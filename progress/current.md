@@ -73,3 +73,11 @@ Decisiones documentadas durante la sesión a considerar para ADR-012 (si Raf apr
 3. Supabase CLI como devDep npm en lugar de instalación nativa (Scoop/winget bloqueados por entorno corporativo).
 
 Nota crítica para el implementer: en PowerShell usar `pnpm.cmd` (no `pnpm`) porque Cylance bloquea la ejecución de scripts `.ps1`. En Bash funciona `pnpm` directo.
+
+## Bitácora — sesión 4 (implementer Fase 2)
+
+- `2026-05-25` — implementer relanzado para Fase 2. Pre-flight: lectura completa de spec, ADR-011, ADR-012, progress, plan dejado por sesión 3. CLI accede a Supabase con `SUPABASE_ACCESS_TOKEN` de `.env.local` (`functions list` retorna 0 funciones desplegadas).
+- Scope acordado con leader: T2.1, T2.3, T2.4, T2.5, T2.6, T2.7 cerradas con tests; T2.2 code-complete con fallback graceful por `RESEND_API_KEY` ausente.
+- Decisión de producto del leader: email a owner en aceptación de invitación (R5.10) via Resend (`https://api.resend.com/emails` con `RESEND_API_KEY`). Sin paquetes npm en Edge Functions.
+- `2026-05-25` — implementer escribe 6 shared helpers en `supabase/functions/_shared/` (cors, errors, supabase, auth, email, push) y las 7 Edge Functions. Despliega todas con `pnpm.cmd exec supabase functions deploy <name>`. Setea secret `EXPO_ACCESS_TOKEN` via `supabase secrets set`. Suite `supabase/tests/edge/run.cjs` con 22 subtests + setup + cleanup; corre verde contra remoto.
+- `2026-05-25` — `node scripts/check.mjs` verde: typecheck client + 15 tests RLS + 24 tests Edge = 39 tests OK. Fase 2 cerrada por implementer; T2.2 espera `RESEND_API_KEY` para test end-to-end de R5.10. El resto del flujo de aceptación está testeado.

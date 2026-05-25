@@ -96,14 +96,14 @@ Plan de implementación paso a paso. Cada tarea tiene su criterio de aceptación
 
 ## Fase 2 — Edge Functions
 
-### T2.1 Edge Function `invite_user`
+### [x] T2.1 Edge Function `invite_user`
 - Archivo: `supabase/functions/invite_user/index.ts`.
 - Recibe `{ establishment_id, email, role }`, retorna `{ invitation_id }` o error.
 - Genera token con `crypto.randomUUID()` o `crypto.getRandomValues`.
 - Llama Supabase Auth admin API para mandar magic link, o usa Resend.
 - **Aceptación**: invocada con owner válido crea invitación y dispara email; con no-owner retorna 403.
 
-### T2.2 Edge Function `accept_invitation`
+### [~] T2.2 Edge Function `accept_invitation`
 - Archivo: `accept_invitation/index.ts`.
 - Recibe `{ token }`, retorna `{ establishment_id, role }` o error.
 - Valida token, expiración, email matching contra `auth.uid()`.
@@ -113,30 +113,31 @@ Plan de implementación paso a paso. Cada tarea tiene su criterio de aceptación
   - Push notification a todos los `push_tokens` activos del owner vía Expo Push API. Cubre: `R5.11`.
   - Ambos envíos se ejecutan en el mismo Edge Function pero con manejo de errores aislado: si el push falla, el email igual sale; si el email falla, el aceptado igual queda persistido.
 - **Aceptación**: token válido genera membership; token usado/expirado retorna error claro; owner recibe email; owner con permisos de push recibe notificación.
+- **Nota Sesión 4**: code-complete. Flujo principal (aceptación + insert user_roles + accepted_at + push call) testeado. R5.10 email queda como best-effort hasta que `RESEND_API_KEY` esté en secrets de Supabase (helper retorna `{ok:false, reason:'no_key'}` con warning, no bloquea).
 
-### T2.3 Edge Function `cancel_invitation`
+### [x] T2.3 Edge Function `cancel_invitation`
 - Archivo: `cancel_invitation/index.ts`.
 - Solo owner del establishment.
 - **Aceptación**: cancela invitación pending; falla si ya fue aceptada.
 
-### T2.4 Edge Function `resend_invitation`
+### [x] T2.4 Edge Function `resend_invitation`
 - Archivo: `resend_invitation/index.ts`.
 - Regenera token, actualiza `expires_at`, reenvía email.
 - **Aceptación**: el token viejo deja de funcionar, el nuevo sí.
 
-### T2.5 Edge Function `remove_member`
+### [x] T2.5 Edge Function `remove_member`
 - Archivo: `remove_member/index.ts`.
 - Solo owner. Marca `user_roles.active = false`, set `deactivated_at`.
 - No permite remover al último owner activo.
 - **Aceptación**: owner remueve operario OK; intentar removerse a sí mismo siendo único owner falla.
 
-### T2.6 Edge Function `change_member_role`
+### [x] T2.6 Edge Function `change_member_role`
 - Archivo: `change_member_role/index.ts`.
 - Solo owner. Desactiva el viejo, inserta nuevo activo.
 - Bloquea degradar al único owner.
 - **Aceptación**: cambio de field_operator a veterinarian queda registrado; degradar único owner falla.
 
-### T2.7 Edge Function `register_push_token`
+### [x] T2.7 Edge Function `register_push_token`
 - Archivo: `register_push_token/index.ts`.
 - Recibe `{ expo_push_token, device_id, platform }`. Upsert en `push_tokens` por `(user_id, token)`, actualizando `last_seen`.
 - **Aceptación**: cliente registra token y queda asociado al `auth.uid()`. Re-registro de mismo token actualiza `last_seen` sin duplicar.

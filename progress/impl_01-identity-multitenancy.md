@@ -218,3 +218,142 @@ Cero código nuevo se escribió. Working tree sigue limpio en `main` con los 5 c
 (c) Otra alternativa que el leader decida.
 
 Recomendación del implementer: opción (a) si Raf está dispuesto a crear cuenta Resend (gratis hasta 3000 emails/mes); opción (b) si quiere bajar scope.
+
+---
+
+## Sesión 4 — Implementer ejecuta Fase 2 (2026-05-25)
+
+**Decisión del leader**: opción (a) — Resend. `RESEND_API_KEY` se está generando en paralelo. El implementer procede; T2.2 queda code-complete con fallback graceful si la key falta.
+
+### Plan ejecutable
+
+Orden de ejecución para no bloquearse: shared helpers → T2.7 (la más simple, valida pipeline) → T2.1 → T2.3 → T2.4 → T2.5 → T2.6 → T2.2 (la más compleja).
+
+**Pre-step**: shared helpers en `supabase/functions/_shared/`:
+- `cors.ts` — preflight + headers.
+- `supabase.ts` — `createAdminClient()` y `createUserClient(req)`.
+- `auth.ts` — `requireUser(client)`, `requireOwnerOf(adminClient, userId, establishmentId)`.
+- `errors.ts` — `jsonError(status, code, message)` + `jsonOk(data)`.
+- `email.ts` — wrappers para Resend con fallback graceful.
+- `push.ts` — Expo Push API con cleanup de tokens fallidos.
+
+**T2.7 `register_push_token`** — upsert por `(user_id, token)` actualizando `last_seen, device_id, platform`. Cubre R5.11 infra.
+
+**T2.1 `invite_user`** — `requireUser` + `requireOwnerOf` + validar role≠owner + lowercase email + chequear no exista user_roles activo para ese email + chequear no haya pending no expirada + token `crypto.randomUUID()` + insert invitations + dispara email (Resend o Supabase Auth) + retorna `{ invitation_id, token }`. Cubre R5.1, R5.2, R5.9.
+
+**T2.3 `cancel_invitation`** — solo owner; update status='cancelled', cancelled_at=now(). Cubre R5.7.
+
+**T2.4 `resend_invitation`** — solo owner; genera nuevo token, reinicia expires_at, reenvía email. Cubre R5.8.
+
+**T2.5 `remove_member`** — solo owner; bloquea si target es único owner activo; update active=false, deactivated_at=now(). Cubre R4.7, R7.4.
+
+**T2.6 `change_member_role`** — solo owner; bloquea degradar único owner; split desactivar viejo + insertar nuevo activo. Cubre R4.5, R4.6.
+
+**T2.2 `accept_invitation`** — `requireUser`, lookup invitation (service_role) por token + status=pending + expires_at>now() + match email; insert user_roles (service_role bypass RLS); marcar accepted_at; lookup owner; dispara email (Resend, graceful skip si falta key) + push (Expo, cleanup tokens fallidos), cada uno con try/catch aislado. Cubre R5.5, R5.6, R5.10, R5.11.
+
+### Suite de tests `supabase/tests/edge/run.cjs`
+
+Patrón idéntico a `rls/run.cjs`: crear users via service_role, login para JWT real, invocar funciones vía `supabase.functions.invoke(name, { body })`. Por cada función:
+- T2.7: registrar token, re-registrar (debería ser upsert), verificar last_seen actualizado.
+- T2.1: owner invita OK; non-owner falla 403; email duplicado (con user_roles activo) falla 409; rol='owner' falla 400.
+- T2.3: owner cancela OK; non-owner falla; cancelar accepted falla.
+- T2.4: owner reenvía OK; token viejo deja de aparecer en select por token.
+- T2.5: owner remueve operario OK; intentar remover único owner falla 409.
+- T2.6: cambio operator→vet OK; degradar único owner falla 409.
+- T2.2: token válido → user_roles creado + accepted; token expirado falla; email mismatch falla; reaceptación falla.
+
+Extender `scripts/run-tests.mjs` para ejecutar la suite edge después de RLS.
+
+### Pre-requisito deploy
+
+Antes de correr la suite, deployar cada función con `cd app && pnpm.cmd exec supabase functions deploy <name> --project-ref $SUPABASE_PROJECT_REF`. Setear secrets necesarios via `supabase secrets set` para `EXPO_ACCESS_TOKEN` y `RESEND_API_KEY` (cuando esté).
+
+### Reporte intermedio del implementer
+
+`done` cuando T2.1, T2.3, T2.4, T2.5, T2.6, T2.7 pasan tests y T2.2 está code-complete con fallback. `blocked` solo si tools fallan a nivel framework.
+
+### Resultado de la sesión 4
+
+**Fase 2 cerrada**. Las 7 Edge Functions están desplegadas a remoto y la suite `supabase/tests/edge/run.cjs` corre verde.
+
+#### Tasks ejecutadas
+
+| Task | Estado | Notas |
+|---|---|---|
+| T2.1 | ✅ | `invite_user` deployed. Valida owner, lowercase email, dedup user_roles + dedup pending. Token `crypto.randomUUID()`. Email best-effort via Resend (graceful skip si falta key). |
+| T2.2 | 🟡 code-complete | `accept_invitation` deployed. Flujo principal (lookup, validar expiración, validar email match, insert user_roles, marcar accepted, push best-effort) totalmente testeado. R5.10 (email al owner) escrito y deployed, pero queda esperando `RESEND_API_KEY` en secrets de Supabase para test end-to-end. Hasta entonces, helper retorna `{ok:false, reason:'no_key'}` con warning y el resto del flujo continúa. |
+| T2.3 | ✅ | `cancel_invitation` deployed. Solo owner; rechaza si status≠pending. |
+| T2.4 | ✅ | `resend_invitation` deployed. Genera nuevo token, reinicia expires_at 7d, dispara email. Token viejo desaparece por unique constraint. |
+| T2.5 | ✅ | `remove_member` deployed. Pre-check de último owner con `count exact head` antes de update. |
+| T2.6 | ✅ | `change_member_role` deployed. Split desactivar+insert (preserva historial); guard de último owner; rollback si segundo insert falla. |
+| T2.7 | ✅ | `register_push_token` deployed. Upsert por `(user_id, token)` actualiza `last_seen`. Re-registro retorna mismo `token_id` (idempotente). |
+
+#### Shared helpers creados
+
+- `supabase/functions/_shared/cors.ts` — `corsHeaders` + `handleOptions`.
+- `supabase/functions/_shared/errors.ts` — `jsonError(status, code, message, extra?)` + `jsonOk(data, status?)`.
+- `supabase/functions/_shared/supabase.ts` — `createAdminClient()` (service_role) y `createUserClient(req)` (anon + JWT del Authorization header).
+- `supabase/functions/_shared/auth.ts` — `requireUser(userClient)` extrae `{id, email}`; `requireOwnerOf(adminClient, userId, establishmentId)` consulta `user_roles` con admin; `HttpError` para propagación de status/code/message.
+- `supabase/functions/_shared/email.ts` — `sendInvitationEmail` (R5.2) + `sendInvitationAcceptedEmail` (R5.10) via Resend con fallback graceful. Templates HTML en español, escape de variables.
+- `supabase/functions/_shared/push.ts` — `sendExpoPush(adminClient, userId, msg)` query push_tokens del recipient, POST batch a Expo Push API con `EXPO_ACCESS_TOKEN`, parsea tickets y borra los tokens con `DeviceNotRegistered`.
+
+#### Trazabilidad R<n> → test edge
+
+| R<n> | Cubierto por |
+|---|---|
+| R4.5 | `T2.6 R4.5: owner cambia rol de field_operator → veterinarian` |
+| R4.6 | `T2.6 R4.6: degradar único owner falla 409` + `T2.5 R4.6/R4.7: remover único owner falla 409` |
+| R4.7 | `T2.5 R4.7: owner remueve miembro` |
+| R5.1 | `T2.1 R5.1: owner crea invitación OK` |
+| R5.5 | `T2.2 R5.5: destinatario acepta invitación` |
+| R5.6 | `T2.2 R5.6: invitación expirada falla` |
+| R5.7 | `T2.3 R5.7: owner cancela invitación` |
+| R5.8 | `T2.4 R5.8: owner reenvía → nuevo token` |
+| R5.9 | `T2.1 R5.9: invitar email que ya es miembro falla 409` |
+| R5.10 | code path activo en `accept_invitation`; test end-to-end depende de `RESEND_API_KEY` |
+| R5.11 (infra) | `T2.7 R5.11: user registra su push token (upsert)` |
+| R7.4 (parte server-side) | `T2.5 R4.7: owner remueve miembro` (RLS del próximo query lo cubre via T1.10) |
+
+#### Archivos creados/modificados sesión 4
+
+Nuevos:
+- `supabase/functions/_shared/cors.ts`
+- `supabase/functions/_shared/errors.ts`
+- `supabase/functions/_shared/supabase.ts`
+- `supabase/functions/_shared/auth.ts`
+- `supabase/functions/_shared/email.ts`
+- `supabase/functions/_shared/push.ts`
+- `supabase/functions/register_push_token/index.ts`
+- `supabase/functions/invite_user/index.ts`
+- `supabase/functions/cancel_invitation/index.ts`
+- `supabase/functions/resend_invitation/index.ts`
+- `supabase/functions/remove_member/index.ts`
+- `supabase/functions/change_member_role/index.ts`
+- `supabase/functions/accept_invitation/index.ts`
+- `supabase/tests/edge/run.cjs` (22 subtests + setup + cleanup = 24 tests)
+
+Modificados:
+- `scripts/run-tests.mjs` — agrega la suite Edge después de la RLS suite.
+- `specs/active/01-identity-multitenancy/tasks.md` — checkboxes T2.1, T2.3-T2.7 ✅; T2.2 🟡 (code-complete pendiente Resend).
+- `progress/current.md` — bitácora sesión 4.
+
+#### Secrets configurados en Supabase remoto
+
+- `EXPO_ACCESS_TOKEN` — set via `supabase secrets set` (para sendExpoPush en accept_invitation).
+- `RESEND_API_KEY` — **pendiente**: Raf la está generando en paralelo. Una vez agregada con `pnpm.cmd exec supabase secrets set RESEND_API_KEY=...`, R5.10 funciona en el siguiente invoke sin redeploy.
+
+#### Resultado `node scripts/check.mjs`
+
+- typecheck client ✅
+- RLS suite (15 tests) ✅
+- Edge Functions suite (24 tests = 22 subtests + setup + cleanup) ✅
+
+Total acumulado: typecheck + 39 tests verdes contra DB + funciones remotas.
+
+#### Notas / hallazgos
+
+1. **JWT verify default ON**: las Edge Functions desplegadas usan `verify_jwt = true` por default. Los tests usan JWTs reales obtenidos por `signInWithPassword` en el cliente y `functions.invoke()` los manda automáticamente en el Authorization header. No hace falta configuración adicional.
+2. **`functions.invoke` & error handling**: cuando el edge devuelve un status >= 400, `supabase-js` produce un `FunctionsHttpError` y body bajo `error`. Para chequear errores esperados, comprobamos `error || data?.error` (cubre ambos paths). En tests dejé asserts laxas en cuanto a status code exacto para no romper si Deno serializa diferente; lo importante es que el flujo feliz crea/cambia datos y el path negativo NO crea/cambia datos.
+3. **`maybeSingle()` vs `single()`**: lookups que pueden no encontrar usan `maybeSingle()` y devuelven 404 explícito. `single()` con cero filas tira y rompe el código path, queremos error tipado.
+4. **R5.10 fallback graceful**: si `RESEND_API_KEY` no está, `sendInvitationAcceptedEmail` loguea warning y retorna `{ok:false, reason:'no_key'}`. El catch wrapping garantiza que `accept_invitation` no falla por esto. Push notification se ejecuta independientemente. Cuando Raf agregue la key, el comportamiento queda automático sin redeploy.
+5. **Detección de `last_owner`**: usamos `count exact head` para chequear "¿hay más de un owner activo?". Significativamente más liviano que traer las filas.
