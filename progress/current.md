@@ -51,14 +51,22 @@ Status en `feature_list.json` queda `in_progress` con `notes` documentando la pa
 - `2026-05-25` — Leader crea `ADR-013` (stack frontend: Tamagui + Expo Router + Reanimated + Moti + Lottie + EAS + Sentry + PostHog + Maestro + MCPs Figma/Supabase).
 - `2026-05-25` — Leader crea `docs/setup-frontend.md` con instrucciones paso a paso para instalar Figma MCP, Supabase MCP, y librerías del stack cuando llegue el momento.
 - `2026-05-25` — Feature 01 marcada como pausada intencionalmente en `feature_list.json` (campo `notes`).
-- `2026-05-25` — Leader lanza `spec_author` para `02-modelo-animal`.
+- `2026-05-25` — Leader lanza `spec_author` para `02-modelo-animal` → cierra con status `spec_ready` (3 archivos escritos).
+
+## Bitácora — sesión 5 (MCPs operativos + decisión de empezar designs)
+
+- `2026-05-25` — Raf instala Figma MCP y Supabase MCP. Aprendizaje del entorno: `npx` está roto (Cylance MITM rompe el fetch); reemplazado por `pnpm dlx`. Setup `--scope user` desde **bash**, no PowerShell (resuelve el shim correcto y permite cargar `.env.local`). Raf actualiza `docs/setup-frontend.md` con los comandos reales.
+- `2026-05-25` — Leader verifica en sesión: ambas MCPs disponibles (`mcp__figma__*` + `mcp__supabase__*`). Spec 02 sigue en `spec_ready` esperando lectura/aprobación humana.
+- `2026-05-25` — Decisión de Raf: **antes de aprobar spec 02 o destrabar Fase 3 del spec 01**, avanzar primero designs en Figma. Primer mockup: flujo de **wizard signup + crear establishment** del spec 01 (backend ya done, contratos estables). Pantallas a diseñar: splash, signup, verificá email, login, onboarding empty state con CTA dual (R6.5), completar teléfono (R3.8), nombre del establecimiento, home post-creación, y bonus aceptar invitación (R5.3).
+- `2026-05-25` — Leader cierra higiene: commit de `setup-frontend.md` con los cambios del aprendizaje real de las MCPs.
 
 ## Próximo paso
 
-1. **En paralelo (Raf)**: instalar Figma MCP + Supabase MCP en Claude Code siguiendo `docs/setup-frontend.md` Parte 1. Esto NO requiere esperar al spec_author.
-2. **Esperar `spec_author`**: cuando reporte `spec_ready`, Raf lee `specs/active/02-modelo-animal/` y aprueba o pide cambios.
-3. **Cuando 02 esté aprobado**: leader bumpea a `in_progress` y lanza implementer para Fase 1+2 backend (schema + Edge Functions + tests). Frontend de 02 también queda pausado.
-4. **Cuando Raf esté listo para frontend**: retomamos Fase 3+ del spec 01 con el stack del `ADR-013` y los designs de Figma.
+1. **Raf (offline / fuera de Claude Code)**: abre Figma, crea project `RAFAQ — Mobile`, diseña las 8 pantallas del flujo de wizard signup + crear establishment. Manga-UX: botones ≥56×56dp, font operativa ≥18sp, una decisión primaria por pantalla.
+2. **Cuando Raf tenga algo navegable**: pasa el link del archivo Figma a leader → leader usa Figma MCP para leerlo, validar contra `R1`/`R3`/`R5`/`R6.5` del spec 01, y proponer ajustes antes de codear.
+3. **Decisiones que quedan pendientes (no urgentes)**:
+   - Aprobar o pedir cambios en `specs/active/02-modelo-animal/` (3 archivos, ~115KB). Una vez aprobado, leader lanza implementer para backend de 02 (mismo patrón que 01).
+   - Destrabar Fase 3 del spec 01: agregar libs Tamagui + Expo Router + Reanimated + manga-friendly + observabilidad al `app/package.json` y reorganizar `app/` con expo-router. Requiere aprobación explícita de Raf.
 
 ## ADRs creados en este ciclo
 

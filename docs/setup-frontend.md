@@ -2,7 +2,11 @@
 
 Guía paso a paso para instalar las MCPs, librerías y tools que decidimos en `docs/adr/ADR-013-frontend-stack.md`. Cada sección incluye **comandos concretos** para copy-paste.
 
-> Convención: estos pasos asumen que estás en PowerShell, working dir = `C:\dev\RAFAQ\app-ganado`. En PowerShell usá `pnpm.cmd`, no `pnpm` (Cylance bloquea scripts `.ps1` — ver `ADR-011`).
+> **Convenciones críticas en este entorno** (Windows + Cylance + Banco Patagonia network):
+> - Working dir base: `C:\dev\RAFAQ\app-ganado`.
+> - **NO usar `npx`** — npm está roto por Cylance (Z_DATA_ERROR / FETCH_ERROR / Unterminated JSON). Usar **`pnpm dlx`** en su lugar para ejecutables one-shot.
+> - **En PowerShell**: `pnpm.cmd` (no `pnpm`) — Cylance Script Control bloquea `.ps1`. En Bash funciona `pnpm` directo.
+> - Para MCPs de Claude Code que se spawnean automáticamente, usar `pnpm dlx` (sin `.cmd`) — la spawning library de Node resuelve el shim correcto.
 
 ---
 
@@ -28,15 +32,17 @@ Las MCPs son servidores que se conectan a Claude Code y le dan superpoderes. Una
      - Scopes: tildá **File content** (read).
    - **Copialo inmediatamente** — Figma lo muestra una sola vez.
 
-2. **Registrar el MCP en Claude Code** (PowerShell):
+2. **Registrar el MCP en Claude Code** (bash, no PowerShell — `claude mcp add` con `--scope user` funciona desde bash):
 
-   ```powershell
-   claude mcp add figma --scope user -- npx -y figma-developer-mcp --figma-api-key=TU_FIGMA_TOKEN_AQUI --stdio
+   ```bash
+   claude mcp add figma --scope user -e FIGMA_API_KEY=TU_FIGMA_TOKEN_AQUI -- pnpm dlx figma-developer-mcp --stdio
    ```
 
    Reemplazá `TU_FIGMA_TOKEN_AQUI` con el token que copiaste.
 
    - `--scope user` hace que esté disponible en todos tus proyectos, no solo este.
+   - `-e FIGMA_API_KEY=...` pasa el token como env var (el MCP server lo lee de ahí).
+   - **Usamos `pnpm dlx` en lugar de `npx`** porque npx está roto en este entorno (Cylance/proxy). pnpm dlx resuelve el binario y lo ejecuta sin pasar por npm.
    - El `--stdio` flag le dice al MCP server que se comunique via stdin/stdout (lo que Claude Code espera).
 
 3. **Verificá** con:
@@ -61,38 +67,28 @@ Las MCPs son servidores que se conectan a Claude Code y le dan superpoderes. Una
 
 **Pasos**:
 
-1. **Registrar el MCP** (PowerShell):
+1. **Registrar el MCP** (bash):
 
-   ```powershell
-   claude mcp add supabase --scope user -- npx -y "@supabase/mcp-server-supabase" --read-only --project-ref=xrhlxxdnfzvdnztacofj
+   ```bash
+   cd C:/dev/RAFAQ/app-ganado
+   set -a && . ./.env.local && set +a
+   claude mcp add supabase --scope user -e SUPABASE_ACCESS_TOKEN="$SUPABASE_ACCESS_TOKEN" -- pnpm dlx "@supabase/mcp-server-supabase" --read-only --project-ref="$SUPABASE_PROJECT_REF"
    ```
 
+   - `set -a && . ./.env.local && set +a` carga las vars de `.env.local` en la shell (necesario porque ya tenés el token ahí).
    - El flag `--read-only` es crítico: bloquea cualquier operación de write desde Claude. Solo SELECT y EXPLAIN. **Defensa importante para no romper la DB de producción accidentalmente.**
    - `--project-ref=xrhlxxdnfzvdnztacofj` lo scopea a tu proyecto RAFAQ específicamente.
+   - **`pnpm dlx` en lugar de `npx`**: npm está roto en este entorno por Cylance. pnpm dlx esquiva el problema.
 
-2. **Configurar el access token**: el MCP lee `SUPABASE_ACCESS_TOKEN` del environment. Hay dos formas:
+2. **Verificá**:
 
-   **Opción A** (recomendada): pasarlo inline al registrar el MCP. Editá el comando arriba para incluir:
-
-   ```powershell
-   claude mcp add supabase --scope user -e SUPABASE_ACCESS_TOKEN=TU_TOKEN_AQUI -- npx -y "@supabase/mcp-server-supabase" --read-only --project-ref=xrhlxxdnfzvdnztacofj
-   ```
-
-   **Opción B**: setear la env var en Windows globalmente:
-
-   ```powershell
-   [System.Environment]::SetEnvironmentVariable('SUPABASE_ACCESS_TOKEN', 'TU_TOKEN_AQUI', 'User')
-   ```
-
-   Y reiniciar Claude Code.
-
-3. **Verificá**:
-
-   ```powershell
+   ```bash
    claude mcp list
    ```
 
-4. **Probalo**: pedime "consultá la tabla `users` y mostrame cuántas filas hay" en una sesión nueva.
+   Debería mostrar `supabase` con `✓ Connected`.
+
+3. **Probalo**: en una sesión nueva, pedime "consultá la tabla `users` y mostrame cuántas filas hay".
 
 **Costo**: $0. Usa el plan free de Supabase ya existente.
 
