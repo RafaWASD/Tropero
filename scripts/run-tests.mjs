@@ -43,13 +43,14 @@ const pnpmCmd = platform === 'win32' ? 'pnpm.cmd' : 'pnpm';
 
 run('typecheck client', `cd app && ${pnpmCmd} typecheck`);
 
-// La suite RLS necesita keys de Supabase. Si no hay service_role, se saltea
-// con un warning (para builds CI sin credenciales). Para el check local
-// completo, exigimos las claves.
+// La suite RLS y la suite Edge necesitan keys de Supabase. Si no hay service_role,
+// se saltean con un warning (para builds CI sin credenciales). Para el check
+// local completo, exigimos las claves.
 if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
   run('RLS suite', `node --test supabase/tests/rls/run.cjs`);
+  run('Edge Functions suite', `node --test supabase/tests/edge/run.cjs`);
 } else {
-  console.log('\n>>> RLS suite — SKIPPED (falta SUPABASE_SERVICE_ROLE_KEY en env)');
+  console.log('\n>>> RLS + Edge suites — SKIPPED (falta SUPABASE_SERVICE_ROLE_KEY en env)');
 }
 
 console.log('\nAll tests passed.');
