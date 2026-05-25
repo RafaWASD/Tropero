@@ -1,0 +1,4 @@
+{
+  "testCommand": "node scripts/run-tests.mjs",
+  "_comment": "Lanza typecheck del cliente + suite RLS. La suite RLS requiere .env.local con SUPABASE_SERVICE_ROLE_KEY (toca DB remota). Ver ADR-011 sobre pnpm.cmd en PowerShell."
+}

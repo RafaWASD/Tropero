@@ -1,0 +1,31 @@
+# Node / Expo
+node_modules/
+.expo/
+.expo-shared/
+dist/
+web-build/
+coverage/
+*.log
+
+# Supabase
+supabase/.branches/
+supabase/.temp/
+
+# Harness temp
+*.tmp
+
+# OS / editores
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Env
+.env
+.env.local
+.env.*.local
+
+# Override del .gitignore global del usuario
+# (~/.gitignore_global ignora CLAUDE.md por convenciones corporativas, pero
+# acá es el archivo principal del proyecto y debe estar versionado).
+!CLAUDE.md

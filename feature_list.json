@@ -1,0 +1,128 @@
+{
+  "project": "RAFAQ — App ganadera",
+  "description": "Gestión de cría bovina mobile-first, offline-first, multi-tenant. MVP para el mercado argentino con deadline SENASA julio 2026.",
+  "rules": {
+    "one_feature_at_a_time": true,
+    "require_tests_to_close": true,
+    "require_approved_spec_to_implement": true,
+    "valid_status": ["pending", "spec_ready", "in_progress", "done", "blocked"],
+    "sdd_required_when": "feature has \"sdd\": true",
+    "specs_path": "specs/active/<name>/"
+  },
+  "features": [
+    {
+      "id": 1,
+      "name": "01-identity-multitenancy",
+      "title": "Identidad y multi-tenancy",
+      "description": "Auth Supabase email/password, usuarios con roles por establishment (owner/field_operator/veterinarian), invitaciones por email magic link, RLS, soft-deletes.",
+      "acceptance": [
+        "Un usuario nuevo se registra, verifica email, crea un establishment y queda como owner.",
+        "Un owner invita por email; el destinatario recibe el link, se registra/loguea y queda con el rol indicado.",
+        "Un user con roles en múltiples establishments puede cambiar el contexto activo.",
+        "RLS impide que un user vea datos de un establishment donde no tiene rol activo (validado con tests).",
+        "Un owner puede remover el acceso de otro user y ese user pierde acceso inmediatamente."
+      ],
+      "sdd": true,
+      "status": "in_progress"
+    },
+    {
+      "id": 2,
+      "name": "02-modelo-animal",
+      "title": "Modelo de animal",
+      "description": "Identificación flexible (TAG/IDV/visual_id_alt), categorías de cría bovina con transiciones automáticas, override manual, ficha con eventos cronológicos, ternero al pie como entidad independiente.",
+      "acceptance": [
+        "Crear un animal con al menos uno de TAG, IDV o visual_id_alt.",
+        "Categoría se autocalcula según especie+sistema; override manual posible.",
+        "Ternero al pie se crea como entidad independiente desde nacimiento.",
+        "Ficha de animal muestra cronología de eventos."
+      ],
+      "sdd": true,
+      "status": "pending"
+    },
+    {
+      "id": 3,
+      "name": "03-modo-maniobras",
+      "title": "MODO MANIOBRAS",
+      "description": "Wizard secuencial pantalla por pantalla, pantalla de resumen final antes de commit, 10 maniobras MVP, presets de combinaciones, carga offline con sync posterior.",
+      "acceptance": [
+        "Operario selecciona maniobras y arranca sesión.",
+        "Wizard avanza pantalla por pantalla, una decisión por pantalla.",
+        "Resumen final permite revisar antes de commit.",
+        "Funciona offline; sync automático cuando vuelve conexión.",
+        "Preset guarda combinación de maniobras + config para reuso."
+      ],
+      "sdd": true,
+      "status": "pending"
+    },
+    {
+      "id": 4,
+      "name": "04-bluetooth-baston",
+      "title": "Integración bastón Bluetooth (Allflex RS420)",
+      "description": "Lectura de TAG vía BLE nativo del bastón, correlación con teclado manual, modo manual de fallback.",
+      "acceptance": [
+        "Cliente se conecta al bastón Allflex RS420 vía BLE.",
+        "TAG leído aparece en la pantalla en <1s.",
+        "Si bastón se desconecta, modo manual accesible en 1 tap.",
+        "Logs de eventos no bloquean flujo del operario."
+      ],
+      "sdd": true,
+      "status": "pending"
+    },
+    {
+      "id": 5,
+      "name": "05-bluetooth-balanza",
+      "title": "Integración balanza Bluetooth (Vesta 3516 vía ESP32)",
+      "description": "Bridge BLE Vesta 3516 vía ESP32 (Nordic UART Service), motor de correlación TAG↔peso por ventana temporal ~3s, modo manual de carga.",
+      "acceptance": [
+        "Cliente recibe pesos del bridge ESP32.",
+        "Correlación TAG↔peso dentro de ventana ~3s funciona consistentemente.",
+        "Si no hay TAG en ventana, peso queda pendiente de asignación manual.",
+        "Modo manual de carga existe."
+      ],
+      "sdd": true,
+      "status": "pending"
+    },
+    {
+      "id": 6,
+      "name": "06-import-laboratorios",
+      "title": "Importación de laboratorios (CEDIVE)",
+      "description": "Importación de PDFs/Excel de CEDIVE como primer lab, arquitectura de parsers configurables, vinculación automática con animales por número de tubo.",
+      "acceptance": [
+        "Owner sube PDF/Excel de CEDIVE.",
+        "Parser extrae resultados por tubo.",
+        "Resultados se vinculan a animales por número de tubo automáticamente.",
+        "Errores de parseo se reportan claramente."
+      ],
+      "sdd": true,
+      "status": "pending"
+    },
+    {
+      "id": 7,
+      "name": "07-reportes-basicos",
+      "title": "Reportes básicos",
+      "description": "Resumen por sesión, ficha individual de animal con cronología, KPIs del rodeo (% preñez, % parición, peso promedio por categoría), comparativas básicas entre sesiones.",
+      "acceptance": [
+        "Resumen de sesión muestra totales, anomalías y promedios.",
+        "Ficha animal lista eventos en orden cronológico.",
+        "KPIs de rodeo calculables a demanda.",
+        "Comparativa entre dos sesiones del mismo rodeo."
+      ],
+      "sdd": true,
+      "status": "pending"
+    },
+    {
+      "id": 8,
+      "name": "08-export-sigsa",
+      "title": "Exportación SIGSA/SIGBIOTRAZA",
+      "description": "Exportar archivos en formato SIGSA/SIGBIOTRAZA para que el productor cumpla con declaración de identificaciones electrónicas en 10 días (deadline SENASA julio 2026).",
+      "acceptance": [
+        "Owner genera archivo de exportación.",
+        "Formato cumple con especificación SIGSA/SIGBIOTRAZA.",
+        "Archivo importable en sistemas SENASA sin errores.",
+        "Audit trail de qué se exportó y cuándo."
+      ],
+      "sdd": true,
+      "status": "pending"
+    }
+  ]
+}
