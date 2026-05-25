@@ -357,3 +357,88 @@ Total acumulado: typecheck + 39 tests verdes contra DB + funciones remotas.
 3. **`maybeSingle()` vs `single()`**: lookups que pueden no encontrar usan `maybeSingle()` y devuelven 404 explícito. `single()` con cero filas tira y rompe el código path, queremos error tipado.
 4. **R5.10 fallback graceful**: si `RESEND_API_KEY` no está, `sendInvitationAcceptedEmail` loguea warning y retorna `{ok:false, reason:'no_key'}`. El catch wrapping garantiza que `accept_invitation` no falla por esto. Push notification se ejecuta independientemente. Cuando Raf agregue la key, el comportamiento queda automático sin redeploy.
 5. **Detección de `last_owner`**: usamos `count exact head` para chequear "¿hay más de un owner activo?". Significativamente más liviano que traer las filas.
+
+---
+
+## Sesión 6 — Refactor a invitaciones link shareable (ADR-014) (2026-05-25)
+
+**Contexto**: ADR-014 cierra el pivot del modelo de invitaciones: de "email magic link" a "bearer token shareable". El owner crea la invitación sin email obligatorio y recibe un `accept_url` que reparte por el canal que prefiera (WhatsApp, mail, copy-paste). El backend ya estaba diseñado defensivamente (email best-effort, token en la respuesta), así que el costo del pivot es bajo.
+
+### Tasks ejecutadas
+
+| Task | Estado | Notas |
+|---|---|---|
+| T1.11 | ✅ | `0012_invitations_email_nullable.sql` aplicada a remoto. `email` ahora nullable. CHECK constraints `invitations_email_not_empty` y `invitations_email_lower` se mantienen (Postgres los evalúa UNKNOWN en NULL). |
+| T2.1 | ✅ refactor | `invite_user` ahora acepta `email?` opcional. Sin email send. Retorna `{ invitation_id, token, accept_url, expires_at }`. Prechecks soft (R5.9 + pending duplicada) solo aplican si vino email como anotación. Reusa env var `APP_URL` que ya existía en `_shared/email.ts`. |
+| T2.2 | ✅ refactor | `accept_invitation` deja de validar email-matching (modelo bearer). R5.9 ahora retorna 409 `already_member` cuando el caller ya tiene `user_roles` activo en el establishment. Email al owner cuando aceptan (R5.10) + push (R5.11) intactos. |
+| T2.4 | ✅ refactor | `resend_invitation` regenera token + reinicia expiración. Sin email send. Retorna `{ token, accept_url, expires_at }`. |
+| `_shared/email.ts` | ✅ limpieza | Eliminada `sendInvitationEmail` (ya no se usa). Conserva `sendInvitationAcceptedEmail`, `sendViaResend`, `escapeHtml`, `FROM_DEFAULT` y tipos. Verificado con grep que ninguna función la importe. |
+
+### Tests modificados / nuevos
+
+**Modificados**:
+- `T2.1 R5.1: owner crea invitación OK` — agrega aserts sobre `data.accept_url` (debe incluir el token codeado) y `data.expires_at`.
+- `T2.4 R5.8: owner reenvía → nuevo token` — agrega aserts sobre `data.accept_url` y `data.expires_at`.
+
+**Nuevos**:
+- `T2.1 ADR-014: owner crea invitación SIN email` — invoca `invite_user` sin email, valida 200, valida `invitation_id`/`token`/`accept_url`, valida en DB que `email` quedó `null`. Cancela la invitación creada para no contaminar tests posteriores.
+- `T2.2 ADR-014: token bearer funciona con email distinto al de la invitación` — crea invitación con `email = X@…`, crea user con `email = Y@…`, ese user acepta y queda con `user_roles` activo. Verifica que la invitación quedó `accepted`.
+- `T2.2 R5.9: aceptar cuando ya soy miembro falla 409` — crea invitación pending, owner (ya miembro activo) intenta aceptar, espera error `already_member`.
+
+**Eliminado**:
+- `T2.2: email mismatch falla` — ya no aplica al modelo bearer (ADR-014).
+
+### Trazabilidad R<n> → test (sesión 6 — refactor link shareable)
+
+| R<n> | Cubierto por |
+|---|---|
+| R5.1 (link shareable, opcionalmente con email anotación) | `T2.1 R5.1: owner crea invitación OK` + `T2.1 ADR-014: owner crea invitación SIN email` |
+| R5.2 (retorna `accept_url`) | `T2.1 R5.1: owner crea invitación OK` (aserts sobre `accept_url`) + `T2.1 ADR-014: owner crea invitación SIN email` |
+| R5.5 (token bearer crea user_roles) | `T2.2 R5.5: destinatario acepta invitación` + `T2.2 ADR-014: token bearer funciona con email distinto al de la invitación` |
+| R5.6 (expirada falla) | `T2.2 R5.6: invitación expirada falla` (intacto) |
+| R5.8 (regenerar link) | `T2.4 R5.8: owner reenvía → nuevo token` (con aserts de `accept_url`) |
+| R5.9 (already_member en accept) | `T2.2 R5.9: aceptar cuando ya soy miembro falla 409` |
+| R5.10 (email al owner) | code path intacto en `accept_invitation`; helper `sendInvitationAcceptedEmail` no se tocó |
+| R5.11 (push al owner) | `sendExpoPush` intacto en `accept_invitation` |
+| ADR-014 (modelo bearer sin email-matching) | `T2.2 ADR-014: token bearer funciona con email distinto al de la invitación` |
+
+### Deploys
+
+- `invite_user` redeployado vía `pnpm.cmd exec supabase functions deploy invite_user --project-ref $SUPABASE_PROJECT_REF` (con `.env.local` cargado vía `set -a && . ./.env.local && set +a`).
+- `accept_invitation` redeployado idem.
+- `resend_invitation` redeployado idem.
+- `cancel_invitation`, `remove_member`, `change_member_role`, `register_push_token`, helpers `_shared/{auth,supabase,cors,errors,push}.ts` no se tocaron. `_shared/email.ts` se limpió pero solo lo usa `accept_invitation`, que ya fue redeployado.
+
+### Gotchas / notas técnicas
+
+1. **CHECK constraints + NULL**: Postgres evalúa los CHECK como UNKNOWN cuando la columna es NULL, lo que satisface el constraint. Por eso `invitations_email_not_empty` y `invitations_email_lower` siguen vigentes en la migration 0004 y no hubo que tocarlos en la 0012 — solo bloquean strings vacíos o con mayúsculas, no NULL.
+2. **`APP_URL` env var**: reutilizada de `_shared/email.ts` (default `https://app.rafq.ar`). No se inventó env var nueva. El spec menciona `PUBLIC_APP_URL` / `EXPO_PUBLIC_APP_URL` pero el código real usa `APP_URL` — coordinar con frontend cuando arranque Fase 3 si hay que renombrar (en backend `EXPO_PUBLIC_*` es ruido).
+3. **Carga de `.env.local` en bash**: el shell no carga `.env.local` automáticamente. Para invocar `supabase functions deploy` desde bash hace falta `set -a && . ./.env.local && set +a` antes (exporta automáticamente todo lo que se asigna durante el source).
+4. **Test "T2.1 sin email" — no contaminar tests downstream**: el test crea una invitación pending sin email y, dado que el flujo posterior reusa `invitationId`/`invitationToken` del test "R5.1", se cancela la invitación recién creada vía service_role (status='cancelled') antes de terminar. Esto evita que aparezca como pending al final del cleanup o interfiera con tests que asumen estado conocido.
+5. **`_shared/email.ts` ahora es solo R5.10**: el archivo quedó más chico (eliminamos ~30 líneas de `sendInvitationEmail`). Si en el futuro hace falta volver a email-bound (no es probable), se puede reactivar mirando el commit anterior — la decisión es reversible (ver ADR-014, sección "Reversibilidad").
+
+### Archivos creados/modificados en esta sesión
+
+Nuevos:
+- `supabase/migrations/0012_invitations_email_nullable.sql`
+
+Modificados:
+- `supabase/functions/invite_user/index.ts` — refactor link shareable.
+- `supabase/functions/accept_invitation/index.ts` — modelo bearer + R5.9 hard 409.
+- `supabase/functions/resend_invitation/index.ts` — sin email send, retorna accept_url.
+- `supabase/functions/_shared/email.ts` — eliminada `sendInvitationEmail`.
+- `supabase/tests/edge/run.cjs` — 2 tests nuevos, 1 test borrado, asserts ampliados en R5.1 y R5.8.
+- `specs/active/01-identity-multitenancy/tasks.md` — T1.11 marcada `[x]`.
+- `progress/current.md` — bitácora sesión 6.
+
+### Resultado `node scripts/check.mjs`
+
+- typecheck client ✅
+- RLS suite (15 tests) ✅
+- Edge Functions suite (**26 tests** = 24 originales − 1 borrado + 3 nuevos + setup + cleanup) ✅
+
+Total acumulado: typecheck + **41 tests verdes** contra DB + Edge Functions remotas (modelo link shareable activo).
+
+### Reporte para `leader` (sesión 6)
+
+**`done` para el refactor link shareable**. Backend de feature 01 sigue `in_progress` (frontend pausado intencionalmente). El reviewer decide si el refactor cumple ADR-014 + R5.1/R5.2/R5.5/R5.8/R5.9 (lo que corresponde aprobar en este chunk) y el leader sigue manteniendo la pausa de Fase 3+ hasta que Raf decida destrabar frontend.

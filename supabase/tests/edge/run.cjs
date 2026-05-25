@@ -209,8 +209,47 @@ test('Edge Functions — Fase 2', async (t) => {
     assert.equal(error, null, error && error.message);
     assert.ok(data.invitation_id);
     assert.ok(data.token);
+    assert.ok(data.accept_url, 'debería retornar accept_url');
+    assert.ok(
+      data.accept_url.includes(encodeURIComponent(data.token)),
+      'accept_url debería incluir el token',
+    );
+    assert.ok(data.expires_at, 'debería retornar expires_at');
     invitationId = data.invitation_id;
     invitationToken = data.token;
+  });
+
+  await t.test('T2.1 ADR-014: owner crea invitación SIN email', async () => {
+    const { data, error } = await ownerClient.functions.invoke('invite_user', {
+      body: {
+        establishment_id: estA,
+        role: 'veterinarian',
+      },
+    });
+    assert.equal(error, null, error && error.message);
+    assert.ok(data.invitation_id, 'debería retornar invitation_id');
+    assert.ok(data.token, 'debería retornar token');
+    assert.ok(data.accept_url, 'debería retornar accept_url');
+    assert.ok(
+      data.accept_url.includes(encodeURIComponent(data.token)),
+      'accept_url debería incluir el token',
+    );
+
+    // Verifica en DB que la fila quedó con email=null.
+    const { data: row } = await admin
+      .from('invitations')
+      .select('email, status')
+      .eq('id', data.invitation_id)
+      .single();
+    assert.equal(row.email, null, 'email debería quedar null');
+    assert.equal(row.status, 'pending');
+
+    // Cancelamos esta invitación para que no interfiera con tests posteriores
+    // (queda en estado cancelled, fuera del flujo principal).
+    await admin
+      .from('invitations')
+      .update({ status: 'cancelled', cancelled_at: new Date().toISOString() })
+      .eq('id', data.invitation_id);
   });
 
   await t.test('T2.1: non-owner falla 403', async () => {
@@ -280,6 +319,12 @@ test('Edge Functions — Fase 2', async (t) => {
     assert.equal(error, null, error && error.message);
     assert.ok(data.token);
     assert.notEqual(data.token, invitationToken, 'token debería cambiar');
+    assert.ok(data.accept_url, 'debería retornar accept_url');
+    assert.ok(
+      data.accept_url.includes(encodeURIComponent(data.token)),
+      'accept_url debería incluir el nuevo token',
+    );
+    assert.ok(data.expires_at, 'debería retornar expires_at');
 
     // Verifica que el token viejo ya no está vivo en DB.
     const { data: byOld } = await admin
@@ -444,25 +489,96 @@ test('Edge Functions — Fase 2', async (t) => {
     assert.equal(inv.status, 'expired');
   });
 
-  await t.test('T2.2: email mismatch falla', async () => {
-    // Owner intenta aceptar la invitación que era para invitee. Email no matchea.
-    const wrongToken = `mismatch_${RUN_TAG}`;
-    await admin.from('invitations').insert({
-      establishment_id: estA,
-      invited_by: owner.id,
-      email: `${RUN_TAG}_other@rafaq-test.local`,
-      role: 'field_operator',
-      token: wrongToken,
-      status: 'pending',
-      expires_at: new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString(),
-    });
+  await t.test(
+    'T2.2 ADR-014: token bearer funciona con email distinto al de la invitación',
+    async () => {
+      // Crear invitación pending anotada con un email X, pero el user que la
+      // acepta tiene un email Y distinto. En el modelo bearer (ADR-014) el
+      // token vale por sí solo y el flujo debe completarse.
+      const bearerToken = `bearer_${RUN_TAG}_${Math.random().toString(36).slice(2, 8)}`;
+      const annotationEmail = `${RUN_TAG}_annotation@rafaq-test.local`;
 
-    const { data, error } = await ownerClient.functions.invoke(
-      'accept_invitation',
-      { body: { token: wrongToken } },
-    );
-    assert.ok(error || data?.error, 'debería fallar email_mismatch');
-  });
+      const { data: invRow, error: invErr } = await admin
+        .from('invitations')
+        .insert({
+          establishment_id: estA,
+          invited_by: owner.id,
+          email: annotationEmail,
+          role: 'veterinarian',
+          token: bearerToken,
+          status: 'pending',
+          expires_at: new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString(),
+        })
+        .select('id')
+        .single();
+      assert.equal(invErr, null, invErr && invErr.message);
+
+      // Creamos un user con email distinto al de la anotación.
+      const bearerEmail = `${RUN_TAG}_bearer@rafaq-test.local`;
+      const { data: u, error: uErr } = await admin.auth.admin.createUser({
+        email: bearerEmail,
+        password: PASSWORD,
+        email_confirm: true,
+        user_metadata: { name: 'Bearer User' },
+      });
+      assert.equal(uErr, null, uErr && uErr.message);
+      const bearerUserId = u.user.id;
+      createdUserIds.push(bearerUserId);
+      const bearerClient = await getUserClient(bearerEmail);
+
+      const { data: accepted, error: accErr } =
+        await bearerClient.functions.invoke('accept_invitation', {
+          body: { token: bearerToken },
+        });
+      assert.equal(accErr, null, accErr && accErr.message);
+      assert.equal(accepted.establishment_id, estA);
+      assert.equal(accepted.role, 'veterinarian');
+
+      // Verifica user_roles activo para el bearer user (no para el email de
+      // anotación).
+      const { data: ur } = await admin
+        .from('user_roles')
+        .select('role, active')
+        .eq('user_id', bearerUserId)
+        .eq('establishment_id', estA)
+        .eq('active', true);
+      assert.equal(ur.length, 1, 'debería haber un user_roles activo');
+      assert.equal(ur[0].role, 'veterinarian');
+
+      // Verifica invitación marcada accepted.
+      const { data: inv } = await admin
+        .from('invitations')
+        .select('status')
+        .eq('id', invRow.id)
+        .single();
+      assert.equal(inv.status, 'accepted');
+    },
+  );
+
+  await t.test(
+    'T2.2 R5.9: aceptar cuando ya soy miembro falla 409',
+    async () => {
+      // Creamos una invitación pending para estA con cualquier rol.
+      const memberToken = `member_${RUN_TAG}_${Math.random().toString(36).slice(2, 8)}`;
+      await admin.from('invitations').insert({
+        establishment_id: estA,
+        invited_by: owner.id,
+        email: null,
+        role: 'field_operator',
+        token: memberToken,
+        status: 'pending',
+        expires_at: new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString(),
+      });
+
+      // El owner ya es owner activo de estA. Aceptar debería fallar 409
+      // already_member (modelo bearer: el check duro de R5.9 vive acá).
+      const { data, error } = await ownerClient.functions.invoke(
+        'accept_invitation',
+        { body: { token: memberToken } },
+      );
+      assert.ok(error || data?.error, 'debería fallar already_member');
+    },
+  );
 
   // ===================================================================
   // T2.6 — change_member_role

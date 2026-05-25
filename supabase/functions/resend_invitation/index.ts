@@ -1,16 +1,19 @@
-// T2.4 — resend_invitation
-// Owner reenvía una invitación pending: genera nuevo token, reinicia expires_at,
-// dispara email de nuevo. El token viejo deja de funcionar por unique constraint.
+// T2.4 — resend_invitation (modelo link shareable, ver ADR-014).
+// Conceptualmente "regenerar link": genera un nuevo token y reinicia la
+// expiración. El token viejo deja de funcionar (sirve como mecanismo de
+// revocación cuando el owner comparte el link por error o sospecha que llegó
+// a la persona equivocada). No dispara email; el owner reparte el nuevo link
+// por el canal que prefiera.
+// Conserva el nombre del archivo para no romper deploys históricos.
 // Cubre: R5.8.
 //
-// Input: { invitation_id }
-// Output: { token, expires_at }
+// Input:  { invitation_id }
+// Output: { token, accept_url, expires_at }
 
 import { handleOptions } from '../_shared/cors.ts';
 import { jsonError, jsonOk } from '../_shared/errors.ts';
 import { createAdminClient, createUserClient } from '../_shared/supabase.ts';
 import { HttpError, requireOwnerOf, requireUser } from '../_shared/auth.ts';
-import { sendInvitationEmail } from '../_shared/email.ts';
 
 type Body = { invitation_id?: unknown };
 const INVITATION_TTL_DAYS = 7;
@@ -53,7 +56,7 @@ Deno.serve(async (req: Request) => {
       return jsonError(
         409,
         'invalid_state',
-        `Solo se pueden reenviar invitaciones pending (estado actual: ${inv.status}).`,
+        `Solo se pueden regenerar invitaciones pending (estado actual: ${inv.status}).`,
       );
     }
 
@@ -73,39 +76,13 @@ Deno.serve(async (req: Request) => {
       return jsonError(500, 'db_error', updErr.message);
     }
 
-    // Resend email best-effort.
-    let emailStatus = 'sent';
-    try {
-      const { data: estData } = await adminClient
-        .from('establishments')
-        .select('name')
-        .eq('id', inv.establishment_id)
-        .single();
-      const { data: inviterData } = await adminClient
-        .from('users')
-        .select('name')
-        .eq('id', user.id)
-        .single();
-
-      const sendResult = await sendInvitationEmail({
-        to: inv.email,
-        establishmentName: estData?.name ?? 'tu establecimiento',
-        inviterName: inviterData?.name ?? 'Un usuario',
-        role: inv.role as 'field_operator' | 'veterinarian',
-        token: newToken,
-      });
-      if (!sendResult.ok) {
-        emailStatus = sendResult.reason;
-      }
-    } catch (err) {
-      console.error('resend_invitation email send failed:', err);
-      emailStatus = 'error';
-    }
+    const appUrl = Deno.env.get('APP_URL') ?? 'https://app.rafq.ar';
+    const acceptUrl = `${appUrl}/invite?token=${encodeURIComponent(newToken)}`;
 
     return jsonOk({
       token: newToken,
+      accept_url: acceptUrl,
       expires_at: newExpires,
-      email_status: emailStatus,
     });
   } catch (err) {
     if (err instanceof HttpError) {

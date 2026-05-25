@@ -1,10 +1,12 @@
-// T2.2 — accept_invitation
-// El destinatario logueado acepta una invitación válida. Crea user_roles,
-// marca invitations.accepted y dispara notificaciones al owner (email + push)
-// con manejo aislado de errores.
-// Cubre: R5.5, R5.6, R5.10, R5.11.
+// T2.2 — accept_invitation (modelo bearer, ver ADR-014).
+// El destinatario logueado acepta una invitación válida usando el token.
+// El token es bearer: NO se valida email-matching con el JWT (cualquier user
+// logueado con el link puede aceptar). Crea user_roles, marca invitations
+// como accepted y dispara notificaciones al owner (email + push) con manejo
+// aislado de errores.
+// Cubre: R5.5, R5.6, R5.9, R5.10, R5.11.
 //
-// Input: { token }
+// Input:  { token }
 // Output: { establishment_id, role }
 
 import { handleOptions } from '../_shared/cors.ts';
@@ -35,8 +37,8 @@ Deno.serve(async (req: Request) => {
       return jsonError(400, 'invalid_input', 'token es obligatorio.');
     }
 
-    // Lookup via admin (bypassea RLS, así el caller no necesita match perfecto
-    // de email para ver la invitación antes de aceptar).
+    // Lookup via admin (bypassea RLS, el caller no necesita pertenecer al
+    // establishment para ver la invitación antes de aceptarla).
     const { data: inv, error: lookupErr } = await adminClient
       .from('invitations')
       .select('id, establishment_id, email, role, status, expires_at, invited_by')
@@ -67,17 +69,9 @@ Deno.serve(async (req: Request) => {
       return jsonError(410, 'expired', 'La invitación expiró.');
     }
 
-    // El email del JWT debe matchear el de la invitación (lowercase).
-    if (user.email !== inv.email.toLowerCase()) {
-      return jsonError(
-        403,
-        'email_mismatch',
-        'La invitación es para otro email.',
-      );
-    }
-
-    // R5.5 — insert del user_roles. Si ya existe uno activo (race), no falla:
-    // unique index lo bloquearía pero lo manejamos con un select previo.
+    // R5.9 — bloqueo duro: si el caller ya tiene un user_roles activo en el
+    // establishment, no se acepta (sería un segundo rol activo). El modelo
+    // bearer no puede prevenir esto en invite_user, así que el check vive acá.
     const { data: existing, error: existingErr } = await adminClient
       .from('user_roles')
       .select('id')
@@ -88,19 +82,25 @@ Deno.serve(async (req: Request) => {
     if (existingErr) {
       return jsonError(500, 'db_error', existingErr.message);
     }
+    if (existing) {
+      return jsonError(
+        409,
+        'already_member',
+        'Ya sos miembro de este establecimiento.',
+      );
+    }
 
-    if (!existing) {
-      const { error: insErr } = await adminClient
-        .from('user_roles')
-        .insert({
-          user_id: user.id,
-          establishment_id: inv.establishment_id,
-          role: inv.role,
-          active: true,
-        });
-      if (insErr) {
-        return jsonError(500, 'db_error', insErr.message);
-      }
+    // R5.5 — insert del user_roles nuevo.
+    const { error: insErr } = await adminClient
+      .from('user_roles')
+      .insert({
+        user_id: user.id,
+        establishment_id: inv.establishment_id,
+        role: inv.role,
+        active: true,
+      });
+    if (insErr) {
+      return jsonError(500, 'db_error', insErr.message);
     }
 
     // Marcar invitation accepted.

@@ -3,21 +3,21 @@
 > Este archivo se vacía al cerrar cada sesión y se mueve a `history.md`.
 > Mientras trabajás, **mantenelo actualizado en tiempo real**, no al final.
 
-- **Feature en curso:** `02-modelo-animal` (spec_author en marcha — escribiendo el spec)
-- **Feature pausada intencionalmente:** `01-identity-multitenancy` (backend done, frontend deferred)
+- **Feature en curso:** `01-identity-multitenancy` (sesión 6 — refactor backend a invitaciones link shareable cerrado y aprobado por reviewer)
+- **Feature pausada intencionalmente:** `02-modelo-animal` (spec_ready esperando aprobación humana)
 - **Inicio sesión:** 2026-05-25
-- **Agente activo:** `spec_author` (lanzado por `leader`)
+- **Agente activo:** `leader` (cerrando sesión)
 
 ## Estado de `01-identity-multitenancy`
 
 - ✅ **Fase 0** (setup) — scaffold Expo + Supabase CLI + Expo Notifications.
-- ✅ **Fase 1** (schema + RLS) — 11 migrations aplicadas a remoto + 15 tests RLS verdes.
-- ✅ **Fase 2** (Edge Functions) — 7 funciones desplegadas + 24 tests verdes. Email via Resend, push via Expo.
+- ✅ **Fase 1** (schema + RLS) — 12 migrations aplicadas a remoto (sumó `0012_invitations_email_nullable.sql` en sesión 6) + 15 tests RLS verdes.
+- ✅ **Fase 2** (Edge Functions) — 7 funciones desplegadas + 26 tests verdes. Refactor a modelo link shareable (`ADR-014`) en sesión 6: `invite_user`, `accept_invitation`, `resend_invitation` ya no usan email para invitar (Resend sigue solo para R5.10).
 - ⏸ **Fases 3-8** (frontend + PowerSync + QA) — pausadas intencionalmente. Raf decidió no avanzar frontend hasta refinar stack (`ADR-013`) y agregar tooling de UX (Figma MCP + Tamagui + etc).
 
 Status en `feature_list.json` queda `in_progress` con `notes` documentando la pausa. Cuando Raf esté listo para frontend, retomamos.
 
-`node scripts/check.mjs` verde con typecheck + 39 tests reales contra DB remota.
+`node scripts/check.mjs` verde con typecheck + 41 tests reales contra DB remota (15 RLS + 26 Edge).
 
 ## Estado de `02-modelo-animal` (en curso)
 
@@ -60,6 +60,20 @@ Status en `feature_list.json` queda `in_progress` con `notes` documentando la pa
 - `2026-05-25` — Decisión de Raf: **antes de aprobar spec 02 o destrabar Fase 3 del spec 01**, avanzar primero designs en Figma. Primer mockup: flujo de **wizard signup + crear establishment** del spec 01 (backend ya done, contratos estables). Pantallas a diseñar: splash, signup, verificá email, login, onboarding empty state con CTA dual (R6.5), completar teléfono (R3.8), nombre del establecimiento, home post-creación, y bonus aceptar invitación (R5.3).
 - `2026-05-25` — Leader cierra higiene: commit de `setup-frontend.md` con los cambios del aprendizaje real de las MCPs.
 
+## Bitácora — sesión 6 (refactor a invitaciones link shareable — ADR-014)
+
+- `2026-05-25` — Raf cuestiona el flujo de invitaciones email-magic-link y propone link shareable estilo Slack/Notion: owner genera link y lo comparte por WhatsApp/mail/etc con share sheet nativa + botón copiar. Leader analiza impacto: backend ya está casi diseñado para esto (email best-effort), las 7 líneas de email-matching en `accept_invitation` son lo único que ata al modelo email-bound. Estimación 4hs de trabajo, ningún trabajo previo perdido porque la Fase 3 está pausada.
+- `2026-05-25` — Raf aprueba avanzar. Decisión cerrada sobre el CTA secundario de R6.5: "pegar link de invitación" (red de seguridad si el deep link no autoabre).
+- `2026-05-25` — Leader crea `ADR-014` (invitaciones por link shareable) con contexto, alternativas (mantener email, dual paralelo, códigos numéricos, QR), consecuencias y mitigaciones (token UUID v4 + expiración 7d + regenerar revoca + lista visible al owner). Actualiza índice del README de ADRs.
+- `2026-05-25` — Leader refina `specs/active/01-identity-multitenancy/{requirements,design,tasks}.md`: R5.1-R5.12 reescritos (R5.12 nuevo), R6.5 con "pegar link", schema marca `email` nullable + nota a migration 0012, sección "Flujo de invitación" en dos partes (owner + destinatario), tabla de Decisiones actualizada, sección Riesgos con mitigación del modelo bearer, Dependencias externas con rol residual de Resend.
+- `2026-05-25` — Leader lanza implementer con scope acotado: migration 0012 + refactor de 3 Edge Functions + cleanup de `_shared/email.ts` (borrar `sendInvitationEmail`) + actualización de tests. NO tocar `cancel_invitation`/`remove_member`/`change_member_role`/`register_push_token`/migrations 0001-0011/RLS tests. Implementer cierra `done` con 41 tests verdes (15 RLS + 26 Edge, antes 39).
+- `2026-05-25` — Leader lanza reviewer. Aprobado: ADR-014 sigue template, specs coherentes, migration correcta, Edge Functions cumplen el bearer model con R5.9 hard 409, `sendInvitationEmail` eliminada sin imports muertos, R5.10/R5.11 intactos, tests cubren bearer cross-email + already_member. 4 findings cosméticos en `design.md` (residuos del modelo viejo en policy `invitations`, paso 8 del flujo de signup, env var `PUBLIC_APP_URL` vs `APP_URL` real, "deep link via magic link"). Leader arregla los 4 antes del commit.
+- `2026-05-25` — Cierre: `node scripts/check.mjs` verde, commit + sesión 6 al `history.md`.
+
+### Gotcha de env var (relevante para Fase 3 del cliente)
+
+El código real de Edge Functions usa `Deno.env.get('APP_URL')` (env del Edge Function en Supabase secrets). El spec original mencionaba `PUBLIC_APP_URL` / `EXPO_PUBLIC_APP_URL` (prefijo del cliente Expo). Quedó alineado a `APP_URL` en código + spec. Cuando arranque Fase 3, el cliente Expo va a necesitar su propia env (`EXPO_PUBLIC_APP_URL` o similar) para construir universal links — son dos vars distintas pero deben apuntar al mismo host.
+
 ## Próximo paso
 
 1. **Raf (offline / fuera de Claude Code)**: abre Figma, crea project `RAFAQ — Mobile`, diseña las 8 pantallas del flujo de wizard signup + crear establishment. Manga-UX: botones ≥56×56dp, font operativa ≥18sp, una decisión primaria por pantalla.
@@ -73,6 +87,7 @@ Status en `feature_list.json` queda `in_progress` con `notes` documentando la pa
 - `ADR-011` — Package manager pnpm con `onlyBuiltDependencies`.
 - `ADR-012` — Patrones de implementación: triggers postgres, tests Node nativo, Supabase CLI como devDep.
 - `ADR-013` — Stack frontend ambicioso (Tamagui + Reanimated + Moti + Maestro + Sentry + PostHog + MCPs).
+- `ADR-014` — Invitaciones por link shareable (modelo bearer estilo Slack/Notion) en vez de email magic link.
 
 ## Notas técnicas vigentes para el implementer
 

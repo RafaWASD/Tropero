@@ -2,6 +2,7 @@
 
 **Status**: Draft (pendiente de aprobación humana)
 **Fecha**: 2026-05-25
+**Última revisión**: 2026-05-25 — refinamiento de invitaciones a link shareable (ver `ADR-014`).
 
 Plan de implementación paso a paso. Cada tarea tiene su criterio de aceptación. El orden importa: dependencias hacia adelante.
 
@@ -94,36 +95,52 @@ Plan de implementación paso a paso. Cada tarea tiene su criterio de aceptación
 - Cubrir: aislamiento entre tenants, owner vs operator, soft-delete, RLS de `push_tokens`.
 - **Aceptación**: la suite corre en CI y todos los casos pasan.
 
+### [x] T1.11 Migration: `invitations.email` nullable (modelo link shareable)
+- Archivo: `supabase/migrations/0012_invitations_email_nullable.sql`.
+- `alter table public.invitations alter column email drop not null;`
+- Mantener el índice `invitations_pending_by_email` (sigue siendo útil cuando el email viene como anotación).
+- **Aceptación**: insert en `invitations` sin email funciona; insert con email también funciona.
+- Cubre: `ADR-014`, R5.1.
+
 ## Fase 2 — Edge Functions
 
-### [x] T2.1 Edge Function `invite_user`
+### [x] T2.1 Edge Function `invite_user` (refactor: modelo link shareable)
 - Archivo: `supabase/functions/invite_user/index.ts`.
-- Recibe `{ establishment_id, email, role }`, retorna `{ invitation_id }` o error.
-- Genera token con `crypto.randomUUID()` o `crypto.getRandomValues`.
-- Llama Supabase Auth admin API para mandar magic link, o usa Resend.
-- **Aceptación**: invocada con owner válido crea invitación y dispara email; con no-owner retorna 403.
+- Recibe `{ establishment_id, role, email? }`, retorna `{ invitation_id, token, accept_url, expires_at }` o error.
+- Genera token con `crypto.randomUUID()`.
+- Si vino `email`: prechecks soft de R5.9 (no es member activo) y de duplicado de pending. Si no vino email: skip esos prechecks (el bloqueo duro está en `accept_invitation`).
+- Inserta en `invitations` con `email` nullable.
+- Construye `accept_url` usando `Deno.env.get('PUBLIC_APP_URL')` (default `https://app.rafq.ar`).
+- **No** dispara email al destinatario.
+- **Aceptación**: invocada con owner válido crea invitación y retorna `accept_url` con el token embebido; con no-owner retorna 403; sin email funciona; con email duplicado o member activo, falla 409 según corresponda.
+- Cubre: R5.1, R5.2, R5.9 (precheck soft), `ADR-014`.
 
-### [~] T2.2 Edge Function `accept_invitation`
+### [x] T2.2 Edge Function `accept_invitation` (refactor: modelo bearer)
 - Archivo: `accept_invitation/index.ts`.
 - Recibe `{ token }`, retorna `{ establishment_id, role }` o error.
-- Valida token, expiración, email matching contra `auth.uid()`.
+- Valida token (existe), status `pending`, no expirada.
+- **Ya no valida** que `user.email` matchee `inv.email` (modelo bearer, ver `ADR-014`).
+- R5.9 — valida que el caller no tiene ya `user_roles` activo en ese establishment; si lo tiene, retorna 409 `already_member`.
 - Inserta `user_roles`, marca invitación como `accepted`.
 - **Después de aceptar exitosamente**, dispara notificaciones al owner que creó la invitación:
-  - Email transaccional (Resend o SMTP de Supabase) con info del nuevo miembro. Cubre: `R5.10`.
+  - Email transaccional (Resend) con info del nuevo miembro. Cubre: `R5.10`.
   - Push notification a todos los `push_tokens` activos del owner vía Expo Push API. Cubre: `R5.11`.
-  - Ambos envíos se ejecutan en el mismo Edge Function pero con manejo de errores aislado: si el push falla, el email igual sale; si el email falla, el aceptado igual queda persistido.
-- **Aceptación**: token válido genera membership; token usado/expirado retorna error claro; owner recibe email; owner con permisos de push recibe notificación.
-- **Nota Sesión 4**: code-complete. Flujo principal (aceptación + insert user_roles + accepted_at + push call) testeado. R5.10 email queda como best-effort hasta que `RESEND_API_KEY` esté en secrets de Supabase (helper retorna `{ok:false, reason:'no_key'}` con warning, no bloquea).
+  - Ambos envíos con manejo de errores aislado.
+- **Aceptación**: token válido genera membership sin importar el email del JWT; token usado/expirado/cancelado retorna error claro; usuario que ya es miembro recibe 409; owner recibe email; owner con permisos de push recibe notificación.
+- **Nota Sesión 4**: code-complete. R5.10 email best-effort hasta que `RESEND_API_KEY` esté en secrets.
 
 ### [x] T2.3 Edge Function `cancel_invitation`
 - Archivo: `cancel_invitation/index.ts`.
 - Solo owner del establishment.
 - **Aceptación**: cancela invitación pending; falla si ya fue aceptada.
 
-### [x] T2.4 Edge Function `resend_invitation`
-- Archivo: `resend_invitation/index.ts`.
-- Regenera token, actualiza `expires_at`, reenvía email.
-- **Aceptación**: el token viejo deja de funcionar, el nuevo sí.
+### [x] T2.4 Edge Function `resend_invitation` (refactor: regenerar link)
+- Archivo: `resend_invitation/index.ts` (nombre conservado por compat de deploys; semántica = "regenerar link").
+- Solo owner. Solo invitaciones en estado `pending`.
+- Regenera token con `crypto.randomUUID()`, actualiza `expires_at`. **Ya no envía email**.
+- Retorna `{ token, accept_url, expires_at }`.
+- **Aceptación**: el token viejo deja de funcionar, el nuevo sí; no se manda email; cualquier non-owner falla 403.
+- Cubre: R5.8, `ADR-014`.
 
 ### [x] T2.5 Edge Function `remove_member`
 - Archivo: `remove_member/index.ts`.
@@ -196,9 +213,9 @@ Plan de implementación paso a paso. Cada tarea tiene su criterio de aceptación
 ### T4.3 Pantalla OnboardingWizard (sin establecimientos)
 - Wizard con dos CTAs visibles (ver `R6.5`):
   - Primario: "Crear mi primer campo" → navega a `CreateEstablishmentScreen` (T4.4).
-  - Secundario: "Compartir mi email con productores" → pantalla con el email del usuario destacado, botón de copiar, y copy explicativo ("pasáselo a un productor que quiera invitarte").
-- **Aceptación**: user verificado sin `user_roles` activos cae acá; ambos CTAs son visibles con jerarquía clara (primario más grande, ambos accesibles).
-- Cubre: `R6.5`.
+  - Secundario: "Pegar link de invitación" → abre un input modal donde el usuario pega un link `https://app.rafq.ar/invite?token=XXX` o `rafq://invite?token=XXX`. El cliente extrae el token con `expo-linking` (parse de URL) y navega a `AcceptInvitationScreen` (T5.4) con ese token en el estado. Validar que el link tenga el formato esperado y mostrar error legible si no.
+- **Aceptación**: user verificado sin `user_roles` activos cae acá; ambos CTAs son visibles con jerarquía clara (primario más grande, ambos accesibles). Pegar un link válido lleva a la pantalla de aceptación; pegar texto inválido muestra error.
+- Cubre: `R6.5`, `ADR-014`.
 
 ### T4.4 Crear establecimiento (con gate de teléfono)
 - `CreateEstablishmentScreen` con form (name, province, opcionales).
@@ -221,24 +238,36 @@ Plan de implementación paso a paso. Cada tarea tiene su criterio de aceptación
 - Para owner: botones "Invitar", "Cambiar rol", "Remover".
 - **Aceptación**: owner ve lista; operator ve lista read-only.
 
-### T5.2 Form de invitación
-- Modal "Invitar miembro": email + rol.
-- Llamada a Edge Function `invite_user`.
-- Toast de éxito o error.
-- **Aceptación**: invitación creada, aparece en sección "Invitaciones pendientes".
+### T5.2 Form de invitación (modelo link shareable)
+- Modal "Invitar miembro": **rol obligatorio** + email opcional como anotación.
+- Llamada a Edge Function `invite_user({ establishment_id, role, email? })`.
+- Al recibir respuesta exitosa, mostrar pantalla "Listo, compartí el link" con:
+  - El `accept_url` destacado en grande.
+  - Botón "Copiar al portapapeles" (`Clipboard.setStringAsync`).
+  - Botón "Compartir" (`Share.share({ message: accept_url, url: accept_url })`) que abre la share sheet nativa (WhatsApp, mail, SMS, etc.).
+  - Nota de expiración: "Este link vence en 7 días. Podés cancelarlo o regenerarlo desde Miembros".
+- Toast de error si falla.
+- **Aceptación**: invitación creada, link visible con botones funcionales; el link compartido vía WhatsApp llega como mensaje preparado para enviar.
+- Cubre: R5.1, R5.2, R5.3, `ADR-014`.
 
 ### T5.3 Sección de invitaciones pendientes
 - Lista de invitations status=pending del establishment activo.
-- Acciones: cancelar, reenviar, copy link.
-- **Aceptación**: pendientes visibles, acciones funcionan.
+- Por cada pendiente: rol, fecha de creación, expiración, email opcional (anotación).
+- Acciones por item: **copiar link**, **compartir link**, **regenerar link** (llama `resend_invitation`, advierte que el link anterior dejará de funcionar), **cancelar**.
+- **Aceptación**: pendientes visibles con todas las acciones funcionales; regenerar muestra el nuevo link y deja inservible el anterior.
+- Cubre: R5.7, R5.8, R5.12.
 
-### T5.4 Pantalla de aceptar invitación (deep link)
-- Configurar `expo-linking` con esquema y universal link.
-- `AcceptInvitationScreen` accesible vía `/invite?token=XXX`.
-- Lookup token → mostrar info del campo y rol.
-- Si no logueado: opciones "Registrarme" / "Iniciar sesión", ambas mantienen el token en estado.
-- Después de auth, llamada a `accept_invitation`.
-- **Aceptación**: end-to-end: owner invita, destinatario recibe email, abre link, se registra/loguea, queda agregado al campo con el rol correcto.
+### T5.4 Pantalla de aceptar invitación (deep link + entrada manual)
+- Configurar `expo-linking` con esquema `rafq://` y universal link `https://app.rafq.ar/invite`.
+- `AcceptInvitationScreen` accesible vía:
+  - Deep link / universal link con `?token=XXX`.
+  - Entrada manual desde el CTA "pegar link" del wizard (T4.3).
+- Lookup local del token (UI muestra info del establishment y rol antes de aceptar). El backend hará el lookup definitivo en `accept_invitation`.
+- Si no logueado: opciones "Registrarme" / "Iniciar sesión", ambas mantienen el token en estado (navegación o storage temporal).
+- Después de auth, llamada a `accept_invitation({ token })`.
+- Manejo de errores: 410 expirada / 409 ya miembro / 404 token inválido / 409 ya accepted-cancelled → mensajes legibles.
+- **Aceptación**: end-to-end: owner crea invitación, comparte link por WhatsApp, destinatario abre link en su celu, se registra/loguea, queda agregado al campo con el rol correcto. Caso degradado (entrada manual desde wizard) también funciona.
+- Cubre: R5.4, R5.5, R5.6, R5.9.
 
 ### T5.5 Cambiar rol de miembro
 - Acción "Cambiar rol" → modal con opciones.
@@ -307,6 +336,7 @@ T0.* → T1.* → T2.* ─┐
                     ├→ T3.* → T4.* → T5.* → T6.* → T7.* → T8.*
                     │
               T1.10 (tests RLS) gate antes de avanzar a Fase 3
+              T1.11 + T2.1 + T2.2 + T2.4 → refactor a link shareable (ADR-014)
               T0.4 + T1.9 + T2.7 + T3.6 → cadena de push notifications (R5.11)
 ```
 

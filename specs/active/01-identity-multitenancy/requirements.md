@@ -2,11 +2,12 @@
 
 **Status**: Draft (pendiente de aprobación humana)
 **Fecha**: 2026-05-25
+**Última revisión**: 2026-05-25 — refinamiento de invitaciones a link shareable (ver `ADR-014`).
 **Autor**: Raf
 
 ## Resumen
 
-Primer bloque fundacional del producto. Establece el modelo de identidad de usuarios, autenticación, jerarquía de establecimientos, roles por relación usuario-establecimiento, e invitaciones por email con magic link. Sin rodeos en este spec (van en spec 02).
+Primer bloque fundacional del producto. Establece el modelo de identidad de usuarios, autenticación, jerarquía de establecimientos, roles por relación usuario-establecimiento, e invitaciones por **link shareable** que el owner reparte por el canal que prefiera (WhatsApp, mail, copy-paste). Sin rodeos en este spec (van en spec 02).
 
 Sirve como sustrato de todas las features que vienen después: ninguna entidad de negocio se puede crear sin `establishment_id`, y ningún acceso se permite sin un `user_roles` activo.
 
@@ -15,18 +16,19 @@ Sirve como sustrato de todas las features que vienen después: ninguna entidad d
 Antes de las requirements, dejo registradas las decisiones que ya están cerradas para esta spec:
 
 - **Auth provider**: Supabase Auth (email + password) — ver `ADR-002`.
-- **Invitaciones**: email con magic link. Si el email no tiene cuenta, recibe link de registro pre-vinculado. Si ya la tiene, link de aceptación.
+- **Invitaciones (modelo link shareable)**: el owner crea la invitación sin ingresar email del destinatario. El sistema genera un link tipo `https://app.rafq.ar/invite?token=XXX` (y deep link `rafq://invite?token=XXX`) que el owner comparte por el canal que prefiera (WhatsApp, mail, SMS, copy/paste) usando la share sheet nativa o el botón de copy. El token vale por sí solo (modelo bearer, ver `ADR-014`).
 - **Signup neutro**: el signup no pregunta "soy productor" vs "soy vet". El rol vive solo en `user_roles` (relación user-establishment). Un mismo usuario puede ser owner de su campo y veterinario invitado en otro.
 - **Sin `user_type` en MVP**: la diferenciación de UX para el cold-start del vet se resuelve con un CTA dual en el empty state, no con autodeclaración en signup. Mantiene `ADR-006` intacto. Si más adelante hace falta segmentar para analytics o marketing, se agrega post-MVP con data real.
 - **Modelo de roles**: `owner` / `field_operator` / `veterinarian` — ver `ADR-006`.
 - **Multi-tenant enforcement**: Row Level Security de Postgres — ver `ADR-004`.
 - **Soft deletes**: `deleted_at nullable timestamp` en todas las entidades de negocio.
 - **Hard-delete fuera de scope MVP**: la política de retención (cuándo convertir soft-deletes en hard-deletes) se difiere hasta que SENASA publique requerimientos formales de retención. Anotar en `CONTEXT/08-roadmap.md` como trigger explícito.
-- **Onboarding post-signup**: wizard con dos CTAs visibles — primario "crear mi primer campo" y secundario "compartir mi email con productores". El mismo wizard sirve a productores y a veterinarios sin necesidad de segmentar.
+- **Onboarding post-signup**: wizard con dos CTAs visibles — primario "crear mi primer campo" y secundario "pegar link de invitación". El mismo wizard sirve a productores y a veterinarios/operarios sin necesidad de segmentar (ver `ADR-014`).
 - **Teléfono**: opcional en signup, obligatorio al crear establecimiento. Refleja que el contacto telefónico solo importa para clientes que pagan (owners).
-- **Email de invitación**: solo español, template fijo en MVP. No customización por owner. No multi-idioma.
-- **Notificación al owner cuando aceptan invitación**: email transaccional (reusa la infra que ya hace falta para `R5.2`) + push notification (suma Expo Notifications al scope MVP).
+- **Email de invitación al destinatario**: **no aplica** en el modelo link shareable. El owner es responsable de hacer llegar el link al destinatario por el canal que elija. Eliminado.
+- **Notificación al owner cuando aceptan invitación**: email transaccional al owner (via Resend) + push notification (Expo Notifications). Este flujo se mantiene intacto.
 - **Transferencia de ownership**: no implementamos flujo en MVP. El único owner activo debe soft-deletear el establecimiento antes de darse de baja de su cuenta (`R2.5`). Documentar como limitación conocida.
+- **Email opcional como anotación en `invitations`**: el owner puede registrar a quién dirige la invitación (campo `email` nullable), pero **no se valida contra el destinatario que acepta** (eso es del modelo bearer). Sirve solo para la lista de "invitaciones pendientes" del owner.
 - **Sin rodeos en este spec**: rodeos quedan para spec 02 (modelo de animal).
 
 ## Requirements (EARS)
@@ -95,34 +97,41 @@ Antes de las requirements, dejo registradas las decisiones que ya están cerrada
 
 **R4.7** El sistema deberá permitir que un `owner` remueva el acceso de otro usuario al establecimiento, marcando el `user_roles` correspondiente como `active = false`.
 
-### R5. Invitaciones
+### R5. Invitaciones (modelo link shareable, ver `ADR-014`)
 
-**R5.1** El sistema deberá permitir que un `owner` invite a otro usuario a su establecimiento ingresando email y rol (`field_operator` o `veterinarian`).
+**R5.1** El sistema deberá permitir que un `owner` cree una invitación a su establecimiento seleccionando solo el rol destino (`field_operator` o `veterinarian`). Opcionalmente, el owner podrá registrar un email destinatario como anotación, **sin que ese email se valide al aceptar** (es solo etiqueta para que el owner reconozca la invitación en su lista de pendientes).
 
 **R5.2** Cuando un owner crea una invitación, el sistema deberá:
-- Crear una fila en `invitations` con token único, expiración 7 días, estado `pending`.
-- Enviar un email al destinatario con un magic link que incluye el token.
+- Crear una fila en `invitations` con token único (UUID v4), expiración 7 días, estado `pending`, y `email` opcional.
+- Retornar al cliente `{ invitation_id, token, accept_url, expires_at }`, donde `accept_url` es un universal link (`https://app.rafq.ar/invite?token=XXX`) que también funciona como deep link nativo (`rafq://invite?token=XXX`).
+- **No** disparar email automático al destinatario.
 
-**R5.3** Si el email destinatario no tiene cuenta en el sistema, el magic link deberá llevarlo a una pantalla de registro pre-vinculada al token de invitación.
+**R5.3** El cliente del owner deberá ofrecer al menos dos acciones visibles sobre el link generado:
+- **Copiar al portapapeles** (`Clipboard.setStringAsync`).
+- **Compartir vía share sheet nativa** (`expo-sharing` o `Share.share`), permitiendo elegir WhatsApp, mail, SMS, Instagram, Telegram, etc. según las apps que el dispositivo del owner exponga.
 
-**R5.4** Si el email destinatario ya tiene cuenta, el magic link deberá llevarlo a una pantalla de aceptación con login.
+**R5.4** Cuando un destinatario abre el link de invitación:
+- Si el deep link se abre en la app y el usuario ya está logueado, el sistema deberá mostrar una pantalla de aceptación con info del establishment y rol.
+- Si el usuario no está logueado, el sistema deberá ofrecerle "Registrarme" o "Iniciar sesión", preservando el token de invitación en el estado y completando la aceptación después de auth.
+- Si el deep link no autoabre la app (caso degradado, ej. browser desktop, restricción del SO), el destinatario podrá entrar a la app manualmente, ir al wizard de onboarding y usar el CTA "pegar link de invitación" (ver `R6.5`).
 
-**R5.5** Cuando el destinatario acepta una invitación válida (token correcto, no expirada, estado `pending`), el sistema deberá:
-- Crear o reutilizar el usuario.
-- Crear un `user_roles` con el rol indicado y `active = true`.
-- Marcar la invitación como `accepted`.
+**R5.5** Cuando el destinatario logueado acepta una invitación válida (token correcto, no expirada, estado `pending`), el sistema deberá:
+- Crear un `user_roles` con `(user_id = auth.uid(), establishment_id, role, active = true)`. Si ya existe un `user_roles` activo para ese par (race condition), no falla: se reutiliza el existente.
+- Marcar la invitación como `accepted` con `accepted_at = now()`.
 
-**R5.6** Si una invitación está expirada o ya fue usada, el sistema no deberá permitir su aceptación y deberá mostrar un mensaje claro al usuario.
+**R5.6** Si una invitación está expirada (`expires_at < now()`), cancelada, o ya aceptada, el sistema no deberá permitir su aceptación y deberá retornar un error claro al cliente para que muestre un mensaje legible.
 
-**R5.7** El sistema deberá permitir que el owner cancele una invitación pendiente.
+**R5.7** El sistema deberá permitir que el owner cancele una invitación pendiente (estado pasa a `cancelled`, el token deja de ser válido).
 
-**R5.8** El sistema deberá permitir reenviar una invitación pendiente, lo cual genera un nuevo token y reinicia la expiración.
+**R5.8** El sistema deberá permitir **regenerar el link** de una invitación pendiente. La operación deberá generar un nuevo token (invalidando el anterior) y reiniciar `expires_at`. Sirve como mecanismo de revocación cuando el owner comparte el link por error o sospecha que llegó a la persona equivocada.
 
-**R5.9** Si un owner invita a un email que ya tiene un `user_roles` activo en ese establecimiento, el sistema deberá rechazar la invitación con un mensaje claro.
+**R5.9** Cuando el destinatario intenta aceptar una invitación y ya tiene un `user_roles` activo en ese establecimiento, el sistema deberá retornar un error claro `already_member`. La validación se hace en la aceptación, no en la creación (el modelo bearer no conoce al destinatario al crear el link).
 
-**R5.10** Cuando una invitación pasa a estado `accepted`, el sistema deberá enviar un email transaccional al owner que la creó, notificándolo de la aceptación.
+**R5.10** Cuando una invitación pasa a estado `accepted`, el sistema deberá enviar un email transaccional al owner que la creó, notificándolo de la aceptación (incluye nombre/email del nuevo miembro y rol asignado). El envío es best-effort: si falla, no debe revertir la aceptación.
 
-**R5.11** Donde el owner tenga la app instalada y permisos de notificaciones otorgados, el sistema deberá enviar también una push notification cuando una invitación que él creó sea aceptada.
+**R5.11** Donde el owner tenga la app instalada y permisos de notificaciones otorgados (token registrado en `push_tokens`), el sistema deberá enviar también una push notification cuando una invitación que él creó sea aceptada. El envío es best-effort en paralelo al email (R5.10).
+
+**R5.12** El sistema deberá listar al owner las invitaciones de su establishment activo en estado `pending`, exponiendo para cada una: rol, fecha de creación, expiración, email opcional, y acciones (copiar link, compartir link, regenerar, cancelar).
 
 ### R6. Contexto activo de establecimiento
 
@@ -134,7 +143,7 @@ Antes de las requirements, dejo registradas las decisiones que ya están cerrada
 
 **R6.4** Cuando un usuario solo tiene `user_roles` activo en un único establecimiento, el sistema deberá seleccionarlo automáticamente sin pedir input.
 
-**R6.5** Cuando un usuario verificado no tiene ningún `user_roles` activo, el sistema deberá mostrar un wizard de onboarding con dos CTAs visibles: (a) primario, "crear mi primer campo", que inicia el flujo de creación de establecimiento; y (b) secundario, "compartir mi email con productores", que muestra el email del usuario con un botón de copiar y una breve instrucción para pasárselo a un productor que quiera invitarlo.
+**R6.5** Cuando un usuario verificado no tiene ningún `user_roles` activo, el sistema deberá mostrar un wizard de onboarding con dos CTAs visibles: (a) primario, "crear mi primer campo", que inicia el flujo de creación de establecimiento; y (b) secundario, "pegar link de invitación", que abre un input para que el usuario pegue manualmente un link `https://app.rafq.ar/invite?token=XXX` o `rafq://invite?token=XXX` recibido por WhatsApp, mail o cualquier otro canal. Al pegar un link válido, el sistema deberá extraer el token, navegar a la pantalla de aceptación de invitación (ver `R5.4`) y completar el flujo. Este CTA actúa como red de seguridad cuando el deep link no autoabre la app por restricciones del SO o porque el usuario abrió el link desde un dispositivo distinto.
 
 ### R7. Aislamiento multi-tenant
 

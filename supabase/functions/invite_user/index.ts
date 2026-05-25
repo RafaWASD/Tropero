@@ -1,15 +1,17 @@
-// T2.1 — invite_user
-// Owner invita a un email con un rol (field_operator | veterinarian).
-// Cubre: R5.1, R5.2, R5.9.
+// T2.1 — invite_user (modelo link shareable, ver ADR-014).
+// Owner crea una invitación a su establecimiento seleccionando solo el rol.
+// El email es opcional como anotación (no se valida al aceptar).
+// La función retorna un accept_url shareable que el owner reparte por el canal
+// que prefiera (WhatsApp, mail, copy-paste). NO dispara email automático.
+// Cubre: R5.1, R5.2, R5.9 (precheck soft cuando viene email).
 //
-// Input: { establishment_id, email, role }
-// Output: { invitation_id, token }
+// Input:  { establishment_id, role, email? }
+// Output: { invitation_id, token, accept_url, expires_at }
 
 import { handleOptions } from '../_shared/cors.ts';
 import { jsonError, jsonOk } from '../_shared/errors.ts';
 import { createAdminClient, createUserClient } from '../_shared/supabase.ts';
 import { HttpError, requireOwnerOf, requireUser } from '../_shared/auth.ts';
-import { sendInvitationEmail } from '../_shared/email.ts';
 
 type Body = {
   establishment_id?: unknown;
@@ -45,10 +47,15 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    const email =
-      typeof body.email === 'string' ? body.email.trim().toLowerCase() : '';
-    if (!email || !email.includes('@')) {
-      return jsonError(400, 'invalid_input', 'email inválido.');
+    // Email opcional. Si viene, normalizamos a lowercase y validamos formato
+    // mínimo. Si no viene, queda null y se saltan los prechecks soft.
+    const emailRaw = typeof body.email === 'string' ? body.email.trim() : '';
+    let email: string | null = null;
+    if (emailRaw.length > 0) {
+      if (!emailRaw.includes('@')) {
+        return jsonError(400, 'invalid_input', 'email inválido.');
+      }
+      email = emailRaw.toLowerCase();
     }
 
     const role = typeof body.role === 'string' ? body.role : '';
@@ -63,44 +70,47 @@ Deno.serve(async (req: Request) => {
     // Verifica que el caller es owner activo.
     await requireOwnerOf(adminClient, user.id, establishmentId);
 
-    // R5.9 — bloquear si el email ya tiene un user_roles activo en el campo.
-    const { data: existingMember, error: existingErr } = await adminClient
-      .from('user_roles')
-      .select('id, users:users!inner(email)')
-      .eq('establishment_id', establishmentId)
-      .eq('active', true)
-      .eq('users.email', email)
-      .limit(1);
-    if (existingErr) {
-      return jsonError(500, 'db_error', existingErr.message);
-    }
-    if (existingMember && existingMember.length > 0) {
-      return jsonError(
-        409,
-        'already_member',
-        'Ese email ya es miembro activo del establecimiento.',
-      );
-    }
+    // Prechecks soft de R5.9 / pending duplicada: solo aplican si vino email
+    // como anotación. El bloqueo duro de R5.9 (modelo bearer) está en
+    // accept_invitation: el destinatario real recién se conoce al aceptar.
+    if (email) {
+      const { data: existingMember, error: existingErr } = await adminClient
+        .from('user_roles')
+        .select('id, users:users!inner(email)')
+        .eq('establishment_id', establishmentId)
+        .eq('active', true)
+        .eq('users.email', email)
+        .limit(1);
+      if (existingErr) {
+        return jsonError(500, 'db_error', existingErr.message);
+      }
+      if (existingMember && existingMember.length > 0) {
+        return jsonError(
+          409,
+          'already_member',
+          'Ese email ya es miembro activo del establecimiento.',
+        );
+      }
 
-    // Bloquear si hay una invitación pending no expirada para ese email/establishment.
-    const nowIso = new Date().toISOString();
-    const { data: pending, error: pendingErr } = await adminClient
-      .from('invitations')
-      .select('id')
-      .eq('establishment_id', establishmentId)
-      .eq('email', email)
-      .eq('status', 'pending')
-      .gt('expires_at', nowIso)
-      .limit(1);
-    if (pendingErr) {
-      return jsonError(500, 'db_error', pendingErr.message);
-    }
-    if (pending && pending.length > 0) {
-      return jsonError(
-        409,
-        'pending_exists',
-        'Ya hay una invitación pendiente para ese email.',
-      );
+      const nowIso = new Date().toISOString();
+      const { data: pending, error: pendingErr } = await adminClient
+        .from('invitations')
+        .select('id')
+        .eq('establishment_id', establishmentId)
+        .eq('email', email)
+        .eq('status', 'pending')
+        .gt('expires_at', nowIso)
+        .limit(1);
+      if (pendingErr) {
+        return jsonError(500, 'db_error', pendingErr.message);
+      }
+      if (pending && pending.length > 0) {
+        return jsonError(
+          409,
+          'pending_exists',
+          'Ya hay una invitación pendiente para ese email.',
+        );
+      }
     }
 
     const token = crypto.randomUUID();
@@ -125,40 +135,14 @@ Deno.serve(async (req: Request) => {
       return jsonError(500, 'db_error', insErr.message);
     }
 
-    // Email best-effort. Si falla, dejamos la invitación creada igual (el owner
-    // puede usar resend_invitation o copy link).
-    let emailStatus = 'sent';
-    try {
-      const { data: estData } = await adminClient
-        .from('establishments')
-        .select('name')
-        .eq('id', establishmentId)
-        .single();
-      const { data: inviterData } = await adminClient
-        .from('users')
-        .select('name')
-        .eq('id', user.id)
-        .single();
-
-      const sendResult = await sendInvitationEmail({
-        to: email,
-        establishmentName: estData?.name ?? 'tu establecimiento',
-        inviterName: inviterData?.name ?? 'Un usuario',
-        role: role as 'field_operator' | 'veterinarian',
-        token,
-      });
-      if (!sendResult.ok) {
-        emailStatus = sendResult.reason;
-      }
-    } catch (err) {
-      console.error('invite_user email send failed:', err);
-      emailStatus = 'error';
-    }
+    const appUrl = Deno.env.get('APP_URL') ?? 'https://app.rafq.ar';
+    const acceptUrl = `${appUrl}/invite?token=${encodeURIComponent(token)}`;
 
     return jsonOk({
       invitation_id: inserted.id,
       token,
-      email_status: emailStatus,
+      accept_url: acceptUrl,
+      expires_at: expiresAt,
     });
   } catch (err) {
     if (err instanceof HttpError) {

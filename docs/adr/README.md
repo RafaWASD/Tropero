@@ -53,3 +53,7 @@ Positivas, negativas y mitigaciones.
 | 008 | Transiciones automáticas de categoría con override | Accepted |
 | 009 | Billing infrastructure diferida post-beta | Accepted |
 | 010 | Hardware integration con Vesta vía bridge ESP32 | Accepted |
+| 011 | Package manager pnpm con `onlyBuiltDependencies` | Accepted |
+| 012 | Patrones de implementación (triggers, tests, CLI) | Accepted |
+| 013 | Stack de frontend (Tamagui + Expo Router + Reanimated + ...) | Accepted |
+| 014 | Invitaciones por link shareable (en vez de magic link por email) | Accepted |

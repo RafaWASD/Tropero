@@ -2,6 +2,11 @@
 // Si `RESEND_API_KEY` no está configurada, las funciones retornan `{ ok: false,
 // reason: 'no_key' }` SIN tirar — el caller decide si bloquea o continúa.
 // Esto permite que R5.10 sea best-effort hasta que Raf agregue la key.
+//
+// Tras adoptar el modelo link shareable (ADR-014), `sendInvitationEmail` se
+// eliminó: el owner reparte el link él mismo. Solo queda
+// `sendInvitationAcceptedEmail` (R5.10), que notifica al owner cuando alguien
+// acepta su invitación.
 
 export type EmailRecipient = {
   email: string;
@@ -50,39 +55,6 @@ async function sendViaResend(payload: {
 
   const body = await res.json().catch(() => ({}));
   return { ok: true, id: body.id ?? 'unknown' };
-}
-
-// Email de invitación al destinatario.
-// Magic link incluye el token: la app extrae token del query string y llama
-// accept_invitation.
-export async function sendInvitationEmail(params: {
-  to: string;
-  establishmentName: string;
-  inviterName: string;
-  role: 'field_operator' | 'veterinarian';
-  token: string;
-}): Promise<EmailResult> {
-  const appUrl = Deno.env.get('APP_URL') ?? 'https://app.rafq.ar';
-  const link = `${appUrl}/invite?token=${encodeURIComponent(params.token)}`;
-  const roleEs =
-    params.role === 'veterinarian' ? 'veterinario' : 'operario de campo';
-
-  const html = `
-    <p>Hola,</p>
-    <p><strong>${escapeHtml(params.inviterName)}</strong> te invitó a sumarte
-    al establecimiento <strong>${escapeHtml(params.establishmentName)}</strong>
-    en RAFAQ como <strong>${roleEs}</strong>.</p>
-    <p><a href="${link}">Aceptar invitación</a></p>
-    <p>O copiá y pegá este link en la app:<br>${link}</p>
-    <p>El link expira en 7 días.</p>
-    <p>— Equipo RAFAQ</p>
-  `;
-
-  return sendViaResend({
-    to: params.to,
-    subject: `${params.inviterName} te invitó a ${params.establishmentName}`,
-    html,
-  });
 }
 
 // Email al owner cuando aceptan una invitación. R5.10.
