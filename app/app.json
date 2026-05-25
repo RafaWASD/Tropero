@@ -1,0 +1,44 @@
+{
+  "expo": {
+    "name": "RAFAQ",
+    "slug": "rafaq-app",
+    "scheme": "rafq",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "ar.rafq.app",
+      "infoPlist": {
+        "UIBackgroundModes": ["remote-notification"]
+      }
+    },
+    "android": {
+      "package": "ar.rafq.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "permissions": ["NOTIFICATIONS"]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-notifications",
+        {
+          "color": "#1A73E8",
+          "defaultChannel": "default"
+        }
+      ]
+    ],
+    "extra": {
+      "supabaseUrl": "https://xrhlxxdnfzvdnztacofj.supabase.co"
+    }
+  }
+}
