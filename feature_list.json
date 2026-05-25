@@ -23,7 +23,8 @@
         "Un owner puede remover el acceso de otro user y ese user pierde acceso inmediatamente."
       ],
       "sdd": true,
-      "status": "in_progress"
+      "status": "in_progress",
+      "notes": "Backend (Fases 0+1+2) cerrado y verde: 11 migrations aplicadas, 24+15 tests reales contra DB remota, 7 Edge Functions con email (Resend) + push (Expo). Frontend (Fases 3-8) pausado intencionalmente esperando definición de stack y refinamiento de UX por Raf — ver ADR-013."
     },
     {
       "id": 2,
@@ -37,7 +38,7 @@
         "Ficha de animal muestra cronología de eventos."
       ],
       "sdd": true,
-      "status": "pending"
+      "status": "spec_ready"
     },
     {
       "id": 3,
