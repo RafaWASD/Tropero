@@ -25,6 +25,9 @@ Thumbs.db
 .env.local
 .env.*.local
 
+# Claude Code local settings (per-user permissions cache, NO compartir)
+.claude/settings.local.json
+
 # Override del .gitignore global del usuario
 # (~/.gitignore_global ignora CLAUDE.md por convenciones corporativas, pero
 # acá es el archivo principal del proyecto y debe estar versionado).

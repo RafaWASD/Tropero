@@ -170,3 +170,51 @@ El leader puede relanzar al implementer (más sesiones) o tomar la siguiente fas
 (c) reformula el alcance de la spec en chunks más chicos.
 
 `node scripts/check.mjs` está verde con typecheck + 15 tests RLS pasando contra la DB remota.
+
+---
+
+## Sesión 3 — Implementer bloqueado por permisos de tools (2026-05-25)
+
+El leader lanzó una tercera sesión de implementer para Fase 2 (Edge Functions). Esa sesión **fue bloqueada por denegación de permisos de Write/Edit/Bash a nivel framework** (no por blocker técnico). Toda la investigación (lectura de spec, ADRs, progress) se completó, pero el implementer no pudo escribir un solo archivo.
+
+Cero código nuevo se escribió. Working tree sigue limpio en `main` con los 5 commits del milestone Fase 0+1.
+
+### Plan de Fase 2 dejado por el implementer bloqueado (para que la próxima sesión lo levante sin re-investigar)
+
+**Shared helpers en `supabase/functions/_shared/`**:
+- `cors.ts` — `corsHeaders` + `handleOptions(req)` para preflight.
+- `supabase.ts` — factories `createAdminClient()` (service_role) y `createUserClient(req)` (anon + JWT del header `Authorization`).
+- `auth.ts` — `requireUser(client)` extrae `auth.uid()`; `requireOwnerOf(adminClient, userId, establishmentId)` valida via tabla.
+- `errors.ts` — `jsonError(status, code, message)` + `jsonOk(data)` con CORS headers.
+- `email.ts` — invitación via `auth.admin.inviteUserByEmail(email, { data: { invitation_token, establishment_name }, redirectTo: ${APP_URL}/invite?token=${token} })`. Notificación al owner via `auth.admin.generateLink({ type: 'magiclink' })` + fallback a Resend si `RESEND_API_KEY` está configurada. Si ninguno cubre, skip con warning (R5.10 best-effort, no bloqueante).
+- `push.ts` — POST a `https://exp.host/--/api/v2/push/send` con `Authorization: Bearer ${EXPO_ACCESS_TOKEN}`, body es array de mensajes. Parsear respuesta: por cada `data[i].status === 'error'` con `details.error === 'DeviceNotRegistered'`, hacer `delete` del row de `push_tokens` correspondiente.
+
+**Funciones**:
+
+- **T2.1 `invite_user`**: input `{ establishment_id, email, role }`. Pasos: `requireUser` → `requireOwnerOf` → valida `role !== 'owner'` → normaliza email a lowercase → chequea no exista `user_roles active = true` para ese email en ese establishment (join con `users.email`) → chequea no haya invitation `pending` no expirada para ese email → genera token con `crypto.randomUUID()` → inserta en `invitations` (status=pending, expires_at=now()+7d, invited_by=user.id) → dispara email via helper → retorna `{ invitation_id, token }`. Cubre R5.1, R5.2, R5.9.
+
+- **T2.2 `accept_invitation`**: input `{ token }`. Pasos: `requireUser` → lookup invitation (service_role) por token + status=pending + expires_at>now() → match `invitation.email === auth user email` (lowercase) → service_role insert en `user_roles(user_id=auth.uid(), establishment_id, role, active=true)` (bypass RLS) → service_role update `invitations.status='accepted', accepted_at=now()` → lookup owner via `user_roles WHERE establishment_id AND role='owner' AND active=true` → trigger email y push al owner con manejo de errores aislado (try/catch independiente para cada uno). Cubre R5.5, R5.6, R5.10, R5.11.
+
+- **T2.3 `cancel_invitation`**: input `{ invitation_id }`. Solo owner. Update `status='cancelled', cancelled_at=now()`. Cubre R5.7.
+
+- **T2.4 `resend_invitation`**: input `{ invitation_id }`. Solo owner. Genera nuevo token, update `token, expires_at=now()+7d`, reenvía email. Token viejo deja de funcionar por unique constraint en token. Cubre R5.8.
+
+- **T2.5 `remove_member`**: input `{ user_id, establishment_id }`. Solo owner. Pre-check: `count(user_roles WHERE establishment_id AND role='owner' AND active=true) > 1` si target es owner. Si es el único owner → 409 conflict. Update `active=false, deactivated_at=now()`. Cubre R4.7, R7.4.
+
+- **T2.6 `change_member_role`**: input `{ user_id, establishment_id, new_role }`. Solo owner. Pre-check si current role='owner' y new_role!='owner': contar otros owners activos; si target es único owner → 409. Transacción via rpc o split: update viejo `active=false, deactivated_at=now()` + insert nuevo `active=true`. Validar new_role en enum. Cubre R4.5, R4.6.
+
+- **T2.7 `register_push_token`**: input `{ expo_push_token, device_id, platform }`. `requireUser`. Upsert por `(user_id, token)` actualizando `last_seen=now(), device_id, platform`. Usa `onConflict: 'user_id,token'` del cliente service_role o del cliente del user (la policy `push_tokens_insert_self`/`push_tokens_update_self` lo permite). Cubre R5.11 infra.
+
+**Tests**: nuevo runner `supabase/tests/edge/run.cjs` con el mismo patrón que `rls/run.cjs`. Para cada función crear test con JWT real via `supabase.functions.invoke(name, { body })` post-login. Extender `scripts/run-tests.mjs` para correr ambas suites secuencialmente. Requiere deploy previo de las funciones a remoto via `cd app && pnpm.cmd exec supabase functions deploy <name>` (que requiere `SUPABASE_ACCESS_TOKEN`, ya en `.env.local`).
+
+### Decisión pendiente para el leader
+
+**Pregunta del implementer al leader**: para R5.10 (notificación email al owner cuando aceptan), `supabase.auth.admin` no manda emails arbitrarios (solo invites/magic links). Opciones:
+
+(a) **Fetch directo a Resend API** (`https://api.resend.com/emails` con `RESEND_API_KEY`). Sin deps externas, alineado con principio de "menos superficie de ataque" (no agregamos paquetes a Edge Functions). Requiere que Raf cree cuenta en Resend y agregue `RESEND_API_KEY` a `.env.local`.
+
+(b) **R5.10 queda como best-effort log-only en MVP**. No mandamos email al owner cuando aceptan; solo push notification (R5.11) y badge in-app. Documentar limitación.
+
+(c) Otra alternativa que el leader decida.
+
+Recomendación del implementer: opción (a) si Raf está dispuesto a crear cuenta Resend (gratis hasta 3000 emails/mes); opción (b) si quiere bajar scope.
