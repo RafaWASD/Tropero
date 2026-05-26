@@ -96,7 +96,57 @@ Las MCPs son servidores que se conectan a Claude Code y le dan superpoderes. Una
 
 ---
 
-### 1.3 — Tokens Studio for Figma (plugin, no MCP) — **PENDIENTE de cerrar design system**
+### 1.3 — Mobbin MCP (research de UI/UX patterns reales)
+
+**Para qué**: acceso directo desde Claude Code a la biblioteca de **621.500+ screens + 142.200+ flows** de apps reales que cura Mobbin. Lanzado oficialmente el 12 de mayo de 2026, en beta. Sin esto: vos curás manualmente en el browser y yo leo screenshots descargados. Con esto: yo busco/comparo patterns en vivo durante la sesión.
+
+**Pre-requisito**: suscripción Mobbin paga activa (Pro $40/seat/mes anual, o superior). El MCP está en **todos los planes pagos**, no requiere Enterprise.
+
+**Pasos**:
+
+1. **Registrar el MCP** (bash, no PowerShell — mismo motivo que Figma/Supabase):
+
+   ```bash
+   claude mcp add mobbin --scope user --transport http https://api.mobbin.com/mcp
+   ```
+
+   Diferencias importantes vs los otros MCPs:
+   - **`--transport http`** (no `stdio`). El server corre en la nube de Mobbin, no como subprocess local.
+   - **No requiere `-e TOKEN=...`** ni env vars. La autorización es **OAuth** al primer uso.
+   - No usa `pnpm dlx` — el server no corre localmente, no hay binary que ejecutar.
+
+2. **Verificá**:
+
+   ```bash
+   claude mcp list
+   ```
+
+   Debería mostrar `mobbin`. Probablemente con estado `pending auth` hasta el primer uso real.
+
+3. **Primera autorización** (OAuth):
+   - Reiniciá Claude Code para que cargue el MCP nuevo.
+   - En una sesión nueva, cuando Claude (yo) llame al primer tool de Mobbin, **se abre el browser automáticamente**.
+   - Login con tu cuenta Mobbin Pro → autorizar acceso del MCP → token persistido localmente.
+   - A partir de ahí no te lo pide más.
+
+4. **Probalo**: pedime en una sesión nueva "mostrame onboardings de B2B mobile en Mobbin". Si funciona, ves screens reales descritos. Si dice `unauthorized`, repetí el flujo OAuth.
+
+**Tools que expone el MCP** (subject to change, está en beta):
+- Búsqueda de screens por keyword, app, flow type, industry.
+- Acceso a flows enteros (multi-screen).
+- Patterns library agrupada.
+- Imágenes en alta resolución descargables.
+
+**Costo**: $0 adicional sobre tu suscripción Pro existente.
+
+**Workflow recomendado en RAFAQ**:
+- Vos hacés primera pasada solo en Mobbin browser (calibrar tu ojo).
+- Sesión conjunta: yo traigo screens via MCP, comparamos, vos guardás los que valen en tu Project + descargás los esenciales a `design/inspiration/`.
+- Síntesis: yo leo todo (MCP + repo) y propongo direcciones contrastadas.
+
+---
+
+### 1.4 — Tokens Studio for Figma (plugin, no MCP) — **PENDIENTE de cerrar design system**
 
 > ⚠ Esta sección quedó documentada **anticipadamente**. El design system aún no está cerrado (intento de formalizar prematuramente como ADR-015 fue eliminado) y `design/tokens.json` está marcado como draft exploratorio (ver `design/README.md`). **No importes el JSON a Figma como sistema canónico todavía** — primero terminamos la fase de inspiración + exploración con Stitch + decisión de mood. Las instrucciones que siguen son válidas técnicamente pero apuntan a tokens que aún pueden cambiar mucho.
 
@@ -283,6 +333,9 @@ Cosas que conviene tildar HOY (paralelo a otras tareas):
 - [x] `claude mcp add supabase ...` con `--read-only`
 - [x] `claude mcp list` y verificar que `supabase` aparece
 - [x] Reiniciar Claude Code para que cargue las MCPs nuevas
+- [ ] `claude mcp add mobbin --scope user --transport http https://api.mobbin.com/mcp`
+- [ ] Reiniciar Claude Code → primer uso dispara OAuth flow → autorizar con cuenta Mobbin Pro
+- [ ] `claude mcp list` y verificar que `mobbin` aparece como `connected`
 - [ ] (FUTURO, cuando design system esté cerrado) Crear archivo Figma `RAFAQ Design System`
 - [ ] (FUTURO) Instalar plugin **Tokens Studio for Figma** dentro del archivo
 - [ ] (FUTURO) Importar `design/tokens.json` vía `Tools → Load from local file`
