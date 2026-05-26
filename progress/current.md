@@ -96,6 +96,15 @@ El código real de Edge Functions usa `Deno.env.get('APP_URL')` (env del Edge Fu
   - **Decisiones del draft afirmadas por research**: dual theme (Revolut Business confirma), sans no serif (universal), CTA exclusivo brand (universal), touch targets grandes (Jobber/Shopee), Inter (dominante). **No afirmadas todavía**: paleta exacta (A vs B vs C abierta), iconografía custom (a definir cuando armemos pantallas).
   - **Recomendación de leader**: probar **A híbrida con disciplina C** (Campo Profundo + minimalismo Attio) en Stitch con el flujo signup wizard del spec 01. Alternativa fuerte: B con disciplina C si Raf prefiere distancia del cliché agtech.
 - `2026-05-26` — Tareas pendientes que Raf debe cubrir offline (Mobbin no las tiene): apps argentinas (MP, Modo, Ualá, Brubank), apps agtech (Auravant, JDOC, FieldView), competencia directa fea (Allflex, Tru-Test, Datamars). Guardar en subcarpetas de `design/inspiration/`.
+- `2026-05-26` — Raf carga **23 capturas device adicionales**: 13 de Mercado Pago register flow + home post-login ("moderno, pro, alta UX/UI") y 10 de Auravant crear actividad ("estéticamente feo pero parecido en funcionalidad"). Leader renombra a convención (`mercadopago-register-NN-descripcion.jpeg`, `auravant-crear-registro-NN-descripcion.jpeg`), mueve un Auravant misplaced de `06-argentino/` a `01-agtech-rural/`, lee las 23 imágenes, y arma notes detallados:
+  - `design/inspiration/06-argentino/_notes.md` (nuevo) con análisis MP screen por screen
+  - `design/inspiration/01-agtech-rural/_notes.md` (actualizado) con sección Auravant separando estética [anti] de arquitectura funcional [function-ref] [keep]
+- `2026-05-26` — Leader integra hallazgos al `design/research-findings.md` con nueva sección "Validaciones device". Cambios clave:
+  - **Mercado Pago refuerza la dirección A híbrida con C**: header brand persistente + cards blancas elevadas + disciplina B2B + microinteractions argentinas (voseo, WhatsApp OTP, autocomplete dominios, pre-fill +54).
+  - **Auravant es el molde funcional para MODO MANIOBRAS (spec 03)**: top bar contexto jerárquico activo, grid 2x2 select type, modal sheets stacked, form principal con secciones agrupadas, "Add X" mini-cards inline, mismo form crear=editar.
+  - **Patrón universal #12 nuevo emergente**: wizard "tarjetas con CTA solo en activo" (de MP) — alternativa objetivamente mejor al step indicator clásico para pasos independientes.
+  - **Insight de producto**: arquitectura funcional Auravant + estética dirección A híbrida con C + microinteractions MP = diferenciación clara contra competencia (Allflex/Tru-Test/Datamars/Auravant mismo).
+  - Tabla "Material descargado" actualizada: 45 screens totales (22 Mobbin + 23 device) en 8 carpetas.
 
 ## Bitácora — sesión 8 (correctivo: ADR-015 withdrawn, fase de exploración)
 
