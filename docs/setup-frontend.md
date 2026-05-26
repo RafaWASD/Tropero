@@ -96,6 +96,42 @@ Las MCPs son servidores que se conectan a Claude Code y le dan superpoderes. Una
 
 ---
 
+### 1.3 — Tokens Studio for Figma (plugin, no MCP) — **PENDIENTE de cerrar design system**
+
+> ⚠ Esta sección quedó documentada **anticipadamente**. El design system aún no está cerrado (intento de formalizar prematuramente como ADR-015 fue eliminado) y `design/tokens.json` está marcado como draft exploratorio (ver `design/README.md`). **No importes el JSON a Figma como sistema canónico todavía** — primero terminamos la fase de inspiración + exploración con Stitch + decisión de mood. Las instrucciones que siguen son válidas técnicamente pero apuntan a tokens que aún pueden cambiar mucho.
+
+**Para qué (cuando llegue el momento)**: importar `design/tokens.json` como Variables nativas de Figma, en una sola operación. Sin esto tendrías que typear cientos de tokens a mano — paleta light + dark, escala tipográfica, spacing, radius, sombras.
+
+**Pre-requisito**: cuenta Figma activa, archivo `RAFAQ Design System` creado (vacío por ahora).
+
+**Pasos**:
+
+1. **Instalar el plugin** dentro de Figma:
+   - Abrí Figma → en el archivo `RAFAQ Design System` → menú `Plugins` → `Find plugins` → buscar **"Tokens Studio for Figma"** (autor: Jan Six / Figma Tokens) → **Run**.
+   - La primera vez te pide aceptar permisos. Es free para uso personal.
+
+2. **Importar el JSON del repo**:
+   - Con el plugin abierto en Figma, pestaña `Tools` → `Load from local file`.
+   - Seleccioná `C:\DEV\RAFAQ\app-ganado\design\tokens.json`.
+   - El plugin te muestra los token sets detectados: `global`, `light`, `dark`.
+   - Confirmá el import.
+
+3. **Activar themes**:
+   - En el plugin, pestaña `Themes` (arriba a la derecha) → deberías ver `Campo Profundo · Light` y `Campo Profundo · Dark` ya configurados (vienen en el JSON via `$themes`).
+   - Activá uno por vez según diseñes la pantalla light o dark.
+
+4. **Sincronizar con Figma Variables**:
+   - Pestaña `Settings` del plugin → activá `Update Figma styles on token change` y `Update Figma variables on token change`.
+   - Run `Apply to selection` o `Apply to document` para crear las Variables nativas de Figma con los nombres de tokens.
+
+5. **Workflow ongoing**:
+   - **Si cambia un token**: editás `design/tokens.json` en el repo → en Figma `Tools → Load from local file` re-importa → `Apply to document`.
+   - **Nunca edites tokens directamente en Figma**. El JSON del repo es la fuente única de verdad para mantener paridad con código (Tamagui también lo va a consumir).
+
+**Costo**: $0 para uso personal. (Hay tier paid para sync con GitHub/GitLab automático — innecesario en MVP.)
+
+---
+
 ## Parte 2 — Librerías del proyecto (agregar antes de empezar Fase 3)
 
 Estas se agregan al `app/package.json` con `pnpm.cmd add ...`. **NO las agregues ahora** — las agregamos cuando arranque el frontend del spec 01. Las listo para referencia.
@@ -241,12 +277,17 @@ Esta skill la creamos cuando tengamos primeras pantallas codeadas para validar. 
 
 Cosas que conviene tildar HOY (paralelo a otras tareas):
 
-- [ ] Generar Figma Personal Access Token
-- [ ] `claude mcp add figma ...` con el token
-- [ ] `claude mcp list` y verificar que `figma` aparece
-- [ ] `claude mcp add supabase ...` con `--read-only`
-- [ ] `claude mcp list` y verificar que `supabase` aparece
-- [ ] Reiniciar Claude Code para que cargue las MCPs nuevas
+- [x] Generar Figma Personal Access Token
+- [x] `claude mcp add figma ...` con el token
+- [x] `claude mcp list` y verificar que `figma` aparece
+- [x] `claude mcp add supabase ...` con `--read-only`
+- [x] `claude mcp list` y verificar que `supabase` aparece
+- [x] Reiniciar Claude Code para que cargue las MCPs nuevas
+- [ ] (FUTURO, cuando design system esté cerrado) Crear archivo Figma `RAFAQ Design System`
+- [ ] (FUTURO) Instalar plugin **Tokens Studio for Figma** dentro del archivo
+- [ ] (FUTURO) Importar `design/tokens.json` vía `Tools → Load from local file`
+- [ ] (FUTURO) Activar themes light/dark del sistema definitivo
+- [ ] (FUTURO) `Apply to document` para generar las Figma Variables
 
 Lo que NO se hace ahora:
 - Instalar libs del stack (Tamagui, etc) → cuando arranque Fase 3 del spec 01
