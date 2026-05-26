@@ -86,6 +86,17 @@ El código real de Edge Functions usa `Deno.env.get('APP_URL')` (env del Edge Fu
   6. Alinea `docs/design-system.md` sección 14 con esas resoluciones.
 - `2026-05-25` — `check.mjs` verde post-cambios (todos los tests reales contra DB remota pasan; el design system no toca código de app ni tests).
 
+## Bitácora — sesión 9 (research curado + findings + Mobbin MCP operativo)
+
+- `2026-05-26` — Raf instala Mobbin MCP (`claude mcp add mobbin --scope user --transport http https://api.mobbin.com/mcp`) y completa OAuth. Tool `mcp__mobbin__search_screens` disponible. Acceso a 621.500+ screens reales desde Claude.
+- `2026-05-26` — Sesión de research conjunta en modo A: leader busca via MCP, Raf reacciona. 6 categorías browseadas (agtech/tracking, field-service wizards, pro-tools dashboards, onboarding wizards, outdoor/offline, signup puro + fintech). **41 screens revisadas**, **22 curadas** descargadas a `design/inspiration/{00..99}/` con `_notes.md` por categoría con tags + links Mobbin.
+- `2026-05-26` — Leader sintetiza en `design/research-findings.md`:
+  - **3 direcciones viables** emergen, cada una validada por app real exitosa: (A) Campo Profundo tierra-criollo validada por Komoot/Lifesum, (B) Verde Teal Fresco SaaS validada por Gusto, (C) Pro-Clean Minimalismo validada por Attio. Una 4ta dirección (premium editorial con serif tipo Neo Financial) se descarta como principal pero queda como referencia tonal para marketing futuro.
+  - **11 patrones universales** que aplican a cualquier dirección elegida (CTA fixed-bottom con brand, step indicator dots-conectados estilo Shopee, hero number centrado, validation inline bajo password, offline como CTA visible, lista tasks en empty state, timeline vertical para chronology, CTA dual sólido+outline para R6.5, bocadillo dark para alerts críticos, mini-stepper en card de status, hero preview value en welcome).
+  - **Decisiones del draft afirmadas por research**: dual theme (Revolut Business confirma), sans no serif (universal), CTA exclusivo brand (universal), touch targets grandes (Jobber/Shopee), Inter (dominante). **No afirmadas todavía**: paleta exacta (A vs B vs C abierta), iconografía custom (a definir cuando armemos pantallas).
+  - **Recomendación de leader**: probar **A híbrida con disciplina C** (Campo Profundo + minimalismo Attio) en Stitch con el flujo signup wizard del spec 01. Alternativa fuerte: B con disciplina C si Raf prefiere distancia del cliché agtech.
+- `2026-05-26` — Tareas pendientes que Raf debe cubrir offline (Mobbin no las tiene): apps argentinas (MP, Modo, Ualá, Brubank), apps agtech (Auravant, JDOC, FieldView), competencia directa fea (Allflex, Tru-Test, Datamars). Guardar en subcarpetas de `design/inspiration/`.
+
 ## Bitácora — sesión 8 (correctivo: ADR-015 withdrawn, fase de exploración)
 
 - `2026-05-26` — Raf corrige error de leader en sesión 7: el doc `RAFAQ-Design-System-Campo-Profundo.md` que él bajó al root era una **idea exploratoria** charlada en otro chat, no decisión cerrada. Leader lo había formalizado prematuramente como ADR-015 accepted + tokens canónicos + edits en setup-frontend.md. Raf aclara: quiere primero **buscar inspiraciones** (Dribbble, Mobbin, apps de competencia y referencia), explorar con Stitch (que evaluó positivo en sesión previa), y darle look & feel propio. NO quiere que el design system se sienta "vibecodeado más".
@@ -105,12 +116,13 @@ El código real de Edge Functions usa `Deno.env.get('APP_URL')` (env del Edge Fu
 
 ## Próximo paso
 
-1. **Raf**: iniciar **fase de inspiración** — armar tablero (Figma file o Dribbble board o carpeta `design/inspiration/`) con 15-30 referencias visuales. Leader le pasa lista curada de fuentes + queries específicos.
-2. **En paralelo**: Raf prueba Stitch standalone en `stitch.withgoogle.com` (gratis, Google login). Genera 2-3 moods opuestos para el flujo wizard signup, sin compromiso. Vibe design + multi-screen.
-3. **Sincronización**: cuando Raf tenga inspiración + outputs de Stitch, leader analiza patrones (paleta, tipografía, densidad, tono), propone 2-3 direcciones contrastadas con evidencia, Raf elige con convicción.
-4. **Recién entonces**: ADR nuevo (probablemente -016) que supersede al -015, doc canónico, `tokens.json` cerrado, importación a Figma.
-5. **Auditar prompt del Notion** cuando Raf lo copy/paste (Notion no se deja scrapear). Criterios ya enumerados en el chat: ignorar prompts injection, no exponer secrets, no hooks auto-ejecutables, etc.
-6. **Decisiones que quedan pendientes (no urgentes)**:
+1. **Raf revisa material curado**: `design/research-findings.md` (~30-45 min de lectura) + las 22 PNGs en `design/inspiration/` + los `_notes.md` por categoría.
+2. **Raf decide dirección candidata**: A híbrida con disciplina C (recomendación leader), o B con C, o pedir otra ronda de browse si le falta convicción.
+3. **Tareas offline en paralelo** (Mobbin no las tiene): descargar al device y screenshotear Mercado Pago / Modo / Ualá / Brubank + Auravant / JDOC / FieldView + Allflex / Tru-Test / Datamars (antipatterns). Guardar en `design/inspiration/06-argentino/`, `01-agtech-rural/`, `99-antipatterns/`.
+4. **Cuando tenga dirección**: armar brief escrito (basado en findings, NO en draft viejo) para Stitch. Generar flujo signup wizard del spec 01 en Stitch. Comparar contra 2da dirección si hay duda.
+5. **Auditar prompt del Notion** cuando Raf lo copy/paste (Notion no se deja scrapear). Criterios ya enumerados: prompt injection, secrets handling, hooks auto-ejecutables, etc.
+6. **Recién después**: ADR nuevo (probablemente -016) que reemplaza el draft + doc canónico + `tokens.json` actualizado + plan de implementación a Tamagui.
+7. **Decisiones que quedan pendientes (no urgentes)**:
    - Aprobar o pedir cambios en `specs/active/02-modelo-animal/` (3 archivos, ~115KB).
    - Destrabar Fase 3 del spec 01 (Tamagui + Expo Router + …) — depende de design system cerrado.
 
