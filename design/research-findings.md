@@ -194,9 +194,9 @@ Estos patterns se confirmaron por **frecuencia recurrente** (>=3 apps los usan) 
 
 ## Validaciones device — Mercado Pago + Auravant (2026-05-26)
 
-Raf cargó **23 capturas adicionales** del device, dos casos que cierran categorías que Mobbin no cubre y refinan la dirección del design system.
+Raf cargó **26 capturas adicionales** del device, dos casos que cierran categorías que Mobbin no cubre y refinan la dirección del design system.
 
-### Mercado Pago (12 screens register + 1 home) — Validación argentino-profesional ⭐⭐⭐
+### Mercado Pago (16 screens: register + home + 3 tabs) — Validación argentino-profesional ⭐⭐⭐
 
 Para Raf el flujo le pareció "moderno, pro, alta UX/UI". Validaciones concretas:
 
@@ -223,6 +223,33 @@ Para Raf el flujo le pareció "moderno, pro, alta UX/UI". Validaciones concretas
 - Usa identidad de marca FUERTE en el top bar (yellow MP) — Campo Profundo verde puede hacer lo mismo.
 - Cards blancas elevadas con disciplina (mucho whitespace, una decisión por pantalla) — eso es C Attio aplicado.
 - Acción primaria en bottom anchored — universal.
+
+#### Estructura de navegación principal (bottom nav) — propuesta a partir de MP
+
+Las 3 capturas adicionales de las pestañas del bottom nav de MP (`Actividad`, `Beneficios`, `Más`) sugieren una **estructura tentativa de navegación principal para RAFAQ** que resuelve dos features core simultáneamente (Raf marcó que **MODO MANIOBRA** y **BUSCAR ANIMAL** son funcionalidades CORE del producto, ambas con peso comparable):
+
+```
+[ 🏠 Inicio ] [ 🐄 Animales ] [ ⚡ Modo Maniobra (FAB) ] [ 📊 Reportes ] [ ☰ Más ]
+```
+
+| Tab | Rol | Inspiración | Spec |
+|---|---|---|---|
+| **Inicio** | Home post-establishment con KPIs + quick actions (4 circulares) | `mercadopago-homepage` | R6.1 (spec 01) |
+| **Animales** | BUSCAR ANIMAL — stats 2-col scrolleable + search permanente + chips de filtros + lista agrupada | `mercadopago-tab-actividad` | spec separada CORE (a definir, Raf lo va a explicar) |
+| **⚡ Modo Maniobra (FAB)** | Acción más crítica del operador en manga, elevada al centro del bottom nav | FAB QR central de MP | spec 03 (CORE) |
+| **Reportes** | KPIs del rodeo, comparativas, exportaciones SIGSA | (estructura propia) | spec 07 + spec 08 |
+| **Más** | Settings, perfil, theme switch, ayuda, sesión | `mercadopago-tab-mas` | varios |
+
+**Por qué este pattern encaja**:
+- **FAB central elevado** comunica "esto es lo más importante" — para el operador en manga, MODO MANIOBRA es exactamente eso. Además es el botón más accesible para una mano enguantada (centro del thumb-zone).
+- **`Animales` como pestaña dedicada** (no como sub-menú) refleja la centralidad de BUSCAR ANIMAL — Raf lo marcó como CORE.
+- **`Reportes` como pestaña dedicada** (no como sub-menú de Más) refleja que el productor argentino paga la app por los reportes (analytics + KPIs + benchmarking según memoria `product-positioning`).
+- **El tab `Actividad` de MP es plantilla casi 1:1 para `Animales` de RAFAQ**: stats arriba (`Activos / Preñadas / En venta`) + search permanente + chips de filtros + lista agrupada por categoría o fecha + row con icono + TAG + categoría + estado + valor.
+- **El tab `Más` de MP es plantilla directa**: bloque perfil top + banner destacado + lista vertical con icono + chevron + separators.
+
+**Próximo paso (cuando armemos pantallas en Stitch)**: validar esta estructura en mockup high-fi del bottom nav + las 5 pestañas. Si Raf valida el pattern, queda como decisión de navegación principal antes de detallar cada pestaña.
+
+> ⚠ **Nota sobre BUSCAR ANIMAL**: Raf adelantó en chat que es funcionalidad CORE igual que MODO MANIOBRA, y va a explicar el flujo en otra sesión para que escribamos las specs. **Hoy no existe en `feature_list.json`** — probablemente sea spec separada (ej. `09-buscar-animal`) o extensión sustantiva del `02-modelo-animal`. Cuando Raf lo explique, definimos si requiere nueva feature.
 
 ### Auravant (10 screens crear-registro) — Validación funcional para MODO MANIOBRAS (spec 03) ⭐⭐
 
@@ -316,7 +343,7 @@ ADR nuevo (probablemente -016 si seguimos el orden) + `docs/design-system.md` ca
 
 ## Material descargado
 
-Total: **45 screens** organizadas en 8 carpetas bajo `design/inspiration/` (22 vía Mobbin MCP + 23 capturas device de Raf). Cada carpeta tiene su `_notes.md` con tags, descripciones y links a Mobbin cuando aplica.
+Total: **48 screens** organizadas en 8 carpetas bajo `design/inspiration/` (22 vía Mobbin MCP + 26 capturas device de Raf). Cada carpeta tiene su `_notes.md` con tags, descripciones y links a Mobbin cuando aplica.
 
 | Carpeta | Screens | Tema |
 |---|---|---|
@@ -325,7 +352,7 @@ Total: **45 screens** organizadas en 8 carpetas bajo `design/inspiration/` (22 v
 | `02-blue-collar-manga/` | 4 | Field service + wizards business + steppers |
 | `03-pro-tools-dashboards/` | 3 | Hero numbers + timeline vertical |
 | `04-onboarding-wizards/` | 4 | R6.5, validation, madlib, preview value |
-| `06-argentino/` | 13 | **Device Mercado Pago** — register flow completo + home post-login ⭐⭐⭐ |
+| `06-argentino/` | 16 | **Device Mercado Pago** — register completo + home + 3 tabs bottom nav (Actividad/Beneficios/Más) ⭐⭐⭐ |
 | `07-outdoor-offline/` | 3 | Offline visible, stats card, dark alert |
 | `99-antipatterns/` | 1 | Qué NO hacer (Cleo) |
 

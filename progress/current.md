@@ -105,6 +105,9 @@ El código real de Edge Functions usa `Deno.env.get('APP_URL')` (env del Edge Fu
   - **Patrón universal #12 nuevo emergente**: wizard "tarjetas con CTA solo en activo" (de MP) — alternativa objetivamente mejor al step indicator clásico para pasos independientes.
   - **Insight de producto**: arquitectura funcional Auravant + estética dirección A híbrida con C + microinteractions MP = diferenciación clara contra competencia (Allflex/Tru-Test/Datamars/Auravant mismo).
   - Tabla "Material descargado" actualizada: 45 screens totales (22 Mobbin + 23 device) en 8 carpetas.
+- `2026-05-26` — Raf carga **3 capturas adicionales de MP** (pestañas del bottom nav: Actividad, Beneficios, Más). Le interesa evaluar este pattern para entrar a MODO MANIOBRA y BUSCAR ANIMAL. Leader analiza y propone **estructura tentativa de bottom nav RAFAQ**: `[Inicio] [Animales] [⚡Modo Maniobra (FAB central)] [Reportes] [Más]`. El FAB central comunica "acción más crítica del operador" + es el más accesible para mano enguantada. Tab `Animales` resuelve BUSCAR ANIMAL como pestaña dedicada (no sub-menú) reflejando su rol CORE. Tab `Actividad` de MP es plantilla casi 1:1 para `Animales` (stats + search permanente + chips filtros + lista agrupada). Tab `Más` de MP es plantilla directa para settings de RAFAQ.
+- `2026-05-26` — Adelanto de Raf: **BUSCAR ANIMAL es funcionalidad CORE igual que MODO MANIOBRA**. Hoy no existe en `feature_list.json` — probablemente sea spec separada (ej. `09-buscar-animal`) o extensión sustantiva de `02-modelo-animal`. Raf va a explicar el flujo en otra sesión para escribir las specs. Anotado como nota en research-findings.md.
+- Material total ahora: **48 screens** (22 Mobbin + 26 device). 16 en `06-argentino/` (13 register + home + 3 tabs).
 
 ## Bitácora — sesión 8 (correctivo: ADR-015 withdrawn, fase de exploración)
 

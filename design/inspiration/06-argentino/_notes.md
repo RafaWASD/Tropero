@@ -198,9 +198,141 @@ Imagen full-bleed de mujer espalda usando teléfono con preview de captura facia
 
 ---
 
+## mercadopago-tab-actividad.jpeg ⭐⭐⭐ — Pestaña Actividad (molde para BUSCAR ANIMAL)
+
+**Es el molde directo de BUSCAR ANIMAL** que Raf marcó como funcionalidad core del producto (spec todavía no escrita).
+
+Top bar amarillo brand persistente con AI sparkle FAB esquina derecha. Header blanco con `Actividad` display bold grande.
+
+**Stats cards 2-col scrolleable horizontal**:
+- `Actividades / 1 / en curso` (label + número + caption)
+- `Salidas / $ 2.016.234 / en mayo` (label + número grande + caption)
+- (carrusel sugiere más cards a la derecha)
+
+**Search bar pill permanente** con icono lupa + placeholder `Buscar`.
+
+**Chips de filtros horizontales scrolleables**: `⚙ Filtros` (con icono ajustes) · `Transferencias` · `Pagos y compras` · (más a la derecha).
+
+**Lista cronológica agrupada por fecha**:
+- Header `Hoy` (bold)
+- Row con icono circular outline + nombre destino bold + tipo (Pago) + ícono brand + chip de método (Mastercard crédito) — derecha: monto `-US$22,50` rojo + hora `01:41 hs`
+- Header `25 de mayo`
+- Row siguiente con mismo pattern (Transferencia enviada / Dinero disponible)
+
+Bottom nav 5 items con `Actividad` **activo en azul brand** (resto grey con label).
+
+- [pattern] ⭐⭐ **stats cards 2-col scrolleable como hero arriba de la lista** — para BUSCAR ANIMAL: `Activos / 127 / en rodeo` · `Preñadas / 89 / 84%` · `En venta / 12 / mayo` · etc.
+- [pattern] ⭐ **search bar pill permanente** debajo del stats — siempre visible al filtrar la lista
+- [pattern] ⭐ **chips horizontales scrolleables con icono Filtros + categorías** — para RAFAQ: `⚙ Filtros` + `Todos` · `Por rodeo` · `Por categoría` · `Preñadas` · `En venta` · etc.
+- [pattern] ⭐⭐ **lista cronológica agrupada por fecha header bold** — para timeline de eventos del animal en ficha individual (spec 02 acceptance 4): `Hoy` / `Ayer` / `25 de mayo` como headers, eventos como rows
+- [pattern] **row de actividad con: icono circular outline + nombre + tipo + chip de método / valor + hora a derecha** — molde para row de evento en RAFAQ: icono categoría animal + TAG + tipo evento + chip estado / valor (peso/dosis) + fecha
+- [keep] **toda esta pestaña es plantilla casi 1:1 para BUSCAR ANIMAL**:
+  - stats arriba (`Activos / Preñadas / En venta`)
+  - search permanente (por TAG / IDV / visual_id_alt)
+  - chips de filtros (rodeo / categoría / estado / sistema)
+  - lista de animales agrupada por categoría o última actividad
+  - row de animal con: icono especie + TAG + categoría + último evento + chip estado / fecha
+- [adapt] amarillo top → verde Campo Profundo; azul activo → terracota o teal según dirección final
+- [meta] esta pestaña sugiere que **el pattern de bottom nav con tab "Actividad/Animales" funciona perfectamente para BUSCAR ANIMAL**
+
+---
+
+## mercadopago-tab-beneficios.jpeg — Pestaña Beneficios (carrusel + lista)
+
+Top bar amarillo brand persistente con AI sparkle FAB esquina. Header blanco `Beneficios` display bold.
+
+**Carrusel hero de cards full-bleed** con cards horizontales scrolleables: card promocional `Conocé tu Tarjeta de Crédito Mercado Pago / Cuotas sin interés en Mercado Libre y más.` con ilustración de tarjeta + fondo azul-cielo gradiente a amarillo.
+
+**Sección `🏆 Tus desafíos`** (icono trofeo + label) con card blanca:
+- Icono circular con $ + chip dorado
+- `Ganá $ 10.000 de cashback`
+- Link blue `Conocer desafío`
+
+**Sección de promociones brand cards 2-col horizontal scrolleable**: foto producto/comercio + logo + texto `¡20% OFF + Cuotas en Arredo!` + `Pagando con QR en tiendas físicas`.
+
+Bottom nav con `Beneficios` activo azul brand.
+
+- [pattern] **carrusel hero full-bleed scrolleable** con cards promocionales — patrón para hero rotativo de tarjetas
+- [pattern] **secciones temáticas con icono + label** + cards dentro de cada sección
+- [pattern] **chips dorados** (`Conocé`) y badges sobre cards para destacar "lo nuevo"
+- [meta] **Esta pestaña NO aplica directamente a RAFAQ** — es marketing/promociones de MP. Pero el pattern de "carrusel hero + secciones temáticas con icono" puede usarse para una eventual pestaña de **"Recomendaciones"** o **"Próximas tareas"** (vacunaciones próximas, pesajes pendientes, animales sin ver hace 30 días). Lo dejo como referencia tonal pero no es prioritario.
+- [skip] copy promocional aspiracional no aplica al tono profesional pro de RAFAQ
+
+---
+
+## mercadopago-tab-mas.jpeg ⭐⭐ — Pestaña Más (settings + cuenta + lista navegable)
+
+Top bar amarillo brand persistente. Bloque de perfil grande:
+- Avatar circular blanco con icono persona
+- Nombre `Rafael` display bold
+- `Tu perfil ›` subtítulo + chevron al perfil completo
+
+**Banner promocional `meli+ Total / Suscribite con hasta 40% OFF`** card púrpura-gradiente con chevron.
+
+**Banner `Mercado Libre`** con logo MP + arrow up-right (link externo a la app ML).
+
+**Lista vertical de items** con icono outline + label + chevron a la derecha (solo en items con sub-página):
+- 🏠 `Inicio` (link a tab inicio aunque haya bottom nav — útil para discoverability)
+- 🔔 `Notificaciones` con badge red `3`
+- ✨ `Asistente personal` (AI feature destacada)
+- 🔒 `Seguridad` + chip outline azul `CONOCÉ` (badge de "feature nueva sin ver")
+- ❓ `Ayuda ›`
+- ─── separator ───
+- 📥 `Cobrar`
+- 💳 `Tu dinero ›`
+- 📄 `Reportes de tenencias` + chip outline azul `NUEVO`
+- 💼 `Tarjetas`
+- 📱 `Recargar celular`
+- 💸 `Cuentas y servici...` (truncado)
+
+Bottom nav con `Más` activo azul brand.
+
+- [pattern] ⭐ **bloque perfil top con avatar + nombre + subtítulo + chevron** — molde directo para perfil de RAFAQ
+- [pattern] ⭐⭐ **lista vertical de items con icono outline + label + chevron a la derecha** + separators agrupando secciones — pattern universal para "Settings/Más" en mobile. **Adoptable directamente** para RAFAQ:
+  - 👤 Perfil
+  - 🏛 Establecimiento (con sub: cambiar activo / invitar miembro / configurar)
+  - 🔔 Notificaciones (badge contador)
+  - 📊 Reportes (badge NUEVO)
+  - 🔗 Exportar SIGSA / SIGBIOTRAZA
+  - 🎨 Apariencia (theme switch light/dark/auto)
+  - ❓ Ayuda
+  - 🚪 Cerrar sesión
+- [pattern] **badges `CONOCÉ` / `NUEVO`** pill azul outline para features sin ver — patrón delicado para introducir features sin abrumar
+- [pattern] **banner promocional como card destacada al inicio de la lista** (meli+ Total) — para RAFAQ podría ser banner de "Próxima vacunación pendiente" o "3 animales sin pesar hace 60 días" (alerta accionable, no marketing)
+- [pattern] **icono outline 24px + label sans regular + chevron right** — anatomía de row de settings universal
+- [keep] **esta pestaña es plantilla directa para tab Más de RAFAQ** — solo cambia el listado de items
+
+---
+
+## mercadopago-tab-actividad.jpeg + mercadopago-tab-mas.jpeg combinados = pattern bottom nav universal
+
+El bottom nav de MP es **5 items con FAB central elevado**, donde cada tab:
+- Mantiene top bar brand persistente (consistencia de marca)
+- Tiene su propio header con título display bold
+- Estructura propia: stats / hero / lista / settings según contexto
+- Item activo destacado en color brand (azul)
+- Resto grey con label visible
+
+**Para RAFAQ esto sugiere directamente la siguiente estructura tentativa de bottom nav** (a discutir cuando armemos pantallas en Stitch):
+
+```
+[ 🏠 Inicio ] [ 🐄 Animales ] [ ⚡ Modo Maniobra (FAB) ] [ 📊 Reportes ] [ ☰ Más ]
+```
+
+Donde:
+- **Inicio** = home post-establishment con KPIs + quick actions (molde mercadopago-homepage)
+- **Animales** = BUSCAR ANIMAL con stats + search + filtros + lista (molde mercadopago-tab-actividad) — funcionalidad CORE del producto según Raf
+- **[FAB Modo Maniobra]** = el botón más prominente, acción crítica del operador en manga — molde de FAB QR centro de MP
+- **Reportes** = KPIs del rodeo + comparativas + exportaciones (spec 07)
+- **Más** = settings, perfil, ayuda, theme switch, exportar SIGSA, etc. (molde mercadopago-tab-mas)
+
+---
+
 ## Resumen del valor de MP para RAFAQ
 
 **Para Raf este flujo le pareció "moderno, pro, alta UX/UI"** y validó la dirección. Los hallazgos clave que llevamos a `research-findings.md`:
+
+### Del flujo register + home (sesiones anteriores)
 
 1. **Voseo constante** como tono argentino del copy.
 2. **Header brand persistente** + greeting personalizado.
@@ -216,4 +348,16 @@ Imagen full-bleed de mujer espalda usando teléfono con preview de captura facia
 12. **Privacy toggle de números sensibles** (homepage ojo cerrado).
 13. **Chip inline `▲ Rinde 18,2%`** verde para tendencia (homepage).
 
-Pattern más importante: el **wizard de MP no usa step indicator clásico, usa lista de tarjetas donde solo el activo tiene CTA**. Es objetivamente más claro para el usuario porque siempre sabe qué hacer ahora.
+### De las 3 pestañas del bottom nav (nuevo, esta sesión)
+
+14. **Estructura de bottom nav con FAB central** = molde para navegación principal de RAFAQ (con `Modo Maniobra` en el FAB central, `Animales` en una pestaña, `Más` en otra).
+15. **Tab "Actividad" = molde directo de BUSCAR ANIMAL**: stats 2-col scrolleable + search permanente + chips de filtros + lista cronológica agrupada por fecha + row con icono+nombre+chip+valor+fecha.
+16. **Tab "Más" = molde directo de settings de RAFAQ**: bloque perfil top + banners + lista vertical con icono outline + chevron + separators.
+17. **Cada tab tiene top bar brand persistente** (consistencia visual cross-tab).
+18. **Item activo destacado en color brand** en bottom nav.
+19. **Banner promocional/destacado** al inicio de listas (adaptable para alertas accionables en RAFAQ tipo "3 animales sin pesar hace 60 días").
+20. **Badges `CONOCÉ` / `NUEVO` outline azul** para features sin ver.
+
+### Patrón más importante de toda la sesión
+
+El **wizard de MP no usa step indicator clásico, usa lista de tarjetas donde solo el activo tiene CTA** (#3 arriba). Es objetivamente más claro para el usuario porque siempre sabe qué hacer ahora. **Llevado a `research-findings.md` como patrón universal #12**.
