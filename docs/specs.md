@@ -15,12 +15,36 @@ Cada feature `"sdd": true` tiene `specs/active/<feature-name>/` con tres archivo
 ## Estados
 
 ```
-pending → [spec_author] → spec_ready → ⏸ HUMANO APRUEBA → in_progress → [implementer → reviewer] → done
+pending → [spec_author] → spec_ready
+                              ↓
+                  [security_analyzer modo `spec`] ← Gate 1 (condicional)
+                              ↓
+                       ⏸ HUMANO APRUEBA
+                              ↓
+                       in_progress
+                              ↓
+                  [implementer → reviewer]
+                              ↓
+                  [security_analyzer modo `code`] ← Gate 2 (siempre)
+                              ↓
+                       ⏸ HUMANO APRUEBA FINAL
+                              ↓
+                            done
 ```
 
-## La puerta de aprobación humana
+## Las puertas de aprobación humana (dos, no una)
 
-El flujo se detiene **una sola vez**: cuando `spec_author` termina los 3 archivos, marca `spec_ready` y para. El humano lee `specs/active/<feature>/` y dice "aprobado" (o pide cambios). Solo entonces el leader hace `spec_ready → in_progress` y lanza al implementer.
+A partir de ADR-019, el flujo se detiene **dos veces** para el humano:
+
+**Puerta 1**: tras `spec_author` (y eventualmente tras Gate 1 si aplica). El humano lee `specs/active/<feature>/` y dice "aprobado" (o pide cambios). Solo entonces el leader hace `spec_ready → in_progress` y lanza al implementer.
+
+**Puerta 2**: tras `reviewer` APPROVED + `security_analyzer` modo `code` PASS. El humano valida el output del security review en `progress/security_code_<feature>.md` y aprueba `done`. Si el security review reportó findings HIGH, el flujo vuelve a implementer antes de llegar a esta puerta.
+
+## Gates de seguridad (resumen — detalle en ADR-019)
+
+- **Gate 1 (spec security)** — Condicional. Se invoca si la spec toca: RLS, schema sensible, Edge Functions, auth/tokens, secrets, datos regulados (SENASA/PII). El subagente `security_analyzer` en modo `spec` audita las decisiones de diseño y emite veredicto PASS / FAIL / NEEDS_CLARIFICATION. Output: `progress/security_spec_<feature>.md`.
+
+- **Gate 2 (code security)** — Siempre. Se invoca después de `reviewer` APPROVED. El subagente `security_analyzer` en modo `code` invoca la skill `security-review` de Sentry (plugin `sentry-skills` instalado a nivel user) sobre el diff del branch. Reporta solo findings HIGH-confidence + complementa con checklist específico de RAFAQ (RLS, Edge Functions, secrets, triggers). Veredicto PASS / FAIL. Output: `progress/security_code_<feature>.md`.
 
 ## requirements.md — EARS estricto (español)
 
