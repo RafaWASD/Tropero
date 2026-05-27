@@ -3,10 +3,10 @@
 > Este archivo se vacía al cerrar cada sesión y se mueve a `history.md`.
 > Mientras trabajás, **mantenelo actualizado en tiempo real**, no al final.
 
-- **Feature en curso:** `01-identity-multitenancy` (sesión 6 — refactor backend a invitaciones link shareable cerrado y aprobado por reviewer)
-- **Feature pausada intencionalmente:** `02-modelo-animal` (spec_ready esperando aprobación humana)
-- **Inicio sesión:** 2026-05-25
-- **Agente activo:** `leader` (cerrando sesión)
+- **Feature en curso:** `02-modelo-animal` (backend listo para implementar — esperando arranque de B.2)
+- **Feature pausada intencionalmente (frontend):** `01-identity-multitenancy` (Fases 3-8 esperando design system) + `02-modelo-animal` (Fase 3+ esperando design system)
+- **Sesión 12 — incorporación de security_analyzer al flujo SDD (2026-05-27)**
+- **Agente activo:** `leader`
 
 ## Estado de `01-identity-multitenancy`
 
@@ -109,6 +109,113 @@ El código real de Edge Functions usa `Deno.env.get('APP_URL')` (env del Edge Fu
 - `2026-05-26` — Adelanto de Raf: **BUSCAR ANIMAL es funcionalidad CORE igual que MODO MANIOBRA**. Hoy no existe en `feature_list.json` — probablemente sea spec separada (ej. `09-buscar-animal`) o extensión sustantiva de `02-modelo-animal`. Raf va a explicar el flujo en otra sesión para escribir las specs. Anotado como nota en research-findings.md.
 - Material total ahora: **48 screens** (22 Mobbin + 26 device). 16 en `06-argentino/` (13 register + home + 3 tabs).
 
+## Bitácora — sesión 11 (refinamiento + aprobación de spec 02 con R14 tentativo)
+
+- `2026-05-26` — Sesión arranca con todos los archivos base leídos + `node scripts/check.mjs` verde (15 RLS + 26 Edge tests pasando). Estado: bloque A del plan con A.3/A.4/A.6 done, A.1 in_progress (Raf), A.5 pendiente.
+- `2026-05-26` — Leader propone avanzar A.5 (refinar spec 02) que es lo único que puede hacer sin esperar a Raf. Raf aprueba.
+- `2026-05-26` — Conflicto arquitectónico detectado: spec 02 actual tiene 5 tablas de eventos tipadas + auditoría, pero ADR-017 (escrito después) propone una tabla unificada genérica. Leader hace AskUserQuestion con 3 opciones (Híbrido / ADR-017 literal / ADR-017 con vistas). Primera ronda Raf pide explicación menos técnica. Leader reformula sin DB enfocando consecuencias funcionales (analytics, validación, esfuerzo de refactor). Raf elige **Híbrido**: conservar 5 tablas tipadas + agregar `animal_events` solo para `event_type IN ('observacion','otro')`. Decisión clave: "data analytics es PILAR".
+- `2026-05-26` — También cerrado: R15 entero se borra del spec 02 (UX se mueve a spec 09).
+- `2026-05-26` — Leader lanza `spec_author` con scope acotado: Híbrido + R15 borrar + R4.13 inmutabilidad + R10.1 séptimo origen + terminología + motor de form dinámico + cabeceras con fecha. Spec_author refina los 3 archivos (~250 líneas netas agregadas), 3 migrations nuevas (0033/0034/0035), housekeeping renumerada a 0036. `check.mjs` verde. Status sigue `spec_ready`.
+- `2026-05-26` — Leader entrega resumen escaneable del spec en chat. Raf cuestiona: "¿no está mal cerrar specs sin tener definido el design UX/UI?". Leader analiza: ~93% del spec es independiente del design system; solo R14 (pantalla Ficha animal) lo toca, y aún así de forma genérica (qué muestra, no cómo se ve). El patrón ya validado en spec 01 es: aprobar spec entero + implementar solo backend + pausar frontend hasta design system. Leader propone 3 caminos vía AskUserQuestion.
+- `2026-05-26` — Raf elige "Aprobar con R14 marcado como tentativo". Decisión grabada.
+- `2026-05-26` — Leader ejecuta la aprobación condicional:
+  1. `requirements.md`: agrega disclaimer en R14 ("⚠️ Sección TENTATIVA, sujeta a refinamiento incremental cuando se cierre design system") + bullet en Historial de refinamiento documentando la aprobación con condición.
+  2. `feature_list.json`: spec 02 pasa de `spec_ready` a `in_progress` con `notes` documentando la pausa de frontend (mismo patrón que spec 01).
+  3. `progress/plan.md`: A.5 marcado como `done` con detalle de cambios. Tabla "Estado global resumido" actualizada. Changelog agrega entrada sesión 11.
+  4. `progress/current.md`: bitácora sesión 11 documentada.
+
+## Bitácora — sesión 11 (continuación: A.7 spec 09 redactada)
+
+- `2026-05-26` — Raf elige avanzar A.7 antes que B.2 (recomendación del leader: cerrar todo el modelo del frontend antes de implementar backend para tener visibilidad total).
+- `2026-05-26` — Leader lanza `spec_author` con prompt detallado: 9 decisiones cerradas explicitadas (dos puertas, find-or-create, `lastRodeoSelected`, identificación dual, form dinámico, timeline append-only, duplicados A+B+C, terminología, dependencias). Scope hard: NO modificar spec 02, NO redefinir schemas, NO escribir código, marcar UI como tentativa.
+- `2026-05-26` — `spec_author` entrega:
+  - `specs/active/09-buscar-animal/requirements.md` (252 líneas, 12 requirements R1-R12).
+  - `specs/active/09-buscar-animal/design.md` (421 líneas, arquitectura + hooks + pantallas + alternativa descartada).
+  - `specs/active/09-buscar-animal/tasks.md` (449 líneas, 6 fases, trazabilidad R↔T completa).
+  - `feature_list.json`: spec 09 movida a `status: spec_ready` con `notes` listando TODOs y dependencias.
+  - `check.mjs` verde.
+- `2026-05-26` — Leader actualiza `progress/plan.md`: A.7 marcado `done`, B.4 actualizado, decisiones cerradas tildadas en sección "Decisiones cerradas en charla", changelog agrega entrada de continuación sesión 11.
+
+## TODOs documentados en spec 09 — estado
+
+1. ~~**R12 — tensión con R4.13 de spec 02**~~ ✅ **RESUELTA el 2026-05-26** (ver bitácora abajo).
+2. **Dependencia spec 04**: la puerta BLE (R2 de spec 09) y la Fase 4 de tasks.md siguen bloqueadas hasta que spec 04 (BLE bastón) esté implementada. Stub declarado en T1.5.
+3. **Dependencia ADR-018**: estructura de navegación principal (bottom nav) asumida como tentativa.
+
+## Bitácora — sesión 12 (security_analyzer + skill Sentry)
+
+- `2026-05-27` — Raf pregunta sobre agregar un agente experto en ciberseguridad al flujo. Menciona "Cyber Neo Claude" como candidato. Leader investiga: encuentra `Hainrixz/cyber-neo` (proyecto verde, 2 commits, 127 stars, autor individual + comunidad tododeia.com).
+- `2026-05-27` — Leader compara contra alternativas + `/security-review` built-in de Anthropic. Raf recibe luego info sobre `getsentry/skills@security-review` desde fuente externa. Leader investiga a fondo: empresa Sentry, Apache-2.0, 747 stars, 221 commits, sistema de confianza HIGH/MEDIUM/LOW, 27 reference files (17 vulns + 5 lenguajes + 5 infra), read-only enforced, methodology de tracing en vez de checklist.
+- `2026-05-27` — Veredicto del leader: getsentry security-review es claramente superior a Cyber Neo en madurez + methodology + reducción de false positives. Recomendación final: getsentry como skill base.
+- `2026-05-27` — Análisis de cómo implementar el agente en RAFAQ. Raf propone 5to subagente que revise specs antes de aprobación + código pre-aprobación. Leader evalúa 4 patrones (A subagente always-on / B skill libre / C hook automático / D subagente + 2 gates condicionales). Recomienda Patrón D.
+- `2026-05-27` — Raf aprueba Patrón D + instala el plugin Sentry a nivel user (`claude plugin install sentry-skills@sentry-skills`).
+- `2026-05-27` — Leader entrega los 7 cambios:
+  1. **`docs/adr/ADR-019-security-analyzer-skill-sentry.md`** — decisión arquitectónica formal con análisis completo de alternativas (Cyber Neo, agamm, Phoenix, mahmutka, /security-review built-in, Sentry) y de patrones de implementación (A/B/C/D).
+  2. **`.claude/agents/security_analyzer.md`** — nuevo subagente con 2 modos (`spec` y `code`), checklist RAFAQ-específico, formato de output consistente con reviewer (`progress/security_spec_<feature>.md` y `progress/security_code_<feature>.md`).
+  3. **`.claude/agents/leader.md`** — actualizado con flujo SDD que incluye Gate 1 (condicional) y Gate 2 (siempre), criterios para invocar cada gate, escalado de esfuerzo actualizado, reglas duras nuevas (NUNCA saltar Gate 2).
+  4. **`AGENTS.md`** — flujo SDD con gates + mapa del repositorio actualizado.
+  5. **`docs/specs.md`** — diagrama de estados con 2 puertas de aprobación humana.
+  6. **`docs/adr/README.md`** — agregada fila ADR-019 + slot 018 reservado para bottom nav.
+  7. **`progress/plan.md`** y este archivo — bitácora y changelog.
+
+## TODOs / próximas pruebas
+
+- **Primera prueba real del flujo nuevo**: cuando arranquemos B.2 (backend spec 02). Gate 1 debería aplicar (spec 02 toca RLS + schema + Edge Functions). Gate 2 sobre migrations + tests cuando estén implementadas.
+- **Documentar replicación del plugin**: cuando llegue el momento de onboarding de otro dev, agregar a `docs/setup-frontend.md` el paso de instalar `sentry-skills@sentry-skills`.
+- **Considerar pin a tag específico**: si la skill cambia comportamiento entre versiones, podemos pinear a un commit/tag específico del repo `getsentry/skills` en vez de `main` indiscriminadamente. Por ahora no se hace (proyecto pre-prod, OK aceptar updates).
+
+## Bitácora — sesión 11 (aprobación spec 09)
+
+- `2026-05-26` — Raf pidió resumen ejecutivo de spec 09 para leer en chat sin abrir VSCode. Leader leyó los 3 archivos completos y armó resumen escaneable: 1 oración del qué + diagrama de 2 puertas + tabla de 12 requirements (6 def + 6 UI tentativa) + 8 pantallas + 4 hooks clave + alternativa descartada + riesgos + plan de fases con bloqueos.
+- `2026-05-26` — Raf aprobó spec 09 entera. Status en `feature_list.json` movido a `blocked` con notes explícita (no `in_progress` para respetar `one_feature_at_a_time` del check.mjs — spec 02 sigue como feature activa porque es prerequisito técnico). Historial de aprobación agregado al requirements.md de spec 09.
+
+## Bitácora — sesión 11 (resolución R12 ↔ R4.13)
+
+- `2026-05-26` — Raf pide analizar la tensión R12 ↔ R4.13 antes de avanzar con aprobación de spec 09 o backend de spec 02. Leader presenta análisis técnico: el trigger actual bloquea TODO cambio de `tag_electronic` (incluyendo `NULL → valor`); R7/R8 de spec 09 necesitan exactamente ese caso. Distinción semántica clara entre "completar info" (`NULL → valor`) y "reescribir identidad" (`valor → otro valor`).
+- `2026-05-26` — Leader evalúa 5 opciones y descarta 2 (modelar TAG como evento append-only = over-engineering; diferir R7/R8 = sacrifica caso central del deadline SENASA). Presenta 3 opciones a Raf vía AskUserQuestion:
+  - **A**: refinar trigger en 2 líneas SQL para permitir `NULL → valor`.
+  - **B**: refinar trigger + Edge Function dedicada `assign_tag_to_animal` con audit granular.
+  - **C**: soft-delete + alta nuevo (rompe trazabilidad SENASA).
+- `2026-05-26` — Raf elige **opción A**. Razones documentadas por el leader: velocidad de MVP, distinción semántica defensible, backwards compatible si después se quiere sumar audit granular (opción B post-MVP).
+- `2026-05-26` — Cambios aplicados (4 archivos editados):
+  1. `specs/active/02-modelo-animal/design.md` — trigger `tg_animals_block_tag_change` actualizado: `if old.tag_electronic is null then return new` antes del check de `IS DISTINCT FROM`. Mismo cambio en `tg_animal_profiles_block_idv_change` para `idv`. Comentarios SQL explicando la distinción semántica. Notas debajo del bloque ampliadas.
+  2. `specs/active/02-modelo-animal/requirements.md` — R4.13 reescrita con sub-cláusulas R4.13.a (`NULL → valor` permitido), R4.13.b (`valor → otro valor` prohibido), R4.13.c (`valor → NULL` prohibido). Entrada nueva al Historial de refinamiento explicando razón y backwards-compatibility.
+  3. `specs/active/09-buscar-animal/requirements.md` — R12 marcada ✅ RESUELTA con trazabilidad histórica. R12.2 actualizada con `WHERE tag_electronic IS NULL` defensivo + manejo de race condition. R12.4 documenta upgrade path post-MVP a opción B (Edge Function con audit granular). Criterio de aceptación global "implementación bloqueada" cambiado a "habilitada para implementación end-to-end".
+  4. `specs/active/09-buscar-animal/tasks.md` — Fase 3 desbloqueada: header del archivo + diagrama de dependencias + tabla de trazabilidad R↔T + T3.1 reescrita como "validar precondición R4.13 a nivel DB". Eliminada la columna "Depende de R12" de la tabla de fases.
+  5. `feature_list.json` spec 09 notes — eliminado el TODO de R12, mantenidos spec 04 + ADR-018.
+- `2026-05-26` — Decisión meta: **no se crea ADR separado**. Es refinamiento de spec, no decisión arquitectónica transversal. La trazabilidad vive en los Historiales de spec 02 y 09 + esta bitácora.
+
+## Decisiones de criterio propio del spec_author (Raf debería validar al revisar)
+
+- **Heurística R1.4**: input numérico/estructurado → `idv`; texto libre → `visual_id_alt`. Diferida al design.md para detalle.
+- **`useBusyMode()`**: hook que las pantallas activan para suspender el listener BLE global durante un form CREATE/EDIT abierto (evita que un bastoneo accidental pise el flujo activo).
+- **Mock provider del bastón**: para tests sin device físico, expone `mockTagRead(tag)` y se monta con `mode='mock'`.
+
+## Próximos pasos posibles
+
+Con A.5 y A.7 done, se desbloquean dos caminos paralelos:
+
+1. **Aprobar spec 09 (Raf)**: leer `specs/active/09-buscar-animal/` (~1100 líneas) y aprobar/pedir cambios. Cuando se aprueba, se desbloquea B.4 (implementación). Patrón de aprobación condicional (UI tentativa) ya validado en spec 02.
+
+2. **B.2 — Backend de spec 02 (Fase 1+2)**: implementar migrations 0013..0035 + RLS + triggers + tests. Estimación: 1-2 sesiones de implementer. NO depende del design system NI de aprobación de spec 09. Output: schema completo + tests verdes contra DB remota.
+
+Pueden correr en sesiones distintas. Raf elige el orden — la aprobación de spec 09 es lectura (mismo rango de esfuerzo que la de spec 02); B.2 es ejecución larga.
+
+## Bitácora — sesión 10 (discovery BUSCAR ANIMAL + validación terminología + ADRs 016/017 + spec 09 + plan.md)
+
+- `2026-05-26` — Raf explica al leader la feature CORE **BUSCAR ANIMAL**: dos puertas de entrada (manual desde ANIMALES tipeando ID visual + bastón BLE como listener global activo en cualquier pantalla excepto MODO MANIOBRAS) que convergen en flujo find-or-create. Si el animal no existe → form CREATE con ID precargado + selección de rodeo + form dinámico según sistema del rodeo. Si existe → form EDIT con datos precargados + acceso al timeline. Leader hace 4 preguntas clave (selección de rodeo, ID visual vs electrónica + duplicados, modelo de comentarios, terminología rodeo/lote).
+- `2026-05-26` — Respuestas y decisiones: (1) **`lastRodeoSelected`** scope app session, persiste hasta cerrar app, fallback a último rodeo usado en device. (2) **IDs únicas, no hay duplicados**; al crear se muestran ambos campos (visual + electrónica), el usado para entrar viene precargado y no modificable, el otro vacío recomendado pero no obligatorio. (3) **Comentarios = timeline append-only** con autor + timestamp + tipo + payload + edit_window. (4) **Terminología validada con el vet socio (Facundo, UNLP)**: rodeo = grupo de animales (entidad principal), sistema = tipo productivo, lote no se usa para grupos.
+- `2026-05-26` — Duplicados lógicos (animal con solo visual + después se le pone electrónica): MVP cubre con **A** (búsqueda intermedia previa al alta cuando se bastonea algo sin match) **+ B** (flujo dedicado de "asignación masiva de caravanas"). Opción **C** (detección automática + merge guiado) **diferida a post-MVP** → anotada en `CONTEXT/07-pendientes.md` sección "Funcionalidades a priorizar después del MVP".
+- `2026-05-26` — **Purga de alucinaciones**: Raf detecta que el leader inventó "Hugo" como nombre del vet socio. Búsqueda exhaustiva descubre que la alucinación se extendió a 6 archivos del repo con datos falsos: "Joaquín Giménez (Matrícula 13759)" como vet del campo, "Los Tamarindos" como campo beta (Tamarindos es un campo real pero NO el de prueba — fue material de referencia), "174 animales Angus" como inventario. Reales: vet socio = **Facundo** (UNLP, equity 50/50), RAFAQ = Raf + Facundo, campo de prueba en **Chascomús**. Limpieza quirúrgica en `CONTEXT/01-producto.md`, `CONTEXT/02-modelo-negocio.md`, `CONTEXT/07-pendientes.md`, `CONTEXT/08-roadmap.md`, `docs/adr/ADR-007-lab-integration-parsers.md`, `docs/adr/ADR-010-vesta-hardware-integration.md`. Cero ocurrencias residuales post-cleanup. Memoria `feedback-no-inventar-nombres` + `product-people` agregadas.
+- `2026-05-26` — Leader propone reordenar la ejecución del proyecto en 4 bloques (A preparación → B esqueleto → C workflows → D soporte/salida) priorizando dependencias reales sobre orden numérico. Raf pide que el plan viva en archivo persistente para sesiones futuras. Leader crea **`progress/plan.md`** con IDs estables (A.1, A.2, etc.), estado, dueño, dependencias, output por item, sección "Decisiones cerradas en charla pero todavía no formalizadas" y changelog. `AGENTS.md` actualizado: "leer plan.md al arrancar sesión" sumado a la lista obligatoria + entrada en mapa del repositorio. Memoria `project-execution-plan` agregada como pointer.
+- `2026-05-26` — Raf autoriza avanzar con los 3 ítems del plan que el leader puede hacer sin esperarlo: A.3, A.4, A.6. Leader entrega:
+  1. **`docs/adr/ADR-016-terminologia-rodeo-sistema.md`** (no 015 — el slot 015 quedó vacío por la retirada del ADR de design system "Campo Profundo" en sesión 8; saltar evita ambigüedad con referencias residuales en `current.md`, `design/README.md`, `docs/design-system.md`).
+  2. **`docs/adr/ADR-017-timeline-eventos-animal.md`** con schema canónico de `animal_events` (id, animal_id, establishment_id, author_id, created_at, event_type enum, text, structured_payload jsonb, edit_window_until 15min, deleted_at). Hereda heurística de "si se cuenta/filtra/grafica → estructurado; si es observación humana sin schema → texto libre en evento `observacion`".
+  3. **Feature 9 `09-buscar-animal`** agregada a `feature_list.json` con `status: pending`, `sdd: true`, `notes` documentando dependencias (specs 02 + 04) y los ADRs.
+  4. `docs/adr/README.md` actualizado con ADR-016, ADR-017 e indicación de que 015 fue eliminado.
+  5. `progress/plan.md` actualizado: A.3 + A.4 + A.6 marcados como `done`. Changelog del plan registra el avance. La estructura bottom nav (item A.2) reasignada de ADR-017 a ADR-018 ya que el 017 quedó tomado.
+- **Estado al cierre de sesión**: bloque A del plan parcialmente avanzado. Lo que sigue queda en cancha de Raf: refinar spec 02 antes de aprobar (A.5) y cerrar design system canónico (A.1). El leader no avanza sin esas decisiones humanas.
+
 ## Bitácora — sesión 8 (correctivo: ADR-015 withdrawn, fase de exploración)
 
 - `2026-05-26` — Raf corrige error de leader en sesión 7: el doc `RAFAQ-Design-System-Campo-Profundo.md` que él bajó al root era una **idea exploratoria** charlada en otro chat, no decisión cerrada. Leader lo había formalizado prematuramente como ADR-015 accepted + tokens canónicos + edits en setup-frontend.md. Raf aclara: quiere primero **buscar inspiraciones** (Dribbble, Mobbin, apps de competencia y referencia), explorar con Stitch (que evaluó positivo en sesión previa), y darle look & feel propio. NO quiere que el design system se sienta "vibecodeado más".
@@ -135,7 +242,7 @@ El código real de Edge Functions usa `Deno.env.get('APP_URL')` (env del Edge Fu
 5. **Auditar prompt del Notion** cuando Raf lo copy/paste (Notion no se deja scrapear). Criterios ya enumerados: prompt injection, secrets handling, hooks auto-ejecutables, etc.
 6. **Recién después**: ADR nuevo (probablemente -016) que reemplaza el draft + doc canónico + `tokens.json` actualizado + plan de implementación a Tamagui.
 7. **Decisiones que quedan pendientes (no urgentes)**:
-   - Aprobar o pedir cambios en `specs/active/02-modelo-animal/` (3 archivos, ~115KB).
+   - ~~Aprobar o pedir cambios en `specs/active/02-modelo-animal/`~~ ✅ Aprobada con R14 tentativo en sesión 11 (2026-05-26).
    - Destrabar Fase 3 del spec 01 (Tamagui + Expo Router + …) — depende de design system cerrado.
 
 ## ADRs creados en este ciclo
