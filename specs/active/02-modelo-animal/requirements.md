@@ -4,6 +4,20 @@
 **Fecha**: 2026-05-25
 **Autor**: spec_author (Raf)
 
+## Historial de refinamiento
+
+- **2026-05-26 (refinamiento R4.13 — destrabar tensión con spec 09 R12)** — Raf eligió la opción A del análisis de tensión R12 ↔ R4.13. La inmutabilidad de `tag_electronic` e `idv` se relaja de "post-alta absoluta" a "post-completitud": **`NULL → valor` queda permitido** (completar información que faltaba al alta inicial — caso de uso central del flujo de asignación de caravanas de spec 09 R7/R8); **`valor → otro valor` sigue prohibido** (reescribir identidad rompe trazabilidad SENASA); **`valor → NULL` también queda prohibido** (no hay caso de uso real; defensivo). Migration `0035_immutability_identifiers.sql` actualizada con la condición `old IS NULL ⇒ return new` antes del check. R4.13 reescrita debajo. Tests requeridos en T2.x: caso permitido (NULL → valor), caso prohibido (valor → otro valor), caso prohibido defensivo (valor → NULL). Razón de fondo: la distinción semántica entre "completar info" y "reescribir identidad" es defensible y desbloquea R7/R8 de spec 09 con cambio mínimo (2 líneas SQL por trigger) y backwards compatible si en el futuro se quiere sumar audit granular vía Edge Function.
+- **2026-05-26 (aprobación)** — Spec aprobado por Raf con condición: **R14 (pantalla "Ficha de animal") queda marcada como TENTATIVA** hasta que se cierre el design system (item A.1 del `progress/plan.md`). Las requirements R1..R13 y R6.B son definitivas. R14 puede sufrir refinamiento incremental cuando se aborde la Fase 4 (frontend) del `tasks.md`, sin reabrir el spec entero. El backend (Fase 1+2) queda libre para implementar — no depende del design system. Patrón ya validado en spec 01.
+- **2026-05-26** — Refinamiento previo a aprobación. Cambios:
+  - Adoptado **modelo Híbrido de eventos**: se conservan las 5 tablas tipadas (`weight_events`, `reproductive_events`, `sanitary_events`, `condition_score_events`, `lab_samples`) y se agrega una 6ta tabla `animal_events` acotada a `event_type IN ('observacion','otro')` para observaciones libres y casos sin schema. ADR-017 queda matizado: el cuaderno genérico convive con los tipados, no los reemplaza. Type-safety a nivel DB se preserva para el pilar analytics.
+  - Agregada sección R6.B (R6.10–R6.13) que describe la tabla `animal_events`, append-only con `edit_window_until` (15 min), soft-delete, RLS por `establishment_id` y trigger `author_id` automático.
+  - Extendida R10.1: la función `animal_timeline` ahora incluye un séptimo origen `event_kind = 'observacion'` proveniente de `animal_events`.
+  - **Eliminada R15 completa** (R15.1..R15.5): la UX de búsqueda + alta interactiva se mueve a spec 09 `09-buscar-animal`. Spec 02 queda como modelo de datos puro. Los datos y RLS que spec 09 consume siguen acá (R5 búsqueda, R10 cronología, R4 perfil).
+  - Agregada **R4.13 (inmutabilidad de identificadores post-alta)**: tras el INSERT inicial, `animals.tag_electronic` y `animal_profiles.idv` no se pueden modificar. `visual_id_alt` sí (texto libre). Corrección de identificador equivocado se resuelve por soft-delete + alta nuevo (el flujo masivo "asignación de caravanas" queda fuera de scope de MVP en spec 02 y se cubre desde spec 09).
+  - Confirmada terminología **rodeo + sistema** según ADR-016 (era consistente en los 3 archivos, validado).
+  - Confirmada referencia al **motor de form dinámico por rodeo** en design.md (se agrega sección breve apuntando a `categories_by_system` + posible `system_field_config`).
+  - Criterios de aceptación globales ajustados: removida toda referencia a R15; agregada referencia a `animal_events` para el criterio de cronología.
+
 ## Resumen
 
 Segundo bloque fundacional del producto. Parte del sustrato de `01-identity-multitenancy` (`users`, `establishments`, `user_roles`, RLS, helpers `has_role_in` / `is_owner_of`) y agrega el modelo central de la app: **animal, perfil de animal y eventos cronológicos básicos**, junto con la capa de configuración multi-especie (`species`, `systems_by_species`, `categories_by_system`) y la jerarquía intermedia `rodeos`.
@@ -33,7 +47,8 @@ Antes de las requirements, dejo registradas las decisiones cerradas para esta sp
 - **CUT manual con prompt al cargar dientes 1/2, 1/4 o sin dientes**: la transición a CUT nunca es automática. El cliente muestra el prompt; si el operador confirma, hace un UPDATE explícito que pone `is_cut = true` y `category_id = (categoría CUT del sistema)` con `category_override = true`. El dato de `teeth_state` se guarda en `animal_profiles` (propiedad sobreescribible, sin historial — confirmado en `CONTEXT/03-flujos-maniobras.md` § Dientes).
 - **Ternero al pie**: entidad independiente. Al cargar un evento `reproductive_event` con `event_type = 'birth'` y `calf_*` provistos, el sistema crea automáticamente un `animals` + `animal_profile` nuevos para el ternero, los linkea vía `reproductive_events.calf_id`, y los hereda al mismo `establishment_id` + `rodeo_id` que la madre. La categoría inicial del ternero se setea según el sexo (ternero/ternera).
 - **Rodeos en este spec**: la jerarquía `establishments → rodeos → animal_profiles` se cierra acá. Un rodeo es `(establishment_id, species_id, system_id, name)`. Un establecimiento puede tener varios rodeos (post-MVP: distintos sistemas conviviendo); en MVP típicamente uno solo (bovino + cría).
-- **Eventos cubiertos por este spec**: tablas `weight_events`, `reproductive_events`, `sanitary_events`, `condition_score_events`, `lab_samples` con su schema, RLS y triggers de transición de categoría — pero **sin** UI de carga masiva ni carga vía wizard (eso queda para feature 03). Se permite carga unitaria desde la ficha del animal (un evento a la vez) para que la cronología sea verificable end-to-end.
+- **Eventos cubiertos por este spec — modelo Híbrido (ADR-017 matizado, 2026-05-26)**: se conservan las 5 tablas tipadas (`weight_events`, `reproductive_events`, `sanitary_events`, `condition_score_events`, `lab_samples`) con su schema, RLS y triggers de transición de categoría, **y se agrega una 6ta tabla `animal_events`** acotada por CHECK a `event_type IN ('observacion','otro')` para observaciones libres y casos sin schema. Los otros tipos del ADR-017 original (`salud`, `reproduccion`, `traslado`, `pesaje`, `identificacion`) **no** van en `animal_events` porque ya están cubiertos por las 5 tablas tipadas. El motivo de esta convivencia: data analytics es pilar del producto y requiere type-safety a nivel DB sobre los datos que se cuentan/filtran/grafican; el cuaderno libre vive al lado para lo que no es analytics. La feature 03 sigue siendo dueña de la carga masiva por wizard sobre las 5 tablas tipadas. Se permite carga unitaria desde la ficha del animal (un evento a la vez) para que la cronología sea verificable end-to-end.
+- **Inmutabilidad de identificadores post-alta**: tras el INSERT inicial, `animals.tag_electronic` y `animal_profiles.idv` no se pueden modificar (regla del modelo, no UX). `visual_id_alt` sí es modificable porque es texto libre que en la práctica se carga incompleto al inicio. La corrección de un identificador equivocado se hace por soft-delete + alta nuevo. El flujo masivo "asignación de caravanas" (animal que solo tenía visual y después se le pone electrónica) queda fuera de scope MVP de este spec y se cubre desde spec 09.
 - **Soft deletes**: en `animals`, `animal_profiles`, `rodeos`, y en cada tabla de eventos (`deleted_at` nullable timestamptz). RLS filtra `deleted_at IS NULL` por default.
 - **RLS scoping**: toda tabla con `establishment_id` (directo o transitivo) protegida por `has_role_in(establishment_id)`. Para `animals` (que es global), el acceso se deriva: el usuario ve un `animal` si tiene rol en algún establishment donde hay un `animal_profile` activo de ese animal.
 - **Offline-first**: PowerSync sincroniza `animals`, `animal_profiles`, `rodeos`, `species`, `systems_by_species`, `categories_by_system`, y todas las tablas de eventos. La carga de animales y eventos individuales debe funcionar offline.
@@ -107,6 +122,12 @@ Antes de las requirements, dejo registradas las decisiones cerradas para esta sp
 
 **R4.12** Mientras un `animal_profile` tenga `deleted_at IS NULL`, el sistema deberá considerarlo "presente" en el establecimiento. Cuando `status` cambia a `sold`, `dead` o `transferred`, el sistema deberá permitir mantener el perfil visible para historial pero deberá excluirlo de las queries de "rodeo actual" (vía filtro `status = 'active'`).
 
+**R4.13** El sistema deberá enforce, vía trigger Postgres a nivel DB, una **inmutabilidad post-completitud** sobre `animals.tag_electronic` y `animal_profiles.idv` con tres reglas separadas:
+- **R4.13.a — Caso permitido**: UPDATE que pase un identificador de `NULL` a un valor concreto (`NULL → 'ARG001'`) deberá ser aceptado. Este caso cubre la **asignación inicial de caravana** cuando un animal se cargó originalmente sin TAG o sin IDV (escenario central de los flujos R7 y R8 de spec 09 — asignación de caravanas a animales viejos). Es "completar información que faltaba al alta", no "reescribir identidad".
+- **R4.13.b — Caso prohibido (reescribir identidad)**: UPDATE que cambie un identificador de un valor concreto a otro valor concreto (`'ARG001' → 'ARG002'`) deberá ser rechazado con error claro. Cambiar un TAG/IDV ya cargado rompe trazabilidad y audit trail SENASA: la historia previa registrada bajo el valor original queda colgada de un identificador distinto. La corrección de un identificador equivocado se realiza mediante soft-delete del `animal_profile`/`animal` y alta nuevo.
+- **R4.13.c — Caso prohibido (volver a NULL)**: UPDATE que pase un identificador de un valor concreto a `NULL` (`'ARG001' → NULL`) deberá ser rechazado. No hay caso de uso real para "quitarle la caravana" a un animal que ya la tenía; defensivo.
+- **`animal_profiles.visual_id_alt` queda completamente fuera del bloqueo**: es texto libre que típicamente se carga incompleto en el momento del alta y puede actualizarse libremente.
+
 ### R5. Identificación al cargar
 
 **R5.1** El sistema deberá permitir buscar un animal por `tag_electronic` (match exacto, scope global) en el contexto del establecimiento activo. Si encuentra un `animal_profile` activo en ese establecimiento, lo retorna; si encuentra el animal pero no tiene perfil activo acá, deberá ofrecer "transferir/dar de alta en este campo".
@@ -136,6 +157,26 @@ Antes de las requirements, dejo registradas las decisiones cerradas para esta sp
 **R6.8** Toda tabla de eventos deberá ser accesible (SELECT, INSERT) por usuarios con rol activo en el `establishment_id` derivado del `animal_profile_id`. UPDATE y DELETE de eventos solo por `owner` o por el `created_by` del evento (corrección de propio error).
 
 **R6.9** El sistema deberá exponer una "cronología del animal" — un ordenamiento de todos los eventos de un `animal_profile_id` por `event_date` (o `weight_date` / `collection_date` según la tabla) descendente, con tipo de evento etiquetado para que el cliente pueda renderizar la ficha.
+
+### R6.B Eventos libres / observaciones (`animal_events`) — modelo Híbrido
+
+> Adoptado en refinamiento 2026-05-26 tras matización del ADR-017. Esta tabla **no reemplaza** a las 5 tablas tipadas del R6.1..R6.5; convive con ellas y solo cubre los tipos `observacion` y `otro`. El motivo: data analytics es pilar del producto y necesita type-safety a nivel DB sobre lo que se cuenta/filtra/grafica (las 5 tablas tipadas resuelven eso); las observaciones libres del operador (sin schema) se modelan acá.
+
+**R6.10** El sistema deberá modelar la tabla `animal_events` con `(id, animal_profile_id, establishment_id, author_id, created_at, event_type, text, structured_payload, edit_window_until, deleted_at)`. La columna `establishment_id` deberá estar denormalizada (referenciando `establishments(id)` directamente) para que las policies RLS evalúen sin joins, replicando el patrón de performance del resto del sistema.
+
+**R6.11** El sistema deberá enforce vía CHECK constraint a nivel DB que `event_type` solo acepte los valores `'observacion'` y `'otro'`. Cualquier otro valor del enum del ADR-017 original (`salud`, `reproduccion`, `traslado`, `pesaje`, `identificacion`) **no** deberá ser aceptado por esta tabla, ya que esos casos están cubiertos por las 5 tablas tipadas del R6.1..R6.5.
+
+**R6.12** El sistema deberá tratar `animal_events` como append-only con ventana de corrección:
+- `edit_window_until` deberá settearse por default a `now() + interval '15 minutes'` en el INSERT.
+- El sistema deberá rechazar cualquier UPDATE de las columnas `text`, `structured_payload` o `event_type` después de `edit_window_until`.
+- El sistema deberá permitir soft-delete vía `deleted_at` en cualquier momento (auditable; el evento permanece en DB).
+- Las queries normales deberán filtrar `deleted_at IS NULL` por default.
+
+**R6.13** El sistema deberá registrar `author_id = auth.uid()` automáticamente vía trigger BEFORE INSERT en `animal_events` (mismo patrón que `tg_set_created_by_auth_uid` de las tablas tipadas, adaptado al nombre `author_id`). La policy RLS deberá permitir:
+- SELECT a cualquier usuario con rol activo en el `establishment_id` (`has_role_in(establishment_id) AND deleted_at IS NULL`).
+- INSERT a cualquier usuario con rol activo en el `establishment_id`.
+- UPDATE solo al `author_id` original y solo mientras `now() < edit_window_until` (o al `owner` del establishment como excepción administrativa de auditoría — definir en design).
+- Soft-delete (UPDATE `deleted_at`) solo al `author_id` original o al `owner`.
 
 ### R7. Transiciones automáticas de categoría
 
@@ -179,7 +220,7 @@ Antes de las requirements, dejo registradas las decisiones cerradas para esta sp
 
 ### R10. Cronología (ficha del animal)
 
-**R10.1** El sistema deberá exponer una función SQL `animal_timeline(profile_id uuid)` que retorne un set de eventos unificados con `(event_kind, event_id, event_date, payload_jsonb)` ordenados por `event_date desc, created_at desc`. `event_kind` enum/text: `weight | reproductive | sanitary | condition_score | lab_sample | category_change`.
+**R10.1** El sistema deberá exponer una función SQL `animal_timeline(profile_id uuid)` que retorne un set de eventos unificados con `(event_kind, event_id, event_date, payload_jsonb)` ordenados por `event_date desc, created_at desc`. `event_kind` enum/text: `weight | reproductive | sanitary | condition_score | lab_sample | category_change | observacion`. El séptimo origen `observacion` proviene de `animal_events` (R6.10..R6.13) y trae en `payload` al menos `{ event_type, text, structured_payload, author_id, edit_window_until }`. El `event_date` para este origen es `created_at` de la fila de `animal_events`.
 
 **R10.2** El sistema deberá enforce vía RLS que la función `animal_timeline` solo retorne eventos cuyo `animal_profile_id` pertenezca a un establecimiento donde `auth.uid()` tiene rol activo.
 
@@ -187,7 +228,7 @@ Antes de las requirements, dejo registradas las decisiones cerradas para esta sp
 
 ### R11. Aislamiento multi-tenant y RLS
 
-**R11.1** El sistema deberá hacer cumplir el aislamiento entre tenants mediante RLS de Postgres para todas las tablas con `establishment_id` directo o transitivo (`rodeos`, `animal_profiles`, `weight_events`, `reproductive_events`, `sanitary_events`, `condition_score_events`, `lab_samples`, `animal_category_history`).
+**R11.1** El sistema deberá hacer cumplir el aislamiento entre tenants mediante RLS de Postgres para todas las tablas con `establishment_id` directo o transitivo (`rodeos`, `animal_profiles`, `weight_events`, `reproductive_events`, `sanitary_events`, `condition_score_events`, `lab_samples`, `animal_category_history`, `animal_events`).
 
 **R11.2** Para tablas con `animal_profile_id` (no tienen `establishment_id` directo), el sistema deberá derivar el establishment vía join al `animal_profiles` correspondiente para evaluar `has_role_in(...)` en las policies.
 
@@ -209,7 +250,7 @@ Antes de las requirements, dejo registradas las decisiones cerradas para esta sp
 
 ### R13. Sincronización offline
 
-**R13.1** Las tablas `animals`, `animal_profiles`, `rodeos`, `species`, `systems_by_species`, `categories_by_system`, `weight_events`, `reproductive_events`, `sanitary_events`, `condition_score_events`, `lab_samples`, `animal_category_history` deberán estar configuradas en PowerSync como sincronizables. Los buckets se definen en `design.md`.
+**R13.1** Las tablas `animals`, `animal_profiles`, `rodeos`, `species`, `systems_by_species`, `categories_by_system`, `weight_events`, `reproductive_events`, `sanitary_events`, `condition_score_events`, `lab_samples`, `animal_category_history`, `animal_events` deberán estar configuradas en PowerSync como sincronizables. Los buckets se definen en `design.md`.
 
 **R13.2** La carga unitaria de un animal nuevo y de eventos individuales sobre un animal deberá funcionar offline. Cuando hay conexión, PowerSync sincroniza; cuando no hay, los datos quedan en SQLite local con `pending_sync` lógico.
 
@@ -220,6 +261,8 @@ Antes de las requirements, dejo registradas las decisiones cerradas para esta sp
 **R13.5** Las tablas de configuración (`species`, `systems_by_species`, `categories_by_system`) deberán cargarse en SQLite local al primer login y refrescarse periódicamente (TTL ~24 hs). Cambios de seed se propagan vía nueva migration y sync.
 
 ### R14. Cliente: ficha del animal
+
+> **⚠️ Sección TENTATIVA** (aprobada con reserva el 2026-05-26). Las requirements R14.1..R14.7 describen QUÉ tiene que mostrar y hacer la pantalla a nivel funcional — independiente del design system. Cuando se cierre el design system (item A.1 del `progress/plan.md`) y se aborde la Fase 4 (frontend) del `tasks.md`, esta sección puede recibir **refinamiento incremental** sin reabrir el spec entero: layout específico, componentes visuales, microinteractions, navegación entre tabs/scroll, empty states, copy final del prompt CUT, etc. La aprobación firme de R14 ocurre cuando se redacte el bloque "Refinamientos post-design-system" en el design.md de implementación frontend (mismo patrón que se usará en spec 01).
 
 **R14.1** El sistema deberá exponer una pantalla "Ficha de animal" accesible desde una lista de animales o desde la búsqueda.
 
@@ -235,17 +278,16 @@ Antes de las requirements, dejo registradas las decisiones cerradas para esta sp
 
 **R14.7** Si el animal es ternero o ternera, la pantalla deberá mostrar un link a la ficha de la madre derivado del `reproductive_events.calf_id` que lo originó.
 
-### R15. Cliente: alta y búsqueda de animales
+### R15. — (eliminada en refinamiento 2026-05-26)
 
-**R15.1** El sistema deberá exponer una pantalla "Buscar animal" con tres campos: TAG, IDV y `visual_id_alt`. Al menos uno con texto, dispara búsqueda en orden de prioridad R5.1 → R5.2 → R5.3.
+La sección original R15 "Cliente: alta y búsqueda de animales" (R15.1..R15.5) **fue eliminada** porque la UX de búsqueda + alta interactiva se mueve a spec 09 `09-buscar-animal`. Spec 02 queda como modelo de datos puro: expone schema, RLS, triggers y la capacidad de búsqueda (R5) + cronología (R10), y spec 09 se encarga de toda la UX (form dinámico por rodeo, dos puertas — manual + bastón BLE —, find-or-create, selección de rodeo con `lastRodeoSelected`, etc.).
 
-**R15.2** Si la búsqueda no encuentra resultados, la pantalla deberá ofrecer un CTA "Crear este animal" que abre el form de alta con los datos ya ingresados pre-poblados.
-
-**R15.3** El form de alta deberá tener inputs para los tres identificadores, `species` (default bovino, oculto si solo hay uno activo), `sex`, `birth_date` (opcional), `rodeo` (default el único activo del establishment), `breed`, `coat_color`, `entry_date`, `entry_weight`, `entry_origin`. La categoría se autocalcula (R4.7) y se muestra read-only con opción de override.
-
-**R15.4** El form deberá validar localmente que al menos uno de los tres identificadores tenga texto antes de habilitar el botón "Crear" (R13.3).
-
-**R15.5** Donde un `field_operator` o `veterinarian` cree un animal durante una maniobra (feature 03), el sistema deberá permitir el alta con los mismos datos mínimos. El alta vía maniobra reusa el mismo Edge Function / RLS path que el alta manual.
+Las capacidades subyacentes del modelo siguen acá:
+- R5.1..R5.4: búsqueda por TAG / IDV / `visual_id_alt` con scoping por establishment activo.
+- R4.13: inmutabilidad de identificadores post-alta (regla del modelo, no UX).
+- R4.7: cálculo automático de categoría inicial.
+- R13.3: validación local de al menos un identificador antes de envío.
+- R10: cronología (consumida por la pantalla de edit de spec 09).
 
 ## Criterios de aceptación globales
 
@@ -255,7 +297,9 @@ Esta spec se considera implementada cuando:
 - Un usuario crea un animal hembra de < 1 año en cría bovina y el sistema le asigna `category = ternera` automáticamente. El mismo animal a 18 meses queda como `vaquillona`.
 - Al registrar un tacto positivo sobre una vaquillona, su categoría pasa automáticamente a `vaquillona_preñada`. Al registrar el parto, pasa a `vaca_segundo_servicio`. Si el usuario cambió manualmente la categoría antes, el override se respeta.
 - Al registrar un parto con `calf_weight` y `calf_sex`, el sistema crea automáticamente el ternero como entidad independiente y linkea madre ↔ ternero vía `reproductive_events.calf_id`.
-- La ficha del animal muestra todos los eventos cargados ordenados cronológicamente.
+- La ficha del animal muestra todos los eventos cargados ordenados cronológicamente, incluyendo los 5 tipos tipados (peso / reproductivo / sanitario / condition score / lab) **+ las observaciones libres de `animal_events`** (modelo Híbrido) **+ los `category_change` históricos**.
+- Una observación libre creada por un usuario se puede editar dentro de los 15 minutos del INSERT (`edit_window_until`). Pasada la ventana, el sistema rechaza el UPDATE de `text`, `structured_payload` o `event_type` y solo permite soft-delete.
+- Los identificadores formales (`tag_electronic`, `idv`) no se pueden modificar post-alta (R4.13). `visual_id_alt` sí se puede actualizar.
 - Cargar un animal en el campo (sin conexión) funciona end-to-end: el alta queda persistida local, sincroniza al volver red, los triggers del server revalidan y no hay divergencia.
 - RLS impide que un usuario lea o modifique animales / eventos de un establishment donde no tiene rol activo (validado con tests reales contra DB remota).
 - Todo lo anterior funciona con Supabase + cliente React Native (frontend puede estar pausado en el backend-only en MVP, pero el spec describe ambos lados).

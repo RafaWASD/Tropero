@@ -3,6 +3,18 @@
 **Status**: Draft (pendiente de aprobación humana)
 **Fecha**: 2026-05-25
 
+## Historial de refinamiento
+
+- **2026-05-26** — Refinamiento previo a aprobación. Cambios:
+  - Agregada tabla `animal_events` (modelo Híbrido, ADR-017 matizado) en migration nueva `0033_animal_events.sql`. CHECK acota `event_type` a `'observacion' | 'otro'`. RLS scopeada por `establishment_id` denormalizado. Trigger `tg_set_author_id_auth_uid` autollenar `author_id = auth.uid()`. Trigger BEFORE UPDATE rechaza modificación de `text/structured_payload/event_type` pasada `edit_window_until` (cubre R6.10..R6.13).
+  - Extendida función `animal_timeline` para incluir `observacion` como séptimo origen (UNION ALL con `animal_events`). Migration `0034_animal_timeline_v2.sql` reemplaza la versión de `0032`.
+  - Agregado trigger `tg_animals_block_tag_change` y `tg_animal_profiles_block_idv_change` para enforce inmutabilidad post-alta de `tag_electronic` y `idv` (R4.13). `visual_id_alt` sigue editable.
+  - Bucket `est_animal_events` agregado a PowerSync.
+  - Renumerada `0033_check_grants.sql` original a `0036_check_grants.sql` para acomodar las migrations nuevas.
+  - Eliminada sección que referenciaba el flujo R15 desde el cliente — la UX de búsqueda + alta interactiva ahora vive en spec 09. `useSearchAnimal` queda referenciado como hook que **consume** las primitives de este spec (R5 + R10) pero su definición e implementación se mueven a spec 09. La pantalla `AnimalSearchScreen` y `AnimalCreateScreen` se mueven a spec 09.
+  - Agregada sección "Motor de form dinámico por rodeo" que confirma cómo se renderiza el form de alta según `system_id` del rodeo seleccionado (consumido por spec 09).
+  - Renumeración de migrations actualizada en el diagrama del top y en la sección "Migrations 0012..0034".
+
 ## Arquitectura general
 
 ```
@@ -23,17 +35,23 @@
 ┌─────────────────────────────────────────────────────┐
 │  Supabase                                            │
 │  ┌──────────────────────────────────────────────┐    │
-│  │  Migrations 0012..0030 (este spec):           │    │
+│  │  Migrations 0012..0035 (este spec):           │    │
 │  │   - species / systems / categories (config)   │    │
 │  │   - rodeos                                    │    │
 │  │   - animals / animal_profiles                 │    │
-│  │   - eventos (weight, repro, sanitary, ...)    │    │
+│  │   - eventos tipados (weight, repro, sanitary, │    │
+│  │     condition_score, lab_samples)             │    │
+│  │   - animal_events (Híbrido: 'observacion' |   │    │
+│  │     'otro') con edit_window_until 15 min      │    │
 │  │   - animal_category_history                   │    │
 │  │   - triggers: transiciones, ternero al pie,   │    │
 │  │     identidad check, default rodeo,           │    │
-│  │     created_by, category_history              │    │
-│  │   - helpers: animal_timeline(), compute_      │    │
-│  │     category(), establishment_of_profile()    │    │
+│  │     created_by, author_id, category_history,  │    │
+│  │     bloqueo cambio tag/idv (inmutabilidad)    │    │
+│  │   - helpers: animal_timeline() (con           │    │
+│  │     observacion como 7mo origen),             │    │
+│  │     compute_category(),                       │    │
+│  │     establishment_of_profile()                │    │
 │  │   - RLS policies por tabla                    │    │
 │  └──────────────────────────────────────────────┘    │
 └─────────────────────────────────────────────────────┘
@@ -46,7 +64,7 @@ Se parte del estado actual del backend tras spec 01:
 - Patrón de migration con `enable RLS + GRANT + policies` documentado.
 - Tests Node nativo `supabase/tests/rls/run.cjs`.
 
-Las migrations de este spec comienzan en `0012_` y siguen en adelante.
+Las migrations de este spec comienzan en `0012_` y siguen hasta `0036_`. El refinamiento 2026-05-26 agregó migrations `0033_animal_events.sql`, `0034_animal_timeline_v2.sql` (reemplaza la timeline de `0032`) y `0035_immutability_identifiers.sql`, y renumeró el housekeeping de grants a `0036_check_grants.sql`. Ver "Historial de refinamiento" arriba.
 
 ## Schema SQL
 
@@ -1128,6 +1146,260 @@ grant execute on function public.animal_timeline (uuid) to authenticated;
 
 Cubre **R10.1**, **R10.2**.
 
+### Eventos libres / observaciones (`animal_events`) — modelo Híbrido
+
+> Tabla agregada en refinamiento 2026-05-26 (ADR-017 matizado). Convive con las 5 tablas tipadas; cubre **solo** `event_type IN ('observacion','otro')`. Los demás tipos del ADR-017 original (`salud`, `reproduccion`, `traslado`, `pesaje`, `identificacion`) **no** van acá: ya están en las 5 tablas tipadas. Esa convivencia preserva type-safety para el pilar de analytics y, a la vez, da al operador un cuaderno libre para observaciones humanas sin schema.
+
+```sql
+-- 0033_animal_events.sql
+create table public.animal_events (
+  id                 uuid primary key default gen_random_uuid(),
+  animal_profile_id  uuid not null references public.animal_profiles(id) on delete cascade,
+  establishment_id   uuid not null references public.establishments(id) on delete cascade,
+  author_id          uuid not null references public.users(id),
+  created_at         timestamptz not null default now(),
+  event_type         text not null check (event_type in ('observacion','otro')),
+  text               text,
+  structured_payload jsonb,
+  edit_window_until  timestamptz not null default (now() + interval '15 minutes'),
+  deleted_at         timestamptz
+);
+
+create index animal_events_by_profile_created
+  on public.animal_events (animal_profile_id, created_at desc)
+  where deleted_at is null;
+
+create index animal_events_by_establishment
+  on public.animal_events (establishment_id, created_at desc)
+  where deleted_at is null;
+
+create index animal_events_by_author
+  on public.animal_events (author_id, created_at desc);
+
+-- Trigger: setear author_id automáticamente desde auth.uid() si vino null
+create or replace function public.tg_set_author_id_auth_uid ()
+returns trigger language plpgsql as $$
+begin
+  if new.author_id is null then
+    new.author_id := auth.uid();
+  end if;
+  return new;
+end; $$;
+
+create trigger animal_events_set_author_id
+  before insert on public.animal_events
+  for each row execute function public.tg_set_author_id_auth_uid();
+
+-- Trigger: validar consistencia animal_profile_id ↔ establishment_id
+-- (el cliente envía ambos; defensivamente verificamos que coinciden)
+create or replace function public.tg_animal_events_validate_est ()
+returns trigger language plpgsql as $$
+declare v_est uuid;
+begin
+  select establishment_id into v_est from public.animal_profiles where id = new.animal_profile_id;
+  if v_est is null then
+    raise exception 'animal_profile_id not found' using errcode = '23503';
+  end if;
+  if v_est <> new.establishment_id then
+    raise exception 'establishment_id mismatch with animal_profile' using errcode = '23514';
+  end if;
+  return new;
+end; $$;
+
+create trigger animal_events_validate_est
+  before insert on public.animal_events
+  for each row execute function public.tg_animal_events_validate_est();
+
+-- Trigger: rechazar UPDATE de text/structured_payload/event_type pasada la ventana
+create or replace function public.tg_animal_events_enforce_edit_window ()
+returns trigger language plpgsql as $$
+begin
+  if now() > old.edit_window_until then
+    if new.text is distinct from old.text
+       or new.structured_payload is distinct from old.structured_payload
+       or new.event_type is distinct from old.event_type then
+      raise exception 'edit window expired for animal_event %', old.id
+        using errcode = '23514';
+    end if;
+  end if;
+  -- author_id, animal_profile_id, establishment_id, created_at, edit_window_until inmutables
+  if new.author_id        is distinct from old.author_id
+     or new.animal_profile_id is distinct from old.animal_profile_id
+     or new.establishment_id  is distinct from old.establishment_id
+     or new.created_at        is distinct from old.created_at
+     or new.edit_window_until is distinct from old.edit_window_until then
+    raise exception 'immutable column changed on animal_event %', old.id
+      using errcode = '23514';
+  end if;
+  return new;
+end; $$;
+
+create trigger animal_events_enforce_edit_window
+  before update on public.animal_events
+  for each row execute function public.tg_animal_events_enforce_edit_window();
+
+-- RLS
+alter table public.animal_events enable row level security;
+
+create policy animal_events_select on public.animal_events
+  for select using (has_role_in(establishment_id) and deleted_at is null);
+
+create policy animal_events_insert on public.animal_events
+  for insert with check (has_role_in(establishment_id));
+
+-- UPDATE: author original (dentro o fuera de ventana — el trigger enforce qué columnas son tocables) o owner
+create policy animal_events_update on public.animal_events
+  for update using (
+    has_role_in(establishment_id)
+    and (author_id = auth.uid() or is_owner_of(establishment_id))
+  ) with check (
+    has_role_in(establishment_id)
+    and (author_id = auth.uid() or is_owner_of(establishment_id))
+  );
+
+grant select, insert, update on public.animal_events to authenticated;
+```
+
+Notas:
+- El CHECK `event_type IN ('observacion','otro')` cierra el alcance a lo que el modelo Híbrido pidió. **No** abrir a `'salud'`, `'reproduccion'`, etc. — esos ya están cubiertos por las 5 tablas tipadas (R6.1..R6.5).
+- El trigger `enforce_edit_window` se aplica también al UPDATE de `deleted_at` desde el cliente, pero no lo bloquea porque solo enforce las 3 columnas de contenido + las 5 columnas inmutables. Cambiar `deleted_at` (soft-delete) es permitido siempre.
+- **Evolución post-MVP**: si en uso real se valida que conviene unificar las 5 tablas tipadas + `animal_events` en un único modelo "evento genérico + capa de vistas tipadas", se evaluará entonces. Por ahora la separación se mantiene porque protege analytics. Documentado como TODO conceptual; no hay implementación pendiente.
+
+Cubre **R6.10**, **R6.11**, **R6.12**, **R6.13**.
+
+### Cronología v2 (incluye `animal_events`)
+
+La función `animal_timeline` de `0032` se reemplaza para incluir el séptimo origen `observacion`.
+
+```sql
+-- 0034_animal_timeline_v2.sql
+create or replace function public.animal_timeline (profile_id uuid)
+returns table (
+  event_kind  text,
+  event_id    uuid,
+  event_date  timestamptz,
+  payload     jsonb
+) language sql security definer stable
+set search_path = public as $$
+  select 'weight'::text, id, (weight_date::timestamptz + coalesce(time, '00:00'::time)),
+         jsonb_build_object('weight_kg', weight_kg, 'source', source, 'notes', notes)
+  from public.weight_events
+  where animal_profile_id = profile_id and deleted_at is null
+    and has_role_in(establishment_of_profile(profile_id))
+
+  union all
+  select 'reproductive', id, event_date::timestamptz,
+         jsonb_build_object('event_type', event_type, 'pregnancy_status', pregnancy_status,
+                            'calf_id', calf_id, 'notes', notes)
+  from public.reproductive_events
+  where animal_profile_id = profile_id and deleted_at is null
+    and has_role_in(establishment_of_profile(profile_id))
+
+  union all
+  select 'sanitary', id, event_date::timestamptz,
+         jsonb_build_object('event_type', event_type, 'product_name', product_name,
+                            'route', route, 'notes', notes)
+  from public.sanitary_events
+  where animal_profile_id = profile_id and deleted_at is null
+    and has_role_in(establishment_of_profile(profile_id))
+
+  union all
+  select 'condition_score', id, event_date::timestamptz,
+         jsonb_build_object('score', score, 'notes', notes)
+  from public.condition_score_events
+  where animal_profile_id = profile_id and deleted_at is null
+    and has_role_in(establishment_of_profile(profile_id))
+
+  union all
+  select 'lab_sample', id, collection_date::timestamptz,
+         jsonb_build_object('sample_type', sample_type, 'tube_number', tube_number,
+                            'result', result, 'received', result_received_date)
+  from public.lab_samples
+  where animal_profile_id = profile_id and deleted_at is null
+    and has_role_in(establishment_of_profile(profile_id))
+
+  union all
+  select 'category_change', id, changed_at,
+         jsonb_build_object('from', from_category_id, 'to', to_category_id, 'reason', reason)
+  from public.animal_category_history
+  where animal_profile_id = profile_id
+    and has_role_in(establishment_of_profile(profile_id))
+
+  union all
+  select 'observacion', id, created_at,
+         jsonb_build_object('event_type', event_type, 'text', text,
+                            'structured_payload', structured_payload,
+                            'author_id', author_id,
+                            'edit_window_until', edit_window_until)
+  from public.animal_events
+  where animal_profile_id = profile_id and deleted_at is null
+    and has_role_in(establishment_id)
+
+  order by event_date desc;
+$$;
+
+grant execute on function public.animal_timeline (uuid) to authenticated;
+```
+
+Cubre **R10.1** (extendido), **R10.2**.
+
+### Inmutabilidad de identificadores post-alta (R4.13)
+
+Migration nueva que bloquea por trigger cualquier UPDATE de `animals.tag_electronic` o `animal_profiles.idv`. `visual_id_alt` sigue editable.
+
+```sql
+-- 0035_immutability_identifiers.sql
+-- Inmutabilidad relajada (refinamiento 2026-05-26 para destrabar R12 de spec 09):
+-- - Permitir NULL → valor (completar info que faltaba al alta).
+-- - Bloquear valor → otro valor (reescribir identidad: rompe trazabilidad SENASA).
+-- - Bloquear valor → NULL (volver a quedar "sin caravana" tras haberla tenido no es un caso de uso real;
+--   si alguna vez aparece, se trata como caso edge a refinar; por defecto se rechaza).
+
+create or replace function public.tg_animals_block_tag_change ()
+returns trigger language plpgsql as $$
+begin
+  -- Permitir NULL → valor (asignación inicial de caravana en spec 09 R7/R8).
+  if old.tag_electronic is null then
+    return new;
+  end if;
+  -- Bloquear cualquier cambio cuando ya había un TAG cargado.
+  if new.tag_electronic is distinct from old.tag_electronic then
+    raise exception 'tag_electronic is immutable once set (animal %); use soft-delete + new insert to correct an erroneous TAG'
+      using errcode = '23514';
+  end if;
+  return new;
+end; $$;
+
+create trigger animals_block_tag_change
+  before update of tag_electronic on public.animals
+  for each row execute function public.tg_animals_block_tag_change();
+
+create or replace function public.tg_animal_profiles_block_idv_change ()
+returns trigger language plpgsql as $$
+begin
+  -- Misma política: NULL → valor permitido (completar IDV faltante al alta).
+  if old.idv is null then
+    return new;
+  end if;
+  if new.idv is distinct from old.idv then
+    raise exception 'idv is immutable once set (profile %); use soft-delete + new insert to correct an erroneous IDV'
+      using errcode = '23514';
+  end if;
+  return new;
+end; $$;
+
+create trigger animal_profiles_block_idv_change
+  before update of idv on public.animal_profiles
+  for each row execute function public.tg_animal_profiles_block_idv_change();
+```
+
+Notas:
+- `visual_id_alt` queda explícitamente **fuera** del bloqueo: es texto libre que en la práctica se carga incompleto al inicio.
+- **Refinamiento 2026-05-26**: la inmutabilidad de `tag_electronic` e `idv` es **post-completitud, no post-alta**. Una vez que el campo tiene valor, no se puede cambiar. Pero `NULL → valor` está permitido para soportar el caso "animal cargado sin caravana al que después se le pone una" (spec 09 R7/R8 — asignación de caravanas). La distinción semántica: completar información que faltaba ≠ reescribir identidad. El primer caso preserva trazabilidad; el segundo la rompe.
+- Tests requeridos (T2.x correspondiente): caso permitido (`NULL → 'ARG001'`) y caso prohibido (`'ARG001' → 'ARG002'`) validados por separado. También bloquear `valor → NULL` (defensivo).
+
+Cubre **R4.13**.
+
 ## Row Level Security (resumen)
 
 | Tabla | SELECT | INSERT | UPDATE | DELETE (hard) |
@@ -1137,6 +1409,7 @@ Cubre **R10.1**, **R10.2**.
 | `animals` | derivado de `animal_profiles` | autenticado | derivado | — |
 | `animal_profiles` | `has_role_in` + `deleted_at IS NULL` | `has_role_in` | `has_role_in` | — |
 | `weight_events`, `reproductive_events`, `sanitary_events`, `condition_score_events`, `lab_samples` | `has_role_in(establishment_of_profile(...))` | idem | `is_owner_of OR created_by = uid()` | — |
+| `animal_events` (Híbrido, `'observacion' \| 'otro'`) | `has_role_in(establishment_id)` | `has_role_in(establishment_id)` | `author_id = uid() OR is_owner_of` + trigger enforce edit_window | — (soft via `deleted_at`) |
 | `semen_registry` | `has_role_in` | `has_role_in` | `is_owner_of` | — |
 | `animal_category_history` | `has_role_in` | (trigger) | — | — |
 
@@ -1165,17 +1438,21 @@ Expone: `switchRodeo`, `createRodeo` (solo si rol owner), `refreshRodeos`. Scope
 
 ### Hooks de animal
 
+Spec 02 define **solo los hooks que el modelo de datos expone** (lista, detalle, timeline, mutaciones). El hook de búsqueda interactiva + alta dinámica (`useSearchAnimal`, form CREATE/EDIT con dos puertas, selección de rodeo, form dinámico por sistema, etc.) **se mueve a spec 09 `09-buscar-animal`** — esta spec ya no lo define.
+
 ```typescript
 useAnimals(filter?: { status?: AnimalStatus, rodeoId?: string, search?: string }): UseQueryResult<AnimalListItem[]>
 useAnimal(profileId: string): UseQueryResult<AnimalDetail>
-useAnimalTimeline(profileId: string): UseQueryResult<TimelineEvent[]>
-useCreateAnimal(): UseMutationResult<...>
+useAnimalTimeline(profileId: string): UseQueryResult<TimelineEvent[]>     // incluye 'observacion'
+useCreateAnimal(): UseMutationResult<...>                                  // primitive — UX completa en spec 09
 useUpdateAnimal(profileId: string): UseMutationResult<...>
-useSearchAnimal(): { byTag, byIdv, byVisualAlt, isSearching }
 useCategories(systemCode: string): Category[]
+useAnimalObservations(profileId: string): { add, softDelete, edit }        // wrapper de animal_events ('observacion'|'otro')
 ```
 
-Todos los hooks orquestan `services/animals.ts` que es la única capa que toca PowerSync. La regla de capas del `architecture.md` se mantiene.
+Todos los hooks orquestan `services/animals.ts` (+ `services/observations.ts` para `animal_events`) que es la única capa que toca PowerSync. La regla de capas del `architecture.md` se mantiene.
+
+**Nota explícita**: `useSearchAnimal` **no se define en este spec**. Spec 09 lo construye consumiendo las primitives de búsqueda definidas en R5 (queries directas a `animal_profiles` por TAG / IDV / `visual_id_alt`) y el hook de mutación `useCreateAnimal` de acá.
 
 ### Lógica de categoría compartida cliente/server
 
@@ -1183,21 +1460,19 @@ Crear `app/src/services/category/transitions.ts` con la implementación TypeScri
 
 ### Navegación
 
-Nuevas pantallas dentro de `AppStack → MainTabs`:
+Nuevas pantallas dentro de `AppStack → MainTabs` que **define este spec**:
 
 ```
 MainTabs
 ├── Home
 ├── Animales              ← nuevo (tab)
 │    ├── AnimalListScreen
-│    ├── AnimalSearchScreen
-│    ├── AnimalCreateScreen / CompletePhoneScreen (heredado)
-│    └── AnimalDetailScreen  ← ficha + cronología
+│    └── AnimalDetailScreen  ← ficha + cronología (incluye observaciones)
 └── Settings
      └── RodeosScreen      ← gestión de rodeos (owner)
 ```
 
-`AcceptInvitation` y `EmptyState` siguen del spec 01.
+`AnimalSearchScreen` y `AnimalCreateScreen` **no se definen acá** — pertenecen a spec 09 `09-buscar-animal` (UX de búsqueda + alta interactiva + form dinámico por rodeo + dos puertas manual/BLE). `AcceptInvitation` y `EmptyState` siguen del spec 01.
 
 ## PowerSync
 
@@ -1209,6 +1484,7 @@ Heredando los buckets de spec 01 (`user_self`, `est_membership`, `est_data`, `es
 - `est_animal_profiles`: filas de `animal_profiles` por establishment.
 - `est_animals_local`: filas de `animals` con `id` en el set de `animal_profiles.animal_id` del establishment. (No es global; cada cliente solo sincroniza los animales presentes en sus establishments.)
 - `est_weight_events`, `est_reproductive_events`, `est_sanitary_events`, `est_condition_score_events`, `est_lab_samples`: filas cuyo `animal_profile_id` cae en `est_animal_profiles`.
+- `est_animal_events`: filas de `animal_events` cuyo `establishment_id` está en el set del usuario (filtrado por la columna denormalizada — no requiere join). Modelo Híbrido (refinamiento 2026-05-26).
 - `est_animal_category_history`: idem.
 - `est_semen_registry`: por establishment.
 - `config_global`: filas de `species`, `systems_by_species`, `categories_by_system` (todas las activas). TTL 24 hs en cliente.
@@ -1223,15 +1499,17 @@ Heredando los buckets de spec 01 (`user_self`, `est_membership`, `est_data`, `es
 
 PowerSync maneja la cola por default. Para casos extremos (constraints DB que fallan offline porque el cliente no vio el estado actual), el cliente captura el error de sync y muestra una alerta accionable al usuario ("este IDV ya existe en tu campo; revisá").
 
-## Búsqueda
+## Búsqueda (primitives de R5 consumidas por spec 09)
 
-`useSearchAnimal` implementa el orden de R5:
+> El hook `useSearchAnimal` y la pantalla `AnimalSearchScreen` **se definen en spec 09** (refinamiento 2026-05-26). Esta sección documenta solo las **primitives de búsqueda a nivel datos** que spec 09 consume.
+
+Orden canónico (R5):
 
 1. TAG (match exacto contra `animals.tag_electronic` filtrado por presencia de perfil en el establishment activo).
 2. IDV (match exacto contra `animal_profiles.idv` filtrado por establishment).
 3. `visual_id_alt` fuzzy: `select * from animal_profiles where visual_id_alt % :query and establishment_id = :est and deleted_at is null order by similarity(visual_id_alt, :query) desc limit 20`.
 
-Si el usuario escanea TAG y el animal existe globalmente pero no tiene perfil activo acá, la UI ofrece "Dar de alta en este campo" (crea nuevo `animal_profile` para el animal global existente).
+Caso especial cubierto a nivel datos: si el TAG existe globalmente pero no hay perfil activo en el establishment, la query retorna el `animal_id` del global sin perfil local. La UX de "Dar de alta en este campo" (crear nuevo `animal_profile` para ese animal global) la decide y orquesta spec 09.
 
 ## Cliente: validaciones locales
 
@@ -1240,6 +1518,15 @@ Si el usuario escanea TAG y el animal existe globalmente pero no tiene perfil ac
 - `validateIdentity({ tag, idv, visualAlt })`: retorna error si todos vacíos (R13.3).
 - `validateProfileForm(form, rodeoSystemCode)`: chequea coherencia (categoría override válida para sistema, etc.).
 - `previewCategory(form, events)`: invoca `transitions.ts` para mostrar la categoría calculada en la UI antes de guardar.
+
+## Motor de form dinámico por rodeo (consumido por spec 09)
+
+El form de alta de animal **renderiza campos según el `system_id` del rodeo seleccionado**. Esta nota es para que el implementer de spec 02 (backend) y spec 09 (frontend) sepan dónde vive la configuración.
+
+- **Configuración mínima MVP**: las **categorías disponibles** por sistema viven en `categories_by_system` (ya seedeada por T1.4). Spec 09 lee esa tabla para popular el dropdown de categoría sugerida + override (R4.7, R4.8).
+- **Campos por sistema**: en MVP, los campos del form de alta son **los mismos para todos los sistemas activos** (en el MVP solo `(bovino, cria)` está activo, así que la pregunta es trivial). La columnas de `animal_profiles` cubren el superset razonable (`breed`, `coat_color`, `birth_weight`, `entry_*`, etc.). Spec 09 puede hardcodear el render en cliente para `(bovino, cria)`.
+- **Evolución post-MVP**: cuando se habilite un segundo sistema (`invernada`, `feedlot`, `tambo`, `cabana`), evaluar si hace falta una tabla auxiliar **`system_field_config (system_id, field_key, required, default_value, sort_order)`** que parametrice qué campos mostrar y cuáles ocultar por sistema. Decisión diferida hasta tener ≥2 sistemas activos. Mientras tanto: el implementer de spec 09 puede dejar un punto de extensión claro en el componente del form (ej. un map `systemCode → FieldConfig[]`) para que agregar la tabla más adelante sea un swap de fuente, no un rewrite.
+- **No-objetivo de este spec**: spec 02 **no implementa** la pantalla del form ni el motor de render dinámico. Solo expone la fuente de configuración (`categories_by_system`) y deja el hook conceptual para extender post-MVP.
 
 ## Alternativas descartadas
 

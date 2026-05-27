@@ -23,8 +23,8 @@
         "Un owner puede remover el acceso de otro user y ese user pierde acceso inmediatamente."
       ],
       "sdd": true,
-      "status": "in_progress",
-      "notes": "Backend (Fases 0+1+2) cerrado y verde: 11 migrations aplicadas, 24+15 tests reales contra DB remota, 7 Edge Functions con email (Resend) + push (Expo). Frontend (Fases 3-8) pausado intencionalmente esperando definición de stack y refinamiento de UX por Raf — ver ADR-013."
+      "status": "blocked",
+      "notes": "Backend (Fases 0+1+2) cerrado y verde: 12 migrations aplicadas (incluyendo refactor a link shareable de ADR-014), 15 RLS + 26 Edge tests reales contra DB remota, 7 Edge Functions con email (Resend) + push (Expo). Frontend (Fases 3-8) bloqueado esperando design system (item A.1 progress/plan.md). Cuando Raf cierre el design system canónico, esta feature destraba B.1 del plan. Status `blocked` (no `in_progress`) para respetar regla one_feature_at_a_time del check."
     },
     {
       "id": 2,
@@ -38,7 +38,8 @@
         "Ficha de animal muestra cronología de eventos."
       ],
       "sdd": true,
-      "status": "spec_ready"
+      "status": "in_progress",
+      "notes": "Spec refinada y aprobada por Raf el 2026-05-26 con modelo Híbrido de eventos (5 tablas tipadas + animal_events para observaciones libres), R4.13 inmutabilidad de identificadores, R15 borrada (movida a spec 09). R14 (pantalla Ficha animal) aprobada como TENTATIVA — sujeta a refinamiento incremental cuando se cierre el design system (item A.1 plan.md). Backend (Fase 1+2: schema + RLS + triggers + tests) listo para implementar. Frontend (Fase 3+) pausado intencionalmente hasta cerrar design system, mismo patrón que spec 01."
     },
     {
       "id": 3,
@@ -124,6 +125,22 @@
       ],
       "sdd": true,
       "status": "pending"
+    },
+    {
+      "id": 9,
+      "name": "09-buscar-animal",
+      "title": "BUSCAR ANIMAL",
+      "description": "Feature core de identificación y carga/edición de animales. Dos puertas de entrada que convergen: (1) manual desde sección ANIMALES tipeando ID visual, y (2) bastón BLE como listener global activo en cualquier pantalla (excepto MODO MANIOBRAS). Resuelve en find-or-create: si el animal no existe, abre form CREATE con ID precargado + selección de rodeo + form dinámico según sistema productivo del rodeo. Si existe, abre form EDIT con datos precargados y acceso al timeline de eventos.",
+      "acceptance": [
+        "Bastoneo desde cualquier pantalla (excepto MODO MANIOBRAS) dispara el flujo BUSCAR ANIMAL.",
+        "Manual desde sección ANIMALES con ID visual también dispara el mismo flujo.",
+        "Animal nuevo: form CREATE con ID precargado no modificable + selección de rodeo (1 rodeo → fijo; ≥2 → combo con default lastRodeoSelected) + campos dinámicos según sistema del rodeo.",
+        "Animal existente: form EDIT con datos precargados + sección timeline append-only + botón agregar evento.",
+        "MVP cubre duplicados lógicos con flujo A (búsqueda intermedia previa al alta) y flujo B (asignación masiva de caravanas). Detección automática de duplicados queda diferida post-MVP."
+      ],
+      "sdd": true,
+      "status": "blocked",
+      "notes": "Spec redactada 2026-05-26 siguiendo decisiones de sesiones 9-11. APROBADA por Raf el 2026-05-26. 12 requirements totales (6 definitivas: R3, R6, R9, R10, R11, R12; 6 tentativas UI con disclaimer estilo R14 de spec 02: R1, R2, R4, R5, R7, R8). R12 (tensión con R4.13 de spec 02) RESUELTA el 2026-05-26 vía opción A (refinar trigger para permitir NULL→valor). Status `blocked` (no `in_progress`) para respetar regla `one_feature_at_a_time` del check.mjs: spec 02 está actualmente in_progress y es prerequisito técnico (spec 09 consume primitives de spec 02). Una vez que B.2 (backend spec 02) termine o se libere ese slot, spec 09 pasa a `in_progress`. Dependencias activas restantes: (1) spec 04 (BLE bastón, pending) — puerta BLE (R2) + Fase 4 bloqueadas hasta implementar bastón; puerta manual (R1) y motor find-or-create (R3) funcionan sin spec 04; (2) ADR-018 (estructura nav principal, pending) — bottom nav tentativo [Inicio] [Animales] [⚡FAB Maniobra] [Reportes] [Más]; (3) design system canónico (A.1 plan.md) — UI tentativa. Fases ejecutables sin design system: 0, 1, 5, 6 (parcial). Fases 2, 3, 4 esperan design system cerrado. Mismo patrón pause-frontend que specs 01 y 02."
     }
   ]
 }

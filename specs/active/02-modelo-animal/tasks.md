@@ -3,6 +3,18 @@
 **Status**: Draft (pendiente de aprobación humana)
 **Fecha**: 2026-05-25
 
+## Historial de refinamiento
+
+- **2026-05-26** — Refinamiento previo a aprobación. Cambios:
+  - Agregadas tareas Fase 1 nuevas para `animal_events` (modelo Híbrido, ADR-017 matizado): **T1.24** migration + RLS + triggers, **T1.25** migration `animal_timeline_v2` que incluye `observacion` como séptimo origen.
+  - Agregada **T1.26** migration de inmutabilidad de identificadores (`tag_electronic`, `idv`) post-alta — cubre R4.13. `visual_id_alt` sigue editable.
+  - Renumerado el housekeeping de grants: **T1.23** → **T1.27** (`0033_check_grants.sql` → `0036_check_grants.sql`).
+  - Agregadas tareas Fase 2 nuevas: **T2.13** tests de `animal_events` (CHECK constraint, append-only, edit_window_until 15min, soft-delete, RLS), **T2.14** tests de inmutabilidad de identificadores (R4.13), **T2.15** tests de timeline v2 con 7 orígenes.
+  - **Eliminadas T4.2 y T4.3** (Fase 4 cliente: `AnimalSearchScreen` y `AnimalCreateScreen`) — la UX de búsqueda + alta interactiva se mueve a spec 09 `09-buscar-animal`. Spec 02 ya no implementa esas pantallas.
+  - **Renumeradas** las tareas restantes de Fase 4: T4.4 → T4.2 (AnimalDetailScreen), T4.5 → T4.3 (RodeosScreen), T4.6 → T4.4 (Prompt CUT).
+  - Tabla "Trazabilidad R<n> → tasks" actualizada: eliminada fila R15.1..R15.5 (las requirements ya no existen); agregadas filas R6.10..R6.13 → T1.24, T2.13; R4.13 → T1.26, T2.14.
+  - Renumeración de migrations actualizada en el diagrama final.
+
 Plan de implementación paso a paso. Cada tarea tiene su criterio de aceptación y los `R<n>` que cubre. El orden importa: dependencias hacia adelante.
 
 **Fases sugeridas para esta feature**:
@@ -197,8 +209,39 @@ Igual que con spec 01, la feature se puede cerrar tras Fase 1+2 y **diferir Fase
 - **Aceptación**: llamar la función para un animal con eventos retorna todos en orden cronológico; llamarla para un animal de otro establishment retorna 0 filas (RLS).
 - **Cubre**: R10.1, R10.2.
 
-### T1.23 Migration `0033_check_grants.sql` (housekeeping)
-- Revisar y consolidar grants de todas las tablas/funciones nuevas.
+### T1.24 Migration `0033_animal_events.sql` (modelo Híbrido)
+- Crear tabla `public.animal_events` con `(id, animal_profile_id, establishment_id, author_id, created_at, event_type, text, structured_payload, edit_window_until, deleted_at)`.
+- CHECK constraint `event_type in ('observacion','otro')` — alcance acotado por modelo Híbrido (no se admiten los otros tipos del ADR-017 original).
+- Default `edit_window_until = now() + interval '15 minutes'`.
+- Indexes: `(animal_profile_id, created_at desc) where deleted_at is null`, `(establishment_id, created_at desc) where deleted_at is null`, `(author_id, created_at desc)`.
+- Función + trigger `tg_set_author_id_auth_uid` (BEFORE INSERT): autollenar `author_id = auth.uid()` si vino null.
+- Trigger `tg_animal_events_validate_est` (BEFORE INSERT): verificar que `establishment_id` coincide con `animal_profiles.establishment_id`.
+- Trigger `tg_animal_events_enforce_edit_window` (BEFORE UPDATE): rechazar cambio de `text/structured_payload/event_type` pasada `edit_window_until`; rechazar siempre cambio de `author_id/animal_profile_id/establishment_id/created_at/edit_window_until` (inmutables).
+- RLS:
+  - `select`: `has_role_in(establishment_id) and deleted_at is null`.
+  - `insert`: `has_role_in(establishment_id)`.
+  - `update`: `has_role_in(establishment_id) and (author_id = auth.uid() or is_owner_of(establishment_id))` (el trigger enforce qué columnas son tocables).
+- `grant select, insert, update` to `authenticated`.
+- **Aceptación**: insert con `event_type='salud'` falla con `23514` (CHECK); insert OK con `'observacion'`; update de `text` dentro de los 15 min OK; update de `text` pasadas 15 min falla; soft-delete (`update set deleted_at = now()`) permitido siempre por author/owner; userB sin rol no ve ni puede insertar; otro author no puede editar texto ajeno.
+- **Cubre**: R6.10, R6.11, R6.12, R6.13.
+
+### T1.25 Migration `0034_animal_timeline_v2.sql` (timeline con séptimo origen)
+- Reemplazar (`create or replace function`) `animal_timeline(profile_id uuid)` para incluir el UNION ALL con `animal_events` como `event_kind = 'observacion'`.
+- Payload del nuevo origen: `{ event_type, text, structured_payload, author_id, edit_window_until }`.
+- `event_date` del nuevo origen = `created_at` de `animal_events`.
+- Mantener `order by event_date desc` total.
+- **Aceptación**: animal con 1 weight + 1 observation → `animal_timeline` retorna 3 filas (weight + observation + category_change initial); cuenta correcta de los 7 orígenes posibles; userB sin rol → 0 filas (RLS).
+- **Cubre**: R10.1 (extendido a 7 orígenes).
+
+### T1.26 Migration `0035_immutability_identifiers.sql` (R4.13)
+- Función + trigger `tg_animals_block_tag_change` (BEFORE UPDATE OF `tag_electronic`): rechazar cualquier cambio de `tag_electronic` post-INSERT.
+- Función + trigger `tg_animal_profiles_block_idv_change` (BEFORE UPDATE OF `idv`): rechazar cualquier cambio de `idv` post-INSERT.
+- Explícitamente **no** bloquear `visual_id_alt` — sigue editable.
+- **Aceptación**: insert de animal con `tag_electronic='X'`, luego `update set tag_electronic='Y'` falla con `23514`; `update set visual_id_alt='nuevo'` OK; insert de profile con `idv='001'`, luego `update set idv='002'` falla.
+- **Cubre**: R4.13.
+
+### T1.27 Migration `0036_check_grants.sql` (housekeeping)
+- Revisar y consolidar grants de todas las tablas/funciones nuevas (incluye `animal_events`).
 - Cualquier permission que se haya escapado al rol `authenticated` queda fijada acá (sigue el patrón establecido por `0010_grants_fix.sql` de spec 01).
 - **Aceptación**: `node scripts/check.mjs` verde; `select` desde cliente authenticated sobre cada tabla con RLS funciona end-to-end.
 - **Cubre**: housekeeping.
@@ -302,6 +345,35 @@ Patrón heredado de spec 01: tests Node nativo en `supabase/tests/`, login con u
 - **Aceptación**: `check.mjs` corre Fase 2 entera y queda verde.
 - **Cubre**: housekeeping.
 
+### T2.13 Tests: `animal_events` (modelo Híbrido, R6.10..R6.13)
+- Caso 1: insert con `event_type='observacion'` + `text='vio cojera leve'` → OK; `author_id` queda con `auth.uid()` del cliente; `edit_window_until ≈ now() + 15 min`.
+- Caso 2: insert con `event_type='salud'` → falla con CHECK (`23514`). Solo `'observacion'` y `'otro'` son válidos.
+- Caso 3: insert con `establishment_id` que no coincide con `animal_profiles.establishment_id` del `animal_profile_id` provisto → falla.
+- Caso 4: update de `text` dentro de los 15 min por el author → OK.
+- Caso 5: update de `text` pasada la ventana (mock con `update animal_events set edit_window_until = now() - interval '1 min' where id = ...` previo) → falla con `23514`.
+- Caso 6: update de `author_id` / `animal_profile_id` / `establishment_id` / `created_at` / `edit_window_until` → falla siempre (inmutables).
+- Caso 7: soft-delete (`update set deleted_at = now()`) por author dentro de la ventana → OK; por author fuera de la ventana → OK (soft-delete no está atado al edit_window).
+- Caso 8: userB sin rol en estA intenta `select * from animal_events where ...` → 0 filas (RLS).
+- Caso 9: userB con rol `field_operator` en estA intenta editar evento creado por userA → falla (no es author ni owner).
+- Caso 10: userB con rol `owner` en estA edita evento de userA → OK (excepción administrativa).
+- **Aceptación**: 10 tests verdes.
+- **Cubre**: R6.10, R6.11, R6.12, R6.13.
+
+### T2.14 Tests: inmutabilidad de identificadores post-alta (R4.13)
+- Caso 1: crear animal con `tag_electronic='ARG001'`, luego `update set tag_electronic='ARG002'` → falla con `23514`.
+- Caso 2: crear profile con `idv='001'`, luego `update set idv='002'` → falla con `23514`.
+- Caso 3: `update set visual_id_alt='vaca blanca corregida'` → OK (no está bloqueado).
+- Caso 4: crear animal con `tag_electronic=null`, luego `update set tag_electronic='ARG003'` → falla (también es cambio de null a value).
+- **Aceptación**: 4 tests verdes.
+- **Cubre**: R4.13.
+
+### T2.15 Tests: cronología v2 con 7 orígenes (extensión de T2.10)
+- Animal con 1 peso + 1 tacto + 1 sanitario + 1 observation + 1 condition score → `animal_timeline(profile_id)` retorna 6 filas (5 eventos + 1 `category_change` initial). Verificar que `event_kind = 'observacion'` aparece en el resultado.
+- Borrar (soft-delete) la observation → ya no aparece en el timeline.
+- Otro user sin rol en el establishment del animal → 0 filas para todos los orígenes incluido `observacion`.
+- **Aceptación**: 3 tests verdes.
+- **Cubre**: R10.1 (séptimo origen).
+
 ## Fase 3 — Cliente: contextos y servicios base
 
 > **Estado**: pausado intencionalmente hasta que Raf retome el frontend con el stack del `ADR-013`. Las tareas quedan documentadas y listas para retomarse después.
@@ -315,11 +387,11 @@ Patrón heredado de spec 01: tests Node nativo en `supabase/tests/`, login con u
 
 ### T3.2 Servicio `app/src/services/animals.ts`
 - Funciones (sin tocar UI):
-  - `createAnimal(form): Promise<AnimalProfile>` con patrón split insert + select (`ADR-012`).
+  - `createAnimal(form): Promise<AnimalProfile>` con patrón split insert + select (`ADR-012`). **Primitive de mutación**: la UX de "alta interactiva con ID precargado + form dinámico por rodeo + dos puertas" se construye en spec 09 sobre esta primitive.
   - `fetchAnimals(filter): Promise<AnimalListItem[]>`.
   - `fetchAnimalDetail(profileId): Promise<AnimalDetail>` (incluye `animals.*` joined).
-  - `fetchAnimalTimeline(profileId): Promise<TimelineEvent[]>` llamando a `animal_timeline(...)`.
-  - `searchByTag / searchByIdv / searchByVisualAlt`.
+  - `fetchAnimalTimeline(profileId): Promise<TimelineEvent[]>` llamando a `animal_timeline(...)` (incluye `observacion` como séptimo origen).
+  - `searchByTag / searchByIdv / searchByVisualAlt` — **primitives** que spec 09 consume.
   - `updateAnimalCategory(profileId, categoryId)` (marca override por trigger).
   - `revertCategoryOverride(profileId)` (set override=false + recompute).
   - `markCut(profileId)`.
@@ -340,36 +412,30 @@ Patrón heredado de spec 01: tests Node nativo en `supabase/tests/`, login con u
 - **Aceptación**: misma lógica que el trigger SQL — verificado con tabla de casos.
 - **Cubre**: R13.4 (preview offline).
 
-### T3.5 Hooks (`useAnimals`, `useAnimal`, `useAnimalTimeline`, `useSearchAnimal`, `useCategories`)
+### T3.5 Servicio `app/src/services/observations.ts` (modelo Híbrido)
+- `createObservation({ animalProfileId, establishmentId, eventType, text?, structuredPayload? }): Promise<AnimalEvent>` con `event_type IN ('observacion','otro')` (validación tipo TS); el server enforce vía CHECK.
+- `editObservation(eventId, { text?, structuredPayload?, eventType? })`: el cliente debe verificar localmente si `now() < edit_window_until` antes de habilitar el botón de edit en UI; el server enforce vía trigger.
+- `softDeleteObservation(eventId)`: marca `deleted_at`, permitido siempre por author/owner.
+- **Aceptación**: unit tests + integration test contra DB remota.
+- **Cubre**: soporte de R6.10..R6.13.
+
+### T3.6 Hooks (`useAnimals`, `useAnimal`, `useAnimalTimeline`, `useCategories`, `useAnimalObservations`)
 - Cada hook orquesta el service correspondiente y expone estado de loading/error/data.
+- `useAnimalObservations(profileId)` envuelve `animal_events` (CRUD acotado al modelo Híbrido — solo `event_type IN ('observacion','otro')`).
+- `useSearchAnimal` **no se define en este spec** (se mueve a spec 09); las primitives de query (TAG / IDV / visual_id_alt) viven en `services/animals.ts` y son consumidas por spec 09.
 - **Aceptación**: cobertura de los flujos del cliente vía RTL component-tests donde el hook se usa.
-- **Cubre**: soporte de R14, R15.
+- **Cubre**: soporte de R14, R6.10..R6.13 (observaciones).
 
 ## Fase 4 — Cliente: pantallas
 
 ### T4.1 `AnimalListScreen` (tab Animales)
 - Lista paginada de `animal_profiles` activos del establishment activo, filtrable por rodeo y estado.
 - Tap → `AnimalDetailScreen`.
-- CTA "Buscar / Crear" → `AnimalSearchScreen`.
-- **Aceptación**: 50 animales se cargan sin lag perceptible (PowerSync local).
+- CTA "Buscar / Crear" navega a la pantalla `AnimalSearchScreen` **definida en spec 09** (no en este spec). En el momento de implementar spec 02 standalone, dejar el CTA con un placeholder o deshabilitado hasta que spec 09 lo provea.
+- **Aceptación**: 50 animales se cargan sin lag perceptible (PowerSync local); navegación al detail funciona; CTA hacia spec 09 queda enlazado o documentado como pendiente de integración cruzada.
 - **Cubre**: R14.1 (parcial).
 
-### T4.2 `AnimalSearchScreen` (R5, R15.1)
-- Tres inputs (TAG, IDV, visual_alt) + botón "Buscar".
-- Orden de búsqueda según R5.
-- Si no encuentra → CTA "Crear este animal" con pre-poblado.
-- **Aceptación**: búsqueda por cada uno de los tres campos retorna el animal correcto; "no encontrado" lleva al alta.
-- **Cubre**: R5.1, R5.2, R5.3, R5.4, R15.1.
-
-### T4.3 `AnimalCreateScreen` (R15.3, R15.4)
-- Form con identificadores, sex, birth_date opcional, rodeo (default único), breed, coat_color, entry_*.
-- Validación local R13.3 (al menos uno de tres identificadores) — botón "Crear" deshabilitado si no.
-- Preview de categoría calculada (R4.7) read-only con toggle para override.
-- Submit → service.createAnimal.
-- **Aceptación**: alta funciona offline + online; constraint local impide envío inválido.
-- **Cubre**: R4.7, R13.3, R15.3, R15.4, R15.5.
-
-### T4.4 `AnimalDetailScreen` — ficha del animal (R14)
+### T4.2 `AnimalDetailScreen` — ficha del animal (R14)
 - Cabecera con campos del R14.2.
 - Sección "Categoría" con valor actual + toggle de override (R14.5).
 - Botón "Marcar como CUT" con confirmación (R14.6, R8.5).
@@ -379,14 +445,14 @@ Patrón heredado de spec 01: tests Node nativo en `supabase/tests/`, login con u
 - **Aceptación**: ficha muestra >= 3 tipos de eventos en orden; toggle de override funciona; CUT actualiza la categoría visible.
 - **Cubre**: R10, R14.
 
-### T4.5 `RodeosScreen` (Settings, owner-only)
+### T4.3 `RodeosScreen` (Settings, owner-only)
 - Lista de rodeos del establishment con estado.
 - Solo owner ve los botones de crear / soft-delete.
 - Form de crear rodeo: name + species + system, con dropdowns filtrados a combinaciones activas (en MVP solo `(bovino, cria)`).
 - **Aceptación**: field_operator ve la lista read-only; owner crea y soft-deletes.
 - **Cubre**: R2.2, R2.3, R2.5.
 
-### T4.6 Prompt CUT automático al cargar dientes (R8.4)
+### T4.4 Prompt CUT automático al cargar dientes (R8.4)
 - Cuando el form de "actualizar dientes" del animal cierra con value en `('1/2','1/4','sin_dientes')` y `is_cut = false`, mostrar modal con dos botones explícitos.
 - Si confirma → llamar `service.markCut`.
 - No mostrar el prompt para terneros/terneras (R8.3).
@@ -441,7 +507,7 @@ T1.1 → T1.2..T1.7 (config + rodeos + helper)
                      ↓
                    T1.8..T1.11 (animals + profiles + RLS)
                      ↓
-                   T1.12..T1.18 (helpers + tablas de eventos)
+                   T1.12..T1.18 (helpers + tablas de eventos tipadas)
                      ↓
                    T1.19 (category_history)
                      ↓
@@ -449,11 +515,17 @@ T1.1 → T1.2..T1.7 (config + rodeos + helper)
                      ↓
                    T1.21 (calf creation) ← BEFORE INSERT corre antes que T1.20 AFTER INSERT
                      ↓
-                   T1.22 (timeline) ← requiere todas las tablas de eventos
+                   T1.22 (timeline v1)
                      ↓
-                   T1.23 (grants housekeeping)
+                   T1.24 (animal_events — modelo Híbrido)
                      ↓
-                   Fase 2 (T2.1..T2.12)
+                   T1.25 (timeline v2 — incluye 'observacion') ← requiere T1.24
+                     ↓
+                   T1.26 (inmutabilidad tag/idv post-alta)
+                     ↓
+                   T1.27 (grants housekeeping)
+                     ↓
+                   Fase 2 (T2.1..T2.15)
                      ↓
                    ⏸ PUERTA: opcional cerrar acá si frontend sigue diferido
                      ↓
@@ -485,29 +557,31 @@ T1.1 → T1.2..T1.7 (config + rodeos + helper)
 | R4.10 | T1.20 (compute_category), T2.5 |
 | R4.11 | T1.9 (unique index), T2.2 |
 | R4.12 | T1.9 (status enum + filtro lógico) |
-| R5.1, R5.2, R5.3, R5.4 | T1.9 (índices), T4.2, T2.11 |
+| R4.13 | T1.26, T2.14 |
+| R5.1, R5.2, R5.3, R5.4 | T1.9 (índices), T2.11 (las primitives — la UX vive en spec 09) |
 | R6.1..R6.5 | T1.14..T1.18 |
 | R6.6 | T1.14..T1.18 (FK constraints) |
 | R6.7 | T1.13, T1.14..T1.18 |
 | R6.8 | T1.14..T1.18 (policies), T2.8 |
+| R6.10..R6.13 (`animal_events`, modelo Híbrido) | T1.24, T2.13, T3.5 |
 | R7.1..R7.5 | T1.20, T2.4 |
 | R7.6 | T1.20, T2.5 |
 | R8.1, R8.2 | T1.9 (teeth_state enum) |
-| R8.3 | T4.6 |
-| R8.4, R8.5 | T4.6, T2.6 |
+| R8.3 | T4.4 |
+| R8.4, R8.5 | T4.4, T2.6 |
 | R9.1..R9.4 | T1.21, T2.7 |
-| R10.1, R10.2 | T1.22, T2.10 |
+| R10.1, R10.2 | T1.22 (v1) + T1.25 (v2 con `observacion`), T2.10, T2.15 |
 | R10.3 | T1.19, T2.4 |
-| R11.1..R11.5 | T1.11, T1.14..T1.18 (policies), T2.8 |
-| R12.1..R12.3 | T1.8, T1.9, T1.14..T1.18 (campos deleted_at) |
+| R11.1..R11.5 | T1.11, T1.14..T1.18 (policies), T1.24 (RLS de `animal_events`), T2.8 |
+| R12.1..R12.3 | T1.8, T1.9, T1.14..T1.18 (campos deleted_at), T1.24 |
 | R12.4 | T1.19, T2.4 |
 | R13.1 | T5.1 |
 | R13.2 | T5.2 |
-| R13.3 | T4.3 |
+| R13.3 | (movido a spec 09 — la validación local del form de alta vive allá) |
 | R13.4 | T3.4, T5.3 |
 | R13.5 | T5.4 |
-| R14.1..R14.7 | T4.1, T4.4 |
-| R15.1..R15.5 | T4.2, T4.3 |
+| R14.1..R14.7 | T4.1, T4.2 |
+| ~~R15.1..R15.5~~ | **eliminadas en refinamiento 2026-05-26** — UX movida a spec 09 `09-buscar-animal` |
 
 ## Notas de ejecución
 
@@ -516,5 +590,5 @@ T1.1 → T1.2..T1.7 (config + rodeos + helper)
 - Si una tarea expone una pregunta nueva al vet socio → registrarla en `CONTEXT/07-pendientes.md`.
 - Patrón **split insert + select** (`ADR-012`) sigue siendo la norma para inserts que disparan triggers (animal_profiles, reproductive_events).
 - Tests Fase 2 corren contra DB remota — requieren `SUPABASE_SERVICE_ROLE_KEY` en `.env.local`. El runner saltea con warning si no está, no rompe `check.mjs`.
-- Si en revisión del spec se decide que el bulk-edit de animales hace falta en MVP, agregar Edge Function `bulk_edit_animals` en una T1.24 entre T1.22 y T1.23.
+- Si en revisión del spec se decide que el bulk-edit de animales hace falta en MVP, agregar Edge Function `bulk_edit_animals` como tarea adicional entre T1.27 y la Fase 2 (sin romper la numeración de las migrations 0033..0036).
 - Las tareas Fase 3+ están **listas para diferirse**: cerrar Fase 1+2 alcanza para declarar el backend completo, replicando el patrón de spec 01.
