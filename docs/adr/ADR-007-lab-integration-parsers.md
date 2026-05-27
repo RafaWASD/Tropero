@@ -52,7 +52,7 @@ Sin embargo, la vinculación de resultados es **funcionalidad crítica**: el pro
 
 ### MVP: solo parser CEDIVE
 
-Empezar con un solo parser concreto (CEDIVE Chascomús) que cubre Los Tamarindos. Sumar más parsers a medida que entren campos con otros labs.
+Empezar con un solo parser concreto (CEDIVE Chascomús). Sumar más parsers a medida que entren campos con otros labs.
 
 ## Alternativas consideradas
 

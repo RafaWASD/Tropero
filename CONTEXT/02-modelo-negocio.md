@@ -99,6 +99,6 @@ Ver `docs/adr/ADR-009-billing-deferred.md`.
 
 ## Lanzamiento
 
-**Beta gratuita 6-12 meses** para Los Tamarindos y campos que sume el vet socio. Comunicando desde el día 1 que el producto será pago a futuro.
+**Beta gratuita 6-12 meses** para el campo del vet socio en Chascomús y campos adicionales que sume el vet socio. Comunicando desde el día 1 que el producto será pago a futuro.
 
 Cuando haya 10+ campos pidiendo entrada activa, se activa el sistema de pricing real.

@@ -112,7 +112,7 @@ Cada uno con sus categorías, maniobras específicas, KPIs y reportes.
 
 ## Hitos del proyecto
 
-### Hito 1 — Beta interno en Los Tamarindos
+### Hito 1 — Beta interno en el campo del vet socio en Chascomús
 **Target: pre-julio 2026** (antes del deadline SENASA)
 - MVP funcionando en producción real
 - Carga diaria de manga con vet socio + capataz

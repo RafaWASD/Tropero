@@ -57,3 +57,8 @@ Positivas, negativas y mitigaciones.
 | 012 | Patrones de implementación (triggers, tests, CLI) | Accepted |
 | 013 | Stack de frontend (Tamagui + Expo Router + Reanimated + ...) | Accepted |
 | 014 | Invitaciones por link shareable (en vez de magic link por email) | Accepted |
+| ~~015~~ | ~~Design system "Campo Profundo"~~ — eliminado 2026-05-26 (formalización prematura, ver `docs/design-system.md` draft) | — |
+| 016 | Terminología: rodeo (grupo de animales) y sistema (tipo productivo) | Accepted |
+| 017 | Timeline append-only de eventos del animal (no nota plana sobreescribible) | Accepted |
+| 018 | _(reservado para estructura de navegación principal — pending hasta cerrar A.2 del plan)_ | — |
+| 019 | Security analyzer como 5to subagente + skill getsentry/security-review | Accepted |

@@ -40,7 +40,7 @@ Ver `CONTEXT/08-roadmap.md` para el detalle de qué está dentro y fuera del MVP
 
 Raf — desarrollo completo del producto.
 Vet socio (UNLP) — dominio, validación de flujos, red comercial, ventas. Equity 50/50.
-Padre del vet socio — primer cliente beta. Campo "Los Tamarindos" en Chascomús, 174 animales Angus, vet del campo: Joaquín Giménez (Matrícula 13759).
+Padre del vet socio — primer cliente beta. Campo en Chascomús.
 
 ## Competencia identificada
 

@@ -6,7 +6,7 @@ Esta lista se mantiene viva. Cada item se cierra cuando se valida con el vet soc
 
 Ninguno actualmente. Las decisiones cerradas alcanzan para empezar specs y código.
 
-## A validar con el vet socio (Joaquín / amigo de Raf)
+## A validar con el vet socio
 
 ### Pesaje de ternero
 ¿Hay alguna diferencia operativa real vs pesaje de adulto, más allá de la categoría que se autocompleta?
@@ -79,6 +79,7 @@ Estas funcionalidades del vet son post-MVP, pero conviene tenerlas en cuenta par
 - Centralización de PDFs de laboratorio
 - Protocolos sanitarios reutilizables
 - Alertas cruzadas multi-campo
+- **Detección automática de animales duplicados + merge guiado** — Red de seguridad para el caso de un animal cargado con solo ID visual al que después se le agrega caravana electrónica y se bastonea (genera duplicado lógico). Detectar candidatos en background (mismo rodeo, uno con solo visual + otro con solo electrónica, ventana de tiempo cercana) y ofrecer merge no automático. En MVP se cubre con dos flujos manuales: (A) búsqueda intermedia previa al alta cuando se bastonea algo sin match, y (B) flujo dedicado de "asignación masiva de caravanas" cuando llega un lote de caravanas nuevas. Ver memoria `product_feature_buscar_animal` para el contexto completo de la decisión.
 
 ## Anti-fraude
 

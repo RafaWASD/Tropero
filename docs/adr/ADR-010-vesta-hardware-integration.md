@@ -18,7 +18,7 @@ Inicialmente se exploró la idea de un dispositivo independiente que leyera dire
 
 La alternativa más elegante: **interceptar el output del puerto RS-232 del Vesta**, leer lo que el Vesta ya está calculando, y retransmitirlo vía BLE al teléfono.
 
-El cable Vesta↔bastón existe físicamente en el campo (ya confirmado en Los Tamarindos), lo que permite conexión limpia sin pinchar pines.
+Se asume que el cable Vesta↔bastón ya existe físicamente en el campo del vet socio (a confirmar en día de campo), lo que permitiría conexión limpia sin pinchar pines.
 
 Adicionalmente, el bastón Allflex RS420 ya tiene Bluetooth nativo y se conecta directamente al teléfono — no hace falta bridge para el bastón.
 
