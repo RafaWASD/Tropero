@@ -96,6 +96,23 @@ try {
   exitCode = 1;
 }
 
+console.log('\n-- 2b. Higiene de progress/current.md ----------------');
+try {
+  const cur = readFileSync('progress/current.md', 'utf8');
+  const lines = cur.split('\n').length;
+  const sessionBlocks = (cur.match(/^##\s+(Bitácora|Sesión)/gim) || []).length;
+  if (sessionBlocks >= 2 || lines > 150) {
+    warn(
+      `current.md parece inflado (${sessionBlocks} bloque(s) de sesión, ${lines} líneas). ` +
+        `Al cerrar sesión, mové el resumen a history.md y dejá current.md limpio (AGENTS.md §6).`
+    );
+  } else {
+    ok(`current.md en tamaño razonable (${lines} líneas)`);
+  }
+} catch (e) {
+  warn(`No pude leer progress/current.md: ${e.message}`);
+}
+
 console.log('\n-- 3. Ejecutando tests -------------------------------');
 let testCommand = '';
 if (existsSync('.harness/config.json')) {

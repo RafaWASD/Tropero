@@ -240,3 +240,28 @@ El código real de Edge Functions usa `Deno.env.get('APP_URL')` (env del Edge Fu
 - `ADR-019` — Security analyzer como 5to subagente + skill Sentry.
 
 > Las secciones forward-looking de `current.md` ("Próximos pasos posibles", "Estado real del frontend post-corrección", "Próximo paso") describían estado planificado ya superado; su contenido vigente vive en `progress/plan.md`. No se reproducen acá.
+
+---
+
+## Sesión 13 — Auditoría de consistencia del harness (2026-05-28)
+
+- **Agente:** claude (sesión meta, no SDD — análisis y corrección del harness, no implementación de feature).
+- **Pedido de Raf:** analizar harness/flujo/agentes y reportar inconsistencias / contradicciones / huecos.
+- **Inconsistencias arregladas y commiteadas** (commit `bf879fa`):
+  - `check.mjs` valida `security_analyzer.md` (5to agente) + `progress/plan.md`; `CHECKPOINTS.md` C1 → "5 agentes".
+  - Estado `deferred` agregado al enum (`feature_list.json` + `check.mjs` + `docs/specs.md`). Features 01 y 09 migradas de `blocked` → `deferred` (no hay bloqueante externo; postergadas por decisión propia).
+  - Gate 2 (security modo `code`) diffea desde `baseline_commit` que registra el implementer (se trabaja sobre `main`, no `main...HEAD`). Tocados `implementer.md`, `security_analyzer.md`, `leader.md`.
+  - Skill namespaceada `sentry-skills:security-review` en `security_analyzer.md`.
+  - Arranque de `CLAUDE.md` alineado con `AGENTS.md` (corre check antes de leer estado + incluye `plan.md`).
+  - Fila "Trivial" del escalado del leader incluye reviewer (Gate 2 depende de su aprobación).
+  - `spec_author`: modo "refinamiento" para specs ya `spec_ready` (Gate 1 FAIL + "pedí cambios").
+  - `verification.md` / `architecture.md` / `conventions.md`: comandos reales (pnpm / Node-nativo, no pgTAP / npx), tests de cliente marcados forward-looking, `Refs` opcional.
+  - `AGENTS.md`: fila `.harness/config.json` actualizada (ya no "cuando habilités tests reales").
+  - `plan.md`: división de autoridad feature_list ↔ plan + tabla marcada como snapshot.
+- **Higiene:** bitácoras de sesiones 1-12 consolidadas en este `history.md` (commit `84cd2a8`); `current.md` reseteado. Sumado WARN en `check.mjs` que avisa cuando `current.md` se ve inflado (≥2 bloques de sesión o >150 líneas) — recordatorio del paso manual de cierre.
+- **Descartado (no eran problema):** la columna de estado de `plan.md` (trackea implementación, no estado SDD) y las skills on-demand `llm-council` / `stitch-workflow` (no van en el mapa del workflow porque se disparan solo cuando Raf las pide explícitamente).
+- **Dejado COMO ESTÁ por decisión de Raf:** Stop hook corre la suite remota en cada cierre de turno (peaje de segundos OK) y `git push *` auto-allowed en `settings.local.json` (evita fricción al pushear lo que Raf ya pidió).
+- **Inmutable, no tocado:** ADR-019 (drift de naming interno; los docs operativos ya usan el nombre correcto, así que el ADR queda como registro histórico).
+- **Commits:** `84cd2a8` (bitácoras) + `bf879fa` (fixes de consistencia), ambos pusheados a `origin/main`. El cierre de sesión (este resumen + WARN + reset de `current.md`) va en commit aparte.
+- **Verificación:** `node scripts/check.mjs` verde en cada paso (typecheck + 15 RLS + 26 Edge contra DB remota).
+- **No tocado (trabajo previo de Raf, sin commitear):** `specs/active/02-modelo-animal/*`, `specs/active/09-buscar-animal/*`, `design/*`.
