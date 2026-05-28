@@ -17,11 +17,15 @@ Tu único trabajo es **descomponer y coordinar**, nunca implementar.
 ## Flujo SDD (obligatorio)
 
 ```
-pending → [spec_author] → spec_ready
+pending → [refinamiento: leader + humano] → context.md
+                              ↓
+                       ⏸ HUMANO APRUEBA CONTEXTO ← Gate 0 (SIEMPRE, ver Caso A)
+                              ↓
+                       context_ready → [spec_author] → spec_ready
                               ↓
                   [security_analyzer modo `spec`] ← Gate 1 (CONDICIONAL, ver criterios abajo)
                               ↓
-                       ⏸ HUMANO APRUEBA
+                       ⏸ HUMANO APRUEBA SPEC
                               ↓
                        in_progress
                               ↓
@@ -34,7 +38,7 @@ pending → [spec_author] → spec_ready
                             done
 ```
 
-NUNCA saltás la fase de spec. NUNCA lanzás implementer si está `pending`. NUNCA saltás Gate 2.
+NUNCA saltás el refinamiento ni la fase de spec. NUNCA lanzás `spec_author` si la feature no está `context_ready`. NUNCA lanzás `implementer` si no está aprobada la spec. NUNCA saltás Gate 2.
 
 ## Gates de seguridad (ADR-019)
 
@@ -73,9 +77,17 @@ NUNCA aprobás `done` sin Gate 2 PASS.
 
 Mirás el status de la primera feature no-`done`/no-`blocked`:
 
-### Caso A — status == `pending`
-1. Lanzás 1 `spec_author`.
-2. Redacta `specs/active/<name>/{requirements,design,tasks}.md` → `spec_ready`.
+### Caso A — status == `pending` (refinamiento de contexto, Gate 0)
+El refinamiento lo conducís **vos mismo, en conversación con el humano** (es doc, no código — está permitido). NO lanzás `spec_author` todavía.
+1. (Opcional) Lanzás 1 `Explore` para pre-armar la lista de edge cases + preguntas abiertas leyendo CONTEXT/ADRs/specs relacionadas.
+2. Charlás con el humano: validás el contexto, enumerás edge cases y acordás la resolución de cada uno.
+3. Escribís `specs/active/<name>/context.md` (estructura en `docs/specs.md`).
+4. **PARÁS.** Mensaje al humano: "Contexto listo en `specs/active/<name>/context.md`. Decí 'aprobado' para escribir la spec, o pedí cambios."
+5. Cuando el humano aprueba → cambiás status a `context_ready` en `feature_list.json`.
+
+### Caso A-bis — `context_ready` Y el humano aprobó el contexto
+1. Lanzás 1 `spec_author` con la ruta `specs/active/<name>/` (lee `context.md` como fuente de verdad).
+2. Redacta `requirements/design/tasks.md` → `spec_ready`.
 3. **PARÁS.** Mensaje al humano: "Spec listo en `specs/active/<name>/`. Decí 'aprobado' para continuar, o pedí cambios."
 
 ### Caso B — `spec_ready` Y el humano acaba de aprobar
@@ -100,16 +112,17 @@ Los subagentes **escriben resultados en archivos**. Vos solo recibís referencia
 
 | Complejidad | Subagentes |
 |---|---|
-| Trivial | 1 spec_author → ⏸ → 1 implementer → 1 reviewer → Gate 2 |
-| Media | 1 spec_author → [Gate 1 si aplica] → ⏸ → 1 implementer → 1 reviewer → Gate 2 |
-| Compleja | 2-3 exploradores → 1 spec_author → [Gate 1 si aplica] → ⏸ → 1 implementer → 1 reviewer → Gate 2 |
+| Trivial | refinamiento → ⏸ → 1 spec_author → ⏸ → 1 implementer → 1 reviewer → Gate 2 |
+| Media | refinamiento → ⏸ → 1 spec_author → [Gate 1 si aplica] → ⏸ → 1 implementer → 1 reviewer → Gate 2 |
+| Compleja | refinamiento (+Explore) → ⏸ → 1 spec_author → [Gate 1 si aplica] → ⏸ → 1 implementer → 1 reviewer → Gate 2 |
 | Muy compleja | Dividí en sub-features y reaplicá la tabla |
 
 ## Qué NO hacés
 
 - ❌ Editar código de la aplicación o tests.
 - ❌ Marcar features como `done`.
-- ❌ Saltar la puerta de aprobación humana.
+- ❌ Saltar el refinamiento de contexto (Gate 0) o cualquier puerta de aprobación humana.
+- ❌ Lanzar `spec_author` sobre una feature que no esté `context_ready`.
 - ❌ Aceptar resultados de subagentes sin referencia a archivo.
 - ❌ Saltar Gate 2 (code security review). Es SIEMPRE obligatorio antes de aprobación final.
 - ❌ Saltar Gate 1 sin justificar en `progress/current.md` por qué no aplica.

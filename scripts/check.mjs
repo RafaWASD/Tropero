@@ -56,8 +56,12 @@ for (const f of base) {
 }
 
 console.log('\n-- 2. Validando feature_list.json y specs ------------');
-const validStatus = ['pending', 'spec_ready', 'in_progress', 'done', 'blocked', 'deferred'];
+const validStatus = ['pending', 'context_ready', 'spec_ready', 'in_progress', 'done', 'blocked', 'deferred'];
 const requiresSpec = ['spec_ready', 'in_progress', 'done'];
+// Gate de refinamiento (ADR-022): una feature en context_ready debe tener
+// context.md. Aplica hacia adelante — NO se retro-exige a spec_ready+
+// (grandfathering de 01/02/09, aprobadas antes del gate).
+const requiresContext = ['context_ready'];
 
 try {
   const data = JSON.parse(readFileSync('feature_list.json', 'utf8'));
@@ -75,6 +79,14 @@ try {
       fail(`Feature ${f.id} (${f.name}): status inválido "${f.status}"`);
       exitCode = 1;
     }
+    if (f.sdd === true && requiresContext.includes(f.status)) {
+      const p = join('specs', 'active', f.name, 'context.md');
+      if (!existsSync(p)) {
+        fail(`Feature ${f.id} (${f.name}) en ${f.status}: falta ${p}`);
+        specErrors++;
+        exitCode = 1;
+      }
+    }
     if (f.sdd === true && requiresSpec.includes(f.status)) {
       const dir = join('specs', 'active', f.name);
       for (const n of ['requirements.md', 'design.md', 'tasks.md']) {
@@ -89,7 +101,7 @@ try {
   }
   if (specErrors === 0) {
     ok(`feature_list.json válido (${data.features.length} features)`);
-    ok('Specs presentes para todas las features SDD no-pending');
+    ok('context.md presente en context_ready; specs presentes en spec_ready+');
   }
 } catch (e) {
   fail(`feature_list.json inválido: ${e.message}`);

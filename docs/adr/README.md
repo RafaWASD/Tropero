@@ -76,3 +76,4 @@ Esto preserva el razonamiento histórico: cualquiera puede leer el ADR viejo y e
 | 019 | Security analyzer como 5to subagente + skill getsentry/security-review | Accepted |
 | 020 | Lote como agrupación de manejo (complementa ADR-016) | Accepted |
 | 021 | Plantilla de datos: catálogo global + defaults por sistema + gating | Accepted |
+| 022 | Gate de refinamiento de contexto antes de la spec (Gate 0) + política de pipeline | Accepted |

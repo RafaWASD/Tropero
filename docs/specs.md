@@ -4,8 +4,9 @@
 
 ## Estructura
 
-Cada feature `"sdd": true` tiene `specs/active/<feature-name>/` con tres archivos:
+Cada feature `"sdd": true` tiene `specs/active/<feature-name>/` con cuatro archivos:
 
+- `context.md` — REFINAMIENTO de contexto y edge cases (se escribe primero; ver abajo)
 - `requirements.md` — QUÉ se construye (EARS)
 - `design.md` — CÓMO se construye
 - `tasks.md` — PASOS concretos
@@ -15,11 +16,15 @@ Cada feature `"sdd": true` tiene `specs/active/<feature-name>/` con tres archivo
 ## Estados
 
 ```
-pending → [spec_author] → spec_ready
+pending → [refinamiento: leader + humano] → context.md
+                              ↓
+                       ⏸ HUMANO APRUEBA CONTEXTO ← Gate 0 (NUEVO, siempre)
+                              ↓
+                       context_ready → [spec_author lee context.md] → spec_ready
                               ↓
                   [security_analyzer modo `spec`] ← Gate 1 (condicional)
                               ↓
-                       ⏸ HUMANO APRUEBA
+                       ⏸ HUMANO APRUEBA SPEC
                               ↓
                        in_progress
                               ↓
@@ -41,19 +46,38 @@ El diagrama de arriba es el ciclo de vida SDD. Ortogonal a eso, una feature pued
 
 Regla mnemotécnica: `blocked` = *no puedo*; `deferred` = *elijo no ahora*. Ninguno de los dos cuenta como `in_progress` para `one_feature_at_a_time`. El `check.mjs` tampoco exige specs para una feature `deferred` (igual que `blocked`), aunque la tenga aprobada — la info de "spec aprobada" se documenta en el campo `notes`.
 
-## Las puertas de aprobación humana (dos, no una)
+## Las puertas de aprobación humana (tres)
 
-A partir de ADR-019, el flujo se detiene **dos veces** para el humano:
+El flujo se detiene **tres veces** para el humano:
 
-**Puerta 1**: tras `spec_author` (y eventualmente tras Gate 1 si aplica). El humano lee `specs/active/<feature>/` y dice "aprobado" (o pide cambios). Solo entonces el leader hace `spec_ready → in_progress` y lanza al implementer.
+**Puerta 0 — contexto** (ADR-022): tras el refinamiento, el humano lee `specs/active/<feature>/context.md` (corto) y aprueba el contexto + los edge cases + sus resoluciones. Solo entonces el leader pasa la feature a `context_ready` y habilita al `spec_author`. Es la puerta más barata y la que evita el rework de specs mal cimentadas.
 
-**Puerta 2**: tras `reviewer` APPROVED + `security_analyzer` modo `code` PASS. El humano valida el output del security review en `progress/security_code_<feature>.md` y aprueba `done`. Si el security review reportó findings HIGH, el flujo vuelve a implementer antes de llegar a esta puerta.
+**Puerta 1 — spec** (ADR-019): tras `spec_author` (y eventualmente tras Gate 1 si aplica). El humano lee `specs/active/<feature>/` y dice "aprobado" (o pide cambios). Solo entonces el leader hace `spec_ready → in_progress` y lanza al implementer.
+
+**Puerta 2 — código** (ADR-019): tras `reviewer` APPROVED + `security_analyzer` modo `code` PASS. El humano valida el output del security review en `progress/security_code_<feature>.md` y aprueba `done`. Si el security review reportó findings HIGH, el flujo vuelve a implementer antes de llegar a esta puerta.
 
 ## Gates de seguridad (resumen — detalle en ADR-019)
 
 - **Gate 1 (spec security)** — Condicional. Se invoca si la spec toca: RLS, schema sensible, Edge Functions, auth/tokens, secrets, datos regulados (SENASA/PII). El subagente `security_analyzer` en modo `spec` audita las decisiones de diseño y emite veredicto PASS / FAIL / NEEDS_CLARIFICATION. Output: `progress/security_spec_<feature>.md`.
 
 - **Gate 2 (code security)** — Siempre. Se invoca después de `reviewer` APPROVED. El subagente `security_analyzer` en modo `code` invoca la skill `security-review` de Sentry (plugin `sentry-skills` instalado a nivel user) sobre el diff del branch. Reporta solo findings HIGH-confidence + complementa con checklist específico de RAFAQ (RLS, Edge Functions, secrets, triggers). Veredicto PASS / FAIL. Output: `progress/security_code_<feature>.md`.
+
+## context.md — refinamiento de contexto (Gate 0)
+
+Antes de escribir la spec larga, el leader y el humano refinan el contexto en una conversación y lo cierran en un `context.md` **corto y legible**. Es el contrato humano: acá se valida que el contexto sea correcto y se cubren los edge cases que antes quedaban afuera. La spec (requirements/design/tasks) pasa a ser la elaboración para la máquina — el humano confía en ella porque las decisiones ya se cerraron acá.
+
+Lo conduce el **leader en conversación directa** (opcionalmente lanza 1 Explore para pre-armar la lista de edge cases + preguntas). El `spec_author` lo lee como **fuente de verdad primaria** y no re-decide nada: lo traduce a EARS/design/tasks.
+
+Estructura:
+
+- **Contexto validado** — qué se entiende de la feature (de CONTEXT/ADRs/charlas). El humano confirma o corrige.
+- **Alcance** — qué entra y qué queda afuera (límites explícitos).
+- **Casos y decisiones** — el corazón: cada edge case con su resolución acordada.
+- **Pendientes** — cuáles de `CONTEXT/07-pendientes.md` toca; resueltos acá o marcados como bloqueantes.
+- **Insumos para spec_author** — punteros a ADRs, secciones de CONTEXT y specs relacionadas.
+- **Aprobación** — fecha + nombre de quien aprueba.
+
+`check.mjs` exige `context.md` cuando la feature está en `context_ready`. El gate aplica **hacia adelante**: las features aprobadas antes de ADR-022 (01, 02, 09) no se retrofitean.
 
 ## requirements.md — EARS estricto (español)
 
@@ -100,6 +124,16 @@ El implementer marca `[x]`. El reviewer rechaza si queda `[ ]` sin justificació
 ## Trazabilidad (regla dura)
 
 Cada test mapea a un `R<n>`; cada `R<n>` tiene ≥1 test. El reviewer lo comprueba. El implementer documenta el mapa `R<n> → archivo:test` en `progress/impl_<name>.md`.
+
+## Política de pipeline (orden entre refinar, spec-ear e implementar)
+
+Tres actividades, tres ritmos. La implementación es la prioridad; refinar y spec-ear van adelante lo justo para no frenarla nunca:
+
+- **Implementación: WIP = 1** — una feature `in_progress` a la vez (lo enforza `check.mjs`, regla `one_feature_at_a_time`).
+- **Spec completa: buffer = 1** — como mucho una feature "on-deck" (spec aprobada esperando turno). No se spec-ea todo el roadmap: las specs largas se pudren (spec 02 se reescribió 2 veces).
+- **Refinamiento de contexto: buffer = 2–3** — es barato y no se pudre rápido. Se lockean decisiones temprano de las próximas features; alimentan las specs just-in-time.
+
+Alternar entre spec-ear e implementar **no está mal** — pero debe ser dirigido por el pipeline, no por humor. Regla: cuando la implementación se bloquea (design system, día de campo) o cuando falta la spec on-deck, usás la holgura para refinar/spec-ear la próxima del critical path. Detalle y justificación en ADR-022.
 
 ## Cuándo NO aplica SDD
 

@@ -21,7 +21,7 @@
 | `progress/current.md` | Sesión actual | Siempre, al empezar |
 | `progress/plan.md` | Plan de ejecución multi-sesión (bloques A→B→C→D, dependencias, decisiones pendientes de formalizar) | Siempre, al empezar — comparar contra current/history |
 | `progress/history.md` | Bitácora append-only | Si necesitás histórico |
-| `specs/active/<feature>/` | requirements + design + tasks | Antes de implementar feature SDD |
+| `specs/active/<feature>/` | context + requirements + design + tasks | Antes de implementar feature SDD |
 | `docs/architecture.md` | Qué es "buen trabajo" en este stack | Antes de implementar |
 | `docs/conventions.md` | Estilo, nombres, errores | Antes de escribir código |
 | `docs/specs.md` | Proceso SDD (EARS + puerta humana) | Antes de redactar/leer un spec |
@@ -35,7 +35,7 @@
 
 - Una sola feature a la vez (validado por `check.mjs`).
 - No declarás `done` sin verificación verde.
-- No saltás la fase de spec ni la aprobación humana.
+- No saltás el refinamiento (Gate 0), la fase de spec, ni las aprobaciones humanas.
 - Documentás en `progress/current.md` **mientras** trabajás, no al final.
 - Dejás el repo limpio antes de cerrar.
 - Si no sabés algo, lo buscás en `docs/` o `CONTEXT/` antes de inventar.
@@ -43,11 +43,15 @@
 ## 4. Flujo SDD
 
 ```
-pending → [spec_author] → spec_ready
+pending → [refinamiento: leader + humano] → context.md
+                              ↓
+                       ⏸ HUMANO APRUEBA CONTEXTO ← Gate 0 (siempre, ver ADR-022)
+                              ↓
+                       context_ready → [spec_author lee context.md] → spec_ready
                               ↓
                   [security_analyzer modo `spec`] ← Gate 1 (condicional, ver ADR-019)
                               ↓
-                       ⏸ HUMANO APRUEBA
+                       ⏸ HUMANO APRUEBA SPEC
                               ↓
                        in_progress
                               ↓
@@ -59,6 +63,8 @@ pending → [spec_author] → spec_ready
                               ↓
                             done
 ```
+
+**Gate 0** (siempre): antes de la spec, el leader refina el contexto con el humano y lo cierra en `specs/active/<feature>/context.md` (corto). El humano aprueba el contexto + los edge cases; recién entonces la feature pasa a `context_ready` y se habilita al `spec_author`. Evita el rework de specs mal cimentadas. Detalle en `docs/adr/ADR-022-gate-refinamiento-contexto.md` y `docs/specs.md`.
 
 **Gate 1** (condicional): se invoca si la spec toca RLS, schema sensible, Edge Functions, auth/tokens, secrets, o datos regulados (SENASA/PII). Si no, el leader lo salta documentando en `progress/current.md`.
 

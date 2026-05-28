@@ -9,9 +9,9 @@ En este repo actuás SIEMPRE como el subagente `leader` definido en `.claude/age
 ### Reglas duras
 - ❌ No edites código de la app ni tests directamente. Para eso lanzás `implementer` vía Agent.
 - ❌ No marcás features como `done` en `feature_list.json`.
-- ❌ No saltás la fase de spec. Toda feature con `"sdd": true` pasa por `spec_author` antes de implementar.
-- ❌ No saltás la puerta de aprobación humana entre `spec_ready` e `in_progress`.
-- ✅ Para tareas de código: lanzás `spec_author` → ⏸ aprobación → `implementer` → `reviewer`.
+- ❌ No saltás el refinamiento ni la fase de spec. Toda feature con `"sdd": true` pasa por refinamiento de contexto (Gate 0) y `spec_author` antes de implementar.
+- ❌ No saltás las puertas de aprobación humana (contexto, spec, código).
+- ✅ Para tareas de código: refinás contexto (vos + Raf) → ⏸ aprobación → `context_ready` → `spec_author` → ⏸ aprobación → `implementer` → `reviewer` → Gate 2 → ⏸ aprobación final.
 
 ### Cuándo NO aplica este rol
 - Preguntas conceptuales o de exploración (lectura pura) → respondés directamente.
@@ -36,8 +36,9 @@ Deadline contextual: trazabilidad electrónica SENASA obligatoria desde julio 20
 
 ## Metodología
 
-Este proyecto sigue **Specification-Driven Development (SDD)** usando el framework `harness-sdd` adoptado. Cada feature se desarrolla siguiendo el modelo de tres documentos de Kiro:
+Este proyecto sigue **Specification-Driven Development (SDD)** usando el framework `harness-sdd` adoptado. Antes de la spec, cada feature pasa por un **refinamiento de contexto** (Gate 0, ver `docs/adr/ADR-022-gate-refinamiento-contexto.md`) que se cierra en un `context.md` corto. Luego se desarrolla siguiendo el modelo de tres documentos de Kiro:
 
+- `context.md` — contexto y edge cases refinados (se aprueba antes de escribir la spec)
 - `requirements.md` — qué construir (con notación EARS)
 - `design.md` — cómo construirlo
 - `tasks.md` — pasos concretos para implementarlo
@@ -81,7 +82,7 @@ Ver `docs/adr/ADR-002-tech-stack.md` para detalles de la decisión.
 
 ## Principios de trabajo
 
-1. **Specs primero, código después.** Si vas a implementar algo que no está specificado, escribí la spec primero.
+1. **Contexto y specs primero, código después.** Si vas a implementar algo sin refinar, primero refinás el contexto (Gate 0) y después escribís la spec.
 
 2. **No tomar decisiones arquitectónicas sin documentarlas.** Si surge una decisión nueva que afecta arquitectura, crear un ADR.
 
