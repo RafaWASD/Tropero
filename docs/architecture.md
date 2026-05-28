@@ -35,7 +35,7 @@ utils/           → helpers puros
 
 - **`supabase/migrations/`** — schema SQL versionado, incluye RLS policies y helpers.
 - **`supabase/functions/`** — Edge Functions (Deno) para operaciones que no se expresan limpio en RLS (invitaciones, validaciones complejas, integraciones externas).
-- **`supabase/tests/`** — pgTAP o scripts SQL que validan RLS y triggers.
+- **`supabase/tests/`** — runners Node-nativos (`rls/run.cjs`, `edge/run.cjs`) que validan RLS, triggers y Edge Functions contra la DB remota. NO pgTAP (Docker bloqueado en el entorno; ver `ADR-012`).
 
 ## Principios
 

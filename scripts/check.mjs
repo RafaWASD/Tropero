@@ -36,6 +36,7 @@ const base = [
   'feature_list.json',
   'progress/current.md',
   'progress/history.md',
+  'progress/plan.md',
   'docs/architecture.md',
   'docs/conventions.md',
   'docs/verification.md',
@@ -44,6 +45,7 @@ const base = [
   '.claude/agents/spec_author.md',
   '.claude/agents/implementer.md',
   '.claude/agents/reviewer.md',
+  '.claude/agents/security_analyzer.md',
 ];
 for (const f of base) {
   if (existsSync(f)) ok(`Existe ${f}`);
@@ -54,7 +56,7 @@ for (const f of base) {
 }
 
 console.log('\n-- 2. Validando feature_list.json y specs ------------');
-const validStatus = ['pending', 'spec_ready', 'in_progress', 'done', 'blocked'];
+const validStatus = ['pending', 'spec_ready', 'in_progress', 'done', 'blocked', 'deferred'];
 const requiresSpec = ['spec_ready', 'in_progress', 'done'];
 
 try {

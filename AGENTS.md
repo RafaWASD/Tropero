@@ -29,7 +29,7 @@
 | `CHECKPOINTS.md` | Estado final correcto | Para auto-evaluarte |
 | `.claude/agents/` | Definiciones de subagentes (leader, spec_author, implementer, reviewer, **security_analyzer**) | Si orquestás trabajo |
 | `scripts/check.mjs` | Validador del entorno | Cada arranque y antes de cerrar |
-| `.harness/config.json` | Config del check (testCommand) | Cuando habilités tests reales |
+| `.harness/config.json` | Config del check (`testCommand` → `scripts/run-tests.mjs`) | Si tocás cómo se corren los tests |
 
 ## 3. Reglas duras (no negociables)
 

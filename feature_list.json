@@ -5,7 +5,7 @@
     "one_feature_at_a_time": true,
     "require_tests_to_close": true,
     "require_approved_spec_to_implement": true,
-    "valid_status": ["pending", "spec_ready", "in_progress", "done", "blocked"],
+    "valid_status": ["pending", "spec_ready", "in_progress", "done", "blocked", "deferred"],
     "sdd_required_when": "feature has \"sdd\": true",
     "specs_path": "specs/active/<name>/"
   },
@@ -23,8 +23,8 @@
         "Un owner puede remover el acceso de otro user y ese user pierde acceso inmediatamente."
       ],
       "sdd": true,
-      "status": "blocked",
-      "notes": "Backend (Fases 0+1+2) cerrado y verde: 12 migrations aplicadas (incluyendo refactor a link shareable de ADR-014), 15 RLS + 26 Edge tests reales contra DB remota, 7 Edge Functions con email (Resend) + push (Expo). Frontend (Fases 3-8) bloqueado esperando design system (item A.1 progress/plan.md). Cuando Raf cierre el design system canónico, esta feature destraba B.1 del plan. Status `blocked` (no `in_progress`) para respetar regla one_feature_at_a_time del check."
+      "status": "deferred",
+      "notes": "Backend (Fases 0+1+2) cerrado y verde: 12 migrations aplicadas (incluyendo refactor a link shareable de ADR-014), 15 RLS + 26 Edge tests reales contra DB remota, 7 Edge Functions con email (Resend) + push (Expo). Frontend (Fases 3-8) bloqueado esperando design system (item A.1 progress/plan.md). Cuando Raf cierre el design system canónico, esta feature destraba B.1 del plan. Status `deferred` (no `in_progress`) para respetar regla one_feature_at_a_time del check (backend done, frontend pausado — no hay bloqueante externo, está postergado por decisión propia)."
     },
     {
       "id": 2,
@@ -139,8 +139,8 @@
         "MVP cubre duplicados lógicos con flujo A (búsqueda intermedia previa al alta) y flujo B (asignación masiva de caravanas). Detección automática de duplicados queda diferida post-MVP."
       ],
       "sdd": true,
-      "status": "blocked",
-      "notes": "Spec redactada 2026-05-26 siguiendo decisiones de sesiones 9-11. APROBADA por Raf el 2026-05-26. 12 requirements totales (6 definitivas: R3, R6, R9, R10, R11, R12; 6 tentativas UI con disclaimer estilo R14 de spec 02: R1, R2, R4, R5, R7, R8). R12 (tensión con R4.13 de spec 02) RESUELTA el 2026-05-26 vía opción A (refinar trigger para permitir NULL→valor). Status `blocked` (no `in_progress`) para respetar regla `one_feature_at_a_time` del check.mjs: spec 02 está actualmente in_progress y es prerequisito técnico (spec 09 consume primitives de spec 02). Una vez que B.2 (backend spec 02) termine o se libere ese slot, spec 09 pasa a `in_progress`. Dependencias activas restantes: (1) spec 04 (BLE bastón, pending) — puerta BLE (R2) + Fase 4 bloqueadas hasta implementar bastón; puerta manual (R1) y motor find-or-create (R3) funcionan sin spec 04; (2) ADR-018 (estructura nav principal, pending) — bottom nav tentativo [Inicio] [Animales] [⚡FAB Maniobra] [Reportes] [Más]; (3) design system canónico (A.1 plan.md) — UI tentativa. Fases ejecutables sin design system: 0, 1, 5, 6 (parcial). Fases 2, 3, 4 esperan design system cerrado. Mismo patrón pause-frontend que specs 01 y 02."
+      "status": "deferred",
+      "notes": "Spec redactada 2026-05-26 siguiendo decisiones de sesiones 9-11. APROBADA por Raf el 2026-05-26. 12 requirements totales (6 definitivas: R3, R6, R9, R10, R11, R12; 6 tentativas UI con disclaimer estilo R14 de spec 02: R1, R2, R4, R5, R7, R8). R12 (tensión con R4.13 de spec 02) RESUELTA el 2026-05-26 vía opción A (refinar trigger para permitir NULL→valor). Status `deferred` (no `in_progress`) para respetar regla `one_feature_at_a_time` del check.mjs (spec aprobada, esperando turno — no hay bloqueante externo): spec 02 está actualmente in_progress y es prerequisito técnico (spec 09 consume primitives de spec 02). Una vez que B.2 (backend spec 02) termine o se libere ese slot, spec 09 pasa a `in_progress`. Dependencias activas restantes: (1) spec 04 (BLE bastón, pending) — puerta BLE (R2) + Fase 4 bloqueadas hasta implementar bastón; puerta manual (R1) y motor find-or-create (R3) funcionan sin spec 04; (2) ADR-018 (estructura nav principal, pending) — bottom nav tentativo [Inicio] [Animales] [⚡FAB Maniobra] [Reportes] [Más]; (3) design system canónico (A.1 plan.md) — UI tentativa. Fases ejecutables sin design system: 0, 1, 5, 6 (parcial). Fases 2, 3, 4 esperan design system cerrado. Mismo patrón pause-frontend que specs 01 y 02."
     }
   ]
 }

@@ -55,6 +55,8 @@ src/
 
 ## Tests
 
+> Los tests del **cliente** (lo de abajo) todavía no están seteados — aplican cuando arranque Fase 3+. Hoy los tests reales son los runners Node-nativos de backend (RLS + Edge), ver `docs/verification.md`.
+
 - **Framework**: Jest con preset `jest-expo` + React Native Testing Library.
 - **Ubicación**: junto al archivo bajo test (`Foo.tsx` ↔ `Foo.test.tsx`).
 - **Naming**: `describe(unit, () => { it('caso esperado', () => {...}) })`.
@@ -108,7 +110,7 @@ Tipos:
 Reglas:
 - Mensaje en español, presente indicativo (`agrega`, no `agregó` ni `agregar`).
 - Commits atómicos: cada commit debería poder revertirse independientemente sin romper el resto.
-- Cuando el commit responde a una decisión, agregar `Refs: ADR-XXX` o `Refs: spec NNN` al final.
+- Cuando el commit responde a una decisión, referenciar el ADR/spec (`ADR-XXX`, `spec NNN`). En la práctica la referencia va inline en el cuerpo del mensaje; el trailer `Refs:` es opcional, no obligatorio.
 
 Ejemplo:
 

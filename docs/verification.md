@@ -42,21 +42,25 @@ En el resto del código los tests son recomendables pero no obligatorios al impl
 
 | Concepto | Comando |
 |---|---|
-| Type-check | `npx tsc --noEmit` |
-| Tests del cliente | `npm test -- --watchAll=false` |
-| Lint | `npm run lint` |
-| Tests SQL/RLS | `supabase db test` (cuando pgTAP esté setup) |
-| Tests Edge Functions | `cd supabase/functions && deno test --allow-all` |
+| Type-check | `cd app && pnpm.cmd typecheck` (corre `tsc --noEmit`) |
+| Tests del cliente | `cd app && pnpm.cmd test` (Jest + RNTL, cuando se setee) |
+| Lint | `cd app && pnpm.cmd lint` (cuando se setee) |
+| Tests SQL/RLS | `node --test supabase/tests/rls/run.cjs` (Node nativo contra DB remota — NO pgTAP, Docker bloqueado; ver ADR-012) |
+| Tests Edge Functions | `node --test supabase/tests/edge/run.cjs` (Node nativo vía `supabase-js` + `functions.invoke`, NO `deno test`) |
+
+> `npx`/`npm` están rotos en este entorno (Cylance MITM); el proyecto usa `pnpm.cmd` en PowerShell. Ver ADR-011. Lo de arriba lo orquesta `scripts/run-tests.mjs`, que es lo que `check.mjs` ejecuta como `testCommand`.
 
 Durante bootstrap (sin código), `testCommand` queda vacío o el archivo `.harness/config.json` no existe. El check.mjs imprime `[WARN]` y sigue.
 
-Cuando arranquemos a codear, crear `.harness/config.json`:
+Ya hay código, así que `.harness/config.json` está configurado con:
 
 ```json
 {
-  "testCommand": "npx tsc --noEmit && npm test -- --watchAll=false"
+  "testCommand": "node scripts/run-tests.mjs"
 }
 ```
+
+`run-tests.mjs` corre, en orden: typecheck del cliente → suite RLS → suite Edge Functions. La suite RLS/Edge toca DB remota y requiere `.env.local` con `SUPABASE_SERVICE_ROLE_KEY`; si falta, se saltea con warning.
 
 ## Reglas duras de verificación
 

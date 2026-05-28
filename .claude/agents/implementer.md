@@ -18,10 +18,11 @@ Ejecutás **una sola** feature siguiendo su spec aprobado en `specs/active/<name
 1. Leé `CLAUDE.md`, `AGENTS.md`, `docs/architecture.md`, `docs/conventions.md`, `docs/specs.md`.
 2. Leé el spec completo. Cada `T<n>` es lo que vas a hacer; cada `R<n>` es lo que debe quedar verdadero.
 3. Anotás en `progress/current.md`: feature en curso + plan (T1..Tn).
-4. Por cada task `T<n>` en orden: implementás, escribís su test, marcás `[x] T<n>` en `tasks.md`.
-5. Verificás ejecutando `node scripts/check.mjs`. Si falla → volvés al paso 4.
-6. **Trazabilidad**: cada `R<n>` cubierto por ≥1 test concreto. Documentás el mapa `R<n> → archivo:test` en `progress/impl_<name>.md`.
-7. **No marcás `done` vos mismo.** Esperás al reviewer.
+4. **Baseline para Gate 2** (security_analyzer modo `code`): si `progress/impl_<name>.md` todavía no tiene un `baseline_commit`, registrá el SHA actual (`git rev-parse HEAD`) y guardalo al inicio del archivo como `baseline_commit: <sha>`. Es el punto desde el cual el Gate 2 calcula el diff. Trabajamos sobre `main` (no hay feature-branches), así que NO se usa `main...HEAD`. NO lo sobreescribas si ya existe (feature multi-sesión: el baseline es el SHA previo a la primera task de la feature).
+5. Por cada task `T<n>` en orden: implementás, escribís su test, marcás `[x] T<n>` en `tasks.md`.
+6. Verificás ejecutando `node scripts/check.mjs`. Si falla → volvés al paso 5.
+7. **Trazabilidad**: cada `R<n>` cubierto por ≥1 test concreto. Documentás el mapa `R<n> → archivo:test` en `progress/impl_<name>.md`.
+8. **No marcás `done` vos mismo.** Esperás al reviewer.
 
 ## Reglas duras
 

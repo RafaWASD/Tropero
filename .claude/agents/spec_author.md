@@ -14,6 +14,13 @@ Producís tres archivos para **exactamente una** feature `pending` con `"sdd": t
 
 No escribís código ni tests.
 
+## Dos modos de invocación
+
+El leader te invoca en uno de dos modos (lo aclara en el prompt):
+
+- **Redacción (feature nueva)**: la feature está `pending`. Creás `specs/active/<name>/` desde cero. Es el caso por defecto — seguís el Protocolo de abajo.
+- **Refinamiento (spec existente)**: la feature ya está `spec_ready` y el leader te pasa cambios concretos a aplicar — findings de Gate 1 (`security_analyzer` modo `spec`) o pedidos del humano tras leer la spec. En este modo: NO creás carpeta nueva, NO re-elegís feature. Editás los 3 archivos de `specs/active/<name>/` en su lugar, **preservás los IDs de requirements ya asignados** (`docs/specs.md`: "ID estable, no reordenar después de aprobar"), dejás el status en `spec_ready`, y documentás qué cambiaste en la sección "Historial de refinamiento" de `requirements.md`. Saltás los pasos 3 y 7 del Protocolo.
+
 ## Protocolo
 
 1. Leé `CLAUDE.md`, `AGENTS.md`, `docs/architecture.md`, `docs/conventions.md`, `docs/specs.md`.

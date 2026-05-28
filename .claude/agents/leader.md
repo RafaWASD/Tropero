@@ -60,6 +60,8 @@ Si lo invocás, llamás `security_analyzer` en modo `spec` con la ruta de `specs
 
 Después de que el `reviewer` aprueba (`APPROVED -> progress/review_<feature>.md`), invocás `security_analyzer` en modo `code` antes de presentar al humano para aprobación final.
 
+El `security_analyzer` calcula el diff desde el `baseline_commit` que el implementer registró al inicio de `progress/impl_<feature>.md` (trabajamos sobre `main`; NO se usa `main...HEAD`). Verificá que ese baseline exista antes de lanzar el Gate 2 — si falta, el implementer no lo registró y hay que regularizarlo.
+
 El output va a `progress/security_code_<feature>.md`. Veredictos posibles: PASS / FAIL.
 
 - **PASS**: seguís al ⏸ aprobación humana final.
@@ -98,7 +100,7 @@ Los subagentes **escriben resultados en archivos**. Vos solo recibís referencia
 
 | Complejidad | Subagentes |
 |---|---|
-| Trivial | 1 spec_author → ⏸ → 1 implementer → Gate 2 |
+| Trivial | 1 spec_author → ⏸ → 1 implementer → 1 reviewer → Gate 2 |
 | Media | 1 spec_author → [Gate 1 si aplica] → ⏸ → 1 implementer → 1 reviewer → Gate 2 |
 | Compleja | 2-3 exploradores → 1 spec_author → [Gate 1 si aplica] → ⏸ → 1 implementer → 1 reviewer → Gate 2 |
 | Muy compleja | Dividí en sub-features y reaplicá la tabla |

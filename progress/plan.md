@@ -10,10 +10,13 @@
 - Si surge una decisión nueva que invalida parte del plan → anotarla en el changelog y reescribir el item afectado.
 - Estados válidos: `pending` / `in_progress` / `done` / `blocked` / `deferred`.
 - Si un item dice "depende de Raf" significa que no avanza sin decisión humana — el leader no lo arranca por su cuenta.
+- **División de autoridad**: `feature_list.json` manda sobre el **estado SDD** de cada feature (pending/spec_ready/in_progress/done/blocked/deferred). Este archivo manda sobre el **orden, las dependencias y el porqué**. Si la tabla "Estado global resumido" de abajo discrepa con `feature_list.json`, gana `feature_list.json` — actualizá la tabla, no al revés.
 
 ---
 
 ## Estado global resumido (al 2026-05-26)
+
+> Snapshot de lectura rápida. La verdad del estado por feature vive en `feature_list.json` — si discrepan, gana el JSON.
 
 | Spec | Backend | Frontend | Notas |
 |---|---|---|---|

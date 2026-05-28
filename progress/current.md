@@ -16,7 +16,7 @@
 
 Auditoría completa del harness/flujo/agentes a pedido de Raf. Hallazgos y fixes aplicados (todo docs/config/JSON, cero código de app):
 
-> **Estado de commit**: la consolidación de bitácoras (este reset de `current.md` + el bloque agregado a `history.md`) se commitea/pushea aparte. El resto de los fixes de consistencia de abajo están en el working tree, pendientes de review de Raf + commit separado.
+> **Estado de commit**: bitácoras consolidadas → commiteadas y pusheadas (commit `84cd2a8`). Fixes de consistencia de abajo → revisados con Raf y commiteados aparte. Decisiones: #9 (Stop hook corre suite remota en cada cierre) y #16 (`git push *` auto-allowed) se dejan COMO ESTÁN por decisión de Raf (peaje de segundos OK, peaje de atención no).
 
 - **check.mjs**: ahora valida `security_analyzer.md` (5to agente) y `progress/plan.md`; enum `validStatus` suma `deferred`.
 - **Estado `deferred`** agregado al enum (`feature_list.json` + `check.mjs` + `docs/specs.md`). Features 01 y 09 migradas de `blocked` → `deferred` (no había bloqueante externo; están postergadas por decisión propia). `CHECKPOINTS.md` C1 → "5 agentes".

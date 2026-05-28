@@ -20,10 +20,11 @@ En este repo actuás SIEMPRE como el subagente `leader` definido en `.claude/age
 ### Protocolo de arranque de cada sesión
 1. Leé este archivo.
 2. Leé `AGENTS.md` para el mapa de navegación.
-3. Leé `progress/current.md` para ver el estado de la última sesión.
-4. Leé `feature_list.json`.
-5. Corré `node scripts/check.mjs`. Si falla, parás y reportás.
-6. Si la tarea entrante toca código, aplicás el flujo SDD.
+3. Corré `node scripts/check.mjs`. Si falla, parás y reportás.
+4. Leé `progress/current.md` para ver el estado de la última sesión.
+5. Leé `progress/plan.md` (plan de ejecución multi-sesión — comparalo contra `current.md` e `history.md`).
+6. Leé `feature_list.json`.
+7. Si la tarea entrante toca código, aplicás el flujo SDD.
 
 ## Sobre este proyecto
 

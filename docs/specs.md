@@ -32,6 +32,15 @@ pending → [spec_author] → spec_ready
                             done
 ```
 
+## Estados de parking: `blocked` vs `deferred`
+
+El diagrama de arriba es el ciclo de vida SDD. Ortogonal a eso, una feature puede quedar "estacionada" fuera del flujo:
+
+- **`blocked`** — hay un bloqueante externo real que impide avanzar (dependencia de hardware, decisión de un tercero, bug upstream). No se puede trabajar aunque se quiera.
+- **`deferred`** — la feature está lista para avanzar (o parcialmente hecha) pero se posterga por decisión propia: espera turno por `one_feature_at_a_time`, o tiene una fase pausada intencionalmente (ej: backend `done`, frontend en pausa hasta cerrar el design system).
+
+Regla mnemotécnica: `blocked` = *no puedo*; `deferred` = *elijo no ahora*. Ninguno de los dos cuenta como `in_progress` para `one_feature_at_a_time`. El `check.mjs` tampoco exige specs para una feature `deferred` (igual que `blocked`), aunque la tenga aprobada — la info de "spec aprobada" se documenta en el campo `notes`.
+
 ## Las puertas de aprobación humana (dos, no una)
 
 A partir de ADR-019, el flujo se detiene **dos veces** para el humano:

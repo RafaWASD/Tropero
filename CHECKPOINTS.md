@@ -5,7 +5,7 @@
 ## C1 — El harness está completo
 - [ ] Existen archivos base: `AGENTS.md`, `feature_list.json`, `progress/current.md`, `progress/history.md`.
 - [ ] Existen docs: `architecture.md`, `conventions.md`, `verification.md`, `specs.md`.
-- [ ] Existen los 4 agentes en `.claude/agents/` (leader, spec_author, implementer, reviewer).
+- [ ] Existen los 5 agentes en `.claude/agents/` (leader, spec_author, implementer, reviewer, security_analyzer).
 - [ ] `node scripts/check.mjs` termina con exit code 0.
 
 ## C2 — El estado es coherente
