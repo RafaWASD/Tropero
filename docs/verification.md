@@ -23,6 +23,19 @@
 - El implementer documenta en `progress/impl_<name>.md` el mapa requirement → test concreto (archivo + nombre).
 - El reviewer rechaza si algún `R<n>` queda sin test.
 
+## Áreas con testing obligatorio (no negociables)
+
+En estas áreas el reviewer rechaza implementaciones sin tests N1+N2:
+
+- **Correlación temporal BLE** — Vesta ↔ Allflex, ventanas de correlación, fallback manual.
+- **Sincronización offline y resolución de conflictos** — PowerSync, colas, last-write-wins y estrategias custom.
+- **Cálculos de KPIs y analítica** — métricas que se muestran al usuario o se exportan.
+- **Importación de archivos de laboratorio** — parsers configurables (ADR-007).
+- **Transiciones automáticas de categoría** — lógica de ADR-008.
+- **Lógica de billing y planes** — cuando se active (ADR-009).
+
+En el resto del código los tests son recomendables pero no obligatorios al implementar. Vale la pena agregarlos cuando aparece el primer bug en esa zona.
+
 ## Comandos del stack
 
 > Configurables en `.harness/config.json`. El `scripts/check.mjs` ejecuta `testCommand`.

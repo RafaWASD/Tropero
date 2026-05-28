@@ -91,3 +91,32 @@ src/
 - Una migration por cambio lógico, nombre numerado + descripción: `0001_users.sql`, `0002_establishments.sql`.
 - Incluir RLS + helpers + indexes en la misma migration que crea la tabla cuando es posible.
 - Comentarios SQL en español si explican el porqué del modelo.
+
+## Formato de commits
+
+Convención: `<tipo>(<scope opcional>): <descripción corta en presente>` + descripción larga opcional + `Refs:` cuando aplica.
+
+Tipos:
+- `feat` — funcionalidad nueva
+- `fix` — corrección de bug
+- `docs` — documentación, specs, ADRs, CONTEXT, progress
+- `refactor` — reorganización sin cambio funcional
+- `test` — tests agregados o ajustados
+- `chore` — config, build, deps, scripts
+- `style` — formato, espaciado (no lógica)
+
+Reglas:
+- Mensaje en español, presente indicativo (`agrega`, no `agregó` ni `agregar`).
+- Commits atómicos: cada commit debería poder revertirse independientemente sin romper el resto.
+- Cuando el commit responde a una decisión, agregar `Refs: ADR-XXX` o `Refs: spec NNN` al final.
+
+Ejemplo:
+
+```
+feat(maniobras): wizard de carga secuencial por animal
+
+Implementa el flujo descrito en spec 003-modo-maniobras.
+Pantalla por maniobra + resumen final antes de commit.
+
+Refs: ADR-008, spec 003
+```

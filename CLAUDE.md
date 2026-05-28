@@ -92,6 +92,27 @@ Ver `docs/adr/ADR-002-tech-stack.md` para detalles de la decisión.
 
 6. **Multi-tenant desde día 1.** Todo dato tiene contexto de `establishment_id`. Nunca asumas que solo hay un campo.
 
+## Reglas duras adicionales
+
+Complementan los principios. Operan sobre cómo manejás contexto y cambios, no sobre filosofía del producto.
+
+- **Jerarquía de verdad**: ADR > CONTEXT > spec activa > código > memoria. Si hay conflicto entre fuentes, parar y avisar — no asumas que el nivel más bajo está al día.
+- **Confirmar antes de**: editar specs en `specs/done/`, cambiar design tokens, borrar archivos, refactorizar ≥3 archivos en una pasada, modificar contratos públicos (interfaces, types exportados).
+- **Scope discipline**: overflow durante la sesión → anotar en `docs/backlog.md`, no improvisar. Si lo encontrado es bloqueante para la tarea original, parar y consultar.
+- **Defaults menores**: decisión técnica menor no documentada → proponer default + commit. Decisión con consecuencias arquitectónicas (afecta varias features, define patrón) → ADR. Regla práctica: ¿se va a referenciar en 6 meses? Sí → ADR.
+
+### Handoffs desde chats externos
+
+Cuando aparezca un archivo `HANDOFF-*.md` en la raíz del repo (típicamente bajado de claude.ai):
+
+1. Leerlo completo antes de tocar nada.
+2. Mostrar los diffs propuestos antes de aplicar.
+3. Aplicar solo después de aprobación explícita.
+4. Borrar el `HANDOFF-*.md` después de aplicar.
+5. Commit limpio referenciando el handoff aplicado.
+
+Los archivos `HANDOFF-*` son temporales — no deben sobrevivir más de una sesión.
+
 ## Preguntas pendientes para refinar con el vet socio
 
 Ver `CONTEXT/07-pendientes.md` para la lista actualizada de cosas que aún hay que validar antes de implementar.

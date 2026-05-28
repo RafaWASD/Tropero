@@ -39,6 +39,18 @@ Qué otras opciones se evaluaron y por qué se descartaron.
 Positivas, negativas y mitigaciones.
 ```
 
+## Inmutabilidad y superseding
+
+Un ADR aceptado es **inmutable**. No se edita contenido, no se reescribe contexto, no se "actualiza" la decisión.
+
+Cuando una decisión cambia:
+
+1. Crear un ADR nuevo con status `Accepted` que explica el nuevo razonamiento.
+2. En el ADR viejo, **solo se modifica el campo `Status`**: pasa a `Superseded by ADR-XXX`. Nada más.
+3. La justificación del cambio vive en el ADR nuevo, nunca en el viejo.
+
+Esto preserva el razonamiento histórico: cualquiera puede leer el ADR viejo y entender qué se pensaba en su momento, y por qué se reemplazó.
+
 ## Índice de ADRs
 
 | Nº | Título | Status |
