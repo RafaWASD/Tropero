@@ -62,7 +62,25 @@
 
 **Dos vistas del orden:**
 - **Definir/refinar:** 03 → 04 → 05 → 08 (research) → 06 → 07. *(01/02/09 ya definidas.)*
-- **Implementar:** 02 backend → 01 fe → 02 fe → 04 → 09 → 05 → 03 → 08 → 06 → 07.
+- **Implementar:** ~~02 backend~~ ✅ (sesión 15) → 01 fe → 02 fe → 04 → 09 → 05 → 03 → 08 → 06 → 07.
+
+### Recomendaciones priorizadas — próximas sesiones (al cierre de sesión 15)
+
+> Qué conviene hacer ahora, en orden de prioridad. **P0** = cuello de botella / destraba lo máximo. **P1** = long-lead, arrancar en paralelo YA por su latencia externa. **P2** = oportunista, llena buffer, sin bloqueante. Regla de pipeline: implementación WIP=1, ≤1 spec on-deck (hoy spec 09), refinar contexto 2-3 features adelante.
+
+**Ola 0 — lo que queda (en paralelo):**
+- **[P0] Cerrar design system (A.1) + ADR-018 bottom nav (A.2)** — Dueño: **Raf**. Es EL cuello de botella: bloquea todo el frontend (01, 02, 09 y luego 03). Hasta cerrarlo, el critical path del frontend está congelado. Output: ADR + tokens canónicos + design system.
+- **[P1] Agendar día de campo + prep hardware** — Dueño: **Raf**. Comprar multímetro, sacar el loopback del ESP32 (`CONTEXT/07`). Latencia de calendario/hardware; destraba specs 04/05 (escaneo BLE Allflex + Vesta TX) y la puerta BLE de 09/03. Arrancar ya.
+- **[P1] Research formato SIGSA/SIGBIOTRAZA (08)** — Dueño: **leader** (sin dependencias). Long-lead + crítico para julio 2026. Investigar el formato exacto que aceptan los sistemas SENASA → insumo para el `context.md` de 08.
+- **[P1] Validar seed de cría (26 fields) con Facundo** — Dueño: **Raf + Facundo**. Hoy TENTATIVO; sustenta el modelo de datos de spec 02. De-risk-ea; ajustable por migration sin reabrir spec. Atar a reunión con Facundo (quizás el mismo día de campo).
+- **[P2] Pre-refinar contexto de 04 bastón BLE (parte no-hardware)** — Dueño: **leader + Raf**. Barato, llena el buffer de refinamiento. UX/edge cases (doble lectura, no-lectura, desconexión, fallback manual) se cierran ahora; UUIDs/protocolo se finalizan tras el día de campo.
+
+**Ola 1 — al cerrar el design system:**
+- **[P0] Frontend de spec 01 (B.1, Fases 3-8)** — Dueño: **implementer**. Da la app navegable; prerequisito de todo el resto del frontend. Necesita A.1 + A.2.
+- **[P1] Frontend de spec 02** — Dueño: **implementer**. Después de 01 fe.
+- **[P2] Pull-left: 09 Fases 0/1/5/6** (hooks/validaciones/offline) — no necesitan design system; se pueden adelantar en paralelo a B.1.
+
+> **No** escribir la spec larga de 03 hasta estar cerca de implementarla (depende de 04/05/09 sin construir) — su contexto ya está lockeado en `context_ready`.
 
 ---
 
