@@ -99,7 +99,7 @@ app/src/features/animals/
 ├── hooks/
 │   ├── useAnimalLookup.ts                   # R3 — motor find-or-create
 │   ├── useLastRodeoSelected.ts              # R6
-│   ├── useDynamicAnimalForm.ts              # Lee categories_by_system + system_field_config (post-MVP)
+│   ├── useDynamicAnimalForm.ts              # Campos del form de alta (animal_profiles): categories_by_system + hardcode cría (system_field_config post-MVP) + selector de lote
 │   └── useBleStickListener.ts               # Interface — implementación en spec 04
 ├── services/
 │   ├── animal-lookup.ts                     # Wrapper sobre searchByTag/IDV/visualAlt de spec 02
@@ -160,7 +160,7 @@ useLastRodeoSelected(establishmentId: string): {
 - En memoria: zustand store global indexado por `establishment_id` (zustand recomendado por consistencia con stack ADR-013 si está adoptado; fallback a Context API si zustand no está confirmado todavía).
 - Persistencia: `AsyncStorage` con key `rafaq:last_rodeo:<establishment_id>`. Hidratar al mount del provider.
 - Fallback DB: cuando el store no tiene valor para el establishment, dispara una query a PowerSync SQLite del último `animal_profiles.rodeo_id` tocado por el usuario en ese establishment (`max(updated_at) where created_by = userId or last_modified_by = userId`). La query es read-local, no red.
-- Si la query DB también retorna vacío, fallback al rodeo default del establishment (`name = 'Rodeo principal'` creado por R2.6 de spec 02).
+- Si la query DB también retorna vacío, fallback al **primer rodeo activo creado** del establishment (`order by created_at asc limit 1`). Si tampoco hay rodeos activos, retorna `null` y la UI debe bloquear el flujo con un CTA al wizard de R2.6 de spec 02 ("Creá tu primer rodeo"). **Refinamiento 2026-05-27 de spec 02**: el trigger que creaba un "Rodeo principal" autogenerado fue eliminado; los establecimientos recién creados arrancan con 0 rodeos.
 
 ### `useBleStickListener` — interface (spec 04 expone la implementación)
 
@@ -202,8 +202,10 @@ useDynamicAnimalForm(rodeoId: string, options: {
 };
 ```
 
-- Lee el `system_id` del rodeo y deriva la lista de campos. En MVP `(bovino, cría)` el conjunto es hardcoded (ver R4.5).
-- Estructura del módulo: `app/src/features/animals/services/form-config/(bovino,cria).ts` exporta un array `FieldConfig[]` para ese par. Cuando se habilite un segundo sistema, agregar `(bovino,invernada).ts`, etc. Punto de extensión limpio para post-MVP (spec 02 ya anticipa la posibilidad de una tabla `system_field_config` pero no la implementa en MVP).
+- Lee el `system_id` del rodeo y deriva la lista de campos del **form de alta del animal** (columnas de `animal_profiles`: sexo, raza, pelaje, peso de entrada, lote opcional, etc.). En MVP `(bovino, cría)` el conjunto es hardcoded (ver R4.5).
+- **Distinción ADR-021**: este `FieldConfig[]` describe los **atributos del animal** (columnas de `animal_profiles`), NO los data_keys de eventos. Los data_keys que el rodeo tracquea viven en `rodeo_data_config` (+ `field_definitions`) y determinan qué **eventos** se pueden cargar después (al "+ agregar evento" en EDIT, y el gating de maniobras de spec 03), no los campos de este form de alta. Son fuentes distintas: el form de alta = `system_field_config` (futura tabla post-MVP, hoy hardcodeada); los eventos = `rodeo_data_config`.
+- Estructura del módulo: `app/src/features/animals/services/form-config/bovino-cria.ts` exporta un array `FieldConfig[]` para ese par. Cuando se habilite un segundo sistema, agregar `bovino-invernada.ts`, etc. Punto de extensión limpio para post-MVP (spec 02 anticipa una tabla `system_field_config` para los campos del form de alta por sistema, distinta de `field_definitions`; no se implementa en MVP).
+- **Lote**: el form incluye un selector opcional de `management_group_id` (los `management_groups` activos del establishment, o "sin lote"), consumido vía `useManagementGroups` de spec 02. UI tentativa.
 - `prefilledIdentifier`: bloquea el campo correspondiente como `identifier_locked` (no editable durante alta); los otros dos quedan como `identifier_optional` (vacío, opcional).
 - `submit()`: delega en `useCreateAnimal` de spec 02 con `patrón split insert + select` (ADR-012).
 
@@ -226,7 +228,7 @@ Implementación de la lógica de persistencia + fallback de `useLastRodeoSelecte
 export async function readLastRodeo(establishmentId: string): Promise<string | null>;  // AsyncStorage
 export async function writeLastRodeo(establishmentId: string, rodeoId: string): Promise<void>;
 export async function queryLastUsedRodeoFromDb(establishmentId: string, userId: string): Promise<string | null>;
-export async function getDefaultRodeo(establishmentId: string): Promise<string>;       // 'Rodeo principal' fallback
+export async function getDefaultRodeo(establishmentId: string): Promise<string | null>; // primer rodeo activo creado (order by created_at asc limit 1); null si no hay ninguno → UI bloquea con CTA wizard R2.6 spec 02
 ```
 
 ## Pantallas
@@ -341,8 +343,9 @@ Spec 09 **consume** los buckets de spec 02 sin agregar buckets nuevos:
 
 - `est_animal_profiles`, `est_animals_local`: para R3 (lookup) y R1 (lista).
 - `est_rodeos`: para `RodeoSelector` (R4.4).
+- `est_management_groups`: para el selector de lote en CREATE/EDIT (ADR-020).
 - `est_weight_events`, `est_reproductive_events`, `est_sanitary_events`, `est_condition_score_events`, `est_lab_samples`, `est_animal_events`, `est_animal_category_history`: para el timeline (R5.3).
-- `config_global`: para `useDynamicAnimalForm` (categorías por sistema).
+- `config_global`: para `useDynamicAnimalForm` (categorías por sistema + catálogo `field_definitions`/`system_default_fields` para el wizard de rodeo, aunque el form de alta del animal en MVP es hardcoded para cría).
 
 No requiere ajustes a las sync rules de spec 02.
 
@@ -398,11 +401,13 @@ No requiere ajustes a las sync rules de spec 02.
 | `lastRodeoSelected` queda stale si el usuario borra el rodeo desde otra pantalla (RodeoScreen de spec 02) | El hook valida que el rodeo siga activo antes de usarlo como default. Si fue soft-deleted o inactivo, fallback a R6.3 (query DB del último usado) y refresca el storage. |
 | Búsqueda fuzzy de `visual_id_alt` lenta con muchos animales | Spec 02 ya tiene índice GIN trigram + límite a 20. Cliente debouncea la búsqueda 250 ms y muestra spinner. |
 | Tests del flujo BLE difíciles sin device real | Mock del provider en tests: el `BleStickListenerProvider` acepta un `mode='mock'` que expone una API para disparar eventos manualmente desde el test (`mockTagRead(tag)`). |
-| Tensión R4.13 bloquea opciones A/B sin que el leader lo note | R12 de requirements documenta explícitamente el TODO. `tasks.md` Fase 3 lo marca como blocked-pending-refinement de spec 02. El reviewer debe levantar el flag si no está resuelto antes de implementar Fase 3. |
+| Tensión R4.13 con opciones A/B (asignar TAG NULL→valor) | **RESUELTA** (2026-05-26): R4.13 de spec 02 permite explícitamente `NULL → valor` (R4.13.a). Ver R12 de requirements (RESUELTO). No es un bloqueo activo. |
 
 ## Dependencias del spec
 
-- **Spec 02** (modelo animal): aprobada y backend implementable. Spec 09 consume `animals`, `animal_profiles`, `animal_events`, `rodeos`, `categories_by_system`, función `animal_timeline()`, RLS de R11, motor de form dinámico documentado en design.md § "Motor de form dinámico por rodeo". **No** redefine.
+- **Spec 02** (modelo animal): aprobada (refundida 2026-05-28) y backend implementable. Spec 09 consume `animals`, `animal_profiles`, `animal_events`, `rodeos`, `categories_by_system`, `field_definitions` + `system_default_fields` + `rodeo_data_config` (plantilla de datos, ADR-021), `management_groups` (lote, ADR-020), función `animal_timeline()`, RLS de R11, motor de form dinámico documentado en design.md § "Motor de form dinámico por rodeo". **No** redefine.
+- **ADR-020** (lote): ✅ accepted. Spec 09 consume `management_groups` para el selector de lote en CREATE/EDIT (UI tentativa).
+- **ADR-021** (plantilla de datos): ✅ accepted. Spec 09 distingue el form de alta del animal (columnas `animal_profiles`, hardcode cría) de los data_keys de eventos (`rodeo_data_config`).
 - **Spec 04** (BLE bastón): pending. Spec 09 declara la interface `useBleStickListener` y monta un stub mientras spec 04 no esté. La puerta BLE (R2) se activa solo cuando spec 04 esté implementada.
 - **Spec 01** (identity multi-tenancy): backend done (Fase 1+2), frontend pendiente. Spec 09 consume `AuthContext`, `EstablishmentContext`. La implementación de spec 09 depende de que Fase 3+ de spec 01 esté implementada (puerta común para todo el frontend post-design-system).
 - **ADR-016** (terminología rodeo/sistema): ✅ done. Spec 09 usa "rodeo" y "sistema" consistentemente.

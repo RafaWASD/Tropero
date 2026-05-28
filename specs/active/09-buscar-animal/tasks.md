@@ -58,7 +58,7 @@
 - Implementar funciones: `readLastRodeo`, `writeLastRodeo`, `queryLastUsedRodeoFromDb`, `getDefaultRodeo`.
 - AsyncStorage key pattern: `rafaq:last_rodeo:<establishment_id>`.
 - Query DB usa PowerSync local: `select rodeo_id from animal_profiles where establishment_id = ? order by updated_at desc limit 1` (filtrado por usuario actual si el schema permite; sino el más reciente del establishment).
-- Fallback final: rodeo con `name = 'Rodeo principal'` del establishment.
+- Fallback final: **primer rodeo activo creado** del establishment (`select id from rodeos where establishment_id = ? and active = true and deleted_at is null order by created_at asc limit 1`). Si no hay ningún rodeo activo, la función retorna `null` para que la UI muestre el bloqueo "Creá un rodeo primero" que lleva al wizard de R2.6 de spec 02. **Refinamiento 2026-05-27 de spec 02**: ya no existe el rodeo autogenerado "Rodeo principal"; el fallback es el primer rodeo creado, o `null` con bloqueo de UI.
 - **Aceptación**: tests `last-rodeo.test.ts` verdes (CRUD AsyncStorage + fallback DB + fallback default).
 - **Cubre**: R6.3, R6.4.
 
@@ -98,7 +98,7 @@
 
 ### T1.6 Hook `useDynamicAnimalForm`
 - Crear el hook en `hooks/useDynamicAnimalForm.ts`.
-- Lee el `rodeo_id` provisto, deriva `system_id` via PowerSync, carga el `FieldConfig[]` de `services/form-config/(bovino,cria).ts` para MVP.
+- Lee el `rodeo_id` provisto, deriva `system_id` via PowerSync, carga el `FieldConfig[]` de `services/form-config/bovino-cria.ts` para MVP. **Nota (ADR-021)**: este `FieldConfig[]` describe los **atributos del animal** (columnas de `animal_profiles`), NO los data_keys de eventos (`rodeo_data_config`, que determinan qué eventos se pueden cargar después).
 - Estado del form local (no global). `setField(key, value)` actualiza.
 - `validate()` corre los validators inline (al menos un identificador no vacío, `sex` requerido, fechas válidas, numéricos positivos).
 - `submit()` invoca `useCreateAnimal` de spec 02 con el patrón split insert + select.
@@ -106,16 +106,17 @@
 - **Cubre**: R4.5, R4.6, R4.8, R11.4.
 
 ### T1.7 Form config para `(bovino, cría)`
-- Crear `app/src/features/animals/services/form-config/bovino-cria.ts` con el `FieldConfig[]` de R4.5:
+- Crear `app/src/features/animals/services/form-config/bovino-cria.ts` con el `FieldConfig[]` de R4.5 (atributos del animal, no data_keys de eventos):
   - identificador precargado (locked)
   - identificador #2 (optional)
   - identificador #3 (optional)
   - `sex` (radio, required)
   - `birth_date` (date, optional)
   - `breed`, `coat_color`, `entry_date`, `entry_weight`, `entry_origin` (optional)
+  - `management_group_id` (selector de lote, optional — lee `management_groups` activos del establishment vía `useManagementGroups` de spec 02; opción "sin lote"; ADR-020)
   - `category` (autocalculada read-only con opción de override)
-- **Aceptación**: import desde `useDynamicAnimalForm` funciona; campos validan.
-- **Cubre**: R4.5.
+- **Aceptación**: import desde `useDynamicAnimalForm` funciona; campos validan; el selector de lote lista los `management_groups` del establishment o "sin lote".
+- **Cubre**: R4.5 (incluye lote opcional).
 
 ### T1.8 Validaciones locales offline-first
 - Crear `app/src/features/animals/services/validation.ts` con:
@@ -194,20 +195,21 @@
 
 ### T2.8 `AddEventSheet` (componente)
 - Bottom sheet o screen (definir con design system) con paso 1 (seleccionar tipo) + paso 2 (form específico).
-- Tipos disponibles: `observacion | salud | reproduccion | traslado | pesaje | identificacion | otro` mapeados a los 5 tipados de spec 02 + `observacion`.
+- Tipos disponibles (modelo Híbrido de spec 02): **peso / reproductivo / sanitario / condición corporal / muestra de lab** (los 5 tipados de R6.1..R6.5) + **observación libre** (`animal_events`). *(NO los tipos del enum viejo del ADR-017 `salud/reproduccion/traslado/pesaje/identificacion` — el modelo Híbrido los reemplazó.)*
 - Submit invoca el service correspondiente (`createWeightEvent | createReproductiveEvent | createSanitaryEvent | createConditionScoreEvent | createLabSample | createObservation`).
+- Cuando spec 03 implemente el gating DB, los tipos ofrecidos acá deberán filtrarse por los data_keys habilitados en el `rodeo_data_config` del rodeo del animal (ej. no ofrecer "reproductivo/tacto" si el rodeo no tiene `prenez`). En MVP de spec 09 (sin spec 03) se ofrecen todos.
 - **Aceptación**: cada tipo cubierto por un test que verifica que el service correcto se invoca.
 - **Cubre**: R5.4.
 
 ### T2.9 `AnimalEditScreen` (R5)
 - Recibe param: `animalProfileId`.
 - Layout: header read-only de identificadores + zona de atributos editables + timeline scrollable + botón "+ agregar evento".
-- Atributos: `useUpdateAnimal(profileId)` maneja mutaciones inline.
+- Atributos: `useUpdateAnimal(profileId)` maneja mutaciones inline. Incluye **selector de lote** (`management_group_id`) que invoca `useAssignManagementGroup` de spec 02 (asignar/cambiar/quitar, cualquier rol operativo — ADR-020 / R2.17).
 - Timeline: `useAnimalTimeline(profileId)` retorna las filas; render con `TimelineEventRenderer`.
 - Botón "+ agregar evento" abre `AddEventSheet`.
 - Edit/soft-delete de evento gateado por R5.5 / R5.6 (cliente y server).
 - Link a madre si es ternero/ternera (R5.8).
-- **Aceptación**: cubre todas las requirements R5.x con tests RTL.
+- **Aceptación**: cubre todas las requirements R5.x con tests RTL; asignar/quitar lote persiste.
 - **Cubre**: R5.1, R5.2, R5.3, R5.5, R5.6, R5.7, R5.8, R5.9.
 
 ### T2.10 Navegación: agregar rutas y tipos

@@ -19,6 +19,18 @@ USUARIO
 
 Nivel `Rodeo` es donde se define la combinación **especie + sistema productivo**. Un mismo establecimiento puede tener varios rodeos de tipos distintos.
 
+### Los tres ejes ortogonales de organización del animal
+
+Un animal vive en tres dimensiones independientes (ADR-020). Lo que las distingue es **qué dispara un cambio en cada una**:
+
+| Eje | Representa | Cambia cuando… | Cómo |
+|---|---|---|---|
+| **Rodeo** (`animal_profiles.rodeo_id`) | sistema productivo (define qué datos se cargan, vía `rodeo_data_config`) | cambia el sistema productivo del animal | manual / semi-auto, baja frecuencia |
+| **Categoría** (`animal_profiles.category_id`) | estado biológico | cambia el estado biológico (tacto, parto) | **automático por evento** (trigger, ADR-008) |
+| **Lote** (`animal_profiles.management_group_id`) | agrupación de manejo | el productor decide reagrupar | **siempre manual, nunca por evento** |
+
+Los tres son ortogonales: una transición de categoría no toca rodeo ni lote; asignar lote no cambia categoría ni rodeo. **Regla de display**: agrupar por lote si el animal lo tiene, si no por categoría.
+
 ## Bloques principales
 
 ### 1. Usuarios y Roles
@@ -51,6 +63,21 @@ categories_by_system
   id, system_id, name, parent_category_id, auto_transitions
   -- ej: (cría, vaquillona), (cría, vaquillona_preñada, parent=vaquillona)
 
+-- Plantilla de datos configurable por rodeo (ADR-021). Tres tablas:
+field_definitions  (catálogo GLOBAL de datos tracqueables — read-only desde cliente)
+  id, data_key (unique global), label, description
+  category  -- reproductivo | productivo | sanitario | manejo | comercial | identificacion
+  data_type  -- maniobra | evento_individual | evento_grupal | propiedad
+  ui_component, config_schema (jsonb), schema_version, active
+  -- cada dato existe UNA vez (no atado a sistema); ej: prenez, peso, vacunacion, dientes
+  -- seed MVP: 26 fields de cría (TENTATIVO hasta validar con Facundo)
+
+system_default_fields  (qué fields son default/required POR SISTEMA — read-only desde cliente)
+  id, system_id, field_definition_id
+  default_enabled  -- viene tildado al crear un rodeo de ese sistema
+  required_for_system, sort_order
+  -- unique(system_id, field_definition_id)
+
 establishments
   id, name, owner_id, province, city
   latitude, longitude (nullable)
@@ -62,6 +89,21 @@ rodeos
   id, establishment_id, name
   species_id, system_id  -- FK a species y systems_by_species
   active, created_at, updated_at
+  -- NO hay rodeo default: el usuario crea el primero vía wizard (ADR-021/spec 02 R2.6)
+
+rodeo_data_config  (estado efectivo POR RODEO — toggle del owner)
+  rodeo_id, field_definition_id, enabled, custom_config (jsonb)
+  -- PK (rodeo_id, field_definition_id); ON DELETE CASCADE desde rodeos
+  -- un trigger AFTER INSERT en rodeos lo pre-popula con los system_default_fields del sistema
+  -- el owner puede habilitar cualquier field del catálogo global, incluso uno no-default
+  --   de su sistema (ej. rodeo de tambo que también tactea preñez)
+  -- sustrato del gating de maniobras de spec 03
+
+management_groups  (lote — agrupación de manejo, ADR-020. UI lo muestra como "Lote")
+  id, establishment_id, name (texto libre, sin presets)
+  active, created_at, updated_at, deleted_at
+  -- scope establishment (NO rodeo): habilita lotes "cruzando rodeos"
+  -- crear/editar/borrar: solo owner. asignar animal: cualquier rol operativo
 ```
 
 ### 3. Animal (entidad central)
@@ -77,6 +119,7 @@ animals  (entidad global)
 
 animal_profiles  (datos por establecimiento)
   id, animal_id, establishment_id, rodeo_id
+  management_group_id  -- FK nullable a management_groups (lote, ADR-020). NULL = sin lote
   idv  -- caravana visual, única por campo
   visual_id_alt  -- identificación alternativa (tatuaje, hierro, descripción)
   category_id  -- FK a categories_by_system
@@ -98,7 +141,9 @@ animal_profiles  (datos por establecimiento)
 
 ```
 sessions
-  id, establishment_id, rodeo_id, lote_label (text libre)
+  id, establishment_id, rodeo_id
+  management_group_id  -- FK nullable a management_groups (reconciliado 2026-05-28: era lote_label texto;
+                       --   ahora apunta al lote real de ADR-020. spec 03 implementa el detalle)
   session_type  -- maniobras | weighing_only | sanitary_only | etc
   selected_maneuvers  -- JSON con qué maniobras están activas
   maneuver_config  -- JSON con pre-config (vacuna, pajuelas)
@@ -148,7 +193,8 @@ sanitary_events  (registro individual)
   notes, created_by, created_at
 
 sanitary_campaigns  (planificación poblacional)
-  id, establishment_id, rodeo_id (nullable), lote_label (nullable)
+  id, establishment_id, rodeo_id (nullable)
+  management_group_id  -- FK nullable a management_groups (reconciliado 2026-05-28: era lote_label texto)
   name, campaign_type
   product_name, active_ingredient, dose_ml, route
   planned_date, executed_date, next_dose_date
@@ -240,7 +286,7 @@ PowerSync maneja la mayor parte de esto automáticamente. La tabla `sync_queue` 
 
 ## Transiciones automáticas de categoría
 
-Implementadas como triggers o lógica en backend (Edge Functions de Supabase). Ver `docs/adr/ADR-008-automatic-category-transitions.md`.
+Implementadas como triggers en backend (Postgres) sobre `reproductive_events`. Ver `docs/adr/ADR-008-automatic-category-transitions.md`.
 
 | De | A | Trigger |
 |---|---|---|
@@ -249,14 +295,17 @@ Implementadas como triggers o lógica en backend (Edge Functions de Supabase). V
 | Vaca segundo servicio | Multípara | Registro de segundo parto |
 | Cualquier vaca | CUT | Manual con prompt automático al cargar dientes 1/2, 1/4 o sin dientes |
 
+**Ortogonalidad (ADR-020)**: estos triggers escriben **únicamente** `animal_profiles.category_id`. Nunca tocan `rodeo_id` ni `management_group_id` (lote). Un animal que transiciona de categoría permanece en su mismo rodeo y su mismo lote.
+
 ## Ternero al pie
 
 Se registra como entidad separada (`animals` + `animal_profile`) desde el momento del nacimiento. Tiene su propio TAG y caravana visual desde día 1 (la caravana debe colocarse al nacimiento o dentro de esa semana por ley SENASA).
 
 ## Lo que NO se modela (decisión explícita)
 
-- Lotes/potreros como entidades físicas con movimientos entre ellos
+- **Potreros** como entidades físicas georreferenciadas con movimientos entre ellos. *(El "lote" SÍ se modela ahora —`management_groups`, ADR-020— pero como **agrupación de manejo** lógica, distinta de rodeo y de potrero físico. No hay tracking de qué potrero ocupa cada lote.)*
 - Stock de pajuelas
 - Stock de medicamentos
+- Historial de transferencias de lote o de rodeo (`movements`) — en MVP solo se guarda el estado actual (`management_group_id` / `rodeo_id`); el historial de movimientos queda como decisión separada post-MVP
 - Movimientos de animales entre establecimientos a nivel transaccional (se modela en `entry_*` y `exit_*` de `animal_profiles`)
 - Módulo financiero/contabilidad

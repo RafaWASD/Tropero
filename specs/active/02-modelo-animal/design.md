@@ -1,19 +1,9 @@
 # Spec 02 — Design
 
-**Status**: Draft (pendiente de aprobación humana)
-**Fecha**: 2026-05-25
+**Status**: Aprobada 2026-05-26 · refundida 2026-05-28 (incorpora ADR-020 lote + ADR-021 plantilla de datos).
+**Fecha original**: 2026-05-25
 
-## Historial de refinamiento
-
-- **2026-05-26** — Refinamiento previo a aprobación. Cambios:
-  - Agregada tabla `animal_events` (modelo Híbrido, ADR-017 matizado) en migration nueva `0033_animal_events.sql`. CHECK acota `event_type` a `'observacion' | 'otro'`. RLS scopeada por `establishment_id` denormalizado. Trigger `tg_set_author_id_auth_uid` autollenar `author_id = auth.uid()`. Trigger BEFORE UPDATE rechaza modificación de `text/structured_payload/event_type` pasada `edit_window_until` (cubre R6.10..R6.13).
-  - Extendida función `animal_timeline` para incluir `observacion` como séptimo origen (UNION ALL con `animal_events`). Migration `0034_animal_timeline_v2.sql` reemplaza la versión de `0032`.
-  - Agregado trigger `tg_animals_block_tag_change` y `tg_animal_profiles_block_idv_change` para enforce inmutabilidad post-alta de `tag_electronic` y `idv` (R4.13). `visual_id_alt` sigue editable.
-  - Bucket `est_animal_events` agregado a PowerSync.
-  - Renumerada `0033_check_grants.sql` original a `0036_check_grants.sql` para acomodar las migrations nuevas.
-  - Eliminada sección que referenciaba el flujo R15 desde el cliente — la UX de búsqueda + alta interactiva ahora vive en spec 09. `useSearchAnimal` queda referenciado como hook que **consume** las primitives de este spec (R5 + R10) pero su definición e implementación se mueven a spec 09. La pantalla `AnimalSearchScreen` y `AnimalCreateScreen` se mueven a spec 09.
-  - Agregada sección "Motor de form dinámico por rodeo" que confirma cómo se renderiza el form de alta según `system_id` del rodeo seleccionado (consumido por spec 09).
-  - Renumeración de migrations actualizada en el diagrama del top y en la sección "Migrations 0012..0034".
+> El historial de refinamientos vive en el **Changelog** al final de este documento (audit trail, mismo principio que los ADRs).
 
 ## Arquitectura general
 
@@ -35,9 +25,16 @@
 ┌─────────────────────────────────────────────────────┐
 │  Supabase                                            │
 │  ┌──────────────────────────────────────────────┐    │
-│  │  Migrations 0012..0035 (este spec):           │    │
+│  │  Migrations 0012..0037 (este spec):           │    │
 │  │   - species / systems / categories (config)   │    │
-│  │   - rodeos                                    │    │
+│  │   - field_definitions (catálogo GLOBAL de     │    │
+│  │     datos tracqueables, ADR-021)              │    │
+│  │   - system_default_fields (defaults/required  │    │
+│  │     por sistema)                              │    │
+│  │   - rodeos + rodeo_data_config (toggle por    │    │
+│  │     rodeo, FK a field_definitions)            │    │
+│  │   - management_groups (lote, ADR-020) +       │    │
+│  │     animal_profiles.management_group_id       │    │
 │  │   - animals / animal_profiles                 │    │
 │  │   - eventos tipados (weight, repro, sanitary, │    │
 │  │     condition_score, lab_samples)             │    │
@@ -45,9 +42,10 @@
 │  │     'otro') con edit_window_until 15 min      │    │
 │  │   - animal_category_history                   │    │
 │  │   - triggers: transiciones, ternero al pie,   │    │
-│  │     identidad check, default rodeo,           │    │
-│  │     created_by, author_id, category_history,  │    │
-│  │     bloqueo cambio tag/idv (inmutabilidad)    │    │
+│  │     identidad check, pre-populate config de   │    │
+│  │     rodeo, validar data_key, created_by,      │    │
+│  │     author_id, category_history, bloqueo      │    │
+│  │     cambio tag/idv (inmutabilidad)            │    │
 │  │   - helpers: animal_timeline() (con           │    │
 │  │     observacion como 7mo origen),             │    │
 │  │     compute_category(),                       │    │
@@ -57,6 +55,18 @@
 └─────────────────────────────────────────────────────┘
 ```
 
+### Los tres ejes ortogonales (regla maestra)
+
+Un animal vive en tres dimensiones independientes. Lo que las distingue es **qué dispara un cambio en cada una** (ADR-020):
+
+| Eje | Tabla / columna | Cambia cuando… | Disparador |
+|---|---|---|---|
+| **Rodeo** | `animal_profiles.rodeo_id` | cambia el sistema productivo | manual / semi-auto, baja frecuencia |
+| **Categoría** | `animal_profiles.category_id` | cambia el estado biológico | **automático por evento** (trigger, ADR-008) |
+| **Lote** | `animal_profiles.management_group_id` | el productor decide reagrupar | **siempre manual, nunca por evento** |
+
+Implicancia de diseño crítica: los triggers de transición de categoría (`0030_category_transitions`) **solo** tocan `category_id`. Nunca escriben `rodeo_id` ni `management_group_id`. Ningún trigger asigna lote (R2.18, R7.7).
+
 Se parte del estado actual del backend tras spec 01:
 - 11 migrations `0001..0011` aplicadas a Supabase remoto.
 - Helpers `has_role_in(uuid)`, `is_owner_of(uuid)`.
@@ -64,7 +74,7 @@ Se parte del estado actual del backend tras spec 01:
 - Patrón de migration con `enable RLS + GRANT + policies` documentado.
 - Tests Node nativo `supabase/tests/rls/run.cjs`.
 
-Las migrations de este spec comienzan en `0012_` y siguen hasta `0036_`. El refinamiento 2026-05-26 agregó migrations `0033_animal_events.sql`, `0034_animal_timeline_v2.sql` (reemplaza la timeline de `0032`) y `0035_immutability_identifiers.sql`, y renumeró el housekeeping de grants a `0036_check_grants.sql`. Ver "Historial de refinamiento" arriba.
+Las migrations de este spec van de `0012_` a `0037_`. La refundición 2026-05-28 reemplazó el contenido de la `0016` buggeada (`system_data_templates` por-sistema) por las **tres tablas de plantilla** de ADR-021 (`field_definitions` + `system_default_fields` + `rodeo_data_config` + triggers, todo en `0016` como unidad lógica), insertó `management_groups` + `ALTER animal_profiles ADD management_group_id` como `0036`, y movió `check_grants` a `0037`. Los bloques `0017`–`0035` **mantienen su numeración** original. Ver detalle en el Changelog y en `tasks.md`.
 
 ## Schema SQL
 
@@ -231,40 +241,276 @@ create policy rodeos_update on public.rodeos
 grant select, insert, update on public.rodeos to authenticated;
 ```
 
-Adicional: trigger AFTER INSERT en `establishments` (extiende `handle_new_establishment` de migration 0011) que crea un rodeo default `(bovino, cria)` con `name = 'Rodeo principal'`.
+**Sin rodeo default**: no existe trigger de auto-creación de rodeo al crear un establecimiento. Tras el alta del establishment, el cliente lleva al usuario al wizard de "Crear rodeo" que (i) elige sistema activo, (ii) nombra el rodeo, (iii) tilda/destilda los datos de la plantilla del sistema. El rodeo se crea por INSERT explícito a `rodeos` desde el cliente; el trigger AFTER INSERT de `0016` (`tg_rodeos_seed_data_config`) pre-popula `rodeo_data_config` con los defaults del sistema. Mientras el establishment no tenga rodeo, el cliente bloquea la navegación (empty state de bloqueo total, R2.6).
+
+### Plantilla de datos: catálogo global + defaults por sistema + toggle por rodeo (`ADR-021`)
+
+Tres tablas que separan tres responsabilidades (corrige el bug del catálogo-por-sistema de versiones previas — ver Changelog):
+
+1. **`field_definitions`** — catálogo GLOBAL: cada dato tracqueable existe **una sola vez** (no atado a un sistema). Read-only desde cliente.
+2. **`system_default_fields`** — qué fields vienen tildados/requeridos **por sistema** (la "plantilla"). Read-only desde cliente.
+3. **`rodeo_data_config`** — estado efectivo **por rodeo** (toggle del owner). Mutable por owner.
+
+La separación habilita el caso real "rodeo de tambo que también quiere tactear preñez": `prenez` existe en `field_definitions` (global), así que el rodeo de tambo puede habilitarlo en su `rodeo_data_config` aunque no sea default de tambo en `system_default_fields`. Sustrato del gating de maniobras de spec 03 (R2.7).
+
+> Las tres tablas van en **una sola migration `0016`** (unidad lógica). El seed de cría es **TENTATIVO** (validación con Facundo pendiente).
 
 ```sql
--- 0016_default_rodeo_on_establishment.sql
-create or replace function public.handle_new_establishment_default_rodeo ()
-returns trigger language plpgsql security definer set search_path = public as $$
-declare
-  v_species_id uuid;
-  v_system_id  uuid;
+-- 0016_field_template_and_rodeo_config.sql
+-- (tres tablas de plantilla de datos + seed de cría + triggers. ADR-021.)
+-- Nota: tg_set_updated_at_generic se reusa de spec 01 (0002); se consolida en 0017.
+
+-- 1) Catálogo GLOBAL de datos tracqueables ---------------------------------
+create table public.field_definitions (
+  id              uuid primary key default gen_random_uuid(),
+  data_key        text not null unique,        -- clave estable GLOBAL: 'prenez', 'peso', ...
+  label           text not null,               -- texto humano para UI
+  description     text,
+  category        text not null,               -- 'reproductivo'|'productivo'|'sanitario'|'manejo'|'comercial'|'identificacion'
+  data_type       text not null,               -- 'maniobra'|'evento_individual'|'evento_grupal'|'propiedad'
+  ui_component    text,                         -- 'numeric'|'numeric_stepped'|'enum_single'|'enum_multi'|'date'|'silent_apply'|'composite'|'text'
+  config_schema   jsonb,                        -- configuración específica del dato (TENTATIVO por field)
+  schema_version  int not null default 1,
+  active          boolean not null default true,
+  created_at      timestamptz not null default now(),
+  updated_at      timestamptz not null default now()
+);
+
+create index field_definitions_by_category on public.field_definitions (category) where active = true;
+
+-- Seed TENTATIVO de cría: 26 fields (23 default ON, 3 default OFF). default_enabled vive en system_default_fields.
+insert into public.field_definitions (data_key, label, description, category, data_type, ui_component) values
+  -- Reproductivo
+  ('servicio',                'Servicio / entore',        'Registro de monta natural o IA',             'reproductivo', 'evento_individual', 'composite'),
+  ('prenez',                  'Preñez',                   'Tacto: preñada / vacía',                     'reproductivo', 'maniobra',          'enum_single'),
+  ('tamano_prenez',          'Tamaño de preñez',         'Cabeza / cuerpo / cola del tacto positivo',  'reproductivo', 'maniobra',          'enum_single'),
+  ('tacto_vaquillona',       'Aptitud vaquillona',       'Apta / no apta / diferida',                  'reproductivo', 'maniobra',          'enum_single'),
+  ('parto',                   'Parto',                    'Registro de parto + ternero al pie',         'reproductivo', 'evento_individual', 'composite'),
+  ('aborto',                  'Aborto',                   'Registro de aborto',                         'reproductivo', 'evento_individual', 'date'),
+  ('destete',                 'Destete',                  'Destete del ternero (usa pesaje)',           'reproductivo', 'evento_individual', 'composite'),
+  ('raspado_toros',          'Raspado de toros',         'Tricomoniasis + campylobacteriosis',         'reproductivo', 'maniobra',          'composite'),
+  ('inseminacion',            'Inseminación artificial',  'IATF / IA con pajuela',                      'reproductivo', 'maniobra',          'composite'),
+  -- Productivo
+  ('peso',                    'Pesaje',                   'Peso vivo en balanza o manual',              'productivo',   'maniobra',          'numeric'),
+  ('peso_destete',           'Peso al destete',          'Peso del ternero al destete',                'productivo',   'evento_individual', 'numeric'),
+  ('condicion_corporal',      'Condición corporal',       'Score 1.00 - 5.00 (escala media)',           'productivo',   'maniobra',          'numeric_stepped'),
+  ('peso_nacimiento',         'Peso al nacer',            'Peso del ternero al nacimiento',             'productivo',   'evento_individual', 'numeric'),
+  -- Sanitario
+  ('vacunacion',              'Vacunación',               'Aplicación de vacuna (silenciosa)',          'sanitario',    'maniobra',          'silent_apply'),
+  ('brucelosis',              'Brucelosis (sangrado)',    'Extracción de sangre con tubo numerado',     'sanitario',    'maniobra',          'composite'),
+  ('antiparasitario_interno', 'Antiparasitario interno',  'Desparasitación interna (silenciosa)',       'sanitario',    'evento_grupal',     'silent_apply'),
+  ('antiparasitario_externo', 'Antiparasitario externo',  'Desparasitación externa (silenciosa)',       'sanitario',    'evento_grupal',     'silent_apply'),
+  ('antibiotico',             'Antibiótico',              'Aplicación de antibiótico (silenciosa)',     'sanitario',    'evento_individual', 'silent_apply'),
+  ('suplementacion',          'Suplementación min/vit',   'Minerales / vitaminas (silenciosa)',         'sanitario',    'evento_grupal',     'silent_apply'),
+  ('tratamiento_curativo',    'Tratamiento curativo',     'Tratamiento de un episodio clínico',         'sanitario',    'evento_individual', 'text'),
+  ('enfermedad',              'Episodio de enfermedad',   'Registro de enfermedad detectada',           'sanitario',    'evento_individual', 'text'),
+  ('tuberculosis',            'Tuberculosis',             'Test de tuberculosis',                       'sanitario',    'evento_individual', 'enum_single'),
+  -- Manejo
+  ('dientes',                 'Estado de dientes',        'Estado dentario (dispara prompt CUT)',       'manejo',       'maniobra',          'enum_single'),
+  ('observacion',             'Observación libre',        'Nota libre del operador (animal_events)',    'manejo',       'evento_individual', 'text'),
+  -- Comercial
+  ('compra',                  'Compra / ingreso',         'Alta por compra',                            'comercial',    'evento_individual', 'composite'),
+  ('venta',                   'Venta / egreso',           'Baja por venta',                             'comercial',    'evento_individual', 'composite');
+
+alter table public.field_definitions enable row level security;
+create policy field_definitions_select on public.field_definitions
+  for select to authenticated using (true);
+grant select on public.field_definitions to authenticated;
+
+create trigger field_definitions_set_updated_at
+  before update on public.field_definitions
+  for each row execute function public.tg_set_updated_at_generic();
+
+-- 2) Defaults / required POR SISTEMA (la "plantilla") ----------------------
+create table public.system_default_fields (
+  id                  uuid primary key default gen_random_uuid(),
+  system_id           uuid not null references public.systems_by_species(id),
+  field_definition_id uuid not null references public.field_definitions(id),
+  default_enabled     boolean not null default true,   -- viene tildado al crear rodeo del sistema
+  required_for_system boolean not null default false,  -- si true, no se puede destildar a nivel rodeo
+  sort_order          int not null default 0,
+  unique (system_id, field_definition_id)
+);
+
+create index system_default_fields_by_system on public.system_default_fields (system_id, sort_order);
+
+-- Seed de cría: las 26 filas anteriores, 3 con default_enabled = false.
+with sys as (
+  select s.id as system_id
+  from public.systems_by_species s
+  join public.species sp on sp.id = s.species_id
+  where sp.code = 'bovino' and s.code = 'cria'
+)
+insert into public.system_default_fields (system_id, field_definition_id, default_enabled, required_for_system, sort_order)
+select sys.system_id, fd.id,
+       case when fd.data_key in ('inseminacion','peso_nacimiento','tuberculosis') then false else true end,
+       false,
+       row_number() over (order by fd.category, fd.label)
+from sys, public.field_definitions fd;
+-- En cría MVP ningún field es required (la identificación TAG/IDV/visual_id_alt es el único requisito real, R4.2).
+
+alter table public.system_default_fields enable row level security;
+create policy system_default_fields_select on public.system_default_fields
+  for select to authenticated using (true);
+grant select on public.system_default_fields to authenticated;
+
+-- 3) Estado efectivo POR RODEO (toggle del owner) --------------------------
+create table public.rodeo_data_config (
+  rodeo_id            uuid not null references public.rodeos(id) on delete cascade,
+  field_definition_id uuid not null references public.field_definitions(id),
+  enabled             boolean not null,
+  custom_config       jsonb,                  -- overrides opcionales al config_schema del field
+  created_at          timestamptz not null default now(),
+  updated_at          timestamptz not null default now(),
+  primary key (rodeo_id, field_definition_id)
+);
+
+create index rodeo_data_config_by_rodeo
+  on public.rodeo_data_config (rodeo_id) where enabled = true;
+create index rodeo_data_config_by_field
+  on public.rodeo_data_config (field_definition_id) where enabled = true;
+
+create trigger rodeo_data_config_set_updated_at
+  before update on public.rodeo_data_config
+  for each row execute function public.tg_set_updated_at_generic();
+
+-- Trigger AFTER INSERT en rodeos: pre-poblar rodeo_data_config con los system_default_fields del sistema
+create or replace function public.tg_rodeos_seed_data_config ()
+returns trigger language plpgsql security definer
+set search_path = public as $$
 begin
-  select s.id, sys.id into v_species_id, v_system_id
-  from public.species s
-  join public.systems_by_species sys on sys.species_id = s.id
-  where s.code = 'bovino' and sys.code = 'cria';
-
-  if v_species_id is null or v_system_id is null then
-    return new;
-  end if;
-
-  insert into public.rodeos (establishment_id, name, species_id, system_id)
-  values (new.id, 'Rodeo principal', v_species_id, v_system_id);
-
+  insert into public.rodeo_data_config (rodeo_id, field_definition_id, enabled)
+  select new.id, sdf.field_definition_id, sdf.default_enabled
+  from public.system_default_fields sdf
+  where sdf.system_id = new.system_id;
   return new;
-end;
-$$;
+end; $$;
 
-create trigger on_establishment_created_default_rodeo
-  after insert on public.establishments
-  for each row execute function public.handle_new_establishment_default_rodeo();
+create trigger rodeos_seed_data_config
+  after insert on public.rodeos
+  for each row execute function public.tg_rodeos_seed_data_config();
 
-grant execute on function public.handle_new_establishment_default_rodeo () to authenticated;
+-- RLS: SELECT a todo rol del establishment del rodeo; INSERT/UPDATE solo owner; no DELETE de cliente.
+-- (INSERT lo habilita el owner para agregar un field no-default del sistema — caso "tambo que tactea preñez".)
+alter table public.rodeo_data_config enable row level security;
+
+create policy rodeo_data_config_select on public.rodeo_data_config
+  for select using (
+    exists (select 1 from public.rodeos r
+            where r.id = rodeo_data_config.rodeo_id
+              and has_role_in(r.establishment_id) and r.deleted_at is null)
+  );
+
+create policy rodeo_data_config_insert on public.rodeo_data_config
+  for insert with check (
+    exists (select 1 from public.rodeos r
+            where r.id = rodeo_data_config.rodeo_id and is_owner_of(r.establishment_id))
+  );
+
+create policy rodeo_data_config_update on public.rodeo_data_config
+  for update using (
+    exists (select 1 from public.rodeos r
+            where r.id = rodeo_data_config.rodeo_id and is_owner_of(r.establishment_id))
+  ) with check (
+    exists (select 1 from public.rodeos r
+            where r.id = rodeo_data_config.rodeo_id and is_owner_of(r.establishment_id))
+  );
+-- No policy DELETE: deshabilitar = enabled=false; el borrado real solo por CASCADE al borrar el rodeo.
+
+grant select, insert, update on public.rodeo_data_config to authenticated;
 ```
 
-Cubre **R2.1..R2.6**.
+Notas:
+- **Por qué tres tablas y no una por-sistema**: el bug del modelo anterior era que `system_data_templates(system_id, data_key)` ataba cada dato a un sistema, impidiendo reusarlo. Acá `field_definitions` es global (un dato existe una vez), `system_default_fields` solo marca el default por sistema, y `rodeo_data_config` referencia `field_definitions` directamente — por eso un rodeo puede habilitar **cualquier** field del catálogo (caso "tambo + preñez").
+- **No hay trigger de validación contra el sistema** en `rodeo_data_config` (a diferencia del modelo viejo): el FK a `field_definitions` ya garantiza que el field existe en el catálogo, y la intención de diseño es **permitir** habilitar fields fuera del default del sistema.
+- El trigger `tg_rodeos_seed_data_config` (AFTER INSERT en `rodeos`) garantiza que un rodeo recién creado nunca queda con config vacía — arranca con los `system_default_fields` del sistema.
+- **Catálogo read-only**: `field_definitions` y `system_default_fields` se modifican vía migration (mismo patrón que `species`/`categories_by_system`). Solo `rodeo_data_config` es mutable (owner).
+- **Gating de maniobras (spec 03)**: el mapeo maniobra→data_keys es hardcodeado (ADR-021, ver tabla en R2.7 del requirements). Una query `SELECT count(*) FROM rodeo_data_config rdc JOIN field_definitions fd ON fd.id = rdc.field_definition_id WHERE rdc.rodeo_id = ? AND fd.data_key = ANY($1) AND rdc.enabled = true` resuelve el gating en O(log n) con el index `(field_definition_id) WHERE enabled = true`. El enforcement (doble capa UI + DB) vive en spec 03.
+- **Seed TENTATIVO**: 26 fields de cría (23 ON, 3 OFF: `inseminacion`, `peso_nacimiento`, `tuberculosis`). `evaluacion_toro` diferido post-MVP. Otros sistemas reciben su `system_default_fields` cuando se activen; los `field_definitions` universales ya quedan disponibles. Ajustable por migration sin reabrir spec 02.
+
+Cubre **R2.1..R2.5**, **R2.6**, **R2.7** (nota gating), **R2.8..R2.13**.
+
+### Lotes — agrupación de manejo (`management_groups`, `ADR-020`)
+
+Tercer eje de organización (regla maestra). Tabla `management_groups` (scope establishment) + columna nullable `animal_profiles.management_group_id`. La UI la muestra como "Lote".
+
+> **Orden de migration**: la tabla `management_groups` solo depende de `establishments` (existe desde spec 01), pero la columna `animal_profiles.management_group_id` depende de que `animal_profiles` ya exista (migration `0019`). Por eso esta migration se numera **`0036`** (después de todo el bloque de animal) y agrega la columna vía `ALTER TABLE`. Conceptualmente es un eje de organización paralelo al rodeo; físicamente se materializa al final.
+
+```sql
+-- 0036_management_groups.sql (ADR-020)
+
+create table public.management_groups (
+  id                uuid primary key default gen_random_uuid(),
+  establishment_id  uuid not null references public.establishments(id) on delete cascade,
+  name              text not null,
+  active            boolean not null default true,
+  created_at        timestamptz not null default now(),
+  updated_at        timestamptz not null default now(),
+  deleted_at        timestamptz,
+  constraint management_groups_name_not_empty check (length(trim(name)) > 0)
+);
+
+create index management_groups_by_est
+  on public.management_groups (establishment_id) where deleted_at is null;
+
+create trigger management_groups_set_updated_at
+  before update on public.management_groups
+  for each row execute function public.tg_set_updated_at_generic();
+
+-- Columna en animal_profiles (eje lote). Nullable: NULL = "sin grupo de manejo custom".
+alter table public.animal_profiles
+  add column management_group_id uuid references public.management_groups(id);
+
+create index animal_profiles_by_management_group
+  on public.animal_profiles (management_group_id) where deleted_at is null;
+
+-- Validación: el lote debe ser del mismo establishment que el perfil (asignación exclusiva = FK simple).
+create or replace function public.tg_animal_profiles_management_group_check ()
+returns trigger language plpgsql as $$
+declare v_est uuid;
+begin
+  if new.management_group_id is null then return new; end if;
+  select establishment_id into v_est
+  from public.management_groups
+  where id = new.management_group_id and deleted_at is null;
+  if v_est is null then
+    raise exception 'management_group % not found or deleted', new.management_group_id using errcode = '23503';
+  end if;
+  if v_est <> new.establishment_id then
+    raise exception 'management_group belongs to a different establishment' using errcode = '23514';
+  end if;
+  return new;
+end; $$;
+
+create trigger animal_profiles_management_group_check
+  before insert or update of management_group_id on public.animal_profiles
+  for each row execute function public.tg_animal_profiles_management_group_check();
+
+-- RLS de management_groups: SELECT a todo rol activo; INSERT/UPDATE/soft-DELETE solo owner.
+alter table public.management_groups enable row level security;
+
+create policy management_groups_select on public.management_groups
+  for select using (has_role_in(establishment_id) and deleted_at is null);
+
+create policy management_groups_insert on public.management_groups
+  for insert with check (is_owner_of(establishment_id));
+
+create policy management_groups_update on public.management_groups
+  for update using (is_owner_of(establishment_id))
+  with check (is_owner_of(establishment_id));
+
+grant select, insert, update on public.management_groups to authenticated;
+-- La ASIGNACIÓN de un animal a un lote es un UPDATE de animal_profiles.management_group_id,
+-- cubierto por la policy animal_profiles_update (has_role_in) — cualquier rol operativo activo (R2.17, R11.5).
+```
+
+Notas:
+- **Asignación exclusiva**: un animal está en a lo sumo un lote (FK simple, no M2M). Transferir = `UPDATE ... SET management_group_id = X`. Sin historial en MVP.
+- **Ortogonalidad** (R7.7): ningún trigger de transición de categoría toca `management_group_id`. El ternero al pie nace con `management_group_id = NULL` (R9.1).
+- **Regla de display** "lote si tiene, si no categoría" (R2.16): la implementa el cliente. Spec 02 expone `management_group_id` + `category_id` para que el cliente agrupe.
+- **Soft-delete de un lote con animales asignados**: el cliente debe reasignar esos animales a `NULL` antes (o la operación se maneja en la capa de servicio); a nivel DB el FK no cascadea el soft-delete. Decisión de UX en spec 09/cliente.
+
+Cubre **R2.14..R2.18**, parte de **R4.1** (columna), **R9.1** (ternero sin lote), **R7.7** (ortogonalidad).
 
 ### Helper genérico `tg_set_updated_at_generic`
 
@@ -325,6 +571,9 @@ grant select, insert, update on public.animals to authenticated;
 
 ```sql
 -- 0019_animal_profiles.sql
+-- Nota: la columna `management_group_id` (eje lote, ADR-020) se agrega vía ALTER en
+-- la migration 0036, porque la tabla `management_groups` se crea recién ahí. A nivel
+-- del modelo lógico (R4.1) el perfil tiene management_group_id; físicamente entra en 0036.
 create type public.animal_status as enum ('active', 'sold', 'dead', 'transferred');
 create type public.teeth_state_enum as enum (
   '2d','4d','6d','boca_llena','3/4','1/2','1/4','sin_dientes'
@@ -335,6 +584,7 @@ create table public.animal_profiles (
   animal_id          uuid not null references public.animals(id) on delete cascade,
   establishment_id   uuid not null references public.establishments(id) on delete cascade,
   rodeo_id           uuid not null references public.rodeos(id),
+  -- management_group_id uuid references public.management_groups(id)  -- agregado en 0036 (ADR-020)
   idv                text,
   visual_id_alt      text,
   category_id        uuid not null references public.categories_by_system(id),
@@ -1003,7 +1253,9 @@ create trigger reproductive_events_apply_transition
   for each row execute function public.tg_reproductive_events_apply_transition();
 ```
 
-Cubre **R7.1..R7.6**.
+**Ortogonalidad (R7.7)**: `apply_auto_transition` y `tg_reproductive_events_apply_transition` escriben **únicamente** `category_id` (vía el UPDATE de `apply_auto_transition`). No tocan `rodeo_id` ni `management_group_id`. Un animal que transiciona de `vaca_segundo_servicio` a `multipara` por un parto permanece en su mismo rodeo y su mismo lote. Ningún trigger del sistema asigna lote automáticamente (ADR-020 punto 6, R2.18).
+
+Cubre **R7.1..R7.7**.
 
 ### Ternero al pie (R9)
 
@@ -1404,10 +1656,12 @@ Cubre **R4.13**.
 
 | Tabla | SELECT | INSERT | UPDATE | DELETE (hard) |
 |---|---|---|---|---|
-| `species`, `systems_by_species`, `categories_by_system` | todos los autenticados | — (vía migration) | — | — |
+| `species`, `systems_by_species`, `categories_by_system`, `field_definitions`, `system_default_fields` | todos los autenticados | — (vía migration) | — | — |
 | `rodeos` | `has_role_in` | `is_owner_of` | `is_owner_of` | — (soft via UPDATE) |
+| `rodeo_data_config` | `has_role_in` (via join a `rodeos`) | `is_owner_of` (habilitar field no-default) | `is_owner_of` (toggle) | — (CASCADE desde `rodeos`) |
+| `management_groups` (lote) | `has_role_in` + `deleted_at IS NULL` | `is_owner_of` | `is_owner_of` | — (soft via `deleted_at`) |
 | `animals` | derivado de `animal_profiles` | autenticado | derivado | — |
-| `animal_profiles` | `has_role_in` + `deleted_at IS NULL` | `has_role_in` | `has_role_in` | — |
+| `animal_profiles` | `has_role_in` + `deleted_at IS NULL` | `has_role_in` | `has_role_in` (incluye asignar `management_group_id`) | — |
 | `weight_events`, `reproductive_events`, `sanitary_events`, `condition_score_events`, `lab_samples` | `has_role_in(establishment_of_profile(...))` | idem | `is_owner_of OR created_by = uid()` | — |
 | `animal_events` (Híbrido, `'observacion' \| 'otro'`) | `has_role_in(establishment_id)` | `has_role_in(establishment_id)` | `author_id = uid() OR is_owner_of` + trigger enforce edit_window | — (soft via `deleted_at`) |
 | `semen_registry` | `has_role_in` | `has_role_in` | `is_owner_of` | — |
@@ -1430,11 +1684,11 @@ Este spec **se apoya en triggers** (`ADR-012`) y no introduce Edge Functions cr�
 ```typescript
 type RodeoState =
   | { status: 'loading' }
-  | { status: 'no_rodeos' }     // ningún rodeo activo (raro: el trigger crea uno default)
+  | { status: 'no_rodeos' }     // establecimiento recién creado, antes de que el owner cierre el wizard de "Crear rodeo"
   | { status: 'active', current: Rodeo, available: Rodeo[] };
 ```
 
-Expone: `switchRodeo`, `createRodeo` (solo si rol owner), `refreshRodeos`. Scoped por el establishment activo de `EstablishmentContext`.
+Expone: `switchRodeo`, `createRodeo` (solo si rol owner; ver wizard descrito en R2.6), `refreshRodeos`. Scoped por el establishment activo de `EstablishmentContext`. **Importante** (refinamiento 2026-05-27): el estado `no_rodeos` es el estado inicial esperado tras la creación del establishment — ya no hay rodeo default autogenerado. El cliente debe llevar al usuario al wizard de "Crear rodeo" en ese caso (CTA prominente, posiblemente bloqueo del resto de la app hasta que el wizard se cierre exitosamente).
 
 ### Hooks de animal
 
@@ -1448,9 +1702,12 @@ useCreateAnimal(): UseMutationResult<...>                                  // pr
 useUpdateAnimal(profileId: string): UseMutationResult<...>
 useCategories(systemCode: string): Category[]
 useAnimalObservations(profileId: string): { add, softDelete, edit }        // wrapper de animal_events ('observacion'|'otro')
+useRodeoDataConfig(rodeoId: string): { fields: FieldDefinition[], toggle, enableNonDefault }  // catálogo + estado por rodeo (owner-only mutaciones)
+useManagementGroups(): { groups: ManagementGroup[], create, rename, softDelete }              // lote (ADR-020); create/rename/softDelete owner-only
+useAssignManagementGroup(profileId: string): (groupId: string | null) => Promise<void>        // asignar/quitar lote — cualquier rol operativo
 ```
 
-Todos los hooks orquestan `services/animals.ts` (+ `services/observations.ts` para `animal_events`) que es la única capa que toca PowerSync. La regla de capas del `architecture.md` se mantiene.
+Todos los hooks orquestan `services/animals.ts` (+ `services/observations.ts` para `animal_events`, `services/rodeo-config.ts` para la plantilla, `services/management-groups.ts` para lote) que es la única capa que toca PowerSync. La regla de capas del `architecture.md` se mantiene.
 
 **Nota explícita**: `useSearchAnimal` **no se define en este spec**. Spec 09 lo construye consumiendo las primitives de búsqueda definidas en R5 (queries directas a `animal_profiles` por TAG / IDV / `visual_id_alt`) y el hook de mutación `useCreateAnimal` de acá.
 
@@ -1481,13 +1738,15 @@ MainTabs
 Heredando los buckets de spec 01 (`user_self`, `est_membership`, `est_data`, `est_members`, `est_invitations`), agregamos:
 
 - `est_rodeos`: filas de `rodeos` cuyo `establishment_id` está en el set del usuario.
-- `est_animal_profiles`: filas de `animal_profiles` por establishment.
+- `est_rodeo_data_config`: filas de `rodeo_data_config` cuyo `rodeo_id` cae en `est_rodeos`. Necesario para que el wizard de creación de rodeo, la pantalla de gestión y el gating de maniobras (spec 03) funcionen offline.
+- `est_management_groups`: filas de `management_groups` cuyo `establishment_id` está en el set del usuario. Necesario para que la asignación de lote funcione offline (R13.2).
+- `est_animal_profiles`: filas de `animal_profiles` por establishment (incluye `management_group_id`).
 - `est_animals_local`: filas de `animals` con `id` en el set de `animal_profiles.animal_id` del establishment. (No es global; cada cliente solo sincroniza los animales presentes en sus establishments.)
 - `est_weight_events`, `est_reproductive_events`, `est_sanitary_events`, `est_condition_score_events`, `est_lab_samples`: filas cuyo `animal_profile_id` cae en `est_animal_profiles`.
 - `est_animal_events`: filas de `animal_events` cuyo `establishment_id` está en el set del usuario (filtrado por la columna denormalizada — no requiere join). Modelo Híbrido (refinamiento 2026-05-26).
 - `est_animal_category_history`: idem.
 - `est_semen_registry`: por establishment.
-- `config_global`: filas de `species`, `systems_by_species`, `categories_by_system` (todas las activas). TTL 24 hs en cliente.
+- `config_global`: filas de `species`, `systems_by_species`, `categories_by_system`, `field_definitions`, `system_default_fields` (todas las activas). TTL 24 hs en cliente. Necesario para que el wizard de creación de rodeo pueda renderizar los toggles (catálogo global + defaults del sistema) offline.
 
 ### Estrategia de conflictos
 
@@ -1519,14 +1778,19 @@ Caso especial cubierto a nivel datos: si el TAG existe globalmente pero no hay p
 - `validateProfileForm(form, rodeoSystemCode)`: chequea coherencia (categoría override válida para sistema, etc.).
 - `previewCategory(form, events)`: invoca `transitions.ts` para mostrar la categoría calculada en la UI antes de guardar.
 
-## Motor de form dinámico por rodeo (consumido por spec 09)
+## Motor de form dinámico por rodeo (consumido por spec 09 y spec 03)
 
-El form de alta de animal **renderiza campos según el `system_id` del rodeo seleccionado**. Esta nota es para que el implementer de spec 02 (backend) y spec 09 (frontend) sepan dónde vive la configuración.
+Dos consumos distintos del modelo de datos por rodeo:
 
-- **Configuración mínima MVP**: las **categorías disponibles** por sistema viven en `categories_by_system` (ya seedeada por T1.4). Spec 09 lee esa tabla para popular el dropdown de categoría sugerida + override (R4.7, R4.8).
-- **Campos por sistema**: en MVP, los campos del form de alta son **los mismos para todos los sistemas activos** (en el MVP solo `(bovino, cria)` está activo, así que la pregunta es trivial). La columnas de `animal_profiles` cubren el superset razonable (`breed`, `coat_color`, `birth_weight`, `entry_*`, etc.). Spec 09 puede hardcodear el render en cliente para `(bovino, cria)`.
-- **Evolución post-MVP**: cuando se habilite un segundo sistema (`invernada`, `feedlot`, `tambo`, `cabana`), evaluar si hace falta una tabla auxiliar **`system_field_config (system_id, field_key, required, default_value, sort_order)`** que parametrice qué campos mostrar y cuáles ocultar por sistema. Decisión diferida hasta tener ≥2 sistemas activos. Mientras tanto: el implementer de spec 09 puede dejar un punto de extensión claro en el componente del form (ej. un map `systemCode → FieldConfig[]`) para que agregar la tabla más adelante sea un swap de fuente, no un rewrite.
-- **No-objetivo de este spec**: spec 02 **no implementa** la pantalla del form ni el motor de render dinámico. Solo expone la fuente de configuración (`categories_by_system`) y deja el hook conceptual para extender post-MVP.
+1. **Spec 09 — form de alta de animal**: renderiza campos según el `system_id` del rodeo seleccionado. Las **categorías disponibles** por sistema viven en `categories_by_system` (seedeada por T1.4). Spec 09 lee esa tabla para popular el dropdown de categoría sugerida + override (R4.7, R4.8). En MVP los campos del form son **los mismos para todos los sistemas activos** (solo `(bovino, cria)` está activo, así que la pregunta es trivial). Las columnas de `animal_profiles` cubren el superset razonable (`breed`, `coat_color`, `birth_weight`, `entry_*`, etc.).
+
+2. **Spec 03 — gating de maniobras**: una maniobra tiene un set de `data_keys` requeridos (mapeo hardcodeado, ADR-021). Por ejemplo, **tacto** requiere `prenez` y `tamano_prenez` con `enabled = true` en el `rodeo_data_config` del rodeo destino. Una query de la forma `SELECT count(*) FROM rodeo_data_config rdc JOIN field_definitions fd ON fd.id = rdc.field_definition_id WHERE rdc.rodeo_id = ? AND fd.data_key = ANY($1) AND rdc.enabled = true` resuelve el gating en O(log n) con el index `(field_definition_id) WHERE enabled = true`. La UI del wizard de maniobras lee `rodeo_data_config` para deshabilitar/explicar las maniobras incompatibles con el rodeo elegido (capa UI); la capa DB rechaza persistir el evento gateado. Ambas capas en spec 03.
+
+3. **Wizard de creación de rodeo (spec 02)**: el cliente lee `field_definitions` (catálogo global) join `system_default_fields` filtrando por el `system_id` elegido, renderiza una lista de toggles con su `default_enabled`, y al confirmar hace INSERT en `rodeos` + UPDATEs sobre `rodeo_data_config` (las filas ya existen porque el trigger AFTER INSERT las pre-pobló). Si el usuario quiere habilitar un dato que no es default del sistema, el cliente hace un INSERT en `rodeo_data_config` (permitido al owner, R2.12).
+
+- **Por qué tres tablas tipadas y no JSONB ni catálogo-por-sistema**: data analytics es pilar del producto. Queries como "¿qué rodeos tracquean preñez?" o "promedio de tasa de preñez por sistema" salen naturales con tablas tipadas; con JSONB requieren `custom_config->>...::boolean` + GIN y son frágiles. El catálogo-por-sistema (modelo viejo) impedía reusar un dato entre sistemas (bug "tambo + preñez"); el catálogo **global** (`field_definitions`) lo resuelve.
+- **Evolución post-MVP**: cuando se habilite un segundo sistema (`invernada`, `feedlot`, `tambo`, `cabana`), basta sumar filas a `field_definitions` (datos nuevos) y `system_default_fields` (sus defaults), cero código. Una tabla auxiliar para parametrizar **qué columnas de `animal_profiles`** mostrar por sistema (distinto de los data_keys tracqueables) queda diferida hasta tener ≥2 sistemas activos.
+- **No-objetivo de este spec**: spec 02 **no implementa** la pantalla del wizard de maniobras ni el form de alta de animal. Solo expone la fuente de configuración (`categories_by_system`, `field_definitions`, `system_default_fields`, `rodeo_data_config`) y el sustrato para el gating.
 
 ## Alternativas descartadas
 
@@ -1591,6 +1855,8 @@ El form de alta de animal **renderiza campos según el `system_id` del rodeo sel
 | Búsqueda fuzzy de `visual_id_alt` lenta | Índice GIN trigram + límite a 20 resultados. |
 | Sync de tablas de configuración con TTL stale | Forzar refresh al detectar cambio de schema vía version-stamp en `species` (a futuro). En MVP, refresh al primer login del día. |
 | Migration 0031 (ternero) muy compleja para revisar | Dividir en archivos: 0030 transitions, 0031 calf creation, 0032 timeline — cada uno auditable independientemente. |
+| Owner deshabilita en un rodeo un data_key que ya tiene eventos cargados | El cliente debe avisar antes de destildar ("este dato tiene N eventos cargados"); no se borran datos históricos. Validación de UX en spec 03/cliente. |
+| Soft-delete de un lote con animales asignados | El cliente reasigna esos animales a `NULL` antes del soft-delete (o la capa de servicio lo hace); el FK no cascadea el soft-delete. |
 
 ## Dependencias del spec
 
@@ -1606,3 +1872,16 @@ El form de alta de animal **renderiza campos según el `system_id` del rodeo sel
 - Commits en español, presente, descriptivo.
 
 Ver `tasks.md` para el plan de ejecución paso a paso.
+
+## Changelog
+
+> Audit trail del design. No se borra (mismo principio que los ADRs). Orden cronológico inverso.
+
+- **2026-05-28 — Refundición consolidada (ADR-020 lote + ADR-021 plantilla de datos)**:
+  - **Plantilla de datos (ADR-021)**: se reemplazó el contenido de la migration `0016` (antes `system_data_templates` catálogo *por sistema*, con bug "no reusa datos entre sistemas") por las **tres tablas** `field_definitions` (catálogo global) + `system_default_fields` (defaults por sistema) + `rodeo_data_config` (toggle por rodeo, FK a `field_definitions`), todo en `0016`. Seed de 26 fields de cría (TENTATIVO). Trigger `tg_rodeos_seed_data_config` ahora pre-popula desde `system_default_fields`. Se eliminó el trigger de validación contra el sistema (el FK al catálogo global + la intención de permitir fields no-default lo hacen innecesario). RLS de `rodeo_data_config` ahora permite INSERT al owner (habilitar field no-default — caso "tambo + preñez").
+  - **Lote (ADR-020)**: nueva migration `0036_management_groups.sql` — tabla `management_groups` (scope establishment) + `ALTER animal_profiles ADD management_group_id` + trigger de validación mismo-establishment + RLS (crear/editar/borrar solo owner; asignar animal = UPDATE de `animal_profiles` por cualquier rol operativo). `check_grants` movido a `0037`.
+  - **Ortogonalidad (R7.7)**: nota explícita de que los triggers de transición de categoría solo tocan `category_id`, nunca `rodeo_id` ni `management_group_id`.
+  - **Transversal**: regla maestra de 3 ejes agregada a Arquitectura; tabla RLS, buckets PowerSync (`est_management_groups`, `config_global` con catálogo de fields) y "Motor de form dinámico" actualizados al modelo de catálogo global. Header + historial movido a este Changelog. Diagrama de migrations `0012..0037`.
+  - **Preservado**: todo el SQL de animals/profiles/eventos/transiciones/ternero/timeline/inmutabilidad/animal_events se mantuvo con su numeración original (`0017`–`0035`).
+- **2026-05-27 — Plantilla por sistema + sin rodeo default** *(superada por la refundición 2026-05-28)*. Introdujo `system_data_templates` + `rodeo_data_config` como catálogo por-sistema (modelo con bug, reemplazado por ADR-021) y eliminó el trigger de rodeo default.
+- **2026-05-26 — Refinamiento previo a aprobación**. Agregada `animal_events` (modelo Híbrido, migration de la época `0033`) + `animal_timeline_v2` con séptimo origen `observacion` + triggers de inmutabilidad de `tag_electronic`/`idv` (R4.13). Eliminadas referencias al flujo R15 (movido a spec 09). Agregada sección "Motor de form dinámico por rodeo".

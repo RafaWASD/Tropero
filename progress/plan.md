@@ -1,7 +1,7 @@
 # Plan de ejecución — RAFAQ
 
 > Fuente única del orden de trabajo. Vive al lado de `current.md` (sesión en curso) y `history.md` (bitácora cerrada) para que sean comparables.
-> Última actualización: **2026-05-26** (creación inicial tras sesión de discovery sobre BUSCAR ANIMAL).
+> Última actualización: **2026-05-28** (refundición consolidada de spec 02 incorporando ADR-020 lote + ADR-021 plantilla de datos).
 
 ## Cómo usar este archivo
 
@@ -21,14 +21,14 @@
 | Spec | Backend | Frontend | Notas |
 |---|---|---|---|
 | 01-identity-multitenancy | ✅ done (41 tests verdes) | ⏸ pausado (Fases 3-8) | Esperando design system + decisión de retomar |
-| 02-modelo-animal | ❌ pending (listo para arrancar) | ⏸ pausado (Fase 3+) | spec refinada y aprobada 2026-05-26 con R14 tentativo; mismo patrón pause-frontend que spec 01 |
-| 03-modo-maniobras | ❌ pending | ❌ pending | depende de 02, 04, 05 |
+| 02-modelo-animal | ❌ pending (listo para arrancar) | ⏸ pausado (Fase 3+) | spec **refundida 2026-05-28** (ADR-020 lote + ADR-021 plantilla de datos: catálogo global + defaults por sistema + toggle por rodeo + gating). R14 y seed de cría TENTATIVOS. Mismo patrón pause-frontend que spec 01 |
+| 03-modo-maniobras | ❌ pending | ❌ pending | depende de 02, 04, 05. **Dueña del gating de maniobras** (mapeo maniobra→data_keys de ADR-021, doble capa UI+DB) — spec 02 dejó el sustrato (`rodeo_data_config`) |
 | 04-bluetooth-baston | ❌ pending | ❌ pending | bloqueante para BUSCAR ANIMAL y MODO MANIOBRAS |
 | 05-bluetooth-balanza | ❌ pending | ❌ pending | depende de hardware confirmado en día de campo |
 | 06-import-laboratorios | ❌ pending | ❌ pending | post-MVP esencialmente |
 | 07-reportes-basicos | ❌ pending | ❌ pending | post-MVP esencialmente |
 | 08-export-sigsa | ❌ pending | ❌ pending | crítico antes de julio 2026 (deadline SENASA) |
-| 09-buscar-animal | ❌ pending (esperando turno tras spec 02) | ⏸ pausado (Fases 2-4 esperando design system) | spec aprobada 2026-05-26 con UI tentativa; status `blocked` por regla one_feature_at_a_time |
+| 09-buscar-animal | ❌ pending (esperando turno tras spec 02) | ⏸ pausado (Fases 2-4 esperando design system) | spec aprobada 2026-05-26, **alineada y re-aprobada 2026-05-28** (consume plantilla ADR-021 + lote ADR-020; distinción form-fields vs data_keys; selector de lote en CREATE/EDIT). Status `blocked` por regla one_feature_at_a_time |
 
 **Design system**: en fase de exploración. Research curado de 48 screens hecho (`design/research-findings.md`, 22 Mobbin + 26 device). Dirección sin cerrar. Pendiente: decisión de dirección + Stitch + ADR + tokens canónicos.
 
@@ -138,11 +138,12 @@ Objetivo: tener la app funcional con identidad + modelo de datos + bastón + BUS
 - **Dueño**: `implementer` → `reviewer`.
 - **Dependencias**: A.5 (spec aprobada), A.3 + A.4 (ADRs canónicos).
 - **Pasos**:
-  - Implementer ejecuta migrations 0012..0030 según `tasks.md` de spec 02: species/systems/categories config, rodeos, animals/animal_profiles, eventos, triggers, helpers, RLS.
-  - Tests RLS por tabla.
+  - Implementer ejecuta migrations **0012..0037** según `tasks.md` de spec 02: species/systems/categories config, **plantilla de datos (`field_definitions` + `system_default_fields` + `rodeo_data_config`, migration 0016, ADR-021)**, rodeos, animals/animal_profiles, eventos, triggers, helpers, **lote (`management_groups` + `animal_profiles.management_group_id`, migration 0036, ADR-020)**, RLS.
+  - Tests RLS por tabla (incluye T2.16 plantilla + caso "tambo+preñez", T2.17 lote, T2.4 ortogonalidad).
   - Reviewer valida.
 - **Output**: backend completo de spec 02 (schema + RLS + Edge Functions si aplican).
 - **Bloqueante para**: B.3, B.4 (BUSCAR ANIMAL y BLE bastón usan estas tablas).
+- **Notas**: el seed de cría de `field_definitions` (26 fields) es TENTATIVO hasta validar con Facundo; ajustable por migration sin reabrir spec. Gate 1 de seguridad ya aplicó al refinar la spec (toca RLS/schema); Gate 2 sobre las migrations cuando estén implementadas.
 - **Notas**: el frontend de spec 02 se difiere — siguiendo el patrón de spec 01 donde el frontend va por separado integrado con cada feature siguiente.
 
 ### B.3 — Implementación de spec 04 (BLE bastón)
@@ -215,6 +216,13 @@ Esto es red de seguridad. Si una sesión se corta antes de hacer los ADRs, estas
 
 ## Changelog del plan
 
+- **2026-05-28 (sesión 14 — refundición consolidada de spec 02: lote + plantilla de datos)** — Tras detectar que spec 02 acumulaba refinamientos apilados y un bug en el modelo de plantilla (catálogo por-sistema que no permitía reusar datos entre sistemas, ej. "tambo que tactea preñez"), Raf cerró dos decisiones en chats externos y las bajó como ADRs:
+  - **ADR-020 (lote como agrupación de manejo)**: tercer eje de organización ortogonal a rodeo y categoría. Tabla `management_groups` (scope establishment, nombre libre, sin presets) + `animal_profiles.management_group_id` nullable. Asignación exclusiva, manual, sin historial MVP. Regla de display "lote si tiene, si no categoría". Sin auto-asignación. Activa la cláusula reservada de ADR-016.
+  - **ADR-021 (plantilla de datos)**: catálogo GLOBAL (`field_definitions`) + defaults por sistema (`system_default_fields`) + toggle por rodeo (`rodeo_data_config`). Corrige el bug del catálogo-por-sistema. Seed de 26 fields de cría (TENTATIVO hasta validar con Facundo). Gating de maniobras doble capa (UI + DB), mapeo hardcodeado. Nombre canónico de la tabla de lote resuelto: `management_groups`.
+  - **Refundición de spec 02** (los 3 archivos) consolidando ambos hilos en una sola pasada para no consolidar el bug ni tocar la spec dos veces: cuerpo reescrito orgánicamente, historial movido a Changelog, migrations renumeradas (plantilla en `0016`, lote en `0036`, check_grants `0037`), R2.B reemplazada (3 tablas), R2.C nueva (lote), R7.7 ortogonalidad. Todo el detalle ganado preservado (R4.13, modelo Híbrido, ternero al pie, transiciones, split insert+select).
+  - **Spec 09 alineada y re-aprobada**: consume plantilla + lote; distinción form-fields (`animal_profiles`, hardcode cría) vs data_keys de eventos (`rodeo_data_config`); selector de lote en CREATE/EDIT; corregida la lista de tipos de evento de R5.4/AddEventSheet (usaba los tipos viejos del ADR-017 que el modelo Híbrido descartó); R6.4 fallback al primer rodeo creado (no "Rodeo principal").
+  - **CONTEXT/04 actualizado**: 3 tablas de plantilla + `management_groups` + `animal_profiles.management_group_id`; sección de 3 ejes ortogonales; "Lo que NO se modela" aclarado (lote ya no prohibido, sí potreros físicos y `movements`); reconciliados `sessions.lote_label` y `sanitary_campaigns.lote_label` → `management_group_id` FK.
+  - ADR-020 y ADR-021 commiteados al índice de `docs/adr/README.md`.
 - **2026-05-26 (creación)** — Plan inicial. Sesión de discovery sobre BUSCAR ANIMAL con Raf + validación de terminología con el vet socio. Decisiones cerradas en charla anotadas en sección anterior.
 - **2026-05-26 (avance bloque A)** — Cerrados A.3, A.4 y A.6 en la misma sesión:
   - `ADR-016-terminologia-rodeo-sistema.md` creado.
