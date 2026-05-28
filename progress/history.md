@@ -265,3 +265,29 @@ El código real de Edge Functions usa `Deno.env.get('APP_URL')` (env del Edge Fu
 - **Commits:** `84cd2a8` (bitácoras) + `bf879fa` (fixes de consistencia), ambos pusheados a `origin/main`. El cierre de sesión (este resumen + WARN + reset de `current.md`) va en commit aparte.
 - **Verificación:** `node scripts/check.mjs` verde en cada paso (typecheck + 15 RLS + 26 Edge contra DB remota).
 - **No tocado (trabajo previo de Raf, sin commitear):** `specs/active/02-modelo-animal/*`, `specs/active/09-buscar-animal/*`, `design/*`.
+
+---
+
+## Sesión 14 — Refundición consolidada de spec 02: lote + plantilla de datos (2026-05-28)
+
+- **Agente:** claude (sesión SDD de refinamiento de specs — edición directa de docs, sin lanzar implementer; spec 02 ya aprobada → confirmación humana en cada paso).
+- **Origen:** la conversación arrancó con Raf revisando spec 02 ("¿cómo es eso del rodeo default?"). Derivó en detectar que spec 02 tenía premisas falsas (rodeo default autogenerado) y, tras dos iteraciones, un **bug estructural** en el modelo de plantilla de datos.
+- **Trayecto:**
+  - Primera ronda (2026-05-27): se eliminó el rodeo default y se modeló la plantilla de datos como catálogo **por sistema** (`system_data_templates`). Raf detectó que ese modelo no soportaba "rodeo de tambo que también tactea preñez" (un dato no se puede reusar entre sistemas).
+  - Raf paró el avance incremental ("¿no conviene tirar la spec, charlar y rehacerla?"). Se acordó: NO tirar spec 02 (80% estaba sólido), sí refundir los hilos abiertos.
+  - Raf cerró dos decisiones en chats externos y las bajó como ADRs **commiteados**: **ADR-020** (lote como agrupación de manejo, fbe1c79) y **ADR-021** (plantilla de datos: catálogo global + defaults por sistema + toggle por rodeo + gating, ffb53d2).
+- **Decisiones de diseño tomadas con Raf (vía AskUserQuestion):**
+  - Nombre canónico de la tabla de lote: **`management_groups`** (inglés, regla CLAUDE.md; UI lo muestra como "Lote").
+  - Enforcement del gating de "el animal hereda los datos del rodeo": **doble capa UI + DB**, mapeo maniobra→data_keys hardcodeado (el detalle DB es de spec 03).
+  - Empty state de establishment sin rodeo: **bloqueo total** (wizard como primera pantalla).
+  - Reconciliación de `sessions.lote_label` / `sanitary_campaigns.lote_label` → `management_group_id` FK (a nivel modelo conceptual en CONTEXT/04; spec 03 implementa).
+- **Refundición aplicada (commit `9f066a1`, 8 archivos):**
+  - **spec 02** (3 archivos): R2.B reemplazada por 3 tablas (`field_definitions` global + `system_default_fields` + `rodeo_data_config`), R2.C nueva (lote), R7.7 ortogonalidad, R4.1 +columna, seed 26 fields cría (TENTATIVO, 23 ON / 3 OFF), gating doble capa documentado, criterios + caso tambo+preñez. SQL de las 3 tablas + `management_groups` + trigger auto-poblado + RLS. Migrations renumeradas: plantilla en `0016`, lote en `0036`, check_grants `0037` (bloques `0017–0035` sin cambios). Historiales → Changelog en cada archivo. Todo el detalle ganado preservado (R4.13, modelo Híbrido, ternero al pie, transiciones, split insert+select).
+  - **spec 09** (3 archivos): consume plantilla+lote; **distinción clave** form-fields del alta (columnas `animal_profiles`, hardcode cría) vs data_keys de eventos (`rodeo_data_config`); selector de lote en CREATE/EDIT; **corregida** la lista de tipos de evento de R5.4/AddEventSheet (usaba los tipos viejos del enum ADR-017 que el modelo Híbrido descartó); riesgo R4.13 marcado RESUELTO (era stale). **Re-aprobada por Raf** tras resumen integral.
+  - **CONTEXT/04**: 3 tablas + `management_groups` + columna; sección de 3 ejes ortogonales; "Lo que NO se modela" aclarado (lote ya no prohibido; sí potreros físicos y tabla `movements`); reconciliado `lote_label` → `management_group_id` FK.
+  - **progress/plan.md**: estado spec 02/09, B.2 migrations `0012..0037` + tablas nuevas, changelog sesión 14.
+- **Verificación:** `node scripts/check.mjs` verde en estructura (harness + feature_list + specs). `data_keys` ASCII consistentes (`prenez`, `tamano_prenez`, `condicion_corporal`); `system_data_templates` solo como referencia histórica (changelogs + alternativas de ADR-021), nunca tabla viva.
+- **Higiene:** handoffs externos borrados tras aplicar (`docs/adr/handoff-lote/`, `docs/adr/handoff-plantilla/`, `handoff-plantilla.zip`, `tropero-docs.zip`) — el único permanente fue cada ADR. Working tree limpio.
+- **Commits de la sesión:** `fbe1c79` (ADR-020) + `ffb53d2` (ADR-021) + `9f066a1` (refundición). Cierre de sesión (este resumen + reset de `current.md`) en commit aparte. **No pusheados todavía** (Raf decide cuándo).
+- **Pendiente abierto:** validar el seed de cría de `field_definitions` (26 fields) con Facundo — ajustable por migration sin reabrir spec. Sigue sin redactarse spec 03 (dueña del gating de maniobras + sessions/lote_label reconciliation).
+- **Próximo paso:** B.2 (backend spec 02, ahora con plantilla + lote) o seguir A.1 (design system). Raf elige.
