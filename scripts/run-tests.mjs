@@ -49,8 +49,9 @@ run('typecheck client', `cd app && ${pnpmCmd} typecheck`);
 if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
   run('RLS suite', `node --test supabase/tests/rls/run.cjs`);
   run('Edge Functions suite', `node --test supabase/tests/edge/run.cjs`);
+  run('Animal suite (spec 02)', `node --test supabase/tests/animal/run.cjs`);
 } else {
-  console.log('\n>>> RLS + Edge suites — SKIPPED (falta SUPABASE_SERVICE_ROLE_KEY en env)');
+  console.log('\n>>> RLS + Edge + Animal suites — SKIPPED (falta SUPABASE_SERVICE_ROLE_KEY en env)');
 }
 
 console.log('\nAll tests passed.');

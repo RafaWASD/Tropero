@@ -17,33 +17,33 @@ Igual que con spec 01, la feature se puede cerrar tras Fase 1+2 y **diferir Fase
 
 ## Fase 1 — Schema, triggers y RLS
 
-### T1.1 Verificar prerequisitos
+### [x] T1.1 Verificar prerequisitos
 - Confirmar que la extension `pg_trgm` está habilitada en el proyecto remoto: `select * from pg_extension where extname = 'pg_trgm';` (Supabase la incluye por default desde Postgres 13).
 - Confirmar que el patrón de migrations posterior a `0011` no rompe el estado actual: `supabase db push` corriendo en seco contra el remoto sin pending changes.
 - **Aceptación**: `pg_trgm` está habilitada (o se habilita en `0012_species.sql` con `create extension if not exists pg_trgm`). `node scripts/check.mjs` verde antes de empezar.
 
-### T1.2 Migration `0012_species.sql`
+### [x] T1.2 Migration `0012_species.sql`
 - Crear tabla `public.species` con `(id, code, name, icon, active, created_at, updated_at)`.
 - Seed: `bovino` (`active=true`), `equino` y `porcino` (`active=false`).
 - `enable RLS` + policy `species_select` para `authenticated`. `grant select` solamente.
 - **Aceptación**: `select * from species` desde cliente anon-key retorna las 3 filas; no se puede insert/update.
 - **Cubre**: R1.1, R1.4, R1.5.
 
-### T1.3 Migration `0013_systems_by_species.sql`
+### [x] T1.3 Migration `0013_systems_by_species.sql`
 - Crear tabla con `(id, species_id, code, name, active, created_at, updated_at)` y unique `(species_id, code)`.
 - Seed para bovino: `cria` (active=true), resto (`tambo`, `cabana`, `invernada`, `feedlot`) inactive.
 - RLS + grant select.
 - **Aceptación**: cliente lee `(bovino, cria, active=true)`; otras combinaciones existen pero `active=false`.
 - **Cubre**: R1.2, R1.4, R1.5.
 
-### T1.4 Migration `0014_categories_by_system.sql`
+### [x] T1.4 Migration `0014_categories_by_system.sql`
 - Crear tabla con todos los campos del design.
 - Seed de las 10 categorías de `(bovino, cria)` listadas en R1.3.
 - RLS + grant select.
 - **Aceptación**: las 10 categorías del seed presentes y legibles; insert desde cliente authenticated falla por falta de policy.
 - **Cubre**: R1.3, R1.4, R1.5.
 
-### T1.5 Migration `0015_rodeos.sql`
+### [x] T1.5 Migration `0015_rodeos.sql`
 - Crear tabla `public.rodeos` con campos del design.
 - Trigger `tg_rodeos_validate_species_system` (BEFORE INSERT OR UPDATE): rechaza si `(species_id, system_id)` no existe o `active=false`.
 - Trigger `rodeos_set_updated_at` reusando `tg_set_updated_at_generic` (helper de spec 01 / consolidado en `0017`).
@@ -51,7 +51,7 @@ Igual que con spec 01, la feature se puede cerrar tras Fase 1+2 y **diferir Fase
 - **Aceptación**: owner crea rodeo OK; field_operator falla con 42501; combinación `(bovino, invernada)` (system inactive) falla con 23514.
 - **Cubre**: R2.1, R2.2, R2.3, R2.4.
 
-### T1.6 Migration `0016_field_template_and_rodeo_config.sql` — plantilla de datos (ADR-021)
+### [x] T1.6 Migration `0016_field_template_and_rodeo_config.sql` — plantilla de datos (ADR-021)
 > Tres tablas de la plantilla de datos en una sola migration (unidad lógica). Reemplaza el modelo buggeado `system_data_templates` por-sistema. Ver design.md § "Plantilla de datos".
 
 - **Tabla `field_definitions`** (catálogo GLOBAL): `(id, data_key unique, label, description, category, data_type, ui_component, config_schema jsonb, schema_version, active, created_at, updated_at)` + index `(category) where active`.
@@ -72,13 +72,13 @@ Igual que con spec 01, la feature se puede cerrar tras Fase 1+2 y **diferir Fase
   - **Caso tambo + preñez**: en un rodeo cuyo sistema NO tiene `prenez` como default, el owner hace `insert into rodeo_data_config (rodeo_id, field_definition_id, enabled) values (?, (id de prenez), true)` → **OK** (el field existe en el catálogo global). En MVP esto se prueba con cría (que sí lo tiene como default); el caso real se valida cuando se active tambo, pero el INSERT owner de un field arbitrario del catálogo debe funcionar ya.
 - **Cubre**: R2.6 (no rodeo default — no hay trigger de auto-creación), R2.8, R2.9, R2.10, R2.11, R2.12, R2.13.
 
-### T1.7 Migration `0017_generic_updated_at.sql`
+### [x] T1.7 Migration `0017_generic_updated_at.sql`
 - Crear (o consolidar) función `tg_set_updated_at_generic`.
 - Si ya existía con otro nombre en spec 01 (`tg_establishments_set_updated_at` es específica de `establishments`), agregar la genérica acá.
 - **Aceptación**: función creable; reusable desde T1.5, T1.6 y futuras.
 - **Cubre**: utilidad para R2, R3, R4.
 
-### T1.8 Migration `0018_animals.sql`
+### [x] T1.8 Migration `0018_animals.sql`
 - Crear tabla `public.animals` con campos del design.
 - Unique index parcial `animals_tag_unique` sobre `(tag_electronic) where tag_electronic is not null and deleted_at is null`.
 - Trigger `tg_animals_validate_species` BEFORE INSERT/UPDATE: rechaza species_id inactiva.
@@ -87,7 +87,7 @@ Igual que con spec 01, la feature se puede cerrar tras Fase 1+2 y **diferir Fase
 - **Aceptación**: insert con `species_id` de bovino activo OK; con `equino` (inactivo) falla con 23514; dos animals con mismo tag fallan por unique.
 - **Cubre**: R3.1, R3.2, R3.3, R3.4.
 
-### T1.9 Migration `0019_animal_profiles.sql`
+### [x] T1.9 Migration `0019_animal_profiles.sql`
 - Crear enum `animal_status` y `teeth_state_enum`.
 - Crear tabla `public.animal_profiles` con todos los campos del design. **No** incluye `management_group_id` todavía (se agrega vía ALTER en `0036`, porque `management_groups` se crea ahí).
 - Indexes: `animal_profiles_idv_unique` (parcial), `animal_profiles_active_animal_unique` (parcial), `animal_profiles_visual_alt_trgm` (GIN trgm), `animal_profiles_by_est`, `animal_profiles_by_rodeo`, `animal_profiles_by_animal`.
@@ -96,7 +96,7 @@ Igual que con spec 01, la feature se puede cerrar tras Fase 1+2 y **diferir Fase
 - **Aceptación**: insert válido OK; insert con `(establishment_id, idv)` duplicado falla por unique; dos perfiles activos para el mismo `animal_id` falla por unique parcial.
 - **Cubre**: R4.1 (parcial — la columna `management_group_id` la cubre T1.27), R4.3, R4.4, R4.11.
 
-### T1.10 Migration `0020_animal_profiles_validations.sql`
+### [x] T1.10 Migration `0020_animal_profiles_validations.sql`
 - Triggers:
   - `tg_animal_profiles_identity_check` (R4.2): rechaza si los 3 identificadores están vacíos mirando `animals.tag_electronic`.
   - `tg_animal_profiles_rodeo_check` (R4.5): rechaza si rodeo no es del establishment o está inactivo/soft-deleted.
@@ -109,25 +109,25 @@ Igual que con spec 01, la feature se puede cerrar tras Fase 1+2 y **diferir Fase
   - UPDATE manual de categoría → `category_override` queda en true.
 - **Cubre**: R4.2, R4.5, R4.6, R4.8.
 
-### T1.11 Migration `0021_rls_animals_and_profiles.sql`
+### [x] T1.11 Migration `0021_rls_animals_and_profiles.sql`
 - Policies de `animal_profiles`: `select` (`has_role_in + deleted_at is null`), `insert` (`has_role_in`), `update` (`has_role_in`). El UPDATE de `management_group_id` (asignar lote) queda cubierto por esta misma policy de update (cualquier rol operativo, R11.5).
 - Policies de `animals`: `select` (derivado de existencia de animal_profile con has_role_in), `insert` (autenticado), `update` (derivado).
 - Aplicar grants ya hechos en `0018` y `0019` (idempotente).
 - **Aceptación**: userA con perfil en estA puede ver el animal globalmente; userB sin rol en estA no lo ve (tests RLS reales).
 - **Cubre**: R3.5, R11.1, R11.2, R11.3, R11.5.
 
-### T1.12 Migration `0022_event_helpers.sql`
+### [x] T1.12 Migration `0022_event_helpers.sql`
 - Crear función `establishment_of_profile(profile_id uuid) returns uuid` security definer stable.
 - Grant execute a authenticated.
 - **Aceptación**: la función retorna el `establishment_id` correcto para un `animal_profile_id` dado.
 - **Cubre**: utilidad para R11.2.
 
-### T1.13 Migration `0023_event_created_by_helper.sql`
+### [x] T1.13 Migration `0023_event_created_by_helper.sql`
 - Función trigger `tg_set_created_by_auth_uid` que llena `created_by` con `auth.uid()` si vino null.
 - **Aceptación**: helper invocable desde triggers de eventos.
 - **Cubre**: R6.7.
 
-### T1.14 Migration `0024_weight_events.sql`
+### [x] T1.14 Migration `0024_weight_events.sql`
 - Enum `event_source`.
 - Tabla `weight_events` con campos del design + check `weight_kg > 0`.
 - Index `(animal_profile_id, weight_date desc) where deleted_at is null`.
@@ -137,7 +137,7 @@ Igual que con spec 01, la feature se puede cerrar tras Fase 1+2 y **diferir Fase
 - **Aceptación**: insert válido OK; userB sin rol no ve el evento; field_operator que cargó edita; otro field_operator que no lo cargó no edita.
 - **Cubre**: R6.1, R6.6, R6.7, R6.8 (parte).
 
-### T1.15 Migration `0025_reproductive_events.sql`
+### [x] T1.15 Migration `0025_reproductive_events.sql`
 - Enums: `repro_event_type`, `service_type_enum`, `pregnancy_status_enum`.
 - Tabla auxiliar `semen_registry` (campos del design + RLS).
 - Tabla `reproductive_events` con todos los campos del design, incluyendo `calf_tag_electronic`.
@@ -147,7 +147,7 @@ Igual que con spec 01, la feature se puede cerrar tras Fase 1+2 y **diferir Fase
 - **Aceptación**: insert válido OK; check de `calf_sex in ('male','female')` enforce.
 - **Cubre**: R6.2, R6.6, R6.7, R6.8 (parte).
 
-### T1.16 Migration `0026_sanitary_events.sql`
+### [x] T1.16 Migration `0026_sanitary_events.sql`
 - Enums `sanitary_event_type`, `sanitary_route`.
 - Tabla `sanitary_events` con campos del design.
 - Index por `(animal_profile_id, event_date desc)`.
@@ -156,13 +156,13 @@ Igual que con spec 01, la feature se puede cerrar tras Fase 1+2 y **diferir Fase
 - **Aceptación**: insert válido OK; RLS aislado.
 - **Cubre**: R6.3, R6.6, R6.7, R6.8 (parte).
 
-### T1.17 Migration `0027_condition_score_events.sql`
+### [x] T1.17 Migration `0027_condition_score_events.sql`
 - Tabla `condition_score_events` con CHECK explícito sobre los 17 valores discretos de score.
 - Index, trigger, RLS.
 - **Aceptación**: insert con `score = 3.10` falla; con `3.00` OK.
 - **Cubre**: R6.4, R6.6, R6.7, R6.8 (parte).
 
-### T1.18 Migration `0028_lab_samples.sql`
+### [x] T1.18 Migration `0028_lab_samples.sql`
 - Enum `lab_sample_type`.
 - Tabla `lab_samples` con campos del design.
 - Indexes: por profile+fecha y por `tube_number`.
@@ -170,7 +170,7 @@ Igual que con spec 01, la feature se puede cerrar tras Fase 1+2 y **diferir Fase
 - **Aceptación**: insert válido OK; búsqueda por `tube_number` usa el index.
 - **Cubre**: R6.5, R6.6, R6.7, R6.8 (parte).
 
-### T1.19 Migration `0029_animal_category_history.sql`
+### [x] T1.19 Migration `0029_animal_category_history.sql`
 - Enum `category_change_reason`.
 - Tabla `animal_category_history` con campos del design.
 - Trigger `tg_animal_profiles_record_category_change`:
@@ -180,7 +180,7 @@ Igual que con spec 01, la feature se puede cerrar tras Fase 1+2 y **diferir Fase
 - **Aceptación**: crear un animal graba fila inicial; cambiar categoría manual graba `manual_override`; trigger automático graba `auto_transition` (validado en T1.20).
 - **Cubre**: R10.3, R12.4.
 
-### T1.20 Migration `0030_category_transitions.sql`
+### [x] T1.20 Migration `0030_category_transitions.sql`
 - Función `compute_category(profile_id uuid) returns uuid` security definer stable, con la lógica del design (sex + edad + conteo de partos + tacto positivo).
 - Función `apply_auto_transition(profile_id uuid, target_category_id uuid)`: setea GUC `rafaq.is_auto_transition = 'on'`, UPDATE de **solo** `category_id`, GUC `'off'`. **No** toca `rodeo_id` ni `management_group_id` (ortogonalidad, R7.7).
 - Trigger `tg_reproductive_events_apply_transition` AFTER INSERT en `reproductive_events`:
@@ -194,7 +194,7 @@ Igual que con spec 01, la feature se puede cerrar tras Fase 1+2 y **diferir Fase
 - **Aceptación**: insertar tacto positivo sobre vaquillona cambia categoría; sobre vaquillona con `category_override=true` no cambia; insert de parto incrementa categoría; insert de birth sobre `multipara` no la cambia.
 - **Cubre**: R7.1, R7.2, R7.3, R7.4, R7.5, R7.6, R7.7, R4.9.
 
-### T1.21 Migration `0031_calf_creation.sql`
+### [x] T1.21 Migration `0031_calf_creation.sql`
 - Función trigger `tg_reproductive_events_create_calf` BEFORE INSERT sobre `reproductive_events`:
   - Skip si `event_type != 'birth'` o `calf_id IS NOT NULL` o `calf_sex IS NULL`.
   - Crear `animals` (con TAG opcional desde `calf_tag_electronic`).
@@ -204,7 +204,7 @@ Igual que con spec 01, la feature se puede cerrar tras Fase 1+2 y **diferir Fase
 - **Aceptación**: insertar parto con `calf_sex='female', calf_weight=35` crea automáticamente ternera con perfil y linkea; insertar parto con `calf_tag_electronic` duplicado falla y NO crea ni evento ni ternero.
 - **Cubre**: R9.1, R9.2, R9.3, R9.4.
 
-### T1.22 Migration `0032_animal_timeline.sql`
+### [x] T1.22 Migration `0032_animal_timeline.sql`
 - Función `animal_timeline(profile_id uuid)` que retorna set unificado de eventos con `(event_kind, event_id, event_date, payload)`.
 - Incluye 5 tablas de eventos + `animal_category_history`.
 - Cada SELECT chequea `has_role_in(establishment_of_profile(profile_id))` (defensa adicional, las tablas ya tienen RLS).
@@ -213,7 +213,7 @@ Igual que con spec 01, la feature se puede cerrar tras Fase 1+2 y **diferir Fase
 - **Aceptación**: llamar la función para un animal con eventos retorna todos en orden cronológico; llamarla para un animal de otro establishment retorna 0 filas (RLS).
 - **Cubre**: R10.1, R10.2.
 
-### T1.24 Migration `0033_animal_events.sql` (modelo Híbrido)
+### [x] T1.24 Migration `0033_animal_events.sql` (modelo Híbrido)
 - Crear tabla `public.animal_events` con `(id, animal_profile_id, establishment_id, author_id, created_at, event_type, text, structured_payload, edit_window_until, deleted_at)`.
 - CHECK constraint `event_type in ('observacion','otro')` — alcance acotado por modelo Híbrido (no se admiten los otros tipos del ADR-017 original).
 - Default `edit_window_until = now() + interval '15 minutes'`.
@@ -229,7 +229,7 @@ Igual que con spec 01, la feature se puede cerrar tras Fase 1+2 y **diferir Fase
 - **Aceptación**: insert con `event_type='salud'` falla con `23514` (CHECK); insert OK con `'observacion'`; update de `text` dentro de los 15 min OK; update de `text` pasadas 15 min falla; soft-delete (`update set deleted_at = now()`) permitido siempre por author/owner; userB sin rol no ve ni puede insertar; otro author no puede editar texto ajeno.
 - **Cubre**: R6.10, R6.11, R6.12, R6.13.
 
-### T1.25 Migration `0034_animal_timeline_v2.sql` (timeline con séptimo origen)
+### [x] T1.25 Migration `0034_animal_timeline_v2.sql` (timeline con séptimo origen)
 - Reemplazar (`create or replace function`) `animal_timeline(profile_id uuid)` para incluir el UNION ALL con `animal_events` como `event_kind = 'observacion'`.
 - Payload del nuevo origen: `{ event_type, text, structured_payload, author_id, edit_window_until }`.
 - `event_date` del nuevo origen = `created_at` de `animal_events`.
@@ -237,14 +237,14 @@ Igual que con spec 01, la feature se puede cerrar tras Fase 1+2 y **diferir Fase
 - **Aceptación**: animal con 1 weight + 1 observation → `animal_timeline` retorna 3 filas (weight + observation + category_change initial); cuenta correcta de los 7 orígenes posibles; userB sin rol → 0 filas (RLS).
 - **Cubre**: R10.1 (extendido a 7 orígenes).
 
-### T1.26 Migration `0035_immutability_identifiers.sql` (R4.13)
+### [x] T1.26 Migration `0035_immutability_identifiers.sql` (R4.13)
 - Función + trigger `tg_animals_block_tag_change` (BEFORE UPDATE OF `tag_electronic`): permitir `NULL → valor`; rechazar `valor → otro valor` y `valor → NULL`.
 - Función + trigger `tg_animal_profiles_block_idv_change` (BEFORE UPDATE OF `idv`): misma política post-completitud.
 - Explícitamente **no** bloquear `visual_id_alt` — sigue editable.
 - **Aceptación**: insert de animal con `tag_electronic=NULL`, luego `update set tag_electronic='ARG001'` → **OK** (completar info). Luego `update set tag_electronic='ARG002'` → falla con `23514`. `update set tag_electronic=NULL` → falla. `update set visual_id_alt='nuevo'` → OK. Idem para `idv`.
 - **Cubre**: R4.13.
 
-### T1.27 Migration `0036_management_groups.sql` (lote — ADR-020)
+### [x] T1.27 Migration `0036_management_groups.sql` (lote — ADR-020)
 > Tercer eje de organización. Tabla `management_groups` (scope establishment) + columna `animal_profiles.management_group_id` vía ALTER (la tabla y la columna no podían crearse antes porque `animal_profiles` recién existe en 0019 y `management_groups` se modela acá).
 
 - Crear tabla `public.management_groups` con `(id, establishment_id FK ON DELETE CASCADE, name, active, created_at, updated_at, deleted_at)` + check `name` no vacío + index `(establishment_id) where deleted_at is null`.
@@ -261,7 +261,7 @@ Igual que con spec 01, la feature se puede cerrar tras Fase 1+2 y **diferir Fase
   - `userB` sin rol en el establishment no ve el lote (0 filas).
 - **Cubre**: R2.14, R2.15, R2.16 (sustrato), R2.17, R2.18 (FK simple, sin auto-asignación), R4.1 (columna), R7.7 (la columna no la tocan los triggers de transición).
 
-### T1.28 Migration `0037_check_grants.sql` (housekeeping)
+### [x] T1.28 Migration `0037_check_grants.sql` (housekeeping)
 - Revisar y consolidar grants de todas las tablas/funciones nuevas (incluye `field_definitions`, `system_default_fields`, `rodeo_data_config`, `management_groups`, `animal_events`).
 - Cualquier permission que se haya escapado al rol `authenticated` queda fijada acá (sigue el patrón establecido por `0010_grants_fix.sql` de spec 01).
 - **Aceptación**: `node scripts/check.mjs` verde; `select` desde cliente authenticated sobre cada tabla con RLS funciona end-to-end.
@@ -271,7 +271,7 @@ Igual que con spec 01, la feature se puede cerrar tras Fase 1+2 y **diferir Fase
 
 Patrón heredado de spec 01: tests Node nativo en `supabase/tests/`, login con users de prueba, ejercen las policies y triggers, y limpian al final.
 
-### T2.1 Suite `supabase/tests/animal/run.cjs` (esqueleto)
+### [x] T2.1 Suite `supabase/tests/animal/run.cjs` (esqueleto)
 - Crear runner Node nativo siguiendo el patrón de `supabase/tests/rls/run.cjs`.
 - Setup: crear `userA` (owner de `estA`) y `userB` (owner de `estB`) via service role. Los rodeos **no se crean automáticamente** — el setup crea manualmente un rodeo `(bovino, cría, name='Rodeo principal')` en cada establishment para que las suites siguientes tengan dónde meter animales. El trigger `tg_rodeos_seed_data_config` pre-puebla `rodeo_data_config` (26 filas, 23 enabled) al insertarse el rodeo.
 - Helper `createAnimal(client, { tag?, idv?, visualAlt?, sex, birthDate?, rodeoId? })`: insert en `animals` + `animal_profiles` con patrón split (sin `.select()` + select separado).
@@ -279,7 +279,7 @@ Patrón heredado de spec 01: tests Node nativo en `supabase/tests/`, login con u
 - Helper `createManagementGroup(client, { establishmentId, name })`: insert en `management_groups`.
 - **Aceptación**: skeleton corre con 0 tests y termina limpio; cada establishment de setup tiene 1 rodeo `(bovino, cría)` creado manualmente y 26 filas en `rodeo_data_config` (23 enabled).
 
-### T2.2 Tests: identificación flexible (R4.2)
+### [x] T2.2 Tests: identificación flexible (R4.2)
 - Caso 1: animal con solo TAG → OK.
 - Caso 2: animal con solo IDV → OK.
 - Caso 3: animal con solo `visual_id_alt` → OK.
@@ -289,7 +289,7 @@ Patrón heredado de spec 01: tests Node nativo en `supabase/tests/`, login con u
 - **Aceptación**: 6 tests verdes.
 - **Cubre**: R4.2, R3.2, R4.3.
 
-### T2.3 Tests: categoría auto-calculada al alta (R4.7)
+### [x] T2.3 Tests: categoría auto-calculada al alta (R4.7)
 - Hembra con `birth_date = hoy - 6 meses` → categoría `ternera`.
 - Hembra con `birth_date = hoy - 18 meses` y sin eventos previos → `vaquillona`.
 - Macho con `birth_date = hoy - 6 meses` → `ternero`.
@@ -297,7 +297,7 @@ Patrón heredado de spec 01: tests Node nativo en `supabase/tests/`, login con u
 - **Aceptación**: 4 tests verdes.
 - **Cubre**: R4.7.
 
-### T2.4 Tests: transiciones automáticas (R7.1..R7.5, R7.7)
+### [x] T2.4 Tests: transiciones automáticas (R7.1..R7.5, R7.7)
 - Vaquillona + tacto positivo (`pregnancy_status = 'medium'`) → categoría pasa a `vaquillona_prenada` y `category_override` queda `false`.
 - Vaquillona preñada + evento `birth` → `vaca_segundo_servicio`.
 - Vaca segundo servicio + segundo `birth` → `multipara`.
@@ -309,20 +309,20 @@ Patrón heredado de spec 01: tests Node nativo en `supabase/tests/`, login con u
 - **Aceptación**: 8 tests verdes.
 - **Cubre**: R7.1, R7.2, R7.3, R7.4, R7.5, R7.7, R4.9, R10.3, R12.4.
 
-### T2.5 Tests: override manual y revert (R4.8, R4.10)
+### [x] T2.5 Tests: override manual y revert (R4.8, R4.10)
 - UPDATE manual de `category_id` desde cliente → trigger pone `category_override = true` y `animal_category_history.reason = 'manual_override'`.
 - UPDATE de `category_override = false` + UPDATE de `category_id = compute_category(id)` → categoría se recalcula y `animal_category_history.reason = 'revert_to_auto'`.
 - **Aceptación**: 2 tests verdes.
 - **Cubre**: R4.8, R4.10, R7.6.
 
-### T2.6 Tests: CUT manual (R8)
+### [x] T2.6 Tests: CUT manual (R8)
 - Update directo de `is_cut = true` + `category_id = (cut)` + `category_override = true` desde la ficha → OK.
 - Verificar que las policies permiten el update a field_operator y veterinarian (R11.5).
 - Test del prompt automático queda como **manual test guideline** (es UX cliente, no SQL).
 - **Aceptación**: 2 tests verdes (los manuales se documentan en `progress/impl_02-modelo-animal.md`).
 - **Cubre**: R8.4, R8.5.
 
-### T2.7 Tests: ternero al pie (R9)
+### [x] T2.7 Tests: ternero al pie (R9)
 - Insertar `reproductive_events` con `event_type='birth', calf_sex='female', calf_weight=35` sobre una vaquillona preñada.
   - Verifica: `calf_id` no es null tras el insert; `animal_profiles` del ternero existe con `category.code = 'ternera'`, `entry_origin = 'born_here'`, `visual_id_alt = 'recién nacido — pendiente de caravana'`, `management_group_id IS NULL`.
   - Verifica que la madre transicionó a `vaca_segundo_servicio` (transición AFTER INSERT corre después del BEFORE INSERT que creó al ternero).
@@ -331,7 +331,7 @@ Patrón heredado de spec 01: tests Node nativo en `supabase/tests/`, login con u
 - **Aceptación**: 3 tests verdes.
 - **Cubre**: R9.1, R9.2, R9.3, R9.4.
 
-### T2.8 Tests: RLS de animales y eventos (R11)
+### [x] T2.8 Tests: RLS de animales y eventos (R11)
 - userA crea animal en estA; userB intenta `select` → 0 filas.
 - userA crea evento; userB no lo ve.
 - userA es field_operator en estA, userB es veterinarian. Ambos pueden insertar eventos sobre animales de estA.
@@ -341,7 +341,7 @@ Patrón heredado de spec 01: tests Node nativo en `supabase/tests/`, login con u
 - **Aceptación**: 6 tests verdes.
 - **Cubre**: R11.1, R11.2, R11.3, R11.4, R11.5, R6.8.
 
-### T2.9 Tests: creación manual de rodeo + validaciones (R2)
+### [x] T2.9 Tests: creación manual de rodeo + validaciones (R2)
 - Crear establishment → verificar `select count(*) from rodeos where establishment_id = ?` = **0** (no más default).
 - Owner crea rodeo `(bovino, cría, name='Rodeo principal')` manualmente vía INSERT → OK; verificar que el trigger pre-pobló **26 filas** en `rodeo_data_config` para ese `rodeo_id` (23 con `enabled = true`).
 - Owner intenta crear rodeo `(bovino, invernada)` → falla por system inactive (23514).
@@ -351,14 +351,14 @@ Patrón heredado de spec 01: tests Node nativo en `supabase/tests/`, login con u
 - **Aceptación**: 6 tests verdes.
 - **Cubre**: R2.2, R2.3, R2.4, R2.5, R2.6 (no default), R2.11 (trigger pre-populate, indirecto).
 
-### T2.10 Tests: cronología (R10)
+### [x] T2.10 Tests: cronología (R10)
 - Animal con 1 peso + 1 tacto + 1 sanitario → `animal_timeline(profile_id)` retorna 3 eventos + 1 `category_change` (el initial). Total 4 filas.
 - Otro user sin rol → 0 filas.
 - Orden por `event_date desc` verificable.
 - **Aceptación**: 3 tests verdes.
 - **Cubre**: R10.1, R10.2.
 
-### T2.11 Tests: búsqueda fuzzy (R5)
+### [x] T2.11 Tests: búsqueda fuzzy (R5)
 - Crear animal con `visual_id_alt = 'vaca blanca mancha pata izquierda'`.
 - Búsqueda con `'vaca blanca'` → encuentra (similarity ≥ 0.3).
 - Búsqueda con `'toro negro'` → no encuentra.
@@ -366,13 +366,13 @@ Patrón heredado de spec 01: tests Node nativo en `supabase/tests/`, login con u
 - **Aceptación**: 4 tests verdes.
 - **Cubre**: R5.1, R5.2, R5.3, R5.4.
 
-### T2.12 Hook al runner global
+### [x] T2.12 Hook al runner global
 - Agregar la suite `animal/run.cjs` al runner `scripts/run-tests.mjs` (heredado de spec 01).
 - `node scripts/check.mjs` debe ejecutar y reportar verde el nuevo set de tests.
 - **Aceptación**: `check.mjs` corre Fase 2 entera y queda verde.
 - **Cubre**: housekeeping.
 
-### T2.13 Tests: `animal_events` (modelo Híbrido, R6.10..R6.13)
+### [x] T2.13 Tests: `animal_events` (modelo Híbrido, R6.10..R6.13)
 - Caso 1: insert con `event_type='observacion'` + `text='vio cojera leve'` → OK; `author_id` queda con `auth.uid()` del cliente; `edit_window_until ≈ now() + 15 min`.
 - Caso 2: insert con `event_type='salud'` → falla con CHECK (`23514`). Solo `'observacion'` y `'otro'` son válidos.
 - Caso 3: insert con `establishment_id` que no coincide con `animal_profiles.establishment_id` del `animal_profile_id` provisto → falla.
@@ -386,7 +386,7 @@ Patrón heredado de spec 01: tests Node nativo en `supabase/tests/`, login con u
 - **Aceptación**: 10 tests verdes.
 - **Cubre**: R6.10, R6.11, R6.12, R6.13.
 
-### T2.14 Tests: inmutabilidad de identificadores post-completitud (R4.13)
+### [x] T2.14 Tests: inmutabilidad de identificadores post-completitud (R4.13)
 - Caso 1: crear animal con `tag_electronic='ARG001'`, luego `update set tag_electronic='ARG002'` → falla con `23514`.
 - Caso 2: crear profile con `idv='001'`, luego `update set idv='002'` → falla con `23514`.
 - Caso 3: `update set visual_id_alt='vaca blanca corregida'` → OK (no está bloqueado).
@@ -395,14 +395,14 @@ Patrón heredado de spec 01: tests Node nativo en `supabase/tests/`, login con u
 - **Aceptación**: 5 tests verdes.
 - **Cubre**: R4.13.
 
-### T2.15 Tests: cronología v2 con 7 orígenes (extensión de T2.10)
+### [x] T2.15 Tests: cronología v2 con 7 orígenes (extensión de T2.10)
 - Animal con 1 peso + 1 tacto + 1 sanitario + 1 observation + 1 condition score → `animal_timeline(profile_id)` retorna 6 filas (5 eventos + 1 `category_change` initial). Verificar que `event_kind = 'observacion'` aparece en el resultado.
 - Borrar (soft-delete) la observation → ya no aparece en el timeline.
 - Otro user sin rol en el establishment del animal → 0 filas para todos los orígenes incluido `observacion`.
 - **Aceptación**: 3 tests verdes.
 - **Cubre**: R10.1 (séptimo origen).
 
-### T2.16 Tests: plantilla de datos — catálogo global + defaults + toggle (R2.8..R2.13)
+### [x] T2.16 Tests: plantilla de datos — catálogo global + defaults + toggle (R2.8..R2.13)
 > Tests del modelo de 3 tablas de ADR-021. Reemplaza la versión que testeaba el modelo por-sistema buggeado.
 
 - Caso 1 (catálogo global seedeado): `select count(*) from field_definitions where active` = 26. Verificar columnas `label`, `category`, `data_type`, `ui_component` pobladas. `data_key` único (sin duplicados).
@@ -417,7 +417,7 @@ Patrón heredado de spec 01: tests Node nativo en `supabase/tests/`, login con u
 - **Aceptación**: 9 tests verdes.
 - **Cubre**: R2.8, R2.9, R2.10, R2.11, R2.12, R2.13.
 
-### T2.17 Tests: lote / management_groups (R2.14..R2.18)
+### [x] T2.17 Tests: lote / management_groups (R2.14..R2.18)
 > Tercer eje de organización (ADR-020).
 
 - Caso 1 (crear lote owner-only): owner crea `management_group` "Otoño 2026" → OK; `field_operator` intenta crear → falla por RLS (42501/no policy).
@@ -431,6 +431,14 @@ Patrón heredado de spec 01: tests Node nativo en `supabase/tests/`, login con u
 - Caso 9 (RLS scoping): `userB` sin rol en `estA` no ve los `management_groups` de `estA` (0 filas).
 - **Aceptación**: 9 tests verdes.
 - **Cubre**: R2.14, R2.15, R2.16, R2.17, R2.18.
+
+### [x] T2.18 Fix de seguridad: `apply_auto_transition` no es RPC público (SEC-HIGH-01)
+> Fix loop de Gate 2 (FAIL). Ver `progress/security_code_02-modelo-animal.md` § SEC-HIGH-01.
+
+- Migration `0042_revoke_internal_function_grants.sql`: `revoke execute on function public.apply_auto_transition (uuid, uuid) from public, authenticated, anon;` + `notify pgrst, 'reload schema';`. `apply_auto_transition` es helper SECURITY DEFINER interno del trigger de transición (R7.7); había quedado expuesto como RPC de PostgREST con `EXECUTE TO PUBLIC` por default → write cross-tenant (CWE-862/CWE-639). El trigger `tg_reproductive_events_apply_transition` (SECURITY DEFINER, corre como owner) conserva su EXECUTE, así que las transiciones automáticas siguen funcionando.
+- Test de regresión: un `authenticated` sin rol en el establishment del perfil objetivo intenta `rpc('apply_auto_transition', { profile_id: <perfil ajeno>, target_category_id: <categoría válida> })` → debe fallar (permission denied / función no accesible) Y la categoría del perfil objetivo NO cambia (verificado con service_role).
+- **Aceptación**: T2.18 verde; T2.4/T2.5 (transiciones automáticas + override/revert) siguen verdes.
+- **Cubre**: SEC-HIGH-01, R11.x (aislamiento multi-tenant).
 
 ## Fase 3 — Cliente: contextos y servicios base
 
@@ -708,6 +716,7 @@ T1.1 → T1.2..T1.7 (config + rodeos + plantilla de datos [3 tablas, 0016] + hel
 
 > Audit trail de la evolución del plan de tareas. Orden cronológico inverso.
 
+- **2026-05-28 — Fix loop Gate 2 (FAIL → SEC-HIGH-01)**: agregada T2.18 (migration `0042` revoca EXECUTE de `apply_auto_transition` a public/authenticated/anon + test de regresión cross-tenant). Suite Animal pasa de 18 a 19 subtests.
 - **2026-05-28 — Refundición consolidada (ADR-020 lote + ADR-021 plantilla de datos)**:
   - **T1.6 reescrita**: migration `0016` ahora crea las **tres tablas** de plantilla (`field_definitions` catálogo global + `system_default_fields` + `rodeo_data_config`) + seed de 26 fields de cría + trigger de auto-poblado desde `system_default_fields`. Se eliminó el trigger de validación-por-sistema (el FK al catálogo global lo hace innecesario y se permite habilitar fields no-default). RLS de `rodeo_data_config` ahora permite INSERT al owner (caso "tambo + preñez").
   - **T1.27 nueva**: migration `0036_management_groups.sql` — tabla de lote + `ALTER animal_profiles ADD management_group_id` + trigger de validación mismo-establishment + RLS. **T1.28** = `0037_check_grants` (era T1.27/0036).

@@ -3,15 +3,18 @@
 > Este archivo se vacía al cerrar cada sesión y su resumen se mueve a `history.md`.
 > Mientras trabajás, **mantenelo actualizado en tiempo real**, no al final.
 
-_Sin sesión activa. Última cerrada: sesión 14 — refundición consolidada de spec 02 (lote + plantilla de datos) (2026-05-28). Ver `history.md`._
+_Sin sesión activa. Última cerrada: sesión 15 — gate de refinamiento de contexto (ADR-022) + reorden del roadmap por olas (2026-05-28). Ver `history.md`._
 
 ## Estado del proyecto (al 2026-05-28)
 
-- **Feature activa (`in_progress`):** `02-modelo-animal` — spec **refundida** (sesión 14) incorporando ADR-020 (lote `management_groups`) + ADR-021 (plantilla de datos: catálogo global `field_definitions` + `system_default_fields` + `rodeo_data_config` + gating). R14 y seed de cría (26 fields) TENTATIVOS. Backend (B.2 del plan) todavía `pending`, nadie lo arrancó. Frontend (Fase 3+) pausado hasta cerrar design system.
-- **`deferred`:** `01-identity-multitenancy` (backend done + 41 tests; frontend Fases 3-8 esperando design system) · `09-buscar-animal` (spec aprobada + alineada/re-aprobada en sesión 14; esperando turno tras spec 02).
-- **ADRs nuevos (sesión 14):** ADR-020 (lote como agrupación de manejo, complementa ADR-016) + ADR-021 (plantilla de datos, catálogo global + gating). Ambos `Accepted` y en el índice.
+- **Backend cerrado y verificado:** `02-modelo-animal` backend (Fase 1+2) **DONE** el 2026-05-28 (sesión 15): migrations 0013-0042 + suite animal 19/19 + reviewer APPROVED + Gate 2 PASS (SEC-HIGH-01 cerrado). No hay ninguna feature `in_progress` ahora — slot libre.
+- **`deferred`:** `01-identity-multitenancy` (backend done + 41 tests; frontend esperando design system) · `02-modelo-animal` (backend done; frontend Fase 3+ pausado) · `09-buscar-animal` (spec aprobada; esperando turno). R14 y el seed de cría (26 fields) de spec 02 siguen TENTATIVOS.
+- **`context_ready`:** `03-modo-maniobras` — contexto refinado y aprobado (sesión 15, primer uso del Gate 0). Spec diferida JIT (buffer=1, 09 on-deck).
+- **ADRs:** ADR-020 (lote) + ADR-021 (plantilla de datos) de sesión 14 + **ADR-022 (gate de refinamiento de contexto)** de sesión 15. Todos `Accepted` y en el índice.
+- **Proceso (sesión 15):** el flujo SDD ahora tiene **Gate 0 de refinamiento de contexto** antes de la spec — estado nuevo `context_ready` + artefacto `context.md` (corto, conducido por el leader en charla con Raf). Tres puertas humanas: contexto → spec → código. Política de pipeline: impl WIP=1, spec buffer=1, refinamiento buffer=2–3. Detalle en ADR-022 + `docs/specs.md`. Aplica hacia adelante (01/02/09 grandfathered).
+- **Roadmap (sesión 15):** ordenado por **olas** en `plan.md` (rush MVP), arranque paralelo en Ola 0.
 - **Bloque A del plan:** A.1 (design system) `in_progress` con Raf; A.2 (bottom nav → ADR-018) `pending`; A.3–A.7 `done`.
-- **Próximo paso sugerido:** B.2 (backend spec 02, ahora migrations `0012..0037` incluyendo plantilla en 0016 + lote en 0036) o seguir cerrando A.1 (design system). Raf elige el orden. Pendiente: validar el seed de cría de `field_definitions` con Facundo.
+- **Próximo paso:** Ola 0/1 restantes — Raf cierra **design system** (A.1, destraba todo el frontend) + **research SIGSA** (08, long-lead) + **día de campo** (04/05 BLE). Sin design system no hay nuevo critical path implementable; opción: pre-refinar contexto de 04 (parte no-hardware). Pendiente: validar seed de cría con Facundo.
 
 ## Notas técnicas vigentes para el implementer
 

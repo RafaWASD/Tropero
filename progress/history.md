@@ -291,3 +291,35 @@ El código real de Edge Functions usa `Deno.env.get('APP_URL')` (env del Edge Fu
 - **Commits de la sesión:** `fbe1c79` (ADR-020) + `ffb53d2` (ADR-021) + `9f066a1` (refundición). Cierre de sesión (este resumen + reset de `current.md`) en commit aparte. **No pusheados todavía** (Raf decide cuándo).
 - **Pendiente abierto:** validar el seed de cría de `field_definitions` (26 fields) con Facundo — ajustable por migration sin reabrir spec. Sigue sin redactarse spec 03 (dueña del gating de maniobras + sessions/lote_label reconciliation).
 - **Próximo paso:** B.2 (backend spec 02, ahora con plantilla + lote) o seguir A.1 (design system). Raf elige.
+
+---
+
+## Sesión 15 — Gate de refinamiento de contexto + reorden del roadmap (2026-05-28)
+
+- **Agente:** claude (rol leader — cambio de proceso/docs del harness, edición directa sin implementer; planificado en plan mode y aprobado por Raf antes de ejecutar).
+- **Origen:** Raf pidió leer todo el contexto/specs/pendientes y armar un plan de desarrollo ordenado, resolviendo tres dolores: (1) specs largas que salían mal por contexto sin refinar (spec 02 reescrita ×2), (2) falta de política de orden entre spec-ear e implementar, (3) falta de un orden claro de qué definir/implementar primero. Pidió explícitamente agregar el paso de refinamiento al workflow del harness.
+- **Decisiones tomadas con Raf (vía AskUserQuestion):**
+  - Modelado del refinamiento: **estado `context_ready` + artefacto `context.md`** (chequeable por check.mjs).
+  - Quién refina: **el leader en conversación directa** (no subagente — el valor es el diálogo en vivo).
+  - Política de orden y arranque: Raf delegó el análisis → recomendación adoptada (ver abajo).
+- **Parte 1 — Gate 0 de refinamiento (ADR-022):**
+  - `feature_list.json`: `context_ready` agregado a `valid_status`.
+  - `scripts/check.mjs`: `context_ready` en `validStatus` + `requiresContext=['context_ready']` que exige `context.md`; sin retro-exigencia a `spec_ready+` (grandfathering 01/02/09).
+  - `docs/specs.md`: diagrama de estados con Gate 0; sección "context.md — refinamiento de contexto"; tres puertas humanas (contexto → spec → código); sección "Política de pipeline".
+  - `.claude/agents/leader.md`: flujo con Gate 0; Caso A (refinamiento leader-led → context.md → context_ready) + Caso A-bis (context_ready aprobado → spec_author).
+  - `.claude/agents/spec_author.md`: arranca de `context_ready`, lee `context.md` como fuente de verdad.
+  - `AGENTS.md` + `CLAUDE.md`: flujo, reglas duras y mapa actualizados.
+  - `docs/adr/ADR-022-gate-refinamiento-contexto.md` creado (Accepted) + índice README.
+- **Parte 2 — Política de pipeline:** dos tracks, implementación WIP=1, spec buffer=1, refinamiento buffer=2–3. Conclusión: alternar spec/impl no está mal si es dirigido por el pipeline, no por humor. Documentada en ADR-022 + docs/specs.md.
+- **Parte 3 — Roadmap por olas (rush MVP):** sección "Orden de ejecución (olas)" en plan.md. Arranque paralelo (Ola 0): B.2 backend 02 + A.1 design system (Raf) + refinar contexto de 03 + research SIGSA + agendar día de campo. Orden de implementar: 02 backend → 01 fe → 02 fe → 04 → 09 → 05 → 03 → 08 → 06 → 07. Reconciliado el drift de la tabla "Estado global resumido" (09 es deferred, no blocked).
+- **Verificación:** `node scripts/check.mjs` verde con el código nuevo (typecheck + 15 RLS + 26 Edge contra DB remota). Dry-run de la guardia: flip temporal de 03 a `context_ready` sin context.md → check FALLÓ con "falta ...context.md" (exit 1) → revertido a `pending` (cambio net-zero, estado idéntico al verde).
+- **Higiene:** sin temporales; `feature_list.json` restaurado exacto tras el dry-run.
+- **Commits:** ninguno todavía — Raf decide cuándo commitear (cambios sin commitear: harness + ADR-022 + plan.md + este resumen).
+- **Pendiente abierto:** sigue sin validarse el seed de cría con Facundo; sigue sin redactarse spec 03 (ahora pasa primero por el Gate 0 nuevo).
+- **Ola 0 ejecutada (misma sesión 15):**
+  - **(a) B.2 backend de spec 02 — DONE.** Implementer (background) aplicó migrations `0013-0042` al remoto + suite `supabase/tests/animal` 19/19. 4 desviaciones documentadas (SECURITY DEFINER en identity_check + record_category_change, fix de revert de override, soft-delete vía RPCs `soft_delete_*`, renumber +1). Reviewer **APPROVED**. Gate 2 (security_analyzer) encontró **SEC-HIGH-01**: `apply_auto_transition` (SECURITY DEFINER, helper interno del trigger) quedó expuesta como RPC con `EXECUTE TO PUBLIC` → un authenticated podía reescribir la categoría de un animal de otro tenant. Rebote al implementer → `0042_revoke_internal_function_grants.sql` (revoke) + test `T2.18` → **Gate 2 re-run PASS** (cierre confirmado runtime). Raf aprobó (Puerta 2) → spec 02 a `deferred` (backend done, frontend Fase 3+ pausado, patrón spec 01). `design.md` actualizado al as-built (Changelog).
+  - **(b) Gate 0 estrenado con 03 MODO MANIOBRAS.** Refinamiento conducido por el leader con Raf (2 rondas de AskUserQuestion): sessions persistida (1 rodeo/sesión), find-or-create de spec 09 para alta en manga, vacuna/pajuela texto libre, raspado solo machos, pesaje ternero mínimo (peso al pie/destete → backlog), **lote NO auto-asignado desde la sesión** (edge case que el gate atrapó en vivo: un turno puede tocar 2 lotes y los pisaría), gating DB por trigger, migrations 0038+. `context.md` aprobado → `03` a `context_ready`; spec diferida JIT (buffer=1).
+  - **Bug menor de harness detectado**: el subagente `security_analyzer` no tiene tool `Write` → no pudo persistir su reporte de Gate 2 (lo persistió el leader). Follow-up: agregarle `Write` a `.claude/agents/security_analyzer.md` o ajustar su protocolo.
+- **Verificación:** `node scripts/check.mjs` verde en cada paso (typecheck + 15 RLS + 26 Edge + 19 Animal contra DB remota).
+- **Commits de la sesión:** 3 — (1) proceso/harness (Gate 0 + pipeline + ADR-022 + roadmap olas), (2) contexto de 03, (3) backend de spec 02. Push según decida Raf.
+- **Próximo:** Olas 0/1 restantes — design system (Raf, destraba frontend), research SIGSA (08), día de campo (04/05). Pendiente: validar seed de cría de `field_definitions` con Facundo.

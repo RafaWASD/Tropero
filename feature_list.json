@@ -5,7 +5,7 @@
     "one_feature_at_a_time": true,
     "require_tests_to_close": true,
     "require_approved_spec_to_implement": true,
-    "valid_status": ["pending", "spec_ready", "in_progress", "done", "blocked", "deferred"],
+    "valid_status": ["pending", "context_ready", "spec_ready", "in_progress", "done", "blocked", "deferred"],
     "sdd_required_when": "feature has \"sdd\": true",
     "specs_path": "specs/active/<name>/"
   },
@@ -38,8 +38,8 @@
         "Ficha de animal muestra cronología de eventos."
       ],
       "sdd": true,
-      "status": "in_progress",
-      "notes": "Spec refinada y aprobada por Raf el 2026-05-26 con modelo Híbrido de eventos (5 tablas tipadas + animal_events para observaciones libres), R4.13 inmutabilidad de identificadores, R15 borrada (movida a spec 09). R14 (pantalla Ficha animal) aprobada como TENTATIVA — sujeta a refinamiento incremental cuando se cierre el design system (item A.1 plan.md). Backend (Fase 1+2: schema + RLS + triggers + tests) listo para implementar. Frontend (Fase 3+) pausado intencionalmente hasta cerrar design system, mismo patrón que spec 01."
+      "status": "deferred",
+      "notes": "Backend (Fase 1+2) IMPLEMENTADO y verificado el 2026-05-28 (sesión 15): migrations 0013-0042 aplicadas al remoto (config multi-especie, plantilla ADR-021, rodeos, animals/perfiles, 5 tablas de evento + animal_events, transiciones de categoría, ternero al pie, inmutabilidad R4.13, lote ADR-020, soft-delete RPCs, RLS/grants) + suite supabase/tests/animal 19/19 verde. Reviewer APPROVED + Gate 2 PASS (encontró y cerró SEC-HIGH-01: apply_auto_transition estaba expuesta como RPC → revoke en migration 0042 + test T2.18). design.md actualizado al as-built. Status deferred (NO done): frontend (Fase 3+) pausado intencionalmente hasta cerrar el design system, mismo patrón que spec 01. R14 (Ficha animal) sigue TENTATIVA. Detalle en progress/{impl,review,security_code}_02-modelo-animal.md. Migrations renumeradas +1 (0012 ya lo ocupaba spec 01)."
     },
     {
       "id": 3,
@@ -54,7 +54,8 @@
         "Preset guarda combinación de maniobras + config para reuso."
       ],
       "sdd": true,
-      "status": "pending"
+      "status": "context_ready",
+      "notes": "Contexto refinado y APROBADO por Raf el 2026-05-28 (sesión 15, primer uso del Gate 0 de ADR-022). Ver specs/active/03-modo-maniobras/context.md. Decisiones lockeadas: sessions persistida (1 rodeo/sesión, animal de otro rodeo → avisar+reasignar), find-or-create de spec 09 para alta en manga, vacuna/pajuela texto libre+autocompletar, tacto vaquillona como reproductive_event (extiende enum si falta), dientes/CUT reusa sustrato spec 02 (prompt en la maniobra), raspado solo machos, pesaje ternero = adulto + autocompleta categoría (peso al pie vs destete → backlog post-MVP con Facundo), lote NO auto-asignado desde la sesión (per-animal manual), validaciones cruzadas → spec 07, gating DB por trigger BEFORE INSERT, migrations 0038+. Redacción de spec DIFERIDA (just-in-time): se escribe más cerca de implementar 03 (Ola 3, tras 04/05/09) para evitar rot — pipeline buffer=1 (spec 09 ocupa el slot on-deck). Depende de specs 02, 04, 05, 09."
     },
     {
       "id": 4,

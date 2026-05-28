@@ -1,7 +1,7 @@
 # Plan de ejecución — RAFAQ
 
 > Fuente única del orden de trabajo. Vive al lado de `current.md` (sesión en curso) y `history.md` (bitácora cerrada) para que sean comparables.
-> Última actualización: **2026-05-28** (refundición consolidada de spec 02 incorporando ADR-020 lote + ADR-021 plantilla de datos).
+> Última actualización: **2026-05-28** (sesión 15 — gate de refinamiento de contexto ADR-022 + reorden del roadmap por olas para rush MVP).
 
 ## Cómo usar este archivo
 
@@ -10,27 +10,59 @@
 - Si surge una decisión nueva que invalida parte del plan → anotarla en el changelog y reescribir el item afectado.
 - Estados válidos: `pending` / `in_progress` / `done` / `blocked` / `deferred`.
 - Si un item dice "depende de Raf" significa que no avanza sin decisión humana — el leader no lo arranca por su cuenta.
-- **División de autoridad**: `feature_list.json` manda sobre el **estado SDD** de cada feature (pending/spec_ready/in_progress/done/blocked/deferred). Este archivo manda sobre el **orden, las dependencias y el porqué**. Si la tabla "Estado global resumido" de abajo discrepa con `feature_list.json`, gana `feature_list.json` — actualizá la tabla, no al revés.
+- **División de autoridad**: `feature_list.json` manda sobre el **estado SDD** de cada feature (pending/context_ready/spec_ready/in_progress/done/blocked/deferred). Este archivo manda sobre el **orden, las dependencias y el porqué**. Si la tabla "Estado global resumido" de abajo discrepa con `feature_list.json`, gana `feature_list.json` — actualizá la tabla, no al revés.
 
 ---
 
-## Estado global resumido (al 2026-05-26)
+## Estado global resumido (al 2026-05-28)
 
 > Snapshot de lectura rápida. La verdad del estado por feature vive en `feature_list.json` — si discrepan, gana el JSON.
 
 | Spec | Backend | Frontend | Notas |
 |---|---|---|---|
 | 01-identity-multitenancy | ✅ done (41 tests verdes) | ⏸ pausado (Fases 3-8) | Esperando design system + decisión de retomar |
-| 02-modelo-animal | ❌ pending (listo para arrancar) | ⏸ pausado (Fase 3+) | spec **refundida 2026-05-28** (ADR-020 lote + ADR-021 plantilla de datos: catálogo global + defaults por sistema + toggle por rodeo + gating). R14 y seed de cría TENTATIVOS. Mismo patrón pause-frontend que spec 01 |
+| 02-modelo-animal | ✅ done (Fase 1+2: migrations 0013-0042, 19 tests, reviewer APPROVED + Gate 2 PASS) | ⏸ pausado (Fase 3+) | spec **refundida 2026-05-28** (ADR-020 lote + ADR-021 plantilla de datos: catálogo global + defaults por sistema + toggle por rodeo + gating). R14 y seed de cría TENTATIVOS. Mismo patrón pause-frontend que spec 01 |
 | 03-modo-maniobras | ❌ pending | ❌ pending | depende de 02, 04, 05. **Dueña del gating de maniobras** (mapeo maniobra→data_keys de ADR-021, doble capa UI+DB) — spec 02 dejó el sustrato (`rodeo_data_config`) |
 | 04-bluetooth-baston | ❌ pending | ❌ pending | bloqueante para BUSCAR ANIMAL y MODO MANIOBRAS |
 | 05-bluetooth-balanza | ❌ pending | ❌ pending | depende de hardware confirmado en día de campo |
 | 06-import-laboratorios | ❌ pending | ❌ pending | post-MVP esencialmente |
 | 07-reportes-basicos | ❌ pending | ❌ pending | post-MVP esencialmente |
 | 08-export-sigsa | ❌ pending | ❌ pending | crítico antes de julio 2026 (deadline SENASA) |
-| 09-buscar-animal | ❌ pending (esperando turno tras spec 02) | ⏸ pausado (Fases 2-4 esperando design system) | spec aprobada 2026-05-26, **alineada y re-aprobada 2026-05-28** (consume plantilla ADR-021 + lote ADR-020; distinción form-fields vs data_keys; selector de lote en CREATE/EDIT). Status `blocked` por regla one_feature_at_a_time |
+| 09-buscar-animal | ❌ pending (esperando turno tras spec 02) | ⏸ pausado (Fases 2-4 esperando design system) | spec aprobada 2026-05-26, **alineada y re-aprobada 2026-05-28** (consume plantilla ADR-021 + lote ADR-020; distinción form-fields vs data_keys; selector de lote en CREATE/EDIT). Status `deferred` por regla one_feature_at_a_time |
 
 **Design system**: en fase de exploración. Research curado de 48 screens hecho (`design/research-findings.md`, 22 Mobbin + 26 device). Dirección sin cerrar. Pendiente: decisión de dirección + Stitch + ADR + tokens canónicos.
+
+---
+
+## Orden de ejecución (olas) — rush MVP
+
+> Vista de orden por encima de los bloques A–D. Los bloques de abajo tienen el detalle por item; esta sección dice **en qué orden** y **qué corre en paralelo**. Política: implementación WIP=1, spec buffer=1, refinamiento buffer=2–3 (ver ADR-022 y `docs/specs.md` § Política de pipeline). Arranque elegido: **paralelo** (no serializar detrás del design system).
+
+**Ola 0 — ahora, en paralelo** (aprovecha el tiempo bloqueado por el design system):
+- **[IMPL]** B.2 backend spec 02 — fundacional, sin design system. Lo necesitan 09 y 03.
+- **[RAF]** A.1 design system + A.2 ADR-018 bottom nav — destraba TODO el frontend.
+- **[REFINAR]** contexto de 03 MODO MANIOBRAS (primer uso del Gate 0, ADR-022; la feature más grande) + pre-refinar 04/05 BLE (cerrar tras día de campo).
+- **[RESEARCH]** formato SIGSA (D.1/08) + agendar día de campo (multímetro, sacar loopback ESP32 — `CONTEXT/07`).
+
+**Ola 1 — al cerrar el design system:**
+- **[IMPL]** B.1 frontend spec 01 → app navegable. Después frontend spec 02.
+- Pull-left: 09 Fases 0/1/5/6 (hooks/validaciones/offline) pueden arrancar sin design system.
+
+**Ola 2 — con B.1 + día de campo hechos:**
+- **[IMPL]** B.3 spec 04 (bastón BLE) — destraba puerta BLE de 09 y MODO MANIOBRAS.
+- **[IMPL]** B.4 spec 09 (BUSCAR ANIMAL) — puerta manual primero; puerta BLE tras 04.
+
+**Ola 3 — convergencia:**
+- **[IMPL]** C.1 spec 05 (balanza BLE).
+- **[IMPL]** C.2 spec 03 (MODO MANIOBRAS) — necesita 02+04+05+09; spec escrita JIT desde el `context.md` de Ola 0.
+
+**Ola 4 — compliance + post-MVP:**
+- **[IMPL]** D.1 spec 08 (SIGSA) — research ya hecho en Ola 0; aterrizar antes de julio 2026.
+- **[IMPL]** D.2 spec 06 (labs), D.3 spec 07 (reportes).
+
+**Dos vistas del orden:**
+- **Definir/refinar:** 03 → 04 → 05 → 08 (research) → 06 → 07. *(01/02/09 ya definidas.)*
+- **Implementar:** 02 backend → 01 fe → 02 fe → 04 → 09 → 05 → 03 → 08 → 06 → 07.
 
 ---
 
@@ -134,7 +166,7 @@ Objetivo: tener la app funcional con identidad + modelo de datos + bastón + BUS
 - **Notas**: la sección "Notas técnicas vigentes para el implementer" de `progress/current.md` sigue válida (pnpm.cmd en PowerShell, GRANT explícito, tests Node nativo, etc.).
 
 ### B.2 — Implementación backend de spec 02
-- **Estado**: `pending`.
+- **Estado**: `done` (2026-05-28, sesión 15). Migrations 0013-0042 aplicadas al remoto + suite `supabase/tests/animal` 19/19. Reviewer APPROVED + Gate 2 PASS (SEC-HIGH-01 `apply_auto_transition` cerrada con `0042`). spec 02 → `deferred` (backend done, frontend Fase 3+ pausado). Renumber +1 (0012 lo ocupaba spec 01).
 - **Dueño**: `implementer` → `reviewer`.
 - **Dependencias**: A.5 (spec aprobada), A.3 + A.4 (ADRs canónicos).
 - **Pasos**:
@@ -216,6 +248,13 @@ Esto es red de seguridad. Si una sesión se corta antes de hacer los ADRs, estas
 
 ## Changelog del plan
 
+- **2026-05-28 (sesión 15 — gate de refinamiento de contexto + reorden del roadmap)** — Raf pidió ordenar todo el desarrollo y resolver tres dolores: (1) specs largas que salían mal por contexto sin refinar (spec 02 reescrita ×2), (2) falta de política de orden entre spec-ear e implementar, (3) falta de un orden claro de qué definir/implementar primero. Cambios:
+  - **Gate 0 de refinamiento de contexto** (ADR-022): estado nuevo `context_ready` + artefacto `context.md` (corto, conducido por el leader en charla con Raf) entre `pending` y `spec_ready`. Tres puertas humanas ahora (contexto → spec → código). Tocados `feature_list.json`, `scripts/check.mjs`, `docs/specs.md`, `.claude/agents/leader.md`, `.claude/agents/spec_author.md`, `AGENTS.md`, `CLAUDE.md`. Grandfathering de 01/02/09 (SDD hacia adelante).
+  - **Política de pipeline** (ADR-022 + `docs/specs.md`): implementación WIP=1, spec buffer=1, refinamiento buffer=2–3. Alternar es correcto si es dirigido por el pipeline, no por humor.
+  - **Roadmap por olas (rush MVP)**: sección nueva "Orden de ejecución (olas)" arriba. Arranque en paralelo (Ola 0): B.2 backend 02 + design system (Raf) + refinar 03 + research SIGSA + agendar día de campo.
+  - Reconciliado el drift de la tabla "Estado global resumido" (09 es `deferred`, no `blocked`; fecha actualizada).
+  - **Ola 0 ejecutada (misma sesión 15)**: (a) **B.2 backend de spec 02 IMPLEMENTADO** — migrations 0013-0042 + suite animal 19/19 → reviewer APPROVED → Gate 2 encontró y cerró **SEC-HIGH-01** (`apply_auto_transition` expuesta como RPC → cross-tenant; fix `0042` revoke + test T2.18) → PASS → Raf aprobó → spec 02 a `deferred` (backend done, frontend pausado, patrón spec 01). `design.md` de spec 02 actualizado al as-built (soft-delete RPC + SECURITY DEFINER + renumber). (b) **Gate 0 estrenado**: contexto de 03 MODO MANIOBRAS refinado con Raf (2 rondas) y aprobado → `context_ready`; spec diferida JIT (buffer=1, 09 on-deck).
+  - **Próximo**: Ola 0/1 restantes — design system (Raf), research SIGSA (08), día de campo (04/05). Implementable hoy sin design system: nada nuevo en critical path hasta destrabar frontend; pre-refinar 04 (parte no-hardware) es opción.
 - **2026-05-28 (sesión 14 — refundición consolidada de spec 02: lote + plantilla de datos)** — Tras detectar que spec 02 acumulaba refinamientos apilados y un bug en el modelo de plantilla (catálogo por-sistema que no permitía reusar datos entre sistemas, ej. "tambo que tactea preñez"), Raf cerró dos decisiones en chats externos y las bajó como ADRs:
   - **ADR-020 (lote como agrupación de manejo)**: tercer eje de organización ortogonal a rodeo y categoría. Tabla `management_groups` (scope establishment, nombre libre, sin presets) + `animal_profiles.management_group_id` nullable. Asignación exclusiva, manual, sin historial MVP. Regla de display "lote si tiene, si no categoría". Sin auto-asignación. Activa la cláusula reservada de ADR-016.
   - **ADR-021 (plantilla de datos)**: catálogo GLOBAL (`field_definitions`) + defaults por sistema (`system_default_fields`) + toggle por rodeo (`rodeo_data_config`). Corrige el bug del catálogo-por-sistema. Seed de 26 fields de cría (TENTATIVO hasta validar con Facundo). Gating de maniobras doble capa (UI + DB), mapeo hardcodeado. Nombre canónico de la tabla de lote resuelto: `management_groups`.

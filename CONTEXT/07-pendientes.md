@@ -61,6 +61,10 @@ Investigar el formato exacto de archivo que aceptan estos sistemas:
 
 Si podemos exportar archivos importables en estos sistemas, eso es feature diferencial frente a Control Ganadero.
 
+### Soft-delete vía RPC vs UPDATE (surgido al implementar spec 02 backend)
+PostgREST rechaza un soft-delete por `UPDATE deleted_at` cuando la policy de SELECT de la tabla filtra `deleted_at is null` sobre la propia fila (exige que la fila siga visible tras el UPDATE; pasa aun con `Prefer: return=minimal`). Afecta a `rodeos`, `management_groups`, `animal_events` y los 5 eventos tipados de spec 02. Se resolvió con funciones SECURITY DEFINER (`soft_delete_*`, migration `0041`) que re-validan la misma autorización y hacen el UPDATE por dentro — preservando R12.3 (lecturas normales no retornan soft-deleted).
+- **Pendiente para Raf/reviewer**: confirmar el enfoque. Cambia el contrato de soft-delete de "UPDATE columna" a "RPC", lo que **impacta la estrategia offline de PowerSync (Fase 5 de spec 02)**: un soft-delete offline ya no es un simple update local sincronizable; hay que decidir cómo encolar/reconciliar la RPC (o, alternativamente, relajar la policy de SELECT y filtrar `deleted_at` en el cliente, o un split de policies). Reversible. Detalle en `progress/impl_02-modelo-animal.md` § Desviaciones.
+
 ## Hardware día de campo
 
 - Comprar multímetro nuevo (el DT-830B actual está roto)
