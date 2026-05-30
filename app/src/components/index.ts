@@ -17,3 +17,9 @@ export type {
   EstablishmentSwitcherDropdownProps,
   SwitcherField,
 } from './EstablishmentSwitcherDropdown';
+export { AnimalRow } from './AnimalRow';
+export type {
+  AnimalRowProps,
+  AnimalSex,
+  AnimalStatus,
+} from './AnimalRow';

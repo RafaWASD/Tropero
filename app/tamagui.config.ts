@@ -167,6 +167,19 @@ const tokens = createTokens({
     // mis campos" sin truncar, sin invadir todo el viewport (maxWidth:100% lo recorta en
     // pantallas angostas). JIT: lo necesitó el dropdown del switch.
     dropdownWidth: 280,
+    // ── Tab "Animales" (BUSCAR ANIMAL, spec 09 R1) — JIT, derivados al construir la
+    // pantalla 🔴 manga-crítica. Alto mínimo de la fila de un animal (AnimalRow): 72px
+    // da un target cómodo con guante (Fitts) para el avatar 48 + dos líneas de texto +
+    // chevron/chip, más alto que la fila web típica (uso en manga, manga-friendly).
+    animalRow: 72,
+    // Alto del buscador permanente de Animales (R1.2). Por ser 🔴 manga-crítico es más
+    // grande que el de "Mis campos" (que usa el patrón pill estándar): pill XL ≥56px
+    // (= touchMin) para tipear con una mano a pleno sol. Mismo valor que touchMin pero
+    // token propio semántico (es un buscador, no un botón) → JIT lo necesitó la pantalla.
+    searchBarLg: 56,
+    // Alto mínimo de los chips de filtro (R1.5: Rodeo/Estado/Sin caravana). ≥40px para
+    // target tappable cómodo sin robarle altura a la lista (un escalón bajo touchMin).
+    chipMin: 40,
   },
 });
 
