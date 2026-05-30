@@ -35,6 +35,13 @@ Confirmar que estas transiciones automáticas cubren todos los casos reales:
 ### Validación tacto vs parto
 ¿Vale la pena implementar la validación cruzada que detecta inconsistencia entre el tamaño de preñez predicho (cabeza/cuerpo/cola) y la fecha real de parto? ¿Es feature útil para el vet o ruido?
 
+### Eventos reproductivos y de categoría (surgidos en el refinamiento sesión 18)
+Consolidados acá para llevar a la próxima charla con Facundo. No bloquean el resto del refinamiento, pero cierran el detalle fino de specs 02/03/08.
+- **Aborto → categoría destino**: una vaca/vaquillona preñada que aborta, ¿a qué categoría vuelve? (¿`vaca`/vacía? ¿`vaquillona` si era vaquillona preñada?). La decisión (sesión 18) es que el aborto **revierte** la categoría y `compute_category` deja de contarla como preñez; falta el mapeo exacto.
+- **Castración → efecto de categoría**: en cría **no existe la categoría "novillo"** (las categorías de cría son ternero/ternera/vaquillona/.../torito/toro). Si la castración va a ser maniobra de manga + operación masiva por rodeo, ¿qué pasa con la categoría del macho castrado? Opciones: (a) agregar categoría `novillo` a cría, (b) castración = solo evento sanitario sin cambio de categoría en cría, (c) el novillo "se va" a invernada (post-MVP). Definir con Facundo.
+- **Destete → ¿marca algo en la madre?**: la decisión (sesión 18) pone el evento de destete en la ficha del **ternero** (transiciona su categoría, R7.8). ¿Conviene además registrar algo en la **madre** (fin de lactancia / disponible para próximo servicio), o se deriva? Definir con Facundo.
+- **Razas para el catálogo SENASA (feature 08)**: lista de razas realmente usadas en la zona para sembrar el catálogo controlado de razas con su código SENASA (H/AA/HA/B/BG/BF/...). Hoy `breed` es texto libre; 08 lo vuelve catálogo. Validar el listado relevante con Facundo.
+
 ## A investigar técnicamente
 
 ### Formato de laboratorios

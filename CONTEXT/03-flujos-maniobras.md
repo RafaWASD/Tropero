@@ -134,7 +134,9 @@ Al cargar un parto, la app puede mirar el último tacto de la vaca y verificar s
 
 "Lote" en el contexto del trabajo cotidiano no es un terreno físico — es una etiqueta libre que el productor le pone a un grupo de animales para organizar su jornada (ej: "Lote A12", "Vacas Las Marías", "Lote venta noviembre").
 
-En la app se modela como:
-- Campo de texto libre asignable a sesiones de maniobras
-- Asignable a animales individuales puntualmente
-- NO se modelan terrenos físicos, ubicaciones, ni movimientos entre lotes
+En la app se modela como (ADR-020, tabla `management_groups`):
+- Tabla `management_groups` (scope establishment, nombres libres del productor, sin presets) — **NO** "texto libre en la sesión".
+- `animal_profiles.management_group_id` (FK nullable): asignación exclusiva (un lote a la vez), manual, sin historial en MVP.
+- Regla de display: agrupar por lote si el animal tiene `management_group_id`, si no por categoría.
+- La sesión de maniobras **no** lleva el lote como FK asignadora — el lote es per-animal (ver `specs/active/03-modo-maniobras/context.md`).
+- NO se modelan terrenos físicos, ubicaciones, ni movimientos físicos entre lotes.

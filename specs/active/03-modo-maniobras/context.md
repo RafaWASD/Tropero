@@ -86,3 +86,26 @@ MODO MANIOBRAS es el modo guiado de jornada de manga — el corazón operativo (
 
 ## Aprobación
 - **Aprobado por Raf el 2026-05-28** (sesión 15, primer uso del Gate 0 de ADR-022). 03 pasa a `context_ready`. Las decisiones quedan lockeadas acá. La redacción de la spec (`spec_author`) se hace **just-in-time**, más cerca de implementar 03 (Ola 3), porque 03 depende de 04/05/09 todavía sin construir — escribirla ahora arriesgaría el mismo rot que sufrieron spec 02/09 (política de pipeline: spec buffer = 1, hoy ocupado por spec 09).
+
+## Refinamiento de edge cases — sesión 18 (2026-05-29) — PENDIENTE de aprobación de Raf
+
+Audit profundo del context (s15) contra spec 02 con los refinamientos de s17/s18. Corrige contradicciones stale y suma decisiones. **Supersede** las líneas del cuerpo (s15) que se indican.
+
+1. **Cambio de rodeo en la sesión — corrige contradicción con R4.5.1.** El cuerpo (s15) ofrecía "[pasar el animal a este rodeo]" vía `UPDATE rodeo_id`; spec 02 **R4.5.1 (s17) bloqueó** el cambio de rodeo. **Resolución (Raf): relajar R4.5.1 → mover de rodeo PERMITIDO dentro del mismo sistema productivo** (el rationale de R4.5.1 era el dead-end de categoría cross-sistema; dentro de cría —un solo sistema— es seguro). En la manga, animal de otro rodeo del mismo establ./sistema → "[pasar a este rodeo]" vuelve a ser válido. **Delta sobre spec 02**: refinar R4.5.1 a "permitido dentro del mismo sistema".
+
+2. **Eventos reproductivos NO-maniobra (parto / aborto / destete) → solo desde la ficha (spec 09 EDIT), no del wizard de manga.** Solo **tacto e inseminación** son maniobras reproductivas de manga. Ubicación de cada uno (criterio del leader, aprobado por Raf — "evento de la vaca → ficha de la vaca; transición del ternero → ficha del ternero"):
+   - **Parto → ficha de la MADRE** (`reproductive_events.animal_profile_id = madre`; crea el/los ternero(s); el form de **mellizos** vive acá).
+   - **Aborto → ficha de la MADRE** (revierte su categoría — decisión s18).
+   - **Destete → ficha del TERNERO** (transiciona la categoría del ternero, R7.8; "destetar todo" opera sobre los terneros). Posible marca derivada en la madre (fin de lactancia) → **a confirmar con Facundo**.
+
+3. **Castración (revisado s18 — NO es maniobra de manga por ahora).** Decisión de Raf: la castración **no** se agrega como maniobra del wizard todavía; se anota como **"quizás a futuro"**. En MVP la castración existe como: **(a) evento individual** sobre el animal (desde la ficha) y **(b) operación masiva "castrar todo"** sobre un **rodeo o lote** (ver scope nuevo abajo). ⚠️ **Efecto de categoría pendiente de Facundo**: cría no tiene categoría "novillo" (R1.3 de spec 02 solo ternero/ternera/vaquillona/.../torito/toro) → ¿agregar `novillo`, o castración = solo evento sanitario sin cambio de categoría en cría? Gating: nuevo `data_key` (`castracion`) en el catálogo (delta spec 02 R2.13 / ADR-021). Las 10 maniobras de manga quedan como estaban (sin 11ª).
+
+4. **Animal de OTRO ESTABLECIMIENTO escaneado en la sesión (caso D2).** El cuerpo (s15) solo contemplaba otro RODEO del mismo campo. **Resolución (Raf): avisar "este animal está en el campo X" + saltarlo** (no frenar la manga) **+ sugerir "si querés transferirlo a este campo, bastonealo después de terminar las maniobras"**. La transferencia con re-parenting (sub-spec aparte, ver abajo) se dispara fuera de la sesión de manga.
+
+### Scope NUEVO capturado (excede este audit → su propia feature + Gate 0)
+- **Operaciones masivas por rodeo**: generar eventos sobre todo el rodeo (o subconjunto filtrado) manualmente — **destetar todo, castrar todo, vacunar todo** (esta última ya tiene sustrato en `sanitary_campaigns` de spec 02). Vive en una **vista de rodeo** con acciones masivas.
+- **Navegación rodeo-céntrica**: la vista de rodeo con acciones choca con ADR-018 (no hay tab "Rodeos"; viven en "Más"). **Probable reapertura de ADR-018.** Raf lo planteó como intuición ("¿la home debería ser rodeos?").
+- **Decisión de tratamiento PENDIENTE** (Raf decide al cierre): feature propia con Gate 0 vs foldear en 03. Recomendación del leader: **feature nueva** ("operaciones masivas por rodeo" + vista de rodeo), no meterla a presión en 03.
+
+### Transferencia con re-parenting (de 09 D2) → SUB-SPEC APARTE
+Decisión de Raf (s18): la transferencia que preserva historia (re-apunta eventos/vínculos cross-tenant + Gate 1) se trata como **sub-spec propia**, no foldeada en 09. Ver `specs/active/09-buscar-animal/context.md` D2.

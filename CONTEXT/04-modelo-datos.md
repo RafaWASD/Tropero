@@ -307,5 +307,5 @@ Se registra como entidad separada (`animals` + `animal_profile`) desde el moment
 - Stock de pajuelas
 - Stock de medicamentos
 - Historial de transferencias de lote o de rodeo (`movements`) — en MVP solo se guarda el estado actual (`management_group_id` / `rodeo_id`); el historial de movimientos queda como decisión separada post-MVP
-- Movimientos de animales entre establecimientos a nivel transaccional (se modela en `entry_*` y `exit_*` de `animal_profiles`)
+- Movimientos de animales entre establecimientos: la **transferencia de un animal entre campos** SÍ se modela en MVP como flujo dedicado con re-parenting de historia (**feature 11**, decidido sesión 18, Gate 1) — no solo vía `entry_*`/`exit_*`. El *historial* de transferencias como entidad (`movements`) sigue post-MVP.
 - Módulo financiero/contabilidad
