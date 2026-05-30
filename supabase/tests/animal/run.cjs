@@ -1081,6 +1081,337 @@ test('animal suite — spec 02', async (t) => {
       .from('animal_profiles').select('category_id').eq('id', target.profile.id).single();
     assert.equal(after.category_id, originalCategoryId, 'la categoría del perfil ajeno NO debe cambiar (R11.x)');
   });
+
+  // ---- T2.19 Tests de no-bypass del delta Tier 1 (Gate 1, sesión 20) -------
+  // Cierre de los 4 findings del Gate 1 (SEC-SPEC-01..04) sobre las migrations
+  // 0043-0047. Corren contra DB remota; el estado real se lee con service_role.
+  await t.test('T2.19 no-bypass delta Tier 1 (SEC-SPEC-01..04)', async (st) => {
+
+    // -- Caso 1: exit_animal_profile exige rol activo (SEC-SPEC-01, espejo de T2.18) --
+    await st.test('caso 1: exit_animal_profile autor-sin-rol -> 42501, status sin cambiar', async () => {
+      // userD: lo hacemos field_operator de estA, crea un animal (queda created_by = userD),
+      // luego le desactivamos el rol y prueba dar de baja.
+      const userD = await createTestUser('userD19');
+      const clientD = await getUserClient(userD.email);
+      await assignRoleAsService(userD.id, estA, 'field_operator');
+      const an = await createAnimal(clientD, {
+        idv: `${RUN_TAG}_EXIT1`, sex: 'female', birthDate: daysAgo(400),
+        rodeoId: rodeoA.id, establishmentId: estA, systemId: rodeoA.systemId,
+      });
+      assert.equal(an.error, undefined, an.error && an.error.message);
+      // created_by quedó forzado a userD (server-side).
+      {
+        const { data } = await admin.from('animal_profiles').select('created_by, status').eq('id', an.profile.id).single();
+        assert.equal(data.created_by, userD.id, 'created_by = autor real (userD)');
+        assert.equal(data.status, 'active');
+      }
+      // Desactivamos el rol de userD en estA.
+      await admin.from('user_roles').update({ active: false }).eq('user_id', userD.id).eq('establishment_id', estA);
+      // userD (created_by, pero rol inactivo) intenta dar de baja -> 42501.
+      {
+        const { error } = await clientD.rpc('exit_animal_profile', {
+          p_profile_id: an.profile.id, p_status: 'sold', p_exit_reason: 'sale', p_exit_date: daysAgo(0),
+        });
+        assert.notEqual(error, null, 'autor sin rol activo NO debe poder dar de baja (SEC-SPEC-01)');
+        assert.match(String(error.message + ' ' + (error.code || '')), /not authorized|42501/i);
+      }
+      // status leído con service_role: sigue active, exit_* sin setear.
+      {
+        const { data } = await admin.from('animal_profiles')
+          .select('status, exit_reason, exit_date').eq('id', an.profile.id).single();
+        assert.equal(data.status, 'active', 'la baja NO se aplicó (status sigue active)');
+        assert.equal(data.exit_reason, null, 'exit_reason no se seteó');
+        assert.equal(data.exit_date, null, 'exit_date no se seteó');
+      }
+      // Variante de control: el owner (userA, rol activo) sí puede dar de baja.
+      {
+        const { error } = await clientA.rpc('exit_animal_profile', {
+          p_profile_id: an.profile.id, p_status: 'sold', p_exit_reason: 'sale', p_exit_date: daysAgo(0),
+        });
+        assert.equal(error, null, error && error.message);
+        const { data } = await admin.from('animal_profiles')
+          .select('status, exit_reason, deleted_at').eq('id', an.profile.id).single();
+        assert.equal(data.status, 'sold', 'owner sí da de baja');
+        assert.equal(data.exit_reason, 'sale');
+        assert.equal(data.deleted_at, null, 'baja NO es soft-delete (deleted_at NULL, R4.12/R4.15)');
+      }
+    });
+
+    // -- Caso 2: register_birth no cruza tenant (SEC-SPEC-02) --
+    await st.test('caso 2: register_birth cross-tenant A->B -> 42501, nada creado; control crea todo', async () => {
+      // Madre en estB (tenant B). userA no tiene rol en estB.
+      const madreB = await createAnimal(clientB, {
+        idv: `${RUN_TAG}_RBmotherB`, sex: 'female', birthDate: daysAgo(900),
+        rodeoId: rodeoB.id, establishmentId: estB, systemId: rodeoB.systemId, categoryCode: 'vaquillona_prenada',
+      });
+      assert.equal(madreB.error, undefined, madreB.error && madreB.error.message);
+      // Snapshot de conteos antes del ataque (service_role).
+      const evBefore = await admin.from('reproductive_events')
+        .select('id', { count: 'exact', head: true }).eq('animal_profile_id', madreB.profile.id);
+      const profBefore = await admin.from('animal_profiles')
+        .select('id', { count: 'exact', head: true }).eq('establishment_id', estB);
+      // userA (tenant A) invoca register_birth sobre la madre de B -> 42501.
+      {
+        const { error } = await clientA.rpc('register_birth', {
+          p_mother_profile_id: madreB.profile.id, p_event_date: daysAgo(1),
+          p_calves: [{ calf_sex: 'male' }],
+        });
+        assert.notEqual(error, null, 'register_birth cross-tenant debe fallar (SEC-SPEC-02)');
+        assert.match(String(error.message + ' ' + (error.code || '')), /not authorized|42501/i);
+      }
+      // Nada se creó: ni evento, ni nuevos perfiles en estB.
+      {
+        const evAfter = await admin.from('reproductive_events')
+          .select('id', { count: 'exact', head: true }).eq('animal_profile_id', madreB.profile.id);
+        assert.equal(evAfter.count, evBefore.count, 'no se creó evento de parto en B');
+        const profAfter = await admin.from('animal_profiles')
+          .select('id', { count: 'exact', head: true }).eq('establishment_id', estB);
+        assert.equal(profAfter.count, profBefore.count, 'no se creó ningún perfil de ternero en B');
+      }
+      // Variante de control: clientB (dueño de la madre) registra mellizos -> crea todo.
+      {
+        const { data: birthId, error } = await clientB.rpc('register_birth', {
+          p_mother_profile_id: madreB.profile.id, p_event_date: daysAgo(1),
+          p_calves: [{ calf_sex: 'male', calf_weight: 32 }, { calf_sex: 'female', calf_weight: 30 }],
+        });
+        assert.equal(error, null, error && error.message);
+        assert.ok(birthId, 'register_birth devuelve el id del evento de parto');
+        // 2 filas en birth_calves para ese parto.
+        const { data: bc } = await admin.from('birth_calves').select('calf_profile_id').eq('birth_event_id', birthId);
+        assert.equal(bc.length, 2, 'parto de mellizos crea 2 filas en birth_calves (R7.9)');
+        // Los 2 terneros existen, en estB, rodeo de la madre, categoría ternero/ternera.
+        const calfIds = bc.map((r) => r.calf_profile_id);
+        const { data: calves } = await admin.from('animal_profiles')
+          .select('establishment_id, rodeo_id, category_id, entry_origin').in('id', calfIds);
+        assert.equal(calves.length, 2);
+        for (const c of calves) {
+          assert.equal(c.establishment_id, estB, 'ternero hereda el establishment de la madre (no del payload)');
+          assert.equal(c.rodeo_id, rodeoB.id, 'ternero en el rodeo de la madre (R9.1)');
+          assert.equal(c.entry_origin, 'born_here');
+        }
+        // El conteo de partos cuenta el EVENTO, no los 2 terneros: la madre transiciona +1 parto.
+        const { data: m } = await admin.from('animal_profiles').select('category_id').eq('id', madreB.profile.id).single();
+        const { data: mcat } = await admin.from('categories_by_system').select('code').eq('id', m.category_id).single();
+        assert.equal(mcat.code, 'vaca_segundo_servicio', 'mellizos = UN parto (no doble-cuenta, R7.9)');
+      }
+    });
+
+    // -- Caso 3: birth_calves no acepta INSERT directo de cliente (SEC-SPEC-04) --
+    await st.test('caso 3: INSERT directo a birth_calves -> bloqueado (sin GRANT INSERT)', async () => {
+      // Madre + parto mono propio (clientA) para tener un birth_event_id real propio.
+      const madre = await createAnimal(clientA, {
+        idv: `${RUN_TAG}_BCmother`, sex: 'female', birthDate: daysAgo(900),
+        rodeoId: rodeoA.id, establishmentId: estA, systemId: rodeoA.systemId, categoryCode: 'vaquillona_prenada',
+      });
+      await clientA.from('reproductive_events').insert({
+        animal_profile_id: madre.profile.id, event_type: 'birth', event_date: daysAgo(1), calf_sex: 'female',
+      });
+      const { data: ev } = await clientA.from('reproductive_events')
+        .select('id').eq('animal_profile_id', madre.profile.id).eq('event_type', 'birth')
+        .order('created_at', { ascending: false }).limit(1).single();
+      // Otro animal_profile cualquiera del propio establecimiento para intentar ligar.
+      const other = await createAnimal(clientA, {
+        idv: `${RUN_TAG}_BCother`, sex: 'male', birthDate: daysAgo(100),
+        rodeoId: rodeoA.id, establishmentId: estA, systemId: rodeoA.systemId, categoryCode: 'ternero',
+      });
+      // INSERT directo por PostgREST -> debe fallar (sin GRANT INSERT: permission denied).
+      const { data: ins, error } = await clientA.from('birth_calves')
+        .insert({ birth_event_id: ev.id, calf_profile_id: other.profile.id }).select();
+      assert.ok(error || !ins || ins.length === 0, 'INSERT directo a birth_calves debe ser rechazado (SEC-SPEC-04)');
+      if (error) {
+        assert.match(String(error.message + ' ' + (error.code || '')), /permission denied|42501|not.*allow|denied/i);
+      }
+      // Verificación: NO quedó una fila que ligue other.profile a ese parto.
+      const { data: rows } = await admin.from('birth_calves')
+        .select('calf_profile_id').eq('birth_event_id', ev.id).eq('calf_profile_id', other.profile.id);
+      assert.deepEqual(rows, [], 'no se fabricó parentesco falso vía INSERT directo');
+    });
+
+    // -- Caso 4: SELECT de birth_calves filtra evento soft-deleted (SEC-SPEC-04.a) --
+    await st.test('caso 4: SELECT de birth_calves filtra parto soft-deleted', async () => {
+      const madre = await createAnimal(clientA, {
+        idv: `${RUN_TAG}_SDmother`, sex: 'female', birthDate: daysAgo(900),
+        rodeoId: rodeoA.id, establishmentId: estA, systemId: rodeoA.systemId, categoryCode: 'vaquillona_prenada',
+      });
+      // parto mono -> 1 fila en birth_calves (creada por el trigger SECURITY DEFINER).
+      await clientA.from('reproductive_events').insert({
+        animal_profile_id: madre.profile.id, event_type: 'birth', event_date: daysAgo(1), calf_sex: 'male',
+      });
+      const { data: ev } = await clientA.from('reproductive_events')
+        .select('id').eq('animal_profile_id', madre.profile.id).eq('event_type', 'birth')
+        .order('created_at', { ascending: false }).limit(1).single();
+      // visible antes del soft-delete.
+      {
+        const { data } = await clientA.from('birth_calves').select('calf_profile_id').eq('birth_event_id', ev.id);
+        assert.equal(data.length, 1, 'la fila puente del parto es visible antes del soft-delete');
+      }
+      // soft-delete del evento de parto vía RPC.
+      {
+        const { error } = await clientA.rpc('soft_delete_event', { p_kind: 'reproductive', p_event_id: ev.id });
+        assert.equal(error, null, error && error.message);
+      }
+      // authenticated ya NO ve las filas de birth_calves (policy con re.deleted_at is null).
+      {
+        const { data } = await clientA.from('birth_calves').select('calf_profile_id').eq('birth_event_id', ev.id);
+        assert.deepEqual(data, [], 'tras soft-delete del parto, las filas puente no son visibles (SEC-SPEC-04.a)');
+      }
+      // con service_role siguen físicamente presentes (no se hard-deletearon).
+      {
+        const { data } = await admin.from('birth_calves').select('calf_profile_id').eq('birth_event_id', ev.id);
+        assert.equal(data.length, 1, 'la fila puente sigue física (no hard-delete)');
+      }
+    });
+
+    // -- Caso 5: created_by se fuerza server-side, no es spoofeable (SEC-SPEC-03) --
+    await st.test('caso 5: created_by forzado a auth.uid() aunque el cliente mande otro', async () => {
+      // userA inserta un animal_profile pasando created_by = userB explícito en el payload.
+      const { speciesId } = await lookupSpeciesSystem(clientA, 'bovino', 'cria');
+      const animalId = require('node:crypto').randomUUID();
+      {
+        const { error } = await clientA.from('animals')
+          .insert({ id: animalId, sex: 'female', species_id: speciesId, tag_electronic: `${RUN_TAG}_CB5` });
+        assert.equal(error, null, error && error.message);
+      }
+      const catId = await categoryId(clientA, rodeoA.systemId, 'vaquillona');
+      const profileId = require('node:crypto').randomUUID();
+      {
+        const { error } = await clientA.from('animal_profiles').insert({
+          id: profileId, animal_id: animalId, establishment_id: estA, rodeo_id: rodeoA.id,
+          category_id: catId, status: 'active',
+          created_by: userB.id,   // <- intento de spoof: atribuir el alta a otro usuario
+        });
+        assert.equal(error, null, error && error.message);
+      }
+      // service_role: created_by quedó = userA (el caller real), NO userB.
+      {
+        const { data } = await admin.from('animal_profiles').select('created_by').eq('id', profileId).single();
+        assert.equal(data.created_by, userA.id, 'created_by forzado al caller real (SEC-SPEC-03)');
+        assert.notEqual(data.created_by, userB.id, 'el valor spoofeado del cliente fue ignorado');
+      }
+      // Corolario de authz R4.14: userB (el uid spoofeado) NO puede dar de baja vía v_creator.
+      // Le damos a userB rol activo en estA para aislar la rama v_creator (no la de owner).
+      {
+        await admin.from('user_roles').update({ active: false }).eq('user_id', userB.id).eq('establishment_id', estA);
+        await assignRoleAsService(userB.id, estA, 'field_operator');
+        const { error } = await clientB.rpc('exit_animal_profile', {
+          p_profile_id: profileId, p_status: 'sold', p_exit_reason: 'sale', p_exit_date: daysAgo(0),
+        });
+        assert.notEqual(error, null, 'userB (no owner, no creator real) NO puede dar de baja vía v_creator');
+        assert.match(String(error.message + ' ' + (error.code || '')), /not authorized|42501/i);
+        const { data } = await admin.from('animal_profiles').select('status').eq('id', profileId).single();
+        assert.equal(data.status, 'active', 'el animal sigue activo');
+      }
+    });
+
+    // -- Caso 6: L2 — el alta del ternero al pie no la bloquean los triggers de validación --
+    await st.test('caso 6 (L2): alta de ternero al pie (mono y mellizos) no bloqueada por triggers', async () => {
+      // Mono: parto directo -> trigger crea ternero categoría ternero/ternera, mismo system.
+      {
+        const madre = await createAnimal(clientA, {
+          idv: `${RUN_TAG}_L2mono`, sex: 'female', birthDate: daysAgo(900),
+          rodeoId: rodeoA.id, establishmentId: estA, systemId: rodeoA.systemId, categoryCode: 'vaquillona_prenada',
+        });
+        const { error } = await clientA.from('reproductive_events').insert({
+          animal_profile_id: madre.profile.id, event_type: 'birth', event_date: daysAgo(1), calf_sex: 'male',
+        });
+        assert.equal(error, null, 'alta de ternero al pie (mono) NO debe ser bloqueada (L2)');
+        const { data: ev } = await clientA.from('reproductive_events')
+          .select('calf_id').eq('animal_profile_id', madre.profile.id).eq('event_type', 'birth')
+          .order('created_at', { ascending: false }).limit(1).single();
+        const { data: calf } = await admin.from('animal_profiles').select('category_id, rodeo_id').eq('id', ev.calf_id).single();
+        const { data: cat } = await admin.from('categories_by_system').select('code, system_id').eq('id', calf.category_id).single();
+        assert.equal(cat.code, 'ternero', 'ternero macho con categoría ternero');
+        assert.equal(cat.system_id, rodeoA.systemId, 'categoría del mismo system que la madre');
+        assert.equal(calf.rodeo_id, rodeoA.id, 'ternero en el rodeo de la madre (no aplica rodeo_same_system_check)');
+      }
+      // Mellizos: register_birth -> dos terneros, ambos del mismo system, sin bloqueo.
+      {
+        const madre = await createAnimal(clientA, {
+          idv: `${RUN_TAG}_L2twin`, sex: 'female', birthDate: daysAgo(900),
+          rodeoId: rodeoA.id, establishmentId: estA, systemId: rodeoA.systemId, categoryCode: 'vaquillona_prenada',
+        });
+        const { data: birthId, error } = await clientA.rpc('register_birth', {
+          p_mother_profile_id: madre.profile.id, p_event_date: daysAgo(1),
+          p_calves: [{ calf_sex: 'male' }, { calf_sex: 'female' }],
+        });
+        assert.equal(error, null, 'alta de mellizos NO debe ser bloqueada (L2)');
+        const { data: bc } = await admin.from('birth_calves').select('calf_profile_id').eq('birth_event_id', birthId);
+        assert.equal(bc.length, 2);
+        const { data: calves } = await admin.from('animal_profiles').select('category_id').in('id', bc.map((r) => r.calf_profile_id));
+        const codes = [];
+        for (const c of calves) {
+          const { data: cat } = await admin.from('categories_by_system').select('code, system_id').eq('id', c.category_id).single();
+          assert.equal(cat.system_id, rodeoA.systemId, 'cada ternero del mismo system que la madre');
+          codes.push(cat.code);
+        }
+        assert.deepEqual(codes.sort(), ['ternera', 'ternero'], 'un ternero y una ternera');
+      }
+    });
+
+    // -- Caso 7: R4.5.1 relajada — cambio de rodeo permitido dentro del mismo sistema --
+    await st.test('caso 7 (R4.5.1): mover animal a otro rodeo del mismo sistema es permitido', async () => {
+      const an = await createAnimal(clientA, {
+        idv: `${RUN_TAG}_RC1`, sex: 'female', birthDate: daysAgo(400),
+        rodeoId: rodeoA.id, establishmentId: estA, systemId: rodeoA.systemId,
+      });
+      // Segundo rodeo del mismo establecimiento (mismo system: MVP solo tiene 'cria').
+      const rodeoA2 = await createRodeo(clientA, { establishmentId: estA, name: `${RUN_TAG}_RodeoA2` });
+      assert.equal(rodeoA2.systemId, rodeoA.systemId, 'precondición: ambos rodeos comparten system');
+      // Mover el animal: el trigger animal_profiles_rodeo_same_system_check NO debe bloquear.
+      {
+        const { error } = await clientA.from('animal_profiles')
+          .update({ rodeo_id: rodeoA2.id }).eq('id', an.profile.id);
+        assert.equal(error, null, 'cambio de rodeo dentro del mismo sistema debe ser permitido (R4.5.1)');
+        const { data } = await admin.from('animal_profiles').select('rodeo_id').eq('id', an.profile.id).single();
+        assert.equal(data.rodeo_id, rodeoA2.id, 'el animal quedó en el rodeo destino');
+      }
+    });
+
+    // -- Control de rollback atómico (R2-NEW, R9.4/R9.5): ternero intermedio inválido --
+    await st.test('control: register_birth con ternero intermedio inválido -> rollback total', async () => {
+      const madre = await createAnimal(clientA, {
+        idv: `${RUN_TAG}_RBmother`, sex: 'female', birthDate: daysAgo(900),
+        rodeoId: rodeoA.id, establishmentId: estA, systemId: rodeoA.systemId, categoryCode: 'vaquillona_prenada',
+      });
+      // Pre-creamos un animal con un TAG; lo usaremos como TAG duplicado en el ternero #2.
+      const dupTag = `${RUN_TAG}_RBDUP`;
+      await createAnimal(clientA, {
+        tag: dupTag, sex: 'male', birthDate: daysAgo(100),
+        rodeoId: rodeoA.id, establishmentId: estA, systemId: rodeoA.systemId, categoryCode: 'ternero',
+      });
+      const evBefore = await admin.from('reproductive_events')
+        .select('id', { count: 'exact', head: true }).eq('animal_profile_id', madre.profile.id);
+      const profBefore = await admin.from('animal_profiles')
+        .select('id', { count: 'exact', head: true }).eq('establishment_id', estA);
+      // register_birth con [valido, dup(intermedio), valido] -> el #2 viola el unique global de TAG.
+      {
+        const { error } = await clientA.rpc('register_birth', {
+          p_mother_profile_id: madre.profile.id, p_event_date: daysAgo(1),
+          p_calves: [
+            { calf_sex: 'male' },
+            { calf_sex: 'female', calf_tag_electronic: dupTag },   // intermedio inválido (TAG duplicado)
+            { calf_sex: 'male' },
+          ],
+        });
+        assert.notEqual(error, null, 'un ternero intermedio inválido debe abortar el parto (R9.4/R9.5)');
+      }
+      // Rollback total: ni evento de parto, ni terneros (el #1 que ya se había insertado tampoco).
+      {
+        const evAfter = await admin.from('reproductive_events')
+          .select('id', { count: 'exact', head: true }).eq('animal_profile_id', madre.profile.id);
+        assert.equal(evAfter.count, evBefore.count, 'rollback: no quedó el evento de parto');
+        const profAfter = await admin.from('animal_profiles')
+          .select('id', { count: 'exact', head: true }).eq('establishment_id', estA);
+        assert.equal(profAfter.count, profBefore.count, 'rollback: 0 terneros (incl. el #1 ya creado)');
+      }
+      // La madre NO transicionó (el evento se revirtió).
+      {
+        const { data: m } = await admin.from('animal_profiles').select('category_id').eq('id', madre.profile.id).single();
+        const { data: mcat } = await admin.from('categories_by_system').select('code').eq('id', m.category_id).single();
+        assert.equal(mcat.code, 'vaquillona_prenada', 'la madre no transicionó (parto revertido)');
+      }
+    });
+  });
 });
 
 test('cleanup', async () => {

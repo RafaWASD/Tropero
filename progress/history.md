@@ -324,3 +324,136 @@ El código real de Edge Functions usa `Deno.env.get('APP_URL')` (env del Edge Fu
 - **Recomendaciones priorizadas Ola 0/1** guardadas en `progress/plan.md` § "Recomendaciones priorizadas — próximas sesiones" (P0: design system; P1: día de campo + research SIGSA + validar seed con Facundo; P2: pre-refinar 04 / pull-left 09).
 - **Commits de la sesión:** 3 pusheados por Raf (`c1cae84..2adcfd1`): (1) proceso/harness (Gate 0 + pipeline + ADR-022 + roadmap olas), (2) contexto de 03, (3) backend de spec 02. + 1 commit de cierre (fix `Write` en security_analyzer + recomendaciones priorizadas + cierre de sesión).
 - **Próximo:** ver `plan.md` § Recomendaciones priorizadas. Resumen: design system (Raf, destraba frontend) → frontend 01 → 04/09 → 05/03; en paralelo research SIGSA + día de campo. Pendiente: validar seed de cría con Facundo.
+
+---
+
+## Sesión 16 — Research SIGSA (Ola 0, P1) (2026-05-28)
+
+- **Agente:** claude (rol leader — research autónomo + edición directa de docs base/ADRs, sin implementer).
+- **Origen:** item P1 long-lead de Ola 0 (research del formato de exportación SENASA, dueño leader, sin dependencias). Adelanta el long-lead de la feature 08; no abre la feature (sigue `pending`, no se escribió `context.md`).
+- **Trabajo:** 2 agentes web en paralelo (formato + regulatorio). Output: `specs/active/08-export-sigsa/research-findings.md` (insumo pre-Gate-0, NO es spec).
+- **Hallazgos clave:**
+  - **Formato CONFIRMADO** (manual oficial SIGSA v2.42.80, dic 2025): archivo `.txt`, registro `RFID-SEXO-RAZA-MM/AAAA` por animal, separados por `;`. Ej: `032010000000000-M-H-08/2025;…`. RENSPA/especie/fecha-aplicación/motivo se eligen en pantalla, no van en el archivo. Feature viable HOY con info pública. Es upload manual, no API.
+  - **Corrección de supuesto base (VERIFICADA contra el articulado del BO):** el "deadline julio 2026" NO existe en la norma vigente. Leído el texto Arts. 1°–30° de la Res. SENASA 841/2025 con citas: cronograma = terneros al destete desde 1/1/2026 + reposición natural, sin corte para adultos (Art. 3°); plazo de declaración 10 días hábiles (Art. 8°); campos = RFID+sexo+raza+fecha/mes-año nac. (Art. 8°); vías = oficina local / SIGSA / SIGBIOTRAZA (Art. 8°); responsable = el productor (Art. 5°). Raf eligió verificar antes de tocar docs base → verificación HECHA → Raf aprobó aplicar en docs base + ADRs.
+  - **APLICADO:** reword en CLAUDE.md, feature_list.json, CONTEXT/01, CONTEXT/08, plan.md ("julio 2026" → "obligación vigente desde 1/1/2026 + reposición natural, declaración 10 días hábiles, Res. 841/2025"). ADRs corregidos (Raf confirmó que "julio 2026" fue error — la norma se anunció jul-2025, Res. 530/2025 BO 21/07/2025, rige desde 1/1/2026): ADR-002/005/009/017 (005 y 017 con reword semántico). Ya no queda "julio 2026" fuera de las líneas que documentan la corrección. Hitos de CONTEXT/08 ("pre-julio 2026") marcados "a re-evaluar por Raf" porque hoy (2026-05-28) la obligación ya rige.
+  - SIGBIOTRAZA (app BLE→SIGSA directo) es competidor, no integrable. Oportunidad: RAFAQ como alternativa generando el TXT.
+- **Incertidumbres abiertas** (en el doc §6): tabla completa de códigos de raza, si spec 02 captura raza/sexo/fecha-nac + RENSPA en establishments, validaciones server-side (probar upload real).
+- **Commits:** ninguno en la sesión — cambios de sesión 16 quedaron sin commitear (M en CLAUDE.md, CONTEXT/01, CONTEXT/08, ADR-002/005/009/017, feature_list.json, plan.md, current.md + ?? specs/active/08-export-sigsa/).
+
+---
+
+## Sesión 17 — P0 design: ADR-018 bottom nav + Stitch home + ADR-023 + scaffold B.0 + refi 01/02 + home a mano (2026-05-28→29)
+
+Trabajo de la sesión: **cerrar A.2 del plan** (estructura de navegación principal), una de las dos mitades del P0 design (la otra, A.1 design system, sigue siendo dueño Raf y depende de su fix manual en Figma).
+
+Hecho:
+- **ADR-018 escrito** (`docs/adr/ADR-018-estructura-navegacion-principal.md`, `Accepted`) + agregado al índice `docs/adr/README.md`. Formaliza el bottom nav de 5 items `[Inicio] [Animales] [⚡FAB Maniobra] [Reportes] [Más]`:
+  - FAB central elevado = MODO MANIOBRAS (acción más crítica; verde botella `#1e5a3e`, ~64px, icono rayo, label "Maniobra").
+  - Tab **Animales** = puerta manual de BUSCAR ANIMAL (`AnimalsTabScreen`, spec 09 R1), primer nivel de jerarquía (no submenú).
+  - Regla transversal: el **bastón BLE es listener global, no una tab** — activo en todas las pantallas excepto MODO MANIOBRAS.
+  - **Más** = settings + perfil + miembros/invitaciones (spec 01) + asignación masiva de caravanas (spec 09 R8) + switch de establecimiento.
+  - 5 alternativas evaluadas y rechazadas (drawer, 4 tabs sin FAB, FAB para Buscar Animal, +5 items, top tab bar).
+- **plan.md A.2** marcado `done` (sesión 17) con el output detallado. Bloqueante levantado: las secciones de navegación raíz de design.md de specs 01 y 09 dejan de citar "ADR-018 pending" y referencian el ADR al implementar B.1.
+- **Cierre administrativo de sesión 16**: su resumen (research SIGSA) movido de `current.md` a `history.md` (no se había cerrado formalmente).
+
+- **Home definitiva rediseñada vía Stitch** (A.1, avance grande). Raf descartó el fix manual de Figma → se prompteó Stitch (MCP, modelo GEMINI_3_1_PRO). Cambios aplicados y verificados con render local (Chrome headless): CTA "Crear rodeo" full-width, FAB elevado (⚡ centrado, ya no se superpone), hamburguesa → **switch de establecimiento** "La Juanita ▾", stepper riel único centrado (Paso 1 verde con "+"), banner descartable (✕), **fondo blanco neutro** `#faf9f9`. Canónica: `design/stitch-iter-4/00-home-CANONICAL.png` (screen `a5bac4039faf4a2abe5f808425b177bf`).
+  - **Design system de Stitch corregido a nivel proyecto (v4)**: variant FIDELITY + `overrideNeutralColor #808080` → base blanco neutro (mató el tinte frío `#f8f9ff` de Material You de raíz, para todas las pantallas) + verde botella en containers + bone en cards. Lección y gotchas en `design/FRONTEND-STATUS.md` (el motor de color pisa el designMd; consistencia eventual; DOM-ops no persiste).
+  - **Nuevo hueco de producto detectado**: pantalla "Mis campos" + landing por rol (owner vs vet). Anotado en `docs/backlog.md` (2026-05-29) + memoria. A resolver en sesión dedicada.
+
+- **Workflow de frontend DEFINIDO por LLM Council → ADR-023** (`Accepted`). Se evaluó si Stitch es cuello de botella + se relevaron herramientas nuevas por web (Claude Design abr-2026, TapUI, Bolt — ninguna genera Tamagui nativo). Veredicto del council: (1) **componentes = deliverable, no pantallas**; (2) herramientas demotadas a inspiración, Stitch fuera del critical path; (3) hand-craft pantallas de alto impacto, generar las CRUD con agentes; (4) **lint guardrail** anti color/spacing hardcodeado (oráculo de QA + anti-drift); (5) **derivar el design system de construir la home a mano**, no canonizar en abstracto; (6) iterar en Expo real. Asesor más fuerte: Primeros Principios (test de cobertura). Punto ciego marcado: Expansionista (scope creep "generador como producto"). 
+- **Hallazgo crítico**: `app/` es un Expo pelado — **el stack de ADR-013 (Tamagui/Expo Router/Reanimated) nunca se instaló**. Nuevo item **B.0 (scaffold)** en el plan, prerequisito duro.
+
+- **B.0 — scaffold del stack ADR-013 DONE** (sesión 17). Tamagui 2.0.0 + Expo Router + Reanimated 4 instalados; `app/app/` con Expo Router + `(tabs)` + FAB elevado (ADR-018) como stubs; `tamagui.config.ts` provisional con tokens v4. typecheck + check.mjs + `expo export` verdes. Detalle en `progress/impl_B.0-scaffold-frontend.md`. Desviaciones: Reanimated 4 (no 3), bottom-tabs a mano, Node 20.13.1 < 20.19.4 (warning). Sin render en device aún.
+- **"Mis campos" + landing por cantidad: DECIDIDO y formalizado** (sesión 17). Raf cerró la regla: ≥2 campos → pantalla "Mis campos" (landing de vets/multi-campo); ==1 → home directa + "Mis campos" vía switch del header. Folded en spec 01 `R6.6`-`R6.9` + flujo en su `design.md`. Backlog 2026-05-29 → RESUELTO; memoria actualizada. Se implementa en B.1.
+
+- **Refi de edge cases sobre specs 01 y 02 (Gate 0 retroactivo) APROBADA por Raf (2026-05-29).** 2 auditorías en paralelo → 8 decisiones (switch dropdown + last_opened requerido + crear-campo-requiere-red en 01; baja/egreso con enum + mellizos MVP + detección blanda + transiciones-por-edad-no-automáticas + corrección de eventos tipados + cambio-de-rodeo-bloqueado en 02) + ~15 gaps foldeados. Aplicada por spec_author a requirements+design de ambas specs. Verificada (check verde, IDs sin colisión). Decisiones de criterio propio del spec_author aprobadas junto con la refi.
+- **Delta backend de spec 02 PENDIENTE** (se desprende de la refi aprobada; spec 02 backend estaba "done", se reabre incremento acotado): agregar `created_by` a `animal_profiles` (confirmado: falta), `exit_reason` text→enum, tabla `birth_calves` + conteo de partos en compute_category, trigger de recálculo al editar/borrar evento, `weaning` en enum event_type si falta. Lo hace el implementer cuando toque (puede ir en paralelo a la home).
+
+- **Diseño "Mis campos" RESUELTO** (sesión 17): card "híbrido adaptivo" (`EstablishmentCard`) + métrica hero adaptativa + slot de benchmark (off en MVP) + imagen default-generada/opcional + searchbar. Foldeado en R6.6.2 de spec 01 (req + design). Rollup de stats / vista mapa / benchmarking-post-beta → backlog.
+- **Home a mano — Incremento 1 CONSTRUIDO y verde** (A.1 paso 2): componentes `Button`/`Card`/`Stepper` en `app/src/components/`, Inter cargada (con timeout-fallback en el gate de fuentes — fix de robustez anti splash-infinito), home armada en `app/app/(tabs)/index.tsx` contra el mockup canónico. 3/3 gates verdes (typecheck, check.mjs, expo export web). Detalle en `progress/impl_A.1-home-increment-1.md`. **Render NO verificado aún**: el preview web headless del leader está bloqueado por un mismatch react 19.2.3 vs react-dom 19.2.6 (web-only, NO afecta nativo); el veredicto "primer try" va en device (Raf con Metro). Dropdown del switch (R6.8.1) y EstablishmentCard quedan para incrementos siguientes.
+
+**Render/preview RESUELTO vía WEB** (sesión 17): react-dom alineado a 19.2.3 (= react) → el React #527 murió, la home renderiza. Leader la screenshotea headless; Raf la ve con `pnpm.cmd web` en el navegador. **Device real bloqueado por gap de Expo:** SDK 56 salió 21-may-2026 y Expo Go SDK 56 NO está en App Store / Play Store (sin fecha) → la Expo Go de tienda (SDK 54) no carga el proyecto. NO es Cylance ni config de Raf. Decisión (sesión 17): **web para iterar diseño ahora**; device real = dev-build propio más adelante (o sideload Android del APK SDK 56). No requiere cuenta Expo ni MCP para correr local.
+**Issue detectado en el render (para incremento 2): overflow horizontal** — el contenido se va más ancho que la pantalla (412px): se cortan a la derecha el avatar del header, el ✕ del banner, el CTA, el body de los pasos y el item "Más" del nav. Falta constreñir el contenido al ancho + padding simétrico.
+
+- **Home a mano — Incremento 3 CONSTRUIDO y verde** (2 ajustes acotados, modo colaborativo, sin backend). Detalle en `progress/impl_A.2-home-increment-3.md`.
+  - **Ajuste 1 — overflow horizontal en WEB resuelto** (el inc. 2 lo arregló para NATIVO con `flexShrink`, pero en react-native-web los flex items tienen `min-width:auto` y no encogen por debajo del ancho intrínseco de su contenido). Fix: `minWidth:0` en los contenedores flex con texto — columna de contenido + title + body del `Stepper`; Pressable/XStack/Text del switch del header; Text del banner en `index.tsx`. Defensa raíz: `width:100% + maxWidth:100% + overflow:hidden` en el `YStack` raíz y `maxWidth:100%` en el `ScrollView` (no rompe el scroll vertical). Sin tokens nuevos.
+  - **Ajuste 2 — elevación del FAB bajada a ~57%** (Mercado Pago real medido): `FAB_RAISE_RATIO 0.66→0.57` → `size.fabRaise = round(64*0.57) = 36` (antes 42). Cruce: 36/64 = ~57% arriba / ~43% solapado. Anillo blanco + sombra intactos. Label "Maniobra" `marginTop $3→$2` para realinear.
+  - **Render verificado headless (Edge + CDP `setDeviceMetricsOverride`) a 360 y 412px: 0 elementos exceden el viewport** (`docScrollWidth == clientWidth == viewport` en ambos). Avatar, ✕, CTA, bodies wrappeados y los 5 items del nav (incl. "Más") visibles. Lección: el screenshot por `--window-size` da falso corte (recorta la ventana del SO, no el viewport CSS); usar `Emulation.setDeviceMetricsOverride`. 3/3 gates verdes (typecheck, check.mjs, expo export web — `dist/` regenerado, bundle `entry-6b78c1e8…`).
+
+Pendiente / próximo:
+- **Raf abre la home con `pnpm.cmd web`** y da feedback → incremento 2 = arreglar el overflow horizontal + lo que Raf note.
+- Construir incrementos siguientes: dropdown switch (R6.8.1), pantalla "Mis campos" + EstablishmentCard.
+- Delta backend de spec 02 (ver arriba).
+- **Node ≥20.19.4 es REQUERIDO** (NO es warning: `expo start` corta y no levanta con Node viejo). Raf tiene nvm-windows; actualizar con `nvm install 24.16.0 && nvm use 24.16.0` (pnpm vive en AppData\Roaming\npm, sobrevive el switch). `node scripts/check.mjs` igual corría con 20.13.1, pero el dev server de Expo no.
+- Commits de sesión 16 y 17 sin commitear (Raf decide).
+
+
+## Sesión 18 — Gate 0 refinamiento de contexto (08/04/09/03) + audits profundos + features 10/11 (2026-05-29)
+
+Raf pidió pasar por Gate 0 (refinamiento de contexto + edge cases) de todo lo que quedaba por refinar. Alcance acordado (vía AskUserQuestion): **08 SIGSA** (ahora) → **04 bastón** (solo no-hardware) → **auditar edge cases de 09**; **05 balanza** diferida entera al día de campo; **06 labs / 07 reportes** diferidos a su momento (respeta buffer de ADR-022 — 06 necesita PDFs reales de CEDIVE, 07 se beneficia de uso real).
+
+Hecho (3 `context.md` escritos, **TODOS pendientes de aprobación de Raf**):
+- **`specs/active/08-export-sigsa/context.md`** — 4 decisiones de Raf: (1) **catálogo de razas con código SENASA** (delta spec 02: `breed` texto libre → referencia controlada + migración); (2) **RENSPA opcional** en establishments (delta spec 01); (3) **marcador `sigsa_declared_at` por animal + lista de pendientes + `export_log`** (audit); (4) **validar-y-bloquear** (lista "a completar" antes de generar). Scope MVP = solo alta de dispositivos. Sub-tareas pre-spec: extraer tabla de códigos de raza del manual + probar upload real contra SIGSA.
+- **`specs/active/04-bluetooth-baston/context.md`** (parcial) — arquitectura ya contractualizada por spec 09 (`useBleStickListener`, provider, `useBusyMode`, mock). 3 decisiones: (1) **recordar bastón + reconexión automática**; (2) **dedup por TAG ~3s** (no rompe asignación masiva); (3) **feedback vibración+sonido(apagable)+visual**. **Hardware = BLOQUEANTE día de campo**: UUIDs + parsing del mensaje del Allflex RS420 (nRF Connect).
+- **`specs/active/09-buscar-animal/context.md`** — auditoría de edge cases (Gate 0 retroactivo; 09 nunca tuvo la de 01/02). 1 agente Explore (~15 gaps) + verificación contra specs reales → mayoría ya cubiertos → **3 decisiones reales**: (D1) **bloquear cambio de campo** con flujo abierto (cubre R10.3); (D2) **transferencia mínima en MVP** cuando el TAG está activo en otro campo del usuario — ⚠️ **write cross-tenant → Gate 1** + convierte R4.11 de spec 02 de "futura" a flujo MVP; (D3) **set acotado editable inline + baja en sub-flujo aparte** (cubre R5.2).
+
+**Profundización del audit (Raf pidió revisión cruzada más a fondo)** — lectura completa de spec 02 (493 líneas) + cruce con las decisiones nuevas. 5 hallazgos reales (3 introducidos en esta misma sesión), 4 decisiones de Raf:
+- **🔴 Aborto sin transición** (spec 02): R6.2 tiene el evento `abortion` en el enum pero R7.1-R7.3 no lo manejan → una preñada que aborta queda "preñada" para siempre (rompe % preñez/analytics). **Decisión: manejar en MVP** — `abortion` revierte categoría + compute_category lo resta (categoría destino a confirmar con Facundo). **Delta nuevo sobre spec 02.**
+- **🔴 Marcador SIGSA mal ubicado** (lo metí yo en 08): estaba "por animal global"; la declaración es por RENSPA/establecimiento. **Decisión: marcador por (establecimiento, animal)** — en `animal_profiles` o tabla `sigsa_declarations`. Corregido en el context de 08.
+- **🔴 D2 transferencia — costo nuevo**: la versión "mínima" dejaba huérfano el timeline/linaje. **Decisión: transferencia que PRESERVA historia** (re-apunta eventos/vínculos al perfil nuevo). Es la opción más pesada (re-parenting cross-tenant, `session_id`/idv/linaje a resolver, **Gate 1**, candidata a sub-spec). Corregido en el context de 09.
+- **🟡 RENSPA cardinalidad** (lo simplifiqué yo en 08): **Decisión: un RENSPA por establecimiento en MVP** (campo único; export deja tipear si hay multi-unidad). Confirmado.
+- **🟡 Multípara comprada sin historial** (spec 02): compute_category cuenta partos del sistema; una comprada no los tiene → vaquillona salvo override. **Default (sin pregunta): MVP = override manual + documentar**; campo de paridad de ingreso → backlog analytics.
+
+Deltas cross-spec actualizados (a coordinar al implementar; tocan backend ya `done`, se suman al delta de sesión 17):
+- **spec 02**: catálogo de razas + migración de `breed` **y `reproductive_events.breed` + trigger de ternero al pie** (de 08); **transición de aborto** (revierte categoría + compute_category, nuevo); transferencia con **re-parenting de historia** + R4.11 "futura"→MVP (de 09 D2, **Gate 1**, candidata a sub-spec).
+- **spec 01**: `renspa` opcional (único) en establishments (de 08); switch del header respeta guard "flujo abierto" (de 09 D1).
+
+**Raf pidió audits profundos de TODO + re-parenting como sub-spec aparte.** Cobertura: spec 02 (full) + spec 09 (full) + contexts 04/08 + **03 (deep audit hecho)** + **01 (en curso)**.
+
+**Audit profundo de 03 MODO MANIOBRAS (context s15 vs spec 02 s17/s18) — decisiones de Raf, foldadas en `specs/active/03-modo-maniobras/context.md` (refinamiento s18, pendiente aprobación):**
+- **Contradicción rodeo-change corregida**: el context s15 ofrecía "pasar a este rodeo" (UPDATE rodeo_id), R4.5.1 (s17) lo bloqueaba. **Decisión: relajar R4.5.1 → mover de rodeo permitido dentro del mismo sistema** (delta spec 02).
+- **Parto/aborto/destete = solo ficha (no maniobras)**: parto→ficha madre (mellizos acá), aborto→ficha madre, destete→ficha ternero (R7.8). Solo tacto/inseminación son maniobras reproductivas de manga.
+- **Castración = evento individual (ficha) + operación masiva "castrar todo" (rodeo/lote, feature 10); NO maniobra de manga en MVP** ("quizás a futuro"). ⚠️ efecto de categoría pendiente Facundo (cría no tiene "novillo"); nuevo data_key `castracion` (delta spec 02 R2.13/ADR-021).
+- **Animal de otro establecimiento en sesión (D2)**: avisar + saltar en la manga + sugerir "bastonealo después de las maniobras para transferirlo".
+- **CONTEXT/03 sección "Lotes" STALE** (texto libre en sesiones vs `management_groups`/ADR-020) — flageado, pendiente reconciliar con OK de Raf.
+
+**Scope NUEVO capturado (excede audit → feature propia + Gate 0, Raf decide):**
+- **Operaciones masivas por rodeo** (destetar todo / castrar todo / vacunar todo) desde una **vista de rodeo**. "Vacunar todo" ya tiene sustrato (`sanitary_campaigns`).
+- **Navegación rodeo-céntrica** → probable **reapertura de ADR-018** (no hay tab Rodeos hoy). Recomendación leader: feature nueva, no foldear en 03.
+
+**Re-parenting de transferencia (09 D2) = SUB-SPEC APARTE** (decisión Raf s18). Candidata a feature nueva con Gate 1.
+
+**Audit profundo de 01 identity (ya muy refinada en s17 → pocos hallazgos, los nuevos por cruce con D1/offline) — decisiones de Raf (deltas para foldar por spec_author en spec 01, no reescrito acá):**
+- **`active_lost` + trabajo en curso/encolado** (cruce R6.10 + D1 + offline): te remueven/borran el campo con un form abierto o mutaciones offline encoladas → RLS las rechaza al sincronizar. **Decisión: informar + descartar** (form abierto: avisar y descartar; mutaciones encoladas: surface vía path de error de sync de 09 R11.5, "estos N cambios en campo X no se guardaron"). Delta R6.10.
+- **R6.2 "cambiar en cualquier momento" vs guard D1**: foldear la excepción (switch bloqueado con flujo abierto). Delta R6.2/R6.8.1 (la decisión ya está en D1 de 09).
+- **Aceptar invitación a campo soft-deleted**: R5.6 no lo rechaza → gap. Delta: R5.5/R5.6 rechaza si el establishment está soft-deleted.
+- **Restaurar campo borrado**: **NO en MVP** (soft-delete del campo no reversible desde la UI; data persiste soft-linked; restore self-service post-MVP). Documentar en R3.6.
+- **RENSPA** (delta 08): campo opcional en R3.3. **Acceso temporal del vet** (CONTEXT/07): NO modelado en `user_roles` (post-MVP/billing) — nota.
+
+**ITEMS PARA FACUNDO (consolidado, bloquean cierre fino de varias specs):** categoría destino del aborto (02); efecto de categoría de castración (02/03 — ¿agregar "novillo"?); marca-en-madre opcional al destetar (02/03); lista de razas relevantes para el catálogo SENASA (08); seed de cría 26 fields (02, ya tentativo); peso al pie vs destete (03, ya backlog).
+
+Pendiente / próximo:
+- **✅ APROBADO por Raf (Gate 0, sesión 18)**: 08, 04, 09-audit, 03-refi, deltas 01/02. **Aplicado**: `feature_list.json` (08/04→`context_ready`, +features 10/11, deltas en 01/02/09), `plan.md` (changelog s18 + orden definir/refinar), `CONTEXT/07` (items Facundo).
+- **Scan cruzado de consistencia HECHO (sesión 18, 3 agentes verificados contra el texto)**: confirmó consistente el núcleo (RLS, ortogonalidad de ejes, gating, modelo híbrido, terminología, nav). **Cazó 1 alucinación** (Agent B citó "CONTEXT/08:309" inexistente; el stale real está en CONTEXT/04:309-310). Arreglados stale: `CONTEXT/03` "Lotes"→ADR-020, `current.md` castración, `CONTEXT/04:310`→feature 11. **4 decisiones de Raf**: raza del ternero = heredar de la madre (cruza se corrige en ficha); op masiva + override = preview avisa + deja revertir; lote en transferencia → NULL; baja madre/toro = sin aviso (R4.15 ya preserva vínculo). Folds al bloque de delta de spec 02 (rama aborto/weaning, data_key castracion, R4.5.1→mismo-sistema, created_by en R4.1, enum tacto_vaquillona, migración de breed) + spec 09 (R5.5 sin ventana para eventos tipados).
+- **Feature 10 (operaciones-rodeo)**: `context.md` + edge cases del scan foldeados. **✅ APROBADO por Raf → `context_ready`.**
+- **Feature 11 (transferencia re-parenting)**: `context.md` Gate 0 completo. **✅ APROBADO por Raf → `context_ready`.** **Gate 1** obligatorio al spec-ear.
+- **Bloque grande pendiente**: el delta backend de spec 02 (s17+s18) — planificar como bloque, no incremento.
+- **Verificación dura 08**: confirmar formato EXACTO de SIGSA con upload real / login clave fiscal (Raf/Facundo).
+- **Día de campo** sigue bloqueando: hardware de 04 (UUIDs Allflex) + 05 entera.
+- **Para Facundo**: ver `CONTEXT/07` (aborto/categoría, castración/novillo, destete-madre, razas SENASA).
+
+---
+
+## Sesión 19 — cierre P0 design: nav firmado + skill design-review + higiene (2026-05-30)
+
+Continuación del cierre del **P0 design** (A.1 design system + A.2 nav). El nav (A.2) quedó firmado y se estaba cerrando A.1.
+
+Hecho:
+- **Nav (ADR-018) FIRMADO por Raf** ("AHORA SI, ME ENCANTA") tras iteración fina del FAB central + halo + label, medida con CDP a 360/412px (no a ojo). Estado final en `app/app/(tabs)/_layout.tsx`: FAB flota ~55% sobre la barra (`fabRaise=35`), halo verde pálido absoluto detrás (no empuja layout), label **"Maniobra"** con distinción intencional (negro/negrita/12px, bajado a -2px). `navBar=60` + `max(insets.bottom, navBottomMin=12)`. Cero hardcode (tokens vía `getTokenValue`).
+- **Skill `design-review` creada y APROBADA** (`.claude/skills/design-review/SKILL.md`): procedimiento (lluvia de ideas + análisis ANTES de implementar · vetear ANTES de mostrar · medir-no-estimar · tubería CDP) + criterios (Nielsen 10, Laws of UX, mobile/HIG/thumb-zone, Gestalt/tercios) + criticidad manga GRADUADA (🔴 manga-only = máximo no negociable; 🟡 mixtas = con margen) + checklist. Complementa las memorias `feedback-design-pro-analysis` + `feedback-design-vet-before-showing`.
+- **Higiene**: trim de current.md (s17+s18 a history); matados artefactos colgados del pipeline de preview (2 `http.server` + 2 Chrome headless); limpiadas 14 capturas intermedias de `design/stitch-iter-4/` (2.3M→737KB, conservado el set canónico).
+
+En curso al cerrar (continúa en `plan.md` A.1):
+- **Canonización del design system (cierre A.1 / ADR-023)**: `tamagui.config.ts` canónico, `docs/design-system.md` sin DRAFT, `design/tokens.json`, lint anti-hardcode (ADR-023 §4). Luego: dropdown del switch (R6.8.1) → "Mis campos" + `EstablishmentCard`. **Pausada** al pivotar al backend.
+
+_Cierre: Raf pivotea al bloque backend de spec 02 (sesión 20). Features 10/11 ya `context_ready`. El delta backend de spec 02 es un **bloque**, no un incremento acotado._

@@ -1,9 +1,13 @@
 # Spec 02 — Design
 
-**Status**: Aprobada 2026-05-26 · refundida 2026-05-28 (incorpora ADR-020 lote + ADR-021 plantilla de datos).
+**Status**: Aprobada 2026-05-26 · refundida 2026-05-28 (incorpora ADR-020 lote + ADR-021 plantilla de datos) · refinamiento de edge cases 2026-05-29 (sesión 17).
 **Fecha original**: 2026-05-25
 
-> El historial de refinamientos vive en el **Changelog** al final de este documento (audit trail, mismo principio que los ADRs).
+> El historial de refinamientos vive en el **Changelog** al final de este documento (audit trail, mismo principio que los ADRs). La entrada de sesión 17 (2026-05-29) está al tope del Changelog.
+>
+> **Nota de alcance del refinamiento de sesión 17**: este design **documenta el cambio conceptual** (baja de animal, mellizos uno-a-muchos, recálculo de categoría, transiciones por edad, TAG no reusable, timeline siempre visible). El SQL nuevo / las migrations correspondientes los escribe el **implementer**; los bloques SQL nuevos marcados "(sesión 17 — propuesta de diseño)" eran orientativos.
+>
+> **Nota de alcance del fold Tier 1 (sesión 20)**: la sección **"Fold del Tier 1 — bloque backend delta s17/s18"** (abajo) deja **firmes** 5 de esas decisiones (`created_by`, `exit_reason` enum, `birth_calves`/mellizos, recálculo de categoría `R6.14`, `R4.5.1` relajada) y les asigna **migrations concretas 0043+**. Los bloques SQL de esa sección son **especificación de diseño firme** (el implementer escribe los `.sql` + tests, pero el modelado queda cerrado). Lo que sigue marcado **DEFERIDO** (Tier 2: ramas `weaning`/`abortion`; Tier 3: razas SENASA + `castracion`) **no** entra en este fold — pendiente de Facundo/research.
 
 ## Arquitectura general
 
@@ -427,8 +431,10 @@ Notas:
 - **Catálogo read-only**: `field_definitions` y `system_default_fields` se modifican vía migration (mismo patrón que `species`/`categories_by_system`). Solo `rodeo_data_config` es mutable (owner).
 - **Gating de maniobras (spec 03)**: el mapeo maniobra→data_keys es hardcodeado (ADR-021, ver tabla en R2.7 del requirements). Una query `SELECT count(*) FROM rodeo_data_config rdc JOIN field_definitions fd ON fd.id = rdc.field_definition_id WHERE rdc.rodeo_id = ? AND fd.data_key = ANY($1) AND rdc.enabled = true` resuelve el gating en O(log n) con el index `(field_definition_id) WHERE enabled = true`. El enforcement (doble capa UI + DB) vive en spec 03.
 - **Seed TENTATIVO**: 26 fields de cría (23 ON, 3 OFF: `inseminacion`, `peso_nacimiento`, `tuberculosis`). `evaluacion_toro` diferido post-MVP. Otros sistemas reciben su `system_default_fields` cuando se activen; los `field_definitions` universales ya quedan disponibles. Ajustable por migration sin reabrir spec 02.
+- **El timeline muestra historial aunque el data_key esté deshabilitado (sesión 17, R2.12.1)**: `rodeo_data_config.enabled` y `field_definitions.active` controlan la **carga futura** (gating de maniobras de spec 03), **no** la visibilidad de lo ya cargado. La función `animal_timeline` (ver más abajo) **no** hace join a `rodeo_data_config` ni filtra por `enabled`/`active` — por diseño rinde todos los eventos históricos. Cuando el `owner` destilda en un rodeo un data_key que ya tiene eventos cargados, el **cliente** debe avisarle ("este dato tiene N eventos cargados; se dejará de pedir pero el historial se conserva"); el conteo sale de un `count(*)` sobre la tabla de eventos correspondiente filtrado por los `animal_profiles` del rodeo. No se borra ni se oculta nada.
+- **Garantía de R2.11 acotada (sesión 17)**: "el rodeo nunca queda con `rodeo_data_config` vacía" vale **solo** para sistemas con filas en `system_default_fields`. En MVP solo `(bovino, cría)` las tiene. **Activar un sistema nuevo** (invernada/feedlot/tambo/cabaña) **requiere seedear sus `system_default_fields` en la misma migration** que pone `systems_by_species.active = true`; de lo contrario el trigger `tg_rodeos_seed_data_config` no inserta filas y un rodeo de ese sistema nace con config vacía. Precondición de activación documentada acá.
 
-Cubre **R2.1..R2.5**, **R2.6**, **R2.7** (nota gating), **R2.8..R2.13**.
+Cubre **R2.1..R2.5**, **R2.6**, **R2.7** (nota gating), **R2.8..R2.13**, **R2.12.1**.
 
 ### Lotes — agrupación de manejo (`management_groups`, `ADR-020`)
 
@@ -731,6 +737,191 @@ create trigger animal_profiles_set_override
 ```
 
 El trigger de transición automática (definido más abajo) seteará `set_config('rafaq.is_auto_transition','on',true)` antes del UPDATE para evitar marcar override en automático.
+
+### Fold del Tier 1 — bloque backend delta s17/s18 (sesión 20, migrations 0043+)
+
+> **Estado**: el backend de spec 02 está `done` (migrations 0013-0042 aplicadas, suite animal 19/19). Este bloque **reabre un incremento** sobre ese backend. Las **decisiones del Tier 1 ya fueron aprobadas en Gate 0** (refinamientos s17/s18); esta sección las deja **firmes a nivel design** y asigna **números de migration concretos a partir de 0043** (no se pisan las 0013-0042). El SQL de abajo es la **especificación de diseño firme** del Tier 1; el implementer escribe los archivos `.sql` y los tests. Convenciones vigentes: `GRANT` explícito a `authenticated`, split insert+select, RLS por establishment, RPCs `SECURITY DEFINER` donde la policy de SELECT lo exija (patrón as-built `0041`).
+>
+> **Mapa de migrations propuestas del Tier 1:**
+>
+> | Migration | Item Tier 1 | Contenido |
+> |---|---|---|
+> | `0043_animal_profiles_created_by.sql` | 1 | columna `created_by` + trigger BEFORE INSERT que **fuerza** `created_by = auth.uid()` server-side (load-bearing para authz, SEC-SPEC-03) |
+> | `0044_exit_reason_enum.sql` | 2 | tipo `exit_reason_enum` + conversión texto→enum + RPC `exit_animal_profile` |
+> | `0045_birth_calves.sql` | 3 | tabla puente `birth_calves` (`select`-only para cliente, poblada server-side, SEC-SPEC-04) + RPC firme `register_birth` para N terneros (SEC-SPEC-02) + trigger mono-ternero extendido + conteo de partos por evento |
+> | `0046_category_recompute_on_event_change.sql` | 4 | trigger AFTER UPDATE/DELETE de recálculo de categoría (`R6.14`) |
+> | `0047_rodeo_change_same_system.sql` | 5 | trigger BEFORE UPDATE de `rodeo_id` que exige mismo `system_id` (`R4.5.1`) |
+>
+> (Numeración orientativa contigua; el implementer puede reordenar/fusionar dentro del rango 0043+ sin reabrir spec, respetando dependencias — p. ej. `0043` antes de `0044` porque el RPC de baja lee `created_by`.)
+>
+> **Explícitamente FUERA del Tier 1 — NO se diseña ni se implementa en este fold:**
+> - **Tier 2 (DEFERIDO — pendiente Facundo)**: ramas de transición de **aborto** (`abortion`) y **destete** (`weaning`). Los targets de categoría están pendientes de confirmación de Facundo. Nota detallada en "Transiciones automáticas" (cerca de R7). **No** se agregan estas ramas a `tg_reproductive_events_apply_transition` ni a `compute_category` ahora.
+> - **Tier 3 (DEFERIDO — pendiente Facundo/research)**: (a) **catálogo de razas SENASA** + migración de `animal_profiles.breed` (y `reproductive_events.breed`) de texto libre a FK contra una tabla de razas, con el ternero heredando la raza de la madre — bloqueado por la tabla de códigos de raza (manual SIGSA = PDF de imágenes, no extraíble) + la lista de razas relevantes; (b) **castración**: data_key `castracion` (sembrable) + su **efecto de categoría** (¿agregar `novillo`? ¿solo sanitario?). Ambos requieren input de Facundo/research. **No** se toca la columna `breed` (sigue texto libre) ni se agrega `castracion` en este fold.
+> - **Transferencia re-parenting** (R4.11 → MVP, con RPC atómico): es **feature 11** (spec propia + Gate 1), **no** parte de este bloque. No se diseña acá.
+
+#### `created_by` en `animal_profiles` (item 1 — migration `0043`, R4.1 / R4.14)
+
+Confirmado en la decomposición de sesión 20: la columna **`created_by` falta** en el as-built actual de `animal_profiles`. Se agrega como FK **nullable** a `users(id)`. A diferencia de las tablas de evento (donde `created_by` es puro audit trail), en `animal_profiles` **`created_by` es load-bearing para autorización**: `exit_animal_profile` (`R4.14`) lo usa para decidir quién puede dar de baja. Por eso el trigger **NO** reusa el helper "setear solo si NULL" (`tg_set_created_by_auth_uid`, que un INSERT con `created_by` no-NULL podría burlar): usa una variante que **siempre** sobreescribe el valor server-side, ignorando cualquier `created_by` del payload del cliente.
+
+```sql
+-- 0043_animal_profiles_created_by.sql (fold Tier 1, sesión 20)
+alter table public.animal_profiles
+  add column created_by uuid references public.users(id);
+
+-- (SEC-SPEC-03, Gate 1 s20) `created_by` es load-bearing para authz en animal_profiles (R4.14),
+-- así que se FUERZA server-side: el trigger ignora el valor del cliente y siempre setea auth.uid().
+-- NO se reusa tg_set_created_by_auth_uid ("solo si NULL"), que es spoofeable en el INSERT
+-- (la policy animal_profiles_insert solo exige has_role_in, no restringe created_by).
+create or replace function public.tg_force_created_by_auth_uid ()
+returns trigger language plpgsql as $$
+begin
+  new.created_by := auth.uid();   -- ignora cualquier valor que venga en el INSERT del cliente
+  return new;
+end; $$;
+
+comment on function public.tg_force_created_by_auth_uid is
+  'Trigger BEFORE INSERT: FUERZA created_by = auth.uid() (ignora el valor del cliente). '
+  'Para columnas created_by que son load-bearing para authz (animal_profiles, R4.14). '
+  'No confundir con tg_set_created_by_auth_uid ("solo si NULL"), que es audit-only.';
+
+create trigger animal_profiles_set_created_by
+  before insert on public.animal_profiles
+  for each row execute function public.tg_force_created_by_auth_uid();
+```
+
+Notas:
+- **Por qué `tg_force_...` y no el helper compartido** (SEC-SPEC-03): el helper `tg_set_created_by_auth_uid` (`0024`) solo setea `created_by` cuando viene `NULL`. En las tablas de evento eso es inocuo (es audit trail). En `animal_profiles`, `created_by` gobierna una decisión de authz (`exit_animal_profile`, `R4.14`), y como la policy `animal_profiles_insert` (`0021`) solo exige `has_role_in`, **cualquier rol operativo activo podría setear `created_by` a un UUID arbitrario en el INSERT** (atribuir el alta a otro / plantar un cómplice que luego dé de baja vía la rama `v_creator = auth.uid()`). Forzar `auth.uid()` server-side cierra ese vector: el autor registrado es siempre el que ejecutó el INSERT.
+- **Nullable** (no `not null`): las filas as-built ya existentes quedan con `created_by = NULL`; el backfill histórico no es posible (no se conoce el autor original) y no es necesario para el MVP. El trigger garantiza autoría real desde el alta en adelante.
+- **No rompe el split insert+select**: el trigger es BEFORE INSERT y solo escribe una columna de la propia fila; no consulta otras tablas ni evalúa RLS.
+- El RPC `exit_animal_profile` (item 2) lee `created_by` para la autorización de `R4.14`; con esta migration la columna existe firme y su valor es **confiable** (no spoofeable). Si una fila vieja tiene `created_by = NULL`, solo el `owner` puede darla de baja (la rama `v_creator = auth.uid()` no matchea `NULL`), lo cual es el comportamiento conservador correcto.
+
+#### Baja / egreso de animal (item 2 — migration `0044`, R4.14 / R4.15)
+
+Dar de baja un animal es un cambio de `status` (NO soft-delete). Las columnas ya existen en `animal_profiles` (`status`, `exit_date`, `exit_reason`, `exit_weight`, `exit_price`). Dos cambios:
+
+1. **`exit_reason` pasa de texto libre a enum** (`R4.14`). El conjunto de valores (`sale|death|transfer|culling|theft|other`) lo fija `R4.14` desde sesión 17; el fold Tier 1 lo deja firme. La columna está **vacía en producción** (MVP backend-only, sin altas reales todavía), así que la conversión es directa. Migration:
+
+```sql
+-- 0044_exit_reason_enum.sql (fold Tier 1, sesión 20)
+create type public.exit_reason_enum as enum (
+  'sale','death','transfer','culling','theft','other'   -- venta/muerte/transferencia/descarte/robo/otro
+);
+
+-- Backfill seguro: la columna texto está vacía en MVP, pero se normaliza por defensa
+-- antes del ALTER (cualquier string no mapeable se rebaja a 'other' para no abortar la migration).
+update public.animal_profiles
+   set exit_reason = case
+         when exit_reason in ('sale','death','transfer','culling','theft','other') then exit_reason
+         when exit_reason is null or trim(exit_reason) = '' then null
+         else 'other'
+       end
+ where exit_reason is not null;
+
+alter table public.animal_profiles
+  alter column exit_reason type public.exit_reason_enum
+  using nullif(trim(exit_reason), '')::public.exit_reason_enum;
+```
+
+Notas de la conversión:
+- El `update` previo es un **backfill defensivo**: en MVP la columna está vacía, así que es no-op; pero deja la migration robusta si en QA hubiera texto libre cargado (cualquier valor fuera del enum cae a `'other'` en vez de abortar el `ALTER`).
+- `using nullif(trim(...),'')::enum` convierte cadena vacía → `NULL` (el enum no tiene un miembro vacío) y castea el resto.
+
+2. **La baja se hace vía RPC `SECURITY DEFINER`** (no UPDATE directo de cliente), consistente con el patrón as-built de soft-delete (`0041_soft_delete_rpcs.sql`, ver Changelog): el RPC re-valida la autorización de `R4.14` (es `is_owner_of(est)` **o** `created_by` del perfil) derivando el establishment de la fila real, y aplica el cambio de `status` + columnas de egreso en una transacción.
+
+```sql
+-- 0044_exit_reason_enum.sql (continúa — RPC de baja; fold Tier 1, sesión 20)
+create or replace function public.exit_animal_profile (
+  p_profile_id  uuid,
+  p_status      public.animal_status,        -- 'sold' | 'dead' | 'transferred'
+  p_exit_reason public.exit_reason_enum,
+  p_exit_date   date,
+  p_exit_weight numeric default null,
+  p_exit_price  numeric default null
+) returns void language plpgsql security definer
+set search_path = public as $$
+declare v_est uuid; v_creator uuid;
+begin
+  select establishment_id, created_by into v_est, v_creator
+  from public.animal_profiles where id = p_profile_id and deleted_at is null;
+  if v_est is null then
+    raise exception 'animal_profile not found' using errcode = '23503';
+  end if;
+  -- R4.14: owner del campo O el operario que cargó el animal — pero SIEMPRE con rol activo.
+  -- (SEC-SPEC-01, Gate 1 s20) `has_role_in(v_est)` es OBLIGATORIO: filtra al autor cuyo rol
+  -- fue desactivado/revocado/transferido (user_roles.active = false). Sin él, un ex-operario
+  -- que sigue matcheando `v_creator = auth.uid()` podría dar de baja un animal de un campo
+  -- del que ya no forma parte (cambiar status, fijar exit_*). Mismo patrón as-built que
+  -- `soft_delete_animal_event` (0041 l.78) y misma clase de hueco que cerró SEC-HIGH-01.
+  if not (public.has_role_in(v_est)
+          and (public.is_owner_of(v_est) or v_creator = auth.uid())) then
+    raise exception 'not authorized to exit this animal' using errcode = '42501';
+  end if;
+  if p_status = 'active' then
+    raise exception 'exit status must be sold/dead/transferred' using errcode = '23514';
+  end if;
+  update public.animal_profiles
+     set status = p_status, exit_reason = p_exit_reason, exit_date = p_exit_date,
+         exit_weight = coalesce(p_exit_weight, exit_weight),
+         exit_price  = coalesce(p_exit_price, exit_price)
+   where id = p_profile_id;
+   -- deleted_at queda NULL: NO es soft-delete. El perfil queda archivado y visible (R4.12/R4.15).
+end; $$;
+
+-- SEG (SEC-SPEC-01, Gate 1 s20): revoke/grant con la FIRMA TIPADA COMPLETA (sin firma es
+-- ambiguo si hubiera overloads; el as-built 0041/0042 siempre revoca con firma) +
+-- `notify pgrst, 'reload schema'` al final, igual que 0041 y 0042. Sin el reload,
+-- PostgREST puede no aplicar el cambio de grants / no exponer el RPC nuevo hasta el
+-- próximo reload, dejando una ventana donde los grants efectivos ≠ los migrados.
+-- exit_animal_profile SÍ debe ser invocable por authenticated (R4.14: el owner y el
+-- autor dan de baja desde la ficha) — por eso se revoca a public/anon y se concede a
+-- authenticated, a diferencia de apply_auto_transition (0042) que se revocó a los tres.
+revoke execute on function public.exit_animal_profile (uuid, public.animal_status, public.exit_reason_enum, date, numeric, numeric) from public, anon;
+grant  execute on function public.exit_animal_profile (uuid, public.animal_status, public.exit_reason_enum, date, numeric, numeric) to authenticated;
+notify pgrst, 'reload schema';
+```
+
+Notas de diseño:
+- **Depende de `created_by` en `animal_profiles`** (item 1, migration `0043`) para identificar "el operario que cargó el animal". El fold Tier 1 deja firme que la columna **falta** en el as-built actual y la agrega en `0043` (forzado a `auth.uid()` server-side vía trigger BEFORE INSERT, SEC-SPEC-03 — el valor es confiable, no spoofeable). Por eso `0043` se aplica **antes** que `0044`. Para filas viejas con `created_by = NULL`, la rama `v_creator = auth.uid()` no matchea, así que solo el `owner` puede darlas de baja (conservador, correcto).
+- **No es soft-delete** (`R4.12`): `deleted_at` queda `NULL`; el perfil sale del rodeo activo por el filtro `status = 'active'` de las queries operativas, pero sigue visible en historial y en las fichas que lo referencian (`R4.15`).
+- **Preserva vínculos** (`R4.15`): los `reproductive_events.calf_id`/`bull_id` que apuntan a este perfil no se tocan. **Nunca** hard-delete de un perfil referenciado — el `ON DELETE CASCADE` de las FKs es para borrado físico, que no ocurre en este flujo.
+
+#### Cambio de rodeo dentro del mismo sistema (item 5 — migration `0047`, R4.5.1)
+
+> **Cambio respecto de sesión 17**: la `R4.5.1` original bloqueaba **todo** cambio de `rodeo_id` post-alta en MVP (la UI no lo ofrecía). El fold Tier 1 (sesión 20) la **relaja**: se permite cambiar de rodeo **dentro del mismo sistema productivo** y se rechaza el cruce de sistemas a nivel DB.
+
+La regla (`R4.5.1` relajada): un UPDATE de `animal_profiles.rodeo_id` es válido **solo si** el rodeo destino tiene el **mismo `system_id`** que el rodeo origen. El rodeo destino, además, debe ser activo y del mismo establecimiento — condición que **ya** enforce el trigger `tg_animal_profiles_rodeo_check` (`0020`, `R4.5`), que corre en `before insert or update`. El trigger nuevo agrega **solo** la verificación de mismo-sistema en el caso UPDATE de `rodeo_id`:
+
+```sql
+-- 0047_rodeo_change_same_system.sql (fold Tier 1, sesión 20)
+create or replace function public.tg_animal_profiles_rodeo_same_system_check ()
+returns trigger language plpgsql security definer
+set search_path = public as $$
+declare v_old_system uuid; v_new_system uuid;
+begin
+  -- Solo aplica cuando el rodeo cambia en un UPDATE.
+  if new.rodeo_id is not distinct from old.rodeo_id then
+    return new;
+  end if;
+  select system_id into v_old_system from public.rodeos where id = old.rodeo_id;
+  select system_id into v_new_system from public.rodeos where id = new.rodeo_id;
+  if v_new_system is distinct from v_old_system then
+    raise exception 'rodeo change across productive systems is not allowed (category dead-end, R4.6); same system_id required'
+      using errcode = '23514';
+  end if;
+  return new;
+end; $$;
+
+create trigger animal_profiles_rodeo_same_system_check
+  before update of rodeo_id on public.animal_profiles
+  for each row execute function public.tg_animal_profiles_rodeo_same_system_check();
+```
+
+Notas de diseño:
+- **Por qué un trigger aparte y no extender `tg_animal_profiles_rodeo_check`**: ese trigger valida pertenencia al establecimiento + rodeo activo, que aplica también al INSERT (donde no hay `old`). La verificación de mismo-sistema es **exclusiva del UPDATE de `rodeo_id`** (necesita `old.rodeo_id`), así que vive en un trigger `before update of rodeo_id` separado, sin tocar el camino del alta.
+- **`SECURITY DEFINER`** + `search_path = public`: el trigger lee `rodeos` (que tiene RLS) para resolver el `system_id` de ambos rodeos; con `SECURITY DEFINER` la lectura no se rebota por la policy de `rodeos` durante el UPDATE (mismo motivo que `tg_animal_profiles_identity_check` pasó a `SECURITY DEFINER` en el as-built, ver Changelog). Solo lee `system_id`, no retorna datos ni es invocable como RPC.
+- **Ortogonalidad (R7.7 / `R4.5.1`)**: el cambio de rodeo **no** toca `category_id` ni `management_group_id`. Como destino y origen comparten `system_id`, la categoría actual sigue siendo válida para el sistema (`R4.6`) y **no** se recalcula. El cliente puede mover el animal con un UPDATE simple de `rodeo_id`; no hay re-mapeo de categoría.
+- **MVP**: con solo `(bovino, cría)` activo, todos los rodeos de un establecimiento comparten `system_id`, así que el trigger nunca rechaza en la práctica. La validación queda firme para cuando exista multi-sistema (entonces el cruce de sistemas seguirá rechazado hasta que se especifique la resolución de categoría cross-sistema).
+- **`R4.5` intacto**: la policy de UPDATE de `animal_profiles` (`has_role_in`) ya autoriza el cambio de rodeo a cualquier rol operativo activo; este trigger solo restringe el **valor** del rodeo destino, no quién puede hacerlo.
 
 #### RLS de `animals` y `animal_profiles`
 
@@ -1150,7 +1341,12 @@ begin
       v_target_code := 'torito';   -- conservador, owner puede cambiar a 'toro'
     end if;
   else
-    -- conteo de partos
+    -- conteo de PARTOS (no de terneros) — R7.3/R7.9 (sesión 17):
+    -- un parto = un evento 'birth', aunque haya parido N terneros (mellizos).
+    -- Con el modelo de mellizos uno-a-muchos (ver "Mellizos / N terneros por parto"),
+    -- un parto de mellizos sigue siendo UN evento 'birth', así que count(*) sobre
+    -- eventos 'birth' == count de partos. Mantener este conteo por EVENTO de parto,
+    -- nunca sumar filas-hijo / terneros.
     select count(*) into v_births
     from public.reproductive_events
     where animal_profile_id = profile_id
@@ -1255,12 +1451,189 @@ create trigger reproductive_events_apply_transition
 
 **Ortogonalidad (R7.7)**: `apply_auto_transition` y `tg_reproductive_events_apply_transition` escriben **únicamente** `category_id` (vía el UPDATE de `apply_auto_transition`). No tocan `rodeo_id` ni `management_group_id`. Un animal que transiciona de `vaca_segundo_servicio` a `multipara` por un parto permanece en su mismo rodeo y su mismo lote. Ningún trigger del sistema asigna lote automáticamente (ADR-020 punto 6, R2.18).
 
-Cubre **R7.1..R7.7**.
+**Transiciones por EDAD no automáticas por reloj (sesión 17, R7.8)**: no hay ningún cron ni job que re-evalúe la edad de los animales. El trigger de transición de arriba se dispara **solo por inserción de un evento** (tacto positivo, parto). Las transiciones etáreas (destete: `ternero`/`ternera` → categoría destetada) ocurren por un **evento de destete** (`reproductive_events` con `event_type = 'weaning'`) o por **override manual** (`R4.8`).
 
-### Ternero al pie (R9)
+> **DEFERIDO Tier 2 — pendiente Facundo (NO se implementa en este fold).** La **rama de destete** (`weaning`) y la **rama de aborto** (`abortion`) del trigger de transición quedan **fuera del Tier 1**. Los **targets de categoría** están pendientes de confirmación de Facundo:
+> - **Destete** (`weaning`): target propuesto `ternera → vaquillona`, `ternero → torito` — **a confirmar**.
+> - **Aborto** (`abortion`): target propuesto `vaquillona_prenada → vaquillona` (único estado "preñada" en cría; revierte y `compute_category` deja de contar la preñez) — **a confirmar**.
+>
+> Hasta que Facundo confirme los targets, **no** se agregan estas ramas a `tg_reproductive_events_apply_transition` ni a `compute_category`. El esqueleto de la rama de destete (orientativo, **no** parte del Tier 1) sería:
+>
+> ```sql
+> -- DEFERIDO Tier 2 — NO implementar en el fold Tier 1 (sesión 20). Pendiente Facundo.
+> -- dentro de tg_reproductive_events_apply_transition, agregar (cuando se confirmen targets):
+> --   elsif new.event_type = 'weaning' and v_current_code = 'ternera' then
+> --     v_target_code := 'vaquillona';
+> --   elsif new.event_type = 'weaning' and v_current_code = 'ternero' then
+> --     v_target_code := 'torito';
+> -- y la rama de aborto:
+> --   elsif new.event_type = 'abortion' and v_current_code = 'vaquillona_prenada' then
+> --     v_target_code := 'vaquillona';
+> ```
+
+`compute_category` (`R7.6`) usa `birth_date`/edad **solo** para resolver el punto de partida en el alta (`R4.7`) y como desempate cuando no hay eventos; **no** como disparador continuo (`R7.8`). El default para `birth_date IS NULL` (`R4.7.1`, **a confirmar**) es adulto-por-sexo sin evento: hembra → `vaquillona`, macho → `torito`. Hoy `compute_category` ya cae en `vaquillona`/`torito` cuando `birth_date is null` (la rama `< 365` no se cumple con NULL), así que el default propuesto **coincide con el comportamiento actual** — la requirement solo lo deja explícito y confirmable.
+
+#### Recálculo de categoría al editar/borrar un evento que disparó transición (item 4 — migration `0046`, R6.14)
+
+Cuando se **edita o soft-deletea** un evento tipado que participó de una transición (típicamente un `reproductive_events` de `tacto` positivo o `birth`), y el perfil tiene `category_override = false`, hay que **recalcular** la categoría desde cero con `compute_category` y persistir el resultado (registrando en `animal_category_history`). El fold Tier 1 deja firme el trigger AFTER UPDATE/DELETE sobre `reproductive_events` que recompute:
 
 ```sql
--- 0031_calf_creation.sql
+-- 0046_category_recompute_on_event_change.sql (fold Tier 1, sesión 20)
+create or replace function public.tg_reproductive_events_recompute_on_change ()
+returns trigger language plpgsql security definer
+set search_path = public as $$
+declare v_override boolean; v_target uuid; v_profile uuid;
+begin
+  v_profile := coalesce(new.animal_profile_id, old.animal_profile_id);
+  select category_override into v_override from public.animal_profiles where id = v_profile;
+  if v_override is null or v_override = true then
+    return coalesce(new, old);   -- override manda (R4.9)
+  end if;
+  v_target := public.compute_category(v_profile);
+  if v_target is not null then
+    perform public.apply_auto_transition(v_profile, v_target);  -- reusa la GUC + history (reason auto_transition)
+  end if;
+  return coalesce(new, old);
+end; $$;
+
+-- AFTER UPDATE: solo cuando cambia algo relevante a una transición.
+create trigger reproductive_events_recompute_on_update
+  after update of event_type, pregnancy_status, deleted_at on public.reproductive_events
+  for each row execute function public.tg_reproductive_events_recompute_on_change();
+
+-- AFTER DELETE: cubre el hard-delete (raro; el flujo normal es soft-delete vía UPDATE de deleted_at,
+-- que ya entra por el trigger de UPDATE de arriba).
+create trigger reproductive_events_recompute_on_delete
+  after delete on public.reproductive_events
+  for each row execute function public.tg_reproductive_events_recompute_on_change();
+```
+
+Notas:
+- **Alcance del recálculo**: el trigger vive **solo sobre `reproductive_events`** porque es la única tabla tipada que participa de transiciones de categoría en el Tier 1 (`tacto` positivo, `birth`). Las otras cuatro tipadas (`weight_events`, `sanitary_events`, `condition_score_events`, `lab_samples`) no disparan transiciones, así que no llevan este trigger. (Cuando Tier 2 agregue `weaning`/`abortion`, siguen siendo `reproductive_events`, así que el mismo trigger los cubre sin cambios.)
+- **El soft-delete es un UPDATE de `deleted_at`**: el trigger `... after update of deleted_at` lo captura. El trigger `after delete` es defensa para el hard-delete eventual.
+- El recálculo reusa `apply_auto_transition` (que setea la GUC `rafaq.is_auto_transition`), así el cambio queda registrado en `animal_category_history` como `auto_transition` y no marca override.
+- El **cliente** marca el evento como "corregido" en el timeline (es presentación; el soft-delete ya preserva la fila para el audit trail). No requiere columna nueva: editado = `created_at < updated_at` (si las tipadas tuvieran `updated_at`) o, para soft-delete, `deleted_at IS NOT NULL` filtrado fuera del timeline normal pero contable para el aviso. **Decisión de presentación del cliente** (R14, TENTATIVO).
+- **Edición/borrado sin ventana de tiempo** para los 5 tipados (`R6.8.1`): las policies de UPDATE de las tablas tipadas (`is_owner_of OR created_by = auth.uid()`) **ya** permiten esto sin límite temporal. **No** hay que agregar ningún `edit_window_until` a las tipadas — la ventana de 15 min es exclusiva de `animal_events` (R6.12). Esto corrige la lectura de spec 09 R5.5 (que asumía 15 min para todos): el cliente de spec 09 debe ofrecer editar/borrar los tipados a owner/autor siempre, y limitar a 15 min solo las observaciones.
+
+Cubre **R7.1..R7.9**, **R6.8.1**, **R6.14**, **R4.7.1**.
+
+### Ternero al pie (R9) + mellizos / N terneros por parto (item 3 — migration `0045`, R7.9 / R9.5)
+
+> **Cambio conceptual (sesión 17, firme en fold Tier 1 sesión 20)**: un parto es **un** evento `birth` con **N terneros** asociados (uno-a-muchos), no un evento por ternero. El modelo as-built actual (migration `0031`) crea exactamente un ternero por evento `birth` y linkea vía la columna `reproductive_events.calf_id` (uno-a-uno). El fold Tier 1 deja firme la relación uno-a-muchos vía tabla puente `birth_calves` para soportar mellizos sin romper el conteo de partos.
+
+**Tabla puente `birth_calves` (firme, migration `0045`):**
+
+```sql
+-- 0045_birth_calves.sql (fold Tier 1, sesión 20)
+create table public.birth_calves (
+  birth_event_id   uuid not null references public.reproductive_events(id) on delete cascade,
+  calf_profile_id  uuid not null references public.animal_profiles(id),
+  created_at       timestamptz not null default now(),
+  primary key (birth_event_id, calf_profile_id)
+);
+create index birth_calves_by_event on public.birth_calves (birth_event_id);
+create index birth_calves_by_calf  on public.birth_calves (calf_profile_id);
+
+-- RLS: el establishment se deriva del animal de la MADRE (dueña del evento de parto),
+-- vía establishment_of_profile sobre el animal_profile_id del reproductive_events.
+-- (SEC-SPEC-04, Gate 1 s20) Ambas policies filtran `re.deleted_at is null`: tras soft-deletear
+-- el evento de parto, las filas de birth_calves NO deben seguir visibles ni insertables
+-- (consistente con que toda policy de SELECT del spec filtra deleted_at — R12.3).
+alter table public.birth_calves enable row level security;
+
+create policy birth_calves_select on public.birth_calves
+  for select using (
+    exists (
+      select 1 from public.reproductive_events re
+      where re.id = birth_calves.birth_event_id
+        and re.deleted_at is null
+        and has_role_in(establishment_of_profile(re.animal_profile_id))
+    )
+  );
+-- NO hay policy de INSERT para `authenticated`: la tabla se puebla SOLO desde el flujo de
+-- parto SECURITY DEFINER (trigger mono-ternero extendido + RPC register_birth de mellizos),
+-- que corren como owner del schema y bypassean RLS. El vínculo madre→ternero es append-only
+-- y de ORIGEN SERVER (SEC-SPEC-04): el cliente nunca inserta filas directas. Sin GRANT INSERT,
+-- un caller no puede fabricar parentescos ni ligar terneros cruzados desde PostgREST.
+-- (La policy de SELECT, con re.deleted_at is null, sí es para el cliente — necesita leer la relación.)
+
+grant select on public.birth_calves to authenticated;
+-- Sin INSERT/UPDATE/DELETE de cliente: la relación es append-only y server-side.
+-- Al hard-deletear el evento de parto, el ON DELETE CASCADE limpia birth_calves.
+-- (El flujo normal es soft-delete del evento; la fila puente queda pero deja de ser visible
+--  por el filtro re.deleted_at is null de la policy de SELECT.)
+```
+
+- **Por qué tabla puente y no múltiples eventos `birth`**: si cada mellizo fuera su propio evento `birth`, el conteo de partos de `compute_category` (`count(*)` sobre eventos `birth`) marcaría a la madre como multípara con un solo parto real. La tabla puente mantiene **un** evento de parto con **N** terneros, así que `count(distinct birth_event)` == partos. **El conteo de partos en `compute_category` (ya firme, ver "Transiciones automáticas") cuenta `reproductive_events` con `event_type = 'birth'` distintos, NUNCA filas de `birth_calves` ni terneros.** El comentario en `compute_category` lo deja explícito.
+- **`birth_calves` es de origen SERVER, no se inserta directo desde el cliente (SEC-SPEC-04)**: se **quitó** `insert` del grant a `authenticated`. La tabla la pobla **solo** el flujo de parto `SECURITY DEFINER` (el trigger mono-ternero extendido de `0031` y el RPC `register_birth` de mellizos), que corren como owner del schema y bypassean RLS. Esto cierra dos vectores que abría el INSERT directo de cliente: (a) **fabricar parentescos falsos** ligando cualquier `calf_profile_id` del propio establecimiento a un parto ajeno; y (b) el **cruce de tenant** (ternero de otro establishment), que la antigua policy de INSERT (solo `has_role_in` sobre la madre) no validaba. Como la única vía de escritura es el flujo server, la herencia de tenant del ternero (mismo establishment + rodeo de la madre, garantizada por el trigger/RPC) es ahora la **única** forma de poblar la tabla — no hay superficie PostgREST para corromperla.
+- **`re.deleted_at is null` en la policy de SELECT (SEC-SPEC-04)**: tras soft-deletear el evento de parto, las filas de `birth_calves` dejan de ser visibles, consistente con que toda policy de SELECT del spec filtra `deleted_at is null` (`R12.3`). El flujo normal de borrado de un parto es soft-delete; el `ON DELETE CASCADE` solo aplica al hard-delete (que no ocurre en el flujo normal).
+- **Compatibilidad con la columna `calf_id` existente**: la columna `reproductive_events.calf_id` (uno-a-uno) **se conserva** apuntando al primer/único ternero, por compatibilidad con las lecturas as-built (`animal_timeline` rinde `calf_id` en el payload; `R14.7` navega a la madre). `birth_calves` es la **fuente de verdad** de la relación completa madre→terneros. El vínculo se resuelve por `birth_calves JOIN reproductive_events`; `calf_id` queda como atajo para el caso mono-ternero (común).
+- **`R4.15`**: ningún ternero referenciado en `birth_calves` se hard-deletea; la baja de la madre o de un ternero es cambio de `status`. Las navegaciones a la ficha de la madre toleran `status ≠ active`.
+
+**Creación de N terneros (firme, migration `0045`)**: la creación deja de producir exactamente uno. El mecanismo concreto:
+- **Para el caso mono-ternero** (el común): se **conserva** el trigger BEFORE INSERT as-built `tg_reproductive_events_create_calf` (`0031`), que crea el ternero a partir de `calf_sex`/`calf_weight`/`calf_tag_electronic` del propio evento y lo linkea en `calf_id`. La migration `0045` **agrega** una fila en `birth_calves(birth_event_id, calf_profile_id)` para ese ternero (extendiendo el mismo trigger con un INSERT a la tabla puente tras setear `calf_id`). El INSERT a `birth_calves` lo hace el trigger `SECURITY DEFINER` (no el cliente, que ya no tiene `GRANT INSERT` — SEC-SPEC-04).
+- **Para el caso multi-ternero** (mellizos): el cliente envía la lista de terneros del parto (`[{ calf_sex, calf_weight?, calf_tag_electronic? }, ...]`) y la creación se hace vía un **RPC `SECURITY DEFINER`** que, en una transacción: inserta el `reproductive_events` de parto, itera la lista, crea un `animal` + `animal_profile` por ternero (misma herencia que `R9.1`: establishment + rodeo de la madre, `management_group_id = NULL`, categoría `ternero`/`ternera` según sexo, `entry_origin = 'born_here'`, fallback `visual_id_alt` por ternero sin TAG), e inserta una fila en `birth_calves` por cada uno (poblando `calf_id` con el primero por compat). Si **cualquier** ternero falla, rollback del evento completo (`R9.4`/`R9.5`).
+- En ambos caminos, **el trigger de transición de la madre se dispara una sola vez** por el evento de parto (es AFTER INSERT sobre `reproductive_events`, no sobre `birth_calves`), así que mellizos no doble-cuentan el parto.
+
+**Contrato firme del RPC de mellizos (SEC-SPEC-02, Gate 1 s20 — NO se difiere al implementer).** El Gate 1 escala a HIGH cualquier RPC `SECURITY DEFINER` invocable por el cliente cuyo contrato de autorización quede sin fijar (es la condición exacta que produjo SEC-HIGH-01: `register_birth` **escribe `animal_profiles`** con input del cliente, idéntica superficie de riesgo). Por eso el RPC **deja de estar en prosa** ("lo define el implementer") y pasa a **SQL firme**: la firma, la derivación de autorización, el blindaje de la superficie RPC y el `search_path` quedan fijos en el design; el implementer solo escribe el cuerpo de creación de los N terneros:
+
+1. **Firma tipada concreta** (parámetros explícitos, sin overloads ambiguos):
+
+   ```sql
+   -- 0045_birth_calves.sql (continúa — RPC de parto con N terneros; fold Tier 1, sesión 20)
+   create or replace function public.register_birth (
+     p_mother_profile_id uuid,
+     p_event_date        date,
+     p_calves            jsonb   -- [{ "calf_sex": "male|female", "calf_weight": num?, "calf_tag_electronic": text? }, ...]
+   ) returns uuid                -- devuelve el reproductive_events.id del parto creado
+   language plpgsql security definer
+   set search_path = public as $$
+   declare v_est uuid; v_birth_event_id uuid;
+   begin
+     -- (a) AUTORIZACIÓN derivada de la FILA REAL de la madre, NUNCA de un parámetro del cliente:
+     select establishment_id into v_est
+     from public.animal_profiles
+     where id = p_mother_profile_id and deleted_at is null;
+     if v_est is null then
+       raise exception 'mother animal_profile not found' using errcode = '23503';
+     end if;
+     if not public.has_role_in(v_est) then
+       raise exception 'not authorized to register a birth for this animal' using errcode = '42501';
+     end if;
+     -- (b) inserta reproductive_events(event_type='birth', animal_profile_id=p_mother_profile_id, ...)
+     --     itera p_calves, crea animal + animal_profile por ternero heredando v_est (NO un est del payload),
+     --     inserta birth_calves por cada uno, puebla calf_id con el primero. Rollback total si cualquiera falla.
+     -- ... cuerpo a cargo del implementer ...
+     return v_birth_event_id;
+   end; $$;
+   ```
+
+2. **La autorización se deriva del `establishment_id` de la fila real de la madre** (`select establishment_id into v_est from animal_profiles where id = p_mother_profile_id`), leída por dentro del `SECURITY DEFINER`, y se valida con `has_role_in(v_est)`. **Nunca** se confía en un `establishment_id` (ni en cualquier otra columna de tenant) que venga en el payload o en un parámetro. Como el RPC bypassea toda RLS por dentro, esto es la única defensa contra que un caller del tenant A pase `p_mother_profile_id` del tenant B y cree el parto/terneros en B (mismo bug que `apply_auto_transition`, SEC-HIGH-01). Idéntico al patrón de `exit_animal_profile` (deriva `v_est` de la fila real) y `soft_delete_event` (`0041`).
+
+3. **Herencia de tenant en cada ternero**: cada `animal_profile` de ternero creado hereda `v_est` (el establishment derivado de la madre), no un valor del payload. El rodeo es el de la madre (`R9.1`). El RPC no acepta `establishment_id`/`rodeo_id` de cliente.
+
+4. **Cierre de la superficie RPC** (patrón obligatorio post-SEC-HIGH-01, con firma tipada completa):
+
+   ```sql
+   revoke execute on function public.register_birth(uuid, date, jsonb) from public, anon;
+   grant  execute on function public.register_birth(uuid, date, jsonb) to authenticated;
+   notify pgrst, 'reload schema';
+   ```
+
+   `register_birth` **sí** debe ser invocable por `authenticated` (es el camino de carga de mellizos del cliente) — a diferencia de `apply_auto_transition`, que NO debía y fue revocado a los tres roles. El `revoke ... from public, anon` cierra el `EXECUTE TO PUBLIC` por default y el acceso anónimo; el `grant ... to authenticated` con firma tipada deja el RPC abierto solo a usuarios logueados.
+
+5. **Test obligatorio (`tasks.md` + suite)**: un caller del tenant A que invoque `register_birth(p_mother_profile_id = <perfil del tenant B>, ...)` debe recibir **`42501`** y **no crear nada** (ni evento, ni animales, ni `birth_calves`). El camino feliz (madre del propio tenant) crea el parto + N terneros en una transacción.
+
+> **Reconciliación trigger mono ↔ RPC N — camino firme, sin ambigüedad (SEC-SPEC-02)**: el reparto entre el trigger as-built y el RPC nuevo queda **fijo** así (se elige UNA partición, no se deja a criterio):
+> - **Exactamente 1 ternero (caso común)**: lo maneja el **trigger BEFORE INSERT `tg_reproductive_events_create_calf`** (`0031`), que se dispara cuando el cliente inserta directo un `reproductive_events` de `event_type='birth'` con los campos `calf_*` del propio evento. La migration `0045` lo **extiende** para que, además de setear `calf_id`, inserte la fila correspondiente en `birth_calves(birth_event_id, calf_profile_id)`. Este camino conserva el comportamiento as-built (ya cubierto por tests) y **no** crea superficie RPC nueva: la autorización la da la policy de INSERT de `reproductive_events` (`has_role_in`), el INSERT a `birth_calves` lo hace el trigger `SECURITY DEFINER` (no el cliente, coherente con SEC-SPEC-04).
+> - **N ≥ 2 terneros (mellizos)**: lo maneja **exclusivamente** el RPC `register_birth` especificado arriba. El cliente **no** inserta el `reproductive_events` directo en este caso: llama al RPC con `p_calves` de longitud ≥ 2. El RPC inserta el evento de parto, los N `animal_profiles` y las N filas de `birth_calves` en una transacción atómica con rollback total (`R9.4`/`R9.5`), todo bajo el contrato de autorización firme de arriba (`v_est` derivado de la fila real de la madre, `has_role_in` antes de cualquier INSERT, `revoke/grant` + `search_path`).
+>
+> El implementer **puede** unificar ambos caminos enrutando también el caso 1-ternero por `register_birth` (con `p_calves` de longitud 1), si lo prefiere por simetría — pero **solo** bajo la condición de que (i) el conteo de partos siga siendo por evento `birth` (nunca por ternero / fila de `birth_calves`) y (ii) se respete íntegro el contrato de seguridad firme de arriba (firma tipada, `v_est` derivado de la fila real, `has_role_in` antes de los INSERT, `revoke ... from public, anon` + `grant ... to authenticated` + `notify`). Lo que **NO** se difiere es la firma ni el contrato de seguridad del RPC: quedan firmes. Lo único a cargo del implementer es el **cuerpo** de creación de los N terneros.
+
+El trigger uno-a-uno as-built queda como base del comportamiento mono-ternero (válido para un solo ternero, el caso común; `0045` lo extiende para poblar `birth_calves`):
+
+```sql
+-- 0031_calf_creation.sql (as-built mono-ternero; 0045 lo extiende para poblar birth_calves)
 create or replace function public.tg_reproductive_events_create_calf ()
 returns trigger language plpgsql security definer
 set search_path = public as $$
@@ -1595,6 +1968,8 @@ grant execute on function public.animal_timeline (uuid) to authenticated;
 
 Cubre **R10.1** (extendido), **R10.2**.
 
+> **R2.12.1 (sesión 17)**: `animal_timeline` **no** filtra por `rodeo_data_config.enabled` ni por `field_definitions.active`. Renderiza todos los eventos históricos del perfil aunque su data_key haya sido destildado o el field deshabilitado — el historial es siempre visible. Esta función ya cumple R2.12.1 sin cambios; la requirement solo lo asienta. La marca de "corregido" para eventos editados/borrados (R6.14) es responsabilidad de presentación del cliente; el soft-delete ya excluye del timeline normal las observaciones borradas (`deleted_at IS NULL` en el WHERE) — para mostrar "X corregido" el cliente puede consultar aparte o el implementer puede exponer una variante con `include_deleted`.
+
 ### Inmutabilidad de identificadores post-alta (R4.13)
 
 Migration nueva que bloquea por trigger cualquier UPDATE de `animals.tag_electronic` o `animal_profiles.idv`. `visual_id_alt` sigue editable.
@@ -1649,8 +2024,9 @@ Notas:
 - `visual_id_alt` queda explícitamente **fuera** del bloqueo: es texto libre que en la práctica se carga incompleto al inicio.
 - **Refinamiento 2026-05-26**: la inmutabilidad de `tag_electronic` e `idv` es **post-completitud, no post-alta**. Una vez que el campo tiene valor, no se puede cambiar. Pero `NULL → valor` está permitido para soportar el caso "animal cargado sin caravana al que después se le pone una" (spec 09 R7/R8 — asignación de caravanas). La distinción semántica: completar información que faltaba ≠ reescribir identidad. El primer caso preserva trazabilidad; el segundo la rompe.
 - Tests requeridos (T2.x correspondiente): caso permitido (`NULL → 'ARG001'`) y caso prohibido (`'ARG001' → 'ARG002'`) validados por separado. También bloquear `valor → NULL` (defensivo).
+- **TAG no reusable + corrección (sesión 17, R5.6 / R4.13.b)**: el unique parcial `animals_tag_unique` está acotado a `tag_electronic is not null and deleted_at is null`. Por eso un TAG cargado por error se corrige con **soft-delete del `animal` (+ su `animal_profile`)** —que lo saca del índice parcial y **libera** el TAG— seguido de un **alta correctiva** con el TAG correcto. Esto es consistente con SENASA: el chip físico es único de por vida; acá se reasigna el registro lógico de un alta errónea, no se recicla un chip. **Error accionable al escanear un TAG ya existente** (`R5.6`): la búsqueda por TAG (`R5.1`, primitive consumida por spec 09) debe poder distinguir el caso "TAG existe en un animal **activo**" del caso "TAG existe en un animal **dado de baja**" (`status ≠ active`, `deleted_at IS NULL`) para que el cliente arme el mensaje *"Este TAG pertenece a `<animal>`, dado de baja el `<fecha>`."*. A nivel datos, la query de búsqueda por TAG retorna el animal dueño + su `status`/`exit_date` para que spec 09 construya el copy. Un TAG de un animal **soft-deleted** ya no aparece (índice parcial), así que un alta con ese TAG es aceptada (alta correctiva).
 
-Cubre **R4.13**.
+Cubre **R4.13**, **R5.6** (a nivel primitive de búsqueda).
 
 ## Row Level Security (resumen)
 
@@ -1666,8 +2042,9 @@ Cubre **R4.13**.
 | `animal_events` (Híbrido, `'observacion' \| 'otro'`) | `has_role_in(establishment_id)` | `has_role_in(establishment_id)` | `author_id = uid() OR is_owner_of` + trigger enforce edit_window | — (soft via `deleted_at`) |
 | `semen_registry` | `has_role_in` | `has_role_in` | `is_owner_of` | — |
 | `animal_category_history` | `has_role_in` | (trigger) | — | — |
+| `birth_calves` (sesión 17, mellizos R7.9) | `has_role_in` (via join a `reproductive_events`→`animal_profiles`) **+ `re.deleted_at IS NULL`** | **sin GRANT INSERT de cliente** — poblada solo server-side (trigger mono + RPC `register_birth`, SEC-SPEC-04) | — | — (CASCADE desde el evento) |
 
-Cubre **R11.1..R11.5**.
+Cubre **R11.1..R11.5**. La baja de animal (`R4.14`) se hace vía RPC `exit_animal_profile` (`SECURITY DEFINER`, re-valida `has_role_in AND (is_owner_of OR created_by = auth.uid())` — rol activo obligatorio, SEC-SPEC-01), no por UPDATE directo de cliente — mismo patrón que las RPCs de soft-delete (ver Changelog as-built). El alta de mellizos (`R7.9`/`R9.5`) usa el RPC firme `register_birth` (`SECURITY DEFINER`, deriva el establishment de la fila real de la madre + `has_role_in` antes de cualquier INSERT, SEC-SPEC-02).
 
 ## Edge Functions
 
@@ -1700,6 +2077,8 @@ useAnimal(profileId: string): UseQueryResult<AnimalDetail>
 useAnimalTimeline(profileId: string): UseQueryResult<TimelineEvent[]>     // incluye 'observacion'
 useCreateAnimal(): UseMutationResult<...>                                  // primitive — UX completa en spec 09
 useUpdateAnimal(profileId: string): UseMutationResult<...>
+useExitAnimal(profileId: string): UseMutationResult<...>                   // baja/egreso (R4.14): status + exit_reason enum + exit_date/weight/price. Llama RPC exit_animal_profile (rol activo + owner|autor, SEC-SPEC-01).
+useRegisterBirth(): UseMutationResult<...>                                 // parto (R7.9/R9.5): 1 ternero = insert directo de reproductive_events (trigger crea ternero + birth_calves); N≥2 (mellizos) = RPC register_birth (SECURITY DEFINER, SEC-SPEC-02). El cliente NUNCA inserta birth_calves directo (SEC-SPEC-04).
 useCategories(systemCode: string): Category[]
 useAnimalObservations(profileId: string): { add, softDelete, edit }        // wrapper de animal_events ('observacion'|'otro')
 useRodeoDataConfig(rodeoId: string): { fields: FieldDefinition[], toggle, enableNonDefault }  // catálogo + estado por rodeo (owner-only mutaciones)
@@ -1743,6 +2122,7 @@ Heredando los buckets de spec 01 (`user_self`, `est_membership`, `est_data`, `es
 - `est_animal_profiles`: filas de `animal_profiles` por establishment (incluye `management_group_id`).
 - `est_animals_local`: filas de `animals` con `id` en el set de `animal_profiles.animal_id` del establishment. (No es global; cada cliente solo sincroniza los animales presentes en sus establishments.)
 - `est_weight_events`, `est_reproductive_events`, `est_sanitary_events`, `est_condition_score_events`, `est_lab_samples`: filas cuyo `animal_profile_id` cae en `est_animal_profiles`.
+- `est_birth_calves` (sesión 17, mellizos R7.9): filas de `birth_calves` cuyo `birth_event_id` cae en `est_reproductive_events`. Necesario para que la relación madre→N terneros del parto esté disponible offline.
 - `est_animal_events`: filas de `animal_events` cuyo `establishment_id` está en el set del usuario (filtrado por la columna denormalizada — no requiere join). Modelo Híbrido (refinamiento 2026-05-26).
 - `est_animal_category_history`: idem.
 - `est_semen_registry`: por establishment.
@@ -1855,8 +2235,13 @@ Dos consumos distintos del modelo de datos por rodeo:
 | Búsqueda fuzzy de `visual_id_alt` lenta | Índice GIN trigram + límite a 20 resultados. |
 | Sync de tablas de configuración con TTL stale | Forzar refresh al detectar cambio de schema vía version-stamp en `species` (a futuro). En MVP, refresh al primer login del día. |
 | Migration 0031 (ternero) muy compleja para revisar | Dividir en archivos: 0030 transitions, 0031 calf creation, 0032 timeline — cada uno auditable independientemente. |
-| Owner deshabilita en un rodeo un data_key que ya tiene eventos cargados | El cliente debe avisar antes de destildar ("este dato tiene N eventos cargados"); no se borran datos históricos. Validación de UX en spec 03/cliente. |
+| Owner deshabilita en un rodeo un data_key que ya tiene eventos cargados | El cliente debe avisar antes de destildar ("este dato tiene N eventos cargados"); no se borran datos históricos (R2.12.1). El `animal_timeline` no filtra por `enabled`/`active`, así que el historial sigue visible. Validación de UX en spec 03/cliente. |
 | Soft-delete de un lote con animales asignados | El cliente reasigna esos animales a `NULL` antes del soft-delete (o la capa de servicio lo hace); el FK no cascadea el soft-delete. |
+| Mellizos marcan mal a la madre como multípara (sesión 17) | Modelo uno-a-muchos (`birth_calves`): un parto = un evento `birth` con N terneros; `compute_category` cuenta **eventos** `birth`, no terneros (R7.9). Tests: parto con 2 terneros deja la madre con +1 parto, no +2. |
+| Baja de animal confundida con soft-delete (sesión 17) | `exit_animal_profile` cambia `status` con `deleted_at` intacto (NULL); el perfil queda archivado y visible (R4.14/R4.12). Tests: animal dado de baja sigue apareciendo en su ficha y en `R14.7`/`R5.8`. |
+| Dar de baja una madre/toro rompe la navegación a su ficha (sesión 17) | Nunca hard-delete de un perfil referenciado como `calf_id`/`bull_id`; las fichas toleran `status ≠ active` (R4.15). Tests: ternero con madre vendida navega a la ficha de la madre sin crash. |
+| Editar/borrar un tacto viejo deja la categoría desactualizada (sesión 17) | Trigger de recálculo `tg_reproductive_events_recompute_on_change` invoca `compute_category` si no hay override (R6.14). Tests: borrar el tacto que disparó la preñez revierte la categoría. |
+| Escanear un TAG ya usado da error opaco (sesión 17) | La búsqueda por TAG retorna el animal dueño + `status`/`exit_date` para que spec 09 arme el copy accionable, incluso si está dado de baja (R5.6). |
 
 ## Dependencias del spec
 
@@ -1876,6 +2261,32 @@ Ver `tasks.md` para el plan de ejecución paso a paso.
 ## Changelog
 
 > Audit trail del design. No se borra (mismo principio que los ADRs). Orden cronológico inverso.
+
+- **2026-05-30 (sesión 20) — Fold del Tier 1 del bloque backend (delta s17/s18) a design firme, migrations 0043+**. El backend de spec 02 está `done` (0013-0042); este bloque reabre un incremento. Se **promueven a diseño firme** (con números de migration concretos 0043+) los 5 ítems del Tier 1 que la sesión 17 había dejado como "propuesta de diseño". El SQL queda como **especificación firme**; el implementer escribe los `.sql` + tests. Cambios en `design.md`:
+  - **Nueva sección "Fold del Tier 1"** con mapa de migrations: `0043` (`created_by`) · `0044` (`exit_reason` enum + RPC baja) · `0045` (`birth_calves`) · `0046` (recálculo de categoría) · `0047` (cambio de rodeo mismo-sistema). Bloque explícito de "FUERA del Tier 1" (Tier 2/Tier 3 DEFERIDO + transferencia = feature 11).
+  - **Item 1 — `created_by` (`0043`)**: firme que la columna **falta** en el as-built; se agrega FK nullable a `users(id)` + trigger BEFORE INSERT que **fuerza** `created_by = auth.uid()` server-side (`tg_force_created_by_auth_uid`, ver Endurecimiento Gate 1 / SEC-SPEC-03 abajo — la columna es load-bearing para authz, no se usa el helper "solo si NULL"). Nota de orden: `0043` antes que `0044` (el RPC de baja lee `created_by`).
+  - **Item 2 — `exit_reason` enum (`0044`)**: el bloque texto→enum pasa de "propuesta" a migration firme `0044`, con **backfill defensivo** (cualquier texto fuera del enum → `'other'`, vacío → `NULL`) antes del `ALTER`. El RPC `exit_animal_profile` queda en la misma migration; la nota "requiere `created_by`" se actualiza a dependencia firme de `0043`.
+  - **Item 3 — mellizos `birth_calves` (`0045`)**: tabla puente firme con **RLS** (establishment derivado de la madre vía `establishment_of_profile`). `select`-only para el cliente, poblada **solo** server-side (ver Endurecimiento Gate 1 / SEC-SPEC-04). Creación N terneros: trigger mono-ternero `0031` extendido para poblar `birth_calves` (caso 1) + RPC firme `register_birth` `SECURITY DEFINER` (caso mellizos, ≥2; ver SEC-SPEC-02); el trigger de transición de la madre se dispara una vez por evento `birth`. `compute_category` cuenta **eventos `birth` distintos**, no terneros (ya estaba en el comentario del SQL; queda firme). `calf_id` se conserva apuntando al primer ternero por compat.
+  - **Item 4 — recálculo de categoría (`0046`)**: el trigger `tg_reproductive_events_recompute_on_change` pasa a firme con sus dos `create trigger` (AFTER UPDATE OF `event_type,pregnancy_status,deleted_at` + AFTER DELETE), solo sobre `reproductive_events` (única tipada que dispara transiciones). Recomputa vía `compute_category`/`apply_auto_transition` si `category_override = false`; registra en `animal_category_history`.
+  - **Item 5 — cambio de rodeo mismo-sistema (`0047`, NUEVO)**: nueva subsección "Cambio de rodeo dentro del mismo sistema" — trigger `tg_animal_profiles_rodeo_same_system_check` (`SECURITY DEFINER`, BEFORE UPDATE OF `rodeo_id`) que exige `system_id` destino == origen, rechazando el cruce de sistemas (`R4.6`). Reemplaza el bloqueo total de la `R4.5.1` original de sesión 17.
+  - **DEFERIDO**: **Tier 2** (ramas `weaning`/`abortion`, targets pendientes de Facundo) marcado con nota explícita en "Transiciones automáticas"; **Tier 3** (razas SENASA + `castracion`) marcado en el bloque "FUERA del Tier 1". `breed` sigue texto libre; no se agrega `castracion`.
+  - **Nota de alcance global** del header actualizada para distinguir los bloques s17 ya promovidos a firme (Tier 1) de lo que sigue DEFERIDO.
+  - **Endurecimiento Gate 1 (FAIL → fix)**: el Gate 1 (security_analyzer modo `spec`) sobre el delta Tier 1 dio **FAIL** con 2 HIGH + 2 MEDIUM (reporte: `progress/security_spec_02-modelo-animal.md`). Los 4 findings se cerraron a nivel design **sin** escribir migrations (las escribe el implementer). Sin renumerar requirements:
+    - **SEC-SPEC-01 (HIGH) — `exit_animal_profile` (`0044`)**: la guarda de autorización pasa de `is_owner_of OR created_by = auth.uid()` a `has_role_in(v_est) AND (is_owner_of OR created_by = auth.uid())`. El `has_role_in` obligatorio impide que un autor cuyo rol fue desactivado (`user_roles.active = false`) dé de baja un animal de un campo del que ya no forma parte (misma clase que SEC-HIGH-01). Mismo patrón as-built que `soft_delete_animal_event` (`0041`).
+    - **SEC-SPEC-02 (HIGH) — RPC multi-ternero (`0045`)**: el RPC de mellizos pasó de **prosa** ("lo define el implementer") a **SQL firme** (`register_birth`): firma tipada `(uuid, date, jsonb)`, `set search_path = public`, `revoke execute ... from public, anon` + `grant execute ... to authenticated`, autorización vía `has_role_in(v_est)` con `v_est` **derivado de la fila real de la madre** (nunca de un `establishment_id` del payload), `has_role_in` **antes** de cualquier INSERT, y transacción atómica con rollback total si falla cualquier ternero (`R9.4`/`R9.5`). Reconciliación firme: el trigger mono-ternero `0031` maneja el caso 1; `register_birth` maneja N≥2.
+    - **SEC-SPEC-03 (MEDIUM) — `created_by` (`0043`)**: como `created_by` es ahora load-bearing para authz (`R4.14`), el trigger pasa de reusar `tg_set_created_by_auth_uid` ("setea solo si NULL", spoofeable en el INSERT) a `tg_force_created_by_auth_uid`, que **siempre** sobreescribe `new.created_by := auth.uid()` ignorando el valor del cliente.
+    - **SEC-SPEC-04 (MEDIUM) — `birth_calves` (`0045`)**: (a) `and re.deleted_at is null` agregado a la policy de SELECT (las filas dejan de ser visibles tras soft-delete del parto, consistente con `R12.3`); (b) **se quitó `insert` del grant** a `authenticated` — la tabla se puebla **solo** desde el flujo de parto `SECURITY DEFINER` (trigger mono + `register_birth`). El cliente conserva `select`. Cierra el INSERT directo que permitía fabricar parentescos falsos y el cruce de tenant del ternero.
+    - **Tests de no-bypass** declarados en `tasks.md` (T2.19): `exit_animal_profile` con autor-sin-rol (espejo de T2.18), `register_birth` cross-tenant, INSERT directo a `birth_calves` (debe fallar sin grant), y L2 (alta del ternero al pie no bloqueada por `rodeo_same_system_check` ni por el category check as-built).
+
+- **2026-05-29 (sesión 17) — Refinamiento de edge cases (Gate 0 retroactivo)**. Documenta el **cambio conceptual** de las decisiones de Raf de sesión 17; el SQL/migrations los escribe el implementer (los bloques nuevos marcados "(sesión 17 — propuesta de diseño)" son orientativos, no as-built). Cambios en `design.md`:
+  - **Baja / egreso de animal** (`R4.14`/`R4.15`): nueva subsección — `exit_reason` pasa a enum (`sale|death|transfer|culling|theft|other`); baja vía RPC `exit_animal_profile` (`SECURITY DEFINER`, re-valida `is_owner_of OR created_by = auth.uid()`, no UPDATE de cliente, mismo patrón que las RPCs de soft-delete); no es soft-delete (`deleted_at` intacto). Requiere `created_by` en `animal_profiles` (verificar/agregar contra as-built).
+  - **Mellizos / N terneros por parto** (`R7.9`/`R9.5`): reescrita la sección "Ternero al pie" — modelo uno-a-muchos con tabla puente `birth_calves(birth_event_id, calf_profile_id)`; el conteo de partos en `compute_category` cuenta **eventos** `birth`, no terneros (comentario actualizado en el SQL); el trigger mono-ternero queda como referencia del caso común. Añadidos bucket `est_birth_calves`, fila en la tabla RLS, hook `useRegisterBirth`.
+  - **Transiciones por edad no automáticas** (`R7.8`/`R4.7.1`): nota explícita de que no hay cron; rama propuesta de `weaning` en el trigger de transición; default para `birth_date IS NULL` (adulto por sexo) documentado y notado que **coincide con el comportamiento actual** de `compute_category`.
+  - **Recálculo de categoría al corregir eventos** (`R6.14`): nueva subsección con trigger propuesto `tg_reproductive_events_recompute_on_change` (recomputa vía `compute_category`/`apply_auto_transition` si no hay override); aclaración de que la edición/borrado de los 5 tipados es **sin ventana de tiempo** (las policies de UPDATE ya lo permiten; la ventana de 15 min es solo de `animal_events`) — corrige la lectura de spec 09 R5.5.
+  - **TAG no reusable + error accionable** (`R5.6`/`R4.13.b`): nota en la sección de inmutabilidad — el unique parcial libera el TAG al soft-deletear; la búsqueda por TAG retorna el animal dueño + `status`/`exit_date` para el copy de spec 09.
+  - **Timeline siempre muestra historial** (`R2.12.1`): notas en la plantilla de datos y en la cronología v2 — `animal_timeline` no filtra por `enabled`/`active`; aviso al owner al destildar un dato con eventos (cliente). Acotación de `R2.11` (activar un sistema nuevo exige seedear sus `system_default_fields`).
+  - **Hooks de cliente**: `useExitAnimal`, `useRegisterBirth`. **Riesgos**: 5 filas nuevas (mellizos, baja vs soft-delete, baja de madre/toro, recálculo al corregir, TAG ya usado).
+  - **Criterios de diseño propios (a validar por Raf/Facundo)**: tabla puente `birth_calves` (vs múltiples eventos `birth`); conservar `reproductive_events.calf_id` apuntando al primer ternero por compat; mapeo `weaning`→categoría (`ternera→vaquillona`, `ternero→torito`); RPC para la baja en vez de UPDATE de cliente.
 
 - **2026-05-28 (sesión 15) — As-built de la implementación Fase 1+2 (backend)**. Lo siguiente refleja el código realmente aplicado y **prevalece sobre las descripciones inline previas donde difieran**. Detalle en `progress/impl_02-modelo-animal.md` y `progress/review_02-modelo-animal.md`.
   - **Soft-delete vía RPC, no UPDATE de cliente** (migration `0041_soft_delete_rpcs.sql`): el soft-delete se hace con funciones `SECURITY DEFINER` `soft_delete_rodeo` / `soft_delete_management_group` / `soft_delete_animal_event` / `soft_delete_event(kind,id)`, **no** con un `UPDATE deleted_at` desde el cliente. Motivo: PostgREST rechaza (42501) el `UPDATE deleted_at` cuando la policy SELECT filtra `deleted_at is null` sobre la propia fila (exige que la fila post-update siga visible). Relajar la SELECT rompería R12.3. Cada RPC re-valida la MISMA autorización que la policy de UPDATE (`is_owner_of`/`has_role_in`, derivando el establishment de la fila real) y preserva R12.3. **Impacto en Fase 5 (PowerSync)**: la estrategia offline de borrado debe usar estas RPCs, no un write local de `deleted_at` — anotado en `CONTEXT/07-pendientes.md`.

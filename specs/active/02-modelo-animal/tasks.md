@@ -440,6 +440,18 @@ Patrón heredado de spec 01: tests Node nativo en `supabase/tests/`, login con u
 - **Aceptación**: T2.18 verde; T2.4/T2.5 (transiciones automáticas + override/revert) siguen verdes.
 - **Cubre**: SEC-HIGH-01, R11.x (aislamiento multi-tenant).
 
+### [x] T2.19 Tests de no-bypass del delta Tier 1 (Gate 1, modo `spec`, sesión 20)
+> Cierre de los findings del Gate 1 (FAIL) sobre el delta Tier 1. Ver `progress/security_spec_02-modelo-animal.md` y la sub-entrada "Endurecimiento Gate 1 (FAIL → fix)" del Changelog de `design.md`. Estos tests son **parte del contrato de seguridad firme** del fold; sin ellos el fold no cierra. Corren contra DB remota con `service_role` para verificar el estado real tras cada intento.
+
+- **Caso 1 — `exit_animal_profile` exige rol activo (SEC-SPEC-01, espejo de T2.18)**: un `authenticated` que es `created_by` del `animal_profile` **pero con `user_roles.active = false`** (rol desactivado/revocado en ese establishment) llama `rpc('exit_animal_profile', { p_profile_id, p_status: 'sold', p_exit_reason: 'sale', p_exit_date })` → recibe **`42501`** y, leído con `service_role`, el `status` del perfil **NO** cambió (sigue `active`) ni se setearon las columnas `exit_*`. Variante de control: el mismo perfil, con el `owner` (rol activo) → la baja **sí** procede.
+- **Caso 2 — `register_birth` no cruza tenant (SEC-SPEC-02)**: un `authenticated` con rol activo en el tenant A invoca `rpc('register_birth', { p_mother_profile_id: <animal_profile del tenant B>, p_event_date, p_calves: [{calf_sex:'male'}] })` → recibe **`42501`** y, con `service_role`, **no** se creó **nada**: ni `reproductive_events` de parto, ni `animals`/`animal_profiles` de ternero, ni filas de `birth_calves`. Variante de control: madre del propio tenant A → crea el parto + N terneros + N filas `birth_calves` en una transacción.
+- **Caso 3 — `birth_calves` no acepta INSERT directo de cliente (SEC-SPEC-04)**: un `authenticated` con rol activo en el tenant A, dueño de un evento `birth` propio, intenta `insert into birth_calves(birth_event_id: <parto propio>, calf_profile_id: <cualquier animal_profile>)` por PostgREST → **falla** (sin `GRANT INSERT` para `authenticated`: 42501 / permission denied) y no se crea fila. Verifica que la única vía de escritura es el flujo server-side (trigger mono / `register_birth`).
+- **Caso 4 — SELECT de `birth_calves` filtra evento soft-deleted (SEC-SPEC-04.a)**: tras soft-deletear el evento de parto (RPC `soft_delete_event('reproductive', <birth_event_id>)`), un `authenticated` con rol en el establishment **no** ve las filas de `birth_calves` de ese parto (0 filas por la policy con `re.deleted_at is null`); con `service_role` las filas siguen físicamente presentes (no se hard-deletearon).
+- **Caso 5 — `created_by` se fuerza server-side, no es spoofeable (SEC-SPEC-03)**: un `authenticated` con rol activo inserta un `animal_profile` pasando explícitamente `created_by = <uid de otro usuario>` en el payload → con `service_role`, la fila resultante tiene `created_by = <uid del caller real>` (el trigger `tg_force_created_by_auth_uid` lo sobreescribió, ignorando el valor del cliente). Corolario verificable de la cadena de authz de `R4.14`: ese otro usuario **no** puede dar de baja el animal vía la rama `v_creator = auth.uid()`.
+- **Caso 6 — L2: el alta del ternero al pie no la bloquean los triggers de validación (anexo del reporte)**: registrar un parto (mono o mellizos) sobre una madre de `(bovino, cría)` crea el/los ternero(s) con categoría `ternero`/`ternera` **del mismo `system_id` de la madre**, heredando establishment + rodeo. Verificar que el alta **no** es rechazada por `tg_animal_profiles_rodeo_same_system_check` (`0047`, item 5) — el ternero entra con el rodeo de la madre, sin cambio de rodeo, así que el trigger ni siquiera aplica (es `before update of rodeo_id`) — **ni** por `tg_animal_profiles_category_check` as-built (la categoría `ternero`/`ternera` pertenece al system del rodeo). El camino feliz debe pasar; es un test de no-regresión que blinda contra que el endurecimiento rompa el alta legítima.
+- **Aceptación**: 6 casos verdes (cada uno con su variante de control donde aplica). Suite Animal pasa de 19 a un número mayor según el desglose del implementer. T2.4/T2.5/T2.7/T2.18 siguen verdes.
+- **Cubre**: SEC-SPEC-01, SEC-SPEC-02, SEC-SPEC-03, SEC-SPEC-04, R4.14, R7.9/R9.5, R11.x (aislamiento multi-tenant).
+
 ## Fase 3 — Cliente: contextos y servicios base
 
 > **Estado**: pausado intencionalmente hasta que Raf retome el frontend con el stack del `ADR-013`. Las tareas quedan documentadas y listas para retomarse después.
@@ -691,7 +703,11 @@ T1.1 → T1.2..T1.7 (config + rodeos + plantilla de datos [3 tablas, 0016] + hel
 | R9.1..R9.4 | T1.21, T2.7 |
 | R10.1, R10.2 | T1.22 (v1) + T1.25 (v2 con `observacion`), T2.10, T2.15 |
 | R10.3 | T1.19, T2.4 |
-| R11.1..R11.5 | T1.11, T1.14..T1.18 (policies), T1.24 (RLS `animal_events`), T1.27 (RLS lote), T2.8 |
+| R11.1..R11.5 | T1.11, T1.14..T1.18 (policies), T1.24 (RLS `animal_events`), T1.27 (RLS lote), T2.8, T2.19 (no-bypass delta Tier 1) |
+| R4.14 (baja vía `exit_animal_profile`, authz rol activo) | design `0044` + T2.19 caso 1 (SEC-SPEC-01) |
+| R7.9 / R9.5 (mellizos, alta N terneros vía `register_birth`) | design `0045` + T2.19 casos 2/6 (SEC-SPEC-02) |
+| R4.1 (`created_by` load-bearing, forzado server-side) | design `0043` + T2.19 caso 5 (SEC-SPEC-03) |
+| SEC-SPEC-01..04 (Gate 1 delta Tier 1) | T2.19 |
 | R12.1..R12.3 | T1.8, T1.9, T1.14..T1.18 (campos deleted_at), T1.24, T1.27 |
 | R12.4 | T1.19, T2.4 |
 | R13.1 | T5.1 |
@@ -716,6 +732,7 @@ T1.1 → T1.2..T1.7 (config + rodeos + plantilla de datos [3 tablas, 0016] + hel
 
 > Audit trail de la evolución del plan de tareas. Orden cronológico inverso.
 
+- **2026-05-30 (sesión 20) — Endurecimiento Gate 1 (FAIL → fix) del delta Tier 1**: agregada **T2.19** (tests de no-bypass que cierran los 4 findings del Gate 1 modo `spec` sobre las migrations 0043-0047 propuestas). Seis casos: `exit_animal_profile` con autor-sin-rol activo → `42501`, status sin cambiar (SEC-SPEC-01, espejo de T2.18); `register_birth` cross-tenant → `42501`, no crea nada (SEC-SPEC-02); INSERT directo a `birth_calves` sin grant → falla (SEC-SPEC-04.b); SELECT de `birth_calves` filtra el parto soft-deleted (SEC-SPEC-04.a); `created_by` forzado server-side, no spoofeable (SEC-SPEC-03); L2 — el alta del ternero al pie no la bloquean `rodeo_same_system_check` ni el category check as-built. No se renumeró ningún requirement. Ver `progress/security_spec_02-modelo-animal.md` y el Changelog de `design.md`.
 - **2026-05-28 — Fix loop Gate 2 (FAIL → SEC-HIGH-01)**: agregada T2.18 (migration `0042` revoca EXECUTE de `apply_auto_transition` a public/authenticated/anon + test de regresión cross-tenant). Suite Animal pasa de 18 a 19 subtests.
 - **2026-05-28 — Refundición consolidada (ADR-020 lote + ADR-021 plantilla de datos)**:
   - **T1.6 reescrita**: migration `0016` ahora crea las **tres tablas** de plantilla (`field_definitions` catálogo global + `system_default_fields` + `rodeo_data_config`) + seed de 26 fields de cría + trigger de auto-poblado desde `system_default_fields`. Se eliminó el trigger de validación-por-sistema (el FK al catálogo global lo hace innecesario y se permite habilitar fields no-default). RLS de `rodeo_data_config` ahora permite INSERT al owner (caso "tambo + preñez").

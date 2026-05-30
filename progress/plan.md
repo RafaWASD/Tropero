@@ -27,7 +27,7 @@
 | 05-bluetooth-balanza | ❌ pending | ❌ pending | depende de hardware confirmado en día de campo |
 | 06-import-laboratorios | ❌ pending | ❌ pending | post-MVP esencialmente |
 | 07-reportes-basicos | ❌ pending | ❌ pending | post-MVP esencialmente |
-| 08-export-sigsa | ❌ pending | ❌ pending | crítico antes de julio 2026 (deadline SENASA) |
+| 08-export-sigsa | ❌ pending | ❌ pending | obligación SENASA vigente desde 1/1/2026 (Res. 841/2025). Research hecho (sesión 16): export TXT `RFID-SEXO-RAZA-MM/AAAA;…` a SIGSA web, ver `specs/active/08-export-sigsa/research-findings.md` |
 | 09-buscar-animal | ❌ pending (esperando turno tras spec 02) | ⏸ pausado (Fases 2-4 esperando design system) | spec aprobada 2026-05-26, **alineada y re-aprobada 2026-05-28** (consume plantilla ADR-021 + lote ADR-020; distinción form-fields vs data_keys; selector de lote en CREATE/EDIT). Status `deferred` por regla one_feature_at_a_time |
 
 **Design system**: en fase de exploración. Research curado de 48 screens hecho (`design/research-findings.md`, 22 Mobbin + 26 device). Dirección sin cerrar. Pendiente: decisión de dirección + Stitch + ADR + tokens canónicos.
@@ -57,11 +57,11 @@
 - **[IMPL]** C.2 spec 03 (MODO MANIOBRAS) — necesita 02+04+05+09; spec escrita JIT desde el `context.md` de Ola 0.
 
 **Ola 4 — compliance + post-MVP:**
-- **[IMPL]** D.1 spec 08 (SIGSA) — research ya hecho en Ola 0; aterrizar antes de julio 2026.
+- **[IMPL]** D.1 spec 08 (SIGSA) — research ya hecho en Ola 0; obligación ya vigente (1/1/2026), aterrizar pronto.
 - **[IMPL]** D.2 spec 06 (labs), D.3 spec 07 (reportes).
 
 **Dos vistas del orden:**
-- **Definir/refinar:** 03 → 04 → 05 → 08 (research) → 06 → 07. *(01/02/09 ya definidas.)*
+- **Definir/refinar:** ~~03~~ ✅ · ~~04 (no-hw)~~ ✅ · ~~08~~ ✅ (s18, context_ready) · **05** día de campo · **06** archivos CEDIVE · **07** uso real · **10 operaciones-rodeo** (context drafted) · **11 transferencia** (necesita Gate 0 propio). *(01/02/09 ya definidas + auditadas s17/s18.)*
 - **Implementar:** ~~02 backend~~ ✅ (sesión 15) → 01 fe → 02 fe → 04 → 09 → 05 → 03 → 08 → 06 → 07.
 
 ### Recomendaciones priorizadas — próximas sesiones (al cierre de sesión 15)
@@ -71,7 +71,7 @@
 **Ola 0 — lo que queda (en paralelo):**
 - **[P0] Cerrar design system (A.1) + ADR-018 bottom nav (A.2)** — Dueño: **Raf**. Es EL cuello de botella: bloquea todo el frontend (01, 02, 09 y luego 03). Hasta cerrarlo, el critical path del frontend está congelado. Output: ADR + tokens canónicos + design system.
 - **[P1] Agendar día de campo + prep hardware** — Dueño: **Raf**. Comprar multímetro, sacar el loopback del ESP32 (`CONTEXT/07`). Latencia de calendario/hardware; destraba specs 04/05 (escaneo BLE Allflex + Vesta TX) y la puerta BLE de 09/03. Arrancar ya.
-- **[P1] Research formato SIGSA/SIGBIOTRAZA (08)** — Dueño: **leader** (sin dependencias). Long-lead + crítico para julio 2026. Investigar el formato exacto que aceptan los sistemas SENASA → insumo para el `context.md` de 08.
+- ~~**[P1] Research formato SIGSA/SIGBIOTRAZA (08)** — Dueño: **leader** (sin dependencias)~~ ✅ **HECHO (sesión 16, 2026-05-28)**. Output: `specs/active/08-export-sigsa/research-findings.md`. Formato CONFIRMADO (TXT `RFID-SEXO-RAZA-MM/AAAA;…`, upload manual a SIGSA web). **Hallazgo lateral, VERIFICADO contra el articulado del BO**: el "deadline julio 2026" no existe en la norma vigente — cronograma real arranca 1/1/2026 (terneros al destete, Art. 3°) + reposición natural; plazo de declaración 10 días hábiles (Art. 8°), Res. SENASA 841/2025. Verificado contra el articulado en sesión 16 y **aplicado en docs base + ADRs** (CLAUDE.md/CONTEXT/feature_list/plan + ADR-002/005/009/017). Raf confirmó que "julio 2026" fue error mío (la norma se anunció jul-2025, Res. 530/2025, y rige desde 1/1/2026). Corrección cerrada.
 - **[P1] Validar seed de cría (26 fields) con Facundo** — Dueño: **Raf + Facundo**. Hoy TENTATIVO; sustenta el modelo de datos de spec 02. De-risk-ea; ajustable por migration sin reabrir spec. Atar a reunión con Facundo (quizás el mismo día de campo).
 - **[P2] Pre-refinar contexto de 04 bastón BLE (parte no-hardware)** — Dueño: **leader + Raf**. Barato, llena el buffer de refinamiento. UX/edge cases (doble lectura, no-lectura, desconexión, fallback manual) se cierran ahora; UUIDs/protocolo se finalizan tras el día de campo.
 
@@ -89,30 +89,27 @@
 Objetivo: cerrar las decisiones transversales que van a contaminar todo lo que se construya después si no se cierran ahora.
 
 ### A.1 — Cerrar design system canónico
-- **Estado**: `in_progress` (Raf, en exploración).
-- **Dueño**: Raf (con leader como soporte cuando se llegue al ADR).
-- **Dependencias**: ninguna.
-- **Pasos**:
-  - Raf revisa `design/research-findings.md` + inspiraciones en `design/inspiration/`.
-  - Raf decide dirección candidata (A híbrida con C, B con C, o pedir otra ronda).
-  - Raf descarga apps argentinas/agtech/competencia faltantes (Mobbin no las tiene).
-  - Raf usa Stitch con la dirección elegida para generar el flujo signup wizard de spec 01 como prueba.
-  - Cuando hay convicción → leader redacta ADR-018 (o el número que toque) + actualiza `docs/design-system.md` + `design/tokens.json` canónicos.
-- **Output**: ADR de design system + tokens canónicos + design system canónico.
-- **Bloqueante para**: A.2, B.1 (frontend de spec 01), todo el resto del frontend.
-- **Notas**: ver `progress/current.md` sesión 9 para detalle del research curado.
+- **Estado**: `in_progress` — **reencuadrado por ADR-023** (sesión 17, decisión validada por LLM Council).
+- **Dueño**: leader + implementer (deja de ser exploración manual de Raf en Stitch).
+- **Dependencias**: A.2 ✅ (bottom nav). Stitch **fuera del critical path**.
+- **Cambio de enfoque (ADR-023)**: el design system **NO se canoniza en abstracto primero**. Se **deriva de construir la home a mano** en Tamagui/Expo (test de cobertura). La dirección visual ya está aprobada (`design/stitch-iter-4/00-home-CANONICAL.png` como referencia, NO como código a portar). Stitch/Claude Design quedan como inspiración; Mobbin (MCP) para patrones móviles.
+- **Pasos** (orden invertido por el Council):
+  1. **B.0 — scaffold del stack ADR-013** (prerequisito; ver B.0 abajo). Sin esto no se puede construir ninguna pantalla.
+  2. Construir la **home a mano** en Tamagui/Expo ensamblándola con componentes (`BottomNav`, `Card`, `Button`, `Stepper`, `FormField`, `ListRow`) y tokens que se van derivando. Test de cobertura: lo que falte = backlog de componentes/tokens.
+  3. Validar la home corriendo en device frame real (gate de "primer try"; idealmente una pantalla-manga con Facundo/operario antes de dar por cerrado).
+  4. **Recién entonces** canonizar `tamagui.config.ts` + `docs/design-system.md` + librería de componentes.
+  5. Guardrail desde día 1: lint/check que falla ante color/spacing hardcodeado (oráculo de QA + defensa contra drift, ADR-023 §4).
+- **Output**: stack scaffoldeado + home corriendo + tokens y librería de componentes canónicos derivados + lint guardrail.
+- **Bloqueante para**: B.1 (resto del frontend de spec 01), todo el frontend.
+- **Notas**: ADR-023 documenta el workflow completo (componentes = deliverable, hand-craft vs generate, herramientas demotadas). Mockups previos en `design/stitch-iter-4/` = referencia de dirección.
 
 ### A.2 — Cerrar estructura de navegación principal (bottom nav)
-- **Estado**: `pending`.
+- **Estado**: `done` (2026-05-28, sesión 17).
 - **Dueño**: leader propone, Raf aprueba.
 - **Dependencias**: A.1 (al menos dirección elegida; no hace falta tokens canónicos todavía).
-- **Pasos**:
-  - Leader formaliza la estructura tentativa `[Inicio] [Animales] [⚡FAB Maniobra] [Reportes] [Más]` en un ADR.
-  - Validar con Raf que el FAB central comunica "Modo Maniobra" como acción más crítica.
-  - Validar que `Animales` cubre BUSCAR ANIMAL como tab dedicada (no submenú).
-- **Output**: `docs/adr/ADR-018-estructura-navegacion-principal.md` (siguiente número libre, el 015 fue eliminado en sesión 8 y los 016/017 se ocupan en esta sesión).
-- **Bloqueante para**: actualización del design.md de spec 01 (sección "Navegación raíz") + design.md de spec 09.
-- **Notas**: la estructura tentativa salió del análisis de Mercado Pago bottom nav en sesión 9.
+- **Output**: [`docs/adr/ADR-018-estructura-navegacion-principal.md`](../docs/adr/ADR-018-estructura-navegacion-principal.md) creado (`Accepted`) y agregado al índice. Formaliza el bottom nav de 5 items `[Inicio] [Animales] [⚡FAB Maniobra] [Reportes] [Más]` con FAB central elevado = MODO MANIOBRAS, tab Animales = puerta manual de BUSCAR ANIMAL, regla transversal del listener BLE (no es tab; activo en todas las pantallas excepto MODO MANIOBRAS). 5 alternativas evaluadas (drawer, 4 tabs sin FAB, FAB para Buscar Animal, +5 items, top tab bar).
+- **Bloqueante para**: actualización del design.md de spec 01 (sección "Navegación raíz") + design.md de spec 09 — ambas dejan de citar "ADR-018 pending" y referencian el ADR al implementar B.1.
+- **Notas**: la estructura tentativa salió del análisis de Mercado Pago bottom nav en sesión 9. El ADR la cierra como definitiva.
 
 ### A.3 — Escribir ADR-016 (terminología rodeo/sistema)
 - **Estado**: `done` (2026-05-26).
@@ -170,10 +167,23 @@ Objetivo: cerrar las decisiones transversales que van a contaminar todo lo que s
 
 Objetivo: tener la app funcional con identidad + modelo de datos + bastón + BUSCAR ANIMAL trabajando end-to-end.
 
-### B.1 — Frontend de spec 01 (Fases 3-8)
-- **Estado**: `blocked` por A.1 (design system).
+### B.0 — Scaffold del stack ADR-013 (prerequisito frontend)
+- **Estado**: `done` (2026-05-29, sesión 17). Implementer instaló las 3 capas críticas (Tamagui 2.0.0 + Expo Router ~56.2.7 + Reanimated 4.3.1/worklets 0.8.3 + gesture-handler + lucide-react-native + bottom-tabs peer), `tamagui.config.ts` provisional con tokens v4, migración a Expo Router (`app/app/` con `(tabs)` + FAB central elevado de ADR-018 como stubs). Verificado: typecheck verde, `check.mjs` verde (suites backend 19/19 intactas), `expo export` bundleó 3804 módulos sin error. Detalle en `progress/impl_B.0-scaffold-frontend.md`. **Desviaciones**: Reanimated 4 (no 3 como decía ADR-013 — `expo install` eligió la compatible con SDK 56 + worklets plugin); bottom-tabs instalado a mano (peer del Tabs); Node v20.13.1 < 20.19.4 recomendado por Expo (warning, conviene actualizar). Sin validación de render en device (no hay simulador local) — pendiente al construir la home.
 - **Dueño**: `implementer` → `reviewer`.
-- **Dependencias**: A.1 (design system canónico), A.2 (bottom nav).
+- **Dependencias**: A.2 ✅ (ADR-018 bottom nav), ADR-023.
+- **Por qué existe**: hallazgo de sesión 17 — `app/` es un Expo pelado (`App.tsx` placeholder; solo servicios `supabase`/`push`/`env` en `src/`). **El stack de ADR-013 (Tamagui + Expo Router + Reanimated) nunca se instaló.** Es prerequisito duro de cualquier pantalla.
+- **Pasos**:
+  - Instalar Tamagui + `@tamagui/config` + babel-plugin + Expo Router + Reanimated en `app/` (pnpm.cmd).
+  - `tamagui.config.ts` **provisional** sembrado con los tokens validados del design system v4 de Stitch (blanco neutro `#FFFFFF`/`#faf9f9`, verde botella `#1e5a3e`, bone `#F8F6F1`, terracota `#c84a2c`, Inter, touch-target ≥56px). Marcado como provisional → se endurece al construir la home (A.1).
+  - Migrar a estructura de Expo Router (`app/(tabs)/_layout.tsx`) con el shell de bottom-nav de ADR-018 (5 items + FAB central elevado) como **stubs navegables**.
+  - Verificar que bootea en Expo + `check.mjs` typecheck verde.
+- **Output**: app que arranca con el stack target + shell de navegación stub. Desbloquea A.1 paso 2 (home a mano).
+- **Bloqueante para**: A.1 (construir la home), B.1.
+
+### B.1 — Frontend de spec 01 (Fases 3-8)
+- **Estado**: `blocked` por B.0 (scaffold) + A.1 (design system derivado de la home).
+- **Dueño**: `implementer` → `reviewer`.
+- **Dependencias**: B.0 (scaffold ADR-013), A.1 (tokens + librería de componentes derivados), A.2 (bottom nav). Sigue ADR-023 (componentes = deliverable; hand-craft pantallas de alto impacto, generar las CRUD).
 - **Pasos**:
   - Releer `specs/active/01-identity-multitenancy/{design,tasks}.md`.
   - Agregar sección al design.md "Refinamientos post-research (2026-XX-XX)" con: estructura bottom nav del ADR-017, referencia a design system canónico, patrón de CTA dual de R6.5 si cambia con design system.
@@ -233,11 +243,11 @@ Objetivo: tener la app funcional con identidad + modelo de datos + bastón + BUS
 
 ---
 
-## Bloque D — Soporte y salida (orden flexible, antes de julio 2026)
+## Bloque D — Soporte y salida (orden flexible; obligación SENASA ya vigente desde 1/1/2026)
 
 ### D.1 — Spec 08 (export SIGSA/SIGBIOTRAZA)
 - **Estado**: `pending`.
-- **Crítico antes**: deadline SENASA julio 2026.
+- **Crítico**: obligación SENASA de identificación electrónica vigente desde 1/1/2026 (Res. 841/2025); declaración en 10 días hábiles.
 - **Pendiente investigación**: formato exacto SIGSA (ver `CONTEXT/07-pendientes.md`).
 
 ### D.2 — Spec 06 (import laboratorios CEDIVE)
@@ -266,6 +276,18 @@ Esto es red de seguridad. Si una sesión se corta antes de hacer los ADRs, estas
 
 ## Changelog del plan
 
+- **2026-05-29 (sesión 18 — tanda de refinamiento de contexto Gate 0 + audits profundos de todo lo pendiente)** — Raf pidió pasar por Gate 0 todo lo que quedaba por refinar + ver edge cases, y luego "audits profundos con refinamientos para aclarar todo". Resultado:
+  - **3 artefactos Gate 0 nuevos (APROBADOS por Raf)**: **08 SIGSA** `context.md` (catálogo de razas con código SENASA, RENSPA único opcional, marcador declarado **por (establecimiento, animal)** + export_log, validar-y-bloquear; **import a SIGSA web corroborado por 2 fuentes**, formato EXACTO = gate duro de upload real / login clave fiscal); **04 bastón** `context.md` parcial (no-hardware: reconexión automática, dedup por TAG ~3s, feedback vibración+sonido+visual; **hardware Allflex = bloqueante día de campo**); **auditoría de 09** `context.md` (D1 bloquear switch con flujo abierto, D2 transferencia→feature 11, D3 EDIT editable acotado + baja en sub-flujo). **08 y 04 → `context_ready`.**
+  - **Audits profundos (APROBADOS)** de 02/09/03/01 → contradicciones stale + gaps reales: **(02)** transición de **ABORTO** faltante (R6.2 tiene el evento, R7 no lo maneja → revierte categoría); multípara comprada (override manual + doc). **(03, refi s18)** contradicción rodeo-change corregida (**relajar R4.5.1** a "permitido dentro del mismo sistema"); parto/aborto/destete = **solo ficha** (parto/aborto→madre, destete→ternero), no maniobras; **castración NO maniobra** (evento individual + masivo); animal de otro campo en manga = avisar+saltar+sugerir bastonear-después. **(01)** `active_lost`+trabajo encolado (informar+descartar vía error de sync), guard del switch (D1), invitación a campo borrado (rechazar), restore de campo = no-MVP.
+  - **2 FEATURES NUEVAS** (ambas `pending`): **`11-transferencia-animal`** (re-parenting cross-tenant que **preserva historia**, **Gate 1**, sub-spec de 09 D2) y **`10-operaciones-rodeo`** (vista de grupo rodeo/lote con acciones masivas **vacunación/destete/castración**; selección todo+filtro+preview+skip-report; **nav = Inicio rodeo-céntrico, sin reabrir ADR-018**; `context.md` drafted, pendiente aprobación final).
+  - **Delta backend de spec 02 = BLOQUE** (s17+s18, reabre backend "done", planificar aparte): created_by, exit_reason enum, birth_calves, recálculo, weaning + catálogo de razas (3 migraciones), transición de aborto, data_key `castracion`, R4.11→MVP (transferencia re-parenting). **Delta spec 01**: active_lost/queued, switch guard, invitación-a-borrado, RENSPA opcional.
+  - **Items para Facundo** consolidados en `CONTEXT/07-pendientes.md`: categoría destino del aborto · efecto de categoría de castración (¿agregar `novillo`?) · marca-en-madre al destetar · lista de razas SENASA. **Enlace feature 06**: la devolución del lab (resultados) ya tiene lugar en el modelo (`lab_samples.result`); el parser CEDIVE = feature 06, diferida hasta tener archivos reales.
+  - **Diferidas confirmadas**: 05 balanza (día de campo entero), 06 labs (archivos reales CEDIVE), 07 reportes (uso real).
+  - `node scripts/check.mjs` verde. `feature_list.json` actualizado (08/04→`context_ready`, +10/+11, deltas en 01/02/09).
+- **2026-05-29 (sesión 17 cont. — refi de edge cases sobre specs 01 y 02, Gate 0 retroactivo)** — Antes de arrancar el frontend, Raf pidió refinar specs 01 y 02 (escritas pre-Gate-0) buscando edge cases. 2 auditorías en paralelo → ambas necesitaban refi. **8 decisiones de Raf** (vía AskUserQuestion): **(spec 01)** switch del header = dropdown rápido (campo actual + últimos 2 visitados + "Crear nuevo +") + "Mis campos" para la lista larga → `last_establishment_opened` pasa a REQUERIDO; crear campo requiere red (cambiar de campo activo sí offline). **(spec 02)** baja/egreso de animal = archivar con motivo (enum sale/death/transfer/culling/theft/other, preserva historia y vínculos, owner+autor); mellizos en MVP (parto con N terneros, compute_category cuenta partos no terneros); detección blanda de duplicado al alta (trigram); transiciones por edad NO automáticas por reloj (vía evento de destete/manual); corrección de eventos tipados libre por owner/autor + recálculo de categoría; cambio de rodeo bloqueado en MVP. **Gaps foldeados con default**: (01) estado `active_lost` + re-ruteo (cubre removido-en-vivo/campo-borrado/last_opened-muerto), persistir token de invitación cross-cold-start, orden+búsqueda en Mis campos, flujo guiado del owner único que se va, link single-use copy, accept-already-member copy, warning al borrar campo con N miembros, aviso-al-miembro-al-borrar = silencioso MVP, single-owner SPOF = limitación conocida; (02) baja de madre/toro preserva vínculo, timeline muestra historial aunque se destilde data_key, TAG no se reusa + error accionable, R2.11 garantía acotada, empty states → al refinar R14, entry_origin enum → backlog. **Aplicación delegada a spec_author** (editó requirements+design de ambas specs, no tocó código/migrations). **APROBADA por Raf el 2026-05-29** (incluidas las decisiones de criterio propio del spec_author: `birth_date` NULL→adulto-por-sexo, mellizos vía tabla puente `birth_calves`, destete ternera→vaquillona/ternero→torito, search bar Mis campos >~8 campos, últimos-2-visitados, dup ≥0.3). **Delta backend de spec 02 pendiente** (B.2.1, implementer): agregar `created_by` a `animal_profiles` (confirmado: falta), `exit_reason` text→enum, tabla `birth_calves` + conteo de partos en `compute_category`, trigger de recálculo al editar/borrar evento, `weaning` en enum event_type. Pendiente aparte: cerrar el diseño de la pantalla "Mis campos" (R6.6) — en discusión con Raf.
+- **2026-05-29 (sesión 17 cont. — workflow de frontend definido por LLM Council, ADR-023)** — Tras evaluar el cuello de botella de Stitch (output web no-Tamagui, no responsive, fricción MCP) + relevar herramientas nuevas vía web (Claude Design, TapUI, Bolt, etc. — ninguna genera Tamagui nativo), se pasó la decisión de workflow de frontend por el **LLM Council**. Veredicto → **ADR-023** (`Accepted`): (1) los **componentes son el deliverable, no las pantallas**; verdad canónica = `tamagui.config.ts` + librería RN. (2) Herramientas de diseño **demotadas a inspiración, cero handoff de código**; Stitch fuera del critical path; Mobbin para patrones. (3) **Hand-craft** las pantallas de alto impacto (wizard manga, estados vacíos/error/BLE), **generar** las CRUD con implementer agents. (4) **Guardrail**: lint que falla ante color/spacing hardcodeado (= oráculo de QA + defensa contra drift). (5) El design system **se deriva de construir la home a mano** (test de cobertura), NO se canoniza en abstracto. (6) Iterar en Expo con device frames reales. **Hallazgo crítico del leader**: `app/` nunca tuvo el stack de ADR-013 instalado (Expo pelado) → nuevo item **B.0 (scaffold)** como prerequisito duro, destrabable ya. **A.1 reencuadrado** (orden invertido: scaffold → home a mano → derivar tokens/componentes → canonizar). Hueco de producto "Mis campos" + landing por rol queda en `docs/backlog.md` (2026-05-29). Próximo: lanzar implementer para B.0.
+- **2026-05-28 (sesión 17 — P0 design: ADR-018 bottom nav)** — Cerrado **A.2** (estructura de navegación principal), una de las dos mitades del P0 design (la otra, A.1 design system, sigue siendo dueño Raf). Escrito `docs/adr/ADR-018-estructura-navegacion-principal.md` (`Accepted`) + índice. Formaliza el bottom nav de 5 items `[Inicio] [Animales] [⚡FAB Maniobra] [Reportes] [Más]` con FAB central elevado = MODO MANIOBRAS, tab Animales = puerta manual de BUSCAR ANIMAL (no submenú), y la regla transversal de que el bastón BLE es listener global (no una tab; activo en todas las pantallas excepto MODO MANIOBRAS). "Más" = settings + perfil + miembros/invitaciones + asignación masiva de caravanas + switch de establecimiento. 5 alternativas evaluadas (drawer, 4 tabs sin FAB, FAB para Buscar Animal, +5 items, top tab bar). Bloqueante levantado: las secciones de navegación raíz de design.md de specs 01 y 09 dejan de citar "ADR-018 pending". A.2 → `done`. Próximo ADR libre: **023** (reservado para el design system canónico de A.1). Cierre administrativo: resumen de sesión 16 movido de `current.md` a `history.md`. **Falta para destrabar el frontend**: A.1 (design system, dueño Raf — fix manual de Figma + canonización).
+- **2026-05-28 (sesión 16 — research SIGSA, Ola 0 P1)** — Ejecutado el research autónomo del formato de exportación SENASA (item P1 long-lead de Ola 0). 2 agentes web en paralelo (formato + regulatorio), ambos con fuentes oficiales. Output: `specs/active/08-export-sigsa/research-findings.md` (insumo pre-Gate-0, no spec). Resultados: (1) **formato confirmado** — TXT `RFID-SEXO-RAZA-MM/AAAA` por animal, separados por `;`, upload manual a SIGSA web (no API); feature viable hoy. (2) **Corrección de supuesto base**: el "deadline julio 2026" no es fecha legal vigente — el cronograma real (Res. SENASA 530/2025 + 841/2025) arranca 1/1/2026 con terneros + reposición natural, plazo de declaración 10 días hábiles. **Pendiente decisión de Raf** sobre actualizar el framing del deadline en CLAUDE.md/CONTEXT/feature_list/plan (no se tocó unilateralmente por la jerarquía de verdad). (3) SIGBIOTRAZA es competidor no integrable. Incertidumbres abiertas documentadas en §6 del doc (tabla de razas, cross-check con spec 02, validaciones server-side, Anexo de la Res). No se escribió el `context.md` de 08 todavía (sigue pending; el research adelanta el long-lead, no abre la feature). **Verificación + corrección del deadline (misma sesión)**: leído el articulado completo de la Res. 841/2025 en el BO (Arts. 1°–30°) → confirmado con cita que no existe "julio 2026" en la norma (cronograma 1/1/2026 terneros al destete, Art. 3°; plazo 10 días hábiles, Art. 8°; campos RFID+sexo+raza+fecha/mes-año nac., Art. 8°; vías oficina/SIGSA/SIGBIOTRAZA, Art. 8°; responsable el productor, Art. 5°). Raf aprobó el reword en docs base (CLAUDE.md, feature_list, CONTEXT/01, CONTEXT/08, plan.md) y luego confirmó que "julio 2026" fue error (la norma se anunció jul-2025, Res. 530/2025, rige desde 1/1/2026) → **ADRs 002/005/009/017 también corregidos** (005 y 017 con reword semántico). Ya no queda "julio 2026" fuera de las líneas que documentan la corrección. Hitos de CONTEXT/08 marcados "a re-evaluar" porque la obligación ya rige (hoy 2026-05-28 > 1/1/2026).
 - **2026-05-28 (sesión 15 — gate de refinamiento de contexto + reorden del roadmap)** — Raf pidió ordenar todo el desarrollo y resolver tres dolores: (1) specs largas que salían mal por contexto sin refinar (spec 02 reescrita ×2), (2) falta de política de orden entre spec-ear e implementar, (3) falta de un orden claro de qué definir/implementar primero. Cambios:
   - **Gate 0 de refinamiento de contexto** (ADR-022): estado nuevo `context_ready` + artefacto `context.md` (corto, conducido por el leader en charla con Raf) entre `pending` y `spec_ready`. Tres puertas humanas ahora (contexto → spec → código). Tocados `feature_list.json`, `scripts/check.mjs`, `docs/specs.md`, `.claude/agents/leader.md`, `.claude/agents/spec_author.md`, `AGENTS.md`, `CLAUDE.md`. Grandfathering de 01/02/09 (SDD hacia adelante).
   - **Política de pipeline** (ADR-022 + `docs/specs.md`): implementación WIP=1, spec buffer=1, refinamiento buffer=2–3. Alternar es correcto si es dirigido por el pipeline, no por humor.
