@@ -12,7 +12,7 @@ Solo developer construyendo aplicación móvil ganadera con los siguientes reque
 - **Offline-first** no negociable: peón en manga no tiene señal
 - **Bluetooth LE** robusto con múltiples conexiones simultáneas (bastón + balanza)
 - **Base de datos relacional** con relaciones complejas (animales / eventos / sesiones / labs)
-- **Tiempo a producción crítico**: deadline SENASA julio 2026
+- **Tiempo a producción crítico**: identificación electrónica bovina obligatoria por SENASA desde el 1/1/2026 (Res. 841/2025)
 - **AI assistance disponible** (Claude Max, Claude Code) — el stack debe ser uno donde la IA produzca código de alta calidad
 
 ## Decisión

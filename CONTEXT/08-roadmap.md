@@ -4,7 +4,7 @@
 
 **MVP enfocado en cría bovina**. Arquitectura preparada desde día 1 para extender a otros sistemas y especies, pero solo cría visible en UI.
 
-Deadline contextual: julio 2026 (SENASA — caravanas electrónicas obligatorias).
+Driver regulatorio: identificación electrónica obligatoria para terneros bovinos al destete desde el 1/1/2026 (Res. SENASA 841/2025); rodeo adulto por reposición natural; declaración ante SENASA en 10 días hábiles. (Corrección verificada en sesión 16 — antes se asumía un "deadline julio 2026" inexistente en la norma; ver `specs/active/08-export-sigsa/research-findings.md`.)
 
 ## Dentro del MVP
 
@@ -113,14 +113,14 @@ Cada uno con sus categorías, maniobras específicas, KPIs y reportes.
 ## Hitos del proyecto
 
 ### Hito 1 — Beta interno en el campo del vet socio en Chascomús
-**Target: pre-julio 2026** (antes del deadline SENASA)
+**Target: 2026, cuanto antes** — la obligación de identificación electrónica de terneros ya rige (1/1/2026), así que no hay "fecha de gracia"; el beta debe estar operativo lo antes posible. *(Hito a re-evaluar por Raf: la fecha original "pre-julio 2026" se basaba en un deadline inexistente en la norma.)*
 - MVP funcionando en producción real
 - Carga diaria de manga con vet socio + capataz
 - Validación de UX con feedback continuo
 - Iteración rápida sobre bugs y fricciones
 
 ### Hito 2 — Beta extendido
-**Target: post-julio 2026**
+**Target: segunda mitad de 2026**
 - Sumar 5-10 campos a través de la red del vet socio
 - Validación de pricing con productores reales
 - Estabilización de features core

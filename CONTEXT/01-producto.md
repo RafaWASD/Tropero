@@ -14,7 +14,7 @@ Una plataforma de gestión ganadera mobile-first para el mercado argentino. El p
 
 Las soluciones existentes en Argentina (principalmente Control Ganadero, que opera como monopolio) producen informes estáticos en PDF, sin identificación individual de animales, sin comparación histórica y sin análisis cruzado de datos. El productor recibe papeles que mira y archiva, no datos sobre los que pueda actuar.
 
-Hay además un driver regulatorio fuerte: desde julio 2026 las caravanas electrónicas son obligatorias para todo el ganado bovino bajo SENASA. Eso crea un deadline de mercado y fuerza la adopción de identificación electrónica.
+Hay además un driver regulatorio fuerte: desde el 1/1/2026 la identificación electrónica es obligatoria para los terneros bovinos al destete (Res. SENASA 841/2025), y el rodeo adulto queda cubierto por reposición natural. Cada identificación debe declararse ante SENASA dentro de los 10 días hábiles. Eso fuerza la adopción de identificación electrónica y crea demanda recurrente de la declaración.
 
 ## La propuesta de valor
 

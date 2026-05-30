@@ -32,7 +32,7 @@ Aplicación de gestión ganadera para el mercado argentino. MVP enfocado en sist
 
 Solo developer (Raf) trabajando en conjunto con un veterinario socio (50/50 equity) que aporta dominio y red comercial. Primer cliente beta: campo del padre del socio en Chascomús, Buenos Aires.
 
-Deadline contextual: trazabilidad electrónica SENASA obligatoria desde julio 2026.
+Driver regulatorio: identificación electrónica bovina obligatoria para terneros al destete **desde el 1/1/2026** (Res. SENASA 841/2025), con cobertura del rodeo adulto por reposición natural; cada identificación se declara ante SENASA en **10 días hábiles**. (El supuesto previo de un "deadline julio 2026" se corrigió y verificó en sesión 16 — ver `specs/active/08-export-sigsa/research-findings.md`.)
 
 ## Metodología
 

@@ -12,7 +12,7 @@ La pregunta arquitectónica abierta: ¿estos datos viven como un campo `comments
 
 Durante el discovery de BUSCAR ANIMAL (2026-05-26), Raf mencionó "permitir agregar comentarios" en la pantalla de edit del animal sin haber resuelto cuál es el modelo. El leader propuso explícitamente evaluar entre las dos opciones. Varios factores específicos de RAFAQ empujan hacia eventos estructurados:
 
-1. **SENASA obliga trazabilidad** desde julio 2026. Un historial granular y auditable es requisito regulatorio, no opcional. Si se empieza con nota plana, habrá que migrar y reconstruir cuando llegue la obligación.
+1. **SENASA exige identificación electrónica individual y su declaración** desde el 1/1/2026 (Res. 530/2025 + 841/2025), base de la trazabilidad individual del bovino. Un historial granular y auditable es requisito regulatorio, no opcional. Si se empieza con nota plana, habrá que migrar y reconstruir cuando crezca la exigencia de trazabilidad.
 2. **Multi-usuario con roles distintos**: el owner (productor), el vet, los peones (`field_operator`) y eventualmente el cliente vet con múltiples campos (post-MVP) dejan información con autoridad y propósito distintos. Que el peón sobreescriba lo que dejó el vet es un bug de producto, no una feature.
 3. **Reproducción ganadera necesita consultar eventos meses después**: el vet marca "celo detectado el 5/3", y nueve meses más tarde, cuando esa vaca pare, alguien tiene que poder ir hacia atrás y verificar el ciclo. Una nota plana no preserva esa cronología.
 4. **Pilar de analytics + benchmarking** del producto (uno de los 3 pilares en el posicionamiento, ver memoria `product_positioning`): requiere **eventos estructurados** que se puedan contar, filtrar y graficar. Texto libre suelto es invisible al motor de análisis.
@@ -86,7 +86,7 @@ Reglas de UX (no parte del schema, pero acoplado):
 
 **Positivas**:
 
-- **Trazabilidad granular nativa**. SENASA cubierto sin trabajo adicional cuando llegue julio 2026.
+- **Trazabilidad granular nativa**. La exigencia SENASA (vigente desde el 1/1/2026) queda cubierta sin trabajo adicional.
 - **Audit completo multi-usuario**. Quién dijo qué cuándo es base de datos consultable.
 - **Pilar de analytics habilitado desde el día 1**. Cualquier dashboard de reproducción, sanidad o productividad lee `animal_events` filtrando por tipo.
 - **Alertas y recordatorios escalables**. Features tipo "vacas a tactar en los próximos 7 días" o "animales sin movimiento en 60 días" son queries SQL, no proyectos.

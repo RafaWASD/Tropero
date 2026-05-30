@@ -11,7 +11,7 @@ El producto tiene un modelo de negocio definido conceptualmente (planes Vet Base
 1. Los **números exactos** de pricing (5/20/20 USD) son tentativos y se validan con el vet socio y con clientes reales durante la beta
 2. La **estructura de planes** podría refinarse (¿el plan Base tiene sentido como existe? ¿1 semana es el tiempo correcto?)
 3. **Construir billing real** (integración con gateway, gestión de suscripciones, dunning, facturación AFIP) toma 2-4 semanas de trabajo
-4. Antes del deadline SENASA (julio 2026), el tiempo es escaso. Cualquier semana invertida en billing es una semana menos en producto core.
+4. Con la obligación SENASA de identificación electrónica vigente desde el 1/1/2026, el tiempo es escaso. Cualquier semana invertida en billing es una semana menos en producto core.
 5. La beta gratuita (6-12 meses) cubre el primer período donde el producto está siendo refinado. No hay que cobrar en esa ventana.
 
 El riesgo de construir billing ahora es **construir lo equivocado**: si los planes cambian post-beta (probable), hay que refactorizar billing.

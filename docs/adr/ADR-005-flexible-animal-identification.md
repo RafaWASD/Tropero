@@ -8,8 +8,8 @@
 
 La identificación de animales en Argentina vive un período de transición regulatoria:
 
-- **Pre-julio 2026**: caravana visual (IDV) es lo dominante. TAG electrónico opcional.
-- **Desde julio 2026** (SENASA): TAG electrónico **obligatorio** para todos los nacimientos
+- **Hasta fines de 2025**: la caravana visual (IDV) es lo dominante; el TAG electrónico es opcional y conviven animales pre-existentes sin chip.
+- **Desde el 1/1/2026** (Res. SENASA 530/2025 + 841/2025): identificación electrónica **obligatoria** para los terneros al destete (o antes del primer movimiento); el rodeo adulto se cubre gradualmente por reposición natural.
 - **Cabañas y producción de élite**: identificación por tatuaje, marca a fuego, descripción detallada
 
 Adicionalmente, hay productores pequeños con animales sin caravana visible, identificados solo por características descriptivas o señas particulares (color, defectos, hierro).
@@ -36,7 +36,7 @@ Si forzamos que todo animal tenga TAG electrónico, dejamos fuera a una porción
 
 ### Solo TAG electrónico obligatorio
 - **Pros**: alineado con ley futura, datos limpios
-- **Contras**: deja fuera mercado actual hasta julio 2026, deja fuera cabañas con tatuaje, deja fuera ganado pre-existente sin chip
+- **Contras**: deja fuera al ganado adulto pre-existente sin chip (que solo se cubre gradualmente por reposición natural tras el 1/1/2026), deja fuera cabañas con tatuaje
 
 ### Solo IDV obligatorio
 - **Pros**: refleja realidad actual del campo
