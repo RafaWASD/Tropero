@@ -457,3 +457,26 @@ En curso al cerrar (continúa en `plan.md` A.1):
 - **Canonización del design system (cierre A.1 / ADR-023)**: `tamagui.config.ts` canónico, `docs/design-system.md` sin DRAFT, `design/tokens.json`, lint anti-hardcode (ADR-023 §4). Luego: dropdown del switch (R6.8.1) → "Mis campos" + `EstablishmentCard`. **Pausada** al pivotar al backend.
 
 _Cierre: Raf pivotea al bloque backend de spec 02 (sesión 20). Features 10/11 ya `context_ready`. El delta backend de spec 02 es un **bloque**, no un incremento acotado._
+
+---
+
+## Sesión 20 — Tier 1 backend spec 02 + canonización design + frontends (Animales/Mis campos) + día de campo 04 (2026-05-30)
+
+Sesión larga y multi-hebra (terminales en paralelo). Cerró el delta backend Tier 1 de spec 02, canonizó el design system (A.1), construyó dos pantallas de frontend, redactó spec 03 en paralelo y trajo un **hallazgo bloqueante de hardware** del día de campo.
+
+Hecho:
+- **Spec 02 — delta backend Tier 1 (DONE)**. Pipeline SDD completo en autónomo: `spec_author` foldeó Tier 1 (R4.1 `created_by`, R4.5.1 mismo-sistema, `exit_reason` enum, `birth_calves` + conteo de partos, recálculo R6.14) → **Gate 1 FAIL** (2 HIGH + 2 MEDIUM, clase SEC-HIGH-01) → endurecido (`has_role_in` en `exit_animal_profile`, RPC `register_birth` con SQL firme + grant acotado, `created_by` forzado server-side, `birth_calves` select-only + `deleted_at`) → **Gate 1 re-audit PASS** → `implementer` migrations **0043-0049** (aplicadas a remoto) → suite animal **19→28** verde (T2.19: 6 no-bypass + L2 + R4.5.1 + rollback) → `reviewer` APPROVED → **Gate 2 PASS** → ✅ **Raf aprobó**. **Tier 2/3 diferidos a Facundo** (targets aborto/destete, razas SENASA, efecto castración). Deuda L1 (`soft_delete_event` sin `has_role_in`) → backlog. Backlog s14-20 commiteado en commits temáticos.
+- **A.1 — design system v4 CANONIZADO** (cierra el item A.1 del plan). Draft "Campo Profundo" archivado en `design/explorations/`; `docs/design-system.md` reescrito como **v4 canónico** (blanco neutro / verde botella `#1e5a3e` / bone `#F8F6F1` / terracota, **light-only**, derivado del build per ADR-023); `tamagui.config.ts` des-provisionalizado; **lint anti-hardcode** (`scripts/check-hardcode.mjs`, cableado en `check.mjs`, 0 excepciones). Análisis pro (skill `design-review`) + **fix de contraste medido WCAG** (`textFaint` 2.40→4.03 redefinido terciario, `textMuted`/`terracota` recalibrados AA holgado para sol de manga). **Frontend DESTRABADO.** Colores de estado + dark → JIT/post-MVP.
+- **Frontend "Mis campos"** (spec 01 R6.6-R6.9, design-track). `EstablishmentCard` (variante A banner-strip, métrica hero adaptativa) + pantalla `mis-campos.tsx` (orden activo+alfabético, searchbar >8, CTAs) + `EstablishmentSwitcherDropdown` (R6.8.1, cableado al header de la home). Vetado CDP. **Fix latente cazado en el veteo**: `accessibilityRole` se filtraba al DOM en TODOS los botones (`Button.tsx`) → split por plataforma. Commit `fa753d3` (front-only).
+- **Frontend tab Animales** (spec 09 R1, puerta manual de BUSCAR ANIMAL 🔴 core). `AnimalRow` (fila MP-Actividad: avatar glifo-sexo/foto-JIT + ID hero que popea + "sin caravana") + `AnimalsTabScreen` (buscador XL permanente, chips de filtro, lista mock, estados sin-match R1.4 + vacío). Lluvia analizada (fila MP sobre card-foto/ID-gigante). Paleta de estado **diferida** (texto neutro). Vetado CDP 360+412 + estado sin-match. Commit `57cafe2`.
+- **[paralelo] Spec 03 MODO MANIOBRAS redactada** → `spec_ready`. 12 US / ~70 reqs + 28 tasks; tablas `sessions` + `maneuver_presets`, FK `session_id` en las 5 tablas de evento, gating capa 2. **Gate 1 pendiente** (schema-sensitive). 7 decisiones abiertas + 3 conflictos para Raf (design §9). Commit `2421cf3`.
+- **[día de campo] Spec 04 — hallazgo BLOQUEANTE** (leader + Raf, bastón conectado). El Allflex RS420 usa **Bluetooth Classic (SPP + iAP/MFi), NO BLE** → `react-native-ble-plx` (ADR-002) no puede hablarle. Android viable vía SPP nativo; iOS requiere cert MFi. TAG confirmado (ISO 11784/11785 FDX-B, 15 díg, prefijo 982); transmite en vivo por SPP (protocolo capturado COM9). `specs/active/04-bluetooth-baston/field-findings.md` + evidencia. Commit `f7aa050`. **Requiere ADR de transporte antes de foldear spec 04.**
+
+Pendiente / próximo (orden en `plan.md`):
+- 🔴 **ADR de transporte del bastón** (spec 04): SPP nativo Android / MFi iOS / bridge VESTA_BRIDGE. BLOQUEA spec 04 + revisa supuesto BLE de ADR-002/CONTEXT-05.
+- **Spec 03 Gate 1** (security_analyzer modo spec) + resolver las 7 decisiones abiertas + 3 conflictos antes de aprobar/implementar.
+- **Spec 02 Tier 2/3** → Facundo (targets de transición, razas SENASA, castración).
+- **Frontend**: ficha de animal (pantalla EDIT R5, destino del tap de `AnimalRow`); refinamiento hero-identificador de `AnimalRow` (IDV vs visual — duda de dominio para Facundo); routing landing-por-cantidad de "Mis campos" (Inc 4, R6.7 + active_lost R6.10); wiring de stats reales (backlog).
+- **Verificación dura 08**: formato EXACTO de SIGSA con upload real.
+
+_Cierre: Raf pidió commitear todo (4 commits: front Animales, spec 03, día de campo 04, cierre) y cerrar sesión. El hallazgo del bastón es el bloqueante de mayor prioridad para la próxima sesión._

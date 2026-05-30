@@ -89,7 +89,7 @@
 Objetivo: cerrar las decisiones transversales que van a contaminar todo lo que se construya después si no se cierran ahora.
 
 ### A.1 — Cerrar design system canónico
-- **Estado**: `in_progress` — **reencuadrado por ADR-023** (sesión 17, decisión validada por LLM Council).
+- **Estado**: ✅ **`done` (sesión 20)** — design system v4 canonizado (`docs/design-system.md` + `tamagui.config.ts` único, lint anti-hardcode, Campo Profundo archivado). Pasos 1-5 cumplidos. **Frontend destrabado.** — reencuadrado por ADR-023 (sesión 17, validado por LLM Council).
 - **Dueño**: leader + implementer (deja de ser exploración manual de Raf en Stitch).
 - **Dependencias**: A.2 ✅ (bottom nav). Stitch **fuera del critical path**.
 - **Cambio de enfoque (ADR-023)**: el design system **NO se canoniza en abstracto primero**. Se **deriva de construir la home a mano** en Tamagui/Expo (test de cobertura). La dirección visual ya está aprobada (`design/stitch-iter-4/00-home-CANONICAL.png` como referencia, NO como código a portar). Stitch/Claude Design quedan como inspiración; Mobbin (MCP) para patrones móviles.
@@ -206,16 +206,17 @@ Objetivo: tener la app funcional con identidad + modelo de datos + bastón + BUS
 - **Notas**: el seed de cría de `field_definitions` (26 fields) es TENTATIVO hasta validar con Facundo; ajustable por migration sin reabrir spec. Gate 1 de seguridad ya aplicó al refinar la spec (toca RLS/schema); Gate 2 sobre las migrations cuando estén implementadas.
 - **Notas**: el frontend de spec 02 se difiere — siguiendo el patrón de spec 01 donde el frontend va por separado integrado con cada feature siguiente.
 
-### B.3 — Implementación de spec 04 (BLE bastón)
-- **Estado**: `pending`.
+### B.3 — Implementación de spec 04 (transporte del bastón) — 🔴 supuesto BLE INVALIDADO (s20)
+- **Estado**: `blocked` por **ADR de transporte** (día de campo s20).
 - **Dueño**: `spec_author` → Raf aprueba → `implementer` → `reviewer`.
-- **Dependencias**: B.2 (modelo de animal en DB), día de campo (escaneo nRF Connect del Allflex RS420 para identificar UUIDs).
-- **Pasos**:
-  - Spec 04 ya existe como pending en feature_list. Validar si necesita refinar tras el research (probablemente no — es low-level BLE).
-  - Día de campo: escanear protocolo BLE del Allflex con nRF Connect (ver `CONTEXT/07-pendientes.md` sección hardware).
+- **Hallazgo bloqueante (s20)**: el día de campo confirmó que el **Allflex RS420 NO usa BLE** (Bluetooth Classic SPP + iAP/MFi). `react-native-ble-plx` (ADR-002) NO le habla. Ver `specs/active/04-bluetooth-baston/field-findings.md`. **Antes de implementar B.3 hay que decidir el transporte vía ADR**: SPP nativo Android (viable) / MFi iOS (barrera cert) / bridge VESTA_BRIDGE (ESP32). Esto invalida el plan original de "adaptador BLE GATT".
+- **Pasos** (actualizado):
+  - **ADR-024 candidato**: transporte del bastón (decisión arquitectónica, revisa ADR-002 + `CONTEXT/05`).
+  - Refinar/reescribir spec 04 según el transporte elegido (ya no es "low-level BLE" sino el módulo nativo del transporte).
   - Implementer hace conexión + listener global + integración con BUSCAR ANIMAL.
+  - Insumo firme independiente del transporte: `normalize.ts`/`isValidTag` (TAG ISO 11784/11785 FDX-B, 15 díg, prefijo 982).
 - **Output**: spec 04 done.
-- **Bloqueante para**: B.4 (BUSCAR ANIMAL usa el listener BLE global).
+- **Bloqueante para**: B.4 (BUSCAR ANIMAL usa el listener del bastón). La **puerta manual** de B.4 (tab Animales) NO depende del bastón y ya tiene frontend (s20).
 
 ### B.4 — Implementación de spec 09 (BUSCAR ANIMAL)
 - **Estado**: `pending`.

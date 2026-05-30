@@ -3,68 +3,36 @@
 > Este archivo se vacía al cerrar cada sesión y su resumen se mueve a `history.md`.
 > Mientras trabajás, **mantenelo actualizado en tiempo real**, no al final.
 
-## Sesión 20 — bloque backend spec 02 (delta s17/s18) (2026-05-30)
+## (sin sesión activa)
 
-Raf pivotea del track de diseño (s19, canonización pausada → `plan.md` A.1) al **bloque backend de spec 02**: el conjunto de cambios al backend (ya `done`, migrations 0013-0042) que se desprende de los refinamientos de Gate 0 + audits de s17/s18. Es un **bloque**, no un incremento acotado.
+Sesión 20 cerrada el 2026-05-30 — ver `history.md`. Arrancá la próxima sesión leyendo el protocolo de `CLAUDE.md` + `plan.md` + este estado.
 
-### Decomposición del bloque (lo que toca el backend de spec 02)
-**Tier 1 — listo, sin dependencia externa:**
-- `created_by` en `animal_profiles` (+ trigger BEFORE INSERT default `auth.uid()`). Confirmado: falta.
-- `exit_reason` text → enum (`sale|death|transfer|culling|theft|other`).
-- Tabla puente `birth_calves` (1 parto → N terneros) + `compute_category` cuenta **partos distintos** (no terneros) + trigger de alta de ternero (0032) soporta N terneros.
-- Trigger de **recálculo de categoría** al editar/borrar un evento tipado que disparó transición (R6.14), si no hay override.
-- **R4.5.1 relajada**: permitir cambio de `rodeo_id` **dentro del mismo sistema** (validación en trigger).
-
-**Tier 2 — listo con default, Facundo confirma el target:**
-- Rama de **destete** (`weaning`): ternero→torito, ternera→vaquillona (R7.8, target propuesto).
-- Rama de **aborto** (`abortion`): `vaquillona_prenada` → `vaquillona` (único estado "preñada" en cría; revierte + compute_category deja de contar preñez).
-
-**Tier 3 — BLOQUEADO (Facundo / research):**
-- **Castración**: data_key `castracion` (se puede sembrar) + **efecto de categoría** (¿agregar `novillo`? ¿solo sanitario?) → Facundo.
-- **Catálogo de razas SENASA** + migración de `breed` (texto→FK, incl. `reproductive_events.breed` + ternero hereda de la madre): bloqueado por la **tabla de códigos de raza** (manual SIGSA = PDF de imágenes, no extraíble) + lista de razas relevantes → Facundo.
-
-**FUERA de este bloque (features propias):**
-- **Transferencia re-parenting** (R4.11→MVP + RPC atómico) = **feature 11**, su propia spec + **Gate 1**.
-- `renspa` en establishments = delta de **spec 01**. Marcador SIGSA = impl de **feature 08**.
-
-### Plan de pipeline SDD para el bloque (a confirmar arranque)
-1. `spec_author` folda Tier 1 + Tier 2 en spec 02 requirements+design (Tier 3 como TENTATIVO/TODO).
-2. **Gate 1** (security_analyzer modo `spec`) — el bloque toca schema + triggers + RLS (schema-sensitive, ADR-019).
-3. `implementer` — migrations 0043+ + tests (suite animal).
-4. `reviewer`.
-5. **Gate 2** (security_analyzer modo `code`) — siempre.
-6. ⏸ Raf aprueba final.
-
-### En curso / próximo
-- **DECIDIDO (Raf, 2026-05-30): SOLO Tier 1 ahora.** Tier 2 (ramas aborto/destete) y Tier 3 (castración, razas) → se ven con Facundo. No se asumen los targets de transición.
-- **Tier 1 a implementar**: `created_by` en `animal_profiles` · `exit_reason` text→enum · `birth_calves` + conteo de partos en `compute_category` + trigger de ternero N-terneros · trigger de recálculo de categoría al editar/borrar evento (R6.14) · R4.5.1 relajada (rodeo mismo-sistema).
-- **Pipeline (estado real)**: ✅ `spec_author` foldeó Tier 1 en req (R4.1 `created_by`, R4.5.1 mismo-sistema, Changelog s20) + design (SQL de migrations 0043-0047). ✅ **Gate 1** corrió: **FAIL** (2 HIGH + 2 MEDIUM, misma clase que SEC-HIGH-01) → `spec_author` endureció (guarda `has_role_in` en `exit_animal_profile`, RPC `register_birth` con SQL firme + grant acotado, `created_by` forzado server-side, `birth_calves` select-only + filtro `deleted_at`) + T2.19 (6 no-bypass) → **Gate 1 re-audit PASS**. Reporte en `progress/security_spec_02-modelo-animal.md`. L1 (deuda `soft_delete_event`) → backlog. ✅ **`implementer` corrió** (Tier 1 backend): migrations **0043-0049** aplicadas a remoto (`migration list` Local=Remote=0001..0049), suite animal **19 → 28** verde (T2.19: 6 no-bypass + L2 + R4.5.1 + control de rollback atómico), `check.mjs` verde. Feature 02 pasó a `in_progress`. 3 desviaciones mecánicas documentadas en `progress/impl_02-tier1-backend.md` (birth_calves mono se puebla en AFTER INSERT por el FK; grant a service_role; compute_category re-emitida idempotente). ✅ `reviewer` **APPROVED** (`progress/review_02-tier1-backend.md`; 2 obs no-bloqueantes O1/O2). ✅ **Gate 2 PASS** (`progress/security_code_02-tier1-backend.md`; R1-NEW + R2-NEW cerradas y probadas con tests de estado reales, 0 findings HIGH). **⏸ AHORA: puerta humana FINAL — Raf aprueba el cierre del Tier 1.** Pendiente de commit (Raf decide); ver O1/O2 abajo.
-
-**Pendientes abiertas (orden en `plan.md`):**
-- ✅ **Canonización del design system (A.1) — CERRADA (sesión 20)**: Campo Profundo archivado en `design/explorations/`; `docs/design-system.md` reescrito como el **v4 canónico** (blanco neutro / verde botella `#1e5a3e` / bone `#F8F6F1` / terracota `#c84a2c`, **light-only**, derivado del build per ADR-023); `tamagui.config.ts` des-provisionalizado; **lint anti-hardcode** (`scripts/check-hardcode.mjs`, cableado en `check.mjs`) — 8 literales tokenizados, 0 excepciones; refs actualizadas (design/README, ADR-README, setup-frontend, FRONTEND-STATUS). **Frontend DESTRABADO.** Colores de estado + dark mode → JIT/post-MVP.
-- **Verificación dura 08**: formato EXACTO de SIGSA con upload real (Raf/Facundo).
-- **Día de campo**: hardware de 04 (UUIDs Allflex RS420) + 05 entera.
-- **Items para Facundo** (`CONTEXT/07`): categoría destino del aborto · efecto de castración (¿"novillo"?) · marca-en-madre al destetar · razas SENASA · seed de cría.
-
-_Última cerrada: sesión 19 — cierre P0 design (nav firmado + skill design-review) (2026-05-30). Ver `history.md`._
+**Lo más urgente para la próxima sesión (en orden):**
+1. 🔴 **ADR de transporte del bastón** (spec 04). El día de campo confirmó que el **Allflex RS420 NO usa BLE** (Bluetooth Classic SPP + iAP/MFi) → `react-native-ble-plx` (ADR-002) no aplica. Evidencia en `specs/active/04-bluetooth-baston/field-findings.md`. Decidir transporte: **SPP nativo Android** (viable) / **MFi iOS** (barrera cert) / **bridge VESTA_BRIDGE** (ESP32). Revisa el supuesto BLE de ADR-002 + `CONTEXT/05`. **BLOQUEANTE de spec 04.**
+2. **Spec 03 (MODO MANIOBRAS) → Gate 1** (security_analyzer modo spec, schema-sensitive) + resolver con Raf las **7 decisiones abiertas + 3 conflictos** (design §9) antes de aprobar/implementar.
+3. **Frontend** (track design, ADR-023, no toca el pipeline SDD): ficha de animal (pantalla EDIT R5, destino del tap de `AnimalRow`) · refinamiento hero-identificador de `AnimalRow` (IDV vs visual, duda de dominio para Facundo) · routing landing-por-cantidad de "Mis campos" (Inc 4, R6.7 + `active_lost` R6.10) · wiring de stats reales (backlog).
+4. **Spec 02 Tier 2/3** → bloqueado en Facundo (targets aborto/destete, razas SENASA, efecto castración).
 
 ## Estado del proyecto (al 2026-05-30)
 
-- **Backend `02-modelo-animal` DONE** (sesión 15): migrations 0013-0042 + suite animal 19/19 + reviewer APPROVED + Gate 2 PASS. **Se reabre un BLOQUE** por el delta s17/s18 (ver sesión 20). No hay feature `in_progress` ahora.
-- **`deferred`:** `01-identity-multitenancy` (backend done + tests; frontend en curso vía la home) · `02-modelo-animal` (backend done; frontend Fase 3+ pausado) · `09-buscar-animal` (spec aprobada + auditada s18; esperando turno).
-- **`context_ready`:** `03-modo-maniobras` (refinado s15 + audit s18) · `08-export-sigsa` · `04-bluetooth-baston` (parcial, hardware bloqueante) · **`10-operaciones-rodeo`** (nueva, aprobada s18) · **`11-transferencia-animal`** (nueva, aprobada s18, Gate 1).
+- **Backend `02-modelo-animal`**: base DONE (s15, migrations 0013-0042) + **delta Tier 1 DONE** (s20, migrations **0043-0049**, suite animal **28/28**, Gate 2 PASS, Raf aprobó). **Tier 2/3 diferidos a Facundo**. No hay feature `in_progress`.
+- **`deferred`:** `01-identity-multitenancy` (backend done; **frontend en curso**: home + "Mis campos" + switch dropdown construidos y vetados) · `02-modelo-animal` (backend Tier 1 done; Tier 2/3 + frontend Fase 3+ pendientes) · `09-buscar-animal` (spec aprobada; **frontend puerta manual = tab Animales construido y vetado**; backend find-or-create + BLE pendientes).
+- **`spec_ready`:** **`03-modo-maniobras`** (redactada s20 → requiere **Gate 1** + 7 decisiones abiertas).
+- **`context_ready`:** `08-export-sigsa` · `04-bluetooth-baston` (🔴 **hallazgo bloqueante s20**: RS420 no es BLE → ADR de transporte) · **`10-operaciones-rodeo`** · **`11-transferencia-animal`** (Gate 1 al spec-ear).
 - **`pending`:** `05-bluetooth-balanza` (día de campo) · `06-import-laboratorios` (archivos CEDIVE reales) · `07-reportes-basicos` (uso real).
-- **ADRs:** último cerrado ADR-023 (workflow diseño). Próximo libre: **ADR-024**.
-- **Bloque A del plan (P0 design):** A.2 (nav → ADR-018) **`done` + firmado**; A.1 (design system) **en canonización, pausada**; A.3–A.7 `done`.
+- **ADRs:** último cerrado ADR-023 (workflow diseño). **Próximo libre: ADR-024** — candidato fuerte: transporte del bastón (hallazgo spec 04).
+- **Bloque A del plan (P0 design):** **A.1 (design system) `done` + canonizado (s20)**; A.2 (nav → ADR-018) `done` + firmado; A.3–A.7 `done`. **Frontend destrabado** — se construye por componentes (ADR-023).
 
 ## Notas técnicas vigentes para el implementer
 
 - En PowerShell usar `pnpm.cmd` (no `pnpm`) — Cylance Script Control bloquea `.ps1`.
 - **Node ≥20.19.4 REQUERIDO** para el dev server de Expo (`expo start` corta con Node viejo; `check.mjs` igual corre). Raf en 24.16.0 vía nvm-windows.
 - **Device real bloqueado**: Expo Go SDK 56 no está en tiendas → iterar diseño por **web** (`pnpm.cmd web`); veredicto final en device = dev-build propio más adelante.
-- **Preview fiel del leader = CDP `Emulation.setDeviceMetricsOverride`** (NO `--window-size`, da falso recorte). Tubería en la skill `design-review`. Matar los `http.server`/Chrome headless al terminar.
+- **Preview fiel del leader = CDP `Emulation.setDeviceMetricsOverride`** (NO `--window-size`, da falso recorte). Tubería en `scripts/cdp-capture.py` + skill `design-review`. Matar el dev server + Chrome headless al terminar (`TaskStop`).
+- **Cero hardcode en pantallas** (ADR-023 §4): todo via tokens; lo que cruza a API no-Tamagui se lee con `getTokenValue`. Lint `scripts/check-hardcode.mjs` (cableado en `check.mjs`) falla ante hex/px literal en `app/app/**` + `app/src/components/**`.
 - En migrations: `GRANT` explícito a `authenticated` siempre — Auto-expose new tables está OFF.
 - Tests RLS/Edge/animal en Node nativo, no pgTAP/deno (Docker bloqueado). Corre todo `scripts/run-tests.mjs`.
 - RLS-on-RETURNING gotcha: el cliente NO debe usar `.insert().select()` en un solo roundtrip; split insert + select.
-- Migrations del bloque backend 02 arrancan en **0043+** (0013-0042 ya aplicadas).
+- Migrations backend: as-built llega a **0049**; spec 03 arranca en **0050+**.
 - **Nav (ADR-018)**: el FAB central elevado usa un `tabBarButton` custom en Expo Router. Stub navegable hasta implementar spec 03.
+- **BLE / bastón (s20)**: el Allflex RS420 NO es BLE (Bluetooth Classic SPP + iAP/MFi). El diseño BLE de spec 04 / ADR-002 no aplica al transporte real — pendiente ADR. El TAG es ISO 11784/11785 FDX-B (15 díg, prefijo 982); `normalize.ts`/`isValidTag` (R8) es insumo firme independiente del transporte.
