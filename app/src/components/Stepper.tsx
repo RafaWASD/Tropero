@@ -8,10 +8,11 @@
 // A la derecha: título (Inter 600, $textPrimary) + body (Inter 400, $textMuted)
 // debajo, + un slot opcional `children` (ej. el CTA full-width del paso activo).
 //
-// Cero hardcode (ADR-023 §4): diámetros/colores/espaciados via tokens. El único
-// valor crudo es el grosor de la línea conectora (1px hairline) y el grosor de
-// borde del círculo (2px), documentados como detalle de render — no son color ni
-// spacing semántico y no tienen token equivalente en la escala.
+// Cero hardcode de color/spacing (ADR-023 §4): diámetros/colores/espaciados/radios
+// via tokens (radio del círculo = $pill). Los únicos valores crudos son el grosor de
+// la línea conectora (1px hairline, prop borderWidth/width) y el grosor de borde del
+// círculo (2px): detalle de render, no color ni spacing semántico, sin token
+// equivalente en la escala — el lint no los marca (no son props de color/spacing).
 
 import { ReactNode } from 'react';
 import { getTokenValue, Text, View, XStack, YStack } from 'tamagui';
@@ -67,7 +68,7 @@ function StepRail({
       <View
         width={diameter}
         height={diameter}
-        borderRadius={9999}
+        borderRadius="$pill"
         alignItems="center"
         justifyContent="center"
         backgroundColor={state === 'active' ? '$primary' : '$surface'}

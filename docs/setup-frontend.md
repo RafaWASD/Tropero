@@ -148,7 +148,7 @@ Las MCPs son servidores que se conectan a Claude Code y le dan superpoderes. Una
 
 ### 1.4 — Tokens Studio for Figma (plugin, no MCP) — **PENDIENTE de cerrar design system**
 
-> ⚠ Esta sección quedó documentada **anticipadamente**. El design system aún no está cerrado (intento de formalizar prematuramente como ADR-015 fue eliminado) y `design/tokens.json` está marcado como draft exploratorio (ver `design/README.md`). **No importes el JSON a Figma como sistema canónico todavía** — primero terminamos la fase de inspiración + exploración con Stitch + decisión de mood. Las instrucciones que siguen son válidas técnicamente pero apuntan a tokens que aún pueden cambiar mucho.
+> ⚠ **SECCIÓN HISTÓRICA — superada por ADR-023 (sesión 20).** Describe un workflow de importar `design/tokens.json` a Figma (Tokens Studio) que **ya no aplica**: ADR-023 demotó las herramientas de diseño a inspiración y fijó **el código como fuente única** (`app/tamagui.config.ts`; ver `docs/design-system.md`). El `tokens.json` de "Campo Profundo" se archivó en `design/explorations/` y **no se mantiene un `tokens.json` paralelo**. Se conserva esto solo como referencia del formato Tokens Studio, por si a futuro se sincroniza con Figma (se generaría desde el config). Las instrucciones de abajo apuntan a un archivo que ya no vive en `design/tokens.json`.
 
 **Para qué (cuando llegue el momento)**: importar `design/tokens.json` como Variables nativas de Figma, en una sola operación. Sin esto tendrías que typear cientos de tokens a mano — paleta light + dark, escala tipográfica, spacing, radius, sombras.
 

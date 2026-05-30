@@ -1,34 +1,33 @@
 # /design — Recursos visuales de RAFAQ
 
-## Status (2026-05-26)
+## Status (2026-05-30)
 
-**Esta carpeta contiene drafts exploratorios, NO el design system canónico.**
+El **design system canónico (v4) ya está cerrado** (item A.1 del plan). Vive en:
+- **`docs/design-system.md`** — documento canónico (lectura humana).
+- **`app/tamagui.config.ts`** — fuente única de verdad de los tokens (ADR-023 §1).
 
-El archivo `tokens.json` se generó a partir del draft `docs/design-system.md` (que también está marcado como exploratorio). Se intentó formalizar este sistema como un ADR prematuramente (ADR-015, **eliminado el 2026-05-26**), sin completar la fase de exploración (inspiración + Stitch + comparación de moods opuestos).
+Esta carpeta guarda **recursos de apoyo** (inspiración, capturas, exploraciones), NO el sistema canónico.
 
-## Cómo usar lo que hay acá hoy
-
-- ✅ Como **input** para exploración de diseño (uno entre varios).
-- ✅ Como **referencia técnica** del formato Tokens Studio (estructura, sintaxis, themes).
-- ❌ **NO** importar a Figma como sistema final.
-- ❌ **NO** traducir a Tamagui en código.
-- ❌ **NO** tratar los hex/sizes como decisiones cerradas.
-
-## Qué falta antes de cerrar el sistema
-
-1. **Inspiración**: capturas de Dribbble + screens reales de Mobbin + apps de competencia (Allflex/Tru-Test) y referencia (John Deere, FieldView, Auravant, onX, Linear).
-2. **Exploración con Stitch**: generar 2-3 moods opuestos (no solo Campo Profundo) usando vibe design.
-3. **Comparación**: pantalla de signup en 2-3 moods, mismo contenido, ver cuál convence.
-4. **Convicción de Raf** sobre paleta, tipografía, densidad y tono.
-5. **Recién entonces**: ADR nuevo que supersede al -015, doc canónico, `tokens.json` cerrado.
-
-## Estructura cuando esté cerrado (futuro)
+## Estructura
 
 ```
 design/
-├── README.md              (este archivo, actualizado)
-├── tokens.json            (canónico, Tokens Studio)
-├── inspiration/           (capturas curadas que motivaron decisiones)
-├── moods/                 (variantes exploradas + descartadas + elegida)
-└── exports/               (assets exportados de Figma o Stitch)
+├── README.md              (este archivo)
+├── FRONTEND-STATUS.md     (estado/roadmap del frontend)
+├── design-brief-v1.md     (brief original, histórico)
+├── research-findings.md   (research de diseño, histórico)
+├── inspiration/           (capturas curadas: MP, John Deere, Auravant, Mobbin, etc.)
+├── explorations/          (exploraciones SUPERADAS — "Campo Profundo" archivado; ver su README)
+└── stitch-iter-*/         (iteraciones de Stitch; stitch-iter-4 = home + nav firmados)
 ```
+
+## Cómo se usa
+
+- ✅ `inspiration/` = referencia visual real (medir patrones, no estimar — ver skill `design-review`).
+- ✅ `explorations/` = ideas reutilizables JIT (componentes/a11y/dark del draft viejo), NO canónico.
+- ✅ `stitch-iter-4/` = la home + nav aprobados, como referencia de dirección.
+- ❌ Nada de esta carpeta es la fuente de tokens. Esa es `app/tamagui.config.ts` (+ `docs/design-system.md`).
+
+## Nota sobre Stitch / Figma
+
+ADR-023 **demotó** las herramientas de diseño a inspiración (ninguna genera Tamagui nativo; código = fuente). El workflow de importar `tokens.json` a Figma (Tokens Studio) que describía `docs/setup-frontend.md` quedó **histórico** — no se mantiene un `tokens.json` paralelo.

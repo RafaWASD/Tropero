@@ -107,7 +107,7 @@ function HomeHeader() {
       <View
         width={avatarSize}
         height={avatarSize}
-        borderRadius={9999}
+        borderRadius="$pill"
         backgroundColor="$surface"
         borderWidth={1}
         borderColor="$divider"
@@ -136,7 +136,7 @@ function ReadyBanner({ onDismiss }: { onDismiss: () => void }) {
         <View
           width={iconBox}
           height={iconBox}
-          borderRadius={9999}
+          borderRadius="$pill"
           backgroundColor="$greenLight"
           alignItems="center"
           justifyContent="center"

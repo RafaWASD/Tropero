@@ -126,16 +126,18 @@ Flujo cubierto (8 pantallas spec 01): Splash, Registro, Verificación Email, Ini
 
 ---
 
-## Qué falta para cerrar A.1 — REENCUADRADO por ADR-023 (sesión 17, LLM Council)
+## A.1 — design system ✅ CERRADO (sesión 20)
 
-⚠️ **Cambio de enfoque:** el design system NO se canoniza en abstracto. Se **deriva de construir la home a mano** en Tamagui/Expo. Esta home de Stitch (`design/stitch-iter-4/00-home-CANONICAL.png`) es **referencia de dirección visual, NO código a portar** (Stitch escupe HTML web, no Tamagui). Ver `docs/adr/ADR-023-workflow-diseno-frontend.md`.
+> **El design system v4 quedó canonizado.** Fuente única: `app/tamagui.config.ts` + `docs/design-system.md` (canónico). El draft "Campo Profundo" se archivó en `design/explorations/`. No se mantiene un `design/tokens.json` paralelo (ADR-023 §1, código = fuente). El **lint anti-hardcode** (`scripts/check-hardcode.mjs`, cableado en `check.mjs`) cierra el guardrail de ADR-023 §4: 8 literales tokenizados, 0 excepciones. El reencuadre histórico de ADR-023 se conserva abajo.
+
+⚠️ **Cambio de enfoque (histórico):** el design system NO se canoniza en abstracto. Se **deriva de construir la home a mano** en Tamagui/Expo. Esta home de Stitch (`design/stitch-iter-4/00-home-CANONICAL.png`) es **referencia de dirección visual, NO código a portar** (Stitch escupe HTML web, no Tamagui). Ver `docs/adr/ADR-023-workflow-diseno-frontend.md`.
 
 Orden nuevo:
 1. ~~Fix de la home~~ ✅ + ~~ADR-018 bottom nav~~ ✅ (sesión 17).
 2. **B.0 — scaffold del stack ADR-013** en `app/` (Tamagui + Expo Router + Reanimated + `tamagui.config.ts` provisional sembrado con los tokens v4 de abajo + shell bottom-nav stub). `app/` hoy es un Expo pelado, nunca se instaló el stack. → implementer.
 3. **Construir la home a mano** corriendo en Expo, ensamblada con componentes (`BottomNav`/`Card`/`Button`/`Stepper`/`FormField`/`ListRow`) + tokens que se derivan. Test de cobertura.
 4. Validar corriendo en device frame real (gate "primer try").
-5. **Recién entonces canonizar**: `tamagui.config.ts` definitivo + `docs/design-system.md` + `design/tokens.json` (Tokens Studio) + `design-brief` v2.
+5. ✅ **Canonizado** (sesión 20): `tamagui.config.ts` (sin "provisional") + `docs/design-system.md` (canónico). `design/tokens.json` (Tokens Studio) NO se recrea — código = fuente única (ADR-023 §1).
 6. **Lint guardrail** desde día 1: falla ante color/spacing hardcodeado (ADR-023 §4).
 
 **Tokens validados (design system v4 de Stitch) para sembrar el `tamagui.config.ts` provisional:** base blanco `#FFFFFF`/`#faf9f9` (neutro, sin tinte), verde botella `#1e5a3e`, bone `#F8F6F1` (cards), terracota `#c84a2c` (alertas), verde claro `#93cfac` (icon container), texto `#0F0E0C`, gris `#707972`, divisor `#E5E5E3`, Inter (700/600/500/400), touch-target ≥56px, radios 16px cards / pill botones.

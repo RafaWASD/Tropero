@@ -20,6 +20,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Pressable } from 'react-native';
 import { Text, YStack } from 'tamagui';
 
+import { shadows } from '../../tamagui.config';
+
 // Valores del design system (tokens) leídos en runtime para pasarlos a APIs
 // no-Tamagui (React Navigation tabBarStyle, color de los íconos lucide). Se leen
 // DENTRO de los componentes (no a nivel de módulo) para garantizar que el config
@@ -29,6 +31,9 @@ function navColors() {
     primary: getTokenValue('$primary', 'color'),
     white: getTokenValue('$white', 'color'),
     greenLight: getTokenValue('$greenLight', 'color'),
+    // Halo verde pálido translúcido del FAB (= $greenLight @ 45%). Token de color
+    // propio ($fabHalo) → la pantalla no hardcodea la rgba (ADR-023 §4).
+    fabHalo: getTokenValue('$fabHalo', 'color'),
     textMuted: getTokenValue('$textMuted', 'color'),
     divider: getTokenValue('$divider', 'color'),
     fabSize: getTokenValue('$fab', 'size'),
@@ -36,6 +41,18 @@ function navColors() {
     // parte del círculo sólido (~55%) asoma por encima del navbar (antes 0.33→21 lo
     // dejaba cortado a la mitad / medio enterrado).
     fabRaise: getTokenValue('$fabRaise', 'size'),
+    // Inset (magnitud) del anillo del halo respecto al círculo del FAB: 8px, DERIVADO
+    // en el config de (fabHalo - fab)/2. La pantalla aplica -fabHaloInset en los 4
+    // lados → no hardcodea el -8 (ADR-023 §4).
+    fabHaloInset: getTokenValue('$fabHaloInset', 'size'),
+    // Tamaño de los íconos de los 4 items planos del nav (lucide, API no-Tamagui).
+    navIcon: getTokenValue('$navIcon', 'size'),
+    // Tamaño del ícono ⚡ (Zap) dentro del FAB.
+    fabIcon: getTokenValue('$fabIcon', 'size'),
+    // Tamaño de fuente del label de los items (= 11px); cruza a tabBarLabelStyle.
+    navLabel: getTokenValue('$navLabel', 'size'),
+    // Padding superior de cada item del nav; cruza a tabBarItemStyle.
+    navItemTop: getTokenValue('$navItemTop', 'size'),
     // Alto de contenido del bottom-nav (insets.bottom se suma aparte). Intermedio:
     // $navBar (60), targets más grandes que MP por uso con guante (manga-friendly).
     navHeight: getTokenValue('$navBar', 'size'),
@@ -101,33 +118,32 @@ function ManiobraFab() {
           justifyContent: 'center',
           // El offset que eleva el botón vive en el CÍRCULO SÓLIDO (no en un wrapper).
           marginTop: -FAB_RAISE,
-          // El anillo absoluto asoma 8px alrededor; sin esto el Pressable lo recortaría.
+          // El anillo absoluto asoma fabHaloInset alrededor; sin esto el Pressable lo
+          // recortaría.
           overflow: 'visible',
-          // Sombra (provisional; se canoniza como token de elevación en A.1).
-          shadowColor: COLOR.primary,
-          shadowOffset: { width: 0, height: 4 },
-          shadowOpacity: 0.3,
-          shadowRadius: 8,
-          elevation: 6,
+          // Sombra del FAB: objeto de estilo canónico del config (shadows.fab) — no se
+          // hardcodean los valores acá (ADR-023 §4 / docs/design-system.md §5).
+          ...shadows.fab,
         }}
       >
         {/* Anillo verde pálido DECORATIVO detrás del FAB (estilo Mercado Pago):
-            $greenLight translúcido. position:'absolute' con inset -8px en los 4 lados
-            → NO ocupa lugar en el layout (no empuja FAB ni label) y asoma ~8px de
-            verde claro alrededor del círculo de 64 (diámetro ≈80 = fab+16). zIndex:-1
-            → pinta DETRÁS del círculo dark-green y del ⚡; solo asoma el anillo de 8px.
-            Opacidad ~0.45 (más sutil que el 0.55 anterior). */}
+            $fabHalo = $greenLight translúcido (rgb verde claro @ 45%, token de color del
+            config). position:'absolute' con inset -$fabHaloInset (8px, token derivado de
+            (fabHalo-fab)/2) en los 4 lados → NO ocupa lugar en el layout (no empuja FAB ni
+            label) y asoma 8px de verde claro alrededor del círculo de 64 (diámetro ≈80 =
+            fab+16). zIndex:-1 → pinta DETRÁS del círculo dark-green y del ⚡; solo asoma el
+            anillo. Color/inset por TOKEN, no literales (ADR-023 §4). */}
         <YStack
           position="absolute"
-          top={-8}
-          left={-8}
-          right={-8}
-          bottom={-8}
-          borderRadius={9999}
-          backgroundColor="rgba(147, 207, 172, 0.45)"
+          top={-COLOR.fabHaloInset}
+          left={-COLOR.fabHaloInset}
+          right={-COLOR.fabHaloInset}
+          bottom={-COLOR.fabHaloInset}
+          borderRadius="$pill"
+          backgroundColor="$fabHalo"
           zIndex={-1}
         />
-        <Zap size={28} color={COLOR.white} fill={COLOR.white} />
+        <Zap size={COLOR.fabIcon} color={COLOR.white} fill={COLOR.white} />
       </Pressable>
       {/* Label "Maniobra" anclado al FONDO de la celda. Posicionado absoluto contra el
           fondo: el FAB sube (fabRaise 35) sin arrastrar el texto. bottom={LABEL_BOTTOM} =
@@ -177,28 +193,31 @@ export default function TabsLayout() {
           height: COLOR.navHeight + navBottom,
           paddingBottom: navBottom,
         },
-        tabBarLabelStyle: { fontSize: 11, fontWeight: '500' },
+        // fontSize del label = $navLabel (11px, token leído con getTokenValue → no
+        // literal; cruza a la API tabBarLabelStyle de React Navigation).
+        tabBarLabelStyle: { fontSize: COLOR.navLabel, fontWeight: '500' },
         // Gap ícono↔label achicado un toque (nav "intermedio"): marginTop negativo
         // sobre el label lo acerca al ícono sin pegarlos (queda cómodo y legible,
         // NO tan junto como Mercado Pago — uso con guante / manga-friendly).
         tabBarLabelPosition: 'below-icon',
-        tabBarItemStyle: { paddingTop: 2 },
+        // paddingTop = $navItemTop (2px, token) → separa el ícono del borde de la barra.
+        tabBarItemStyle: { paddingTop: COLOR.navItemTop },
       }}
     >
       <Tabs.Screen
         name="index"
         options={{
           title: 'Inicio',
-          // Íconos lucide bajados de ~26 → 24 (nav "intermedio", más compacto sin
-          // exagerar): tamaño explícito, no el default del tab bar.
-          tabBarIcon: ({ color }) => <Home size={24} color={color} />,
+          // Íconos lucide a $navIcon (24px, token leído en COLOR.navIcon): tamaño
+          // explícito por token (cruza a la prop `size` de lucide), no literal.
+          tabBarIcon: ({ color }) => <Home size={COLOR.navIcon} color={color} />,
         }}
       />
       <Tabs.Screen
         name="animales"
         options={{
           title: 'Animales',
-          tabBarIcon: ({ color }) => <PawPrint size={24} color={color} />,
+          tabBarIcon: ({ color }) => <PawPrint size={COLOR.navIcon} color={color} />,
         }}
       />
       <Tabs.Screen
@@ -213,14 +232,14 @@ export default function TabsLayout() {
         name="reportes"
         options={{
           title: 'Reportes',
-          tabBarIcon: ({ color }) => <BarChart3 size={24} color={color} />,
+          tabBarIcon: ({ color }) => <BarChart3 size={COLOR.navIcon} color={color} />,
         }}
       />
       <Tabs.Screen
         name="mas"
         options={{
           title: 'Más',
-          tabBarIcon: ({ color }) => <Menu size={24} color={color} />,
+          tabBarIcon: ({ color }) => <Menu size={COLOR.navIcon} color={color} />,
         }}
       />
     </Tabs>

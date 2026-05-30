@@ -1,16 +1,20 @@
-// tamagui.config.ts — RAFAQ design tokens
+// tamagui.config.ts — RAFAQ design tokens (FUENTE ÚNICA CANÓNICA)
 //
-// PROVISIONAL — se endurece al construir la home (A.1, ADR-023).
+// Este archivo ES la fuente única canónica de tokens del frontend (ADR-023 §1):
+// color, spacing, tipografía, radios, touch-targets y elevación. Su LECTURA
+// HUMANA es docs/design-system.md (design system v4 canónico) — si hay conflicto
+// entre ese doc y este archivo, gana el código.
 //
-// Esta config siembra los tokens VALIDADOS del design system v4 (Stitch) que
-// están en design/FRONTEND-STATUS.md. NO es el design system canónico: ese se
-// DERIVA de construir la home a mano en Tamagui/Expo (ADR-023 §5). Hasta
-// entonces estos valores son la base de trabajo, no el contrato final.
+// Los valores de acá SON el v4 canónico: se derivaron de construir la home + el
+// bottom-nav a mano (las pantallas que Raf firmó), no en abstracto (ADR-023 §5).
+// Crece JIT: cuando una pantalla nueva necesite un token que no existe, se agrega
+// entonces — no se inventa por adelantado.
 //
 // Regla dura (ADR-023 §4): las PANTALLAS no hardcodean color/spacing. Todo valor
 // visual referencia un token de acá (ej. backgroundColor="$primary",
-// padding="$4", borderRadius="$card"). Este archivo es la ÚNICA fuente literal
-// de hex/px del frontend.
+// padding="$4", borderRadius="$card"); los valores que cruzan a APIs no-Tamagui
+// se leen con getTokenValue('$token', grupo). Este archivo es la ÚNICA fuente
+// literal de hex/px del frontend — lo garantiza el lint scripts/check-hardcode.mjs.
 //
 // Stack: ADR-013 (Tamagui v2). Base = defaultConfig de @tamagui/config/v4
 // (scales space/size/zIndex/radius + themes default de componentes), sobre la
@@ -19,7 +23,7 @@
 import { createFont, createTamagui, createTokens } from '@tamagui/core';
 import { defaultConfig } from '@tamagui/config/v4';
 
-// ─── Paleta canónica (design system v4, FRONTEND-STATUS.md) ───────────────────
+// ─── Paleta canónica (design system v4) ───────────────────────────────────────
 // Único lugar del frontend donde viven los hex literales.
 const palette = {
   // Fondos base: blanco neutro, sin tinte frío ni cálido.
@@ -27,16 +31,22 @@ const palette = {
   bg: '#faf9f9', // fondo base de la app (neutro)
   // Brand.
   primary: '#1e5a3e', // verde botella — brand primary + FAB + item activo
-  primaryPress: '#184a33', // estado pressed del primary (derivado, provisional)
+  primaryPress: '#184a33', // estado pressed del primary (derivado)
   // Surfaces.
   surface: '#F8F6F1', // bone — surface de cards (cálido, solo para cards)
   // Acentos.
-  terracota: '#c84a2c', // alertas / tertiary
-  greenLight: '#93cfac', // verde claro — icon containers
+  terracota: '#C0451F', // alertas / tertiary (contraste AA 4.86 sobre $bg; fix WCAG)
+  greenLight: '#93cfac', // verde claro — icon containers + halo del FAB
+  // Halo del FAB (ADR-018): greenLight (#93cfac = rgb(147,207,172)) al 45% de alpha.
+  // Es el MISMO verde claro translúcido — se expone como token de color propio para
+  // que el bottom-nav lo referencie ($fabHalo) en vez de hardcodear la rgba (ADR-023
+  // §4). RN/Tamagui no derivan alpha de un token de color, así que el rgba se escribe
+  // acá (única fuente literal) atado por comentario a greenLight.
+  fabHalo: 'rgba(147, 207, 172, 0.45)',
   // Texto.
   textPrimary: '#0F0E0C', // negro
-  textMuted: '#707972', // gris (labels secundarios, items inactivos del nav)
-  textFaint: '#A8A29D', // gris muted
+  textMuted: '#5C655F', // gris (labels secundarios, items inactivos del nav) — AA 5.74 sobre $bg (fix WCAG)
+  textFaint: '#807A74', // gris terciario — AA-large 4.03 sobre $bg (fix WCAG)
   // Líneas.
   divider: '#E5E5E3',
 } as const;
@@ -70,6 +80,7 @@ const tokens = createTokens({
     surface: palette.surface,
     terracota: palette.terracota,
     greenLight: palette.greenLight,
+    fabHalo: palette.fabHalo, // verde claro translúcido del halo del FAB (= greenLight @ 45%)
     textPrimary: palette.textPrimary,
     textMuted: palette.textMuted,
     textFaint: palette.textFaint,
@@ -101,7 +112,25 @@ const tokens = createTokens({
     // asoma ~8px de verde claro alrededor del círculo dark-green de 64 (diámetro ≈80).
     // No se consume como tamaño de wrapper (eso causaba el bug del halo que tomaba el
     // marginTop y tapaba el label); el inset -8 vive en _layout.tsx.
-    fabHalo: FAB_SIZE + 16, // = 80: diámetro efectivo del anillo (referencia del inset -8)
+    fabHalo: FAB_SIZE + 16, // = 80: diámetro efectivo del anillo (referencia del inset)
+    // Inset (magnitud positiva) del anillo del halo respecto al círculo del FAB.
+    // DERIVADO de la geometría: (fabHalo - fab) / 2 = (80 - 64) / 2 = 8 → el anillo
+    // se monta como hijo absoluto con top/left/right/bottom = -fabHaloInset (asoma 8px
+    // de verde claro alrededor del círculo de 64). La pantalla lo lee con getTokenValue
+    // y aplica el signo negativo, así NO hardcodea el -8 (ADR-023 §4).
+    fabHaloInset: (FAB_SIZE + 16 - FAB_SIZE) / 2, // = 8
+    // Tamaño de los íconos del bottom-nav (lucide Home/PawPrint/BarChart3/Menu). Cruza
+    // a una API no-Tamagui (prop `size` de lucide-react-native), se lee con getTokenValue.
+    navIcon: 24,
+    // Tamaño del ícono ⚡ (Zap) dentro del FAB central.
+    fabIcon: 28,
+    // Padding superior de cada item del bottom-nav (separa ícono del borde de la barra).
+    navItemTop: 2,
+    // Tamaño de fuente del label de los 4 items planos del nav (= font.size.$1 = 11px;
+    // micro-label bajo el ícono). Cruza a la API no-Tamagui tabBarLabelStyle de React
+    // Navigation (que pide un número), por eso vive como token de size leído con
+    // getTokenValue, no como literal en la pantalla.
+    navLabel: 11,
     // Cuánto sube el FAB sobre la barra (offset negativo del marginTop). Derivado
     // de fab * 0.55 → ~55% del botón por encima de la barra: el FAB FLOTA (la mayor
     // parte del círculo arriba de la línea del navbar, ~45% solapado dentro). No
@@ -115,20 +144,32 @@ const tokens = createTokens({
   },
 });
 
-// ─── Elevación / sombra ───────────────────────────────────────────────────────
-// Derivado al construir la home (A.1, ADR-023 §5): los cards necesitan una sombra
-// suave. Tamagui v4 NO expone tokens de sombra (shadowColor/Offset/etc. son props
-// de estilo, no un token escalar), así que la centralizamos como un OBJETO de
-// estilo exportado en vez de un token `$`. Sigue siendo la única fuente del valor
-// (las pantallas no lo hardcodean: importan `shadows.card`). PROVISIONAL: cuando se
-// canonice el design system se evalúa promover esto a un sistema de elevación.
+// ─── Elevación / sombra (canónico) ────────────────────────────────────────────
+// Tamagui v4 NO expone tokens de sombra (shadowColor/Offset/etc. son props de
+// estilo, no un token escalar), así que la elevación se centraliza como OBJETOS
+// de estilo exportados en vez de tokens `$`. Siguen siendo la única fuente del
+// valor: las pantallas/componentes los importan (Card → shadows.card; el FAB del
+// bottom-nav → shadows.fab), NO hardcodean los valores. Hay dos niveles porque la
+// home + el nav los necesitaron; si hace falta más elevación se agrega JIT
+// (eventual sistema elevation.1/2/3).
 export const shadows = {
+  // Sombra suave de cards (card de fondo bone sobre bg neutro).
   card: {
     shadowColor: palette.textPrimary, // negro de marca, no #000 puro
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06, // sombra suave (card de fondo bone sobre bg neutro)
+    shadowOpacity: 0.06,
     shadowRadius: 12,
     elevation: 2, // Android
+  },
+  // Sombra del FAB central elevado (ADR-018): más marcada y teñida de verde para
+  // que el botón "flote" sobre la barra blanca. shadowColor = $primary (verde
+  // botella de marca, no #000 puro).
+  fab: {
+    shadowColor: palette.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 6, // Android
   },
 } as const;
 

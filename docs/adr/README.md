@@ -69,7 +69,7 @@ Esto preserva el razonamiento histórico: cualquiera puede leer el ADR viejo y e
 | 012 | Patrones de implementación (triggers, tests, CLI) | Accepted |
 | 013 | Stack de frontend (Tamagui + Expo Router + Reanimated + ...) | Accepted |
 | 014 | Invitaciones por link shareable (en vez de magic link por email) | Accepted |
-| ~~015~~ | ~~Design system "Campo Profundo"~~ — eliminado 2026-05-26 (formalización prematura, ver `docs/design-system.md` draft) | — |
+| ~~015~~ | ~~Design system "Campo Profundo"~~ — eliminado 2026-05-26 (formalización prematura). El sistema canónico **v4** se cerró en `docs/design-system.md` (sesión 20); el draft Campo Profundo quedó archivado en `design/explorations/` | — |
 | 016 | Terminología: rodeo (grupo de animales) y sistema (tipo productivo) | Accepted |
 | 017 | Timeline append-only de eventos del animal (no nota plana sobreescribible) | Accepted |
 | 018 | Estructura de navegación principal (bottom nav de 5 items con FAB central) | Accepted |

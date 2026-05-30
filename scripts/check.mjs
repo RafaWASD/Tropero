@@ -125,6 +125,17 @@ try {
   warn(`No pude leer progress/current.md: ${e.message}`);
 }
 
+console.log('\n-- 2c. Lint anti-hardcode (ADR-023 §4) ---------------');
+// Guardrail de diseño: las pantallas/componentes no hardcodean color/spacing, todo
+// referencia un token del design system (app/tamagui.config.ts). Falla el check ante
+// cualquier violación. Script dedicado: scripts/check-hardcode.mjs.
+try {
+  execSync('node scripts/check-hardcode.mjs', { stdio: 'inherit' });
+} catch (e) {
+  fail(`Lint anti-hardcode rojo (exit ${e.status})`);
+  exitCode = 1;
+}
+
 console.log('\n-- 3. Ejecutando tests -------------------------------');
 let testCommand = '';
 if (existsSync('.harness/config.json')) {
