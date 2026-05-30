@@ -1,7 +1,7 @@
 {
   "name": "rafaq-app",
   "version": "0.1.0",
-  "main": "index.ts",
+  "main": "expo-router/entry",
   "private": true,
   "scripts": {
     "start": "expo start",
@@ -11,22 +11,37 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@expo-google-fonts/inter": "^0.4.2",
+    "@react-navigation/bottom-tabs": "7.16.2",
     "@react-navigation/native": "^7.2.4",
     "@react-navigation/native-stack": "^7.15.1",
     "@supabase/supabase-js": "^2.106.1",
+    "@tamagui/config": "2.0.0",
+    "@tamagui/core": "2.0.0",
     "expo": "~56.0.4",
     "expo-constants": "^56.0.15",
     "expo-device": "^56.0.4",
     "expo-linking": "^56.0.11",
     "expo-notifications": "^56.0.13",
+    "expo-router": "~56.2.7",
     "expo-secure-store": "^56.0.4",
+    "expo-splash-screen": "~56.0.10",
     "expo-status-bar": "~56.0.4",
+    "lucide-react-native": "1.17.0",
     "react": "19.2.3",
+    "react-dom": "19.2.3",
     "react-native": "0.85.3",
+    "react-native-gesture-handler": "~2.31.1",
+    "react-native-reanimated": "4.3.1",
     "react-native-safe-area-context": "^5.8.0",
-    "react-native-screens": "^4.25.2"
+    "react-native-screens": "^4.25.2",
+    "react-native-svg": "15.15.4",
+    "react-native-worklets": "0.8.3",
+    "tamagui": "2.0.0"
   },
   "devDependencies": {
+    "@tamagui/babel-plugin": "2.0.0",
+    "@tamagui/metro-plugin": "2.0.0",
     "@types/react": "~19.2.2",
     "supabase": "^2.101.0",
     "typescript": "~6.0.3",
@@ -39,6 +54,9 @@
       "@expo/cli",
       "esbuild",
       "supabase"
-    ]
+    ],
+    "overrides": {
+      "react-dom": "19.2.3"
+    }
   }
 }

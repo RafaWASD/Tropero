@@ -6,8 +6,12 @@ node_modules/
 # Expo
 .expo/
 dist/
+dist-check/
 web-build/
 expo-env.d.ts
+
+# Tamagui (build cache del optimizing compiler)
+.tamagui/
 
 # Native
 .kotlin/
@@ -20,6 +24,10 @@ expo-env.d.ts
 
 # Metro
 .metro-health-check*
+
+# CDP headless capture (throwaway perfiles de Edge para verificación visual de render)
+.cdp-profile*/
+dist_tmp/
 
 # debug
 npm-debug.*

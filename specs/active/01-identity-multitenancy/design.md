@@ -2,7 +2,7 @@
 
 **Status**: Draft (pendiente de aprobación humana)
 **Fecha**: 2026-05-25
-**Última revisión**: 2026-05-25 — refinamiento de invitaciones a link shareable (`ADR-014`).
+**Última revisión**: 2026-05-29 — refinamiento de edge cases sesión 17 (estado `active_lost` en `EstablishmentState`, dropdown del switch, persistencia del token de invitación). Previa: 2026-05-25 — refinamiento de invitaciones a link shareable (`ADR-014`).
 
 ## Arquitectura general
 
@@ -250,10 +250,45 @@ create policy establishments_update on public.establishments
 5. Trigger on_auth_user_created inserta en public.users (id, name, email).
 6. Cliente muestra "Te mandamos un email, verificá para continuar".
 7. Usuario clickea link en email → Supabase marca email_confirmed_at = now() y redirige a la app.
-8. App detecta sesión válida y email verificado → muestra wizard de onboarding con dos CTAs (ver `R6.5`):
-   - Primario: "Crear mi primer campo" → flujo de creación de establecimiento. Si el perfil del usuario no tiene `phone`, se intercala una pantalla pidiéndolo antes de continuar (ver `R3.8`).
-   - Secundario: "Pegar link de invitación" → abre un input para pegar el link `https://app.rafq.ar/invite?token=XXX` o `rafq://invite?token=XXX` recibido por WhatsApp/mail/etc. El cliente extrae el token y navega a la pantalla de aceptación (ver `ADR-014`).
+8. App detecta sesión válida y email verificado → pasa el `EmailVerificationGate`. **Antes** de mostrar el wizard, el cliente chequea si hay un **token de invitación pendiente** en almacenamiento seguro (`expo-secure-store`, ver `R5.13`):
+   - **Si hay token pendiente** → re-rutea automáticamente a `AcceptInvitationScreen` con ese token (ver `R5.4`/`R5.13`). Resuelta la aceptación (ok o error terminal), borra el token persistido. Este camino cubre el onboarding del vet/peón invitado, que atraviesa signup + verificación + posible kill de la app sin perder la invitación.
+   - **Si no hay token** → muestra el wizard de onboarding con dos CTAs (ver `R6.5`):
+     - Primario: "Crear mi primer campo" → flujo de creación de establecimiento. **Requiere conexión** (`R9.2`, operación administrativa online). Si el perfil del usuario no tiene `phone`, se intercala una pantalla pidiéndolo antes de continuar (ver `R3.8`).
+     - Secundario: "Pegar link de invitación" → abre un input para pegar el link `https://app.rafq.ar/invite?token=XXX` o `rafq://invite?token=XXX` recibido por WhatsApp/mail/etc. El cliente extrae el token, **lo persiste en almacenamiento seguro** (`R5.13`) y navega a la pantalla de aceptación (ver `ADR-014`).
 ```
+
+## Flujo de landing / selección de establecimiento (ver `R6.6`–`R6.9`, sesión 17)
+
+Al abrir la app con sesión válida + email verificado, el router decide el landing por **cantidad de `user_roles` activos** (no por rol):
+
+```
+0 campos activos   → wizard de onboarding (R6.5): "crear mi primer campo" | "pegar link de invitación"
+1 campo activo     → home del establecimiento (auto-activo, R6.4). El switch del header (dropdown, R6.8.1) da
+                     acceso a "Mis campos" y a "Crear nuevo campo +".
+≥2 campos activos  → pantalla "Mis campos" (R6.6) = realización del selector de R6.1.
+(campo activo dejó de ser válido) → active_lost (R6.10): aviso + re-ruteo según R6.7 sobre los campos restantes.
+```
+
+- **"Mis campos"** (`MyEstablishmentsScreen`): lista los establecimientos con rol activo (nombre + badge de rol + marca del activo). Tap → fija activo (`R6.3`) y navega a su home. Incluye CTA "crear campo" (`R3.1`) y, si aplica, "pegar link de invitación" (`R6.5`). **Orden** (`R6.6.1`): campo activo / último visitado primero (de `last_establishment_opened`), resto alfabético. **Search bar** cuando hay **>~8 campos activos** (atiende al vet con ~20). El umbral exacto (~8) es heurística del autor de spec, a validar.
+- **Switch de header = dropdown rápido** (`R6.8`/`R6.8.1`, sesión 17): arriba a la izquierda de las pantallas principales, muestra el campo activo (feedback de contexto). Al tocarlo, despliega un **dropdown inline**: campo activo + **últimos 2 visitados** + "Ver todos mis campos" (→ "Mis campos") + "Crear nuevo campo +" (→ `R3.1`). Tocar un visitado cambia de campo sin pasar por el selector. Es el atajo de cambio rápido para los campos de uso frecuente; "Mis campos" queda para la lista larga y la gestión. Realiza la mitigación anotada en `ADR-018` (promover el switch al header).
+- **Por qué por cantidad y no por rol**: un vet con 12 campos y un productor con 5 quieren el selector como entrada; al dueño de un solo campo, una pantalla de selección con un único ítem es fricción. El rol es solo el correlato típico (los vets suelen tener varios).
+- **`last_establishment_opened`** (`R6.9`, **requerido** desde sesión 17): pre-destaca el último campo en "Mis campos", lo ordena primero (`R6.6.1`), fija el contexto activo por defecto al reabrir, y **alimenta los "últimos visitados" del dropdown del switch** (`R6.8.1`). **No** saltea el selector para usuarios con ≥2 campos en el landing inicial (`R6.7`); el dropdown es un atajo posterior. Si apunta a un campo ya inaccesible, se ignora y se aplica `active_lost` (`R6.10`). Implementación: persistir por usuario el id del campo activo y un rastro corto de los últimos abiertos (suficiente para 2 visitados distintos del activo); el rastro de visitados sobrevive cold-start (almacenamiento local del cliente).
+- **Pantalla "Mis campos" como landing del vet** = la pantalla previa a la home que faltaba en el diseño (detectada sesión 17). Sustrato de datos ya existente: `user_roles` + `establishments` + `EstablishmentContext`.
+- **`EstablishmentCard`** (`R6.6.2`, sesión 17 — dirección "híbrido adaptivo", aprobada por Raf): cada campo se renderiza como una card de densidad media (no fila plana ni banner full-screen; escala de 1 a ~20 campos). Anatomía:
+  ```
+  ┌────────────────────────────┐
+  │ ▓▓ banner ▓▓        ● activo│   banner = gradiente verde botella + inicial (default)
+  │ La Juanita          [Dueño] │   nombre + badge de rol
+  │ 320 animales · 4 rodeos     │   hasta 2 contadores
+  │ Preñez 92% · +5 vs zona ▲   │   métrica hero adaptativa + slot benchmark (off en MVP)
+  └────────────────────────────┘
+  ```
+  - **Banner**: default generado (gradiente brand + inicial); foto custom opcional (Supabase Storage, cacheada offline) — nunca forzada.
+  - **Métrica hero adaptativa**: tacto reciente → % preñez (mes/año); sino con animales → cabezas + fecha última maniobra; campo vacío → CTA "Configurá tu rodeo".
+  - **Señal de atención** opcional (ej. "⚠ tacto pendiente") → triage para el vet.
+  - **Slot de benchmarking** reservado en la línea hero ("+5 vs zona"): **vacío en MVP** (sin baseline con pocos campos beta); se enciende post-beta. Pilar de producto, diseñado-para, no prometido vacío.
+  - Es componente reusable de la librería (ADR-023); UI fina TENTATIVA hasta el design system, anatomía fijada.
+  - **Arquitectura**: contadores + métrica hero por N campos en vivo es costoso/poco-offline; con pocos campos se computa en vivo, al escalar → rollup de resumen por establecimiento (cacheado, refrescado al cerrar maniobra). Ver backlog.
 
 ## Flujo de invitación (modelo link shareable, ver `ADR-014`)
 
@@ -285,22 +320,24 @@ create policy establishments_update on public.establishments
    b. Si no autoabre (caso degradado, ej. tap en desktop) → el destinatario abre la app manualmente y usa el CTA "pegar link de invitación" del wizard de onboarding (R6.5). El cliente extrae el token del URL pegado.
 3. AcceptInvitationScreen:
    - Si el usuario está logueado: muestra info del establishment y rol, botón "Aceptar invitación".
-   - Si no logueado: ofrece "Registrarme" / "Iniciar sesión", preservando el token en el estado de navegación.
+   - Si no logueado: ofrece "Registrarme" / "Iniciar sesión", **persistiendo el token en almacenamiento seguro** (`expo-secure-store`, `R5.13`) — no solo en el estado de navegación, que no sobrevive signup + verificación de email + un eventual kill de la app. Al pasar el gate de verificación (`R1.3`), el cliente detecta el token pendiente y vuelve a esta pantalla automáticamente (ver flujo de signup, paso 8).
 4. Tras tap en "Aceptar" (post-auth si hizo falta), cliente llama Edge Function `accept_invitation({ token })`.
 5. Edge Function:
    a. Lookup invitation por token (admin client, bypassea RLS para evitar dependencias circulares).
    b. Valida que la invitación existe, status == 'pending', no expirada.
-       Si expirada: best-effort mark status = 'expired', retorna 410.
-   c. R5.9 — valida que el usuario actual no tiene ya un user_roles activo en ese establishment. Si lo tiene, retorna 409 'already_member'.
+       Si expirada/cancelada/ya aceptada (link single-use, `R5.6`): best-effort mark status apropiado, retorna error. El cliente muestra copy accionable ("Este link ya fue usado. Pedile al dueño que te genere uno nuevo.").
+   c. R5.9 — valida que el usuario actual no tiene ya un user_roles activo en ese establishment. Si lo tiene, retorna 409 'already_member' **sin tocar el rol existente** (no auto-cambia rol vía invitación — evita escalada). El cliente muestra copy que nombra el rol actual ("Esta persona ya es miembro como <rol>. Para cambiarle el rol, usá Miembros → Cambiar rol."). El cambio de rol vive en `change_member_role` (`R4.5`), no acá.
    d. Inserta user_roles (user_id = auth.uid(), establishment_id, role, active = true).
    e. Marca invitation.status = 'accepted', accepted_at = now().
    f. Dispara notificaciones al owner (R5.10 + R5.11) con try/catch aislados:
       - Email transaccional vía Resend.
       - Push notification vía Expo Push si el owner tiene push tokens activos.
    g. Retorna { establishment_id, role } al cliente.
-6. Cliente refresca lista de establishments del usuario y navega al home del establishment recién aceptado.
+6. Cliente **borra el token persistido** (`R5.13`), refresca lista de establishments del usuario y navega al home del establishment recién aceptado.
 7. Owner recibe email + push, abre la app y ve al nuevo miembro en la sección Members.
 ```
+
+> **Persistencia del token (sesión 17, `R5.13`)**: el token de invitación pendiente se guarda en `expo-secure-store` apenas el destinatario abre/pega el link sin estar logueado, y se borra cuando se consume (aceptación exitosa o error terminal como expirado/ya usado). Esto evita perder la invitación en el cold-start del onboarding del invitado. El gate de verificación de email (`R1.3`) consulta este store y re-rutea a `AcceptInvitationScreen` si hay token pendiente, antes del wizard/landing.
 
 ### Diferencias clave vs el modelo email magic link anterior
 
@@ -359,12 +396,23 @@ type EstablishmentState =
   | { status: 'loading' }
   | { status: 'no_establishments' }
   | { status: 'choosing', available: Establishment[] }
-  | { status: 'active', current: Establishment, available: Establishment[], role: UserRole };
+  | { status: 'active', current: Establishment, available: Establishment[], role: UserRole }
+  // sesión 17 (R6.10): el establishment activo dejó de ser válido para el usuario.
+  // 4 casos: rol removido estando adentro / owner borró el campo / last_establishment_opened
+  // inaccesible al reabrir / sync revocó el rol. NO se fuerza logout (R7.4).
+  | { status: 'active_lost', reason: 'role_revoked' | 'establishment_deleted',
+      lostEstablishmentName: string, available: Establishment[] };
 ```
 
 Expone: `switchEstablishment`, `refreshEstablishments`.
 
 Toda query a tablas con `establishment_id` filtra implícitamente por `current.id` mediante una capa de repositorio.
+
+**Manejo de `active_lost`** (`R6.10`): la capa de repositorio detecta el evento de pérdida de dos maneras:
+- **proactiva** (al reabrir / al refrescar): si el `last_establishment_opened` persistido o el `current.id` ya no aparece en el set de `user_roles` activos del usuario (porque un sync lo desactivó o el campo se soft-deleteó), el contexto transiciona a `active_lost`;
+- **reactiva** (durante la operación): una query a una tabla del campo activo retorna 0 filas / error de acceso donde antes había datos (consistente con `R7.2`/`R7.4`, que invalidan el acceso en la próxima query sin logout) → el contexto transiciona a `active_lost`.
+
+`reason` distingue el copy: `role_revoked` → *"Ya no tenés acceso a `<campo>`"*; `establishment_deleted` → *"`<campo>` fue eliminado"*. Tras mostrar el aviso, el contexto **re-rutea según `R6.7`** evaluado sobre `available` (los `user_roles` activos restantes): ≥1 → "Mis campos" o home (si queda exactamente 1); 0 → `no_establishments` (wizard `R6.5`). No se llama a `signOut`. En MVP no hay push/email al miembro afectado: el aviso vive solo dentro de la app.
 
 ### Navegación raíz
 
@@ -376,15 +424,22 @@ RootStack
 │   ├── ForgotPassword
 │   └── AcceptInvitation (universal link / deep link, ver ADR-014)
 └── AppStack (cuando authenticated)
-    ├── EmailVerificationGate (si email no verificado)
-    ├── EstablishmentSelector (si choosing)
+    ├── EmailVerificationGate (si email no verificado; re-rutea a AcceptInvitation si hay token pendiente, R5.13)
+    ├── EstablishmentSelector (si choosing)         ← "Mis campos" (R6.6); landing si ≥2 campos (R6.7)
     ├── EmptyState (si no_establishments)
+    ├── EstablishmentLost (si active_lost)          ← aviso legible + re-ruteo (R6.10)
     └── MainTabs (si active)
-        ├── Home
+        ├── Home                                    ← header con switch = dropdown rápido (R6.8/R6.8.1)
         ├── Members
         ├── Settings
         └── ...
 ```
+
+El estado `active_lost` (`R6.10`) se materializa como una pantalla/overlay `EstablishmentLost` que muestra el aviso (`reason`) y dispara el re-ruteo de `R6.7` sobre los campos restantes. No es un destino persistente: en cuanto el usuario reconoce el aviso (o automáticamente), el router lo lleva a `EstablishmentSelector` / `MainTabs` / `EmptyState` según corresponda.
+
+### Switch del header = dropdown rápido (`R6.8.1`)
+
+El switch del header (`HeaderEstablishmentSwitch`) no navega directo a "Mis campos": despliega un **dropdown inline** con (en orden) el campo activo, los **últimos 2 visitados** (de `last_establishment_opened` / rastro de visitados, `R6.9`), **"Ver todos mis campos"** (→ `EstablishmentSelector` / `R6.6`) y **"Crear nuevo campo +"** (→ flujo de creación, `R3.1`). Tocar un campo visitado hace `switchEstablishment(id)` y navega a su home sin pasar por el selector. La pantalla "Mis campos" sigue siendo la vía para la lista completa, la búsqueda (`R6.6.1`, search bar cuando hay >~8 campos) y la gestión.
 
 ## PowerSync
 
@@ -411,10 +466,19 @@ Todas las decisiones de producto que afectan esta spec están cerradas y documen
 | Email al destinatario de invitación | No aplica (link shareable). Owner usa share sheet del SO | — |
 | Email en tabla invitations | Nullable, solo anotación opcional para el owner. No se valida al aceptar | `R5.1` |
 | Notificación al owner cuando aceptan | Email transaccional + push notification (Expo Push) | `R5.10`, `R5.11` |
-| Transferencia de ownership | No hay flujo. El único owner debe soft-deletear el campo antes de darse de baja | `R2.5` |
+| Transferencia de ownership | No hay flujo. El único owner debe soft-deletear el campo antes de darse de baja. **Owner único = punto único de falla** (limitación conocida, sin 2do owner en MVP) | `R2.5`, `R2.5.1` |
 | Hard delete | Diferido fuera de MVP, esperando requerimientos de retención de SENASA | — (nota en `CONTEXT/08-roadmap.md`) |
 | Vista vet/operario sin invitaciones | Cubierto por el CTA "pegar link" del wizard. No requiere lógica diferenciada por rol | `R6.5` |
-| Revocación de link | Acción "regenerar link" invalida el token anterior y emite uno nuevo | `R5.8` |
+| Revocación de link | Acción "regenerar link" invalida el token anterior y emite uno nuevo. Link **single-use de facto** | `R5.8`, `R5.6` |
+| Switch del header (sesión 17) | **Dropdown rápido**: activo + últimos 2 visitados + "Ver todos" + "Crear campo +". No navega directo al selector | `R6.8`, `R6.8.1` |
+| `last_establishment_opened` (sesión 17) | Promovido a **requerido** (alimenta el dropdown). Orden de "Mis campos" + contexto por defecto + últimos visitados | `R6.9`, `R6.6.1` |
+| Pérdida del campo activo (sesión 17) | Estado **`active_lost`** + re-ruteo según `R6.7`; sin logout forzado | `R6.10` |
+| Crear campo vs cambiar de campo (sesión 17) | Crear campo **requiere conexión**; cambiar de campo activo funciona **offline** si el destino ya sincronizó | `R9.2` |
+| Token de invitación pendiente (sesión 17) | Persistido en `expo-secure-store`; re-ruteo a aceptación tras verificar email | `R5.4`, `R5.13` |
+| Baja del owner único (sesión 17) | Lista de campos bloqueantes con atajo a soft-delete por campo | `R2.5.1` |
+| Soft-delete de campo con miembros (sesión 17) | Warning con conteo de miembros activos + confirmación | `R3.6.1` |
+| `already_member` (sesión 17) | No auto-cambia rol vía invitación (evita escalada); copy accionable a "Miembros → Cambiar rol" | `R5.9` |
+| Aviso al miembro al perder un campo (sesión 17) | **NO en MVP**: silencioso vía `active_lost`. Push/email proactivo = post-MVP | `R6.10` |
 
 ## Riesgos y mitigaciones
 
@@ -455,6 +519,21 @@ pnpm start                                    # arrancar Metro
 - **Deep linking + universal links** configurado en Expo (esquema `rafq://` para deep link nativo + `https://app.rafq.ar/invite?token=...` para universal link). **Crítico** para el modelo link shareable: el link generado por `invite_user` debe abrir la app cuando el destinatario tap.
 - **Native share sheet** del SO: `expo-sharing` o `react-native`'s `Share.share` para que el owner reparta el link por WhatsApp/mail/etc.
 - **Clipboard**: `expo-clipboard` (`Clipboard.setStringAsync`) para el botón "copiar link".
+- **Almacenamiento seguro**: `expo-secure-store` para persistir el **token de invitación pendiente** a través del cold-start del onboarding del invitado (`R5.13`, sesión 17). Se escribe al abrir/pegar el link sin sesión, se lee al pasar el gate de verificación de email, y se borra al consumir el token.
 - **Variable de entorno `APP_URL`** (env del Edge Function en Supabase secrets, ej. `https://app.rafq.ar`): usada por `invite_user` y `resend_invitation` para construir el `accept_url` retornado al cliente. Default en código: `https://app.rafq.ar` si no está seteada. Cuando arranque la Fase 3 del cliente, el universal link debe apuntar al mismo host.
 
 Ver `tasks.md` para el plan de implementación paso a paso.
+
+## Historial de refinamiento
+
+> Audit trail de los refinamientos del design posteriores a la redacción inicial. No se borra.
+
+- **2026-05-29 (sesión 17) — Refinamiento de edge cases (Gate 0 retroactivo)**. Cambios en `design.md` (los requirements correspondientes están en `requirements.md` → "Historial de refinamiento"):
+  - **`EstablishmentState`** — agregado el estado **`active_lost`** (`{ reason, lostEstablishmentName, available }`) con detección proactiva (al reabrir/refrescar) y reactiva (query falla durante la operación, consistente con `R7.4`); re-ruteo según `R6.7` sobre los campos restantes; sin logout forzado. Cubre `R6.10`.
+  - **Navegación raíz** — agregada la pantalla/overlay `EstablishmentLost` (no persistente) y notas sobre el dropdown del switch. Nueva subsección **"Switch del header = dropdown rápido"** (`R6.8.1`).
+  - **Flujo de landing** — actualizada la tabla (1 campo → dropdown del header) y las notas de "Mis campos" (orden `R6.6.1` + search bar >~8 campos) y de `last_establishment_opened` (promovido a requerido, alimenta el dropdown).
+  - **Flujo de signup (paso 8)** — el gate de verificación de email chequea token pendiente en `expo-secure-store` y re-rutea a `AcceptInvitationScreen` antes del wizard; creación de campo marcada como online (`R9.2`).
+  - **Flujo de invitación — lado destinatario** — token persistido en almacenamiento seguro (no estado de navegación); copy de `already_member` (no auto-cambia rol) y de link single-use; borrado del token al consumirlo. Nota explícita de persistencia del token (`R5.13`).
+  - **Tabla "Decisiones de producto resueltas"** — agregadas las decisiones de sesión 17 (switch=dropdown, `last_establishment_opened` requerido, `active_lost`, crear vs cambiar campo, token persistido, baja del owner único, soft-delete con miembros, `already_member`, aviso al miembro = NO MVP, owner único = punto único de falla).
+  - **Dependencias externas** — agregado `expo-secure-store`.
+  - **Nota de implementación pendiente**: el rastro de "últimos visitados" (para el dropdown) y `last_establishment_opened` requieren almacenamiento local por usuario que sobreviva cold-start; la spec no fija el mecanismo concreto (AsyncStorage / secure-store / fila propia) — decisión técnica menor del implementer, a confirmar al construir el cliente.

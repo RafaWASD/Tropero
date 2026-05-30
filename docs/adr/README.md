@@ -72,8 +72,9 @@ Esto preserva el razonamiento histórico: cualquiera puede leer el ADR viejo y e
 | ~~015~~ | ~~Design system "Campo Profundo"~~ — eliminado 2026-05-26 (formalización prematura, ver `docs/design-system.md` draft) | — |
 | 016 | Terminología: rodeo (grupo de animales) y sistema (tipo productivo) | Accepted |
 | 017 | Timeline append-only de eventos del animal (no nota plana sobreescribible) | Accepted |
-| 018 | _(reservado para estructura de navegación principal — pending hasta cerrar A.2 del plan)_ | — |
+| 018 | Estructura de navegación principal (bottom nav de 5 items con FAB central) | Accepted |
 | 019 | Security analyzer como 5to subagente + skill getsentry/security-review | Accepted |
 | 020 | Lote como agrupación de manejo (complementa ADR-016) | Accepted |
 | 021 | Plantilla de datos: catálogo global + defaults por sistema + gating | Accepted |
 | 022 | Gate de refinamiento de contexto antes de la spec (Gate 0) + política de pipeline | Accepted |
+| 023 | Workflow de diseño de frontend: componentes como deliverable + generación con guardrails | Accepted |

@@ -6,25 +6,29 @@
 
 ---
 
-## ⚠️ ACCIÓN PENDIENTE PRIORITARIA — corregir la home a mano en Figma
+## ✅ HOME FIX RESUELTO (sesión 17, 2026-05-29) — vía Stitch, no Figma
 
-La pantalla **home definitiva** quedó canonizada como referencia PERO tiene **una corrección pendiente que Raf hace a mano en Figma** (no vale seguir prompteando Stitch por esto).
+La home definitiva se corrigió **prompteando Stitch** (Raf descartó el fix manual en Figma). Cambios aplicados y verificados (render local con Chrome headless):
 
-**Qué corregir**: el CTA **"Crear rodeo"** del Paso 1 del wizard está **alineado a la derecha y es chico**.
+- **CTA "Crear rodeo"** → pill verde botella `#1e5a3e` **full-width** debajo del body del Paso 1, ~56px. (Era chico y a la derecha — patrón desktop-first; RAFAQ es mobile-first uso con guante, CLAUDE.md principio 4.)
+- **FAB "Maniobra"** → elevado de verdad, sobresale sobre la barra, anillo blanco + sombra, ⚡ centrado, label "Maniobra" debajo (ya no se superpone).
+- **Hamburguesa → switch de establecimiento** "La Juanita ▾" en el header (también da feedback de en qué campo estás; abre la futura pantalla "Mis campos", ver `docs/backlog.md` 2026-05-29).
+- **Stepper** → riel vertical único, 3 círculos = diámetro centrados en la línea, Paso 1 verde con "+" (la asimetría card/plano que desalineaba todo desapareció).
+- **Banner "establecimiento listo"** → descartable (✕).
+- **Fondo** → blanco neutro `#faf9f9` (≈ blanco puro, sin tinte frío ni cálido).
 
-**Cómo corregirlo**:
-- Cambiar el CTA a **pill verde botella (#1e5a3e) full-width** dentro del card del Paso 1, ubicado **debajo del body text** (no a la derecha).
-- Alto mínimo **56-60px**, padding generoso.
-- Texto blanco "Crear rodeo", Inter weight 600, 16px.
+**Causa raíz del tinte frío** (lo que reaparecía siempre): el token `background` del design system de Stitch era `#f8f9ff` (default Material You), generado por `overrideNeutralColor` azulado. Se arregló **a nivel design system** (no por pantalla) → ver abajo.
 
-**Por qué** (razonamiento cerrado con el leader):
-- El patrón "CTA chico a la derecha de la card" es B2B desktop-first (Linear/Notion/Attio con mouse).
-- RAFAQ es **mobile-first para uso en campo con mano enguantada** → necesita tap targets grandes (CLAUDE.md principio 4: "botones grandes, una decisión por pantalla").
-- Un CTA chico a la derecha puede pasarse desapercibido y el usuario podría tocar el FAB Maniobra central por confusión.
-- Full-width dentro del card mantiene la jerarquía (el FAB central sigue siendo el botón más prominente de la pantalla) pero hace la acción del wizard fácil de pegar.
+**Home canónica actual**: `design/stitch-iter-4/00-home-CANONICAL.png`
+**Screen ID en Stitch**: `a5bac4039faf4a2abe5f808425b177bf` ("Home RAFAQ - Wizard Final (White) v2")
+**HTML fuente**: `design/stitch-iter-4/home-final.html`
 
-**Archivo de referencia de la home actual**: `design/stitch-iter-3/07-home-final-v2.png`
-**Screen ID en Stitch**: `0753a3cb5be5403bbe731bed77655873` ("Home RAFAQ - Wizard Final (White)")
+### Lección de Stitch (importante para futuras ediciones)
+- El **motor de color dinámico (Material You)** pisa los colores explícitos del `designMd`: re-deriva la rampa de surfaces desde `customColor` + `overrideNeutralColor` + `colorVariant`. Para controlar el fondo hay que tocar **esos params**, no el YAML del designMd.
+- Para **blanco neutro + verde botella en containers**: `colorVariant: FIDELITY` (preserva el seed verde en los containers) + `overrideNeutralColor: #808080` (gris puro chroma 0 → fondo neutro sin tinte). Con `NEUTRAL` el fondo sale neutro PERO desatura `primary-container` a verde menta (rompe el pill activo del nav). Con neutral cálido (`#78716c`) el fondo sale `#fff8f5` (blanco cálido).
+- **Consistencia eventual**: `update_design_system` tarda en commitear; un `apply_design_system` disparado inmediato puede leer la versión anterior. Si el resultado no refleja el update, reaplicar.
+- La edición rápida por **DOM ops** (`edit_screens` con cambios chicos) a veces NO persiste al archivo. `apply_design_system` sí persiste confiable.
+- Modelo: usar **GEMINI_3_1_PRO** (el mejor que ofrece Stitch; el otro es 3 Flash).
 
 ---
 
@@ -99,7 +103,10 @@ La pantalla **home definitiva** quedó canonizada como referencia PERO tiene **u
 design/stitch-iter-1/   — 9 screens base del flujo onboarding signup wizard
 design/stitch-iter-2/   — 11 screens: bone bg + CTA primary email + FAB nav + logo R monograma
 design/stitch-iter-3/   — 8 screens: bg blanco puro + back arrow corregido + sin brújula
-                          + home-final-v2.png (LA HOME CANONIZADA, con CTA pendiente de fix manual)
+                          + home-final-v2.png (home previa, con CTA pendiente)
+design/stitch-iter-4/   — home FINAL (sesión 17): switch de campo + FAB elevado + stepper
+                          riel + CTA full-width + banner descartable + bg blanco neutro.
+                          00-home-CANONICAL.png (LA HOME CANÓNICA) + home-final.html
 ```
 
 Flujo cubierto (8 pantallas spec 01): Splash, Registro, Verificación Email, Inicio Onboarding (CTA dual R6.5), Validación Teléfono (R3.8), Crear Establecimiento, Home post-creación, Aceptar Invitación (R5.3). + Logo R monograma + Design System.
@@ -119,17 +126,19 @@ Flujo cubierto (8 pantallas spec 01): Splash, Registro, Verificación Email, Ini
 
 ---
 
-## Qué falta para cerrar A.1 (design system canónico)
+## Qué falta para cerrar A.1 — REENCUADRADO por ADR-023 (sesión 17, LLM Council)
 
-1. Raf corrige el CTA del home a mano en Figma (acción pendiente arriba).
-2. (Opcional) Aplicar la dirección a 2-3 pantallas más clave hasta el mismo estándar.
-3. Canonizar:
-   - Actualizar `design/design-brief-v1.md` → v2 con lo validado en iteraciones.
-   - Crear `docs/design-system.md` canónico (quitar disclaimer DRAFT EXPLORATORIO).
-   - Actualizar `design/tokens.json` con valores canónicos (formato Tokens Studio).
-   - Crear **ADR-020** (design system canónico) — reemplaza el draft. Nota: ADR-015 fue eliminado, 016/017 ocupados, 018 reservado para bottom nav, 019 ocupado por security_analyzer. Próximo libre: **020**.
-   - Crear **ADR-018** (estructura bottom nav) — item A.2 del plan.
-4. Traducir tokens a `tamagui.config.ts` cuando arranque la implementación frontend (B.1).
+⚠️ **Cambio de enfoque:** el design system NO se canoniza en abstracto. Se **deriva de construir la home a mano** en Tamagui/Expo. Esta home de Stitch (`design/stitch-iter-4/00-home-CANONICAL.png`) es **referencia de dirección visual, NO código a portar** (Stitch escupe HTML web, no Tamagui). Ver `docs/adr/ADR-023-workflow-diseno-frontend.md`.
+
+Orden nuevo:
+1. ~~Fix de la home~~ ✅ + ~~ADR-018 bottom nav~~ ✅ (sesión 17).
+2. **B.0 — scaffold del stack ADR-013** en `app/` (Tamagui + Expo Router + Reanimated + `tamagui.config.ts` provisional sembrado con los tokens v4 de abajo + shell bottom-nav stub). `app/` hoy es un Expo pelado, nunca se instaló el stack. → implementer.
+3. **Construir la home a mano** corriendo en Expo, ensamblada con componentes (`BottomNav`/`Card`/`Button`/`Stepper`/`FormField`/`ListRow`) + tokens que se derivan. Test de cobertura.
+4. Validar corriendo en device frame real (gate "primer try").
+5. **Recién entonces canonizar**: `tamagui.config.ts` definitivo + `docs/design-system.md` + `design/tokens.json` (Tokens Studio) + `design-brief` v2.
+6. **Lint guardrail** desde día 1: falla ante color/spacing hardcodeado (ADR-023 §4).
+
+**Tokens validados (design system v4 de Stitch) para sembrar el `tamagui.config.ts` provisional:** base blanco `#FFFFFF`/`#faf9f9` (neutro, sin tinte), verde botella `#1e5a3e`, bone `#F8F6F1` (cards), terracota `#c84a2c` (alertas), verde claro `#93cfac` (icon container), texto `#0F0E0C`, gris `#707972`, divisor `#E5E5E3`, Inter (700/600/500/400), touch-target ≥56px, radios 16px cards / pill botones.
 
 ---
 

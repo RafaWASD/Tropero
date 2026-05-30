@@ -11,7 +11,9 @@
       "supportsTablet": true,
       "bundleIdentifier": "ar.rafq.app",
       "infoPlist": {
-        "UIBackgroundModes": ["remote-notification"]
+        "UIBackgroundModes": [
+          "remote-notification"
+        ]
       }
     },
     "android": {
@@ -23,7 +25,9 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "permissions": ["NOTIFICATIONS"]
+      "permissions": [
+        "NOTIFICATIONS"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -35,7 +39,9 @@
           "color": "#1A73E8",
           "defaultChannel": "default"
         }
-      ]
+      ],
+      "expo-router",
+      "expo-splash-screen"
     ],
     "extra": {
       "supabaseUrl": "https://xrhlxxdnfzvdnztacofj.supabase.co"
