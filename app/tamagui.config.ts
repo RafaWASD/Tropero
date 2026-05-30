@@ -32,6 +32,11 @@ const palette = {
   // Brand.
   primary: '#1e5a3e', // verde botella — brand primary + FAB + item activo
   primaryPress: '#184a33', // estado pressed del primary (derivado)
+  // Verde botella CLARO (derivado, +luminosidad sobre primary): tono superior del
+  // gradiente del banner de EstablishmentCard. Mismo hue brand, no el greenLight
+  // desaturado (ese es para halos/contenedores). Da un degradé visible, no un bloque
+  // plano. JIT: lo necesitó el banner-strip de "Mis campos".
+  primaryLight: '#2e8259',
   // Surfaces.
   surface: '#F8F6F1', // bone — surface de cards (cálido, solo para cards)
   // Acentos.
@@ -77,6 +82,7 @@ const tokens = createTokens({
     bg: palette.bg,
     primary: palette.primary,
     primaryPress: palette.primaryPress,
+    primaryLight: palette.primaryLight,
     surface: palette.surface,
     terracota: palette.terracota,
     greenLight: palette.greenLight,
@@ -141,6 +147,26 @@ const tokens = createTokens({
     // del banner "establecimiento listo").
     avatar: 40, // diámetro del avatar de usuario en el header
     icon: 48, // diámetro de contenedores de ícono circulares (banner, etc.)
+    // ── EstablishmentCard ("Mis campos", R6.6.2) — JIT, derivados al construir la card.
+    // Banner-strip slim de arriba: ni full-screen ni thumbnail chico (~72-80px). 72 da
+    // aire para la inicial grande ($10) sin robarle protagonismo al nombre hero, y
+    // aprieta la densidad a ~4-5 cards por pantalla (densidad media) — bajado de 76 → 72
+    // en el pulido (re-vet iter-4): banner un toque más slim sin perder el gradiente.
+    bannerStrip: 72,
+    // Punto del indicador "● activo" del campo activo.
+    dot: 8,
+    // Tamaño de fuente del input del searchbar de "Mis campos" (R6.6.1). Espeja el
+    // font.size.$5 (16px, "body grande / inputs" del design system v4), pero vive como
+    // token de `size` porque cruza a una API no-Tamagui (el `style.fontSize` del
+    // <TextInput> de RN, que pide un número) y se lee con getTokenValue — mismo patrón
+    // que `navLabel` (font size del nav que cruza a tabBarLabelStyle). No es literal en
+    // la pantalla. JIT: lo necesitó el searchbar.
+    inputText: 16,
+    // Ancho de la card del dropdown del switch de establecimiento (R6.8.1). Menú anclado
+    // arriba-izquierda bajo el header: ancho cómodo para nombres de campo + "Ver todos
+    // mis campos" sin truncar, sin invadir todo el viewport (maxWidth:100% lo recorta en
+    // pantallas angostas). JIT: lo necesitó el dropdown del switch.
+    dropdownWidth: 280,
   },
 });
 

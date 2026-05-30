@@ -103,6 +103,8 @@ export default function RootLayout() {
           <Stack screenOptions={{ headerShown: false }}>
             <Stack.Screen name="(tabs)" />
             <Stack.Screen name="maniobra" options={{ presentation: 'modal' }} />
+            {/* "Mis campos" (spec 01 R6.6): pantalla standalone, header propio. */}
+            <Stack.Screen name="mis-campos" />
           </Stack>
         </TamaguiProvider>
       </SafeAreaProvider>

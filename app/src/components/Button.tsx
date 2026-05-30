@@ -82,25 +82,24 @@ export function Button({
   ...rest
 }: ButtonProps) {
   const labelColor = variant === 'primary' ? '$white' : '$primary';
-  // Comunicar el estado "disabled" a tecnologías de asistencia SIN filtrar un prop
-  // inválido al DOM. ButtonFrame es un styled(View) de Tamagui: en web (react-native-web)
-  // Tamagui mapea `accessibilityRole`→`role` pero NO traduce `accessibilityState`, que
-  // se filtraría al DOM y dispara el warning de React ("does not recognize the
-  // accessibilityState prop"). Por eso lo separamos por plataforma: en web usamos
-  // `aria-disabled` (atributo DOM válido que RNW pasa tal cual); en native el equivalente
-  // RN es `accessibilityState`.
-  const a11yState =
+  // Comunicar rol + estado a tecnologías de asistencia SIN filtrar props inválidas al
+  // DOM. ButtonFrame es un styled(View) de Tamagui: en web (react-native-web) NO traduce
+  // `accessibilityRole` ni `accessibilityState` a sus equivalentes ARIA — los pasa tal
+  // cual al <div> y React tira el warning ("does not recognize the accessibilityRole/
+  // accessibilityState prop on a DOM element"). Por eso separamos por plataforma:
+  //   - web: `role="button"` + `aria-disabled` → atributos DOM válidos (ARIA), sin leak.
+  //   - native: `accessibilityRole` / `accessibilityState` → la API RN correcta.
+  const a11y =
     Platform.OS === 'web'
-      ? { 'aria-disabled': disabled }
-      : { accessibilityState: { disabled } };
+      ? { role: 'button' as const, 'aria-disabled': disabled }
+      : { accessibilityRole: 'button' as const, accessibilityState: { disabled } };
   return (
     <ButtonFrame
       variant={variant}
       fullWidth={fullWidth}
       disabled={disabled}
       onPress={disabled ? undefined : onPress}
-      accessibilityRole="button"
-      {...a11yState}
+      {...a11y}
       {...rest}
     >
       <ButtonLabel color={labelColor}>{children}</ButtonLabel>
