@@ -4,32 +4,29 @@
 //   - GestureHandlerRootView: requerido por react-native-gesture-handler en la
 //     raíz para que los gestos (swipes, long-press en manga) funcionen en todo
 //     el árbol.
-//   - SafeAreaProvider: insets seguros (notch / home indicator). El bottom-nav
-//     los consume vía useSafeAreaInsets (ADR-023 §6).
-//   - TamaguiProvider: inyecta el design system (tamagui.config.ts) a toda la app.
+//   - SafeAreaProvider: insets seguros (notch / home indicator).
+//   - TamaguiProvider: inyecta el design system (tamagui.config.ts).
+//   - AuthProvider (spec 01, T3.1): sesión Supabase Auth. El gating de navegación
+//     raíz se hace según el AuthState (ver AuthGate abajo).
 //
-// Carga de fuentes (A.1): cargamos Inter de verdad (400/500/600/700) y mapeamos
-// los módulos `Inter_NNN...` de @expo-google-fonts/inter a los NOMBRES DE FAMILIA
-// que tamagui.config.ts declara en su `face` (`Inter`, `Inter-Medium`,
-// `Inter-SemiBold`, `Inter-Bold`). Mantenemos el splash visible
-// (preventAutoHideAsync) y NO renderizamos el árbol hasta que las fuentes están
-// listas — así la primera pintura ya es Inter, no el sans-serif del sistema
-// (core del "primer try", CLAUDE.md principio 4).
+// Gating de navegación (spec 01, R1.3 / R7.* / design.md §Navegación raíz):
+//   - loading                          → splash (no renderizamos rutas hasta saber)
+//   - unauthenticated                  → grupo (auth): SignIn / SignUp / ForgotPassword
+//   - authenticated + email NO verif.  → /verify-email (EmailVerificationGate, R1.3)
+//   - authenticated + verificado       → (tabs) [PLACEHOLDER de "landing autenticado";
+//                                         la Fase 4 (B.1.2) inserta el gating de
+//                                         establecimiento: Mis campos / wizard / active_lost]
+// Las rutas /maniobra, /mis-campos, /update-password se mantienen accesibles.
 //
-// Fallback por timeout: si la carga de fuentes se cuelga (ni resuelve ni tira
-// error — pasa en web headless y podría pasar en cualquier target), a los ~3s
-// renderizamos igual cayendo con gracia al sans-serif del sistema; Inter aparece
-// cuando termine de cargar. Así no quedamos colgados en splash infinito.
-//
-// Debajo, un Stack de expo-router con el grupo (tabs) como pantalla principal y
-// la ruta /maniobra como modal/stub (FAB de MODO MANIOBRAS, ADR-018).
+// Carga de fuentes (A.1): cargamos Inter de verdad (400/500/600/700). Mantenemos el
+// splash visible hasta que las fuentes están listas; fallback por timeout a ~3s.
 
 import 'react-native-gesture-handler';
 import { useCallback, useEffect, useState } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { TamaguiProvider } from 'tamagui';
-import { Stack } from 'expo-router';
+import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useFonts } from 'expo-font';
 import * as SplashScreen from 'expo-splash-screen';
@@ -41,18 +38,71 @@ import {
 } from '@expo-google-fonts/inter';
 
 import config from '../tamagui.config';
+import { AuthProvider, useAuth } from '@/contexts';
 
-// Mantenemos el splash nativo hasta que las fuentes carguen (evita el flash de
-// system-font → Inter en el primer frame). Idempotente; se ignora si ya se ocultó.
 SplashScreen.preventAutoHideAsync().catch(() => {
   /* noop: en web/algunos targets puede no estar disponible */
 });
 
+// Grupo de rutas de auth (debe coincidir con el nombre del directorio app/(auth)).
+const AUTH_GROUP = '(auth)';
+const VERIFY_ROUTE = 'verify-email';
+// Rutas accesibles SIN estar autenticado/verificado (no las re-ruteamos): la pantalla
+// de actualizar contraseña (destino del link de reset) puede alcanzarse en medio del
+// flujo de recuperación. El wiring fino es de la Fase 5 (ver update-password.tsx).
+const PUBLIC_ROUTES = new Set(['update-password']);
+
+/**
+ * Enruta según el AuthState. Vive DENTRO del AuthProvider (usa useAuth) y dentro del
+ * árbol de navegación (usa useSegments/useRouter). Reacciona a cambios de estado
+ * (login, logout, verificación) re-ruteando con router.replace.
+ */
+function AuthGate() {
+  const { state } = useAuth();
+  const segments = useSegments();
+  const router = useRouter();
+
+  useEffect(() => {
+    if (state.status === 'loading') return;
+
+    const top = segments[0] ?? '';
+    const inAuthGroup = top === AUTH_GROUP;
+    const inVerify = top === VERIFY_ROUTE;
+    const inPublic = PUBLIC_ROUTES.has(top);
+
+    if (state.status === 'unauthenticated') {
+      // Sin sesión → al grupo de auth (salvo que esté en una ruta pública como reset).
+      if (!inAuthGroup && !inPublic) router.replace('/(auth)/sign-in');
+      return;
+    }
+
+    // authenticated
+    if (!state.emailVerified) {
+      // Email sin verificar → gate de verificación (R1.3). Permitimos rutas públicas
+      // (recovery) por si el flujo de reset cae acá.
+      if (!inVerify && !inPublic) router.replace('/verify-email');
+      return;
+    }
+
+    // authenticated + verificado → landing autenticado. Si está en auth/verify, lo
+    // sacamos hacia (tabs). (Fase 4 insertará acá el gating de establecimiento.)
+    if (inAuthGroup || inVerify) router.replace('/(tabs)');
+  }, [state, segments, router]);
+
+  return (
+    <Stack screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="(auth)" />
+      <Stack.Screen name="verify-email" />
+      <Stack.Screen name="update-password" />
+      <Stack.Screen name="(tabs)" />
+      <Stack.Screen name="maniobra" options={{ presentation: 'modal' }} />
+      {/* "Mis campos" (spec 01 R6.6): pantalla standalone, header propio. */}
+      <Stack.Screen name="mis-campos" />
+    </Stack>
+  );
+}
+
 export default function RootLayout() {
-  // Las CLAVES de este mapa son los nombres de familia que tamagui.config.ts
-  // espera en su `face` (peso → familia). expo-font registra cada .ttf bajo esa
-  // clave, así que `fontFamily: 'Inter-Bold'` (que Tamagui emite para weight 700)
-  // resuelve al archivo correcto.
   const [fontsLoaded, fontError] = useFonts({
     Inter: Inter_400Regular,
     'Inter-Medium': Inter_500Medium,
@@ -60,17 +110,12 @@ export default function RootLayout() {
     'Inter-Bold': Inter_700Bold,
   });
 
-  // Fallback por timeout: si a los ~3s la carga de fuentes no resolvió (ni cargó
-  // ni tiró error — cuelgue en web headless u otro target), seguimos igual.
   const [timedOut, setTimedOut] = useState(false);
   useEffect(() => {
     const timer = setTimeout(() => setTimedOut(true), 3000);
     return () => clearTimeout(timer);
   }, []);
 
-  // Si las fuentes fallan en cargar (error) o la carga se cuelga (timeout), no
-  // dejamos la app colgada en el splash: seguimos (cae al sans-serif del sistema)
-  // en vez de pantalla negra eterna.
   const ready = fontsLoaded || fontError != null || timedOut;
 
   useEffect(() => {
@@ -90,8 +135,6 @@ export default function RootLayout() {
   }, [ready]);
 
   if (!ready) {
-    // Gate: no renderizamos el árbol hasta tener Inter. El splash nativo sigue
-    // visible mientras tanto (preventAutoHideAsync de arriba).
     return null;
   }
 
@@ -100,12 +143,9 @@ export default function RootLayout() {
       <SafeAreaProvider>
         <TamaguiProvider config={config} defaultTheme="light">
           <StatusBar style="dark" />
-          <Stack screenOptions={{ headerShown: false }}>
-            <Stack.Screen name="(tabs)" />
-            <Stack.Screen name="maniobra" options={{ presentation: 'modal' }} />
-            {/* "Mis campos" (spec 01 R6.6): pantalla standalone, header propio. */}
-            <Stack.Screen name="mis-campos" />
-          </Stack>
+          <AuthProvider>
+            <AuthGate />
+          </AuthProvider>
         </TamaguiProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>

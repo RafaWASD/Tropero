@@ -4,6 +4,7 @@ import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 
 import type { Result } from '../types';
+import { supabase } from './supabase';
 
 export type PushRegistrationFailure =
   | { kind: 'not_a_device' }
@@ -51,5 +52,36 @@ export async function getExpoPushTokenSafe(): Promise<Result<string, PushRegistr
       return { ok: false, error: { kind: 'no_project_id' } };
     }
     return { ok: false, error: { kind: 'unexpected', message } };
+  }
+}
+
+// Registra el Expo push token del dispositivo en el backend (Edge Function
+// register_push_token, T2.7 → infra de R5.11). Best-effort por diseño:
+//   - WEB / simulador: getExpoPushTokenSafe devuelve `not_a_device` → no-op, ok:false.
+//   - permiso denegado: no insistimos (R5.11/T3.6 "graceful, si rechaza no insistir").
+//   - fallo de red/Edge: lo tragamos con warning (no rompemos el login por push).
+// El JWT del usuario lo agrega supabase-js automáticamente en functions.invoke.
+export async function registerPushTokenBestEffort(): Promise<
+  Result<{ tokenId: string }, PushRegistrationFailure | { kind: 'register_failed'; message: string }>
+> {
+  const tokenResult = await getExpoPushTokenSafe();
+  if (!tokenResult.ok) return tokenResult;
+
+  try {
+    const { data, error } = await supabase.functions.invoke('register_push_token', {
+      body: {
+        expo_push_token: tokenResult.value,
+        device_id: Device.osInternalBuildId ?? Device.modelId ?? null,
+        platform: Platform.OS,
+      },
+    });
+    if (error || data?.error) {
+      const message = error?.message ?? data?.error?.message ?? 'register_push_token failed';
+      return { ok: false, error: { kind: 'register_failed', message } };
+    }
+    return { ok: true, value: { tokenId: String(data?.token_id ?? '') } };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: { kind: 'register_failed', message } };
   }
 }
