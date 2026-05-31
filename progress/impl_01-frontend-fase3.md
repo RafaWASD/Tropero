@@ -179,3 +179,53 @@ Modificados:
 - `scripts/run-tests.mjs` — corre los client unit tests dentro de `check.mjs`
 
 NO toqué (coordinación / leader): `feature_list.json`, `progress/current.md`, `progress/plan.md`, ni la DB remota. Tampoco marqué nada `done`.
+
+---
+
+## Fix loop (sesión 21): FIX 1 flash + FIX 2 OBS-2
+
+Fix loop chico sobre B.1.1 (reviewer APPROVED + Gate 2 PASS en commit `1893513`). Dos fixes acotados, sin reabrir arquitectura. NO se tocó nada de Fase 4/5 (la home mock `(tabs)/index.tsx` queda para B.1.2), ni OBS-1 (SecureStore 2KB, sigue `TODO B.1.2`).
+
+### FIX 1 — flash de la home mock en cold start sin sesión
+
+**Causa raíz**: el splash nativo se ocultaba apenas cargaban las FUENTES (`ready` en `RootLayout`), pero la sesión seguía en `loading`. Como la ruta inicial de Expo Router es `/` = `(tabs)`, se pintaba un frame de la home mock ("La Juanita"/"Lucas") antes de que el `AuthGate` re-ruteara a `/(auth)/sign-in` cuando `getSession()` resolvía.
+
+**Fix** (patrón oficial de auth de Expo Router — mantener el splash hasta que auth resuelva, no solo las fuentes):
+- `RootLayout` ya NO oculta el splash. Quité su `useEffect` de `hideAsync` por `ready` y el `onLayoutRootView` (con su `onLayout`). Mantiene su rol de gate de FUENTES: `if (!ready) return null` + el timeout de ~3s de fuentes (intacto). Mientras tanto el splash nativo queda visible.
+- El `AuthGate` (que monta DENTRO del gate de fuentes → ya hay fuentes cuando monta) ahora es el dueño del `SplashScreen.hideAsync()`. Lo llama vía `hideSplashOnce()` (idempotente por `useRef`), recién **después** de solicitar el `router.replace` del re-ruteo, en el mismo ciclo del effect. Orden: `replace` (síncrono) → `hideSplashOnce()` (el `hideAsync` es promesa, destapa en un tick posterior) → al destaparse, la navegación ya está aplicada → nunca se ve `(tabs)` por debajo.
+- Fallback de seguridad nuevo en `AuthGate`: `setTimeout(hideSplashOnce, 5000)`. Si la sesión nunca resuelve (`getSession` colgado), no quedamos trabados en el splash; el `Stack` ya está montado debajo y el effect seguirá re-ruteando cuando el estado cambie.
+- Refactoricé el cuerpo del effect de `AuthGate` de `return`-temprano a `if/else if/else` para que `hideSplashOnce()` se ejecute en TODAS las ramas (incluida la authenticated+verificado, que no hace replace y cae legítimamente a `(tabs)`).
+
+**Verificación FIX 1**:
+- `pnpm.cmd web` en puerto 8087: dev server levantó leyendo `app/.env.local`; `GET /` → HTTP 200; `GET` del bundle de entry (`expo-router/entry.bundle`, web) → HTTP 200, **13.44 MB** (mismo orden que el bundle verde de B.1.1) → todo transpila/empaqueta con los cambios. Log de Metro sin líneas de error/fail.
+- Por construcción (el parpadeo es difícil de capturar en web headless): el árbol de `(tabs)` NO puede ser visible mientras `state.status === 'loading'`, porque el splash nativo permanece encima hasta que `AuthGate` lo oculta, y eso solo ocurre **después** de que el estado resolvió y el re-ruteo quedó solicitado. Razonamiento del orden documentado en el comentario de cabecera de `_layout.tsx`.
+
+### FIX 2 — OBS-2: forgot-password no debe discriminar por el texto traducido
+
+**Problema**: `forgot-password.tsx` decidía la rama "mostrar error real vs. mensaje neutro" con `copy.includes('conexión'/'intentos')` sobre el copy YA traducido → control de flujo acoplado al texto; si cambia el copy, la rama se rompe en silencio.
+
+**Fix**:
+- Nuevo helper puro `isNetworkOrRateLimit(error)` en `auth-errors.ts`: decide mirando el error CRUDO (`status === 429`, `code` de rate-limit, `name`/`message` de red), no el copy. Misma detección que usa `authErrorMessage` para esas ramas (comentario que pide mantenerlas alineadas). Fail-closed: error nulo/desconocido/sin status → `false`.
+- `forgot-password.tsx` ahora hace `if (isNetworkOrRateLimit(result.error)) setFormError(authErrorMessage(result.error, 'reset'))` y en cualquier otro caso `setSent(true)` (mensaje neutro). Se preserva el anti-enumeración: solo red/429 muestran error real (no filtran existencia de cuenta).
+- 3 tests nuevos en `auth-errors.test.ts` (`OBS-2 …`): detecta red, detecta rate-limit (429 + codes), y es `false` para no-accionables / sin status / nulo.
+
+**Verificación FIX 2**: cubierto por los 3 unit tests `OBS-2` (corren dentro de `check.mjs`).
+
+### Resultado de autoverificación (fix loop)
+1. `cd app; pnpm.cmd typecheck` → **verde**.
+2. `node scripts/check.mjs` (raíz) → **verde**. Client unit tests: **22** (19 previos + 3 nuevos `OBS-2`). RLS (15) + Edge (26) + Animal (28) + Maneuvers (13) sin regresión. **Anti-hardcode: 0 violaciones**.
+3. `pnpm.cmd web` → bundle web HTTP 200, 13.44 MB, sin errores (ver FIX 1).
+
+### Autorrevisión adversarial (fix loop)
+- **¿Splash colgado si auth nunca resuelve?** No → fallback `setTimeout(hideSplashOnce, 5000)` en `AuthGate`, además del timeout de fuentes (~3s) en `RootLayout`. ✔
+- **¿Caso autenticado+verificado roto?** No → no hace replace si ya está fuera de auth/verify; `hideSplashOnce()` corre igual (rama `else`) y cae a `(tabs)` legítimo, sin flash. ✔
+- **¿`hideSplashOnce` múltiple?** Idempotente por `useRef(splashHidden)`. ✔
+- **¿Orden replace/hide?** `replace` síncrono antes de `hideAsync` (promesa) → al destaparse el splash, la nav ya está aplicada. ✔
+- **¿El helper cubre red + 429 + sin status?** Sí, con fail-closed a `false` para `{}`/`null`/`undefined`. Testeado. ✔
+- **¿Anti-enumeración intacto en forgot-password?** Sí, mensaje neutro salvo red/429 (que no filtran existencia). ✔
+
+### Archivos tocados (fix loop)
+- `app/app/_layout.tsx` — FIX 1: el splash lo oculta `AuthGate` tras re-rutear (+ fallback 5s); `RootLayout` deja de ocultarlo.
+- `app/app/(auth)/forgot-password.tsx` — FIX 2: rama por `isNetworkOrRateLimit(error)`, no por substring del copy.
+- `app/src/utils/auth-errors.ts` — FIX 2: nuevo helper puro `isNetworkOrRateLimit`.
+- `app/src/utils/auth-errors.test.ts` — FIX 2: 3 tests `OBS-2`.

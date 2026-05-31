@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { authErrorMessage } from './auth-errors.ts';
+import { authErrorMessage, isNetworkOrRateLimit } from './auth-errors.ts';
 
 test('T3.2 email ya registrado (por code y por message)', () => {
   assert.match(authErrorMessage({ code: 'user_already_exists' }, 'signup'), /ya tiene una cuenta/i);
@@ -51,4 +51,30 @@ test('T3.2 fallback por contexto cuando el error no se reconoce', () => {
 test('T3.2 error nulo no rompe', () => {
   assert.equal(typeof authErrorMessage(null), 'string');
   assert.equal(typeof authErrorMessage(undefined), 'string');
+});
+
+// OBS-2 (fix loop sesión 21): el control de flujo de forgot-password decide la rama
+// "mostrar error real vs. mensaje neutro anti-enumeración" mirando el error CRUDO,
+// no el copy traducido. Estos tests fijan ese contrato.
+test('OBS-2 isNetworkOrRateLimit detecta red', () => {
+  assert.equal(isNetworkOrRateLimit({ message: 'Failed to fetch' }), true);
+  assert.equal(isNetworkOrRateLimit({ message: 'Network request failed' }), true);
+  assert.equal(isNetworkOrRateLimit({ name: 'AuthRetryableFetchError' }), true);
+});
+
+test('OBS-2 isNetworkOrRateLimit detecta rate-limit (429 y codes)', () => {
+  assert.equal(isNetworkOrRateLimit({ status: 429 }), true);
+  assert.equal(isNetworkOrRateLimit({ code: 'over_request_rate_limit' }), true);
+  assert.equal(isNetworkOrRateLimit({ code: 'over_email_send_rate_limit' }), true);
+});
+
+test('OBS-2 isNetworkOrRateLimit es false para errores no accionables (anti-enumeración)', () => {
+  // Sin status/code de red ni 429 → no cortamos el flujo (mostramos mensaje neutro).
+  assert.equal(isNetworkOrRateLimit({ message: 'algo raro' }), false);
+  assert.equal(isNetworkOrRateLimit({ code: 'invalid_credentials' }), false);
+  assert.equal(isNetworkOrRateLimit({ status: 400 }), false);
+  // Caso sin status (error parcial / desconocido) → false, fail-closed.
+  assert.equal(isNetworkOrRateLimit({}), false);
+  assert.equal(isNetworkOrRateLimit(null), false);
+  assert.equal(isNetworkOrRateLimit(undefined), false);
 });

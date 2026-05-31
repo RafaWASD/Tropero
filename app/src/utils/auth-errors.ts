@@ -19,6 +19,37 @@ const GENERIC = 'No pudimos completar la operación. Probá de nuevo en un momen
 const NETWORK = 'Sin conexión. Revisá tu internet e intentá de nuevo.';
 
 /**
+ * ¿El error es un fallo de RED o un RATE-LIMIT del server? Decide mirando el error
+ * CRUDO (code/status/name/message), NO el copy ya traducido. Sirve para decidir
+ * control de flujo (ej. forgot-password: mostrar el error real vs. el mensaje neutro
+ * anti-enumeración) sin acoplarse al texto, que puede cambiar.
+ *
+ * Es la misma detección que usa authErrorMessage para las ramas NETWORK y rate-limit;
+ * mantenerlas alineadas. Fail-closed: error nulo/desconocido → false (no es accionable).
+ */
+export function isNetworkOrRateLimit(error: AuthErrorLike | null | undefined): boolean {
+  if (!error) return false;
+
+  const code = (error.code ?? '').toLowerCase();
+  const msg = (error.message ?? '').toLowerCase();
+  const name = (error.name ?? '').toLowerCase();
+  const status = error.status ?? null;
+
+  // Sin red: 'Failed to fetch' / 'Network request failed' / AuthRetryableFetchError.
+  const isNetwork =
+    msg.includes('failed to fetch') ||
+    msg.includes('network request failed') ||
+    msg.includes('network error') ||
+    name.includes('retryable');
+
+  // Rate limit (incluye el lockout nativo de Supabase Auth, R1.7 server-side).
+  const isRateLimit =
+    code === 'over_request_rate_limit' || code === 'over_email_send_rate_limit' || status === 429;
+
+  return isNetwork || isRateLimit;
+}
+
+/**
  * Devuelve copy en voseo para un error de auth. `context` afina el mensaje según
  * el flujo (login vs signup), porque el mismo code/status puede leerse distinto.
  */

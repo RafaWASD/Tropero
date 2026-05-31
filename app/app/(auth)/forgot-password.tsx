@@ -15,7 +15,7 @@ import { YStack } from 'tamagui';
 
 import { AuthScreenShell, Button, FormError, FormField, InfoNote, LinkButton } from '@/components';
 import { useAuth } from '@/contexts';
-import { authErrorMessage } from '@/utils/auth-errors';
+import { authErrorMessage, isNetworkOrRateLimit } from '@/utils/auth-errors';
 import { isValidEmail, type FieldError } from '@/utils/validation';
 
 export default function ForgotPasswordScreen() {
@@ -46,10 +46,12 @@ export default function ForgotPasswordScreen() {
       setSent(true);
       return;
     }
-    const copy = authErrorMessage(result.error, 'reset');
     // Solo cortamos el flujo si es un problema accionable por el usuario (red/limit).
-    if (copy.includes('conexión') || copy.includes('intentos')) {
-      setFormError(copy);
+    // Decidimos por el error CRUDO (status/code/name), no por el texto traducido: el
+    // copy puede cambiar y rompería esta rama en silencio. Cualquier otro error → no
+    // revelamos nada (anti-enumeración): mostramos "Revisá tu email" igual.
+    if (isNetworkOrRateLimit(result.error)) {
+      setFormError(authErrorMessage(result.error, 'reset'));
     } else {
       setSent(true);
     }
