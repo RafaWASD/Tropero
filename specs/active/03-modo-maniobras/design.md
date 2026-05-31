@@ -1,6 +1,6 @@
 # Spec 03 — MODO MANIOBRAS — Design
 
-**Status**: `spec_ready` (pendiente Gate 1 `security_analyzer` modo `spec`).
+**Status**: `spec_ready` — **APROBADA por Raf (Puerta 1, 2026-05-30)**. Gate 1 PASS.
 **Fecha**: 2026-05-30 (sesión 18).
 **Fuente de verdad**: `context.md` (Gate 0 aprobado). Sustrato: spec 02 (eventos tipados, `rodeo_data_config`, `field_definitions`, `management_groups`, triggers, `animal_timeline`, RLS, helper `establishment_of_profile`). **Nota Gate 1 (SEC-SPEC-03-02)**: las funciones `current_animal_rodeo` / `get_rodeo_data_keys` **NO existen as-built** (verificado, 0 hits en migrations 0001-0049) — spec 03 NO depende de ellas; el rodeo del animal se resuelve **inline** vía `animal_profiles.rodeo_id` del perfil activo (ver §4).
 

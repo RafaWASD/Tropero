@@ -50,8 +50,9 @@ if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
   run('RLS suite', `node --test supabase/tests/rls/run.cjs`);
   run('Edge Functions suite', `node --test supabase/tests/edge/run.cjs`);
   run('Animal suite (spec 02)', `node --test supabase/tests/animal/run.cjs`);
+  run('Maneuvers suite (spec 03)', `node --test supabase/tests/maneuvers/run.cjs`);
 } else {
-  console.log('\n>>> RLS + Edge + Animal suites — SKIPPED (falta SUPABASE_SERVICE_ROLE_KEY en env)');
+  console.log('\n>>> RLS + Edge + Animal + Maneuvers suites — SKIPPED (falta SUPABASE_SERVICE_ROLE_KEY en env)');
 }
 
 console.log('\nAll tests passed.');

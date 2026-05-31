@@ -22,7 +22,8 @@ Ejecutás **una sola** feature siguiendo su spec aprobado en `specs/active/<name
 5. Por cada task `T<n>` en orden: implementás, escribís su test, marcás `[x] T<n>` en `tasks.md`.
 6. Verificás ejecutando `node scripts/check.mjs`. Si falla → volvés al paso 5.
 7. **Trazabilidad**: cada `R<n>` cubierto por ≥1 test concreto. Documentás el mapa `R<n> → archivo:test` en `progress/impl_<name>.md`.
-8. **No marcás `done` vos mismo.** Esperás al reviewer.
+8. **Autorrevisión adversarial (antes de reportar).** Antes de pasar al reviewer, hacés una pasada crítica de tu propio trabajo — NO sos pasamanos de tu propio código. Buscás activamente, como si fueras un revisor hostil: (a) desviaciones del spec (R<n> no cubierto o cubierto a medias); (b) bugs y edge cases no testeados (NULL, vacío, límites, concurrencia, orden); (c) gaps de seguridad (RLS, fail-closed, `search_path`, `revoke execute`, tenant-check, `created_by` forzado, no exponer helpers como RPC); (d) gaps offline-first / multi-tenant; (e) tests que pasan por la razón equivocada (no ejercen el path real, no verifican el reject). Lo que encontrás, lo **corregís** y re-verificás con `node scripts/check.mjs` antes de seguir. Documentás la autorrevisión en `progress/impl_<name>.md` (qué buscaste, qué encontraste, cómo lo cerraste). Esto NO reemplaza al reviewer ni al Gate 2 — los precede para que lleguen a algo ya pulido.
+9. **No marcás `done` vos mismo.** Esperás al reviewer.
 
 ## Reglas duras
 

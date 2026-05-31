@@ -1,6 +1,6 @@
 # Spec 03 — MODO MANIOBRAS — Requirements (EARS)
 
-**Status**: `spec_ready` (pendiente Gate 1 `security_analyzer` modo `spec` + aprobación humana).
+**Status**: `spec_ready` — **APROBADA por Raf (Puerta 1, 2026-05-30)**. Gate 1 PASS. Lista para `implementer` (coordinando con la terminal de frontend que toca app/).
 **Fecha**: 2026-05-30 (sesión 18).
 **Autor**: spec_author.
 **Fuente de verdad**: `specs/active/03-modo-maniobras/context.md` (Gate 0 aprobado por Raf 2026-05-28, + refinamiento de edge cases s18). Cada "Caso y decisión" del context queda cubierto por ≥1 `R<n>` (ver mapa de cobertura al final).

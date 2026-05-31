@@ -2,7 +2,7 @@
 
 **Fecha**: 2026-05-30
 **Autor**: leader (orquestó spec_author + Gate 1) — terminal dedicada a la spec de 03
-**Estado**: `spec_ready` — **Gate 1 PASS (re-audit)** — **pendiente aprobación humana (Puerta 1)**
+**Estado**: `spec_ready` — **Gate 1 PASS** — **✅ APROBADA por Raf (Puerta 1, 2026-05-30)**. Pendiente: coordinar arranque de `implementer` con la terminal de frontend (toca app/ + supabase/).
 **Footprint**: `specs/active/03-modo-maniobras/` + este archivo + `feature_list.json`[feature 3 → spec_ready] + `progress/security_spec_03-modo-maniobras.md`. NO se tocó app/, supabase/, docs/, ni `progress/current.md` ni `plan.md` (los maneja la terminal de frontend, que tiene cambios concurrentes en curso — mis-campos, EstablishmentCard, y también edita `feature_list.json`).
 
 ## Resultado
@@ -63,9 +63,30 @@ Raf resolvió en la puerta las 4 decisiones que quedaban abiertas, y pidió una 
 
 Líneas reales tras el fold: requirements 340, design 593, tasks 241 (verificadas en disco). Reporte Gate 1: 264 líneas.
 
+## Implementación backend (Fase 1/2) — 2026-05-30
+
+Implementer corrió en background (footprint backend, no tocó app/ ni current.md). El leader cazó 3 bugs reales que el implementer había misdiagnosticado/omitido (NO eran flake — ver [[feedback_autorrevision_implementer]]):
+1. **Soft-delete por UPDATE directo daba 42501 determinista** (regla de visibilidad post-UPDATE de PostgREST, ya documentada en 0041 de spec 02). El implementer lo tapó con `writeWithRetry` tratando 42501 como "transitorio". → Fix real: RPC `soft_delete_maneuver_preset` (migración **0057**, patrón de 0041) + T2.9 usa `soft_delete_event` + 42501 sacado de la lista transitoria.
+2. **Faltaba el RPC `soft_delete_maneuver_preset`** (gap de schema de la tabla nueva). → 0057.
+3. **La suite NO estaba enganchada en `run-tests.mjs`** (T2.10) → `check.mjs` daba verde-falso sin correr la feature. → hook agregado (`run-tests.mjs:53`).
++ El leader detectó que el `db push` de 0057 se cortó por un ConnectionRefused y nunca llegó al remoto (lo verificó con `migration list` + probe service_role `P0002` vs `PGRST202`); lo aplicó y reconfirmó.
+
+**Migraciones (archivos nuevos, no editan 0001–0049)**: 0050 sessions · 0051 maneuver_presets · 0052 event_session_fk + tenant-check · 0053 tacto_vaquillona (enum) · 0054 gating_db_layer (assert_data_keys_enabled fail-closed + triggers BEFORE INSERT + trigger dientes/CUT afinado) · 0055 check_grants (smoke-check fail-closed) · **0056** fix tenant-check (split BEFORE INSERT + BEFORE UPDATE OF session_id; 0052 no disparaba en INSERT = bypass) · **0057** soft_delete_maneuver_preset RPC. Local==Remote 0050–0057.
+
+**Verificación (toda releída en disco por el leader, no por claim de agente):**
+- Suite `supabase/tests/maneuvers/run.cjs` → **13/13** (tests 13, pass 13, fail 0, NODE_RC=0).
+- `node scripts/check.mjs` full → **RC=0**: RLS 15/15 + Edge 26/26 + Animal spec02 28/28 + **Maneuvers spec03 13/13** (sin regresión de spec 01/02; hook funcionando).
+- Tasks T1.1–T1.6, T2.1–T2.11, T2.10 → `[x]`; T2.12 → `[ ]` (nota de Gate 2, find-or-create cross-spec, se cierra con spec 09).
+
+**Gates de código:**
+- **Reviewer = APPROVED** (`progress/review_03-modo-maniobras.md`) — solo Fase 1/2 backend; cliente diferido.
+- **Gate 2 (security_analyzer code) = PASS** (`progress/security_code_03-modo-maniobras.md`, 253 líneas, veredicto línea 3, releído en disco). 9/9 focos CERRADOS, cero HIGH nuevos. SEC-HIGH-01 no reintroducida (10 funciones con search_path fijo + revoke execute; soft_delete es la única RPC con grant deliberado). FIX 0056 cierra el bypass cross-tenant. D9/T2.12 diferido a spec 09 (no es FAIL).
+
 ## Estado del flujo SDD
 
-`context_ready` → ✅ spec_author → ✅ Gate 1 FAIL → ✅ endurecido → ✅ Gate 1 re-audit PASS → ✅ **puerta: Raf resuelve D1/D2/D8/D9 + hardening #1–#5** → ✅ **Gate 1 re-audit del delta PASS** → **⏸ PUERTA 1 (Raf aprueba la spec)** → [pendiente] implementer (otra etapa; coordinar con la terminal de frontend que toca app/) → reviewer → Gate 2 → ⏸ Puerta 2.
+`context_ready` → ✅ spec_author → ✅ Gate 1 FAIL → ✅ endurecido → ✅ Gate 1 re-audit PASS → ✅ **Puerta 1 (Raf aprueba spec)** → ✅ implementer (Fase 1/2 backend) → ✅ **leader cazó 3 bugs reales + fix** → ✅ 13/13 verde + check.mjs RC=0 → ✅ reviewer APPROVED → ✅ **Gate 2 (code) PASS** → **⏸ PUERTA 2 (Raf aprueba el código backend)** → [diferido] Fase 3/4 cliente (specs 04/05/09).
+
+**Backend de spec 03 completo y verificado. Espera aprobación humana (Puerta 2). NO marcado `done`.**
 
 **NO se invocó implementer.** La spec espera aprobación humana. `check.mjs` verde (typecheck + RLS 15 + Edge 26 + animal spec 02 28; anti-hardcode 0 violaciones; RC=0).
 
