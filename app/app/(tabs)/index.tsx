@@ -11,9 +11,13 @@
 //
 // Incremento (R6.8.1): el switch del header pasa de ESTÁTICO a DROPDOWN funcional
 // (EstablishmentSwitcherDropdown): campo activo ● → últimos 2 visitados → "Ver todos
-// mis campos" (→ /mis-campos) → "Crear nuevo campo +" (stub). Mock data + tokens; NO
-// toca backend. Sigue fuera de scope acá: "Mis campos" / EstablishmentCard (ya viven
-// en app/mis-campos.tsx) y el routing/persistencia real del cambio de campo.
+// mis campos" (→ /mis-campos) → "Crear nuevo campo +" (→ /crear-campo).
+//
+// B.1.2 (Fase 4): la home se CABLEA a datos reales — fuera el mock data. El nombre del
+// usuario viene de AuthContext; el campo activo y los visitados, de EstablishmentContext.
+// El switch refleja el campo activo REAL; al elegir un visitado, switchEstablishment(id)
+// cambia el contexto y la home re-renderiza con el campo nuevo (bug (a) de Raf). NUNCA se
+// hardcodea establishment_id (CLAUDE.md ppio 6).
 //
 // Cero hardcode de color/spacing (ADR-023 §4): todo via tokens. Donde un valor
 // cruza a una API no-Tamagui (tamaño de íconos lucide) se lee con getTokenValue.
@@ -34,23 +38,7 @@ import {
   type StepperStep,
   type SwitcherField,
 } from '@/components';
-
-// Datos estáticos del mockup (incremento 1). En incrementos posteriores vienen del
-// contexto multi-tenant (establishment activo + usuario), nunca hardcodeados — ver
-// CLAUDE.md principio 6. Acá son placeholders del mockup canónico.
-const ESTABLISHMENT_NAME = 'La Juanita';
-const USER_FIRST_NAME = 'Lucas';
-
-// ─── Mock del switch de establecimiento (R6.8.1 / R6.9) ────────────────────────
-// Campo activo + rastro de campos recientes (last_establishment_opened, R6.9; más
-// reciente primero). En producción TODO esto viene del contexto multi-tenant — NUNCA
-// se hardcodea establishment_id (CLAUDE.md ppio 6). Nombres coherentes con los del
-// Inc 2 ("Mis campos"): activo "La Juanita"; últimos visitados "El Ombú" y "Bella Vista".
-const ACTIVE_FIELD: SwitcherField = { id: 'la-juanita', name: ESTABLISHMENT_NAME };
-const RECENT_FIELDS: SwitcherField[] = [
-  { id: 'el-ombu', name: 'El Ombú' },
-  { id: 'bella-vista', name: 'Bella Vista' },
-];
+import { useAuth, useEstablishment } from '@/contexts';
 
 const WIZARD_STEPS: StepperStep[] = [
   {
@@ -159,7 +147,13 @@ function HomeHeader({
 }
 
 /** Banner "establecimiento listo" — descartable (✕). */
-function ReadyBanner({ onDismiss }: { onDismiss: () => void }) {
+function ReadyBanner({
+  establishmentName,
+  onDismiss,
+}: {
+  establishmentName: string;
+  onDismiss: () => void;
+}) {
   const checkColor = getTokenValue('$primary', 'color');
   const iconBox = getTokenValue('$icon', 'size');
   const xColor = getTokenValue('$textMuted', 'color');
@@ -189,7 +183,7 @@ function ReadyBanner({ onDismiss }: { onDismiss: () => void }) {
         <Text flex={1} minWidth={0} fontFamily="$body" fontSize="$5" fontWeight="400" color="$textPrimary">
           Tu establecimiento{' '}
           <Text fontFamily="$body" fontWeight="600" color="$textPrimary">
-            {ESTABLISHMENT_NAME}
+            {establishmentName}
           </Text>{' '}
           está listo.
         </Text>
@@ -212,20 +206,34 @@ function ReadyBanner({ onDismiss }: { onDismiss: () => void }) {
 export default function InicioScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { state: authState } = useAuth();
+  const { state: estState, recents, switchEstablishment } = useEstablishment();
   const [bannerVisible, setBannerVisible] = useState(true);
+
+  // ── Datos reales (Fase 4) ────────────────────────────────────────────────────
+  // Nombre del usuario ← AuthContext (primer nombre del perfil). Campo activo ← contexto
+  // multi-tenant (R6.3). NUNCA se hardcodea (CLAUDE.md ppio 6).
+  const userFirstName =
+    authState.status === 'authenticated' ? firstNameOf(authState.user.name) : null;
+
+  // El campo activo real. La home solo se renderiza cuando el gating ya garantizó estado
+  // 'active' (RootGate), pero defendemos por si se monta en transición.
+  const activeField: SwitcherField | null =
+    estState.status === 'active'
+      ? { id: estState.current.id, name: estState.current.name }
+      : null;
 
   // ── Switch de establecimiento (R6.8.1) ──────────────────────────────────────
   const [switcherOpen, setSwitcherOpen] = useState(false);
-  // Campo activo en sesión. En prod = contexto multi-tenant (R6.3); acá un mock que
-  // cambia al elegir un visitado, así el switch refleja el nuevo activo de inmediato.
-  const [activeField, setActiveField] = useState<SwitcherField>(ACTIVE_FIELD);
   // Alto del header medido en runtime (insets + fila) para anclar el dropdown JUSTO
   // debajo. onLayout → número derivado del layout, no un literal de spacing.
   const [headerBottom, setHeaderBottom] = useState(0);
 
-  // Los "últimos 2 visitados" distintos del activo (R6.8.1). Si el activo es uno de los
-  // recientes, igual se excluye y quedan los demás (con <3 campos totales, los que haya).
-  const visited = pickVisited(RECENT_FIELDS, activeField.id);
+  // Los "últimos 2 visitados" distintos del activo (R6.8.1), derivados del rastro REAL de
+  // visitados (R6.9). Al hacer switch, el saliente entra a recientes → reaparece como
+  // visitado (bug (b) de Raf). Mapeamos los recents del contexto a SwitcherField.
+  const recentFields: SwitcherField[] = recents.map((e) => ({ id: e.id, name: e.name }));
+  const visited = activeField ? pickVisited(recentFields, activeField.id) : [];
 
   // El CTA del paso 1 vive como `children` del paso activo (Button primary fullWidth).
   const steps: StepperStep[] = WIZARD_STEPS.map((step, i) =>
@@ -246,6 +254,14 @@ export default function InicioScreen() {
         }
       : step
   );
+
+  // Guarda de transición: la home solo tiene sentido con un campo activo. El gating
+  // (RootGate) garantiza estado 'active' antes de mostrar (tabs); si por una carrera de
+  // render no hay campo activo todavía, no pintamos la home mock — devolvemos un lienzo
+  // vacío con el fondo de marca (el gate reubica en el próximo tick).
+  if (!activeField) {
+    return <YStack flex={1} width="100%" backgroundColor="$bg" />;
+  }
 
   return (
     // Raíz a ancho completo: flex:1 + width:100%. El padding horizontal es simétrico
@@ -284,7 +300,7 @@ export default function InicioScreen() {
         showsHorizontalScrollIndicator={false}
         showsVerticalScrollIndicator={false}
       >
-        {/* Saludo. */}
+        {/* Saludo. Nombre real del usuario (AuthContext); sin nombre, saludo neutro. */}
         <Text
           fontFamily="$body"
           fontSize="$9"
@@ -292,11 +308,16 @@ export default function InicioScreen() {
           color="$textPrimary"
           marginTop="$4"
         >
-          ¡Hola {USER_FIRST_NAME}! 👋
+          {userFirstName ? `¡Hola ${userFirstName}! 👋` : '¡Hola! 👋'}
         </Text>
 
-        {/* Banner descartable. */}
-        {bannerVisible ? <ReadyBanner onDismiss={() => setBannerVisible(false)} /> : null}
+        {/* Banner descartable: nombre del campo activo real. */}
+        {bannerVisible ? (
+          <ReadyBanner
+            establishmentName={activeField.name}
+            onDismiss={() => setBannerVisible(false)}
+          />
+        ) : null}
 
         {/* Wizard de 3 pasos. */}
         <YStack marginTop="$6" marginBottom="$8">
@@ -317,23 +338,29 @@ export default function InicioScreen() {
             // Tocar el campo activo no hace nada más que cerrar (R6.8.1).
           }}
           onSelectVisited={(field) => {
-            // Fija el campo como activo (R6.3) + navega a su home (R6.8.1). Acá: actualiza
-            // el label del switch; el cambio real de contexto + persistencia de
-            // last_establishment_opened (R6.9) son sub-tarea del contexto multi-tenant.
-            setActiveField(field);
-            // router.replace('/') — re-aterriza en la home del nuevo campo activo (stub:
-            // mismo route; con contexto real la home re-renderiza con el campo elegido).
+            // Fija el campo como activo (R6.3) + cambia el contexto multi-tenant (R6.8.1).
+            // switchEstablishment promueve el saliente en el rastro de visitados (R6.9) y
+            // dispara el re-render de la home con el campo nuevo (bug (a) de Raf). La home
+            // sigue siendo la misma ruta; el contexto manda el nuevo activo.
+            void switchEstablishment(field.id);
           }}
           onSeeAll={() => {
             // "Ver todos mis campos" → pantalla "Mis campos" (R6.6).
             router.push('/mis-campos');
           }}
           onCreate={() => {
-            // "Crear nuevo campo +" → inicia el flujo de creación de establecimiento
-            // (R3.1). STUB: el wizard de alta de campo es sub-tarea posterior.
+            // "Crear nuevo campo +" → flujo de alta de establecimiento (R3.1) — bug (d) de Raf.
+            router.push('/crear-campo');
           }}
         />
       ) : null}
     </YStack>
   );
+}
+
+/** Primer nombre del nombre completo guardado en el perfil (para el saludo). */
+function firstNameOf(name: string | null): string | null {
+  if (!name) return null;
+  const first = name.trim().split(/\s+/)[0];
+  return first || null;
 }

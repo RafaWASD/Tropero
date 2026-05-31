@@ -8,8 +8,11 @@ import {
   isValidEmail,
   isValidPassword,
   isValidName,
+  isValidPhone,
   validateSignUp,
   validateSignIn,
+  validateCreateEstablishment,
+  validateProfile,
   PASSWORD_MIN_LENGTH,
 } from './validation.ts';
 
@@ -69,4 +72,55 @@ test('T3.2 validateSignIn solo valida formato (no longitud de password)', () => 
   const badEmail = validateSignIn({ email: 'x', password: 'algo' });
   assert.ok(badEmail.email);
   assert.equal(badEmail.valid, false);
+});
+
+test('R3.8 isValidPhone exige al menos 8 dígitos (ignora separadores)', () => {
+  assert.equal(isValidPhone(''), false);
+  assert.equal(isValidPhone('123'), false);
+  assert.equal(isValidPhone('11 2345 6789'), true); // 10 dígitos con espacios
+  assert.equal(isValidPhone('+54 9 11 1234-5678'), true);
+  assert.equal(isValidPhone('abcd'), false);
+});
+
+test('R3.3 validateCreateEstablishment exige nombre y provincia', () => {
+  const bad = validateCreateEstablishment({ name: '  ', province: '' });
+  assert.ok(bad.name);
+  assert.ok(bad.province);
+  assert.equal(bad.valid, false);
+
+  const okOnlyName = validateCreateEstablishment({ name: 'La Juanita', province: '' });
+  assert.equal(okOnlyName.name, null);
+  assert.ok(okOnlyName.province);
+  assert.equal(okOnlyName.valid, false);
+
+  const good = validateCreateEstablishment({ name: 'La Juanita', province: 'Buenos Aires' });
+  assert.equal(good.name, null);
+  assert.equal(good.province, null);
+  assert.equal(good.valid, true);
+});
+
+test('R2.1 validateProfile exige nombre; teléfono opcional pero válido si se ingresa', () => {
+  // Nombre vacío → error de nombre.
+  const noName = validateProfile({ name: '  ', phone: '11 2345 6789' });
+  assert.ok(noName.name);
+  assert.equal(noName.phone, null);
+  assert.equal(noName.valid, false);
+
+  // Teléfono vacío = OK (opcional): no se fuerza a tenerlo en el form de edición.
+  const emptyPhone = validateProfile({ name: 'Raf', phone: '' });
+  assert.equal(emptyPhone.name, null);
+  assert.equal(emptyPhone.phone, null);
+  assert.equal(emptyPhone.valid, true);
+
+  // Teléfono con basura (no vacío e inválido) → error de teléfono.
+  const badPhone = validateProfile({ name: 'Raf', phone: '123' });
+  assert.equal(badPhone.name, null);
+  assert.ok(badPhone.phone);
+  assert.equal(badPhone.valid, false);
+
+  // Todo bien.
+  const good = validateProfile({ name: 'Raf', phone: '11 2345 6789' });
+  assert.equal(good.name, null);
+  assert.equal(good.phone, null);
+  assert.equal(good.valid, true);
 });

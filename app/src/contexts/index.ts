@@ -1,4 +1,4 @@
-// Re-exports de contextos. AuthContext (T3.1); EstablishmentContext llega en T4.1.
+// Re-exports de contextos. AuthContext (T3.1); EstablishmentContext (T4.1).
 export { AuthProvider, useAuth } from './AuthContext';
 export type {
   AuthState,
@@ -8,3 +8,9 @@ export type {
   SignUpInput,
   SignInInput,
 } from './AuthContext';
+export { EstablishmentProvider, useEstablishment } from './EstablishmentContext';
+export type {
+  EstablishmentState,
+  ActiveLostReason,
+  EstablishmentContextValue,
+} from './EstablishmentContext';
