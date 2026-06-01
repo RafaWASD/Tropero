@@ -19,6 +19,7 @@
     "**/*.test.ts",
     "**/*.test.tsx",
     "e2e",
-    "playwright.config.ts"
+    "playwright.config.ts",
+    "playwright.report.config.ts"
   ]
 }

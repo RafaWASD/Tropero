@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit",
     "e2e:build": "expo export -p web",
     "e2e:test": "playwright test",
-    "e2e": "pnpm run e2e:build && playwright test"
+    "e2e": "pnpm run e2e:build && playwright test",
+    "e2e:report": "pnpm run e2e:build && playwright test --config playwright.report.config.ts"
   },
   "dependencies": {
     "@expo-google-fonts/inter": "^0.4.2",
