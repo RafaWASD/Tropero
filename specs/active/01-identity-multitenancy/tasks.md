@@ -233,12 +233,16 @@ Plan de implementación paso a paso. Cada tarea tiene su criterio de aceptación
 
 ## Fase 5 — Cliente: invitaciones y miembros
 
-### T5.1 Pantalla Members del establishment
-- Lista de `user_roles` activos del campo activo.
+### [x] T5.1 Pantalla Members del establishment
+- Lista de `user_roles` activos del campo activo. (`app/app/miembros.tsx`)
 - Para owner: botones "Invitar", "Cambiar rol", "Remover".
-- **Aceptación**: owner ve lista; operator ve lista read-only.
+- **Aceptación**: owner ve lista; operator ve vista mínima (RLS owner-céntrica, hallazgo #1).
+- **As-built (B.1.3)**: owner ve la lista completa + acciones; no-owner ve solo SU fila + nota
+  "Solo el dueño gestiona el equipo" (la policy `user_roles_select` 0008 no le deja ver más).
+  Email del miembro NO se muestra (loadMembers solo trae id+name, hallazgo #2). Cableado el item
+  "Equipo" de `mas.tsx` → `/miembros`.
 
-### T5.2 Form de invitación (modelo link shareable)
+### [x] T5.2 Form de invitación (modelo link shareable) — `app/app/invitar.tsx`
 - Modal "Invitar miembro": **rol obligatorio** + email opcional como anotación.
 - Llamada a Edge Function `invite_user({ establishment_id, role, email? })`.
 - Al recibir respuesta exitosa, mostrar pantalla "Listo, compartí el link" con:
@@ -250,14 +254,21 @@ Plan de implementación paso a paso. Cada tarea tiene su criterio de aceptación
 - **Aceptación**: invitación creada, link visible con botones funcionales; el link compartido vía WhatsApp llega como mensaje preparado para enviar.
 - Cubre: R5.1, R5.2, R5.3, `ADR-014`.
 
-### T5.3 Sección de invitaciones pendientes
+### [x] T5.3 Sección de invitaciones pendientes (en `app/app/miembros.tsx`, owner)
 - Lista de invitations status=pending del establishment activo.
 - Por cada pendiente: rol, fecha de creación, expiración, email opcional (anotación).
 - Acciones por item: **copiar link**, **compartir link**, **regenerar link** (llama `resend_invitation`, advierte que el link anterior dejará de funcionar), **cancelar**.
 - **Aceptación**: pendientes visibles con todas las acciones funcionales; regenerar muestra el nuevo link y deja inservible el anterior.
 - Cubre: R5.7, R5.8, R5.12.
 
-### T5.4 Pantalla de aceptar invitación (deep link + entrada manual)
+### [~] T5.4 Pantalla de aceptar invitación (deep link + entrada manual) — `app/app/invite.tsx`
+- **As-built (B.1.3)**: entrada manual (pegar link, wizard T4.3 + stub mis-campos) + parseo del token
+  (`parseInviteToken`) + confirm genérico (sin preview — hallazgo RLS #3) + acceptInvitation +
+  refreshEstablishments(establishment_id) → home del campo nuevo. Auth-con-token (R5.13) cableado:
+  no-logueado → persiste token + Registrarme/Iniciar sesión → al verificar, verify-email/onboarding
+  re-rutean a `/invite?token=`. Errores 404/409/410 → copy legible. `scheme: 'rafq'` ya en app.json.
+  **DIFERIDO** (device-blocked, sin dominio): asociación universal-link (apple-app-site-association /
+  assetlinks) + verificación on-device del deep-link nativo. El loop se prueba en web pegando el link.
 - Configurar `expo-linking` con esquema `rafq://` y universal link `https://app.rafq.ar/invite`.
 - `AcceptInvitationScreen` accesible vía:
   - Deep link / universal link con `?token=XXX`.
@@ -269,14 +280,15 @@ Plan de implementación paso a paso. Cada tarea tiene su criterio de aceptación
 - **Aceptación**: end-to-end: owner crea invitación, comparte link por WhatsApp, destinatario abre link en su celu, se registra/loguea, queda agregado al campo con el rol correcto. Caso degradado (entrada manual desde wizard) también funciona.
 - Cubre: R5.4, R5.5, R5.6, R5.9.
 
-### T5.5 Cambiar rol de miembro
-- Acción "Cambiar rol" → modal con opciones.
+### [x] T5.5 Cambiar rol de miembro (en `app/app/miembros.tsx`, owner)
+- Acción "Cambiar rol" → selector con opciones (Operario/Veterinario).
 - Llamada a Edge Function `change_member_role`.
-- **Aceptación**: cambio se refleja en la UI inmediatamente.
+- **Aceptación**: cambio se refleja en la UI inmediatamente (refresca la lista). Error legible
+  (incl. last_owner: "no se puede dejar al campo sin dueño").
 
-### T5.6 Remover miembro
-- Acción "Remover" → confirmación → llamada a `remove_member`.
-- **Aceptación**: removido pierde acceso en su siguiente query.
+### [x] T5.6 Remover miembro (en `app/app/miembros.tsx`, owner)
+- Acción "Remover" → `confirmDestructive` → llamada a `remove_member`.
+- **Aceptación**: removido pierde acceso en su siguiente query. Error legible (incl. last_owner).
 
 ## Fase 6 — Perfil
 

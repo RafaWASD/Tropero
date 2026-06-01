@@ -21,6 +21,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { getTokenValue, Text, View, XStack, YStack } from 'tamagui';
 import { shadows } from '../../tamagui.config';
 import { roleLabel } from '../utils/establishment';
+import { RoleBadge } from './RoleBadge';
 
 // ─── Tipos públicos ───────────────────────────────────────────────────────────
 
@@ -129,23 +130,9 @@ function BannerStrip({ name, imageUrl }: { name: string; imageUrl?: string }) {
   );
 }
 
-/** Chip neutro del rol (borde $divider sobre $surface, texto $textMuted). */
-function RoleBadge({ role }: { role: EstablishmentRole }) {
-  return (
-    <View
-      backgroundColor="$surface"
-      borderWidth={1}
-      borderColor="$divider"
-      borderRadius="$pill"
-      paddingHorizontal="$3"
-      paddingVertical="$1"
-    >
-      <Text fontFamily="$body" fontSize="$2" fontWeight="500" color="$textMuted">
-        {roleLabel(role)}
-      </Text>
-    </View>
-  );
-}
+// RoleBadge (chip neutro del rol) ahora vive en ./RoleBadge (FUENTE ÚNICA compartida con la
+// pantalla Miembros, Fase 5). EstablishmentRole === UserRole (misma unión de strings), así que
+// pasarle el rol es type-safe.
 
 /** Indicador "● activo" del campo activo actual (en $primary). */
 function ActiveIndicator() {

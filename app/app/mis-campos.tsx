@@ -112,8 +112,8 @@ function SearchBar({
 
 /**
  * CTA secundario y sutil "pegar link de invitación" (R6.5/R6.6, "si corresponde"). Ghost
- * (sin relleno), al final de la lista. STUB Fase 5 (B.1.3): el flujo de pegar/aceptar link
- * se construye en la Fase 5; acá solo informa al tocar.
+ * (sin relleno), al final de la lista. Fase 5 (B.1.3): navega a /invite, que abre el input para
+ * pegar el link, parsea el token y completa la aceptación (T5.4).
  */
 function PasteInviteLink({ onPress }: { onPress: () => void }) {
   const muted = getTokenValue('$textMuted', 'color');
@@ -146,7 +146,6 @@ export default function MisCamposScreen() {
   const router = useRouter();
   const { state, recents, switchEstablishment } = useEstablishment();
   const [query, setQuery] = useState('');
-  const [showInviteStub, setShowInviteStub] = useState(false);
 
   // Campos disponibles + id del activo, según el estado del contexto. "Mis campos" se
   // muestra tanto como landing (choosing) como navegando desde la home (active).
@@ -258,22 +257,11 @@ export default function MisCamposScreen() {
           ) : null}
         </YStack>
 
-        {/* CTA secundario "pegar link de invitación" (R6.5/R6.6) — STUB Fase 5. Se oculta
-            mientras se busca (no aporta al triage de búsqueda). */}
+        {/* CTA secundario "pegar link de invitación" (R6.5/R6.6) → /invite (Fase 5, T5.4). Se
+            oculta mientras se busca (no aporta al triage de búsqueda). */}
         {query.trim().length === 0 ? (
           <YStack width="100%" marginTop="$4" gap="$2">
-            <PasteInviteLink onPress={() => setShowInviteStub(true)} />
-            {showInviteStub ? (
-              <Text
-                fontFamily="$body"
-                fontSize="$3"
-                fontWeight="400"
-                color="$textMuted"
-                textAlign="center"
-              >
-                La aceptación de invitaciones por link llega muy pronto.
-              </Text>
-            ) : null}
+            <PasteInviteLink onPress={() => router.push('/invite')} />
           </YStack>
         ) : null}
       </ScrollView>

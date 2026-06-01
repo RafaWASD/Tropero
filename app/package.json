@@ -19,6 +19,7 @@
     "@tamagui/config": "2.0.0",
     "@tamagui/core": "2.0.0",
     "expo": "~56.0.4",
+    "expo-clipboard": "~56.0.3",
     "expo-constants": "^56.0.15",
     "expo-device": "^56.0.4",
     "expo-linear-gradient": "^56.0.4",

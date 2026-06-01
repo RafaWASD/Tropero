@@ -5,20 +5,26 @@
 //
 // CTA dual (R6.5), jerarquía clara:
 //   (a) PRIMARIO — "Crear mi primer campo" → /crear-campo (flujo de alta, R3.1/R3.8).
-//   (b) SECUNDARIO — "Pegar link de invitación" → STUB Fase 5 (B.1.3). El flujo de
-//       pegar/extraer token + AcceptInvitation se construye en la Fase 5; acá solo el
-//       botón con copy honesto. NO se construye el input de pegar ni la aceptación.
+//   (b) SECUNDARIO — "Pegar link de invitación" → /invite (Fase 5, T5.4): abre el input para
+//       pegar el link, extrae el token y completa la aceptación.
 //
 // El mismo wizard sirve a productores y a vets/operarios (no se segmenta por rol; el rol
 // vive en user_roles, no en el signup — ver Decisiones tomadas).
 //
-// Cero hardcode (ADR-023 §4): AuthScreenShell + Button + InfoNote de la librería + tokens.
+// SEAM R5.13 — CENTRALIZADO en RootGate. El re-ruteo a /invite?token= cuando hay un token de
+// invitación pendiente vive ahora en una FUENTE ÚNICA: el RootGate (_layout.tsx, Opción A del fix de
+// B.1.3), que lo dispara apenas el usuario queda authenticated && emailVerified, ANTES del gating de
+// establecimiento. Por eso este wizard YA NO necesita su propio seam: un invitado nuevo (0 campos)
+// con token pendiente nunca llega acá — RootGate lo manda a /invite antes de resolver el estado
+// no_establishments. Tener el seam acá además causaría doble-ruteo. Ver _layout.tsx (RootGate, paso
+// 3.5) e impl_01-frontend-fase5.md.
+//
+// Cero hardcode (ADR-023 §4): AuthScreenShell + Button de la librería + tokens.
 
-import { useState } from 'react';
 import { useRouter } from 'expo-router';
 import { YStack } from 'tamagui';
 
-import { AuthScreenShell, Button, InfoNote } from '@/components';
+import { AuthScreenShell, Button } from '@/components';
 import { useAuth } from '@/contexts';
 
 export default function OnboardingScreen() {
@@ -26,10 +32,6 @@ export default function OnboardingScreen() {
   const { state } = useAuth();
   const firstName =
     state.status === 'authenticated' ? firstNameOf(state.user.name) : null;
-
-  // STUB Fase 5: el flujo de pegar link de invitación (extraer token + AcceptInvitation)
-  // es B.1.3. Acá solo informamos al tocar, sin construir el input ni la aceptación.
-  const [showInviteStub, setShowInviteStub] = useState(false);
 
   return (
     <AuthScreenShell
@@ -42,17 +44,10 @@ export default function OnboardingScreen() {
           Crear mi primer campo
         </Button>
 
-        {/* CTA secundario (R6.5 b): pegar link de invitación. STUB Fase 5 (B.1.3). */}
-        <Button variant="secondary" fullWidth onPress={() => setShowInviteStub(true)}>
+        {/* CTA secundario (R6.5 b): pegar link de invitación → /invite (T5.4). */}
+        <Button variant="secondary" fullWidth onPress={() => router.push('/invite')}>
           Pegar link de invitación
         </Button>
-
-        {showInviteStub ? (
-          <InfoNote>
-            La aceptación de invitaciones por link llega muy pronto. Mientras tanto, pedile
-            al dueño del campo que te agregue, o creá tu propio campo.
-          </InfoNote>
-        ) : null}
       </YStack>
     </AuthScreenShell>
   );

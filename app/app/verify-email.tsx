@@ -5,16 +5,14 @@
 // Auto-refresh: re-chequea la sesión periódicamente y al re-enfocar la pantalla, así
 // cuando el usuario verifica desde el mail (en otra pestaña/app) el gate avanza solo.
 //
-// ── SEAM R5.13 (token de invitación pendiente) ────────────────────────────────────
-// El flujo de signup (design.md paso 8) dice: ANTES de mostrar el wizard, chequear si
-// hay un token de invitación pendiente en almacenamiento seguro (R5.13) y, si lo hay,
-// re-rutear a AcceptInvitation. Acá dejamos el HOOK consultando el store
-// (getPendingInvitationToken). AcceptInvitation se construye en la Fase 5:
-//   TODO B.1.3: cuando exista AcceptInvitationScreen, al pasar el gate (emailVerified
-//   pasa a true), si getPendingInvitationToken() devuelve un token → router.replace a
-//   /accept-invitation?token=… (en vez del wizard/landing de la Fase 4). Tras consumir
-//   el token (aceptación OK o error terminal) → clearPendingInvitationToken().
-// Por ahora solo logueamos en dev que hay un token pendiente, sin re-rutear.
+// ── SEAM R5.13 (token de invitación pendiente) — CENTRALIZADO en RootGate ──────────
+// El re-ruteo a /invite?token= cuando hay un token de invitación pendiente vive AHORA en una
+// FUENTE ÚNICA: el RootGate (_layout.tsx, Opción A del fix de B.1.3). RootGate lo dispara apenas el
+// usuario queda authenticated && emailVerified, ANTES del gating de establecimiento, así cubre TODOS
+// los aterrizajes post-auth (incluido el usuario existente con campos, que no pasa por esta pantalla
+// ni por onboarding). Por eso esta pantalla YA NO necesita su propio seam: al verificar, el gate de
+// emailVerified de RootGate la saca de acá y el check de token pendiente re-rutea a /invite. Tener el
+// seam acá además causaría doble-ruteo. Ver _layout.tsx (RootGate, paso 3.5) e impl_01-frontend-fase5.md.
 //
 // Cero hardcode (ADR-023 §4): tokens + componentes de la librería.
 
@@ -25,7 +23,6 @@ import { YStack } from 'tamagui';
 import { AuthScreenShell, Button, FormError, InfoNote, LinkButton } from '@/components';
 import { useAuth } from '@/contexts';
 import { authErrorMessage } from '@/utils/auth-errors';
-import { getPendingInvitationToken } from '@/services/pending-invitation';
 
 const REFRESH_INTERVAL_MS = 5000;
 
@@ -54,20 +51,7 @@ export default function VerifyEmailScreen() {
     }, [refreshSession]),
   );
 
-  // SEAM R5.13: consultamos el store de token pendiente. El re-ruteo real a
-  // AcceptInvitation es TODO B.1.3 (ver cabecera). Acá solo lo observamos.
-  useEffect(() => {
-    let active = true;
-    getPendingInvitationToken().then((token) => {
-      if (active && token && process.env.NODE_ENV !== 'production') {
-        // TODO B.1.3: re-rutear a /accept-invitation?token=token al verificar.
-        console.warn('[invite] hay un token de invitación pendiente; AcceptInvitation llega en Fase 5.');
-      }
-    });
-    return () => {
-      active = false;
-    };
-  }, []);
+  // (El re-ruteo R5.13 al verificar con token pendiente lo hace RootGate — ver header.)
 
   async function onResend() {
     setFormError(null);

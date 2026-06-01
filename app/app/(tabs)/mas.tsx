@@ -428,22 +428,20 @@ export default function MasScreen() {
         ) : null}
 
         {/* ── Equipo (miembros/invitaciones) — Fase 5 / B.1.3 ── */}
-        <SectionTitle>Equipo</SectionTitle>
-        <Card>
-          <XStack alignItems="center" gap="$3">
-            <View width="$icon" alignItems="center" flexShrink={0}>
-              <Users size={20} color={muted} strokeWidth={2} />
-            </View>
-            <YStack flex={1} minWidth={0} gap="$1">
-              <Text fontFamily="$body" fontSize="$5" fontWeight="500" color="$textPrimary">
-                Miembros e invitaciones
-              </Text>
-              <Text fontFamily="$body" fontSize="$3" fontWeight="400" color="$textMuted">
-                Próximamente vas a poder invitar a tu vet o capataz y administrar permisos.
-              </Text>
-            </YStack>
-          </XStack>
-        </Card>
+        {activeField ? (
+          <>
+            <SectionTitle>Equipo</SectionTitle>
+            <Card padding="$0" gap="$0" overflow="hidden">
+              <ActionRow
+                icon={<Users size={20} color={primary} strokeWidth={2} />}
+                label="Miembros e invitaciones"
+                accessibilityLabel="Ver miembros e invitaciones del equipo"
+                trailing={<ChevronRight size={20} color={muted} strokeWidth={2} />}
+                onPress={() => router.push('/miembros')}
+              />
+            </Card>
+          </>
+        ) : null}
 
         {/* ── Cerrar sesión (T6.2 / R1.6) — destructiva, thumb-zone (abajo) ── */}
         <YStack marginTop="$8" width="100%">

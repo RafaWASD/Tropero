@@ -52,6 +52,7 @@ import {
 
 import config from '../tamagui.config';
 import { AuthProvider, EstablishmentProvider, useAuth, useEstablishment } from '@/contexts';
+import { getPendingInvitationToken } from '@/services/pending-invitation';
 
 SplashScreen.preventAutoHideAsync().catch(() => {
   /* noop: en web/algunos targets puede no estar disponible */
@@ -62,8 +63,10 @@ const AUTH_GROUP = '(auth)';
 const VERIFY_ROUTE = 'verify-email';
 // Rutas accesibles SIN estar autenticado/verificado (no las re-ruteamos): la pantalla
 // de actualizar contraseña (destino del link de reset) puede alcanzarse en medio del
-// flujo de recuperación. El wiring fino es de la Fase 5 (ver update-password.tsx).
-const PUBLIC_ROUTES = new Set(['update-password']);
+// flujo de recuperación; y /invite (aceptar invitación, Fase 5) puede abrirse vía deep-link
+// por alguien sin sesión — ahí ofrece Registrarme/Iniciar sesión persistiendo el token (R5.13),
+// así que NO debemos rebotarlo a sign-in (perdería el contexto de la invitación).
+const PUBLIC_ROUTES = new Set(['update-password', 'invite']);
 
 // Rutas del gating de ESTABLECIMIENTO (Fase 4). Top-segment de cada destino.
 const ONBOARDING_ROUTE = 'onboarding'; // wizard sin campos (R6.5)
@@ -73,6 +76,13 @@ const CREAR_CAMPO_ROUTE = 'crear-campo'; // alta de campo (R3.1) — destino nav
 // strandedOnGatingRoute, así que el gate no lo expulsa a (tabs) mientras se edita. Se registra
 // en el Stack abajo; no necesita constante de re-ruteo porque nunca se re-rutea desde 'active'.
 const CAMPO_PERDIDO_ROUTE = 'campo-perdido'; // aviso active_lost (R6.10)
+const INVITE_ROUTE = 'invite'; // aceptar invitación (R5.4) — destino navegable desde wizard/mis-campos
+// Destinos de Fase 5 que el usuario abre explícitamente y NO deben re-rutearse mientras estén
+// abiertos, en CUALQUIER estado de establecimiento (no solo 'active'): /invite lo abre tanto un
+// usuario con 0 campos (invitado nuevo, estado no_establishments) como uno con ≥2 (choosing); si
+// lo rebotáramos a onboarding/mis-campos perdería el flujo de aceptación. /invitar y /miembros se
+// abren desde 'active' (owner), pero los listamos por robustez. Ver gating abajo.
+const FASE5_DESTINATIONS = new Set([INVITE_ROUTE, 'invitar', 'miembros']);
 
 /**
  * Gate unificado de navegación: auth (R1.3 / R7.*) + establecimiento (Fase 4: R6.4–R6.10).
@@ -83,6 +93,13 @@ const CAMPO_PERDIDO_ROUTE = 'campo-perdido'; // aviso active_lost (R6.10)
  *   1. auth loading                        → no re-rutea (splash).
  *   2. unauthenticated                     → /(auth)/sign-in.
  *   3. authenticated + !emailVerified      → /verify-email.
+ *   3.5 authenticated + verificado + TOKEN DE INVITACIÓN PENDIENTE (R5.13) → /invite?token=…
+ *        FUENTE ÚNICA del re-ruteo del token (Opción A). Toma precedencia sobre el gating de
+ *        establecimiento, así cubre TODOS los aterrizajes post-auth, no solo no_establishments:
+ *        un usuario EXISTENTE con campos que se desloguea, abre /invite, va a sign-in y vuelve
+ *        logueado+verificado aterriza en (tabs)/mis-campos SIN pasar por verify-email/onboarding;
+ *        si el re-ruteo viviera solo en esos seams, el token quedaría huérfano y la invitación
+ *        nunca se aceptaría. Guard one-shot (useRef) + chequeo de no-estar-ya-en-/invite contra loop.
  *   4. authenticated + verificado          → delega al EstablishmentState:
  *        loading           → no re-rutea (splash; el contexto está cargando memberships).
  *        no_establishments → /onboarding (R6.5).
@@ -99,6 +116,39 @@ function RootGate() {
   const { state: est } = useEstablishment();
   const segments = useSegments();
   const router = useRouter();
+
+  // R5.13 (FUENTE ÚNICA, Opción A) — token de invitación pendiente.
+  // La lectura del store (expo-secure-store / localStorage) es ASYNC, pero el efecto de gating es
+  // SYNC (decide ruta a partir de auth/est en el mismo ciclo). Para que el gating pueda consultar el
+  // token sin await, lo mantenemos en state: un efecto chico lo lee con getPendingInvitationToken()
+  // cuando el usuario está authenticated && emailVerified, y lo limpia del state si deja de estarlo
+  // (logout / sesión perdida) — así un token viejo no re-dispara el re-ruteo en otra sesión.
+  const isAuthedVerified = auth.status === 'authenticated' && auth.emailVerified;
+  const [pendingInviteToken, setPendingInviteToken] = useState<string | null>(null);
+  // Guard one-shot: una vez que mandamos a /invite por un token pendiente, no volvemos a forzarlo en
+  // este mount. Cubre el caso 5 ("Ahora no" → router.replace('/(tabs)')): el usuario salió de /invite
+  // a propósito; sin el guard, el gating de 'active' lo dejaría en (tabs) pero el token (que sigue en
+  // storage hasta que lo acepte) volvería a empujarlo a /invite en cada re-render → loop/flash. Con el
+  // guard one-shot, el re-prompt recién puede ocurrir en un cold-start futuro (mount nuevo), que es
+  // aceptable por el brief.
+  const reroutedForInvite = useRef(false);
+  useEffect(() => {
+    if (!isAuthedVerified) {
+      // No autenticado/verificado → no debe haber token “armado”. Lo limpiamos del state (no del
+      // storage: el store lo administra invite.tsx al aceptar/errores terminales) y reseteamos el
+      // guard para el próximo login.
+      setPendingInviteToken(null);
+      reroutedForInvite.current = false;
+      return;
+    }
+    let active = true;
+    getPendingInvitationToken().then((token) => {
+      if (active) setPendingInviteToken(token);
+    });
+    return () => {
+      active = false;
+    };
+  }, [isAuthedVerified]);
 
   // FIX 1 (heredado de B.1.1): el splash nativo se oculta UNA sola vez, recién cuando el
   // gating resolvió (o por timeout). El ref evita ocultar dos veces.
@@ -141,6 +191,28 @@ function RootGate() {
       return;
     }
 
+    // R5.13 (FUENTE ÚNICA, Opción A) — re-ruteo del token de invitación pendiente. Va DESPUÉS del
+    // gate de emailVerified (no aceptamos sin verificar) y ANTES del gating de establecimiento, así
+    // toma precedencia sobre home/mis-campos/onboarding/campo-perdido y cubre TODOS los aterrizajes
+    // post-auth — incluido el del usuario existente con campos (EL BUG). Condiciones:
+    //   - hay token en state (lo cargó el efecto de arriba cuando auth quedó verificado),
+    //   - no estamos YA en /invite (top !== INVITE_ROUTE) — si ya estamos ahí, dejamos que invite.tsx
+    //     maneje el flujo (confirm/accept) sin re-empujar (caso 4: usuario logueado abre /invite directo),
+    //   - el guard one-shot no se consumió (evita el loop del caso 5 "Ahora no" → (tabs)).
+    // Matriz cubierta (ver impl_01-frontend-fase5.md):
+    //   1) nuevo usuario verifica con token → cae acá tras verify → /invite (ya no hace falta el seam de
+    //      verify-email; lo eliminamos por eso). 2) nuevo sin campos idem (no llega a onboarding).
+    //   3) EXISTENTE con campos logueado → /invite (EL FIX). 4) ya logueado abre /invite → no re-empuja
+    //      (top === INVITE_ROUTE). 5) "Ahora no" → guard ya consumido → no rebota. 6) tras aceptar OK
+    //      invite.tsx limpió el token → en el próximo ciclo no hay token (y el guard tampoco rebota).
+    //      7) error terminal → invite.tsx limpió el token → ídem.
+    if (pendingInviteToken && top !== INVITE_ROUTE && !reroutedForInvite.current) {
+      reroutedForInvite.current = true;
+      router.replace({ pathname: '/invite', params: { token: pendingInviteToken } });
+      hideSplashOnce();
+      return;
+    }
+
     // authenticated + verificado → gating de ESTABLECIMIENTO (Fase 4).
     if (est.status === 'loading') {
       // El contexto está cargando memberships: mantenemos el splash hasta que resuelva
@@ -153,13 +225,17 @@ function RootGate() {
     // Rutas que el usuario abre explícitamente y NO deben re-rutearse mientras el estado
     // sea 'active' (si las re-ruteáramos, no podría crear un campo ni navegar el switch).
     const onCrearCampo = top === CREAR_CAMPO_ROUTE;
+    // Aceptar invitación (R5.4): destino navegable en CUALQUIER estado de establecimiento — un
+    // invitado nuevo (0 campos) lo abre desde el wizard, uno con ≥2 desde "Mis campos". No lo
+    // rebotamos a onboarding/mis-campos (perdería la aceptación). /invitar y /miembros idem.
+    const onFase5Destination = FASE5_DESTINATIONS.has(top);
 
     if (est.status === 'no_establishments') {
-      if (top !== ONBOARDING_ROUTE && !onCrearCampo) router.replace('/onboarding');
+      if (top !== ONBOARDING_ROUTE && !onCrearCampo && !onFase5Destination) router.replace('/onboarding');
     } else if (est.status === 'choosing') {
-      if (top !== MIS_CAMPOS_ROUTE && !onCrearCampo) router.replace('/mis-campos');
+      if (top !== MIS_CAMPOS_ROUTE && !onCrearCampo && !onFase5Destination) router.replace('/mis-campos');
     } else if (est.status === 'active_lost') {
-      if (top !== CAMPO_PERDIDO_ROUTE) router.replace('/campo-perdido');
+      if (top !== CAMPO_PERDIDO_ROUTE && !onFase5Destination) router.replace('/campo-perdido');
     } else if (est.status === 'active') {
       // Campo activo fijado → home. Solo forzamos a (tabs) si el usuario quedó "varado"
       // en un destino del gating que ya no aplica (auth, onboarding, campo-perdido). NO
@@ -173,7 +249,7 @@ function RootGate() {
 
     // El re-ruteo ya quedó solicitado: ocultamos el splash en el mismo ciclo (FIX 1).
     hideSplashOnce();
-  }, [auth, est, segments, router, hideSplashOnce]);
+  }, [auth, est, segments, router, hideSplashOnce, pendingInviteToken]);
 
   return (
     <Stack screenOptions={{ headerShown: false }}>
@@ -192,6 +268,10 @@ function RootGate() {
       <Stack.Screen name="editar-campo" />
       {/* Aviso de pérdida del campo activo (R6.10) — transitorio. */}
       <Stack.Screen name="campo-perdido" />
+      {/* Fase 5 — equipo: Miembros (R5.x), Invitar (T5.2), Aceptar invitación (T5.4). */}
+      <Stack.Screen name="miembros" />
+      <Stack.Screen name="invitar" />
+      <Stack.Screen name="invite" />
     </Stack>
   );
 }

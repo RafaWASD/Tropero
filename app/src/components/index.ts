@@ -22,6 +22,10 @@ export type {
   EstablishmentSwitcherDropdownProps,
   SwitcherField,
 } from './EstablishmentSwitcherDropdown';
+export { ShareLink } from './ShareLink';
+export type { ShareLinkProps } from './ShareLink';
+export { RoleBadge } from './RoleBadge';
+export type { RoleBadgeProps } from './RoleBadge';
 export { AnimalRow } from './AnimalRow';
 export type {
   AnimalRowProps,

@@ -21,6 +21,13 @@ export async function ensureAndroidChannel(): Promise<void> {
 }
 
 export async function getExpoPushTokenSafe(): Promise<Result<string, PushRegistrationFailure>> {
+  // En web `Device.isDevice` puede dar true (es un dispositivo real) y caer más abajo en el catch
+  // como `unexpected`, logueando ruido (`[push] registro best-effort no realizado: unexpected`). No
+  // hay push token de Expo en web → guard temprano: best-effort no-op, mismo comportamiento (ok:false)
+  // sin warning. (Mantenemos el chequeo de Device.isDevice abajo para simuladores native.)
+  if (Platform.OS === 'web') {
+    return { ok: false, error: { kind: 'not_a_device' } };
+  }
   if (!Device.isDevice) {
     return { ok: false, error: { kind: 'not_a_device' } };
   }
