@@ -5,8 +5,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node scripts/check.mjs",
-            "description": "Antes de cerrar sesion, validar el harness completo."
+            "command": "node scripts/check.mjs --fast",
+            "description": "Guardrail rapido por turno: estructura + feature_list + lint anti-hardcode, SIN tests (offline, ~1-2s). El check COMPLETO con tests (typecheck + RLS remota) se corre manual al iniciar sesion y antes de commitear (CLAUDE.md)."
           }
         ]
       }

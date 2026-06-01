@@ -27,6 +27,12 @@ const warn = (m) => console.log(`${C.yellow}[WARN]${C.reset}  ${m}`);
 const fail = (m) => console.log(`${C.red}[FAIL]${C.reset}  ${m}`);
 
 let exitCode = 0;
+// --fast (lo usa el hook Stop): corre solo chequeos locales y rápidos
+// (estructura + feature_list + higiene + lint anti-hardcode) y OMITE la suite de
+// tests (typecheck del cliente + RLS contra DB remota). Evita que el hook por-turno
+// se cuelgue en timeouts de red o falle sin conectividad. El check COMPLETO (con
+// tests) se corre manual al iniciar sesión y antes de commitear código.
+const FAST = process.argv.includes('--fast');
 
 console.log('-- 1. Archivos base del harness ----------------------');
 const base = [
@@ -137,27 +143,32 @@ try {
 }
 
 console.log('\n-- 3. Ejecutando tests -------------------------------');
-let testCommand = '';
-if (existsSync('.harness/config.json')) {
-  try {
-    const cfg = JSON.parse(readFileSync('.harness/config.json', 'utf8'));
-    testCommand = (cfg.testCommand || '').trim();
-  } catch (e) {
-    warn(`.harness/config.json ilegible: ${e.message}`);
-  }
-}
-
-if (!testCommand) {
-  warn('Bootstrap mode: sin testCommand configurado. Saltando tests.');
-  warn('Cuando exista código, creá .harness/config.json con { "testCommand": "..." }');
+if (FAST) {
+  warn('Modo --fast (hook Stop): se OMITE la suite de tests (typecheck del cliente + RLS remota).');
+  warn('Corré `node scripts/check.mjs` COMPLETO al iniciar sesión y antes de commitear código.');
 } else {
-  console.log(`    > ${testCommand}`);
-  try {
-    execSync(testCommand, { stdio: 'inherit' });
-    ok('Tests verdes');
-  } catch (e) {
-    fail(`Tests rojos (exit ${e.status})`);
-    exitCode = 1;
+  let testCommand = '';
+  if (existsSync('.harness/config.json')) {
+    try {
+      const cfg = JSON.parse(readFileSync('.harness/config.json', 'utf8'));
+      testCommand = (cfg.testCommand || '').trim();
+    } catch (e) {
+      warn(`.harness/config.json ilegible: ${e.message}`);
+    }
+  }
+
+  if (!testCommand) {
+    warn('Bootstrap mode: sin testCommand configurado. Saltando tests.');
+    warn('Cuando exista código, creá .harness/config.json con { "testCommand": "..." }');
+  } else {
+    console.log(`    > ${testCommand}`);
+    try {
+      execSync(testCommand, { stdio: 'inherit' });
+      ok('Tests verdes');
+    } catch (e) {
+      fail(`Tests rojos (exit ${e.status})`);
+      exitCode = 1;
+    }
   }
 }
 
