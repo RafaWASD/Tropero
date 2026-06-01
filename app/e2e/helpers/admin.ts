@@ -125,6 +125,70 @@ export async function seedEstablishment(
 }
 
 /**
+ * Crea un rodeo de fixture (bovino/cría) para un establishment, vía service_role (bypassea RLS).
+ * NECESARIO desde C1: el RootGate bloquea TODA la app si el campo activo tiene 0 rodeos (empty-state
+ * de bloqueo total, R2.6) → un usuario sembrado con un campo SIN rodeo cae en el wizard "Creá tu
+ * primer rodeo" en vez de aterrizar en home/Más. Los tests que necesitan llegar a home (perfil,
+ * cuenta, logout, invitaciones) deben sembrar también un rodeo. El trigger 0018 pre-pobla la config.
+ * Resuelve species/system por `code` (no hardcodea UUIDs); el nombre va namespaced con el RUN_TAG.
+ */
+export async function seedRodeo(
+  establishmentId: string,
+  name = 'Rodeo general',
+  opts: { speciesCode?: string; systemCode?: string } = {},
+): Promise<string> {
+  const speciesCode = opts.speciesCode ?? 'bovino';
+  const systemCode = opts.systemCode ?? 'cria';
+
+  const { data: species, error: spErr } = await admin
+    .from('species')
+    .select('id')
+    .eq('code', speciesCode)
+    .maybeSingle();
+  if (spErr) throw new Error(`seedRodeo species: ${spErr.message}`);
+  if (!species) throw new Error(`seedRodeo: especie "${speciesCode}" no encontrada en el catálogo`);
+
+  const { data: system, error: sysErr } = await admin
+    .from('systems_by_species')
+    .select('id')
+    .eq('species_id', species.id)
+    .eq('code', systemCode)
+    .maybeSingle();
+  if (sysErr) throw new Error(`seedRodeo system: ${sysErr.message}`);
+  if (!system) throw new Error(`seedRodeo: sistema "${systemCode}" no encontrado para ${speciesCode}`);
+
+  const { data: ins, error: insErr } = await admin
+    .from('rodeos')
+    .insert({
+      establishment_id: establishmentId,
+      name: `${RUN_TAG} ${name}`,
+      species_id: species.id,
+      system_id: system.id,
+    })
+    .select('id')
+    .single();
+  if (insErr) throw new Error(`seedRodeo insert: ${insErr.message}`);
+  // El rodeo se borra en cascada al borrar el establishment (FK on delete cascade, 0017) → el
+  // cleanup de establishments ya lo cubre, no hace falta trackearlo aparte.
+  return ins.id as string;
+}
+
+/**
+ * Conveniencia: siembra un establishment con rol owner activo PARA `ownerId` Y un rodeo bovino/cría,
+ * de una. Es el estado de partida más común desde C1 (un usuario que aterriza en home, no en el
+ * bloqueo total de rodeo). Devuelve el establishmentId.
+ */
+export async function seedEstablishmentWithRodeo(
+  ownerId: string,
+  name: string,
+  opts: { province?: string; city?: string | null } = {},
+): Promise<string> {
+  const estId = await seedEstablishment(ownerId, name, opts);
+  await seedRodeo(estId);
+  return estId;
+}
+
+/**
  * Agrega a `userId` como MIEMBRO ACTIVO (no-owner) de un establishment existente, vía service_role.
  * Útil para sembrar un usuario que aterriza en HOME (estado 'active') pero NO es dueño único de
  * ningún campo (su baja de cuenta NO se bloquea). El rol default es 'field_operator'. (El índice

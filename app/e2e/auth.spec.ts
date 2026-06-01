@@ -75,10 +75,11 @@ test('login con credenciales inválidas muestra error y no navega', async ({ pag
 test('logout desde Más vuelve a la pantalla de login', async ({ page }) => {
   // Usuario con un campo sembrado → al login aterriza en HOME (estado active).
   const user = await createTestUser('logout');
-  // Le damos un campo para que caiga en home (no en onboarding) y podamos ir a la tab "Más".
-  const { seedEstablishment, setUserPhone } = await import('./helpers/admin');
+  // Le damos un campo + un rodeo para que caiga en home (no en onboarding ni en el bloqueo total de
+  // rodeo del RootGate, C1) y podamos ir a la tab "Más".
+  const { seedEstablishmentWithRodeo, setUserPhone } = await import('./helpers/admin');
   await setUserPhone(user.id, '1123456789');
-  await seedEstablishment(user.id, 'Campo Logout');
+  await seedEstablishmentWithRodeo(user.id, 'Campo Logout');
 
   await page.goto('/');
   await signIn(page, user);

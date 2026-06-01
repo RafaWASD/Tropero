@@ -31,7 +31,7 @@ import { Alert, Platform, Pressable } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
-import { AlertTriangle, Building2, CheckCircle2, ChevronRight, LogOut, Pencil, Trash2, Users } from 'lucide-react-native';
+import { AlertTriangle, Building2, CheckCircle2, ChevronRight, Layers, LogOut, Pencil, Trash2, Users } from 'lucide-react-native';
 
 import { Button, Card, FormField, FormError, InfoNote } from '@/components';
 import { useAuth, useEstablishment, useProfile } from '@/contexts';
@@ -780,33 +780,46 @@ export default function MasScreen() {
           <InfoNote>No pudimos identificar tu cuenta. Cerrá sesión y volvé a entrar.</InfoNote>
         )}
 
-        {/* ── Campo activo (R3.4 / R3.6) — acciones OWNER-ONLY ── */}
+        {/* ── Campo activo (R3.4 / R3.6) — acciones OWNER-ONLY + Rodeos (todos los roles) ── */}
         {activeField ? (
           <>
             <SectionTitle>{`Campo activo · ${activeField.name}`}</SectionTitle>
-            {isOwner ? (
-              <Card padding="$0" gap="$0" overflow="hidden">
-                <ActionRow
-                  icon={<Pencil size={20} color={primary} strokeWidth={2} />}
-                  label="Editar campo"
-                  trailing={<ChevronRight size={20} color={muted} strokeWidth={2} />}
-                  onPress={() => router.push('/editar-campo')}
-                />
-                <View height={1} backgroundColor="$divider" marginHorizontal="$4" />
-                <ActionRow
-                  icon={<Trash2 size={20} color={terracota} strokeWidth={2} />}
-                  label={deleting ? 'Eliminando…' : 'Eliminar campo'}
-                  destructive
-                  accessibilityLabel="Eliminar campo (acción destructiva)"
-                  onPress={() => void onDeleteField()}
-                />
-              </Card>
-            ) : (
+            <Card padding="$0" gap="$0" overflow="hidden">
+              {/* Rodeos (spec 02 C1): la lista es visible a todos los roles; la gestión (crear /
+                  editar plantilla / eliminar) es owner-only dentro de la pantalla (R2.3). */}
+              <ActionRow
+                icon={<Layers size={20} color={primary} strokeWidth={2} />}
+                label="Rodeos"
+                accessibilityLabel="Ver y gestionar los rodeos del campo"
+                trailing={<ChevronRight size={20} color={muted} strokeWidth={2} />}
+                onPress={() => router.push('/rodeos')}
+              />
+              {isOwner ? (
+                <>
+                  <View height={1} backgroundColor="$divider" marginHorizontal="$4" />
+                  <ActionRow
+                    icon={<Pencil size={20} color={primary} strokeWidth={2} />}
+                    label="Editar campo"
+                    trailing={<ChevronRight size={20} color={muted} strokeWidth={2} />}
+                    onPress={() => router.push('/editar-campo')}
+                  />
+                  <View height={1} backgroundColor="$divider" marginHorizontal="$4" />
+                  <ActionRow
+                    icon={<Trash2 size={20} color={terracota} strokeWidth={2} />}
+                    label={deleting ? 'Eliminando…' : 'Eliminar campo'}
+                    destructive
+                    accessibilityLabel="Eliminar campo (acción destructiva)"
+                    onPress={() => void onDeleteField()}
+                  />
+                </>
+              ) : null}
+            </Card>
+            {!isOwner ? (
               <InfoNote>
                 Solo el dueño del campo puede editar o eliminar sus datos. Vos sos miembro de este
                 campo.
               </InfoNote>
-            )}
+            ) : null}
           </>
         ) : null}
 

@@ -50,7 +50,7 @@ run('typecheck client', `cd app && ${pnpmCmd} typecheck`);
 // "type":"module" en app/package.json; los .ts se reparsean como ESM, es benigno).
 run(
   'client unit tests',
-  `node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test app/src/utils/validation.test.ts app/src/utils/auth-errors.test.ts app/src/utils/lockout.test.ts app/src/utils/establishment.test.ts app/src/utils/establishment-mapping.test.ts app/src/utils/invite.test.ts app/src/utils/account-result.test.ts app/src/services/establishment-store.test.ts app/src/services/ble/parser-rs420.test.ts`,
+  `node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test app/src/utils/validation.test.ts app/src/utils/auth-errors.test.ts app/src/utils/lockout.test.ts app/src/utils/establishment.test.ts app/src/utils/establishment-mapping.test.ts app/src/utils/invite.test.ts app/src/utils/account-result.test.ts app/src/utils/rodeo-template.test.ts app/src/utils/a11y.test.ts app/src/services/establishment-store.test.ts app/src/services/ble/parser-rs420.test.ts`,
 );
 
 // La suite RLS y la suite Edge necesitan keys de Supabase. Si no hay service_role,

@@ -21,6 +21,7 @@ import { test, expect, applyEnvShim } from './helpers/fixtures';
 import {
   createTestUser,
   seedEstablishment,
+  seedRodeo,
   setUserPhone,
   getLatestInvitationToken,
   cleanupAll,
@@ -45,6 +46,9 @@ test('loop 2 cuentas: el dueño invita por link y el invitado acepta; el dueño 
   await setUserPhone(invitee.id, '1198765432');
   const fieldName = `${RUN_TAG} Campo Equipo`;
   const estId = await seedEstablishment(owner.id, 'Campo Equipo');
+  // C1: sin rodeo, el RootGate bloquea con el wizard de rodeo → ni el owner ni el invitado llegan a
+  // home. Un rodeo en el campo destraba el aterrizaje de ambos (el invitado lo hereda al aceptar).
+  await seedRodeo(estId);
 
   // ── Contexto A: el DUEÑO genera el link de invitación ─────────────────────────
   const ctxA = await browser.newContext();

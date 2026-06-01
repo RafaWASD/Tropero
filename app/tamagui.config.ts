@@ -180,6 +180,17 @@ const tokens = createTokens({
     // Alto mínimo de los chips de filtro (R1.5: Rodeo/Estado/Sin caravana). ≥40px para
     // target tappable cómodo sin robarle altura a la lista (un escalón bajo touchMin).
     chipMin: 40,
+    // ── Toggle de la plantilla de datos del rodeo (spec 02 C1, ADR-021) — JIT.
+    // Control propio (no hay primitivo Switch en la base v4). Pista pill + thumb circular blanco.
+    // toggleTrack = ancho de la pista; toggleThumb = alto de la pista (= diámetro visual); knob =
+    // diámetro del thumb interno (un toque menor que la pista para que asome el padding $1=2px).
+    // El TAP target real lo da la fila completa (≥touchMin), así que la pista puede ser compacta.
+    toggleTrack: 48,
+    toggleThumb: 28,
+    toggleKnob: 24,
+    // Alto de cada segmento de la barra de progreso del wizard "Crear rodeo" (spec 02 C1). Barra
+    // fina (estilo onboarding) — JIT lo necesitó el wizard.
+    progressTrack: 6,
   },
 });
 

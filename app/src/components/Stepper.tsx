@@ -16,15 +16,18 @@
 
 import { ReactNode } from 'react';
 import { getTokenValue, Text, View, XStack, YStack } from 'tamagui';
-import { Plus } from 'lucide-react-native';
+import { Check, Plus } from 'lucide-react-native';
 
 export type StepperStep = {
   /** Título del paso (a la derecha del círculo). */
   title: string;
   /** Texto descriptivo debajo del título. */
   body: string;
-  /** Estado del paso: activo (relleno + icono) o futuro (borde + número). */
-  state: 'active' | 'future';
+  /** Estado del paso:
+   *   - done   → completado: círculo relleno $primary con un check (✓). El título queda atenuado.
+   *   - active → en curso: círculo relleno $primary con icono "+".
+   *   - future → pendiente: círculo borde $divider, fondo bone, número en gris. */
+  state: 'done' | 'active' | 'future';
   /** Contenido extra debajo del body (ej. el CTA del paso activo). */
   children?: ReactNode;
 };
@@ -44,7 +47,7 @@ function StepRail({
   isFirst,
   isLast,
 }: {
-  state: 'active' | 'future';
+  state: 'done' | 'active' | 'future';
   index: number;
   isFirst: boolean;
   isLast: boolean;
@@ -53,6 +56,9 @@ function StepRail({
   // sí acepta token, pero la dejamos explícita para documentar el hairline).
   const diameter = getTokenValue('$icon', 'size'); // 48
   const lineColor = '$divider';
+  // done y active comparten el círculo relleno verde (el paso ya "tocó" el riel); future es el
+  // círculo vacío con número. El glifo distingue: ✓ (done) vs + (active).
+  const filled = state === 'done' || state === 'active';
 
   return (
     <YStack width={diameter} flexShrink={0} alignItems="center">
@@ -71,11 +77,13 @@ function StepRail({
         borderRadius="$pill"
         alignItems="center"
         justifyContent="center"
-        backgroundColor={state === 'active' ? '$primary' : '$surface'}
-        borderWidth={state === 'active' ? 0 : 2}
+        backgroundColor={filled ? '$primary' : '$surface'}
+        borderWidth={filled ? 0 : 2}
         borderColor="$divider"
       >
-        {state === 'active' ? (
+        {state === 'done' ? (
+          <Check size={26} color={getTokenValue('$white', 'color')} strokeWidth={3} />
+        ) : state === 'active' ? (
           <Plus size={26} color={getTokenValue('$white', 'color')} strokeWidth={2.5} />
         ) : (
           <Text fontFamily="$body" fontSize="$6" fontWeight="600" color="$textMuted">
@@ -120,7 +128,8 @@ export function Stepper({ steps }: StepperProps) {
                 fontFamily="$body"
                 fontSize="$6"
                 fontWeight="600"
-                color="$textPrimary"
+                // Un paso hecho queda atenuado (no compite con el activo por la atención).
+                color={step.state === 'done' ? '$textMuted' : '$textPrimary'}
                 flexShrink={1}
                 minWidth={0}
               >

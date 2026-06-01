@@ -38,28 +38,10 @@ import {
   type StepperStep,
   type SwitcherField,
 } from '@/components';
-import { useAuth, useEstablishment, useProfile } from '@/contexts';
+import { useAuth, useEstablishment, useProfile, useRodeo } from '@/contexts';
 import { localityOf, shouldShowReadyBanner } from '@/utils/establishment';
 import { addDismissedBanner, loadDismissedBanners } from '@/services/establishment-store';
 
-const WIZARD_STEPS: StepperStep[] = [
-  {
-    state: 'active',
-    title: 'Creá y configurá tu primer rodeo',
-    body: 'Definí sistema productivo (cría / recría / invernada) y qué datos vas a cargar por animal.',
-    // children (el CTA) se inyecta abajo para poder cablear su onPress.
-  },
-  {
-    state: 'future',
-    title: 'Cargá tu primer animal',
-    body: 'Empezá registrando los animales de tu rodeo.',
-  },
-  {
-    state: 'future',
-    title: 'Invitá a tu vet o capataz',
-    body: 'Sumá miembros con permisos específicos para tu equipo.',
-  },
-];
 
 /** Header propio de la home (el tab no muestra header nativo, ADR-018). */
 function HomeHeader({
@@ -229,6 +211,7 @@ export default function InicioScreen() {
   const { state: authState } = useAuth();
   const { state: estState, recents, switchEstablishment } = useEstablishment();
   const { profile, loading: profileLoading } = useProfile();
+  const { state: rodeoState } = useRodeo();
 
   const userId = authState.status === 'authenticated' ? authState.user.id : null;
 
@@ -324,25 +307,55 @@ export default function InicioScreen() {
   }));
   const visited = activeField ? pickVisited(recentFields, activeField.id) : [];
 
-  // El CTA del paso 1 vive como `children` del paso activo (Button primary fullWidth).
-  const steps: StepperStep[] = WIZARD_STEPS.map((step, i) =>
-    i === 0
-      ? {
-          ...step,
-          children: (
-            <Button
-              variant="primary"
-              fullWidth
-              onPress={() => {
-                // TODO: navegar a "Crear rodeo" (spec 02) — fuera del incremento 1.
-              }}
-            >
-              Crear rodeo
-            </Button>
-          ),
-        }
-      : step
-  );
+  // ── Pasos de "primeros pasos" DRIVEADOS POR ESTADO REAL (bug 1 de Raf). ──────────────
+  // El Stepper era ESTÁTICO: el paso "Crear rodeo" estaba hardcodeado 'active' con un CTA que solo
+  // tenía un `// TODO` → la home seguía diciendo "Creá tu primer rodeo" DESPUÉS de crearlo, y el CTA
+  // no hacía nada. Pero la home solo se renderiza cuando el RootGate ya garantizó ≥1 rodeo (con 0
+  // rodeos el bloqueo total muestra el wizard, NO la home), así que el paso de rodeo SIEMPRE está
+  // HECHO acá. Lo driveamos desde estado real (useRodeo + rol del campo activo); ningún CTA es un
+  // TODO muerto.
+  const rodeoDone = rodeoState.status === 'active';
+  // Solo el owner puede invitar miembros (R5): a un no-owner no le ofrecemos ese CTA.
+  const canInvite = activeField?.role === 'owner';
+
+  const steps: StepperStep[] = [
+    {
+      // El gate garantiza ≥1 rodeo en la home → este paso está hecho. Su CTA lleva a la gestión de
+      // rodeos (NO un TODO), por si el usuario quiere crear/editar otro.
+      state: rodeoDone ? 'done' : 'active',
+      title: 'Configurá tu rodeo',
+      body: 'Definiste el sistema productivo y los datos que cargás por animal. Podés ajustarlo cuando quieras.',
+      children: (
+        <Button variant="secondary" fullWidth onPress={() => router.push('/rodeos')}>
+          Gestionar rodeos
+        </Button>
+      ),
+    },
+    {
+      // Siguiente paso real: cargar el primer animal. El alta find-or-create es de C2 (todavía no
+      // existe), pero la tab "Animales" YA es navegable (stub con su propio CTA de alta), así que el
+      // CTA lleva ahí — NO un TODO muerto ni un botón sin acción.
+      state: 'active',
+      title: 'Cargá tu primer animal',
+      body: 'Empezá registrando los animales de tu rodeo desde la pestaña Animales.',
+      children: (
+        <Button variant="primary" fullWidth onPress={() => router.navigate('/(tabs)/animales')}>
+          Ir a Animales
+        </Button>
+      ),
+    },
+    {
+      state: 'future',
+      title: 'Invitá a tu vet o capataz',
+      body: 'Sumá miembros con permisos específicos para tu equipo.',
+      // CTA solo para el owner (el único que puede invitar, R5) → pantalla de equipo (/miembros).
+      children: canInvite ? (
+        <Button variant="secondary" fullWidth onPress={() => router.push('/miembros')}>
+          Invitar al equipo
+        </Button>
+      ) : undefined,
+    },
+  ];
 
   // Guarda de transición: la home solo tiene sentido con un campo activo. El gating
   // (RootGate) garantiza estado 'active' antes de mostrar (tabs); si por una carrera de

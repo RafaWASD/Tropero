@@ -16,3 +16,5 @@ export type {
 } from './EstablishmentContext';
 export { ProfileProvider, useProfile } from './ProfileContext';
 export type { Profile, ProfileContextValue } from './ProfileContext';
+export { RodeoProvider, useRodeo } from './RodeoContext';
+export type { RodeoState, RodeoContextValue } from './RodeoContext';

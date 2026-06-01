@@ -51,7 +51,15 @@ import {
 } from '@expo-google-fonts/inter';
 
 import config from '../tamagui.config';
-import { AuthProvider, EstablishmentProvider, ProfileProvider, useAuth, useEstablishment } from '@/contexts';
+import {
+  AuthProvider,
+  EstablishmentProvider,
+  ProfileProvider,
+  RodeoProvider,
+  useAuth,
+  useEstablishment,
+  useRodeo,
+} from '@/contexts';
 import { getPendingInvitationToken } from '@/services/pending-invitation';
 
 SplashScreen.preventAutoHideAsync().catch(() => {
@@ -84,6 +92,17 @@ const INVITE_ROUTE = 'invite'; // aceptar invitación (R5.4) — destino navegab
 // abren desde 'active' (owner), pero los listamos por robustez. Ver gating abajo.
 const FASE5_DESTINATIONS = new Set([INVITE_ROUTE, 'invitar', 'miembros']);
 
+// Rutas del gating de RODEO (spec 02 C1). El chequeo de rodeo corre DESPUÉS del de
+// establecimiento (solo en estado 'active'): un campo recién creado arranca con 0 rodeos →
+// bloqueo total hacia el wizard "Crear rodeo" (R2.6). 'rodeos' (gestión) y 'editar-plantilla'
+// son destinos navegables del owner que NO se re-rutean (no son del bloqueo total).
+const CREAR_RODEO_ROUTE = 'crear-rodeo'; // wizard (R2.6) — destino del bloqueo total + de RodeosScreen
+const RODEOS_ROUTE = 'rodeos'; // gestión de rodeos (owner) — destino navegable desde "Más"
+const EDITAR_PLANTILLA_ROUTE = 'editar-plantilla'; // editar plantilla (owner) — destino navegable
+// Destinos de C1 que el usuario abre con un rodeo YA existente (estado 'active' de rodeo) y NO
+// deben re-rutearse al wizard. crear-rodeo entra acá también (crear un 2do rodeo desde la lista).
+const RODEO_DESTINATIONS = new Set([RODEOS_ROUTE, EDITAR_PLANTILLA_ROUTE, CREAR_RODEO_ROUTE]);
+
 /**
  * Gate unificado de navegación: auth (R1.3 / R7.*) + establecimiento (Fase 4: R6.4–R6.10).
  * Vive DENTRO de AuthProvider + EstablishmentProvider (usa useAuth/useEstablishment) y del
@@ -114,6 +133,7 @@ const FASE5_DESTINATIONS = new Set([INVITE_ROUTE, 'invitar', 'miembros']);
 function RootGate() {
   const { state: auth } = useAuth();
   const { state: est } = useEstablishment();
+  const { state: rodeo } = useRodeo();
   const segments = useSegments();
   const router = useRouter();
 
@@ -229,6 +249,9 @@ function RootGate() {
     // invitado nuevo (0 campos) lo abre desde el wizard, uno con ≥2 desde "Mis campos". No lo
     // rebotamos a onboarding/mis-campos (perdería la aceptación). /invitar y /miembros idem.
     const onFase5Destination = FASE5_DESTINATIONS.has(top);
+    // Destinos de C1 (rodeo): el wizard "Crear rodeo" (bloqueo total + crear 2do rodeo), la
+    // gestión de rodeos y editar plantilla. Son navegación legítima del owner; no se re-rutean.
+    const onRodeoDestination = RODEO_DESTINATIONS.has(top);
 
     if (est.status === 'no_establishments') {
       if (top !== ONBOARDING_ROUTE && !onCrearCampo && !onFase5Destination) router.replace('/onboarding');
@@ -237,19 +260,37 @@ function RootGate() {
     } else if (est.status === 'active_lost') {
       if (top !== CAMPO_PERDIDO_ROUTE && !onFase5Destination) router.replace('/campo-perdido');
     } else if (est.status === 'active') {
-      // Campo activo fijado → home. Solo forzamos a (tabs) si el usuario quedó "varado"
-      // en un destino del gating que ya no aplica (auth, onboarding, campo-perdido). NO
-      // sacamos al usuario de (tabs), mis-campos ni crear-campo (navegación legítima).
-      const strandedOnGatingRoute =
-        inAuthFlow ||
-        top === ONBOARDING_ROUTE ||
-        top === CAMPO_PERDIDO_ROUTE;
-      if (strandedOnGatingRoute) router.replace('/(tabs)');
+      // Campo activo fijado → gating de RODEO (spec 02 C1, R2.6). El chequeo de rodeo va DESPUÉS
+      // del de establecimiento (auth → email → token → establecimiento → RODEO), porque sin campo
+      // activo no hay sobre qué rodeo decidir.
+      if (rodeo.status === 'loading') {
+        // El RodeoContext está cargando los rodeos del campo activo (o reintentando tras un fallo
+        // de red): mantenemos el splash, igual que con memberships. NO afirmamos bloqueo a ciegas.
+        return;
+      }
+      if (rodeo.status === 'no_rodeos') {
+        // Bloqueo total (R2.6): el campo activo no tiene rodeos → wizard "Crear rodeo" como primera
+        // pantalla. Bloquea TODO el resto de la app (incluido (tabs)/mis-campos). Solo dejamos
+        // pasar el propio wizard. NO permitimos otros destinos de rodeo acá (rodeos/editar-plantilla
+        // no tienen sentido sin un rodeo).
+        if (top !== CREAR_RODEO_ROUTE) router.replace('/crear-rodeo');
+      } else {
+        // Hay rodeo activo → home. Forzamos a (tabs) solo si el usuario quedó "varado" en un destino
+        // del gating que ya no aplica (auth, onboarding, campo-perdido). NO sacamos al usuario de
+        // (tabs), mis-campos, crear-campo, los destinos de Fase 5, ni los destinos de rodeo
+        // (rodeos/crear-rodeo/editar-plantilla = navegación legítima del owner).
+        const strandedOnGatingRoute =
+          inAuthFlow ||
+          top === ONBOARDING_ROUTE ||
+          top === CAMPO_PERDIDO_ROUTE;
+        // No de-strand de un destino de rodeo: el owner puede estar gestionando rodeos.
+        if (strandedOnGatingRoute && !onRodeoDestination) router.replace('/(tabs)');
+      }
     }
 
     // El re-ruteo ya quedó solicitado: ocultamos el splash en el mismo ciclo (FIX 1).
     hideSplashOnce();
-  }, [auth, est, segments, router, hideSplashOnce, pendingInviteToken]);
+  }, [auth, est, rodeo, segments, router, hideSplashOnce, pendingInviteToken]);
 
   return (
     <Stack screenOptions={{ headerShown: false }}>
@@ -276,6 +317,11 @@ function RootGate() {
       <Stack.Screen name="miembros" />
       <Stack.Screen name="invitar" />
       <Stack.Screen name="invite" />
+      {/* Spec 02 C1 — rodeos: wizard "Crear rodeo" (R2.6, también empty-state de bloqueo total),
+          gestión de rodeos (owner) y editar plantilla de datos (owner, R2.12). */}
+      <Stack.Screen name="crear-rodeo" />
+      <Stack.Screen name="rodeos" />
+      <Stack.Screen name="editar-plantilla" />
     </Stack>
   );
 }
@@ -319,7 +365,13 @@ export default function RootLayout() {
                   consulta). Así no remonta al pasar los gates de auth y el gating de
                   establecimiento (RootGate) tiene contexto disponible. */}
               <EstablishmentProvider>
-                <RootGate />
+                {/* RodeoProvider (spec 02 C1): rodeo activo del campo activo. Monta DENTRO de
+                    EstablishmentProvider (scope = campo activo) y ENVUELVE al RootGate para que el
+                    gating de rodeo (bloqueo total R2.6) y las pantallas de C1 puedan usar useRodeo().
+                    Sin campo activo queda en 'loading' y no fetcha (deps primitivas, sin loop). */}
+                <RodeoProvider>
+                  <RootGate />
+                </RodeoProvider>
               </EstablishmentProvider>
             </ProfileProvider>
           </AuthProvider>

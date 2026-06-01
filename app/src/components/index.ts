@@ -32,3 +32,5 @@ export type {
   AnimalSex,
   AnimalStatus,
 } from './AnimalRow';
+export { FieldTemplateToggleList } from './FieldTemplateToggleList';
+export type { FieldTemplateToggleListProps } from './FieldTemplateToggleList';

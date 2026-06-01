@@ -14,6 +14,7 @@ import { test, expect } from './helpers/fixtures';
 import {
   createTestUser,
   seedEstablishment,
+  seedRodeo,
   setUserPhone,
   trackEstablishmentsByNameLike,
   cleanupAll,
@@ -25,7 +26,9 @@ test.afterAll(async () => {
   await cleanupAll();
 });
 
-test('crear campo desde onboarding (con gate de teléfono) aterriza en home', async ({ page }) => {
+test('crear campo desde onboarding (con gate de teléfono) → bloqueo total de rodeo (C1, R2.6)', async ({
+  page,
+}) => {
   const user = await createTestUser('crear');
   // NO seteamos teléfono: queremos ejercitar el gate de teléfono (R3.8) en el flujo de UI.
 
@@ -49,11 +52,13 @@ test('crear campo desde onboarding (con gate de teléfono) aterriza en home', as
   await page.getByLabel('Provincia', { exact: true }).fill('Buenos Aires');
   await crearCampoBtn.click();
 
-  // Tras crear OK, refreshEstablishments(newId) fija el campo activo → RootGate aterriza en home.
-  await waitForHome(page);
-  // El header de la home muestra el nombre del campo activo en el chip del switch (también puede
-  // aparecer en el banner "está listo" → .first() para no ambiguar).
-  await expect(page.getByText(fieldName, { exact: true }).first()).toBeVisible({ timeout: 15_000 });
+  // POST-C1 (R2.6): tras crear el PRIMER campo, el campo activo tiene 0 rodeos → el RootGate bloquea
+  // TODA la app con el wizard "Creá tu primer rodeo" (no aterriza en home hasta crear un rodeo). Esto
+  // ejercita el encadenado de gates establecimiento → rodeo desde el flujo de UI real (antes de C1
+  // este test terminaba en home; ahora termina, correctamente, en el bloqueo total de rodeo).
+  await expect(page.getByText('Creá tu primer rodeo', { exact: true })).toBeVisible({
+    timeout: 30_000,
+  });
 
   // Aseguramos que el campo creado por UI quede trackeado para cleanup (por si el sweep por
   // RUN_TAG cambiara). El nombre arranca con el RUN_TAG.
@@ -66,8 +71,11 @@ test('con ≥2 campos el login aterriza en "Mis campos" y elegir uno lleva a su 
   const user = await createTestUser('multi');
   await setUserPhone(user.id, '1123456789');
   // Dos campos sembrados (estado 'choosing' → landing "Mis campos", R6.7).
-  await seedEstablishment(user.id, 'Campo Norte');
+  const norteId = await seedEstablishment(user.id, 'Campo Norte');
   await seedEstablishment(user.id, 'Campo Sur');
+  // C1: el campo elegido (Norte) necesita un rodeo para aterrizar en home y no en el bloqueo total de
+  // rodeo (este test va de landing/switch de establecimiento, no de rodeos).
+  await seedRodeo(norteId);
 
   await page.goto('/');
   await signIn(page, user);

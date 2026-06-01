@@ -1,6 +1,6 @@
 # E2E (Playwright) — build WEB de RAFAQ contra Supabase REMOTO
 
-Red de seguridad de regresión para los flujos críticos del cliente (auth + establecimientos).
+Red de seguridad de regresión para los flujos críticos del cliente (auth + establecimientos + rodeos).
 Es donde aparecen bugs de runtime que `tsc --noEmit` y los unit tests no atrapan: loops de
 render, 403 RLS al crear campo, listas que no refrescan, el switch que no cambia el activo.
 
@@ -68,8 +68,24 @@ El remoto se comparte con el testing manual de Raf, así que la suite es **colis
 | `invitations.spec.ts` | ✅ verde | loop de 2 cuentas (dueño invita por link → token leído de la DB con service_role → invitado **pega el link in-app** y acepta → dueño ve al miembro) |
 | `profile.spec.ts` | ✅ verde | Fase 6 R2.1: el saludo de la home se actualiza al editar el nombre (fuente única); el teléfono sanitiza letras + valida 8-15 dígitos; la edición se descarta al salir de "Más" (modo lectura) |
 | `account.spec.ts` | ✅ verde | Fase 6 R2.2/R2.4/R2.5: eliminar cuenta — baja no bloqueada (cierra sesión + ban server-side); bloqueo único-owner (R2.5/R2.5.1, lista de campos); cambiar email — request + el viejo sigue vigente (NO el link) |
+| `rodeos.spec.ts` | ✅ verde | spec 02 C1 (fix-loop): BUG 2 — la fila de toggle del paso 3 sigue siendo interactiva (clic flippea `aria-checked`); BUG 1 — crear rodeo desde el empty-state aterriza en home SIN el paso "Creá tu primer rodeo" pendiente y SIN CTA muerto (Stepper driveado por estado real: "Gestionar rodeos" + "Ir a Animales"); crear con un toggle destildado → la config persiste `enabled=false` (verificado server-side con el login del propio usuario, RLS) |
 
-Total: **13 tests** (`pnpm e2e`).
+Total: **16 tests** (`pnpm e2e`).
+
+### Notas del fix-loop de RODEOS (BUG 2 — límite de esta suite)
+
+BUG 2 (los toggles no respondían al tap) **NO se reproduce en esta suite**, y es importante saber por
+qué: la suite corre el **export estático de producción** (`expo export -p web`), donde los warnings de
+React y el LogBox/error-overlay de Expo **se eliminan**. La causa real del bug era un warning de React
+("does not recognize the `accessibilityLabel` prop on a DOM element", por pasar `accessibilityLabel`
+crudo al `Pressable` de react-native-web) que **solo en DEV** (`pnpm web` / Metro — lo que prueba Raf)
+monta un overlay que cubre la pantalla e intercepta los toques. En el export ese overlay no existe, así
+que el toggle siempre respondió acá → la suite no lo atrapaba. El **guard de regresión REAL** de la
+causa es el unit test `app/src/utils/a11y.test.ts` (en web nunca se emite `accessibilityLabel`, solo
+`aria-*`); el test de `rodeos.spec.ts` queda como regresión de que la fila de toggle **sigue siendo
+interactiva**. Lección: para bugs de runtime que dependen del modo dev (overlays/warnings), el oráculo
+es el dev server, no solo el export. La verificación contra el dev server (`pnpm web`) se hizo a mano en
+el fix-loop con un diag temporal (ya removido).
 
 ### Notas de los specs de Fase 6
 

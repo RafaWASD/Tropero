@@ -14,7 +14,7 @@
 import { test, expect } from './helpers/fixtures';
 import {
   createTestUser,
-  seedEstablishment,
+  seedEstablishmentWithRodeo,
   setUserPhone,
   cleanupAll,
 } from './helpers/admin';
@@ -41,7 +41,7 @@ test('el saludo de la home se actualiza al editar el nombre (fuente única — F
   // El usuario se crea con name "E2E saludo" → el saludo muestra el PRIMER nombre: "E2E".
   const user = await createTestUser('saludo', 'E2E saludo');
   await setUserPhone(user.id, '1123456789');
-  await seedEstablishment(user.id, 'Campo Saludo');
+  await seedEstablishmentWithRodeo(user.id, 'Campo Saludo'); // +rodeo: si no, el RootGate bloquea con el wizard de rodeo (C1)
 
   await page.goto('/');
   await signIn(page, user);
@@ -67,7 +67,7 @@ test('el campo teléfono no acepta letras (sanitizado en vivo) y valida al guard
 }) => {
   const user = await createTestUser('tel', 'E2E tel');
   await setUserPhone(user.id, '1123456789');
-  await seedEstablishment(user.id, 'Campo Tel');
+  await seedEstablishmentWithRodeo(user.id, 'Campo Tel');
 
   await page.goto('/');
   await signIn(page, user);
@@ -102,7 +102,7 @@ test('el campo teléfono no acepta letras (sanitizado en vivo) y valida al guard
 test('la edición se descarta al salir de Más (vuelve a modo lectura, Fix 1)', async ({ page }) => {
   const user = await createTestUser('reset', 'E2E reset');
   await setUserPhone(user.id, '1123456789');
-  await seedEstablishment(user.id, 'Campo Reset');
+  await seedEstablishmentWithRodeo(user.id, 'Campo Reset');
 
   await page.goto('/');
   await signIn(page, user);

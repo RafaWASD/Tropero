@@ -36,6 +36,8 @@ import {
   admin,
   createTestUser,
   seedEstablishment,
+  seedEstablishmentWithRodeo,
+  seedRodeo,
   setUserPhone,
   addMember,
   cleanupAll,
@@ -68,6 +70,7 @@ test('eliminar cuenta (baja simple) cierra sesión y vuelve al login', async ({ 
   const user = await createTestUser('baja');
   await setUserPhone(user.id, '1123456789');
   const estId = await seedEstablishment(fieldOwner.id, 'Campo Compartido');
+  await seedRodeo(estId); // C1: sin rodeo el RootGate bloquea al miembro con el wizard de rodeo
   await addMember(user.id, estId, 'field_operator');
 
   await page.goto('/');
@@ -101,8 +104,9 @@ test('eliminar cuenta bloqueada: el usuario es dueño único de un campo (R2.5/R
 }) => {
   const user = await createTestUser('soleowner');
   await setUserPhone(user.id, '1123456789');
-  // Dueño ÚNICO de un campo → la baja se bloquea (sole_owner).
-  await seedEstablishment(user.id, 'Campo Unico');
+  // Dueño ÚNICO de un campo → la baja se bloquea (sole_owner). +rodeo: si no, el RootGate (C1) lo
+  // bloquea con el wizard de rodeo antes de llegar a home (el rodeo no cambia la propiedad del campo).
+  await seedEstablishmentWithRodeo(user.id, 'Campo Unico');
   const fieldName = `${RUN_TAG} Campo Unico`;
 
   await page.goto('/');
@@ -135,7 +139,7 @@ test('cambiar email: pide confirmación y mantiene el email VIEJO hasta confirma
 }) => {
   const user = await createTestUser('email');
   await setUserPhone(user.id, '1123456789');
-  await seedEstablishment(user.id, 'Campo Email');
+  await seedEstablishmentWithRodeo(user.id, 'Campo Email');
 
   await page.goto('/');
   await signIn(page, user);
