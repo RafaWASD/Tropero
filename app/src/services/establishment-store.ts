@@ -28,9 +28,18 @@ export { promoteInTrail } from '../utils/establishment';
 
 // expo-secure-store solo admite keys con [A-Za-z0-9._-]. El user_id es un UUID (cumple),
 // pero saneamos defensivamente (mismo criterio que el storage adapter de auth).
+function safeUser(userId: string): string {
+  return userId.replace(/[^A-Za-z0-9._-]/g, '_');
+}
+
 function userKey(userId: string): string {
-  const safe = userId.replace(/[^A-Za-z0-9._-]/g, '_');
-  return `rafq.est_trail.${safe}`;
+  return `rafq.est_trail.${safeUser(userId)}`;
+}
+
+// Key separada (por usuario) del set de banners "establecimiento listo" ya descartados
+// (Run 2 c). Per-campo: guardamos los establishmentId cuyo banner el usuario cerró.
+function dismissedBannersKey(userId: string): string {
+  return `rafq.banner_dismissed.${safeUser(userId)}`;
 }
 
 function hasLocalStorage(): boolean {
@@ -88,5 +97,43 @@ export async function recordOpened(userId: string, id: string): Promise<string[]
   const current = await loadTrail(userId);
   const next = promoteInTrail(current, id);
   await saveTrail(userId, next);
+  return next;
+}
+
+// ─── Banner "establecimiento listo" descartado per-campo (Run 2 c) ──────────────
+//
+// Misma mecánica que el rastro (web→localStorage / native→SecureStore), key separada
+// `rafq.banner_dismissed.<userId>`. Guarda el SET (lista deduplicada) de establishmentId
+// cuyo banner el usuario ya cerró. Per-campo: cerrar el banner del campo A no afecta al de
+// B, y volver a A no lo resucita (está persistido). Best-effort: si el storage falla, el
+// estado en memoria sigue funcionando (igual que el trail).
+
+/** Lee el set persistido de banners descartados. [] si no hay nada / parseo falla. */
+export async function loadDismissedBanners(userId: string): Promise<string[]> {
+  try {
+    const raw = await readRaw(dismissedBannersKey(userId));
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((x): x is string => typeof x === 'string');
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Agrega `establishmentId` al set de banners descartados (read-modify-write, idempotente) y
+ * devuelve el set actualizado. Es best-effort igual que recordOpened: si el storage falla,
+ * el set devuelto sigue siendo correcto para el estado en memoria.
+ */
+export async function addDismissedBanner(userId: string, establishmentId: string): Promise<string[]> {
+  const current = await loadDismissedBanners(userId);
+  if (current.includes(establishmentId)) return current;
+  const next = [...current, establishmentId];
+  try {
+    await writeRaw(dismissedBannersKey(userId), JSON.stringify(next));
+  } catch {
+    // Best-effort: persistir es nice-to-have; no rompe la sesión.
+  }
   return next;
 }

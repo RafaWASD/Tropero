@@ -33,7 +33,7 @@ import { Link2, Plus, Search } from 'lucide-react-native';
 
 import { EstablishmentCard } from '@/components';
 import { useEstablishment } from '@/contexts';
-import { sortMyEstablishments } from '@/utils/establishment';
+import { localityOf, sortMyEstablishments } from '@/utils/establishment';
 import type { MembershipEstablishment } from '@/services/establishments';
 
 // Umbral de campos a partir del cual aparece el searchbar (R6.6.1: ">~8 campos").
@@ -231,6 +231,7 @@ export default function MisCamposScreen() {
               key={est.id}
               name={est.name}
               role={est.role}
+              locality={localityOf(est)}
               isActive={est.id === activeId}
               // STATS = BACKLOG (sin rollup): contadores en 0 + métrica hero 'empty' (CTA
               // "Configurá tu rodeo"). No inventamos números. Ver design.md §rollup.

@@ -29,6 +29,8 @@ import { Platform, Pressable, StyleSheet } from 'react-native';
 import { getTokenValue, Text, View, XStack, YStack, type ColorTokens } from 'tamagui';
 import { Building2, Check, LayoutGrid, Plus } from 'lucide-react-native';
 import { shadows } from '../../tamagui.config';
+import { roleLabel } from '../utils/establishment';
+import type { UserRole } from '../types';
 
 // ─── Tipos públicos ───────────────────────────────────────────────────────────
 
@@ -38,7 +40,27 @@ export type SwitcherField = {
   id: string;
   /** Nombre del campo (lo que se lee en la fila). */
   name: string;
+  /**
+   * Localidad de desambiguación (Run 2 e): city o, en su defecto, province. Opcional para no
+   * romper llamadas previas; el llamador la deriva con `localityOf(e)`.
+   */
+  locality?: string;
+  /** Rol del usuario en este campo (Run 2 e): alimenta el subtítulo "<localidad> · <rol>". */
+  role?: UserRole;
 };
+
+/**
+ * Subtítulo de desambiguación de un campo (Run 2 e): "<localidad> · <rol>". Con campos del
+ * mismo nombre, el switch "se ve muy confuso" (Raf) → esta 2da línea los distingue. Si falta
+ * la localidad o el rol, no deja "·" colgando: devuelve solo la parte disponible, o '' si
+ * ambas faltan (el llamador no renderiza la línea). Pura/local — el dropdown la consume.
+ */
+export function switcherSubtitle(field: SwitcherField): string {
+  const loc = field.locality?.trim() ?? '';
+  const rol = field.role ? roleLabel(field.role) : '';
+  if (loc && rol) return `${loc} · ${rol}`;
+  return loc || rol;
+}
 
 export type EstablishmentSwitcherDropdownProps = {
   /** Campo activo actual (R6.8.1 punto 1). */
@@ -93,12 +115,18 @@ export function pickVisited(
 
 /**
  * Fila genérica del dropdown. Target grande (alto ≥ $touchMin) manga-friendly: ícono a
- * la izquierda + label + slot trailing opcional (ej. "● activo"). `tone='active'`
- * diferencia el campo activo (contenedor verde claro + texto/ícono en $primary).
+ * la izquierda + label (+ subtítulo opcional de desambiguación) + slot trailing opcional
+ * (ej. "● activo"). `tone='active'` diferencia el campo activo (contenedor verde claro +
+ * texto/ícono en $primary).
+ *
+ * `subtitle` (Run 2 e): 2da línea muted "<localidad> · <rol>" para distinguir campos
+ * homónimos. Cuando viene, el bloque de texto pasa de 1 línea a label + subtítulo; el alto
+ * sigue respetando minHeight=$touchMin (la fila crece si hace falta, nunca baja del target).
  */
 function Row({
   icon,
   label,
+  subtitle,
   labelColor = '$textPrimary',
   fontWeight = '500',
   tone = 'default',
@@ -108,6 +136,7 @@ function Row({
 }: {
   icon: ReactNode;
   label: string;
+  subtitle?: string;
   labelColor?: ColorTokens;
   fontWeight?: '400' | '500' | '600' | '700';
   tone?: 'default' | 'active';
@@ -115,6 +144,7 @@ function Row({
   accessibilityLabel?: string;
   onPress: () => void;
 }) {
+  const hasSubtitle = subtitle != null && subtitle.trim().length > 0;
   return (
     <Pressable
       accessibilityRole="button"
@@ -135,22 +165,35 @@ function Row({
         <View width="$icon" alignItems="center" flexShrink={0}>
           {icon}
         </View>
-        {/* Label LEFT-ALIGNED (Jakob: los menús son left-aligned). Toma el espacio
-            restante para poder truncar a 1 línea sin empujar la fila, pero el texto
-            arranca JUSTO después del ícono (textAlign:left) — agrupado a la izquierda
-            con el ícono, no centrado en el hueco de la fila. */}
-        <Text
-          flex={1}
-          minWidth={0}
-          textAlign="left"
-          numberOfLines={1}
-          fontFamily="$body"
-          fontSize="$5"
-          fontWeight={fontWeight}
-          color={labelColor}
-        >
-          {label}
-        </Text>
+        {/* Bloque de texto LEFT-ALIGNED (Jakob: los menús son left-aligned). Toma el espacio
+            restante para truncar a 1 línea sin empujar la fila. label (hero) + subtítulo
+            (secundario muted) cuando viene. */}
+        <YStack flex={1} minWidth={0}>
+          <Text
+            textAlign="left"
+            numberOfLines={1}
+            fontFamily="$body"
+            fontSize="$5"
+            fontWeight={fontWeight}
+            color={labelColor}
+          >
+            {label}
+          </Text>
+          {/* Subtítulo de desambiguación: "<localidad> · <rol>" (Run 2 e). Secundario, muted,
+              más chico; 1 línea con ellipsis. Solo si viene (no deja línea vacía). */}
+          {hasSubtitle ? (
+            <Text
+              textAlign="left"
+              numberOfLines={1}
+              fontFamily="$body"
+              fontSize="$3"
+              fontWeight="400"
+              color="$textMuted"
+            >
+              {subtitle}
+            </Text>
+          ) : null}
+        </YStack>
         {/* Slot trailing (ej. "● activo"); no encoge. */}
         {trailing ? (
           <View flexShrink={0} alignItems="flex-end">
@@ -240,11 +283,12 @@ export function EstablishmentSwitcherDropdown({
         {...shadows.card}
       >
         {/* 1. Campo ACTIVO — diferenciado (verde claro + check $primary + "● activo").
-            Tap = cierra (no hace nada más). */}
+            Tap = cierra (no hace nada más). Subtítulo de desambiguación (Run 2 e). */}
         <Row
           tone="active"
           icon={<Check size={iconSize} color={primary} strokeWidth={2.5} />}
           label={active.name}
+          subtitle={switcherSubtitle(active)}
           labelColor="$primary"
           fontWeight="600"
           trailing={<ActivePill />}
@@ -256,12 +300,14 @@ export function EstablishmentSwitcherDropdown({
         />
 
         {/* 2. Últimos 2 campos VISITADOS distintos del activo (R6.9). Tap = fija activo
-            + navega a su home. Con <3 campos totales, los que haya (puede ser 0). */}
+            + navega a su home. Con <3 campos totales, los que haya (puede ser 0).
+            Subtítulo "<localidad> · <rol>" para distinguir homónimos (Run 2 e). */}
         {visited.map((field) => (
           <Row
             key={field.id}
             icon={<Building2 size={iconSize} color={muted} strokeWidth={2} />}
             label={field.name}
+            subtitle={switcherSubtitle(field)}
             accessibilityLabel={`Cambiar a ${field.name}`}
             onPress={() => {
               onSelectVisited(field);

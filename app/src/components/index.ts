@@ -17,7 +17,7 @@ export type {
   EstablishmentRole,
   EstablishmentHeroMetric,
 } from './EstablishmentCard';
-export { EstablishmentSwitcherDropdown, pickVisited } from './EstablishmentSwitcherDropdown';
+export { EstablishmentSwitcherDropdown, pickVisited, switcherSubtitle } from './EstablishmentSwitcherDropdown';
 export type {
   EstablishmentSwitcherDropdownProps,
   SwitcherField,

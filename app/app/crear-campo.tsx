@@ -28,7 +28,7 @@ import {
   saveOwnPhone,
 } from '@/services/establishments';
 import { isValidPhone, validateCreateEstablishment } from '@/utils/validation';
-import { parseHectares } from '@/utils/establishment';
+import { hasDuplicateName, parseHectares } from '@/utils/establishment';
 
 // Copy accionable ante falta de conexión (R9.2): crear campo es operación online.
 const OFFLINE_COPY =
@@ -176,6 +176,9 @@ function CreateForm({
   onCreated: (newId: string) => void | Promise<void>;
 }) {
   const router = useRouter();
+  // `recents` es el set de campos accesibles del usuario (con nombres) → fuente para detectar
+  // nombres duplicados (Run 2 f). Se advierte (no se bloquea) si el nombre tipeado coincide.
+  const { recents } = useEstablishment();
   const [name, setName] = useState('');
   const [province, setProvince] = useState('');
   const [city, setCity] = useState('');
@@ -185,6 +188,11 @@ function CreateForm({
   const [provinceError, setProvinceError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+
+  // Advertencia NO bloqueante (Run 2 f): el nombre coincide con un campo existente del usuario.
+  // En vivo mientras tipea; no bloquea el submit (decisión council). En ALTA no se excluye nada
+  // (el campo nuevo aún no existe en `recents`).
+  const duplicateName = hasDuplicateName(name, recents);
 
   async function onSubmit() {
     setFormError(null);
@@ -232,6 +240,11 @@ function CreateForm({
           autoCapitalize="words"
           error={nameError}
         />
+        {/* Advertencia NO bloqueante de nombre duplicado (Run 2 f): hint muted, no error rojo.
+            El submit NO se bloquea — podés crear igual. */}
+        {duplicateName ? (
+          <InfoNote>Ya tenés un campo con este nombre. Podés crearlo igual.</InfoNote>
+        ) : null}
         <FormField
           label="Provincia"
           value={province}

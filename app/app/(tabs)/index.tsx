@@ -22,7 +22,7 @@
 // Cero hardcode de color/spacing (ADR-023 §4): todo via tokens. Donde un valor
 // cruza a una API no-Tamagui (tamaño de íconos lucide) se lee con getTokenValue.
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Pressable } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -39,6 +39,8 @@ import {
   type SwitcherField,
 } from '@/components';
 import { useAuth, useEstablishment } from '@/contexts';
+import { localityOf, shouldShowReadyBanner } from '@/utils/establishment';
+import { addDismissedBanner, loadDismissedBanners } from '@/services/establishment-store';
 
 const WIZARD_STEPS: StepperStep[] = [
   {
@@ -63,10 +65,13 @@ const WIZARD_STEPS: StepperStep[] = [
 function HomeHeader({
   activeName,
   isOpen,
+  highlight,
   onSwitchPress,
 }: {
   activeName: string;
   isOpen: boolean;
+  /** Pulso de confirmación al cambiar de campo (Run 2 d): fondo $greenLight breve en el chip. */
+  highlight: boolean;
   onSwitchPress: () => void;
 }) {
   const iconColor = getTokenValue('$primary', 'color');
@@ -93,7 +98,22 @@ function HomeHeader({
         // fuera de pantalla a la derecha (Fix overflow web).
         style={{ flexShrink: 1, minWidth: 0 }}
       >
-        <XStack alignItems="center" gap="$2" flexShrink={1} minWidth={0}>
+        {/* Chip del switch. Lleva el pulso de confirmación al cambiar de campo (Run 2 d):
+            fondo $greenLight breve (~450ms) que aparece y se desvanece, dejando el chip en
+            su estado normal (transparente). borderRadius $pill + padding chico para que el
+            realce se vea como una pill, no un bloque cuadrado. El pulso es DECORATIVO: no
+            mueve el layout (el padding está siempre presente) ni bloquea toques. Sin driver
+            de `animations` en el config (tamagui.config.ts) → toggle de fondo con timeout. */}
+        <XStack
+          alignItems="center"
+          gap="$2"
+          flexShrink={1}
+          minWidth={0}
+          borderRadius="$pill"
+          paddingHorizontal="$2"
+          paddingVertical="$1"
+          backgroundColor={highlight ? '$greenLight' : 'transparent'}
+        >
           <Building2 size={20} color={iconColor} />
           <Text
             fontFamily="$body"
@@ -208,7 +228,8 @@ export default function InicioScreen() {
   const router = useRouter();
   const { state: authState } = useAuth();
   const { state: estState, recents, switchEstablishment } = useEstablishment();
-  const [bannerVisible, setBannerVisible] = useState(true);
+
+  const userId = authState.status === 'authenticated' ? authState.user.id : null;
 
   // ── Datos reales (Fase 4) ────────────────────────────────────────────────────
   // Nombre del usuario ← AuthContext (primer nombre del perfil). Campo activo ← contexto
@@ -217,11 +238,47 @@ export default function InicioScreen() {
     authState.status === 'authenticated' ? firstNameOf(authState.user.name) : null;
 
   // El campo activo real. La home solo se renderiza cuando el gating ya garantizó estado
-  // 'active' (RootGate), pero defendemos por si se monta en transición.
+  // 'active' (RootGate), pero defendemos por si se monta en transición. Lleva localidad + rol
+  // (Run 2 e) para el subtítulo de desambiguación del dropdown del switch.
   const activeField: SwitcherField | null =
     estState.status === 'active'
-      ? { id: estState.current.id, name: estState.current.name }
+      ? {
+          id: estState.current.id,
+          name: estState.current.name,
+          locality: localityOf(estState.current),
+          role: estState.current.role,
+        }
       : null;
+  const activeId = activeField?.id ?? null;
+
+  // ── Banner "establecimiento listo" per-campo + dismiss persistido (Run 2 c) ──
+  // El banner se controlaba con un useState(true) local → NO era per-campo (se mantenía
+  // visible al cambiar de campo y el descarte no era por-campo). Ahora: per-campo, dismiss
+  // persistido per-usuario (establishment-store). Cargamos el set de descartados al montar
+  // (por userId) y lo mantenemos en estado; el banner se muestra SOLO para el campo activo y
+  // SOLO si su id no está descartado (shouldShowReadyBanner, null-safe). Al cambiar de campo,
+  // el banner se re-evalúa contra el activo nuevo. Descartar en A no afecta a B (per-campo) y
+  // volver a A no lo resucita (persistido).
+  const [dismissedBanners, setDismissedBanners] = useState<string[]>([]);
+  useEffect(() => {
+    if (!userId) return;
+    let active = true;
+    loadDismissedBanners(userId).then((ids) => {
+      if (active) setDismissedBanners(ids);
+    });
+    return () => {
+      active = false;
+    };
+  }, [userId]);
+
+  const bannerVisible = shouldShowReadyBanner(activeId, dismissedBanners);
+
+  async function dismissBanner() {
+    if (!userId || !activeId) return;
+    // Persistimos el descarte per-campo y actualizamos el estado para ocultar de inmediato.
+    const next = await addDismissedBanner(userId, activeId);
+    setDismissedBanners(next);
+  }
 
   // ── Switch de establecimiento (R6.8.1) ──────────────────────────────────────
   const [switcherOpen, setSwitcherOpen] = useState(false);
@@ -229,10 +286,40 @@ export default function InicioScreen() {
   // debajo. onLayout → número derivado del layout, no un literal de spacing.
   const [headerBottom, setHeaderBottom] = useState(0);
 
+  // ── Micro-feedback al cambiar de campo (Run 2 d) ─────────────────────────────
+  // Pulso breve (~450ms) de fondo $greenLight en el chip del switch del header que confirma
+  // el cambio (SIN skeleton / SIN pantalla de carga: el switch es local, no hay round-trip).
+  // Dispara SOLO cuando activeId pasa de un campo REAL a OTRO campo real estando la home
+  // MONTADA (caso dropdown del switch). NO dispara: (1) en el montaje inicial; (2) cuando el
+  // activo "aparece" por primera vez (null → id, ej. una carrera de render donde el contexto
+  // resuelve un tick tarde) — eso no es un cambio que el usuario haya pedido confirmar. Por
+  // eso comparamos contra el activeId PREVIO real (ref), no contra un flag de montaje.
+  // Caso "Mis campos" → home: onSelect hace switch + router.replace → la home MONTA fresca; en
+  // montaje fresco el prev arranca null → no hay pulso, y está BIEN (el cambio de pantalla
+  // completo ya es feedback suficiente). NO forzamos el pulso cross-screen (complejidad
+  // innecesaria).
+  const [switchHighlight, setSwitchHighlight] = useState(false);
+  const prevActiveIdRef = useRef<string | null>(activeId);
+  useEffect(() => {
+    const prev = prevActiveIdRef.current;
+    prevActiveIdRef.current = activeId;
+    // Solo pulso si había un activo real distinto del nuevo (cambio genuino de campo).
+    if (!activeId || !prev || prev === activeId) return;
+    setSwitchHighlight(true);
+    const t = setTimeout(() => setSwitchHighlight(false), 450);
+    return () => clearTimeout(t);
+  }, [activeId]);
+
   // Los "últimos 2 visitados" distintos del activo (R6.8.1), derivados del rastro REAL de
   // visitados (R6.9). Al hacer switch, el saliente entra a recientes → reaparece como
-  // visitado (bug (b) de Raf). Mapeamos los recents del contexto a SwitcherField.
-  const recentFields: SwitcherField[] = recents.map((e) => ({ id: e.id, name: e.name }));
+  // visitado (bug (b) de Raf). Mapeamos los recents del contexto a SwitcherField, con
+  // localidad + rol para el subtítulo de desambiguación (Run 2 e).
+  const recentFields: SwitcherField[] = recents.map((e) => ({
+    id: e.id,
+    name: e.name,
+    locality: localityOf(e),
+    role: e.role,
+  }));
   const visited = activeField ? pickVisited(recentFields, activeField.id) : [];
 
   // El CTA del paso 1 vive como `children` del paso activo (Button primary fullWidth).
@@ -283,6 +370,7 @@ export default function InicioScreen() {
         <HomeHeader
           activeName={activeField.name}
           isOpen={switcherOpen}
+          highlight={switchHighlight}
           onSwitchPress={() => setSwitcherOpen((v) => !v)}
         />
       </YStack>
@@ -311,11 +399,12 @@ export default function InicioScreen() {
           {userFirstName ? `¡Hola ${userFirstName}! 👋` : '¡Hola! 👋'}
         </Text>
 
-        {/* Banner descartable: nombre del campo activo real. */}
+        {/* Banner descartable per-campo (Run 2 c): solo para el campo activo y solo si su id
+            no fue descartado (persistido per-usuario). Al cerrar, se persiste el descarte. */}
         {bannerVisible ? (
           <ReadyBanner
             establishmentName={activeField.name}
-            onDismiss={() => setBannerVisible(false)}
+            onDismiss={() => void dismissBanner()}
           />
         ) : null}
 

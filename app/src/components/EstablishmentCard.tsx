@@ -20,6 +20,7 @@ import { Pressable } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { getTokenValue, Text, View, XStack, YStack } from 'tamagui';
 import { shadows } from '../../tamagui.config';
+import { roleLabel } from '../utils/establishment';
 
 // ─── Tipos públicos ───────────────────────────────────────────────────────────
 
@@ -40,6 +41,12 @@ export type EstablishmentCardProps = {
   name: string;
   /** Rol del usuario en este campo (badge). */
   role: EstablishmentRole;
+  /**
+   * Localidad de desambiguación (Run 2 e): city o, en su defecto, province. Línea muted bajo
+   * el nombre para distinguir campos homónimos. El rol NO va acá (ya está en el RoleBadge — no
+   * se duplica). Opcional: si falta (campos sin localidad), no se renderiza la línea.
+   */
+  locality?: string;
   /** ¿Es el establecimiento activo actual? → indicador "● activo". */
   isActive?: boolean;
   /** Cantidad de animales activos (1er contador). */
@@ -58,12 +65,10 @@ export type EstablishmentCardProps = {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-// Etiqueta de rol en español para el usuario final (UI en español, CLAUDE.md).
-const ROLE_LABEL: Record<EstablishmentRole, string> = {
-  owner: 'Dueño',
-  field_operator: 'Operario',
-  veterinarian: 'Veterinario',
-};
+// Etiqueta de rol en español (UI en español, CLAUDE.md). FUENTE ÚNICA: roleLabel de
+// utils/establishment (compartida con el dropdown del switch, Run 2 e) → no diverge la
+// etiqueta entre la card y el switch (Nielsen #4 consistencia). EstablishmentRole y UserRole
+// son la misma unión de strings, así que roleLabel(role) es type-safe.
 
 // Formato de miles con separador "." (es-AR): 1240 → "1.240".
 function formatThousands(n: number): string {
@@ -136,7 +141,7 @@ function RoleBadge({ role }: { role: EstablishmentRole }) {
       paddingVertical="$1"
     >
       <Text fontFamily="$body" fontSize="$2" fontWeight="500" color="$textMuted">
-        {ROLE_LABEL[role]}
+        {roleLabel(role)}
       </Text>
     </View>
   );
@@ -236,6 +241,7 @@ function HeroMetric({ metric }: { metric: EstablishmentHeroMetric }) {
 export function EstablishmentCard({
   name,
   role,
+  locality,
   isActive = false,
   animalCount,
   rodeoCount,
@@ -244,7 +250,8 @@ export function EstablishmentCard({
   imageUrl,
   onPress,
 }: EstablishmentCardProps) {
-  const a11yLabel = `${name}, ${ROLE_LABEL[role]}${isActive ? ', campo activo' : ''}`;
+  const hasLocality = locality != null && locality.trim().length > 0;
+  const a11yLabel = `${name}, ${roleLabel(role)}${isActive ? ', campo activo' : ''}`;
 
   return (
     // Card tappable. overflow hidden → el banner-strip respeta el radio $card de la card
@@ -285,6 +292,23 @@ export function EstablishmentCard({
               <View flex={1} minWidth={0} />
               <RoleBadge role={role} />
             </XStack>
+
+            {/* 3b. Localidad de desambiguación (Run 2 e): línea muted bajo el nombre para
+                distinguir campos homónimos. El rol NO va acá (ya está en el RoleBadge). Solo
+                si viene (no deja línea vacía). */}
+            {hasLocality ? (
+              <Text
+                fontFamily="$body"
+                fontSize="$3"
+                fontWeight="400"
+                color="$textMuted"
+                numberOfLines={1}
+                alignSelf="flex-start"
+                textAlign="left"
+              >
+                {locality}
+              </Text>
+            ) : null}
 
             {/* 4. 2 contadores: animales · rodeos. */}
             <Text

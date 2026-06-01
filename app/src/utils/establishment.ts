@@ -243,3 +243,92 @@ export function buildRecents(
     .sort((a, b) => a.name.localeCompare(b.name, 'es-AR', { sensitivity: 'base' }));
   return [...fromTrail, ...remaining];
 }
+
+// ─── Desambiguación de campos homónimos (R6.6 / R6.8.1) — Run 2 (e) ─────────────
+//
+// Con campos del mismo nombre el switch "se ve muy confuso" (Raf). El subtítulo de
+// desambiguación es localidad + rol. NO usamos "propietario/owner-name" (RLS no expone
+// el dueño a los miembros — diferido a Facundo). Lógica pura para testear.
+
+/** Etiqueta de rol canónica en español (UI en español). FUENTE ÚNICA — la consumen el
+ *  dropdown del switch y EstablishmentCard para no divergir (Nielsen #4 consistencia). */
+const ROLE_LABELS: Record<UserRole, string> = {
+  owner: 'Dueño',
+  field_operator: 'Operario',
+  veterinarian: 'Veterinario',
+};
+
+/** Etiqueta de rol en español para el usuario final. Pura. */
+export function roleLabel(role: UserRole): string {
+  return ROLE_LABELS[role];
+}
+
+/**
+ * Localidad de desambiguación de un campo: `city` si existe y no está vacía, si no
+ * `province` (que es obligatoria en el alta, R3.3). Devuelve '' solo si ambas faltan
+ * (no debería pasar — province es obligatoria — pero defendemos null/vacío). El llamador
+ * NO debe renderizar una línea con "·" colgando si esto vuelve vacío. Pura.
+ */
+export function localityOf(args: { city?: string | null; province?: string | null }): string {
+  const city = args.city?.trim();
+  if (city) return city;
+  const province = args.province?.trim();
+  return province ?? '';
+}
+
+// ─── Detección de nombres duplicados (R3.1 / R3.4) — Run 2 (f) ──────────────────
+
+/** Campo accesible mínimo para comparar nombres (id + name) — lo cumple MembershipEstablishment. */
+export type NamedField = { id: string; name: string };
+
+/**
+ * ¿`name` coincide (trimmed + case/acento-insensitive, es-AR) con el nombre de algún campo
+ * de `existing`? Mismo criterio de comparación que el filtro de búsqueda de "Mis campos"
+ * (toLocaleLowerCase('es-AR') + sin acentos). Se usa para ADVERTIR (no bloquear) al
+ * crear/editar un campo con nombre repetido (decisión council).
+ *
+ * `excludeId` (opcional): en EDICIÓN, el propio campo no cuenta como duplicado de sí mismo.
+ * Pasamos su id para saltarlo de la comparación — así editar sin cambiar el nombre NO
+ * advierte, pero si hay OTRO campo genuinamente homónimo sí (su id no fue excluido). En
+ * ALTA no se pasa (el campo nuevo aún no existe en `existing`).
+ *
+ * Nombre vacío/blanco → false (no advertimos sobre un campo sin tipear todavía). Pura.
+ */
+export function hasDuplicateName(
+  name: string,
+  existing: NamedField[],
+  excludeId?: string,
+): boolean {
+  const target = normalizeName(name);
+  if (target.length === 0) return false;
+  return existing.some((e) => e.id !== excludeId && normalizeName(e.name) === target);
+}
+
+/** Normalización de nombre para comparar: trim + lowercase es-AR + sin acentos (NFD). */
+function normalizeName(s: string): string {
+  return s
+    .trim()
+    .toLocaleLowerCase('es-AR')
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '');
+}
+
+// ─── Banner "establecimiento listo" per-campo (R6.x) — Run 2 (c) ────────────────
+
+/**
+ * ¿Mostrar el banner "establecimiento listo" para el campo activo? Solo si hay un campo
+ * activo (`activeId` no nulo) y su id NO está en el set de banners ya descartados por el
+ * usuario (persistido per-campo, establishment-store). Pura, null-safe.
+ *
+ * TODO (spec 02 frontend): gatear ADEMÁS por rodeoCount === 0 ("solo si falta configurar",
+ * decisión council). El frontend de rodeos (spec 02) no existe todavía, así que hoy NO
+ * podemos consultar si el campo tiene rodeo → gateamos SOLO por el set de descartados
+ * (efectivamente todos los campos están sin configurar hoy). NO inventamos estado de rodeo.
+ */
+export function shouldShowReadyBanner(
+  activeId: string | null,
+  dismissedIds: string[],
+): boolean {
+  if (!activeId) return false;
+  return !dismissedIds.includes(activeId);
+}

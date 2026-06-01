@@ -3,7 +3,10 @@
 // Bottom tab bar de 5 items con FAB central elevado:
 //   [Inicio]  [Animales]  [⚡ FAB Maniobra]  [Reportes]  [Más]
 //
-// - Item activo en verde botella ($primary), inactivos en gris ($textMuted).
+// - Item activo: ícono verde botella ($primary) DENTRO de una pill verde claro ($greenLight)
+//   estilo Material-3 (active indicator). Inactivos: ícono gris ($textMuted), sin pill. La pill
+//   suma 2 canales (forma + fondo) además del color → el activo se distingue al sol / de lejos /
+//   con guante sin depender solo del color (WCAG 1.4.1, color como único canal era el problema).
 // - El FAB central NO es una tab plana: es un botón elevado (círculo verde ~64px
 //   que sobresale sobre la barra) que abre MODO MANIOBRAS (spec 03, stub /maniobra).
 // - Iconos: lucide-react-native (icon set canónico, FRONTEND-STATUS.md).
@@ -14,10 +17,10 @@
 // design system, no son literales.
 
 import { Tabs, useRouter } from 'expo-router';
-import { BarChart3, Home, Menu, PawPrint, Zap } from 'lucide-react-native';
+import { BarChart3, Home, type LucideIcon, Menu, PawPrint, Zap } from 'lucide-react-native';
 import { getTokenValue } from 'tamagui';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Pressable } from 'react-native';
+import { Pressable, type ColorValue } from 'react-native';
 import { Text, YStack } from 'tamagui';
 
 import { shadows } from '../../tamagui.config';
@@ -60,6 +63,36 @@ function navColors() {
     // físicos, o el preview web): garantiza un respiro contra el borde inferior.
     navBottomMin: getTokenValue('$navBottomMin', 'size'),
   };
+}
+
+/**
+ * Ícono de un item PLANO del nav con "active indicator" pill estilo Material-3 (Run 2 b).
+ * Cuando `focused`, el ícono lucide queda DENTRO de una pill verde claro ($greenLight); cuando
+ * no, la pill es transparente. Suma forma + fondo al color (el `color` ya viene $primary cuando
+ * focused, $textMuted si no, vía tabBarActive/InactiveTintColor) → el activo se distingue sin
+ * depender solo del color (WCAG 1.4.1).
+ *
+ * Layout (RESTRICCIÓN: no romper la celda de 60px ni el label de abajo, ni a 360px):
+ * la pill es CHICA y NO empuja el label — el ícono ya estaba en la mitad superior de la celda
+ * (paddingTop $navItemTop) y la pill abraza el ícono con un padding mínimo ($3 horizontal / $1
+ * vertical). El contenedor es del tamaño del ícono + padding, no fuerza ancho intrínseco que
+ * empuje la fila (cabe en la celda de la tab). La pill es decorativa: no intercepta toques
+ * (el Pressable de la tab de React Navigation envuelve todo).
+ */
+function NavTabIcon({ Icon, color, focused }: { Icon: LucideIcon; color: ColorValue; focused: boolean }) {
+  const iconSize = getTokenValue('$navIcon', 'size');
+  return (
+    <YStack
+      borderRadius="$pill"
+      paddingHorizontal="$3"
+      paddingVertical="$1"
+      alignItems="center"
+      justifyContent="center"
+      backgroundColor={focused ? '$greenLight' : 'transparent'}
+    >
+      <Icon size={iconSize} color={color} />
+    </YStack>
+  );
 }
 
 /**
@@ -208,16 +241,16 @@ export default function TabsLayout() {
         name="index"
         options={{
           title: 'Inicio',
-          // Íconos lucide a $navIcon (24px, token leído en COLOR.navIcon): tamaño
-          // explícito por token (cruza a la prop `size` de lucide), no literal.
-          tabBarIcon: ({ color }) => <Home size={COLOR.navIcon} color={color} />,
+          // Active-indicator pill M3 (Run 2 b): NavTabIcon recibe `focused` para pintar la pill
+          // verde claro detrás del ícono activo. El tamaño del ícono ($navIcon) vive en NavTabIcon.
+          tabBarIcon: ({ color, focused }) => <NavTabIcon Icon={Home} color={color} focused={focused} />,
         }}
       />
       <Tabs.Screen
         name="animales"
         options={{
           title: 'Animales',
-          tabBarIcon: ({ color }) => <PawPrint size={COLOR.navIcon} color={color} />,
+          tabBarIcon: ({ color, focused }) => <NavTabIcon Icon={PawPrint} color={color} focused={focused} />,
         }}
       />
       <Tabs.Screen
@@ -232,14 +265,14 @@ export default function TabsLayout() {
         name="reportes"
         options={{
           title: 'Reportes',
-          tabBarIcon: ({ color }) => <BarChart3 size={COLOR.navIcon} color={color} />,
+          tabBarIcon: ({ color, focused }) => <NavTabIcon Icon={BarChart3} color={color} focused={focused} />,
         }}
       />
       <Tabs.Screen
         name="mas"
         options={{
           title: 'Más',
-          tabBarIcon: ({ color }) => <Menu size={COLOR.navIcon} color={color} />,
+          tabBarIcon: ({ color, focused }) => <NavTabIcon Icon={Menu} color={color} focused={focused} />,
         }}
       />
     </Tabs>

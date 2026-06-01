@@ -27,7 +27,7 @@ import {
   updateEstablishment,
   type EstablishmentDetail,
 } from '@/services/establishments';
-import { formatHectares, parseHectares } from '@/utils/establishment';
+import { formatHectares, hasDuplicateName, parseHectares } from '@/utils/establishment';
 import { validateCreateEstablishment } from '@/utils/validation';
 
 // Copy accionable ante falta de conexión (editar es operación online, igual que crear).
@@ -148,6 +148,9 @@ function EditForm({
   onSaved: () => void | Promise<void>;
   onCancel: () => void;
 }) {
+  // `recents` = set de campos accesibles del usuario → fuente para detectar nombres duplicados
+  // (Run 2 f). En EDICIÓN excluimos el propio campo (detail.id) para no advertir contra sí mismo.
+  const { recents } = useEstablishment();
   const [name, setName] = useState(detail.name);
   const [province, setProvince] = useState(detail.province);
   const [city, setCity] = useState(detail.city ?? '');
@@ -157,6 +160,10 @@ function EditForm({
   const [provinceError, setProvinceError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+
+  // Advertencia NO bloqueante de nombre duplicado (Run 2 f): el nombre coincide con OTRO campo
+  // del usuario (el propio se excluye por id). En vivo; no bloquea el submit.
+  const duplicateName = hasDuplicateName(name, recents, detail.id);
 
   async function onSubmit() {
     setFormError(null);
@@ -195,6 +202,11 @@ function EditForm({
           autoCapitalize="words"
           error={nameError}
         />
+        {/* Advertencia NO bloqueante de nombre duplicado (Run 2 f): hint muted, no error rojo.
+            El propio campo se excluye (detail.id) → no advierte si no cambiás el nombre. */}
+        {duplicateName ? (
+          <InfoNote>Ya tenés un campo con este nombre. Podés guardarlo igual.</InfoNote>
+        ) : null}
         <FormField
           label="Provincia"
           value={province}

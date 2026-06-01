@@ -11,8 +11,12 @@ import {
   buildRecents,
   detectActiveLost,
   formatHectares,
+  hasDuplicateName,
+  localityOf,
   parseHectares,
   resolveState,
+  roleLabel,
+  shouldShowReadyBanner,
   sortMyEstablishments,
   type MembershipEstablishment,
 } from './establishment.ts';
@@ -203,4 +207,107 @@ test('parseHectares ∘ formatHectares es estable (round-trip de edición)', () 
   }
   // null pre-cargado → input vacío → parsea de vuelta a null.
   assert.equal(parseHectares(formatHectares(null)), null);
+});
+
+// ─── roleLabel (Run 2 e) — etiqueta de rol canónica ──────────────────────────────
+
+test('roleLabel: las 3 etiquetas canónicas en español', () => {
+  assert.equal(roleLabel('owner'), 'Dueño');
+  assert.equal(roleLabel('field_operator'), 'Operario');
+  assert.equal(roleLabel('veterinarian'), 'Veterinario');
+});
+
+// ─── localityOf (Run 2 e) — localidad de desambiguación ──────────────────────────
+
+test('localityOf: usa city si existe y no está vacía', () => {
+  assert.equal(localityOf({ city: 'Chascomús', province: 'Buenos Aires' }), 'Chascomús');
+});
+
+test('localityOf: cae a province si city es null/vacía/espacios', () => {
+  assert.equal(localityOf({ city: null, province: 'Buenos Aires' }), 'Buenos Aires');
+  assert.equal(localityOf({ city: '', province: 'Córdoba' }), 'Córdoba');
+  assert.equal(localityOf({ city: '   ', province: 'Santa Fe' }), 'Santa Fe');
+});
+
+test('localityOf: trim de city', () => {
+  assert.equal(localityOf({ city: '  Tandil  ', province: 'Buenos Aires' }), 'Tandil');
+});
+
+test('localityOf: ambas vacías/ausentes → cadena vacía (caller no renderiza "·" colgando)', () => {
+  assert.equal(localityOf({ city: null, province: null }), '');
+  assert.equal(localityOf({}), '');
+  assert.equal(localityOf({ city: '', province: '' }), '');
+});
+
+// ─── hasDuplicateName (Run 2 f) — advertir nombres repetidos ─────────────────────
+
+const named = (id: string, name: string) => ({ id, name });
+
+test('hasDuplicateName: match exacto → true', () => {
+  assert.equal(hasDuplicateName('La Juanita', [named('a', 'La Juanita')]), true);
+});
+
+test('hasDuplicateName: distinto case → true (case-insensitive)', () => {
+  assert.equal(hasDuplicateName('la juanita', [named('a', 'LA JUANITA')]), true);
+});
+
+test('hasDuplicateName: acentos ignorados → true', () => {
+  assert.equal(hasDuplicateName('chascomus', [named('a', 'Chascomús')]), true);
+  assert.equal(hasDuplicateName('Ángel', [named('a', 'angel')]), true);
+});
+
+test('hasDuplicateName: trim en ambos lados → true', () => {
+  assert.equal(hasDuplicateName('  La Juanita  ', [named('a', 'La Juanita')]), true);
+});
+
+test('hasDuplicateName: nombre distinto → false', () => {
+  assert.equal(hasDuplicateName('El Ombú', [named('a', 'La Juanita')]), false);
+});
+
+test('hasDuplicateName: nombre vacío/blanco → false (no advierte antes de tipear)', () => {
+  assert.equal(hasDuplicateName('', [named('a', 'La Juanita')]), false);
+  assert.equal(hasDuplicateName('   ', [named('a', 'La Juanita')]), false);
+});
+
+test('hasDuplicateName: lista vacía → false', () => {
+  assert.equal(hasDuplicateName('La Juanita', []), false);
+});
+
+test('hasDuplicateName edición: excluye el propio campo por id → false al no cambiar el nombre', () => {
+  // Editando el campo 'a' (La Juanita) sin cambiar el nombre: NO debe advertir contra sí mismo.
+  assert.equal(
+    hasDuplicateName('La Juanita', [named('a', 'La Juanita'), named('b', 'El Ombú')], 'a'),
+    false,
+  );
+});
+
+test('hasDuplicateName edición: OTRO campo homónimo SÍ advierte (su id no se excluye)', () => {
+  // Editando 'a' y poniéndole el nombre de 'b' (que ya existe): debe advertir.
+  assert.equal(
+    hasDuplicateName('El Ombú', [named('a', 'La Juanita'), named('b', 'El Ombú')], 'a'),
+    true,
+  );
+});
+
+// ─── shouldShowReadyBanner (Run 2 c) — banner per-campo + dismiss persistido ─────
+
+test('shouldShowReadyBanner: sin campo activo (null) → false', () => {
+  assert.equal(shouldShowReadyBanner(null, []), false);
+  assert.equal(shouldShowReadyBanner(null, ['a']), false);
+});
+
+test('shouldShowReadyBanner: activo NO descartado → true', () => {
+  assert.equal(shouldShowReadyBanner('a', []), true);
+  assert.equal(shouldShowReadyBanner('a', ['b', 'c']), true);
+});
+
+test('shouldShowReadyBanner: activo descartado → false (no resucita)', () => {
+  assert.equal(shouldShowReadyBanner('a', ['a']), false);
+  assert.equal(shouldShowReadyBanner('a', ['b', 'a', 'c']), false);
+});
+
+test('shouldShowReadyBanner: descartar campo A no afecta a campo B (per-campo)', () => {
+  // El bug de Raf: descartar en A no debe ocultar el banner de B.
+  assert.equal(shouldShowReadyBanner('b', ['a']), true);
+  assert.equal(shouldShowReadyBanner('a', ['a']), false);
 });

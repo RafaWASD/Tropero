@@ -220,19 +220,48 @@ export async function loadFullProfile(userId: string): Promise<LoadFullProfileRe
  * id = auth.uid() (un user solo edita su propia fila). UPDATE SIN `.select()`: no necesitamos el
  * RETURNING (el llamador re-lee o usa lo que ya tiene), y así evitamos cualquier sorpresa de
  * RLS-on-RETURNING.
+ *
+ * Run 2 (a) — fix del saludo (greeting desync): el saludo de la home sale de
+ * `AuthContext.user.name`, que se deriva de `auth.user_metadata.name` (lo fija el signup en
+ * `toAuthUser`). Pero este UPDATE solo escribía `public.users.name` → eran dos fuentes y editar
+ * el nombre en "Más" NO cambiaba el saludo. Acá, además del UPDATE a public.users, sincronizamos
+ * el metadata de Auth con `supabase.auth.updateUser({ data: { name } })`: eso emite el evento
+ * USER_UPDATED, que el AuthContext (onAuthStateChange) escucha → re-lee `toAuthUser` → la home
+ * refleja el nombre nuevo SIN reload.
+ *
+ * Orden: primero public.users (la fuente persistente del perfil), después el metadata de Auth.
+ * Si el UPDATE a public.users falla, cortamos (no tocamos Auth → no quedan fuentes desincronizadas
+ * con un nombre que no llegó a persistirse). Si public.users salió OK pero `updateUser` falla (red),
+ * NO rompemos el guardado: devolvemos ok igual (el nombre QUEDÓ guardado donde manda el perfil; el
+ * saludo se re-sincronizará en el próximo cold-start o refresh de sesión cuando AuthContext relea
+ * la sesión). Best-effort tolerante, coherente con el resto del cliente.
+ *
+ * TODO (post-MVP): consolidar fuente única de nombre en public.users vía ProfileContext (hoy el
+ * nombre vive duplicado en public.users + auth.user_metadata; un ProfileContext que lea public.users
+ * y alimente el saludo eliminaría la desincronización de raíz, sin depender del metadata de Auth).
  */
 export async function saveProfile(
   userId: string,
   input: { name: string; phone: string | null },
 ): Promise<SaveResult> {
+  const name = input.name.trim();
   const { error } = await supabase
     .from('users')
-    .update({ name: input.name.trim(), phone: input.phone?.trim() || null })
+    .update({ name, phone: input.phone?.trim() || null })
     .eq('id', userId);
 
   if (error) {
     return { ok: false, error: classifyError(error) };
   }
+
+  // Sincroniza el nombre en el metadata de Auth → dispara USER_UPDATED → AuthContext re-lee →
+  // el saludo de la home se actualiza sin reload (Run 2 a). Best-effort: si falla por red, el
+  // nombre YA quedó persistido en public.users; no revertimos ni rompemos el guardado.
+  const { error: authError } = await supabase.auth.updateUser({ data: { name } });
+  if (authError && process.env.NODE_ENV !== 'production') {
+    console.warn('[profile] updateUser (metadata name) no sincronizó:', authError.message);
+  }
+
   return { ok: true };
 }
 
