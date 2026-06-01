@@ -122,7 +122,7 @@ function CompletePhoneScreen({
   async function onSubmit() {
     setError(null);
     if (!isValidPhone(phone)) {
-      setError('Ingresá un teléfono válido (al menos 8 dígitos).');
+      setError('Ingresá un teléfono válido (8 a 15 dígitos).');
       return;
     }
     if (!userId) {

@@ -1,9 +1,10 @@
 // supabase/tests/edge/run.cjs
 // Suite de tests para Edge Functions de Fase 2 (spec 01-identity-multitenancy).
 // Corre contra el proyecto remoto con JWTs reales de users de prueba.
-// Cubre: T2.1, T2.2, T2.3, T2.4, T2.5, T2.6, T2.7.
+// Cubre: T2.1, T2.2, T2.3, T2.4, T2.5, T2.6, T2.7, T6.3 (delete_account).
 //
-// Trazabilidad R<n> documentada en progress/impl_01-identity-multitenancy.md.
+// Trazabilidad R<n> documentada en progress/impl_01-identity-multitenancy.md
+// (Fase 2) y progress/impl_01-frontend-fase6-backend.md (T6.3 / R2.4, R2.5, R2.5.1).
 
 'use strict';
 
@@ -680,6 +681,332 @@ test('Edge Functions — Fase 2', async (t) => {
     );
     assert.ok(error || data?.error, 'debería fallar (no es owner de estA)');
   });
+});
+
+// =====================================================================
+// T6.3 — delete_account (R2.4, R2.5, R2.5.1)
+// Bloque aislado: crea SUS PROPIOS usuarios/campos namespaced (no toca los
+// compartidos del bloque Fase 2, que se reusan entre tests). Los user ids se
+// registran en createdUserIds para el cleanup global (admin.deleteUser cascadea
+// public.users aun si quedó soft-deleteado/baneado).
+// =====================================================================
+
+// Devuelve el access token (JWT) de un userClient logueado.
+async function getAccessToken(userClient) {
+  const { data, error } = await userClient.auth.getSession();
+  if (error) throw new Error(`getSession: ${error.message}`);
+  const token = data?.session?.access_token;
+  if (!token) throw new Error('getSession: sin access_token');
+  return token;
+}
+
+// Inserta un owner-role activo directo (service_role) — para armar 2do owner / setups.
+async function grantOwnerRole(userId, establishmentId) {
+  const { error } = await admin.from('user_roles').insert({
+    user_id: userId,
+    establishment_id: establishmentId,
+    role: 'owner',
+    active: true,
+  });
+  if (error) throw new Error(`grantOwnerRole: ${error.message}`);
+}
+
+test('Edge Functions — delete_account (T6.3)', async (t) => {
+  await t.test('Test 1 — R2.4: baja simple (usuario sin campos) → 200', async () => {
+    const u = await createTestUser('del_simple');
+    const uClient = await getUserClient(u.email);
+
+    const { data, error } = await uClient.functions.invoke('delete_account', {
+      body: {},
+    });
+    assert.equal(error, null, error && error.message);
+    assert.equal(data.ok, true);
+
+    // users.deleted_at set + ningún rol activo.
+    const { data: urow } = await admin
+      .from('users')
+      .select('deleted_at')
+      .eq('id', u.id)
+      .single();
+    assert.ok(urow.deleted_at, 'users.deleted_at debería estar seteado');
+
+    const { data: activeRoles } = await admin
+      .from('user_roles')
+      .select('id')
+      .eq('user_id', u.id)
+      .eq('active', true);
+    assert.equal(activeRoles.length, 0, 'no debería quedar ningún rol activo');
+  });
+
+  await t.test('Test 2 — HIGH-1: login posterior al ban FALLA', async () => {
+    const u = await createTestUser('del_ban');
+    const uClient = await getUserClient(u.email);
+
+    const { error } = await uClient.functions.invoke('delete_account', {
+      body: {},
+    });
+    assert.equal(error, null, error && error.message);
+
+    // Re-login con las mismas credenciales debe ser rechazado (ban).
+    const fresh = createClient(SUPABASE_URL, ANON_KEY, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
+    const { data: signin, error: signinErr } =
+      await fresh.auth.signInWithPassword({ email: u.email, password: PASSWORD });
+    assert.ok(signinErr, 'el re-login debería fallar tras el ban');
+    assert.ok(
+      !signin?.session,
+      'no debería haber sesión tras el ban',
+    );
+  });
+
+  await t.test(
+    'Test 3 — R2.5: único owner de campo activo bloquea (409 sole_owner, sin escribir)',
+    async () => {
+      const u = await createTestUser('del_sole');
+      const uClient = await getUserClient(u.email);
+      const est = await createEstablishmentAs(uClient, `${RUN_TAG} del_sole_est`);
+
+      const { data, error } = await uClient.functions.invoke('delete_account', {
+        body: {},
+      });
+      // El edge devuelve 409; supabase-js lo expone como error O como data.error.
+      let payload = data;
+      if (error && error.context && typeof error.context.json === 'function') {
+        payload = await error.context.json();
+      }
+      assert.ok(
+        (error || payload?.error),
+        'debería fallar con sole_owner',
+      );
+      assert.ok(payload?.error, 'debería traer el envelope de error');
+      assert.equal(payload.error.code, 'sole_owner');
+      assert.ok(
+        Array.isArray(payload.error.establishments),
+        'debería listar establishments bloqueantes',
+      );
+      const blocked = payload.error.establishments.find((e) => e.id === est);
+      assert.ok(blocked, 'el campo del usuario debería estar en la lista');
+      assert.equal(blocked.name, `${RUN_TAG} del_sole_est`);
+
+      // NO se escribió: deleted_at null + rol owner sigue activo.
+      const { data: urow } = await admin
+        .from('users')
+        .select('deleted_at')
+        .eq('id', u.id)
+        .single();
+      assert.equal(urow.deleted_at, null, 'no debería haberse soft-deleteado');
+      const { data: roles } = await admin
+        .from('user_roles')
+        .select('id')
+        .eq('user_id', u.id)
+        .eq('active', true);
+      assert.equal(roles.length, 1, 'el rol owner debería seguir activo');
+    },
+  );
+
+  await t.test('Test 4 — owner con 2do owner NO bloquea → 200', async () => {
+    const u = await createTestUser('del_twoown');
+    const u2 = await createTestUser('del_twoown2');
+    const uClient = await getUserClient(u.email);
+    const est = await createEstablishmentAs(uClient, `${RUN_TAG} del_twoown_est`);
+    // Segundo owner activo del mismo campo.
+    await grantOwnerRole(u2.id, est);
+
+    const { data, error } = await uClient.functions.invoke('delete_account', {
+      body: {},
+    });
+    assert.equal(error, null, error && error.message);
+    assert.equal(data.ok, true);
+
+    // El usuario quedó sin rol activo; el campo conserva al otro owner.
+    const { data: roles } = await admin
+      .from('user_roles')
+      .select('id')
+      .eq('user_id', u.id)
+      .eq('active', true);
+    assert.equal(roles.length, 0, 'el usuario no debería tener rol activo');
+
+    const { count } = await admin
+      .from('user_roles')
+      .select('id', { count: 'exact', head: true })
+      .eq('establishment_id', est)
+      .eq('role', 'owner')
+      .eq('active', true);
+    assert.equal(count, 1, 'el campo debería conservar al otro owner');
+  });
+
+  await t.test('Test 5 — D4: campo ya soft-deleteado no bloquea → 200', async () => {
+    const u = await createTestUser('del_softest');
+    const uClient = await getUserClient(u.email);
+    const est = await createEstablishmentAs(uClient, `${RUN_TAG} del_softest_est`);
+    // Soft-delete del campo (el usuario es único owner, pero el campo ya está borrado).
+    const { error: sdErr } = await admin
+      .from('establishments')
+      .update({ deleted_at: new Date().toISOString() })
+      .eq('id', est);
+    assert.equal(sdErr, null, sdErr && sdErr.message);
+
+    const { data, error } = await uClient.functions.invoke('delete_account', {
+      body: {},
+    });
+    assert.equal(error, null, error && error.message);
+    assert.equal(data.ok, true);
+
+    const { data: urow } = await admin
+      .from('users')
+      .select('deleted_at')
+      .eq('id', u.id)
+      .single();
+    assert.ok(urow.deleted_at, 'debería haberse soft-deleteado');
+  });
+
+  await t.test(
+    'Test 6 — tras la baja el token queda revocado (signOut global) → 401',
+    async () => {
+      // Propiedad de seguridad REAL (más fuerte que la idempotencia que el test
+      // asumía): la baja hace `signOut(global)` server-side, que REVOCA la sesión.
+      // El access token (firma válida, ~1h de vida) ya NO sirve para re-operar:
+      // pasa el gateway (verify_jwt ON deja pasar la firma OK), llega al código, y
+      // `requireUser` → `getUser()` falla server-side porque la sesión fue revocada
+      // → la FUNCIÓN devuelve 401 {error:{code:'unauthorized'}}. Observado empírico:
+      // status 401, body {"error":{"code":"unauthorized","message":"Sesión inválida
+      // o ausente."}}. Esto cierra la ventana residual del access token: no se puede
+      // re-disparar la baja ni nada con ese token tras la 1ra llamada.
+      //
+      // (El branch defensivo `200 already_deleted` se cubre en aislamiento en el
+      // test siguiente, sin depender del signOut.)
+      const u = await createTestUser('del_idem');
+      const uClient = await getUserClient(u.email);
+
+      // Token vivo ANTES de la baja: tiene firma válida, pero la baja lo revocará.
+      const token = await getAccessToken(uClient);
+
+      const first = await uClient.functions.invoke('delete_account', { body: {} });
+      assert.equal(first.error, null, first.error && first.error.message);
+      assert.equal(first.data.ok, true);
+
+      // 2da llamada con el MISMO access token (raw fetch para no depender del refresh).
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/delete_account`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          apikey: ANON_KEY,
+          'Content-Type': 'application/json',
+        },
+        body: '{}',
+      });
+      assert.equal(
+        res.status,
+        401,
+        'tras la baja el token está revocado → 401 (no se puede re-operar)',
+      );
+      const body = await res.json().catch(() => ({}));
+      // La firma válida llega al código → es el 401 de la FUNCIÓN (no del gateway),
+      // con su envelope {error:{code:'unauthorized'}}.
+      assert.equal(body?.error?.code, 'unauthorized');
+    },
+  );
+
+  await t.test(
+    'Test 6b — already_deleted (branch idempotente): perfil ya soft-deleteado + sesión viva → 200',
+    async () => {
+      // Cubre el branch defensivo `200 already_deleted` EN AISLAMIENTO, sin depender
+      // del signOut (que en el flujo normal revoca la sesión → ver Test 6). Ese branch
+      // solo es alcanzable si `requireUser` tiene éxito sobre un usuario YA soft-
+      // deleteado — algo que el flujo normal NO produce (la baja revoca la sesión).
+      // Es defensivo: caso de falla parcial (si el signOut hubiera fallado, el usuario
+      // conservaría sesión y podría reintentar → debe ser idempotente).
+      //
+      // Setup: soft-deleteamos la fila DIRECTO con el admin client (sin llamar el edge
+      // ni banear) → la sesión sigue VIVA → el token llega al código y getUser() OK.
+      const u = await createTestUser('del_already');
+      const uClient = await getUserClient(u.email);
+
+      const { error: sdErr } = await admin
+        .from('users')
+        .update({ deleted_at: new Date().toISOString() })
+        .eq('id', u.id);
+      assert.equal(sdErr, null, sdErr && sdErr.message);
+
+      // Token vivo (sesión no revocada) → el edge entra al branch de idempotencia.
+      const { data, error } = await uClient.functions.invoke('delete_account', {
+        body: {},
+      });
+      assert.equal(error, null, error && error.message);
+      assert.equal(data.ok, true);
+      assert.equal(
+        data.already_deleted,
+        true,
+        'debería marcar already_deleted (branch idempotente en aislamiento)',
+      );
+    },
+  );
+
+  await t.test('Test 7 — sin sesión → 401 (rechazo del gateway, verify_jwt ON)', async () => {
+    // Raw fetch SIN Authorization Bearer (solo apikey anon). Con verify_jwt ON (default;
+    // config.toml no overridea por-función), el PLATFORM (gateway) rechaza el no-Bearer
+    // ANTES de llegar al código → 401 con el BODY DEL PLATFORM (p.ej.
+    // {"code":"UNAUTHORIZED_NO_AUTH_HEADER",...}), NO el envelope
+    // {error:{code:'unauthorized'}} de la función. La propiedad de seguridad que importa
+    // es el 401 (sin sesión no se opera); el shape del body lo decide el gateway, no
+    // nuestro código, así que NO asertamos sobre `error.code` (puede ser undefined).
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/delete_account`, {
+      method: 'POST',
+      headers: {
+        apikey: ANON_KEY,
+        'Content-Type': 'application/json',
+      },
+      body: '{}',
+    });
+    assert.equal(res.status, 401, 'sin sesión debería ser 401');
+  });
+
+  await t.test(
+    'Test 8 — HIGH/IDOR: RPC delete_account_tx NO invocable por authenticated',
+    async () => {
+      // Usuario normal (authenticated) intenta llamar la RPC directo contra PostgREST,
+      // targeteando a OTRO user. Debe ser rechazado por permiso (NO 200, NO escribe).
+      const attacker = await createTestUser('del_attacker');
+      const victim = await createTestUser('del_victim');
+      const attackerClient = await getUserClient(attacker.email);
+      const token = await getAccessToken(attackerClient);
+
+      const res = await fetch(
+        `${SUPABASE_URL}/rest/v1/rpc/delete_account_tx`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            apikey: ANON_KEY,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ p_user_id: victim.id }),
+        },
+      );
+      // Permiso denegado: PostgREST devuelve 401/403 (o 404, porque OCULTA como
+      // "not found" las funciones que el rol no puede ejecutar). NOTA: pre-deploy de
+      // la migración 0058 esto también da 404 (la función aún no existe), así que el
+      // 404 es ambiguo entre "no existe" y "existe pero revocada". Post-deploy sigue
+      // siendo 404 (PostgREST oculta la función revocada) → el test pasa igual. La
+      // garantía DURA que verificamos es invariante a esa ambigüedad: NUNCA 200 y la
+      // víctima NUNCA se escribe (chequeo de deleted_at abajo). Si la 0058 estuviera
+      // mal grantada (EXECUTE-able por authenticated), esto daría 200 y rompería.
+      assert.ok(
+        [401, 403, 404].includes(res.status),
+        `esperaba 401/403/404, obtuve ${res.status}`,
+      );
+      assert.notEqual(res.status, 200, 'la RPC NO debe ser invocable por authenticated');
+
+      // La víctima NO fue tocada.
+      const { data: vrow } = await admin
+        .from('users')
+        .select('deleted_at')
+        .eq('id', victim.id)
+        .single();
+      assert.equal(vrow.deleted_at, null, 'la víctima no debería haber sido borrada');
+    },
+  );
 });
 
 test('cleanup', async () => {

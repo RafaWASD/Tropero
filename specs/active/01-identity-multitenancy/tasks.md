@@ -292,10 +292,18 @@ Plan de implementación paso a paso. Cada tarea tiene su criterio de aceptación
 
 ## Fase 6 — Perfil
 
-### T6.1 Pantalla de perfil
+### [x] T6.1 Pantalla de perfil
 - Mostrar y editar name, phone, email.
 - Cambio de email dispara verificación.
 - **Aceptación**: cambios persisten; cambio de email mantiene el viejo hasta confirmar.
+- **As-built (Fase 6 frontend)**: sección Perfil de `app/app/(tabs)/mas.tsx` — name+phone editables
+  (→ `public.users` vía `saveProfile`, RLS users_update_self) + **email editable** (R2.1/R2.2):
+  `EmailChangeForm` → `changeEmail()` (`auth.updateUser({email})`); Supabase manda verificación al
+  nuevo y mantiene el viejo hasta confirmar (R2.2 nativo); el display sigue mostrando el viejo (del
+  session) hasta confirmar. **ProfileContext** (`app/src/contexts/ProfileContext.tsx`) = fuente única
+  del saludo (name/phone de public.users, email del session) → home/onboarding leen de ahí (cae el
+  sync de auth-metadata de Run 2; greeting desync resuelto de raíz). Service `changeEmail` en
+  `app/src/services/account.ts`; mapeo puro testeado en `app/src/utils/account-result.ts`.
 
 ### T6.2 Logout
 - Botón en perfil.
@@ -307,6 +315,18 @@ Plan de implementación paso a paso. Cada tarea tiene su criterio de aceptación
 - Bloqueo si es único owner de algún establishment.
 - Llamada a Edge Function `delete_account` que hace soft-delete y desactiva roles.
 - **Aceptación**: cuenta sin owner solo se elimina; cuenta con campos da error claro.
+- **Estado**:
+  - [x] **Backend** — RPC `delete_account_tx` (migración 0058) + edge `delete_account`
+    + 8 tests edge. Contrato `design-T6.3-delete-account.md` (Gate 1 PASS). Falta
+    deploy/migración (lo hace el leader). Pendiente reviewer + Gate 2.
+  - [x] **Frontend** — `deleteAccount()` en `app/src/services/account.ts` (vía `invoke` del edge,
+    Result tipado: ok / already_deleted / sole_owner+lista / network / unauthorized / unknown;
+    mapeo puro testeado en `app/src/utils/account-result.ts`). UI en `mas.tsx` **zona de peligro**
+    (terracota, al fondo): "Eliminar cuenta" → **doble confirmación** (idle → confirm con
+    consecuencias → "Sí, eliminar mi cuenta"). `sole_owner` (R2.5.1) → **lista de campos
+    bloqueantes** con atajo a soft-delete por campo (reusa `softDeleteEstablishment` + warning de
+    miembros R3.6.1) + "Reintentar baja". `ok` → `signOut()` + estado breve "cuenta eliminada"
+    (RootGate rutea a auth). Pendiente reviewer + Gate 2.
 
 ## Fase 7 — PowerSync
 

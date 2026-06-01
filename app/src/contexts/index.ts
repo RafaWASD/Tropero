@@ -14,3 +14,5 @@ export type {
   ActiveLostReason,
   EstablishmentContextValue,
 } from './EstablishmentContext';
+export { ProfileProvider, useProfile } from './ProfileContext';
+export type { Profile, ProfileContextValue } from './ProfileContext';

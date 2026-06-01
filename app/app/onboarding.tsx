@@ -25,13 +25,14 @@ import { useRouter } from 'expo-router';
 import { YStack } from 'tamagui';
 
 import { AuthScreenShell, Button } from '@/components';
-import { useAuth } from '@/contexts';
+import { useProfile } from '@/contexts';
 
 export default function OnboardingScreen() {
   const router = useRouter();
-  const { state } = useAuth();
-  const firstName =
-    state.status === 'authenticated' ? firstNameOf(state.user.name) : null;
+  // Saludo desde ProfileContext (fuente única, public.users — Fase 6). Mientras carga o sin
+  // nombre, saludo neutro (sin parpadear "¡Bienvenido, undefined!").
+  const { profile, loading } = useProfile();
+  const firstName = !loading ? firstNameOf(profile?.name ?? null) : null;
 
   return (
     <AuthScreenShell

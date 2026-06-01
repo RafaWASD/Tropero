@@ -51,7 +51,7 @@ import {
 } from '@expo-google-fonts/inter';
 
 import config from '../tamagui.config';
-import { AuthProvider, EstablishmentProvider, useAuth, useEstablishment } from '@/contexts';
+import { AuthProvider, EstablishmentProvider, ProfileProvider, useAuth, useEstablishment } from '@/contexts';
 import { getPendingInvitationToken } from '@/services/pending-invitation';
 
 SplashScreen.preventAutoHideAsync().catch(() => {
@@ -266,6 +266,10 @@ function RootGate() {
       <Stack.Screen name="crear-campo" />
       {/* Edición de campo (R3.4) — destino owner-only desde "Más". */}
       <Stack.Screen name="editar-campo" />
+      {/* Cambio de email (R2.1/R2.2) — destino desde "Más" (fila de email del perfil). Como
+          editar-campo: NO está en strandedOnGatingRoute, así el gate no lo expulsa a (tabs)
+          mientras se cambia el email. */}
+      <Stack.Screen name="cambiar-email" />
       {/* Aviso de pérdida del campo activo (R6.10) — transitorio. */}
       <Stack.Screen name="campo-perdido" />
       {/* Fase 5 — equipo: Miembros (R5.x), Invitar (T5.2), Aceptar invitación (T5.4). */}
@@ -305,13 +309,19 @@ export default function RootLayout() {
         <TamaguiProvider config={config} defaultTheme="light">
           <StatusBar style="dark" />
           <AuthProvider>
-            {/* EstablishmentProvider monta siempre, pero se auto-inhabilita sin sesión
-                verificada (lee user_id del AuthContext; sin user queda en 'loading' y no
-                consulta). Así no remonta al pasar los gates de auth y el gating de
-                establecimiento (RootGate) tiene contexto disponible. */}
-            <EstablishmentProvider>
-              <RootGate />
-            </EstablishmentProvider>
+            {/* ProfileProvider (Fase 6): fuente única del saludo (name/phone de public.users,
+                email del session). Monta DENTRO de AuthProvider (lee user.id/email del
+                AuthContext) y ENVUELVE a EstablishmentProvider + RootGate para que home /
+                onboarding puedan consumir useProfile(). Sin sesión queda neutro (no fetcha). */}
+            <ProfileProvider>
+              {/* EstablishmentProvider monta siempre, pero se auto-inhabilita sin sesión
+                  verificada (lee user_id del AuthContext; sin user queda en 'loading' y no
+                  consulta). Así no remonta al pasar los gates de auth y el gating de
+                  establecimiento (RootGate) tiene contexto disponible. */}
+              <EstablishmentProvider>
+                <RootGate />
+              </EstablishmentProvider>
+            </ProfileProvider>
           </AuthProvider>
         </TamaguiProvider>
       </SafeAreaProvider>

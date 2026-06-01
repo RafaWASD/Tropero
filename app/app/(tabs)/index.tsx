@@ -38,7 +38,7 @@ import {
   type StepperStep,
   type SwitcherField,
 } from '@/components';
-import { useAuth, useEstablishment } from '@/contexts';
+import { useAuth, useEstablishment, useProfile } from '@/contexts';
 import { localityOf, shouldShowReadyBanner } from '@/utils/establishment';
 import { addDismissedBanner, loadDismissedBanners } from '@/services/establishment-store';
 
@@ -228,14 +228,16 @@ export default function InicioScreen() {
   const router = useRouter();
   const { state: authState } = useAuth();
   const { state: estState, recents, switchEstablishment } = useEstablishment();
+  const { profile, loading: profileLoading } = useProfile();
 
   const userId = authState.status === 'authenticated' ? authState.user.id : null;
 
-  // ── Datos reales (Fase 4) ────────────────────────────────────────────────────
-  // Nombre del usuario ← AuthContext (primer nombre del perfil). Campo activo ← contexto
-  // multi-tenant (R6.3). NUNCA se hardcodea (CLAUDE.md ppio 6).
-  const userFirstName =
-    authState.status === 'authenticated' ? firstNameOf(authState.user.name) : null;
+  // ── Datos reales (Fase 4 + Fase 6) ───────────────────────────────────────────
+  // Nombre del usuario ← ProfileContext (FUENTE ÚNICA, public.users; Fase 6 — antes salía de
+  // AuthContext/user_metadata y no se actualizaba al editar). Campo activo ← contexto
+  // multi-tenant (R6.3). NUNCA se hardcodea (CLAUDE.md ppio 6). Mientras el perfil carga,
+  // mostramos el saludo NEUTRO (sin parpadear "Hola undefined").
+  const userFirstName = firstNameOf(profile?.name ?? null);
 
   // El campo activo real. La home solo se renderiza cuando el gating ya garantizó estado
   // 'active' (RootGate), pero defendemos por si se monta en transición. Lleva localidad + rol
@@ -388,7 +390,8 @@ export default function InicioScreen() {
         showsHorizontalScrollIndicator={false}
         showsVerticalScrollIndicator={false}
       >
-        {/* Saludo. Nombre real del usuario (AuthContext); sin nombre, saludo neutro. */}
+        {/* Saludo. Nombre real del usuario (ProfileContext, fuente única — Fase 6). Mientras
+            el perfil carga o no hay nombre, saludo NEUTRO (sin parpadear "Hola undefined"). */}
         <Text
           fontFamily="$body"
           fontSize="$9"
@@ -396,7 +399,7 @@ export default function InicioScreen() {
           color="$textPrimary"
           marginTop="$4"
         >
-          {userFirstName ? `¡Hola ${userFirstName}! 👋` : '¡Hola! 👋'}
+          {!profileLoading && userFirstName ? `¡Hola ${userFirstName}! 👋` : '¡Hola! 👋'}
         </Text>
 
         {/* Banner descartable per-campo (Run 2 c): solo para el campo activo y solo si su id

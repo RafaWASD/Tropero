@@ -216,29 +216,17 @@ export async function loadFullProfile(userId: string): Promise<LoadFullProfileRe
 
 /**
  * Guarda nombre + teléfono del perfil propio (R2.1). NO toca el email: cambiar el email dispara
- * verificación (R2.2) y va por otro flujo (TODO, fuera de Run 1). RLS `users_update_self` exige
- * id = auth.uid() (un user solo edita su propia fila). UPDATE SIN `.select()`: no necesitamos el
- * RETURNING (el llamador re-lee o usa lo que ya tiene), y así evitamos cualquier sorpresa de
- * RLS-on-RETURNING.
+ * verificación (R2.2) y va por otro flujo (changeEmail en services/account.ts). RLS
+ * `users_update_self` exige id = auth.uid() (un user solo edita su propia fila). UPDATE SIN
+ * `.select()`: no necesitamos el RETURNING (el llamador re-lee o usa lo que ya tiene), y así
+ * evitamos cualquier sorpresa de RLS-on-RETURNING.
  *
- * Run 2 (a) — fix del saludo (greeting desync): el saludo de la home sale de
- * `AuthContext.user.name`, que se deriva de `auth.user_metadata.name` (lo fija el signup en
- * `toAuthUser`). Pero este UPDATE solo escribía `public.users.name` → eran dos fuentes y editar
- * el nombre en "Más" NO cambiaba el saludo. Acá, además del UPDATE a public.users, sincronizamos
- * el metadata de Auth con `supabase.auth.updateUser({ data: { name } })`: eso emite el evento
- * USER_UPDATED, que el AuthContext (onAuthStateChange) escucha → re-lee `toAuthUser` → la home
- * refleja el nombre nuevo SIN reload.
- *
- * Orden: primero public.users (la fuente persistente del perfil), después el metadata de Auth.
- * Si el UPDATE a public.users falla, cortamos (no tocamos Auth → no quedan fuentes desincronizadas
- * con un nombre que no llegó a persistirse). Si public.users salió OK pero `updateUser` falla (red),
- * NO rompemos el guardado: devolvemos ok igual (el nombre QUEDÓ guardado donde manda el perfil; el
- * saludo se re-sincronizará en el próximo cold-start o refresh de sesión cuando AuthContext relea
- * la sesión). Best-effort tolerante, coherente con el resto del cliente.
- *
- * TODO (post-MVP): consolidar fuente única de nombre en public.users vía ProfileContext (hoy el
- * nombre vive duplicado en public.users + auth.user_metadata; un ProfileContext que lea public.users
- * y alimente el saludo eliminaría la desincronización de raíz, sin depender del metadata de Auth).
+ * Fase 6 (consolidación del saludo — fuente única): escribe SOLO `public.users`. Ya NO sincroniza
+ * el nombre a `auth.user_metadata` (lo que hacía Run 2): el saludo de la home/onboarding ahora lee
+ * el nombre del ProfileContext (que lee `public.users`), no de AuthContext/user_metadata. Tras
+ * guardar, el llamador refresca el ProfileContext (`useProfile().refresh()`) → el saludo se
+ * actualiza sin reload, sin depender del metadata de Auth. Esto elimina de raíz la desincronización
+ * de 2 fuentes que tenía Run 2.
  */
 export async function saveProfile(
   userId: string,
@@ -253,15 +241,6 @@ export async function saveProfile(
   if (error) {
     return { ok: false, error: classifyError(error) };
   }
-
-  // Sincroniza el nombre en el metadata de Auth → dispara USER_UPDATED → AuthContext re-lee →
-  // el saludo de la home se actualiza sin reload (Run 2 a). Best-effort: si falla por red, el
-  // nombre YA quedó persistido en public.users; no revertimos ni rompemos el guardado.
-  const { error: authError } = await supabase.auth.updateUser({ data: { name } });
-  if (authError && process.env.NODE_ENV !== 'production') {
-    console.warn('[profile] updateUser (metadata name) no sincronizó:', authError.message);
-  }
-
   return { ok: true };
 }
 

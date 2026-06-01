@@ -31,6 +31,8 @@ export type FormFieldProps = {
   editable?: boolean;
   returnKeyType?: TextInputProps['returnKeyType'];
   onSubmitEditing?: TextInputProps['onSubmitEditing'];
+  /** Tope de caracteres tipeables (delega en el maxLength nativo del TextInput). */
+  maxLength?: number;
 };
 
 export const FormField = forwardRef<TextInput, FormFieldProps>(function FormField(
@@ -48,6 +50,7 @@ export const FormField = forwardRef<TextInput, FormFieldProps>(function FormFiel
     editable = true,
     returnKeyType,
     onSubmitEditing,
+    maxLength,
   },
   ref,
 ) {
@@ -91,6 +94,7 @@ export const FormField = forwardRef<TextInput, FormFieldProps>(function FormFiel
         editable={editable}
         returnKeyType={returnKeyType}
         onSubmitEditing={onSubmitEditing}
+        maxLength={maxLength}
         style={{
           minHeight,
           borderRadius: radius,
