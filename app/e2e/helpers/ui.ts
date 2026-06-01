@@ -57,6 +57,43 @@ export async function waitForOnboarding(page: Page): Promise<void> {
   });
 }
 
+/**
+ * Navega a una tab del bottom-nav por su label y espera a aterrizar. El click del label de la tab
+ * puede ser interceptado transitoriamente por el contenido del ScrollView durante la animación de
+ * cambio de tab (react-native-web), así que reintentamos el click hasta que un ANCLA de la pantalla
+ * destino esté visible. `anchor` es un locator de algo único de la pantalla destino.
+ */
+export async function gotoTab(
+  page: Page,
+  tabLabel: string,
+  anchor: import('@playwright/test').Locator,
+): Promise<void> {
+  // El target clickeable de cada tab del bottom-nav es el `<a role="tab" href="/…">` (React
+  // Navigation web), NO el <div> del label de texto. Clickear el LABEL hacía que un sibling absoluto
+  // (el FAB elevado / capa de la barra) interceptara el puntero de forma intermitente; el `role=tab`
+  // es el elemento accionable correcto y no se intercepta. Su nombre accesible = el texto del label.
+  const tab = page.getByRole('tab', { name: tabLabel, exact: true });
+  // Reintentamos el click hasta aterrizar (cubre cualquier transición de animación residual). ~5×.
+  for (let i = 0; i < 5; i++) {
+    await expect(tab).toBeVisible({ timeout: 15_000 });
+    try {
+      await tab.click({ timeout: 8_000 });
+    } catch {
+      await page.waitForTimeout(400);
+      continue;
+    }
+    try {
+      await expect(anchor).toBeVisible({ timeout: 5_000 });
+      return;
+    } catch {
+      /* la tab no aterrizó todavía: reintenta el click */
+    }
+  }
+  // Último intento: falla con el assert real si tampoco aterriza.
+  await tab.click({ timeout: 10_000 });
+  await expect(anchor).toBeVisible({ timeout: 10_000 });
+}
+
 /** Espera la pantalla "Mis campos" (landing con ≥2 campos). */
 export async function waitForMisCampos(page: Page): Promise<void> {
   // Título "Mis campos" (heading) — hay también el accesibilidad-label del botón "Crear campo".

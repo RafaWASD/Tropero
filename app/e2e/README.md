@@ -65,16 +65,38 @@ El remoto se comparte con el testing manual de Raf, así que la suite es **colis
 |------|--------|-------|
 | `auth.spec.ts` | ✅ verde | login (pre-confirmado → onboarding), validación de sign-up en cliente, login con credenciales malas, logout → login |
 | `establishments.spec.ts` | ✅ verde | crear campo desde onboarding con gate de teléfono → home; ≥2 campos → "Mis campos" → elegir → home |
-| `invitations.spec.ts` | ⏸ `test.fixme` | loop de 2 cuentas (dueño invita por link, invitado acepta, dueño ve al miembro) |
+| `invitations.spec.ts` | ✅ verde | loop de 2 cuentas (dueño invita por link → token leído de la DB con service_role → invitado **pega el link in-app** y acepta → dueño ve al miembro) |
+| `profile.spec.ts` | ✅ verde | Fase 6 R2.1: el saludo de la home se actualiza al editar el nombre (fuente única); el teléfono sanitiza letras + valida 8-15 dígitos; la edición se descarta al salir de "Más" (modo lectura) |
+| `account.spec.ts` | ✅ verde | Fase 6 R2.2/R2.4/R2.5: eliminar cuenta — baja no bloqueada (cierra sesión + ban server-side); bloqueo único-owner (R2.5/R2.5.1, lista de campos); cambiar email — request + el viejo sigue vigente (NO el link) |
 
-## Habilitar `invitations.spec.ts` (post-B.1.3)
+Total: **13 tests** (`pnpm e2e`).
 
-El frontend de invitaciones (Más → Equipo → Invitar, `/invite`, AcceptInvitation) **aún no está
-commiteado en este branch** — hoy "Equipo" es un stub "Próximamente". Cuando se commitee B.1.3:
+### Notas de los specs de Fase 6
 
-1. En `invitations.spec.ts`, cambiá `test.fixme(...)` por `test(...)`.
-2. Ajustá los selectores marcados como TENTATIVOS a la UI real de invitaciones/miembros.
-3. Corré `pnpm e2e` y verificá verde.
+- **Navegación de tabs** (`helpers/ui.ts → gotoTab`): el target clickeable del bottom-nav es el
+  `<a role="tab" href="/…">` (React Navigation web), NO el `<div>` del label de texto — clickear el
+  label hacía que el FAB elevado interceptara el puntero de forma intermitente. `gotoTab` clickea el
+  `role=tab` y reintenta hasta que un ancla de la pantalla destino esté visible.
+- **`account.spec.ts` "baja simple"**: un usuario SIN campos aterriza en `/onboarding` y NO tiene la
+  tab "Más" (la zona de peligro vive en `mas.tsx`, estado `active`). Para alcanzar la UI de baja SIN
+  que la baja se bloquee, el usuario se siembra como MIEMBRO (no-owner) de un campo de otro dueño:
+  aterriza en HOME y su baja no se bloquea. Es la baja "no bloqueada" equivalente y el camino real.
+- **`invitations.spec.ts`**: el invitado abre `/invite` por NAVEGACIÓN IN-APP (botón "Pegar link de
+  invitación" del wizard) y pega el link — NO con `page.goto('/invite?token=…')`. Un `goto` recarga el
+  SPA y, en el primer render, la sesión está `loading` (isAuthed=false) → `invite.tsx` arranca en
+  `auth_required` y PERSISTE el token → al aceptar, el RootGate re-rutea de vuelta a /invite (loop).
+  Pegar in-app mantiene la sesión → fase `confirm` directa, sin persistir token, sin loop.
+
+## LÍMITE conocido — cambio de email (link de verificación)
+
+El test `account.spec.ts` "cambiar email" automatiza **el request + la UI + que el email VIEJO siga
+vigente** (la propiedad load-bearing de R2.2: Supabase mantiene el viejo hasta confirmar). NO clickea
+el LINK de verificación: cerrar el cambio requiere LEER el mail, lo que no es automatizable contra el
+remoto sin un servicio de inbox (Inbucket / Mailosaur). Además, el ÉXITO del request depende del
+rate-limit de envío de mails del proyecto remoto compartido: con la cuota consumida por otros
+tests/uso, `auth.updateUser({email})` devuelve `over_email_send_rate_limit` (429). Por eso el test
+acepta AMBOS desenlaces (confirmación OK / rechazo por rate-limit) y, en los dos, verifica que el
+email viejo persiste. Cerrar el cambio (click al link) queda manual / a un inbox-tool a futuro.
 
 ## Notas / fricciones de testear web
 

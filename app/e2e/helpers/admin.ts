@@ -124,6 +124,54 @@ export async function seedEstablishment(
   return estId;
 }
 
+/**
+ * Agrega a `userId` como MIEMBRO ACTIVO (no-owner) de un establishment existente, vía service_role.
+ * Útil para sembrar un usuario que aterriza en HOME (estado 'active') pero NO es dueño único de
+ * ningún campo (su baja de cuenta NO se bloquea). El rol default es 'field_operator'. (El índice
+ * único de R4.3 es parcial `where active`, no apto para onConflict; el par es nuevo → insert plano.)
+ */
+export async function addMember(
+  userId: string,
+  establishmentId: string,
+  role: 'field_operator' | 'veterinarian' = 'field_operator',
+): Promise<void> {
+  const { error } = await admin
+    .from('user_roles')
+    .insert({ user_id: userId, establishment_id: establishmentId, role, active: true });
+  if (error) throw new Error(`addMember(${userId}): ${error.message}`);
+}
+
+/**
+ * Lee el token de la invitación PENDIENTE más reciente de un establishment, vía service_role
+ * (las invitations son owner-only por RLS desde el browser, pero el admin las ve todas). Es MÁS
+ * ESTABLE que scrapear el ShareLink del DOM (el accept_url se trunca con ellipsis en la UI). El
+ * invitado navega luego a `/invite?token=<token>`. Reintenta unas veces por si la fila tarda en
+ * verse tras crear la invitación desde la UI (round-trip al edge invite_user).
+ */
+export async function getLatestInvitationToken(
+  establishmentId: string,
+  opts: { tries?: number; delayMs?: number } = {},
+): Promise<string> {
+  const tries = opts.tries ?? 10;
+  const delayMs = opts.delayMs ?? 500;
+  for (let i = 0; i < tries; i++) {
+    const { data, error } = await admin
+      .from('invitations')
+      .select('token, created_at')
+      .eq('establishment_id', establishmentId)
+      .eq('status', 'pending')
+      .order('created_at', { ascending: false })
+      .limit(1);
+    if (error) throw new Error(`getLatestInvitationToken: ${error.message}`);
+    const token = data?.[0]?.token as string | undefined;
+    if (token) return token;
+    await new Promise((r) => setTimeout(r, delayMs));
+  }
+  throw new Error(
+    `getLatestInvitationToken(${establishmentId}): no apareció ninguna invitación pendiente tras ${tries} intentos.`,
+  );
+}
+
 /** Permite que un test trackee para cleanup un establishment creado por la UI (por nombre exacto). */
 export async function trackEstablishmentsByNameLike(namePrefix: string): Promise<string[]> {
   const { data, error } = await admin
