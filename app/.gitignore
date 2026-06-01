@@ -13,6 +13,12 @@ expo-env.d.ts
 # Tamagui (build cache del optimizing compiler)
 .tamagui/
 
+# Playwright E2E (artefactos de corrida — NO se commitean)
+test-results/
+playwright-report/
+blob-report/
+.playwright/
+
 # Native
 .kotlin/
 *.orig.*

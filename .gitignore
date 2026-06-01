@@ -28,6 +28,10 @@ Thumbs.db
 # Claude Code local settings (per-user permissions cache, NO compartir)
 .claude/settings.local.json
 
+# Claude Code worktrees efímeros (aislamiento de subagentes) y locks del scheduler
+.claude/worktrees/
+.claude/scheduled_tasks.lock
+
 # Override del .gitignore global del usuario
 # (~/.gitignore_global ignora CLAUDE.md por convenciones corporativas, pero
 # acá es el archivo principal del proyecto y debe estar versionado).

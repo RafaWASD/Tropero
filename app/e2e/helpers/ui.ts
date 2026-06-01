@@ -1,0 +1,64 @@
+// e2e/helpers/ui.ts — helpers de interacción con la UI web (react-native-web + Tamagui).
+//
+// Cómo renderiza la app al DOM (relevante para los selectores):
+//   - FormField (src/components/FormField.tsx) monta un <TextInput> de RN → en web es un
+//     <input> con `aria-label={label}` (rama Platform.OS==='web'). Por eso ubicamos los
+//     inputs por rol+nombre: getByLabel('Email'), getByLabel('Contraseña'), etc.
+//   - Button (src/components/Button.tsx) en web pasa `role="button"` al <div> y el texto va
+//     adentro → getByRole('button', { name: 'Iniciar sesión' }).
+//   - Las confirmaciones destructivas (mas.tsx → confirmDestructive) usan window.confirm en
+//     web → se manejan con page.on('dialog') en el test.
+//
+// El build es SPA (un solo index.html). Navegamos a '/' y dejamos que el AuthGate
+// (app/_layout.tsx RootGate) re-rutee según el estado. Por eso los helpers esperan por
+// TEXTO/ROL visible, no por URL.
+
+import { expect, type Page } from '@playwright/test';
+import type { TestUser } from './admin';
+
+/** Espera a que el bundle monte y la pantalla de login esté visible (post-splash). */
+export async function waitForSignIn(page: Page): Promise<void> {
+  // exact:true en los labels — "Contraseña" sin exact también matchea el botón "Olvidé mi
+  // contraseña" (su aria-label contiene "contraseña") → strict mode violation. El botón de
+  // login se ubica por rol (no por texto suelto del título homónimo).
+  await expect(page.getByLabel('Email', { exact: true })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByLabel('Contraseña', { exact: true })).toBeVisible();
+}
+
+/**
+ * Inicia sesión con un usuario pre-confirmado. NO navega a mano tras el submit: el AuthGate
+ * re-rutea solo al cambiar el AuthState. El llamador espera por la pantalla destino
+ * (onboarding / home / mis-campos) con su propio assert.
+ */
+export async function signIn(page: Page, user: TestUser): Promise<void> {
+  await waitForSignIn(page);
+  await page.getByLabel('Email', { exact: true }).fill(user.email);
+  await page.getByLabel('Contraseña', { exact: true }).fill(user.password);
+  await page.getByRole('button', { name: 'Iniciar sesión', exact: true }).click();
+}
+
+/** True si estamos en el wizard de onboarding (sin campos). */
+export async function isOnOnboarding(page: Page): Promise<boolean> {
+  return page.getByRole('button', { name: 'Crear mi primer campo' }).isVisible();
+}
+
+/**
+ * Espera a aterrizar en la HOME (post-login con campo activo). La home tiene el wordmark
+ * "RAFAQ" en el header y el saludo "¡Hola …! 👋". Anclamos al saludo (texto único de la home).
+ */
+export async function waitForHome(page: Page): Promise<void> {
+  await expect(page.getByText(/¡Hola.*👋/)).toBeVisible({ timeout: 30_000 });
+}
+
+/** Espera el wizard de onboarding (estado no_establishments). */
+export async function waitForOnboarding(page: Page): Promise<void> {
+  await expect(page.getByRole('button', { name: 'Crear mi primer campo' })).toBeVisible({
+    timeout: 30_000,
+  });
+}
+
+/** Espera la pantalla "Mis campos" (landing con ≥2 campos). */
+export async function waitForMisCampos(page: Page): Promise<void> {
+  // Título "Mis campos" (heading) — hay también el accesibilidad-label del botón "Crear campo".
+  await expect(page.getByText('Mis campos', { exact: true })).toBeVisible({ timeout: 30_000 });
+}

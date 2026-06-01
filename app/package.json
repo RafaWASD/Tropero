@@ -8,7 +8,10 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "e2e:build": "expo export -p web",
+    "e2e:test": "playwright test",
+    "e2e": "pnpm run e2e:build && playwright test"
   },
   "dependencies": {
     "@expo-google-fonts/inter": "^0.4.2",
@@ -42,9 +45,11 @@
     "tamagui": "2.0.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
     "@tamagui/babel-plugin": "2.0.0",
     "@tamagui/metro-plugin": "2.0.0",
     "@types/react": "~19.2.2",
+    "serve": "^14.2.6",
     "supabase": "^2.101.0",
     "typescript": "~6.0.3",
     "ws": "^8.21.0"

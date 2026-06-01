@@ -17,6 +17,8 @@
     "babel.config.js",
     "metro.config.js",
     "**/*.test.ts",
-    "**/*.test.tsx"
+    "**/*.test.tsx",
+    "e2e",
+    "playwright.config.ts"
   ]
 }
