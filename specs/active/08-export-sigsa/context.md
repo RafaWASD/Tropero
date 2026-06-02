@@ -46,7 +46,7 @@
 - Se agrega un **catálogo controlado de razas** de cría bovina con su **código SENASA** (`H`/`AA`/`HA`/`B`/`BG`/`BF`/`OR`/`S-E`…). El animal referencia el catálogo (FK/enum); el export mapea 1:1 al código.
 - **Delta sobre spec 02 (backend done)**: `animal_profiles.breed` pasa de **texto libre → referencia controlada** + migración de los datos libres existentes (best-effort match al catálogo; sin match → `OR` "otra raza" o queda a completar). **También** migra `reproductive_events.breed` (raza del ternero al parto, migration 0026) y el **trigger de ternero al pie** (migration 0032, R9 de spec 02): el ternero recién creado hereda/recibe la raza del catálogo, no texto libre. El form del evento `birth` (spec 09 R5.4) ofrece el picker del catálogo.
 - Fallback: raza sin especificar → `S-E`. El catálogo es **reusable** más allá del export (reportes, filtros, benchmarking) — por eso vive en el modelo, no como lookup de export.
-- **Sub-tarea pre-spec**: extraer la tabla completa de códigos del manual SIGSA (págs. 7-8) para sembrar el catálogo. TENTATIVO hasta validar el listado de razas relevantes con Facundo.
+- **Sub-tarea pre-spec**: ✅ **HECHA (sesión 22)** — tabla completa de 32 códigos (28 bovinas) extraída y verificada en `razas-senasa-codigos.md` (este directorio). El catálogo se siembra con las 28 bovinas (grafías literales del manual). Queda validar con Facundo el subset relevante de la zona (solo para ordenar/defaultear el picker, no recorta el enum).
 
 ### RENSPA (decisión 2: campo opcional en establishments)
 - Se agrega **`renspa` (opcional)** a `establishments`. RAFAQ lo muestra como recordatorio al exportar y queda disponible para validación anti-fraude futura (CONTEXT/07).
