@@ -118,6 +118,7 @@ Opciones de alto nivel (a evaluar, no decididas), reordenadas con el reencuadre:
 - [ ] Test de la pista del bridge (¿el Vesta reenvía el TAG por Pin 3?) — **sigue siendo la clave para iOS**.
 - [x] Cabecera `1000000` decodificada: **constante** con 2 tags distintos (`982...` y `032...`) → prefijo fijo del lector. Visto tag oficial argentino (`032...`) y de fabricante (`982...`), ambos 15 díg.
 - [ ] Hex exacto del byte de control inicial + terminador de línea (menor; requiere hex dump).
+- [ ] **(Acción de Raf) Actualizar el firmware del RS420.** La app oficial **Allflex Connect** marca el software del lector como desactualizado. La actualización la hace la propia app por Bluetooth (lector cargado, teléfono con internet, no cancelar a mitad); fallback = EID Tag Manager por USB en Windows. **Anotar la versión nueva tras actualizar** — si vuelve a capturarse el protocolo SPP por COM, importa saber si la trama (`□ + 1000000 + EID + YYMMDDHHMMSS`) cambió entre versiones. Procedimiento detallado charlado en chat 2026-06-01.
 
 ## Sesión 21 (2026-05-31) — inteligencia de transporte: councils + autorización Allflex + Serialio
 
