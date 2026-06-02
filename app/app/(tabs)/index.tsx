@@ -22,9 +22,9 @@
 // Cero hardcode de color/spacing (ADR-023 §4): todo via tokens. Donde un valor
 // cruza a una API no-Tamagui (tamaño de íconos lucide) se lee con getTokenValue.
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Pressable } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
 import { Building2, Check, ChevronDown, User, X } from 'lucide-react-native';
@@ -41,6 +41,8 @@ import {
 import { useAuth, useEstablishment, useProfile, useRodeo } from '@/contexts';
 import { localityOf, shouldShowReadyBanner } from '@/utils/establishment';
 import { addDismissedBanner, loadDismissedBanners } from '@/services/establishment-store';
+import { countAnimals } from '@/services/animals';
+import { countTeam } from '@/services/members';
 
 
 /** Header propio de la home (el tab no muestra header nativo, ADR-018). */
@@ -235,6 +237,10 @@ export default function InicioScreen() {
         }
       : null;
   const activeId = activeField?.id ?? null;
+  // Rol del usuario en el campo activo (primitivo) — solo el owner puede invitar/gestionar miembros (R5)
+  // y solo él necesita el conteo de equipo (la RLS es owner-céntrica). Lo usan el step de equipo y el
+  // loader (deps primitivas, sin loops).
+  const isOwner = activeField?.role === 'owner';
 
   // ── Banner "establecimiento listo" per-campo + dismiss persistido (Run 2 c) ──
   // El banner se controlaba con un useState(true) local → NO era per-campo (se mantenía
@@ -307,6 +313,98 @@ export default function InicioScreen() {
   }));
   const visited = activeField ? pickVisited(recentFields, activeField.id) : [];
 
+  // ── Conteo de animales del campo activo → drivea el paso "Cargá tu primer animal" (fix-loop 3) ──
+  // El paso "Cargá tu primer animal" estaba HARDCODEADO state:'active' (cuando se hizo el fix de C1,
+  // la capa de animales C2 no existía). Ahora SÍ existe → el paso debe reflejar si el campo activo
+  // tiene ≥1 animal. Cargamos un count liviano (head:true, sin traer filas).
+  //
+  // `hasAnimals` arranca null = "todavía no sabemos" (no afirmamos pendiente ni hecho hasta tener el
+  // primer count). Mientras carga / en error NO reseteamos a null → no parpadeamos el paso.
+  const [hasAnimals, setHasAnimals] = useState<boolean | null>(null);
+  // Guard de secuencia: si el campo activo cambia (o el foco re-dispara) mientras una carga está en
+  // vuelo, descartamos el resultado viejo (evita una respuesta tardía pisando una nueva).
+  const animalCountSeq = useRef(0);
+  // Último campo cuyo count tenemos aplicado. Distingue "re-foco del MISMO campo" (conservar el valor
+  // → sin parpadeo, brief: "asumí el estado previo") de "cambio de campo" (resetear a null → no
+  // heredar el "hecho" del campo viejo en uno nuevo donde quizá no hay animales = NO mentir).
+  const countedEstIdRef = useRef<string | null>(null);
+
+  const loadAnimalCount = useCallback((estId: string | null) => {
+    if (!estId) {
+      countedEstIdRef.current = null;
+      setHasAnimals(null);
+      return;
+    }
+    // Cambio de campo: olvidamos el valor del campo anterior (no afirmamos "hecho" heredado en el
+    // campo nuevo durante su carga). Re-foco del mismo campo: conservamos el valor (sin parpadeo).
+    if (countedEstIdRef.current !== estId) {
+      countedEstIdRef.current = estId;
+      setHasAnimals(null);
+    }
+    const seq = ++animalCountSeq.current;
+    void countAnimals(estId).then((result) => {
+      if (seq !== animalCountSeq.current) return; // cambió el campo / re-foco mientras cargaba.
+      // En error (red/permisos) NO afirmamos un estado falso: dejamos el valor previo (no
+      // parpadeamos el paso). El usuario que ya tiene animales no ve "Cargá tu primer animal"
+      // reaparecer por un hipo de red; el que no los tiene, no ve un falso "hecho".
+      if (result.ok) setHasAnimals(result.value > 0);
+    });
+  }, []);
+
+  // ── Conteo del equipo del campo activo → drivea el paso "Invitá a tu vet o capataz" (fix-loop 4) ──
+  // Mismo PATRÓN que el conteo de animales (arriba): el paso 3 estaba HARDCODEADO `state:'future'`
+  // (estático) → MENTÍA cuando ya habías sumado/invitado a alguien (el caso de Raf: sumó a su vet pero
+  // el Inicio seguía pidiendo "Invitá a tu operario o vet"). Ahora se drivea por estado real.
+  //
+  // Señal de "equipo iniciado": ≥1 OTRO miembro activo (además del usuario actual) O ≥1 invitación
+  // pendiente. Para el OWNER el conteo (countTeam) responde ambas; para un NO-OWNER la RLS owner-céntrica
+  // (0008) hace que `others`/`pending` den 0 (no ve al owner ni a sus pares), PERO un no-owner que llegó a
+  // la home ES evidencia de un equipo de ≥2 (alguien lo sumó) → para él el paso lo cierra el ROL, no el
+  // conteo (ver `teamStarted` abajo). Así ningún rol ve el paso mentir.
+  //
+  // `teamCounts` arranca null = "todavía no sabemos" (no afirmamos hecho/pendiente hasta el primer
+  // conteo). Mientras carga / en error NO reseteamos a null → no parpadeamos el paso.
+  const [teamCounts, setTeamCounts] = useState<{ others: number; pending: number } | null>(null);
+  // Guard de secuencia (descarta respuestas tardías) y guard de campo (resetea a null SOLO al cambiar de
+  // campo, no en re-foco del mismo) — IDÉNTICOS al patrón del conteo de animales (countedEstIdRef), para
+  // no heredar el "hecho" de un campo viejo al switchear (no mentir) ni parpadear en re-foco.
+  const teamCountSeq = useRef(0);
+  const teamCountedEstIdRef = useRef<string | null>(null);
+
+  const loadTeamCount = useCallback((estId: string | null, selfId: string | null, owner: boolean) => {
+    // Solo el OWNER necesita el conteo: para un no-owner el paso lo cierra el rol (ver teamStarted) y
+    // la RLS owner-céntrica le daría 0/0 igual → no malgastamos 2 round-trips ni dependemos de un valor
+    // que ignoraríamos. Dejamos teamCounts en null (el rol decide, no el conteo).
+    if (!owner || !estId || !selfId) {
+      teamCountedEstIdRef.current = null;
+      setTeamCounts(null);
+      return;
+    }
+    // Cambio de campo: olvidamos el conteo del anterior (no afirmamos "hecho" heredado durante la carga
+    // del nuevo). Re-foco del mismo campo: conservamos el valor (sin parpadeo).
+    if (teamCountedEstIdRef.current !== estId) {
+      teamCountedEstIdRef.current = estId;
+      setTeamCounts(null);
+    }
+    const seq = ++teamCountSeq.current;
+    void countTeam(estId, selfId).then((result) => {
+      if (seq !== teamCountSeq.current) return; // cambió el campo / re-foco mientras cargaba.
+      // En error (red/permisos) NO afirmamos un estado falso: dejamos el valor previo (no parpadeamos).
+      if (result.ok) setTeamCounts(result.counts);
+    });
+  }, []);
+
+  // Recargamos al ENFOCAR la home (mount + volver de la tab Animales/Equipo) y cuando cambia el campo
+  // activo. Dep PRIMITIVA (activeId string + userId, NO el objeto activeField — lección RodeoContext/
+  // miembros.tsx: un objeto recreado cada render dispararía un loop de fetch). `loadAnimalCount` y
+  // `loadTeamCount` son estables (useCallback sin deps) y el foco es un evento DISCRETO → no loopea.
+  useFocusEffect(
+    useCallback(() => {
+      loadAnimalCount(activeId);
+      loadTeamCount(activeId, userId, isOwner);
+    }, [activeId, userId, isOwner, loadAnimalCount, loadTeamCount]),
+  );
+
   // ── Pasos de "primeros pasos" DRIVEADOS POR ESTADO REAL (bug 1 de Raf). ──────────────
   // El Stepper era ESTÁTICO: el paso "Crear rodeo" estaba hardcodeado 'active' con un CTA que solo
   // tenía un `// TODO` → la home seguía diciendo "Creá tu primer rodeo" DESPUÉS de crearlo, y el CTA
@@ -315,8 +413,18 @@ export default function InicioScreen() {
   // HECHO acá. Lo driveamos desde estado real (useRodeo + rol del campo activo); ningún CTA es un
   // TODO muerto.
   const rodeoDone = rodeoState.status === 'active';
-  // Solo el owner puede invitar miembros (R5): a un no-owner no le ofrecemos ese CTA.
-  const canInvite = activeField?.role === 'owner';
+  // Solo el owner puede invitar miembros (R5): a un no-owner no le ofrecemos ese CTA (isOwner arriba).
+  const canInvite = isOwner;
+
+  // Paso "Invitá a tu vet o capataz" DRIVEADO por estado real (fix-loop 4): `done` cuando el campo ya
+  // tiene equipo (≥1 otro miembro o ≥1 invitación pendiente), `active` cuando todavía no.
+  //   - NO-OWNER: el solo hecho de estar en la home de un campo ajeno = equipo iniciado (alguien lo
+  //     sumó); además la RLS no le deja ver al owner ni invitaciones → el rol cierra el paso (`done`).
+  //   - OWNER: lo decide el conteo real. `teamCounts === null` (cargando / aún sin saber) = NO afirmamos
+  //     "hecho": mostramos PENDIENTE (default honesto; el peor error sería afirmar "hecho" en falso). En
+  //     re-foco del mismo campo el valor previo se conserva → sin parpadeo.
+  const teamStarted =
+    !isOwner || (teamCounts != null && (teamCounts.others >= 1 || teamCounts.pending >= 1));
 
   const steps: StepperStep[] = [
     {
@@ -332,26 +440,50 @@ export default function InicioScreen() {
       ),
     },
     {
-      // Siguiente paso real: cargar el primer animal. El alta find-or-create es de C2 (todavía no
-      // existe), pero la tab "Animales" YA es navegable (stub con su propio CTA de alta), así que el
-      // CTA lleva ahí — NO un TODO muerto ni un botón sin acción.
-      state: 'active',
-      title: 'Cargá tu primer animal',
-      body: 'Empezá registrando los animales de tu rodeo desde la pestaña Animales.',
+      // Paso "Cargá tu primer animal" DRIVEADO por estado real (fix-loop 3): `done` cuando el campo
+      // activo ya tiene ≥1 animal (hasAnimals === true), `active` cuando todavía no. El rodeo SIEMPRE
+      // está hecho en la home (el RootGate garantiza ≥1 rodeo antes de renderizarla — ver el paso de
+      // rodeo arriba), así que no hace falta condicionar el `active` a rodeoDone: el único eje real
+      // de este paso es "¿hay animales?".
+      // Mientras el primer count carga (hasAnimals === null) el paso se muestra PENDIENTE: es el
+      // default honesto para alguien de quien todavía no sabemos si cargó animales (el bug que motivó
+      // este fix era el inverso — afirmar "pendiente" para SIEMPRE aunque ya hubiera animales; el peor
+      // error sería afirmar "hecho" en falso, que NO hacemos). En re-focos (volver de otra tab) el
+      // valor previo se conserva → sin parpadeo; el único flash posible es el mount frío inicial (1
+      // render, count head:true rápido). El CTA "Ir a Animales" queda disponible en AMBOS estados
+      // (mismo criterio que "Gestionar rodeos" del paso rodeo done): cuando está hecho sirve para
+      // seguir cargando; nunca es un botón muerto.
+      state: hasAnimals ? 'done' : 'active',
+      title: hasAnimals ? 'Cargaste tu primer animal' : 'Cargá tu primer animal',
+      body: hasAnimals
+        ? 'Ya tenés animales registrados en este campo. Seguí cargando desde la pestaña Animales.'
+        : 'Empezá registrando los animales de tu rodeo desde la pestaña Animales.',
       children: (
-        <Button variant="primary" fullWidth onPress={() => router.navigate('/(tabs)/animales')}>
+        <Button
+          variant={hasAnimals ? 'secondary' : 'primary'}
+          fullWidth
+          onPress={() => router.navigate('/(tabs)/animales')}
+        >
           Ir a Animales
         </Button>
       ),
     },
     {
-      state: 'future',
-      title: 'Invitá a tu vet o capataz',
-      body: 'Sumá miembros con permisos específicos para tu equipo.',
-      // CTA solo para el owner (el único que puede invitar, R5) → pantalla de equipo (/miembros).
+      // Paso "Invitá a tu vet o capataz" DRIVEADO por estado real (fix-loop 4): `done` cuando el campo
+      // ya tiene equipo (teamStarted), `active` cuando todavía no. Se rendea `done` igual que los pasos
+      // rodeo/animal (Stepper ✓ verde + título atenuado), consistencia visual. El CTA "Equipo" queda
+      // disponible en AMBOS estados para el owner (mismo criterio que los otros pasos done: cuando está
+      // hecho sirve para gestionar el equipo; nunca es un botón muerto). A un no-owner no se le ofrece el
+      // CTA (no puede invitar, R5) y su paso ya está `done` por rol.
+      state: teamStarted ? 'done' : 'active',
+      title: teamStarted ? 'Tu equipo está en marcha' : 'Invitá a tu vet o capataz',
+      body: teamStarted
+        ? 'Ya sumaste a tu equipo a este campo. Gestioná miembros y permisos cuando quieras.'
+        : 'Sumá miembros con permisos específicos para tu equipo.',
+      // CTA solo para el owner (el único que puede invitar/gestionar, R5) → pantalla de equipo (/miembros).
       children: canInvite ? (
         <Button variant="secondary" fullWidth onPress={() => router.push('/miembros')}>
-          Invitar al equipo
+          {teamStarted ? 'Gestionar equipo' : 'Invitar al equipo'}
         </Button>
       ) : undefined,
     },

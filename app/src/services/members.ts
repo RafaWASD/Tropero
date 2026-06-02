@@ -202,6 +202,66 @@ export async function loadMembers(
   return { ok: true, members };
 }
 
+// ─── Conteo liviano del equipo (home: paso "Invitá a tu vet o capataz" por estado real) ──
+
+/** Conteo liviano del equipo de un campo: otros miembros activos + invitaciones pendientes. */
+export type TeamCounts = { others: number; pending: number };
+
+export type CountTeamResult =
+  | { ok: true; counts: TeamCounts }
+  | { ok: false; error: { kind: 'network' | 'unknown'; message: string } };
+
+/**
+ * Cuenta, SIN traer listas completas, las dos señales de "equipo iniciado" de un campo, para drivear
+ * el paso "Invitá a tu vet o capataz" del Stepper de la home por estado REAL (en vez de hardcodearlo
+ * siempre pendiente):
+ *   - `others`  = user_roles activos del campo con `user_id != selfUserId` (otros miembros además del
+ *                 usuario actual). HEAD count (sin filas).
+ *   - `pending` = invitaciones status=pending del campo. HEAD count.
+ *
+ * RLS como barrera (0008), owner-céntrica — IMPORTANTE para interpretar el resultado:
+ *   - `user_roles_select` deja al OWNER ver TODAS las filas activas de su campo, pero a un NO-OWNER
+ *     solo la SUYA. Así, para un no-owner `others` SIEMPRE da 0 (no ve al owner ni a sus pares): el
+ *     llamador (la home) NO debe inferir "equipo no iniciado" de eso. Un no-owner que llegó a la home
+ *     ES en sí mismo evidencia de un equipo de ≥2 personas (alguien lo sumó) → la home trata "no-owner"
+ *     como equipo iniciado por su rol, sin depender de este conteo.
+ *   - `invitations` es owner-only (RLS): para un no-owner `pending` da 0. Idem: lo decide el rol.
+ * Por eso este helper es la fuente para el OWNER; para el no-owner el paso lo cierra el rol (ver la home).
+ *
+ * Multi-tenant (CLAUDE.md ppio 6): NUNCA hardcodea establishment_id ni selfUserId — ambos llegan del
+ * contexto del llamador. El `.eq('establishment_id', …)` es defensa en profundidad; la RLS es la barrera.
+ */
+export async function countTeam(
+  establishmentId: string,
+  selfUserId: string,
+): Promise<CountTeamResult> {
+  // Otros miembros activos (≠ usuario actual). HEAD count: solo el header Content-Range, sin filas.
+  const membersRes = await supabase
+    .from('user_roles')
+    .select('user_id', { count: 'exact', head: true })
+    .eq('establishment_id', establishmentId)
+    .eq('active', true)
+    .neq('user_id', selfUserId);
+  if (membersRes.error) {
+    return { ok: false, error: classifyQueryError(membersRes.error) };
+  }
+
+  // Invitaciones pendientes (owner-only por RLS → 0 para un no-owner). HEAD count.
+  const invitesRes = await supabase
+    .from('invitations')
+    .select('id', { count: 'exact', head: true })
+    .eq('establishment_id', establishmentId)
+    .eq('status', 'pending');
+  if (invitesRes.error) {
+    return { ok: false, error: classifyQueryError(invitesRes.error) };
+  }
+
+  return {
+    ok: true,
+    counts: { others: membersRes.count ?? 0, pending: invitesRes.count ?? 0 },
+  };
+}
+
 export type LoadPendingInvitationsResult =
   | { ok: true; invitations: PendingInvitation[] }
   | { ok: false; error: { kind: 'network' | 'unknown'; message: string } };

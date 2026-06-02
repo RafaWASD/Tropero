@@ -103,6 +103,13 @@ const EDITAR_PLANTILLA_ROUTE = 'editar-plantilla'; // editar plantilla (owner) �
 // deben re-rutearse al wizard. crear-rodeo entra acá también (crear un 2do rodeo desde la lista).
 const RODEO_DESTINATIONS = new Set([RODEOS_ROUTE, EDITAR_PLANTILLA_ROUTE, CREAR_RODEO_ROUTE]);
 
+// Destinos de C2 (animales): el alta find-or-create (R4) y la ficha del animal (R5). Son
+// navegación legítima desde la tab Animales con un rodeo YA existente (estado 'active' de rodeo)
+// y NO deben re-rutearse al wizard ni a (tabs). 'animal' es el top-segment de /animal/[id].
+const CREAR_ANIMAL_ROUTE = 'crear-animal'; // AnimalCreateScreen (R4)
+const ANIMAL_ROUTE = 'animal'; // ficha del animal /animal/[id] (R5)
+const ANIMAL_DESTINATIONS = new Set([CREAR_ANIMAL_ROUTE, ANIMAL_ROUTE]);
+
 /**
  * Gate unificado de navegación: auth (R1.3 / R7.*) + establecimiento (Fase 4: R6.4–R6.10).
  * Vive DENTRO de AuthProvider + EstablishmentProvider (usa useAuth/useEstablishment) y del
@@ -252,6 +259,9 @@ function RootGate() {
     // Destinos de C1 (rodeo): el wizard "Crear rodeo" (bloqueo total + crear 2do rodeo), la
     // gestión de rodeos y editar plantilla. Son navegación legítima del owner; no se re-rutean.
     const onRodeoDestination = RODEO_DESTINATIONS.has(top);
+    // Destinos de C2 (animales): el alta find-or-create (R4) y la ficha del animal (R5). Solo
+    // tienen sentido con un rodeo existente; no se re-rutean en estado 'active' con rodeo.
+    const onAnimalDestination = ANIMAL_DESTINATIONS.has(top);
 
     if (est.status === 'no_establishments') {
       if (top !== ONBOARDING_ROUTE && !onCrearCampo && !onFase5Destination) router.replace('/onboarding');
@@ -283,8 +293,11 @@ function RootGate() {
           inAuthFlow ||
           top === ONBOARDING_ROUTE ||
           top === CAMPO_PERDIDO_ROUTE;
-        // No de-strand de un destino de rodeo: el owner puede estar gestionando rodeos.
-        if (strandedOnGatingRoute && !onRodeoDestination) router.replace('/(tabs)');
+        // No de-strand de un destino de rodeo (gestión) ni de animales (alta/ficha): son
+        // navegación legítima desde Más / la tab Animales con un rodeo existente.
+        if (strandedOnGatingRoute && !onRodeoDestination && !onAnimalDestination) {
+          router.replace('/(tabs)');
+        }
       }
     }
 
@@ -322,6 +335,10 @@ function RootGate() {
       <Stack.Screen name="crear-rodeo" />
       <Stack.Screen name="rodeos" />
       <Stack.Screen name="editar-plantilla" />
+      {/* Spec 02 C2 — animales: alta find-or-create (R4) y ficha del animal (R5). Destinos
+          navegables desde la tab Animales con un rodeo existente (no se re-rutean al wizard). */}
+      <Stack.Screen name="crear-animal" />
+      <Stack.Screen name="animal/[id]" />
     </Stack>
   );
 }

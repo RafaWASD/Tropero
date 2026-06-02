@@ -99,3 +99,12 @@ export async function waitForMisCampos(page: Page): Promise<void> {
   // Título "Mis campos" (heading) — hay también el accesibilidad-label del botón "Crear campo".
   await expect(page.getByText('Mis campos', { exact: true })).toBeVisible({ timeout: 30_000 });
 }
+
+/**
+ * Navega a la tab "Animales" (puerta manual de BUSCAR ANIMAL, spec 09 R1) y espera el buscador
+ * permanente (ancla única de la pantalla). Reusa gotoTab (esquiva el FAB que intercepta labels).
+ */
+export async function gotoAnimales(page: Page): Promise<void> {
+  const searchBar = page.getByLabel('Buscar animal por caravana o número', { exact: true });
+  await gotoTab(page, 'Animales', searchBar);
+}

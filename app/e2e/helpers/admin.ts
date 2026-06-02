@@ -176,16 +176,72 @@ export async function seedRodeo(
 /**
  * Conveniencia: siembra un establishment con rol owner activo PARA `ownerId` Y un rodeo bovino/cría,
  * de una. Es el estado de partida más común desde C1 (un usuario que aterriza en home, no en el
- * bloqueo total de rodeo). Devuelve el establishmentId.
+ * bloqueo total de rodeo). Devuelve { establishmentId, rodeoId, systemId }.
  */
 export async function seedEstablishmentWithRodeo(
   ownerId: string,
   name: string,
   opts: { province?: string; city?: string | null } = {},
+): Promise<{ establishmentId: string; rodeoId: string }> {
+  const establishmentId = await seedEstablishment(ownerId, name, opts);
+  const rodeoId = await seedRodeo(establishmentId);
+  return { establishmentId, rodeoId };
+}
+
+/**
+ * Siembra un animal (animals + animal_profiles) en un rodeo, vía service_role (bypassea RLS).
+ * Necesario para el test "buscar un animal EXISTENTE → ficha" (C2). Resuelve species/system/category
+ * por code (no hardcodea UUIDs). La categoría inicial se computa simple por sexo (como el alta real):
+ * macho → torito, hembra → vaquillona (sin fecha de nacimiento). El animal se borra en cascada al
+ * borrar el establishment (FK on delete cascade) → el cleanup de establishments ya lo cubre.
+ *
+ * Devuelve el animal_profile_id (lo que la ficha y la lista usan como key).
+ */
+export async function seedAnimal(
+  establishmentId: string,
+  rodeoId: string,
+  opts: { idv?: string | null; visualAlt?: string | null; tag?: string | null; sex?: 'male' | 'female' } = {},
 ): Promise<string> {
-  const estId = await seedEstablishment(ownerId, name, opts);
-  await seedRodeo(estId);
-  return estId;
+  const sex = opts.sex ?? 'female';
+
+  // species/system del rodeo.
+  const { data: rodeo, error: rErr } = await admin
+    .from('rodeos')
+    .select('species_id, system_id')
+    .eq('id', rodeoId)
+    .single();
+  if (rErr) throw new Error(`seedAnimal rodeo: ${rErr.message}`);
+
+  const categoryCode = sex === 'male' ? 'torito' : 'vaquillona';
+  const { data: cat, error: cErr } = await admin
+    .from('categories_by_system')
+    .select('id')
+    .eq('system_id', rodeo.system_id)
+    .eq('code', categoryCode)
+    .single();
+  if (cErr) throw new Error(`seedAnimal category: ${cErr.message}`);
+
+  const animalId = randomUUID();
+  const animalPayload: Record<string, unknown> = { id: animalId, sex, species_id: rodeo.species_id };
+  if (opts.tag) animalPayload.tag_electronic = opts.tag;
+  const { error: aErr } = await admin.from('animals').insert(animalPayload);
+  if (aErr) throw new Error(`seedAnimal animals: ${aErr.message}`);
+
+  const profileId = randomUUID();
+  const profilePayload: Record<string, unknown> = {
+    id: profileId,
+    animal_id: animalId,
+    establishment_id: establishmentId,
+    rodeo_id: rodeoId,
+    category_id: cat.id,
+    status: 'active',
+  };
+  if (opts.idv) profilePayload.idv = opts.idv;
+  if (opts.visualAlt) profilePayload.visual_id_alt = opts.visualAlt;
+  const { error: pErr } = await admin.from('animal_profiles').insert(profilePayload);
+  if (pErr) throw new Error(`seedAnimal animal_profiles: ${pErr.message}`);
+
+  return profileId;
 }
 
 /**

@@ -16,6 +16,8 @@ import { Pressable } from 'react-native';
 import { getTokenValue, Text, View, XStack, YStack } from 'tamagui';
 import { ChevronRight } from 'lucide-react-native';
 
+import { CategoryBadge } from './CategoryBadge';
+
 // ─── Tipos públicos ───────────────────────────────────────────────────────────
 
 export type AnimalSex = 'male' | 'female';
@@ -206,16 +208,22 @@ export function AnimalRow({
             ) : null}
           </XStack>
 
-          {/* Subtítulo: categoría · rodeo (el sexo ya está en el avatar; no se repite). */}
-          <Text
-            fontFamily="$body"
-            fontSize="$3"
-            fontWeight="400"
-            color="$textMuted"
-            numberOfLines={1}
-          >
-            {`${category} · ${rodeo}`}
-          </Text>
+          {/* Subtítulo: badge de categoría con COLOR (firma verde RAFAQ) + rodeo muted. Antes era
+              "categoría · rodeo" en gris plano (genérico); el badge le da jerarquía e identidad. */}
+          <XStack alignItems="center" gap="$2" minWidth={0}>
+            <CategoryBadge label={category} size="sm" />
+            <Text
+              fontFamily="$body"
+              fontSize="$3"
+              fontWeight="400"
+              color="$textMuted"
+              numberOfLines={1}
+              flexShrink={1}
+              minWidth={0}
+            >
+              {rodeo}
+            </Text>
+          </XStack>
         </YStack>
 
         {/* Derecha: señal de estado. Sin tag → chip neutro "sin caravana"; con tag → chevron

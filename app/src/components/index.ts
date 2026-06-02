@@ -32,5 +32,7 @@ export type {
   AnimalSex,
   AnimalStatus,
 } from './AnimalRow';
+export { CategoryBadge } from './CategoryBadge';
+export type { CategoryBadgeProps } from './CategoryBadge';
 export { FieldTemplateToggleList } from './FieldTemplateToggleList';
 export type { FieldTemplateToggleListProps } from './FieldTemplateToggleList';
