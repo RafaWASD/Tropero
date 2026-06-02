@@ -8,7 +8,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { switchA11y, buttonA11y } from './a11y.ts';
+import { switchA11y, buttonA11y, labelA11y } from './a11y.ts';
 
 test('switchA11y web: emite ARIA DOM-válido, SIN accessibility* (no filtra al DOM)', () => {
   const props = switchA11y('web', { label: 'Peso al nacer', checked: true, disabled: false });
@@ -78,4 +78,23 @@ test('buttonA11y native: accessibilityLabel + role + state', () => {
 test('buttonA11y native sin disabled/selected: sin accessibilityState', () => {
   const props = buttonA11y('ios', { label: 'Volver' });
   assert.deepEqual(props, { accessibilityRole: 'button', accessibilityLabel: 'Volver' });
+});
+
+// ─── labelA11y: elemento DISPLAY etiquetado (chip/badge), sobre primitivo de Tamagui ──────
+
+test('labelA11y web: SOLO aria-label, SIN accessibility* (no filtra al DOM en un primitivo Tamagui)', () => {
+  const props = labelA11y('web', 'Categoría Vaquillona');
+  assert.deepEqual(props, { 'aria-label': 'Categoría Vaquillona' });
+  // Garantía dura: ninguna prop accessibility* cruda (la que React no reconoce en el <div>).
+  for (const key of Object.keys(props)) {
+    assert.ok(!key.startsWith('accessibility'), `web no debe emitir ${key}`);
+  }
+});
+
+test('labelA11y native: SOLO accessibilityLabel, SIN atributos ARIA crudos', () => {
+  const props = labelA11y('android', 'Sexo Hembra');
+  assert.deepEqual(props, { accessibilityLabel: 'Sexo Hembra' });
+  for (const key of Object.keys(props)) {
+    assert.ok(!key.startsWith('aria-') && key !== 'role', `native no debe emitir ${key}`);
+  }
 });

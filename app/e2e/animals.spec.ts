@@ -66,8 +66,9 @@ test('alta desde empty → el animal aparece en la lista y abre la ficha', async
   // valor visual cargado (aparece en el hero Y en la fila → .first()).
   await expect(page.getByText('Identificación', { exact: true })).toBeVisible({ timeout: 20_000 });
   await expect(page.getByText(visualLabel, { exact: true }).first()).toBeVisible();
-  // Teaser cálido del Historial (C3, fix-loop FIX 1) — reemplaza el "Próximamente" gris.
-  await expect(page.getByText('Historial de eventos', { exact: true })).toBeVisible();
+  // Sección Historial (C3.1) — reemplaza el teaser "Próximamente". Un animal recién creado tiene
+  // solo el `initial` → empty/sparse cálido.
+  await expect(page.getByText('Historial', { exact: true })).toBeVisible();
 
   // Volvemos a la lista. La ficha está FUERA del grupo (tabs) (es un Stack screen), así que no
   // tiene la bottom-nav: usamos su botón "Volver" para regresar a la tab Animales (el create se

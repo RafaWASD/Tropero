@@ -67,6 +67,13 @@ export type AnimalStatus = 'active' | 'sold' | 'dead' | 'transferred';
 export type AnimalDetail = {
   profileId: string;
   animalId: string;
+  /**
+   * establishment_id del PERFIL (C3.1). Necesario para la observación libre (animal_events): su
+   * establishment_id está denormalizado y un trigger valida que coincida con el establishment del
+   * perfil → se deriva de ACÁ (el perfil), no del contexto activo (el usuario podría tener el campo
+   * B activo mientras mira la ficha del campo A).
+   */
+  establishmentId: string;
   idv: string | null;
   visualIdAlt: string | null;
   tagElectronic: string | null;
@@ -504,6 +511,7 @@ export async function createAnimal(
 type ProfileDetailRow = {
   id: string;
   animal_id: string;
+  establishment_id: string;
   idv: string | null;
   visual_id_alt: string | null;
   category_id: string;
@@ -531,7 +539,7 @@ export async function fetchAnimalDetail(profileId: string): Promise<ServiceResul
   const { data, error } = await supabase
     .from('animal_profiles')
     .select(
-      'id, animal_id, idv, visual_id_alt, category_id, category_override, breed, coat_color,' +
+      'id, animal_id, establishment_id, idv, visual_id_alt, category_id, category_override, breed, coat_color,' +
         ' entry_date, entry_weight, status, rodeo_id, management_group_id,' +
         ' animals!inner ( tag_electronic, sex, birth_date ),' +
         ' rodeos!inner ( name ),' +
@@ -552,6 +560,7 @@ export async function fetchAnimalDetail(profileId: string): Promise<ServiceResul
     value: {
       profileId: r.id,
       animalId: r.animal_id,
+      establishmentId: r.establishment_id,
       idv: r.idv,
       visualIdAlt: r.visual_id_alt,
       tagElectronic: r.animals?.tag_electronic ?? null,

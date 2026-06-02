@@ -12,6 +12,11 @@
 
 import type { AnimalSex } from './animal-category';
 
+// Tope EXCLUSIVO de peso de bovino: < 10000 (parte entera ≤ 4 cifras). Mismo valor que el
+// WEIGHT_KG_LIMIT de event-input.ts; se define local porque los utils PUROS de la suite node:test no
+// hacen value-import entre siblings (el runner los carga sin bundler — ver nota en event-input.ts).
+const WEIGHT_KG_LIMIT = 10000;
+
 /** Estado del form de alta (lo que el screen mantiene). Identificadores aparte (precargado + 2). */
 export type AnimalCreateForm = {
   sex: AnimalSex | null;
@@ -76,12 +81,15 @@ export function validateAnimalCreate(
     }
   }
 
-  // entry_weight: si está presente (no vacío), numérico > 0.
+  // entry_weight: si está presente (no vacío), numérico > 0 y parte entera ≤ 4 cifras (ningún bovino
+  // llega a 5 cifras / 10.000 kg). El sanitizeWeightInput ya acota la parte entera en vivo; backstop.
   const w = form.entryWeight.trim();
   if (w.length > 0) {
     const n = parseWeight(w);
     if (n === null || n <= 0) {
       errors.entryWeight = 'El peso de entrada tiene que ser un número mayor a 0.';
+    } else if (n >= WEIGHT_KG_LIMIT) {
+      errors.entryWeight = 'El peso no puede tener más de 4 cifras.';
     }
   }
 

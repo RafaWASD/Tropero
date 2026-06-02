@@ -108,7 +108,8 @@ const RODEO_DESTINATIONS = new Set([RODEOS_ROUTE, EDITAR_PLANTILLA_ROUTE, CREAR_
 // y NO deben re-rutearse al wizard ni a (tabs). 'animal' es el top-segment de /animal/[id].
 const CREAR_ANIMAL_ROUTE = 'crear-animal'; // AnimalCreateScreen (R4)
 const ANIMAL_ROUTE = 'animal'; // ficha del animal /animal/[id] (R5)
-const ANIMAL_DESTINATIONS = new Set([CREAR_ANIMAL_ROUTE, ANIMAL_ROUTE]);
+const AGREGAR_EVENTO_ROUTE = 'agregar-evento'; // wizard "Agregar evento" desde la ficha (C3.1)
+const ANIMAL_DESTINATIONS = new Set([CREAR_ANIMAL_ROUTE, ANIMAL_ROUTE, AGREGAR_EVENTO_ROUTE]);
 
 /**
  * Gate unificado de navegación: auth (R1.3 / R7.*) + establecimiento (Fase 4: R6.4–R6.10).
@@ -339,6 +340,8 @@ function RootGate() {
           navegables desde la tab Animales con un rodeo existente (no se re-rutean al wizard). */}
       <Stack.Screen name="crear-animal" />
       <Stack.Screen name="animal/[id]" />
+      {/* Spec 02 C3.1 — wizard "Agregar evento" desde la ficha (peso / condición / observación). */}
+      <Stack.Screen name="agregar-evento" />
     </Stack>
   );
 }

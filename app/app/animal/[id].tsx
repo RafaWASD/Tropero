@@ -19,12 +19,19 @@ import { Platform, Pressable } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
-import { ChevronLeft, ClipboardList, Clock, Mars, Tag, Venus } from 'lucide-react-native';
+import { ChevronLeft, ClipboardList, Clock, Gauge, Mars, Plus, Tag, Venus } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
 
-import { Card, CategoryBadge, InfoNote, FormError } from '@/components';
+import { Button, Card, CategoryBadge, InfoNote, FormError, TimelineEvent } from '@/components';
 import { fetchAnimalDetail, type AnimalDetail } from '@/services/animals';
-import { buttonA11y } from '@/utils/a11y';
+import { fetchTimeline, type TimelineItem } from '@/services/events';
+import {
+  deriveCurrentState,
+  formatEventDate,
+  type CurrentState,
+} from '@/utils/event-timeline';
+import { formatConditionScore } from '@/utils/event-input';
+import { buttonA11y, labelA11y } from '@/utils/a11y';
 
 export default function AnimalDetailScreen() {
   const router = useRouter();
@@ -33,6 +40,8 @@ export default function AnimalDetailScreen() {
   const profileId = typeof params.id === 'string' ? params.id : null;
 
   const [detail, setDetail] = useState<AnimalDetail | null>(null);
+  const [timeline, setTimeline] = useState<TimelineItem[] | null>(null);
+  const [timelineError, setTimelineError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -44,21 +53,50 @@ export default function AnimalDetailScreen() {
     }
     setLoading(true);
     setError(null);
-    const r = await fetchAnimalDetail(profileId);
+    setTimelineError(null);
+    // Detalle + timeline en paralelo (R10/R14): un solo loading para la ficha entera. El timeline
+    // tiene su propio error blando (si falla, la cabecera sigue mostrándose).
+    const [detailR, timelineR] = await Promise.all([
+      fetchAnimalDetail(profileId),
+      fetchTimeline(profileId),
+    ]);
     setLoading(false);
-    if (!r.ok) {
-      setError(r.error.kind === 'network' ? 'Sin conexión: no pudimos cargar el animal.' : r.error.message);
+    if (!detailR.ok) {
+      setError(
+        detailR.error.kind === 'network'
+          ? 'Sin conexión: no pudimos cargar el animal.'
+          : detailR.error.message,
+      );
       return;
     }
-    setDetail(r.value);
+    setDetail(detailR.value);
+    if (timelineR.ok) {
+      setTimeline(timelineR.value);
+    } else {
+      setTimeline(null);
+      setTimelineError(
+        timelineR.error.kind === 'network'
+          ? 'Sin conexión: no pudimos cargar el historial.'
+          : 'No pudimos cargar el historial.',
+      );
+    }
   }, [profileId]);
 
-  // Recargar al enfocar (volver de C3 cuando exista, o tras crear).
+  // Recargar al enfocar (volver de agregar-evento, o tras crear) → el timeline se refresca y el
+  // evento nuevo aparece arriba sin parpadeo (un solo fetch al re-enfocar).
   useFocusEffect(
     useCallback(() => {
       void load();
     }, [load]),
   );
+
+  const goToAddEvent = useCallback(() => {
+    if (!detail) return;
+    router.push({
+      pathname: '/agregar-evento',
+      params: { profileId: detail.profileId, establishmentId: detail.establishmentId },
+    });
+  }, [detail, router]);
 
   const muted = getTokenValue('$textMuted', 'color');
 
@@ -112,8 +150,18 @@ export default function AnimalDetailScreen() {
               {detail.coatColor ? <AttributeRow label="Pelaje" value={detail.coatColor} /> : null}
             </DetailSection>
 
-            {/* Teaser cálido del Historial — C3 (Próximamente). */}
-            <TimelineTeaser />
+            {/* Estado actual (fix-loop 2 FIX C): el VALOR VIGENTE de cada medición tipada (peso /
+                condición corporal) = el del último evento de ese tipo. Es un ATRIBUTO del animal,
+                no solo historia. El timeline de abajo sigue siendo la auditoría completa. */}
+            <CurrentStateSection timeline={timeline} />
+
+            {/* Historial real (C3.1): riel de eventos + CTA "Agregar evento". */}
+            <HistorySection
+              timeline={timeline}
+              error={timelineError}
+              onAddEvent={goToAddEvent}
+              onRetry={() => void load()}
+            />
           </>
         ) : null}
       </ScrollView>
@@ -155,7 +203,7 @@ function AnimalHero({ detail }: { detail: AnimalDetail }) {
       {/* Fila de chips de identidad: categoría (verde) · sexo (ícono color) · rodeo. */}
       <XStack width="100%" alignItems="center" gap="$2" flexWrap="wrap">
         <CategoryBadge label={categoryLabel} manual={detail.categoryOverride} size="md" />
-        <XStack alignItems="center" gap="$1" accessibilityLabel={`Sexo ${sexLabel}`}>
+        <XStack alignItems="center" gap="$1" {...labelA11y(Platform.OS, `Sexo ${sexLabel}`)}>
           <SexIcon size={18} color={primary} strokeWidth={2.5} />
           <Text fontFamily="$body" fontSize="$4" fontWeight="500" color="$textMuted">
             {sexLabel}
@@ -245,32 +293,192 @@ function AttributeRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-// ─── Teaser cálido del Historial — C3 (Próximamente) ──────────────────────────────────
+// ─── Sección "Estado actual" (FIX C): valor vigente de cada medición tipada ───────────
+//
+// El peso/condición actuales son DATOS del animal (el del evento más reciente de cada tipo), no solo
+// historia. Esta sección los muestra como atributos; el Historial de abajo es la auditoría completa.
+// Se muestra SIEMPRE (enseña qué se trackea): si no hay evento de un tipo → "Sin registrar" (muted,
+// consistente con los "—" del resto de la ficha).
+//
+// Arquitectura a futuro (C3.2): escala a estado reproductivo (preñez) y última sanidad cuando esos
+// eventos se puedan cargar. `deriveCurrentState` es el punto de extensión (suma campos al CurrentState
+// y acá se agregan filas). La observación libre NO va acá (solo timeline: no tiene "valor actual").
+function CurrentStateSection({ timeline }: { timeline: TimelineItem[] | null }) {
+  // `now` para el timestamp relativo de cada valor (un Date por render, determinístico acá).
+  const now = new Date();
+  const state: CurrentState = deriveCurrentState(timeline);
+
+  const weightValue = state.weight
+    ? `${formatKg(state.weight.kg)} kg · ${formatEventDate(state.weight.date, now, { dateOnly: true })}`
+    : null;
+  const scoreValue = state.conditionScore
+    ? `${formatConditionScore(state.conditionScore.score)} / 5 · ${formatEventDate(state.conditionScore.date, now, { dateOnly: true })}`
+    : null;
+
+  return (
+    <DetailSection icon={Gauge} title="Estado actual">
+      <CurrentStateRow label="Peso actual" value={weightValue} />
+      <CurrentStateRow label="Condición corporal" value={scoreValue} />
+    </DetailSection>
+  );
+}
 
 /**
- * Teaser del historial de eventos: card $greenLight suave con un reloj $primary + copy cálido. NO un
- * cuadro gris muerto (el "Próximamente" plano anterior). Comunica valor por venir, con la marca.
+ * Fila de "Estado actual": label muted arriba, valor abajo. Si no hay valor → "Sin registrar" muted
+ * (mismo lenguaje que los "—" del resto de la ficha). El valor presente va con su timestamp embebido
+ * (ej. "320 kg · Hoy"). Reusa el patrón de AttributeRow para coherencia visual.
  */
-function TimelineTeaser() {
-  const primary = getTokenValue('$primary', 'color');
+function CurrentStateRow({ label, value }: { label: string; value: string | null }) {
   return (
-    <YStack
-      width="100%"
-      backgroundColor="$greenLight"
-      borderRadius="$card"
-      padding="$4"
-      gap="$2"
-    >
-      <XStack alignItems="center" gap="$2">
-        <Clock size={20} color={primary} strokeWidth={2.5} />
-        <Text fontFamily="$body" fontSize="$5" fontWeight="600" color="$primary">
-          Historial de eventos
+    <YStack gap="$1">
+      <Text fontFamily="$body" fontSize="$3" fontWeight="500" color="$textMuted">
+        {label}
+      </Text>
+      {value ? (
+        <Text
+          fontFamily="$body"
+          fontSize="$5"
+          fontWeight="600"
+          color="$textPrimary"
+          numberOfLines={1}
+          minWidth={0}
+        >
+          {value}
+        </Text>
+      ) : (
+        <Text fontFamily="$body" fontSize="$5" fontWeight="500" color="$textMuted">
+          Sin registrar
+        </Text>
+      )}
+    </YStack>
+  );
+}
+
+/** Formatea kg sin decimales innecesarios ("320.00" → "320", "320.50" → "320,5"). Espeja el de
+ * TimelineEvent (el riel y el estado actual muestran el peso igual). */
+function formatKg(n: number): string {
+  if (Number.isInteger(n)) return String(n);
+  return n.toFixed(2).replace(/0+$/, '').replace(/\.$/, '').replace('.', ',');
+}
+
+// ─── Sección Historial (C3.1): riel de eventos + CTA "Agregar evento" ─────────────────
+
+/**
+ * Historial de eventos del animal (R10/R14). Header "Historial" + botón primario "Agregar evento"
+ * (zona pulgar, ≥$touchMin). Debajo, el riel de TimelineEvent. Estados:
+ *   - error blando → FormError + reintentar (la cabecera de la ficha ya se mostró).
+ *   - sparse/empty → si el único evento es el `initial` de categoría (o no hay ninguno), un empty
+ *     cálido $greenLight invita a cargar el primer evento (el timeline NUNCA está 100% vacío:
+ *     siempre hay al menos el `initial`, pero un animal recién creado "se siente" vacío).
+ *   - con eventos → la lista, el más reciente arriba.
+ */
+function HistorySection({
+  timeline,
+  error,
+  onAddEvent,
+  onRetry,
+}: {
+  timeline: TimelineItem[] | null;
+  error: string | null;
+  onAddEvent: () => void;
+  onRetry: () => void;
+}) {
+  const primary = getTokenValue('$primary', 'color');
+  // `now` se calcula UNA vez por render de la sección (no por fila) — determinístico dentro del render.
+  const now = new Date();
+
+  // "Sparse": no hay eventos, o el único que hay es el `initial` (el alta). El operario aún no
+  // cargó nada propio → mostramos un empty cálido en vez de un riel de un solo nodo solitario.
+  const isSparse =
+    timeline != null &&
+    (timeline.length === 0 ||
+      (timeline.length === 1 &&
+        timeline[0].kind === 'category_change' &&
+        timeline[0].reason === 'initial'));
+
+  return (
+    <YStack width="100%" gap="$3">
+      <XStack width="100%" alignItems="center" gap="$2">
+        <View
+          width={28}
+          height={28}
+          borderRadius="$pill"
+          backgroundColor="$greenLight"
+          alignItems="center"
+          justifyContent="center"
+        >
+          <Clock size={16} color={primary} strokeWidth={2.5} />
+        </View>
+        <Text flex={1} minWidth={0} fontFamily="$body" fontSize="$6" fontWeight="600" color="$textPrimary">
+          Historial
         </Text>
       </XStack>
-      <Text fontFamily="$body" fontSize="$3" fontWeight="400" color="$primary">
-        Pronto vas a ver acá la cronología del animal —pesos, sanidad, reproducción— y vas a poder
-        agregar eventos.
-      </Text>
+
+      <AddEventButton onPress={onAddEvent} />
+
+      {error ? (
+        <YStack gap="$2">
+          <FormError message={error} />
+          <Button variant="secondary" fullWidth onPress={onRetry}>
+            Reintentar
+          </Button>
+        </YStack>
+      ) : timeline == null ? (
+        <InfoNote>Cargando el historial…</InfoNote>
+      ) : isSparse ? (
+        <YStack width="100%" backgroundColor="$greenLight" borderRadius="$card" padding="$4" gap="$2">
+          <Text fontFamily="$body" fontSize="$5" fontWeight="600" color="$primary">
+            Todavía no hay eventos
+          </Text>
+          <Text fontFamily="$body" fontSize="$3" fontWeight="400" color="$primary">
+            Cargá el primer evento de este animal —un pesaje, su condición corporal o una
+            observación— y va a aparecer acá arriba.
+          </Text>
+        </YStack>
+      ) : (
+        <Card gap="$1">
+          {timeline.map((item, i) => (
+            <TimelineEvent
+              key={`${item.kind}-${item.eventId}`}
+              item={item}
+              isLast={i === timeline.length - 1}
+              now={now}
+            />
+          ))}
+        </Card>
+      )}
     </YStack>
+  );
+}
+
+// CTA primario "Agregar evento" con ícono lucide (el Button canónico solo acepta `children: string`,
+// así que para el ícono + texto armamos el botón a mano replicando su forma con TOKENS — pill,
+// $touchMin, $primary, texto blanco). a11y por helper (web=ARIA, native=accessibility*) — NUNCA
+// accessibilityLabel crudo en el Pressable de RN-web (BUG del LogBox que tapa la pantalla, lección C1).
+function AddEventButton({ onPress }: { onPress: () => void }) {
+  const white = getTokenValue('$white', 'color');
+  return (
+    <Pressable
+      style={{ width: '100%' }}
+      onPress={onPress}
+      {...buttonA11y(Platform.OS, { label: 'Agregar evento' })}
+    >
+      <XStack
+        width="100%"
+        minHeight="$touchMin"
+        alignItems="center"
+        justifyContent="center"
+        gap="$2"
+        borderRadius="$pill"
+        backgroundColor="$primary"
+        paddingHorizontal="$5"
+        pressStyle={{ backgroundColor: '$primaryPress' }}
+      >
+        <Plus size={20} color={white} strokeWidth={2.5} />
+        <Text fontFamily="$body" fontSize="$5" fontWeight="600" color="$white">
+          Agregar evento
+        </Text>
+      </XStack>
+    </Pressable>
   );
 }

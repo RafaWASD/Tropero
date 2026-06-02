@@ -20,6 +20,10 @@ export const IDV_MAX_LENGTH = 20;
 export const VISUAL_MAX_LENGTH = 30;
 // Fecha ISO 'YYYY-MM-DD' = 10 caracteres con los guiones.
 const DATE_MASK_LENGTH = 10;
+// Peso de bovino: máximo 4 cifras ENTERAS. El bovino más pesado registrado pesó 1.740 kg; ninguno
+// llegó a 5 cifras (10.000 kg). Los decimales (ej. 320,5) NO se limitan. Compartido por el peso de
+// entrada del alta (C2) y el evento de peso (C3): ambos son pesos de bovino, el cap aplica igual.
+export const WEIGHT_INTEGER_MAX_DIGITS = 4;
 
 /**
  * Caravana electrónica: solo dígitos, máximo 15 (FDX-B). Descarta cualquier no-dígito que el
@@ -70,22 +74,34 @@ export function maskDateInput(raw: string): string {
 
 /**
  * Peso (decimal): dígitos + UN solo separador decimal (coma o punto, es-AR). Descarta letras y
- * separadores extra. No fuerza el valor > 0 (eso lo valida parseWeight/animal-form al submit), solo
- * impide tipear "dasdas".
+ * separadores extra. La parte ENTERA se acota a WEIGHT_INTEGER_MAX_DIGITS (4): ningún bovino llega a
+ * 5 cifras (ver constante). Los decimales NO se limitan. No fuerza el valor > 0 (eso lo valida
+ * parseWeight/animal-form/validateWeight al submit), solo impide tipear "dasdas".
  *
  *   "180"     → "180"
  *   "320,5"   → "320,5"
  *   "32.5"    → "32.5"
+ *   "1740"    → "1740"
+ *   "12345"   → "1234"  (parte entera acotada a 4 dígitos)
+ *   "99999"   → "9999"
+ *   "12345,5" → "1234,5" (cap solo sobre los enteros; los decimales se mantienen)
  *   "1,2,3"   → "1,23"   (un solo separador; el resto de comas se descartan)
  *   "abc12"   → "12"
  *   ",5"      → ",5"     (separador inicial permitido; el validador lo resuelve)
  */
 export function sanitizeWeightInput(raw: string): string {
-  // Quedarnos con dígitos y separadores; luego colapsar a UN solo separador (el primero).
+  // Quedarnos con dígitos y separadores; luego colapsar a UN solo separador (el primero) y acotar la
+  // parte entera (los dígitos ANTES del separador) a WEIGHT_INTEGER_MAX_DIGITS.
   let seenSeparator = false;
   let out = '';
+  let integerDigits = 0;
   for (const ch of raw) {
     if (ch >= '0' && ch <= '9') {
+      // Antes del separador: contamos enteros y cortamos al tope. Después: los decimales no se limitan.
+      if (!seenSeparator) {
+        if (integerDigits >= WEIGHT_INTEGER_MAX_DIGITS) continue; // 5to+ dígito entero → descartado
+        integerDigits += 1;
+      }
       out += ch;
     } else if ((ch === ',' || ch === '.') && !seenSeparator) {
       seenSeparator = true;

@@ -57,6 +57,9 @@ type NativeButtonProps = {
   accessibilityState?: { disabled?: boolean; selected?: boolean };
 };
 
+type WebLabelProps = { 'aria-label': string };
+type NativeLabelProps = { accessibilityLabel: string };
+
 /** Props a11y de un control tipo switch (toggle), DOM-válidas en web. */
 export function switchA11y(
   platform: A11yPlatform,
@@ -98,4 +101,27 @@ export function buttonA11y(
     if (input.selected !== undefined) native.accessibilityState.selected = input.selected;
   }
   return native;
+}
+
+/**
+ * Props a11y de un elemento DISPLAY etiquetado pero NO interactivo (un chip, un badge, una barra de
+ * progreso de solo lectura, un grupo de íconos con significado). Complementa buttonA11y/switchA11y:
+ * esos son para CONTROLES (role button/switch); este es para elementos que solo necesitan un nombre
+ * accesible, sin rol de control.
+ *
+ * POR QUÉ: los primitivos de Tamagui (`View`/`XStack`/`YStack`/`Text`/`Stack`) NO mapean
+ * `accessibilityLabel` → `aria-label` en web (a diferencia del `Pressable`/`TextInput` de RN, que SÍ
+ * lo mapean). Pasarles `accessibilityLabel` crudo lo filtra como atributo DOM desconocido → React
+ * tira "does not recognize the `accessibilityLabel` prop on a DOM element" (misma clase que el bug
+ * del overlay de C1). Este helper emite el atributo correcto por plataforma: en web SOLO `aria-label`
+ * (DOM-válido), en native SOLO `accessibilityLabel`.
+ */
+export function labelA11y(
+  platform: A11yPlatform,
+  label: string,
+): WebLabelProps | NativeLabelProps {
+  if (platform === 'web') {
+    return { 'aria-label': label };
+  }
+  return { accessibilityLabel: label };
 }

@@ -36,3 +36,5 @@ export { CategoryBadge } from './CategoryBadge';
 export type { CategoryBadgeProps } from './CategoryBadge';
 export { FieldTemplateToggleList } from './FieldTemplateToggleList';
 export type { FieldTemplateToggleListProps } from './FieldTemplateToggleList';
+export { TimelineEvent } from './TimelineEvent';
+export type { TimelineEventProps } from './TimelineEvent';

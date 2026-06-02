@@ -92,3 +92,19 @@ test('FIX2 sanitizeWeightInput: dígitos + UN separador, descarta letras', () =>
   // separador inicial permitido (el validador de submit lo resuelve)
   assert.equal(sanitizeWeightInput(',5'), ',5');
 });
+
+test('FIXB sanitizeWeightInput: parte entera acotada a 4 dígitos (ningún bovino llega a 5 cifras)', () => {
+  // 5+ dígitos enteros → recortado a 4 (bug que Raf marcó: aceptaba 5 cifras).
+  assert.equal(sanitizeWeightInput('12345'), '1234');
+  assert.equal(sanitizeWeightInput('99999'), '9999');
+  // El récord histórico (1.740 kg) y un peso normal NO se tocan.
+  assert.equal(sanitizeWeightInput('1740'), '1740');
+  assert.equal(sanitizeWeightInput('320,5'), '320,5');
+  // 9999 (4 cifras, máximo) intacto.
+  assert.equal(sanitizeWeightInput('9999'), '9999');
+  // El cap es SOLO sobre la parte entera: los decimales se mantienen aunque haya 5+ dígitos tipeados.
+  assert.equal(sanitizeWeightInput('12345,5'), '1234,5');
+  assert.equal(sanitizeWeightInput('99999,99'), '9999,99');
+  // Dígitos enteros de más DESPUÉS de ya tener 4 + separador no rompen el orden.
+  assert.equal(sanitizeWeightInput('1234567'), '1234');
+});

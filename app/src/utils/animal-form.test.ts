@@ -83,6 +83,16 @@ test('entry_weight > 0 si presente; vacío OK; 0/negativo/no-numérico → error
   assert.ok(validateAnimalCreate(base({ entryWeight: 'mucho' }), TODAY).entryWeight);
 });
 
+test('FIXB entry_weight: máximo 4 cifras (9999 OK; 10000 rechazado)', () => {
+  // 9999 (límite de 4 cifras) y el récord histórico (1.740) pasan.
+  assert.equal(validateAnimalCreate(base({ entryWeight: '9999' }), TODAY).entryWeight, null);
+  assert.equal(validateAnimalCreate(base({ entryWeight: '1740' }), TODAY).entryWeight, null);
+  // 10000 (5 cifras) → error de dominio.
+  const err = validateAnimalCreate(base({ entryWeight: '10000' }), TODAY).entryWeight;
+  assert.ok(err);
+  assert.match(String(err), /4 cifras/);
+});
+
 test('parseWeight: coma o punto decimal, rechaza basura', () => {
   assert.equal(parseWeight('320'), 320);
   assert.equal(parseWeight('320,5'), 320.5);

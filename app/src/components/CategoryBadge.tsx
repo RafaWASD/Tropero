@@ -13,7 +13,10 @@
 // Cero hardcode (ADR-023 §4): tokens. `size` controla densidad (la fila de la lista usa 'sm', el
 // hero de la ficha usa 'md').
 
+import { Platform } from 'react-native';
 import { Text, View, XStack } from 'tamagui';
+
+import { labelA11y } from '../utils/a11y';
 
 export type CategoryBadgeProps = {
   /** Etiqueta de categoría ya resuelta (es-AR), ej. "Vaquillona". Si vacía → no se renderiza. */
@@ -38,7 +41,9 @@ export function CategoryBadge({ label, manual = false, size = 'sm' }: CategoryBa
       paddingHorizontal={isMd ? '$3' : '$2'}
       paddingVertical="$1"
       alignSelf="flex-start"
-      accessibilityLabel={a11yLabel}
+      // `View` es un primitivo de Tamagui → NO mapea accessibilityLabel a aria-label en web (lo
+      // filtraría crudo al DOM). labelA11y emite el atributo correcto por plataforma.
+      {...labelA11y(Platform.OS, a11yLabel)}
     >
       <XStack alignItems="center" gap="$1">
         <Text
