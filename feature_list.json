@@ -175,6 +175,23 @@
       "sdd": true,
       "status": "context_ready",
       "notes": "Salió del audit de 09 D2 (sesión 18). Raf eligió la transferencia que PRESERVA historia (re-apunta eventos) sobre la mínima; por su peso se trata como sub-spec aparte. Decisiones + complejidades en specs/active/09-buscar-animal/context.md D2: session_id cross-tenant, colisión de idv en destino, linaje cruzado (descendencia que no se transfiere). GATE 1 OBLIGATORIO (cross-tenant write + re-parenting masivo). Delta spec 02: R4.11 'transferencia futura'→MVP + RPC/Edge Function atómico. context.md ESCRITO (sesión 18) con Gate 0 completo (decisiones de Raf): re-apunta eventos/animal_events/category_history/vínculos; lote→NULL; idv conservar-o-NULL ante colisión; session_id→null; rodeo destino mismo-sistema (como CREATE); marcador SIGSA no carga (keyeado por establecimiento-animal); linaje cruzado tolerado por RLS; atómica + roles-en-ambos-campos + online. Ver specs/active/11-transferencia-animal/context.md. APROBADO por Raf (2026-05-29) → context_ready. GATE 1 obligatorio al redactar la spec."
+    },
+    {
+      "id": 12,
+      "name": "12-import-rodeo",
+      "title": "Importación masiva de rodeo (carga inicial del padrón)",
+      "description": "Camino MASIVO que el find-or-create de spec 02/09 deja afuera: el usuario nuevo con rodeo entero (caso del beta de Chascomús). Importa un archivo (Excel/CSV con mapeo de columnas + TXT de SIGSA RFID-SEXO-RAZA-MM/AAAA) y da de alta en lote animals + animal_profiles en UN rodeo del establecimiento activo. Censo de IDENTIDAD (TAG/IDV/visual ≥1 ADR-005, sexo, fecha, raza, categoría con override, lote opcional), validación + preview (válidos/errores/duplicados), import parcial skip-and-report, dedup intra-archivo y contra existentes, audit (import_log). Online (es setup; el parseo es local). NO importa eventos/historial (se acumula después por manga).",
+      "acceptance": [
+        "El usuario sube un Excel/CSV, mapea columnas a los campos del censo (auto-detección + ajuste manual) y ve un preview de válidos/errores/duplicados antes de escribir.",
+        "El usuario sube un TXT de SIGSA (RFID-SEXO-RAZA-MM/AAAA) y se importa sin mapeo manual.",
+        "Cada fila resuelve al menos un identificador (ADR-005); las inválidas se reportan y se saltan (skip-and-report), los válidos entran.",
+        "Dedup intra-archivo y contra animales existentes del establecimiento (skip + report).",
+        "Queda audit del import (archivo, conteos, errores, quién, cuándo) en import_log.",
+        "Entry point: flag de onboarding tras crear campo+rodeo + re-ejecutable desde Rodeos / Más."
+      ],
+      "sdd": true,
+      "status": "context_ready",
+      "notes": "Surgió de specs/active/02-modelo-animal/context-frontend.md (el caso masivo que el find-or-create deja afuera; es el caso del beta de Chascomús: rodeo existente con caravana visual + planilla, TAGs electrónicos aún sin colocar). context.md ESCRITO + APROBADO por Raf (Gate 0, sesión 22, 2026-06-01) desde una terminal secundaria colisión-safe; el id/nombre eran provisionales y el alta en feature_list (esta entrada) la hace la terminal de coordinación (sesión 22, esta). 3 decisiones lockeadas: (1) dos fuentes = Excel/CSV con mapeo de columnas + TXT SIGSA ya mapeado; (2) categoría desde columna con category_override=true (no hay eventos de los que el trigger ADR-008 pueda auto-calcular); (3) censo de identidad (no eventos). FUERA de MVP: importar eventos/historial, vínculo madre-ternero, auto-marcar sigsa_declared_at, descarga directa de SIGSA/RENSPA, campos extendidos/plantilla, offline. Depende de spec 02 (sustrato animals/animal_profiles, backend done), spec 09 (dedup R5.5/R5.6), spec 04 R8 (normalize/isValidTag para RFID); acoplado a spec 08 (catálogo de razas) para el mapeo de raza. Schema nuevo mínimo: import_log (audit). Ver specs/active/12-import-rodeo/context.md."
     }
   ]
 }
