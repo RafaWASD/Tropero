@@ -32,6 +32,14 @@ Thumbs.db
 .claude/worktrees/
 .claude/scheduled_tasks.lock
 
+# Assets no-código (no inflan el repo de código; quedan locales)
+#   - material de marketing (carruseles, fotos IG/WhatsApp, ~5 MB de JPEGs)
+#   - screenshots ad-hoc del testing manual de Raf (feedback efímero)
+#   - PDFs de referencia sueltos en docs/
+ads-n-marketing/
+tests/
+docs/Profile.pdf
+
 # Override del .gitignore global del usuario
 # (~/.gitignore_global ignora CLAUDE.md por convenciones corporativas, pero
 # acá es el archivo principal del proyecto y debe estar versionado).
