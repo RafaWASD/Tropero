@@ -158,8 +158,8 @@
         "Funciona offline (N mutaciones encoladas)."
       ],
       "sdd": true,
-      "status": "context_ready",
-      "notes": "Surgió del audit profundo de 03 (sesión 18). context.md DRAFTED con decisiones aprobadas por Raf (sesión 18): nav=Inicio rodeo-céntrico (NO reabre ADR-018; Inicio ya = resumen de rodeos), 3 ops masivas (vacunación/destete/castración; sangrado/raspado descartado = muestra individual), scope rodeo O lote, selección todo+filtro+preview+skip-report. Ver specs/active/10-operaciones-rodeo/context.md. APROBADO por Raf (2026-05-29); edge cases del scan cruzado foldeados (override→preview-avisa+revertir, offline mutaciones independientes + contador, 1-evento-por-animal, filtro status=active). Delta spec 02: data_key castracion; efecto de categoría de castración → Facundo. Reusa tablas de evento + gating + sanitary_campaigns. Spec JIT (cerca de implementar 03, comparten sustrato)."
+      "status": "spec_ready",
+      "notes": "SPEC REDACTADA + GATE 1 (security_analyzer modo spec) PASS (sesión 22, terminal paralela ya cerrada): requirements/design/tasks completos + los 5 findings del FAIL previo CERRADOS / 0 abiertos (progress/security_spec_10-operaciones-rodeo.md). PENDIENTE Puerta 1 humana (aprobación de Raf) antes de implementar. Surgió del audit profundo de 03 (sesión 18). context.md DRAFTED con decisiones aprobadas por Raf (sesión 18): nav=Inicio rodeo-céntrico (NO reabre ADR-018; Inicio ya = resumen de rodeos), 3 ops masivas (vacunación/destete/castración; sangrado/raspado descartado = muestra individual), scope rodeo O lote, selección todo+filtro+preview+skip-report. Ver specs/active/10-operaciones-rodeo/context.md. APROBADO por Raf (2026-05-29); edge cases del scan cruzado foldeados (override→preview-avisa+revertir, offline mutaciones independientes + contador, 1-evento-por-animal, filtro status=active). Delta spec 02: data_key castracion; efecto de categoría de castración → Facundo. Reusa tablas de evento + gating + sanitary_campaigns. Spec JIT (cerca de implementar 03, comparten sustrato)."
     },
     {
       "id": 11,
