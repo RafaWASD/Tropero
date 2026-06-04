@@ -8,6 +8,15 @@ Ninguno actualmente. Las decisiones cerradas alcanzan para empezar specs y códi
 
 ## A validar con el vet socio
 
+> **🟢 RESUELTO en gran parte (sesión Facundo 2026-06-03)** — ver
+> `specs/active/02-modelo-animal/dominio-categorias-facundo-2026-06-03.md`. Cerrados ahí: máquina de
+> estados de categorías completa (novillito/novillo, castración, 2 años, destete como disparador),
+> aborto (revierte + flag), destete → cría al pie en la madre, etiquetas de tacto (cabeza/cuerpo/cola),
+> servicio (natural sin toro / IA-TE con pajuela), validación tacto↔parto (sí), pesaje de ternero (igual
+> que el normal), **datos por categoría** (la tabla del alta guiada) y las **fórmulas de analytics**
+> (% preñez / % destete / % cabeza-cuerpo-cola en tacto y destete). Los ítems de abajo que ya están
+> cubiertos por ese doc se mantienen por trazabilidad pero quedan **CERRADOS**.
+
 ### Pesaje de ternero
 ¿Hay alguna diferencia operativa real vs pesaje de adulto, más allá de la categoría que se autocompleta?
 - ¿Se vincula con la madre automáticamente?
