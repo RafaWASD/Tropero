@@ -47,6 +47,7 @@ import {
 } from '@/utils/animal-input';
 import type { AnimalSex } from '@/utils/animal-category';
 import { buttonA11y } from '@/utils/a11y';
+import { backOr } from '@/utils/nav';
 
 const OFFLINE_COPY =
   'Necesitás conexión para dar de alta un animal. Conectate a internet y volvé a intentar.';
@@ -111,8 +112,15 @@ export default function CrearAnimalScreen() {
   const busyRef = useRef(false);
 
   // Rodeo elegido + sus datos (system_id para resolver la categoría inicial).
+  //
+  // ⚠️ FIX (carrera del rodeo-default, C3.2b T0): con EXACTAMENTE 1 rodeo el default se resuelve
+  // ASYNC (readLastRodeo + queryLastUsedRodeoFromDb), así que `selectedRodeoId` queda null hasta que
+  // resuelve. Si el operario submitea antes de que resuelva, daba "Elegí un rodeo" espurio (el único
+  // rodeo posible es obvio). Fallback determinista: con 1 rodeo, `selectedRodeo` cae a ese único rodeo
+  // aunque `selectedRodeoId` aún no resolvió → el submit nunca queda sin rodeo en el caso 1-rodeo.
+  // El caso ≥2 rodeos NO cambia (combo + default async, R4.4): el fallback solo aplica a length===1.
   const selectedRodeo = useMemo(
-    () => rodeos.find((r) => r.id === selectedRodeoId) ?? null,
+    () => rodeos.find((r) => r.id === selectedRodeoId) ?? (rodeos.length === 1 ? rodeos[0] : null),
     [rodeos, selectedRodeoId],
   );
 
@@ -243,7 +251,15 @@ export default function CrearAnimalScreen() {
       {/* Header con back. */}
       <YStack width="100%" paddingTop={insets.top} paddingHorizontal="$4">
         <XStack width="100%" alignItems="center" gap="$2" paddingVertical="$3">
-          <Pressable hitSlop={8} onPress={() => router.back()} {...buttonA11y(Platform.OS, { label: 'Volver' })}>
+          {/* "Volver" ROBUSTO (backOr): si el stack está vacío (web-refresh / hot-reload / deep-link
+              / cold-start directo en el alta) router.back() fallaría y dejaría al usuario trabado →
+              caemos a la lista de animales (de donde se llega al alta por no-match, R1.4). El
+              router.replace post-create de onSubmit NO se toca (ya es robusto). */}
+          <Pressable
+            hitSlop={8}
+            onPress={() => backOr(router, '/(tabs)/animales')}
+            {...buttonA11y(Platform.OS, { label: 'Volver' })}
+          >
             <ChevronLeft size={28} color={muted} strokeWidth={2} />
           </Pressable>
           <Text fontFamily="$body" fontSize="$8" lineHeight="$8" fontWeight="700" color="$textPrimary">
@@ -452,7 +468,7 @@ export default function CrearAnimalScreen() {
         <Button
           variant="primary"
           fullWidth
-          disabled={submitting || noRodeo}
+          disabled={submitting || noRodeo || !selectedRodeo}
           onPress={() => void onSubmit()}
         >
           {submitting ? 'Creando…' : 'Crear animal'}

@@ -332,6 +332,30 @@ export async function cleanupAll(): Promise<void> {
 
   if (createdEstablishmentIds.size > 0) {
     const ids = [...createdEstablishmentIds];
+
+    // ⚠️ birth_calves.calf_profile_id → animal_profiles(id) NO tiene ON DELETE CASCADE (mig 0045).
+    // Si un test registró un PARTO, hay filas en birth_calves apuntando a los animal_profiles de los
+    // terneros; el CASCADE de establishments → animal_profiles choca con ese FK y FALLA el borrado
+    // (deja el campo + el usuario colgados). Pre-paso: borramos los reproductive_events de los
+    // animal_profiles de estos campos → su FK birth_event_id (ON DELETE CASCADE) limpia birth_calves
+    // → el CASCADE del establishment ya puede borrar los animal_profiles. Best-effort (loguea, no tira).
+    try {
+      const { data: profiles } = await admin
+        .from('animal_profiles')
+        .select('id')
+        .in('establishment_id', ids);
+      const profileIds = (profiles ?? []).map((p) => p.id as string);
+      if (profileIds.length > 0) {
+        const { error: reproErr } = await admin
+          .from('reproductive_events')
+          .delete()
+          .in('animal_profile_id', profileIds);
+        if (reproErr) console.error('[e2e cleanup] reproductive_events:', reproErr.message);
+      }
+    } catch (e) {
+      console.error('[e2e cleanup] sweep reproductive_events:', (e as Error).message);
+    }
+
     const { error } = await admin.from('establishments').delete().in('id', ids);
     if (error) console.error('[e2e cleanup] establishments:', error.message);
     else createdEstablishmentIds.clear();

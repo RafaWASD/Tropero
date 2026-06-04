@@ -13,6 +13,17 @@ import {
   sanitizeObservationInput,
   validateObservation,
   OBSERVATION_MAX_LENGTH,
+  PREGNANCY_OPTIONS,
+  SERVICE_TYPE_OPTIONS,
+  SEX_OPTIONS,
+  validateCalves,
+  shouldWarnUnconfirmedBirth,
+  reproductiveWarning,
+  UNCONFIRMED_BIRTH_WARNING,
+  UNCONFIRMED_ABORTION_WARNING,
+  SERVICE_ON_PREGNANT_WARNING,
+  REPRODUCTIVE_WARNING_CONFIRM_LABEL,
+  type CalfDraft,
 } from './event-input.ts';
 
 // ─── Condición corporal: 17 valores cerrados (1.00 → 5.00 paso 0.25) ──────────────────────
@@ -144,4 +155,204 @@ test('validateObservation: vacío o solo espacios → error', () => {
 test('validateObservation: dentro del tope', () => {
   const r = validateObservation('x'.repeat(OBSERVATION_MAX_LENGTH));
   assert.equal(r.ok, true);
+});
+
+// ─── Reproductivo: listas cerradas de opciones (R6.2) ──────────────────────────────────────
+
+test('PREGNANCY_OPTIONS: 4 opciones con los values del enum pregnancy_status', () => {
+  assert.equal(PREGNANCY_OPTIONS.length, 4);
+  assert.deepEqual(
+    PREGNANCY_OPTIONS.map((o) => o.value),
+    ['empty', 'small', 'medium', 'large'],
+  );
+  // Labels presentes y no vacíos (es-AR).
+  for (const o of PREGNANCY_OPTIONS) assert.ok(o.label.length > 0, `label vacío para ${o.value}`);
+  // El value 'empty' es "Vacía" (consistente con humanizePregnancyStatus).
+  assert.equal(PREGNANCY_OPTIONS[0].label, 'Vacía');
+  // B1 (dominio Facundo §4): SOLO el término de campo (Cabeza/Cuerpo/Cola), sin "preñez chica/media/
+  // grande". Mapeo al enum DB: small=cola, medium=cuerpo, large=cabeza — antídoto contra re-inversión.
+  const byValue = Object.fromEntries(PREGNANCY_OPTIONS.map((o) => [o.value, o.label]));
+  assert.equal(byValue.small, 'Cola');
+  assert.equal(byValue.medium, 'Cuerpo');
+  assert.equal(byValue.large, 'Cabeza');
+  // Ninguna etiqueta debe contener la palabra de tamaño (chica/media/grande): solo término de campo.
+  for (const o of PREGNANCY_OPTIONS) {
+    assert.doesNotMatch(o.label, /chica|media|grande/i, `${o.value} no debe llevar tamaño`);
+  }
+});
+
+test('SERVICE_TYPE_OPTIONS: 3 opciones con los values del enum service_type', () => {
+  assert.equal(SERVICE_TYPE_OPTIONS.length, 3);
+  assert.deepEqual(
+    SERVICE_TYPE_OPTIONS.map((o) => o.value),
+    ['natural', 'ai', 'te'],
+  );
+  for (const o of SERVICE_TYPE_OPTIONS) assert.ok(o.label.length > 0, `label vacío para ${o.value}`);
+  assert.equal(SERVICE_TYPE_OPTIONS[0].label, 'Monta natural');
+});
+
+// ─── Parto: SEX_OPTIONS + validateCalves (R9 / R9.5 mellizos) ───────────────────────────────
+
+test('SEX_OPTIONS: 2 opciones con los values del enum sex (male/female)', () => {
+  assert.equal(SEX_OPTIONS.length, 2);
+  assert.deepEqual(
+    SEX_OPTIONS.map((o) => o.value),
+    ['male', 'female'],
+  );
+  assert.equal(SEX_OPTIONS[0].label, 'Macho');
+  assert.equal(SEX_OPTIONS[1].label, 'Hembra');
+});
+
+test('validateCalves: lista vacía → error (≥1 requerido)', () => {
+  const r = validateCalves([]);
+  assert.equal(r.ok, false);
+  if (!r.ok) assert.match(r.error, /al menos un ternero/);
+});
+
+test('validateCalves: un ternero con sexo, sin peso ni tag → OK (peso/tag opcionales)', () => {
+  const calves: CalfDraft[] = [{ sex: 'female', weightRaw: '', tagRaw: '' }];
+  const r = validateCalves(calves);
+  assert.equal(r.ok, true);
+  if (r.ok) {
+    assert.equal(r.value.length, 1);
+    assert.equal(r.value[0].sex, 'female');
+    assert.equal(r.value[0].weightKg, null);
+    assert.equal(r.value[0].tag, null);
+  }
+});
+
+test('validateCalves: mellizos (2 terneros) con sexos distintos → OK', () => {
+  const calves: CalfDraft[] = [
+    { sex: 'male', weightRaw: '35', tagRaw: '' },
+    { sex: 'female', weightRaw: '', tagRaw: '982000123456789' },
+  ];
+  const r = validateCalves(calves);
+  assert.equal(r.ok, true);
+  if (r.ok) {
+    assert.equal(r.value.length, 2);
+    assert.equal(r.value[0].sex, 'male');
+    assert.equal(r.value[0].weightKg, 35);
+    assert.equal(r.value[0].tag, null);
+    assert.equal(r.value[1].sex, 'female');
+    assert.equal(r.value[1].weightKg, null);
+    assert.equal(r.value[1].tag, '982000123456789');
+  }
+});
+
+test('validateCalves: falta el sexo de ALGÚN ternero → error claro', () => {
+  const calves: CalfDraft[] = [
+    { sex: 'male', weightRaw: '', tagRaw: '' },
+    { sex: null, weightRaw: '', tagRaw: '' }, // el 2do no eligió sexo
+  ];
+  const r = validateCalves(calves);
+  assert.equal(r.ok, false);
+  if (!r.ok) assert.match(r.error, /sexo de cada ternero/);
+});
+
+test('validateCalves: peso INVÁLIDO (si hay texto) → error; peso vacío → OK', () => {
+  // 0 no es válido (> 0).
+  const bad = validateCalves([{ sex: 'female', weightRaw: '0', tagRaw: '' }]);
+  assert.equal(bad.ok, false);
+  // 5 cifras (10000) → error de dominio (≤ 4 cifras).
+  const bad2 = validateCalves([{ sex: 'female', weightRaw: '10000', tagRaw: '' }]);
+  assert.equal(bad2.ok, false);
+  // peso con coma es-AR válido.
+  const ok = validateCalves([{ sex: 'female', weightRaw: '34,5', tagRaw: '' }]);
+  assert.equal(ok.ok, true);
+  if (ok.ok) assert.equal(ok.value[0].weightKg, 34.5);
+});
+
+test('validateCalves: tag con espacios alrededor se limpia; vacío → null', () => {
+  const r = validateCalves([{ sex: 'male', weightRaw: '', tagRaw: '  982000123456789  ' }]);
+  assert.equal(r.ok, true);
+  if (r.ok) assert.equal(r.value[0].tag, '982000123456789');
+  const r2 = validateCalves([{ sex: 'male', weightRaw: '', tagRaw: '   ' }]);
+  assert.equal(r2.ok, true);
+  if (r2.ok) assert.equal(r2.value[0].tag, null);
+});
+
+// ─── Aviso suave: PARTO sobre hembra que NO figura preñada (shouldWarnUnconfirmedBirth) ──────
+
+test('shouldWarnUnconfirmedBirth: PARTO + NO preñada → avisa (true)', () => {
+  assert.equal(shouldWarnUnconfirmedBirth('birth', false), true);
+});
+
+test('shouldWarnUnconfirmedBirth: PARTO + SÍ preñada → NO avisa (guarda directo)', () => {
+  assert.equal(shouldWarnUnconfirmedBirth('birth', true), false);
+});
+
+test('shouldWarnUnconfirmedBirth: PARTO + estado indeterminado (null/undefined) → avisa (conservador)', () => {
+  // No se pudo determinar la preñez → ante la duda, que el operario confirme.
+  assert.equal(shouldWarnUnconfirmedBirth('birth', null), true);
+  assert.equal(shouldWarnUnconfirmedBirth('birth', undefined), true);
+});
+
+test('shouldWarnUnconfirmedBirth: tacto/servicio/peso NUNCA avisan (solo el parto)', () => {
+  // El aviso es EXCLUSIVO del parto, sin importar el estado de preñez.
+  for (const t of ['tacto', 'service', 'weight', 'condition_score', 'observation']) {
+    assert.equal(shouldWarnUnconfirmedBirth(t, false), false, `${t} no debería avisar`);
+    assert.equal(shouldWarnUnconfirmedBirth(t, true), false, `${t} no debería avisar`);
+    assert.equal(shouldWarnUnconfirmedBirth(t, null), false, `${t} no debería avisar`);
+  }
+});
+
+// ─── reproductiveWarning: las 3 ramas que avisan + null (helper generalizado de avisos suaves) ──────
+
+test('reproductiveWarning: BIRTH + NO preñada → aviso "no figura preñada" (parto)', () => {
+  const w = reproductiveWarning('birth', false);
+  assert.notEqual(w, null);
+  assert.equal(w?.message, UNCONFIRMED_BIRTH_WARNING);
+  assert.match(w!.message, /no figura preñada/i);
+  assert.match(w!.message, /registrar el parto igual/i);
+  assert.equal(w?.confirmLabel, REPRODUCTIVE_WARNING_CONFIRM_LABEL);
+});
+
+test('reproductiveWarning: BIRTH + estado indeterminado (null/undefined) → avisa (conservador)', () => {
+  assert.notEqual(reproductiveWarning('birth', null), null);
+  assert.notEqual(reproductiveWarning('birth', undefined), null);
+});
+
+test('reproductiveWarning: BIRTH + SÍ preñada → null (guarda directo)', () => {
+  assert.equal(reproductiveWarning('birth', true), null);
+});
+
+test('reproductiveWarning: ABORTION + NO preñada → aviso "no figura preñada" (aborto)', () => {
+  const w = reproductiveWarning('abortion', false);
+  assert.notEqual(w, null);
+  assert.equal(w?.message, UNCONFIRMED_ABORTION_WARNING);
+  assert.match(w!.message, /no figura preñada/i);
+  assert.match(w!.message, /registrar el aborto igual/i);
+  assert.equal(w?.confirmLabel, REPRODUCTIVE_WARNING_CONFIRM_LABEL);
+});
+
+test('reproductiveWarning: ABORTION + estado indeterminado → avisa; + SÍ preñada → null', () => {
+  assert.notEqual(reproductiveWarning('abortion', null), null);
+  assert.notEqual(reproductiveWarning('abortion', undefined), null);
+  assert.equal(reproductiveWarning('abortion', true), null); // figura preñada → coherente, sin aviso
+});
+
+test('reproductiveWarning: SERVICE + SÍ preñada → aviso "figura preñada" (servicio)', () => {
+  const w = reproductiveWarning('service', true);
+  assert.notEqual(w, null);
+  assert.equal(w?.message, SERVICE_ON_PREGNANT_WARNING);
+  assert.match(w!.message, /figura preñada/i);
+  assert.match(w!.message, /registrar el servicio igual/i);
+  assert.equal(w?.confirmLabel, REPRODUCTIVE_WARNING_CONFIRM_LABEL);
+});
+
+test('reproductiveWarning: SERVICE + NO preñada / indeterminado → null (sin aviso, directo)', () => {
+  // Servicio sobre una hembra que NO figura preñada es lo normal → sin aviso. Indeterminado tampoco es
+  // "figura preñada" → sin aviso (a diferencia de birth/abortion, el conservadurismo NO aplica acá:
+  // un estado desconocido no significa que esté preñada).
+  assert.equal(reproductiveWarning('service', false), null);
+  assert.equal(reproductiveWarning('service', null), null);
+  assert.equal(reproductiveWarning('service', undefined), null);
+});
+
+test('reproductiveWarning: tacto / pesaje / condición / observación → SIEMPRE null (no avisan)', () => {
+  for (const t of ['tacto', 'weight', 'condition_score', 'observation']) {
+    assert.equal(reproductiveWarning(t, false), null, `${t} no debería avisar`);
+    assert.equal(reproductiveWarning(t, true), null, `${t} no debería avisar`);
+    assert.equal(reproductiveWarning(t, null), null, `${t} no debería avisar`);
+  }
 });

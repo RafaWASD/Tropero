@@ -19,19 +19,45 @@ import {
   parseTimeline,
   collectCategoryIds,
   resolveCategoryNames,
+  applyReproMeta,
+  type ReproMeta,
   type TimelineItem,
   type TimelineRow,
+  type PregnancyStatus,
+  type ServiceType,
 } from '../utils/event-timeline';
 
 // ─── Error / Result uniforme (mismo shape que animals.ts) ──────────────────────────────────
 
-export type AppError = { kind: 'network' | 'unknown'; message: string };
+export type AppError = {
+  kind: 'network' | 'duplicate_tag' | 'not_authorized' | 'unknown';
+  message: string;
+};
 export type ServiceResult<T> = { ok: true; value: T } | { ok: false; error: AppError };
 
 function classifyError(error: { message?: string; code?: string } | null): AppError {
   const msg = error?.message ?? '';
+  const code = error?.code ?? '';
   if (/network|failed to fetch|fetch failed/i.test(msg)) {
     return { kind: 'network', message: msg };
+  }
+  // Caravana del ternero duplicada (R9.4): la RPC register_birth revierte TODO el parto si el TAG de
+  // cualquier ternero ya está asignado (unique parcial de animals.tag_electronic, R3.2). El cliente da
+  // un mensaje accionable. unique violation = 23505, o el msg trae "tag"/"unique"/"duplicate".
+  if (code === '23505' || (/duplicate key|unique/i.test(msg) && /tag/i.test(msg))) {
+    return {
+      kind: 'duplicate_tag',
+      message: 'Esa caravana electrónica ya está asignada a otro animal.',
+    };
+  }
+  // La RPC deriva el tenant de la fila REAL de la madre + has_role_in → un caller sin rol recibe 42501
+  // (insufficient_privilege). No debería ocurrir desde la ficha (el usuario tiene rol en el campo del
+  // animal), pero lo mapeamos a un copy claro por las dudas (defensa, no se cruza tenant client-side).
+  if (code === '42501' || /not authorized|permission denied|insufficient/i.test(msg)) {
+    return {
+      kind: 'not_authorized',
+      message: 'No tenés permiso para registrar un parto en este animal.',
+    };
   }
   return { kind: 'unknown', message: msg || 'Error desconocido' };
 }
@@ -53,30 +79,153 @@ export async function fetchTimeline(profileId: string): Promise<ServiceResult<Ti
   if (error) return { ok: false, error: classifyError(error) };
 
   const rows = (data ?? []) as unknown as TimelineRow[];
-  const items = parseTimeline(rows);
+  let items = parseTimeline(rows);
 
-  // Resolver los nombres de categoría de los category_change (from/to son UUIDs). Una sola query.
+  // (1) Resolver los nombres de categoría de los category_change (from/to son UUIDs). Una sola query.
+  // Tolerante: si la resolución falla (red intermitente) NO tiramos el timeline — el historial sigue
+  // siendo útil sin el nombre resuelto (el componente muestra "categoría" de fallback).
   const categoryIds = collectCategoryIds(items);
-  if (categoryIds.length === 0) {
-    return { ok: true, value: items };
+  if (categoryIds.length > 0) {
+    const { data: cats, error: catErr } = await supabase
+      .from('categories_by_system')
+      .select('id, name')
+      .in('id', categoryIds);
+    if (!catErr && cats) {
+      const nameById: Record<string, string> = {};
+      for (const c of cats as { id: string; name: string }[]) {
+        nameById[c.id] = c.name;
+      }
+      items = resolveCategoryNames(items, nameById);
+    }
   }
 
-  const { data: cats, error: catErr } = await supabase
-    .from('categories_by_system')
-    .select('id, name')
-    .in('id', categoryIds);
-  // Si la resolución de nombres falla (ej. red intermitente), NO tiramos el timeline entero: el
-  // historial sigue siendo útil sin el nombre resuelto (el componente muestra "categoría" de
-  // fallback). Solo logueamos implícitamente devolviendo los items sin resolver.
-  if (catErr || !cats) {
-    return { ok: true, value: items };
+  // (2) Enriquecer service_type + created_at de los eventos reproductivos (la RPC 0035 NO los trae).
+  // Mismo patrón tolerante que la resolución de categorías: UNA query suplementaria a
+  // reproductive_events (RLS la protege igual que la RPC), mapa eventId→ReproMeta, applyReproMeta
+  // (puro). El `created_at` da el orden total real para desempatar el estado reproductivo vigente
+  // cuando un tacto y un parto/aborto caen el MISMO día (eventDate es columna `date`, sin hora). Si
+  // la query falla o no hay eventos reproductivos, devolvemos los items sin enriquecer (el timeline NO
+  // se pierde; createdAt queda null y deriveCurrentState cae al desempate por eventId).
+  const hasReproductive = items.some((it) => it.kind === 'reproductive');
+  if (hasReproductive) {
+    const { data: repro, error: reproErr } = await supabase
+      .from('reproductive_events')
+      .select('id, service_type, created_at')
+      .eq('animal_profile_id', profileId);
+    if (!reproErr && repro) {
+      const byId: Record<string, ReproMeta> = {};
+      for (const r of repro as {
+        id: string;
+        service_type: string | null;
+        created_at: string | null;
+      }[]) {
+        byId[r.id] = { serviceType: r.service_type, createdAt: r.created_at };
+      }
+      items = applyReproMeta(items, byId);
+    }
   }
 
-  const nameById: Record<string, string> = {};
-  for (const c of cats as { id: string; name: string }[]) {
-    nameById[c.id] = c.name;
-  }
-  return { ok: true, value: resolveCategoryNames(items, nameById) };
+  return { ok: true, value: items };
+}
+
+// ─── Lectura: link a la MADRE (R14.7 / R4.15) ────────────────────────────────────────────────
+//
+// Resuelve calf → madre vía la tabla puente birth_calves (no vía reproductive_events.calf_id: ese
+// solo apunta al PRIMER ternero de un parto de mellizos; birth_calves cubre TODOS los terneros, R7.9).
+//
+// Cadena: birth_calves (calf_profile_id = X) → birth_event_id → reproductive_events.animal_profile_id
+// (= la madre) → identidad de la madre (idv/visual/tag, nombre de categoría, status). Un solo nested
+// select de PostgREST por los FKs. RLS: birth_calves_select deriva el establishment de la madre y
+// filtra el evento soft-deleted; reproductive_events/animal_profiles tienen sus propias policies por
+// has_role_in. El cliente NO fuerza permisos — la RLS es la barrera (R11).
+//
+// ⚠️ NO filtramos por `status` de la madre (R14.7/R4.15): la madre puede estar vendida/muerta/
+// transferida y el link DEBE funcionar igual (se muestra archivada, sin dead-end). NO filtramos
+// `deleted_at` de la madre acá tampoco — birth_calves nunca apunta a un perfil hard-deleteado (R4.15
+// prohíbe hard-delete de un perfil referenciado como calf_id), y el join !inner trae la madre si existe.
+//
+// Devuelve null si el animal NO es un ternero con parto registrado (no hay fila en birth_calves) → la
+// ficha NO muestra link. Tolerante: si la query falla (red), devolvemos el error blando (la ficha lo
+// trata como "sin link", no rompe la cabecera).
+
+export type MotherLink = {
+  /** profileId de la madre (para navegar a su ficha). */
+  profileId: string;
+  /** idv ?? visual ?? tag ?? "Madre" — el identificador a mostrar. */
+  label: string;
+  /** status de la madre (active/sold/dead/transferred) — para el indicador de archivada (R14.7). */
+  status: 'active' | 'sold' | 'dead' | 'transferred';
+  /** Nombre de la categoría de la madre (ej. "Vaca multípara"). */
+  categoryName: string;
+};
+
+type MotherRow = {
+  reproductive_events: {
+    animal_profiles: {
+      id: string;
+      idv: string | null;
+      visual_id_alt: string | null;
+      status: 'active' | 'sold' | 'dead' | 'transferred';
+      animals: { tag_electronic: string | null } | null;
+      categories_by_system: { name: string } | null;
+    } | null;
+  } | null;
+};
+
+/**
+ * Resuelve la MADRE de un ternero (R14.7) vía birth_calves. Devuelve null si el animal no es un
+ * ternero con parto registrado. Tolera madre con status ≠ active (R4.15): NO filtra por status.
+ */
+export async function fetchMother(calfProfileId: string): Promise<ServiceResult<MotherLink | null>> {
+  // Nested select por los FKs: birth_calves → reproductive_events (parto) → animal_profiles (madre).
+  //
+  // ⚠️ DISAMBIGUACIÓN OBLIGATORIA: reproductive_events tiene TRES FKs a animal_profiles
+  // (animal_profile_id = madre, calf_id = 1er ternero, bull_id = toro). Un embed pelado
+  // `animal_profiles!inner` es AMBIGUO → PostgREST no sabe qué relación seguir y la query falla
+  // (PGRST201), dejando la card "Madre" sin mostrarse (silenciosamente: fetchMother cae al error
+  // blando). Hay que nombrar la columna FK: `animal_profiles!animal_profile_id` fuerza el lado MADRE.
+  // (Las dos hops internas — animals via animal_id, categories_by_system via category_id — tienen un
+  // único FK cada una → NO necesitan hint.)
+  //
+  // !inner para que las filas sin la relación no devuelvan basura; el lado de animals/categorías es
+  // left de hecho (un identificador puede faltar). limit 1: un ternero pertenece a UN parto (PK
+  // (birth_event_id, calf_profile_id) — un calf no se duplica entre partos).
+  const { data, error } = await supabase
+    .from('birth_calves')
+    .select(
+      'reproductive_events!inner (' +
+        ' animal_profiles!animal_profile_id!inner (' +
+        '   id, idv, visual_id_alt, status,' +
+        '   animals!inner ( tag_electronic ),' +
+        '   categories_by_system!inner ( name )' +
+        ' )' +
+        ')',
+    )
+    .eq('calf_profile_id', calfProfileId)
+    .limit(1)
+    .maybeSingle();
+
+  if (error) return { ok: false, error: classifyError(error) };
+  if (!data) return { ok: true, value: null }; // no es ternero con parto registrado → sin link
+
+  const mother = (data as unknown as MotherRow).reproductive_events?.animal_profiles ?? null;
+  if (!mother) return { ok: true, value: null };
+
+  const label =
+    cleanStr(mother.idv) ??
+    cleanStr(mother.visual_id_alt) ??
+    cleanStr(mother.animals?.tag_electronic ?? null) ??
+    'Madre';
+
+  return {
+    ok: true,
+    value: {
+      profileId: mother.id,
+      label,
+      status: mother.status,
+      categoryName: mother.categories_by_system?.name ?? '',
+    },
+  };
 }
 
 // ─── Escritura: peso (R6.1) ─────────────────────────────────────────────────────────────────
@@ -137,6 +286,180 @@ export async function addConditionScore(
   const { error } = await supabase.from('condition_score_events').insert(payload);
   if (error) return { ok: false, error: classifyError(error) };
   return { ok: true, value: true };
+}
+
+// ─── Escritura: reproductivo — tacto / servicio (R6.2) ───────────────────────────────────────
+//
+// reproductive_events deriva su tenant del animal_profile_id vía RLS (with check has_role_in(
+// establishment_of_profile(...))) → NO se manda establishment_id, solo el profileId. created_by lo
+// setea el trigger desde auth.uid() — NO se manda. Inserts SIN .select() (RLS-on-RETURNING).
+//
+// ⚠️ Efecto colateral server-side (NO se toca desde el cliente): un `tacto` con pregnancy_status ≠
+// 'empty' sobre una vaquillona dispara la transición de categoría a vaquillona_prenada (trigger
+// reproductive_events_apply_transition, si category_override=false). El cliente solo re-fetchea el
+// timeline + el detalle al volver a la ficha. `service` NO dispara transición (es un registro).
+
+export type AddTactoInput = {
+  profileId: string;
+  /** Resultado del tacto. Viene de un selector CERRADO (PREGNANCY_OPTIONS) → siempre un enum válido. */
+  pregnancyStatus: PregnancyStatus;
+  /** ISO 'YYYY-MM-DD'. event_date es columna `date` NOT NULL. */
+  eventDate: string;
+  notes?: string | null;
+};
+
+/**
+ * Inserta un evento reproductivo `tacto` (R6.2). El pregnancy_status viene de un selector CERRADO →
+ * siempre cumple el enum del DB. created_by por trigger. Insert SIN .select(); el caller re-fetchea.
+ */
+export async function addTacto(input: AddTactoInput): Promise<ServiceResult<true>> {
+  const payload: Record<string, unknown> = {
+    animal_profile_id: input.profileId,
+    event_type: 'tacto',
+    event_date: input.eventDate,
+    pregnancy_status: input.pregnancyStatus,
+  };
+  const notes = cleanStr(input.notes);
+  if (notes) payload.notes = notes;
+
+  const { error } = await supabase.from('reproductive_events').insert(payload);
+  if (error) return { ok: false, error: classifyError(error) };
+  return { ok: true, value: true };
+}
+
+// ─── Escritura: reproductivo — aborto (R6.2 / dominio Facundo §1) ────────────────────────────
+//
+// Un `abortion` es la pérdida de la preñez. MISMO patrón que addTacto: insert mínimo en
+// reproductive_events (event_type 'abortion'), tenant por RLS (with check has_role_in), created_by por
+// trigger. SIN .select() (RLS-on-RETURNING). No lleva pregnancy_status ni service_type.
+//
+// ⚠️ Efecto colateral server-side (NO se toca desde el cliente, dominio Facundo §1): un aborto REVIERTE
+// la preñez de la categoría — `vaquillona_prenada → vaquillona` (vía el trigger de transición, si
+// category_override=false); una vaca de 2º servicio/multípara que aborta QUEDA igual (ya tiene partos
+// contados). El "flag rojo permanente" (A2) se DERIVA de la existencia del evento (hasAbortion), no es
+// una columna de estado → el cliente solo re-fetchea el timeline al volver a la ficha.
+
+export type AddAbortionInput = {
+  profileId: string;
+  /** ISO 'YYYY-MM-DD'. event_date es columna `date` NOT NULL. */
+  eventDate: string;
+  notes?: string | null;
+};
+
+/**
+ * Inserta un evento reproductivo `abortion` (pérdida de la preñez). created_by por trigger. Insert SIN
+ * .select(); el caller re-fetchea. deriveCurrentState ya trata `abortion` como determinante de preñez
+ * → deja el estado "Vacía" (vía aborto). El flag "tuvo aborto" de la ficha lo deriva hasAbortion.
+ */
+export async function addAbortion(input: AddAbortionInput): Promise<ServiceResult<true>> {
+  const payload: Record<string, unknown> = {
+    animal_profile_id: input.profileId,
+    event_type: 'abortion',
+    event_date: input.eventDate,
+  };
+  const notes = cleanStr(input.notes);
+  if (notes) payload.notes = notes;
+
+  const { error } = await supabase.from('reproductive_events').insert(payload);
+  if (error) return { ok: false, error: classifyError(error) };
+  return { ok: true, value: true };
+}
+
+export type AddServiceInput = {
+  profileId: string;
+  /** Tipo de servicio. Viene de un selector CERRADO (SERVICE_TYPE_OPTIONS) → siempre un enum válido. */
+  serviceType: ServiceType;
+  /** ISO 'YYYY-MM-DD'. event_date es columna `date` NOT NULL. */
+  eventDate: string;
+  notes?: string | null;
+};
+
+/**
+ * Inserta un evento reproductivo `service` (R6.2). El service_type viene de un selector CERRADO →
+ * siempre cumple el enum del DB. NO dispara transición de categoría. created_by por trigger. Insert
+ * SIN .select(); el caller re-fetchea.
+ */
+export async function addService(input: AddServiceInput): Promise<ServiceResult<true>> {
+  const payload: Record<string, unknown> = {
+    animal_profile_id: input.profileId,
+    event_type: 'service',
+    event_date: input.eventDate,
+    service_type: input.serviceType,
+  };
+  const notes = cleanStr(input.notes);
+  if (notes) payload.notes = notes;
+
+  const { error } = await supabase.from('reproductive_events').insert(payload);
+  if (error) return { ok: false, error: classifyError(error) };
+  return { ok: true, value: true };
+}
+
+// ─── Escritura: PARTO — register_birth (R9 / R7.9 / R9.5) ─────────────────────────────────────
+//
+// Un parto = UN evento `birth` con 1..N terneros (mellizos), creado ATÓMICAMENTE por la RPC
+// register_birth (0045): el server crea el evento + por CADA ternero un animals + animal_profile
+// (hereda establishment + rodeo de la madre, category_id = ternero|ternera por sexo,
+// entry_origin='born_here', status='active', sin lote) + una fila en el puente birth_calves. Si
+// CUALQUIER ternero falla → rollback total (R9.4/R9.5). Devuelve el reproductive_events.id del parto.
+//
+// ⚠️ El cliente DEBE usar SIEMPRE esta RPC para el parto (1..N uniforme), NUNCA inserts directos a
+// reproductive_events con campos calf_* (eso es el trigger mono-ternero, que la RPC esquiva insertando
+// el evento sin calf_sex). NO usamos .select() (es una RPC que devuelve un escalar uuid → OK).
+//
+// Server-side, además: la TRANSICIÓN de categoría de la madre (vaquillona_prenada →
+// vaca_segundo_servicio → multipara si category_override=false) la hace un trigger AFTER INSERT del
+// evento de parto; y la creación de los terneros la hace la RPC. El cliente NO toca nada de eso: al
+// volver a la ficha, el useFocusEffect re-fetchea y refleja el badge nuevo + el nodo "Parto".
+//
+// Multi-tenant: el cliente manda SOLO motherProfileId + fecha + terneros. La RPC deriva el tenant de
+// la fila REAL de la madre + has_role_in (un caller sin rol recibe 42501). NO se manda establishment_id.
+
+/** Un ternero del parto (lo que el form arma). sexo REQUERIDO; peso/tag opcionales. */
+export type BirthCalfInput = {
+  sex: 'male' | 'female';
+  /** Peso al nacer en kg (> 0 si viene). Opcional. */
+  weightKg?: number | null;
+  /** Caravana electrónica FDX-B (15 díg). Opcional — sin TAG el server pone el fallback visual. */
+  tag?: string | null;
+};
+
+export type RegisterBirthInput = {
+  motherProfileId: string;
+  /** ISO 'YYYY-MM-DD'. event_date del parto. */
+  eventDate: string;
+  /** Al menos 1 ternero (lo garantiza validateCalves en el caller). */
+  calves: BirthCalfInput[];
+};
+
+/**
+ * Registra un parto vía la RPC register_birth (R9/R7.9/R9.5). Mapea cada ternero al shape del payload
+ * jsonb que la RPC espera (`{ calf_sex, calf_weight?, calf_tag_electronic? }`), omitiendo el peso y el
+ * tag cuando no vinieron (la RPC los trata como NULL → fallback visual del ternero sin tag, R9.1).
+ *
+ * Devuelve { birthEventId } — la RPC devuelve el uuid del evento de parto como escalar (data es el
+ * string). Errores mapeados con classifyError: tag duplicado → kind 'duplicate_tag' (mensaje
+ * accionable, R9.4 = rollback atómico server-side); sin rol → 'not_authorized'.
+ */
+export async function registerBirth(
+  input: RegisterBirthInput,
+): Promise<ServiceResult<{ birthEventId: string }>> {
+  const calves = input.calves.map((c) => {
+    const payload: Record<string, unknown> = { calf_sex: c.sex };
+    if (c.weightKg != null) payload.calf_weight = c.weightKg;
+    const tag = cleanStr(c.tag);
+    if (tag) payload.calf_tag_electronic = tag;
+    return payload;
+  });
+
+  const { data, error } = await supabase.rpc('register_birth', {
+    p_mother_profile_id: input.motherProfileId,
+    p_event_date: input.eventDate,
+    p_calves: calves,
+  });
+  if (error) return { ok: false, error: classifyError(error) };
+  // La RPC devuelve el uuid del evento de parto como escalar (string). Defensivo si vuelve null.
+  const birthEventId = typeof data === 'string' ? data : '';
+  return { ok: true, value: { birthEventId } };
 }
 
 // ─── Escritura: observación libre (R6.10) ────────────────────────────────────────────────────

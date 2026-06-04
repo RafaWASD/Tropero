@@ -56,8 +56,15 @@ export type ReproEventType =
   | 'drying'
   | 'rejection';
 
-/** pregnancy_status de reproductive_events (R6.2): vacía / cabeza / cuerpo / cola. */
+/** pregnancy_status de reproductive_events (R6.2): empty=vacía / small=cola / medium=cuerpo / large=cabeza. */
 export type PregnancyStatus = 'empty' | 'small' | 'medium' | 'large';
+
+/**
+ * service_type de reproductive_events (R6.2): monta natural / inseminación (IA) / transferencia
+ * embrionaria (TE). NO viene en el payload de la RPC animal_timeline (0035) → se enriquece
+ * client-side con una query suplementaria (applyServiceTypes), igual que los nombres de categoría.
+ */
+export type ServiceType = 'natural' | 'ai' | 'te';
 
 /** event_type de sanitary_events (R6.3). */
 export type SanitaryEventType =
@@ -96,6 +103,21 @@ export type TimelineItem =
       eventType: ReproEventType | null;
       pregnancyStatus: PregnancyStatus | null;
       calfId: string | null;
+      /**
+       * service_type del evento. La RPC 0035 NO lo trae → el parser lo deja `null` y el service lo
+       * completa con applyReproMeta (una query suplementaria, mismo patrón que los nombres de
+       * category_change). Solo es relevante para event_type 'service'; en otros queda null.
+       */
+      serviceType: ServiceType | null;
+      /**
+       * `created_at` REAL (timestamp de inserción) del reproductive_event. La RPC 0035 NO lo trae →
+       * el parser lo deja `null` y el service lo completa con applyReproMeta (misma query
+       * suplementaria que service_type). Se usa SOLO para desempatar el estado reproductivo vigente
+       * cuando dos eventos repro caen el MISMO `eventDate` (mismo día): un parto/aborto del mismo día
+       * que un tacto debe ganar (parió/abortó → ya no está preñada), y `eventDate` (columna `date`,
+       * sin hora) no alcanza para ordenarlos. Ver deriveCurrentState. null si la query no lo trajo.
+       */
+      createdAt: string | null;
       notes: string | null;
     }
   | {
@@ -198,6 +220,9 @@ export function parseTimelineRow(row: TimelineRow): TimelineItem | null {
         eventType: str(p, 'event_type') as ReproEventType | null,
         pregnancyStatus: str(p, 'pregnancy_status') as PregnancyStatus | null,
         calfId: str(p, 'calf_id'),
+        // service_type y created_at NO vienen en la RPC 0035 → null acá; los completa applyReproMeta.
+        serviceType: null,
+        createdAt: null,
         notes: str(p, 'notes'),
       };
     case 'sanitary':
@@ -297,6 +322,40 @@ export function resolveCategoryNames(
   });
 }
 
+/**
+ * Metadatos suplementarios de un reproductive_event que la RPC animal_timeline (0035) NO trae y el
+ * service enriquece con una query a reproductive_events: `service_type` (tipo de servicio) y
+ * `created_at` (timestamp real de inserción, para desempatar el estado vigente en el mismo día).
+ */
+export type ReproMeta = {
+  serviceType?: string | null;
+  createdAt?: string | null;
+};
+
+const SERVICE_TYPES: ReadonlySet<string> = new Set<ServiceType>(['natural', 'ai', 'te']);
+
+/**
+ * Completa `serviceType` y `createdAt` de los items reproductive desde el mapa eventId→ReproMeta (NO
+ * muta; espejo de resolveCategoryNames). La RPC animal_timeline (0035) no trae ninguno de los dos →
+ * el service los enriquece con UNA query suplementaria a reproductive_events. Tolerante: un eventId
+ * sin entrada en el mapa, o un service_type que no es un ServiceType conocido, queda `null` (no rompe
+ * el item); un `createdAt` ausente queda `null` (deriveCurrentState cae al desempate por eventId).
+ * Solo toca los items reproductive; el resto pasa intacto.
+ */
+export function applyReproMeta(
+  items: readonly TimelineItem[],
+  byId: Readonly<Record<string, ReproMeta>>,
+): TimelineItem[] {
+  return items.map((it) => {
+    if (it.kind !== 'reproductive') return it;
+    const meta = byId[it.eventId];
+    const rawType = meta?.serviceType ?? null;
+    const serviceType = rawType != null && SERVICE_TYPES.has(rawType) ? (rawType as ServiceType) : null;
+    const createdAt = meta?.createdAt ?? null;
+    return { ...it, serviceType, createdAt };
+  });
+}
+
 // ─── Estado actual del animal (último valor vigente por medición tipada) ──────────────────
 //
 // Decisión de modelo (fix-loop 2, FIX C): los datos MEDIDOS del animal no son SOLO eventos. El
@@ -304,15 +363,33 @@ export function resolveCategoryNames(
 // más reciente de ese tipo) es un ATRIBUTO del animal que se muestra en la ficha. Solo las
 // observaciones libres quedan únicamente en el timeline (no tienen "valor actual").
 //
-// Para C3.1 los tipos cargables son peso + condición corporal → surfaceamos esos dos. Punto de
-// EXTENSIÓN a futuro (C3.2): estado reproductivo (preñez del último reproductive_event) y última
-// sanidad se agregan acá sumando ramas; la ficha las muestra sin tocar la lógica de selección.
+// Para C3.1 los tipos cargables eran peso + condición corporal. C3.2a agrega el ESTADO REPRODUCTIVO
+// (preñez): el valor vigente lo determina el evento reproductivo más reciente entre tacto/birth/abortion
+// (los que definen preñez; service/weaning/drying/rejection NO la determinan). La ficha lo muestra
+// (solo hembras) sin tocar la lógica de selección.
+
+/**
+ * Estado reproductivo vigente (preñez). Lo determina el evento más reciente entre tacto/birth/abortion:
+ *   - tacto positivo (status ≠ empty) → preñada, con el tamaño de preñez.
+ *   - tacto empty → vacía (vía tacto).
+ *   - birth → vacía (parió: ya no está preñada).
+ *   - abortion → vacía (vía aborto).
+ * `via` distingue el origen de un estado "vacía" (para que la ficha pueda matizar el copy si quiere).
+ */
+export type PregnancyState =
+  | { kind: 'pregnant'; status: 'small' | 'medium' | 'large'; date: string }
+  | { kind: 'empty'; date: string; via: 'tacto' | 'birth' | 'abortion' };
 
 export type CurrentState = {
   /** Peso vigente: kg + fecha del weight_event más reciente. Ausente si nunca se pesó. */
   weight?: { kg: number; date: string };
   /** Condición corporal vigente: score + fecha del condition_score_event más reciente. */
   conditionScore?: { score: number; date: string };
+  /**
+   * Estado reproductivo vigente (preñez). Ausente si no hay ningún evento reproductivo que la
+   * determine (tacto/birth/abortion). La ficha lo muestra solo para hembras.
+   */
+  pregnancy?: PregnancyState;
 };
 
 /**
@@ -322,8 +399,14 @@ export type CurrentState = {
  * ante cualquier orden de entrada). Timeline vacío/null → `{}`. Un evento con valor null (payload
  * incompleto) NO cuenta como vigente (no surfaceamos un "peso actual" sin número).
  *
- * Empate de fecha (mismo `eventDate` exacto) → desempate estable por `eventId` mayor (mismo criterio
- * que parseTimeline: el id "más alto" gana), para que el resultado sea determinístico.
+ * Empate de fecha (mismo `eventDate` exacto):
+ *   - weight / condition_score → desempate estable por `eventId` mayor (el id "más alto" gana).
+ *   - reproductive → desempate por `createdAt` (timestamp real de inserción) mayor si AMBOS lo tienen;
+ *     si empata o falta en alguno, cae a `eventId` mayor. Esto hace DETERMINÍSTICO el caso de un tacto
+ *     y un parto/aborto cargados el MISMO día: `eventDate` es columna `date` (sin hora) → no alcanza
+ *     para ordenarlos, y el `eventId` es un UUID random → desempatar por él sería ~50/50 (el parto
+ *     debe ganar siempre: parió/abortó ⇒ ya no está preñada). `createdAt` (now() de inserción) da el
+ *     orden total real. Lo enriquece applyReproMeta; sin él (query falló) cae al comportamiento previo.
  */
 export function deriveCurrentState(
   timeline: readonly TimelineItem[] | null | undefined,
@@ -336,8 +419,14 @@ export function deriveCurrentState(
     item: Extract<TimelineItem, { kind: 'condition_score' }>;
     ms: number;
   } | null = null;
+  // Preñez: el evento reproductivo más reciente que la DETERMINA (tacto/birth/abortion). Los demás
+  // event_type reproductivos (service/weaning/drying/rejection) NO cambian el estado de preñez.
+  let reproBest: {
+    item: Extract<TimelineItem, { kind: 'reproductive' }>;
+    ms: number;
+  } | null = null;
 
-  // ¿`candidate` es más reciente que `best`? Mayor fecha gana; empate → mayor eventId.
+  // ¿`candidate` es más reciente que `best`? Mayor fecha gana; empate → mayor eventId. (weight/score)
   const isNewer = (
     candDate: string,
     candId: string,
@@ -348,6 +437,24 @@ export function deriveCurrentState(
     if (Number.isFinite(cand) && cand !== best.ms) return cand > best.ms;
     // Empate (o fecha inválida) → desempate estable por eventId.
     return candId > best.item.eventId;
+  };
+
+  // Orden total real para los eventos repro: fecha → createdAt (si ambos lo tienen) → eventId.
+  const isNewerRepro = (
+    cand: Extract<TimelineItem, { kind: 'reproductive' }>,
+    best: { item: Extract<TimelineItem, { kind: 'reproductive' }>; ms: number } | null,
+  ): boolean => {
+    if (!best) return true;
+    const candMs = Date.parse(cand.eventDate);
+    if (Number.isFinite(candMs) && candMs !== best.ms) return candMs > best.ms;
+    // Mismo eventDate (mismo día): desempatar por createdAt si AMBOS lo tienen y difieren.
+    const candCreated = cand.createdAt != null ? Date.parse(cand.createdAt) : NaN;
+    const bestCreated = best.item.createdAt != null ? Date.parse(best.item.createdAt) : NaN;
+    if (Number.isFinite(candCreated) && Number.isFinite(bestCreated) && candCreated !== bestCreated) {
+      return candCreated > bestCreated;
+    }
+    // createdAt empata o falta en alguno → desempate estable por eventId (comportamiento previo).
+    return cand.eventId > best.item.eventId;
   };
 
   for (const it of timeline) {
@@ -361,6 +468,14 @@ export function deriveCurrentState(
       if (isNewer(it.eventDate, it.eventId, scoreBest)) {
         scoreBest = { item: it, ms: Date.parse(it.eventDate) };
       }
+    } else if (it.kind === 'reproductive') {
+      // Solo tacto/birth/abortion determinan preñez. service/weaning/drying/rejection no la cambian.
+      if (it.eventType !== 'tacto' && it.eventType !== 'birth' && it.eventType !== 'abortion') {
+        continue;
+      }
+      if (isNewerRepro(it, reproBest)) {
+        reproBest = { item: it, ms: Date.parse(it.eventDate) };
+      }
     }
   }
 
@@ -370,7 +485,44 @@ export function deriveCurrentState(
   if (scoreBest && scoreBest.item.score != null) {
     state.conditionScore = { score: scoreBest.item.score, date: scoreBest.item.eventDate };
   }
+  const pregnancy = reproBest ? toPregnancyState(reproBest.item) : undefined;
+  if (pregnancy) state.pregnancy = pregnancy;
   return state;
+}
+
+/**
+ * Mapea el evento reproductivo determinante (tacto/birth/abortion) a un PregnancyState. Un `tacto`
+ * con pregnancy_status null o desconocido NO se puede interpretar como preñez ni como vacía → devuelve
+ * undefined (no surfaceamos un estado a ciegas). birth/abortion siempre significan "vacía".
+ */
+function toPregnancyState(
+  item: Extract<TimelineItem, { kind: 'reproductive' }>,
+): PregnancyState | undefined {
+  const date = item.eventDate;
+  if (item.eventType === 'birth') return { kind: 'empty', date, via: 'birth' };
+  if (item.eventType === 'abortion') return { kind: 'empty', date, via: 'abortion' };
+  if (item.eventType === 'tacto') {
+    const s = item.pregnancyStatus;
+    if (s === 'empty') return { kind: 'empty', date, via: 'tacto' };
+    if (s === 'small' || s === 'medium' || s === 'large') {
+      return { kind: 'pregnant', status: s, date };
+    }
+    // tacto con status null/desconocido: sin dato claro → no surfaceamos preñez.
+    return undefined;
+  }
+  return undefined;
+}
+
+/**
+ * ¿El animal tuvo AL MENOS un aborto? (dominio Facundo §1, A2: el flag "tuvo aborto" — la "marquita
+ * roja" — se DERIVA de la existencia de un evento reproductivo `abortion`, NO es una columna de estado).
+ * PURA: recorre el timeline y devuelve true si hay un evento reproductivo con eventType 'abortion'.
+ * Timeline vacío/null → false. Es PERMANENTE: una vez que hay un aborto, el flag queda para siempre
+ * (no se "limpia" por una preñez posterior — es historia, marca al animal).
+ */
+export function hasAbortion(timeline: readonly TimelineItem[] | null | undefined): boolean {
+  if (!timeline) return false;
+  return timeline.some((it) => it.kind === 'reproductive' && it.eventType === 'abortion');
 }
 
 // ─── Fecha humana es-AR (PURA: `now` inyectado) ──────────────────────────────────────────
@@ -490,16 +642,53 @@ export function humanizeReproEventType(t: string | null | undefined): string {
   return REPRO_LABELS[t as ReproEventType] ?? 'Reproducción';
 }
 
+// B1 (dominio Facundo §4): término de campo SOLO (Cabeza/Cuerpo/Cola), sin "preñez chica/media/grande".
+// Lo usa el detalle del nodo "Tacto" del timeline (humanizePregnancyStatus). small=cola, medium=cuerpo,
+// large=cabeza; empty="Vacía".
 const PREGNANCY_LABELS: Record<PregnancyStatus, string> = {
   empty: 'Vacía',
-  small: 'Preñez chica (cabeza)',
-  medium: 'Preñez media (cuerpo)',
-  large: 'Preñez grande (cola)',
+  small: 'Cola',
+  medium: 'Cuerpo',
+  large: 'Cabeza',
 };
 
 export function humanizePregnancyStatus(s: string | null | undefined): string | null {
   if (!s) return null;
   return PREGNANCY_LABELS[s as PregnancyStatus] ?? null;
+}
+
+const SERVICE_TYPE_LABELS: Record<ServiceType, string> = {
+  natural: 'Monta natural',
+  ai: 'Inseminación (IA)',
+  te: 'Transferencia embrionaria (TE)',
+};
+
+export function humanizeServiceType(t: string | null | undefined): string | null {
+  if (!t) return null;
+  return SERVICE_TYPE_LABELS[t as ServiceType] ?? null;
+}
+
+/**
+ * Texto del ESTADO de preñez para la ficha ("Estado reproductivo"). El "via" y la fecha los compone
+ * la ficha aparte; este humanizer solo da el texto del estado. Ausente → null (la fila muestra "Sin
+ * registrar").
+ *
+ * B1 (dominio Facundo §4): la fila de estado lleva "Preñada (...)" con el término de campo entre
+ * paréntesis (cola/cuerpo/cabeza), SIN palabra de tamaño. Mantenemos "Preñada" como estado (a
+ * diferencia del selector y el timeline, que van solo con el término) para que se entienda que está
+ * preñada. small=cola, medium=cuerpo, large=cabeza.
+ */
+export function humanizePregnancyState(p: PregnancyState | undefined): string | null {
+  if (!p) return null;
+  if (p.kind === 'empty') return 'Vacía';
+  switch (p.status) {
+    case 'small':
+      return 'Preñada (cola)';
+    case 'medium':
+      return 'Preñada (cuerpo)';
+    case 'large':
+      return 'Preñada (cabeza)';
+  }
 }
 
 const SANITARY_LABELS: Record<SanitaryEventType, string> = {

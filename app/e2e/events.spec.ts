@@ -77,8 +77,10 @@ test('ficha → timeline (sparse inicial) → agregar peso y observación → ap
   await expect(page.getByText('Peso actual', { exact: true })).toBeVisible();
   await expect(page.getByText(/320 kg · /)).toBeVisible();
   // La condición corporal todavía no se cargó → "Sin registrar" (la sección se muestra siempre).
+  // Como el animal es HEMBRA, "Estado reproductivo" también muestra "Sin registrar" (C3.2a) → hay 2
+  // filas "Sin registrar"; usamos .first() (su presencia es lo que importa, no la unicidad).
   await expect(page.getByText('Condición corporal', { exact: true })).toBeVisible();
-  await expect(page.getByText('Sin registrar', { exact: true })).toBeVisible();
+  await expect(page.getByText('Sin registrar', { exact: true }).first()).toBeVisible();
 
   // ── Agregar una OBSERVACIÓN. ──────────────────────────────────────────────────────────
   await page.getByRole('button', { name: 'Agregar evento', exact: true }).click();
@@ -135,4 +137,539 @@ test('agregar-evento: validación EN VIVO + rechazo de submit inválido (peso va
   await expect(page.getByText('Ingresá el peso en kilos.', { exact: true })).toBeVisible({ timeout: 10_000 });
   // Sigue en el wizard (el campo de peso sigue visible; no aterrizó en la ficha).
   await expect(weightInput).toBeVisible();
+});
+
+// Gate por SEXO de los eventos REPRODUCTIVOS (bug que Raf pegó en web): el wizard "Agregar evento"
+// NO debe ofrecer Tacto/Servicio/Parto para un MACHO (tacto, servicio y parto son solo de hembras).
+// Sembramos un macho → abrimos su ficha → Agregar evento → el paso 1 muestra SOLO "General"
+// (Pesaje/Condición corporal/Observación), sin la sección "Reproductivo" ni sus 3 botones.
+// (El test "reproductivo" de abajo cubre el caso HEMBRA: la sección SÍ aparece — espejo del gate.)
+test('macho: el paso 1 NO ofrece eventos reproductivos (tacto/servicio/parto)', async ({ page }) => {
+  const user = await createTestUser('machogate');
+  await setUserPhone(user.id, '1123456789');
+  const { establishmentId, rodeoId } = await seedEstablishmentWithRodeo(user.id, 'Campo MachoGate');
+  const idv = `3311${Date.now().toString().slice(-5)}`;
+  // MACHO → categoría inicial torito. La preñez/servicio/parto no aplican.
+  await seedAnimal(establishmentId, rodeoId, { idv, sex: 'male' });
+
+  await page.goto('/');
+  await signIn(page, user);
+  await waitForHome(page);
+  await gotoAnimales(page);
+
+  const row = page.getByRole('button', { name: new RegExp(idv) }).first();
+  await expect(row).toBeVisible({ timeout: 20_000 });
+  await row.click();
+  await expect(page.getByText('Historial', { exact: true })).toBeVisible({ timeout: 20_000 });
+
+  await page.getByRole('button', { name: 'Agregar evento', exact: true }).click();
+  await expect(page.getByText('¿Qué querés cargar?', { exact: true })).toBeVisible({ timeout: 20_000 });
+
+  // SÍ están las 3 cards de "General" (un macho carga peso/condición/observación normal).
+  await expect(page.getByRole('button', { name: 'Pesaje', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Condición corporal', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Observación', exact: true })).toBeVisible();
+
+  // NO está la sección "Reproductivo" ni ninguno de sus 3 eventos (gate por sexo).
+  await expect(page.getByText('Reproductivo', { exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Tacto', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Servicio', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Parto', exact: true })).toHaveCount(0);
+});
+
+// C3.2a — Reproductivo: Tacto (preñez) + Servicio simple. Verifica:
+//   - el wizard agrupado (sección "Reproductivo") y el selector vertical de opciones,
+//   - el evento "Tacto" aparece en el timeline,
+//   - "Estado reproductivo" en "Estado actual" muestra "Preñada (cuerpo)" (deriveCurrentState),
+//   - la TRANSICIÓN de categoría server-side real: el CategoryBadge del hero pasa a "Vaquillona preñada"
+//     (un tacto positivo sobre una vaquillona dispara vaquillona → vaquillona_prenada),
+//   - un Servicio ("Monta natural") aparece luego en el timeline con su tipo enriquecido (service_type).
+//
+// La hembra se siembra con seedAnimal (categoría inicial vaquillona por sexo female, category_override
+// false por default) → la transición server-side aplica al insertar el tacto positivo.
+test('reproductivo: tacto (preñez media) → estado reproductivo + transición de categoría → servicio', async ({
+  page,
+}) => {
+  const user = await createTestUser('repro');
+  await setUserPhone(user.id, '1123456789');
+  const { establishmentId, rodeoId } = await seedEstablishmentWithRodeo(user.id, 'Campo Repro');
+  const idv = `5511${Date.now().toString().slice(-5)}`;
+  // Hembra → categoría inicial vaquillona (seedAnimal computa por sexo).
+  await seedAnimal(establishmentId, rodeoId, { idv, sex: 'female' });
+
+  await page.goto('/');
+  await signIn(page, user);
+  await waitForHome(page);
+  await gotoAnimales(page);
+
+  const row = page.getByRole('button', { name: new RegExp(idv) }).first();
+  await expect(row).toBeVisible({ timeout: 20_000 });
+  await row.click();
+
+  // Ficha cargada: el hero arranca en "Vaquillona" (categoría inicial). Anclamos al historial.
+  await expect(page.getByText('Historial', { exact: true })).toBeVisible({ timeout: 20_000 });
+  // Estado reproductivo arranca "Sin registrar" (no hay tacto/parto/aborto todavía). La sección
+  // muestra peso + condición + (hembra) estado reproductivo.
+  await expect(page.getByText('Estado reproductivo', { exact: true })).toBeVisible();
+
+  // ── Agregar un TACTO con preñez media. ──────────────────────────────────────────────────
+  await page.getByRole('button', { name: 'Agregar evento', exact: true }).click();
+
+  // Paso 1 agrupado: la sección "Reproductivo" existe; tocamos "Tacto".
+  await expect(page.getByText('¿Qué querés cargar?', { exact: true })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText('Reproductivo', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Tacto', exact: true }).click();
+
+  // Paso 2: selector vertical de resultado. B1: el label es SOLO el término de campo → "Cuerpo".
+  const pregOption = page.getByRole('button', { name: 'Cuerpo', exact: true });
+  await expect(pregOption).toBeVisible({ timeout: 20_000 });
+  await pregOption.click();
+  await page.getByRole('button', { name: 'Guardar evento', exact: true }).click();
+
+  // De vuelta en la ficha: el timeline muestra "Tacto"; el estado reproductivo muestra la preñez.
+  // B1: la fila de estado lleva "Preñada (cuerpo)" (término entre paréntesis, sin palabra de tamaño).
+  await expect(page.getByText('Tacto', { exact: true })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText(/Preñada \(cuerpo\) · /)).toBeVisible();
+
+  // La TRANSICIÓN server-side aplicó: el CategoryBadge del hero cambió de "Vaquillona" a la categoría
+  // preñada. El nombre del catálogo es "Vaquillona preñada" (contiene "preñada"). Lo distinguimos del
+  // texto del estado reproductivo ("Preñada — media (cuerpo)") matcheando el nombre de la CATEGORÍA
+  // (empieza con "Vaquillona"), tolerante a mayúsc./minúsc. y a un cambio menor de copy del catálogo.
+  await expect(page.getByText(/vaquillona pre[ñn]ada/i).first()).toBeVisible({ timeout: 20_000 });
+
+  // ── Agregar un SERVICIO (Monta natural). ────────────────────────────────────────────────
+  await page.getByRole('button', { name: 'Agregar evento', exact: true }).click();
+  await page.getByRole('button', { name: 'Servicio', exact: true }).click();
+
+  // Selector vertical de tipo de servicio. Elegimos "Monta natural".
+  const natural = page.getByRole('button', { name: 'Monta natural', exact: true });
+  await expect(natural).toBeVisible({ timeout: 20_000 });
+  await natural.click();
+  // Esta hembra FIGURA preñada (el tacto Cuerpo de arriba) → registrar un servicio dispara el AVISO
+  // SUAVE "figura preñada, ¿registrar el servicio igual?". Lo aceptamos (page.once('dialog')); sin este
+  // handler Playwright auto-dismiss el confirm y el servicio NO se registraría.
+  let serviceDialog = '';
+  page.once('dialog', async (dialog) => {
+    serviceDialog = dialog.message();
+    await dialog.accept();
+  });
+  await page.getByRole('button', { name: 'Guardar evento', exact: true }).click();
+  await expect.poll(() => serviceDialog, { timeout: 20_000 }).toMatch(/figura preñada/i);
+
+  // De vuelta en la ficha: el timeline muestra "Servicio" + el tipo enriquecido "Monta natural".
+  await expect(page.getByText('Cargando ficha…', { exact: true })).toHaveCount(0, { timeout: 20_000 });
+  await expect(page.getByText('Servicio', { exact: true }).filter({ visible: true })).toBeVisible({
+    timeout: 20_000,
+  });
+  await expect(page.getByText('Monta natural', { exact: true }).filter({ visible: true })).toBeVisible();
+  // El tacto sigue en el timeline.
+  await expect(page.getByText('Tacto', { exact: true }).filter({ visible: true }).first()).toBeVisible();
+});
+
+// C3.2b — PARTO con MELLIZOS (register_birth N terneros) + link a la MADRE (R14.7). Verifica:
+//   - el form de parto: lista dinámica de terneros (agregar un 2do → mellizos, R9.5),
+//   - register_birth crea ATÓMICAMENTE el evento + 2 terneros + transición de categoría server-side,
+//   - de vuelta en la madre: nodo "Parto" en el timeline; "Estado reproductivo → Vacía" (parió);
+//     el CategoryBadge transicionó (vaquillona_prenada → "vaca…", contiene "vaca"),
+//   - los 2 terneros aparecen en la tab Animales con el visual "recién nacido — pendiente de caravana",
+//   - abrir UN ternero → la card "Madre" muestra el idv de la madre → tocarla → ficha de la madre.
+//
+// Para que la madre sea vaquillona_prenada (y el parto la transicione a vaca_segundo_servicio),
+// primero le damos un TACTO positivo por UI (B1: el label de cabeza/large es "Cabeza"), reusando C3.2a.
+test('parto con mellizos: register_birth crea 2 terneros + transición + link a la madre (R14.7)', async ({
+  page,
+}) => {
+  const user = await createTestUser('parto');
+  await setUserPhone(user.id, '1123456789');
+  const { establishmentId, rodeoId } = await seedEstablishmentWithRodeo(user.id, 'Campo Parto');
+  // Hembra → categoría inicial vaquillona. El IDV de la MADRE: lo usamos para abrir su ficha y, tras
+  // navegar desde el ternero, para confirmar que aterrizamos en ella.
+  const motherIdv = `4411${Date.now().toString().slice(-5)}`;
+  await seedAnimal(establishmentId, rodeoId, { idv: motherIdv, sex: 'female' });
+
+  await page.goto('/');
+  await signIn(page, user);
+  await waitForHome(page);
+  await gotoAnimales(page);
+
+  const motherRow = page.getByRole('button', { name: new RegExp(motherIdv) }).first();
+  await expect(motherRow).toBeVisible({ timeout: 20_000 });
+  await motherRow.click();
+  await expect(page.getByText('Historial', { exact: true })).toBeVisible({ timeout: 20_000 });
+
+  // ── 1) Tacto positivo (preñez grande) → la madre pasa a vaquillona_prenada. ───────────────
+  await page.getByRole('button', { name: 'Agregar evento', exact: true }).click();
+  await page.getByRole('button', { name: 'Tacto', exact: true }).click();
+  const pregOption = page.getByRole('button', { name: 'Cabeza', exact: true });
+  await expect(pregOption).toBeVisible({ timeout: 20_000 });
+  await pregOption.click();
+  await page.getByRole('button', { name: 'Guardar evento', exact: true }).click();
+  await expect(page.getByText('Tacto', { exact: true })).toBeVisible({ timeout: 20_000 });
+  // La transición server-side aplicó: el badge contiene "preñada" (vaquillona preñada).
+  await expect(page.getByText(/vaquillona pre[ñn]ada/i).first()).toBeVisible({ timeout: 20_000 });
+
+  // ── 2) PARTO con 2 terneros (mellizos). ───────────────────────────────────────────────────
+  await page.getByRole('button', { name: 'Agregar evento', exact: true }).click();
+  await expect(page.getByText('¿Qué querés cargar?', { exact: true })).toBeVisible({ timeout: 20_000 });
+  await page.getByRole('button', { name: 'Parto', exact: true }).click();
+
+  // Por default hay UN ternero ("Ternero 1"). Agregamos un 2do (mellizos, R9.5).
+  await expect(page.getByText('Ternero 1', { exact: true })).toBeVisible({ timeout: 20_000 });
+  await page.getByRole('button', { name: 'Agregar otro ternero', exact: true }).click();
+  await expect(page.getByText('Ternero 2', { exact: true })).toBeVisible();
+
+  // Elegimos el sexo de cada ternero (los selectores Macho/Hembra son por ternero; hay 2 de cada uno
+  // → tomamos por orden con .nth()). Ternero 1 = Macho (1er "Macho"), Ternero 2 = Hembra (2do "Hembra").
+  await page.getByRole('button', { name: 'Macho', exact: true }).first().click();
+  await page.getByRole('button', { name: 'Hembra', exact: true }).nth(1).click();
+
+  await page.getByRole('button', { name: 'Guardar evento', exact: true }).click();
+
+  // ── 3) De vuelta en la ficha de la MADRE. ─────────────────────────────────────────────────
+  // ANCLA: router.back() vuelve a la ficha y useFocusEffect dispara un refetch (detail+timeline+madre
+  // en Promise.all, con "Cargando ficha…" hasta que resuelven). Esperamos a que la ficha esté
+  // RECARGADA antes de asertar el estado derivado: "Historial" vuelve a estar y el "Cargando ficha…"
+  // se fue. Sin esto, podríamos leer el estado del render previo (antes del refetch). Espera por
+  // estado/elemento, NO timeout fijo.
+  await expect(page.getByText('Cargando ficha…', { exact: true })).toHaveCount(0, { timeout: 20_000 });
+  await expect(page.getByText('Historial', { exact: true })).toBeVisible({ timeout: 20_000 });
+
+  // Nodo "Parto" en el timeline (señal determinística más fuerte: el evento se persistió).
+  await expect(page.getByText('Parto', { exact: true })).toBeVisible({ timeout: 20_000 });
+  // Estado reproductivo → "Vacía · …" (parió: ya no está preñada; deriveCurrentState con birth → empty).
+  // DETERMINÍSTICO tras el fix de TAREA 2: el parto (created_at posterior) gana al tacto del mismo día,
+  // aunque ambos caigan en el mismo event_date (columna `date`, sin hora). Antes era ~50% flake.
+  await expect(page.getByText(/^Vacía · /)).toBeVisible({ timeout: 20_000 });
+  // El CategoryBadge transicionó: vaquillona_prenada → vaca_segundo_servicio. El nombre del catálogo
+  // contiene "vaca" (tolerante a copy exacto: "Vaca de segundo servicio" / similar). Lo distinguimos
+  // del badge previo (que ya no debe decir "vaquillona preñada").
+  // NOTA: NO asertamos que "vaquillona preñada" desaparezca: el timeline conserva el nodo de
+  // category_change "Cambió a Vaquillona preñada (automático)" del tacto → ese texto persiste en el
+  // historial para siempre (es historia, no estado). La señal de transición es el badge "vaca" del hero
+  // + el estado reproductivo "Vacía" + el nodo "Parto", todos ya asertados arriba.
+  await expect(page.getByText(/vaca/i).first()).toBeVisible({ timeout: 20_000 });
+
+  // ── 4) Los 2 terneros aparecen en la tab Animales con el visual de "pendiente de caravana". ─
+  await page.getByRole('button', { name: 'Volver', exact: true }).click();
+  await gotoAnimales(page);
+  // El visual_id_alt fallback "recién nacido — pendiente de caravana" aparece (hay 2; tomamos uno).
+  const calfRow = page
+    .getByRole('button', { name: /recién nacido — pendiente de caravana/ })
+    .first();
+  await expect(calfRow).toBeVisible({ timeout: 20_000 });
+
+  // ── 5) Abrir UN ternero → card "Madre" → tocarla → ficha de la madre. ─────────────────────
+  await calfRow.click();
+  // La ficha del ternero: la card "Madre" muestra el idv de la madre (R14.7).
+  await expect(page.getByText('Madre', { exact: true })).toBeVisible({ timeout: 20_000 });
+  const motherCard = page.getByRole('button', { name: new RegExp(`ficha de la madre.*${motherIdv}`) });
+  await expect(motherCard).toBeVisible({ timeout: 20_000 });
+  await motherCard.click();
+
+  // Aterrizamos en la ficha de la MADRE. ANCLA: el IDV de la madre (hero + fila de identificación).
+  //
+  // ⚠️ En web, Expo Router deja montadas DETRÁS las pantallas previas del stack (aria-hidden): acá
+  // conviven la instancia VIEJA de la ficha de la madre (la del paso 3, oculta) + la del ternero
+  // (oculta) + la NUEVA de la madre (visible). Por eso el motherIdv aparece varias veces en el DOM y
+  // un `.first()` puede caer en una instancia OCULTA → "hidden". Filtramos a la ocurrencia VISIBLE
+  // (`filter({ visible: true })`) para anclar inequívocamente en la ficha en pantalla. Espera por
+  // estado/elemento, sin timeout fijo.
+  await expect(
+    page.getByText(motherIdv, { exact: true }).filter({ visible: true }).first(),
+  ).toBeVisible({ timeout: 20_000 });
+  // Y el "Parto" sigue en su timeline visible (confirma que es la madre, no otro animal).
+  await expect(
+    page.getByText('Parto', { exact: true }).filter({ visible: true }).first(),
+  ).toBeVisible({ timeout: 20_000 });
+});
+
+// C3.2 gating final — AVISO SUAVE: PARTO sobre una hembra que NO figura preñada (no bloqueo). Un parto
+// solo lo da una hembra preñada, PERO puede estar preñada de verdad sin el tacto cargado (figura "Sin
+// registrar"); el parto ya es prueba de la preñez. Entonces NO bloqueamos: al "Guardar evento" de un
+// PARTO sobre una hembra que no figura preñada, aparece una CONFIRMACIÓN suave ("no figura preñada,
+// ¿registrar igual?"). Si confirma → procede y crea el parto. Si la hembra SÍ figura preñada (tacto
+// positivo previo), NO hay aviso → eso ya lo cubre el test "parto con mellizos" de arriba (le da un
+// tacto Cabeza antes del parto → figura preñada → guarda directo, sin window.confirm).
+//
+// El aviso es window.confirm en web → en Playwright hay que manejar el dialog explícitamente
+// (page.once('dialog')): si NO lo manejáramos, Playwright lo auto-dismiss (devuelve false) y el parto
+// no procedería. Asertamos el TEXTO del diálogo + que al aceptar el parto se crea.
+test('parto en hembra NO preñada: aparece el aviso suave → al confirmar crea el parto (no bloqueo)', async ({
+  page,
+}) => {
+  const user = await createTestUser('partoaviso');
+  await setUserPhone(user.id, '1123456789');
+  const { establishmentId, rodeoId } = await seedEstablishmentWithRodeo(user.id, 'Campo PartoAviso');
+  // Hembra → vaquillona. SIN tacto previo → "Estado reproductivo: Sin registrar" → NO figura preñada.
+  const idv = `2211${Date.now().toString().slice(-5)}`;
+  await seedAnimal(establishmentId, rodeoId, { idv, sex: 'female' });
+
+  await page.goto('/');
+  await signIn(page, user);
+  await waitForHome(page);
+  await gotoAnimales(page);
+
+  const row = page.getByRole('button', { name: new RegExp(idv) }).first();
+  await expect(row).toBeVisible({ timeout: 20_000 });
+  await row.click();
+  await expect(page.getByText('Historial', { exact: true })).toBeVisible({ timeout: 20_000 });
+  // De partida la hembra NO figura preñada (Sin registrar) — el estado reproductivo arranca vacío.
+  await expect(page.getByText('Estado reproductivo', { exact: true })).toBeVisible();
+
+  // ── Registrar un PARTO directamente, SIN tacto previo. ────────────────────────────────────
+  await page.getByRole('button', { name: 'Agregar evento', exact: true }).click();
+  await expect(page.getByText('¿Qué querés cargar?', { exact: true })).toBeVisible({ timeout: 20_000 });
+  await page.getByRole('button', { name: 'Parto', exact: true }).click();
+
+  // Ternero 1: elegimos el sexo (requerido) — un solo ternero alcanza.
+  await expect(page.getByText('Ternero 1', { exact: true })).toBeVisible({ timeout: 20_000 });
+  await page.getByRole('button', { name: 'Macho', exact: true }).first().click();
+
+  // El "Guardar evento" dispara el AVISO SUAVE (window.confirm). Capturamos el dialog: verificamos
+  // que el mensaje habla de "no figura preñada" y lo ACEPTAMOS (= "Registrar igual"). Sin este
+  // handler, Playwright auto-dismiss el confirm (false) y el parto no se crearía.
+  let dialogText = '';
+  page.once('dialog', async (dialog) => {
+    dialogText = dialog.message();
+    await dialog.accept();
+  });
+  await page.getByRole('button', { name: 'Guardar evento', exact: true }).click();
+
+  // El diálogo apareció con el copy del aviso suave (no un error de "no podés", sino "¿registrar igual?").
+  await expect.poll(() => dialogText, { timeout: 20_000 }).toMatch(/no figura preñada/i);
+  await expect.poll(() => dialogText).toMatch(/registrar el parto igual/i);
+
+  // Tras CONFIRMAR el parto procede: de vuelta en la ficha de la madre, el nodo "Parto" aparece en el
+  // timeline (se persistió) y el estado reproductivo pasa a "Vacía" (parió).
+  await expect(page.getByText('Cargando ficha…', { exact: true })).toHaveCount(0, { timeout: 20_000 });
+  await expect(page.getByText('Parto', { exact: true })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText(/^Vacía · /)).toBeVisible({ timeout: 20_000 });
+});
+
+// C3.2 gating final — ESPEJO (camino preñada): una hembra que SÍ figura preñada (tacto positivo previo)
+// NO debe disparar el aviso al registrar el parto → guarda DIRECTO. Verificación fuerte: registramos un
+// page.on('dialog') que FALLA si aparece un confirm; el parto debe completarse sin él.
+test('parto en hembra PREÑADA: NO aparece aviso → guarda directo (sin confirmación)', async ({
+  page,
+}) => {
+  const user = await createTestUser('partosinaviso');
+  await setUserPhone(user.id, '1123456789');
+  const { establishmentId, rodeoId } = await seedEstablishmentWithRodeo(user.id, 'Campo PartoSinAviso');
+  const idv = `1122${Date.now().toString().slice(-5)}`;
+  await seedAnimal(establishmentId, rodeoId, { idv, sex: 'female' });
+
+  // Cualquier window.confirm que se dispare es un BUG (la hembra figura preñada → no debe avisar).
+  let unexpectedDialog = false;
+  page.on('dialog', async (dialog) => {
+    unexpectedDialog = true;
+    await dialog.dismiss();
+  });
+
+  await page.goto('/');
+  await signIn(page, user);
+  await waitForHome(page);
+  await gotoAnimales(page);
+
+  const row = page.getByRole('button', { name: new RegExp(idv) }).first();
+  await expect(row).toBeVisible({ timeout: 20_000 });
+  await row.click();
+  await expect(page.getByText('Historial', { exact: true })).toBeVisible({ timeout: 20_000 });
+
+  // ── 1) Tacto positivo (Cabeza) → la hembra FIGURA preñada. ────────────────────────────────
+  await page.getByRole('button', { name: 'Agregar evento', exact: true }).click();
+  await page.getByRole('button', { name: 'Tacto', exact: true }).click();
+  const pregOption = page.getByRole('button', { name: 'Cabeza', exact: true });
+  await expect(pregOption).toBeVisible({ timeout: 20_000 });
+  await pregOption.click();
+  await page.getByRole('button', { name: 'Guardar evento', exact: true }).click();
+  await expect(page.getByText('Tacto', { exact: true })).toBeVisible({ timeout: 20_000 });
+  // El estado reproductivo confirma que figura preñada (deriveCurrentState computa pregnant del tacto).
+  await expect(page.getByText(/Preñada \(cabeza\) · /)).toBeVisible({ timeout: 20_000 });
+
+  // ── 2) PARTO → debe guardar DIRECTO, sin aviso. ───────────────────────────────────────────
+  await page.getByRole('button', { name: 'Agregar evento', exact: true }).click();
+  await page.getByRole('button', { name: 'Parto', exact: true }).click();
+  await expect(page.getByText('Ternero 1', { exact: true })).toBeVisible({ timeout: 20_000 });
+  await page.getByRole('button', { name: 'Macho', exact: true }).first().click();
+  await page.getByRole('button', { name: 'Guardar evento', exact: true }).click();
+
+  // El parto se creó sin confirmación: nodo "Parto" + estado "Vacía".
+  await expect(page.getByText('Cargando ficha…', { exact: true })).toHaveCount(0, { timeout: 20_000 });
+  await expect(page.getByText('Parto', { exact: true })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText(/^Vacía · /)).toBeVisible({ timeout: 20_000 });
+  // Y NUNCA apareció un window.confirm (la hembra figuraba preñada → guarda directo).
+  expect(unexpectedDialog).toBe(false);
+});
+
+// C3.2 gating reproductivo — ABORTO (nuevo tipo): cargar un aborto sobre una hembra → aparece el nodo
+// "Aborto" en el timeline + el estado reproductivo pasa a "Vacía" (el aborto revierte la preñez) + el
+// flag "Tuvo aborto" (terracota, A2) aparece en el hero de la ficha. El aborto sobre una hembra que NO
+// figura preñada dispara el aviso suave "no figura preñada, ¿registrar el aborto igual?" → lo
+// confirmamos (page.once('dialog')) para que proceda.
+test('aborto: cargar un aborto → nodo "Aborto" + estado "Vacía" + flag "Tuvo aborto" en la ficha', async ({
+  page,
+}) => {
+  const user = await createTestUser('aborto');
+  await setUserPhone(user.id, '1123456789');
+  const { establishmentId, rodeoId } = await seedEstablishmentWithRodeo(user.id, 'Campo Aborto');
+  const idv = `8811${Date.now().toString().slice(-5)}`;
+  // Hembra → vaquillona. La sembramos PREÑADA por UI (tacto Cabeza) para que el aborto no dispare el
+  // aviso de "no figura preñada" en este test (lo que probamos acá es el evento + estado + flag).
+  await seedAnimal(establishmentId, rodeoId, { idv, sex: 'female' });
+
+  await page.goto('/');
+  await signIn(page, user);
+  await waitForHome(page);
+  await gotoAnimales(page);
+
+  const row = page.getByRole('button', { name: new RegExp(idv) }).first();
+  await expect(row).toBeVisible({ timeout: 20_000 });
+  await row.click();
+  await expect(page.getByText('Historial', { exact: true })).toBeVisible({ timeout: 20_000 });
+
+  // ── 1) Tacto positivo (Cabeza) → la hembra FIGURA preñada (así el aborto guarda directo). ──
+  await page.getByRole('button', { name: 'Agregar evento', exact: true }).click();
+  await page.getByRole('button', { name: 'Tacto', exact: true }).click();
+  const pregOption = page.getByRole('button', { name: 'Cabeza', exact: true });
+  await expect(pregOption).toBeVisible({ timeout: 20_000 });
+  await pregOption.click();
+  await page.getByRole('button', { name: 'Guardar evento', exact: true }).click();
+  await expect(page.getByText('Tacto', { exact: true })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText(/Preñada \(cabeza\) · /)).toBeVisible({ timeout: 20_000 });
+
+  // ── 2) Cargar un ABORTO (la 4ta card de "Reproductivo"). ──────────────────────────────────
+  await page.getByRole('button', { name: 'Agregar evento', exact: true }).click();
+  await expect(page.getByText('¿Qué querés cargar?', { exact: true })).toBeVisible({ timeout: 20_000 });
+  // La card "Aborto" existe en la sección Reproductivo (solo hembras).
+  await page.getByRole('button', { name: 'Aborto', exact: true }).click();
+
+  // Paso 2 "Aborto": solo fecha (prefill hoy) + notas opcionales. El campo de fecha del aborto confirma
+  // que estamos en el form correcto. Guardamos directo (figura preñada → sin aviso).
+  await expect(page.getByLabel('Fecha del aborto (AAAA-MM-DD)', { exact: true })).toBeVisible({
+    timeout: 20_000,
+  });
+  await page.getByRole('button', { name: 'Guardar evento', exact: true }).click();
+
+  // ── 3) De vuelta en la ficha: nodo "Aborto" + estado "Vacía" + flag "Tuvo aborto". ──────────
+  await expect(page.getByText('Cargando ficha…', { exact: true })).toHaveCount(0, { timeout: 20_000 });
+  await expect(page.getByText('Historial', { exact: true }).filter({ visible: true })).toBeVisible({
+    timeout: 20_000,
+  });
+  // Nodo "Aborto" en el timeline (el evento se persistió). filter visible: Expo Router web deja pantallas
+  // previas montadas aria-hidden (la card "Aborto" del paso 1) → anclamos a la ocurrencia visible.
+  await expect(
+    page.getByText('Aborto', { exact: true }).filter({ visible: true }).first(),
+  ).toBeVisible({ timeout: 20_000 });
+  // El aborto revierte la preñez → estado reproductivo "Vacía · …" (deriveCurrentState con abortion).
+  await expect(page.getByText(/^Vacía · /)).toBeVisible({ timeout: 20_000 });
+  // El flag "Tuvo aborto" (A2, terracota) aparece en el hero — permanente, derivado del timeline.
+  await expect(page.getByText('Tuvo aborto', { exact: true }).filter({ visible: true })).toBeVisible({
+    timeout: 20_000,
+  });
+});
+
+// C3.2 gating reproductivo — AVISO SUAVE de SERVICIO sobre una hembra PREÑADA (no bloqueo). No se da
+// servicio a una hembra ya preñada, PERO puede figurar preñada por un tacto viejo y haberlo perdido sin
+// registrarlo → avisamos suave ("figura preñada, ¿registrar el servicio igual?") y dejamos confirmar.
+// La hembra figura preñada por un tacto positivo previo (Cabeza).
+test('servicio en hembra PREÑADA: aparece el aviso "figura preñada" → al confirmar registra', async ({
+  page,
+}) => {
+  const user = await createTestUser('servpren');
+  await setUserPhone(user.id, '1123456789');
+  const { establishmentId, rodeoId } = await seedEstablishmentWithRodeo(user.id, 'Campo ServPren');
+  const idv = `9911${Date.now().toString().slice(-5)}`;
+  await seedAnimal(establishmentId, rodeoId, { idv, sex: 'female' });
+
+  await page.goto('/');
+  await signIn(page, user);
+  await waitForHome(page);
+  await gotoAnimales(page);
+
+  const row = page.getByRole('button', { name: new RegExp(idv) }).first();
+  await expect(row).toBeVisible({ timeout: 20_000 });
+  await row.click();
+  await expect(page.getByText('Historial', { exact: true })).toBeVisible({ timeout: 20_000 });
+
+  // ── 1) Tacto positivo (Cabeza) → la hembra FIGURA preñada. ────────────────────────────────
+  await page.getByRole('button', { name: 'Agregar evento', exact: true }).click();
+  await page.getByRole('button', { name: 'Tacto', exact: true }).click();
+  const pregOption = page.getByRole('button', { name: 'Cabeza', exact: true });
+  await expect(pregOption).toBeVisible({ timeout: 20_000 });
+  await pregOption.click();
+  await page.getByRole('button', { name: 'Guardar evento', exact: true }).click();
+  await expect(page.getByText('Tacto', { exact: true })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText(/Preñada \(cabeza\) · /)).toBeVisible({ timeout: 20_000 });
+
+  // ── 2) Registrar un SERVICIO → debe disparar el aviso suave "figura preñada". ───────────────
+  await page.getByRole('button', { name: 'Agregar evento', exact: true }).click();
+  await page.getByRole('button', { name: 'Servicio', exact: true }).click();
+  const natural = page.getByRole('button', { name: 'Monta natural', exact: true });
+  await expect(natural).toBeVisible({ timeout: 20_000 });
+  await natural.click();
+
+  // El "Guardar evento" dispara el window.confirm del aviso suave: capturamos el dialog, verificamos el
+  // copy ("figura preñada" / "registrar el servicio igual") y lo ACEPTAMOS.
+  let dialogText = '';
+  page.once('dialog', async (dialog) => {
+    dialogText = dialog.message();
+    await dialog.accept();
+  });
+  await page.getByRole('button', { name: 'Guardar evento', exact: true }).click();
+
+  await expect.poll(() => dialogText, { timeout: 20_000 }).toMatch(/figura preñada/i);
+  await expect.poll(() => dialogText).toMatch(/registrar el servicio igual/i);
+
+  // Tras confirmar, el servicio se registra: de vuelta en la ficha el nodo "Servicio" + "Monta natural".
+  await expect(page.getByText('Cargando ficha…', { exact: true })).toHaveCount(0, { timeout: 20_000 });
+  await expect(page.getByText('Servicio', { exact: true })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText('Monta natural', { exact: true })).toBeVisible({ timeout: 20_000 });
+});
+
+// C3.2 gating reproductivo — ESPEJO: SERVICIO sobre una hembra que NO figura preñada NO debe avisar →
+// guarda DIRECTO (es el caso normal). Verificación fuerte: page.on('dialog') que FALLA si aparece un
+// confirm; el servicio debe completarse sin él.
+test('servicio en hembra NO preñada: NO aparece aviso → guarda directo (sin confirmación)', async ({
+  page,
+}) => {
+  const user = await createTestUser('servsinpren');
+  await setUserPhone(user.id, '1123456789');
+  const { establishmentId, rodeoId } = await seedEstablishmentWithRodeo(user.id, 'Campo ServSinPren');
+  // Hembra → vaquillona, SIN tacto previo → NO figura preñada (Sin registrar).
+  const idv = `7733${Date.now().toString().slice(-5)}`;
+  await seedAnimal(establishmentId, rodeoId, { idv, sex: 'female' });
+
+  // Cualquier window.confirm que se dispare es un BUG (la hembra no figura preñada → servicio directo).
+  let unexpectedDialog = false;
+  page.on('dialog', async (dialog) => {
+    unexpectedDialog = true;
+    await dialog.dismiss();
+  });
+
+  await page.goto('/');
+  await signIn(page, user);
+  await waitForHome(page);
+  await gotoAnimales(page);
+
+  const row = page.getByRole('button', { name: new RegExp(idv) }).first();
+  await expect(row).toBeVisible({ timeout: 20_000 });
+  await row.click();
+  await expect(page.getByText('Historial', { exact: true })).toBeVisible({ timeout: 20_000 });
+  // De partida NO figura preñada.
+  await expect(page.getByText('Estado reproductivo', { exact: true })).toBeVisible();
+
+  // Registrar un SERVICIO directamente, SIN tacto previo → debe guardar sin aviso.
+  await page.getByRole('button', { name: 'Agregar evento', exact: true }).click();
+  await page.getByRole('button', { name: 'Servicio', exact: true }).click();
+  const natural = page.getByRole('button', { name: 'Monta natural', exact: true });
+  await expect(natural).toBeVisible({ timeout: 20_000 });
+  await natural.click();
+  await page.getByRole('button', { name: 'Guardar evento', exact: true }).click();
+
+  // El servicio se creó sin confirmación: nodo "Servicio" + "Monta natural".
+  await expect(page.getByText('Cargando ficha…', { exact: true })).toHaveCount(0, { timeout: 20_000 });
+  await expect(page.getByText('Servicio', { exact: true })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText('Monta natural', { exact: true })).toBeVisible({ timeout: 20_000 });
+  // Y NUNCA apareció un window.confirm (no figura preñada → guarda directo).
+  expect(unexpectedDialog).toBe(false);
 });

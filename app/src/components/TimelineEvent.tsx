@@ -27,6 +27,7 @@ import {
   Baby,
   Flag,
   FlaskConical,
+  HeartCrack,
   Scale,
   StickyNote,
   Syringe,
@@ -42,6 +43,7 @@ import {
   humanizeRoute,
   humanizeSampleType,
   humanizeSanitaryEventType,
+  humanizeServiceType,
   isDateOnlyKind,
   type TimelineItem,
 } from '../utils/event-timeline';
@@ -97,12 +99,20 @@ function present(item: TimelineItem): Presentation {
       };
     }
     case 'reproductive': {
+      // El detalle muestra lo más informativo del evento: para tacto, el resultado de preñez; para
+      // servicio, el tipo (monta/IA/TE); si no hay ninguno, las notas. Tacto positivo y servicio son
+      // mutuamente excluyentes por event_type, así que no compiten.
       const preg = humanizePregnancyStatus(item.pregnancyStatus);
+      const svc = humanizeServiceType(item.serviceType);
+      // ABORTO = pérdida de la preñez (señal médica): acento $terracota + ícono HeartCrack (corazón
+      // roto = pérdida), igual que los sanitarios. El resto del reproductivo (tacto/servicio/parto) usa
+      // el $primary + Baby de siempre. El título lo da humanizeReproEventType ("Aborto"/"Tacto"/…).
+      const isAbortion = item.eventType === 'abortion';
       return {
-        icon: Baby,
-        accent: 'primary',
+        icon: isAbortion ? HeartCrack : Baby,
+        accent: isAbortion ? 'terracota' : 'primary',
         title: humanizeReproEventType(item.eventType),
-        detail: preg ?? (item.notes ?? null),
+        detail: preg ?? svc ?? (item.notes ?? null),
       };
     }
     case 'lab_sample': {

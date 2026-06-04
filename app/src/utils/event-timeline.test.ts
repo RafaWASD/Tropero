@@ -8,16 +8,21 @@ import {
   parseTimeline,
   collectCategoryIds,
   resolveCategoryNames,
+  applyReproMeta,
   formatEventDate,
   isDateOnlyKind,
   humanizeReproEventType,
   humanizePregnancyStatus,
+  humanizeServiceType,
+  humanizePregnancyState,
   humanizeSanitaryEventType,
   humanizeSampleType,
   humanizeRoute,
   describeCategoryChange,
   deriveCurrentState,
+  hasAbortion,
   type TimelineRow,
+  type PregnancyState,
 } from './event-timeline.ts';
 
 // ─── Parseo por kind (los 7 orígenes de la RPC 0035) ─────────────────────────────────────
@@ -62,6 +67,8 @@ test('parseTimelineRow: reproductive con todos los campos', () => {
     assert.equal(item.eventType, 'tacto');
     assert.equal(item.pregnancyStatus, 'medium');
     assert.equal(item.calfId, null);
+    // service_type NO viene en la RPC 0035 → el parser lo deja null (lo completa applyServiceTypes).
+    assert.equal(item.serviceType, null);
   }
 });
 
@@ -263,6 +270,63 @@ test('resolveCategoryNames: id sin nombre en el mapa → null (no crashea)', () 
   if (it.kind === 'category_change') assert.equal(it.toCategoryName, null);
 });
 
+// ─── applyReproMeta (enriquece service_type + created_at, espejo de resolveCategoryNames) ──────
+
+test('applyReproMeta: setea serviceType Y createdAt al item reproductive por eventId', () => {
+  const items = parseTimeline([
+    { event_kind: 'reproductive', event_id: 'r1', event_date: '2025-03-01T00:00:00Z', payload: { event_type: 'service' } },
+  ]);
+  const out = applyReproMeta(items, { r1: { serviceType: 'ai', createdAt: '2025-03-01T12:34:56Z' } });
+  const it = out[0];
+  assert.equal(it.kind, 'reproductive');
+  if (it.kind === 'reproductive') {
+    assert.equal(it.serviceType, 'ai');
+    assert.equal(it.createdAt, '2025-03-01T12:34:56Z');
+  }
+});
+
+test('applyReproMeta: createdAt ausente → null; serviceType no-enum → null (tolerante)', () => {
+  const items = parseTimeline([
+    { event_kind: 'reproductive', event_id: 'r1', event_date: '2025-03-01T00:00:00Z', payload: { event_type: 'tacto', pregnancy_status: 'small' } },
+  ]);
+  // meta con serviceType basura y sin createdAt.
+  const out = applyReproMeta(items, { r1: { serviceType: 'basura' } });
+  const it = out[0];
+  if (it.kind === 'reproductive') {
+    assert.equal(it.serviceType, null);
+    assert.equal(it.createdAt, null);
+  }
+});
+
+test('applyReproMeta: id faltante en el mapa → serviceType y createdAt null', () => {
+  const items = parseTimeline([
+    { event_kind: 'reproductive', event_id: 'r1', event_date: '2025-03-01T00:00:00Z', payload: { event_type: 'tacto', pregnancy_status: 'medium' } },
+  ]);
+  const out = applyReproMeta(items, {}); // r1 ausente
+  const it = out[0];
+  if (it.kind === 'reproductive') {
+    assert.equal(it.serviceType, null);
+    assert.equal(it.createdAt, null);
+  }
+});
+
+test('applyReproMeta: NO muta el input + deja intactos los NO reproductive', () => {
+  const items = parseTimeline([
+    { event_kind: 'reproductive', event_id: 'r1', event_date: '2025-03-01T00:00:00Z', payload: { event_type: 'service' } },
+    { event_kind: 'weight', event_id: 'w1', event_date: '2025-02-01T00:00:00Z', payload: { weight_kg: 300 } },
+  ]);
+  const before = items.find((i) => i.eventId === 'r1')!;
+  const out = applyReproMeta(items, { r1: { serviceType: 'natural', createdAt: '2025-03-01T08:00:00Z' } });
+  // el original sigue con createdAt null (no se mutó).
+  if (before.kind === 'reproductive') {
+    assert.equal(before.serviceType, null);
+    assert.equal(before.createdAt, null);
+  }
+  // el weight pasa intacto.
+  const w = out.find((i) => i.eventId === 'w1')!;
+  assert.equal(w.kind, 'weight');
+});
+
 // ─── formatEventDate (PURA, `now` fijo) ───────────────────────────────────────────────────
 
 const NOW = new Date(2025, 2, 15, 12, 0, 0); // 15 mar 2025, 12:00 local
@@ -394,11 +458,38 @@ test('humanizeReproEventType', () => {
   assert.equal(humanizeReproEventType('desconocido'), 'Reproducción');
 });
 
-test('humanizePregnancyStatus', () => {
+test('humanizePregnancyStatus: B1 término de campo SOLO (Cabeza/Cuerpo/Cola)', () => {
   assert.equal(humanizePregnancyStatus('empty'), 'Vacía');
-  assert.equal(humanizePregnancyStatus('large'), 'Preñez grande (cola)');
+  assert.equal(humanizePregnancyStatus('small'), 'Cola');
+  assert.equal(humanizePregnancyStatus('medium'), 'Cuerpo');
+  assert.equal(humanizePregnancyStatus('large'), 'Cabeza');
   assert.equal(humanizePregnancyStatus(null), null);
   assert.equal(humanizePregnancyStatus('xx'), null);
+});
+
+test('humanizeServiceType: los 3 valores + null/desconocido', () => {
+  assert.equal(humanizeServiceType('natural'), 'Monta natural');
+  assert.equal(humanizeServiceType('ai'), 'Inseminación (IA)');
+  assert.equal(humanizeServiceType('te'), 'Transferencia embrionaria (TE)');
+  assert.equal(humanizeServiceType(null), null);
+  assert.equal(humanizeServiceType(undefined), null);
+  assert.equal(humanizeServiceType('xx'), null);
+});
+
+test('humanizePregnancyState: B1 "Preñada (cola/cuerpo/cabeza)" + Vacía + undefined', () => {
+  const small: PregnancyState = { kind: 'pregnant', status: 'small', date: '2025-03-01T00:00:00Z' };
+  const medium: PregnancyState = { kind: 'pregnant', status: 'medium', date: '2025-03-01T00:00:00Z' };
+  const large: PregnancyState = { kind: 'pregnant', status: 'large', date: '2025-03-01T00:00:00Z' };
+  const empty: PregnancyState = { kind: 'empty', date: '2025-03-01T00:00:00Z', via: 'tacto' };
+  // La fila de estado lleva "Preñada (...)" con el término de campo, SIN palabra de tamaño.
+  assert.equal(humanizePregnancyState(small), 'Preñada (cola)');
+  assert.equal(humanizePregnancyState(medium), 'Preñada (cuerpo)');
+  assert.equal(humanizePregnancyState(large), 'Preñada (cabeza)');
+  assert.equal(humanizePregnancyState(empty), 'Vacía');
+  assert.equal(humanizePregnancyState(undefined), null);
+  // Ninguna lleva la palabra de tamaño (chica/media/grande).
+  assert.doesNotMatch(humanizePregnancyState(small)!, /chica|media|grande/i);
+  assert.doesNotMatch(humanizePregnancyState(large)!, /chica|media|grande/i);
 });
 
 test('humanizeSanitaryEventType', () => {
@@ -457,6 +548,19 @@ function weightRow(id: string, date: string, kg: number | null): TimelineRow {
 }
 function scoreRow(id: string, date: string, score: number | null): TimelineRow {
   return { event_kind: 'condition_score', event_id: id, event_date: date, payload: { score } };
+}
+function reproRow(
+  id: string,
+  date: string,
+  eventType: string,
+  pregnancyStatus: string | null = null,
+): TimelineRow {
+  return {
+    event_kind: 'reproductive',
+    event_id: id,
+    event_date: date,
+    payload: { event_type: eventType, pregnancy_status: pregnancyStatus },
+  };
 }
 
 test('deriveCurrentState: timeline vacío o null → {}', () => {
@@ -534,4 +638,244 @@ test('deriveCurrentState: empate de fecha exacta → desempata por eventId mayor
     weightRow('w-zzz', '2025-03-01T00:00:00Z', 400), // misma fecha, id mayor → gana
   ]);
   assert.deepEqual(deriveCurrentState(items).weight, { kg: 400, date: '2025-03-01T00:00:00Z' });
+});
+
+// ─── deriveCurrentState: estado reproductivo (preñez) — C3.2a ──────────────────────────────
+
+test('deriveCurrentState: preñez del último TACTO positivo (status medium)', () => {
+  const items = parseTimeline([
+    reproRow('t1', '2025-02-01T00:00:00Z', 'tacto', 'small'),
+    reproRow('t2', '2025-04-01T00:00:00Z', 'tacto', 'medium'), // más reciente
+  ]);
+  assert.deepEqual(deriveCurrentState(items).pregnancy, {
+    kind: 'pregnant',
+    status: 'medium',
+    date: '2025-04-01T00:00:00Z',
+  });
+});
+
+test('deriveCurrentState: tacto EMPTY → vacía (via tacto)', () => {
+  const items = parseTimeline([reproRow('t1', '2025-03-01T00:00:00Z', 'tacto', 'empty')]);
+  assert.deepEqual(deriveCurrentState(items).pregnancy, {
+    kind: 'empty',
+    via: 'tacto',
+    date: '2025-03-01T00:00:00Z',
+  });
+});
+
+test('deriveCurrentState: BIRTH posterior a un tacto positivo → vacía (via birth)', () => {
+  // Tacto positivo en feb; parto en jun (más reciente) → ya no está preñada.
+  const items = parseTimeline([
+    reproRow('t1', '2025-02-01T00:00:00Z', 'tacto', 'large'),
+    reproRow('b1', '2025-06-01T00:00:00Z', 'birth', null),
+  ]);
+  assert.deepEqual(deriveCurrentState(items).pregnancy, {
+    kind: 'empty',
+    via: 'birth',
+    date: '2025-06-01T00:00:00Z',
+  });
+});
+
+test('deriveCurrentState: ABORTION → vacía (via abortion)', () => {
+  const items = parseTimeline([
+    reproRow('t1', '2025-02-01T00:00:00Z', 'tacto', 'medium'),
+    reproRow('ab1', '2025-05-01T00:00:00Z', 'abortion', null),
+  ]);
+  assert.deepEqual(deriveCurrentState(items).pregnancy, {
+    kind: 'empty',
+    via: 'abortion',
+    date: '2025-05-01T00:00:00Z',
+  });
+});
+
+test('deriveCurrentState: service/weaning/drying/rejection NO determinan preñez (se ignoran)', () => {
+  // Un tacto positivo viejo + un servicio nuevo: el servicio NO cambia el estado → sigue preñada
+  // por el tacto. (El servicio es un registro, no un diagnóstico de preñez.)
+  const items = parseTimeline([
+    reproRow('t1', '2025-02-01T00:00:00Z', 'tacto', 'small'),
+    reproRow('sv1', '2025-09-01T00:00:00Z', 'service', null), // más reciente pero NO determina
+    reproRow('we1', '2025-08-01T00:00:00Z', 'weaning', null),
+  ]);
+  assert.deepEqual(deriveCurrentState(items).pregnancy, {
+    kind: 'pregnant',
+    status: 'small',
+    date: '2025-02-01T00:00:00Z',
+  });
+});
+
+test('deriveCurrentState: sin eventos reproductivos determinantes → pregnancy ausente', () => {
+  const items = parseTimeline([
+    weightRow('w1', '2025-03-01T00:00:00Z', 300),
+    reproRow('sv1', '2025-04-01T00:00:00Z', 'service', null), // solo un servicio: no determina
+  ]);
+  assert.equal(deriveCurrentState(items).pregnancy, undefined);
+});
+
+test('deriveCurrentState: tacto con status null/desconocido → pregnancy ausente (no a ciegas)', () => {
+  const items = parseTimeline([reproRow('t1', '2025-03-01T00:00:00Z', 'tacto', null)]);
+  assert.equal(deriveCurrentState(items).pregnancy, undefined);
+});
+
+test('deriveCurrentState: empate de fecha entre repro determinantes → desempata por eventId mayor', () => {
+  const items = parseTimeline([
+    reproRow('t-aaa', '2025-03-01T00:00:00Z', 'tacto', 'small'),
+    reproRow('t-zzz', '2025-03-01T00:00:00Z', 'tacto', 'empty'), // misma fecha, id mayor → gana
+  ]);
+  assert.deepEqual(deriveCurrentState(items).pregnancy, {
+    kind: 'empty',
+    via: 'tacto',
+    date: '2025-03-01T00:00:00Z',
+  });
+});
+
+// ─── deriveCurrentState: desempate por created_at en eventos repro del MISMO día (TAREA 2) ─────────
+// El bug que esto cierra: tacto y parto/aborto el mismo eventDate (columna `date`, sin hora). El
+// eventId es un UUID random → desempatar por él era ~50/50. El parto/aborto SIEMPRE debe ganar al
+// tacto del mismo día (parió/abortó → ya no está preñada). created_at (now() de inserción) da el orden
+// total real. Tests DETERMINÍSTICOS: invierten orden de entrada y fuerzan el eventId del tacto a ser
+// MAYOR que el del birth (para probar que NO es el eventId el que decide, sino el created_at).
+
+/** Arma items repro con created_at via el path real: parseTimeline (createdAt null) → applyReproMeta. */
+function reproItemsWithCreatedAt(
+  specs: { id: string; date: string; type: string; preg?: string | null; createdAt: string | null }[],
+) {
+  const rows: TimelineRow[] = specs.map((s) => reproRow(s.id, s.date, s.type, s.preg ?? null));
+  const items = parseTimeline(rows);
+  const byId: Record<string, { serviceType?: string | null; createdAt?: string | null }> = {};
+  for (const s of specs) byId[s.id] = { createdAt: s.createdAt };
+  return applyReproMeta(items, byId);
+}
+
+test('deriveCurrentState: tacto y BIRTH mismo día, created_at del birth posterior → vacía (gana birth)', () => {
+  const day = '2025-06-01T00:00:00Z'; // mismo eventDate (columna date, sin hora)
+  // eventId del tacto MAYOR que el del birth a propósito: si decidiera el eventId, ganaría el tacto y
+  // veríamos "preñada" (el bug). Con created_at el birth (insertado después) gana → "vacía".
+  const a = reproItemsWithCreatedAt([
+    { id: 't-zzz', date: day, type: 'tacto', preg: 'large', createdAt: '2025-06-01T10:00:00Z' },
+    { id: 'b-aaa', date: day, type: 'birth', createdAt: '2025-06-01T10:05:00Z' }, // posterior
+  ]);
+  assert.deepEqual(deriveCurrentState(a).pregnancy, { kind: 'empty', via: 'birth', date: day });
+  // …y DETERMINÍSTICO sin importar el orden de entrada: invertimos y debe dar lo mismo.
+  const b = reproItemsWithCreatedAt([
+    { id: 'b-aaa', date: day, type: 'birth', createdAt: '2025-06-01T10:05:00Z' },
+    { id: 't-zzz', date: day, type: 'tacto', preg: 'large', createdAt: '2025-06-01T10:00:00Z' },
+  ]);
+  assert.deepEqual(deriveCurrentState(b).pregnancy, { kind: 'empty', via: 'birth', date: day });
+});
+
+test('deriveCurrentState: tacto y ABORTION mismo día, created_at del aborto posterior → vacía (gana aborto)', () => {
+  const day = '2025-05-10T00:00:00Z';
+  const items = reproItemsWithCreatedAt([
+    { id: 't-zzz', date: day, type: 'tacto', preg: 'medium', createdAt: '2025-05-10T09:00:00Z' },
+    { id: 'ab-aaa', date: day, type: 'abortion', createdAt: '2025-05-10T09:30:00Z' }, // posterior
+  ]);
+  assert.deepEqual(deriveCurrentState(items).pregnancy, { kind: 'empty', via: 'abortion', date: day });
+});
+
+test('deriveCurrentState: created_at AMBOS null (query falló) → cae al desempate por eventId (previo)', () => {
+  const day = '2025-06-01T00:00:00Z';
+  // Sin created_at en ninguno: comportamiento previo = mayor eventId gana. Acá el tacto tiene id mayor
+  // → gana el tacto (preñada). Es el fallback documentado: sin created_at no podemos saber el orden
+  // real, caemos al estable por eventId (no rompe; solo no resuelve el caso ambiguo del mismo día).
+  const items = reproItemsWithCreatedAt([
+    { id: 't-zzz', date: day, type: 'tacto', preg: 'small', createdAt: null },
+    { id: 'b-aaa', date: day, type: 'birth', createdAt: null },
+  ]);
+  assert.deepEqual(deriveCurrentState(items).pregnancy, {
+    kind: 'pregnant',
+    status: 'small',
+    date: day,
+  });
+});
+
+test('deriveCurrentState: created_at en UNO solo (falta en el otro) → cae a eventId (no a medias)', () => {
+  const day = '2025-06-01T00:00:00Z';
+  // Solo el birth tiene created_at; el tacto no. La regla exige AMBOS para usar created_at → cae al
+  // desempate por eventId (el tacto, id mayor, gana). Es el fallback seguro: no inventamos un orden
+  // con datos parciales. (En la práctica la query trae created_at de todos o de ninguno.)
+  const items = reproItemsWithCreatedAt([
+    { id: 't-zzz', date: day, type: 'tacto', preg: 'medium', createdAt: null },
+    { id: 'b-aaa', date: day, type: 'birth', createdAt: '2025-06-01T10:05:00Z' },
+  ]);
+  assert.deepEqual(deriveCurrentState(items).pregnancy, {
+    kind: 'pregnant',
+    status: 'medium',
+    date: day,
+  });
+});
+
+test('deriveCurrentState: created_at NO afecta cuando los eventDate DIFIEREN (la fecha manda)', () => {
+  // Fecha distinta: aunque el tacto tenga created_at posterior al birth, el birth es de un día MAYOR
+  // → el birth gana por eventDate. created_at solo desempata el mismo día.
+  const items = reproItemsWithCreatedAt([
+    { id: 't1', date: '2025-02-01T00:00:00Z', type: 'tacto', preg: 'large', createdAt: '2025-06-02T10:00:00Z' },
+    { id: 'b1', date: '2025-06-01T00:00:00Z', type: 'birth', createdAt: '2025-06-01T08:00:00Z' },
+  ]);
+  assert.deepEqual(deriveCurrentState(items).pregnancy, {
+    kind: 'empty',
+    via: 'birth',
+    date: '2025-06-01T00:00:00Z',
+  });
+});
+
+test('deriveCurrentState: preñez NO rompe weight/conditionScore (los tres conviven)', () => {
+  const items = parseTimeline([
+    weightRow('w1', '2025-03-01T00:00:00Z', 330),
+    scoreRow('s1', '2025-04-10T00:00:00Z', 3.5),
+    reproRow('t1', '2025-05-01T00:00:00Z', 'tacto', 'large'),
+  ]);
+  const state = deriveCurrentState(items);
+  assert.deepEqual(state.weight, { kg: 330, date: '2025-03-01T00:00:00Z' });
+  assert.deepEqual(state.conditionScore, { score: 3.5, date: '2025-04-10T00:00:00Z' });
+  assert.deepEqual(state.pregnancy, { kind: 'pregnant', status: 'large', date: '2025-05-01T00:00:00Z' });
+});
+
+// ─── hasAbortion (flag "tuvo aborto" derivado del timeline — A2) ────────────────────────────
+
+test('hasAbortion: hay un evento abortion → true', () => {
+  const items = parseTimeline([
+    reproRow('t1', '2025-02-01T00:00:00Z', 'tacto', 'medium'),
+    reproRow('ab1', '2025-05-01T00:00:00Z', 'abortion', null),
+  ]);
+  assert.equal(hasAbortion(items), true);
+});
+
+test('hasAbortion: NO hay aborto (solo tacto/servicio/parto) → false', () => {
+  const items = parseTimeline([
+    reproRow('t1', '2025-02-01T00:00:00Z', 'tacto', 'medium'),
+    reproRow('sv1', '2025-03-01T00:00:00Z', 'service', null),
+    reproRow('b1', '2025-09-01T00:00:00Z', 'birth', null),
+    weightRow('w1', '2025-04-01T00:00:00Z', 300),
+  ]);
+  assert.equal(hasAbortion(items), false);
+});
+
+test('hasAbortion: timeline vacío / null / undefined → false', () => {
+  assert.equal(hasAbortion([]), false);
+  assert.equal(hasAbortion(null), false);
+  assert.equal(hasAbortion(undefined), false);
+});
+
+test('hasAbortion: PERMANENTE — un aborto seguido de una preñez posterior sigue marcando true', () => {
+  // Aborta, luego vuelve a preñarse (tacto positivo posterior): el flag NO se limpia (es historia).
+  const items = parseTimeline([
+    reproRow('ab1', '2025-03-01T00:00:00Z', 'abortion', null),
+    reproRow('t2', '2025-08-01T00:00:00Z', 'tacto', 'large'), // preñada de nuevo, más reciente
+  ]);
+  assert.equal(hasAbortion(items), true);
+  // …y el estado vigente SÍ es la preñez nueva (deriveCurrentState toma el más reciente): el flag y el
+  // estado son señales independientes (uno es historia permanente, el otro el estado actual).
+  assert.deepEqual(deriveCurrentState(items).pregnancy, {
+    kind: 'pregnant',
+    status: 'large',
+    date: '2025-08-01T00:00:00Z',
+  });
+});
+
+test('hasAbortion: ignora un kind no-reproductive con eventType "abortion" espurio (defensivo)', () => {
+  // Solo cuentan los reproductive con eventType abortion. Una observación no aporta (no tiene esa forma).
+  const items = parseTimeline([
+    { event_kind: 'observacion', event_id: 'o1', event_date: '2025-01-01T00:00:00Z', payload: { text: 'aborto?' } },
+  ]);
+  assert.equal(hasAbortion(items), false);
 });

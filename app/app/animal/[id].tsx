@@ -19,19 +19,34 @@ import { Platform, Pressable } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
-import { ChevronLeft, ClipboardList, Clock, Gauge, Mars, Plus, Tag, Venus } from 'lucide-react-native';
+import {
+  ChevronLeft,
+  ChevronRight,
+  ClipboardList,
+  Clock,
+  Gauge,
+  HeartCrack,
+  Mars,
+  Milk,
+  Plus,
+  Tag,
+  Venus,
+} from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
 
 import { Button, Card, CategoryBadge, InfoNote, FormError, TimelineEvent } from '@/components';
-import { fetchAnimalDetail, type AnimalDetail } from '@/services/animals';
-import { fetchTimeline, type TimelineItem } from '@/services/events';
+import { fetchAnimalDetail, type AnimalDetail, type AnimalStatus } from '@/services/animals';
+import { fetchTimeline, fetchMother, type TimelineItem, type MotherLink } from '@/services/events';
 import {
   deriveCurrentState,
   formatEventDate,
+  hasAbortion,
+  humanizePregnancyState,
   type CurrentState,
 } from '@/utils/event-timeline';
 import { formatConditionScore } from '@/utils/event-input';
 import { buttonA11y, labelA11y } from '@/utils/a11y';
+import { backOr } from '@/utils/nav';
 
 export default function AnimalDetailScreen() {
   const router = useRouter();
@@ -42,6 +57,9 @@ export default function AnimalDetailScreen() {
   const [detail, setDetail] = useState<AnimalDetail | null>(null);
   const [timeline, setTimeline] = useState<TimelineItem[] | null>(null);
   const [timelineError, setTimelineError] = useState<string | null>(null);
+  // Link a la madre (R14.7). null = no es ternero con parto registrado (o falló el fetch blando) → la
+  // ficha NO muestra la card "Madre". El fetch es blando: si falla, la cabecera/timeline siguen vivos.
+  const [mother, setMother] = useState<MotherLink | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -54,11 +72,12 @@ export default function AnimalDetailScreen() {
     setLoading(true);
     setError(null);
     setTimelineError(null);
-    // Detalle + timeline en paralelo (R10/R14): un solo loading para la ficha entera. El timeline
-    // tiene su propio error blando (si falla, la cabecera sigue mostrándose).
-    const [detailR, timelineR] = await Promise.all([
+    // Detalle + timeline + madre en paralelo (R10/R14/R14.7): un solo loading para la ficha entera.
+    // El timeline y la madre tienen su propio manejo blando (si fallan, la cabecera sigue).
+    const [detailR, timelineR, motherR] = await Promise.all([
       fetchAnimalDetail(profileId),
       fetchTimeline(profileId),
+      fetchMother(profileId),
     ]);
     setLoading(false);
     if (!detailR.ok) {
@@ -80,6 +99,9 @@ export default function AnimalDetailScreen() {
           : 'No pudimos cargar el historial.',
       );
     }
+    // Madre (R14.7): blando — un fallo (red) deja la card sin mostrar, no rompe la ficha. value puede
+    // ser null (el animal no es un ternero con parto registrado) → tampoco se muestra la card.
+    setMother(motherR.ok ? motherR.value : null);
   }, [profileId]);
 
   // Recargar al enfocar (volver de agregar-evento, o tras crear) → el timeline se refresca y el
@@ -92,11 +114,32 @@ export default function AnimalDetailScreen() {
 
   const goToAddEvent = useCallback(() => {
     if (!detail) return;
+    // Pasamos el SEXO del animal: el wizard oculta la sección "Reproductivo" (tacto/servicio/parto)
+    // para machos — esos eventos son solo de hembras. detail.sex es 'male' | 'female'.
+    //
+    // Y pasamos si la hembra FIGURA PREÑADA en nuestros registros (deriveCurrentState del MISMO
+    // timeline que ya alimenta la fila "Estado reproductivo"): el wizard usa esto para el AVISO SUAVE
+    // al registrar un PARTO sobre una hembra que no figura preñada (no bloquea, solo confirma). Los
+    // params de expo-router son strings → mandamos '1'/'0' y el wizard lo parsea. Si el timeline no
+    // determina preñez (Sin registrar), pregnant=false → el wizard avisa (conservador).
+    const pregnant = deriveCurrentState(timeline).pregnancy?.kind === 'pregnant';
     router.push({
       pathname: '/agregar-evento',
-      params: { profileId: detail.profileId, establishmentId: detail.establishmentId },
+      params: {
+        profileId: detail.profileId,
+        establishmentId: detail.establishmentId,
+        sex: detail.sex,
+        pregnant: pregnant ? '1' : '0',
+      },
     });
-  }, [detail, router]);
+  }, [detail, timeline, router]);
+
+  // Navegar a la ficha de la madre (R14.7). Tolerante a madre archivada (status ≠ active): la ficha
+  // destino se carga igual (fetchAnimalDetail NO filtra por status), sin dead-end ni crash (R4.15).
+  const goToMother = useCallback(() => {
+    if (!mother) return;
+    router.push({ pathname: '/animal/[id]', params: { id: mother.profileId } });
+  }, [mother, router]);
 
   const muted = getTokenValue('$textMuted', 'color');
 
@@ -105,7 +148,14 @@ export default function AnimalDetailScreen() {
       {/* Barra superior compacta: solo el back (el título es el HERO, abajo). */}
       <YStack width="100%" paddingTop={insets.top} paddingHorizontal="$4">
         <XStack width="100%" alignItems="center" paddingVertical="$3">
-          <Pressable hitSlop={8} onPress={() => router.back()} {...buttonA11y(Platform.OS, { label: 'Volver' })}>
+          {/* "Volver" ROBUSTO (backOr): si el stack está vacío (web-refresh / hot-reload / deep-link
+              / cold-start directo en la ficha) router.back() fallaría y dejaría al usuario trabado →
+              caemos a la lista de animales (de donde se llega a la ficha por tap, R1.3). */}
+          <Pressable
+            hitSlop={8}
+            onPress={() => backOr(router, '/(tabs)/animales')}
+            {...buttonA11y(Platform.OS, { label: 'Volver' })}
+          >
             <ChevronLeft size={28} color={muted} strokeWidth={2} />
           </Pressable>
         </XStack>
@@ -131,7 +181,11 @@ export default function AnimalDetailScreen() {
           <FormError message={error} />
         ) : detail ? (
           <>
-            <AnimalHero detail={detail} />
+            <AnimalHero detail={detail} hadAbortion={hasAbortion(timeline)} />
+
+            {/* Link a la MADRE (R14.7): solo si el animal es un ternero con parto registrado. Tappable
+                → ficha de la madre. Tolera madre archivada (status ≠ active): indicador + navega igual. */}
+            {mother ? <MotherCard mother={mother} onPress={goToMother} /> : null}
 
             {/* Identificación: los 3 identificadores, truncados si son largos. */}
             <DetailSection icon={Tag} title="Identificación">
@@ -153,7 +207,7 @@ export default function AnimalDetailScreen() {
             {/* Estado actual (fix-loop 2 FIX C): el VALOR VIGENTE de cada medición tipada (peso /
                 condición corporal) = el del último evento de ese tipo. Es un ATRIBUTO del animal,
                 no solo historia. El timeline de abajo sigue siendo la auditoría completa. */}
-            <CurrentStateSection timeline={timeline} />
+            <CurrentStateSection timeline={timeline} sex={detail.sex} />
 
             {/* Historial real (C3.1): riel de eventos + CTA "Agregar evento". */}
             <HistorySection
@@ -173,10 +227,10 @@ export default function AnimalDetailScreen() {
 
 /**
  * Hero header: el identificador HERO grande (idv → visual → caravana) + CategoryBadge (firma verde)
- * + sexo con ícono en color + rodeo muted. Es la "cara" de la ficha — da personalidad donde antes
- * había un título negro pelado.
+ * + (si tuvo aborto) el flag "Tuvo aborto" terracota + sexo con ícono en color + rodeo muted. Es la
+ * "cara" de la ficha — da personalidad donde antes había un título negro pelado.
  */
-function AnimalHero({ detail }: { detail: AnimalDetail }) {
+function AnimalHero({ detail, hadAbortion }: { detail: AnimalDetail; hadAbortion: boolean }) {
   const primary = getTokenValue('$primary', 'color');
   const hero = detail.idv ?? detail.visualIdAlt ?? detail.tagElectronic ?? 'Animal';
   const SexIcon = detail.sex === 'male' ? Mars : Venus;
@@ -200,9 +254,11 @@ function AnimalHero({ detail }: { detail: AnimalDetail }) {
         {hero}
       </Text>
 
-      {/* Fila de chips de identidad: categoría (verde) · sexo (ícono color) · rodeo. */}
+      {/* Fila de chips de identidad: categoría (verde) · [flag aborto terracota] · sexo (ícono color)
+          · rodeo. El flag "Tuvo aborto" (A2, marquita roja) va junto al CategoryBadge si hubo ≥1 aborto. */}
       <XStack width="100%" alignItems="center" gap="$2" flexWrap="wrap">
         <CategoryBadge label={categoryLabel} manual={detail.categoryOverride} size="md" />
+        {hadAbortion ? <AbortionFlag /> : null}
         <XStack alignItems="center" gap="$1" {...labelA11y(Platform.OS, `Sexo ${sexLabel}`)}>
           <SexIcon size={18} color={primary} strokeWidth={2.5} />
           <Text fontFamily="$body" fontSize="$4" fontWeight="500" color="$textMuted">
@@ -229,6 +285,114 @@ function AnimalHero({ detail }: { detail: AnimalDetail }) {
         ) : null}
       </XStack>
     </YStack>
+  );
+}
+
+// ─── Flag "Tuvo aborto" (A2, marquita roja — dominio Facundo §1) ──────────────────────
+//
+// Indicador chico TERRACOTA en el hero si el animal tuvo al menos un aborto (hasAbortion del timeline).
+// Permanente: una vez que hubo un aborto, queda marcado (es historia, no estado que se limpie). Pill al
+// lenguaje del CategoryBadge pero en terracota (señal médica/pérdida): como NO hay token terracota-claro
+// en la paleta (igual que TimelineEvent), usamos $surface de fondo + borde y texto $terracota + el ícono
+// HeartCrack. a11y por helper (View no mapea accessibilityLabel a aria-label en web → labelA11y). Cero
+// hardcode: tokens + getTokenValue para el ícono lucide (cruza a API no-Tamagui).
+function AbortionFlag() {
+  const terracota = getTokenValue('$terracota', 'color');
+  return (
+    <View
+      backgroundColor="$surface"
+      borderWidth={1}
+      borderColor="$terracota"
+      borderRadius="$pill"
+      paddingHorizontal="$3"
+      paddingVertical="$1"
+      alignSelf="flex-start"
+      {...labelA11y(Platform.OS, 'Tuvo aborto')}
+    >
+      <XStack alignItems="center" gap="$1">
+        <HeartCrack size={14} color={terracota} strokeWidth={2.5} />
+        <Text fontFamily="$body" fontSize="$4" fontWeight="600" color="$terracota" numberOfLines={1}>
+          Tuvo aborto
+        </Text>
+      </XStack>
+    </View>
+  );
+}
+
+// ─── Card "Madre" (link a la ficha de la madre, R14.7) ────────────────────────────────
+
+/**
+ * Mapa status (≠ active) → label de archivada para el indicador (R14.7). El `exit_reason` detallado y
+ * el "modo archivada" completo de la ficha son C3.3; acá solo NO hacemos dead-end e indicamos que la
+ * madre no está activa. status 'active' → null (no se muestra indicador).
+ */
+function archivedLabel(status: AnimalStatus): string | null {
+  switch (status) {
+    case 'sold':
+      return 'Vendida';
+    case 'dead':
+      return 'Muerta';
+    case 'transferred':
+      return 'Transferida';
+    default:
+      return null;
+  }
+}
+
+/**
+ * Card tappable "Madre" (R14.7): ícono Milk (firma RAFAQ verde) + label de la madre + su categoría;
+ * si la madre está archivada (status ≠ active), un indicador chico ("Vendida"/"Muerta"/"Transferida").
+ * Al tocar → ficha de la madre (tolerante a archivada, R4.15). a11y por helper (Pressable). Cero
+ * hardcode (tokens). Mismo lenguaje visual que las TypeCard (borde, halo verde, chevron).
+ */
+function MotherCard({ mother, onPress }: { mother: MotherLink; onPress: () => void }) {
+  const primary = getTokenValue('$primary', 'color');
+  const faint = getTokenValue('$textFaint', 'color');
+  const archived = archivedLabel(mother.status);
+  // Subtítulo: categoría de la madre + (si archivada) el estado. Ej. "Vaca multípara · Vendida".
+  const subtitleParts = [mother.categoryName, archived].filter(Boolean) as string[];
+  const subtitle = subtitleParts.length > 0 ? subtitleParts.join(' · ') : 'Madre';
+
+  return (
+    <Pressable onPress={onPress} {...buttonA11y(Platform.OS, { label: `Ver la ficha de la madre: ${mother.label}` })}>
+      <XStack
+        width="100%"
+        alignItems="center"
+        gap="$3"
+        minHeight="$touchMin"
+        borderRadius="$card"
+        borderWidth={2}
+        borderColor="$divider"
+        backgroundColor="$white"
+        paddingHorizontal="$4"
+        paddingVertical="$3"
+        pressStyle={{ backgroundColor: '$surface' }}
+      >
+        <View
+          width="$icon"
+          height="$icon"
+          borderRadius="$pill"
+          backgroundColor="$greenLight"
+          alignItems="center"
+          justifyContent="center"
+          flexShrink={0}
+        >
+          <Milk size={22} color={primary} strokeWidth={2.5} />
+        </View>
+        <YStack flex={1} minWidth={0} gap="$1">
+          <Text fontFamily="$body" fontSize="$3" fontWeight="500" color="$textMuted">
+            Madre
+          </Text>
+          <Text fontFamily="$body" fontSize="$5" fontWeight="600" color="$textPrimary" numberOfLines={1}>
+            {mother.label}
+          </Text>
+          <Text fontFamily="$body" fontSize="$3" fontWeight="400" color="$textMuted" numberOfLines={1}>
+            {subtitle}
+          </Text>
+        </YStack>
+        <ChevronRight size={22} color={faint} strokeWidth={2} />
+      </XStack>
+    </Pressable>
   );
 }
 
@@ -300,10 +464,19 @@ function AttributeRow({ label, value }: { label: string; value: string }) {
 // Se muestra SIEMPRE (enseña qué se trackea): si no hay evento de un tipo → "Sin registrar" (muted,
 // consistente con los "—" del resto de la ficha).
 //
-// Arquitectura a futuro (C3.2): escala a estado reproductivo (preñez) y última sanidad cuando esos
-// eventos se puedan cargar. `deriveCurrentState` es el punto de extensión (suma campos al CurrentState
-// y acá se agregan filas). La observación libre NO va acá (solo timeline: no tiene "valor actual").
-function CurrentStateSection({ timeline }: { timeline: TimelineItem[] | null }) {
+// C3.2a: la sección escala al ESTADO REPRODUCTIVO (preñez) — fila "Estado reproductivo" SOLO para
+// hembras (la preñez no aplica a machos). `deriveCurrentState` es el punto de extensión (computa
+// `pregnancy` del último evento determinante: tacto/birth/abortion). La transición de categoría
+// (vaquillona → vaquillona_prenada) la hace el server y la refleja el CategoryBadge del hero; esta
+// fila muestra el estado de preñez crudo del último tacto/parto/aborto. La observación libre NO va
+// acá (solo timeline: no tiene "valor actual").
+function CurrentStateSection({
+  timeline,
+  sex,
+}: {
+  timeline: TimelineItem[] | null;
+  sex: 'male' | 'female';
+}) {
   // `now` para el timestamp relativo de cada valor (un Date por render, determinístico acá).
   const now = new Date();
   const state: CurrentState = deriveCurrentState(timeline);
@@ -315,10 +488,21 @@ function CurrentStateSection({ timeline }: { timeline: TimelineItem[] | null }) 
     ? `${formatConditionScore(state.conditionScore.score)} / 5 · ${formatEventDate(state.conditionScore.date, now, { dateOnly: true })}`
     : null;
 
+  // Estado reproductivo (solo hembras): texto del estado (humanizePregnancyState) + fecha del evento
+  // determinante. Si no hay evento reproductivo que determine preñez → null → "Sin registrar".
+  const pregnancyText = humanizePregnancyState(state.pregnancy);
+  const pregnancyValue =
+    pregnancyText && state.pregnancy
+      ? `${pregnancyText} · ${formatEventDate(state.pregnancy.date, now, { dateOnly: true })}`
+      : null;
+
   return (
     <DetailSection icon={Gauge} title="Estado actual">
       <CurrentStateRow label="Peso actual" value={weightValue} />
       <CurrentStateRow label="Condición corporal" value={scoreValue} />
+      {sex === 'female' ? (
+        <CurrentStateRow label="Estado reproductivo" value={pregnancyValue} />
+      ) : null}
     </DetailSection>
   );
 }

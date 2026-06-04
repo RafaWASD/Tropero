@@ -23,16 +23,39 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { Platform, Pressable, TextInput, type TextStyle } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter, type Href } from 'expo-router';
 import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
-import { Activity, ChevronLeft, ChevronRight, StickyNote, Weight } from 'lucide-react-native';
+import {
+  Activity,
+  Baby,
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  HeartCrack,
+  HeartHandshake,
+  Plus,
+  StickyNote,
+  Stethoscope,
+  Trash2,
+  Weight,
+} from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
 
-import { Button, FormField, FormError, InfoNote } from '@/components';
-import { addWeight, addConditionScore, addObservation } from '@/services/events';
+import { Button, Card, FormField, FormError, InfoNote } from '@/components';
+import {
+  addWeight,
+  addConditionScore,
+  addObservation,
+  addTacto,
+  addService,
+  addAbortion,
+  registerBirth,
+} from '@/services/events';
 import {
   sanitizeWeightInput,
+  sanitizeTagInput,
   maskDateInput,
+  TAG_ELECTRONIC_LENGTH,
 } from '@/utils/animal-input';
 import {
   CONDITION_SCORES,
@@ -41,14 +64,49 @@ import {
   validateWeight,
   validateEventDate,
   validateObservation,
+  validateCalves,
+  reproductiveWarning,
   OBSERVATION_MAX_LENGTH,
+  PREGNANCY_OPTIONS,
+  SERVICE_TYPE_OPTIONS,
+  SEX_OPTIONS,
+  type CalfDraft,
 } from '@/utils/event-input';
+import type { PregnancyStatus, ServiceType } from '@/utils/event-timeline';
 import { buttonA11y } from '@/utils/a11y';
+import { backOr } from '@/utils/nav';
+import { confirmAction } from '@/utils/confirm';
 
 const OFFLINE_COPY =
   'Necesitás conexión para cargar un evento. Conectate a internet y volvé a intentar.';
 
-type EventType = 'weight' | 'condition_score' | 'observation';
+type EventType =
+  | 'weight'
+  | 'condition_score'
+  | 'observation'
+  | 'tacto'
+  | 'service'
+  | 'birth'
+  | 'abortion';
+
+// Título del diálogo de confirmación del aviso suave reproductivo, por tipo de evento (es-AR). Solo
+// los eventos que pueden disparar el aviso (parto/servicio/aborto) lo necesitan.
+const REPRO_DIALOG_TITLE: Partial<Record<EventType, string>> = {
+  birth: 'Parto',
+  service: 'Servicio',
+  abortion: 'Aborto',
+};
+
+// Un ternero del form de parto, con un id LOCAL estable (no el índice del array): permite borrar un
+// ternero del MEDIO sin que React confunda los keys (lección de listas dinámicas — key=índice rompe
+// el reconciliado al remover). `sex`/`weightRaw`/`tagRaw` espejan CalfDraft (validateCalves).
+type CalfRow = { localId: string; sex: 'male' | 'female' | null; weightRaw: string; tagRaw: string };
+
+let calfIdSeq = 0;
+function newCalf(): CalfRow {
+  calfIdSeq += 1;
+  return { localId: `calf-${calfIdSeq}`, sex: null, weightRaw: '', tagRaw: '' };
+}
 
 // Fecha de hoy en ISO 'YYYY-MM-DD' (local) para pre-cargar el campo de fecha (el caso típico es
 // "cargar el evento de hoy" — el operario rara vez cambia la fecha).
@@ -62,10 +120,23 @@ function todayIso(): string {
 export default function AgregarEventoScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const params = useLocalSearchParams<{ profileId?: string; establishmentId?: string }>();
+  const params = useLocalSearchParams<{
+    profileId?: string;
+    establishmentId?: string;
+    sex?: string;
+    pregnant?: string;
+  }>();
   const profileId = typeof params.profileId === 'string' ? params.profileId : null;
   const establishmentId =
     typeof params.establishmentId === 'string' ? params.establishmentId : null;
+  // Los eventos REPRODUCTIVOS (tacto/servicio/parto) son SOLO de hembras. Gateamos la sección
+  // "Reproductivo" del paso 1 por el sexo del animal (viene de la ficha). Conservador: solo `'female'`
+  // exacto habilita reproductivo; macho o sexo ausente/desconocido → NO se ofrecen esos eventos.
+  const isFemale = params.sex === 'female';
+  // ¿La hembra FIGURA preñada en nuestros registros? Lo computa la ficha (deriveCurrentState) y lo pasa
+  // como '1'/'0'. Solo '1' cuenta como preñada; cualquier otra cosa (ausente/'0'/desconocido) → NO
+  // figura preñada → al registrar un PARTO mostramos el aviso suave (conservador). Ver onSubmit/birth.
+  const figuresPregnant = params.pregnant === '1';
 
   const [step, setStep] = useState<1 | 2>(1);
   const [eventType, setEventType] = useState<EventType | null>(null);
@@ -86,6 +157,32 @@ export default function AgregarEventoScreen() {
   const [observation, setObservation] = useState('');
   const [observationErr, setObservationErr] = useState<string | null>(null);
 
+  // Campos de tacto (reproductivo).
+  const [pregnancyStatus, setPregnancyStatus] = useState<PregnancyStatus | null>(null);
+  const [tactoDate, setTactoDate] = useState(todayIso());
+  const [tactoStatusErr, setTactoStatusErr] = useState<string | null>(null);
+  const [tactoDateErr, setTactoDateErr] = useState<string | null>(null);
+
+  // Campos de servicio (reproductivo). Notas OPCIONALES.
+  const [serviceType, setServiceType] = useState<ServiceType | null>(null);
+  const [serviceDate, setServiceDate] = useState(todayIso());
+  const [serviceNotes, setServiceNotes] = useState('');
+  const [serviceTypeErr, setServiceTypeErr] = useState<string | null>(null);
+  const [serviceDateErr, setServiceDateErr] = useState<string | null>(null);
+  const [serviceNotesErr, setServiceNotesErr] = useState<string | null>(null);
+
+  // Campos de parto (reproductivo). Lista dinámica de terneros (default 1, R9.5 mellizos).
+  const [birthDate, setBirthDate] = useState(todayIso());
+  const [calves, setCalves] = useState<CalfRow[]>(() => [newCalf()]);
+  const [birthDateErr, setBirthDateErr] = useState<string | null>(null);
+  const [calvesErr, setCalvesErr] = useState<string | null>(null);
+
+  // Campos de aborto (reproductivo). Fecha + notas OPCIONALES (mismo shape que el servicio).
+  const [abortionDate, setAbortionDate] = useState(todayIso());
+  const [abortionNotes, setAbortionNotes] = useState('');
+  const [abortionDateErr, setAbortionDateErr] = useState<string | null>(null);
+  const [abortionNotesErr, setAbortionNotesErr] = useState<string | null>(null);
+
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const busyRef = useRef(false);
@@ -93,6 +190,18 @@ export default function AgregarEventoScreen() {
   const missingParams = !profileId;
 
   const muted = getTokenValue('$textMuted', 'color');
+
+  // Destino de fallback para el "Volver" robusto (backOr): volvemos a la FICHA del animal
+  // (de donde se llega a "Agregar evento"). Si faltan params (profileId null), caemos a la tab
+  // Animales en vez de romper. Solo se usa cuando el stack está vacío (web-refresh / hot-reload /
+  // deep-link / cold-start en ruta profunda) — el caso normal sigue siendo router.back().
+  const backFallback: Href = useMemo(
+    () =>
+      profileId
+        ? { pathname: '/animal/[id]', params: { id: profileId } }
+        : '/(tabs)/animales',
+    [profileId],
+  );
 
   const onChooseType = useCallback((t: EventType) => {
     setEventType(t);
@@ -106,8 +215,25 @@ export default function AgregarEventoScreen() {
       setStep(1);
       return;
     }
-    router.back();
-  }, [step, router]);
+    backOr(router, backFallback);
+  }, [step, router, backFallback]);
+
+  // ── Handlers de la lista dinámica de terneros (parto, R9.5). ──
+  const addCalf = useCallback(() => {
+    setCalves((prev) => [...prev, newCalf()]);
+    setCalvesErr(null);
+  }, []);
+
+  const removeCalf = useCallback((localId: string) => {
+    // Mantenemos el mínimo de 1 ternero: nunca quedamos en 0 (un parto tiene al menos un ternero).
+    setCalves((prev) => (prev.length <= 1 ? prev : prev.filter((c) => c.localId !== localId)));
+    setCalvesErr(null);
+  }, []);
+
+  const updateCalf = useCallback((localId: string, patch: Partial<Omit<CalfRow, 'localId'>>) => {
+    setCalves((prev) => prev.map((c) => (c.localId === localId ? { ...c, ...patch } : c)));
+    setCalvesErr(null);
+  }, []);
 
   const finishSubmit = useCallback(
     (r: { ok: true } | { ok: false; error: { kind: string; message: string } }) => {
@@ -118,14 +244,38 @@ export default function AgregarEventoScreen() {
         return;
       }
       // Volvemos a la ficha: useFocusEffect recarga el timeline → el evento nuevo aparece arriba.
-      router.back();
+      // backOr: si el stack está vacío (web-refresh / deep-link / cold-start) router.back() fallaría
+      // y dejaría al operario trabado tras GUARDAR — caemos a la ficha del animal (backFallback).
+      backOr(router, backFallback);
     },
-    [router],
+    [router, backFallback],
   );
 
   const onSubmit = useCallback(async () => {
     if (busyRef.current || !profileId || !eventType) return;
     setFormError(null);
+
+    // AVISO SUAVE (no bloqueo) de los eventos reproductivos vs. el estado de preñez que figura en
+    // nuestros registros: parto/aborto sobre hembra NO preñada, o servicio sobre hembra SÍ preñada →
+    // confirmación "¿registrar igual?". reproductiveWarning(eventType, figuresPregnant) devuelve el copy
+    // o null.
+    //
+    // PRECONDICIÓN: el caller ya tomó el re-entrancy guard (busyRef.current = true) ANTES de invocar
+    // esta función — SINCRÓNICAMENTE tras validar, sin await de por medio (en native el Alert es async y
+    // el botón sigue habilitado mientras está abierto → un doble-tap abriría un 2do Alert). Esta función
+    // solo muestra el diálogo (si corresponde) y LIBERA el guard si el operario cancela; devuelve true
+    // si hay que proceder, false si canceló. Si no hay aviso, retorna true sin diálogo (no-op).
+    const confirmReproIfNeeded = async (): Promise<boolean> => {
+      const warning = reproductiveWarning(eventType, figuresPregnant);
+      if (!warning) return true;
+      const proceed = await confirmAction({
+        title: REPRO_DIALOG_TITLE[eventType] ?? 'Evento',
+        message: warning.message,
+        confirmLabel: warning.confirmLabel,
+      });
+      if (!proceed) busyRef.current = false;
+      return proceed;
+    };
 
     // Validación por tipo (espejo del DB; feedback inmediato sin round-trip).
     if (eventType === 'weight') {
@@ -173,6 +323,131 @@ export default function AgregarEventoScreen() {
       finishSubmit(r);
       return;
     }
+
+    if (eventType === 'tacto') {
+      const d = validateEventDate(tactoDate);
+      setTactoDateErr(d.ok ? null : d.error);
+      if (pregnancyStatus == null) {
+        setTactoStatusErr('Elegí el resultado del tacto.');
+      } else {
+        setTactoStatusErr(null);
+      }
+      if (pregnancyStatus == null || !d.ok) return;
+      // Guard ANTES de cualquier await (anti doble-tap). tacto NO dispara aviso (reproductiveWarning(
+      // 'tacto', …) === null) → confirmReproIfNeeded es un no-op acá, pero pasamos por el gate uniforme.
+      busyRef.current = true;
+      if (!(await confirmReproIfNeeded())) return;
+      setSubmitting(true);
+      const r = await addTacto({ profileId, pregnancyStatus, eventDate: d.value });
+      finishSubmit(r);
+      return;
+    }
+
+    if (eventType === 'service') {
+      const d = validateEventDate(serviceDate);
+      setServiceDateErr(d.ok ? null : d.error);
+      if (serviceType == null) {
+        setServiceTypeErr('Elegí el tipo de servicio.');
+      } else {
+        setServiceTypeErr(null);
+      }
+      // Notas OPCIONALES: vacío es válido (no las mandamos). Si hay texto, validamos solo el tope
+      // (validateObservation rechaza el vacío → no la usamos para el caso vacío; el sanitizer ya acota
+      // en vivo al maxLength del textarea, así que este check es un backstop defensivo).
+      const trimmedNotes = serviceNotes.trim();
+      let notes: string | null = null;
+      let notesOk = true;
+      if (trimmedNotes.length > 0) {
+        const o = validateObservation(serviceNotes);
+        if (o.ok) {
+          notes = o.value;
+          setServiceNotesErr(null);
+        } else {
+          setServiceNotesErr(o.error);
+          notesOk = false;
+        }
+      } else {
+        setServiceNotesErr(null);
+      }
+      // Paramos si CUALQUIER campo es inválido (todos los errores ya quedaron seteados arriba).
+      if (serviceType == null || !d.ok || !notesOk) return;
+      // Guard ANTES de cualquier await (anti doble-tap). AVISO SUAVE: servicio sobre una hembra que SÍ
+      // figura preñada (no se da servicio a una preñada; pero puede figurar preñada por un tacto viejo y
+      // haberlo perdido) → confirmación "¿registrar igual?". Si NO figura preñada → sin aviso, directo.
+      busyRef.current = true;
+      if (!(await confirmReproIfNeeded())) return;
+      setSubmitting(true);
+      const r = await addService({ profileId, serviceType, eventDate: d.value, notes });
+      finishSubmit(r);
+      return;
+    }
+
+    if (eventType === 'birth') {
+      // Validamos fecha + lista de terneros (cada uno con sexo; pesos opcionales válidos; tags
+      // opcionales). validateCalves es PURO (testeable) y normaliza sexo/peso/tag.
+      const d = validateEventDate(birthDate);
+      setBirthDateErr(d.ok ? null : d.error);
+      const drafts: CalfDraft[] = calves.map((c) => ({
+        sex: c.sex,
+        weightRaw: c.weightRaw,
+        tagRaw: c.tagRaw,
+      }));
+      const v = validateCalves(drafts);
+      setCalvesErr(v.ok ? null : v.error);
+      if (!d.ok || !v.ok) return;
+      // AVISO SUAVE (no bloqueo): un parto solo lo da una hembra preñada, PERO puede estar preñada de
+      // verdad sin el tacto cargado (figura "Sin registrar") y el parto ya es prueba de la preñez. Si
+      // la hembra NO figura preñada en nuestros registros, pedimos una confirmación suave ANTES de
+      // registrar (no es un error: es "¿registrar igual?"). Guard ANTES del diálogo (doble-tap del Alert
+      // async en native); confirmReproIfNeeded lo libera si cancela. NO tocamos `submitting` (visual)
+      // hasta confirmar.
+      busyRef.current = true;
+      if (!(await confirmReproIfNeeded())) return;
+      setSubmitting(true);
+      // La RPC register_birth crea el evento + 1..N terneros + transición de la madre ATÓMICAMENTE
+      // server-side (R9.4/R9.5). El cliente manda solo motherProfileId + fecha + terneros — el tenant
+      // lo deriva el server de la fila real de la madre. Al volver, useFocusEffect refresca la ficha.
+      const r = await registerBirth({
+        motherProfileId: profileId,
+        eventDate: d.value,
+        calves: v.value.map((c) => ({ sex: c.sex, weightKg: c.weightKg, tag: c.tag })),
+      });
+      finishSubmit(r);
+      return;
+    }
+
+    if (eventType === 'abortion') {
+      const d = validateEventDate(abortionDate);
+      setAbortionDateErr(d.ok ? null : d.error);
+      // Notas OPCIONALES (mismo manejo que el servicio): vacío es válido (no se mandan); con texto, se
+      // valida el tope (backstop — el sanitizer ya acota en vivo).
+      const trimmedNotes = abortionNotes.trim();
+      let notes: string | null = null;
+      let notesOk = true;
+      if (trimmedNotes.length > 0) {
+        const o = validateObservation(abortionNotes);
+        if (o.ok) {
+          notes = o.value;
+          setAbortionNotesErr(null);
+        } else {
+          setAbortionNotesErr(o.error);
+          notesOk = false;
+        }
+      } else {
+        setAbortionNotesErr(null);
+      }
+      if (!d.ok || !notesOk) return;
+      // AVISO SUAVE: aborto sobre una hembra que NO figura preñada → confirmación "¿registrar igual?".
+      // Guard ANTES del diálogo (anti doble-tap); confirmReproIfNeeded lo libera si cancela.
+      busyRef.current = true;
+      if (!(await confirmReproIfNeeded())) return;
+      setSubmitting(true);
+      // El aborto revierte la preñez de la categoría server-side (dominio Facundo §1) y deja el estado
+      // "Vacía" (deriveCurrentState con abortion). El flag "tuvo aborto" lo deriva hasAbortion al volver.
+      const r = await addAbortion({ profileId, eventDate: d.value, notes });
+      finishSubmit(r);
+      return;
+    }
   }, [
     eventType,
     profileId,
@@ -182,6 +457,16 @@ export default function AgregarEventoScreen() {
     score,
     scoreDate,
     observation,
+    pregnancyStatus,
+    tactoDate,
+    serviceType,
+    serviceDate,
+    serviceNotes,
+    birthDate,
+    calves,
+    abortionDate,
+    abortionNotes,
+    figuresPregnant,
     finishSubmit,
   ]);
 
@@ -192,7 +477,15 @@ export default function AgregarEventoScreen() {
         ? 'Pesaje'
         : eventType === 'condition_score'
           ? 'Condición corporal'
-          : 'Observación';
+          : eventType === 'tacto'
+            ? 'Tacto'
+            : eventType === 'service'
+              ? 'Servicio'
+              : eventType === 'birth'
+                ? 'Parto'
+                : eventType === 'abortion'
+                  ? 'Aborto'
+                  : 'Observación';
 
   return (
     <YStack flex={1} width="100%" maxWidth="100%" overflow="hidden" backgroundColor="$bg">
@@ -228,7 +521,7 @@ export default function AgregarEventoScreen() {
             No pudimos cargar el animal. Volvé a la ficha y abrí "Agregar evento" de nuevo.
           </InfoNote>
         ) : step === 1 ? (
-          <Step1ChooseType onChoose={onChooseType} />
+          <Step1ChooseType onChoose={onChooseType} isFemale={isFemale} />
         ) : eventType === 'weight' ? (
           <WeightForm
             weightKg={weightKg}
@@ -258,6 +551,71 @@ export default function AgregarEventoScreen() {
               if (scoreDateErr) setScoreDateErr(null);
             }}
             dateErr={scoreDateErr}
+          />
+        ) : eventType === 'tacto' ? (
+          <TactoForm
+            status={pregnancyStatus}
+            onStatus={(s) => {
+              setPregnancyStatus(s);
+              if (tactoStatusErr) setTactoStatusErr(null);
+            }}
+            statusErr={tactoStatusErr}
+            date={tactoDate}
+            onDate={(t) => {
+              setTactoDate(maskDateInput(t));
+              if (tactoDateErr) setTactoDateErr(null);
+            }}
+            dateErr={tactoDateErr}
+          />
+        ) : eventType === 'service' ? (
+          <ServiceForm
+            type={serviceType}
+            onType={(t) => {
+              setServiceType(t);
+              if (serviceTypeErr) setServiceTypeErr(null);
+            }}
+            typeErr={serviceTypeErr}
+            date={serviceDate}
+            onDate={(t) => {
+              setServiceDate(maskDateInput(t));
+              if (serviceDateErr) setServiceDateErr(null);
+            }}
+            dateErr={serviceDateErr}
+            notes={serviceNotes}
+            onNotes={(t) => {
+              setServiceNotes(sanitizeObservationInput(t));
+              if (serviceNotesErr) setServiceNotesErr(null);
+            }}
+            notesErr={serviceNotesErr}
+          />
+        ) : eventType === 'birth' ? (
+          <PartoForm
+            date={birthDate}
+            onDate={(t) => {
+              setBirthDate(maskDateInput(t));
+              if (birthDateErr) setBirthDateErr(null);
+            }}
+            dateErr={birthDateErr}
+            calves={calves}
+            onAddCalf={addCalf}
+            onRemoveCalf={removeCalf}
+            onUpdateCalf={updateCalf}
+            calvesErr={calvesErr}
+          />
+        ) : eventType === 'abortion' ? (
+          <AbortionForm
+            date={abortionDate}
+            onDate={(t) => {
+              setAbortionDate(maskDateInput(t));
+              if (abortionDateErr) setAbortionDateErr(null);
+            }}
+            dateErr={abortionDateErr}
+            notes={abortionNotes}
+            onNotes={(t) => {
+              setAbortionNotes(sanitizeObservationInput(t));
+              if (abortionNotesErr) setAbortionNotesErr(null);
+            }}
+            notesErr={abortionNotesErr}
           />
         ) : (
           <ObservationForm
@@ -298,31 +656,89 @@ export default function AgregarEventoScreen() {
 
 // ─── Paso 1: elegí el tipo de evento (3 cards grandes) ────────────────────────────────────
 
-function Step1ChooseType({ onChoose }: { onChoose: (t: EventType) => void }) {
+function Step1ChooseType({
+  onChoose,
+  isFemale,
+}: {
+  onChoose: (t: EventType) => void;
+  isFemale: boolean;
+}) {
+  // Agrupado en secciones (Gestalt proximidad/similitud; escala a C3.3 sin re-acomodar): "General"
+  // (peso/condición/observación) y "Reproductivo" (tacto/servicio/parto). Subtítulo de grupo
+  // $textMuted/600. La sección "Reproductivo" se muestra SOLO para hembras (isFemale): tacto, servicio
+  // y parto no aplican a machos — para un macho el operario solo ve "General".
   return (
-    <YStack gap="$3">
+    <YStack gap="$4">
       <Text fontFamily="$body" fontSize="$6" fontWeight="600" color="$textPrimary">
         ¿Qué querés cargar?
       </Text>
-      <TypeCard
-        icon={Weight}
-        title="Pesaje"
-        subtitle="El peso del animal en kilos"
-        onPress={() => onChoose('weight')}
-      />
-      <TypeCard
-        icon={Activity}
-        title="Condición corporal"
-        subtitle="Escala de 1 a 5"
-        onPress={() => onChoose('condition_score')}
-      />
-      <TypeCard
-        icon={StickyNote}
-        title="Observación"
-        subtitle="Una nota libre sobre el animal"
-        onPress={() => onChoose('observation')}
-      />
+
+      <YStack gap="$2">
+        <SectionLabel>General</SectionLabel>
+        <YStack gap="$3">
+          <TypeCard
+            icon={Weight}
+            title="Pesaje"
+            subtitle="El peso del animal en kilos"
+            onPress={() => onChoose('weight')}
+          />
+          <TypeCard
+            icon={Activity}
+            title="Condición corporal"
+            subtitle="Escala de 1 a 5"
+            onPress={() => onChoose('condition_score')}
+          />
+          <TypeCard
+            icon={StickyNote}
+            title="Observación"
+            subtitle="Una nota libre sobre el animal"
+            onPress={() => onChoose('observation')}
+          />
+        </YStack>
+      </YStack>
+
+      {/* Reproductivo SOLO para hembras: tacto/servicio/parto no aplican a machos. */}
+      {isFemale ? (
+        <YStack gap="$2">
+          <SectionLabel>Reproductivo</SectionLabel>
+          <YStack gap="$3">
+            <TypeCard
+              icon={Stethoscope}
+              title="Tacto"
+              subtitle="Diagnóstico de preñez"
+              onPress={() => onChoose('tacto')}
+            />
+            <TypeCard
+              icon={HeartHandshake}
+              title="Servicio"
+              subtitle="Monta natural, IA o TE"
+              onPress={() => onChoose('service')}
+            />
+            <TypeCard
+              icon={Baby}
+              title="Parto"
+              subtitle="Nacimiento de uno o más terneros"
+              onPress={() => onChoose('birth')}
+            />
+            <TypeCard
+              icon={HeartCrack}
+              title="Aborto"
+              subtitle="Pérdida de la preñez"
+              onPress={() => onChoose('abortion')}
+            />
+          </YStack>
+        </YStack>
+      ) : null}
     </YStack>
+  );
+}
+
+/** Subtítulo de grupo del paso 1 ($textMuted, chico, semibold) — separador de secciones (Gestalt). */
+function SectionLabel({ children }: { children: string }) {
+  return (
+    <Text fontFamily="$body" fontSize="$3" fontWeight="600" color="$textMuted">
+      {children}
+    </Text>
   );
 }
 
@@ -510,21 +926,376 @@ function ScoreSelector({
   );
 }
 
-// ─── Form: Observación libre (textarea con tope) ──────────────────────────────────────────
+// ─── Selector vertical full-width (opción única) ──────────────────────────────────────────
+//
+// Cada opción es una FILA ancha (no chip): labels largos como "Transferencia embrionaria (TE)"
+// entran cómodos (mejor Fitts que un chip apretado). Patrón consistente con el
+// ScoreSelector (borde 2px, radio, selected = relleno+texto $primary) pero en formato fila. a11y por
+// buttonA11y (web=ARIA, native=accessibility*). Cero hardcode: tokens + getTokenValue para el ícono.
+function OptionSelector<T extends string>({
+  options,
+  value,
+  onChange,
+}: {
+  options: readonly { value: T; label: string }[];
+  value: T | null;
+  onChange: (v: T) => void;
+}) {
+  const white = getTokenValue('$white', 'color');
+  return (
+    <YStack width="100%" gap="$2">
+      {options.map((opt) => {
+        const selected = value === opt.value;
+        return (
+          <Pressable
+            key={opt.value}
+            onPress={() => onChange(opt.value)}
+            {...buttonA11y(Platform.OS, { label: opt.label, selected })}
+          >
+            <XStack
+              width="100%"
+              alignItems="center"
+              gap="$2"
+              minHeight="$touchMin"
+              borderRadius="$card"
+              borderWidth={2}
+              borderColor={selected ? '$primary' : '$divider'}
+              backgroundColor={selected ? '$primary' : '$white'}
+              paddingHorizontal="$4"
+              paddingVertical="$3"
+              pressStyle={{ opacity: 0.85 }}
+            >
+              <Text
+                flex={1}
+                minWidth={0}
+                fontFamily="$body"
+                fontSize="$5"
+                fontWeight="600"
+                color={selected ? '$white' : '$textPrimary'}
+              >
+                {opt.label}
+              </Text>
+              {selected ? <Check size={20} color={white} strokeWidth={2.5} /> : null}
+            </XStack>
+          </Pressable>
+        );
+      })}
+    </YStack>
+  );
+}
 
-function ObservationForm({
+// ─── Form: Tacto (selector cerrado de pregnancy_status + fecha) ────────────────────────────
+
+function TactoForm({
+  status,
+  onStatus,
+  statusErr,
+  date,
+  onDate,
+  dateErr,
+}: {
+  status: PregnancyStatus | null;
+  onStatus: (s: PregnancyStatus) => void;
+  statusErr: string | null;
+  date: string;
+  onDate: (t: string) => void;
+  dateErr: string | null;
+}) {
+  return (
+    <YStack gap="$3">
+      <YStack gap="$2">
+        <Text fontFamily="$body" fontSize="$3" fontWeight="500" color="$textMuted">
+          Resultado del tacto
+        </Text>
+        <OptionSelector options={PREGNANCY_OPTIONS} value={status} onChange={onStatus} />
+        {statusErr ? (
+          <Text fontFamily="$body" fontSize="$3" fontWeight="400" color="$terracota">
+            {statusErr}
+          </Text>
+        ) : null}
+      </YStack>
+      <FormField
+        label="Fecha (AAAA-MM-DD)"
+        value={date}
+        onChangeText={onDate}
+        keyboardType="number-pad"
+        placeholder="AAAA-MM-DD"
+        error={dateErr}
+      />
+    </YStack>
+  );
+}
+
+// ─── Form: Servicio (selector cerrado de service_type + fecha + notas OPCIONALES) ──────────
+
+function ServiceForm({
+  type,
+  onType,
+  typeErr,
+  date,
+  onDate,
+  dateErr,
+  notes,
+  onNotes,
+  notesErr,
+}: {
+  type: ServiceType | null;
+  onType: (t: ServiceType) => void;
+  typeErr: string | null;
+  date: string;
+  onDate: (t: string) => void;
+  dateErr: string | null;
+  notes: string;
+  onNotes: (t: string) => void;
+  notesErr: string | null;
+}) {
+  return (
+    <YStack gap="$3">
+      <YStack gap="$2">
+        <Text fontFamily="$body" fontSize="$3" fontWeight="500" color="$textMuted">
+          Tipo de servicio
+        </Text>
+        <OptionSelector options={SERVICE_TYPE_OPTIONS} value={type} onChange={onType} />
+        {typeErr ? (
+          <Text fontFamily="$body" fontSize="$3" fontWeight="400" color="$terracota">
+            {typeErr}
+          </Text>
+        ) : null}
+      </YStack>
+      <FormField
+        label="Fecha (AAAA-MM-DD)"
+        value={date}
+        onChangeText={onDate}
+        keyboardType="number-pad"
+        placeholder="AAAA-MM-DD"
+        error={dateErr}
+      />
+      <NotesField
+        label="Notas (opcional)"
+        value={notes}
+        onChange={onNotes}
+        error={notesErr}
+        placeholder="Ej. toro Aberdeen Angus N° 12"
+        a11yLabel="Notas del servicio"
+      />
+    </YStack>
+  );
+}
+
+// ─── Form: Aborto (fecha + notas OPCIONALES) ───────────────────────────────────────────────
+//
+// El aborto es la pérdida de la preñez: solo necesita la FECHA (prefill hoy) + notas opcionales (ej.
+// causa observada). No lleva selector (no hay "tipo de aborto" en el modelo). Mismo lenguaje que el
+// resto: FormField de fecha + NotesField reusado (label/placeholder/a11y configurables).
+function AbortionForm({
+  date,
+  onDate,
+  dateErr,
+  notes,
+  onNotes,
+  notesErr,
+}: {
+  date: string;
+  onDate: (t: string) => void;
+  dateErr: string | null;
+  notes: string;
+  onNotes: (t: string) => void;
+  notesErr: string | null;
+}) {
+  return (
+    <YStack gap="$3">
+      <FormField
+        label="Fecha del aborto (AAAA-MM-DD)"
+        value={date}
+        onChangeText={onDate}
+        keyboardType="number-pad"
+        placeholder="AAAA-MM-DD"
+        error={dateErr}
+      />
+      <NotesField
+        label="Notas (opcional)"
+        value={notes}
+        onChange={onNotes}
+        error={notesErr}
+        placeholder="Ej. causa observada, semana de gestación"
+        a11yLabel="Notas del aborto"
+      />
+    </YStack>
+  );
+}
+
+// ─── Form: Parto (fecha + lista dinámica de terneros, R9.5 mellizos) ───────────────────────
+//
+// La fecha del parto + una o más cards "Ternero N". Cada card: sexo (REQUERIDO, OptionSelector
+// Macho/Hembra) + peso al nacer (opcional, kg) + caravana electrónica (opcional, FDX-B 15 díg). El
+// botón "+ Agregar otro ternero" suma una card (mellizos); cada card (salvo cuando hay una sola)
+// tiene "Quitar". El estado vive en el screen como array con id local estable (key de React).
+function PartoForm({
+  date,
+  onDate,
+  dateErr,
+  calves,
+  onAddCalf,
+  onRemoveCalf,
+  onUpdateCalf,
+  calvesErr,
+}: {
+  date: string;
+  onDate: (t: string) => void;
+  dateErr: string | null;
+  calves: CalfRow[];
+  onAddCalf: () => void;
+  onRemoveCalf: (localId: string) => void;
+  onUpdateCalf: (localId: string, patch: Partial<Omit<CalfRow, 'localId'>>) => void;
+  calvesErr: string | null;
+}) {
+  const primary = getTokenValue('$primary', 'color');
+  return (
+    <YStack gap="$4">
+      <FormField
+        label="Fecha del parto (AAAA-MM-DD)"
+        value={date}
+        onChangeText={onDate}
+        keyboardType="number-pad"
+        placeholder="AAAA-MM-DD"
+        error={dateErr}
+      />
+
+      <YStack gap="$3">
+        {calves.map((calf, i) => (
+          <CalfBlock
+            key={calf.localId}
+            index={i}
+            calf={calf}
+            canRemove={calves.length > 1}
+            onRemove={() => onRemoveCalf(calf.localId)}
+            onUpdate={(patch) => onUpdateCalf(calf.localId, patch)}
+          />
+        ))}
+      </YStack>
+
+      {/* Error general del set de terneros (ej. "Elegí el sexo de cada ternero."). */}
+      {calvesErr ? (
+        <Text fontFamily="$body" fontSize="$3" fontWeight="400" color="$terracota">
+          {calvesErr}
+        </Text>
+      ) : null}
+
+      {/* Agregar otro ternero (mellizos, R9.5). Pressable estilado al lenguaje (borde discontinuo no
+          existe en tokens → borde sólido $primary + texto $primary), a11y por helper. */}
+      <Pressable
+        style={{ width: '100%' }}
+        onPress={onAddCalf}
+        {...buttonA11y(Platform.OS, { label: 'Agregar otro ternero' })}
+      >
+        <XStack
+          width="100%"
+          minHeight="$touchMin"
+          alignItems="center"
+          justifyContent="center"
+          gap="$2"
+          borderRadius="$card"
+          borderWidth={2}
+          borderColor="$primary"
+          backgroundColor="$greenLight"
+          paddingHorizontal="$4"
+          pressStyle={{ opacity: 0.85 }}
+        >
+          <Plus size={20} color={primary} strokeWidth={2.5} />
+          <Text fontFamily="$body" fontSize="$5" fontWeight="600" color="$primary">
+            Agregar otro ternero
+          </Text>
+        </XStack>
+      </Pressable>
+    </YStack>
+  );
+}
+
+/** Una card "Ternero N": sexo (requerido) + peso (opcional) + caravana (opcional) + quitar. */
+function CalfBlock({
+  index,
+  calf,
+  canRemove,
+  onRemove,
+  onUpdate,
+}: {
+  index: number;
+  calf: CalfRow;
+  canRemove: boolean;
+  onRemove: () => void;
+  onUpdate: (patch: Partial<Omit<CalfRow, 'localId'>>) => void;
+}) {
+  const terracota = getTokenValue('$terracota', 'color');
+  return (
+    <Card gap="$3">
+      <XStack width="100%" alignItems="center" gap="$2">
+        <Text flex={1} minWidth={0} fontFamily="$body" fontSize="$6" fontWeight="600" color="$textPrimary">
+          {`Ternero ${index + 1}`}
+        </Text>
+        {canRemove ? (
+          <Pressable
+            hitSlop={8}
+            onPress={onRemove}
+            {...buttonA11y(Platform.OS, { label: `Quitar ternero ${index + 1}` })}
+          >
+            <Trash2 size={20} color={terracota} strokeWidth={2} />
+          </Pressable>
+        ) : null}
+      </XStack>
+
+      <YStack gap="$2">
+        <Text fontFamily="$body" fontSize="$3" fontWeight="500" color="$textMuted">
+          Sexo
+        </Text>
+        <OptionSelector
+          options={SEX_OPTIONS}
+          value={calf.sex}
+          onChange={(s) => onUpdate({ sex: s })}
+        />
+      </YStack>
+
+      <FormField
+        label="Peso al nacer en kg (opcional)"
+        value={calf.weightRaw}
+        onChangeText={(t) => onUpdate({ weightRaw: sanitizeWeightInput(t) })}
+        keyboardType="decimal-pad"
+        placeholder="Ej. 35"
+      />
+
+      <FormField
+        label={`Caravana electrónica (opcional, ${TAG_ELECTRONIC_LENGTH} dígitos)`}
+        value={calf.tagRaw}
+        onChangeText={(t) => onUpdate({ tagRaw: sanitizeTagInput(t) })}
+        keyboardType="number-pad"
+        placeholder="982 0001 2345 6789"
+      />
+    </Card>
+  );
+}
+
+// ─── NotesField: textarea con tope (reusable: observación libre Y notas de servicio) ──────
+//
+// Textarea estilado al lenguaje de FormField (input pill blanco, redondeado, sin el borde default del
+// browser). Los valores cruzan a la API de estilo no-Tamagui del <TextInput> de RN → getTokenValue
+// (no literales, ADR-023 §4). Reusable: la observación libre (C3.1) y las notas opcionales del
+// servicio (C3.2a) usan el mismo componente — label/placeholder/a11yLabel configurables.
+function NotesField({
+  label,
   value,
   onChange,
   error,
+  placeholder,
+  a11yLabel,
 }: {
+  label: string;
   value: string;
   onChange: (t: string) => void;
   error: string | null;
+  placeholder: string;
+  /** Nombre accesible del <input>. NUNCA accessibilityLabel crudo al <input> de RN-web (lección C1). */
+  a11yLabel: string;
 }) {
-  // Estilo del <textarea> alineado al lenguaje de FormField (input pill blanco, redondeado, sin el
-  // borde default del browser). Los valores cruzan a la API de estilo no-Tamagui del <TextInput> de
-  // RN → se leen con getTokenValue (no literales, ADR-023 §4).
-  const placeholder = getTokenValue('$textMuted', 'color'); // mismo placeholder que FormField
+  const placeholderColor = getTokenValue('$textMuted', 'color'); // mismo placeholder que FormField
   const textPrimary = getTokenValue('$textPrimary', 'color');
   const surface = getTokenValue('$white', 'color'); // input blanco sobre $bg (como FormField)
   const borderColor = getTokenValue(error ? '$terracota' : '$divider', 'color');
@@ -532,16 +1303,19 @@ function ObservationForm({
   // redondeado del input; el outline default rompe el lenguaje de FormField. RN-web traduce
   // outlineWidth:0 a `outline: none` en el DOM (tipado en TextStyle, sin cast).
   const webOutlineReset: TextStyle = Platform.OS === 'web' ? { outlineWidth: 0 } : {};
+  // a11y ramificada por plataforma (label DOM-válido en web, accessibilityLabel en native).
+  const a11y =
+    Platform.OS === 'web' ? { 'aria-label': a11yLabel } : { accessibilityLabel: a11yLabel };
   return (
     <YStack gap="$2">
       <Text fontFamily="$body" fontSize="$3" fontWeight="500" color="$textMuted">
-        Observación
+        {label}
       </Text>
       <TextInput
         value={value}
         onChangeText={onChange}
-        placeholder="Ej. Renguea de la pata derecha; revisar en la próxima."
-        placeholderTextColor={placeholder}
+        placeholder={placeholder}
+        placeholderTextColor={placeholderColor}
         multiline
         maxLength={OBSERVATION_MAX_LENGTH}
         textAlignVertical="top"
@@ -558,7 +1332,7 @@ function ObservationForm({
           color: textPrimary,
           ...webOutlineReset,
         }}
-        {...observationA11y()}
+        {...a11y}
       />
       <XStack width="100%" justifyContent="flex-end">
         <Text fontFamily="$body" fontSize="$2" fontWeight="400" color="$textFaint">
@@ -574,10 +1348,25 @@ function ObservationForm({
   );
 }
 
-// a11y del textarea ramificada por plataforma (label DOM-válido en web, accessibilityLabel en
-// native) — NUNCA accessibilityLabel crudo al <input> de RN-web (lección C1).
-function observationA11y() {
-  return Platform.OS === 'web'
-    ? { 'aria-label': 'Observación' }
-    : { accessibilityLabel: 'Observación' };
+// ─── Form: Observación libre (NotesField requerido) ───────────────────────────────────────
+
+function ObservationForm({
+  value,
+  onChange,
+  error,
+}: {
+  value: string;
+  onChange: (t: string) => void;
+  error: string | null;
+}) {
+  return (
+    <NotesField
+      label="Observación"
+      value={value}
+      onChange={onChange}
+      error={error}
+      placeholder="Ej. Renguea de la pata derecha; revisar en la próxima."
+      a11yLabel="Observación"
+    />
+  );
 }
