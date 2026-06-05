@@ -1412,6 +1412,434 @@ test('animal suite — spec 02', async (t) => {
       }
     });
   });
+
+  // =====================================================================
+  // Tier 2/3 — modelo de categorías de cría (RT2.x). Delta backend:
+  // seed novillito/novillo, is_castrated, nursing, compute_category reescrita,
+  // disparadores servicio/destete/parto/aborto, cortes de edad + cron, consistencia
+  // trigger<->recompute, override, no-spoof. Cubre T8.a-T8.n de tasks-tier2.
+  // =====================================================================
+
+  // Helper: code de la categoría materializada de un perfil (leído con el client dado).
+  async function profileCode(client, profileId) {
+    const { data: p } = await client.from('animal_profiles').select('category_id').eq('id', profileId).single();
+    const { data: c } = await client.from('categories_by_system').select('code').eq('id', p.category_id).single();
+    return c.code;
+  }
+  // Helper: code que compute_category devuelve para un perfil (RPC).
+  async function computeCode(client, profileId) {
+    const { data, error } = await client.rpc('compute_category', { profile_id: profileId });
+    assert.equal(error, null, error && error.message);
+    const { data: c } = await client.from('categories_by_system').select('code').eq('id', data).single();
+    return c.code;
+  }
+
+  // ---- T2.20 seed novillito/novillo (RT2.1.x) -----------------------------
+  await t.test('T2.20 seed novillito/novillo (RT2.1.x)', async () => {
+    const { data, error } = await clientA
+      .from('categories_by_system').select('code, active').eq('system_id', rodeoA.systemId);
+    assert.equal(error, null, error && error.message);
+    const byCode = Object.fromEntries(data.map((r) => [r.code, r.active]));
+    assert.equal(byCode['novillito'], true, 'novillito sembrado y activo');
+    assert.equal(byCode['novillo'], true, 'novillo sembrado y activo');
+    // las 10 base siguen presentes y activas (RT2.1.2).
+    for (const code of ['ternero', 'ternera', 'vaquillona', 'vaquillona_prenada', 'vaca_segundo_servicio', 'multipara', 'cut', 'vaca_cabana', 'toro', 'torito']) {
+      assert.equal(byCode[code], true, `categoría base ${code} sigue activa`);
+    }
+  });
+
+  // ---- T2.21 compute_category rama macho (alta directa) (RT2.3.x) ---------
+  await t.test('T2.21 compute_category rama macho (RT2.3.x)', async () => {
+    async function makeMale({ birthDate, castrated = false, code = 'torito' }) {
+      const r = await createAnimal(clientA, { idv: `${RUN_TAG}_M_${Math.random().toString(36).slice(2, 7)}`, sex: 'male', birthDate, rodeoId: rodeoA.id, establishmentId: estA, systemId: rodeoA.systemId, categoryCode: code });
+      assert.equal(r.error, undefined, r.error && r.error.message);
+      if (castrated) {
+        const { error } = await clientA.from('animals').update({ is_castrated: true }).eq('id', r.animalId);
+        assert.equal(error, null, error && error.message);
+      }
+      return r;
+    }
+    // macho <1 año, entero -> ternero (RT2.3.1)
+    assert.equal(await computeCode(clientA, (await makeMale({ birthDate: daysAgo(180), code: 'ternero' })).profile.id), 'ternero');
+    // macho >=1<2 año, entero -> torito (RT2.3.2)
+    assert.equal(await computeCode(clientA, (await makeMale({ birthDate: daysAgo(400) })).profile.id), 'torito');
+    // macho >=2 años, entero -> toro (RT2.3.3)
+    assert.equal(await computeCode(clientA, (await makeMale({ birthDate: daysAgo(800) })).profile.id), 'toro');
+    // macho >=1<2 año, castrado -> novillito (RT2.3.2)
+    assert.equal(await computeCode(clientA, (await makeMale({ birthDate: daysAgo(400), castrated: true })).profile.id), 'novillito');
+    // macho >=2 años, castrado -> novillo (RT2.3.3)
+    assert.equal(await computeCode(clientA, (await makeMale({ birthDate: daysAgo(800), castrated: true })).profile.id), 'novillo');
+    // macho birth_date NULL, entero -> torito (RT2.3.4)
+    assert.equal(await computeCode(clientA, (await makeMale({ birthDate: null })).profile.id), 'torito');
+  });
+
+  // ---- T2.22 compute_category rama hembra (alta directa) (RT2.4.x) --------
+  await t.test('T2.22 compute_category rama hembra (RT2.4.x)', async () => {
+    async function makeFemale({ birthDate, code = 'vaquillona' }) {
+      const r = await createAnimal(clientA, { idv: `${RUN_TAG}_F_${Math.random().toString(36).slice(2, 7)}`, sex: 'female', birthDate, rodeoId: rodeoA.id, establishmentId: estA, systemId: rodeoA.systemId, categoryCode: code });
+      assert.equal(r.error, undefined, r.error && r.error.message);
+      return r;
+    }
+    // hembra <1 año sin eventos -> ternera (RT2.4.5)
+    assert.equal(await computeCode(clientA, (await makeFemale({ birthDate: daysAgo(180), code: 'ternera' })).profile.id), 'ternera');
+    // hembra >=1 año sin eventos -> vaquillona (RT2.4.4)
+    assert.equal(await computeCode(clientA, (await makeFemale({ birthDate: daysAgo(550) })).profile.id), 'vaquillona');
+    // hembra birth_date NULL sin eventos -> vaquillona (RT2.4.6)
+    assert.equal(await computeCode(clientA, (await makeFemale({ birthDate: null })).profile.id), 'vaquillona');
+  });
+
+  // ---- T2.23 transición SERVICIO (RT2.5.x) --------------------------------
+  await t.test('T2.23 servicio (ternera->vaquillona) (RT2.5.x)', async () => {
+    // ternera + service -> vaquillona, override sigue false (RT2.5.1)
+    const tn = await createAnimal(clientA, { idv: `${RUN_TAG}_SV1`, sex: 'female', birthDate: daysAgo(180), rodeoId: rodeoA.id, establishmentId: estA, systemId: rodeoA.systemId, categoryCode: 'ternera' });
+    await clientA.from('reproductive_events').insert({ animal_profile_id: tn.profile.id, event_type: 'service', event_date: daysAgo(1) });
+    assert.equal(await profileCode(clientA, tn.profile.id), 'vaquillona', 'servicio sobre ternera -> vaquillona (RT2.5.1)');
+    {
+      const { data } = await clientA.from('animal_profiles').select('category_override').eq('id', tn.profile.id).single();
+      assert.equal(data.category_override, false, 'transición auto no marca override');
+    }
+    // servicio sobre vaquillona ya existente -> sin cambio (RT2.5.2)
+    const vq = await createAnimal(clientA, { idv: `${RUN_TAG}_SV2`, sex: 'female', birthDate: daysAgo(550), rodeoId: rodeoA.id, establishmentId: estA, systemId: rodeoA.systemId, categoryCode: 'vaquillona' });
+    await clientA.from('reproductive_events').insert({ animal_profile_id: vq.profile.id, event_type: 'service', event_date: daysAgo(1) });
+    assert.equal(await profileCode(clientA, vq.profile.id), 'vaquillona', 'servicio sobre vaquillona no retrocede ni avanza (RT2.5.2)');
+    // servicio sobre una preñada NO la retrocede (el tacto+ vigente domina en compute_category) (RT2.5.2)
+    const pr = await createAnimal(clientA, { idv: `${RUN_TAG}_SV4`, sex: 'female', birthDate: daysAgo(550), rodeoId: rodeoA.id, establishmentId: estA, systemId: rodeoA.systemId, categoryCode: 'vaquillona' });
+    await clientA.from('reproductive_events').insert({ animal_profile_id: pr.profile.id, event_type: 'tacto', event_date: daysAgo(10), pregnancy_status: 'large' });
+    assert.equal(await profileCode(clientA, pr.profile.id), 'vaquillona_prenada', 'precondición: preñada');
+    await clientA.from('reproductive_events').insert({ animal_profile_id: pr.profile.id, event_type: 'service', event_date: daysAgo(1) });
+    assert.equal(await profileCode(clientA, pr.profile.id), 'vaquillona_prenada', 'servicio sobre preñada no la retrocede (RT2.5.2)');
+    // servicio con override=true -> sin cambio (RT2.5.3)
+    const tnov = await createAnimal(clientA, { idv: `${RUN_TAG}_SV3`, sex: 'female', birthDate: daysAgo(180), rodeoId: rodeoA.id, establishmentId: estA, systemId: rodeoA.systemId, categoryCode: 'ternera' });
+    await clientA.from('animal_profiles').update({ category_override: true }).eq('id', tnov.profile.id);
+    await clientA.from('reproductive_events').insert({ animal_profile_id: tnov.profile.id, event_type: 'service', event_date: daysAgo(1) });
+    assert.equal(await profileCode(clientA, tnov.profile.id), 'ternera', 'override bloquea servicio (RT2.5.3)');
+  });
+
+  // ---- T2.24 transición DESTETE (RT2.6.x) ---------------------------------
+  await t.test('T2.24 destete (RT2.6.x)', async () => {
+    // ternero macho entero + weaning -> torito (RT2.6.1)
+    const tm = await createAnimal(clientA, { idv: `${RUN_TAG}_W1`, sex: 'male', birthDate: daysAgo(180), rodeoId: rodeoA.id, establishmentId: estA, systemId: rodeoA.systemId, categoryCode: 'ternero' });
+    await clientA.from('reproductive_events').insert({ animal_profile_id: tm.profile.id, event_type: 'weaning', event_date: daysAgo(1) });
+    assert.equal(await profileCode(clientA, tm.profile.id), 'torito', 'ternero entero + destete -> torito (RT2.6.1)');
+    // ternero macho castrado + weaning -> novillito (RT2.6.1)
+    const tmc = await createAnimal(clientA, { idv: `${RUN_TAG}_W2`, sex: 'male', birthDate: daysAgo(180), rodeoId: rodeoA.id, establishmentId: estA, systemId: rodeoA.systemId, categoryCode: 'ternero' });
+    await clientA.from('animals').update({ is_castrated: true }).eq('id', tmc.animalId);
+    // castrar un ternero NO transiciona (RT2.2.2): sigue ternero hasta el destete.
+    assert.equal(await profileCode(clientA, tmc.profile.id), 'ternero', 'castrar ternero no transiciona (RT2.2.2)');
+    await clientA.from('reproductive_events').insert({ animal_profile_id: tmc.profile.id, event_type: 'weaning', event_date: daysAgo(1) });
+    assert.equal(await profileCode(clientA, tmc.profile.id), 'novillito', 'ternero castrado + destete -> novillito (RT2.6.1)');
+    // ternera + weaning -> vaquillona (RT2.6.2)
+    const tf = await createAnimal(clientA, { idv: `${RUN_TAG}_W3`, sex: 'female', birthDate: daysAgo(180), rodeoId: rodeoA.id, establishmentId: estA, systemId: rodeoA.systemId, categoryCode: 'ternera' });
+    await clientA.from('reproductive_events').insert({ animal_profile_id: tf.profile.id, event_type: 'weaning', event_date: daysAgo(1) });
+    assert.equal(await profileCode(clientA, tf.profile.id), 'vaquillona', 'ternera + destete -> vaquillona (RT2.6.2)');
+    // destete sobre torito ya graduado -> sin retroceso (RT2.6.3)
+    const grad = await createAnimal(clientA, { idv: `${RUN_TAG}_W4`, sex: 'male', birthDate: daysAgo(400), rodeoId: rodeoA.id, establishmentId: estA, systemId: rodeoA.systemId, categoryCode: 'torito' });
+    await clientA.from('reproductive_events').insert({ animal_profile_id: grad.profile.id, event_type: 'weaning', event_date: daysAgo(1) });
+    assert.equal(await profileCode(clientA, grad.profile.id), 'torito', 'destete no retrocede a un torito (RT2.6.3)');
+    // destete con override=true -> sin cambio (RT2.6.4)
+    const ov = await createAnimal(clientA, { idv: `${RUN_TAG}_W5`, sex: 'female', birthDate: daysAgo(180), rodeoId: rodeoA.id, establishmentId: estA, systemId: rodeoA.systemId, categoryCode: 'ternera' });
+    await clientA.from('animal_profiles').update({ category_override: true }).eq('id', ov.profile.id);
+    await clientA.from('reproductive_events').insert({ animal_profile_id: ov.profile.id, event_type: 'weaning', event_date: daysAgo(1) });
+    assert.equal(await profileCode(clientA, ov.profile.id), 'ternera', 'override bloquea destete (RT2.6.4)');
+  });
+
+  // ---- T2.25 PARTO desde cualquier categoría (RT2.7.1/2.7.2) --------------
+  await t.test('T2.25 parto desde cualquier categoría + mellizos (RT2.7.1/2.7.2)', async () => {
+    // vaquillona (sin pasar por preñada) + birth -> vaca_segundo_servicio (RT2.7.1)
+    const vq = await createAnimal(clientA, { idv: `${RUN_TAG}_P1`, sex: 'female', birthDate: daysAgo(550), rodeoId: rodeoA.id, establishmentId: estA, systemId: rodeoA.systemId, categoryCode: 'vaquillona' });
+    await clientA.from('reproductive_events').insert({ animal_profile_id: vq.profile.id, event_type: 'birth', event_date: daysAgo(1), calf_sex: 'female' });
+    assert.equal(await profileCode(clientA, vq.profile.id), 'vaca_segundo_servicio', 'vaquillona + parto -> vaca (RT2.7.1)');
+    // ternera + birth -> vaca_segundo_servicio (salto desde ternera) (RT2.7.1/2.4.2)
+    const tn = await createAnimal(clientA, { idv: `${RUN_TAG}_P2`, sex: 'female', birthDate: daysAgo(300), rodeoId: rodeoA.id, establishmentId: estA, systemId: rodeoA.systemId, categoryCode: 'ternera' });
+    await clientA.from('reproductive_events').insert({ animal_profile_id: tn.profile.id, event_type: 'birth', event_date: daysAgo(1), calf_sex: 'male' });
+    assert.equal(await profileCode(clientA, tn.profile.id), 'vaca_segundo_servicio', 'ternera que pare -> vaca (RT2.4.2)');
+    // + 2º birth -> multipara (RT2.4.1)
+    await clientA.from('reproductive_events').insert({ animal_profile_id: tn.profile.id, event_type: 'birth', event_date: daysAgo(1), calf_sex: 'female' });
+    assert.equal(await profileCode(clientA, tn.profile.id), 'multipara', '2º parto -> multipara (RT2.4.1)');
+    // mellizos: register_birth con 2 terneros = UN parto -> avanza una sola vez (RT2.7.2)
+    const tw = await createAnimal(clientA, { idv: `${RUN_TAG}_P3`, sex: 'female', birthDate: daysAgo(550), rodeoId: rodeoA.id, establishmentId: estA, systemId: rodeoA.systemId, categoryCode: 'vaquillona' });
+    const { data: birthId, error: rbErr } = await clientA.rpc('register_birth', {
+      p_mother_profile_id: tw.profile.id, p_event_date: daysAgo(1),
+      p_calves: [{ calf_sex: 'male' }, { calf_sex: 'female' }],
+    });
+    assert.equal(rbErr, null, rbErr && rbErr.message);
+    {
+      const { data: bc } = await admin.from('birth_calves').select('calf_profile_id').eq('birth_event_id', birthId);
+      assert.equal(bc.length, 2, 'mellizos = 2 filas en birth_calves');
+    }
+    assert.equal(await profileCode(clientA, tw.profile.id), 'vaca_segundo_servicio', 'mellizos = UN parto (no doble-cuenta, RT2.7.2)');
+  });
+
+  // ---- T2.26 ABORTO revierte (RT2.7.3/2.7.4/2.7.6) ------------------------
+  await t.test('T2.26 aborto revierte (RT2.7.3/2.7.4/2.7.6)', async () => {
+    // vaquillona + tacto+ -> prenada; + abortion -> vaquillona (RT2.7.3)
+    const vq = await createAnimal(clientA, { idv: `${RUN_TAG}_AB1`, sex: 'female', birthDate: daysAgo(550), rodeoId: rodeoA.id, establishmentId: estA, systemId: rodeoA.systemId, categoryCode: 'vaquillona' });
+    await clientA.from('reproductive_events').insert({ animal_profile_id: vq.profile.id, event_type: 'tacto', event_date: daysAgo(10), pregnancy_status: 'medium' });
+    assert.equal(await profileCode(clientA, vq.profile.id), 'vaquillona_prenada', 'tacto+ -> preñada');
+    await clientA.from('reproductive_events').insert({ animal_profile_id: vq.profile.id, event_type: 'abortion', event_date: daysAgo(1) });
+    assert.equal(await profileCode(clientA, vq.profile.id), 'vaquillona', 'aborto revierte preñez -> vaquillona (RT2.7.3)');
+    // multipara que aborta queda multipara (RT2.7.4)
+    const mp = await createAnimal(clientA, { idv: `${RUN_TAG}_AB2`, sex: 'female', birthDate: daysAgo(900), rodeoId: rodeoA.id, establishmentId: estA, systemId: rodeoA.systemId, categoryCode: 'multipara' });
+    await clientA.from('reproductive_events').insert({ animal_profile_id: mp.profile.id, event_type: 'birth', event_date: daysAgo(60) });
+    await clientA.from('reproductive_events').insert({ animal_profile_id: mp.profile.id, event_type: 'birth', event_date: daysAgo(50) });
+    assert.equal(await profileCode(clientA, mp.profile.id), 'multipara', 'precondición: multipara con 2 partos');
+    await clientA.from('reproductive_events').insert({ animal_profile_id: mp.profile.id, event_type: 'abortion', event_date: daysAgo(1) });
+    assert.equal(await profileCode(clientA, mp.profile.id), 'multipara', 'multipara que aborta queda multipara (RT2.7.4)');
+    // aborto con override=true -> sin cambio (RT2.7.6)
+    const ov = await createAnimal(clientA, { idv: `${RUN_TAG}_AB3`, sex: 'female', birthDate: daysAgo(550), rodeoId: rodeoA.id, establishmentId: estA, systemId: rodeoA.systemId, categoryCode: 'vaquillona_prenada' });
+    await clientA.from('animal_profiles').update({ category_override: true }).eq('id', ov.profile.id);
+    await clientA.from('reproductive_events').insert({ animal_profile_id: ov.profile.id, event_type: 'abortion', event_date: daysAgo(1) });
+    assert.equal(await profileCode(clientA, ov.profile.id), 'vaquillona_prenada', 'override bloquea aborto (RT2.7.6)');
+  });
+
+  // ---- T2.27 CASTRACIÓN (cambio de is_castrated) (RT2.2.x/2.10.4) ---------
+  await t.test('T2.27 castración (RT2.2.x/2.10.4)', async () => {
+    // torito + set is_castrated=true -> novillito (RT2.2.3)
+    const to = await createAnimal(clientA, { idv: `${RUN_TAG}_CS1`, sex: 'male', birthDate: daysAgo(400), rodeoId: rodeoA.id, establishmentId: estA, systemId: rodeoA.systemId, categoryCode: 'torito' });
+    await clientA.from('animals').update({ is_castrated: true }).eq('id', to.animalId);
+    assert.equal(await profileCode(clientA, to.profile.id), 'novillito', 'torito castrado -> novillito (RT2.2.3)');
+    // history registró auto_transition (RT2.10.4)
+    {
+      const { data } = await clientA.from('animal_category_history').select('reason').eq('animal_profile_id', to.profile.id);
+      assert.ok(data.map((r) => r.reason).includes('auto_transition'), 'castración queda en history como auto_transition (RT2.10.4)');
+    }
+    // toro (>=2 años) + castrar -> novillo (RT2.2.4) — verifica el corte de 2 años en la delegación
+    const tr = await createAnimal(clientA, { idv: `${RUN_TAG}_CS2`, sex: 'male', birthDate: daysAgo(800), rodeoId: rodeoA.id, establishmentId: estA, systemId: rodeoA.systemId, categoryCode: 'toro' });
+    await clientA.from('animals').update({ is_castrated: true }).eq('id', tr.animalId);
+    assert.equal(await profileCode(clientA, tr.profile.id), 'novillo', 'toro castrado -> novillo, no novillito (RT2.2.4)');
+    // ternero + castrar -> sigue ternero (RT2.2.2)
+    const tn = await createAnimal(clientA, { idv: `${RUN_TAG}_CS3`, sex: 'male', birthDate: daysAgo(100), rodeoId: rodeoA.id, establishmentId: estA, systemId: rodeoA.systemId, categoryCode: 'ternero' });
+    await clientA.from('animals').update({ is_castrated: true }).eq('id', tn.animalId);
+    assert.equal(await profileCode(clientA, tn.profile.id), 'ternero', 'ternero castrado sigue ternero (RT2.2.2)');
+    // castrar con override=true -> sin cambio (RT2.2.5)
+    const ov = await createAnimal(clientA, { idv: `${RUN_TAG}_CS4`, sex: 'male', birthDate: daysAgo(400), rodeoId: rodeoA.id, establishmentId: estA, systemId: rodeoA.systemId, categoryCode: 'torito' });
+    await clientA.from('animal_profiles').update({ category_override: true }).eq('id', ov.profile.id);
+    await clientA.from('animals').update({ is_castrated: true }).eq('id', ov.animalId);
+    assert.equal(await profileCode(clientA, ov.profile.id), 'torito', 'override bloquea castración (RT2.2.5)');
+    // true->false no revierte novillito->torito (RT2.2.6)
+    await clientA.from('animals').update({ is_castrated: false }).eq('id', to.animalId);
+    assert.equal(await profileCode(clientA, to.profile.id), 'novillito', 'des-castración NO revierte (RT2.2.6)');
+  });
+
+  // ---- T2.28 CRÍA AL PIE (nursing) (RT2.9.x) ------------------------------
+  await t.test('T2.28 cría al pie / nursing (RT2.9.x)', async () => {
+    const grp = await createManagementGroup(clientA, { establishmentId: estA, name: `${RUN_TAG}_loteNurs` });
+    const madre = await createAnimal(clientA, { idv: `${RUN_TAG}_NU1`, sex: 'female', birthDate: daysAgo(900), rodeoId: rodeoA.id, establishmentId: estA, systemId: rodeoA.systemId, categoryCode: 'vaquillona_prenada' });
+    await clientA.from('animal_profiles').update({ management_group_id: grp.id }).eq('id', madre.profile.id);
+    // birth con calf -> nursing true (RT2.9.1)
+    await clientA.from('reproductive_events').insert({ animal_profile_id: madre.profile.id, event_type: 'birth', event_date: daysAgo(30), calf_sex: 'female' });
+    {
+      const { data } = await clientA.from('animal_profiles').select('nursing, category_id, rodeo_id, management_group_id').eq('id', madre.profile.id).single();
+      assert.equal(data.nursing, true, 'parto -> nursing true (RT2.9.1)');
+      // ortogonalidad: cambiar nursing no tocó rodeo ni lote (RT2.9.2). category cambió por el PARTO (no por nursing).
+      assert.equal(data.rodeo_id, rodeoA.id, 'nursing no cambia rodeo (RT2.9.2)');
+      assert.equal(data.management_group_id, grp.id, 'nursing no cambia lote (RT2.9.2)');
+    }
+    // resolver el ternero ligado al parto
+    const { data: ev } = await clientA.from('reproductive_events').select('id').eq('animal_profile_id', madre.profile.id).eq('event_type', 'birth').order('created_at', { ascending: false }).limit(1).single();
+    const { data: bc } = await admin.from('birth_calves').select('calf_profile_id').eq('birth_event_id', ev.id).single();
+    const calfProfileId = bc.calf_profile_id;
+    // destetar al ternero (weaning sobre el perfil del ternero) -> madre nursing false (RT2.9.1)
+    const { data: wEv, error: wErr } = await admin.from('reproductive_events').insert({ animal_profile_id: calfProfileId, event_type: 'weaning', event_date: daysAgo(1) }).select('id').single();
+    assert.equal(wErr, null, wErr && wErr.message);
+    {
+      const { data } = await admin.from('animal_profiles').select('nursing').eq('id', madre.profile.id).single();
+      assert.equal(data.nursing, false, 'destete del ternero -> madre nursing false (RT2.9.1)');
+    }
+    // borrar el destete (soft-delete) -> madre vuelve nursing true (RT2.9.3)
+    await admin.from('reproductive_events').update({ deleted_at: new Date().toISOString() }).eq('id', wEv.id);
+    {
+      const { data } = await admin.from('animal_profiles').select('nursing').eq('id', madre.profile.id).single();
+      assert.equal(data.nursing, true, 'soft-delete del destete -> nursing vuelve true (RT2.9.3)');
+    }
+    // borrar el parto (soft-delete) -> nursing false (RT2.9.3)
+    await admin.from('reproductive_events').update({ deleted_at: new Date().toISOString() }).eq('id', ev.id);
+    {
+      const { data } = await admin.from('animal_profiles').select('nursing').eq('id', madre.profile.id).single();
+      assert.equal(data.nursing, false, 'soft-delete del parto -> nursing false (RT2.9.3)');
+    }
+    // MELLIZOS via register_birth -> nursing true (regresión: el AFTER INSERT del birth corre con
+    // birth_calves aún vacío; el trigger de 0067 sobre birth_calves cierra el hueco).
+    {
+      const m2 = await createAnimal(clientA, { idv: `${RUN_TAG}_NU2`, sex: 'female', birthDate: daysAgo(900), rodeoId: rodeoA.id, establishmentId: estA, systemId: rodeoA.systemId, categoryCode: 'vaquillona_prenada' });
+      const { error: rbErr } = await clientA.rpc('register_birth', { p_mother_profile_id: m2.profile.id, p_event_date: daysAgo(20), p_calves: [{ calf_sex: 'male' }, { calf_sex: 'female' }] });
+      assert.equal(rbErr, null, rbErr && rbErr.message);
+      const { data } = await admin.from('animal_profiles').select('nursing').eq('id', m2.profile.id).single();
+      assert.equal(data.nursing, true, 'mellizos (register_birth) -> madre nursing true (RT2.9.1)');
+    }
+  });
+
+  // ---- T2.29 CONSISTENCIA trigger<->recompute (la clave, RT2.10) ----------
+  await t.test('T2.29 consistencia trigger<->recompute (RT2.10/2.7.5)', async () => {
+    // borrar el service que promovió ternera->vaquillona -> vuelve a ternera (si <1 año) (RT2.10.2)
+    // El soft-delete de un evento desde el cliente va por la RPC soft_delete_event (0041; el UPDATE
+    // directo de deleted_at lo bloquea la RLS por visibilidad-on-RETURNING). El UPDATE de deleted_at
+    // que la RPC hace adentro (SECURITY DEFINER) dispara el trigger de recálculo (0046/0063).
+    {
+      const tn = await createAnimal(clientA, { idv: `${RUN_TAG}_CN1`, sex: 'female', birthDate: daysAgo(180), rodeoId: rodeoA.id, establishmentId: estA, systemId: rodeoA.systemId, categoryCode: 'ternera' });
+      const { data: ev } = await clientA.from('reproductive_events').insert({ animal_profile_id: tn.profile.id, event_type: 'service', event_date: daysAgo(1) }).select('id').single();
+      assert.equal(await profileCode(clientA, tn.profile.id), 'vaquillona', 'precondición: servicio promovió');
+      const { error } = await clientA.rpc('soft_delete_event', { p_kind: 'reproductive', p_event_id: ev.id });
+      assert.equal(error, null, error && error.message);
+      assert.equal(await profileCode(clientA, tn.profile.id), 'ternera', 'borrar el servicio revierte a ternera (RT2.10.2)');
+    }
+    // borrar el weaning que graduó ternero->torito -> vuelve a ternero (RT2.10.2)
+    {
+      const tm = await createAnimal(clientA, { idv: `${RUN_TAG}_CN2`, sex: 'male', birthDate: daysAgo(180), rodeoId: rodeoA.id, establishmentId: estA, systemId: rodeoA.systemId, categoryCode: 'ternero' });
+      const { data: ev } = await clientA.from('reproductive_events').insert({ animal_profile_id: tm.profile.id, event_type: 'weaning', event_date: daysAgo(1) }).select('id').single();
+      assert.equal(await profileCode(clientA, tm.profile.id), 'torito', 'precondición: destete graduó');
+      const { error } = await clientA.rpc('soft_delete_event', { p_kind: 'reproductive', p_event_id: ev.id });
+      assert.equal(error, null, error && error.message);
+      assert.equal(await profileCode(clientA, tm.profile.id), 'ternero', 'borrar el destete revierte a ternero (RT2.10.2)');
+    }
+    // borrar un birth de una multipara (2 partos) -> recálculo a vaca_segundo_servicio (1 parto) (RT2.10.2)
+    {
+      const mp = await createAnimal(clientA, { idv: `${RUN_TAG}_CN3`, sex: 'female', birthDate: daysAgo(900), rodeoId: rodeoA.id, establishmentId: estA, systemId: rodeoA.systemId, categoryCode: 'vaquillona' });
+      const { data: b1 } = await clientA.from('reproductive_events').insert({ animal_profile_id: mp.profile.id, event_type: 'birth', event_date: daysAgo(60) }).select('id').single();
+      await clientA.from('reproductive_events').insert({ animal_profile_id: mp.profile.id, event_type: 'birth', event_date: daysAgo(30) });
+      assert.equal(await profileCode(clientA, mp.profile.id), 'multipara', 'precondición: 2 partos -> multipara');
+      const { error } = await clientA.rpc('soft_delete_event', { p_kind: 'reproductive', p_event_id: b1.id });
+      assert.equal(error, null, error && error.message);
+      assert.equal(await profileCode(clientA, mp.profile.id), 'vaca_segundo_servicio', 'borrar un parto -> vaca (1 parto) (RT2.10.2)');
+    }
+    // aborto-revierte-tacto sobrevive al recompute (RT2.7.5) + por fecha
+    {
+      const vq = await createAnimal(clientA, { idv: `${RUN_TAG}_CN4`, sex: 'female', birthDate: daysAgo(550), rodeoId: rodeoA.id, establishmentId: estA, systemId: rodeoA.systemId, categoryCode: 'vaquillona' });
+      await clientA.from('reproductive_events').insert({ animal_profile_id: vq.profile.id, event_type: 'tacto', event_date: daysAgo(10), pregnancy_status: 'large' });
+      const { data: abEv } = await clientA.from('reproductive_events').insert({ animal_profile_id: vq.profile.id, event_type: 'abortion', event_date: daysAgo(2) }).select('id').single();
+      // incremental dejó vaquillona; recompute directo NO la deja prenada (RT2.7.5)
+      assert.equal(await profileCode(clientA, vq.profile.id), 'vaquillona', 'incremental: aborto revierte');
+      assert.equal(await computeCode(clientA, vq.profile.id), 'vaquillona', 'recompute: aborto-revierte-tacto sobrevive (RT2.7.5)');
+      // mover la fecha del aborto ANTES del tacto -> el tacto vuelve a contar -> prenada (RT2.7.5 por fecha)
+      await clientA.from('reproductive_events').update({ event_date: daysAgo(20) }).eq('id', abEv.id);
+      assert.equal(await computeCode(clientA, vq.profile.id), 'vaquillona_prenada', 'aborto anterior al tacto: el tacto vuelve a contar (RT2.7.5 por fecha)');
+      // y la materializada por el trigger de recálculo (que se disparó por el UPDATE de event_date) coincide
+      assert.equal(await profileCode(clientA, vq.profile.id), 'vaquillona_prenada', 'recálculo on-update coincide con compute_category (RT2.10.1/2.10.3)');
+    }
+    // compute_category directo == categoría materializada tras una secuencia (RT2.10.1)
+    {
+      const sq = await createAnimal(clientA, { idv: `${RUN_TAG}_CN5`, sex: 'female', birthDate: daysAgo(300), rodeoId: rodeoA.id, establishmentId: estA, systemId: rodeoA.systemId, categoryCode: 'ternera' });
+      await clientA.from('reproductive_events').insert({ animal_profile_id: sq.profile.id, event_type: 'service', event_date: daysAgo(40) });
+      await clientA.from('reproductive_events').insert({ animal_profile_id: sq.profile.id, event_type: 'tacto', event_date: daysAgo(20), pregnancy_status: 'small' });
+      await clientA.from('reproductive_events').insert({ animal_profile_id: sq.profile.id, event_type: 'birth', event_date: daysAgo(1), calf_sex: 'male' });
+      assert.equal(await profileCode(clientA, sq.profile.id), await computeCode(clientA, sq.profile.id), 'materializada == compute_category tras secuencia (RT2.10.1)');
+      assert.equal(await profileCode(clientA, sq.profile.id), 'vaca_segundo_servicio', 'secuencia servicio+tacto+parto -> vaca');
+    }
+  });
+
+  // ---- T2.30 OVERRIDE manda en todas las transiciones nuevas (RT2.11) -----
+  await t.test('T2.30 override manda + revert (RT2.11.x)', async () => {
+    // con override=true: servicio/destete/parto/aborto/castración NO cambian la categoría.
+    const baseCat = 'vaquillona';
+    async function overrideAnimal(idv, sex = 'female', code = baseCat, birthDate = daysAgo(550)) {
+      const r = await createAnimal(clientA, { idv: `${RUN_TAG}_${idv}`, sex, birthDate, rodeoId: rodeoA.id, establishmentId: estA, systemId: rodeoA.systemId, categoryCode: code });
+      await clientA.from('animal_profiles').update({ category_override: true }).eq('id', r.profile.id);
+      return r;
+    }
+    const a1 = await overrideAnimal('OV_SV');
+    await clientA.from('reproductive_events').insert({ animal_profile_id: a1.profile.id, event_type: 'service', event_date: daysAgo(1) });
+    assert.equal(await profileCode(clientA, a1.profile.id), baseCat, 'override bloquea servicio (RT2.11.1)');
+    const a2 = await overrideAnimal('OV_BIRTH');
+    await clientA.from('reproductive_events').insert({ animal_profile_id: a2.profile.id, event_type: 'birth', event_date: daysAgo(1), calf_sex: 'male' });
+    assert.equal(await profileCode(clientA, a2.profile.id), baseCat, 'override bloquea parto (RT2.11.1)');
+    const a3 = await overrideAnimal('OV_CS', 'male', 'torito', daysAgo(400));
+    await clientA.from('animals').update({ is_castrated: true }).eq('id', a3.animalId);
+    assert.equal(await profileCode(clientA, a3.profile.id), 'torito', 'override bloquea castración (RT2.11.1)');
+    // revert: override=false + compute_category recalcula correcto con is_castrated + eventos (RT2.11.2)
+    {
+      const computed = (await clientA.rpc('compute_category', { profile_id: a3.profile.id })).data;
+      await clientA.from('animal_profiles').update({ category_override: false, category_id: computed }).eq('id', a3.profile.id);
+      // a3 es torito castrado de 400 días -> al revertir resuelve novillito (RT2.11.2)
+      assert.equal(await profileCode(clientA, a3.profile.id), 'novillito', 'revert recalcula con is_castrated (RT2.11.2)');
+    }
+  });
+
+  // ---- T2.31 SEGURIDAD / no-spoof (RT2.12.x) ------------------------------
+  await t.test('T2.31 seguridad / no-spoof is_castrated + funciones internas (RT2.12.x)', async () => {
+    // apply_auto_transition NO invocable por authenticated (ya cubierto en T2.18; re-afirmamos el revoke).
+    {
+      const tgt = await createAnimal(clientA, { idv: `${RUN_TAG}_SEC1`, sex: 'female', birthDate: daysAgo(550), rodeoId: rodeoA.id, establishmentId: estA, systemId: rodeoA.systemId, categoryCode: 'vaquillona' });
+      const multiId = await categoryId(clientA, rodeoA.systemId, 'multipara');
+      const { error } = await clientA.rpc('apply_auto_transition', { profile_id: tgt.profile.id, target_category_id: multiId });
+      assert.notEqual(error, null, 'apply_auto_transition NO invocable por authenticated (RT2.12.2)');
+    }
+    // is_castrated cross-tenant: userC sin rol en estA no puede togglear is_castrated de un animal de estA.
+    {
+      const an = await createAnimal(clientA, { idv: `${RUN_TAG}_SEC2`, sex: 'male', birthDate: daysAgo(400), rodeoId: rodeoA.id, establishmentId: estA, systemId: rodeoA.systemId, categoryCode: 'torito' });
+      const userC = await createTestUser('userC31');
+      const clientC = await getUserClient(userC.email);
+      // userC no ve el animal (RLS) -> el update no afecta filas.
+      const { data: upd } = await clientC.from('animals').update({ is_castrated: true }).eq('id', an.animalId).select();
+      assert.ok(!upd || upd.length === 0, 'userC sin rol no togglea is_castrated cross-tenant (RT2.12.5)');
+      // verificado con service_role: sigue false y la categoría no cambió.
+      const { data: a } = await admin.from('animals').select('is_castrated').eq('id', an.animalId).single();
+      assert.equal(a.is_castrated, false, 'is_castrated cross-tenant NO se aplicó');
+      assert.equal(await profileCode(admin, an.profile.id), 'torito', 'la categoría del animal ajeno NO cambió');
+    }
+    // userB (field_operator de estA, asignado en tests previos) SÍ puede togglear is_castrated de estA.
+    {
+      // garantizar rol activo de userB en estA (puede haber quedado inactivo por T2.13 caso 10/T2.18).
+      await admin.from('user_roles').update({ active: false }).eq('user_id', userB.id).eq('establishment_id', estA);
+      await assignRoleAsService(userB.id, estA, 'field_operator');
+      const an = await createAnimal(clientA, { idv: `${RUN_TAG}_SEC3`, sex: 'male', birthDate: daysAgo(400), rodeoId: rodeoA.id, establishmentId: estA, systemId: rodeoA.systemId, categoryCode: 'torito' });
+      const { error } = await clientB.from('animals').update({ is_castrated: true }).eq('id', an.animalId);
+      assert.equal(error, null, 'field_operator de estA togglea is_castrated (RT2.12.1)');
+      assert.equal(await profileCode(admin, an.profile.id), 'novillito', 'la transición se aplicó (torito->novillito) para el dueño');
+    }
+  });
+
+  // ---- T2.32 migración no toca histórico (RT2.13.x) -----------------------
+  await t.test('T2.32 migración no toca histórico (RT2.13.x)', async () => {
+    // un animal con is_castrated=false y categoría base no migra por el solo seed.
+    const an = await createAnimal(clientA, { idv: `${RUN_TAG}_HIST1`, sex: 'male', birthDate: daysAgo(400), rodeoId: rodeoA.id, establishmentId: estA, systemId: rodeoA.systemId, categoryCode: 'torito' });
+    const { data: a } = await admin.from('animals').select('is_castrated').eq('id', an.animalId).single();
+    assert.equal(a.is_castrated, false, 'is_castrated arranca false (default columna nueva, RT2.13.1)');
+    assert.equal(await profileCode(clientA, an.profile.id), 'torito', 'la categoría base no cambió por el seed (RT2.13.2)');
+    // y el perfil arranca nursing=false (default).
+    const { data: p } = await admin.from('animal_profiles').select('nursing').eq('id', an.profile.id).single();
+    assert.equal(p.nursing, false, 'nursing arranca false (default columna nueva)');
+  });
+
+  // ---- T2.33 CRON de edad (refresh_age_categories) (RT2.8.x, SEC-SPEC-M02) -
+  await t.test('T2.33 cron refresh_age_categories: targeted/no-spoof/override (RT2.8.x)', async () => {
+    // SEGURIDAD (SEC-SPEC-M02): clientA (authenticated) NO puede invocar la función (revocada).
+    {
+      const { error } = await clientA.rpc('refresh_age_categories');
+      assert.notEqual(error, null, 'refresh_age_categories NO invocable por authenticated (RT2.12.6/M02)');
+    }
+    // recalcula age-stale corte 1 año: ternero @400 sin eventos -> torito.
+    const tn = await createAnimal(clientA, { idv: `${RUN_TAG}_CR1`, sex: 'male', birthDate: daysAgo(400), rodeoId: rodeoA.id, establishmentId: estA, systemId: rodeoA.systemId, categoryCode: 'ternero' });
+    // recalcula age-stale corte 2 años: torito @800 entero -> toro; novillito @800 -> novillo.
+    const to = await createAnimal(clientA, { idv: `${RUN_TAG}_CR2`, sex: 'male', birthDate: daysAgo(800), rodeoId: rodeoA.id, establishmentId: estA, systemId: rodeoA.systemId, categoryCode: 'torito' });
+    const noL = await createAnimal(clientA, { idv: `${RUN_TAG}_CR3`, sex: 'male', birthDate: daysAgo(800), rodeoId: rodeoA.id, establishmentId: estA, systemId: rodeoA.systemId, categoryCode: 'novillito' });
+    await admin.from('animals').update({ is_castrated: true }).eq('id', noL.animalId);
+    // NO toca a los que no cruzaron umbral: ternero @100 sigue ternero; vaquillona @900 sigue vaquillona (hembra sin corte 2 años).
+    const young = await createAnimal(clientA, { idv: `${RUN_TAG}_CR4`, sex: 'male', birthDate: daysAgo(100), rodeoId: rodeoA.id, establishmentId: estA, systemId: rodeoA.systemId, categoryCode: 'ternero' });
+    const vqOld = await createAnimal(clientA, { idv: `${RUN_TAG}_CR5`, sex: 'female', birthDate: daysAgo(900), rodeoId: rodeoA.id, establishmentId: estA, systemId: rodeoA.systemId, categoryCode: 'vaquillona' });
+    // respeta override: ternero @400 override=true no cambia.
+    const ov = await createAnimal(clientA, { idv: `${RUN_TAG}_CR6`, sex: 'male', birthDate: daysAgo(400), rodeoId: rodeoA.id, establishmentId: estA, systemId: rodeoA.systemId, categoryCode: 'ternero' });
+    await clientA.from('animal_profiles').update({ category_override: true }).eq('id', ov.profile.id);
+    // respeta soft-delete: perfil age-stale soft-deleted no se toca.
+    const sd = await createAnimal(clientA, { idv: `${RUN_TAG}_CR7`, sex: 'male', birthDate: daysAgo(400), rodeoId: rodeoA.id, establishmentId: estA, systemId: rodeoA.systemId, categoryCode: 'ternero' });
+    await admin.from('animal_profiles').update({ deleted_at: new Date().toISOString() }).eq('id', sd.profile.id);
+
+    // invocar el job vía service_role (ejercita el efecto sin esperar al schedule).
+    const { error: cronErr } = await admin.rpc('refresh_age_categories');
+    assert.equal(cronErr, null, cronErr && cronErr.message);
+
+    assert.equal(await profileCode(admin, tn.profile.id), 'torito', 'cron: ternero@400 -> torito (corte 1 año, RT2.8.4)');
+    assert.equal(await profileCode(admin, to.profile.id), 'toro', 'cron: torito@800 -> toro (corte 2 años)');
+    assert.equal(await profileCode(admin, noL.profile.id), 'novillo', 'cron: novillito@800 castrado -> novillo');
+    assert.equal(await profileCode(admin, young.profile.id), 'ternero', 'cron NO toca ternero@100 (RT2.8.4c)');
+    assert.equal(await profileCode(admin, vqOld.profile.id), 'vaquillona', 'cron NO toca vaquillona vieja (hembra sin corte 2 años, RT2.8.4a)');
+    assert.equal(await profileCode(admin, ov.profile.id), 'ternero', 'cron respeta override (RT2.8.3)');
+    assert.equal(await profileCode(admin, sd.profile.id), 'ternero', 'cron respeta soft-delete');
+    // el cambio del ternero@400 quedó en history como auto_transition (RT2.8.4b)
+    {
+      const { data } = await admin.from('animal_category_history').select('reason').eq('animal_profile_id', tn.profile.id);
+      assert.ok(data.map((r) => r.reason).includes('auto_transition'), 'cron registra auto_transition en history (RT2.8.4b)');
+    }
+  });
 });
 
 test('cleanup', async () => {

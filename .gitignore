@@ -37,7 +37,9 @@ Thumbs.db
 #   - screenshots ad-hoc del testing manual de Raf (feedback efímero)
 #   - PDFs de referencia sueltos en docs/
 ads-n-marketing/
-tests/
+# Solo el tests/ de la RAÍZ (screenshots ad-hoc de Raf). El `/` inicial evita matchear
+# supabase/tests/ (suites de backend, que SÍ se versionan).
+/tests/
 docs/Profile.pdf
 
 # Override del .gitignore global del usuario
