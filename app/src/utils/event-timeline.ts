@@ -87,11 +87,20 @@ export type CategoryChangeReason =
 // Unión discriminada: cada kind con su payload ya narrowado. Los nombres de categoría del
 // category_change los resuelve el service (vienen como UUID en la RPC); acá quedan como `*Name`
 // opcionales (el parser deja los UUID en `*Id`, el service los completa con el nombre).
+//
+// `createdAt` (timestamp REAL de inserción) está en TODOS los kinds: la RPC animal_timeline (0069) lo
+// trae como columna top-level desde cada origen (weight_events.created_at, …, reproductive_events.
+// created_at; para category_change usa changed_at, su instante real). Se usa para (1) ORDENAR el
+// timeline dentro de un mismo día calendario (lo recién registrado arriba; ver parseTimeline) y (2)
+// desempatar el estado reproductivo vigente cuando dos eventos repro caen el mismo `eventDate` (ver
+// deriveCurrentState). Es `string | null`: null defensivo si la fila no lo trajo (RPC vieja / payload
+// raro) → el orden cae al desempate estable por eventId.
 export type TimelineItem =
   | {
       kind: 'weight';
       eventId: string;
       eventDate: string;
+      createdAt: string | null;
       weightKg: number | null;
       source: string | null;
       notes: string | null;
@@ -100,30 +109,23 @@ export type TimelineItem =
       kind: 'reproductive';
       eventId: string;
       eventDate: string;
+      createdAt: string | null;
       eventType: ReproEventType | null;
       pregnancyStatus: PregnancyStatus | null;
       calfId: string | null;
       /**
-       * service_type del evento. La RPC 0035 NO lo trae → el parser lo deja `null` y el service lo
-       * completa con applyReproMeta (una query suplementaria, mismo patrón que los nombres de
-       * category_change). Solo es relevante para event_type 'service'; en otros queda null.
+       * service_type del evento. La RPC animal_timeline NO lo trae → el parser lo deja `null` y el
+       * service lo completa con applyReproMeta (una query suplementaria, mismo patrón que los nombres
+       * de category_change). Solo es relevante para event_type 'service'; en otros queda null.
        */
       serviceType: ServiceType | null;
-      /**
-       * `created_at` REAL (timestamp de inserción) del reproductive_event. La RPC 0035 NO lo trae →
-       * el parser lo deja `null` y el service lo completa con applyReproMeta (misma query
-       * suplementaria que service_type). Se usa SOLO para desempatar el estado reproductivo vigente
-       * cuando dos eventos repro caen el MISMO `eventDate` (mismo día): un parto/aborto del mismo día
-       * que un tacto debe ganar (parió/abortó → ya no está preñada), y `eventDate` (columna `date`,
-       * sin hora) no alcanza para ordenarlos. Ver deriveCurrentState. null si la query no lo trajo.
-       */
-      createdAt: string | null;
       notes: string | null;
     }
   | {
       kind: 'sanitary';
       eventId: string;
       eventDate: string;
+      createdAt: string | null;
       eventType: SanitaryEventType | null;
       productName: string | null;
       route: string | null;
@@ -133,6 +135,7 @@ export type TimelineItem =
       kind: 'condition_score';
       eventId: string;
       eventDate: string;
+      createdAt: string | null;
       score: number | null;
       notes: string | null;
     }
@@ -140,6 +143,7 @@ export type TimelineItem =
       kind: 'lab_sample';
       eventId: string;
       eventDate: string;
+      createdAt: string | null;
       sampleType: LabSampleType | null;
       tubeNumber: string | null;
       result: string | null;
@@ -149,6 +153,7 @@ export type TimelineItem =
       kind: 'category_change';
       eventId: string;
       eventDate: string;
+      createdAt: string | null;
       fromCategoryId: string | null;
       toCategoryId: string | null;
       fromCategoryName: string | null;
@@ -159,6 +164,7 @@ export type TimelineItem =
       kind: 'observacion';
       eventId: string;
       eventDate: string;
+      createdAt: string | null;
       eventType: string | null;
       text: string | null;
       authorId: string | null;
@@ -170,6 +176,8 @@ export type TimelineRow = {
   event_kind: string;
   event_id: string;
   event_date: string;
+  /** Timestamp REAL de inserción del evento (RPC 0069, top-level). Para el orden dentro del día. */
+  created_at: string;
   payload: Record<string, unknown> | null;
 };
 
@@ -203,7 +211,10 @@ function num(payload: Record<string, unknown> | null | undefined, key: string): 
  */
 export function parseTimelineRow(row: TimelineRow): TimelineItem | null {
   const p = row.payload ?? null;
-  const base = { eventId: row.event_id, eventDate: row.event_date };
+  // `createdAt` viene de la RPC (0069) para TODOS los kinds. Defensivo: si la fila no lo trajo (RPC
+  // vieja / shape raro), queda null → el orden cae al desempate estable por eventId.
+  const createdAt = typeof row.created_at === 'string' && row.created_at.length > 0 ? row.created_at : null;
+  const base = { eventId: row.event_id, eventDate: row.event_date, createdAt };
   switch (row.event_kind as TimelineKind) {
     case 'weight':
       return {
@@ -220,9 +231,9 @@ export function parseTimelineRow(row: TimelineRow): TimelineItem | null {
         eventType: str(p, 'event_type') as ReproEventType | null,
         pregnancyStatus: str(p, 'pregnancy_status') as PregnancyStatus | null,
         calfId: str(p, 'calf_id'),
-        // service_type y created_at NO vienen en la RPC 0035 → null acá; los completa applyReproMeta.
+        // service_type NO viene en la RPC → null acá; lo completa applyReproMeta. createdAt SÍ viene de
+        // la RPC (0069) → ya está en `base`, NO se pisa con null (ese era el bug que esto cierra).
         serviceType: null,
-        createdAt: null,
         notes: str(p, 'notes'),
       };
     case 'sanitary':
@@ -275,9 +286,37 @@ export function parseTimelineRow(row: TimelineRow): TimelineItem | null {
 }
 
 /**
- * Parsea + ordena un set de filas crudas. Orden: event_date desc (R10.1). La RPC ya ordena, pero
- * reordenamos defensivamente acá (el orden visual no debe depender de que PostgREST preserve el
- * `order by` de la función). Empate de fecha → estable por eventId (determinístico para tests).
+ * Clave de DÍA CALENDARIO de un item del timeline, como entero `AAAAMMDD` ordenable (mayor = más
+ * reciente). El criterio del día es EL MISMO que usa formatEventDate (ver isDateOnlyKind), para que un
+ * date-only de hoy y un timestamp de hoy caigan en EL MISMO día (si no, el bug se reproduce al revés):
+ *   - date-only (weight/condition_score/sanitary/lab_sample/reproductive): el valor llega como
+ *     UTC-medianoche del día que el usuario tipeó → sus componentes UTC SON la fecha calendario.
+ *   - instante real (observacion/category_change): es un timestamptz real → su día calendario es el
+ *     día LOCAL del dispositivo (lo que el operario llama "hoy"), igual que lo muestra formatEventDate.
+ * PURA, sin huso asumido (usa los getters UTC vs locales explícitamente). Fecha inválida → null.
+ */
+function dayKey(item: TimelineItem): number | null {
+  const d = new Date(item.eventDate);
+  if (Number.isNaN(d.getTime())) return null;
+  if (isDateOnlyKind(item.kind)) {
+    return d.getUTCFullYear() * 10000 + (d.getUTCMonth() + 1) * 100 + d.getUTCDate();
+  }
+  return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
+}
+
+/**
+ * Parsea + ordena un set de filas crudas. Orden (fix del bug de orden del timeline):
+ *   (1) DÍA CALENDARIO de eventDate, descendente — el día más reciente arriba. El día se extrae con
+ *       dayKey (mismo criterio que formatEventDate: UTC para date-only, local para instantes) → un
+ *       date-only de hoy y un timestamp de hoy comparten día.
+ *   (2) dentro del mismo día, `createdAt` (instante REAL de inserción) DESCENDENTE — lo recién
+ *       registrado arriba. Esto pone un servicio/tacto/etc. cargado hoy ARRIBA de los eventos del
+ *       mismo día con hora real (Alta, "Cambió a…", observaciones), que antes lo tapaban porque el
+ *       date-only volvía como 00:00 < su hora real. Un evento BACKDATED (fecha vieja, createdAt nuevo)
+ *       NO salta al tope: cae en SU día (el orden por día manda) y solo se ordena por createdAt
+ *       DENTRO de ese día.
+ *   (3) desempate final estable por eventId (determinístico para tests; sin Date.now() interno).
+ * PURA, TZ-independiente (no usa la hora local para comparar instantes entre días, solo el día).
  */
 export function parseTimeline(rows: readonly TimelineRow[]): TimelineItem[] {
   const items: TimelineItem[] = [];
@@ -286,10 +325,20 @@ export function parseTimeline(rows: readonly TimelineRow[]): TimelineItem[] {
     if (item) items.push(item);
   }
   items.sort((a, b) => {
-    const da = Date.parse(a.eventDate);
-    const db = Date.parse(b.eventDate);
-    if (Number.isFinite(da) && Number.isFinite(db) && da !== db) return db - da;
-    // empate (o fecha inválida) → desempate estable por eventId.
+    // (1) día calendario desc. Un día inválido (fecha no parseable) se trata como el MÁS VIEJO posible
+    // (-Infinity) → cae al fondo, sin romper el orden del resto.
+    const dayA = dayKey(a) ?? -Infinity;
+    const dayB = dayKey(b) ?? -Infinity;
+    if (dayA !== dayB) return dayB - dayA;
+    // (2) mismo día → createdAt desc (lo recién registrado arriba). createdAt ausente en alguno →
+    // ese instante se trata como el MÁS VIEJO (-Infinity) para no saltar el orden; si ambos faltan o
+    // empatan, cae al desempate por eventId.
+    const ca = a.createdAt != null ? Date.parse(a.createdAt) : NaN;
+    const cb = b.createdAt != null ? Date.parse(b.createdAt) : NaN;
+    const msA = Number.isFinite(ca) ? ca : -Infinity;
+    const msB = Number.isFinite(cb) ? cb : -Infinity;
+    if (msA !== msB) return msB - msA;
+    // (3) desempate estable por eventId (mayor primero).
     return a.eventId < b.eventId ? 1 : a.eventId > b.eventId ? -1 : 0;
   });
   return items;
@@ -323,24 +372,22 @@ export function resolveCategoryNames(
 }
 
 /**
- * Metadatos suplementarios de un reproductive_event que la RPC animal_timeline (0035) NO trae y el
- * service enriquece con una query a reproductive_events: `service_type` (tipo de servicio) y
- * `created_at` (timestamp real de inserción, para desempatar el estado vigente en el mismo día).
+ * Metadato suplementario de un reproductive_event que la RPC animal_timeline NO trae y el service
+ * enriquece con una query a reproductive_events: `service_type` (tipo de servicio). El `created_at` YA
+ * NO se enriquece acá — viene de la RPC (0069) como columna top-level para TODOS los kinds.
  */
 export type ReproMeta = {
   serviceType?: string | null;
-  createdAt?: string | null;
 };
 
 const SERVICE_TYPES: ReadonlySet<string> = new Set<ServiceType>(['natural', 'ai', 'te']);
 
 /**
- * Completa `serviceType` y `createdAt` de los items reproductive desde el mapa eventId→ReproMeta (NO
- * muta; espejo de resolveCategoryNames). La RPC animal_timeline (0035) no trae ninguno de los dos →
- * el service los enriquece con UNA query suplementaria a reproductive_events. Tolerante: un eventId
- * sin entrada en el mapa, o un service_type que no es un ServiceType conocido, queda `null` (no rompe
- * el item); un `createdAt` ausente queda `null` (deriveCurrentState cae al desempate por eventId).
- * Solo toca los items reproductive; el resto pasa intacto.
+ * Completa `serviceType` de los items reproductive desde el mapa eventId→ReproMeta (NO muta; espejo de
+ * resolveCategoryNames). La RPC animal_timeline NO trae service_type → el service lo enriquece con UNA
+ * query suplementaria a reproductive_events. Tolerante: un eventId sin entrada en el mapa, o un
+ * service_type que no es un ServiceType conocido, queda `null` (no rompe el item). NO toca `createdAt`
+ * (ese viene de la RPC, ya está en el item). Solo toca los items reproductive; el resto pasa intacto.
  */
 export function applyReproMeta(
   items: readonly TimelineItem[],
@@ -351,8 +398,7 @@ export function applyReproMeta(
     const meta = byId[it.eventId];
     const rawType = meta?.serviceType ?? null;
     const serviceType = rawType != null && SERVICE_TYPES.has(rawType) ? (rawType as ServiceType) : null;
-    const createdAt = meta?.createdAt ?? null;
-    return { ...it, serviceType, createdAt };
+    return { ...it, serviceType };
   });
 }
 
@@ -406,7 +452,8 @@ export type CurrentState = {
  *     y un parto/aborto cargados el MISMO día: `eventDate` es columna `date` (sin hora) → no alcanza
  *     para ordenarlos, y el `eventId` es un UUID random → desempatar por él sería ~50/50 (el parto
  *     debe ganar siempre: parió/abortó ⇒ ya no está preñada). `createdAt` (now() de inserción) da el
- *     orden total real. Lo enriquece applyReproMeta; sin él (query falló) cae al comportamiento previo.
+ *     orden total real. Viene de la RPC animal_timeline (0069) en la fila; sin él (RPC vieja / shape
+ *     raro → createdAt null) cae al comportamiento previo (desempate por eventId).
  */
 export function deriveCurrentState(
   timeline: readonly TimelineItem[] | null | undefined,

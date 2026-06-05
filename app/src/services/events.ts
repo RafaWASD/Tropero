@@ -99,27 +99,26 @@ export async function fetchTimeline(profileId: string): Promise<ServiceResult<Ti
     }
   }
 
-  // (2) Enriquecer service_type + created_at de los eventos reproductivos (la RPC 0035 NO los trae).
-  // Mismo patrón tolerante que la resolución de categorías: UNA query suplementaria a
-  // reproductive_events (RLS la protege igual que la RPC), mapa eventId→ReproMeta, applyReproMeta
-  // (puro). El `created_at` da el orden total real para desempatar el estado reproductivo vigente
-  // cuando un tacto y un parto/aborto caen el MISMO día (eventDate es columna `date`, sin hora). Si
-  // la query falla o no hay eventos reproductivos, devolvemos los items sin enriquecer (el timeline NO
-  // se pierde; createdAt queda null y deriveCurrentState cae al desempate por eventId).
+  // (2) Enriquecer service_type de los eventos reproductivos (la RPC NO lo trae). Mismo patrón
+  // tolerante que la resolución de categorías: UNA query suplementaria a reproductive_events (RLS la
+  // protege igual que la RPC), mapa eventId→ReproMeta, applyReproMeta (puro). El `created_at` YA NO se
+  // pide acá: la RPC 0069 lo trae top-level para TODOS los kinds (es lo que ordena el timeline dentro
+  // de un día y desempata el estado reproductivo vigente del mismo día). Si la query falla o no hay
+  // eventos reproductivos, devolvemos los items sin enriquecer (el timeline NO se pierde; serviceType
+  // queda null y el detalle del nodo "Servicio" muestra el fallback).
   const hasReproductive = items.some((it) => it.kind === 'reproductive');
   if (hasReproductive) {
     const { data: repro, error: reproErr } = await supabase
       .from('reproductive_events')
-      .select('id, service_type, created_at')
+      .select('id, service_type')
       .eq('animal_profile_id', profileId);
     if (!reproErr && repro) {
       const byId: Record<string, ReproMeta> = {};
       for (const r of repro as {
         id: string;
         service_type: string | null;
-        created_at: string | null;
       }[]) {
-        byId[r.id] = { serviceType: r.service_type, createdAt: r.created_at };
+        byId[r.id] = { serviceType: r.service_type };
       }
       items = applyReproMeta(items, byId);
     }

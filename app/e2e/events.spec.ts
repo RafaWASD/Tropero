@@ -626,6 +626,65 @@ test('servicio en hembra PREÑADA: aparece el aviso "figura preñada" → al con
   await expect(page.getByText('Monta natural', { exact: true })).toBeVisible({ timeout: 20_000 });
 });
 
+// BUG DE ORDEN DEL TIMELINE (fix 0069 + parseTimeline): un evento TIPADO (date-only, vuelve 00:00 UTC)
+// cargado HOY aparecía POR DEBAJO de los eventos del mismo día con hora real (el "Alta"/category_change,
+// las observaciones). Causa: el orden era por event_date y los date-only volvían como medianoche-UTC
+// (00:00) < la hora real (ej. 15:45) de los timestamp-events. El fix ordena por (día calendario desc,
+// created_at desc) → lo recién registrado queda ARRIBA dentro de su día.
+//
+// Verificación: seed de un animal → su único nodo es el "Alta" (category_change `initial`, con hora real
+// del seed). Cargamos un SERVICIO (date-only, created_at = ahora, posterior al seed) → el nodo "Servicio"
+// debe aparecer ARRIBA del nodo "Cambió a…"/"Alta" del MISMO día. Comparamos la posición VERTICAL real
+// (boundingBox().y): arriba = y menor. Antes del fix, el "Servicio" caía al fondo (00:00 < hora del seed).
+test('orden del timeline: un SERVICIO cargado hoy aparece ARRIBA del "Cambió a…" del mismo día (bug 0069)', async ({
+  page,
+}) => {
+  const user = await createTestUser('orden');
+  await setUserPhone(user.id, '1123456789');
+  const { establishmentId, rodeoId } = await seedEstablishmentWithRodeo(user.id, 'Campo Orden');
+  // Hembra → vaquillona. Un servicio sobre una vaquillona la mantiene/confirma vaquillona; lo que nos
+  // importa es que el nodo "Servicio" (date-only, recién cargado) gane al category_change del seed.
+  const idv = `6622${Date.now().toString().slice(-5)}`;
+  await seedAnimal(establishmentId, rodeoId, { idv, sex: 'female' });
+
+  await page.goto('/');
+  await signIn(page, user);
+  await waitForHome(page);
+  await gotoAnimales(page);
+
+  const row = page.getByRole('button', { name: new RegExp(idv) }).first();
+  await expect(row).toBeVisible({ timeout: 20_000 });
+  await row.click();
+  await expect(page.getByText('Historial', { exact: true })).toBeVisible({ timeout: 20_000 });
+
+  // ── Cargar un SERVICIO (Monta natural). La hembra no figura preñada → guarda directo (sin aviso). ──
+  await page.getByRole('button', { name: 'Agregar evento', exact: true }).click();
+  await expect(page.getByText('¿Qué querés cargar?', { exact: true })).toBeVisible({ timeout: 20_000 });
+  await page.getByRole('button', { name: 'Servicio', exact: true }).click();
+  const natural = page.getByRole('button', { name: 'Monta natural', exact: true });
+  await expect(natural).toBeVisible({ timeout: 20_000 });
+  await natural.click();
+  await page.getByRole('button', { name: 'Guardar evento', exact: true }).click();
+
+  // De vuelta en la ficha: el timeline muestra "Servicio" + "Monta natural" y el "Alta" del seed.
+  await expect(page.getByText('Cargando ficha…', { exact: true })).toHaveCount(0, { timeout: 20_000 });
+  const servicio = page.getByText('Servicio', { exact: true }).filter({ visible: true }).first();
+  // El nodo del seed: el category_change `initial` → título "Alta" (describeCategoryChange).
+  const alta = page.getByText('Alta', { exact: true }).filter({ visible: true }).first();
+  await expect(servicio).toBeVisible({ timeout: 20_000 });
+  await expect(alta).toBeVisible({ timeout: 20_000 });
+
+  // ── La aserción del BUG: el "Servicio" (recién cargado hoy) está ARRIBA del "Alta" del mismo día. ──
+  // Arriba = coordenada Y MENOR. Antes del fix 0069, el date-only (00:00 UTC) caía debajo del "Alta"
+  // (hora real del seed) → el servicio estaba al FONDO. Ahora el created_at (now() de inserción) lo
+  // sube. Comparamos las posiciones verticales reales en pantalla (no el orden del DOM a ciegas).
+  const servicioBox = await servicio.boundingBox();
+  const altaBox = await alta.boundingBox();
+  expect(servicioBox).not.toBeNull();
+  expect(altaBox).not.toBeNull();
+  expect(servicioBox!.y).toBeLessThan(altaBox!.y);
+});
+
 // C3.2 gating reproductivo — ESPEJO: SERVICIO sobre una hembra que NO figura preñada NO debe avisar →
 // guarda DIRECTO (es el caso normal). Verificación fuerte: page.on('dialog') que FALLA si aparece un
 // confirm; el servicio debe completarse sin él.

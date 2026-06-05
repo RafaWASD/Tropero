@@ -32,6 +32,7 @@ test('parseTimelineRow: weight', () => {
     event_kind: 'weight',
     event_id: 'w1',
     event_date: '2025-03-15T10:00:00Z',
+    created_at: '2025-03-15T10:05:00Z',
     payload: { weight_kg: 320.5, source: 'manual', notes: 'pesado en manga' },
   };
   const item = parseTimelineRow(row);
@@ -41,7 +42,29 @@ test('parseTimelineRow: weight', () => {
     assert.equal(item.source, 'manual');
     assert.equal(item.notes, 'pesado en manga');
     assert.equal(item.eventId, 'w1');
+    // createdAt viene de la RPC (0069) para TODOS los kinds → el parser lo copia a `base`.
+    assert.equal(item.createdAt, '2025-03-15T10:05:00Z');
   }
+});
+
+test('parseTimelineRow: created_at ausente/vacío → createdAt null (defensivo)', () => {
+  // RPC vieja / shape raro: sin created_at en la fila → createdAt null (el orden cae al eventId).
+  const noField = parseTimelineRow({
+    event_kind: 'weight',
+    event_id: 'w-no',
+    event_date: '2025-03-15T10:00:00Z',
+    // sin created_at a propósito (cast para simular una fila incompleta sin romper el tipo).
+    payload: { weight_kg: 300 },
+  } as unknown as TimelineRow);
+  assert.equal(noField?.createdAt, null);
+  const empty = parseTimelineRow({
+    event_kind: 'weight',
+    event_id: 'w-empty',
+    event_date: '2025-03-15T10:00:00Z',
+    created_at: '',
+    payload: { weight_kg: 300 },
+  });
+  assert.equal(empty?.createdAt, null);
 });
 
 test('parseTimelineRow: weight con numeric como string ("320.50")', () => {
@@ -236,6 +259,135 @@ test('parseTimeline: vacío → []', () => {
   assert.deepEqual(parseTimeline([]), []);
 });
 
+// ─── parseTimeline: ORDEN por (día calendario desc, createdAt desc, eventId desc) — EL BUG ─────────
+// El bug que esto cierra: un evento TIPADO (date-only, vuelve 00:00 UTC) cargado HOY caía POR DEBAJO
+// de los eventos del mismo día con hora real (category_change=changed_at, observacion=created_at). El
+// fix ordena por DÍA calendario y, dentro del día, por created_at (instante real de inserción) desc.
+
+// (a) MISMO día: un date-only (servicio, createdAt NUEVO) vs un timestamp (category_change, createdAt
+//     VIEJO). El recién registrado (servicio) debe ir ARRIBA. Antes iba al fondo (00:00 < hora real).
+test('parseTimeline (a): mismo día, date-only recién cargado va ARRIBA del timestamp viejo del mismo día', () => {
+  // El servicio (date-only) llega como UTC-medianoche del día tipeado; el category_change (instante)
+  // tiene la hora real. Ambos son del MISMO día calendario (15 may). created_at: el servicio se cargó
+  // a las 18:30 (recién); el category_change (Alta) ocurrió a las 09:00. El servicio debe ganar.
+  const rows: TimelineRow[] = [
+    {
+      event_kind: 'category_change',
+      event_id: 'cat-alta',
+      event_date: '2025-05-15T09:00:00Z', // instante real (changed_at)
+      created_at: '2025-05-15T09:00:00Z',
+      payload: { from: null, to: 'uuid-vaq', reason: 'initial' },
+    },
+    {
+      event_kind: 'reproductive',
+      event_id: 'svc-hoy',
+      event_date: '2025-05-15T00:00:00Z', // date-only → UTC-medianoche (mismo día calendario)
+      created_at: '2025-05-15T18:30:00Z', // cargado RECIÉN, después del alta
+      payload: { event_type: 'service' },
+    },
+  ];
+  const items = parseTimeline(rows);
+  // El servicio (createdAt 18:30) va ARRIBA del category_change (createdAt 09:00) del MISMO día.
+  assert.deepEqual(
+    items.map((i) => i.eventId),
+    ['svc-hoy', 'cat-alta'],
+  );
+});
+
+// (b) BACKDATED: un date-only con fecha VIEJA pero createdAt NUEVO NO debe saltar al tope. Cae en SU
+//     día (el orden por día manda); el createdAt solo desempata DENTRO del día.
+test('parseTimeline (b): evento backdated (fecha vieja, createdAt nuevo) cae en SU día, NO al tope', () => {
+  const rows: TimelineRow[] = [
+    {
+      event_kind: 'observacion',
+      event_id: 'obs-hoy',
+      event_date: '2025-06-10T12:00:00Z', // hoy (instante real)
+      created_at: '2025-06-10T12:00:00Z',
+      payload: { text: 'de hoy' },
+    },
+    {
+      event_kind: 'weight',
+      event_id: 'peso-backdated',
+      event_date: '2025-03-01T00:00:00Z', // fecha VIEJA (1 mar) — date-only
+      created_at: '2025-06-10T18:00:00Z', // pero cargado RECIÉN (hoy, más nuevo que la obs)
+      payload: { weight_kg: 300 },
+    },
+  ];
+  const items = parseTimeline(rows);
+  // Aunque el peso tenga el createdAt MÁS NUEVO, su DÍA (1 mar) es más viejo → va ABAJO. No salta al
+  // tope por haberse cargado recién. El día manda; createdAt solo ordena dentro del día.
+  assert.deepEqual(
+    items.map((i) => i.eventId),
+    ['obs-hoy', 'peso-backdated'],
+  );
+});
+
+// (c) ORDEN ENTRE DÍAS: el día más reciente arriba, sin importar el created_at.
+test('parseTimeline (c): orden entre días — el día más reciente arriba (created_at irrelevante entre días)', () => {
+  const rows: TimelineRow[] = [
+    { event_kind: 'weight', event_id: 'd-feb', event_date: '2025-02-10T00:00:00Z', created_at: '2025-06-01T10:00:00Z', payload: { weight_kg: 280 } },
+    { event_kind: 'weight', event_id: 'd-may', event_date: '2025-05-20T00:00:00Z', created_at: '2025-05-20T08:00:00Z', payload: { weight_kg: 320 } },
+    { event_kind: 'weight', event_id: 'd-ene', event_date: '2025-01-05T00:00:00Z', created_at: '2025-01-05T08:00:00Z', payload: { weight_kg: 260 } },
+  ];
+  const items = parseTimeline(rows);
+  // may > feb > ene por DÍA, aunque feb tenga el created_at más nuevo (jun): el día manda.
+  assert.deepEqual(
+    items.map((i) => i.eventId),
+    ['d-may', 'd-feb', 'd-ene'],
+  );
+});
+
+// (d) TZ-INDEPENDIENTE: el día de un date-only se toma de los componentes UTC (la fecha tipeada); el de
+//     un instante real se toma del día LOCAL. Verificamos SIN mutar process.env.TZ (V8 cachea el huso →
+//     mutarlo mid-proceso no es confiable, mismo criterio que los tests de formatEventDate): construimos
+//     el instante "hoy" a partir de componentes LOCALES (toISOString) y el date-only con el MISMO día
+//     calendario como literal UTC-medianoche. Así, sea cual sea el huso del runner, ambos caen en el
+//     mismo día calendario y el orden lo decide el createdAt.
+test('parseTimeline (d): TZ-independiente — date-only y timestamp del mismo día calendario se ordenan por createdAt', () => {
+  // Instante real "hoy a las 09:00 LOCAL" del 12 jun 2025 (su día LOCAL es el 12, en cualquier huso).
+  const localInstant = new Date(2025, 5, 12, 9, 0, 0); // 12 jun, 09:00 local
+  const obsIso = localInstant.toISOString();
+  // Un createdAt posterior al instante de la obs, también construido local (12 jun 20:00 local).
+  const tactoCreated = new Date(2025, 5, 12, 20, 0, 0).toISOString();
+  const rows: TimelineRow[] = [
+    {
+      event_kind: 'observacion',
+      event_id: 'obs-manana',
+      event_date: obsIso, // instante real → día LOCAL = 12 jun
+      created_at: obsIso,
+      payload: { text: 'de la mañana' },
+    },
+    {
+      event_kind: 'reproductive',
+      event_id: 'tacto-tarde',
+      event_date: '2025-06-12T00:00:00+00:00', // date-only del 12 jun → día calendario (UTC) = 12 jun
+      created_at: tactoCreated, // cargado por la tarde, después de la obs
+      payload: { event_type: 'tacto', pregnancy_status: 'medium' },
+    },
+  ];
+  const items = parseTimeline(rows);
+  // Ambos son del MISMO día calendario (12 jun) en cualquier huso → se ordenan por createdAt: el tacto
+  // (20:00) es posterior a la obs (09:00) → el tacto va ARRIBA. Si el día NO se computara consistente
+  // (date-only por UTC, instante por local), caerían en días distintos y el orden cambiaría (el bug).
+  assert.deepEqual(
+    items.map((i) => i.eventId),
+    ['tacto-tarde', 'obs-manana'],
+  );
+});
+
+// Fecha inválida → se trata como el día MÁS VIEJO (cae al fondo) sin romper el orden del resto.
+test('parseTimeline: eventDate inválido cae al fondo (no rompe el orden)', () => {
+  const rows: TimelineRow[] = [
+    { event_kind: 'weight', event_id: 'mal', event_date: 'no-es-fecha', created_at: '2025-06-01T10:00:00Z', payload: { weight_kg: 300 } },
+    { event_kind: 'weight', event_id: 'bien', event_date: '2025-04-01T00:00:00Z', created_at: '2025-04-01T10:00:00Z', payload: { weight_kg: 310 } },
+  ];
+  const items = parseTimeline(rows);
+  assert.deepEqual(
+    items.map((i) => i.eventId),
+    ['bien', 'mal'],
+  );
+});
+
 // ─── Resolución de nombres de categoría (sin N+1) ─────────────────────────────────────────
 
 test('collectCategoryIds: junta los from/to únicos de los category_change', () => {
@@ -270,57 +422,58 @@ test('resolveCategoryNames: id sin nombre en el mapa → null (no crashea)', () 
   if (it.kind === 'category_change') assert.equal(it.toCategoryName, null);
 });
 
-// ─── applyReproMeta (enriquece service_type + created_at, espejo de resolveCategoryNames) ──────
+// ─── applyReproMeta (enriquece SOLO service_type; createdAt viene de la RPC) ──────────────────
 
-test('applyReproMeta: setea serviceType Y createdAt al item reproductive por eventId', () => {
+test('applyReproMeta: setea serviceType al item reproductive por eventId (NO toca createdAt)', () => {
+  // createdAt viene de la FILA (RPC 0069); applyReproMeta solo agrega serviceType y lo PRESERVA.
   const items = parseTimeline([
-    { event_kind: 'reproductive', event_id: 'r1', event_date: '2025-03-01T00:00:00Z', payload: { event_type: 'service' } },
+    { event_kind: 'reproductive', event_id: 'r1', event_date: '2025-03-01T00:00:00Z', created_at: '2025-03-01T12:34:56Z', payload: { event_type: 'service' } },
   ]);
-  const out = applyReproMeta(items, { r1: { serviceType: 'ai', createdAt: '2025-03-01T12:34:56Z' } });
+  const out = applyReproMeta(items, { r1: { serviceType: 'ai' } });
   const it = out[0];
   assert.equal(it.kind, 'reproductive');
   if (it.kind === 'reproductive') {
     assert.equal(it.serviceType, 'ai');
+    // createdAt NO lo toca applyReproMeta: sigue siendo el de la fila.
     assert.equal(it.createdAt, '2025-03-01T12:34:56Z');
   }
 });
 
-test('applyReproMeta: createdAt ausente → null; serviceType no-enum → null (tolerante)', () => {
+test('applyReproMeta: serviceType no-enum → null (tolerante); createdAt de la fila intacto', () => {
   const items = parseTimeline([
-    { event_kind: 'reproductive', event_id: 'r1', event_date: '2025-03-01T00:00:00Z', payload: { event_type: 'tacto', pregnancy_status: 'small' } },
+    { event_kind: 'reproductive', event_id: 'r1', event_date: '2025-03-01T00:00:00Z', created_at: '2025-03-01T09:00:00Z', payload: { event_type: 'tacto', pregnancy_status: 'small' } },
   ]);
-  // meta con serviceType basura y sin createdAt.
+  // meta con serviceType basura → null. createdAt no se toca.
   const out = applyReproMeta(items, { r1: { serviceType: 'basura' } });
   const it = out[0];
   if (it.kind === 'reproductive') {
     assert.equal(it.serviceType, null);
-    assert.equal(it.createdAt, null);
+    assert.equal(it.createdAt, '2025-03-01T09:00:00Z');
   }
 });
 
-test('applyReproMeta: id faltante en el mapa → serviceType y createdAt null', () => {
+test('applyReproMeta: id faltante en el mapa → serviceType null (createdAt de la fila intacto)', () => {
   const items = parseTimeline([
-    { event_kind: 'reproductive', event_id: 'r1', event_date: '2025-03-01T00:00:00Z', payload: { event_type: 'tacto', pregnancy_status: 'medium' } },
+    { event_kind: 'reproductive', event_id: 'r1', event_date: '2025-03-01T00:00:00Z', created_at: '2025-03-01T07:00:00Z', payload: { event_type: 'tacto', pregnancy_status: 'medium' } },
   ]);
   const out = applyReproMeta(items, {}); // r1 ausente
   const it = out[0];
   if (it.kind === 'reproductive') {
     assert.equal(it.serviceType, null);
-    assert.equal(it.createdAt, null);
+    assert.equal(it.createdAt, '2025-03-01T07:00:00Z');
   }
 });
 
 test('applyReproMeta: NO muta el input + deja intactos los NO reproductive', () => {
   const items = parseTimeline([
-    { event_kind: 'reproductive', event_id: 'r1', event_date: '2025-03-01T00:00:00Z', payload: { event_type: 'service' } },
-    { event_kind: 'weight', event_id: 'w1', event_date: '2025-02-01T00:00:00Z', payload: { weight_kg: 300 } },
+    { event_kind: 'reproductive', event_id: 'r1', event_date: '2025-03-01T00:00:00Z', created_at: '2025-03-01T08:00:00Z', payload: { event_type: 'service' } },
+    { event_kind: 'weight', event_id: 'w1', event_date: '2025-02-01T00:00:00Z', created_at: '2025-02-01T08:00:00Z', payload: { weight_kg: 300 } },
   ]);
   const before = items.find((i) => i.eventId === 'r1')!;
-  const out = applyReproMeta(items, { r1: { serviceType: 'natural', createdAt: '2025-03-01T08:00:00Z' } });
-  // el original sigue con createdAt null (no se mutó).
+  const out = applyReproMeta(items, { r1: { serviceType: 'natural' } });
+  // el original sigue con serviceType null (no se mutó).
   if (before.kind === 'reproductive') {
     assert.equal(before.serviceType, null);
-    assert.equal(before.createdAt, null);
   }
   // el weight pasa intacto.
   const w = out.find((i) => i.eventId === 'w1')!;
@@ -543,22 +696,26 @@ test('describeCategoryChange: nombre no resuelto → fallback "categoría"', () 
 // ─── deriveCurrentState (FIX C): valor vigente de cada medición tipada ─────────────────────
 
 // Helper para armar items rápido a partir de filas crudas (ejerce el path real parseTimelineRow).
+// created_at default = event_date (la RPC 0069 lo trae top-level; en los tests de estado vigente, donde
+// importa el orden dentro del día, se pasa explícito vía reproItemsWithCreatedAt).
 function weightRow(id: string, date: string, kg: number | null): TimelineRow {
-  return { event_kind: 'weight', event_id: id, event_date: date, payload: { weight_kg: kg } };
+  return { event_kind: 'weight', event_id: id, event_date: date, created_at: date, payload: { weight_kg: kg } };
 }
 function scoreRow(id: string, date: string, score: number | null): TimelineRow {
-  return { event_kind: 'condition_score', event_id: id, event_date: date, payload: { score } };
+  return { event_kind: 'condition_score', event_id: id, event_date: date, created_at: date, payload: { score } };
 }
 function reproRow(
   id: string,
   date: string,
   eventType: string,
   pregnancyStatus: string | null = null,
+  createdAt: string = date,
 ): TimelineRow {
   return {
     event_kind: 'reproductive',
     event_id: id,
     event_date: date,
+    created_at: createdAt,
     payload: { event_type: eventType, pregnancy_status: pregnancyStatus },
   };
 }
@@ -735,15 +892,18 @@ test('deriveCurrentState: empate de fecha entre repro determinantes → desempat
 // total real. Tests DETERMINÍSTICOS: invierten orden de entrada y fuerzan el eventId del tacto a ser
 // MAYOR que el del birth (para probar que NO es el eventId el que decide, sino el created_at).
 
-/** Arma items repro con created_at via el path real: parseTimeline (createdAt null) → applyReproMeta. */
+/**
+ * Arma items repro con created_at via el path real: la RPC 0069 trae created_at en la FILA → parseTimeline
+ * lo lee en `base`. (Antes venía de applyReproMeta; ahora viene de la fila.) Un createdAt null se modela
+ * con una fila SIN created_at (string vacío) → parseTimelineRow lo deja null.
+ */
 function reproItemsWithCreatedAt(
   specs: { id: string; date: string; type: string; preg?: string | null; createdAt: string | null }[],
 ) {
-  const rows: TimelineRow[] = specs.map((s) => reproRow(s.id, s.date, s.type, s.preg ?? null));
-  const items = parseTimeline(rows);
-  const byId: Record<string, { serviceType?: string | null; createdAt?: string | null }> = {};
-  for (const s of specs) byId[s.id] = { createdAt: s.createdAt };
-  return applyReproMeta(items, byId);
+  const rows: TimelineRow[] = specs.map((s) =>
+    reproRow(s.id, s.date, s.type, s.preg ?? null, s.createdAt ?? ''),
+  );
+  return parseTimeline(rows);
 }
 
 test('deriveCurrentState: tacto y BIRTH mismo día, created_at del birth posterior → vacía (gana birth)', () => {
