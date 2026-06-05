@@ -51,8 +51,13 @@ Lo invocás **solo si** la spec toca alguno de estos dominios:
 - Auth, sessions, tokens, secrets.
 - Endpoints expuestos públicamente.
 - Datos regulados (SENASA, PII).
+- **Inputs de usuario**: cualquier formulario, buscador, campo de texto libre o prompt nuevo o modificado. Si el usuario tipea algo que llega al backend/DB, Gate 1 aplica (validación + límites + rate limit, ver Catálogo del `security_analyzer`).
+- **Operaciones masivas / bulk / import** de datos (fan-out, vector de amplificación).
+- **Ingesta de archivos o fetch externo** (CSV/PDF import, lab parsers, SENASA/SIGSA) — riesgo de injection/SSRF.
+- **Sync offline** (PowerSync sync rules, Realtime, data-at-rest local).
+- **BLE / bastón** (lecturas EID como input no confiable).
 
-Si la spec NO toca ninguno (ej: refactor puro de UI sin cambios de datos), saltás Gate 1 y documentás en `progress/current.md`: "Gate 1 omitido — spec no toca dominios de seguridad".
+Regla práctica: **si la spec agrega o cambia un campo que el usuario tipea, Gate 1 aplica.** Solo saltás Gate 1 cuando la spec es puramente visual/no-dato (ej: refactor de layout, cambio de copy o de tokens sin tocar inputs, datos ni sync). En ese caso documentás en `progress/current.md`: "Gate 1 omitido — spec no toca dominios de seguridad (sin inputs/datos/sync nuevos)".
 
 Si lo invocás, llamás `security_analyzer` en modo `spec` con la ruta de `specs/active/<feature>/`. El output va a `progress/security_spec_<feature>.md`. Veredictos posibles: PASS / FAIL / NEEDS_CLARIFICATION.
 
