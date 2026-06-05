@@ -93,6 +93,14 @@ src/
 - Una migration por cambio lógico, nombre numerado + descripción: `0001_users.sql`, `0002_establishments.sql`.
 - Incluir RLS + helpers + indexes en la misma migration que crea la tabla cuando es posible.
 - Comentarios SQL en español si explican el porqué del modelo.
+- **PII sensible → tabla `*_private` self-only (ADR-025).** Toda columna de PII de contacto/identidad
+  personal/dato regulado que viva en una tabla cuyas filas son visibles a otros usuarios del tenant
+  va a una tabla compañera `<entidad>_private (<entidad>_id PK)` con RLS self-only, NO a la tabla
+  pública. La RLS de Postgres es row-level (no column-level) y el WAL (realtime/PowerSync) replica la
+  tabla base ignorando views/RPCs/column-GRANTs → solo la separación FÍSICA cierra la PII en todos los
+  canales. Un `ALTER TABLE ... ADD COLUMN pii` sobre una tabla pública es un anti-patrón. Primera
+  instancia: `public.user_private` (email/phone), spec 14 / migración `0068`. Detalle y alternativas
+  descartadas en `docs/adr/ADR-025-pii-tabla-private-self-only.md`.
 
 ## Formato de commits
 

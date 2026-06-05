@@ -74,22 +74,38 @@ Deno.serve(async (req: Request) => {
     // como anotación. El bloqueo duro de R5.9 (modelo bearer) está en
     // accept_invitation: el destinatario real recién se conoce al aceptar.
     if (email) {
-      const { data: existingMember, error: existingErr } = await adminClient
-        .from('user_roles')
-        .select('id, users:users!inner(email)')
-        .eq('establishment_id', establishmentId)
-        .eq('active', true)
-        .eq('users.email', email)
-        .limit(1);
-      if (existingErr) {
-        return jsonError(500, 'db_error', existingErr.message);
+      // Precheck "ya es miembro activo" — re-ruteado a user_private (spec 14, R8.1/R8.3).
+      // El email se separó de public.users a public.user_private (RLS self-only). Lo resolvemos
+      // en 2 pasos vía admin-client (service-role, bypassa RLS): user_private por email →
+      // user_roles por user_id. Más robusto que un doble embed PostgREST (no depende de cómo
+      // resuelva el `!inner` anidado). Resultado funcional idéntico (mismo código already_member).
+      const { data: privByEmail, error: privErr } = await adminClient
+        .from('user_private')
+        .select('user_id')
+        .eq('email', email)
+        .maybeSingle();
+      if (privErr) {
+        return jsonError(500, 'db_error', privErr.message);
       }
-      if (existingMember && existingMember.length > 0) {
-        return jsonError(
-          409,
-          'already_member',
-          'Ese email ya es miembro activo del establecimiento.',
-        );
+
+      if (privByEmail) {
+        const { data: existingMember, error: existingErr } = await adminClient
+          .from('user_roles')
+          .select('id')
+          .eq('establishment_id', establishmentId)
+          .eq('active', true)
+          .eq('user_id', privByEmail.user_id)
+          .limit(1);
+        if (existingErr) {
+          return jsonError(500, 'db_error', existingErr.message);
+        }
+        if (existingMember && existingMember.length > 0) {
+          return jsonError(
+            409,
+            'already_member',
+            'Ese email ya es miembro activo del establecimiento.',
+          );
+        }
       }
 
       const nowIso = new Date().toISOString();

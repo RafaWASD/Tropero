@@ -118,11 +118,20 @@ Deno.serve(async (req: Request) => {
     // R5.10 / R5.11 — notificaciones al owner. Cada una con try/catch aislado:
     // un fallo de email no debe romper push y viceversa; ambos son best-effort.
     try {
+      // El owner: name sigue en public.users; email se separó a public.user_private (spec 14,
+      // R8.2/R8.3). Dos lecturas admin-client (service-role bypassa RLS): name por id, email por
+      // user_id. El email del que ACEPTA (user.email) sale del JWT (_shared/auth.ts), no de la DB.
       const { data: ownerData } = await adminClient
         .from('users')
-        .select('id, name, email')
+        .select('id, name')
         .eq('id', inv.invited_by)
         .single();
+      const { data: ownerPrivate } = await adminClient
+        .from('user_private')
+        .select('email')
+        .eq('user_id', inv.invited_by)
+        .maybeSingle();
+      const ownerEmail = ownerPrivate?.email ?? null;
       const { data: estData } = await adminClient
         .from('establishments')
         .select('name')
@@ -134,11 +143,11 @@ Deno.serve(async (req: Request) => {
         .eq('id', user.id)
         .single();
 
-      if (ownerData?.email) {
+      if (ownerEmail) {
         try {
           const sendResult = await sendInvitationAcceptedEmail({
-            to: ownerData.email,
-            ownerName: ownerData.name ?? 'Hola',
+            to: ownerEmail,
+            ownerName: ownerData?.name ?? 'Hola',
             establishmentName: estData?.name ?? 'tu establecimiento',
             newMemberName: newMember?.name ?? user.email,
             newMemberEmail: user.email,

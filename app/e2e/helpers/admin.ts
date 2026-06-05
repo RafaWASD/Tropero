@@ -74,12 +74,16 @@ export async function createTestUser(
 }
 
 /**
- * Setea el teléfono del perfil del usuario (public.users.phone) vía service_role. Útil para
- * SALTEAR el gate de teléfono (R3.8) cuando un test quiere ir directo al form de crear campo
- * sin pasar por la pantalla de teléfono. Si el test QUIERE ejercitar el gate, no se llama.
+ * Setea el teléfono del perfil del usuario vía service_role. Útil para SALTEAR el gate de teléfono
+ * (R3.8) cuando un test quiere ir directo al form de crear campo sin pasar por la pantalla de
+ * teléfono. Si el test QUIERE ejercitar el gate, no se llama.
+ *
+ * Spec 14: el `phone` se separó de `public.users` a `public.user_private` (PII de contacto
+ * self-only). El service_role bypassa RLS; escribimos directo en user_private (la fila la creó el
+ * trigger de signup junto con users, así que un update por user_id basta).
  */
 export async function setUserPhone(userId: string, phone: string): Promise<void> {
-  const { error } = await admin.from('users').update({ phone }).eq('id', userId);
+  const { error } = await admin.from('user_private').update({ phone }).eq('user_id', userId);
   if (error) throw new Error(`setUserPhone(${userId}): ${error.message}`);
 }
 

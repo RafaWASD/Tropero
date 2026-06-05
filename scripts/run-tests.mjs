@@ -61,6 +61,9 @@ if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
   run('Edge Functions suite', `node --test supabase/tests/edge/run.cjs`);
   run('Animal suite (spec 02)', `node --test supabase/tests/animal/run.cjs`);
   run('Maneuvers suite (spec 03)', `node --test supabase/tests/maneuvers/run.cjs`);
+  // spec 14 (user_private) — enganchada por el leader tras aplicar la migración 0068 + redeploy
+  // de invite_user/accept_invitation (deploy coordinado, 2026-06-04).
+  run('User_private suite (spec 14)', `node --test supabase/tests/user_private/run.cjs`);
 } else {
   console.log('\n>>> RLS + Edge + Animal + Maneuvers suites — SKIPPED (falta SUPABASE_SERVICE_ROLE_KEY en env)');
 }

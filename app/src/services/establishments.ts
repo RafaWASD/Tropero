@@ -149,12 +149,15 @@ export type LoadProfileResult =
   | { ok: true; profile: UserProfile }
   | { ok: false; error: { kind: 'network' | 'unknown'; message: string } };
 
-/** Lee el perfil del usuario actual (para el gate de teléfono, R3.8). */
+/**
+ * Lee el perfil del usuario actual (para el gate de teléfono, R3.8). El `phone` se separó a
+ * `public.user_private` (spec 14, R6.4). RLS `user_private_select_self` (0068) acota a la fila propia.
+ */
 export async function loadOwnProfile(userId: string): Promise<LoadProfileResult> {
   const { data, error } = await supabase
-    .from('users')
+    .from('user_private')
     .select('phone')
-    .eq('id', userId)
+    .eq('user_id', userId)
     .maybeSingle();
 
   if (error) {
@@ -167,12 +170,15 @@ export type SaveResult =
   | { ok: true }
   | { ok: false; error: { kind: 'network' | 'unknown'; message: string } };
 
-/** Guarda el teléfono en el perfil (R3.8). RLS users_update_self exige id = auth.uid(). */
+/**
+ * Guarda el teléfono en el perfil (R3.8). El `phone` vive en `public.user_private` (spec 14, R6.4).
+ * RLS `user_private_update_self` (0068) exige user_id = auth.uid() (un user solo edita su fila).
+ */
 export async function saveOwnPhone(userId: string, phone: string): Promise<SaveResult> {
   const { error } = await supabase
-    .from('users')
+    .from('user_private')
     .update({ phone: phone.trim() })
-    .eq('id', userId);
+    .eq('user_id', userId);
 
   if (error) {
     return { ok: false, error: classifyError(error) };
@@ -190,13 +196,18 @@ export type LoadFullProfileResult =
 
 /**
  * Lee el perfil completo del usuario actual (name + email + phone) para la sección Perfil de
- * "Más" (R2.1). RLS `users_select_self` (0006) deja al user ver SOLO su propia fila (id =
- * auth.uid()). No mezcla perfiles de otros (R7.2).
+ * "Más" (R2.1). El `name` sale de `public.users`; el `email` + `phone` se separaron a
+ * `public.user_private` (spec 14, R6.1). RLS self-only en ambas tablas (0006 / 0068) deja al user
+ * ver SOLO su propia fila. No mezcla perfiles de otros (R7.2).
+ *
+ * Nota: el email mostrado en la pantalla de "Más" lo deriva del session de auth (R6.5); este
+ * `loadFullProfile` mantiene `email` en el shape por compatibilidad de contrato (Run 1 lo pedía),
+ * leyéndolo de `user_private` (la copia consultable). El email canónico fresco lo da el session.
  */
 export async function loadFullProfile(userId: string): Promise<LoadFullProfileResult> {
   const { data, error } = await supabase
     .from('users')
-    .select('name, email, phone')
+    .select('name')
     .eq('id', userId)
     .maybeSingle();
 
@@ -211,7 +222,21 @@ export async function loadFullProfile(userId: string): Promise<LoadFullProfileRe
       error: { kind: 'unknown', message: 'No se encontró el perfil del usuario.' },
     };
   }
-  return { ok: true, profile: { name: data.name ?? '', email: data.email ?? '', phone: data.phone ?? null } };
+
+  const { data: priv, error: privError } = await supabase
+    .from('user_private')
+    .select('email, phone')
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (privError) {
+    return { ok: false, error: classifyError(privError) };
+  }
+
+  return {
+    ok: true,
+    profile: { name: data.name ?? '', email: priv?.email ?? '', phone: priv?.phone ?? null },
+  };
 }
 
 /**
@@ -221,21 +246,34 @@ export async function loadFullProfile(userId: string): Promise<LoadFullProfileRe
  * `.select()`: no necesitamos el RETURNING (el llamador re-lee o usa lo que ya tiene), y así
  * evitamos cualquier sorpresa de RLS-on-RETURNING.
  *
- * Fase 6 (consolidación del saludo — fuente única): escribe SOLO `public.users`. Ya NO sincroniza
- * el nombre a `auth.user_metadata` (lo que hacía Run 2): el saludo de la home/onboarding ahora lee
- * el nombre del ProfileContext (que lee `public.users`), no de AuthContext/user_metadata. Tras
- * guardar, el llamador refresca el ProfileContext (`useProfile().refresh()`) → el saludo se
- * actualiza sin reload, sin depender del metadata de Auth. Esto elimina de raíz la desincronización
- * de 2 fuentes que tenía Run 2.
+ * Fase 6 (consolidación del saludo — fuente única): el `name` va a `public.users`; ya NO sincroniza
+ * el nombre a `auth.user_metadata` (lo que hacía Run 2). El saludo de la home/onboarding lee el
+ * nombre del ProfileContext (que lee `public.users`). Tras guardar, el llamador refresca el
+ * ProfileContext (`useProfile().refresh()`).
+ *
+ * Spec 14 (R6.2): el `phone` se separó a `public.user_private` → son DOS writes (distinta tabla).
+ * Escribimos el `phone` PRIMERO (user_private) y el `name` DESPUÉS (users): si el phone falla,
+ * cortamos antes de tocar el name (no dejamos el name guardado con el phone viejo de forma
+ * silenciosa). RLS `user_private_update_self` / `users_update_self` acotan ambos a la fila propia.
  */
 export async function saveProfile(
   userId: string,
   input: { name: string; phone: string | null },
 ): Promise<SaveResult> {
   const name = input.name.trim();
+
+  const { error: phoneError } = await supabase
+    .from('user_private')
+    .update({ phone: input.phone?.trim() || null })
+    .eq('user_id', userId);
+
+  if (phoneError) {
+    return { ok: false, error: classifyError(phoneError) };
+  }
+
   const { error } = await supabase
     .from('users')
-    .update({ name, phone: input.phone?.trim() || null })
+    .update({ name })
     .eq('id', userId);
 
   if (error) {

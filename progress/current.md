@@ -3,6 +3,60 @@
 > Este archivo se vacía al cerrar cada sesión y su resumen se mueve a `history.md`.
 > Mientras trabajás, **mantenelo actualizado en tiempo real**, no al final.
 
+## Bloque — HARDENING DE SEGURIDAD (2026-06-04)
+
+Raf pidió ampliar el `security_analyzer` (validar inputs de formularios/buscadores/prompts con límites + validación; verificar rate limits). El leader lo cuestionó y escaló a un catálogo completo de clases de defecto, después corrió una auditoría baseline y abrió dos features de hardening. Mandato de Raf: "mandale mecha a TODO lo que consideres; soy no-experto en cibersec, decidí vos (council si amerita)".
+
+**1. `security_analyzer` ampliado** (`.claude/agents/security_analyzer.md`): + sección de validación de inputs (capa cliente UX bypasseable vs capa autoritativa server) + rate limits + **Catálogo de dominios A–I** (A authz/service-role/mass-assignment/IDOR · B exposición/err.message/PII · C offline/PowerSync/data-at-rest · D secretos/supply-chain · E abuso-escala/DoW/captcha/enumeration · F inyección/ingesta/SSRF · G BLE · H auth/sesión · I compliance/mobile) + 2 reglas duras (service-role=RLS-bypass siempre HIGH; mass assignment y err.message al cliente = finding) + 3 tablas de trazabilidad en el output. Anclado en convenciones reales del repo.
+
+**2. Leader Gate 1 auto-trigger** (`.claude/agents/leader.md`): ampliados los dominios que disparan Gate 1 — regla nueva "si la spec agrega/cambia un campo que el usuario tipea, Gate 1 aplica" + bulk/import, ingesta/SSRF, sync offline, BLE.
+
+**3. Auditoría baseline** del código YA mergeado → `progress/security_baseline_shipped.md` (**3 HIGH / 6 MEDIUM / 4 LOW**). Los 3 HIGH RE-VERIFICADOS por el leader contra source. Corregido un error del leader: el service-role está LIMPIO en las 8 EFs (scopeado por tenant+rol; sin mass assignment). Triage completo en `docs/backlog.md` (entrada 2026-06-04 "Baseline de seguridad"). HIGH: B3-1 (PII coworkers), INPUT-1 (sin tope server en texto de usuario), H2-1 (password server 6 vs cliente 8).
+
+**4. Fix de config aplicado**: `config.toml` `minimum_password_length = 6 → 8`. **PENDIENTE acción de Raf**: reflejarlo en el Auth del proyecto REMOTO (dashboard). E3-1 (captcha Turnstile + email-confirmation) y CORS (`*`) = recomendación dada, acción/decisión de Raf (pre-prod / necesita keys).
+
+**5. Feature 13 `13-hardening-seguridad`** (cluster code/DB: INPUT-1 techo-holgado + B1-1 error genérico + A1-1 `animals_update with check` + F1-1 escaping/tope buscador + H1-1 invalidar sesión). Gate 0 APROBADO por Raf → `spec_author` ✅ (spec_ready, 10 reqs / 21 tasks) → **Gate 1 (security spec) CORRIENDO**. Tras Gate 1 PASS → ⏸ Puerta 1 humana. E2-1 (rate-limit propio de EFs) quedó FUERA (backlog, condicionado a configurar `RESEND_API_KEY`).
+
+**6. Feature 14 `14-pii-user-private`** (cierra B3-1): pasó por **LLM Council** (5 asesores + peer review) → **veredicto unánime opción D**: separar email+phone a tabla `user_private` self-only. Razón decisiva: realtime/PowerSync sincronizan FILAS por el WAL → views/RPC/column-GRANTs no protegen ese canal, solo la separación física sí. **Insight clave verificado**: `public.users.email` es duplicado de `auth.users.email` (trigger `handle_new_auth_user`). **TIMING: hacerlo ANTES de wire PowerSync** (barato ahora, caro después). Gate 0 APROBADO por Raf → `spec_author` → Gate 1 PASS → Puerta 1 (Raf) → implementer → reviewer APPROVED + Gate 2 PASS → **✅ DEPLOY APLICADO Y VALIDADO (ver bloque abajo)**. **ADR-025 escrito**. Define el patrón canónico de PII del producto.
+
+**Pendiente al cierre del bloque:**
+- Gate 1 de feature 13 (corriendo) → si PASS, ⏸ Puerta 1; si FAIL, fix-loop con spec_author.
+- `spec_author` de feature 14 (corriendo) → luego Gate 1 (obligatorio) → ⏸ Puerta 1.
+- Acciones de Raf: password en Auth remoto; captcha Turnstile (cuenta+key) cuando se abra signup.
+- Decisión futura: ¿ADR que fije "PII sensible → tabla `*_private` self-only"?
+
+**Feature 14 — IMPLEMENTER ✅ (2026-06-04, NO aplicado al remoto)**. Gate 1 PASS + Puerta 1
+aprobada por Raf → implementer entregó todo (NO aplicó la migración: deploy destructivo
+coordinado que ejecuta el leader). Archivos: `supabase/migrations/0068_user_private_pii.sql`
+(tabla `user_private` self-only + RLS + unique index total + backfill con pre-check de emails
+dup + drop columns + reescritura `handle_new_auth_user` + trigger propagación email confirmado
+R7.2 + grants/revokes + smoke-check fail-closed) · EFs `invite_user`/`accept_invitation`
+re-ruteadas a `user_private` vía admin-client · services `profile.ts`/`establishments.ts`
+(loadProfileNamePhone/loadOwnProfile/saveOwnPhone/loadFullProfile/saveProfile) ·
+**M-1** helper e2e `setUserPhone` → `user_private` · suite `supabase/tests/user_private/run.cjs`
+(T17–T23, wiring COMENTADO en run-tests.mjs hasta el apply) · `docs/conventions.md` (nota
+ADR-025, que ya existía). Autorrevisión adversarial hecha (ver `impl_14-pii-user-private.md`):
+cazó el edge case del índice TOTAL vs PARCIAL (pre-check de emails dup) + un test que pasaba
+por la razón equivocada (T21 ahora aserta `already_member`). check.mjs: tests verdes,
+typecheck OK, anti-hardcode 0 (el FAIL "2 features in_progress" es preexistente, no regresión).
+**✅ DEPLOY HECHO POR EL LEADER (2026-06-04)**: reviewer APPROVED + Gate 2 PASS → deploy coordinado.
+El MCP estaba **read-only** → la migración 0068 se aplicó vía la **Management API `/database/query`**
+(con `SUPABASE_ACCESS_TOKEN`, corre como `postgres`), envuelta en `BEGIN/COMMIT` tras probar que el
+endpoint es atómico (un `create` en `begin..rollback` no sobrevivió). Validado pre-apply contra data
+real (read-only): 0 emails duplicados / 0 nulls / ninguna view o función —salvo `handle_new_auth_user`,
+que la migración reescribe— depende de `users.email/phone`. Validado post-apply: `user_private` **202
+filas**, `users` sin email/phone, RLS self-only, grants OK (authenticated select/update; anon nada;
+service_role lectura), triggers presentes. EFs `invite_user`+`accept_invitation` redeployadas con
+**`npx supabase functions deploy`** (la CLI no estaba en PATH; bundlea nativo sin Docker). Suite
+`user_private` enganchada en `run-tests.mjs` → **19/19 estable** (la flakiness inicial era el rate-limit
+de email de Auth agotado por corridas seguidas, ya reseteó; los críticos T17/T18 pasan siempre).
+Test bug menor de T23 R7.2 (`@rafaq-test.local` rechazado por Auth en cambio de email user-initiated)
+→ fix-loop de implementer → verde. **Numeración**: en disco `0068`, en el remoto registrada aparte
+(divergencia con la otra terminal que aplicó Tier 2 con timestamps → NO usar `supabase db push`).
+**Commit selectivo** (pathspec, sin tocar el Tier 2 stageado de la otra terminal). Pendiente menor:
+web-sanity-check de Raf en perfil/cambio-email (el deploy está vivo → corre el frontend nuevo).
+Feature 14 → `done`. **Feature 13 (hardening) queda spec_ready con Puerta 1 aprobada, en cola.**
+
 ## Sesión 21 — ACTIVA (2026-05-30): frontend spec 01 (B.1)
 
 Raf eligió arrancar **B.1 (frontend de spec 01)** ahora que A.1 (design system) + B.0 (scaffold) + A.2 (nav) están cerrados y todo el backend core (01/02-Tier1/03) está done. Es el único trabajo a la vez critical-path y sin bloqueante externo. spec 01 → `in_progress` en `feature_list.json`.
