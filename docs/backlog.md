@@ -17,6 +17,13 @@ No es un sustituto de `feature_list.json` ni de los ADRs — es la antesala dond
 
 ## Ítems pendientes
 
+## 2026-06-06 — Rate-limit de frecuencia de importación masiva (control diferido, feature 12)
+
+**Origen**: sesión 23, Gate 1 (security) de feature 12 — finding MEDIUM-4.
+**Qué**: los topes de la spec 12 (R3: 5 MB / 5000 filas / largo por campo) acotan **una** corrida de import, pero NO la **frecuencia** (un usuario autenticado podría disparar muchas corridas seguidas = DoW por reintentos). No hay rate-limit de import-por-usuario/establecimiento.
+**Por qué importa**: bajo en MVP (es op de oficina, no endpoint público; mismo-tenant; la escala ya es posible vía alta unitaria), pero a escala de "decenas de miles de usuarios" un rate-limit de corridas conviene.
+**Próximo paso sugerido**: evaluar si el abuso real lo amerita; si sí, rate-limit por (usuario, establecimiento) sobre `import_log` (ya registra cada corrida con `created_at` + `imported_by`) — contar corridas en ventana y bloquear. Anclado a R3.7 de la spec 12. Nada (info) hasta ver abuso.
+
 ## 2026-06-04 — ⏰ Keep-alive ping para evitar la pausa por inactividad de Supabase free (HACER PRONTO)
 
 **Origen**: sesión 22, charla de infra al decidir las transiciones por edad (Raf preguntó cómo evitar la pausa).
