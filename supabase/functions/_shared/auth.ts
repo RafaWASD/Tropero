@@ -41,7 +41,12 @@ export async function requireOwnerOf(
     .eq('active', true)
     .maybeSingle();
   if (error) {
-    throw new HttpError(500, 'db_error', error.message);
+    // B1-1 (R3.3): NO propagar error.message al cliente (lo devolvería el catch de cada EF
+    // vía jsonError(err.status, err.code, err.message)). El detalle va a logs; el cliente
+    // recibe copy genérico. Cierra el leak transversal que alcanza a toda EF que llama
+    // requireOwnerOf.
+    console.error('[requireOwnerOf]', error);
+    throw new HttpError(500, 'db_error', 'Error interno, probá de nuevo.');
   }
   if (!data) {
     throw new HttpError(

@@ -27,7 +27,7 @@
 // RLS ya niega todo acceso con los roles inactivos).
 
 import { handleOptions } from '../_shared/cors.ts';
-import { jsonError, jsonOk } from '../_shared/errors.ts';
+import { jsonError, jsonOk, serverError } from '../_shared/errors.ts';
 import { createAdminClient, createUserClient } from '../_shared/supabase.ts';
 import { HttpError, requireUser } from '../_shared/auth.ts';
 
@@ -62,7 +62,7 @@ Deno.serve(async (req: Request) => {
       .maybeSingle();
     if (userErr) {
       // Fail-closed: si no podemos leer el estado, NO escribimos.
-      return jsonError(500, 'db_error', userErr.message);
+      return serverError('db_error', userErr);
     }
     if (userRow?.deleted_at) {
       return jsonOk({ ok: true, already_deleted: true });
@@ -81,7 +81,7 @@ Deno.serve(async (req: Request) => {
       .eq('role', 'owner')
       .eq('active', true);
     if (rolesErr) {
-      return jsonError(500, 'db_error', rolesErr.message);
+      return serverError('db_error', rolesErr);
     }
 
     const blocking: { id: string; name: string }[] = [];
@@ -97,7 +97,7 @@ Deno.serve(async (req: Request) => {
         .in('id', ownedIds)
         .is('deleted_at', null);
       if (estErr) {
-        return jsonError(500, 'db_error', estErr.message);
+        return serverError('db_error', estErr);
       }
 
       for (const est of activeEsts ?? []) {
@@ -111,7 +111,7 @@ Deno.serve(async (req: Request) => {
           .eq('active', true);
         if (countErr) {
           // Fail-closed: ante incertidumbre del conteo, NO permitimos la baja.
-          return jsonError(500, 'db_error', countErr.message);
+          return serverError('db_error', countErr);
         }
         // El conteo INCLUYE al usuario actual (su rol aún activo) → umbral <= 1 = "solo yo".
         if ((count ?? 0) <= 1) {
@@ -142,7 +142,7 @@ Deno.serve(async (req: Request) => {
         });
       }
       // Cualquier otro error de la RPC → 500. Como es atómica, la DB queda intacta.
-      return jsonError(500, 'db_error', rpcErr.message);
+      return serverError('db_error', rpcErr);
     }
 
     // Paso 5: revocación de auth (hardening del cascarón). Si falla, se loguea y se
@@ -184,7 +184,6 @@ Deno.serve(async (req: Request) => {
     if (err instanceof HttpError) {
       return jsonError(err.status, err.code, err.message);
     }
-    console.error('delete_account unexpected:', err);
-    return jsonError(500, 'unexpected', (err as Error).message);
+    return serverError('unexpected', err);
   }
 });

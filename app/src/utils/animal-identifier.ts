@@ -16,6 +16,14 @@
 // "Dar de alta" (R1.4) y el orden de búsqueda (R5); meterla en el screen la dejaría sin test y
 // acoplada a la UI. Extraída a util pura como exige el brief de C2.
 
+// Tope de largo del TÉRMINO del buscador de animales (spec 13 — F1-1, R7.3). Coherente con el techo
+// de identificadores de INPUT-1 (64): un IDV/visual/TAG legítimo nunca lo supera. FUENTE ÚNICA del
+// tope: classifySearchQuery (abajo) lo aplica server-side (autoritativo, recorta el término antes de
+// cualquier query a PostgREST); el TextInput del buscador lo importa como `maxLength` (capa de UX,
+// bypasseable). Vive acá (no en animal-input.ts) porque el corte vive en classifySearchQuery y así
+// evitamos un import de valor cross-file que el type-stripping de node:test no resuelve sin extensión.
+export const SEARCH_TERM_MAX_LENGTH = 64;
+
 /** En qué campo precargar el texto tipeado al dar de alta tras un no-match (R1.4). */
 export type IdentifierKind = 'idv' | 'visual';
 
@@ -103,7 +111,14 @@ const TAG_DIGITS = 15;
  * aplica el motor, no acá.
  */
 export function classifySearchQuery(query: string): SearchPlan {
-  const normalized = query.trim();
+  // F1-1 (R7.3): recorte AUTORITATIVO server-side del término antes de cualquier query. El
+  // service consume `normalized`/`compact` derivados de acá → topar la entrada acá topa TODAS
+  // las sub-queries (idv/tag/visual). Recorte silencioso (truncar) en vez de rechazo: mejor UX
+  // (el operario que pega texto de más igual busca por el prefijo). El TextInput tiene el mismo
+  // maxLength como UX, pero el cliente es attacker-controlled (pega a PostgREST directo) → este
+  // es el corte real que impide mandar un término de miles de chars a PostgREST.
+  const capped = query.slice(0, SEARCH_TERM_MAX_LENGTH);
+  const normalized = capped.trim();
   const compact = normalized.replace(STRUCTURED_SEPARATORS, '');
   const isDigits = compact.length > 0 && /^\d+$/.test(compact);
   return {

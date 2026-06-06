@@ -6,7 +6,7 @@
 // Output: { ok: true }
 
 import { handleOptions } from '../_shared/cors.ts';
-import { jsonError, jsonOk } from '../_shared/errors.ts';
+import { jsonError, jsonOk, serverError } from '../_shared/errors.ts';
 import { createAdminClient, createUserClient } from '../_shared/supabase.ts';
 import { HttpError, requireOwnerOf, requireUser } from '../_shared/auth.ts';
 
@@ -38,7 +38,7 @@ Deno.serve(async (req: Request) => {
       .eq('id', invitationId)
       .maybeSingle();
     if (lookupErr) {
-      return jsonError(500, 'db_error', lookupErr.message);
+      return serverError('db_error', lookupErr);
     }
     if (!inv) {
       return jsonError(404, 'not_found', 'Invitación no encontrada.');
@@ -62,7 +62,7 @@ Deno.serve(async (req: Request) => {
       })
       .eq('id', invitationId);
     if (updErr) {
-      return jsonError(500, 'db_error', updErr.message);
+      return serverError('db_error', updErr);
     }
 
     return jsonOk({ ok: true });
@@ -70,7 +70,6 @@ Deno.serve(async (req: Request) => {
     if (err instanceof HttpError) {
       return jsonError(err.status, err.code, err.message);
     }
-    console.error('cancel_invitation unexpected:', err);
-    return jsonError(500, 'unexpected', (err as Error).message);
+    return serverError('unexpected', err);
   }
 });

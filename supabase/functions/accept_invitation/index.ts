@@ -10,7 +10,7 @@
 // Output: { establishment_id, role }
 
 import { handleOptions } from '../_shared/cors.ts';
-import { jsonError, jsonOk } from '../_shared/errors.ts';
+import { jsonError, jsonOk, serverError } from '../_shared/errors.ts';
 import { createAdminClient, createUserClient } from '../_shared/supabase.ts';
 import { HttpError, requireUser } from '../_shared/auth.ts';
 import { sendInvitationAcceptedEmail } from '../_shared/email.ts';
@@ -45,7 +45,7 @@ Deno.serve(async (req: Request) => {
       .eq('token', token)
       .maybeSingle();
     if (lookupErr) {
-      return jsonError(500, 'db_error', lookupErr.message);
+      return serverError('db_error', lookupErr);
     }
     if (!inv) {
       return jsonError(404, 'not_found', 'Invitación no encontrada.');
@@ -80,7 +80,7 @@ Deno.serve(async (req: Request) => {
       .eq('active', true)
       .maybeSingle();
     if (existingErr) {
-      return jsonError(500, 'db_error', existingErr.message);
+      return serverError('db_error', existingErr);
     }
     if (existing) {
       return jsonError(
@@ -100,7 +100,7 @@ Deno.serve(async (req: Request) => {
         active: true,
       });
     if (insErr) {
-      return jsonError(500, 'db_error', insErr.message);
+      return serverError('db_error', insErr);
     }
 
     // Marcar invitation accepted.
@@ -112,7 +112,7 @@ Deno.serve(async (req: Request) => {
       })
       .eq('id', inv.id);
     if (updErr) {
-      return jsonError(500, 'db_error', updErr.message);
+      return serverError('db_error', updErr);
     }
 
     // R5.10 / R5.11 — notificaciones al owner. Cada una con try/catch aislado:
@@ -188,7 +188,6 @@ Deno.serve(async (req: Request) => {
     if (err instanceof HttpError) {
       return jsonError(err.status, err.code, err.message);
     }
-    console.error('accept_invitation unexpected:', err);
-    return jsonError(500, 'unexpected', (err as Error).message);
+    return serverError('unexpected', err);
   }
 });

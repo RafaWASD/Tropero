@@ -34,7 +34,7 @@ import {
   type AnimalStatus,
 } from '@/services/animals';
 import type { Rodeo } from '@/services/rodeos';
-import { classifyIdentifier } from '@/utils/animal-identifier';
+import { classifyIdentifier, SEARCH_TERM_MAX_LENGTH } from '@/utils/animal-identifier';
 import { buttonA11y } from '@/utils/a11y';
 
 const SEARCH_DEBOUNCE_MS = 250; // R1.2
@@ -386,6 +386,7 @@ function AnimalSearchBar({
         accessibilityLabel="Buscar animal por caravana o número"
         autoCorrect={false}
         autoCapitalize="none"
+        maxLength={SEARCH_TERM_MAX_LENGTH}
         style={{ flex: 1, color: textPrimary, fontFamily: 'Inter', fontSize }}
       />
     </XStack>

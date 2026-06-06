@@ -8,7 +8,7 @@
 // Output: { ok: true, role_id }
 
 import { handleOptions } from '../_shared/cors.ts';
-import { jsonError, jsonOk } from '../_shared/errors.ts';
+import { jsonError, jsonOk, serverError } from '../_shared/errors.ts';
 import { createAdminClient, createUserClient } from '../_shared/supabase.ts';
 import { HttpError, requireOwnerOf, requireUser } from '../_shared/auth.ts';
 
@@ -60,7 +60,7 @@ Deno.serve(async (req: Request) => {
       .eq('active', true)
       .maybeSingle();
     if (roleErr) {
-      return jsonError(500, 'db_error', roleErr.message);
+      return serverError('db_error', roleErr);
     }
     if (!targetRole) {
       return jsonError(
@@ -83,7 +83,7 @@ Deno.serve(async (req: Request) => {
         .eq('role', 'owner')
         .eq('active', true);
       if (countErr) {
-        return jsonError(500, 'db_error', countErr.message);
+        return serverError('db_error', countErr);
       }
       if ((count ?? 0) <= 1) {
         return jsonError(
@@ -101,7 +101,7 @@ Deno.serve(async (req: Request) => {
       .update({ active: false, deactivated_at: nowIso })
       .eq('id', targetRole.id);
     if (updErr) {
-      return jsonError(500, 'db_error', updErr.message);
+      return serverError('db_error', updErr);
     }
 
     const { data: inserted, error: insErr } = await adminClient
@@ -120,7 +120,23 @@ Deno.serve(async (req: Request) => {
         .from('user_roles')
         .update({ active: true, deactivated_at: null })
         .eq('id', targetRole.id);
-      return jsonError(500, 'db_error', insErr.message);
+      return serverError('db_error', insErr);
+    }
+
+    // H1-1 (R9.2/R9.3/R9.4/R9.5): tras el split de rol, invalidar la sesión del TARGET para que su
+    // siguiente request re-autentique con el rol NUEVO (su JWT viejo aún lleva el rol viejo en los
+    // claims hasta el refresh). Mecanismo: RPC SECURITY DEFINER `revoke_user_sessions(target_uid)`
+    // (migración 0072) que borra `auth.sessions` del target → revoca sus refresh tokens de forma
+    // PERSISTENTE (el ban finito anterior NO revocaba — ver review #1 + 0072). Fail-SOFT (R9.4): si
+    // falla, se loguea y NO se revierte el split ya consumado (la barrera primaria es user_roles).
+    // NO se expone el error al cliente (R9.5).
+    try {
+      const { error: revokeErr } = await adminClient.rpc('revoke_user_sessions', {
+        target_uid: targetUserId,
+      });
+      if (revokeErr) console.error('[change_member_role revoke session]', revokeErr);
+    } catch (e) {
+      console.error('[change_member_role revoke session threw]', e);
     }
 
     return jsonOk({ ok: true, role_id: inserted.id });
@@ -128,7 +144,6 @@ Deno.serve(async (req: Request) => {
     if (err instanceof HttpError) {
       return jsonError(err.status, err.code, err.message);
     }
-    console.error('change_member_role unexpected:', err);
-    return jsonError(500, 'unexpected', (err as Error).message);
+    return serverError('unexpected', err);
   }
 });

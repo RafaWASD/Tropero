@@ -52,6 +52,10 @@ if (!SUPABASE_URL || !SERVICE_ROLE_KEY || !ANON_KEY) {
 const RUN_TAG = `animal_test_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 const PASSWORD = 'TestPassword!Aa1';
 
+// spec 13 (hardening): el bloque INPUT-1/A1-1/F1-1 corre contra el remoto como el resto de la
+// suite. Las migraciones 0070+0071 ya están APLICADAS y las EFs redeployadas (deploy del leader
+// completado), así que el gate `SPEC13_APPLIED` se removió: estos tests corren SIEMPRE.
+
 const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
   auth: { autoRefreshToken: false, persistSession: false },
 });
@@ -1839,6 +1843,215 @@ test('animal suite — spec 02', async (t) => {
       const { data } = await admin.from('animal_category_history').select('reason').eq('animal_profile_id', tn.profile.id);
       assert.ok(data.map((r) => r.reason).includes('auto_transition'), 'cron registra auto_transition en history (RT2.8.4b)');
     }
+  });
+});
+
+// =====================================================================
+// spec 13 — Hardening (DB layer): INPUT-1 (R2), A1-1 (R6), F1-1 (R8)
+// Migraciones 0070 (CHECKs) y 0071 (animals_update with check) APLICADAS al remoto.
+// Corre como el resto de la suite (fixtures con service_role, assertions con JWT REAL de
+// un miembro del tenant escribiendo vía PostgREST directo, NO por la UI).
+// =====================================================================
+test('spec 13 — INPUT-1 / A1-1 / F1-1 (DB layer)', async (t) => {
+  let userA, userB, clientA, clientB, estA, estB, rodeoA, rodeoB;
+
+  await t.test('setup: dos campos, miembro real en cada uno', async () => {
+    userA = await createTestUser('s13_A');
+    userB = await createTestUser('s13_B');
+    clientA = await getUserClient(userA.email);
+    clientB = await getUserClient(userB.email);
+    estA = await createEstablishmentAs(clientA, `${RUN_TAG} s13_estA`);
+    estB = await createEstablishmentAs(clientB, `${RUN_TAG} s13_estB`);
+    rodeoA = await createRodeo(clientA, { establishmentId: estA, name: `${RUN_TAG}_s13_rA` });
+    rodeoB = await createRodeo(clientB, { establishmentId: estB, name: `${RUN_TAG}_s13_rB` });
+  });
+
+  // -------------------------------------------------------------------
+  // INPUT-1 (R2.1–R2.3): tope de largo server-side, muestreo por CLASE y por TIPO.
+  // Cada caso escribe vía PostgREST directo (JWT de miembro): techo+1 → 23514, y el
+  // borde `techo` → persiste (anti-falso-positivo). Cubre ≥3 tablas del refinamiento:
+  // sanitary_events.notes (notes/text), animal_events.structured_payload (jsonb/bytes),
+  // weight_events.notes (eventos). Más identidad: animal_profiles.idv (id corto),
+  // animal_profiles.notes (notas), animals.tag_electronic (id corto), establishments.name.
+  // -------------------------------------------------------------------
+  await t.test('R2: INPUT-1 CHECK rechaza techo+1 (23514) y acepta el borde — muestreo por clase', async () => {
+    // Animal de A para colgar eventos.
+    const an = await createAnimal(clientA, {
+      idv: `${RUN_TAG}_s13_idv`, sex: 'female', birthDate: daysAgo(500),
+      rodeoId: rodeoA.id, establishmentId: estA, systemId: rodeoA.systemId,
+    });
+    assert.ok(an.profile, an.error && an.error.message);
+    const profileId = an.profile.id;
+    const animalId = an.animalId;
+
+    // helper: intenta un UPDATE de una columna text de una tabla; espera 23514 si > techo.
+    async function expectTextCap(table, col, idCol, idVal, cap, label) {
+      // techo+1 → rechazo 23514.
+      {
+        const tooLong = 'x'.repeat(cap + 1);
+        const { error } = await clientA.from(table).update({ [col]: tooLong }).eq(idCol, idVal);
+        assert.ok(error, `${label}: techo+1 debería fallar`);
+        assert.equal(error.code, '23514', `${label}: debería ser check_violation (23514), fue ${error.code}`);
+      }
+      // borde `techo` → persiste.
+      {
+        const exact = 'y'.repeat(cap);
+        const { error } = await clientA.from(table).update({ [col]: exact }).eq(idCol, idVal);
+        assert.equal(error, null, `${label}: el borde (techo) debería persistir: ${error && error.message}`);
+        const { data } = await clientA.from(table).select(col).eq(idCol, idVal).single();
+        assert.equal(data[col].length, cap, `${label}: el valor de largo=techo debería estar guardado`);
+      }
+    }
+
+    // animal_profiles.notes (clase notas 4000) y .idv NO (inmutable por 0036 → usamos coat_color, id corto 64).
+    await expectTextCap('animal_profiles', 'notes', 'id', profileId, 4000, 'animal_profiles.notes');
+    await expectTextCap('animal_profiles', 'coat_color', 'id', profileId, 64, 'animal_profiles.coat_color');
+
+    // animals.tag_electronic (id corto 64; techo subido de 32→64 por decisión de Raf 2026-06-05 para
+    // acomodar los fixtures de test de ~45 chars sin perder el cap anti-abuso) — el animal aún NO tiene
+    // TAG (se creó por IDV) → NULL→valor permitido por el trigger 0036; probamos el CHECK sobre la asignación.
+    {
+      const tooLong = '9'.repeat(65);
+      const { error: e1 } = await clientA.from('animals').update({ tag_electronic: tooLong }).eq('id', animalId);
+      assert.ok(e1, 'animals.tag_electronic techo+1 (65) debería fallar');
+      assert.equal(e1.code, '23514', `animals.tag_electronic debería ser 23514, fue ${e1.code}`);
+      const exact = '9'.repeat(64);
+      const { error: e2 } = await clientA.from('animals').update({ tag_electronic: exact }).eq('id', animalId);
+      assert.equal(e2, null, `animals.tag_electronic borde 64 debería persistir: ${e2 && e2.message}`);
+    }
+
+    // establishments.name (clase nombre-de-campo 160) — escribible por owner.
+    await expectTextCap('establishments', 'name', 'id', estA, 160, 'establishments.name');
+    // restaurar nombre del campo para no romper otros asserts dependientes del nombre.
+    await admin.from('establishments').update({ name: `${RUN_TAG} s13_estA` }).eq('id', estA);
+
+    // ── Tablas del refinamiento (R2.2): sanitary_events.notes (notes), weight_events.notes (eventos) ──
+    // sanitary_events: insert mínimo, luego cap sobre notes.
+    {
+      const seId = require('node:crypto').randomUUID();
+      const { error: insErr } = await clientA.from('sanitary_events').insert({
+        id: seId, animal_profile_id: profileId, event_type: 'vaccination',
+        product_name: 'Test vaccine', event_date: daysAgo(1), notes: 'ok',
+      });
+      assert.equal(insErr, null, insErr && `sanitary_events insert: ${insErr.message}`);
+      await expectTextCap('sanitary_events', 'notes', 'id', seId, 4000, 'sanitary_events.notes');
+    }
+    {
+      const weId = require('node:crypto').randomUUID();
+      const { error: insErr } = await clientA.from('weight_events').insert({
+        id: weId, animal_profile_id: profileId, weight_kg: 320.5, weight_date: daysAgo(1), notes: 'ok',
+      });
+      assert.equal(insErr, null, insErr && `weight_events insert: ${insErr.message}`);
+      await expectTextCap('weight_events', 'notes', 'id', weId, 4000, 'weight_events.notes');
+    }
+
+    // ── jsonb por BYTES (R2.2): animal_events.structured_payload, techo 32768 bytes (octet_length) ──
+    {
+      const aeId = require('node:crypto').randomUUID();
+      const { error: insErr } = await clientA.from('animal_events').insert({
+        id: aeId, animal_profile_id: profileId, establishment_id: estA,
+        event_type: 'otro', structured_payload: { k: 'ok' },
+      });
+      assert.equal(insErr, null, insErr && `animal_events insert: ${insErr.message}`);
+
+      // payload cuyo octet_length(::text) > 32768. Un string JSON `{"k":"<N x 'a'>"}` tiene
+      // overhead fijo (~8 bytes: {"k":""}) + N bytes del valor ASCII → N=32768 ya supera 32768.
+      const bigVal = 'a'.repeat(32768);
+      const { error: tooBig } = await clientA.from('animal_events')
+        .update({ structured_payload: { k: bigVal } }).eq('id', aeId);
+      assert.ok(tooBig, 'animal_events.structured_payload techo+1 bytes debería fallar');
+      assert.equal(tooBig.code, '23514', `structured_payload debería ser 23514, fue ${tooBig.code}`);
+
+      // borde: un payload por debajo del techo persiste.
+      const okVal = 'b'.repeat(32000);
+      const { error: okErr } = await clientA.from('animal_events')
+        .update({ structured_payload: { k: okVal } }).eq('id', aeId);
+      assert.equal(okErr, null, `structured_payload < techo debería persistir: ${okErr && okErr.message}`);
+    }
+  });
+
+  // -------------------------------------------------------------------
+  // A1-1 (R6.1–R6.3): animals_update with check re-valida has_role_in.
+  // Animal cuyo ÚNICO perfil está en estB; un miembro SOLO de estA intenta UPDATE de esa
+  // fila de animals vía PostgREST directo → RLS lo bloquea (0 filas). Control positivo:
+  // el dueño del perfil (estB) SÍ puede actualizar un campo mutable.
+  // -------------------------------------------------------------------
+  await t.test('R6.1: miembro de estA NO puede UPDATE un animal cuyo único perfil está en estB (RLS)', async () => {
+    const anB = await createAnimal(clientB, {
+      idv: `${RUN_TAG}_s13_onlyB`, sex: 'female', birthDate: daysAgo(500),
+      rodeoId: rodeoB.id, establishmentId: estB, systemId: rodeoB.systemId,
+    });
+    assert.ok(anB.profile, anB.error && anB.error.message);
+
+    // userA (sin rol en estB) intenta mutar la fila de animals → 0 filas (RLS: el using no
+    // encuentra perfil del animal con has_role_in para A). .select() para contar afectadas.
+    const { data: affected, error } = await clientA
+      .from('animals')
+      .update({ sex: 'male' })
+      .eq('id', anB.animalId)
+      .select('id');
+    assert.equal(error, null, error && error.message);
+    assert.deepEqual(affected, [], 'A no debería poder actualizar el animal solo-de-B (0 filas, RLS)');
+
+    // R6.2 control positivo: B (dueño del perfil) SÍ puede actualizar un campo mutable.
+    const { data: okAffected, error: okErr } = await clientB
+      .from('animals')
+      .update({ birth_date: daysAgo(499) })
+      .eq('id', anB.animalId)
+      .select('id');
+    assert.equal(okErr, null, okErr && okErr.message);
+    assert.equal(okAffected.length, 1, 'B (con perfil del animal) debería poder actualizar');
+  });
+
+  // -------------------------------------------------------------------
+  // F1-1 (R8.1): un término con metacaracteres de .or() NO altera la estructura del filtro
+  // ni cruza columnas. Se ejecuta vía PostgREST directo replicando la sub-query parametrizada
+  // del service (.ilike(col, pattern)). Comparamos contra un término literal equivalente: el
+  // término malicioso NO debe traer filas que el literal no traería (no inyecta condición).
+  // -------------------------------------------------------------------
+  await t.test('R8.1: .ilike(col, pattern) parametrizado neutraliza filter-injection de .or()', async () => {
+    // Dos animales de A: uno con visual_id_alt que contiene texto, otro con idv distinto.
+    const aVisual = await createAnimal(clientA, {
+      visualAlt: `vaca ${RUN_TAG}_marca`, sex: 'female', birthDate: daysAgo(500),
+      rodeoId: rodeoA.id, establishmentId: estA, systemId: rodeoA.systemId,
+    });
+    assert.ok(aVisual.profile, aVisual.error && aVisual.error.message);
+    const aOther = await createAnimal(clientA, {
+      idv: `${RUN_TAG}_s13_other`, sex: 'female', birthDate: daysAgo(500),
+      rodeoId: rodeoA.id, establishmentId: estA, systemId: rodeoA.systemId,
+    });
+    assert.ok(aOther.profile, aOther.error && aOther.error.message);
+
+    // Término MALICIOSO: intenta inyectar una condición sobre idv vía sintaxis de .or().
+    // Con .ilike(visual_id_alt, `%term%`) parametrizado, el valor viaja FUERA del filtro →
+    // se busca LITERALMENTE en visual_id_alt y no matchea nada (ningún visual contiene esa basura),
+    // y NO trae la fila de aOther (no cruzó a idv).
+    const malicious = `idv.eq.${RUN_TAG}_s13_other`;
+    const { data: malData, error: malErr } = await clientA
+      .from('animal_profiles')
+      .select('id, visual_id_alt')
+      .eq('establishment_id', estA)
+      .eq('status', 'active')
+      .is('deleted_at', null)
+      .ilike('visual_id_alt', `%${malicious}%`)
+      .limit(20);
+    assert.equal(malErr, null, malErr && malErr.message);
+    const broughtOther = (malData || []).some((r) => r.id === aOther.profile.id);
+    assert.equal(broughtOther, false, 'el término malicioso NO debe traer la fila de idv (no cruza columna)');
+    assert.equal((malData || []).length, 0, 'el término malicioso (buscado literal en visual) no matchea nada');
+
+    // Control: un término LEGÍTIMO que sí está en visual_id_alt trae su fila (no rompimos la búsqueda).
+    const { data: okData, error: okErr } = await clientA
+      .from('animal_profiles')
+      .select('id, visual_id_alt')
+      .eq('establishment_id', estA)
+      .eq('status', 'active')
+      .is('deleted_at', null)
+      .ilike('visual_id_alt', `%${RUN_TAG}_marca%`)
+      .limit(20);
+    assert.equal(okErr, null, okErr && okErr.message);
+    const foundVisual = (okData || []).some((r) => r.id === aVisual.profile.id);
+    assert.equal(foundVisual, true, 'un término legítimo en visual_id_alt SÍ trae su fila (R7.5)');
   });
 });
 

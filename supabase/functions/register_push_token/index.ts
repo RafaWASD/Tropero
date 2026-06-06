@@ -6,7 +6,7 @@
 // Output: { token_id }
 
 import { handleOptions } from '../_shared/cors.ts';
-import { jsonError, jsonOk } from '../_shared/errors.ts';
+import { jsonError, jsonOk, serverError } from '../_shared/errors.ts';
 import { createAdminClient, createUserClient } from '../_shared/supabase.ts';
 import { HttpError, requireUser } from '../_shared/auth.ts';
 
@@ -73,7 +73,7 @@ Deno.serve(async (req: Request) => {
       .single();
 
     if (error) {
-      return jsonError(500, 'db_error', error.message);
+      return serverError('db_error', error);
     }
 
     return jsonOk({ token_id: data.id });
@@ -81,7 +81,6 @@ Deno.serve(async (req: Request) => {
     if (err instanceof HttpError) {
       return jsonError(err.status, err.code, err.message);
     }
-    console.error('register_push_token unexpected:', err);
-    return jsonError(500, 'unexpected', (err as Error).message);
+    return serverError('unexpected', err);
   }
 });

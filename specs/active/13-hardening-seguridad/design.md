@@ -1,35 +1,39 @@
 # Spec 13 — Hardening de seguridad (baseline) — Design
 
-**Status**: spec_ready. **Fuente de verdad**: `context.md`. **Insumo**: `progress/security_baseline_shipped.md`.
+**Status**: in_progress — reconciliado con el AS-BUILT (2026-06-05; migraciones 0070/0071/0072 + EFs desplegadas). **Fuente de verdad**: `context.md`. **Insumo**: `progress/security_baseline_shipped.md` + `progress/impl_13-hardening-seguridad.md` (as-built).
 
 > **SCHEMA/RLS-SENSITIVE → Gate 1 (`security_analyzer` modo `spec`) OBLIGATORIO** antes de la Puerta 1 humana (ADR-019). La feature agrega `CHECK`s a tablas con `establishment_id`, **recrea la policy RLS `animals_update`**, y modifica el manejo de errores y la invalidación de sesión en Edge Functions con service-role. Todo esto cae en los dominios A (authz), B (exposición), F (inyección), H (sesión) del catálogo.
 
-> **Multi-tenancy / RLS**: A1-1 (R5) recrea una policy RLS sobre `animals` (tabla global, ADR-004) cuyo aislamiento entre tenants es el punto del fix. INPUT-1 (R1) agrega CHECKs a 15 tablas, la mayoría con `establishment_id` o `animal_profile_id` (scopeadas por RLS `has_role_in`): `animal_profiles`, `animal_events`, `establishments`, `rodeos`, `rodeo_data_config`, `management_groups`, `semen_registry`, `weight_events`, `reproductive_events`, `sanitary_events`, `condition_score_events`, `lab_samples`, `sessions`, `maneuver_presets`, más `users`/`invitations`/`push_tokens` (identidad/membresía, scopeadas por self/owner). Los CHECKs son ortogonales a la RLS (se evalúan en cualquier path de escritura, también service-role), pero se menciona RLS explícitamente porque la feature **es** sobre la frontera entre tenants y el cliente attacker-controlled escribe a esas mismas tablas vía PostgREST.
+> **Multi-tenancy / RLS**: A1-1 (R5) recrea una policy RLS sobre `animals` (tabla global, ADR-004) cuyo aislamiento entre tenants es el punto del fix. INPUT-1 (R1) agrega CHECKs a 15 tablas, la mayoría con `establishment_id` o `animal_profile_id` (scopeadas por RLS `has_role_in`): `animal_profiles`, `animal_events`, `establishments`, `rodeos`, `rodeo_data_config`, `management_groups`, `semen_registry`, `weight_events`, `reproductive_events`, `sanitary_events`, `condition_score_events`, `lab_samples`, `sessions`, `maneuver_presets`, más `users`/`user_private`/`invitations`/`push_tokens` (identidad/membresía/PII de contacto, scopeadas por self/owner; `user_private` con RLS self-only por feature 14 / 0068). Los CHECKs son ortogonales a la RLS (se evalúan en cualquier path de escritura, también service-role), pero se menciona RLS explícitamente porque la feature **es** sobre la frontera entre tenants y el cliente attacker-controlled escribe a esas mismas tablas vía PostgREST.
 
 > **Offline-first**: la feature no agrega carga de datos en campo; H1-1 (R9) es relevante al modelo offline futuro (PowerSync, C4) — una sesión revocada no debe re-autorizar mutaciones encoladas. Se documenta el modelo de invalidación pensando en ese futuro, pero no se wirea PowerSync acá.
 
 ---
 
-## Numeración de migrations (COORDINACIÓN — leer antes de implementar)
+## Numeración de migrations (AS-BUILT)
 
-El as-built llega a **0058** (`0058_delete_account_rpc.sql`). Esta spec agrega **2 migrations nuevas** (INPUT-1 y A1-1). **NO** se hardcodea el número (`0059`/`0060`) en la spec: la spec 02 Tier 2 **ya reclama 0059+** y otras specs activas avanzan el as-built en paralelo. El número concreto se asigna **al implementar**, tomando el siguiente libre en ese momento.
+Esta spec agregó **3 migrations nuevas** (números reales asignados al implementar, tomando el siguiente libre):
 
-- **Dependencia de coordinación**: si en el momento de implementar otra spec ya tomó `0059`/`0060`, esta spec usa los siguientes libres. El implementer debe `Glob supabase/migrations/*.sql`, tomar el máximo y continuar. Anotar el número real en `progress/impl_13-*.md`.
-- Convención de nombres as-built: `00NN_check_text_length_caps.sql` (INPUT-1) y `00MM_animals_update_with_check.sql` (A1-1). `NN < MM` para que el orden lexicográfico respete el orden lógico, pero **son independientes** (no hay dependencia de datos entre ellas).
-- **NO se reabren** las migrations viejas (0001/0002/0019/0020/0022/0034). Todo es `ALTER`/`create or replace policy` en migrations nuevas.
+- **`0070_check_text_length_caps.sql`** (INPUT-1, R1).
+- **`0071_animals_update_with_check.sql`** (A1-1, R5).
+- **`0072_revoke_user_sessions_rpc.sql`** (H1-1, R9 — agregada en el fix-loop del reviewer al reemplazar el ban por la RPC; ver §H1-1).
+
+`0070 < 0071 < 0072` en orden lexicográfico. **0070 depende de 0068** (feature 14 / `user_private`, ya aplicada): el orden de apply es 0068 → 0070. 0071 y 0072 son independientes entre sí y de 0070 (no hay dependencia de datos). **NO se reabren** las migrations viejas (0001/0002/0019/0020/0022/0034/0036/0068). Todo es `ALTER`/`create or replace policy`/`create function` en migrations nuevas.
 
 ---
 
 ## INPUT-1 (R1, R2) — CHECKs de largo
 
-### Archivo nuevo: `supabase/migrations/00NN_check_text_length_caps.sql`
+### Archivo nuevo: `supabase/migrations/0070_check_text_length_caps.sql`
 
 Agrega un CHECK por **cada** columna de texto-libre/`jsonb` de usuario escribible por un miembro de la tabla R1.1–R1.45. La superficie es completa: barre **todas** las tablas con `grant insert/update to authenticated` + write-policy positiva (verificado vía grep — ver §Reconciliación en requirements). Dos patrones según tipo:
 
 - **`text`** → `CHECK (char_length(col) <= N)`.
 - **`jsonb`** → `CHECK (octet_length(col::text) <= N)` (tope de **bytes** del jsonb serializado; mismo patrón que `sessions.config`/`maneuver_presets.config` en 0050/0051). Aplica a `establishments.plan_limits` (16384), `rodeo_data_config.custom_config` (16384), `animal_events.structured_payload` (32768).
 
-Tablas tocadas (15): `users`, `establishments`, `invitations`, `push_tokens`, `rodeos`, `rodeo_data_config`, `animals`, `animal_profiles`, `weight_events`, `semen_registry`, `reproductive_events`, `sanitary_events`, `condition_score_events`, `lab_samples`, `animal_events`, `management_groups`, `sessions`, `maneuver_presets`.
+Tablas tocadas (15): `users` (solo `name`), `user_private` (`email`/`phone`, ver reconciliación post-feature-14), `establishments`, `invitations`, `push_tokens`, `rodeos`, `rodeo_data_config`, `animals`, `animal_profiles`, `weight_events`, `semen_registry`, `reproductive_events`, `sanitary_events`, `condition_score_events`, `lab_samples`, `animal_events`, `management_groups`, `sessions`, `maneuver_presets`.
+
+> **Reconciliación post-feature-14 (AS-BUILT)**: la feature 14 (migración 0068 `user_private_pii`, aplicada al remoto **antes** que 0070) movió `email` y `phone` de `public.users` a `public.user_private` (RLS self-only, grant `update` a `authenticated`). Por eso el as-built de 0070 pone `user_private_email_len_chk` (320) y `user_private_phone_len_chk` (32) sobre `public.user_private`, y `users` solo conserva `users_name_len_chk` (120). El conteo no cambia (−2 en `users`, +2 en `user_private` = 45/15). **Dependencia de orden de apply: 0068 → 0070** (0070 referencia `user_private`).
 
 Patrón por constraint (mitiga el riesgo de abortar la migration con datos legados, R1.46):
 
@@ -46,19 +50,22 @@ alter table public.animal_events
 alter table public.animal_events validate constraint animal_events_structured_payload_size_chk;
 ```
 
-- `not valid` + `validate constraint` separa la creación (rápida, no bloquea) de la validación (que escanea filas existentes). Si hubiera datos legados fuera de rango, el `validate` falla **visiblemente** (no corrompe silenciosamente). **Esperado**: no hay datos fuera de rango en el beta actual (single-beta, sin import masivo todavía — spec 12 sin código). El implementer puede correr un `select count(*) ... where char_length(col) > N` (o `octet_length(col::text) > N` para jsonb) de pre-check antes de migrar y abortar con mensaje claro si encuentra algo (decisión menor, documentar en el archivo).
+- **Patrón as-built (R1.46/R1.46a/R1.46b/R1.46c)** — clave conceptual: un CHECK `NOT VALID` **igual enforça todos los `INSERT`/`UPDATE` futuros**; Postgres solo saltea la validación de las **filas existentes** al crearlo. O sea, el objetivo de seguridad de INPUT-1 (capear input de usuario de acá en más, contra storage-exhaustion) se cumple con `NOT VALID` solo. El `VALIDATE CONSTRAINT` es únicamente un re-chequeo retroactivo de las filas viejas.
+  - **43 columnas limpias** → `add constraint ... not valid` + `validate constraint` (quedan validadas).
+  - **2 columnas con basura de e2e** → `add constraint ... not valid` **sin** `validate constraint` (grandfather): `animals.tag_electronic` y `reproductive_events.calf_tag_electronic` (filas legadas de e2e, tags sintéticos de fixtures `animal_test_<ts>_<rand>_<SUFFIX>` de hasta ~45 chars). Los tags reales son 15 díg FDX-B, bien bajo el tope de 64; el `NOT VALID` capea todo input futuro de esas columnas igual. Se grandfatherean (no se mutan ni se borran) las filas legadas. La **limpieza de esa data de e2e** queda como deuda en `docs/backlog.md`.
+- **Pre-check de datos legados (DO-block, R1.46c)**: cuenta las filas fuera de rango por columna y, si hay, emite `RAISE NOTICE` listando los violadores **sin abortar** (NO `RAISE EXCEPTION`). Razón: la barrera de seguridad es el CHECK `NOT VALID`, no el pre-check; abortar por basura de e2e ya grandfathereada no aportaba seguridad y bloqueaba el apply. El NOTICE deja traza visible para auditoría. El DO-block sigue contando **todas** las columnas → una violación inesperada futura en otra columna queda visible en el log (no silenciada), aunque ya no aborte. (El primer apply además abortó por la reconciliación con feature 14 — `column "phone" does not exist` —, corregido moviendo los CHECK de `email`/`phone` a `user_private`; ver §reconciliación.)
 - Para columnas que admiten `NULL` (la mayoría de las de texto-libre y todos los `jsonb` nullable), `char_length(NULL) <= N` / `octet_length(NULL) <= N` es `NULL` → el CHECK **pasa** (no rechaza NULL). Correcto (R1.47): no se vuelve la columna NOT NULL. Para `establishments.plan_limits` (`not null default '{}'`), nunca es NULL → el CHECK siempre evalúa, sin cambio de comportamiento para `{}`.
 - Naming: `<tabla>_<col>_len_chk` (text) / `<tabla>_<col>_size_chk` (jsonb bytes). Todos en un solo archivo, con un comentario de cabecera mapeando a R1.x y citando la spec.
 - Cerrar con `notify pgrst, 'reload schema';`.
 
 ### Techos (de la tabla R1, reconciliada — por clase)
 
-- **Identificadores/códigos cortos (32–64)**: `animals.tag_electronic` 32, `reproductive_events.calf_tag_electronic` 32, `animal_profiles.{idv,visual_id_alt,breed,coat_color}` 64, `lab_samples.tube_number` 64, `semen_registry.breed` 64, `establishments.plan_type` 64.
+- **Identificadores/códigos cortos (64)**: `animals.tag_electronic` 64, `reproductive_events.calf_tag_electronic` 64, `animal_profiles.{idv,visual_id_alt,breed,coat_color}` 64, `lab_samples.tube_number` 64, `semen_registry.breed` 64, `establishments.plan_type` 64.
 - **Nombres (120)**: `users.name`, `rodeos.name`, `management_groups.name`, `maneuver_presets.name`, `semen_registry.{pajuela_name,bull_name}`, `animal_profiles.entry_origin`, `sessions.work_lot_label`.
-- **Teléfono (32)**: `users.phone`.
+- **Teléfono (32)**: `user_private.phone` (movido de `users` por feature 14 / 0068 — ver reconciliación).
 - **Nombre de campo / producto / proveedor / destino / ingrediente (160)**: `establishments.name`, `semen_registry.supplier`, `sanitary_events.{product_name,active_ingredient}`, `lab_samples.lab_destination`, `push_tokens.device_id`.
 - **Provincia/ciudad (96)**: `establishments.{province,city}`.
-- **Email (320)**: `users.email`, `invitations.email`.
+- **Email (320)**: `user_private.email` (movido de `users` por feature 14 / 0068 — ver reconciliación), `invitations.email`.
 - **Token (512)**: `invitations.token`, `push_tokens.token`.
 - **Notas/resultados/interpretaciones (4000)**: `animal_profiles.notes`, `animal_events.text`, `weight_events.notes`, `condition_score_events.notes`, `sessions.notes`, `semen_registry.notes`, `reproductive_events.notes`, `sanitary_events.{result,notes}`, `lab_samples.{result,result_interpretation,notes}`.
 - **`jsonb` (bytes)**: `establishments.plan_limits` 16384, `rodeo_data_config.custom_config` 16384, `animal_events.structured_payload` 32768.
@@ -67,7 +74,7 @@ alter table public.animal_events validate constraint animal_events_structured_pa
 
 ### Decisión `tag_electronic` / `calf_tag_electronic` (R1.49)
 
-**Solo techo de largo (R1.15 = 32 para `animals.tag_electronic`; R1.29 = 32 para `reproductive_events.calf_tag_electronic`)**, NO un CHECK de formato 15 díg en esta spec. Justificación: el cliente ya valida el formato FDX-B (15 díg) como UX; agregar un CHECK rígido `~ '^[0-9]{15}$'` a nivel DB acoplaría el schema a un formato que puede variar (otros estándares de caravana, importaciones legadas, casos de migración) y arriesga rechazar datos legítimos en el import masivo futuro (spec 12). El techo de 32 corta el abuso (storage exhaustion) sin acoplar formato. La **inmutabilidad** del `tag_electronic` (que un atacante no lo reescriba) ya la cubre el trigger de A1-1/0036 (ver R5.5) — ese es el control de integridad relevante, no el formato. (`calf_tag_electronic` no tiene trigger de inmutabilidad propio: es un campo de evento que se completa al cargar el parto; solo necesita el techo de largo.)
+**Solo techo de largo (R1.15 = 64 para `animals.tag_electronic`; R1.29 = 64 para `reproductive_events.calf_tag_electronic`)**, NO un CHECK de formato 15 díg en esta spec. Justificación: el cliente ya valida el formato FDX-B (15 díg) como UX; agregar un CHECK rígido `~ '^[0-9]{15}$'` a nivel DB acoplaría el schema a un formato que puede variar (otros estándares de caravana, importaciones legadas, casos de migración) y arriesga rechazar datos legítimos en el import masivo futuro (spec 12). El techo de 64 corta el abuso (storage exhaustion; FDX-B real = 15 díg, 64 no permite payloads multi-KB) sin acoplar formato y acomoda los tags sintéticos de fixtures de test (`animal_test_<ts>_<rand>_<SUFFIX>`, hasta ~45 chars) que el tope previo de 32 rechazaba (decisión de Raf, 2026-06-05; ver §Historial de refinamiento, corrección 4). La **inmutabilidad** del `tag_electronic` (que un atacante no lo reescriba) ya la cubre el trigger de A1-1/0036 (ver R5.5) — ese es el control de integridad relevante, no el formato. (`calf_tag_electronic` no tiene trigger de inmutabilidad propio: es un campo de evento que se completa al cargar el parto; solo necesita el techo de largo.)
 
 ### Alternativa descartada (INPUT-1)
 
@@ -110,7 +117,7 @@ En `_shared/auth.ts:44` (`requireOwnerOf`), `throw new HttpError(500, 'db_error'
 
 ## A1-1 (R5, R6) — recrear `animals_update` con `with check` que re-valida `has_role_in`
 
-### Archivo nuevo: `supabase/migrations/00MM_animals_update_with_check.sql`
+### Archivo nuevo: `supabase/migrations/0071_animals_update_with_check.sql`
 
 ```sql
 -- Recrea animals_update: el with check re-afirma has_role_in sobre algún perfil del animal
@@ -165,39 +172,67 @@ Definir `SEARCH_TERM_MAX_LENGTH = 64` en un módulo de utils compartido (ej. jun
 
 ---
 
-## H1-1 (R9, R10) — invalidar sesión del target
+## H1-1 (R9, R10) — invalidar sesión del target (AS-BUILT: RPC, no ban)
+
+### Archivo nuevo: `supabase/migrations/0072_revoke_user_sessions_rpc.sql`
+
+```sql
+create or replace function public.revoke_user_sessions (target_uid uuid)
+returns void language plpgsql security definer
+set search_path = public as $$
+begin
+  -- Borra las sesiones del target → revoca sus refresh tokens de forma persistente
+  -- (mismo efecto que signOut global, pero por user id). El access-token vigente vive
+  -- hasta su exp (~1h), cubierto por RLS. `auth.sessions` con esquema explícito
+  -- (auth NO está en search_path); SECURITY DEFINER corre con el dueño (acceso a auth).
+  delete from auth.sessions where user_id = target_uid;
+end; $$;
+
+-- Blindaje de grants (lección SEC-HIGH-01 / patrón 0042/0055/0058): SECURITY DEFINER +
+-- toma target_uid → revocar de los TRES roles cliente; solo service_role la ejecuta.
+revoke all on function public.revoke_user_sessions (uuid) from public, authenticated, anon;
+grant execute on function public.revoke_user_sessions (uuid) to service_role;
+-- + smoke-check fail-closed (estilo 0055/0058): si quedara EXECUTE-able por
+--   authenticated/anon/public, la migración FALLA (logout-de-cualquiera).
+notify pgrst, 'reload schema';
+```
 
 ### Archivos a modificar: `supabase/functions/remove_member/index.ts`, `supabase/functions/change_member_role/index.ts`
 
-Tras el write de `user_roles` (después del `update active:false` en `remove_member`; después del split en `change_member_role`), invalidar la sesión del **target**:
+Tras el write de `user_roles` (después del `update active:false` en `remove_member`; después del split en `change_member_role`), invalidar la sesión del **target** invocando la RPC vía admin-client (service_role):
 
 ```ts
-// Hardening del cascarón (H1-1): RLS ya niega acceso con el rol inactivo; esto
-// revoca la sesión activa del target para no esperar al jwt_expiry (1h) y blindar
-// el caso offline futuro (C4). Fail-soft: si falla, se loguea y NO se revierte el
-// cambio de rol (la barrera primaria es user_roles.active).
+// Hardening del cascarón (H1-1): RLS ya niega acceso con el rol inactivo; esto revoca
+// la sesión activa del target de forma PERSISTENTE para no esperar al jwt_expiry (~1h) y
+// blindar el caso offline futuro (C4). Fail-soft: si falla, se loguea y NO se revierte el
+// cambio de rol (la barrera primaria es user_roles.active). No se expone el error al cliente.
 try {
-  const { error: signOutErr } = await adminClient.auth.admin.signOut(targetUserId, 'global');
-  if (signOutErr) console.error('[remove_member signOut]', signOutErr);
+  const { error: revokeErr } = await adminClient.rpc('revoke_user_sessions', {
+    target_uid: targetUserId,
+  });
+  if (revokeErr) console.error('[remove_member revoke session]', revokeErr);
 } catch (e) {
-  console.error('[remove_member signOut threw]', e);
+  console.error('[remove_member revoke session threw]', e);
 }
 ```
 
-### Modelo de invalidación (R9.3 — punto crítico, distinto de `delete_account`)
+### Modelo de invalidación (R9.3 — AS-BUILT, distinto de `delete_account` y del ban inicial)
 
-`delete_account` usa el **access token del request** para `signOut(accessToken, 'global')` porque el target **es** el caller (ver su NOTA DE IMPLEMENTACIÓN: la Auth Admin API `signOut(jwt, scope)` espera el access token, no un UUID). En `remove_member`/`change_member_role` el target es **otro** usuario y el caller (owner) **no tiene** el access token del target.
+`delete_account` usa el **access token del request** para `signOut(accessToken, 'global')` porque el target **es** el caller. En `remove_member`/`change_member_role` el target es **otro** usuario y el caller (owner) **no tiene** el access token del target, y `@supabase/supabase-js@2` **NO** expone un `signOut(userId)` (la Auth Admin API `signOut(jwt, scope)` solo acepta el access token).
 
-El implementer debe usar la API que invalida por **user id**, no por access token. Opciones a verificar contra la versión de `@supabase/supabase-js` / GoTrue del proyecto, en orden de preferencia:
-1. `auth.admin.signOut(userId, scope)` **si** la versión acepta user id (algunas versiones aceptan el id; otras solo el JWT — **verificar en implementación**, es la incógnita técnica de esta tarea).
-2. Si `signOut` solo acepta JWT: revocar los refresh tokens del target por user id (endpoint admin de GoTrue / `auth.admin.updateUserById` no revoca sesiones; la vía correcta suele ser el endpoint admin `logout` por user o invalidar sesiones — confirmar API disponible).
-3. Fallback documentado si ninguna API por-user-id está disponible en la versión actual: registrar la limitación y dejar el `active:false` como única barrera (RLS), anotando la deuda — pero esto sería **no cumplir R9**, así que solo si se confirma que la API no existe (escalar al leader antes de aceptar el fallback).
+**Historia del fix (por qué RPC y no ban)**: la implementación inicial usó `updateUserById(targetUserId, {ban_duration:'1s'})` (un ban finito y corto, asumiendo que revocaba los refresh tokens al setearlo). El reviewer + el leader lo probaron **empíricamente inefectivo**: tras el ban de 1s + 2.5s de espera, `refreshSession` con el token original **vuelve a funcionar** — el ban finito solo bloquea el refresh durante la ventana, NO revoca el refresh token de forma persistente. R9.1/R9.2 exigen invalidación **persistente**.
 
-El design **no** cierra cuál de las 3 porque depende de la versión exacta de la lib (a verificar al implementar, igual que el número de migration). Lo que sí fija: (a) apunta a `targetUserId`, NO al token del caller (R9.3); (b) fail-soft con `console.error`, sin revertir el rol (R9.4); (c) no expone el error al cliente (R9.5).
+**Mecanismo correcto (as-built)**: replicar lo que hace `signOut(global)` —que internamente borra las sesiones del usuario en `auth.sessions`, dejando los refresh tokens sin poder canjearse— pero **por user id**, vía la RPC `SECURITY DEFINER` `revoke_user_sessions(target_uid)` que ejecuta `DELETE FROM auth.sessions WHERE user_id = target_uid`. **Verificado empíricamente** (no asumido, lección del ban): sobre un user de prueba, tras el `DELETE` + 2s, `refreshSession` con el token original falla persistente con `400 Invalid Refresh Token: Refresh Token Not Found` (control PRE-DELETE: el mismo refresh devolvía sesión válida; `auth.sessions` 2 → 0). El access-token vigente del target vive hasta su `exp` (~1h), cubierto por RLS (`user_roles.active=false` niega datos en cada request) — lo que R9/R10 aceptan para un riesgo MEDIUM. El target puede re-loguear (conserva rol en OTROS campos; no es un ban permanente). Lo que el design fija: (a) apunta a `targetUserId`, NO al token del caller (R9.3); (b) fail-soft con `console.error`, sin revertir el rol (R9.4); (c) no expone el error al cliente (R9.5).
+
+**Blindaje de la RPC (crítico)**: es `SECURITY DEFINER` y toma `target_uid` → si fuera EXECUTE-able por `authenticated`/`anon`/`public`, cualquiera podría `POST /rest/v1/rpc/revoke_user_sessions {target_uid:<otro>}` y desloguear a cualquier usuario (logout-de-cualquiera / DoS de sesión). Por eso: `revoke all ... from public, authenticated, anon` + `grant execute ... to service_role` + un smoke-check fail-closed que aborta la migración si quedara invocable por un rol cliente (patrón 0042/0055/0058, lección SEC-HIGH-01).
+
+> **SPEC-MED-2 RESUELTO**: el residual del ban finito (micro-ventana de lock-out de login del target tras remove/degrade) que la implementación inicial había escalado a la Puerta humana **ya no aplica** — el `DELETE FROM auth.sessions` no banea; el target re-loguea sin ventana. No queda decisión de producto pendiente por este punto.
 
 ### Alternativa descartada (H1-1)
 
 **Bajar `jwt_expiry` global** (config.toml) para acortar la ventana. Descartada: degrada la UX de **todos** los usuarios (refresh más frecuente, peor offline) para mitigar un caso puntual, y es un cambio de config (fuera de SDD, como H2-1/CORS). La invalidación dirigida al target es quirúrgica.
+
+**Ban finito (`updateUserById` + `ban_duration:'1s'`)** — descartada tras verificación empírica: el ban finito NO revoca los refresh tokens de forma persistente (el refresh vuelve a funcionar pasada la ventana) → no cumple R9.1/R9.2. Reemplazado por la RPC `DELETE FROM auth.sessions`.
 
 ---
 
@@ -205,13 +240,14 @@ El design **no** cierra cuál de las 3 porque depende de la versión exacta de l
 
 | Acción | Archivo | Finding | R<n> |
 |--------|---------|---------|------|
-| Crear | `supabase/migrations/00NN_check_text_length_caps.sql` (45 CHECKs sobre 15 tablas; `char_length` para text, `octet_length(::text)` para jsonb) | INPUT-1 | R1 |
-| Crear | `supabase/migrations/00MM_animals_update_with_check.sql` | A1-1 | R5 |
+| Crear | `supabase/migrations/0070_check_text_length_caps.sql` (45 CHECKs sobre 15 tablas; `char_length` para text, `octet_length(::text)` para jsonb; `email`/`phone` sobre `user_private` por feature 14; 2 columnas de tag grandfathereadas `NOT VALID` sin `VALIDATE`) | INPUT-1 | R1 |
+| Crear | `supabase/migrations/0071_animals_update_with_check.sql` | A1-1 | R5 |
+| Crear | `supabase/migrations/0072_revoke_user_sessions_rpc.sql` (RPC `revoke_user_sessions(target_uid)` `SECURITY DEFINER` + grants blindados) | H1-1 | R9 |
 | Modificar | `supabase/functions/_shared/errors.ts` (helper `serverError`) | B1-1 | R3 |
 | Modificar | `supabase/functions/_shared/auth.ts` (`requireOwnerOf` 500 genérico) | B1-1 | R3.3 |
 | Modificar | 8× `supabase/functions/*/index.ts` (reemplazar 5xx crudos) | B1-1 | R3.2 |
-| Modificar | `supabase/functions/remove_member/index.ts` (signOut target) | H1-1 | R9.1 |
-| Modificar | `supabase/functions/change_member_role/index.ts` (signOut target) | H1-1 | R9.2 |
+| Modificar | `supabase/functions/remove_member/index.ts` (RPC `revoke_user_sessions` del target) | H1-1 | R9.1 |
+| Modificar | `supabase/functions/change_member_role/index.ts` (RPC `revoke_user_sessions` del target) | H1-1 | R9.2 |
 | Modificar | `app/src/services/animals.ts` (rama `.or()` parametrizada + tope término) | F1-1 | R7 |
 | Modificar | `app/app/(tabs)/animales.tsx` (`maxLength` del TextInput) | F1-1 | R7.4 |
 | Crear | constante `SEARCH_TERM_MAX_LENGTH` (utils compartido) | F1-1 | R7.3 |
@@ -222,6 +258,6 @@ El design **no** cierra cuál de las 3 porque depende de la versión exacta de l
 ## Notas para Gate 1 (`security_analyzer` modo `spec`)
 
 1. **A1-1 alcance**: el `with check == using` cierra `with check (true)` y alinea el patrón, pero el caso "co-tenant muta un animal compartido donde **sí** tiene rol" no lo bloquea ninguna policy (es acceso legítimo por diseño); la integridad del identificador la sostiene el trigger 0036 (R5.5). Confirmar que esto es suficiente o si el finding exige column-level write authz (sería scope nuevo → escalar).
-2. **INPUT-1 datos legados + cobertura completa**: el `not valid` + `validate` falla visible ante datos fuera de rango; confirmar que no rompe migraciones en entornos con datos (beta actual: sin import masivo). La cobertura es **completa** (45 columnas / 15 tablas, barrido de todas las tablas con `insert/update` a `authenticated` — resuelve SPEC-HIGH-1, Path A). Los `jsonb` (`plan_limits`, `custom_config`, `structured_payload`) usan tope de **bytes** (`octet_length(::text)`); `sessions.config`/`maneuver_presets.config` quedan fuera por estar **ya** topadas (0050/0051).
-3. **H1-1 API por-user-id**: la invalidación de sesión de un usuario que no es el caller depende de la API de GoTrue/supabase-js disponible — incógnita a verificar al implementar; si no existe API por user id, escalar antes de aceptar fallback.
+2. **INPUT-1 datos legados + cobertura completa** (AS-BUILT): el `not valid` enforça todo input futuro; el `validate` (re-chequeo retroactivo) se aplica a las 43 columnas limpias y se **omite** en las 2 columnas de tag con basura de e2e (`animals.tag_electronic` 179 filas, `reproductive_events.calf_tag_electronic` 18 filas → grandfathereadas, `NOT VALID` sin `VALIDATE`; la limpieza de esa data queda en backlog). El pre-check emite `RAISE NOTICE` (no aborta). La cobertura es **completa** (45 columnas / 15 tablas, barrido de todas las tablas con `insert/update` a `authenticated` — resuelve SPEC-HIGH-1, Path A). `email`/`phone` viven en `user_private` (feature 14 / 0068); orden de apply 0068 → 0070. Los `jsonb` (`plan_limits`, `custom_config`, `structured_payload`) usan tope de **bytes** (`octet_length(::text)`); `sessions.config`/`maneuver_presets.config` quedan fuera por estar **ya** topadas (0050/0051).
+3. **H1-1 mecanismo de invalidación** (AS-BUILT, incógnita resuelta): `@supabase/supabase-js@2` no expone `signOut(userId)`; el ban finito (`updateUserById` + `ban_duration`) se probó empíricamente inefectivo (no revoca persistente). El as-built usa la RPC `SECURITY DEFINER` `revoke_user_sessions(target_uid)` → `DELETE FROM auth.sessions WHERE user_id = target_uid` (migración 0072, grants blindados, verificada empíricamente). SPEC-MED-2 (micro-lockout del ban) RESUELTO.
 4. **B1-1 completitud**: verificar las ~32 ocurrencias (grep `jsonError(5\d\d, ...message)` + `_shared/auth.ts:44`) — ninguna debe quedar propagando `.message`.

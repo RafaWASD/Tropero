@@ -9,7 +9,7 @@
 // Output: { invitation_id, token, accept_url, expires_at }
 
 import { handleOptions } from '../_shared/cors.ts';
-import { jsonError, jsonOk } from '../_shared/errors.ts';
+import { jsonError, jsonOk, serverError } from '../_shared/errors.ts';
 import { createAdminClient, createUserClient } from '../_shared/supabase.ts';
 import { HttpError, requireOwnerOf, requireUser } from '../_shared/auth.ts';
 
@@ -85,7 +85,7 @@ Deno.serve(async (req: Request) => {
         .eq('email', email)
         .maybeSingle();
       if (privErr) {
-        return jsonError(500, 'db_error', privErr.message);
+        return serverError('db_error', privErr);
       }
 
       if (privByEmail) {
@@ -97,7 +97,7 @@ Deno.serve(async (req: Request) => {
           .eq('user_id', privByEmail.user_id)
           .limit(1);
         if (existingErr) {
-          return jsonError(500, 'db_error', existingErr.message);
+          return serverError('db_error', existingErr);
         }
         if (existingMember && existingMember.length > 0) {
           return jsonError(
@@ -118,7 +118,7 @@ Deno.serve(async (req: Request) => {
         .gt('expires_at', nowIso)
         .limit(1);
       if (pendingErr) {
-        return jsonError(500, 'db_error', pendingErr.message);
+        return serverError('db_error', pendingErr);
       }
       if (pending && pending.length > 0) {
         return jsonError(
@@ -148,7 +148,7 @@ Deno.serve(async (req: Request) => {
       .select('id')
       .single();
     if (insErr) {
-      return jsonError(500, 'db_error', insErr.message);
+      return serverError('db_error', insErr);
     }
 
     const appUrl = Deno.env.get('APP_URL') ?? 'https://app.rafq.ar';
@@ -164,7 +164,6 @@ Deno.serve(async (req: Request) => {
     if (err instanceof HttpError) {
       return jsonError(err.status, err.code, err.message);
     }
-    console.error('invite_user unexpected:', err);
-    return jsonError(500, 'unexpected', (err as Error).message);
+    return serverError('unexpected', err);
   }
 });

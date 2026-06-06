@@ -58,6 +58,10 @@ if (!SUPABASE_URL || !SERVICE_ROLE_KEY || !ANON_KEY) {
 const RUN_TAG = `edge_test_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 const PASSWORD = 'TestPassword!Aa1';
 
+// spec 13 (hardening): el bloque B1-1/H1-1 corre contra el remoto como el resto de la suite.
+// Las 8 EFs ya están REDEPLOYADAS (serverError + invalidación de sesión vía revoke_user_sessions),
+// así que el gate `SPEC13_APPLIED` se removió: estos tests corren SIEMPRE.
+
 const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
   auth: { autoRefreshToken: false, persistSession: false },
 });
@@ -1007,6 +1011,175 @@ test('Edge Functions — delete_account (T6.3)', async (t) => {
       assert.equal(vrow.deleted_at, null, 'la víctima no debería haber sido borrada');
     },
   );
+});
+
+// =====================================================================
+// spec 13 — B1-1 (R4: copy genérico en 5xx) + H1-1 (R10: invalidar sesión del target)
+// Las 8 EFs ya están REDEPLOYADAS (serverError + revoke_user_sessions). Corre como el resto.
+// =====================================================================
+
+// Helper: extrae el refresh_token de un userClient logueado.
+async function getRefreshToken(userClient) {
+  const { data, error } = await userClient.auth.getSession();
+  if (error) throw new Error(`getSession: ${error.message}`);
+  const rt = data?.session?.refresh_token;
+  if (!rt) throw new Error('getSession: sin refresh_token');
+  return rt;
+}
+
+test('spec 13 — B1-1 copy genérico (R4) + H1-1 invalidar sesión (R10)', async (t) => {
+  let owner, ownerClient, estA;
+
+  await t.test('setup', async () => {
+    owner = await createTestUser('s13_owner');
+    ownerClient = await getUserClient(owner.email);
+    estA = await createEstablishmentAs(ownerClient, `${RUN_TAG} s13_estA`);
+  });
+
+  // -------------------------------------------------------------------
+  // B1-1 (R4.1): forzar un 5xx en una EF y verificar que el body NO contiene el
+  // .message crudo del driver (ni nombres de tabla/columna/constraint/path), solo el copy
+  // genérico + code estable. Forzamos un db_error: invitar con un new_role válido pero un
+  // user_id/establishment_id que dispare un error de driver es difícil de forzar de forma
+  // estable; en su lugar verificamos la PROPIEDAD del helper de forma robusta: cualquier 5xx
+  // que devuelvan las EFs trae el copy fijo 'Error interno, probá de nuevo.' y NUNCA un
+  // fragmento de Postgres/Deno. Disparamos un db_error real en remove_member pasando un
+  // establishment_id con formato UUID inexistente NO sirve (da 403/404). En cambio, pasamos
+  // a change_member_role un new_role inválido (4xx con copy a mano) para CONFIRMAR el control
+  // negativo (el 4xx conserva su copy), y validamos la forma del 5xx con un payload que
+  // rompe el driver: un establishment_id que NO es uuid → Postgres 22P02 (invalid_text_repr)
+  // en la query de requireOwnerOf → serverError lo enmascara.
+  await t.test('R4.1: un 5xx (db_error por uuid inválido) NO filtra el .message del driver', async () => {
+    const { data, error } = await ownerClient.functions.invoke('remove_member', {
+      body: { user_id: 'not-a-uuid', establishment_id: 'also-not-a-uuid' },
+    });
+    // supabase-js expone el 5xx como error con context, o como data.error.
+    let payload = data;
+    if (error && error.context && typeof error.context.json === 'function') {
+      payload = await error.context.json();
+    }
+    assert.ok(payload?.error, 'debería traer envelope de error');
+    // El code estable se conserva.
+    assert.equal(payload.error.code, 'db_error', `code debería ser db_error, fue ${payload.error.code}`);
+    // El message es el copy genérico fijo — NUNCA el .message del driver.
+    assert.equal(
+      payload.error.message,
+      'Error interno, probá de nuevo.',
+      `el 5xx debería traer el copy genérico, trajo: ${JSON.stringify(payload.error.message)}`,
+    );
+    // Defensa extra: el body serializado no contiene rastros de schema/driver.
+    const blob = JSON.stringify(payload).toLowerCase();
+    for (const leak of ['uuid', 'invalid input', '22p02', 'syntax', 'postgres', 'pgrst', 'relation', 'column', 'select']) {
+      assert.ok(!blob.includes(leak), `el body no debería filtrar "${leak}": ${blob}`);
+    }
+  });
+
+  await t.test('R4: un 4xx con copy a mano se CONSERVA (control negativo, R3.4)', async () => {
+    const { data, error } = await ownerClient.functions.invoke('change_member_role', {
+      body: { user_id: owner.id, establishment_id: estA, new_role: 'super_admin' },
+    });
+    let payload = data;
+    if (error && error.context && typeof error.context.json === 'function') {
+      payload = await error.context.json();
+    }
+    assert.ok(payload?.error, 'debería traer envelope de error');
+    assert.equal(payload.error.code, 'invalid_input', 'el 4xx conserva su code');
+    assert.equal(payload.error.message, 'new_role inválido.', 'el 4xx conserva su copy a mano (no se tocó)');
+  });
+
+  // -------------------------------------------------------------------
+  // H1-1 (R10.1): tras remove_member, la sesión previa del target queda invalidada de forma
+  // PERSISTENTE (su refresh token anterior ya no produce sesión, porque la EF borró las filas de
+  // `auth.sessions` del target vía `revoke_user_sessions` → refresh token no canjeable).
+  //
+  // DETERMINISTA, NO timing-based (fix del reviewer #1): el mecanismo anterior (ban finito 1s)
+  // solo bloqueaba el refresh ~1s → el test era una condición de carrera (verde sólo dentro de la
+  // ventana). Ahora el DELETE de la sesión es persistente: el refresh falla SIN depender de
+  // ninguna ventana temporal. Para descartar el falso positivo, se confirma PRIMERO que el refresh
+  // FUNCIONABA antes de invocar la EF (control), y DESPUÉS que falla.
+  // -------------------------------------------------------------------
+  await t.test('R10.1: remove_member invalida la sesión del target de forma persistente (refresh revocado)', async () => {
+    const target = await createTestUser('s13_rm_target');
+    const targetClient = await getUserClient(target.email);
+    await grantOwnerRole(target.id, estA); // 2 owners → remover a uno no dispara last_owner.
+    const refreshBefore = await getRefreshToken(targetClient);
+
+    // CONTROL (descarta falso positivo): antes de remover, el refresh token SÍ produce sesión.
+    const pre = createClient(SUPABASE_URL, ANON_KEY, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
+    const { data: preRefresh, error: preErr } = await pre.auth.refreshSession({
+      refresh_token: refreshBefore,
+    });
+    assert.ok(
+      !preErr && preRefresh?.session,
+      'CONTROL: el refresh token del target DEBERÍA producir sesión ANTES de remove_member',
+    );
+    // Re-capturar un refresh token fresco (el control de arriba pudo rotar el token).
+    const refreshFresh = preRefresh.session.refresh_token;
+
+    const { data, error } = await ownerClient.functions.invoke('remove_member', {
+      body: { user_id: target.id, establishment_id: estA },
+    });
+    assert.equal(error, null, error && error.message);
+    assert.equal(data.ok, true);
+
+    // El refresh token del target ya NO produce sesión: la EF borró auth.sessions del target.
+    // Es persistente (no una ventana de ban) → no se espera ni se reintenta.
+    const fresh = createClient(SUPABASE_URL, ANON_KEY, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
+    const { data: refreshed, error: refreshErr } = await fresh.auth.refreshSession({
+      refresh_token: refreshFresh,
+    });
+    assert.ok(
+      refreshErr && !refreshed?.session,
+      'el refresh token previo del target NO debería producir sesión tras remove_member (H1-1, persistente)',
+    );
+  });
+
+  // -------------------------------------------------------------------
+  // H1-1 (R10.2): ídem tras change_member_role (degradación). Mismo patrón determinista.
+  // -------------------------------------------------------------------
+  await t.test('R10.2: change_member_role invalida la sesión del target de forma persistente (refresh revocado)', async () => {
+    const target = await createTestUser('s13_ch_target');
+    const targetClient = await getUserClient(target.email);
+    // El target empieza como field_operator (rol activo) en estA.
+    await admin.from('user_roles').insert({
+      user_id: target.id, establishment_id: estA, role: 'field_operator', active: true,
+    });
+    const refreshBefore = await getRefreshToken(targetClient);
+
+    // CONTROL: antes de degradar, el refresh token SÍ produce sesión.
+    const pre = createClient(SUPABASE_URL, ANON_KEY, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
+    const { data: preRefresh, error: preErr } = await pre.auth.refreshSession({
+      refresh_token: refreshBefore,
+    });
+    assert.ok(
+      !preErr && preRefresh?.session,
+      'CONTROL: el refresh token del target DEBERÍA producir sesión ANTES de change_member_role',
+    );
+    const refreshFresh = preRefresh.session.refresh_token;
+
+    const { data, error } = await ownerClient.functions.invoke('change_member_role', {
+      body: { user_id: target.id, establishment_id: estA, new_role: 'veterinarian' },
+    });
+    assert.equal(error, null, error && error.message);
+    assert.equal(data.ok, true);
+
+    const fresh = createClient(SUPABASE_URL, ANON_KEY, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
+    const { data: refreshed, error: refreshErr } = await fresh.auth.refreshSession({
+      refresh_token: refreshFresh,
+    });
+    assert.ok(
+      refreshErr && !refreshed?.session,
+      'el refresh token previo del target NO debería producir sesión tras change_member_role (H1-1, persistente)',
+    );
+  });
 });
 
 test('cleanup', async () => {
