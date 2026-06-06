@@ -78,3 +78,4 @@ Esto preserva el razonamiento histórico: cualquiera puede leer el ADR viejo y e
 | 021 | Plantilla de datos: catálogo global + defaults por sistema + gating | Accepted |
 | 022 | Gate de refinamiento de contexto antes de la spec (Gate 0) + política de pipeline | Accepted |
 | 023 | Workflow de diseño de frontend: componentes como deliverable + generación con guardrails | Accepted |
+| 024 | Transporte del bastón lector: contrato de ingesta de EID transport-agnóstico (multi-adaptador) | Accepted |

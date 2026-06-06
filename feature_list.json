@@ -61,16 +61,17 @@
       "id": 4,
       "name": "04-bluetooth-baston",
       "title": "Integración bastón Bluetooth (Allflex RS420)",
-      "description": "Lectura de TAG vía BLE nativo del bastón, correlación con teclado manual, modo manual de fallback.",
+      "description": "Lectura del EID (RFID FDX-B ISO 11784/11785, 15 díg) del bastón vía un CONTRATO DE INGESTA transport-agnóstico con 5 adaptadores intercambiables (ADR-024): spp-android (RS420 Bluetooth Classic SPP nativo — cubre el beta), web-serial (dev/test), manual (piso, puerta cero), mock (CI), e hid-wedge (BLE-HID keyboard-wedge para iOS sin MFi — GATED por validación física). Alimenta el find-or-create de spec 09. NO es BLE GATT: el día de campo (s20) refutó el supuesto BLE de ADR-002 (el RS420 es Classic SPP+MFi; no hay GATT abierto en stick readers).",
       "acceptance": [
-        "Cliente se conecta al bastón Allflex RS420 vía BLE.",
-        "TAG leído aparece en la pantalla en <1s.",
-        "Si bastón se desconecta, modo manual accesible en 1 tap.",
-        "Logs de eventos no bloquean flujo del operario."
+        "Todo EID de cualquier adaptador pasa por normalización + isValidTag + confirmación visual antes del commit (integridad de la declaración SENASA).",
+        "El EID leído aparece confirmado en pantalla en <1s; vibración táctil siempre + beep apagable.",
+        "Si el bastón se desconecta, la carga manual sigue accesible en 1 tap (manual-first: la app nunca se bloquea por el bastón ni el transporte).",
+        "Tres bastoneos de EIDs distintos = 3 lecturas al instante; re-escaneo del mismo EID en ~3s se ignora (no rompe la asignación masiva de spec 09 R8).",
+        "Logs de eventos de transporte no bloquean el flujo del operario."
       ],
       "sdd": true,
-      "status": "context_ready",
-      "notes": "Gate 0 PARCIAL refinado y APROBADO por Raf (sesión 18, 2026-05-29). Ver specs/active/04-bluetooth-baston/context.md. Parte NO-hardware lockeada: implementa la interfaz que spec 09 ya contractualizó (useBleStickListener / BleStickListenerProvider / useBleConnectionStatus / useBusyMode / mock); reconexión automática al bastón recordado; dedup por TAG ~3s (no rompe asignación masiva R8); feedback vibración+sonido(apagable)+visual; manual-first (la app nunca se bloquea por estado BLE). HARDWARE = BLOQUEANTE día de campo: service/characteristic UUIDs + parsing del mensaje del Allflex RS420 (nRF Connect) — sin eso compila/testea contra el mock pero no lee del device real. No bloquea pasar a context_ready; sí bloquea implementar B.3. Spec JIT (Ola 2/B.3) foldando el día de campo."
+      "status": "spec_ready",
+      "notes": "SPEC v2 REDACTADA + Puerta 1 APROBADA por Raf (2026-06-03) + Gate 1 (security modo spec) PASS, sin findings HIGH. Status flip context_ready→spec_ready (2026-06-06, terminal de coordinación). La spec se REESCRIBIÓ a v2 foldando ADR-024: el día de campo (s20, field-findings.md) + investigación de mercado (deep-research s22) REFUTARON el supuesto BLE GATT — el RS420 es Bluetooth Classic SPP+MFi, no hay GATT abierto en stick readers, y el camino abierto cross-platform es BLE-HID keyboard-wedge. ADR-024 reemplazó el adaptador BLE único por un contrato de ingesta transport-agnóstico con 5 adaptadores; context.md (Gate 0) + requirements/design/tasks v2 reconciliados. 15 requirements (R1-R15). Madurez por capa: contrato (R1-R3) + feedback (R4) + mock/wiring (R10) + interfaz StickAdapter (R11) + offline (R14) FIRMES; web-serial (R5) + manual (R7) BUILDABLES HOY sin device; spp-android (R6,R12) requiere DEV BUILD + Android (Raf compra el teléfono); hid-wedge (R8) GATED por validación física en iPhone real (ADR-024 §4); UI de conexión (R9) tentativa (design system). Reusa parser-rs420.ts (commit 9126dba) ya de-riskeado. Implementa la interfaz que spec 09 contractualizó (useBleStickListener/BleStickListenerProvider/useBleConnectionStatus/useBusyMode/mock). Track DIFERIDO (canal Facundo): autorización MFi-Allflex (SDK 2.0) para iOS sin dongle. Bridge ESP32 = solo test rig, NO producto (decisión Raf). PENDIENTE para implementar (B.3, plan.md): empezar por la capa buildable-hoy (contrato+web-serial+manual+mock+provider) → dev build Android → HID tras el gate físico. Spec JIT (Ola 2/B.3). Planes de adaptador en android-spp-impl-plan.md + web-serial-dev-harness-plan.md."
     },
     {
       "id": 5,

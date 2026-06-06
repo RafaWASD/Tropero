@@ -1,350 +1,283 @@
-# Spec 04 — Integración bastón Bluetooth (Allflex RS420) — Design
+# Spec 04 — Integración bastón lector RFID (EID) — Design
 
-**Status**: `spec_ready` (pendiente de aprobación humana — Puerta 1).
-**Fecha**: 2026-05-30.
-**Cobertura**: parte **NO-hardware**. El adaptador GATT real del RS420 queda como **stub/TODO bloqueante** (ver § "Pendiente día de campo"). Todo lo demás se construye y testea contra el **mock provider**.
+**Status**: ✅ **Puerta 1 APROBADA por Raf (2026-06-03).** Gate 1 (security, modo spec) PASS (sin findings HIGH). En implementación — empezando por la capa buildable-hoy (contrato + web-serial + manual + mock + provider/hooks).
+**Fecha**: 2026-06-03 (sesión 22+).
+**Fuente de verdad**: `requirements.md` (v2) + `context.md` (Gate 0 aprobado) + **ADR-024** (transporte). El design **respeta el contrato de ingesta de EID transport-agnóstico + los 5 adaptadores** de ADR-024; no inventa otro transporte ni lo contradice.
 
 ## Historial de refinamiento
 
-- **2026-05-30 — Creación inicial.** Design redactado a partir del `context.md` aprobado en Gate 0 (sesión 18) y de la interfaz ya contractualizada por spec 09 design.md. No redefine los tipos de spec 09 (`BleStickEvent`, `useBleStickListener`, `BleStickListenerProvider`, `useBleConnectionStatus`, `useBusyMode`): los **implementa**. Referencias: ADR-002, ADR-013, ADR-018, CONTEXT/05, CONTEXT/07.
+- **2026-06-03 — Reescritura v2 (folding ADR-024).** La v1 (2026-05-30) asumía un único adaptador **BLE GATT** (`react-native-ble-plx`) con UUIDs a confirmar el día de campo. El día de campo + la investigación de mercado lo refutaron; ADR-024 lo reemplazó por un **contrato multi-adaptador** y el `context.md` se actualizó. Esta v2 reescribe el design sobre ADR-024 + el context actualizado. Consolida (sin copiar entero) `android-spp-impl-plan.md` y `web-serial-dev-harness-plan.md`. **No redefine** los tipos de spec 09 (`BleStickEvent`, `useBleStickListener`, `BleStickListenerProvider`, `useBleConnectionStatus`, `useBusyMode`): los **implementa**.
 
 ## Relación con spec 09 (qué implementa 04, qué consume de 04)
 
-Spec 09 ya declaró los contratos. 04 los hace reales:
+Spec 09 ya declaró los contratos (su `design.md` §"Hooks y servicios de cliente" + `tasks.md` Fase 4). 04 los hace reales. **04 NO redefine ni contradice** la interfaz de spec 09 — el "contrato de ingesta" de ADR-024 es la generalización de esa interfaz a N adaptadores.
 
-| Contrato (declarado en spec 09 design.md) | Estado en spec 09 | Estado en spec 04 |
+| Contrato (declarado en spec 09) | Estado en spec 09 | Estado en spec 04 |
 |---|---|---|
-| `BleStickEvent` (tipo) | declarado | **se reusa tal cual** (no se redefine) |
-| `useBleStickListener(opts)` | stub (T1.5, nunca dispara) | **implementación real** (R1.1) |
-| `BleStickListenerProvider` | esqueleto (T4.2, monta hook stub) | **implementación real montando el hook de 04** (R1, R11) |
-| `useBleConnectionStatus()` | "a definir" (T4.2) | **definido e implementado** (R2.4, R2.5) |
-| `useBusyMode()` | "a definir" (T4.5) | **definido e implementado** (R11.3) |
-| mock provider | pedido (riesgos design.md) | **implementado** (R10) |
+| `BleStickEvent` (`tag_read` / `connection_changed`) | declarado (design §useBleStickListener) | **se reusa tal cual** (no se redefine) — R1.6, R9.4 |
+| `useBleStickListener(opts)` | stub (T1.5, nunca dispara) | **implementación real** — R10.4 |
+| `BleStickListenerProvider` | esqueleto (T4.2, monta hook stub) | **implementación real montando el adaptador según plataforma** — R10.3 |
+| `useBleConnectionStatus()` | "a definir" (T4.2) | **definido e implementado** — R9.3 |
+| `useBusyMode()` | "a definir" (T4.5) | **definido e implementado** — R10.6 |
+| `{ enableListener, disableListener }` | esqueleto (T4.2/T4.4) | **implementado** — R10.5, R10.7 |
+| mock provider (`mode='mock'` + `mockTagRead`) | pedido (riesgos design.md) | **implementado** — R10.1, R10.2 |
 | `FindOrCreateOverlay`, `useAnimalLookup`, screens | propiedad de spec 09 | **consumidos, no tocados** |
 
-**Regla de frontera**: 04 NO modifica ningún archivo de `app/src/features/animals/` (territorio de spec 09) salvo el reemplazo del stub `useBleStickListener.ts` por una reexportación que delegue en `services/ble/`. Si durante implementación se necesitara cambiar un contrato de spec 09, **parar y reportar al leader** (mismo protocolo que spec 09 con spec 02).
+**Regla de frontera.** 04 es dueña de `app/src/services/ble/*`. NO modifica los archivos de `app/src/features/animals/` (territorio de spec 09) **salvo** reemplazar el stub `app/src/features/animals/hooks/useBleStickListener.ts` por una reexportación delgada que delega en `services/ble/`, y montar el adaptador real en el `BleStickListenerProvider` que spec 09 declaró. Si durante implementación se necesitara cambiar un contrato de spec 09 (ej. la confirmación pre-commit de R2, ver Preguntas abiertas #3 de requirements), **parar y reportar al leader** (mismo protocolo que spec 09 con spec 02). El reparto exacto provider/hook entre `services/ble/` y `features/animals/` se coordina con quien implemente spec 09 Fase 4 (Preguntas abiertas #2).
 
-## Arquitectura del servicio BLE
+## Arquitectura: el contrato de ingesta + 5 adaptadores (ADR-024)
+
+La unidad de la arquitectura **no es "BLE"**: es **"un EID válido + confirmado → commit al motor find-or-create"**. Cualquier fuente que produzca un string de dígitos es un **proveedor** del mismo contrato.
 
 ```
-┌────────────────────────────────────────────────────────────────┐
-│  React Native (Expo) + TypeScript                              │
-│                                                                │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │  BleStickListenerProvider (global, montado en root)       │  │ ← spec 09 lo declara; 04 lo implementa
-│  │   · usa useBleStickListener (real, de 04)                 │  │
-│  │   · al recibir tag_read → useAnimalLookup (spec 09)       │  │
-│  │   · expone { enableListener, disableListener } (ctx)      │  │
-│  │   · expone useBleConnectionStatus() / useBusyMode()       │  │
-│  └──────────────────────────────────────────────────────────┘  │
-│                              ↓ consume                          │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │  services/ble/  (territorio de spec 04)                   │  │
-│  │   ├── stick.ts            → useBleStickListener (R1)      │  │
-│  │   ├── adapter.ts          → interface BleStickAdapter     │  │
-│  │   ├── adapter-ble-plx.ts  → adaptador REAL 🔧 stub        │  │ ← día de campo
-│  │   ├── adapter-mock.ts     → adaptador MOCK (R10)          │  │
-│  │   ├── connection.ts       → ciclo de vida / reconexión    │  │
-│  │   ├── remembered-device.ts→ persistencia bastón recordado │  │
-│  │   ├── dedup.ts            → ventana por-TAG (R4)          │  │
-│  │   ├── normalize.ts        → normalización/validación TAG  │  │
-│  │   ├── feedback.ts         → vibración + beep + visual     │  │
-│  │   ├── permissions.ts      → permisos por plataforma (R2)  │  │
-│  │   └── config.ts           → constantes (ventana, UUIDs🔧) │  │
-│  └──────────────────────────────────────────────────────────┘  │
-│                              ↓                                  │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │  Pantalla de conexión (en tab "Más", ADR-018)            │  │
-│  │   └── BleStickConnectionScreen (R3.1, R3.5, R3.6)        │  │
-│  └──────────────────────────────────────────────────────────┘  │
-│                              ↓                                  │
-│      react-native-ble-plx  (real)   |   in-memory (mock)       │
-└────────────────────────────────────────────────────────────────┘
-                               │
-                  ❌ sin red — todo local (R12)
+┌──────────────────────────────────────────────────────────────────────────┐
+│  BleStickListenerProvider (global, root)   ← spec 09 lo declara; 04 lo monta │
+│   · monta el adaptador según Platform/entorno (R10.3)                       │
+│   · al recibir tag_read confirmado → useAnimalLookup(spec 09, source='ble') │
+│   · expone { enableListener, disableListener } + useBusyMode + status       │
+└──────────────────────────────────────────────────────────────────────────┘
+                              ↓ consume
+┌──────────────────────────────────────────────────────────────────────────┐
+│  EID-INGEST CONTRACT  (services/ble/, territorio de 04)  — transport-agnóstico│
+│   normalize + isValidTag (R1)  →  dedup por-TAG ~3s (R3)                     │
+│     →  confirm visual + feedback (R2, R4)  →  BleStickEvent{tag_read} (R1.6) │
+│                                                                              │
+│   StickAdapter (interfaz común R11):                                         │
+│     connect(deviceId?) / disconnect() / onTagRead(cb) / onStatus(cb)         │
+│     / enable() / disable()                                                    │
+│       ├── adapter-spp-android   RS420 Classic SPP (react-native-bluetooth-   │
+│       │     classic). CUBRE AL BETA.        [dev build + Android]  R6,R12     │
+│       ├── adapter-hid-wedge     BLE-HID → TextInput de scan. iOS+Android sin  │
+│       │     MFi.  ⚠ GATED por validación física (ADR-024 §4)      R8          │
+│       ├── adapter-web-serial    RS420 por COM virtual (Web Serial). DEV/TEST. │
+│       │     [buildable hoy, Platform.OS==='web']                  R5          │
+│       ├── adapter-manual        carga manual (puerta cero spec 09 R1).        │
+│       │     PISO, siempre disponible. [buildable hoy]             R7          │
+│       └── adapter-mock          CI / dev sin device. [buildable hoy] R10      │
+│            ↓                                                                  │
+│   parser-rs420.ts (COMPARTIDO para streams SPP/serial; YA committeado 9126dba)│
+│       parseRs420Line / normalizeTag / isValidTag  (R1.2, R1.3, R11.4)        │
+└──────────────────────────────────────────────────────────────────────────┘
+                              ↓
+┌──────────────────────────────────────────────────────────────────────────┐
+│  Pantalla de conexión en tab "Más" (ADR-018)  + indicador global de estado  │
+│   └── StickConnectionScreen (R9) — específica por adaptador                  │
+└──────────────────────────────────────────────────────────────────────────┘
 ```
 
-**04 no introduce ninguna migración SQL ni tabla.** No toca multi-tenancy a nivel datos: el TAG se entrega como string al motor de spec 09, que ya scopea por `establishment_id` (spec 09 R10.3). El único estado persistente de 04 es el **identificador del bastón recordado**, que es estado de dispositivo (no de tenant): se guarda en almacenamiento local del device, no en la DB. Por eso **no aplica RLS a 04** (no escribe tablas con `establishment_id`).
+**Madurez de cada pieza (buildable HOY vs. dev-build vs. GATED):**
+
+| Pieza | Buildable hoy sin device | Necesita dev build / Android | GATED por hardware de test |
+|---|---|---|---|
+| Contrato de ingesta (R1–R3) | ✅ (sobre parser ya hecho) | — | — |
+| Feedback (R4) | ✅ (web Audio + visual; haptic real en device) | — | — |
+| `adapter-web-serial` (R5) | ✅ (RS420 pareado a Windows + Chrome) | — | — |
+| `adapter-manual` (R7) | ✅ | — | — |
+| `adapter-mock` (R10) | ✅ | — | — |
+| `BleStickListenerProvider` + hooks (R10) | ✅ (con mock/web-serial/manual) | — | — |
+| Interfaz `StickAdapter` (R11) | ✅ | — | — |
+| `adapter-spp-android` (R6, R12) | ❌ | ✅ `react-native-bluetooth-classic` + Android de pruebas | — |
+| Pantalla de conexión SPP (R9) | parcial (UI sí; conexión real no) | ✅ | — |
+| `adapter-hid-wedge` (R8) | ❌ (no se implementa) | — | ⚠️ **GATED** (ADR-024 §4 — iPhone real) |
+
+> **Decisión de orden de build (informa tasks.md):** primero todo lo **buildable hoy** (contrato + parser-reuse + manual + web-serial + mock + provider/hooks), que de-riskea el pipeline entero contra el RS420 real en web sin compilar nada; después **`adapter-spp-android`** (entregable del beta, requiere dev build); el **`adapter-hid-wedge`** queda como bloque GATED — no se toca hasta pasar el gate físico.
 
 ## Archivos a crear o modificar
 
-### Nuevos archivos en `app/src/services/ble/`
+### Nuevos archivos en `app/src/services/ble/` (territorio de 04)
 
 ```
 app/src/services/ble/
-├── stick.ts                  # useBleStickListener real (R1.1–R1.4)
-├── adapter.ts                # interface BleStickAdapter (R1.5)
-├── adapter-ble-plx.ts        # 🔧 adaptador real react-native-ble-plx — STUB (R1.6)
-├── adapter-mock.ts           # adaptador mock (R10)
-├── connection.ts             # máquina de estados de conexión + reconexión backoff (R2.4, R3.3, R3.4)
-├── remembered-device.ts      # persistencia del deviceId recordado (R3.2, R3.5)
-├── dedup.ts                  # deduplicación por-TAG con ventana (R4)
-├── normalize.ts              # normalización + validación del TAG (R8)
-├── feedback.ts               # vibración + beep opcional + señal visual (R5)
-├── permissions.ts            # solicitud y estado de permisos por plataforma (R2.1–R2.3)
-├── config.ts                 # constantes: DEDUP_WINDOW_MS, BACKOFF, 🔧 UUIDs placeholder
-├── types.ts                  # reexporta BleStickEvent (de spec 09) + tipos internos de 04
-└── __tests__/
-    ├── dedup.test.ts
-    ├── normalize.test.ts
-    ├── connection.test.ts
-    ├── remembered-device.test.ts
-    ├── stick.test.ts          # con adapter-mock
-    ├── feedback.test.ts
-    └── permissions.test.ts
+├── parser-rs420.ts                 # YA EXISTE (commit 9126dba) — reuso directo, NO se reescribe
+├── parser-rs420.test.ts            # YA EXISTE — tests del parser
+├── contract.ts                     # Contrato de ingesta: normalize+validate+confirm+dedup → tag_read (R1,R2,R3)
+├── dedup.ts                        # Ventana por-TAG ~3s, keyed por EID (R3)
+├── feedback.ts                     # Vibración (siempre) + beep (configurable) + señal visual (R4)
+├── feedback-pref.ts                # Persistencia local del toggle de beep (R4.3, R4.4)
+├── config.ts                       # Constantes: DEDUP_WINDOW_MS=3000, SPP_UUID, baud default (R3.4)
+├── stick-adapter.ts                # interfaz StickAdapter (R11.1)
+├── adapter-manual.ts               # puerta cero → contrato (R7)
+├── adapter-mock.ts                 # inyección de lecturas + connection (R10.1)
+├── adapter-web-serial.ts           # Web Serial (Platform.OS==='web'), reusa parser (R5)
+├── adapter-spp-android.ts          # react-native-bluetooth-classic (R6) — necesita dev build
+├── adapter-hid-wedge.ts            # ⚠ GATED — NO se implementa hasta R8.7 (placeholder documentado)
+├── remembered-device.ts            # persistencia del bastón recordado (SPP) (R6.3)
+├── permissions.ts                  # permisos por transporte (R12)
+├── connection-status.ts            # estado de conexión + useBleConnectionStatus (R9.2, R9.3)
+├── stick.ts                        # ensambla contrato + adaptador activo → useBleStickListener real (R10.4)
+└── __tests__ (junto al módulo, patrón node:test del parser)
+    ├── contract.test.ts            # normalize/validate/confirm/dedup (R1, R2, R3)
+    ├── dedup.test.ts               # mismo TAG <3s ignora; TAGs distintos pasan al instante (R3)
+    ├── adapter-web-serial.test.ts  # framing por línea + reuso parser (R5)
+    ├── adapter-mock.test.ts        # inyección + enable/disable (R10)
+    └── feedback.test.ts            # vibración siempre / beep apagable (R4)
 ```
 
-### Nuevos archivos de UI (en territorio de "Más" / settings — coordinar con shell de spec 01)
+> El `parser-rs420.ts` **es puro** (no react-native, no I/O) y corre bajo `node:test` igual que `src/utils/*`. El contrato + dedup + feedback-pref se diseñan para ser **mayormente puros** (testables sin device): la lógica de ventana, validación y selección de feedback no necesita hardware; solo la capa de transporte (adaptadores) y el efecto físico (haptic/beep nativo) lo necesitan.
+
+### Pantalla de conexión + UI (TENTATIVA — design system)
 
 ```
-app/src/features/settings/ble/        (o equivalente según el shell de "Más" de spec 01)
-├── BleStickConnectionScreen.tsx      # pantalla de conexión (R3.1, R3.5, R3.6)
-├── BleConnectionIndicator.tsx        # indicador global de estado (R9)
-└── BleSoundPreferenceToggle.tsx      # toggle apagar beep (R5.3)
+app/src/features/ble-stick/screens/         (o donde la nav de "Más" lo monte — coordinar ADR-018)
+└── StickConnectionScreen.tsx               # R9 — específica por adaptador (SPP/web-serial/HID)
+app/src/features/ble-stick/components/
+├── StickStatusIndicator.tsx                # indicador global en el chrome (R9.3)
+└── ScanInput.tsx                           # campo de scan enfocado para hid-wedge (R8.4) — GATED
 ```
 
-> Nota de frontera: la ubicación física exacta de estas pantallas en el árbol de navegación depende del shell de "Más" que monta spec 01 (B.1). 04 declara los componentes; su montaje en la tab "Más" se coordina cuando se implemente. Mismo patrón "UI tentativa hasta design system" que specs 01/02/09.
+### Modificaciones a archivos existentes (mínimas, en frontera de spec 09)
 
-### Modificaciones a archivos existentes (mínimas, sin tocar lógica de spec 09)
+- `app/src/features/animals/hooks/useBleStickListener.ts` (stub de spec 09 T1.5) → reemplazar el cuerpo stub por una **reexportación delgada** que delega en `services/ble/stick.ts`. NO cambia la firma declarada por spec 09.
+- `app/src/features/animals/providers/BleStickListenerProvider.tsx` (esqueleto de spec 09 T4.2) → montar el adaptador real según plataforma/entorno (R10.3) + implementar `{ enableListener, disableListener }` + `useBusyMode` + `useBleConnectionStatus`. Coordinar con quien implemente spec 09 Fase 4 (Preguntas abiertas #2 de requirements).
+- Config de navegación de "Más" (ADR-018): agregar la entrada a `StickConnectionScreen`.
+- `app.json` / config plugin (solo para `adapter-spp-android`): permisos Android + config plugin de `react-native-bluetooth-classic` (dev build).
 
-- `app/src/features/animals/hooks/useBleStickListener.ts` (stub creado por spec 09 T1.5) → reemplazar el cuerpo del stub por una **reexportación** del `useBleStickListener` real de `services/ble/stick.ts`. Es el único archivo de spec 09 que 04 toca, y solo para conectar el cable; la firma no cambia. Si spec 09 aún no creó ese stub al momento de implementar 04, se crea acá respetando la firma.
-- `BleStickListenerProvider`: spec 09 lo declara montando el hook stub; al implementar 04 se ajusta para montar el hook real y exponer `useBleConnectionStatus` / `useBusyMode`. Coordinar con la Fase 4 de spec 09 (T4.2) — son la misma pieza vista desde dos specs.
+**Ningún archivo de spec 01, spec 02 ni los screens/hooks de spec 09 (find-or-create) se modifica desde 04** salvo los dos puntos de frontera listados.
 
-## La interface (referenciando spec 09 — NO se redefine)
-
-`services/ble/types.ts` **reexporta** `BleStickEvent` desde el módulo de tipos de spec 09 (`app/src/features/animals/types.ts`), no lo redeclara, para que haya una sola fuente de verdad del tipo:
+## Contratos de tipos (reuso de spec 09 — NO se redefinen)
 
 ```typescript
-// services/ble/types.ts
-export type { BleStickEvent } from '@/features/animals/types';
-//  BleStickEvent =
-//    | { kind: 'tag_read', tag: string, timestamp: number }
-//    | { kind: 'connection_changed', connected: boolean }
+// Declarados por spec 09 design.md — 04 los IMPLEMENTA, no los redefine.
+type BleStickEvent =
+  | { kind: 'tag_read', tag: string, timestamp: number }
+  | { kind: 'connection_changed', connected: boolean };
+
+useBleStickListener(opts: { enabled: boolean, onTagRead: (tag: string) => void }): {
+  isConnected: boolean;
+  isListening: boolean;
+};
 ```
 
-`stick.ts` implementa exactamente la firma que spec 09 espera:
-
 ```typescript
-// services/ble/stick.ts  (firma idéntica a la declarada en spec 09 design.md)
-export function useBleStickListener(opts: {
-  enabled: boolean;
-  onTagRead: (tag: string) => void;
-}): { isConnected: boolean; isListening: boolean };
+// NUEVO en 04 — interfaz StickAdapter (R11), transport-agnóstica.
+type ConnectionStatus =
+  | 'off' | 'permission_denied' | 'scanning' | 'connecting' | 'connected' | 'disconnected';
 
-// control imperativo (R1.3, R1.4) — usado por el provider y MODO MANIOBRAS
-export function enableListener(): void;
-export function disableListener(): void;
-
-// estado de conexión (R2.4, R2.5) — implementación del hook que spec 09 deja "a definir"
-export type BleConnectionStatus =
-  | 'bluetooth_off'
-  | 'permission_denied'
-  | 'scanning'
-  | 'connecting'
-  | 'connected'
-  | 'disconnected';
-export function useBleConnectionStatus(): BleConnectionStatus;
-
-// busy mode (R11.3) — implementación del hook que spec 09 deja "a definir"
-export function useBusyMode(): { setBusy: (busy: boolean) => void; isBusy: boolean };
-```
-
-## Adaptador (`BleStickAdapter`) — punto de extensión real/mock
-
-```typescript
-// services/ble/adapter.ts
-export interface BleStickAdapter {
-  requestPermissions(): Promise<'granted' | 'denied' | 'bluetooth_off'>;     // R2
-  scan(onFound: (device: { id: string; name: string }) => void): () => void; // R3.1 (devuelve stopScan)
-  connect(deviceId: string): Promise<void>;                                   // R3.2, R3.3
+interface StickAdapter {
+  connect(deviceId?: string): Promise<void>;
   disconnect(): Promise<void>;
-  subscribeToTags(onRaw: (raw: string, ts: number) => void): () => void;      // 🔧 R1.6 — la parte GATT
-  onConnectionChange(cb: (connected: boolean) => void): () => void;
-  getConnectionState(): BleConnectionStatus;
+  onTagRead(cb: (rawOrEid: string) => void): () => void;   // stream adapters pasan línea cruda; manual/hid pasan dígitos
+  onStatus(cb: (status: ConnectionStatus) => void): () => void;
+  enable(): void;
+  disable(): void;
 }
 ```
 
-- `adapter-ble-plx.ts` — implementación con `react-native-ble-plx` (ADR-002). **`subscribeToTags` es el único método que depende del protocolo concreto del RS420** (service/characteristic UUIDs + parse del payload) → 🔧 stub hasta el día de campo. El resto de los métodos (scan, connect, permisos, connectionChange) son genéricos de `react-native-ble-plx` y **sí** se pueden escribir ahora, aunque solo se validan contra device real el día de campo.
-- `adapter-mock.ts` — implementación en memoria (R10): `subscribeToTags` se alimenta de `mockTagRead(tag)`; `onConnectionChange` de `mockConnectionChange(connected)`. Sin device.
-
-`stick.ts` selecciona el adaptador vía `config.ts` (`USE_MOCK_BLE` o entorno de test), de modo que el código consumidor (provider, MODO MANIOBRAS, spec 09) nunca distingue mock de real (R10.3).
-
-## Ciclo de vida de conexión / reconexión (`connection.ts`)
-
-Máquina de estados (alimenta `useBleConnectionStatus`, R2.4):
-
-```
-        ┌─────────────┐  BT off / sin permiso
-        │ bluetooth_off│◄──────────────────────────┐
-        │ permission_  │                            │
-        │   denied     │                            │
-        └──────┬───────┘                            │
-   permiso OK  │ + BT on                            │
-               ▼                                    │
-  ┌────────────────┐  hay bastón recordado    ┌─────┴──────┐
-  │   scanning     │─────────────────────────►│ connecting │
-  │ (pantalla conn │  (R3.3 auto, foreground) └─────┬──────┘
-  │  o auto)       │                                │ ok
-  └────────────────┘                                ▼
-         ▲                                   ┌────────────┐
-         │  back to range (backoff, R3.4)    │ connected  │
-         └───────────────────────────────────┤            │
-                                             └─────┬──────┘
-                                    desconexión    │
-                                                   ▼
-                                            ┌──────────────┐
-                                            │ disconnected │ ── auto-retry backoff (R3.4) ──┐
-                                            └──────────────┘                                │
-                                                   ▲────────────────────────────────────────┘
-```
-
-- **Recuerdo (R3.2)**: al elegir un bastón en la pantalla de conexión, se persiste `deviceId` vía `remembered-device.ts`.
-- **Auto-reconnect (R3.3)**: al boot/foreground, si hay `deviceId` recordado → `connect()` directo (sin pasar por la pantalla de conexión).
-- **Backoff (R3.4)**: ante `disconnected` con bastón recordado, reintentos con backoff incremental (ej. 1s, 2s, 4s, 8s, cap a 30s), solo en foreground (R3.8). Sin loop agresivo que drene batería.
-- **Cambiar/olvidar (R3.5)**: `forgetRemembered()` limpia el `deviceId`; vuelve al estado pre-emparejamiento.
-- **Múltiples Allflex (R3.6)**: la pantalla de conexión acumula todos los `scan` results compatibles; tras elegir, ese pasa a ser el recordado.
-- **Un bastón por dispositivo (R3.7)**: `remembered-device.ts` guarda un único `deviceId` (no una lista).
-- **Foreground-only (R3.8)**: la máquina se pausa en background y reanuda en foreground (listener de `AppState`).
-
-**Persistencia del bastón recordado (`remembered-device.ts`)**: `AsyncStorage` key `rafaq:ble:remembered_stick` → `{ deviceId, name, lastConnectedAt }`. Es estado de **dispositivo**, no de tenant; sobrevive reinicios; no se sincroniza ni va a la DB (sin RLS, sin multi-tenancy).
-
-## Deduplicación por-TAG con ventana (`dedup.ts`)
-
-- Estructura: `Map<tagNormalizado, lastEmittedTs>`.
-- Al llegar un TAG (ya normalizado por R8): si existe en el map y `now - lastEmittedTs < DEDUP_WINDOW_MS` → **descartar** (no invocar `onTagRead`). Si no, **emitir** y actualizar `lastEmittedTs`.
-- `DEDUP_WINDOW_MS = 3000` en `config.ts` (R4.4, ajustable).
-- **Por-TAG, no global** (R4.3): cada TAG tiene su propia entrada → tres TAGs distintos en sucesión emiten los tres (R4.2, clave para spec 09 R8 asignación masiva).
-- GC: limpieza periódica de entradas con `now - lastEmittedTs > 10s` para no crecer sin límite.
-
-## Feedback de lectura (`feedback.ts`)
-
-- **Vibración (R5.1)**: `expo-haptics` (`Haptics.notificationAsync(Success)` o `impactAsync`), siempre, independiente del sonido.
-- **Beep (R5.2, R5.3)**: `expo-av` (sonido corto pre-cargado) condicionado a la preferencia `bleSoundEnabled`. Preferencia persistida en `AsyncStorage` (`rafaq:ble:sound_enabled`, default `true`); toggle en `BleSoundPreferenceToggle.tsx`.
-- **Señal visual (R5.4)**: el servicio emite el evento de lectura; la UI (provider / pantalla activa) muestra la confirmación visual. 04 provee la señal; el render visual concreto lo define el design system (UI tentativa).
-- **Latencia < 1 s (R5.5)**: el feedback se dispara sincrónicamente en el callback de `onTagRead`, sin esperar el find-or-create. Objetivo medido desde la recepción de la notificación BLE.
-
-## Estados de permiso (`permissions.ts`)
-
-| Plataforma | Permisos requeridos |
-|---|---|
-| Android 12+ (API 31+) | `BLUETOOTH_SCAN`, `BLUETOOTH_CONNECT` (declarar `neverForLocation` en el manifest para evitar el permiso de ubicación) |
-| Android < 12 | `ACCESS_FINE_LOCATION` (requerido para scan BLE legacy) |
-| iOS | `NSBluetoothAlwaysUsageDescription` (Info.plist) + prompt de Bluetooth |
-
-- Flujo: `requestPermissions()` → mapea a uno de `granted | denied | bluetooth_off`.
-- `permission_denied` (R2.2): estado con CTA → `Linking.openSettings()` (deep-link a settings de la app). Nunca bloquea la carga manual.
-- `bluetooth_off` (R2.3): estado con CTA para activar BT. En Android, `requestEnable` si está disponible; en iOS, instrucción al usuario.
-- Config Expo: agregar el plugin de `react-native-ble-plx` en `app.json` / `expo` config con los permisos correspondientes (coordinar con quien tenga el lock de `app/`).
-
-## Normalización y validación del TAG (`normalize.ts`)
-
-- `normalizeTag(raw: string): string` — trim, strip de control chars/CR/LF, uppercase, formato canónico.
-- `isValidTag(tag: string): boolean` — valida contra el formato RFID esperado. **Provisional** hasta el día de campo (R8.3): el formato canónico exacto (longitud, prefijo país ISO 11784/11785, encoding) se confirma con el escaneo del RS420. Hoy se valida una forma genérica verificable con el mock.
-- Lectura malformada (R8.2): `isValidTag === false` → log + NO invocar `onTagRead` + toast opcional no bloqueante.
-
-## Provider, busy mode y suspensión por contexto
-
-`BleStickListenerProvider` (declarado por spec 09, implementado por 04):
-
 ```typescript
-const enabled =
-  !isInModoManiobrasRoute   // R11.1/R11.2 — MODO MANIOBRAS suspende (spec 09 R2.3 gobierna el alcance)
-  && !isBusy;               // R11.3 — CREATE/EDIT suspenden vía useBusyMode
-
-useBleStickListener({
-  enabled,
-  onTagRead: (tag) => {
-    // R5: feedback inmediato (vibración + beep + visual)
-    fireReadFeedback();
-    // spec 09: dispara find-or-create encima de la pantalla actual
-    triggerFindOrCreate(tag);
-  },
-});
+// NUEVO en 04 — el contrato de ingesta (R1–R3). Mayormente puro → testeable sin device.
+function ingestRawLine(line: string): { eid: string } | null;   // parseRs420Line → isValidTag (R1)
+function shouldEmit(eid: string, now: number): boolean;          // dedup por-TAG ventana ~3s (R3)
+// confirm visual + feedback (R2, R4) viven en la capa UI/provider, gated por shouldEmit.
 ```
 
-- `enableListener()` / `disableListener()` (R1.3): MODO MANIOBRAS (spec 03) los llama en `useEffect` con cleanup (contrato heredado de spec 09 T4.4). 04 provee el control; el alcance lo gobierna spec 09.
-- `useBusyMode()` (R11.3): CREATE/EDIT marcan `setBusy(true)` en mount, `setBusy(false)` en unmount → suspende el listener sin desconectar el bastón.
-- El listener "ocupado" o "en maniobras" **no desconecta** el BLE (R1.4): solo deja de invocar `onTagRead`, así la reactivación es instantánea.
+## Cómo cada adaptador entrega al contrato
 
-## Indicador global de conexión (`BleConnectionIndicator.tsx`)
+- **`adapter-spp-android`** (R6): abre el RFCOMM SPP (UUID `00001101-...`) con `react-native-bluetooth-classic`, lee líneas ASCII, pasa cada **línea cruda** a `ingestRawLine` → `parseRs420Line` descarta framing → `isValidTag`. Pairing PIN 1234 (slave), recordar device (`remembered-device.ts`), reconexión backoff (`connection-status.ts`). Baud-independiente.
+- **`adapter-web-serial`** (R5): `requestPort()` + `open({baudRate})` + `port.readable.pipeThrough(TextDecoderStream)` + framing por `\n` → cada línea a `ingestRawLine` (mismo `parser-rs420.ts`). `getPorts()` para reconectar sin re-preguntar. Solo `Platform.OS==='web'`, Chromium, contexto seguro. **Mismo pipeline que SPP detrás del contrato** — solo el transporte difiere.
+- **`adapter-manual`** (R7): el tipeo de spec 09 R1 (IDV/visual/EID) entra como un EID/identificador directo al contrato (no pasa por `parseRs420Line` — ya es el dígito limpio); `isValidTag` aplica si el tipeo es un EID. Siempre disponible, piso.
+- **`adapter-mock`** (R10): `mockTagRead(tag)` inyecta un EID ya limpio al contrato (ejercita validate+dedup+confirm+feedback sin transporte); `mockConnectionChange(connected)` ejercita el status.
+- **`adapter-hid-wedge`** (R8, **GATED**): NO es GATT, NO usa `react-native-ble-plx`. Captura **keystrokes + Enter** en un `TextInput` de scan (`ScanInput.tsx`); ensambla la línea tipeada (15 díg, quizá sin el framing del lector) → `isValidTag` la valida (R8.2). El parser de stream **no aplica** a este adaptador (R11.4). **No se implementa hasta R8.7.**
 
-- Componente que consume `useBleConnectionStatus()` (R9.1) y se actualiza reactivamente (R9.2).
-- Render: ícono + color por estado (conectado / buscando / desconectado / BT off / sin permiso). Ubicación visual concreta en el chrome = design system (UI tentativa, ADR-018).
+El **parser `parser-rs420.ts` es compartido** por los dos adaptadores de stream (SPP + web-serial) y ya está de-riskeado: solo el transporte difiere. Esto es exactamente el "dos caminos de stream con parser compartido — bajo riesgo" de ADR-024 §Consecuencias.
 
-## Mock provider (`adapter-mock.ts`)
+## Dedup, confirmación y feedback (el corazón del contrato)
 
-- Implementa `BleStickAdapter` 100% en memoria (R10.1).
-- API de test/dev (R10.2): `mockTagRead(tag)`, `mockConnectionChange(connected)`, `mockScanResult(device)`.
-- Pasa por el **mismo pipeline** que el real: dedup (R4) → normalize (R8) → feedback (R5) → `onTagRead` → `enable/disable` honrado (R10.4). Así un test con el mock ejercita la misma lógica que el device, salvo la capa GATT (que es justo lo que el día de campo cierra).
-- Selección (R10.3): toggle de dev `USE_MOCK_BLE` en `config.ts` + default en entorno de test (`jest`).
+- **Dedup (R3)** — `dedup.ts`: un `Map<eid, lastEmittedAtMs>`. `shouldEmit(eid, now)` retorna `false` si `now - lastEmittedAt[eid] < DEDUP_WINDOW_MS` (default 3000, `config.ts`, ajustable R3.4); `true` y actualiza el timestamp en cualquier otro caso. **Keyed por EID** → un EID distinto nunca espera (R3.2, habilita asignación masiva spec 09 R8). No es un cooldown global. Puro y testeable.
+- **Confirmación visual (R2)** — la UI muestra el EID legible antes del commit. Es el **mismo gate** que el feedback visual de R4 (R2.4). Para asignación masiva (spec 09 R8) la confirmación es ligera y encadenable (R2.5): no bloquea el siguiente EID distinto. **Interpretación de frontera** (Preguntas abiertas #3 de requirements): la confirmación se realiza dentro del `FindOrCreateOverlay`/flujo de spec 09 mostrando el EID antes de ejecutar el commit; si requiere cambio de contrato en spec 09, parar y reportar.
+- **Feedback (R4)** — `feedback.ts`: al confirmar un EID válido dispara `Haptics` (vibración, **siempre**, R4.1) + beep si `feedbackPref.beepEnabled` (R4.2, persistido en `feedback-pref.ts`, R4.3/R4.4) + señal visual <1s (R4.4). En web (`adapter-web-serial`): beep por Web Audio, vibración degradada en silencio (R4.5).
 
-## Offline-first
+## Conexión, estado e indicador global (R9)
 
-- Toda la cadena (permisos → scan → connect → subscribe → dedup → normalize → feedback → `onTagRead`) es **local al device** (R12.1, R12.2). No hay ninguna llamada de red en 04.
-- El find-or-create posterior lo resuelve spec 09 contra PowerSync local (spec 09 R11). 04 solo entrega el string del TAG.
+- `connection-status.ts` modela `ConnectionStatus` y expone `useBleConnectionStatus()` (R9.3). Cada cambio emite `BleStickEvent{connection_changed}` (R9.4).
+- **`StickConnectionScreen`** (R9.1, en "Más"/ADR-018) es **específica por adaptador**: SPP lista/elige/olvida dispositivos (R6.2, R6.6); web-serial hace `requestPort` + lista `getPorts` (R5.2, R5.4); HID muestra instrucción de parear el teclado en el SO + el campo de scan (R8.3, R8.4 — GATED).
+- **`StickStatusIndicator`** (R9.3) en el chrome, alimentado por `useBleConnectionStatus`. Estados con CTA: apagado / permiso denegado / buscando / conectado / desconectado (R9.2). **Todos no bloqueantes** — la carga manual anda en cualquiera (R9.6, R7.2).
+- Reconexión automática con backoff donde el adaptador lo soporta (SPP, web-serial) — R9.5. Foreground-only en MVP (R6.9).
 
-## Logging (`config.ts` / logger compartido)
+## Permisos por transporte (R12)
 
-- Eventos de ciclo de vida BLE (connect/disconnect/retry/malformed) → logger diagnóstico (no bloqueante, R13.1).
-- Errores GATT/scan/timeout (R13.2): capturados, logueados, reflejados en `useBleConnectionStatus()`, sin propagar excepciones a la UI.
+| Adaptador | Permisos | Build |
+|---|---|---|
+| `spp-android` | Android 12+: `BLUETOOTH_SCAN` + `BLUETOOTH_CONNECT` (`neverForLocation`); <12: `BLUETOOTH`/`BLUETOOTH_ADMIN` + location | **dev build** (`react-native-bluetooth-classic`, Expo Go no sirve) — R12.2 |
+| `hid-wedge` (GATED) | **ninguno de app** (teclado del SO) — R12.3 | — |
+| `web-serial` | permiso del **navegador** (gesto `requestPort()`) — R12.4 | `pnpm web`, Chromium, contexto seguro |
+| `manual` | ninguno | cualquiera |
+| `mock` | ninguno | CI / dev |
 
-## Pendiente día de campo (🔧 BLOQUEANTE — CONTEXT/05, CONTEXT/07)
+Permiso denegado → estado `permission_denied` con CTA (R9.2) + carga manual operativa (R12.5, R7.2). Nunca bloquea.
 
-> **Esta es la frontera del refinamiento parcial.** Todo lo de arriba se construye y testea contra el mock **ahora**. Lo de abajo se cierra el día de campo y se folda antes de implementar la parte real (Ola 2 / B.3 del plan). Hasta entonces, `adapter-ble-plx.ts` compila con stubs marcados `// TODO(día de campo)` y los tests corren contra `adapter-mock.ts`.
+## BLE / protocolo (lo que pide `docs/specs.md` cuando toca BLE)
 
-1. **Service / characteristic UUIDs del Allflex RS420** (🔧 R1.6) — escanear el RS420 con **nRF Connect** (CONTEXT/05). Identificar el service que expone el bastón y la characteristic de NOTIFY que transporta el TAG. Completar `config.ts` (placeholders `RS420_SERVICE_UUID`, `RS420_TAG_CHAR_UUID`) y `adapter-ble-plx.ts.subscribeToTags`.
-   - Nota: el RS420 transmite vía **Bluetooth nativo** (BLE), distinto del bridge ESP32 Nordic UART del Vesta (ese es spec 05, balanza). No asumir que el RS420 usa Nordic UART; **confirmar UUIDs reales con nRF Connect**.
-2. **Formato del mensaje del TAG** (🔧 R8.3) — del mismo escaneo, capturar un payload real al bastonear un tag conocido. Derivar encoding/longitud/estructura (ASCII vs binario, ISO 11784/11785, prefijo país). Completar `normalize.ts.normalizeTag` / `isValidTag` con el formato canónico real.
-3. **Señal de "lectura fallida"** (🔧 R7.2) — confirmar si el RS420 emite algo a nivel protocolo cuando se acciona sin detectar tag. **Default asumido**: no emite → no-read silencioso (R7.1). Si emite → folder un evento de no-read manejable.
-4. **Battery Service (nice-to-have, hardware-dependiente)** — verificar si el RS420 expone el Battery Service estándar `0x180F`. Si sí → low-battery warning en el indicador. Si no → se omite (no es requirement numerado).
+- **Transporte**: NO es BLE GATT (refutado, ADR-024). `spp-android` = Bluetooth **Classic SPP** (RFCOMM, UUID `00001101-0000-1000-8000-00805F9B34FB`); `hid-wedge` = **BLE-HID** (perfil teclado del SO, no GATT); `web-serial` = COM virtual del SPP por `navigator.serial`.
+- **Protocolo del stream RS420** (caracterizado en campo, `field-findings.md`): ASCII, 1 línea por lectura, `[STX ~0x02] + "1000000" + <EID 15 díg> + <YYMMDDHHMMSS 12 díg>` terminado en `\n` (a veces `\r\n`). Ya parseado por `parser-rs420.ts` (regex anclada `/^1000000(\d{15})\d{12}$/`, descarta framing y timestamp; nunca tira).
+- **Ventana de correlación**: 04 NO correlaciona EID↔peso (eso es spec 05, fuera de alcance). 04 usa el **timestamp del teléfono** en la ingesta (R1.5); el del lector se descarta en el parser.
+- **Fallback manual**: `adapter-manual` siempre disponible, 1 tap, mismo contrato (R7).
 
-**Puerta del día de campo**: hasta cumplir (1)+(2), la lectura del **device real** no funciona, aunque el resto de la feature sí (contra mock). El implementer marca esta puerta en `tasks.md` Fase 4.
+## Offline-first (`docs/specs.md` — feature que carga datos en campo)
+
+**Offline-first no es opcional** (CLAUDE.md principio 3): el peón en la manga no tiene señal. La conexión bastón↔teléfono es **local** (BLE Classic / serie / HID), no requiere internet (R14). El find-or-create disparado por el `tag_read` corre contra **PowerSync local** (spec 09 R11.3, T5.2). Ningún paso del contrato de ingesta (normalizar, validar, dedup, confirmar, feedback, emitir) toca la red (R14.2). La sync de las mutaciones resultantes la maneja spec 09 (cola PowerSync).
+
+## Multi-tenancy / RLS
+
+04 **no introduce tablas nuevas ni RLS nueva**: no toca la DB. El EID que 04 emite lo procesa el motor find-or-create de spec 09, que ya scopea por `establishment_id` activo (spec 09 R10) y se apoya en las policies RLS de spec 02 R11 como red de seguridad final. 04 solo entrega el `tag_read`; el aislamiento multi-tenant es responsabilidad del consumidor (spec 09 R10.3: el listener es consciente del establishment activo). **Nota de frontera**: 04 no debe asumir un establishment; pasa el EID crudo y deja que spec 09 lo resuelva contra el establishment del context.
+
+## Estados de PowerSync / Edge Functions
+
+- **PowerSync**: 04 no agrega buckets ni sync rules. Consume indirectamente (vía spec 09) la copia local. Sin cambios.
+- **Edge Functions**: ninguna. 04 es 100% cliente (transporte + contrato de ingesta). No hay backend nuevo.
 
 ## Alternativa descartada
 
-### Adaptador BLE acoplado directo (sin interface `BleStickAdapter`), parseando el RS420 inline en `stick.ts`
+### A — Un único adaptador BLE GATT con `react-native-ble-plx` (la v1 de esta spec)
+
+**Era la dirección de la v1** (2026-05-30) y de ADR-002: un solo adaptador GATT, descubrir service/characteristic del RS420 por UUID, suscribirse a notificaciones.
 
 **Pros**:
-- Menos archivos: `stick.ts` habla `react-native-ble-plx` directo.
-- Menos indirección para una sola marca de bastón (Allflex) en MVP.
+- Encaja con ADR-002 sin fricción (un solo transporte, un solo módulo nativo ya elegido).
+- Menos superficie: un adaptador en vez de cinco.
 
-**Contras**:
-- **Imposibilita testear sin device**: sin la interface, no hay dónde inyectar el mock; toda la lógica de dedup/normalize/feedback quedaría atrapada detrás de una capa BLE que solo corre en un teléfono con un Allflex en mano. Spec 09 explícitamente pidió un mock provider para su CI (no se puede romper eso).
-- **Mezcla la parte bloqueante con la no-bloqueante**: el contexto manda separar lo construible-ahora (todo el comportamiento) de lo que espera el día de campo (los UUIDs + parsing). Con todo inline, la parte no-hardware quedaría rehén del hardware — exactamente lo que el refinamiento parcial busca evitar.
-- **Mata la extensibilidad**: el día de mañana habrá otros bastones/balanzas (CONTEXT/05 ya anticipa fuentes de peso pluggables). La interface `BleStickAdapter` es el mismo patrón "fuente pluggable" aplicado al bastón.
+**Contras (por qué se descartó — ADR-024)**:
+- **Refutado por evidencia de campo + mercado**: el RS420 es Bluetooth **Classic SPP + MFi**, NO expone GATT (no aparece en nRF Connect aunque esté pareado). `react-native-ble-plx` (BLE-only) **no puede comunicarse con el RS420**. La premisa era falsa.
+- Ningún stick reader de ganado expone GATT abierto (Allflex AWR300 = Classic; Gallagher HR5 = app propia; Tru-Test XRS2 = Data Link). Construir sobre "uso GATT y anda en ambos OS" habría sido construir sobre arena.
+- No habría cubierto **iOS** (la barrera real es MFi/HID, no GATT) ni el beta (que tiene un RS420 Classic).
 
-**Razón**: la interface `BleStickAdapter` con implementaciones real/mock intercambiables es lo que permite (a) cumplir el requisito de spec 09 de testear el stack completo sin hardware, (b) aislar la única parte bloqueante (el `subscribeToTags` real + parsing) en un único método stub, y (c) extender a otros bastones después. El costo (una interface + dos archivos) es marginal. Esta es la dirección elegida.
+**Razón**: la abstracción correcta no es "BLE" sino "un EID es texto" — un **contrato de ingesta** con N transportes como proveedores (ADR-024, veredicto del LLM Council). El multi-adaptador es resiliente al fabricante y al transporte, deja iOS como first-class vía `hid-wedge`, cubre el beta con `spp-android`, y permite desarrollar hoy con `web-serial`/`mock`. Si mañana aparece un lector con GATT abierto real, se suma un `adapter-ble-gatt` **sin tocar el contrato** (R11.3). Esta es la dirección elegida.
+
+### B — Bastón que bufferea offline y se descarga en batch (`adapter-batch-dump`)
+
+Documentada en ADR-024 §Alternativas: el RS420 almacena sesiones; "bastoneás sin teléfono, volcás la sesión después" disolvería el problema de transporte-en-vivo-iOS y la ergonomía de sostener el teléfono en la manga. **No se adopta para el MVP** (pierde el feedback en vivo que es parte del pilar manga-friendly; rompe la correlación EID↔peso en vivo de spec 05). Queda anotado como **proveedor candidato del contrato** (`adapter-batch-dump`, R11.3) — se evalúa si el gate físico del HID (R8.7) falla o si la ergonomía de campo lo exige.
 
 ## Riesgos y mitigaciones
 
 | Riesgo | Mitigación |
 |---|---|
-| El protocolo real del RS420 difiere de lo asumido (no es BLE GATT estándar, payload binario raro) | Toda la lógica no-hardware está aislada del adaptador; el día de campo solo se completa `subscribeToTags` + `normalize`. El blast radius del descubrimiento queda confinado a 2 archivos (`adapter-ble-plx.ts`, `normalize.ts`). |
-| Reconexión agresiva drena batería en campo | Backoff incremental con cap (R3.4) + foreground-only (R3.8) + sin polling. |
-| Dedup global rompería la asignación masiva (spec 09 R8) | Dedup explícitamente **por-TAG** (R4.3), validado con test de 3 TAGs distintos seguidos. |
-| Permisos denegados dejan al operador trabado | Manual-first (R6): la app nunca se bloquea por BLE; manual en 1 tap (R6.2). |
-| Lectura malformada dispara un find-or-create basura | `isValidTag` filtra antes de `onTagRead` (R8.2). |
-| El listener pisa un form CREATE/EDIT en curso | `useBusyMode` suspende el listener durante formularios (R11.3). |
-| Feedback se demora esperando el find-or-create | El feedback se dispara sincrónicamente en `onTagRead`, antes del lookup (R5.5). |
+| El `adapter-hid-wedge` es frágil en RN/iOS (foco, autocorrección, supresión de teclado) | **GATED** (R8.7): no se implementa hasta el gate físico de ADR-024 §4. El contrato sobrevive sin él (los otros 4 adaptadores siguen). |
+| El camino BLE-abierto barato en AR sin probar (genéricos Montetech/Smart LFID) | No se compromete hardware: `adapter-manual` es el piso siempre. El gate físico (R8.7) valida antes de recomendar hardware. |
+| Firmware RS420 desactualizado → la trama SPP podría cambiar tras actualizar | `parser-rs420.ts` tolera `\r`/STX por `normalizeTag`; re-capturar y revalidar el parser si Raf actualiza el firmware (Preguntas abiertas #5). |
+| EID con un dígito corrupto → declaración SENASA incorrecta (10 días hábiles) | **Confirmación visual pre-commit (R2)** + `isValidTag` (R1.3) en el contrato. Lectura malformada se descarta + loguea, no rompe el flujo (R1.4). |
+| Listener captura un TAG mientras hay un form CREATE/EDIT abierto, pisando el form | `useBusyMode()` (R10.6): el provider no dispara nuevo flujo mientras un form está activo. |
+| Reparto de archivos provider/hook entre `services/ble/` y `features/animals/` (territorio spec 09) | Frontera explícita + coordinar con spec 09 Fase 4 (Preguntas abiertas #2). 04 solo reexporta el stub y monta el adaptador; no toca los screens. |
+| Dev build con `react-native-bluetooth-classic` incompatible con Expo SDK 56 | Vetar el config plugin / prebuild manual antes de implementar `adapter-spp-android` (Pendientes del context; tasks T-SPP.0). |
 
 ## Dependencias del spec
 
-- **Spec 09** (BUSCAR ANIMAL): aprobada. Declara la interface que 04 implementa (`BleStickEvent`, `useBleStickListener`, provider, `useBleConnectionStatus`, `useBusyMode`, mock provider). 04 consume su motor find-or-create y sus screens; **no** los modifica.
-- **Spec 03** (MODO MANIOBRAS): pending. Consume `disableListener`/`enableListener` para suspender el listener global dentro de su wizard. 04 provee el control.
-- **Spec 01** (identity/multi-tenancy): el shell de "Más" (ADR-018) hospeda la pantalla de conexión y el indicador global. Coordinar el montaje cuando spec 01 frontend (B.1) exista.
-- **ADR-002** (react-native-ble-plx): ✅ accepted. Stack BLE.
-- **ADR-013** (frontend stack): ✅. expo-haptics / expo-av / AsyncStorage.
-- **ADR-018** (estructura de navegación): ✅ accepted. Listener global = no es tab; pantalla de conexión en "Más"; bastoneo dispara find-or-create encima de la pantalla actual.
-- **ADR-003** (BLE Nordic UART): aplica al **bridge del Vesta (spec 05)**, NO al RS420. El RS420 usa su propio protocolo BLE nativo, a descubrir el día de campo. No asumir Nordic UART para el bastón.
-- **CONTEXT/05** (hardware): protocolo del bastón a confirmar con nRF Connect.
-- **CONTEXT/07** (día de campo): pendientes bloqueantes listados.
+- **ADR-024** (transporte): Accepted. **Fuente de verdad** — el design lo respeta al pie (contrato + 5 adaptadores, beta = SPP-Android + manual, HID GATED, MFi diferido a Facundo).
+- **spec 09** (`buscar-animal`): declara la interfaz que 04 implementa. 04 reemplaza el stub T1.5 y monta el provider real. No redefine ni contradice.
+- **spec 03** (`modo-maniobras`): consumidor; usa `enableListener`/`disableListener` + busy-mode (R10.5, R10.7). Sin cambios desde 04.
+- **`parser-rs420.ts`** (commit `9126dba`): reuso directo. NO se reescribe.
+- **ADR-002** (stack): amendado por ADR-024 (`react-native-ble-plx` vale para el bridge Vesta BLE, no para el RS420). 04 usa `react-native-bluetooth-classic` (SPP) + Web Serial + captura HID, no GATT.
+- **ADR-018** (navegación): pantalla de conexión en "Más"; listener global (no es tab).
+- **CONTEXT/05** (hardware), **CONTEXT/07** (día de campo): timestamp del teléfono, no-read silencioso, pendientes.
 
 ## Notas para el implementer
 
-- 04 **no** introduce migraciones SQL, tablas, RLS ni Edge Functions. Todo es cliente.
-- No tocar `app/src/features/animals/` salvo reemplazar el stub `useBleStickListener.ts` por la reexportación al real (única integración). Si hace falta más, **parar y reportar al leader**.
-- Construir y testear **todo** contra `adapter-mock.ts` primero. El `adapter-ble-plx.ts` real se completa el día de campo (los `// TODO(día de campo)` marcan los huecos).
-- Validaciones de cliente espejo del comportamiento esperado; la latencia de feedback < 1 s es un objetivo medible (R5.5).
+- Leer `context.md` + ADR-024 + `field-findings.md` + spec 09 design/tasks (Fase 4) **antes** de empezar. Mandatorio entender que el transporte NO es GATT.
+- **Reuso obligatorio de `parser-rs420.ts`** — no reimplementar el parseo del stream. Los streams (SPP/serial) van al mismo parser.
+- **No redefinir los tipos de spec 09** (`BleStickEvent`, etc.) — implementarlos.
+- **No tocar los screens de find-or-create de spec 09** — solo reexportar el stub y montar el adaptador en el provider declarado (coordinar Fase 4).
+- El `adapter-hid-wedge` **NO se implementa** hasta R8.7 (gate físico). Dejar el archivo como placeholder documentado, sin lógica activa.
+- Patrón de tests del parser (`node:test`, módulos puros) para el contrato/dedup/feedback-pref. Adaptadores con device → test manual en device real + mock en CI.
 - Commits en español, presente, descriptivo.
+- Si aparece la necesidad de cambiar un contrato de spec 09 (ej. confirmación pre-commit R2), **parar y reportar al leader** — no parchear desde 04.
 
 Ver `tasks.md` para el plan de ejecución paso a paso.
+</content>

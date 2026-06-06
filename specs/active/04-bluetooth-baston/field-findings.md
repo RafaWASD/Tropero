@@ -146,6 +146,46 @@ Veredicto (4/5 + chairman): **NO.** No montar un negocio de hardware (FCC/SIG, I
 - **SDK embebido:** probablemente NO saltea a Allflex (la app de RAFAQ igual declara el protocol string → necesita autorización). Acelera el código, no la autorización.
 - **3 preguntas pendientes a soporte Serialio** (support@serialio.com): ¿el SDK exime de la autorización MFi?; mecanismo iOS del wedge; soporte RN + precio.
 
+## Sesión 22 (2026-06-02) — investigación de mercado: ¿existe un BLE-abierto barato en AR? (deep-research, verificado)
+
+> Disparada por Raf **antes de decidir el ADR de transporte**: validar la premisa "existen bastones BLE genéricos baratos (~USD 100-300) que andan en iOS+Android sin MFi". Harness deep-research: 6 ángulos, 23 fuentes (mayoría primarias = manuales/páginas de fabricante), 98 claims → 25 verificados con voto adversarial 3-votos. **Material verificado; la conclusión "no existe barato" es ausencia-de-evidencia, NO prueba de inexistencia.**
+
+### Hallazgo principal (alto, 3-0): EXISTE un transporte abierto sin MFi — **BLE-HID / keyboard-wedge**
+El camino abierto cross-platform real **NO es GATT**: es **BLE-HID (keyboard-wedge)**. El lector parea como un **teclado Bluetooth** (ej. nombre `380-HID`) y **tipea el EID en el campo de texto que tenga el foco** — sin app propietaria, sin MFi/iAP, en **iOS Y Android**. Documentado **textual** en manuales de **AgriEID** (BT Ultra, Smart, Ext) y en la KB de **Datamars/Tru-Test** (XRS2i/XRS2/SRS2i/SRS2: "HID mode ... acts as a keyboard wedge ... works with Windows, Apple and Android"). Corroboración independiente: AgriWebb. Prueba de que parea nativo en iOS sin MFi: el side-effect documentado de que **HID suprime el teclado en pantalla de iOS** (AgriEID agregó un modo "IHID" para soltarlo) — eso solo pasa porque BLE-HID es un perfil de teclado **nativo** de iOS.
+
+### Implicación arquitectónica (importante para spec 04 + ADR)
+BLE-HID **NO es** una suscripción GATT que leas con `react-native-ble-plx`. Es **input de teclado del SO** que cae en un `TextInput` enfocado. Integrarlo = **capturar las teclas + el terminador (Enter) en un campo de "scan" y parsear**, NO suscribir una característica. → El `StickAdapter` se **ensancha**: además del adaptador-stream (SPP Android / GATT), aparece un **adaptador keyboard-wedge** (capturar+parsear `TextInput`). El `parser-rs420` line-parser aplica al stream SPP; el HID necesita su propia captura (los HID suelen tipear 15 díg + Enter, a veces con prefijo). **Bonus**: el keyboard-wedge ES la "puerta cero" (carga manual) potenciada por el bastón — no hay módulo nativo, anda en ambas plataformas, cero MFi.
+
+### Tag standard NO es restricción (alto, 3-0)
+Todos los lectores abiertos leen **FDX-B + HDX, ISO 11784/11785 @ 134.2 kHz** = exactamente la caravana oficial bovina AR. Compatibilidad de tag universal, no diferencia.
+
+### El precio mata al device-abierto-verificado (alto, 3-0)
+El más barato con transporte abierto **confirmado** = **AgriEID BT Ultra** a **USD 595 (sale) / 795 (regular)** directo AU/USA, **2-2.65x sobre el techo de USD 300**, sin distribuidor AR ni listing en MercadoLibre AR. Datamars 'i' (XRS2i/SRS2i) = USD 700-1000+, flagship, sin presencia AR verificada. **El device abierto que existe NO es el device barato que pedíamos.**
+
+### Los genéricos baratos: transporte NO verificable (ausencia-de-evidencia)
+- **SÍ hay listings AR** de genéricos baratos en las fuentes: **Montetech ME-BL01** (MercadoLibre AR, omconsultora.com.ar), **Smart LFID** (agronext.com.ar), **"Traza 2 Pro"** (donagro.com.ar), multifrecuencia HDX/FDX-B (kitvet.com.ar). **PERO** todos describen solo "Bluetooth"/"Bluetooth 4.0" **sin** distinguir perfil (GATT/HID/SPP/Classic) y **sin** SDK ni protocolo de terceros → **el transporte abierto NO se pudo confirmar ni descartar**. Quedan **no-verificados**, no confirmados-ausentes.
+- **SEIKO SRA02**: descalificado por categoría — es un **handheld Android autónomo** (corre apps EN el device), no un periférico BLE que alimente un teléfono externo.
+- **SPP de AgriEID** = **Classic + app-locked** (PIN 000000, requiere la app propietaria) → falla iOS sin MFi, NO es ruta abierta. Solo BLE-HID lo es.
+
+### Conclusión (confianza media — ausencia de evidencia)
+A precio/disponibilidad verificados, **NO existe en la evidencia** un stick genérico barato (USD 100-300), BLE-abierto, iOS+Android, comprable en AR hoy. La ruta abierta (BLE-HID) es **real y sin MFi** pero confirmada solo en devices USD 595+ sin canal AR. Los baratos que SÍ están en AR no pudieron verificarse. **Premisa parcialmente falseada**: "BLE-HID abierto existe" = VERDADERO; "barato + abierto + en AR" = NO PROBADO. El RS420 del beta (Classic+MFi) **no se beneficia** del hallazgo HID — sigue siendo Android-SPP o MFi.
+
+### Test de falsación que queda (ahora barato y concreto)
+El test decisivo ya NO es vago ("¿hace GATT?"). Es físico y nítido: **comprar UN genérico AR (Montetech ME-BL01 / Smart LFID) y verificar si parea como TECLADO Bluetooth y tipea el EID de 15 díg + Enter** en un `TextInput`, en iPhone y Android. Si sí → existe el camino barato+abierto+AR. Si no → la ruta abierta obliga a importar un AgriEID USD 595+, lo que cambia la economía de "recomendar hardware compatible".
+
+### Preguntas abiertas (del research)
+- ¿Montetech ME-BL01 / Smart LFID hacen BLE-HID? (no resuelto por web; los listings solo dicen "Bluetooth").
+- ¿Algún lector expone un GATT abierto (Nordic UART) para un stream parseable real vía `react-native-ble-plx`, a cualquier precio?
+- ¿Qué tan confiable es el keyboard-wedge en un `TextInput` de RN en iOS (con supresión de teclado) y Android, en la práctica?
+- Costo landed real en AR (aranceles+flete+IVA) de un AgriEID BT Ultra / Datamars SRS2i.
+
+### Fuentes clave (sesión 22)
+- AgriEID BT Ultra — manual (Shopify CDN PDF) + páginas US/AU; AgriEID Quick Start NLIS; AgriEID Ext; AgriEID support.
+- Datamars/Tru-Test KB "Scanning EIDs onto Windows/Apple/Android" (HID keyboard-wedge cross-platform).
+- Listings AR: omconsultora.com.ar (ME-BL01), MercadoLibre AR (Montetech), agronext.com.ar (Smart LFID), donagro.com.ar (Traza 2 Pro), kitvet.com.ar (multifrecuencia).
+- Control negativo: SEIKO SRA02 (handheld Android), animal-microchip.com (genérico "Bluetooth" sin perfil), Agrident AWR250 (Android/Windows, sin iOS).
+- Reporte completo del harness: task `w2cmuc5m0` (output en `tasks/`).
+
 ## Fuentes
 - Manual RS420 Rev. 2.5 (allflex.global)
 - Serialio — "Connect Allflex Stick Reader To iOS" (serialio.com)
