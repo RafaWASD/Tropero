@@ -33,13 +33,13 @@
 
 ### 1.2 Backend (delta mínimo)
 
-| Migration (número TBD-al-implementar, **≥ 0073** — el as-built en disco llega a `0072`) | Qué hace | Cubre |
+| Migration (**as-built**: `0073`/`0074`, aplicadas al remoto — el as-built en disco llegaba a `0072`) | Qué hace | Cubre |
 |---|---|---|
-| `00NN_import_log.sql` | Tabla `import_log` (audit) + RLS scoped por establishment + trigger `imported_by` forzado + CHECK `octet_length` de `error_details`. | R11 |
-| `00NN_import_rodeo_bulk_rpc.sql` (**FIRME** — Puerta 1 D2 = Escenario B, ver §6) | RPC `import_rodeo_bulk` `SECURITY DEFINER` que re-valida `has_role_in` owner/vet + rodeo∈establishment, setea establishment_id/created_by/imported_by server-side, y hace el batch insert atómico por chunk (2 inserts animals→profile por animal en la misma transacción). `EXECUTE` revocado de public/anon, grant a `authenticated`. | R9.4 |
-| `supabase/tests/import/run.cjs` (runner Node, ADR-012) | Tests RLS de `import_log` + (si aplica) tests del RPC (authz cross-tenant, rodeo de otro establishment, rol field_operator rechazado). | R9, R11 |
+| `0073_import_log.sql` | Tabla `import_log` (audit) + enum `import_file_format` + RLS scoped por establishment (SELECT `has_role_in`; INSERT owner/vet inline) + trigger `tg_force_imported_by_auth_uid` (`imported_by` forzado) + CHECK `char_length(file_name)≤255` + CHECK `octet_length(error_details::text)≤262144`. | R11 |
+| `0074_import_rodeo_bulk_rpc.sql` (**FIRME** — Puerta 1 D2 = Escenario B, ver §6) | RPC `import_rodeo_bulk(p_rodeo_id, p_rows jsonb)` `SECURITY DEFINER` que re-valida owner/vet inline + deriva est/species/system∈rodeo, setea establishment_id/created_by/imported_by server-side, y hace el batch insert por fila (2 inserts animals→profile por animal). **Import parcial por-fila**: `begin...exception when unique_violation` por fila (una carrera se saltea + reporta, no aborta el chunk). `EXECUTE` revocado de public/anon, grant a `authenticated` + smoke-check fail-closed de grants (estilo `0055`/`0058`). Devuelve `jsonb { imported_ok, imported_errors, errors:[{row_index, reason}] }`. | R9.4, R8.1, R8.2, R8.4 |
+| `supabase/tests/import/run.cjs` (runner Node, ADR-012) | **22 tests verde**: RLS de `import_log` (cross-tenant, imported_by forzado, field_operator/outsider rechazados, CHECKs) + RPC (owner/vet inserta; otro est / rodeo ajeno / rodeo inexistente / field_operator / anon rechazados; import parcial; TAG>64 dentro del definer). | R9, R11, R8.2 |
 
-> **El implementer fija el número de migration a la siguiente libre tras `0072`.** NO reclamar números ya usados.
+> **Contrato de `p_rows` (definido al implementar, ver `0074` header)**: cada fila lleva `row_index` (para reportar fallos) + los campos de identidad/censo (`sex`, `tag_electronic`, `birth_date`, `idv`, `visual_id_alt`, `breed`, `category_code`, `category_override`, `management_group_id`). El RPC **NO** lee `establishment_id`/`created_by`/`imported_by`/`species_id`/`system_id`/`rodeo_id` del payload — todo server-side desde el rodeo (A1-1/SEC-SPEC-03). El cliente (T3.3) arma este shape.
 
 ---
 
@@ -262,8 +262,9 @@ El catálogo de `categories_by_system` para `(bovino, cría)` AS-BUILT (`0015` +
   3. que `establishment_id` y `created_by`/`imported_by` se setean **server-side** dentro del RPC (no se leen del payload de filas) — lección A1-1 / SEC-SPEC-03;
   4. que el RPC tiene `EXECUTE` revocado de `public`/`anon` y grant solo a `authenticated` (lección SEC-HIGH-01 de spec 02);
   5. que los topes de largo (0070) y los unique se siguen enforçando dentro del RPC (no se bypassean con `security definer`).
+  6. *(Gate 2 SEC-12B-HIGH-01)* que el RPC enforça un **tope DURO de filas por llamada** (`jsonb_array_length(p_rows) <= 5000`, espejo de R3.2/D4) **después** de la re-validación de rol y **antes** del loop, rechazando el **batch entero** (no skip-and-report) si lo excede. El cap del cliente (R3.2/R3.3) es UX/bypasseable con curl; el RPC es la frontera server-side autoritativa contra DoW/amplificación (R9.5).
 
-**DECISIÓN — Puerta 1 (Raf, 2026-06-06): Escenario B (RPC bulk `SECURITY DEFINER`).** Raf eligió B sobre la recomendación inicial del autor (A), priorizando atomicidad por animal (sin huérfanos) + bloqueo de `field_operator` a nivel DB para la escritura masiva (cierra MEDIUM-3 de Gate 1). El RPC `import_rodeo_bulk` es ahora parte FIRME del diseño (no condicional). **Los 5 controles del Escenario B (arriba) son obligatorios y Gate 2 (code) los verifica**, con el matiz de Gate 1: el RPC lo llama el **cliente directo** → `grant execute to authenticated` + `revoke from public/anon` (NO service-role-only como el RPC de `0058`). Gate 1 ya revisó este escenario y dio **PASS** (los controles tienen precedente exacto en `0058`). **Gate 2 (code) aplica siempre**, como en todo run.
+**DECISIÓN — Puerta 1 (Raf, 2026-06-06): Escenario B (RPC bulk `SECURITY DEFINER`).** Raf eligió B sobre la recomendación inicial del autor (A), priorizando atomicidad por animal (sin huérfanos) + bloqueo de `field_operator` a nivel DB para la escritura masiva (cierra MEDIUM-3 de Gate 1). El RPC `import_rodeo_bulk` es ahora parte FIRME del diseño (no condicional). **Los 6 controles del Escenario B (arriba — el 6to, el tope DURO de filas server-side, se agregó en Gate 2 SEC-12B-HIGH-01) son obligatorios y Gate 2 (code) los verifica**, con el matiz de Gate 1: el RPC lo llama el **cliente directo** → `grant execute to authenticated` + `revoke from public/anon` (NO service-role-only como el RPC de `0058`). Gate 1 ya revisó este escenario y dio **PASS** (los controles tienen precedente exacto en `0058`). **Gate 2 (code) aplica siempre**, como en todo run.
 
 ---
 

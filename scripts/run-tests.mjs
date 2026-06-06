@@ -50,7 +50,7 @@ run('typecheck client', `cd app && ${pnpmCmd} typecheck`);
 // "type":"module" en app/package.json; los .ts se reparsean como ESM, es benigno).
 run(
   'client unit tests',
-  `node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./scripts/ts-ext-resolver.mjs --test app/src/utils/validation.test.ts app/src/utils/auth-errors.test.ts app/src/utils/lockout.test.ts app/src/utils/establishment.test.ts app/src/utils/establishment-mapping.test.ts app/src/utils/invite.test.ts app/src/utils/account-result.test.ts app/src/utils/rodeo-template.test.ts app/src/utils/a11y.test.ts app/src/utils/animal-identifier.test.ts app/src/utils/animal-category.test.ts app/src/utils/animal-category-picker.test.ts app/src/utils/animal-category-fields.test.ts app/src/utils/animal-birth-year.test.ts app/src/utils/animal-form.test.ts app/src/utils/animal-input.test.ts app/src/utils/event-timeline.test.ts app/src/utils/event-input.test.ts app/src/utils/last-rodeo.test.ts app/src/utils/nav.test.ts app/src/services/establishment-store.test.ts app/src/services/ble/parser-rs420.test.ts app/src/services/ble/dedup.test.ts app/src/services/ble/contract.test.ts app/src/services/ble/feedback.test.ts app/src/services/ble/adapter-mock.test.ts app/src/services/ble/adapter-web-serial.test.ts app/src/services/ble/wiring.test.ts app/src/services/ble/offline-noread.test.ts`,
+  `node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./scripts/ts-ext-resolver.mjs --test app/src/utils/validation.test.ts app/src/utils/auth-errors.test.ts app/src/utils/lockout.test.ts app/src/utils/establishment.test.ts app/src/utils/establishment-mapping.test.ts app/src/utils/invite.test.ts app/src/utils/account-result.test.ts app/src/utils/rodeo-template.test.ts app/src/utils/a11y.test.ts app/src/utils/animal-identifier.test.ts app/src/utils/animal-category.test.ts app/src/utils/animal-category-picker.test.ts app/src/utils/animal-category-fields.test.ts app/src/utils/animal-birth-year.test.ts app/src/utils/animal-form.test.ts app/src/utils/animal-input.test.ts app/src/utils/event-timeline.test.ts app/src/utils/event-input.test.ts app/src/utils/last-rodeo.test.ts app/src/utils/nav.test.ts app/src/services/establishment-store.test.ts app/src/services/ble/parser-rs420.test.ts app/src/services/ble/dedup.test.ts app/src/services/ble/contract.test.ts app/src/services/ble/feedback.test.ts app/src/services/ble/adapter-mock.test.ts app/src/services/ble/adapter-web-serial.test.ts app/src/services/ble/wiring.test.ts app/src/services/ble/offline-noread.test.ts app/src/utils/import/parse-csv.test.ts app/src/utils/import/parse-sigsa-txt.test.ts app/src/utils/import/breed-senasa.test.ts app/src/utils/import/column-mapping.test.ts app/src/utils/import/normalize-row.test.ts app/src/utils/import/validate-rows.test.ts`,
 );
 
 // La suite RLS y la suite Edge necesitan keys de Supabase. Si no hay service_role,
@@ -64,6 +64,10 @@ if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
   // spec 14 (user_private) — enganchada por el leader tras aplicar la migración 0068 + redeploy
   // de invite_user/accept_invitation (deploy coordinado, 2026-06-04).
   run('User_private suite (spec 14)', `node --test supabase/tests/user_private/run.cjs`);
+  // spec 12 (import masivo de rodeo) — backend: import_log RLS + RPC import_rodeo_bulk
+  // (SECURITY DEFINER, authz cross-tenant). Enganchada por el leader tras el run de backend
+  // (las migraciones 0073/0074 ya aplicadas al remoto vía Management API, 2026-06-06).
+  run('Import suite (spec 12)', `node --test supabase/tests/import/run.cjs`);
 } else {
   console.log('\n>>> RLS + Edge + Animal + Maneuvers suites — SKIPPED (falta SUPABASE_SERVICE_ROLE_KEY en env)');
 }
