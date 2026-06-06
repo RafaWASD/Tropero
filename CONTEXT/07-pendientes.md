@@ -17,6 +17,9 @@ Ninguno actualmente. Las decisiones cerradas alcanzan para empezar specs y códi
 > (% preñez / % destete / % cabeza-cuerpo-cola en tacto y destete). Los ítems de abajo que ya están
 > cubiertos por ese doc se mantienen por trazabilidad pero quedan **CERRADOS**.
 
+### 🟡 ABIERTO — Circunferencia escrotal (CE): modelado a refinar con Facundo (2026-06-05)
+Facundo confirmó que la CE importa **sobre todo en toritos** (y toros) y que **se mide en 3 momentos distintos** para ver la progresión. Antes de modelarla hay que cerrar el detalle con él: **¿cuáles son esos 3 momentos** (¿edades/eventos fijos? ¿libre?)?, **¿qué rango/unidad** (cm) y qué valor es "apto" reproductivo?, **¿dato suelto con historial** (tabla `scrotal_circumference_events` estilo `weight_events`) **o atado a una maniobra**? Por eso quedó **DIFERIDA del chunk de la alta guiada** (Raf, 2026-06-05): la alta guiada se hace frontend-puro con los datos que YA existen (`teeth_state`, `is_cut`, peso, condición, pelaje, raza, lote, tamaño de preñez, `nursing`); la CE entra como follow-up chico (tabla nueva + campo en el wizard de toritos/toros) tras validar el detalle.
+
 ### Pesaje de ternero
 ¿Hay alguna diferencia operativa real vs pesaje de adulto, más allá de la categoría que se autocompleta?
 - ¿Se vincula con la madre automáticamente?

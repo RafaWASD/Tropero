@@ -13,10 +13,7 @@
 // offline-first real (PowerSync) es C5. Sin red → kind:'network' con copy accionable.
 
 import { supabase } from './supabase';
-import {
-  computeInitialCategoryCode,
-  type AnimalSex,
-} from '../utils/animal-category';
+import { type AnimalSex } from '../utils/animal-category';
 import { classifyIdentifier, classifySearchQuery } from '../utils/animal-identifier';
 
 // ─── Error / Result uniforme (mismo shape que rodeo-config.ts / establishments.ts) ──
@@ -309,13 +306,21 @@ export async function searchAnimals(
   //    que "112" matchee "112" exacto aunque el % trigram no lo prenda en textos muy cortos.
   if (plan.tryVisual) {
     const term = plan.normalized;
+    // F1-1 (R7.1, forma parametrizada — preferida): `.ilike(column, pattern)` envía el patrón
+    // como VALOR (fuera del string de filtro), no como un fragmento de `.or(...)`. Esto neutraliza
+    // de RAÍZ el filter injection de los metacaracteres de `.or()` (`. ( ) : *` y comillas): un
+    // término malicioso ya no puede alterar la estructura del filtro ni cruzar a otra columna.
+    // Como esta sub-query filtra UNA sola columna (visual_id_alt), no necesita `.or()`. El
+    // `escapeIlike` se conserva solo para los comodines `% _` del PATRÓN de ilike (que un `%`
+    // literal del término no actúe de comodín), no para los metacaracteres de `.or()` (que ya no
+    // aplican). El recorte de largo del término ya lo hizo classifySearchQuery (R7.3).
     const { data, error } = await supabase
       .from('animal_profiles')
       .select(LIST_SELECT)
       .eq('establishment_id', establishmentId)
       .eq('status', 'active')
       .is('deleted_at', null)
-      .or(`visual_id_alt.ilike.%${escapeIlike(term)}%`)
+      .ilike('visual_id_alt', `%${escapeIlike(term)}%`)
       .limit(20);
     if (error) return { ok: false, error: classifyError(error) };
     pushRows(data as unknown as ProfileListRow[], seen, out);
@@ -340,6 +345,43 @@ function pushRows(
 // que un visual_id_alt con "%" no rompa el patrón. (Defensivo; visual_id_alt rara vez los tiene.)
 function escapeIlike(term: string): string {
   return term.replace(/[%_,]/g, ' ');
+}
+
+// ─── Catálogo de categorías del sistema (picker de la alta guiada, paso 3) ────────────
+
+/** Una categoría del catálogo de un sistema productivo (alta guiada A, picker cerrado). */
+export type SystemCategory = {
+  /** code estable del catálogo (ej. 'multipara', 'ternero'). Lo usa el override + el insert. */
+  code: string;
+  /** name legible es-AR (ej. 'Multípara', 'Ternero') — lo que ve el usuario en el picker. */
+  name: string;
+};
+
+type CategoryRow = { code: string; name: string };
+
+/**
+ * Lee las categorías ACTIVAS del catálogo de un sistema productivo (categories_by_system del
+ * `systemId` del rodeo elegido) — el picker CERRADO de la alta guiada (paso 3). SELECT abierto a
+ * authenticated (catálogo global, mismo patrón que field_definitions). Multi-tenant (CLAUDE.md
+ * ppio 6): NUNCA se hardcodea el systemId ni los codes — salen del sistema del rodeo activo.
+ *
+ * No filtra por sexo (la tabla no tiene columna de sexo): el filtrado por sexo lo hace el cliente
+ * con el mapeo conocido por `code` (codes fijos del catálogo de cría). Devuelve todas las del
+ * sistema; el screen las filtra. Orden por sort_order (presentación estable del catálogo).
+ */
+export async function fetchSystemCategories(
+  systemId: string,
+): Promise<ServiceResult<SystemCategory[]>> {
+  const { data, error } = await supabase
+    .from('categories_by_system')
+    .select('code, name')
+    .eq('system_id', systemId)
+    .eq('active', true)
+    .order('sort_order', { ascending: true });
+
+  if (error) return { ok: false, error: classifyError(error) };
+  const rows = (data ?? []) as CategoryRow[];
+  return { ok: true, value: rows.map((r) => ({ code: r.code, name: r.name })) };
 }
 
 // ─── Motor find-or-create — puerta MANUAL (R3) ───────────────────────────────────────
@@ -395,6 +437,18 @@ export type CreateAnimalInput = {
   /** system_id del rodeo (para resolver category_id por code). */
   systemId: string;
   sex: AnimalSex;
+  /**
+   * code de la categoría ELEGIDA por el usuario en el wizard (paso 3, alta guiada A). Reemplaza a la
+   * computada: se resuelve a category_id por (systemId, code). En vez de computar siempre la
+   * categoría del sexo+edad, el screen elige una del catálogo del sistema → la mandamos acá.
+   */
+  categoryCode: string;
+  /**
+   * ¿La categoría elegida debe PRESERVARSE (override) frente al recálculo del server? Lo decide el
+   * screen con categoryOverrideFor (coincide con la computada → false; difiere → true). Se setea
+   * en animal_profiles.category_override.
+   */
+  categoryOverride: boolean;
   /** ISO 'YYYY-MM-DD' o null. */
   birthDate?: string | null;
   /** Identificadores (al menos uno debe venir no vacío — lo garantiza el precargado de R4.2). */
@@ -407,6 +461,19 @@ export type CreateAnimalInput = {
   entryWeight?: number | null;
   /** Lote opcional (ADR-020). */
   managementGroupId?: string | null;
+  /**
+   * Estado de dientes (boca) — columna `teeth_state` (enum teeth_state_enum, 0020). Solo lo pide la
+   * alta guiada para vacas (2º serv/multípara) y toros (sub-chunk B, dominio §2). Selector CERRADO →
+   * siempre un enum válido. Omitido si no aplica a la categoría o no se eligió.
+   */
+  teethState?: string | null;
+  /**
+   * Cría al pie — columna `nursing` (boolean, 0061). La alta guiada lo pide para vacas con servicio
+   * (2º serv/multípara). El cliente puede setearla en el INSERT (el trigger de nursing es AFTER INSERT
+   * sobre reproductive_events/birth_calves, NO sobre animal_profiles → no pisa este valor inicial). Si
+   * no se capturó (no aplica o sin elegir), se omite y queda el default false NOT NULL.
+   */
+  nursing?: boolean | null;
 };
 
 /**
@@ -419,9 +486,11 @@ export type CreateAnimalInput = {
  *   de la presencia de un perfil con has_role_in), así que NO se puede re-seleccionar por TAG.
  *   Generar los ids resuelve el find-or-create y replica cómo un cliente real opera.
  *
- * Categoría inicial (R4.7): la computamos en el cliente (computeInitialCategoryCode, espejo de
- * compute_category sin eventos) y resolvemos category_id por code — NO se puede llamar
- * compute_category(profile_id) porque el perfil aún no existe y category_id es NOT NULL.
+ * Categoría inicial (R4.7 / alta guiada A): la ELIGE el usuario en el wizard (paso 3) — recibimos su
+ * `code` + el `categoryOverride` ya decidido por el screen (coincide con la computada → false;
+ * difiere → true). Resolvemos category_id por (systemId, code) y seteamos category_override en el
+ * perfil. NO se puede llamar compute_category(profile_id) porque el perfil aún no existe y
+ * category_id es NOT NULL.
  *
  * Atomicidad: si el insert del perfil falla (ej. unique de IDV), el `animals` ya quedó insertado
  * pero SIN perfil → invisible por RLS y sin TAG-colisión persistente si el fallo fue del perfil.
@@ -434,20 +503,20 @@ export type CreateAnimalInput = {
 export async function createAnimal(
   input: CreateAnimalInput,
 ): Promise<ServiceResult<{ profileId: string; animalId: string }>> {
-  // 1) Resolver category_id por code (catálogo del system del rodeo). No hardcodeamos UUID.
-  const categoryCode = computeInitialCategoryCode(input.sex, input.birthDate ?? null);
+  // 1) Resolver category_id por el code ELEGIDO (catálogo del system del rodeo). No hardcodeamos
+  //    UUID; el code viene del picker (paso 3 del wizard), que lo sacó de fetchSystemCategories.
   const { data: cat, error: catErr } = await supabase
     .from('categories_by_system')
     .select('id')
     .eq('system_id', input.systemId)
-    .eq('code', categoryCode)
+    .eq('code', input.categoryCode)
     .eq('active', true)
     .maybeSingle();
   if (catErr) return { ok: false, error: classifyError(catErr) };
   if (!cat) {
     return {
       ok: false,
-      error: { kind: 'unknown', message: 'No se pudo determinar la categoría inicial del animal.' },
+      error: { kind: 'unknown', message: 'No se pudo determinar la categoría del animal.' },
     };
   }
 
@@ -486,6 +555,9 @@ export async function createAnimal(
     establishment_id: input.establishmentId,
     rodeo_id: input.rodeoId,
     category_id: cat.id,
+    // Override de la categoría elegida (alta guiada A #4): si difiere de la computada por sexo+edad,
+    // se preserva (true) y el recálculo del server no la revierte; si coincide, false (auto-transiciona).
+    category_override: input.categoryOverride,
     status: 'active',
   };
   const idv = cleanStr(input.idv);
@@ -499,6 +571,13 @@ export async function createAnimal(
   if (input.entryDate) profilePayload.entry_date = input.entryDate;
   if (input.entryWeight != null) profilePayload.entry_weight = input.entryWeight;
   if (input.managementGroupId) profilePayload.management_group_id = input.managementGroupId;
+  // Datos por categoría (sub-chunk B): dientes (enum) + cría al pie (boolean). Solo se setean si el
+  // caller los mandó (la alta guiada los manda solo para las categorías que los piden). teeth_state
+  // viene de un selector CERRADO → enum válido. nursing en INSERT NO lo pisa el trigger (AFTER INSERT
+  // sobre reproductive_events/birth_calves, no sobre animal_profiles).
+  const teeth = cleanStr(input.teethState);
+  if (teeth) profilePayload.teeth_state = teeth;
+  if (input.nursing != null) profilePayload.nursing = input.nursing;
 
   const { error: pErr } = await supabase.from('animal_profiles').insert(profilePayload);
   if (pErr) return { ok: false, error: classifyError(pErr) };

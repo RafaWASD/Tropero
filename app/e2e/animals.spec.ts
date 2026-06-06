@@ -28,7 +28,30 @@ test.afterAll(async () => {
   await cleanupAll();
 });
 
-test('alta desde empty → el animal aparece en la lista y abre la ficha', async ({ page }) => {
+// Helper: camina el wizard de la alta guiada desde el paso 2 (sexo) hasta el paso 4 (datos),
+// eligiendo el sexo y la categoría indicados. Con 1 rodeo el wizard auto-avanza el paso 1 → arranca
+// en sexo. Selectores robustos por a11y (buttonA11y emite role=button + aria-label en web).
+async function walkWizardToData(
+  page: import('@playwright/test').Page,
+  opts: { sex: 'Macho' | 'Hembra'; categoryName: string },
+) {
+  // Paso 2 — sexo (full-screen).
+  await expect(page.getByText('¿Es macho o hembra?', { exact: true })).toBeVisible({ timeout: 20_000 });
+  await page.getByRole('button', { name: `Sexo ${opts.sex}`, exact: true }).click();
+  await page.getByRole('button', { name: 'Continuar', exact: true }).click();
+
+  // Paso 3 — categoría (picker cerrado, filtrado por sexo+sistema).
+  await expect(page.getByText('¿Qué categoría es?', { exact: true })).toBeVisible({ timeout: 20_000 });
+  await page.getByRole('button', { name: `Categoría ${opts.categoryName}`, exact: true }).click();
+  await page.getByRole('button', { name: 'Continuar', exact: true }).click();
+
+  // Paso 4 — datos.
+  await expect(page.getByText('Datos del animal', { exact: true })).toBeVisible({ timeout: 20_000 });
+}
+
+test('alta guiada desde empty → wizard (sexo→categoría→datos) → el animal aparece en la lista y abre la ficha', async ({
+  page,
+}) => {
   const user = await createTestUser('alta');
   await setUserPhone(user.id, '1123456789');
   await seedEstablishmentWithRodeo(user.id, 'Campo Alta');
@@ -49,15 +72,16 @@ test('alta desde empty → el animal aparece en la lista y abre la ficha', async
   await expect(emptyCta).toBeVisible({ timeout: 20_000 });
   await emptyCta.click();
 
-  // Pantalla CREATE. Completamos: visual + sexo (requerido). El identificador visual lo tipeamos
-  // como "recomendado" (el alta en blanco no precarga ninguno).
+  // Con 1 rodeo el wizard auto-avanza el paso 1 → arranca en SEXO. Elegimos Hembra → Ternera (coincide
+  // con la computada para una hembra sin fecha → vaquillona NO: sin fecha computa vaquillona; acá
+  // elegimos "Vaquillona" para que coincida y no haya override en este caso base).
+  await walkWizardToData(page, { sex: 'Hembra', categoryName: 'Vaquillona' });
+
+  // Paso 4: identificación visual (recomendado; el alta en blanco no precarga ninguno).
   const visualLabel = `${RUN_TAG}-V1`;
   const visualInput = page.getByLabel('Identificación visual (recomendado)', { exact: true });
   await expect(visualInput).toBeVisible({ timeout: 20_000 });
   await visualInput.fill(visualLabel);
-
-  // Sexo: segmented control grande. Elegimos Hembra.
-  await page.getByRole('button', { name: 'Sexo Hembra', exact: true }).click();
 
   // Crear.
   await page.getByRole('button', { name: 'Crear animal', exact: true }).click();
@@ -66,22 +90,225 @@ test('alta desde empty → el animal aparece en la lista y abre la ficha', async
   // valor visual cargado (aparece en el hero Y en la fila → .first()).
   await expect(page.getByText('Identificación', { exact: true })).toBeVisible({ timeout: 20_000 });
   await expect(page.getByText(visualLabel, { exact: true }).first()).toBeVisible();
+  // El badge de categoría refleja la elegida ("Vaquillona") — coincide con la computada → sin override.
+  await expect(page.getByText('Vaquillona', { exact: true }).first()).toBeVisible();
   // Sección Historial (C3.1) — reemplaza el teaser "Próximamente". Un animal recién creado tiene
   // solo el `initial` → empty/sparse cálido.
   await expect(page.getByText('Historial', { exact: true })).toBeVisible();
 
-  // Volvemos a la lista. La ficha está FUERA del grupo (tabs) (es un Stack screen), así que no
-  // tiene la bottom-nav: usamos su botón "Volver" para regresar a la tab Animales (el create se
-  // hizo con replace, así que back desde la ficha cae en (tabs)/Animales). El animal aparece.
+  // Volvemos a la lista vía "Volver" (el create se hizo con replace → back desde la ficha cae en
+  // (tabs)/Animales). El animal aparece.
   await page.getByRole('button', { name: 'Volver', exact: true }).click();
   await expect(page.getByText(visualLabel, { exact: true }).first()).toBeVisible({ timeout: 20_000 });
 
   // fix-loop 3: volvemos a Inicio → el paso de animal ahora está HECHO (count real = 1, no
-  // hardcodeado). useFocusEffect recarga el count al re-enfocar la home tras crear el animal: el
-  // paso muestra "Cargaste tu primer animal" y YA NO el "Cargá tu primer animal" pendiente.
+  // hardcodeado). useFocusEffect recarga el count al re-enfocar la home tras crear el animal.
   await gotoTab(page, 'Inicio', page.getByText(/¡Hola.*👋/));
   await expect(page.getByText('Cargaste tu primer animal', { exact: true })).toBeVisible({ timeout: 20_000 });
   await expect(page.getByText('Cargá tu primer animal', { exact: true })).toHaveCount(0);
+});
+
+test('B: alta de una MULTÍPARA → el form NO pide peso, SÍ dientes/condición/preñez/cría al pie; se crea con override + condición en Estado actual', async ({
+  page,
+}) => {
+  // Sub-chunk B (datos por categoría): una multípara NO es de recría → su form NO pide peso; pide
+  // dientes + condición corporal + estado de preñez + cría al pie (tabla §2). Cargamos dientes +
+  // condición + cría al pie → se crea (override=true, no derivable) y la ficha muestra "Multípara"
+  // + la condición en "Estado actual".
+  const user = await createTestUser('multipara');
+  await setUserPhone(user.id, '1123456789');
+  await seedEstablishmentWithRodeo(user.id, 'Campo Multipara');
+
+  await page.goto('/');
+  await signIn(page, user);
+  await waitForHome(page);
+  await gotoAnimales(page);
+
+  await page.getByRole('button', { name: 'Dar de alta tu primer animal' }).click();
+  await walkWizardToData(page, { sex: 'Hembra', categoryName: 'Multípara' });
+
+  // El form NO pide peso (no es recría). Y SÍ ofrece dientes/condición/preñez/cría al pie.
+  await expect(page.getByLabel('Peso en kg (opcional)', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('Dientes (opcional)', { exact: true })).toBeVisible();
+  await expect(page.getByText('Condición corporal (opcional, 1 a 5)', { exact: true })).toBeVisible();
+  await expect(page.getByText('Estado de preñez (opcional)', { exact: true })).toBeVisible();
+  await expect(page.getByText('Cría al pie (opcional)', { exact: true })).toBeVisible();
+
+  // Identificación + dientes + condición 3 + con cría al pie.
+  const visualLabel = `${RUN_TAG}-MP`;
+  await page.getByLabel('Identificación visual (recomendado)', { exact: true }).fill(visualLabel);
+  await page.getByRole('button', { name: 'Dientes Boca llena', exact: true }).click();
+  await page.getByRole('button', { name: 'Condición 3', exact: true }).click();
+  await page.getByRole('button', { name: 'Cría al pie Con cría al pie', exact: true }).click();
+
+  await page.getByRole('button', { name: 'Crear animal', exact: true }).click();
+
+  // Ficha: badge "Multípara" (override, no derivable) + condición corporal en "Estado actual".
+  await expect(page.getByText('Identificación', { exact: true })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText('Multípara', { exact: true }).first()).toBeVisible();
+  // El override se refleja en el a11y label del badge ("fijada manualmente").
+  await expect(
+    page.getByLabel('Categoría Multípara, fijada manualmente', { exact: true }).first(),
+  ).toBeVisible();
+  // La condición corporal cargada al alta quedó como EVENTO post-create → aparece su valor "3 / 5" en
+  // "Estado actual" (deriveCurrentState lo deriva del condition_score_event recién insertado). El valor
+  // es la prueba real de que el evento se guardó (el label "Condición corporal" lo renderiza RN-web en
+  // div+span anidados → matchea 2 nodos en strict mode; asertamos el VALOR, que es único y diagnóstico).
+  await expect(page.getByText('Estado actual', { exact: true })).toBeVisible();
+  await expect(page.getByText(/3 \/ 5/).first()).toBeVisible({ timeout: 20_000 });
+});
+
+test('B: alta de un TERNERO → el form pide PESO, NO dientes/preñez', async ({ page }) => {
+  // Sub-chunk B: un ternero es de recría → su form pide SOLO peso (de los extra); no dientes ni preñez.
+  const user = await createTestUser('ternerob');
+  await setUserPhone(user.id, '1123456789');
+  await seedEstablishmentWithRodeo(user.id, 'Campo TerneroB');
+
+  await page.goto('/');
+  await signIn(page, user);
+  await waitForHome(page);
+  await gotoAnimales(page);
+
+  await page.getByRole('button', { name: 'Dar de alta tu primer animal' }).click();
+  await walkWizardToData(page, { sex: 'Macho', categoryName: 'Ternero' });
+
+  // Pide peso; NO pide dientes ni preñez.
+  await expect(page.getByLabel('Peso en kg (opcional)', { exact: true })).toBeVisible();
+  await expect(page.getByText('Dientes (opcional)', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('Estado de preñez (opcional)', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('Condición corporal (opcional, 1 a 5)', { exact: true })).toHaveCount(0);
+
+  // Cargamos identificación + peso → se crea.
+  const visualLabel = `${RUN_TAG}-TERB`;
+  await page.getByLabel('Identificación visual (recomendado)', { exact: true }).fill(visualLabel);
+  await page.getByLabel('Peso en kg (opcional)', { exact: true }).fill('180');
+
+  await page.getByRole('button', { name: 'Crear animal', exact: true }).click();
+
+  await expect(page.getByText('Identificación', { exact: true })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText('Ternero', { exact: true }).first()).toBeVisible();
+  // El peso de alta (entry_weight) NO es un weight_event → "Estado actual / Peso actual" queda
+  // "Sin registrar" (el peso de entrada vive en la columna, no en el timeline). Un macho NO muestra
+  // la fila "Estado reproductivo".
+  await expect(page.getByText('Estado reproductivo', { exact: true })).toHaveCount(0);
+});
+
+test('B: alta de una VAQUILLONA PREÑADA con preñez "Cabeza" → estado reproductivo Preñada (cabeza) + badge SIN override (derivable)', async ({
+  page,
+}) => {
+  // Sub-chunk B + override refinado: elegir vaquillona_prenada Y capturar preñez "Cabeza" (large) →
+  // es DERIVABLE (un tacto+ la transiciona server-side) → override=FALSE. El tacto+ se crea post-create
+  // → la ficha muestra "Estado reproductivo: Preñada (cabeza)" y el badge "Vaquillona preñada" SIN la
+  // marca de override.
+  const user = await createTestUser('vaqprenada');
+  await setUserPhone(user.id, '1123456789');
+  await seedEstablishmentWithRodeo(user.id, 'Campo VaqPrenada');
+
+  await page.goto('/');
+  await signIn(page, user);
+  await waitForHome(page);
+  await gotoAnimales(page);
+
+  await page.getByRole('button', { name: 'Dar de alta tu primer animal' }).click();
+  await walkWizardToData(page, { sex: 'Hembra', categoryName: 'Vaquillona preñada' });
+
+  // El form de vaquillona preñada pide preñez + condición; NO peso ni dientes ni cría al pie.
+  await expect(page.getByText('Estado de preñez (opcional)', { exact: true })).toBeVisible();
+  await expect(page.getByLabel('Peso en kg (opcional)', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('Dientes (opcional)', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('Cría al pie (opcional)', { exact: true })).toHaveCount(0);
+
+  const visualLabel = `${RUN_TAG}-VQP`;
+  await page.getByLabel('Identificación visual (recomendado)', { exact: true }).fill(visualLabel);
+  await page.getByRole('button', { name: 'Preñez Cabeza', exact: true }).click();
+
+  await page.getByRole('button', { name: 'Crear animal', exact: true }).click();
+
+  // Ficha: estado reproductivo "Preñada (cabeza)" (del tacto+ post-create) + badge "Vaquillona preñada"
+  // SIN override (a11y label sin "fijada manualmente").
+  await expect(page.getByText('Identificación', { exact: true })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText('Estado reproductivo', { exact: true })).toBeVisible();
+  await expect(page.getByText(/Preñada \(cabeza\)/).first()).toBeVisible({ timeout: 20_000 });
+  // Badge derivable → SIN "fijada manualmente".
+  await expect(
+    page.getByLabel('Categoría Vaquillona preñada', { exact: true }).first(),
+  ).toBeVisible();
+  await expect(
+    page.getByLabel('Categoría Vaquillona preñada, fijada manualmente', { exact: true }),
+  ).toHaveCount(0);
+});
+
+test('alta guiada: elegir una categoría que DIFIERE de la computada → override (Multípara con fecha vieja)', async ({
+  page,
+}) => {
+  // Caso A5 "vaca comprada": una hembra con fecha de nacimiento vieja computa Vaquillona, pero el
+  // usuario la da de alta como Multípara (comprada sin historial cargado). Como difiere → override:
+  // el recálculo del server NO la revierte a vaquillona; la ficha muestra el badge "Multípara".
+  const user = await createTestUser('override');
+  await setUserPhone(user.id, '1123456789');
+  await seedEstablishmentWithRodeo(user.id, 'Campo Override');
+
+  await page.goto('/');
+  await signIn(page, user);
+  await waitForHome(page);
+  await gotoAnimales(page);
+
+  await page.getByRole('button', { name: 'Dar de alta tu primer animal' }).click();
+
+  // SEXO Hembra → CATEGORÍA Multípara (en el picker de hembra; no aparece para macho).
+  await walkWizardToData(page, { sex: 'Hembra', categoryName: 'Multípara' });
+
+  // Identificación + año de nacimiento VIEJO (computaría vaquillona) → override aplica (la multípara
+  // no es derivable del alta, así que el override es true por code; el año viejo refuerza el caso).
+  const visualLabel = `${RUN_TAG}-MULTI`;
+  await page.getByLabel('Identificación visual (recomendado)', { exact: true }).fill(visualLabel);
+  await page.getByLabel('Año de nacimiento (opcional, AAAA)', { exact: true }).fill('2020');
+
+  await page.getByRole('button', { name: 'Crear animal', exact: true }).click();
+
+  // Ficha: el badge muestra la categoría ELEGIDA ("Multípara"), NO la computada (vaquillona) → el
+  // override preservó la elección. (El badge "Multípara" en el hero confirma category_id + el punto
+  // de override sutil no es asertable por texto; basta con la categoría elegida.)
+  await expect(page.getByText('Identificación', { exact: true })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText('Multípara', { exact: true }).first()).toBeVisible();
+  // Y NUNCA muestra "Vaquillona" (la computada): si el override hubiera fallado, el server la habría
+  // dejado como vaquillona o el recálculo la revertiría.
+  await expect(page.getByText('Vaquillona', { exact: true })).toHaveCount(0);
+});
+
+test('alta guiada: elegir la categoría que COINCIDE con la computada → sin override (vaquillona sin año)', async ({
+  page,
+}) => {
+  // Una hembra SIN año de nacimiento computa Vaquillona (default conservador); el usuario elige
+  // "Vaquillona" → coincide → sin override (auto-transiciona después). (No usamos un año reciente para
+  // "ternera" porque el year-only se mapea a AAAA-07-01 — mitad de año — y la edad respecto al corte de
+  // 1 año queda ambigua según el mes actual; el caso "sin año → vaquillona coincide" es determinista.)
+  const user = await createTestUser('coincide');
+  await setUserPhone(user.id, '1123456789');
+  await seedEstablishmentWithRodeo(user.id, 'Campo Coincide');
+
+  await page.goto('/');
+  await signIn(page, user);
+  await waitForHome(page);
+  await gotoAnimales(page);
+
+  await page.getByRole('button', { name: 'Dar de alta tu primer animal' }).click();
+
+  await walkWizardToData(page, { sex: 'Hembra', categoryName: 'Vaquillona' });
+
+  const visualLabel = `${RUN_TAG}-VQ`;
+  await page.getByLabel('Identificación visual (recomendado)', { exact: true }).fill(visualLabel);
+  // Sin año → hembra computa vaquillona → coincide con la elegida → sin override.
+
+  await page.getByRole('button', { name: 'Crear animal', exact: true }).click();
+
+  await expect(page.getByText('Identificación', { exact: true })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText('Vaquillona', { exact: true }).first()).toBeVisible();
+  // Coincide → SIN override (a11y label sin "fijada manualmente").
+  await expect(page.getByLabel('Categoría Vaquillona', { exact: true }).first()).toBeVisible();
+  await expect(
+    page.getByLabel('Categoría Vaquillona, fijada manualmente', { exact: true }),
+  ).toHaveCount(0);
 });
 
 test('fix-loop 4: con un 2do miembro sembrado, el paso de equipo de la home aparece HECHO', async ({
@@ -140,6 +367,13 @@ test('buscar un identificador INEXISTENTE → CTA "Dar de alta" → CREATE con e
   const cta = page.getByRole('button', { name: 'Dar de alta este animal' });
   await expect(cta).toBeVisible({ timeout: 20_000 });
   await cta.click();
+
+  // El find-or-create NO cambia: el id tipeado se precarga. El wizard arranca DESPUÉS del id; con 1
+  // rodeo auto-avanza a SEXO. El header muestra "Creando: 77123" (el id precargado) en todos los pasos.
+  await expect(page.getByText('Creando: 77123', { exact: true })).toBeVisible({ timeout: 20_000 });
+
+  // Caminamos hasta el paso de DATOS, donde está la identificación.
+  await walkWizardToData(page, { sex: 'Macho', categoryName: 'Ternero' });
 
   // CREATE: como el texto es numérico/estructurado (R1.4), se precarga en idv READ-ONLY.
   const idvReadonly = page.getByLabel('Caravana / IDV (no editable)', { exact: true });
@@ -226,34 +460,37 @@ test('FIX2: el alta LIMITA los inputs en vivo (caravana 15 díg, fecha/peso sin 
 
   await page.getByRole('button', { name: 'Dar de alta tu primer animal' }).click();
 
+  // El sexo y la categoría ahora son pasos del wizard (no inputs de texto) → se eligen, no se "limitan".
+  // Caminamos al paso de DATOS, donde están los inputs de texto que SÍ se acotan en vivo.
+  await walkWizardToData(page, { sex: 'Macho', categoryName: 'Torito' });
+
   // Caravana electrónica: tipeamos letras + 40 dígitos → debe quedar SOLO 15 dígitos (FDX-B).
   const tagInput = page.getByLabel('Caravana electrónica (recomendado, 15 dígitos)', { exact: true });
   await expect(tagInput).toBeVisible({ timeout: 20_000 });
   await tagInput.fill('abc1234567890123456789012345');
   await expect(tagInput).toHaveValue('123456789012345'); // 15 dígitos, sin letras
 
-  // Fecha de nacimiento: tipeamos basura → la máscara descarta letras y arma AAAA-MM-DD.
-  const birthInput = page.getByLabel('Fecha de nacimiento (opcional, AAAA-MM-DD)', { exact: true });
-  await birthInput.fill('asdasd');
-  await expect(birthInput).toHaveValue(''); // nada de "asdasd"
-  await birthInput.fill('20240115');
-  await expect(birthInput).toHaveValue('2024-01-15'); // guiones automáticos
+  // Año de nacimiento: tipeamos basura → solo 4 dígitos numéricos (year-only, sub-chunk B).
+  const yearInput = page.getByLabel('Año de nacimiento (opcional, AAAA)', { exact: true });
+  await yearInput.fill('asdasd');
+  await expect(yearInput).toHaveValue(''); // nada de "asdasd"
+  await yearInput.fill('20240115');
+  await expect(yearInput).toHaveValue('2024'); // cortado a 4 dígitos
 
-  // Peso: tipeamos basura → solo número decimal.
-  const weightInput = page.getByLabel('Peso de entrada en kg (opcional)', { exact: true });
+  // Peso (el torito es recría → pide peso): tipeamos basura → solo número decimal.
+  const weightInput = page.getByLabel('Peso en kg (opcional)', { exact: true });
   await weightInput.fill('dasdas');
   await expect(weightInput).toHaveValue('');
   await weightInput.fill('180');
   await expect(weightInput).toHaveValue('180');
 
-  // Dejamos la caravana INCOMPLETA (borramos y ponemos 8 díg) y NO elegimos sexo → submit debe
-  // mostrar errores y NO navegar (seguimos en la pantalla de alta).
+  // Dejamos la caravana INCOMPLETA (8 díg) → submit debe mostrar el error de largo y NO navegar
+  // (seguimos en el paso de datos; el error es accionable, no rompe el flujo — R4.8).
   await tagInput.fill('12345678'); // 8 díg < 15
   await page.getByRole('button', { name: 'Crear animal', exact: true }).click();
   await expect(page.getByText('La caravana electrónica tiene que tener 15 dígitos.')).toBeVisible({ timeout: 10_000 });
-  await expect(page.getByText('Elegí el sexo del animal.')).toBeVisible();
-  // Sigue en la pantalla de alta (no aterrizó en una ficha).
-  await expect(page.getByText('Datos del animal', { exact: true })).toHaveCount(0);
+  // Sigue en el paso de datos del wizard (no aterrizó en una ficha — la ficha tiene "Historial").
+  await expect(page.getByText('Historial', { exact: true })).toHaveCount(0);
 });
 
 test('FIX3: con un filtro de Estado activo y 0 resultados, el empty es contextual (no "no cargaste")', async ({
