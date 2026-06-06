@@ -43,7 +43,8 @@
     "react-native-screens": "^4.25.2",
     "react-native-svg": "15.15.4",
     "react-native-worklets": "0.8.3",
-    "tamagui": "2.0.0"
+    "tamagui": "2.0.0",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
   "devDependencies": {
     "@playwright/test": "^1.60.0",

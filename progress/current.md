@@ -29,6 +29,15 @@ Capa I/O del import: `app/src/services/import-rodeo.ts` (única capa de red/DB) 
 
 **PENDIENTE feature 12**: reviewer+Gate 2 de Fase 3 → `.xlsx` (R3.8) + Fase 4 hook+UI + Fase 5 entry point → cada uno con reviewer+Gate 2 → Puerta de código humana al cierre.
 
+### RUN AISLADO — parser `.xlsx` (R3.8) — DONE (implementer, 2026-06-06, pendiente reviewer+Gate 2)
+
+Implementer corrió SOLO el parser `.xlsx` de feature 12 (util puro adicional, espeja `parse-csv.ts`). NO tocó backend/service/UI ni `run-tests.mjs`. Bitácora `progress/impl_12-xlsx.md` (baseline `67d8619`).
+- **Dependencia VETADA**: `xlsx@0.20.3` desde `https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz` (dominio exacto `cdn.sheetjs.com`, ≥0.20.2 post-fix CVE-2023-30533 + CVE-2024-22363). Registrada en `app/package.json` + `app/pnpm-lock.yaml`. **Sin postinstall** (el paquete no declara lifecycle hooks; pnpm `onlyBuiltDependencies` no pidió build/allowlist). NO la npm `xlsx` vulnerable.
+- **`parse-xlsx.ts`**: `XLSX.read(data,{type:'array', sheetRows: MAX_ROWS+1, cellFormula:false,…})` (cap AL PARSEAR, anti-DoW real verificado: 50k filas NO materializa 50k); `!fullref`+conteo materializado → `rowsExceeded` (rechaza-y-reporta, no trunca); primera hoja; `sheet_to_json({raw:false})` → valores CACHEADOS a string (no evalúa fórmulas, no reexporta, R3.5); try/catch → `parseError` (R3.6). Mismo contrato `{headers,rows,rowsExceeded,cellsExceeded}` que `parse-csv.ts` (+`parseError?` opcional) → intercambiables.
+- **`parse-xlsx.test.ts`**: 14 tests `node:test` verdes (workbooks en memoria con la lib real). typecheck verde + check.mjs verde end-to-end (sin regresión; el test aún NO está en `run-tests.mjs`).
+- **Residual zip-bomb** (anotado, aceptable): `XLSX.read` descomprime todo el ZIP/sharedStrings para hallar límites de fila aunque `sheetRows` solo retenga MAX_ROWS+1. Acotado por R3.1 (5 MB comprimido, en el service ANTES del parse) + `sheetRows`. Cuantificado: un `.xlsx` repetitivo de ~5 MB ≈ ≤9.3k filas, read+cap ~90ms. Op de owner/vet autenticado (threat model bajo, R3.7).
+- **Para enganchar (leader)**: agregar `app/src/utils/import/parse-xlsx.test.ts` a `client unit tests` de `run-tests.mjs`.
+
 ---
 
 ## Feature 04 bastón — capa buildable-hoy ✅ DONE + GATEADA + COMMITEADA (2026-06-06)
