@@ -36,6 +36,7 @@
 
 import 'react-native-gesture-handler';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Platform } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { TamaguiProvider } from 'tamagui';
@@ -110,6 +111,16 @@ const CREAR_ANIMAL_ROUTE = 'crear-animal'; // AnimalCreateScreen (R4)
 const ANIMAL_ROUTE = 'animal'; // ficha del animal /animal/[id] (R5)
 const AGREGAR_EVENTO_ROUTE = 'agregar-evento'; // wizard "Agregar evento" desde la ficha (C3.1)
 const ANIMAL_DESTINATIONS = new Set([CREAR_ANIMAL_ROUTE, ANIMAL_ROUTE, AGREGAR_EVENTO_ROUTE]);
+
+// Harness de DEV/TEST (spec 04 R5, /baston-test): pantalla WEB-ONLY para validar el
+// adapter-web-serial contra el RS420 real, sin pasar por el gating de auth/establecimiento/
+// rodeo. Sin este bypass, una sesión web no logueada (o sin campo/rodeo activo) rebotaría a
+// sign-in/onboarding/crear-rodeo y el harness sería inalcanzable — justo lo contrario del
+// objetivo "probar en pnpm web lo antes posible". Solo aplica en web (Platform.OS==='web'):
+// en native la ruta no funciona (Web Serial no existe) y queda gateada como cualquier otra.
+// Cero superficie de seguridad (frontend puro, sin red/DB). Reversible: borrar este Set + el
+// early-return del efecto de abajo.
+const DEV_WEB_ROUTES = new Set(['baston-test']);
 
 /**
  * Gate unificado de navegación: auth (R1.3 / R7.*) + establecimiento (Fase 4: R6.4–R6.10).
@@ -204,6 +215,13 @@ function RootGate() {
     const inAuthGroup = top === AUTH_GROUP;
     const inVerify = top === VERIFY_ROUTE;
     const inPublic = PUBLIC_ROUTES.has(top);
+
+    // Bypass de gating para harnesses de dev web (ver DEV_WEB_ROUTES): alcanzables directo en
+    // `pnpm web` sin sesión / campo / rodeo, así Raf puede probar el bastón sin rebotar a login.
+    if (Platform.OS === 'web' && DEV_WEB_ROUTES.has(top)) {
+      hideSplashOnce();
+      return;
+    }
 
     if (auth.status === 'unauthenticated') {
       // Sin sesión → al grupo de auth (salvo ruta pública como reset).

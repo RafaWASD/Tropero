@@ -63,10 +63,13 @@ Sabemos que CEDIVE Chascomús tiene su formato. La Red Nacional de Laboratorios 
 - Empezar con parser CEDIVE específicamente
 - Diseñar arquitectura de parsers para que sumar nuevos formatos sea agregar archivos, no refactorizar
 
-### Protocolo BLE del Allflex RS420
-- Escanear con nRF Connect el día del campo
-- Identificar service y characteristic UUIDs
-- Documentar formato del mensaje cuando lee TAG
+### Transporte del Allflex RS420 — 🟢 RESUELTO (ADR-024, feature 04)
+El RS420 **NO es BLE GATT**: es Bluetooth Classic SPP + iAP/MFi (perfil propietario Apple). El
+diseño BLE original de spec 04 / ADR-002 no aplica al transporte real. ADR-024 fija el **contrato de
+ingesta agnóstico del transporte** + 5 adapters (manual, mock, web-serial, spp-android, hid-wedge). El
+TAG sigue siendo ISO 11784/11785 FDX-B (15 díg, prefijo 982/032-Argentina); `parser-rs420.ts` +
+`isValidTag` son insumo firme independiente del transporte. La capa buildable-hoy está implementada y
+gateada (`app/src/services/ble/`, commit feature 04). Lo que sigue depende de **hardware** (ver abajo).
 
 ### Formato exacto del mensaje del Vesta 3516
 - Día de campo: ver qué string emite por Pin 3 TX al pesar un animal
@@ -90,6 +93,26 @@ PostgREST rechaza un soft-delete por `UPDATE deleted_at` cuando la policy de SEL
 - Sacar bloque loopback del código antes del día de campo
 - Validar lectura del Pin 3 (TX) del Vesta cuando pesa un animal
 - Si Vesta no saca datos por defecto: probar Plan B (Config → Lector → cable)
+
+## Hardware del bastón (lector RFID) — pendiente para probar feature 04 end-to-end
+
+Lo que Raf **tiene hoy**: el **Allflex RS420** + una **notebook con `pnpm web`**. Por eso la primera
+prueba real es **web-serial** (Web Serial API, solo Chromium + secure context): enchufar el RS420 a la
+notebook por su cable/COM y leer EIDs en vivo desde la pantalla de test web. Esto NO necesita celular ni
+dev build.
+
+Hardware/acciones a conseguir para cubrir los demás transportes (ADR-024):
+- **Actualizar el firmware del RS420** (acción de Raf) — para descartar bugs viejos del lector antes del
+  día de campo.
+- **Celular Android de prueba** (comprar) — necesario para el adapter **SPP nativo** (`adapter-spp-android`,
+  R6): requiere **dev build propio** (Expo Go SDK 56 no está en tiendas) + Bluetooth Classic SPP, que
+  web no puede ejercitar.
+- **Lector RFID barato con salida HID-keyboard** (comprar, mercado AR: tipo Montetech ME-BL01 / Smart
+  LFID u similar) — para validar el adapter **HID-wedge** (`adapter-hid-wedge`, R8), el camino
+  cross-platform abierto (el lector se presenta como teclado y "tipea" el EID). Sirve también como Plan B
+  si el RS420 da problemas de pareo.
+- **MFi-Allflex / lector MFi** (canal Facundo, "Pedido B") — para el camino iAP/MFi en iPhone, gateado
+  por el gate físico de iPhone (R8). Depende de que Facundo gestione el pedido.
 
 ## Funcionalidades a priorizar después del MVP
 
