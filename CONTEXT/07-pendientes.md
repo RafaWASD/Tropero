@@ -89,6 +89,8 @@ PostgREST rechaza un soft-delete por `UPDATE deleted_at` cuando la policy de SEL
 
 ## Hardware día de campo
 
+> **Pruebas pendientes de hardware** (juntar todas para una misma tanda):
+- **🔵 Bastón RS420 en `pnpm web`** — pantalla de test ya construida y commiteada (`9dd2ed0`, ruta `/baston-test`). Probar: parear RS420 a Windows (COM virtual SPP) → `pnpm.cmd web` en Chrome/Edge → `localhost:8081/baston-test` → "Conectar" → bastonear → ver el EID de 15 díg entrando en vivo. Valida `adapter-web-serial` + parser + dedup end-to-end. Riesgo único: si un firmware nuevo cambió la trama, el EID no parsea → recapturar protocolo.
 - Comprar multímetro nuevo (el DT-830B actual está roto)
 - Sacar bloque loopback del código antes del día de campo
 - Validar lectura del Pin 3 (TX) del Vesta cuando pesa un animal
