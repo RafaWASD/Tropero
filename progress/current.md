@@ -3,6 +3,12 @@
 > Este archivo se vacía al cerrar cada sesión y su resumen se mueve a `history.md`.
 > Mientras trabajás, **mantenelo actualizado en tiempo real**, no al final.
 
+## Feature 04 bastón — capa buildable-hoy ✅ DONE + GATEADA + COMMITEADA (2026-06-06)
+
+Implementada toda en `app/src/services/ble/`: contrato de ingesta (R1-R3, reusa `parser-rs420.ts`) + confirmación pre-commit + feedback (R4) + adapter-manual/web-serial/mock + interfaz `StickAdapter` (R11) + provider/hooks con la firma EXACTA de spec 09 (`useBleStickListener`/`useBleConnectionStatus`/`useBusyMode`/`BleStickListenerProvider`) + offline/logging/no-read/permisos. **75/75 tests BLE verdes** + check.mjs verde. **reviewer APPROVED + Gate 2 PASS**. No se cambió ningún contrato de spec 09 (su frontend está deferred; `app/src/features/animals/` no existe → todo en `services/ble/`, spec 09 Fase 4 delega ahí). Feature 04 → `deferred` (chunk done; el RESTO pendiente de HARDWARE). DEFERIDO: spp-android (R6, dev build + Android), hid-wedge (R8, GATED por gate físico iPhone), pantalla de conexión R9 (tentativa/design system), prueba real con RS420 (T2.5), MFi-Allflex (canal Facundo). Detalle en `progress/impl_04-bluetooth-baston.md`. Commit selectivo (sin tocar feature 2 de la otra terminal).
+
+---
+
 _(Sin sesión activa. La última cerrada está resumida en `progress/history.md`.)_
 
 ## Última sesión cerrada — 2026-06-05: hardening de seguridad
