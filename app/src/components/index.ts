@@ -38,3 +38,5 @@ export { FieldTemplateToggleList } from './FieldTemplateToggleList';
 export type { FieldTemplateToggleListProps } from './FieldTemplateToggleList';
 export { TimelineEvent } from './TimelineEvent';
 export type { TimelineEventProps } from './TimelineEvent';
+export { Select } from './Select';
+export type { SelectProps, SelectOption } from './Select';

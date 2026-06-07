@@ -26,13 +26,14 @@
 
 > **As-built (Fase 3) — split puro/I/O (patrón del repo `establishment-store.ts` ↔ `utils/establishment.ts`)**: la lógica testeable se extrajo a `import-write.ts` (sin imports RN/expo) porque el service importa `./supabase` → `expo-secure-store`, que NO carga bajo `node:test`. El service queda como capa I/O delgada. La orquestación end-to-end de la escritura (`confirmImport`) vive en el service y la llama el hook (Fase 4) tras la confirmación (R5.5); el hook le pasa las `CandidateRow[]` (ya parseadas/validadas con los utils puros) + un probe `isOnline` (NetInfo).
 | `app/src/hooks/useImportRodeo.ts` | hook | Orquesta: pick archivo → parse → mapeo → validar → preview → confirmar → escribir → resultado. | R1.3, R5, R8 |
-| `app/src/screens/import/ImportSourceScreen.tsx` | screen `[UI TENTATIVA]` | Elegir fuente (CSV/Excel | TXT SIGSA) + pick archivo + rodeo destino. | R1.3, R2 |
-| `app/src/screens/import/ImportMappingScreen.tsx` | screen `[UI TENTATIVA]` | Mapeo de columnas (solo CSV/Excel). | R4.1, R4.2 |
-| `app/src/screens/import/ImportPreviewScreen.tsx` | screen `[UI TENTATIVA]` | Preview (válidos/errores/duplicados por motivo) + confirmación. | R5.3, R5.4, R5.5 |
-| `app/src/screens/import/ImportResultScreen.tsx` | screen `[UI TENTATIVA]` | Resultado final (conteos + detalle de errores). | R8.3 |
+| `app/app/import-rodeo.tsx` (**as-built**: 1 ruta con 4 pasos internos, patrón `crear-rodeo`) | screen | Wizard completo: fuente+destino → mapeo (CSV/Excel) → preview → resultado. Una decisión por pantalla. | R1.3, R2, R4, R5, R8.3 |
+| `app/src/components/Select.tsx` (**as-built**) | componente | Combo reutilizable (trigger pill + lista acordeón inline; web+native, sin portales). Lo consume el paso de mapeo. | R4.2 |
+| `app/src/utils/import/import-ui.ts` (**as-built**) | util puro | Helpers de UI puros: normalización por mapeo, copy legible de errores (NUNCA sqlerrm crudo), modelo de preview, `buildColumnSamples` (muestra de datos por columna para el mapeo). | R4, R5.4 |
 | Entry point en `RodeosScreen` (spec 02 C1, **reuso**) + flag de onboarding (spec 01/02, **reuso**) | screen (edición) | CTA "Importar rodeo". **No** se reimplementan los flujos. | R1.1, R1.2 |
 
 > **Dependencia de coordinación (frontend en vuelo).** El entry point se cabla sobre la pantalla de Rodeos (spec 02 C1, committeada) y el onboarding (spec 01 Fase 4 / spec 02, committeados). Esta feature **reusa** esos flujos; si los nombres/firmas difieren al implementar, se adaptan los imports (no se duplica navegación). El pick de archivo usa `expo-document-picker` (managed workflow, ADR-002).
+
+> **As-built (Fase 4) — mapeo SOURCE-DRIVEN (corrección de UX post-implementación).** La primera versión del paso de mapeo era FIELD-DRIVEN (una fila por campo del censo, el combo ofrecía los headers del archivo como opciones). Eso producía sinsentidos como "Caravana electrónica = sexo" (sexo es un header de la planilla), todos los combos ofrecían la misma lista de títulos, y el trigger `$white` sobre `$bg` no tenía afordancia de combo. Se reorientó al patrón estándar de import (estilo Expensify "Import categories"): **una fila por COLUMNA del archivo** (header + muestra de datos via `buildColumnSamples`) con un `Select` cuyas opciones son la lista FIJA de campos del censo + "Ignorar". Esto cumple mejor R4.1/R4.2 ("mapeo de cada columna del archivo a un campo del censo") y encaja con el modelo de datos (`mapping: (CensusField|null)[]` ya indexado por columna → `mapping[c]` es el campo de la columna `c`). El single-source lo sigue forzando `applyMappingOverride` (un campo en una sola columna); cuando un campo ya está en otra columna, su opción lleva un hint `en "<header>"`.
 
 ### 1.2 Backend (delta mínimo)
 
@@ -157,9 +158,11 @@ ImportSourceScreen
   → R3.2: rechazar si #filas > 5000 (reporta, no trunca)
   → R3.6: si parse falla → abortar con mensaje, no escribir
 
-ImportMappingScreen (solo CSV/Excel)
+Paso MAPEO del wizard (solo CSV/Excel) — SOURCE-DRIVEN (as-built)
   → auto-detección de headers (column-mapping.ts)             [R4.1]
-  → ajuste manual del operador                                [R4.2]
+  → una fila POR COLUMNA del archivo: header + muestra de
+    datos (buildColumnSamples) + Select con los campos del
+    censo (lista fija) — el operador ajusta el mapeo          [R4.2]
 
 ImportPreviewScreen
   → normalize-row.ts por fila (sexo/fecha/TAG/raza/topes)     [R3.4, R4.3-4.5, R6]

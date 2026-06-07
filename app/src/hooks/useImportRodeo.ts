@@ -45,6 +45,7 @@ import type { NormalizedRow } from '@/utils/import/normalize-row';
 import { validateRows, type ValidationResult } from '@/utils/import/validate-rows';
 import {
   buildCategoryLabelByIndex,
+  buildColumnSamples,
   buildPreviewItems,
   mappingIsComplete,
   normalizeSigsaRows,
@@ -96,6 +97,12 @@ export type ImportState = {
   file: PickedFile | null;
   headers: string[];
   mapping: ColumnMapping;
+  /**
+   * Muestra de datos por COLUMNA (índice = posición de la columna en headers) para el paso de
+   * mapeo source-driven: los primeros valores no vacíos de cada columna, para que el operador vea
+   * qué trae sin adivinar (patrón Expensify). Para SIGSA queda [] (no hay mapeo, no se usa).
+   */
+  columnSamples: string[];
   /** ¿El mapeo tiene ≥1 identificador + sexo? (habilita "Continuar" en el paso 2). */
   mappingComplete: boolean;
   preview: ImportPreview | null;
@@ -209,6 +216,9 @@ export function useImportRodeo(): UseImportRodeo {
   }, [rodeoId, rodeos]);
 
   const mappingComplete = useMemo(() => mappingIsComplete(mapping), [mapping]);
+
+  // Muestra de datos por columna (paso 2 source-driven). SIGSA no tiene headers → []. PURO.
+  const columnSamples = useMemo(() => buildColumnSamples(headers, dataRows), [headers, dataRows]);
 
   const setSource = useCallback((next: ImportSource) => {
     setSourceState((prev) => {
@@ -472,6 +482,7 @@ export function useImportRodeo(): UseImportRodeo {
     file,
     headers,
     mapping,
+    columnSamples,
     mappingComplete,
     preview,
     result,

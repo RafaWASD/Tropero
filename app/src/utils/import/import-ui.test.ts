@@ -24,6 +24,7 @@ import {
   buildPreviewItems,
   buildCategoryLabelByIndex,
   toCandidates,
+  buildColumnSamples,
   PREVIEW_CAP,
   CATEGORY_BADGE_MAX,
   censusFieldLabel,
@@ -258,4 +259,86 @@ test('censusFieldLabel: etiqueta legible por campo', () => {
   assert.equal(censusFieldLabel('tag_electronic'), 'Caravana electrónica');
   assert.equal(censusFieldLabel('idv'), 'Caravana visual (IDV)');
   assert.equal(censusFieldLabel('sex'), 'Sexo');
+});
+
+test('buildColumnSamples: muestra normal — primeros valores no vacíos por columna, unidos por " · "', () => {
+  const headers = ['caravana', 'sexo', 'raza'];
+  const rows = [
+    ['0001', 'M', 'Angus'],
+    ['0002', 'H', 'Hereford'],
+    ['0003', 'M', 'Brangus'],
+    ['0004', 'H', 'Angus'], // 4ta fila: no entra (cap por defecto = 3)
+  ];
+  const samples = buildColumnSamples(headers, rows);
+  assert.equal(samples.length, 3);
+  assert.equal(samples[0], '0001 · 0002 · 0003');
+  assert.equal(samples[1], 'M · H · M');
+  assert.equal(samples[2], 'Angus · Hereford · Brangus');
+});
+
+test('buildColumnSamples: saltea celdas vacías/espacios intercaladas (toma los primeros NO vacíos)', () => {
+  const headers = ['idv', 'mote'];
+  const rows = [
+    ['0001', ''], // mote vacío
+    ['', '   '], // idv vacío, mote solo espacios
+    ['0002', 'Manchada'],
+    ['0003', 'Negra'],
+    ['0004', 'Overa'],
+  ];
+  const samples = buildColumnSamples(headers, rows);
+  // idv: saltea la celda vacía de la 2da fila → 0001, 0002, 0003.
+  assert.equal(samples[0], '0001 · 0002 · 0003');
+  // mote: saltea vacío + solo-espacios → Manchada, Negra, Overa.
+  assert.equal(samples[1], 'Manchada · Negra · Overa');
+});
+
+test('buildColumnSamples: filas desparejas (más cortas que headers) no rompen', () => {
+  const headers = ['a', 'b', 'c'];
+  const rows = [
+    ['x1', 'y1'], // sin celda para la columna c
+    ['x2'], // solo la columna a
+    ['x3', 'y3', 'z3'],
+  ];
+  const samples = buildColumnSamples(headers, rows);
+  assert.equal(samples.length, 3);
+  assert.equal(samples[0], 'x1 · x2 · x3');
+  assert.equal(samples[1], 'y1 · y3'); // y2 no existe (fila corta)
+  assert.equal(samples[2], 'z3'); // solo la 3ra fila la trae
+});
+
+test('buildColumnSamples: cap de cantidad configurable (perColumn)', () => {
+  const headers = ['n'];
+  const rows = [['1'], ['2'], ['3'], ['4'], ['5']];
+  const samples = buildColumnSamples(headers, rows, { perColumn: 2 });
+  assert.equal(samples[0], '1 · 2');
+});
+
+test('buildColumnSamples: capa cada valor a maxCharsPerValue (texto opaco del archivo, R3.5)', () => {
+  const headers = ['notas'];
+  const long = 'X'.repeat(50);
+  const samples = buildColumnSamples(headers, [[long]], { maxCharsPerValue: 10 });
+  assert.equal(samples[0], 'X'.repeat(10));
+  // El default también capea (24 chars).
+  const def = buildColumnSamples(headers, [[long]]);
+  assert.equal(def[0]?.length, 24);
+});
+
+test('buildColumnSamples: headers sin filas → array de "" del largo correcto', () => {
+  const samples = buildColumnSamples(['a', 'b', 'c'], []);
+  assert.deepEqual(samples, ['', '', '']);
+});
+
+test('buildColumnSamples: columna entera vacía → "" en su posición', () => {
+  const headers = ['llena', 'vacia'];
+  const rows = [
+    ['v1', ''],
+    ['v2', ''],
+  ];
+  const samples = buildColumnSamples(headers, rows);
+  assert.equal(samples[0], 'v1 · v2');
+  assert.equal(samples[1], ''); // columna sin datos → vacío (la UI no la renderiza)
+});
+
+test('buildColumnSamples: sin headers (SIGSA / sin mapeo) → array vacío', () => {
+  assert.deepEqual(buildColumnSamples([], [['a', 'b']]), []);
 });

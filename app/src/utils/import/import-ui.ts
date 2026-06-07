@@ -56,6 +56,48 @@ export function censusFieldLabel(field: CensusField): string {
   return CENSUS_FIELD_LABELS[field];
 }
 
+/** Cuántos valores de muestra mostramos por columna (default del mapeo source-driven). */
+const COLUMN_SAMPLE_COUNT = 3;
+/** Tope de caracteres por valor de muestra (defensa: texto opaco del archivo, R3.5). */
+const COLUMN_SAMPLE_MAX_CHARS = 24;
+
+/**
+ * Arma, por cada columna del archivo (indexada por su posición), un string con los primeros
+ * `perColumn` (default 3) valores NO VACÍOS de esa columna en `dataRows` — cada uno trimmeado y
+ * capeado a `maxCharsPerValue` (default 24, defensa: texto opaco del archivo, R3.5) — unidos por
+ * " · ". Esto alimenta la "muestra de datos" bajo cada header en el paso de mapeo source-driven
+ * (patrón Expensify: el operador ve QUÉ trae la columna, sin adivinar).
+ *
+ * PURA, sin I/O, nunca tira. El array devuelto tiene SIEMPRE `headers.length` entradas (una por
+ * columna, en orden). Una columna sin ningún dato no vacío → "" (la UI no la renderiza). Soporta
+ * filas desparejas (una fila más corta que otra no rompe: una celda fuera de rango se ignora).
+ */
+export function buildColumnSamples(
+  headers: string[],
+  dataRows: string[][],
+  opts?: { perColumn?: number; maxCharsPerValue?: number },
+): string[] {
+  const cols = Array.isArray(headers) ? headers.length : 0;
+  const perColumn = opts?.perColumn ?? COLUMN_SAMPLE_COUNT;
+  const maxChars = opts?.maxCharsPerValue ?? COLUMN_SAMPLE_MAX_CHARS;
+  const rows = Array.isArray(dataRows) ? dataRows : [];
+
+  const samples: string[] = [];
+  for (let c = 0; c < cols; c++) {
+    const values: string[] = [];
+    for (const row of rows) {
+      if (values.length >= perColumn) break;
+      const cell = Array.isArray(row) ? row[c] : undefined;
+      if (typeof cell !== 'string') continue;
+      const trimmed = cell.trim();
+      if (trimmed.length === 0) continue;
+      values.push(trimmed.length > maxChars ? trimmed.slice(0, maxChars) : trimmed);
+    }
+    samples.push(values.join(' · '));
+  }
+  return samples;
+}
+
 /**
  * Whether the current mapping is enough to build a preview (R4.2/R5): at least one identifier
  * column AND the sex column must be mapped. The mapping step blocks "Continuar" until this is true.

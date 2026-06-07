@@ -9,8 +9,9 @@
 // operación de oficina, mantenemos el lenguaje del resto de los wizards: crear-rodeo / crear-animal):
 //   1. FUENTE + DESTINO : 2 cards de fuente (Planilla | SIGSA) + rodeo destino (1 fijo / ≥2 selector) +
 //                          "Elegir archivo" (R1.3, R2). pickFile valida tamaño ANTES de leer (R3.1).
-//   2. MAPEO (solo CSV/Excel): cada campo del censo → un header del archivo (auto-detectado, ajustable,
-//                          R4.1/R4.2). ≥1 identificador + sexo habilita "Continuar".
+//   2. MAPEO (solo CSV/Excel): SOURCE-DRIVEN (patrón Expensify) — una fila por COLUMNA del archivo
+//                          (header + muestra de sus datos) y un combo que dice qué campo del censo es
+//                          (auto-detectado, ajustable, R4.1/R4.2). ≥1 identificador + sexo habilita "Continuar".
 //   3. PREVIEW          : 3 conteos grandes (Válidos/Con error/Duplicados) + lista capeada con motivo
 //                          LEGIBLE por fila (nunca sqlerrm crudo) + confirmación (R5.3–R5.6).
 //   4. RESULTADO        : conteos finales + qué corregir (legible) + CTAs (R8.3).
@@ -31,13 +32,13 @@ import { useRouter } from 'expo-router';
 import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
 import {
   Check,
-  ChevronDown,
   ChevronLeft,
   FileSpreadsheet,
   FileText,
 } from 'lucide-react-native';
 
-import { Button, Card, CategoryBadge, FormError, InfoNote } from '@/components';
+import { Button, Card, CategoryBadge, FormError, InfoNote, Select } from '@/components';
+import type { SelectOption } from '@/components';
 import { useEstablishment, useRodeo } from '@/contexts';
 import type { Rodeo } from '@/services/rodeos';
 import {
@@ -46,10 +47,8 @@ import {
   type ImportStep,
 } from '@/hooks/useImportRodeo';
 import type { ColumnMapping, CensusField } from '@/utils/import/column-mapping';
-import { columnIndexFor } from '@/utils/import/column-mapping';
 import {
   CENSUS_FIELDS,
-  IDENTIFIER_FIELDS,
   censusFieldLabel,
   writeErrorCopy,
   type PreviewItem,
@@ -168,9 +167,9 @@ export default function ImportRodeoScreen() {
         ) : state.step === 'mapping' ? (
           <StepMapping
             headers={state.headers}
+            columnSamples={state.columnSamples}
             mapping={state.mapping}
             onSetColumn={setColumnMapping}
-            muted={muted}
           />
         ) : state.step === 'preview' && state.preview ? (
           <StepPreview preview={state.preview} />
@@ -470,21 +469,27 @@ function RodeoSelector({
   );
 }
 
-// ─── Paso 2: Mapeo de columnas (solo CSV/Excel) ──────────────────────────────────────────────
+// ─── Paso 2: Mapeo de columnas (solo CSV/Excel) — SOURCE-DRIVEN (patrón Expensify) ───────────
+//
+// Una fila por COLUMNA del archivo (no por campo del censo): el operador ve el HEADER + una
+// MUESTRA de los datos de esa columna y elige, en un combo, qué campo del censo es (o "Ignorar").
+// Da vuelta el modelo viejo (fila=campo, opciones=headers), que mostraba sinsentidos como
+// "Caravana electrónica = sexo". El modelo de datos ya está indexado por columna
+// (`mapping: (CensusField|null)[]`), así que `mapping[c]` da directo el campo de la columna `c`.
 
 function StepMapping({
   headers,
+  columnSamples,
   mapping,
   onSetColumn,
-  muted,
 }: {
   headers: string[];
+  columnSamples: string[];
   mapping: ColumnMapping;
   onSetColumn: (columnIndex: number, field: CensusField | null) => void;
-  muted: string;
 }) {
-  // Estado local: qué campo tiene el picker abierto (uno a la vez).
-  const [openField, setOpenField] = useState<CensusField | null>(null);
+  // Estado local: qué columna tiene el combo abierto (uno a la vez — acordeón).
+  const [openColumn, setOpenColumn] = useState<number | null>(null);
 
   return (
     <YStack gap="$3">
@@ -493,147 +498,147 @@ function StepMapping({
           Asigná las columnas
         </Text>
         <Text fontFamily="$body" fontSize="$4" fontWeight="400" color="$textMuted">
-          Decinos qué columna de tu planilla es cada dato. Marcamos con * los obligatorios.
+          Decinos qué dato es cada columna de tu planilla. Las que no uses, dejalas en "Ignorar".
         </Text>
       </YStack>
 
       <YStack gap="$2">
-        {CENSUS_FIELDS.map((field) => (
-          <FieldMappingRow
-            key={field}
-            field={field}
+        {headers.map((header, c) => (
+          <ColumnMappingRow
+            key={c}
+            columnIndex={c}
             headers={headers}
+            header={header}
+            sample={columnSamples[c] ?? ''}
             mapping={mapping}
-            open={openField === field}
-            onToggle={() => setOpenField((f) => (f === field ? null : field))}
-            onPick={(columnIndex) => {
-              onSetColumn(columnIndex, field);
-              setOpenField(null);
+            open={openColumn === c}
+            onToggle={() => setOpenColumn((prev) => (prev === c ? null : c))}
+            onChange={(field) => {
+              onSetColumn(c, field);
+              setOpenColumn(null);
             }}
-            onClear={() => {
-              const col = columnIndexFor(mapping, field);
-              if (col >= 0) onSetColumn(col, null);
-              setOpenField(null);
-            }}
-            muted={muted}
           />
         ))}
       </YStack>
 
       <InfoNote>
-        Necesitás asignar al menos un identificador (caravana electrónica, IDV u otro ID visual) y el
-        sexo para poder continuar.
+        Asigná al menos un identificador (caravana electrónica, IDV u otro ID visual) y el sexo para
+        continuar.
       </InfoNote>
     </YStack>
   );
 }
 
-/** ¿El campo es obligatorio para habilitar el preview? (≥1 identificador colectivo + sexo). */
-function isRequiredField(field: CensusField): boolean {
-  return field === 'sex' || (IDENTIFIER_FIELDS as readonly CensusField[]).includes(field);
-}
+/** El placeholder del combo (no importar la columna). */
+const IGNORE_LABEL = 'Ignorar (no importar)';
 
-function FieldMappingRow({
-  field,
+/**
+ * Una fila del mapeo SOURCE-DRIVEN: el header de la columna `c` (o "Columna N" si viene vacío) +
+ * la muestra de sus datos + un Select cuyas opciones son los campos FIJOS del censo. El value del
+ * Select es `mapping[c]` (el campo asignado a esta columna, o null = Ignorar). Si un campo ya está
+ * asignado a OTRA columna, su opción lleva un hint ("en '<header>'") para avisar que elegirlo lo
+ * va a mover (applyMappingOverride fuerza single-source — no se reimplementa acá).
+ */
+function ColumnMappingRow({
+  columnIndex,
   headers,
+  header,
+  sample,
   mapping,
   open,
   onToggle,
-  onPick,
-  onClear,
-  muted,
+  onChange,
 }: {
-  field: CensusField;
+  columnIndex: number;
   headers: string[];
+  header: string;
+  sample: string;
   mapping: ColumnMapping;
   open: boolean;
   onToggle: () => void;
-  onPick: (columnIndex: number) => void;
-  onClear: () => void;
-  muted: string;
+  onChange: (field: CensusField | null) => void;
 }) {
-  const col = columnIndexFor(mapping, field);
-  const assignedHeader = col >= 0 ? headers[col] : null;
-  const required = isRequiredField(field);
-  const label = `${censusFieldLabel(field)}${required ? ' *' : ''}`;
+  const title = columnTitle(header, columnIndex);
+  const assignedField = mapping[columnIndex] ?? null;
 
+  // Opciones = los campos FIJOS del censo. Hint cuando el campo ya está en OTRA columna (≠ esta):
+  // "en '<header de esa columna>'" → el operador entiende que elegirlo lo va a mover de columna
+  // (applyMappingOverride limpia la otra columna; el hint es la señal previa al toque).
+  const options: SelectOption[] = CENSUS_FIELDS.map((field) => {
+    const otherCol = mapping.indexOf(field);
+    const usedElsewhere = otherCol >= 0 && otherCol !== columnIndex;
+    return {
+      value: field,
+      label: censusFieldLabel(field),
+      hint: usedElsewhere ? `en "${columnTitle(headers[otherCol] ?? '', otherCol)}"` : undefined,
+    };
+  });
+
+  // Contenedor de fila con fondo $white (no $surface): así el trigger del Select —muted $surface /
+  // assigned $greenLight— SIEMPRE contrasta contra el fondo de la fila (resuelve el defecto de
+  // afordancia: un combo $surface dentro de una card $surface se fundiría). Mismo patrón de fila
+  // estilo-card que SourceCard / PreviewRow de esta pantalla.
+  //
+  // Layout VERTICAL (no header-izq + combo-der): la identidad de la columna (header + muestra) va
+  // arriba a ancho completo, y el Select debajo también a ancho completo. Así el trigger pill y su
+  // lista desplegada (acordeón inline) usan TODO el ancho de la fila — la lista no queda apretada en
+  // una columna estrecha (con labels como "Fecha de nacimiento" + hint) y el target es más cómodo
+  // en manga (una decisión por fila, Fitts).
   return (
-    <YStack gap="$2">
-      <Text fontFamily="$body" fontSize="$3" fontWeight="500" color="$textMuted">
-        {label}
-      </Text>
-      <Pressable onPress={onToggle} {...buttonA11y(Platform.OS, { label: `Elegir columna para ${censusFieldLabel(field)}`, selected: open })}>
-        <XStack
-          width="100%"
-          minHeight="$touchMin"
-          alignItems="center"
-          gap="$3"
-          backgroundColor="$white"
-          borderRadius="$card"
-          borderWidth={1}
-          borderColor={assignedHeader ? '$primary' : '$divider'}
-          paddingHorizontal="$4"
-          pressStyle={{ backgroundColor: '$surface' }}
+    <YStack
+      width="100%"
+      gap="$2"
+      borderRadius="$card"
+      borderWidth={1}
+      borderColor={assignedField ? '$primary' : '$divider'}
+      backgroundColor="$white"
+      paddingHorizontal="$4"
+      paddingVertical="$3"
+    >
+      {/* Identidad de la columna: header + muestra de datos (el gran win del patrón source-driven). */}
+      <YStack width="100%" minWidth={0} gap="$1">
+        <Text
+          numberOfLines={1}
+          fontFamily="$body"
+          fontSize="$5"
+          fontWeight="600"
+          color="$textPrimary"
         >
+          {title}
+        </Text>
+        {sample.length > 0 ? (
           <Text
-            flex={1}
-            minWidth={0}
             numberOfLines={1}
             fontFamily="$body"
-            fontSize="$5"
-            fontWeight={assignedHeader ? '600' : '400'}
-            color={assignedHeader ? '$textPrimary' : '$textMuted'}
+            fontSize="$3"
+            fontWeight="400"
+            color="$textMuted"
           >
-            {assignedHeader ?? 'Sin asignar'}
+            {sample}
           </Text>
-          <ChevronDown size={22} color={muted} strokeWidth={2} />
-        </XStack>
-      </Pressable>
+        ) : null}
+      </YStack>
 
-      {open ? (
-        <Card gap="$1" paddingVertical="$2">
-          <PickerOption label="Sin asignar" selected={col < 0} onPress={onClear} />
-          {headers.map((h, i) => (
-            <PickerOption
-              key={`${h}-${i}`}
-              label={h.trim().length > 0 ? h : `Columna ${i + 1}`}
-              selected={i === col}
-              onPress={() => onPick(i)}
-            />
-          ))}
-        </Card>
-      ) : null}
+      {/* Combo: qué campo del censo es esta columna (ancho completo de la fila). */}
+      <Select
+        value={assignedField}
+        options={options}
+        placeholder="Ignorar"
+        placeholderOptionLabel={IGNORE_LABEL}
+        open={open}
+        onToggle={onToggle}
+        onChange={(value) => onChange(value as CensusField | null)}
+        tone={assignedField ? 'assigned' : 'muted'}
+        a11yLabel={`Asignar un campo a la columna ${title}`}
+      />
     </YStack>
   );
 }
 
-function PickerOption({
-  label,
-  selected,
-  onPress,
-}: {
-  label: string;
-  selected: boolean;
-  onPress: () => void;
-}) {
-  return (
-    <Pressable onPress={onPress} {...buttonA11y(Platform.OS, { label, selected })}>
-      <XStack alignItems="center" gap="$2" minHeight="$chipMin" paddingHorizontal="$2" pressStyle={{ opacity: 0.6 }}>
-        <Text
-          flex={1}
-          minWidth={0}
-          numberOfLines={1}
-          fontFamily="$body"
-          fontSize="$4"
-          fontWeight="500"
-          color="$textPrimary"
-        >
-          {label}
-        </Text>
-        {selected ? <Check size={20} color={getTokenValue('$primary', 'color')} strokeWidth={2.5} /> : null}
-      </XStack>
-    </Pressable>
-  );
+/** El título visible de una columna: su header trimmeado, o "Columna N" (1-based) si viene vacío. */
+function columnTitle(header: string, columnIndex: number): string {
+  const trimmed = header.trim();
+  return trimmed.length > 0 ? trimmed : `Columna ${columnIndex + 1}`;
 }
 
 // ─── Paso 3: Preview ─────────────────────────────────────────────────────────────────────────
