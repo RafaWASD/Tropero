@@ -3,6 +3,20 @@
 > Este archivo se vacía al cerrar cada sesión y su resumen se mueve a `history.md`.
 > Mientras trabajás, **mantenelo actualizado en tiempo real**, no al final.
 
+## Spec 02 C3.3 — Baja / egreso de animal desde la ficha: DONE + GATEADO + COMMITEADO (2026-06-07)
+
+Raf preguntó "¿cómo elimino un animal?" → en RAFAQ no se borra, se **da de baja** (egreso, archivar con motivo, preserva historia). El backend ya estaba 100% listo y gateado (RPC `exit_animal_profile`, `0044`, SEC-SPEC-01); faltaba SOLO el frontend + servicio cliente = el chunk **C3.3** del frontend de spec 02 (la ficha ya lo tenía anotado como pendiente en `[id].tsx:326`). Raf eligió implementarlo.
+
+**Gate 0 (UX) cerrado con Raf** (`specs/active/02-modelo-animal/context-c3.3-baja.md`): D1 = **3 motivos** en MVP (Venta/Muerte/Transferencia, mapean 1:1 a `status`+`exit_reason`; los otros 3 del enum — culling/theft/other — diferidos a semántica de reporte con Facundo). D2 = peso+precio **opcionales solo en Venta** (analytics). UX resuelta por el leader (no se le preguntó a Raf, se le mostró armada): botón discreto al fondo de la ficha (terracota outline, fricción protectora para destructivo), sheet/pantalla de 2 pasos, no reversible desde UI, gating espejo del authz del RPC, modo archivada (badge + ocultar acciones), online-only. **Gate 1 N/A** (frontend, no toca schema/RLS/Edge nuevos).
+
+**Implementación** (implementer): servicio `exitAnimalProfile` sobre `supabase.rpc('exit_animal_profile')` + lógica PURA `app/src/services/exit-animal.ts` (split testeable: mapeo motivo→status, `classifyExitError` sin leak de sqlerrm, validadores de venta opcionales, `sanitizePriceInput` SIN el cap de 4 díg del peso — bug que el implementer cazó en su autorrevisión, `archivedBadgeLabel`) + `fetchAnimalDetail` extendido (`created_by`/`exit_date`/`exit_reason`) + pantalla `app/app/animal/baja.tsx` (paso 1 motivo / paso 2 fecha+venta+aviso-irreversibilidad+botón destructivo, `busyRef` anti doble-tap) + ficha `[id].tsx` (botón gated `canExit` + `ArchivedBadge` + ocultar "Agregar evento"/"Dar de baja" en archivada). 25 unit tests + e2e nuevo en `animals.spec.ts`. Bitácora `progress/impl_02-c3.3-baja.md`.
+
+**Gates (todos verdes)**: el leader verificó el núcleo authz-sensitive a mano (gating conservador multi-tenant: animal de otro campo → solo `created_by`; el RPC es la barrera real). **reviewer APPROVED** (`review_02-c3.3-baja.md`, verificó check + Playwright 14/14; 1 nit cosmético 29→25 tests corregido en specs). **Gate 2 (security_code) PASS 0 HIGH** (`security_code_02-c3.3-baja.md`: authz/IDOR OK, sin leak de errores, inputs validados, ReDoS descartado empíricamente; 1 MED al backlog = `exit_weight`/`exit_price` sin CHECK>0 DB). **Veto de diseño del leader** (skill design-review): 🟡 mixta, pasa el checklist (jerarquía/consistencia/manga-friendly/estados), reusa componentes ya validados (MotherCard/AddEventButton/AbortionFlag) — no se re-iteró. **Puerta de código humana**: Raf aprobó ("perfecta, cerremos", 2026-06-07).
+
+**check.mjs verde** end-to-end (608 client unit tests incl. 25 nuevos + e2e animals 14/14 + suites backend sin regresión). Specs reconciliadas (R14.9 aterrizada + design.md sección C3.3 + tasks.md T3.9/T4.6). Commit: ver abajo. Spec 02 sigue `deferred` (C4 lotes + C5 PowerSync pendientes).
+
+**2 deudas ANENAS anotadas al backlog (ninguna de C3.3)**: (1) `rodeos.spec.ts` 2 e2e rojos por el `OnboardingImportOffer` de **feature 12** (test desactualizado de ESE frente, no bug real; cerrar cuando Raf pruebe la 12, que sigue esperando su puerta de código); (2) MED-01 `exit_weight`/`exit_price` sin CHECK>0 DB.
+
 ## Feature 12 — Importación masiva de rodeo: SPEC REDACTADA + GATE 1 EN CURSO (2026-06-06)
 
 Raf eligió esto como "lo próximo" tras cerrar feature 04 (enabler del beta de Chascomús: cargar el rodeo existente desde Excel/planilla + TXT SIGSA, sin esperar a colocar los TAGs). Estaba `context_ready` (Gate 0 aprobado s22).

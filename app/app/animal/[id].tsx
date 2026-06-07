@@ -14,12 +14,13 @@
 // Criticidad 🟡. Cero hardcode (ADR-023 §4): tokens + componentes; íconos lucide con getTokenValue.
 // Voseo es-AR. a11y por helper (utils/a11y).
 
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Platform, Pressable } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
 import {
+  Archive,
   ChevronLeft,
   ChevronRight,
   ClipboardList,
@@ -36,6 +37,8 @@ import type { LucideIcon } from 'lucide-react-native';
 
 import { Button, Card, CategoryBadge, InfoNote, FormError, TimelineEvent } from '@/components';
 import { fetchAnimalDetail, type AnimalDetail, type AnimalStatus } from '@/services/animals';
+import { archivedBadgeLabel } from '@/services/exit-animal';
+import { useAuth, useEstablishment } from '@/contexts';
 import { fetchTimeline, fetchMother, type TimelineItem, type MotherLink } from '@/services/events';
 import {
   deriveCurrentState,
@@ -53,6 +56,13 @@ export default function AnimalDetailScreen() {
   const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<{ id?: string }>();
   const profileId = typeof params.id === 'string' ? params.id : null;
+
+  // Contexto de autorización para el gating del botón "Dar de baja" (C3.3, R4.14): el RPC enforça
+  // server-side `has_role_in(est) AND (is_owner_of(est) OR created_by = auth.uid())`. El gating de
+  // cliente es best-effort (el RPC es la barrera real), pero no mostramos el botón a quien no podría.
+  const { state: authState } = useAuth();
+  const { state: estState } = useEstablishment();
+  const userId = authState.status === 'authenticated' ? authState.user.id : null;
 
   const [detail, setDetail] = useState<AnimalDetail | null>(null);
   const [timeline, setTimeline] = useState<TimelineItem[] | null>(null);
@@ -141,6 +151,38 @@ export default function AnimalDetailScreen() {
     router.push({ pathname: '/animal/[id]', params: { id: mother.profileId } });
   }, [mother, router]);
 
+  // Identificador HERO del animal (idv → visual → caravana → "Animal"): lo mismo que muestra el hero,
+  // reusado para el resumen del sheet de baja. Memo: depende solo del detalle.
+  const heroLabel = useMemo(
+    () => detail?.idv ?? detail?.visualIdAlt ?? detail?.tagElectronic ?? 'Animal',
+    [detail],
+  );
+
+  // ¿Mostramos "Dar de baja"? (C3.3, R4.14) Solo si:
+  //   - el animal está ACTIVO (un archivado ya está de baja, no se vuelve a ofrecer), Y
+  //   - el usuario es OWNER del campo del animal, O lo CARGÓ (detail.createdBy === userId).
+  // Conservadurismo multi-tenant: el `role`/owner del contexto es del establishment ACTIVO. Si el
+  // animal pertenece a OTRO campo (detail.establishmentId !== activo), el owner-flag del contexto NO
+  // aplica a ese campo → en ese caso habilitamos SOLO por created_by === userId (el RPC re-valida con
+  // has_role_in del campo del animal igual). Si coincide el campo activo, usamos estState.role.
+  const canExit = useMemo(() => {
+    if (!detail || detail.status !== 'active') return false;
+    const isAuthor = userId != null && detail.createdBy != null && detail.createdBy === userId;
+    const activeEstId = estState.status === 'active' ? estState.current.id : null;
+    const animalInActiveEst = activeEstId != null && activeEstId === detail.establishmentId;
+    const isOwnerOfActive = estState.status === 'active' && estState.role === 'owner';
+    const isOwner = animalInActiveEst && isOwnerOfActive;
+    return isAuthor || isOwner;
+  }, [detail, userId, estState]);
+
+  const goToBaja = useCallback(() => {
+    if (!detail) return;
+    router.push({
+      pathname: '/animal/baja',
+      params: { profileId: detail.profileId, hero: heroLabel },
+    });
+  }, [detail, heroLabel, router]);
+
   const muted = getTokenValue('$textMuted', 'color');
 
   return (
@@ -183,6 +225,10 @@ export default function AnimalDetailScreen() {
           <>
             <AnimalHero detail={detail} hadAbortion={hasAbortion(timeline)} />
 
+            {/* Modo archivada (C3.3, R14.9): si el animal está de baja (status ≠ active), badge bajo el
+                hero con el verbo + fecha de egreso ("Vendido el …"). Para un animal activo → null. */}
+            <ArchivedBadge status={detail.status} exitDate={detail.exitDate} />
+
             {/* Link a la MADRE (R14.7): solo si el animal es un ternero con parto registrado. Tappable
                 → ficha de la madre. Tolera madre archivada (status ≠ active): indicador + navega igual. */}
             {mother ? <MotherCard mother={mother} onPress={goToMother} /> : null}
@@ -209,13 +255,19 @@ export default function AnimalDetailScreen() {
                 no solo historia. El timeline de abajo sigue siendo la auditoría completa. */}
             <CurrentStateSection timeline={timeline} sex={detail.sex} />
 
-            {/* Historial real (C3.1): riel de eventos + CTA "Agregar evento". */}
+            {/* Historial real (C3.1): riel de eventos + CTA "Agregar evento". El CTA se OCULTA en modo
+                archivada (C3.3): un animal dado de baja no recibe eventos nuevos en MVP. */}
             <HistorySection
               timeline={timeline}
               error={timelineError}
               onAddEvent={goToAddEvent}
               onRetry={() => void load()}
+              archived={detail.status !== 'active'}
             />
+
+            {/* "Dar de baja" (C3.3, R4.14): al FONDO de la ficha, discreto (terracota/outline), gated:
+                solo activo + (owner del campo o autor del alta). El RPC es la barrera real (42501). */}
+            {canExit ? <ExitButton onPress={goToBaja} /> : null}
           </>
         ) : null}
       </ScrollView>
@@ -313,6 +365,39 @@ function AbortionFlag() {
         <HeartCrack size={14} color={terracota} strokeWidth={2.5} />
         <Text fontFamily="$body" fontSize="$4" fontWeight="600" color="$terracota" numberOfLines={1}>
           Tuvo aborto
+        </Text>
+      </XStack>
+    </View>
+  );
+}
+
+// ─── Badge de modo archivada (C3.3, R14.9) ────────────────────────────────────────────
+//
+// Si el animal está de baja (status ≠ active), una fila bajo el hero con el ÍCono Archive + el verbo
+// derivado de status+exit_date ("Vendido el {fecha}" / "Muerto el …" / "Transferido el …"). Para un
+// animal activo, archivedBadgeLabel devuelve null → no se renderiza nada. La fecha puede ser null
+// (datos viejos): el helper PURO ya evita el "null" literal (solo el verbo). Lenguaje terracota como
+// AbortionFlag (señal de estado de salida): $surface de fondo + borde/texto/ícono $terracota (no hay
+// token terracota-claro). a11y por helper (View no mapea accessibilityLabel a aria-label en web).
+function ArchivedBadge({ status, exitDate }: { status: AnimalStatus; exitDate: string | null }) {
+  const label = archivedBadgeLabel(status, exitDate);
+  if (!label) return null;
+  const terracota = getTokenValue('$terracota', 'color');
+  return (
+    <View
+      backgroundColor="$surface"
+      borderWidth={1}
+      borderColor="$terracota"
+      borderRadius="$card"
+      paddingHorizontal="$4"
+      paddingVertical="$3"
+      alignSelf="flex-start"
+      {...labelA11y(Platform.OS, label)}
+    >
+      <XStack alignItems="center" gap="$2">
+        <Archive size={18} color={terracota} strokeWidth={2.5} />
+        <Text fontFamily="$body" fontSize="$5" fontWeight="600" color="$terracota" numberOfLines={1}>
+          {label}
         </Text>
       </XStack>
     </View>
@@ -561,11 +646,14 @@ function HistorySection({
   error,
   onAddEvent,
   onRetry,
+  archived,
 }: {
   timeline: TimelineItem[] | null;
   error: string | null;
   onAddEvent: () => void;
   onRetry: () => void;
+  /** Modo archivada (status ≠ active): oculta el CTA "Agregar evento" (C3.3). */
+  archived: boolean;
 }) {
   const primary = getTokenValue('$primary', 'color');
   // `now` se calcula UNA vez por render de la sección (no por fila) — determinístico dentro del render.
@@ -598,7 +686,8 @@ function HistorySection({
         </Text>
       </XStack>
 
-      <AddEventButton onPress={onAddEvent} />
+      {/* CTA "Agregar evento" — oculto en modo archivada (un animal de baja no recibe eventos en MVP). */}
+      {archived ? null : <AddEventButton onPress={onAddEvent} />}
 
       {error ? (
         <YStack gap="$2">
@@ -661,6 +750,41 @@ function AddEventButton({ onPress }: { onPress: () => void }) {
         <Plus size={20} color={white} strokeWidth={2.5} />
         <Text fontFamily="$body" fontSize="$5" fontWeight="600" color="$white">
           Agregar evento
+        </Text>
+      </XStack>
+    </Pressable>
+  );
+}
+
+// Botón "Dar de baja" DISCRETO al fondo de la ficha (C3.3): outline terracota (NO un primario que
+// compita con "Agregar evento"). La baja es destructiva e infrecuente → fricción a propósito (Fitts
+// inverso: hay que scrollear hasta el fondo). Solo navega al sheet de baja; la confirmación + el
+// write viven en /animal/baja. a11y por helper (NUNCA accessibilityLabel crudo en el Pressable de
+// RN-web). Cero hardcode: tokens + getTokenValue para el ícono lucide.
+function ExitButton({ onPress }: { onPress: () => void }) {
+  const terracota = getTokenValue('$terracota', 'color');
+  return (
+    <Pressable
+      style={{ width: '100%' }}
+      onPress={onPress}
+      {...buttonA11y(Platform.OS, { label: 'Dar de baja' })}
+    >
+      <XStack
+        width="100%"
+        minHeight="$touchMin"
+        alignItems="center"
+        justifyContent="center"
+        gap="$2"
+        borderRadius="$pill"
+        backgroundColor="transparent"
+        borderWidth={2}
+        borderColor="$terracota"
+        paddingHorizontal="$5"
+        pressStyle={{ backgroundColor: '$surface' }}
+      >
+        <Archive size={18} color={terracota} strokeWidth={2.5} />
+        <Text fontFamily="$body" fontSize="$5" fontWeight="600" color="$terracota">
+          Dar de baja
         </Text>
       </XStack>
     </Pressable>

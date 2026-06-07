@@ -15,6 +15,11 @@
 import { supabase } from './supabase';
 import { type AnimalSex } from '../utils/animal-category';
 import { classifyIdentifier, classifySearchQuery } from '../utils/animal-identifier';
+import {
+  classifyExitError,
+  type ExitReasonChoice,
+  type ExitStatus,
+} from './exit-animal';
 
 // ─── Error / Result uniforme (mismo shape que rodeo-config.ts / establishments.ts) ──
 
@@ -84,6 +89,19 @@ export type AnimalDetail = {
   entryDate: string | null;
   entryWeight: number | null;
   status: AnimalStatus;
+  /**
+   * Autor del alta (animal_profiles.created_by, 0043 — seteado server-side por trigger a auth.uid()).
+   * Lo usa el gating del botón "Dar de baja" (C3.3, R4.14): además del owner del campo, el operario
+   * que CARGÓ el animal puede darlo de baja. null = alta sin autor registrado (datos viejos / seed).
+   */
+  createdBy: string | null;
+  /** Fecha de egreso (animal_profiles.exit_date, 0020/0044) — null si el animal sigue activo. Modo archivada. */
+  exitDate: string | null;
+  /**
+   * Motivo de egreso (animal_profiles.exit_reason, enum 0044: sale|death|transfer|culling|theft|other).
+   * null si activo. Lo usa el badge de modo archivada para derivar el verbo (vendido/muerto/transferido).
+   */
+  exitReason: string | null;
   rodeoId: string;
   rodeoName: string;
   managementGroupId: string | null;
@@ -600,6 +618,9 @@ type ProfileDetailRow = {
   entry_date: string | null;
   entry_weight: number | null;
   status: AnimalStatus;
+  created_by: string | null;
+  exit_date: string | null;
+  exit_reason: string | null;
   rodeo_id: string;
   management_group_id: string | null;
   animals: { tag_electronic: string | null; sex: AnimalSex; birth_date: string | null } | null;
@@ -619,7 +640,7 @@ export async function fetchAnimalDetail(profileId: string): Promise<ServiceResul
     .from('animal_profiles')
     .select(
       'id, animal_id, establishment_id, idv, visual_id_alt, category_id, category_override, breed, coat_color,' +
-        ' entry_date, entry_weight, status, rodeo_id, management_group_id,' +
+        ' entry_date, entry_weight, status, created_by, exit_date, exit_reason, rodeo_id, management_group_id,' +
         ' animals!inner ( tag_electronic, sex, birth_date ),' +
         ' rodeos!inner ( name ),' +
         ' categories_by_system!inner ( code, name ),' +
@@ -653,12 +674,61 @@ export async function fetchAnimalDetail(profileId: string): Promise<ServiceResul
       entryDate: r.entry_date,
       entryWeight: r.entry_weight,
       status: r.status,
+      createdBy: r.created_by,
+      exitDate: r.exit_date,
+      exitReason: r.exit_reason,
       rodeoId: r.rodeo_id,
       rodeoName: r.rodeos?.name ?? '',
       managementGroupId: r.management_group_id,
       managementGroupName: r.management_groups?.name ?? null,
     },
   };
+}
+
+// ─── Baja / egreso de animal (R4.14 / R14.9, C3.3) ───────────────────────────────────
+
+export type ExitAnimalInput = {
+  /** El animal_profile a dar de baja. */
+  profileId: string;
+  /** Status de egreso resuelto del motivo (sold|dead|transferred). NUNCA 'active' (el RPC lo rechaza). */
+  status: ExitStatus;
+  /** exit_reason resuelto del motivo (sale|death|transfer en MVP). */
+  exitReason: ExitReasonChoice;
+  /** Fecha de egreso 'YYYY-MM-DD'. */
+  exitDate: string;
+  /** Peso de salida en kg (opcional, SOLO Venta — analytics). */
+  exitWeight?: number | null;
+  /** Precio de salida en $ (opcional, SOLO Venta — analytics). */
+  exitPrice?: number | null;
+};
+
+/**
+ * Da de baja (egreso) un animal_profile vía el RPC `exit_animal_profile` (migration 0044). NO es
+ * soft-delete: el perfil queda archivado y visible en historial (deleted_at NULL), pero sale del
+ * rodeo activo por el filtro status='active' de las queries operativas (R4.12/R4.15).
+ *
+ * Authz: el RPC enforça server-side `has_role_in(est) AND (is_owner_of(est) OR created_by=auth.uid())`
+ * (R4.14, SEC-SPEC-01). El gating del botón en la ficha es best-effort; ESTE RPC es la barrera real —
+ * un 42501 se traduce a "No tenés permiso…" (classifyExitError). El cliente NO fuerza permisos.
+ *
+ * Online-only (C3.3): sin red → kind:'network' con copy accionable; la baja NO se marca (el RPC no
+ * llegó a correr). El offline real es PowerSync (C5).
+ *
+ * Los nombres de params son los del SQL (p_profile_id, p_status, …). exit_weight/exit_price se mandan
+ * solo si vienen (el RPC los coalesce: null no pisa un valor previo). El RPC devuelve void → value void.
+ */
+export async function exitAnimalProfile(input: ExitAnimalInput): Promise<ServiceResult<void>> {
+  const { error } = await supabase.rpc('exit_animal_profile', {
+    p_profile_id: input.profileId,
+    p_status: input.status,
+    p_exit_reason: input.exitReason,
+    p_exit_date: input.exitDate,
+    // Opcionales: mandamos null explícito si no vinieron (el RPC los coalesce → no pisa valores previos).
+    p_exit_weight: input.exitWeight ?? null,
+    p_exit_price: input.exitPrice ?? null,
+  });
+  if (error) return { ok: false, error: classifyExitError(error) };
+  return { ok: true, value: undefined };
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────────

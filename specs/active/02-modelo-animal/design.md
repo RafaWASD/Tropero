@@ -2110,6 +2110,27 @@ MainTabs
 
 `AnimalSearchScreen` y `AnimalCreateScreen` **no se definen acá** — pertenecen a spec 09 `09-buscar-animal` (UX de búsqueda + alta interactiva + form dinámico por rodeo + dos puertas manual/BLE). `AcceptInvitation` y `EmptyState` siguen del spec 01.
 
+### Baja desde la ficha (C3.3 — as-built, frontend Fase 3+)
+
+> Aterriza la UX de `R4.14`/`R14.9` (Gate 0 `context-c3.3-baja.md`, 2026-06-07). Frontend + un servicio cliente sobre el RPC **ya existente** `exit_animal_profile` (`0044`). **No** toca schema/RLS/migración. El frontend de spec 02 usa **servicios delgados** (`services/animals.ts`) en lugar de hooks react-query (los `useExitAnimal`/`useAnimal` de la sección anterior son el contrato de datos; el as-built los implementa como funciones de servicio + estado local en la pantalla, mismo patrón que C1/C2/C3.1/C3.2).
+
+**Capa de datos** — `app/src/services/`:
+
+- **`exitAnimalProfile(input): Promise<ServiceResult<void>>`** (`animals.ts`): llama `supabase.rpc('exit_animal_profile', { p_profile_id, p_status, p_exit_reason, p_exit_date, p_exit_weight, p_exit_price })`. `p_exit_weight`/`p_exit_price` se mandan `null` si no vinieron (el RPC los `coalesce` → no pisan valores previos). El RPC es la **barrera real de authz** (`has_role_in AND (is_owner_of OR created_by = auth.uid())`, SEC-SPEC-01); un `42501` → copy "No tenés permiso…".
+- **`exit-animal.ts`** (lógica PURA, sin `./supabase` → testeable bajo `node:test`, patrón `establishment-store.ts`):
+  - `EXIT_REASON_MAPPINGS` + `exitReasonToStatus(choice)` → el mapa **motivo → (status, exit_reason)**: `Venta→(sold,sale)` (captura peso+precio), `Muerte→(dead,death)`, `Transferencia→(transferred,transfer)`. MVP expone **3 motivos** (no los 6 del enum DB; `culling/theft/other` diferidos a Facundo — D1).
+  - `classifyExitError(error)` → mapea `42501`/`23503`/`23514`/network/unknown a un `AppError` con copy es-AR accionable (NUNCA el `sqlerrm` crudo).
+  - `validateExitWeight` / `validateExitPrice` (OPCIONALES, vacío → `null`) + `sanitizePriceInput` (sin el cap de 4 díg de `sanitizeWeightInput` — un animal se vende por 6-7 cifras).
+  - `archivedBadgeLabel(status, exitDate)` → texto del badge de modo archivada ("Vendido el {fecha}"); fecha `null` → solo el verbo (nunca "null").
+- **`fetchAnimalDetail`** (extendido): el SELECT + el type `AnimalDetail` agregan `created_by → createdBy`, `exit_date → exitDate`, `exit_reason → exitReason` (gating + badge de archivada).
+
+**Capa de UI** — `app/app/animal/`:
+
+- **`[id].tsx`** (ficha): botón **"Dar de baja"** al FONDO (terracota/outline, discreto — Fitts inverso a propósito), **gated** por `canExit = status==='active' AND (owner del campo activo del animal OR createdBy===userId)`. Conservadurismo multi-tenant: el owner-flag del contexto es del establishment **activo**; si el animal es de otro campo, se habilita solo por `createdBy` (el RPC re-valida igual). **Modo archivada** (`status≠active`): badge bajo el hero (`ArchivedBadge`) + se ocultan "Agregar evento" y "Dar de baja"; el resto read-only.
+- **`baja.tsx`** (pantalla corta, registrada en `_layout.tsx` bajo el top-segment `animal` ya permitido): paso 1 = elegir motivo (3 cards grandes ≥`$touchMin`); paso 2 = fecha (default hoy) + (solo Venta) peso/precio opcionales + resumen del animal + aviso de irreversibilidad + botón destructivo. `busyRef` anti doble-tap; online-only (sin red → error, no marca la baja). Post-éxito → `backOr` a la ficha, que recarga por `useFocusEffect` y pasa a modo archivada in-situ (el animal sale de la tab Animales por el filtro `status='active'`).
+
+**Tests**: `exit-animal.test.ts` (25 unit: mapeo, `classifyExitError`, validadores opcionales, `sanitizePriceInput`, `archivedBadgeLabel`) + e2e `animals.spec.ts` (owner da de baja Venta → desaparece de Animales + ficha "Vendido" + visible bajo filtro Vendidos).
+
 ## PowerSync
 
 ### Buckets nuevos

@@ -369,6 +369,8 @@ function RootGate() {
           navegables desde la tab Animales con un rodeo existente (no se re-rutean al wizard). */}
       <Stack.Screen name="crear-animal" />
       <Stack.Screen name="animal/[id]" />
+      {/* Spec 02 C3.3 — baja / egreso de animal desde la ficha (motivo + fecha + datos de venta). */}
+      <Stack.Screen name="animal/baja" />
       {/* Spec 02 C3.1 — wizard "Agregar evento" desde la ficha (peso / condición / observación). */}
       <Stack.Screen name="agregar-evento" />
     </Stack>

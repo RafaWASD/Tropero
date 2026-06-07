@@ -17,6 +17,20 @@ No es un sustituto de `feature_list.json` ni de los ADRs — es la antesala dond
 
 ## Ítems pendientes
 
+## 2026-06-07 — `exit_weight`/`exit_price` sin `CHECK > 0` a nivel DB (MED-01, Gate 2 C3.3)
+
+**Origen**: sesión actual, Gate 2 (security_analyzer modo code) de C3.3 baja de animal — finding MEDIUM.
+**Qué**: las columnas `animal_profiles.exit_weight` / `exit_price` (`0020`/`0044`) tienen como único backstop server el tipo `numeric` — no hay `CHECK (exit_weight > 0)` ni rango de precio a nivel DB. El cliente (`validateExitWeight`/`validateExitPrice`) ya valida `>0` y topes, pero un valor negativo/absurdo pegado directo al RPC `exit_animal_profile` (saltando la UI) se persistiría.
+**Por qué importa**: bajo — no cruza frontera de seguridad (es dato de analytics del **propio** tenant, no leak ni escalación). Solo ensucia los reportes de venta del dueño. No se tocó backend en C3.3.
+**Próximo paso sugerido**: en una pasada de hardening del modelo de animal, agregar `CHECK (exit_weight > 0)` + rango de `exit_price` en una migration nueva (junto con otras deudas de CHECK de dominio si las hay). Nada urgente.
+
+## 2026-06-07 — `rodeos.spec.ts` e2e roja por el OnboardingImportOffer de feature 12
+
+**Origen**: sesión actual, mientras se implementaba C3.3 (baja de animal). El implementer lo detectó como hallazgo fuera de alcance; el leader lo confirmó por `git diff` (C3.3 NO toca `rodeos.spec.ts` ni `crear-rodeo.tsx` → el rojo es ajeno y pre-existente al chunk).
+**Qué**: `crear-rodeo.tsx:221` muestra el `OnboardingImportOffer` (CTA "Importar rodeo", feature 12, commit `4e1b6d5`) tras crear el **primer** rodeo, con `router.replace('/import-rodeo')` / `router.replace('/(tabs)')`. La suite `app/e2e/rodeos.spec.ts` (BUG 1) crea un rodeo y espera aterrizar directo en home → la oferta de onboarding intercepta y el assert falla. 2 tests rojos. El `check.mjs` NO corre los Playwright e2e (corre las suites node de backend), por eso quedó verde igual y el rojo no se vio en el pipeline.
+**Por qué importa**: feature 12 está `in_progress` esperando la **puerta de código humana de Raf**; este es un test desactualizado de SU frente, no un bug del flujo real (el onboarding nuevo es intencional). Conviene cerrarlo en el mismo paquete que la puerta de feature 12 para que la suite e2e quede 100% verde antes de marcarla `done`.
+**Próximo paso sugerido**: actualizar `rodeos.spec.ts` para descartar el `OnboardingImportOffer` (tap en "Saltar/Continuar") antes de assertear la home — o verificar la oferta como parte del flujo esperado. Pertenece a feature 12 (otro frente), NO a C3.3. Nada más en este chunk.
+
 ## 2026-06-06 — Rate-limit de frecuencia de importación masiva (control diferido, feature 12)
 
 **Origen**: sesión 23, Gate 1 (security) de feature 12 — finding MEDIUM-4.

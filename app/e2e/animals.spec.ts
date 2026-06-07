@@ -493,6 +493,68 @@ test('FIX2: el alta LIMITA los inputs en vivo (caravana 15 díg, fecha/peso sin 
   await expect(page.getByText('Historial', { exact: true })).toHaveCount(0);
 });
 
+test('C3.3 baja: owner da de baja (Venta) → desaparece de la tab Animales y la ficha queda archivada ("Vendido")', async ({
+  page,
+}) => {
+  // Estado de partida: owner + campo con rodeo + 1 animal ACTIVO sembrado, identificable por su IDV.
+  // El owner gatea el botón "Dar de baja" por la rama owner (created_by del seed es null — el
+  // service_role no tiene auth.uid() —, así que la rama de autor no aplica; la de owner sí, R4.14).
+  const user = await createTestUser('baja');
+  await setUserPhone(user.id, '1123456789');
+  const { establishmentId, rodeoId } = await seedEstablishmentWithRodeo(user.id, 'Campo Baja');
+  const idv = `4411${Date.now().toString().slice(-5)}`;
+  await seedAnimal(establishmentId, rodeoId, { idv, sex: 'female' });
+
+  await page.goto('/');
+  await signIn(page, user);
+  await waitForHome(page);
+  await gotoAnimales(page);
+
+  // El animal aparece en la lista (activo) → tocarlo abre la ficha.
+  const row = page.getByRole('button', { name: new RegExp(idv) }).first();
+  await expect(row).toBeVisible({ timeout: 20_000 });
+  await row.click();
+
+  // Ficha del animal activo: el botón "Dar de baja" está visible (owner del campo del animal). El
+  // animal recién sembrado tiene la sección Historial; NO tiene badge de archivada todavía.
+  await expect(page.getByText('Historial', { exact: true })).toBeVisible({ timeout: 20_000 });
+  const exitBtn = page.getByRole('button', { name: 'Dar de baja', exact: true });
+  await expect(exitBtn).toBeVisible();
+  await exitBtn.click();
+
+  // Paso 1 del sheet de baja: elegimos "Venta" (la card con su a11y label = el título).
+  await expect(page.getByText('¿Qué pasó con este animal?', { exact: true })).toBeVisible({ timeout: 20_000 });
+  await page.getByRole('button', { name: 'Venta', exact: true }).click();
+
+  // Paso 2: la fecha viene precargada con hoy; la Venta ofrece peso + precio OPCIONALES. Cargamos
+  // un peso de salida (opcional) para ejercer el path de datos de venta, y confirmamos.
+  const weightInput = page.getByLabel('Peso de salida en kg (opcional)', { exact: true });
+  await expect(weightInput).toBeVisible({ timeout: 20_000 });
+  await weightInput.fill('380');
+  // El precio queda vacío (opcional) → no debe bloquear la baja.
+
+  // El botón destructivo "Dar de baja" del paso 2 (el del paso 1 era "Venta"/cards; acá el CTA fijo).
+  await page.getByRole('button', { name: 'Dar de baja', exact: true }).click();
+
+  // De vuelta en la ficha (in-situ): modo archivada → badge "Vendido el …" + el botón "Dar de baja"
+  // YA NO está (el animal está de baja) + "Agregar evento" tampoco.
+  await expect(page.getByText(/Vendido el /).first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole('button', { name: 'Dar de baja', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Agregar evento', exact: true })).toHaveCount(0);
+
+  // Volvemos a la tab Animales → el animal vendido YA NO aparece (la lista filtra status='active').
+  await page.getByRole('button', { name: 'Volver', exact: true }).click();
+  await expect(page.getByLabel('Buscar animal por caravana o número', { exact: true })).toBeVisible({
+    timeout: 20_000,
+  });
+  await expect(page.getByRole('button', { name: new RegExp(idv) })).toHaveCount(0);
+
+  // Pero SÍ aparece si filtramos por "Vendidos" (sigue archivado y visible, R4.12/R4.15).
+  await page.getByRole('button', { name: 'Filtrar por estado' }).click();
+  await page.getByRole('button', { name: 'Vendidos', exact: true }).click();
+  await expect(page.getByText(idv, { exact: true }).first()).toBeVisible({ timeout: 20_000 });
+});
+
 test('FIX3: con un filtro de Estado activo y 0 resultados, el empty es contextual (no "no cargaste")', async ({
   page,
 }) => {

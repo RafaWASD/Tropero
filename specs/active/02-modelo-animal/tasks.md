@@ -524,6 +524,13 @@ Patrón heredado de spec 01: tests Node nativo en `supabase/tests/`, login con u
 - **Aceptación**: cobertura de los flujos del cliente vía RTL component-tests.
 - **Cubre**: soporte de R14, R6.10..R6.13, R2.B, R2.C.
 
+### [x] T3.9 Servicio de baja / egreso (C3.3 — frontend, R4.14 / R14.9) — DONE (2026-06-07)
+- **`exitAnimalProfile(input): Promise<ServiceResult<void>>`** en `app/src/services/animals.ts`: llama el RPC ya existente `supabase.rpc('exit_animal_profile', {...})` (migration `0044`); `p_exit_weight`/`p_exit_price` → `null` si no vinieron (el RPC los `coalesce`). El RPC es la barrera de authz; el servicio NO fuerza permisos.
+- **Lógica PURA en `app/src/services/exit-animal.ts`** (sin `./supabase` → testeable bajo `node:test`): `EXIT_REASON_MAPPINGS` + `exitReasonToStatus` (motivo→(status,exit_reason)); `classifyExitError` (42501/23503/23514/network/unknown → copy es-AR, nunca el `sqlerrm`); `validateExitWeight`/`validateExitPrice` (opcionales, vacío→null) + `sanitizePriceInput` (sin el cap de 4 díg del peso); `archivedBadgeLabel(status, exitDate)`.
+- **`fetchAnimalDetail` extendido**: SELECT + type `AnimalDetail` suman `createdBy`, `exitDate`, `exitReason` (gating + badge de archivada).
+- **Aceptación**: `exit-animal.test.ts` 25/25 verde (mapeo, errores, validadores, sanitizer, badge). Enganchado en `run-tests.mjs`.
+- **Cubre**: R4.14 (capa cliente), R14.9 (mapeo 3 motivos + datos de venta opcionales).
+
 ## Fase 4 — Cliente: pantallas
 
 ### T4.1 `AnimalListScreen` (tab Animales)
@@ -574,6 +581,12 @@ Patrón heredado de spec 01: tests Node nativo en `supabase/tests/`, login con u
 - Al soft-delete de un lote con animales asignados, avisar y ofrecer reasignar a `NULL` o a otro lote.
 - **Aceptación**: owner crea "Otoño 2026", asigna 3 animales, los ve agrupados; `field_operator` puede asignar pero no crear/borrar lotes.
 - **Cubre**: R2.14, R2.16, R2.17.
+
+### [x] T4.6 Baja / egreso desde la ficha (C3.3, R4.14 / R14.9) — DONE (2026-06-07)
+- **`app/app/animal/[id].tsx`** (ficha): botón **"Dar de baja"** al FONDO, terracota/outline (discreto, no compite con "Agregar evento"), **gated** por `canExit = status==='active' AND (owner del campo activo del animal OR createdBy===userId)`. Conservadurismo multi-tenant: si el animal es de otro campo, solo `createdBy` (el RPC re-valida igual). **Modo archivada** (`status≠active`): badge bajo el hero (`ArchivedBadge` — "Vendido/Muerto/Transferido el {exitDate}") + se ocultan "Agregar evento" y "Dar de baja"; el resto read-only.
+- **`app/app/animal/baja.tsx`** (pantalla corta, registrada en `_layout.tsx`): paso 1 = motivo (3 cards grandes, una decisión por pantalla); paso 2 = fecha (default hoy) + (solo Venta) peso/precio opcionales + resumen del animal + aviso de irreversibilidad + botón destructivo. `busyRef` anti doble-tap; online-only. Post-éxito → `backOr` a la ficha → `useFocusEffect` recarga → modo archivada in-situ; el animal sale de la tab Animales (filtro `status='active'`).
+- **Aceptación**: e2e `animals.spec.ts` ("owner da de baja Venta → desaparece de Animales + ficha 'Vendido' + visible bajo filtro Vendidos"). `check.mjs` verde (typecheck + anti-hardcode + 25 unit + e2e). Cero hardcode (tokens), voseo es-AR, a11y por helper.
+- **Cubre**: R4.14 (acción desde la ficha + gating espejo del authz del RPC), R14.9 (3 motivos, datos de venta opcionales solo en Venta, no reversible, online-only), R4.12/R4.15 (sale del activo, sigue archivado/visible).
 
 ## Fase 5 — PowerSync
 
@@ -704,7 +717,8 @@ T1.1 → T1.2..T1.7 (config + rodeos + plantilla de datos [3 tablas, 0016] + hel
 | R10.1, R10.2 | T1.22 (v1) + T1.25 (v2 con `observacion`), T2.10, T2.15 |
 | R10.3 | T1.19, T2.4 |
 | R11.1..R11.5 | T1.11, T1.14..T1.18 (policies), T1.24 (RLS `animal_events`), T1.27 (RLS lote), T2.8, T2.19 (no-bypass delta Tier 1) |
-| R4.14 (baja vía `exit_animal_profile`, authz rol activo) | design `0044` + T2.19 caso 1 (SEC-SPEC-01) |
+| R4.14 (baja vía `exit_animal_profile`, authz rol activo) | design `0044` + T2.19 caso 1 (SEC-SPEC-01); **frontend C3.3**: T3.9 (servicio + lógica pura) + T4.6 (ficha + sheet de baja + modo archivada) |
+| R14.9 (baja desde la ficha: 3 motivos, datos de venta opcionales, no reversible, online-only) | T3.9 + T4.6 (as-built C3.3, 2026-06-07) |
 | R7.9 / R9.5 (mellizos, alta N terneros vía `register_birth`) | design `0045` + T2.19 casos 2/6 (SEC-SPEC-02) |
 | R4.1 (`created_by` load-bearing, forzado server-side) | design `0043` + T2.19 caso 5 (SEC-SPEC-03) |
 | SEC-SPEC-01..04 (Gate 1 delta Tier 1) | T2.19 |
@@ -732,6 +746,7 @@ T1.1 → T1.2..T1.7 (config + rodeos + plantilla de datos [3 tablas, 0016] + hel
 
 > Audit trail de la evolución del plan de tareas. Orden cronológico inverso.
 
+- **2026-06-07 — Frontend C3.3 (baja / egreso desde la ficha, R4.14 / R14.9)**: agregadas **T3.9** (servicio `exitAnimalProfile` + lógica pura `exit-animal.ts` + `fetchAnimalDetail` extendido con `createdBy`/`exitDate`/`exitReason`) y **T4.6** (botón gated + sheet `animal/baja.tsx` + modo archivada en la ficha). Ambas marcadas `[x]` (DONE, pendiente reviewer + Gate 2). El backend (RPC `exit_animal_profile`, `0044`) ya existía + Gate 1 PASS; este chunk es frontend + un servicio cliente, no toca DB/migración/RLS. Trazabilidad R4.14/R14.9 actualizada. `design.md` sumó la subsección "Baja desde la ficha (C3.3 — as-built)". No se renumeró ningún requirement.
 - **2026-05-30 (sesión 20) — Endurecimiento Gate 1 (FAIL → fix) del delta Tier 1**: agregada **T2.19** (tests de no-bypass que cierran los 4 findings del Gate 1 modo `spec` sobre las migrations 0043-0047 propuestas). Seis casos: `exit_animal_profile` con autor-sin-rol activo → `42501`, status sin cambiar (SEC-SPEC-01, espejo de T2.18); `register_birth` cross-tenant → `42501`, no crea nada (SEC-SPEC-02); INSERT directo a `birth_calves` sin grant → falla (SEC-SPEC-04.b); SELECT de `birth_calves` filtra el parto soft-deleted (SEC-SPEC-04.a); `created_by` forzado server-side, no spoofeable (SEC-SPEC-03); L2 — el alta del ternero al pie no la bloquean `rodeo_same_system_check` ni el category check as-built. No se renumeró ningún requirement. Ver `progress/security_spec_02-modelo-animal.md` y el Changelog de `design.md`.
 - **2026-05-28 — Fix loop Gate 2 (FAIL → SEC-HIGH-01)**: agregada T2.18 (migration `0042` revoca EXECUTE de `apply_auto_transition` a public/authenticated/anon + test de regresión cross-tenant). Suite Animal pasa de 18 a 19 subtests.
 - **2026-05-28 — Refundición consolidada (ADR-020 lote + ADR-021 plantilla de datos)**:
