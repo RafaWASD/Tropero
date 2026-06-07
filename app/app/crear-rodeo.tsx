@@ -85,6 +85,11 @@ export default function CrearRodeoScreen() {
   const [creating, setCreating] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
+  // Onboarding (R1.2 spec 12): tras crear el PRIMER rodeo (bloqueo total = onboarding), ofrecemos
+  // importar el rodeo existente en vez de saltar directo al inicio. Solo en este caso (el alta desde
+  // Rodeos ya tiene su propio CTA de import, T5.1). El que llega al bloqueo total es siempre el owner.
+  const [onboardingDone, setOnboardingDone] = useState(false);
+
   // ── Cargar sistemas al montar (paso 1). ──────────────────────────────────────
   useEffect(() => {
     let active = true;
@@ -192,12 +197,15 @@ export default function CrearRodeoScreen() {
       return;
     }
     // El rodeo se creó: refrescamos el RodeoContext (pasa a 'active' sobre el nuevo) → el RootGate
-    // destraba la navegación (sale del bloqueo total si venía de ahí). Reemplazamos para no dejar
-    // el wizard en el back-stack.
+    // destraba la navegación (sale del bloqueo total si venía de ahí).
     await refreshRodeos();
     if (isBlockingEmptyState) {
-      router.replace('/(tabs)');
+      // Onboarding (R1.2 spec 12): en vez de saltar directo al inicio, ofrecemos importar el rodeo
+      // existente (el caso del beta — el productor ya tiene su padrón en una planilla). No forzamos.
+      setOnboardingDone(true);
     } else {
+      // Alta desde Rodeos: volvemos a la lista (ahí está el CTA de import, T5.1). Reemplazamos para
+      // no dejar el wizard en el back-stack.
       router.replace('/rodeos');
     }
   }
@@ -206,6 +214,17 @@ export default function CrearRodeoScreen() {
   const subtitle = isBlockingEmptyState
     ? 'Un rodeo agrupa tus animales por sistema productivo. Creá el primero para empezar a cargar animales.'
     : 'Configurá un nuevo rodeo en este campo.';
+
+  // Onboarding completado: oferta de importar el rodeo existente (R1.2 spec 12).
+  if (onboardingDone) {
+    return (
+      <OnboardingImportOffer
+        insets={insets}
+        onImport={() => router.replace('/import-rodeo')}
+        onSkip={() => router.replace('/(tabs)')}
+      />
+    );
+  }
 
   return (
     <YStack flex={1} width="100%" maxWidth="100%" overflow="hidden" backgroundColor="$bg">
@@ -327,6 +346,68 @@ export default function CrearRodeoScreen() {
             {step === 1 ? 'Cancelar' : 'Atrás'}
           </Button>
         )}
+      </YStack>
+    </YStack>
+  );
+}
+
+// ─── Oferta de import post-onboarding (R1.2 spec 12) ───────────────────────────────
+//
+// Tras crear el primer campo + rodeo, ofrecemos importar el rodeo existente desde una planilla (el
+// caso del beta de Chascomús). Es una OFERTA, no un paso obligatorio: el CTA secundario va directo al
+// inicio. El que llega acá es siempre el owner (el bloqueo total solo lo ve quien crea el campo).
+
+function OnboardingImportOffer({
+  insets,
+  onImport,
+  onSkip,
+}: {
+  insets: { top: number; bottom: number };
+  onImport: () => void;
+  onSkip: () => void;
+}) {
+  return (
+    <YStack flex={1} width="100%" maxWidth="100%" overflow="hidden" backgroundColor="$bg">
+      <ScrollView
+        flex={1}
+        width="100%"
+        maxWidth="100%"
+        contentContainerStyle={{
+          paddingHorizontal: getTokenValue('$4', 'space'),
+          paddingTop: insets.top + getTokenValue('$6', 'space'),
+          paddingBottom: insets.bottom + getTokenValue('$6', 'space'),
+          width: '100%',
+          maxWidth: '100%',
+        }}
+        showsHorizontalScrollIndicator={false}
+      >
+        <YStack gap="$3">
+          <Text fontFamily="$body" fontSize="$8" fontWeight="700" color="$textPrimary">
+            ¡Listo! Tu rodeo ya está creado
+          </Text>
+          <Text fontFamily="$body" fontSize="$4" fontWeight="400" color="$textMuted">
+            ¿Ya tenés tu rodeo en una planilla o en un archivo de SENASA? Importalo de una y empezá con
+            todos tus animales cargados. Si preferís, también podés cargarlos de a uno más adelante.
+          </Text>
+        </YStack>
+      </ScrollView>
+
+      <YStack
+        width="100%"
+        paddingHorizontal="$4"
+        paddingTop="$3"
+        paddingBottom={insets.bottom + 12}
+        gap="$2"
+        borderTopWidth={1}
+        borderTopColor="$divider"
+        backgroundColor="$bg"
+      >
+        <Button variant="primary" fullWidth onPress={onImport}>
+          Importar mi rodeo existente
+        </Button>
+        <Button variant="secondary" fullWidth onPress={onSkip}>
+          Más tarde, ir al inicio
+        </Button>
       </YStack>
     </YStack>
   );

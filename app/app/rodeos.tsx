@@ -19,7 +19,14 @@ import { Alert, Platform, Pressable } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
-import { ChevronLeft, ChevronRight, Plus, SlidersHorizontal, Trash2 } from 'lucide-react-native';
+import {
+  ChevronLeft,
+  ChevronRight,
+  Plus,
+  SlidersHorizontal,
+  Trash2,
+  Upload,
+} from 'lucide-react-native';
 
 import { Button, Card, InfoNote } from '@/components';
 import { useEstablishment, useRodeo } from '@/contexts';
@@ -35,6 +42,12 @@ export default function RodeosScreen() {
   const { state: rodeoState, refreshRodeos } = useRodeo();
 
   const isOwner = estState.status === 'active' && estState.role === 'owner';
+  // Importar rodeo: owner + veterinario (R2.4 spec 12). field_operator NO (el RPC ya lo bloquea a
+  // nivel DB; esto es la barrera de UX). El wizard /import-rodeo re-valida el rol adentro.
+  const canImport =
+    estState.status === 'active' &&
+    (estState.role === 'owner' || estState.role === 'veterinarian');
+  const hasRodeos = rodeoState.status === 'active' && rodeoState.available.length > 0;
   const muted = getTokenValue('$textMuted', 'color');
   const primary = getTokenValue('$primary', 'color');
   const terracota = getTokenValue('$terracota', 'color');
@@ -161,6 +174,35 @@ export default function RodeosScreen() {
             </InfoNote>
           </YStack>
         )}
+
+        {/* CTA importar rodeo (owner/vet, R1.1/R2.4 spec 12). Re-ejecutable. Solo con ≥1 rodeo
+            (el wizard también bloquea sin rodeo, R1.4; acá ni lo ofrecemos para no confundir).
+            Fila de acción icono+texto (el Button canónico es solo-texto; este patrón es el mismo
+            de las acciones de RodeoCard — manga-friendly, $touchMin). */}
+        {canImport && hasRodeos ? (
+          <YStack marginTop="$3">
+            <Pressable
+              onPress={() => router.push('/import-rodeo')}
+              {...buttonA11y(Platform.OS, { label: 'Importar rodeo desde un archivo' })}
+            >
+              <XStack
+                alignItems="center"
+                gap="$3"
+                minHeight="$touchMin"
+                paddingHorizontal="$4"
+                borderRadius="$pill"
+                borderWidth={2}
+                borderColor="$primary"
+                pressStyle={{ backgroundColor: '$surface' }}
+              >
+                <Upload size={20} color={primary} strokeWidth={2} />
+                <Text fontFamily="$body" fontSize="$5" fontWeight="600" color="$primary">
+                  Importar rodeo
+                </Text>
+              </XStack>
+            </Pressable>
+          </YStack>
+        ) : null}
       </ScrollView>
     </YStack>
   );
