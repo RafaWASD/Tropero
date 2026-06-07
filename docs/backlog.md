@@ -24,7 +24,9 @@ No es un sustituto de `feature_list.json` ni de los ADRs — es la antesala dond
 **Por qué importa**: bajo — no cruza frontera de seguridad (es dato de analytics del **propio** tenant, no leak ni escalación). Solo ensucia los reportes de venta del dueño. No se tocó backend en C3.3.
 **Próximo paso sugerido**: en una pasada de hardening del modelo de animal, agregar `CHECK (exit_weight > 0)` + rango de `exit_price` en una migration nueva (junto con otras deudas de CHECK de dominio si las hay). Nada urgente.
 
-## 2026-06-07 — `rodeos.spec.ts` e2e roja por el OnboardingImportOffer de feature 12
+## 2026-06-07 — `rodeos.spec.ts` e2e roja por el OnboardingImportOffer de feature 12 ✅ RESUELTO
+
+**Resuelto** (2026-06-07, terminal feature 12): el helper `completeCrearRodeo` (`app/e2e/helpers/rodeos.ts`) ahora descarta la oferta de onboarding tocando "Más tarde, ir al inicio" (de forma tolerante para el alta no-bloqueante). Corrida real: 3/3 verdes. No se tocó la app (la oferta es intencional). Se mantiene el registro por trazabilidad.
 
 **Origen**: sesión actual, mientras se implementaba C3.3 (baja de animal). El implementer lo detectó como hallazgo fuera de alcance; el leader lo confirmó por `git diff` (C3.3 NO toca `rodeos.spec.ts` ni `crear-rodeo.tsx` → el rojo es ajeno y pre-existente al chunk).
 **Qué**: `crear-rodeo.tsx:221` muestra el `OnboardingImportOffer` (CTA "Importar rodeo", feature 12, commit `4e1b6d5`) tras crear el **primer** rodeo, con `router.replace('/import-rodeo')` / `router.replace('/(tabs)')`. La suite `app/e2e/rodeos.spec.ts` (BUG 1) crea un rodeo y espera aterrizar directo en home → la oferta de onboarding intercepta y el assert falla. 2 tests rojos. El `check.mjs` NO corre los Playwright e2e (corre las suites node de backend), por eso quedó verde igual y el rojo no se vio en el pipeline.

@@ -65,4 +65,17 @@ export async function completeCrearRodeo(
   const crear = page.getByRole('button', { name: 'Crear rodeo', exact: true });
   await expect(crear).toBeVisible({ timeout: 15_000 });
   await crear.click();
+
+  // Oferta de onboarding (feature 12, R1.2): tras crear el PRIMER rodeo desde el empty-state de
+  // bloqueo total, en vez de ir directo al inicio la app interpone OnboardingImportOffer (dos CTAs:
+  // "Importar mi rodeo existente" / "Más tarde, ir al inicio"). La descartamos tocando "Más tarde,
+  // ir al inicio" para aterrizar en home. En el alta NO-bloqueante (no empty-state) NO hay oferta
+  // —va directo a /rodeos— así que esto es TOLERANTE: si no aparece, seguimos sin romper.
+  const skipOffer = page.getByRole('button', { name: 'Más tarde, ir al inicio', exact: true });
+  try {
+    await skipOffer.waitFor({ state: 'visible', timeout: 15_000 });
+    await skipOffer.click();
+  } catch {
+    // alta no-bloqueante: no hay oferta de onboarding, seguimos
+  }
 }
