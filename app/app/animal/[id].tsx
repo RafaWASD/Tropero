@@ -21,6 +21,8 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
 import {
   Archive,
+  Boxes,
+  Check,
   ChevronLeft,
   ChevronRight,
   ClipboardList,
@@ -35,10 +37,17 @@ import {
 } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
 
-import { Button, Card, CategoryBadge, InfoNote, FormError, TimelineEvent } from '@/components';
+import { Button, Card, CategoryBadge, InfoNote, FormError, FormField, TimelineEvent } from '@/components';
 import { fetchAnimalDetail, type AnimalDetail, type AnimalStatus } from '@/services/animals';
 import { archivedBadgeLabel } from '@/services/exit-animal';
 import { useAuth, useEstablishment } from '@/contexts';
+import {
+  assignAnimalToGroup,
+  createManagementGroup,
+  fetchManagementGroups,
+  type ManagementGroup,
+} from '@/services/management-groups';
+import { canManageGroups, validateGroupName } from '@/utils/management-group';
 import { fetchTimeline, fetchMother, type TimelineItem, type MotherLink } from '@/services/events';
 import {
   deriveCurrentState,
@@ -65,6 +74,10 @@ export default function AnimalDetailScreen() {
   const userId = authState.status === 'authenticated' ? authState.user.id : null;
 
   const [detail, setDetail] = useState<AnimalDetail | null>(null);
+  // Lotes del campo del ANIMAL (C4): para el selector "Lote" de la ficha. Se cargan del
+  // detail.establishmentId (el campo del perfil), NO del contexto activo (el usuario podría tener
+  // otro campo activo mientras mira esta ficha — mismo cuidado multi-tenant que canExit).
+  const [groups, setGroups] = useState<ManagementGroup[]>([]);
   const [timeline, setTimeline] = useState<TimelineItem[] | null>(null);
   const [timelineError, setTimelineError] = useState<string | null>(null);
   // Link a la madre (R14.7). null = no es ternero con parto registrado (o falló el fetch blando) → la
@@ -99,6 +112,11 @@ export default function AnimalDetailScreen() {
       return;
     }
     setDetail(detailR.value);
+    // Lotes del campo del animal (selector de lote, C4). Blando: si falla, el selector queda sin
+    // opciones (se puede igual quitar el lote actual) — no rompe la ficha. Scope = campo del PERFIL.
+    void fetchManagementGroups(detailR.value.establishmentId).then((gr) => {
+      setGroups(gr.ok ? gr.value : []);
+    });
     if (timelineR.ok) {
       setTimeline(timelineR.value);
     } else {
@@ -183,6 +201,64 @@ export default function AnimalDetailScreen() {
     });
   }, [detail, heroLabel, router]);
 
+  // ── Lote (C4): gating + acciones. ──
+  // El control de lote SOLO se muestra si el animal está ACTIVO (un archivado no se reorganiza). La
+  // ASIGNACIÓN la permite cualquier rol operativo del campo del animal (RLS animal_profiles_update);
+  // la UI la ofrece siempre (la RLS es la barrera real, un error 0-filas se traduce a copy es-AR). El
+  // QUICK-CREATE de un lote nuevo es owner-only: como el `role` del contexto es del campo ACTIVO, solo
+  // lo habilitamos si el animal pertenece al campo activo Y ese rol es owner (mismo cuidado que canExit;
+  // si el animal es de otro campo no sabemos el rol → no ofrecemos crear, sí asignar a uno existente).
+  const canEditLote = detail != null && detail.status === 'active';
+  const canQuickCreateLote = useMemo(() => {
+    if (!detail) return false;
+    const activeEstId = estState.status === 'active' ? estState.current.id : null;
+    const animalInActiveEst = activeEstId != null && activeEstId === detail.establishmentId;
+    return animalInActiveEst && canManageGroups(estState.status === 'active' ? estState.role : null);
+  }, [detail, estState]);
+
+  const onAssignLote = useCallback(
+    async (groupId: string | null): Promise<{ ok: boolean; error?: string }> => {
+      if (!detail) return { ok: false };
+      const r = await assignAnimalToGroup(detail.profileId, groupId);
+      if (!r.ok) {
+        return {
+          ok: false,
+          error: r.error.kind === 'network'
+            ? 'Sin conexión: no pudimos cambiar el lote. Conectate y volvé a intentar.'
+            : r.error.message,
+        };
+      }
+      // Refrescamos la ficha para que el lote mostrado refleje el cambio al instante (R: la ficha
+      // refleja el lote asignado sin salir/volver). `load()` re-trae detalle + grupos + timeline.
+      await load();
+      return { ok: true };
+    },
+    [detail, load],
+  );
+
+  // Quick-create de un lote (owner) sin salir de la ficha + asignarlo de una. Devuelve el grupo nuevo
+  // (para que el selector lo seleccione) o un error es-AR. Refresca los grupos del campo del animal.
+  const onQuickCreateLote = useCallback(
+    async (name: string): Promise<{ ok: boolean; group?: ManagementGroup; error?: string }> => {
+      if (!detail) return { ok: false };
+      const valid = validateGroupName(name);
+      if (!valid.ok) return { ok: false, error: valid.error };
+      const created = await createManagementGroup(detail.establishmentId, valid.value);
+      if (!created.ok) {
+        return {
+          ok: false,
+          error: created.error.kind === 'network'
+            ? 'Sin conexión: no pudimos crear el lote. Conectate y volvé a intentar.'
+            : created.error.message,
+        };
+      }
+      const gr = await fetchManagementGroups(detail.establishmentId);
+      if (gr.ok) setGroups(gr.value);
+      return { ok: true, group: created.value };
+    },
+    [detail],
+  );
+
   const muted = getTokenValue('$textMuted', 'color');
 
   return (
@@ -245,10 +321,22 @@ export default function AnimalDetailScreen() {
               <AttributeRow label="Sexo" value={detail.sex === 'male' ? 'Macho' : 'Hembra'} />
               <AttributeRow label="Nacimiento" value={detail.birthDate ?? '—'} />
               <AttributeRow label="Rodeo" value={detail.rodeoName || '—'} />
-              <AttributeRow label="Lote" value={detail.managementGroupName ?? 'Sin lote'} />
               {detail.breed ? <AttributeRow label="Raza" value={detail.breed} /> : null}
               {detail.coatColor ? <AttributeRow label="Pelaje" value={detail.coatColor} /> : null}
             </DetailSection>
+
+            {/* Lote (ADR-020 / C4): control para asignar / cambiar / quitar el lote. Cualquier rol
+                operativo puede asignar (RLS); el quick-create de un lote nuevo es owner-only. Modo
+                archivada (status ≠ active) → solo lectura (un animal de baja no se reorganiza). */}
+            <LoteControl
+              currentGroupId={detail.managementGroupId}
+              currentGroupName={detail.managementGroupName}
+              groups={groups}
+              editable={canEditLote}
+              canQuickCreate={canQuickCreateLote}
+              onAssign={onAssignLote}
+              onQuickCreate={onQuickCreateLote}
+            />
 
             {/* Estado actual (fix-loop 2 FIX C): el VALOR VIGENTE de cada medición tipada (peso /
                 condición corporal) = el del último evento de ese tipo. Es un ATRIBUTO del animal,
@@ -539,6 +627,275 @@ function AttributeRow({ label, value }: { label: string; value: string }) {
         {value}
       </Text>
     </YStack>
+  );
+}
+
+// ─── Control de Lote (C4 / ADR-020): asignar / cambiar / quitar desde la ficha ────────
+//
+// Lote = agrupación de manejo libre (ADR-020), ortogonal a rodeo/categoría. Desde la ficha el
+// operario (cualquier rol) asigna / cambia / QUITA (→ "Sin lote", management_group_id NULL) el lote
+// del animal. La RLS es la barrera real (la asignación es un UPDATE de animal_profiles permitido a
+// cualquier rol operativo); el quick-create de un lote nuevo es OWNER-only (lo gatea `canQuickCreate`).
+//
+// Estados:
+//   - read-only (editable=false: animal archivado) → solo muestra el lote actual.
+//   - sin lotes en el campo + NO puede crear → copy "pedíle al dueño que cree uno".
+//   - selector inline (acordeón): "Sin lote" + cada lote activo + (owner) "Crear lote nuevo".
+//
+// Cero hardcode (tokens + getTokenValue para íconos). a11y por helper (NUNCA accessibilityLabel crudo
+// en Pressable de RN-web). El cambio refresca la ficha (onAssign llama a load()) → el lote mostrado
+// se actualiza al instante.
+function LoteControl({
+  currentGroupId,
+  currentGroupName,
+  groups,
+  editable,
+  canQuickCreate,
+  onAssign,
+  onQuickCreate,
+}: {
+  currentGroupId: string | null;
+  currentGroupName: string | null;
+  groups: ManagementGroup[];
+  editable: boolean;
+  canQuickCreate: boolean;
+  onAssign: (groupId: string | null) => Promise<{ ok: boolean; error?: string }>;
+  onQuickCreate: (name: string) => Promise<{ ok: boolean; group?: ManagementGroup; error?: string }>;
+}) {
+  const primary = getTokenValue('$primary', 'color');
+  const muted = getTokenValue('$textMuted', 'color');
+  const checkSize = getTokenValue('$navIcon', 'size'); // 24
+
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // Sub-modo "crear lote nuevo" (owner) dentro del selector.
+  const [creatingNew, setCreatingNew] = useState(false);
+  const [newName, setNewName] = useState('');
+
+  const currentLabel = currentGroupName ?? 'Sin lote';
+  // El a11y label del trigger DEBE coincidir con su texto visible: en RN-web el aria-label OVERRIDE-a
+  // el texto como nombre accesible → si difirieran, getByRole(name) del e2e (y el lector de pantalla)
+  // verían un nombre distinto al que se lee en la UI.
+  const triggerLabel = currentGroupId ? 'Cambiar lote' : 'Asignar a un lote';
+
+  const onPick = useCallback(
+    async (groupId: string | null) => {
+      if (busy || groupId === currentGroupId) {
+        setOpen(false);
+        return;
+      }
+      setBusy(true);
+      setError(null);
+      const r = await onAssign(groupId);
+      setBusy(false);
+      if (!r.ok) {
+        setError(r.error ?? 'No se pudo cambiar el lote.');
+        return;
+      }
+      setOpen(false);
+    },
+    [busy, currentGroupId, onAssign],
+  );
+
+  const onSubmitNew = useCallback(async () => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    const r = await onQuickCreate(newName);
+    if (!r.ok || !r.group) {
+      setBusy(false);
+      setError(r.error ?? 'No se pudo crear el lote.');
+      return;
+    }
+    // Creado: asignamos el animal al lote nuevo de una.
+    const assigned = await onAssign(r.group.id);
+    setBusy(false);
+    if (!assigned.ok) {
+      setError(assigned.error ?? 'El lote se creó, pero no pudimos asignarlo. Probá elegirlo de la lista.');
+      return;
+    }
+    setNewName('');
+    setCreatingNew(false);
+    setOpen(false);
+  }, [busy, newName, onQuickCreate, onAssign]);
+
+  return (
+    <DetailSection icon={Boxes} title="Lote">
+      <YStack gap="$3">
+        {/* Lote actual (siempre visible). */}
+        <YStack gap="$1">
+          <Text fontFamily="$body" fontSize="$3" fontWeight="500" color="$textMuted">
+            Lote actual
+          </Text>
+          <Text fontFamily="$body" fontSize="$5" fontWeight="600" color="$textPrimary" numberOfLines={1} minWidth={0}>
+            {currentLabel}
+          </Text>
+        </YStack>
+
+        {error ? <FormError message={error} /> : null}
+
+        {editable ? (
+          <>
+            {/* Trigger del selector (cambiar lote). */}
+            <Pressable
+              onPress={() => {
+                setOpen((v) => !v);
+                setCreatingNew(false);
+                setError(null);
+              }}
+              {...buttonA11y(Platform.OS, { label: triggerLabel, selected: open })}
+            >
+              <XStack
+                width="100%"
+                minHeight="$touchMin"
+                alignItems="center"
+                justifyContent="center"
+                gap="$2"
+                borderRadius="$pill"
+                backgroundColor="transparent"
+                borderWidth={2}
+                borderColor="$primary"
+                paddingHorizontal="$5"
+                pressStyle={{ backgroundColor: '$surface' }}
+              >
+                <Boxes size={18} color={primary} strokeWidth={2.5} />
+                <Text fontFamily="$body" fontSize="$5" fontWeight="600" color="$primary">
+                  {triggerLabel}
+                </Text>
+              </XStack>
+            </Pressable>
+
+            {open ? (
+              creatingNew ? (
+                <Card gap="$3">
+                  <Text fontFamily="$body" fontSize="$5" fontWeight="600" color="$textPrimary">
+                    Nuevo lote
+                  </Text>
+                  <FormField
+                    label="Nombre del lote"
+                    value={newName}
+                    onChangeText={(t) => {
+                      setNewName(t);
+                      if (error) setError(null);
+                    }}
+                    placeholder="Ej. Otoño 2026"
+                    autoCapitalize="sentences"
+                  />
+                  <XStack gap="$2">
+                    <YStack flex={1}>
+                      <Button
+                        variant="secondary"
+                        fullWidth
+                        onPress={() => {
+                          setCreatingNew(false);
+                          setNewName('');
+                          setError(null);
+                        }}
+                      >
+                        Cancelar
+                      </Button>
+                    </YStack>
+                    <YStack flex={1}>
+                      <Button variant="primary" fullWidth disabled={busy} onPress={() => void onSubmitNew()}>
+                        {busy ? 'Creando…' : 'Crear y asignar'}
+                      </Button>
+                    </YStack>
+                  </XStack>
+                </Card>
+              ) : (
+                <Card gap="$1" paddingVertical="$2">
+                  {/* "Sin lote" (quitar). */}
+                  <LoteOption
+                    label="Sin lote"
+                    selected={currentGroupId === null}
+                    primary={primary}
+                    checkSize={checkSize}
+                    onPress={() => void onPick(null)}
+                  />
+                  {groups.map((g) => (
+                    <LoteOption
+                      key={g.id}
+                      label={g.name}
+                      selected={g.id === currentGroupId}
+                      primary={primary}
+                      checkSize={checkSize}
+                      onPress={() => void onPick(g.id)}
+                    />
+                  ))}
+                  {/* Crear lote nuevo (owner-only): CTA al pie de la lista, centrada y separada de las
+                      opciones por un divisor (mismo patrón que "Renombrar"/"Eliminar lote" en lotes.tsx). */}
+                  {canQuickCreate ? (
+                    <>
+                      <View height={1} backgroundColor="$divider" />
+                      <Pressable
+                        onPress={() => {
+                          setCreatingNew(true);
+                          setError(null);
+                        }}
+                        {...buttonA11y(Platform.OS, { label: 'Crear lote nuevo' })}
+                      >
+                        <XStack
+                          alignItems="center"
+                          gap="$2"
+                          minHeight="$chipMin"
+                          paddingHorizontal="$2"
+                          pressStyle={{ opacity: 0.6 }}
+                        >
+                          <Plus size={20} color={primary} strokeWidth={2.5} />
+                          <Text flex={1} textAlign="center" minWidth={0} fontFamily="$body" fontSize="$4" fontWeight="600" color="$primary">
+                            Crear lote nuevo
+                          </Text>
+                          <View width={20} flexShrink={0} />
+                        </XStack>
+                      </Pressable>
+                    </>
+                  ) : groups.length === 0 ? (
+                    <InfoNote>Todavía no hay lotes en este campo. Pedíle al dueño que cree uno.</InfoNote>
+                  ) : null}
+                </Card>
+              )
+            ) : null}
+          </>
+        ) : null}
+      </YStack>
+    </DetailSection>
+  );
+}
+
+/** Una fila de opción del selector de lote. Target ≥ $chipMin; la elegida lleva un check $primary. */
+function LoteOption({
+  label,
+  selected,
+  primary,
+  checkSize,
+  onPress,
+}: {
+  label: string;
+  selected: boolean;
+  primary: string;
+  checkSize: number;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable onPress={onPress} {...buttonA11y(Platform.OS, { label: `Lote ${label}`, selected })}>
+      <XStack alignItems="center" gap="$2" minHeight="$chipMin" paddingHorizontal="$2" pressStyle={{ opacity: 0.6 }}>
+        <Text
+          flex={1}
+          minWidth={0}
+          numberOfLines={1}
+          fontFamily="$body"
+          fontSize="$4"
+          fontWeight={selected ? '600' : '500'}
+          color={selected ? '$primary' : '$textPrimary'}
+        >
+          {label}
+        </Text>
+        <View width={checkSize} alignItems="center" justifyContent="center" flexShrink={0}>
+          {selected ? <Check size={20} color={primary} strokeWidth={2.5} /> : null}
+        </View>
+      </XStack>
+    </Pressable>
   );
 }
 

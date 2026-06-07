@@ -17,6 +17,17 @@ No es un sustituto de `feature_list.json` ni de los ADRs — es la antesala dond
 
 ## Ítems pendientes
 
+## 2026-06-07 — Polish de C4 lotes (no bloqueantes, post puerta de código)
+
+**Origen**: cierre de C4 lotes (frontend `management_groups`). Veto de diseño del leader + Gate 2 + feedback de Raf.
+**Qué** (3 ítems chicos):
+- **Error-copy crudo** (MEDIUM-1 de Gate 2): `createManagementGroup`/`renameManagementGroup` en `app/src/services/management-groups.ts` propagan `error.message` de PostgREST en la rama `kind:'unknown'`. Es la MISMA deuda transversal de la entrada 2026-06-01 "Mapear errores crudos del backend a copy genérico" — sumar estos 2 call-sites a esa pasada. No empeora nada (camino frío, errores esperables pre-gateados).
+- **Member-count en la card colapsada de `/lotes`**: hoy hay que abrir el acordeón para ver cuántos animales tiene un lote. Un "N animales" en la fila colapsada ayudaría (Nielsen #1 visibilidad). Roza la vista de grupo de spec 10 — evaluar si va acá o se difiere a 10.
+- **"Eliminar lote" siempre visible por card** (rojo) en `/lotes`: con muchos lotes repite la acción destructiva en cada card. Ya tiene confirmación destructiva; con pocos lotes (beta) es aceptable. Evaluar mover a overflow/menú si escala.
+**Por qué importa**: pulido ("mejor en el primer try"); ninguno es MVP-blocker ni hueco de seguridad.
+**Próximo paso sugerido**: foldear el error-copy en la pasada transversal de errores; el member-count decidirlo al implementar spec 10 (comparten la vista de grupo).
+**Nota cerrada**: el "Crear lote nuevo" del combo de la ficha quedó como CTA centrada con divisor + "+" a la izq; el centrado no es perfecto pero Raf lo aceptó (no se reabre).
+
 ## 2026-06-07 — `exit_weight`/`exit_price` sin `CHECK > 0` a nivel DB (MED-01, Gate 2 C3.3)
 
 **Origen**: sesión actual, Gate 2 (security_analyzer modo code) de C3.3 baja de animal — finding MEDIUM.

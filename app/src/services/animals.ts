@@ -61,6 +61,8 @@ export type AnimalListItem = {
   rodeoId: string;
   rodeoName: string;
   status: AnimalStatus;
+  /** Lote asignado (ADR-020). null = sin lote (se agrupa por categoría). Lo usa fetchGroupMembers (C4). */
+  managementGroupId: string | null;
 };
 
 export type AnimalStatus = 'active' | 'sold' | 'dead' | 'transferred';
@@ -118,15 +120,17 @@ type ProfileListRow = {
   category_id: string;
   rodeo_id: string;
   status: AnimalStatus;
+  management_group_id: string | null;
   animals: { tag_electronic: string | null; sex: AnimalSex } | null;
   rodeos: { name: string } | null;
   categories_by_system: { code: string; name: string } | null;
 };
 
 // SELECT compartido por fetchAnimals/searchAnimals (lista): join a animals (tag+sex), rodeo (name)
-// y categoría (code+name). PostgREST resuelve los joins por FK. NO traemos campos sensibles extra.
+// y categoría (code+name) + el lote (management_group_id, para fetchGroupMembers de C4). PostgREST
+// resuelve los joins por FK. NO traemos campos sensibles extra.
 const LIST_SELECT =
-  'id, animal_id, idv, visual_id_alt, category_id, rodeo_id, status,' +
+  'id, animal_id, idv, visual_id_alt, category_id, rodeo_id, status, management_group_id,' +
   ' animals!inner ( tag_electronic, sex ),' +
   ' rodeos!inner ( name ),' +
   ' categories_by_system!inner ( code, name )';
@@ -144,6 +148,7 @@ function toListItem(r: ProfileListRow): AnimalListItem {
     rodeoId: r.rodeo_id,
     rodeoName: r.rodeos?.name ?? '',
     status: r.status,
+    managementGroupId: r.management_group_id,
   };
 }
 

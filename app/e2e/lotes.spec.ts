@@ -1,0 +1,151 @@
+// e2e/lotes.spec.ts — red de seguridad del flujo C4: LOTES (management_groups, ADR-020 / spec 02).
+//
+// Corre contra el export ESTÁTICO de prod servido en :8099 + Supabase remoto (mismo patrón que
+// rodeos/animals/events.spec.ts). Estado de partida: usuario OWNER con teléfono (saltea el gate
+// R3.8) + 1 campo con 1 rodeo + 1 animal sembrado.
+//
+// Cubre el flujo de C4 (criterios del context-c4-lotes):
+//   1. Crear un lote desde la pantalla /lotes (entry point junto a Rodeos, D2).
+//   2. Asignar el animal a ese lote DESDE LA FICHA (cualquier rol; acá owner). La ficha refleja el
+//      lote asignado al instante.
+//   3. Ver los miembros del lote (tap en el lote → lista de animales activos, D3).
+//   4. Borrar el lote → el animal queda reasignado a NULL (D1). El soft-delete del lote va por el RPC
+//      SECURITY DEFINER `soft_delete_management_group` (0041, owner-only), NO por UPDATE directo: un
+//      `update management_groups set deleted_at = now()` vía PostgREST daría 42501 porque la fila sale
+//      de la SELECT-policy (`deleted_at is null`) tras el UPDATE (gotcha ESPERADO, no bug de backend).
+//
+// NOTA de navegación: /lotes es un Stack.Screen pusheado SOBRE (tabs) (sin bottom-nav). RN-web deja
+// AMBAS pantallas en el DOM (la de abajo oculta) → no asertamos por textos ambiguos como "Lotes"
+// (existe el título del screen Y el ActionRow de "Más"); usamos anclas únicas (el CTA "Crear lote",
+// los lotes por nombre con RUN_TAG) y volvemos con "Volver" antes de cambiar de tab.
+//
+// La E2E corre el export de PROD → es CIEGA a overlays de DEV; el a11y helper es obligatorio. Las
+// confirmaciones destructivas usan window.confirm en web → page.on('dialog'). Usuarios + campos
+// namespaced; cleanup en afterAll + teardown.
+
+import { test, expect } from './helpers/fixtures';
+import {
+  createTestUser,
+  seedEstablishmentWithRodeo,
+  seedAnimal,
+  setUserPhone,
+  cleanupAll,
+  RUN_TAG,
+} from './helpers/admin';
+import { signIn, waitForHome, gotoAnimales, gotoTab } from './helpers/ui';
+
+test.afterAll(async () => {
+  await cleanupAll();
+});
+
+// Auto-aceptar las confirmaciones destructivas (window.confirm en web).
+test.beforeEach(async ({ page }) => {
+  page.on('dialog', (dialog) => dialog.accept());
+});
+
+// Abre la pantalla /lotes desde "Más" (ActionRow "Lotes"). Espera el CTA "Crear lote" (ancla única
+// de la pantalla cuando es owner, no ambigua con el título del screen).
+async function gotoLotes(page: import('@playwright/test').Page): Promise<void> {
+  const lotesRow = page.getByRole('button', { name: 'Ver y gestionar los lotes del campo' });
+  await gotoTab(page, 'Más', lotesRow);
+  await lotesRow.click();
+  await expect(page.getByRole('button', { name: 'Crear lote', exact: true })).toBeVisible({ timeout: 20_000 });
+}
+
+test('crear lote → asignar desde la ficha → ver miembros', async ({ page }) => {
+  const user = await createTestUser('lotes');
+  await setUserPhone(user.id, '1123456789');
+  const { establishmentId, rodeoId } = await seedEstablishmentWithRodeo(user.id, 'Campo Lotes');
+  const idv = `8822${Date.now().toString().slice(-5)}`;
+  await seedAnimal(establishmentId, rodeoId, { idv, sex: 'female' });
+
+  const loteName = `${RUN_TAG} Otoño`;
+
+  await page.goto('/');
+  await signIn(page, user);
+  await waitForHome(page);
+
+  // ── 1. Ir a /lotes desde "Más" → crear el lote. ───────────────────────────────────────
+  await gotoLotes(page);
+  await page.getByRole('button', { name: 'Crear lote', exact: true }).click();
+  const nameInput = page.getByLabel('Nombre del lote', { exact: true });
+  await expect(nameInput).toBeVisible({ timeout: 20_000 });
+  await nameInput.fill(loteName);
+  // Cuando el form está abierto hay un único "Crear lote" (el submit del Card); `.last()` por robustez.
+  await page.getByRole('button', { name: 'Crear lote', exact: true }).last().click();
+
+  // El lote aparece en la lista (tappable para ver miembros — ancla única por RUN_TAG).
+  await expect(
+    page.getByRole('button', { name: `Ver los animales del lote ${loteName}`, exact: true }),
+  ).toBeVisible({ timeout: 20_000 });
+
+  // ── 2. Volver a (tabs) → ficha del animal → asignar el lote. ──────────────────────────
+  await page.getByRole('button', { name: 'Volver', exact: true }).click();
+  await gotoAnimales(page);
+  const row = page.getByRole('button', { name: new RegExp(idv) }).first();
+  await expect(row).toBeVisible({ timeout: 20_000 });
+  await row.click();
+
+  // Ficha: sección "Lote" con "Sin lote" + CTA "Asignar a un lote".
+  await expect(page.getByText('Lote actual', { exact: true })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText('Sin lote', { exact: true }).first()).toBeVisible();
+  await page.getByRole('button', { name: 'Asignar a un lote', exact: true }).click();
+
+  // Selector: elegir el lote creado → la ficha refleja el lote asignado al instante (queda como
+  // "Lote actual" y el trigger pasa a "Cambiar lote"). El nombre con RUN_TAG es único en el DOM.
+  await page.getByRole('button', { name: `Lote ${loteName}`, exact: true }).click();
+  await expect(page.getByText(loteName, { exact: true }).first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole('button', { name: 'Cambiar lote', exact: true })).toBeVisible({ timeout: 20_000 });
+
+  // ── 3. Volver a /lotes → ver miembros (D3): el animal asignado aparece en el acordeón. ─
+  await page.getByRole('button', { name: 'Volver', exact: true }).click();
+  await gotoLotes(page);
+  await page.getByRole('button', { name: `Ver los animales del lote ${loteName}`, exact: true }).click();
+  await expect(page.getByRole('button', { name: new RegExp(idv) }).first()).toBeVisible({ timeout: 20_000 });
+});
+
+// D1 end-to-end: crear lote → asignar 1 animal → borrar el lote → el animal queda SIN lote y el lote
+// desaparece de la lista. El soft-delete del lote pasa por el RPC `soft_delete_management_group`
+// (0041, owner-only); el clear-NULL del paso 1 va por UPDATE directo. No hay bug de backend: el RPC
+// existe y está desplegado exactamente para este gotcha de visibilidad SELECT.
+test('borrar lote → su animal queda reasignado a NULL (D1)', async ({ page }) => {
+  const user = await createTestUser('lotesdel');
+  await setUserPhone(user.id, '1123456789');
+  const { establishmentId, rodeoId } = await seedEstablishmentWithRodeo(user.id, 'Campo LotesDel');
+  const idv = `7733${Date.now().toString().slice(-5)}`;
+  await seedAnimal(establishmentId, rodeoId, { idv, sex: 'female' });
+  const loteName = `${RUN_TAG} Primavera`;
+
+  await page.goto('/');
+  await signIn(page, user);
+  await waitForHome(page);
+
+  // Crear + asignar (idéntico al test de arriba, condensado).
+  await gotoLotes(page);
+  await page.getByRole('button', { name: 'Crear lote', exact: true }).click();
+  await page.getByLabel('Nombre del lote', { exact: true }).fill(loteName);
+  await page.getByRole('button', { name: 'Crear lote', exact: true }).last().click();
+  await page.getByRole('button', { name: 'Volver', exact: true }).click();
+  await gotoAnimales(page);
+  await page.getByRole('button', { name: new RegExp(idv) }).first().click();
+  await page.getByRole('button', { name: 'Asignar a un lote', exact: true }).click();
+  await page.getByRole('button', { name: `Lote ${loteName}`, exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Cambiar lote', exact: true })).toBeVisible({ timeout: 20_000 });
+
+  // Borrar el lote (confirmación auto-aceptada) → debería reasignar el animal a NULL y soft-deletear.
+  await page.getByRole('button', { name: 'Volver', exact: true }).click();
+  await gotoLotes(page);
+  await page
+    .getByRole('button', { name: `Eliminar el lote ${loteName} (acción destructiva)`, exact: true })
+    .click();
+  await expect(
+    page.getByRole('button', { name: `Ver los animales del lote ${loteName}`, exact: true }),
+  ).toHaveCount(0, { timeout: 20_000 });
+
+  // El animal volvió a "Sin lote" (D1).
+  await page.getByRole('button', { name: 'Volver', exact: true }).click();
+  await gotoAnimales(page);
+  await page.getByRole('button', { name: new RegExp(idv) }).first().click();
+  await expect(page.getByText('Lote actual', { exact: true })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText('Sin lote', { exact: true }).first()).toBeVisible();
+});

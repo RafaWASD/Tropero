@@ -100,6 +100,7 @@ const FASE5_DESTINATIONS = new Set([INVITE_ROUTE, 'invitar', 'miembros']);
 const CREAR_RODEO_ROUTE = 'crear-rodeo'; // wizard (R2.6) — destino del bloqueo total + de RodeosScreen
 const RODEOS_ROUTE = 'rodeos'; // gestión de rodeos (owner) — destino navegable desde "Más"
 const EDITAR_PLANTILLA_ROUTE = 'editar-plantilla'; // editar plantilla (owner) — destino navegable
+const LOTES_ROUTE = 'lotes'; // gestión de lotes (spec 02 C4, ADR-020) — destino desde Rodeos/"Más"
 const IMPORT_RODEO_ROUTE = 'import-rodeo'; // wizard de importación masiva (spec 12) — destino owner/vet desde Rodeos
 // Destinos de C1 que el usuario abre con un rodeo YA existente (estado 'active' de rodeo) y NO
 // deben re-rutearse al wizard. crear-rodeo entra acá también (crear un 2do rodeo desde la lista).
@@ -110,6 +111,7 @@ const RODEO_DESTINATIONS = new Set([
   EDITAR_PLANTILLA_ROUTE,
   CREAR_RODEO_ROUTE,
   IMPORT_RODEO_ROUTE,
+  LOTES_ROUTE,
 ]);
 
 // Destinos de C2 (animales): el alta find-or-create (R4) y la ficha del animal (R5). Son
@@ -362,6 +364,9 @@ function RootGate() {
       <Stack.Screen name="crear-rodeo" />
       <Stack.Screen name="rodeos" />
       <Stack.Screen name="editar-plantilla" />
+      {/* Spec 02 C4 — lotes (ADR-020): gestión (crear/renombrar/borrar + ver miembros), owner-gated.
+          Destino navegable desde Rodeos / "Más" con un rodeo existente (no se re-rutea al wizard). */}
+      <Stack.Screen name="lotes" />
       {/* Spec 12 — importación masiva de rodeo: wizard owner/vet (fuente+destino → mapeo →
           preview → resultado), destino navegable desde Rodeos con un rodeo existente. */}
       <Stack.Screen name="import-rodeo" />

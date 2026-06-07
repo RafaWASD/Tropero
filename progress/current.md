@@ -3,7 +3,24 @@
 > Este archivo se vacía al cerrar cada sesión y su resumen se mueve a `history.md`.
 > Mientras trabajás, **mantenelo actualizado en tiempo real**, no al final.
 
-_(Sin sesión activa. La última cerrada está resumida en `progress/history.md`.)_
+## Sesión en curso — 2026-06-07: C4 lotes (frontend `management_groups`, spec 02)
+
+**Tarea**: frontend C4 de spec 02 — gestión de lotes (`management_groups`, ADR-020). Backend `0037` ya aplicado → **frontend puro** (Gate 1 N/A, como C3.3).
+
+**Por qué C4** (decisión de Raf, esta sesión): tras descartar arrancar feature 10 (resultó stale vs el backend Tier 2 de Facundo — castración masiva specceada como `sanitary_events` marker pero el efecto de categoría as-built 0064 va por `animals.is_castrated`; spec 10 necesita reconciliación antes de implementar → queda on-deck). C4 es limpio, más chico, y prerequisito de la mitad "lote" de spec 10.
+
+**Gate 0 cerrado** (`specs/active/02-modelo-animal/context-c4-lotes.md`, aprobado por Raf):
+- D1 borrar lote con animales → reasigna animales a NULL (vuelven a categoría) + soft-delete; orden null-primero; 2 UPDATES no atómicos (recuperable, atomicidad real = C5); sin RPC → Gate 1 N/A.
+- D2 gestión de lotes vive junto a Rodeos (`/lotes`); asignar día-a-día desde la ficha.
+- D3 incluye ver-miembros de un lote; vista de grupo rodeo-céntrica + agrupamiento en Inicio = spec 10 (no se toca).
+
+**Alcance C4**: `management-groups.ts` (CRUD: create/rename/soft-delete + assign/clear) + `LotesScreen` (lista + CRUD owner-only) + asignar/quitar desde la ficha + ver miembros. Online-first (C5=PowerSync). E2E Playwright nuevo.
+
+**ESTADO: C4 DONE + COMMITEADO** (puerta de código de Raf). Pipeline completo: implementer → **leader cazó un falso "bloqueante de backend"** (el implementer usaba `UPDATE deleted_at` directo → 42501; el RPC `soft_delete_management_group` de `0041` ya existía para ese gotcha de PostgREST) → fix-loop a RPC → reviewer APPROVED → Gate 2 PASS 0 HIGH → veto de diseño leader (8 capturas CDP) → puerta de código de Raf. 3 iteraciones del "Crear lote nuevo" en el combo de la ficha (CTA centrada con divisor + "+" a la izq; centrado imperfecto, aceptado). check.mjs verde (628 unit + e2e lotes 2/2). spec 02 `in_progress→deferred` (C5 PowerSync sigue pendiente). Deuda menor anotada en backlog (error-copy de create/rename; member-count en card colapsada).
+
+**Flag abierto (no bloqueante)**: conflicto de Puerta 1 de spec 10 — `feature_list.json` dice PENDIENTE, `requirements.md` dice APROBADA (1/6). Raf no lo confirmó. Se reconcilia en la pasada de reconciliación de spec 10 cuando se retome.
+
+---
 
 ## Última sesión cerrada — 2026-06-06/07: feature 12 import masivo (CERRADA) + bastón buildable + C3.3 baja de animal
 

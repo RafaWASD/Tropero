@@ -20,6 +20,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
 import {
+  Boxes,
   ChevronLeft,
   ChevronRight,
   Plus,
@@ -203,6 +204,36 @@ export default function RodeosScreen() {
             </Pressable>
           </YStack>
         ) : null}
+
+        {/* Lotes (spec 02 C4, ADR-020, D2: la gestión de lotes vive JUNTO a Rodeos). Visible a
+            TODOS los roles: la lista es read-only para no-owners (la gestión es owner-only adentro);
+            asignar animales a un lote (cualquier rol) pasa por la ficha. Separador + fila de acción
+            icono+texto, mismo patrón que "Importar rodeo". */}
+        <View height={1} backgroundColor="$divider" marginVertical="$4" />
+        <Text fontFamily="$body" fontSize="$3" fontWeight="500" color="$textMuted" marginBottom="$2">
+          Otros grupos del campo
+        </Text>
+        <Pressable
+          onPress={() => router.push('/lotes')}
+          {...buttonA11y(Platform.OS, { label: 'Ver y gestionar los lotes del campo' })}
+        >
+          <XStack
+            alignItems="center"
+            gap="$3"
+            minHeight="$touchMin"
+            paddingHorizontal="$4"
+            borderRadius="$pill"
+            borderWidth={2}
+            borderColor="$primary"
+            pressStyle={{ backgroundColor: '$surface' }}
+          >
+            <Boxes size={20} color={primary} strokeWidth={2} />
+            <Text flex={1} minWidth={0} fontFamily="$body" fontSize="$5" fontWeight="600" color="$primary">
+              Lotes
+            </Text>
+            <ChevronRight size={20} color={muted} strokeWidth={2} />
+          </XStack>
+        </Pressable>
       </ScrollView>
     </YStack>
   );

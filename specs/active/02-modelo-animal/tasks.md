@@ -509,13 +509,14 @@ Patrón heredado de spec 01: tests Node nativo en `supabase/tests/`, login con u
 - **Aceptación**: unit tests + integration test; el helper de gating refleja el mapeo de ADR-021.
 - **Cubre**: soporte de R2.8..R2.13, R2.7 (sustrato del gating).
 
-### T3.7 Servicio `app/src/services/management-groups.ts` (lote)
-- `fetchManagementGroups(establishmentId): Promise<ManagementGroup[]>`.
-- `createManagementGroup(establishmentId, name)` / `renameManagementGroup(id, name)` / `softDeleteManagementGroup(id)` (owner-only).
-- `assignAnimalToGroup(profileId, groupId | null)` (cualquier rol operativo).
-- `groupAnimalsForDisplay(profiles)`: implementa la regla "lote si tiene, si no categoría" (R2.16) en cliente.
-- **Aceptación**: unit tests + integration test; la regla de display agrupa correctamente.
-- **Cubre**: soporte de R2.14..R2.18.
+### [x] T3.7 Servicio `app/src/services/management-groups.ts` (lote) — C4
+- [x] `fetchManagementGroups(establishmentId): Promise<ManagementGroup[]>` (ya existía de C2).
+- [x] `createManagementGroup(establishmentId, name)` / `renameManagementGroup(id, name)` / `softDeleteManagementGroup(id)` (owner-only por RLS). El borrado reasigna miembros a NULL ANTES del soft-delete (D1, 2 pasos no atómicos documentados).
+- [x] `assignAnimalToGroup(profileId, groupId | null)` (cualquier rol operativo).
+- [x] `fetchGroupMembers(establishmentId, groupId)`: lista los animales activos de un lote (ver-miembros, D3 — reusa fetchAnimals).
+- [x] Lógica pura en `utils/management-group.ts`: `validateGroupName` + gating por rol (`canManageGroups`/`canAssignGroup`). Tests node:test (`management-group.test.ts`, 8 casos).
+- **SCOPE C4 (context-c4-lotes, Gate 0 aprobado por Raf)**: `groupAnimalsForDisplay` (regla de display "lote si tiene/si no categoría", R2.16) queda **FUERA** — es la vista de grupo rodeo-céntrica + agrupamiento en Inicio de **spec 10**. C4 provee CRUD + asignar + ver-miembros (lista simple), NO el agrupamiento global.
+- **Cubre**: R2.14, R2.15, R2.17 (soporte cliente). R2.16 (display) → spec 10.
 
 ### T3.8 Hooks
 - `useAnimals`, `useAnimal`, `useAnimalTimeline`, `useCategories`, `useAnimalObservations`, `useRodeoDataConfig`, `useManagementGroups`, `useAssignManagementGroup`.
@@ -545,7 +546,7 @@ Patrón heredado de spec 01: tests Node nativo en `supabase/tests/`, login con u
 - Cabecera con campos del R14.2 (incluye rodeo y lote del animal).
 - Sección "Categoría" con valor actual + toggle de override (R14.5).
 - Botón "Marcar como CUT" con confirmación (R14.6, R8.5).
-- Selector de lote: asignar / cambiar / quitar `management_group_id` (R14.8, R2.17).
+- [x] Selector de lote (`LoteControl`, C4 / DONE 2026-06-07): asignar / cambiar / quitar `management_group_id` (R14.8, R2.17). Sección "Lote" con el lote actual + CTA "Asignar/Cambiar lote" → selector inline (acordeón) con "Sin lote" + lotes activos + (owner-only) "Crear lote nuevo" (quick-create sin salir de la ficha). Cualquier rol asigna (RLS); el cambio refresca la ficha al instante. No-owner sin lotes → copy "pedíle al dueño que cree uno". Read-only en modo archivada.
 - Cronología renderizada desde `useAnimalTimeline` (R10), componente por tipo (R14.3).
 - Si es ternero/ternera: link a la ficha de la madre (R14.7) — query inversa: `select * from reproductive_events where calf_id = profile_id`.
 - Editar/borrar evento solo si owner o creador (R14.4).
@@ -575,12 +576,15 @@ Patrón heredado de spec 01: tests Node nativo en `supabase/tests/`, login con u
 - **Aceptación**: prompt aparece exactamente en los 3 valores; no aparece para terneros.
 - **Cubre**: R8.1, R8.2, R8.3, R8.4.
 
-### T4.5 Gestión de lotes (`ManagementGroupsScreen`)
-- Pantalla (Settings o sección Animales) para listar / crear / renombrar / soft-delete de `management_groups` (owner-only para crear/editar/borrar).
-- Asignar animales a un lote desde acción masiva o desde la ficha (T4.2).
-- Al soft-delete de un lote con animales asignados, avisar y ofrecer reasignar a `NULL` o a otro lote.
-- **Aceptación**: owner crea "Otoño 2026", asigna 3 animales, los ve agrupados; `field_operator` puede asignar pero no crear/borrar lotes.
-- **Cubre**: R2.14, R2.16, R2.17.
+### [x] T4.5 Gestión de lotes (`LotesScreen`, ruta `/lotes`) — C4 (DONE 2026-06-07)
+- [x] **`app/app/lotes.tsx`** (`LotesScreen`): lista de lotes activos del campo activo; **owner**: crear (form inline), renombrar (inline), soft-delete (confirmación destructiva con copy D1: "sus N animales quedan sin lote"). **No-owner**: lista read-only + InfoNote (la RLS es la barrera; la UI no ofrece botones muertos).
+- [x] **Ver-miembros (D3)**: tap en un lote → acordeón con la lista de sus animales activos reusando `AnimalRow` (de C2). Tap en un animal → su ficha.
+- [x] **Asignar desde la ficha** (T4.2): `LoteControl` en `animal/[id].tsx` (cualquier rol). Acción masiva NO en C4 (fuera de alcance).
+- [x] **Borrado D1**: reasigna animales a `NULL` ANTES del soft-delete (orden anti-FK-colgante). NO ofrece "reasignar a OTRO lote" (decisión Raf: solo →NULL; el animal vuelve a agruparse por categoría).
+- [x] **Entry point (D2)**: `/lotes` se llega desde "Más" (ActionRow "Lotes") y desde `RodeosScreen` (sección "Otros grupos del campo"). Registrada en `_layout.tsx` como destino de la rodeo-zone (no se re-rutea al wizard). Owner-gating de UI por `canManageGroups(role)`.
+- **Aceptación**: owner crea "Otoño 2026", lo asigna a un animal desde la ficha, ve el animal como miembro del lote, borra el lote → el animal queda sin lote. Cubierto por e2e `lotes.spec.ts`.
+- **SCOPE C4**: agrupamiento "lote/categoría" en listas + vista de grupo rodeo-céntrica + aviso "N sin lote" = **spec 10** (fuera).
+- **Cubre**: R2.14, R2.17.
 
 ### [x] T4.6 Baja / egreso desde la ficha (C3.3, R4.14 / R14.9) — DONE (2026-06-07)
 - **`app/app/animal/[id].tsx`** (ficha): botón **"Dar de baja"** al FONDO, terracota/outline (discreto, no compite con "Agregar evento"), **gated** por `canExit = status==='active' AND (owner del campo activo del animal OR createdBy===userId)`. Conservadurismo multi-tenant: si el animal es de otro campo, solo `createdBy` (el RPC re-valida igual). **Modo archivada** (`status≠active`): badge bajo el hero (`ArchivedBadge` — "Vendido/Muerto/Transferido el {exitDate}") + se ocultan "Agregar evento" y "Dar de baja"; el resto read-only.

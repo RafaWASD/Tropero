@@ -31,7 +31,7 @@ import { Alert, Platform, Pressable } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
-import { AlertTriangle, Building2, CheckCircle2, ChevronRight, Layers, LogOut, Pencil, Trash2, Users } from 'lucide-react-native';
+import { AlertTriangle, Boxes, Building2, CheckCircle2, ChevronRight, Layers, LogOut, Pencil, Trash2, Users } from 'lucide-react-native';
 
 import { Button, Card, FormField, FormError, InfoNote } from '@/components';
 import { useAuth, useEstablishment, useProfile } from '@/contexts';
@@ -793,6 +793,17 @@ export default function MasScreen() {
                 accessibilityLabel="Ver y gestionar los rodeos del campo"
                 trailing={<ChevronRight size={20} color={muted} strokeWidth={2} />}
                 onPress={() => router.push('/rodeos')}
+              />
+              <View height={1} backgroundColor="$divider" marginHorizontal="$4" />
+              {/* Lotes (spec 02 C4, ADR-020): la lista es visible a todos los roles; la gestión
+                  (crear / renombrar / borrar) es owner-only dentro de la pantalla. Asignar animales
+                  a un lote (cualquier rol) pasa por la ficha del animal. */}
+              <ActionRow
+                icon={<Boxes size={20} color={primary} strokeWidth={2} />}
+                label="Lotes"
+                accessibilityLabel="Ver y gestionar los lotes del campo"
+                trailing={<ChevronRight size={20} color={muted} strokeWidth={2} />}
+                onPress={() => router.push('/lotes')}
               />
               {isOwner ? (
                 <>
