@@ -17,6 +17,20 @@ Raf preguntó "¿cómo elimino un animal?" → en RAFAQ no se borra, se **da de 
 
 **2 deudas ANENAS anotadas al backlog (ninguna de C3.3)**: (1) `rodeos.spec.ts` 2 e2e rojos por el `OnboardingImportOffer` de **feature 12** (test desactualizado de ESE frente, no bug real; cerrar cuando Raf pruebe la 12, que sigue esperando su puerta de código); (2) MED-01 `exit_weight`/`exit_price` sin CHECK>0 DB.
 
+## Feature 12 — Importación masiva de rodeo: ✅ DONE + CERRADA (2026-06-07)
+
+**Puerta de código humana: Raf aprobó ("cerra 12", 2026-06-07).** `feature_list.json` 12 = `done`. Tras la implementación completa del 2026-06-06 (5 commits, todas las fases gateadas), esta sesión cerró 3 bugs de UX que Raf reportó probando en vivo + el e2e roto — todos con veto de diseño del leader + check.mjs verde + specs reconciliadas:
+- **`3ae4478`** — mapeo SOURCE-DRIVEN: una fila por COLUMNA del archivo (header + muestra de datos) + combo con los campos FIJOS del censo, en vez del modelo invertido (fila=campo, opciones=headers) que mostraba "Caravana electrónica = sexo". Componente `Select` reutilizable nuevo (trigger pill con afordancia, lista acordeón inline web+native). Inspo Mobbin (Expensify "Import categories").
+- **`cd2b6c8`** — `parse-csv` auto-detecta el delimitador (`,`/`;`/tab) mirando el header, respetando comillas, sniff acotado anti-DoW, default coma (retrocompat). Excel es-AR exporta `;` → la planilla real del productor se leía como UNA columna. R3.9.
+- **`f10ed27`** — el preview AVISA qué categorías declaradas NO están en el catálogo del rodeo (el "Vaca→vaquillona"): aviso de precaución + badge "· a completar" por fila. Mirror client-side del match server-side (`classifyDeclaredCategory` usa el mismo `normalizeCategoryText` que el RPC). Decisión de Raf: avisar sin adivinar; el mapeo de dominio queda para Facundo (D3). R10.7 + CONTEXT/07.
+- **`8576369`** — e2e `rodeos.spec.ts`: el helper `completeCrearRodeo` descarta el `OnboardingImportOffer` (feature 12, intencional) antes de la home. Playwright **3/3 verde** (build prod + Supabase remoto). Backlog #1 RESUELTO.
+
+**DEFERIDO a Facundo (D3, NO bloquea el cierre):** qué hace una "Vaca" genérica declarada (no existe `code` 'vaca' en el catálogo de cría — se parte en multipara / vaca_segundo_servicio / vaca_cabana). Opciones en `CONTEXT/07-pendientes.md`. El RPC matchea solo por `code` exacto (no por `name` ni sinónimos).
+
+**Spec 12 queda en `specs/active/`** (no se movió a `done/`): el cierre de D3 con Facundo todavía la referencia. **Artefactos de prueba** (en Descargas de Raf): `rafaq-import-demo.xlsx`, `rafaq-import-demo-punto-y-coma.csv` (camino es-AR `;`), `rafaq-import-demo.csv`.
+
+---
+
 ## Feature 12 — Importación masiva de rodeo: SPEC REDACTADA + GATE 1 EN CURSO (2026-06-06)
 
 Raf eligió esto como "lo próximo" tras cerrar feature 04 (enabler del beta de Chascomús: cargar el rodeo existente desde Excel/planilla + TXT SIGSA, sin esperar a colocar los TAGs). Estaba `context_ready` (Gate 0 aprobado s22).
