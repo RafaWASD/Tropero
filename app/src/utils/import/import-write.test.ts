@@ -18,6 +18,8 @@ import {
   checkFileSize,
   escapeIlike,
   resolveCategory,
+  normalizeCategoryText,
+  classifyDeclaredCategory,
   normalizeLoteName,
   buildRpcRow,
   chunkRows,
@@ -108,6 +110,48 @@ test('R10.5: sin columna de categoría → category_code=null + override=false (
 
 test('R10.5: categoría vacía/espacios → null + override=false', () => {
   assert.deepEqual(resolveCategory('   '), { categoryCode: null, categoryOverride: false });
+});
+
+// ─── Visibilidad: clasificación de categoría declarada vs catálogo (mirror del match del RPC) ──
+//
+// classifyDeclaredCategory es el espejo CLIENTE del match server-side de 0074 (code = category_code).
+// El normalizado DEBE coincidir con el que resolveCategory manda en p_rows.category_code, si no el
+// aviso del preview mentiría. Por eso usamos el MISMO normalizeCategoryText en ambos lados.
+
+test('normalizeCategoryText: mismo normalizado que el code que manda resolveCategory (mirror del RPC)', () => {
+  // Lo que resolveCategory pone en category_code es exactamente normalizeCategoryText(raw).
+  assert.equal(normalizeCategoryText('Vaquillona'), 'vaquillona');
+  assert.equal(normalizeCategoryText('Vaca Segundo Servicio'), 'vaca_segundo_servicio');
+  assert.equal(normalizeCategoryText('Multípara'), 'multipara'); // sin tilde
+  assert.equal(normalizeCategoryText(null), null);
+  assert.equal(normalizeCategoryText('   '), null);
+  // Coincide con el category_code que se manda al RPC.
+  assert.equal(resolveCategory('Vaca Segundo Servicio').categoryCode, normalizeCategoryText('Vaca Segundo Servicio'));
+});
+
+test('classifyDeclaredCategory: matched cuando el normalizado ∈ catálogo (el RPC va a respetarla)', () => {
+  const catalog = new Set(['ternero', 'ternera', 'vaquillona', 'multipara', 'toro', 'torito']);
+  assert.equal(classifyDeclaredCategory('Vaquillona', catalog), 'matched');
+  assert.equal(classifyDeclaredCategory('Toro', catalog), 'matched');
+  // Con tilde/mayúsculas/espacios: igual matchea porque normaliza igual que el code del catálogo.
+  assert.equal(classifyDeclaredCategory('  MULTÍPARA  ', catalog), 'matched');
+});
+
+test('classifyDeclaredCategory: unmatched cuando hay texto pero su normalizado NO está (a avisar)', () => {
+  const catalog = new Set(['ternero', 'ternera', 'vaquillona', 'multipara', 'toro', 'torito']);
+  // "Vaca" no es un code del catálogo de cría → va a caer en placeholder por sexo (R10.5).
+  assert.equal(classifyDeclaredCategory('Vaca', catalog), 'unmatched');
+  // Texto arbitrario tampoco matchea.
+  assert.equal(classifyDeclaredCategory('Cualquier cosa', catalog), 'unmatched');
+  // Catálogo vacío (degradación / query falló) → todo texto cae a unmatched (el caller decide no avisar).
+  assert.equal(classifyDeclaredCategory('Vaquillona', new Set()), 'unmatched');
+});
+
+test('classifyDeclaredCategory: none cuando no hay texto (celda vacía / sin columna / SIGSA) — NO se avisa', () => {
+  const catalog = new Set(['vaquillona', 'torito']);
+  assert.equal(classifyDeclaredCategory(null, catalog), 'none');
+  assert.equal(classifyDeclaredCategory('', catalog), 'none');
+  assert.equal(classifyDeclaredCategory('   ', catalog), 'none');
 });
 
 // ─── T3.2 — normalización de nombre de lote (match por nombre, R10.4) ──────────────────

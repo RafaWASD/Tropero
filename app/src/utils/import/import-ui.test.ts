@@ -23,10 +23,13 @@ import {
   rowLabel,
   buildPreviewItems,
   buildCategoryLabelByIndex,
+  buildCategoryStatusByIndex,
+  summarizeUnrecognizedCategories,
   toCandidates,
   buildColumnSamples,
   PREVIEW_CAP,
   CATEGORY_BADGE_MAX,
+  UNRECOGNIZED_CATEGORY_LABELS_CAP,
   censusFieldLabel,
 } from './import-ui.ts';
 
@@ -245,6 +248,130 @@ test('buildPreviewItems: el categoryLabel del preview sale del mapa (wire del ba
   assert.ok(first && first.status === 'valid' && first.categoryLabel === 'Torito');
   // La válida sin categoría queda con categoryLabel null (sin badge).
   assert.ok(second && second.status === 'valid' && second.categoryLabel === null);
+});
+
+// ─── Visibilidad: categoría declarada vs catálogo (aviso del preview, R10.5) ──────────────────
+
+test('buildCategoryStatusByIndex: clasifica cada válida vs el catálogo del system (mirror del RPC)', () => {
+  const catalog = new Set(['vaquillona', 'torito', 'toro']);
+  const rows = [
+    normalizeRow({ idv: '0241', sex: 'H', category: 'Vaquillona' }), // 0 matched
+    normalizeRow({ idv: '0242', sex: 'H', category: 'Vaca' }), // 1 unmatched (no hay code "vaca")
+    normalizeRow({ idv: '0243', sex: 'H' }), // 2 none (sin categoría)
+  ];
+  const map = buildCategoryStatusByIndex(rows, [0, 1, 2], catalog);
+  assert.equal(map.get(0), 'matched');
+  assert.equal(map.get(1), 'unmatched');
+  assert.equal(map.get(2), 'none');
+});
+
+test('buildCategoryStatusByIndex: solo computa los índices válidos pasados', () => {
+  const catalog = new Set(['toro']);
+  const rows = [normalizeRow({ idv: '0241', sex: 'M', category: 'Toro' })];
+  // index 0 NO está en validIndices → no se clasifica.
+  const map = buildCategoryStatusByIndex(rows, [], catalog);
+  assert.equal(map.size, 0);
+});
+
+test('summarizeUnrecognizedCategories: resume las no reconocidas (cuántas filas + textos distintos)', () => {
+  const catalog = new Set(['vaquillona', 'torito', 'toro']);
+  const rows = [
+    normalizeRow({ idv: '0241', sex: 'H', category: 'Vaca' }), // unmatched
+    normalizeRow({ idv: '0242', sex: 'H', category: 'vaca' }), // unmatched (mismo texto, case-insensitive)
+    normalizeRow({ idv: '0243', sex: 'H', category: 'Recría' }), // unmatched (otro texto)
+    normalizeRow({ idv: '0244', sex: 'H', category: 'Vaquillona' }), // matched → no cuenta
+    normalizeRow({ idv: '0245', sex: 'H' }), // none → no cuenta
+  ];
+  const validIndices = [0, 1, 2, 3, 4];
+  const status = buildCategoryStatusByIndex(rows, validIndices, catalog);
+  const summary = summarizeUnrecognizedCategories(rows, validIndices, status);
+  assert.ok(summary);
+  // 3 filas no reconocidas (las dos "Vaca"/"vaca" + "Recría"); el conteo de filas es exacto.
+  assert.equal(summary.rowCount, 3);
+  // Textos distintos (case-insensitive): "Vaca" (primera forma) y "Recría". "Vaquillona" no entra.
+  assert.deepEqual(summary.labels, ['Vaca', 'Recría']);
+  // 2 textos distintos en total → no hay "y N más" (distinctCount == labels.length).
+  assert.equal(summary.distinctCount, 2);
+});
+
+test('summarizeUnrecognizedCategories: null cuando NO hay ninguna no reconocida (sin aviso)', () => {
+  const catalog = new Set(['vaquillona', 'torito']);
+  const rows = [
+    normalizeRow({ idv: '0241', sex: 'H', category: 'Vaquillona' }), // matched
+    normalizeRow({ idv: '0242', sex: 'H' }), // none
+  ];
+  const validIndices = [0, 1];
+  const status = buildCategoryStatusByIndex(rows, validIndices, catalog);
+  assert.equal(summarizeUnrecognizedCategories(rows, validIndices, status), null);
+});
+
+test('summarizeUnrecognizedCategories: capea la lista de labels a UNRECOGNIZED_CATEGORY_LABELS_CAP, conteo exacto', () => {
+  const catalog = new Set(['vaquillona']);
+  // N textos distintos no reconocidos (más que el cap).
+  const distinct = UNRECOGNIZED_CATEGORY_LABELS_CAP + 3;
+  const rows = Array.from({ length: distinct }, (_, i) =>
+    normalizeRow({ idv: String(1000 + i), sex: 'H', category: `Cat${i}` }),
+  );
+  const validIndices = rows.map((_, i) => i);
+  const status = buildCategoryStatusByIndex(rows, validIndices, catalog);
+  const summary = summarizeUnrecognizedCategories(rows, validIndices, status);
+  assert.ok(summary);
+  // El conteo de FILAS es exacto aunque la lista de labels esté capeada.
+  assert.equal(summary.rowCount, distinct);
+  assert.equal(summary.labels.length, UNRECOGNIZED_CATEGORY_LABELS_CAP);
+  // distinctCount cuenta TODOS los textos distintos (> labels capeados) → la UI muestra "y N más".
+  assert.equal(summary.distinctCount, distinct);
+  assert.ok(summary.distinctCount > summary.labels.length);
+});
+
+test('summarizeUnrecognizedCategories: capea cada texto a CATEGORY_BADGE_MAX (texto opaco, R3.5)', () => {
+  const catalog = new Set(['vaquillona']);
+  const long = 'Z'.repeat(CATEGORY_BADGE_MAX + 40);
+  const rows = [normalizeRow({ idv: '0241', sex: 'H', category: long })];
+  const status = buildCategoryStatusByIndex(rows, [0], catalog);
+  const summary = summarizeUnrecognizedCategories(rows, [0], status);
+  assert.ok(summary);
+  assert.equal(summary.labels[0]?.length, CATEGORY_BADGE_MAX);
+});
+
+test('buildPreviewItems: thread del categoryStatus a la fila válida (per-fila a completar)', () => {
+  const catalog = new Set(['vaquillona']);
+  const rows = [
+    normalizeRow({ idv: '0241', sex: 'H', category: 'Vaca' }), // unmatched
+    normalizeRow({ idv: '0242', sex: 'H', category: 'Vaquillona' }), // matched
+    normalizeRow({ idv: '0243', sex: 'H' }), // none
+  ];
+  const v = validateRows(rows);
+  const categoryStatusByIndex = buildCategoryStatusByIndex(rows, v.valid, catalog);
+  const { items } = buildPreviewItems({
+    rows,
+    validIndices: v.valid,
+    errors: v.errors,
+    intraDuplicates: v.intraDuplicates,
+    existingSkips: [],
+    categoryStatusByIndex,
+  });
+  const i0 = items.find((i) => i.index === 0);
+  const i1 = items.find((i) => i.index === 1);
+  const i2 = items.find((i) => i.index === 2);
+  assert.ok(i0 && i0.status === 'valid' && i0.categoryStatus === 'unmatched');
+  assert.ok(i1 && i1.status === 'valid' && i1.categoryStatus === 'matched');
+  assert.ok(i2 && i2.status === 'valid' && i2.categoryStatus === 'none');
+});
+
+test('buildPreviewItems: sin categoryStatusByIndex → categoryStatus "none" por defecto (degradación)', () => {
+  const rows = [normalizeRow({ idv: '0241', sex: 'H', category: 'Vaca' })];
+  const v = validateRows(rows);
+  const { items } = buildPreviewItems({
+    rows,
+    validIndices: v.valid,
+    errors: v.errors,
+    intraDuplicates: v.intraDuplicates,
+    existingSkips: [],
+  });
+  const i0 = items.find((i) => i.index === 0);
+  // Sin catálogo (degradación) → 'none' → la UI no marca "a completar".
+  assert.ok(i0 && i0.status === 'valid' && i0.categoryStatus === 'none');
 });
 
 test('toCandidates: arma CandidateRow[] de los índices válidos', () => {

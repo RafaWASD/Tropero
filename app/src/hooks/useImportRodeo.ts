@@ -29,6 +29,7 @@ import {
   checkFileSize,
   confirmImport,
   dedupAgainstExisting,
+  fetchCategoryCatalogCodes,
   type ImportFileFormat,
   type ImportRunResult,
 } from '@/services/import-rodeo';
@@ -45,13 +46,16 @@ import type { NormalizedRow } from '@/utils/import/normalize-row';
 import { validateRows, type ValidationResult } from '@/utils/import/validate-rows';
 import {
   buildCategoryLabelByIndex,
+  buildCategoryStatusByIndex,
   buildColumnSamples,
   buildPreviewItems,
   mappingIsComplete,
   normalizeSigsaRows,
   normalizeTableRows,
+  summarizeUnrecognizedCategories,
   toCandidates,
   type PreviewItem,
+  type UnrecognizedCategories,
 } from '@/utils/import/import-ui';
 
 /** La fuente elegida en el paso 1 (R1.3). 'spreadsheet' = CSV/Excel (mapeo); 'sigsa' = TXT fijo. */
@@ -83,6 +87,13 @@ export type ImportPreview = {
   hiddenCount: number;
   /** Total de filas de datos del archivo (para el conteo del import_log). */
   totalRecords: number;
+  /**
+   * Categorías DECLARADAS que NO están en el catálogo del system del rodeo → van a quedar "a
+   * completar" (placeholder por sexo del RPC, R10.5). SOLO visibilidad: avisamos sin cambiar el
+   * mapeo ni el RPC. `null` si no hay ninguna no reconocida, o si el catálogo no se pudo traer
+   * (degradación graciosa: el preview igual funciona, sin este aviso).
+   */
+  unrecognizedCategories: UnrecognizedCategories | null;
 };
 
 /** El error de un paso del flujo, ya legible en español (nunca sqlerrm crudo). */
@@ -395,6 +406,27 @@ export function useImportRodeo(): UseImportRodeo {
     // sin badge). NO es la categoría que resuelve el RPC server-side.
     const categoryLabelByIndex = buildCategoryLabelByIndex(rows, validIndices);
 
+    // Visibilidad de categorías declaradas vs catálogo del system del rodeo (R10.5): avisamos qué
+    // categorías NO matchean el catálogo (van a caer en placeholder "a completar"). MIRROR del match
+    // server-side del RPC (no lo cambia). Degradación graciosa: si no hay rodeo destino o la query del
+    // catálogo falla, NO rompemos el preview — seguimos sin el aviso de categorías (categoryStatus
+    // queda en 'none' por fila → ningún aviso ni señal de "a completar").
+    let categoryStatusByIndex: ReturnType<typeof buildCategoryStatusByIndex> | undefined;
+    let unrecognizedCategories: UnrecognizedCategories | null = null;
+    if (effectiveRodeoId) {
+      const catalog = await fetchCategoryCatalogCodes(effectiveRodeoId);
+      // Solo computamos el aviso si el catálogo se trajo Y no vino vacío: con un set vacío toda
+      // categoría declarada caería en 'unmatched' falsamente, así que ahí preferimos NO avisar.
+      if (catalog.ok && catalog.value.size > 0) {
+        categoryStatusByIndex = buildCategoryStatusByIndex(rows, validIndices, catalog.value);
+        unrecognizedCategories = summarizeUnrecognizedCategories(
+          rows,
+          validIndices,
+          categoryStatusByIndex,
+        );
+      }
+    }
+
     const { items, hiddenCount } = buildPreviewItems({
       rows,
       validIndices,
@@ -402,6 +434,7 @@ export function useImportRodeo(): UseImportRodeo {
       intraDuplicates: validation.intraDuplicates,
       existingSkips,
       categoryLabelByIndex,
+      categoryStatusByIndex,
     });
 
     setPreview({
@@ -411,10 +444,11 @@ export function useImportRodeo(): UseImportRodeo {
       items,
       hiddenCount,
       totalRecords: rows.length,
+      unrecognizedCategories,
     });
     setLoading(false);
     setStep('preview');
-  }, [establishmentId, source, sigsaRows, dataRows, mapping]);
+  }, [establishmentId, effectiveRodeoId, source, sigsaRows, dataRows, mapping]);
 
   const confirm = useCallback(async () => {
     if (!establishmentId || !effectiveRodeoId || !file || !preview) return;

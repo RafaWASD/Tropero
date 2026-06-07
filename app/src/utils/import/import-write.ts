@@ -177,8 +177,14 @@ export function resolveCategory(
   return { categoryCode: norm, categoryOverride: true };
 }
 
-/** Normaliza el texto de categoría a un candidato de `code` (minúsculas, sin tilde, espacios→_). PURO. */
-function normalizeCategoryText(raw: string | null): string | null {
+/**
+ * Normaliza el texto de categoría a un candidato de `code` (minúsculas, sin tilde, espacios→_). PURO.
+ * EXPORTADA porque el preview (import-ui / hook) la reusa para PREDECIR exactamente qué code va a
+ * matchear el RPC (mismo normalizado que resolveCategory manda en p_rows.category_code). Es el mirror
+ * cliente del match server-side por `categories_by_system.code` (0074): cualquier divergencia entre
+ * esta y lo que se manda al RPC haría que el aviso del preview mienta. NO la dupliques en otro lado.
+ */
+export function normalizeCategoryText(raw: string | null): string | null {
   if (raw == null) return null;
   const v = raw
     .normalize('NFD')
@@ -187,6 +193,32 @@ function normalizeCategoryText(raw: string | null): string | null {
     .trim()
     .replace(/\s+/g, '_');
   return v.length === 0 ? null : v;
+}
+
+/** El estado de una categoría declarada en una fila frente al catálogo del system del rodeo. */
+export type DeclaredCategoryStatus = 'matched' | 'unmatched' | 'none';
+
+/**
+ * Clasifica la categoría DECLARADA en una fila contra el catálogo de codes del system del rodeo
+ * destino (SOLO visibilidad client-side — NO cambia el mapeo ni el RPC; el RPC sigue decidiendo).
+ * Mirror EXACTO del match server-side de 0074: `categories_by_system.code = category_code` para el
+ * system del rodeo, con `category_code = normalizeCategoryText(raw)`. PURO.
+ *
+ *   - `none`      → no hay texto de categoría (celda vacía / sin columna mapeada / SIGSA). Es "a
+ *                   completar" ESPERADO (placeholder por sexo, R10.5) — NO es un problema a avisar.
+ *   - `matched`   → el normalizado del texto ∈ catalogCodes → el RPC va a respetar la categoría
+ *                   declarada (`category_override = true`).
+ *   - `unmatched` → hay texto pero su normalizado NO está en el catálogo → el RPC lo IGNORA y cae al
+ *                   placeholder por sexo (`category_override = false`, R10.5). ESTE es el caso a avisar:
+ *                   el operador declaró algo que no se va a respetar (ej. "Vaca" sin code en el catálogo).
+ */
+export function classifyDeclaredCategory(
+  rawCategory: string | null,
+  catalogCodes: ReadonlySet<string>,
+): DeclaredCategoryStatus {
+  const code = normalizeCategoryText(rawCategory);
+  if (code === null) return 'none';
+  return catalogCodes.has(code) ? 'matched' : 'unmatched';
 }
 
 /**

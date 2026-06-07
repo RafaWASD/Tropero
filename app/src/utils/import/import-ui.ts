@@ -15,7 +15,12 @@ import {
 import { breedNameFromCode } from './breed-senasa';
 import { normalizeRow, type NormalizedRow, type RawMappedRow } from './normalize-row';
 import type { RowError, RowErrorReason, IntraDuplicateGroup } from './validate-rows';
-import type { CandidateRow, ExistingDuplicateReason } from './import-write';
+import {
+  classifyDeclaredCategory,
+  type CandidateRow,
+  type DeclaredCategoryStatus,
+  type ExistingDuplicateReason,
+} from './import-write';
 import type { SigsaRecord } from './parse-sigsa-txt';
 
 /** The census fields the mapping step exposes, in display order (R4 — campos del censo). */
@@ -211,7 +216,19 @@ export function writeErrorCopy(reason: string): string {
 
 /** One row in the preview list, with a legible label + status, capped for perf (R5.4). */
 export type PreviewItem =
-  | { index: number; status: 'valid'; label: string; categoryLabel: string | null }
+  | {
+      index: number;
+      status: 'valid';
+      label: string;
+      categoryLabel: string | null;
+      /**
+       * Estado de la categoría DECLARADA en esta fila frente al catálogo del system del rodeo (SOLO
+       * visibilidad — el RPC decide). 'matched' = el RPC la va a respetar; 'unmatched' = NO está en
+       * el catálogo y va a caer en placeholder "a completar" (R10.5) → la fila lo señala; 'none' = sin
+       * categoría declarada (esperado, sin señal). Default 'none' si no se computó (degradación).
+       */
+      categoryStatus: DeclaredCategoryStatus;
+    }
   | { index: number; status: 'error'; label: string; reason: string }
   | { index: number; status: 'duplicate'; label: string; reason: string };
 
@@ -240,6 +257,12 @@ export function buildPreviewItems(args: {
   existingSkips: { index: number; reason: ExistingDuplicateReason }[];
   /** Resolved category label per row index (best-effort, optional — UI nicety). */
   categoryLabelByIndex?: Map<number, string>;
+  /**
+   * Estado de la categoría declarada por fila válida (matched/unmatched/none) frente al catálogo del
+   * system del rodeo. Optional: si el catálogo no se pudo traer (degradación) se omite y cada válida
+   * queda con 'none' (sin señal de "a completar" — el preview sigue andando, R: degradación graciosa).
+   */
+  categoryStatusByIndex?: Map<number, DeclaredCategoryStatus>;
   cap?: number;
 }): { items: PreviewItem[]; hiddenCount: number } {
   const cap = args.cap ?? PREVIEW_CAP;
@@ -252,6 +275,7 @@ export function buildPreviewItems(args: {
       status: 'valid',
       label: rowLabel(row, index),
       categoryLabel: args.categoryLabelByIndex?.get(index) ?? null,
+      categoryStatus: args.categoryStatusByIndex?.get(index) ?? 'none',
     });
   }
   for (const e of args.errors) {
@@ -319,4 +343,89 @@ export function buildCategoryLabelByIndex(
     map.set(index, trimmed.length > CATEGORY_BADGE_MAX ? trimmed.slice(0, CATEGORY_BADGE_MAX) : trimmed);
   }
   return map;
+}
+
+// ─── Visibilidad: categorías declaradas que NO matchean el catálogo (aviso del preview) ───────
+//
+// "Avisar, sin adivinar el dominio" (decisión de Raf): el preview muestra qué categorías declaradas
+// NO están en el catálogo del system del rodeo → van a quedar "a completar" (placeholder por sexo del
+// RPC, R10.5). NO cambia el mapeo ni el RPC: SOLO visibilidad client-side, mirror del match de 0074.
+
+/** Cuántos textos distintos de categoría no-reconocida mostrar en el aviso (resumen + "y N más"). */
+export const UNRECOGNIZED_CATEGORY_LABELS_CAP = 5;
+
+/**
+ * Clasifica la categoría declarada de cada fila VÁLIDA contra el catálogo de codes del system del
+ * rodeo (matched/unmatched/none), espejo del match server-side de 0074 (classifyDeclaredCategory).
+ * PURE. Si `catalogCodes` viene vacío (catálogo no traído / degradación), TODA categoría con texto
+ * caería en 'unmatched' — por eso el caller NO debe avisar cuando el catálogo no se pudo resolver
+ * (ver summarizeUnrecognizedCategories, que el hook solo invoca con un catálogo real).
+ */
+export function buildCategoryStatusByIndex(
+  rows: NormalizedRow[],
+  validIndices: number[],
+  catalogCodes: ReadonlySet<string>,
+): Map<number, DeclaredCategoryStatus> {
+  const map = new Map<number, DeclaredCategoryStatus>();
+  for (const index of validIndices) {
+    map.set(index, classifyDeclaredCategory(rows[index]?.category ?? null, catalogCodes));
+  }
+  return map;
+}
+
+/** El aviso de categorías declaradas no reconocidas para el preview (R10.5 visibilidad). */
+export type UnrecognizedCategories = {
+  /** Textos CRUDOS distintos no reconocidos, capeados (primeros N, ej. "Vaca"). */
+  labels: string[];
+  /** Cuántas FILAS válidas traen una categoría no reconocida (≥1 si hay aviso). */
+  rowCount: number;
+  /**
+   * Cuántos TEXTOS DISTINTOS no reconocidos hay en total (puede ser > labels.length si se capeó la
+   * lista). La UI muestra "y N más" cuando distinctCount > labels.length — el conteo es honesto.
+   */
+  distinctCount: number;
+};
+
+/**
+ * Resume las categorías DECLARADAS no reconocidas entre las filas válidas (las que se van a escribir):
+ * cuántas filas y qué textos crudos distintos (capeados a UNRECOGNIZED_CATEGORY_LABELS_CAP). PURE.
+ *
+ * Solo cuenta filas con status 'unmatched' (hay texto pero su normalizado no está en el catálogo).
+ * 'none' (sin categoría declarada) NO cuenta — es "a completar" esperado, no un problema. Devuelve
+ * `null` si no hay ninguna no reconocida (el preview no muestra aviso). El texto se toma de
+ * `row.category` (ya trimmeado por normalizeRow) y se capa a CATEGORY_BADGE_MAX (texto opaco, R3.5).
+ * El conteo de FILAS es exacto aunque la lista de labels esté capeada (resumen + "y N más" en la UI).
+ */
+export function summarizeUnrecognizedCategories(
+  rows: NormalizedRow[],
+  validIndices: number[],
+  statusByIndex: ReadonlyMap<number, DeclaredCategoryStatus>,
+  opts?: { labelsCap?: number },
+): UnrecognizedCategories | null {
+  const labelsCap = opts?.labelsCap ?? UNRECOGNIZED_CATEGORY_LABELS_CAP;
+  const seen = new Set<string>();
+  const labels: string[] = [];
+  let rowCount = 0;
+  let distinctCount = 0;
+
+  for (const index of validIndices) {
+    if (statusByIndex.get(index) !== 'unmatched') continue;
+    rowCount += 1;
+    const raw = rows[index]?.category;
+    if (typeof raw !== 'string') continue;
+    const trimmed = raw.trim();
+    if (trimmed.length === 0) continue;
+    const capped =
+      trimmed.length > CATEGORY_BADGE_MAX ? trimmed.slice(0, CATEGORY_BADGE_MAX) : trimmed;
+    // Dedup case-insensitive por valor crudo capeado para no listar "Vaca"/"vaca" dos veces, pero
+    // mostrando el primero tal cual lo escribió el operador (no el normalizado a code).
+    const key = capped.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    distinctCount += 1;
+    if (labels.length < labelsCap) labels.push(capped);
+  }
+
+  if (rowCount === 0) return null;
+  return { labels, rowCount, distinctCount };
 }

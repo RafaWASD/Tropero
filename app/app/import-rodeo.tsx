@@ -52,6 +52,7 @@ import {
   censusFieldLabel,
   writeErrorCopy,
   type PreviewItem,
+  type UnrecognizedCategories,
 } from '@/utils/import/import-ui';
 import { buttonA11y, labelA11y } from '@/utils/a11y';
 import { backOr } from '@/utils/nav';
@@ -652,6 +653,7 @@ function StepPreview({
     duplicateCount: number;
     items: PreviewItem[];
     hiddenCount: number;
+    unrecognizedCategories: UnrecognizedCategories | null;
   };
 }) {
   return (
@@ -681,6 +683,12 @@ function StepPreview({
           Ninguna fila se puede importar tal cual. Corregí el archivo (revisá identificadores y sexo) y
           volvé a subirlo.
         </InfoNote>
+      ) : null}
+
+      {/* Aviso de categorías declaradas que NO están en el catálogo → quedan "a completar" (R10.5).
+          SOLO visibilidad: no cambiamos el mapeo ni el RPC, avisamos sin adivinar el dominio. */}
+      {preview.unrecognizedCategories ? (
+        <UnrecognizedCategoriesNote info={preview.unrecognizedCategories} />
       ) : null}
 
       {/* Lista por fila (capeada para perf). */}
@@ -720,9 +728,47 @@ function CountColumn({
   );
 }
 
+/**
+ * Aviso de categorías declaradas que NO están en el catálogo del rodeo (R10.5 — van a quedar "a
+ * completar"). Tono de PRECAUCIÓN ($terracota como acento, como "Con error") pero NO es un error
+ * bloqueante: las filas igual se importan, solo que con la categoría por sexo. Texto en voseo. Lista
+ * los primeros N textos crudos distintos (ya capeados en el hook) con "…" si hay más. Cero hardcode (tokens).
+ */
+function UnrecognizedCategoriesNote({ info }: { info: UnrecognizedCategories }) {
+  // Lista ya capeada en el hook (info.labels). Si hay más textos DISTINTOS que los mostrados, "…".
+  const shown = info.labels.join(', ');
+  const hasMore = info.distinctCount > info.labels.length;
+  const labelList = hasMore ? `${shown}…` : shown;
+  const filasTxt = `${info.rowCount} ${info.rowCount === 1 ? 'fila tiene' : 'filas tienen'}`;
+  return (
+    <View
+      width="100%"
+      backgroundColor="$surface"
+      borderRadius="$card"
+      borderWidth={1}
+      borderColor="$terracota"
+      paddingHorizontal="$4"
+      paddingVertical="$3"
+      gap="$1"
+    >
+      <Text fontFamily="$body" fontSize="$4" fontWeight="600" color="$terracota">
+        {`${filasTxt} una categoría que no está en tu catálogo`}
+      </Text>
+      <Text fontFamily="$body" fontSize="$3" fontWeight="400" color="$textMuted">
+        {labelList.length > 0
+          ? `${labelList} van a quedar "a completar". Podés ajustar el archivo o corregirlas después.`
+          : 'Esas filas van a quedar "a completar". Podés ajustar el archivo o corregirlas después.'}
+      </Text>
+    </View>
+  );
+}
+
 function PreviewRow({ item }: { item: PreviewItem }) {
   const borderColor =
     item.status === 'valid' ? '$primary' : item.status === 'error' ? '$terracota' : '$divider';
+  // Una válida cuya categoría declarada NO matchea el catálogo va a quedar "a completar" (R10.5): el
+  // badge se marca con tono de precaución para que el operador vea CUÁL no se va a respetar.
+  const categoryUnmatched = item.status === 'valid' && item.categoryStatus === 'unmatched';
   return (
     <XStack
       width="100%"
@@ -751,9 +797,41 @@ function PreviewRow({ item }: { item: PreviewItem }) {
         ) : null}
       </YStack>
       {item.status === 'valid' && item.categoryLabel ? (
-        <CategoryBadge label={item.categoryLabel} />
+        categoryUnmatched ? (
+          <CategoryUnmatchedBadge label={item.categoryLabel} />
+        ) : (
+          <CategoryBadge label={item.categoryLabel} />
+        )
       ) : null}
     </XStack>
+  );
+}
+
+/**
+ * Variante de precaución del badge de categoría: la categoría declarada NO está en el catálogo del
+ * rodeo (R10.5) → la fila se importa pero va a quedar "a completar". Tono $terracota (no la firma
+ * $greenLight/$primary del CategoryBadge), con sufijo "· a completar" para que sea obvio que ese
+ * valor no se va a respetar. Cero hardcode (tokens + a11y por helper).
+ */
+function CategoryUnmatchedBadge({ label }: { label: string }) {
+  const trimmed = label.trim();
+  if (trimmed.length === 0) return null;
+  return (
+    <View
+      backgroundColor="$surface"
+      borderRadius="$pill"
+      borderWidth={1}
+      borderColor="$terracota"
+      paddingHorizontal="$2"
+      paddingVertical="$1"
+      alignSelf="flex-start"
+      flexShrink={0}
+      {...labelA11y(Platform.OS, `Categoría ${trimmed}, no está en el catálogo, va a quedar a completar`)}
+    >
+      <Text fontFamily="$body" fontSize="$2" fontWeight="600" color="$terracota" numberOfLines={1}>
+        {`${trimmed} · a completar`}
+      </Text>
+    </View>
   );
 }
 

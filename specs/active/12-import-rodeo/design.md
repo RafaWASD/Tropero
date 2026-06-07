@@ -247,6 +247,8 @@ El catálogo de `categories_by_system` para `(bovino, cría)` AS-BUILT (`0015` +
 
 > **Match del nombre de categoría**: la columna del CSV trae texto del productor (ej. "vaca", "vaquillona", "novillo"). El match contra el `code`/`name` del catálogo es **best-effort** (normalizado a minúsculas/sin tilde, contra `code` y `name`); sin match → R10.5. La tabla de sinónimos es TENTATIVA hasta ver la planilla real (disclaimer, igual que R4.1).
 
+> **As-built (corrección 2026-06-07) — match por `code` exacto + aviso en preview (R10.7).** El RPC `0074` matchea SOLO `categories_by_system.code = normalizeCategoryText(texto)` (lowercase/sin tilde/espacios→`_`), NO por `name` ni por una tabla de sinónimos (la del párrafo anterior quedó TENTATIVA, no se implementó). Consecuencia detectada en prueba real (Raf): el productor escribe **"Vaca"** genérica, que **no existe como `code`** en el catálogo de cría (que parte "vaca" en `multipara`/`vaca_segundo_servicio`/`vaca_cabana`) → cae al placeholder por sexo → la hembra entra como `vaquillona`. "Toro" sí entra porque el `code` `toro` existe. Decisión de Raf: **avisar sin adivinar el dominio** (R10.7) — el cliente carga los `code`s del catálogo del rodeo y, en el preview, marca las categorías declaradas no reconocidas (aviso de precaución + badge "· a completar" por fila). El mapeo de dominio de "Vaca" genérica / sinónimos / agregar al catálogo queda **DIFERIDO a Facundo** (D3, `CONTEXT/07-pendientes.md`). `classifyDeclaredCategory` (cliente) usa el MISMO `normalizeCategoryText` que `resolveCategory` manda al RPC → el aviso predice exactamente el match server-side.
+
 ---
 
 ## 6. Backend / Gates — ¿aplica Gate 1?

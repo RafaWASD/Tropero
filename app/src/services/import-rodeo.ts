@@ -145,6 +145,52 @@ export async function dedupAgainstExisting(
   return { ok: true, value: mergeDedupAgainstExisting(candidates, existingIdvs, existingTags) };
 }
 
+// ─── I/O — visibilidad: codes ACTIVOS del catálogo del system del rodeo (preview) ────────
+
+/**
+ * Trae el set de `code`s ACTIVOS del catálogo `categories_by_system` del system del rodeo destino,
+ * para que el PREVIEW pueda avisar qué categorías declaradas NO van a matchear (caerían en placeholder
+ * por sexo, R10.5). SOLO lectura — NO cambia el mapeo ni el RPC; el RPC sigue decidiendo (0074). Es el
+ * MIRROR cliente del match server-side (code = category_code para el system del rodeo + active=true).
+ *
+ * `categories_by_system` es legible por authenticated (policy `using(true)` de 0015) — read-only de
+ * catálogo, sin datos de tenant. Resolvemos el system_id del rodeo (1 query, RLS scopea por
+ * has_role_in vía 0017) y traemos los codes activos de ese system (1 query). Si el rodeo no existe /
+ * no es visible → set vacío (el caller degrada: sin aviso de categorías, NO rompe el preview).
+ */
+export async function fetchCategoryCatalogCodes(
+  rodeoId: string,
+): Promise<ServiceResult<Set<string>>> {
+  // 1) system_id del rodeo (no se hardcodea el system — se deriva del rodeo, igual que el RPC).
+  const { data: rodeo, error: rodeoErr } = await supabase
+    .from('rodeos')
+    .select('system_id')
+    .eq('id', rodeoId)
+    .is('deleted_at', null)
+    .maybeSingle();
+  if (rodeoErr) return { ok: false, error: classifyError(rodeoErr) };
+  const systemId = (rodeo as { system_id: string } | null)?.system_id ?? null;
+  if (!systemId) {
+    // Rodeo inexistente / no visible bajo RLS: sin catálogo. El caller NO debe romper el preview.
+    return { ok: true, value: new Set<string>() };
+  }
+
+  // 2) codes ACTIVOS del catálogo de ese system (espejo del filtro `code = category_code and
+  //    active = true` que hace 0074 al resolver category_id).
+  const { data, error } = await supabase
+    .from('categories_by_system')
+    .select('code')
+    .eq('system_id', systemId)
+    .eq('active', true);
+  if (error) return { ok: false, error: classifyError(error) };
+
+  const codes = new Set<string>();
+  for (const r of (data ?? []) as { code: string | null }[]) {
+    if (r.code) codes.add(r.code);
+  }
+  return { ok: true, value: codes };
+}
+
 // ─── I/O — T3.2: resolución de lotes por nombre → management_group_id (en LOTE) ────────
 
 /**
