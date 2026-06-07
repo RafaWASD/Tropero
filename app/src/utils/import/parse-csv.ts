@@ -45,12 +45,87 @@ type ParseState = {
   committed: number;
 };
 
+/** Field-separator candidates we auto-detect, in tie-break preference order. */
+type Delimiter = ',' | ';' | '\t';
+
+/**
+ * Max characters scanned when sniffing the delimiter (R3.3 anti-DoW). The header line is
+ * naturally short, but we never assume that: a 50 MB single-cell file must not trigger a
+ * 50 MB sniff. We stop at the first record terminator OR this cap, whichever comes first.
+ */
+const SNIFF_LIMIT = 64 * 1024;
+
+/**
+ * Detect the field delimiter from the FIRST record (header line) of CSV text.
+ *
+ * Excel in es-AR/es-ES locales exports CSV with `;` (semicolon) as the list separator, so
+ * a hardcoded comma would read a real beta spreadsheet as a single column. We sniff the
+ * first record only, respecting RFC-4180 quoting: a delimiter INSIDE a quoted field does
+ * not count, and the first record ends at the first `\r`/`\n` that is OUTSIDE quotes.
+ *
+ * We count out-of-quote occurrences of each candidate (`,`, `;`, `\t`) and return the one
+ * with the highest count (> 0). A tie or no delimiter at all → default `,` — so a
+ * single-column file or any existing comma file parses exactly as before (full
+ * backward compatibility).
+ *
+ * Pure: no I/O, never throws. The scan is bounded by the first record terminator or
+ * SNIFF_LIMIT characters, whichever comes first (R3.3 anti-DoW).
+ */
+export function detectDelimiter(text: string): Delimiter {
+  if (typeof text !== 'string' || text.length === 0) return ',';
+
+  let comma = 0;
+  let semicolon = 0;
+  let tab = 0;
+  let inQuotes = false;
+
+  const scanEnd = Math.min(text.length, SNIFF_LIMIT);
+  for (let i = 0; i < scanEnd; i++) {
+    const ch = text[i];
+
+    if (inQuotes) {
+      if (ch === '"') {
+        // An escaped quote `""` inside a quoted field stays inside quotes.
+        if (text[i + 1] === '"') {
+          i++;
+        } else {
+          inQuotes = false;
+        }
+      }
+      continue;
+    }
+
+    if (ch === '"') {
+      inQuotes = true;
+      continue;
+    }
+
+    // Out of quotes: the first record terminator ends the header line.
+    if (ch === '\r' || ch === '\n') break;
+
+    if (ch === ',') comma++;
+    else if (ch === ';') semicolon++;
+    else if (ch === '\t') tab++;
+  }
+
+  // The candidate with the STRICTLY-greatest count wins. Any tie at the top — including
+  // the all-zero case (no delimiter found) — falls back to `,` for backward
+  // compatibility (a single-column file stays one column).
+  if (semicolon > comma && semicolon > tab) return ';';
+  if (tab > comma && tab > semicolon) return '\t';
+  return ',';
+}
+
 /**
  * Parse CSV text into { headers, rows } with row/cell caps applied during the scan.
  *
+ * The field separator is auto-detected from the header line via detectDelimiter (comma,
+ * semicolon or tab) so Excel's es-AR/es-ES `;` exports parse correctly; a comma file is
+ * unchanged.
+ *
  * Handles RFC-4180-ish quoting: fields may be wrapped in double quotes; an escaped
- * quote inside a quoted field is `""`; quoted fields may contain commas, newlines and
- * quotes. Outside quotes, `\r\n`, `\n` and lone `\r` all end a record. A trailing
+ * quote inside a quoted field is `""`; quoted fields may contain the delimiter, newlines
+ * and quotes. Outside quotes, `\r\n`, `\n` and lone `\r` all end a record. A trailing
  * newline does NOT produce a spurious empty row.
  *
  * The cap counts DATA rows (records after the header). Once MAX_ROWS data rows are
@@ -60,6 +135,11 @@ export function parseCsv(text: string): ParsedTable {
   if (typeof text !== 'string' || text.length === 0) {
     return { headers: [], rows: [], rowsExceeded: false, cellsExceeded: false };
   }
+
+  // Auto-detect the field separator once from the header line (Excel es-AR/es-ES exports
+  // CSV with `;`). Everything below is identical to the comma-only path, just parameterized
+  // by `delimiter` instead of a hardcoded comma.
+  const delimiter = detectDelimiter(text);
 
   const state: ParseState = {
     rows: [],
@@ -104,7 +184,7 @@ export function parseCsv(text: string): ParsedTable {
       continue;
     }
 
-    if (ch === ',') {
+    if (ch === delimiter) {
       pushField(state);
       started = true;
       continue;

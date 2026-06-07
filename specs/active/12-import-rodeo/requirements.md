@@ -84,6 +84,8 @@ Esta spec **consume** el sustrato as-built de spec 02 (tablas `animals`/`animal_
 
 **R3.7** *(Control diferido — Gate 1 MEDIUM-4.)* Los topes R3.1-R3.4 acotan **una** corrida, pero NO la **frecuencia** de corridas (un usuario autenticado podría disparar muchas seguidas = DoW por reintentos). Para MVP esto es **aceptable** (es una op de oficina, no un endpoint público; mismo-tenant; la escala ya es posible vía alta unitaria). Queda anotado como control diferido (rate-limit de frecuencia de import por usuario/establecimiento) en `docs/backlog.md`; se evalúa si el abuso real lo amerita.
 
+**R3.9** *(As-built — robustez es-AR.)* Donde el sistema parsee CSV, deberá **auto-detectar el delimitador de campos** mirando el primer registro (header): elige entre coma, punto y coma o tabulación el de mayor frecuencia FUERA de comillas, con default a coma ante empate o ausencia (retrocompat total). Excel en locale es-AR/es-ES exporta CSV con `;` como separador de listas; sin esta detección, la planilla real del productor del beta se leería como una sola columna. El sniff respeta el quoting RFC-4180 y está acotado (`SNIFF_LIMIT`, anti-DoW consistente con R3.3). Implementado en `detectDelimiter` de `parse-csv.ts`.
+
 ### R4. Fuente CSV/Excel: mapeo de columnas
 
 > `[UI TENTATIVA]` para layout/copy del mapeo; **definitiva** para el contrato de campos mapeables y la normalización.

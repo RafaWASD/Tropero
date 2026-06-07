@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { parseCsv, MAX_ROWS, MAX_CELLS_PER_ROW } from './parse-csv.ts';
+import { parseCsv, detectDelimiter, MAX_ROWS, MAX_CELLS_PER_ROW } from './parse-csv.ts';
 
 test('R4.1 CSV bien formado → headers + filas correctas', () => {
   const csv = 'caravana,sexo,raza\n0241,M,Angus\n0242,H,Hereford';
@@ -121,4 +121,99 @@ test('borde: input no-string → tabla vacía (defensivo, never throws)', () => 
   const out = parseCsv(null);
   assert.deepEqual(out.headers, []);
   assert.deepEqual(out.rows, []);
+});
+
+// --- Auto-detección de delimitador (Excel es-AR exporta CSV con `;`) ---
+
+test('no-regresión: CSV coma sigue parseando idéntico', () => {
+  const csv = 'a,b,c\n1,2,3\n4,5,6';
+  const out = parseCsv(csv);
+  assert.deepEqual(out.headers, ['a', 'b', 'c']);
+  assert.deepEqual(out.rows, [
+    ['1', '2', '3'],
+    ['4', '5', '6'],
+  ]);
+});
+
+test('punto y coma (export Excel es-AR) → 3 headers + fila correcta', () => {
+  const out = parseCsv('a;b;c\n1;2;3');
+  assert.deepEqual(out.headers, ['a', 'b', 'c']);
+  assert.deepEqual(out.rows, [['1', '2', '3']]);
+});
+
+test('tab → 3 headers + fila correcta', () => {
+  const out = parseCsv('a\tb\tc\n1\t2\t3');
+  assert.deepEqual(out.headers, ['a', 'b', 'c']);
+  assert.deepEqual(out.rows, [['1', '2', '3']]);
+});
+
+test('punto y coma con coma DENTRO de comillas: la coma interna no dispara coma como delimitador', () => {
+  // Header `"a,b";c` tiene 1 coma (dentro de comillas, no cuenta) y 1 `;` (fuera).
+  // Debe ganar `;` → 2 columnas, no 3.
+  const out = parseCsv('"a,b";c\n"x,y";z');
+  assert.deepEqual(out.headers, ['a,b', 'c']);
+  assert.deepEqual(out.rows, [['x,y', 'z']]);
+});
+
+test('archivo de una sola columna (sin delimitador) → 1 columna, default coma sin romper', () => {
+  const out = parseCsv('soloheader\nvalor1\nvalor2');
+  assert.deepEqual(out.headers, ['soloheader']);
+  assert.deepEqual(out.rows, [['valor1'], ['valor2']]);
+});
+
+test('empate de conteos (coma vs punto y coma) → default coma', () => {
+  // Header `a,b;c` tiene 1 coma y 1 punto y coma → empate → default coma.
+  // Con coma: ['a', 'b;c'] (el `;` queda como texto literal dentro de la 2da celda).
+  const out = parseCsv('a,b;c\n1,2;3');
+  assert.deepEqual(out.headers, ['a', 'b;c']);
+  assert.deepEqual(out.rows, [['1', '2;3']]);
+});
+
+test('R3.2/R3.3 caps de filas funcionan con `;` como delimitador', () => {
+  const lines = ['h1;h2']; // header con punto y coma
+  for (let i = 0; i < MAX_ROWS + 10; i++) lines.push(`${i};x`);
+  const out = parseCsv(lines.join('\n'));
+  assert.deepEqual(out.headers, ['h1', 'h2']);
+  assert.equal(out.rowsExceeded, true, 'debe señalar excedido también con `;`');
+  assert.equal(out.rows.length, MAX_ROWS, 'no materializa más de MAX_ROWS con `;`');
+  // Verifica que el delimitador se aplicó: cada fila tiene 2 celdas, no 1.
+  assert.equal(out.rows[0].length, 2);
+});
+
+test('R3.2 exactamente MAX_ROWS filas con `;` → NO marca excedido', () => {
+  const lines = ['h1;h2'];
+  for (let i = 0; i < MAX_ROWS; i++) lines.push(`${i};x`);
+  const out = parseCsv(lines.join('\n'));
+  assert.equal(out.rowsExceeded, false);
+  assert.equal(out.rows.length, MAX_ROWS);
+  assert.equal(out.rows[0].length, 2);
+});
+
+test('detectDelimiter directa: cada candidato + default', () => {
+  assert.equal(detectDelimiter('a,b,c\n1,2,3'), ',', 'coma');
+  assert.equal(detectDelimiter('a;b;c\n1;2;3'), ';', 'punto y coma');
+  assert.equal(detectDelimiter('a\tb\tc'), '\t', 'tab');
+  assert.equal(detectDelimiter('soloheader'), ',', 'sin delimitador → default coma');
+  assert.equal(detectDelimiter(''), ',', 'string vacío → default coma');
+  // @ts-expect-error robustez ante input no-string
+  assert.equal(detectDelimiter(null), ',', 'no-string → default coma, never throws');
+});
+
+test('detectDelimiter: sólo mira el PRIMER registro (header), no las filas de datos', () => {
+  // Header con coma (gana coma); las filas de datos usan `;` pero NO deben influir.
+  assert.equal(detectDelimiter('a,b\n1;2;3;4;5'), ',');
+});
+
+test('detectDelimiter: `;` dentro de comillas en el header NO lo elige', () => {
+  // Header `"a;b",c` → el `;` está entre comillas (no cuenta), la coma gana.
+  assert.equal(detectDelimiter('"a;b",c\n1,2'), ',');
+});
+
+test('detectDelimiter: empate (1 coma + 1 punto y coma) → default coma', () => {
+  assert.equal(detectDelimiter('a,b;c'), ',');
+});
+
+test('detectDelimiter: empate entre `;` y tab (ambos > coma) → default coma', () => {
+  // semicolon=2, tab=2, comma=0 → empate en el tope → default coma.
+  assert.equal(detectDelimiter('a;b;c\td\te'), ',');
 });

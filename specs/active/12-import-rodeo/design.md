@@ -15,7 +15,7 @@
 
 | Archivo (kebab-case, `conventions.md`) | Capa | Qué hace | Cubre |
 |---|---|---|---|
-| `app/src/utils/import/parse-csv.ts` | util puro | Parsea CSV/Excel → `{ headers: string[], rows: string[][] }` con cap de filas/celdas ANTES de materializar todo (R3.3). Sin I/O. | R3.2, R3.3, R4.1 |
+| `app/src/utils/import/parse-csv.ts` | util puro | Parsea CSV → `{ headers: string[], rows: string[][] }` con cap de filas/celdas ANTES de materializar todo (R3.3). **Auto-detecta el delimitador** (`,`/`;`/tab) del header — `detectDelimiter`, default coma, sniff acotado (es-AR Excel exporta `;`, R3.9). Sin I/O. | R3.2, R3.3, R3.9, R4.1 |
 | `app/src/utils/import/parse-sigsa-txt.ts` | util puro | Parsea el TXT SIGSA (`RFID-SEXO-RAZA-MM/AAAA;…`) por **posición** → filas normalizadas. Sin I/O. | R6.2, R10.1 |
 | `app/src/utils/import/column-mapping.ts` | util puro | Auto-detección de headers → campo del censo + aplicación del mapeo manual. | R4.1, R4.2 |
 | `app/src/utils/import/normalize-row.ts` | util puro | Normaliza sexo (R4.3), fecha (R4.4), TAG (reusa `parser-rs420.ts` R4.5), raza (R6); aplica topes de largo (R3.4). | R3.4, R4.3, R4.4, R4.5, R6 |
