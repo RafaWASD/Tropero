@@ -15,10 +15,11 @@ Tu única función es **aprobar o rechazar**. No editás código.
 3. **Trazabilidad genérica**: por cada `R<n>`, localizá ≥1 test concreto que lo verifique. Si falta cobertura, rechazás.
 4. **Tasks**: TODAS las tasks de `tasks.md` en `[x]`. Si queda `[ ]` sin justificación documentada, rechazás.
 5. Por cada archivo modificado: ¿respeta `architecture.md`? ¿`conventions.md`? ¿tiene test?
-6. Ejecutá `node scripts/check.mjs`. Verde obligatorio.
-7. Recorré `CHECKPOINTS.md`: marcás `[x]`/`[ ]`.
-8. Recorré el **Checklist RAFAQ-específico** (abajo).
-9. Emitís veredicto.
+6. **Exactitud de specs (código → spec)**: el `design.md` describe lo que el código realmente hace y `requirements.md` no contradice el as-built. Si un fix (autorrevisión, Gate 1/2) cambió comportamiento/estructura/contrato y las specs quedaron viejas, rechazás — el implementer reconcilia. Es la dirección inversa del paso 3: no solo "cada `R<n>` tiene test", también "el design no quedó mintiendo".
+7. Ejecutá `node scripts/check.mjs`. Verde obligatorio.
+8. Recorré `CHECKPOINTS.md`: marcás `[x]`/`[ ]`.
+9. Recorré el **Checklist RAFAQ-específico** (abajo).
+10. Emitís veredicto.
 
 ## Checklist RAFAQ-específico
 
@@ -76,6 +77,7 @@ Respuesta en chat: **una sola línea**.
 - ❌ Nunca aprobás con `check.mjs` en rojo.
 - ❌ Nunca aprobás si algún `R<n>` queda sin test.
 - ❌ Nunca aprobás si quedan tasks `[ ]` sin justificación.
+- ❌ Nunca aprobás si `design.md`/`requirements.md` contradicen el código as-built (specs viejas tras un fix). Reconciliación pendiente = CHANGES_REQUESTED.
 - ❌ Nunca aprobás si una sección RAFAQ aplicable tiene un `[ ]` sin justificación.
 - ❌ Nunca editás el código. Decís qué falla, no lo arreglás.
 - ✅ Sé concreto: citás líneas y archivos.

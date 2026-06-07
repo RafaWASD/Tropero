@@ -140,6 +140,12 @@ Para specs puramente UI sin datos nuevos (ej: refactor de pantalla), Gate 1 se s
 - Cuando se llegue a implementar B.2 (backend spec 02), es la primera prueba real del flujo nuevo con security_analyzer en acción.
 - Si en post-MVP surge necesidad de auditoría regulatoria SENASA explícita, este ADR queda como base de evidencia.
 
+### Addendum (2026-06-07) — Reconciliación de specs tras fix-loops de gate
+
+Hueco detectado al revisar el flujo: los gates corrigen *código* (Gate 2 FAIL → implementer fixea → reviewer revalida → loop hasta PASS), pero ningún agente tenía codificada la obligación de reflejar ese cambio de vuelta en las specs. La regla existía como feedback de Raf y se cumplía en la práctica (ej. `impl_13` reconcilió `requirements.md` tras mover PII a `user_private`), pero dependía de que el leader la inyectara a mano — frágil justo en el fix-loop de Gate 2, donde el brief del implementer apunta a *fixear*, no a reconciliar.
+
+Cierre: la reconciliación al as-built pasa a ser regla dura con triple cobertura — `implementer` la ejecuta (paso 9), `reviewer` la verifica (dirección código → spec; specs viejas = CHANGES_REQUESTED) y `leader` la exige como pre-condición de `done`. Enunciado canónico en `docs/specs.md` § "Reconciliación de specs al as-built". No cambia los gates de este ADR; cierra el feedback loop spec↔código que los gates abren.
+
 ### Reversibilidad
 
 Media. Adoptar la skill + crear el subagente + actualizar los agentes existentes son cambios atómicos en archivos del repo, fáciles de revertir vía git. Lo que NO es trivial revertir: las decisiones tomadas con el security review activo (cambios al código que se hicieron por findings del security_analyzer). Si en el futuro se quiere desinstalar la skill, los cambios al código ya están integrados.

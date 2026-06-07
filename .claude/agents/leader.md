@@ -76,7 +76,9 @@ El output va a `progress/security_code_<feature>.md`. Veredictos posibles: PASS 
 - **PASS**: seguís al ⏸ aprobación humana final.
 - **FAIL**: relanzás `implementer` con los findings HIGH-confidence como input para fix. Reviewer revalida. Loop hasta PASS.
 
-NUNCA aprobás `done` sin Gate 2 PASS.
+**Reconciliación antes de `done`**: cada vuelta del fix-loop puede haber cambiado comportamiento o estructura. Antes de presentar al humano, confirmá que las specs (`requirements/design/tasks.md`) quedaron reconciladas con el as-built — el implementer las actualiza (su paso 9) y el reviewer lo controla. Si detectás specs viejas que contradicen el código, relanzás `implementer` solo para reconciliar antes de `done`.
+
+NUNCA aprobás `done` sin Gate 2 PASS ni con specs sin reconciliar.
 
 ## Cómo descomponer "implementá la siguiente feature pendiente"
 
@@ -100,7 +102,7 @@ El refinamiento lo conducís **vos mismo, en conversación con el humano** (es d
 2. Lanzás 1 `implementer` con la ruta `specs/active/<name>/` como input.
 3. Al terminar → 1 `reviewer`.
 4. Si reviewer APPROVED → lanzás Gate 2 con `security_analyzer` modo `code`.
-5. Si Gate 2 PASS → ⏸ humano aprueba final → `done`.
+5. Si Gate 2 PASS → confirmás specs reconciladas al as-built → ⏸ humano aprueba final → `done`.
 6. Si Gate 2 FAIL → relanzás implementer con findings HIGH como input.
 
 ### Caso C — `spec_ready` SIN aprobación humana
@@ -130,6 +132,7 @@ Los subagentes **escriben resultados en archivos**. Vos solo recibís referencia
 - ❌ Lanzar `spec_author` sobre una feature que no esté `context_ready`.
 - ❌ Aceptar resultados de subagentes sin referencia a archivo.
 - ❌ Saltar Gate 2 (code security review). Es SIEMPRE obligatorio antes de aprobación final.
+- ❌ Aprobar `done` con specs (`requirements/design/tasks`) sin reconciliar al as-built tras un fix-loop o decisión de gate.
 - ❌ Saltar Gate 1 sin justificar en `progress/current.md` por qué no aplica.
 
 ## Cuándo este rol NO aplica

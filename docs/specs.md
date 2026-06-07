@@ -125,6 +125,17 @@ El implementer marca `[x]`. El reviewer rechaza si queda `[ ]` sin justificació
 
 Cada test mapea a un `R<n>`; cada `R<n>` tiene ≥1 test. El reviewer lo comprueba. El implementer documenta el mapa `R<n> → archivo:test` en `progress/impl_<name>.md`.
 
+## Reconciliación de specs al as-built (regla dura)
+
+Las specs son la fuente de verdad, no un artefacto de una sola pasada. Toda corrección que cambie el comportamiento o la estructura después de escrita la spec —fix de la autorrevisión del implementer, fix de un FAIL de Gate 1/2, o una decisión tomada en un gate— se reconcilia en `specs/active/<feature>/{requirements,design,tasks}.md` **antes de cerrar/commitear**. Nunca queda una spec que contradiga el código.
+
+La dirección importa. La trazabilidad de arriba garantiza *spec → código* (cada `R<n>` tiene test). Esta regla garantiza *código → spec*: el `design.md` describe lo que el código realmente hace y el `requirements.md` no quedó viejo. Un fix de seguridad que cambia el diseño se refleja en el `design.md`; si cambia el *qué*, se anota bajo el `R<n>` afectado en `requirements.md` (no se reescriben los EARS por gusto — nota de reconciliación, patrón de `impl_13`).
+
+Triple cobertura para que no dependa de la memoria de nadie:
+- **implementer** la ejecuta (paso 9 de su protocolo) antes de pasar al reviewer.
+- **reviewer** la verifica —rechaza con CHANGES_REQUESTED si el `design.md` quedó mintiendo.
+- **leader** la exige como pre-condición de `done` (no aprueba con specs sin reconciliar).
+
 ## Política de pipeline (orden entre refinar, spec-ear e implementar)
 
 Tres actividades, tres ritmos. La implementación es la prioridad; refinar y spec-ear van adelante lo justo para no frenarla nunca:
