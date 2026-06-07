@@ -3,36 +3,19 @@
 > Este archivo se vacía al cerrar cada sesión y su resumen se mueve a `history.md`.
 > Mientras trabajás, **mantenelo actualizado en tiempo real**, no al final.
 
-## Sesión en curso — 2026-06-07: C4 lotes (frontend `management_groups`, spec 02)
+_(Sin sesión activa. La última cerrada está resumida en `progress/history.md`.)_
 
-**Tarea**: frontend C4 de spec 02 — gestión de lotes (`management_groups`, ADR-020). Backend `0037` ya aplicado → **frontend puro** (Gate 1 N/A, como C3.3).
+## Última sesión cerrada — 2026-06-07: spec 02 C4 lotes (`management_groups`)
 
-**Por qué C4** (decisión de Raf, esta sesión): tras descartar arrancar feature 10 (resultó stale vs el backend Tier 2 de Facundo — castración masiva specceada como `sanitary_events` marker pero el efecto de categoría as-built 0064 va por `animals.is_castrated`; spec 10 necesita reconciliación antes de implementar → queda on-deck). C4 es limpio, más chico, y prerequisito de la mitad "lote" de spec 10.
+Ver `progress/history.md` (entrada 2026-06-07). En síntesis:
+- **Spec 02 C4 lotes** — DONE + committeada (`36c5437`, puerta de código de Raf). Frontend de `management_groups` (ADR-020): CRUD de lotes (owner) + asignar/quitar/quick-create desde la ficha + ver-miembros; entry junto a Rodeos. Frontend puro (backend `0037` ya aplicado) → Gate 1 N/A. Borrado vía RPC `soft_delete_management_group` (0041 pre-existente — el leader cazó un falso "bloqueante de backend" del implementer que usaba `UPDATE deleted_at` directo → 42501 esperado por el gotcha de PostgREST). Gates: reviewer APPROVED + Gate 2 PASS 0 HIGH + veto de diseño + puerta de código. check.mjs verde (628 unit + e2e lotes 2/2). **spec 02 sigue `deferred`** (queda C5 PowerSync, bloqueado por infra).
+- **Feature 10 (masivas)** — descartada para implementar ahora: STALE vs el backend Tier 2 (castración masiva specceada como `sanitary_events` marker, pero el efecto de categoría as-built `0064` va por `animals.is_castrated`). **On-deck, a reconciliar** antes de implementar. + conflicto de Puerta 1 sin confirmar (`feature_list` PENDIENTE vs `requirements.md` APROBADA, 1/6).
 
-**Gate 0 cerrado** (`specs/active/02-modelo-animal/context-c4-lotes.md`, aprobado por Raf):
-- D1 borrar lote con animales → reasigna animales a NULL (vuelven a categoría) + soft-delete; orden null-primero; 2 UPDATES no atómicos (recuperable, atomicidad real = C5); sin RPC → Gate 1 N/A.
-- D2 gestión de lotes vive junto a Rodeos (`/lotes`); asignar día-a-día desde la ficha.
-- D3 incluye ver-miembros de un lote; vista de grupo rodeo-céntrica + agrupamiento en Inicio = spec 10 (no se toca).
-
-**Alcance C4**: `management-groups.ts` (CRUD: create/rename/soft-delete + assign/clear) + `LotesScreen` (lista + CRUD owner-only) + asignar/quitar desde la ficha + ver miembros. Online-first (C5=PowerSync). E2E Playwright nuevo.
-
-**ESTADO: C4 DONE + COMMITEADO** (puerta de código de Raf). Pipeline completo: implementer → **leader cazó un falso "bloqueante de backend"** (el implementer usaba `UPDATE deleted_at` directo → 42501; el RPC `soft_delete_management_group` de `0041` ya existía para ese gotcha de PostgREST) → fix-loop a RPC → reviewer APPROVED → Gate 2 PASS 0 HIGH → veto de diseño leader (8 capturas CDP) → puerta de código de Raf. 3 iteraciones del "Crear lote nuevo" en el combo de la ficha (CTA centrada con divisor + "+" a la izq; centrado imperfecto, aceptado). check.mjs verde (628 unit + e2e lotes 2/2). spec 02 `in_progress→deferred` (C5 PowerSync sigue pendiente). Deuda menor anotada en backlog (error-copy de create/rename; member-count en card colapsada).
-
-**Flag abierto (no bloqueante)**: conflicto de Puerta 1 de spec 10 — `feature_list.json` dice PENDIENTE, `requirements.md` dice APROBADA (1/6). Raf no lo confirmó. Se reconcilia en la pasada de reconciliación de spec 10 cuando se retome.
-
----
-
-## Última sesión cerrada — 2026-06-06/07: feature 12 import masivo (CERRADA) + bastón buildable + C3.3 baja de animal
-
-Ver `progress/history.md` (entrada 2026-06-06/07). En síntesis:
-- **Feature 12** (importación masiva de rodeo) — **DONE + cerrada** (puerta de código de Raf, "cerra 12"). Implementación completa 2026-06-06 (5 commits; Gate 1 / Puerta 1 / Gate 2 — cazó 1 HIGH del cap de batch solo-cliente) + cierre 2026-06-07 con 3 fixes de UX probados en vivo (mapeo SOURCE-DRIVEN + componente `Select`; auto-detección de delimitador `,`/`;`/tab para Excel es-AR; aviso de categorías no reconocidas en el preview) + e2e `rodeos.spec.ts` verde. Commits `3ae4478` / `cd2b6c8` / `f10ed27` / `8576369` / cierre `5c8acc0`.
-- **Feature 04** (bastón) — capa buildable-hoy DONE + pantalla harness web (`app/app/baston-test.tsx`) para probar el RS420 en `pnpm web`; el RESTO `deferred` por hardware. **ADR-024** cerró que el RS420 no es BLE GATT (BT Classic SPP / iAP-MFi).
-- **Spec 02 C3.3** (baja/egreso de animal desde la ficha) — DONE + committeada (`5a4f34a`, terminal paralela). Spec 02 sigue `deferred` (C4 lotes + C5 PowerSync pendientes).
-
-**Estado por feature**: la fuente única es `feature_list.json`. **Pendientes principales**:
-- [Facundo] D3 del import — qué hace una "Vaca" genérica declarada (no existe en el catálogo de cría); CE en toritos (3 momentos/unidad); pricing; campos temporales del vet. Ver `CONTEXT/07-pendientes.md`.
-- [Raf] live test del bastón con el RS420 en web (T2.5); web-check de feature 14 (perfil/cambiar-email).
-- [Backlog] limpiar data de e2e de prod antes del beta de Chascomús; MED-01 `CHECK>0` en `exit_weight`/`exit_price`; rate-limit de frecuencia de import; `deno check` de EFs al pipeline.
+**Pendientes principales** (fuente única: `feature_list.json`):
+- [Raf] **PowerSync (C5)** — provisionar la instancia (Cloud; el leader dejó la prep lista para cuando diga) → destraba offline-first. Live test del bastón con el RS420 en web (T2.5); web-check de feature 14.
+- [Leader, on-deck] reconciliación de spec 10 vs el backend Tier 2 + confirmar el conflicto de Puerta 1.
+- [Facundo] D3 del import ("Vaca" genérica); CE en toritos; pricing; campos del vet. Ver `CONTEXT/07-pendientes.md`.
+- [Backlog] limpiar data de e2e de prod antes del beta; polish de C4 (error-copy de create/rename, member-count en card colapsada); MED-01 `CHECK>0` en `exit_weight`/`exit_price`; rate-limit de import; `deno check` de EFs al pipeline.
 
 ## Notas técnicas vigentes para el implementer
 
