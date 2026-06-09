@@ -19,20 +19,21 @@
 import { test as base, expect } from '@playwright/test';
 import { getE2EEnv } from './env';
 
-const { supabaseUrl, anonKey } = getE2EEnv();
+const { supabaseUrl, anonKey, powersyncUrl } = getE2EEnv();
 
 export const test = base.extend({
   // Sobrescribe la fixture `page` para inyectar el shim antes de cualquier navegación.
   page: async ({ page }, use) => {
     await page.addInitScript(
-      ([url, key]) => {
+      ([url, key, psUrl]) => {
         const g = globalThis as unknown as { process?: { env?: Record<string, string> } };
         g.process = g.process || {};
         g.process.env = g.process.env || {};
         g.process.env.EXPO_PUBLIC_SUPABASE_URL = url;
         g.process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY = key;
+        g.process.env.EXPO_PUBLIC_POWERSYNC_URL = psUrl;
       },
-      [supabaseUrl, anonKey],
+      [supabaseUrl, anonKey, powersyncUrl],
     );
     await use(page);
   },
@@ -46,13 +47,14 @@ export { expect };
  */
 export async function applyEnvShim(page: import('@playwright/test').Page): Promise<void> {
   await page.addInitScript(
-    ([url, key]) => {
+    ([url, key, psUrl]) => {
       const g = globalThis as unknown as { process?: { env?: Record<string, string> } };
       g.process = g.process || {};
       g.process.env = g.process.env || {};
       g.process.env.EXPO_PUBLIC_SUPABASE_URL = url;
       g.process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY = key;
+      g.process.env.EXPO_PUBLIC_POWERSYNC_URL = psUrl;
     },
-    [supabaseUrl, anonKey],
+    [supabaseUrl, anonKey, powersyncUrl],
   );
 }

@@ -28,6 +28,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
 import { Building2, Check, ChevronDown, User, X } from 'lucide-react-native';
+import { useStatus } from '@powersync/react';
 
 import {
   Button,
@@ -242,6 +243,12 @@ export default function InicioScreen() {
   // loader (deps primitivas, sin loops).
   const isOwner = activeField?.role === 'owner';
 
+  // Estado de sync de PowerSync (el árbol está bajo PowerSyncContext): lo usamos para re-leer los
+  // conteos del Stepper (animales/equipo) cuando AVANZA un sync, sin depender solo del re-foco (fix
+  // showstopper, mismo patrón que la tab Animales). Primitivo (ms) → dep estable, no loopea.
+  const syncStatus = useStatus();
+  const lastSyncedMs = syncStatus.lastSyncedAt?.getTime() ?? 0;
+
   // ── Banner "establecimiento listo" per-campo + dismiss persistido (Run 2 c) ──
   // El banner se controlaba con un useState(true) local → NO era per-campo (se mantenía
   // visible al cambiar de campo y el descarte no era por-campo). Ahora: per-campo, dismiss
@@ -404,6 +411,17 @@ export default function InicioScreen() {
       loadTeamCount(activeId, userId, isOwner);
     }, [activeId, userId, isOwner, loadAnimalCount, loadTeamCount]),
   );
+
+  // FIX showstopper: re-leer los conteos cuando AVANZA el sync (lastSyncedAt). Al bajar el first-sync
+  // —o cuando una alta optimista pasa de overlay a fila sincronizada— los conteos locales cambian; sin
+  // este re-read el Stepper quedaría mostrando "Cargá tu primer animal" hasta el próximo re-foco. La
+  // dep es un primitivo (ms), estable entre syncs → no loopea. El useFocusEffect queda de red de
+  // seguridad. Se omite mientras lastSyncedMs===0 (aún no hubo sync; el efecto de foco ya cargó).
+  useEffect(() => {
+    if (lastSyncedMs === 0) return;
+    loadAnimalCount(activeId);
+    loadTeamCount(activeId, userId, isOwner);
+  }, [lastSyncedMs, activeId, userId, isOwner, loadAnimalCount, loadTeamCount]);
 
   // ── Pasos de "primeros pasos" DRIVEADOS POR ESTADO REAL (bug 1 de Raf). ──────────────
   // El Stepper era ESTÁTICO: el paso "Crear rodeo" estaba hardcodeado 'active' con un CTA que solo

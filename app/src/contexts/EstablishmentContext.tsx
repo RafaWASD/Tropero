@@ -33,9 +33,12 @@ import {
 import { useAuth } from './AuthContext';
 import {
   loadMemberships,
+  type LoadMembershipsResult,
   type MembershipEstablishment,
 } from '../services/establishments';
 import { loadTrail, recordOpened, saveTrail } from '../services/establishment-store';
+import { getPowerSync } from '../services/powersync/database';
+import { isFirstSyncPending, waitForUsableSync } from '../services/powersync/first-sync';
 import {
   buildRecents,
   detectActiveLost,
@@ -143,20 +146,37 @@ export function EstablishmentProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  // Aplica el RESULTADO de loadMemberships (no solo el set): centraliza la regla de error para que
+  // bootstrap + refreshEstablishments + el listener de sync la compartan (1c del fix). REGLA CLAVE:
+  // un fallo `network` MIENTRAS el primer sync sigue pendiente (isFirstSyncPending) NO es genuino —
+  // es "el SQLite local todavía no se pobló" (runLocalQuery degrada vacío+!hasSynced a network). En
+  // ese caso NO afirmamos no_establishments (sería el onboarding fantasma); mantenemos el estado
+  // previo (loading en bootstrap) y el listener `statusChanged` (1b) re-resolverá cuando baje el sync.
+  // Solo afirmamos no_establishments si el fallo es genuino (first-sync YA completó, o no es network).
+  const applyMembershipsResult = useCallback(
+    (result: LoadMembershipsResult) => {
+      if (result.ok) {
+        applyMemberships(result.establishments);
+        return;
+      }
+      const syncPending = result.error.kind === 'network' && isFirstSyncPending();
+      if (syncPending) {
+        // Sync en vuelo: NO afirmamos nada. Si estábamos en loading, nos quedamos en loading (el
+        // RootGate mantiene el splash); si ya teníamos un estado válido (active/choosing), lo
+        // preservamos (un refresh reactivo durante una carrera no debe regresar a onboarding).
+        setState((prev) => (prev.status === 'loading' ? { status: 'loading' } : prev));
+        return;
+      }
+      // Fallo genuino. No tumbamos un estado válido por un network transitorio post-sync: solo en
+      // bootstrap (loading) caemos a no_establishments (el wizard es recuperable; refrescar reintenta).
+      setState((prev) => (prev.status === 'loading' ? { status: 'no_establishments' } : prev));
+    },
+    [applyMemberships],
+  );
+
   const refreshEstablishments = useCallback(async (preferredId?: string) => {
     if (!userId) {
       setState({ status: 'no_establishments' });
-      return;
-    }
-    const result = await loadMemberships(userId);
-    if (!result.ok) {
-      // No tumbamos el estado si ya teníamos uno válido: un fallo de red transitorio no
-      // debe expulsar al usuario de su campo. En bootstrap (loading) lo dejamos en
-      // no_establishments solo si nunca cargamos (el wizard es recuperable; refrescar
-      // reintenta). Mantener el estado previo es más seguro que falsear active_lost.
-      if (state.status === 'loading') {
-        setState({ status: 'no_establishments' });
-      }
       return;
     }
     // Si vino un preferido (ej. el campo recién creado), lo fijamos ANTES de resolver: el set
@@ -164,8 +184,9 @@ export function EstablishmentProvider({ children }: { children: ReactNode }) {
     if (preferredId) {
       preferredIdRef.current = preferredId;
     }
-    applyMemberships(result.establishments);
-  }, [userId, applyMemberships, state.status]);
+    const result = await loadMemberships(userId);
+    applyMembershipsResult(result);
+  }, [userId, applyMembershipsResult]);
 
   const switchEstablishment = useCallback(
     async (id: string) => {
@@ -227,19 +248,52 @@ export function EstablishmentProvider({ children }: { children: ReactNode }) {
       trailRef.current = trail;
       // El head del rastro es last_establishment_opened (R6.9): preferido por defecto.
       preferredIdRef.current = trail[0] ?? null;
+      // FIX showstopper: ANTES de leer memberships (SQLite local), esperamos a que haya datos USABLES
+      // —sync persistido restaurado de disco ('cached', offline/reload, AL INSTANTE), o first-sync
+      // completado ('synced'), o timeout (degradación). Sin esto, leíamos el SQLite vacío y caíamos a
+      // no_establishments = onboarding fantasma. waitForUsableSync NO cuelga offline ('cached' inmediato).
+      await waitForUsableSync();
+      if (!active) return;
       const result = await loadMemberships(userId);
       if (!active) return;
-      if (!result.ok) {
-        setState({ status: 'no_establishments' });
-        return;
-      }
-      applyMemberships(result.establishments);
+      // applyMembershipsResult respeta "network && first-sync pendiente" → se queda en loading (NO
+      // no_establishments); el listener `statusChanged` (1b) re-resolverá cuando el sync llegue tarde.
+      applyMembershipsResult(result);
     })();
 
     return () => {
       active = false;
     };
-  }, [userId, applyMemberships]);
+  }, [userId, applyMembershipsResult]);
+
+  // FIX showstopper (1b): re-resolver cuando el PRIMER sync llega DESPUÉS del bootstrap. Si el bootstrap
+  // leyó el SQLite vacío (first-sync aún no completó), quedó en `loading`; cuando el sync baja los datos
+  // del campo, este listener los re-lee (`refreshEstablishments` re-corre loadMemberships sobre el local
+  // ya poblado) y re-resuelve → la ruta pasa de onboarding/splash a home sin que el usuario haga nada.
+  //
+  // ACOTADO A LA TRANSICIÓN first-sync false→true (no a cada statusChanged): trackeamos `lastHasSynced`
+  // en una var local del efecto y solo refrescamos cuando hasSynced pasa de no-true a true UNA vez. Así
+  // evitamos loops y falsos active_lost por downloads parciales posteriores (cada paquete dispara
+  // statusChanged). La reactividad ante cambios de coworker (roles agregados/quitados tras el first-sync)
+  // queda DIFERIDA: la cubre el useFocusEffect / refresh manual existente de las pantallas.
+  useEffect(() => {
+    if (!userId) return;
+    const db = getPowerSync();
+    // Semilla con el estado actual: si el first-sync YA estaba completo al montar el listener (caso
+    // 'cached'), NO disparamos un refresh redundante (el bootstrap ya leyó datos usables).
+    let lastHasSynced = db.currentStatus?.hasSynced === true;
+    const dispose = db.registerListener({
+      statusChanged: (status) => {
+        const nowSynced = status?.hasSynced === true;
+        if (nowSynced && !lastHasSynced) {
+          lastHasSynced = true;
+          void refreshEstablishments();
+        }
+        // No regresamos lastHasSynced a false: la transición que nos importa es la PRIMERA (false→true).
+      },
+    });
+    return dispose;
+  }, [userId, refreshEstablishments]);
 
   // Poda del rastro persistido: si algún id del rastro ya no es accesible (R6.9), lo
   // sacamos del storage para que no resucite si el usuario recupera otro campo. Best-effort.

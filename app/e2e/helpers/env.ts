@@ -50,6 +50,7 @@ export type E2EEnv = {
   supabaseUrl: string;
   anonKey: string;
   serviceRoleKey: string;
+  powersyncUrl: string;
 };
 
 /**
@@ -63,11 +64,14 @@ export function getE2EEnv(): E2EEnv {
   const anonKey =
     process.env.SUPABASE_ANON_KEY || process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '';
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+  const powersyncUrl =
+    process.env.EXPO_PUBLIC_POWERSYNC_URL || process.env.POWERSYNC_URL || '';
 
   const missing: string[] = [];
   if (!supabaseUrl) missing.push('EXPO_PUBLIC_SUPABASE_URL (o SUPABASE_URL)');
   if (!anonKey) missing.push('EXPO_PUBLIC_SUPABASE_ANON_KEY (o SUPABASE_ANON_KEY)');
   if (!serviceRoleKey) missing.push('SUPABASE_SERVICE_ROLE_KEY');
+  if (!powersyncUrl) missing.push('EXPO_PUBLIC_POWERSYNC_URL (o POWERSYNC_URL)');
 
   if (missing.length > 0) {
     throw new Error(
@@ -77,5 +81,5 @@ export function getE2EEnv(): E2EEnv {
     );
   }
 
-  return { supabaseUrl, anonKey, serviceRoleKey };
+  return { supabaseUrl, anonKey, serviceRoleKey, powersyncUrl };
 }

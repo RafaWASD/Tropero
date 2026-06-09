@@ -1881,3 +1881,106 @@ de verificación abajo sobre `check.mjs`.
   `specs/active/15-powersync/{tasks,design}.md`, `specs/active/02-modelo-animal/tasks.md` y esta entrada).
   NO toqué local-reads.ts/outbox.ts/upload.ts/online-guard*/0082. NO commiteé. NO marqué done (espera reviewer
   + Gate 2).
+
+---
+
+## Run T11 — FIX showstopper: la app aterriza en ONBOARDING / listas vacías (2026-06-09)
+
+> `baseline_commit` ya existe (`1618a9566…`), NO se reescribe (multi-run). 100% client-side. NO toco
+> streams/migraciones/connector/outbox/overlay/schema/local-reads ni el shim E2E. NO done, NO commit.
+
+### Diagnóstico (CONFIRMADO por E2E)
+
+Todos los datos SÍ sincronizan (`user_roles=1, animal_profiles=1, establishments=1, rodeos=1`), pero el
+ORDEN es: el gate de establecimiento lee el SQLite local VACÍO → resuelve `no_establishments` → onboarding
+ANTES de que baje el first-sync; y NO se re-suscribe. `runLocalQuery` (`local-query.ts:56-58`) YA distingue
+"vacío + `!hasSynced`" devolviendo `{ ok:false, kind:'network', SYNCING_MESSAGE }`, PERO el bootstrap del
+`EstablishmentContext` colapsaba CUALQUIER `!result.ok` a `setState({ status:'no_establishments' })` →
+onboarding fantasma. (`RodeoContext` ya se quedaba en `loading` ante `network`, pero tampoco re-evaluaba.)
+
+### Plan (T<n>) — HECHO
+
+- [x] Paso 0 — `app/src/services/powersync/first-sync.ts` (nuevo) + `first-sync.test.ts` (8 unit, db fake):
+  `waitForUsableSync` (`'cached'` instantáneo si `hasSynced===true` = offline/reload sin colgar / `'synced'`
+  si el first-sync completa / `'timeout'` si aborta) + `isFirstSyncPending` + `FIRST_SYNC_TIMEOUT_MS=4500`.
+  `getPowerSync` por **require LAZY** dentro de `resolveDb` (no arrastra RN al grafo node:test; el test inyecta
+  `db`). Enganchado en `scripts/run-tests.mjs`.
+- [x] Paso 1 — `EstablishmentContext.tsx`: (1a) bootstrap `await waitForUsableSync()` antes de `loadMemberships`;
+  (1c) helper `applyMembershipsResult(result)` compartido (bootstrap+refresh+listener): `network &&
+  isFirstSyncPending()` → NO afirma `no_establishments` (loading / preserva estado válido); fallo genuino →
+  solo `loading→no_establishments`; (1b) efecto `getPowerSync().registerListener({ statusChanged })` →
+  `refreshEstablishments()` SOLO en la transición first-sync false→true (var local `lastHasSynced`), dispose en
+  cleanup, dep `[userId, refreshEstablishments]`.
+- [x] Paso 2 — `_layout.tsx` (RootGate): sin lógica de sync nueva. `SPLASH_FALLBACK_MS = FIRST_SYNC_TIMEOUT_MS
+  + 500` (≈5s) → el splash se destapa DESPUÉS de que el contexto resuelve; si el sync llega tarde, 1b re-rutea.
+- [x] Paso 3 — `RodeoContext.tsx`: listener `statusChanged` re-corre `load(userId, establishmentId)` en la
+  transición false→true SOLO si está esperando (`isWaitingRef`, status `loading`).
+- [x] Paso 4 — `(tabs)/animales.tsx` + `(tabs)/index.tsx` (stepper, "opcional menor" del brief): `useStatus()`
+  de `@powersync/react` + efecto que re-corre la carga al avanzar `lastSyncedAt` (primitivo ms → no loopea).
+
+### Trazabilidad (R<n> → test)
+
+- **R5.4** (degradar "aún no sincronizó" sin crashear — consumo correcto en el gate): `first-sync.test.ts`
+  (cached/synced/timeout/pending) + E2E `animals.spec:386` (ROJO en baseline → VERDE con el fix: aterriza en
+  home con la lista poblada, no en onboarding) + el assert anti-flash agregado en `animals.spec:386`.
+- **R11.2** (no romper los flujos gateados): E2E `auth.spec` 4/4 (incl. onboarding legítimo POST first-sync) +
+  `establishments.spec:68` (≥2 campos → Mis campos → home) + 16/18 de auth+animals verdes + `check.mjs` verde.
+
+### Verificación REAL
+
+- `pnpm --dir app typecheck` verde. `check.mjs` verde end-to-end (typecheck + client unit incl. `first-sync`
+  8/8 + RLS/Edge/Animal/Maneuvers/User_private/Import suites).
+- **E2E (rebuild `e2e:build` + Playwright, vía Bash):** `auth.spec` **4/4** + `animals.spec` **12/14**.
+  - **VERDE el oráculo del bug**: `animals.spec:386` "buscar un animal EXISTENTE → … aparece en la lista
+    (carga inicial)". En el BASELINE sin el fix este test (y `:52`, `:500`) están ROJOS — verificado por stash.
+  - `animals.spec:52` "alta guiada desde empty → … aparece en la lista": el cuerpo (el animal APARECE EN LA
+    LISTA, línea 102) **PASA**; falla solo el tail (línea 107, stepper "Cargaste tu primer animal" tras alta
+    OFFLINE) → residual PRE-EXISTENTE (race overlay-clear ↔ sync-back, T6), backlog 2026-06-09.
+  - `animals.spec:500` (C3.3 baja): residual PRE-EXISTENTE (el overlay de exit marca `status` pero NO
+    `exit_date` → el badge sale "Vendido" sin fecha; el regex `/Vendido el /` no matchea). Fuera de scope
+    (overlay/local-reads). Backlog 2026-06-09.
+  - `establishments.spec:29` (crear-campo desde onboarding): residual PRE-EXISTENTE (verificado rojo en
+    baseline) — `refreshEstablishments(newId)` lee local antes del sync-down del campo nuevo. Backlog.
+
+### Autorrevisión adversarial (paso 8)
+
+Busqué activamente, como revisor hostil:
+- **¿Offline-launch NO cuelga?** SÍ no cuelga: `waitForUsableSync` devuelve `'cached'` AL INSTANTE si
+  `hasSynced===true` (PowerSync restaura `hasSynced` de IndexedDB al boot) → no espera red. Unit test lo
+  cubre + verifica que NO llama `waitForFirstSync` en ese caso.
+- **¿Onboarding legítimo (user sin campos) llega DESPUÉS del first-sync?** SÍ: `auth.spec:19` verde. Tras
+  `hasSynced=true`, un resultado vacío genuino → `isFirstSyncPending()` false → `no_establishments` (onboarding).
+- **¿El listener loopea?** NO: var local `lastHasSynced`, solo dispara en `nowSynced && !lastHasSynced`, nunca
+  vuelve a false. Acotado a la transición first-sync → no re-trigger por downloads parciales (no falsos
+  active_lost). `applyMembershipsResult` durante una carrera de refresh respeta `network && pending` → no
+  regresa a onboarding.
+- **¿logout/switch intactos?** SÍ: `auth.spec:75` (logout→login) verde; el reset por `userId=null` sigue; el
+  listener se dispose al caer userId (cleanup del efecto). `switchEstablishment`/`acknowledgeActiveLost` sin
+  tocar. `refreshEstablishments` preserva su contrato (solo moví el set de `preferredId` antes del await — es
+  un ref, idéntico; los callers reales son online post-first-sync → `applyMembershipsResult` toma el path ok).
+- **¿RodeoContext queda colgado?** NO: listener `statusChanged` re-corre `load` en la transición si está
+  `loading`; 16 tests que pasan por `waitForHome` (exige est:active Y rodeo resuelto) verdes.
+- **¿`waitForHome` pasa DE VERDAD (no solo typecheck)?** SÍ — 16/18 E2E lo atraviesan en vivo.
+- **Encontré y CERRÉ en el camino**: el `import { getPowerSync } from './database'` estático rompía el unit
+  test (RN en el grafo node:test) → lo hice **require LAZY** dentro de `resolveDb` (el test inyecta `db`, el
+  require nunca corre bajo test). El home stepper (`index.tsx`) NO cerró el residual de `:52` aun con el patch
+  reactivo → lo dejé documentado como residual de overlay/sync-timing (no inventé un fix fuera de scope).
+
+### Reconciliación de specs
+
+- `design.md §5.1` — bloque "As-built (reconciliación, fix showstopper)" con todo el as-built (first-sync.ts,
+  los 5 pasos, validación E2E, residuales).
+- `requirements.md R5.4` — nota de reconciliación (el fix es el CONSUMO correcto de la degradación de R5.4 + el
+  gate de spec 01 leyendo de local; no es una R nueva).
+- `tasks.md T11` — task nueva `[x]` con alcance + cobertura + residuales.
+- `docs/backlog.md` — entrada "Reactividad de lecturas PowerSync: migrar a useQuery/watch" + los 3 residuales
+  PRE-EXISTENTES (`:52` tail, `:500` exit_date, `establishments:29`).
+
+### Archivos tocados
+
+Nuevos: `app/src/services/powersync/first-sync.ts` + `first-sync.test.ts`.
+Modificados: `app/src/contexts/EstablishmentContext.tsx`, `app/src/contexts/RodeoContext.tsx`,
+`app/app/_layout.tsx`, `app/app/(tabs)/animales.tsx`, `app/app/(tabs)/index.tsx`, `app/e2e/animals.spec.ts`
+(assert anti-flash reforzado), `scripts/run-tests.mjs` (engancha el unit), `docs/backlog.md`,
+`specs/active/15-powersync/{requirements,design,tasks}.md` (reconciliación), `progress/current.md` + este archivo.
+NO toqué streams/migraciones/connector/outbox/upload/overlay/schema/local-reads ni el shim E2E. NO commit. NO done.

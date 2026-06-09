@@ -24,6 +24,7 @@ import { Platform, Pressable, TextInput } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
 import { Check, Plus, Search } from 'lucide-react-native';
+import { useStatus } from '@powersync/react';
 
 import { AnimalRow, Card, InfoNote, FormError } from '@/components';
 import { useEstablishment, useRodeo } from '@/contexts';
@@ -82,6 +83,11 @@ export default function AnimalesScreen() {
   const router = useRouter();
   const { state: estState } = useEstablishment();
   const { state: rodeoState } = useRodeo();
+  // Estado de sync de PowerSync (el árbol está bajo PowerSyncContext): lo usamos para re-cargar la
+  // lista cuando baja un sync (R5.4 / fix showstopper — la lista se rellena al llegar el first-sync
+  // sin salir/volver a la tab). Lo derivamos a un primitivo (ms) para que la dep del efecto sea estable.
+  const syncStatus = useStatus();
+  const lastSyncedMs = syncStatus.lastSyncedAt?.getTime() ?? 0;
 
   const establishmentId = estState.status === 'active' ? estState.current.id : null;
   const rodeos: Rodeo[] = rodeoState.status === 'active' ? rodeoState.available : [];
@@ -150,6 +156,16 @@ export default function AnimalesScreen() {
       void loadList();
     }, [loadList]),
   );
+
+  // FIX showstopper: re-cargar la lista cuando AVANZA el sync (lastSyncedAt). Al bajar el first-sync
+  // (o un download posterior), el SQLite local se puebla → re-corremos loadList sin que el operario
+  // tenga que salir/volver a la tab. La dep es un primitivo (ms): `lastSyncedAt` es estable entre
+  // syncs en el SDK → no loopea (solo avanza cuando hay un sync nuevo). El useFocusEffect queda de
+  // red de seguridad; el efecto inicial (`[loadList]`) cubre la primera carga.
+  useEffect(() => {
+    if (lastSyncedMs === 0) return; // todavía no hubo ningún sync: el efecto inicial ya cargó (o vacío).
+    void loadList();
+  }, [lastSyncedMs, loadList]);
 
   // ── Ejecutar la búsqueda real cuando cambia el query debounced (R1.2/R5). ──
   useEffect(() => {

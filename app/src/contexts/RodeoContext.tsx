@@ -37,6 +37,7 @@ import { useAuth } from './AuthContext';
 import { useEstablishment } from './EstablishmentContext';
 import { fetchRodeos, type Rodeo } from '../services/rodeos';
 import { loadActiveRodeo, saveActiveRodeo } from '../services/rodeo-store';
+import { getPowerSync } from '../services/powersync/database';
 
 export type RodeoState =
   | { status: 'loading' }
@@ -133,6 +134,37 @@ export function RodeoProvider({ children }: { children: ReactNode }) {
   // Carga inicial + recarga cuando cambia el usuario o el campo activo (deps PRIMITIVAS).
   useEffect(() => {
     void load(userId, establishmentId);
+  }, [userId, establishmentId, load]);
+
+  // Espejo sincrónico de "el contexto está esperando datos" (loading, o active sin error de red ya
+  // resuelto): lo lee el listener de sync sin re-suscribirse en cada render. `loading` cubre tanto el
+  // arranque como el reintento tras un fallo de red (load setea loading + error en ese caso).
+  const isWaitingRef = useRef(false);
+  isWaitingRef.current = state.status === 'loading';
+
+  // FIX showstopper (espejo de 1b del EstablishmentContext): re-evaluar cuando el PRIMER sync llega
+  // DESPUÉS de que RodeoContext ya leyó el SQLite local vacío. Si el bootstrap leyó rodeos vacíos
+  // (first-sync pendiente → fetchRodeos degrada a network → load se queda en `loading`), este listener
+  // re-corre `load` cuando el sync baja los datos, así RodeoContext pasa de loading a active/no_rodeos.
+  // Sin esto, tras el fix del EstablishmentContext el campo resolvería pero el rodeo quedaría colgado
+  // en loading (el RootGate exige est:active Y rodeo resuelto para llegar a home — lo que valida el E2E).
+  //
+  // ACOTADO: solo en la transición first-sync false→true (var local lastHasSynced) Y solo si el
+  // contexto está esperando (isWaitingRef) → no recargamos de más cuando ya hay rodeo activo resuelto.
+  useEffect(() => {
+    if (!userId || !establishmentId) return;
+    const db = getPowerSync();
+    let lastHasSynced = db.currentStatus?.hasSynced === true;
+    const dispose = db.registerListener({
+      statusChanged: (status) => {
+        const nowSynced = status?.hasSynced === true;
+        if (nowSynced && !lastHasSynced) {
+          lastHasSynced = true;
+          if (isWaitingRef.current) void load(userId, establishmentId);
+        }
+      },
+    });
+    return dispose;
   }, [userId, establishmentId, load]);
 
   const refreshRodeos = useCallback(async () => {

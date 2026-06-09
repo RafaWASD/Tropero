@@ -394,6 +394,10 @@ test('buscar un animal EXISTENTE → tocar el resultado → ficha', async ({ pag
   await page.goto('/');
   await signIn(page, user);
   await waitForHome(page);
+  // Blindaje anti-flash de onboarding (fix showstopper): el usuario SÍ tiene un campo sembrado, así que
+  // tras aterrizar en home NO debe quedar ningún CTA de "Crear mi primer campo" (el bug era aterrizar en
+  // onboarding porque el gate leía el SQLite local vacío antes de bajar el first-sync).
+  await expect(page.getByRole('button', { name: 'Crear mi primer campo' })).toHaveCount(0);
   await gotoAnimales(page);
 
   // El animal aparece en la lista (carga inicial).

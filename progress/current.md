@@ -261,6 +261,31 @@ Plan (T<n>) — HECHO, esperando reviewer + Gate 2:
   NO es de este fix (cliente puro; la animal suite no importa services de app/). Detalle/autorrevisión/
   reconciliación en `progress/impl_15-powersync.md` (sección "Run online-guard"). NO commit, NO done.
 
+### Run firstSync-gate (FIX showstopper — app aterriza en ONBOARDING / listas vacías) — EN CURSO (implementer)
+
+Feature en curso: `15-powersync`. Bug confirmado por E2E: todos los datos SÍ sincronizan, pero el gate
+de establecimiento y las lecturas resuelven el SQLite local one-shot ANTES de que complete el first-sync
+y NO re-evalúan → onboarding fantasma + lista de animales vacía. 100% client-side (NO se toca streams/
+migraciones/connector/outbox/overlay/schema). `baseline_commit` ya existe (`1618a956…`), NO se reescribe.
+
+Plan (T<n>) — HECHO, esperando reviewer + Gate 2:
+- [x] T1 (Paso 0) — `first-sync.ts` (`waitForUsableSync` cached/synced/timeout + `isFirstSyncPending`) +
+  `first-sync.test.ts` (8 unit, db fake; `getPowerSync` require LAZY para no romper node:test).
+- [x] T2 (Paso 1) — `EstablishmentContext.tsx`: bootstrap espera `waitForUsableSync`; helper interno
+  `applyMembershipsResult` que respeta `network && isFirstSyncPending()` → no afirma no_establishments;
+  listener `statusChanged` que re-resuelve SOLO en la transición first-sync false→true.
+- [x] T3 (Paso 2) — `_layout.tsx` RootGate: `SPLASH_FALLBACK_MS = FIRST_SYNC_TIMEOUT_MS + 500` (~5s).
+- [x] T4 (Paso 3) — `RodeoContext.tsx`: listener `statusChanged` re-corre `load` al llegar el first-sync
+  estando en loading.
+- [x] T5 (Paso 4) — `animales.tsx` + `(tabs)/index.tsx` (stepper): `useStatus()` + efecto que re-corre la
+  carga cuando avanza `lastSyncedAt`.
+- [x] Verificación: typecheck + `check.mjs` verde (unit incl. first-sync 8/8) + E2E `auth.spec` **4/4** +
+  `animals.spec` **12/14** (rebuild). **El oráculo del bug (`animals.spec:386`) pasa de ROJO en baseline a
+  VERDE.** Residuales `:52`(tail)/`:500`/`establishments:29` = PRE-EXISTENTES (verificados rojos en baseline,
+  fuera de scope) → backlog.
+- [x] Reconciliación de specs (design §5.1 / requirements R5.4 / tasks T11) + autorrevisión adversarial.
+  Detalle en `progress/impl_15-powersync.md` (Run T11). NO commit, NO done.
+
 ## Notas técnicas vigentes para el implementer
 
 - En PowerShell usar `pnpm.cmd` (no `pnpm`) — Cylance Script Control bloquea `.ps1`.

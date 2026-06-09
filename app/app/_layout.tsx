@@ -63,6 +63,14 @@ import {
 } from '@/contexts';
 import { getPendingInvitationToken } from '@/services/pending-invitation';
 import { PowerSyncProvider } from '@/services/powersync/provider';
+import { FIRST_SYNC_TIMEOUT_MS } from '@/services/powersync/first-sync';
+
+// Fallback que destapa el splash si NADA resuelve (getSession/memberships colgados). DEBE ser MAYOR
+// que FIRST_SYNC_TIMEOUT_MS (la espera del primer sync en EstablishmentContext, ~4500ms): así, cuando
+// el splash se destapa, el contexto YA resolvió su ruta (con datos usables, timeout, o 'cached') y no
+// se ve un frame de onboarding/(tabs) erróneo. Si el sync llega DESPUÉS del destape, el listener
+// statusChanged del EstablishmentContext re-rutea de onboarding a home sin intervención del usuario.
+const SPLASH_FALLBACK_MS = FIRST_SYNC_TIMEOUT_MS + 500;
 
 SplashScreen.preventAutoHideAsync().catch(() => {
   /* noop: en web/algunos targets puede no estar disponible */
@@ -212,10 +220,11 @@ function RootGate() {
   }, []);
 
   // Fallback de seguridad: si algo nunca resuelve (getSession/memberships colgados), no
-  // dejamos la app trabada en el splash. ~5s después destapamos igual; el gate seguirá
-  // re-ruteando cuando el estado cambie.
+  // dejamos la app trabada en el splash. Tras SPLASH_FALLBACK_MS (= FIRST_SYNC_TIMEOUT_MS + margen)
+  // destapamos igual; el gate seguirá re-ruteando cuando el estado cambie (el listener statusChanged
+  // del EstablishmentContext re-rutea de onboarding a home si el sync baja tarde).
   useEffect(() => {
-    const timer = setTimeout(hideSplashOnce, 5000);
+    const timer = setTimeout(hideSplashOnce, SPLASH_FALLBACK_MS);
     return () => clearTimeout(timer);
   }, [hideSplashOnce]);
 
