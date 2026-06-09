@@ -6,28 +6,18 @@
 // fresco tras confirmar un cambio (R2.2). Así eliminamos la desincronización del saludo que
 // tenía Run 2 (que sincronizaba el nombre a auth.user_metadata además de a public.users).
 //
-// RLS: `users_select_self` (0006) deja al user ver SOLO su fila de users (id = auth.uid());
-// `user_private_select_self` (0068) idem para su fila de user_private (user_id = auth.uid()). No
-// mezcla perfiles de otros (R7.2). NUNCA se hardcodea nada del usuario; sale de auth.uid() vía RLS.
+// LECTURA (spec 15, T3.2): desde el SQLite local de PowerSync (self-only sincronizado por las streams
+// self_user_private + est_members/self). El scoping self-only (user_id = auth.uid()) ya lo aplicó la
+// stream → no se re-filtra. NUNCA se hardcodea nada del usuario; sale del propio user vía la stream.
 
-import { supabase } from './supabase';
+import { buildOwnNameQuery, buildOwnPhoneQuery } from './powersync/local-reads';
+import { runLocalQuerySingle } from './powersync/local-query';
 
 export type ProfileNamePhone = { name: string; phone: string | null };
 
 export type LoadProfileNamePhoneResult =
   | { ok: true; profile: ProfileNamePhone }
   | { ok: false; error: { kind: 'network' | 'unknown'; message: string } };
-
-function classifyError(error: { message?: string } | null): {
-  kind: 'network' | 'unknown';
-  message: string;
-} {
-  const msg = error?.message ?? '';
-  if (/network|failed to fetch|fetch failed/i.test(msg)) {
-    return { kind: 'network', message: msg };
-  }
-  return { kind: 'unknown', message: msg || 'Error desconocido' };
-}
 
 /**
  * Lee name (de `public.users`) + phone (de `public.user_private`) del perfil propio para el
@@ -41,31 +31,23 @@ function classifyError(error: { message?: string } | null): {
 export async function loadProfileNamePhone(
   userId: string,
 ): Promise<LoadProfileNamePhoneResult> {
-  const { data, error } = await supabase
-    .from('users')
-    .select('name')
-    .eq('id', userId)
-    .maybeSingle();
-
-  if (error) {
-    return { ok: false, error: classifyError(error) };
-  }
-  if (!data) {
+  // name desde users (self) en el SQLite local (T3.2). emptyIsSyncing:true → pre-sync ausente degrada
+  // "sincronizando"; post-sync ausente → "no se encontró el perfil" (igual que el path PostgREST).
+  const nameRes = await runLocalQuerySingle<{ name: string | null }>(buildOwnNameQuery(userId), {
+    emptyIsSyncing: true,
+  });
+  if (!nameRes.ok) return { ok: false, error: nameRes.error };
+  if (!nameRes.value) {
     return {
       ok: false,
       error: { kind: 'unknown', message: 'No se encontró el perfil del usuario.' },
     };
   }
 
-  const { data: priv, error: privError } = await supabase
-    .from('user_private')
-    .select('phone')
-    .eq('user_id', userId)
-    .maybeSingle();
+  // phone desde user_private (self). Ausente = null (resultado legítimo: el teléfono es opcional),
+  // no se degrada — el name (perfil público) basta para el saludo.
+  const privRes = await runLocalQuerySingle<{ phone: string | null }>(buildOwnPhoneQuery(userId));
+  if (!privRes.ok) return { ok: false, error: privRes.error };
 
-  if (privError) {
-    return { ok: false, error: classifyError(privError) };
-  }
-
-  return { ok: true, profile: { name: data.name ?? '', phone: priv?.phone ?? null } };
+  return { ok: true, profile: { name: nameRes.value.name ?? '', phone: privRes.value?.phone ?? null } };
 }

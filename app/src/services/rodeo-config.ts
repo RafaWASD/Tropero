@@ -1,15 +1,24 @@
 // Capa de datos de la plantilla de datos del rodeo (spec 02 frontend, C1 / T3.6 — ADR-021).
 //
-// Queries DIRECTAS a Supabase con supabase-js (PowerSync es C5, diferido — los services son la
-// ÚNICA capa que tocará PowerSync, design.md §retrofit). RLS protege server-side:
-//   - field_definitions / system_default_fields: SELECT abierto a authenticated (catálogo global).
-//   - rodeo_data_config: SELECT con has_role_in(rodeo.establishment_id); INSERT/UPDATE solo owner
-//     (is_owner_of), sin DELETE de cliente (0018). El cliente no fuerza permisos: la RLS es la barrera.
+// LECTURAS (spec 15, T3.1): desde el SQLite local de PowerSync (catálogos sincronizados por las
+// streams). `fetchFieldCatalog`/`fetchSystemDefaults`/`fetchRodeoConfig` leen local; el scoping de
+// tenant (has_role_in del rodeo, catálogo global) ya lo aplicó la stream al sincronizar → NO se
+// re-filtra acá. Los SQL builders puros viven en powersync/local-reads.ts (testeables sin SDK).
+// ESCRITURAS (`toggleRodeoField`, `enableNonDefaultField`): siguen ONLINE contra Supabase (admin/
+// owner, R7.1 / design §5.3) — NO se tocan en T3. RLS protege server-side:
+//   - rodeo_data_config: INSERT/UPDATE solo owner (is_owner_of), sin DELETE de cliente (0018).
 //
 // Multi-tenant (CLAUDE.md ppio 6): NUNCA se hardcodea establishment_id. El rodeo trae su
-// establishment vía FK; la RLS deriva el acceso. Acá solo movemos data_keys + toggles.
+// establishment vía FK; la RLS/stream derivan el acceso. Acá solo movemos data_keys + toggles.
 
 import { supabase } from './supabase';
+import {
+  buildFieldCatalogQuery,
+  buildSystemDefaultsQuery,
+  buildRodeoConfigQuery,
+  toBool,
+} from './powersync/local-reads';
+import { runLocalQuery } from './powersync/local-query';
 import type {
   FieldDefinition,
   SystemDefaultField,
@@ -56,76 +65,69 @@ function toFieldDefinition(r: FieldDefinitionRow): FieldDefinition {
 }
 
 /**
- * Lee el catálogo global de datos tracqueables (field_definitions activos, R2.8). Read-only.
- * El orden visual lo decide groupTogglesByCategory (lógica pura); acá traemos crudo.
+ * Lee el catálogo global de datos tracqueables (field_definitions activos, R2.8). Read-only,
+ * desde el SQLite local (T3.1/R5.4). El orden visual lo decide groupTogglesByCategory (lógica pura);
+ * acá traemos crudo. Si el primer sync aún no ocurrió y no hay catálogo local → degrada "Sincronizando…".
  */
 export async function fetchFieldCatalog(): Promise<ServiceResult<FieldDefinition[]>> {
-  const { data, error } = await supabase
-    .from('field_definitions')
-    .select('id, data_key, label, description, category, data_type, ui_component')
-    .eq('active', true);
-
-  if (error) return { ok: false, error: classifyError(error) };
-  const rows = (data ?? []) as FieldDefinitionRow[];
-  return { ok: true, value: rows.map(toFieldDefinition) };
+  const r = await runLocalQuery<FieldDefinitionRow>(buildFieldCatalogQuery());
+  if (!r.ok) return { ok: false, error: r.error };
+  return { ok: true, value: r.value.map(toFieldDefinition) };
 }
 
 // ─── Defaults por sistema (read-only) ─────────────────────────────────────────────
 
+// SQLite guarda los booleanos como 0/1 (column.integer en AppSchema) → toBool los coerce de vuelta.
 type SystemDefaultRow = {
   field_definition_id: string;
-  default_enabled: boolean;
-  required_for_system: boolean;
+  default_enabled: number | boolean;
+  required_for_system: number | boolean;
   sort_order: number;
 };
 
 /**
  * Lee los system_default_fields de un sistema (R2.9): qué datos vienen tildados/required y en
- * qué orden, para armar la plantilla del wizard. Read-only.
+ * qué orden, para armar la plantilla del wizard. Read-only, desde el SQLite local (T3.1).
  */
 export async function fetchSystemDefaults(
   systemId: string,
 ): Promise<ServiceResult<SystemDefaultField[]>> {
-  const { data, error } = await supabase
-    .from('system_default_fields')
-    .select('field_definition_id, default_enabled, required_for_system, sort_order')
-    .eq('system_id', systemId);
-
-  if (error) return { ok: false, error: classifyError(error) };
-  const rows = (data ?? []) as SystemDefaultRow[];
+  const r = await runLocalQuery<SystemDefaultRow>(buildSystemDefaultsQuery(systemId));
+  if (!r.ok) return { ok: false, error: r.error };
   return {
     ok: true,
-    value: rows.map((r) => ({
-      fieldDefinitionId: r.field_definition_id,
-      defaultEnabled: r.default_enabled,
-      requiredForSystem: r.required_for_system,
-      sortOrder: r.sort_order,
+    value: r.value.map((row) => ({
+      fieldDefinitionId: row.field_definition_id,
+      defaultEnabled: toBool(row.default_enabled),
+      requiredForSystem: toBool(row.required_for_system),
+      sortOrder: row.sort_order,
     })),
   };
 }
 
 // ─── Estado efectivo por rodeo (mutable: owner) ───────────────────────────────────
 
-type RodeoConfigRow = { field_definition_id: string; enabled: boolean };
+// `enabled` es 0/1 en SQLite (column.integer) → toBool lo coerce.
+type RodeoConfigRow = { field_definition_id: string; enabled: number | boolean };
 
 /**
- * Lee el estado efectivo de la plantilla de un rodeo (rodeo_data_config, R2.10). RLS:
- * has_role_in(establishment del rodeo) → cualquier rol del campo lo lee (para mostrar la
- * plantilla read-only a no-owners y para el gating de spec 03).
+ * Lee el estado efectivo de la plantilla de un rodeo (rodeo_data_config, R2.10) desde el SQLite
+ * local (T3.1). El scoping (has_role_in del establecimiento del rodeo) ya lo aplicó la stream → no
+ * se re-filtra. Cualquier rol del campo lo lee (plantilla read-only para no-owners + gating de spec 03).
+ * El trigger tg_rodeos_seed_data_config (0018) pre-pobla la config en el INSERT del rodeo, así que un
+ * rodeo sincronizado siempre trae filas; vacío + sin primer sync → degrada "Sincronizando…".
  */
 export async function fetchRodeoConfig(
   rodeoId: string,
 ): Promise<ServiceResult<RodeoFieldConfig[]>> {
-  const { data, error } = await supabase
-    .from('rodeo_data_config')
-    .select('field_definition_id, enabled')
-    .eq('rodeo_id', rodeoId);
-
-  if (error) return { ok: false, error: classifyError(error) };
-  const rows = (data ?? []) as RodeoConfigRow[];
+  const r = await runLocalQuery<RodeoConfigRow>(buildRodeoConfigQuery(rodeoId));
+  if (!r.ok) return { ok: false, error: r.error };
   return {
     ok: true,
-    value: rows.map((r) => ({ fieldDefinitionId: r.field_definition_id, enabled: r.enabled })),
+    value: r.value.map((row) => ({
+      fieldDefinitionId: row.field_definition_id,
+      enabled: toBool(row.enabled),
+    })),
   };
 }
 

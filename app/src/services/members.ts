@@ -1,14 +1,17 @@
 // Capa de datos de miembros e invitaciones (spec 01, Fase 5 / B.1.3).
 //
 // Dos clases de operación:
-//   1. LECTURAS directas a Supabase (RLS protege server-side):
-//        - loadMembers: filas de user_roles activas del campo (owner ve todas; no-owner ve solo
-//          la suya, por la policy user_roles_select 0008). Join a users SOLO por id+name (hallazgo
-//          RLS #2: no traer phone/email de otros).
-//        - loadPendingInvitations: invitations status=pending del campo (RLS owner-only, 0008).
+//   1. LECTURAS desde el SQLite local de PowerSync (spec 15, T3.2). El SCOPING ya lo aplicó la
+//      sync stream al sincronizar (est_members: owner ve la matriz de roles; no-owner solo la propia
+//      vía self_user_roles; est_invitations es owner-only) → acá NO se re-scopea, solo filtros de
+//      dominio. SQL builders puros en powersync/local-reads.ts.
+//        - loadMembers: user_roles activos del campo + LEFT JOIN users por id+name (hallazgo RLS #2:
+//          NO traer phone/email de otros — esas columnas ni existen en la tabla users local).
+//        - loadPendingInvitations: invitations status=pending del campo (owner-only por la stream).
+//        - countTeam: conteos livianos (otros miembros + invitaciones pendientes).
 //   2. WRAPPERS de las Edge Functions de Fase 2 (operaciones que requieren admin/validación
-//      cruzada: invitar, cancelar, regenerar, remover, cambiar rol, aceptar). Vía
-//      supabase.functions.invoke; el JWT lo agrega supabase-js solo.
+//      cruzada: invitar, cancelar, regenerar, remover, cambiar rol, aceptar) — siguen ONLINE (R7.1).
+//      Vía supabase.functions.invoke; el JWT lo agrega supabase-js solo.
 //
 // Helper de invoke (invokeFn): normaliza el shape de respuesta a un Result tipado con el `code`
 // del error. supabase-js devuelve, en no-2xx, `{ data: null, error: FunctionsHttpError }` y el
@@ -20,6 +23,13 @@
 
 import { supabase } from './supabase';
 import type { UserRole } from '../types';
+import {
+  buildMembersQuery,
+  buildCountOtherMembersQuery,
+  buildCountPendingInvitationsQuery,
+  buildPendingInvitationsQuery,
+} from './powersync/local-reads';
+import { runLocalQuery } from './powersync/local-query';
 
 // Base URL para reconstruir el accept_url de invitaciones PENDIENTES a partir del token. Las
 // invitaciones recién creadas/regeneradas ya traen `accept_url` del backend; para las que listamos
@@ -142,28 +152,18 @@ async function readEdgeError(error: unknown): Promise<ServiceError> {
   return { kind: 'unknown', code: null, message };
 }
 
-// ─── Lecturas directas (RLS) ──────────────────────────────────────────────────────
+// ─── Lecturas locales (SQLite de PowerSync, T3.2) ─────────────────────────────────
 
 export type LoadMembersResult =
   | { ok: true; members: Member[] }
   | { ok: false; error: { kind: 'network' | 'unknown'; message: string } };
 
-function classifyQueryError(error: { message?: string } | null): {
-  kind: 'network' | 'unknown';
-  message: string;
-} {
-  const msg = error?.message ?? '';
-  if (/network|failed to fetch|fetch failed/i.test(msg)) {
-    return { kind: 'network', message: msg };
-  }
-  return { kind: 'unknown', message: msg || 'Error desconocido' };
-}
-
-// Forma cruda de la fila de user_roles con el user embebido (join PostgREST por la FK user_id).
-type MemberRow = {
+// Forma PLANA de la fila local (LEFT JOIN user_roles + users). El join `user:users(id,name)` de
+// PostgREST se reescribe como LEFT JOIN SQLite (user_name puede ser null si falta la fila users).
+type MemberFlatRow = {
   role: UserRole;
   user_id: string;
-  user: { id: string; name: string | null } | null;
+  user_name: string | null;
 };
 
 /**
@@ -182,22 +182,18 @@ export async function loadMembers(
   establishmentId: string,
   currentUserId: string,
 ): Promise<LoadMembersResult> {
-  const { data, error } = await supabase
-    .from('user_roles')
-    .select('role, user_id, user:users ( id, name )')
-    .eq('establishment_id', establishmentId)
-    .eq('active', true);
+  // Desde el SQLite local (T3.2): la stream est_members decide qué filas de user_roles ve el usuario
+  // (owner: la matriz; no-owner: solo la propia vía self_user_roles) → acá NO se re-scopea, solo el
+  // filtro de dominio active=1. SOLO id+name del user (hallazgo RLS #2: nunca phone/email de otros —
+  // esas columnas ni existen en la tabla users local).
+  const r = await runLocalQuery<MemberFlatRow>(buildMembersQuery(establishmentId));
+  if (!r.ok) return { ok: false, error: r.error };
 
-  if (error) {
-    return { ok: false, error: classifyQueryError(error) };
-  }
-
-  const rows = (data ?? []) as unknown as MemberRow[];
-  const members: Member[] = rows.map((r) => ({
-    userId: r.user_id,
-    name: r.user?.name ?? '',
-    role: r.role,
-    isCurrentUser: r.user_id === currentUserId,
+  const members: Member[] = r.value.map((row) => ({
+    userId: row.user_id,
+    name: row.user_name ?? '',
+    role: row.role,
+    isCurrentUser: row.user_id === currentUserId,
   }));
   return { ok: true, members };
 }
@@ -235,30 +231,26 @@ export async function countTeam(
   establishmentId: string,
   selfUserId: string,
 ): Promise<CountTeamResult> {
-  // Otros miembros activos (≠ usuario actual). HEAD count: solo el header Content-Range, sin filas.
-  const membersRes = await supabase
-    .from('user_roles')
-    .select('user_id', { count: 'exact', head: true })
-    .eq('establishment_id', establishmentId)
-    .eq('active', true)
-    .neq('user_id', selfUserId);
-  if (membersRes.error) {
-    return { ok: false, error: classifyQueryError(membersRes.error) };
-  }
+  // Desde el SQLite local (T3.2). La asimetría owner/no-owner del docstring se preserva por la stream:
+  //  - others: para un no-owner la stream solo trae SU propia fila de user_roles → COUNT(≠ self) = 0.
+  //  - pending: la stream est_invitations es owner-only → para un no-owner no hay filas → COUNT = 0.
+  // COUNT(*) devuelve siempre 1 fila → emptyIsSyncing no aplica.
+  const membersRes = await runLocalQuery<{ count: number }>(
+    buildCountOtherMembersQuery(establishmentId, selfUserId),
+  );
+  if (!membersRes.ok) return { ok: false, error: membersRes.error };
 
-  // Invitaciones pendientes (owner-only por RLS → 0 para un no-owner). HEAD count.
-  const invitesRes = await supabase
-    .from('invitations')
-    .select('id', { count: 'exact', head: true })
-    .eq('establishment_id', establishmentId)
-    .eq('status', 'pending');
-  if (invitesRes.error) {
-    return { ok: false, error: classifyQueryError(invitesRes.error) };
-  }
+  const invitesRes = await runLocalQuery<{ count: number }>(
+    buildCountPendingInvitationsQuery(establishmentId),
+  );
+  if (!invitesRes.ok) return { ok: false, error: invitesRes.error };
 
   return {
     ok: true,
-    counts: { others: membersRes.count ?? 0, pending: invitesRes.count ?? 0 },
+    counts: {
+      others: membersRes.value[0]?.count ?? 0,
+      pending: invitesRes.value[0]?.count ?? 0,
+    },
   };
 }
 
@@ -282,18 +274,15 @@ type PendingRow = {
 export async function loadPendingInvitations(
   establishmentId: string,
 ): Promise<LoadPendingInvitationsResult> {
-  const { data, error } = await supabase
-    .from('invitations')
-    .select('id, role, email, created_at, expires_at, token')
-    .eq('establishment_id', establishmentId)
-    .eq('status', 'pending');
+  // Desde el SQLite local (T3.2): la stream est_invitations es owner-only + solo pending → un no-owner
+  // no tiene filas locales (lista vacía, igual que la RLS owner-only). emptyIsSyncing:false → vacío es
+  // un resultado LEGÍTIMO (no-owner, o sin invitaciones pendientes), NO se degrada a "sincronizando".
+  const r = await runLocalQuery<PendingRow>(buildPendingInvitationsQuery(establishmentId), {
+    emptyIsSyncing: false,
+  });
+  if (!r.ok) return { ok: false, error: r.error };
 
-  if (error) {
-    return { ok: false, error: classifyQueryError(error) };
-  }
-
-  const rows = (data ?? []) as unknown as PendingRow[];
-  const invitations: PendingInvitation[] = rows.map((r) => ({
+  const invitations: PendingInvitation[] = r.value.map((r) => ({
     id: r.id,
     role: r.role,
     email: r.email,

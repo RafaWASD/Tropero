@@ -18,6 +18,13 @@ import {
   type AppError,
   type ServiceResult,
 } from './rodeo-config';
+import {
+  buildSpeciesByCodeQuery,
+  buildSystemsBySpeciesQuery,
+  buildRodeosQuery,
+  toBool,
+} from './powersync/local-reads';
+import { runLocalQuery, runLocalQuerySingle } from './powersync/local-query';
 
 export type { AppError, ServiceResult } from './rodeo-config';
 
@@ -41,49 +48,45 @@ export type ProductionSystem = {
   active: boolean;
 };
 
+// `active` es 0/1 en SQLite (column.integer) → toBool lo coerce.
 type SystemRow = {
   id: string;
   species_id: string;
   code: string;
   name: string;
-  active: boolean;
+  active: number | boolean;
 };
+
+type SpeciesIdRow = { id: string };
 
 /**
  * Lista los sistemas productivos de una especie (por `code`, default 'bovino') para el paso 1
- * del wizard. Trae TODOS (activos e inactivos) para grisar los no-MVP con badge "Próximamente".
- * Read-only (catálogo). NO hardcodea el UUID de la especie: lo resuelve por code.
+ * del wizard, desde el SQLite local (T3.1; catálogo global sincronizado por catalog_species/
+ * catalog_systems). Trae TODOS (activos e inactivos) para grisar los no-MVP con badge "Próximamente".
+ * NO hardcodea el UUID de la especie: lo resuelve por code (2 queries locales: species → systems).
+ * Si el catálogo aún no sincronizó (species no encontrada + sin primer sync) → degrada "Sincronizando…".
  */
 export async function fetchProductionSystems(
   speciesCode = 'bovino',
 ): Promise<ServiceResult<ProductionSystem[]>> {
-  const { data: species, error: spErr } = await supabase
-    .from('species')
-    .select('id')
-    .eq('code', speciesCode)
-    .eq('active', true)
-    .maybeSingle();
-
-  if (spErr) return { ok: false, error: classifyError(spErr) };
-  if (!species) {
+  const spRes = await runLocalQuerySingle<SpeciesIdRow>(buildSpeciesByCodeQuery(speciesCode), {
+    emptyIsSyncing: true,
+  });
+  if (!spRes.ok) return { ok: false, error: spRes.error };
+  if (!spRes.value) {
     return { ok: false, error: { kind: 'unknown', message: `Especie "${speciesCode}" no disponible.` } };
   }
 
-  const { data, error } = await supabase
-    .from('systems_by_species')
-    .select('id, species_id, code, name, active')
-    .eq('species_id', species.id);
-
-  if (error) return { ok: false, error: classifyError(error) };
-  const rows = (data ?? []) as SystemRow[];
+  const r = await runLocalQuery<SystemRow>(buildSystemsBySpeciesQuery(spRes.value.id));
+  if (!r.ok) return { ok: false, error: r.error };
   return {
     ok: true,
-    value: rows.map((r) => ({
-      systemId: r.id,
-      speciesId: r.species_id,
-      code: r.code,
-      name: r.name,
-      active: r.active,
+    value: r.value.map((row) => ({
+      systemId: row.id,
+      speciesId: row.species_id,
+      code: row.code,
+      name: row.name,
+      active: toBool(row.active),
     })),
   };
 }
@@ -99,13 +102,14 @@ export type Rodeo = {
   active: boolean;
 };
 
+// `active` es 0/1 en SQLite (column.integer); de PostgREST viene boolean → toBool unifica ambos.
 type RodeoRow = {
   id: string;
   establishment_id: string;
   name: string;
   species_id: string;
   system_id: string;
-  active: boolean;
+  active: number | boolean;
 };
 
 function toRodeo(r: RodeoRow): Rodeo {
@@ -115,16 +119,34 @@ function toRodeo(r: RodeoRow): Rodeo {
     name: r.name,
     speciesId: r.species_id,
     systemId: r.system_id,
-    active: r.active,
+    active: toBool(r.active),
   };
 }
 
 /**
- * Lista los rodeos ACTIVOS (no soft-deleted, active=true) de un establecimiento. RLS filtra por
- * has_role_in + deleted_at is null (0017); además filtramos active=true para excluir rodeos
- * desactivados. Cualquier rol del campo los ve (lista read-only para no-owners, R2.3).
+ * Lista los rodeos ACTIVOS (no soft-deleted, active=true) de un establecimiento, desde el SQLite
+ * local (T3.3/R5.1). El scoping (has_role_in + deleted_at is null, 0017) ya lo aplicó la stream
+ * est_rodeos al sincronizar → no se re-filtra; SÍ conservamos el filtro de DOMINIO `active = true`
+ * (excluye rodeos desactivados) + `deleted_at IS NULL` (defensivo). Orden preservado: created_at ASC.
+ * Cualquier rol del campo los ve (lista read-only para no-owners, R2.3).
+ *
+ * Lo consume RodeoContext. NOTA: createRodeo NO usa esta lectura para su diff before/after (sería
+ * incorrecto: su INSERT es ONLINE y la fila vuelve al SQLite local recién por la stream, async); usa
+ * fetchRodeosOnline (helper interno PostgREST) para ver su propia escritura de inmediato — ver allí.
  */
 export async function fetchRodeos(establishmentId: string): Promise<ServiceResult<Rodeo[]>> {
+  const r = await runLocalQuery<RodeoRow>(buildRodeosQuery(establishmentId));
+  if (!r.ok) return { ok: false, error: r.error };
+  return { ok: true, value: r.value.map(toRodeo) };
+}
+
+/**
+ * Lectura ONLINE del set de rodeos (PostgREST) — uso INTERNO de createRodeo para diffear su propio
+ * INSERT de inmediato (la fila recién creada NO está aún en el SQLite local; baja por la stream
+ * async). Mantiene el comportamiento ONLINE de createRodeo en T3 (el swap a outbox/overlay es T5/T6).
+ * Misma query/filtros/orden que la versión PostgREST original de fetchRodeos.
+ */
+async function fetchRodeosOnline(establishmentId: string): Promise<ServiceResult<Rodeo[]>> {
   const { data, error } = await supabase
     .from('rodeos')
     .select('id, establishment_id, name, species_id, system_id, active')
@@ -209,7 +231,9 @@ export async function createRodeo(
   }
 
   // 2) SET de rodeos ANTES del insert (para diffear el nuevo después, robusto ante homónimos).
-  const before = await fetchRodeos(input.establishmentId);
+  // ONLINE (fetchRodeosOnline) — createRodeo es online en T3 y debe ver su propio INSERT al instante;
+  // la versión local de fetchRodeos no lo reflejaría hasta que la stream sincronice (async).
+  const before = await fetchRodeosOnline(input.establishmentId);
   if (!before.ok) return { ok: false, error: before.error };
   const beforeIds = new Set(before.value.map((r) => r.id));
 
@@ -222,8 +246,8 @@ export async function createRodeo(
   });
   if (insertError) return { ok: false, error: classifyError(insertError) };
 
-  // SELECT separado: el id que aparece ahora y NO estaba antes es el rodeo nuevo.
-  const after = await fetchRodeos(input.establishmentId);
+  // SELECT separado (ONLINE): el id que aparece ahora y NO estaba antes es el rodeo nuevo.
+  const after = await fetchRodeosOnline(input.establishmentId);
   if (!after.ok) return { ok: false, error: after.error };
   const created = after.value.find((r) => !beforeIds.has(r.id));
   if (!created) {

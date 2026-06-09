@@ -1,0 +1,231 @@
+# sync-streams/rafaq.yaml — Sync Streams de RAFAQ (spec 15). PASO 1 (JOIN-FREE) — 2026-06-09.
+#
+# ⚠️ El contenido de estas streams ES la frontera de autorización (lo audita Gate 1). NO hay RLS por
+#    encima del wire de sync: el WAL replica la tabla base ignorando views/RPCs/column-GRANTs (ADR-025).
+#    Por eso cada stream scopea explícitamente. NO se deploya desde acá: pegar en el dashboard → Validate → Deploy.
+#
+# ──────────────────────────────────────────────────────────────────────────────────────────────────
+# ⚠️⚠️  HISTORIA (por qué este YAML es JOIN-FREE):
+#   - V1 (subselects anidados) → PSYNC_S2305 (un bucket por fila de datos, regresión #611).
+#   - V2 (with: org_scope + INNER JOIN establishments para el deleted_at) → SIGUIÓ FALLANDO en runtime:
+#     PowerSync evalúa CADA tabla del INNER JOIN como una parameter query INDEPENDIENTE y SIN aplicarle
+#     el org_scope. El `INNER JOIN establishments` enumeró los 102 campos VIVOS de toda la DB por stream
+#     → ~1020 → revienta. Log probatorio: "Stream est_rodeos evaluating parameter on establishments: 102".
+#     CONCLUSIÓN DURA: los JOINs en las data queries son incompatibles con el bucket model de PowerSync.
+#   - V3 (ESTE — JOIN-FREE): cada tabla filtra DIRECTO `WHERE establishment_id IN org_scope`, sin JOINs.
+#     El bucket count pasa a ser INDEPENDIENTE del volumen de data (la contaminación de test deja de importar).
+#     El `deleted_at` del campo se resuelve haciendo que `org_scope` ya esté limpio: el trigger de la
+#     migración 0076 desactiva `user_roles.active` cuando un establishment se soft-deletea → un rol activo
+#     siempre apunta a un campo vivo → `establishment_id IN org_scope` ya excluye campos borrados SIN JOIN.
+#     (Redundante con has_role_in/is_owner_of, que ya filtran e.deleted_at IS NULL — 0005; el trigger solo
+#     alinea `active` para el modelo de sync. Ver design §2.)
+# ──────────────────────────────────────────────────────────────────────────────────────────────────
+#
+# ⚠️ ALCANCE DE ESTE ARCHIVO = PASO 1 (validación del modelo JOIN-free en vivo). Cubre las tablas que YA
+#    tienen `establishment_id` propio → JOIN-free hoy, sin tocar el schema. Las tablas hijas (eventos,
+#    birth_calves, animal_category_history, rodeo_data_config) y los casos de entidad COMPARTIDA (animals
+#    global, users/nombres-de-coworkers) NECESITAN denormalizar `establishment_id` (PASO 2: migraciones +
+#    ADR + re-Gate 1) y están DIFERIDAS — listadas al final como comentario, NO activas todavía.
+#
+# auth.user_id() = sub del JWT de Supabase.
+# org_scope:   SELECT establishment_id FROM user_roles WHERE user_id = auth.user_id() AND active = true
+# owner_scope: SELECT establishment_id FROM user_roles WHERE user_id = auth.user_id() AND active = true AND role = 'owner'
+#   → ambos scopeados por auth.user_id() → devuelven SOLO los campos del user (chico) → 1 bucket por campo.
+#   → con el trigger 0076, `active = true` ⇒ campo vivo → NO hace falta JOIN a establishments.
+#
+# Sintaxis (docs.powersync.com/sync/streams/{overview,ctes}): `with:` = mapa nombre→query única; referencia
+# short-hand `WHERE col IN org_scope` (CTE de 1 columna); `queries:` = lista de data queries por stream.
+
+config:
+  edition: 3
+
+streams:
+  # ── GLOBAL read-only (sin filtro, sin `with:`; 1 bucket global c/u) ──────────────
+  catalog_species:
+    auto_subscribe: true
+    queries:
+      - SELECT * FROM species
+  catalog_systems:
+    auto_subscribe: true
+    queries:
+      - SELECT * FROM systems_by_species
+  catalog_categories:
+    auto_subscribe: true
+    queries:
+      - SELECT * FROM categories_by_system
+  catalog_field_definitions:
+    auto_subscribe: true
+    queries:
+      - SELECT * FROM field_definitions
+  catalog_system_default_fields:
+    auto_subscribe: true
+    queries:
+      - SELECT * FROM system_default_fields
+
+  # ── SELF-ONLY (PII + per-user; filtro directo por auth → 1 bucket; sin `with:`) ──
+  self_user_private:                         # ADR-025: email/phone self-only (frontera WAL)
+    auto_subscribe: true
+    queries:
+      # PK as-built = user_id → emitir `id` con alias (PowerSync exige `id` en cada fila — T1.3).
+      - SELECT user_id AS id, * FROM user_private WHERE user_id = auth.user_id()
+  self_user_roles:                           # membresías del propio usuario
+    auto_subscribe: true
+    queries:
+      - SELECT * FROM user_roles WHERE user_id = auth.user_id()
+
+  # ── PER-ESTABLISHMENT JOIN-FREE (tienen establishment_id propio) ─────────────────
+  #    Patrón: `with: org_scope` + `WHERE establishment_id IN org_scope AND <tabla>.deleted_at IS NULL`.
+  #    El campo-vivo lo garantiza org_scope (trigger 0076). El deleted_at propio de la tabla excluye la
+  #    fila soft-deleteada. SIN JOINs → sin explosión de buckets.
+  est_establishments:                        # la tabla ES establishments (filtra su propio deleted_at)
+    auto_subscribe: true
+    with:
+      org_scope: SELECT establishment_id FROM user_roles WHERE user_id = auth.user_id() AND active = true
+    queries:
+      - SELECT * FROM establishments WHERE id IN org_scope AND deleted_at IS NULL
+
+  est_members_roles:                         # MATRIZ DE ROLES de coworkers (owner-only). NOMBRES → paso 2.
+    auto_subscribe: true
+    with:
+      owner_scope: SELECT establishment_id FROM user_roles WHERE user_id = auth.user_id() AND active = true AND role = 'owner'
+    queries:
+      # Espeja user_roles_select (0008): owner ve los roles ajenos de SUS campos. user_roles tiene
+      # establishment_id propio → JOIN-free. El propio rol del user llega por self_user_roles.
+      # ⚠️ Los NOMBRES de coworkers (tabla users, entidad compartida) quedan DIFERIDOS al paso 2
+      #    (necesitan denormalización o quedar online). En paso 1 sincroniza solo la matriz de roles.
+      - SELECT * FROM user_roles WHERE active = true AND establishment_id IN owner_scope
+
+  est_invitations:                           # solo pendientes, solo donde el user es OWNER (R4.9, D1)
+    auto_subscribe: true
+    with:
+      owner_scope: SELECT establishment_id FROM user_roles WHERE user_id = auth.user_id() AND active = true AND role = 'owner'
+    queries:
+      - >
+        SELECT * FROM invitations
+        WHERE establishment_id IN owner_scope
+          AND status = 'pending'
+          AND deleted_at IS NULL
+
+  est_rodeos:
+    auto_subscribe: true
+    with:
+      org_scope: SELECT establishment_id FROM user_roles WHERE user_id = auth.user_id() AND active = true
+    queries:
+      - SELECT * FROM rodeos WHERE establishment_id IN org_scope AND deleted_at IS NULL
+
+  est_management_groups:
+    auto_subscribe: true
+    with:
+      org_scope: SELECT establishment_id FROM user_roles WHERE user_id = auth.user_id() AND active = true
+    queries:
+      - SELECT * FROM management_groups WHERE establishment_id IN org_scope AND deleted_at IS NULL
+
+  est_animal_profiles:
+    auto_subscribe: true
+    with:
+      org_scope: SELECT establishment_id FROM user_roles WHERE user_id = auth.user_id() AND active = true
+    queries:
+      - SELECT * FROM animal_profiles WHERE establishment_id IN org_scope AND deleted_at IS NULL
+
+  est_sessions:
+    auto_subscribe: true
+    with:
+      org_scope: SELECT establishment_id FROM user_roles WHERE user_id = auth.user_id() AND active = true
+    queries:
+      - SELECT * FROM sessions WHERE establishment_id IN org_scope AND deleted_at IS NULL
+
+  est_maneuver_presets:
+    auto_subscribe: true
+    with:
+      org_scope: SELECT establishment_id FROM user_roles WHERE user_id = auth.user_id() AND active = true
+    queries:
+      - SELECT * FROM maneuver_presets WHERE establishment_id IN org_scope AND deleted_at IS NULL
+
+  est_semen_registry:
+    auto_subscribe: true
+    with:
+      org_scope: SELECT establishment_id FROM user_roles WHERE user_id = auth.user_id() AND active = true
+    queries:
+      - SELECT * FROM semen_registry WHERE establishment_id IN org_scope AND deleted_at IS NULL
+
+  est_animal_events:                         # tiene establishment_id propio (0034) → JOIN-free
+    auto_subscribe: true
+    with:
+      org_scope: SELECT establishment_id FROM user_roles WHERE user_id = auth.user_id() AND active = true
+    queries:
+      - SELECT * FROM animal_events WHERE establishment_id IN org_scope AND deleted_at IS NULL
+
+  # ── PASO 2 — TABLAS HIJAS con `establishment_id` DENORMALIZADO (ADR-026) ─────────
+  #    Las migraciones del paso 2 agregan `establishment_id` (forzado por trigger desde el padre,
+  #    anti-spoof) a estas tablas → entran al MISMO patrón JOIN-free ya probado. ⚠️ Solo deployar
+  #    DESPUÉS de aplicar esas migraciones (la columna debe existir o el Validate del dashboard falla).
+  ev_weight_events:
+    auto_subscribe: true
+    with:
+      org_scope: SELECT establishment_id FROM user_roles WHERE user_id = auth.user_id() AND active = true
+    queries:
+      - SELECT * FROM weight_events WHERE establishment_id IN org_scope AND deleted_at IS NULL
+  ev_reproductive_events:
+    auto_subscribe: true
+    with:
+      org_scope: SELECT establishment_id FROM user_roles WHERE user_id = auth.user_id() AND active = true
+    queries:
+      - SELECT * FROM reproductive_events WHERE establishment_id IN org_scope AND deleted_at IS NULL
+  ev_sanitary_events:
+    auto_subscribe: true
+    with:
+      org_scope: SELECT establishment_id FROM user_roles WHERE user_id = auth.user_id() AND active = true
+    queries:
+      - SELECT * FROM sanitary_events WHERE establishment_id IN org_scope AND deleted_at IS NULL
+  ev_condition_score_events:
+    auto_subscribe: true
+    with:
+      org_scope: SELECT establishment_id FROM user_roles WHERE user_id = auth.user_id() AND active = true
+    queries:
+      - SELECT * FROM condition_score_events WHERE establishment_id IN org_scope AND deleted_at IS NULL
+  ev_lab_samples:
+    auto_subscribe: true
+    with:
+      org_scope: SELECT establishment_id FROM user_roles WHERE user_id = auth.user_id() AND active = true
+    queries:
+      - SELECT * FROM lab_samples WHERE establishment_id IN org_scope AND deleted_at IS NULL
+
+  est_animal_category_history:               # sin deleted_at propio (0030) → solo scope por org_scope
+    auto_subscribe: true
+    with:
+      org_scope: SELECT establishment_id FROM user_roles WHERE user_id = auth.user_id() AND active = true
+    queries:
+      - SELECT * FROM animal_category_history WHERE establishment_id IN org_scope
+
+  # birth_calves: PK compuesta → `id` sintético (§PK). establishment_id denormalizado del parto→madre.
+  # ⚠️ GATE 1 debe verificar: birth_calves_select as-built filtra reproductive_events.deleted_at IS NULL.
+  #    birth_calves NO tiene deleted_at propio → si el parto se soft-deletea, esta stream NO lo excluye
+  #    (over-sync vs RLS). Si Gate 1 lo marca, la migración debe propagar el soft-delete del parto a
+  #    birth_calves (columna/flag) o el stream filtrar por el estado del parto. Flaggeado a propósito.
+  ev_birth_calves:
+    auto_subscribe: true
+    with:
+      org_scope: SELECT establishment_id FROM user_roles WHERE user_id = auth.user_id() AND active = true
+    queries:
+      - SELECT (birth_event_id || ':' || calf_profile_id) AS id, * FROM birth_calves WHERE establishment_id IN org_scope
+
+  # ⚠️ GATE 1 paso 2 (MED-2): rodeo_data_config_select filtra rodeos.deleted_at IS NULL; los rodeos se
+  #    soft-deletean. Esta stream solo filtra establishment_id IN org_scope → over-sync same-tenant de la
+  #    config de un rodeo borrado (no se renderiza, su rodeo no sincroniza). Backlogueado (propagar el
+  #    soft-delete del rodeo a rodeo_data_config). Mismo caso que ev_birth_calves. NO cross-tenant.
+  est_rodeo_data_config:                     # PK compuesta → `id` sintético. sin deleted_at propio (0018)
+    auto_subscribe: true
+    with:
+      org_scope: SELECT establishment_id FROM user_roles WHERE user_id = auth.user_id() AND active = true
+    queries:
+      - SELECT (rodeo_id || ':' || field_definition_id) AS id, * FROM rodeo_data_config WHERE establishment_id IN org_scope
+
+# ══════════════════════════════════════════════════════════════════════════════════════════════════
+# ENTIDADES COMPARTIDAS — FUERA DEL SYNC SET (ADR-026 b1/c2):
+#   - `animals` (global) → NO se sincroniza. Su identidad (tag_electronic/sex/birth_date) se denormaliza
+#     sobre `animal_profiles` (que ya sincroniza vía est_animal_profiles) → la UI la lee de ahí (swap T4).
+#   - `users` (global)   → NO se sincroniza. El `name` se denormaliza sobre `user_roles.member_name` →
+#     rides on self_user_roles (nombre propio) + est_members_roles (coworkers). PII (email/phone) en
+#     user_private self-only (self_user_private), NUNCA se denormaliza (ADR-025).
+# Total: 25 streams (17 del paso 1 + 8 del paso 2). Bucket math para 2 campos: ~43 (design §2.4). << 1000.
+# ══════════════════════════════════════════════════════════════════════════════════════════════════

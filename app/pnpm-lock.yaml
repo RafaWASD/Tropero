@@ -14,6 +14,18 @@ importers:
       '@expo-google-fonts/inter':
         specifier: ^0.4.2
         version: 0.4.2
+      '@journeyapps/wa-sqlite':
+        specifier: 1.7.0
+        version: 1.7.0
+      '@powersync/react':
+        specifier: 1.10.0
+        version: 1.10.0(@powersync/common@1.53.2)(react@19.2.3)
+      '@powersync/react-native':
+        specifier: 1.35.3
+        version: 1.35.3(@powersync/common@1.53.2)(react-native@0.85.3(@babel/core@7.29.0)(@react-native/metro-config@0.85.3(@babel/core@7.29.0))(@types/react@19.2.15)(react@19.2.3))(react@19.2.3)
+      '@powersync/web':
+        specifier: 1.38.2
+        version: 1.38.2(@journeyapps/wa-sqlite@1.7.0)(@powersync/common@1.53.2)
       '@react-navigation/bottom-tabs':
         specifier: 7.16.2
         version: 7.16.2(@react-native-masked-view/masked-view@0.3.2(react-native@0.85.3(@babel/core@7.29.0)(@react-native/metro-config@0.85.3(@babel/core@7.29.0))(@types/react@19.2.15)(react@19.2.3))(react@19.2.3))(@react-navigation/native@7.2.4(react-native@0.85.3(@babel/core@7.29.0)(@react-native/metro-config@0.85.3(@babel/core@7.29.0))(@types/react@19.2.15)(react@19.2.3))(react@19.2.3))(react-native-safe-area-context@5.7.0(react-native@0.85.3(@babel/core@7.29.0)(@react-native/metro-config@0.85.3(@babel/core@7.29.0))(@types/react@19.2.15)(react@19.2.3))(react@19.2.3))(react-native-screens@4.25.2(react-native@0.85.3(@babel/core@7.29.0)(@react-native/metro-config@0.85.3(@babel/core@7.29.0))(@types/react@19.2.15)(react@19.2.3))(react@19.2.3))(react-native@0.85.3(@babel/core@7.29.0)(@react-native/metro-config@0.85.3(@babel/core@7.29.0))(@types/react@19.2.15)(react@19.2.3))(react@19.2.3)
@@ -912,6 +924,9 @@ packages:
     resolution: {integrity: sha512-u3UPsIilWKOM3F9CXtrG8LEJmNxwoCQC/XVj4IKYXvvpx7QIi/Kg1LI5uDmDpKlac62NUtX7eLjRh+jVZcLOzw==}
     engines: {node: ^14.15.0 || ^16.10.0 || >=18.0.0}
 
+  '@journeyapps/wa-sqlite@1.7.0':
+    resolution: {integrity: sha512-xQZ670aKDo4FWxIFpLqY0AGDpURr09aYIO08UkLdWvFw8C018nCiqY0ILJudGRhRdXORhv7K2xD2OXZ2QxU39w==}
+
   '@jridgewell/gen-mapping@0.3.13':
     resolution: {integrity: sha512-2kkt/7niJ6MgEPxF0bYdQ6etZaA+fQvDcLKckhy1yIQOzaoKjBBjSj63/aLVjYE3qhRt5dvM+uUyfCg6UKCBbA==}
 
@@ -981,6 +996,33 @@ packages:
     resolution: {integrity: sha512-O71yZIbAh/PxDMNGns37GHBIfrVkEVyn+AXyIa5dOTfb4/xNvRWV+Vv/NMbNCtODB/pO7vLlF2OTmMVLhmr7Ag==}
     engines: {node: '>=18'}
     hasBin: true
+
+  '@powersync/common@1.53.2':
+    resolution: {integrity: sha512-y+GtaLL4imFIWOatErIAEozNZPcIkAcA24c2Mso124ZFStOEeP8LJTSMDxPhyK14mzSnBk2dSjrOAjNz7m2B8g==}
+
+  '@powersync/react-native@1.35.3':
+    resolution: {integrity: sha512-n5AXMfuyg66xHwDOBRN92vR6hukoHMYE47aDpQchTeiN1es2n/Qv4YbT0U6K8rfYtBIfUGVrcUWGwhUpQ+E0HA==}
+    peerDependencies:
+      '@journeyapps/react-native-quick-sqlite': ^2.5.2
+      '@powersync/common': ^1.53.2
+      react: '*'
+      react-native: '*'
+    peerDependenciesMeta:
+      '@journeyapps/react-native-quick-sqlite':
+        optional: true
+
+  '@powersync/react@1.10.0':
+    resolution: {integrity: sha512-orM29qocbF8zYTBM27j9nPNztyplpbNVaw8djpqxl8N2wESqHTbHOKpatg+Fa5aofgjzmrkiGwevJvCbiWYYWQ==}
+    peerDependencies:
+      '@powersync/common': ^1.51.0
+      react: '*'
+
+  '@powersync/web@1.38.2':
+    resolution: {integrity: sha512-lAHpqTnywK/wy120HSS2O8IRSYYXDAVJV8opGGOcBQZwbCB1h8vHk4vJDyJ012iWq6onUJHnQOD95KHzGRR+pw==}
+    hasBin: true
+    peerDependencies:
+      '@journeyapps/wa-sqlite': ^1.5.0
+      '@powersync/common': ^1.53.2
 
   '@radix-ui/primitive@1.1.3':
     resolution: {integrity: sha512-JTF99U/6XIjCBo0wqkU5sK10glYe27MRRsfwoiq5zzOEZLHU3A3KCMa5X/azekYRCJ0HlwI0crAXS/5dEHTzDg==}
@@ -2363,6 +2405,9 @@ packages:
     resolution: {integrity: sha512-1rXeuUUiGGrykh+CeBdu5Ie7OJwinCgQY0bc7GCRxy5xVHy+moaqkpL/jqQq0MtQOeYcrqEz4abc5f0KtU7W4A==}
     engines: {node: '>=12.5.0'}
 
+  comlink@4.4.2:
+    resolution: {integrity: sha512-OxGdvBmJuNKSCMO4NTl1L47VRp6xn2wG4F/2hYzB6tiCb709otOxtEYCSvK80PtjODfXXZu8ds+Nw5kVCjqd2g==}
+
   commander@11.1.0:
     resolution: {integrity: sha512-yPVavfyCcRhmorC7rWlkHn15b4wDVgVmBA7kV4QVBsF7kv/9TKJAbAXVTxvTnwP8HHKjRCJDClKbciiYS7p0DQ==}
     engines: {node: '>=16'}
@@ -2588,6 +2633,9 @@ packages:
   etag@1.8.1:
     resolution: {integrity: sha512-aIL5Fx7mawVa300al2BnEE4iNvo1qETxLrPI/o05L7z6go7fCw1J6EQmbK4FmJ2AS7kgVF/KEZWufBfdClMcPg==}
     engines: {node: '>= 0.6'}
+
+  event-iterator@2.0.0:
+    resolution: {integrity: sha512-KGft0ldl31BZVV//jj+IAIGCxkvvUkkON+ScH6zfoX+l+omX6001ggyRSpI0Io2Hlro0ThXotswCtfzS8UkIiQ==}
 
   event-target-shim@5.0.1:
     resolution: {integrity: sha512-i/2XbnSz/uxRCU6+NdVJgKWDTM427+MqYbkQzD321DuCQJUqOuJKIA0IM2+W2xtYHdKOmZ4dR6fExsd4SXL+WQ==}
@@ -3074,6 +3122,9 @@ packages:
 
   jimp-compact@0.16.1:
     resolution: {integrity: sha512-dZ6Ra7u1G8c4Letq/B5EzAxj4tLFHL+cGtdpR+PVm4yzPDj+lCk+AbivWt1eOM+ikzkowtyV7qSqX6qr3t71Ww==}
+
+  js-logger@1.6.1:
+    resolution: {integrity: sha512-yTgMCPXVjhmg28CuUH8CKjU+cIKL/G+zTu4Fn4lQxs8mRFH/03QTNvEFngcxfg/gRDiQAOoyCKmMTOm9ayOzXA==}
 
   js-tokens@4.0.0:
     resolution: {integrity: sha512-RdJUflcE3cUzKiMqQgsCu06FPu9UdIJO0beYbPhHN4k6apgJtifcoCtT9bcxOpYBtpD2kCM6Sbzg4CausW/PKQ==}
@@ -5316,6 +5367,8 @@ snapshots:
       '@types/yargs': 17.0.35
       chalk: 4.1.2
 
+  '@journeyapps/wa-sqlite@1.7.0': {}
+
   '@jridgewell/gen-mapping@0.3.13':
     dependencies:
       '@jridgewell/sourcemap-codec': 1.5.5
@@ -5375,6 +5428,30 @@ snapshots:
   '@playwright/test@1.60.0':
     dependencies:
       playwright: 1.60.0
+
+  '@powersync/common@1.53.2':
+    dependencies:
+      event-iterator: 2.0.0
+      js-logger: 1.6.1
+
+  '@powersync/react-native@1.35.3(@powersync/common@1.53.2)(react-native@0.85.3(@babel/core@7.29.0)(@react-native/metro-config@0.85.3(@babel/core@7.29.0))(@types/react@19.2.15)(react@19.2.3))(react@19.2.3)':
+    dependencies:
+      '@powersync/common': 1.53.2
+      '@powersync/react': 1.10.0(@powersync/common@1.53.2)(react@19.2.3)
+      react: 19.2.3
+      react-native: 0.85.3(@babel/core@7.29.0)(@react-native/metro-config@0.85.3(@babel/core@7.29.0))(@types/react@19.2.15)(react@19.2.3)
+
+  '@powersync/react@1.10.0(@powersync/common@1.53.2)(react@19.2.3)':
+    dependencies:
+      '@powersync/common': 1.53.2
+      react: 19.2.3
+
+  '@powersync/web@1.38.2(@journeyapps/wa-sqlite@1.7.0)(@powersync/common@1.53.2)':
+    dependencies:
+      '@journeyapps/wa-sqlite': 1.7.0
+      '@powersync/common': 1.53.2
+      comlink: 4.4.2
+      commander: 12.1.0
 
   '@radix-ui/primitive@1.1.3': {}
 
@@ -5697,9 +5774,7 @@ snapshots:
       metro-runtime: 0.84.4
     transitivePeerDependencies:
       - '@babel/core'
-      - bufferutil
       - supports-color
-      - utf-8-validate
 
   '@react-native/normalize-color@2.1.0': {}
 
@@ -7487,6 +7562,8 @@ snapshots:
       color-convert: 2.0.1
       color-string: 1.9.1
 
+  comlink@4.4.2: {}
+
   commander@11.1.0: {}
 
   commander@12.1.0: {}
@@ -7704,6 +7781,8 @@ snapshots:
   escape-string-regexp@4.0.0: {}
 
   etag@1.8.1: {}
+
+  event-iterator@2.0.0: {}
 
   event-target-shim@5.0.1: {}
 
@@ -8227,6 +8306,8 @@ snapshots:
       supports-color: 8.1.1
 
   jimp-compact@0.16.1: {}
+
+  js-logger@1.6.1: {}
 
   js-tokens@4.0.0: {}
 

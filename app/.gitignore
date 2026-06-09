@@ -13,6 +13,12 @@ expo-env.d.ts
 # Tamagui (build cache del optimizing compiler)
 .tamagui/
 
+# PowerSync web — assets de runtime (worker UMD + wa-sqlite WASM) servidos desde public/.
+# Build-artifact: los regenera el prebuild `copy-powersync-assets` (script `web`/`e2e:build`,
+# = `powersync-web copy-assets --output public`). NO se commitean (binarios pesados, versionados
+# con el SDK). Un clone fresco los obtiene al correr `pnpm web`. Ver impl_15 Hotfix Run 1.2.
+public/@powersync/
+
 # Playwright E2E (artefactos de corrida — NO se commitean)
 test-results/
 playwright-report/

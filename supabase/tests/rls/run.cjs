@@ -340,6 +340,18 @@ test('RLS suite — multi-tenant isolation', async (t) => {
 
     // Volver a poner deleted_at = null vía service_role para que cleanup funcione bien.
     await admin.from('establishments').update({ deleted_at: null }).eq('id', estA);
+
+    // Tras 0076, el soft-delete de arriba desactiva los user_roles de estA (active=false)
+    // vía el trigger establishment_soft_delete_deactivates_roles. El trigger NO reactiva en el
+    // restore, por diseño (un restore real es responsable de reactivar explícitamente). estA es
+    // un campo COMPARTIDO que los tests posteriores reusan (R5.1 invitations con userA owner;
+    // R7.3 y R6.1 con userB field_operator), así que reactivamos sus roles acá, espejando lo que
+    // un restore real haría. Idempotente: sin 0076 los roles siguen active=true y esto es no-op.
+    await admin
+      .from('user_roles')
+      .update({ active: true, deactivated_at: null })
+      .eq('establishment_id', estA)
+      .in('user_id', [userA.id, userB.id]);
   });
 
   // -------------------------------------------------------------------
@@ -496,6 +508,311 @@ test('RLS suite — multi-tenant isolation', async (t) => {
     const ids = data.map((r) => r.id).sort();
     const expected = [estA, estB].sort();
     assert.deepEqual(ids, expected);
+  });
+
+  // -------------------------------------------------------------------
+  // spec 15-powersync (migración 0076) — el soft-delete de un campo desactiva sus user_roles.
+  //
+  // POR QUÉ: el modelo de sync JOIN-free de PowerSync scopea por `user_roles.active = true` SIN JOIN a
+  // establishments, así que `active` tiene que ser un proxy fiel de "campo vivo". El trigger
+  // establishment_soft_delete_deactivates_roles (0076) desactiva los roles del campo al soft-deletearlo.
+  // Es ADITIVO y redundante con la RLS: has_role_in YA filtra deleted_at, así que devolvía false igual —
+  // este test verifica que (a) el trigger pone active=false + deactivated_at, y (b) has_role_in sigue false
+  // (sin regresión). Campo + usuario DEDICADOS (estE/userE) para no contaminar el resto de la suite (el
+  // trigger NO reactiva en el restore, por diseño).
+  //
+  // ⚠️ Este test REQUIERE la migración 0076 APLICADA al remoto (la aplica el leader por Management API
+  // tras gatear el SQL). Hasta entonces FALLA — es ESPERADO: sin el trigger
+  // establishment_soft_delete_deactivates_roles, el soft-delete NO desactiva los roles, así que `active`
+  // sigue true tras el borrado y la aserción (a) falla. El implementer NO aplica la migración. Mismo patrón
+  // que la suite `spec 15-powersync` de supabase/tests/animal/run.cjs (delta 0075, Run 2).
+  // -------------------------------------------------------------------
+  await t.test('spec 15 (0076): soft-delete de un campo desactiva sus user_roles (active=false) y has_role_in sigue false', async () => {
+    const userE = await createTestUser('userE');
+    const clientE = await getUserClient(userE.email);
+    // Owner = userE crea un campo dedicado (el trigger 0011 lo deja owner activo).
+    const estE = await createEstablishmentAs(clientE, `${RUN_TAG} estE 0076`);
+    // Un segundo miembro activo (field_operator) para verificar que el trigger desactiva TODOS los roles,
+    // no solo el del owner.
+    await assignRoleAsService(userB.id, estE, 'field_operator');
+
+    // ANTES del borrado: ambos roles activos (vía service_role para ver el estado real de user_roles).
+    {
+      const { data, error } = await admin
+        .from('user_roles')
+        .select('user_id, active, deactivated_at')
+        .eq('establishment_id', estE);
+      assert.equal(error, null, error && error.message);
+      assert.equal(data.length, 2, 'estE debería tener 2 user_roles (owner userE + field_operator userB)');
+      assert.ok(data.every((r) => r.active === true), 'ambos roles deberían estar active=true ANTES del borrado');
+      assert.ok(data.every((r) => r.deactivated_at === null), 'deactivated_at debería ser null ANTES del borrado');
+    }
+
+    // ANTES del borrado: has_role_in(estE) true para el owner (campo vivo + rol activo) → ve el campo.
+    {
+      const { data } = await clientE.from('establishments').select('id').eq('id', estE);
+      assert.equal(data.length, 1, 'el owner debería ver estE ANTES del borrado (has_role_in true)');
+    }
+
+    // SOFT-DELETE desde el owner (mismo camino que softDeleteEstablishment del cliente).
+    {
+      const { error: delErr } = await clientE
+        .from('establishments')
+        .update({ deleted_at: new Date().toISOString() })
+        .eq('id', estE)
+        .is('deleted_at', null);
+      assert.equal(delErr, null, delErr && `soft-delete del owner no debería fallar: ${delErr.message}`);
+    }
+
+    // (a) DESPUÉS del borrado: el trigger 0076 desactivó AMBOS roles (active=false + deactivated_at poblado).
+    //     Se lee vía service_role porque el cliente ya no ve el campo soft-deleteado.
+    {
+      const { data, error } = await admin
+        .from('user_roles')
+        .select('user_id, active, deactivated_at')
+        .eq('establishment_id', estE);
+      assert.equal(error, null, error && error.message);
+      assert.equal(data.length, 2, 'siguen las 2 filas (no se borran, se desactivan — auditoría)');
+      assert.ok(
+        data.every((r) => r.active === false),
+        'el trigger 0076 debería haber puesto active=false en TODOS los roles del campo',
+      );
+      assert.ok(
+        data.every((r) => r.deactivated_at !== null),
+        'el trigger 0076 debería haber poblado deactivated_at',
+      );
+    }
+
+    // (b) DESPUÉS del borrado: has_role_in(estE) sigue false (era false igual por el JOIN a deleted_at;
+    //     verifica que no hubo regresión). El owner ya no ve el campo.
+    {
+      const { data } = await clientE.from('establishments').select('id').eq('id', estE);
+      assert.deepEqual(data, [], 'el owner NO debería ver estE tras el soft-delete (has_role_in false)');
+    }
+  });
+
+  // -------------------------------------------------------------------
+  // spec 15-powersync (migración 0076 — guard) — INVARIANTE: NO se puede tener un user_roles.active = true
+  // apuntando a un establishment soft-deleteado.
+  //
+  // POR QUÉ: el modelo de sync JOIN-free de PowerSync depende de "user_roles.active = true ⇒ campo vivo".
+  // El trigger establishment_soft_delete_deactivates_roles (0076) cubre los roles EXISTENTES al borrar el
+  // campo, pero NO impide CREAR/activar un rol NUEVO para un campo ya borrado (vector verificado:
+  // supabase/functions/accept_invitation/index.ts:93-101 inserta active:true sin chequear deleted_at →
+  // owner invita → owner borra el campo → el invitado acepta el link pendiente → quedaría un rol activo
+  // sobre un campo muerto → el sync le replicaría la data del campo borrado). El guard
+  // user_roles_block_active_on_soft_deleted_establishment (0076) cierra esa otra mitad a nivel DB: rechaza
+  // (errcode 23514) cualquier INSERT/UPDATE que deje active=true en un campo con deleted_at IS NOT NULL,
+  // venga del code-path que venga. Ejercitamos el guard DIRECTO vía service_role (simular accept_invitation
+  // entero es pesado y el guard es agnóstico del caller): un INSERT/UPDATE de user_roles.active=true sobre
+  // un campo borrado debe FALLAR; sobre un campo vivo, y cualquier op active=false, deben PASAR.
+  //
+  // ⚠️ Como el test del trigger de deactivate, REQUIERE 0076 APLICADA al remoto (la aplica el leader por
+  // Management API tras gatear el SQL). Hasta entonces FALLA — es ESPERADO: sin el guard, los INSERT/UPDATE
+  // de active=true sobre el campo borrado NO se rechazan, así que las aserciones de rechazo fallan. El
+  // implementer NO aplica la migración. Campo + usuario DEDICADOS (estG/userG) → autocontenido.
+  // -------------------------------------------------------------------
+  await t.test('spec 15 (0076 guard): no se puede activar/insertar un user_roles.active=true en un campo soft-deleteado', async () => {
+    const userG = await createTestUser('userG');
+    const clientG = await getUserClient(userG.email);
+    // Campo VIVO dedicado (el trigger 0011 deja a userG owner activo).
+    const estG = await createEstablishmentAs(clientG, `${RUN_TAG} estG 0076-guard`);
+    // Un 2do usuario para fabricar roles nuevos sin chocar el unique-active de userG (owner).
+    const userH = await createTestUser('userH');
+
+    // CASO POSITIVO (campo VIVO): insertar un user_roles.active=true para userH en estG (vivo) → PASA.
+    // Es el camino legítimo de aceptar una invitación a un campo que sigue vivo.
+    {
+      const { error } = await admin
+        .from('user_roles')
+        .insert({ user_id: userH.id, establishment_id: estG, role: 'field_operator', active: true });
+      assert.equal(error, null, error && `insert active=true en campo VIVO no debería fallar: ${error.message}`);
+    }
+
+    // SOFT-DELETE de estG desde el owner (mismo camino que softDeleteEstablishment). El trigger de deactivate
+    // (0076) desactiva los roles existentes (owner userG + field_operator userH) → active=false.
+    {
+      const { error: delErr } = await clientG
+        .from('establishments')
+        .update({ deleted_at: new Date().toISOString() })
+        .eq('id', estG)
+        .is('deleted_at', null);
+      assert.equal(delErr, null, delErr && `soft-delete del owner no debería fallar: ${delErr.message}`);
+    }
+
+    // CASO NEGATIVO 1 (INSERT sobre campo BORRADO): intentar INSERTAR un user_roles.active=true NUEVO para
+    // userB en estG (ya borrado) → el guard lo RECHAZA (errcode 23514). Este es EXACTAMENTE el vector de
+    // accept_invitation (un rol nuevo activo sobre un campo que se borró entre invitar y aceptar).
+    {
+      const { error } = await admin
+        .from('user_roles')
+        .insert({ user_id: userB.id, establishment_id: estG, role: 'veterinarian', active: true });
+      assert.notEqual(error, null, 'el guard debería RECHAZAR insertar active=true en un campo soft-deleteado');
+      assert.match(
+        String((error && (error.message + ' ' + (error.code || '') + ' ' + (error.details || ''))) || ''),
+        /23514|borrado|soft-deletead/i,
+        'el rechazo debería ser el del guard (23514 / campo borrado), no otro error',
+      );
+    }
+
+    // CASO NEGATIVO 2 (UPDATE active=true sobre campo BORRADO): intentar REACTIVAR el rol de userH (que el
+    // trigger de deactivate dejó en active=false) mientras estG sigue borrado → el guard lo RECHAZA. Cubre el
+    // path de "poner active=true" por UPDATE, no solo por INSERT.
+    {
+      const { error } = await admin
+        .from('user_roles')
+        .update({ active: true, deactivated_at: null })
+        .eq('user_id', userH.id)
+        .eq('establishment_id', estG);
+      assert.notEqual(error, null, 'el guard debería RECHAZAR reactivar (UPDATE active=true) un rol en un campo borrado');
+      assert.match(
+        String((error && (error.message + ' ' + (error.code || '') + ' ' + (error.details || ''))) || ''),
+        /23514|borrado|soft-deletead/i,
+        'el rechazo del UPDATE debería ser el del guard (23514 / campo borrado)',
+      );
+    }
+
+    // CONTRAPRUEBA DE COMPATIBILIDAD (active=false SIEMPRE permitido): un UPDATE que pone/mantiene active=false
+    // sobre el campo borrado NO debe ser bloqueado por el guard (es lo que hace el propio trigger de deactivate
+    // y la remoción de miembros). Sin esta garantía, el guard rompería el deactivate. Verificamos que NO
+    // levanta error (no-op sobre userH, ya en false).
+    {
+      const { error } = await admin
+        .from('user_roles')
+        .update({ active: false })
+        .eq('user_id', userH.id)
+        .eq('establishment_id', estG);
+      assert.equal(error, null, error && `active=false en campo borrado NO debería ser bloqueado por el guard: ${error.message}`);
+    }
+
+    // CONTRAPRUEBA (campo RESTAURADO antes de reactivar): el orden correcto es restore (deleted_at=null)
+    // ANTES de reactivar (active=true) — espeja el fix de R8.3/R8.4. Con el campo VIVO de nuevo, reactivar
+    // PASA. (Si se reactivara ANTES del restore, el guard lo bloquearía — por eso el orden importa.)
+    {
+      const { error: restoreErr } = await admin
+        .from('establishments')
+        .update({ deleted_at: null })
+        .eq('id', estG);
+      assert.equal(restoreErr, null, restoreErr && restoreErr.message);
+      const { error: reactErr } = await admin
+        .from('user_roles')
+        .update({ active: true, deactivated_at: null })
+        .eq('user_id', userH.id)
+        .eq('establishment_id', estG);
+      assert.equal(
+        reactErr,
+        null,
+        reactErr && `reactivar DESPUÉS del restore (campo vivo) no debería fallar: ${reactErr.message}`,
+      );
+    }
+  });
+});
+
+// -------------------------------------------------------------------
+// spec 15-powersync — PASO 2 / (c2): denormalización de `name` sobre `user_roles.member_name` (migración 0080).
+//
+// POR QUÉ (decisión c2 de Raf, ADR-026 §C): `users` es global (un user en >1 campo) → NO se sincroniza en el
+// modelo JOIN-free. Para tener los nombres de coworkers (y el propio) offline, se denormaliza `users.name` sobre
+// `user_roles.member_name`, que ya viaja por los streams self_user_roles / est_members_roles. La columna se
+// mantiene fiel por (1) un trigger force en el INSERT del rol (anti-spoof) y (2) un trigger de propagación al
+// editar `users.name`. PII (email/phone) NO se toca (sigue en user_private self-only).
+//
+// ⚠️ REQUIERE la migración 0080 APLICADA al remoto (la aplica el leader por Management API tras gatear el SQL).
+// Hasta entonces FALLA — es ESPERADO: la columna `member_name` aún no existe en user_roles, así que el
+// INSERT/SELECT que la referencia da error de columna inexistente. El implementer NO aplica la migración.
+// -------------------------------------------------------------------
+test('spec 15-powersync paso 2 (0080 / c2): user_roles.member_name denormalizado desde users.name', async (t) => {
+  // -- (1) FORCE en el INSERT del rol: member_name se deriva de users.name, ignorando el payload (anti-spoof). --
+  await t.test('(c2 force) member_name se FUERZA desde users.name en el INSERT del rol (ignora el payload spoofeado)', async () => {
+    const userM = await createTestUser('s15p2_M'); // su user_metadata.name = 'Test s15p2_M' → users.name
+    const clientM = await getUserClient(userM.email);
+    // El owner crea su campo (el trigger 0011 deja a userM owner activo → ya hay una fila user_roles para userM).
+    const estM = await createEstablishmentAs(clientM, `${RUN_TAG} estM 0080`);
+
+    // El nombre real del user (fuente de verdad) lo leemos de users (service_role).
+    const { data: u } = await admin.from('users').select('name').eq('id', userM.id).single();
+    assert.ok(u && u.name, 'el user M debería tener un name');
+
+    // (a) La fila owner creada por el trigger 0011 ya quedó con member_name = users.name.
+    {
+      const { data: r } = await admin
+        .from('user_roles')
+        .select('member_name')
+        .eq('user_id', userM.id)
+        .eq('establishment_id', estM)
+        .single();
+      assert.equal(r.member_name, u.name, 'el member_name del rol owner = users.name (force en el INSERT del trigger 0011)');
+    }
+
+    // (b) Un INSERT de rol NUEVO con un member_name SPOOFEADO en el payload → el trigger force lo pisa con
+    //     users.name del user_id. Usamos otro user (userN) para no chocar el unique-active de userM.
+    const userN = await createTestUser('s15p2_N');
+    const { data: un } = await admin.from('users').select('name').eq('id', userN.id).single();
+    {
+      const { error } = await admin
+        .from('user_roles')
+        .insert({
+          user_id: userN.id,
+          establishment_id: estM,
+          role: 'field_operator',
+          active: true,
+          member_name: 'NOMBRE SPOOFEADO QUE NO DEBE QUEDAR', // <- spoof; el trigger debe pisarlo
+        });
+      assert.equal(error, null, error && `insert del rol no debería fallar: ${error.message}`);
+    }
+    {
+      const { data: r } = await admin
+        .from('user_roles')
+        .select('member_name')
+        .eq('user_id', userN.id)
+        .eq('establishment_id', estM)
+        .single();
+      assert.equal(r.member_name, un.name, 'member_name forzado desde users.name (no el spoofeado)');
+      assert.notEqual(r.member_name, 'NOMBRE SPOOFEADO QUE NO DEBE QUEDAR', 'el member_name spoofeado NO debe persistir');
+    }
+
+    // (c) ANTI-SPOOF POR UPDATE (force BEFORE UPDATE OF member_name): pisar member_name por UPDATE directo →
+    //     el trigger lo re-deriva desde users.name. Cierra el vector de "renombrar" a un coworker offline.
+    {
+      const { error } = await admin
+        .from('user_roles')
+        .update({ member_name: 'RENOMBRE FALSO POR UPDATE' })
+        .eq('user_id', userN.id)
+        .eq('establishment_id', estM);
+      assert.equal(error, null, error && `el UPDATE no debería fallar: ${error.message}`);
+      const { data: r } = await admin
+        .from('user_roles')
+        .select('member_name')
+        .eq('user_id', userN.id)
+        .eq('establishment_id', estM)
+        .single();
+      assert.equal(r.member_name, un.name, 'tras el UPDATE-spoof member_name sigue siendo el real (users.name)');
+    }
+  });
+
+  // -- (2) PROPAGACIÓN: al editar users.name, se propaga a TODAS las filas user_roles del user. --
+  await t.test('(c2 propagación) editar users.name propaga a user_roles.member_name de todos los campos del user', async () => {
+    const userP = await createTestUser('s15p2_P');
+    const clientP = await getUserClient(userP.email);
+    // userP es owner de DOS campos → tiene 2 filas user_roles, ambas deben actualizarse al cambiar su nombre.
+    const estP1 = await createEstablishmentAs(clientP, `${RUN_TAG} estP1 0080`);
+    const estP2 = await createEstablishmentAs(clientP, `${RUN_TAG} estP2 0080`);
+
+    const nuevoNombre = `Renombrado ${RUN_TAG}`;
+    const { error: updErr } = await admin.from('users').update({ name: nuevoNombre }).eq('id', userP.id);
+    assert.equal(updErr, null, updErr && updErr.message);
+
+    const { data: roles, error } = await admin
+      .from('user_roles')
+      .select('establishment_id, member_name')
+      .eq('user_id', userP.id)
+      .in('establishment_id', [estP1, estP2]);
+    assert.equal(error, null, error && error.message);
+    assert.equal(roles.length, 2, 'userP debería tener un rol en cada uno de sus 2 campos');
+    assert.ok(
+      roles.every((r) => r.member_name === nuevoNombre),
+      'el cambio de users.name se propagó a member_name de TODAS las filas user_roles del user',
+    );
   });
 });
 

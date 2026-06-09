@@ -62,6 +62,7 @@ import {
   useRodeo,
 } from '@/contexts';
 import { getPendingInvitationToken } from '@/services/pending-invitation';
+import { PowerSyncProvider } from '@/services/powersync/provider';
 
 SplashScreen.preventAutoHideAsync().catch(() => {
   /* noop: en web/algunos targets puede no estar disponible */
@@ -411,11 +412,17 @@ export default function RootLayout() {
         <TamaguiProvider config={config} defaultTheme="light">
           <StatusBar style="dark" />
           <AuthProvider>
-            {/* ProfileProvider (Fase 6): fuente única del saludo (name/phone de public.users,
-                email del session). Monta DENTRO de AuthProvider (lee user.id/email del
-                AuthContext) y ENVUELVE a EstablishmentProvider + RootGate para que home /
-                onboarding puedan consumir useProfile(). Sin sesión queda neutro (no fetcha). */}
-            <ProfileProvider>
+            {/* PowerSyncProvider (spec 15, T1.7): provee el DB local de PowerSync al árbol
+                (PowerSyncContext) y orquesta connect/disconnect según la sesión Supabase. Monta
+                DENTRO de AuthProvider (lee el AuthState para saber cuándo hay sesión válida) y
+                ENVUELVE a los providers de datos para que sus lecturas watchables puedan
+                suscribirse al DB local. Sin sesión válida no conecta (fetchCredentials → null). */}
+            <PowerSyncProvider>
+              {/* ProfileProvider (Fase 6): fuente única del saludo (name/phone de public.users,
+                  email del session). Monta DENTRO de AuthProvider (lee user.id/email del
+                  AuthContext) y ENVUELVE a EstablishmentProvider + RootGate para que home /
+                  onboarding puedan consumir useProfile(). Sin sesión queda neutro (no fetcha). */}
+              <ProfileProvider>
               {/* EstablishmentProvider monta siempre, pero se auto-inhabilita sin sesión
                   verificada (lee user_id del AuthContext; sin user queda en 'loading' y no
                   consulta). Así no remonta al pasar los gates de auth y el gating de
@@ -429,7 +436,8 @@ export default function RootLayout() {
                   <RootGate />
                 </RodeoProvider>
               </EstablishmentProvider>
-            </ProfileProvider>
+              </ProfileProvider>
+            </PowerSyncProvider>
           </AuthProvider>
         </TamaguiProvider>
       </SafeAreaProvider>

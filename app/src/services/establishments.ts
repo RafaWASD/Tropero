@@ -1,22 +1,45 @@
 // Capa de datos de establecimientos (spec 01, Fase 4 — T4.1 / T4.4).
 //
-// Queries DIRECTAS a Supabase con supabase-js (PowerSync es Fase 7, diferida — design.md
-// §PowerSync). RLS protege server-side (R7.1/R7.2): la policy `establishments_select` usa
-// has_role_in(id) y `user_roles_select` deja al user ver SUS roles. El cliente no mezcla
-// campos: solo trae los establishments donde el usuario tiene user_roles.active = true.
+// LECTURAS (spec 15, T3.2): desde el SQLite local de PowerSync (contexto sincronizado por las
+// streams est_establishments / est_members / self_user_private). `loadMemberships`,
+// `loadOwnProfile`, `loadFullProfile`, `loadEstablishmentDetail`, `countActiveMembers` leen local;
+// el scoping de tenant (has_role_in, self-only) ya lo aplicó la stream → NO se re-filtra. Los SQL
+// builders puros viven en powersync/local-reads.ts (testeables sin SDK).
+// MUTACIONES (crear/editar/soft-delete establecimiento, guardar perfil/teléfono): siguen ONLINE
+// contra Supabase (admin/owner, R7.1) — NO se tocan en T3. RLS protege server-side (R7.1/R7.2).
 //
 // Multi-tenant (CLAUDE.md ppio 6): NUNCA se hardcodea establishment_id. El set de campos
-// del usuario se deriva de auth.uid() vía RLS; el campo activo lo decide el contexto.
+// del usuario se deriva de auth.uid() vía la stream; el campo activo lo decide el contexto.
 
 import { supabase } from './supabase';
 import { mapMembershipRows, type RoleRow } from '../utils/establishment';
 import type { MembershipEstablishment } from '../utils/establishment';
+import {
+  buildMembershipsQuery,
+  buildOwnPhoneQuery,
+  buildOwnNameQuery,
+  buildOwnEmailPhoneQuery,
+  buildEstablishmentDetailQuery,
+  buildCountActiveMembersQuery,
+} from './powersync/local-reads';
+import { runLocalQuery, runLocalQuerySingle } from './powersync/local-query';
 
 export type { MembershipEstablishment } from '../utils/establishment';
 
 export type LoadMembershipsResult =
   | { ok: true; establishments: MembershipEstablishment[] }
   | { ok: false; error: { kind: 'network' | 'unknown'; message: string } };
+
+// Forma PLANA de la fila local (JOIN user_roles + establishments). Se re-arma a RoleRow para
+// reusar mapMembershipRows (dedup + filtro soft-delete).
+type MembershipFlatRow = {
+  role: RoleRow['role'];
+  id: string;
+  name: string;
+  province: string;
+  city: string | null;
+  deleted_at: string | null;
+};
 
 function classifyError(error: { message?: string; code?: string } | null): {
   kind: 'network' | 'unknown';
@@ -46,20 +69,23 @@ function classifyError(error: { message?: string; code?: string } | null): {
  * Filtra los soft-deleted (R8.3) en el mapeo. El contexto reordena por recencia (R6.6.1).
  */
 export async function loadMemberships(userId: string): Promise<LoadMembershipsResult> {
-  // Join user_roles → establishments. PostgREST resuelve la FK por el nombre de la tabla.
-  const { data, error } = await supabase
-    .from('user_roles')
-    .select(
-      'role, establishment:establishments ( id, name, province, city, deleted_at )',
-    )
-    .eq('active', true)
-    .eq('user_id', userId);
+  // Desde el SQLite local (T3.2): JOIN user_roles → establishments (el join `!inner` de PostgREST
+  // se reescribe como JOIN SQLite en buildMembershipsQuery). El filtro `ur.user_id = ?` es CRÍTICO
+  // (la stream est_members trae roles de coworkers para el owner; sin él un owner duplicaría campos).
+  const r = await runLocalQuery<MembershipFlatRow>(buildMembershipsQuery(userId));
+  if (!r.ok) return { ok: false, error: r.error };
 
-  if (error) {
-    return { ok: false, error: classifyError(error) };
-  }
-
-  const rows = (data ?? []) as unknown as RoleRow[];
+  // Re-armamos la forma anidada `RoleRow` que espera mapMembershipRows (dedup + soft-delete safety net).
+  const rows: RoleRow[] = r.value.map((row) => ({
+    role: row.role,
+    establishment: {
+      id: row.id,
+      name: row.name,
+      province: row.province,
+      city: row.city ?? null,
+      deleted_at: row.deleted_at ?? null,
+    },
+  }));
   return { ok: true, establishments: mapMembershipRows(rows) };
 }
 
@@ -154,16 +180,12 @@ export type LoadProfileResult =
  * `public.user_private` (spec 14, R6.4). RLS `user_private_select_self` (0068) acota a la fila propia.
  */
 export async function loadOwnProfile(userId: string): Promise<LoadProfileResult> {
-  const { data, error } = await supabase
-    .from('user_private')
-    .select('phone')
-    .eq('user_id', userId)
-    .maybeSingle();
-
-  if (error) {
-    return { ok: false, error: classifyError(error) };
-  }
-  return { ok: true, profile: { phone: data?.phone ?? null } };
+  // Desde el SQLite local (T3.2): user_private es self-only en la stream → la única fila es la propia.
+  // emptyIsSyncing:false → fila ausente = phone null (resultado legítimo, igual que maybeSingle), no
+  // se degrada a "sincronizando" (el gate de teléfono no debe trabarse si el user no cargó teléfono).
+  const r = await runLocalQuerySingle<{ phone: string | null }>(buildOwnPhoneQuery(userId));
+  if (!r.ok) return { ok: false, error: r.error };
+  return { ok: true, profile: { phone: r.value?.phone ?? null } };
 }
 
 export type SaveResult =
@@ -205,37 +227,34 @@ export type LoadFullProfileResult =
  * leyéndolo de `user_private` (la copia consultable). El email canónico fresco lo da el session.
  */
 export async function loadFullProfile(userId: string): Promise<LoadFullProfileResult> {
-  const { data, error } = await supabase
-    .from('users')
-    .select('name')
-    .eq('id', userId)
-    .maybeSingle();
-
-  if (error) {
-    return { ok: false, error: classifyError(error) };
-  }
-  if (!data) {
-    // La fila de perfil debería existir (la crea el trigger on_auth_user_created). Si falta,
-    // reportamos unknown en vez de fabricar datos.
+  // name desde users (self) en el SQLite local (T3.2). emptyIsSyncing:true → si la fila no está y aún
+  // no sincronizó, degrada "sincronizando"; post-sync ausente → "no se encontró el perfil".
+  const nameRes = await runLocalQuerySingle<{ name: string | null }>(buildOwnNameQuery(userId), {
+    emptyIsSyncing: true,
+  });
+  if (!nameRes.ok) return { ok: false, error: nameRes.error };
+  if (!nameRes.value) {
+    // La fila de perfil debería existir (la crea el trigger on_auth_user_created). Si falta
+    // tras sincronizar, reportamos unknown en vez de fabricar datos.
     return {
       ok: false,
       error: { kind: 'unknown', message: 'No se encontró el perfil del usuario.' },
     };
   }
 
-  const { data: priv, error: privError } = await supabase
-    .from('user_private')
-    .select('email, phone')
-    .eq('user_id', userId)
-    .maybeSingle();
-
-  if (privError) {
-    return { ok: false, error: classifyError(privError) };
-  }
+  // email + phone desde user_private (self). Ausente = vacío/null (resultado legítimo), no degrada.
+  const privRes = await runLocalQuerySingle<{ email: string | null; phone: string | null }>(
+    buildOwnEmailPhoneQuery(userId),
+  );
+  if (!privRes.ok) return { ok: false, error: privRes.error };
 
   return {
     ok: true,
-    profile: { name: data.name ?? '', email: priv?.email ?? '', phone: priv?.phone ?? null },
+    profile: {
+      name: nameRes.value.name ?? '',
+      email: privRes.value?.email ?? '',
+      phone: privRes.value?.phone ?? null,
+    },
   };
 }
 
@@ -303,22 +322,24 @@ export type LoadEstablishmentDetailResult =
 export async function loadEstablishmentDetail(
   establishmentId: string,
 ): Promise<LoadEstablishmentDetailResult> {
-  const { data, error } = await supabase
-    .from('establishments')
-    .select('id, name, province, city, total_hectares')
-    .eq('id', establishmentId)
-    .is('deleted_at', null)
-    .maybeSingle();
-
-  if (error) {
-    return { ok: false, error: classifyError(error) };
-  }
-  if (!data) {
+  // Desde el SQLite local (T3.2): el scoping (has_role_in) ya lo aplicó la stream → si la fila está
+  // local, el usuario tiene acceso. emptyIsSyncing:true → pre-sync ausente degrada "sincronizando";
+  // post-sync ausente → "no se encontró el campo" (sin acceso / soft-deleted).
+  const r = await runLocalQuerySingle<{
+    id: string;
+    name: string;
+    province: string;
+    city: string | null;
+    total_hectares: number | null;
+  }>(buildEstablishmentDetailQuery(establishmentId), { emptyIsSyncing: true });
+  if (!r.ok) return { ok: false, error: r.error };
+  if (!r.value) {
     return {
       ok: false,
       error: { kind: 'unknown', message: 'No se encontró el campo. Puede que ya no tengas acceso.' },
     };
   }
+  const data = r.value;
   return {
     ok: true,
     establishment: {
@@ -433,15 +454,12 @@ export async function countActiveMembers(
   establishmentId: string,
   ownerId: string,
 ): Promise<CountMembersResult> {
-  const { count, error } = await supabase
-    .from('user_roles')
-    .select('id', { count: 'exact', head: true })
-    .eq('establishment_id', establishmentId)
-    .eq('active', true)
-    .neq('user_id', ownerId);
-
-  if (error) {
-    return { ok: false, error: classifyError(error) };
-  }
-  return { ok: true, count: count ?? 0 };
+  // Desde el SQLite local (T3.2): la stream est_members trae la matriz de roles del campo al owner
+  // → el COUNT local sobre user_roles del campo (activos, ≠ owner) refleja cuántos OTROS perderán
+  // acceso. COUNT(*) devuelve siempre 1 fila → emptyIsSyncing no aplica (no degrada).
+  const r = await runLocalQuery<{ count: number }>(
+    buildCountActiveMembersQuery(establishmentId, ownerId),
+  );
+  if (!r.ok) return { ok: false, error: r.error };
+  return { ok: true, count: r.value[0]?.count ?? 0 };
 }

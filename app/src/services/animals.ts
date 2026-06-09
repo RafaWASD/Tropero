@@ -20,6 +20,8 @@ import {
   type ExitReasonChoice,
   type ExitStatus,
 } from './exit-animal';
+import { buildSystemCategoriesQuery } from './powersync/local-reads';
+import { runLocalQuery } from './powersync/local-query';
 
 // ─── Error / Result uniforme (mismo shape que rodeo-config.ts / establishments.ts) ──
 
@@ -384,8 +386,8 @@ type CategoryRow = { code: string; name: string };
 
 /**
  * Lee las categorías ACTIVAS del catálogo de un sistema productivo (categories_by_system del
- * `systemId` del rodeo elegido) — el picker CERRADO de la alta guiada (paso 3). SELECT abierto a
- * authenticated (catálogo global, mismo patrón que field_definitions). Multi-tenant (CLAUDE.md
+ * `systemId` del rodeo elegido) — el picker CERRADO de la alta guiada (paso 3). Desde el SQLite
+ * local (T3.1/R5.4; catálogo global sincronizado por catalog_categories). Multi-tenant (CLAUDE.md
  * ppio 6): NUNCA se hardcodea el systemId ni los codes — salen del sistema del rodeo activo.
  *
  * No filtra por sexo (la tabla no tiene columna de sexo): el filtrado por sexo lo hace el cliente
@@ -395,16 +397,9 @@ type CategoryRow = { code: string; name: string };
 export async function fetchSystemCategories(
   systemId: string,
 ): Promise<ServiceResult<SystemCategory[]>> {
-  const { data, error } = await supabase
-    .from('categories_by_system')
-    .select('code, name')
-    .eq('system_id', systemId)
-    .eq('active', true)
-    .order('sort_order', { ascending: true });
-
-  if (error) return { ok: false, error: classifyError(error) };
-  const rows = (data ?? []) as CategoryRow[];
-  return { ok: true, value: rows.map((r) => ({ code: r.code, name: r.name })) };
+  const r = await runLocalQuery<CategoryRow>(buildSystemCategoriesQuery(systemId));
+  if (!r.ok) return { ok: false, error: r.error };
+  return { ok: true, value: r.value.map((row) => ({ code: row.code, name: row.name })) };
 }
 
 // ─── Motor find-or-create — puerta MANUAL (R3) ───────────────────────────────────────
