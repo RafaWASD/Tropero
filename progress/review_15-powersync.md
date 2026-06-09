@@ -180,3 +180,225 @@ Ninguno. APPROVED para cerrar Run 2.
 ### Pendiente para el leader (NO bloquea el cierre del run)
 - Aplicar 0075 al remoto por Management API (gateado). Tras aplicar, los 3 tests de spec 15-powersync deben pasar y la
   suite backend completa debe quedar verde (T7.5).
+
+---
+
+# Review - 15-powersync - T5 + T6 (escritura offline: CRUD plano + outbox/overlay/RPC-mapping)
+
+> Reviewer (puerta de codigo). Alcance: Run 8 (T5.1/T5.2/T5.3) + Run T6 (T6.1, T6.2a-f, T6.5).
+> Verificado contra: tasks.md T5/T6, design 5.2/5.3/5.4, requirements R6.*, impl_15 Run 8 / Run T6.
+> Branch actual sin commitear. NO se edito codigo (solo lectura + check.mjs).
+
+## Veredicto: CHANGES_REQUESTED
+
+T5 y T6 estan implementados con calidad alta y el grueso del run cumple la spec: firmas publicas intactas,
+split-insert/count eliminados, outbox op_intents (insertOnly) + overlay pending_* (localOnly) en UNA
+writeTransaction, mapeo intent->RPC con p_client_op_id solo a register_birth, create_animal -> 2 upserts
+idempotentes, UNION synced+overlay en todas las lecturas afectadas, ACK/rollback/idempotent_discard
+clasificados, import_rodeo_bulk online, idempotencia at-least-once cubierta. check.mjs VERDE.
+
+El bloqueo es UNO solo: un drift spec<->codigo sin reconciliar (regla dura). createRodeo quedo ONLINE y
+T3.3 prometio explicitamente swapearlo en T5/T6; T5/T6 no lo hizo NI lo reconcilio como diferido. Es CRUD
+plano R6.1/R6.3/R6.4-elegible (mismo class que crear/renombrar lote, que T5 SI swapeo) y rompe offline-first
+para crear rodeo en campo. No es bug de seguridad/integridad, es spec vieja tras el run, que la regla dura
+obliga a reconciliar antes de cerrar.
+
+## Trazabilidad R<n> -> test (T5/T6)
+
+| R<n> | Que verifica | Test concreto | Estado |
+|---|---|---|---|
+| R6.1 (CRUD plano local + upload, offline) | INSERT/UPDATE local de 6 add* + 3 de lote | local-reads.test.ts :: buildAdd{Weight,ConditionScore,Tacto,Service,Abortion,Observation}Insert + build{Create,Rename,Assign}* | OK |
+| R6.3 (eliminar split-insert/count) | sin .select()/count exact en codigo activo | local-reads.test.ts :: buildRename (sin count), buildCreate (un INSERT) + grep 0 en codigo | OK |
+| R6.4 (id de cliente) | el id va 1ro en args | local-reads.test.ts :: cada build*Insert asserta id primero; randomUuid() | OK |
+| R6.5/R6.6 (clasif b RPC-bound; import online) | import_rodeo_bulk NO se encola | import-rodeo.ts intacto + kind network sin red | OK |
+| R6.8 (outbox op_intents insertOnly) | genera CrudEntry, no replica fila plana | schema.test.ts :: R6.8 outbox op_intents insertOnly | OK |
+| R6.9 (drenado intent->RPC) | mapeo + clasificacion | upload.test.ts :: mapIntentToRpc (4) + transient/permanent (3) | OK |
+| R6.10 (idempotencia no doble-apply) | register_birth client_op_id; soft_delete P0002; create_animal ON CONFLICT | upload.test.ts :: 23505 uq -> idempotent_discard, P0002 + backend animal/run.cjs spec 15 casos 1/2/3 | OK |
+| R6.11 (overlay local-only + UNION + rollback) | localOnly; UNION; clear/rollback por client_op_id | schema.test.ts :: pending_* localOnly + GUARD overlay; local-reads.test.ts :: UNION en list/count/search/detail/timeline/mother + clearOverlay + PENDING_OVERLAY_TABLES | OK |
+| R6.12 (no doble-upload) | overlay localOnly (0 CrudEntry) -> 1 CrudEntry por op (b) | schema.test.ts :: localOnly de pending_*; garantia arquitectonica (E2E = T7.5/T7.9) | OK (arq; E2E->T7) |
+| R11.1 (firmas publicas intactas) | exports sin cambio nombre/params/retorno | diff HEAD vs working: addWeight/.../createAnimal/registerBirth/exitAnimalProfile/softDelete* identicas; typecheck verde | OK |
+
+> El cierre E2E in-vivo (1 CrudEntry server-side / no-doble-upload / rollback contra SQLite+PowerSync REAL)
+> esta correctamente diferido a T7.5/T7.9 (NO marcado como hecho). En T5/T6 quedo la garantia arquitectonica + unit puros.
+
+## Tasks completas: SI (con 1 drift no reconciliado)
+
+- T5.1 [x], T5.2 [x], T5.3 [~] (N/A justificado: sin service de sessions/maneuver_presets, spec 03 diferida).
+- T6.1 [x], T6.2a-f [x], T6.4 [x] (0075 aplicado: tests spec 15 register_birth VERDES), T6.5 [x], T6.6 [x] (0076 aplicado: verdes).
+- Ninguna task de T5/T6 quedo [ ] sin justificacion.
+- PERO: T3.3 (Run 3) prometio swapear createRodeo en T5/T6; no se cumplio ni se reconcilio.
+
+## Exactitud de specs (codigo -> spec): reconciliaciones al as-built
+
+Verificadas EN design.md (no solo en el impl log), landed via diff:
+- create_animal sin RPC -> 2 upserts idempotentes: design 5.4.2 RECONCILIADO. OK.
+- softDeleteRodeo: UPDATE directo -> RPC soft_delete_rodeo: design 1.2 + 5.3.1 RECONCILIADO. OK.
+- exitAnimalProfile vive en animals.ts: design 1.2 RECONCILIADO. OK.
+- overlay pending_animal_profiles shape completo + pending_reproductive_events created_at: design 5.3.3. OK.
+- errores de dominio ya no se surfacing del return -> uploadData al subir: design 5.3.3. OK (UX elevada al leader).
+
+DRIFT NO RECONCILIADO (bloqueante): design 1.2 (rodeos.ts -> create/update local CRUD plano R6.1) contradice
+el as-built (createRodeo sigue ONLINE en rodeos.ts:206-252: insert online + before/after via fetchRodeosOnline,
+sin id de cliente ni outbox). tasks.md T3.3 dice que T5/T6 lo swaparia; T5/T6 no lo hizo ni anoto por que.
+
+## CHECKPOINTS
+
+No existe CHECKPOINTS.md en la raiz (verificado). El gating vive en tasks.md (Gate 1 spec, Puerta 1 humana) y
+feature_list.json. N/A para este review.
+
+## Checklist RAFAQ-especifico
+
+- A. Multi-tenancy / RLS: N/A para el codigo de T5/T6 (no se crean tablas/policies; escope 100% cliente services/).
+  El aislamiento cross-tenant de las escrituras lo valida el server al SUBIR (RLS + triggers force 0077, re-validado
+  en uploadData) + backend tests (spec 15 cross-tenant register_birth caso 2, VERDE). El wire son las streams (Gate 1).
+- B. Offline-first:
+  - [x] Funciona offline: 6 add* + 3 de lote local (runLocalWrite); las 4 b RPC-bound encolan intent + overlay (UNION).
+        createAnimal/registerBirth resuelven category/species/contexto-madre DESDE LOCAL.
+  - [ ] createRodeo NO funciona offline (sigue online): el drift bloqueante.
+  - [x] Sync bucket scoping: N/A en T5/T6 (streams ya scopean por establishment_id activo; no se tocan).
+  - [x] Resolucion de conflictos: LWW PowerSync (editables) + append-only (eventos, R12.2); b RPC-bound con
+        idempotencia explicita/natural documentada (5.4.3). Justificada.
+  - [x] No requests sincronos desde la pantalla: todo via services; campo toca SQLite local. EXCEPCION: createRodeo (drift).
+- C. BLE: N/A.  D. UI de campo: N/A (capa services; R11.1 confirma sin tocar pantallas).  E. Edge Functions: N/A (R7.1/T6.3).
+
+## Scope (nada fuera de T5/T6)
+
+VERIFICADO via git status + diff: NO se toco sync-streams/rafaq.yaml, supabase/migrations/, supabase/. Cambios en
+app/src/services/{animals,events,management-groups,rodeos}.ts + services/powersync/* + specs/progress. import-rodeo.ts
+intacto (T6.1). AppSchema de streams paso 2 sin tocar. T6.3 (identidad/admin online) sin tocar. OK.
+
+## Cambios requeridos
+
+1. [BLOQUEANTE - drift spec<->codigo, regla dura] createRodeo quedo ONLINE sin reconciliar.
+   - Codigo: app/src/services/rodeos.ts:206-252 - insert online + before/after via fetchRodeosOnline, sin id de cliente ni outbox.
+   - Spec que lo promete: specs/active/15-powersync/tasks.md:29 (T3.3) - createRodeo/softDeleteRodeo siguen ONLINE (T5/T6).
+   - Spec que quedo mintiendo: specs/active/15-powersync/design.md:49 (1.2) - rodeos.ts -> create/update local (CRUD plano, R6.1).
+   - Es CRUD plano single-tabla (INSERT en rodeos), mismo class que createManagementGroup que T5 SI swapeo. Rompe offline-first (R6.1).
+   - Resolucion (una de dos):
+     (a) swapear createRodeo a escritura local (id de cliente + runLocalWrite + eliminar before/after online), o
+     (b) decidir que queda ONLINE deliberadamente y documentarlo en design 1.2 + impl_15 Run T6 + ajustar tasks.md T3.3.
+   - El implementer reconcilia (no lo arregla el reviewer).
+
+## Pendiente para el leader (NO bloquea una vez cerrado el drift)
+
+- Decision de producto (design 5.3.3): UX offline de duplicados (sin feedback inmediato de caravana/IDV/tag duplicada;
+  se ve al sincronizar). El implementer propone evaluar check de unicidad LOCAL best-effort pre-encolado. No bloquea el codigo.
+- T7.5/T7.9 (E2E in-vivo no-doble-upload + rollback contra SQLite/PowerSync REAL) correctamente diferidos a T7.
+
+
+============================================================
+
+Review 15-powersync . Run T9.8 (createRodeo OFFLINE - RPC create_rodeo 0081 + outbox/overlay, un-defer)
+
+Reviewer (puerta de codigo). Alcance: el un-defer de createRodeo (que quedo ONLINE y motivo el
+CHANGES_REQUESTED del review T5/T6) a OFFLINE via RPC create_rodeo (0081) + outbox + overlay optimista.
+Verificado contra: tasks.md T9.8/T3.3, design seccion 1.2 (un-defer reconciliado), docs/backlog.md (entrada
+RESUELTA), impl_15 Run T9.8. Branch sin commitear (sobre 32630a0). NO se edito codigo. baseline: HEAD = 32630a0.
+
+## Veredicto: APPROVED
+
+El un-defer cierra el ULTIMO write que faltaba offline y resuelve EXACTAMENTE el bloqueo del review T5/T6
+(createRodeo ONLINE = drift spec-codigo). Firma publica intacta (R11.1); patron outbox/overlay correcto (1
+op_intent insertOnly + 2 overlay localOnly en 1 writeTransaction; UNION en las 2 lecturas; ACK limpia overlay /
+permanente rollbackea, cubren AMBAS overlay via PENDING_OVERLAY_TABLES=7); plantilla optimista EQUIVALENTE a la
+server-side; sin doble-upload (overlay localOnly = 0 CrudEntry, schema.test); scope aditivo (1 RPC + swap
+cliente); specs reconciliadas. RPC idempotente natural (ON CONFLICT DO NOTHING del id + UPSERT de toggles),
+owner-only (is_owner_of, espeja rodeos_insert), guard anti-IDOR. Los 4 tests de la RPC FALLAN hoy SOLO porque
+0081 no esta aplicada al remoto (PGRST202) - ESPERADO y documentado (regimen 0075-0080: la aplica el leader tras
+gatear). NO motiva rechazo (precedente Run 2, este mismo archivo).
+
+## Trazabilidad R(n) a test (T9.8)
+
+- R5.1  rodeo alta-optimista en la lista local . local-reads.test.ts buildRodeosQuery (UNION pending_rodeos) +
+        buildSystemByCodeQuery . OK
+- R6.4  id de cliente reusado por la RPC (ON CONFLICT) . run.cjs create_rodeo caso 1 (ret==rodeoId) + caso 2
+        (replay = mismo id) . OK (rojo hoy = 0081, ESPERADO)
+- R6.10 idempotencia no doble-apply (replay = no-op total) . run.cjs caso 2 (1 rodeo, 26 filas no 52) +
+        upload.test.ts create_rodeo NO idempotent_discard . OK (rojo hoy = 0081)
+- R6.11 overlay localOnly + UNION + clear/rollback de las 2 . schema.test.ts pending_* localOnly (7) + GUARD
+        overlay; local-reads.test.ts buildRodeoConfigQuery UNION + buildPendingRodeoInsert +
+        buildClearOverlayDelete + PENDING_OVERLAY_TABLES 7 . OK
+- R6.12 no doble-upload (overlay 0 CrudEntry, 1 op_intent) . schema.test.ts pending_rodeos/config localOnly;
+        upload.test.ts mapIntentToRpc create_rodeo a 1 rpc . OK (arquitectonico; E2E T7.9)
+- R11.1 firma publica intacta (ServiceResult Rodeo) . typecheck verde + rodeos.ts 176-261; wizard no se toca . OK
+- R11.3/R11.4 delta backend aditivo, gateado . 0081 = CREATE FUNCTION + grants + notify . OK
+- anti-IDOR p_id colisionado con rodeo ajeno a 42501, plantilla ajena intacta . run.cjs caso 4 . OK (rojo hoy=0081)
+- authz owner-only no-owner a 42501, nada creado . run.cjs caso 3 . OK (rojo hoy = 0081)
+
+Ningun R(n) del alcance queda sin test.
+
+## Equivalencia plantilla optimista vs RPC (checklist 3) - VERIFICADA
+
+- Server: trigger tg_rodeos_seed_data_config (0018) seedea 1 fila por system_default_field con
+  enabled=default_enabled (26 en cria); la RPC UPSERTea el diff (UPDATE de defaults cambiados + INSERT de
+  no-defaults habilitados).
+- Optimista: buildEffectiveConfigRows = buildWizardToggles (1 fila por system_default_field con estado FINAL del
+  usuario) + 1 fila por cada insert del diff. Mismo set de filas, mismo enabled final por field. COINCIDEN, sin
+  drift visual.
+- Edge case OK: si fetchSystemDefaults no sincronizo, configRows vacio y pToggles vacio (rodeos.ts 218-230); se
+  encola sin plantilla optimista (la real baja por la stream; la lista igual aparece). Degradacion documentada.
+
+## Tasks completas: SI
+
+- T9.8 [x]: RPC 0081 + schema (2 overlay) + outbox (enqueueCreateRodeo) + upload (create_rodeo en RPC_OP_TYPES) +
+  rodeos.ts (createRodeo offline, fetchRodeosOnline eliminado) + local-reads (UNION 2 queries + builders) +
+  rodeo-template (buildEffectiveConfigRows puro) + tests.
+- T3.3 [x]: reconciliado (createRodeo offline HECHO en T9.8; fetchRodeosOnline eliminado).
+- Ninguna task [ ] sin justificacion. El unico rojo = 0081-no-aplicada (la aplica el leader), marcado ESPERADO en
+  el SQL, el test, tasks.md y el impl log - patron identico a 0075-0080.
+
+## Exactitud de specs (codigo a spec): reconciliado, sin drift
+
+- design 1.2 (rodeos.ts): RECONCILIADO. Describe createRodeo OFFLINE via RPC 0081 + outbox/overlay, con motivo
+  (plantilla por trigger + PK compuesta read-only-local) e idempotencia natural. Ya NO dice create/update local
+  CRUD plano (la linea que mentia en el review T5/T6).
+- tasks.md T9.8 + T3.3: byte-fiel al codigo.
+- docs/backlog.md: entrada createRodeo marcada RESUELTA (2026-06-09, Run T9.8) con la opcion (b) implementada.
+- impl_15 Run T9.8: subtareas [x], autorrevision (anti-IDOR), rojo esperado = 0081 no aplicada documentado.
+- MINOR (no bloqueante): la enumeracion en prosa de la whitelist de op_types en design 5.4.2 (nota Run T6) NO
+  incluye create_rodeo. Texto ilustrativo, no contrato (el contrato vive en upload.ts RPC_OP_TYPES + design 1.2 +
+  tasks T9.8). Sugerencia: sumarlo la proxima vez que se toque 5.4.2.
+
+## CHECKPOINTS (alcance T9.8)
+
+- C1 harness: [x] check.mjs ROJO SOLO por los 4 tests create_rodeo (0081 no aplicada) - ESPERADO (regimen
+  0075-0080). Resto VERDE (typecheck, 745 client units, RLS, Edge, spec 02/13/15-delta/paso2).
+- C2 estado coherente: [x] feature 15 sigue in_progress (NO done).
+- C3 arquitectura: [x] swap en services/ + utils/rodeo-template (puro); 0081 aditiva (0081, disco 0080); sin debug
+  logs nuevos (el console.log de connector es prexistente T1, fuera de scope); SIN hardcode de establishment_id.
+- C4 verificacion real: [x] la RPC se testea contra estado real (26 filas, peso aplicado, anti-IDOR before/after);
+  buildEffectiveConfigRows 4 casos; UNION/overlay/clear con unit reales.
+- C6 SDD: [x] 3 archivos; tasks T9.8 [x]; cada R con al menos 1 test.
+- C7 multi-tenant: [x] owner-only (is_owner_of PRIMERO, espeja rodeos_insert) + guard anti-IDOR (caso 4); trigger
+  0078 fuerza establishment_id de la plantilla desde el rodeo.
+- C8 offline-first: [x] createRodeo funciona offline (intent + overlay, rodeo Y plantilla al instante via UNION);
+  idempotencia at-least-once; sin requests sincronos desde la pantalla.
+
+## Checklist RAFAQ-especifico
+
+- A. Multi-tenancy / RLS: APLICA. enable RLS N/A (no crea tablas; rodeos/rodeo_data_config ya con RLS 0017/0018).
+  policies N/A (0081 no toca). has_role_in/is_owner_of [x] (is_owner_of PRIMERO 0081 linea 53, sin SQL duplicado).
+  aislamiento cross-tenant [x] (caso 4 anti-IDOR + caso 3 no-owner). deleted_at IS NULL [x] (guard 0081 linea 90).
+- B. Offline-first: funciona offline [x]; sync bucket N/A en cliente (deploy = T9.3); conflictos = idempotencia
+  natural (ON CONFLICT + UPSERT) [x]; sin requests sincronos desde pantalla [x].
+- C. BLE: N/A.  D. UI de campo: N/A (services; R11.1 sin tocar wizard).  E. Edge Functions: N/A (RPC SQL, no Deno).
+
+## Scope (checklist 6)
+
+VERIFICADO: delta backend = 1 RPC (0081), aditiva, no toca RLS/policies/triggers/streams/otras migraciones. Swap
+cliente solo el camino de createRodeo. Los diffs grandes de animals/events/management-groups NO son scope T9.8:
+son el swap T4/T5/T6 prexistente NO commiteado (HEAD 32630a0 commiteo solo el backend paso 1+2; el animals.ts de
+HEAD sigue ONLINE/pre-swap, verificado) - ya revisado en el review T5/T6 de este archivo. Las columnas extra de
+schema.ts (created_by/nursing/is_castrated/heifer_fitness/client_op_id + GUARD) son el fix del bug T4
+no-such-column del mismo working tree, reconciliado en design 3 - fuera del alcance T9.8 pero documentado y correcto.
+
+## Cambios requeridos (T9.8)
+
+Ninguno. APPROVED.
+
+## Pendiente para el leader (NO bloquea el cierre del run)
+
+- Aplicar 0081_create_rodeo_rpc.sql al remoto por Management API (gateado por Gate 1 spec). Tras aplicar, los 4
+  tests create_rodeo deben pasar y la suite backend quedar verde (T7.5). Unico rojo hoy.
+- E2E in-vivo del alta de rodeo offline diferido a T7.9.
+- MINOR opcional: sumar create_rodeo a la enumeracion en prosa de la whitelist de op_types en design 5.4.2.

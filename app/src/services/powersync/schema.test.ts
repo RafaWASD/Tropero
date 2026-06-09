@@ -55,6 +55,9 @@ const PENDING_TABLES = [
   'pending_reproductive_events',
   'pending_birth_calves',
   'pending_status_overrides',
+  // Run T9.8 — overlay del alta de rodeo OFFLINE (intent create_rodeo).
+  'pending_rodeos',
+  'pending_rodeo_data_config',
 ];
 
 test('R2.1: AppSchema valida contra el SDK (no tira la validación de PowerSync)', () => {
@@ -168,4 +171,116 @@ test('users NO trae email/phone (PII movida a user_private, 0068 / ADR-025)', ()
 test('el schema total = 26 sincronizadas + op_intents + 5 overlay = 32 tablas', () => {
   const json = AppSchema.toJSON() as { tables: TableJson[] };
   assert.equal(json.tables.length, SYNCED_TABLES.length + 1 + PENDING_TABLES.length);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GUARD anti-recurrencia (T4 bug "no such column: ap.created_by", 2026-06-09).
+//
+// Los SQL builders de local-reads.ts (T3+T4) SELECTean columnas de las tablas sincronizadas.
+// Si el AppSchema NO declara una columna que un builder lee, PowerSync NO la materializa en el
+// SQLite local y la query revienta en vivo con "no such column". Los unit tests de local-reads
+// testean el STRING SQL, no corren contra el SQLite real → no cazan el gap. Este guard cierra
+// el hueco: por cada tabla, verifica que el AppSchema declara TODA columna que los builders leen.
+//
+// `id` se EXCLUYE: es la PK implícita que el SDK agrega (no se declara, pero siempre es queryable).
+// El mapa es MANUAL (derivado de local-reads.ts): cada columna está atribuida a su tabla DUEÑA,
+// resolviendo los alias de JOIN (ap=animal_profiles, r=rodeos, c/m por contexto, etc.). Si se
+// agrega un builder que lee una columna nueva, sumarla acá → el guard exige declararla en schema.ts.
+const COLUMNS_READ_BY_BUILDERS: Record<string, string[]> = {
+  // catálogos globales
+  field_definitions: ['data_key', 'label', 'description', 'category', 'data_type', 'ui_component', 'active'],
+  system_default_fields: ['field_definition_id', 'default_enabled', 'required_for_system', 'sort_order', 'system_id'],
+  rodeo_data_config: ['field_definition_id', 'enabled', 'rodeo_id'],
+  categories_by_system: ['code', 'name', 'system_id', 'active', 'sort_order'],
+  species: ['code', 'active'],
+  systems_by_species: ['species_id', 'code', 'name', 'active'],
+  // contexto de establecimiento / miembros
+  rodeos: ['establishment_id', 'name', 'species_id', 'system_id', 'active', 'deleted_at', 'created_at'],
+  user_roles: ['role', 'user_id', 'establishment_id', 'active', 'member_name'],
+  user_private: ['phone', 'email', 'user_id'],
+  establishments: ['name', 'province', 'city', 'deleted_at', 'total_hectares'],
+  invitations: ['role', 'email', 'created_at', 'expires_at', 'token', 'establishment_id', 'status'],
+  management_groups: ['name', 'establishment_id', 'active', 'deleted_at'],
+  // camino de datos
+  animal_profiles: [
+    'animal_id', 'establishment_id', 'idv', 'visual_id_alt', 'category_id', 'category_override',
+    'breed', 'coat_color', 'entry_date', 'entry_weight', 'status', 'created_by', 'exit_date',
+    'exit_reason', 'rodeo_id', 'management_group_id', 'animal_tag_electronic', 'animal_sex',
+    'animal_birth_date', 'deleted_at', 'created_at',
+  ],
+  // timeline (7 orígenes)
+  weight_events: ['weight_kg', 'source', 'notes', 'weight_date', 'created_at', 'animal_profile_id', 'deleted_at'],
+  reproductive_events: [
+    'event_type', 'pregnancy_status', 'calf_id', 'notes', 'event_date', 'created_at',
+    'animal_profile_id', 'deleted_at', 'service_type',
+  ],
+  sanitary_events: ['event_type', 'product_name', 'route', 'notes', 'event_date', 'created_at', 'animal_profile_id', 'deleted_at'],
+  condition_score_events: ['score', 'notes', 'event_date', 'created_at', 'animal_profile_id', 'deleted_at'],
+  lab_samples: [
+    'sample_type', 'tube_number', 'result', 'result_received_date', 'collection_date',
+    'created_at', 'animal_profile_id', 'deleted_at',
+  ],
+  animal_category_history: ['from_category_id', 'to_category_id', 'changed_at', 'reason', 'animal_profile_id'],
+  animal_events: [
+    'event_type', 'text', 'structured_payload', 'author_id', 'edit_window_until',
+    'created_at', 'animal_profile_id', 'deleted_at',
+  ],
+  birth_calves: ['birth_event_id', 'calf_profile_id'],
+};
+
+test('GUARD: el AppSchema declara TODA columna que los builders de local-reads.ts (T3+T4) leen', () => {
+  const tables = tablesByName();
+  for (const [tableName, neededCols] of Object.entries(COLUMNS_READ_BY_BUILDERS)) {
+    const t = tables.get(tableName);
+    assert.ok(t, `falta la tabla sincronizada ${tableName}`);
+    const declared = new Set(t.columns.map((c) => c.name));
+    for (const col of neededCols) {
+      if (col === 'id') continue; // PK implícita: el SDK la agrega, no se declara.
+      assert.ok(
+        declared.has(col),
+        `AppSchema.${tableName} NO declara '${col}', pero un builder de local-reads.ts lo SELECTea ` +
+          `→ PowerSync no lo materializa → "no such column" en vivo. Agregalo en schema.ts.`,
+      );
+    }
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GUARD del OVERLAY (T6): las lecturas UNIONan synced + pending_* (R6.11). Si el overlay no declara
+// una columna que el UNION lee, el SQLite local revienta con "no such column" en vivo (los unit tests
+// de local-reads solo ven el STRING SQL, no corren contra SQLite). Este guard lo caza.
+const OVERLAY_COLUMNS_READ_BY_BUILDERS: Record<string, string[]> = {
+  // lista/detalle/count UNIONan pending_animal_profiles (espejo de animal_profiles + identidad b1).
+  pending_animal_profiles: [
+    'client_op_id', 'animal_id', 'establishment_id', 'rodeo_id', 'management_group_id', 'idv',
+    'visual_id_alt', 'category_id', 'category_override', 'breed', 'coat_color', 'entry_date',
+    'entry_weight', 'status', 'created_by', 'exit_date', 'exit_reason', 'animal_tag_electronic',
+    'animal_sex', 'animal_birth_date', 'created_at',
+  ],
+  // timeline (parto optimista) + mother UNIONan pending_reproductive_events.
+  pending_reproductive_events: ['client_op_id', 'animal_profile_id', 'event_type', 'event_date', 'notes'],
+  // mother UNIONa pending_birth_calves (join por client_op_id a pending_reproductive_events).
+  pending_birth_calves: ['client_op_id', 'calf_profile_id'],
+  // la ocultación de exits/soft-deletes lee pending_status_overrides en TODAS las lecturas afectadas.
+  pending_status_overrides: ['client_op_id', 'target_table', 'target_id', 'effect', 'status'],
+  // Run T9.8 — buildRodeosQuery UNIONa pending_rodeos; buildRodeoConfigQuery UNIONa pending_rodeo_data_config.
+  pending_rodeos: ['client_op_id', 'establishment_id', 'name', 'species_id', 'system_id', 'active', 'created_at'],
+  pending_rodeo_data_config: ['client_op_id', 'rodeo_id', 'field_definition_id', 'enabled'],
+};
+
+test('GUARD (T6): el overlay pending_* declara TODA columna que el UNION de lectura lee', () => {
+  const tables = tablesByName();
+  for (const [tableName, neededCols] of Object.entries(OVERLAY_COLUMNS_READ_BY_BUILDERS)) {
+    const t = tables.get(tableName);
+    assert.ok(t, `falta el overlay ${tableName}`);
+    const declared = new Set(t.columns.map((c) => c.name));
+    for (const col of neededCols) {
+      if (col === 'id') continue; // PK implícita.
+      assert.ok(
+        declared.has(col),
+        `AppSchema.${tableName} (overlay) NO declara '${col}', pero el UNION de una lectura T6 lo lee ` +
+          `→ "no such column" en vivo. Agregalo en schema.ts.`,
+      );
+    }
+  }
 });

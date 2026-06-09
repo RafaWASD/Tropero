@@ -26,7 +26,7 @@
 // abajo (thumb-zone); confirmación obligatoria en lo destructivo (Nielsen #5 + #3); touch-targets
 // ≥56px ($touchMin); tokens-only (ADR-023 §4); voseo argentino.
 
-import { useCallback, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Alert, Platform, Pressable } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -40,6 +40,7 @@ import {
   saveProfile,
   softDeleteEstablishment,
 } from '@/services/establishments';
+import { subscribeSyncUiState } from '@/services/powersync/status';
 import {
   deleteAccount,
   type BlockingEstablishment,
@@ -52,6 +53,22 @@ import {
 } from '@/utils/validation';
 
 const OFFLINE_COPY = 'Necesitás conexión para esto. Conectate a internet y volvé a intentar.';
+
+// ─── Hook de conexión (reusa subscribeSyncUiState de PowerSync, spec 15) ──────────
+//
+// Editar el perfil es ONLINE-only (R9.2). En vez de dejar que el usuario tipee y reciba un
+// fast-fail al guardar, le avisamos PROACTIVAMENTE que está sin conexión y deshabilitamos "Guardar".
+// La pantalla SIGUE mostrando nombre/teléfono (lectura local) offline — sólo bloqueamos la edición.
+// `connected` es la señal del socket de PowerSync (la misma que usa el guard del service).
+function useIsOffline(): boolean {
+  const [offline, setOffline] = useState(false);
+  useEffect(() => {
+    // subscribeSyncUiState emite el estado actual de inmediato + en cada cambio; devuelve un dispose.
+    const dispose = subscribeSyncUiState((s) => setOffline(!s.connected));
+    return dispose;
+  }, []);
+  return offline;
+}
 
 // ─── Título de sección (mudo, $textMuted chico — jerarquía de settings) ──────────
 
@@ -148,6 +165,7 @@ function ProfileSection({ userId }: { userId: string }) {
   const { profile, loading, error, refresh } = useProfile();
   const { state: authState } = useAuth();
   const emailVerified = authState.status === 'authenticated' && authState.emailVerified;
+  const offline = useIsOffline();
   const [editing, setEditing] = useState(false);
 
   // Fix 1 — descartar la edición sin guardar al salir de la pantalla (blur). El cleanup corre al
@@ -181,6 +199,7 @@ function ProfileSection({ userId }: { userId: string }) {
         userId={userId}
         initialName={profile.name}
         initialPhone={profile.phone}
+        offline={offline}
         onDone={() => {
           // Refresca la fuente única (public.users) → saludo de la home al día (Fase 6).
           void refresh();
@@ -201,7 +220,17 @@ function ProfileSection({ userId }: { userId: string }) {
         onChange={() => router.push('/cambiar-email')}
       />
       <ProfileField label="Teléfono" value={profile.phone || 'Sin teléfono'} />
-      <Button variant="secondary" fullWidth onPress={() => setEditing(true)}>
+      {/* Aviso proactivo offline (R9.2): el perfil se VE (lectura local) pero NO se edita sin red.
+          Deshabilitamos "Editar perfil" para no dejar tipear y fallar al guardar. */}
+      {offline ? (
+        <InfoNote>Sin conexión: no podés editar el perfil ahora.</InfoNote>
+      ) : null}
+      <Button
+        variant="secondary"
+        fullWidth
+        disabled={offline}
+        onPress={() => setEditing(true)}
+      >
         Editar perfil
       </Button>
     </Card>
@@ -295,12 +324,14 @@ function ProfileEditForm({
   userId,
   initialName,
   initialPhone,
+  offline,
   onDone,
   onCancel,
 }: {
   userId: string;
   initialName: string;
   initialPhone: string | null;
+  offline: boolean;
   onDone: () => void;
   onCancel: () => void;
 }) {
@@ -358,8 +389,18 @@ function ProfileEditForm({
         maxLength={PHONE_MAX_LENGTH}
         error={phoneError}
       />
+      {/* Si la conexión se cae mientras se edita: aviso + Guardar deshabilitado (belt-and-suspenders
+          del fast-fail del service). El usuario puede Cancelar y volver al modo lectura local. */}
+      {offline ? (
+        <InfoNote>Sin conexión: no podés editar el perfil ahora.</InfoNote>
+      ) : null}
       <FormError message={formError} />
-      <Button variant="primary" fullWidth disabled={saving} onPress={() => void onSubmit()}>
+      <Button
+        variant="primary"
+        fullWidth
+        disabled={saving || offline}
+        onPress={() => void onSubmit()}
+      >
         {saving ? 'Guardando…' : 'Guardar'}
       </Button>
       <Button variant="secondary" fullWidth onPress={onCancel}>

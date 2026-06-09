@@ -4,14 +4,17 @@
 // streams). `fetchFieldCatalog`/`fetchSystemDefaults`/`fetchRodeoConfig` leen local; el scoping de
 // tenant (has_role_in del rodeo, catálogo global) ya lo aplicó la stream al sincronizar → NO se
 // re-filtra acá. Los SQL builders puros viven en powersync/local-reads.ts (testeables sin SDK).
-// ESCRITURAS (`toggleRodeoField`, `enableNonDefaultField`): siguen ONLINE contra Supabase (admin/
-// owner, R7.1 / design §5.3) — NO se tocan en T3. RLS protege server-side:
-//   - rodeo_data_config: INSERT/UPDATE solo owner (is_owner_of), sin DELETE de cliente (0018).
+// EDICIÓN de plantilla: ahora es OFFLINE-first (spec 15, T9.9) — `editar-plantilla.tsx` encola
+// `enqueueSetRodeoConfig` (RPC `set_rodeo_config` 0082 + overlay `pending_rodeo_data_config`), NO
+// escribe acá. Las viejas escrituras ONLINE de este módulo (`toggleRodeoField`/`enableNonDefaultField`,
+// UPDATE/INSERT directos a rodeo_data_config vía PostgREST) se REMOVIERON en T9.9: sin callers y
+// rotas sin red. RLS server-side sigue protegiendo rodeo_data_config (INSERT/UPDATE solo owner
+// is_owner_of, sin DELETE de cliente — 0018; la RPC 0082 espeja esa authz). Este módulo quedó
+// read-only (solo lecturas locales).
 //
 // Multi-tenant (CLAUDE.md ppio 6): NUNCA se hardcodea establishment_id. El rodeo trae su
-// establishment vía FK; la RLS/stream derivan el acceso. Acá solo movemos data_keys + toggles.
+// establishment vía FK; la RLS/stream derivan el acceso.
 
-import { supabase } from './supabase';
 import {
   buildFieldCatalogQuery,
   buildSystemDefaultsQuery,
@@ -31,14 +34,6 @@ export type { FieldDefinition, SystemDefaultField, RodeoFieldConfig } from '../u
 export type AppError = { kind: 'network' | 'unknown'; message: string };
 
 export type ServiceResult<T> = { ok: true; value: T } | { ok: false; error: AppError };
-
-function classifyError(error: { message?: string; code?: string } | null): AppError {
-  const msg = error?.message ?? '';
-  if (/network|failed to fetch|fetch failed/i.test(msg)) {
-    return { kind: 'network', message: msg };
-  }
-  return { kind: 'unknown', message: msg || 'Error desconocido' };
-}
 
 // ─── Catálogo global (read-only) ─────────────────────────────────────────────────
 
@@ -105,7 +100,7 @@ export async function fetchSystemDefaults(
   };
 }
 
-// ─── Estado efectivo por rodeo (mutable: owner) ───────────────────────────────────
+// ─── Estado efectivo por rodeo (read-only; la edición va por outbox, T9.9) ─────────
 
 // `enabled` es 0/1 en SQLite (column.integer) → toBool lo coerce.
 type RodeoConfigRow = { field_definition_id: string; enabled: number | boolean };
@@ -129,52 +124,4 @@ export async function fetchRodeoConfig(
       enabled: toBool(row.enabled),
     })),
   };
-}
-
-/**
- * Toggle de una fila EXISTENTE de rodeo_data_config (R2.12: UPDATE enabled). Owner-only por RLS
- * (is_owner_of). UPDATE SIN .select() (gotcha RLS-on-RETURNING, lección de spec 01) + count:'exact'
- * para distinguir "se actualizó" de "RLS lo bloqueó / no había fila" y reportar error accionable
- * en vez de un falso OK (un field_operator recibiría count=0).
- */
-export async function toggleRodeoField(
-  rodeoId: string,
-  fieldDefinitionId: string,
-  enabled: boolean,
-): Promise<ServiceResult<void>> {
-  const { error, count } = await supabase
-    .from('rodeo_data_config')
-    .update({ enabled }, { count: 'exact' })
-    .eq('rodeo_id', rodeoId)
-    .eq('field_definition_id', fieldDefinitionId);
-
-  if (error) return { ok: false, error: classifyError(error) };
-  if (count === 0) {
-    return {
-      ok: false,
-      error: {
-        kind: 'unknown',
-        message: 'No se pudo cambiar el dato. Solo el dueño del campo puede ajustar la plantilla.',
-      },
-    };
-  }
-  return { ok: true, value: undefined };
-}
-
-/**
- * Habilita un dato NO-default del sistema en el rodeo (R2.12: INSERT en rodeo_data_config con
- * enabled=true para un field que no tenía fila — caso "tambo + preñez"). Owner-only por RLS.
- * INSERT SIN .select() (gotcha RLS-on-RETURNING). El field existe en el catálogo global, así
- * que el FK no falla; si el caller intentara un field inexistente, el FK rechaza (23503).
- */
-export async function enableNonDefaultField(
-  rodeoId: string,
-  fieldDefinitionId: string,
-): Promise<ServiceResult<void>> {
-  const { error } = await supabase
-    .from('rodeo_data_config')
-    .insert({ rodeo_id: rodeoId, field_definition_id: fieldDefinitionId, enabled: true });
-
-  if (error) return { ok: false, error: classifyError(error) };
-  return { ok: true, value: undefined };
 }

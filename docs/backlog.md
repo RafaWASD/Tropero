@@ -17,6 +17,20 @@ No es un sustituto de `feature_list.json` ni de los ADRs — es la antesala dond
 
 ## Ítems pendientes
 
+## 2026-06-09 — Primitiva de snackbar/toast reusable (confirmación post-acción)
+
+**Origen**: cierre T9.9, decisión UX de "Guardar plantilla" (Raf). Recomendé "volver atrás + confirmación breve"; no existe primitiva de toast/snackbar en el repo, así que se shippeó `router.back()` silencioso (consistente con `editar-campo`).
+**Qué**: agregar una primitiva de snackbar/toast reusable al design system (`@/components`) + un context/hook para dispararla desde cualquier flujo. Copy offline-aware ("Guardada — se sincroniza al reconectar").
+**Por qué importa**: pulido ("mejor en el primer try" — Nielsen #1 visibilidad). Hoy la confirmación de guardado en flujos que vuelven atrás (editar-plantilla, editar-campo, etc.) depende del indicador global de sync, no de feedback local por-acción. App-wide, no solo plantilla.
+**Próximo paso sugerido**: primitiva en el DS + wire en los flujos save-and-leave (editar-plantilla, editar-campo, crear-lote, edición de perfil). No bloqueante; el back silencioso es funcional y consistente.
+
+## 2026-06-09 — Cap defensivo de `p_toggles` en `create_rodeo`/`set_rodeo_config` (LOW, Gate 1 T9.8/T9.9)
+
+**Origen**: Gate 1 (security_analyzer, code mode) de `set_rodeo_config` (0082, Run T9.9). Misma observación aplica a `create_rodeo` (0081, T9.8) — el gemelo ya está en el remoto.
+**Qué**: ambas RPC reciben `p_toggles jsonb` (array de `{field_definition_id, enabled}`) sin tope de cardinalidad server-side. Cada `field_definition_id` está FK-bound (23503 si no existe) y la PK compuesta `(rodeo_id, field_definition_id)` colapsa duplicados en UPSERTs sobre la misma fila → un array gigante no crece la tabla, solo cuesta CPU de la tx del **propio owner** (self-DoS acotado, sin amplificación ni cross-tenant).
+**Por qué importa**: bajo — el gate lo clasificó **LOW, no bloqueante** y aprobó aplicar 0082 tal cual (consistente con 0081-live, ya gateado LOW). No es hueco de seguridad; es hardening defensivo uniforme.
+**Próximo paso sugerido**: en una pasada de hardening, agregar `if jsonb_array_length(p_toggles) > 64 then raise ... using errcode = '22023'` al inicio del loop de toggles **en ambas** (0081 nueva migration que recrea `create_rodeo` + en `set_rodeo_config`), para mantener simetría. 64 es holgado para un catálogo de ~30-50 fields. Nada urgente.
+
 ## 2026-06-07 — Polish de C4 lotes (no bloqueantes, post puerta de código)
 
 **Origen**: cierre de C4 lotes (frontend `management_groups`). Veto de diseño del leader + Gate 2 + feedback de Raf.
@@ -262,6 +276,22 @@ No es un sustituto de `feature_list.json` ni de los ADRs — es la antesala dond
 **Qué**: las streams JOIN-free `ev_birth_calves` y `est_rodeo_data_config` filtran solo `establishment_id IN org_scope`, pero su RLS as-built filtra además el `deleted_at` del PADRE que ellas no tienen: `birth_calves_select` filtra `reproductive_events.deleted_at IS NULL` (0045); `rodeo_data_config_select` filtra `rodeos.deleted_at IS NULL` (0018). Al soft-deletear un parto / un rodeo, sus filas hijas (links de parentesco / config del template — solo UUIDs/flags, **del propio campo**) siguen sincronizando al device, aunque la RLS las oculta.
 **Por qué importa**: bajo — es **same-tenant** (no sale nada cross-tenant, no hay PII) y **invisible** (las filas huérfanas no se renderizan: su padre, el parto/rodeo soft-deleteado, no sincroniza). Es bloat menor del SQLite local + una desviación de la equivalencia stream↔RLS estricta. NO es MVP-blocker; el deploy del paso 2 procede con esto documentado.
 **Próximo paso sugerido**: migración nueva que agregue `deleted_at` (o un flag) a `birth_calves` y `rodeo_data_config`, mantenido por un trigger que propague el soft-delete del padre (cuando `reproductive_events.deleted_at`/`rodeos.deleted_at` pasa a NOT NULL → marcar las hijas), + filtrar `deleted_at IS NULL` en las dos streams. Cierra la equivalencia. Patrón = el trigger de propagación de 0079/0080. Gate 1 sobre el delta. Quitar los comentarios ⚠️ de las dos streams en `rafaq.yaml` al cerrarlo.
+
+## 2026-06-09 — Transición de categoría optimista offline (tacto/aborto) — PowerSync T5
+
+**Origen**: T5 (escritura offline simple) de PowerSync. Los `add*` de eventos escriben local + suben al reconectar.
+**Qué**: las transiciones de **categoría** del animal por un evento reproductivo (un tacto positivo → "preñada", un aborto → revierte) las hace un **trigger AFTER INSERT server-side** sobre `reproductive_events` (inserta `animal_category_history` + actualiza `animal_profiles.category`). Offline ese trigger NO corre → el **evento se graba y se ve en el timeline al instante**, pero el **badge/categoría** del animal (lista, ficha) NO se actualiza hasta que el evento sincroniza (reconexión → upload → trigger server → re-sync del perfil).
+**Por qué importa**: bajo — el dato crítico (el evento) se graba offline sin pérdida; es solo el estado DERIVADO (categoría) el que lagea hasta el sync. En la manga el operador igual ve el tacto registrado. Pero para "mejor en el primer try", ver la categoría actualizada al instante offline sería más pulido.
+**Próximo paso sugerido**: transición de categoría **optimista** offline — replicar la lógica del trigger en el cliente (un overlay/UPDATE local de la categoría al cargar el tacto/aborto, reconciliado al sync) o un `pending_status_overrides` de categoría (similar al overlay de T6). Evaluar al cerrar T6 (comparte el patrón de overlay). NO MVP-blocker.
+
+## 2026-06-09 — `createRodeo` offline — ✅ RESUELTA (2026-06-09, Run T9.8) — PowerSync
+
+**✅ RESUELTA (2026-06-09)**: Raf pidió explícito que `createRodeo` funcione OFFLINE (offline-first sin excepciones). Se implementó la **opción (b)** del "próximo paso" de abajo: outbox → RPC nueva `create_rodeo` (migración `0081`, NO aplicada aún — la aplica el leader tras Gate 1) que hace seed+diff atómico server-side (como `register_birth`), + overlay optimista (`pending_rodeos` + `pending_rodeo_data_config`, la plantilla COMPUTADA en el cliente desde `system_default_fields` ya sincronizado + el diff de toggles). El rodeo Y su plantilla aparecen offline al instante (UNION en `buildRodeosQuery`/`buildRodeoConfigQuery`). Idempotencia NATURAL (sin `client_op_id`: INSERT del rodeo `ON CONFLICT DO NOTHING` → el trigger de seed no re-dispara + UPSERT de toggles → replay = no-op total). Owner-only (`is_owner_of`, espeja `rodeos_insert`) + guard anti-IDOR (autorrevisión: p_id colisionado con rodeo ajeno → 42501, no toca su `rodeo_data_config`). Ver `specs/active/15-powersync/tasks.md` T9.8 + `progress/impl_15-powersync.md` (Run T9.8). Specs reconciliadas (design §1.2 un-defer, tasks T3.3/T9.8). El último write que faltaba offline queda cerrado.
+
+**Origen** (histórico): reviewer de T5/T6 (escritura offline). Drift spec↔código: el design prometía `createRodeo` local; quedó ONLINE. Reconciliado documentando el diferimiento (design §1.2 + tasks T3.3).
+**Qué**: crear un rodeo (`rodeos.createRodeo`) sigue requiriendo conexión. A diferencia de `createManagementGroup` (CRUD plano single-tabla, ya offline en T5), `createRodeo` NO es trivial offline: su **plantilla de datos** (`rodeo_data_config`) la **seedea un trigger server-side** (`tg_rodeos_seed_data_config`, 0018) con los defaults del sistema, y luego se aplica el diff de toggles del usuario. Offline el trigger no corre → la plantilla no se arma localmente → el rodeo quedaría sin su config hasta sincronizar, y el diff de toggles no tendría filas que actualizar.
+**Por qué importa**: contradice el principio offline-first de Raf ("todo offline menos login/invitaciones/perfil"). PERO crear un rodeo es típicamente **setup** (al dar de alta el campo, con conectividad), no una operación de manga. El leader lo **difirió** por la complejidad real del seeding. **Decisión de Raf pendiente**: ¿aceptable online (setup), o se hace el trabajo de offline?
+**Próximo paso sugerido (si se hace offline)**: rework del seeding de la plantilla para offline — opciones: (a) el cliente arma la `rodeo_data_config` completa localmente (defaults del catálogo ya sincronizado + toggles del usuario) y el trigger server usa `ON CONFLICT DO NOTHING` al subir (el cliente gana, sin duplicados); o (b) `createRodeo` por outbox→RPC nueva que haga seed+diff atómico server-side (como register_birth). Ambas tocan backend + Gate 1. Estimar cuando Raf confirme que lo quiere offline.
 
 ## 2026-06-05 — Sumar `deno check` de las Edge Functions al pipeline (`check.mjs`)
 

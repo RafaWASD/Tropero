@@ -503,8 +503,8 @@ Patrón heredado de spec 01: tests Node nativo en `supabase/tests/`, login con u
 - `fetchFieldCatalog(): Promise<FieldDefinition[]>` (lee `field_definitions`, cacheado en SQLite local).
 - `fetchSystemDefaults(systemId): Promise<SystemDefaultField[]>`.
 - `fetchRodeoConfig(rodeoId): Promise<RodeoDataConfig[]>`.
-- `toggleRodeoField(rodeoId, fieldDefinitionId, enabled)` (owner; UPDATE).
-- `enableNonDefaultField(rodeoId, fieldDefinitionId)` (owner; INSERT — caso "tambo + preñez").
+- ~~`toggleRodeoField(rodeoId, fieldDefinitionId, enabled)` (owner; UPDATE).~~ — **RECONCILIADO (spec 15 T9.9, 2026-06-09):** la edición de plantilla pasó a OFFLINE-first (`enqueueSetRodeoConfig` → RPC `set_rodeo_config` 0082 + outbox/overlay). Estas dos escrituras ONLINE quedaron sin callers y se REMOVIERON de `rodeo-config.ts` (que quedó read-only). La authz owner-only sigue viva en la RPC 0082 (espeja `rodeo_data_config` 0018).
+- ~~`enableNonDefaultField(rodeoId, fieldDefinitionId)` (owner; INSERT — caso "tambo + preñez").~~ — Ver nota de reconciliación de la línea anterior (removida en spec 15 T9.9; el caso "tambo + preñez" lo cubre ahora el UPSERT del diff de `set_rodeo_config`).
 - `isManeuverAvailable(rodeoId, requiredDataKeys[]): boolean` — helper de gating (consumido por spec 03).
 - **Aceptación**: unit tests + integration test; el helper de gating refleja el mapeo de ADR-021.
 - **Cubre**: soporte de R2.8..R2.13, R2.7 (sustrato del gating).

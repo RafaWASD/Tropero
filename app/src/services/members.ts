@@ -30,6 +30,8 @@ import {
   buildPendingInvitationsQuery,
 } from './powersync/local-reads';
 import { runLocalQuery } from './powersync/local-query';
+import { offlineError } from './powersync/online-guard';
+import { getPowerSync } from './powersync/database';
 
 // Base URL para reconstruir el accept_url de invitaciones PENDIENTES a partir del token. Las
 // invitaciones recién creadas/regeneradas ya traen `accept_url` del backend; para las que listamos
@@ -93,6 +95,18 @@ export type Result<T> = { ok: true; value: T } | { ok: false; error: ServiceErro
  * debería con jsonOk/jsonError, pero blindamos como push-notifications.ts).
  */
 async function invokeFn<T>(name: string, body: Record<string, unknown>): Promise<Result<T>> {
+  // Las operaciones de equipo (invitar/cancelar/regenerar/remover/cambiar-rol/aceptar) son Edge
+  // Functions ONLINE-only (R9.2): sin red el invoke no resuelve rápido → fast-fail accionable ANTES
+  // del call. Todas pasan por acá → un único guard cubre todos los call-sites. (Las LECTURAS de
+  // miembros/invitaciones NO pasan por invokeFn — leen del SQLite local, así que no se gatean.)
+  const off = offlineError(
+    getPowerSync().currentStatus?.connected,
+    'Necesitás conexión para gestionar tu equipo.',
+  );
+  if (off) {
+    return { ok: false, error: { kind: 'network', code: null, message: off.message } };
+  }
+
   let data: unknown;
   let error: unknown;
   try {

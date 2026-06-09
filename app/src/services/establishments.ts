@@ -23,6 +23,10 @@ import {
   buildCountActiveMembersQuery,
 } from './powersync/local-reads';
 import { runLocalQuery, runLocalQuerySingle } from './powersync/local-query';
+import { assertOnline } from './powersync/online-guard';
+
+// Copy es-AR (voseo) para el fast-fail de las acciones ONLINE-only de campo cuando no hay red.
+const OFFLINE_FIELD_MSG = 'Necesitás conexión para esta acción.';
 
 export type { MembershipEstablishment } from '../utils/establishment';
 
@@ -129,6 +133,11 @@ export async function createEstablishment(
   userId: string,
   input: CreateEstablishmentInput,
 ): Promise<CreateEstablishmentResult> {
+  // Crear campo es ONLINE-only (R9.2): sin red, el insert no resuelve → fast-fail accionable
+  // en vez de colgar. Antes del primer supabase call (incl. el diff de memberships, que igual es local).
+  const off = assertOnline(OFFLINE_FIELD_MSG);
+  if (off) return off;
+
   const row = {
     name: input.name.trim(),
     province: input.province.trim(),
@@ -197,6 +206,10 @@ export type SaveResult =
  * RLS `user_private_update_self` (0068) exige user_id = auth.uid() (un user solo edita su fila).
  */
 export async function saveOwnPhone(userId: string, phone: string): Promise<SaveResult> {
+  // ONLINE-only (R9.2): el `user_private` no está en el sync set de escritura offline → fast-fail.
+  const off = assertOnline('Necesitás conexión para guardar tu teléfono.');
+  if (off) return off;
+
   const { error } = await supabase
     .from('user_private')
     .update({ phone: phone.trim() })
@@ -279,6 +292,12 @@ export async function saveProfile(
   userId: string,
   input: { name: string; phone: string | null },
 ): Promise<SaveResult> {
+  // ONLINE-only (R9.2): perfil = `public.users` + `public.user_private` (no en el sync set de
+  // escritura offline). Sin red, los DOS `supabase.update()` no resuelven → la pantalla queda en
+  // "Guardando…" para siempre (bug reportado). Fast-fail accionable ANTES del primer write.
+  const off = assertOnline('Necesitás conexión para editar tu perfil.');
+  if (off) return off;
+
   const name = input.name.trim();
 
   const { error: phoneError } = await supabase
@@ -377,6 +396,10 @@ export async function updateEstablishment(
   establishmentId: string,
   input: UpdateEstablishmentInput,
 ): Promise<SaveResult> {
+  // Editar campo es ONLINE-only (R9.2): sin red el update no resuelve → fast-fail accionable.
+  const off = assertOnline('Necesitás conexión para editar el campo.');
+  if (off) return off;
+
   const { error, count } = await supabase
     .from('establishments')
     .update(
@@ -420,6 +443,10 @@ export async function updateEstablishment(
  * documentado como decisión consciente.
  */
 export async function softDeleteEstablishment(establishmentId: string): Promise<SaveResult> {
+  // Eliminar campo es ONLINE-only (R9.2): sin red el update no resuelve → fast-fail accionable.
+  const off = assertOnline(OFFLINE_FIELD_MSG);
+  if (off) return off;
+
   const { error, count } = await supabase
     .from('establishments')
     .update({ deleted_at: new Date().toISOString() }, { count: 'exact' })

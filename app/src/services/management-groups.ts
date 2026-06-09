@@ -1,27 +1,39 @@
 // Capa de datos de lotes / management_groups (ADR-020). En C2 solo se LEÍAN los lotes activos del
-// establishment para el selector opcional del form de alta (R4.5). C4 (spec 02 T3.7) agrega el CRUD
+// establishment para el selector opcional del form de alta (R4.5). C4 (spec 02 T3.7) agregó el CRUD
 // completo (crear / renombrar / borrar) + asignar/quitar desde la ficha + ver miembros de un lote.
 //
-// Queries DIRECTAS a Supabase con supabase-js (PowerSync es C5, diferido — los services son la
-// ÚNICA capa que tocará PowerSync; mantenerlos delgados y swappables). RLS protege server-side (0037):
-//   - SELECT: has_role_in(establishment_id) + deleted_at is null → cualquier rol activo lee.
-//   - INSERT/UPDATE de management_groups: is_owner_of → SOLO owner (crear/renombrar/borrar).
-//   - ASIGNAR un animal a un lote = UPDATE de animal_profiles.management_group_id, cubierto por
-//     animal_profiles_update (has_role_in) → cualquier rol operativo activo (R2.17).
-//   - BORRAR (soft-delete) un lote NO se hace por UPDATE directo: vía el RPC SECURITY DEFINER
-//     `soft_delete_management_group` (0041, owner-only). Ver el JSDoc de softDeleteManagementGroup.
+// SWAP PowerSync (spec 15): LECTURAS desde el SQLite local (T4.3, fetchManagementGroups/fetchGroupMembers).
+// ESCRITURAS SIMPLES (T5.2, CRUD plano OFFLINE): createManagementGroup (INSERT local), renameManagementGroup
+// (UPDATE local), assignAnimalToGroup (UPDATE local) → `getPowerSync().execute(...)` vía runLocalWrite →
+// PowerSync encola UNA CrudEntry → connector.uploadData() la sube al reconectar. La autorización real la
+// valida la RLS al SUBIR (0037), NO el write local (R6.3/R8.1):
+//   - INSERT/UPDATE de management_groups: is_owner_of → SOLO owner (crear/renombrar). Un no-owner es
+//     rechazado al subir (descartado + superficiado por uploadData), NO por el return del service.
+//   - ASIGNAR = UPDATE de animal_profiles.management_group_id, cubierto por animal_profiles_update
+//     (has_role_in) → cualquier rol operativo activo (R2.17); el tenant-check del lote lo valida el
+//     trigger 0037 al subir.
+//   - BORRAR (soft-delete) un lote es RPC-bound (T6, NO swapeado acá): sigue ONLINE vía el RPC SECURITY
+//     DEFINER `soft_delete_management_group` (0041, owner-only) — sortea el gotcha RLS-on-RETURNING del
+//     soft-delete (el UPDATE de deleted_at saca la fila de la SELECT-policy → 42501). Ver softDelete.
 // El cliente NO fuerza permisos; la RLS es la barrera real. NUNCA se hardcodea establishment_id
 // (CLAUDE.md ppio 6): viene del EstablishmentContext.
 //
-// RLS-on-RETURNING gotcha (lección spec 01 B.1.2): la policy SELECT filtra `deleted_at is null`, así
-// que NO usamos `.insert().select()` / `.update().select()` en un solo roundtrip (el RETURNING
-// evaluaría SELECT sobre la fila antes de ser visible → vacío/403). Split write + read separados.
-// El soft-delete es un caso particular del MISMO gotcha (el UPDATE vuelve la fila no-visible bajo la
-// SELECT-policy `deleted_at is null` → 42501); por eso va por RPC y no por UPDATE directo (0041).
+// R6.3 — el gotcha RLS-on-RETURNING DESAPARECE en las escrituras simples: con escritura LOCAL la lectura
+// post-escritura es una query SQLite (no roundtrip, no RETURNING que evalúe la SELECT-policy `deleted_at
+// is null`) → se ELIMINARON el diff before/after de create y el `count:'exact'` de assign/rename. El
+// id de cliente (R6.4) deja devolver el lote recién creado sin re-leer.
 
-import { supabase } from './supabase';
 import type { AnimalListItem, ServiceResult } from './animals';
 import { fetchAnimals } from './animals';
+import {
+  buildManagementGroupsQuery,
+  buildCreateManagementGroupInsert,
+  buildRenameManagementGroupUpdate,
+  buildAssignAnimalToGroupUpdate,
+  buildClearGroupMembersUpdate,
+} from './powersync/local-reads';
+import { runLocalQuery, runLocalWrite } from './powersync/local-query';
+import { enqueueSoftDelete } from './powersync/outbox';
 
 export type ManagementGroup = {
   id: string;
@@ -30,75 +42,39 @@ export type ManagementGroup = {
 
 type Row = { id: string; name: string };
 
-function classifyError(error: { message?: string; code?: string } | null): { kind: 'network' | 'unknown'; message: string } {
-  const msg = error?.message ?? '';
-  if (/network|failed to fetch|fetch failed/i.test(msg)) return { kind: 'network', message: msg };
-  return { kind: 'unknown', message: msg || 'Error desconocido' };
-}
-
-// Copy es-AR del soft-delete de lote. NUNCA exponemos el sqlerrm/message crudo de Postgres al usuario
-// (mismo criterio que classifyExitError de exit-animal.ts): el copy específico viaja en `message`.
-const DELETE_COPY = {
-  unauthorized: 'No se pudo eliminar el lote. Solo el dueño del campo puede hacerlo.',
-  gone: 'El lote ya no existe o ya fue eliminado.',
-  network: 'Sin conexión: no pudimos eliminar el lote. Conectate y volvé a intentar.',
-  unknown: 'No se pudo eliminar el lote. Volvé a intentar.',
-} as const;
+// Con el swap a OUTBOX (T6), el soft-delete de lote ya NO clasifica el error de la RPC en el return: el
+// encolado SIEMPRE tiene éxito offline y el rechazo REAL (42501 no-owner, P0002 ya-borrado) lo resuelve
+// uploadData al SUBIR (P0002 → descarte idempotente; 42501 → rollback del overlay + superficia, R8.1) — NO
+// por el return de softDeleteManagementGroup. Por eso se eliminaron classifyError/classifyDeleteError/DELETE_COPY.
 
 /**
- * Clasifica el error del RPC `soft_delete_management_group` (migration 0041) a copy es-AR accionable.
- * El RPC lanza, por `errcode`:
- *   - 42501 → no es owner del establishment del lote → "solo el dueño puede".
- *   - P0002 → el lote no existe / ya fue soft-deleteado.
- * Más network (sin conexión) y cualquier otro → unknown genérico (nunca el message crudo).
- * Detecta primero la red por el MENSAJE (supabase-js no setea code en fallos de fetch).
- */
-function classifyDeleteError(error: { message?: string; code?: string } | null): {
-  kind: 'network' | 'unknown';
-  message: string;
-} {
-  const msg = error?.message ?? '';
-  const code = error?.code ?? '';
-  if (/network|failed to fetch|fetch failed|networkerror/i.test(msg)) {
-    return { kind: 'network', message: DELETE_COPY.network };
-  }
-  if (code === '42501') return { kind: 'unknown', message: DELETE_COPY.unauthorized };
-  if (code === 'P0002') return { kind: 'unknown', message: DELETE_COPY.gone };
-  return { kind: 'unknown', message: DELETE_COPY.unknown };
-}
-
-/**
- * Lista los lotes ACTIVOS (no soft-deleted) del establishment, para el selector "Lote" opcional
- * del alta (ADR-020 / R4.5). Orden por nombre (es-AR) para una lista estable.
+ * Lista los lotes ACTIVOS (no soft-deleted) del establishment, para el selector "Lote" opcional del
+ * alta (ADR-020 / R4.5), desde el SQLite local (T4.3/R5.1). El scoping (has_role_in + deleted_at del
+ * campo) ya lo aplicó la stream est_management_groups → NO se re-filtra; SÍ se conservan los filtros de
+ * DOMINIO `active = 1` + `deleted_at IS NULL` (defensivo). Orden por nombre (es-AR) para una lista
+ * estable. emptyIsSyncing default true: un campo sin lotes aún sincronizando degrada a "Sincronizando".
  */
 export async function fetchManagementGroups(
   establishmentId: string,
 ): Promise<ServiceResult<ManagementGroup[]>> {
-  const { data, error } = await supabase
-    .from('management_groups')
-    .select('id, name')
-    .eq('establishment_id', establishmentId)
-    .eq('active', true)
-    .is('deleted_at', null)
-    .order('name', { ascending: true });
-
-  if (error) return { ok: false, error: classifyError(error) };
-  const rows = (data ?? []) as Row[];
-  return { ok: true, value: rows.map((r) => ({ id: r.id, name: r.name })) };
+  const r = await runLocalQuery<Row>(buildManagementGroupsQuery(establishmentId));
+  if (!r.ok) return { ok: false, error: { kind: r.error.kind, message: r.error.message } };
+  return { ok: true, value: r.value.map((row) => ({ id: row.id, name: row.name })) };
 }
 
 // ─── Crear lote (owner) ─────────────────────────────────────────────────────────────
 
 /**
- * Crea un lote (R2.14/ADR-020, owner-only por RLS management_groups_insert = is_owner_of). El nombre
- * ya viene trimeado/validado por el caller (validateGroupName), pero re-trimeamos por defensa (el
+ * Crea un lote LOCAL (R2.14/ADR-020, offline) → upload queue. id de CLIENTE (R6.4) → devolvemos el lote
+ * recién creado SIN re-leer (la fila ya está en SQLite local; la lista local la verá al instante). El
+ * nombre ya viene trimeado/validado por el caller (validateGroupName), re-trimeamos por defensa (el
  * CHECK management_groups_name_not_empty exige length(trim(name)) > 0). NUNCA se hardcodea
  * establishment_id: lo pasa el caller desde el EstablishmentContext.
  *
- * SPLIT insert + read (gotcha RLS-on-RETURNING): NO usamos `.insert().select()` — la policy SELECT
- * filtra `deleted_at is null` y el RETURNING podría no ver la fila. Insertamos SIN .select() y
- * recuperamos el lote diffeando el set ANTES/DESPUÉS (robusto ante nombres homónimos, igual que
- * createRodeo / createEstablishment). Online-only (C5 = PowerSync): sin red → kind:'network'.
+ * R6.3: se ELIMINA el split insert + diff before/after — con escritura LOCAL ya no hay roundtrip ni
+ * RETURNING que evalúe la SELECT-policy `deleted_at is null`. Owner-only lo valida la RLS al SUBIR
+ * (management_groups_insert = is_owner_of): un no-owner es rechazado allí (descartado + superficiado por
+ * uploadData, R8.1) — NO por el return de acá (que ya devolvió ok con la fila local). Contrato T5.
  */
 export async function createManagementGroup(
   establishmentId: string,
@@ -109,36 +85,20 @@ export async function createManagementGroup(
     return { ok: false, error: { kind: 'unknown', message: 'El lote necesita un nombre.' } };
   }
 
-  // SET de lotes ANTES del insert (para diffear el nuevo, robusto ante homónimos).
-  const before = await fetchManagementGroups(establishmentId);
-  if (!before.ok) return { ok: false, error: before.error };
-  const beforeIds = new Set(before.value.map((g) => g.id));
-
-  const { error: insertError } = await supabase.from('management_groups').insert({
-    establishment_id: establishmentId,
-    name: trimmed,
-  });
-  if (insertError) return { ok: false, error: classifyError(insertError) };
-
-  const after = await fetchManagementGroups(establishmentId);
-  if (!after.ok) return { ok: false, error: after.error };
-  const created = after.value.find((g) => !beforeIds.has(g.id));
-  if (!created) {
-    return {
-      ok: false,
-      error: { kind: 'unknown', message: 'No se pudo confirmar el lote recién creado.' },
-    };
-  }
-  return { ok: true, value: created };
+  const id = randomUuid();
+  const r = await runLocalWrite(buildCreateManagementGroupInsert(id, establishmentId, trimmed));
+  if (!r.ok) return { ok: false, error: { kind: r.error.kind, message: r.error.message } };
+  return { ok: true, value: { id, name: trimmed } };
 }
 
 // ─── Renombrar lote (owner) ─────────────────────────────────────────────────────────
 
 /**
- * Renombra un lote (R2.14, owner-only por RLS management_groups_update = is_owner_of). UPDATE SIN
- * .select() (gotcha RLS-on-RETURNING) + count:'exact' para distinguir "se actualizó" de "RLS lo
- * bloqueó / no había fila activa" (un no-owner recibiría count=0) y devolver un copy accionable en
- * vez de un falso OK. Filtra `deleted_at is null` (no se renombra un lote ya borrado).
+ * Renombra un lote LOCAL (R2.14, offline) → upload queue. UPDATE local que filtra `deleted_at is null`
+ * (no se renombra un lote ya borrado). R6.3: se ELIMINA el `count:'exact'` — con escritura LOCAL el
+ * UPDATE siempre "tiene éxito" offline. Owner-only lo valida la RLS al SUBIR (management_groups_update =
+ * is_owner_of): un no-owner es rechazado allí (descartado + superficiado por uploadData, R8.1) — NO por
+ * el return de acá. Contrato T5: el local write siempre devuelve ok; el reject de upload va por status.
  */
 export async function renameManagementGroup(
   groupId: string,
@@ -149,22 +109,8 @@ export async function renameManagementGroup(
     return { ok: false, error: { kind: 'unknown', message: 'El lote necesita un nombre.' } };
   }
 
-  const { error, count } = await supabase
-    .from('management_groups')
-    .update({ name: trimmed }, { count: 'exact' })
-    .eq('id', groupId)
-    .is('deleted_at', null);
-
-  if (error) return { ok: false, error: classifyError(error) };
-  if (count === 0) {
-    return {
-      ok: false,
-      error: {
-        kind: 'unknown',
-        message: 'No se pudo renombrar el lote. Solo el dueño del campo puede hacerlo.',
-      },
-    };
-  }
+  const r = await runLocalWrite(buildRenameManagementGroupUpdate(groupId, trimmed));
+  if (!r.ok) return { ok: false, error: { kind: r.error.kind, message: r.error.message } };
   return { ok: true, value: undefined };
 }
 
@@ -174,48 +120,48 @@ export async function renameManagementGroup(
  * Borra un lote (owner-only) reasignando primero sus animales a `management_group_id = NULL` y
  * soft-deleteando el lote DESPUÉS (D1 del context-c4-lotes).
  *
- * ⚠️ ORDEN OBLIGATORIO (anti-FK-colgante): PRIMERO `UPDATE animal_profiles SET management_group_id =
- * NULL WHERE management_group_id = <lote>` (los animales vuelven a agruparse por categoría, regla
- * ADR-020), DESPUÉS el soft-delete del lote. Nunca al revés: borrar-primero dejaría animales apuntando
- * a un lote ya filtrado por `deleted_at` (huérfano visible como "sin lote" en la ficha pero con FK
- * colgante en la fila). El paso 1 es un UPDATE directo y SÍ funciona vía PostgREST: no cambia la
- * visibilidad SELECT del perfil (no toca su `deleted_at`), así que no choca con el gotcha de abajo.
+ * ⚠️ ORDEN OBLIGATORIO (anti-FK-colgante): PRIMERO se reasignan a NULL los management_group_id de los
+ * perfiles del lote (los animales vuelven a agruparse por categoría, regla ADR-020), DESPUÉS el
+ * soft-delete del lote. El FIFO de la upload queue lo preserva: el UPDATE local del paso 1 se encola
+ * ANTES del op_intent del paso 2, así que al subir corren en ese orden. Nunca al revés: borrar-primero
+ * dejaría animales apuntando a un lote ya filtrado por `deleted_at` (FK colgante).
  *
- * ⚠️ El soft-delete NO se hace por UPDATE directo. Un `UPDATE management_groups SET deleted_at = now()`
- * vía PostgREST devuelve 42501: PostgREST exige que la fila siga visible bajo la policy de SELECT tras
- * el UPDATE, y la SELECT de management_groups filtra `deleted_at is null` → la fila sale de visibilidad
- * → rechazo (comportamiento ESPERADO, no un bug de RLS). El backend resuelve esto con el RPC
- * SECURITY DEFINER `soft_delete_management_group(p_group_id)` (migration 0041): re-valida owner-only y
- * hace el UPDATE por dentro (bypass de la verificación de visibilidad). El cliente solo lo invoca.
+ * ⚠️ El soft-delete NO se hace por UPDATE plano. Un `UPDATE management_groups SET deleted_at = now()`
+ * vía PostgREST devuelve 42501 (la fila sale de la SELECT-policy `deleted_at is null` tras el UPDATE) —
+ * gotcha RLS-on-RETURNING. El backend lo resuelve con el RPC SECURITY DEFINER
+ * `soft_delete_management_group(p_group_id)` (0041, owner-only). Por eso el paso 2 va por la OUTBOX
+ * (intent → RPC al subir), NO por CRUD plano.
  *
- * ⚠️ NO ATÓMICO (clear-NULL directo + RPC, 2 pasos client-side, online, C4) — MISMO criterio que la
- * no-atomicidad del split insert de createAnimal. Si el RPC (paso 2) falla, los animales ya quedaron
- * en NULL y el lote sigue vivo: estado CONSISTENTE (no corrupto) y RECUPERABLE — el owner reintenta el
- * borrado (el clear-NULL es idempotente). La atomicidad real llega con C5/PowerSync.
- *
- * El error del RPC se mapea con classifyDeleteError: 42501 (no es owner) y P0002 (lote inexistente /
- * ya borrado) → copy es-AR accionable, nunca el sqlerrm crudo. La reasignación a NULL (paso 1) la
- * permite cualquier rol operativo (animal_profiles_update); el RPC del paso 2 rechaza a quien no sea
- * owner con 42501 → copy "solo el dueño" sin haber corrompido nada (los animales ya están en NULL).
+ * OFFLINE-FIRST (T6.2f): ambos pasos son LOCALES y devuelven ok offline al instante. La autorización
+ * real (owner-only del paso 2) la valida la RPC al SUBIR; un rechazo (42501) → uploadData rollbackea el
+ * overlay (el lote re-aparece) + superficia (R8.1). Si el paso 2 ya corrió (reintento at-least-once) →
+ * P0002 → descarte idempotente. NO ATÓMICO entre los 2 pasos (igual que online): si el paso 2 se
+ * rechaza, los animales ya quedaron en NULL — estado CONSISTENTE y recuperable (el clear-NULL es idempotente).
  */
 export async function softDeleteManagementGroup(groupId: string): Promise<ServiceResult<void>> {
-  // Paso 1: reasignar a NULL los animales de ESTE lote (cualquier estado, incluidos archivados —
-  // un animal vendido que apuntaba al lote tampoco debe quedar con FK colgante). NO filtramos por
-  // status acá: el FK debe quedar limpio en TODA fila que apuntaba al lote. UPDATE directo OK (no
-  // cambia la visibilidad SELECT del perfil → sin gotcha RLS-on-RETURNING).
-  const { error: clearError } = await supabase
-    .from('animal_profiles')
-    .update({ management_group_id: null })
-    .eq('management_group_id', groupId);
-  if (clearError) return { ok: false, error: classifyError(clearError) };
+  // OFFLINE-FIRST (T6.2f): el borrado de lote es una op (b) RPC-bound (el soft-delete por RPC SECURITY
+  // DEFINER, owner-only, sortea el gotcha RLS-on-RETURNING — 0041). Dos pasos, AMBOS offline:
+  //
+  // Paso 1: reasignar a NULL los management_group_id de TODOS los perfiles del lote (anti-FK-colgante,
+  // cualquier estado incl. archivados). Es CRUD PLANO sobre la tabla SINCRONIZADA → un UPDATE local
+  // (runLocalWrite) que genera su propia CrudEntry → uploadData lo sube como UPDATE. Los animales vuelven
+  // a agruparse por categoría al instante, offline. La RLS (animal_profiles_update = has_role_in) lo
+  // re-valida al subir.
+  const clear = await runLocalWrite(buildClearGroupMembersUpdate(groupId));
+  if (!clear.ok) return { ok: false, error: { kind: clear.error.kind, message: clear.error.message } };
 
-  // Paso 2: soft-delete del lote vía RPC SECURITY DEFINER (owner-only, 0041). NO por UPDATE directo
-  // (daría 42501 por el gotcha de visibilidad SELECT — ver JSDoc). El RPC tira 42501 si no es owner,
-  // P0002 si el lote no existe → classifyDeleteError los traduce a copy es-AR.
-  const { error: delError } = await supabase.rpc('soft_delete_management_group', {
-    p_group_id: groupId,
+  // Paso 2: encolar el soft-delete del lote vía la OUTBOX (intent soft_delete_management_group + overlay
+  // pending_status_overrides effect='soft_deleted'). El lote DESAPARECE de la lista al instante (UNION
+  // oculta los soft_deleted pendientes). Al SUBIR (FIFO, después del clear-NULL del paso 1), uploadData
+  // llama supabase.rpc('soft_delete_management_group', { p_group_id }). Idempotencia natural: un reintento
+  // levanta P0002 (lote ya borrado) → descarte idempotente sin rollback (§5.4.3(4)). Un rechazo 42501 (no
+  // owner) → rollback del overlay (el lote re-aparece) + superficia (R8.1).
+  const enq = await enqueueSoftDelete({
+    entity: 'management_group',
+    targetId: groupId,
+    params: { p_group_id: groupId },
   });
-  if (delError) return { ok: false, error: classifyDeleteError(delError) };
+  if (!enq.ok) return { ok: false, error: { kind: 'unknown', message: enq.error.message } };
   return { ok: true, value: undefined };
 }
 
@@ -228,30 +174,18 @@ export async function softDeleteManagementGroup(groupId: string): Promise<Servic
  * (tg_animal_profiles_management_group_check) valida server-side que el lote sea del MISMO
  * establishment del perfil (no se puede asignar un lote de otro campo).
  *
- * UPDATE SIN .select() (gotcha RLS-on-RETURNING) + count:'exact' para distinguir el bloqueo de RLS /
- * perfil inexistente (count=0) de un éxito. Filtra `deleted_at is null` (no se asigna a un perfil
- * soft-deleted). Un error del trigger (lote de otro est / borrado) cae en classifyError → copy es-AR.
+ * UPDATE LOCAL (offline) → upload queue. Filtra `deleted_at is null` (no se asigna a un perfil
+ * soft-deleted). R6.3: se ELIMINA el `count:'exact'` — con escritura LOCAL el UPDATE siempre "tiene
+ * éxito" offline. El tenant-check del lote (mismo establishment del perfil, trigger 0037) lo valida
+ * server-side al SUBIR (un lote de otro campo o borrado es rechazado allí + superficiado por uploadData,
+ * R8.1) — NO por el return de acá. Contrato T5: el local write siempre devuelve ok.
  */
 export async function assignAnimalToGroup(
   profileId: string,
   groupId: string | null,
 ): Promise<ServiceResult<void>> {
-  const { error, count } = await supabase
-    .from('animal_profiles')
-    .update({ management_group_id: groupId }, { count: 'exact' })
-    .eq('id', profileId)
-    .is('deleted_at', null);
-
-  if (error) return { ok: false, error: classifyError(error) };
-  if (count === 0) {
-    return {
-      ok: false,
-      error: {
-        kind: 'unknown',
-        message: 'No se pudo cambiar el lote del animal. Volvé a intentar.',
-      },
-    };
-  }
+  const r = await runLocalWrite(buildAssignAnimalToGroupUpdate(profileId, groupId));
+  if (!r.ok) return { ok: false, error: { kind: r.error.kind, message: r.error.message } };
   return { ok: true, value: undefined };
 }
 
@@ -264,8 +198,9 @@ export async function assignAnimalToGroup(
  * activo (NUNCA hardcodeado); RLS lo re-scopea igual. Devuelve AnimalListItem[] para reusar AnimalRow.
  *
  * Implementado en términos de fetchAnimals (no una query nueva) para no duplicar el SELECT/joins ni el
- * mapeo, y para que el swap a PowerSync (C5) sea localizado. fetchAnimals no expone un filtro por
- * management_group_id, así que pedimos los activos del establishment y filtramos client-side por el
+ * mapeo, y para que el swap a PowerSync sea localizado. Como fetchAnimals YA lee del SQLite local
+ * (T4.1), fetchGroupMembers lee local automáticamente (sin tocar acá). fetchAnimals no expone un filtro
+ * por management_group_id, así que pedimos los activos del establishment y filtramos client-side por el
  * lote. Aceptable para rodeos de cientos (la tab ya trae hasta 200); un filtro server-side por
  * management_group_id es refinamiento posterior si hiciera falta.
  */
@@ -276,4 +211,11 @@ export async function fetchGroupMembers(
   const r = await fetchAnimals(establishmentId, { status: 'active' });
   if (!r.ok) return r;
   return { ok: true, value: r.value.filter((a) => a.managementGroupId === groupId) };
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────────
+
+/** UUID v4 de cliente (R6.4). crypto.randomUUID está en RN (Hermes), web y Node — sin dep extra. */
+function randomUuid(): string {
+  return globalThis.crypto.randomUUID();
 }

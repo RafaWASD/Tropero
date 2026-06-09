@@ -293,6 +293,34 @@ export function computeEditDiff(
   return ops;
 }
 
+/** Una fila efectiva de la plantilla del rodeo (id del field + su estado), para el overlay optimista. */
+export type EffectiveConfigRow = { fieldDefinitionId: string; enabled: boolean };
+
+/**
+ * Computa la PLANTILLA EFECTIVA del rodeo (las filas que tendría `rodeo_data_config` tras el trigger de seed
+ * 0018 + la RPC create_rodeo), para el OVERLAY OPTIMISTA del alta de rodeo OFFLINE (spec 15, Run T9.8). El
+ * trigger 0018 seedea una fila por cada system_default_field con `enabled = default_enabled`; la RPC aplica
+ * el diff (UPDATE de los defaults cambiados + INSERT de los no-defaults habilitados). El resultado neto:
+ *   - una fila por cada toggle del wizard (los default-fields del sistema con su estado FINAL elegido por el
+ *     usuario — buildWizardToggles cubre exactamente los default-fields);
+ *   - + una fila por cada no-default habilitado (diff kind 'insert', que NO está en los toggles del wizard).
+ * Pura (sin I/O) → testeable con node:test, igual que computeConfigDiff.
+ */
+export function buildEffectiveConfigRows(
+  toggles: TemplateToggle[],
+  diffOps: ConfigOp[],
+): EffectiveConfigRow[] {
+  const rows: EffectiveConfigRow[] = toggles.map((t) => ({ fieldDefinitionId: t.field.id, enabled: t.enabled }));
+  const seen = new Set(rows.map((r) => r.fieldDefinitionId));
+  for (const op of diffOps) {
+    if (op.kind === 'insert' && !seen.has(op.fieldDefinitionId)) {
+      rows.push({ fieldDefinitionId: op.fieldDefinitionId, enabled: op.enabled });
+      seen.add(op.fieldDefinitionId);
+    }
+  }
+  return rows;
+}
+
 /** Aplica un cambio de un toggle (por id) sobre la lista, devolviendo una nueva lista (inmutable). */
 export function setToggle(
   toggles: TemplateToggle[],

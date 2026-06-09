@@ -10,6 +10,7 @@ import {
   groupTogglesByCategory,
   computeConfigDiff,
   computeEditDiff,
+  buildEffectiveConfigRows,
   setToggle,
   categoryLabel,
   type FieldDefinition,
@@ -218,6 +219,58 @@ test('computeEditDiff: re-habilitar un no-default que YA tenía fila (enabled=fa
   ];
   const ops = computeEditDiff(desired, current);
   assert.deepEqual(ops, [{ kind: 'update', fieldDefinitionId: FD.inseminacion.id, enabled: true }]);
+});
+
+// ─── buildEffectiveConfigRows (overlay optimista del alta de rodeo OFFLINE, Run T9.8) ──
+
+test('buildEffectiveConfigRows: sin cambios → una fila por toggle del wizard con su estado default', () => {
+  const toggles = buildWizardToggles(CATALOG, DEFAULTS); // 5 default-fields, todos ON
+  const diff = computeConfigDiff(toggles, DEFAULTS); // 0 ops
+  const rows = buildEffectiveConfigRows(toggles, diff);
+  // = exactamente la plantilla que el trigger 0018 seedearía: una fila por default-field, su estado.
+  assert.equal(rows.length, 5);
+  assert.ok(rows.every((r) => r.enabled === true));
+  assert.deepEqual(
+    rows.map((r) => r.fieldDefinitionId).sort(),
+    [FD.servicio.id, FD.prenez.id, FD.peso.id, FD.vacunacion.id, FD.dientes.id].sort(),
+  );
+});
+
+test('buildEffectiveConfigRows: destildar un default → la fila refleja enabled=false (no se omite)', () => {
+  let toggles = buildWizardToggles(CATALOG, DEFAULTS);
+  toggles = setToggle(toggles, FD.peso.id, false);
+  const diff = computeConfigDiff(toggles, DEFAULTS); // 1 update (peso→false)
+  const rows = buildEffectiveConfigRows(toggles, diff);
+  // Sigue habiendo una fila por cada default-field (el trigger las seedea); peso quedó en false.
+  assert.equal(rows.length, 5);
+  const peso = rows.find((r) => r.fieldDefinitionId === FD.peso.id);
+  assert.equal(peso?.enabled, false);
+});
+
+test('buildEffectiveConfigRows: un NO-default habilitado (diff insert) suma su fila sin duplicar', () => {
+  // Wizard estándar (5 default-fields) + un no-default habilitado por una variante de UI (diff insert).
+  const toggles = buildWizardToggles(CATALOG, DEFAULTS);
+  const diff = [
+    ...computeConfigDiff(toggles, DEFAULTS),
+    { kind: 'insert' as const, fieldDefinitionId: FD.inseminacion.id, enabled: true },
+  ];
+  const rows = buildEffectiveConfigRows(toggles, diff);
+  assert.equal(rows.length, 6, 'los 5 defaults + el no-default habilitado');
+  const insem = rows.find((r) => r.fieldDefinitionId === FD.inseminacion.id);
+  assert.deepEqual(insem, { fieldDefinitionId: FD.inseminacion.id, enabled: true });
+  // No hay duplicados de field_definition_id.
+  const ids = rows.map((r) => r.fieldDefinitionId);
+  assert.equal(new Set(ids).size, ids.length);
+});
+
+test('buildEffectiveConfigRows: un no-default que YA está como toggle no se duplica por el diff', () => {
+  // Caso defensivo: si un field aparece como toggle Y como insert del diff (no debería, pero…) → 1 fila.
+  const toggles: TemplateToggle[] = [
+    { field: FD.inseminacion, enabled: true, required: false, isDefault: false, sortOrder: 99 },
+  ];
+  const diff = [{ kind: 'insert' as const, fieldDefinitionId: FD.inseminacion.id, enabled: true }];
+  const rows = buildEffectiveConfigRows(toggles, diff);
+  assert.equal(rows.length, 1);
 });
 
 // ─── setToggle ──────────────────────────────────────────────────────────────────

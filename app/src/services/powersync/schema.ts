@@ -197,6 +197,13 @@ const animal_profiles = new Table({
   exit_price: column.real,
   status: column.text,
   notes: column.text,
+  // created_by (0043): uuid→TEXT. NO es audit puro — es load-bearing para authz (exit_animal_profile lo
+  // lee para decidir quién puede dar de baja, R4.14). La ficha (buildAnimalDetailQuery) lo SELECTea →
+  // sin declararlo, el SQLite local NO lo materializa y `SELECT ap.created_by` tira "no such column".
+  created_by: column.text,
+  // nursing (0061): cría al pie. boolean→INTEGER (0/1). As-built en animal_profiles (no en animals);
+  // se declara para que el SET local espeje la stream (que hace SELECT *) y futuras lecturas no rompan.
+  nursing: column.integer,
   // PASO 2 (ADR-026 §B / b1 / 0079): identidad del animal GLOBAL denormalizada sobre el perfil per-campo,
   // mantenida fiel por trigger (force desde `animals` + propagación). `animals` NO entra al sync set; la UI
   // lee la identidad offline DESDE acá (swap T4). Tipos = animals (0019): text, text, date→TEXT.
@@ -214,6 +221,8 @@ const animals = new Table({
   species_id: column.text,
   sex: column.text,
   birth_date: column.text,
+  // is_castrated (0060): atributo físico del animal. boolean→INTEGER (0/1). Espeja el SELECT * de la stream.
+  is_castrated: column.integer,
   created_at: column.text,
   updated_at: column.text,
   deleted_at: column.text,
@@ -303,7 +312,12 @@ const reproductive_events = new Table({
   calf_sex: column.text,
   calf_tag_electronic: column.text,
   notes: column.text,
+  // heifer_fitness (0053): aptitud de vaquillona (apta/no_apta/diferida). enum→TEXT. Espeja SELECT *.
+  heifer_fitness: column.text,
   created_by: column.text,
+  // client_op_id (0075, delta de idempotencia T6.4): uuid→TEXT. La stream est_reproductive_events hace
+  // SELECT * → baja por el wire; se declara para que el SET local espeje el as-built (no se lee aún).
+  client_op_id: column.text,
   created_at: column.text,
   deleted_at: column.text,
 });
@@ -399,6 +413,10 @@ const op_intents = new Table(
 // del intent que la generó (para limpiar/rollbackear el overlay por client_op_id). Las lecturas
 // hacen UNION synced + overlay. El wiring de escritura/lectura del overlay es Run T6 (acá solo el
 // schema). Las columnas espejan lo mínimo que la UI muestra offline del ternero/alta/baja.
+// pending_animals: identidad GLOBAL del/los animal(es) optimista(s). El cliente la genera (createAnimal:
+// el alta; register_birth: los terneros con ids de cliente PROVISIONALES — los reales los asigna la RPC).
+// Espeja las columnas de `animals` que el upload del intent reusará (create_animal aplica un upsert de
+// animals con estos ids → idempotente por PK; register_birth NO usa estos ids, son solo visuales).
 const pending_animals = new Table(
   {
     client_op_id: column.text,
@@ -410,6 +428,10 @@ const pending_animals = new Table(
   { localOnly: true },
 );
 
+// pending_animal_profiles: el efecto optimista del PERFIL (alta o ternero). Espeja TODAS las columnas
+// que las lecturas T4 (lista/detalle vía buildAnimals*Query) leen de `animal_profiles`, INCLUIDA la
+// identidad denormalizada (b1: animal_tag_electronic/animal_sex/animal_birth_date) → el UNION synced +
+// overlay es directo (mismas columnas), sin JOIN a pending_animals. created_at para el orden de la lista.
 const pending_animal_profiles = new Table(
   {
     client_op_id: column.text,
@@ -420,8 +442,20 @@ const pending_animal_profiles = new Table(
     idv: column.text,
     visual_id_alt: column.text,
     category_id: column.text,
+    category_override: column.integer,
     breed: column.text,
+    coat_color: column.text,
+    entry_date: column.text,
+    entry_weight: column.real,
     status: column.text,
+    created_by: column.text,
+    exit_date: column.text,
+    exit_reason: column.text,
+    // identidad denormalizada (b1) — espejo de animal_profiles.animal_* para el UNION de lectura.
+    animal_tag_electronic: column.text,
+    animal_sex: column.text,
+    animal_birth_date: column.text,
+    created_at: column.text,
   },
   { localOnly: true },
 );
@@ -433,6 +467,7 @@ const pending_reproductive_events = new Table(
     event_type: column.text,
     event_date: column.text,
     notes: column.text,
+    created_at: column.text,
   },
   { localOnly: true },
 );
@@ -456,6 +491,37 @@ const pending_status_overrides = new Table(
     target_id: column.text,
     effect: column.text,
     status: column.text,
+  },
+  { localOnly: true },
+);
+
+// pending_rodeos / pending_rodeo_data_config (Run T9.8): overlay del alta de rodeo OFFLINE (intent
+// create_rodeo → RPC create_rodeo, 0081). El `id` de pending_rodeos = id de CLIENTE del rodeo (el mismo
+// que la RPC reusará por ON CONFLICT → idempotente). buildRodeosQuery UNIONa pending_rodeos (el rodeo
+// offline aparece en la lista); buildRodeoConfigQuery UNIONa pending_rodeo_data_config (la plantilla offline
+// aparece en el form dinámico / "editar plantilla"). Espejan las columnas que esas lecturas leen. La
+// plantilla optimista se COMPUTA en el cliente (defaults del sistema desde system_default_fields YA
+// sincronizado + el diff de toggles del usuario). Al ACK, clearOverlay limpia ambos por client_op_id y las
+// filas reales bajan por est_rodeos / est_rodeo_data_config.
+const pending_rodeos = new Table(
+  {
+    client_op_id: column.text,
+    establishment_id: column.text,
+    name: column.text,
+    species_id: column.text,
+    system_id: column.text,
+    active: column.integer,
+    created_at: column.text,
+  },
+  { localOnly: true },
+);
+
+const pending_rodeo_data_config = new Table(
+  {
+    client_op_id: column.text,
+    rodeo_id: column.text,
+    field_definition_id: column.text,
+    enabled: column.integer,
   },
   { localOnly: true },
 );
@@ -500,6 +566,8 @@ export const AppSchema = new Schema({
   pending_reproductive_events,
   pending_birth_calves,
   pending_status_overrides,
+  pending_rodeos,
+  pending_rodeo_data_config,
 });
 
 export type Database = (typeof AppSchema)['types'];

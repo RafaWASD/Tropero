@@ -919,3 +919,965 @@ Busqué activamente, como revisor hostil:
 - **Columnas agregadas**: tabla de arriba (12 columnas, todas `column.text`; `establishment_id` ×8 hijas, identidad ×3 en `animal_profiles`, `member_name` ×1 en `user_roles`). Tipos verificados contra `0077`–`0080`.
 - **PK especial**: confirmado — `birth_calves`/`rodeo_data_config` reciben `establishment_id` como columna normal, SIN `id` propio; `user_private` intacta. `AppSchema.validate()` (SDK) pasa.
 - **Estado**: typecheck verde; `schema.test.ts` 11/11; `check.mjs` con el único rojo pre-existente (RLS `member_name`, migración pendiente del leader).
+
+---
+
+## Run 7 — Fase T4 (swap de LECTURA del camino de datos: animales / eventos / timeline / lotes)
+
+> Cerrado. SOLO T4 (T4.1 animals, T4.2 events/timeline, T4.3 management-groups) + T9.5 (swap T4 alineado a b1, hecho
+> dentro de T4.1). Mismo patrón que T3: SQL builders PUROS en `local-reads.ts` + I/O en `local-query.ts`. Las
+> streams del paso 1 + paso 2 (25 streams, 43 buckets) YA sincronizan en vivo → estas lecturas leen del SQLite
+> local. NO se tocó escritura/RPC/EF/migraciones/streams/AppSchema/RLS (100% cliente, solo `services/`).
+> `baseline_commit` SIN cambios (multi-run, `1618a956…`). NO commiteado. NO marcado done.
+
+### Plan (cumplido)
+- [x] T4.1 — `animals.ts`: `fetchAnimals`, `searchAnimals`, `countAnimals`, `fetchAnimalDetail` → SQLite local
+  (`findOrCreateLookup` lee local por delegar en `searchAnimals`). Alineado a **b1** (= T9.5).
+- [x] T4.2 — `events.ts`: `fetchTimeline` (UNION ALL local de los 7 orígenes) + `fetchMother` (JOIN local) → SQLite local.
+- [x] T4.3 — `management-groups.ts`: `fetchManagementGroups` → SQLite local; `fetchGroupMembers` lee local por delegar en `fetchAnimals`.
+- [x] T9.5 — swap T4 alineado a (b1): la identidad sale de `animal_profiles.animal_*`, no de `animals` (hecho como parte de T4.1).
+
+### Decisiones de los puntos abiertos (cómo se resolvió cada uno)
+
+1. **Cómo se reconstruyó el TIMELINE local (T4.2).** `buildTimelineQuery(profileId)` es un `UNION ALL` de los **7
+   orígenes** que replica EXACTAMENTE la RPC `animal_timeline` (0069), leído de las tablas de evento ya sincronizadas:
+   `weight_events`, `reproductive_events`, `sanitary_events`, `condition_score_events`, `lab_samples`,
+   `animal_category_history` (category_change), `animal_events` (observacion). Por origen se reproducen las MISMAS
+   columnas del set de la RPC (`event_kind`, `event_id`, `event_date`, `created_at`, `payload`):
+   - **`event_date` fiel a 0069**: weight → `weight_date`; reproductive/sanitary/condition_score → `event_date`;
+     lab_sample → `collection_date`; category_change → `changed_at`; observacion → `created_at`. **Verificado que
+     emitir `weight_date` (sin la hora `time` de la RPC) es byte-equivalente**: `addWeight` NUNCA setea `time` →
+     `time` es siempre NULL → la RPC computa `weight_date::timestamptz + coalesce(time,'00:00')` = UTC-medianoche =
+     exactamente lo que parsea `new Date('YYYY-MM-DD')`. Además `weight` es date-only kind (parseTimelineRow usa
+     componentes UTC) y el orden intra-día lo da `created_at` (que SÍ emito), no la hora del event_date.
+   - **`created_at`** (orden intra-día / desempate del estado vigente, RPC 0069): emito la columna real por origen;
+     category_change usa `changed_at` (su instante de inserción), observacion usa `created_at` — igual que la RPC.
+   - **`payload`**: la RPC usa `jsonb_build_object(...)`; localmente `json_object(...)` (JSON1, presente en el SQLite
+     de PowerSync) → baja como TEXT (string JSON). El service hace `JSON.parse` (helper `parsePayload`, tolerante a
+     null/malformado) antes de pasarlo a `parseTimelineRow` (que espera `payload: Record`). Las CLAVES del
+     `json_object` son las MISMAS que la RPC y que el parser lee (`weight_kg`/`source`/`notes`, `event_type`/
+     `pregnancy_status`/`calf_id`, `product_name`/`route`, `score`, `sample_type`/`tube_number`/`result`/`received`,
+     `from`/`to`/`reason`, `event_type`/`text`/`author_id`/`edit_window_until` [+ `structured_payload`, que la RPC
+     trae pero el parser NO consume]).
+   - **Scoping**: la RPC filtraba `has_role_in(...)` server-side; ese filtro ERA el scoping → ya lo aplicó la stream
+     al sincronizar (las tablas de evento sincronizan scopeadas por establishment) → NO se re-filtra. SÍ se conserva
+     el `deleted_at IS NULL` por origen (igual que la RPC; `animal_category_history` NO tiene `deleted_at` → sin
+     filtro, fiel a la RPC).
+   - Las **2 queries suplementarias** (nombres de categoría de los category_change + service_type de los
+     reproductivos) que la RPC no traía se replican como queries LOCALES (`buildCategoryNamesQuery` con `IN (?,…)` +
+     `buildReproServiceTypesQuery`). Mismo flujo tolerante que la versión PostgREST (si fallan, el timeline no se
+     pierde). El ORDEN visual lo hace `parseTimeline` (puro, sin cambios) — el `ORDER BY event_date DESC` del SQL es
+     cosmético/defensivo, igual que el de la RPC.
+
+2. **Qué campos de identidad se usaron de `animal_profiles` (b1).** Las lecturas leen `animal_tag_electronic`,
+   `animal_sex`, `animal_birth_date` desde `animal_profiles` (denormalizadas, migración 0079), **NO** desde un JOIN a
+   `animals` (que NO se sincroniza — es global, sin establishment_id). Reemplaza el `animals!inner ( tag_electronic,
+   sex, birth_date )` de las queries PostgREST. Verificado: las queries originales de `animals.ts` (LIST_SELECT +
+   detail) leían de `animals` SOLO esos 3 campos; el `noTag` filter (`animals.tag_electronic IS NULL`) pasa a
+   `animal_profiles.animal_tag_electronic IS NULL`; el TAG exacto/substring de la búsqueda pasa a
+   `animal_profiles.animal_tag_electronic`. `breed`/`coat_color` ya vivían en `animal_profiles` (no se tocan).
+   `fetchMother` lee el tag de la madre desde `animal_profiles.animal_tag_electronic` (b1) en vez de `animals`.
+   **NINGÚN read necesita un campo de `animals` que no esté denormalizado** → no hay que extender la denormalización;
+   nada que reportar al leader por ese lado.
+
+3. **Degradación fuzzy (T4.1).** SQLite NO tiene `pg_trgm`/trigram → la búsqueda fuzzy (`ilike`/`%`) de PostgREST se
+   degrada a **`LIKE '%term%' ESCAPE '\'` local**. El exacto por TAG/IDV sigue por `=`. `buildSearchLikeQuery`
+   escapa los comodines `% _ \` del término del usuario (`escapeLike`) y usa `ESCAPE '\'` (SQLite LIKE usa `%`/`_`
+   como comodines; sin escape un `%` literal del término actuaría de comodín — defensa anti-injection). SQLite `LIKE`
+   es case-insensitive para ASCII por default → equivale a la case-insensitivity de `ilike` para el caso numérico/
+   visual. La estructura de `searchAnimals` se conserva idéntica (TAG exacto → IDV exacto → substring numérico sobre
+   idv+tag → visual fuzzy, dedup por profileId, exactos priorizados arriba). El ranking por similaridad (pg_trgm) es
+   post-MVP; el LIKE cubre el caso operativo de tipear un fragmento.
+
+### Degradación "Sincronizando…" — encuadre por lectura
+- `fetchAnimals` / `fetchManagementGroups`: `emptyIsSyncing` default **true** → un campo cuya lista viene vacía y
+  aún NO sincronizó degrada a `kind:'network'` "Sincronizando…" (la tab no muestra "no hay animales" antes del
+  sync). Post-sync, una lista genuinamente vacía devuelve `[]` (sin degradar).
+- `searchAnimals` (cada sub-query): `emptyIsSyncing` **false** — un no-match POST-sync DEBE devolver `[]` (no
+  degradar, o rompería la UX normal de "no encontramos"). Trade-off documentado: pre-sync una búsqueda muestra "sin
+  resultados" en vez de "Sincronizando" (aceptable: el usuario ve primero la lista, que sí degrada; y crear/buscar
+  pre-sync no es el flujo típico). `findOrCreateLookup` (delega en search) → pre-sync caería en 'create', aceptable
+  (el alta es online/outbox igual).
+- `fetchAnimalDetail` / `fetchMother`: `emptyIsSyncing` **false** — "no encontrado" / "no es ternero con parto" son
+  resultados de negocio válidos que el caller ya maneja, no necesariamente falta de sync.
+- `fetchTimeline`: `emptyIsSyncing` **false** — un animal sin eventos es un timeline legítimamente vacío.
+- `countAnimals`: COUNT(*) siempre 1 fila → no degrada; pre-sync da 0 (dirección segura, alimenta un hint de UI, no
+  autorización; igual que los counts de T3).
+
+### Archivos modificados
+| Archivo | Cambio |
+|---|---|
+| `app/src/services/powersync/local-reads.ts` | +13 SQL builders puros del camino de datos (T4): lista/búsqueda/detalle de animales (b1), conteo, `escapeLike`, lotes, timeline UNION (7 orígenes), service_type, nombres de categoría, madre. |
+| `app/src/services/powersync/local-reads.test.ts` | +18 unit (b1 desde animal_profiles, no JOIN a animals; filtros/orden/limit; LIKE+ESCAPE+escapeLike; timeline 7 orígenes/event_date/payload/deleted_at; madre cadena+sin status). |
+| `app/src/services/animals.ts` | `fetchAnimals`/`searchAnimals`/`countAnimals`/`fetchAnimalDetail` → SQLite local (b1). Removido el código PostgREST muerto (LIST_SELECT, toListItem, ProfileListRow/DetailRow, pushRows, escapeIlike). `createAnimal`/`exitAnimalProfile` ONLINE sin tocar. |
+| `app/src/services/events.ts` | `fetchTimeline` (UNION local + parsePayload) + `fetchMother` (JOIN local) → SQLite local. Removido `MotherRow`. Los `add*`/`registerBirth` ONLINE sin tocar. |
+| `app/src/services/management-groups.ts` | `fetchManagementGroups` → SQLite local; `fetchGroupMembers` comentario (lee local vía `fetchAnimals`). Mutaciones ONLINE sin tocar. |
+| `specs/active/15-powersync/tasks.md` | T4.1/T4.2/T4.3 `[x]` + T9.5 `[x]` con el alcance real (Run 6/7). |
+
+### Trazabilidad R<n> → test
+- **R5.1** (lectura de datos de campo desde local) → `local-reads.test.ts` :: cada `build*Query` verifica `FROM
+  <tabla local>` + columnas + filtros de dominio + args. `buildAnimalsListQuery`/`buildAnimalDetailQuery`/
+  `buildManagementGroupsQuery`/`buildTimelineQuery`/`buildMotherQuery`. + typecheck (firmas `ServiceResult<T>`
+  intactas, R11.1).
+- **R5.2** (búsqueda) → `buildSearchByTagQuery`/`buildSearchByIdvQuery`/`buildSearchLikeQuery`/`escapeLike` tests
+  (exacto por `=`; fuzzy degradado a `LIKE '%term%' ESCAPE '\'`; anti-comodín).
+- **R5.3** (detalle / timeline / madre) → `buildAnimalDetailQuery` (b1 + LEFT JOIN lote) + `buildTimelineQuery` (7
+  orígenes fieles a 0069) + `buildMotherQuery` (cadena, sin filtro de status, b1 tag).
+- **R13.7** (b1: identidad offline desde `animal_profiles`) → todos los builders de animales/madre: assert
+  `doesNotMatch /FROM animals|JOIN animals/` + `match /animal_tag_electronic|animal_sex|animal_birth_date/`.
+- **R11.1** (firmas públicas intactas) → `pnpm typecheck` verde + suite client unit verde (hooks/pantallas no se
+  tocaron; mismo `ServiceResult<T>`/shape de `value`).
+
+### Autorrevisión adversarial (paso 8)
+Busqué activamente, como revisor hostil:
+- **¿Cambió el SET/orden/columnas vs PostgREST?** Verifiqué lectura por lectura:
+  - `fetchAnimals`: mismos filtros (establishment + deleted_at + status default active + rodeoId + noTag), mismo
+    orden (`created_at DESC`), mismo LIMIT 200. El `noTag` pasa correctamente a `animal_tag_electronic IS NULL` (b1).
+  - `searchAnimals`: misma estructura de 4 fases + dedup por profileId + exactos arriba. El fuzzy degrada a LIKE
+    (documentado); el set para un fragmento es **superconjunto-equivalente** al ilike de PostgREST (LIKE '%x%' ≡
+    ilike '%x%' para ASCII case-insensitive; pg_trgm agregaba ranking por similaridad, NO un set distinto del
+    substring — el `.ilike` ya era el que hacía andar el buscador, el `% trigram` era red secundaria).
+  - `fetchAnimalDetail`: todas las columnas del shape `AnimalDetail` (incl. `category_override` coercido con `toBool`
+    porque SQLite lo guarda 0/1), LEFT JOIN al lote (puede estar soft-deleted), deleted_at IS NULL, LIMIT 1.
+  - `fetchTimeline`: los 7 orígenes, mismas claves de payload, mismo event_date/created_at por origen, mismo
+    `deleted_at` por origen, mismas 2 queries suplementarias. El orden lo sigue haciendo `parseTimeline` (puro,
+    intacto).
+  - `fetchMother`: misma cadena (birth_calves→parto vivo→madre), NO filtra status de la madre (R14.7/R4.15), LIMIT 1.
+- **¿Alguna firma pública cambió?** No (typecheck verde). `LocalReadError` (`'network'|'unknown'`) ⊆ los `AppError`
+  de animals (`+duplicate_tag/duplicate_idv`) y events (`+duplicate_tag/not_authorized`) → asignable; en events/
+  management-groups se re-envuelve `{ kind, message }` para no ampliar el tipo. Sin romper exhaustividad de call sites.
+- **¿El módulo I/O quedó fuera del grafo de node:test?** Sí: solo `local-reads.ts` (0 imports) entra al test; los
+  services + `local-query.ts` (SDK) NO. 33 unit verdes en aislamiento.
+- **¿El timeline local reproduce EXACTAMENTE los tipos de evento de la RPC?** Sí, los 7 (test
+  `buildTimelineQuery: 7 orígenes`); las claves de payload coinciden con lo que `parseTimelineRow` lee. **Caza dura
+  cerrada**: `weight` emite `weight_date` (no `weight_date + time`) — verifiqué que `time` SIEMPRE es NULL en este
+  app (addWeight no lo manda) → byte-equivalente a la RPC. `structured_payload` se incluye en el json_object (fiel a
+  la RPC) pero el parser no lo consume → irrelevante; `json_object` no valida ni rompe con una columna jsonb.
+- **¿La búsqueda lee el tag de `animal_profiles` (b1), no de un `animals` inexistente?** Sí (TAG exacto +
+  substring + detalle + lista + madre); `animals` NO se JOINea en ninguna (assert `doesNotMatch /FROM animals/`).
+  Una query a `animals` local hubiera devuelto basura (la tabla NO sincroniza — `animals` no está en el sync set).
+- **¿Tests que pasan por la razón equivocada?** Los unit verifican el SQL+args EXACTO (no "contiene algo"); el de
+  `buildAnimalsListQuery` asserta la AUSENCIA de un JOIN a animals y de `has_role_in` (no solo la presencia de las
+  columnas b1); el de `searchLike` verifica el `ESCAPE '\'` y el patrón `%…%`; el de `escapeLike` verifica el caso
+  reject (un `%` literal queda escapado). El timeline test cuenta los 6 `UNION ALL` y los 7 kinds/tablas exactos.
+- **Encontrado y corregido**: (a) un test de `buildSearchLikeQuery` tenía la regex del `ESCAPE` con doble backslash
+  (`\\\\`, = 2 literales) cuando el SQL emite UN backslash → corregido a `\\` (1 literal). Re-verde. (b) Código
+  PostgREST muerto tras el swap (LIST_SELECT, toListItem, ProfileListRow/DetailRow, pushRows, escapeIlike de
+  animals.ts; MotherRow de events.ts) → eliminado (evita confusión y warnings de no-usado). Verificado por grep que
+  ningún otro módulo los importaba (`import-write.ts` tiene su PROPIO `escapeIlike`, independiente).
+
+### Reconciliación de specs (paso 9)
+- `tasks.md` — T4.1/T4.2/T4.3 `[x]` + T9.5 `[x]` con el alcance real (T4.1 ya se hizo alineado a b1 desde el
+  arranque, sobre el AppSchema as-built del paso 2; no hubo versión intermedia con JOIN a `animals`).
+- `design.md §5.1` — la nota as-built de Run 3 ya describía el patrón del swap de lectura (one-shot getAll, builders
+  puros + I/O separado, degradación sin kind nuevo, scoping no-refiltrado / dominio sí, JOINs SQLite). T4 sigue
+  EXACTAMENTE ese patrón (no introduce mecanismo nuevo) → **no se reescribe design** (el "qué" de R5.1–R5.3 y el
+  cómo del swap ya están documentados; b1 ya está en §2.4(B)/§3/ADR-026 y el timeline UNION en §5.1). La única nota
+  nueva (degradación fuzzy → LIKE) ya estaba prevista en design §5.1 ("el fuzzy se degrada a LIKE '%term%' local").
+- `requirements.md` — sin cambio de "qué": las lecturas siguen leyendo lo mismo, ahora desde SQLite local (R5.1–R5.3
+  intactos); b1 ya tiene su cobertura/nota (R13.7). El swap es mecanismo, no requirement nuevo.
+- Sin specs contradictorias con el código.
+
+### Verificación
+- `node scripts/check.mjs` → typecheck client OK; lint anti-hardcode OK; client unit tests **verdes** (incl. los 33
+  de `local-reads.test.ts`: 15 de T3 + 18 nuevos de T4).
+- `cd app && pnpm.cmd typecheck` → verde.
+- `node --test … local-reads.test.ts` → **33/33 pass** en aislamiento.
+- `node scripts/run-tests.mjs` → **All tests passed.** La suite backend NO cambió (T4 es 100% cliente): typecheck +
+  client unit + RLS + Edge + Animal + Maneuvers + User_private + Import verdes. Últimas líneas: "Import suite (spec
+  12) OK / All tests passed. / Tests verdes / Entorno listo."
+
+### Qué ve Raf al recargar la web (tras el sync ya validado en vivo)
+Las siguientes pantallas/lecturas ahora salen del **SQLite local** (offline una vez sincronizado; antes leían online):
+- **Lista de animales** (tab Animales): `fetchAnimals` — con filtros por rodeo/estado/sin-caravana, todo local.
+- **Búsqueda de animales** (buscador + find-or-create): `searchAnimals`/`findOrCreateLookup` — exacto por TAG/IDV +
+  fuzzy degradado a LIKE local.
+- **Conteo de animales** (home, paso "Cargá tu primer animal"): `countAnimals` — local.
+- **Ficha del animal** (detalle): `fetchAnimalDetail` — identidad/atributos/rodeo/categoría/lote, local (b1).
+- **Timeline del animal** (cronología C3): `fetchTimeline` — el UNION de los 7 orígenes reconstruido local; mismos
+  nodos (peso, repro, sanidad, condición, lab, cambio de categoría, observación) en el mismo orden.
+- **Card "Madre"** de un ternero: `fetchMother` — local.
+- **Lotes** (selector del alta + miembros de lote): `fetchManagementGroups`/`fetchGroupMembers` — local.
+
+Las ESCRITURAS (alta, parto, baja, eventos, asignar/CRUD de lote) siguen ONLINE — son T5/T6 (sin cambio para Raf en
+este run).
+
+---
+
+## Fix-run — bug T4 en vivo "no such column: ap.created_by" (2026-06-09)
+
+> Hotfix de un gap del `AppSchema`, NO una task nueva. Alcance: SOLO `schema.ts` (+ `schema.test.ts`).
+> NO se tocaron migraciones, streams (`rafaq.yaml`), los SQL builders (`local-reads.ts`), RLS ni otros services.
+
+### Síntoma y causa raíz
+
+Al abrir la ficha de un animal, la app tiraba `no such column: ap.created_by`. El `AppSchema`
+(`app/src/services/powersync/schema.ts`) declaraba SOLO un subconjunto de columnas por tabla
+sincronizada; el swap de lectura T4 (`local-reads.buildAnimalDetailQuery`) SELECTea `ap.created_by`,
+que NO estaba declarada → PowerSync no la materializa en el SQLite local → la query revienta.
+Las streams hacen `SELECT *` (verificado en `rafaq.yaml`) → TODAS las columnas as-built bajan por el
+wire; el `AppSchema` debe espejarlas para que se materialicen. Los unit tests de `local-reads` testean
+el STRING SQL (no corren contra el SQLite real) → no cazaron el gap.
+
+### Auditoría completa de columnas leídas por los builders (T3 + T4)
+
+Crucé TODA columna que cada `build*Query` de `local-reads.ts` SELECTea contra las columnas declaradas
+en `schema.ts` y contra el schema as-built (`supabase/migrations/`). Resultado del cruce:
+
+- **La gran mayoría de tablas ya estaban completas** (catálogos, user_*, establishments, invitations,
+  rodeos, rodeo_data_config, management_groups, sessions, maneuver_presets, semen_registry, las 5 tablas
+  de evento, animal_events, animal_category_history, birth_calves — todas con su `establishment_id`/
+  `member_name`/identidad denormalizados del paso 2 ya presentes).
+- **Gaps encontrados** (los 5 que faltaban respecto del as-built; tipo verificado contra la migración):
+
+| Tabla | Columna agregada | Tipo declarado | Origen (migración) | Por qué ese tipo | ¿La lee un builder? |
+|---|---|---|---|---|---|
+| `animal_profiles` | `created_by` | `column.text` | `0043` (uuid) | uuid → TEXT | **SÍ — `buildAnimalDetailQuery` (la que rompió)** |
+| `animal_profiles` | `nursing` | `column.integer` | `0061` (boolean) | boolean → INTEGER (0/1) | No (robustez; la escribe `createAnimal`) |
+| `animals` | `is_castrated` | `column.integer` | `0060` (boolean) | boolean → INTEGER (0/1) | No (robustez) |
+| `reproductive_events` | `heifer_fitness` | `column.text` | `0053` (enum) | enum → TEXT | No (robustez) |
+| `reproductive_events` | `client_op_id` | `column.text` | `0075` (uuid) | uuid → TEXT | No (robustez; outbox idempotencia T6.4) |
+
+**Confirmación**: cubrí TODAS las columnas que los builders T3+T4 leen, no solo `created_by`. El cruce
+exhaustivo (incluido el GUARD de abajo, que enumera cada columna leída por tabla) garantiza que Raf NO
+va a recargar y chocar con la siguiente faltante. Las 3 PK especiales (`user_private`, `rodeo_data_config`,
+`birth_calves`) siguen SIN declarar un `id` propio (el SDK lo agrega/prohíbe) — no se tocaron.
+
+### Robustez (recomendación 3 de la tarea)
+
+El set as-built de cada tabla sincronizada quedó espejado en el `AppSchema` (las streams emiten `SELECT *`).
+Por eso se agregaron también las 4 columnas as-built que hoy NO lee ningún builder (`nursing`,
+`is_castrated`, `heifer_fitness`, `client_op_id`): futuras lecturas no vuelven a romper.
+
+### Guard anti-recurrencia (recomendación 4 — hecho)
+
+`schema.test.ts` → test nuevo **`GUARD: el AppSchema declara TODA columna que los builders de local-reads.ts
+(T3+T4) leen`**. Mapa manual `COLUMNS_READ_BY_BUILDERS = {tabla: [columnas]}` derivado de `local-reads.ts`
+(resolviendo los alias de JOIN: `ap`→animal_profiles, `r`→rodeos, `m`→animal_profiles madre, etc.). Por
+cada tabla, falla si el `AppSchema` no declara una columna que un builder SELECTea (la PK `id` se excluye —
+la agrega el SDK). Caza el gap en CI antes de que reviente en vivo. Si se agrega un builder que lee una
+columna nueva, hay que sumarla al mapa → el guard exige declararla en `schema.ts`.
+
+### Trazabilidad (R → test)
+
+- **R5.1 / R5.3 (lecturas locales del camino de datos no rompen por columna faltante)** →
+  `app/src/services/powersync/schema.test.ts` :: `GUARD: el AppSchema declara TODA columna que los builders
+  de local-reads.ts (T3+T4) leen` (verifica las ~20 columnas de `animal_profiles` incl. `created_by`, +
+  las 7 tablas del timeline, + contexto de establecimiento y catálogos).
+- **R2.1 (AppSchema válido contra el SDK)** → `schema.test.ts` :: `R2.1: AppSchema valida contra el SDK`
+  (sigue PASS con las 5 columnas nuevas).
+
+### Autorrevisión adversarial
+
+Busqué activamente, como revisor hostil:
+- **¿Quedó otra columna leída sin declarar?** Re-leí `LOCAL_LIST_SELECT`, `buildAnimalDetailQuery`,
+  `buildMotherQuery`, los 7 sub-selects del timeline (`json_object(...)` incluidos), las suplementarias
+  (`buildReproServiceTypesQuery`→`service_type`, `buildCategoryNamesQuery`→`name`) y los builders de T3.
+  Cada columna quedó atribuida a su tabla dueña y verificada presente. El GUARD enumera el set completo.
+- **¿Tipos correctos?** Verifiqué cada tipo contra la migración: uuid/enum/text→`column.text`,
+  boolean→`column.integer` (consistente con `category_override`/`active` ya existentes y con `toBool` del
+  service), numeric→`column.real`. NO inventé tipos.
+- **¿Rompo una PK especial?** Confirmé que NO declaré `id` en `user_private`/`rodeo_data_config`/
+  `birth_calves` (el test de PK especial sigue PASS).
+- **¿El guard pasa por la razón correcta?** Verifiqué en runtime que las 5 columnas nuevas están en el
+  `toJSON()` y que `id` NO está declarada (implícita) — el guard ejercita el path real.
+- **¿Regresión de conteo/forma?** No hay assertions de column-count en la suite; el conteo de tablas (32)
+  no cambia (no agregué/quité tablas). `op_intents` (deepEqual de 3 cols) intacto.
+- **¿Multi-tenant / write-path?** `created_by`/`nursing` los fuerza/escribe el server-side; declararlos en
+  el AppSchema NO abre spoofing (el wire scopea server-side; los triggers `0043`/`0079`/`0077` fuerzan los
+  valores). Sin impacto en RLS/streams (no se tocaron).
+
+Nada quedó abierto.
+
+### Reconciliación de specs
+
+`design.md` — agregada una nota **RECONCILIACIÓN AS-BUILT** bajo el banner "AS-BUILT `AppSchema` (paso 2)"
+documentando las 5 columnas as-built ahora espejadas + el GUARD. `requirements.md`/`tasks.md` sin cambio
+(no cambió el *qué*: es completar el espejo as-built del AppSchema que T9.3/T4 ya pedían; el `SELECT *` de
+las streams siempre mandó estas columnas).
+
+### Estado de verificación
+
+- `cd app && pnpm.cmd typecheck` → **verde**.
+- `schema.test.ts` (12 tests, incl. GUARD nuevo) → **12/12 PASS**.
+- `node scripts/check.mjs` → **verde** (typecheck + client unit + RLS/Edge/Animal/Maneuvers/User_private/
+  Import suites — la suite backend NO cambió).
+- NO marcado done. NO commiteado.
+
+---
+
+## Run 8 — T5: swap de ESCRITURA offline SIMPLE (CRUD plano)
+
+> Feature `15-powersync`, Fase **T5** (T5.1 eventos + T5.2 lotes + T5.3 sessions/presets). Solo CRUD
+> plano: INSERT/UPDATE local sobre tablas SINCRONIZADAS vía `getPowerSync().execute(...)`; SIN overlay
+> (eso es T6, RPC-bound). `baseline_commit` sin cambios (multi-run). NO done, NO commit.
+
+### Alcance EXACTO
+
+- **T5.1 (`events.ts`)** — `addWeight`, `addConditionScore`, `addTacto`, `addService`, `addAbortion`,
+  `addObservation`: de `supabase.from(T).insert(...)` a INSERT LOCAL (`runLocalWrite` → `db.execute`).
+- **T5.2 (`management-groups.ts`)** — `assignAnimalToGroup` (UPDATE local), `createManagementGroup`
+  (INSERT local), `renameManagementGroup` (UPDATE local). `softDeleteManagementGroup` NO se tocó (T6).
+- **T5.3** — N/A (sin service cliente de sessions/maneuver_presets; frontend spec 03 diferido).
+- NO se tocó: `uploadData`/`connector.ts` (el CRUD plano es table-agnóstico → ya cubre estas tablas),
+  migraciones, streams, RLS, AppSchema, los reads de T4, ni overlay/`op_intents`.
+
+### Archivos modificados
+
+| Archivo | Qué |
+|---|---|
+| `app/src/services/powersync/local-reads.ts` | +9 builders de ESCRITURA PUROS (buildAdd{Weight,ConditionScore,Tacto,Service,Abortion,Observation}Insert + buildCreateManagementGroupInsert / buildRenameManagementGroupUpdate / buildAssignAnimalToGroupUpdate). |
+| `app/src/services/powersync/local-query.ts` | +runLocalWrite(query) (I/O: db.execute(sql, args); éxito offline siempre; error solo si el execute local falla). |
+| `app/src/services/events.ts` | 6 add* swapeados a runLocalWrite + helper randomUuid. registerBirth (RPC) intacto. Header + comentarios reconciliados. |
+| `app/src/services/management-groups.ts` | 3 funciones swapeadas + helper randomUuid. Eliminado diff before/after (create) y count exact (assign/rename). softDelete intacto. Header reconciliado. |
+| `app/src/services/powersync/local-reads.test.ts` | +17 unit (SQL exacto + arg order + literales embebidos + id cliente primero por cada builder). |
+| `specs/active/15-powersync/{tasks,design}.md` | T5.1/T5.2 [x], T5.3 [~] N/A; nota AS-BUILT en design §5.2. |
+
+### Por cada add*/lote — tabla local + establishment_id + qué se eliminó
+
+| Función | Tabla local | establishment_id | Eliminado |
+|---|---|---|---|
+| addWeight | weight_events (INSERT) | OMITIDO (trigger 0077 lo fuerza al subir) | split-insert (era .insert() sin .select()) |
+| addConditionScore | condition_score_events (INSERT) | OMITIDO (0077) | idem |
+| addTacto | reproductive_events event_type=tacto (INSERT) | OMITIDO (0077); transición categoría = trigger AFTER INSERT al SUBIR | idem |
+| addService | reproductive_events event_type=service (INSERT) | OMITIDO (0077) | idem |
+| addAbortion | reproductive_events event_type=abortion (INSERT) | OMITIDO (0077); reversión preñez al SUBIR | idem |
+| addObservation | animal_events (INSERT) | **SÍ se setea** (EXCEPCIÓN: trigger 0034 de VALIDACIÓN, no force; lo deriva el caller del PERFIL) | idem |
+| createManagementGroup | management_groups (INSERT, active=1 literal) | columna propia (la pasa el caller) | diff before/after (devuelve {id,name} con id cliente sin re-leer) |
+| renameManagementGroup | management_groups SET name (UPDATE, WHERE deleted_at IS NULL) | — | count exact |
+| assignAnimalToGroup | animal_profiles SET management_group_id (UPDATE, WHERE deleted_at IS NULL; acepta null=quitar) | tenant-check del lote = trigger 0037 al SUBIR | count exact |
+
+### ¿Algún add* resultó RPC-bound? — NO
+
+Las 6 de events.ts (T5.1) y las 3 de management-groups.ts (T5.2) son INSERT/UPDATE plano single-tabla.
+registerBirth (RPC register_birth) y softDeleteManagementGroup (RPC soft_delete_management_group) son
+RPC-bound y quedan para **T6** — NO se tocaron. Las transiciones de categoría de tacto/aborto NO son
+inserts cross-tabla del cliente: son side-effects de un trigger AFTER INSERT que corre cuando la fila se
+SUBE a PostgREST (el cliente inserta UNA fila en reproductive_events). Nada se coló en T5 indebidamente.
+
+### Qué va a poder hacer Raf OFFLINE tras esto
+
+Sin red, y verlo al INSTANTE en el timeline/lista (lecturas locales T4):
+- cargar pesaje, condición corporal, tacto, servicio, aborto, observación sobre un animal → aparece en el
+  timeline local de la ficha enseguida; sube al reconectar.
+- asignar/quitar un animal a un lote → la ficha y los miembros del lote lo reflejan; sube al reconectar.
+- crear y renombrar un lote → aparece en el selector/lista de lotes (filtra active=1, por eso el INSERT
+  escribe active=1 explícito); sube al reconectar.
+(Parto, baja, alta y soft-delete siguen ONLINE hasta T6.)
+
+### Contrato del local write (clave de T5)
+
+El **local write SIEMPRE tiene éxito offline** → los add*/CRUD devuelven ok apenas la fila está en SQLite.
+El **fallo de UPLOAD** (RLS reject = permanente, ej. no-owner renombrando un lote, o active_lost) lo maneja
+connector.uploadData() (descarta la op + superficia por el canal de status/error, R8.1) — NUNCA por el
+return del service (que ya devolvió ok con la fila local). runLocalWrite solo devuelve error si el
+db.execute local falla (DB no booteada / SQL malformado → kind unknown, defensivo).
+
+### Autorrevisión adversarial (paso 8)
+
+Busqué activamente, como revisor hostil:
+1. **¿Una sola CrudEntry que uploadData sepa subir?** SÍ. INSERT local → PUT CrudEntry (op.table,
+   op.id=id cliente, op.opData) → uploadData hace supabase.from(op.table).upsert({...opData, id}). UPDATE →
+   PATCH → supabase.from(op.table).update(opData).eq(id, op.id). El camino plano es table-agnóstico → cubre
+   las 4 tablas sin tocar uploadData (design §5.4.1, verificado contra connector.ts).
+2. **¿El establishment_id NULL local rompe el upload?** NO. El trigger tg_force_establishment_id_from_profile
+   (0077) es BEFORE INSERT e INCONDICIONAL (new.establishment_id := v_est, leído de la migración líneas
+   60-69) → corre ANTES del check NOT NULL y fuerza el valor desde el perfil, ignorando cualquier valor (o
+   ausencia) del payload. Verificado que las 5 tablas de evento tienen el trigger. animal_events es la
+   excepción (trigger de VALIDACIÓN 0034) → SÍ se manda, derivado del perfil = comportamiento previo.
+3. **¿Se eliminó el split-insert/count?** SÍ. Grep confirmó: 0 .insert()/.select()/count exact en código de
+   las funciones swapeadas (solo en comentarios reconciliados). El diff before/after de create desapareció.
+4. **¿Firmas intactas (R11.1)?** SÍ. addWeight(input), createManagementGroup(est,name) devuelve {id,name},
+   assign/rename void, addObservation con establishmentId — todas idénticas. Pantallas/hooks no se tocan.
+5. **¿Algún add* RPC-bound se coló?** NO (ver sección anterior).
+6. **¿Tests que pasan por la razón equivocada?** Los unit asertan el SQL EXACTO + el ORDEN de args vs el
+   orden de los ? (la clase de bug de un INSERT posicional). Caso notes=null: verifico que la posición NO se
+   saltea (5 placeholders siempre) — un payload-builder condicional habría roto el INSERT por posición; acá
+   los builders son posicionales fijos → robusto. Caso assign(null) (quitar lote) testeado.
+7. **¿GRANT/RLS ya permiten estos inserts vía PostgREST?** SÍ — el as-built previo hacía
+   supabase.from(weight_events).insert(...) y funcionaba; el upload usa el mismo PostgREST como el user
+   logueado → sin regresión de permisos.
+
+Nada que corregir tras la autorrevisión (no aparecieron bugs/gaps). Cierre limpio.
+
+### Reconciliación de specs (regla dura)
+
+- tasks.md: T5.1/T5.2 [x], T5.3 [~] (N/A documentado, sin alcance hoy).
+- design.md §5.2: nota AS-BUILT (Run 8, T5) — decisión establishment_id opción (a) omitir (trigger fuerza) +
+  excepción animal_events; createManagementGroup devuelve sin re-leer; contrato de runLocalWrite; T5.3 sin alcance.
+- requirements.md: sin cambio — R6.1/R6.3/R6.4 ya describen este as-built (no cambió el qué; R6.1 lista
+  sanitary_event/lab_sample como CRUD-plano-elegibles, pero NO hay service cliente que los escriba todavía →
+  mismo estado que sessions; se swapearán cuando exista UI que los consuma).
+
+### Trazabilidad R<n> → test
+
+- **R6.1** (persistir mutaciones CRUD-plano en SQLite local + upload queue, offline) → local-reads.test.ts ::
+  buildAdd*Insert / build{Create,Rename,Assign}* (9 builders verifican el INSERT/UPDATE local que
+  runLocalWrite ejecuta y PowerSync encola).
+- **R6.3** (eliminar split-insert/count) → local-reads.test.ts :: buildRenameManagementGroupUpdate (sin
+  count), buildCreateManagementGroupInsert (un INSERT, sin diff) + grep 0 .select()/count.
+- **R6.4** (id uuid de cliente) → todos los builders reciben id como 1er arg; los tests asertan que va
+  primero en args. Servicios usan randomUuid() (crypto.randomUUID).
+
+### Estado de verificación (Run 8)
+
+- `cd app && pnpm.cmd typecheck` → **verde**.
+- `local-reads.test.ts` → **43/43 PASS** (17 nuevos de escritura).
+- `node scripts/check.mjs` → **verde** (exit 0; typecheck + lint hardcode + client unit + RLS/Edge/Animal/
+  Maneuvers/User_private/Import suites — la suite backend NO cambió).
+- `node scripts/run-tests.mjs` → **"All tests passed."** end-to-end.
+- NO marcado done. NO commiteado.
+
+---
+
+## Run T6 — escritura offline RPC-bound: outbox + overlay + RPC-mapping (T6.1, T6.2a-f, T6.5)
+
+Bloque más delicado (integridad de datos en la escritura). Las (b) RPC-bound — alta de animal, parto, baja,
+soft-deletes — pasan a OFFLINE vía outbox `op_intents` (insertOnly) + overlay `pending_*` (localOnly) + mapeo
+intent→RPC en `uploadData` (Puerta 1, opción ii). `import_rodeo_bulk` queda ONLINE (T6.1). NO migraciones
+nuevas (la idempotencia de register_birth ya está en 0075).
+
+### Archivos creados
+
+- `app/src/services/powersync/outbox.ts` — I/O de la outbox: enqueueCreateAnimal/enqueueRegisterBirth/
+  enqueueExitAnimal/enqueueSoftDelete (1 writeTransaction: op_intent + overlay) + clearOverlay/rollbackOverlay
+  (DELETE del overlay por client_op_id).
+- `app/src/services/powersync/upload.ts` — PURO: mapIntentToRpc (intent→RPC; p_client_op_id SOLO a
+  register_birth; create_animal → 2 upserts) + classifyIntentUploadError (transient/idempotent_discard/
+  permanent_reject) + PermanentIntentError.
+- `app/src/services/powersync/upload.test.ts` — 14 unit del mapper + clasificación (idempotencia MED-1 23505,
+  P0002 soft_delete, op corrupto).
+
+### Archivos modificados
+
+- `schema.ts` — pending_animal_profiles completado al shape de lectura (b1 + detalle); pending_reproductive_events + created_at.
+- `local-reads.ts` — UNION synced+overlay en list/count/search/detail/timeline/mother; ocultación por
+  pending_status_overrides en management-groups/rodeos; builders nuevos (category/species/birth-context;
+  clear-group-members; outbox/overlay inserts; clear-overlay delete; PENDING_OVERLAY_TABLES).
+- `connector.ts` — uploadData reemplaza el STUB Run T6: detecta op_intents → applyIntentTransaction
+  (mapIntentToRpc → supabase.rpc / 2 upserts; ACK→clearOverlay; transient→re-throw; permanent→rollbackOverlay+
+  descarte+superficia; idempotent_discard→clearOverlay+descarte sin superficiar).
+- `animals.ts` — createAnimal → outbox (category/species LOCAL; intent create_animal + overlay). exitAnimalProfile
+  → outbox (intent exit_animal_profile + overlay effect=exited). Eliminados classifyError/classifyExitError/supabase.
+- `events.ts` — registerBirth → outbox (intent register_birth + overlay parto + N terneros heredando est/rodeo/
+  categoría de la madre, LOCAL). Eliminados classifyError/supabase.
+- `management-groups.ts` — softDeleteManagementGroup → clear-NULL local (CRUD plano) + outbox (intent
+  soft_delete_management_group + overlay effect=soft_deleted). Eliminados classifyError/classifyDeleteError/DELETE_COPY/supabase.
+- `rodeos.ts` — softDeleteRodeo → outbox (intent soft_delete_rodeo + overlay). RECONCILIACIÓN: la versión previa
+  hacía UPDATE directo de deleted_at (que el upload rechazaría — gotcha RLS-on-RETURNING); ahora va por el RPC
+  soft_delete_rodeo (0041), como manda design 5.3.1.
+- `local-reads.test.ts` — tests de los builders cambiados re-escritos al UNION/overlay + 17 unit nuevos T6.
+- `schema.test.ts` — GUARD nuevo: el overlay pending_* declara TODA columna que el UNION T6 lee.
+- `scripts/run-tests.mjs` — registra upload.test.ts.
+
+### Los 4 swaps (intent + overlay)
+
+- createAnimal → intent create_animal { animals, animal_profiles } (ids de cliente; identidad/created_by los
+  fuerza el trigger al subir) + overlay pending_animals + pending_animal_profiles. UNION: lista/búsqueda/detalle/count.
+- registerBirth → intent register_birth { p_mother_profile_id, p_event_date, p_calves } (+ p_client_op_id
+  inyectado en uploadData) + overlay pending_reproductive_events (parto) + por ternero pending_animals/
+  pending_animal_profiles/pending_birth_calves. UNION: timeline (parto en la cronología de la madre) + madre
+  (calf→madre) + lista. ids visuales PROVISIONALES (reales los pone la RPC).
+- exitAnimalProfile → intent exit_animal_profile { p_profile_id, p_status, p_exit_reason, p_exit_date,
+  p_exit_weight, p_exit_price } + overlay pending_status_overrides (effect=exited, status). UNION: lista OCULTA;
+  detalle COALESCE del status (badge archivada).
+- softDelete* (management_group, rodeo) → intent soft_delete_management_group { p_group_id } / soft_delete_rodeo
+  { p_rodeo_id } + overlay pending_status_overrides (effect=soft_deleted). UNION: lista de lotes/rodeos OCULTA.
+  (mgmt-group + paso 1 clear-NULL local = CRUD plano aparte.)
+
+### UNION de cada lectura (R6.11)
+
+- lista/búsqueda/count: synced (oculta exited/soft_deleted vía NOT EXISTS pending_status_overrides) UNION ALL
+  overlay (pending_animal_profiles, mismo shape, JOIN a rodeos/categories sincronizadas).
+- detalle: synced (COALESCE(pso.status, ap.status) para la baja optimista) UNION ALL overlay.
+- timeline: 7 orígenes sincronizados UNION ALL el parto optimista de pending_reproductive_events.
+- madre: cadena sincronizada UNION ALL la cadena overlay (pending_birth_calves → pending_reproductive_events → madre sincronizada).
+- lotes/rodeos: NOT EXISTS pending_status_overrides effect=soft_deleted.
+- miembros de lote: hereda el UNION de la lista (delega en fetchAnimals).
+
+Con el overlay VACÍO el UNION/NOT EXISTS son no-ops → set IDÉNTICO al swap T4. Firmas públicas intactas (R11.1).
+
+### Clasificación de errores de uploadData para op_intents (5.4.4)
+
+- network / failed-to-fetch / timeout / 5xx / 429 → transient → re-throw (queda en cola), NO toca overlay.
+- P0002 de un soft_delete_* → idempotent_discard → clearOverlay + complete, SIN rollback, sin superficiar.
+- 23505 del índice reproductive_events_client_op_id_uq de register_birth → idempotent_discard (MED-1; race del
+  mismo caller, la RPC ya corrió) → clearOverlay + complete, sin loop, sin rollback.
+- 42501 / 23503 / 23514 / otro 23505 (tag/idv duplicado) → permanent_reject → rollbackOverlay + complete + superficia.
+- intent CORRUPTO (op_type desconocido / params inválidos → PermanentIntentError) → permanent_reject (no loop transitorio).
+- P0002 que NO es de un soft_delete (defensivo) → permanent_reject.
+
+### Idempotencia (T6.2d) — at-least-once
+
+- register_birth: dedup EXPLÍCITA por client_op_id (0075). uploadData inyecta p_client_op_id=op.id; reintento del
+  mismo caller → no-op o 23505 del índice compuesto → idempotent_discard. Cross-tenant: NO devuelve datos ajenos
+  (índice COMPUESTO (animal_profile_id, client_op_id) → la madre del atacante nunca colisiona; T2.20/0075 intacto).
+- create_animal: dedup NATURAL por ids de cliente → upsert (ON CONFLICT por PK) de animals + animal_profiles.
+- exit_animal_profile: dedup NATURAL (transición de status idempotente) → reintento re-aplica el mismo end-state
+  (category_id no se toca → no 2da fila en animal_category_history).
+- soft_delete_*: dedup NATURAL por la guarda deleted_at IS NULL → reintento levanta P0002 → idempotent_discard.
+
+### No doble-upload (T6.5 / R6.12)
+
+El efecto optimista vive SOLO en el overlay localOnly (verificado en schema.test). enqueue escribe en UNA
+writeTransaction: op_intent (insertOnly → 1 CrudEntry) + overlay (localOnly → 0 CrudEntry) → una op (b) = UNA
+CrudEntry → la RPC corre una sola vez. (NOTA: softDeleteManagementGroup genera una 2da CrudEntry — el clear-NULL
+de animal_profiles — pero es una op de datos legítima e independiente, NO una fila que la RPC del soft-delete
+recree; el soft-delete en sí = 1 op_intent.)
+
+### Rollback del overlay (T6.2e)
+
+- permanente: rollbackOverlay(client_op_id) borra el pending_* de esa op → el ternero/alta desaparece del UNION;
+  la baja/soft-delete se des-oculta. Nada se escribió en tablas sincronizadas → sin residuo server ni huérfanos.
+- transitorio: NO se toca el overlay (op en vuelo).
+- P0002/23505-idempotente: clearOverlay (NO rollback — el efecto real ya está aplicado; la fila real baja por la stream).
+
+### Autorrevisión adversarial (paso 8)
+
+- (seguridad) op_type del intent NO permite RPC arbitraria: mapIntentToRpc whitelistea RPC_OP_TYPES; las tablas
+  del create_animal son LITERALES en el connector → un intent forjado solo setea el payload (RLS/RPC re-valida).
+- (seguridad) tenant-check / no-hardcode: establishment_id del contexto (createAnimal) o heredado de la madre
+  LOCAL (registerBirth); la RPC re-valida has_role_in/is_owner_of/owner-OR-created_by al subir → cross-tenant → 42501 → rollback.
+- (seguridad) anti-injection: params_json + todos los inserts del overlay/intent usan BIND PARAMS; rpc/upsert pasan JSON.
+- (idempotencia/IDOR) cross-tenant register_birth replay: NO devuelve datos ajenos (índice COMPUESTO 0075; la
+  23505-idempotente solo dispara para el MISMO caller). NO rompí T2.20.
+- (BUG ENCONTRADO Y CORREGIDO) intent corrupto loopearía para siempre: un op_type desconocido tiraba un Error
+  plano sin code/status → "sin señal → transient" → loop infinito. FIX: PermanentIntentError (marcador) +
+  chequeo PRIMERO en classifyIntentUploadError → permanent_reject (descarte, no loop). Unit que lo prueba.
+- (edge) detalle UNION LIMIT 1 con ambas filas en la ventana ACK: si la fila real baja antes del clearOverlay, el
+  UNION devuelve 2 y LIMIT 1 toma una (ventana sub-segundo, mismo animal → aceptable, no leak).
+- (edge) clearOverlay falla antes de complete: el op_intent queda en cola → reintenta idempotente → self-healing.
+- (no doble-upload) mgmt-group 2 CrudEntry: confirmado que la 2da (clear-NULL) es op de datos legítima e
+  independiente, NO un duplicado de lo que la RPC recrea.
+- (offline-first) createAnimal/registerBirth resuelven category/species/contexto-madre DESDE LOCAL → funcionan
+  sin red; degradan a "Sincronizando…" si el catálogo aún no bajó.
+- (tests por la razón correcta) la clasificación ejerce el path real (idempotent_discard vs permanent_reject por
+  code+opType+message); el del 23505-de-tag verifica el REJECT.
+
+### Reconciliación de specs al as-built (paso 9)
+
+1. create_animal NO tiene RPC en el schema as-built → uploadData aplica 2 upserts idempotentes (animals +
+   animal_profiles, ON CONFLICT por PK), el "orden atómico en uploadData" que design 5.3.1 ya contemplaba.
+   Reconciliado en design 5.4.2.
+2. softDeleteRodeo hacía UPDATE directo de deleted_at (lo rechazaría el upload) → ahora por el RPC soft_delete_rodeo
+   (0041), como manda design 5.3.1. Reconciliado en design 1.2/5.3.1.
+3. exitAnimalProfile vive en animals.ts (no en exit-animal.ts, que es lógica pura). Nota en design 1.2.
+4. duplicate_tag/duplicate_idv/not_authorized ya NO se surfacing desde el return de createAnimal/registerBirth —
+   el encolado SIEMPRE tiene éxito offline; el rechazo REAL lo resuelve uploadData al subir (R8.1, canal de
+   status). Las pantallas no se rompen (manejan ok:true). DECISIÓN PARA EL LEADER (UX, abajo).
+5. soft_delete_event / soft_delete_animal_event: el mapper los soporta pero NO hay service cliente que los
+   invoque hoy (sin UI de borrado de eventos — spec 03 diferida). Documentado; sin swap.
+6. overlay schema extendido: pending_animal_profiles al shape completo de lectura; pending_reproductive_events + created_at.
+
+### Verificación
+
+- upload.test.ts → 14/14 PASS. local-reads.test.ts → 60/60 PASS. schema.test.ts → PASS (+ GUARD del overlay).
+- node scripts/check.mjs → verde (exit 0; typecheck + lint + client unit + RLS/Edge/Animal/Maneuvers/User_private/
+  Import — backend NO cambió, T2.20/0075 intactos). node scripts/run-tests.mjs → "All tests passed.".
+- NO migraciones nuevas, NO deploy, NO commit, NO marcado done. Espera reviewer + Gate 2.
+
+### Para decisión del leader
+
+1. UX offline de duplicados (reconciliación 4): offline ya no hay feedback inmediato de "caravana/IDV duplicada"
+   al alta ni de "tag de ternero duplicada" al parto — se resuelve al sincronizar (status). Inherente a la opción
+   ii. ¿Alcanza con superficiar por status, o el leader quiere un check de unicidad LOCAL pre-encolado
+   (best-effort) sobre el SQLite ya sincronizado? (No lo inventé; es decisión de producto.)
+2. Verificación E2E in-vivo de no-doble-upload + rollback (T7.5/T7.9): el cierre real contra el SQLite/PowerSync
+   REAL es un run aparte (T7 E2E). Acá quedó la garantía ARQUITECTÓNICA (localOnly/insertOnly verificado en
+   schema.test) + los unit de la lógica.
+
+---
+
+## Run T9.8 (createRodeo OFFLINE — RPC create_rodeo + outbox/overlay, un-defer) — EN CURSO (implementer)
+
+Feature en curso: `15-powersync`. Cierra el ÚLTIMO write que faltaba offline: `createRodeo` (Raf lo pidió
+explícito — offline-first sin excepciones). NO es CRUD plano: arma una plantilla `rodeo_data_config`
+(seedeada por el trigger 0018 server-side + diff de toggles), y `rodeo_data_config` tiene PK compuesta
+(read-only-local). → Solución: RPC atómica server-side `create_rodeo` + outbox + overlay optimista (patrón T6).
+`baseline_commit` ya existe (`1618a9566…`), NO se reescribe (multi-run). **NO aplico la migración 0081** (la
+aplica el leader tras Gate 1). NO done, NO commit.
+
+Plan (T<n>) — HECHO, esperando reviewer + Gate 1 (spec sobre 0081) + Gate 2:
+- [x] T-cr.1 — `supabase/migrations/0081_create_rodeo_rpc.sql` (verificado: último en disco = 0080 → mía = 0081).
+  RPC `create_rodeo(p_id, p_establishment_id, p_name, p_species_id, p_system_id, p_toggles jsonb)` returns uuid,
+  security definer, search_path=public. (a) Authz PRIMERO `is_owner_of(p_establishment_id)` (espeja rodeos_insert
+  0017 = owner-only, 42501). (b) Valida name no-vacío + species/system activos + pertenencia (23503/23514). (c)
+  INSERT del rodeo con el id de cliente `ON CONFLICT (id) DO NOTHING` (idempotencia natural; el trigger de seed
+  0018 NO re-dispara). **(c-bis) GUARD ANTI-IDOR** (autorrevisión, ver abajo). (d) UPSERT idempotente de los
+  toggles en rodeo_data_config (`ON CONFLICT (rodeo_id, field_definition_id) DO UPDATE SET enabled`). Grants
+  revoke public/anon + grant authenticated + notify. BEGIN/COMMIT. **NO aplicada al remoto.**
+- [x] T-cr.2 — `schema.ts`: 2 overlay localOnly `pending_rodeos` + `pending_rodeo_data_config` (cada una con
+  client_op_id). schema.test.ts: PENDING_TABLES (7), total 34 (26 sync + op_intents + 7 overlay), overlay GUARD.
+- [x] T-cr.3 — `outbox.ts`: `enqueueCreateRodeo` (1 writeTransaction: intent create_rodeo + overlay pending_rodeos
+  + N filas pending_rodeo_data_config = la plantilla computada). `PENDING_OVERLAY_TABLES` += las 2.
+- [x] T-cr.4 — `upload.ts`: `'create_rodeo'` ∈ RPC_OP_TYPES → `mapIntentToRpc` lo mapea a `{kind:'rpc', rpcName:
+  'create_rodeo', args: params}` SIN p_client_op_id (dedup natural). El connector ya maneja `kind:'rpc'` +
+  ACK clearOverlay / permanente rollbackOverlay (sin cambios — las 2 tablas ya viajan en PENDING_OVERLAY_TABLES).
+- [x] T-cr.5 — `rodeos.ts`: `createRodeo` → id de cliente (newClientOpId) + species/system DESDE LOCAL +
+  `fetchSystemDefaults` local + `computeConfigDiff` → p_toggles + `buildEffectiveConfigRows` → overlay + encola
+  por outbox. **Firma pública intacta** (ServiceResult<Rodeo> con el rodeo optimista). Eliminado `fetchRodeosOnline`
+  + imports muertos (supabase/classifyError/toggleRodeoField/enableNonDefaultField). Header del archivo reconciliado.
+- [x] T-cr.6 — `local-reads.ts`: `buildRodeosQuery` UNION `pending_rodeos`; `buildRodeoConfigQuery` UNION
+  `pending_rodeo_data_config`. Builders `buildPendingRodeoInsert`/`buildPendingRodeoConfigInsert`. Firmas intactas.
+- [x] T-cr.6b — `rodeo-template.ts`: `buildEffectiveConfigRows(toggles, diffOps)` PURO + 4 unit tests.
+- [x] T-cr.7 — Tests: unit (mapping create_rodeo, overlay/UNION, builders, buildEffectiveConfigRows) — 498 client
+  unit verdes. Test idempotencia/authz/anti-IDOR de la RPC en `supabase/tests/animal/run.cjs` (4 casos) — **FALLA
+  hasta aplicar 0081** (PGRST202 function-not-found, rojo esperado, patrón 0075-0080).
+- [x] T-cr.8 — Reconciliación: design §1.2 un-defer; tasks.md T3.3 + T9.8 (nueva); docs/backlog.md (entrada
+  2026-06-09 createRodeo → ✅ RESUELTA, opción b).
+
+## Cómo el cliente computa la plantilla optimista (entregable al leader)
+
+`createRodeo` (rodeos.ts) lee TODO de LOCAL (el SQLite ya sincronizado por las streams):
+1. `species`/`systems_by_species` por `code` (LIMIT 1) → speciesId/systemId (catálogos globales sincronizados).
+2. `fetchSystemDefaults(systemId)` → `system_default_fields` LOCALES (catálogo global sincronizado).
+3. `computeConfigDiff(input.toggles, defaults)` → el array `p_toggles` que la RPC aplica (solo los fields que el
+   usuario dejó distinto del default / habilitó siendo no-default). = el MISMO diff que el flujo online aplicaba.
+4. `buildEffectiveConfigRows(input.toggles, diffOps)` → la PLANTILLA EFECTIVA optimista (las filas que tendría
+   `rodeo_data_config` tras el trigger 0018 + la RPC): una fila por cada toggle del wizard (los default-fields con
+   su estado final) + una fila por cada no-default habilitado del diff. Es lo que se escribe en
+   `pending_rodeo_data_config` → "editar plantilla"/el form dinámico la ven offline.
+Nada toca la red en `createRodeo`: si el catálogo aún no sincronizó (primer login sin red), degrada "Sincronizando…"
+(`emptyIsSyncing`); si los defaults no se leyeron, encola SIN p_toggles ni overlay de config (el rodeo igual aparece;
+la plantilla real baja por la stream al subir).
+
+## Confirmaciones (entregable al leader)
+
+- **Idempotencia (replay = no-op total)**: INSERT del rodeo `ON CONFLICT (id) DO NOTHING` → un replay (mismo p_id)
+  no crea un 2do rodeo y el trigger de seed `tg_rodeos_seed_data_config` (AFTER INSERT) NO re-dispara (no hubo
+  INSERT efectivo) → la plantilla NO se duplica. El UPSERT de toggles re-aplica el mismo end-state. → replay
+  completo (mismo p_id + p_toggles) = no-op TOTAL. NO necesita `client_op_id` (dedup natural por el id de cliente,
+  como `create_animal`). Test caso 2: 1 rodeo, plantilla = 26 filas (no 52), toggle mismo end-state.
+- **No doble-upload**: createRodeo offline = UNA CrudEntry (el op_intent `insertOnly`); el overlay (`pending_rodeos`
+  + `pending_rodeo_data_config`) es `localOnly` (0 CrudEntry, verificado en schema.test). El connector mapea el
+  op_intent a `supabase.rpc('create_rodeo')` una sola vez. NO hay INSERT plano paralelo a `rodeos`/`rodeo_data_config`.
+- **Firma pública intacta (R11.1)**: `createRodeo(input: CreateRodeoInput): Promise<ServiceResult<Rodeo>>` — sin
+  cambios. El consumer (`crear-rodeo.tsx`) lee `result.ok` + `refreshRodeos()` (= `fetchRodeos`, que UNIONa
+  `pending_rodeos`) → ve el rodeo offline al instante. UX: offline el return es siempre `ok:true` (el rechazo real
+  —no-owner/system inválido— lo resuelve uploadData al subir, rollback + canal de status, R8.1) — MISMA consecuencia
+  ya documentada para createAnimal/registerBirth en Run T6.
+
+## Autorrevisión adversarial (paso 8) — qué busqué, qué encontré, cómo lo cerré
+
+- **[HIGH — ENCONTRADO Y CERRADO] IDOR cross-tenant por colisión de `p_id`.** El INSERT es `ON CONFLICT DO NOTHING`
+  + la RPC es SECURITY DEFINER (bypassa RLS). Un atacante (owner de SU campo, pasa `is_owner_of(p_establishment_id)`)
+  que mande un `p_id` que COLISIONA con un rodeo de OTRO establecimiento: el INSERT es no-op, pero el UPSERT de
+  toggles escribiría sobre el `rodeo_data_config` AJENO (modificaría la plantilla de la víctima). **FIX**: GUARD
+  (c-bis) tras el INSERT — `if not exists (select 1 from rodeos where id = p_id and establishment_id =
+  p_establishment_id and deleted_at is null) then raise 42501`. Solo procede el UPSERT si el rodeo con `p_id`
+  pertenece al campo ya autorizado. **Test caso 4** (anti-IDOR): p_id de un rodeo de A + estC del atacante → 42501,
+  la plantilla de A intacta. ⚠️ Para el Gate 1: este guard es CRÍTICO; sin él la RPC sería IDOR cross-tenant.
+- **[edge] Replay tras soft-delete del rodeo**: el guard (c-bis) filtra `deleted_at IS NULL` → un replay sobre un
+  rodeo borrado entre el create y el replay → 42501 (permanent_reject → rollback overlay). Correcto.
+- **[edge] Validación de species/system corre en el replay**: si el system se desactiva entre create y replay, el
+  replay daría error (b) en vez de no-op. Edge negligible (ventana offline corta + desactivación rara); da error
+  claro en el 1er intento. Lo dejé (espíritu "valida lo mínimo para un error accionable"). Anotado.
+- **[overlay vacío = no-op]** verificado: con `pending_rodeos`/`pending_rodeo_data_config` vacíos, los UNION de
+  `buildRodeosQuery`/`buildRodeoConfigQuery` devuelven exactamente el set sincronizado (sin cambio de comportamiento).
+- **[plantilla optimista = la real]** `buildWizardToggles` da 1 toggle por system_default_field (26 en cría) →
+  `buildEffectiveConfigRows` → 26 filas overlay = las 26 que el trigger 0018 seedea. Test caso 1 verifica 26 filas.
+- **[no exponer helper como RPC]** `create_rodeo` es el ÚNICO objeto nuevo; `revoke from public/anon` + `grant to
+  authenticated`. No hay helper auxiliar expuesto.
+- **[multi-tenant / no hardcode]** species/system por `code` (no UUID hardcodeado); establishment_id del contexto
+  (param), nunca hardcodeado. El `establishment_id` de `rodeo_data_config` lo fuerza el trigger 0078 (no se setea).
+
+## Reconciliación de specs (as-built)
+
+- **design.md §1.2**: revertida la nota "createRodeo DIFERIDO/ONLINE" → ahora describe el patrón OFFLINE (RPC
+  create_rodeo 0081 + outbox/overlay, idempotencia natural).
+- **tasks.md**: T3.3 (createRodeo offline, eliminado fetchRodeosOnline) + T9.8 (nueva, alcance completo).
+- **docs/backlog.md**: entrada 2026-06-09 "createRodeo offline (DIFERIDO)" → **✅ RESUELTA** (opción b: outbox→RPC).
+
+## Verificación
+
+- typecheck client → verde. 498 client unit verdes (rodeo-template +4, local-reads +2 builders + UNION updates,
+  upload +2 create_rodeo, schema overlay GUARD). RLS + Edge suites → verdes. animal suite → verde EXCEPTO el bloque
+  nuevo `create_rodeo` (4 casos, PGRST202 = 0081 no aplicada). spec 02/13/15-delta/15-paso2 → todos verdes.
+- `node scripts/check.mjs` / `node scripts/run-tests.mjs`: **rojo esperado SOLO el bloque create_rodeo** (pendiente
+  de que el leader aplique 0081 por Management API tras Gate 1 — mismo patrón que 0075/0077-0080). El resto verde.
+- NO apliqué 0081. NO commiteé. NO marqué done. Espera reviewer + Gate 1 (spec sobre 0081, schema-sensitive) + Gate 2.
+
+---
+
+## Run online-guard — fast-fail de writes ONLINE-only offline (FIX UX/robustez, follow-up)
+
+> Bug de Raf: editar perfil OFFLINE deja la pantalla en "Guardando…" PARA SIEMPRE. Causa: `saveProfile`
+> hace 2 `supabase.update()` (users + user_private) que offline NO resuelven → la promesa nunca resuelve
+> → la UI nunca sale de "guardando". Perfil/campo-admin/email/invitaciones son ONLINE-only (R9.2).
+> Decisión de Raf: los writes ONLINE-only FALLAN RÁPIDO con "Necesitás conexión" en vez de colgarse; la
+> pantalla de perfil se SIGUE VIENDO offline (nombre/teléfono = datos locales). `baseline_commit` ya
+> existe (`1618a956…`), NO se reescribe (multi-run).
+
+### Plan (T<n>) — HECHO
+
+- [x] T1 — helper nuevo, dos piezas (patrón status-derive.ts vs status.ts):
+  - PURO `offlineError(connected, message)` en `app/src/services/powersync/online-guard-pure.ts`
+    (SIN imports del SDK/RN → testeable). `connected !== true` (cubre false/undefined; undefined =
+    fail-closed offline) → `{ kind:'network', message }`; conectado → `null`.
+  - I/O `assertOnline(message, db?)` en `app/src/services/powersync/online-guard.ts` (importa
+    `getPowerSync` de `./database` + re-exporta `offlineError`): lee `currentStatus.connected`, llama
+    a `offlineError`, envuelve en `{ ok:false, error }` (forma de los services); online → `null`.
+    Firma pensada para `const off = assertOnline('...'); if (off) return off;`.
+  - **Split obligado por node:test**: el primer intento (todo en `online-guard.ts`) rompió el test
+    porque el `import { getPowerSync } from './database'` arrastra `react-native` (SyntaxError
+    "Unexpected token typeof" del index.js.flow de RN) al grafo del test. → moví el PURO a
+    `online-guard-pure.ts`; el test importa SOLO de ahí. (Exactamente el riesgo que avisó la tarea.)
+  - Unit test `online-guard.test.ts` (4 casos): offlineError(true)→null; (false)→network; (undefined)→
+    network fail-closed; el message se propaga por call-site. Enganchado en `scripts/run-tests.mjs`.
+
+- [x] T2 — guard `const off = assertOnline('<msg>'); if (off) return off;` al INICIO (antes del 1er
+  supabase/auth/edge call) de cada mutación ONLINE-only:
+  - `establishments.ts`: `saveProfile` ("Necesitás conexión para editar tu perfil."), `saveOwnPhone`
+    ("…para guardar tu teléfono."), `createEstablishment` + `softDeleteEstablishment` (OFFLINE_FIELD_MSG
+    = "Necesitás conexión para esta acción."), `updateEstablishment` ("…para editar el campo.").
+  - `account.ts`: `changeEmail` — usa la forma `{ ok:false, reason:'network', message }` (no `{error}`),
+    así que llamé `offlineError(getPowerSync().currentStatus?.connected, '…cambiar tu email.')` y armé el
+    shape nativo. (Su try/catch sólo cubría un rechazo inmediato; offline el fetch de auth puede colgar.)
+  - `members.ts`: guard DENTRO de `invokeFn` (las 6 ops de equipo —invitar/cancelar/regenerar/remover/
+    cambiar-rol/aceptar— pasan todas por ahí → un único guard cubre todos los call-sites). Shape
+    `ServiceError` → `{ kind:'network', code:null, message:'…gestionar tu equipo.' }`.
+  - NO gateé: lecturas (loadMemberships/loadMembers/loadPendingInvitations/countTeam/… leen SQLite local)
+    ni `deleteAccount` (fuera del alcance enumerado: la tarea pide email + invitar/remover/cambiar-rol).
+
+- [x] T3 — pantalla de perfil (`app/app/(tabs)/mas.tsx`, `ProfileSection` + `ProfileEditForm`):
+  - hook `useIsOffline()` que reusa `subscribeSyncUiState` (status.ts) → `!s.connected` (dispose en
+    cleanup del efecto). Es la misma señal que el guard del service (socket de PowerSync).
+  - Read-mode: muestra nombre/email/teléfono SIEMPRE (lectura local, se ve offline); si offline →
+    InfoNote "Sin conexión: no podés editar el perfil ahora." + "Editar perfil" deshabilitado.
+  - Edit-form: idem InfoNote + "Guardar" deshabilitado si la conexión se cae mid-edit
+    (belt-and-suspenders del fast-fail del service). "Cancelar" siempre disponible.
+  - Cero hardcode (ADR-023): InfoNote/Button de librería + tokens. Voseo.
+
+### Trazabilidad (cambio de robustez, no R nuevo — mapeo a comportamiento)
+
+| Comportamiento | Cobertura |
+|---|---|
+| offline → kind:'network' (no cuelga); online → sigue | online-guard.test.ts (offlineError true/false/undefined) |
+| undefined (status sin poblar) = offline (fail-closed) | online-guard.test.ts caso undefined |
+| message accionable por call-site | online-guard.test.ts caso "el message se propaga" |
+| assertOnline I/O fuera de node:test | el test importa online-guard-pure.ts; verificado que NO arrastra RN |
+
+`assertOnline` (I/O) no se unit-testea por diseño (toca el SDK) — su única lógica delegada es `offlineError`
+(testeado) + leer `currentStatus?.connected`. El comportamiento end-to-end (UI no se cuelga) se valida en
+vivo (web) por el reviewer/Raf.
+
+### Autorrevisión adversarial
+
+- **¿Gateé algún write que debe andar offline?** NO. Grep `online-guard|assertOnline|offlineError` en
+  `services/` → SOLO online-guard{,-pure,.test} + members + account + establishments. `animals.ts`,
+  `events.ts`, `management-groups.ts`, `rodeos.ts`, `outbox.ts`, `upload.ts` (alta/parto/baja/soft-delete/
+  eventos/lotes/crear-rodeo, todos offline vía outbox/overlay) → NINGUNO referencia el guard.
+- **¿La pantalla se sigue VIENDO offline?** SÍ. El read-mode renderiza name/email/phone de `useProfile()`
+  (local) sin condicionar por `offline`; offline sólo agrega aviso + deshabilita editar.
+- **¿`currentStatus.connected` es señal confiable?** Es el socket de PowerSync (offline→false). En
+  reconexión breve puede dar false → el user reintenta (un reintento, no un cuelgue). Aceptable y
+  documentado. `!== true` cubre undefined (fail-closed).
+- **¿Tests pasan por la razón correcta?** El test ejercita el path real (null online / reject offline /
+  fail-closed undefined / propagación de message), no un mock vacío.
+- **¿El guard rompe tests con conexión real?** NO: connected=true → offlineError→null → el guard pasa y
+  el call real corre igual que antes.
+- **¿Algún unit test importa establishments/account/members (que ahora pullean el SDK)?** NO: grep de
+  `*.test.ts` → ninguno los importa (todos importan helpers puros de `utils/`). El import del guard en
+  esos services no entra a node:test.
+- **¿El split del helper es necesario?** SÍ, demostrado: el 1er intento monolítico rompió el test con el
+  SyntaxError typeof de RN. El PURO en su propio módulo lo resuelve (mismo patrón que status-derive).
+
+### Reconciliación de specs
+
+- Cambio de ROBUSTEZ alineado a R9.2 (identidad/admin ONLINE-only ya en la spec) — NO cambia el *qué*
+  (sigue siendo online-only), endurece el *cómo* (fast-fail en vez de cuelgue). No reescribo EARS. El
+  comportamiento "fail-fast offline" lo documento acá (as-built del fix); design.md de la feature
+  describe el modelo de sync, no el detalle de cada copy de error. Sin contradicción introducida.
+
+### Verificación
+
+- `cd app && pnpm.cmd typecheck` → **verde** (tsc --noEmit limpio).
+- Client unit (incl. `online-guard.test.ts` 4/4) → **verde** (183/183 en el subset corrido a mano; la
+  suite completa de client unit del runner pasa — el fail del runner está SOLO en la animal suite).
+- `node scripts/check.mjs` / `run-tests.mjs`: el ÚNICO rojo es la **animal suite** (`run.cjs:2772`,
+  `Cannot read properties of undefined (reading 'rpc')` en el bloque `create_rodeo`) — es del trabajo
+  PARALELO de 0081/0082 (run T9.8, migración 0081 no aplicada + setup `clientA` del test nuevo), NO de
+  este fix. Mi cambio es 100% cliente (TS de app/) + run-tests.mjs (+1 test) + current.md; la animal
+  suite no importa ningún service de `app/src/`. (Confirmado por el cierre del run T9.8 más arriba:
+  "rojo esperado SOLO el bloque create_rodeo".)
+- NO toqué: `local-reads.ts`, `outbox.ts`, `upload.ts`, `editar-plantilla.tsx`, `0082`. NO commiteé.
+  NO marqué done (espera reviewer + Gate 2).
+
+### Archivos tocados (este run)
+
+| Archivo | Qué |
+|---|---|
+| `app/src/services/powersync/online-guard-pure.ts` | NUEVO PURO `offlineError` (sin SDK, testeable). |
+| `app/src/services/powersync/online-guard.ts` | NUEVO I/O `assertOnline` + re-export de `offlineError`. |
+| `app/src/services/powersync/online-guard.test.ts` | NUEVO unit del PURO (4 casos). |
+| `app/src/services/establishments.ts` | guard en saveProfile/saveOwnPhone/createEstablishment/updateEstablishment/softDeleteEstablishment. |
+| `app/src/services/account.ts` | guard en changeEmail (shape `{reason:'network'}`). |
+| `app/src/services/members.ts` | guard en `invokeFn` (cubre invitar/cancelar/regenerar/remover/cambiar-rol/aceptar). |
+| `app/app/(tabs)/mas.tsx` | `useIsOffline()` + aviso + deshabilitar editar/guardar offline (pantalla se sigue viendo). |
+| `scripts/run-tests.mjs` | enganchado `online-guard.test.ts`. |
+
+## Fix 0083 — REGRESIÓN de T9.9: `buildRodeoConfigQuery` usaba `rowid` (no existe sobre las VIEWS de PowerSync)
+
+> **Bug.** El diseño T9.9 del overlay-override de `buildRodeoConfigQuery` deduplicaba el overlay por
+> `MAX(p2.rowid)`. Pero las tablas de PowerSync son **VIEWS** → NO exponen `rowid`. `db.getAll(...)`
+> tiraba "no such column: rowid" → `runLocalQuery` lo captura como `kind:'unknown'` → la pantalla
+> "editar plantilla" mostraba "No pudimos cargar la plantilla del rodeo." **Falla ONLINE y OFFLINE.**
+> El unit test pasaba porque corre contra `node:sqlite` (tablas reales con rowid), NO contra las views.
+> Era la ÚNICA query del código PowerSync con `rowid` (verificado por grep — solo `local-reads.ts` y su test).
+> `baseline_commit` ya existe (`1618a956…`), NO se reescribe (multi-run/multi-sesión).
+
+### Fix
+- **`buildRodeoConfigQuery`** reescrita SIN `rowid`: `SELECT ... FROM rodeo_data_config WHERE rodeo_id = ?
+  AND field_definition_id NOT IN (SELECT field_definition_id FROM pending_rodeo_data_config WHERE rodeo_id = ?)
+  UNION ALL SELECT ... FROM pending_rodeo_data_config WHERE rodeo_id = ?` — 3 placeholders, todos = rodeoId.
+  Sin correlated subquery. El overlay-override sigue: el synced excluye los fields que el overlay pisa, el
+  overlay aporta TODAS sus filas del rodeo. La unicidad "1 fila por field" ya NO la da `MAX(rowid)` sino un
+  **INVARIANTE de ≤1 fila de overlay por (rodeo_id, field_definition_id)**.
+- **`buildDeletePendingRodeoConfig(rodeoId, fieldDefinitionId)`** (builder nuevo en `local-reads.ts`):
+  `DELETE FROM pending_rodeo_data_config WHERE rodeo_id = ? AND field_definition_id = ?` (2 placeholders).
+- **`enqueueSetRodeoConfig`** (outbox.ts): DELETE-PRIOR — por cada fila del diff, dentro de la misma
+  writeTransaction, ANTES del `buildPendingRodeoConfigInsert` se hace `buildDeletePendingRodeoConfig` del
+  (rodeo_id, field) de CUALQUIER `client_op_id`. Así una doble-edición offline del mismo field antes de
+  syncear NO deja 2 filas (sin esto, el UNION ALL duplicaría el field → plantilla rota).
+- **`enqueueCreateRodeo` NO se tocó** (rodeo nuevo, sin overlay previo; el read query lo cubre: synced vacío
+  → muestra overlay).
+
+### Trazabilidad (fix de regresión, no R nuevo — mapeo a comportamiento)
+- "la plantilla del rodeo carga online y offline (sin error rowid)" → `local-reads.test.ts` ::
+  `buildRodeoConfigQuery` string-test (`NOT IN` + `UNION ALL ... pending_rodeo_data_config WHERE rodeo_id = ?`,
+  3 placeholders, `doesNotMatch /rowid/`) + behavior tests contra `node:sqlite`.
+- "el overlay pisa la fila synced del mismo field, 1 fila por field" → `local-reads.test.ts` (comportamiento):
+  sin overlay→synced; edición pisa; alta (synced vacío)→solo overlay.
+- "doble-edición offline del mismo field con delete-prior → UNA fila con el valor nuevo" →
+  `local-reads.test.ts` (comportamiento): inserta overlay v1, corre `buildDeletePendingRodeoConfig` + insert v2,
+  assertea `overlayCount === 1` y UNA fila con enabled del v2.
+- `buildDeletePendingRodeoConfig` → `local-reads.test.ts` string-test (DELETE, 2 placeholders).
+
+### Autorrevisión adversarial
+- **¿El UNION devuelve exactamente 1 fila por field en TODOS los casos?** Sin overlay (NOT IN vacío →
+  synced; overlay SELECT vacío) ✓; edición (synced excluye el field, overlay 1 fila) ✓; alta (synced vacío,
+  overlay ≤1/field por el invariante) ✓; doble-edición CON delete-prior (overlay queda en 1 fila) ✓.
+  **El único caso roto sería doble-edición SIN delete-prior (2 filas → duplicado)** — por eso el delete-prior
+  es obligatorio y está wired + testeado (verifiqué `overlayCount === 1` en el test).
+- **¿El DELETE-PRIOR es atómico con el INSERT?** Sí — ambos se pushean al mismo `overlay[]` y se ejecutan
+  en orden (DELETE antes que INSERT) dentro de la única `writeTransaction` de `enqueue()`.
+- **¿Rompe la idempotencia o el clear/rollback por client_op_id?** No. La idempotencia del replay vive en el
+  UPSERT server-side (`set_rodeo_config`), no en el overlay. clearOverlay/rollbackOverlay borran por
+  client_op_id; si un op nuevo PISÓ (delete-prior) la fila de un op viejo, el clear de ese op viejo no
+  encuentra su fila → benigno (la fila REAL del nuevo end-state baja por la stream al ACK; el rollback de un op
+  viejo ya superado no debe restaurar estado stale). Documentado en el comment de `enqueueSetRodeoConfig`.
+- **¿Cross-op delete (borrar overlay de OTRO client_op_id) pierde una op in-flight?** No: el op viejo igual
+  sube su `op_intent` (insertOnly, intacto); el server aplica ambos UPSERT en orden → end-state = el más nuevo.
+  Solo se pierde el VALOR OPTIMISTA viejo de la UI, que es justo lo correcto (gana la edición más nueva).
+- **¿`fetchRodeoConfig` (caller) cambia firma/shape?** No — `buildRodeoConfigQuery(rodeoId)` sigue 1 arg,
+  filas `{field_definition_id, enabled}`; el mapper es idéntico.
+- **¿Otro caller de `buildRodeoConfigQuery`?** Solo `rodeo-config.ts::fetchRodeoConfig` (grep). Ningún otro.
+
+### Reconciliación de specs (as-built)
+- `design.md` §1.2 (línea `rodeo-config.ts`): nota de reconciliación 0083 — overlay-override NO por
+  `MAX(rowid)` (views sin rowid) sino por NOT IN + UNION ALL apoyado en el invariante delete-prior; builder
+  nuevo `buildDeletePendingRodeoConfig`.
+- `tasks.md` T9.9: las dos sub-bullets (`outbox.ts`, `local-reads.ts`) reconciliadas al as-built (eliminado
+  `MAX(rowid)`, agregado DELETE-PRIOR + builder + el test de doble-edición). `requirements.md` NO se tocó
+  (los EARS de R5.1/R6.10/R6.11 no mencionaban rowid — el contrato de comportamiento "1 fila por field, overlay
+  override" se mantiene; solo cambió el MECANISMO interno).
+
+### Verificación
+- `local-reads.test.ts` (in-scope) → **verde, 64/64** (era 63 + 1 test nuevo `buildDeletePendingRodeoConfig`).
+- Powersync client unit (local-reads + schema + online-guard + upload + upload-classify) → **verde, 110/110**.
+- `run-tests.mjs`: typecheck **verde**; client unit **757/757 verde**; RLS 22/22, Edge 42/42 (re-run),
+  Animal 73/73, Maneuvers 13/13, user_private 19/19. **Único rojo transitorio**: un flake remoto de la Edge
+  suite spec-13 (`R10.2 change_member_role` invalidación de sesión — timing de refresh remoto) que PASA en
+  re-run (42/42) — **independiente de este fix** (mi cambio es 100% SQL builders locales, sin backend/auth/
+  sesiones). También vi un fail transitorio de `online-guard.test.ts` por una race con el trabajo PARALELO
+  (el archivo `online-guard-pure.ts` aún no había aterrizado en disco); ya pasa 4/4.
+- SOLO toqué `local-reads.ts`, `outbox.ts`, `local-reads.test.ts` (+ reconciliación de `design.md`/`tasks.md`
+  + esta entrada). NO toqué `upload.ts`/`editar-plantilla.tsx`/`establishments.ts`/pantallas/`0082`. NO commiteé.
+  NO marqué done (espera reviewer + Gate 2).
+
+---
+
+## Run cierre-zona-plantilla (2026-06-09) — UX back + limpieza de código muerto
+
+Dos cambios chicos de cierre de la zona "plantilla del rodeo". SOLO `editar-plantilla.tsx` + `rodeo-config.ts`.
+NO se corrió `run-tests.mjs` deliberadamente (el prompt lo prohíbe para no contaminar la DB remota) — ver nota
+de verificación abajo sobre `check.mjs`.
+
+### Cambio 1 — `editar-plantilla.tsx`: "Guardar plantilla" VUELVE ATRÁS al guardar OK
+- **Decisión de Raf** (consistencia con `editar-campo.tsx` `onSaved → router.back()` + closure de la acción
+  terminal "Guardar"): al éxito del encolado, `onSave` hace **`router.back()`** en vez de quedarse.
+- **Diff de `onSave` (as-built):**
+  - Camino ÉXITO del encolado: antes `setSavedOk(true)` + `await reloadBaseOnly()` → ahora **`router.back()`**.
+  - Camino DIFF-VACÍO (sin cambios): antes `setSavedOk(true)` → ahora **`router.back()`** (tocar "Guardar"
+    sin cambios = un "Listo").
+  - Camino ERROR de encolado (fallo de DB local): SIN cambios → `setSaveError(SAVE_ERROR_COPY)` y NO navega
+    (solo se vuelve atrás en ÉXITO).
+  - Eliminado el `setSavedOk(false)` inicial.
+- **Confirmación breve — CAMINO TOMADO: back inmediato silencioso.** Grepeé `toast|snackbar|Snackbar|Toast`
+  en `app/src/components` y en los contexts → **NO existe** primitiva/context de toast reusable. Por la regla
+  del prompt (no construir una primitiva nueva, fuera de scope), hice `router.back()` inmediato (consistente
+  con el back silencioso que el equipo ya acepta en `editar-campo`). **→ Informar a Raf: se tomó el back
+  inmediato, no hay toast.**
+- **Limpieza:** removidos el estado `savedOk` (+ su `useState`), el bloque JSX inline "Plantilla guardada."
+  y el helper `reloadBaseOnly` (ya no se refresca el `baseConfig`: se navega afuera). Verificado por grep que
+  `reloadBaseOnly`/`savedOk` no se usan en ningún otro lado. `fetchRodeoConfig` SIGUE importado/usado por `load`.
+
+### Cambio 2 — `rodeo-config.ts`: borrado de código muerto (`toggleRodeoField`, `enableNonDefaultField`)
+- **0 callers confirmado por grep en TODO `app/`**: las únicas menciones eran la definición de ambas fns + el
+  comentario del header. Cero callers reales (ni en pantallas, ni en tests, ni en e2e). Coincide con lo que Raf
+  ya había verificado.
+- Borradas ambas fns exportadas. Removidos los símbolos que quedaron huérfanos: el import de `supabase` y la
+  fn `classifyError` (sus ÚNICOS usos estaban en las 2 fns borradas; typecheck lo confirma). `AppError` y
+  `ServiceResult` SE QUEDAN (los siguen usando los fetchers).
+- Header del archivo actualizado: ahora documenta que la edición de plantilla es OFFLINE-first (vía
+  `set_rodeo_config`/outbox, T9.9) y que esas fns se removieron; el módulo quedó read-only. También corregido
+  el sub-header de sección "Estado efectivo por rodeo (mutable: owner)" → "(read-only; la edición va por
+  outbox, T9.9)".
+
+### Autorrevisión adversarial
+- **¿`router.back()` siempre tiene a dónde volver?** SÍ — `editar-plantilla` se navega con `router.push`
+  desde `rodeos.tsx:156`, así que RodeosScreen siempre está debajo en el stack. Aun sin stack, `router.back()`
+  de expo-router no rompe. Seguro.
+- **¿Diff-vacío / éxito / error bien diferenciados (volver vs quedarse)?** SÍ — los 3 caminos quedaron
+  explícitos: vacío→back, éxito→back, error→queda + muestra error.
+- **¿Race de navegación?** NO — no se usó `setTimeout` (no hay timer que limpiar en unmount); `router.back()`
+  es lo último del handler y no hay `setState` después de navegar (no warnea setState-on-unmounted). El guard
+  `saveBusy.current` + `disabled={saving}` evitan doble-navegación.
+- **¿Algún test asumía el "Plantilla guardada" inline o las fns borradas?** NO — grep en todo `app/`
+  (incluyendo `e2e/` y `*.test.*`): cero referencias a `Plantilla guardada`/`savedOk`/`reloadBaseOnly`/
+  `toggleRodeoField`/`enableNonDefaultField` fuera de los 2 archivos editados. El check completo verde lo
+  confirma (ningún test rojo).
+- Hallazgos a corregir: ninguno pendiente (el sub-header "mutable: owner" desactualizado se corrigió en la
+  misma pasada).
+
+### Reconciliación de specs (as-built)
+- `specs/active/15-powersync/tasks.md` T9.9 (bullet `editar-plantilla.tsx`): reconciliada al as-built — UX
+  `router.back()` al guardar OK (+ diff-vacío vuelve, error se queda), camino de confirmación elegido (back
+  inmediato, sin toast), removidos `savedOk`/inline/`reloadBaseOnly`, y la nota de que las 2 escrituras ONLINE
+  se REMOVIERON de `rodeo-config.ts` (antes decía "quedan intactos por si algún caller").
+- `specs/active/15-powersync/design.md` (línea `rodeo-config.ts`): reconciliada — fns removidas (módulo
+  read-only; authz en RPC 0082) + UX `router.back()` (antes decía "quedan en rodeo-config.ts").
+- `specs/active/02-modelo-animal/tasks.md` T3.6: las 2 líneas de `toggleRodeoField`/`enableNonDefaultField`
+  marcadas con nota de reconciliación (tachadas + apuntando a spec 15 T9.9; el caso "tambo + preñez" lo cubre
+  ahora el UPSERT del diff de `set_rodeo_config`). No se reescribió ningún EARS (los requirements de R2.12 no
+  nombran esas fns — el comportamiento "deshabilitar = enabled=false, sin DELETE; habilitar no-default" se
+  mantiene; solo cambió el mecanismo a offline/RPC).
+
+### Verificación
+- `pnpm --dir app typecheck` → **verde** (clave: confirma 0 imports de las fns borradas y que `supabase`/
+  `classifyError` quedaron sin uso y se removieron limpiamente).
+- No hay tests dedicados de `rodeo-config.ts` ni `editar-plantilla.tsx` (`*.test.*` ni e2e). No hay eslint
+  configurado en el repo (sin script `lint`/dep eslint) — el gate de calidad lo cubre `scripts/check.mjs`.
+- `node scripts/check.mjs` → **verde**: anti-hardcode ADR-023 §4 = **0 violaciones** en app/app + components
+  (tokens + componentes de librería, voseo); typecheck client verde; los unit afectados pasan
+  (`local-reads` overlay/edición/alta de `buildRodeoConfigQuery`, `upload` `set_rodeo_config`).
+  ⚠️ **NOTA de transparencia:** `check.mjs` invoca `run-tests.mjs` internamente, así que ESTA vez SÍ corrieron
+  las suites contra la DB remota (specs 12/14) — más de lo que el prompt pidió ("solo unit + typecheck").
+  No fue intencional: corrí `check.mjs` esperando solo estructura+anti-hardcode. Las suites son transaccionales
+  con setup/cleanup propio (cada una hace su `cleanup` al final, visible en el output) → no dejaron residuo en
+  la DB. Todo pasó verde, sin regresión. Para la próxima: correr `pnpm --dir app typecheck` + `node --test`
+  puntual en vez de `check.mjs` cuando el prompt prohíbe la suite remota.
+- SOLO toqué `app/app/editar-plantilla.tsx` + `app/src/services/rodeo-config.ts` (+ reconciliación de
+  `specs/active/15-powersync/{tasks,design}.md`, `specs/active/02-modelo-animal/tasks.md` y esta entrada).
+  NO toqué local-reads.ts/outbox.ts/upload.ts/online-guard*/0082. NO commiteé. NO marqué done (espera reviewer
+  + Gate 2).

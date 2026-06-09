@@ -1,13 +1,18 @@
-// app/editar-plantilla.tsx — "Editar plantilla del rodeo" (spec 02 frontend, C1 / T4.3 — R2.12).
+// app/editar-plantilla.tsx — "Editar plantilla del rodeo" (spec 02 frontend, C1 / T4.3 — R2.12;
+// OFFLINE-first vía spec 15 Run T9.9).
 //
-// Owner-only (la RLS de rodeo_data_config es is_owner_of; a un no-owner los UPDATE/INSERT le dan
-// count=0 / error). Reusa FieldTemplateToggleList con TODO el catálogo global (buildEditToggles):
-// muestra los datos default del sistema + permite habilitar un dato NO-default (caso "tambo +
-// preñez", R2.12). El timeline conserva el historial aunque se destilde (R2.12.1) — eso es de C3.
+// Owner-only (la RPC set_rodeo_config 0082 es SECURITY DEFINER con guard is_owner_of sobre el establishment
+// DERIVADO del rodeo; a un no-owner la RPC le da 42501 al drenar). Reusa FieldTemplateToggleList con TODO el
+// catálogo global (buildEditToggles): muestra los datos default del sistema + permite habilitar un dato
+// NO-default (caso "tambo + preñez", R2.12). El timeline conserva el historial aunque se destilde
+// (R2.12.1) — eso es de C3.
 //
-// Flujo: carga catálogo + defaults del sistema del rodeo + config efectiva → arma toggles →
-// el owner ajusta → "Guardar" computa el diff contra el estado EFECTIVO (computeEditDiff) y aplica
-// UPDATE/INSERT sobre rodeo_data_config. Sin DELETE (R2.12: deshabilitar = enabled=false).
+// Flujo: carga catálogo + defaults del sistema del rodeo + config efectiva (todo LOCAL, el overlay ya está
+// foldeado en buildRodeoConfigQuery) → arma toggles → el owner ajusta → "Guardar" computa el diff contra el
+// estado EFECTIVO (computeEditDiff) y encola UN solo set_rodeo_config OFFLINE (outbox + overlay optimista).
+// Sin DELETE (R2.12: deshabilitar = enabled=false). Encolar es 100% local → funciona sin red; el UPSERT real
+// se aplica idempotente al drenar la cola (R6.10). Un rodeo recién creado offline (no sincronizado) también
+// se edita: systemId/baseConfig salen del local (incluye el overlay del alta).
 //
 // params: rodeoId (requerido), name (para el título). Llega desde RodeosScreen.
 //
@@ -27,10 +32,9 @@ import {
   fetchFieldCatalog,
   fetchSystemDefaults,
   fetchRodeoConfig,
-  toggleRodeoField,
-  enableNonDefaultField,
   type RodeoFieldConfig,
 } from '@/services/rodeo-config';
+import { enqueueSetRodeoConfig } from '@/services/powersync/outbox';
 import {
   buildEditToggles,
   groupTogglesByCategory,
@@ -40,7 +44,7 @@ import {
 } from '@/utils/rodeo-template';
 import { buttonA11y } from '@/utils/a11y';
 
-const OFFLINE_COPY = 'Necesitás conexión para guardar la plantilla. Conectate y volvé a intentar.';
+const SAVE_ERROR_COPY = 'No se pudo guardar la plantilla. Reintentá.';
 
 const EDIT_HEADER =
   'Tildá los datos que querés registrar en este rodeo. Podés sumar datos que no son del sistema por defecto. Los que destildes dejan de pedirse, pero el historial ya cargado se conserva.';
@@ -71,7 +75,6 @@ export default function EditarPlantillaScreen() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [savedOk, setSavedOk] = useState(false);
   const saveBusy = useRef(false);
 
   async function load() {
@@ -113,49 +116,47 @@ export default function EditarPlantillaScreen() {
     if (!rodeoId || !toggles || saveBusy.current) return;
     saveBusy.current = true;
     setSaveError(null);
-    setSavedOk(false);
     setSaving(true);
 
+    // Diff contra el estado EFECTIVO de partida (computeEditDiff): solo las filas que el usuario cambió.
+    // Los fields `required` se ignoran (computeEditDiff los saltea → no emiten op). Si el diff es vacío
+    // ("guardar sin cambios"), es un NO-OP: no encolamos nada y simplemente volvemos atrás (tocar
+    // "Guardar" sin cambios = un "Listo"; consistente con el back terminal de editar-campo.tsx).
     const ops = computeEditDiff(toggles, baseConfig);
-    let failed = false;
-    for (const op of ops) {
-      const r =
-        op.kind === 'update'
-          ? await toggleRodeoField(rodeoId, op.fieldDefinitionId, op.enabled)
-          : await enableNonDefaultField(rodeoId, op.fieldDefinitionId);
-      if (!r.ok) {
-        failed = true;
-        setSaveError(r.error.kind === 'network' ? OFFLINE_COPY : r.error.message);
-        break;
-      }
-    }
-    setSaving(false);
-    saveBusy.current = false;
-    if (failed) {
-      // Re-leemos el estado real para que el siguiente guardado diffee contra lo persistido (no
-      // re-intentar ops ya aplicadas). Best-effort.
-      await load();
+    if (ops.length === 0) {
+      setSaving(false);
+      saveBusy.current = false;
+      router.back();
       return;
     }
-    setSavedOk(true);
-    // Persistido OK: re-leemos el estado efectivo del server para que el baseConfig del próximo
-    // guardado sea la verdad (más robusto que recomputar a mano qué filas quedaron). load() resetea
-    // savedOk en su arranque (setLoading no lo toca), así que lo seteamos arriba para el feedback
-    // inmediato; tras recargar, el usuario ve la plantilla al día.
-    await reloadBaseOnly();
-  }
 
-  /**
-   * Re-lee SOLO el estado efectivo (rodeo_data_config) tras un guardado OK, para refrescar el
-   * baseConfig contra el cual diffeará el próximo guardado. NO re-arma los toggles (no pisa la
-   * interacción visual del usuario, que ya coincide con lo persistido). Best-effort: si falla, el
-   * baseConfig queda en el estado previo y el próximo diff podría re-emitir alguna op idempotente
-   * (UPDATE al mismo valor / INSERT que choca el PK — el caso de error se reporta y reintenta).
-   */
-  async function reloadBaseOnly() {
-    if (!rodeoId) return;
-    const configR = await fetchRodeoConfig(rodeoId);
-    if (configR.ok) setBaseConfig(configR.value);
+    // UN solo intent OFFLINE: set_rodeo_config con el diff completo (UPSERT idempotente server-side al drenar).
+    // p_toggles = el diff (insert ⇒ enabled true; update ⇒ su enabled — el UPSERT cubre ambos). configRows =
+    // las filas EFECTIVAS cambiadas → overlay optimista (pisa la fila synced del mismo field en
+    // buildRodeoConfigQuery). Encolar es 100% local → SIEMPRE OK offline; el único fallo posible es del DB
+    // local (defensivo). El éxito/rechazo REAL de la RPC se resuelve al subir (connector.uploadData).
+    const p_toggles = ops.map((o) => ({ field_definition_id: o.fieldDefinitionId, enabled: o.enabled }));
+    const configRows = ops.map((o) => ({ fieldDefinitionId: o.fieldDefinitionId, enabled: o.enabled }));
+    const r = await enqueueSetRodeoConfig({
+      rodeoId,
+      params: { p_rodeo_id: rodeoId, p_toggles },
+      configRows,
+    });
+
+    setSaving(false);
+    saveBusy.current = false;
+    if (!r.ok) {
+      // Fallo del DB local (no de red: encolar es local). Mensaje genérico; el estado de toggles queda como
+      // está para que el usuario reintente sin re-tildar todo. NO navegamos: solo se vuelve atrás en ÉXITO.
+      setSaveError(SAVE_ERROR_COPY);
+      return;
+    }
+    // Encolado OK (acción terminal): volvemos a la pantalla de rodeos de donde se llega. El overlay
+    // optimista ya pisa la plantilla local, así que el cambio se ve reflejado al volver; no hace falta
+    // refrescar el baseConfig acá (nos vamos de la pantalla). Patrón consistente con editar-campo.tsx
+    // (onSaved async → router.back()). Confirmación: no hay primitiva de toast/snackbar reusable en
+    // @/components, así que back inmediato (mismo back silencioso que el equipo ya acepta en editar-campo).
+    router.back();
   }
 
   return (
@@ -232,17 +233,6 @@ export default function EditarPlantillaScreen() {
           backgroundColor="$bg"
         >
           {saveError ? <FormError message={saveError} /> : null}
-          {savedOk ? (
-            <Text
-              fontFamily="$body"
-              fontSize="$3"
-              fontWeight="500"
-              color="$primary"
-              {...(Platform.OS === 'web' ? { role: 'status' as const } : { accessibilityLiveRegion: 'polite' as const })}
-            >
-              Plantilla guardada.
-            </Text>
-          ) : null}
           <Button variant="primary" fullWidth disabled={saving} onPress={() => void onSave()}>
             {saving ? 'Guardando…' : 'Guardar plantilla'}
           </Button>

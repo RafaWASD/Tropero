@@ -25,6 +25,7 @@
 // (sesión de supabase-js). El edge deriva el user de `requireUser` (su propio JWT).
 
 import { supabase } from './supabase';
+import { offlineError } from './powersync/online-guard';
 import {
   classifyAuthEmailError,
   classifyDeleteNetworkError,
@@ -32,6 +33,7 @@ import {
   type ChangeEmailResult,
   type DeleteAccountResult,
 } from '../utils/account-result';
+import { getPowerSync } from './powersync/database';
 
 export type { ChangeEmailResult, DeleteAccountResult, BlockingEstablishment } from '../utils/account-result';
 
@@ -43,6 +45,14 @@ export type { ChangeEmailResult, DeleteAccountResult, BlockingEstablishment } fr
  * desde el mail → el session sigue reportando el email viejo, y el display de "Más" también.
  */
 export async function changeEmail(newEmail: string): Promise<ChangeEmailResult> {
+  // ONLINE-only (R9.2): `supabase.auth.updateUser` no resuelve sin red → fast-fail accionable ANTES
+  // del call (el try/catch de abajo sólo cubre un rechazo inmediato; offline el fetch puede colgar).
+  const off = offlineError(
+    getPowerSync().currentStatus?.connected,
+    'Necesitás conexión para cambiar tu email.',
+  );
+  if (off) return { ok: false, reason: 'network', message: off.message };
+
   const email = newEmail.trim();
   try {
     const { error } = await supabase.auth.updateUser({ email });
@@ -96,6 +106,14 @@ async function mapDeleteAccountError(error: unknown): Promise<DeleteAccountResul
  * R9.2: operación ONLINE. Sin red → reason='network' para que la pantalla muestre copy accionable.
  */
 export async function deleteAccount(): Promise<DeleteAccountResult> {
+  // ONLINE-only (R9.2): `supabase.functions.invoke('delete_account')` no resuelve sin red → fast-fail
+  // accionable ANTES del call (offline el fetch puede colgar → "Eliminando…" para siempre).
+  const off = offlineError(
+    getPowerSync().currentStatus?.connected,
+    'Necesitás conexión para eliminar la cuenta.',
+  );
+  if (off) return { ok: false, reason: 'network', establishments: [], message: off.message };
+
   let data: unknown;
   let error: unknown;
   try {

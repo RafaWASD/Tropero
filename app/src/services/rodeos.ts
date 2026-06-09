@@ -1,40 +1,37 @@
-// Capa de datos de rodeos (spec 02 frontend, C1 — nuevo service).
+// Capa de datos de rodeos (spec 02 frontend, C1 — swap a PowerSync en spec 15).
 //
-// Queries DIRECTAS a Supabase con supabase-js (PowerSync es C5, diferido). RLS protege
-// server-side (0017): SELECT con has_role_in(establishment_id); INSERT/UPDATE solo owner
-// (is_owner_of). El cliente no fuerza permisos — la RLS es la barrera real (un field_operator
-// que intentara crear/borrar recibe 0 filas afectadas / error, R2.3).
+// OFFLINE-FIRST (spec 15): las LECTURAS (fetchProductionSystems/fetchRodeos) leen del SQLite local de
+// PowerSync (las streams ya scopearon por establecimiento). Las ESCRITURAS van por la OUTBOX: createRodeo
+// encola un intent `create_rodeo` → RPC server-side (0081) + overlay optimista (Run T9.8); softDeleteRodeo
+// encola un intent `soft_delete_rodeo` → RPC (T6). La RLS/RPC siguen siendo la barrera real al SUBIR
+// (rodeos_insert/create_rodeo = owner-only is_owner_of, 0017/0081; un field_operator es rechazado allí).
 //
 // Multi-tenant (CLAUDE.md ppio 6): NUNCA se hardcodea establishment_id ni species/system. El
 // establishment viene del contexto activo; species_id/system_id se resuelven por `code` (no se
-// hardcodea el UUID del sistema — se busca 'bovino'/'cria' por code en las tablas de catálogo).
+// hardcodea el UUID del sistema — se busca 'bovino'/'cria' por code en las tablas de catálogo, ahora local).
 
-import { supabase } from './supabase';
-import { computeConfigDiff, type SystemDefaultField, type TemplateToggle } from '../utils/rodeo-template';
+import {
+  computeConfigDiff,
+  buildEffectiveConfigRows,
+  type SystemDefaultField,
+  type TemplateToggle,
+} from '../utils/rodeo-template';
 import {
   fetchSystemDefaults,
-  toggleRodeoField,
-  enableNonDefaultField,
   type AppError,
   type ServiceResult,
 } from './rodeo-config';
 import {
   buildSpeciesByCodeQuery,
   buildSystemsBySpeciesQuery,
+  buildSystemByCodeQuery,
   buildRodeosQuery,
   toBool,
 } from './powersync/local-reads';
 import { runLocalQuery, runLocalQuerySingle } from './powersync/local-query';
+import { enqueueSoftDelete, enqueueCreateRodeo, newClientOpId } from './powersync/outbox';
 
 export type { AppError, ServiceResult } from './rodeo-config';
-
-function classifyError(error: { message?: string; code?: string } | null): AppError {
-  const msg = error?.message ?? '';
-  if (/network|failed to fetch|fetch failed/i.test(msg)) {
-    return { kind: 'network', message: msg };
-  }
-  return { kind: 'unknown', message: msg || 'Error desconocido' };
-}
 
 // ─── Sistemas productivos disponibles (paso 1 del wizard) ─────────────────────────
 
@@ -130,34 +127,13 @@ function toRodeo(r: RodeoRow): Rodeo {
  * (excluye rodeos desactivados) + `deleted_at IS NULL` (defensivo). Orden preservado: created_at ASC.
  * Cualquier rol del campo los ve (lista read-only para no-owners, R2.3).
  *
- * Lo consume RodeoContext. NOTA: createRodeo NO usa esta lectura para su diff before/after (sería
- * incorrecto: su INSERT es ONLINE y la fila vuelve al SQLite local recién por la stream, async); usa
- * fetchRodeosOnline (helper interno PostgREST) para ver su propia escritura de inmediato — ver allí.
+ * Lo consume RodeoContext. Tras un createRodeo OFFLINE (Run T9.8), el rodeo recién creado aparece acá al
+ * instante: buildRodeosQuery UNIONa pending_rodeos (el rodeo alta-optimista) → no hace falta re-leer online.
  */
 export async function fetchRodeos(establishmentId: string): Promise<ServiceResult<Rodeo[]>> {
   const r = await runLocalQuery<RodeoRow>(buildRodeosQuery(establishmentId));
   if (!r.ok) return { ok: false, error: r.error };
   return { ok: true, value: r.value.map(toRodeo) };
-}
-
-/**
- * Lectura ONLINE del set de rodeos (PostgREST) — uso INTERNO de createRodeo para diffear su propio
- * INSERT de inmediato (la fila recién creada NO está aún en el SQLite local; baja por la stream
- * async). Mantiene el comportamiento ONLINE de createRodeo en T3 (el swap a outbox/overlay es T5/T6).
- * Misma query/filtros/orden que la versión PostgREST original de fetchRodeos.
- */
-async function fetchRodeosOnline(establishmentId: string): Promise<ServiceResult<Rodeo[]>> {
-  const { data, error } = await supabase
-    .from('rodeos')
-    .select('id, establishment_id, name, species_id, system_id, active')
-    .eq('establishment_id', establishmentId)
-    .eq('active', true)
-    .is('deleted_at', null)
-    .order('created_at', { ascending: true });
-
-  if (error) return { ok: false, error: classifyError(error) };
-  const rows = (data ?? []) as RodeoRow[];
-  return { ok: true, value: rows.map(toRodeo) };
 }
 
 // ─── Crear rodeo (owner) ──────────────────────────────────────────────────────────
@@ -173,22 +149,29 @@ export type CreateRodeoInput = {
 };
 
 /**
- * Crea un rodeo (R2.2, owner-only por RLS) y aplica el diff de la plantilla de datos.
+ * Crea un rodeo OFFLINE-FIRST (R2.2 / R5.1, owner-only) vía la OUTBOX (Run T9.8). Raf pidió explícito que
+ * crear rodeo funcione sin red (offline-first sin excepciones). A diferencia de createManagementGroup (INSERT
+ * plano → CRUD plano offline en T5), crear un rodeo arma una PLANTILLA de datos (`rodeo_data_config`): el
+ * trigger server-side `tg_rodeos_seed_data_config` (0018) seedea los defaults del sistema + se aplica el diff
+ * de toggles, y `rodeo_data_config` tiene PK COMPUESTA (read-only-local). Por eso va por una RPC atómica
+ * server-side `create_rodeo` (0081) + outbox + overlay optimista (mismo patrón que register_birth/exit).
  *
  * Flujo:
- *   1. Resolver species_id / system_id por `code` (no hardcodear el UUID — buscar en catálogo).
- *   2. ⚠️ SPLIT insert + select (gotcha RLS-on-RETURNING, lección de spec 01 B.1.2): NO usar
- *      .insert().select() — el RETURNING evalúa rodeos_select (has_role_in) sobre la fila antes
- *      de que sea visible, riesgo de 403. Insertamos SIN .select() y recuperamos el id diffeando
- *      el set de rodeos del establishment ANTES/DESPUÉS (robusto ante nombres duplicados, igual
- *      que createEstablishment). El trigger tg_rodeos_seed_data_config (0018) pre-pobla
- *      rodeo_data_config con los defaults del sistema en el mismo INSERT.
- *   3. Aplicar el diff de toggles del usuario (computeConfigDiff) sobre rodeo_data_config:
- *      UPDATE para defaults que cambiaron, INSERT para no-defaults habilitados. Best-effort
- *      reportable: si una op falla, devolvemos el rodeo creado igual (no lo deshacemos —
- *      revertir un INSERT con trigger es frágil) pero señalamos el fallo parcial al caller.
+ *   1. Generar el `id` del rodeo en el CLIENTE (R6.4): la RPC lo reusa por ON CONFLICT → idempotente at-least-once.
+ *   2. Resolver species_id / system_id por `code` DESDE LOCAL (catálogo sincronizado). No hardcodear el UUID.
+ *   3. Computar el DIFF de toggles (computeConfigDiff) contra los system_default_fields LOCALES → el array
+ *      `p_toggles` de la RPC (la plantilla que el usuario eligió, sobre los defaults que el trigger seedea).
+ *   4. Encolar la intención `create_rodeo` (params de la RPC) + el efecto optimista:
+ *        - pending_rodeos (el rodeo, con el id de cliente) → aparece en la lista al instante;
+ *        - pending_rodeo_data_config (la PLANTILLA EFECTIVA computada en el cliente: los toggles del wizard
+ *          —defaults con su estado final— + los no-defaults habilitados del diff) → "editar plantilla"/el
+ *          form dinámico la ven al instante, offline.
+ *      Al SUBIR, create_rodeo crea el rodeo (el trigger 0018 seedea la config) + UPSERTea los toggles ATÓMICO
+ *      server-side; el ACK limpia el overlay y las filas reales bajan por est_rodeos / est_rodeo_data_config.
  *
- * R9.2: crear rodeo es operación administrativa ONLINE (como crear campo). Sin red → kind:'network'.
+ * R11.1: firma pública intacta (devuelve ServiceResult<Rodeo> con el rodeo optimista). El rechazo REAL
+ * (no-owner 42501 / system inválido) lo resuelve uploadData al SUBIR (rollback del overlay + superficia por el
+ * canal de status, R8.1) — NO el return (offline-first: el encolado SIEMPRE tiene éxito si hay catálogo local).
  */
 export async function createRodeo(
   input: CreateRodeoInput,
@@ -201,123 +184,104 @@ export async function createRodeo(
     return { ok: false, error: { kind: 'unknown', message: 'El rodeo necesita un nombre.' } };
   }
 
-  // 1) Resolver species_id por code (catálogo). No hardcodeamos el UUID.
-  const { data: species, error: spErr } = await supabase
-    .from('species')
-    .select('id')
-    .eq('code', speciesCode)
-    .eq('active', true)
-    .maybeSingle();
-  if (spErr) return { ok: false, error: classifyError(spErr) };
-  if (!species) {
+  // 1) Resolver species_id por code DESDE LOCAL (catálogo global sincronizado). No hardcodeamos el UUID.
+  //    emptyIsSyncing: si el catálogo aún no bajó (primer login sin red) → degrada "Sincronizando…".
+  const spRes = await runLocalQuerySingle<{ id: string }>(buildSpeciesByCodeQuery(speciesCode), {
+    emptyIsSyncing: true,
+  });
+  if (!spRes.ok) return { ok: false, error: spRes.error };
+  if (!spRes.value) {
     return { ok: false, error: { kind: 'unknown', message: `Especie "${speciesCode}" no disponible.` } };
   }
+  const speciesId = spRes.value.id;
 
-  // Resolver system_id por (species_id, code) — debe estar activo (R2.4; el trigger DB lo
-  // re-valida igual, pero filtramos acá para un error claro antes del insert).
-  const { data: system, error: sysErr } = await supabase
-    .from('systems_by_species')
-    .select('id')
-    .eq('species_id', species.id)
-    .eq('code', systemCode)
-    .eq('active', true)
-    .maybeSingle();
-  if (sysErr) return { ok: false, error: classifyError(sysErr) };
-  if (!system) {
+  // Resolver system_id por (species_id, code) ACTIVO DESDE LOCAL (R2.4). La RPC + el trigger lo re-validan
+  // server-side al subir; acá filtramos para un error claro antes de encolar.
+  const sysRes = await runLocalQuerySingle<{ id: string }>(
+    buildSystemByCodeQuery(speciesId, systemCode),
+    { emptyIsSyncing: true },
+  );
+  if (!sysRes.ok) return { ok: false, error: sysRes.error };
+  if (!sysRes.value) {
     return {
       ok: false,
       error: { kind: 'unknown', message: 'Ese sistema productivo todavía no está disponible.' },
     };
   }
+  const systemId = sysRes.value.id;
 
-  // 2) SET de rodeos ANTES del insert (para diffear el nuevo después, robusto ante homónimos).
-  // ONLINE (fetchRodeosOnline) — createRodeo es online en T3 y debe ver su propio INSERT al instante;
-  // la versión local de fetchRodeos no lo reflejaría hasta que la stream sincronice (async).
-  const before = await fetchRodeosOnline(input.establishmentId);
-  if (!before.ok) return { ok: false, error: before.error };
-  const beforeIds = new Set(before.value.map((r) => r.id));
+  // 2) Computar el DIFF de toggles del usuario contra los system_default_fields LOCALES (computeConfigDiff):
+  //    es el array p_toggles que la RPC aplica (los fields que el usuario dejó distinto del default + los
+  //    no-defaults habilitados). Si no pudimos leer los defaults (no sincronizó), encolamos SIN toggles → el
+  //    rodeo queda con la plantilla default del trigger (el usuario la ajusta luego en "editar plantilla").
+  const defaultsResult = await fetchSystemDefaults(systemId);
+  const defaults = defaultsResult.ok ? (defaultsResult.value as SystemDefaultField[]) : [];
+  const diffOps = defaultsResult.ok ? computeConfigDiff(input.toggles, defaults) : [];
+  // p_toggles: { field_definition_id, enabled } por cada op del diff (update o insert). La RPC UPSERTea.
+  const pToggles = diffOps.map((op) => ({
+    field_definition_id: op.fieldDefinitionId,
+    enabled: op.enabled,
+  }));
 
-  // Insert SIN .select() — ver nota arriba (RLS-on-RETURNING → 403). El trigger pre-pobla config.
-  const { error: insertError } = await supabase.from('rodeos').insert({
-    establishment_id: input.establishmentId,
-    name,
-    species_id: species.id,
-    system_id: system.id,
+  // 3) PLANTILLA EFECTIVA optimista (overlay): la que "editar plantilla"/el form dinámico muestran offline,
+  //    espejando lo que el trigger 0018 + la RPC dejarían. = los toggles del wizard (defaults con su estado
+  //    final) + los no-defaults habilitados del diff. Solo si pudimos leer los defaults; si no, no escribimos
+  //    config optimista (la real bajará por la stream al subir — la lista del rodeo igual aparece).
+  const configRows = defaultsResult.ok ? buildEffectiveConfigRows(input.toggles, diffOps) : [];
+
+  const rodeoId = newClientOpId(); // uuid de cliente (R6.4): la RPC lo reusa por ON CONFLICT (idempotente).
+
+  // 4) Encolar la intención create_rodeo + el overlay (rodeo + plantilla). Offline el rodeo Y su plantilla
+  //    aparecen al instante (UNION en buildRodeosQuery / buildRodeoConfigQuery).
+  const enq = await enqueueCreateRodeo({
+    rodeoId,
+    params: {
+      p_id: rodeoId,
+      p_establishment_id: input.establishmentId,
+      p_name: name,
+      p_species_id: speciesId,
+      p_system_id: systemId,
+      p_toggles: pToggles,
+    },
+    overlay: {
+      establishmentId: input.establishmentId,
+      name,
+      speciesId,
+      systemId,
+    },
+    configRows,
   });
-  if (insertError) return { ok: false, error: classifyError(insertError) };
+  if (!enq.ok) return { ok: false, error: { kind: 'unknown', message: enq.error.message } };
 
-  // SELECT separado (ONLINE): el id que aparece ahora y NO estaba antes es el rodeo nuevo.
-  const after = await fetchRodeosOnline(input.establishmentId);
-  if (!after.ok) return { ok: false, error: after.error };
-  const created = after.value.find((r) => !beforeIds.has(r.id));
-  if (!created) {
-    return {
-      ok: false,
-      error: { kind: 'unknown', message: 'No se pudo confirmar el rodeo recién creado.' },
-    };
-  }
-
-  // 3) Aplicar el diff de toggles sobre la config pre-poblada por el trigger.
-  // Necesitamos los defaults del sistema para saber qué fields tienen fila (UPDATE) vs cuáles
-  // hay que insertar (no-default habilitado).
-  const defaultsResult = await fetchSystemDefaults(system.id);
-  if (defaultsResult.ok) {
-    const ops = computeConfigDiff(input.toggles, defaultsResult.value as SystemDefaultField[]);
-    for (const op of ops) {
-      const r =
-        op.kind === 'update'
-          ? await toggleRodeoField(created.id, op.fieldDefinitionId, op.enabled)
-          : await enableNonDefaultField(created.id, op.fieldDefinitionId);
-      if (!r.ok) {
-        // El rodeo SÍ se creó (con la plantilla default del trigger). Una op de ajuste falló:
-        // no deshacemos el rodeo (revertir un INSERT con trigger es frágil); reportamos para que
-        // la UI avise "rodeo creado, revisá la plantilla" sin perder el rodeo.
-        return {
-          ok: false,
-          error: {
-            kind: r.error.kind,
-            message:
-              'El rodeo se creó, pero no pudimos guardar todos los ajustes de la plantilla. Revisala en "Editar plantilla".',
-          },
-        };
-      }
-    }
-  }
-  // Si no pudimos leer los defaults (red), el rodeo igual quedó con la plantilla default del
-  // trigger; preferimos devolver OK sobre el rodeo creado a tumbarlo por no leer los defaults.
-
-  return { ok: true, value: created };
+  // Devolvemos el rodeo OPTIMISTA (firma pública intacta, R11.1). active=true (recién creado).
+  return {
+    ok: true,
+    value: { id: rodeoId, establishmentId: input.establishmentId, name, speciesId, systemId, active: true },
+  };
 }
 
 // ─── Soft-delete (owner) ────────────────────────────────────────────────────────
 
 /**
- * Soft-delete de un rodeo (R2.5, owner-only): set deleted_at = now(). RLS rodeos_update es
- * is_owner_of. Si el rodeo tiene animal_profiles activos, el backend lo rechaza (R2.5 — el
- * constraint/trigger DB; acá reportamos el error). UPDATE SIN .select() + count:'exact' para
- * distinguir bloqueo de RLS (count=0) de éxito.
+ * Soft-delete de un rodeo OFFLINE-FIRST (R2.5, owner-only) vía la OUTBOX (T6.2f). RECONCILIACIÓN: la
+ * versión previa hacía un UPDATE directo `deleted_at = now()` con `count:'exact'` — pero ese UPDATE plano
+ * de `deleted_at` vía PostgREST/upload sería RECHAZADO (42501) por el gotcha RLS-on-RETURNING (la fila sale
+ * de la SELECT-policy `deleted_at is null`). El soft-delete DEBE ir por el RPC SECURITY DEFINER
+ * `soft_delete_rodeo(p_rodeo_id)` (0041, owner-only; rechaza con 23514 si el rodeo tiene animal_profiles
+ * activos, R2.5). Por eso ahora se encola un intent `soft_delete_rodeo` + overlay pending_status_overrides
+ * (effect='soft_deleted'): el rodeo DESAPARECE de la lista al instante (UNION oculta los soft_deleted).
  *
- * Nota: el chequeo de "tiene animales activos" lo enforce el backend (R2.5). En MVP, antes de
- * que C2 cargue animales, ningún rodeo tiene perfiles, así que el soft-delete pasa. Cuando C2
- * exista, un rodeo con animales activos devolverá el error del backend, que clasificamos como
- * 'unknown' con su message (el caller lo muestra).
+ * Al SUBIR, uploadData llama supabase.rpc('soft_delete_rodeo', { p_rodeo_id }). Idempotencia natural: un
+ * reintento levanta P0002 (rodeo ya borrado) → descarte idempotente sin rollback (§5.4.3(4)). Un rechazo
+ * (42501 no-owner / 23514 con animales activos) → rollback del overlay (el rodeo re-aparece) + superficia
+ * (R8.1). La firma pública (ServiceResult<void>) NO cambia (R11.1).
  */
 export async function softDeleteRodeo(rodeoId: string): Promise<ServiceResult<void>> {
-  const { error, count } = await supabase
-    .from('rodeos')
-    .update({ deleted_at: new Date().toISOString() }, { count: 'exact' })
-    .eq('id', rodeoId)
-    .is('deleted_at', null);
-
-  if (error) return { ok: false, error: classifyError(error) };
-  if (count === 0) {
-    return {
-      ok: false,
-      error: {
-        kind: 'unknown',
-        message: 'No se pudo eliminar el rodeo. Solo el dueño del campo puede hacerlo.',
-      },
-    };
-  }
+  const enq = await enqueueSoftDelete({
+    entity: 'rodeo',
+    targetId: rodeoId,
+    params: { p_rodeo_id: rodeoId },
+  });
+  if (!enq.ok) return { ok: false, error: { kind: 'unknown', message: enq.error.message } };
   return { ok: true, value: undefined };
 }

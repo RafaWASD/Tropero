@@ -154,6 +154,113 @@ app code/EFs/streams/otras migraciones. NO aplicado al remoto. NO commiteado. NO
 - **Backlog abierto** (docs/backlog.md): aislamiento de tests / limpieza DB beta (344K animals de test); propagar soft-delete del padre a birth_calves/rodeo_data_config; mensaje lindo en accept_invitation ante campo borrado.
 - **Checkpoint-commit** de toda la sesión: hecho a pedido de Raf (feature 15 NO cerrada — sigue T4+).
 
+### Run 7 (T4 — swap de LECTURA del camino de datos) — HECHO, esperando reviewer + Gate 2 (implementer)
+
+Feature en curso: `15-powersync`, Run 7 = Fase **T4** (T4.1 animals, T4.2 events/timeline, T4.3 management-groups) +
+T9.5 (swap T4 alineado a b1, hecho dentro de T4.1). SOLO lecturas → SQLite local (mismo patrón que T3: builders puros
+en `local-reads.ts` + I/O en `local-query.ts`). Las streams del paso 1 + paso 2 ya sincronizan en vivo (25 streams, 43
+buckets). `baseline_commit` ya existe (`1618a956…`), NO se reescribe (multi-run). NO se tocó escritura/RPC/EF/
+migraciones/streams/AppSchema/RLS (100% cliente, solo `services/`). NO done, NO commit.
+
+Plan — HECHO:
+- [x] T4.1 — `animals.ts`: `fetchAnimals`, `searchAnimals` (fuzzy→LIKE local; exacto TAG/IDV igual), `countAnimals`,
+  `fetchAnimalDetail` → SQLite local; `findOrCreateLookup` lee local por delegar en `searchAnimals`. **b1**: identidad
+  (`tag_electronic`/`sex`/`birth_date`) desde `animal_profiles.animal_*`, NO JOIN a `animals` (= T9.5).
+- [x] T4.2 — `events.ts`: `fetchTimeline` (UNION ALL local de los 7 orígenes, fiel a `animal_timeline` 0069; payload
+  via `json_object`→`JSON.parse`; las 2 queries suplementarias —categorías + service_type— locales) + `fetchMother`
+  (JOIN local birth_calves→reproductive_events→animal_profiles; tag de la madre b1) → SQLite local.
+- [x] T4.3 — `management-groups.ts`: `fetchManagementGroups` → SQLite local; `fetchGroupMembers` lee local por delegar
+  en `fetchAnimals`.
+
+Verde: `check.mjs` (exit 0) + typecheck + `run-tests.mjs` ("All tests passed."). 18 unit nuevos en `local-reads.test.ts`
+(33 totales). Decisiones de los puntos abiertos (timeline UNION, identidad b1, degradación fuzzy→LIKE), trazabilidad,
+autorrevisión y reconciliación en `progress/impl_15-powersync.md` (sección **Run 7**). NO commiteado. NO marcado done.
+Ningún read necesita un campo de `animals` no denormalizado → nada que reportar al leader por ese lado.
+
+### Run 8 (T5 — swap de ESCRITURA offline SIMPLE, CRUD plano) — EN CURSO (implementer)
+
+Feature en curso: `15-powersync`, Run 8 = Fase **T5** (T5.1 eventos, T5.2 lotes, T5.3 sessions/presets).
+Solo CRUD plano (INSERT/UPDATE local sobre tablas SINCRONIZADAS vía `getPowerSync().execute(...)`); SIN
+overlay (eso es T6). `baseline_commit` ya existe (`1618a9566…`), NO se reescribe (multi-run). NO toco
+uploadData (salvo ampliar mapeo plano si faltara), migraciones, streams, RLS, AppSchema, reads de T4, ni
+overlay. NO done, NO commit.
+
+Plan (T<n>) — HECHO, esperando reviewer + Gate 2:
+- [x] T5.1 — `events.ts`: `addWeight`/`addConditionScore`/`addTacto`/`addService`/`addAbortion`/
+  `addObservation` → INSERT local + upload queue; `id` cliente; eliminado split-insert. Todos INSERT plano
+  single-tabla (NINGUNA RPC-bound) — verificado en el as-built. `establishment_id` de los eventos OMITIDO
+  (trigger 0077 lo fuerza al subir, NULL local, timeline filtra por animal_profile_id); EXCEPCIÓN
+  `animal_events` (trigger de VALIDACIÓN 0034 → SÍ se setea desde el perfil).
+- [x] T5.2 — `management-groups.ts`: `assignAnimalToGroup` (UPDATE local), `createManagementGroup`
+  (INSERT local, devuelve el lote con id cliente sin re-leer), `renameManagementGroup` (UPDATE local) →
+  eliminados el diff before/after de create + el `count:'exact'` de assign/rename. softDelete NO se tocó (T6).
+- [~] T5.3 — `sessions`/`maneuver_presets`: **N/A** — no existe service cliente (frontend spec 03 diferido;
+  solo el AppSchema los declara). Nada que swapear. Documentado, no se inventó.
+
+SQL builders de escritura PUROS en `local-reads.ts` (patrón de los read-builders) + I/O `runLocalWrite` en
+`local-query.ts`. 17 unit nuevos en `local-reads.test.ts` (SQL+args+id por cada add*/lote → 43 totales en
+el archivo). Verde: `check.mjs` (exit 0) + typecheck + `run-tests.mjs` ("All tests passed."). Trazabilidad,
+autorrevisión y reconciliación en `progress/impl_15-powersync.md` (sección Run 8). `uploadData` NO se tocó
+(el CRUD plano es table-agnóstico → ya cubre estas tablas). NO commiteado. NO marcado done.
+
+### Run T6 (escritura offline RPC-bound: outbox + overlay + RPC-mapping) — EN CURSO (implementer)
+
+Feature en curso: `15-powersync`, Run T6 = Fase **T6** (T6.1 + T6.2a–f + T6.5). Escritura offline de las (b)
+RPC-bound (alta, parto, baja, soft-deletes) vía **outbox `op_intents` + overlay `pending_*` local-only + mapeo
+intent→RPC en `uploadData`** (Puerta 1, opción ii). `baseline_commit` ya existe (`1618a9566…`), NO se reescribe
+(multi-run). NO migraciones nuevas (idempotencia ya en 0075). NO done, NO commit. NO toco RLS/streams/reads de
+T3/T4 salvo el UNION del overlay. `import_rodeo_bulk` queda ONLINE (T6.1).
+
+Plan (T6.2 a→f + T6.5):
+- [ ] T6.2a — schema.ts: verificar/completar `op_intents` + `pending_*` (columnas que el overlay UNION precisa).
+- [ ] T6.2b — `outbox.ts`: enqueueIntent (1 writeTransaction: op_intent + overlay) + clearOverlay + rollbackOverlay.
+- [ ] T6.2c — `upload.ts` + connector: applyIntent (intent→supabase.rpc; `p_client_op_id` SOLO a register_birth; FIFO).
+- [ ] T6.2d — idempotencia: create_animal (ON CONFLICT/ids cliente), soft_delete_* (P0002), exit (natural), register_birth (0075).
+- [ ] T6.2e — ACK/rollback: éxito→clearOverlay; transitorio→re-throw; permanente→rollbackOverlay; P0002/23505→descarte idempotente.
+- [ ] T6.2f — swap 4 services (createAnimal/registerBirth/exitAnimalProfile/softDelete*) + UNION synced+overlay en lecturas.
+- [ ] T6.5 — no doble-upload: 1 op (b) = 1 CrudEntry (op_intent); test register_birth offline.
+
+### Run T9.8 (createRodeo OFFLINE — RPC create_rodeo + outbox/overlay, un-defer) — EN CURSO (implementer)
+
+Feature en curso: `15-powersync`. Raf pidió explícito que `createRodeo` funcione OFFLINE (offline-first sin
+excepciones) — es el último write que faltaba. NO es CRUD plano (arma la plantilla `rodeo_data_config`, seedeada
+por el trigger 0018 server-side + diff de toggles; `rodeo_data_config` tiene PK compuesta = read-only-local). →
+RPC atómica server-side `create_rodeo` (migración **0081**, NO aplicada — la aplica el leader tras Gate 1) +
+outbox + overlay optimista (patrón T6). `baseline_commit` sin cambios (multi-run). NO done, NO commit.
+
+Plan: 0081 RPC create_rodeo (owner-only authz, INSERT ON CONFLICT idempotente, UPSERT toggles) → schema.ts (2
+overlay localOnly pending_rodeos + pending_rodeo_data_config) → outbox.ts (enqueueCreateRodeo) → upload/connector
+('create_rodeo' → supabase.rpc, dedup natural) → rodeos.ts (createRodeo offline, firma intacta, elimina
+fetchRodeosOnline) → local-reads.ts (UNION en buildRodeosQuery/buildRodeoConfigQuery) → tests + reconciliación
+(design §1.2 un-defer, tasks, backlog → RESUELTA). Detalle en `progress/impl_15-powersync.md` (Run T9.8).
+
+### Run online-guard (FIX UX/robustez — fast-fail de writes ONLINE-only offline) — EN CURSO (implementer)
+
+Feature en curso: `15-powersync`. Bug de Raf: editar perfil OFFLINE deja la pantalla en "Guardando…"
+PARA SIEMPRE (`saveProfile` hace 2 `supabase.update()` que offline no resuelven → la promesa nunca
+resuelve → la UI nunca sale de "guardando"). Decisión de Raf: los writes ONLINE-only deben FALLAR
+RÁPIDO con "Necesitás conexión" en vez de colgarse; la pantalla de perfil SE SIGUE VIENDO offline
+(nombre/teléfono son datos locales). `baseline_commit` ya existe (`1618a9566…`), NO se reescribe.
+
+Plan (T<n>) — HECHO, esperando reviewer + Gate 2:
+- [x] T1 — PURO `offlineError` en `online-guard-pure.ts` (sin SDK, testeable) + I/O `assertOnline` en
+  `online-guard.ts` (lee `currentStatus.connected` via `getPowerSync`, envuelve `{ok:false, error}`) +
+  unit test SOLO del PURO (4 casos, enganchado en run-tests.mjs). **Split obligado**: el PURO no podía
+  vivir junto al import del SDK porque arrastra RN al grafo de node:test (SyntaxError typeof) — mismo
+  patrón status-derive vs status.
+- [x] T2 — `assertOnline` al INICIO de cada mutación ONLINE-only: `establishments.ts` (saveProfile,
+  saveOwnPhone, createEstablishment, updateEstablishment, softDeleteEstablishment), `account.ts`
+  (changeEmail, shape `{reason:'network'}`), `members.ts` (guard en `invokeFn` → cubre las 6 ops de
+  equipo). NO gateé lecturas ni los writes offline (animals/events/management-groups/rodeos/outbox/
+  upload → ninguno referencia el guard, verificado por grep).
+- [x] T3 — `mas.tsx`: `useIsOffline()` (reusa `subscribeSyncUiState`) → aviso "Sin conexión: no podés
+  editar el perfil ahora" + "Editar perfil"/"Guardar" deshabilitados offline. La pantalla SIGUE
+  mostrando nombre/email/teléfono (lectura local).
+- [x] T4 — typecheck verde + client unit 183/183 (incl. online-guard 4/4). El único rojo del runner es
+  la **animal suite** (bloque `create_rodeo` de 0081/0082, trabajo PARALELO, migración no aplicada) —
+  NO es de este fix (cliente puro; la animal suite no importa services de app/). Detalle/autorrevisión/
+  reconciliación en `progress/impl_15-powersync.md` (sección "Run online-guard"). NO commit, NO done.
+
 ## Notas técnicas vigentes para el implementer
 
 - En PowerShell usar `pnpm.cmd` (no `pnpm`) — Cylance Script Control bloquea `.ps1`.

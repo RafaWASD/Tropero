@@ -46,14 +46,23 @@ app/App.tsx (o el root provider)     → montar <PowerSyncProvider> por encima d
 app/src/services/animals.ts          → lecturas → watchable local; createAnimal → OUTBOX (intención create_animal + filas optimistas) → RPC en uploadData (Puerta 1, opción ii)
 app/src/services/events.ts           → lecturas → watchable local; addWeight/.../addObservation → local+upload (CRUD plano); registerBirth → OUTBOX (intención register_birth + terneros optimistas) → RPC (opción ii)
 app/src/services/management-groups.ts→ lecturas → watchable local; assignAnimalToGroup/create/rename → local+upload (CRUD plano); softDelete → OUTBOX (intención soft_delete_management_group) → RPC (opción ii)
-app/src/services/rodeos.ts           → lecturas → watchable local; create/update local (CRUD plano, R6.1); softDelete rodeo → OUTBOX → RPC (opción ii)
-app/src/services/rodeo-config.ts     → lecturas → watchable local (catálogo + toggle)
-app/src/services/establishments.ts   → lectura del contexto → watchable local; create/invite ONLINE (R7.1)
-app/src/services/members.ts          → lectura → watchable local; mutaciones admin ONLINE (R7.1)
-app/src/services/profile.ts          → lectura self → watchable local (user_private); edición ONLINE (R7.1)
-app/src/services/exit-animal.ts      → exitAnimalProfile → OUTBOX (intención exit_animal_profile + UPDATE optimista) → RPC (opción ii)
+app/src/services/rodeos.ts           → lecturas → watchable local; **createRodeo OFFLINE vía RPC `create_rodeo` (0081) + outbox/overlay (Run T9.8 — un-defer, Raf: offline-first sin excepciones)**: NO es CRUD plano single-tabla como createManagementGroup — su plantilla (`rodeo_data_config`) la seedea un trigger server-side (`tg_rodeos_seed_data_config`, 0018) + el diff de toggles, y `rodeo_data_config` tiene PK COMPUESTA (read-only-local) → por eso va por una RPC ATÓMICA server-side `create_rodeo` (id de cliente + INSERT ON CONFLICT DO NOTHING + UPSERT de los toggles, idempotente; owner-only is_owner_of, espeja rodeos_insert 0017) + outbox (intent `create_rodeo`) + overlay optimista (`pending_rodeos` + `pending_rodeo_data_config`, la plantilla COMPUTADA en el cliente). Offline el rodeo Y su plantilla aparecen al instante (UNION en buildRodeosQuery/buildRodeoConfigQuery). Idempotencia NATURAL (sin client_op_id: replay = no-op total — ON CONFLICT del id + el trigger de seed no re-dispara + UPSERT de toggles). softDelete rodeo → OUTBOX (intención soft_delete_rodeo) → RPC (opción ii) — HECHO en T6.
+app/src/services/rodeo-config.ts     → lecturas → watchable local (catálogo + toggle). **Editar plantilla OFFLINE vía RPC `set_rodeo_config` (0082) + outbox/overlay (Run T9.9 — gemelo de T9.8 para EDICIÓN; Raf: offline-first sin excepciones)**: `editar-plantilla.tsx` encola `enqueueSetRodeoConfig` (intent `set_rodeo_config` + overlay `pending_rodeo_data_config` del diff de `computeEditDiff`) en vez de UPDATE/INSERT online a `rodeo_data_config` (PK COMPUESTA, read-only-local). La RPC DERIVA el est del rodeo (anti-IDOR hermético; owner-only is_owner_of, espeja rodeo_data_config_update/insert 0018) + UPSERT idempotente (sin client_op_id; replay = no-op). `buildRodeoConfigQuery` pasó a **overlay-override** (el overlay pisa la fila synced por field) para no duplicar el field en edición. **Reconciliación rowid (Run T9.9 follow-up, 2026-06-09):** el overlay-override NO se dedupa por `MAX(rowid)` (el diseño T9.9 original) — las tablas de PowerSync son **VIEWS** y NO exponen `rowid` (`db.getAll` tiraba "no such column: rowid" online y offline; el unit test no lo cazó porque corre contra `node:sqlite`, tablas reales con rowid). El as-built es: el synced excluye los fields del overlay (`NOT IN`) `UNION ALL` TODAS las filas del overlay del rodeo, apoyado en un **INVARIANTE de ≤1 fila de overlay por (rodeo_id, field_definition_id)** que garantiza `enqueueSetRodeoConfig` con un **DELETE-PRIOR** (borra la fila previa de ese rodeo+field, de cualquier `client_op_id`, antes del INSERT del overlay). Builder nuevo `buildDeletePendingRodeoConfig`. **Cierre de zona (2026-06-09):** las viejas escrituras ONLINE `toggleRodeoField`/`enableNonDefaultField` se REMOVIERON de `rodeo-config.ts` (0 callers tras T9.9, verificado por grep en todo `app/`) → el módulo quedó **read-only** (solo lecturas locales); la authz owner-only sigue viva en la RPC `set_rodeo_config` 0082. Además, el `onSave` de `editar-plantilla.tsx` pasó a **`router.back()` al guardar OK** (vuelve a RodeosScreen; consistente con `editar-campo.tsx` `onSaved → router.back()` y con el cierre de la acción terminal "Guardar"): diff-vacío también vuelve, error de encolado se queda y muestra el error. Sin primitiva de toast reusable en `@/components` → back inmediato silencioso (no se construyó primitiva nueva); se removieron el estado `savedOk`, el texto inline "Plantilla guardada" y el helper `reloadBaseOnly`.
+app/src/services/establishments.ts   → lectura del contexto → watchable local; create/invite/edición/perfil ONLINE (R7.1) con **fast-fail de conexión** (T10): offline devuelven `kind:'network'` ("Necesitás conexión") en vez de colgar la pantalla (`online-guard`). saveProfile/saveOwnPhone/createEstablishment/updateEstablishment/softDeleteEstablishment gateados.
+app/src/services/members.ts          → lectura → watchable local; mutaciones admin ONLINE (R7.1) con fast-fail de conexión (T10, en `invokeFn`)
+app/src/services/profile.ts          → lectura self → watchable local (user_private); edición ONLINE (R7.1). La pantalla de perfil (`mas.tsx`) offline se VE (lectura local) pero deshabilita editar/guardar + avisa "Sin conexión" (T10)
+app/src/services/animals.ts          → exitAnimalProfile → OUTBOX (intención exit_animal_profile + overlay pending_status_overrides effect='exited') → RPC (opción ii)
 app/src/services/import-rodeo.ts     → import_rodeo_bulk queda ONLINE (excepción Puerta 1: onboarding masivo, no manga)
 ```
+
+> **⚠️ RECONCILIADO al as-built (Run T6):**
+> - **`exitAnimalProfile` vive en `animals.ts`** (NO en `exit-animal.ts`, que es la lógica PURA de mapeo
+>   motivo→status + clasificación de errores, testeable bajo node:test). El swap a outbox se hizo en
+>   `animals.ts::exitAnimalProfile`.
+> - **`softDeleteRodeo` (rodeos.ts) hacía un UPDATE DIRECTO de `deleted_at`** (`count:'exact'`), NO el RPC
+>   `soft_delete_rodeo`. Un UPDATE plano de `deleted_at` por el upload sería RECHAZADO (gotcha
+>   RLS-on-RETURNING: la fila sale de la SELECT-policy `deleted_at is null`). El swap lo corrigió al RPC
+>   `soft_delete_rodeo` (0041, owner-only) por la outbox, como manda §5.3.1.
 
 > **Regla de capas (architecture.md)**: el swap es 100 % dentro de `services/`. Las firmas públicas (`ServiceResult<T>`/`AppError`) no cambian → hooks/screens no se tocan (salvo el provider). (R11.1)
 
@@ -600,6 +609,15 @@ Las streams nuevas del paso 2 (A) son **idénticas en forma** a las del paso 1 (
 > - **`establishment_id`** (`column.text`) en las 8 tablas hijas (`weight_events`, `reproductive_events`, `sanitary_events`, `condition_score_events`, `lab_samples`, `animal_category_history`, `birth_calves`, `rodeo_data_config`) — espejo fiel de la fila local (el scoping del wire es server-side por la stream). En `birth_calves`/`rodeo_data_config` (PK compuesta) va como **columna normal** más; **NO** se declara un `id` propio (el SDK lo agrega y lo prohíbe — lo porta el `id` sintético de la stream, §PK).
 > - **`animal_tag_electronic` / `animal_sex` / `animal_birth_date`** (`column.text`) en `animal_profiles` (b1: identidad del animal que la UI lee offline; `animal_birth_date` es `date`→TEXT).
 > - **`member_name`** (`column.text`) en `user_roles` (c2: el nombre que `buildMembersQuery`/`buildOwnNameQuery` ya leen; sin esta columna esas lecturas devolverían vacío). Cubierto por `schema.test.ts` (3 tests nuevos del paso 2). No agrega/quita tablas → el conteo total (32) no cambia.
+>
+> **RECONCILIACIÓN AS-BUILT (fix bug T4 en vivo, 2026-06-09 — "no such column: ap.created_by").** El `AppSchema` declaraba SOLO un subconjunto de columnas por tabla; el swap de lectura T4 (`local-reads.buildAnimalDetailQuery`) SELECTea `ap.created_by`, que NO estaba declarada → PowerSync no la materializaba en el SQLite local → la ficha del animal reventaba con `no such column`. Las streams hacen `SELECT *` (verificado en `rafaq.yaml`) → TODAS las columnas as-built bajan por el wire; el `AppSchema` debe espejarlas para que se materialicen. Se completaron las columnas as-built faltantes (tipos verificados contra `supabase/migrations/`):
+> - **`animal_profiles.created_by`** (`column.text`; uuid `0043`) — **la que rompió**: la lee `buildAnimalDetailQuery` (→ `fetchAnimalDetail.createdBy`); es load-bearing para authz de baja (`exit_animal_profile`, R4.14).
+> - **`animal_profiles.nursing`** (`column.integer`; boolean `0061`) — cría al pie; la escribe `createAnimal` en el INSERT del perfil. Robustez (espeja el `SELECT *`).
+> - **`animals.is_castrated`** (`column.integer`; boolean `0060`) — atributo físico. Robustez.
+> - **`reproductive_events.heifer_fitness`** (`column.text`; enum `0053`) — aptitud de vaquillona. Robustez.
+> - **`reproductive_events.client_op_id`** (`column.text`; uuid `0075`, delta de idempotencia T6.4) — clave de la outbox; baja por la stream (`SELECT *`). Robustez.
+>
+> **GUARD anti-recurrencia** (`schema.test.ts`, test nuevo): un mapa manual `{tabla: [columnas que los builders de local-reads.ts leen]}` que falla si el `AppSchema` NO declara una columna que un builder SELECTea (la PK `id` se excluye — la agrega el SDK). Caza el gap en CI antes de que reviente en vivo (los unit tests de `local-reads` solo verifican el STRING SQL, no corren contra el SQLite real).
 
 | Tabla as-built | Clase | Stream | PK `id` simple? |
 |---|---|---|---|
@@ -704,6 +722,13 @@ Estas pasan de `supabase.from(T).insert(payload)` a `db.execute('INSERT INTO T (
 
 **R6.3 (gotcha RLS-on-RETURNING desaparece)**: hoy estos services hacen split insert+select / `count:'exact'` para sortear que el RETURNING no ve la fila bajo la SELECT-policy `deleted_at is null`. Con escritura local, **la lectura post-escritura es una query watchable sobre SQLite local** — no hay roundtrip a PostgREST ni RETURNING que evalúe RLS. El `diff before/after` de `createManagementGroup` y el `count:'exact'` de `assignAnimalToGroup`/`renameManagementGroup` se **eliminan**: la fila ya está en el DB local apenas se inserta/actualiza, y la watchable refleja el cambio. La autorización real se valida al **subir** (el upload aplica el INSERT/UPDATE contra PostgREST → RLS lo acepta o lo rechaza, R6.2/R8.1).
 
+> **AS-BUILT (Run 8, T5).** Los SQL builders de escritura son PUROS en `services/powersync/local-reads.ts` (mismo patrón que los read-builders) + I/O `runLocalWrite()` en `local-query.ts` (`db.execute(sql, args)`). Decisiones de implementación:
+> - **`establishment_id` de las tablas de evento (0077)**: se ELIGIÓ la opción (a) — **OMITIRLO en el INSERT local**. El trigger `tg_force_establishment_id_from_profile` (0077, BEFORE INSERT) lo FUERZA desde `animal_profiles.establishment_id` al SUBIR (incondicional, anti-spoof — ignora cualquier valor del payload), así que la fila sube consistente; localmente queda NULL y no rompe nada porque las lecturas T4 del timeline filtran por `animal_profile_id` (NUNCA por `establishment_id`). Es lo más robusto y simple (no se deriva del contexto activo, que podría ser otro campo). **EXCEPCIÓN: `animal_events`** — su trigger (`tg_animal_events_validate_est`, 0034) es de VALIDACIÓN (no force): exige que `establishment_id` coincida con el del perfil (23514 si no) → `addObservation` SÍ lo setea en el INSERT local, derivado del PERFIL (lo pasa el caller, no el contexto activo). Comportamiento idéntico al as-built previo.
+> - **`created_by`/`author_id`/`source`/`edit_window_until`**: NO se mandan (trigger/default server-side los pone al subir) — idéntico al as-built previo.
+> - **`createManagementGroup`** devuelve el lote con su `id` de cliente SIN re-leer (la firma `ServiceResult<ManagementGroup>` se preserva, R11.1).
+> - **Contrato**: `runLocalWrite` devuelve error SOLO si el `execute` local falla (DB no booteada / SQL malformado, defensivo `kind:'unknown'`) — NUNCA por un reject de upload (eso lo maneja `uploadData` por el canal de status, R8.1). El local write siempre tiene éxito offline.
+> - **`sessions`/`maneuver_presets`**: sin service cliente (frontend spec 03 diferido) → T5.3 sin alcance hoy.
+
 ### 5.3 Mutaciones (b) RPC-bound — OFFLINE vía outbox + RPC-mapping (Puerta 1, opción ii)
 
 > **RESUELTO en la Puerta 1 (2026-06-08): opción (ii).** `register_birth`, `exit_animal_profile`, los `soft_delete_*` y el **alta de animal** (`createAnimal`) van **OFFLINE** vía una **outbox** local mapeada a RPC en el drenado (R6.6, R6.8–R6.11). Solo `import_rodeo_bulk` queda **ONLINE** (excepción documentada abajo). Estas mutaciones NO se pueden expresar como CRUD plano offline-safe (son atómicas / SECURITY DEFINER / cross-tabla), de ahí el outbox + RPC-mapping en vez del camino plano de §5.2.
@@ -747,6 +772,25 @@ const op_intents = new Table(
 #### 5.3.3 Estado optimista — OVERLAY LOCAL-ONLY (R6.11/R6.12, cerrado 2026-06-08)
 
 > **Cierre del hueco DOUBLE-UPLOAD.** El diseño previo escribía las filas optimistas en las tablas **SINCRONIZADAS** (el ternero, el alta, el UPDATE de baja, el `deleted_at`) con ids de cliente *y además* encolaba el `op_intent`. Problema: PowerSync genera una CrudEntry para **ambas cosas** → `uploadData()` aplicaría la op DOS veces (el INSERT/UPDATE plano de la fila optimista **y** la RPC del intent). Eso duplica / corrompe. **Resuelto: el efecto optimista vive en un overlay `localOnly` que NO genera CrudEntry; el upload va SOLO por el `op_intent`.**
+
+> **⚠️ RECONCILIADO al as-built (Run T6) — columnas del overlay + surfacing de errores de dominio.**
+> - **`pending_animal_profiles` lleva el shape COMPLETO de lectura** (no solo "unas cols espejo"): las
+>   columnas que el UNION de la lista (`buildAnimalsListQuery`) y del detalle (`buildAnimalDetailQuery`) leen,
+>   INCLUIDA la **identidad denormalizada b1** (`animal_tag_electronic`/`animal_sex`/`animal_birth_date`) + los
+>   atributos de detalle (`category_override`/`breed`/`coat_color`/`entry_date`/`entry_weight`/`created_by`/
+>   `exit_date`/`exit_reason`) + `created_at` (para el ORDER BY del UNION). Así el UNION es directo (mismas
+>   columnas que `animal_profiles`), sin JOIN a `pending_animals`. `pending_reproductive_events` lleva
+>   `created_at` (orden/payload del timeline). Un GUARD en `schema.test.ts` verifica que el overlay declara
+>   toda columna que el UNION lee (anti "no such column" en vivo).
+> - **Los errores de DOMINIO ya NO se surfacing desde el return del service** (offline-first): con el alta/
+>   parto offline, el encolado SIEMPRE tiene éxito (devuelve `ok:true`) y el rechazo REAL — caravana/IDV
+>   duplicada (`createAnimal`), tag de ternero duplicada o sin rol (`registerBirth`), 42501 en la baja/borrado
+>   — lo resuelve `uploadData` al SUBIR (rollback del overlay + superficia por el canal de status, R8.1), NO
+>   el return. Las pantallas no se rompen (ya manejaban `ok:true` → navegan). **Consecuencia UX**: offline no
+>   hay feedback inmediato de duplicado al dar de alta; se ve al sincronizar. (Decisión de producto abierta
+>   para el leader: ¿check de unicidad LOCAL best-effort pre-encolado sobre el SQLite ya sincronizado?)
+> - **`soft_delete_event`/`soft_delete_animal_event`**: el mapper los soporta, pero NO hay service cliente que
+>   los invoque hoy (sin UI de borrado de eventos — spec 03 diferida) → sin swap en este run.
 
 El efecto optimista se escribe en **tablas overlay `localOnly: true`** declaradas en `AppSchema`, en el **mismo paso (misma `writeTransaction` local)** en que el service encola la intención en `op_intents`:
 
@@ -805,13 +849,29 @@ for (const op of tx.crud) {
 ```
 async function applyIntent(op /* CrudEntry de op_intents */) {
   const params  = JSON.parse(op.opData.params_json);
-  const rpcName = op.opData.op_type;            // 'register_birth' | 'exit_animal_profile' | 'soft_delete_*' | 'create_animal'
+  const opType  = op.opData.op_type;            // 'register_birth' | 'exit_animal_profile' | 'soft_delete_*' | 'create_animal'
   // SOLO register_birth recibe p_client_op_id (dedup explícita, delta §5.4.3). El resto es
   // dedup-natural → NO se les pasa p_client_op_id (su firma no lo tiene).
-  const args = rpcName === 'register_birth' ? { ...params, p_client_op_id: op.id } : params;
-  await throwOnError(supabase.rpc(rpcName, args));
+  const args = opType === 'register_birth' ? { ...params, p_client_op_id: op.id } : params;
+  await throwOnError(supabase.rpc(opType, args));
 }
 ```
+
+> **⚠️ RECONCILIADO al as-built (Run T6) — `create_animal` NO tiene RPC en el schema.** El alta NO se
+> implementa con `supabase.rpc('create_animal', ...)` (esa RPC no existe en el backend as-built). El intent
+> `create_animal` lleva en `params_json` los DOS payloads cross-tabla (`{ animals: {...}, animal_profiles:
+> {...} }`, con ids de cliente) y `uploadData` los aplica como **2 upserts idempotentes** (`supabase.from(
+> 'animals').upsert(payload)` + `supabase.from('animal_profiles').upsert(payload)`, `ON CONFLICT` por la PK
+> `id` → un reintento at-least-once NO duplica). Es exactamente el "**orden atómico en `uploadData`**" que
+> §5.3.1 ya contemplaba como alternativa a una RPC. `animals` primero (el perfil tiene FK `animal_id`); si el
+> upsert del perfil falla (p.ej. idv duplicado), el `animals` queda huérfano e invisible por RLS (idéntico al
+> split-insert online) y el rollback del overlay revierte la vista optimista. Las tablas (`animals`/
+> `animal_profiles`) son LITERALES en el connector (no vienen del intent) → un intent forjado no puede
+> redirigir el upsert a otra tabla. El `op_type` se whitelistea (`mapIntentToRpc`): un `op_type` fuera de
+> {`create_animal`, `register_birth`, `exit_animal_profile`, `soft_delete_management_group`,
+> `soft_delete_rodeo`, `soft_delete_animal_event`, `soft_delete_event`} → `PermanentIntentError` (descarte,
+> no se invoca una RPC arbitraria). `register_birth`/`exit_animal_profile`/`soft_delete_*` SÍ mapean a su RPC
+> homónima vía `supabase.rpc`.
 
 - **Orden**: las intenciones se drenan en **orden de cola** (FIFO de la upload queue), igual que el CRUD plano. Si una operación depende de otra (ej. crear un animal y luego un evento sobre él), el orden de encolado lo preserva. Las dependencias cross-op se resuelven porque los `id` de `create_animal`/eventos son de cliente (la RPC los recibe como params; para `register_birth` los ids de los terneros los asigna el server).
 - **`p_client_op_id` solo en `register_birth`** (§5.4.3): es la única RPC con dedup explícita. `exit_animal_profile`/`create_animal`/`soft_delete_*` no llevan ese param (sus firmas as-built no lo tienen y son dedup-natural).

@@ -2450,6 +2450,344 @@ test('spec 15-powersync paso 2 — denormalización establishment_id (tablas hij
   });
 });
 
+// =====================================================================
+// spec 15-powersync — Run T9.8: RPC create_rodeo (alta de rodeo OFFLINE).
+// Migración supabase/migrations/0081_create_rodeo_rpc.sql.
+// ⚠️ Estos tests REQUIEREN la migración 0081 APLICADA al remoto (la aplica el leader por Management API
+// tras gatear el SQL). Hasta entonces FALLAN — es ESPERADO: la función create_rodeo no existe aún, así
+// que el call da PGRST202 (function not found). El implementer NO aplica la migración. Mismo patrón que
+// la suite spec 15-powersync (delta 0075) y la del paso 2 (0077-0080).
+//
+// Verifican: (1) owner crea un rodeo vía la RPC con id de cliente → rodeo + plantilla (trigger 0018) +
+// toggles aplicados; (2) IDEMPOTENCIA: replay (mismo p_id + p_toggles) = no-op total (1 rodeo, la plantilla
+// NO se duplica porque el trigger no re-dispara, los toggles re-aplican el mismo end-state); (3) AUTHZ:
+// un usuario SIN rol de owner en el campo → 42501 (espeja rodeos_insert = is_owner_of, 0017).
+// =====================================================================
+test('spec 15-powersync — create_rodeo RPC (alta de rodeo OFFLINE, Run T9.8)', async (t) => {
+  let userA, userB, clientA, clientB, estA, speciesId, systemId, fdPeso;
+
+  await t.test('setup: owner A + un field_operator B en el campo de A', async () => {
+    userA = await createTestUser('s15cr_A');
+    userB = await createTestUser('s15cr_B');
+    clientA = await getUserClient(userA.email);
+    clientB = await getUserClient(userB.email);
+    estA = await createEstablishmentAs(clientA, `${RUN_TAG} s15cr_estA`);
+    // B es field_operator del campo de A (rol activo pero NO owner) → debe poder leer rodeos pero NO crear.
+    await assignRoleAsService(userB.id, estA, 'field_operator');
+    const ss = await lookupSpeciesSystem(clientA, 'bovino', 'cria');
+    speciesId = ss.speciesId;
+    systemId = ss.systemId;
+    // Un field_definition para diffear un toggle (peso = default ON en cría → lo apagamos en p_toggles).
+    const { data: fd } = await clientA.from('field_definitions').select('id').eq('data_key', 'peso').single();
+    fdPeso = fd.id;
+  });
+
+  // -- Caso 1: owner crea el rodeo con id de cliente; trigger seedea la plantilla; toggles aplicados. --
+  await t.test('caso 1: owner crea rodeo vía create_rodeo (id de cliente) → rodeo + plantilla + toggle aplicado', async () => {
+    const rodeoId = require('node:crypto').randomUUID();
+    const { data: ret, error } = await clientA.rpc('create_rodeo', {
+      p_id: rodeoId,
+      p_establishment_id: estA,
+      p_name: `${RUN_TAG}_cr_rodeo`,
+      p_species_id: speciesId,
+      p_system_id: systemId,
+      p_toggles: [{ field_definition_id: fdPeso, enabled: false }], // apagar 'peso' (default ON)
+    });
+    assert.equal(error, null, error && error.message);
+    assert.equal(ret, rodeoId, 'create_rodeo devuelve el id del rodeo (= el id de cliente)');
+
+    // El rodeo existe con el id de CLIENTE.
+    const { data: rodeo } = await admin.from('rodeos')
+      .select('id, establishment_id, name, species_id, system_id, deleted_at').eq('id', rodeoId).single();
+    assert.ok(rodeo, 'el rodeo se creó con el id de cliente');
+    assert.equal(rodeo.establishment_id, estA);
+    assert.equal(rodeo.deleted_at, null);
+
+    // El trigger 0018 seedeó la plantilla (26 filas en cría).
+    const { data: cfg } = await admin.from('rodeo_data_config')
+      .select('field_definition_id, enabled, establishment_id').eq('rodeo_id', rodeoId);
+    assert.equal(cfg.length, 26, 'el trigger pre-pobló rodeo_data_config (26 filas en cría)');
+    // El toggle del usuario se aplicó: 'peso' quedó en false (era default ON).
+    const peso = cfg.find((c) => c.field_definition_id === fdPeso);
+    assert.equal(peso.enabled, false, 'el toggle de peso se aplicó (enabled=false sobre el default ON)');
+    // establishment_id denormalizado lo forzó el trigger 0078 desde el rodeo.
+    assert.ok(cfg.every((c) => c.establishment_id === estA), 'establishment_id de la plantilla forzado al del rodeo');
+  });
+
+  // -- Caso 2: IDEMPOTENCIA — replay (mismo p_id + p_toggles) = no-op TOTAL. --
+  await t.test('caso 2: replay (mismo p_id + p_toggles) → no-op total (1 rodeo, plantilla no duplicada, toggles iguales)', async () => {
+    const rodeoId = require('node:crypto').randomUUID();
+    const args = {
+      p_id: rodeoId,
+      p_establishment_id: estA,
+      p_name: `${RUN_TAG}_cr_idemp`,
+      p_species_id: speciesId,
+      p_system_id: systemId,
+      p_toggles: [{ field_definition_id: fdPeso, enabled: false }],
+    };
+    // 1er call: crea el rodeo + plantilla.
+    const r1 = await clientA.rpc('create_rodeo', args);
+    assert.equal(r1.error, null, r1.error && r1.error.message);
+
+    const cfgBefore = await admin.from('rodeo_data_config')
+      .select('field_definition_id', { count: 'exact', head: true }).eq('rodeo_id', rodeoId);
+    const rodeoCountBefore = await admin.from('rodeos')
+      .select('id', { count: 'exact', head: true }).eq('establishment_id', estA);
+
+    // 2do call: MISMO p_id + p_toggles (simula el reintento at-least-once tras perder el ACK).
+    const r2 = await clientA.rpc('create_rodeo', args);
+    assert.equal(r2.error, null, r2.error && r2.error.message);
+    assert.equal(r2.data, rodeoId, 'el replay devuelve el MISMO id (no-op idempotente)');
+
+    // Estado real: exactamente UN rodeo (no 2) y la plantilla NO se duplicó (el trigger no re-disparó: el
+    // INSERT del rodeo fue ON CONFLICT DO NOTHING → no hubo INSERT efectivo → no AFTER INSERT trigger).
+    const rodeoCountAfter = await admin.from('rodeos')
+      .select('id', { count: 'exact', head: true }).eq('establishment_id', estA);
+    assert.equal(rodeoCountAfter.count, rodeoCountBefore.count, 'el replay NO creó un 2do rodeo');
+    const cfgAfter = await admin.from('rodeo_data_config')
+      .select('field_definition_id', { count: 'exact', head: true }).eq('rodeo_id', rodeoId);
+    assert.equal(cfgAfter.count, cfgBefore.count, 'el replay NO duplicó la plantilla (trigger no re-dispara)');
+    assert.equal(cfgAfter.count, 26, 'la plantilla sigue siendo 26 filas (no 52)');
+    // El toggle sigue en el mismo end-state (UPSERT idempotente).
+    const { data: peso } = await admin.from('rodeo_data_config')
+      .select('enabled').eq('rodeo_id', rodeoId).eq('field_definition_id', fdPeso).single();
+    assert.equal(peso.enabled, false, 'el toggle re-aplicado deja el mismo end-state');
+  });
+
+  // -- Caso 3: AUTHZ — un NO-owner (field_operator del campo) NO puede crear un rodeo → 42501. --
+  await t.test('caso 3: field_operator (no-owner) llamando create_rodeo → 42501, nada creado', async () => {
+    const rodeoId = require('node:crypto').randomUUID();
+    const { error } = await clientB.rpc('create_rodeo', {
+      p_id: rodeoId,
+      p_establishment_id: estA,
+      p_name: `${RUN_TAG}_cr_denied`,
+      p_species_id: speciesId,
+      p_system_id: systemId,
+      p_toggles: [],
+    });
+    assert.notEqual(error, null, 'un no-owner NO debe poder crear un rodeo (owner-only, espeja rodeos_insert)');
+    assert.match(String(error.message + ' ' + (error.code || '')), /42501|not authorized|denied/i);
+    // NO se creó el rodeo.
+    const { data: rows } = await admin.from('rodeos').select('id').eq('id', rodeoId);
+    assert.deepEqual(rows, [], 'el rodeo NO se creó (authz rechazó antes de cualquier escritura)');
+  });
+
+  // -- Caso 4 (anti-IDOR): owner de OTRO campo colisiona p_id con un rodeo AJENO → NO toca su plantilla. --
+  await t.test('caso 4: p_id que colisiona con un rodeo AJENO → 42501; la plantilla del rodeo ajeno intacta', async () => {
+    // userC = owner de SU propio campo estC; intenta crear un rodeo con el p_id de un rodeo de estA (ajeno).
+    const userC = await createTestUser('s15cr_C');
+    const clientC = await getUserClient(userC.email);
+    const estC = await createEstablishmentAs(clientC, `${RUN_TAG} s15cr_estC`);
+    // Un rodeo REAL de A (víctima), con su plantilla seedeada.
+    const victimRodeoId = require('node:crypto').randomUUID();
+    {
+      const { error } = await clientA.rpc('create_rodeo', {
+        p_id: victimRodeoId, p_establishment_id: estA, p_name: `${RUN_TAG}_cr_victim`,
+        p_species_id: speciesId, p_system_id: systemId, p_toggles: [],
+      });
+      assert.equal(error, null, error && error.message);
+    }
+    // Snapshot de la plantilla de la víctima ANTES del ataque (el toggle de 'peso' = default ON).
+    const { data: pesoBefore } = await admin.from('rodeo_data_config')
+      .select('enabled').eq('rodeo_id', victimRodeoId).eq('field_definition_id', fdPeso).single();
+    assert.equal(pesoBefore.enabled, true, 'precondición: peso ON en la plantilla de la víctima');
+
+    // ATAQUE: userC (owner de estC) llama create_rodeo con el p_id del rodeo de A + SU propio establishment.
+    // is_owner_of(estC) pasa, pero el rodeo p_id es de estA → el guard anti-IDOR debe rechazar (42501) y
+    // NUNCA tocar el rodeo_data_config ajeno (un UPSERT bypassaría RLS por ser SECURITY DEFINER).
+    const { error: atkErr } = await clientC.rpc('create_rodeo', {
+      p_id: victimRodeoId,            // <- p_id de un rodeo AJENO (de estA)
+      p_establishment_id: estC,       // <- el campo PROPIO del atacante (is_owner_of pasa)
+      p_name: `${RUN_TAG}_cr_attack`,
+      p_species_id: speciesId, p_system_id: systemId,
+      p_toggles: [{ field_definition_id: fdPeso, enabled: false }], // intento de apagar peso en la víctima
+    });
+    assert.notEqual(atkErr, null, 'colisión de p_id con un rodeo ajeno → debe rechazar (anti-IDOR)');
+    assert.match(String(atkErr.message + ' ' + (atkErr.code || '')), /42501|not.*belong|denied|not authorized/i);
+
+    // INVARIANTE: la plantilla de la víctima quedó INTACTA (peso sigue ON; el atacante NO la modificó).
+    const { data: pesoAfter } = await admin.from('rodeo_data_config')
+      .select('enabled, establishment_id').eq('rodeo_id', victimRodeoId).eq('field_definition_id', fdPeso).single();
+    assert.equal(pesoAfter.enabled, true, 'la plantilla de la víctima NO fue modificada por el atacante');
+    assert.equal(pesoAfter.establishment_id, estA, 'el rodeo_data_config ajeno sigue siendo de estA');
+    // El rodeo de la víctima sigue siendo de estA (el INSERT ON CONFLICT no lo re-apropió).
+    const { data: vr } = await admin.from('rodeos').select('establishment_id').eq('id', victimRodeoId).single();
+    assert.equal(vr.establishment_id, estA, 'el rodeo de la víctima sigue perteneciendo a estA');
+  });
+});
+
+test('spec 15-powersync — set_rodeo_config RPC (editar plantilla OFFLINE, Run T9.9)', async (t) => {
+  let userA, userB, clientA, clientB, estA, speciesId, systemId, fdUpdate, fdInsert, rodeoA;
+
+  await t.test('setup: owner A + field_operator B en el campo de A + un rodeo de A con su plantilla seedeada', async () => {
+    userA = await createTestUser('s15sc_A');
+    userB = await createTestUser('s15sc_B');
+    clientA = await getUserClient(userA.email);
+    clientB = await getUserClient(userB.email);
+    estA = await createEstablishmentAs(clientA, `${RUN_TAG} s15sc_estA`);
+    // B es field_operator del campo de A (rol activo pero NO owner) → debe poder LEER la plantilla pero NO editarla.
+    await assignRoleAsService(userB.id, estA, 'field_operator');
+    const ss = await lookupSpeciesSystem(clientA, 'bovino', 'cria');
+    speciesId = ss.speciesId;
+    systemId = ss.systemId;
+    // En cría TODOS los field_definitions activos son defaults del sistema → no existe ningún field activo
+    // no-default. Por eso ambas ramas del UPSERT (update + insert) se ejercitan sobre fields DEFAULT reales:
+    //   - fdUpdate = 'peso' (default ON) → destildar = rama UPDATE sobre una fila ya seedeada.
+    //   - fdInsert = otro default cualquiera → para ejercitar la rama INSERT, en el setup BORRAMOS (vía service
+    //     role) su fila seedeada en rodeo_data_config de rodeoA, así no tiene fila pre-poblada y el set_rodeo_config
+    //     la crea por la rama INSERT del ON CONFLICT (+ el trigger 0078 fuerza establishment_id en ese INSERT).
+    // Esto NO toca el catálogo global field_definitions (no creamos fields sintéticos): solo la config de ESTE
+    // rodeo de test, que se limpia al borrar el rodeo/est en el cleanup.
+    const { data: fdP } = await clientA.from('field_definitions').select('id').eq('data_key', 'peso').single();
+    fdUpdate = fdP.id;
+    // Elegimos fdInsert como cualquier default del sistema cría que NO sea 'peso' (sin hardcodear ids: lo leemos
+    // de system_default_fields del sistema cría).
+    const { data: defs } = await clientA.from('system_default_fields').select('field_definition_id').eq('system_id', systemId);
+    const other = defs.map((d) => d.field_definition_id).find((id) => id !== fdUpdate);
+    assert.ok(other, 'el sistema cría debe tener ≥2 defaults para elegir fdUpdate ≠ fdInsert');
+    fdInsert = other;
+
+    // Creamos el rodeo de A vía create_rodeo (0081) — su trigger 0018 seedea la plantilla (las 26 filas).
+    rodeoA = require('node:crypto').randomUUID();
+    const { error } = await clientA.rpc('create_rodeo', {
+      p_id: rodeoA, p_establishment_id: estA, p_name: `${RUN_TAG}_sc_rodeo`,
+      p_species_id: speciesId, p_system_id: systemId, p_toggles: [],
+    });
+    assert.equal(error, null, error && error.message);
+
+    // Borramos (vía service role) la fila seedeada de fdInsert en la config de rodeoA → queda sin fila
+    // pre-poblada para que set_rodeo_config la cree por la rama INSERT del UPSERT (caso 1).
+    const { error: delErr } = await admin.from('rodeo_data_config')
+      .delete().eq('rodeo_id', rodeoA).eq('field_definition_id', fdInsert);
+    assert.equal(delErr, null, delErr && delErr.message);
+    const { count: insRows } = await admin.from('rodeo_data_config')
+      .select('field_definition_id', { count: 'exact', head: true }).eq('rodeo_id', rodeoA).eq('field_definition_id', fdInsert);
+    assert.equal(insRows, 0, 'fdInsert quedó sin fila pre-poblada (rama INSERT lista)');
+  });
+
+  // -- Caso 1: owner edita la plantilla ejercitando AMBAS ramas del UPSERT (update + insert) vía set_rodeo_config. --
+  await t.test('caso 1: owner edita vía set_rodeo_config (rama UPDATE destildando un default + rama INSERT de un default sin fila) → filas reflejan el nuevo enabled', async () => {
+    const { data: ret, error } = await clientA.rpc('set_rodeo_config', {
+      p_rodeo_id: rodeoA,
+      p_toggles: [
+        { field_definition_id: fdInsert, enabled: true },  // rama INSERT: su fila seedeada se borró en el setup
+        { field_definition_id: fdUpdate, enabled: false },  // rama UPDATE: apagar 'peso' (default ON, fila ya seedeada)
+      ],
+    });
+    assert.equal(error, null, error && error.message);
+    assert.equal(ret, rodeoA, 'set_rodeo_config devuelve el id del rodeo');
+
+    // 'peso' quedó en false (rama UPDATE sobre el default ON ya seedeado).
+    const { data: peso } = await admin.from('rodeo_data_config')
+      .select('enabled, establishment_id').eq('rodeo_id', rodeoA).eq('field_definition_id', fdUpdate).single();
+    assert.equal(peso.enabled, false, 'el toggle de peso se aplicó (enabled=false sobre el default ON) — rama UPDATE');
+    // fdInsert se creó por la rama INSERT (su fila no existía) con enabled=true.
+    const { data: inserted } = await admin.from('rodeo_data_config')
+      .select('enabled, establishment_id').eq('rodeo_id', rodeoA).eq('field_definition_id', fdInsert).single();
+    assert.ok(inserted, 'fdInsert se insertó (fila nueva creada por la rama INSERT del UPSERT)');
+    assert.equal(inserted.enabled, true, 'fdInsert quedó habilitado (enabled=true) — rama INSERT');
+    // establishment_id forzado por el trigger 0078 desde el rodeo (anti-spoof) en INSERT y UPDATE.
+    assert.equal(peso.establishment_id, estA, 'establishment_id forzado al del rodeo (rama UPDATE)');
+    assert.equal(inserted.establishment_id, estA, 'establishment_id forzado al del rodeo (rama INSERT, trigger 0078-on-INSERT)');
+  });
+
+  // -- Caso 2: IDEMPOTENCIA — replay con los mismos toggles = no-op total. --
+  await t.test('caso 2: replay (mismos toggles) → no-op total (mismos valores, sin duplicar filas)', async () => {
+    const cfgBefore = await admin.from('rodeo_data_config')
+      .select('field_definition_id', { count: 'exact', head: true }).eq('rodeo_id', rodeoA);
+
+    const { error } = await clientA.rpc('set_rodeo_config', {
+      p_rodeo_id: rodeoA,
+      p_toggles: [
+        { field_definition_id: fdInsert, enabled: true },
+        { field_definition_id: fdUpdate, enabled: false },
+      ],
+    });
+    assert.equal(error, null, error && error.message);
+
+    // El conteo de filas no cambió (PK compuesta → el UPSERT no duplica; fdInsert ya tiene fila tras caso 1).
+    const cfgAfter = await admin.from('rodeo_data_config')
+      .select('field_definition_id', { count: 'exact', head: true }).eq('rodeo_id', rodeoA);
+    assert.equal(cfgAfter.count, cfgBefore.count, 'el replay NO duplicó filas (UPSERT por PK compuesta)');
+    // Los valores siguen iguales (mismo end-state).
+    const { data: peso } = await admin.from('rodeo_data_config')
+      .select('enabled').eq('rodeo_id', rodeoA).eq('field_definition_id', fdUpdate).single();
+    assert.equal(peso.enabled, false, 'peso sigue en false tras el replay');
+    const { data: inserted } = await admin.from('rodeo_data_config')
+      .select('enabled').eq('rodeo_id', rodeoA).eq('field_definition_id', fdInsert).single();
+    assert.equal(inserted.enabled, true, 'fdInsert sigue en true tras el replay');
+  });
+
+  // -- Caso 3: AUTHZ — un NO-owner (field_operator del campo) NO puede editar la plantilla → 42501. --
+  await t.test('caso 3: field_operator (no-owner) llamando set_rodeo_config → 42501, plantilla sin cambios', async () => {
+    const { data: pesoBefore } = await admin.from('rodeo_data_config')
+      .select('enabled').eq('rodeo_id', rodeoA).eq('field_definition_id', fdUpdate).single();
+
+    const { error } = await clientB.rpc('set_rodeo_config', {
+      p_rodeo_id: rodeoA,
+      p_toggles: [{ field_definition_id: fdUpdate, enabled: true }], // intento de re-prender 'peso'
+    });
+    assert.notEqual(error, null, 'un no-owner NO debe poder editar la plantilla (owner-only, espeja rodeo_data_config_update)');
+    assert.match(String(error.message + ' ' + (error.code || '')), /42501|not authorized|denied/i);
+
+    // La plantilla NO cambió.
+    const { data: pesoAfter } = await admin.from('rodeo_data_config')
+      .select('enabled').eq('rodeo_id', rodeoA).eq('field_definition_id', fdUpdate).single();
+    assert.equal(pesoAfter.enabled, pesoBefore.enabled, 'la plantilla quedó intacta (authz rechazó antes de escribir)');
+  });
+
+  // -- Caso 4 (anti-IDOR por derivación): un owner de OTRO campo edita un rodeo AJENO → 42501. --
+  await t.test('caso 4: p_rodeo_id de un rodeo AJENO (otro tenant) → 42501; la plantilla del rodeo ajeno intacta', async () => {
+    // userC = owner de SU propio campo estC; intenta editar la plantilla del rodeo de A (ajeno).
+    const userC = await createTestUser('s15sc_C');
+    const clientC = await getUserClient(userC.email);
+    await createEstablishmentAs(clientC, `${RUN_TAG} s15sc_estC`);
+
+    // Snapshot de la plantilla de la víctima ANTES del ataque.
+    const { data: pesoBefore } = await admin.from('rodeo_data_config')
+      .select('enabled').eq('rodeo_id', rodeoA).eq('field_definition_id', fdUpdate).single();
+
+    // ATAQUE: userC (owner de estC) llama set_rodeo_config con el p_rodeo_id del rodeo de A. La RPC DERIVA el
+    // establishment del rodeo (= estA), is_owner_of(estA) para userC = false → 42501. Sin tocar la plantilla
+    // ajena (es hermético por construcción: el est NO es parámetro, se deriva del rodeo).
+    const { error: atkErr } = await clientC.rpc('set_rodeo_config', {
+      p_rodeo_id: rodeoA, // <- rodeo AJENO (de estA)
+      p_toggles: [{ field_definition_id: fdUpdate, enabled: true }],
+    });
+    assert.notEqual(atkErr, null, 'editar un rodeo ajeno → debe rechazar (anti-IDOR por derivación del est)');
+    assert.match(String(atkErr.message + ' ' + (atkErr.code || '')), /42501|not authorized|denied/i);
+
+    // INVARIANTE: la plantilla de la víctima quedó INTACTA.
+    const { data: pesoAfter } = await admin.from('rodeo_data_config')
+      .select('enabled, establishment_id').eq('rodeo_id', rodeoA).eq('field_definition_id', fdUpdate).single();
+    assert.equal(pesoAfter.enabled, pesoBefore.enabled, 'la plantilla de la víctima NO fue modificada por el atacante');
+    assert.equal(pesoAfter.establishment_id, estA, 'el rodeo_data_config ajeno sigue siendo de estA');
+  });
+
+  // -- Caso 5: rodeo soft-deleteado → P0002 'rodeo not found', nada cambia. --
+  await t.test('caso 5: rodeo soft-deleteado → P0002 (rodeo not found), nada cambia', async () => {
+    // Creamos un rodeo de A y lo soft-deleteamos vía el RPC soft_delete_rodeo (camino real de baja).
+    const goneRodeo = require('node:crypto').randomUUID();
+    {
+      const { error } = await clientA.rpc('create_rodeo', {
+        p_id: goneRodeo, p_establishment_id: estA, p_name: `${RUN_TAG}_sc_gone`,
+        p_species_id: speciesId, p_system_id: systemId, p_toggles: [],
+      });
+      assert.equal(error, null, error && error.message);
+    }
+    const { error: delErr } = await clientA.rpc('soft_delete_rodeo', { p_rodeo_id: goneRodeo });
+    assert.equal(delErr, null, delErr && delErr.message);
+
+    // Editar la plantilla de un rodeo soft-deleteado → P0002 (la edición es moot).
+    const { error } = await clientA.rpc('set_rodeo_config', {
+      p_rodeo_id: goneRodeo,
+      p_toggles: [{ field_definition_id: fdUpdate, enabled: false }],
+    });
+    assert.notEqual(error, null, 'editar un rodeo soft-deleteado debe fallar (P0002)');
+    assert.match(String(error.message + ' ' + (error.code || '')), /P0002|not found/i);
+  });
+});
+
 test('cleanup', async () => {
   await cleanup();
 });

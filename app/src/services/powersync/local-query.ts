@@ -75,3 +75,32 @@ export async function runLocalQuerySingle<Row = Record<string, unknown>>(
   if (!r.ok) return r;
   return { ok: true, value: r.value[0] ?? null };
 }
+
+/**
+ * ESCRITURA local (spec 15, T5 / R6.1): ejecuta un INSERT/UPDATE de CRUD plano contra el SQLite local
+ * vía `db.execute(sql, args)`. PowerSync encola UNA CrudEntry por statement → `connector.uploadData()`
+ * la sube al reconectar (R3.3). La fila/cambio aparece LOCAL al instante (offline) → las lecturas
+ * locales (T4) lo ven enseguida.
+ *
+ * CONTRATO (clave de T5): el local write SIEMPRE tiene éxito offline. Devolvemos error SOLO si el
+ * `execute` local falla (DB no booteada / SQL malformado → `unknown`, defensivo) — NO si el upload sería
+ * rechazado por RLS. El fallo de UPLOAD (RLS reject = PERMANENTE) lo maneja `uploadData` aparte (descarta
+ * + superficia por el canal de status, R8.1) — NUNCA por el return de este helper (que ya devolvió ok con
+ * la fila local). Un error de RED tampoco llega acá: el write local no toca la red (PowerSync encola).
+ */
+export async function runLocalWrite(
+  query: LocalQuery,
+  options: { db?: AbstractPowerSyncDatabase } = {},
+): Promise<LocalReadResult<true>> {
+  const db = options.db ?? getPowerSync();
+  try {
+    await db.execute(query.sql, query.args as unknown[]);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return {
+      ok: false,
+      error: { kind: 'unknown', message: message || 'Error al escribir datos locales.' },
+    };
+  }
+  return { ok: true, value: true };
+}
