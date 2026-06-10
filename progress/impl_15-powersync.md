@@ -2114,3 +2114,321 @@ este fix.
 `specs/active/15-powersync/{design.md,tasks.md}`, `docs/backlog.md`, `progress/current.md` + este archivo.
 NO toqué streams/migraciones/connector/upload/RLS ni el shim E2E (`e2e/helpers/{env,fixtures}.ts`) ni el
 gate del fix anterior (salvo el provider en el residual #1). NO commit. NO marcado done.
+
+---
+
+## Run bugfix-overlay-list — 🐛 "animal creado OFFLINE desaparece de la lista al navegar de tab" (2026-06-10)
+
+> Bug del backlog 2026-06-10 (repro en vivo de Raf, dev server web). `baseline_commit` SIN cambios
+> (multi-run, `1618a956…`). 100% client-side: NO se tocó streams/migraciones/RLS/schema sincronizado/
+> connector/outbox/upload/local-reads. NO commit, NO done, NO `feature_list.json`/`current.md`.
+
+### FASE A — repro automatizado + diagnóstico (evidencia, no plausibilidad)
+
+**Harness nuevo**: `app/e2e/animals-offline.spec.ts` — primeros tests offline REALES de la suite
+(`context.setOffline(true)` = mismo mecanismo CDP que el DevTools→Offline del repro). Estado de
+partida idéntico al repro: usuario nuevo + campo con **2 rodeos** server-side (helper `seedRodeo`
+reusado para el 2do) + 0 animales. Instrumentación de diagnóstico (temporal, ya REMOVIDA): hook
+`__rafaqDebugDumpOverlay` en `provider.tsx` (marcado `TODO(debug 15-powersync)`) que dumpeaba
+`pending_animals`/`pending_animal_profiles`/`pending_status_overrides`/`rodeos`/`categories` count/
+upload-queue count/`currentStatus` y el resultado EXACTO de `buildAnimalsListQuery` — + captura de
+TODA la consola del page (señal clave: `[powersync] upload rechazado (descartado)`).
+
+**Resultado 1 — el repro LITERAL del backlog NO reproduce (en NINGÚN entorno):** alta por el
+empty-state CTA con IDV "12" → ficha → Volver (visible) → Más → Animales → **"12" SIGUE visible**.
+Corrido contra (a) el export estático prod (harness canónico, :8099) y (b) el **dev server de Metro**
+(`expo start --web --port 8082`, el entorno EXACTO del repro de Raf; el spec quedó dual-target vía
+`RAFAQ_E2E_BASE_URL`). También con dwell de 20s+ en Más y DOBLE ciclo Más→Animales. Evidencia de los
+dumps en el "momento del bug":
+- `pending_animals` + `pending_animal_profiles` INTACTOS (todas las columnas correctas: status
+  'active', created_at ISO, category_id local, establishment_id, rodeo_id del contexto).
+- `listRows` (la query REAL de la lista) DEVUELVE el animal (UNION overlay OK, JOINs OK).
+- `uploadQueueCount: 1` (el intent sigue encolado), `connected: true`, `hasSynced: true`.
+- Consola: 10+ `ERR_INTERNET_DISCONNECTED` (ciclos de retry del upload) y **CERO**
+  `[powersync] upload rechazado` → ningún rollback/clear espurio.
+
+**Hipótesis 1 (rollback espurio) DESCARTADA con evidencia adicional de código**: verifiqué en
+`@supabase/postgrest-js` (dist instalado) la forma EXACTA del error de fetch-failure offline:
+`{ message: "TypeError: Failed to fetch", code: '', status: undefined }` (el `status: 0` queda en el
+response, NO en el error) → matchea `/failed to fetch/i` → `classifyIntentUploadError` = `transient`
+→ re-throw sin tocar overlay. Además POST NO es retryable en postgrest-js (`RETRYABLE_METHODS` =
+GET/HEAD/OPTIONS) y el loop de upload de PowerSync corta cuando `isConnected` cae → no hay camino
+temporal hacia un permanent_reject offline. Hipótesis 3 (contexto re-resuelve) y 4 (fila no matchea)
+descartadas por los dumps; hipótesis 5 (degradación hasSynced): no aplica (overlay no-vacío + hasSynced
+true; no apareció el banner).
+
+**Resultado 2 — causa raíz CONFIRMADA (hipótesis 2, estado de UI stale): ROJO determinístico.**
+Alta vía el BUSCADOR no-match (el find-or-create real de la manga, spec 09 R1.4): tipear "34" →
+"No encontramos «34»" → "Dar de alta este animal" → wizard → crear → ficha → **Volver** → la tab
+muestra el no-match VIEJO "No encontramos «34»" **aunque el dump probó que el animal está en el
+overlay Y en `listRows`**. Mecánica: la ejecución de `searchAnimals` vivía SOLO en el efecto
+`[establishmentId, debouncedQuery]` de `animales.tsx`; con el término en el search bar
+(`isSearching=true` → `visible = searchResults`), el re-foco de la tab re-corría `loadList` pero NO
+la búsqueda → `searchResults` quedaba congelado en el estado pre-alta. Cada vuelta a la tab (Más →
+Animales incluida) re-mostraba el stale → "el animal ya no está". Es la reconstrucción determinística
+del repro de Raf: el identificador recién tipeado queda en el buscador en el flujo natural de campo.
+(Nota de fidelidad: la secuencia LITERAL narrada — buscador vacío — no reproduce en ningún entorno
+con estado limpio; la evidencia dice que el dato NUNCA se pierde. Si Raf re-viera una desaparición
+con el buscador VACÍO, es otro bug y el test 1 lo va a atrapar.)
+
+### FASE B — fix (mínimo y dirigido a la causa)
+
+`app/app/(tabs)/animales.tsx` (ÚNICO archivo de app tocado):
+- La ejecución de la búsqueda se extrajo a un callback `runSearch` (misma lógica, mismo guard de
+  secuencia `searchSeq`, mismas deps `[establishmentId, debouncedQuery]` → semántica del efecto
+  original INTACTA).
+- `useFocusEffect` ahora corre `loadList()` **y** `runSearch()` (un alta/cambio hecho con la tab
+  desenfocada se ve al volver aunque haya un término tipeado).
+- El efecto de `lastSyncedMs` también re-corre `runSearch()` (un download puede traer/ocultar
+  resultados de la búsqueda activa — simétrico a la lista).
+- Sin cambios de firmas/services/SQL. No toca outbox/overlay/connector (verificados SANOS).
+
+### Verificación
+
+- **E2E nuevo** `animals-offline.spec.ts` (estado final, SIN hook de debug):
+  - test 1 (repro literal, empty-CTA + Más→Animales + dwell de retries): **VERDE** (ya era verde en
+    baseline → queda como red de regresión del overlay + de la clasificación transient offline).
+  - test 2 (alta vía buscador no-match + Volver + Más→Animales con el término tipeado): **ROJO en
+    baseline → VERDE con el fix**. Prueba dura: stash del fix → rebuild → test 2 ROJO en el
+    MISMO harness (falla en «No encontramos "34"» visible) → stash pop → rebuild → VERDE.
+- **Oráculos previos** corridos solos (regla del brief; DB beta contaminada los flakea en serial):
+  `animals.spec:52` PASS, `:386` PASS, `:500` PASS.
+- **`node scripts/check.mjs` → exit 0** (typecheck + lint anti-hardcode + client unit + RLS/Edge/
+  Animal/Maneuvers/User_private/Import). El fix es de pantalla (sin unit nuevo: `animales.tsx` no es
+  cargable bajo node:test; el oráculo es el E2E, patrón del repo).
+- Limpieza: el hook `__rafaqDebugDumpOverlay` y los dumps del spec se REMOVIERON (el E2E final no
+  depende de ellos); queda solo la captura de consola (Playwright puro) que se imprime al fallar.
+
+### Trazabilidad
+
+| Qué | Test |
+|---|---|
+| Animal offline-only visible en la lista a través de navegación de tabs (R6.11 overlay en lectura + ppio 3 offline-first) | `app/e2e/animals-offline.spec.ts` :: test 1 (repro literal) |
+| Búsqueda activa re-computada al re-foco (fix; alta no-match visible, no stale) | `app/e2e/animals-offline.spec.ts` :: test 2 (ROJO baseline → VERDE) |
+| Upload offline clasifica transient y NO toca overlay (R3.4/R6.9, regresión) | test 1 (dwell de retries + assert de visibilidad; consola capturada — un rechazo lo haría fallar y la imprime) |
+
+### Autorrevisión adversarial (paso 8)
+
+- **¿El fix puede loopear?** No: `runSearch` tiene identidad estable salvo cambio de
+  `establishmentId`/`debouncedQuery` (las MISMAS deps del efecto original); `useFocusEffect` es un
+  evento discreto; `lastSyncedMs` es primitivo y solo avanza con syncs nuevos (offline no cambia).
+  El guard `searchSeq` descarta resultados viejos en carreras de foco/tipeo (igual que antes).
+- **¿Flicker del no-match durante el re-search?** No: `showNoMatch` exige `!searching` → mientras la
+  búsqueda re-corre no se muestra un no-match falso; el SQLite local resuelve en ms.
+- **¿Query vacío al re-foco?** `runSearch` con query vacío repone `searchResults=[]`/`searching=false`
+  (no-op idéntico al comportamiento previo). Comportamiento online sin término: CERO cambio.
+- **¿Tests por la razón correcta?** El test 2 falla en baseline EXACTAMENTE en el síntoma (no-match
+  stale visible) y el dump demostró que el dato existía → el verde post-fix ejercita el path real
+  (re-search del overlay), no un timeout generoso. El test 1 verde-en-baseline NO es el oráculo del
+  fix: es red de regresión declarada (documentado en el spec header).
+- **¿Selectores frágiles?** `getByText('12'/'34', exact)` podría colisionar con otro texto exacto
+  futuro; mitigado con ids cortos distintos por test y asserts de contexto (ficha 'Identificación',
+  no-match exacto con comillas). Aceptado (mismo patrón de la suite).
+- **¿Multi-tenant/seguridad?** Sin cambios de scoping: `runSearch` usa el MISMO `establishmentId` del
+  contexto (nunca hardcodeado); no se agregó superficie nueva (el hook de debug se removió).
+- **Encontrado en el camino y decidido NO tocar (fuera de alcance, anotado):** (a) ProfileContext queda
+  con error "Sin conexión…" si carga antes del first-sync y no se re-evalúa (backlog 2026-06-10 nuevo);
+  (b) `classifyIdentifier` exige ≥3 dígitos para IDV → un "12"/"34" tipeado va a VISUAL (comportamiento
+  R1.4 as-spec, solo documentado en el test).
+
+### Reconciliación de specs (paso 9)
+
+- `design.md §5.1` — bloque as-built nuevo "Run bugfix-overlay-list" (causa raíz, fix `runSearch`,
+  descarte con evidencia de las otras hipótesis, oráculos E2E offline).
+- `tasks.md T11` — sub-bullet nuevo con el run (la clase del fix es la misma del T11: consumo del
+  re-query manual; ahora cubre también la búsqueda activa).
+- `requirements.md` — SIN cambio: no cambia ningún "qué" (R6.11/R5 ya exigían ver el overlay; el fix
+  es mecanismo de UI). Decisión documentada acá.
+- `docs/backlog.md` — entrada del bug marcada ✅ RESUELTO (con la causa real y el descarte de las
+  hipótesis 1-4) + entrada NUEVA del hallazgo ProfileContext.
+
+### Archivos tocados (este run)
+
+App: `app/app/(tabs)/animales.tsx` (fix). E2E: `app/e2e/animals-offline.spec.ts` (nuevo, 2 tests).
+Docs: `specs/active/15-powersync/{design,tasks}.md`, `docs/backlog.md`, este archivo.
+`app/src/services/powersync/provider.tsx` quedó BYTE-IDÉNTICO (el hook de debug se agregó y se
+removió dentro del run). NO commit. NO done. Espera reviewer + Gate 2.
+
+---
+
+## Run create-animal-rpc — RPC atómica `create_animal` (0083): cierra la PÉRDIDA REAL de datos del alta (2026-06-10)
+
+> Decisión de Raf YA TOMADA (opción B): RPC `create_animal` atómica server-side, patrón 0081
+> `create_rodeo`. Causa raíz CONFIRMADA por el leader (logs API Supabase + DB remota — NO re-derivada):
+> el alta se subía como 2 upserts HTTP NO atómicos en `applyIntentTransaction`; un drenado interrumpido
+> ENTRE ambos dejaba `animals` huérfano (sin perfil, invisible por RLS) y el REINTENTO pegaba el
+> conflicto de PK → `ON CONFLICT DO UPDATE` (default supabase-js) → policy UPDATE de `animals` (0022,
+> exige `EXISTS animal_profiles` visible) → 42501/403 → `permanent_reject` → `rollbackOverlay` + descarte
+> → el animal desaparecía de la UI y NUNCA llegaba al server. `baseline_commit` SIN cambios (multi-run).
+> Este run se APILA sobre el trabajo sin commitear del Run bugfix-overlay-list (no se tocó).
+
+### Plan — todo hecho
+
+- [x] T1 — `supabase/migrations/0083_create_animal_rpc.sql` escrita (NO aplicada al remoto — la aplica
+      el leader por Management API tras Gate 1).
+- [x] T2 — Cliente: `upload.ts` (mapeo a RPC + compat de intents viejos), `connector.ts` (muere la rama
+      de 2 upserts), comentarios reconciliados en `animals.ts`/`outbox.ts`. Unit tests.
+- [x] T3 — Tests backend: suite top-level `spec 15-powersync — create_animal RPC` en
+      `supabase/tests/animal/run.cjs` (7 casos + setup). ROJOS hasta aplicar 0083 (esperado).
+- [x] T4 — Oráculo E2E de persistencia server-side: helper `waitForServerAnimalProfile` en
+      `app/e2e/helpers/admin.ts` + assert en el alta ONLINE (`animals.spec.ts` test 1) + extensión del
+      test offline 1 (`animals-offline.spec.ts`): reconectar → drenar → fila REAL en el server + el
+      animal sigue en la lista + cero "upload rechazado".
+- [x] T5 — Reconciliación de specs + esta bitácora + entrada de backlog (surfacing UI de rechazos).
+
+### (1) SQL de 0083 — decisiones tomadas
+
+Firma: `create_animal(p_animal_id, p_profile_id, p_establishment_id, p_rodeo_id, p_category_id, p_sex,
+p_species_id, p_category_override=false, p_status='active', p_tag_electronic=null, p_birth_date=null,
+p_idv=null, p_visual_id_alt=null, p_breed=null, p_coat_color=null, p_entry_date=null, p_entry_weight=null,
+p_management_group_id=null, p_teeth_state=null, p_nursing=null) returns uuid` (= p_profile_id).
+SECURITY DEFINER + `set search_path = public`. Estructura calcada de 0081:
+
+1. **(a) AUTHZ PRIMERO**: `has_role_in(p_establishment_id)` → 42501 genérico. Paridad EXACTA con la
+   policy INSERT as-built de `animal_profiles` (0022): cualquier rol activo (owner/vet/field_operator)
+   puede dar de alta — NO `is_owner_of` (eso es de rodeos). `has_role_in` es fail-closed con uid null.
+2. **(a-bis) Corte temprano de replay completo**: si el perfil de ESTE intent ya existe (id + animal +
+   establishment) → return sin tocar nada. Hace el replay robusto incluso si la identidad del animal
+   fue editada entre el primer apply y el reintento (sin el corte, el guard (b-bis) rechazaría 42501 un
+   replay legítimo — edge cazado en la autorrevisión). Sin filtro de `deleted_at` a propósito (un perfil
+   soft-deleteado post-apply NO se resucita). No es oráculo: solo matchea filas del tenant ya autorizado
+   y devuelve el id que el caller ya tenía.
+3. **(b) INSERT `animals`** (id, sex, species_id, tag trim/nullif, birth_date) `ON CONFLICT (id) DO
+   NOTHING` — target SOLO la PK: `animals_tag_unique` (parcial) NO se absorbe → tag tomado por OTRO
+   animal = 23505 que SALE (verificado en el caso 6 del test).
+4. **(b-bis) Guard anti-IDOR/anti-mismatch** (espeja el c-bis de 0081): la fila `animals` con
+   p_animal_id debe MATCHEAR la identidad del intent (`sex`/`species_id` + `tag`/`birth_date` con
+   `IS NOT DISTINCT FROM`) y estar viva. Un replay o un huérfano del camino viejo matchean SIEMPRE
+   (salen del mismo payload); una colisión con un animal AJENO → 42501 genérico, sin colgarle un perfil
+   y sin filtrar qué difiere. Necesario porque la RPC bypassa RLS (SECURITY DEFINER).
+5. **(c) INSERT `animal_profiles`** (todas las columnas del alta; coalesce de category_override/status/
+   nursing — NOT NULL con default; nullif/trim de los textos; casts a enums animal_status/teeth_state)
+   `ON CONFLICT (id) DO NOTHING`. NO se setean `created_by` (lo FUERZA 0043 desde auth.uid() — que bajo
+   SECURITY DEFINER sigue siendo el caller, patrón 0075/0081) ni la identidad denormalizada (la FUERZA
+   0079). Los triggers 0021 (identidad/rodeo/categoría), los CHECKs 0070 y los UNIQUE de dominio
+   (idv por establishment, un perfil activo por animal) aplican adentro; un fallo ABORTA TODA la RPC
+   (tampoco queda el `animals` → ya no se generan huérfanos nuevos; caso 5 lo verifica).
+6. **(c-bis) Guard post-insert**: el perfil con p_profile_id debe ser del animal+establishment del
+   intent (colisión adversarial de p_profile_id con un perfil ajeno → 42501, sin tocar la fila ajena).
+7. **HEALING del half-state** (el bug): `animals` huérfano preexistente → (b) DO NOTHING → (b-bis)
+   matchea → (c) crea el perfil que faltaba → el alta termina de aterrizar. Caso 3 del test = el bug.
+8. Grants: `revoke ... from public, anon` + `grant execute ... to authenticated` con la firma tipada
+   completa de 20 args + `notify pgrst, 'reload schema'`. BEGIN/COMMIT. Sin validaciones duplicadas de
+   triggers (lean, paridad con el camino online).
+
+### (2) Cambios de cliente + compat de intents viejos
+
+| Archivo | Cambio |
+|---|---|
+| `app/src/services/powersync/upload.ts` | `mapIntentToRpc`: `create_animal` → `{kind:'rpc', rpcName:'create_animal', args:p_*}`. **El shape del intent NO cambió** (`params_json = {animals:{...}, animal_profiles:{...}}`): el mapeo TRADUCE ese shape histórico → los op_intents YA ENCOLADOS en devices drenan por el camino nuevo sin migración local. Keys opcionales ausentes (intents viejos) → `null` explícito → defaults server-side. Sin ids de cliente → `PermanentIntentError`. `IntentPlan` quedó single-variant (`kind:'rpc'`). |
+| `app/src/services/powersync/connector.ts` | MUERE la rama `kind === 'create_animal'` (los 2 upserts): todo intent (b) va por `supabase.rpc`. Headers reconciliados. |
+| `app/src/services/powersync/outbox.ts` | Solo docs: `enqueueCreateAnimal` NO cambia el shape (decisión: compat > estética; cambiarlo obligaría a dual-shape en el mapper sin beneficio). |
+| `app/src/services/animals.ts` | Solo docs/comentarios (el "NO hay RPC create_animal" estaba stale). Cero cambio de lógica/firma (R11.1). |
+| `app/src/services/powersync/upload.test.ts` | create_animal→RPC: mapping payload COMPLETO (20 args, sin p_client_op_id), mapping MINIMAL (intent viejo, opcionales ausentes → null), intent sin ids → PermanentIntentError, clasificación como RPC (42501/23505 tag-idv → permanent_reject; red/5xx → transient; replay = 2xx sin error, sin idempotent_discard). |
+| `app/e2e/helpers/admin.ts` | + `waitForServerAnimalProfile` (oráculo de persistencia, pollea admin). |
+| `app/e2e/animals.spec.ts` | Test 1 (alta online): + oráculo de persistencia server-side post-alta. |
+| `app/e2e/animals-offline.spec.ts` | Test 1: + reconexión → drenado → fila REAL server-side + el animal SIGUE en la lista + cero `upload rechazado` en consola. |
+
+`classifyIntentUploadError` NO cambió de lógica (revisada para create_animal-as-RPC: 42501 → permanent;
+23505 → permanent — correcto, ahora solo puede ser dominio real; red → transient; el replay no produce
+error). NO se tocó outbox/overlay/lecturas (sanos y gateados).
+
+### (3) Estado de tests — qué queda ROJO-ESPERADO
+
+`node scripts/check.mjs`: **los ÚNICOS rojos son los 7 casos (+1 suite) de `spec 15-powersync —
+create_animal RPC` en `supabase/tests/animal/run.cjs`, todos con `PGRST202` (la función no existe en el
+remoto hasta que el leader aplique 0083)** — mismo patrón que 0075-0082. Verificado en la corrida
+completa: typecheck cliente OK, 767 client unit OK (incl. los nuevos de upload), RLS 22 OK, Edge 42 OK,
+Animal suite: spec 02 / spec 13 / register_birth-idempotencia / paso 2 / create_rodeo / set_rodeo_config
+TODOS verdes; Maneuvers/User_private/Import verdes.
+
+- Suite backend nueva (7 casos): happy path (created_by + identidad FORZADOS por triggers dentro de la
+  RPC), replay idéntico = no-op 2xx (1 animals, 1 perfil), **half-state healing (EL test del bug:
+  huérfano pre-insertado vía service role → la RPC crea el perfil, NO 403/42501)**, cross-tenant 42501
+  (nada creado), idv duplicado 23505 **+ atomicidad (no queda huérfano nuevo)**, tag duplicado de OTRO
+  animal 23505, anti-IDOR (p_animal_id ajeno + identidad distinta → 42501, sin perfil colgado).
+- E2E: el bloque nuevo del test offline 1 y el oráculo online quedan ROJOS contra el remoto SIN 0083
+  (PGRST202 → code no vacío → permanent_reject → rollback → mismo síntoma del bug). NO se corrieron
+  contra el remoto en este run (quedarían rojos por la migración pendiente); el resto de la suite E2E
+  no se toca. Correrlos tras aplicar 0083.
+- ⚠️ **ORDEN DE DEPLOY (para el leader)**: aplicar 0083 ANTES de servir el cliente nuevo. Un cliente
+  nuevo contra un remoto sin la RPC clasifica PGRST202 como permanent_reject → descartaría altas. (El
+  cliente VIEJO contra un remoto CON 0083 sigue funcionando: la RPC es aditiva.)
+
+### (4) Reconciliación de specs (paso 9)
+
+- `design.md §5.3.1` — fila `animals.createAnimal`: as-built RPC 0083; la alternativa "orden atómico en
+  uploadData" probada INSUFICIENTE.
+- `design.md §5.4.2` — la nota de Run T6 ("create_animal NO tiene RPC → 2 upserts") marcada ⛔
+  SUPERSEDIDA con la cadena completa del 42501 (por qué NO era idempotente bajo RLS) + nota ✅ as-built
+  VIGENTE (RPC 0083, authz, ON CONFLICT solo-PK, guards, healing, compat del shape, whitelist
+  actualizada con create_rodeo/set_rodeo_config que faltaban en esa lista).
+- `design.md §5.4.3(3)` — dedup natural de create_animal: se materializa en la RPC; "SIN delta" acotado
+  (sin delta de SCHEMA; la RPC es delta aditivo tipo 0081/0082).
+- `requirements.md R6.10` (bullet create_animal) — nota de reconciliación (NO se reescribió el EARS): el
+  "qué" no cambia; el mecanismo as-built es la RPC; la implementación previa violaba R6.9/R6.11 en el
+  edge del half-state.
+- `tasks.md T6.2c/T6.2d` + T7.7 sub-bullet create_animal — as-built + ubicación de los tests.
+- `docs/backlog.md` — entrada REABIERTA NO tocada (la cierra el leader). Entrada NUEVA: "Surfacing en
+  UI de los rechazos PERMANENTES de upload (hoy solo console.warn)" — sugerencia a evaluar, NO
+  implementada (fuera de alcance).
+
+### Autorrevisión adversarial (paso 8)
+
+Busqué activamente, como revisor hostil:
+
+- **¿La RPC puede colgarle un perfil a un animal ajeno?** (el riesgo nuevo de bypassar RLS con DEFINER):
+  NO — guard (b-bis) exige matcheo de identidad completa con `IS NOT DISTINCT FROM` (NULL-safe) +
+  guard (c-bis) sobre el perfil. Testeado (caso 7) con atacante que SÍ pasa la authz (rol en SU campo).
+  Residual aceptado (mismo que 0081): un atacante que conozca el UUID + la identidad EXACTA de un
+  huérfano ajeno podría reclamarlo — UUIDs de cliente no enumerables + el perfil activo de un animal
+  vivo lo bloquea `animal_profiles_active_animal_unique` (23505).
+- **¿El replay puede dar 23505 espurio del idv contra su PROPIA fila?** NO: el corte (a-bis) corta antes;
+  y aún sin él, `ON CONFLICT (id)` pre-chequea el arbiter (la PK) ANTES de insertar el tuple → DO NOTHING
+  sin tocar los otros índices.
+- **¿Un 23505 REAL se puede tragar como replay?** NO: el target del ON CONFLICT es SOLO la PK; tag/idv
+  duplicados revientan y salen (casos 5/6) y el cliente los clasifica permanent_reject (test unit).
+- **Edge cazado y CORREGIDO en la autorrevisión**: replay con identidad EDITADA entre el apply y el
+  reintento (ACK perdido + UPDATE de animals) → el guard (b-bis) lo habría rechazado 42501 (espurio,
+  inofensivo pero sucio) → agregado el corte temprano (a-bis) por perfil existente.
+- **Cazado y corregido**: comentario en connector.ts que arrancaba con "TODO intent..." (español) —
+  parecía un marcador TODO sin contexto (regla de cierre) → reescrito "Cada intent...".
+- **¿auth.uid() dentro del DEFINER?** Verificado contra el patrón ya validado 0075/0081 + el caso 1 del
+  test asserta `created_by === userA.id` (cuando 0083 se aplique, valida en vivo).
+- **¿Compat de intents viejos REALMENTE cubierta?** El shape no cambió (una sola forma) + test unit
+  "MINIMAL (intent VIEJO ya encolado)" con keys ausentes → null → defaults server-side. Los args van
+  SIEMPRE los 20 (nulls explícitos) → resolución de firma PostgREST estable.
+- **¿PGRST202 si drena antes del deploy de 0083?** permanent_reject → descartaría el alta → por eso la
+  nota de ORDEN DE DEPLOY arriba (el leader aplica 0083 antes de servir el cliente). No es regresión del
+  run: el camino viejo perdía el alta igual (y peor: con la migración aplicada, el nuevo lo SANA).
+- **¿Tests que pasan por la razón equivocada?** Los 7 backend HOY fallan con PGRST202 — prueban que
+  llaman la firma real (los nombres de args del error matchean la migración). El caso 3 (healing)
+  pre-inserta el huérfano vía service role = el estado EXACTO del bug, y asserta el perfil creado + NO
+  42501. El caso 5 asserta el REJECT y la atomicidad (no-huérfano), no solo el happy path. El E2E
+  offline asserta la fila REAL server-side vía admin (no la UI, que muestra overlay — el gap exacto que
+  dejó pasar el bug) + cero `upload rechazado` en consola.
+- **¿Multi-tenant / offline-first?** Sin hardcodes (establishment del contexto/params); el alta sigue
+  100% offline (outbox+overlay intactos); el cambio es solo el CAMINO DE SUBIDA.
+- **¿Rompo el trabajo sin commitear del run anterior?** `git status` revisado antes y después: no toqué
+  `animales.tsx` ni los archivos de coordinación; `animals-offline.spec.ts` solo EXTIENDE el test 1
+  (el oráculo del run anterior quedó intacto).
+- **NO toqué** el campo real de Raf (`037ac0a5…`) ni limpié huérfanos (leader/backlog).
+
+### Trazabilidad R<n> → test (Run create-animal-rpc)
+
+| R<n> | Cobertura | Test |
+|---|---|---|
+| R6.9 (drenado vía RPC, reject permanente superficia) | create_animal mapea a RPC; 42501/23505 → permanent_reject | `upload.test.ts` :: "create_animal → RPC atómica 0083…" + "create_animal como RPC (0083)…" |
+| R6.10 (no doble-apply del alta) | replay idéntico = no-op 2xx, 1 animals + 1 perfil | `supabase/tests/animal/run.cjs` :: `create_animal RPC` :: caso 2 *(rojo hasta 0083)* |
+| R6.10/R6.9/R6.11 (EL BUG: half-state no pierde el alta) | huérfano preexistente → la RPC crea el perfil, NO 42501 | …:: caso 3 *(rojo hasta 0083)* + E2E offline test 1 (bloque drenado) |
+| R6.2 (server re-valida; triggers dentro de la RPC) | created_by forzado al caller; identidad denormalizada forzada | …:: caso 1 *(rojo hasta 0083)* |
+| R8.1/R11.4 (authz/anti-IDOR de la RPC nueva) | cross-tenant 42501 nada creado; p_animal_id ajeno 42501 sin perfil colgado | …:: casos 4 y 7 *(rojos hasta 0083)* |
+| R6.9 (rechazo de dominio legítimo SALE) | idv/tag duplicado → 23505 + atomicidad (sin huérfano nuevo) | …:: casos 5 y 6 *(rojos hasta 0083)* |
+| Persistencia server-side del alta (gap E2E del bug) | fila REAL en animal_profiles vía admin tras alta online/offline-reconectado | `app/e2e/animals.spec.ts` test 1 + `app/e2e/animals-offline.spec.ts` test 1 *(rojos hasta 0083)* |
+| Compat intents viejos | shape `{animals, animal_profiles}` → args p_*; ausentes → null | `upload.test.ts` :: "create_animal MINIMAL (intent VIEJO…)" |
+
+### Verificación final
+
+`node scripts/check.mjs` → typecheck OK, lint anti-hardcode OK, 767 client unit OK, todas las suites DB
+verdes SALVO la suite nueva `create_animal RPC` (8 rojos PGRST202, esperado hasta aplicar 0083).
+NO commit. NO done. NO se aplicó 0083 al remoto. Espera reviewer + Gate 2 + aplicación por el leader.

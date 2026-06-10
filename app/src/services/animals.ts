@@ -441,23 +441,23 @@ export type CreateAnimalInput = {
  * perfil. NO se puede llamar compute_category(profile_id) porque el perfil aún no existe y
  * category_id es NOT NULL.
  *
- * Atomicidad: si el insert del perfil falla (ej. unique de IDV), el `animals` ya quedó insertado
- * pero SIN perfil → invisible por RLS y sin TAG-colisión persistente si el fallo fue del perfil.
- * En MVP (online, sin transacción cross-tabla desde el cliente) esto es aceptable: el animal
- * huérfano no aparece en ninguna lista (no tiene perfil) y no bloquea reintentar (el TAG, si vino,
- * sí quedó tomado — por eso el caller debe mostrar el error de duplicate_tag y el operario corrige).
- * Si el insert de animals falla (duplicate_tag), no se inserta nada del perfil. La transacción
- * atómica real llega con PowerSync/RPC (C5); documentado.
+ * Atomicidad (as-built Run create-animal-rpc, 2026-06-10): el alta se persiste vía la RPC ATÓMICA
+ * `create_animal` (0083) al drenar la outbox — una sola transacción server-side (animals + perfil),
+ * sin half-state posible. Si el perfil falla (ej. unique de IDV), TODA la RPC aborta (tampoco queda
+ * el animals; el TAG no queda tomado) y uploadData rollbackea el overlay + superficia. El camino
+ * viejo (2 upserts no atómicos) dejaba huérfanos y PERDÍA el alta bajo reintento (backlog 2026-06-10);
+ * la RPC además sana esos huérfanos preexistentes (ON CONFLICT (id) DO NOTHING).
  */
 export async function createAnimal(
   input: CreateAnimalInput,
 ): Promise<ServiceResult<{ profileId: string; animalId: string }>> {
-  // OFFLINE-FIRST (T6.2f): el alta es una op (b) RPC-bound (2 inserts cross-tabla animals→animal_profiles,
-  // no atómicos online). Va por la OUTBOX: se encola la intención `create_animal` (con los 2 payloads + ids
-  // de cliente) + el efecto optimista en el overlay (pending_animals + pending_animal_profiles). El alta
-  // aparece en la lista/ficha al instante, OFFLINE; al SUBIR, uploadData aplica 2 upserts idempotentes
-  // (ON CONFLICT por PK → un reintento at-least-once NO duplica, R6.10). NO hay RPC create_animal en el
-  // schema as-built → el "orden atómico en uploadData" (animals primero) reemplaza la RPC (design §5.3.1).
+  // OFFLINE-FIRST (T6.2f): el alta es una op (b) RPC-bound (2 inserts cross-tabla animals→animal_profiles).
+  // Va por la OUTBOX: se encola la intención `create_animal` (con los 2 payloads + ids de cliente) + el
+  // efecto optimista en el overlay (pending_animals + pending_animal_profiles). El alta aparece en la
+  // lista/ficha al instante, OFFLINE; al SUBIR, uploadData la mapea a la RPC ATÓMICA `create_animal`
+  // (0083, Run create-animal-rpc): una sola transacción server-side, idempotente por los ids de cliente
+  // (ON CONFLICT (id) DO NOTHING → un reintento at-least-once NO duplica, R6.10) y sin half-state posible
+  // (el camino viejo de 2 upserts no atómicos perdía el alta bajo reintento — backlog 2026-06-10).
   // La firma pública (ServiceResult<{profileId, animalId}>) NO cambia (R11.1).
 
   // 1) Resolver category_id por (system, code) DESDE LOCAL (catálogo sincronizado). No hardcodeamos UUID;
@@ -487,8 +487,8 @@ export async function createAnimal(
   const speciesId = rodeoRes.value.species_id;
   const categoryId = catRes.value.id;
 
-  // 3) Payload de `animals` (id de cliente). Solo TAG si vino. birth_date opcional. Es lo que el upsert
-  //    de uploadData aplicará (ON CONFLICT por id = idempotente).
+  // 3) Payload de `animals` (id de cliente). Solo TAG si vino. birth_date opcional. uploadData lo traduce
+  //    a los args de la RPC create_animal (0083; ON CONFLICT por id = idempotente).
   const animalId = randomUuid();
   const tag = cleanStr(input.tagElectronic);
   const birthDate = input.birthDate ? input.birthDate : null;

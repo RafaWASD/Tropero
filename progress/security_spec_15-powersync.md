@@ -494,3 +494,28 @@ La §9-nota (L748-755) documenta correctamente que el guard procedural es el req
 - **Recordatorio para el gate de la migración real (≥0075, R11.4):** cuando el implementer escriba la migración, el gate sobre el SQL real debe confirmar (a) el cuerpo implementa el guard scopeado (NO el literal global); (b) `revoke ... from public, anon` + `grant ... to authenticated` con la firma de 4 args `(uuid, date, jsonb, uuid)` + `notify pgrst`; (c) índice compuesto parcial; (d) ninguna policy/RLS/trigger as-built tocada. La migración NO existe hoy (as-built llega a 0074) → checks del gate de la migración, no de esta re-verificación spec.
 
 **Veredicto del DELTA fix: PASS.** HIGH-D1 cerrado sin regresiones ni issues nuevos. La spec 15-powersync queda lista para implementación desde la óptica de Gate 1: el leader puede habilitar el `implementer` (T6.4 incluido), con el recordatorio de que el gate de la migración real (≥0075) re-verifica el cuerpo del guard contra el SQL escrito.
+
+---
+
+## Run create-animal-rpc — Gate 1 (modo `code` sobre el diff sin commitear) — 2026-06-10
+
+> `security_analyzer` (ADR-019). Sección apendeada por el leader con el veredicto literal del gate (el agente lo devolvió por mensaje). Artefactos auditados (diff sin commitear, NO aplicado al remoto): `supabase/migrations/0083_create_animal_rpc.sql` (NUEVA), `app/src/services/powersync/upload.ts`, `app/src/services/powersync/connector.ts`. Baseline as-built re-leído: 0005, 0019, 0020, 0021, 0022, 0037, 0043, 0070, 0079, 0081.
+
+### Veredicto: **PASS** — 0 HIGH, 1 MEDIUM no bloqueante (precedente aceptado)
+
+- **Authz primero**: `has_role_in(p_establishment_id)` antes de cualquier escritura, 42501 genérico sin leak. Paridad con la policy INSERT de animal_profiles 0022 (cualquier rol del campo; correcto que NO sea owner-only como create_rodeo).
+- **Anti-IDOR bajo DEFINER cerrado en las dos puntas**: b-bis (animals matchea identidad del intent, IS NOT DISTINCT FROM + deleted_at null) + c-bis load-bearing (perfil = animal+establishment autorizado). Colisión adversarial de ambos ids → 42501 sin escritura cross-tenant ni dato ajeno. a-bis no es oráculo cross-tenant (guard a corta antes).
+- **Oráculo de existencia de animal (b-bis)**: no práctico (UUID 122-bit client-generated, animals no sincroniza, perfiles RLS-protegidos) — mismo perfil de riesgo aceptado en 0081. No es finding.
+- **Triggers heredados bajo DEFINER**: 0043 created_by=auth.uid() del CALLER; 0079 fuerza identidad; 0021/0037 validan rodeo/categoría/lote por establishment_id EXPLÍCITO (no dependen de RLS del caller). Cero dependencia de RLS para semántica de seguridad.
+- **Idempotencia R6.10**: ON CONFLICT (id) DO NOTHING solo-PK en ambos INSERTs; replay completo = no-op 2xx (corte a-bis); healing del half-state; los 23505 de dominio (animals_tag_unique, animal_profiles_idv_unique) SÍ salen → permanent_reject correcto.
+- **Inputs**: 20 args tipados, nullif(trim) en textos, casts a enums verificados contra DB real (veto del leader), CHECKs 0070 + sex check + identidad mínima 0021 aplican dentro del definer. 22P02 → permanent_reject (sin loop).
+- **Grants**: revoke public/anon + grant authenticated con la firma completa de 20 args verificada 1:1; notify pgrst; begin/commit.
+- **Cliente**: la traducción shape histórico → args p_* lee SOLO del payload del intent (sin inyección de autoridad; mass-assignment n.a. — authz re-verificada server-side); intents sin ids → PermanentIntentError; clasificación de errores sana (red → transient; 42501/23505/23514/22P02 → permanent).
+- **Rate limits/DoS**: drenado FIFO del propio usuario, 1 op = 1 animal, sin amplificación ni denial-of-wallet nuevo.
+
+### Finding MEDIUM (no bloqueante)
+
+**MED — `p_entry_weight numeric` sin CHECK de rango server-side** (la columna es numeric(7,2) → magnitud acotada, pero admite ≤0/absurdos). Mismo tier que MED-01 de C3.3 (exit_weight/exit_price, backlog 2026-06-07), aceptado allí. Cerrarlo junto con MED-01 en la pasada de hardening de CHECKs de dominio.
+
+### Checks post-apply (para el leader al aplicar 0083 por Management API)
+(a) cuerpo idéntico al SQL gateado (guards a/a-bis/b-bis/c-bis, ambos ON CONFLICT (id) DO NOTHING); (b) enums animal_status/teeth_state_enum existen (ya verificado); (c) los 7 tests de la suite `create_animal RPC` pasan a VERDE post-apply (incl. anti-IDOR y cross-tenant); (d) ninguna policy/RLS/trigger as-built tocada (migración aditiva: 1 RPC).

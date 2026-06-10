@@ -314,6 +314,84 @@ AMBIENTAL — verificado: `:386` flakea YA en baseline con mis cambios STASHEADO
 contaminada (~344K animals) exprime el FIRST_SYNC_TIMEOUT. Detalle + autorrevisión + reconciliación en
 `progress/impl_15-powersync.md` (Run residuales-offline). NO commit, NO done.
 
+### Run bugfix-overlay-list (2026-06-10 — 🐛 animal creado OFFLINE desaparece de la lista al navegar de tab) — EN CURSO
+
+Feature en curso: `15-powersync`. Bug de Raf (docs/backlog.md 2026-06-10, repro determinístico en vivo):
+campo con 2 rodeos y 0 animales server-side → Network Offline → alta con IDV "12" → tab "Más" → volver a
+"Animales" → el animal ya no está. OFFLINE-ONLY (vive en el overlay `pending_*`); bug de LECTURA/CONTEXTO
+LOCAL, no de pérdida server-side.
+
+**Diagnóstico estático del leader (capas verificadas SANAS en frío):**
+- `outbox.enqueueCreateAnimal` + `buildPendingAnimalProfileInsert`: el overlay escribe TODAS las columnas
+  que la lista necesita (status='active', created_at, category_id resuelto local, establishment_id, rodeo_id).
+- `buildAnimalsListQuery` (UNION synced+overlay): filtros equivalentes en ambas ramas; orden de args correcto;
+  JOINs del overlay (`rodeos`, `categories_by_system`) van contra tablas sincronizadas presentes.
+- `classifyIntentUploadError`: red/fetch-fail → transient (NO rollbackea overlay); default-sin-señal → transient.
+- No existe NINGÚN otro camino que borre `pending_*` salvo `clearOverlay`/`rollbackOverlay` (solo desde
+  `connector.applyIntentTransaction`). No hay `disconnectAndClear` en el código.
+- Conclusión: el bug es DINÁMICO. La suite E2E NO tiene ningún test offline (cero `setOffline`) → el repro
+  automatizado es el primer paso obligatorio.
+
+**Plan del run** (implementer, background): (A) test E2E ROJO que replica el repro exacto (2 rodeos, offline,
+alta por empty-state CTA, ficha→Volver→lista, tab Más→Animales) + instrumentación para capturar el estado del
+overlay/console en el fallo → root cause confirmado y reportado; (B) fix client-side + test verde + suite sin
+regresión + reconciliación de specs + autorrevisión. Si el fix requiriera schema/streams/RLS → PARA y reporta.
+Después: reviewer → Gate 2 → puerta humana de Raf.
+
+**RESULTADO (run completo, GATEADO — espera puerta humana de Raf):**
+- **Causa raíz CONFIRMADA con evidencia** (≠ todas las hipótesis del backlog): estado de UI stale del
+  BUSCADOR en `animales.tsx` — la búsqueda solo corría en el efecto `[establishmentId, debouncedQuery]`;
+  con un término tipeado (find-or-create de la manga: tipear → no-match → "Dar de alta"), el re-foco de la
+  tab re-corría la LISTA pero NO la búsqueda → cada vuelta mostraba el no-match VIEJO "No encontramos «N»".
+  **El dato NUNCA se pierde**: dumps del SQLite local probaron overlay intacto, `buildAnimalsListQuery`
+  devolviendo el animal, upload clasificando transient en 10+ retries (cero rollback). El repro LITERAL
+  (buscador vacío) NO reproduce en ningún entorno (export prod ni dev server Metro).
+- **Fix**: `animales.tsx` único archivo de app — `runSearch` extraído a callback (mismo seq-guard/deps) y
+  re-corrido en `useFocusEffect` + efecto de `lastSyncedMs`, simétrico a `loadList`.
+- **E2E nuevos** (`app/e2e/animals-offline.spec.ts`, primeros tests offline reales de la suite): repro
+  literal (red de regresión del overlay) + alta vía buscador no-match (ROJO baseline → VERDE, por stash).
+- **Verificación del leader** (adversarial, corrida por mí): E2E offline 2/2 verdes + `check.mjs` exit 0.
+- **Gates**: reviewer APPROVED (2 MINOR no bloqueantes: re-queries locales redundantes por tick de debounce
+  — se borra con la migración a useQuery, backlog 2026-06-09; assert instantáneo apareado con oráculo
+  fuerte) + Gate 2 PASS 0 HIGH/0 MED (`progress/security_code_15-powersync.md`, archivo acumulativo nuevo
+  con punteros a los previos).
+- **Specs reconciliadas**: design §5.1 as-built + tasks T11 sub-bullet; requirements sin cambio (no cambia
+  el "qué"); backlog: bug ✅ RESUELTO + hallazgo lateral NUEVO (ProfileContext pegado en "Sin conexión" si
+  carga antes del first-sync — entrada 2026-06-10).
+- NO commiteado. Espera aprobación de Raf.
+
+**⚠️ REABIERTO (mismo día): 2da causa raíz — PÉRDIDA REAL de datos en el upload de `create_animal`.**
+Raf re-reprodujo ("211", multípara, mismo campo). Diagnóstico del leader con logs API de Supabase + DB
+remota: el alta como 2 upserts NO atómicos en `applyIntentTransaction` se auto-envenena en el reintento —
+si el drenado se corta entre `animals` y `animal_profiles` (toggle de red), el retry del upsert de `animals`
+pega ON CONFLICT DO UPDATE → policy UPDATE exige perfil visible (no existe) → 42501/403 → clasificado
+permanente → rollbackOverlay → dato descartado para siempre (+ los eventos post-create caen por FK 409).
+Evidencia: `POST /rest/v1/animals → 403` + `POST /rest/v1/condition_score_events → 409` en la sesión de Raf,
+cero `animal_profiles` server-side en `037ac0a5…`, huérfanos en `animals`. La suite no lo veía: offline nunca
+drena; online aserta UI (overlay) sin oráculo de persistencia server-side. Raf eligió **B: RPC atómica**.
+
+**Run create-animal-rpc — DONE + GATEADO + APLICADO (espera puerta humana final):**
+- **0083 `create_animal` RPC** (SECURITY DEFINER, authz has_role_in primero, INSERT animals + profile en UNA
+  tx, ON CONFLICT (id) DO NOTHING solo-PK = idempotente + HEALING del half-state, guards anti-IDOR b-bis/
+  c-bis patrón 0081) — **APLICADA al remoto** (Management API HTTP 201, autorizada por Raf; verificado
+  post-apply: prosecdef, firma 20 args, ACL solo postgres+authenticated).
+- Cliente: `upload.ts` create_animal → RPC (traduce el shape histórico de intents ya encolados — drenan sin
+  migración local); `connector.ts` sin la rama de 2 upserts. `classifyIntentUploadError` sin cambios (replay
+  = no-op 2xx).
+- **Gates**: veto leader (enums verificados contra DB real) + Gate 1 PASS 0 HIGH (1 MED no bloqueante:
+  entry_weight sin CHECK de rango → cerrar con MED-01) + reviewer APPROVED (3 MINOR: dist/ stale en e2e
+  directo — usar pnpm e2e:build; timeout del helper == timeout global; match vacío footgun teórico) +
+  Gate 2 PASS 0 HIGH 0 MED nuevos. Tracking: security_spec/security_code/review _15-powersync.md.
+- **Verificación**: run-tests.mjs "All tests passed" post-apply (7 tests nuevos de la RPC verdes, incl.
+  healing = el caso del bug, cross-tenant, anti-IDOR); E2E animals-offline 2/2 verdes con build fresco +
+  oráculo de persistencia server-side (`waitForServerAnimalProfile`); **prueba A/B del reviewer**: contra el
+  dist/ viejo el oráculo cazó EN VIVO la cadena del bug (403→42501→upload rechazado) y con el build nuevo dio
+  verde.
+- Specs reconciliadas (design §5.3.1/§5.4.2/§5.4.3 — "2 upserts" SUPERSEDIDO; requirements R6.10; tasks).
+  Backlog: entrada del bug ✅ RESUELTO (2 causas); entrada nueva "surfacing UI de rechazos permanentes";
+  huérfanos "12"/"211" irrecuperables → limpieza DB beta (entrada 2026-06-08).
+- NO commiteado (los DOS runs del día). Espera puerta humana final de Raf.
+
 ## Notas técnicas vigentes para el implementer
 
 - En PowerShell usar `pnpm.cmd` (no `pnpm`) — Cylance Script Control bloquea `.ps1`.

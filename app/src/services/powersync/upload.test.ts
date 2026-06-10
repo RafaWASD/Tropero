@@ -95,22 +95,98 @@ test('mapIntentToRpc: set_rodeo_config → rpc SIN p_client_op_id (dedup natural
   ]);
 });
 
-test('mapIntentToRpc: create_animal → plan especial con los 2 payloads (NO hay RPC create_animal)', () => {
+test('mapIntentToRpc: create_animal → RPC atómica 0083 con args p_* (payload COMPLETO traducido)', () => {
+  // Run create-animal-rpc: el alta YA NO son 2 upserts (perdían el dato bajo reintento, backlog
+  // 2026-06-10) — mapea a supabase.rpc('create_animal', p_*). El shape del intent es el HISTÓRICO
+  // ({ animals, animal_profiles }) → compat con los op_intents ya encolados en devices.
   const plan = mapIntentToRpc({
     id: 'cop-3',
     opData: {
       op_type: 'create_animal',
       params_json: JSON.stringify({
-        animals: { id: 'a1', sex: 'female', species_id: 'sp1' },
-        animal_profiles: { id: 'p1', animal_id: 'a1', establishment_id: 'e1' },
+        animals: { id: 'a1', sex: 'female', species_id: 'sp1', tag_electronic: 'TAG1', birth_date: '2024-07-01' },
+        animal_profiles: {
+          id: 'p1', animal_id: 'a1', establishment_id: 'e1', rodeo_id: 'r1', category_id: 'c1',
+          category_override: true, status: 'active', idv: 'IDV1', visual_id_alt: 'V1', breed: 'Angus',
+          coat_color: 'negro', entry_date: '2026-06-01', entry_weight: 180.5, management_group_id: 'mg1',
+          teeth_state: '2d', nursing: true,
+        },
       }),
     },
   });
-  assert.equal(plan.kind, 'create_animal');
-  if (plan.kind !== 'create_animal') return;
-  assert.equal(plan.animals.id, 'a1');
-  assert.equal(plan.animal_profiles.id, 'p1');
-  assert.equal(plan.animal_profiles.animal_id, 'a1');
+  assert.equal(plan.kind, 'rpc');
+  assert.equal(plan.rpcName, 'create_animal');
+  assert.equal(plan.args.p_animal_id, 'a1');
+  assert.equal(plan.args.p_profile_id, 'p1');
+  assert.equal(plan.args.p_establishment_id, 'e1');
+  assert.equal(plan.args.p_rodeo_id, 'r1');
+  assert.equal(plan.args.p_category_id, 'c1');
+  assert.equal(plan.args.p_sex, 'female');
+  assert.equal(plan.args.p_species_id, 'sp1');
+  assert.equal(plan.args.p_category_override, true);
+  assert.equal(plan.args.p_status, 'active');
+  assert.equal(plan.args.p_tag_electronic, 'TAG1');
+  assert.equal(plan.args.p_birth_date, '2024-07-01');
+  assert.equal(plan.args.p_idv, 'IDV1');
+  assert.equal(plan.args.p_visual_id_alt, 'V1');
+  assert.equal(plan.args.p_breed, 'Angus');
+  assert.equal(plan.args.p_coat_color, 'negro');
+  assert.equal(plan.args.p_entry_date, '2026-06-01');
+  assert.equal(plan.args.p_entry_weight, 180.5);
+  assert.equal(plan.args.p_management_group_id, 'mg1');
+  assert.equal(plan.args.p_teeth_state, '2d');
+  assert.equal(plan.args.p_nursing, true);
+  // create_animal NO recibe p_client_op_id (dedup natural por los ids de cliente, R6.10).
+  assert.ok(!('p_client_op_id' in plan.args), 'create_animal NO debe llevar p_client_op_id');
+});
+
+test('mapIntentToRpc: create_animal MINIMAL (intent VIEJO ya encolado, keys opcionales ausentes) → nulls + defaults', () => {
+  // Compat hacia atrás OBLIGATORIA: los op_intents encolados por el camino viejo solo llevan las keys
+  // presentes (createAnimal omite tag/birth_date/idv/etc. si no vinieron). El mapeo debe traducir ESE
+  // shape: opcionales ausentes → null (la RPC aplica sus defaults server-side).
+  const plan = mapIntentToRpc({
+    id: 'cop-old',
+    opData: {
+      op_type: 'create_animal',
+      params_json: JSON.stringify({
+        animals: { id: 'a2', sex: 'male', species_id: 'sp1' },
+        animal_profiles: {
+          id: 'p2', animal_id: 'a2', establishment_id: 'e1', rodeo_id: 'r1', category_id: 'c2',
+          category_override: false, status: 'active', idv: 'IDV2',
+        },
+      }),
+    },
+  });
+  assert.equal(plan.kind, 'rpc');
+  assert.equal(plan.rpcName, 'create_animal');
+  assert.equal(plan.args.p_animal_id, 'a2');
+  assert.equal(plan.args.p_profile_id, 'p2');
+  assert.equal(plan.args.p_idv, 'IDV2');
+  // Opcionales ausentes en el intent viejo → null explícito (NO undefined: el arg viaja y la RPC decide).
+  assert.equal(plan.args.p_tag_electronic, null);
+  assert.equal(plan.args.p_birth_date, null);
+  assert.equal(plan.args.p_visual_id_alt, null);
+  assert.equal(plan.args.p_breed, null);
+  assert.equal(plan.args.p_coat_color, null);
+  assert.equal(plan.args.p_entry_date, null);
+  assert.equal(plan.args.p_entry_weight, null);
+  assert.equal(plan.args.p_management_group_id, null);
+  assert.equal(plan.args.p_teeth_state, null);
+  assert.equal(plan.args.p_nursing, null);
+});
+
+test('mapIntentToRpc: create_animal SIN ids de cliente → PermanentIntentError (sin ids no hay idempotencia)', () => {
+  assert.throws(
+    () =>
+      mapIntentToRpc({
+        id: 'cop-bad',
+        opData: {
+          op_type: 'create_animal',
+          params_json: JSON.stringify({ animals: { sex: 'female' }, animal_profiles: { establishment_id: 'e1' } }),
+        },
+      }),
+    PermanentIntentError,
+  );
 });
 
 test('mapIntentToRpc: op_type desconocido → tira (rechazo permanente → uploadData descarta sin loop)', () => {
@@ -204,11 +280,27 @@ test('NO confundir: 23505 de OTRO índice (tag duplicado) en register_birth → 
   );
 });
 
-test('NO confundir: 23505 en create_animal (tag/idv duplicado) → permanent_reject', () => {
+test('create_animal como RPC (0083): 42501 / 23505 tag-idv → permanent_reject; red → transient; replay = 2xx sin error', () => {
+  // El replay (mismos ids de cliente) es un no-op EXITOSO de la RPC (ON CONFLICT DO NOTHING) → 2xx,
+  // NO produce error → no necesita idempotent_discard. Cualquier error es transient o un rechazo real.
+  // 42501 = sin rol en el establishment (o guard anti-IDOR de la RPC); 23505 = tag de OTRO animal /
+  // idv duplicado (el ON CONFLICT de la RPC targetea SOLO la PK → los UNIQUE de dominio SÍ revientan).
+  assert.equal(classifyIntentUploadError({ code: '42501' }, 'create_animal'), 'permanent_reject');
   assert.equal(
     classifyIntentUploadError({ code: '23505', message: 'animals_tag_unique' }, 'create_animal'),
     'permanent_reject',
   );
+  assert.equal(
+    classifyIntentUploadError(
+      { code: '23505', message: 'duplicate key value violates unique constraint "animal_profiles_idv_unique"' },
+      'create_animal',
+    ),
+    'permanent_reject',
+  );
+  // Red caída a mitad del drenado (la cadena del bug del backlog 2026-06-10) → transient: la tx queda
+  // en cola y el REINTENTO contra la RPC atómica es un no-op seguro (ya no se auto-envenena con 42501).
+  assert.equal(classifyIntentUploadError({ message: 'fetch failed' }, 'create_animal'), 'transient');
+  assert.equal(classifyIntentUploadError({ status: 503 }, 'create_animal'), 'transient');
 });
 
 test('op corrupto: mapIntentToRpc tira PermanentIntentError → classifyIntentUploadError = permanent_reject (no loop)', () => {

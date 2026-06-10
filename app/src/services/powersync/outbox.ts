@@ -79,7 +79,9 @@ export type EnqueueCreateAnimalInput = {
   /** ids de cliente que la RPC/upsert reusarán (idempotencia por PK, R6.10). */
   animalId: string;
   profileId: string;
-  /** Params del intent (lo que uploadData aplica al subir: los 2 payloads cross-tabla). */
+  /** Params del intent: los 2 payloads cross-tabla (shape HISTÓRICO — mapIntentToRpc los traduce a los
+   *  args p_* de la RPC atómica create_animal 0083; NO cambiar el shape: los intents ya encolados en
+   *  devices llevan este formato). */
   params: { animals: Record<string, unknown>; animal_profiles: Record<string, unknown> };
   /** Campos para el overlay optimista (lo que la ficha/lista muestra offline). */
   overlay: {
@@ -91,7 +93,8 @@ export type EnqueueCreateAnimalInput = {
 /**
  * Encola un alta `create_animal`: intent (con los 2 payloads cross-tabla + ids de cliente) + overlay
  * (pending_animals + pending_animal_profiles). La lista/ficha lo muestran al instante; al subir, uploadData
- * aplica un upsert idempotente de animals + animal_profiles (ON CONFLICT por PK → reintento no duplica).
+ * lo mapea a la RPC ATÓMICA `create_animal` (0083): una transacción server-side, idempotente por los ids
+ * de cliente (ON CONFLICT (id) DO NOTHING → reintento no duplica; sana huérfanos del camino viejo).
  */
 export async function enqueueCreateAnimal(
   input: EnqueueCreateAnimalInput,

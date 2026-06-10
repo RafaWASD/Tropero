@@ -17,7 +17,46 @@ No es un sustituto de `feature_list.json` ni de los ADRs — es la antesala dond
 
 ## Ítems pendientes
 
-## 2026-06-10 — 🐛 BUG ABIERTO: animal creado OFFLINE desaparece de la lista al navegar de tab
+## 2026-06-10 — 🐛 BUG: animal creado OFFLINE desaparece de la lista al navegar de tab ✅ RESUELTO (2 causas raíz)
+
+**✅ CERRADO (2026-06-10, Run create-animal-rpc)**: la 2da causa (pérdida real en el upload, detalle abajo)
+se cerró con la **RPC atómica `create_animal` (migración 0083, APLICADA al remoto)** — una sola transacción
+server-side (sin half-state posible), idempotente por ids de cliente (`ON CONFLICT (id) DO NOTHING` solo-PK),
+guards anti-IDOR (patrón 0081), y **healing**: un `animals` huérfano del camino viejo deja de bloquear (el
+replay completa el perfil). Cliente: `upload.ts` mapea `create_animal` → RPC traduciendo el shape histórico
+de los intents ya encolados; `connector.ts` elimina la rama de 2 upserts. Gates: Gate 1 PASS 0 HIGH +
+reviewer APPROVED + Gate 2 PASS 0 HIGH. Verificación: suite backend "All tests passed" post-apply (7 tests
+nuevos: happy/replay/**healing del half-state = el caso del bug**/cross-tenant/idv-dup/tag-dup/anti-IDOR) +
+E2E con **oráculo de persistencia server-side nuevo** (`waitForServerAnimalProfile`) 2/2 verdes — y prueba
+A/B en vivo del reviewer: contra el build viejo el oráculo cazó la cadena exacta (403→42501→"upload
+rechazado"); con el build nuevo, verde. **Residuo NO auto-sanable**: los animales "12"/"211" de Raf
+perdieron su intent (descartado) → irrecuperables; sus filas huérfanas en `animals` (sin perfil, invisibles)
+quedan para la limpieza de la DB beta (entrada 2026-06-08). Re-crear los animales a mano.
+
+**(2da causa, cerrada — pérdida real en el upload)** (diagnóstico original, 2026-06-10 — Raf re-reprodujo con IDV "211", multípara, mismo campo): el fix del
+buscador stale era REAL pero parcial. La 2da causa raíz, confirmada por el leader con los logs de la API de
+Supabase + estado de la DB remota: **el upsert de `create_animal` en `uploadData` NO es idempotente bajo RLS
+y PIERDE el dato en el reintento**. Cadena: (1) `applyIntentTransaction` aplica el alta como 2 upserts HTTP
+NO atómicos (`animals` → `animal_profiles`); (2) si el drenado se interrumpe ENTRE ambos (toggle de red al
+testear, tab cerrada, fetch caído → transient → re-throw y reintento), queda `animals` insertado SIN perfil
+(huérfano, invisible por RLS); (3) el REINTENTO del upsert de `animals` pega el **conflicto de PK → rama
+`ON CONFLICT DO UPDATE` → la policy UPDATE de `animals` exige `EXISTS animal_profiles visible` → el perfil
+no existe → 42501/403**; (4) `classifyIntentUploadError('42501')` = `permanent_reject` → `rollbackOverlay`
+borra el overlay + descarta el intent → **el animal desaparece de la UI y NUNCA llega al server**; (5) los
+eventos post-create encolados (condición corporal de la multípara) fallan después con FK 23503 → 409 y
+también se descartan. Evidencia: logs API de la sesión real de Raf muestran `POST /rest/v1/animals → 403` +
+`POST /rest/v1/condition_score_events → 409` SIN ningún POST de `animal_profiles` (la tx aborta antes); el
+campo `037ac0a5…` tiene CERO `animal_profiles` server-side (ni "12" ni "211" llegaron jamás); quedan filas
+huérfanas en `animals`. Los datos de "12"/"211" son IRRECUPERABLES (idv/categoría vivían en el perfil que
+nunca llegó; el overlay fue borrado). **Por qué ningún test lo cazó**: los E2E offline nunca dejan correr el
+upload; los E2E online asertan la UI (que muestra el OVERLAY) y no verifican persistencia server-side →
+ninguna alta vía app aterriza en el server desde el swap a outbox (72b3239) sin que la suite lo note. El fix
+DEBE incluir un oráculo de persistencia server-side post-alta online. Fix candidato: RPC `create_animal`
+atómica server-side (patrón 0081 `create_rodeo`) o upserts `ignoreDuplicates` (ON CONFLICT DO NOTHING, sin
+rama UPDATE) — decisión con Raf en curso. Lo de abajo documenta la 1ra causa (buscador stale), que SIGUE
+arreglada.
+
+**(1ra causa, cerrada — buscador stale)** (2026-06-10, Run bugfix-overlay-list de 15-powersync): causa raíz = **estado de UI stale del BUSCADOR**, NO pérdida de datos. El overlay local está SANO: el repro E2E instrumentado (export prod Y dev server Metro, `context.setOffline(true)` + dump del SQLite local + captura de consola) probó que el animal queda en `pending_animal_profiles`, que `buildAnimalsListQuery` lo devuelve, y que el upload offline clasifica **transient** en 10+ ciclos de retry (`TypeError: Failed to fetch`, `code:''` → cero `[powersync] upload rechazado`, cero rollback) — hipótesis 1/2/3/4 de abajo DESCARTADAS con evidencia. El defecto real: `animales.tsx` re-corría la LISTA al re-enfocar la tab pero NO la BÚSQUEDA activa → con un término en el buscador (el find-or-create de la manga: tipear el número → no-match → "Dar de alta este animal"), cada vuelta a la tab (p.ej. Más → Animales) mostraba el no-match VIEJO "No encontramos «N»" = "el animal ya no está". Fix: `runSearch` extraído a callback + re-corrido en `useFocusEffect` y en el efecto de `lastSyncedAt` (simétrico a `loadList`). E2E nuevos (`app/e2e/animals-offline.spec.ts`, primeros tests offline reales de la suite): repro literal de este backlog (verde ya en baseline — queda de red de regresión del overlay) + alta vía buscador no-match (ROJO en baseline → VERDE con el fix, verificado por stash en el mismo harness). Detalle en `progress/impl_15-powersync.md` (Run bugfix-overlay-list). Se mantiene el registro por trazabilidad.
 
 **Origen**: validación en vivo de Raf (web, dev server `pnpm web`, código de hoy con commits 72b3239/05a7321/8ffbc80). Repro determinístico.
 **Repro**: campo "nombre de campo de prueba" (`037ac0a5-aaea-4ede-8894-451540c8f3bd`; 2 rodeos: "Cria hembras" `845df40d`, "adsads" `36f40b6b`; 0 animales server-side). Network→Offline → crear animal con IDV "12" → ir a la tab "Más" → volver a "Animales" → **el animal "12" YA NO ESTÁ en la lista**.
@@ -30,6 +69,20 @@ No es un sustituto de `feature_list.json` ni de los ADRs — es la antesala dond
 **Verificación preferida (NO testear a mano)**: test E2E (la suite ya es PowerSync-aware) con 1 campo + 2 rodeos: crear animal vía wizard → navegar a otra tab y volver → assertir que SIGUE en la lista. `context.setOffline(true)` para el caso offline puro.
 **Archivos**: `app/app/(tabs)/animales.tsx`, `app/src/contexts/RodeoContext.tsx`, `app/src/contexts/EstablishmentContext.tsx`, `app/src/services/powersync/local-reads.ts` (`buildAnimalsListQuery` rama overlay), `app/src/services/powersync/outbox.ts` (`enqueueCreateAnimal`), `app/src/services/animals.ts` (`createAnimal`), `app/app/crear-animal.tsx`.
 **Próximo paso**: una sesión nueva (otro modelo) lo diagnostica + arregla. Relacionado con el gap de reactividad del overlay descrito abajo (un write puro del overlay no re-renderiza sin re-foco — pero acá SÍ hay re-foco por la navegación, así que apuntá primero al filtro de rodeo / JOIN del overlay).
+
+## 2026-06-10 — Surfacing en UI de los rechazos PERMANENTES de upload (hoy solo console.warn)
+
+**Origen**: Run create-animal-rpc (15-powersync), al cerrar la cadena del bug de pérdida del alta.
+**Qué**: cuando `uploadData` clasifica un rechazo como `permanent_reject` (42501, 23505 de tag/idv duplicado, FK 23503, intent corrupto), hace rollback del overlay + descarta el intent + `console.warn('[powersync] upload rechazado (descartado)')` — y NADA visible para el usuario: el animal/parto/baja simplemente desaparece de la UI sin explicación. R10.2 pide "registro observable" y R8.1 "superficiar el rechazo de forma legible"; el console.warn cumple lo primero pero no lo segundo. Con la RPC 0083 el caso espurio (el bug) ya no existe, pero los rechazos LEGÍTIMOS (caravana/IDV duplicada cargada offline, rol perdido `active_lost`) siguen siendo silenciosos — el operario cree que cargó el animal y lo pierde sin aviso.
+**Por qué importa**: pérdida de dato PERCIBIDA como bug (aunque sea un rechazo legítimo). En la manga nadie mira la consola. Rompe "el mejor en el primer try".
+**Próximo paso sugerido**: run chico de UX — canal de status ya existente (`status.ts` / `pending ops`): acumular los rechazos en una tablita local (o en memoria + badge en el header de sync) con copy es-AR accionable ("No pudimos guardar el animal 211: caravana duplicada"). Decisión de producto sobre dónde mostrarlo (toast al reconectar vs. bandeja de "pendientes con error"). NO implementado en este run (fuera de alcance).
+
+## 2026-06-10 — ProfileContext queda en "Sin conexión: no pudimos actualizar tu perfil" si la carga corre antes del first-sync (y la tab Más lo muestra)
+
+**Origen**: Run bugfix-overlay-list (15-powersync), hallazgo lateral del repro E2E offline (el ancla "Editar perfil" de la tab Más no aparecía).
+**Qué**: `ProfileContext` carga name/phone UNA vez al resolver `userId` (`useEffect [userId]`) — típicamente ANTES del first-sync de PowerSync → `runLocalQuerySingle` degrada "vacío + !hasSynced" a `kind:'network'` → `error` queda seteado y NO se re-evalúa solo (no escucha `statusChanged` ni re-corre al avanzar `lastSyncedAt`). En la tab "Más", la sección Perfil muestra el alert "Sin conexión: no pudimos actualizar tu perfil." + "Reintentar" y NO renderiza "Editar perfil" hasta que el usuario re-enfoca/reintenta (hay un `useFocusEffect` con `refresh()` que lo suele salvar al entrar a Más, pero la ventana existe y offline-post-sync el copy es engañoso). Misma clase que el fix T11 (consumir la degradación R5.4 re-evaluando en la transición first-sync), no aplicada a este contexto.
+**Por qué importa**: cosmético/UX (el saludo cae al fallback y Más muestra un error transitorio falso) — no pierde datos. Rompe el "mejor en el primer try" si Raf lo ve en el arranque.
+**Próximo paso sugerido**: run chico — en `ProfileContext`, retry en la transición first-sync false→true (mismo patrón `lastHasSynced` de `EstablishmentContext`) o `waitForUsableSync()` antes de la primera carga. Alternativa de fondo: la migración a `useQuery`/`watch` (entrada 2026-06-09) lo borra gratis.
 
 ## 2026-06-09 — Reactividad de lecturas PowerSync: migrar a `useQuery`/`watch` (follow-up del fix showstopper)
 

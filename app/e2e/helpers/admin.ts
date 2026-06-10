@@ -296,6 +296,41 @@ export async function getLatestInvitationToken(
   );
 }
 
+/**
+ * ORÁCULO de persistencia server-side de un alta (Run create-animal-rpc, 15-powersync). Pollea vía
+ * service_role hasta que `animal_profiles` contenga la fila REAL en el server para ese establishment
+ * + identificador. Existe porque el bug de pérdida de datos del backlog 2026-06-10 pasó INVISIBLE:
+ * los E2E asertaban la UI (que muestra el OVERLAY local) sin verificar que el alta aterrizara en el
+ * server — ninguna alta vía app llegaba al server y la suite seguía verde. Todo test de alta que
+ * quiera garantizar persistencia DEBE llamar esto, no solo mirar la lista.
+ */
+export async function waitForServerAnimalProfile(
+  establishmentId: string,
+  match: { idv?: string; visualAlt?: string },
+  opts: { tries?: number; delayMs?: number } = {},
+): Promise<{ id: string; animal_id: string }> {
+  const tries = opts.tries ?? 30;
+  const delayMs = opts.delayMs ?? 2000;
+  for (let i = 0; i < tries; i++) {
+    let q = admin
+      .from('animal_profiles')
+      .select('id, animal_id')
+      .eq('establishment_id', establishmentId)
+      .is('deleted_at', null);
+    if (match.idv) q = q.eq('idv', match.idv);
+    if (match.visualAlt) q = q.eq('visual_id_alt', match.visualAlt);
+    const { data, error } = await q.limit(1);
+    if (error) throw new Error(`waitForServerAnimalProfile: ${error.message}`);
+    if (data && data.length > 0) return data[0] as { id: string; animal_id: string };
+    await new Promise((r) => setTimeout(r, delayMs));
+  }
+  throw new Error(
+    `waitForServerAnimalProfile(${establishmentId}, ${JSON.stringify(match)}): el alta NUNCA llegó al ` +
+      `server (${tries} intentos) — el animal vive solo en el overlay/UI. Pérdida de persistencia ` +
+      `(cadena del backlog 2026-06-10) o la RPC create_animal (0083) no está aplicada al remoto.`,
+  );
+}
+
 /** Permite que un test trackee para cleanup un establishment creado por la UI (por nombre exacto). */
 export async function trackEstablishmentsByNameLike(namePrefix: string): Promise<string[]> {
   const { data, error } = await admin

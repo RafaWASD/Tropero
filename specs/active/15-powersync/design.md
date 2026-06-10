@@ -720,6 +720,8 @@ Cada `await supabase.from(T).select(...)` pasa a `await db.getAll(sql)` o `db.wa
 > - **`_layout.tsx` (RootGate):** sin lógica de sync nueva — solo coordinación de timeouts. El fallback que destapa el splash pasó a `SPLASH_FALLBACK_MS = FIRST_SYNC_TIMEOUT_MS + 500` (≈5s): garantiza que el contexto resuelva su ruta ANTES de que el splash se destape; si el sync llega más tarde, el listener (1b) re-rutea de onboarding a home.
 > - **`animales.tsx` + stepper del Inicio (`(tabs)/index.tsx`):** `useStatus()` de `@powersync/react` + efecto que re-corre la carga (`loadList()` / `loadAnimalCount`+`loadTeamCount`) cuando AVANZA `status.lastSyncedAt` (dep primitiva en ms → estable entre syncs, no loopea). Así la lista/los conteos se rellenan al bajar el first-sync (o un download posterior) sin salir/volver a la tab. El `useFocusEffect` queda de red de seguridad. **NO se migró el data layer a `useQuery`/`watch`** (refactor grande que tocaría overlay/outbox — backlog 2026-06-09).
 > - **Validación E2E (oráculo):** `animals.spec.ts:386` "buscar un animal EXISTENTE → … aparece en la lista (carga inicial)" pasa de ROJO (baseline sin el fix) a VERDE — es la repro directa del bug (aterrizaba en onboarding; ahora aterriza en home con la lista poblada) + assert anti-flash agregado. `auth.spec` 4/4 verde (incl. "SIN campos → onboarding" DESPUÉS del first-sync = onboarding legítimo intacto). `establishments.spec:68` (≥2 campos → Mis campos → home) verde. Residuales PRE-EXISTENTES al fix (verificados rojos en baseline, fuera de scope → backlog 2026-06-09): `animals.spec:52` tail (stepper post-alta-offline), `animals.spec:500` (overlay de exit sin `exit_date`), `establishments.spec:29` (crear-campo lee local antes del sync-down del campo nuevo).
+>
+> **As-built (Run bugfix-overlay-list, 2026-06-10 — "animal creado OFFLINE desaparece de la lista al navegar de tab"):** el re-query manual de `animales.tsx` cubría la LISTA pero NO la BÚSQUEDA activa: la ejecución de `searchAnimals` vivía solo en el efecto `[establishmentId, debouncedQuery]` → si el alta nacía del no-match del buscador (find-or-create R1.4 de spec 09), el término quedaba en el search bar y al re-enfocar la tab `visible` mostraba los `searchResults` VIEJOS ("No encontramos «N»") aunque el animal recién creado SÍ estaba en el overlay (`pending_animal_profiles`) y en `buildAnimalsListQuery` (verificado por dump del SQLite local en el repro E2E). Fix: la ejecución de la búsqueda se extrajo a un callback `runSearch` (mismo guard de secuencia) y se re-corre TAMBIÉN en el `useFocusEffect` y en el efecto de `lastSyncedAt` — simétrico a `loadList`. Diagnóstico que DESCARTÓ las otras hipótesis con evidencia (repro E2E instrumentado, export prod Y dev server Metro): el overlay NUNCA se rollbackea offline (el error real de upload es `TypeError: Failed to fetch` con `code:''`/`status:undefined` → `classifyIntentUploadError` = transient en 10+ ciclos de retry, cero `[powersync] upload rechazado`), el contexto no re-resuelve al navegar, y la fila del overlay matchea la query de la lista. Oráculos E2E nuevos (primeros tests offline reales de la suite, `context.setOffline(true)`): `animals-offline.spec.ts` — (1) repro literal del backlog (alta por empty-CTA → Más → Animales → sigue visible; verde ya en baseline, queda de red de regresión del overlay/clasificación transient) y (2) alta vía buscador no-match → al volver de la ficha (y tras Más→Animales con el término tipeado) el animal se ve, no el no-match stale — **ROJO en baseline → VERDE con el fix** (verificado por stash en el mismo harness).
 
 ### 5.2 Escritura local + upload — CRUD-plano offline-safe (R6.1)
 
@@ -746,7 +748,7 @@ Estas pasan de `supabase.from(T).insert(payload)` a `db.execute('INSERT INTO T (
 
 | Service / función | Por qué NO es CRUD plano (necesita RPC) |
 |---|---|
-| `animals.createAnimal` | 2 inserts cross-tabla `animals`→`animal_profiles`, hoy NO atómicos. Dos CrudEntry planos separados podrían dejar un `animals` huérfano si el upload del perfil falla por RLS/unique. La RPC (o el orden atómico en `uploadData`) evita el huérfano. |
+| `animals.createAnimal` | 2 inserts cross-tabla `animals`→`animal_profiles`, NO atómicos. Dos CrudEntry planos separados podrían dejar un `animals` huérfano si el upload del perfil falla por RLS/unique. **As-built (Run create-animal-rpc, 2026-06-10): RPC atómica `create_animal` (0083)** — la alternativa "orden atómico en `uploadData`" (2 upserts) se implementó primero (Run T6) y se probó INSUFICIENTE: perdía el alta bajo reintento (ver la nota de §5.4.2). |
 | `events.registerBirth` (`register_birth`) | RPC SECURITY DEFINER atómico (evento de parto + N terneros + N `birth_calves` + transición de categoría de la madre). No es CRUD plano; un upload plano no lo replica atómicamente. |
 | `exit-animal.exitAnimalProfile` (`exit_animal_profile`) | RPC SECURITY DEFINER (authz `has_role_in AND (owner OR created_by)` + lógica de egreso). |
 | `soft_delete_*` (rodeo, management_group, animal_event, evento tipado) | RPCs SECURITY DEFINER que sortean el gotcha RLS-on-RETURNING del soft-delete. Un UPDATE local de `deleted_at` subido como CRUD plano sería **rechazado** por PostgREST (la fila sale de la SELECT-policy) — exactamente el bug que los RPCs resuelven. Por eso el `DELETE`/soft-delete NO va por el camino plano de §5.4.1: va por la outbox→RPC. |
@@ -869,21 +871,39 @@ async function applyIntent(op /* CrudEntry de op_intents */) {
 }
 ```
 
-> **⚠️ RECONCILIADO al as-built (Run T6) — `create_animal` NO tiene RPC en el schema.** El alta NO se
-> implementa con `supabase.rpc('create_animal', ...)` (esa RPC no existe en el backend as-built). El intent
-> `create_animal` lleva en `params_json` los DOS payloads cross-tabla (`{ animals: {...}, animal_profiles:
-> {...} }`, con ids de cliente) y `uploadData` los aplica como **2 upserts idempotentes** (`supabase.from(
-> 'animals').upsert(payload)` + `supabase.from('animal_profiles').upsert(payload)`, `ON CONFLICT` por la PK
-> `id` → un reintento at-least-once NO duplica). Es exactamente el "**orden atómico en `uploadData`**" que
-> §5.3.1 ya contemplaba como alternativa a una RPC. `animals` primero (el perfil tiene FK `animal_id`); si el
-> upsert del perfil falla (p.ej. idv duplicado), el `animals` queda huérfano e invisible por RLS (idéntico al
-> split-insert online) y el rollback del overlay revierte la vista optimista. Las tablas (`animals`/
-> `animal_profiles`) son LITERALES en el connector (no vienen del intent) → un intent forjado no puede
-> redirigir el upsert a otra tabla. El `op_type` se whitelistea (`mapIntentToRpc`): un `op_type` fuera de
-> {`create_animal`, `register_birth`, `exit_animal_profile`, `soft_delete_management_group`,
-> `soft_delete_rodeo`, `soft_delete_animal_event`, `soft_delete_event`} → `PermanentIntentError` (descarte,
-> no se invoca una RPC arbitraria). `register_birth`/`exit_animal_profile`/`soft_delete_*` SÍ mapean a su RPC
-> homónima vía `supabase.rpc`.
+> **⛔ SUPERSEDIDO (Run create-animal-rpc, 2026-06-10) — la nota de reconciliación de Run T6 ("`create_animal`
+> NO tiene RPC → 2 upserts idempotentes") quedó INVALIDADA por un bug de PÉRDIDA REAL de datos** (backlog
+> 2026-06-10 REABIERTO; diagnóstico del leader con logs API + DB remota). Los 2 upserts HTTP NO eran
+> idempotentes bajo RLS: (1) un drenado interrumpido ENTRE ambos (red, tab cerrada) dejaba `animals` insertado
+> SIN perfil (huérfano invisible por RLS); (2) el REINTENTO del upsert de `animals` pegaba el conflicto de PK
+> → rama default `ON CONFLICT DO UPDATE` de supabase-js → la policy UPDATE de `animals` (0022) exige `EXISTS
+> animal_profiles` visible → el perfil no existe → **42501/403**; (3) `classifyIntentUploadError('42501')` =
+> `permanent_reject` → `rollbackOverlay` + descarte del intent → **el alta desaparecía de la UI y nunca
+> llegaba al server**; (4) los eventos post-create encolados morían después con FK 23503. Evidencia: campo
+> real de Raf con CERO `animal_profiles` server-side + huérfanos en `animals` + logs `POST animals → 403`.
+>
+> **✅ As-built VIGENTE (Run create-animal-rpc): `create_animal` SÍ tiene RPC — migración `0083_create_animal_rpc.sql`
+> (patrón 0081 `create_rodeo`), decisión de Raf (opción B).** Una RPC SECURITY DEFINER (`set search_path =
+> public`) con: authz PRIMERO (`has_role_in(p_establishment_id)`, paridad con la policy INSERT as-built de
+> `animal_profiles` — cualquier rol activo puede dar de alta; 42501 genérico); UNA transacción con INSERT de
+> `animals` + INSERT de `animal_profiles` con los ids de CLIENTE, ambos `ON CONFLICT (id) DO NOTHING`
+> (target SOLO la PK) → replay at-least-once = no-op 2xx total Y **healing del half-state** (un `animals`
+> huérfano del camino viejo → DO NOTHING → se crea el perfil que faltaba); guards anti-IDOR post-insert
+> (la fila de `animals` debe MATCHEAR la identidad del intent — sex/species/tag/birth_date — y el perfil debe
+> ser del animal+establishment del intent; mismatch → 42501 genérico, espeja el (c-bis) de 0081); los UNIQUE
+> de dominio (tag de OTRO animal, idv duplicado) NO se absorben → 23505 SALE (rechazo permanente que
+> uploadData superficia); los triggers as-built disparan adentro (0043 fuerza `created_by` = caller —
+> `auth.uid()` sigue siendo el caller bajo SECURITY DEFINER, patrón 0075/0081; 0079 fuerza la identidad
+> denormalizada; 0021 valida identidad/rodeo/categoría); grants cerrados a `authenticated` + `notify pgrst`.
+> **El connector ya NO tiene la rama de 2 upserts**: todo intent (b) va por `supabase.rpc`. **Compat hacia
+> atrás**: el shape del intent NO cambió (`params_json = { animals: {...}, animal_profiles: {...} }`) —
+> `mapIntentToRpc` TRADUCE ese shape histórico a los args `p_*` de la RPC, así los op_intents YA ENCOLADOS
+> en devices drenan por el camino nuevo (keys opcionales ausentes → `null` → defaults server-side). Un intent
+> sin ids de cliente → `PermanentIntentError` (sin ids no hay idempotencia). El `op_type` se sigue
+> whitelisteando (`mapIntentToRpc`): un `op_type` fuera de {`create_animal`, `register_birth`,
+> `exit_animal_profile`, `soft_delete_management_group`, `soft_delete_rodeo`, `soft_delete_animal_event`,
+> `soft_delete_event`, `create_rodeo`, `set_rodeo_config`} → `PermanentIntentError` (descarte, no se invoca
+> una RPC arbitraria).
 
 - **Orden**: las intenciones se drenan en **orden de cola** (FIFO de la upload queue), igual que el CRUD plano. Si una operación depende de otra (ej. crear un animal y luego un evento sobre él), el orden de encolado lo preserva. Las dependencias cross-op se resuelven porque los `id` de `create_animal`/eventos son de cliente (la RPC los recibe como params; para `register_birth` los ids de los terneros los asigna el server).
 - **`p_client_op_id` solo en `register_birth`** (§5.4.3): es la única RPC con dedup explícita. `exit_animal_profile`/`create_animal`/`soft_delete_*` no llevan ese param (sus firmas as-built no lo tienen y son dedup-natural).
@@ -949,8 +969,8 @@ update public.animal_profiles
 ```
 Análisis del reintento: la baja **no setea `deleted_at`** (queda NULL) → en el reintento el `SELECT ... WHERE id = p_profile_id AND deleted_at IS NULL` **vuelve a encontrar** la fila → re-pasa la authz (`has_role_in AND (owner OR created_by)`) → re-corre el mismo UPDATE de status. Como `status`/`exit_reason`/`exit_date` ya tienen los valores de la 1ra pasada, el segundo UPDATE deja el **mismo end-state** (idempotente). **No hay segundo efecto**: el UPDATE toca `status, exit_reason, exit_date, exit_weight, exit_price` pero **NO `category_id`**, así que el trigger `animal_profiles_record_category_change_upd` (AFTER UPDATE **OF category_id**, `0030_animal_category_history.sql:52-54`) NO dispara → no se inserta una 2da fila en `animal_category_history`. No hay otro trigger AFTER sobre `animal_profiles` que produzca un side-effect no idempotente en un cambio de status. **Conclusión: `exit_animal_profile` es naturalmente idempotente por la guarda `deleted_at IS NULL` + la transición de status idempotente → SIN `client_op_id`, SIN delta** (delta más chico — solo `register_birth`).
 
-**(3) `create_animal` (alta) — dedup NATURAL por `id` de cliente → NO necesita delta.**
-Evidencia (`app/src/services/animals.ts`): `createAnimal` genera `animalId = randomUuid()` y `profileId = randomUuid()` en el cliente y hace `from('animals').insert({ id, ... })` + `from('animal_profiles').insert({ id, ... })`. La intención `create_animal` reusa esos ids de cliente. Reintentar el INSERT del mismo `id` → choca con la PK (`ON CONFLICT (id) DO NOTHING` en la RPC/upsert que aplica el intent) → no crea un segundo animal. SIN delta.
+**(3) `create_animal` (alta) — dedup NATURAL por `id` de cliente → NO necesita `p_client_op_id`.**
+Evidencia (`app/src/services/animals.ts`): `createAnimal` genera `animalId = randomUuid()` y `profileId = randomUuid()` en el cliente. La intención `create_animal` reusa esos ids de cliente. Reintentar con el mismo `id` → `ON CONFLICT (id) DO NOTHING` → no crea un segundo animal. **As-built (Run create-animal-rpc, 2026-06-10): la dedup se materializa en la RPC atómica `create_animal` (0083)** — el "SIN delta" original quedó parcialmente supersedido: sigue sin haber delta de SCHEMA (ni columna ni índice nuevos), pero SÍ se agregó la RPC (delta aditivo tipo 0081/0082) porque los 2 upserts no atómicos del Run T6 perdían el alta bajo reintento (ver la nota de §5.4.2). El replay de la RPC es un no-op 2xx (no produce error → no necesita rama `idempotent_discard` en el cliente) y además SANA el half-state del camino viejo.
 
 **(4) `soft_delete_*` — dedup NATURAL por la guarda `deleted_at IS NULL` → NO necesita delta.**
 Evidencia (`supabase/migrations/0041_soft_delete_rpcs.sql`): cada `soft_delete_*` hace `select ... where id = ... and deleted_at is null` y luego `update ... set deleted_at = now() where id = ...`. En el reintento la fila ya tiene `deleted_at IS NOT NULL` → el SELECT no la encuentra → la RPC **levanta `not found`** (`P0002`). Eso NO crea un segundo borrado (no hay segundo efecto), pero **NO es un 2xx**. **Manejo en `uploadData` (§5.4.4)**: un `P0002` (`not found`) sobre una intención `soft_delete_*` cuyo efecto YA está aplicado se trata como **éxito idempotente** — descartar la intención **sin** rollback del overlay (la baja real ya ocurrió server-side) — NO como rechazo permanente que dispararía un rollback erróneo (restauraría una fila que sí está borrada). SIN delta.

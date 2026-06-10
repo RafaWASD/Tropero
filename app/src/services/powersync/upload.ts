@@ -3,10 +3,12 @@
 // → testeable con node:test. El I/O (supabase.rpc, tx.complete, clear/rollbackOverlay) vive en connector.ts.
 //
 // Dos piezas:
-//  (1) mapIntentToRpc(op): traduce una CrudEntry de op_intents a { kind:'rpc', rpcName, args } o
-//      { kind:'create_animal', animals, animal_profiles } (el alta NO tiene RPC en el schema as-built →
-//      uploadData aplica 2 upserts idempotentes; el resto sí mapea a una RPC). p_client_op_id SOLO a
-//      register_birth (las demás firmas no lo tienen).
+//  (1) mapIntentToRpc(op): traduce una CrudEntry de op_intents a { kind:'rpc', rpcName, args }. TODAS las
+//      ops (b) mapean a una RPC — incluido create_animal (RPC atómica 0083, Run create-animal-rpc: los 2
+//      upserts no atómicos del camino viejo PERDÍAN datos bajo reintento, backlog 2026-06-10 REABIERTO).
+//      Para create_animal el mapeo TRADUCE el shape histórico del intent ({ animals, animal_profiles })
+//      a los args p_* de la RPC → los op_intents YA ENCOLADOS en devices drenan por el camino nuevo.
+//      p_client_op_id SOLO a register_birth (las demás firmas no lo tienen).
 //  (2) classifyIntentUploadError(error, opType): decide el destino de un error de la RPC:
 //        - 'transient'           → re-throw (queda en cola, reintenta) — NO toca overlay (R3.4/R6.9).
 //        - 'idempotent_discard'  → la op YA corrió server-side (reintento at-least-once): descartar SIN
@@ -25,12 +27,11 @@ export type OpIntentEntry = {
   opData?: Record<string, unknown> | null;
 };
 
-/** Resultado del mapeo de un intent a su forma de aplicación en uploadData. */
-export type IntentPlan =
-  | { kind: 'rpc'; rpcName: string; args: Record<string, unknown> }
-  | { kind: 'create_animal'; animals: Record<string, unknown>; animal_profiles: Record<string, unknown> };
+/** Resultado del mapeo de un intent a su forma de aplicación en uploadData (siempre una RPC). */
+export type IntentPlan = { kind: 'rpc'; rpcName: string; args: Record<string, unknown> };
 
-/** op_types que se mapean a una RPC directa (todas menos create_animal, que son 2 upserts). */
+/** op_types que se mapean a una RPC con los params del intent TAL CUAL (create_animal se mapea aparte:
+ *  su params_json histórico es { animals, animal_profiles } y se TRADUCE a los args p_* de la RPC 0083). */
 const RPC_OP_TYPES = new Set([
   'register_birth',
   'exit_animal_profile',
@@ -48,8 +49,9 @@ const RPC_OP_TYPES = new Set([
 
 /**
  * Mapea una CrudEntry de op_intents a su plan de aplicación. PURA (testeable).
- *   - create_animal → { kind:'create_animal', animals, animal_profiles } (2 upserts idempotentes por PK;
- *     el alta NO tiene RPC en el schema as-built — reconciliación, ver impl_15 / design §5.4.2).
+ *   - create_animal → { kind:'rpc', rpcName:'create_animal', args: p_* } (RPC ATÓMICA 0083; TRADUCE el
+ *     shape histórico del intent { animals: {...}, animal_profiles: {...} } — los intents ya encolados
+ *     en devices drenan por el camino nuevo; dedup NATURAL por los ids de cliente, replay = no-op 2xx).
  *   - register_birth → { kind:'rpc', args: { ...params, p_client_op_id: op.id } } (dedup EXPLÍCITA por
  *     client_op_id, delta 0075 — la ÚNICA RPC que recibe p_client_op_id; las demás firmas no lo tienen).
  *   - exit_animal_profile / soft_delete_* → { kind:'rpc', args: params } (dedup NATURAL, sin client_op_id).
@@ -80,9 +82,43 @@ export function mapIntentToRpc(op: OpIntentEntry): IntentPlan {
   }
 
   if (opType === 'create_animal') {
+    // RPC atómica 0083 (Run create-animal-rpc). El shape del intent es el HISTÓRICO de
+    // enqueueCreateAnimal ({ animals: {...}, animal_profiles: {...} }, ids de cliente adentro) — NO se
+    // cambió a propósito: los op_intents ya encolados en devices (camino viejo de 2 upserts) drenan por
+    // esta misma traducción. Las keys ausentes del payload viajan como null → la RPC aplica sus defaults
+    // server-side (coalesce de status/category_override/nursing; nullif/trim de los textos).
     const animals = (params.animals ?? {}) as Record<string, unknown>;
-    const animal_profiles = (params.animal_profiles ?? {}) as Record<string, unknown>;
-    return { kind: 'create_animal', animals, animal_profiles };
+    const profile = (params.animal_profiles ?? {}) as Record<string, unknown>;
+    if (typeof animals.id !== 'string' || typeof profile.id !== 'string') {
+      // Sin ids de cliente no hay idempotencia posible → intent corrupto = rechazo PERMANENTE (no loop).
+      throw new PermanentIntentError('create_animal sin ids de cliente (intent corrupto)');
+    }
+    return {
+      kind: 'rpc',
+      rpcName: 'create_animal',
+      args: {
+        p_animal_id: animals.id,
+        p_profile_id: profile.id,
+        p_establishment_id: profile.establishment_id ?? null,
+        p_rodeo_id: profile.rodeo_id ?? null,
+        p_category_id: profile.category_id ?? null,
+        p_sex: animals.sex ?? null,
+        p_species_id: animals.species_id ?? null,
+        p_category_override: profile.category_override ?? false,
+        p_status: profile.status ?? 'active',
+        p_tag_electronic: animals.tag_electronic ?? null,
+        p_birth_date: animals.birth_date ?? null,
+        p_idv: profile.idv ?? null,
+        p_visual_id_alt: profile.visual_id_alt ?? null,
+        p_breed: profile.breed ?? null,
+        p_coat_color: profile.coat_color ?? null,
+        p_entry_date: profile.entry_date ?? null,
+        p_entry_weight: profile.entry_weight ?? null,
+        p_management_group_id: profile.management_group_id ?? null,
+        p_teeth_state: profile.teeth_state ?? null,
+        p_nursing: profile.nursing ?? null,
+      },
+    };
   }
 
   if (!RPC_OP_TYPES.has(opType)) {

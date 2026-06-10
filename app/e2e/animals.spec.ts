@@ -19,6 +19,7 @@ import {
   seedAnimal,
   addMember,
   setUserPhone,
+  waitForServerAnimalProfile,
   cleanupAll,
   RUN_TAG,
 } from './helpers/admin';
@@ -54,7 +55,7 @@ test('alta guiada desde empty → wizard (sexo→categoría→datos) → el anim
 }) => {
   const user = await createTestUser('alta');
   await setUserPhone(user.id, '1123456789');
-  await seedEstablishmentWithRodeo(user.id, 'Campo Alta');
+  const { establishmentId } = await seedEstablishmentWithRodeo(user.id, 'Campo Alta');
 
   await page.goto('/');
   await signIn(page, user);
@@ -95,6 +96,13 @@ test('alta guiada desde empty → wizard (sexo→categoría→datos) → el anim
   // Sección Historial (C3.1) — reemplaza el teaser "Próximamente". Un animal recién creado tiene
   // solo el `initial` → empty/sparse cálido.
   await expect(page.getByText('Historial', { exact: true })).toBeVisible();
+
+  // ── ORÁCULO de PERSISTENCIA server-side (Run create-animal-rpc). La UI de arriba muestra el OVERLAY
+  // local — eso NO prueba que el alta llegó al server (el bug del backlog 2026-06-10 pasó invisible
+  // exactamente por asertar solo la UI: ninguna alta aterrizaba server-side y la suite seguía verde).
+  // Acá esperamos la fila REAL en animal_profiles vía admin (el drenado online de la outbox → RPC
+  // create_animal 0083 corre enseguida con red).
+  await waitForServerAnimalProfile(establishmentId, { visualAlt: visualLabel });
 
   // Volvemos a la lista vía "Volver" (el create se hizo con replace → back desde la ficha cae en
   // (tabs)/Animales). El animal aparece.

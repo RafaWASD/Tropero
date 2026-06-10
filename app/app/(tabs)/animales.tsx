@@ -150,25 +150,12 @@ export default function AnimalesScreen() {
     void loadList();
   }, [loadList]);
 
-  // Recargar al re-enfocar la tab (volver de crear-animal / ficha) para reflejar altas/cambios.
-  useFocusEffect(
-    useCallback(() => {
-      void loadList();
-    }, [loadList]),
-  );
-
-  // FIX showstopper: re-cargar la lista cuando AVANZA el sync (lastSyncedAt). Al bajar el first-sync
-  // (o un download posterior), el SQLite local se puebla → re-corremos loadList sin que el operario
-  // tenga que salir/volver a la tab. La dep es un primitivo (ms): `lastSyncedAt` es estable entre
-  // syncs en el SDK → no loopea (solo avanza cuando hay un sync nuevo). El useFocusEffect queda de
-  // red de seguridad; el efecto inicial (`[loadList]`) cubre la primera carga.
-  useEffect(() => {
-    if (lastSyncedMs === 0) return; // todavía no hubo ningún sync: el efecto inicial ya cargó (o vacío).
-    void loadList();
-  }, [lastSyncedMs, loadList]);
-
-  // ── Ejecutar la búsqueda real cuando cambia el query debounced (R1.2/R5). ──
-  useEffect(() => {
+  // ── Ejecutar la búsqueda real (R1.2/R5). Extraída a callback para poder RE-CORRERLA al re-enfocar
+  //    la tab (fix bug overlay-list, Run bugfix-overlay-list): si el alta nace del no-match del
+  //    buscador, el término queda en el search bar y la tab desenfocada NO re-computa searchResults →
+  //    al volver de la ficha se veía el no-match VIEJO ("No encontramos «N»") aunque el animal recién
+  //    creado SÍ está en el overlay local. El guard de secuencia (searchSeq) se conserva. ──
+  const runSearch = useCallback(async () => {
     const q = debouncedQuery.trim();
     if (!establishmentId || q.length === 0) {
       setSearchResults([]);
@@ -177,17 +164,42 @@ export default function AnimalesScreen() {
     }
     const seq = ++searchSeq.current;
     setSearching(true);
-    (async () => {
-      const r = await searchAnimals(establishmentId, q);
-      if (seq !== searchSeq.current) return;
-      setSearching(false);
-      if (!r.ok) {
-        setSearchResults([]);
-        return;
-      }
-      setSearchResults(r.value);
-    })();
+    const r = await searchAnimals(establishmentId, q);
+    if (seq !== searchSeq.current) return;
+    setSearching(false);
+    if (!r.ok) {
+      setSearchResults([]);
+      return;
+    }
+    setSearchResults(r.value);
   }, [establishmentId, debouncedQuery]);
+
+  // Búsqueda cuando cambia el query debounced (R1.2/R5).
+  useEffect(() => {
+    void runSearch();
+  }, [runSearch]);
+
+  // Recargar al re-enfocar la tab (volver de crear-animal / ficha) para reflejar altas/cambios.
+  // Re-corre TAMBIÉN la búsqueda activa (fix bug overlay-list): un alta hecha mientras la tab estaba
+  // desenfocada debe verse al volver aunque haya un término en el buscador.
+  useFocusEffect(
+    useCallback(() => {
+      void loadList();
+      void runSearch();
+    }, [loadList, runSearch]),
+  );
+
+  // FIX showstopper: re-cargar la lista cuando AVANZA el sync (lastSyncedAt). Al bajar el first-sync
+  // (o un download posterior), el SQLite local se puebla → re-corremos loadList sin que el operario
+  // tenga que salir/volver a la tab. La dep es un primitivo (ms): `lastSyncedAt` es estable entre
+  // syncs en el SDK → no loopea (solo avanza cuando hay un sync nuevo). El useFocusEffect queda de
+  // red de seguridad; el efecto inicial (`[loadList]`) cubre la primera carga. La búsqueda activa
+  // también se refresca (mismo motivo: un download puede traer/ocultar resultados).
+  useEffect(() => {
+    if (lastSyncedMs === 0) return; // todavía no hubo ningún sync: el efecto inicial ya cargó (o vacío).
+    void loadList();
+    void runSearch();
+  }, [lastSyncedMs, loadList, runSearch]);
 
   // Conteo del header (R1.1): sale de la lista cargada (no del mock).
   const totalCount = list.length;

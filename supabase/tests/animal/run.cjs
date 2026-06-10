@@ -2788,6 +2788,231 @@ test('spec 15-powersync — set_rodeo_config RPC (editar plantilla OFFLINE, Run 
   });
 });
 
+// =====================================================================
+// spec 15-powersync — Run create-animal-rpc: RPC create_animal (alta ATÓMICA).
+// Migración supabase/migrations/0083_create_animal_rpc.sql.
+// ⚠️ Estos tests REQUIEREN la migración 0083 APLICADA al remoto (la aplica el leader por Management API
+// tras gatear el SQL). Hasta entonces FALLAN — es ESPERADO: la función create_animal no existe aún →
+// PGRST202 (function not found). El implementer NO aplica la migración. Mismo patrón que 0075-0082.
+//
+// Contexto (bug de PÉRDIDA REAL de datos, backlog 2026-06-10 REABIERTO): el alta se subía como 2 upserts
+// HTTP no atómicos; un drenado interrumpido entre ambos dejaba `animals` huérfano y el reintento moría
+// 42501 (la policy UPDATE de animals exige un perfil visible) → rollback del overlay → alta perdida.
+// La RPC es UNA transacción + idempotente por ids de cliente + SANA el half-state (caso 3 = el bug).
+// =====================================================================
+test('spec 15-powersync — create_animal RPC (alta atómica, Run create-animal-rpc)', async (t) => {
+  let userA, userB, clientA, clientB, estA, estB, rodeoA, speciesId, catVaq;
+  const uuid = () => require('node:crypto').randomUUID();
+
+  // args completos para un alta hembra/vaquillona en estA/rodeoA (cada caso pisa lo que necesita).
+  function buildArgs(overrides = {}) {
+    return {
+      p_animal_id: uuid(),
+      p_profile_id: uuid(),
+      p_establishment_id: estA,
+      p_rodeo_id: rodeoA.id,
+      p_category_id: catVaq,
+      p_sex: 'female',
+      p_species_id: speciesId,
+      ...overrides,
+    };
+  }
+
+  await t.test('setup: owner A (estA + rodeo), owner B (estB, sin rol en estA)', async () => {
+    userA = await createTestUser('s15ca_A');
+    userB = await createTestUser('s15ca_B');
+    clientA = await getUserClient(userA.email);
+    clientB = await getUserClient(userB.email);
+    estA = await createEstablishmentAs(clientA, `${RUN_TAG} s15ca_estA`);
+    estB = await createEstablishmentAs(clientB, `${RUN_TAG} s15ca_estB`);
+    rodeoA = await createRodeo(clientA, { establishmentId: estA, name: `${RUN_TAG}_ca_rodeoA` });
+    const ss = await lookupSpeciesSystem(clientA, 'bovino', 'cria');
+    speciesId = ss.speciesId;
+    catVaq = await categoryId(clientA, rodeoA.systemId, 'vaquillona');
+  });
+
+  // -- Caso 1: happy path — UNA RPC crea animals + perfil; triggers fuerzan created_by + identidad. --
+  await t.test('caso 1: alta completa vía create_animal → animals + perfil; created_by e identidad FORZADOS por triggers', async () => {
+    const tag = `${RUN_TAG}_ca_tag1`;
+    const args = buildArgs({
+      p_tag_electronic: tag,
+      p_birth_date: '2024-07-01',
+      p_idv: `${RUN_TAG}_idv1`,
+      p_breed: 'Angus',
+      p_entry_weight: 180.5,
+    });
+    const { data: ret, error } = await clientA.rpc('create_animal', args);
+    assert.equal(error, null, error && error.message);
+    assert.equal(ret, args.p_profile_id, 'create_animal devuelve el id del perfil (= id de cliente)');
+
+    const { data: an } = await admin.from('animals')
+      .select('id, sex, species_id, tag_electronic, birth_date, deleted_at').eq('id', args.p_animal_id).single();
+    assert.ok(an, 'animals se creó con el id de cliente');
+    assert.equal(an.sex, 'female');
+    assert.equal(an.species_id, speciesId);
+    assert.equal(an.tag_electronic, tag);
+    assert.equal(an.birth_date, '2024-07-01');
+
+    const { data: prof } = await admin.from('animal_profiles')
+      .select('id, animal_id, establishment_id, rodeo_id, category_id, status, idv, breed, entry_weight, created_by, animal_tag_electronic, animal_sex, animal_birth_date')
+      .eq('id', args.p_profile_id).single();
+    assert.ok(prof, 'animal_profiles se creó con el id de cliente');
+    assert.equal(prof.animal_id, args.p_animal_id);
+    assert.equal(prof.establishment_id, estA);
+    assert.equal(prof.rodeo_id, rodeoA.id);
+    assert.equal(prof.category_id, catVaq);
+    assert.equal(prof.status, 'active');
+    assert.equal(prof.idv, `${RUN_TAG}_idv1`);
+    assert.equal(prof.breed, 'Angus');
+    assert.equal(Number(prof.entry_weight), 180.5);
+    // created_by lo FUERZA el trigger 0043 desde auth.uid() (la RPC no lo setea) — y bajo SECURITY
+    // DEFINER auth.uid() sigue siendo el CALLER (patrón validado 0075/0081).
+    assert.equal(prof.created_by, userA.id, 'created_by forzado al caller (trigger 0043 dentro de la RPC)');
+    // Identidad denormalizada b1: la FUERZA el trigger 0079 desde animals (la RPC no la setea).
+    assert.equal(prof.animal_tag_electronic, tag, 'identidad denormalizada forzada (0079)');
+    assert.equal(prof.animal_sex, 'female');
+    assert.equal(prof.animal_birth_date, '2024-07-01');
+  });
+
+  // -- Caso 2: IDEMPOTENCIA — replay idéntico (mismos ids de cliente) = no-op TOTAL, no error. --
+  await t.test('caso 2: replay idéntico (mismos ids de cliente) → 2xx no-op (ni duplica ni error)', async () => {
+    const args = buildArgs({ p_idv: `${RUN_TAG}_idv2` });
+    const r1 = await clientA.rpc('create_animal', args);
+    assert.equal(r1.error, null, r1.error && r1.error.message);
+
+    // Replay (reintento at-least-once tras perder el ACK): MISMOS args.
+    const r2 = await clientA.rpc('create_animal', args);
+    assert.equal(r2.error, null, `el replay NO debe dar error (ON CONFLICT DO NOTHING): ${r2.error && r2.error.message}`);
+    assert.equal(r2.data, args.p_profile_id, 'el replay devuelve el MISMO id de perfil');
+
+    // Estado real: UNA fila de animals, UN perfil (ni 2 animales ni 2 perfiles).
+    const { count: nAnimals } = await admin.from('animals')
+      .select('id', { count: 'exact', head: true }).eq('id', args.p_animal_id);
+    assert.equal(nAnimals, 1);
+    const { count: nProfiles } = await admin.from('animal_profiles')
+      .select('id', { count: 'exact', head: true }).eq('animal_id', args.p_animal_id);
+    assert.equal(nProfiles, 1, 'el replay NO creó un 2do perfil');
+  });
+
+  // -- Caso 3 (EL TEST DEL BUG): half-state healing — animals huérfano del camino viejo → la RPC lo SANA. --
+  await t.test('caso 3: half-state healing — animals huérfano preexistente → la RPC crea el perfil (NO 403/42501)', async () => {
+    // Simula el half-state EXACTO del bug (backlog 2026-06-10): el camino viejo de 2 upserts insertó
+    // `animals` y se interrumpió ANTES del perfil → huérfano invisible por RLS. Con el camino viejo, el
+    // reintento moría 42501 (ON CONFLICT DO UPDATE vs la policy UPDATE de animals que exige un perfil
+    // visible) y el alta se PERDÍA. La RPC debe sanarlo: DO NOTHING en animals → sigue → crea el perfil.
+    const orphanId = uuid();
+    const { error: seedErr } = await admin.from('animals')
+      .insert({ id: orphanId, sex: 'female', species_id: speciesId });
+    assert.equal(seedErr, null, seedErr && seedErr.message);
+
+    // El MISMO intent re-drenado (mismos valores que produjeron el huérfano: sin tag, sin birth_date).
+    const args = buildArgs({ p_animal_id: orphanId, p_idv: `${RUN_TAG}_idv3` });
+    const { data: ret, error } = await clientA.rpc('create_animal', args);
+    assert.equal(error, null, `el reintento sobre el huérfano NO debe morir 42501/403 (el bug): ${error && error.message}`);
+    assert.equal(ret, args.p_profile_id);
+
+    // El huérfano quedó SANADO: ahora tiene su perfil (el alta aterrizó completa).
+    const { data: prof } = await admin.from('animal_profiles')
+      .select('id, animal_id, establishment_id, idv, created_by').eq('id', args.p_profile_id).single();
+    assert.ok(prof, 'el perfil del huérfano se creó');
+    assert.equal(prof.animal_id, orphanId);
+    assert.equal(prof.establishment_id, estA);
+    assert.equal(prof.idv, `${RUN_TAG}_idv3`);
+    assert.equal(prof.created_by, userA.id);
+    // Y sigue habiendo UNA sola fila de animals (no se duplicó el huérfano).
+    const { count: nAnimals } = await admin.from('animals')
+      .select('id', { count: 'exact', head: true }).eq('id', orphanId);
+    assert.equal(nAnimals, 1);
+  });
+
+  // -- Caso 4: AUTHZ — caller sin rol en p_establishment_id → 42501, nada creado. --
+  await t.test('caso 4: cross-tenant (userB sin rol en estA) → 42501, nada creado', async () => {
+    const args = buildArgs({ p_idv: `${RUN_TAG}_idv4` }); // p_establishment_id = estA (ajeno para B)
+    const { error } = await clientB.rpc('create_animal', args);
+    assert.notEqual(error, null, 'un caller sin rol en el establishment NO debe poder crear (has_role_in)');
+    assert.match(String(error.message + ' ' + (error.code || '')), /42501|not authorized|denied/i);
+    // NADA se escribió (el guard corre ANTES de cualquier INSERT).
+    const { data: an } = await admin.from('animals').select('id').eq('id', args.p_animal_id);
+    assert.deepEqual(an, [], 'animals NO se creó');
+    const { data: prof } = await admin.from('animal_profiles').select('id').eq('id', args.p_profile_id);
+    assert.deepEqual(prof, [], 'el perfil NO se creó');
+  });
+
+  // -- Caso 5: idv duplicado → 23505 SALE (rechazo de dominio) y la RPC aborta ATÓMICA (sin huérfano). --
+  await t.test('caso 5: idv duplicado en el establishment → 23505; ATÓMICO: tampoco queda el animals (sin huérfano nuevo)', async () => {
+    const dupIdv = `${RUN_TAG}_idv_dup`;
+    const first = buildArgs({ p_idv: dupIdv });
+    const r1 = await clientA.rpc('create_animal', first);
+    assert.equal(r1.error, null, r1.error && r1.error.message);
+
+    // OTRO animal (ids nuevos) con el MISMO idv → el UNIQUE parcial (establishment_id, idv) revienta.
+    const second = buildArgs({ p_idv: dupIdv });
+    const { error } = await clientA.rpc('create_animal', second);
+    assert.notEqual(error, null, 'idv duplicado debe rechazarse (23505 de dominio, NO se traga)');
+    assert.match(String(error.message + ' ' + (error.code || '')), /23505|duplicate|idv/i);
+
+    // MEJORA CLAVE vs el camino viejo: la RPC aborta ENTERA → NO queda un animals huérfano del 2do alta.
+    const { data: an } = await admin.from('animals').select('id').eq('id', second.p_animal_id);
+    assert.deepEqual(an, [], 'el 23505 del perfil abortó TODA la RPC: animals NO quedó huérfano');
+    const { data: prof } = await admin.from('animal_profiles').select('id').eq('id', second.p_profile_id);
+    assert.deepEqual(prof, [], 'el perfil duplicado NO se creó');
+  });
+
+  // -- Caso 6: tag duplicado de OTRO animal → 23505 SALE (el ON CONFLICT targetea SOLO la PK). --
+  await t.test('caso 6: tag_electronic tomado por OTRO animal → 23505, nada creado', async () => {
+    const dupTag = `${RUN_TAG}_ca_tagdup`;
+    const first = buildArgs({ p_tag_electronic: dupTag, p_idv: `${RUN_TAG}_idv6a` });
+    const r1 = await clientA.rpc('create_animal', first);
+    assert.equal(r1.error, null, r1.error && r1.error.message);
+
+    // OTRO animal (id nuevo) con el MISMO tag → animals_tag_unique revienta (NO lo absorbe el ON
+    // CONFLICT (id): el target es SOLO la PK — un duplicado real NUNCA se traga como replay).
+    const second = buildArgs({ p_tag_electronic: dupTag, p_idv: `${RUN_TAG}_idv6b` });
+    const { error } = await clientA.rpc('create_animal', second);
+    assert.notEqual(error, null, 'tag duplicado de OTRO animal debe rechazarse (23505)');
+    assert.match(String(error.message + ' ' + (error.code || '')), /23505|duplicate|tag/i);
+    const { data: an } = await admin.from('animals').select('id').eq('id', second.p_animal_id);
+    assert.deepEqual(an, [], 'animals NO se creó (la RPC abortó atómica)');
+  });
+
+  // -- Caso 7 (anti-IDOR, espeja el c-bis de 0081): p_animal_id que colisiona con un animal AJENO. --
+  await t.test('caso 7: p_animal_id de un animal AJENO (identidad distinta) → 42501; sin perfil colgado al animal ajeno', async () => {
+    // Animal REAL de A (víctima), con tag — creado en el caso 1/6; usamos uno nuevo para aislar.
+    const victim = buildArgs({ p_tag_electronic: `${RUN_TAG}_ca_victim`, p_idv: `${RUN_TAG}_idv7` });
+    const rv = await clientA.rpc('create_animal', victim);
+    assert.equal(rv.error, null, rv.error && rv.error.message);
+
+    // ATAQUE: userB (rol en estB → has_role_in(estB) PASA) reusa el p_animal_id de la víctima con SU
+    // establishment y SU payload (identidad distinta: sin tag). El INSERT de animals es DO NOTHING
+    // (la PK existe) → el guard de matcheo debe rechazar 42501 ANTES de colgarle un perfil de estB
+    // al animal de A (la RPC es SECURITY DEFINER → sin el guard, bypassaría la RLS).
+    const catB = catVaq; // catálogo global; el rodeo es lo tenant-scoped
+    const rodeoB = await createRodeo(clientB, { establishmentId: estB, name: `${RUN_TAG}_ca_rodeoB` });
+    const atk = {
+      p_animal_id: victim.p_animal_id,          // ← id del animal AJENO
+      p_profile_id: uuid(),
+      p_establishment_id: estB,                  // ← campo PROPIO del atacante (authz pasa)
+      p_rodeo_id: rodeoB.id,
+      p_category_id: catB,
+      p_sex: 'female',
+      p_species_id: speciesId,
+      p_idv: `${RUN_TAG}_idv7atk`,
+      // sin p_tag_electronic → identidad NO matchea la del animal de A (que tiene tag)
+    };
+    const { error: atkErr } = await clientB.rpc('create_animal', atk);
+    assert.notEqual(atkErr, null, 'colisión de p_animal_id con un animal ajeno → debe rechazar (anti-IDOR)');
+    assert.match(String(atkErr.message + ' ' + (atkErr.code || '')), /42501|not.*match|denied|not authorized/i);
+
+    // INVARIANTE: el animal de la víctima NO tiene ningún perfil en estB; su perfil de estA intacto.
+    const { data: profs } = await admin.from('animal_profiles')
+      .select('id, establishment_id').eq('animal_id', victim.p_animal_id);
+    assert.equal(profs.length, 1, 'el animal ajeno sigue con UN solo perfil');
+    assert.equal(profs[0].establishment_id, estA, 'el perfil sigue siendo de estA (el atacante no colgó nada)');
+    const { data: atkProf } = await admin.from('animal_profiles').select('id').eq('id', atk.p_profile_id);
+    assert.deepEqual(atkProf, [], 'el perfil del atacante NO se creó');
+  });
+});
+
 test('cleanup', async () => {
   await cleanup();
 });

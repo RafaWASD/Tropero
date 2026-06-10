@@ -10,8 +10,9 @@
 //   CrudEntry, distinguidas por op.table (§5.4):
 //   (1) CRUD plano (tablas de datos sincronizadas): upsert/update por op.table/op.id contra Supabase.
 //   (2) op_intents (outbox, insertOnly): mapeo a supabase.rpc(...) (§5.4.2) — las (b) RPC-bound (alta,
-//       parto, baja, soft-deletes). create_animal NO tiene RPC → 2 upserts idempotentes (ON CONFLICT por
-//       PK). p_client_op_id SOLO a register_birth (delta 0075). Idempotencia at-least-once (§5.4.3) +
+//       parto, baja, soft-deletes). TODAS van por RPC: create_animal incluida (RPC atómica 0083 — los 2
+//       upserts no atómicos del camino viejo perdían el alta bajo reintento, backlog 2026-06-10).
+//       p_client_op_id SOLO a register_birth (delta 0075). Idempotencia at-least-once (§5.4.3) +
 //       ACK/rollback del overlay local-only (§5.4.4): éxito → clearOverlay; transitorio → re-throw (queda
 //       en cola); permanente → rollbackOverlay + descarte + superficia; P0002 de soft_delete_* / 23505 del
 //       índice de idempotencia de register_birth → descarte idempotente SIN rollback (la op ya corrió).
@@ -120,22 +121,14 @@ export class SupabaseConnector implements PowerSyncBackendConnector {
     const clientOpId = op.id;
     const opType = typeof op.opData?.op_type === 'string' ? op.opData.op_type : '';
     try {
+      // Cada intent (b) mapea a UNA RPC atómica server-side (p_client_op_id SOLO en register_birth, ya
+      // inyectado por mapIntentToRpc). create_animal INCLUIDA (RPC 0083): el camino viejo de 2 upserts
+      // HTTP no atómicos quedaba en half-state si el drenado se interrumpía entre ambos, y el reintento
+      // moría 42501 contra la policy UPDATE de animals → rollback del overlay → PÉRDIDA del alta
+      // (backlog 2026-06-10 REABIERTO). La RPC además SANA esos huérfanos (ON CONFLICT (id) DO NOTHING).
       const plan = mapIntentToRpc({ id: op.id, opData: op.opData ?? null });
-      if (plan.kind === 'create_animal') {
-        // create_animal NO tiene RPC en el schema as-built → 2 upserts idempotentes por PK (ON CONFLICT
-        // por el id de cliente, R6.10). animals primero (el perfil tiene FK animal_id → animals.id). Si el
-        // upsert del perfil falla (p.ej. idv duplicado), el animals ya quedó (huérfano invisible por RLS,
-        // como el split-insert online) — el rollback del overlay revierte la VISTA optimista local igual.
-        const { error: aErr } = await supabase.from('animals').upsert(plan.animals);
-        if (aErr) throw aErr;
-        const { error: pErr } = await supabase.from('animal_profiles').upsert(plan.animal_profiles);
-        if (pErr) throw pErr;
-      } else {
-        // register_birth / exit_animal_profile / soft_delete_* → supabase.rpc con sus args (p_client_op_id
-        // SOLO en register_birth, ya inyectado por mapIntentToRpc).
-        const { error } = await supabase.rpc(plan.rpcName, plan.args);
-        if (error) throw error;
-      }
+      const { error } = await supabase.rpc(plan.rpcName, plan.args);
+      if (error) throw error;
       // ── ACK (éxito, R6.11): la op corrió server-side. Limpiar el overlay local-only: las filas reales
       //    bajan por la stream → el UNION deja de mostrar el overlay (sin duplicado). complete() saca el
       //    op_intent de la cola atómicamente.

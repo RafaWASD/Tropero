@@ -402,3 +402,253 @@ Ninguno. APPROVED.
   tests create_rodeo deben pasar y la suite backend quedar verde (T7.5). Unico rojo hoy.
 - E2E in-vivo del alta de rodeo offline diferido a T7.9.
 - MINOR opcional: sumar create_rodeo a la enumeracion en prosa de la whitelist de op_types en design 5.4.2.
+
+============================================================
+
+# Review — 15-powersync · Run bugfix-overlay-list (bug "animal creado OFFLINE desaparece de la lista al navegar de tab")
+
+Reviewer (puerta de código). Alcance: fix del bug del backlog 2026-06-10 (repro en vivo de Raf).
+Working tree SIN commitear sobre 8db117f. Verificado contra: design §5.1 (as-built nuevo), tasks.md T11
+(sub-bullet), docs/backlog.md, impl_15 (Run bugfix-overlay-list). NO se editó código.
+
+## Veredicto: APPROVED
+
+Fix mínimo y dirigido a la causa raíz confirmada con evidencia (no plausibilidad): la ejecución de
+`searchAnimals` vivía SOLO en el efecto `[establishmentId, debouncedQuery]` → con un término en el
+buscador, el re-foco de la tab re-corría la lista pero NO la búsqueda → `searchResults` stale
+("No encontramos «N»") aunque el animal estaba en el overlay. Extracción a `runSearch` (mismo
+seq-guard, mismas deps) + re-corrida en `useFocusEffect` y en el efecto de `lastSyncedMs`, simétrico
+a `loadList`. El diagnóstico descartó rollback espurio del overlay / JOIN / contexto con dumps del
+SQLite local y captura de consola (cero `[powersync] upload rechazado` en 10+ retries transient).
+
+## Trazabilidad (alcance del run — bugfix, sin R nuevos)
+
+| Qué | Test |
+|---|---|
+| Animal offline-only visible en la lista a través de Más→Animales (R6.11 overlay en lectura + ppio 3 offline-first) | `app/e2e/animals-offline.spec.ts` test 1 (repro literal; verde en baseline = red de regresión declarada) |
+| Búsqueda activa re-computada al re-foco (causa raíz) | `animals-offline.spec.ts` test 2 — **ROJO en baseline → VERDE con fix**, verificado por stash (impl log, Verificación) |
+| Upload offline clasifica transient y NO toca overlay (R6.9, regresión) | test 1: dwell 6s ≥1 ciclo de retry + oráculo de visibilidad + consola capturada (un rechazo lo haría fallar e imprime el diagnóstico) |
+
+`requirements.md` SIN cambio: defendible — R6.11/R5 ya exigían ver el overlay en las lecturas; el fix
+es mecanismo de UI (cómo), no cambia ningún "qué". Decisión documentada en el impl log (paso 9).
+
+## Verificaciones puntuales del brief
+
+1. **¿Puede loopear?** No. `runSearch` solo cambia identidad con `establishmentId`/`debouncedQuery`
+   (las MISMAS deps del efecto original); ni `runSearch` ni `loadList` mutan sus propias deps
+   (los setState que disparan — `searchResults`/`searching`/`list`/`loading` — no son deps de nada);
+   `lastSyncedMs` es primitivo y solo avanza con syncs nuevos (offline no cambia). Query vacío
+   short-circuitea sin tocar services → comportamiento online sin término: CERO cambio.
+2. **Scope del diff** (git status): `animales.tsx` (único de app) + `animals-offline.spec.ts` (nuevo)
+   + reconciliación (design/tasks/backlog) + bitácoras. `provider.tsx` NO está en el diff
+   (byte-idéntico, confirmado por git). Grep de `__rafaqDebugDumpOverlay|rafaqDebug|DumpOverlay|debugDump`
+   sobre `app/` → **0 matches**: cero instrumentación residual; el spec nuevo solo captura consola
+   (Playwright puro) y la imprime al fallar.
+3. **Calidad del E2E**: helpers reales reusados (`gotoTab`/`gotoAnimales`/`seedRodeo`/`cleanupAll`/
+   `RUN_TAG` existen en `e2e/helpers/`), selectores idénticos al patrón de la suite (mismos
+   `getByRole('button', { name: 'Volver'/'Dar de alta tu primer animal' })` que `animals.spec.ts`),
+   `afterAll(cleanupAll)` + usuarios namespaced, sin dependencia del hook de debug removido. El único
+   `waitForTimeout(6_000)` está justificado y documentado en el comment: dwell para que corra ≥1 ciclo
+   de retry del upload offline (~5s en el SDK) ANTES del oráculo de visibilidad — es lo que convierte
+   el test 1 en red de regresión de la clasificación transient, no un band-aid de flakiness. ACEPTADO.
+4. **Specs vs código**: design §5.1 as-built describe EXACTAMENTE el fix (`runSearch` + los 2 puntos de
+   re-corrida + el descarte de hipótesis con evidencia); tasks.md T11 sub-bullet fiel; backlog
+   ✅ RESUELTO con la causa real + hallazgo lateral ProfileContext registrado como entrada nueva
+   (scope discipline correcto: anotado, no improvisado). Sin drift.
+5. **UI de campo (sin flicker)**: `setSearching(true)` corre sincrónico al inicio de `runSearch` y
+   `showNoMatch` exige `!searching` (animales.tsx:210) → durante el re-search no se muestra un
+   no-match falso; el SQLite local resuelve en ms. Sin cambios de layout/targets/copy.
+
+## CHECKPOINTS (alcance del run)
+
+- C1 harness: [x] `node scripts/check.mjs` → exit 0 (re-corrido por este reviewer: typecheck + lint
+  anti-hardcode 0 violaciones + client units + RLS/Edge/Animal/Maneuvers/User_private/Import verdes).
+- C2 estado coherente: [x] 15-powersync sigue única `in_progress`; NO done; current.md describe el run.
+- C3 arquitectura: [x] cambio contenido en la pantalla; sin deps nuevas; sin logs de debug (los
+  `console.log` del spec E2E solo imprimen al fallar — patrón de la suite); sin hardcode de
+  `establishment_id` (`runSearch` usa el del contexto).
+- C4 verificación real: [x] oráculo E2E contra PowerSync/SQLite real con `context.setOffline(true)`
+  (primeros tests offline reales de la suite); test 2 ROJO→VERDE por stash = falla por la razón
+  correcta. Leader corrió `pnpm exec playwright test e2e/animals-offline.spec.ts` → 2/2 verdes (27.5s).
+  Sin unit nuevo: `animales.tsx` no es cargable bajo node:test (patrón del repo, justificado en impl log).
+- C8 offline-first: [x] el bug ERA de offline-first y el fix lo cierra con cobertura automatizada nueva;
+  buckets/streams/conflict-resolution intactos (cero cambios de sync).
+
+## Checklist RAFAQ-específico
+
+- A (RLS/multi-tenancy): **N/A** — cero cambios de schema/RLS/policies. Scoping por contexto intacto.
+- B (offline-first): **APLICA** — [x] funciona offline (2 E2E con `setOffline(true)`); [x] buckets sin
+  cambio; [x] conflictos sin cambio (overlay/outbox intactos, verificados sanos por los dumps);
+  [x] la pantalla no hace requests síncronos a Supabase (services → SQLite local).
+- C (BLE): **N/A**.
+- D (UI de campo): **APLICA** — [x] sin cambio de targets/fuentes/layout; [x] loading visible
+  (`searching` + "Cargando…" intactos); [x] sin flicker del no-match (punto 5 arriba).
+- E (Edge Functions): **N/A**.
+
+## Observaciones MINOR (no bloquean)
+
+- **M1 — runSearch redundante por tipeo con la tab enfocada**: al cambiar `debouncedQuery` cambia la
+  identidad de `runSearch` → además de su efecto propio, se re-disparan el `useFocusEffect` (que
+  también corre `loadList`) y el efecto de `lastSyncedMs` (si ≠0) → hasta 3 `runSearch` + 2 `loadList`
+  extra por tick de debounce. Correctitud garantizada por `searchSeq`/`listSeq` (último gana); costo =
+  queries redundantes al SQLite local (ms). El patrón PRE-EXISTÍA para `loadList` (cambios de filtro) —
+  el fix es simétrico, no lo introduce. Se borra gratis con la migración a `useQuery`/`watch`
+  (backlog 2026-06-09).
+- **M2 — `toHaveCount(0)` instantáneo** (animals-offline.spec.ts:171/178): solo, sería un assert débil
+  (pasa en el instante 0 antes del render); está apareado con el oráculo fuerte (`'34'` visible) y el
+  ROJO de baseline se verificó por stash, así que el test falla por la razón correcta. OK como está.
+
+## Cambios requeridos
+
+Ninguno.
+
+---
+
+# Review — 15-powersync · Run create-animal-rpc (RPC atómica 0083 — cierra la pérdida real del alta)
+
+> Reviewer (puerta de código). Alcance del run: migración 0083 (YA APLICADA al remoto por el leader,
+> Management API HTTP 201, post-apply verificado) + cliente (upload.ts/connector.ts) + 7 tests backend +
+> oráculo E2E de persistencia server-side + reconciliación de specs. Trabajo SIN commitear, apilado sobre
+> el Run bugfix-overlay-list (ya APPROVED — no se re-revisó salvo la colisión en animals-offline.spec.ts).
+> Gate 1 ya emitido: PASS 0 HIGH, 1 MED no bloqueante (entry_weight sin CHECK de rango, precedente MED-01)
+> — sección "Run create-animal-rpc — Gate 1" en progress/security_spec_15-powersync.md. Este review cubre
+> CORRECTITUD funcional (la seguridad ya está gateada).
+
+## Veredicto: APPROVED
+
+Verificación EJECUTADA por el reviewer (no solo leída):
+- `node scripts/check.mjs` → exit 0, "All tests passed" — incluye los 7 casos de la suite
+  `create_animal RPC` (supabase/tests/animal/run.cjs:2803) ahora VERDES post-apply de 0083.
+- E2E vivo contra el remoto con 0083: `pnpm e2e:build` (export fresco) + `playwright test
+  e2e/animals-offline.spec.ts` → 2/2 verdes (test 1 con el bloque nuevo de drenado: alta offline →
+  reconectar → fila REAL en animal_profiles vía admin en ~18s + el animal sigue en la lista + cero
+  "upload rechazado"). `animals.spec.ts -g "alta guiada desde empty"` (oráculo online) → verde.
+- Bonus probatorio: la primera corrida del reviewer fue accidentalmente contra el `dist/` VIEJO
+  (build 01:50, cliente de 2 upserts) y el oráculo nuevo la cazó EN VIVO con la cadena exacta del bug
+  (403 → {table: op_intents, op: PUT, code: 42501} → "[powersync] upload rechazado (descartado)" →
+  el alta jamás llegó al server). Misma corrida con el export fresco (cliente RPC): verde. Demostración
+  A/B de que (a) el oráculo detecta el bug real y (b) la RPC lo cierra.
+
+## Correctitud funcional revisada (foco pedido por el leader)
+
+1. Migración 0083 (`supabase/migrations/0083_create_animal_rpc.sql`):
+- Estilo/estructura calcada de 0081 (header con racional, begin/commit, authz PRIMERO, ON CONFLICT (id)
+  DO NOTHING, guards post-insert, comment on function, revoke public/anon + grant authenticated con la
+  firma tipada completa de 20 args, notify pgrst). Comentarios consistentes con el código (verificado).
+- Edges del flujo a/a-bis/b/b-bis/c/c-bis correctos:
+  - Replay tras edición de identidad: el corte (a-bis) matchea por perfil (id+animal+est) ANTES del
+    guard de identidad (b-bis) → no rechaza 42501 espurio un replay legítimo. Correcto.
+  - Half-state healing: (b) DO NOTHING sobre el huérfano + (b-bis) matchea (payload idéntico,
+    IS NOT DISTINCT FROM NULL-safe para tag/birth_date) + (c) crea el perfil. El caso 3 lo prueba con el
+    estado EXACTO del bug (huérfano pre-insertado vía service role) y asserta NO-42501. Correcto.
+  - Soft-deleted: (a-bis) sin filtro deleted_at A PROPÓSITO (un perfil soft-deleteado post-apply NO se
+    resucita en el replay — documentado); un `animals` soft-deleteado no matchea (b-bis) → 42501
+    (rechazo deliberado de una entidad removida). Correcto.
+  - Mismatch/anti-IDOR: (b-bis) y (c-bis) → 42501 genérico sin oráculo de qué difiere; el caso 7 ataca
+    con un caller que SÍ pasa la authz (rol en SU campo) — testeado por la razón correcta.
+  - 23505 de dominio NO se traga: target del ON CONFLICT = SOLO la PK; tag/idv duplicados salen
+    (casos 5 y 6) y el caso 5 además asserta ATOMICIDAD (sin huérfano nuevo). Correcto.
+- Enums animal_status/teeth_state_enum verificados contra la DB real por el veto manual del leader (citado).
+
+2. Cliente:
+- `upload.ts::mapIntentToRpc`: mapeo verificado CAMPO POR CAMPO contra la firma de 20 args de la RPC y
+  contra lo que `animals.ts::createAnimal` pone en params_json (animals: id/sex/species_id/tag_electronic?/
+  birth_date?; profile: id/animal_id/establishment_id/rodeo_id/category_id/category_override/status/idv?/
+  visual_id_alt?/breed?/coat_color?/entry_date?/entry_weight?/management_group_id?/teeth_state?/nursing?).
+  Sin huecos ni args de más; sin p_client_op_id (correcto: la firma no lo tiene). Keys opcionales ausentes
+  (intents VIEJOS ya encolados en devices) → null explícito → defaults server-side: drenan por el camino
+  nuevo sin migración local (test unit "MINIMAL" lo cubre). Sin ids de cliente → PermanentIntentError
+  (anti-loop). IntentPlan quedó single-variant — sin dead code.
+- `connector.ts`: rama de 2 upserts ELIMINADA limpia — grep confirma cero referencias vigentes a
+  from('animals').upsert / plan.kind === 'create_animal'; solo comentarios históricos correctos.
+- `classifyIntentUploadError` sin cambio de lógica; para create_animal-as-RPC: 42501/23505 → permanent,
+  red/5xx → transient, replay = 2xx sin error (testeado en upload.test.ts).
+- `outbox.ts`/`animals.ts`: solo docs (el shape del intent NO cambió — decisión compat > estética, correcta).
+
+3. Tests backend (suite `create_animal RPC`, 7 casos): bien construidos, no pasan por la razón equivocada —
+caso 3 reproduce el bug real (huérfano vía service role → perfil creado + NO 42501); caso 4 asserta NADA
+creado (authz antes de escribir); caso 7 con authz que PASA (anti-IDOR puro); casos 5/6 assertan reject +
+atomicidad, no solo el happy path. Verdes post-apply (corrida propia de check.mjs).
+
+4. E2E: `waitForServerAnimalProfile` (admin polling, error accionable) + oráculo en animals.spec.ts test 1
++ extensión del offline test 1. Coherente con la suite (RUN_TAG, cleanup, fixtures). El oráculo del run
+ANTERIOR en el offline test 1 quedó intacto (solo se apendeó el bloque de drenado al final). Corridos y
+verdes por el reviewer.
+
+5. Reconciliación de specs (código → spec): design §5.3.1 (fila createAnimal as-built RPC + alternativa
+"orden atómico" probada insuficiente), §5.4.2 (nota Run T6 marcada SUPERSEDIDA con la cadena del 42501 +
+nota as-built VIGENTE con whitelist completa incl. create_rodeo/set_rodeo_config — matchea RPC_OP_TYPES
+del código), §5.4.3(3) ("SIN delta" acotado a schema), requirements R6.10 (nota de reconciliación sin
+reescribir el EARS), tasks T6.2c/T6.2d/T7.7 anotadas. Grep global: NO queda ningún rastro VIGENTE de
+"create_animal NO tiene RPC / 2 upserts" como verdad actual.
+
+6. No rompe el run anterior: animales.tsx no tocado por este run; animals-offline.spec.ts solo extiende
+el test 1 después del oráculo original; ambos tests del run anterior verdes en mi corrida (2/2).
+
+## Trazabilidad R<n> ↔ test (este run)
+
+| R<n> | Test concreto | Estado |
+|---|---|---|
+| R6.9 (drenado vía RPC; reject permanente superficia) | upload.test.ts :: "create_animal → RPC atómica 0083…" + "create_animal como RPC (0083)…" | verde |
+| R6.10 (no doble-apply del alta) | run.cjs :: create_animal RPC :: caso 2 (replay no-op) | verde post-apply |
+| R6.10/R6.9/R6.11 (EL BUG: half-state no pierde el alta) | run.cjs :: caso 3 (healing) + animals-offline.spec.ts test 1 (bloque drenado) | verdes (corridos por el reviewer) |
+| R6.2 (server re-valida; triggers dentro de la RPC) | run.cjs :: caso 1 (created_by + identidad forzados por 0043/0079) | verde |
+| R8.1/R11.4 (authz/anti-IDOR de la RPC nueva) | run.cjs :: casos 4 y 7 | verdes |
+| R6.9 (rechazo de dominio legítimo SALE + atomicidad) | run.cjs :: casos 5 y 6 | verdes |
+| Persistencia server-side del alta (gap E2E del bug) | animals.spec.ts test 1 + animals-offline.spec.ts test 1 (oráculo admin) | verdes (corridos) |
+| Compat intents viejos | upload.test.ts :: "create_animal MINIMAL (intent VIEJO…)" | verde |
+
+## Tasks completas: sí (alcance del run)
+
+T1–T5 del plan del run todas hechas (bitácora impl_15 § Run create-animal-rpc). Las [ ] restantes de
+tasks.md (T6.3, T7.2, T7.4, T7.8, T7.9…) son de OTROS runs de la feature multi-run — justificado.
+T7.7 sigue [~] con el sub-bullet create_animal ahora cubierto server-side (anotado en tasks.md).
+
+## CHECKPOINTS
+
+- C1 harness completo: [x] check.mjs exit 0 (corrida propia).
+- C2 estado coherente: [x] una sola feature in_progress (15-powersync); no se marcó done; current.md describe la sesión.
+- C3 arquitectura: [x] cambios en services/powersync + migración + tests; sin deps nuevas; sin TODOs sin contexto (el "TODO intent…" cazado y reescrito en la autorrevisión); sin establishment_id hardcodeado (lint anti-hardcode verde; la RPC lo recibe como param y lo guarda has_role_in).
+- C4 verificación real: [x] 7 tests backend contra la DB remota real (fixtures reales, sin mocks de I/O crítico) + unit del mapeo + E2E con oráculo server-side; cross-tenant caso 4.
+- C5 cierre: [x] sin artefactos sin trackear (dist/, test-results/, public/@powersync/ gitignoreados); history/current los maneja el leader al cerrar.
+- C6 SDD: [x] specs reconciliadas al as-built (punto 5); cada R del run con ≥1 test (tabla arriba).
+- C7 multi-tenant: [x] sin tabla nueva (RPC aditiva); has_role_in() helper (no SQL inline); cross-tenant caso 4 + anti-IDOR caso 7; deleted_at en los guards (b-bis)/(c-bis).
+- C8 offline-first: [x] el alta sigue 100% offline (outbox/overlay intactos); solo cambió el camino de SUBIDA; buckets/streams sin cambios; idempotencia documentada (replay no-op + healing, design §5.4.3(3)).
+
+## Checklist RAFAQ-específico
+
+- A (RLS/multi-tenancy): APLICA PARCIAL — sin tabla nueva ni cambio de RLS/policies (migración aditiva,
+  verificado por Gate 1); [x] has_role_in() helper usado (no SQL duplicado inline); [x] test de
+  aislamiento cross-tenant (caso 4) + anti-IDOR (caso 7); [x] deleted_at IS NULL en los guards.
+- B (offline-first): APLICA — [x] funciona offline (E2E setOffline 2/2, corridos); [x] sync bucket
+  scoping sin cambio; [x] resolución de conflictos documentada (replay at-least-once = no-op natural por
+  ids de cliente, design §5.4.3(3)); [x] sin requests síncronos a Supabase desde pantallas (el cambio
+  vive en el connector/drenado).
+- C (BLE): N/A.
+- D (UI de campo): N/A — cero cambios de UI en este run.
+- E (Edge Functions): N/A — la RPC es función Postgres (no EF); auth vía has_role_in PRIMERO + Gate 1 PASS.
+
+## Observaciones MINOR (no bloquean)
+
+- M1 — trampa del export viejo: `playwright test` directo sirve un dist/ stale en silencio
+  (reuseExistingServer + sin rebuild) — la primera corrida del reviewer falló por eso (y de paso
+  reprodujo el bug con el cliente viejo). El camino canónico `pnpm e2e` ya rebuilda; toda validación
+  E2E post-cambio-de-cliente debe pasar antes por `pnpm e2e:build`. Pre-existente al run.
+- M2 — presupuesto del oráculo: waitForServerAnimalProfile default 30×2s = 60s == timeout 60_000 del
+  playwright.config → en una regresión real el test moriría por timeout de Playwright (mensaje genérico)
+  antes que por el error accionable del helper. Con el cliente nuevo el drenado aterriza en segundos
+  (test 1 completo: 18.3s) → no flakea en la práctica. Ajustable gratis (tries: 20) si molesta.
+- M3 — match vacío: waitForServerAnimalProfile(est, {}) matchearía cualquier perfil del campo. Ambos
+  call sites pasan un identificador; footgun teórico del helper.
+
+## Cambios requeridos
+
+Ninguno.
+
+## Para el leader (post-aprobación)
+
+- 0083 ya aplicada y verificada; el ORDEN DE DEPLOY que pedía la bitácora quedó satisfecho (RPC viva
+  antes de servir/commitear el cliente nuevo).
+- La entrada REABIERTA del backlog 2026-06-10 queda lista para cerrarla vos (el implementer no la tocó,
+  correcto). La limpieza de los huérfanos reales del campo de Raf sigue pendiente (la RPC los sana solo
+  si el intent re-drena; los de "12"/"211" perdieron su intent → no se auto-sanan).
