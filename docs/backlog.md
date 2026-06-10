@@ -17,6 +17,24 @@ No es un sustituto de `feature_list.json` ni de los ADRs — es la antesala dond
 
 ## Ítems pendientes
 
+## 2026-06-10 — Transiciones de categoría NO visibles offline (recálculo es server-side)
+
+**Origen**: testing en vivo de Raf post-fix del alta offline (sesión bugfix 15-powersync). Lo golpeó DOS
+veces en el mismo día: (1) tactos+/servicios sobre "1212" (ahí además había override=true), (2) servicio
+sobre una ternera año-2025 sin override — la categoría no cambia hasta reconectar.
+**Qué**: `compute_category` corre como trigger server-side en el INSERT del evento (Tier 2, 0062/0063/0046);
+offline el evento queda guardado local + encolado, pero la categoría visible es la vieja hasta que el ciclo
+reconectar→subir evento→recalc→sync-down del perfil completa. Diseño vigente y correcto (LWW, estado
+derivado server-side), pero la expectativa de campo es "la puse en servicio → la veo vaquillona AHORA".
+**Por qué importa**: UX de manga — el operario carga eventos en el corral sin señal y no ve el efecto; puede
+dudar de si "se guardó bien" (misma clase de desconfianza que el bug recién cerrado, aunque acá no se pierde
+nada). Pilar "mejor en el primer try".
+**Próximo paso sugerido**: evaluar un recálculo ESPEJO client-side (port de compute_category a TS puro,
+aplicado solo a la VISTA local/overlay — el server sigue siendo la verdad y pisa al sincronizar; LWW lo hace
+seguro) o, mínimo, un hint de UI ("categoría se actualiza al sincronizar") en la ficha cuando hay eventos
+pendientes. Decidir alcance con Raf antes de especificar; relacionado con la migración a useQuery/watch
+(entrada 2026-06-09).
+
 ## 2026-06-10 — 🐛 BUG: animal creado OFFLINE desaparece de la lista al navegar de tab ✅ RESUELTO (2 causas raíz)
 
 **✅ CERRADO (2026-06-10, Run create-animal-rpc)**: la 2da causa (pérdida real en el upload, detalle abajo)
