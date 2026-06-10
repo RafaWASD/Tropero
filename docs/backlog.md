@@ -17,6 +17,20 @@ No es un sustituto de `feature_list.json` ni de los ADRs — es la antesala dond
 
 ## Ítems pendientes
 
+## 2026-06-10 — 🐛 BUG ABIERTO: animal creado OFFLINE desaparece de la lista al navegar de tab
+
+**Origen**: validación en vivo de Raf (web, dev server `pnpm web`, código de hoy con commits 72b3239/05a7321/8ffbc80). Repro determinístico.
+**Repro**: campo "nombre de campo de prueba" (`037ac0a5-aaea-4ede-8894-451540c8f3bd`; 2 rodeos: "Cria hembras" `845df40d`, "adsads" `36f40b6b`; 0 animales server-side). Network→Offline → crear animal con IDV "12" → ir a la tab "Más" → volver a "Animales" → **el animal "12" YA NO ESTÁ en la lista**.
+**Naturaleza**: el animal es OFFLINE-ONLY → vive solo en el overlay local (`pending_animals`/`pending_animal_profiles` del SQLite de PowerSync en el browser); NO llega al servidor → NO se ve con `execute_sql`. Es un bug de **LECTURA/CONTEXTO LOCAL**, NO de pérdida de dato server-side. Campo2 (animales sincronizados) muestra OK → el fix de first-sync (05a7321) anda; ESTO es distinto.
+**Hipótesis (a investigar, en orden)**:
+1. **Filtro de RODEO activo de la tab Animales** (`app/app/(tabs)/animales.tsx` → `fetchAnimals(est, { rodeoId })`): el animal se crea en el rodeo activo al alta; al VOLVER, si el rodeo activo/filtro re-resuelve a OTRO de los 2 rodeos del campo (`RodeoContext`), la lista (scopeada a ese rodeo) no contiene el overlay → "desaparece". Ver `RodeoContext` + el default del filtro de la tab + estabilidad del rodeo activo entre navegaciones (el `useFocusEffect` re-corre `loadList`).
+2. **INNER JOIN del overlay** en `buildAnimalsListQuery` (`local-reads.ts`, `LOCAL_LIST_SELECT_OVERLAY`): la rama overlay hace `JOIN rodeos` (tabla SINCRONIZADA) + `JOIN categories_by_system`. Si el rodeo del alta NO está en la tabla synced `rodeos` del local (p.ej. rodeo creado offline → vive en `pending_rodeos`, no en `rodeos`; o lag de sync de ese rodeo), el INNER JOIN descarta el animal → invisible. Verificar si el rodeo usado para el alta está synced en el local.
+3. **establishment_id/rodeo_id del overlay** ≠ el contexto activo al volver (contexto de campo/rodeo stale entre crear y volver).
+4. El `writeTransaction` de `enqueueCreateAnimal` (`outbox.ts`) no persiste, o un `clearOverlay`/`rollbackOverlay` espurio se dispara offline.
+**Verificación preferida (NO testear a mano)**: test E2E (la suite ya es PowerSync-aware) con 1 campo + 2 rodeos: crear animal vía wizard → navegar a otra tab y volver → assertir que SIGUE en la lista. `context.setOffline(true)` para el caso offline puro.
+**Archivos**: `app/app/(tabs)/animales.tsx`, `app/src/contexts/RodeoContext.tsx`, `app/src/contexts/EstablishmentContext.tsx`, `app/src/services/powersync/local-reads.ts` (`buildAnimalsListQuery` rama overlay), `app/src/services/powersync/outbox.ts` (`enqueueCreateAnimal`), `app/src/services/animals.ts` (`createAnimal`), `app/app/crear-animal.tsx`.
+**Próximo paso**: una sesión nueva (otro modelo) lo diagnostica + arregla. Relacionado con el gap de reactividad del overlay descrito abajo (un write puro del overlay no re-renderiza sin re-foco — pero acá SÍ hay re-foco por la navegación, así que apuntá primero al filtro de rodeo / JOIN del overlay).
+
 ## 2026-06-09 — Reactividad de lecturas PowerSync: migrar a `useQuery`/`watch` (follow-up del fix showstopper)
 
 **Origen**: fix del showstopper de 15-powersync (la app aterrizaba en onboarding / listas vacías porque el gate y las lecturas resolvían el SQLite local one-shot ANTES del first-sync y no re-evaluaban).
