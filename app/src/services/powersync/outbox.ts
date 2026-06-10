@@ -289,12 +289,18 @@ export type EnqueueExitInput = {
   profileId: string;
   /** status de egreso (sold/dead/transferred) — el override lo refleja en la ficha + oculta de la lista. */
   status: string;
+  /** Fecha de egreso (la que el usuario eligió = exactamente la que persiste la RPC). El overlay la
+   *  lleva para que el badge "Vendido el {fecha}" funcione OFFLINE (residual #2). */
+  exitDate: string;
 };
 
 /**
  * Encola una baja `exit_animal_profile`: intent (params de la RPC) + overlay pending_status_overrides
- * (effect 'exited', status). La lista activa OCULTA el animal y la ficha marca el status al instante; la
- * fila sincronizada NO se toca (R6.11). Idempotencia natural (transición de status, sin delta — §5.4.3(2)).
+ * (effect 'exited', status, exit_date). La lista activa OCULTA el animal y la ficha marca el status +
+ * la FECHA al instante (el badge muestra "Vendido el {fecha}" OFFLINE, igual que la fila real al
+ * sincronizar — la exit_date del overlay es la MISMA que la RPC persiste → sin doble badge ni mismatch
+ * al reconciliar, residual #2). La fila sincronizada NO se toca (R6.11). Idempotencia natural
+ * (transición de status, sin delta — §5.4.3(2)).
  */
 export async function enqueueExitAnimal(
   input: EnqueueExitInput,
@@ -306,7 +312,7 @@ export async function enqueueExitAnimal(
   const intent = buildOpIntentInsert(clientOpId, 'exit_animal_profile', JSON.stringify(input.params), createdAt);
   const overlay: TxWrite[] = [
     buildPendingStatusOverrideInsert(
-      newClientOpId(), clientOpId, 'animal_profiles', input.profileId, 'exited', input.status,
+      newClientOpId(), clientOpId, 'animal_profiles', input.profileId, 'exited', input.status, input.exitDate,
     ),
   ];
   return enqueue(intent, overlay, db);

@@ -469,6 +469,8 @@ test('buildAnimalDetailQuery: b1 identidad+birth_date, LEFT JOIN lote, deleted_a
   assert.match(q.sql, /WHERE ap\.id = \? AND ap\.deleted_at IS NULL/);
   // T6: el status refleja el override de baja optimista (COALESCE) + UNION con el alta optimista
   assert.match(q.sql, /COALESCE\(pso\.status, ap\.status\) AS status/);
+  // residual #2: la FECHA de egreso también sale del override (badge "Vendido el {fecha}" offline)
+  assert.match(q.sql, /COALESCE\(pso\.exit_date, ap\.exit_date\) AS exit_date/);
   assert.match(q.sql, /LEFT JOIN pending_status_overrides pso ON pso\.target_table = 'animal_profiles' AND pso\.target_id = ap\.id AND pso\.effect = 'exited'/);
   assert.match(q.sql, /UNION ALL/);
   assert.match(q.sql, /FROM pending_animal_profiles pap/);
@@ -795,12 +797,15 @@ test('buildPendingBirthCalfInsert: puente parto→ternero del overlay', () => {
   assert.deepEqual(q.args, ['bc-1', 'cop-1', 'e-1', 'calf-prof-1']);
 });
 
-test('buildPendingStatusOverrideInsert: override exited/soft_deleted con target + status', () => {
-  const exit = buildPendingStatusOverrideInsert('o-1', 'cop-1', 'animal_profiles', 'prof-9', 'exited', 'sold');
-  assert.match(exit.sql, /INSERT INTO pending_status_overrides \(id, client_op_id, target_table, target_id, effect, status\)/);
-  assert.deepEqual(exit.args, ['o-1', 'cop-1', 'animal_profiles', 'prof-9', 'exited', 'sold']);
+test('buildPendingStatusOverrideInsert: override exited/soft_deleted con target + status + exit_date (residual #2)', () => {
+  // exit con fecha → el badge "Vendido el {fecha}" funciona offline.
+  const exit = buildPendingStatusOverrideInsert('o-1', 'cop-1', 'animal_profiles', 'prof-9', 'exited', 'sold', '2026-06-09');
+  assert.match(exit.sql, /INSERT INTO pending_status_overrides \(id, client_op_id, target_table, target_id, effect, status, exit_date\)/);
+  assert.match(exit.sql, /VALUES \(\?, \?, \?, \?, \?, \?, \?\)/);
+  assert.deepEqual(exit.args, ['o-1', 'cop-1', 'animal_profiles', 'prof-9', 'exited', 'sold', '2026-06-09']);
+  // soft_delete: sin exit_date → default null (no aplica).
   const del = buildPendingStatusOverrideInsert('o-2', 'cop-2', 'management_groups', 'g-1', 'soft_deleted', null);
-  assert.deepEqual(del.args, ['o-2', 'cop-2', 'management_groups', 'g-1', 'soft_deleted', null]);
+  assert.deepEqual(del.args, ['o-2', 'cop-2', 'management_groups', 'g-1', 'soft_deleted', null, null]);
 });
 
 test('buildPendingRodeoInsert: pending_rodeos con id de cliente + active=1 literal (Run T9.8)', () => {

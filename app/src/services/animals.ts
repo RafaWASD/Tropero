@@ -685,6 +685,7 @@ export async function exitAnimalProfile(input: ExitAnimalInput): Promise<Service
   const enq = await enqueueExitAnimal({
     profileId: input.profileId,
     status: input.status,
+    exitDate: input.exitDate,
     params: {
       p_profile_id: input.profileId,
       p_status: input.status,

@@ -104,27 +104,29 @@ export type CreateEstablishmentResult =
   | { ok: true; establishment: MembershipEstablishment }
   | { ok: false; error: { kind: 'network' | 'unknown'; message: string } };
 
+/** UUID v4 de cliente. crypto.randomUUID está en RN (Hermes), web y Node — sin dep extra. */
+function randomUuid(): string {
+  return globalThis.crypto.randomUUID();
+}
+
 /**
  * Crea un establecimiento (R3.1). NO se hardcodea establishment_id ni owner: el trigger
  * 0011 (AFTER INSERT) deriva el owner de auth.uid() (R3.2).
  *
- * ⚠️ SPLIT insert + select — NO usar `.insert().select()` (RLS-on-RETURNING):
- *   El `.select()` post-insert hace que PostgREST evalúe la policy `establishments_select`
- *   (`has_role_in(id)`, 0007) sobre la fila del RETURNING. En la práctica eso devuelve
- *   **403 Forbidden** porque, en ese punto de la transacción, el rol owner que crea el
- *   trigger 0011 todavía NO es visible para la policy de select. (El comentario de
- *   `0011_establishment_auto_owner.sql` afirma que `insert().select()` es seguro acá; eso
- *   es FALSO — Raf lo confirmó probando en web: `POST …?select=… → 403`.) La migration NO
- *   se toca (ya aplicada al remoto). El patrón correcto es insert SIN `.select()` y luego un
- *   SELECT separado (mismo patrón que `createEstablishmentAs` en supabase/tests/rls/run.cjs).
- *
- * Cómo recuperamos el id del campo recién creado, robusto ante NOMBRES DUPLICADOS:
- *   No filtramos por `name` (dos campos del mismo usuario podrían llamarse igual). En su
- *   lugar diffeamos el SET de memberships del usuario: lo leemos ANTES del insert y DESPUÉS;
- *   el id que aparece en el after-set y NO estaba en el before-set es el campo nuevo. Esto
- *   identifica la fila exacta sin ambigüedad por nombre, y reusa `loadMemberships` (ya
- *   filtra por user_id + dedup + soft-delete, testeado). El campo nuevo trae role 'owner'
- *   (creado por el trigger), así que `loadMemberships` ya lo ve en el after-set.
+ * ⚠️ ID DE CLIENTE — por qué generamos el `id` acá (spec 15, residual #1):
+ *   El insert NO usa `.select()` (RLS-on-RETURNING → 403: la policy `establishments_select`
+ *   `has_role_in(id)` no ve el rol owner que el trigger 0011 crea en la misma transacción).
+ *   La versión anterior recuperaba el id DIFFEANDO el set de memberships ANTES/DESPUÉS del
+ *   insert — pero `loadMemberships` lee el SQLite LOCAL de PowerSync, y el campo recién creado
+ *   ONLINE todavía NO bajó por el sync → el after-set NO lo incluía → "No se pudo confirmar el
+ *   campo recién creado" (el bug del residual #1: el create FALLABA aunque el insert hubiera
+ *   andado). La solución robusta: GENERAMOS el `id` (uuid v4) en el cliente y lo mandamos en el
+ *   insert (la policy `establishments_insert` es `with check (auth.uid() is not null)`, NO
+ *   restringe el `id`; el trigger 0011 deriva el owner igual). Así CONOCEMOS la fila exacta sin
+ *   ningún read-back: armamos el `MembershipEstablishment` con el id + los datos del input + role
+ *   'owner'. El contexto lo aterriza optimista (applyCreatedEstablishment) y reconcilia cuando el
+ *   sync baja la fila real (mismo id → idempotente, sin duplicado). Mismo patrón de id-de-cliente
+ *   que `createAnimal`/`createRodeo` (offline-first), consistente con la arquitectura.
  *
  * R9.2: crear campo REQUIERE conexión (operación administrativa online). Si la red falla,
  * devolvemos kind:'network' para que la pantalla muestre copy accionable.
@@ -134,48 +136,31 @@ export async function createEstablishment(
   input: CreateEstablishmentInput,
 ): Promise<CreateEstablishmentResult> {
   // Crear campo es ONLINE-only (R9.2): sin red, el insert no resuelve → fast-fail accionable
-  // en vez de colgar. Antes del primer supabase call (incl. el diff de memberships, que igual es local).
+  // en vez de colgar. Antes del primer supabase call.
   const off = assertOnline(OFFLINE_FIELD_MSG);
   if (off) return off;
 
+  const id = randomUuid();
+  const name = input.name.trim();
+  const province = input.province.trim();
+  const city = input.city?.trim() || null;
   const row = {
-    name: input.name.trim(),
-    province: input.province.trim(),
-    city: input.city?.trim() || null,
+    id,
+    name,
+    province,
+    city,
     total_hectares: input.totalHectares ?? null,
   };
 
-  // SET de campos del usuario ANTES del insert (para diffear el nuevo después).
-  const before = await loadMemberships(userId);
-  if (!before.ok) {
-    return { ok: false, error: before.error };
-  }
-  const beforeIds = new Set(before.establishments.map((e) => e.id));
-
-  // Insert SIN .select() — ver nota arriba (RLS-on-RETURNING → 403).
+  // Insert SIN .select() (RLS-on-RETURNING → 403). El id es de cliente → no necesitamos read-back.
   const { error: insertError } = await supabase.from('establishments').insert(row);
   if (insertError) {
     return { ok: false, error: classifyError(insertError) };
   }
 
-  // SELECT separado: re-leemos el set (el trigger 0011 ya creó el rol owner) y tomamos el
-  // id que NO estaba antes. Robusto ante nombres duplicados (no filtra por name).
-  const after = await loadMemberships(userId);
-  if (!after.ok) {
-    return { ok: false, error: after.error };
-  }
-  const created = after.establishments.find((e) => !beforeIds.has(e.id));
-  if (!created) {
-    // El insert no devolvió error pero el campo nuevo no aparece en el after-set. No
-    // inventamos un id: reportamos unknown para que la pantalla muestre el error genérico.
-    return {
-      ok: false,
-      error: { kind: 'unknown', message: 'No se pudo confirmar el campo recién creado.' },
-    };
-  }
-
-  // El creador es owner por el trigger 0011 (R3.2); loadMemberships ya trae role='owner'.
-  return { ok: true, establishment: created };
+  // El creador es owner por el trigger 0011 (R3.2). Devolvemos la fila que CONOCEMOS (id de cliente
+  // + datos del input); el sync bajará la fila real con el mismo id (reconciliación en el contexto).
+  return { ok: true, establishment: { id, name, province, city, role: 'owner' } };
 }
 
 export type UserProfile = { phone: string | null };

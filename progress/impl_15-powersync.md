@@ -1984,3 +1984,133 @@ Modificados: `app/src/contexts/EstablishmentContext.tsx`, `app/src/contexts/Rode
 (assert anti-flash reforzado), `scripts/run-tests.mjs` (engancha el unit), `docs/backlog.md`,
 `specs/active/15-powersync/{requirements,design,tasks}.md` (reconciliación), `progress/current.md` + este archivo.
 NO toqué streams/migraciones/connector/outbox/upload/overlay/schema/local-reads ni el shim E2E. NO commit. NO done.
+
+## Run residuales-offline (cierre de los 3 residuales PRE-EXISTENTES del write-side offline) — 2026-06-09
+
+> Meta: cerrar los 3 residuales PRE-EXISTENTES (docs/backlog.md:26-29) que dejaban la E2E en 16/18 →
+> **18/18**. 100% client-side salvo el overlay local-only (NO toca streams/migraciones/connector base/
+> schema sincronizado/RLS). `baseline_commit` sin cambios (multi-run). NO commit, NO done.
+
+### Residual #1 (FUNCIONAL) — crear campo lee el local antes de que el campo baje por el sync
+
+**Oráculo:** `app/e2e/establishments.spec.ts:29` ("crear campo desde onboarding → bloqueo total de rodeo").
+
+**Root cause REAL (más profundo que el del backlog):** NO era solo que el contexto leyera local antes del
+sync — el propio `createEstablishment` (service) FALLABA. Recuperaba el id del campo nuevo DIFFEANDO el set
+de memberships ANTES/DESPUÉS del insert (`loadMemberships` before/after), pero `loadMemberships` lee el
+SQLite LOCAL de PowerSync y el campo recién creado ONLINE todavía NO bajó por el sync -> el after-set NO lo
+incluía -> `created` undefined -> `{ok:false, kind:'unknown'}` -> la pantalla mostraba "No pudimos crear el
+campo. Probá de nuevo." (confirmado en el screenshot del error-context: el campo NI se confirmaba). El
+`applyCreatedEstablishment` del contexto solo NO alcanzaba: el service erraba antes de devolver el campo.
+
+**Fix (combina la elección (b) optimista del prompt + arreglo del service):**
+- `app/src/services/establishments.ts` — `createEstablishment` GENERA el `id` (uuid v4) en el cliente y lo
+  manda en el insert (la policy `establishments_insert` es `with check (auth.uid() is not null)`, NO
+  restringe `id`; el trigger 0011 deriva el owner igual). Elimina el diff before/after (read-back local que
+  rompía). Devuelve la fila que CONOCE (`{id, name, province, city, role:'owner'}`). Mismo patrón de id-de-
+  cliente que `createAnimal`/`createRodeo` — consistente con offline-first. Sin read-back => no depende del
+  sync.
+- `app/src/contexts/EstablishmentContext.tsx` — método nuevo `applyCreatedEstablishment(field)` (opción (b)):
+  registra el campo en `pendingCreatedRef` (Map id->field) + lo fija `preferredIdRef` + `applyMemberships`
+  -> aterriza `active` AL INSTANTE (R6.3); `applyMemberships` MERGEA los pending-created en `available`
+  hasta que el set SINCRONIZADO los incluya (anti-flicker: un loadMemberships pre-sync NO borra el campo
+  nuevo) y los RECONCILIA (purga del Map) cuando el synced ya los trae (mismo id -> sin duplicado). Dispara
+  `refreshEstablishments(id)` en background. `pendingCreatedRef.clear()` en logout/cambio de user.
+- `app/app/crear-campo.tsx` — `onCreated(field)` (full field, no solo id) -> `applyCreatedEstablishment(field)`
+  en vez de `refreshEstablishments(newId)`. RootGate detecta `active` sobre el campo nuevo (0 rodeos ->
+  `no_rodeos` -> "Creá tu primer rodeo").
+
+**Anti-stuck / anti-flicker / no-regresión:** NO queda stuck si el sync tarda (aterriza `active` al instante;
+no espera round-trip; createEstablishment es online => el insert YA confirmó server-side, el sync trae la
+fila después). NO flickea a onboarding (el merge mantiene el campo en `available` hasta reconciliar). El
+merge es no-op cuando `pendingCreatedRef` está vacío => CERO cambio en el bootstrap normal (seed+signin),
+el switch, el landing por cantidad (>=2 -> Mis campos), y el onboarding legítimo (0 campos).
+
+### Residual #2 (cosmético) — baja offline: badge "Vendido" sin fecha
+
+**Oráculo:** `app/e2e/animals.spec.ts:500` ("C3.3 baja … badge 'Vendido el …'").
+
+**Root cause:** el overlay `pending_status_overrides` (effect 'exited') llevaba `status` pero NO `exit_date`;
+`buildAnimalDetailQuery` surfaceaba `COALESCE(pso.status, ap.status)` pero `exit_date` salía solo de
+`ap.exit_date` (NULL hasta que la RPC corre) -> `archivedBadgeLabel(status, null)` = "Vendido" sin fecha.
+
+**Fix:**
+- `schema.ts` — columna `exit_date` (column.text) en el overlay `pending_status_overrides` (localOnly).
+- `local-reads.ts` — `buildPendingStatusOverrideInsert` toma `exitDate` (default null) y lo inserta;
+  `buildAnimalDetailQuery` surfacea `COALESCE(pso.exit_date, ap.exit_date) AS exit_date`.
+- `outbox.ts` — `enqueueExitAnimal` toma `exitDate` y lo pasa al overlay.
+- `animals.ts` — `exitAnimalProfile` pasa `input.exitDate` (la fecha que el usuario ELIGIÓ = exactamente la
+  que la RPC persiste -> MISMO end-state al sincronizar, sin doble badge ni mismatch).
+- Tests: `schema.test.ts` (GUARD: pending_status_overrides declara exit_date), `local-reads.test.ts`
+  (buildPendingStatusOverrideInsert con exit_date + COALESCE en detail).
+
+### Residual #3 (cosmético) — home stepper "Cargaste tu primer animal" tras alta offline
+
+**Oráculo:** `app/e2e/animals.spec.ts:52` (tail, ~líneas 104-108).
+
+**Investigación:** `buildAnimalsCountQuery` YA UNIONa el overlay `pending_animal_profiles` (con
+`establishment_id`/`status`/`notHiddenByOverride`) [OK]; `loadAnimalCount` re-corre en `useFocusEffect` al
+re-enfocar Inicio [OK] + en el efecto `[lastSyncedMs]` cuando avanza el sync [OK] (mecanismo del fix T11). El
+count incluye el overlay y se refresca al re-enfocar. **NO requirió cambio de código nuevo** (el camino ya
+estaba cubierto por T11: count UNIONa overlay + useFocusEffect recarga + lastSyncedMs re-query). Verificado:
+`:52` pasa DETERMINÍSTICAMENTE corrido solo (5.2s). El count NO loopea (`lastSyncedMs` es un primitivo ms,
+dep estable; `useFocusEffect` es un evento discreto; guard `lastSyncedMs===0`). Mi cambio NO toca el
+stepper/count -> comportamiento IDÉNTICO con/sin mis cambios en ese path.
+
+### Verificación E2E (oráculo)
+
+REBUILD (`pnpm run e2e:build`, exit 0). Corridas (workers:1, retries:0):
+- **`auth.spec` 4/4 VERDE** (incl. `:19` login-sin-campos->onboarding = onboarding legítimo intacto).
+- **`establishments.spec` 4/4 VERDE en x2** (residual #1 `:29` x2 + `:68` >=2 campos->Mis campos x2, sin
+  flakiness — los establishments tests no seedean data pesada -> first-sync rápido y estable).
+- **animals.spec — los 3 oráculos VERDES corridos solos:** `:52` (residual #3) PASS (5.2s); `:500`
+  (residual #2) PASS (18.4s); `:386` (showstopper T11) PASS en varias corridas.
+
+**Flakiness ambiental (NO regresión — verificado contra baseline):** corriendo la `animals.spec` COMPLETA
+(14 tests) o `--repeat-each` contra la DB beta remota CONTAMINADA (~344K animals de test, backlog
+2026-06-08/09), un subconjunto VARIABLE de los alta-tests (`:111`/`:161`/`:196`/`:241`/`:279`/`:386`/`:52`/
+`:500`) flakea por TIMEOUT del first-sync (FIRST_SYNC_TIMEOUT_MS=4500ms exprimido por el sync del WAL
+contaminado bajo carga serial). El set de fallos CAMBIA entre corridas = firma de flake ambiental, no de
+regresión. **Prueba dura:** stasheé TODOS mis cambios, rebuildeé el baseline y corrí `:386` x2 -> 1 pass /
+1 fail (FLAKEA YA EN BASELINE, sin mis cambios). Corridos SOLOS, los 3 oráculos + `:386` pasan
+determinísticamente. La flakiness es el item de backlog "aislamiento de tests / limpieza DB beta", ajeno a
+este fix.
+
+### Autorrevisión adversarial (paso 8)
+
+- **#1 ¿queda stuck si el sync tarda?** NO: `applyCreatedEstablishment` aterriza `active` SINCRÓNICO (sin
+  await del sync); `createEstablishment` ya confirmó el insert server-side (online). El merge no espera red.
+- **#1 ¿flickea a onboarding?** NO: el merge mantiene el campo en `available` hasta que el synced lo trae;
+  `applyMembershipsResult` además preserva el estado válido ante un `network` durante el first-sync (no
+  cae a no_establishments). Reconciliación purga el optimista sin duplicar (mismo id).
+- **#1 ¿onboarding legítimo / switch / landing intactos?** SÍ: el merge es no-op con `pendingCreatedRef`
+  vacío. `auth.spec:19` (onboarding) + `establishments.spec:68` (>=2->Mis campos) VERDES.
+- **#1 ¿el id de cliente rompe algo?** NO: `establishments_insert` no restringe `id`; el trigger 0011
+  deriva owner de auth.uid(); el sync baja la fila real con el MISMO id -> idempotente (sin duplicado).
+- **#2 ¿el exit_date offline coincide con el real al sincronizar (sin doble badge)?** SÍ: el overlay lleva
+  `input.exitDate` = la fecha que el usuario eligió = la que la RPC persiste (`p_exit_date`). Al ACK, el
+  overlay se limpia y la fila real (mismo exit_date) baja por la stream -> MISMO badge, sin doble.
+  COALESCE(pso.exit_date, ap.exit_date) -> sin override, idéntico al as-built (NULL->NULL para un activo).
+- **#3 ¿el count loopea?** NO: dep `lastSyncedMs` es primitivo ms (estable entre syncs); `useFocusEffect`
+  es evento discreto; el guard `lastSyncedMs===0` evita el primer disparo redundante.
+- **Tests que pasan por la razón equivocada:** `:500` ahora ejerce el path REAL (badge con fecha desde el
+  overlay offline) — antes el regex `/Vendido el /` no matcheaba sin fecha. `:52` ejerce el conteo real
+  (overlay->stepper). No hay asserts que pasen sin ejercer el path real.
+
+### Reconciliación de specs (paso 9)
+
+- `design.md §5.3` — overlay `pending_status_overrides` con `exit_date` + fila de `exit_animal_profile`
+  (`exit_date=<fecha elegida>` + COALESCE en la ficha). Residual #1: el contrato de `createEstablishment`
+  (id de cliente, sin read-back) es del código de spec 01 -> nota en el JSDoc del service; ningún EARS de
+  spec 15 lo contradice.
+- `docs/backlog.md` — sacadas las 3 entradas de residuales cerradas (`:52`, `:500`, `establishments:29`).
+- `tasks.md T11` — los 3 residuales anotados como CERRADOS.
+
+### Archivos tocados (este run)
+
+`app/app/crear-campo.tsx`, `app/src/contexts/EstablishmentContext.tsx`,
+`app/src/services/establishments.ts`, `app/src/services/animals.ts`,
+`app/src/services/powersync/{schema.ts,local-reads.ts,outbox.ts}` + tests `{schema.test.ts,local-reads.test.ts}`;
+`specs/active/15-powersync/{design.md,tasks.md}`, `docs/backlog.md`, `progress/current.md` + este archivo.
+NO toqué streams/migraciones/connector/upload/RLS ni el shim E2E (`e2e/helpers/{env,fixtures}.ts`) ni el
+gate del fix anterior (salvo el provider en el residual #1). NO commit. NO marcado done.

@@ -286,6 +286,34 @@ Plan (T<n>) — HECHO, esperando reviewer + Gate 2:
 - [x] Reconciliación de specs (design §5.1 / requirements R5.4 / tasks T11) + autorrevisión adversarial.
   Detalle en `progress/impl_15-powersync.md` (Run T11). NO commit, NO done.
 
+### Run residuales-offline (cerrar los 3 residuales PRE-EXISTENTES del write-side offline) — EN CURSO (implementer)
+
+Feature en curso: `15-powersync`. Cerrar los 3 residuales PRE-EXISTENTES (docs/backlog.md:26-29) que dejan
+la E2E en 16/18. Meta: **18/18** (auth + animals + establishments). 100% client-side salvo el overlay
+local-only (no toca streams/migraciones/connector base/schema sincronizado/RLS). `baseline_commit` ya
+existe (`1618a956…`), NO se reescribe (multi-run). NO commit, NO done (espera reviewer).
+
+Plan (T<n>) — HECHO, esperando reviewer + Gate 2:
+- [x] R1 (FUNCIONAL) — crear campo. Root cause REAL: `createEstablishment` (service) FALLABA — recuperaba el
+  id por diff de `loadMemberships` before/after, pero la lectura es LOCAL y el campo recién creado no bajó →
+  "No pudimos crear el campo". Fix: `createEstablishment` GENERA el `id` (uuid v4) cliente + insert sin
+  read-back (la policy insert no restringe `id`) + aterrizaje OPTIMISTA `applyCreatedEstablishment` en el
+  contexto (inyecta + merge-until-confirmed + reconcilia por id). Oráculo `establishments.spec:29` VERDE
+  (x2 estable, junto con `:68` ≥2→Mis campos).
+- [x] R2 (cosmético) — badge "Vendido el {fecha}" offline. Fix: `exit_date` (cliente, la fecha elegida = la
+  que la RPC persiste) en el overlay `pending_status_overrides` (schema + builder + `enqueueExitAnimal` +
+  `exitAnimalProfile`) + `COALESCE(pso.exit_date, ap.exit_date)` en `buildAnimalDetailQuery`. Oráculo
+  `animals.spec:500` VERDE (corrido solo).
+- [x] R3 (cosmético) — stepper. NO requirió código nuevo: el count YA UNIONa el overlay
+  (`buildAnimalsCountQuery`) + `useFocusEffect`/`lastSyncedMs` (fix T11) ya recargan al re-enfocar. Oráculo
+  `animals.spec:52` VERDE (corrido solo). El count no loopea.
+
+**Verificación E2E:** auth 4/4 · establishments 4/4 (x2) · los 3 oráculos de animals VERDES corridos solos.
+La flakiness restante de los alta-tests bajo carga serial (set de fallos VARIABLE entre corridas) es
+AMBIENTAL — verificado: `:386` flakea YA en baseline con mis cambios STASHEADOS (1 pass/1 fail) → DB beta
+contaminada (~344K animals) exprime el FIRST_SYNC_TIMEOUT. Detalle + autorrevisión + reconciliación en
+`progress/impl_15-powersync.md` (Run residuales-offline). NO commit, NO done.
+
 ## Notas técnicas vigentes para el implementer
 
 - En PowerShell usar `pnpm.cmd` (no `pnpm`) — Cylance Script Control bloquea `.ps1`.

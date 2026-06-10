@@ -73,6 +73,19 @@ export type EstablishmentContextValue = {
    * no_establishments. Lo llama la pantalla de aviso tras que el usuario lo lee. Sin logout.
    */
   acknowledgeActiveLost: () => void;
+  /**
+   * Aterriza un campo RECIÉN CREADO de forma OPTIMISTA (spec 15, residual #1). `createEstablishment`
+   * es ONLINE (write a Supabase), pero la lectura del set (`loadMemberships`) viene del SQLite local
+   * vía PowerSync — y el campo recién creado todavía NO bajó por el sync → un `refreshEstablishments`
+   * inmediato leería un set SIN el campo nuevo → no aterrizaría en su home (onboarding fantasma).
+   *
+   * Solución: INYECTAMOS el campo (que `createEstablishment` ya devuelve) en `available` + lo fijamos
+   * activo AL INSTANTE (la app aterriza en su home / bloqueo de rodeo sin esperar el round-trip). Lo
+   * marcamos "pending" y lo MERGEAMOS en los resultados de `loadMemberships` hasta que el set
+   * sincronizado lo incluya (anti-flicker: un `loadMemberships` pre-sync no lo borra). Cuando el sync
+   * lo trae (mismo id), se reconcilia y se limpia la marca pending.
+   */
+  applyCreatedEstablishment: (field: MembershipEstablishment) => void;
 };
 
 const EstablishmentContext = createContext<EstablishmentContextValue | null>(null);
@@ -96,12 +109,32 @@ export function EstablishmentProvider({ children }: { children: ReactNode }) {
   // active_lost al crear campo). Es la fuente de verdad sincrónica del set vigente.
   const availableRef = useRef<MembershipEstablishment[]>([]);
   const trailRef = useRef<string[]>([]);
+  // Campos recién creados OPTIMISTAS (residual #1): id → field. Se MERGEAN en `available` hasta que
+  // el set sincronizado los incluya (el sync los baja con el mismo id). Mientras estén acá, un
+  // `loadMemberships` pre-sync NO los borra (anti-flicker). Se purgan cuando el synced ya los trae
+  // (reconciliación) o si el sync no llegó tras el timeout (createEstablishment es online → llega).
+  const pendingCreatedRef = useRef<Map<string, MembershipEstablishment>>(new Map());
 
   // Aplica un set de memberships recién traído: detecta active_lost (R6.10), resuelve el
   // estado (R6.7/R6.4) y actualiza el rastro de recientes. Centraliza la transición para
   // que refresh y switch compartan la misma lógica.
   const applyMemberships = useCallback(
-    (available: MembershipEstablishment[]) => {
+    (rawAvailable: MembershipEstablishment[]) => {
+      // Residual #1 — reconciliación + merge de los campos recién creados optimistas:
+      //   1. RECONCILIAR: cualquier pending-created cuyo id ya esté en el set sincronizado se purga
+      //      del overlay (el sync lo trajo → ya no hace falta el optimista; evita duplicado y deja
+      //      de mergear). Esto cierra el ciclo de vida del optimista sin dejar marca pegada.
+      //   2. MERGEAR: los pending-created que el synced AÚN no incluye se agregan al set (anti-flicker:
+      //      un loadMemberships pre-sync no borra el campo nuevo de la home).
+      const syncedIds = new Set(rawAvailable.map((e) => e.id));
+      for (const id of [...pendingCreatedRef.current.keys()]) {
+        if (syncedIds.has(id)) pendingCreatedRef.current.delete(id);
+      }
+      const available =
+        pendingCreatedRef.current.size > 0
+          ? [...rawAvailable, ...[...pendingCreatedRef.current.values()].filter((e) => !syncedIds.has(e.id))]
+          : rawAvailable;
+
       // Sincronizamos el set vigente para que switchEstablishment lea de acá (no del closure
       // de `state`, que puede estar stale tras un setState async).
       availableRef.current = available;
@@ -222,6 +255,26 @@ export function EstablishmentProvider({ children }: { children: ReactNode }) {
     setState(resolved);
   }, [state]);
 
+  // Residual #1 — aterrizaje OPTIMISTA del campo recién creado. `createEstablishment` (online) ya
+  // devolvió el campo; lo inyectamos en `available` + lo fijamos activo AL INSTANTE, sin esperar a
+  // que el sync lo baje (un loadMemberships del SQLite local todavía no lo ve → onboarding fantasma).
+  const applyCreatedEstablishment = useCallback(
+    (field: MembershipEstablishment) => {
+      // Lo registramos como pending-created: se mergeará en cada loadMemberships hasta que el set
+      // sincronizado lo incluya (anti-flicker). Se purga en applyMemberships cuando el synced lo trae.
+      pendingCreatedRef.current.set(field.id, field);
+      // Lo fijamos como preferido → resolveState lo deja `active` directo (R6.3).
+      preferredIdRef.current = field.id;
+      // Aplicamos sobre el set vigente; applyMemberships mergea el pending-created → active inmediato.
+      applyMemberships(availableRef.current);
+      // Disparamos un refresh en segundo plano: cuando el sync baje el campo real (mismo id), el
+      // loadMemberships lo reconcilia (purga el optimista) sin que el usuario espere. El listener
+      // statusChanged (1b) también lo cubrirá si el refresh corre antes del sync-down.
+      void refreshEstablishments(field.id);
+    },
+    [applyMemberships, refreshEstablishments],
+  );
+
   // Bootstrap: al tener user_id, leemos el rastro persistido (para fijar el preferido por
   // defecto, R6.9) y traemos las memberships. Re-corre si cambia el user (login distinto).
   const bootedForUser = useRef<string | null>(null);
@@ -234,6 +287,7 @@ export function EstablishmentProvider({ children }: { children: ReactNode }) {
       currentIdRef.current = null;
       currentNameRef.current = null;
       trailRef.current = [];
+      pendingCreatedRef.current.clear();
       setRecents([]);
       setState({ status: 'loading' });
       return;
@@ -315,6 +369,7 @@ export function EstablishmentProvider({ children }: { children: ReactNode }) {
         switchEstablishment,
         refreshEstablishments,
         acknowledgeActiveLost,
+        applyCreatedEstablishment,
       }}
     >
       {children}

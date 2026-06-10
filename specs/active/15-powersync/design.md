@@ -812,8 +812,11 @@ const pending_animals         = new Table({ client_op_id: column.text, /* ... */
 const pending_birth_calves    = new Table({ client_op_id: column.text, /* ... */ },                { localOnly: true });
 const pending_reproductive_events = new Table({ client_op_id: column.text, /* ... */ },            { localOnly: true });
 // Para bajas/soft-deletes: un overlay de "ocultar/marcar" en vez de un UPDATE sobre la fila sincronizada.
+// `exit_date` (residual #2, as-built): fecha de egreso de cliente para una baja optimista (effect 'exited'),
+// surfaceada por la ficha (COALESCE pso.exit_date) → el badge "Vendido el {fecha}" funciona OFFLINE con la
+// misma fecha que la RPC persiste. null para soft_deleted.
 const pending_status_overrides = new Table(
-  { client_op_id: column.text, target_table: column.text, target_id: column.text, effect: column.text /* 'soft_deleted'|'exited' */, status: column.text },
+  { client_op_id: column.text, target_table: column.text, target_id: column.text, effect: column.text /* 'soft_deleted'|'exited' */, status: column.text, exit_date: column.text },
   { localOnly: true },
 );
 ```
@@ -822,7 +825,7 @@ const pending_status_overrides = new Table(
 |---|---|
 | `register_birth` | filas en `pending_reproductive_events` (el parto) + `pending_animals`/`pending_animal_profiles` (N terneros) + `pending_birth_calves`, todas con `client_op_id` = id del intent (los ids "visuales" del overlay son de cliente, **provisionales**: los reales los asigna la RPC server-side — §5.4.3). |
 | `createAnimal` | filas en `pending_animals` + `pending_animal_profiles` (ids de cliente = los mismos que la RPC reusará por ON CONFLICT — §5.4.3). |
-| `exit_animal_profile` | fila en `pending_status_overrides` (`target_table='animal_profiles'`, `target_id=<perfil>`, `effect='exited'`, `status=<sold/dead/transferred>`). NO se UPDATEa la fila sincronizada. |
+| `exit_animal_profile` | fila en `pending_status_overrides` (`target_table='animal_profiles'`, `target_id=<perfil>`, `effect='exited'`, `status=<sold/dead/transferred>`, `exit_date=<fecha elegida>`). NO se UPDATEa la fila sincronizada. La ficha COALESCEa `pso.exit_date` → badge "Vendido el {fecha}" offline (residual #2). |
 | `soft_delete_*` | fila en `pending_status_overrides` (`effect='soft_deleted'`, `target_table`/`target_id` del objetivo). La lectura la trata como "oculta". |
 
 **Lectura = UNION synced + overlay (R6.11).** Las queries de lectura del camino afectado (ficha/detalle, timeline, lista de animales, miembros de lote) hacen `UNION ALL` del estado sincronizado con el overlay pendiente, aplicando el override de estado:

@@ -8,10 +8,12 @@
 //   1. GATE DE TELÉFONO (R3.8): al montar, leemos users.phone. Si está vacío, mostramos
 //      CompletePhoneScreen — pide el teléfono y lo guarda en public.users ANTES de seguir.
 //   2. FORM DE ALTA: name + province (obligatorios) + city + hectáreas (opcionales).
-//      Al crear OK: refreshEstablishments(nuevoId) — UNA sola llamada que re-lee el set (ahora
-//      con el campo nuevo) y lo fija activo (R6.3) en la misma operación → el gating raíz
-//      aterriza en su home. NUNCA se hardcodea establishment_id ni owner: el trigger los deriva
-//      de auth.uid().
+//      Al crear OK: applyCreatedEstablishment(field) — aterrizaje OPTIMISTA (spec 15, residual #1).
+//      createEstablishment (online) ya devolvió el campo; el contexto lo INYECTA en `available` + lo
+//      fija activo (R6.3) AL INSTANTE y dispara el refresh en background para reconciliar cuando el
+//      sync baje la fila real (un refreshEstablishments inmediato leería el SQLite local SIN el campo
+//      recién creado → onboarding fantasma). El gating raíz aterriza en su home / bloqueo de rodeo.
+//      NUNCA se hardcodea establishment_id ni owner: el trigger los deriva de auth.uid().
 //
 // Cero hardcode (ADR-023 §4): AuthScreenShell + FormField + Button + FormError/InfoNote +
 // tokens. Voseo argentino.
@@ -28,7 +30,11 @@ import {
   saveOwnPhone,
 } from '@/services/establishments';
 import { isValidPhone, validateCreateEstablishment } from '@/utils/validation';
-import { hasDuplicateName, parseHectares } from '@/utils/establishment';
+import {
+  hasDuplicateName,
+  parseHectares,
+  type MembershipEstablishment,
+} from '@/utils/establishment';
 
 // Copy accionable ante falta de conexión (R9.2): crear campo es operación online.
 const OFFLINE_COPY =
@@ -39,7 +45,7 @@ type Phase = 'loading' | 'need_phone' | 'form';
 export default function CrearCampoScreen() {
   const router = useRouter();
   const { state: authState } = useAuth();
-  const { refreshEstablishments } = useEstablishment();
+  const { applyCreatedEstablishment } = useEstablishment();
 
   const userId = authState.status === 'authenticated' ? authState.user.id : null;
 
@@ -89,15 +95,15 @@ export default function CrearCampoScreen() {
   return (
     <CreateForm
       userId={userId}
-      onCreated={async (newId) => {
-        // Re-leemos el set (ahora incluye el campo nuevo) fijándolo como preferido en la MISMA
-        // operación (R6.3). Una sola llamada: refreshEstablishments(newId) recarga del server y
-        // resuelve `active` directo sobre el campo nuevo. NO encadenamos un switchEstablishment
-        // posterior: ese leería un `available` que aún no reflejaba el set fresco (timing async
-        // de setState) y falseaba active_lost — aterrizaba en /campo-perdido en vez de la home.
-        await refreshEstablishments(newId);
-        // El gating raíz (RootGate) detecta 'active' sobre el campo nuevo y aterriza en su
-        // home. Reemplazamos para no dejar el form en el back-stack.
+      onCreated={(field) => {
+        // Residual #1 (spec 15) — aterrizaje OPTIMISTA: `createEstablishment` (online) ya devolvió el
+        // campo, pero la lectura del set viene del SQLite local (PowerSync) y el campo recién creado
+        // todavía NO bajó por el sync → un refreshEstablishments inmediato leería un set SIN el campo
+        // nuevo → onboarding fantasma. applyCreatedEstablishment lo INYECTA en `available` + lo fija
+        // activo AL INSTANTE (R6.3) y dispara el refresh en background para reconciliar cuando el sync
+        // lo traiga. El RootGate detecta 'active' sobre el campo nuevo (0 rodeos → bloqueo de rodeo) y
+        // aterriza sin esperar el round-trip. Reemplazamos para no dejar el form en el back-stack.
+        applyCreatedEstablishment(field);
         router.replace('/(tabs)');
       }}
     />
@@ -173,7 +179,7 @@ function CreateForm({
   onCreated,
 }: {
   userId: string | null;
-  onCreated: (newId: string) => void | Promise<void>;
+  onCreated: (field: MembershipEstablishment) => void | Promise<void>;
 }) {
   const router = useRouter();
   // `recents` es el set de campos accesibles del usuario (con nombres) → fuente para detectar
@@ -220,7 +226,7 @@ function CreateForm({
     setCreating(false);
 
     if (result.ok) {
-      await onCreated(result.establishment.id);
+      await onCreated(result.establishment);
     } else {
       setFormError(result.error.kind === 'network' ? OFFLINE_COPY : 'No pudimos crear el campo. Probá de nuevo.');
     }

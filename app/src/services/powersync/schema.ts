@@ -491,6 +491,11 @@ const pending_status_overrides = new Table(
     target_id: column.text,
     effect: column.text,
     status: column.text,
+    // exit_date (residual #2): fecha de egreso de cliente para una baja optimista (effect 'exited').
+    // La ficha la surfacea (COALESCE pso.exit_date) → el badge muestra "Vendido el {fecha}" OFFLINE,
+    // igual que la fila real al sincronizar (es exactamente la fecha que la RPC persiste). null para
+    // soft_deleted (no aplica).
+    exit_date: column.text,
   },
   { localOnly: true },
 );

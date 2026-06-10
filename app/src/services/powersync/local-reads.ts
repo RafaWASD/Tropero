@@ -622,16 +622,19 @@ export function buildAnimalDetailQuery(profileId: string): LocalQuery {
   // sale de la rama sincronizada (sin duplicado — un solo profileId existe en un lado por vez).
   //
   // Para una BAJA optimista (exit) de un perfil SINCRONIZADO, el override marca el `status` nuevo:
-  // COALESCE(pso.status, ap.status) → la ficha refleja el archivado al instante (el badge deriva del
-  // status; exit_date queda como esté hasta que la RPC corra). El override NO oculta la ficha (un animal
-  // dado de baja sigue siendo visible/archivado, R4.12/R4.15) — solo la lista activa lo oculta.
+  // COALESCE(pso.status, ap.status) → la ficha refleja el archivado al instante. La FECHA de egreso
+  // también sale del override (COALESCE(pso.exit_date, ap.exit_date)) → el badge "Vendido el {fecha}"
+  // funciona OFFLINE con la misma fecha que la RPC persistirá (residual #2; sin esto salía "Vendido"
+  // sin fecha porque ap.exit_date es NULL hasta que la RPC corre). El override NO oculta la ficha (un
+  // animal dado de baja sigue visible/archivado, R4.12/R4.15) — solo la lista activa lo oculta.
   const synced =
     'SELECT ap.id AS id, ap.animal_id AS animal_id, ap.establishment_id AS establishment_id, ' +
     'ap.idv AS idv, ap.visual_id_alt AS visual_id_alt, ap.category_id AS category_id, ' +
     'ap.category_override AS category_override, ap.breed AS breed, ap.coat_color AS coat_color, ' +
     'ap.entry_date AS entry_date, ap.entry_weight AS entry_weight, ' +
     'COALESCE(pso.status, ap.status) AS status, ' +
-    'ap.created_by AS created_by, ap.exit_date AS exit_date, ap.exit_reason AS exit_reason, ' +
+    'ap.created_by AS created_by, COALESCE(pso.exit_date, ap.exit_date) AS exit_date, ' +
+    'ap.exit_reason AS exit_reason, ' +
     'ap.rodeo_id AS rodeo_id, ap.management_group_id AS management_group_id, ' +
     'ap.animal_tag_electronic AS tag_electronic, ap.animal_sex AS sex, ' +
     'ap.animal_birth_date AS birth_date, ' +
@@ -1206,7 +1209,11 @@ export function buildDeletePendingRodeoConfig(
 /** Efecto de un override de estado: oculta/marca una fila objetivo (baja o soft-delete optimista). */
 export type StatusOverrideEffect = 'exited' | 'soft_deleted';
 
-/** INSERT optimista en pending_status_overrides (baja/soft-delete: oculta/marca la fila objetivo). */
+/**
+ * INSERT optimista en pending_status_overrides (baja/soft-delete: oculta/marca la fila objetivo).
+ * `exitDate` (residual #2): fecha de egreso de cliente para una baja (effect 'exited') — la ficha la
+ * surfacea (COALESCE) → el badge "Vendido el {fecha}" funciona OFFLINE. null para soft_deleted.
+ */
 export function buildPendingStatusOverrideInsert(
   id: string,
   clientOpId: string,
@@ -1214,13 +1221,14 @@ export function buildPendingStatusOverrideInsert(
   targetId: string,
   effect: StatusOverrideEffect,
   status: string | null,
+  exitDate: string | null = null,
 ): LocalQuery {
   return {
     sql:
       'INSERT INTO pending_status_overrides ' +
-      '(id, client_op_id, target_table, target_id, effect, status) ' +
-      'VALUES (?, ?, ?, ?, ?, ?)',
-    args: [id, clientOpId, targetTable, targetId, effect, status],
+      '(id, client_op_id, target_table, target_id, effect, status, exit_date) ' +
+      'VALUES (?, ?, ?, ?, ?, ?, ?)',
+    args: [id, clientOpId, targetTable, targetId, effect, status, exitDate],
   };
 }
 

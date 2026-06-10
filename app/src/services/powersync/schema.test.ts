@@ -262,7 +262,8 @@ const OVERLAY_COLUMNS_READ_BY_BUILDERS: Record<string, string[]> = {
   // mother UNIONa pending_birth_calves (join por client_op_id a pending_reproductive_events).
   pending_birth_calves: ['client_op_id', 'calf_profile_id'],
   // la ocultación de exits/soft-deletes lee pending_status_overrides en TODAS las lecturas afectadas.
-  pending_status_overrides: ['client_op_id', 'target_table', 'target_id', 'effect', 'status'],
+  // exit_date (residual #2): buildAnimalDetailQuery lo COALESCEa para el badge "Vendido el {fecha}" offline.
+  pending_status_overrides: ['client_op_id', 'target_table', 'target_id', 'effect', 'status', 'exit_date'],
   // Run T9.8 — buildRodeosQuery UNIONa pending_rodeos; buildRodeoConfigQuery UNIONa pending_rodeo_data_config.
   pending_rodeos: ['client_op_id', 'establishment_id', 'name', 'species_id', 'system_id', 'active', 'created_at'],
   pending_rodeo_data_config: ['client_op_id', 'rodeo_id', 'field_definition_id', 'enabled'],
