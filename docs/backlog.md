@@ -17,7 +17,29 @@ No es un sustituto de `feature_list.json` ni de los ADRs — es la antesala dond
 
 ## Ítems pendientes
 
-## 2026-06-10 — Transiciones de categoría NO visibles offline (recálculo es server-side)
+## 2026-06-10 — 8 e2e rojos PRE-EXISTENTES en HEAD (account/events×3/profile×3/rodeos) — triage pendiente
+
+**Origen**: run T7.9 de feature 15. El implementer los reportó como pre-existentes; el reviewer lo
+CONFIRMÓ con worktree limpio sobre HEAD `55d5700` (8 failed / 12 passed, fallos de ASERCIÓN, no de
+red — evidencia en `progress/review_15-powersync.md` § "Review — Run T7.9").
+**Qué**: `account.spec.ts` (1), `events.spec.ts` (3), `profile.spec.ts` (3), `rodeos.spec.ts` (1)
+fallan en HEAD. Al menos los de events incluyen el badge "vaquillona preñada" = el gap de transición
+de categoría server-side (entrada 2026-06-10 arriba, DECIDIDO → chunk C6 de spec 02). El resto sin
+diagnóstico individual; sospecha: flakiness sobre la DB beta contaminada y/o timing.
+**Por qué importa**: la suite e2e es el oráculo de regresión del repo (regla: testear con Playwright,
+no a mano) — con 8 rojos crónicos el verde deja de significar algo y los gates pierden señal.
+**Próximo paso sugerido**: triage spec por spec tras cerrar feature 15: (a) los que cierra C6 →
+verificar al implementar C6; (b) los de flakiness/data → arreglar asserts o aislar data; (c) si
+alguno es bug real de producto → feature/fix con su propio ciclo.
+
+## 2026-06-10 — Transiciones de categoría NO visibles offline (recálculo es server-side) ✅ DECIDIDO (2026-06-10)
+
+**✅ Alcance decidido por Raf (2026-06-10)**: opción A — **espejo client-side display-only** de
+`compute_category` (port a TS puro, solo vista, server sigue siendo la verdad) **+ badge de
+override en la ficha + acción quitar fijación** (el caso "1212" NO era offline: tenía
+`category_override=true` y el server no transiciona ni online, R4.9). Gate 0 escrito y aprobado:
+`specs/active/02-modelo-animal/context-c6-categoria-espejo.md` (chunk C6 de spec 02, frontend
+puro). Arranca al cerrar la feature 15 (WIP=1). Entrada original abajo para contexto:
 
 **Origen**: testing en vivo de Raf post-fix del alta offline (sesión bugfix 15-powersync). Lo golpeó DOS
 veces en el mismo día: (1) tactos+/servicios sobre "1212" (ahí además había override=true), (2) servicio
@@ -342,6 +364,7 @@ arreglada.
 **Qué**: el proyecto Supabase **remoto** (prod) tiene ~**1800 `animals` + 747 `animal_profiles` + cientos de eventos de TEST** (de las corridas e2e/seed acumuladas), con tags basura. No es data real. Cuando se onboardee el beta de Chascomús (Facundo + el campo del padre), el cliente arrancaría con su data mezclada con basura de test.
 **Por qué importa**: data sucia en prod = analytics sucio (pilar del producto), confusión, y riesgo de que el cliente vea animales fantasma. RAFAQ apunta a "el mejor en el primer try". Además, por culpa de esos tags largos, 2 columnas (`animals.tag_electronic`, `reproductive_events.calf_tag_electronic`) quedaron con su CHECK en `NOT VALID` sin `VALIDATE` (grandfather) y con tope 64 en vez de 32 — una limpieza permitiría validar el constraint y bajar el tope al valor real (15 díg FDX-B + holgura).
 **Próximo paso sugerido**: antes del beta real, purgar la data de e2e del remoto (identificable por el prefijo `animal_test_` / emails `@rafaq-test.local` / `bantest_` etc.) con un script de limpieza cuidadoso (respetando FKs: events → profiles → animals → users). Después, opcionalmente, `VALIDATE CONSTRAINT` de los 2 tags + bajar el tope a 32. Coordinar con la suite e2e (que debe limpiar lo suyo; ver si el cleanup de los helpers está fallando y dejando residuo).
+**Nota 2026-06-10 (Gate 2 T7, LOW-2)**: la suite nueva `sync_streams` limpia por ids trackeados, pero ante un kill duro puede dejar huérfanos namespaced (`@rafaq-test.local`) — el sweep de esta entrada los cubre; aplica a todas las suites contra remoto.
 
 ## 2026-06-08 — La DB beta contaminada con data de test rompió el sync de PowerSync + falta aislamiento de tests (ADR)
 
