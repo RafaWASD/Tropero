@@ -652,3 +652,182 @@ Ninguno.
 - La entrada REABIERTA del backlog 2026-06-10 queda lista para cerrarla vos (el implementer no la tocó,
   correcto). La limpieza de los huérfanos reales del campo de Raf sigue pendiente (la RPC los sana solo
   si el intent re-drena; los de "12"/"211" perdieron su intent → no se auto-sanan).
+
+
+---
+
+# Review — Run cierre-T7 (2026-06-10)
+
+> Reviewer pass del run "cierre Fase T7": T7.2 + T9.7 (suite no-bypass por device, supabase/tests/sync_streams/run.cjs, NUEVO), T7.3 (E2E evento simple offline + oraculo server-side), enganche en scripts/run-tests.mjs, reconciliacion de tasks.md/design.md. Alcance verificado: SOLO tests + docs (cero schema/RLS/EF/streams/migraciones).
+
+## Veredicto: APPROVED
+
+## Restriccion dura del run (PROHIBIDO tocar schema/RLS/EF/streams) — CUMPLIDA
+git status confirma cero cambios en supabase/migrations/, supabase/functions/, sync-streams/. El run toca: supabase/tests/sync_streams/run.cjs (NUEVO), scripts/run-tests.mjs (enganche L76), app/e2e/animals-offline.spec.ts, app/e2e/helpers/admin.ts, specs/active/15-powersync/tasks.md+design.md, progress/impl_15-powersync.md. Nada fuera de tests + docs. Sin mutant file residual (verificado: solo run.cjs en el dir).
+
+## check.mjs — VERDE (corrido por el reviewer)
+node scripts/check.mjs -> exit 0. La suite nueva corre 25 subtests, 25 pass, 0 fail, + cleanup verde. Todas las suites previas (RLS/Edge/Animal/Maneuvers/User_private/Import) siguen verdes con 0075-0083 aplicadas. La suite esta enganchada DENTRO del gate SUPABASE_SERVICE_ROLE_KEY (L76) -> corre siempre que haya keys (no es verde-falso por no-enganche, leccion sesion 18 respetada).
+
+## FOCO 1 — Fidelidad predicado-simulado vs YAML deployado: PASS (con nota de drift)
+Comparacion stream-por-stream del SQL que la suite ejecuta (helpers orgScope/ownerScope/syncSetIds/rowsInSyncSet) contra el predicado real de sync-streams/rafaq.yaml (V3 JOIN-FREE):
+- orgScope(u) = user_roles WHERE user_id=u AND active=true -> identico al CTE org_scope del YAML. ownerScope anade role=owner -> identico a owner_scope. OK
+- Per-establishment (est_animal_profiles/est_rodeos/est_management_groups/ev_*): syncSetIds(t, scope, withDeletedAtFilter:true) = WHERE establishment_id IN org_scope AND deleted_at IS NULL -> identico al YAML. OK
+- est_animal_category_history/ev_birth_calves/est_rodeo_data_config (sin deleted_at propio): simulacion sin filtro deleted_at -> identico al YAML. OK
+- est_establishments: id IN org_scope AND deleted_at IS NULL -> identico. OK
+- est_members_roles (owner-only): active=true AND establishment_id IN owner_scope -> identico. est_invitations: establishment_id IN owner_scope AND status=pending AND deleted_at IS NULL -> identico. OK
+- self_user_private/self_user_roles: WHERE user_id = actor -> identico. OK
+Guard anti-drift futuro: PARCIAL. La suite PARSEA el YAML solo para las propiedades NEGATIVAS de "NO esta en el sync set" (animals y users via doesNotMatch). Para el predicado POSITIVO per-establishment, la suite DUPLICA el predicado a mano en JS (no lo parsea del YAML); hay nota de mantenimiento en el header ("mismo SQL que rafaq.yaml", L241) pero NO un assert runtime que ate la simulacion al YAML -> si alguien editara el establishment_id IN org_scope del YAML, la suite quedaria verde-falsa. Aceptable: (a) espeja el patron de los runners RLS; (b) design seccion 7 eligio explicitamente "simular el predicado contra Postgres"; (c) la frontera REAL la audita Gate 1 sobre el YAML (PASS previo). Registrado como finding no-bloqueante (F1/F2).
+
+## FOCO 2 — Los tests negativos MUERDEN: PASS (mutation-test ejecutado por el reviewer)
+Mutacion aplicada por el reviewer: quitar el filtro de scope en syncSetIds y rowsInSyncSet (simula una stream SIN el scope). Resultado: 12 subtests cross-tenant FALLAN (est_animal_profiles, las 5 ev_*, est_animal_events, ev_birth_calves, est_rodeo_data_config, est_animal_category_history, est_rodeos/est_management_groups). Los asserts no son tautologicos ni sobre conjuntos vacios: el setup siembra al menos una fila por tenant en cada tabla, asi que el assert de disjuncion tiene data real que atrapar. (El implementer reporto 11; observo 12 al incluir los paths de PK sintetica — diferencia menor, claim esencialmente fiel.) Las clases self-only/owner-only quedaron verdes bajo ESTA mutacion porque muerden sobre OTRA superficie (scope por user_id/owner), correcto. Archivo restaurado byte-identico tras el test.
+
+## FOCO 3 — Oraculo E2E server-side: PASS
+animals-offline.spec.ts test 3 verifica la fila REAL en weight_events via waitForServerWeightEvent(establishmentId, weightKg) (poll con service_role sobre la tabla del server), NO la UI/overlay. Ademas assert de que el peso SIGUE en la ficha post-drenado y CERO upload rechazado en consola. Es la leccion del bug de alta offline. Selectores del wizard mapean a pantallas reales (agregar-evento.tsx, animal/[id].tsx) — no phantom; implementer reporto 3/3 verde.
+
+## FOCO 4 — Suite enganchada/verde, autocontenida, tolerante a data ajena, cleanup: PASS
+- Enganchada en run-tests.mjs L76 dentro del gate de keys -> corre en check.mjs. OK
+- Autocontenida: RUN_TAG namespacea 2 campos + 3 users + (HIGH-1) un 4to campo/owner dedicados. OK
+- Tolerante a la data contaminada (344K animals): TODOS los asserts cross-tenant son relacionales entre nuestros tenants (A-vs-B, disjuncion), nunca conteos absolutos. El unico count mayor a cero es sobre catalogos globales (correcto). OK
+- Cleanup robusto: estD/ownerD/soft-deleted-rodeo trackeados; cleanup() pre-borra reproductive_events para destrabar el CASCADE (birth_calves sin ON DELETE CASCADE), luego CASCADE de establishments + deleteUser. Empiricamente verde en 2 corridas (normal + mutada). No deja basura FK-bloqueante. OK
+
+## FOCO 5 — Reconciliacion specs (T7.8 parcial / T7.9 diferido): COHERENTE
+- T7.8 [~]: rationale = cobertura a NIVEL CLASIFICACION en upload.test.ts (classifyIntentUploadError: permanent_reject->rollback / transient->no-toca-overlay / P0002->idempotent_discard / intent corrupto->PermanentIntentError). Verificado: upload.test.ts existe en el runner (L53) con 58 referencias a esos outcomes. El E2E in-vivo del rollback se defiere honestamente a T7.9. El parcial no sobre-afirma.
+- T7.9 [ ]: diferido con rationale explicito (E2E de PARTO offline + rollback in-vivo = run aparte; el alta offline E2E ya esta en tests 1+2; logica unit-cubierta). Coincide con el alcance nombrado del run. Justificado y documentado -> no bloquea.
+- T7.1/T7.4/T7.5/T7.6 -> [x] con ubicacion real verificada. T7.2/T9.7 -> [x] (suite real, mutation-probada).
+- design seccion 7: nota AS-BUILT agregada (1 linea, L1048) describe fielmente la suite. Exacta.
+- Direccion codigo->spec (paso 6): este run NO cambio comportamiento/estructura/contrato (solo agrego tests) -> no introdujo ni empeoro drift. La tension pre-existente R4.1-EARS (JOIN V2) vs YAML-V3 ya esta cubierta por las notas RECONCILIADO de requirements.md L87-103 (apuntan a rafaq.yaml/design seccion 2.2 como fuente de verdad) y fue auditada en el Gate 1 V3 PASS previo — NO es deuda de este run.
+
+## Trazabilidad R<n> vs test (este run)
+- R4.1, R4.2 -> est_animal_profiles / est_rodeos+est_management_groups / est_establishments + R8.2/HIGH-1 (soft-delete del campo -> org_scope vacio)
+- R4.3 -> self_user_private
+- R4.4 -> catalogos globales (R4.4)
+- R4.5 -> soft-deleted (R4.5)
+- R4.6, R13.5, R13.6 -> 5 ev_* (weight/sanitary/condition_score/lab/reproductive) + est_animal_category_history
+- R4.7, R13.7 -> animals (T9.7) + b1 (T9.7)
+- R4.8 -> ev_birth_calves
+- R4.9 -> est_invitations
+- R4.10 -> est_rodeo_data_config
+- R4.11 -> SIN test directo (finding F2; satisfecho as-built — push_tokens/import_log ausentes del YAML)
+- R8.2 -> R8.2/HIGH-1
+- R9.1, R9.2 -> suite completa (no-bypass por device)
+- R13.8 (c2) -> c2 (T9.7)
+- R5.1, R5.2 -> E2E test 3 (lectura local ficha+timeline offline)
+- R6.1 -> E2E test 3 (peso offline INSERT local)
+- R6.2 -> E2E test 3 (waitForServerWeightEvent, trigger 0077 al subir)
+- R11.2 -> E2E test 3 + check.mjs verde (firmas/flujos intactos)
+- R3.3/R3.4/R3.5/R8.1 (T7.1) -> upload-classify.test.ts + upload.test.ts
+- R6.10 (T7.7 parcial) -> animal/run.cjs T2.20 + create_animal RPC suite
+
+## Tasks completas: SI (con diferimientos justificados)
+T7.1 a T7.6 [x]; T7.2/T9.7 [x]; T7.7/T7.8 [~] (parcial honesto, cobertura unit/clasificacion real); T7.9 [ ] diferido con rationale dentro del alcance nombrado del run. No hay [ ] sin justificacion documentada.
+
+## CHECKPOINTS
+- C1 — harness completo: [x]
+- C2 — estado coherente: [x] (15-powersync in_progress; no se marco done)
+- C3 — arquitectura: [x] (tests Node-nativos + Playwright, sin deps nuevas, sin hardcode de establishment_id — el scope sale de user_roles por actor)
+- C4 — verificacion real: [x] (fixtures reales contra la DB remota; suite con mas de 0 tests verdes; test de aislamiento cross-tenant ES el nucleo de la suite)
+- C5 — sesion: [ ] N/A en este run (no se cierra sesion ni se commitea; lo maneja el leader)
+- C6 — SDD: [x] (3 archivos de spec; cada R<n> del run con al menos 1 test salvo R4.11 — ver F2)
+- C7 — multi-tenant: [x] (la suite valida la frontera de tenancy del sync set; helpers org_scope/owner_scope espejan has_role_in/is_owner_of)
+- C8 — offline-first: [x] (E2E test 3: lectura+escritura offline + reconexion)
+
+## Checklist RAFAQ-especifico
+- A (multi-tenancy/RLS): aplicable — esta suite ES el test de aislamiento cross-tenant del wire de sync. [x] streams scopean por establishment_id IN org_scope; [x] helpers org_scope/owner_scope espejan has_role_in/is_owner_of (no SQL ad-hoc divergente); [x] test cross-tenant A vs B; [x] deleted_at IS NULL filtrado en las streams con soft-delete (subtest R4.5). No se crearon tablas nuevas (run de tests).
+- B (offline-first): aplicable — [x] E2E offline (setOffline true) + sync bucket scopeado por establishment_id; [x] last-write-wins documentado (R12.2); [x] lectura/escritura via repositorio/local, oraculo confirma el drenado.
+- C (BLE): N/A (el run no toca BLE).
+- D (UI de campo): N/A (sin cambios de UI; el E2E maneja pantallas existentes ya gateadas).
+- E (Edge Functions): N/A (cero cambios en supabase/functions/, verificado por git status).
+
+## Findings (no bloqueantes)
+- F1 (drift guard parcial, FOCO 1): la suite duplica a mano el predicado per-establishment en JS en vez de parsearlo del YAML; solo las propiedades negativas (animals/users ausentes) tienen drift-guard runtime. Recomendacion (backlog): agregar doesNotMatch(yaml, FROM push_tokens) + FROM import_log y, opcionalmente, un assert que verifique que cada stream per-establishment del YAML contiene literalmente establishment_id IN org_scope/owner_scope. No bloquea: Gate 1 sobre el YAML es la frontera autoritativa y dio PASS.
+- F2 (R4.11 sin test directo): push_tokens/import_log NO estan en el YAML (requirement satisfecho as-built) pero la suite no los drift-guardea como si hace con animals/users. Mismo remedio que F1.
+
+## Cambios requeridos
+Ninguno. APPROVED.
+
+---
+
+## Review — Run T7.9 (PARCIAL — en progreso, red flaky)
+
+> Reviewer RELANZADO tras la muerte del anterior por corte de red. Alcance: 5 E2E nuevos + helpers admin aditivos + reconciliacion T7.9/T7.8.
+> ESTE BLOQUE SE IRA COMPLETANDO. Guardado parcial por si la red se vuelve a cortar.
+
+### Avance verificado hasta ahora
+- Diff revisado: `app/e2e/animals-offline.spec.ts` (5 tests nuevos + helpers de navegacion), `app/e2e/helpers/admin.ts` (6 helpers ADITIVOS, cero delecion), `specs/.../design.md` + `tasks.md` reconciliados, `progress/*` (leader/bitacora), `scripts/run-tests.mjs` + `docs/backlog.md` (cierre-T7 ya gateado), `supabase/tests/sync_streams/` untracked (cierre-T7).
+- RESTRICCION DURA OK: cero cambio en `app/src/`, `supabase/migrations/`, `supabase/functions/`, `sync-streams/`. `feature_list.json` y `plan.md` SIN tocar. (git status verificado.)
+- MORDIDA del parto: el oraculo `waitForServerBirth` asserta `birthEventCount === 1` EXACTO + `calfCount === N` EXACTO → un doble-apply daria 2 → muerde. `birth_calves` es server-only (sin GRANT INSERT) → un ternero server existe SOLO si la RPC corrio.
+- MORDIDA del rollback: `softDeleteProfile(madre)` server-side mientras offline → `register_birth` (0075:98-100 `WHERE deleted_at IS NULL` → raise `23503`) → connector.ts clasifica `permanent_reject` (upload.ts:205, unit-test upload.test.ts:214) → `rollbackOverlay`. El test asserta (a) overlay borrado (count 0 tras refresh), (b) `getServerBirthState` = 0/0, (c) warn `upload rechazado` presente (connector.ts:168). DETERMINISTA: el soft-delete admin aterriza server-side ANTES de reconectar → sin carrera con el drain.
+- CONTRAPRUEBA transitorio: asserta overlay PERSISTE (count 1) + `rejected === []` + server 0/0 EN COLA → luego reconecta y `waitForServerBirth` confirma que dreno (no se descarto). Distingue "en cola" de "no paso nada".
+
+### PENDIENTE (red flaky bloqueo temporal)
+- `node scripts/check.mjs`: 1ra corrida ROJA por `ConnectTimeoutError`/`UND_ERR_CONNECT_TIMEOUT` a Supabase (Cloudflare 172.64.149.246:443) DENTRO de `animal/run.cjs` — NO un fallo de codigo, es la red. Probes: REST 401 (reachable) x2, auth health TIMEOUT. Red intermitente. REINTENTANDO.
+- Worktree HEAD para verificar los 8 fallos pre-existentes: PENDIENTE.
+
+### check.mjs — RESUELTO: VERDE (exit 0)
+- Las 2 corridas rojas iniciales fueron `ConnectTimeoutError` a Supabase (red flaky tras el corte), fallando en suites DISTINTAS cada vez (animal/run.cjs, luego rls/run.cjs) = signature de red, no de codigo. Probes pasaron de timeout a 401-estable. RLS standalone 22/22. 3ra corrida de `check.mjs` → VERDE: "All tests passed." / "Entorno listo." incl. Sync streams no-bypass 25/25.
+
+### Veredicto sobre los 8 fallos pre-existentes (worktree HEAD = 55d5700)
+**CLAIM CONFIRMADO: los 8 fallos son PRE-EXISTENTES en HEAD, NO los introdujo el working tree (T7.9 ni cierre-T7).**
+- Worktree limpio `git worktree add ../rafaq-verify HEAD` (55d5700), `pnpm install` + env copiado + `pnpm e2e:build` OK.
+- Corrida de `account.spec.ts events.spec.ts profile.spec.ts rodeos.spec.ts` (workers=1) en HEAD, RED ESTABLE:
+  **8 failed / 12 passed, ZERO `fetch failed`** — todos fallos de ASERCION (`toBeVisible` timeouts), no de red.
+  Los 8: `account.spec.ts:137` (cambiar email), `events.spec.ts:190/279/509/639` (tacto→transicion categoria / parto mellizos / aborto / orden timeline), `profile.spec.ts:38/65/102` (nombre/telefono/descarte).
+- 2 fallos son EXACTAMENTE el badge `vaquillona preñada` (events:190 L238, + el de parto) = el gap de backlog
+  "transiciones de categoria NO visibles / recalculo server-side" (2026-06-08/09, YA DECIDIDO opcion A, chunk C6 spec 02). Confirma la hipotesis del implementer.
+- 1ra corrida (red flaky) dio 13 fallos inflados por `fetch failed` transitorios (rodeos:99 cayo por `createTestUser fetch failed`); la corrida ESTABLE los redujo a los 8 reales de asercion → los extras eran ruido de red, no codigo.
+- POR QUE NO ES EL WORKING TREE: el diff de `admin.ts` es 100% ADITIVO (cero delecion/modificacion de lineas existentes, `git diff | grep ^-` vacio); NINGUNO de los 4 specs que fallan importa los 6 helpers nuevos; `cleanupAll` intacto. El unico vector seria data residual en la beta compartida — y los fallos reproducen identicos en HEAD, donde el working tree no existe. → NO es regresion del run. Distribucion levemente distinta a la del implementer (events×4 vs ×3, rodeos×0 vs ×1) por flakiness ambiental, pero el set y la causa coinciden.
+- ACCION: quedan para backlog/leader (ya hay entrada + decision C6). NO bloquean T7.9.
+
+### VEREDICTO Run T7.9: APPROVED
+
+**Alcance**: 5 E2E nuevos en `animals-offline.spec.ts` + 6 helpers aditivos en `helpers/admin.ts` + reconciliacion T7.9[x]/T7.8[x] en design/tasks + bitacora. Solo tests + helpers + docs.
+
+**Restriccion dura — OK**: cero cambio en `app/src/`, `supabase/migrations/`, `supabase/functions/`, `sync-streams/` (git status verificado). `feature_list.json` y `plan.md` SIN tocar. Lo demas del working tree (`scripts/run-tests.mjs`, `docs/backlog.md`, `supabase/tests/sync_streams/`, `progress/current.md`) es trabajo cierre-T7/leader YA GATEADO — este run NO lo modifico (verificado: el diff de esos archivos es del cierre-T7, no de T7.9).
+
+**Trazabilidad R<n> ↔ test (Run T7.9)** — TODOS cubiertos:
+| R<n> | Test |
+|---|---|
+| R6.6 parto offline | animals-offline.spec.ts "PARTO mono/mellizos (T7.9)" |
+| R6.8 overlay optimista | idem (asserts overlay offline: "Parto" en cronologia + ternero en lista) |
+| R6.12 no doble-upload | idem — `waitForServerBirth` asserta `birthEventCount===1` EXACTO |
+| R6.10 idempotencia/baja | idem + "BAJA (Venta) (T7.9)" → `waitForServerExit('sold')` |
+| R6.9 reject permanente | "rollback (T7.8)" — 23503→permanent_reject, warn observable + "transitorio (contraprueba)" |
+| R6.11 rollback overlay | "rollback (T7.8)" — ternero desaparece (count 0 tras refresh) |
+| R8.1 server re-valida | "rollback (T7.8)" — `getServerBirthState`=0/0 (RPC abortó atómica) |
+| R10.2 rechazo observable / transitorio reintenta | "rollback (T7.8)" (warn) + "transitorio" (no warn, en cola, drena al reconectar) |
+
+**Foco 1 — Mordida**: VERIFICADO.
+- Parto: `waitForServerBirth` asserta `birthEventCount===1` Y `calfCount===N` EXACTOS (no `>=1`) → un doble-apply daria 2 eventos → FALLA. `birth_calves` server-only (sin GRANT INSERT) → ternero server existe SOLO si la RPC corrio (no confunde overlay con real).
+- Rollback: asserta (a) overlay borrado UI count 0, (b) server 0/0, (c) warn `upload rechazado` presente. El implementer reporta (y es plausible) que sin el `refreshAnimalesList` el assert fallaba con count=1 → la asercion muerde.
+- Contraprueba transitorio: asserta overlay PERSISTE (count 1) + `rejected===[]` + server 0/0 EN COLA, LUEGO reconecta y `waitForServerBirth` confirma drenado. Distingue "en cola" de "no paso nada".
+
+**Foco 2 — Oraculos server-side**: OK. Todos los helpers nuevos miran el SERVER via service_role (`reproductive_events`/`birth_calves`/`animal_profiles`/`weight_events`), nunca el overlay/UI — leccion del bug de perdida invisible.
+
+**Foco 3 — Determinismo del rollback**: OK. `softDeleteProfile(madre)` se aplica server-side via admin MIENTRAS el cliente esta offline → cuando reconecta y drena, la madre YA esta soft-deleteada → `register_birth` (0075:98-100, `WHERE deleted_at IS NULL` → `raise 23503`) rechaza ANTES de cualquier INSERT (atomico, 0 filas). Sin carrera con el drain: el soft-delete admin aterriza antes de la reconexion. 23503→permanent_reject confirmado en connector.ts:153 + unit upload.test.ts:214.
+
+**Foco 4 — Cleanup + namespacing**: OK. Data sembrada por `createTestUser`/`seedEstablishmentWithRodeo`/`seedAnimal` namespaced por RUN_TAG; `cleanupAll` (intacto) borra por ids trackeados. Oraculos scopeados por `motherProfileId`/`establishmentId` UNICO por test → inmunes a la contaminacion de la beta. (LOW: huerfanos ante kill duro → ya en backlog, no bloquea.)
+
+**Foco 5 — Cero cambio app/src/migraciones/EF/streams**: OK (ver Restriccion dura).
+
+**Foco 6 — Reconciliacion**: COHERENTE. T7.9→[x] y T7.8→[x] con ubicacion de cada test/helper; design §7 nota AS-BUILT del write-path E2E (principio "oraculo mira el server" + desviacion de MECANISMO de test `refreshAnimalesList` por la lectura one-shot + "el assert del rollback muerde"); requirements.md sin cambio de "que" (materializa R6.6/R6.8-R6.12 como E2E, no requirement nuevo). Sin specs contradictorias con el as-built. **T6.5/T7.5 "1 CrudEntry in-vivo"**: el test de parto (op_intents → register_birth atomico → 1 evento) cubre el espiritu de "un solo intent → un solo apply"; el conteo literal de CrudEntries de op_intents queda en el unit T7.7 (idempotencia server-side) + la clasificacion T7.8 — coherente, no abierto.
+
+**check.mjs**: VERDE (exit 0) — "All tests passed." Las 2 corridas rojas iniciales fueron `ConnectTimeoutError` a Supabase (red flaky post-corte), en suites distintas cada vez = red, no codigo. Confirmado: RLS standalone 22/22, sync-streams 25/25, animal suite verde tras estabilizar la red.
+
+**E2E del run**: `animals-offline.spec.ts` 8/8 PASS reproducido por MI (build fresco del working tree, red estable, ZERO `fetch failed`). Respalda la evidencia del reviewer caido (t79-e2e-results.txt, 2x 8/8).
+
+**Veredicto sobre los 8 fallos pre-existentes**: CONFIRMADOS PRE-EXISTENTES (ver subseccion dedicada arriba). HEAD 55d5700 en worktree limpio → 8 failed / 12 passed, todos de ASERCION (badge `vaquillona preñada` = gap de categoria server-side ya en backlog + decidido C6 spec 02), ZERO red. El working tree NO los introdujo: diff de admin.ts 100% aditivo, ningun spec fallido importa los helpers nuevos. Quedan al leader/backlog, NO bloquean T7.9.
+
+**CHECKPOINTS aplicables**:
+- C1 check.mjs exit 0 → [x]. C3 (sin hardcode establishment_id en los tests, sin TODOs sueltos) → [x]. C4 (tests con fixtures reales server-side, runner >0 verdes, cross-tenant cubierto por la suite sync_streams del cierre-T7) → [x]. C6 (R<n> con ≥1 test, tasks T7.x [x]) → [x]. C7/C8 (multi-tenant + offline) cubiertos por el cuerpo de la feature; este run los EJERCITA E2E (offline parto/baja/rollback + oraculo server-side) → [x].
+- C2/C5 (cierre de sesion, history.md, estado de la feature en feature_list) → responsabilidad del LEADER al cerrar; este run no marca done ni commitea. N/A para el reviewer del run.
+
+**Checklist RAFAQ-especifico**:
+- A (RLS/multi-tenancy): N/A directo (cero tabla/policy nueva en este run); el aislamiento cross-tenant del schema lo cubre la suite sync_streams (cierre-T7).
+- B (offline-first): [x] funciona offline (5 tests con `setOffline(true)`), [x] bucket scopeado (heredado), [x] conflict resolution documentada (idempotencia por client_op_id + rollback/transient en design §5.4/§7), [x] no requests sincronos a Supabase desde pantalla (overlay/SQLite local + outbox).
+- C (BLE): N/A (no toca BLE).
+- D (UI campo): N/A en este run (tests, no UI nueva).
+- E (Edge Functions): N/A (no toca EFs).
+
+**Cambios requeridos**: NINGUNO.
+
+`APPROVED`

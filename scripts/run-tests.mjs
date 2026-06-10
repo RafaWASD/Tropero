@@ -68,8 +68,14 @@ if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
   // (SECURITY DEFINER, authz cross-tenant). Enganchada por el leader tras el run de backend
   // (las migraciones 0073/0074 ya aplicadas al remoto vía Management API, 2026-06-06).
   run('Import suite (spec 12)', `node --test supabase/tests/import/run.cjs`);
+  // spec 15 (no-bypass por device) — la frontera de AUTORIZACIÓN de las sync streams (T7.2 + T9.7):
+  // por cada clase de stream, A no recibe la data de B, user_private es self-only, catálogos globales
+  // llegan a todos, soft-deleted sale del sync set, y las tablas hijas denormalizadas (paso 2) no
+  // cruzan tenant. Espejo de la RLS suite, pero sobre las streams (simulando el predicado contra
+  // Postgres con el user_id de cada actor — design §7). Autocontenida (2 campos/usuarios dedicados).
+  run('Sync streams no-bypass suite (spec 15)', `node --test supabase/tests/sync_streams/run.cjs`);
 } else {
-  console.log('\n>>> RLS + Edge + Animal + Maneuvers suites — SKIPPED (falta SUPABASE_SERVICE_ROLE_KEY en env)');
+  console.log('\n>>> RLS + Edge + Animal + Maneuvers + user_private + Import + Sync-streams suites — SKIPPED (falta SUPABASE_SERVICE_ROLE_KEY en env)');
 }
 
 console.log('\nAll tests passed.');

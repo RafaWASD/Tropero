@@ -331,6 +331,39 @@ export async function waitForServerAnimalProfile(
   );
 }
 
+/**
+ * ORÁCULO de persistencia server-side de un EVENTO SIMPLE (spec 15 T7.3 — evento simple offline →
+ * reconexión → fila REAL en el server). Pollea vía service_role hasta que `weight_events` contenga la
+ * fila REAL para ese establishment + peso. Espeja `waitForServerAnimalProfile`: el bug de pérdida de
+ * datos del backlog pasó invisible porque los E2E asertaban la UI (overlay) sin verificar el server.
+ * El evento simple es CRUD plano (INSERT local + upload queue, T5.1) — al reconectar PowerSync drena
+ * la cola por PostgREST; el trigger 0077 fuerza `establishment_id` desde el perfil al subir.
+ */
+export async function waitForServerWeightEvent(
+  establishmentId: string,
+  weightKg: number,
+  opts: { tries?: number; delayMs?: number } = {},
+): Promise<{ id: string }> {
+  const tries = opts.tries ?? 30;
+  const delayMs = opts.delayMs ?? 2000;
+  for (let i = 0; i < tries; i++) {
+    const { data, error } = await admin
+      .from('weight_events')
+      .select('id, establishment_id, weight_kg')
+      .eq('establishment_id', establishmentId)
+      .eq('weight_kg', weightKg)
+      .is('deleted_at', null)
+      .limit(1);
+    if (error) throw new Error(`waitForServerWeightEvent: ${error.message}`);
+    if (data && data.length > 0) return { id: data[0].id as string };
+    await new Promise((r) => setTimeout(r, delayMs));
+  }
+  throw new Error(
+    `waitForServerWeightEvent(${establishmentId}, ${weightKg}kg): el peso NUNCA llegó al server ` +
+      `(${tries} intentos) — el evento vive solo en el SQLite local / no se drenó la upload queue.`,
+  );
+}
+
 /** Permite que un test trackee para cleanup un establishment creado por la UI (por nombre exacto). */
 export async function trackEstablishmentsByNameLike(namePrefix: string): Promise<string[]> {
   const { data, error } = await admin
@@ -405,6 +438,134 @@ export async function cleanupAll(): Promise<void> {
     if (error) console.error(`[e2e cleanup] user ${uid}:`, error.message);
     else createdUserIds.delete(uid);
   }
+}
+
+/**
+ * ORÁCULO de persistencia server-side de un PARTO (spec 15 T7.9 — parto offline → reconexión → un solo
+ * evento de parto + N terneros REALES en el server, NO duplicados). Pollea vía service_role hasta que
+ * `reproductive_events` tenga un evento `birth` para la madre + cuenta los `birth_calves` de ESE evento.
+ * Devuelve { birthEventId, birthEventCount, calfCount } — el test asserta birthEventCount === 1 (no
+ * doble-apply, R6.10/R6.12) y calfCount === <terneros esperados>. Espeja waitForServerWeightEvent: el
+ * oráculo mira el SERVER (no el overlay/UI), que es donde el bug de pérdida/duplicación se manifiesta.
+ *
+ * birth_calves es SERVER-ONLY (sin GRANT de INSERT) → los terneros SOLO pueden existir si la RPC
+ * register_birth corrió. La cuenta de eventos `birth` de la madre detecta un doble-apply (sería 2).
+ */
+export async function waitForServerBirth(
+  motherProfileId: string,
+  opts: { expectedCalves?: number; tries?: number; delayMs?: number } = {},
+): Promise<{ birthEventId: string; birthEventCount: number; calfCount: number }> {
+  const tries = opts.tries ?? 30;
+  const delayMs = opts.delayMs ?? 2000;
+  const expected = opts.expectedCalves ?? 1;
+  for (let i = 0; i < tries; i++) {
+    const snap = await getServerBirthState(motherProfileId);
+    // Esperamos a que el parto + sus terneros estén materializados (calfCount ≥ esperado) — bajo
+    // at-least-once el ACK puede tardar, pero la RPC es atómica: cuando hay evento, hay N terneros.
+    if (snap.birthEventCount >= 1 && snap.calfCount >= expected) {
+      return {
+        birthEventId: snap.birthEventId as string,
+        birthEventCount: snap.birthEventCount,
+        calfCount: snap.calfCount,
+      };
+    }
+    await new Promise((r) => setTimeout(r, delayMs));
+  }
+  const last = await getServerBirthState(motherProfileId);
+  throw new Error(
+    `waitForServerBirth(${motherProfileId}): el parto NUNCA aterrizó completo en el server ` +
+      `(${tries} intentos; última lectura birthEvents=${last.birthEventCount}, calves=${last.calfCount}, ` +
+      `esperados ${expected}). El parto vive solo en el overlay o no se drenó la outbox / RPC register_birth.`,
+  );
+}
+
+/**
+ * Snapshot NO-bloqueante del estado server-side del parto de una madre: cantidad de eventos `birth`
+ * (vivos) + cantidad total de terneros (`birth_calves`) colgados de esos eventos. Lo usa la
+ * contraprueba del rollback (debe quedar en 0/0: la RPC abortó atómica → NADA escrito) y el oráculo
+ * del happy path. `birthEventId` = el id del PRIMER evento birth (o '' si no hay).
+ */
+export async function getServerBirthState(
+  motherProfileId: string,
+): Promise<{ birthEventId: string; birthEventCount: number; calfCount: number }> {
+  const { data: events, error: evErr } = await admin
+    .from('reproductive_events')
+    .select('id')
+    .eq('animal_profile_id', motherProfileId)
+    .eq('event_type', 'birth')
+    .is('deleted_at', null);
+  if (evErr) throw new Error(`getServerBirthState events: ${evErr.message}`);
+  const eventIds = (events ?? []).map((e) => e.id as string);
+  if (eventIds.length === 0) return { birthEventId: '', birthEventCount: 0, calfCount: 0 };
+  const { count, error: cErr } = await admin
+    .from('birth_calves')
+    .select('*', { count: 'exact', head: true })
+    .in('birth_event_id', eventIds);
+  if (cErr) throw new Error(`getServerBirthState calves: ${cErr.message}`);
+  return { birthEventId: eventIds[0], birthEventCount: eventIds.length, calfCount: count ?? 0 };
+}
+
+/**
+ * ORÁCULO de persistencia server-side de una BAJA (spec 15 T7.9 — baja offline → reconexión → el
+ * status/exit_reason REAL aterriza en el server, R6.10). Pollea `animal_profiles` vía service_role
+ * hasta que el perfil tenga el `status` egresado esperado (sold/dead/transferred). Devuelve la fila
+ * (status + exit_reason + exit_date). Mira el SERVER, no el overlay (que solo OCULTA de la lista).
+ */
+export async function waitForServerExit(
+  profileId: string,
+  expectedStatus: 'sold' | 'dead' | 'transferred',
+  opts: { tries?: number; delayMs?: number } = {},
+): Promise<{ status: string; exit_reason: string | null; exit_date: string | null }> {
+  const tries = opts.tries ?? 30;
+  const delayMs = opts.delayMs ?? 2000;
+  for (let i = 0; i < tries; i++) {
+    const { data, error } = await admin
+      .from('animal_profiles')
+      .select('status, exit_reason, exit_date')
+      .eq('id', profileId)
+      .limit(1);
+    if (error) throw new Error(`waitForServerExit: ${error.message}`);
+    const row = data?.[0] as { status: string; exit_reason: string | null; exit_date: string | null } | undefined;
+    if (row && row.status === expectedStatus) return row;
+    await new Promise((r) => setTimeout(r, delayMs));
+  }
+  throw new Error(
+    `waitForServerExit(${profileId}, ${expectedStatus}): el status egresado NUNCA aterrizó en el ` +
+      `server (${tries} intentos) — la baja vive solo en el overlay / no se drenó la outbox.`,
+  );
+}
+
+/**
+ * Snapshot NO-bloqueante del status server-side de un perfil. Lo usa la contraprueba: tras un rollback
+ * la baja NO debe haber aplicado (status sigue 'active'). Si el perfil fue soft-deleteado devuelve
+ * `deleted_at` no-null (para no confundir un rollback con un soft-delete del setup del test).
+ */
+export async function getServerProfileStatus(
+  profileId: string,
+): Promise<{ status: string | null; deleted_at: string | null }> {
+  const { data, error } = await admin
+    .from('animal_profiles')
+    .select('status, deleted_at')
+    .eq('id', profileId)
+    .limit(1);
+  if (error) throw new Error(`getServerProfileStatus: ${error.message}`);
+  const row = data?.[0] as { status: string; deleted_at: string | null } | undefined;
+  return { status: row?.status ?? null, deleted_at: row?.deleted_at ?? null };
+}
+
+/**
+ * Soft-deletea un animal_profile server-side (deleted_at = now()) vía service_role. Lo usa el test de
+ * ROLLBACK in-vivo (T7.8/T7.9): rompe la PRECONDICIÓN server-side de una RPC encolada offline (p.ej. la
+ * madre de un register_birth ya no existe → la RPC levanta 23503 'mother animal_profile not found' →
+ * classifyIntentUploadError → permanent_reject → rollbackOverlay). Es el camino MÁS DETERMINISTA de
+ * provocar un rechazo PERMANENTE real del server (no un 42501 de RLS, que exigiría manipular roles).
+ */
+export async function softDeleteProfile(profileId: string): Promise<void> {
+  const { error } = await admin
+    .from('animal_profiles')
+    .update({ deleted_at: new Date().toISOString() })
+    .eq('id', profileId);
+  if (error) throw new Error(`softDeleteProfile(${profileId}): ${error.message}`);
 }
 
 /** Cliente anon (key pública) — para chequeos auxiliares server-side desde el test si hiciera falta. */

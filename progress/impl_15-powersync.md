@@ -2432,3 +2432,310 @@ Busqué activamente, como revisor hostil:
 `node scripts/check.mjs` → typecheck OK, lint anti-hardcode OK, 767 client unit OK, todas las suites DB
 verdes SALVO la suite nueva `create_animal RPC` (8 rojos PGRST202, esperado hasta aplicar 0083).
 NO commit. NO done. NO se aplicó 0083 al remoto. Espera reviewer + Gate 2 + aplicación por el leader.
+
+---
+
+## Run cierre-T7 — Fase T7: tests de no-bypass por device (T7.2 + T9.7) + E2E evento simple offline (T7.3) + verificación (2026-06-10)
+
+> Alcance EXACTO: cerrar el bloque de tests de la Fase T7 — **T7.2 + T9.7** (no-bypass por device, la pieza
+> central) + **T7.3** (completar el E2E offline con el camino de evento simple) + **T7.5/T7.6** (verificación)
+> + reconciliar checkboxes de T7/T9.7. **SOLO tests + reconciliación de docs** (regla dura del run). CERO
+> cambio de schema/migraciones/RLS/policies/triggers/EF/streams (verificado por `git status`). `baseline_commit`
+> SIN cambios (multi-sesión, `1618a956…`). NO commit. NO done.
+
+### Estado del backend al arrancar (verificado, NO re-derivado)
+Las migraciones `0075`–`0083` (deltas de idempotencia + paso 2 + RPCs `create_animal`/`create_rodeo`/
+`set_rodeo_config`) **YA están aplicadas al remoto** (el leader las aplicó por Management API). Probado:
+las columnas denormalizadas existen (`weight_events.establishment_id`, `animal_profiles.animal_tag_electronic`,
+`user_roles.member_name`, `rodeo_data_config.establishment_id`, `birth_calves.establishment_id`,
+`reproductive_events.client_op_id`) y las 3 RPCs resuelven su firma (42501 con service_role = revocadas de
+public/anon, esperado). → `check.mjs` arranca **VERDE** (las notas "rojo hasta que el leader aplique" de Runs
+2/4/5/create-animal-rpc están RESUELTAS; ver reconciliación abajo).
+
+### Auditoría de qué ya estaba cubierto de T7 (no se re-implementó)
+- **T7.1** (unit mappers/connector): `upload-classify.test.ts` (R3.4/R3.5) + `upload.test.ts`
+  (`mapIntentToRpc` CrudEntry→RPC + `classifyIntentUploadError` transient/idempotent_discard/permanent_reject).
+  Confirmado en disco. → marcada `[x]`.
+- **T7.4** (boot WASM): validado en vivo por Raf (hotfix Run 1.2); además los 3 E2E offline ejercitan el boot
+  + lecturas locales. → `[x]`.
+- **T7.7** (idempotencia): `register_birth` (Run 2, `animal/run.cjs`), `create_animal` (Run create-animal-rpc),
+  `exit/soft_delete` (dedup natural, clasificación en `upload.test.ts`). Ya `[~]`/cubierto.
+- **T7.8** (rollback overlay): cubierto a nivel CLASIFICACIÓN en `upload.test.ts` (permanent_reject→rollback,
+  transient→no-rollback, P0002→idempotent_discard); el E2E in-vivo queda en T7.9. → `[~]` honesto.
+- El grueso PENDIENTE era **T7.2 + T9.7** (no-bypass por device) y **el camino de evento simple offline de T7.3**.
+
+### (1) T7.2 + T9.7 — suite de NO-BYPASS POR DEVICE (la pieza central)
+**Archivo nuevo:** `supabase/tests/sync_streams/run.cjs` (suite top-level `spec 15-powersync — no-bypass por
+device (sync streams, T7.2 + T9.7)`, 25 subtests). **Enganchada en `scripts/run-tests.mjs`** (`run('Sync
+streams no-bypass suite (spec 15)', …)`) → `check.mjs` la corre SIEMPRE (lección sesión 18: suite no
+enganchada = verde-falso).
+
+**Cómo valida la frontera (design §7):** las 25 streams V3 son JOIN-FREE y scopean por el MISMO predicado
+`establishment_id IN org_scope` (`org_scope`/`owner_scope` = `SELECT establishment_id FROM user_roles WHERE
+user_id = <actor> AND active = true [AND role='owner']`). La suite **simula ese predicado contra Postgres con
+el `user_id` de cada actor** vía service_role (que BYPASSA la RLS) → testea la frontera de la STREAM, no la de
+PostgREST (que son distintas: el WAL ignora RLS/views, ADR-025). Autocontenida: 2 campos + 3 usuarios
+dedicados (owner A, owner B, coworker CoA field_operator de A) + un 4to campo dedicado (ownerD) para el caso
+HIGH-1, namespaced con RUN_TAG; tolerante a data ajena (todo assert es relación ENTRE nuestros tenants, nunca
+conteo absoluto); cleanup robusto (CASCADE de establishments + borrado de users).
+
+**Clases de stream cubiertas (25 subtests):**
+- per-establishment estándar: `est_animal_profiles`, `est_rodeos`, `est_management_groups`,
+  `est_establishments`, `est_animal_events` — A NO recibe la fila de B y viceversa; el coworker de A recibe lo
+  de A pero no lo de B.
+- self-only: `self_user_private` (PII de B NO llega a A; ni el coworker recibe el del owner — self-only por
+  `user_id`), `self_user_roles` (A solo ve SUS membresías).
+- owner-only: `est_members_roles` (owner A ve la matriz de roles de SU campo incl. el coworker; B no; el
+  coworker —no-owner— tiene `owner_scope` vacío → no recibe la matriz de nadie), `est_invitations` (A ve su
+  pendiente; B no).
+- catálogos globales (R4.4): species/systems/categories/field_definitions/system_default_fields tienen filas y
+  NO se filtran por establecimiento → llegan a A y a B por igual.
+- soft-delete (R4.5): un rodeo soft-deleteado de A SALE del sync set (`deleted_at IS NULL` en la stream).
+- **R8.2 / HIGH-1**: soft-delete de un campo → su org_scope queda VACÍO (trigger 0076 desactiva los roles) →
+  el owner deja de recibir TODAS sus filas (profiles, weight_events, establishment) por el sync set.
+- **PASO 2 (T9.7)**: las 5 tablas de evento denormalizadas (`weight/sanitary/condition_score/lab/reproductive`
+  — A no recibe eventos de B, disjunción dura + `establishment_id ∈ scopeA`), `ev_birth_calves` (el ternero del
+  parto de A no entra al sync set de B — cadena denormalizada 0078), `est_rodeo_data_config` (config del rodeo
+  de A no cruza), `est_animal_category_history` (historial no cruza). **b1**: la identidad denormalizada de
+  `animal_profiles` (`animal_sex`/`animal_tag_electronic`) es fiel al animal y el tag de B no aparece en el set
+  de A. **`animals` NO en el sync set de nadie**: assert estructural sobre `rafaq.yaml` (`doesNotMatch /FROM
+  animals\b/` + no existe `est_animals`). **c2**: `member_name` viaja en `user_roles` (owner-only) = `users.name`
+  del coworker, y `users` NO figura como `FROM` en ninguna stream.
+
+**Detalles de fixtures resueltos (cazas reales):** `animal_events` exige `establishment_id` + `author_id`
+explícitos con service_role (el trigger 0034 VALIDA y 0043 forzaría desde auth.uid()=null → NOT NULL); el enum
+`repro_event_type` es `'birth'` (no `'parto'`); `birth_calves` es SERVER-ONLY (sin GRANT de INSERT ni a
+service_role) → el parto se crea vía la RPC `register_birth` con el JWT del owner (única vía); la madre debe ser
+`vaquillona_prenada` con ≥1 identificador (CHECK 0070); `lab_samples.tube_number` es NOT NULL.
+
+### (2) T7.3 — E2E evento simple offline (completar el camino faltante)
+El alta offline + reconexión + oráculo server-side de `animal_profiles` + lectura offline de lista/ficha/
+búsqueda YA estaba en `app/e2e/animals-offline.spec.ts` (tests 1+2, Run create-animal-rpc). **AGREGADO** el
+camino faltante de EVENTO SIMPLE (T5.1, CRUD plano):
+- **`app/e2e/helpers/admin.ts`**: `waitForServerWeightEvent(establishmentId, weightKg)` — oráculo de
+  persistencia server-side (pollea `weight_events` vía service_role; espeja `waitForServerAnimalProfile`).
+- **`app/e2e/animals-offline.spec.ts`** test 3: animal sembrado (ya sincronizado) → OFFLINE → abrir su ficha
+  (lectura local) → cronología → "Agregar evento"→"Pesaje"→peso único→Guardar (INSERT local) → el peso se ve
+  OFFLINE en el timeline (lectura local) → RECONEXIÓN → **oráculo server-side**: la fila REAL aterriza en
+  `weight_events` (establishment_id forzado por 0077 al subir) + el peso SIGUE en la ficha + cero `upload
+  rechazado`. Cubre R5.1 (ficha/timeline local), R6.1 (escritura de evento simple offline), R6.2 (re-validación
+  server al subir).
+- **Corrida E2E**: `pnpm e2e:build` + Playwright → `animals-offline.spec.ts` **3/3 PASS** (12s el nuevo; 35s
+  los 3) contra el remoto con 0083 aplicada. El oráculo mira el SERVER (admin/service_role), no la UI (que
+  muestra overlay — el gap exacto que dejó pasar el bug de pérdida de datos).
+
+### (3) Reconciliación de tasks.md (paso 9)
+- **T7.1/T7.4/T7.5/T7.6** → `[x]` con la ubicación real del test/verificación.
+- **T7.2** → `[x]` (`sync_streams/run.cjs`, mutation-probada).
+- **T7.3** → `[x]` (alta+lectura ya cubierto; evento simple agregado).
+- **T7.8** → `[~]` (clasificación cubierta; E2E in-vivo del rollback queda en T7.9).
+- **T7.9** → `[ ]` DIFERIDO con rationale (E2E específico de PARTO offline + rollback in-vivo; el alta offline
+  E2E ya está; la lógica está unit-cubierta) — fuera del alcance nombrado de este run.
+- **T7.7** sub-bullets `create_animal`/`soft_delete_*` → notas "ROJOS hasta 0083" actualizadas a VERDES (el
+  leader aplicó las migraciones).
+- **T9.7** → `[x]` (implementado junto con T7.2 en la misma suite).
+- **design §7** (Tests de no-bypass) → nota AS-BUILT con la ubicación de la suite + el método (simulación del
+  predicado por actor) + la cobertura + la mutation-prueba.
+- `requirements.md` SIN cambio de "qué": R9.2/R4.x/R13.x ya especificaban estos tests; este run los CONSTRUYE
+  (mecanismo, no requirement nuevo). Las notas stale "NO aplicadas al remoto" de Runs 2/4/5 son historial de
+  esos runs (no se reescriben); el estado vigente (aplicadas) queda registrado acá.
+
+### Autorrevisión adversarial (paso 8)
+Busqué activamente, como revisor hostil de la suite de no-bypass (su única razón de existir es la seguridad):
+- **¿Los tests de no-bypass FALLAN si la stream fuera permisiva?** SÍ — **mutation test ejecutado**: copié la
+  suite a un `_mutant.cjs` (en el árbol del repo, para que resuelva módulos) con `syncSetIds` SIN el
+  `establishment_id IN scope` (= stream permisiva que devuelve TODAS las filas) → **11 subtests cross-tenant
+  FALLAN** con los asserts correctos ("A NO debe recibir el perfil de B (cross-tenant)", "animal_events de A y
+  B disjuntos", etc.). Los tests ejercitan la frontera real; no pasan por la razón equivocada. Mutante borrado.
+- **CAZA Y CORREGIDO (debilidad real)**: en la 1ra versión solo sembraba `weight_events`+`animal_events`; los
+  tests de `sanitary/condition_score/lab` corrían sobre sets VACÍOS en ambos tenants → pasaban TRIVIALES (la
+  disjunción de ∅ con ∅ es ∅) y NO habrían cazado una stream permisiva de esas tablas. **Reforzado**: el seed
+  ahora siembra UNO de cada clase (sanitary/condition/lab) por animal en AMBOS tenants. Re-mutación: los 5
+  tests de evento FALLAN bajo el mutante (antes 2; ahora los 5 tienen data y muerden).
+- **¿El oráculo E2E mira el SERVER y no solo la UI?** SÍ — `waitForServerWeightEvent` consulta `weight_events`
+  vía `admin` (service_role), independiente del overlay de la UI. Mismo principio que `waitForServerAnimalProfile`
+  (el helper que cerró el bug de pérdida de datos invisible). El test ADEMÁS asserta cero `upload rechazado` y
+  que el peso sigue en la ficha tras el drenado.
+- **¿La simulación del predicado es FIEL a la stream?** El predicado de cada stream V3 es literalmente
+  `WHERE establishment_id IN org_scope [AND deleted_at IS NULL]` (verificado contra `rafaq.yaml` línea a línea);
+  `org_scope` = `user_roles WHERE user_id = auth.user_id() AND active = true`. Lo replico con service_role (que
+  bypassa RLS) filtrando por el mismo scope → es exactamente lo que el WAL de la stream emitiría. NO uso un
+  cliente JWT con RLS (eso testearía PostgREST, no la stream — error sutil que EVITÉ a propósito).
+- **¿Multi-tenant / no-hardcode?** Cero `establishment_id` hardcodeado: todo deriva de los fixtures por RUN_TAG
+  o del `org_scope` computado por actor. La suite es autocontenida y tolerante a la beta contaminada.
+- **¿El caso HIGH-1/R8.2 ejercita el trigger 0076 real?** SÍ — soft-deletea un campo DEDICADO (estD, no
+  contamina los otros asserts), vuelve a computar `org_scope` (que ahora excluye estD por el trigger) y verifica
+  que TODAS las clases per-establishment de D quedan vacías. Antes del soft-delete asserta que D SÍ recibía su
+  data (no es un falso-positivo por estar siempre vacío).
+- **¿`user_private` self-only de verdad?** El test verifica que ni B ni el COWORKER del mismo campo reciben el
+  `user_private` del owner (el filtro es por `user_id`, no por establishment) → cierra el canal de PII.
+- **¿Rompo algo existente?** `git status`: solo `app/e2e/*` (2), `scripts/run-tests.mjs`, `tasks.md`/`design.md`,
+  `supabase/tests/sync_streams/` (nuevo), `impl_15`. CERO migraciones/EF/RLS/streams/SQL. `check.mjs` exit 0 con
+  la suite nueva enganchada (25/25) + todo lo demás verde. La suite E2E `animals-offline` 3/3 (incl. los 2
+  previos que dependen de `create_animal` 0083). No toqué `progress/current.md`/`docs/backlog.md`/`feature_list`
+  (cambios ajenos del leader en paralelo, confirmados por diff — no son míos).
+- **¿Tests por la razón correcta?** Cada per-establishment test tiene un POSITIVO (A recibe SU fila) + el
+  NO-BYPASS (A no recibe la de B) → falla en ambas direcciones (sobre-restrictivo y permisivo). El de catálogos
+  verifica que tienen filas (no pasa vacío). El de soft-delete verifica que el rodeo VIVO sigue (sanity) además
+  de que el borrado sale.
+
+### Reconciliación de specs (paso 9) — resumen
+- `tasks.md`: T7.1–T7.6 `[x]`, T7.7 notas actualizadas a VERDE, T7.8 `[~]`, T7.9 `[ ]` con rationale, T9.7 `[x]`.
+- `design.md §7`: nota AS-BUILT de la suite de no-bypass (ubicación + método + cobertura + mutation-prueba).
+- `requirements.md`: sin cambio de "qué" (los tests son la materialización de R9.2/R4.x/R13.x, no requirements
+  nuevos). Sin specs contradictorias con el código.
+
+### Verificación final (Run cierre-T7)
+- `node scripts/check.mjs` → **VERDE (exit 0)**: typecheck client OK, lint anti-hardcode OK, client unit OK,
+  RLS/Edge/Animal/Maneuvers/User_private/Import OK, **Sync streams no-bypass suite (spec 15) 25/25 OK**. "All
+  tests passed." / "Entorno listo."
+- `node --test supabase/tests/sync_streams/run.cjs` (aislado) → 25/25 pass.
+- E2E: `pnpm e2e:build` + `playwright test e2e/animals-offline.spec.ts` → **3/3 pass** (el nuevo evento simple
+  offline + los 2 de alta offline).
+- Mutation test (stream permisiva) → 11 subtests cross-tenant FALLAN (prueba de que la suite muerde).
+- NO commit. NO done. CERO cambio de backend. Espera reviewer + Gate 2.
+
+### Diferido / para el leader (Run cierre-T7)
+- **T7.9** (E2E parto offline end-to-end + rollback in-vivo del overlay) y el E2E de baja offline — run E2E
+  aparte. La lógica está unit-cubierta (T7.7 idempotencia + T7.8 clasificación); el cierre in-vivo contra el
+  SQLite/PowerSync real es lo que falta. NO bloquea el bloque de tests no-bypass + evento simple offline.
+- **T8** (native/device) sigue diferido al dev build Android.
+
+---
+
+## Run T7.9 — E2E del write-path offline: PARTO + BAJA + ROLLBACK in-vivo (cierre de T7.8/T7.9) (2026-06-10)
+
+> Alcance EXACTO (último run de tests antes del cierre web de la feature): **T7.9** (E2E parto offline
+> end-to-end + baja offline) + **cierre in-vivo de T7.8** (rollback del overlay contra el SQLite/PowerSync
+> REAL + contraprueba transitorio). **SOLO tests + helpers e2e + reconciliación de specs/bitácora** (regla
+> dura del run). CERO cambio de `app/src/`, migraciones, EFs, streams (verificado por `git status`).
+> `baseline_commit` SIN cambios (multi-sesión, `1618a956…`). NO commit. NO done. Se APILA sobre el trabajo
+> sin commitear del Run cierre-T7 (lo EXTIENDE — no lo modifica).
+
+### Estado del backend al arrancar (verificado, NO re-derivado)
+Las migraciones `0075`–`0083` YA están aplicadas al remoto (el leader las aplicó por Management API; mismo
+estado que dejó el Run cierre-T7). `check.mjs` arranca VERDE. Las 3 RPCs (`create_animal`/`register_birth`/
+`exit_animal_profile`) resuelven su firma. → el E2E corre contra un remoto completo.
+
+### Auditoría de qué ya estaba cubierto (no se re-implementó)
+- **Alta offline** end-to-end + oráculo server-side: `animals-offline.spec.ts` tests 1+2 (Run create-animal-rpc).
+- **Evento simple offline** end-to-end: test 3 (Run cierre-T7, T7.3).
+- **Idempotencia** de `register_birth` (server-side) + clasificación de errores (`upload.test.ts`): T7.7/T7.8 unit.
+- Lo que FALTABA y este run CIERRA: el E2E in-vivo de **PARTO** offline (overlay de N terneros en la ficha de
+  la madre → reconexión → un solo parto en Supabase), de **BAJA** offline, y el **ROLLBACK in-vivo** del
+  overlay (T7.8 a nivel SQLite/PowerSync real, no solo la clasificación unit) + su contraprueba transitoria.
+
+### (1) Helpers de oráculo server-side nuevos (`app/e2e/helpers/admin.ts`, ADITIVO)
+Todos via service_role (miran el SERVER, NUNCA el overlay/UI — lección del bug de pérdida invisible):
+- `waitForServerBirth(motherProfileId, {expectedCalves})` → pollea hasta que `reproductive_events` tenga ≥1
+  evento `birth` de la madre + cuenta `birth_calves` colgados de esos eventos. Devuelve
+  `{birthEventId, birthEventCount, calfCount}` → el test asserta `birthEventCount === 1` (no doble-apply) +
+  `calfCount === N`. **`birth_calves` es server-only (sin GRANT INSERT)** ⇒ un ternero server-side SOLO existe
+  si la RPC `register_birth` corrió → el oráculo NO puede confundir una fila optimista con la real.
+- `getServerBirthState(motherProfileId)` → snapshot NO-bloqueante (mismo shape) → la contraprueba del rollback
+  (debe quedar 0/0: la RPC abortó atómica) y el happy path.
+- `waitForServerExit(profileId, 'sold'|'dead'|'transferred')` → pollea `animal_profiles.status`; devuelve
+  status+exit_reason+exit_date reales. `getServerProfileStatus(profileId)` → snapshot status+deleted_at.
+- `softDeleteProfile(profileId)` → soft-deletea un perfil (deleted_at=now()) → el camino MÁS DETERMINISTA de
+  provocar un rechazo PERMANENTE real (la madre desaparece ⇒ `register_birth` levanta `23503`), sin manipular
+  roles/RLS (que daría 42501 pero exige tocar `user_roles`).
+
+### (2) Tests nuevos (`app/e2e/animals-offline.spec.ts`, 5 tests)
+Helpers de navegación nuevos en el mismo archivo: `openProfileByIdv` (lista→ficha por idv),
+`backToAnimalesList` ("Volver" de la ficha pusheada → tab Animales), `refreshAnimalesList` (rebote Más→Animales
+para forzar el re-fetch one-shot), `registerBirthFromProfile` (Agregar evento→Parto→N terneros Hembra→Guardar;
+acepta el `window.confirm` del aviso suave de parto-no-preñada vía `page.on('dialog')`).
+
+- **PARTO mono / PARTO mellizos** (`for` paramétrico, R6.6/R6.8/R6.12/R6.10): madre hembra sembrada con idv →
+  OFFLINE → registrar el parto desde su ficha → "Parto" se ve en la cronología (overlay
+  `pending_reproductive_events`) y el/los ternero(s) en la lista (overlay `pending_animal_profiles`, fallback
+  visual "recién nacido — pendiente de caravana") → RECONEXIÓN → `waitForServerBirth`: **EXACTAMENTE 1 evento
+  `birth` + N terneros** (no duplicado) + la ficha muestra UN solo nodo "Parto" tras el ACK.
+- **BAJA (Venta)** (R6.10): animal sembrado → OFFLINE → "Dar de baja"→Venta→Dar de baja → el overlay
+  `pending_status_overrides` (effect 'exited') lo OCULTA de la lista activa offline → RECONEXIÓN →
+  `waitForServerExit(profileId,'sold')`: status='sold' + exit_reason real; sigue fuera de la lista.
+- **ROLLBACK in-vivo** (R6.9/R6.11/R8.1/R10.2): PARTO offline (overlay parto+ternero) → mientras OFFLINE,
+  `softDeleteProfile(madre)` (rompe la precondición server-side) → RECONEXIÓN → `register_birth` → `23503` →
+  `classifyIntentUploadError` → `permanent_reject` → `rollbackOverlay`. Verifica: (a) el overlay se BORRA (el
+  ternero desaparece de la lista), (b) `getServerBirthState` = 0 partos / 0 terneros (la RPC abortó atómica),
+  (c) el rechazo es OBSERVABLE (warn `upload rechazado` code 23503), (d) no-loop (tras 6s de retry el overlay
+  sigue vacío).
+- **CONTRAPRUEBA transitorio** (R6.9/R10.2): PARTO offline → quedarse SIN RED un ciclo de retry → el overlay
+  PERSISTE (el ternero sigue en la lista), NO hay warn de rechazo, la intención queda EN COLA (server-side 0
+  partos) → al RECONECTAR (precondición intacta) la intención drena y el parto aterriza (no se descartó).
+
+### (3) Reconciliación de specs (paso 9)
+- `tasks.md`: **T7.9 → `[x]`** (alta ya cubierta + parto+baja+rollback agregados, con ubicación de cada test y
+  helper); **T7.8 → `[x]`** (la clasificación unit del Run cierre-T7 + el CIERRE IN-VIVO de este run).
+- `design.md §7`: nota AS-BUILT del E2E del write-path offline (ubicación + principio "el oráculo mira el
+  SERVER" + cobertura + la desviación de MECANISMO de test `refreshAnimalesList` por la lectura one-shot +
+  la prueba de que el assert del rollback muerde).
+- `requirements.md`: **sin cambio de "qué"** — R6.6/R6.8–R6.12 son los requisitos; este run los MATERIALIZA
+  como E2E in-vivo (mecanismo de test, no requirement nuevo). Sin specs contradictorias con el código.
+
+### (4) Autorrevisión adversarial (paso 8)
+Busqué activamente, como revisor hostil de los oráculos (su única razón de existir es cazar el bug real):
+- **¿El test de parto FALLARÍA si el drain corriera la RPC dos veces?** SÍ. El oráculo asserta
+  `birthEventCount === 1` y `calfCount === N` exactos. Un doble-apply (si el guard `p_client_op_id` se
+  rompiera) daría 2 eventos `birth` → el assert falla. Es una aserción de dedup REAL, no un smoke. (El happy
+  path ejercita el camino normal; la idempotencia bajo reintento la cubre el unit T7.7 server-side.)
+- **¿El test de rollback FALLARÍA si el overlay NO se borrara?** SÍ — **probado empíricamente**: en la 1ra
+  corrida, sin forzar el re-fetch de la lista one-shot, el assert `toHaveCount(0)` recibió `1` (overlay stale)
+  y el test FALLÓ. Eso prueba que la aserción MUERDE. El fix (`refreshAnimalesList`, rebote Más→Animales)
+  confirma que `rollbackOverlay` efectivamente vació `pending_*`; ADEMÁS el oráculo server-side `0/0` prueba
+  que nada leakeó. No pasa por la razón equivocada.
+- **¿El oráculo distingue la fila optimista de la real?** SÍ — consulta Supabase via service_role,
+  independiente del overlay/UI. `birth_calves` es server-only ⇒ los terneros solo existen si la RPC corrió.
+- **¿El rollback test prueba el REJECT real (no un happy)?** SÍ — el warn server `23503` (no un 42501 sintético
+  ni un mock) sale del `register_birth` real contra la madre soft-deleteada; el camino `23503 → permanent_reject`
+  es el del connector real.
+- **¿El camino del permanent_reject es DETERMINISTA?** Elegí soft-delete de la madre (`23503`) sobre un 42501
+  de RLS (que exigiría desactivar el rol del caller a mitad del test — más frágil y con side-effects sobre el
+  sync set). `23503` cae limpio en `permanent_reject` (no transient: tiene `code`; no P0002; no el 23505 de
+  idempotencia de register_birth).
+- **¿La contraprueba transitorio realmente NO superficia?** Verifica explícitamente `rejected === []` mientras
+  offline + `birthEventCount === 0` (en cola, no descartada) + el drenado posterior al reconectar (no se perdió).
+- **Multi-tenant / no-hardcode**: cero `establishment_id` hardcodeado (todo de los fixtures namespaced por
+  RUN_TAG); data de test trackeada + cleanup por ids (el `cleanupAll` ya borra `reproductive_events` antes del
+  CASCADE para no chocar el FK de `birth_calves` — patrón existente, no lo toqué).
+- **¿Aviso suave del parto?** La madre sembrada es vaquillona NO preñada → `register_birth` NO exige preñez
+  (verificado en `0075`), pero la UI dispara el `window.confirm` "registrar igual?" → lo acepto con
+  `page.on('dialog')`. No es un workaround del producto: es el flujo real del operario.
+- **¿Rompo algo existente?** `git status`: solo `app/e2e/animals-offline.spec.ts` + `app/e2e/helpers/admin.ts`
+  (ADITIVO — cero deleción de helpers existentes, verificado por `git diff`) + `tasks.md`/`design.md` + esta
+  bitácora. CERO migraciones/EF/RLS/streams/`app/src/`. Los 5 tests nuevos + los 3 previos = **8/8 verdes** en
+  `animals-offline.spec.ts`.
+
+### (5) Verificación final (Run T7.9)
+- `cd app && pnpm typecheck` → VERDE.
+- `node scripts/check.mjs` → **VERDE (exit 0)**: typecheck/lint/client-unit/RLS/Edge/Animal/Maneuvers/
+  User_private/Import + **Sync streams no-bypass suite 25/25** OK. "All tests passed." / "Entorno listo."
+- E2E: `pnpm e2e:build` + Playwright sobre `animals-offline.spec.ts` → **8/8 PASS** (parto mono 15s, mellizos
+  10s, baja 14s, rollback 20s, transitorio 18s + los 3 previos). Suite E2E COMPLETA corrida: 43 passed.
+- ⚠️ **8 tests de OTROS specs FALLAN (NO regresión de este run, PRE-EXISTENTES)**: `account.spec.ts` (cambio de
+  email), `events.spec.ts` ×3 (tacto→preñada / parto-mellizos / orden-timeline), `profile.spec.ts` ×3 (nombre/
+  teléfono/descarte), `rodeos.spec.ts` (toggle). **VERIFICADO AISLADO**: `events.spec.ts "parto con mellizos"`
+  FALLA SOLO (sin ningún test mío corriendo) con la misma causa — el badge "vaquillona preñada" (transición de
+  categoría recalculada server-side y sincronizada) no aparece a tiempo. Es exactamente el gap del backlog
+  2026-06-08 ("transiciones de categoría no visibles offline / recálculo server-side") + flakiness ambiental
+  sobre la beta contaminada. **NO toqué ninguno de esos specs ni ningún helper que usen** (solo AGREGUÉ helpers
+  nuevos a `admin.ts`, usados solo por mis tests). Quedan para el leader/backlog — fuera del alcance de T7.9.
+
+### Bloqueantes / diferidos
+- **Bloqueantes: NINGUNO.** Ningún test exigió un cambio de producto/backend (la regla dura se respetó: solo
+  tests+helpers).
+- **Diferido (no de este run):** los 8 fallos pre-existentes de account/events/profile/rodeos (transición de
+  categoría server-side no visible a tiempo + flakiness sobre la beta contaminada) — backlog/leader. **T8**
+  (native/device) sigue diferido al dev build Android.
+
+### Mapeo requirement → test (Run T7.9)
+| R<n> | Cobertura | Test |
+|---|---|---|
+| R6.6 (parto offline) | overlay parto+N terneros offline → reconexión → 1 parto server-side | `animals-offline.spec.ts` :: "PARTO mono/mellizos … (T7.9)" |
+| R6.8 (overlay optimista) | parto en cronología + terneros en lista, offline | …:: "PARTO mono/mellizos …" (asserts overlay offline) |
+| R6.12 (no doble-upload) | `waitForServerBirth` → birthEventCount === 1 (no 2 partos / 2N terneros) | …:: "PARTO mono/mellizos …" |
+| R6.10 (idempotencia / no doble-apply; baja) | 1 solo parto; baja → status 'sold' real (transición idempotente) | …:: "PARTO …" + "BAJA (Venta) … (T7.9)" |
+| R6.9 (reject permanente superficia) | 23503 → permanent_reject → warn observable | …:: "PARTO offline + madre soft-deleteada … rollback (T7.8)" |
+| R6.11 (rollback del overlay) | overlay se BORRA (ternero desaparece de la lista) | …:: "… rollback del overlay (T7.8)" |
+| R8.1 (server re-valida y rechaza) | madre soft-deleteada → la RPC rechaza; nada server-side (0/0) | …:: "… rollback (T7.8)" (oráculo `getServerBirthState`) |
+| R10.2 (rechazo observable; transitorio reintenta) | warn `upload rechazado`; transitorio NO superficia, queda en cola | …:: "… rollback (T7.8)" + "… transitorio (T7.8 contraprueba)" |
