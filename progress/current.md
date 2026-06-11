@@ -93,6 +93,34 @@ como 0068-0083; el ledger de `apply_migration` no las registra — disco es la f
 Fase 2 (utils puros) → Fase 3 (services + hooks PowerSync) → Fase 4 (UI: selección explícita checkbox,
 ficha castrado/futuro-torito, vista de grupo rodeo-céntrica). Diseño pasa por el skill design-review.
 
+### BASE NO-UI DE SPEC 10 (Fase 2 + Fase 3) — DONE + GATEADO (reviewer APPROVED + Gate 2 PASS 0 HIGH)
+**Gates** (sobre Fase 2+3 combinadas): reviewer APPROVED (`progress/review_10-frontend-fase2-3.md`) + Gate 2
+PASS 0 HIGH (`progress/security_code_10-frontend-fase2-3.md`; invariante author_id confirmada, 2 MED al
+backlog: castración no-atómica MED-1/MED-2). check.mjs exit 0. **Esperando Puerta 2 + después Fase 4 (UI).**
+La corrida combinada Fase 2+3 se cayó por socket tras T-CL.1/2 → se partió en Fase 2 (T-CL.3-7) + Fase 3
+(T-CL.8-13), ambas cerradas. Detalle abajo:
+
+Services + hooks PowerSync de spec 10 — **Fase 3** (T-CL.8…T-CL.13). NO toca Fase 4 (UI). baseline_commit:
+95e3177. Progreso en `progress/impl_10-frontend-fase3.md`.
+- T-CL.8/9/10: `bulk-operations.ts` (service, wrapper de I/O) + `bulk-operations-plan.ts` (NUEVO, núcleo
+  PURO: plan* + drainBulkPlan). Castración = 2 CrudEntries/animal (UPDATE + observación). Idempotencia
+  de evento (UUIDv5) + batches (~100, InteractionManager). Fallo a mitad ⇒ exitosas persisten + reporte
+  por animal (sin rollback). No toca el connector (CRUD plano as-built).
+- T-CL.11: `animals.setCastrated` (+future_bull=0 + observación simétrica) + `setFutureBull` (sin obs).
+- T-CL.12: `is_castrated`/`future_bull` declaradas en `schema.ts` + proyectadas en lista/detalle/búsqueda
+  → COMPLETA el cableado del espejo C6 de T-CL.7 (ahora con el is_castrated REAL, precedencia). GUARD ok.
+- T-CL.13: observación automática simétrica, sin author_id, N obs + N updates, setFutureBull sin obs.
+- `castration-copy.ts` (NUEVO): fuente única del copy R13.7. Invariantes de seguridad confirmadas
+  (author_id NUNCA en payload; establishment del PERFIL; 2 CrudEntries). typecheck verde + check.mjs exit 0
+  (192 client unit + Fase 1 22/22). Reconciliado design/tasks. NO marqué la feature done.
+
+### HECHO (implementer, 2026-06-11): Fase 2 de spec 10 (utils puros)
+Base NO-UI del frontend de spec 10 — **SOLO Fase 2** (utils puros). NO toca Fase 3 (services/hooks) ni
+Fase 4 (UI). baseline_commit: 95e3177. La corrida previa (`impl_10-frontend-fase2-3.md`) se cayó por un
+error de socket (infra) tras T-CL.1/T-CL.2 (bulk-candidates.ts + test, 13/13 verde — verificados por el
+leader, working tree). Esta corrida retoma desde **T-CL.3** y cierra la Fase 2 (T-CL.3…T-CL.7). Progreso
+en `progress/impl_10-frontend-fase2.md`.
+
 > El fix de centrado robusto (ADR-027 + CenteredRow + crear-rodeo + skill design-review +
 > design-system) YA fue commiteado por su terminal dueña: `877e484` (2026-06-11). Working tree limpio.
 > Próximo recomendado: IMPLEMENTAR SPEC 10 (spec_ready, Puerta 1 aprobada, Gate 1 PASS, delta

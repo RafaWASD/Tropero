@@ -17,6 +17,13 @@ No es un sustituto de `feature_list.json` ni de los ADRs — es la antesala dond
 
 ## Ítems pendientes
 
+## 2026-06-11 — 2 MED del Gate 2 del frontend Fase 2+3 de spec 10 (castración no-atómica)
+
+**Origen**: Gate 2 (security_analyzer, code mode) de la base no-UI de spec 10, `progress/security_code_10-frontend-fase2-3.md`. PASS 0 HIGH. 2 MEDIUM (no bloquean — la no-atomicidad es decisión aceptada de R10.2/Gate 1):
+- **MED-1 (gap de auditoría)**: la castración son **2 CrudEntries independientes** (UPDATE `animal_profiles.is_castrated` + INSERT observación "Castrado"). Si la 2da falla al subir, el animal queda castrado SIN la observación de auditoría (o viceversa). Aceptado por R10.2 (mutaciones independientes, sin rollback). Mitigación futura: detector server-side que reconcilie castrados sin observación, o un job que genere la observación faltante. No MVP.
+- **MED-2 (correctness de reporte)**: `drainBulkPlan` puede reportar un animal como "rechazado" cuando su UPDATE de castración YA quedó encolado (la observación falló) → el operario ve "rechazado" para algo que se aplicó parcialmente. Cosmético/UX, no pérdida de dato. Al implementar la UI de progreso (Fase 4 T-UI.9), afinar el reporte para distinguir "aplicado sin observación" de "rechazado".
+**Próximo paso sugerido**: evaluar al pulir la pantalla de progreso de la masiva (Fase 4) + posible detector server-side en una pasada de hardening. Nada urgente.
+
 ## 2026-06-11 — 3 LOW del Gate 1 puntual de spec 10 (LIM-2, no bloqueantes)
 
 **Origen**: Gate 1 puntual (security_analyzer, spec mode) del delta LIM-2 de spec 10, `progress/security_spec_10-lim2-rechequeo.md`. PASS 0 HIGH/0 MED. 3 LOW para el momento de implementar/Gate 2:
