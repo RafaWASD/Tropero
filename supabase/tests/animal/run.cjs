@@ -1620,9 +1620,13 @@ test('animal suite — spec 02', async (t) => {
     await clientA.from('animal_profiles').update({ category_override: true }).eq('id', ov.profile.id);
     await clientA.from('animals').update({ is_castrated: true }).eq('id', ov.animalId);
     assert.equal(await profileCode(clientA, ov.profile.id), 'torito', 'override bloquea castración (RT2.2.5)');
-    // true->false no revierte novillito->torito (RT2.2.6)
+    // true->false AHORA SÍ revierte novillito->torito.
+    // RECONCILIACIÓN as-built (spec 10 R13.5, migración 0086_castration_recompute_symmetric): el recompute
+    // de castración pasó a ser SIMÉTRICO (D10: castrado = estado editable y reversible). Esto SUPERSEDE
+    // RT2.2.6 de spec 02 Tier 2 ("true->false NO revierte"). La nota de reconciliación a nivel DOC en
+    // requirements/design de spec 02 la coordina el LEADER (no se edita desde la terminal de spec 10).
     await clientA.from('animals').update({ is_castrated: false }).eq('id', to.animalId);
-    assert.equal(await profileCode(clientA, to.profile.id), 'novillito', 'des-castración NO revierte (RT2.2.6)');
+    assert.equal(await profileCode(clientA, to.profile.id), 'torito', 'des-castración SÍ revierte novillito->torito (spec 10 R13.5, recompute simétrico 0086; supersede RT2.2.6)');
   });
 
   // ---- T2.28 CRÍA AL PIE (nursing) (RT2.9.x) ------------------------------

@@ -74,8 +74,12 @@ if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
   // cruzan tenant. Espejo de la RLS suite, pero sobre las streams (simulando el predicado contra
   // Postgres con el user_id de cada actor — design §7). Autocontenida (2 campos/usuarios dedicados).
   run('Sync streams no-bypass suite (spec 15)', `node --test supabase/tests/sync_streams/run.cjs`);
+  // spec 10 (operaciones-rodeo) — Fase 1 backend delta: future_bull + denorm is_castrated con
+  // write-through perfil->animals + propagación down con pre-filtro LIM-2 + recompute simétrico.
+  // Migraciones 0084/0085/0086 ya aplicadas al remoto vía Management API (database/query).
+  run('Operaciones-rodeo suite (spec 10 Fase 1)', `node --test supabase/tests/operaciones_rodeo/run.cjs`);
 } else {
-  console.log('\n>>> RLS + Edge + Animal + Maneuvers + user_private + Import + Sync-streams suites — SKIPPED (falta SUPABASE_SERVICE_ROLE_KEY en env)');
+  console.log('\n>>> RLS + Edge + Animal + Maneuvers + user_private + Import + Sync-streams + Operaciones-rodeo suites — SKIPPED (falta SUPABASE_SERVICE_ROLE_KEY en env)');
 }
 
 console.log('\nAll tests passed.');
