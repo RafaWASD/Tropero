@@ -17,6 +17,30 @@ No es un sustituto de `feature_list.json` ni de los ADRs — es la antesala dond
 
 ## Ítems pendientes
 
+## 2026-06-11 — 2 LOW del Gate 2 del fix ProfileContext first-sync (no bloqueantes)
+
+**Origen**: Gate 2 (security_analyzer, code mode) del fix de e2e rojos (Run e2e-rojos-fix), `progress/security_code_e2e-rojos-fix.md`.
+**Qué**: (1) **Optimista pegado en multi-device** — el gate de reconciliación de `ProfileContext.tsx` (`pendingOptimisticNameRef`, ~líneas 118-122) que evita revertir el saludo recién editado también bloquea, durante esa ventana, un update de `phone` que venga por sync-down de OTRO device; `refresh()` no lo fuerza. Es staleness de data del PROPIO usuario (no leak), ya reconocido por el implementer. (2) **Ventana pre-existente** de `namePhone` in-flight en un switch de usuario sin null intermedio — teórica y ANTERIOR al diff (no la introduce este cambio).
+**Por qué importa**: bajo — ninguno cruza frontera de usuario/tenant; es data propia con staleness acotada. El gate los clasificó LOW, no bloqueantes.
+**Próximo paso sugerido**: ambos desaparecen con la migración del data layer a `useQuery`/`watch` (entrada 2026-06-09) — el watch reactivo re-renderiza ante cualquier cambio del SQLite local sin la maquinaria de re-eval manual ni el ref optimista. No tocar ahora; foldear en esa migración.
+
+## 2026-06-11 — `created_by` spoofeable en eventos por INSERT directo a PostgREST (MED, pre-existente)
+
+**Origen**: Gate 2 (security_analyzer, code mode) del fix del flake de estado repro (Run backlog-flake-repro).
+Finding MEDIUM **fuera del diff** (pre-existente), anotado por recomendación del gate.
+**Qué**: `tg_set_created_by_auth_uid()` (`supabase/migrations/0024…:8-10`) rellena `created_by` SOLO si viene
+NULL → un cliente que pega directo a PostgREST (saltando la app) puede setear `created_by` a OTRO usuario.
+De paso, como la policy UPDATE de `reproductive_events` (`0026:69`) habilita por `created_by = auth.uid()`,
+atribuir el evento a otro usuario le daría a ese usuario derechos de UPDATE sobre la fila. Mismo patrón
+aplica a las otras tablas de evento que usan ese trigger condicional.
+**Por qué importa**: medio — es mismo-tenant (la policy INSERT exige `has_role_in` del establecimiento del
+animal, no cruza frontera de tenant ni escala fuera del campo), pero ensucia la auditoría de autoría y
+puede regalar permisos de edición. El trail regulatorio (ADR-017, `animal_category_history.changed_at`)
+sigue sellado server-side, intacto.
+**Próximo paso sugerido**: en una pasada de hardening, forzar `created_by` INCONDICIONAL estilo el
+`establishment_id` de `0077:68` (`NEW.created_by := auth.uid()` siempre, SECURITY DEFINER) en el trigger
+de las tablas de evento. No-breaking para la app (que nunca manda `created_by`). Nada urgente.
+
 ## 2026-06-11 — 2 LOW del Gate 2 de C6 (clase baseline, no bloqueantes)
 
 Del reporte `progress/security_code_02-c6-categoria-espejo.md`: (1) `err.message` crudo de SQLite
@@ -24,7 +48,9 @@ local puede llegar a la card del revert vía `kind:'unknown'` — patrón baseli
 no cruza trust boundary; unificar copy cuando se toque esa capa. (2) stale-auth en replay del revert
 offline — clase ya aceptada en spec 15 (el server falla cerrado al subir). Sin acción inmediata.
 
-## 2026-06-11 — `deriveCurrentState` desempata por UUID random los eventos repro del mismo día sin `created_at` (flake offline)
+## 2026-06-11 — `deriveCurrentState` desempata por UUID random los eventos repro del mismo día sin `created_at` (flake offline) ✅ RESUELTO
+
+**✅ RESUELTO (2026-06-11, Run backlog-flake-repro)**: DOS cambios complementarios (frontend puro, sin schema/RLS/migraciones). (1) Los INSERT CRUD-plano de `reproductive_events` (tacto/service/abortion) ahora setean `created_at` de CLIENTE (`new Date().toISOString()`) → TODOS los determinantes repro (incluido el parto del overlay, que ya lo traía) tienen un instante REAL de creación. Server-side `created_at` es `default now()` SIN trigger de force (0026) → el valor de cliente persiste, y es semánticamente mejor (instante de CREACIÓN, no de subida) para un evento offline. (2) Se reemplazó el desempate por `eventId` (UUID v4 random) por un `seq` = orden de lectura de `buildTimelineQuery` (que ahora ordena `event_date ASC, created_at IS NULL ASC, created_at ASC` en un SELECT externo que envuelve el UNION; antes `DESC`, cosmético) → `fetchTimeline` asigna `seq`; `isNewerRepro`/`parseTimeline` lo usan como desempate estable. Con (1) el caso realista es "ambos created_at presentes" → el insertado DESPUÉS gana, DETERMINÍSTICO. **Diagnóstico clave (vía DIAG en e2e)**: el approach read-only puro NO alcanzaba — el parto del overlay tenía created_at de cliente mientras el tacto CRUD-plano quedaba NULL hasta sincronizar, y ni "null=más reciente" ni "presente gana" eran universalmente correctos; el created_at de cliente en (1) elimina la ambigüedad. Tests unit nuevos + guard de ORDER BY + 2 tests de comportamiento node:sqlite. e2e `events.spec.ts` (parto/aborto/parto-mellizos): verde y DETERMINÍSTICO con `--repeat-each=5` (10/10 parto-mellizos, 15/15 los otros 3). Detalle en `progress/impl_backlog-flake-repro.md`. Se mantiene la entrada por trazabilidad.
 
 **Origen**: chunk C6 (espejo de categoría), re-verificando los e2e de events. El espejo de CATEGORÍA (badge) ya quedó robusto al caso offline (desempate por índice de array, RC6.1.4); el espejo de ESTADO REPRODUCTIVO (`deriveCurrentState` en `app/src/utils/event-timeline.ts`, la fila "Estado reproductivo: Preñada/Vacía") NO.
 **Qué**: cuando dos eventos repro determinantes de preñez (tacto/birth/abortion) caen el MISMO `event_date` y ambos tienen `created_at = null` (caso REALISTA: se cargan offline por CRUD plano y el trigger sella el `created_at` recién al subir), `isNewerRepro` cae al desempate por `eventId` — que es un UUID v4 RANDOM → ~50/50 cuál "gana". Efecto: tras un PARTO o un ABORTO cargado offline el mismo día que el tacto previo, la fila "Estado reproductivo" muestra "Preñada" en vez de "Vacía" la mitad de las veces. El BADGE de categoría YA quedó correcto con C6 (deriva por índice de array); solo la fila de estado reproductivo arrastra el bug.
@@ -133,7 +159,9 @@ arreglada.
 **Por qué importa**: pérdida de dato PERCIBIDA como bug (aunque sea un rechazo legítimo). En la manga nadie mira la consola. Rompe "el mejor en el primer try".
 **Próximo paso sugerido**: run chico de UX — canal de status ya existente (`status.ts` / `pending ops`): acumular los rechazos en una tablita local (o en memoria + badge en el header de sync) con copy es-AR accionable ("No pudimos guardar el animal 211: caravana duplicada"). Decisión de producto sobre dónde mostrarlo (toast al reconectar vs. bandeja de "pendientes con error"). NO implementado en este run (fuera de alcance).
 
-## 2026-06-10 — ProfileContext queda en "Sin conexión: no pudimos actualizar tu perfil" si la carga corre antes del first-sync (y la tab Más lo muestra)
+## 2026-06-10 — ProfileContext queda en "Sin conexión: no pudimos actualizar tu perfil" si la carga corre antes del first-sync (y la tab Más lo muestra) ✅ RESUELTO (2026-06-11, Run e2e-rojos-fix)
+
+**✅ CERRADO (2026-06-11, Run e2e-rojos-fix)**: era un bug FUNCIONAL determinístico (no solo cosmético): bloqueaba "Editar perfil" / "Cambiar email" en el arranque hasta un retry manual (triage `progress/triage_e2e_rojos.md` lo demostró con 4 e2e rojos deterministas: account:151 + profile:54/75/110, todos en `gotoTab('Más')`). Fix en `app/src/contexts/ProfileContext.tsx`: efecto reactivo que re-lee el perfil cuando AVANZA `lastSyncedAt` (vía `useStatus()` de `@powersync/react`, patrón canónico de `animales.tsx:192`/`index.tsx:415`) → al completar el first-sync se limpia el `error` espurio y carga el perfil; "Más" rendea la sección Perfil. Caso offline-puro intacto (sin sync nunca → `lastSyncedMs===0`, el efecto no dispara, fallback de saludo sigue, sin loop). Al destrabar el ancla `:54`, el e2e profile:38 reveló un SEGUNDO síntoma del mismo gap de reactividad: el saludo de la home no se actualizaba tras editar el nombre porque `saveProfile` es ONLINE-direct a `public.users` pero la lectura viene del SQLite local (lag de sync-down) → se cerró con aterrizaje OPTIMISTA (`applyOwnProfile`: el saludo refleja el valor recién guardado al instante; el sync-down reconcilia; un marcador `pendingOptimisticNameRef` evita que un sync-down de otras tablas revierta el saludo con el valor viejo). Verificación: profile.spec.ts + account.spec.ts 18/18 verde con `--repeat-each=3` (era 4 rojos det.). NO se tocaron los tests (sus asserts eran correctos). Detalle en `progress/impl_e2e-rojos-fix.md`. Entrada original abajo por trazabilidad:
 
 **Origen**: Run bugfix-overlay-list (15-powersync), hallazgo lateral del repro E2E offline (el ancla "Editar perfil" de la tab Más no aparecía).
 **Qué**: `ProfileContext` carga name/phone UNA vez al resolver `userId` (`useEffect [userId]`) — típicamente ANTES del first-sync de PowerSync → `runLocalQuerySingle` degrada "vacío + !hasSynced" a `kind:'network'` → `error` queda seteado y NO se re-evalúa solo (no escucha `statusChanged` ni re-corre al avanzar `lastSyncedAt`). En la tab "Más", la sección Perfil muestra el alert "Sin conexión: no pudimos actualizar tu perfil." + "Reintentar" y NO renderiza "Editar perfil" hasta que el usuario re-enfoca/reintenta (hay un `useFocusEffect` con `refresh()` que lo suele salvar al entrar a Más, pero la ventana existe y offline-post-sync el copy es engañoso). Misma clase que el fix T11 (consumir la degradación R5.4 re-evaluando en la transición first-sync), no aplicada a este contexto.
@@ -183,6 +211,8 @@ arreglada.
 ## 2026-06-07 — `rodeos.spec.ts` e2e roja por el OnboardingImportOffer de feature 12 ✅ RESUELTO
 
 **Resuelto** (2026-06-07, terminal feature 12): el helper `completeCrearRodeo` (`app/e2e/helpers/rodeos.ts`) ahora descarta la oferta de onboarding tocando "Más tarde, ir al inicio" (de forma tolerante para el alta no-bloqueante). Corrida real: 3/3 verdes. No se tocó la app (la oferta es intencional). Se mantiene el registro por trazabilidad.
+
+**Nota (2026-06-11, Run e2e-rojos-fix)**: NO confundir con un flake DISTINTO de `rodeos.spec.ts:138` que apareció después y se cerró en este run. Causa raíz distinta: `createRodeo` pasó a ser OFFLINE-FIRST vía outbox (spec 15, T9.8) → la RPC server-side corre async al drenar la outbox; el test leía el remoto UNA vez tras `waitForHome` y race-eaba con el upload (flake 2/3, `rodeos.length` recibía 0). Fix TEST-only en `app/e2e/rodeos.spec.ts`: `expect.poll` por la persistencia server-side del rodeo (patrón `waitForServerAnimalProfile`). El producto está bien (offline-first es el diseño correcto); el test no debe asumir persistencia síncrona. 3/3 verde con `--repeat-each=3`. La oferta del OnboardingImportOffer NO estuvo involucrada (el helper ya la descarta).
 
 **Origen**: sesión actual, mientras se implementaba C3.3 (baja de animal). El implementer lo detectó como hallazgo fuera de alcance; el leader lo confirmó por `git diff` (C3.3 NO toca `rodeos.spec.ts` ni `crear-rodeo.tsx` → el rojo es ajeno y pre-existente al chunk).
 **Qué**: `crear-rodeo.tsx:221` muestra el `OnboardingImportOffer` (CTA "Importar rodeo", feature 12, commit `4e1b6d5`) tras crear el **primer** rodeo, con `router.replace('/import-rodeo')` / `router.replace('/(tabs)')`. La suite `app/e2e/rodeos.spec.ts` (BUG 1) crea un rodeo y espera aterrizar directo en home → la oferta de onboarding intercepta y el assert falla. 2 tests rojos. El `check.mjs` NO corre los Playwright e2e (corre las suites node de backend), por eso quedó verde igual y el rojo no se vio en el pipeline.
