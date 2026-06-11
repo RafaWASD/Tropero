@@ -114,11 +114,19 @@ export async function fetchTimeline(profileId: string): Promise<ServiceResult<Ti
   });
   if (!tl.ok) return { ok: false, error: { kind: tl.error.kind, message: tl.error.message } };
 
-  const rows: TimelineRow[] = tl.value.map((r) => ({
+  // `seq` = índice de la fila en el set que devuelve buildTimelineQuery (`ORDER BY event_date ASC,
+  // created_at IS NULL ASC, created_at ASC` — la cláusula `created_at IS NULL ASC` empuja los NULL AL FINAL
+  // = recién insertado, aún sin sellar = más reciente). Es el proxy FIEL del ORDEN DE INSERCIÓN local cuando el created_at aún no está
+  // sellado server-side: a igualdad de (event_date, created_at) SQLite entrega las filas en su orden de
+  // almacenamiento estable → el de índice MAYOR se insertó después ⇒ es posterior. parseTimeline lo usa
+  // como desempate estable (en vez del eventId UUID random) y deriveCurrentState para el estado repro del
+  // mismo día (TAREA 2, fix flake — espejo del índice de array de buildCategoryMirrorEventsQuery/RC6.1.4).
+  const rows: TimelineRow[] = tl.value.map((r, i) => ({
     event_kind: r.event_kind,
     event_id: r.event_id,
     event_date: r.event_date,
     created_at: r.created_at,
+    seq: i,
     payload: parsePayload(r.payload),
   }));
   let items = parseTimeline(rows);
@@ -336,6 +344,7 @@ export async function addTacto(input: AddTactoInput): Promise<ServiceResult<true
     input.pregnancyStatus,
     input.eventDate,
     cleanStr(input.notes),
+    nowIso(),
   );
   const r = await runLocalWrite(q);
   if (!r.ok) return { ok: false, error: { kind: r.error.kind, message: r.error.message } };
@@ -373,6 +382,7 @@ export async function addAbortion(input: AddAbortionInput): Promise<ServiceResul
     input.profileId,
     input.eventDate,
     cleanStr(input.notes),
+    nowIso(),
   );
   const r = await runLocalWrite(q);
   if (!r.ok) return { ok: false, error: { kind: r.error.kind, message: r.error.message } };
@@ -400,6 +410,7 @@ export async function addService(input: AddServiceInput): Promise<ServiceResult<
     input.serviceType,
     input.eventDate,
     cleanStr(input.notes),
+    nowIso(),
   );
   const r = await runLocalWrite(q);
   if (!r.ok) return { ok: false, error: { kind: r.error.kind, message: r.error.message } };
@@ -593,4 +604,16 @@ function cleanStr(v: string | null | undefined): string | null {
 /** UUID v4 de cliente (R6.4). crypto.randomUUID está en RN (Hermes), web y Node — sin dep extra. */
 function randomUuid(): string {
   return globalThis.crypto.randomUUID();
+}
+
+/**
+ * created_at de CLIENTE (wall-clock de creación) para los INSERT de reproductive_events (TAREA 2). Da un
+ * instante real de creación a cada evento repro CRUD-plano → el estado reproductivo vigente
+ * (deriveCurrentState) desempata DETERMINÍSTICAMENTE los eventos del mismo `event_date` por created_at, sin
+ * caer al eventId UUID random (el flake). El server lo persiste (created_at = default now() SIN force, 0026)
+ * → es el instante de CREACIÓN en el dispositivo, fiel al orden de creación (mejor que el now() de subida
+ * para un evento cargado offline). Ver el banner de los builds en local-reads.ts.
+ */
+function nowIso(): string {
+  return new Date().toISOString();
 }

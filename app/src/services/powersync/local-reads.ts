@@ -770,8 +770,21 @@ export function buildManagementGroupsQuery(establishmentId: string): LocalQuery 
 //
 // El `payload` se construye con `json_object(...)` (JSON1, disponible en el SQLite de PowerSync) → baja
 // como TEXT (string JSON). El service lo `JSON.parse`ea a un Record antes de pasarlo a parseTimelineRow
-// (que espera `payload: Record`). El ORDEN visual lo hace el cliente (parseTimeline); el `ORDER BY
-// event_date DESC` de acá es cosmético/defensivo (igual que el de la RPC).
+// (que espera `payload: Record`). El ORDEN VISUAL lo hace el cliente (parseTimeline) — el ORDER BY de acá
+// NO es el orden de pantalla.
+//
+// ORDER BY event_date ASC, (created_at IS NULL) ASC, created_at ASC (TAREA 2, fix flake del estado repro):
+// el índice de la fila en este set es la fuente del `seq` que fetchTimeline asigna a cada TimelineItem
+// (proxy FIEL del ORDEN DE INSERCIÓN local). Dentro de un mismo event_date: primero los created_at PRESENTES
+// en orden ascendente, y LOS NULL AL FINAL (`created_at IS NULL ASC` → 0=no-null antes que 1=null). Un
+// created_at NULL = fila CRUD-plano recién insertada local que el trigger aún no selló = la MÁS RECIENTE
+// (semántica null-as-newest del isAfter de buildCategoryMirrorEventsQuery/RC6.1.4, acá codificada en el
+// propio ORDER BY) → queda con índice MAYOR ⇒ posterior. Entre dos NULL (ambos sin sellar, p.ej. tacto +
+// aborto offline el mismo día) SQLite entrega su orden de almacenamiento estable (proxy del orden de
+// inserción) → el INSERTADO DESPUÉS queda con índice MAYOR. Todo esto reproduce lo que el server sellará
+// (created_at = now() en orden de subida = orden de inserción local). Antes era `event_date DESC` (cosmético)
+// y el desempate del estado repro caía al eventId UUID random ⇒ ~50/50 (el bug). El orden de PANTALLA no
+// cambia (parseTimeline re-ordena por su cuenta).
 //
 // event_date por origen (fiel a 0069):
 //   - weight: la RPC hace `weight_date::timestamptz + coalesce(time,'00:00')`. weight es un date-only
@@ -787,7 +800,7 @@ export function buildTimelineQuery(profileId: string): LocalQuery {
   // 7 sub-selects unidos por UNION ALL. Cada uno scopea por animal_profile_id = ? (el del perfil) +
   // su deleted_at propio (salvo category_change, append-only de auditoría). El payload espeja el
   // jsonb_build_object de cada origen en 0069 (mismas claves: el parser lee esas claves).
-  const sql =
+  const union =
     "SELECT 'weight' AS event_kind, id AS event_id, weight_date AS event_date, created_at AS created_at, " +
     "json_object('weight_kg', weight_kg, 'source', source, 'notes', notes) AS payload " +
     'FROM weight_events WHERE animal_profile_id = ? AND deleted_at IS NULL ' +
@@ -822,8 +835,15 @@ export function buildTimelineQuery(profileId: string): LocalQuery {
     'UNION ALL ' +
     "SELECT 'reproductive', id, event_date, created_at, " +
     "json_object('event_type', event_type, 'pregnancy_status', NULL, 'calf_id', NULL, 'notes', notes) " +
-    'FROM pending_reproductive_events WHERE animal_profile_id = ? ' +
-    'ORDER BY event_date DESC';
+    'FROM pending_reproductive_events WHERE animal_profile_id = ?';
+  // El ORDER BY va en un SELECT EXTERNO que envuelve el UNION: en un compound (UNION) SQLite NO acepta
+  // EXPRESIONES en el ORDER BY (solo columnas del result set / posiciones) → `(created_at IS NULL)` daría
+  // "2nd ORDER BY term does not match any column". En el SELECT externo, `created_at` ES una columna del
+  // subquery → la expresión es válida. `created_at IS NULL ASC` empuja los NULL AL FINAL (recién insertado
+  // = más reciente); `created_at ASC` ordena los presentes. (Ver nota TAREA 2 arriba.)
+  const sql =
+    `SELECT event_kind, event_id, event_date, created_at, payload FROM (${union}) ` +
+    'ORDER BY event_date ASC, created_at IS NULL ASC, created_at ASC';
   // 7 placeholders sincronizados + 1 del overlay (pending birth) = 8, todos = profileId.
   return {
     sql,
@@ -957,11 +977,25 @@ export function buildAddConditionScoreInsert(
   };
 }
 
+// ⚠️ created_at de CLIENTE en los INSERT de reproductive_events (TAREA 2, fix flake del estado repro).
+// A diferencia del resto de las tablas de evento, los reproductivos CRUD-plano SÍ setean `created_at` con
+// el wall-clock del cliente al insertar. Motivo: el ESTADO REPRODUCTIVO vigente (deriveCurrentState) y el
+// tacto+ vigente (compute_category) desempatan los eventos del MISMO `event_date` (columna `date`, sin
+// hora) por `created_at` — y un tacto + un parto/aborto el mismo día son indistinguibles sin él. El parto
+// llega por el OVERLAY (pending_reproductive_events) con un created_at de cliente; si el tacto (CRUD-plano)
+// quedara con created_at NULL hasta sincronizar, el desempate se rompía (~50/50 por el eventId UUID random;
+// el flake del backlog). Con created_at de cliente AMBOS tienen un instante real de creación → orden total
+// determinístico (el insertado después gana). Server-side `created_at` es `default now()` SIN trigger de
+// force (0026) → el valor del cliente PERSISTE al subir: es semánticamente correcto (instante de CREACIÓN
+// en el dispositivo, no de subida) y fiel al orden de creación, mejor que el now() de subida para un evento
+// cargado offline. `created_by`/`establishment_id` los SIGUE forzando el trigger (no se tocan). El caller
+// pasa `new Date().toISOString()`.
+
 /**
- * INSERT local de un evento reproductivo `tacto` (espeja events.addTacto). `id` de cliente.
- * `pregnancy_status` de un selector CERRADO. El efecto colateral de TRANSICIÓN de categoría de la madre
- * lo dispara el trigger AFTER INSERT al SUBIR la fila a PostgREST (no local) — el cliente re-fetchea la
- * ficha al volver. `notes` opcional.
+ * INSERT local de un evento reproductivo `tacto` (espeja events.addTacto). `id` + `createdAt` de cliente
+ * (ver nota del banner). `pregnancy_status` de un selector CERRADO. El efecto colateral de TRANSICIÓN de
+ * categoría de la madre lo dispara el trigger AFTER INSERT al SUBIR la fila a PostgREST (no local). `notes`
+ * opcional.
  */
 export function buildAddTactoInsert(
   id: string,
@@ -969,19 +1003,20 @@ export function buildAddTactoInsert(
   pregnancyStatus: string,
   eventDate: string,
   notes: string | null,
+  createdAt: string,
 ): LocalQuery {
   return {
     sql:
       'INSERT INTO reproductive_events ' +
-      '(id, animal_profile_id, event_type, event_date, pregnancy_status, notes) ' +
-      "VALUES (?, ?, 'tacto', ?, ?, ?)",
-    args: [id, profileId, eventDate, pregnancyStatus, notes],
+      '(id, animal_profile_id, event_type, event_date, pregnancy_status, notes, created_at) ' +
+      "VALUES (?, ?, 'tacto', ?, ?, ?, ?)",
+    args: [id, profileId, eventDate, pregnancyStatus, notes, createdAt],
   };
 }
 
 /**
- * INSERT local de un evento reproductivo `service` (espeja events.addService). `id` de cliente.
- * `service_type` de un selector CERRADO. NO dispara transición. `notes` opcional.
+ * INSERT local de un evento reproductivo `service` (espeja events.addService). `id` + `createdAt` de
+ * cliente. `service_type` de un selector CERRADO. NO dispara transición. `notes` opcional.
  */
 export function buildAddServiceInsert(
   id: string,
@@ -989,32 +1024,34 @@ export function buildAddServiceInsert(
   serviceType: string,
   eventDate: string,
   notes: string | null,
+  createdAt: string,
 ): LocalQuery {
   return {
     sql:
       'INSERT INTO reproductive_events ' +
-      '(id, animal_profile_id, event_type, event_date, service_type, notes) ' +
-      "VALUES (?, ?, 'service', ?, ?, ?)",
-    args: [id, profileId, eventDate, serviceType, notes],
+      '(id, animal_profile_id, event_type, event_date, service_type, notes, created_at) ' +
+      "VALUES (?, ?, 'service', ?, ?, ?, ?)",
+    args: [id, profileId, eventDate, serviceType, notes, createdAt],
   };
 }
 
 /**
- * INSERT local de un evento reproductivo `abortion` (espeja events.addAbortion). `id` de cliente. Sin
- * pregnancy_status ni service_type. El efecto colateral de REVERSIÓN de preñez (categoría) lo dispara el
- * trigger al SUBIR. `notes` opcional.
+ * INSERT local de un evento reproductivo `abortion` (espeja events.addAbortion). `id` + `createdAt` de
+ * cliente. Sin pregnancy_status ni service_type. El efecto colateral de REVERSIÓN de preñez (categoría) lo
+ * dispara el trigger al SUBIR. `notes` opcional.
  */
 export function buildAddAbortionInsert(
   id: string,
   profileId: string,
   eventDate: string,
   notes: string | null,
+  createdAt: string,
 ): LocalQuery {
   return {
     sql:
-      'INSERT INTO reproductive_events (id, animal_profile_id, event_type, event_date, notes) ' +
-      "VALUES (?, ?, 'abortion', ?, ?)",
-    args: [id, profileId, eventDate, notes],
+      'INSERT INTO reproductive_events (id, animal_profile_id, event_type, event_date, notes, created_at) ' +
+      "VALUES (?, ?, 'abortion', ?, ?, ?)",
+    args: [id, profileId, eventDate, notes, createdAt],
   };
 }
 

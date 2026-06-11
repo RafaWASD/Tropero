@@ -668,6 +668,89 @@ test('buildTimelineQuery: payload con json_object (las claves que parseTimelineR
   assert.match(q.sql, /json_object\('from', from_category_id, 'to', to_category_id, 'reason', reason\)/);
 });
 
+// TAREA 2 (fix flake estado repro): el ORDER BY debe ser event_date ASC, (created_at IS NULL) ASC,
+// created_at ASC — el índice de la fila en este set es el `seq` (proxy del orden de inserción) que
+// fetchTimeline asigna. Los NULL (CRUD-plano sin sellar = recién insertado = más reciente) van AL FINAL
+// (seq mayor). Si vuelve a `event_date DESC` el desempate del estado repro caería al eventId UUID random.
+test('buildTimelineQuery: ORDER BY event_date ASC, NULL-created_at al final, created_at ASC (fuente del seq)', () => {
+  const q = buildTimelineQuery('p');
+  // El ORDER BY va en un SELECT externo que envuelve el UNION (en un compound SQLite rechaza expresiones).
+  assert.match(q.sql, /ORDER BY event_date ASC, created_at IS NULL ASC, created_at ASC/);
+  assert.doesNotMatch(q.sql, /ORDER BY event_date DESC/);
+  // El UNION sigue adentro (7 UNION ALL) y se envuelve en SELECT … FROM ( … ).
+  assert.match(q.sql, /SELECT event_kind, event_id, event_date, created_at, payload FROM \(/);
+});
+
+// TAREA 2 — COMPORTAMIENTO: contra node:sqlite (tablas reales), el índice de la fila refleja el orden de
+// inserción a igualdad de (event_date, created_at) — el caso REALISTA offline: tacto + parto el mismo día,
+// ambos sin created_at sellado (NULL). El parto, insertado DESPUÉS, debe quedar con índice MAYOR ⇒ seq
+// mayor ⇒ deriveCurrentState lo trata como posterior (espejo del índice de array de la categoría, RC6.1.4).
+test('buildTimelineQuery: a igualdad de (event_date, created_at NULL) el insertado después queda con índice mayor', () => {
+  const db = new DatabaseSync(':memory:');
+  // Solo necesitamos reproductive_events (synced) + las tablas del UNION que el SQL toca; creamos todas
+  // con las columnas mínimas que cada sub-select referencia para que el query no falle por columna ausente.
+  db.exec(
+    'CREATE TABLE weight_events (id TEXT, animal_profile_id TEXT, weight_date TEXT, created_at TEXT, weight_kg REAL, source TEXT, notes TEXT, deleted_at TEXT);' +
+      'CREATE TABLE reproductive_events (id TEXT, animal_profile_id TEXT, event_type TEXT, event_date TEXT, created_at TEXT, pregnancy_status TEXT, calf_id TEXT, notes TEXT, deleted_at TEXT);' +
+      'CREATE TABLE sanitary_events (id TEXT, animal_profile_id TEXT, event_type TEXT, event_date TEXT, created_at TEXT, product_name TEXT, route TEXT, notes TEXT, deleted_at TEXT);' +
+      'CREATE TABLE condition_score_events (id TEXT, animal_profile_id TEXT, event_date TEXT, created_at TEXT, score REAL, notes TEXT, deleted_at TEXT);' +
+      'CREATE TABLE lab_samples (id TEXT, animal_profile_id TEXT, collection_date TEXT, created_at TEXT, sample_type TEXT, tube_number TEXT, result TEXT, result_received_date TEXT, deleted_at TEXT);' +
+      'CREATE TABLE animal_category_history (id TEXT, animal_profile_id TEXT, changed_at TEXT, from_category_id TEXT, to_category_id TEXT, reason TEXT);' +
+      'CREATE TABLE animal_events (id TEXT, animal_profile_id TEXT, created_at TEXT, event_type TEXT, text TEXT, structured_payload TEXT, author_id TEXT, edit_window_until TEXT, deleted_at TEXT);' +
+      'CREATE TABLE pending_reproductive_events (id TEXT, animal_profile_id TEXT, event_type TEXT, event_date TEXT, created_at TEXT, notes TEXT);',
+  );
+  const ins = db.prepare(
+    'INSERT INTO reproductive_events (id, animal_profile_id, event_type, event_date, created_at, pregnancy_status) VALUES (?,?,?,?,?,?)',
+  );
+  // Insertamos el TACTO primero y el PARTO después, MISMO event_date, AMBOS created_at NULL (CRUD plano
+  // local aún sin sellar). El id del tacto es lexicográficamente MAYOR a propósito (zzz > aaa): si el
+  // desempate fuera por id, el tacto ganaría (el bug). Acá probamos que el ÍNDICE refleja la inserción.
+  ins.run('t-zzz', 'p1', 'tacto', '2026-06-01', null, 'large');
+  ins.run('b-aaa', 'p1', 'birth', '2026-06-01', null, null);
+
+  const q = buildTimelineQuery('p1');
+  const rows = (db.prepare(q.sql).all(...(q.args as string[])) as { event_id: string }[]).map((r) => ({
+    ...r,
+  }));
+  db.close();
+
+  // Ambas filas presentes; el PARTO (insertado después) queda DESPUÉS en el array → índice/seq mayor.
+  const ids = rows.map((r) => r.event_id);
+  assert.deepEqual(ids, ['t-zzz', 'b-aaa']);
+  assert.ok(ids.indexOf('b-aaa') > ids.indexOf('t-zzz'), 'el parto (insertado después) tiene índice mayor');
+});
+
+// TAREA 2 — COMPORTAMIENTO (MIXED, el caso del e2e): un tacto YA SINCRONIZADO (created_at presente) + un
+// parto/aborto recién cargado (created_at NULL). El NULL = recién insertado local = más reciente → el SQL
+// lo ordena AL FINAL (NULLs-last) → seq mayor → deriveCurrentState lo trata como posterior ⇒ "Vacía".
+test('buildTimelineQuery: created_at NULL (recién insertado) queda DESPUÉS del created_at presente (NULLs-last)', () => {
+  const db = new DatabaseSync(':memory:');
+  db.exec(
+    'CREATE TABLE weight_events (id TEXT, animal_profile_id TEXT, weight_date TEXT, created_at TEXT, weight_kg REAL, source TEXT, notes TEXT, deleted_at TEXT);' +
+      'CREATE TABLE reproductive_events (id TEXT, animal_profile_id TEXT, event_type TEXT, event_date TEXT, created_at TEXT, pregnancy_status TEXT, calf_id TEXT, notes TEXT, deleted_at TEXT);' +
+      'CREATE TABLE sanitary_events (id TEXT, animal_profile_id TEXT, event_type TEXT, event_date TEXT, created_at TEXT, product_name TEXT, route TEXT, notes TEXT, deleted_at TEXT);' +
+      'CREATE TABLE condition_score_events (id TEXT, animal_profile_id TEXT, event_date TEXT, created_at TEXT, score REAL, notes TEXT, deleted_at TEXT);' +
+      'CREATE TABLE lab_samples (id TEXT, animal_profile_id TEXT, collection_date TEXT, created_at TEXT, sample_type TEXT, tube_number TEXT, result TEXT, result_received_date TEXT, deleted_at TEXT);' +
+      'CREATE TABLE animal_category_history (id TEXT, animal_profile_id TEXT, changed_at TEXT, from_category_id TEXT, to_category_id TEXT, reason TEXT);' +
+      'CREATE TABLE animal_events (id TEXT, animal_profile_id TEXT, created_at TEXT, event_type TEXT, text TEXT, structured_payload TEXT, author_id TEXT, edit_window_until TEXT, deleted_at TEXT);' +
+      'CREATE TABLE pending_reproductive_events (id TEXT, animal_profile_id TEXT, event_type TEXT, event_date TEXT, created_at TEXT, notes TEXT);',
+  );
+  const ins = db.prepare(
+    'INSERT INTO reproductive_events (id, animal_profile_id, event_type, event_date, created_at, pregnancy_status) VALUES (?,?,?,?,?,?)',
+  );
+  // tacto YA synced (created_at presente) + birth recién cargado (created_at NULL), MISMO event_date.
+  ins.run('t-zzz', 'p1', 'tacto', '2026-06-01', '2026-06-01T10:00:00Z', 'large');
+  ins.run('b-aaa', 'p1', 'birth', '2026-06-01', null, null);
+
+  const q = buildTimelineQuery('p1');
+  const ids = (db.prepare(q.sql).all(...(q.args as string[])) as { event_id: string }[]).map((r) => r.event_id);
+  db.close();
+
+  // El birth (created_at NULL = recién insertado) va AL FINAL → índice mayor → gana en deriveCurrentState.
+  assert.deepEqual(ids, ['t-zzz', 'b-aaa']);
+  assert.ok(ids.indexOf('b-aaa') > ids.indexOf('t-zzz'), 'el NULL (recién insertado) queda al final (seq mayor)');
+});
+
 test('buildReproServiceTypesQuery: service_type por evento del perfil, deleted_at', () => {
   const q = buildReproServiceTypesQuery('p9');
   assert.match(q.sql, /SELECT id, service_type FROM reproductive_events WHERE animal_profile_id = \? AND deleted_at IS NULL/);
@@ -743,36 +826,40 @@ test('buildAddConditionScoreInsert: INSERT condition_score_events, score, sin es
   assert.deepEqual(q.args, ['cs-1', 'prof-2', 3.25, '2026-06-09', null]);
 });
 
-test('buildAddTactoInsert: INSERT reproductive_events con event_type literal tacto + pregnancy_status', () => {
-  const q = buildAddTactoInsert('t-1', 'prof-3', 'pregnant', '2026-06-09', 'ok');
+// TAREA 2: los INSERT de reproductive_events setean `created_at` de CLIENTE (último arg) → instante real
+// de creación para que deriveCurrentState desempate los eventos del mismo event_date determinísticamente.
+const CA = '2026-06-09T12:00:00.000Z';
+
+test('buildAddTactoInsert: INSERT reproductive_events con event_type literal tacto + pregnancy_status + created_at de cliente', () => {
+  const q = buildAddTactoInsert('t-1', 'prof-3', 'pregnant', '2026-06-09', 'ok', CA);
   assert.match(
     q.sql,
-    /^INSERT INTO reproductive_events \(id, animal_profile_id, event_type, event_date, pregnancy_status, notes\) VALUES \(\?, \?, 'tacto', \?, \?, \?\)$/,
+    /^INSERT INTO reproductive_events \(id, animal_profile_id, event_type, event_date, pregnancy_status, notes, created_at\) VALUES \(\?, \?, 'tacto', \?, \?, \?, \?\)$/,
   );
   // event_type es literal embebido (no placeholder) → los args NO lo incluyen
   assert.doesNotMatch(q.sql, /service_type/);
-  assert.deepEqual(q.args, ['t-1', 'prof-3', '2026-06-09', 'pregnant', 'ok']);
+  assert.deepEqual(q.args, ['t-1', 'prof-3', '2026-06-09', 'pregnant', 'ok', CA]);
 });
 
-test('buildAddServiceInsert: INSERT reproductive_events con event_type literal service + service_type', () => {
-  const q = buildAddServiceInsert('s-1', 'prof-4', 'natural', '2026-06-09', null);
+test('buildAddServiceInsert: INSERT reproductive_events con event_type literal service + service_type + created_at de cliente', () => {
+  const q = buildAddServiceInsert('s-1', 'prof-4', 'natural', '2026-06-09', null, CA);
   assert.match(
     q.sql,
-    /^INSERT INTO reproductive_events \(id, animal_profile_id, event_type, event_date, service_type, notes\) VALUES \(\?, \?, 'service', \?, \?, \?\)$/,
+    /^INSERT INTO reproductive_events \(id, animal_profile_id, event_type, event_date, service_type, notes, created_at\) VALUES \(\?, \?, 'service', \?, \?, \?, \?\)$/,
   );
   assert.doesNotMatch(q.sql, /pregnancy_status/);
-  assert.deepEqual(q.args, ['s-1', 'prof-4', '2026-06-09', 'natural', null]);
+  assert.deepEqual(q.args, ['s-1', 'prof-4', '2026-06-09', 'natural', null, CA]);
 });
 
-test('buildAddAbortionInsert: INSERT reproductive_events con event_type literal abortion, sin status/type', () => {
-  const q = buildAddAbortionInsert('a-1', 'prof-5', '2026-06-09', 'perdió');
+test('buildAddAbortionInsert: INSERT reproductive_events con event_type literal abortion, sin status/type + created_at de cliente', () => {
+  const q = buildAddAbortionInsert('a-1', 'prof-5', '2026-06-09', 'perdió', CA);
   assert.match(
     q.sql,
-    /^INSERT INTO reproductive_events \(id, animal_profile_id, event_type, event_date, notes\) VALUES \(\?, \?, 'abortion', \?, \?\)$/,
+    /^INSERT INTO reproductive_events \(id, animal_profile_id, event_type, event_date, notes, created_at\) VALUES \(\?, \?, 'abortion', \?, \?, \?\)$/,
   );
   assert.doesNotMatch(q.sql, /pregnancy_status/);
   assert.doesNotMatch(q.sql, /service_type/);
-  assert.deepEqual(q.args, ['a-1', 'prof-5', '2026-06-09', 'perdió']);
+  assert.deepEqual(q.args, ['a-1', 'prof-5', '2026-06-09', 'perdió', CA]);
 });
 
 test('buildAddObservationInsert: animal_events SÍ lleva establishment_id (excepción de validación)', () => {

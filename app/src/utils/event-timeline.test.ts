@@ -22,6 +22,7 @@ import {
   deriveCurrentState,
   hasAbortion,
   type TimelineRow,
+  type TimelineItem,
   type PregnancyState,
 } from './event-timeline.ts';
 
@@ -885,24 +886,48 @@ test('deriveCurrentState: empate de fecha entre repro determinantes → desempat
   });
 });
 
-// ─── deriveCurrentState: desempate por created_at en eventos repro del MISMO día (TAREA 2) ─────────
-// El bug que esto cierra: tacto y parto/aborto el mismo eventDate (columna `date`, sin hora). El
-// eventId es un UUID random → desempatar por él era ~50/50. El parto/aborto SIEMPRE debe ganar al
-// tacto del mismo día (parió/abortó → ya no está preñada). created_at (now() de inserción) da el orden
-// total real. Tests DETERMINÍSTICOS: invierten orden de entrada y fuerzan el eventId del tacto a ser
-// MAYOR que el del birth (para probar que NO es el eventId el que decide, sino el created_at).
+// ─── deriveCurrentState: desempate por orden de inserción (seq) en eventos repro del MISMO día (TAREA 2) ─
+// El bug que esto cierra: tacto y parto/aborto el mismo eventDate (columna `date`, sin hora). El eventId
+// es un UUID random → desempatar por él era ~50/50. El parto/aborto cargado DESPUÉS del tacto el mismo día
+// SIEMPRE debe ganar (parió/abortó → ya no está preñada). El desempate es por `seq` (orden de inserción
+// local = orden de lectura del SQL), que es fiel al server (sella created_at = now() en orden de subida =
+// inserción) y robusto al mix de created_at NULL (CRUD-plano sin sellar) / cliente (overlay) / server. En
+// TODOS estos tests el eventId del tacto es MAYOR que el del birth/aborto (t-zzz > b-aaa): si decidiera el
+// eventId ganaría el tacto (el bug); con seq gana el insertado después.
 
 /**
  * Arma items repro con created_at via el path real: la RPC 0069 trae created_at en la FILA → parseTimeline
- * lo lee en `base`. (Antes venía de applyReproMeta; ahora viene de la fila.) Un createdAt null se modela
- * con una fila SIN created_at (string vacío) → parseTimelineRow lo deja null.
+ * lo lee en `base`. Un createdAt null se modela con una fila SIN created_at (string vacío) → parser → null.
+ *
+ * `seq` (TAREA 2): emula FIELMENTE lo que hace fetchTimeline = índice de fila tras el ORDER BY del SQL
+ * `buildTimelineQuery`: `event_date ASC, (created_at IS NULL) ASC, created_at ASC` (created_at presentes
+ * ascendentes; NULL al FINAL = recién insertado = más reciente; empate de created_at → orden de inserción
+ * = el orden de `specs`). Calculamos ese orden acá y asignamos `seq` = posición resultante. Así el `specs`
+ * representa el ORDEN DE INSERCIÓN local (su orden), y el `seq` el orden de lectura del SQL (lo que decide).
  */
 function reproItemsWithCreatedAt(
   specs: { id: string; date: string; type: string; preg?: string | null; createdAt: string | null }[],
 ) {
-  const rows: TimelineRow[] = specs.map((s) =>
-    reproRow(s.id, s.date, s.type, s.preg ?? null, s.createdAt ?? ''),
-  );
+  // Orden del SQL: event_date ASC, NULL-created_at al final, created_at ASC, y a igualdad el orden de
+  // inserción (índice original en specs). Sort ESTABLE (Array.prototype.sort lo es en Node).
+  const withIdx = specs.map((s, i) => ({ s, i }));
+  withIdx.sort((a, b) => {
+    if (a.s.date !== b.s.date) return a.s.date < b.s.date ? -1 : 1; // event_date ASC
+    const aNull = a.s.createdAt === null;
+    const bNull = b.s.createdAt === null;
+    if (aNull !== bNull) return aNull ? 1 : -1; // NULL al final
+    if (!aNull && !bNull && a.s.createdAt !== b.s.createdAt) {
+      return a.s.createdAt! < b.s.createdAt! ? -1 : 1; // created_at ASC
+    }
+    return a.i - b.i; // empate → orden de inserción (estable)
+  });
+  // seqById: posición de cada spec en el orden del SQL = su seq.
+  const seqById = new Map<string, number>();
+  withIdx.forEach((w, pos) => seqById.set(w.s.id, pos));
+  const rows: TimelineRow[] = specs.map((s) => ({
+    ...reproRow(s.id, s.date, s.type, s.preg ?? null, s.createdAt ?? ''),
+    seq: seqById.get(s.id)!,
+  }));
   return parseTimeline(rows);
 }
 
@@ -932,36 +957,100 @@ test('deriveCurrentState: tacto y ABORTION mismo día, created_at del aborto pos
   assert.deepEqual(deriveCurrentState(items).pregnancy, { kind: 'empty', via: 'abortion', date: day });
 });
 
-test('deriveCurrentState: created_at AMBOS null (query falló) → cae al desempate por eventId (previo)', () => {
+// ── TAREA 2: los 3 casos a igualdad de event_date (espejo de RC6.1.4 de animal-category.test.ts) ──
+// El bug original: con created_at NULL/parcial el desempate caía al eventId UUID random (~50/50). Ahora
+// es DETERMINÍSTICO por `seq` (orden de inserción local = proxy fiel de quién quedará posterior server-
+// side). En TODOS estos tests el eventId del TACTO es lexicográficamente MAYOR que el del birth/aborto
+// (t-zzz > b-aaa): si decidiera el eventId, ganaría el tacto (el bug); con seq gana el insertado después.
+
+// CASO 1 — ambos created_at PRESENTES y distintos → gana el mayor (orden total ya sellado). (Cubierto
+// también por los tests de arriba; lo repetimos explícito para la matriz de los 3 casos.)
+test('deriveCurrentState (TAREA 2, caso 1): ambos created_at presentes → gana el MAYOR (birth posterior → vacía)', () => {
   const day = '2025-06-01T00:00:00Z';
-  // Sin created_at en ninguno: comportamiento previo = mayor eventId gana. Acá el tacto tiene id mayor
-  // → gana el tacto (preñada). Es el fallback documentado: sin created_at no podemos saber el orden
-  // real, caemos al estable por eventId (no rompe; solo no resuelve el caso ambiguo del mismo día).
+  const items = reproItemsWithCreatedAt([
+    { id: 't-zzz', date: day, type: 'tacto', preg: 'small', createdAt: '2025-06-01T10:00:00Z' },
+    { id: 'b-aaa', date: day, type: 'birth', createdAt: '2025-06-01T10:05:00Z' }, // created_at posterior
+  ]);
+  assert.deepEqual(deriveCurrentState(items).pregnancy, { kind: 'empty', via: 'birth', date: day });
+});
+
+// CASO 2 — created_at en UNO solo. El caso REALISTA del e2e: el PARTO/ABORTO recién cargado (created_at aún
+// NULL local, el trigger lo sella al SUBIR) + el tacto ya sincronizado (created_at PRESENTE) del mismo día.
+// El SQL ordena los NULL al FINAL → el parto/aborto (null) queda con seq MAYOR = insertado después → GANA →
+// "Vacía" (parió/abortó ⇒ ya no está preñada). Antes caía al eventId random (~50/50, el bug del e2e).
+test('deriveCurrentState (TAREA 2, caso 2): birth recién cargado (created_at null) + tacto synced (presente) → gana el null (vacía)', () => {
+  const day = '2025-06-01T00:00:00Z';
+  const items = reproItemsWithCreatedAt([
+    { id: 't-zzz', date: day, type: 'tacto', preg: 'medium', createdAt: '2025-06-01T10:00:00Z' }, // ya synced
+    { id: 'b-aaa', date: day, type: 'birth', createdAt: null }, // recién cargado, sin sellar → MÁS RECIENTE
+  ]);
+  assert.deepEqual(deriveCurrentState(items).pregnancy, { kind: 'empty', via: 'birth', date: day });
+});
+
+// CASO 2 — DETERMINÍSTICO sin importar el orden de entrada (invertimos las filas → mismo resultado). El
+// eventId del tacto es MAYOR (t-zzz > b-aaa): si decidiera el eventId ganaría el tacto ("preñada", el bug).
+test('deriveCurrentState (TAREA 2, caso 2 invertido): mismo resultado sin importar el orden de entrada', () => {
+  const day = '2025-06-01T00:00:00Z';
+  const items = reproItemsWithCreatedAt([
+    { id: 'b-aaa', date: day, type: 'birth', createdAt: null },
+    { id: 't-zzz', date: day, type: 'tacto', preg: 'medium', createdAt: '2025-06-01T10:00:00Z' },
+  ]);
+  assert.deepEqual(deriveCurrentState(items).pregnancy, { kind: 'empty', via: 'birth', date: day });
+});
+
+// CASO 2 SIMÉTRICO — aborto recién cargado (null) sobre una hembra con tacto+ ya synced del mismo día →
+// el aborto (null, seq al final = insertado después) revierte → "Vacía". Espeja el 2do test "one null" de RC6.1.4.
+test('deriveCurrentState (TAREA 2, caso 2 simétrico): aborto recién cargado (null) + tacto+ synced → gana el aborto (vacía)', () => {
+  const day = '2025-06-01T00:00:00Z';
+  const items = reproItemsWithCreatedAt([
+    { id: 't-zzz', date: day, type: 'tacto', preg: 'large', createdAt: '2025-06-01T09:00:00Z' },
+    { id: 'ab-a', date: day, type: 'abortion', createdAt: null },
+  ]);
+  assert.deepEqual(deriveCurrentState(items).pregnancy, { kind: 'empty', via: 'abortion', date: day });
+});
+
+// CASO 3 — ambos created_at NULL (los dos CRUD plano offline aún sin sellar). created_at no decide →
+// desempata `seq` = orden de inserción local. El parto, insertado DESPUÉS del tacto, GANA → vacía. Antes
+// caía al eventId UUID random (~50/50 → el flake). Es el caso REALISTA del backlog.
+test('deriveCurrentState (TAREA 2, caso 3): AMBOS null → gana el INSERTADO DESPUÉS (parto → vacía)', () => {
+  const day = '2025-06-01T00:00:00Z';
+  // Orden de inserción: tacto PRIMERO (seq 0), birth DESPUÉS (seq 1) → birth gana.
   const items = reproItemsWithCreatedAt([
     { id: 't-zzz', date: day, type: 'tacto', preg: 'small', createdAt: null },
     { id: 'b-aaa', date: day, type: 'birth', createdAt: null },
   ]);
-  assert.deepEqual(deriveCurrentState(items).pregnancy, {
-    kind: 'pregnant',
-    status: 'small',
-    date: day,
-  });
+  assert.deepEqual(deriveCurrentState(items).pregnancy, { kind: 'empty', via: 'birth', date: day });
 });
 
-test('deriveCurrentState: created_at en UNO solo (falta en el otro) → cae a eventId (no a medias)', () => {
+// CASO 3 SIMÉTRICO — el orden de inserción inverso (aborto y LUEGO un tacto+ re-servicio el mismo día,
+// ambos sin sellar): el tacto (insertado después, seq mayor) GANA → preñada. Prueba que es el seq (orden
+// de inserción), NO una preferencia hardcodeada por birth/aborto, lo que decide. Espeja el simétrico de
+// RC6.1.4 de animal-category.test.ts.
+test('deriveCurrentState (TAREA 2, caso 3 simétrico): AMBOS null, tacto insertado DESPUÉS del aborto → gana el tacto (preñada)', () => {
   const day = '2025-06-01T00:00:00Z';
-  // Solo el birth tiene created_at; el tacto no. La regla exige AMBOS para usar created_at → cae al
-  // desempate por eventId (el tacto, id mayor, gana). Es el fallback seguro: no inventamos un orden
-  // con datos parciales. (En la práctica la query trae created_at de todos o de ninguno.)
+  // Orden de inserción: aborto PRIMERO (seq 0), tacto+ DESPUÉS (seq 1) → el tacto gana.
   const items = reproItemsWithCreatedAt([
+    { id: 'ab-aaa', date: day, type: 'abortion', createdAt: null },
     { id: 't-zzz', date: day, type: 'tacto', preg: 'medium', createdAt: null },
-    { id: 'b-aaa', date: day, type: 'birth', createdAt: '2025-06-01T10:05:00Z' },
   ]);
   assert.deepEqual(deriveCurrentState(items).pregnancy, {
     kind: 'pregnant',
     status: 'medium',
     date: day,
   });
+});
+
+// Fallback: SIN seq en las filas (RPC que no lo aporta / shape legado) y ambos created_at NULL → cae al
+// desempate estable por eventId (comportamiento previo, no rompe; determinístico aunque no resuelve el
+// caso ambiguo del mismo día). Construimos los items SIN seq a mano (no via reproItemsWithCreatedAt).
+test('deriveCurrentState (TAREA 2): sin seq y ambos created_at null → fallback estable por eventId', () => {
+  const day = '2025-06-01T00:00:00Z';
+  const items: TimelineItem[] = [
+    { kind: 'reproductive', eventId: 't-zzz', eventDate: day, createdAt: null, eventType: 'tacto', pregnancyStatus: 'small', calfId: null, serviceType: null, notes: null },
+    { kind: 'reproductive', eventId: 'b-aaa', eventDate: day, createdAt: null, eventType: 'birth', pregnancyStatus: null, calfId: null, serviceType: null, notes: null },
+  ];
+  // Sin seq: eventId mayor (t-zzz) gana → preñada (el fallback documentado).
+  assert.deepEqual(deriveCurrentState(items).pregnancy, { kind: 'pregnant', status: 'small', date: day });
 });
 
 test('deriveCurrentState: created_at NO afecta cuando los eventDate DIFIEREN (la fecha manda)', () => {

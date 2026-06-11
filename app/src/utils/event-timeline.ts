@@ -94,13 +94,30 @@ export type CategoryChangeReason =
 // timeline dentro de un mismo día calendario (lo recién registrado arriba; ver parseTimeline) y (2)
 // desempatar el estado reproductivo vigente cuando dos eventos repro caen el mismo `eventDate` (ver
 // deriveCurrentState). Es `string | null`: null defensivo si la fila no lo trajo (RPC vieja / payload
-// raro) → el orden cae al desempate estable por eventId.
+// raro) → el orden cae al desempate por `seq` (orden de inserción local).
+//
+// `seq` (orden de LECTURA del read local = proxy del ORDEN DE INSERCIÓN local) — TAREA 2 / fix flake del
+// estado repro. La fuente de la verdad del orden a igualdad de `event_date` (columna `date`, SIN hora) es
+// `created_at`: el server lo sella con `now()` al insertar ⇒ orden de subida = orden de inserción local.
+// Cuando el `created_at` aún NO está sellado (fila CRUD-plano cargada local que todavía no subió → NULL
+// en el SQLite local), el único predictor FIEL de "quién va a quedar posterior server-side" es el orden
+// de inserción local. `buildTimelineQuery` entrega las filas
+// `ORDER BY event_date ASC, created_at IS NULL ASC, created_at ASC` (la cláusula `created_at IS NULL ASC`
+// empuja los NULL AL FINAL = recién insertado, aún sin sellar server-side = más reciente)
+// (mismo criterio que el espejo de categoría YA-probado, `buildCategoryMirrorEventsQuery`/RC6.1.4): a
+// igualdad de (event_date, created_at) SQLite las devuelve en su orden de almacenamiento estable (proxy
+// del orden de inserción) → el de índice MAYOR se insertó después ⇒ es posterior. El service (fetchTimeline)
+// asigna `seq` = ese índice. Reemplaza al `eventId` (UUID v4 RANDOM) como desempate estable: el eventId
+// daba ~50/50 en el caso "tacto + parto/aborto el mismo día sin created_at sellado" (el bug). Es `number`
+// en el path real; los call-sites que no lo aportan (RPC fallback / tests legados) usan `eventId` como
+// fallback estable (ver parseTimeline / isNewerRepro).
 export type TimelineItem =
   | {
       kind: 'weight';
       eventId: string;
       eventDate: string;
       createdAt: string | null;
+      seq?: number;
       weightKg: number | null;
       source: string | null;
       notes: string | null;
@@ -110,6 +127,7 @@ export type TimelineItem =
       eventId: string;
       eventDate: string;
       createdAt: string | null;
+      seq?: number;
       eventType: ReproEventType | null;
       pregnancyStatus: PregnancyStatus | null;
       calfId: string | null;
@@ -126,6 +144,7 @@ export type TimelineItem =
       eventId: string;
       eventDate: string;
       createdAt: string | null;
+      seq?: number;
       eventType: SanitaryEventType | null;
       productName: string | null;
       route: string | null;
@@ -136,6 +155,7 @@ export type TimelineItem =
       eventId: string;
       eventDate: string;
       createdAt: string | null;
+      seq?: number;
       score: number | null;
       notes: string | null;
     }
@@ -144,6 +164,7 @@ export type TimelineItem =
       eventId: string;
       eventDate: string;
       createdAt: string | null;
+      seq?: number;
       sampleType: LabSampleType | null;
       tubeNumber: string | null;
       result: string | null;
@@ -154,6 +175,7 @@ export type TimelineItem =
       eventId: string;
       eventDate: string;
       createdAt: string | null;
+      seq?: number;
       fromCategoryId: string | null;
       toCategoryId: string | null;
       fromCategoryName: string | null;
@@ -165,6 +187,7 @@ export type TimelineItem =
       eventId: string;
       eventDate: string;
       createdAt: string | null;
+      seq?: number;
       eventType: string | null;
       text: string | null;
       authorId: string | null;
@@ -178,6 +201,14 @@ export type TimelineRow = {
   event_date: string;
   /** Timestamp REAL de inserción del evento (RPC 0069, top-level). Para el orden dentro del día. */
   created_at: string;
+  /**
+   * Orden de LECTURA del read local (índice de la fila en el set que devuelve buildTimelineQuery,
+   * `ORDER BY event_date ASC, created_at IS NULL ASC, created_at ASC` — la cláusula `created_at IS NULL ASC`
+   * empuja los NULL AL FINAL = recién insertado, aún sin sellar = más reciente). Proxy FIEL del orden de inserción local cuando el
+   * `created_at` aún no está sellado server-side (ver TimelineItem.seq). Opcional: las filas de una RPC
+   * que no lo aporten dejan `seq` undefined → el desempate cae a `eventId` (fallback estable).
+   */
+  seq?: number;
   payload: Record<string, unknown> | null;
 };
 
@@ -212,9 +243,13 @@ function num(payload: Record<string, unknown> | null | undefined, key: string): 
 export function parseTimelineRow(row: TimelineRow): TimelineItem | null {
   const p = row.payload ?? null;
   // `createdAt` viene de la RPC (0069) para TODOS los kinds. Defensivo: si la fila no lo trajo (RPC
-  // vieja / shape raro), queda null → el orden cae al desempate estable por eventId.
+  // vieja / shape raro), queda null → el orden cae al desempate por `seq` (orden de inserción) y, sin
+  // `seq`, a `eventId` (fallback estable).
   const createdAt = typeof row.created_at === 'string' && row.created_at.length > 0 ? row.created_at : null;
-  const base = { eventId: row.event_id, eventDate: row.event_date, createdAt };
+  // `seq` = orden de lectura del read local (proxy del orden de inserción). Solo se propaga si la fila lo
+  // trae (el path real, fetchTimeline, lo asigna); si no, queda undefined (los tie-breaks usan eventId).
+  const seq = typeof row.seq === 'number' ? row.seq : undefined;
+  const base = { eventId: row.event_id, eventDate: row.event_date, createdAt, seq };
   switch (row.event_kind as TimelineKind) {
     case 'weight':
       return {
@@ -315,7 +350,10 @@ function dayKey(item: TimelineItem): number | null {
  *       date-only volvía como 00:00 < su hora real. Un evento BACKDATED (fecha vieja, createdAt nuevo)
  *       NO salta al tope: cae en SU día (el orden por día manda) y solo se ordena por createdAt
  *       DENTRO de ese día.
- *   (3) desempate final estable por eventId (determinístico para tests; sin Date.now() interno).
+ *   (3) desempate final estable por `seq` (orden de inserción local) DESCENDENTE — el insertado después
+ *       arriba. Reemplaza al `eventId` (UUID v4 RANDOM, que barajaba el array en el caso "mismo día +
+ *       ambos createdAt null" — TAREA 2). Sin `seq` en alguno (RPC fallback / tests legados) cae a
+ *       `eventId` (estable, determinístico para tests; sin Date.now() interno).
  * PURA, TZ-independiente (no usa la hora local para comparar instantes entre días, solo el día).
  */
 export function parseTimeline(rows: readonly TimelineRow[]): TimelineItem[] {
@@ -338,7 +376,12 @@ export function parseTimeline(rows: readonly TimelineRow[]): TimelineItem[] {
     const msA = Number.isFinite(ca) ? ca : -Infinity;
     const msB = Number.isFinite(cb) ? cb : -Infinity;
     if (msA !== msB) return msB - msA;
-    // (3) desempate estable por eventId (mayor primero).
+    // (3) desempate estable por `seq` (orden de inserción local) — el insertado después (seq mayor)
+    // arriba. Solo si AMBOS lo tienen; si falta en alguno, cae al fallback por eventId.
+    if (typeof a.seq === 'number' && typeof b.seq === 'number' && a.seq !== b.seq) {
+      return b.seq - a.seq;
+    }
+    // fallback estable por eventId (mayor primero) — RPC sin seq / tests legados.
     return a.eventId < b.eventId ? 1 : a.eventId > b.eventId ? -1 : 0;
   });
   return items;
@@ -447,13 +490,18 @@ export type CurrentState = {
  *
  * Empate de fecha (mismo `eventDate` exacto):
  *   - weight / condition_score → desempate estable por `eventId` mayor (el id "más alto" gana).
- *   - reproductive → desempate por `createdAt` (timestamp real de inserción) mayor si AMBOS lo tienen;
- *     si empata o falta en alguno, cae a `eventId` mayor. Esto hace DETERMINÍSTICO el caso de un tacto
- *     y un parto/aborto cargados el MISMO día: `eventDate` es columna `date` (sin hora) → no alcanza
- *     para ordenarlos, y el `eventId` es un UUID random → desempatar por él sería ~50/50 (el parto
- *     debe ganar siempre: parió/abortó ⇒ ya no está preñada). `createdAt` (now() de inserción) da el
- *     orden total real. Viene de la RPC animal_timeline (0069) en la fila; sin él (RPC vieja / shape
- *     raro → createdAt null) cae al comportamiento previo (desempate por eventId).
+ *   - reproductive → desempate por `seq` (orden de inserción local), porque a igualdad de `eventDate`
+ *     (columna `date`, SIN hora) el orden total real lo da el `created_at` = INSTANTE DE CREACIÓN. Los
+ *     INSERT CRUD-plano de reproductive_events ahora setean created_at de CLIENTE al insertar (tacto/
+ *     service/abortion, ver banner en local-reads.ts) y el parto del overlay también → TODOS los
+ *     determinantes tienen un instante real de creación. `buildTimelineQuery` entrega las filas
+ *     `ORDER BY event_date ASC, created_at IS NULL ASC, created_at ASC` (created_at ascendentes; NULL al
+ *     final = recién insertado sin sellar = más reciente; espejo de buildCategoryMirrorEventsQuery/RC6.1.4)
+ *     → fetchTimeline asigna ese orden de lectura como `seq`. El INSERTADO DESPUÉS (created_at mayor → seq
+ *     MAYOR) es posterior ⇒ gana. Esto hace DETERMINÍSTICO el bug: tacto + parto/aborto el MISMO día (el
+ *     parto/aborto, creado DESPUÉS, GANA ⇒ "Vacía" SIEMPRE), reemplazando el `eventId` UUID random (~50/50).
+ *     Sin `seq` (RPC fallback / tests legados) cae a `createdAt` (el mayor si AMBOS presentes; null = recién
+ *     insertado = más reciente) y, sin él, a `eventId` mayor (estable). PURA.
  */
 export function deriveCurrentState(
   timeline: readonly TimelineItem[] | null | undefined,
@@ -486,7 +534,14 @@ export function deriveCurrentState(
     return candId > best.item.eventId;
   };
 
-  // Orden total real para los eventos repro: fecha → createdAt (si ambos lo tienen) → eventId.
+  // ¿`cand` es más reciente que `best` para los eventos repro? Fecha mayor gana; a igualdad de eventDate
+  // (columna `date` sin hora), DESEMPATE PRIMARIO por `seq` (orden de inserción local = orden de lectura de
+  // buildTimelineQuery `ORDER BY event_date ASC, created_at IS NULL ASC, created_at ASC` → created_at
+  // ascendentes y NULL al final; el insertado DESPUÉS queda con seq mayor). Como los repro CRUD-plano ahora
+  // setean created_at de cliente al insertar (ver banner en local-reads.ts) y el parto del overlay también,
+  // el caso REALISTA es "ambos created_at presentes" → el seq sale del orden por created_at = orden de
+  // creación. Fallback sin seq: created_at (mayor, con null = recién insertado = más reciente), luego
+  // eventId. Espeja la precedencia server (animal-category.ts/RC6.1.4) de forma DETERMINÍSTICA.
   const isNewerRepro = (
     cand: Extract<TimelineItem, { kind: 'reproductive' }>,
     best: { item: Extract<TimelineItem, { kind: 'reproductive' }>; ms: number } | null,
@@ -494,13 +549,26 @@ export function deriveCurrentState(
     if (!best) return true;
     const candMs = Date.parse(cand.eventDate);
     if (Number.isFinite(candMs) && candMs !== best.ms) return candMs > best.ms;
-    // Mismo eventDate (mismo día): desempatar por createdAt si AMBOS lo tienen y difieren.
-    const candCreated = cand.createdAt != null ? Date.parse(cand.createdAt) : NaN;
-    const bestCreated = best.item.createdAt != null ? Date.parse(best.item.createdAt) : NaN;
-    if (Number.isFinite(candCreated) && Number.isFinite(bestCreated) && candCreated !== bestCreated) {
+    // Mismo eventDate (mismo día). (1) DESEMPATE PRIMARIO: seq (orden de inserción local). El insertado
+    // DESPUÉS (seq mayor) es posterior → gana.
+    if (typeof cand.seq === 'number' && typeof best.item.seq === 'number' && cand.seq !== best.item.seq) {
+      return cand.seq > best.item.seq;
+    }
+    // (2) Fallback SIN seq (RPC que no lo aporta / tests legados): created_at. Un null = recién insertado
+    // local (el trigger lo sella al SUBIR) = MÁS RECIENTE que cualquier presente (isAfter/RC6.1.4).
+    const candCa = cand.createdAt;
+    const bestCa = best.item.createdAt;
+    if (candCa !== bestCa) {
+      if (candCa === null) return true; // cand recién insertado → posterior
+      if (bestCa === null) return false; // best recién insertado → cand NO posterior
+      const candCreated = Date.parse(candCa);
+      const bestCreated = Date.parse(bestCa);
+      // PowerSync materializa el texto timestamptz de PG (ISO uniforme, lexicográficamente ordenable) →
+      // Date.parse es fiable; fallback lexicográfico si alguno no parsea (defensivo).
+      if (Number.isNaN(candCreated) || Number.isNaN(bestCreated)) return candCa > bestCa;
       return candCreated > bestCreated;
     }
-    // createdAt empata o falta en alguno → desempate estable por eventId (comportamiento previo).
+    // (3) seq y createdAt no deciden → desempate estable por eventId (previo).
     return cand.eventId > best.item.eventId;
   };
 
