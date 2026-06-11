@@ -162,7 +162,7 @@ function ActionRow({
 
 function ProfileSection({ userId }: { userId: string }) {
   const router = useRouter();
-  const { profile, loading, error, refresh } = useProfile();
+  const { profile, loading, error, refresh, applyOwnProfile } = useProfile();
   const { state: authState } = useAuth();
   const emailVerified = authState.status === 'authenticated' && authState.emailVerified;
   const offline = useIsOffline();
@@ -200,9 +200,14 @@ function ProfileSection({ userId }: { userId: string }) {
         initialName={profile.name}
         initialPhone={profile.phone}
         offline={offline}
-        onDone={() => {
-          // Refresca la fuente única (public.users) → saludo de la home al día (Fase 6).
-          void refresh();
+        onDone={(saved) => {
+          // Aterrizaje OPTIMISTA: el saludo de la home se actualiza AL INSTANTE con lo recién guardado
+          // (no esperamos el round-trip de sync-down del SQLite local, que dejaba el saludo viejo —
+          // spec 15 / Fase 6). El sync-down posterior (efecto de lastSyncedAt en ProfileContext) re-lee
+          // y reconcilia al mismo valor server-side. NO llamamos refresh() acá a propósito: un loadFor
+          // inmediato leería el SQLite local AÚN STALE y pisaría el valor optimista (la lectura tardía
+          // ganaría la carrera de loadSeq). El refresh manual queda disponible vía "Reintentar".
+          applyOwnProfile(saved);
           setEditing(false);
         }}
         onCancel={() => setEditing(false)}
@@ -332,7 +337,8 @@ function ProfileEditForm({
   initialName: string;
   initialPhone: string | null;
   offline: boolean;
-  onDone: () => void;
+  /** Recibe los valores RECIÉN GUARDADOS (trimeados) para el aterrizaje optimista del saludo. */
+  onDone: (saved: { name: string; phone: string | null }) => void;
   onCancel: () => void;
 }) {
   const [name, setName] = useState(initialName);
@@ -352,11 +358,13 @@ function ProfileEditForm({
     setSaving(true);
     const nextPhone = phone.trim() || null;
     // El nombre se guarda trimeado (el saludo no debe arrastrar espacios sobrantes).
-    const result = await saveProfile(userId, { name: name.trim(), phone: nextPhone });
+    const nextName = name.trim();
+    const result = await saveProfile(userId, { name: nextName, phone: nextPhone });
     setSaving(false);
 
     if (result.ok) {
-      onDone();
+      // Pasamos los valores recién guardados (EXACTOS, trimeados) → aterrizaje optimista del saludo.
+      onDone({ name: nextName, phone: nextPhone });
     } else {
       setFormError(
         result.error.kind === 'network' ? OFFLINE_COPY : 'No pudimos guardar los cambios.',
