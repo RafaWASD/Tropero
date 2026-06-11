@@ -33,6 +33,8 @@ import {
   buildSearchLikeQuery,
   escapeLike,
   buildAnimalDetailQuery,
+  buildCategoryMirrorEventsQuery,
+  buildRevertCategoryOverrideUpdate,
   buildManagementGroupsQuery,
   buildTimelineQuery,
   buildReproServiceTypesQuery,
@@ -49,6 +51,7 @@ import {
   buildAssignAnimalToGroupUpdate,
   buildClearGroupMembersUpdate,
   buildCategoryIdByCodeQuery,
+  buildCategoryByCodeQuery,
   buildRodeoSpeciesQuery,
   buildBirthOverlayContextQuery,
   buildOpIntentInsert,
@@ -478,6 +481,123 @@ test('buildAnimalDetailQuery: b1 identidad+birth_date, LEFT JOIN lote, deleted_a
   assert.deepEqual(q.args, ['prof-7', 'prof-7']);
 });
 
+// ─── C6: proyecciones extra del espejo de categoría (RC6.3.1/RC6.3.2) ──────────────────
+
+test('C6: la lista proyecta category_override, animal_birth_date y system_id en AMBAS ramas (synced+overlay)', () => {
+  const q = buildAnimalsListQuery('est-1');
+  // synced (alias ap / r)
+  assert.match(q.sql, /ap\.category_override AS category_override/);
+  assert.match(q.sql, /ap\.animal_birth_date AS birth_date/);
+  assert.match(q.sql, /r\.system_id AS system_id/);
+  // overlay (alias pap / r) — el UNION exige idéntico set de columnas en ambas ramas
+  assert.match(q.sql, /pap\.category_override AS category_override/);
+  assert.match(q.sql, /pap\.animal_birth_date AS birth_date/);
+  // r.system_id aparece 2 veces (una por rama); la presencia ya está asertada arriba.
+  const systemIdCount = (q.sql.match(/r\.system_id AS system_id/g) ?? []).length;
+  assert.equal(systemIdCount, 2, 'system_id proyectado en synced + overlay');
+});
+
+test('C6: el detalle proyecta system_id del rodeo (para resolver code→id/name del catálogo)', () => {
+  const q = buildAnimalDetailQuery('prof-1');
+  const systemIdCount = (q.sql.match(/r\.system_id AS system_id/g) ?? []).length;
+  assert.equal(systemIdCount, 2, 'system_id proyectado en synced + overlay del detalle');
+  // category_override ya se proyectaba (b1/T6); confirmamos que sigue.
+  assert.match(q.sql, /ap\.category_override AS category_override/);
+});
+
+// ─── C6: buildCategoryMirrorEventsQuery (RC6.3.6) ──────────────────────────────────────
+
+test('buildCategoryMirrorEventsQuery: SQL — synced (deleted_at IS NULL + event_type IN) UNION overlay, ORDER BY event_date, created_at', () => {
+  const q = buildCategoryMirrorEventsQuery(['p1', 'p2']);
+  // synced: filtro deleted_at + event_type acotado + IN con un placeholder por id
+  assert.match(q.sql, /FROM reproductive_events WHERE animal_profile_id IN \(\?, \?\) AND deleted_at IS NULL/);
+  assert.match(q.sql, /AND event_type IN \('birth','weaning','service','tacto','abortion'\)/);
+  // overlay: pending_reproductive_events (sin deleted_at, sin pregnancy_status → NULL)
+  assert.match(q.sql, /UNION ALL/);
+  assert.match(q.sql, /FROM pending_reproductive_events WHERE animal_profile_id IN \(\?, \?\) AND event_type IN/);
+  assert.match(q.sql, /NULL AS pregnancy_status/);
+  // orden por (event_date, created_at) — el desempate del tacto+ vigente (RT2.7.5)
+  assert.match(q.sql, /ORDER BY event_date ASC, created_at ASC/);
+  // NO re-scopea tenant
+  assert.doesNotMatch(q.sql, /has_role_in|establishment_id/);
+  // args = ids (synced) ++ ids (overlay)
+  assert.deepEqual(q.args, ['p1', 'p2', 'p1', 'p2']);
+});
+
+test('buildCategoryMirrorEventsQuery: COMPORTAMIENTO — synced no-borrados + overlay birth, excluye deleted_at y tipos irrelevantes', () => {
+  const db = new DatabaseSync(':memory:');
+  db.exec(
+    'CREATE TABLE reproductive_events (animal_profile_id TEXT, event_type TEXT, event_date TEXT, created_at TEXT, pregnancy_status TEXT, deleted_at TEXT);' +
+      'CREATE TABLE pending_reproductive_events (animal_profile_id TEXT, event_type TEXT, event_date TEXT, created_at TEXT);',
+  );
+  const insS = db.prepare(
+    'INSERT INTO reproductive_events (animal_profile_id, event_type, event_date, created_at, pregnancy_status, deleted_at) VALUES (?,?,?,?,?,?)',
+  );
+  // tacto+ vigente (no borrado) de p1
+  insS.run('p1', 'tacto', '2026-05-20', '2026-05-20T10:00:00Z', 'large', null);
+  // un destete BORRADO de p1 → NO debe traerse
+  insS.run('p1', 'weaning', '2026-05-10', '2026-05-10T10:00:00Z', null, '2026-05-15T00:00:00Z');
+  // un evento de un tipo irrelevante (no en la whitelist) → NO debe traerse
+  insS.run('p1', 'sanitary_dummy', '2026-05-12', '2026-05-12T10:00:00Z', null, null);
+  // un evento de OTRO perfil (p2) → no aparece en la query de p1
+  insS.run('p2', 'service', '2026-05-18', '2026-05-18T10:00:00Z', null, null);
+  // overlay: parto optimista de p1 (sin pregnancy_status ni deleted_at)
+  db.prepare('INSERT INTO pending_reproductive_events (animal_profile_id, event_type, event_date, created_at) VALUES (?,?,?,?)')
+    .run('p1', 'birth', '2026-05-25', '2026-05-25T09:00:00Z');
+
+  const q = buildCategoryMirrorEventsQuery(['p1']);
+  const rows = (db.prepare(q.sql).all(...(q.args as string[])) as {
+    animal_profile_id: string;
+    event_type: string;
+    event_date: string;
+    created_at: string | null;
+    pregnancy_status: string | null;
+  }[]).map((r) => ({ ...r }));
+  db.close();
+
+  // Solo el tacto+ (synced no-borrado, tipo válido) + el birth del overlay. NO el destete borrado, NO el
+  // tipo irrelevante, NO el evento de p2.
+  assert.equal(rows.length, 2);
+  // ORDER BY event_date ASC → tacto (05-20) antes que birth (05-25)
+  assert.deepEqual(
+    rows.map((r) => r.event_type),
+    ['tacto', 'birth'],
+  );
+  // el overlay proyecta pregnancy_status NULL
+  const birth = rows.find((r) => r.event_type === 'birth');
+  assert.equal(birth?.pregnancy_status, null);
+  const tacto = rows.find((r) => r.event_type === 'tacto');
+  assert.equal(tacto?.pregnancy_status, 'large');
+});
+
+// ─── C6: buildRevertCategoryOverrideUpdate (RC6.4.3) ───────────────────────────────────
+
+test('buildRevertCategoryOverrideUpdate: UN solo statement setea override=0 Y category_id, deleted_at IS NULL', () => {
+  const q = buildRevertCategoryOverrideUpdate('prof-9', 'cat-derived');
+  assert.match(
+    q.sql,
+    /^UPDATE animal_profiles SET category_override = 0, category_id = \? WHERE id = \? AND deleted_at IS NULL$/,
+  );
+  // ambas columnas en el MISMO UPDATE → una sola CrudEntry → un solo UPDATE PostgREST (0040 respeta revert)
+  assert.deepEqual(q.args, ['cat-derived', 'prof-9']);
+});
+
+test('C6 RC6.3.5 (display-only): los builders del PATH de display son SELECT puros (cero INSERT/UPDATE/DELETE)', () => {
+  // El espejo de display (animals.computeMirrorOverrides) usa SOLO estos dos builders + el SELECT de
+  // detalle/lista. Ninguno muta. El único write del chunk es buildRevertCategoryOverrideUpdate, que NO
+  // está en el path de display (lo dispara la acción explícita "Quitar fijación", RC6.4.3).
+  const displayBuilders = [
+    buildCategoryMirrorEventsQuery(['p1']),
+    buildSystemCategoriesQuery('sys-1'),
+    buildAnimalDetailQuery('p1'),
+    buildAnimalsListQuery('est-1'),
+  ];
+  for (const q of displayBuilders) {
+    assert.match(q.sql, /^\s*SELECT\b/i, 'el path de display arranca en SELECT');
+    assert.doesNotMatch(q.sql, /\b(INSERT|UPDATE|DELETE)\b/i, 'el path de display NO muta nada');
+  }
+});
+
 // ─── Lotes (T4.3) ────────────────────────────────────────────────────────────────────
 
 test('buildManagementGroupsQuery: active=1 + deleted_at IS NULL + orden por nombre + overlay oculta soft_deleted', () => {
@@ -712,6 +832,14 @@ test('buildCategoryIdByCodeQuery: category_id por (system, code) ACTIVO, LIMIT 1
   const q = buildCategoryIdByCodeQuery('sys-1', 'multipara');
   assert.match(q.sql, /SELECT id FROM categories_by_system WHERE system_id = \? AND code = \? AND active = 1 LIMIT 1/);
   assert.deepEqual(q.args, ['sys-1', 'multipara']);
+});
+
+test('buildCategoryByCodeQuery: id + name por (system, code) ACTIVO, LIMIT 1 (RC6.4.6)', () => {
+  // Hermano de buildCategoryIdByCodeQuery que ADEMÁS proyecta el name legible — lo usa la resolución
+  // compartida del revert (preview de la consecuencia + UPDATE). Mismo filtro (active=1), SELECT puro.
+  const q = buildCategoryByCodeQuery('sys-1', 'vaquillona');
+  assert.match(q.sql, /SELECT id, name FROM categories_by_system WHERE system_id = \? AND code = \? AND active = 1 LIMIT 1/);
+  assert.deepEqual(q.args, ['sys-1', 'vaquillona']);
 });
 
 test('buildRodeoSpeciesQuery: species_id del rodeo, LIMIT 1', () => {

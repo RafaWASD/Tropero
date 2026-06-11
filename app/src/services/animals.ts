@@ -12,7 +12,14 @@
 // El ALTA (R4.6) es operación administrativa ONLINE en C2 (como crear campo/rodeo en C1); el
 // offline-first real (PowerSync) es C5. Sin red → kind:'network' con copy accionable.
 
-import { type AnimalSex } from '../utils/animal-category';
+import {
+  type AnimalSex,
+  type CategoryCatalogEntry,
+  type DisplayCategory,
+  type ReproEventInput,
+  computeCategoryCode,
+  computeDisplayOverrides,
+} from '../utils/animal-category';
 import { classifyIdentifier, classifySearchQuery } from '../utils/animal-identifier';
 import {
   type ExitReasonChoice,
@@ -27,10 +34,13 @@ import {
   buildSearchLikeQuery,
   buildAnimalDetailQuery,
   buildCategoryIdByCodeQuery,
+  buildCategoryByCodeQuery,
+  buildCategoryMirrorEventsQuery,
+  buildRevertCategoryOverrideUpdate,
   buildRodeoSpeciesQuery,
   toBool,
 } from './powersync/local-reads';
-import { runLocalQuery, runLocalQuerySingle } from './powersync/local-query';
+import { runLocalQuery, runLocalQuerySingle, runLocalWrite } from './powersync/local-query';
 import { enqueueCreateAnimal, enqueueExitAnimal } from './powersync/outbox';
 
 // ─── Error / Result uniforme (mismo shape que rodeo-config.ts / establishments.ts) ──
@@ -126,23 +136,133 @@ type LocalListRow = {
   rodeo_name: string | null;
   category_code: string | null;
   category_name: string | null;
+  // C6 (RC6.3.1/RC6.3.2): inputs del espejo de categoría — proyectados por LOCAL_LIST_SELECT, consumidos
+  // SOLO por applyCategoryMirror (el shape público AnimalListItem no los expone).
+  category_override?: number | boolean | null;
+  birth_date?: string | null;
+  system_id?: string | null;
 };
 
-function toLocalListItem(r: LocalListRow): AnimalListItem {
+function toLocalListItem(
+  r: LocalListRow,
+  // C6 (RC6.3.2): si el espejo derivó una categoría para esta fila (override=false), pisa code/name en
+  // memoria; sin override → la guardada. Display-only, sin tocar el shape público.
+  mirror?: { code: string; name: string },
+): AnimalListItem {
   return {
     profileId: r.id,
     animalId: r.animal_id,
     idv: r.idv,
     visualIdAlt: r.visual_id_alt,
     tagElectronic: r.tag_electronic,
-    categoryCode: r.category_code ?? '',
-    categoryName: r.category_name ?? '',
+    categoryCode: mirror?.code ?? r.category_code ?? '',
+    categoryName: mirror?.name ?? r.category_name ?? '',
     sex: r.sex ?? 'female',
     rodeoId: r.rodeo_id,
     rodeoName: r.rodeo_name ?? '',
     status: r.status,
     managementGroupId: r.management_group_id,
   };
+}
+
+// ─── Espejo de categoría display-only (C6 / RC6.3) ───────────────────────────────────
+//
+// Inyecta, EN LA CAPA SERVICE, la categoría DERIVADA localmente por el espejo de compute_category
+// (computeCategoryCode, animal-category.ts) cuando `category_override = false`. Lo heredan TODAS las
+// superficies (lista, búsqueda find-or-create, ficha) sin tocar componentes — el shape público
+// (categoryCode/categoryName) NO cambia, solo su VALOR en memoria (RC6.3.5: CERO writes).
+//
+// Cuándo NO toca la fila:
+//   - `category_override = true` → la guardada manda (RC6.3.3).
+//   - code derivado sin fila en el catálogo local del sistema, o sin system_id → fail-safe a la
+//     guardada (RC6.3.4: nunca blanco, nunca crash).
+//
+// Todo del SQLite local (RC6.3.6, cero red): los inputs ya vienen proyectados en la fila
+// (category_override/birth_date/system_id/sex); los eventos se leen batched de reproductive_events +
+// el overlay (buildCategoryMirrorEventsQuery); el catálogo code→name por system_id distinto
+// (buildSystemCategoriesQuery, ya existente). En el MVP el campo opera UN sistema (bovino/cría) → un
+// solo catálogo; el código soporta varios system_id por las dudas.
+
+/** Forma mínima de una fila para el espejo (la cumplen LocalListRow y LocalDetailRow). */
+type MirrorableRow = {
+  id: string;
+  sex: AnimalSex | null;
+  birth_date?: string | null;
+  system_id?: string | null;
+  category_override?: number | boolean | null;
+  category_code: string | null;
+  category_name: string | null;
+};
+
+/**
+ * Capa de I/O del espejo de display: lee del SQLite local los eventos batched + el catálogo code→name de
+ * cada system, y delega la DECISIÓN al núcleo PURO `computeDisplayOverrides` (animal-category.ts) — que no
+ * puede escribir nada (RC6.3.5, propiedad estructural). Devuelve un Map profileId → { code, name } para
+ * las filas que el espejo aplica (override=false + system con catálogo); las demás quedan con la guardada.
+ * Fail-safe: si una lectura local falla, las filas afectadas se omiten del Map (muestran la guardada),
+ * nunca rompe la vista.
+ *
+ * Las dos únicas operaciones de DB acá son SELECT (runLocalQuery). NUNCA un execute/write (RC6.3.5).
+ */
+async function computeMirrorOverrides(
+  rows: readonly MirrorableRow[],
+): Promise<Map<string, DisplayCategory>> {
+  // 1) Filas candidatas: override=false (la guardada manda si true) + con system_id (sin él no se puede
+  //    resolver code→name; el núcleo puro hace fail-safe a la guardada igual). El profileId = row.id.
+  const candidates = rows.filter((r) => !toBool(r.category_override) && r.system_id);
+  if (candidates.length === 0) return new Map();
+
+  const profileIds = candidates.map((r) => r.id);
+
+  // 2) Eventos reproductivos batched (synced + overlay) de todos los candidatos, ya ordenados por
+  //    (event_date, created_at) por el SQL. emptyIsSyncing:false → "sin eventos" es legítimo (no degrada).
+  const eventsRes = await runLocalQuery<{
+    animal_profile_id: string;
+    event_type: string;
+    event_date: string;
+    created_at: string | null;
+    pregnancy_status: string | null;
+  }>(buildCategoryMirrorEventsQuery(profileIds), { emptyIsSyncing: false });
+  if (!eventsRes.ok) return new Map(); // fail-safe: sin eventos legibles, no derivamos (muestra guardada)
+
+  // Agrupa los eventos por perfil, preservando el orden de la query (ORDER BY event_date, created_at).
+  const eventsByProfile = new Map<string, ReproEventInput[]>();
+  for (const e of eventsRes.value) {
+    const list = eventsByProfile.get(e.animal_profile_id) ?? [];
+    list.push({
+      eventType: e.event_type,
+      eventDate: e.event_date,
+      createdAt: e.created_at,
+      pregnancyStatus: e.pregnancy_status,
+    });
+    eventsByProfile.set(e.animal_profile_id, list);
+  }
+
+  // 3) Catálogo code→name por cada system_id DISTINTO de los candidatos (MVP: uno solo).
+  const catalogBySystem = new Map<string, CategoryCatalogEntry[]>();
+  const systemIds = [...new Set(candidates.map((r) => r.system_id as string))];
+  for (const sysId of systemIds) {
+    const catRes = await runLocalQuery<CategoryCatalogEntry>(buildSystemCategoriesQuery(sysId), {
+      emptyIsSyncing: false,
+    });
+    catalogBySystem.set(sysId, catRes.ok ? catRes.value : []);
+  }
+
+  // 4) Decisión PURA (sin I/O): por candidato infiere is_castrated, computa la derivada y resuelve el
+  //    display contra el catálogo (fail-safe a la guardada si no resuelve).
+  return computeDisplayOverrides(
+    candidates.map((r) => ({
+      profileId: r.id,
+      sex: r.sex,
+      birthDate: r.birth_date ?? null,
+      systemId: r.system_id ?? null,
+      categoryOverride: false, // candidates ya filtró override=false
+      storedCode: r.category_code ?? '',
+      storedName: r.category_name ?? '',
+    })),
+    eventsByProfile,
+    catalogBySystem,
+  );
 }
 
 // ─── Lista (R1.1, R1.5) ────────────────────────────────────────────────────────────
@@ -181,7 +301,10 @@ export async function fetchAnimals(
     }),
   );
   if (!r.ok) return { ok: false, error: r.error };
-  return { ok: true, value: r.value.map(toLocalListItem) };
+  // C6 (RC6.3.2): espejo de categoría display-only — la lista muestra la categoría derivada localmente
+  // cuando override=false (incluye eventos cargados offline). Cero writes (RC6.3.5).
+  const overrides = await computeMirrorOverrides(r.value);
+  return { ok: true, value: r.value.map((row) => toLocalListItem(row, overrides.get(row.id))) };
 }
 
 // ─── Conteo liviano (home: paso "Cargá tu primer animal" por estado real) ────────────
@@ -230,7 +353,10 @@ export async function searchAnimals(
   }
 
   const seen = new Set<string>();
-  const out: AnimalListItem[] = [];
+  // Acumulamos las FILAS CRUDAS deduplicadas (los exactos priorizados arriba); el espejo de categoría +
+  // el mapeo a AnimalListItem se hacen UNA vez al final sobre el set deduplicado (C6: una sola pasada del
+  // espejo batched, en vez de por sub-query).
+  const rawRows: LocalListRow[] = [];
 
   // 1) TAG exacto (b1: animal_profiles.animal_tag_electronic) — solo si el texto tiene forma de
   //    caravana FDX-B. Priorizado arriba: un escaneo exacto de 15 díg es el match más fuerte.
@@ -240,7 +366,7 @@ export async function searchAnimals(
       { emptyIsSyncing: false },
     );
     if (!r.ok) return { ok: false, error: r.error };
-    pushLocalRows(r.value, seen, out);
+    pushLocalRows(r.value, seen, rawRows);
   }
 
   // 2) IDV exacto (animal_profiles.idv) — solo si el texto es numérico. Priorizado sobre el
@@ -251,7 +377,7 @@ export async function searchAnimals(
       { emptyIsSyncing: false },
     );
     if (!r.ok) return { ok: false, error: r.error };
-    pushLocalRows(r.value, seen, out);
+    pushLocalRows(r.value, seen, rawRows);
   }
 
   // 3) Substring numérico (LIKE PARCIAL local) sobre idv Y tag_electronic — fix-loop 2: tipear
@@ -265,14 +391,14 @@ export async function searchAnimals(
       { emptyIsSyncing: false },
     );
     if (!idvRes.ok) return { ok: false, error: idvRes.error };
-    pushLocalRows(idvRes.value, seen, out);
+    pushLocalRows(idvRes.value, seen, rawRows);
 
     const tagRes = await runLocalQuery<LocalListRow>(
       buildSearchLikeQuery(establishmentId, 'animal_tag_electronic', plan.compact),
       { emptyIsSyncing: false },
     );
     if (!tagRes.ok) return { ok: false, error: tagRes.error };
-    pushLocalRows(tagRes.value, seen, out);
+    pushLocalRows(tagRes.value, seen, rawRows);
   }
 
   // 4) visual_id_alt fuzzy → DEGRADADO a `LIKE '%term%'` local (sin trigram). Cubre el caso operativo
@@ -285,21 +411,25 @@ export async function searchAnimals(
       { emptyIsSyncing: false },
     );
     if (!r.ok) return { ok: false, error: r.error };
-    pushLocalRows(r.value, seen, out);
+    pushLocalRows(r.value, seen, rawRows);
   }
 
-  return { ok: true, value: out };
+  // C6 (RC6.3.2): mismo espejo que la lista — la búsqueda find-or-create muestra la categoría derivada
+  // localmente cuando override=false. Una sola pasada batched sobre el set deduplicado. Cero writes.
+  const overrides = await computeMirrorOverrides(rawRows);
+  return { ok: true, value: rawRows.map((row) => toLocalListItem(row, overrides.get(row.id))) };
 }
 
+/** Acumula las filas crudas deduplicadas por profileId (los exactos priorizados se agregan primero). */
 function pushLocalRows(
   rows: LocalListRow[] | null,
   seen: Set<string>,
-  out: AnimalListItem[],
+  out: LocalListRow[],
 ): void {
   for (const r of rows ?? []) {
     if (seen.has(r.id)) continue;
     seen.add(r.id);
-    out.push(toLocalListItem(r));
+    out.push(r);
   }
 }
 
@@ -592,6 +722,8 @@ type LocalDetailRow = {
   category_code: string | null;
   category_name: string | null;
   management_group_name: string | null;
+  // C6 (RC6.3.1): system_id del rodeo — para resolver el code derivado a name/id del catálogo local.
+  system_id?: string | null;
 };
 
 /**
@@ -615,6 +747,11 @@ export async function fetchAnimalDetail(profileId: string): Promise<ServiceResul
     return { ok: false, error: { kind: 'unknown', message: 'No se encontró el animal. Puede que ya no tengas acceso.' } };
   }
   const row = r.value;
+  // C6 (RC6.3.1): espejo de categoría display-only — la ficha muestra la categoría derivada localmente
+  // cuando override=false (incluye eventos cargados offline). Cero writes (RC6.3.5). El badge del hero
+  // sigue recibiendo categoryOverride sin tocar (RC6.4.1).
+  const overrides = await computeMirrorOverrides([row]);
+  const mirror = overrides.get(row.id);
   return {
     ok: true,
     value: {
@@ -626,8 +763,8 @@ export async function fetchAnimalDetail(profileId: string): Promise<ServiceResul
       tagElectronic: row.tag_electronic,
       sex: row.sex ?? 'female',
       birthDate: row.birth_date,
-      categoryCode: row.category_code ?? '',
-      categoryName: row.category_name ?? '',
+      categoryCode: mirror?.code ?? row.category_code ?? '',
+      categoryName: mirror?.name ?? row.category_name ?? '',
       categoryOverride: toBool(row.category_override),
       breed: row.breed,
       coatColor: row.coat_color,
@@ -697,6 +834,148 @@ export async function exitAnimalProfile(input: ExitAnimalInput): Promise<Service
   });
   if (!enq.ok) return { ok: false, error: { kind: 'unknown', message: enq.error.message } };
   return { ok: true, value: undefined };
+}
+
+// ─── Quitar fijación manual de categoría (C6 / RC6.4) ────────────────────────────────
+
+/** Categoría AUTOMÁTICA resuelta del espejo para el revert: code derivado + id y name del catálogo local. */
+type ResolvedRevertCategory = { derivedCode: string; categoryId: string; derivedName: string };
+
+/**
+ * Resolución COMPARTIDA del revert (C6 / RC6.4.3 + RC6.4.6): lee TODO del SQLite local (offline-safe) y
+ * computa la categoría AUTOMÁTICA a la que volvería el animal al quitar la fijación — su `code` derivado
+ * por el espejo + el `id` y el `name` legible del catálogo local. Es la ÚNICA fuente de la derivada: la
+ * usan `previewRevertCategory` (mostrar la consecuencia ANTES de confirmar) y `revertCategoryOverride`
+ * (ejecutar el UPDATE) ⇒ lo que se ANTICIPA en la confirmación es EXACTAMENTE la categoría a la que el
+ * revert aterriza (no pueden divergir). 100% SELECT (sin write): el caller del revert hace el UPDATE.
+ *
+ * Pasos (todo LOCAL):
+ *   1) detalle local (sex, birth_date, system_id). Sin animal o sin system_id → error es-AR (RC6.4.5);
+ *   2) eventos reproductivos batched (synced + overlay) → `derivedCode = computeCategoryCode(...)` con
+ *      is_castrated=FALSE (con override=true el code guardado es MANUAL → la inferencia no es confiable;
+ *      HOY ningún write-path setea is_castrated=true → false espeja al server; header animal-category.ts);
+ *   3) resuelve id+name por (system_id, derivedCode) en el catálogo local. Irresoluble → error es-AR
+ *      accionable, SIN write (RC6.4.5: no escribir un category_id inválido — 0021 lo rechazaría con 23514).
+ */
+async function resolveRevertCategory(
+  profileId: string,
+): Promise<ServiceResult<ResolvedRevertCategory>> {
+  // 1) Detalle local (sex, birth_date, system_id, category_code guardado). emptyIsSyncing:false: "no
+  //    encontrado" es un caso de negocio.
+  const detailRes = await runLocalQuerySingle<LocalDetailRow>(buildAnimalDetailQuery(profileId), {
+    emptyIsSyncing: false,
+  });
+  if (!detailRes.ok) return { ok: false, error: detailRes.error };
+  if (!detailRes.value) {
+    return { ok: false, error: { kind: 'unknown', message: 'No se encontró el animal.' } };
+  }
+  const row = detailRes.value;
+  const systemId = row.system_id ?? null;
+  if (!systemId) {
+    // Sin system_id no se puede resolver la categoría derivada → no ejecutar (RC6.4.5).
+    return {
+      ok: false,
+      error: { kind: 'unknown', message: 'No pudimos determinar la categoría automática. Probá de nuevo en unos segundos.' },
+    };
+  }
+
+  // 2) Eventos reproductivos batched (synced + overlay) del perfil → derivada local.
+  const eventsRes = await runLocalQuery<{
+    animal_profile_id: string;
+    event_type: string;
+    event_date: string;
+    created_at: string | null;
+    pregnancy_status: string | null;
+  }>(buildCategoryMirrorEventsQuery([profileId]), { emptyIsSyncing: false });
+  if (!eventsRes.ok) return { ok: false, error: eventsRes.error };
+  const events: ReproEventInput[] = eventsRes.value.map((e) => ({
+    eventType: e.event_type,
+    eventDate: e.event_date,
+    createdAt: e.created_at,
+    pregnancyStatus: e.pregnancy_status,
+  }));
+
+  // is_castrated=false al revertir (con override=true el code guardado es manual → la inferencia no es
+  // confiable; hoy nada setea is_castrated=true → false espeja al server; documentado en el header).
+  const derivedCode = computeCategoryCode({
+    sex: row.sex ?? 'female',
+    birthDate: row.birth_date ?? null,
+    isCastrated: false,
+    events,
+  });
+
+  // 3) Resolver el id+name de la derivada en el catálogo local del sistema. Irresoluble → error es-AR
+  //    (RC6.4.5; el caller del revert NO escribe).
+  const catRes = await runLocalQuerySingle<{ id: string; name: string }>(
+    buildCategoryByCodeQuery(systemId, derivedCode),
+    { emptyIsSyncing: false },
+  );
+  if (!catRes.ok) return { ok: false, error: catRes.error };
+  if (!catRes.value) {
+    return {
+      ok: false,
+      error: {
+        kind: 'unknown',
+        message: 'No pudimos calcular la categoría automática de este animal. Quitá la fijación cuando se sincronice el campo.',
+      },
+    };
+  }
+
+  return {
+    ok: true,
+    value: { derivedCode, categoryId: catRes.value.id, derivedName: catRes.value.name },
+  };
+}
+
+/**
+ * Anticipa la CONSECUENCIA del revert (C6 / RC6.4.6): devuelve el `name` legible de la categoría
+ * AUTOMÁTICA a la que volvería el animal al quitar la fijación, para mostrarlo en la confirmación inline
+ * ("La categoría pasará a …"). SOLO LECTURA (no escribe nada — es display, RC6.3.5): reusa
+ * `resolveRevertCategory` ⇒ el name anticipado es EXACTAMENTE el de la categoría que `revertCategoryOverride`
+ * va a escribir. Si la derivada NO es resoluble localmente (mismo caso que aborta el revert, RC6.4.5),
+ * devuelve `ok:true, value:null` → la UI NO muestra la línea de consecuencia (el revert, si se intenta,
+ * surfaceará el error real). Offline-safe (todo del SQLite local).
+ */
+export async function previewRevertCategory(
+  profileId: string,
+): Promise<ServiceResult<{ derivedCode: string; derivedName: string } | null>> {
+  const r = await resolveRevertCategory(profileId);
+  // Irresoluble (sin system_id / sin fila en el catálogo) → no anticipamos consecuencia (null): la línea
+  // se omite y, si el usuario confirma igual, revertCategoryOverride muestra el error accionable real.
+  if (!r.ok) return { ok: true, value: null };
+  return { ok: true, value: { derivedCode: r.value.derivedCode, derivedName: r.value.derivedName } };
+}
+
+/**
+ * Quita la fijación MANUAL de categoría (D2 / RC6.4.3): setea `category_override = false` Y
+ * `category_id = <categoría DERIVADA por el espejo>` en UN ÚNICO UPDATE local sobre animal_profiles. El
+ * cliente APORTA el valor recalculado (patrón as-built T2.5/T2.30): al SUBIR, el trigger `0040` ve el
+ * revert en el mismo statement y lo respeta (no re-marca override); `0030` registra `revert_to_auto`;
+ * `0021` re-valida la categoría contra el sistema del rodeo.
+ *
+ * La categoría derivada (code + id) la resuelve `resolveRevertCategory` (compartida con el preview de la
+ * consecuencia, RC6.4.6) — todo LOCAL, OFFLINE-safe (RC6.4.4). Si la derivada no es resoluble → NO ejecuta
+ * el revert + error es-AR accionable (RC6.4.5). El write es UN solo UPDATE local
+ * (buildRevertCategoryOverrideUpdate): éxito local inmediato; la RLS `animal_profiles_update` es la barrera
+ * real al subir (la autorización se valida ahí, no acá).
+ *
+ * Firma: ServiceResult<{ derivedCode }> (el caller recarga la ficha; no depende del valor, pero ayuda al
+ * test/diagnóstico). NO recibe is_castrated ni la categoría — todo se deriva del estado local.
+ */
+export async function revertCategoryOverride(
+  profileId: string,
+): Promise<ServiceResult<{ derivedCode: string }>> {
+  const resolved = await resolveRevertCategory(profileId);
+  if (!resolved.ok) return { ok: false, error: resolved.error };
+
+  // UN solo UPDATE local: override=false + category_id derivada (mismo statement → un solo UPDATE al
+  // subir → 0040 respeta el revert). Éxito local inmediato (offline-safe); RLS al subir.
+  const writeRes = await runLocalWrite(
+    buildRevertCategoryOverrideUpdate(profileId, resolved.value.categoryId),
+  );
+  if (!writeRes.ok) return { ok: false, error: { kind: writeRes.error.kind, message: writeRes.error.message } };
+
+  return { ok: true, value: { derivedCode: resolved.value.derivedCode } };
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────────

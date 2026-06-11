@@ -732,3 +732,110 @@ test('servicio en hembra NO preñada: NO aparece aviso → guarda directo (sin c
   // Y NUNCA apareció un window.confirm (no figura preñada → guarda directo).
   expect(unexpectedDialog).toBe(false);
 });
+
+// ════════════════════════════════════════════════════════════════════════════════════════════
+// C6 — Espejo client-side de categoría (offline) + visibilidad del override (spec 02, RC6.x).
+// ════════════════════════════════════════════════════════════════════════════════════════════
+
+// C6 / RC6.3.1 — ESPEJO: una hembra vaquillona + tacto positivo → el hero muestra "Vaquillona preñada"
+// DERIVADA LOCALMENTE por el espejo, sin depender del sync-down server-side. Antes de C6 este badge
+// dependía de que la transición server-side volviera por sync (flaky/lento); ahora el espejo lo computa
+// del evento local recién escrito → determinístico. (Es el gap que cierra los e2e de transición.)
+test('C6 espejo: tacto+ sobre vaquillona → el hero muestra "Vaquillona preñada" derivado localmente', async ({
+  page,
+}) => {
+  const user = await createTestUser('c6espejo');
+  await setUserPhone(user.id, '1123456789');
+  const { establishmentId, rodeoId } = await seedEstablishmentWithRodeo(user.id, 'Campo C6Espejo');
+  const idv = `9911${Date.now().toString().slice(-5)}`;
+  // Hembra → vaquillona, category_override=false (default) → el espejo aplica.
+  await seedAnimal(establishmentId, rodeoId, { idv, sex: 'female' });
+
+  await page.goto('/');
+  await signIn(page, user);
+  await waitForHome(page);
+  await gotoAnimales(page);
+
+  const row = page.getByRole('button', { name: new RegExp(idv) }).first();
+  await expect(row).toBeVisible({ timeout: 20_000 });
+  await row.click();
+  await expect(page.getByText('Historial', { exact: true })).toBeVisible({ timeout: 20_000 });
+  // El hero arranca en "Vaquillona" (categoría inicial sembrada). Anclamos por el a11y label del
+  // CategoryBadge (el texto del badge tiene overflow-hidden por numberOfLines → el span pelado puede
+  // evaluar "hidden" en Playwright; el aria-label del contenedor es estable).
+  await expect(page.getByLabel('Categoría Vaquillona', { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 20_000 });
+
+  // Tacto positivo (Cuerpo = medium). addTacto escribe el evento en reproductive_events LOCAL.
+  await page.getByRole('button', { name: 'Agregar evento', exact: true }).click();
+  await page.getByRole('button', { name: 'Tacto', exact: true }).click();
+  const pregOption = page.getByRole('button', { name: 'Cuerpo', exact: true });
+  await expect(pregOption).toBeVisible({ timeout: 20_000 });
+  await pregOption.click();
+  await page.getByRole('button', { name: 'Guardar evento', exact: true }).click();
+
+  // De vuelta en la ficha: el ESPEJO derivó vaquillona_prenada del tacto local → el hero muestra el badge
+  // "Vaquillona preñada" (categoría del catálogo, contiene "preñada"). Anclamos por el a11y label del
+  // CategoryBadge. NO se muestra el indicador de "fijada manualmente" (override sigue false: transición auto).
+  await expect(page.getByText('Tacto', { exact: true })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByLabel(/Categoría Vaquillona pre[ñn]ada/i).first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText('Categoría fijada manualmente', { exact: true })).toHaveCount(0);
+});
+
+// C6 / RC6.4 — OVERRIDE: una hembra con categoría FIJADA manualmente (category_override=true) muestra el
+// indicador "Categoría fijada manualmente" en la ficha + la acción "Quitar fijación". Al quitarla
+// (confirmación inline), el override se limpia y el hero pasa a mostrar la categoría DERIVADA por el
+// espejo (multipara fijada sobre una hembra sin partos → al revertir, el espejo deriva "Vaquillona").
+test('C6 override: badge "Categoría fijada manualmente" + quitar fijación → hero pasa a la derivada', async ({
+  page,
+}) => {
+  const user = await createTestUser('c6override');
+  await setUserPhone(user.id, '1123456789');
+  const { establishmentId, rodeoId } = await seedEstablishmentWithRodeo(user.id, 'Campo C6Override');
+  const idv = `8811${Date.now().toString().slice(-5)}`;
+  // Hembra FIJADA como "Multípara" a mano (override=true), SIN eventos de parto. El server NO la
+  // transiciona (override manda). Al QUITAR la fijación, el espejo deriva su categoría real: sin partos
+  // ni tactos y sin birth_date conocida → "Vaquillona" (default conservador de la rama hembra).
+  await seedAnimal(establishmentId, rodeoId, {
+    idv,
+    sex: 'female',
+    categoryCode: 'multipara',
+    categoryOverride: true,
+  });
+
+  await page.goto('/');
+  await signIn(page, user);
+  await waitForHome(page);
+  await gotoAnimales(page);
+
+  const row = page.getByRole('button', { name: new RegExp(idv) }).first();
+  await expect(row).toBeVisible({ timeout: 20_000 });
+  await row.click();
+  await expect(page.getByText('Historial', { exact: true })).toBeVisible({ timeout: 20_000 });
+
+  // El indicador "Categoría fijada manualmente" está visible (override=true). El hero muestra "Multípara"
+  // (la guardada — el espejo NO aplica con override=true, RC6.3.3). El a11y label del badge con override
+  // lleva el sufijo ", fijada manualmente".
+  await expect(page.getByText('Categoría fijada manualmente', { exact: true })).toBeVisible({
+    timeout: 20_000,
+  });
+  await expect(page.getByLabel('Categoría Multípara, fijada manualmente', { exact: true })).toBeVisible();
+
+  // Quitar la fijación: la acción + la confirmación inline.
+  await page.getByRole('button', { name: 'Quitar fijación', exact: true }).click();
+  // RC6.4.6 (Nielsen #1 visibilidad / #5 prevención de error): la confirmación ANTICIPA la CONSECUENCIA
+  // — a qué categoría AUTOMÁTICA volvería el animal (el NAME legible de la derivada por el espejo, no el
+  // code). Para esta multípara-sin-partos la derivada es "Vaquillona". El texto se resuelve async (preview
+  // del service) → lo esperamos antes de confirmar.
+  await expect(page.getByText('La categoría pasará a Vaquillona.', { exact: true })).toBeVisible({
+    timeout: 20_000,
+  });
+  await page.getByRole('button', { name: 'Sí, quitar', exact: true }).click();
+
+  // Tras el revert (UPDATE local override=false + category_id derivada): la ficha recarga, el indicador
+  // desaparece y el hero muestra la categoría DERIVADA por el espejo ("Vaquillona", sin sufijo manual).
+  await expect(page.getByText('Cargando ficha…', { exact: true })).toHaveCount(0, { timeout: 20_000 });
+  await expect(page.getByText('Categoría fijada manualmente', { exact: true })).toHaveCount(0, {
+    timeout: 20_000,
+  });
+  await expect(page.getByLabel('Categoría Vaquillona', { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 20_000 });
+});

@@ -143,6 +143,16 @@ notify pgrst, 'reload schema';
 
 ### 3.1 `compute_category` reescrita (0062)
 
+> **⚠️ ANTI-DRIFT (C6 / RC6.5.2) — nota de mantenimiento, aditiva.** Existe un **espejo client-side** de
+> esta función en `app/src/utils/animal-category.ts` (`computeCategoryCode`), display-only y offline (chunk
+> C6 de spec 02): permite ver la categoría derivada localmente antes de que este trigger recompute y el
+> cambio baje por sync. **Cualquier migración que toque `compute_category`** (ramas, cortes de edad,
+> precedencia de la máquina de estados, tacto+ vigente RT2.7.5, conteo de partos) **DEBE actualizar ese
+> espejo + sus fixtures** (`app/src/utils/animal-category.test.ts`, suite "FIXTURES ESPEJO RC6.1.6", que
+> replica caso por caso la matriz `supabase/tests/animal/run.cjs` T2.21–T2.26/T2.29/T2.30). El peor caso del
+> drift es display-only (categoría mostrada vieja hasta el próximo sync; no corrompe datos). Nota gemela en
+> el header del módulo TS.
+
 **[FIRME · dominio]** la máquina de estados; **[DECISIÓN · design]** la materialización por edad (DD-1) y la consulta de aborto-revierte-tacto (RT2.7.5).
 
 Conserva la firma y las propiedades del as-built (`SECURITY DEFINER STABLE`, `set search_path = public`, `grant execute … to authenticated`). Lee ahora también `a.is_castrated` (DD-2) y los eventos `service`/`weaning`/`abortion`. **El conteo de partos sigue contando eventos `birth` distintos** (no terneros, RT2.7.2) — se conserva el comentario firme del `0045`.

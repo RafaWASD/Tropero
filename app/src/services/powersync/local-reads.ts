@@ -347,6 +347,19 @@ export function buildCategoryIdByCodeQuery(systemId: string, code: string): Loca
 }
 
 /**
+ * category_id + NAME por (system_id, code) ACTIVO. Igual que `buildCategoryIdByCodeQuery` pero proyecta
+ * también el `name` legible del catálogo. Lo usa la resolución compartida del revert de override (C6 /
+ * RC6.4.3 + RC6.4.6): el id para el UPDATE local, el name para anticipar la CONSECUENCIA en la
+ * confirmación inline ("La categoría pasará a …"). SELECT puro (display-only en el preview). LIMIT 1.
+ */
+export function buildCategoryByCodeQuery(systemId: string, code: string): LocalQuery {
+  return {
+    sql: 'SELECT id, name FROM categories_by_system WHERE system_id = ? AND code = ? AND active = 1 LIMIT 1',
+    args: [systemId, code],
+  };
+}
+
+/**
  * species_id de un rodeo (espeja la lectura online de rodeos de createAnimal: animals.species_id deriva
  * del rodeo). El rodeo ya está sincronizado (est_rodeos). LIMIT 1 = maybeSingle.
  */
@@ -428,11 +441,17 @@ function notHiddenByOverride(table: string, idExpr: string, effects: readonly st
 // Proyecta `created_at` (alias) ADEMÁS de las columnas de la lista: en un UNION el ORDER BY solo puede
 // referenciar columnas PROYECTADAS, y la lista ordena por created_at. La búsqueda lo ignora (el mapper
 // toLocalListItem lee por nombre y descarta columnas extra) → es inofensivo proyectarlo siempre.
+//
+// C6 (RC6.3.1/RC6.3.2): se agregan `category_override`, `animal_birth_date` y `r.system_id` — inputs del
+// espejo de categoría (`applyCategoryMirror` en animals.ts). El shape PÚBLICO (AnimalListItem) NO cambia:
+// estas columnas extra las consume solo el mirror del service; el mapper toLocalListItem las descarta.
 const LOCAL_LIST_SELECT =
   'SELECT ap.id AS id, ap.animal_id AS animal_id, ap.idv AS idv, ' +
   'ap.visual_id_alt AS visual_id_alt, ap.category_id AS category_id, ap.rodeo_id AS rodeo_id, ' +
   'ap.status AS status, ap.management_group_id AS management_group_id, ' +
   'ap.animal_tag_electronic AS tag_electronic, ap.animal_sex AS sex, ' +
+  'ap.category_override AS category_override, ap.animal_birth_date AS birth_date, ' +
+  'r.system_id AS system_id, ' +
   'r.name AS rodeo_name, c.code AS category_code, c.name AS category_name, ' +
   'ap.created_at AS created_at ' +
   'FROM animal_profiles ap ' +
@@ -442,11 +461,15 @@ const LOCAL_LIST_SELECT =
 // Mismo SELECT (mismo shape de columnas) PERO desde el overlay `pending_animal_profiles` (alias `pap`).
 // La identidad/atributos salen denormalizados del overlay; rodeo/categoría se JOINean a las tablas
 // SINCRONIZADAS (para createAnimal/ternero el rodeo y la categoría son filas reales ya sincronizadas).
+// Mismas columnas C6 (`category_override`/`birth_date`/`system_id`) — ambas ramas del UNION proyectan
+// idéntico set (requisito del UNION ALL).
 const LOCAL_LIST_SELECT_OVERLAY =
   'SELECT pap.id AS id, pap.animal_id AS animal_id, pap.idv AS idv, ' +
   'pap.visual_id_alt AS visual_id_alt, pap.category_id AS category_id, pap.rodeo_id AS rodeo_id, ' +
   'pap.status AS status, pap.management_group_id AS management_group_id, ' +
   'pap.animal_tag_electronic AS tag_electronic, pap.animal_sex AS sex, ' +
+  'pap.category_override AS category_override, pap.animal_birth_date AS birth_date, ' +
+  'r.system_id AS system_id, ' +
   'r.name AS rodeo_name, c.code AS category_code, c.name AS category_name, ' +
   'pap.created_at AS created_at ' +
   'FROM pending_animal_profiles pap ' +
@@ -638,6 +661,8 @@ export function buildAnimalDetailQuery(profileId: string): LocalQuery {
     'ap.rodeo_id AS rodeo_id, ap.management_group_id AS management_group_id, ' +
     'ap.animal_tag_electronic AS tag_electronic, ap.animal_sex AS sex, ' +
     'ap.animal_birth_date AS birth_date, ' +
+    // C6 (RC6.3.1): system_id del rodeo → el espejo resuelve code→name/id del catálogo local del sistema.
+    'r.system_id AS system_id, ' +
     'r.name AS rodeo_name, c.code AS category_code, c.name AS category_name, ' +
     'mg.name AS management_group_name ' +
     'FROM animal_profiles ap ' +
@@ -656,6 +681,8 @@ export function buildAnimalDetailQuery(profileId: string): LocalQuery {
     'pap.rodeo_id AS rodeo_id, pap.management_group_id AS management_group_id, ' +
     'pap.animal_tag_electronic AS tag_electronic, pap.animal_sex AS sex, ' +
     'pap.animal_birth_date AS birth_date, ' +
+    // C6 (RC6.3.1): system_id del rodeo (misma proyección que la rama synced, requisito del UNION).
+    'r.system_id AS system_id, ' +
     'r.name AS rodeo_name, c.code AS category_code, c.name AS category_name, ' +
     'mg.name AS management_group_name ' +
     'FROM pending_animal_profiles pap ' +
@@ -667,6 +694,49 @@ export function buildAnimalDetailQuery(profileId: string): LocalQuery {
     sql: `${synced} UNION ALL ${overlay} LIMIT 1`,
     args: [profileId, profileId],
   };
+}
+
+// ─── Espejo de categoría (C6 / RC6.3.6): eventos reproductivos crudos por perfil ─────────────
+//
+// Builder BATCHED de los eventos reproductivos que alimentan el espejo client-side de compute_category
+// (`computeCategoryCode`, animal-category.ts). Sirve para la ficha (1 id) y para la lista (≤200 ids).
+// Trae las filas CRUDAS (event_type/event_date/created_at/pregnancy_status) — la decisión de categoría
+// vive 100% en TS (design §2/§8: una sola implementación espejo, sin replicar EXISTS/COUNT en SQL local).
+//
+// Dos orígenes UNION ALL (igual que el timeline):
+//   - `reproductive_events` SINCRONIZADO: tactos/servicios/destetes/abortos cargados offline por CRUD plano
+//     + los partos ya sincronizados. Filtro `deleted_at IS NULL` (el espejo cuenta solo no-borrados) +
+//     `event_type IN (...)` (espeja el gate del trigger 0063 — no acarrear eventos irrelevantes).
+//   - `pending_reproductive_events` OVERLAY: los partos OPTIMISTAS de register_birth offline (aún no
+//     subidos). El overlay NO tiene pregnancy_status ni deleted_at (solo porta partos `birth`) → proyecta
+//     NULL en pregnancy_status; el `event_type IN (...)` igual lo acota (será 'birth').
+//
+// ORDER BY event_date ASC, created_at ASC: el orden que el tacto+ vigente (RT2.7.5) usa para el desempate
+// por la tupla (event_date, created_at). El espejo TS recibe las filas en ese orden — el tie-break de
+// `created_at NULL` (fila local recién insertada) lo resuelve el espejo, no el SQL (RC6.1.4).
+//
+// El scoping de tenant ya lo aplicó la stream est_reproductive_events al sincronizar → NO se re-filtra.
+
+const MIRROR_EVENT_TYPES = "('birth','weaning','service','tacto','abortion')";
+
+/**
+ * Eventos reproductivos crudos (synced + overlay) de un conjunto de perfiles, para el espejo de
+ * categoría (RC6.3.6/RC6.3.1). `profileIds` ≥ 1 (el caller no llama con lista vacía). Devuelve filas
+ * `{ animal_profile_id, event_type, event_date, created_at, pregnancy_status }`.
+ */
+export function buildCategoryMirrorEventsQuery(profileIds: readonly string[]): LocalQuery {
+  const placeholders = profileIds.map(() => '?').join(', ');
+  const sql =
+    'SELECT animal_profile_id, event_type, event_date, created_at, pregnancy_status ' +
+    'FROM reproductive_events ' +
+    `WHERE animal_profile_id IN (${placeholders}) AND deleted_at IS NULL ` +
+    `AND event_type IN ${MIRROR_EVENT_TYPES} ` +
+    'UNION ALL ' +
+    'SELECT animal_profile_id, event_type, event_date, created_at, NULL AS pregnancy_status ' +
+    'FROM pending_reproductive_events ' +
+    `WHERE animal_profile_id IN (${placeholders}) AND event_type IN ${MIRROR_EVENT_TYPES} ` +
+    'ORDER BY event_date ASC, created_at ASC';
+  return { sql, args: [...profileIds, ...profileIds] };
 }
 
 // ─── Lotes / management_groups (T4.3) ───────────────────────────────────────────────
@@ -1014,6 +1084,28 @@ export function buildAssignAnimalToGroupUpdate(
   return {
     sql: 'UPDATE animal_profiles SET management_group_id = ? WHERE id = ? AND deleted_at IS NULL',
     args: [groupId, profileId],
+  };
+}
+
+/**
+ * UPDATE local que QUITA la fijación manual de categoría (revert override, C6 / RC6.4.3). UN ÚNICO
+ * statement que setea `category_override = 0` Y `category_id = ?` (la categoría DERIVADA por el espejo,
+ * resuelta a id por el caller). Patrón as-built T2.5/T2.30: el cliente APORTA el valor recalculado; al
+ * SUBIR, PowerSync lo manda como un solo UPDATE → el trigger `0040` ve `old.override=true ∧
+ * new.override=false` EN EL MISMO statement y respeta el revert (no re-marca override); `0030` registra
+ * `revert_to_auto`; `0021` re-valida la categoría contra el sistema del rodeo (23514 si no cuadra).
+ *
+ * Filtra `deleted_at IS NULL` (no se revierte un perfil borrado). Se ELIMINA cualquier `count:'exact'`
+ * (R6.3): el UPDATE local siempre "tiene éxito" offline (RC6.4.4); la authz real (RLS
+ * `animal_profiles_update`) se valida al SUBIR. `category_override` se escribe como 0 (SQLite no tiene
+ * boolean; PowerSync lo materializa al `false` de PG al subir).
+ */
+export function buildRevertCategoryOverrideUpdate(profileId: string, categoryId: string): LocalQuery {
+  return {
+    sql:
+      'UPDATE animal_profiles SET category_override = 0, category_id = ? ' +
+      'WHERE id = ? AND deleted_at IS NULL',
+    args: [categoryId, profileId],
   };
 }
 

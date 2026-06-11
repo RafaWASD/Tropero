@@ -204,7 +204,18 @@ export async function seedEstablishmentWithRodeo(
 export async function seedAnimal(
   establishmentId: string,
   rodeoId: string,
-  opts: { idv?: string | null; visualAlt?: string | null; tag?: string | null; sex?: 'male' | 'female' } = {},
+  opts: {
+    idv?: string | null;
+    visualAlt?: string | null;
+    tag?: string | null;
+    sex?: 'male' | 'female';
+    /** code de categoría explícito (default torito/vaquillona por sexo). Para sembrar una categoría manual. */
+    categoryCode?: string;
+    /** category_override del perfil (default false). true = categoría FIJADA manualmente (C6). */
+    categoryOverride?: boolean;
+    /** birth_date ISO 'YYYY-MM-DD' del animal (opcional). */
+    birthDate?: string | null;
+  } = {},
 ): Promise<string> {
   const sex = opts.sex ?? 'female';
 
@@ -216,7 +227,7 @@ export async function seedAnimal(
     .single();
   if (rErr) throw new Error(`seedAnimal rodeo: ${rErr.message}`);
 
-  const categoryCode = sex === 'male' ? 'torito' : 'vaquillona';
+  const categoryCode = opts.categoryCode ?? (sex === 'male' ? 'torito' : 'vaquillona');
   const { data: cat, error: cErr } = await admin
     .from('categories_by_system')
     .select('id')
@@ -228,6 +239,7 @@ export async function seedAnimal(
   const animalId = randomUUID();
   const animalPayload: Record<string, unknown> = { id: animalId, sex, species_id: rodeo.species_id };
   if (opts.tag) animalPayload.tag_electronic = opts.tag;
+  if (opts.birthDate) animalPayload.birth_date = opts.birthDate;
   const { error: aErr } = await admin.from('animals').insert(animalPayload);
   if (aErr) throw new Error(`seedAnimal animals: ${aErr.message}`);
 
@@ -242,6 +254,7 @@ export async function seedAnimal(
   };
   if (opts.idv) profilePayload.idv = opts.idv;
   if (opts.visualAlt) profilePayload.visual_id_alt = opts.visualAlt;
+  if (opts.categoryOverride) profilePayload.category_override = true;
   const { error: pErr } = await admin.from('animal_profiles').insert(profilePayload);
   if (pErr) throw new Error(`seedAnimal animal_profiles: ${pErr.message}`);
 

@@ -31,6 +31,7 @@ import {
   HeartCrack,
   Mars,
   Milk,
+  Pin,
   Plus,
   Tag,
   Venus,
@@ -38,7 +39,13 @@ import {
 import type { LucideIcon } from 'lucide-react-native';
 
 import { Button, Card, CategoryBadge, InfoNote, FormError, FormField, TimelineEvent } from '@/components';
-import { fetchAnimalDetail, type AnimalDetail, type AnimalStatus } from '@/services/animals';
+import {
+  fetchAnimalDetail,
+  previewRevertCategory,
+  revertCategoryOverride,
+  type AnimalDetail,
+  type AnimalStatus,
+} from '@/services/animals';
 import { archivedBadgeLabel } from '@/services/exit-animal';
 import { useAuth, useEstablishment } from '@/contexts';
 import {
@@ -216,6 +223,40 @@ export default function AnimalDetailScreen() {
     return animalInActiveEst && canManageGroups(estState.status === 'active' ? estState.role : null);
   }, [detail, estState]);
 
+  // ── Quitar fijación de categoría (C6 / RC6.4). ──
+  // Se ofrece SOLO si la categoría está fijada manualmente (override) Y el animal está ACTIVO (un
+  // archivado no se reorganiza, igual que el Lote). Cualquier rol activo puede intentarlo: la RLS
+  // `animal_profiles_update` es la barrera real (mismo razonamiento que el control de Lote). El revert
+  // funciona OFFLINE (RC6.4.4): UPDATE local inmediato; la autorización se valida al subir.
+  const canRevertOverride = detail != null && detail.categoryOverride && detail.status === 'active';
+
+  const onRevertOverride = useCallback(async (): Promise<{ ok: boolean; error?: string }> => {
+    if (!detail) return { ok: false };
+    const r = await revertCategoryOverride(detail.profileId);
+    if (!r.ok) {
+      return {
+        ok: false,
+        error:
+          r.error.kind === 'network'
+            ? 'Sin conexión: no pudimos quitar la fijación. Conectate y volvé a intentar.'
+            : r.error.message,
+      };
+    }
+    // Recargamos la ficha: ahora override=false → el hero muestra la categoría DERIVADA al instante
+    // (también offline, el UPDATE local ya pegó). `load()` re-trae detalle + grupos + timeline.
+    await load();
+    return { ok: true };
+  }, [detail, load]);
+
+  // Anticipa la CONSECUENCIA del revert (RC6.4.6): el NOMBRE de la categoría automática a la que volvería
+  // el animal, para mostrarlo en la confirmación inline ("La categoría pasará a …"). Solo lectura (display).
+  // null = no resoluble localmente (mismo caso que aborta el revert) → la card omite la línea de consecuencia.
+  const onPreviewRevert = useCallback(async (): Promise<string | null> => {
+    if (!detail) return null;
+    const r = await previewRevertCategory(detail.profileId);
+    return r.ok && r.value ? r.value.derivedName : null;
+  }, [detail]);
+
   const onAssignLote = useCallback(
     async (groupId: string | null): Promise<{ ok: boolean; error?: string }> => {
       if (!detail) return { ok: false };
@@ -304,6 +345,17 @@ export default function AnimalDetailScreen() {
             {/* Modo archivada (C3.3, R14.9): si el animal está de baja (status ≠ active), badge bajo el
                 hero con el verbo + fecha de egreso ("Vendido el …"). Para un animal activo → null. */}
             <ArchivedBadge status={detail.status} exitDate={detail.exitDate} />
+
+            {/* Categoría fijada manualmente (C6 / RC6.4.1): si el override está activo, un indicador
+                explícito bajo el hero + (si el animal está activo) la acción "Quitar fijación" con
+                confirmación inline. Para override=false → null (el espejo ya gobierna el display). */}
+            {detail.categoryOverride ? (
+              <CategoryOverrideCard
+                canRevert={canRevertOverride}
+                onRevert={onRevertOverride}
+                onPreviewRevert={onPreviewRevert}
+              />
+            ) : null}
 
             {/* Link a la MADRE (R14.7): solo si el animal es un ternero con parto registrado. Tappable
                 → ficha de la madre. Tolera madre archivada (status ≠ active): indicador + navega igual. */}
@@ -488,6 +540,156 @@ function ArchivedBadge({ status, exitDate }: { status: AnimalStatus; exitDate: s
           {label}
         </Text>
       </XStack>
+    </View>
+  );
+}
+
+// ─── Card "Categoría fijada manualmente" + quitar fijación (C6 / RC6.4) ───────────────
+//
+// Indicador EXPLÍCITO bajo el hero cuando la categoría está fijada a mano (category_override = true):
+// el server NO transiciona la categoría de este animal (R4.9 "override manda") — el dueño la gestiona
+// manual. Más visible que el punto sutil del CategoryBadge: comunica POR QUÉ no transiciona.
+//
+// Acción "Quitar fijación" (RC6.4.2/RC6.4.3): solo si el animal está ACTIVO (`canRevert`); cualquier rol
+// activo puede intentarla (la RLS `animal_profiles_update` es la barrera real). Confirmación INLINE
+// (expande Confirmar/Cancelar) — la acción es reversible-en-la-práctica (volver a fijar = editar la
+// categoría) pero cambia el comportamiento del animal, así que pedimos un toque de confirmación. Funciona
+// OFFLINE (el UPDATE local pega al instante; RC6.4.4). Si la derivada no resuelve localmente, el service
+// devuelve un error es-AR accionable y NO escribe (RC6.4.5) → se muestra acá sin tocar la categoría.
+//
+// CONSECUENCIA visible (RC6.4.6, Nielsen #1 visibilidad + #5 prevención de error): al confirmar, la card
+// anticipa A QUÉ CATEGORÍA volvería el animal ("La categoría pasará a …") usando el NAME legible de la
+// derivada (`onPreviewRevert`, la MISMA resolución que el revert ⇒ no divergen). Si no es resoluble
+// localmente (RC6.4.5), no se anticipa nada (el flujo de error del revert manda) → línea omitida.
+//
+// Lenguaje visual: $surface + borde/ícono/texto $primary (firma RAFAQ, NO terracota — esto NO es una
+// alerta ni una baja). a11y por helper. Cero hardcode (tokens + getTokenValue para el ícono lucide).
+function CategoryOverrideCard({
+  canRevert,
+  onRevert,
+  onPreviewRevert,
+}: {
+  canRevert: boolean;
+  onRevert: () => Promise<{ ok: boolean; error?: string }>;
+  /** Anticipa el NAME de la categoría derivada (consecuencia) o null si no es resoluble (RC6.4.6). */
+  onPreviewRevert: () => Promise<string | null>;
+}) {
+  const primary = getTokenValue('$primary', 'color');
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // Name de la categoría derivada para la línea de consecuencia. null = aún no resuelta / no resoluble.
+  const [derivedName, setDerivedName] = useState<string | null>(null);
+
+  const startConfirm = useCallback(() => {
+    setConfirming(true);
+    setError(null);
+    setDerivedName(null);
+    // Anticipamos la consecuencia (la categoría a la que volvería). Blando: si no resuelve, la línea no se
+    // muestra (no bloquea la acción — el revert real surfaceará el error si lo hubiera). Sin race relevante:
+    // el peor caso es que el name llegue un instante después (la confirmación ya está visible).
+    void onPreviewRevert().then((name) => setDerivedName(name));
+  }, [onPreviewRevert]);
+
+  const onConfirm = useCallback(async () => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    const r = await onRevert();
+    // Si OK, la ficha recarga (override=false) → esta card desmonta sola; no reseteamos busy para evitar
+    // un parpadeo. Si falla, surfaceamos el error y volvemos a habilitar.
+    if (!r.ok) {
+      setBusy(false);
+      setError(r.error ?? 'No se pudo quitar la fijación.');
+      return;
+    }
+  }, [busy, onRevert]);
+
+  return (
+    <View
+      backgroundColor="$surface"
+      borderWidth={1}
+      borderColor="$primary"
+      borderRadius="$card"
+      paddingHorizontal="$4"
+      paddingVertical="$3"
+      gap="$3"
+      {...labelA11y(Platform.OS, 'Categoría fijada manualmente')}
+    >
+      <XStack alignItems="center" gap="$2">
+        <Pin size={18} color={primary} strokeWidth={2.5} />
+        <Text flex={1} minWidth={0} fontFamily="$body" fontSize="$4" fontWeight="600" color="$primary" numberOfLines={2}>
+          Categoría fijada manualmente
+        </Text>
+      </XStack>
+
+      {error ? <FormError message={error} /> : null}
+
+      {/* Acción "Quitar fijación" SOLO para un animal activo (canRevert). Confirmación inline. */}
+      {canRevert ? (
+        confirming ? (
+          <YStack gap="$3">
+            {/* Consecuencia (RC6.4.6): a qué categoría vuelve el animal. Tipografía SECUNDARIA ($3/muted)
+                — informa sin competir con los botones. Solo cuando la derivada resolvió (sino, omitida). */}
+            {derivedName ? (
+              <Text
+                fontFamily="$body"
+                fontSize="$3"
+                fontWeight="500"
+                color="$textMuted"
+                {...labelA11y(Platform.OS, `La categoría pasará a ${derivedName}.`)}
+              >
+                La categoría pasará a {derivedName}.
+              </Text>
+            ) : null}
+            <XStack gap="$2">
+              <YStack flex={1}>
+                <Button
+                  variant="secondary"
+                  fullWidth
+                  disabled={busy}
+                  onPress={() => {
+                    setConfirming(false);
+                    setError(null);
+                    setDerivedName(null);
+                  }}
+                >
+                  Cancelar
+                </Button>
+              </YStack>
+              <YStack flex={1}>
+                <Button variant="primary" fullWidth disabled={busy} onPress={() => void onConfirm()}>
+                  {busy ? 'Quitando…' : 'Sí, quitar'}
+                </Button>
+              </YStack>
+            </XStack>
+          </YStack>
+        ) : (
+          <Pressable
+            style={{ width: '100%' }}
+            onPress={startConfirm}
+            {...buttonA11y(Platform.OS, { label: 'Quitar fijación' })}
+          >
+            <XStack
+              width="100%"
+              minHeight="$touchMin"
+              alignItems="center"
+              justifyContent="center"
+              gap="$2"
+              borderRadius="$pill"
+              backgroundColor="transparent"
+              borderWidth={2}
+              borderColor="$primary"
+              paddingHorizontal="$5"
+              pressStyle={{ backgroundColor: '$greenLight' }}
+            >
+              <Text fontFamily="$body" fontSize="$5" fontWeight="600" color="$primary">
+                Quitar fijación
+              </Text>
+            </XStack>
+          </Pressable>
+        )
+      ) : null}
     </View>
   );
 }
