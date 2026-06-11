@@ -46,6 +46,14 @@ import {
   buildAddServiceInsert,
   buildAddAbortionInsert,
   buildAddObservationInsert,
+  buildAddVaccinationInsert,
+  buildAddWeaningInsert,
+  buildSetCastratedUpdate,
+  buildSetFutureBullUpdate,
+  buildExistingVaccinationIdsQuery,
+  buildExistingWeaningIdsQuery,
+  buildProfileEstablishmentQuery,
+  buildProfileEstablishmentsQuery,
   buildCreateManagementGroupInsert,
   buildRenameManagementGroupUpdate,
   buildAssignAnimalToGroupUpdate,
@@ -379,6 +387,10 @@ test('buildAnimalsListQuery: b1 identidad desde animal_profiles, JOINs, status d
   assert.match(q.sql, /ORDER BY created_at DESC LIMIT 200/);
   // NO re-scopea tenant (has_role_in)
   assert.doesNotMatch(q.sql, /has_role_in/);
+  // spec 10 (T-CL.12): el espejo C6 necesita is_castrated REAL → la lista lo proyecta en AMBAS ramas
+  // (synced: ap.is_castrated; overlay: 0 constante — un alta optimista nace entero).
+  assert.match(q.sql, /ap\.is_castrated AS is_castrated/);
+  assert.match(q.sql, /0 AS is_castrated/);
   // args = synced (est, active) ++ overlay (est, active)
   assert.deepEqual(q.args, ['est-1', 'active', 'est-1', 'active']);
 });
@@ -478,6 +490,10 @@ test('buildAnimalDetailQuery: b1 identidad+birth_date, LEFT JOIN lote, deleted_a
   assert.match(q.sql, /UNION ALL/);
   assert.match(q.sql, /FROM pending_animal_profiles pap/);
   assert.match(q.sql, /LIMIT 1/);
+  // spec 10 (T-CL.12): la ficha proyecta is_castrated REAL (espejo C6) + future_bull (badge ⭐) en la rama
+  // synced; el overlay (alta optimista) proyecta 0/0 constantes (nace entero, sin ⭐) — alinea el UNION.
+  assert.match(q.sql, /ap\.is_castrated AS is_castrated, ap\.future_bull AS future_bull/);
+  assert.match(q.sql, /0 AS is_castrated, 0 AS future_bull/);
   assert.deepEqual(q.args, ['prof-7', 'prof-7']);
 });
 
@@ -1074,4 +1090,121 @@ test('PENDING_OVERLAY_TABLES: las 7 tablas overlay (para clear/rollback por clie
     'pending_rodeos',
     'pending_status_overrides',
   ]);
+});
+
+// ─── spec 10 (T-CL.8/T-CL.11/T-CL.13): builders de las operaciones masivas + castración/futuro torito ──
+
+test('T-CL.8 / R3.1: buildAddVaccinationInsert — sanitary_events vaccination, campaign_id NO se manda (NULL as-built)', () => {
+  const q = buildAddVaccinationInsert('id-1', 'p-1', 'Aftosa', 'subcutánea', '2026-06-11');
+  assert.match(q.sql, /INSERT INTO sanitary_events/);
+  assert.match(q.sql, /'vaccination'/);
+  // campaign_id NO está en la lista de columnas → queda NULL (sanitary_campaigns no existe, design §2.2).
+  assert.ok(!/campaign_id/.test(q.sql), 'no debe setear campaign_id (NULL as-built)');
+  // author_id/created_by/created_at/establishment_id NO se mandan (los fuerza el trigger al subir).
+  for (const forbidden of ['author_id', 'created_by', 'created_at', 'establishment_id']) {
+    assert.ok(!new RegExp(forbidden).test(q.sql), `no debe setear ${forbidden} (trigger server-side)`);
+  }
+  assert.deepEqual(q.args, ['id-1', 'p-1', 'Aftosa', 'subcutánea', '2026-06-11']);
+});
+
+test('T-CL.8 / R3.2: buildAddWeaningInsert — reproductive_events weaning con created_at de cliente', () => {
+  const q = buildAddWeaningInsert('id-1', 'p-1', '2026-06-11', '2026-06-11T10:00:00.000Z');
+  assert.match(q.sql, /INSERT INTO reproductive_events/);
+  assert.match(q.sql, /'weaning'/);
+  // created_at SÍ va (desempate del mismo event_date, banner reproductive_events); el resto por trigger.
+  assert.match(q.sql, /created_at/);
+  assert.ok(!/established_id|author_id|created_by/.test(q.sql));
+  assert.deepEqual(q.args, ['id-1', 'p-1', '2026-06-11', '2026-06-11T10:00:00.000Z']);
+});
+
+test('T-CL.11 / R3.3+R12.4: buildSetCastratedUpdate(true) — is_castrated=1 Y future_bull=0 (auto-clear) en UN statement', () => {
+  const q = buildSetCastratedUpdate('p-1', true);
+  assert.match(q.sql, /UPDATE animal_profiles SET is_castrated = 1, future_bull = 0/);
+  assert.match(q.sql, /WHERE id = \? AND deleted_at IS NULL/);
+  assert.deepEqual(q.args, ['p-1']);
+});
+
+test('T-CL.11 / R13.4: buildSetCastratedUpdate(false) — solo is_castrated=0, NO toca future_bull (revert)', () => {
+  const q = buildSetCastratedUpdate('p-1', false);
+  assert.match(q.sql, /UPDATE animal_profiles SET is_castrated = 0/);
+  assert.ok(!/future_bull/.test(q.sql), 'el revert NO debe tocar future_bull (vuelve a entero, conserva ⭐)');
+  assert.deepEqual(q.args, ['p-1']);
+});
+
+test('T-CL.11 / R12.2: buildSetFutureBullUpdate — solo future_bull, sin tocar is_castrated', () => {
+  const on = buildSetFutureBullUpdate('p-1', true);
+  assert.match(on.sql, /UPDATE animal_profiles SET future_bull = \?/);
+  assert.ok(!/is_castrated/.test(on.sql), 'setFutureBull NO debe tocar is_castrated');
+  assert.deepEqual(on.args, [1, 'p-1']);
+  const off = buildSetFutureBullUpdate('p-1', false);
+  assert.deepEqual(off.args, [0, 'p-1']);
+});
+
+test('T-CL.13 / R13.7: la observación de castración (buildAddObservationInsert) NUNCA manda author_id', () => {
+  // Invariante de seguridad DURA (SEC-SPEC-03): author_id lo fuerza el trigger 0034 al subir.
+  const q = buildAddObservationInsert('obs-1', 'p-1', 'est-A', 'Castrado');
+  assert.ok(!/author_id/.test(q.sql), 'author_id NUNCA en el payload del cliente (lo fuerza el trigger)');
+  // establishment_id SÍ va, derivado del PERFIL (el caller lo resuelve), event_type 'observacion'.
+  assert.match(q.sql, /establishment_id/);
+  assert.match(q.sql, /'observacion'/);
+  assert.deepEqual(q.args, ['obs-1', 'p-1', 'est-A', 'Castrado']);
+});
+
+test('T-CL.13: buildProfileEstablishmentQuery / buildProfileEstablishmentsQuery — establishment del PERFIL (no inventado)', () => {
+  const one = buildProfileEstablishmentQuery('p-1');
+  assert.match(one.sql, /SELECT establishment_id FROM animal_profiles WHERE id = \?/);
+  assert.deepEqual(one.args, ['p-1']);
+  const many = buildProfileEstablishmentsQuery(['p-1', 'p-2']);
+  assert.match(many.sql, /SELECT id, establishment_id FROM animal_profiles WHERE id IN \(\?, \?\)/);
+  assert.deepEqual(many.args, ['p-1', 'p-2']);
+});
+
+test('T-CL.8 / R6.3: buildExistingVaccinationIdsQuery — ids de vacunaciones ya aplicadas (barrera idempotente)', () => {
+  const q = buildExistingVaccinationIdsQuery(['p-1', 'p-2'], '2026-06-11');
+  assert.match(q.sql, /SELECT id FROM sanitary_events/);
+  assert.match(q.sql, /'vaccination'/);
+  assert.match(q.sql, /animal_profile_id IN \(\?, \?\)/);
+  assert.match(q.sql, /event_date = \?/);
+  assert.match(q.sql, /deleted_at IS NULL/);
+  assert.deepEqual(q.args, ['p-1', 'p-2', '2026-06-11']);
+});
+
+test('T-CL.8 / R6.3: buildExistingWeaningIdsQuery — ids de destetes ya aplicados', () => {
+  const q = buildExistingWeaningIdsQuery(['p-1'], '2026-06-11');
+  assert.match(q.sql, /SELECT id FROM reproductive_events/);
+  assert.match(q.sql, /'weaning'/);
+  assert.match(q.sql, /deleted_at IS NULL/);
+  assert.deepEqual(q.args, ['p-1', '2026-06-11']);
+});
+
+// Ejecución REAL contra SQLite in-memory: castración(true) ⇒ is_castrated=1, future_bull=0; (false) ⇒
+// is_castrated=0 sin tocar future_bull (T-CL.10/T-CL.13 — no-op y simetría verificados contra la columna).
+test('T-CL.11: setCastrated statements ejecutan correctamente contra SQLite (is_castrated/future_bull reales)', () => {
+  const db = new DatabaseSync(':memory:');
+  db.exec(
+    'CREATE TABLE animal_profiles (id TEXT, is_castrated INTEGER DEFAULT 0, future_bull INTEGER DEFAULT 0, deleted_at TEXT);',
+  );
+  db.exec("INSERT INTO animal_profiles (id, is_castrated, future_bull) VALUES ('p-1', 0, 1);");
+
+  // Castrar: is_castrated→1, future_bull→0 (auto-clear).
+  const up = buildSetCastratedUpdate('p-1', true);
+  db.prepare(up.sql).run(...(up.args as never[]));
+  let row = db.prepare('SELECT is_castrated, future_bull FROM animal_profiles WHERE id = ?').get('p-1') as {
+    is_castrated: number; future_bull: number;
+  };
+  assert.equal(row.is_castrated, 1);
+  assert.equal(row.future_bull, 0);
+
+  // Re-castrar (re-ejecución): no-op por valor (sigue 1/0) — la idempotencia semántica de la castración.
+  db.prepare(up.sql).run(...(up.args as never[]));
+  row = db.prepare('SELECT is_castrated, future_bull FROM animal_profiles WHERE id = ?').get('p-1') as never;
+  assert.equal(row.is_castrated, 1);
+
+  // Revertir: is_castrated→0, future_bull NO se toca (sigue 0 acá, pero el statement no lo menciona).
+  const down = buildSetCastratedUpdate('p-1', false);
+  db.prepare(down.sql).run(...(down.args as never[]));
+  row = db.prepare('SELECT is_castrated, future_bull FROM animal_profiles WHERE id = ?').get('p-1') as never;
+  assert.equal(row.is_castrated, 0);
+
+  db.close();
 });

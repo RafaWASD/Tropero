@@ -371,6 +371,20 @@ export function buildRodeoSpeciesQuery(rodeoId: string): LocalQuery {
 }
 
 /**
+ * establishment_id de UN perfil (spec 10, T-CL.11): lo necesita la observación automática de castración
+ * (R13.7) — animal_events.establishment_id tiene un trigger de VALIDACIÓN (no force) que exige que coincida
+ * con el del PERFIL (23514 si no) → se deriva de ACÁ (el perfil), NUNCA del contexto activo (un usuario con
+ * rol en varios campos podría tener activo el campo B mientras castra un animal del campo A). LIMIT 1 (PK).
+ * No filtra status/deleted_at: la observación de una corrección puede caer sobre un perfil archivado.
+ */
+export function buildProfileEstablishmentQuery(profileId: string): LocalQuery {
+  return {
+    sql: 'SELECT establishment_id FROM animal_profiles WHERE id = ? LIMIT 1',
+    args: [profileId],
+  };
+}
+
+/**
  * Contexto de la MADRE para el overlay optimista de un parto (T6.2f / register_birth offline): los
  * terneros HEREDAN establishment_id + rodeo_id de la madre (lo hace la RPC server-side); la categoría del
  * ternero (ternero/ternera) se resuelve por el system del rodeo de la madre. Devuelve establishment_id,
@@ -445,12 +459,18 @@ function notHiddenByOverride(table: string, idExpr: string, effects: readonly st
 // C6 (RC6.3.1/RC6.3.2): se agregan `category_override`, `animal_birth_date` y `r.system_id` — inputs del
 // espejo de categoría (`applyCategoryMirror` en animals.ts). El shape PÚBLICO (AnimalListItem) NO cambia:
 // estas columnas extra las consume solo el mirror del service; el mapper toLocalListItem las descarta.
+// spec 10 (T-CL.12 / R13.6): se agrega `is_castrated` denormalizado (0084) — el espejo C6 lo consume como
+// el is_castrated REAL (precedencia sobre la inferencia RC6.2.1). El shape PÚBLICO (AnimalListItem) NO
+// cambia (el mapper toLocalListItem lo descarta); lo lee SOLO computeMirrorOverrides. `future_bull` NO se
+// proyecta acá (la lista/ficha no lo usan en el espejo; la badge ⭐ es Fase 4 — fetchAnimalDetail lo trae
+// aparte cuando la ficha lo pida).
 const LOCAL_LIST_SELECT =
   'SELECT ap.id AS id, ap.animal_id AS animal_id, ap.idv AS idv, ' +
   'ap.visual_id_alt AS visual_id_alt, ap.category_id AS category_id, ap.rodeo_id AS rodeo_id, ' +
   'ap.status AS status, ap.management_group_id AS management_group_id, ' +
   'ap.animal_tag_electronic AS tag_electronic, ap.animal_sex AS sex, ' +
   'ap.category_override AS category_override, ap.animal_birth_date AS birth_date, ' +
+  'ap.is_castrated AS is_castrated, ' +
   'r.system_id AS system_id, ' +
   'r.name AS rodeo_name, c.code AS category_code, c.name AS category_name, ' +
   'ap.created_at AS created_at ' +
@@ -469,6 +489,10 @@ const LOCAL_LIST_SELECT_OVERLAY =
   'pap.status AS status, pap.management_group_id AS management_group_id, ' +
   'pap.animal_tag_electronic AS tag_electronic, pap.animal_sex AS sex, ' +
   'pap.category_override AS category_override, pap.animal_birth_date AS birth_date, ' +
+  // spec 10 (T-CL.12): is_castrated del overlay = SIEMPRE 0 (un alta/ternero optimista nace ENTERO;
+  // la castración es un UPDATE de la fila SINCRONIZADA — nunca toca el overlay). Constante para alinear
+  // las columnas del UNION (requisito del UNION ALL: ambas ramas, idéntico set de columnas/orden).
+  '0 AS is_castrated, ' +
   'r.system_id AS system_id, ' +
   'r.name AS rodeo_name, c.code AS category_code, c.name AS category_name, ' +
   'pap.created_at AS created_at ' +
@@ -661,6 +685,9 @@ export function buildAnimalDetailQuery(profileId: string): LocalQuery {
     'ap.rodeo_id AS rodeo_id, ap.management_group_id AS management_group_id, ' +
     'ap.animal_tag_electronic AS tag_electronic, ap.animal_sex AS sex, ' +
     'ap.animal_birth_date AS birth_date, ' +
+    // spec 10 (T-CL.12 / R13.6): is_castrated REAL (0084) → el espejo C6 lo usa con precedencia sobre la
+    // inferencia. future_bull (0085) → la ficha lo muestra como badge ⭐ (R12.3, Fase 4) + el toggle.
+    'ap.is_castrated AS is_castrated, ap.future_bull AS future_bull, ' +
     // C6 (RC6.3.1): system_id del rodeo → el espejo resuelve code→name/id del catálogo local del sistema.
     'r.system_id AS system_id, ' +
     'r.name AS rodeo_name, c.code AS category_code, c.name AS category_name, ' +
@@ -681,6 +708,9 @@ export function buildAnimalDetailQuery(profileId: string): LocalQuery {
     'pap.rodeo_id AS rodeo_id, pap.management_group_id AS management_group_id, ' +
     'pap.animal_tag_electronic AS tag_electronic, pap.animal_sex AS sex, ' +
     'pap.animal_birth_date AS birth_date, ' +
+    // spec 10 (T-CL.12): is_castrated=0 / future_bull=0 del overlay (alta/ternero optimista nace entero,
+    // sin ⭐); constantes para alinear las columnas del UNION (requisito del UNION ALL).
+    '0 AS is_castrated, 0 AS future_bull, ' +
     // C6 (RC6.3.1): system_id del rodeo (misma proyección que la rama synced, requisito del UNION).
     'r.system_id AS system_id, ' +
     'r.name AS rodeo_name, c.code AS category_code, c.name AS category_name, ' +
@@ -1072,6 +1102,155 @@ export function buildAddObservationInsert(
       'INSERT INTO animal_events (id, animal_profile_id, establishment_id, event_type, text) ' +
       "VALUES (?, ?, ?, 'observacion', ?)",
     args: [id, profileId, establishmentId, text],
+  };
+}
+
+// ─── Operaciones masivas (spec 10, T-CL.8) — builders de las N mutaciones ─────────────────────
+//
+// Las 3 ops escriben tablas YA en el sync set → CRUD plano sobre la fila sincronizada → una CrudEntry por
+// statement → uploadData la sube al reconectar (RLS+triggers+CHECKs re-validan). NO hay canal "bulk": son
+// las MISMAS escrituras que las individuales (vacunación/destete espejan events.ts; castración espeja el
+// UPDATE de animal_profiles de revertCategoryOverride). `id` de cliente lo pasa el service (para vacunación/
+// destete es el UUIDv5 determinístico de bulk-idempotency — dedup por PK ante syncs concurrentes).
+
+/**
+ * INSERT local de una VACUNACIÓN masiva en sanitary_events (R3.1). `event_type='vaccination'`,
+ * `campaign_id` NULL (sanitary_campaigns NO existe as-built — design §2.2). `id` determinístico (UUIDv5,
+ * R6.1) lo pasa el service. `product_name`/`route` de la pre-config. `established_id`/`created_by`/
+ * `created_at`/`source` los pone el trigger/default al SUBIR (NO se mandan, igual que events.add*). El
+ * gating capa 2 (`vacunacion` enabled, fail-closed) lo re-valida `tg_sanitary_events_gating` al subir.
+ */
+export function buildAddVaccinationInsert(
+  id: string,
+  profileId: string,
+  productName: string,
+  route: string | null,
+  eventDate: string,
+): LocalQuery {
+  return {
+    sql:
+      'INSERT INTO sanitary_events ' +
+      '(id, animal_profile_id, event_type, product_name, route, event_date) ' +
+      "VALUES (?, ?, 'vaccination', ?, ?, ?)",
+    args: [id, profileId, productName, route, eventDate],
+  };
+}
+
+/**
+ * INSERT local de un DESTETE masivo en reproductive_events (R3.2). `event_type='weaning'`, uno por
+ * ternero/a seleccionado (R3.5: mellizos = un weaning cada uno). `id` determinístico (UUIDv5, R6.1) +
+ * `createdAt` de cliente (mismo patrón que addTacto/addWeaning individual: el desempate por created_at del
+ * mismo event_date — banner de reproductive_events arriba). La TRANSICIÓN de categoría la dispara el
+ * trigger 0063 al SUBIR (ternera→vaquillona, ternero→torito/novillito) — el cliente NO la aplica.
+ */
+export function buildAddWeaningInsert(
+  id: string,
+  profileId: string,
+  eventDate: string,
+  createdAt: string,
+): LocalQuery {
+  return {
+    sql:
+      'INSERT INTO reproductive_events (id, animal_profile_id, event_type, event_date, created_at) ' +
+      "VALUES (?, ?, 'weaning', ?, ?)",
+    args: [id, profileId, eventDate, createdAt],
+  };
+}
+
+/**
+ * UPDATE local de CASTRACIÓN (R3.3 / R13.4): setea `is_castrated` sobre el perfil — el ÚNICO write-path
+ * offline de la castración (animal_profiles sincroniza; animals NO → el write-through server-side 0084
+ * §4.2 lo propaga a animals.is_castrated y dispara el recompute simétrico 0064/0086). Al CASTRAR
+ * (`value=true`) limpia `future_bull` en la MISMA mutación (R12.4: auto-clear; el trigger normalize 0085 lo
+ * garantiza igual server-side — defensa en profundidad). Al revertir (`value=false`) NO toca future_bull
+ * (el animal vuelve a ser entero; conserva su marca ⭐ si la tenía). Idempotente por valor (re-UPDATE =
+ * no-op; el guard IS DISTINCT FROM de los triggers evita disparos espurios). Filtra deleted_at IS NULL
+ * (no se castra un perfil borrado). RLS animal_profiles_update es la barrera real al subir.
+ *
+ * Es UN solo statement → UNA CrudEntry (PATCH). La observación automática (R13.7) es OTRA CrudEntry
+ * (INSERT animal_events) que el service encadena aparte → 2 CrudEntries/animal, INDEPENDIENTES (R10.2).
+ */
+export function buildSetCastratedUpdate(profileId: string, value: boolean): LocalQuery {
+  if (value) {
+    // Castrar: is_castrated=1 + future_bull=0 (auto-clear, R12.4) en un solo UPDATE.
+    return {
+      sql:
+        'UPDATE animal_profiles SET is_castrated = 1, future_bull = 0 ' +
+        'WHERE id = ? AND deleted_at IS NULL',
+      args: [profileId],
+    };
+  }
+  // Revertir (des-castrar): solo is_castrated=0. future_bull NO se toca (el animal vuelve a entero).
+  return {
+    sql: 'UPDATE animal_profiles SET is_castrated = 0 WHERE id = ? AND deleted_at IS NULL',
+    args: [profileId],
+  };
+}
+
+/**
+ * UPDATE local del flag ⭐ "futuro torito" (R12.2 / setFutureBull): setea `future_bull` sobre el perfil.
+ * SIN observación automática (no es castración — design §3.3). El trigger normalize 0085 lo lleva a false
+ * si el animal no es macho o está castrado (defensa server-side). `value` boolean → 0/1 (SQLite). Filtra
+ * deleted_at IS NULL. RLS animal_profiles_update es la barrera real al subir. UNA CrudEntry (PATCH).
+ */
+export function buildSetFutureBullUpdate(profileId: string, value: boolean): LocalQuery {
+  return {
+    sql: 'UPDATE animal_profiles SET future_bull = ? WHERE id = ? AND deleted_at IS NULL',
+    args: [value ? 1 : 0, profileId],
+  };
+}
+
+/**
+ * `id`s de las VACUNACIONES ya aplicadas localmente para un conjunto de perfiles en una fecha (spec 10,
+ * T-CL.8 / R6.3 — barrera idempotente local). El service compara estos ids contra el UUIDv5 determinístico
+ * de cada candidato (filterNewEventKeys) → re-ejecutar la masiva EXCLUYE los ya procesados. `deleted_at IS
+ * NULL` (un evento borrado no cuenta como aplicado → re-vacunar es legítimo). El scoping ya lo aplicó la
+ * stream. `profileIds` ≥ 1 (el caller no llama con lista vacía). Idéntico patrón para destete abajo.
+ */
+export function buildExistingVaccinationIdsQuery(
+  profileIds: readonly string[],
+  eventDate: string,
+): LocalQuery {
+  const placeholders = profileIds.map(() => '?').join(', ');
+  return {
+    sql:
+      'SELECT id FROM sanitary_events ' +
+      `WHERE animal_profile_id IN (${placeholders}) AND event_type = 'vaccination' ` +
+      'AND event_date = ? AND deleted_at IS NULL',
+    args: [...profileIds, eventDate],
+  };
+}
+
+/**
+ * `id`s de los DESTETES ya aplicados localmente para un conjunto de perfiles en una fecha (R6.3). Igual
+ * que la vacunación, sobre reproductive_events 'weaning'. La barrera principal del destete es que los ya
+ * destetados ni son candidatos (bulk-candidates filtra hasWeaning), pero esta query cubre la re-ejecución
+ * con la MISMA fecha (dedup por el UUIDv5 determinístico). `deleted_at IS NULL`.
+ */
+export function buildExistingWeaningIdsQuery(
+  profileIds: readonly string[],
+  eventDate: string,
+): LocalQuery {
+  const placeholders = profileIds.map(() => '?').join(', ');
+  return {
+    sql:
+      'SELECT id FROM reproductive_events ' +
+      `WHERE animal_profile_id IN (${placeholders}) AND event_type = 'weaning' ` +
+      'AND event_date = ? AND deleted_at IS NULL',
+    args: [...profileIds, eventDate],
+  };
+}
+
+/**
+ * establishment_id de un CONJUNTO de perfiles (spec 10, T-CL.8 — castración masiva): la observación
+ * automática de cada animal (R13.7) lo deriva del PERFIL (NUNCA inventado; el trigger 0034 lo valida). Una
+ * sola query batched (no N+1). Devuelve { id, establishment_id }. `profileIds` ≥ 1.
+ */
+export function buildProfileEstablishmentsQuery(profileIds: readonly string[]): LocalQuery {
+  const placeholders = profileIds.map(() => '?').join(', ');
+  return {
+    sql: `SELECT id, establishment_id FROM animal_profiles WHERE id IN (${placeholders})`,
+    args: [...profileIds],
   };
 }
 

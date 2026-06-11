@@ -154,6 +154,15 @@ test('PASO 2 (ADR-026 §B, b1 / 0079): animal_profiles declara la identidad deno
   }
 });
 
+test('spec 10 (T-CL.12 / R13.3, R12.1): animal_profiles declara is_castrated + future_bull (denorm 0084/0085)', () => {
+  const cols = tablesByName().get('animal_profiles')!.columns.map((c) => c.name);
+  // is_castrated (0084): el espejo C6 lo lee como el REAL con precedencia (R13.6) → completa el cableado
+  // de T-CL.7. future_bull (0085): la ficha lo muestra/togglea (R12.x). Sin declararlas, la stream
+  // est_animal_profiles (SELECT *) NO las materializa en SQLite → "no such column" en vivo.
+  assert.ok(cols.includes('is_castrated'), 'animal_profiles debe declarar is_castrated (0084, espejo C6 real)');
+  assert.ok(cols.includes('future_bull'), 'animal_profiles debe declarar future_bull (0085, badge ⭐/toggle)');
+});
+
 test('PASO 2 (ADR-026 §C, c2 / 0080): user_roles declara member_name (nombres de coworkers offline)', () => {
   const cols = tablesByName().get('user_roles')!.columns.map((c) => c.name);
   assert.ok(cols.includes('member_name'), 'user_roles debe declarar member_name (c2) — lo leen buildMembersQuery/buildOwnNameQuery');
@@ -207,6 +216,10 @@ const COLUMNS_READ_BY_BUILDERS: Record<string, string[]> = {
     'breed', 'coat_color', 'entry_date', 'entry_weight', 'status', 'created_by', 'exit_date',
     'exit_reason', 'rodeo_id', 'management_group_id', 'animal_tag_electronic', 'animal_sex',
     'animal_birth_date', 'deleted_at', 'created_at',
+    // spec 10 (T-CL.12): is_castrated (0084, espejo C6 con precedencia — lista + detalle) + future_bull
+    // (0085, badge ⭐ / toggle de la ficha — detalle). Sin declararlas, PowerSync no las materializa →
+    // "no such column" en buildAnimalsListQuery/buildAnimalDetailQuery en vivo.
+    'is_castrated', 'future_bull',
   ],
   // timeline (7 orígenes)
   weight_events: ['weight_kg', 'source', 'notes', 'weight_date', 'created_at', 'animal_profile_id', 'deleted_at'],

@@ -204,6 +204,17 @@ const animal_profiles = new Table({
   // nursing (0061): cría al pie. boolean→INTEGER (0/1). As-built en animal_profiles (no en animals);
   // se declara para que el SET local espeje la stream (que hace SELECT *) y futuras lecturas no rompan.
   nursing: column.integer,
+  // is_castrated (spec 10, 0084): DENORMALIZADO de animals.is_castrated sobre el perfil per-campo
+  // (animals está FUERA del sync set, ADR-026 b1 → sin esta denorm la castración offline + el espejo C6
+  // no tienen el dato). boolean→INTEGER (0/1). Es el WRITE-PATH offline de la castración (setCastrated
+  // hace un UPDATE de esta columna → write-through server-side a animals, 0084 §4.2). El espejo C6
+  // (computeMirrorOverrides) lo lee como el is_castrated REAL (T-CL.7/R13.6) — completa el cableado que
+  // hasta ahora caía al fallback por inferencia. La stream est_animal_profiles hace SELECT * → baja sola.
+  is_castrated: column.integer,
+  // future_bull (spec 10, 0085): "futuro torito" (Gate 0 v2 D2). boolean→INTEGER (0/1). Solo machos
+  // (normalize server-side); la ficha lo togglea (setFutureBull) y la masiva lo lee para el default de
+  // selección. Espeja el SELECT * de la stream.
+  future_bull: column.integer,
   // PASO 2 (ADR-026 §B / b1 / 0079): identidad del animal GLOBAL denormalizada sobre el perfil per-campo,
   // mantenida fiel por trigger (force desde `animals` + propagación). `animals` NO entra al sync set; la UI
   // lee la identidad offline DESDE acá (swap T4). Tipos = animals (0019): text, text, date→TEXT.

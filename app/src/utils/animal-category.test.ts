@@ -655,3 +655,135 @@ test('RC6.3.2: batch de varias filas — cada una resuelve por sus propios event
   assert.deepEqual(out.get('pb'), { code: 'vaquillona', name: 'Vaquillona' });
   assert.equal(out.has('pc'), false); // override → la guardada, no entra
 });
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// T-CL.7 / R13.6 / R10.6 — el espejo se alimenta del is_castrated REAL (0084), degradando la inferencia.
+// El input real (MirrorRowInput.isCastrated) tiene PRECEDENCIA sobre inferIsCastrated(storedCode): la
+// castración offline da novillito/novillo AL INSTANTE (antes de que el server recompute el code) y el
+// revert da torito/toro — sin esperar el sync-down. El fallback por inferencia se conserva SOLO cuando el
+// caller no provee el real (legacy/Fase 3).
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+
+const CATALOG_MACHO = [
+  { code: 'ternero', name: 'Ternero' },
+  { code: 'torito', name: 'Torito' },
+  { code: 'toro', name: 'Toro' },
+  { code: 'novillito', name: 'Novillito' },
+  { code: 'novillo', name: 'Novillo' },
+];
+
+test('T-CL.7/R10.6: isCastrated=true REAL ⇒ espejo da novillito (1-2 años) y novillo (≥2 años) SIN sync', () => {
+  // El code guardado todavía dice torito/toro (el server no recomputó) pero is_castrated REAL ya es true
+  // (castración offline) → el espejo refleja novillito/novillo al instante. Esto la inferencia por code
+  // NO lo cubría (storedCode torito/toro → inferiría false → torito/toro).
+  const rows = [
+    row({
+      profileId: 'm-1-2',
+      sex: 'male',
+      birthDate: isoDaysAgo(400), // 1-2 años
+      storedCode: 'torito',
+      storedName: 'Torito',
+      isCastrated: true,
+    }),
+    row({
+      profileId: 'm-2plus',
+      sex: 'male',
+      birthDate: isoDaysAgo(800), // ≥2 años
+      storedCode: 'toro',
+      storedName: 'Toro',
+      isCastrated: true,
+    }),
+  ];
+  const out = computeDisplayOverrides(rows, new Map(), catalogMap(CATALOG_MACHO));
+  assert.deepEqual(out.get('m-1-2'), { code: 'novillito', name: 'Novillito' });
+  assert.deepEqual(out.get('m-2plus'), { code: 'novillo', name: 'Novillo' });
+});
+
+test('T-CL.7/R10.6: isCastrated=false REAL ⇒ espejo da torito/toro (revert visible offline)', () => {
+  // El code guardado dice novillito/novillo (estaba castrado) pero is_castrated REAL ya es false (revert
+  // offline) → el espejo vuelve a torito/toro al instante. La inferencia por code daría true (novillito/
+  // novillo → castrado) → no reflejaría el revert.
+  const rows = [
+    row({
+      profileId: 'r-1-2',
+      sex: 'male',
+      birthDate: isoDaysAgo(400),
+      storedCode: 'novillito',
+      storedName: 'Novillito',
+      isCastrated: false,
+    }),
+    row({
+      profileId: 'r-2plus',
+      sex: 'male',
+      birthDate: isoDaysAgo(800),
+      storedCode: 'novillo',
+      storedName: 'Novillo',
+      isCastrated: false,
+    }),
+  ];
+  const out = computeDisplayOverrides(rows, new Map(), catalogMap(CATALOG_MACHO));
+  assert.deepEqual(out.get('r-1-2'), { code: 'torito', name: 'Torito' });
+  assert.deepEqual(out.get('r-2plus'), { code: 'toro', name: 'Toro' });
+});
+
+test('T-CL.7: el is_castrated REAL GANA a lo que infiere el code (precedencia explícita)', () => {
+  // storedCode novillito (inferiría castrado=true) pero el REAL dice false → debe ganar el real → torito.
+  const rowReal = row({
+    profileId: 'win',
+    sex: 'male',
+    birthDate: isoDaysAgo(400),
+    storedCode: 'novillito',
+    storedName: 'Novillito',
+    isCastrated: false, // REAL: NO castrado
+  });
+  const out = computeDisplayOverrides([rowReal], new Map(), catalogMap(CATALOG_MACHO));
+  assert.deepEqual(out.get('win'), { code: 'torito', name: 'Torito' });
+});
+
+test('T-CL.7: SIN isCastrated provisto (null/undefined) ⇒ DEGRADA al fallback por inferencia (legacy C6)', () => {
+  // Call-site legacy (Fase 3 aún sin cablear): no pasa isCastrated → se infiere del code. storedCode
+  // novillito → inferIsCastrated true → novillito (comportamiento IDÉNTICO al previo, sin regresión).
+  const undefinedReal = row({
+    profileId: 'legacy',
+    sex: 'male',
+    birthDate: isoDaysAgo(400),
+    storedCode: 'novillito',
+    storedName: 'Novillito',
+    // isCastrated omitido → undefined → fallback
+  });
+  const nullReal = row({
+    profileId: 'legacy-null',
+    sex: 'male',
+    birthDate: isoDaysAgo(400),
+    storedCode: 'torito',
+    storedName: 'Torito',
+    isCastrated: null, // explícito null → fallback (storedCode torito → infiere false → torito)
+  });
+  const out = computeDisplayOverrides([undefinedReal, nullReal], new Map(), catalogMap(CATALOG_MACHO));
+  assert.deepEqual(out.get('legacy'), { code: 'novillito', name: 'Novillito' });
+  assert.deepEqual(out.get('legacy-null'), { code: 'torito', name: 'Torito' });
+});
+
+test('T-CL.7: castración offline de un TERNERO (is_castrated=true real) NO transiciona el code (sigue ternero)', () => {
+  // En ternero el cambio de is_castrated no transiciona (compute devuelve ternero hasta destete/1 año),
+  // en ambas direcciones — coherente con el server (0062) y con T-DB.5. El espejo no inventa novillito.
+  const rowTern = row({
+    profileId: 'tern',
+    sex: 'male',
+    birthDate: isoDaysAgo(120), // < 1 año
+    storedCode: 'ternero',
+    storedName: 'Ternero',
+    isCastrated: true,
+  });
+  const out = computeDisplayOverrides([rowTern], new Map(), catalogMap(CATALOG_MACHO));
+  assert.deepEqual(out.get('tern'), { code: 'ternero', name: 'Ternero' });
+});
+
+test('T-CL.7: computeCategoryCode directo con isCastrated real espeja al server (ancla de la precedencia)', () => {
+  // El núcleo ya aceptaba isCastrated; T-CL.7 solo lo CABLEA en computeDisplayOverrides. Este test fija
+  // que el contrato del núcleo no cambió (la precedencia es responsabilidad del wrapper, no del núcleo).
+  assert.equal(mirror('male', isoDaysAgo(400), { isCastrated: true }), 'novillito');
+  assert.equal(mirror('male', isoDaysAgo(400), { isCastrated: false }), 'torito');
+  assert.equal(mirror('male', isoDaysAgo(800), { isCastrated: true }), 'novillo');
+  assert.equal(mirror('male', isoDaysAgo(800), { isCastrated: false }), 'toro');
+});

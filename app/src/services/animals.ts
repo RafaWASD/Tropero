@@ -21,6 +21,7 @@ import {
   computeDisplayOverrides,
 } from '../utils/animal-category';
 import { classifyIdentifier, classifySearchQuery } from '../utils/animal-identifier';
+import { castrationObservationText } from '../utils/castration-copy';
 import {
   type ExitReasonChoice,
   type ExitStatus,
@@ -38,6 +39,10 @@ import {
   buildCategoryMirrorEventsQuery,
   buildRevertCategoryOverrideUpdate,
   buildRodeoSpeciesQuery,
+  buildSetCastratedUpdate,
+  buildSetFutureBullUpdate,
+  buildAddObservationInsert,
+  buildProfileEstablishmentQuery,
   toBool,
 } from './powersync/local-reads';
 import { runLocalQuery, runLocalQuerySingle, runLocalWrite } from './powersync/local-query';
@@ -114,6 +119,18 @@ export type AnimalDetail = {
   rodeoName: string;
   managementGroupId: string | null;
   managementGroupName: string | null;
+  /**
+   * is_castrated REAL del perfil (animal_profiles.is_castrated, denormalizado 0084 — spec 10 R13.3). Lo
+   * usa la ficha para la fila "Castrado Sí/No" (R13.1) y la confirmación que anticipa el recálculo. El
+   * espejo C6 ya lo refleja en categoryCode/categoryName cuando override=false (R13.6) — este campo es el
+   * ESTADO crudo para el toggle, no la categoría derivada.
+   */
+  isCastrated: boolean;
+  /**
+   * future_bull del perfil (animal_profiles.future_bull, 0085 — spec 10 R12.1). "Futuro torito": solo
+   * machos, badge ⭐ (R12.3), toggle desde la ficha (R12.2/setFutureBull). Auto-clear al castrar (R12.4).
+   */
+  futureBull: boolean;
 };
 
 // ─── Filas crudas del SQLite local (shape PLANO; b1: identidad desde animal_profiles) ──
@@ -141,6 +158,9 @@ type LocalListRow = {
   category_override?: number | boolean | null;
   birth_date?: string | null;
   system_id?: string | null;
+  // spec 10 (T-CL.12 / R13.6): is_castrated REAL (0084) — input del espejo con precedencia. No se expone
+  // en AnimalListItem (lo descarta el mapper); lo lee SOLO computeMirrorOverrides.
+  is_castrated?: number | boolean | null;
 };
 
 function toLocalListItem(
@@ -192,6 +212,10 @@ type MirrorableRow = {
   category_override?: number | boolean | null;
   category_code: string | null;
   category_name: string | null;
+  // spec 10 (T-CL.7/T-CL.12 / R13.6): is_castrated REAL denormalizado (0084), proyectado por los SELECT
+  // de local-reads (0/1 de SQLite). El espejo lo pasa con PRECEDENCIA a computeDisplayOverrides — cuando
+  // viene definido, la inferencia RC6.2.1 queda como fallback. undefined/null → fallback (cero regresión).
+  is_castrated?: number | boolean | null;
 };
 
 /**
@@ -248,8 +272,11 @@ async function computeMirrorOverrides(
     catalogBySystem.set(sysId, catRes.ok ? catRes.value : []);
   }
 
-  // 4) Decisión PURA (sin I/O): por candidato infiere is_castrated, computa la derivada y resuelve el
-  //    display contra el catálogo (fail-safe a la guardada si no resuelve).
+  // 4) Decisión PURA (sin I/O): por candidato usa el is_castrated REAL (T-CL.7/T-CL.12 / R13.6) con
+  //    PRECEDENCIA sobre la inferencia, computa la derivada y resuelve el display contra el catálogo
+  //    (fail-safe a la guardada si no resuelve). Esto COMPLETA el cableado de T-CL.7: hasta ahora el
+  //    caller no pasaba `isCastrated` → el espejo caía al fallback inferIsCastrated; ahora los SELECT de
+  //    local-reads proyectan `is_castrated` (0084) → la castración offline da `novillito` SIN sync (R10.6).
   return computeDisplayOverrides(
     candidates.map((r) => ({
       profileId: r.id,
@@ -259,6 +286,9 @@ async function computeMirrorOverrides(
       categoryOverride: false, // candidates ya filtró override=false
       storedCode: r.category_code ?? '',
       storedName: r.category_name ?? '',
+      // is_castrated REAL: solo lo pasamos cuando la fila lo PROYECTA (no undefined). Si una fila legacy
+      // no lo trae, queda undefined → computeDisplayOverrides cae al fallback inferIsCastrated (R13.6).
+      isCastrated: r.is_castrated == null ? undefined : toBool(r.is_castrated),
     })),
     eventsByProfile,
     catalogBySystem,
@@ -724,6 +754,9 @@ type LocalDetailRow = {
   management_group_name: string | null;
   // C6 (RC6.3.1): system_id del rodeo — para resolver el code derivado a name/id del catálogo local.
   system_id?: string | null;
+  // spec 10 (T-CL.12): is_castrated REAL (0084, espejo C6 con precedencia) + future_bull (0085, badge ⭐).
+  is_castrated?: number | boolean | null;
+  future_bull?: number | boolean | null;
 };
 
 /**
@@ -778,6 +811,9 @@ export async function fetchAnimalDetail(profileId: string): Promise<ServiceResul
       rodeoName: row.rodeo_name ?? '',
       managementGroupId: row.management_group_id,
       managementGroupName: row.management_group_name,
+      // spec 10: estado crudo del perfil (0/1 de SQLite → boolean) para la ficha (R13.1 toggle, R12.3 badge).
+      isCastrated: toBool(row.is_castrated ?? 0),
+      futureBull: toBool(row.future_bull ?? 0),
     },
   };
 }
@@ -976,6 +1012,79 @@ export async function revertCategoryOverride(
   if (!writeRes.ok) return { ok: false, error: { kind: writeRes.error.kind, message: writeRes.error.message } };
 
   return { ok: true, value: { derivedCode: resolved.value.derivedCode } };
+}
+
+// ─── Castración / futuro torito (spec 10, T-CL.11 — ficha) ───────────────────────────
+//
+// setCastrated es el write-path de castración DESDE LA FICHA (R13.1) — el mismo UPDATE de
+// animal_profiles.is_castrated que usa la masiva (bulk-operations), pero de a uno. El UPDATE es el ÚNICO
+// write-path offline (animal_profiles sincroniza; animals NO → write-through server-side 0084 §4.2 +
+// recompute simétrico 0064/0086). La castración SIEMPRE encadena la observación automática (R13.7): UPDATE
+// + INSERT animal_events = 2 CrudEntries INDEPENDIENTES (R10.2, sin transacción). setFutureBull NO genera
+// observación (no es castración — design §3.3).
+
+/**
+ * Castra / des-castra un animal desde la ficha (R13.1 / R13.4). DOS escrituras locales independientes:
+ *   (1) UPDATE animal_profiles.is_castrated = value (+ future_bull=0 si value=true, R12.4 auto-clear);
+ *   (2) INSERT animal_events 'observacion' con el texto de R13.7 ("Castrado" / "Corrección: marcado como
+ *       no castrado" — simetría) — author_id OMITIDO (lo fuerza el trigger 0034 al subir = usuario
+ *       actual); establishment_id derivado del PERFIL (trigger de validación 0034, 23514 si no coincide).
+ *
+ * Offline-safe: ambos son CRUD plano sobre tablas SINCRONIZADAS (una CrudEntry cada uno → 2/animal,
+ * R13.7). La transición de categoría la dispara el write-through+0064/0086 al SUBIR; el espejo C6 la
+ * refleja AL TOQUE offline con el is_castrated real (R10.6/R13.6). La RLS (animal_profiles_update +
+ * animal_events INSERT policy) es la barrera real al subir.
+ *
+ * Independencia (R10.2): si el UPDATE local tiene éxito y el INSERT falla (caso extremo: DB no booteada),
+ * devolvemos error PERO el flip ya quedó local — coherente con el modelo N-mutaciones-independientes (el
+ * caller re-fetchea; el reviewer/Gate 2 ven que no hay rollback de la exitosa). En la práctica los dos
+ * writes locales tienen éxito offline (runLocalWrite solo falla si el execute local revienta).
+ */
+export async function setCastrated(
+  profileId: string,
+  value: boolean,
+): Promise<ServiceResult<true>> {
+  // 1) establishment_id del PERFIL para la observación (NUNCA del contexto activo — el trigger 0034 valida
+  //    que coincida con el del perfil). emptyIsSyncing:true: sin el perfil local aún, degradar a
+  //    "Sincronizando" (no castrar a ciegas un perfil que no bajó).
+  const estRes = await runLocalQuerySingle<{ establishment_id: string }>(
+    buildProfileEstablishmentQuery(profileId),
+    { emptyIsSyncing: true },
+  );
+  if (!estRes.ok) return { ok: false, error: { kind: estRes.error.kind, message: estRes.error.message } };
+  if (!estRes.value) {
+    return { ok: false, error: { kind: 'unknown', message: 'No se encontró el animal para registrar el cambio.' } };
+  }
+  const establishmentId = estRes.value.establishment_id;
+
+  // 2) UPDATE de estado (is_castrated, + future_bull=0 si value=true). 1ra CrudEntry (PATCH).
+  const updRes = await runLocalWrite(buildSetCastratedUpdate(profileId, value));
+  if (!updRes.ok) return { ok: false, error: { kind: updRes.error.kind, message: updRes.error.message } };
+
+  // 3) Observación automática (R13.7). 2da CrudEntry (PUT animal_events). author_id OMITIDO (el builder
+  //    no lo manda; lo fuerza el trigger). Reusa el MISMO builder que addObservation (sin service nuevo).
+  const obsRes = await runLocalWrite(
+    buildAddObservationInsert(randomUuid(), profileId, establishmentId, castrationObservationText(value)),
+  );
+  if (!obsRes.ok) return { ok: false, error: { kind: obsRes.error.kind, message: obsRes.error.message } };
+
+  return { ok: true, value: true };
+}
+
+/**
+ * Marca / desmarca el flag ⭐ "futuro torito" desde la ficha (R12.2 / R12.4). UN solo UPDATE local de
+ * future_bull (UNA CrudEntry). SIN observación automática (no es castración — design §3.3). El trigger
+ * normalize 0085 lo lleva a false si el animal no es macho o está castrado (defensa server-side); el
+ * cliente NO necesita replicar esa regla acá (la UI solo ofrece el toggle en machos no castrados). RLS al
+ * subir.
+ */
+export async function setFutureBull(
+  profileId: string,
+  value: boolean,
+): Promise<ServiceResult<true>> {
+  const r = await runLocalWrite(buildSetFutureBullUpdate(profileId, value));
+  if (!r.ok) return { ok: false, error: { kind: r.error.kind, message: r.error.message } };
+  return { ok: true, value: true };
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────────

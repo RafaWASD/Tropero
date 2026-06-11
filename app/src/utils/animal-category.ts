@@ -17,15 +17,28 @@
 //     El peor caso del drift es display-only: categoría mostrada desactualizada hasta el próximo sync;
 //     NO corrompe datos (el server sigue siendo la única verdad).
 //
-// LIMITACIÓN de la inferencia de `is_castrated` (RC6.2.2): `is_castrated` NO está en el SQLite local
-//   (`animals` está fuera del sync set, ADR-026 b1; `0079` no lo denormalizó). El espejo lo INFIERE del
-//   `code` guardado (`inferIsCastrated`: novillito/novillo → true; resto → false). HOY ningún write-path
-//   de la app setea `is_castrated=true` (el toggle es de spec 10; el import 0074 no lo setea), así que la
-//   inferencia espeja al server en todos los casos productivos. CASO HOY IMPOSIBLE vía app: un ternero
-//   castrado server-side cuyo DESTETE se carga offline mostraría `torito` en vez de `novillito` hasta el
-//   próximo sync (display-only, converge al sincronizar). El fix real (denormalizar `is_castrated` sobre
-//   `animal_profiles`, estilo b1/0079) es backend → finding al leader (design §7); cuando aterrice, el
-//   wiring del caller pasa la columna real al espejo en vez de inferirla.
+// `is_castrated` REAL vs inferencia DEGRADADA (RC6.2.1 → spec 10 T-CL.7 / R13.6):
+//   El `is_castrated` denormalizado YA EXISTE en `animal_profiles` (migración 0084 de spec 10, estilo
+//   b1/0079: backfill + force-on-INSERT + write-through + propagación) → el espejo debe alimentarse del
+//   VALOR REAL, no inferirlo del code guardado. Por eso `MirrorRowInput.isCastrated` (input REAL,
+//   opcional) tiene PRECEDENCIA en `computeDisplayOverrides`: cuando el caller lo provee (no null), se
+//   usa tal cual; la inferencia `inferIsCastrated(storedCode)` queda DEGRADADA a FALLBACK documentado y
+//   solo se usa cuando el caller NO provee el real (`isCastrated == null`).
+//
+//   POR QUÉ el real importa (caso que la inferencia NO cubría — R10.6): la castración offline de spec 10
+//   setea `is_castrated=true` en `animal_profiles` ANTES de que el server recompute el code. Con la
+//   inferencia vieja (que mira el `code` guardado, todavía `torito`/`ternero`) el espejo daría `torito`;
+//   con el real (`true`) da `novillito` AL INSTANTE, offline, sin esperar el sync-down. Lo mismo el
+//   revert (`false` → `torito`/`toro`). El fallback por inferencia se conserva SOLO para los call-sites
+//   que aún no proyectan la columna real (legacy/transición) y para `category_override=true` (donde el
+//   code guardado es manual y el real no aplica) — espeja al server en todos los casos productivos
+//   actuales (ningún flujo histórico dejó un castrado sin que su code ya fuera novillito/novillo).
+//
+//   ⚠ El CABLEADO del input real en los call-sites de `animals.ts` (lista/ficha/búsqueda offline) y la
+//   PROYECCIÓN de la columna `is_castrated` en las queries locales (local-reads.ts) + el schema PowerSync
+//   (T-CL.12) son de la **Fase 3** de spec 10 — NO de este chunk (Fase 2, utils puros). Hasta entonces el
+//   caller NO pasa `isCastrated` → cae al fallback por inferencia (comportamiento IDÉNTICO al previo, sin
+//   regresión de C6). Este chunk solo HABILITA el input real en la función pura + lo testea.
 // ══════════════════════════════════════════════════════════════════════════════════════════════
 //
 // POR QUÉ existe el espejo PARCIAL del alta (no llamamos compute_category(profile_id) en el alta):
@@ -318,7 +331,13 @@ function normalizeOpts(opts: CategoryComputeOpts | Date): { today: Date; pregnan
 /**
  * Infiere `is_castrated` del `code` guardado del perfil (RC6.2.1): `true` si el code ∈ {novillito,
  * novillo} (solo la castración produce esos codes en un cómputo del server), `false` en cualquier otro
- * caso. Workaround mientras `is_castrated` NO esté en el SQLite local (ver banner ANTI-DRIFT / header).
+ * caso.
+ *
+ * DEGRADADA a FALLBACK (spec 10 T-CL.7 / R13.6): desde la denorm 0084, `is_castrated` SÍ está en el
+ * SQLite local — el espejo se alimenta del valor REAL (`MirrorRowInput.isCastrated`) y esta inferencia
+ * SOLO se usa cuando el caller no lo provee (call-sites legacy de C6 aún sin cablear el real — Fase 3, o
+ * `category_override=true` donde el code guardado es manual). Se conserva exportada porque es la red de
+ * seguridad de esos caminos y porque `resolveRevertCategory`/los tests RC6.2.1 la usan. Ver header.
  */
 export function inferIsCastrated(storedCode: string | null | undefined): boolean {
   return storedCode === 'novillito' || storedCode === 'novillo';
@@ -367,10 +386,16 @@ export type MirrorRowInput = {
   birthDate: string | null;
   systemId: string | null;
   categoryOverride: boolean;
-  /** code guardado del perfil (para inferir is_castrated + fail-safe). */
+  /** code guardado del perfil (fail-safe + fallback de inferencia de is_castrated cuando no hay real). */
   storedCode: string;
   /** name guardado del perfil (fail-safe). */
   storedName: string;
+  /**
+   * `animal_profiles.is_castrated` REAL denormalizado (0084, spec 10 R13.6). Si se provee (no null),
+   * el espejo lo usa TAL CUAL y NO infiere del code (la castración offline se refleja al instante).
+   * Si es `null`/`undefined` (call-site que aún no proyecta la columna — Fase 3), se DEGRADA al fallback
+   * `inferIsCastrated(storedCode)` (RC6.2.1). Opcional para no romper los call-sites legacy de C6. */
+  isCastrated?: boolean | null;
 };
 
 /**
@@ -390,10 +415,13 @@ export function computeDisplayOverrides(
     if (r.categoryOverride) continue; // override manda → la guardada (RC6.3.3), no se pisa
     if (!r.systemId) continue; // sin system_id no se resuelve code→name → fail-safe a la guardada (RC6.3.4)
     const catalog = catalogBySystem.get(r.systemId) ?? [];
+    // R13.6 / T-CL.7: el `is_castrated` REAL (0084) tiene precedencia. Solo si el call-site no lo provee
+    // (null/undefined — Fase 3 aún sin cablear) se DEGRADA a la inferencia por code (RC6.2.1, fallback).
+    const isCastrated = r.isCastrated ?? inferIsCastrated(r.storedCode);
     const derivedCode = computeCategoryCode({
       sex: r.sex ?? 'female',
       birthDate: r.birthDate,
-      isCastrated: inferIsCastrated(r.storedCode),
+      isCastrated,
       events: eventsByProfile.get(r.profileId) ?? [],
     });
     result.set(
