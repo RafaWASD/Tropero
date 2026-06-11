@@ -492,12 +492,18 @@ function SystemCard({
     ? `${system.name} (próximamente, no disponible)`
     : `Sistema ${system.name}`;
   const a11y = buttonA11y(Platform.OS, { label, disabled, selected });
+  // Cards CENTRADAS, SIN círculo de radio (ADR-027 / decisión Raf 2026-06-11): la selección la
+  // señalan el borde verde ($primary, 2px) + fondo bone ($surface), no una decoración lateral que
+  // descentraría el contenido vs las cards hermanas. El estado `selected` sigue existiendo (a11y +
+  // borde/fondo); solo se sacó el círculo VISUAL. Sin decoración lateral → centrado simple alcanza
+  // (no hace falta CenteredRow): todas las cards quedan centradas al MISMO x.
   return (
     <Pressable disabled={disabled} onPress={onSelect} {...a11y}>
-      <XStack
+      <YStack
         width="100%"
         alignItems="center"
-        gap="$3"
+        justifyContent="center"
+        gap="$1"
         minHeight="$touchMin"
         borderRadius="$card"
         borderWidth={2}
@@ -507,34 +513,27 @@ function SystemCard({
         paddingVertical="$3"
         opacity={disabled ? 0.5 : 1}
       >
-        <YStack flex={1} minWidth={0} gap="$1">
-          <Text fontFamily="$body" fontSize="$6" fontWeight="600" color="$textPrimary">
-            {system.name}
-          </Text>
-          {disabled ? (
-            <Text fontFamily="$body" fontSize="$3" fontWeight="600" color="$textFaint">
-              Próximamente
-            </Text>
-          ) : null}
-        </YStack>
-        {/* Radio visual del seleccionado (solo para sistemas activos). */}
-        {!disabled ? (
-          <View
-            width="$icon"
-            height="$icon"
-            borderRadius="$pill"
-            borderWidth={2}
-            borderColor={selected ? '$primary' : '$divider'}
-            alignItems="center"
-            justifyContent="center"
-            flexShrink={0}
+        <Text
+          fontFamily="$body"
+          fontSize="$6"
+          fontWeight="600"
+          color="$textPrimary"
+          textAlign="center"
+        >
+          {system.name}
+        </Text>
+        {disabled ? (
+          <Text
+            fontFamily="$body"
+            fontSize="$3"
+            fontWeight="600"
+            color="$textFaint"
+            textAlign="center"
           >
-            {selected ? (
-              <View width="$dot" height="$dot" borderRadius="$pill" backgroundColor="$primary" />
-            ) : null}
-          </View>
+            Próximamente
+          </Text>
         ) : null}
-      </XStack>
+      </YStack>
     </Pressable>
   );
 }

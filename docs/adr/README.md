@@ -79,3 +79,6 @@ Esto preserva el razonamiento histórico: cualquiera puede leer el ADR viejo y e
 | 022 | Gate de refinamiento de contexto antes de la spec (Gate 0) + política de pipeline | Accepted |
 | 023 | Workflow de diseño de frontend: componentes como deliverable + generación con guardrails | Accepted |
 | 024 | Transporte del bastón lector: contrato de ingesta de EID transport-agnóstico (multi-adaptador) | Accepted |
+| 025 | PII en tabla privada self-only (frontera WAL de PowerSync) | Accepted |
+| 026 | Denormalización de `establishment_id` para el sync JOIN-free de PowerSync | Accepted |
+| 027 | Invariante de layout: centrado robusto ante decoraciones (slots simétricos) | Accepted |

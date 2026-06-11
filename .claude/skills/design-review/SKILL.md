@@ -37,6 +37,7 @@ RAFAQ apunta a "el mejor en el primer try": el polish de UX pesa más que YAGNI 
 - **Device real** para el veredicto final, no emulador/mouse.
 
 ### Composición y visual
+- **Centrado robusto ante decoraciones (ADR-027 — bug recurrente, vetear SIEMPRE)**: cuando un contenido está (o debería estar) **centrado** respecto a su contenedor y conviven una **decoración lateral** (radio/check/tilde/ícono/badge/chevron/contador/avatar), validar que la decoración **NO corra el centro**. El bug clásico: el label centrado se desplaza porque la decoración es un hermano flex que come ancho de un solo lado → queda desalineado vs las filas hermanas sin decoración (caso canónico: la card "Cría" corrida por su radio, `tests/DESCENTRADO.png`). **Fix canónico**: primitiva `CenteredRow` (slots laterales de ancho IGUAL) o `position: absolute` para texto corto fijo. **Corolarios**: (a) decoración condicional (check solo si seleccionado) → reservar su **slot SIEMPRE**, así togglear no recorre el layout; (b) ícono *ligado al label* (leading de un CTA) → se centra el **grupo** ícono+label, eso NO es este bug. **Cada vez que agregues un círculo/tilde/checkbox/ícono/badge a algo, verificá explícitamente que no descentre nada.**
 - **Regla de los tercios**: anclar elementos clave en líneas de 1/3 o 2/3, no centrado muerto (lectura más dinámica). Ej.: cuánto asoma un FAB sobre el navbar.
 - **Figura-fondo** (Gestalt): separación clara figura/fondo (ej. FAB flotante + halo). Otros principios Gestalt: proximidad, similitud, continuidad, cierre.
 - **Jerarquía visual**: tamaño / peso / color guían el ojo a lo importante primero.
@@ -60,6 +61,7 @@ RAFAQ apunta a "el mejor en el primer try": el polish de UX pesa más que YAGNI 
 - [ ] Safe areas respetadas (nada importante bajo el home indicator / gesture bar).
 - [ ] Sin overflow horizontal (medido a 360 y 412px con CDP).
 - [ ] Jerarquía clara; consistencia (distinción solo si justificada y nombrada).
+- [ ] **Centrado robusto (ADR-027)**: ningún contenido centrado se corre por una decoración lateral (radio/check/ícono/badge). Si agregaste algo a un costado, verificá que no descentre vs las filas hermanas. Decoración condicional → slot reservado siempre.
 - [ ] Figura-fondo, alineación a grilla, ritmo de espaciado coherente.
 - [ ] Contraste / legibilidad OK (medido si hay duda).
 - [ ] Estados vacío/error/offline contemplados (si aplica a la pantalla).

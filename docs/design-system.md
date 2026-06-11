@@ -91,6 +91,8 @@ Base **blanco neutro** (sin tinte frío ni cálido — se mató el `#f8f9ff` de 
 
 **Safe areas**: respetar insets siempre — patrón `paddingBottom = max(insets.bottom, $navBottomMin)`. Nada tocable/importante bajo el home indicator (iOS ≈34px) ni la gesture bar (Android).
 
+**Invariante de centrado robusto (ADR-027)**: contenido que se quiere **centrado** respecto a su contenedor debe centrarse sobre el **ancho REAL** del contenedor — las **decoraciones laterales** (radio/check/ícono/badge/chevron) **NO consumen** el espacio de centrado, o corren el contenido y lo desalinean vs las filas hermanas sin decoración (bug recurrente, ya parchado ad-hoc 2 veces antes de canonizarse). Mecanismo: **slots laterales de ancho IGUAL** a ambos lados (primitiva `CenteredRow`, §6). Corolarios: (a) una decoración **condicional** (un check que aparece solo si seleccionado) reserva su **slot SIEMPRE**, también cuando no se muestra, para que togglear no recorra el layout; (b) un ícono **ligado al label** (leading de un CTA, ej. `+ Dar de alta`) se centra como **grupo** ícono+label — eso NO es este invariante y no se "arregla". Para texto corto de ancho fijo (ej. título de header con back) se acepta `position: absolute` en la decoración si no hay riesgo de overlap.
+
 ---
 
 ## 5. Elevación
@@ -110,6 +112,7 @@ La librería vive en `app/src/components/` y es el deliverable real (ADR-023). C
 - **`Button`** — CTA. Variantes según necesidad; primario = `$primary`, alto ≥ `$touchMin`, radio `$pill`.
 - **`Card`** — superficie `$surface` (bone), radio `$card`, `shadows.card`.
 - **`Stepper`** — wizard de pasos (riel + estados).
+- **`CenteredRow`** — fila con contenido **centrado robusto** a decoraciones laterales (ADR-027). Slots `left`/`right` de ancho IGUAL (`sideWidth`) → el centro nunca se corre aunque solo un lado tenga decoración, y reserva el slot de decoraciones condicionales. Usar siempre que haya contenido centrado conviviendo (o que pueda convivir) con un ícono/check/radio/badge a un costado.
 - **Bottom nav** (`app/app/(tabs)/_layout.tsx`) — 5 items + FAB central elevado (ADR-018). Firmado por Raf.
 
 Crece JIT: cuando una pantalla necesite `FormField`, `ListRow`, `Chip`, etc., se construye el componente (no se compone la pantalla con primitivos sueltos).

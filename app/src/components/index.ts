@@ -40,3 +40,5 @@ export { TimelineEvent } from './TimelineEvent';
 export type { TimelineEventProps } from './TimelineEvent';
 export { Select } from './Select';
 export type { SelectProps, SelectOption } from './Select';
+export { CenteredRow } from './CenteredRow';
+export type { CenteredRowProps } from './CenteredRow';
