@@ -50,6 +50,13 @@ Este delta materializa esa máquina completa en backend, manteniendo **consisten
 
 **RT2.2.6** El sistema **no** deberá revertir automáticamente la categoría si `is_castrated` cambia de `true` a `false` (des-castración no es un caso biológico real; la corrección de un error de carga es manual vía override). El cambio `true → false` se permite a nivel dato (corrección), pero **no** dispara transición automática `novillito → torito` / `novillo → toro`.
 
+> ⚠ **SUPERSEDED por spec 10 v2 (2026-06-11, Gate 0 v2 D10 + R13)**: Raf decidió que el castrado es un
+> estado EDITABLE y REVERSIBLE — el revert `true → false` ahora SÍ dispara recompute (transición
+> automática de vuelta, p. ej. `novillito → torito`), implementado por el **recompute simétrico** del
+> delta backend de spec 10 (reemplazo de `tg_animals_apply_castration`, migraciones ≥0084). Esta
+> cláusula queda vigente SOLO hasta que ese delta se aplique. Trazabilidad:
+> `specs/active/10-operaciones-rodeo/context-v2-seleccion.md` (D10) + su `design.md` §4.2.
+
 ---
 
 ## RT2.3 — `compute_category` reescrita: rama macho completa

@@ -1,284 +1,463 @@
 # Spec 10 — Operaciones masivas por rodeo + vista de grupo — Design
 
-**Status**: borrador para Puerta 1 (status flip de `feature_list.json` pendiente de coordinación).
-**Fecha**: 2026-06-01 (sesión 21).
-**Fuente**: `context.md` (Gate 0) + `requirements.md` de esta spec + overrides del leader (sesión 21).
-**Reusa as-built**: spec 02 (migrations 0013-0049: tablas de evento, `rodeo_data_config`, `field_definitions`/`system_default_fields`, `management_groups`, transiciones, RLS), spec 03 (migration 0054 gating capa 2 `assert_data_keys_enabled`), spec 09 (`AnimalListItem`, find-or-create, path de error de sync R11.5).
+**Status**: reconciliado 2026-06-11 (Gate 0 v2 + staleness vs Tier 2 as-built). Gate 1 re-corrido 2026-06-11: **PASS 0 HIGH / 2 MEDIUM / 3 LOW** (`progress/security_spec_10-operaciones-rodeo.md` §"Spec reconciliada v2"); M1/M2 + L1 foldeados (fix-loop 2026-06-11). **Puerta 1 APROBADA por Raf (2026-06-11) — LIM-1=mitigar con observación / LIM-2=tolerar-y-saltear foldeadas** (fix-loop #2): observación automática de castración (§3.5) + propagación tolerante con pre-filtro (§4.2(4)). ⚠ El delta de LIM-2 (trigger de propagación) requiere **re-chequeo puntual de Gate 1** — lo lanza el leader (§6).
+**Fuente**: `context-v2-seleccion.md` (gana donde choca) + `context.md` + `requirements.md` reconciliado.
+**Reusa as-built**: spec 02 backend (0013–0067: tablas de evento, `rodeo_data_config`, `management_groups`, **Tier 2 categorías**: 0059 seed novillito/novillo, 0060 `animals.is_castrated`, 0061/0067 `nursing`, 0062 `compute_category`, 0063 triggers delegados, 0064 transición de castración, 0066 cron de edad), spec 02 frontend **C1–C4 DONE** (rodeos, alta+lista, ficha, lotes — rutas Expo Router en `app/app/`, services en `app/src/services/`), spec 03 (gating capa 2, 0054/0056), spec 13 (0068–0072), spec 15 PowerSync (sync streams JOIN-free `sync-streams/rafaq.yaml`, CRUD plano `runLocalWrite`, denormalizaciones 0077–0080, outbox; ADR-025/026), chunk C6 (espejo `computeCategoryCode` en `app/src/utils/animal-category.ts`).
 
-> **Regla de oro de esta feature**: una operación masiva = **N eventos individuales idénticos a los que ya se cargan uno por uno**, generados en batch. **No** crea entidades nuevas, **no** crea un "evento colectivo", **no** abre autorización nueva. El grueso del trabajo es **cliente** (UI de vista de grupo + preview + skip-and-report + encolado offline + reporte de sync). El **único delta de DB** es el catálogo del `data_key castracion` + su rama de gating.
+> **Regla de oro reconciliada**: vacunación y destete = **N eventos individuales idénticos a los que ya se cargan uno por uno**; castración = **N UPDATEs del estado `is_castrated`** (sin evento tipado, D10) **+ N observaciones automáticas** (`animal_events 'observacion'`, §3.5 — LIM-1 mitigada, Puerta 1 2026-06-11). Nada crea entidades nuevas ni un "evento colectivo". El grueso es **cliente** (vista de grupo + pantalla de selección + preview + offline). El delta de DB es chico pero existe (§4): `future_bull` + denormalización de `is_castrated` + recompute simétrico — **Gate 1 re-corre sobre eso**.
 
 ---
 
 ## 1. Resumen de capas y archivos
 
-### 1.1 Cliente (grueso de la feature) — TENTATIVO en layout, firme en lógica
+### 1.1 Cliente (grueso de la feature) — interacción lockeada por Gate 0 v2, estética TENTATIVA
 
-| Archivo (kebab-case, ver `conventions.md`) | Capa | Qué hace | Cubre |
+Convenciones as-built: rutas = Expo Router en `app/app/` (kebab-case), componentes en `app/src/components/`, services en `app/src/services/`, utils puros en `app/src/utils/`. Nombres de ruta/archivo **propuestos** (el implementer los alinea al patrón as-built si difieren; no duplica lógica).
+
+| Archivo | Capa | Qué hace | Cubre |
 |---|---|---|---|
-| `app/src/screens/home/HomeScreen.tsx` (evolución, spec 01/02) | screen | Inicio rodeo-céntrico: cards de rodeo + cards de lote | R2.1, R2.2 |
-| `app/src/screens/group/GroupViewScreen.tsx` | screen | Vista de grupo: config + lista de animales + acciones masivas | R1.1, R1.4, R1.5, R1.6 |
-| `app/src/components/GroupActionsBar.tsx` | component | Botonera de las 3 ops masivas (gated) | R1.4, R1.5, R1.6 |
-| `app/src/screens/group/BulkOperationScreen.tsx` | screen | Filtro de alcance + preview + confirmación + reporte | R4.1, R4.2, R4.3, R5.6, R10.3, R10.4 |
-| `app/src/hooks/useGroupAnimals.ts` | hook | Lista animales activos del grupo (rodeo o lote) vía service | R1.2, R1.3 |
-| `app/src/hooks/useBulkOperation.ts` | hook | Orquesta preview → aplicar → encolar → reportar | R3.x, R4.x, R6.x, R10.x |
-| `app/src/services/bulk-operations.ts` | service | I/O: arma el conjunto candidato, calcula skip-and-report, genera N mutaciones PowerSync (batch), expone progreso de sync | R3.x, R4.3, R6.x, R10.1, R10.2, R10.5 |
-| `app/src/utils/bulk-candidates.ts` | util puro | Filtro candidatos (status active + categoría/sexo + ya-aplicado + gating por rodeo real) — testeable sin I/O | R1.3, R4.1, R4.3, R7.2 |
-| `app/src/utils/bulk-idempotency.ts` | util puro | Clave idempotente por animal+tipo+fecha; dedup de re-intentos | R6.1, R6.2, R6.3 |
-| `app/src/components/AnimalListItem.tsx` (spec 09, **reuso**) | component | Item de la lista de animales — **no se redefine** | R1.2 |
-| `app/src/contexts/RodeoContext.tsx` + `app/src/services/rodeo-config.ts` (spec 02 C1/C2, **reuso**) | context/service | Rodeo activo + `rodeo_data_config` cacheado para gating offline | R1.2, R1.5 |
+| `app/app/(tabs)/index.tsx` (evolución de la home as-built) | route | Inicio rodeo-céntrico: cards de rodeo + cards de lote → vista de grupo | R2.1, R2.2 |
+| `app/app/rodeo/[id].tsx` y `app/app/lote/[id].tsx` | route | Vista de grupo (rodeo / lote): metadatos + config + lista de animales activos + acciones masivas | R1.1, R1.3, R1.4, R1.5, R1.6, R7.1 |
+| `app/app/seleccion-masiva.tsx` (params: `groupType`, `groupId`, `op: 'castrate'\|'wean'`) | route | **Pantalla de selección explícita** (D6–D9, D11): secciones, checkboxes, CTA vivo, bottom-sheet | R11.1–R11.9, R5.6 |
+| `app/app/vacunacion-masiva.tsx` (params: grupo) | route | Vacunación masiva: pre-config + filtro + preview + skip-report + progreso | R3.1, R4.1–R4.4, R10.3, R10.4 |
+| `app/src/components/GroupActionsBar.tsx` | component | Botonera de las 3 acciones (Vacunar/Destetar gated; Castrar siempre) | R1.4, R1.5, R1.6 |
+| `app/src/components/AnimalRow.tsx` (**reuso, se extiende**) | component | Variante **compacta** (≥56px) + slot checkbox + badge ⭐ + "categoría · edad" — sin redefinir el componente | R11.9, R12.3 |
+| `app/src/utils/bulk-candidates.ts` | util puro | Candidatos por operación (active + scope grupo + reglas D3/D4 + filtro vacunación + gating por rodeo real) | R1.3, R4.1, R4.3, R7.2, R11.2, R11.4 |
+| `app/src/utils/bulk-selection.ts` | util puro | Estado de selección: secciones por categoría, defaults pre-tildados, todos/ninguno, contadores, desglose para el bottom-sheet | R11.3, R11.4, R11.5, R11.7, R11.8 |
+| `app/src/utils/bulk-idempotency.ts` | util puro | Clave idempotente (animal, tipo, fecha) + `id` UUIDv5 determinístico (solo ops de evento) | R6.1 |
+| `app/src/services/bulk-operations.ts` | service | Genera/encola las N mutaciones locales en batch (eventos vía patrón `events.ts`; castración vía UPDATE `animal_profiles` **+ observación automática por animal, §3.5**); expone progreso "X de N" + rechazos | R3.x, R13.7, R10.1–R10.5 |
+| `app/src/services/animals.ts` (**extensión**) | service | `setCastrated(profileId, value)` (ficha, R13.1 — **crea también la observación automática, §3.5**) + `setFutureBull(profileId, value)` (ficha, R12.2) — UPDATEs locales CRUD plano | R13.1, R13.4 (lado cliente), R13.7, R12.2, R12.4 |
+| `app/src/services/events.ts` (**reuso**) | service | `addObservation`/`buildAddObservationInsert` as-built: la observación automática de castración entra por este mismo camino (INSERT plano `animal_events`, offline) — sin service nuevo | R13.7 |
+| `app/app/animal/[id].tsx` (**extensión de la ficha as-built**) | route | Fila "Castrado Sí/No" editable + toggle ⭐ futuro torito + badge | R13.1, R13.2, R12.2, R12.3 |
+| `app/src/utils/animal-category.ts` (**chunk C6, se cablea**) | util puro | El espejo recibe `is_castrated` REAL (de `animal_profiles` local) en vez de la inferencia RC6.2.1 | R13.6, R10.6 |
+| `app/src/services/powersync/schema.ts` (**extensión**) | schema | Columnas nuevas en `animal_profiles` local: `is_castrated`, `future_bull` | R13.3, R12.1 |
 
-> **Dependencia de coordinación (frontend en vuelo).** `AnimalListItem` (spec 09), `RodeoContext` + `rodeo-config` (spec 02 chunk C1/C2 — ver `progress/impl_02-frontend-c1-rodeos.md`) y la **home de spec 01** se están construyendo en paralelo. Esta feature **reusa** esos componentes/servicios y **no** los redefine. Si los nombres/firmas finales difieren al implementar, se adaptan los imports (no se duplica lógica). El Inicio rodeo-céntrico es **evolución** de la home ya construida (realiza el rol que ADR-018 ya le asignó; **no** reabre ADR-018).
+### 1.2 Backend (delta — TBD numeración, ver §9 D6)
 
-### 1.2 Backend (delta mínimo)
-
-| Archivo / migration | Qué hace | Cubre |
+| Migration (numeración TBD al implementar; as-built en disco llega a **0083** → usar la siguiente libre ≥0084, verificando también el remoto) | Qué hace | Cubre |
 |---|---|---|
-| `supabase/migrations/0056_castracion_data_key.sql` (numeración tentativa, el implementer la fija a la siguiente libre) | Seed del `data_key='castracion'` en `field_definitions` + `system_default_fields` de `(bovino, cría)` + rama de gating `castracion` en el trigger de `sanitary_events` | R3.3, R5.7, R7.3 |
-| `supabase/tests/rls/` (runners Node, ADR-012) | Tests RLS/gating del delta de castración + tenant-safety de las N mutaciones | R7.3, R9.2, R9.3 |
+| `00NN_future_bull.sql` | `animal_profiles.future_bull` + trigger de normalización (solo machos; auto-clear al castrar) | R12.1, R12.4 |
+| `00NN_denormalize_is_castrated.sql` | `animal_profiles.is_castrated` denormalizado: backfill + force-INSERT + propagación down + **write-through up** | R13.3, R13.4 |
+| `00NN_castration_recompute_symmetric.sql` | Reemplaza el cuerpo de `tg_animals_apply_castration` (0064): actúa en **ambas** direcciones | R13.5 |
+| `supabase/tests/rls/` (runners Node, ADR-012) | Tests RLS + comportamiento de los triggers nuevos + no-loop + tenant-safety | R9.2, R12.x, R13.x |
 
-> **No hay tabla nueva, ni Edge Function nueva, ni RPC nueva, ni policy RLS nueva.** Toda la persistencia reusa las tablas de evento de spec 02 y el gating de spec 03 (0054). El delta es seed de catálogo + una rama de gating (ver §4).
+> **ELIMINADO respecto de la versión anterior** (Gate 0 v2 §Implicancias 1): el seed del data_key `castracion` en `field_definitions`/`system_default_fields`, la rama de castración en `tg_sanitary_events_gating` y el marcador `product_name='Castración'`. **No se toca** el trigger de gating de 0054 ni el catálogo. (Los findings H1/M1/L1 del Gate 1 s21 aplicaban a ese delta y quedan sin objeto.)
+
+> **No hay tabla nueva, ni Edge Function, ni RPC invocable por clientes, ni policy RLS nueva.** Sí hay **funciones de trigger nuevas** (SECURITY DEFINER + `revoke execute`, patrón 0079/0055) — superficie que Gate 1 audita (§6).
 
 ---
 
-## 2. Modelo de datos — sin tablas nuevas; reuso + un delta de catálogo
+## 2. Modelo de datos — destinos de escritura por operación
 
-### 2.1 Destinos de escritura de cada operación masiva
+### 2.1 Tabla resumen (reconciliada)
 
-| Operación masiva | Tabla destino (spec 02 as-built) | `event_type` / forma | `data_key` requerido (gating) | Estado del data_key |
-|---|---|---|---|---|
-| **Vacunación masiva** | `sanitary_events` (0026) | `event_type = 'vaccination'`, `product_name` de pre-config | `vacunacion` | ✅ ya seedeado (spec 02) |
-| **Destete masivo** | `reproductive_events` (0025) | `event_type = 'weaning'`, sobre el perfil del **ternero** | `destete` | ✅ ya seedeado (spec 02) |
-| **Castración masiva** | `sanitary_events` (0026) | `event_type = 'treatment'`, `product_name = 'Castración'` (marcador) | `castracion` | ❌ **DELTA de esta spec** (ver §4) |
+| Operación | Mutación por animal | Tabla destino | Gating capa 1 (UI) | Gating capa 2 (DB, as-built) | Transición de categoría |
+|---|---|---|---|---|---|
+| **Vacunación masiva** | INSERT evento | `sanitary_events` (`event_type='vaccination'`, `campaign_id NULL`) | `vacunacion` | ✅ `tg_sanitary_events_gating` → `assert_data_keys_enabled(['vacunacion'])` (0054) | no aplica |
+| **Destete masivo** | INSERT evento | `reproductive_events` (`event_type='weaning'`) | `destete` | ❌ **no existe rama as-built** para `weaning` (0054 solo gatea tacto/tacto_vaquillona/service-ai) — límite documentado, no se reabre | ✅ automática: 0063 → `compute_category` (0062): ternera→vaquillona, ternero→torito/novillito |
+| **Castración masiva** | UPDATE estado | `animal_profiles.is_castrated = true` + `future_bull = false` (write-through a `animals.is_castrated`, §4.2) | sin gating (no es dato configurable) | no aplica (no es evento) | ✅ automática: 0064 **extendido a simétrico** (§4.3): torito→novillito, toro→novillo; revert: novillito→torito, novillo→toro |
 
-**Decisión de modelado de la castración (default del autor de spec, dentro del enum existente).** No se crea una tabla `castration_events` ni un `event_type` nuevo en el enum `sanitary_event_type` (`vaccination|deworming|treatment|test|other`). La castración se persiste como `sanitary_events` con `event_type = 'treatment'` (es un procedimiento sanitario), marcada por un **marcador canónico constante** `product_name = 'Castración'` (D4 **cerrado**, ver §4). **Razón**: agregar un valor al enum o una tabla es un delta de schema mayor que el caso de uso MVP no justifica — la castración masiva del MVP solo necesita **dejar el registro del evento** (el **efecto de categoría es Tier 3 DEFERIDO pendiente de Facundo**, R5.7). *(Si Facundo decide que la castración merece su propia categoría/tabla, eso es un refinamiento post-confirmación, no MVP.)*
+### 2.2 Aclaración `sanitary_campaigns` (sin cambios)
 
-> **El marcador es defensa en profundidad, no una frontera de autorización (M1, Gate 1 s21).** El gating se ata al `data_key='castracion'` (catálogo) vía el trigger por-animal, no al `event_type`. El marcador `product_name='Castración'` es **load-bearing para la clasificación/UX del gating** (que el trigger sepa que este `treatment` es una castración), **no** para una frontera de tenant/authz. El marcador es **canónico y constante** (lo inyecta programáticamente la op masiva, no lo tipea el operario) y el trigger lo compara **robusto a acento y caso** (§4) para que variantes accidentales no lo esquiven. Pero, honestamente: un cliente que **deliberadamente** mande un no-marcador (ej. `product_name='capado'`) escribe un evento de castración **no-gateado** — sin embargo **no** cruza tenants ni escala privilegios (la RLS por-animal sigue valiendo, R9.2); lo único que logra es saltarse una preferencia de config del **propio** owner del rodeo (¿este rodeo trackea castración?). Por eso es defensa en profundidad, no autorización.
+Verificado contra 0026: **`sanitary_campaigns` NO existe** — `sanitary_events.campaign_id` es un `uuid` suelto. La vacunación masiva escribe `sanitary_events` directo con `campaign_id = NULL`. Si una feature futura introduce campañas, podrá poblarlo; no es requisito MVP.
 
-> **Aclaración sobre `sanitary_campaigns`.** El `context.md` dice "vacunación masiva ya tiene sustrato (`sanitary_campaigns` + `sanitary_events`)". Verificado contra el as-built de spec 02 (0026): **`sanitary_campaigns` NO existe todavía** — `sanitary_events.campaign_id` es una columna `uuid` suelta con comentario "FK a sanitary_campaigns que se introduce en feature posterior". Esta spec **no depende** de `sanitary_campaigns`: la vacunación masiva escribe `sanitary_events` directamente (con `campaign_id = NULL`). Si una feature futura introduce `sanitary_campaigns`, la vacunación masiva podrá poblarlo, pero **no es requisito de MVP**. Se documenta para que el implementer no asuma que la tabla existe.
-
-### 2.2 Filtro de candidatos (`status = 'active'`, R1.3)
-
-El conjunto candidato de toda operación masiva se computa en `bulk-candidates.ts` (util puro, testeable):
+### 2.3 Candidatos por operación (`bulk-candidates.ts`, util puro testeable)
 
 ```ts
-// pseudo: candidatos del grupo
-candidates = animalProfiles
-  .filter(p => p.status === 'active' && p.deleted_at == null)   // R1.3
-  .filter(byGroupScope(group))                                  // rodeo_id == group | management_group_id == group
-  .filter(byOptionalFilter(filter))                             // categoría / sexo (R4.1)
+// base común (R1.3): activos del grupo
+base = profiles.filter(p => p.status === 'active' && p.deleted_at == null)
+               .filter(byGroupScope(group))        // rodeo_id == group | management_group_id == group
+
+// vacunación (R4.1, R4.3): base + filtro opcional categoría/sexo − skips(already_applied | rodeo_data_key_disabled)
+// castración (R11.2 — D3):  base.filter(p => p.animal_sex === 'male' && !p.is_castrated)
+//   defaults (R11.3 — D3/D6): preChecked = categoría 'ternero' && !p.future_bull
+// destete    (R11.4 — D4):  base.filter(p => categoryCode(p) ∈ {'ternero','ternera'} && !hasWeaning(p))
+//   defaults: TODOS pre-tildados. En lote cross-rodeo: excluir los de rodeo sin 'destete' enabled,
+//   con contador "N excluidos por configuración del rodeo" (R7.2, criterio del autor).
 ```
 
-Sobre ese conjunto se aplican los **skips** (R4.3): sexo/categoría incompatible con la operación, gating por rodeo real (R7.2), y ya-aplicado (idempotencia R6.x).
+Los inputs (`animal_sex`, `is_castrated`, `future_bull`, categoría, eventos `weaning`) están **todos en el SQLite local** post-denorm (0079 + §4.2) — el armado funciona 100% offline.
 
 ---
 
-## 3. Lógica de aplicación (cliente) — el corazón de la feature
+## 3. Lógica de cliente
 
-### 3.1 Flujo de una operación masiva
+### 3.1 Flujo vacunación masiva (modelo Gate 0 original — sin cambios)
 
 ```
-GroupViewScreen
-  → tap acción masiva (gated por R1.5/R1.6 contra rodeo_data_config del grupo)
-  → BulkOperationScreen
-      1. filtro de alcance (categoría/sexo opcional)               [R4.1]
-      2. computar preview vía useBulkOperation:                    [R4.2]
-           - candidatos = bulk-candidates(group, filter)
-           - aplicables = candidatos − skips
-           - skips agrupados por motivo (ya-aplicado | sexo/cat | rodeo-sin-datakey)  [R4.3]
-           - override-warning: animales con category_override que no transicionarán    [R5.6]
-      3. mostrar "N eventos sobre M animales" + "K saltados (motivos)" + confirmación  [R4.2]
-      4. al confirmar → applyBulkOperation:                        [R3.x, R10.1]
-           por cada animal aplicable → generar 1 mutación PowerSync (insert evento)
-           batch/encolado (R10.5), idempotencia por animal+tipo+fecha (R6.x)
-      5. pantalla de progreso: contador "X de N sincronizados" + rechazos por animal   [R10.3, R10.4]
+Vista de grupo → "Vacunar" (gated R1.5/R1.6)
+  → vacunacion-masiva: pre-config (product_name, fecha) + filtro opcional (R4.1)
+  → preview: "N eventos sobre N animales" + "K saltados (motivos)" (R4.2, R4.3)
+  → confirmar → N INSERTs locales batcheados (R10.1/R10.5), id UUIDv5 (R6.1)
+  → progreso: "X de N sincronizados" + rechazos por animal (R10.3, R10.4)
 ```
 
-### 3.2 Skip-and-report — categorías de skip (R4.3)
+### 3.2 Flujo castrar / destetar (selección explícita — Gate 0 v2)
 
-`bulk-candidates.ts` devuelve `{ applicable: Profile[], skipped: { reason, profiles }[] }` con `reason ∈`:
-- `already_applied` — el animal ya tiene el evento de esta operación para la fecha (idempotencia, R6.1/R6.2).
-- `wrong_sex_or_category` — ej. una hembra en castración masiva; un adulto en destete (no es ternero/a).
-- `rodeo_data_key_disabled` — el rodeo real del animal no tiene el `data_key` `enabled` (lote cross-rodeo, R7.2).
+```
+Vista de grupo → "Castrar" | "Destetar" (verbo pelado, D1)
+  → seleccion-masiva:
+      header: título + contador vivo "12 seleccionados" (D6/D8)
+      [búsqueda solo si candidatos > ~20 (D11)]
+      Sección "Terneros" (castración: pre-tildados los comunes; ⭐ adentro sin tildar)  [D3/D6]
+        ─ fila = AnimalRow compacto + checkbox (≥56px, orden por ID)                  [D11]
+        ─ fila ⭐ tildada → resaltado terracota, SIN modal                              [D7]
+        ─ "todos / ninguno" por sección                                                [D6]
+      Sección "Adultos" (castración: torito/toro no castrados, sin tildar)             [D3]
+      (destete: secciones Terneros / Terneras, TODOS pre-tildados; sin lógica ⭐)      [D4]
+      CTA fijo abajo: "CASTRAR 12 ANIMALES" (vivo; disabled en 0)                      [D8]
+  → tap CTA → bottom-sheet sobre la misma pantalla                                     [D9]
+      desglose por categoría ("8 terneros · 3 toritos · 1 toro")
+      "⚠ 2 futuros toritos incluidos" (solo castración, si aplica)                     [D7]
+      "N con categoría fijada manual no van a cambiar de categoría" + revertir (R5.6)
+      copy: "Podés corregirlo después desde la ficha de cada animal."  ← NUNCA amenazante
+      [CONFIRMAR]  [Volver]
+  → confirmar → N mutaciones locales batcheadas:
+      castración: UPDATE animal_profiles SET is_castrated=1, future_bull=0 WHERE id=?
+                  + INSERT animal_events 'observacion' ("Castrado") por animal (§3.5, R13.7)
+                  → 2 CrudEntries/animal
+      destete:    INSERT reproductive_events 'weaning' (patrón events.ts, id UUIDv5)
+  → la lista/ficha reflejan la categoría nueva AL TOQUE, offline, vía espejo C6 con is_castrated real (R10.6)
+  → progreso de sync: "X de N" + rechazos por animal (R10.3/R10.4)
+```
 
-El reporte (UI, TENTATIVO) muestra el conteo por motivo. Ningún skip bloquea a los demás (R4.4).
+### 3.3 Ficha del animal (D2 + D10)
 
-### 3.3 Gating en cliente (capa 1)
+- **"Castrado Sí/No"** (solo machos): fila editable con confirmación que anticipa el recálculo — el target se calcula localmente con el espejo C6 (`computeCategoryCode` con `isCastrated` invertido): "La categoría se recalcula: Novillito → Torito". Write = `setCastrated(profileId, value)` → UPDATE local de `animal_profiles.is_castrated` (+ `future_bull=0` si value=true) **+ observación automática (§3.5, 1+1 CrudEntries)** → sube por CRUD plano → write-through server (§4.2) → 0064 simétrico transiciona → history. **Sin evento tipado** (R13.2): el timeline muestra la **observación** en todos los casos (incluido `ternero` — LIM-1 mitigada, Puerta 1 2026-06-11) y además el cambio de categoría vía `animal_category_history` cuando hubo transición.
+- **Toggle ⭐ "Futuro torito"** (solo machos, solo ficha, R12.2): UPDATE `future_bull`. Badge visible solo positivo; oculto si la categoría es `toro` (regla de display, cliente). Sin observación automática (no es castración).
 
-- **Grupo = rodeo (R1.5/R1.6)**: la acción se ofrece si el `data_key` está `enabled` en el `rodeo_data_config` del rodeo (cacheado offline vía `rodeo-config` de spec 02, reuso).
-- **Grupo = lote cross-rodeo (R7.1)**: la acción se ofrece si **algún** rodeo representado en el lote tiene el `data_key` `enabled`. Al aplicar, `bulk-candidates.ts` resuelve el **rodeo real de cada animal** (`animal_profiles.rodeo_id`) y saltea (`rodeo_data_key_disabled`) los que no lo tienen (R7.2).
-- El cliente **nunca** es la única defensa: la capa DB (0054) revalida por animal (R7.3, §4).
+### 3.4 Gating en cliente (capa 1)
 
-### 3.4 `category_override` y destete (R5.6)
+- **Rodeo**: Vacunar si `vacunacion` enabled; Destetar si `destete` enabled (`rodeo-config.ts` as-built, cacheado offline). Castrar: siempre (R1.5).
+- **Lote cross-rodeo**: ofrecer la op gateada si **algún** rodeo del lote la tiene (R7.1); al aplicar/listar, resolver el rodeo real por animal y saltar/excluir (R7.2).
+- El cliente nunca es la única defensa donde existe capa 2 (vacunación); para destete la capa 1 es la única barrera **as-built** (límite documentado en R7.3 — no se inventa una rama nueva).
 
-Para el destete masivo (única op MVP con efecto de transición, R5.5):
-- Un animal con `category_override = true` **no** transiciona (spec 02 R4.9). El preview lo lista en un grupo aparte ("N animales tienen categoría manual y no van a transicionar") y ofrece **revertir el override** (set `category_override = false`, spec 02 R4.10) para incluirlos. El evento `weaning` igual se crea para esos animales (el override solo afecta la **categoría**, no la creación del evento).
+### 3.5 Observación automática de castración (R13.7 — LIM-1 mitigada, Puerta 1 2026-06-11)
+
+Cada flip de `is_castrated` aplicado desde la app crea **client-side, junto al UPDATE**, una observación en `animal_events` — el rastro atribuible que D10 (sin evento tipado) no daba en `ternero`.
+
+- **Camino**: reuso del as-built `addObservation`/`buildAddObservationInsert` (`events.ts`): INSERT plano local → upload queue (offline-safe, patrón spec 15). `event_type='observacion'` (Modelo Híbrido 0034, **sin gating** — `animal_events` no pasa por `rodeo_data_config`). `establishment_id` derivado del **perfil** (el trigger de 0034 valida coincidencia, 23514 si no). `author_id` **no se manda**: el trigger `animal_events_set_author_id` lo setea a `auth.uid()` del que sube = usuario actual (idéntico a una observación manual; localmente queda NULL hasta el sync-down — mismo comportamiento as-built, sin gap nuevo). `id` de cliente random (`crypto.randomUUID`, patrón R6.4 de spec 15) — **no** UUIDv5: la observación se crea exactamente una vez por apply local; el dedup determinístico cruzado entre dispositivos borraría la autoría de uno de los dos actores (micro-edge de doble observación entre dos dispositivos offline aceptado; el UPDATE en sí es idempotente por valor).
+- **Copy es-AR** (funcional; ajuste menor de microcopy permitido, el contenido no): castrar → **"Castrado"**; revertir → **"Corrección: marcado como no castrado"**. El revert **también** deja observación (simetría — la corrección es tan auditable como el acto).
+- **Cardinalidad**: masiva = N UPDATEs + N observaciones (2 CrudEntries/animal, batcheadas juntas); toggle de ficha = 1+1.
+- **Independencia (residual aceptado)**: observación y UPDATE son CrudEntries independientes (R10.2, sin transacción) — un rechazo asimétrico de sync puede dejar flip sin observación o viceversa; visible vía R10.3. Coherente con el modelo N-mutaciones-independientes de toda la spec.
+- **Atribución best-effort, NO tamper-evidence** (L5 del re-gate 2026-06-11): la observación es un rastro informativo — su `author_id` es default-if-null (0034, spoofeable intra-tenant, familia SEC-SPEC-03/D7) y su autor puede soft-deletearla en cualquier momento (`deleted_at` no está en los inmutables de `enforce_edit_window`). La verdad auditable del castrado es `is_castrated`; LIM-1 no promete auditoría inviolable.
+- **Qué NO es**: ni un evento tipado CASTRAR (D10 firme), ni un trigger server-side (la DB no escribe observaciones — el flip server-side puro, p. ej. la propagación §4.2(4), no genera observación: solo los flips aplicados desde la app). Superficie de seguridad: **cero delta** — tabla, RLS, triggers y sync stream (`est_animal_events`) son as-built de 0034/spec 15.
 
 ---
 
-## 4. Delta de backend (DB) — `data_key castracion` + rama de gating (SCHEMA-SENSITIVE)
+## 4. Delta de backend (DB) — SCHEMA-SENSITIVE → Gate 1 re-corre
 
-> **Esta feature ES SCHEMA-SENSITIVE.** El delta toca `field_definitions` (catálogo, seed), `system_default_fields` (defaults por sistema) y el **trigger de gating capa 2** de `sanitary_events` (migration 0054 de spec 03). Por tocar gating/datos regulados → **requiere Gate 1 (`security_analyzer` modo `spec`) antes de Puerta 1**, igual que spec 03. Justificación de por qué SÍ aplica Gate 1: el delta agrega un `data_key` que **gatea** la escritura de un tipo de evento (defensa en profundidad ADR-021) y debe mantener la propiedad **fail-closed** + tenant-safety de `assert_data_keys_enabled`; un binding mal hecho `castracion`↔destino rompería el gating silenciosamente (riesgo ADR-021 / spec 03 R7.2). Ver §6.
+> Numeración **TBD al implementar**: as-built en disco llega a `0083_create_animal_rpc.sql`; usar las siguientes libres (≥0084) verificando disco + remoto al momento de aplicar. Tres migraciones (o una sola con las tres secciones — a criterio del implementer, manteniendo el orden de abajo: la denorm de §4.2 debe existir antes de cablear el cliente).
 
-> **Mismo patrón que el delta de razas de la feature 08**: es un delta de catálogo/seed sobre un backend de spec 02 ya `done` (Tier 3 de spec 02 dejó `castracion` explícitamente **fuera** del fold — "no se agrega `castracion`"). Esta spec lo agrega como su propio delta, en migration nueva, sin reabrir spec 02.
+### 4.1 `future_bull` (R12.1, R12.4)
 
 ```sql
--- 0056_castracion_data_key.sql  (numeración tentativa; el implementer usa la siguiente libre tras 0054/0055)
--- Delta de catálogo de spec 10: data_key 'castracion' para gatear la castración masiva.
--- Es Tier 3 que spec 02 dejó fuera ("no se agrega castracion"); spec 10 lo introduce.
+-- 00NN_future_bull.sql — flag "futuro torito" (Gate 0 v2 D2). Decisión de manejo per-perfil:
+-- NO viaja en venta/transferencia (un perfil nuevo en otro campo arranca false).
+alter table public.animal_profiles
+  add column if not exists future_bull boolean not null default false;
 
--- (1) Catálogo global (field_definitions): el data_key existe una sola vez (ADR-021).
-insert into public.field_definitions (data_key, label, description, category, data_type, ui_component) values
-  ('castracion', 'Castración', 'Castración de machos (evento sanitario; efecto de categoría pendiente)',
-   'manejo', 'evento_grupal', 'silent_apply')
-on conflict (data_key) do nothing;
+comment on column public.animal_profiles.future_bull is
+  'Futuro torito (spec 10, Gate 0 v2 D2). Decisión de manejo del campo: solo machos; se marca desde la ficha; auto-clear al castrar (trigger normalize). No viaja entre campos.';
 
--- (2) Default por sistema (system_default_fields) para (bovino, cría).
---     default_enabled = false: NO viene tildado por default (el productor lo habilita si castra).
---     required_for_system = false (en cría nada es required, spec 02 R2.9).
---     L1 (Gate 1 s21): el join filtra por .code ('bovino'/'cria'), igual que el seed canónico
---     de 0018 (L88-93) y 0014 (L20-21). NO usar .name ('Bovino'/'Cría', con mayúscula y tilde):
---     el WHERE por name no matchearía ninguna fila y la castración nunca se ofrecería.
-insert into public.system_default_fields (system_id, field_definition_id, default_enabled, required_for_system, sort_order)
-select s.id, fd.id, false, false, 200
-from public.systems_by_species s
-join public.species sp on sp.id = s.species_id
-cross join public.field_definitions fd
-where sp.code = 'bovino' and s.code = 'cria' and fd.data_key = 'castracion'
-on conflict (system_id, field_definition_id) do nothing;
-
--- (3) Rama de gating capa 2 (extiende el trigger de sanitary_events de la 0054 de spec 03).
---     La castración masiva escribe sanitary_events con event_type='treatment' marcado por el
---     MARCADOR CANÓNICO CONSTANTE product_name = 'Castración' (D4 CERRADO).
+-- Normalización (solo machos + auto-clear al castrar). SILENCIOSA (no raise): D2 define auto-clear
+-- al castrar; para sexo no-macho se elige la misma semántica (un future_bull=true sobre hembra es
+-- siempre un error de payload — se normaliza a false, fail-safe, sin romper flujos legítimos como
+-- la corrección de sexo macho→hembra que propagaría 0079). [criterio del autor — validar Puerta 1]
 --
---     MARCADOR CANÓNICO (D4, cerrado en Gate 1 s21 — ya NO a gusto del implementer):
---       product_name = 'Castración'  (constante exacta).
---     El cliente NO la tipea a mano: la op masiva la setea PROGRAMÁTICAMENTE en la pre-config
---     (design §3.1, R3.1) — es un literal del código del cliente, no input libre del operario.
---
---     PROBLEMA de binding (ADR-021 / spec 03 R7.2): event_type='treatment' también lo usan
---     tratamientos curativos NO gateados por 'castracion'. Por eso el gating NO puede ramificar
---     solo por event_type — discrimina por el marcador.
---
---     NORMALIZACIÓN ROBUSTA A ACENTO Y CASO (M1, Gate 1 s21): la comparación NO puede ser
---     `lower(product_name)='castración'` literal — 'Castracion' sin tilde lo esquivaría
---     (fail-open del marcador). La extensión `unaccent` NO está habilitada en este proyecto
---     (verificado: solo `pg_trgm`, 0020), así que se usa una normalización PORTABLE inline con
---     translate() que mapea las vocales acentuadas a su forma sin tilde antes de comparar.
---     Resultado: variantes accidentales de caso/acento ('Castracion', 'CASTRACIÓN', 'castracion')
---     NO esquivan el gating.
---
--- Forma del trigger (reescritura de la FUNCIÓN REAL tg_sanitary_events_gating de la 0054 —
--- H1, Gate 1 s21: el nombre real es tg_sanitary_events_gating, verificado en 0054 L97/L108 y
--- re-revocado en 0055; NO existe ninguna `tg_sanitary_gating`. Reemplazar SOLO el cuerpo de
--- la función; el trigger `sanitary_events_gating` de la 0054 ya bindea a esta función y NO se
--- re-crea acá — preserva la rama de vacunación as-built + el fail-closed):
-create or replace function public.tg_sanitary_events_gating ()
+-- ⚠ ORDEN DE TRIGGERS (BEFORE, alfabético): debe correr DESPUÉS de
+-- animal_profiles_force_animal_identity (0079, fuerza animal_sex en INSERT) para leer el sexo ya
+-- forzado. 'animal_profiles_normalize_future_bull' > 'animal_profiles_force_animal_identity'
+-- alfabéticamente ('n' > 'f') → orden correcto. Gate 1 lo verifica.
+create or replace function public.tg_normalize_future_bull ()
 returns trigger language plpgsql security definer set search_path = public as $$
 begin
-  if new.event_type = 'vaccination' then
-    perform public.assert_data_keys_enabled(new.animal_profile_id, array['vacunacion']);
-  elsif new.event_type = 'treatment'
-        and lower(translate(coalesce(new.product_name,''), 'áéíóúÁÉÍÓÚ', 'aeiouAEIOU')) = 'castracion' then
-    perform public.assert_data_keys_enabled(new.animal_profile_id, array['castracion']);
+  if new.future_bull = true and (coalesce(new.animal_sex, '') <> 'male' or new.is_castrated = true) then
+    new.future_bull := false;
   end if;
-  -- otros event_type sanitarios (deworming/test/other/treatment no-castración) no se gatean por esta spec.
   return new;
 end; $$;
--- Re-emisión idempotente del revoke (defensa en profundidad, patrón 0055) sobre la función REAL.
--- NO se redefine el trigger sanitary_events_gating (ya existe en 0054) — sería error "trigger ya existe".
-revoke execute on function public.tg_sanitary_events_gating () from public, authenticated, anon;
+revoke execute on function public.tg_normalize_future_bull () from public, authenticated, anon;
+
+drop trigger if exists animal_profiles_normalize_future_bull on public.animal_profiles;
+create trigger animal_profiles_normalize_future_bull
+  before insert or update of future_bull, is_castrated, animal_sex on public.animal_profiles
+  for each row execute function public.tg_normalize_future_bull();
 ```
 
-**Propiedades preservadas del gating (heredadas de spec 03 / 0054):**
-- **Fail-closed** (spec 03 R7.6): `assert_data_keys_enabled` levanta `23514` si el rodeo no se resuelve o falta el `data_key` enabled. La rama de castración lo hereda — un insert de castración sobre un rodeo sin `castracion` enabled se **rechaza por animal** (R7.3).
-- **Tenant-safe**: `assert_data_keys_enabled` resuelve el rodeo inline desde `animal_profiles.rodeo_id` del perfil del propio evento; no cruza tenants (spec 03 R7.4).
-- **EXECUTE revocado** (SEC-HIGH-01 de spec 02): no se expone como RPC.
-- **Riesgo de binding (ADR-021 / spec 03 R7.2) — defensa en profundidad, D4 cerrado**: el marcador `product_name='Castración'` es load-bearing para la **clasificación** del gating (no para authz — ver §2.1). **Mitigación** (D4 cerrado, no opcional): (a) marcador **canónico constante** seteado programáticamente por la op masiva; (b) comparación del trigger **robusta a acento y caso** vía `translate()` portable (la 'Castracion' sin tilde TAMBIÉN se gatea); (c) tests: castración en rodeo con/sin `castracion` → accept/reject; variante de caso/acento (`'Castracion'`) también se gatea; `castracion` existe en `field_definitions`; un `treatment` NO-castración (curativo) no queda gateado por `castracion`. Ver tasks T-DB.3/T-DB.5/T-DB.6.
+*(Se descarta el CHECK declarativo `future_bull = false OR animal_sex = 'male'`: una corrección de sexo propagada por 0079 sobre un perfil con `future_bull=true` lo violaría y rompería la propagación; el trigger normaliza en vez de fallar — alternativa §8.D.)*
+
+### 4.2 Denormalización de `is_castrated` (R13.3, R13.4) — patrón 0079, con write-through
+
+```sql
+-- 00NN_denormalize_is_castrated.sql — cierra el finding F1 de C6 (design-c6 §7):
+-- animals está FUERA del sync set (ADR-026 b1) → ni la castración offline ni el espejo C6
+-- tienen el dato sin esta denorm. Fuente de verdad física sigue siendo animals.is_castrated (0060).
+
+-- (0) Columna espejo en animal_profiles (mismo tipo/default que animals, 0060).
+alter table public.animal_profiles
+  add column if not exists is_castrated boolean not null default false;
+comment on column public.animal_profiles.is_castrated is
+  'Denormalizado de animals.is_castrated (spec 10, estilo 0079/ADR-026). Mantenido por: force en INSERT (fiel a animals), propagación animals→profiles, y WRITE-THROUGH profiles→animals (es el write-path offline de la castración: animals no sincroniza). A diferencia de la identidad (0079), NO se fuerza en UPDATE: es editable por diseño (0060).';
+
+-- (1) BACKFILL (idempotente). El AFTER UPDATE write-through que se crea en (3) queda guardado por
+--     IS DISTINCT FROM → el backfill no rebota contra animals.
+update public.animal_profiles ap
+   set is_castrated = a.is_castrated
+  from public.animals a
+ where a.id = ap.animal_id
+   and ap.is_castrated is distinct from a.is_castrated;
+
+-- (2) FORCE en INSERT del perfil: copia desde animals (un perfil nuevo nace fiel; anti-spoof del alta).
+--     SOLO INSERT: en UPDATE el cliente DEBE poder escribirla (write-path de castración) — ver header.
+create or replace function public.tg_force_is_castrated_on_profile_insert ()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  select a.is_castrated into new.is_castrated
+  from public.animals a where a.id = new.animal_id;
+  new.is_castrated := coalesce(new.is_castrated, false);
+  return new;
+end; $$;
+revoke execute on function public.tg_force_is_castrated_on_profile_insert () from public, authenticated, anon;
+drop trigger if exists animal_profiles_force_is_castrated on public.animal_profiles;
+create trigger animal_profiles_force_is_castrated
+  before insert on public.animal_profiles
+  for each row execute function public.tg_force_is_castrated_on_profile_insert();
+
+-- (3) WRITE-THROUGH up (perfil → animal): el único write-path de la app es el UPDATE del perfil
+--     (animal_profiles sincroniza; animals no). Guard IS DISTINCT FROM en ambos lados corta el ciclo.
+--     El UPDATE a animals dispara: animals_apply_castration (0064→§4.3, recompute) y la
+--     propagación down de (4) — que reescribe el MISMO valor en los perfiles → no-op → FIN del ciclo.
+create or replace function public.tg_profile_is_castrated_writethrough ()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if new.is_castrated is distinct from old.is_castrated then
+    update public.animals
+       set is_castrated = new.is_castrated
+     where id = new.animal_id
+       and is_castrated is distinct from new.is_castrated;
+  end if;
+  return new;
+end; $$;
+revoke execute on function public.tg_profile_is_castrated_writethrough () from public, authenticated, anon;
+drop trigger if exists animal_profiles_is_castrated_writethrough on public.animal_profiles;
+create trigger animal_profiles_is_castrated_writethrough
+  after update of is_castrated on public.animal_profiles
+  for each row execute function public.tg_profile_is_castrated_writethrough();
+
+-- (4) PROPAGACIÓN down (animal → sus perfiles CON RODEO VIVO), estilo 0079(3). Mantiene fieles los
+--     perfiles de TODOS los campos del animal (compartido, ADR-004). El guard evita UPDATEs no-op.
+--     TOLERAR-Y-SALTEAR (LIM-2, decisión de Raf en Puerta 1 2026-06-11): el PRE-FILTRO espeja el
+--     predicado EXACTO de tg_animal_profiles_rodeo_check (0021) para que ningún UPDATE anidado
+--     pueda raisear por rodeo muerto y abortar la cadena — el perfil huérfano se SALTEA (queda
+--     stale, inconsistencia aceptada) y se deja constancia en el log del servidor.
+create or replace function public.tg_propagate_is_castrated_to_profiles ()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare v_skipped int;
+begin
+  update public.animal_profiles ap
+     set is_castrated = new.is_castrated
+   where ap.animal_id = new.id
+     and ap.is_castrated is distinct from new.is_castrated
+     and exists (                          -- pre-filtro = predicado exacto de rodeo_check (0021)
+       select 1 from public.rodeos r
+       where r.id = ap.rodeo_id
+         and r.establishment_id = ap.establishment_id
+         and r.active = true
+         and r.deleted_at is null
+     );
+  -- Visibilidad mínima del skip (server-side; sin superficie cliente — ver análisis abajo):
+  select count(*) into v_skipped
+  from public.animal_profiles ap
+  where ap.animal_id = new.id
+    and ap.is_castrated is distinct from new.is_castrated;
+  if v_skipped > 0 then
+    raise log 'is_castrated propagation: skipped % orphan profile(s) of animal % (inactive/soft-deleted rodeo)',
+      v_skipped, new.id;
+  end if;
+  return new;
+end; $$;
+revoke execute on function public.tg_propagate_is_castrated_to_profiles () from public, authenticated, anon;
+drop trigger if exists animals_propagate_is_castrated on public.animals;
+create trigger animals_propagate_is_castrated
+  after update of is_castrated on public.animals
+  for each row execute function public.tg_propagate_is_castrated_to_profiles();
+```
+
+**Por qué pre-filtro y no manejo de excepción (LIM-2, justificación):** (1) es **set-based** — un solo UPDATE, sin loop por perfil con sub-transacciones/savepoints (`BEGIN…EXCEPTION` por fila es caro y secuencial); (2) **espeja el predicado exacto** del check que abortaría (`rodeo_check`, 0021) — determinístico, sin adivinar errcodes; (3) un handler de excepción tendría que atrapar `23514` genérico y **enmascararía errores legítimos** de `identity_check`/`category_check` (mismo errcode), que acá deben seguir abortando: esos checks re-validan valores que la propagación no cambia, así que solo fallarían ante corrupción real — y eso queremos verlo, no tragarlo. **Visibilidad del skip**: `RAISE LOG` server-side por animal, **sin** skip-report en la UI de la masiva — el perfil huérfano es típicamente de **otro establecimiento** (animal compartido) y reportarlo filtraría info cross-tenant; además el flip del operario ya tuvo éxito (no hay canal de error que activar). **Reconciliación del huérfano**: sin job activo — el perfil stale converge en el próximo cambio de `is_castrated` del animal con su rodeo ya vivo (el guard `IS DISTINCT FROM` lo recoge); mientras tanto su `future_bull` tampoco se auto-limpia (el normalize de §4.1 corre vía el UPDATE que acá se saltea) — parte de la misma inconsistencia aceptada. El UPDATE **directo** del perfil propio (cliente) sigue sujeto a `rodeo_check` fail-closed — caso prácticamente inalcanzable desde la masiva (los candidatos salen de un grupo activo); si ocurre, visible vía R10.3.
+
+**Análisis de no-loop (Gate 1 lo re-verifica):** UPDATE perfil (cliente) → (3) UPDATE `animals` (solo si distinto) → 0064/§4.3 recompute + (4) UPDATE de los perfiles (solo si distinto; el originante ya tiene el valor → no lo toca; los demás perfiles se actualizan y SUS write-through (3) encuentran `animals` ya igual → no-op). Cero recursión. La propagación de (4) además dispara el normalize de §4.1 (`OF is_castrated`) → `future_bull` se auto-limpia en **todos** los perfiles del animal castrado (defensa en profundidad de R12.4).
+
+**Interacción con los checks always-on de 0021 (Gate 1 v2 M1 → resuelta por PRE-FILTRO, Puerta 1 2026-06-11):** `identity_check`/`rodeo_check`/`category_check` son `BEFORE INSERT OR UPDATE` **sin lista de columnas** → re-disparan en cada UPDATE de esta cadena (los N de la masiva y los anidados de la propagación). No escriben (el no-loop se sostiene). El punto de aborto que M1 señalaba (`rodeo_check` sobre un perfil con rodeo inactivo/soft-deleted) queda **neutralizado por el pre-filtro de (4)**: la propagación ya no alcanza a esos perfiles — los **saltea** (LIM-2 RESUELTA: tolerar-y-saltear, decisión de Raf). Detalle, justificación y semántica del skip arriba en (4) y en §6.1; caso testeado en T-DB.4(e).
+
+**Análisis de poder (Gate 1):** el write-through permite que un UPDATE de `animal_profiles` (RLS: `has_role_in(establishment_id)` del perfil) termine escribiendo `animals.is_castrated`. **No es escalamiento**: la policy as-built `animals_update` (0022/0071) ya permite a ese mismo usuario el UPDATE directo de `animals` (caller con rol en cualquier campo con perfil del animal). El caso "animal compartido entre campos A y B": un user de A castra → afecta la categoría del perfil en B — **semánticamente correcto** (la castración es física, DD-2/0060) y es exactamente el acceso legítimo documentado en 0071. Sin cambio de frontera.
+
+### 4.3 Recompute simétrico (R13.5) — fix exacto sobre 0064
+
+Verificado contra `0064_castration_transition.sql`: el guard as-built (líneas 28–31) es
+
+```sql
+  if not (old.is_castrated = false and new.is_castrated = true) then
+    return new;
+  end if;
+```
+
+→ el revert `true → false` **no recalcula** (RT2.2.6 de spec 02 Tier 2, ahora superseded por D10). Fix: **reemplazar SOLO el cuerpo** de la función real `tg_animals_apply_castration` (CREATE OR REPLACE; el trigger `animals_apply_castration` AFTER UPDATE OF `is_castrated` de 0064 **no se re-crea**), cambiando el guard a dirección-agnóstico y conservando todo lo demás (perfil activo único, respeto de override, delegación a `compute_category`, `apply_auto_transition` + history):
+
+```sql
+-- 00NN_castration_recompute_symmetric.sql — D10: castrado es ESTADO editable y reversible →
+-- el recompute debe ser SIMÉTRICO. Supersede RT2.2.6 ("true->false no revierte") de spec 02
+-- Tier 2 — nota de reconciliación en esa spec la coordina el leader.
+create or replace function public.tg_animals_apply_castration ()
+returns trigger language plpgsql security definer
+set search_path = public as $$
+declare
+  v_profile_id uuid;
+  v_override boolean;
+  v_current uuid;
+  v_target uuid;
+begin
+  -- SIMÉTRICO (spec 10 R13.5): cualquier cambio real de is_castrated recalcula.
+  -- false->true: torito->novillito / toro->novillo. true->false: novillito->torito / novillo->toro.
+  if new.is_castrated is not distinct from old.is_castrated then
+    return new;
+  end if;
+  select id, category_override, category_id
+    into v_profile_id, v_override, v_current
+  from public.animal_profiles
+  where animal_id = new.id and status = 'active' and deleted_at is null
+  limit 1;
+  if v_profile_id is null then return new; end if;
+  if v_override is null or v_override = true then return new; end if;  -- R4.9 / RT2.2.5
+
+  v_target := public.compute_category(v_profile_id);   -- delega: consistencia con 0062 (RT2.10.1)
+  if v_target is not null and v_target is distinct from v_current then
+    perform public.apply_auto_transition(v_profile_id, v_target);      -- history auto_transition
+  end if;
+  return new;
+end; $$;
+-- revoke ya emitido en 0064; re-emitir idempotente (patrón 0055):
+revoke execute on function public.tg_animals_apply_castration () from public, authenticated, anon;
+```
+
+`compute_category` (0062) ya maneja ambas direcciones sin tocarlo (rama macho: `is_castrated` decide novillito/novillo vs torito/toro). El cron 0066 no necesita cambios (su filtro targeted es de **edad**; el revert lo cubre este trigger on-change). En `ternero` el cambio de `is_castrated` no transiciona nada (compute devuelve `ternero` hasta destete/1 año) — correcto en ambas direcciones.
+
+### 4.4 Cliente/sync — acompañamiento del delta
+
+- `app/src/services/powersync/schema.ts`: declarar `is_castrated` y `future_bull` en la tabla local `animal_profiles`.
+- `sync-streams/rafaq.yaml`: `est_animal_profiles` ya hace `SELECT * FROM animal_profiles ...` → las columnas nuevas viajan sin tocar el YAML; **verificar al implementar** si el deploy de streams requiere re-publish para tomar columnas nuevas (nota operativa, no de diseño).
+- Espejo C6: pasar `isCastrated: profile.is_castrated` real; retirar (o degradar a fallback documentado) la inferencia `inferIsCastrated(storedCode)` de RC6.2.1 — coordinar la nota de reconciliación en los docs de C6 (leader).
 
 ---
 
-## 5. RLS / seguridad — NO hay superficie de autorización nueva
+## 5. RLS / seguridad — sin superficie de autorización nueva (pero con triggers nuevos)
 
-> Sección explícita pedida por el leader. La operación masiva **no** abre autorización nueva.
+**Roles (R9.1).** Vacunación/destete: N inserts que pasan uno a uno por las policies de INSERT as-built (`has_role_in(establishment_of_profile(animal_profile_id))`, spec 02 R6.8/R11.5) — cualquier rol activo. Castración: N UPDATEs que pasan por `animal_profiles_update` (`has_role_in(establishment_id)`, `using = with check`) — cualquier rol activo; equivalente en poder al UPDATE directo de `animals` que el as-built ya concede (0071). No hay endpoint "bulk" privilegiado.
 
-**Roles (R9.1).** Disparar una operación masiva de un tipo está permitido a **exactamente los mismos roles** que pueden insertar ese evento individualmente. Verificado contra el as-built de spec 02:
-- `sanitary_events` (0026) y `reproductive_events` (0025): grant `insert` a `authenticated` + policy de INSERT `has_role_in(establishment_of_profile(animal_profile_id))` (spec 02 R6.8 / R11.5 — cualquier rol operativo activo: owner, field_operator, veterinarian). La castración (`sanitary_events`) y el destete (`reproductive_events`) heredan esa autorización **sin cambios**.
-- La operación masiva genera N inserts que pasan **uno por uno** por esa misma policy de INSERT (R9.2). No hay un endpoint "bulk" privilegiado que la saltee.
+**Aislamiento por animal (R9.2).** Cada mutación evalúa su RLS por fila. Lote cross-rodeo: todos los animales de un lote son del mismo establishment (spec 02 R2.14) — sin cruce posible. Animal compartido entre campos: ver §4.2 "análisis de poder".
 
-**Por qué NO hay policy RLS nueva (R9.4).** No se crea ninguna tabla nueva (las N filas van a `sanitary_events` / `reproductive_events` existentes, con su RLS de spec 02). No se crea ninguna función `SECURITY DEFINER` nueva (se reusa `assert_data_keys_enabled` de 0054; la migration de esta spec solo **reemplaza el cuerpo** de la función real del trigger de gating de `sanitary_events`, `tg_sanitary_events_gating` (0054 L97/L108 — H1, no `tg_sanitary_gating` que no existe), para sumar la rama de castración, manteniendo `revoke execute`). No hay Edge Function. El único delta es seed de catálogo + rama de gating.
+**`created_by` (R9.3).** Solo aplica a las ops de evento; hereda `tg_set_created_by_auth_uid` (0024, solo-si-NULL, spoofeable intra-tenant — SEC-SPEC-03, condición sistémica documentada, fix transversal backlogged §9 D7). La castración no tiene `created_by`; la transición queda en `animal_category_history` como `auto_transition`.
 
-**`created_by` se auto-rellena si viene null — NO es no-spoofeable en las tablas de evento (R9.3, corregido H2 Gate 1 s21).** Cada uno de los N eventos hereda el trigger `tg_set_created_by_auth_uid` (0024, "solo si NULL"): `created_by` **defaultea a `auth.uid()` cuando el cliente lo omite** (que es lo que hace la op masiva — no envía `created_by`), pero el trigger **no lo fuerza**: un payload que envíe `created_by` no-NULL **lo respeta**. Por lo tanto un cliente con rol activo en el establishment **puede** spoofear la autoría de un evento, atribuyéndolo a **otro usuario del MISMO establishment**. Esto **no es una brecha cross-tenant** (la RLS `sanitary_events_insert`/`reproductive_events_insert` con `has_role_in(...)` sigue impidiendo escribir sobre otro establishment, R9.2) — es solo **atribución intra-campo**. Es una **condición sistémica pre-existente, documentada como SEC-SPEC-03 (migration 0043)**, que afecta a **todas** las tablas de evento de specs 02/03/09 (usan `tg_set_created_by_auth_uid`, no el `tg_force_created_by_auth_uid` no-spoofeable que sí usan `animal_profiles`/`sessions`/`maneuver_presets`). La feature 10 la **hereda** (escribe los mismos eventos individuales), **no la introduce**. Forzar `created_by` no-spoofeable en las tablas de evento es una decisión arquitectónica transversal, **backlogged** (§9 D7), fuera del scope de spec 10.
+**Funciones nuevas (R9.4).** Las 4 funciones de trigger de §4 son `SECURITY DEFINER` + `set search_path = public` + `revoke execute from public, authenticated, anon` — **no** invocables como RPC (lección SEC-HIGH-01/0055). Ninguna recibe parámetros del cliente: derivan todo de `NEW`/`OLD` de la fila que la RLS ya filtró (mismo argumento de seguridad que 0064/0079).
 
-**Aislamiento por animal (R9.2).** Cada insert evalúa `has_role_in(establishment_of_profile(animal_profile_id))`. Como los animales de un lote cross-rodeo pertenecen todos al **mismo establishment** (`management_groups.establishment_id`, spec 02 R2.14), no hay cruce de tenants posible vía la operación masiva. Un animal de otro establishment no puede estar en el lote ni en el rodeo del grupo.
-
-**Defensa en profundidad / gating capa 2 (R7.3).** Aunque el cliente filtre (R7.2), cada insert pasa por el trigger de gating (0054 + delta castración): un insert directo por PostgREST/sync de un evento gateado sobre un rodeo sin el `data_key` se **rechaza fail-closed** (spec 03 R7.3/R7.6). La operación masiva no introduce un camino que evite este check.
+**Gating (R7.3).** Sin cambios sobre 0054: vacunación gateada por animal fail-closed; `weaning` sin rama (límite as-built documentado); castración no gateable. **No se modifica `tg_sanitary_events_gating`.**
 
 ---
 
-## 6. Gate 1 (security_analyzer modo `spec`) — APLICA
+## 6. Gate 1 (security_analyzer modo `spec`) — APLICA y DEBE RE-CORRERSE
 
-**Conclusión: esta feature requiere Gate 1 antes de Puerta 1.** Es SCHEMA-SENSITIVE: el delta de la 0056 toca el **trigger de gating** (defensa en profundidad ADR-021) de una tabla de evento + datos que alimentan analytics regulado (SENASA). Igual que spec 03, el Gate 1 debe verificar:
-- que `assert_data_keys_enabled` sigue **fail-closed** tras sumar la rama de castración (no se introdujo un early-return fail-open);
-- que el binding `castracion`↔destino (`event_type='treatment'` + marcador) **no** abre un bypass (un `treatment` curativo legítimo no debe quedar accidentalmente bloqueado, ni un evento de castración debe poder esquivar el gating cambiando `product_name`);
-- que el trigger conserva `revoke execute` (no se expone como RPC);
-- que no se agregó ninguna policy/función que cruce tenants.
+El PASS del 2026-06-01 auditó el delta viejo (data_key + rama de gating) que ya no existe. Esta versión es SCHEMA-SENSITIVE por el delta de §4 (triggers SECURITY DEFINER sobre `animal_profiles`/`animals` + columna que alimenta la frontera de sync). Gate 1 debe verificar como mínimo:
 
-> **Si Gate 1 concluyera que NO aplica**: no es el caso. Hay delta de gating (trigger) sobre tabla de evento + binding nuevo → Gate 1 aplica. No es un puro delta de seed inerte (eso solo —agregar la fila de `field_definitions`— no gatillaría Gate 1; pero la rama de gating del trigger sí). Documentado para no saltearlo.
+> ⚠ **RE-CHEQUEO PUNTUAL PENDIENTE (lo lanza el leader):** el PASS del 2026-06-11 auditó la propagación de §4.2(4) **sin pre-filtro** (versión que abortaba fail-closed). El fold de LIM-2 (Puerta 1, 2026-06-11) cambió ese trigger: pre-filtro que espeja `rodeo_check` + `RAISE LOG`. Delta acotado a esa función — el re-chequeo puede ser puntual (ítem 1 abajo, actualizado). La observación automática de §3.5 NO agrega superficie (tabla/RLS/stream as-built de 0034).
 
----
-
-## 7. Offline-first y performance de N mutaciones
-
-**Todo offline (R10.1).** El armado del conjunto, el preview y el `applyBulkOperation` corren sobre la copia local de PowerSync (SQLite) sin red. Los N eventos se insertan localmente (cada uno una mutación PowerSync) y se encolan; al volver la red, PowerSync sincroniza. Reusa exactamente el camino de carga individual de spec 02 (R13.2) — no hay un canal de sync especial para "bulk".
-
-**Mutaciones independientes, no atómicas (R10.2).** Cada uno de los N eventos es una mutación PowerSync independiente. Si la sync falla a mitad, los que entraron quedan; **no** se hace rollback de los exitosos (sería peor offline — context). No se usa una transacción única ni un RPC "bulk transaccional".
-
-**Idempotencia / no-duplicación (R6.x).** `bulk-idempotency.ts` define una clave idempotente por **(animal_profile_id, tipo de operación, fecha de la operación)**. Mecanismo de **dos barreras** (la segunda es obligatoria, M2 Gate 1 s21):
-- **Barrera 1 (skip-and-report, primera línea):** al armar el conjunto, se excluyen (skip `already_applied`, R6.2) los animales que **ya tienen** un evento de esa operación en esa fecha (query local: ej. para vacunación masiva, ¿existe `sanitary_events` con `event_type='vaccination'` + `product_name` de la op + `event_date` = fecha de la op + `deleted_at IS NULL` para ese animal?). El criterio exacto de "mismo evento" lo afina el implementer por operación; la propiedad requerida es: **re-ejecutar la misma op sobre el mismo animal en la misma fecha no crea un segundo evento** (R6.1, R6.3).
-- **Barrera 2 (id determinístico — OBLIGATORIO, barrera dura):** el `id` (PK) de cada evento se genera **cliente-side de forma determinística** (UUIDv5 sobre un namespace fijo + la clave `(animal_profile_id, tipo de operación, fecha de la operación)`; ver ADR-012). Así, dos syncs concurrentes del **mismo evento lógico** (ej. dos dispositivos del mismo operario aplicando la op offline en paralelo) generan el **mismo UUID** → colisionan en la **PK existente** de la tabla de evento → Postgres/PowerSync trata la segunda como la misma fila (no inserta un duplicado). Esto da dedup **a nivel DB vía la PK ya existente**, **sin** unique constraint nuevo. **No es opcional ni "a elección del implementer"**: el id determinístico es la barrera que cierra el escenario concurrente que la barrera 1 (skip local) no ve hasta sincronizar.
-
-> **Nota**: el MVP no agrega un unique constraint DB de idempotencia adicional (sería un delta de schema sobre tablas de spec 02 con riesgo de falsos positivos en cargas individuales legítimas — ej. dos vacunas el mismo día). No hace falta: la **PK con id determinístico** ya es la barrera DB (dos eventos lógicamente idénticos colapsan en la misma PK; dos vacunas legítimas el mismo día tendrían distinta clave si la op las distingue, o se cargan por el flujo individual que no usa esta clave). Documentado como límite consciente.
-
-**Performance / volumen (R10.5).** Un rodeo grande = cientos a miles de animales → cientos a miles de mutaciones. Estrategia:
-- generar las mutaciones en **batches** (ej. chunks de ~100) con `requestIdleCallback`/`InteractionManager` para no bloquear el hilo de UI;
-- mostrar progreso ("generando N eventos…") durante el armado y "X de N sincronizados" durante la sync (R10.4);
-- el encolado en PowerSync ya hace el upload incremental — no se fuerza un upload sincrónico.
-
-**Reporte de rechazos por animal (R10.3).** Si un evento es rechazado al sincronizar (gating capa 2, tenant-check, race), se reusa el path de error de sync de spec 09 R11.5 (captura el error de sync, lo hace visible al operario con contexto), agregado por animal: la pantalla de progreso lista los animales cuyo evento falló + el motivo, y el contador "X de N" refleja los que sí entraron. Nada se descarta en silencio.
+1. **No-loop** del trío write-through/propagación/recompute (§4.2): guards `IS DISTINCT FROM` en ambos sentidos; cero recursión. **Interacción real con los triggers as-built de `animal_profiles`** *(prosa corregida por Gate 1 v2 M1 — la versión anterior afirmaba "sin interacción", falso)*: los de 0030 (history), 0040 (override) y 0054 (teeth-gating) no escuchan `OF is_castrated`/`future_bull`, y el 0079-force no incluye estas columnas; **pero los tres checks de 0021 (`animal_profiles_identity_check`, `animal_profiles_rodeo_check`, `animal_profiles_category_check`) son `BEFORE INSERT OR UPDATE` SIN lista de columnas → disparan en TODOS los UPDATEs de `is_castrated`/`future_bull`**, incluidos los N de la masiva y los anidados de la propagación (§4.2(4)). Son re-validaciones idempotentes que no escriben otras tablas → el no-loop se sostiene igual. El punto de aborto que esto creaba (`rodeo_check` exige `rodeos.active = true AND deleted_at IS NULL`) quedó **resuelto por decisión de Raf en Puerta 1 (2026-06-11): TOLERAR-Y-SALTEAR** — la propagación de §4.2(4) lleva un **pre-filtro** que espeja el predicado exacto de `rodeo_check`, de modo que los UPDATEs anidados nunca alcanzan un perfil con rodeo muerto: la castración aplica en el perfil propio + perfiles con rodeo vivo, saltea el huérfano (queda stale — inconsistencia aceptada, requirements §Limitaciones LIM-2) y deja `RAISE LOG`. **Verificar en el re-chequeo puntual**: que el pre-filtro espeja 0021 sin desviación (mismo predicado → mismo conjunto que NO abortaría), que el skip no abre escritura sobre perfiles que la versión anterior tampoco tocaba con éxito, y que el `RAISE LOG` no filtra datos sensibles cross-tenant (solo ids + count). Caso testeado en T-DB.4(e).
+2. **Análisis de poder del write-through** (§4.2): que el UPDATE perfil→animals no exceda lo que `animals_update` (0071) ya concede; nuance del animal compartido documentada y aceptada.
+3. **Orden alfabético de triggers BEFORE** en `animal_profiles` (normalize de §4.1 después del force de 0079) — que la suposición se sostenga con los nombres finales.
+4. `revoke execute` en las 4 funciones nuevas (no exponer RPCs); `SECURITY DEFINER` + `search_path` fijo.
+5. Que **no** se haya tocado `tg_sanitary_events_gating` ni el catálogo (la eliminación del delta viejo es completa), y que la vacunación masiva siga cayendo en la rama as-built fail-closed.
+6. `future_bull`/`is_castrated` en el wire de sync (`est_animal_profiles SELECT *`): no exponen datos de otro tenant (columnas de la propia fila per-establishment) — ADR-025.
+7. El reemplazo de `tg_animals_apply_castration` conserva: respeto de override, perfil activo único, `apply_auto_transition` (revocada de clientes, 0042), y no introduce camino cross-tenant (deriva de `NEW.id` de la fila real).
 
 ---
 
-## 8. Alternativas descartadas (mínimo una, `docs/specs.md`)
+## 7. Offline-first, idempotencia y performance
 
-**A. Evento colectivo único (una fila "operación masiva" + N vínculos) — DESCARTADA.** Modelar la operación como **un** registro colectivo (`bulk_operations` con `animal_count`, `config`) en vez de N eventos individuales. Descartada porque: (1) el context lo prohíbe explícitamente ("un evento por animal, NO un evento colectivo"); (2) rompe la corrección individual (R4.5 / spec 02 R6.8.1 — cada evento debe editarse/borrarse solo); (3) rompe la cronología por animal (cada animal debe ver su propio evento en su timeline, spec 02 R10); (4) las transiciones de categoría se disparan por evento individual (spec 02 R7) — un evento colectivo no las dispararía por animal; (5) sería una tabla nueva con RLS nueva (superficie de autorización extra) contra el principio de "no abrir autorización nueva". El costo de N filas es aceptable y consistente con la carga individual.
+**Todo offline (R10.1).** Armado + selección/preview + aplicar corren sobre SQLite local. Las N mutaciones usan el camino as-built de feature 15: `runLocalWrite` (CRUD plano) → CrudEntry → `uploadData` al reconectar (RLS + triggers re-validan). Sin canal especial "bulk". La castración escribe `animal_profiles` (sincronizada) — **nunca** `animals` (fuera del sync set): por eso existe el write-through de §4.2.
 
-**B. RPC `SECURITY DEFINER` "bulk" transaccional server-side — DESCARTADA.** Un RPC que reciba el conjunto + la op y haga los N inserts en una transacción atómica en el server. Descartada porque: (1) rompe offline-first (requiere red para ejecutar; el peón en la manga no la tiene — principio 3 de CLAUDE.md); (2) "todo-o-nada" es **peor** offline (context R10.2 — si falla a mitad se pierde todo); (3) abre una superficie `SECURITY DEFINER` nueva que habría que blindar (contra R9.4 y la lección SEC-HIGH-01 de spec 02); (4) duplica el gating (habría que re-implementarlo en el RPC en vez de reusar el trigger por-fila). El modelo elegido (N mutaciones PowerSync independientes + gating por trigger) es offline-first, idempotente y reusa todo el sustrato.
+**Independientes, no atómicas (R10.2).** Cada mutación es una CrudEntry; sin rollback de exitosas.
 
-**C. Tabla `castration_events` dedicada + `event_type` nuevo en el enum sanitario — DESCARTADA (para MVP).** Modelar la castración con su propia tabla o un `event_type='castration'`. Descartada para MVP porque el efecto de categoría está **pendiente de Facundo** (R5.7) y agregar tabla/enum es un delta de schema mayor que el caso de uso ("dejar el registro del evento") no justifica todavía. Se usa `sanitary_events` `event_type='treatment'` + marcador. Reabrible cuando Facundo confirme el efecto de categoría (post-MVP).
+**Idempotencia (R6.x).**
+- *Ops de evento* (vacunación, destete): dos barreras — (1) exclusión local de ya-procesados (skip `already_applied` / lista de candidatos); (2) **id UUIDv5 determinístico obligatorio** sobre `(animal_profile_id, tipo, fecha)` → colisión en PK ante syncs concurrentes, dedup a nivel DB sin constraint nuevo (M2 Gate 1 s21, conservado). Límite consciente: dos vacunas legítimas el mismo día se cargan por el flujo individual (id random) — sin falsos positivos.
+- *Castración*: idempotente por semántica (estado absoluto; re-UPDATE = no-op por valor; guards `IS DISTINCT FROM` evitan triggers de gusto; 0064 solo transiciona si target ≠ actual). Los ya castrados no son candidatos (D3).
+
+**Transiciones visibles offline (R10.6).** El espejo C6 con `is_castrated` real + eventos locales muestra la categoría nueva al instante (castración: novillito; destete: vaquillona/torito) sin esperar el recálculo server ni el sync-down. Display-only; converge al sincronizar (misma semántica que C6).
+
+**Volumen (R10.5).** Batches (~100) con `InteractionManager`/idle para no bloquear UI; progreso "generando N…" + "X de N sincronizados"; upload incremental nativo de PowerSync.
+
+**Rechazos por animal (R10.3).** Reusa el canal de status/error de `uploadData` (spec 15 R8.1: el rechazo permanente se descarta del queue y se superficia); la pantalla de progreso lo agrega por animal con motivo. Nada en silencio.
+
+---
+
+## 8. Alternativas descartadas
+
+**A. Evento colectivo único — DESCARTADA** (sin cambios): rompe corrección individual, cronología por animal, transiciones por evento; tabla+RLS nuevas. El context lo prohíbe.
+
+**B. RPC `SECURITY DEFINER` bulk transaccional — DESCARTADA** (sin cambios): rompe offline-first; todo-o-nada es peor offline; superficie definer nueva; duplica gating/RLS.
+
+**C. Castración como evento sanitario con marcador (`event_type='treatment'` + `product_name='Castración'`) — el diseño ANTERIOR de esta misma spec, DESCARTADA por Gate 0 v2 (D10).** Motivos: (1) doble fuente de verdad (evento + `is_castrated`) con drift posible; (2) exigía data_key + rama de gating + normalización de marcador (los findings H1/M1/L1 del Gate 1 s21 fueron costo directo de esa complejidad); (3) "des-castrar" no tiene evento natural → la corrección quedaba asimétrica; (4) la historia ya queda en `animal_category_history` (origen del timeline) sin ruido. El estado editable es más simple, reversible y honesto con el modelo físico (0060).
+
+**D. CHECK declarativo para `future_bull` solo-machos — DESCARTADA** a favor del trigger de normalización (§4.1): un CHECK sobre `animal_sex` denormalizado haría fallar la propagación de identidad de 0079 ante una corrección de sexo sobre un perfil con `future_bull=true`; el trigger normaliza silencioso (fail-safe) y además implementa el auto-clear al castrar en el mismo lugar.
+
+**E. Sincronizar `animals` (stream `est_animals`) en vez de denormalizar `is_castrated` — DESCARTADA**: `animals` es global sin `establishment_id` único → no entra al modelo JOIN-free (ADR-026, PSYNC_S2305); reabriría la frontera de sync entera por una columna. La denorm 0079-style es el patrón ya validado.
+
+**F. Forzar `is_castrated` también en UPDATE (0079 estricto) + write-path vía RPC/outbox — DESCARTADA**: mataría el único write-path offline simple (CRUD plano sobre la tabla sincronizada, patrón validado en feature 15) y obligaría a un outbox tipo `register_birth` para un UPDATE trivial. El force-en-UPDATE protege identidad inmutable; `is_castrated` es editable por diseño (0060) y su escritura ya está autorizada as-built (0071).
 
 ---
 
 ## 9. Decisiones abiertas / coordinación
 
-| # | Tema | Default propuesto | Quién confirma |
+| # | Tema | Estado / default | Quién confirma |
 |---|---|---|---|
-| D1 | **Efecto de categoría de la castración** (R5.7) | NO se implementa en MVP; opciones (novillo / solo sanitario / novillo→invernada) listadas sin elegir | Facundo (CONTEXT/07) |
-| D2 | **Transición de destete masivo** (R5.5) | Evento `weaning` se crea; transición de categoría es Tier 2 DEFERIDO (targets `ternera→vaquillona`, `ternero→torito` a confirmar) | Facundo (spec 02 DEFERIDO Tier 2) |
-| D3 | **Marca en la madre al destetar** | Fuera de MVP; no se implementa | Facundo |
-| D4 | **Marcador de castración en `sanitary_events`** (§2.1, §4) | **CERRADO (Gate 1 s21)**: marcador canónico constante `event_type='treatment'` + `product_name='Castración'` seteado programáticamente por la op masiva; trigger compara robusto a acento/caso (`translate()` portable, `unaccent` no disponible). Defensa en profundidad, no frontera de authz. Ya NO a elección del implementer | cerrado |
-| D5 | **Idempotencia: cliente vs unique DB** (§7) | **CERRADO (Gate 1 s21)**: id determinístico (UUIDv5 sobre `(animal, tipo, fecha)`) **obligatorio** → dedup por la PK existente, sin unique constraint nuevo. El skip-and-report es la primera línea. Ya NO "opcional/según implementer" | cerrado |
-| D6 | **Numeración de la migration** (`0056_..` está TOMADO; última as-built = 0058) | El implementer fija la siguiente libre (≥ `0059`) tras la última migration mergeada | implementer |
-| D7 | **`created_by` no-spoofeable en las tablas de evento** (H2, Gate 1 s21) | **BACKLOGGED, fuera de spec 10.** Forzar `created_by` con `tg_force_created_by_auth_uid` (como `sessions` 0050 / `animal_profiles` 0043) en `sanitary_events`/`reproductive_events`/etc. es una decisión arquitectónica **transversal** (afecta specs 02/03/09 — todas las tablas de evento). Riesgo actual: atribución **intra-tenant** spoofeable (SEC-SPEC-03), **NO** cross-tenant. Spec 10 lo hereda, no lo arregla | Raf (backend transversal) |
+| D1 | Efecto de categoría de la castración | **CERRADO as-built** (0059/0062/0064: torito→novillito, toro→novillo, corte 730d) | cerrado (Facundo, sesión Tier 2 2026-06-03) |
+| D2 | Transición de destete | **CERRADO as-built** (0062/0063: ternera→vaquillona, ternero→torito/novillito) | cerrado |
+| D3 | Marca en la madre al destetar | Fuera de MVP de esta spec (`nursing` as-built 0061/0067 es de spec 02) | — |
+| D4 | Marcador de castración | **ELIMINADO** (Gate 0 v2 D10 — alternativa §8.C) | cerrado |
+| D5 | Idempotencia ops de evento | id UUIDv5 obligatorio (M2 s21, vigente para vacunación/destete) | cerrado |
+| D6 | **Numeración de migraciones** | TBD al implementar: as-built en disco = 0083 → siguiente libre ≥0084, verificar también remoto/terminales paralelas | implementer + leader |
+| D7 | `created_by` no-spoofeable en tablas de evento | BACKLOGGED transversal (SEC-SPEC-03) — sin cambios | Raf |
+| D8 | Normalización silenciosa de `future_bull` (vs raise) | **VALIDADA tal cual** (Raf, Puerta 1 2026-06-11) | cerrado |
+| D9 | Exclusión-de-lista como skip-equivalente en destete cross-rodeo (R7.2) + lista de destete = solo `ternero`/`ternera` sin weaning (R11.4) | **VALIDADA tal cual** (Raf, Puerta 1 2026-06-11) | cerrado |
+| D10 | Nota de reconciliación en spec 02 Tier 2 (RT2.2.6 superseded por el recompute simétrico) | Pendiente — la coordina el leader al implementar (no se editan docs de spec 02 desde esta spec) | leader |
+| D11 | Umbral de búsqueda (~20) y variante compacta de `AnimalRow` (≥56px) | Lockeado el patrón (Gate 0 v2 D11); constante exacta y tokens = design system | implementer/design system |
+| D12 | LIM-1: observación automática al castrar/revertir (R13.7, §3.5; copy "Castrado" / "Corrección: marcado como no castrado") | **DECIDIDA por Raf** (Puerta 1 2026-06-11) | cerrado |
+| D13 | LIM-2: propagación tolerar-y-saltear (pre-filtro espejo de `rodeo_check`, §4.2(4); `RAISE LOG`, sin skip-report UI) | **DECIDIDA por Raf** (Puerta 1 2026-06-11) — ⚠ re-chequeo puntual de Gate 1 pendiente (leader) | cerrado (Gate 1 puntual pendiente) |
 
 ---
 
-## 10. Trazabilidad design → requirements (resumen)
+## 10. Trazabilidad design → requirements
 
-- §1.1 (cliente) → R1.x, R2.x, R4.x, R5.6, R10.x
-- §2 (destinos + filtro candidatos) → R3.x, R1.3
-- §3 (lógica de aplicación, skip-and-report, gating cliente, override) → R4.x, R5.6, R7.1, R7.2
-- §4 (delta `castracion` + gating) → R3.3, R5.7, R7.3
-- §5 (RLS/seguridad, roles, created_by, tenant) → R9.1, R9.2, R9.3, R9.4
+- §1.1 (cliente/rutas/componentes) → R1.x, R2.x, R11.x, R12.2–R12.3, R13.1
+- §2 (destinos + candidatos) → R3.x, R1.3, R11.2, R11.4, R4.1
+- §3.1 (vacunación) → R4.1–R4.4, R6.2
+- §3.2 (selección explícita) → R11.1–R11.9, R5.6, R10.6
+- §3.3 (ficha) → R13.1, R13.2, R12.2–R12.4
+- §3.4 (gating capa 1) → R1.5, R1.6, R7.1, R7.2
+- §3.5 (observación automática) → R13.7, R3.3, R13.2
+- §4.1 (`future_bull`) → R12.1, R12.4
+- §4.2 (denorm + write-through) → R13.3, R13.4, R9.2
+- §4.3 (recompute simétrico) → R13.5, R5.7
+- §4.4 (schema cliente + espejo) → R13.6, R10.6
+- §5 (RLS/roles/created_by) → R9.1–R9.4
 - §6 (Gate 1) → condición de Puerta 1
-- §7 (offline + idempotencia + performance + reporte) → R6.x, R10.x
-- §8/§9 (alternativas + decisiones abiertas) → R3.4, R5.5, R5.7, R6.1
+- §7 (offline/idempotencia/performance) → R6.x, R10.x
+- §8/§9 (alternativas + abiertas) → R3.3, R3.4, R12.1, R13.4
+
+---
+
+## Changelog
+
+- **2026-06-01 (s21)**: diseño original — castración como evento-marker + data_key `castracion` + rama de gating; transiciones TENTATIVAS pendientes de Facundo; archivos cliente sobre nombres especulativos (`AnimalListItem`, screens/), frontend de spec 02 "en vuelo".
+- **2026-06-01 (s21, Gate 1 fix-loop)**: H1 (nombre real del trigger), H2 (`created_by` spoofeable, verdad documentada), M1 (marcador canónico robusto), M2 (UUIDv5 obligatorio), L1 (seed por `.code`).
+- **2026-06-11 — RECONCILIACIÓN COMPLETA**: (a) **Gate 0 v2**: castración → estado editable sin evento (se eliminan data_key/gating/marcador — H1/M1/L1 sin objeto); pantalla de selección explícita (§3.2); `future_bull` (§4.1); denorm `is_castrated` + write-through (§4.2, cierra F1 de C6); recompute simétrico (§4.3); alternativas C–F nuevas. (b) **Staleness**: destete transiciona as-built (0062/0063); efecto de castración cerrado as-built (0059/0064); límite real del gating DB (0054 no gatea weaning); archivos/rutas reconciliados al as-built Expo Router + `AnimalRow`; C1–C4 DONE; offline reconciliado a spec 15 (CRUD plano, sync streams, canal de error de upload); numeración de migraciones ≥0084 TBD. Gate 1 y Puerta 1 reseteados.
+- **2026-06-11 — Fix-loop Gate 1 v2 (PASS 0H/2M/3L — folds documentales)**: **M1** — corregida la afirmación falsa "sin interacción con triggers as-built" en §6.1 y §4.2 (los checks de 0021 son BEFORE sin lista de columnas, disparan en cada UPDATE; `rodeo_check` puede abortar fail-closed la propagación hacia un perfil con rodeo inactivo/soft-deleted); **M2** — §3.3 ya no afirma que el timeline muestra el cambio en `ternero` (sin transición no hay registro; limitación en requirements §Limitaciones); **L1** — aserción del orden de triggers contra `pg_trigger` agregada a T-DB.4(f). Sin cambios de diseño.
+- **2026-06-11 — Fix-loop #2 (Puerta 1 APROBADA por Raf — LIM-1/LIM-2 foldeadas)**: **LIM-1 → observación automática** (nueva §3.5: reuso `addObservation` as-built, copy "Castrado" / "Corrección: marcado como no castrado", 2 CrudEntries/animal en la masiva, 1+1 en ficha, independencia sin atomicidad como residual; §1.1/§3.2/§3.3 actualizados; cero superficie de seguridad nueva). **LIM-2 → tolerar-y-saltear**: la propagación de §4.2(4) gana un **pre-filtro** que espeja el predicado exacto de `rodeo_check` (0021) — elegido sobre manejo de excepción por ser set-based, determinístico y no enmascarar otros 23514 legítimos; `RAISE LOG` server-side como visibilidad mínima (sin skip-report UI — cross-tenant); párrafo M1 de §4.2 y §6.1 reescritos a la semántica de skip; ⚠ banner de **re-chequeo puntual de Gate 1** agregado en §6 (lo lanza el leader). §9: D8/D9 validadas tal cual; D12/D13 nuevas (decisiones de Puerta 1).
