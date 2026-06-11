@@ -75,7 +75,7 @@
 
 - **T8.g — ABORTO revierte.** [ ] vaquillona + tacto+ → `vaquillona_prenada`; + `abortion` → `vaquillona` (RT2.7.3); una `multipara` + `abortion` → sigue `multipara` (RT2.7.4); aborto con `override=true` → sin cambio (RT2.7.6). — **RT2.7.3, RT2.7.4, RT2.7.6.**
 
-- **T8.h — CASTRACIÓN (cambio de `is_castrated`).** [ ] `torito` + set `animals.is_castrated=true` → `novillito` (RT2.2.3); `toro` (≥2 años) + castrar → `novillo` (RT2.2.4); `ternero` + castrar → sigue `ternero` hasta el destete (RT2.2.2); castrar con `override=true` → sin cambio (RT2.2.5); `true→false` no revierte `novillito→torito` (RT2.2.6); el cambio quedó en `animal_category_history` como `auto_transition` (RT2.10.4). — **RT2.2.x, RT2.10.4.**
+- **T8.h — CASTRACIÓN (cambio de `is_castrated`).** [ ] `torito` + set `animals.is_castrated=true` → `novillito` (RT2.2.3); `toro` (≥2 años) + castrar → `novillo` (RT2.2.4); `ternero` + castrar → sigue `ternero` hasta el destete (RT2.2.2); castrar con `override=true` → sin cambio (RT2.2.5); `true→false` **AHORA revierte** `novillito→torito` (RT2.2.6 SUPERSEDED por spec 10: recompute simétrico `0086` — ver requirements RT2.2.6); el cambio quedó en `animal_category_history` como `auto_transition` (RT2.10.4). — **RT2.2.x, RT2.10.4.**
 
 - **T8.i — CRÍA AL PIE (`nursing`).** [ ] madre + `birth` (con calf) → `nursing=true` (RT2.9.1); destetar al ternero (`weaning` sobre el perfil del ternero) → madre `nursing=false` (RT2.9.1); verificar que cambiar `nursing` NO cambió `category_id`/`rodeo_id`/`management_group_id` (RT2.9.2); borrar el destete → madre vuelve `nursing=true`; borrar el parto → `nursing=false` (RT2.9.3). — **RT2.9.x.**
 

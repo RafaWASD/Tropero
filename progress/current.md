@@ -44,15 +44,54 @@ misma suite e2e + misma DB beta).
   - Diff sin commitear (DISJUNTO del ítem 2): `ProfileContext.tsx`, `mas.tsx`, `rodeos.spec.ts` (+
     hunks no adyacentes en `backlog.md`).
 
-## Pendiente: puerta de código de Raf
+## Ítems 2 y 3 — COMMITEADOS (4 commits, working tree limpio)
 
-Ítem 2 + ítem 3 los dos done+gateados, working tree sin commitear. Commits propuestos (archivos disjuntos):
-1. **fix(eventos): estado reproductivo determinístico el mismo día** — events.ts, local-reads.ts,
-   event-timeline.ts (+2 tests), spec15 design, backlog (flake-repro ✅ + created_by MED).
-2. **fix(perfil): ProfileContext re-evalúa tras first-sync + aterrizaje optimista del saludo** —
-   ProfileContext.tsx, mas.tsx, backlog (ProfileContext ✅ + 2 LOW).
-3. **test(e2e): rodeos espera persistencia server-side (offline-first)** — rodeos.spec.ts.
-(backlog.md tiene hunks de los 3 → staging selectivo al commitear.)
+- `fc193e1` fix(eventos): estado reproductivo determinístico el mismo día
+- `9c46f77` fix(perfil): ProfileContext re-evalúa tras first-sync + aterrizaje optimista del saludo
+- `453dbc5` test(e2e): rodeos espera persistencia server-side del rodeo
+- `78c1808` docs: reconcilia backlog y progress de la sesión
+(Sin pushear todavía — Raf pushea.)
+
+## Próximo: SPEC 10 (operaciones-rodeo) — casi lista para implementar
+
+- **Gate 1 puntual del delta LIM-2: PASS** (2026-06-11, `progress/security_spec_10-lim2-rechequeo.md`,
+  0 HIGH/0 MED/3 LOW al backlog). Era el último item leader-owned (el fold de LIM-2 cambió el trigger
+  de propagación §4.2(4) tras el PASS original — re-chequeado: el pre-filtro espeja `rodeo_check` 0021
+  fiel, no crece el poder de escritura, LOG sin leak cross-tenant, no-loop intacto).
+- **DISCREPANCIA DE FUENTES detectada y pendiente de confirmar con Raf**: `design.md §9` + `current.md`
+  dicen que Raf aprobó la **Puerta 1 de la v2 el 2026-06-11** (D8 normalización silenciosa future_bull,
+  D9 exclusión-de-lista en destete, D12/LIM-1 observación automática al castrar, D13/LIM-2 propagación
+  tolerar-y-saltear); `feature_list.json` quedó **stale** ("PENDIENTE PUERTA 1"). Evidencia fuerte a
+  favor de "aprobada", pero al ser gate humano se confirma con Raf antes de implementar la DB de prod.
+  → al confirmar: reconciliar el note de `feature_list.json` (id 10) + arrancar la implementación.
+- **Puerta 1 v2 CONFIRMADA por Raf** (2026-06-11) → `feature_list.json` id 10 reconciliado.
+
+### Chunk backend delta (Fase 1) — DONE + GATEADO, esperando Puerta 2 de Raf
+
+3 migraciones **aplicadas al remoto** (vía `scripts/apply-migration.mjs` = Management API `database/query`,
+como 0068-0083; el ledger de `apply_migration` no las registra — disco es la fuente de verdad):
+- `0084_denormalize_is_castrated.sql` (§4.2): columna espejo + backfill + force-INSERT + write-through
+  perfil→animals + propagación animals→perfiles con pre-filtro rodeo-vivo (espejo literal de
+  `rodeo_check` 0021) + `RAISE LOG` del skip (LIM-2 tolerar-y-saltear) + revokes.
+- `0085_future_bull.sql` (§4.1): columna + trigger normalize (no-macho/castrado→false, silencioso).
+- `0086_castration_recompute_symmetric.sql` (§4.3): reemplazo del cuerpo de `tg_animals_apply_castration`
+  con guard dirección-agnóstico → el revert `true→false` AHORA recompute (novillito→torito).
+- **Orden invertido vs el §-orden del design** (0084 is_castrated ANTES de 0085 future_bull): el trigger
+  normalize lee `new.is_castrated` → la columna tiene que existir primero (si no 42703). Reconciliado en
+  design+tasks de spec 10.
+- Suite `supabase/tests/operaciones_rodeo/run.cjs` (21 casos, contra el remoto) enganchada en
+  `run-tests.mjs`. T-DB.4(e) skip rodeo muerto + T-DB.4(f) orden de triggers vs `pg_trigger` incluidos.
+- Gates: **reviewer APPROVED** (`progress/review_10-backend-delta.md`) + **Gate 2 PASS 0 HIGH/0 MED**
+  (`progress/security_code_10-backend-delta.md`; pre-filtro verificado literal vs 0021 en disco Y en el
+  remoto, revokes efectivos en vivo). check.mjs exit 0.
+- **D10 reconciliado (leader)**: spec 02 Tier 2 (RT2.2.6 en requirements/design/tasks) marcado
+  SUPERSEDED por 0086 (revert ahora recompute). 1 aserción de `tests/animal/run.cjs` (T2.27→torito)
+  ajustada por el implementer (cambio de comportamiento por diseño).
+- LOW: comentario cosmético en `0086:48` (dónde se emitió el revoke) — al backlog si se toca.
+
+### Próximo (al cerrar Puerta 2): frontend de spec 10
+Fase 2 (utils puros) → Fase 3 (services + hooks PowerSync) → Fase 4 (UI: selección explícita checkbox,
+ficha castrado/futuro-torito, vista de grupo rodeo-céntrica). Diseño pasa por el skill design-review.
 
 > El fix de centrado robusto (ADR-027 + CenteredRow + crear-rodeo + skill design-review +
 > design-system) YA fue commiteado por su terminal dueña: `877e484` (2026-06-11). Working tree limpio.

@@ -53,9 +53,12 @@ Este delta materializa esa máquina completa en backend, manteniendo **consisten
 > ⚠ **SUPERSEDED por spec 10 v2 (2026-06-11, Gate 0 v2 D10 + R13)**: Raf decidió que el castrado es un
 > estado EDITABLE y REVERSIBLE — el revert `true → false` ahora SÍ dispara recompute (transición
 > automática de vuelta, p. ej. `novillito → torito`), implementado por el **recompute simétrico** del
-> delta backend de spec 10 (reemplazo de `tg_animals_apply_castration`, migraciones ≥0084). Esta
-> cláusula queda vigente SOLO hasta que ese delta se aplique. Trazabilidad:
-> `specs/active/10-operaciones-rodeo/context-v2-seleccion.md` (D10) + su `design.md` §4.2.
+> delta backend de spec 10 (reemplazo de `tg_animals_apply_castration`, migraciones ≥0084).
+> **✅ EL DELTA YA SE APLICÓ (2026-06-11): migración `0086_castration_recompute_symmetric.sql`** (reviewer
+> APPROVED + Gate 2 PASS). RT2.2.6 queda **HISTÓRICA/SUPERSEDED**: el revert `true → false` AHORA dispara
+> el recompute simétrico (`novillito → torito`, `novillo → toro`), respetando `category_override` (RT2.2.5
+> sigue vigente) y registrando en `animal_category_history` como `auto_transition`. Trazabilidad:
+> `specs/active/10-operaciones-rodeo/design.md` §4.3 + `tasks.md` T-DB.3/T-DB.5 + `progress/impl_10-backend-delta.md`.
 
 ---
 

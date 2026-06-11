@@ -17,6 +17,14 @@ No es un sustituto de `feature_list.json` ni de los ADRs — es la antesala dond
 
 ## Ítems pendientes
 
+## 2026-06-11 — 3 LOW del Gate 1 puntual de spec 10 (LIM-2, no bloqueantes)
+
+**Origen**: Gate 1 puntual (security_analyzer, spec mode) del delta LIM-2 de spec 10, `progress/security_spec_10-lim2-rechequeo.md`. PASS 0 HIGH/0 MED. 3 LOW para el momento de implementar/Gate 2:
+- **L1** — race READ COMMITTED: si un rodeo se desactiva entre el scan del UPDATE de propagación y el BEFORE `rodeo_check` de esa fila, la cadena puede abortar igual (fail-closed, comportamiento viejo ya auditado, visible vía R10.3). Dirección fail-safe. Sin acción.
+- **L2** — `v_skipped` del `RAISE LOG` puede contar perfiles soft-deleted del animal (ni el UPDATE ni el count filtran `ap.deleted_at`, coherente con 0079(3)). Exactitud cosmética del log; opcional anotar "incluye soft-deleted" al implementar T-DB.2.
+- **L3** — perfiles soft-deleted con rodeo vivo SÍ se actualizan (pre-existente, idéntico a 0079). Defendible. Sin acción.
+Verificar L2 al redactar la migración real (Gate 2 sobre T-DB.2 reproduce el predicado literal de 0021).
+
 ## 2026-06-11 — 2 LOW del Gate 2 del fix ProfileContext first-sync (no bloqueantes)
 
 **Origen**: Gate 2 (security_analyzer, code mode) del fix de e2e rojos (Run e2e-rojos-fix), `progress/security_code_e2e-rojos-fix.md`.

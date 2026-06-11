@@ -314,6 +314,8 @@ notify pgrst, 'reload schema';
 
 `is_castrated` vive en `animals`; la categoría en `animal_profiles`. El trigger reacciona al cambio de `is_castrated` sobre `animals` y aplica la transición sobre el **perfil activo** de ese animal. Para `ternero`/`ternera` no hace nada (RT2.2.2: el efecto se difiere al destete, que ya lo maneja `compute_category` leyendo `is_castrated`). Para `false→true` sobre `torito`/`toro` aplica `novillito`/`novillo`. Para `true→false` no revierte (RT2.2.6).
 
+> ⚠ **SUPERSEDED por spec 10 (aplicado 2026-06-11, migración `0086_castration_recompute_symmetric.sql`)**: el cuerpo de `tg_animals_apply_castration` se reemplazó por un guard **dirección-agnóstico** (`IS NOT DISTINCT FROM` → return), de modo que el revert `true → false` AHORA recompute simétricamente (`novillito → torito`, `novillo → toro`). El bloque SQL de abajo es el diseño ORIGINAL de `0064` (asimétrico) — vigente hasta el reemplazo de spec 10. La cláusula "true→false no revierte (RT2.2.6)" queda HISTÓRICA. Ver `specs/active/10-operaciones-rodeo/design.md` §4.3 + `progress/impl_10-backend-delta.md`.
+
 ```sql
 -- 0064_castration_transition.sql — efecto de categoría de is_castrated (DD-2).
 create or replace function public.tg_animals_apply_castration ()
