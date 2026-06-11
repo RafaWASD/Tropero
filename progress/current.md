@@ -3,10 +3,11 @@
 > Este archivo se vacía al cerrar cada sesión y su resumen se mueve a `history.md`.
 > Mientras trabajás, **mantenelo actualizado en tiempo real**, no al final.
 
-(sin sesión activa — la última cerró el 2026-06-11; ver `history.md`)
+(sin sesión activa — las últimas cerraron el 2026-06-11; ver `history.md`)
 
-> ⚠️ Nota de coordinación al arrancar: el working tree puede tener trabajo SIN COMMITEAR de otra
-> terminal (ADR-027 centrado robusto + CenteredRow + crear-rodeo.tsx + skill design-review +
-> design-system.md) — NO es de la sesión cerrada; lo commitea su terminal dueña.
+> El fix de centrado robusto (ADR-027 + CenteredRow + crear-rodeo + skill design-review +
+> design-system) YA fue commiteado por su terminal dueña: `877e484` (2026-06-11). Working tree limpio.
 > Próximo recomendado: IMPLEMENTAR SPEC 10 (spec_ready, Puerta 1 aprobada, Gate 1 PASS, delta
 > backend ≥0084). Paralelo colisión-safe: redactar spec 11.
+> Follow-up menor: `CenteredRow` aún sin usar en pantallas → su 1er uso = migrar "Crear lote nuevo"
+> de `animal/[id].tsx` (post-C6).
