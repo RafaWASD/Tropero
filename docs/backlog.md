@@ -17,6 +17,22 @@ No es un sustituto de `feature_list.json` ni de los ADRs — es la antesala dond
 
 ## Ítems pendientes
 
+## 2026-06-11 — 2 LOW del Gate 2 de C6 (clase baseline, no bloqueantes)
+
+Del reporte `progress/security_code_02-c6-categoria-espejo.md`: (1) `err.message` crudo de SQLite
+local puede llegar a la card del revert vía `kind:'unknown'` — patrón baseline de `local-query.ts`,
+no cruza trust boundary; unificar copy cuando se toque esa capa. (2) stale-auth en replay del revert
+offline — clase ya aceptada en spec 15 (el server falla cerrado al subir). Sin acción inmediata.
+
+## 2026-06-11 — `deriveCurrentState` desempata por UUID random los eventos repro del mismo día sin `created_at` (flake offline)
+
+**Origen**: chunk C6 (espejo de categoría), re-verificando los e2e de events. El espejo de CATEGORÍA (badge) ya quedó robusto al caso offline (desempate por índice de array, RC6.1.4); el espejo de ESTADO REPRODUCTIVO (`deriveCurrentState` en `app/src/utils/event-timeline.ts`, la fila "Estado reproductivo: Preñada/Vacía") NO.
+**Qué**: cuando dos eventos repro determinantes de preñez (tacto/birth/abortion) caen el MISMO `event_date` y ambos tienen `created_at = null` (caso REALISTA: se cargan offline por CRUD plano y el trigger sella el `created_at` recién al subir), `isNewerRepro` cae al desempate por `eventId` — que es un UUID v4 RANDOM → ~50/50 cuál "gana". Efecto: tras un PARTO o un ABORTO cargado offline el mismo día que el tacto previo, la fila "Estado reproductivo" muestra "Preñada" en vez de "Vacía" la mitad de las veces. El BADGE de categoría YA quedó correcto con C6 (deriva por índice de array); solo la fila de estado reproductivo arrastra el bug.
+**Evidencia**: `events.spec.ts` tests "parto en hembra PREÑADA → Vacía" (rojo crónico en HEAD) y "aborto → Vacía" (verde/rojo intermitente según el UUID). Con C6 el badge de esos tests transiciona bien ("Vaca segundo servicio" / la categoría correcta); falla SOLO el `getByText(/^Vacía · /)`.
+**Por qué importa**: es la misma clase de bug que C6 resolvió para categorías, en un módulo vecino; deja 1-2 e2e crónicamente flaky (la suite es el oráculo de regresión) y, en campo, muestra "Preñada" a una vaca que acaba de parir/abortar offline hasta el sync.
+**Fix sugerido**: en `isNewerRepro` (event-timeline.ts), cuando `event_date` empata y `created_at` falta/empata en ambos, desempatar por la POSICIÓN en el timeline ya ordenado (`parseTimeline` ordena por día desc + createdAt desc) en vez de por `eventId` — espejo del fix de índice de array del espejo de categoría (RC6.1.4). O, de fondo: que las escrituras locales de evento (events.ts) seteen un `created_at` de cliente provisional. Fuera de scope de C6 (otro módulo, otra superficie).
+**Próximo paso sugerido**: run chico (otro modelo) sobre `event-timeline.ts` + sus tests unit + re-verificar los 2 e2e. Relacionado con el triage de los 8 e2e rojos de abajo (los de events que NO eran el gap del badge).
+
 ## 2026-06-10 — 8 e2e rojos PRE-EXISTENTES en HEAD (account/events×3/profile×3/rodeos) — triage pendiente
 
 **Origen**: run T7.9 de feature 15. El implementer los reportó como pre-existentes; el reviewer lo
