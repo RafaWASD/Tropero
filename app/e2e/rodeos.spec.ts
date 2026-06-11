@@ -127,16 +127,35 @@ test('crear rodeo con un toggle destildado → la config queda con ese dato desh
   });
   expect(signErr).toBeNull();
 
-  // Rodeo recién creado del establishment.
-  const { data: rodeos, error: rErr } = await supa
-    .from('rodeos')
-    .select('id, name')
-    .eq('establishment_id', estId)
-    .eq('active', true)
-    .is('deleted_at', null);
-  expect(rErr).toBeNull();
-  expect(rodeos && rodeos.length).toBeGreaterThan(0);
-  const rodeoId = rodeos![0].id as string;
+  // Rodeo recién creado del establishment. ORÁCULO de persistencia server-side (patrón
+  // `waitForServerAnimalProfile`, helpers/admin.ts): `createRodeo` es OFFLINE-FIRST vía OUTBOX
+  // desde spec 15 (encola el intent create_rodeo + overlay optimista y devuelve al instante; la
+  // RPC real corre async cuando PowerSync DRENA la outbox). La UI ya aterrizó en home con el rodeo
+  // OPTIMISTA, pero el upload server-side puede no haber completado todavía → un read-back único
+  // race-ea con el drenado (flake: el remoto devuelve 0 filas). Polleamos hasta que la fila REAL
+  // aparezca server-side (RLS-respecting: anon + login del mismo usuario). El producto está bien
+  // (offline-first es el diseño correcto, spec 15); es el test el que no debe asumir persistencia síncrona.
+  let rodeoId = '';
+  await expect
+    .poll(
+      async () => {
+        // NO asertamos dentro del poll (un error transitorio de red abortaría el poll en vez de
+        // reintentar): un fallo o un set vacío devuelve 0 → el poll reintenta hasta el timeout.
+        const { data } = await supa
+          .from('rodeos')
+          .select('id, name')
+          .eq('establishment_id', estId)
+          .eq('active', true)
+          .is('deleted_at', null);
+        if (data && data.length > 0) {
+          rodeoId = data[0].id as string;
+          return data.length;
+        }
+        return 0;
+      },
+      { timeout: 20_000 },
+    )
+    .toBeGreaterThan(0);
 
   // El field_definition por su label (catálogo global).
   const { data: fields } = await supa
