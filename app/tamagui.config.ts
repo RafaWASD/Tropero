@@ -48,6 +48,12 @@ const palette = {
   // §4). RN/Tamagui no derivan alpha de un token de color, así que el rgba se escribe
   // acá (única fuente literal) atado por comentario a greenLight.
   fabHalo: 'rgba(147, 207, 172, 0.45)',
+  // Scrim de modales/bottom-sheets (spec 10, sheet de confirmación de la selección masiva): el negro de
+  // marca textPrimary (#0F0E0C = rgb(15,14,12)) al 45% de alpha. Es el MISMO negro translúcido — se expone
+  // como token de color propio para que el sheet lo referencie ($scrim) en vez de hardcodear la rgba
+  // (ADR-023 §4). RN/Tamagui no derivan alpha de un token de color, así que la rgba se escribe acá (única
+  // fuente literal) atada por comentario a textPrimary. JIT: lo necesitó el bottom-sheet de spec 10.
+  scrim: 'rgba(15, 14, 12, 0.45)',
   // Texto.
   textPrimary: '#0F0E0C', // negro
   textMuted: '#5C655F', // gris (labels secundarios, items inactivos del nav) — AA 5.74 sobre $bg (fix WCAG)
@@ -87,6 +93,7 @@ const tokens = createTokens({
     terracota: palette.terracota,
     greenLight: palette.greenLight,
     fabHalo: palette.fabHalo, // verde claro translúcido del halo del FAB (= greenLight @ 45%)
+    scrim: palette.scrim, // negro translúcido del scrim de modales/sheets (= textPrimary @ 45%)
     textPrimary: palette.textPrimary,
     textMuted: palette.textMuted,
     textFaint: palette.textFaint,

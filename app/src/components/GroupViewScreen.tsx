@@ -3,9 +3,11 @@
 // con useGroupView + su loader, y pasa el estado + un `onAction` + un `renderRow`. Este componente arma:
 //   - header con back,
 //   - GroupMetaHeader (tipo + nombre + cabezas),
-//   - resumen de configuración de datos (qué se gatea — Vacunar/Destetar; Castrar no se lista, R1.5),
 //   - card de acciones masivas (GroupActionsBar),
 //   - lista de animales activos (GroupAnimalsList) con el renderRow de la pantalla.
+//
+// (Sin card de "Datos que se cargan acá": era redundante con las 3 acciones del grupo de abajo —Nielsen
+//  #8—; el gating de las acciones se sigue resolviendo en group-data.ts, solo se quitó el chip visual.)
 //
 // Cero hardcode (ADR-023 §4): tokens + getTokenValue para íconos lucide. Voseo es-AR.
 
@@ -13,7 +15,7 @@ import { Platform, Pressable } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { getTokenValue, ScrollView, Text, XStack, YStack } from 'tamagui';
-import { ChevronLeft, Syringe, Milk } from 'lucide-react-native';
+import { ChevronLeft } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
 
 import { Card } from './Card';
@@ -22,7 +24,7 @@ import { GroupActionsBar } from './GroupActionsBar';
 import { GroupMetaHeader, GroupAnimalsList } from './GroupViewBits';
 import { backOr } from '../utils/nav';
 import { buttonA11y } from '../utils/a11y';
-import type { GroupAction, GroupActionsAvailability } from '../utils/group-actions';
+import type { GroupAction } from '../utils/group-actions';
 import type { GroupViewState } from '../hooks/useGroupView';
 
 export type GroupViewScreenProps<T> = {
@@ -88,8 +90,6 @@ export function GroupViewScreen<T>({
           <>
             <GroupMetaHeader icon={icon} kindLabel={kindLabel} name={name} headCount={animals.length} loading={loading} />
 
-            {actions ? <GroupConfigSummary actions={actions} /> : null}
-
             {actions ? (
               <Card gap="$3">
                 <Text fontFamily="$body" fontSize="$6" fontWeight="600" color="$textPrimary">
@@ -104,47 +104,5 @@ export function GroupViewScreen<T>({
         )}
       </ScrollView>
     </YStack>
-  );
-}
-
-/**
- * Resumen de la config: chips de los datos que gatea el grupo (Vacunación/Destete). Castrar siempre
- * disponible → NO se lista (no es dato configurable, R1.5). Si ninguna gateada → nota corta. */
-function GroupConfigSummary({ actions }: { actions: GroupActionsAvailability }) {
-  const primary = getTokenValue('$primary', 'color');
-  const chips: { Icon: LucideIcon; label: string }[] = [];
-  if (actions.vaccinate) chips.push({ Icon: Syringe, label: 'Vacunación' });
-  if (actions.wean) chips.push({ Icon: Milk, label: 'Destete' });
-
-  return (
-    <Card gap="$3">
-      <Text fontFamily="$body" fontSize="$6" fontWeight="600" color="$textPrimary">
-        Datos que se cargan acá
-      </Text>
-      {chips.length === 0 ? (
-        <Text fontFamily="$body" fontSize="$3" fontWeight="400" color="$textMuted">
-          Este grupo no tiene vacunación ni destete habilitados. Podés castrar igual.
-        </Text>
-      ) : (
-        <XStack flexWrap="wrap" gap="$2">
-          {chips.map(({ Icon, label }) => (
-            <XStack
-              key={label}
-              alignItems="center"
-              gap="$1"
-              backgroundColor="$greenLight"
-              borderRadius="$pill"
-              paddingHorizontal="$3"
-              paddingVertical="$1"
-            >
-              <Icon size={14} color={primary} strokeWidth={2.5} />
-              <Text fontFamily="$body" fontSize="$2" fontWeight="600" color="$primary">
-                {label}
-              </Text>
-            </XStack>
-          ))}
-        </XStack>
-      )}
-    </Card>
   );
 }

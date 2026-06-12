@@ -17,6 +17,12 @@ No es un sustituto de `feature_list.json` ni de los ADRs — es la antesala dond
 
 ## Ítems pendientes
 
+## 2026-06-12 — Gate 2 del UI-B de spec 10 (selección masiva): 1 MED comentario + LOWs
+
+**Origen**: Gate 2 (security_analyzer, code) del chunk UI-B, `progress/security_code_10-ui-b.md`. PASS 0 HIGH.
+- **MED-1 (comentario engañoso, NO vuln)**: `app/app/seleccion-masiva.tsx:143/148` dicen que el fail-open del gating de destete (R7.2) lo respalda "la barrera server-side" — **falso para el GATING**: `0054_gating_db_layer.sql:21` excluye destete del enforcement (decisión de spec US-8). La RLS (autorización) sí está; el gating de destete es display-only y el server ACEPTA un destete en rodeo con `destete` deshabilitado. Mismo-tenant + decisión deliberada → no es hueco, pero el comentario puede hacer que un dev futuro confíe en una barrera inexistente. **Fix: corregir el comentario** (1 línea) — o decisión de producto si se quiere enforcement real del gating de destete server-side. Foldear en el próximo toque de ese archivo (UI-C).
+- **LOW**: sin cap DURO al N total del fan-out de la masiva (el batching ~100 es del encolado, no un tope; mismo-tenant = N ops individuales). LOW: `onRevertOverrides` ignora errores por animal. LOW: `IN(...)` con miles de placeholders roza el límite de SQLite (grupos enormes). Evaluar en hardening.
+
 ## 2026-06-11 — 2 MED del Gate 2 del frontend Fase 2+3 de spec 10 (castración no-atómica)
 
 **Origen**: Gate 2 (security_analyzer, code mode) de la base no-UI de spec 10, `progress/security_code_10-frontend-fase2-3.md`. PASS 0 HIGH. 2 MEDIUM (no bloquean — la no-atomicidad es decisión aceptada de R10.2/Gate 1):

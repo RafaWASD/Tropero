@@ -1299,6 +1299,33 @@ export function buildProfileEstablishmentsQuery(profileIds: readonly string[]): 
   };
 }
 
+/**
+ * Flags de CANDIDATURA de un conjunto de perfiles para la pantalla de selección masiva (spec 10, T-UI.4):
+ * los 3 campos que la fila de lista (AnimalListItem) NO expone pero que bulk-candidates/bulk-selection
+ * necesitan por animal — `is_castrated` (excluye candidatos de castración, D3), `category_override`
+ * (aviso R5.6 en el bottom-sheet, NO afecta candidatura) y `has_weaning` (excluye candidatos de destete,
+ * R11.4). La identidad/categoría/sexo ya las trae fetchAnimals (con la categoría del espejo C6); acá SOLO
+ * estos 3 flags, keyed por id, para mergear. `has_weaning` = EXISTS un `weaning` NO borrado (synced o
+ * pending overlay). Una sola query batched (no N+1). `profileIds` ≥ 1. El scoping ya lo aplicó la stream.
+ */
+export function buildGroupCandidateFlagsQuery(profileIds: readonly string[]): LocalQuery {
+  const placeholders = profileIds.map(() => '?').join(', ');
+  return {
+    sql:
+      'SELECT ap.id AS id, ap.is_castrated AS is_castrated, ' +
+      'ap.category_override AS category_override, ' +
+      'CASE WHEN EXISTS (' +
+      'SELECT 1 FROM reproductive_events re ' +
+      "WHERE re.animal_profile_id = ap.id AND re.event_type = 'weaning' AND re.deleted_at IS NULL" +
+      ') OR EXISTS (' +
+      'SELECT 1 FROM pending_reproductive_events pre ' +
+      "WHERE pre.animal_profile_id = ap.id AND pre.event_type = 'weaning'" +
+      ') THEN 1 ELSE 0 END AS has_weaning ' +
+      `FROM animal_profiles ap WHERE ap.id IN (${placeholders})`,
+    args: [...profileIds],
+  };
+}
+
 // ─── Lotes / management_groups (T5.2) ──────────────────────────────────────────────
 
 /**

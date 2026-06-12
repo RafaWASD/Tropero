@@ -74,6 +74,14 @@ export type AnimalRowProps = {
    * (true) y la categoría NO es `toro`. false/undefined → sin badge. Display-only.
    */
   futureBull?: boolean;
+  /**
+   * RESALTADO de advertencia (spec 10 R11.6, solo `compact`): cuando un ⭐ futuro torito queda TILDADO en
+   * la selección de castración, su fila se RESALTA en terracota (acento de "ojo con este") SIN modal —
+   * la advertencia agregada va recién en el bottom-sheet. Acento = borde izquierdo terracota + fondo
+   * $surface (mismo lenguaje terracota-signal del badge/AbortionFlag, sin token terracota-claro nuevo).
+   * false/undefined → fila normal. La pantalla decide cuándo (futureBull && checked).
+   */
+  highlight?: boolean;
 
   // ─── Slot de checkbox (selección masiva futura — R11.9) ───────────────────────────────
   /**
@@ -253,6 +261,7 @@ export function AnimalRow({
   age,
   categoryCode,
   futureBull,
+  highlight = false,
   checked,
   onToggle,
 }: AnimalRowProps) {
@@ -294,7 +303,10 @@ export function AnimalRow({
         gap="$3"
         paddingHorizontal="$4"
         paddingVertical="$2"
-        backgroundColor="$white"
+        // Resaltado de advertencia (R11.6, ⭐ tildado): fondo $surface + acento terracota a la izquierda.
+        backgroundColor={highlight ? '$surface' : '$white'}
+        borderLeftWidth={highlight ? 4 : 0}
+        borderLeftColor={highlight ? '$terracota' : 'transparent'}
         // Divider entre filas (borde inferior) — da la separación de la lista sin gap.
         borderBottomWidth={1}
         borderBottomColor="$divider"

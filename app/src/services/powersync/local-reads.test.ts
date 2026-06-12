@@ -56,6 +56,7 @@ import {
   buildExistingWeaningIdsQuery,
   buildProfileEstablishmentQuery,
   buildProfileEstablishmentsQuery,
+  buildGroupCandidateFlagsQuery,
   buildCreateManagementGroupInsert,
   buildRenameManagementGroupUpdate,
   buildAssignAnimalToGroupUpdate,
@@ -1293,6 +1294,54 @@ test('T-CL.11: setCastrated statements ejecutan correctamente contra SQLite (is_
   db.prepare(down.sql).run(...(down.args as never[]));
   row = db.prepare('SELECT is_castrated, future_bull FROM animal_profiles WHERE id = ?').get('p-1') as never;
   assert.equal(row.is_castrated, 0);
+
+  db.close();
+});
+
+// ─── buildGroupCandidateFlagsQuery (spec 10, T-UI.4): flags de candidatura de la selección ───────────
+
+// Ejecución REAL contra SQLite in-memory: verifica is_castrated/category_override pass-through +
+// has_weaning = EXISTS un weaning NO borrado (synced) o pending overlay; el weaning borrado NO cuenta.
+test('T-UI.4: buildGroupCandidateFlagsQuery — has_weaning sincronizado, pending y borrado', () => {
+  const db = new DatabaseSync(':memory:');
+  db.exec(
+    'CREATE TABLE animal_profiles (id TEXT, is_castrated INTEGER DEFAULT 0, category_override INTEGER DEFAULT 0);',
+  );
+  db.exec(
+    'CREATE TABLE reproductive_events (id TEXT, animal_profile_id TEXT, event_type TEXT, deleted_at TEXT);',
+  );
+  db.exec(
+    'CREATE TABLE pending_reproductive_events (id TEXT, animal_profile_id TEXT, event_type TEXT);',
+  );
+  // p-1: weaning sincronizado vivo → has_weaning=1. is_castrated=1, override=1.
+  // p-2: weaning sincronizado BORRADO (deleted_at) → NO cuenta → has_weaning=0.
+  // p-3: weaning en el overlay pending → has_weaning=1.
+  // p-4: sin nada → has_weaning=0.
+  db.exec(
+    "INSERT INTO animal_profiles (id, is_castrated, category_override) VALUES " +
+      "('p-1', 1, 1), ('p-2', 0, 0), ('p-3', 0, 0), ('p-4', 0, 0);",
+  );
+  db.exec(
+    "INSERT INTO reproductive_events (id, animal_profile_id, event_type, deleted_at) VALUES " +
+      "('e1', 'p-1', 'weaning', NULL), ('e2', 'p-2', 'weaning', '2026-06-01T00:00:00Z');",
+  );
+  db.exec(
+    "INSERT INTO pending_reproductive_events (id, animal_profile_id, event_type) VALUES " +
+      "('pe1', 'p-3', 'weaning');",
+  );
+
+  const q = buildGroupCandidateFlagsQuery(['p-1', 'p-2', 'p-3', 'p-4']);
+  const rows = db.prepare(q.sql).all(...(q.args as never[])) as {
+    id: string; is_castrated: number; category_override: number; has_weaning: number;
+  }[];
+  const byId = new Map(rows.map((r) => [r.id, r]));
+
+  assert.equal(byId.get('p-1')!.is_castrated, 1);
+  assert.equal(byId.get('p-1')!.category_override, 1);
+  assert.equal(byId.get('p-1')!.has_weaning, 1); // weaning vivo
+  assert.equal(byId.get('p-2')!.has_weaning, 0); // weaning BORRADO no cuenta
+  assert.equal(byId.get('p-3')!.has_weaning, 1); // weaning pending
+  assert.equal(byId.get('p-4')!.has_weaning, 0); // sin weaning
 
   db.close();
 });
