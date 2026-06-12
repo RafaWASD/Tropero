@@ -76,6 +76,20 @@ src/
 - **Errores de red / Supabase**: capturados en services, traducidos a `AppError`.
 - **UI**: error boundaries por pantalla; mensajes accionables ("revisá tu conexión"), no stack traces ni "Network Error".
 
+## UI — actualización optimista en el lugar (no re-fetch que parpadee)
+
+**Regla**: una acción del usuario sobre una pantalla que YA tiene contenido montado (crear/editar/borrar/togglear/asignar un item de una lista, togglear un campo de un detalle, etc.) **NO debe** disparar un re-fetch completo que swappee el contenido por un spinner/placeholder (la pantalla "parpadea en blanco") ni que re-monte la lista (el scroll salta al tope). Eso es un anti-patrón de UX y rompe el pilar "el mejor en el primer try".
+
+**La forma correcta (offline-first con PowerSync)**: la mutación ya escribe al SQLite local (CRUD plano → CrudEntry → `uploadData` reconcilia al subir). La UI debe reflejar el cambio **al instante, en el lugar**, actualizando el estado local de forma **optimista** — sin togglear el estado de `loading` que blankea, sin re-montar. El servidor sigue siendo la verdad (los triggers recalculan al subir; el espejo client-side —ej. `compute_category` de C6— ya converge a eso); el optimismo solo **adelanta** lo que el server va a confirmar, y LWW lo hace seguro.
+
+**Cómo aplicarlo:**
+1. **Separá "carga inicial" de "refresh post-acción".** El spinner/placeholder que reemplaza el contenido se muestra SOLO en la primera carga (sin datos previos): guardalo con `loading && data === null`, NO con `loading` a secas. En un refresh con datos ya montados, nunca blanquees.
+2. **Preferí mutar el estado en el lugar** (insertar/actualizar/quitar el item del array; setear el campo toggleado; recomputar lo derivado con el espejo client-side) por sobre re-fetchear. Si re-leés, que sea un refresh **silencioso**: actualiza los datos sin togglear el estado que desmonta y sin reemplazar el array de una forma que pierda el scroll (mantené el `ScrollView`/`FlatList` montado, keys estables).
+3. **Si la mutación falla**, revertí el cambio optimista + mostrá un error accionable. Nunca dejes un estado "mentido".
+4. **Norte a futuro**: la migración de las lecturas de campo a `useQuery`/`watch` de PowerSync (reads reactivos) borra el re-fetch manual entero — la UI se re-renderiza sola ante cualquier cambio del SQLite local (incluido el write optimista). Hasta entonces, aplicá esta receta a mano. (Backlog 2026-06-09.)
+
+**Referencias en el repo que ya lo hacen bien** (copiar de acá): `app/app/(tabs)/mas.tsx` (`ProfileSection`/`applyOwnProfile` — aterrizaje optimista, NO re-fetchea a propósito), `app/app/(tabs)/index.tsx` (loaders con guards de secuencia que conservan el valor previo y nunca blanquean en refresh del mismo contexto), `app/app/(tabs)/animales.tsx` (el `loading` solo alimenta el subtítulo del header, jamás swappea el body de la lista).
+
 ## Comentarios
 
 - Default: **no escribir comentarios.**

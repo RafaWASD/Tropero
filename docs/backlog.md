@@ -17,6 +17,15 @@ No es un sustituto de `feature_list.json` ni de los ADRs — es la antesala dond
 
 ## Ítems pendientes
 
+## 2026-06-12 — Anti-patrón "re-fetch que parpadea" en 3 pantallas (auditoría, receta en conventions.md)
+
+**Origen**: Raf lo pegó en la ficha del animal (toggle Castrado/⭐ blankeaba + scrolleaba arriba). Pidió auditar el resto + dejar la receta. **Receta documentada en `docs/conventions.md` § "UI — actualización optimista en el lugar"**. La ficha (`animal/[id].tsx`) se está arreglando ya. Las otras 3 instancias encontradas (a corregir con la receta, en orden de prioridad):
+- **ALTA — `app/app/lotes.tsx`** (`load()` línea ~82, render ~218): crear/renombrar/borrar lote → `await load()` → `setLoading(true)` → render muestra "Cargando lotes…" en vez de la lista montada → blank + scroll-reset. Las 3 acciones son cotidianas del owner. Fix: mutar el array `groups` optimista (insertar/renombrar/quitar el item) sin `setLoading(true)`, estilo `mas.tsx`/`applyOwnProfile`.
+- **MEDIA — `app/src/hooks/useGroupView.ts` + `GroupViewBits.tsx`** (consumido por `rodeo/[id]`/`lote/[id]`): al volver de una acción masiva, el `useFocusEffect` corre `load()` con `setLoading(true)` incondicional → la lista + barra + conteo blanquean y re-montan. Fix: no setear `loading=true` cuando `animals.length>0` (refresh en el lugar).
+- **BAJA — `app/app/seleccion-masiva.tsx`** (`onRevertOverrides` → `load()` línea ~255): revertir override desde el sheet blankea la lista de selección. Poco frecuente. Mismo fix (revertir optimista sin recargar todo).
+
+**Referencias OK** (ya lo hacen bien, no tocar): `mas.tsx` (ProfileSection optimista), `index.tsx` (loaders que no blanquean), `animales.tsx` (loading solo en header), `miembros.tsx`/`rodeos.tsx` (guard `loading && data===null`). **Norte de fondo**: migrar las lecturas de campo a `useQuery`/`watch` de PowerSync (backlog 2026-06-09) borra el re-fetch manual entero.
+
 ## 2026-06-12 — a11y: el checkbox de `AnimalRow` compacto no emite `aria-checked` (selección masiva)
 
 **Origen**: chunk UI-D de spec 10 (E2E Playwright), `progress/impl_10-ui-d-e2e.md` (autorrevisión).
