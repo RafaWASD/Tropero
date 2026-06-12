@@ -20,6 +20,14 @@
 > recién con el TOTAL cerrado, presentar a Raf para aprobación/corrección final. El leader vetó cada
 > chunk con design-review + reviewer + Gate 2 y commitea; solo pausa si algo queda genuinamente
 > bloqueado o aparece una decisión real irresoluble. Estado UI: UI-A ✅ + UI-B (Castrar/Destetar) ✅.
+>
+> **✅ SPEC 10 UI COMPLETA (2026-06-12) — esperando aprobación/corrección final de Raf (Puerta 2).**
+> 18 commits. Todos los chunks gateados (design-review + reviewer + Gate 2): UI-A ✅ + UI-B ✅ + UI-B2
+> (vacunación, HIGH VIA-ENUM cerrado en fix-loop) ✅ + UI-C (ficha castrado/⭐/borrado eventos) ✅ + UI-D
+> (E2E 9/9 --repeat-each=3) ✅. Decisiones menores de Raf abiertas (no bloquean, en backlog): badge ⭐
+> terracota, a11y aria-checked del checkbox compacto, `$chipMin` 40 vs 44, "Producto" texto-libre.
+> AL APROBAR RAF: marcar spec 10 acorde en feature_list (queda C5/PowerSync de spec 02 como lo único
+> diferido del stack; spec 10 en sí no tiene backend pendiente). Sin pushear (Raf pushea).
 
 Raf eligió los "cambios chicos" 2 y 3 del backlog (en vez de arrancar spec 10). Decisión del leader:
 **secuencial 2 → 3** (colisionan: los rojos de events del triage son en parte el flake del item 2;
