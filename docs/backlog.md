@@ -17,6 +17,20 @@ No es un sustituto de `feature_list.json` ni de los ADRs — es la antesala dond
 
 ## Ítems pendientes
 
+## 2026-06-12 — a11y: el checkbox de `AnimalRow` compacto no emite `aria-checked` (selección masiva)
+
+**Origen**: chunk UI-D de spec 10 (E2E Playwright), `progress/impl_10-ui-d-e2e.md` (autorrevisión).
+**Qué**: la fila compacta de `AnimalRow` (selección masiva castrar/destetar) pasa `accessibilityState={{checked}}`
+crudo al `Pressable`. react-native-web NO lo traduce a `aria-checked` en el DOM del export de prod (el
+`role="checkbox"` y el `aria-label` SÍ aparecen; `aria-checked` queda ausente). Verificado en los E2E de UI-D
+(por eso verifican los defaults por el CONTADOR vivo, no por `aria-checked`).
+**Por qué importa**: gap de a11y de lectores de pantalla — no anuncian tildado/destildado de la fila. NO es un
+bug funcional (la selección opera bien; el contador/CTA/resaltado ⭐ son correctos). Mismo patrón que el bug que
+motivó `src/utils/a11y.ts` (RN-web no mapea estado a11y crudo a ARIA en algunos elementos).
+**Próximo paso sugerido**: pasada de a11y de `AnimalRow` — emitir el estado vía un helper tipo `switchA11y`
+(que ya produce `aria-checked` correcto en web) en `RowCheckbox`/`AnimalRow`. Nada (info) hasta que se priorice
+un chunk de pulido de a11y. NO es test-only-fixeable (toca el componente de producto).
+
 ## 2026-06-12 — 3 LOW del Gate 2 del UI-C (ficha castrado + borrado de eventos) de spec 10
 
 **Origen**: Gate 2 del chunk UI-C, `progress/security_code_10-ui-c.md`. PASS 0 HIGH.

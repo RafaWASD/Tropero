@@ -215,6 +215,18 @@ export async function seedAnimal(
     categoryOverride?: boolean;
     /** birth_date ISO 'YYYY-MM-DD' del animal (opcional). */
     birthDate?: string | null;
+    /**
+     * Estado de castración inicial (default false). Setea `animals.is_castrated` (fuente de verdad
+     * física, 0060); el trigger `animal_profiles_force_is_castrated` (0084) lo COPIA al perfil en el
+     * INSERT → el espejo C6 y la denorm nacen fieles. Para sembrar un animal ya-castrado (spec 10).
+     */
+    isCastrated?: boolean;
+    /**
+     * Flag ⭐ "futuro torito" del perfil (`animal_profiles.future_bull`, 0085, default false). Solo
+     * machos no-castrados (el trigger de normalización lo fuerza a false si no aplica). Para sembrar
+     * un ternero ⭐ que la castración masiva pre-tilda SIN marcar por default (spec 10 R11.3).
+     */
+    futureBull?: boolean;
   } = {},
 ): Promise<string> {
   const sex = opts.sex ?? 'female';
@@ -240,6 +252,8 @@ export async function seedAnimal(
   const animalPayload: Record<string, unknown> = { id: animalId, sex, species_id: rodeo.species_id };
   if (opts.tag) animalPayload.tag_electronic = opts.tag;
   if (opts.birthDate) animalPayload.birth_date = opts.birthDate;
+  // is_castrated en `animals` (0060) — el force-on-INSERT del perfil (0084) lo copia → el perfil nace fiel.
+  if (opts.isCastrated) animalPayload.is_castrated = true;
   const { error: aErr } = await admin.from('animals').insert(animalPayload);
   if (aErr) throw new Error(`seedAnimal animals: ${aErr.message}`);
 
@@ -255,6 +269,8 @@ export async function seedAnimal(
   if (opts.idv) profilePayload.idv = opts.idv;
   if (opts.visualAlt) profilePayload.visual_id_alt = opts.visualAlt;
   if (opts.categoryOverride) profilePayload.category_override = true;
+  // future_bull (0085): solo machos no-castrados; el trigger de normalización lo fuerza a false si no aplica.
+  if (opts.futureBull) profilePayload.future_bull = true;
   const { error: pErr } = await admin.from('animal_profiles').insert(profilePayload);
   if (pErr) throw new Error(`seedAnimal animal_profiles: ${pErr.message}`);
 

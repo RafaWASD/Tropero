@@ -108,3 +108,25 @@ export async function gotoAnimales(page: Page): Promise<void> {
   const searchBar = page.getByLabel('Buscar animal por caravana o número', { exact: true });
   await gotoTab(page, 'Animales', searchBar);
 }
+
+/**
+ * Inicio rodeo-céntrico (spec 10 R2.1/R2.2): toca la card del rodeo `rodeoName` en la home y aterriza
+ * en su VISTA DE GRUPO (rodeo/[id]). La card es un GroupSummaryCard → role="button" cuyo nombre
+ * accesible es "{name}, {meta} · {N cabezas}" (buttonA11y) → matcheamos por el nombre del rodeo.
+ *
+ * La home carga las cards del RodeoContext (ya disponible al aterrizar) — el nombre del rodeo sembrado
+ * va namespaced con el RUN_TAG, así que es único. La ancla de aterrizaje es la GroupActionsBar (botón
+ * "Castrar" siempre presente, R1.5). Espera generosa: los animales del grupo bajan por first-sync.
+ */
+export async function gotoRodeoGroup(page: Page, rodeoName: string): Promise<void> {
+  const card = page.getByRole('button', { name: new RegExp(escapeRegExp(rodeoName)) }).first();
+  await expect(card).toBeVisible({ timeout: 30_000 });
+  await card.click();
+  // Aterrizaje: la vista de grupo siempre ofrece "Castrar" (R1.5, no se gatea).
+  await expect(page.getByRole('button', { name: 'Castrar', exact: true })).toBeVisible({ timeout: 30_000 });
+}
+
+/** Escapa los metacaracteres de regex de un literal (el RUN_TAG no los tiene, pero defensivo). */
+export function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
