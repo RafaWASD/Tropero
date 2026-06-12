@@ -41,7 +41,7 @@ import {
   type GroupSelectionProfile,
 } from '@/services/bulk-selection-data';
 import { applyBulkVaccination, previewVaccination } from '@/services/bulk-operations';
-import { fetchRodeoGroupActions } from '@/services/group-data';
+import { fetchRodeoConfigGating } from '@/services/group-data';
 import { buildBulkCandidates } from '@/utils/bulk-candidates';
 import {
   deriveCategoryFilterOptions,
@@ -578,9 +578,11 @@ async function resolveVaccGatingPredicate(
   const distinct = [...new Set(rodeoIds)];
   const enabledByRodeo = new Map<string, boolean>();
   for (const rodeoId of distinct) {
-    const r = await fetchRodeoGroupActions(rodeoId);
+    // CONFIG-only (vacunación no se gatea por candidatos, pero usamos el resolver de config por consistencia
+    // y para no requerir la lista del grupo que fetchRodeoGroupActions ahora necesita).
+    const r = await fetchRodeoConfigGating(rodeoId);
     if (!r.ok) return undefined; // gating irresoluble → no excluir a ciegas
-    enabledByRodeo.set(rodeoId, r.value.vaccinate);
+    enabledByRodeo.set(rodeoId, r.value.vaccinationEnabled);
   }
   return (rodeoId: string) => enabledByRodeo.get(rodeoId) === true;
 }

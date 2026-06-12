@@ -130,3 +130,21 @@ export async function gotoRodeoGroup(page: Page, rodeoName: string): Promise<voi
 export function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
+
+/**
+ * Lee el MAYOR `scrollTop` entre los contenedores scrolleables del DOM (spec 10 fix Raf 2026-06-12). El
+ * ScrollView de la ficha (react-native-web) renderiza un <div> con overflow scrolleable; al accionar (toggle
+ * castrado, ⭐, borrar evento) NO debe saltar al tope (scrollTop ~0). Esta lectura es robusta a la estructura
+ * exacta del árbol RN-web: barre todos los elementos y devuelve el scrollTop máximo (el del scroller activo).
+ * Sirve para asertar que un refresh post-acción PRESERVA la posición de scroll (no resetea al tope).
+ */
+export async function readMaxScrollTop(page: Page): Promise<number> {
+  return page.evaluate(() => {
+    let max = 0;
+    for (const el of Array.from(document.querySelectorAll('*'))) {
+      const e = el as HTMLElement;
+      if (e.scrollTop > max) max = e.scrollTop;
+    }
+    return max;
+  });
+}

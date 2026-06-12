@@ -34,6 +34,8 @@
 
 **R1.6** Si una operación masiva gateada (vacunación, destete) tiene su `data_key` requerido `enabled = false` en el `rodeo_data_config` del rodeo, entonces el sistema **no deberá** ofrecer esa operación para ese rodeo. (context §Gating)
 
+> **Reconciliación gating-por-candidatos (fix Raf 2026-06-12, as-built — ver design §3.4).** Además del gating de CONFIG (R1.5/R1.6), una acción NO se ofrece si no hay **candidatos** a quienes aplicarla (evita abrir una pantalla de selección vacía): **Destetar** requiere ≥1 ternero/a sin destete; **Castrar** requiere ≥1 macho entero candidato; **Vacunar** no cambia (aplica a todos los activos → si hay animales, hay candidatos; sigue gateada solo por config). Es ortogonal a R1.5 (que sigue valiendo: la castración no se gatea por `rodeo_data_config`) — solo se le suma el requisito de presencia de candidatos.
+
 **R2.1** El sistema deberá mostrar en **Inicio** las **cards de rodeo** del establecimiento activo (nombre, sistema, cabezas y al menos una métrica clave o señal de atención) y, como grupos secundarios, las **cards de lote** (`management_groups`) activos del establecimiento. (context §Navegación; ADR-018)
 
 **R2.2** Cuando el usuario toca una card de rodeo o de lote en Inicio, el sistema deberá navegar a la **vista de grupo** (R1.1) del grupo correspondiente. (context §Navegación)

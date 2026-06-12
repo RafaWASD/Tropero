@@ -90,7 +90,9 @@ export function GroupViewScreen<T>({
           <>
             <GroupMetaHeader icon={icon} kindLabel={kindLabel} name={name} headCount={animals.length} loading={loading} />
 
-            {actions ? (
+            {/* La card de acciones se muestra solo si hay AL MENOS UNA acción ofrecible (fix Raf 2026-06-12:
+                un grupo sin candidatos ni config habilitada NO muestra una card vacía). */}
+            {actions && (actions.vaccinate || actions.wean || actions.castrate) ? (
               <Card gap="$3">
                 <Text fontFamily="$body" fontSize="$6" fontWeight="600" color="$textPrimary">
                   Acciones del grupo

@@ -45,10 +45,7 @@ export default function RodeoGroupScreen() {
   const loader = useCallback(
     async (): Promise<{ ok: true; data: GroupViewData } | { ok: false; message: string }> => {
       if (!establishmentId || !rodeoId) return { ok: false, message: 'No se encontró el rodeo.' };
-      const [animalsR, actionsR] = await Promise.all([
-        fetchAnimals(establishmentId, { rodeoId, status: 'active' }),
-        fetchRodeoGroupActions(rodeoId),
-      ]);
+      const animalsR = await fetchAnimals(establishmentId, { rodeoId, status: 'active' });
       if (!animalsR.ok) {
         return {
           ok: false,
@@ -58,8 +55,11 @@ export default function RodeoGroupScreen() {
               : 'No pudimos cargar el rodeo.',
         };
       }
-      // Gating blando: si falla, ofrecemos solo Castrar (siempre disponible, R1.5).
-      const actions = actionsR.ok ? actionsR.value : { castrate: true as const, vaccinate: false, wean: false };
+      // Las acciones se gatean por config Y por candidatos (fix Raf 2026-06-12) → necesitan la lista del
+      // grupo. Gating blando: si falla (la query de flags), no ofrecemos NINGUNA acción (fail-closed —
+      // no sabemos si hay candidatos; mejor que abrir una pantalla vacía o castrar sin candidatos).
+      const actionsR = await fetchRodeoGroupActions(rodeoId, animalsR.value);
+      const actions = actionsR.ok ? actionsR.value : { castrate: false, vaccinate: false, wean: false };
       return { ok: true, data: { animals: animalsR.value, actions } };
     },
     [establishmentId, rodeoId],

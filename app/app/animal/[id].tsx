@@ -14,7 +14,7 @@
 // Criticidad 🟡. Cero hardcode (ADR-023 §4): tokens + componentes; íconos lucide con getTokenValue.
 // Voseo es-AR. a11y por helper (utils/a11y).
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { Platform, Pressable } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
@@ -106,13 +106,20 @@ export default function AnimalDetailScreen() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const load = useCallback(async () => {
+  // `load` distingue CARGA INICIAL (puede blanquear: setea `loading`, que desmonta el contenido y resetea
+  // el scroll al tope) de REFRESH SILENCIOSO post-acción (`silent: true` — NO toca `loading`: el ScrollView
+  // queda montado, el scroll se mantiene, solo cambian los datos). Las acciones de la ficha (toggle castrado,
+  // ⭐, borrar evento, lote, revertir override) usan el refresh silencioso para reconciliar con el server SIN
+  // el parpadeo en blanco / salto al tope que Raf reportó. El optimismo en sitio adelanta el cambio; este
+  // refresh confirma (la observación automática en el timeline, la categoría del espejo C6).
+  const load = useCallback(async (opts: { silent?: boolean } = {}) => {
+    const silent = opts.silent === true;
     if (!profileId) {
       setError('No se encontró el animal.');
       setLoading(false);
       return;
     }
-    setLoading(true);
+    if (!silent) setLoading(true);
     setError(null);
     setTimelineError(null);
     // Detalle + timeline + madre en paralelo (R10/R14/R14.7): un solo loading para la ficha entera.
@@ -122,13 +129,18 @@ export default function AnimalDetailScreen() {
       fetchTimeline(profileId),
       fetchMother(profileId),
     ]);
-    setLoading(false);
+    if (!silent) setLoading(false);
     if (!detailR.ok) {
-      setError(
-        detailR.error.kind === 'network'
-          ? 'Sin conexión: no pudimos cargar el animal.'
-          : detailR.error.message,
-      );
+      // En un refresh SILENCIOSO (post-acción) un fallo transitorio del detalle NO debe volar la ficha
+      // entera (el contenido optimista ya está montado); dejamos el estado actual y salimos sin tocar el
+      // error de pantalla. En la carga inicial sí mostramos el error (no hay nada que preservar).
+      if (!silent) {
+        setError(
+          detailR.error.kind === 'network'
+            ? 'Sin conexión: no pudimos cargar el animal.'
+            : detailR.error.message,
+        );
+      }
       return;
     }
     setDetail(detailR.value);
@@ -139,7 +151,7 @@ export default function AnimalDetailScreen() {
     });
     if (timelineR.ok) {
       setTimeline(timelineR.value);
-    } else {
+    } else if (!silent) {
       setTimeline(null);
       setTimelineError(
         timelineR.error.kind === 'network'
@@ -147,18 +159,30 @@ export default function AnimalDetailScreen() {
           : 'No pudimos cargar el historial.',
       );
     }
+    // En silent: si el timeline falló, conservamos el que ya estaba montado (no lo blanqueamos).
     // Madre (R14.7): blando — un fallo (red) deja la card sin mostrar, no rompe la ficha. value puede
     // ser null (el animal no es un ternero con parto registrado) → tampoco se muestra la card.
     setMother(motherR.ok ? motherR.value : null);
   }, [profileId]);
 
-  // Recargar al enfocar (volver de agregar-evento, o tras crear) → el timeline se refresca y el
-  // evento nuevo aparece arriba sin parpadeo (un solo fetch al re-enfocar).
+  // Recargar al enfocar. La PRIMERA carga (mount / cambio de profileId) puede blanquear (no hay nada que
+  // preservar); los RE-FOCUS posteriores (volver de agregar-evento, o tras crear) son SILENCIOSOS → el
+  // timeline se refresca y el evento nuevo aparece sin el parpadeo en blanco / salto al tope. El ref se
+  // resetea al cambiar de animal (profileId) → ese cambio sí vuelve a mostrar la carga inicial.
+  const didInitialLoadRef = useRef(false);
   useFocusEffect(
     useCallback(() => {
-      void load();
+      const silent = didInitialLoadRef.current;
+      didInitialLoadRef.current = true;
+      void load({ silent });
     }, [load]),
   );
+  // Al cambiar de animal, la próxima carga vuelve a ser inicial (blanquea — es otra ficha).
+  const lastProfileIdRef = useRef(profileId);
+  if (lastProfileIdRef.current !== profileId) {
+    lastProfileIdRef.current = profileId;
+    didInitialLoadRef.current = false;
+  }
 
   const goToAddEvent = useCallback(() => {
     if (!detail) return;
@@ -262,9 +286,10 @@ export default function AnimalDetailScreen() {
             : r.error.message,
       };
     }
-    // Recargamos la ficha: ahora override=false → el hero muestra la categoría DERIVADA al instante
-    // (también offline, el UPDATE local ya pegó). `load()` re-trae detalle + grupos + timeline.
-    await load();
+    // Refresh SILENCIOSO (mismo principio en-sitio del fix Raf 2026-06-12): ahora override=false → el hero
+    // muestra la categoría DERIVADA (offline, el UPDATE local ya pegó) SIN blanquear la pantalla ni saltar
+    // al tope. La CategoryOverrideCard desmonta sola al re-leer detail.categoryOverride=false.
+    await load({ silent: true });
     return { ok: true };
   }, [detail, load]);
 
@@ -301,8 +326,27 @@ export default function AnimalDetailScreen() {
   const onSetCastrated = useCallback(
     async (value: boolean): Promise<{ ok: boolean; error?: string }> => {
       if (!detail) return { ok: false };
+      const snapshot = detail; // para revertir el optimismo si la escritura falla
+      // Anticipamos la categoría destino con el espejo C6 (mismo mirror que la confirmación) ANTES de
+      // escribir → la podemos aplicar optimistamente. null = override / sin transición → no cambia categoría.
+      const target = await previewCastrationCategory(detail.profileId, value);
+      const targetCat = target.ok ? target.value : null;
+      // OPTIMISMO EN SITIO (fix Raf 2026-06-12): reflejamos el cambio YA, sin esperar el re-fetch ni
+      // blanquear la pantalla. is_castrated → value; al castrar se limpia el ⭐ (R12.4); la categoría
+      // mostrada salta a la del espejo si hubo transición. El server es la verdad (LWW reconcilia al subir).
+      setDetail((d) =>
+        d == null
+          ? d
+          : {
+              ...d,
+              isCastrated: value,
+              futureBull: value ? false : d.futureBull,
+              ...(targetCat ? { categoryCode: targetCat.code, categoryName: targetCat.name } : {}),
+            },
+      );
       const r = await setCastrated(detail.profileId, value);
       if (!r.ok) {
+        setDetail(snapshot); // REVERT: no dejamos un estado mentido si la acción fue rechazada
         return {
           ok: false,
           error:
@@ -311,9 +355,9 @@ export default function AnimalDetailScreen() {
               : r.error.message,
         };
       }
-      // Recargamos: el espejo C6 con el is_castrated REAL refleja la categoría nueva al instante (offline) +
-      // la observación automática aparece en el timeline + el ⭐ se limpia si se castró.
-      await load();
+      // Refresh SILENCIOSO (no blanquea, no resetea scroll): trae la observación automática al timeline +
+      // confirma la categoría del espejo C6 con el is_castrated REAL ya persistido.
+      void load({ silent: true });
       return { ok: true };
     },
     [detail, load],
@@ -329,8 +373,13 @@ export default function AnimalDetailScreen() {
   const onSetFutureBull = useCallback(
     async (value: boolean): Promise<{ ok: boolean; error?: string }> => {
       if (!detail) return { ok: false };
+      const snapshot = detail;
+      // OPTIMISMO EN SITIO: el ⭐ no genera observación ni cambia categoría → solo flipeamos el flag. Sin
+      // blanquear la pantalla. El badge ⭐ se recomputa en el render (shouldShowFutureBullBadge).
+      setDetail((d) => (d == null ? d : { ...d, futureBull: value }));
       const r = await setFutureBull(detail.profileId, value);
       if (!r.ok) {
+        setDetail(snapshot); // REVERT si la escritura fue rechazada
         return {
           ok: false,
           error:
@@ -339,7 +388,8 @@ export default function AnimalDetailScreen() {
               : r.error.message,
         };
       }
-      await load();
+      // Refresh silencioso para reconciliar (no hay cambio de timeline, pero mantiene el patrón uniforme).
+      void load({ silent: true });
       return { ok: true };
     },
     [detail, load],
@@ -367,8 +417,15 @@ export default function AnimalDetailScreen() {
 
   const onDeleteEvent = useCallback(
     async (item: TimelineItem): Promise<{ ok: boolean; error?: string }> => {
+      const snapshot = timeline; // para restaurar el ítem si el borrado fue rechazado
+      // OPTIMISMO EN SITIO: sacamos el evento del timeline YA (sin blanquear la pantalla ni resetear el
+      // scroll). El (eventId, kind) identifica el ítem unívocamente.
+      setTimeline((tl) =>
+        tl == null ? tl : tl.filter((t) => !(t.kind === item.kind && t.eventId === item.eventId)),
+      );
       const r = await deleteTypedEvent({ kind: item.kind, eventId: item.eventId });
       if (!r.ok) {
+        setTimeline(snapshot ?? null); // REVERT: el evento re-aparece si el server rechazó el borrado
         return {
           ok: false,
           error:
@@ -377,19 +434,25 @@ export default function AnimalDetailScreen() {
               : r.error.message,
         };
       }
-      // Recargamos: el evento desaparece del timeline local (deleted_at) + el detalle refleja el recálculo de
-      // categoría offline (un destete borrado revierte la categoría vía el espejo C6 al refrescar).
-      await load();
+      // Refresh SILENCIOSO: el detalle refleja el recálculo de categoría offline (un destete borrado revierte
+      // la categoría vía el espejo C6) y el timeline confirma la baja — sin parpadeo ni salto al tope.
+      void load({ silent: true });
       return { ok: true };
     },
-    [load],
+    [timeline, load],
   );
 
   const onAssignLote = useCallback(
     async (groupId: string | null): Promise<{ ok: boolean; error?: string }> => {
       if (!detail) return { ok: false };
+      const snapshot = detail;
+      // OPTIMISMO EN SITIO: el lote mostrado salta al elegido (su nombre sale de `groups`; null = "Sin lote")
+      // sin blanquear la pantalla ni resetear el scroll.
+      const newName = groupId == null ? null : (groups.find((g) => g.id === groupId)?.name ?? null);
+      setDetail((d) => (d == null ? d : { ...d, managementGroupId: groupId, managementGroupName: newName }));
       const r = await assignAnimalToGroup(detail.profileId, groupId);
       if (!r.ok) {
+        setDetail(snapshot); // REVERT si el server rechazó
         return {
           ok: false,
           error: r.error.kind === 'network'
@@ -397,12 +460,11 @@ export default function AnimalDetailScreen() {
             : r.error.message,
         };
       }
-      // Refrescamos la ficha para que el lote mostrado refleje el cambio al instante (R: la ficha
-      // refleja el lote asignado sin salir/volver). `load()` re-trae detalle + grupos + timeline.
-      await load();
+      // Refresh SILENCIOSO para reconciliar (sin parpadeo ni salto al tope).
+      void load({ silent: true });
       return { ok: true };
     },
-    [detail, load],
+    [detail, groups, load],
   );
 
   // Quick-create de un lote (owner) sin salir de la ficha + asignarlo de una. Devuelve el grupo nuevo
@@ -933,14 +995,17 @@ function CastrationRow({
     setBusy(true);
     setError(null);
     const r = await onSetCastrated(nextValue);
-    // OK → la ficha recarga (isCastrated cambia) → esta fila se re-renderiza con el estado nuevo. No
-    // reseteamos busy (evita parpadeo). Si falla, surfaceamos el error y rehabilitamos.
+    // El cambio es OPTIMISTA en el padre (la ficha NO se recarga blanqueando) → esta fila persiste su
+    // instancia; reseteamos busy SIEMPRE (si no, un próximo "Cambiar" abriría la confirmación con los botones
+    // trabados en disabled). En OK cerramos la confirmación (la fila ya muestra el estado nuevo); en error
+    // revertimos + mostramos el motivo, dejando la confirmación abierta para reintentar.
+    setBusy(false);
     if (!r.ok) {
-      setBusy(false);
       setError(r.error ?? 'No se pudo guardar el cambio.');
       return;
     }
     setConfirming(false);
+    setTargetName(null);
   }, [busy, onSetCastrated, nextValue]);
 
   return (
@@ -1043,12 +1108,13 @@ function FutureBullRow({
     setBusy(true);
     setError(null);
     const r = await onSetFutureBull(!futureBull);
+    // El cambio es OPTIMISTA en el padre (la ficha NO se recarga blanqueando) → este componente persiste su
+    // instancia; reseteamos busy SIEMPRE para no dejar el botón trabado en "Guardando…". En OK la fila ya
+    // se re-renderizó con el `futureBull` nuevo; en error revertimos + mostramos el motivo.
+    setBusy(false);
     if (!r.ok) {
-      setBusy(false);
       setError(r.error ?? 'No se pudo guardar el cambio.');
-      return;
     }
-    // OK → la ficha recarga (futureBull cambia). No reseteamos busy (la fila se re-renderiza con el estado nuevo).
   }, [busy, onSetFutureBull, futureBull]);
 
   return (

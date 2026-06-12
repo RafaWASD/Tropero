@@ -143,3 +143,39 @@ test('destete masivo: todos pre-tildados → mellizos 1 weaning c/u → transici
   await expect(page.getByText('Categoría fijada manualmente', { exact: true })).toBeVisible();
   await expect(page.getByText('Ternera', { exact: true }).first()).toBeVisible();
 });
+
+// ─── FIX 1 (Raf 2026-06-12): la acción "Destetar" se ofrece solo si HAY CANDIDATOS, no solo por config ──
+//
+// Un rodeo de cría tiene `destete` habilitado por config (default 0018) PERO si no hay ningún ternero/a sin
+// destetar, NO debe ofrecer "Destetar" (abriría una pantalla de selección vacía). Sembramos un rodeo con
+// SOLO un macho ADULTO (torito, entero): es candidato a CASTRACIÓN (→ "Castrar" sí aparece, sirve de ancla)
+// pero NO es candidato a destete (solo ternero/ternera lo son) → "Destetar" NO debe aparecer aunque la
+// config lo habilite. Vacunar tampoco se gatea por candidatos (aplica a todos los activos) → sí aparece.
+test('FIX 1: un rodeo sin terneros NO ofrece "Destetar" (gating por candidatos, no solo config)', async ({
+  page,
+}) => {
+  const user = await createTestUser('gating-destete');
+  await setUserPhone(user.id, '1123456789');
+  const { establishmentId, rodeoId } = await seedEstablishmentWithRodeo(user.id, 'Campo Sin Terneros');
+
+  // SOLO un torito adulto (entero): candidato a castración, NO a destete. Sin ningún ternero/a en el grupo.
+  const idvBull = `NB${RUN_TAG.slice(-6)}`;
+  await seedAnimal(establishmentId, rodeoId, {
+    idv: idvBull, sex: 'male', categoryCode: 'torito', birthDate: birthDateMonthsAgo(18),
+  });
+
+  await page.goto('/');
+  await signIn(page, user);
+  await waitForHome(page);
+
+  // Vista de grupo: gotoRodeoGroup ancla en "Castrar" (presente: hay un macho entero candidato → prueba
+  // que el grupo cargó y que el gating por candidatos ofrece Castrar).
+  await gotoRodeoGroup(page, `${RUN_TAG} Rodeo general`);
+
+  // "Castrar" presente (candidato de castración) → confirma que las acciones se resolvieron con candidatos.
+  await expect(page.getByRole('button', { name: 'Castrar', exact: true })).toBeVisible();
+  // "Vacunar" presente (no se gatea por candidatos — aplica a todos los activos).
+  await expect(page.getByRole('button', { name: 'Vacunar', exact: true })).toBeVisible();
+  // FIX 1: "Destetar" AUSENTE aunque la config del rodeo de cría lo habilite — no hay terneros candidatos.
+  await expect(page.getByRole('button', { name: 'Destetar', exact: true })).toHaveCount(0);
+});

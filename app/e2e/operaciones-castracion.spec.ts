@@ -29,7 +29,7 @@ import {
   cleanupAll,
   RUN_TAG,
 } from './helpers/admin';
-import { signIn, waitForHome, gotoRodeoGroup } from './helpers/ui';
+import { signIn, waitForHome, gotoRodeoGroup, readMaxScrollTop } from './helpers/ui';
 
 test.afterAll(async () => {
   await cleanupAll();
@@ -148,16 +148,35 @@ test('castración masiva: defaults → ⭐ resaltado → bottom-sheet reversible
   // ── REVERT desde la ficha: Castrado → No (R13.1). ──────────────────────────────────────────────
   // La sección "Manejo" (solo machos) muestra "Castrado: Sí" + "Cambiar".
   await expect(page.getByText('Manejo', { exact: true })).toBeVisible();
+
+  // ── FIX 2 (Raf 2026-06-12): el toggle NO debe blanquear la ficha NI saltar al tope (optimista en sitio). ──
+  // Scrolleamos hasta el "Historial" (debajo de la sección Manejo) → el scroller queda en una posición > 0.
+  // Tras el toggle, esa posición debe PRESERVARSE (antes el load() blanqueaba y reseteaba el scroll al tope).
+  await page.getByText('Historial', { exact: true }).scrollIntoViewIfNeeded();
+  const scrollBefore = await readMaxScrollTop(page);
+  expect(scrollBefore, 'el scroll debería estar desplazado del tope antes del toggle').toBeGreaterThan(50);
+
   await page.getByRole('button', { name: 'Marcar como no castrado', exact: true }).click();
   // Confirmación inline que anticipa el recálculo (espejo C6): "La categoría se recalcula: Torito".
   await expect(page.getByText(/La categoría se recalcula: Torito/)).toBeVisible({ timeout: 15_000 });
   await page.getByRole('button', { name: 'Confirmar', exact: true }).click();
 
   // Tras el revert: vuelve a TORITO (recompute simétrico, R13.5) + observación de corrección (R13.7).
+  // El cambio se refleja EN SITIO (optimista) → no esperamos un re-fetch que blanquee.
   await expect(page.getByText('Torito', { exact: true }).first()).toBeVisible({ timeout: 20_000 });
   await expect(
     page.getByText('Corrección: marcado como no castrado', { exact: true }).first(),
   ).toBeVisible();
+
+  // FIX 2.a — NO reapareció el spinner de carga inicial ("Cargando ficha…"): el refresh post-acción es
+  // silencioso (no desmonta el contenido). Si el toggle hubiera disparado el load() blanqueante, este
+  // texto habría aparecido (y reseteado el scroll). 0 ocurrencias = no hubo recarga blanqueante.
+  await expect(page.getByText('Cargando ficha…', { exact: true })).toHaveCount(0);
+
+  // FIX 2.b — el scroll se MANTUVO (no saltó al tope). Tolerancia amplia (la fila Manejo cambia de alto al
+  // colapsar la confirmación, lo que mueve el layout unos px); lo que importa es que NO volvió a ~0.
+  const scrollAfter = await readMaxScrollTop(page);
+  expect(scrollAfter, 'el scroll NO debe resetearse al tope tras el toggle (optimista en sitio)').toBeGreaterThan(50);
 });
 
 // ─── Helpers locales ──────────────────────────────────────────────────────────────────────────

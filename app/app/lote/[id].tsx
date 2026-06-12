@@ -64,10 +64,11 @@ export default function LoteGroupScreen() {
         };
       }
       const members = membersR.value;
-      // Gating cross-rodeo: rodeos reales DISTINTOS de los miembros activos (R7.1).
-      const memberRodeoIds = members.map((m) => m.rodeoId);
-      const actionsR = await fetchLoteGroupActions(memberRodeoIds);
-      const actions = actionsR.ok ? actionsR.value : { castrate: true as const, vaccinate: false, wean: false };
+      // Gating cross-rodeo (R7.1) + por candidatos (fix Raf 2026-06-12): la función deriva los rodeos
+      // reales y los candidatos de los miembros. Gating blando: si falla la query de flags, no ofrecemos
+      // ninguna acción (fail-closed — no sabemos si hay candidatos).
+      const actionsR = await fetchLoteGroupActions(members);
+      const actions = actionsR.ok ? actionsR.value : { castrate: false, vaccinate: false, wean: false };
       return { ok: true, data: { animals: members, actions } };
     },
     [establishmentId, groupId],

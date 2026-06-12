@@ -15,6 +15,15 @@
 // LOTE cross-rodeo (R7.1): la acción gateada se OFRECE si ALGÚN rodeo del lote la tiene habilitada.
 // El skip-and-report (vacunación) / la exclusión-de-lista (destete) por rodeo real se resuelve DESPUÉS,
 // en el armado de candidatos (bulk-candidates.ts) — acá solo decidimos si el BOTÓN aparece.
+//
+// GATING POR CANDIDATOS (fix Raf 2026-06-12): además del gating de CONFIG, una acción NO se ofrece si no
+// hay a quién aplicársela (evita abrir una pantalla de selección VACÍA). `applyCandidateGating` combina la
+// disponibilidad de config con los conteos de candidatos (que el caller computa con `buildBulkCandidates`
+// sobre los perfiles del grupo ya cargados):
+//   - Vacunar: SIN cambio (aplica a todos los activos → si hay animales, hay candidatos; gateado solo por config).
+//   - Destetar: config destete habilitado **Y** ≥1 candidato a destete (pedido explícito de Raf).
+//   - Castrar: ≥1 candidato a castración (no se gatea por config — sigue R1.5; el leader extiende el mismo
+//     principio de candidatos por consistencia). Un grupo sin machos enteros NO ofrece "Castrar".
 
 /** Los data_keys que gatean acciones masivas (R1.5). Castración NO tiene data_key. */
 export const VACCINATION_DATA_KEY = 'vacunacion';
@@ -37,12 +46,28 @@ export type RodeoGating = {
 
 /** Resultado del gating: qué acciones ofrece la vista de grupo (R1.4). */
 export type GroupActionsAvailability = {
-  /** Castrar SIEMPRE true (R1.5: no se gatea). */
-  castrate: true;
-  /** Vacunar si el/los rodeo(s) la tienen habilitada (R1.5/R7.1). */
+  /**
+   * Castrar: no se gatea por CONFIG (R1.5), pero SÍ por CANDIDATOS (fix Raf 2026-06-12): solo si hay ≥1
+   * macho entero candidato. `resolveGroupActions` (solo-config) devuelve `true`; `applyCandidateGating`
+   * lo reduce a `count.castrate > 0`. Por eso es `boolean`, no el literal `true`.
+   */
+  castrate: boolean;
+  /** Vacunar si el/los rodeo(s) la tienen habilitada (R1.5/R7.1). Sin gating por candidatos. */
   vaccinate: boolean;
-  /** Destetar si el/los rodeo(s) la tienen habilitada (R1.5/R7.1). */
+  /** Destetar si el/los rodeo(s) la tienen habilitada (R1.5/R7.1) Y hay ≥1 candidato a destete. */
   wean: boolean;
+};
+
+/**
+ * Conteos de candidatos de las operaciones gateadas por presencia (fix Raf 2026-06-12). Los computa el
+ * caller con `buildBulkCandidates` sobre los perfiles del grupo ya cargados (offline). Vacunación NO está
+ * acá: aplica a todos los activos (si hay animales, hay candidatos) → se gatea solo por config.
+ */
+export type GroupCandidateCounts = {
+  /** Cuántos machos enteros candidatos a castración hay en el grupo. */
+  castrate: number;
+  /** Cuántos terneros/as candidatos a destete hay (ya filtrados por rodeo con `destete` en lote cross-rodeo). */
+  wean: number;
 };
 
 /**
@@ -52,7 +77,8 @@ export type GroupActionsAvailability = {
  *   - N rodeos (vista de lote cross-rodeo): Vacunar/Destetar si ALGÚN rodeo la tiene (R7.1).
  *   - 0 rodeos (lote vacío / aún sincronizando): solo Castrar (las gateadas requieren al menos un
  *     rodeo habilitado — fail-closed: sin info, no se ofrece la gateada).
- * Castrar SIEMPRE true (R1.5). PURA: no toca red ni SQLite.
+ * Castrar `true` acá (R1.5: no se gatea por config). El gating por CANDIDATOS se aplica DESPUÉS con
+ * `applyCandidateGating` (fix Raf 2026-06-12). PURA: no toca red ni SQLite.
  */
 export function resolveGroupActions(
   rodeos: readonly RodeoGating[],
@@ -61,6 +87,26 @@ export function resolveGroupActions(
     castrate: true,
     vaccinate: rodeos.some((r) => r.vaccinationEnabled),
     wean: rodeos.some((r) => r.weaningEnabled),
+  };
+}
+
+/**
+ * Reduce la disponibilidad de CONFIG por PRESENCIA DE CANDIDATOS (fix Raf 2026-06-12): no se ofrece una
+ * acción que abriría una pantalla de selección vacía. PURA.
+ *   - Vacunar: SIN cambio (config; aplica a todos los activos).
+ *   - Destetar: config destete habilitado **Y** ≥1 candidato a destete.
+ *   - Castrar: ≥1 candidato a castración (no se gatea por config — sigue R1.5; gateado solo por candidatos).
+ * Mantiene el gating de config existente (no lo rompe): un `wean=false` de config sigue `false` aunque
+ * hubiera candidatos (no habría a dónde mandarlos), y un `vaccinate=false` de config sigue `false`.
+ */
+export function applyCandidateGating(
+  config: GroupActionsAvailability,
+  counts: GroupCandidateCounts,
+): GroupActionsAvailability {
+  return {
+    vaccinate: config.vaccinate,
+    wean: config.wean && counts.wean > 0,
+    castrate: counts.castrate > 0,
   };
 }
 

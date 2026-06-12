@@ -4,11 +4,13 @@ import assert from 'node:assert/strict';
 
 import {
   resolveGroupActions,
+  applyCandidateGating,
   buildRodeoGating,
   isDataKeyEnabled,
   VACCINATION_DATA_KEY,
   WEANING_DATA_KEY,
   type RodeoGating,
+  type GroupActionsAvailability,
 } from './group-actions.ts';
 
 // ─── resolveGroupActions: castrar siempre; gateadas por rodeo(s) ───────────────────────────
@@ -50,6 +52,48 @@ test('resolveGroupActions: lote cross-rodeo — destetar si ALGÚN rodeo lo tien
 
 test('resolveGroupActions: 0 rodeos (lote vacío / sincronizando) → solo castrar (fail-closed)', () => {
   assert.deepEqual(resolveGroupActions([]), { castrate: true, vaccinate: false, wean: false });
+});
+
+// ─── applyCandidateGating: gating por PRESENCIA de candidatos (fix Raf 2026-06-12) ──────────
+
+/** Config base con todo habilitado (lo que devuelve resolveGroupActions con ambos data_keys on). */
+const allEnabledConfig: GroupActionsAvailability = { castrate: true, vaccinate: true, wean: true };
+
+test('applyCandidateGating: con candidatos de ambas → las 3 acciones (config + candidatos)', () => {
+  const out = applyCandidateGating(allEnabledConfig, { castrate: 2, wean: 3 });
+  assert.deepEqual(out, { castrate: true, vaccinate: true, wean: true });
+});
+
+test('applyCandidateGating: SIN candidatos a destete → Destetar OFF aunque config lo habilite', () => {
+  const out = applyCandidateGating(allEnabledConfig, { castrate: 1, wean: 0 });
+  assert.equal(out.wean, false, 'destete sin candidatos no se ofrece');
+  assert.equal(out.vaccinate, true, 'vacunación no se gatea por candidatos');
+  assert.equal(out.castrate, true, 'castración con candidatos sí');
+});
+
+test('applyCandidateGating: SIN candidatos a castración → Castrar OFF (no depende de config, R1.5)', () => {
+  const out = applyCandidateGating(allEnabledConfig, { castrate: 0, wean: 2 });
+  assert.equal(out.castrate, false, 'castración sin machos enteros candidatos no se ofrece');
+  assert.equal(out.wean, true);
+});
+
+test('applyCandidateGating: NO rompe el gating de config — destete OFF en config sigue OFF con candidatos', () => {
+  // Config con destete deshabilitado (rodeo sin `destete`): aunque hubiera terneros, NO se ofrece.
+  const config: GroupActionsAvailability = { castrate: true, vaccinate: true, wean: false };
+  const out = applyCandidateGating(config, { castrate: 1, wean: 5 });
+  assert.equal(out.wean, false, 'config destete OFF manda aunque haya candidatos');
+});
+
+test('applyCandidateGating: vacunación respeta SOLO la config (off en config → off, on → on)', () => {
+  const off: GroupActionsAvailability = { castrate: true, vaccinate: false, wean: true };
+  assert.equal(applyCandidateGating(off, { castrate: 1, wean: 1 }).vaccinate, false);
+  const on: GroupActionsAvailability = { castrate: true, vaccinate: true, wean: true };
+  assert.equal(applyCandidateGating(on, { castrate: 1, wean: 1 }).vaccinate, true);
+});
+
+test('applyCandidateGating: grupo vacío (0 candidatos) → todas las gateadas por candidatos OFF', () => {
+  const out = applyCandidateGating(allEnabledConfig, { castrate: 0, wean: 0 });
+  assert.deepEqual(out, { castrate: false, vaccinate: true, wean: false });
 });
 
 // ─── buildRodeoGating: data_key → field_id → enabled ───────────────────────────────────────

@@ -46,7 +46,7 @@ import {
   applyBulkCastration,
   applyBulkWeaning,
 } from '@/services/bulk-operations';
-import { fetchRodeoGroupActions } from '@/services/group-data';
+import { fetchRodeoConfigGating } from '@/services/group-data';
 import { revertCategoryOverride } from '@/services/animals';
 import { buildBulkCandidates, type BulkOperation } from '@/utils/bulk-candidates';
 import {
@@ -516,9 +516,11 @@ async function resolveWeanGatingPredicate(
   const distinct = [...new Set(rodeoIds)];
   const enabledByRodeo = new Map<string, boolean>();
   for (const rodeoId of distinct) {
-    const r = await fetchRodeoGroupActions(rodeoId);
+    // CONFIG-only (no candidate-gated): preguntamos si el rodeo TIENE `destete` habilitado, no si tiene
+    // candidatos (fetchRodeoGroupActions ahora gatea por candidatos → su .wean sería la pregunta equivocada).
+    const r = await fetchRodeoConfigGating(rodeoId);
     if (!r.ok) return null; // gating irresoluble → no excluir a ciegas
-    enabledByRodeo.set(rodeoId, r.value.wean);
+    enabledByRodeo.set(rodeoId, r.value.weaningEnabled);
   }
   return (rodeoId: string) => enabledByRodeo.get(rodeoId) === true;
 }
