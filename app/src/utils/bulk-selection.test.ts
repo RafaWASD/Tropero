@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import { type GroupProfile } from './bulk-candidates.ts';
 import {
   buildBulkSelectionState,
+  clearOverridesInSelection,
   toggleProfile,
   toggleSection,
   sectionCheckState,
@@ -232,6 +233,55 @@ test('R5.6: overrideCount default 0 cuando categoryOverride no se provee (campo 
   const candidates = [profile({ profileId: 'a', categoryCode: 'ternero' })]; // sin categoryOverride
   const state = buildBulkSelectionState('castrate', candidates);
   assert.equal(summarizeSelection(state).overrideCount, 0);
+});
+
+// ─── R5.6: clearOverridesInSelection (refresh OPTIMISTA tras revertir — fix re-fetch que parpadea) ──
+
+test('clearOverridesInSelection: limpia override de los revertidos → overrideCount baja, selección intacta', () => {
+  const candidates = [
+    profile({ profileId: 'fijado-1', categoryCode: 'ternero', categoryOverride: true }),
+    profile({ profileId: 'fijado-2', categoryCode: 'ternero', categoryOverride: true }),
+    profile({ profileId: 'normal', categoryCode: 'ternero', categoryOverride: false }),
+  ];
+  const state = buildBulkSelectionState('castrate', candidates); // los 3 terneros comunes → tildados
+  assert.equal(summarizeSelection(state).overrideCount, 2);
+
+  // Revertimos solo 'fijado-1'.
+  const next = clearOverridesInSelection(state, new Set(['fijado-1']));
+  // overrideCount baja a 1 (queda 'fijado-2'); el total/selección NO cambia.
+  assert.equal(summarizeSelection(next).overrideCount, 1);
+  assert.equal(summarizeSelection(next).total, 3);
+  assert.deepEqual(selectedIds(next), selectedIds(state));
+
+  // Revertimos los dos → overrideCount 0.
+  const cleared = clearOverridesInSelection(state, new Set(['fijado-1', 'fijado-2']));
+  assert.equal(summarizeSelection(cleared).overrideCount, 0);
+  assert.equal(summarizeSelection(cleared).total, 3);
+});
+
+test('clearOverridesInSelection: PURO — no muta el estado de entrada', () => {
+  const candidates = [profile({ profileId: 'fijado', categoryCode: 'ternero', categoryOverride: true })];
+  const state = buildBulkSelectionState('castrate', candidates);
+  const next = clearOverridesInSelection(state, new Set(['fijado']));
+  // El input conserva su override (no mutado); el resultado es un objeto NUEVO.
+  assert.equal(summarizeSelection(state).overrideCount, 1);
+  assert.equal(summarizeSelection(next).overrideCount, 0);
+  assert.notEqual(next, state);
+  assert.notEqual(next.sections, state.sections);
+});
+
+test('clearOverridesInSelection: set vacío → devuelve el MISMO estado (no-op, identidad estable)', () => {
+  const candidates = [profile({ profileId: 'fijado', categoryCode: 'ternero', categoryOverride: true })];
+  const state = buildBulkSelectionState('castrate', candidates);
+  const next = clearOverridesInSelection(state, new Set());
+  assert.equal(next, state); // misma referencia: no re-render de gusto
+});
+
+test('clearOverridesInSelection: ids ajenos (no tildados / inexistentes) no afectan a nadie', () => {
+  const candidates = [profile({ profileId: 'fijado', categoryCode: 'ternero', categoryOverride: true })];
+  const state = buildBulkSelectionState('castrate', candidates);
+  const next = clearOverridesInSelection(state, new Set(['otro-que-no-existe']));
+  assert.equal(summarizeSelection(next).overrideCount, 1); // 'fijado' sigue con override
 });
 
 test('R11.8/R5.6: desglose de DESTETE suma terneros+terneras y cuenta override (sin lógica ⭐)', () => {

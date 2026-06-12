@@ -59,7 +59,11 @@ export default function LotesScreen() {
 
   const muted = getTokenValue('$textMuted', 'color');
 
-  const [groups, setGroups] = useState<ManagementGroup[]>([]);
+  // `groups === null` = todavía no cargó (carga inicial: el blank "Cargando lotes…" se permite). Una vez
+  // cargado, las acciones (crear/renombrar/borrar) mutan el array EN SITIO de forma optimista y reconcilian
+  // con un refresh SILENCIOSO — nunca volvemos a `null` ni toggleamos `loading` (que blanquearía + resetearía
+  // el scroll). Misma receta que `animal/[id].tsx` (load({silent}) + patch optimista + revert-si-falla).
+  const [groups, setGroups] = useState<ManagementGroup[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -79,21 +83,30 @@ export default function LotesScreen() {
   // Re-entrancy guard del borrado (un doble-tap no dispara dos).
   const busyRef = useRef(false);
 
-  const load = useCallback(async () => {
+  // `load` distingue CARGA INICIAL (puede blanquear: setea `loading`, que desmonta la lista y resetea el
+  // scroll al tope) de REFRESH SILENCIOSO post-acción (`silent: true` — NO toca `loading`: la lista queda
+  // montada, el scroll se mantiene). Las acciones de la pantalla (crear/renombrar/borrar lote) aplican el
+  // cambio OPTIMISTA en sitio y luego reconcilian con `load({ silent: true })`, sin el parpadeo en blanco.
+  const load = useCallback(async (opts: { silent?: boolean } = {}) => {
+    const silent = opts.silent === true;
     if (!establishmentId) {
       setGroups([]);
       setLoading(false);
       return;
     }
-    setLoading(true);
+    if (!silent) setLoading(true);
     setError(null);
     const r = await fetchManagementGroups(establishmentId);
-    setLoading(false);
+    if (!silent) setLoading(false);
     if (!r.ok) {
-      setError(
-        r.error.kind === 'network' ? 'Sin conexión: no pudimos cargar los lotes.' : 'No pudimos cargar los lotes.',
-      );
-      setGroups([]);
+      // En un refresh SILENCIOSO un fallo transitorio NO debe volar la lista ya montada (el cambio optimista
+      // ya está reflejado); conservamos el estado actual y salimos. En la carga inicial sí mostramos el error.
+      if (!silent) {
+        setError(
+          r.error.kind === 'network' ? 'Sin conexión: no pudimos cargar los lotes.' : 'No pudimos cargar los lotes.',
+        );
+        setGroups([]);
+      }
       return;
     }
     setGroups(r.value);
@@ -105,7 +118,7 @@ export default function LotesScreen() {
 
   // ── Crear lote (owner) ──
   const dupWarning =
-    newName.trim().length > 0 && hasDuplicateName(newName, groups)
+    newName.trim().length > 0 && hasDuplicateName(newName, groups ?? [])
       ? `Ya tenés un lote llamado «${newName.trim()}». Podés crearlo igual.`
       : null;
 
@@ -124,10 +137,13 @@ export default function LotesScreen() {
       setCreateError(r.error.kind === 'network' ? OFFLINE_COPY : r.error.message);
       return;
     }
+    // OPTIMISMO EN SITIO: agregamos el lote nuevo al final SIN blanquear la pantalla ni resetear el scroll.
+    // createManagementGroup devuelve el id REAL (uuid de cliente, ya en SQLite local) + el nombre → no hace
+    // falta re-leer para reconciliar el id (el create no falla en este punto: el return ya fue ok).
+    setGroups((prev) => [...(prev ?? []), r.value]);
     setNewName('');
     setCreating(false);
-    await load();
-  }, [establishmentId, newName, submittingCreate, load]);
+  }, [establishmentId, newName, submittingCreate]);
 
   // ── Borrar lote (owner) — confirmación destructiva con copy D1 ──
   const onDelete = useCallback(
@@ -156,17 +172,24 @@ export default function LotesScreen() {
         return;
       }
       setDeletingId(group.id);
+      // OPTIMISMO EN SITIO: sacamos el lote de la lista YA (sin blanquear ni resetear el scroll) + cerramos
+      // su acordeón si estaba abierto. Snapshot para revertir si el write falla (raro: el soft-delete encola
+      // offline, pero el clear-NULL de miembros es un write local que podría fallar).
+      const snapshot = groups;
+      setGroups((prev) => (prev == null ? prev : prev.filter((g) => g.id !== group.id)));
+      if (expandedId === group.id) setExpandedId(null);
       const r = await softDeleteManagementGroup(group.id);
       setDeletingId(null);
       busyRef.current = false;
       if (!r.ok) {
+        setGroups(snapshot); // REVERT: el lote re-aparece si el borrado fue rechazado
         Alert.alert('No se pudo eliminar', r.error.kind === 'network' ? OFFLINE_COPY : r.error.message);
         return;
       }
-      if (expandedId === group.id) setExpandedId(null);
-      await load();
+      // Refresh SILENCIOSO para reconciliar con el SQLite local (sin parpadeo ni salto al tope).
+      void load({ silent: true });
     },
-    [establishmentId, expandedId, load],
+    [establishmentId, expandedId, groups, load],
   );
 
   return (
@@ -208,16 +231,18 @@ export default function LotesScreen() {
           </Text>
         </YStack>
 
-        {error ? (
+        {/* Blank "Cargando lotes…" SOLO en la carga inicial (groups === null): una vez montada la lista,
+            las acciones la mutan en sitio + refrescan en silencio, sin volver nunca a este placeholder. */}
+        {error && groups === null ? (
           <YStack gap="$2" marginTop="$2">
             <FormError message={error} />
             <Button variant="secondary" fullWidth onPress={() => void load()}>
               Reintentar
             </Button>
           </YStack>
-        ) : loading ? (
+        ) : loading && groups === null ? (
           <InfoNote>Cargando lotes…</InfoNote>
-        ) : groups.length === 0 ? (
+        ) : (groups ?? []).length === 0 ? (
           <InfoNote>
             {isOwner
               ? 'Este campo todavía no tiene lotes. Creá el primero abajo.'
@@ -225,21 +250,27 @@ export default function LotesScreen() {
           </InfoNote>
         ) : (
           <YStack gap="$3" marginTop="$2">
-            {groups.map((g) => (
+            {(groups ?? []).map((g) => (
               <LoteCard
                 key={g.id}
                 group={g}
                 isOwner={isOwner}
                 establishmentId={establishmentId}
-                groups={groups}
+                groups={groups ?? []}
                 expanded={expandedId === g.id}
                 onToggleExpand={() => setExpandedId((id) => (id === g.id ? null : g.id))}
                 renaming={renamingId === g.id}
                 onStartRename={() => setRenamingId(g.id)}
                 onCancelRename={() => setRenamingId(null)}
-                onRenamed={async () => {
+                onRenamed={(newName) => {
+                  // OPTIMISMO EN SITIO: el write ya tuvo éxito en RenameForm → actualizamos el name del item
+                  // en su lugar (sin blanquear ni resetear el scroll) y cerramos el form inline. Refresh
+                  // silencioso para reconciliar con el SQLite local.
+                  setGroups((prev) =>
+                    prev == null ? prev : prev.map((it) => (it.id === g.id ? { ...it, name: newName } : it)),
+                  );
                   setRenamingId(null);
-                  await load();
+                  void load({ silent: true });
                 }}
                 deleting={deletingId === g.id}
                 onDelete={() => void onDelete(g)}
@@ -344,7 +375,8 @@ function LoteCard({
   renaming: boolean;
   onStartRename: () => void;
   onCancelRename: () => void;
-  onRenamed: () => Promise<void>;
+  /** El write ya tuvo éxito; recibe el nombre nuevo para el patch optimista en sitio. */
+  onRenamed: (newName: string) => void;
   deleting: boolean;
   onDelete: () => void;
   onOpenAnimal: (profileId: string) => void;
@@ -465,7 +497,8 @@ function RenameForm({
   group: ManagementGroup;
   groups: ManagementGroup[];
   onCancel: () => void;
-  onRenamed: () => Promise<void>;
+  /** El write ya tuvo éxito; recibe el nombre nuevo (validado/trimeado) para el patch optimista del padre. */
+  onRenamed: (newName: string) => void;
 }) {
   const [name, setName] = useState(group.name);
   const [error, setError] = useState<string | null>(null);
@@ -492,7 +525,8 @@ function RenameForm({
       setError(r.error.kind === 'network' ? OFFLINE_COPY : r.error.message);
       return;
     }
-    await onRenamed();
+    // Pasamos el nombre VALIDADO/TRIMEADO (el mismo que persistió el service) para el patch optimista del padre.
+    onRenamed(valid.value);
   }, [group.id, name, submitting, onRenamed]);
 
   return (

@@ -104,6 +104,47 @@ test('crear lote → asignar desde la ficha → ver miembros', async ({ page }) 
   await expect(page.getByRole('button', { name: new RegExp(idv) }).first()).toBeVisible({ timeout: 20_000 });
 });
 
+// Anti-patrón "re-fetch que parpadea" (fix Raf 2026-06-12, FIX A): crear + renombrar un lote NO debe volver
+// a mostrar el placeholder "Cargando lotes…" (la lista ya está montada → se muta en sitio + refresh silencioso,
+// nunca se blanquea). Asertamos que el spinner NUNCA reaparece tras cada acción y que el cambio se refleja.
+test('crear/renombrar NO blanquea la lista (optimismo en sitio, sin "Cargando lotes…")', async ({ page }) => {
+  const user = await createTestUser('lotesopt');
+  await setUserPhone(user.id, '1123456789');
+  await seedEstablishmentWithRodeo(user.id, 'Campo LotesOpt');
+
+  const loteName = `${RUN_TAG} Invierno`;
+  const renamed = `${RUN_TAG} Invierno B`;
+
+  await page.goto('/');
+  await signIn(page, user);
+  await waitForHome(page);
+
+  await gotoLotes(page);
+  const spinner = page.getByText('Cargando lotes…', { exact: true });
+
+  // ── Crear: la lista NO debe blanquear (el lote nuevo aterriza optimista). ──
+  await page.getByRole('button', { name: 'Crear lote', exact: true }).click();
+  await page.getByLabel('Nombre del lote', { exact: true }).fill(loteName);
+  await page.getByRole('button', { name: 'Crear lote', exact: true }).last().click();
+  await expect(
+    page.getByRole('button', { name: `Ver los animales del lote ${loteName}`, exact: true }),
+  ).toBeVisible({ timeout: 20_000 });
+  // Tras crear, el placeholder de carga inicial NO reaparece (mutación en sitio, no re-fetch que blanquea).
+  await expect(spinner).toHaveCount(0);
+
+  // ── Renombrar: el item se actualiza en su lugar, sin blanquear. ──
+  await page.getByRole('button', { name: `Renombrar el lote ${loteName}`, exact: true }).click();
+  const renameInput = page.getByLabel('Nombre del lote', { exact: true });
+  await expect(renameInput).toBeVisible({ timeout: 20_000 });
+  await renameInput.fill(renamed);
+  await page.getByRole('button', { name: 'Guardar', exact: true }).click();
+  // El lote aparece con el nombre nuevo (ancla única por RUN_TAG) y el spinner NO reaparece.
+  await expect(
+    page.getByRole('button', { name: `Ver los animales del lote ${renamed}`, exact: true }),
+  ).toBeVisible({ timeout: 20_000 });
+  await expect(spinner).toHaveCount(0);
+});
+
 // D1 end-to-end: crear lote → asignar 1 animal → borrar el lote → el animal queda SIN lote y el lote
 // desaparece de la lista. El soft-delete del lote pasa por el RPC `soft_delete_management_group`
 // (0041, owner-only); el clear-NULL del paso 1 va por UPDATE directo. No hay bug de backend: el RPC

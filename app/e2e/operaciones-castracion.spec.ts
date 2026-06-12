@@ -134,6 +134,14 @@ test('castración masiva: defaults → ⭐ resaltado → bottom-sheet reversible
   // ── Verificar la TRANSICIÓN + la OBSERVACIÓN en la ficha del TORITO castrado. ───────────────────
   // Al tocar "Listo" volvemos a la VISTA DE GRUPO (backOr → router.back() pop-ea la selección), que se
   // re-carga al enfocar (useGroupView) → la fila del torito ya muestra Novillito. La abrimos desde ahí.
+  //
+  // FIX B (Raf 2026-06-12): al VOLVER de una masiva el re-focus de useGroupView es SILENCIOSO (no setea
+  // loading cuando ya hay animales) → la lista NO debe re-mostrar "Cargando animales…" (que blanqueaba +
+  // re-montaba la lista/barra/conteo). Anclamos primero en que la lista ya tiene la fila del torito (la
+  // vista re-cargó en el lugar) y asertamos que el placeholder de carga NO está presente.
+  await expect(page.getByRole('button', { name: new RegExp(idvBull) }).first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText('Cargando animales…', { exact: true })).toHaveCount(0);
+
   await openAnimalFichaFromGroup(page, idvBull);
 
   // R13.5 + R10.6: el espejo C6 (offline) muestra la categoría recalculada → Novillito (torito → novillito).

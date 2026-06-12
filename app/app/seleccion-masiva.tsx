@@ -51,6 +51,7 @@ import { revertCategoryOverride } from '@/services/animals';
 import { buildBulkCandidates, type BulkOperation } from '@/utils/bulk-candidates';
 import {
   buildBulkSelectionState,
+  clearOverridesInSelection,
   sectionCheckState,
   selectedCount,
   summarizeSelection,
@@ -246,14 +247,27 @@ export default function SeleccionMasivaScreen() {
     const withOverride = selectedCandidates.filter((c) => c.categoryOverride === true);
     if (withOverride.length === 0) return;
     setRevertingOverride(true);
+    // Revertimos uno por uno; sólo limpiamos en sitio los que el service ACEPTÓ (un fallo raro de write local
+    // deja ese animal con su override → no mentimos su estado).
+    const reverted = new Set<string>();
     for (const c of withOverride) {
-      await revertCategoryOverride(c.profileId);
+      const r = await revertCategoryOverride(c.profileId);
+      if (r.ok) reverted.add(c.profileId);
     }
     setRevertingOverride(false);
     setSheetOpen(false);
-    // Recargar para reflejar la categoría ya recalculada (los que tenían override dejan de avisar).
-    await load();
-  }, [selectedCandidates, load]);
+    // OPTIMISMO EN SITIO (fix Raf 2026-06-12): reflejamos category_override=false de los revertidos SIN re-
+    // fetchear toda la lista (que blanqueaba "Cargando animales…" + reseteaba el scroll). Actualizamos tanto
+    // `candidates` (fuente del candidateById + selectedCandidates) como `selectionState.sections` (fuente del
+    // overrideCount del desglose → el aviso R5.6 desaparece solo). La SELECCIÓN del usuario (`selected`) se
+    // PRESERVA intacta — no la tocamos. El server ya recalculó la categoría offline (LWW reconcilia al subir).
+    if (reverted.size > 0) {
+      setCandidates((prev) =>
+        prev.map((c) => (reverted.has(c.profileId) ? { ...c, categoryOverride: false } : c)),
+      );
+      setSelectionState((prev) => (prev == null ? prev : clearOverridesInSelection(prev, reverted)));
+    }
+  }, [selectedCandidates]);
 
   // ── Render de la fase de PROGRESO (post-confirmar) ─────────────────────────────────────
   if (applyPhase) {

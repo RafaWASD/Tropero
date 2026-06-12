@@ -166,6 +166,31 @@ export function selectedCount(state: BulkSelectionState): number {
 }
 
 /**
+ * Limpia `category_override` (→ false) de los perfiles cuyo `profileId` está en `revertedIds`, devolviendo
+ * un estado NUEVO (inmutable: arrays nuevos + objetos perfil nuevos solo para los afectados). Lo usa la
+ * pantalla de selección tras revertir overrides desde el sheet (R5.6) para reflejar el cambio EN SITIO sin
+ * re-fetchear toda la lista (anti-patrón del blank/scroll-reset): el `overrideCount` del desglose baja solo,
+ * el aviso desaparece, y la SELECCIÓN del usuario (`selected`) se preserva intacta. PURA: no muta el input.
+ */
+export function clearOverridesInSelection(
+  state: BulkSelectionState,
+  revertedIds: ReadonlySet<string>,
+): BulkSelectionState {
+  if (revertedIds.size === 0) return state;
+  return {
+    ...state,
+    sections: state.sections.map((section) => ({
+      ...section,
+      profiles: section.profiles.map((p) =>
+        revertedIds.has(p.profileId) && p.categoryOverride === true
+          ? { ...p, categoryOverride: false }
+          : p,
+      ),
+    })),
+  };
+}
+
+/**
  * Desglose de la selección para el bottom-sheet (R11.8 / R5.6). Recorre SOLO los candidatos
  * SELECCIONADOS (a partir de las secciones del estado, que son la fuente de los GroupProfile) y arma:
  *   - total = cantidad de tildados (== selectedCount — invariante verificada en test);
