@@ -138,6 +138,12 @@ export type TimelineItem =
        */
       serviceType: ServiceType | null;
       notes: string | null;
+      /**
+       * created_by del evento (spec 10 T-UI.8 / R4.5). El read local lo proyecta para gatear (best-effort)
+       * el borrado del evento desde la ficha (owner|autor). null = sin autor registrado / fila legacy. La
+       * BARRERA REAL es la RLS UPDATE server-side. La RPC animal_timeline (path online legacy) NO lo trae.
+       */
+      createdBy: string | null;
     }
   | {
       kind: 'sanitary';
@@ -149,6 +155,8 @@ export type TimelineItem =
       productName: string | null;
       route: string | null;
       notes: string | null;
+      /** created_by del evento (spec 10 T-UI.8). Ver la nota de `reproductive.createdBy`. */
+      createdBy: string | null;
     }
   | {
       kind: 'condition_score';
@@ -270,6 +278,8 @@ export function parseTimelineRow(row: TimelineRow): TimelineItem | null {
         // la RPC (0069) → ya está en `base`, NO se pisa con null (ese era el bug que esto cierra).
         serviceType: null,
         notes: str(p, 'notes'),
+        // created_by (spec 10 T-UI.8): lo proyecta el read local; la RPC online legacy no → null.
+        createdBy: str(p, 'created_by'),
       };
     case 'sanitary':
       return {
@@ -279,6 +289,7 @@ export function parseTimelineRow(row: TimelineRow): TimelineItem | null {
         productName: str(p, 'product_name'),
         route: str(p, 'route'),
         notes: str(p, 'notes'),
+        createdBy: str(p, 'created_by'),
       };
     case 'condition_score':
       return {

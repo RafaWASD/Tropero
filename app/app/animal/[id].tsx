@@ -33,7 +33,10 @@ import {
   Milk,
   Pin,
   Plus,
+  Scissors,
+  Star,
   Tag,
+  Trash2,
   Venus,
 } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
@@ -41,8 +44,11 @@ import type { LucideIcon } from 'lucide-react-native';
 import { Button, Card, CategoryBadge, InfoNote, FormError, FormField, TimelineEvent } from '@/components';
 import {
   fetchAnimalDetail,
+  previewCastrationCategory,
   previewRevertCategory,
   revertCategoryOverride,
+  setCastrated,
+  setFutureBull,
   type AnimalDetail,
   type AnimalStatus,
 } from '@/services/animals';
@@ -55,7 +61,14 @@ import {
   type ManagementGroup,
 } from '@/services/management-groups';
 import { canManageGroups, validateGroupName } from '@/utils/management-group';
-import { fetchTimeline, fetchMother, type TimelineItem, type MotherLink } from '@/services/events';
+import {
+  deleteTypedEvent,
+  fetchTimeline,
+  fetchMother,
+  type TimelineItem,
+  type MotherLink,
+} from '@/services/events';
+import { shouldShowFutureBullBadge } from '@/components/AnimalRow';
 import {
   deriveCurrentState,
   formatEventDate,
@@ -190,15 +203,22 @@ export default function AnimalDetailScreen() {
   // animal pertenece a OTRO campo (detail.establishmentId !== activo), el owner-flag del contexto NO
   // aplica a ese campo → en ese caso habilitamos SOLO por created_by === userId (el RPC re-valida con
   // has_role_in del campo del animal igual). Si coincide el campo activo, usamos estState.role.
+  // ¿El usuario es OWNER del campo del ANIMAL? (best-effort, multi-tenant): el `role` del contexto es del
+  // campo ACTIVO → solo lo sabemos si el animal pertenece al campo activo Y ese rol es owner. Si el animal
+  // es de OTRO campo, no conocemos el rol del usuario en ese campo → false (conservador; la RLS del server
+  // re-valida con has_role_in/is_owner_of del campo real). Reusado por canExit + el gating de borrar evento.
+  const isOwnerOfAnimal = useMemo(() => {
+    if (!detail) return false;
+    const activeEstId = estState.status === 'active' ? estState.current.id : null;
+    const animalInActiveEst = activeEstId != null && activeEstId === detail.establishmentId;
+    return animalInActiveEst && estState.status === 'active' && estState.role === 'owner';
+  }, [detail, estState]);
+
   const canExit = useMemo(() => {
     if (!detail || detail.status !== 'active') return false;
     const isAuthor = userId != null && detail.createdBy != null && detail.createdBy === userId;
-    const activeEstId = estState.status === 'active' ? estState.current.id : null;
-    const animalInActiveEst = activeEstId != null && activeEstId === detail.establishmentId;
-    const isOwnerOfActive = estState.status === 'active' && estState.role === 'owner';
-    const isOwner = animalInActiveEst && isOwnerOfActive;
-    return isAuthor || isOwner;
-  }, [detail, userId, estState]);
+    return isAuthor || isOwnerOfAnimal;
+  }, [detail, userId, isOwnerOfAnimal]);
 
   const goToBaja = useCallback(() => {
     if (!detail) return;
@@ -256,6 +276,114 @@ export default function AnimalDetailScreen() {
     const r = await previewRevertCategory(detail.profileId);
     return r.ok && r.value ? r.value.derivedName : null;
   }, [detail]);
+
+  // ── Castrado Sí/No (spec 10 T-UI.7 / R13.1). ──
+  // Solo machos activos. Anticipa la consecuencia (el NAME de la categoría destino con el is_castrated NUEVO,
+  // espejo C6) en la confirmación; al confirmar, setCastrated encola el UPDATE + la observación automática
+  // (R13.7). El espejo C6 muestra la categoría nueva al instante offline; el future_bull se auto-limpia al
+  // castrar (server + el UPDATE) → al recargar la ficha ya no muestra el ⭐. La RLS es la barrera real al subir.
+  const canEditCastrated = detail != null && detail.sex === 'male' && detail.status === 'active';
+
+  // Anticipa el NAME de la categoría destino al flipear is_castrated a `nextValue` (RC6.4.6 espejo): null =
+  // sin transición que anticipar (override, o destino == sin catálogo) → la card omite la línea de consecuencia.
+  const onPreviewCastration = useCallback(
+    async (nextValue: boolean): Promise<string | null> => {
+      if (!detail) return null;
+      const r = await previewCastrationCategory(detail.profileId, nextValue);
+      // Solo anticipamos si el destino DIFIERE de la categoría actual (p. ej. ternero no transiciona al
+      // castrarse → destino == actual → no mostramos una "consecuencia" que no cambia nada).
+      if (!r.ok || !r.value || r.value.code === detail.categoryCode) return null;
+      return r.value.name;
+    },
+    [detail],
+  );
+
+  const onSetCastrated = useCallback(
+    async (value: boolean): Promise<{ ok: boolean; error?: string }> => {
+      if (!detail) return { ok: false };
+      const r = await setCastrated(detail.profileId, value);
+      if (!r.ok) {
+        return {
+          ok: false,
+          error:
+            r.error.kind === 'network'
+              ? 'Sin conexión: no pudimos guardar el cambio. Conectate y volvé a intentar.'
+              : r.error.message,
+        };
+      }
+      // Recargamos: el espejo C6 con el is_castrated REAL refleja la categoría nueva al instante (offline) +
+      // la observación automática aparece en el timeline + el ⭐ se limpia si se castró.
+      await load();
+      return { ok: true };
+    },
+    [detail, load],
+  );
+
+  // ── ⭐ Futuro torito (spec 10 T-UI.7 / R12.2). ──
+  // Toggle SOLO en la ficha (no en el alta), solo machos NO castrados activos (un castrado ya no es futuro
+  // torito — el flag se auto-limpia). Sin observación automática (no es castración). El badge ⭐ se muestra
+  // solo si positivo y oculto en `toro` (R12.3, shouldShowFutureBullBadge).
+  const canEditFutureBull =
+    detail != null && detail.sex === 'male' && !detail.isCastrated && detail.status === 'active';
+
+  const onSetFutureBull = useCallback(
+    async (value: boolean): Promise<{ ok: boolean; error?: string }> => {
+      if (!detail) return { ok: false };
+      const r = await setFutureBull(detail.profileId, value);
+      if (!r.ok) {
+        return {
+          ok: false,
+          error:
+            r.error.kind === 'network'
+              ? 'Sin conexión: no pudimos guardar el cambio. Conectate y volvé a intentar.'
+              : r.error.message,
+        };
+      }
+      await load();
+      return { ok: true };
+    },
+    [detail, load],
+  );
+
+  // ── Corrección individual de eventos (spec 10 T-UI.8 / R4.5). ──
+  // Un evento de vacunación/destete del timeline es borrable (soft-delete) por OWNER del campo o AUTOR del
+  // evento (reuso spec 02 R6.8.1). Gating de cliente best-effort: la RLS UPDATE (owner|autor) es la barrera
+  // real. Solo se ofrece si el animal está ACTIVO (un archivado no recibe correcciones en MVP, igual que el
+  // resto de las acciones de la ficha).
+  const canDeleteEvent = useCallback(
+    (item: TimelineItem): boolean => {
+      if (!detail || detail.status !== 'active') return false;
+      // Solo vacunación (sanitary 'vaccination') y destete (reproductive 'weaning') — los eventos que
+      // generan las masivas de spec 10 (R4.5). El resto del timeline no se corrige desde acá en este chunk.
+      const isVaccination = item.kind === 'sanitary' && item.eventType === 'vaccination';
+      const isWeaning = item.kind === 'reproductive' && item.eventType === 'weaning';
+      if (!isVaccination && !isWeaning) return false;
+      const author = item.kind === 'sanitary' || item.kind === 'reproductive' ? item.createdBy : null;
+      const isAuthor = userId != null && author != null && author === userId;
+      return isOwnerOfAnimal || isAuthor;
+    },
+    [detail, userId, isOwnerOfAnimal],
+  );
+
+  const onDeleteEvent = useCallback(
+    async (item: TimelineItem): Promise<{ ok: boolean; error?: string }> => {
+      const r = await deleteTypedEvent({ kind: item.kind, eventId: item.eventId });
+      if (!r.ok) {
+        return {
+          ok: false,
+          error:
+            r.error.kind === 'network'
+              ? 'Sin conexión: no pudimos borrar el evento. Conectate y volvé a intentar.'
+              : r.error.message,
+        };
+      }
+      // Recargamos: el evento desaparece del timeline local (deleted_at) + el detalle refleja el recálculo de
+      // categoría offline (un destete borrado revierte la categoría vía el espejo C6 al refrescar).
+      await load();
+      return { ok: true };
+    },
+    [load],
+  );
 
   const onAssignLote = useCallback(
     async (groupId: string | null): Promise<{ ok: boolean; error?: string }> => {
@@ -377,6 +505,21 @@ export default function AnimalDetailScreen() {
               {detail.coatColor ? <AttributeRow label="Pelaje" value={detail.coatColor} /> : null}
             </DetailSection>
 
+            {/* Manejo (spec 10 T-UI.7): Castrado Sí/No + ⭐ Futuro torito — SOLO machos (la castración no
+                aplica a hembras; future_bull es solo-machos). Para hembras esta sección no se renderiza. */}
+            {detail.sex === 'male' ? (
+              <ManagementSection
+                isCastrated={detail.isCastrated}
+                futureBull={detail.futureBull}
+                categoryCode={detail.categoryCode}
+                canEditCastrated={canEditCastrated}
+                canEditFutureBull={canEditFutureBull}
+                onPreviewCastration={onPreviewCastration}
+                onSetCastrated={onSetCastrated}
+                onSetFutureBull={onSetFutureBull}
+              />
+            ) : null}
+
             {/* Lote (ADR-020 / C4): control para asignar / cambiar / quitar el lote. Cualquier rol
                 operativo puede asignar (RLS); el quick-create de un lote nuevo es owner-only. Modo
                 archivada (status ≠ active) → solo lectura (un animal de baja no se reorganiza). */}
@@ -403,6 +546,8 @@ export default function AnimalDetailScreen() {
               onAddEvent={goToAddEvent}
               onRetry={() => void load()}
               archived={detail.status !== 'active'}
+              canDeleteEvent={canDeleteEvent}
+              onDeleteEvent={onDeleteEvent}
             />
 
             {/* "Dar de baja" (C3.3, R4.14): al FONDO de la ficha, discreto (terracota/outline), gated:
@@ -691,6 +836,251 @@ function CategoryOverrideCard({
         )
       ) : null}
     </View>
+  );
+}
+
+// ─── Sección "Manejo" (spec 10 T-UI.7): Castrado Sí/No + ⭐ Futuro torito (solo machos) ────────
+//
+// Dos controles de manejo del macho, agrupados en una card con la firma RAFAQ (DetailSection + Scissors):
+//   1. "Castrado": estado editable (R13.1) con confirmación que ANTICIPA el recálculo de categoría (espejo
+//      C6, igual patrón que CategoryOverrideCard). Al confirmar → setCastrated (UPDATE + observación
+//      automática R13.7). El flip NO es un evento tipado en el timeline (D10) — aparece como observación.
+//   2. "Futuro torito" ⭐ (R12.2): toggle que protege al ternero de la castración masiva. Solo si el animal
+//      NO está castrado (un castrado ya no es futuro torito; el flag se auto-limpia). Badge ⭐ visible solo
+//      positivo + oculto en `toro` (R12.3, shouldShowFutureBullBadge). Sin observación (no es castración).
+//
+// Cero hardcode (tokens + getTokenValue para íconos). a11y por helper. La confirmación del castrado es una
+// acción con CONSECUENCIA (recalcula categoría) → confirmación inline explícita; el ⭐ es un toggle liviano.
+function ManagementSection({
+  isCastrated,
+  futureBull,
+  categoryCode,
+  canEditCastrated,
+  canEditFutureBull,
+  onPreviewCastration,
+  onSetCastrated,
+  onSetFutureBull,
+}: {
+  isCastrated: boolean;
+  futureBull: boolean;
+  categoryCode: string;
+  canEditCastrated: boolean;
+  canEditFutureBull: boolean;
+  /** Anticipa el NAME de la categoría destino al flipear is_castrated a `next` (o null si no transiciona). */
+  onPreviewCastration: (next: boolean) => Promise<string | null>;
+  onSetCastrated: (value: boolean) => Promise<{ ok: boolean; error?: string }>;
+  onSetFutureBull: (value: boolean) => Promise<{ ok: boolean; error?: string }>;
+}) {
+  return (
+    <DetailSection icon={Scissors} title="Manejo">
+      <CastrationRow
+        isCastrated={isCastrated}
+        editable={canEditCastrated}
+        onPreviewCastration={onPreviewCastration}
+        onSetCastrated={onSetCastrated}
+      />
+      {/* Futuro torito: solo se ofrece el toggle si el animal NO está castrado (un castrado ya no es futuro
+          torito). Si está castrado, la fila desaparece (no hay nada que togglear). */}
+      {!isCastrated ? (
+        <FutureBullRow
+          futureBull={futureBull}
+          categoryCode={categoryCode}
+          editable={canEditFutureBull}
+          onSetFutureBull={onSetFutureBull}
+        />
+      ) : null}
+    </DetailSection>
+  );
+}
+
+/**
+ * Fila "Castrado Sí/No" (R13.1). Muestra el estado actual (Sí/No) + un control para cambiarlo (solo machos
+ * activos, `editable`). Al tocar "Cambiar" expande una confirmación INLINE que ANTICIPA el recálculo de
+ * categoría ("La categoría se recalcula: Torito → Novillito") usando el espejo C6 (onPreviewCastration). Al
+ * confirmar → onSetCastrated(nuevoValor). El destino se anticipa solo si la categoría cambia (en `ternero` no
+ * transiciona → no se muestra la línea; igual se aplica el flip + la observación automática R13.7).
+ */
+function CastrationRow({
+  isCastrated,
+  editable,
+  onPreviewCastration,
+  onSetCastrated,
+}: {
+  isCastrated: boolean;
+  editable: boolean;
+  onPreviewCastration: (next: boolean) => Promise<string | null>;
+  onSetCastrated: (value: boolean) => Promise<{ ok: boolean; error?: string }>;
+}) {
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // NAME de la categoría destino para la línea de consecuencia. null = aún no resuelta / no transiciona.
+  const [targetName, setTargetName] = useState<string | null>(null);
+
+  const nextValue = !isCastrated; // el cambio invierte el estado actual
+
+  const startConfirm = useCallback(() => {
+    setConfirming(true);
+    setError(null);
+    setTargetName(null);
+    // Anticipamos la consecuencia (la categoría destino con el is_castrated NUEVO). Blando: si no transiciona
+    // (ternero) o no resuelve, la línea no se muestra — el flip se aplica igual (+ observación R13.7).
+    void onPreviewCastration(nextValue).then((name) => setTargetName(name));
+  }, [onPreviewCastration, nextValue]);
+
+  const onConfirm = useCallback(async () => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    const r = await onSetCastrated(nextValue);
+    // OK → la ficha recarga (isCastrated cambia) → esta fila se re-renderiza con el estado nuevo. No
+    // reseteamos busy (evita parpadeo). Si falla, surfaceamos el error y rehabilitamos.
+    if (!r.ok) {
+      setBusy(false);
+      setError(r.error ?? 'No se pudo guardar el cambio.');
+      return;
+    }
+    setConfirming(false);
+  }, [busy, onSetCastrated, nextValue]);
+
+  return (
+    <YStack gap="$2">
+      <XStack alignItems="center" gap="$2">
+        <YStack flex={1} minWidth={0} gap="$1">
+          <Text fontFamily="$body" fontSize="$3" fontWeight="500" color="$textMuted">
+            Castrado
+          </Text>
+          <Text fontFamily="$body" fontSize="$5" fontWeight="600" color="$textPrimary">
+            {isCastrated ? 'Sí' : 'No'}
+          </Text>
+        </YStack>
+        {/* "Cambiar" SOLO para un macho activo (editable). Discreto (link $primary), abre la confirmación. */}
+        {editable && !confirming ? (
+          <Pressable
+            hitSlop={8}
+            onPress={startConfirm}
+            {...buttonA11y(Platform.OS, { label: isCastrated ? 'Marcar como no castrado' : 'Marcar como castrado' })}
+          >
+            <Text fontFamily="$body" fontSize="$4" fontWeight="600" color="$primary">
+              Cambiar
+            </Text>
+          </Pressable>
+        ) : null}
+      </XStack>
+
+      {error ? <FormError message={error} /> : null}
+
+      {/* Confirmación inline que anticipa el recálculo (R13.1). */}
+      {editable && confirming ? (
+        <YStack gap="$3" paddingTop="$1">
+          <Text fontFamily="$body" fontSize="$4" fontWeight="500" color="$textPrimary">
+            {nextValue ? '¿Marcar este animal como castrado?' : '¿Marcar este animal como NO castrado?'}
+          </Text>
+          {/* Consecuencia (espejo C6): a qué categoría se recalcula. Tipografía secundaria. Omitida si no
+              transiciona (ternero) o no resolvió → solo se aplica el flip + la observación automática. */}
+          {targetName ? (
+            <Text
+              fontFamily="$body"
+              fontSize="$3"
+              fontWeight="500"
+              color="$textMuted"
+              {...labelA11y(Platform.OS, `La categoría se recalcula a ${targetName}.`)}
+            >
+              La categoría se recalcula: {targetName}
+            </Text>
+          ) : null}
+          <XStack gap="$2">
+            <YStack flex={1}>
+              <Button
+                variant="secondary"
+                fullWidth
+                disabled={busy}
+                onPress={() => {
+                  setConfirming(false);
+                  setError(null);
+                  setTargetName(null);
+                }}
+              >
+                Cancelar
+              </Button>
+            </YStack>
+            <YStack flex={1}>
+              <Button variant="primary" fullWidth disabled={busy} onPress={() => void onConfirm()}>
+                {busy ? 'Guardando…' : 'Confirmar'}
+              </Button>
+            </YStack>
+          </XStack>
+        </YStack>
+      ) : null}
+    </YStack>
+  );
+}
+
+/**
+ * Fila "Futuro torito" ⭐ (R12.2): toggle de manejo del ternero macho. Muestra el badge ⭐ cuando es positivo
+ * (y la categoría no es `toro`, R12.3) + un control para marcar/desmarcar (solo machos no castrados activos,
+ * `editable`). Sin confirmación (toggle liviano, sin consecuencia de categoría) y sin observación. El cambio
+ * recarga la ficha (onSetFutureBull → load) → el badge se actualiza al instante.
+ */
+function FutureBullRow({
+  futureBull,
+  categoryCode,
+  editable,
+  onSetFutureBull,
+}: {
+  futureBull: boolean;
+  categoryCode: string;
+  editable: boolean;
+  onSetFutureBull: (value: boolean) => Promise<{ ok: boolean; error?: string }>;
+}) {
+  const terracota = getTokenValue('$terracota', 'color');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const showStar = shouldShowFutureBullBadge(futureBull, categoryCode);
+
+  const onToggle = useCallback(async () => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    const r = await onSetFutureBull(!futureBull);
+    if (!r.ok) {
+      setBusy(false);
+      setError(r.error ?? 'No se pudo guardar el cambio.');
+      return;
+    }
+    // OK → la ficha recarga (futureBull cambia). No reseteamos busy (la fila se re-renderiza con el estado nuevo).
+  }, [busy, onSetFutureBull, futureBull]);
+
+  return (
+    <YStack gap="$2">
+      <XStack alignItems="center" gap="$2">
+        <YStack flex={1} minWidth={0} gap="$1">
+          <Text fontFamily="$body" fontSize="$3" fontWeight="500" color="$textMuted">
+            Futuro torito
+          </Text>
+          <XStack alignItems="center" gap="$2">
+            <Text fontFamily="$body" fontSize="$5" fontWeight="600" color="$textPrimary">
+              {futureBull ? 'Sí' : 'No'}
+            </Text>
+            {showStar ? <Star size={16} color={terracota} strokeWidth={2.5} fill={terracota} /> : null}
+          </XStack>
+        </YStack>
+        {/* Toggle (marcar/desmarcar) — solo macho no castrado activo. Discreto (link $primary). */}
+        {editable ? (
+          <Pressable
+            hitSlop={8}
+            disabled={busy}
+            onPress={() => void onToggle()}
+            {...buttonA11y(Platform.OS, { label: futureBull ? 'Quitar futuro torito' : 'Marcar como futuro torito' })}
+          >
+            <Text fontFamily="$body" fontSize="$4" fontWeight="600" color={busy ? '$textFaint' : '$primary'}>
+              {busy ? 'Guardando…' : futureBull ? 'Quitar' : 'Marcar'}
+            </Text>
+          </Pressable>
+        ) : null}
+      </XStack>
+      {error ? <FormError message={error} /> : null}
+    </YStack>
   );
 }
 
@@ -1206,6 +1596,8 @@ function HistorySection({
   onAddEvent,
   onRetry,
   archived,
+  canDeleteEvent,
+  onDeleteEvent,
 }: {
   timeline: TimelineItem[] | null;
   error: string | null;
@@ -1213,6 +1605,10 @@ function HistorySection({
   onRetry: () => void;
   /** Modo archivada (status ≠ active): oculta el CTA "Agregar evento" (C3.3). */
   archived: boolean;
+  /** ¿Este evento es corregible (borrable) desde la ficha? (spec 10 T-UI.8 / R4.5 — owner|autor). */
+  canDeleteEvent: (item: TimelineItem) => boolean;
+  /** Soft-deletea el evento (vacunación/destete) y recarga la ficha. */
+  onDeleteEvent: (item: TimelineItem) => Promise<{ ok: boolean; error?: string }>;
 }) {
   const primary = getTokenValue('$primary', 'color');
   // `now` se calcula UNA vez por render de la sección (no por fila) — determinístico dentro del render.
@@ -1269,16 +1665,149 @@ function HistorySection({
         </YStack>
       ) : (
         <Card gap="$1">
-          {timeline.map((item, i) => (
-            <TimelineEvent
-              key={`${item.kind}-${item.eventId}`}
-              item={item}
-              isLast={i === timeline.length - 1}
-              now={now}
-            />
-          ))}
+          {timeline.map((item, i) => {
+            const isLast = i === timeline.length - 1;
+            // Vacunación/destete corregibles (owner|autor, R4.5) → wrapper con botón de borrar. El resto
+            // del timeline queda display-only (el TimelineEvent canónico no cambia su contrato).
+            return canDeleteEvent(item) ? (
+              <DeletableTimelineEvent
+                key={`${item.kind}-${item.eventId}`}
+                item={item}
+                isLast={isLast}
+                now={now}
+                onDelete={() => onDeleteEvent(item)}
+              />
+            ) : (
+              <TimelineEvent
+                key={`${item.kind}-${item.eventId}`}
+                item={item}
+                isLast={isLast}
+                now={now}
+              />
+            );
+          })}
         </Card>
       )}
+    </YStack>
+  );
+}
+
+// ─── Nodo del timeline CORREGIBLE (spec 10 T-UI.8 / R4.5): TimelineEvent + botón borrar ──────────
+//
+// Wrapper local de un TimelineEvent de vacunación/destete con un botón de BORRAR (corrección individual,
+// reuso spec 02 R6.8.1). NO se toca el TimelineEvent canónico (display-only, components/) — el botón vive
+// acá, en la ficha. Confirmación INLINE (la baja de un evento es reversible-en-la-práctica recargándolo,
+// pero borra un dato → pedimos un toque de confirmación). El soft-delete es offline-safe; la RLS (owner|
+// autor) es la barrera real al subir (un rechazo re-aparece el evento). Sobre un destete, el server
+// recalcula la categoría (revierte la transición) — el espejo C6 lo refleja al recargar.
+function DeletableTimelineEvent({
+  item,
+  isLast,
+  now,
+  onDelete,
+}: {
+  item: TimelineItem;
+  isLast: boolean;
+  now: Date;
+  onDelete: () => Promise<{ ok: boolean; error?: string }>;
+}) {
+  const terracota = getTokenValue('$terracota', 'color');
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const onConfirm = useCallback(async () => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    const r = await onDelete();
+    // OK → la ficha recarga (el evento desaparece del timeline) → este nodo desmonta. No reseteamos busy
+    // (evita parpadeo). Si falla, surfaceamos el error y rehabilitamos.
+    if (!r.ok) {
+      setBusy(false);
+      setError(r.error ?? 'No se pudo borrar el evento.');
+      return;
+    }
+  }, [busy, onDelete]);
+
+  return (
+    <YStack width="100%">
+      <XStack width="100%" alignItems="flex-start">
+        {/* El TimelineEvent canónico ocupa el ancho; el botón borrar va a la derecha, alineado al título. */}
+        <View flex={1} minWidth={0}>
+          <TimelineEvent item={item} isLast={isLast} now={now} />
+        </View>
+        {!confirming ? (
+          <Pressable
+            hitSlop={8}
+            onPress={() => {
+              setConfirming(true);
+              setError(null);
+            }}
+            {...buttonA11y(Platform.OS, { label: 'Borrar evento' })}
+          >
+            <View padding="$2">
+              <Trash2 size={18} color={terracota} strokeWidth={2} />
+            </View>
+          </Pressable>
+        ) : null}
+      </XStack>
+
+      {/* Confirmación inline del borrado. Indentada para alinear con el contenido del nodo (después del
+          gutter del riel) — usa el token de spacing $8, sin número crudo (ADR-023 §4). */}
+      {confirming ? (
+        <YStack gap="$2" paddingLeft="$8" paddingBottom="$3">
+          {error ? <FormError message={error} /> : null}
+          <Text fontFamily="$body" fontSize="$3" fontWeight="500" color="$textMuted">
+            ¿Borrar este evento? Se puede volver a cargar si te equivocaste.
+          </Text>
+          <XStack gap="$2">
+            <YStack flex={1}>
+              <Button
+                variant="secondary"
+                fullWidth
+                disabled={busy}
+                onPress={() => {
+                  setConfirming(false);
+                  setError(null);
+                }}
+              >
+                Cancelar
+              </Button>
+            </YStack>
+            <YStack flex={1}>
+              {/* "Sí, borrar" terracota (acción destructiva-suave; el Button canónico no tiene variante
+                  destructiva → Pressable a mano con el lenguaje terracota, igual que ExitButton). */}
+              <Pressable
+                style={{ width: '100%' }}
+                disabled={busy}
+                onPress={() => void onConfirm()}
+                {...buttonA11y(Platform.OS, { label: 'Sí, borrar' })}
+              >
+                <XStack
+                  width="100%"
+                  minHeight="$touchMin"
+                  alignItems="center"
+                  justifyContent="center"
+                  gap="$2"
+                  borderRadius="$pill"
+                  backgroundColor="transparent"
+                  borderWidth={2}
+                  borderColor="$terracota"
+                  paddingHorizontal="$5"
+                  opacity={busy ? 0.6 : 1}
+                  pressStyle={{ backgroundColor: '$surface' }}
+                >
+                  <Trash2 size={18} color={terracota} strokeWidth={2.5} />
+                  <Text fontFamily="$body" fontSize="$5" fontWeight="600" color="$terracota">
+                    {busy ? 'Borrando…' : 'Sí, borrar'}
+                  </Text>
+                </XStack>
+              </Pressable>
+            </YStack>
+          </XStack>
+        </YStack>
+      ) : null}
     </YStack>
   );
 }

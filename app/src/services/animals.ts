@@ -19,6 +19,7 @@ import {
   type ReproEventInput,
   computeCategoryCode,
   computeDisplayOverrides,
+  resolveCastrationTargetCategory,
 } from '../utils/animal-category';
 import { classifyIdentifier, classifySearchQuery } from '../utils/animal-identifier';
 import { castrationObservationText } from '../utils/castration-copy';
@@ -1056,6 +1057,69 @@ export async function revertCategoryOverride(
  * caller re-fetchea; el reviewer/Gate 2 ven que no hay rollback de la exitosa). En la práctica los dos
  * writes locales tienen éxito offline (runLocalWrite solo falla si el execute local revienta).
  */
+/**
+ * Anticipa la CONSECUENCIA de flipear "Castrado Sí/No" en la ficha (R13.1): devuelve el `{ code, name }`
+ * de la categoría a la que el animal pasaría al setear `is_castrated = nextValue`, para mostrarlo en la
+ * confirmación ("La categoría se recalcula: Torito → Novillito"). SOLO LECTURA (display, RC6.3.5): espeja
+ * `compute_category` (0062) con el is_castrated NUEVO vía `resolveCastrationTargetCategory` (puro) ⇒ el
+ * destino anticipado es EXACTAMENTE el que el server computará al subir el UPDATE (write-through + 0064/
+ * 0086 simétrico). Offline-safe (todo del SQLite local: detalle + eventos + catálogo).
+ *
+ * Devuelve `ok:true, value:null` (la UI omite la línea de consecuencia) cuando:
+ *   - `category_override = true` → el server NO recalcula (override manda, R5.6);
+ *   - sin `system_id` o el code destino no está en el catálogo local → irresoluble (fail-safe).
+ * El flip en sí (R13.7: la observación automática) se aplica igual aunque acá no haya destino que anticipar.
+ */
+export async function previewCastrationCategory(
+  profileId: string,
+  nextValue: boolean,
+): Promise<ServiceResult<DisplayCategory | null>> {
+  // 1) Detalle local (sex, birth_date, system_id, category_override). emptyIsSyncing:false: "no
+  //    encontrado" es un caso de negocio (el caller ya tiene el detalle; esto solo trae system_id + inputs).
+  const detailRes = await runLocalQuerySingle<LocalDetailRow>(buildAnimalDetailQuery(profileId), {
+    emptyIsSyncing: false,
+  });
+  if (!detailRes.ok) return { ok: false, error: detailRes.error };
+  if (!detailRes.value) return { ok: true, value: null };
+  const row = detailRes.value;
+  const systemId = row.system_id ?? null;
+  if (!systemId) return { ok: true, value: null }; // sin system_id no se resuelve code→name → sin anticipación
+
+  // 2) Eventos reproductivos batched (synced + overlay) del perfil → inputs del espejo. Blando: si falla,
+  //    no anticipamos (el flip real no depende de esto).
+  const eventsRes = await runLocalQuery<{
+    animal_profile_id: string;
+    event_type: string;
+    event_date: string;
+    created_at: string | null;
+    pregnancy_status: string | null;
+  }>(buildCategoryMirrorEventsQuery([profileId]), { emptyIsSyncing: false });
+  if (!eventsRes.ok) return { ok: true, value: null };
+  const events: ReproEventInput[] = eventsRes.value.map((e) => ({
+    eventType: e.event_type,
+    eventDate: e.event_date,
+    createdAt: e.created_at,
+    pregnancyStatus: e.pregnancy_status,
+  }));
+
+  // 3) Catálogo code→name del sistema (local). Blando: si falla, no anticipamos.
+  const catRes = await runLocalQuery<CategoryCatalogEntry>(buildSystemCategoriesQuery(systemId), {
+    emptyIsSyncing: false,
+  });
+  if (!catRes.ok) return { ok: true, value: null };
+
+  // 4) Decisión PURA: el destino con el is_castrated NUEVO (respeta override → null). null = sin anticipación.
+  const target = resolveCastrationTargetCategory({
+    sex: row.sex ?? 'female',
+    birthDate: row.birth_date ?? null,
+    categoryOverride: toBool(row.category_override),
+    nextCastrated: nextValue,
+    events,
+    catalog: catRes.value,
+  });
+  return { ok: true, value: target };
+}
+
 export async function setCastrated(
   profileId: string,
   value: boolean,

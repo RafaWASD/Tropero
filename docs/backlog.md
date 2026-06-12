@@ -17,6 +17,13 @@ No es un sustituto de `feature_list.json` ni de los ADRs — es la antesala dond
 
 ## Ítems pendientes
 
+## 2026-06-12 — 3 LOW del Gate 2 del UI-C (ficha castrado + borrado de eventos) de spec 10
+
+**Origen**: Gate 2 del chunk UI-C, `progress/security_code_10-ui-c.md`. PASS 0 HIGH.
+- **L1 (hardening, no explotable)**: el lookup de `DELETABLE_EVENT_TABLE` (en `deleteTypedEvent`/`local-reads.ts`) es un objeto plano → `kind='constructor'` heredaría de `Object.prototype` y daría truthy → SQL basura LOCAL (no explotable: el `kind` viene de un literal del SQL del timeline, no de input de usuario). Hardening sugerido: `Object.hasOwn(map, kind)` o `Map`. Defensivo.
+- **L2 (pre-existente, fuera del diff)**: la policy RLS UPDATE de `sanitary_events`/`reproductive_events` no tiene restricción column-level → un owner|autor por curl directo podría tocar otras columnas además de `deleted_at`. Mismo-tenant, pre-existente de spec 02. Hardening futuro (column-level o RPC de soft-delete).
+- **Comentario impreciso**: `events.ts` menciona "rollback del overlay" en el path CRUD plano (no aplica) — cosmético, corregir al tocar.
+
 ## 2026-06-12 — LOWs del UI-B2 (vacunación) de spec 10 + decisión de design token
 
 **Origen**: Gate 2 + re-Gate 2 (fix VIA) del chunk UI-B2, `progress/security_code_10-ui-b2*.md`. PASS tras cerrar el HIGH VIA-ENUM-MISMATCH (el campo Vía pasó a chips del enum). LOWs/decisión:

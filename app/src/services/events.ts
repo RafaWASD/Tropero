@@ -50,6 +50,9 @@ import {
   buildAddObservationInsert,
   buildBirthOverlayContextQuery,
   buildCategoryIdByCodeQuery,
+  buildSoftDeleteEventUpdate,
+  DELETABLE_EVENT_TABLE,
+  type DeletableEventTable,
   type PendingProfileFields,
 } from './powersync/local-reads';
 import { runLocalQuery, runLocalQuerySingle, runLocalWrite } from './powersync/local-query';
@@ -589,6 +592,48 @@ export async function addObservation(input: AddObservationInput): Promise<Servic
     input.text,
   );
   const r = await runLocalWrite(q);
+  if (!r.ok) return { ok: false, error: { kind: r.error.kind, message: r.error.message } };
+  return { ok: true, value: true };
+}
+
+// ─── Corrección individual: borrar un evento tipado desde la ficha (spec 10 T-UI.8 / R4.5) ─────
+//
+// Reuso de spec 02 R6.8.1: los eventos TIPADOS (vacunación/destete y demás) se corrigen libremente por
+// OWNER o AUTOR, sin ventana de tiempo. Esta spec 10 cierra el GAP de UI: la ficha NO tenía edit/delete de
+// eventos del timeline (TimelineEvent era display-only). Acá agregamos el MÍNIMO: SOFT-DELETE (UPDATE de
+// `deleted_at`) de un evento de vacunación/destete desde su nodo del timeline.
+//
+// OFFLINE-FIRST (CRUD plano): el UPDATE local pega al instante (la fila desaparece del timeline local, que
+// filtra `deleted_at IS NULL`) → una CrudEntry → uploadData lo sube al reconectar. La RLS UPDATE server-side
+// (`is_owner_of(...) OR created_by = auth.uid()`, 0026/0027) es la BARRERA REAL (owner|autor); un rechazo
+// (42501) lo maneja uploadData (rollback del overlay + superficia, R8.1) → el evento RE-APARECE. El RECÁLCULO
+// de categoría lo dispara el server: sobre `reproductive_events` (incl. `weaning`) el trigger 0046 (AFTER
+// UPDATE OF deleted_at) recompute la categoría si el evento había transicionado (un destete borrado revierte
+// torito/vaquillona → ternero/ternera, si no hay override); `vaccination` no transiciona → sin recálculo. El
+// cliente solo re-fetchea el timeline + el detalle al volver/refrescar (el espejo C6 refleja el revert offline).
+
+export type DeleteTypedEventInput = {
+  /** kind del TimelineItem ('sanitary' | 'reproductive'). Otros kinds NO son borrables desde la ficha. */
+  kind: string;
+  /** id del evento (TimelineItem.eventId). */
+  eventId: string;
+};
+
+/**
+ * Soft-deletea un evento TIPADO (vacunación/destete) desde la ficha (R4.5). Resuelve la tabla por el `kind`
+ * del timeline (sanitary→sanitary_events, reproductive→reproductive_events). Un `kind` no borrable
+ * (weight/condition_score/lab_sample/category_change/observacion) devuelve error (no debería llegar: la UI
+ * solo ofrece el borrado en vacunación/destete). El write local SIEMPRE tiene éxito offline; el rechazo de
+ * autorización lo resuelve uploadData al subir (NO el return de acá). Idempotente (guard deleted_at IS NULL).
+ */
+export async function deleteTypedEvent(
+  input: DeleteTypedEventInput,
+): Promise<ServiceResult<true>> {
+  const table: DeletableEventTable | undefined = DELETABLE_EVENT_TABLE[input.kind];
+  if (!table) {
+    return { ok: false, error: { kind: 'unknown', message: 'Este evento no se puede corregir desde acá.' } };
+  }
+  const r = await runLocalWrite(buildSoftDeleteEventUpdate(table, input.eventId));
   if (!r.ok) return { ok: false, error: { kind: r.error.kind, message: r.error.message } };
   return { ok: true, value: true };
 }

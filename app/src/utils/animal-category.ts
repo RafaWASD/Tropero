@@ -371,6 +371,48 @@ export function deriveDisplayCategory(args: {
   return { code: match.code, name: match.name };
 }
 
+/**
+ * Resuelve la categoría DESTINO al flipear `is_castrated` (spec 10 R13.1 — la confirmación que ANTICIPA el
+ * recálculo en la ficha: "La categoría se recalcula: Torito → Novillito"). PURA: espeja `compute_category`
+ * server-side (0062) con el `is_castrated` NUEVO (`nextCastrated`), reusando `computeCategoryCode`, y
+ * resuelve su `name` legible en el catálogo local. Es el mismo cómputo que el server hará al subir el
+ * UPDATE (write-through + 0064/0086 simétrico) → lo que se anticipa coincide con lo que aterriza.
+ *
+ * Devuelve `null` (no se anticipa transición) cuando:
+ *   - `categoryOverride === true` → el server NO recalcula (override manda, R5.6) → no hay destino que mostrar;
+ *   - el `code` destino no tiene fila en el catálogo local (irresoluble) → fail-safe a "sin anticipación".
+ *
+ * El destino puede COINCIDIR con la categoría actual (p. ej. `ternero` no transiciona al castrarse — 0062
+ * sigue dando `ternero` hasta destete/1 año): en ese caso devuelve igual el `{ code, name }` del destino
+ * (== actual) y el caller decide si lo muestra (si destino == actual, la UI puede omitir la línea de
+ * consecuencia — no hubo cambio de categoría, solo el flip de estado + la observación automática R13.7).
+ */
+export function resolveCastrationTargetCategory(args: {
+  sex: AnimalSex | null;
+  birthDate: string | null;
+  categoryOverride: boolean;
+  /** Valor NUEVO de is_castrated (true = castrar, false = revertir). */
+  nextCastrated: boolean;
+  /** Eventos reproductivos no-borrados del perfil (mismo input que el espejo C6). */
+  events: readonly ReproEventInput[];
+  /** Catálogo code→name del sistema (ya leído del SQLite local). */
+  catalog: readonly CategoryCatalogEntry[];
+  /** Inyectable para tests deterministas (default: hoy). */
+  today?: Date;
+}): DisplayCategory | null {
+  if (args.categoryOverride) return null; // override manda: el server no recalcula (R5.6) → nada que anticipar
+  const derivedCode = computeCategoryCode({
+    sex: args.sex ?? 'female',
+    birthDate: args.birthDate,
+    isCastrated: args.nextCastrated,
+    events: args.events,
+    today: args.today,
+  });
+  const match = args.catalog.find((c) => c.code === derivedCode);
+  if (!match) return null; // code destino sin fila en el catálogo → no anticipamos (fail-safe)
+  return { code: match.code, name: match.name };
+}
+
 // ─── Núcleo PURO del espejo de display (C6 / RC6.3) — sin I/O, testeable a fondo ──────────────
 //
 // `computeDisplayOverrides` es la decisión COMPLETA del espejo de display, separada del I/O: el caller

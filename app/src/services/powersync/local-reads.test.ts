@@ -52,6 +52,8 @@ import {
   buildAddWeaningInsert,
   buildSetCastratedUpdate,
   buildSetFutureBullUpdate,
+  buildSoftDeleteEventUpdate,
+  DELETABLE_EVENT_TABLE,
   buildExistingVaccinationIdsQuery,
   buildExistingWeaningIdsQuery,
   buildProfileEstablishmentQuery,
@@ -768,7 +770,9 @@ test('buildTimelineQuery: event_date por origen fiel a 0069 + deleted_at salvo c
 test('buildTimelineQuery: payload con json_object (las claves que parseTimelineRow lee)', () => {
   const q = buildTimelineQuery('p');
   assert.match(q.sql, /json_object\('weight_kg', weight_kg, 'source', source, 'notes', notes\)/);
-  assert.match(q.sql, /json_object\('event_type', event_type, 'pregnancy_status', pregnancy_status, 'calf_id', calf_id, 'notes', notes\)/);
+  // spec 10 T-UI.8: reproductive + sanitary proyectan created_by (gating del borrado owner|autor).
+  assert.match(q.sql, /json_object\('event_type', event_type, 'pregnancy_status', pregnancy_status, 'calf_id', calf_id, 'notes', notes, 'created_by', created_by\)/);
+  assert.match(q.sql, /json_object\('event_type', event_type, 'product_name', product_name, 'route', route, 'notes', notes, 'created_by', created_by\)/);
   assert.match(q.sql, /json_object\('sample_type', sample_type, 'tube_number', tube_number, 'result', result, 'received', result_received_date\)/);
   assert.match(q.sql, /json_object\('from', from_category_id, 'to', to_category_id, 'reason', reason\)/);
 });
@@ -796,8 +800,8 @@ test('buildTimelineQuery: a igualdad de (event_date, created_at NULL) el inserta
   // con las columnas mínimas que cada sub-select referencia para que el query no falle por columna ausente.
   db.exec(
     'CREATE TABLE weight_events (id TEXT, animal_profile_id TEXT, weight_date TEXT, created_at TEXT, weight_kg REAL, source TEXT, notes TEXT, deleted_at TEXT);' +
-      'CREATE TABLE reproductive_events (id TEXT, animal_profile_id TEXT, event_type TEXT, event_date TEXT, created_at TEXT, pregnancy_status TEXT, calf_id TEXT, notes TEXT, deleted_at TEXT);' +
-      'CREATE TABLE sanitary_events (id TEXT, animal_profile_id TEXT, event_type TEXT, event_date TEXT, created_at TEXT, product_name TEXT, route TEXT, notes TEXT, deleted_at TEXT);' +
+      'CREATE TABLE reproductive_events (id TEXT, animal_profile_id TEXT, event_type TEXT, event_date TEXT, created_at TEXT, pregnancy_status TEXT, calf_id TEXT, notes TEXT, created_by TEXT, deleted_at TEXT);' +
+      'CREATE TABLE sanitary_events (id TEXT, animal_profile_id TEXT, event_type TEXT, event_date TEXT, created_at TEXT, product_name TEXT, route TEXT, notes TEXT, created_by TEXT, deleted_at TEXT);' +
       'CREATE TABLE condition_score_events (id TEXT, animal_profile_id TEXT, event_date TEXT, created_at TEXT, score REAL, notes TEXT, deleted_at TEXT);' +
       'CREATE TABLE lab_samples (id TEXT, animal_profile_id TEXT, collection_date TEXT, created_at TEXT, sample_type TEXT, tube_number TEXT, result TEXT, result_received_date TEXT, deleted_at TEXT);' +
       'CREATE TABLE animal_category_history (id TEXT, animal_profile_id TEXT, changed_at TEXT, from_category_id TEXT, to_category_id TEXT, reason TEXT);' +
@@ -832,8 +836,8 @@ test('buildTimelineQuery: created_at NULL (recién insertado) queda DESPUÉS del
   const db = new DatabaseSync(':memory:');
   db.exec(
     'CREATE TABLE weight_events (id TEXT, animal_profile_id TEXT, weight_date TEXT, created_at TEXT, weight_kg REAL, source TEXT, notes TEXT, deleted_at TEXT);' +
-      'CREATE TABLE reproductive_events (id TEXT, animal_profile_id TEXT, event_type TEXT, event_date TEXT, created_at TEXT, pregnancy_status TEXT, calf_id TEXT, notes TEXT, deleted_at TEXT);' +
-      'CREATE TABLE sanitary_events (id TEXT, animal_profile_id TEXT, event_type TEXT, event_date TEXT, created_at TEXT, product_name TEXT, route TEXT, notes TEXT, deleted_at TEXT);' +
+      'CREATE TABLE reproductive_events (id TEXT, animal_profile_id TEXT, event_type TEXT, event_date TEXT, created_at TEXT, pregnancy_status TEXT, calf_id TEXT, notes TEXT, created_by TEXT, deleted_at TEXT);' +
+      'CREATE TABLE sanitary_events (id TEXT, animal_profile_id TEXT, event_type TEXT, event_date TEXT, created_at TEXT, product_name TEXT, route TEXT, notes TEXT, created_by TEXT, deleted_at TEXT);' +
       'CREATE TABLE condition_score_events (id TEXT, animal_profile_id TEXT, event_date TEXT, created_at TEXT, score REAL, notes TEXT, deleted_at TEXT);' +
       'CREATE TABLE lab_samples (id TEXT, animal_profile_id TEXT, collection_date TEXT, created_at TEXT, sample_type TEXT, tube_number TEXT, result TEXT, result_received_date TEXT, deleted_at TEXT);' +
       'CREATE TABLE animal_category_history (id TEXT, animal_profile_id TEXT, changed_at TEXT, from_category_id TEXT, to_category_id TEXT, reason TEXT);' +
@@ -1342,6 +1346,54 @@ test('T-UI.4: buildGroupCandidateFlagsQuery — has_weaning sincronizado, pendin
   assert.equal(byId.get('p-2')!.has_weaning, 0); // weaning BORRADO no cuenta
   assert.equal(byId.get('p-3')!.has_weaning, 1); // weaning pending
   assert.equal(byId.get('p-4')!.has_weaning, 0); // sin weaning
+
+  db.close();
+});
+
+// ─── buildSoftDeleteEventUpdate / DELETABLE_EVENT_TABLE (spec 10, T-UI.8): corrección de eventos ──────
+
+test('T-UI.8: DELETABLE_EVENT_TABLE mapea solo sanitary/reproductive (los kinds borrables desde la ficha)', () => {
+  assert.equal(DELETABLE_EVENT_TABLE.sanitary, 'sanitary_events');
+  assert.equal(DELETABLE_EVENT_TABLE.reproductive, 'reproductive_events');
+  // Los demás kinds del timeline NO son borrables desde la ficha (este chunk solo vacunación/destete).
+  assert.equal(DELETABLE_EVENT_TABLE.weight, undefined);
+  assert.equal(DELETABLE_EVENT_TABLE.observacion, undefined);
+  assert.equal(DELETABLE_EVENT_TABLE.category_change, undefined);
+});
+
+test('T-UI.8: buildSoftDeleteEventUpdate — UPDATE deleted_at, guard deleted_at IS NULL (idempotente), sin tenant', () => {
+  const q = buildSoftDeleteEventUpdate('sanitary_events', 'ev-1');
+  assert.match(q.sql, /UPDATE sanitary_events SET deleted_at = datetime\('now'\) WHERE id = \? AND deleted_at IS NULL/);
+  assert.deepEqual(q.args, ['ev-1']);
+  // NO re-scopea tenant (la RLS server-side es la barrera); NO toca otras columnas (solo deleted_at).
+  assert.doesNotMatch(q.sql, /has_role_in|establishment/);
+  const rq = buildSoftDeleteEventUpdate('reproductive_events', 'ev-2');
+  assert.match(rq.sql, /UPDATE reproductive_events SET deleted_at/);
+  assert.deepEqual(rq.args, ['ev-2']);
+});
+
+// Ejecución REAL contra SQLite in-memory: el soft-delete oculta la fila (deleted_at no-NULL); re-borrar es
+// no-op (guard deleted_at IS NULL → 0 filas afectadas) → idempotente bajo reintento de sync (R6.3-style).
+test('T-UI.8: buildSoftDeleteEventUpdate ejecuta — marca deleted_at + idempotente (re-borrar = no-op)', () => {
+  const db = new DatabaseSync(':memory:');
+  db.exec(
+    'CREATE TABLE sanitary_events (id TEXT, animal_profile_id TEXT, event_type TEXT, deleted_at TEXT);',
+  );
+  db.exec(
+    "INSERT INTO sanitary_events (id, animal_profile_id, event_type, deleted_at) VALUES ('ev-1', 'p-1', 'vaccination', NULL);",
+  );
+
+  const q = buildSoftDeleteEventUpdate('sanitary_events', 'ev-1');
+  const res1 = db.prepare(q.sql).run(...(q.args as never[]));
+  assert.equal(res1.changes, 1); // borró la fila viva
+  const row = db.prepare('SELECT deleted_at FROM sanitary_events WHERE id = ?').get('ev-1') as {
+    deleted_at: string | null;
+  };
+  assert.ok(row.deleted_at != null, 'deleted_at quedó seteado → la fila se oculta del timeline (deleted_at IS NULL)');
+
+  // Re-borrar: 0 filas afectadas (ya no hay fila con deleted_at IS NULL) → idempotente.
+  const res2 = db.prepare(q.sql).run(...(q.args as never[]));
+  assert.equal(res2.changes, 0);
 
   db.close();
 });

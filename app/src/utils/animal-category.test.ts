@@ -10,6 +10,7 @@ import {
   inferIsCastrated,
   deriveDisplayCategory,
   computeDisplayOverrides,
+  resolveCastrationTargetCategory,
   type ReproEventInput,
   type MirrorRowInput,
   type CategoryCatalogEntry,
@@ -786,4 +787,110 @@ test('T-CL.7: computeCategoryCode directo con isCastrated real espeja al server 
   assert.equal(mirror('male', isoDaysAgo(400), { isCastrated: false }), 'torito');
   assert.equal(mirror('male', isoDaysAgo(800), { isCastrated: true }), 'novillo');
   assert.equal(mirror('male', isoDaysAgo(800), { isCastrated: false }), 'toro');
+});
+
+// ─── T-UI.7 / R13.1 — resolveCastrationTargetCategory (anticipa el recálculo del toggle Castrado) ──
+//
+// El destino que la ficha ANTICIPA al flipear is_castrated, espejando compute_category con el valor NUEVO.
+// Catálogo de machos para resolver el name del destino.
+const MALE_CATALOG: CategoryCatalogEntry[] = [
+  { code: 'ternero', name: 'Ternero' },
+  { code: 'torito', name: 'Torito' },
+  { code: 'toro', name: 'Toro' },
+  { code: 'novillito', name: 'Novillito' },
+  { code: 'novillo', name: 'Novillo' },
+];
+
+test('R13.1: castrar un TORITO (1-2 años) → destino Novillito (anticipación del recálculo)', () => {
+  const r = resolveCastrationTargetCategory({
+    sex: 'male',
+    birthDate: isoDaysAgo(500), // ~1.4 años → torito entero
+    categoryOverride: false,
+    nextCastrated: true,
+    events: [],
+    catalog: MALE_CATALOG,
+    today: TODAY,
+  });
+  assert.deepEqual(r, { code: 'novillito', name: 'Novillito' });
+});
+
+test('R13.1: castrar un TORO (≥2 años) → destino Novillo', () => {
+  const r = resolveCastrationTargetCategory({
+    sex: 'male',
+    birthDate: isoDaysAgo(800),
+    categoryOverride: false,
+    nextCastrated: true,
+    events: [],
+    catalog: MALE_CATALOG,
+    today: TODAY,
+  });
+  assert.deepEqual(r, { code: 'novillo', name: 'Novillo' });
+});
+
+test('R13.1: REVERTIR un novillito (nextCastrated=false) → destino Torito (recompute simétrico)', () => {
+  const r = resolveCastrationTargetCategory({
+    sex: 'male',
+    birthDate: isoDaysAgo(500),
+    categoryOverride: false,
+    nextCastrated: false,
+    events: [],
+    catalog: MALE_CATALOG,
+    today: TODAY,
+  });
+  assert.deepEqual(r, { code: 'torito', name: 'Torito' });
+});
+
+test('R13.1: castrar un TERNERO NO transiciona → destino sigue Ternero (la UI no muestra "consecuencia")', () => {
+  // En ternero el efecto se difiere al destete (0062): el destino con is_castrated=true sigue ternero. El
+  // service compara destino vs categoría actual y, si coinciden, no muestra la línea (igual aplica el flip).
+  const r = resolveCastrationTargetCategory({
+    sex: 'male',
+    birthDate: isoDaysAgo(180), // < 1 año → ternero
+    categoryOverride: false,
+    nextCastrated: true,
+    events: [],
+    catalog: MALE_CATALOG,
+    today: TODAY,
+  });
+  assert.deepEqual(r, { code: 'ternero', name: 'Ternero' });
+});
+
+test('R5.6/R13.1: category_override=true → null (el server NO recalcula → no se anticipa transición)', () => {
+  const r = resolveCastrationTargetCategory({
+    sex: 'male',
+    birthDate: isoDaysAgo(500),
+    categoryOverride: true,
+    nextCastrated: true,
+    events: [],
+    catalog: MALE_CATALOG,
+    today: TODAY,
+  });
+  assert.equal(r, null);
+});
+
+test('R13.1: code destino sin fila en el catálogo → null (fail-safe, no se anticipa)', () => {
+  const r = resolveCastrationTargetCategory({
+    sex: 'male',
+    birthDate: isoDaysAgo(500),
+    categoryOverride: false,
+    nextCastrated: true,
+    events: [],
+    catalog: [{ code: 'torito', name: 'Torito' }], // falta 'novillito' → irresoluble
+    today: TODAY,
+  });
+  assert.equal(r, null);
+});
+
+test('R13.1: el destete cargado adelanta torito→novillito al castrar (events alimentan el espejo)', () => {
+  // Un ternero CON destete + castrado → el espejo da novillito (0062: destete o ≥1 año → torito/novillito).
+  const r = resolveCastrationTargetCategory({
+    sex: 'male',
+    birthDate: isoDaysAgo(200), // < 1 año pero con destete
+    categoryOverride: false,
+    nextCastrated: true,
+    events: [{ eventType: 'weaning', eventDate: isoDaysAgo(5), createdAt: null, pregnancyStatus: null }],
+    catalog: MALE_CATALOG,
+    today: TODAY,
+  });
+  assert.deepEqual(r, { code: 'novillito', name: 'Novillito' });
 });

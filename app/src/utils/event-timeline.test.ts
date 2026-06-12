@@ -84,7 +84,8 @@ test('parseTimelineRow: reproductive con todos los campos', () => {
     event_kind: 'reproductive',
     event_id: 'r1',
     event_date: '2025-02-01T00:00:00Z',
-    payload: { event_type: 'tacto', pregnancy_status: 'medium', calf_id: null, notes: null },
+    // spec 10 T-UI.8: created_by se proyecta en el read local (para gatear el borrado owner|autor).
+    payload: { event_type: 'tacto', pregnancy_status: 'medium', calf_id: null, notes: null, created_by: 'user-7' },
   });
   assert.equal(item?.kind, 'reproductive');
   if (item?.kind === 'reproductive') {
@@ -93,7 +94,19 @@ test('parseTimelineRow: reproductive con todos los campos', () => {
     assert.equal(item.calfId, null);
     // service_type NO viene en la RPC 0035 → el parser lo deja null (lo completa applyServiceTypes).
     assert.equal(item.serviceType, null);
+    assert.equal(item.createdBy, 'user-7'); // T-UI.8: autor del evento (gating del borrado)
   }
+});
+
+test('parseTimelineRow: reproductive SIN created_by (RPC online legacy) → createdBy null', () => {
+  const item = parseTimelineRow({
+    event_kind: 'reproductive',
+    event_id: 'r2',
+    event_date: '2025-02-01T00:00:00Z',
+    payload: { event_type: 'weaning', pregnancy_status: null, calf_id: null, notes: null },
+  });
+  assert.equal(item?.kind, 'reproductive');
+  if (item?.kind === 'reproductive') assert.equal(item.createdBy, null);
 });
 
 test('parseTimelineRow: sanitary', () => {
@@ -101,13 +114,20 @@ test('parseTimelineRow: sanitary', () => {
     event_kind: 'sanitary',
     event_id: 's1',
     event_date: '2025-01-10T00:00:00Z',
-    payload: { event_type: 'vaccination', product_name: 'Aftosa', route: 'subcutaneous', notes: null },
+    payload: {
+      event_type: 'vaccination',
+      product_name: 'Aftosa',
+      route: 'subcutaneous',
+      notes: null,
+      created_by: 'user-9',
+    },
   });
   assert.equal(item?.kind, 'sanitary');
   if (item?.kind === 'sanitary') {
     assert.equal(item.eventType, 'vaccination');
     assert.equal(item.productName, 'Aftosa');
     assert.equal(item.route, 'subcutaneous');
+    assert.equal(item.createdBy, 'user-9'); // T-UI.8: autor del evento (gating del borrado)
   }
 });
 

@@ -881,11 +881,13 @@ export function buildTimelineQuery(profileId: string): LocalQuery {
     'FROM weight_events WHERE animal_profile_id = ? AND deleted_at IS NULL ' +
     'UNION ALL ' +
     "SELECT 'reproductive', id, event_date, created_at, " +
-    "json_object('event_type', event_type, 'pregnancy_status', pregnancy_status, 'calf_id', calf_id, 'notes', notes) " +
+    // spec 10 T-UI.8 / R4.5: `created_by` se proyecta para gatear (best-effort) el borrado del evento desde
+    // la ficha (owner|autor). La barrera REAL es la RLS UPDATE server-side (is_owner_of OR created_by=uid).
+    "json_object('event_type', event_type, 'pregnancy_status', pregnancy_status, 'calf_id', calf_id, 'notes', notes, 'created_by', created_by) " +
     'FROM reproductive_events WHERE animal_profile_id = ? AND deleted_at IS NULL ' +
     'UNION ALL ' +
     "SELECT 'sanitary', id, event_date, created_at, " +
-    "json_object('event_type', event_type, 'product_name', product_name, 'route', route, 'notes', notes) " +
+    "json_object('event_type', event_type, 'product_name', product_name, 'route', route, 'notes', notes, 'created_by', created_by) " +
     'FROM sanitary_events WHERE animal_profile_id = ? AND deleted_at IS NULL ' +
     'UNION ALL ' +
     "SELECT 'condition_score', id, event_date, created_at, " +
@@ -934,6 +936,35 @@ export function buildReproServiceTypesQuery(profileId: string): LocalQuery {
   return {
     sql: 'SELECT id, service_type FROM reproductive_events WHERE animal_profile_id = ? AND deleted_at IS NULL',
     args: [profileId],
+  };
+}
+
+/** Tablas de evento TIPADO sobre las que la ficha permite corrección (soft-delete) desde el timeline. */
+export type DeletableEventTable = 'sanitary_events' | 'reproductive_events';
+
+/** Mapa kind del timeline → tabla de evento tipado borrable (spec 10 T-UI.8). null = no borrable desde la ficha. */
+export const DELETABLE_EVENT_TABLE: Readonly<Record<string, DeletableEventTable>> = {
+  sanitary: 'sanitary_events',
+  reproductive: 'reproductive_events',
+};
+
+/**
+ * SOFT-DELETE local de un evento TIPADO (spec 10 T-UI.8 / R4.5 — corrección individual desde la ficha,
+ * reuso de spec 02 R6.8.1). UPDATE `deleted_at = now()` sobre la fila del evento → una CrudEntry → uploadData
+ * lo sube al reconectar; la RLS UPDATE (`is_owner_of(...) OR created_by = auth.uid()`, 0026/0027) es la
+ * BARRERA REAL (owner|autor; un rechazo lo superficia uploadData). El guard `deleted_at IS NULL` lo hace
+ * idempotente (re-borrar = no-op). Sobre `reproductive_events`, el trigger 0046 (AFTER UPDATE OF deleted_at)
+ * RECALCULA la categoría si el evento había disparado transición (p. ej. un `weaning` borrado revierte el
+ * destete); `sanitary_events 'vaccination'` no transiciona → su borrado no recalcula. Offline-safe.
+ *
+ * `now()` lo resuelve SQLite (`datetime('now')`); el formato exacto del timestamp local no importa: la
+ * lectura del timeline filtra por `deleted_at IS NULL` (cualquier no-NULL lo oculta) y al subir el server
+ * persiste el UPDATE tal cual (el cliente puede escribir `deleted_at`, no es columna forzada por trigger).
+ */
+export function buildSoftDeleteEventUpdate(table: DeletableEventTable, eventId: string): LocalQuery {
+  return {
+    sql: `UPDATE ${table} SET deleted_at = datetime('now') WHERE id = ? AND deleted_at IS NULL`,
+    args: [eventId],
   };
 }
 
