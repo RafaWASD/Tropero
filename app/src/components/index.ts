@@ -26,7 +26,7 @@ export { ShareLink } from './ShareLink';
 export type { ShareLinkProps } from './ShareLink';
 export { RoleBadge } from './RoleBadge';
 export type { RoleBadgeProps } from './RoleBadge';
-export { AnimalRow } from './AnimalRow';
+export { AnimalRow, shouldShowFutureBullBadge } from './AnimalRow';
 export type {
   AnimalRowProps,
   AnimalSex,
@@ -42,3 +42,10 @@ export { Select } from './Select';
 export type { SelectProps, SelectOption } from './Select';
 export { CenteredRow } from './CenteredRow';
 export type { CenteredRowProps } from './CenteredRow';
+export { GroupActionsBar } from './GroupActionsBar';
+export type { GroupActionsBarProps } from './GroupActionsBar';
+export { GroupMetaHeader, GroupAnimalsList } from './GroupViewBits';
+export { GroupViewScreen } from './GroupViewScreen';
+export type { GroupViewScreenProps } from './GroupViewScreen';
+export { GroupSummaryCard } from './GroupSummaryCard';
+export type { GroupSummaryCardProps } from './GroupSummaryCard';

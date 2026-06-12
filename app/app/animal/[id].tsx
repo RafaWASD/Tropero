@@ -21,7 +21,6 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
 import {
   Archive,
-  Boxes,
   Check,
   ChevronLeft,
   ChevronRight,
@@ -29,6 +28,7 @@ import {
   Clock,
   Gauge,
   HeartCrack,
+  Layers,
   Mars,
   Milk,
   Pin,
@@ -923,7 +923,7 @@ function LoteControl({
   }, [busy, newName, onQuickCreate, onAssign]);
 
   return (
-    <DetailSection icon={Boxes} title="Lote">
+    <DetailSection icon={Layers} title="Lote">
       <YStack gap="$3">
         {/* Lote actual (siempre visible). */}
         <YStack gap="$1">
@@ -961,7 +961,7 @@ function LoteControl({
                 paddingHorizontal="$5"
                 pressStyle={{ backgroundColor: '$surface' }}
               >
-                <Boxes size={18} color={primary} strokeWidth={2.5} />
+                <Layers size={18} color={primary} strokeWidth={2.5} />
                 <Text fontFamily="$body" fontSize="$5" fontWeight="600" color="$primary">
                   {triggerLabel}
                 </Text>

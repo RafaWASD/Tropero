@@ -11,12 +11,20 @@
 // Cero hardcode de color/spacing (ADR-023 §4): todo via tokens; lo que cruza a una API
 // no-Tamagui (color del ícono lucide ChevronRight, URL de foto) se lee con getTokenValue o
 // se justifica con design-lint-disable (solo para datos DINÁMICOS, ej. la URL de la foto).
+//
+// VARIANTE COMPACTA (spec 10 T-UI.3 / R11.9, R12.3): la misma fila, con `compact` activa una
+// densidad menor (alto ≥56px = $touchMin, avatar 40px, subtítulo "categoría · edad" en vez del
+// badge + rodeo) + un slot de CHECKBOX (selección masiva castrar/destetar) + el badge ⭐ "futuro
+// torito" (solo positivo y oculto si la categoría ya es `toro`, R12.3). NO se redefine el componente:
+// es la MISMA fila con props nuevas (la tab Animales y la lista de lote siguen con la fila grande por
+// default). La edad la calcula el caller (formatAnimalAge desde animal_birth_date).
 
-import { Pressable } from 'react-native';
+import { Platform, Pressable } from 'react-native';
 import { getTokenValue, Text, View, XStack, YStack } from 'tamagui';
-import { ChevronRight } from 'lucide-react-native';
+import { Check, ChevronRight, Star } from 'lucide-react-native';
 
 import { CategoryBadge } from './CategoryBadge';
+import { labelA11y } from '../utils/a11y';
 
 // ─── Tipos públicos ───────────────────────────────────────────────────────────
 
@@ -34,12 +42,48 @@ export type AnimalRowProps = {
   category: string;
   /** Sexo del animal: alimenta el glifo del avatar fallback (♀/♂). */
   sex: AnimalSex;
-  /** Nombre del rodeo al que pertenece. */
+  /** Nombre del rodeo al que pertenece. Default (no-compact): segunda línea muted. */
   rodeo: string;
   /** Foto del animal (JIT: casi siempre ausente en MVP → fallback avatar neutro). */
   photoUrl?: string;
   /** Toda la fila es tappable → abre EDIT (R1.3) o el flujo correspondiente. */
   onPress?: () => void;
+
+  // ─── Variante COMPACTA (spec 10 T-UI.3 / R11.9) ───────────────────────────────────────
+  /**
+   * Densidad compacta (spec 10): fila ≥56px (vs ≥72px), subtítulo "categoría · edad" (en vez del
+   * badge de categoría + rodeo), avatar más chico, SIN chip "sin caravana" ni chevron por default.
+   * Es la fila de la pantalla de selección masiva (castrar/destetar) y de la lista de la vista de
+   * grupo. Default: false (la tab Animales y la lista de lote siguen con la fila grande).
+   */
+  compact?: boolean;
+  /**
+   * Edad legible es-AR ("3 años" / "8 meses" / null). Solo en `compact`: se muestra como
+   * "categoría · edad". null/undefined → solo la categoría. La calcula el caller (formatAnimalAge,
+   * desde `animal_birth_date`, R11.9).
+   */
+  age?: string | null;
+  /**
+   * code de la categoría (ej. 'toro', 'ternero') — para la regla de display del badge ⭐ (R12.3):
+   * el badge se OCULTA si la categoría ya es `toro` (el flag cumplió su ciclo). Solo se usa con
+   * `futureBull`. Sin él, el ⭐ se muestra según `futureBull` sin la excepción del toro.
+   */
+  categoryCode?: string;
+  /**
+   * ⭐ futuro torito (animal_profiles.future_bull, R12.3). Muestra el badge SOLO cuando es positivo
+   * (true) y la categoría NO es `toro`. false/undefined → sin badge. Display-only.
+   */
+  futureBull?: boolean;
+
+  // ─── Slot de checkbox (selección masiva futura — R11.9) ───────────────────────────────
+  /**
+   * Donde está presente, la fila lleva un CHECKBOX a la izquierda (selección masiva). undefined →
+   * sin checkbox (fila de navegación normal). Cuando se define, el tap de la fila TOGGLEA la
+   * selección (no navega) salvo que `onPress` también esté presente y se prefiera navegar.
+   */
+  checked?: boolean;
+  /** Toggle del checkbox (selección masiva). Se llama al tocar la fila cuando `checked` está definido. */
+  onToggle?: () => void;
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -55,13 +99,23 @@ const SEX_GLYPH: Record<AnimalSex, string> = {
 // ─── Sub-componentes ──────────────────────────────────────────────────────────
 
 /**
- * Avatar del animal (48px, $icon). Si hay `photoUrl` → foto (cover, mismo patrón
- * backgroundImage que EstablishmentCard). Si NO → fallback neutro: círculo $surface + borde
- * $divider con el glifo de sexo centrado en $textMuted. El sexo es el atributo más útil de
- * un vistazo sin requerir color de estado (recognition > recall, Nielsen #6).
+ * ¿Mostrar el badge ⭐ "futuro torito"? (R12.3): SOLO cuando es positivo Y la categoría no es `toro`
+ * (el flag cumplió su ciclo al llegar a toro). Helper exportado para testear la regla de display sin
+ * montar el componente. `categoryCode` opcional: sin él no se aplica la excepción del toro.
  */
-function AnimalAvatar({ sex, photoUrl }: { sex: AnimalSex; photoUrl?: string }) {
-  const size = getTokenValue('$icon', 'size'); // 48
+export function shouldShowFutureBullBadge(futureBull?: boolean, categoryCode?: string): boolean {
+  if (futureBull !== true) return false;
+  return categoryCode !== 'toro';
+}
+
+/**
+ * Avatar del animal. Si hay `photoUrl` → foto (cover, mismo patrón backgroundImage que
+ * EstablishmentCard). Si NO → fallback neutro: círculo $surface + borde $divider con el glifo de sexo
+ * centrado en $textMuted. El sexo es el atributo más útil de un vistazo sin requerir color de estado
+ * (recognition > recall, Nielsen #6). `compact` usa el avatar chico ($avatar=40 vs $icon=48).
+ */
+function AnimalAvatar({ sex, photoUrl, compact }: { sex: AnimalSex; photoUrl?: string; compact?: boolean }) {
+  const size = getTokenValue(compact ? '$avatar' : '$icon', 'size'); // 40 / 48
 
   if (photoUrl) {
     return (
@@ -129,6 +183,61 @@ function NoTagChip() {
   );
 }
 
+/**
+ * Badge ⭐ "Futuro torito" (spec 10 R12.3): pill terracota-outline (señal de "no castrar"). NO usa la
+ * firma verde del CategoryBadge — es una marca de atención, no de identidad (mismo lenguaje que el
+ * AbortionFlag de la ficha: $surface + borde/ícono/texto $terracota, no hay token terracota-claro). El
+ * caller decide cuándo mostrarlo (shouldShowFutureBullBadge). Compacto: solo el ícono ⭐ + "Futuro torito".
+ */
+function FutureBullBadge() {
+  const terracota = getTokenValue('$terracota', 'color');
+  return (
+    <View
+      backgroundColor="$surface"
+      borderWidth={1}
+      borderColor="$terracota"
+      borderRadius="$pill"
+      paddingHorizontal="$2"
+      paddingVertical="$1"
+      flexShrink={0}
+      {...labelA11y(Platform.OS, 'Futuro torito')}
+    >
+      <XStack alignItems="center" gap="$1">
+        <Star size={12} color={terracota} strokeWidth={2.5} fill={terracota} />
+        <Text fontFamily="$body" fontSize="$2" fontWeight="600" color="$terracota" numberOfLines={1}>
+          Futuro torito
+        </Text>
+      </XStack>
+    </View>
+  );
+}
+
+/**
+ * Checkbox cuadrado de la selección masiva (R11.9): $navIcon (24px) de caja, redondeo $4, borde
+ * $divider; tildado → relleno $primary + check blanco. Decorativo (el toque lo maneja la fila entera);
+ * el estado a11y (selected) lo emite el Pressable de la fila. Cero hardcode (tokens + getTokenValue
+ * para el ícono lucide).
+ */
+function RowCheckbox({ checked }: { checked: boolean }) {
+  const size = getTokenValue('$navIcon', 'size'); // 24
+  const white = getTokenValue('$white', 'color');
+  return (
+    <View
+      width={size}
+      height={size}
+      borderRadius="$4"
+      borderWidth={2}
+      borderColor={checked ? '$primary' : '$divider'}
+      backgroundColor={checked ? '$primary' : 'transparent'}
+      alignItems="center"
+      justifyContent="center"
+      flexShrink={0}
+    >
+      {checked ? <Check size={16} color={white} strokeWidth={3} /> : null}
+    </View>
+  );
+}
+
 // ─── Componente principal ─────────────────────────────────────────────────────
 
 export function AnimalRow({
@@ -140,6 +249,12 @@ export function AnimalRow({
   rodeo,
   photoUrl,
   onPress,
+  compact = false,
+  age,
+  categoryCode,
+  futureBull,
+  checked,
+  onToggle,
 }: AnimalRowProps) {
   // Color del ChevronRight (lucide, API no-Tamagui): leído del token, no hardcodeado.
   const chevronColor = getTokenValue('$textFaint', 'color');
@@ -153,17 +268,28 @@ export function AnimalRow({
   // Estado de caravana electrónica: null/undefined → estado neutral "sin caravana".
   const hasTag = tagElectronic != null;
 
-  // a11y: categoría + identificador legible + rodeo + (sin caravana si aplica).
-  const a11yLabel = `${category}, ${idv ?? visualId ?? 'sin identificador'}, ${rodeo}${
-    hasTag ? '' : ', sin caravana'
-  }`;
+  // ¿La fila lleva checkbox (selección masiva)? El tap TOGGLEA en vez de navegar.
+  const hasCheckbox = checked != null;
+  const showStar = shouldShowFutureBullBadge(futureBull, categoryCode);
+  const handlePress = hasCheckbox ? onToggle : onPress;
+
+  // a11y: categoría + identificador legible + rodeo/edad + (sin caravana / futuro torito si aplica).
+  const a11ySuffix = compact
+    ? `${age ? `, ${age}` : ''}${showStar ? ', futuro torito' : ''}`
+    : `, ${rodeo}${hasTag ? '' : ', sin caravana'}`;
+  const a11yLabel = `${category}, ${idv ?? visualId ?? 'sin identificador'}${a11ySuffix}`;
+
+  const a11yProps = hasCheckbox
+    ? { accessibilityRole: 'checkbox' as const, accessibilityState: { checked: checked ?? false } }
+    : { accessibilityRole: 'button' as const };
 
   return (
-    <Pressable accessibilityRole="button" accessibilityLabel={a11yLabel} onPress={onPress}>
+    <Pressable accessibilityLabel={a11yLabel} onPress={handlePress} {...a11yProps}>
       <XStack
         width="100%"
-        // Target grande manga-friendly (Fitts): alto ≥72px ($animalRow), operable con guante.
-        minHeight="$animalRow"
+        // Target manga-friendly (Fitts): ≥72px ($animalRow) normal / ≥56px ($touchMin) compacto —
+        // ambos operables con guante (R11.9 exige ≥56px en la fila compacta de selección).
+        minHeight={compact ? '$touchMin' : '$animalRow'}
         alignItems="center"
         gap="$3"
         paddingHorizontal="$4"
@@ -174,8 +300,11 @@ export function AnimalRow({
         borderBottomColor="$divider"
         pressStyle={{ backgroundColor: '$surface' }}
       >
-        {/* Izquierda: avatar 48px (foto JIT o glifo de sexo neutro). */}
-        <AnimalAvatar sex={sex} photoUrl={photoUrl} />
+        {/* Checkbox de selección (solo cuando la fila lo lleva). Va primero (zona pulgar izquierda). */}
+        {hasCheckbox ? <RowCheckbox checked={checked ?? false} /> : null}
+
+        {/* Avatar (foto JIT o glifo de sexo neutro). Compacto → 40px. */}
+        <AnimalAvatar sex={sex} photoUrl={photoUrl} compact={compact} />
 
         {/* Centro (flex): hero + subtítulo. minWidth=0 para permitir truncado sin empujar. */}
         <YStack flex={1} minWidth={0} gap="$1">
@@ -208,33 +337,53 @@ export function AnimalRow({
             ) : null}
           </XStack>
 
-          {/* Subtítulo: badge de categoría con COLOR (firma verde RAFAQ) + rodeo muted. Antes era
-              "categoría · rodeo" en gris plano (genérico); el badge le da jerarquía e identidad. */}
-          <XStack alignItems="center" gap="$2" minWidth={0}>
-            <CategoryBadge label={category} size="sm" />
-            <Text
-              fontFamily="$body"
-              fontSize="$3"
-              fontWeight="400"
-              color="$textMuted"
-              numberOfLines={1}
-              flexShrink={1}
-              minWidth={0}
-            >
-              {rodeo}
-            </Text>
-          </XStack>
+          {compact ? (
+            // Subtítulo COMPACTO (R11.9): "categoría · edad" en una línea muted + badge ⭐ inline.
+            <XStack alignItems="center" gap="$2" minWidth={0}>
+              <Text
+                fontFamily="$body"
+                fontSize="$3"
+                fontWeight="500"
+                color="$textMuted"
+                numberOfLines={1}
+                flexShrink={1}
+                minWidth={0}
+              >
+                {age ? `${category} · ${age}` : category}
+              </Text>
+              {showStar ? <FutureBullBadge /> : null}
+            </XStack>
+          ) : (
+            // Subtítulo NORMAL: badge de categoría con COLOR (firma verde RAFAQ) + rodeo muted.
+            <XStack alignItems="center" gap="$2" minWidth={0}>
+              <CategoryBadge label={category} size="sm" />
+              <Text
+                fontFamily="$body"
+                fontSize="$3"
+                fontWeight="400"
+                color="$textMuted"
+                numberOfLines={1}
+                flexShrink={1}
+                minWidth={0}
+              >
+                {rodeo}
+              </Text>
+            </XStack>
+          )}
         </YStack>
 
-        {/* Derecha: señal de estado. Sin tag → chip neutro "sin caravana"; con tag → chevron
-            (afford de "se abre"). No encoge. */}
-        <View flexShrink={0} alignItems="flex-end" justifyContent="center">
-          {hasTag ? (
-            <ChevronRight size={chevronSize} color={chevronColor} strokeWidth={2} />
-          ) : (
-            <NoTagChip />
-          )}
-        </View>
+        {/* Derecha: en compacto sin checkbox no hay afford de navegación extra (la categoría · edad
+            ya describe la fila); con checkbox el estado lo da el check. En la fila NORMAL: sin tag →
+            chip neutro "sin caravana"; con tag → chevron (afford de "se abre"). */}
+        {compact ? null : (
+          <View flexShrink={0} alignItems="flex-end" justifyContent="center">
+            {hasTag ? (
+              <ChevronRight size={chevronSize} color={chevronColor} strokeWidth={2} />
+            ) : (
+              <NoTagChip />
+            )}
+          </View>
+        )}
       </XStack>
     </Pressable>
   );

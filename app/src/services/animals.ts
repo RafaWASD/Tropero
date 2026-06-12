@@ -74,6 +74,17 @@ export type AnimalListItem = {
   status: AnimalStatus;
   /** Lote asignado (ADR-020). null = sin lote (se agrupa por categoría). Lo usa fetchGroupMembers (C4). */
   managementGroupId: string | null;
+  /**
+   * Fecha de nacimiento denormalizada (animal_profiles.animal_birth_date, b1 — ISO 'YYYY-MM-DD' o null).
+   * spec 10 (T-UI.1/T-UI.3 / R11.9): alimenta la EDAD de la fila compacta de la vista de grupo. La tab
+   * Animales no la usa (la fila grande no muestra edad) — es campo extra inofensivo.
+   */
+  animalBirthDate: string | null;
+  /**
+   * ⭐ futuro torito (animal_profiles.future_bull, 0085 — spec 10 R12.3). Lo usa la fila compacta de la
+   * vista de grupo para el badge (solo positivo, oculto en `toro`). 0 en el overlay (alta nace sin flag).
+   */
+  futureBull: boolean;
 };
 
 export type AnimalStatus = 'active' | 'sold' | 'dead' | 'transferred';
@@ -161,6 +172,9 @@ type LocalListRow = {
   // spec 10 (T-CL.12 / R13.6): is_castrated REAL (0084) — input del espejo con precedencia. No se expone
   // en AnimalListItem (lo descarta el mapper); lo lee SOLO computeMirrorOverrides.
   is_castrated?: number | boolean | null;
+  // spec 10 (T-UI.1/T-UI.3 / R12.3): future_bull (0085) — badge ⭐ de la fila compacta de la vista de
+  // grupo. Proyectado por LOCAL_LIST_SELECT (overlay = 0 constante). Lo expone AnimalListItem.
+  future_bull?: number | boolean | null;
 };
 
 function toLocalListItem(
@@ -182,6 +196,8 @@ function toLocalListItem(
     rodeoName: r.rodeo_name ?? '',
     status: r.status,
     managementGroupId: r.management_group_id,
+    animalBirthDate: r.birth_date ?? null,
+    futureBull: toBool(r.future_bull ?? 0),
   };
 }
 

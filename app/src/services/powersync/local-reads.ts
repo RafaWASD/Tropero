@@ -460,17 +460,18 @@ function notHiddenByOverride(table: string, idExpr: string, effects: readonly st
 // espejo de categoría (`applyCategoryMirror` en animals.ts). El shape PÚBLICO (AnimalListItem) NO cambia:
 // estas columnas extra las consume solo el mirror del service; el mapper toLocalListItem las descarta.
 // spec 10 (T-CL.12 / R13.6): se agrega `is_castrated` denormalizado (0084) — el espejo C6 lo consume como
-// el is_castrated REAL (precedencia sobre la inferencia RC6.2.1). El shape PÚBLICO (AnimalListItem) NO
-// cambia (el mapper toLocalListItem lo descarta); lo lee SOLO computeMirrorOverrides. `future_bull` NO se
-// proyecta acá (la lista/ficha no lo usan en el espejo; la badge ⭐ es Fase 4 — fetchAnimalDetail lo trae
-// aparte cuando la ficha lo pida).
+// el is_castrated REAL (precedencia sobre la inferencia RC6.2.1). El shape PÚBLICO (AnimalListItem) lo
+// descarta; lo lee SOLO computeMirrorOverrides. spec 10 (T-UI.1/T-UI.3 / R11.9, R12.3): se agregan
+// `animal_birth_date` (edad de la fila compacta) y `future_bull` (badge ⭐ en la lista de la vista de
+// grupo) al shape público AnimalListItem — antes `future_bull` solo lo traía fetchAnimalDetail. La fila
+// compacta de la vista de grupo (AnimalRow `compact`) los necesita por animal.
 const LOCAL_LIST_SELECT =
   'SELECT ap.id AS id, ap.animal_id AS animal_id, ap.idv AS idv, ' +
   'ap.visual_id_alt AS visual_id_alt, ap.category_id AS category_id, ap.rodeo_id AS rodeo_id, ' +
   'ap.status AS status, ap.management_group_id AS management_group_id, ' +
   'ap.animal_tag_electronic AS tag_electronic, ap.animal_sex AS sex, ' +
   'ap.category_override AS category_override, ap.animal_birth_date AS birth_date, ' +
-  'ap.is_castrated AS is_castrated, ' +
+  'ap.is_castrated AS is_castrated, ap.future_bull AS future_bull, ' +
   'r.system_id AS system_id, ' +
   'r.name AS rodeo_name, c.code AS category_code, c.name AS category_name, ' +
   'ap.created_at AS created_at ' +
@@ -490,9 +491,10 @@ const LOCAL_LIST_SELECT_OVERLAY =
   'pap.animal_tag_electronic AS tag_electronic, pap.animal_sex AS sex, ' +
   'pap.category_override AS category_override, pap.animal_birth_date AS birth_date, ' +
   // spec 10 (T-CL.12): is_castrated del overlay = SIEMPRE 0 (un alta/ternero optimista nace ENTERO;
-  // la castración es un UPDATE de la fila SINCRONIZADA — nunca toca el overlay). Constante para alinear
-  // las columnas del UNION (requisito del UNION ALL: ambas ramas, idéntico set de columnas/orden).
-  '0 AS is_castrated, ' +
+  // la castración es un UPDATE de la fila SINCRONIZADA — nunca toca el overlay). future_bull = SIEMPRE 0
+  // (el flag se marca desde la ficha de un animal ya sincronizado, R12.2 — nunca en el alta). Constantes
+  // para alinear las columnas del UNION (requisito del UNION ALL: ambas ramas, idéntico set/orden).
+  '0 AS is_castrated, 0 AS future_bull, ' +
   'r.system_id AS system_id, ' +
   'r.name AS rodeo_name, c.code AS category_code, c.name AS category_name, ' +
   'pap.created_at AS created_at ' +
@@ -578,6 +580,49 @@ export function buildAnimalsCountQuery(establishmentId: string): LocalQuery {
     "WHERE pap.establishment_id = ? AND pap.status = 'active' AND " +
     notHiddenByOverride('animal_profiles', 'pap.id', ['exited', 'soft_deleted']) +
     ') AS count';
+  return { sql, args: [establishmentId, establishmentId] };
+}
+
+/**
+ * Conteo de animales ACTIVOS POR RODEO del campo (spec 10 T-UI.2, Inicio rodeo-céntrico): una fila
+ * `(rodeo_id, count)` por rodeo con ≥1 animal activo. UNION de synced + overlay (altas/terneros
+ * optimistas) agrupado por rodeo_id; los exits/soft-deletes pendientes se OCULTAN (mismo criterio que la
+ * lista). El caller mapea por rodeo_id (los rodeos sin animales no aparecen → cuentan 0). Scoping de
+ * tenant: ya lo aplicó la stream; conservamos status='active' + deleted_at + establishment_id propio.
+ */
+export function buildRodeoHeadCountsQuery(establishmentId: string): LocalQuery {
+  const sql =
+    'SELECT rodeo_id, COUNT(*) AS count FROM (' +
+    'SELECT ap.rodeo_id AS rodeo_id FROM animal_profiles ap ' +
+    "WHERE ap.establishment_id = ? AND ap.status = 'active' AND ap.deleted_at IS NULL AND " +
+    HIDE_EXITED_PROFILE +
+    ' UNION ALL ' +
+    'SELECT pap.rodeo_id AS rodeo_id FROM pending_animal_profiles pap ' +
+    "WHERE pap.establishment_id = ? AND pap.status = 'active' AND " +
+    notHiddenByOverride('animal_profiles', 'pap.id', ['exited', 'soft_deleted']) +
+    ') GROUP BY rodeo_id';
+  return { sql, args: [establishmentId, establishmentId] };
+}
+
+/**
+ * Conteo de animales ACTIVOS POR LOTE (management_group) del campo (spec 10 T-UI.2): una fila
+ * `(management_group_id, count)` por lote con ≥1 animal activo asignado. Solo cuenta perfiles con
+ * `management_group_id` no NULL (los sin lote se agrupan por categoría, no son un grupo). Mismo UNION +
+ * ocultación de exits que el conteo por rodeo. El caller mapea por management_group_id.
+ */
+export function buildGroupHeadCountsQuery(establishmentId: string): LocalQuery {
+  const sql =
+    'SELECT management_group_id, COUNT(*) AS count FROM (' +
+    'SELECT ap.management_group_id AS management_group_id FROM animal_profiles ap ' +
+    "WHERE ap.establishment_id = ? AND ap.status = 'active' AND ap.deleted_at IS NULL " +
+    'AND ap.management_group_id IS NOT NULL AND ' +
+    HIDE_EXITED_PROFILE +
+    ' UNION ALL ' +
+    'SELECT pap.management_group_id AS management_group_id FROM pending_animal_profiles pap ' +
+    "WHERE pap.establishment_id = ? AND pap.status = 'active' " +
+    'AND pap.management_group_id IS NOT NULL AND ' +
+    notHiddenByOverride('animal_profiles', 'pap.id', ['exited', 'soft_deleted']) +
+    ') GROUP BY management_group_id';
   return { sql, args: [establishmentId, establishmentId] };
 }
 

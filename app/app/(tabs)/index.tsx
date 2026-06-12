@@ -27,13 +27,14 @@ import { Pressable } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
-import { Building2, Check, ChevronDown, User, X } from 'lucide-react-native';
+import { Boxes, Building2, Check, ChevronDown, Layers, User, X } from 'lucide-react-native';
 import { useStatus } from '@powersync/react';
 
 import {
   Button,
   Card,
   EstablishmentSwitcherDropdown,
+  GroupSummaryCard,
   Stepper,
   pickVisited,
   type StepperStep,
@@ -41,9 +42,13 @@ import {
 } from '@/components';
 import { useAuth, useEstablishment, useProfile, useRodeo } from '@/contexts';
 import { localityOf, shouldShowReadyBanner } from '@/utils/establishment';
+import { allOnboardingStepsDone } from '@/utils/onboarding';
 import { addDismissedBanner, loadDismissedBanners } from '@/services/establishment-store';
 import { countAnimals } from '@/services/animals';
 import { countTeam } from '@/services/members';
+import { fetchRodeoHeadCounts, fetchGroupHeadCounts } from '@/services/group-data';
+import { fetchManagementGroups, type ManagementGroup } from '@/services/management-groups';
+import { fetchProductionSystems, type Rodeo } from '@/services/rodeos';
 
 
 /** Header propio de la home (el tab no muestra header nativo, ADR-018). */
@@ -401,6 +406,51 @@ export default function InicioScreen() {
     });
   }, []);
 
+  // ── Grupos del campo activo (Inicio rodeo-céntrico, T-UI.2 / R2.1) ──────────────────────────────
+  // Cabezas activas por rodeo + por lote (Map id → count) + la lista de lotes del campo. Los rodeos
+  // salen del RodeoContext (ya cargado). Se cargan al enfocar y al avanzar el sync (mismo patrón que los
+  // conteos del Stepper). Guard de secuencia para descartar respuestas tardías al cambiar de campo.
+  const [rodeoHeadCounts, setRodeoHeadCounts] = useState<Map<string, number>>(new Map());
+  const [groupHeadCounts, setGroupHeadCounts] = useState<Map<string, number>>(new Map());
+  const [lotes, setLotes] = useState<ManagementGroup[]>([]);
+  // Nombre del sistema productivo por system_id (ej. "Cría") → subtítulo de la card de rodeo (R2.1: la
+  // card lleva nombre + SISTEMA + cabezas). Se resuelve barato del catálogo global LOCAL (offline):
+  // fetchProductionSystems('bovino') es UNA lectura SQLite ya usada por el wizard (no es una query nueva
+  // ni un round-trip de red). El catálogo es field-independent → se mapea systemId → name una vez y se
+  // reusa para todos los rodeos. Las cards de LOTE NO llevan sistema (un lote es cross-rodeo: no tiene un
+  // sistema único — ADR-020). Si el catálogo aún no sincronizó, queda vacío y la card cae a solo cabezas.
+  const [systemNames, setSystemNames] = useState<Map<string, string>>(new Map());
+  const groupsSeq = useRef(0);
+
+  const loadGroups = useCallback((estId: string | null) => {
+    if (!estId) {
+      setRodeoHeadCounts(new Map());
+      setGroupHeadCounts(new Map());
+      setLotes([]);
+      // El catálogo de sistemas es global (no per-campo) → NO lo reseteamos al perder el campo activo:
+      // una vez resuelto, sirve para cualquier campo y no hace falta re-leerlo.
+      return;
+    }
+    const seq = ++groupsSeq.current;
+    void Promise.all([
+      fetchRodeoHeadCounts(estId),
+      fetchGroupHeadCounts(estId),
+      fetchManagementGroups(estId),
+      // bovino es la única especie del MVP (todos los rodeos son bovinos); la lectura es local + offline.
+      fetchProductionSystems('bovino'),
+    ]).then(([rodeoCounts, groupCounts, groups, systems]) => {
+      if (seq !== groupsSeq.current) return; // cambió el campo mientras cargaba.
+      if (rodeoCounts.ok) setRodeoHeadCounts(rodeoCounts.value);
+      if (groupCounts.ok) setGroupHeadCounts(groupCounts.value);
+      // fetchManagementGroups degrada a "sincronizando" si un campo nuevo aún no bajó sus lotes →
+      // en ese caso dejamos la lista vacía (la sección de lotes simplemente no aparece, sin error).
+      if (groups.ok) setLotes(groups.value);
+      // Mapa systemId → name. Si el catálogo aún no bajó (primer login sin red) degrada a error/vacío →
+      // NO pisamos el mapa previo (no parpadeamos el subtítulo de la card a "solo cabezas").
+      if (systems.ok) setSystemNames(new Map(systems.value.map((s) => [s.systemId, s.name])));
+    });
+  }, []);
+
   // Recargamos al ENFOCAR la home (mount + volver de la tab Animales/Equipo) y cuando cambia el campo
   // activo. Dep PRIMITIVA (activeId string + userId, NO el objeto activeField — lección RodeoContext/
   // miembros.tsx: un objeto recreado cada render dispararía un loop de fetch). `loadAnimalCount` y
@@ -409,7 +459,8 @@ export default function InicioScreen() {
     useCallback(() => {
       loadAnimalCount(activeId);
       loadTeamCount(activeId, userId, isOwner);
-    }, [activeId, userId, isOwner, loadAnimalCount, loadTeamCount]),
+      loadGroups(activeId);
+    }, [activeId, userId, isOwner, loadAnimalCount, loadTeamCount, loadGroups]),
   );
 
   // FIX showstopper: re-leer los conteos cuando AVANZA el sync (lastSyncedAt). Al bajar el first-sync
@@ -421,7 +472,8 @@ export default function InicioScreen() {
     if (lastSyncedMs === 0) return;
     loadAnimalCount(activeId);
     loadTeamCount(activeId, userId, isOwner);
-  }, [lastSyncedMs, activeId, userId, isOwner, loadAnimalCount, loadTeamCount]);
+    loadGroups(activeId);
+  }, [lastSyncedMs, activeId, userId, isOwner, loadAnimalCount, loadTeamCount, loadGroups]);
 
   // ── Pasos de "primeros pasos" DRIVEADOS POR ESTADO REAL (bug 1 de Raf). ──────────────
   // El Stepper era ESTÁTICO: el paso "Crear rodeo" estaba hardcodeado 'active' con un CTA que solo
@@ -433,6 +485,19 @@ export default function InicioScreen() {
   const rodeoDone = rodeoState.status === 'active';
   // Solo el owner puede invitar miembros (R5): a un no-owner no le ofrecemos ese CTA (isOwner arriba).
   const canInvite = isOwner;
+
+  // ── Grupos para las cards de Inicio (R2.1/R2.2) ────────────────────────────────────────────────
+  // Rodeos del campo activo (del RodeoContext, ya cargados). Las cards muestran nombre + cabezas y
+  // tappean a la vista de grupo (/rodeo/[id]). Los lotes (cards secundarias) salen de `lotes`.
+  const rodeos: Rodeo[] = rodeoState.status === 'active' ? rodeoState.available : [];
+  const openRodeo = useCallback(
+    (rodeoId: string) => router.push({ pathname: '/rodeo/[id]', params: { id: rodeoId } }),
+    [router],
+  );
+  const openLote = useCallback(
+    (groupId: string) => router.push({ pathname: '/lote/[id]', params: { id: groupId } }),
+    [router],
+  );
 
   // Paso "Invitá a tu vet o capataz" DRIVEADO por estado real (fix-loop 4): `done` cuando el campo ya
   // tiene equipo (≥1 otro miembro o ≥1 invitación pendiente), `active` cuando todavía no.
@@ -507,6 +572,17 @@ export default function InicioScreen() {
     },
   ];
 
+  // ── Ocultar el wizard de "primeros pasos" cuando el onboarding está COMPLETO ───────────────────
+  // El stepper es una guía de arranque: una vez que el campo tiene los 3 pasos hechos (rodeo + ≥1
+  // animal + equipo en marcha), deja de aportar y se oculta — un usuario ya-onboardeado no lo ve.
+  // CRITERIO CONSERVADOR (anti-parpadeo, mismo del resto del archivo): solo ocultamos cuando los 3
+  // están CONFIRMADOS done. `hasAnimals === true` exige el count real (null = "todavía no sabemos"
+  // → NO ocultamos, mostramos el stepper). `teamStarted` ya es conservador (null → false). Así un
+  // usuario nuevo siempre ve el stepper (sin flash de "completo" con info incompleta) y solo
+  // desaparece cuando de verdad terminó. Si faltan 1 o 2 pasos, el stepper sigue (con los hechos
+  // tildados). La decisión es lógica PURA (utils/onboarding) → testeable en aislamiento.
+  const allStepsDone = allOnboardingStepsDone({ rodeoDone, hasAnimals, teamStarted });
+
   // Guarda de transición: la home solo tiene sentido con un campo activo. El gating
   // (RootGate) garantiza estado 'active' antes de mostrar (tabs); si por una carrera de
   // render no hay campo activo todavía, no pintamos la home mock — devolvemos un lienzo
@@ -574,10 +650,56 @@ export default function InicioScreen() {
           />
         ) : null}
 
-        {/* Wizard de 3 pasos. */}
-        <YStack marginTop="$6" marginBottom="$8">
-          <Stepper steps={steps} />
-        </YStack>
+        {/* Mis rodeos (Inicio rodeo-céntrico, R2.1/R2.2): cards de rodeo del campo activo → vista de
+            grupo. Es el corazón de la home: tocás un rodeo y ves su config + animales + acciones
+            masivas. Cada card muestra el nombre + las cabezas activas (conteo local, offline). */}
+        {rodeos.length > 0 ? (
+          <YStack width="100%" marginTop="$6" gap="$3">
+            <Text fontFamily="$body" fontSize="$6" fontWeight="600" color="$textPrimary">
+              Mis rodeos
+            </Text>
+            {rodeos.map((r) => (
+              <GroupSummaryCard
+                key={r.id}
+                icon={Boxes}
+                name={r.name}
+                headCount={rodeoHeadCounts.get(r.id) ?? 0}
+                // Sistema productivo del rodeo (ej. "Cría") → "Cría · N cabezas" (R2.1). undefined si el
+                // catálogo aún no resolvió → la card cae a solo cabezas (sin parpadeo de un · vacío).
+                meta={systemNames.get(r.systemId)}
+                onPress={() => openRodeo(r.id)}
+              />
+            ))}
+          </YStack>
+        ) : null}
+
+        {/* Lotes (cards SECUNDARIAS, R2.1): grupos de manejo cross-rodeo (ADR-020). Solo aparecen si el
+            campo tiene lotes. Cada card → vista de grupo del lote (/lote/[id]). */}
+        {lotes.length > 0 ? (
+          <YStack width="100%" marginTop="$6" gap="$3">
+            <Text fontFamily="$body" fontSize="$6" fontWeight="600" color="$textPrimary">
+              Lotes
+            </Text>
+            {lotes.map((g) => (
+              <GroupSummaryCard
+                key={g.id}
+                icon={Layers}
+                name={g.name}
+                headCount={groupHeadCounts.get(g.id) ?? 0}
+                onPress={() => openLote(g.id)}
+              />
+            ))}
+          </YStack>
+        ) : null}
+
+        {/* Wizard de 3 pasos — "primeros pasos" (onboarding). Va DESPUÉS de los rodeos: es la guía de
+            arranque, no el contenido principal de la home rodeo-céntrica. Se OCULTA cuando los 3 pasos
+            están confirmados done (allStepsDone) → el usuario ya-onboardeado no lo ve. */}
+        {allStepsDone ? null : (
+          <YStack marginTop="$6" marginBottom="$8">
+            <Stepper steps={steps} />
+          </YStack>
+        )}
       </ScrollView>
 
       {/* Dropdown del switch de establecimiento (R6.8.1). Se monta SOBRE todo (overlay

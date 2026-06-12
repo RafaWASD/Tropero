@@ -131,6 +131,17 @@ const ANIMAL_ROUTE = 'animal'; // ficha del animal /animal/[id] (R5)
 const AGREGAR_EVENTO_ROUTE = 'agregar-evento'; // wizard "Agregar evento" desde la ficha (C3.1)
 const ANIMAL_DESTINATIONS = new Set([CREAR_ANIMAL_ROUTE, ANIMAL_ROUTE, AGREGAR_EVENTO_ROUTE]);
 
+// Destinos de spec 10 (operaciones masivas por grupo): la vista de grupo de un rodeo (/rodeo/[id]) o
+// lote (/lote/[id]) — se llega desde Inicio (tabs) con un rodeo existente — y los flujos de operación
+// masiva (selección explícita / vacunación). Son navegación legítima en estado 'active'; NO se re-rutean.
+// 'rodeo' y 'lote' son los top-segments de /rodeo/[id] y /lote/[id].
+const GROUP_DESTINATIONS = new Set([
+  'rodeo',
+  'lote',
+  'seleccion-masiva',
+  'vacunacion-masiva',
+]);
+
 // Harness de DEV/TEST (spec 04 R5, /baston-test): pantalla WEB-ONLY para validar el
 // adapter-web-serial contra el RS420 real, sin pasar por el gating de auth/establecimiento/
 // rodeo. Sin este bypass, una sesión web no logueada (o sin campo/rodeo activo) rebotaría a
@@ -301,6 +312,8 @@ function RootGate() {
     // Destinos de C2 (animales): el alta find-or-create (R4) y la ficha del animal (R5). Solo
     // tienen sentido con un rodeo existente; no se re-rutean en estado 'active' con rodeo.
     const onAnimalDestination = ANIMAL_DESTINATIONS.has(top);
+    // Destinos de spec 10 (vista de grupo + operación masiva): navegables desde Inicio con rodeo.
+    const onGroupDestination = GROUP_DESTINATIONS.has(top);
 
     if (est.status === 'no_establishments') {
       if (top !== ONBOARDING_ROUTE && !onCrearCampo && !onFase5Destination) router.replace('/onboarding');
@@ -332,9 +345,14 @@ function RootGate() {
           inAuthFlow ||
           top === ONBOARDING_ROUTE ||
           top === CAMPO_PERDIDO_ROUTE;
-        // No de-strand de un destino de rodeo (gestión) ni de animales (alta/ficha): son
-        // navegación legítima desde Más / la tab Animales con un rodeo existente.
-        if (strandedOnGatingRoute && !onRodeoDestination && !onAnimalDestination) {
+        // No de-strand de un destino de rodeo (gestión), animales (alta/ficha) ni grupo (vista de
+        // grupo / operación masiva): son navegación legítima desde Más / la tab Animales / Inicio.
+        if (
+          strandedOnGatingRoute &&
+          !onRodeoDestination &&
+          !onAnimalDestination &&
+          !onGroupDestination
+        ) {
           router.replace('/(tabs)');
         }
       }
@@ -388,6 +406,14 @@ function RootGate() {
       <Stack.Screen name="animal/baja" />
       {/* Spec 02 C3.1 — wizard "Agregar evento" desde la ficha (peso / condición / observación). */}
       <Stack.Screen name="agregar-evento" />
+      {/* Spec 10 — vista de grupo (operaciones masivas por rodeo/lote): metadatos + config + lista de
+          animales activos + acciones masivas. Destino navegable desde Inicio (card de rodeo/lote). */}
+      <Stack.Screen name="rodeo/[id]" />
+      <Stack.Screen name="lote/[id]" />
+      {/* Spec 10 — flujos de operación masiva (selección explícita castrar/destetar; vacunación masiva).
+          STUB navegable en este chunk (la pantalla real es del próximo chunk de Fase 4). */}
+      <Stack.Screen name="seleccion-masiva" />
+      <Stack.Screen name="vacunacion-masiva" />
     </Stack>
   );
 }

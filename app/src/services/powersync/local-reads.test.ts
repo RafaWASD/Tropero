@@ -28,6 +28,8 @@ import {
   buildPendingInvitationsQuery,
   buildAnimalsListQuery,
   buildAnimalsCountQuery,
+  buildRodeoHeadCountsQuery,
+  buildGroupHeadCountsQuery,
   buildSearchByTagQuery,
   buildSearchByIdvQuery,
   buildSearchLikeQuery,
@@ -391,6 +393,11 @@ test('buildAnimalsListQuery: b1 identidad desde animal_profiles, JOINs, status d
   // (synced: ap.is_castrated; overlay: 0 constante — un alta optimista nace entero).
   assert.match(q.sql, /ap\.is_castrated AS is_castrated/);
   assert.match(q.sql, /0 AS is_castrated/);
+  // spec 10 (T-UI.1/T-UI.3 / R12.3): la fila compacta de la vista de grupo necesita future_bull (badge ⭐)
+  // y birth_date (edad) por animal → la lista los proyecta en AMBAS ramas (overlay future_bull = 0).
+  assert.match(q.sql, /ap\.future_bull AS future_bull/);
+  assert.match(q.sql, /0 AS future_bull/);
+  assert.match(q.sql, /ap\.animal_birth_date AS birth_date/);
   // args = synced (est, active) ++ overlay (est, active)
   assert.deepEqual(q.args, ['est-1', 'active', 'est-1', 'active']);
 });
@@ -423,6 +430,87 @@ test('buildAnimalsCountQuery: COUNT activos synced (oculta exits) + COUNT overla
   assert.match(q.sql, /\) \+ \(/);
   assert.match(q.sql, /AS count/);
   assert.deepEqual(q.args, ['est-9', 'est-9']);
+});
+
+// ─── spec 10 T-UI.2: conteos de cabezas por grupo (Inicio rodeo-céntrico) ──────────────────
+
+test('buildRodeoHeadCountsQuery: GROUP BY rodeo_id, UNION synced+overlay, oculta exits, args duplicados', () => {
+  const q = buildRodeoHeadCountsQuery('est-3');
+  assert.match(q.sql, /SELECT rodeo_id, COUNT\(\*\) AS count FROM \(/);
+  assert.match(q.sql, /SELECT ap\.rodeo_id AS rodeo_id FROM animal_profiles ap/);
+  assert.match(q.sql, /WHERE ap\.establishment_id = \? AND ap\.status = 'active' AND ap\.deleted_at IS NULL AND/);
+  assert.match(q.sql, /UNION ALL/);
+  assert.match(q.sql, /SELECT pap\.rodeo_id AS rodeo_id FROM pending_animal_profiles pap/);
+  assert.match(q.sql, /GROUP BY rodeo_id/);
+  assert.deepEqual(q.args, ['est-3', 'est-3']);
+});
+
+test('buildRodeoHeadCountsQuery: COMPORTAMIENTO — cuenta activos por rodeo, suma overlay, excluye exits/soft-deletes', () => {
+  const db = new DatabaseSync(':memory:');
+  db.exec(
+    'CREATE TABLE animal_profiles (id TEXT, establishment_id TEXT, rodeo_id TEXT, status TEXT, deleted_at TEXT);' +
+      'CREATE TABLE pending_animal_profiles (id TEXT, establishment_id TEXT, rodeo_id TEXT, status TEXT);' +
+      'CREATE TABLE pending_status_overrides (id TEXT, target_table TEXT, target_id TEXT, effect TEXT);',
+  );
+  const insS = db.prepare('INSERT INTO animal_profiles (id, establishment_id, rodeo_id, status, deleted_at) VALUES (?,?,?,?,?)');
+  insS.run('a1', 'est-1', 'rod-A', 'active', null);
+  insS.run('a2', 'est-1', 'rod-A', 'active', null);
+  insS.run('a3', 'est-1', 'rod-B', 'active', null);
+  insS.run('a4', 'est-1', 'rod-A', 'sold', null); // no activo → no cuenta
+  insS.run('a5', 'est-1', 'rod-B', 'active', '2026-01-01'); // soft-deleted → no cuenta
+  insS.run('a6', 'est-2', 'rod-A', 'active', null); // OTRO establishment → no cuenta
+  insS.run('a7', 'est-1', 'rod-A', 'active', null); // activo pero con exit pendiente (override) → no cuenta
+  db.prepare('INSERT INTO pending_status_overrides (id, target_table, target_id, effect) VALUES (?,?,?,?)')
+    .run('o1', 'animal_profiles', 'a7', 'exited');
+  // overlay: un ternero optimista en rod-B
+  db.prepare('INSERT INTO pending_animal_profiles (id, establishment_id, rodeo_id, status) VALUES (?,?,?,?)')
+    .run('p1', 'est-1', 'rod-B', 'active');
+
+  const q = buildRodeoHeadCountsQuery('est-1');
+  const rows = (db.prepare(q.sql).all(...(q.args as string[])) as { rodeo_id: string; count: number }[])
+    .map((r) => ({ rodeo_id: r.rodeo_id, count: r.count }))
+    .sort((a, b) => a.rodeo_id.localeCompare(b.rodeo_id));
+  db.close();
+  // rod-A: a1,a2 (a4 sold, a7 exited, a6 otro est) = 2; rod-B: a3 + overlay p1 (a5 soft-deleted) = 2.
+  assert.deepEqual(rows, [
+    { rodeo_id: 'rod-A', count: 2 },
+    { rodeo_id: 'rod-B', count: 2 },
+  ]);
+});
+
+test('buildGroupHeadCountsQuery: GROUP BY management_group_id, solo no-NULL, UNION+oculta exits', () => {
+  const q = buildGroupHeadCountsQuery('est-5');
+  assert.match(q.sql, /SELECT management_group_id, COUNT\(\*\) AS count FROM \(/);
+  assert.match(q.sql, /SELECT ap\.management_group_id AS management_group_id FROM animal_profiles ap/);
+  assert.match(q.sql, /AND ap\.management_group_id IS NOT NULL AND/);
+  assert.match(q.sql, /AND pap\.management_group_id IS NOT NULL AND/);
+  assert.match(q.sql, /GROUP BY management_group_id/);
+  assert.deepEqual(q.args, ['est-5', 'est-5']);
+});
+
+test('buildGroupHeadCountsQuery: COMPORTAMIENTO — cuenta activos por lote, ignora los sin lote (NULL)', () => {
+  const db = new DatabaseSync(':memory:');
+  db.exec(
+    'CREATE TABLE animal_profiles (id TEXT, establishment_id TEXT, management_group_id TEXT, status TEXT, deleted_at TEXT);' +
+      'CREATE TABLE pending_animal_profiles (id TEXT, establishment_id TEXT, management_group_id TEXT, status TEXT);' +
+      'CREATE TABLE pending_status_overrides (id TEXT, target_table TEXT, target_id TEXT, effect TEXT);',
+  );
+  const insS = db.prepare('INSERT INTO animal_profiles (id, establishment_id, management_group_id, status, deleted_at) VALUES (?,?,?,?,?)');
+  insS.run('a1', 'est-1', 'lote-X', 'active', null);
+  insS.run('a2', 'est-1', 'lote-X', 'active', null);
+  insS.run('a3', 'est-1', null, 'active', null); // sin lote → NO cuenta
+  insS.run('a4', 'est-1', 'lote-Y', 'active', null);
+  insS.run('a5', 'est-1', 'lote-Y', 'sold', null); // no activo → no cuenta
+
+  const q = buildGroupHeadCountsQuery('est-1');
+  const rows = (db.prepare(q.sql).all(...(q.args as string[])) as { management_group_id: string; count: number }[])
+    .map((r) => ({ management_group_id: r.management_group_id, count: r.count }))
+    .sort((a, b) => a.management_group_id.localeCompare(b.management_group_id));
+  db.close();
+  assert.deepEqual(rows, [
+    { management_group_id: 'lote-X', count: 2 },
+    { management_group_id: 'lote-Y', count: 1 },
+  ]);
 });
 
 test('buildSearchByTagQuery: exacto por animal_tag_electronic (b1), active, limit 20, UNION overlay', () => {

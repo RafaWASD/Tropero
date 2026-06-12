@@ -837,7 +837,7 @@ export default function MasScreen() {
               {/* Rodeos (spec 02 C1): la lista es visible a todos los roles; la gestión (crear /
                   editar plantilla / eliminar) es owner-only dentro de la pantalla (R2.3). */}
               <ActionRow
-                icon={<Layers size={20} color={primary} strokeWidth={2} />}
+                icon={<Boxes size={20} color={primary} strokeWidth={2} />}
                 label="Rodeos"
                 accessibilityLabel="Ver y gestionar los rodeos del campo"
                 trailing={<ChevronRight size={20} color={muted} strokeWidth={2} />}
@@ -848,7 +848,7 @@ export default function MasScreen() {
                   (crear / renombrar / borrar) es owner-only dentro de la pantalla. Asignar animales
                   a un lote (cualquier rol) pasa por la ficha del animal. */}
               <ActionRow
-                icon={<Boxes size={20} color={primary} strokeWidth={2} />}
+                icon={<Layers size={20} color={primary} strokeWidth={2} />}
                 label="Lotes"
                 accessibilityLabel="Ver y gestionar los lotes del campo"
                 trailing={<ChevronRight size={20} color={muted} strokeWidth={2} />}

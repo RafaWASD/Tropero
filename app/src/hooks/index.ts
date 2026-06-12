@@ -1,2 +1,3 @@
-// Hooks del dominio. Vacío hasta que existan useAuth / useEstablishment.
-export {};
+// Hooks del dominio.
+export { useGroupView } from './useGroupView';
+export type { GroupViewData, GroupViewState } from './useGroupView';
