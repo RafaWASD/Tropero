@@ -3,7 +3,16 @@
 > Este archivo se vacía al cerrar cada sesión y su resumen se mueve a `history.md`.
 > Mientras trabajás, **mantenelo actualizado en tiempo real**, no al final.
 
-## Sesión 2026-06-11 (tarde) — backlog: fix flake `deriveCurrentState` + triage e2e rojos
+## Sesión 2026-06-11/12 — backlog (items 2/3) + SPEC 10 (backend + frontend hasta UI-A)
+
+> **ESTADO AL CIERRE PARCIAL (2026-06-12): 10 commits.** Items 2/3 del backlog (flake estado repro,
+> ProfileContext, rodeos) + spec 10: **backend delta** (0084/0085/0086 aplicadas al remoto) +
+> **frontend base no-UI** (Fase 2+3: candidatos/selección/idempotencia + bulk-operations + setCastrated)
+> + **UI-A** (vista de grupo + Inicio rodeo-céntrico + AnimalRow compacta + íconos unificados rodeo=Boxes/
+> lote=Layers + stepper hide-when-complete) — TODO gateado (reviewer + Gate 2) + commiteado. Design-review
+> visual de UI-A PASS (capturas en `design/spec10-ui-a/`). **Pendiente spec 10**: UI-B (selección masiva +
+> bottom-sheet, 🔴 manga-crítico), UI-C (vacunación + ficha castrado), UI-D (E2E). **Abierto**: el badge ⭐
+> terracota (¿suavizar fuera de castración? — decisión de Raf, no bloquea). Sin pushear (Raf pushea).
 
 Raf eligió los "cambios chicos" 2 y 3 del backlog (en vez de arrancar spec 10). Decisión del leader:
 **secuencial 2 → 3** (colisionan: los rojos de events del triage son en parte el flake del item 2;

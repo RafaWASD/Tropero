@@ -20,9 +20,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
 import {
-  Boxes,
   ChevronLeft,
   ChevronRight,
+  Layers,
   Plus,
   SlidersHorizontal,
   Trash2,
@@ -227,7 +227,7 @@ export default function RodeosScreen() {
             borderColor="$primary"
             pressStyle={{ backgroundColor: '$surface' }}
           >
-            <Boxes size={20} color={primary} strokeWidth={2} />
+            <Layers size={20} color={primary} strokeWidth={2} />
             <Text flex={1} minWidth={0} fontFamily="$body" fontSize="$5" fontWeight="600" color="$primary">
               Lotes
             </Text>
