@@ -33,6 +33,10 @@ import {
   type DrainRejection,
 } from '../utils/bulk-operations-plan';
 import {
+  buildVaccinationPreview,
+  type VaccinationPreview,
+} from '../utils/vaccination-preview';
+import {
   buildAddVaccinationInsert,
   buildAddWeaningInsert,
   buildSetCastratedUpdate,
@@ -73,6 +77,36 @@ export type BulkApplyOptions = {
   /** Callback de progreso del ENCOLADO local (no del sync — eso es el canal de uploadData). */
   onProgress?: (p: BulkProgress) => void;
 };
+
+// ─── Vacunación masiva: PREVIEW (R4.2/R4.3/R4.4/R6.3/R7.2) ───────────────────────────────────
+
+/**
+ * Computa el PREVIEW obligatorio de la vacunación masiva (R4.2): "N eventos sobre M animales" + el
+ * skip-and-report (R4.3): cuántos se saltan y por qué (ya-vacunados de esa fecha = idempotencia R6.3;
+ * rodeo sin `vacunacion` habilitado = R7.2 lote cross-rodeo). Resuelve del SQLite local los ids de
+ * `vaccination` ya aplicados de estos perfiles en `eventDate` (la barrera idempotente) y delega el conteo
+ * en el util PURO `buildVaccinationPreview`. El `rodeoVaccinationEnabled` (gating por rodeo real) lo
+ * resuelve la pantalla (lote cross-rodeo) y lo pasa; en un rodeo único ya gateado se omite.
+ *
+ * El `preview.toApply` es EXACTAMENTE el conjunto que se le pasa después a `applyBulkVaccination` (R4.4:
+ * no se crea mutación sobre un saltado — los rodeoDisabled NO se encolan).
+ */
+export async function previewVaccination(
+  candidates: readonly GroupProfile[],
+  eventDate: string,
+  rodeoVaccinationEnabled?: (rodeoId: string) => boolean,
+): Promise<ServiceResult<VaccinationPreview>> {
+  // ids de vacunaciones YA aplicadas localmente de estos perfiles en esta fecha (idempotencia, R6.3).
+  const existing = await resolveExistingEventIds(
+    candidates,
+    (ids) => buildExistingVaccinationIdsQuery(ids, eventDate),
+  );
+  if (!existing.ok) return existing;
+  return {
+    ok: true,
+    value: buildVaccinationPreview(candidates, eventDate, existing.value, rodeoVaccinationEnabled),
+  };
+}
 
 // ─── Vacunación masiva (R3.1) ──────────────────────────────────────────────────────────────
 

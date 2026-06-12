@@ -17,6 +17,14 @@ No es un sustituto de `feature_list.json` ni de los ADRs — es la antesala dond
 
 ## Ítems pendientes
 
+## 2026-06-12 — LOWs del UI-B2 (vacunación) de spec 10 + decisión de design token
+
+**Origen**: Gate 2 + re-Gate 2 (fix VIA) del chunk UI-B2, `progress/security_code_10-ui-b2*.md`. PASS tras cerrar el HIGH VIA-ENUM-MISMATCH (el campo Vía pasó a chips del enum). LOWs/decisión:
+- **DECISIÓN DE DISEÑO (Raf)**: el token `$chipMin` = **40px**, reusado por TODOS los filtros/chips de la app. El estándar mobile es ≥44px (iOS)/48dp (Android). Bumpearlo es un cambio de design token **app-wide** (confirm-gated). Por ahora se dejó en 40 (consistencia; los chips no son el CTA primario). Si se quiere subir a 44/48, es una pasada de design system, no de esta feature.
+- **LOW**: el anti-drift de `sanitary-route.ts` ancla los 5 valores del enum por COPIA + test-oráculo (no parsea la migración 0027). Si el enum cambia, el test lo caza, pero podría parsear la migración para robustez total. Defensivo, no urgente.
+- **LOW**: fixtures de tests de plomería (no-de-dominio) todavía usan `'subcutánea'` como string libre — cosmético, no afecta producto.
+- **UX (no MVP-blocker)**: el "Producto" de vacunación es texto libre — tipear con guante en la manga es fricción. A futuro: autocomplete / productos recientes. (El cap server ≤160 ya está.)
+
 ## 2026-06-12 — Gate 2 del UI-B de spec 10 (selección masiva): 1 MED comentario + LOWs
 
 **Origen**: Gate 2 (security_analyzer, code) del chunk UI-B, `progress/security_code_10-ui-b.md`. PASS 0 HIGH.

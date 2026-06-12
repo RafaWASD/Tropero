@@ -13,6 +13,13 @@
 > visual de UI-A PASS (capturas en `design/spec10-ui-a/`). **Pendiente spec 10**: UI-B (selección masiva +
 > bottom-sheet, 🔴 manga-crítico), UI-C (vacunación + ficha castrado), UI-D (E2E). **Abierto**: el badge ⭐
 > terracota (¿suavizar fuera de castración? — decisión de Raf, no bloquea). Sin pushear (Raf pushea).
+>
+> **MANDATO AUTÓNOMO (Raf, 2026-06-12):** completar TODO el resto de la UI de spec 10 SIN checkpoints —
+> UI-B2 Vacunar (corriendo) → si reviewer+Gate2 OK, commit → **directo** UI-C ficha (T-UI.7/8: toggle
+> Castrado Sí/No + ⭐ futuro torito + corrección individual) → **directo** UI-D E2E (T-UI.9/10/11) →
+> recién con el TOTAL cerrado, presentar a Raf para aprobación/corrección final. El leader vetó cada
+> chunk con design-review + reviewer + Gate 2 y commitea; solo pausa si algo queda genuinamente
+> bloqueado o aparece una decisión real irresoluble. Estado UI: UI-A ✅ + UI-B (Castrar/Destetar) ✅.
 
 Raf eligió los "cambios chicos" 2 y 3 del backlog (en vez de arrancar spec 10). Decisión del leader:
 **secuencial 2 → 3** (colisionan: los rojos de events del triage son en parte el flake del item 2;

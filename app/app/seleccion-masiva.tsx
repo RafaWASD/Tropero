@@ -140,12 +140,20 @@ export default function SeleccionMasivaScreen() {
     // Destete en lote cross-rodeo (R7.2 / D9): EXCLUIR de la lista los terneros cuyo rodeo real NO tenga
     // `destete` habilitado, contando cuántos quedaron fuera por configuración del rodeo (equivalente del
     // skip-and-report en el modelo de selección). Solo aplica a wean+lote: en un rodeo único la vista de
-    // grupo ya gateó la op; en castración no hay gating (R1.5). La barrera DEFINITIVA es server-side igual.
+    // grupo ya gateó la op; en castración no hay gating (R1.5).
+    //
+    // ⚠ El gating de DESTETE es DISPLAY-ONLY: el server NO lo enforce-a (R7.3). `tg_sanitary_events_gating`
+    // (0054) gatea solo `vaccination`/tacto/service — `weaning` quedó EXCLUIDO a propósito (decisión de
+    // spec US-8, 0054). Lo único server-side acá es la RLS de AUTORIZACIÓN (has_role_in del establishment),
+    // que decide quién puede escribir el evento pero NO mira el data_key `destete`. Por eso este filtro de
+    // rodeo es del lado del cliente: NO hay barrera server-side que enforce-e el gating de destete.
     let weanEnabledByRodeo: ((rodeoId: string) => boolean) | undefined;
     if (operation === 'wean' && groupType === 'lote') {
       const predicate = await resolveWeanGatingPredicate(r.value.map((p) => p.rodeoId));
       // Si el gating no se pudo resolver (offline parcial), NO excluimos a ciegas (predicate undefined):
-      // mostramos todos y la RLS/gating capa 1 server-side decide al subir. Fail-open de DISPLAY, no de authz.
+      // mostramos todos. Fail-open de DISPLAY — coherente con que el gating de destete NO se enforce-a
+      // server-side (la RLS de autorización sí corre, pero no mira el data_key): no hay barrera que tape un
+      // falso-positivo del display, así que ante duda mostramos (preferimos no ocultar un destete legítimo).
       weanEnabledByRodeo = predicate ?? undefined;
     }
     const built = buildBulkCandidates(operation, r.value, { rodeoWeaningEnabled: weanEnabledByRodeo });
