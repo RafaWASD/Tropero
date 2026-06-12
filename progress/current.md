@@ -21,7 +21,10 @@
 > chunk con design-review + reviewer + Gate 2 y commitea; solo pausa si algo queda genuinamente
 > bloqueado o aparece una decisión real irresoluble. Estado UI: UI-A ✅ + UI-B (Castrar/Destetar) ✅.
 >
-> **✅ SPEC 10 UI COMPLETA (2026-06-12) — esperando aprobación/corrección final de Raf (Puerta 2).**
+> **✅ SPEC 10 APROBADA por Raf (Puerta 2, 2026-06-12) → `done` en feature_list.** + 1 ronda de fixes
+> post-testeo (gating Destetar/Castrar por candidatos + ficha optimista sin parpadeo, gateado+commiteado).
+> EN CURSO: corrección del mismo anti-patrón de re-fetch en las otras 3 pantallas de la auditoría
+> (lotes ALTA, vista de grupo MEDIA, seleccion-masiva revert BAJA) — receta en `docs/conventions.md`.
 > 18 commits. Todos los chunks gateados (design-review + reviewer + Gate 2): UI-A ✅ + UI-B ✅ + UI-B2
 > (vacunación, HIGH VIA-ENUM cerrado en fix-loop) ✅ + UI-C (ficha castrado/⭐/borrado eventos) ✅ + UI-D
 > (E2E 9/9 --repeat-each=3) ✅. Decisiones menores de Raf abiertas (no bloquean, en backlog): badge ⭐
