@@ -23,8 +23,10 @@
 >
 > **✅ SPEC 10 APROBADA por Raf (Puerta 2, 2026-06-12) → `done` en feature_list.** + 1 ronda de fixes
 > post-testeo (gating Destetar/Castrar por candidatos + ficha optimista sin parpadeo, gateado+commiteado).
-> EN CURSO: corrección del mismo anti-patrón de re-fetch en las otras 3 pantallas de la auditoría
-> (lotes ALTA, vista de grupo MEDIA, seleccion-masiva revert BAJA) — receta en `docs/conventions.md`.
+> ✅ Anti-patrón de re-fetch corregido en las 3 pantallas de la auditoría (lotes/vista-grupo/seleccion,
+> gateado+commiteado `2b17cf6`) + receta en `docs/conventions.md`. **Working tree: 2 archivos sueltos
+> AJENOS sin commitear** (`RAFAQ-resumen-app.md` raíz + `app/.li-fetch.cjs` temp de LinkedIn) — de Raf,
+> no los toqué. ~24 commits en la sesión, sin pushear (Raf pushea).
 > 18 commits. Todos los chunks gateados (design-review + reviewer + Gate 2): UI-A ✅ + UI-B ✅ + UI-B2
 > (vacunación, HIGH VIA-ENUM cerrado en fix-loop) ✅ + UI-C (ficha castrado/⭐/borrado eventos) ✅ + UI-D
 > (E2E 9/9 --repeat-each=3) ✅. Decisiones menores de Raf abiertas (no bloquean, en backlog): badge ⭐
