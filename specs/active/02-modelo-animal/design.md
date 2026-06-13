@@ -1863,6 +1863,16 @@ create trigger animal_events_enforce_edit_window
   before update on public.animal_events
   for each row execute function public.tg_animal_events_enforce_edit_window();
 
+-- RECONCILIACIÓN (feature 11 — transferencia-animal, migración 0088, sesión 23): el cuerpo de
+-- tg_animal_events_enforce_edit_window se re-emitió (CREATE OR REPLACE, append-only) con un
+-- early-return al INICIO cuando la GUC LOCAL `rafaq.is_transfer = 'on'` está activa. El RPC
+-- transfer_animal (SECURITY DEFINER, 0087) re-apunta la observación al perfil nuevo en Y cambiando
+-- animal_profile_id + establishment_id (ambas inmutables acá); la GUC habilita ESE re-apuntado solo
+-- dentro del definer. Un UPDATE de cliente directo a PostgREST NO puede setear la GUC dentro de la
+-- transacción del trigger → la inmutabilidad sigue valiendo para clientes (cero relajación del vector
+-- anti-spoof que este trigger cierra). Mismo patrón que rafaq.is_auto_transition (0031). Ver
+-- specs/active/11-transferencia-animal/design.md §4.3 (DEC-A1).
+
 -- RLS
 alter table public.animal_events enable row level security;
 

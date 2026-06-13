@@ -17,6 +17,23 @@ No es un sustituto de `feature_list.json` ni de los ADRs — es la antesala dond
 
 ## Ítems pendientes
 
+## 2026-06-12 — Riesgo latente: cleanup de tests no pagina el select de animal_profiles (3 suites hermanas)
+
+**Origen**: fix del leak de huérfanos en `supabase/tests/import/run.cjs` (~829K filas basura en `animals` desde 2026-06-06). La causa fue que el `cleanup()` recuperaba los `animal_id` a borrar con un `select(...).in('establishment_id', ests)` SIN paginar, y PostgREST topa la respuesta a 1000 filas → con el test de borde de 5000 perfiles quedaban ~4000 `animals` huérfanos por corrida (`animals` NO tiene `establishment_id`, no cascadea del establishment). Arreglado SOLO en `import/run.cjs` con un helper `collectAllAnimalIds(ests)` (keyset por la PK `id`, páginas de 1000). Delta de huérfanos verificado = 0 contra el remoto.
+
+**Qué (riesgo latente)**: el MISMO patrón sin paginar vive en otras suites:
+- `supabase/tests/animal/run.cjs` (~216-219)
+- `supabase/tests/maneuvers/run.cjs` (~289-290)
+- `supabase/tests/operaciones_rodeo/run.cjs` (~230)
+
+(`supabase/tests/sync_streams/run.cjs` NO tiene el riesgo: borra `animals` desde `createdAnimalIds` trackeado en proceso, no desde el select; el select de perfiles ahí solo saca `id` para `reproductive_events`.)
+
+**Por qué importa**: HOY no leakean porque cada una crea <1000 animales por corrida (bien por debajo del cap de PostgREST). Si alguna sube su volumen de fixtures por encima de 1000 en una corrida, vuelve a aparecer el leak de huérfanos en el remoto compartido.
+
+**Por qué NO se arregló acá (scope)**: el helper `collectAllAnimalIds` devuelve solo la lista de `animal_id` deduplicada. Las 3 suites hermanas necesitan ADEMÁS el `id` del perfil (para borrar `reproductive_events` por `animal_profile_id`/`calf_id`) del MISMO select, y cada una tiene una forma de retorno distinta (operaciones_rodeo mergea `createdAnimalIds`, sync_streams solo necesita `id`). Reutilizar el helper tal cual no es drop-in; generalizarlo a `{profileIds, animalIds}` y aplicarlo en 3 archivos heterogéneos es un cambio grande y riesgoso en test-infra que el fix acotado no pedía tocar. Se deja como riesgo latente documentado.
+
+**Próximo paso sugerido**: cuando se toque cualquiera de esas suites (o si se sube su volumen de fixtures), extraer un helper compartido `selectAllPaged(table, cols, {column, values})` con keyset por `id` y reemplazar los selects sin paginar de las 3 (+ idealmente mover `collectAllAnimalIds` de import a ese helper común). Test-infra, no producción.
+
 ## 2026-06-12 — Anti-patrón "re-fetch que parpadea" en 3 pantallas (auditoría, receta en conventions.md) — RESUELTO
 
 **Estado**: ✅ RESUELTO (impl_refetch-fixes, 2026-06-12). Las 3 instancias corregidas con la receta de
@@ -524,3 +541,13 @@ arreglada.
 **Qué**: las EFs (`supabase/functions/**/index.ts` + `_shared/*`) son Deno/TS y NO tienen type-check en el pipeline. Un import faltante, un símbolo mal escrito o un type error solo se descubre al deployar o en runtime.
 **Por qué importa**: las EFs corren con `service_role` (admin) y son la capa de auth/invitaciones — un type bug ahí es serio. Hoy la única red es el Gate 2 (tarde) o el runtime (peor).
 **Próximo paso sugerido**: instalar `deno` localmente y sumar `deno check supabase/functions/**/index.ts` a `scripts/check.mjs` (y quizás al hook Stop si es rápido). Ojo: `deno` no estaba en el PATH de la máquina de Raf al cierre de esta sesión — requiere instalarlo. Cazaría imports/símbolos faltantes antes del deploy.
+
+---
+
+## 2026-06-13 — Higiene de test: el cleanup del animal suite no captura los grafos complejos de spec 11
+
+**Origen**: cierre de feature 11 (transferencia). Tras aplicar 0087/0088 y correr la suite `transfer_animal RPC` (15 subtests con grafos madre+crías cross-campo), los `animals` huérfanos del remoto subieron de 3 a 36 (~33/run de esa suite).
+**Qué**: el `cleanup()` de `supabase/tests/animal/run.cjs` (~líneas 214-242) colecta `animal_id` de `animal_profiles` en los test-establishments y los borra, pero los tests de transferencia crean grafos más complejos (un animal con perfil viejo archivado en X + perfil nuevo en Y + crías/descendencia con vínculos `calf_id`/`bull_id`/`birth_calves` cross-campo) que ese cleanup no limpia del todo → deja `animals` globales huérfanos (tag null, sin perfil — sin colisión ni impacto de sync, pero bloat). **NO es defecto de la RPC**: `transfer_animal` no crea `animals` (reusa el `animal_id` global), así que en producción no orfana nada.
+**Relacionado**: misma clase que la nota del implementer sobre el cleanup sin paginar de las suites hermanas (animal/maneuvers/operaciones_rodeo). El leak grande (import, 4006/run) ya se arregló con keyset pagination.
+**Por qué importa**: ~33/run reacumula bloat lento en `animals` (acabamos de purgar 829K). No urgente, pero conviene un pase de higiene de los cleanups de test.
+**Próximo paso sugerido**: en el cleanup del animal suite, además de los `animal_id` de perfiles en test-ests, capturar los `animals` creados por los helpers de los tests de transferencia (trackear ids creados, o borrar por anti-join `animals` sin perfil cuyo `created_at` cae en la ventana del RUN_TAG). Considerar un helper compartido `selectAllPaged` + tracking explícito de animal_ids creados. Mientras tanto, purga manual ocasional: `DELETE FROM animals a WHERE NOT EXISTS (SELECT 1 FROM animal_profiles p WHERE p.animal_id = a.id);`.
