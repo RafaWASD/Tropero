@@ -221,6 +221,38 @@ function makeRow(i, extra = {}) {
   };
 }
 
+// Junta TODOS los animal_id de los perfiles de estos establishments, paginando.
+// POR QUÉ PAGINAR: PostgREST topa cada respuesta a 1000 filas por default. El test de borde
+// importa 5000 filas (todas con perfil); un `.select(...).in('establishment_id', ests)` sin
+// paginar devolvía solo las primeras ~1000 → el cleanup borraba ~1000 `animals` y el CASCADE del
+// establishment cascadeaba los 5000 `animal_profiles`, dejando ~4000 `animals` HUÉRFANOS por
+// corrida (animals NO tiene establishment_id, así que NO cascadea del establishment: hay que
+// borrarlas explícitas y por eso recuperar TODOS los ids es crítico). Keyset por la PK estable
+// `id` (no offset/range: es robusto ante inserts/deletes concurrentes del remoto compartido).
+async function collectAllAnimalIds(ests) {
+  const PAGE = 1000; // = cap de PostgREST por respuesta
+  const ids = new Set();
+  let after = null; // último id de la página previa (keyset)
+  for (;;) {
+    let q = admin
+      .from('animal_profiles')
+      .select('id, animal_id')
+      .in('establishment_id', ests)
+      .order('id', { ascending: true })
+      .limit(PAGE);
+    if (after) q = q.gt('id', after);
+    const { data, error } = await q;
+    if (error) throw new Error(`collectAllAnimalIds: ${error.message}`);
+    const page = data || [];
+    for (const p of page) {
+      if (p.animal_id) ids.add(p.animal_id);
+    }
+    if (page.length < PAGE) break; // última página
+    after = page[page.length - 1].id;
+  }
+  return [...ids];
+}
+
 async function cleanup() {
   // Splice los arrays a medida que se borran, para que el cleanup de la 2da suite no reintente
   // borrar los fixtures de la 1ra (ambas suites comparten estos arrays module-global).
@@ -231,11 +263,9 @@ async function cleanup() {
     // litter grande en el remoto compartido. Borramos los animals de NUESTROS profiles ANTES del
     // CASCADE (el delete de animals SÍ cascadea a sus profiles — FK 0020:14 on delete cascade).
     try {
-      const { data: ourProfiles } = await admin
-        .from('animal_profiles')
-        .select('animal_id')
-        .in('establishment_id', ests);
-      const animalIds = [...new Set((ourProfiles || []).map((p) => p.animal_id).filter(Boolean))];
+      // Recuperar TODOS los animal_id (paginado: el test de borde deja 5000 perfiles y PostgREST
+      // tope a 1000/respuesta — sin paginar quedaban ~4000 animals huérfanos por corrida).
+      const animalIds = await collectAllAnimalIds(ests);
       // Borrar en chunks (el test de borde puede dejar ~5000 animals; evitamos un IN gigante).
       for (let i = 0; i < animalIds.length; i += 500) {
         const chunk = animalIds.slice(i, i + 500);
