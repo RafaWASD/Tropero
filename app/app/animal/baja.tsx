@@ -275,7 +275,7 @@ function Step1ChooseReason({
   return (
     <YStack gap="$4">
       <YStack gap="$1">
-        <Text fontFamily="$body" fontSize="$6" fontWeight="600" color="$textPrimary">
+        <Text fontFamily="$body" fontSize="$6" lineHeight="$6" fontWeight="600" color="$textPrimary">
           ¿Qué pasó con este animal?
         </Text>
         <Text fontFamily="$body" fontSize="$4" fontWeight="400" color="$textMuted" numberOfLines={1}>
@@ -344,7 +344,7 @@ function ReasonCard({
           <Icon size={22} color={terracota} strokeWidth={2.5} />
         </View>
         <YStack flex={1} minWidth={0} gap="$1">
-          <Text fontFamily="$body" fontSize="$6" fontWeight="600" color="$textPrimary" numberOfLines={1}>
+          <Text fontFamily="$body" fontSize="$6" lineHeight="$6" fontWeight="600" color="$textPrimary" numberOfLines={1}>
             {title}
           </Text>
           <Text fontFamily="$body" fontSize="$3" fontWeight="400" color="$textMuted" numberOfLines={1}>

@@ -195,7 +195,7 @@ export default function MisCamposScreen() {
           justifyContent="space-between"
           paddingVertical="$3"
         >
-          <Text fontFamily="$body" fontSize="$8" fontWeight="700" color="$textPrimary">
+          <Text fontFamily="$body" fontSize="$8" lineHeight="$8" fontWeight="700" color="$textPrimary">
             Mis campos
           </Text>
           <CreateFieldButton onPress={() => router.push('/crear-campo')} />

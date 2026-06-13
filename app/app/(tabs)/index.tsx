@@ -127,7 +127,7 @@ function HomeHeader({
       {/* Wordmark RAFAQ. No encoge (flexShrink:0): es identidad de marca. */}
       <Text
         fontFamily="$body"
-        fontSize="$7"
+        fontSize="$7" lineHeight="$7"
         fontWeight="700"
         color="$primary"
         letterSpacing={1}
@@ -633,7 +633,7 @@ export default function InicioScreen() {
             el perfil carga o no hay nombre, saludo NEUTRO (sin parpadear "Hola undefined"). */}
         <Text
           fontFamily="$body"
-          fontSize="$9"
+          fontSize="$9" lineHeight="$9"
           fontWeight="700"
           color="$textPrimary"
           marginTop="$4"
@@ -655,7 +655,7 @@ export default function InicioScreen() {
             masivas. Cada card muestra el nombre + las cabezas activas (conteo local, offline). */}
         {rodeos.length > 0 ? (
           <YStack width="100%" marginTop="$6" gap="$3">
-            <Text fontFamily="$body" fontSize="$6" fontWeight="600" color="$textPrimary">
+            <Text fontFamily="$body" fontSize="$6" lineHeight="$6" fontWeight="600" color="$textPrimary">
               Mis rodeos
             </Text>
             {rodeos.map((r) => (
@@ -677,7 +677,7 @@ export default function InicioScreen() {
             campo tiene lotes. Cada card → vista de grupo del lote (/lote/[id]). */}
         {lotes.length > 0 ? (
           <YStack width="100%" marginTop="$6" gap="$3">
-            <Text fontFamily="$body" fontSize="$6" fontWeight="600" color="$textPrimary">
+            <Text fontFamily="$body" fontSize="$6" lineHeight="$6" fontWeight="600" color="$textPrimary">
               Lotes
             </Text>
             {lotes.map((g) => (

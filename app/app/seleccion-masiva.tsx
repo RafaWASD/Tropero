@@ -275,7 +275,7 @@ export default function SeleccionMasivaScreen() {
       <YStack flex={1} width="100%" backgroundColor="$bg">
         <YStack width="100%" paddingTop={insets.top} paddingHorizontal="$4">
           <XStack width="100%" alignItems="center" gap="$2" paddingVertical="$3">
-            <Text fontFamily="$body" fontSize="$8" fontWeight="700" color="$textPrimary">
+            <Text fontFamily="$body" fontSize="$8" lineHeight="$8" fontWeight="700" color="$textPrimary">
               {verb}
             </Text>
           </XStack>
@@ -303,7 +303,7 @@ export default function SeleccionMasivaScreen() {
             <ChevronLeft size={28} color={muted} strokeWidth={2} />
           </Pressable>
           <YStack flex={1} minWidth={0}>
-            <Text fontFamily="$body" fontSize="$8" fontWeight="700" color="$textPrimary" numberOfLines={1}>
+            <Text fontFamily="$body" fontSize="$8" lineHeight="$8" fontWeight="700" color="$textPrimary" numberOfLines={1}>
               {operation === 'castrate' ? 'Castrar' : 'Destetar'}
             </Text>
             <Text fontFamily="$body" fontSize="$3" fontWeight="500" color="$textMuted">
@@ -460,7 +460,7 @@ function SelectionSectionBlock({
   return (
     <YStack width="100%" gap="$2">
       <XStack width="100%" alignItems="center" justifyContent="space-between" paddingTop="$2">
-        <Text fontFamily="$body" fontSize="$6" fontWeight="600" color="$textPrimary">
+        <Text fontFamily="$body" fontSize="$6" lineHeight="$6" fontWeight="600" color="$textPrimary">
           {section.title}{' '}
           <Text fontFamily="$body" fontSize="$4" fontWeight="500" color="$textMuted">
             ({profiles.length})

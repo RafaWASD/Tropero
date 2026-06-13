@@ -64,6 +64,7 @@ RAFAQ apunta a "el mejor en el primer try": el polish de UX pesa más que YAGNI 
 - [ ] **Centrado robusto (ADR-027)**: ningún contenido centrado se corre por una decoración lateral (radio/check/ícono/badge). Si agregaste algo a un costado, verificá que no descentre vs las filas hermanas. Decoración condicional → slot reservado siempre.
 - [ ] Figura-fondo, alineación a grilla, ritmo de espaciado coherente.
 - [ ] Contraste / legibilidad OK (medido si hay duda).
+- [ ] **Descendentes sin recorte (bug recurrente — vetar SIEMPRE)**: ningún título/heading recorta las descendentes (g, q, p, j, y) por abajo. Causa raíz en este repo (Tamagui + RN-web): un `Text` que setea `fontSize="$N"` **sin** `lineHeight` NO hereda el `lineHeight` del token (eso solo pasa con la prop `size`) → cae al `line-height: normal` del browser (~1.2×, ajustado), y con `numberOfLines` (que en web es `-webkit-line-clamp` + `overflow:hidden`) **recorta las descendentes de la última línea**. **Fix canónico**: todo heading (`fontSize` ≥ `$6`) y todo `Text` con `numberOfLines` debe setear `lineHeight="$N"` matching (los tokens ya tienen lugar para descendentes). **Verificá en la captura un título que tenga g/q/p/j/y** (no alcanza con "Inicio"/"Animales" que no tienen descendentes — el bug es invisible ahí). Detectado por Raf en "Asi**g**nar caravanas" (sesión 25).
 - [ ] Estados vacío/error/offline contemplados (si aplica a la pantalla).
 - [ ] Tokens, no hardcode (ADR-023 §4).
 - [ ] Render **fiel** (CDP) mirado de cerca, no asumido; comparado 1:1 contra la referencia si existe.

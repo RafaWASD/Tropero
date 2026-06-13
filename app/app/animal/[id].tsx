@@ -1263,7 +1263,7 @@ function DetailSection({
         >
           <Icon size={16} color={primary} strokeWidth={2.5} />
         </View>
-        <Text fontFamily="$body" fontSize="$6" fontWeight="600" color="$textPrimary">
+        <Text fontFamily="$body" fontSize="$6" lineHeight="$6" fontWeight="600" color="$textPrimary">
           {title}
         </Text>
       </XStack>
@@ -1708,7 +1708,7 @@ function HistorySection({
         >
           <Clock size={16} color={primary} strokeWidth={2.5} />
         </View>
-        <Text flex={1} minWidth={0} fontFamily="$body" fontSize="$6" fontWeight="600" color="$textPrimary">
+        <Text flex={1} minWidth={0} fontFamily="$body" fontSize="$6" lineHeight="$6" fontWeight="600" color="$textPrimary">
           Historial
         </Text>
       </XStack>

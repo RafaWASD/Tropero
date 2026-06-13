@@ -5,7 +5,7 @@ import { Text, YStack } from 'tamagui';
 export default function ReportesScreen() {
   return (
     <YStack flex={1} backgroundColor="$bg" alignItems="center" justifyContent="center" padding="$4">
-      <Text fontSize="$8" fontWeight="700" color="$textPrimary">
+      <Text fontSize="$8" lineHeight="$8" fontWeight="700" color="$textPrimary">
         Reportes
       </Text>
       <Text fontSize="$4" color="$textMuted" marginTop="$2">

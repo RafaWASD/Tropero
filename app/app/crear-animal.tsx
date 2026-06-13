@@ -737,7 +737,7 @@ function Step1Rodeo({
   }
   return (
     <YStack gap="$2">
-      <Text fontFamily="$body" fontSize="$6" fontWeight="600" color="$textPrimary">
+      <Text fontFamily="$body" fontSize="$6" lineHeight="$6" fontWeight="600" color="$textPrimary">
         ¿A qué rodeo va este animal?
       </Text>
       <OptionRows
@@ -761,7 +761,7 @@ function Step2Sex({
 }) {
   return (
     <YStack gap="$4">
-      <Text fontFamily="$body" fontSize="$6" fontWeight="600" color="$textPrimary">
+      <Text fontFamily="$body" fontSize="$6" lineHeight="$6" fontWeight="600" color="$textPrimary">
         ¿Es macho o hembra?
       </Text>
       <YStack gap="$3">
@@ -826,7 +826,7 @@ function SexCard({
           flex={1}
           minWidth={0}
           fontFamily="$body"
-          fontSize="$7"
+          fontSize="$7" lineHeight="$7"
           fontWeight="600"
           color={selected ? '$white' : '$textPrimary'}
         >
@@ -855,7 +855,7 @@ function Step3Category({
 }) {
   return (
     <YStack gap="$3">
-      <Text fontFamily="$body" fontSize="$6" fontWeight="600" color="$textPrimary">
+      <Text fontFamily="$body" fontSize="$6" lineHeight="$6" fontWeight="600" color="$textPrimary">
         ¿Qué categoría es?
       </Text>
       {loading ? (
@@ -969,7 +969,7 @@ function Step4Data({
     <>
       {/* ── Identificadores (R4.2 precargado read-only + R4.3 recomendados). BASE. ── */}
       <YStack gap="$2">
-        <Text fontFamily="$body" fontSize="$6" fontWeight="600" color="$textPrimary">
+        <Text fontFamily="$body" fontSize="$6" lineHeight="$6" fontWeight="600" color="$textPrimary">
           Identificación
         </Text>
         {prefillKind === 'tag' ? (
@@ -1064,7 +1064,7 @@ function Step4Data({
       {/* ── Datos ESPECÍFICOS de la categoría (tabla §2). Solo se muestran los que la categoría pide. ── */}
       {hasExtra ? (
         <YStack gap="$4">
-          <Text fontFamily="$body" fontSize="$6" fontWeight="600" color="$textPrimary">
+          <Text fontFamily="$body" fontSize="$6" lineHeight="$6" fontWeight="600" color="$textPrimary">
             Datos de la categoría
           </Text>
 

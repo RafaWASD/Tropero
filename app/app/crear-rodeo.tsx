@@ -232,7 +232,7 @@ export default function CrearRodeoScreen() {
       <YStack width="100%" paddingTop={insets.top} paddingHorizontal="$4" gap="$3">
         <ProgressBar step={step} total={TOTAL_STEPS} />
         <YStack gap="$1">
-          <Text fontFamily="$body" fontSize="$8" fontWeight="700" color="$textPrimary">
+          <Text fontFamily="$body" fontSize="$8" lineHeight="$8" fontWeight="700" color="$textPrimary">
             {title}
           </Text>
           <Text fontFamily="$body" fontSize="$4" fontWeight="400" color="$textMuted">
@@ -266,7 +266,7 @@ export default function CrearRodeoScreen() {
 
         {step === 2 ? (
           <YStack gap="$3">
-            <Text fontFamily="$body" fontSize="$6" fontWeight="600" color="$textPrimary">
+            <Text fontFamily="$body" fontSize="$6" lineHeight="$6" fontWeight="600" color="$textPrimary">
               ¿Cómo se llama el rodeo?
             </Text>
             <FormField
@@ -382,7 +382,7 @@ function OnboardingImportOffer({
         showsHorizontalScrollIndicator={false}
       >
         <YStack gap="$3">
-          <Text fontFamily="$body" fontSize="$8" fontWeight="700" color="$textPrimary">
+          <Text fontFamily="$body" fontSize="$8" lineHeight="$8" fontWeight="700" color="$textPrimary">
             ¡Listo! Tu rodeo ya está creado
           </Text>
           <Text fontFamily="$body" fontSize="$4" fontWeight="400" color="$textMuted">
@@ -460,7 +460,7 @@ function Step1System({
   }
   return (
     <YStack gap="$3">
-      <Text fontFamily="$body" fontSize="$6" fontWeight="600" color="$textPrimary">
+      <Text fontFamily="$body" fontSize="$6" lineHeight="$6" fontWeight="600" color="$textPrimary">
         ¿Qué sistema productivo?
       </Text>
       {systems.map((s) => (
@@ -515,7 +515,7 @@ function SystemCard({
       >
         <Text
           fontFamily="$body"
-          fontSize="$6"
+          fontSize="$6" lineHeight="$6"
           fontWeight="600"
           color="$textPrimary"
           textAlign="center"

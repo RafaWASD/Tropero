@@ -676,7 +676,7 @@ function Step1ChooseType({
   // y parto no aplican a machos — para un macho el operario solo ve "General".
   return (
     <YStack gap="$4">
-      <Text fontFamily="$body" fontSize="$6" fontWeight="600" color="$textPrimary">
+      <Text fontFamily="$body" fontSize="$6" lineHeight="$6" fontWeight="600" color="$textPrimary">
         ¿Qué querés cargar?
       </Text>
 
@@ -789,7 +789,7 @@ function TypeCard({
           <Icon size={22} color={primary} strokeWidth={2.5} />
         </View>
         <YStack flex={1} minWidth={0} gap="$1">
-          <Text fontFamily="$body" fontSize="$6" fontWeight="600" color="$textPrimary" numberOfLines={1}>
+          <Text fontFamily="$body" fontSize="$6" lineHeight="$6" fontWeight="600" color="$textPrimary" numberOfLines={1}>
             {title}
           </Text>
           <Text fontFamily="$body" fontSize="$3" fontWeight="400" color="$textMuted" numberOfLines={1}>
@@ -1236,7 +1236,7 @@ function CalfBlock({
   return (
     <Card gap="$3">
       <XStack width="100%" alignItems="center" gap="$2">
-        <Text flex={1} minWidth={0} fontFamily="$body" fontSize="$6" fontWeight="600" color="$textPrimary">
+        <Text flex={1} minWidth={0} fontFamily="$body" fontSize="$6" lineHeight="$6" fontWeight="600" color="$textPrimary">
           {`Ternero ${index + 1}`}
         </Text>
         {canRemove ? (

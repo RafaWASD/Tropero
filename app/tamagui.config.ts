@@ -187,6 +187,13 @@ const tokens = createTokens({
     // Alto mínimo de los chips de filtro (R1.5: Rodeo/Estado/Sin caravana). ≥40px para
     // target tappable cómodo sin robarle altura a la lista (un escalón bajo touchMin).
     chipMin: 40,
+    // ── Modo `assign_or_create` del bottom-sheet (spec 09 chunk dedup, RD3.3) — JIT, 🔴 manga-crítico.
+    // Tope de alto del scroll de candidatos sin caravana DENTRO del sheet (que ya tiene maxHeight 85% del
+    // viewport): acota la lista a ~3-4 candidatos visibles para que el buscador (arriba) y el CTA "es nuevo"
+    // (abajo, ≥touchMin, Fitts) queden SIEMPRE a la vista — una decisión por pantalla, operable con una
+    // mano a pleno sol. El resto de candidatos se scrollea / se filtra con el buscador. JIT lo necesitó
+    // el AssignOrCreateBody.
+    candidateListMax: 300,
     // ── Toggle de la plantilla de datos del rodeo (spec 02 C1, ADR-021) — JIT.
     // Control propio (no hay primitivo Switch en la base v4). Pista pill + thumb circular blanco.
     // toggleTrack = ancho de la pista; toggleThumb = alto de la pista (= diámetro visual); knob =

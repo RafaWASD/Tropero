@@ -26,7 +26,7 @@ import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
 import { Check, Plus, Search } from 'lucide-react-native';
 import { useStatus } from '@powersync/react';
 
-import { AnimalRow, BleConnectionChip, Card, InfoNote, FormError } from '@/components';
+import { AnimalRow, BleConnectionChip, Button, Card, InfoNote, FormError } from '@/components';
 import { useEstablishment, useRodeo } from '@/contexts';
 import {
   fetchAnimals,
@@ -251,6 +251,13 @@ export default function AnimalesScreen() {
     [router],
   );
 
+  // Entry point a la asignación MASIVA (spec 09 chunk dedup opción B, RD5.1 / D-c): aparece con el filtro
+  // "sin caravana" activo — el operario que está mirando sus animales sin caravana es exactamente quien va
+  // a caravanearlos en serie en la manga.
+  const onBulkAssign = useCallback(() => {
+    router.push('/asignar-caravanas');
+  }, [router]);
+
   const selectedRodeoName = rodeos.find((r) => r.id === rodeoFilter)?.name ?? null;
   const selectedStatusLabel = STATUS_OPTIONS.find((s) => s.value === statusFilter)?.label ?? 'Activos';
 
@@ -336,6 +343,17 @@ export default function AnimalesScreen() {
               setStatusPickerOpen(false);
             }}
           />
+        ) : null}
+
+        {/* CTA a la asignación MASIVA (spec 09 chunk dedup opción B, RD5.1): visible con el filtro "sin
+            caravana" activo. El operario que filtró sus animales sin caravana es quien va a caravanearlos
+            en serie con el bastón. */}
+        {onlyNoTag ? (
+          <YStack width="100%" paddingBottom="$3">
+            <Button variant="primary" fullWidth onPress={onBulkAssign}>
+              Asignar caravanas en masa
+            </Button>
+          </YStack>
         ) : null}
       </YStack>
 
@@ -545,7 +563,7 @@ function NoMatchState({ query, onPress }: { query: string; onPress: () => void }
   return (
     <YStack width="100%" alignItems="center" gap="$4" marginTop="$8" paddingHorizontal="$4">
       <YStack alignItems="center" gap="$2">
-        <Text fontFamily="$body" fontSize="$6" fontWeight="600" color="$textPrimary" textAlign="center">
+        <Text fontFamily="$body" fontSize="$6" lineHeight="$6" fontWeight="600" color="$textPrimary" textAlign="center">
           No encontramos «{query}».
         </Text>
         <Text fontFamily="$body" fontSize="$4" fontWeight="400" color="$textMuted" textAlign="center">
@@ -568,7 +586,7 @@ function FilteredEmptyState({ label, onClear }: { label: string; onClear: () => 
   return (
     <YStack width="100%" alignItems="center" gap="$4" marginTop="$8" paddingHorizontal="$4">
       <YStack alignItems="center" gap="$2">
-        <Text fontFamily="$body" fontSize="$6" fontWeight="600" color="$textPrimary" textAlign="center">
+        <Text fontFamily="$body" fontSize="$6" lineHeight="$6" fontWeight="600" color="$textPrimary" textAlign="center">
           {label}
         </Text>
         <Text fontFamily="$body" fontSize="$4" fontWeight="400" color="$textMuted" textAlign="center">
@@ -608,7 +626,7 @@ function EmptyEstablishmentState({ onPress }: { onPress: () => void }) {
   return (
     <YStack width="100%" alignItems="center" gap="$4" marginTop="$8" paddingHorizontal="$4">
       <YStack alignItems="center" gap="$2">
-        <Text fontFamily="$body" fontSize="$6" fontWeight="600" color="$textPrimary" textAlign="center">
+        <Text fontFamily="$body" fontSize="$6" lineHeight="$6" fontWeight="600" color="$textPrimary" textAlign="center">
           Todavía no cargaste animales.
         </Text>
         <Text fontFamily="$body" fontSize="$4" fontWeight="400" color="$textMuted" textAlign="center">

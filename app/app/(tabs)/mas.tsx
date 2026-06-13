@@ -31,7 +31,7 @@ import { Alert, Platform, Pressable } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
-import { AlertTriangle, Boxes, Building2, CheckCircle2, ChevronRight, Layers, LogOut, Pencil, Trash2, Users } from 'lucide-react-native';
+import { AlertTriangle, Boxes, Building2, CheckCircle2, ChevronRight, Layers, LogOut, Pencil, Radio, Trash2, Users } from 'lucide-react-native';
 
 import { Button, Card, FormField, FormError, InfoNote } from '@/components';
 import { useAuth, useEstablishment, useProfile } from '@/contexts';
@@ -801,7 +801,7 @@ export default function MasScreen() {
       {/* Header propio (el tab no muestra header nativo, ADR-018). */}
       <YStack width="100%" paddingTop={insets.top} paddingHorizontal="$4">
         <XStack width="100%" alignItems="center" paddingVertical="$3">
-          <Text fontFamily="$body" fontSize="$8" fontWeight="700" color="$textPrimary">
+          <Text fontFamily="$body" fontSize="$8" lineHeight="$8" fontWeight="700" color="$textPrimary">
             Más
           </Text>
         </XStack>
@@ -853,6 +853,16 @@ export default function MasScreen() {
                 accessibilityLabel="Ver y gestionar los lotes del campo"
                 trailing={<ChevronRight size={20} color={muted} strokeWidth={2} />}
                 onPress={() => router.push('/lotes')}
+              />
+              <View height={1} backgroundColor="$divider" marginHorizontal="$4" />
+              {/* Asignación masiva de caravanas (spec 09 chunk dedup opción B, RD5.1 / D-c): cualquier
+                  rol activo puede caravanear (trabajo de manga) → visible a todos, no owner-only. */}
+              <ActionRow
+                icon={<Radio size={20} color={primary} strokeWidth={2} />}
+                label="Asignar caravanas en masa"
+                accessibilityLabel="Asignar caravanas electrónicas en masa con el bastón"
+                trailing={<ChevronRight size={20} color={muted} strokeWidth={2} />}
+                onPress={() => router.push('/asignar-caravanas')}
               />
               {isOwner ? (
                 <>

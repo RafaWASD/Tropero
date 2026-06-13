@@ -524,6 +524,19 @@ function listDomainFiltersOverlay(establishmentId: string, status: string): { wh
 const HIDE_EXITED_PROFILE = notHiddenByOverride('animal_profiles', 'ap.id', ['exited', 'soft_deleted']);
 
 /**
+ * Inyecta una columna EXTRA en la lista de proyección de un `SELECT ... FROM ...`, justo antes del primer
+ * ` FROM ` (la columna se agrega al final de la lista de columnas, no como tabla del FROM). Lo usa la
+ * opción A para agregar el alias `updated_at` a `LOCAL_LIST_SELECT`/`_OVERLAY` (que YA incluyen FROM/JOINs)
+ * sin reescribir el SELECT entero. `expr` es una expresión CONTROLADA por el código (nunca input de
+ * usuario) → sin riesgo de injection.
+ */
+function injectProjection(select: string, expr: string): string {
+  const idx = select.indexOf(' FROM ');
+  if (idx === -1) return select; // defensivo: un SELECT sin FROM no debería pasar acá
+  return `${select.slice(0, idx)}, ${expr}${select.slice(idx)}`;
+}
+
+/**
  * Lista de animal_profiles del campo (espeja animals.fetchAnimals). Filtros de DOMINIO conservados:
  * establishment + `deleted_at IS NULL` + `status` (default 'active') + opcional `rodeo_id` + opcional
  * `noTag` (`animal_tag_electronic IS NULL`, b1). Orden `created_at DESC` + LIMIT 200, idénticos.
@@ -533,17 +546,47 @@ const HIDE_EXITED_PROFILE = notHiddenByOverride('animal_profiles', 'ap.id', ['ex
  */
 export function buildAnimalsListQuery(
   establishmentId: string,
-  filter: { rodeoId?: string | null; status?: string | null; noTag?: boolean } = {},
+  filter: {
+    rodeoId?: string | null;
+    status?: string | null;
+    noTag?: boolean;
+    /**
+     * Columna de ORDEN del listado (DESC). Default `'created_at'` (orden de la tab Animales). Opción A
+     * del chunk dedup (RD3.3 / design §3.4): los candidatos `noTag` de la intermedia se ordenan por
+     * `updated_at DESC` (RECIÉN tocados primero — un animal que el operario está cargando/editando en la
+     * manga es el más probable de caravanear ahora). La rama SINCRONIZADA proyecta `ap.updated_at`; la
+     * rama OVERLAY (pending_animal_profiles — un alta optimista sin caravana) NO tiene columna
+     * `updated_at`, así que usa su `created_at` como señal de frescura (una fila optimista recién creada
+     * ES lo más nuevo localmente) — column-aligned con el UNION. Sin esta opción, el orden es idéntico al
+     * histórico (cero regresión para los callers existentes).
+     */
+    orderBy?: 'created_at' | 'updated_at';
+  } = {},
 ): LocalQuery {
   const status = filter.status ?? 'active';
+  const orderBy = filter.orderBy ?? 'created_at';
+  // Cuando ordenamos por updated_at, AMBAS ramas deben PROYECTAR el alias `updated_at` (el ORDER BY de un
+  // UNION solo referencia columnas proyectadas). La synced usa ap.updated_at REAL; la overlay no tiene esa
+  // columna → proyecta pap.created_at AS updated_at (señal de frescura del alta optimista). Para el orden
+  // por created_at (default) NO se proyecta nada extra (cero cambio sobre los callers históricos).
+  // El alias va INYECTADO en la lista de proyección (antes del ` FROM`), NO concatenado al final del SELECT
+  // (que ya incluye FROM/JOINs — concatenar ahí lo tomaría como una tabla del FROM).
+  const syncedSelect =
+    orderBy === 'updated_at'
+      ? injectProjection(LOCAL_LIST_SELECT, 'ap.updated_at AS updated_at')
+      : LOCAL_LIST_SELECT;
+  const overlaySelect =
+    orderBy === 'updated_at'
+      ? injectProjection(LOCAL_LIST_SELECT_OVERLAY, 'pap.created_at AS updated_at')
+      : LOCAL_LIST_SELECT_OVERLAY;
   // Parte SINCRONIZADA (con ocultación de exits/soft-deletes pendientes).
   const dom = listDomainFilters(establishmentId, status);
-  let synced = `${LOCAL_LIST_SELECT} WHERE ${dom.where} AND ${HIDE_EXITED_PROFILE}`;
+  let synced = `${syncedSelect} WHERE ${dom.where} AND ${HIDE_EXITED_PROFILE}`;
   const args: unknown[] = [...dom.args];
   // Parte OVERLAY (altas/terneros optimistas; ocultos si ya tienen un override — defensivo).
   const domO = listDomainFiltersOverlay(establishmentId, status);
   let overlay =
-    `${LOCAL_LIST_SELECT_OVERLAY} WHERE ${domO.where} AND ` +
+    `${overlaySelect} WHERE ${domO.where} AND ` +
     notHiddenByOverride('animal_profiles', 'pap.id', ['exited', 'soft_deleted']);
   const overlayArgs: unknown[] = [...domO.args];
   if (filter.rodeoId) {
@@ -557,9 +600,36 @@ export function buildAnimalsListQuery(
     synced += ' AND ap.animal_tag_electronic IS NULL';
     overlay += ' AND pap.animal_tag_electronic IS NULL';
   }
-  // El ORDER BY usa el alias proyectado `created_at` (lo emiten ambas ramas: ap.created_at / pap.created_at).
-  const sql = `${synced} UNION ALL ${overlay} ORDER BY created_at DESC LIMIT 200`;
+  // El ORDER BY usa el alias proyectado por ambas ramas (created_at por default; updated_at en opción A).
+  const sql = `${synced} UNION ALL ${overlay} ORDER BY ${orderBy} DESC LIMIT 200`;
   return { sql, args: [...args, ...overlayArgs] };
+}
+
+/**
+ * Conteo de candidatos `noTag` activos del campo activo (opción A del chunk dedup, RD8.2 / design §3.2).
+ * Lo usa el host BLE (`FindOrCreateOverlay`) para decidir, tras un lookup `mode:'create'`, si abre la
+ * intermedia `assign_or_create` (≥1 candidato) o va directo a CREATE (0 candidatos) — una lectura LOCAL
+ * más, sin red. Suma synced (oculta exits/soft-deletes pendientes) + overlay (altas optimistas sin
+ * caravana), exactamente el mismo universo que `buildAnimalsListQuery(est, { noTag:true })` recorrería —
+ * pero como COUNT(*) (siempre 1 fila → NO degrada a "sincronizando"). Mismo criterio `noTag` que la lista:
+ * `animal_tag_electronic IS NULL` + status='active' + deleted_at IS NULL + establishment activo.
+ *
+ * Multi-tenant (CLAUDE.md ppio 6): el establishment_id llega por param (del contexto activo), nunca hardcode.
+ */
+export function buildNoTagCandidatesCountQuery(establishmentId: string): LocalQuery {
+  const sql =
+    'SELECT (' +
+    'SELECT COUNT(*) FROM animal_profiles ap ' +
+    "WHERE ap.establishment_id = ? AND ap.status = 'active' AND ap.deleted_at IS NULL " +
+    'AND ap.animal_tag_electronic IS NULL AND ' +
+    HIDE_EXITED_PROFILE +
+    ') + (' +
+    'SELECT COUNT(*) FROM pending_animal_profiles pap ' +
+    "WHERE pap.establishment_id = ? AND pap.status = 'active' " +
+    'AND pap.animal_tag_electronic IS NULL AND ' +
+    notHiddenByOverride('animal_profiles', 'pap.id', ['exited', 'soft_deleted']) +
+    ') AS count';
+  return { sql, args: [establishmentId, establishmentId] };
 }
 
 /**

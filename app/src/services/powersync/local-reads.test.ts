@@ -27,6 +27,7 @@ import {
   buildCountPendingInvitationsQuery,
   buildPendingInvitationsQuery,
   buildAnimalsListQuery,
+  buildNoTagCandidatesCountQuery,
   buildAnimalsCountQuery,
   buildRodeoHeadCountsQuery,
   buildGroupHeadCountsQuery,
@@ -423,6 +424,116 @@ test('buildAnimalsListQuery: sin rodeoId no agrega el filtro; noTag falso no agr
   // el filtro noTag es `animal_tag_electronic IS NULL` (la columna ANTES del IS NULL) — no debe aparecer.
   assert.doesNotMatch(q.sql, /animal_tag_electronic IS NULL/);
   assert.deepEqual(q.args, ['est-1', 'active', 'est-1', 'active']);
+});
+
+// ─── Opción A del chunk dedup (RD3.3 / RD8 / design §3.4): candidatos noTag por updated_at DESC ───
+
+test('buildAnimalsListQuery: orderBy updated_at → ambas ramas proyectan el alias updated_at + ORDER BY updated_at DESC (RD3.3)', () => {
+  const q = buildAnimalsListQuery('est-1', { noTag: true, orderBy: 'updated_at' });
+  // La rama synced usa la columna REAL ap.updated_at; la overlay (sin updated_at) usa pap.created_at AS updated_at.
+  assert.match(q.sql, /ap\.updated_at AS updated_at/);
+  assert.match(q.sql, /pap\.created_at AS updated_at/);
+  // El ORDER BY es por el alias proyectado updated_at (no created_at) — recientes primero.
+  assert.match(q.sql, /ORDER BY updated_at DESC LIMIT 200/);
+  // El filtro noTag sigue en AMBAS ramas.
+  assert.match(q.sql, /AND ap\.animal_tag_electronic IS NULL/);
+  assert.match(q.sql, /AND pap\.animal_tag_electronic IS NULL/);
+  assert.deepEqual(q.args, ['est-1', 'active', 'est-1', 'active']);
+});
+
+test('buildAnimalsListQuery: orderBy default (created_at) NO proyecta updated_at (cero regresión sobre los callers históricos)', () => {
+  const q = buildAnimalsListQuery('est-1');
+  assert.doesNotMatch(q.sql, /AS updated_at/);
+  assert.match(q.sql, /ORDER BY created_at DESC LIMIT 200/);
+});
+
+// COMPORTAMIENTO contra node:sqlite (tablas reales): el orden updated_at DESC respeta la frescura, mezclando
+// synced (updated_at real) + overlay (created_at como fallback de updated_at). Verifica que el UNION está
+// column-aligned (mismo número/orden de columnas en ambas ramas, requisito del UNION ALL) — un assert de
+// string no captura un mismatch de columnas; node:sqlite SÍ falla si las ramas no alinean.
+test('buildAnimalsListQuery (comportamiento): orderBy updated_at ordena candidatos noTag por frescura (synced updated_at + overlay created_at)', () => {
+  const db = new DatabaseSync(':memory:');
+  // Esquema mínimo con las columnas que LOCAL_LIST_SELECT (synced) y LOCAL_LIST_SELECT_OVERLAY proyectan,
+  // + las tablas JOINeadas (rodeos, categories_by_system) y la de override (vacía).
+  db.exec(
+    'CREATE TABLE animal_profiles (id TEXT, animal_id TEXT, idv TEXT, visual_id_alt TEXT, category_id TEXT, ' +
+      'rodeo_id TEXT, status TEXT, management_group_id TEXT, animal_tag_electronic TEXT, animal_sex TEXT, ' +
+      'category_override INTEGER, animal_birth_date TEXT, is_castrated INTEGER, future_bull INTEGER, ' +
+      'establishment_id TEXT, deleted_at TEXT, created_at TEXT, updated_at TEXT);' +
+      'CREATE TABLE pending_animal_profiles (id TEXT, animal_id TEXT, idv TEXT, visual_id_alt TEXT, category_id TEXT, ' +
+      'rodeo_id TEXT, status TEXT, management_group_id TEXT, animal_tag_electronic TEXT, animal_sex TEXT, ' +
+      'category_override INTEGER, animal_birth_date TEXT, establishment_id TEXT, created_at TEXT);' +
+      'CREATE TABLE rodeos (id TEXT, system_id TEXT, name TEXT);' +
+      'CREATE TABLE categories_by_system (id TEXT, code TEXT, name TEXT);' +
+      'CREATE TABLE pending_status_overrides (target_table TEXT, target_id TEXT, effect TEXT);',
+  );
+  db.prepare('INSERT INTO rodeos (id, system_id, name) VALUES (?,?,?)').run('rod-1', 'sys-1', 'Rodeo 1');
+  db.prepare('INSERT INTO categories_by_system (id, code, name) VALUES (?,?,?)').run('cat-1', 'ternero', 'Ternero');
+  // 3 synced sin caravana con updated_at distintos + 1 synced CON caravana (debe quedar fuera por noTag).
+  const insSync = db.prepare(
+    'INSERT INTO animal_profiles (id, animal_id, idv, visual_id_alt, category_id, rodeo_id, status, ' +
+      'management_group_id, animal_tag_electronic, animal_sex, category_override, animal_birth_date, ' +
+      'is_castrated, future_bull, establishment_id, deleted_at, created_at, updated_at) ' +
+      'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+  );
+  // updated_at: A es el más reciente, luego B, luego C. (created_at deliberadamente "al revés" para probar
+  // que ordena por updated_at, no por created_at.)
+  insSync.run('p-A', 'an-A', 'A1', null, 'cat-1', 'rod-1', 'active', null, null, 'female', 0, null, 0, 0, 'est-1', null, '2024-01-01T00:00:00Z', '2024-06-03T00:00:00Z');
+  insSync.run('p-B', 'an-B', 'B1', null, 'cat-1', 'rod-1', 'active', null, null, 'female', 0, null, 0, 0, 'est-1', null, '2024-01-02T00:00:00Z', '2024-06-02T00:00:00Z');
+  insSync.run('p-C', 'an-C', 'C1', null, 'cat-1', 'rod-1', 'active', null, null, 'female', 0, null, 0, 0, 'est-1', null, '2024-01-03T00:00:00Z', '2024-06-01T00:00:00Z');
+  // CON caravana → noTag debe excluirlo.
+  insSync.run('p-tagged', 'an-T', 'T1', null, 'cat-1', 'rod-1', 'active', null, '982000000000001', 'female', 0, null, 0, 0, 'est-1', null, '2024-01-04T00:00:00Z', '2024-06-09T00:00:00Z');
+  // 1 overlay (alta optimista sin caravana): su created_at lo ubica entre A y B (overlay usa created_at AS updated_at).
+  db.prepare(
+    'INSERT INTO pending_animal_profiles (id, animal_id, idv, visual_id_alt, category_id, rodeo_id, status, ' +
+      'management_group_id, animal_tag_electronic, animal_sex, category_override, animal_birth_date, ' +
+      'establishment_id, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+  ).run('p-OPT', 'an-O', 'O1', null, 'cat-1', 'rod-1', 'active', null, null, 'female', 0, null, 'est-1', '2024-06-02T12:00:00Z');
+
+  const q = buildAnimalsListQuery('est-1', { noTag: true, orderBy: 'updated_at' });
+  const rows = db.prepare(q.sql).all(...(q.args as string[])) as { id: string }[];
+  db.close();
+  // El animal con caravana queda FUERA; el resto, por updated_at DESC: A (06-03) > OPT (06-02 12:00) > B (06-02 00:00) > C (06-01).
+  assert.deepEqual(rows.map((r) => r.id), ['p-A', 'p-OPT', 'p-B', 'p-C']);
+});
+
+test('buildNoTagCandidatesCountQuery: COUNT noTag synced (oculta exits) + COUNT noTag overlay, scopeado al establishment', () => {
+  const q = buildNoTagCandidatesCountQuery('est-7');
+  // Dos sub-counts sumados: animal_profiles (noTag + activos + oculta exits) + pending_animal_profiles (noTag + activos).
+  assert.match(q.sql, /SELECT COUNT\(\*\) FROM animal_profiles ap/);
+  assert.match(q.sql, /ap\.establishment_id = \? AND ap\.status = 'active' AND ap\.deleted_at IS NULL AND ap\.animal_tag_electronic IS NULL/);
+  assert.match(q.sql, /SELECT COUNT\(\*\) FROM pending_animal_profiles pap/);
+  assert.match(q.sql, /pap\.establishment_id = \? AND pap\.status = 'active' AND pap\.animal_tag_electronic IS NULL/);
+  assert.match(q.sql, /\) \+ \(/);
+  // NO re-scopea tenant por has_role_in (lo hizo la stream); el establishment llega por arg, sin hardcode.
+  assert.doesNotMatch(q.sql, /has_role_in/);
+  assert.deepEqual(q.args, ['est-7', 'est-7']);
+});
+
+// COMPORTAMIENTO: el conteo refleja exactamente el universo de la lista noTag (synced + overlay), excluyendo
+// los que tienen caravana y los exits pendientes.
+test('buildNoTagCandidatesCountQuery (comportamiento): cuenta solo noTag activos (synced + overlay), excluye tagged y exited', () => {
+  const db = new DatabaseSync(':memory:');
+  db.exec(
+    'CREATE TABLE animal_profiles (id TEXT, status TEXT, animal_tag_electronic TEXT, establishment_id TEXT, deleted_at TEXT);' +
+      'CREATE TABLE pending_animal_profiles (id TEXT, status TEXT, animal_tag_electronic TEXT, establishment_id TEXT);' +
+      'CREATE TABLE pending_status_overrides (target_table TEXT, target_id TEXT, effect TEXT);',
+  );
+  const insSync = db.prepare('INSERT INTO animal_profiles (id, status, animal_tag_electronic, establishment_id, deleted_at) VALUES (?,?,?,?,?)');
+  insSync.run('s-noTag-1', 'active', null, 'est-1', null); // cuenta
+  insSync.run('s-noTag-2', 'active', null, 'est-1', null); // cuenta
+  insSync.run('s-tagged', 'active', '982000000000002', 'est-1', null); // NO (tiene caravana)
+  insSync.run('s-other', 'active', null, 'est-2', null); // NO (otro campo)
+  insSync.run('s-exited', 'active', null, 'est-1', null); // NO (exit pendiente, ver override)
+  db.prepare('INSERT INTO pending_status_overrides (target_table, target_id, effect) VALUES (?,?,?)')
+    .run('animal_profiles', 's-exited', 'exited');
+  db.prepare('INSERT INTO pending_animal_profiles (id, status, animal_tag_electronic, establishment_id) VALUES (?,?,?,?)')
+    .run('o-noTag', 'active', null, 'est-1'); // cuenta (alta optimista sin caravana)
+  const q = buildNoTagCandidatesCountQuery('est-1');
+  const row = db.prepare(q.sql).get(...(q.args as string[])) as { count: number };
+  db.close();
+  // s-noTag-1, s-noTag-2, o-noTag → 3. tagged/other-field/exited excluidos.
+  assert.equal(row.count, 3);
 });
 
 test('buildAnimalsCountQuery: COUNT activos synced (oculta exits) + COUNT overlay', () => {

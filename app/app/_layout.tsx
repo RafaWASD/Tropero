@@ -133,7 +133,11 @@ const RODEO_DESTINATIONS = new Set([
 const CREAR_ANIMAL_ROUTE = 'crear-animal'; // AnimalCreateScreen (R4)
 const ANIMAL_ROUTE = 'animal'; // ficha del animal /animal/[id] (R5)
 const AGREGAR_EVENTO_ROUTE = 'agregar-evento'; // wizard "Agregar evento" desde la ficha (C3.1)
-const ANIMAL_DESTINATIONS = new Set([CREAR_ANIMAL_ROUTE, ANIMAL_ROUTE, AGREGAR_EVENTO_ROUTE]);
+// Spec 09 chunk dedup (opción B, RD5.1): pantalla de asignación masiva de caravanas, navegable desde la
+// tab Animales (filtro "sin caravana") y la tab Más. Navegación legítima en 'active' con rodeo → NO se
+// re-rutea al wizard ni a (tabs) (mismo trato que crear-animal/animal).
+const ASIGNAR_CARAVANAS_ROUTE = 'asignar-caravanas';
+const ANIMAL_DESTINATIONS = new Set([CREAR_ANIMAL_ROUTE, ANIMAL_ROUTE, AGREGAR_EVENTO_ROUTE, ASIGNAR_CARAVANAS_ROUTE]);
 
 // Destinos de spec 10 (operaciones masivas por grupo): la vista de grupo de un rodeo (/rodeo/[id]) o
 // lote (/lote/[id]) — se llega desde Inicio (tabs) con un rodeo existente — y los flujos de operación
@@ -410,6 +414,10 @@ function RootGate() {
       <Stack.Screen name="animal/baja" />
       {/* Spec 02 C3.1 — wizard "Agregar evento" desde la ficha (peso / condición / observación). */}
       <Stack.Screen name="agregar-evento" />
+      {/* Spec 09 chunk dedup (opción B, RD5.1) — asignación MASIVA de caravanas: cola de bastoneos +
+          asignación 1×1 a candidatos sin caravana. Destino navegable desde la tab Animales (filtro "sin
+          caravana") y la tab Más, con un rodeo existente (no se re-rutea al wizard). */}
+      <Stack.Screen name="asignar-caravanas" />
       {/* Spec 10 — vista de grupo (operaciones masivas por rodeo/lote): metadatos + config + lista de
           animales activos + acciones masivas. Destino navegable desde Inicio (card de rodeo/lote). */}
       <Stack.Screen name="rodeo/[id]" />

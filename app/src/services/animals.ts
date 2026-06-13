@@ -48,7 +48,7 @@ import {
   toBool,
 } from './powersync/local-reads';
 import { runLocalQuery, runLocalQuerySingle, runLocalWrite } from './powersync/local-query';
-import { enqueueCreateAnimal, enqueueExitAnimal } from './powersync/outbox';
+import { enqueueAssignTag, enqueueCreateAnimal, enqueueExitAnimal, type OutboxResult } from './powersync/outbox';
 import { assertOnline } from './powersync/online-guard';
 import { supabase } from './supabase';
 import {
@@ -337,6 +337,12 @@ export type FetchAnimalsFilter = {
   status?: AnimalStatus | null;
   /** Solo animales sin caravana electrónica: animals.tag_electronic IS NULL (R1.5). */
   noTag?: boolean;
+  /**
+   * Columna de orden (DESC). Default `'created_at'` (orden de la tab Animales). Opción A del chunk dedup
+   * (RD3.3): la lista de candidatos `noTag` de la intermedia se ordena por `updated_at DESC` (recién
+   * tocados primero). Pasa derecho al builder.
+   */
+  orderBy?: 'created_at' | 'updated_at';
 };
 
 /**
@@ -361,6 +367,7 @@ export async function fetchAnimals(
       rodeoId: filter.rodeoId,
       status: filter.status,
       noTag: filter.noTag,
+      orderBy: filter.orderBy,
     }),
   );
   if (!r.ok) return { ok: false, error: r.error };
@@ -969,6 +976,32 @@ export async function exitAnimalProfile(input: ExitAnimalInput): Promise<Service
   });
   if (!enq.ok) return { ok: false, error: { kind: 'unknown', message: enq.error.message } };
   return { ok: true, value: undefined };
+}
+
+// ─── Asignar caravana electrónica a un animal sin caravana (spec 09 dedup A/B, RD2.1) ──────────
+
+/**
+ * Asigna la caravana electrónica `tag` (EID 15 díg FDX-B bastoneado) al animal del perfil `profileId` que
+ * todavía NO la tenía (NULL→valor), vía la outbox (`enqueueAssignTag` → RPC atómica `assign_tag_to_animal`
+ * 0089 al drenar). Es la ÚNICA vía de mutar `animals.tag_electronic`: `animals` está FUERA del sync set
+ * (ADR-026 b1) — la tabla NI EXISTE en el SQLite local → no hay UPDATE local posible (a diferencia de
+ * setCastrated/setFutureBull, que escriben `animal_profiles`, sí sincronizada). El efecto baja a
+ * `animal_profiles.animal_tag_electronic` por la propagación del trigger 0079 al sincronizar.
+ *
+ * OFFLINE-FIRST (DEC-2 / RD2.5): el encolado tiene éxito al instante OFFLINE (devuelve la intención). El
+ * dup-TAG (23505) / race (23514) / sin-rol (42501) / perfil-inexistente (23503) se resuelven al SUBIR
+ * (uploadData los clasifica `permanent_reject` por el default del clasificador → surface accionable, RD6);
+ * el replay idempotente devuelve 2xx con `{replay:true}` (NO es error → ACK normal, sin case nuevo).
+ *
+ * Authz server-side (la barrera real, RD7.2): el RPC deriva el tenant de la fila real del perfil (anti-IDOR)
+ * y re-chequea `has_role_in` (cualquier rol activo). El cliente NUNCA pasa el establishment_id ni el
+ * animal_id — solo el `profileId` (cuyo tenant se deriva server-side).
+ *
+ * Devuelve el `OutboxResult` del encolado (thin sobre la outbox, mismo patrón que los demás services de
+ * mutación sobre `enqueue*` — el contrato lo fija design §2.4 / RD2.1).
+ */
+export async function assignTagToAnimal(profileId: string, tag: string): Promise<OutboxResult> {
+  return enqueueAssignTag({ params: { p_profile_id: profileId, p_tag_electronic: tag } });
 }
 
 // ─── Quitar fijación manual de categoría (C6 / RC6.4) ────────────────────────────────

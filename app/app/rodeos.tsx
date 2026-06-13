@@ -118,7 +118,7 @@ export default function RodeosScreen() {
           >
             <ChevronLeft size={28} color={muted} strokeWidth={2} />
           </Pressable>
-          <Text fontFamily="$body" fontSize="$8" fontWeight="700" color="$textPrimary">
+          <Text fontFamily="$body" fontSize="$8" lineHeight="$8" fontWeight="700" color="$textPrimary">
             Rodeos
           </Text>
         </XStack>
@@ -265,7 +265,7 @@ function RodeoCard({
   return (
     <Card gap="$3">
       <XStack alignItems="center" gap="$2">
-        <Text flex={1} minWidth={0} numberOfLines={1} fontFamily="$body" fontSize="$6" fontWeight="600" color="$textPrimary">
+        <Text flex={1} minWidth={0} numberOfLines={1} fontFamily="$body" fontSize="$6" lineHeight="$6" fontWeight="600" color="$textPrimary">
           {rodeo.name}
         </Text>
         {isActive ? (

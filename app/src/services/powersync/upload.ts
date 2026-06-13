@@ -45,6 +45,11 @@ const RPC_OP_TYPES = new Set([
   // Run T9.9 — editar plantilla del rodeo OFFLINE: set_rodeo_config (0082). SIN p_client_op_id (su firma no
   // lo tiene; dedup natural por el UPSERT idempotente de toggles → replay = no-op total, R6.10).
   'set_rodeo_config',
+  // spec 09 dedup A/B — asignar caravana OFFLINE: assign_tag_to_animal (0089). op_type = NOMBRE EXACTO de la
+  // RPC (fold MED-1 de Gate 1: sin case especial frágil ni mismatch con la firma tipada del grant). SÍ recibe
+  // p_client_op_id (como register_birth) — PASSTHROUGH del contrato del intent; NO ancla la dedup (state-based,
+  // RD1.6). El default `permanent_reject` cubre 23505/23514/42501/23503; el replay devuelve 2xx (no es error).
+  'assign_tag_to_animal',
 ]);
 
 /**
@@ -125,10 +130,15 @@ export function mapIntentToRpc(op: OpIntentEntry): IntentPlan {
     throw new PermanentIntentError(`op_intent op_type desconocido: ${opType || '(vacío)'}`);
   }
 
-  // p_client_op_id SOLO a register_birth (su firma 4-arg lo tiene; las demás no — pasarlo daría
-  // "function ... does not exist" / arg desconocido). El client_op_id = el id de la fila op_intents.
+  // p_client_op_id a register_birth (dedup explícita, delta 0075) y a assign_tag_to_animal (passthrough del
+  // contrato del intent; su firma (uuid,text,uuid) lo recibe pero la dedup es state-based, RD1.6 / 0089). Las
+  // demás firmas NO lo tienen → pasarlo daría "function ... does not exist" / arg desconocido. Como
+  // op_type === rpcName === 'assign_tag_to_animal', el mapeo genérico (rpcName: opType) lo cubre sin case
+  // especial (fold MED-1 de Gate 1). El client_op_id = el id de la fila op_intents.
   const args =
-    opType === 'register_birth' ? { ...params, p_client_op_id: op.id } : params;
+    opType === 'register_birth' || opType === 'assign_tag_to_animal'
+      ? { ...params, p_client_op_id: op.id }
+      : params;
   return { kind: 'rpc', rpcName: opType, args };
 }
 

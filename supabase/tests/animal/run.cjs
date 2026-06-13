@@ -3559,6 +3559,230 @@ test('spec 11 — transfer_animal RPC (re-parenting de historia)', async (t) => 
   });
 });
 
+// spec 09 — chunk "09 resto · dedup A/B": RPC assign_tag_to_animal (asignación de caravana NULL→valor).
+// Migración supabase/migrations/0089_assign_tag_to_animal_rpc.sql.
+// ⚠️ Estos tests REQUIEREN 0089 APLICADA al remoto (la aplica el leader por Management API tras gatear el
+// SQL — Gate 1 PASS + Gate 2 + autorización de Raf). Hasta entonces FALLAN — ESPERADO: la función
+// assign_tag_to_animal no existe (PGRST202). Patrón 0075-0088.
+//
+// El RPC asigna la caravana electrónica (EID 15 díg) al animal GLOBAL de un perfil ACTIVO sin caravana
+// (NULL→valor), SECURITY DEFINER: (a) deriva animal_id+establishment_id de la fila real (anti-IDOR);
+// (b) has_role_in sobre el tenant derivado (cualquier rol activo, D-d); (c) valida formato ^\d{15}$;
+// (d) idempotencia state-based (animal ya con ese TAG → replay:true); (e) UPDATE con guard tag IS NULL;
+// (f) 0 filas = race → 23514. Unicidad global → 23505 del índice animals_tag_unique (0019). El efecto baja
+// a animal_profiles.animal_tag_electronic vía la propagación del trigger 0079 (no lo escribe el cliente).
+// =====================================================================
+test('spec 09 — assign_tag_to_animal RPC (asignación de caravana NULL→valor)', async (t) => {
+  const uuid = () => require('node:crypto').randomUUID();
+  // Guard: distingue un error de DOMINIO (lo que el test quiere) de PGRST202 (la función no existe porque la
+  // migración 0089 no está aplicada). Sin esto, un PGRST202 que casualmente contenga un código esperado haría
+  // pasar las aserciones de error por la razón EQUIVOCADA (autorrevisión adversarial).
+  function assertRpcExists(error) {
+    if (error && error.code === 'PGRST202') {
+      assert.fail('assign_tag_to_animal no existe en el remoto (migración 0089 no aplicada) — este test no puede validar el comportamiento real.');
+    }
+  }
+  // EID de 15 dígitos ÚNICO por invocación (el RPC valida ^\d{15}$ → los TAG `${RUN_TAG}_...` de la suite
+  // base NO sirven acá). Prefijo fijo + 9 díg random sobre 6 díg de base → colisión despreciable; el índice
+  // global animals_tag_unique rebota igual si colisionara (no es un test que dependa de un valor concreto).
+  let eidCounter = 0;
+  function eid15() {
+    eidCounter += 1;
+    const tail = String(Math.floor(Math.random() * 1e9)).padStart(9, '0');
+    const head = String(eidCounter % 1000000).padStart(6, '0');
+    return (head + tail).slice(0, 15);
+  }
+
+  // userA: owner de estA (campo del animal). userB: owner de estB (otro campo, SIN rol en estA).
+  let userA, userB, clientA, clientB, estA, estB;
+  let rodeoA, rodeoB; // {id, systemId} en cria
+
+  // Crea un animal SIN caravana en estA/rodeoA (candidato a asignación). Devuelve { profileId, animalId }.
+  async function seedNoTagAnimal(opts = {}) {
+    const r = await createAnimal(clientA, {
+      idv: opts.idv === undefined ? `${RUN_TAG}_at_${Math.random().toString(36).slice(2, 7)}` : opts.idv,
+      visualAlt: opts.visualAlt || 'vaca sin caravana',
+      sex: opts.sex || 'female', birthDate: opts.birthDate || daysAgo(700),
+      rodeoId: rodeoA.id, establishmentId: estA, systemId: rodeoA.systemId,
+      categoryCode: opts.categoryCode || (opts.sex === 'male' ? 'torito' : 'vaquillona'),
+    });
+    if (r.error) throw new Error(`seedNoTagAnimal: ${r.error.message}`);
+    return { profileId: r.profile.id, animalId: r.animalId };
+  }
+
+  await t.test('setup: userA owner de estA, userB owner de estB; rodeos cria en ambos', async () => {
+    userA = await createTestUser('s09at_A');
+    userB = await createTestUser('s09at_B');
+    clientA = await getUserClient(userA.email);
+    clientB = await getUserClient(userB.email);
+    estA = await createEstablishmentAs(clientA, `${RUN_TAG} s09at_estA`);
+    estB = await createEstablishmentAs(clientB, `${RUN_TAG} s09at_estB`);
+    rodeoA = await createRodeo(clientA, { establishmentId: estA, name: `${RUN_TAG}_rodeoA_at` });
+    rodeoB = await createRodeo(clientB, { establishmentId: estB, name: `${RUN_TAG}_rodeoB_at` });
+  });
+
+  // -- Escenario 1: NULL→valor OK + propagación a animal_profiles.animal_tag_electronic (0079) + replay:false. --
+  await t.test('escenario 1: NULL→valor OK → animals.tag_electronic seteado + propagado al perfil (0079) + replay:false', async () => {
+    const { profileId, animalId } = await seedNoTagAnimal({});
+    const tag = eid15();
+    const { data: ret, error } = await clientA.rpc('assign_tag_to_animal', {
+      p_profile_id: profileId, p_tag_electronic: tag, p_client_op_id: uuid(),
+    });
+    assertRpcExists(error);
+    assert.equal(error, null, error && error.message);
+    assert.equal(ret.replay, false, 'primera asignación: replay false');
+    assert.equal(ret.animal_id, animalId);
+    assert.equal(ret.profile_id, profileId);
+    assert.equal(ret.tag_electronic, tag);
+    // animals.tag_electronic quedó seteado (lectura por service_role: animals está fuera del sync, pero el
+    // backend test la lee directo).
+    const { data: an } = await admin.from('animals').select('tag_electronic').eq('id', animalId).single();
+    assert.equal(an.tag_electronic, tag, 'animals.tag_electronic seteado por el RPC');
+    // Propagación 0079: animal_profiles.animal_tag_electronic del perfil quedó con el TAG (la UI lo lee offline).
+    const { data: prof } = await admin.from('animal_profiles').select('animal_tag_electronic').eq('id', profileId).single();
+    assert.equal(prof.animal_tag_electronic, tag, 'animal_tag_electronic propagado al perfil (trigger 0079)');
+  });
+
+  // -- Escenario 2: valor→valor rebota (guard IS NULL / trigger 0036) → 23514. --
+  await t.test('escenario 2: animal con caravana A → asignar B rebota (guard IS NULL → 0 filas → 23514)', async () => {
+    const { profileId, animalId } = await seedNoTagAnimal({});
+    const tagA = eid15();
+    // Primera asignación (NULL→valor) OK.
+    {
+      const { error } = await clientA.rpc('assign_tag_to_animal', { p_profile_id: profileId, p_tag_electronic: tagA, p_client_op_id: uuid() });
+      assertRpcExists(error);
+      assert.equal(error, null, error && error.message);
+    }
+    // Intentar reasignar OTRO tag (B) al mismo animal → el guard AND tag_electronic IS NULL afecta 0 filas
+    // → 23514 (race/valor→valor). DISTINGUIBLE del dup global (23505).
+    const tagB = eid15();
+    const { error } = await clientA.rpc('assign_tag_to_animal', { p_profile_id: profileId, p_tag_electronic: tagB, p_client_op_id: uuid() });
+    assertRpcExists(error);
+    assert.notEqual(error, null, 'reasignar a un animal que ya tiene caravana debe rebotar');
+    assert.equal(error.code, '23514', `debe ser 23514 (animal ya tiene caravana): ${error.message}`);
+    // El animal conserva su caravana original (no se pisó).
+    const { data: an } = await admin.from('animals').select('tag_electronic').eq('id', animalId).single();
+    assert.equal(an.tag_electronic, tagA, 'la caravana original NO se pisó');
+  });
+
+  // -- Escenario 3: anti-IDOR — perfil de OTRO campo (caller sin rol) → 42501, no toca el animal ajeno. --
+  await t.test('escenario 3: anti-IDOR — p_profile_id de un perfil de OTRO campo → 42501, sin tocar el animal ajeno', async () => {
+    // Animal de estB (de userB). userA NO tiene rol en estB.
+    const rb = await createAnimal(clientB, {
+      idv: `${RUN_TAG}_atB_${Math.random().toString(36).slice(2, 6)}`, sex: 'female', birthDate: daysAgo(700),
+      rodeoId: rodeoB.id, establishmentId: estB, systemId: rodeoB.systemId, categoryCode: 'vaquillona',
+    });
+    assert.equal(rb.error, undefined, rb.error && rb.error.message);
+    const tag = eid15();
+    // userA invoca el RPC sobre el perfil de B (que SÍ existe). La derivación de la fila real encuentra el
+    // tenant estB, pero has_role_in(estB) es false para userA → 42501. El animal ajeno NO se toca.
+    const { error } = await clientA.rpc('assign_tag_to_animal', { p_profile_id: rb.profile.id, p_tag_electronic: tag, p_client_op_id: uuid() });
+    assertRpcExists(error);
+    assert.notEqual(error, null, 'asignar sobre un perfil de otro campo debe fallar');
+    assert.equal(error.code, '42501', `debe ser 42501 (sin rol en el tenant derivado): ${error.message}`);
+    // El animal de B sigue sin caravana (no se aplicó nada).
+    const { data: an } = await admin.from('animals').select('tag_electronic').eq('id', rb.animalId).single();
+    assert.equal(an.tag_electronic, null, 'el animal ajeno NO recibió la caravana (anti-IDOR)');
+  });
+
+  // -- Escenario 4: rol sin acceso — usuario sin rol activo en el campo del perfil → 42501. --
+  await t.test('escenario 4: usuario sin rol activo en el campo del perfil → 42501', async () => {
+    const { profileId, animalId } = await seedNoTagAnimal({});
+    // userC: nuevo usuario sin ningún rol en estA.
+    const userC = await createTestUser('s09at_C');
+    const clientC = await getUserClient(userC.email);
+    const tag = eid15();
+    const { error } = await clientC.rpc('assign_tag_to_animal', { p_profile_id: profileId, p_tag_electronic: tag, p_client_op_id: uuid() });
+    assertRpcExists(error);
+    assert.notEqual(error, null, 'sin rol activo no puede asignar caravana');
+    assert.equal(error.code, '42501', `debe ser 42501 (sin rol activo): ${error.message}`);
+    const { data: an } = await admin.from('animals').select('tag_electronic').eq('id', animalId).single();
+    assert.equal(an.tag_electronic, null, 'el animal sigue sin caravana');
+  });
+
+  // -- Escenario 5: idempotencia state-based — reintento (mismo TAG ya aplicado) → replay:true, no rebota. --
+  await t.test('escenario 5: idempotencia — reintento con el TAG ya aplicado → replay:true (no doble-aplica ni rebota)', async () => {
+    const { profileId, animalId } = await seedNoTagAnimal({});
+    const tag = eid15();
+    const opId = uuid();
+    // 1ra invocación: NULL→valor, replay false.
+    const r1 = await clientA.rpc('assign_tag_to_animal', { p_profile_id: profileId, p_tag_electronic: tag, p_client_op_id: opId });
+    assertRpcExists(r1.error);
+    assert.equal(r1.error, null, r1.error && r1.error.message);
+    assert.equal(r1.data.replay, false);
+    // 2da invocación: mismo TAG ya aplicado al MISMO animal → la dedup state-based (d) lo reconoce →
+    // replay:true SIN error (NO rebota 23514 por el guard, NO 23505 por unicidad — es el propio animal).
+    // p_client_op_id repetido es passthrough (no ancla nada): el replay se reconoce por el ESTADO ya aplicado.
+    const r2 = await clientA.rpc('assign_tag_to_animal', { p_profile_id: profileId, p_tag_electronic: tag, p_client_op_id: opId });
+    assert.equal(r2.error, null, `el replay NO debe dar error: ${r2.error && r2.error.message}`);
+    assert.equal(r2.data.replay, true, 'reintento del TAG ya aplicado → replay true');
+    assert.equal(r2.data.animal_id, animalId);
+    assert.equal(r2.data.tag_electronic, tag);
+    // El TAG quedó UNA sola vez (no se duplicó nada; sigue siendo el propio animal con su caravana).
+    const { data: an } = await admin.from('animals').select('tag_electronic').eq('id', animalId).single();
+    assert.equal(an.tag_electronic, tag, 'el TAG sigue aplicado una sola vez');
+    // (DA-1 condición de Gate 1) el replay legítimo del propio animal se distingue del dup global de OTRO
+    // animal — un client_op_id DISTINTO sobre el MISMO estado ya aplicado también es replay:true (la dedup
+    // es por estado, no por client_op_id).
+    const r3 = await clientA.rpc('assign_tag_to_animal', { p_profile_id: profileId, p_tag_electronic: tag, p_client_op_id: uuid() });
+    assert.equal(r3.error, null, `replay state-based con OTRO client_op_id tampoco debe dar error: ${r3.error && r3.error.message}`);
+    assert.equal(r3.data.replay, true, 'state-based: mismo estado, distinto client_op_id → replay true igual');
+  });
+
+  // -- Escenario 6: dup global — TAG ya en OTRO animal → 23505 (índice animals_tag_unique 0019). --
+  await t.test('escenario 6: TAG ya asignado a OTRO animal global → 23505 (unicidad global), distinguible del race', async () => {
+    const tag = eid15();
+    // Animal 1 (de estA) ya tiene el TAG.
+    const a1 = await seedNoTagAnimal({});
+    {
+      const { error } = await clientA.rpc('assign_tag_to_animal', { p_profile_id: a1.profileId, p_tag_electronic: tag, p_client_op_id: uuid() });
+      assertRpcExists(error);
+      assert.equal(error, null, error && error.message);
+    }
+    // Animal 2 (de estA, SIN caravana) intenta el MISMO TAG → el UPDATE de (e) viola el índice global parcial
+    // animals_tag_unique → 23505. NO es el replay (es OTRO animal_id) → no replay:true, no 23514.
+    const a2 = await seedNoTagAnimal({});
+    const { error } = await clientA.rpc('assign_tag_to_animal', { p_profile_id: a2.profileId, p_tag_electronic: tag, p_client_op_id: uuid() });
+    assertRpcExists(error);
+    assert.notEqual(error, null, 'un TAG ya usado por otro animal debe rebotar');
+    assert.equal(error.code, '23505', `debe ser 23505 (dup global): ${error.message}`);
+    // Animal 2 sigue sin caravana (el dup no le aplicó nada).
+    const { data: an } = await admin.from('animals').select('tag_electronic').eq('id', a2.animalId).single();
+    assert.equal(an.tag_electronic, null, 'el 2do animal NO recibió el TAG duplicado');
+  });
+
+  // -- grants: assign_tag_to_animal NO invocable por anon (fail-closed) — paridad con 0087/0089 cierre. --
+  await t.test('grants: assign_tag_to_animal NO invocable por anon (PostgREST sin JWT) — fail-closed', async () => {
+    const anonClient = createClient(SUPABASE_URL, ANON_KEY, { auth: { autoRefreshToken: false, persistSession: false } });
+    const { error } = await anonClient.rpc('assign_tag_to_animal', {
+      p_profile_id: uuid(), p_tag_electronic: eid15(), p_client_op_id: uuid(),
+    });
+    assert.notEqual(error, null, 'anon NO debe poder invocar assign_tag_to_animal');
+    // anon sin EXECUTE → permission denied / 404 (no llega a la lógica). El smoke-check del 0089 ya falla el
+    // deploy si quedara EXECUTE-able por anon/public; acá verificamos el comportamiento end-to-end.
+    assert.match(String(error.message + ' ' + (error.code || '')), /permission denied|not found|PGRST|42501|404/i);
+  });
+
+  // -- formato: EID que no es 15 díg → 23514 (validación server-side, defensa en profundidad). --
+  await t.test('formato: p_tag_electronic que no es 15 dígitos → 23514 (validación server-side)', async () => {
+    const { profileId } = await seedNoTagAnimal({});
+    for (const badTag of ['123', '12345678901234', '1234567890123456', 'ABCDEFGHIJKLMNO', '12345678901234a']) {
+      const { error } = await clientA.rpc('assign_tag_to_animal', { p_profile_id: profileId, p_tag_electronic: badTag, p_client_op_id: uuid() });
+      assertRpcExists(error);
+      assert.notEqual(error, null, `tag inválido "${badTag}" debe rebotar`);
+      assert.equal(error.code, '23514', `tag "${badTag}" debe dar 23514: ${error.message}`);
+    }
+  });
+
+  // -- perfil inexistente / inactivo → 23503 (derivación de la fila real, anti-IDOR). --
+  await t.test('perfil inexistente → 23503 sin efectos', async () => {
+    const { error } = await clientA.rpc('assign_tag_to_animal', { p_profile_id: uuid(), p_tag_electronic: eid15(), p_client_op_id: uuid() });
+    assertRpcExists(error);
+    assert.notEqual(error, null, 'perfil inexistente debe rebotar');
+    assert.equal(error.code, '23503', `debe ser 23503 (perfil no encontrado): ${error.message}`);
+  });
+});
+
 test('cleanup', async () => {
   await cleanup();
 });

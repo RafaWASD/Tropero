@@ -321,6 +321,40 @@ export async function enqueueExitAnimal(
   return enqueue(intent, overlay, db);
 }
 
+// ─── assign_tag_to_animal — asignar caravana (NULL→valor sobre animals, SIN overlay local) ───────
+
+export type EnqueueAssignTagInput = {
+  /** Params del intent = los de la RPC assign_tag_to_animal (p_profile_id, p_tag_electronic). El
+   *  p_client_op_id lo reinyecta mapIntentToRpc desde el id del op_intents (passthrough; NO ancla la dedup,
+   *  que es state-based — RD1.6 / design §1.2 d). NO se manda en los params para no duplicarlo. */
+  params: { p_profile_id: string; p_tag_electronic: string };
+};
+
+/**
+ * Encola una asignación de caravana `assign_tag_to_animal`: intent (con p_profile_id + p_tag_electronic) y
+ * NADA de overlay. Molde de enqueueExitAnimal/enqueueSoftDelete pero SIN overlay optimista: `animals` está
+ * FUERA del sync set (ADR-026 b1) — la tabla NI EXISTE en el SQLite local → no hay fila optimista que pisar.
+ * El efecto (animal_profiles.animal_tag_electronic, vía la propagación del trigger 0079) baja por la stream
+ * al sincronizar; la salida del candidato de las listas de sesión es client-side (RD2.5 / RD5.3). El encolado
+ * SIEMPRE tiene éxito al instante OFFLINE (DEC-2); el dup/race se resuelve al SUBIR (uploadData clasifica
+ * 23505/23514/42501/23503 → permanent_reject por el default del clasificador; el replay idempotente devuelve
+ * 2xx con {replay:true} → ACK normal, NO es error → no requiere un case nuevo en classifyIntentUploadError).
+ *
+ * El op_type = `assign_tag_to_animal` = NOMBRE EXACTO de la RPC (fold MED-1 de Gate 1): así el mapeo
+ * genérico (rpcName: opType) lo cubre sin un case especial frágil, y el intent NO cae en PermanentIntentError.
+ */
+export async function enqueueAssignTag(
+  input: EnqueueAssignTagInput,
+  options: { db?: AbstractPowerSyncDatabase } = {},
+): Promise<OutboxResult> {
+  const db = options.db ?? getPowerSync();
+  const clientOpId = newClientOpId();
+  const createdAt = nowIso();
+  const intent = buildOpIntentInsert(clientOpId, 'assign_tag_to_animal', JSON.stringify(input.params), createdAt);
+  // SIN overlay: animals no está en el SQLite local (ADR-026 b1) → no hay fila optimista que pisar.
+  return enqueue(intent, [], db);
+}
+
 // ─── soft_delete_* — borrado (override 'soft_deleted') ────────────────────────────────
 
 const SOFT_DELETE_OP_BY_ENTITY = {

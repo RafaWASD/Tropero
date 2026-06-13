@@ -565,6 +565,54 @@ export async function waitForServerExit(
 }
 
 /**
+ * ORÁCULO de persistencia server-side de una ASIGNACIÓN DE CARAVANA (spec 09 chunk dedup — RD1/RD2). El
+ * assign se ENCOLA offline (op_intent → outbox); al sincronizar, el connector llama al RPC
+ * `assign_tag_to_animal`, que setea `animals.tag_electronic` (índice unique global) y el trigger 0079
+ * propaga el valor a `animal_profiles.animal_tag_electronic` de TODOS los perfiles del animal.
+ *
+ * Por qué un oráculo SERVER y no la ficha: la ficha (`/animal/[id]`) lee LOCAL una sola vez al enfocar
+ * (`useFocusEffect`) y NO es reactiva → muestra "sin caravana" hasta el próximo sync + re-focus (staleness
+ * documentada, design §3.3). Mirar el SERVER (vía service_role) prueba que el assign GENUINAMENTE persistió
+ * end-to-end (outbox → RPC → animals.tag_electronic → propagación 0079), sin depender de la reactividad de
+ * la UI. Verificamos AMBOS lados de la propagación: `animals.tag_electronic` (lo que escribió el RPC) Y
+ * `animal_profiles.animal_tag_electronic` (lo que propagó el trigger 0079, que es lo que la app lee).
+ */
+export async function waitForServerTagAssigned(
+  profileId: string,
+  tag: string,
+  opts: { tries?: number; delayMs?: number } = {},
+): Promise<{ animalTag: string | null; profileTag: string | null }> {
+  const tries = opts.tries ?? 30;
+  const delayMs = opts.delayMs ?? 2000;
+  for (let i = 0; i < tries; i++) {
+    const { data, error } = await admin
+      .from('animal_profiles')
+      .select('animal_tag_electronic, animals(tag_electronic)')
+      .eq('id', profileId)
+      .limit(1);
+    if (error) throw new Error(`waitForServerTagAssigned: ${error.message}`);
+    const row = data?.[0] as
+      | { animal_tag_electronic: string | null; animals: { tag_electronic: string | null } | null }
+      | undefined;
+    const animalTag = row?.animals?.tag_electronic ?? null;
+    const profileTag = row?.animal_tag_electronic ?? null;
+    // El RPC seteó animals.tag_electronic Y el trigger 0079 propagó al denorm del perfil.
+    if (animalTag === tag && profileTag === tag) return { animalTag, profileTag };
+    await new Promise((r) => setTimeout(r, delayMs));
+  }
+  const { data: last } = await admin
+    .from('animal_profiles')
+    .select('animal_tag_electronic, animals(tag_electronic)')
+    .eq('id', profileId)
+    .limit(1);
+  throw new Error(
+    `waitForServerTagAssigned(${profileId}, ${tag}): la caravana NUNCA se asignó en el server ` +
+      `(${tries} intentos; última lectura ${JSON.stringify(last?.[0])}) — el assign vive solo en la ` +
+      `outbox / no se drenó / el RPC assign_tag_to_animal (0089) no aplicó.`,
+  );
+}
+
+/**
  * Snapshot NO-bloqueante del status server-side de un perfil. Lo usa la contraprueba: tras un rollback
  * la baja NO debe haber aplicado (status sigue 'active'). Si el perfil fue soft-deleteado devuelve
  * `deleted_at` no-null (para no confundir un rollback con un soft-delete del setup del test).

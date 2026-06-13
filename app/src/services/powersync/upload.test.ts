@@ -95,6 +95,26 @@ test('mapIntentToRpc: set_rodeo_config → rpc SIN p_client_op_id (dedup natural
   ]);
 });
 
+test('mapIntentToRpc: assign_tag_to_animal → rpc con p_client_op_id = op.id inyectado (passthrough, NO ancla la dedup, spec 09 / 0089)', () => {
+  // op_type = NOMBRE EXACTO de la RPC (fold MED-1 de Gate 1): el mapeo genérico (rpcName: opType) lo cubre
+  // sin case especial. SÍ recibe p_client_op_id (su firma (uuid,text,uuid) lo tiene) — passthrough del
+  // contrato del intent; la dedup es STATE-BASED (RD1.6), no depende de este valor.
+  const plan = mapIntentToRpc({
+    id: 'cop-at',
+    opData: {
+      op_type: 'assign_tag_to_animal',
+      params_json: JSON.stringify({ p_profile_id: 'prof-1', p_tag_electronic: '012345678901234' }),
+    },
+  });
+  assert.equal(plan.kind, 'rpc');
+  if (plan.kind !== 'rpc') return;
+  assert.equal(plan.rpcName, 'assign_tag_to_animal', 'rpcName === op_type (sin remapeo)');
+  assert.equal(plan.args.p_profile_id, 'prof-1');
+  assert.equal(plan.args.p_tag_electronic, '012345678901234');
+  // p_client_op_id = el id de la fila op_intents (passthrough; la RPC NO lo usa para la dedup state-based).
+  assert.equal(plan.args.p_client_op_id, 'cop-at');
+});
+
 test('mapIntentToRpc: create_animal → RPC atómica 0083 con args p_* (payload COMPLETO traducido)', () => {
   // Run create-animal-rpc: el alta YA NO son 2 upserts (perdían el dato bajo reintento, backlog
   // 2026-06-10) — mapea a supabase.rpc('create_animal', p_*). El shape del intent es el HISTÓRICO
@@ -301,6 +321,30 @@ test('create_animal como RPC (0083): 42501 / 23505 tag-idv → permanent_reject;
   // en cola y el REINTENTO contra la RPC atómica es un no-op seguro (ya no se auto-envenena con 42501).
   assert.equal(classifyIntentUploadError({ message: 'fetch failed' }, 'create_animal'), 'transient');
   assert.equal(classifyIntentUploadError({ status: 503 }, 'create_animal'), 'transient');
+});
+
+test('assign_tag_to_animal: 23505 (dup global) / 23514 (race o formato) / 42501 (sin rol) / 23503 (perfil inexistente) → permanent_reject; red → transient (spec 09)', () => {
+  // El default `permanent_reject` (rama 3 del clasificador) cubre TODOS los rechazos reales del RPC SIN un
+  // case nuevo: el replay idempotente devuelve 2xx con {replay:true} (NO entra al clasificador). Por eso
+  // classifyIntentUploadError queda SIN cambios para esta op (design §2.3 / RD2.4, ratificado por Gate 1).
+  assert.equal(
+    classifyIntentUploadError({ code: '23505', message: 'duplicate key value violates unique constraint "animals_tag_unique"' }, 'assign_tag_to_animal'),
+    'permanent_reject',
+  );
+  assert.equal(classifyIntentUploadError({ code: '23514', message: 'animal already has a tag (race)' }, 'assign_tag_to_animal'), 'permanent_reject');
+  assert.equal(classifyIntentUploadError({ code: '23514', message: 'tag_electronic must be exactly 15 digits' }, 'assign_tag_to_animal'), 'permanent_reject');
+  assert.equal(classifyIntentUploadError({ code: '42501' }, 'assign_tag_to_animal'), 'permanent_reject');
+  assert.equal(classifyIntentUploadError({ code: '23503' }, 'assign_tag_to_animal'), 'permanent_reject');
+  // CRÍTICO: un 23505 de assign_tag_to_animal NO debe caer en el idempotent_discard de register_birth (ese
+  // case matchea por opType === 'register_birth' + el nombre del índice reproductive_events_client_op_id_uq).
+  // El dup global de TAG es un rechazo de dominio REAL (rollback + surface "ese TAG ya está en otro animal").
+  assert.equal(
+    classifyIntentUploadError({ code: '23505', message: 'duplicate key ... reproductive_events_client_op_id_uq' }, 'assign_tag_to_animal'),
+    'permanent_reject',
+  );
+  // Red / 5xx → transitorio (queda en cola, NO toca nada — no hay overlay para esta op).
+  assert.equal(classifyIntentUploadError({ message: 'fetch failed' }, 'assign_tag_to_animal'), 'transient');
+  assert.equal(classifyIntentUploadError({ status: 503 }, 'assign_tag_to_animal'), 'transient');
 });
 
 test('op corrupto: mapIntentToRpc tira PermanentIntentError → classifyIntentUploadError = permanent_reject (no loop)', () => {

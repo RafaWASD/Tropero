@@ -254,7 +254,7 @@ export default function VacunacionMasivaScreen() {
       <YStack flex={1} width="100%" backgroundColor="$bg">
         <YStack width="100%" paddingTop={insets.top} paddingHorizontal="$4">
           <XStack width="100%" alignItems="center" gap="$2" paddingVertical="$3">
-            <Text fontFamily="$body" fontSize="$8" fontWeight="700" color="$textPrimary">
+            <Text fontFamily="$body" fontSize="$8" lineHeight="$8" fontWeight="700" color="$textPrimary">
               Vacunar
             </Text>
           </XStack>
@@ -285,7 +285,7 @@ export default function VacunacionMasivaScreen() {
           >
             <ChevronLeft size={28} color={muted} strokeWidth={2} />
           </Pressable>
-          <Text fontFamily="$body" fontSize="$8" fontWeight="700" color="$textPrimary">
+          <Text fontFamily="$body" fontSize="$8" lineHeight="$8" fontWeight="700" color="$textPrimary">
             Vacunar
           </Text>
         </XStack>
@@ -447,7 +447,7 @@ function PreviewCard({
       <XStack alignItems="center" gap="$2">
         <Syringe size={getTokenValue('$navIcon', 'size')} color={primary} strokeWidth={2.5} />
         <YStack flex={1}>
-          <Text fontFamily="$body" fontSize="$7" fontWeight="700" color="$textPrimary">
+          <Text fontFamily="$body" fontSize="$7" lineHeight="$7" fontWeight="700" color="$textPrimary">
             {animalsToApply === 0
               ? 'Ningún animal nuevo para vacunar'
               : `${eventsToApply} ${eventsToApply === 1 ? 'evento' : 'eventos'} sobre ${animalsToApply} ${

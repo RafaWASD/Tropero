@@ -76,3 +76,28 @@ export function resolveTagLookup(params: {
   // Rama 3 — CREATE: sin match en ningún campo.
   return { mode: 'create' };
 }
+
+// ─── Opción A (chunk dedup A/B, RD8 / design §3.2): ¿intermedia o CREATE directo? ─────────────
+//
+// Cuando `resolveTagLookup` devolvió `mode:'create'` (EID bastoneado SIN match en ningún campo del
+// usuario), el host computa además el CONTEO de candidatos sin caravana (`noTag`) del campo activo y
+// decide si abrir la intermedia "¿es uno de tus animales sin caravana?" (`assign_or_create`) o ir
+// DIRECTO a CREATE. La decisión es PURA (sin I/O) — el conteo es una lectura local más que hace el host
+// (RD8.2); acá vive solo la regla, unit-testeable sin SDK/DOM (mismo molde que `resolveTagLookup`).
+
+/** Resultado de la decisión opción A: o se abre la intermedia, o se va directo a CREATE. */
+export type CreateOrAssignResult = { mode: 'assign_or_create' } | { mode: 'create' };
+
+/**
+ * Decide el cuerpo del overlay para un lookup `mode:'create'` según el conteo de candidatos `noTag` (RD8).
+ *
+ * Regla (RD3.1 / RD3.2): ≥1 candidato sin caravana → `assign_or_create` (intermedia con lista + buscador
+ * + "es nuevo"); 0 candidatos → `create` directo (la intermedia vacía es fricción pura — se conserva el
+ * comportamiento del chunk BLE global). Defensivo: un `count` negativo o no-entero (no debería ocurrir;
+ * el host pasa un COUNT(*) ≥ 0) cae a `create` — nunca abre una intermedia sin candidatos verificados.
+ *
+ * @param noTagCandidateCount  conteo de candidatos `noTag` activos del campo activo (lectura local).
+ */
+export function resolveCreateOrAssign(noTagCandidateCount: number): CreateOrAssignResult {
+  return noTagCandidateCount > 0 ? { mode: 'assign_or_create' } : { mode: 'create' };
+}

@@ -12,7 +12,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { resolveTagLookup, type CrossFieldTagRow } from './tag-lookup.ts';
+import { resolveCreateOrAssign, resolveTagLookup, type CrossFieldTagRow } from './tag-lookup.ts';
 
 const EST_ACTIVE = 'est-A';
 
@@ -102,4 +102,24 @@ test('resolveTagLookup: rama CREATE — sin match en ningún campo → { mode:cr
     establishmentId: EST_ACTIVE,
   });
   assert.deepEqual(r, { mode: 'create' });
+});
+
+// ─── Opción A — resolveCreateOrAssign: ¿intermedia o CREATE directo? (RD8 / design §3.2) ──────
+
+test('resolveCreateOrAssign: 0 candidatos noTag → { mode:create } (CREATE directo, sin intermedia vacía — RD3.2)', () => {
+  assert.deepEqual(resolveCreateOrAssign(0), { mode: 'create' });
+});
+
+test('resolveCreateOrAssign: 1 candidato noTag → { mode:assign_or_create } (abre la intermedia — RD3.1)', () => {
+  assert.deepEqual(resolveCreateOrAssign(1), { mode: 'assign_or_create' });
+});
+
+test('resolveCreateOrAssign: ≥2 candidatos noTag → { mode:assign_or_create }', () => {
+  assert.deepEqual(resolveCreateOrAssign(7), { mode: 'assign_or_create' });
+});
+
+test('resolveCreateOrAssign: count negativo (no debería ocurrir) → fail-safe a CREATE directo, nunca intermedia vacía', () => {
+  // Defensa de borde: un COUNT(*) jamás es negativo, pero la regla `> 0` garantiza que cualquier valor
+  // ≤0 cae a create — nunca abrimos una intermedia sin candidatos verificados.
+  assert.deepEqual(resolveCreateOrAssign(-1), { mode: 'create' });
 });

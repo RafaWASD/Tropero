@@ -258,7 +258,7 @@ function BlockShell({
           <Pressable hitSlop={8} onPress={onBack} {...buttonA11y(Platform.OS, { label: 'Volver' })}>
             <ChevronLeft size={28} color={muted} strokeWidth={2} />
           </Pressable>
-          <Text fontFamily="$body" fontSize="$8" fontWeight="700" color="$textPrimary">
+          <Text fontFamily="$body" fontSize="$8" lineHeight="$8" fontWeight="700" color="$textPrimary">
             Importar rodeo
           </Text>
         </XStack>
@@ -314,7 +314,7 @@ function StepSource({
   return (
     <YStack gap="$4">
       <YStack gap="$1">
-        <Text fontFamily="$body" fontSize="$8" fontWeight="700" color="$textPrimary">
+        <Text fontFamily="$body" fontSize="$8" lineHeight="$8" fontWeight="700" color="$textPrimary">
           Importar rodeo
         </Text>
         <Text fontFamily="$body" fontSize="$4" fontWeight="400" color="$textMuted">
@@ -340,7 +340,7 @@ function StepSource({
 
       {/* Fuente (2 cards grandes). */}
       <YStack gap="$2">
-        <Text fontFamily="$body" fontSize="$6" fontWeight="600" color="$textPrimary">
+        <Text fontFamily="$body" fontSize="$6" lineHeight="$6" fontWeight="600" color="$textPrimary">
           ¿De dónde viene el padrón?
         </Text>
         <SourceCard
@@ -404,7 +404,7 @@ function SourceCard({
           <Icon size={22} color={primary} strokeWidth={2.5} />
         </View>
         <YStack flex={1} minWidth={0} gap="$1">
-          <Text fontFamily="$body" fontSize="$6" fontWeight="600" color="$textPrimary">
+          <Text fontFamily="$body" fontSize="$6" lineHeight="$6" fontWeight="600" color="$textPrimary">
             {title}
           </Text>
           <Text fontFamily="$body" fontSize="$3" fontWeight="400" color="$textMuted">
@@ -495,7 +495,7 @@ function StepMapping({
   return (
     <YStack gap="$3">
       <YStack gap="$1">
-        <Text fontFamily="$body" fontSize="$8" fontWeight="700" color="$textPrimary">
+        <Text fontFamily="$body" fontSize="$8" lineHeight="$8" fontWeight="700" color="$textPrimary">
           Asigná las columnas
         </Text>
         <Text fontFamily="$body" fontSize="$4" fontWeight="400" color="$textMuted">
@@ -659,7 +659,7 @@ function StepPreview({
   return (
     <YStack gap="$4">
       <YStack gap="$1">
-        <Text fontFamily="$body" fontSize="$8" fontWeight="700" color="$textPrimary">
+        <Text fontFamily="$body" fontSize="$8" lineHeight="$8" fontWeight="700" color="$textPrimary">
           Revisá antes de importar
         </Text>
         <Text fontFamily="$body" fontSize="$4" fontWeight="400" color="$textMuted">
@@ -718,7 +718,7 @@ function CountColumn({
   const color = tone === 'primary' ? '$primary' : tone === 'terracota' ? '$terracota' : '$textMuted';
   return (
     <YStack flex={1} alignItems="center" gap="$1" {...labelA11y(Platform.OS, `${n} ${label}`)}>
-      <Text fontFamily="$body" fontSize="$9" fontWeight="700" color={color}>
+      <Text fontFamily="$body" fontSize="$9" lineHeight="$9" fontWeight="700" color={color}>
         {n}
       </Text>
       <Text fontFamily="$body" fontSize="$3" fontWeight="500" color="$textMuted">
@@ -853,7 +853,7 @@ function StepResult({
   return (
     <YStack gap="$4">
       <YStack gap="$1">
-        <Text fontFamily="$body" fontSize="$8" fontWeight="700" color="$textPrimary">
+        <Text fontFamily="$body" fontSize="$8" lineHeight="$8" fontWeight="700" color="$textPrimary">
           {hadIssues ? 'Importación con observaciones' : 'Importación lista'}
         </Text>
         <Text fontFamily="$body" fontSize="$4" fontWeight="400" color="$textMuted">
@@ -924,7 +924,7 @@ function ResultLine({
       <Text flex={1} minWidth={0} fontFamily="$body" fontSize="$4" fontWeight="500" color="$textPrimary">
         {label}
       </Text>
-      <Text fontFamily="$body" fontSize="$7" fontWeight="700" color={color}>
+      <Text fontFamily="$body" fontSize="$7" lineHeight="$7" fontWeight="700" color={color}>
         {value}
       </Text>
     </XStack>

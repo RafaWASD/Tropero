@@ -220,7 +220,7 @@ function BastonTestInner() {
       <YStack paddingTop={insets.top} paddingHorizontal="$4" paddingBottom="$2">
         <XStack alignItems="center" gap="$2" paddingVertical="$3">
           <RadioTower size={26} color={getTokenValue('$primary', 'color')} strokeWidth={2.25} />
-          <Text fontFamily="$body" fontSize="$8" fontWeight="700" color="$textPrimary">
+          <Text fontFamily="$body" fontSize="$8" lineHeight="$8" fontWeight="700" color="$textPrimary">
             Test bastón (Web Serial)
           </Text>
         </XStack>

@@ -13,7 +13,7 @@ export default function ManiobraScreen() {
   return (
     <YStack flex={1} backgroundColor="$bg" alignItems="center" justifyContent="center" padding="$4" gap="$4">
       <Zap size={48} color={PRIMARY} fill={PRIMARY} />
-      <Text fontSize="$8" fontWeight="700" color="$textPrimary">
+      <Text fontSize="$8" lineHeight="$8" fontWeight="700" color="$textPrimary">
         MODO MANIOBRAS
       </Text>
       <Text fontSize="$4" color="$textMuted" textAlign="center">

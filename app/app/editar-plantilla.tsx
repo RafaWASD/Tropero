@@ -167,7 +167,7 @@ export default function EditarPlantillaScreen() {
             <ChevronLeft size={28} color={muted} strokeWidth={2} />
           </Pressable>
           <YStack flex={1} minWidth={0}>
-            <Text numberOfLines={1} fontFamily="$body" fontSize="$7" fontWeight="700" color="$textPrimary">
+            <Text numberOfLines={1} fontFamily="$body" fontSize="$7" lineHeight="$7" fontWeight="700" color="$textPrimary">
               Plantilla de datos
             </Text>
             <Text numberOfLines={1} fontFamily="$body" fontSize="$3" fontWeight="500" color="$textMuted">
