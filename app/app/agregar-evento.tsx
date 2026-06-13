@@ -42,6 +42,7 @@ import {
 import type { LucideIcon } from 'lucide-react-native';
 
 import { Button, Card, FormField, FormError, InfoNote } from '@/components';
+import { useBusyWhileMounted } from '@/services/ble/stick';
 import {
   addWeight,
   addConditionScore,
@@ -120,6 +121,12 @@ function todayIso(): string {
 export default function AgregarEventoScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+
+  // Anti-stacking (RB2.2): mientras este form de carga de evento está montado, suspendemos el listener
+  // global del bastón → un bastonazo NO abre el overlay find-or-create encima. No-op seguro hasta el mount
+  // del provider en la raíz (Run 2 del chunk BLE global).
+  useBusyWhileMounted();
+
   const params = useLocalSearchParams<{
     profileId?: string;
     establishmentId?: string;

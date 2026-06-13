@@ -17,6 +17,13 @@ No es un sustituto de `feature_list.json` ni de los ADRs — es la antesala dond
 
 ## Ítems pendientes
 
+## 2026-06-13 — Findings MED/LOW del Gate 2 del chunk "BLE global" de spec 09 (no bloquean)
+
+**Origen**: Gate 2 (security_analyzer, code) del chunk BLE global de spec 09, `progress/security_code_09resto-ble-global.md`. PASS 0 HIGH.
+- **MED-1 (pre-existente de spec 15, NO del chunk)**: `runLocalQuery`/`runLocalWrite` (`app/src/services/powersync/local-query.ts:53-54,99`) surfacean el `err.message` CRUDO del SQLite LOCAL a la UI. Info disclosure menor (motor local, no cruza server/tenant). El overlay lo hereda al mostrar `res.error.message` del lookup/transfer. Fix: copy genérico en esa capa (afecta a todo el data layer, no solo al chunk). Foldear cuando se toque `local-query.ts`.
+- **LOW-1**: el transfer desde el overlay no tiene rate-limit propio (= MED-2 de spec 11, ya aceptado por Raf: online-only, per-user, self-scoped, sin abuso a escala).
+- **LOW-2 (defense-in-depth)**: la marca de E2E del bastón (`window.__RAFAQ_BLE_E2E__` → `mode='mock'` + `BleE2EBridge`) hoy está bien aislada de prod por triple guard (mode='auto' nunca devuelve 'mock'; el bridge re-chequea `kind==='mock'`). NO explotable. Hardening opcional: gatear la marca TAMBIÉN por `__DEV__`/`NODE_ENV !== 'production'`, por si un release accidental llevara la marca seteada. 1 línea en `app/app/_components/ble-e2e-flag.ts`.
+
 ## 2026-06-12 — Riesgo latente: cleanup de tests no pagina el select de animal_profiles (3 suites hermanas)
 
 **Origen**: fix del leak de huérfanos en `supabase/tests/import/run.cjs` (~829K filas basura en `animals` desde 2026-06-06). La causa fue que el `cleanup()` recuperaba los `animal_id` a borrar con un `select(...).in('establishment_id', ests)` SIN paginar, y PostgREST topa la respuesta a 1000 filas → con el test de borde de 5000 perfiles quedaban ~4000 `animals` huérfanos por corrida (`animals` NO tiene `establishment_id`, no cascadea del establishment). Arreglado SOLO en `import/run.cjs` con un helper `collectAllAnimalIds(ests)` (keyset por la PK `id`, páginas de 1000). Delta de huérfanos verificado = 0 contra el remoto.

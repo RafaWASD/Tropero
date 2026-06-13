@@ -32,6 +32,7 @@ import {
   buildAnimalsListQuery,
   buildAnimalsCountQuery,
   buildSearchByTagQuery,
+  buildLookupTagAcrossFieldsQuery,
   buildSearchByIdvQuery,
   buildSearchLikeQuery,
   buildAnimalDetailQuery,
@@ -58,6 +59,11 @@ import {
   mapTransferResult,
   TRANSFER_OFFLINE_MESSAGE,
 } from './transfer-animal';
+import {
+  type TagLookupResult,
+  type CrossFieldTagRow,
+  resolveTagLookup,
+} from './tag-lookup';
 
 // ─── Error / Result uniforme (mismo shape que rodeo-config.ts / establishments.ts) ──
 
@@ -563,6 +569,72 @@ export async function findOrCreateLookup(
   const trimmed = identifier.trim();
   const prefilled = kind === 'idv' ? { idv: trimmed } : { visual: trimmed };
   return { ok: true, value: { found: false, mode: 'create', prefilled } };
+}
+
+// ─── Motor find-or-create — rama BLE / TAG bastoneado (spec 09 chunk BLE global, RB4) ────────
+
+// El tipo del resultado vive en tag-lookup.ts (módulo PURO, testeable sin SDK) y se RE-EXPORTA acá para
+// que el contrato público "el tipo vive en animals.ts" se cumpla (mismo patrón que TransferAnimalInput).
+export type { TagLookupResult } from './tag-lookup';
+
+/**
+ * Resuelve un EID BASTONEADO (ya validado + des-duplicado por el provider de spec 04) a uno de tres modos
+ * (RB4.1-RB4.5 / design §3.2), íntegramente sobre PowerSync local (SQLite), SIN red (offline-first; el set
+ * sincronizado ya incluye TODOS los campos del usuario por spec 15):
+ *   - `edit`     → hay un perfil ACTIVO con ese TAG en el campo ACTIVO (RB4.3).
+ *   - `transfer` → no en el campo activo pero SÍ activo en OTRO campo del usuario (RB4.4 / DEC-3, spec 11).
+ *   - `create`   → sin match en ningún campo (RB4.5 / DEC-2, DIRECTO a CREATE con el TAG precargado).
+ *
+ * Dos lecturas locales (la decisión la toma `resolveTagLookup`, PURA):
+ *   1. `buildSearchByTagQuery(establishmentId, tag)` (ya existe; UNION synced+overlay, status='active',
+ *      scopeada al campo activo) → rama EDIT.
+ *   2. SOLO si la rama 1 vino vacía: `buildLookupTagAcrossFieldsQuery(tag)` (cross-campo, sin filtro de
+ *      establishment) → rama TRANSFER (otro campo) o CREATE (nada).
+ *
+ * Multi-tenant (CLAUDE.md ppio 6): el establishmentId llega por param (contexto activo), NUNCA hardcodeado.
+ * emptyIsSyncing:false en ambas: "no hay match" es un resultado de negocio LEGÍTIMO (= create), no una
+ * degradación a "Sincronizando" — un EID nuevo no debe quedar trabado pidiendo sync.
+ */
+export async function lookupByTag(
+  tag: string,
+  establishmentId: string,
+): Promise<ServiceResult<TagLookupResult>> {
+  // Rama 1 — campo ACTIVO (reusa la query exacta por TAG ya scopeada). emptyIsSyncing:false: vacío = no hay
+  // match en este campo (caso de negocio), no "sincronizando".
+  const activeRes = await runLocalQuery<{ id: string }>(
+    buildSearchByTagQuery(establishmentId, tag),
+    { emptyIsSyncing: false },
+  );
+  if (!activeRes.ok) return { ok: false, error: activeRes.error };
+
+  // Si ya hay match en el campo activo, NO hace falta la query cross-campo (corta-circuito → EDIT).
+  if (activeRes.value.length > 0) {
+    return {
+      ok: true,
+      value: resolveTagLookup({
+        activeFieldRows: activeRes.value,
+        crossFieldRows: [],
+        establishmentId,
+      }),
+    };
+  }
+
+  // Rama 2/3 — sin match en el campo activo: buscamos cross-campo (otro campo del usuario → transfer; nada
+  // → create). emptyIsSyncing:false: vacío = no está en ningún campo (= create), no "sincronizando".
+  const crossRes = await runLocalQuery<CrossFieldTagRow>(
+    buildLookupTagAcrossFieldsQuery(tag),
+    { emptyIsSyncing: false },
+  );
+  if (!crossRes.ok) return { ok: false, error: crossRes.error };
+
+  return {
+    ok: true,
+    value: resolveTagLookup({
+      activeFieldRows: [],
+      crossFieldRows: crossRes.value,
+      establishmentId,
+    }),
+  };
 }
 
 // ─── Alta (R4.6) — split insert + select ─────────────────────────────────────────────

@@ -57,3 +57,6 @@ export type {
   BulkProgressPhase,
   BulkProgressRejection,
 } from './BulkProgressPanel';
+export { BleConnectionChip } from './BleConnectionChip';
+export { bleConnectionView } from './ble-connection-view';
+export type { BleConnectionView, BleStatusColorToken } from './ble-connection-view';

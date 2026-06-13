@@ -53,6 +53,7 @@ import {
   type AnimalStatus,
 } from '@/services/animals';
 import { archivedBadgeLabel } from '@/services/exit-animal';
+import { useBusyWhileMounted } from '@/services/ble/stick';
 import { useAuth, useEstablishment } from '@/contexts';
 import {
   assignAnimalToGroup,
@@ -85,6 +86,11 @@ export default function AnimalDetailScreen() {
   const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<{ id?: string }>();
   const profileId = typeof params.id === 'string' ? params.id : null;
+
+  // Anti-stacking (RB2.2): mientras la ficha (contexto EDIT) está montada, suspendemos el listener global
+  // del bastón → un bastonazo NO abre el overlay find-or-create encima. No-op seguro hasta el mount del
+  // provider en la raíz (Run 2 del chunk BLE global).
+  useBusyWhileMounted();
 
   // Contexto de autorización para el gating del botón "Dar de baja" (C3.3, R4.14): el RPC enforça
   // server-side `has_role_in(est) AND (is_owner_of(est) OR created_by = auth.uid())`. El gating de

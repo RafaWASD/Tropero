@@ -661,6 +661,39 @@ export function buildSearchByTagQuery(establishmentId: string, tag: string): Loc
 }
 
 /**
+ * Lookup EXACTO por TAG electrónico CROSS-CAMPO (spec 09 chunk BLE global, RB4.6 / design §3.3): matchea
+ * `animal_profiles.animal_tag_electronic = ?` con `status='active'` + `deleted_at IS NULL` **SIN** filtrar
+ * por establishment_id — es justo lo que la distingue de `buildSearchByTagQuery` (que sí scopea al campo
+ * activo vía listDomainFilters). Sirve a `lookupByTag` para detectar que un EID bastoneado pertenece a un
+ * animal vivo en OTRO campo del usuario (→ modo 'transfer', spec 11) cuando NO matcheó en el campo activo.
+ *
+ * Proyecta `profile_id` + `establishment_id` + el `name` legible del establishment (JOIN local a
+ * `establishments`, que está sincronizado con su name — buildMembershipsQuery/buildEstablishmentDetailQuery
+ * ya lo usan). LIMIT 2: con 1 fila distinguimos "solo en otro campo" del caso (raro) de >1 perfil activo con
+ * el mismo TAG; el caller (resolveTagLookup) ignora una fila que sea del campo activo (defensivo — esa ya la
+ * habría tomado buildSearchByTagQuery).
+ *
+ * NO consulta el overlay `pending_*` (design §3.3): un transfer aplica sobre filas REALES sincronizadas; un
+ * alta optimista del campo activo ya la cubre la rama 1 (buildSearchByTagQuery, que sí UNIONa overlay).
+ *
+ * Multi-tenancy (RB9.2): NO debilita la RLS — solo NO re-aplica el filtro de campo activo que las queries
+ * operativas sí aplican. El set local ya está scopeado por la stream (has_role_in, solo campos del usuario);
+ * la RLS de spec 02/11 es la barrera final del server. NUNCA se hardcodea establishment_id (CLAUDE.md ppio 6).
+ */
+export function buildLookupTagAcrossFieldsQuery(tag: string): LocalQuery {
+  return {
+    sql:
+      'SELECT ap.id AS profile_id, ap.establishment_id AS establishment_id, ' +
+      'e.name AS establishment_name ' +
+      'FROM animal_profiles ap ' +
+      'JOIN establishments e ON e.id = ap.establishment_id ' +
+      "WHERE ap.animal_tag_electronic = ? AND ap.status = 'active' AND ap.deleted_at IS NULL " +
+      'LIMIT 2',
+    args: [tag],
+  };
+}
+
+/**
  * Búsqueda EXACTA por IDV (`animal_profiles.idv`). status active + deleted_at IS NULL + LIMIT 20.
  * UNION synced + overlay (T6).
  */

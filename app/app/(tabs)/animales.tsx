@@ -26,7 +26,7 @@ import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
 import { Check, Plus, Search } from 'lucide-react-native';
 import { useStatus } from '@powersync/react';
 
-import { AnimalRow, Card, InfoNote, FormError } from '@/components';
+import { AnimalRow, BleConnectionChip, Card, InfoNote, FormError } from '@/components';
 import { useEstablishment, useRodeo } from '@/contexts';
 import {
   fetchAnimals,
@@ -259,9 +259,14 @@ export default function AnimalesScreen() {
       {/* Header fijo: título + buscador permanente + chips de filtro. */}
       <YStack width="100%" paddingTop={insets.top} paddingHorizontal="$4">
         <YStack width="100%" gap="$1" paddingVertical="$3">
-          <Text fontFamily="$body" fontSize="$8" lineHeight="$8" fontWeight="700" color="$textPrimary">
-            Animales
-          </Text>
+          <XStack width="100%" alignItems="center" justifyContent="space-between" gap="$2">
+            <Text fontFamily="$body" fontSize="$8" lineHeight="$8" fontWeight="700" color="$textPrimary">
+              Animales
+            </Text>
+            {/* Chip de estado del bastón (spec 09 chunk BLE global, RB8.1): refleja la conexión + atajo
+                para conectar por web-serial. NUNCA bloquea la puerta manual (RB8.2, manual-first). */}
+            <BleConnectionChip />
+          </XStack>
           <Text fontFamily="$body" fontSize="$3" fontWeight="400" color="$textMuted">
             {loading
               ? 'Cargando…'

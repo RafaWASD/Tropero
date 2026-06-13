@@ -35,6 +35,7 @@ import type { LucideIcon } from 'lucide-react-native';
 import { Button, Card, FormField, FormError, InfoNote } from '@/components';
 import { useAuth, useEstablishment, useRodeo } from '@/contexts';
 import { createAnimal, fetchSystemCategories, type SystemCategory } from '@/services/animals';
+import { useBusyWhileMounted } from '@/services/ble/stick';
 import { addConditionScore, addTacto } from '@/services/events';
 import { fetchManagementGroups, type ManagementGroup } from '@/services/management-groups';
 import {
@@ -95,16 +96,17 @@ function todayIso(): string {
   return `${d.getFullYear()}-${mm}-${dd}`;
 }
 
-// Qué identificador vino precargado y en qué campo. 'idv' | 'visual' (la puerta manual nunca trae
-// 'tag': eso es BLE, spec 04). Sin params → alta "en blanco" (no hay id precargado en el header).
-type PrefillKind = 'idv' | 'visual' | null;
+// Qué identificador vino precargado y en qué campo. 'idv' | 'visual' (puerta MANUAL, heurística R1.4) |
+// 'tag' (rama BLE: el EID bastoneado llega por el param `tag` desde el overlay del chunk BLE global —
+// spec 09 RB6.3). Sin params → alta "en blanco" (no hay id precargado en el header).
+type PrefillKind = 'idv' | 'visual' | 'tag' | null;
 
 type WizardStep = 1 | 2 | 3 | 4;
 
 export default function CrearAnimalScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const params = useLocalSearchParams<{ idv?: string; visual?: string }>();
+  const params = useLocalSearchParams<{ idv?: string; visual?: string; tag?: string }>();
   const { state: authState } = useAuth();
   const { state: estState } = useEstablishment();
   const { state: rodeoState } = useRodeo();
@@ -112,17 +114,31 @@ export default function CrearAnimalScreen() {
   const userId = authState.status === 'authenticated' ? authState.user.id : null;
   const establishmentId = estState.status === 'active' ? estState.current.id : null;
 
-  // El identificador precargado (R4.2): viene por params. idv tiene prioridad sobre visual si
-  // (por error) llegaran ambos. read-only durante el alta. Se muestra en el header del wizard.
+  // Anti-stacking (RB2.2): mientras este form de ALTA está montado, suspendemos el listener global del
+  // bastón → un bastonazo NO abre el overlay find-or-create encima del wizard. No-op seguro hasta que el
+  // provider se monte en la raíz (Run 2 del chunk BLE global).
+  useBusyWhileMounted();
+
+  // El identificador precargado (R4.2): viene por params. read-only durante el alta. Se muestra en el
+  // header del wizard ("Creando: [id]"). Prioridad: tag (BLE bastoneado, RB6.3) > idv > visual — si
+  // (por error) llegaran varios, el TAG manda (es la identidad SENASA confirmada por el bastón).
+  const prefilledTag = typeof params.tag === 'string' ? params.tag : '';
   const prefilledIdv = typeof params.idv === 'string' ? params.idv : '';
   const prefilledVisual = typeof params.visual === 'string' ? params.visual : '';
-  const prefillKind: PrefillKind = prefilledIdv ? 'idv' : prefilledVisual ? 'visual' : null;
-  const prefilledId = prefilledIdv || prefilledVisual; // lo que se muestra en "Creando: [id]"
+  const prefillKind: PrefillKind = prefilledTag
+    ? 'tag'
+    : prefilledIdv
+      ? 'idv'
+      : prefilledVisual
+        ? 'visual'
+        : null;
+  const prefilledId = prefilledTag || prefilledIdv || prefilledVisual; // lo que se muestra en "Creando: [id]"
 
-  // Identificadores: el precargado va read-only (no editable); los otros 2 quedan EDITABLES en el
-  // paso 4 (recomendados, no obligatorios — R4.3). tag siempre editable (la puerta manual no precarga
-  // TAG). El find-or-create no cambia.
-  const [tag, setTag] = useState('');
+  // Identificadores: el precargado va read-only (no editable); los otros quedan EDITABLES en el paso 4
+  // (recomendados, no obligatorios — R4.3). Por la rama BLE (RB6.3) el TAG bastoneado llega precargado
+  // read-only (el operario no lo re-tipea: ya lo leyó el bastón); por la puerta MANUAL el TAG arranca
+  // vacío y editable (idv/visual son el precargado). El find-or-create no cambia.
+  const [tag, setTag] = useState(prefillKind === 'tag' ? prefilledTag : '');
   const [idv, setIdv] = useState(prefillKind === 'idv' ? prefilledIdv : '');
   const [visual, setVisual] = useState(prefillKind === 'visual' ? prefilledVisual : '');
 
@@ -956,7 +972,19 @@ function Step4Data({
         <Text fontFamily="$body" fontSize="$6" fontWeight="600" color="$textPrimary">
           Identificación
         </Text>
-        {prefillKind === 'idv' ? (
+        {prefillKind === 'tag' ? (
+          // Rama BLE (RB6.3): el TAG bastoneado llega precargado read-only (el operario ya lo leyó con el
+          // bastón; no lo re-tipea). idv/visual quedan editables abajo (recomendados, R4.3). El bastón solo
+          // entrega EIDs ya validados (15 díg FDX-B), así que tagError normalmente queda null; igual lo
+          // pasamos para no dejar un dead-end silencioso si llegara un TAG inválido (p.ej. deep-link a mano).
+          <FormField
+            label="Caravana electrónica (no editable)"
+            value={tag}
+            onChangeText={() => {}}
+            editable={false}
+            error={tagError}
+          />
+        ) : prefillKind === 'idv' ? (
           <FormField
             label="Caravana / IDV (no editable)"
             value={idv}
@@ -991,14 +1019,18 @@ function Step4Data({
             placeholder="Ej. 112 o una seña"
           />
         ) : null}
-        <FormField
-          label={`Caravana electrónica (recomendado, ${TAG_ELECTRONIC_LENGTH} dígitos)`}
-          value={tag}
-          onChangeText={onTag}
-          keyboardType="number-pad"
-          placeholder="982 0001 2345 6789"
-          error={tagError}
-        />
+        {/* TAG editable SOLO en la puerta manual (sin TAG precargado). Por la rama BLE el TAG ya se mostró
+            read-only arriba — no se ofrece un 2do campo editable que lo pisaría. */}
+        {prefillKind !== 'tag' ? (
+          <FormField
+            label={`Caravana electrónica (recomendado, ${TAG_ELECTRONIC_LENGTH} dígitos)`}
+            value={tag}
+            onChangeText={onTag}
+            keyboardType="number-pad"
+            placeholder="982 0001 2345 6789"
+            error={tagError}
+          />
+        ) : null}
       </YStack>
 
       {/* ── Datos base de cría (TODAS las categorías): AÑO de nacimiento + raza + pelaje. ── */}

@@ -64,6 +64,10 @@ import {
 import { getPendingInvitationToken } from '@/services/pending-invitation';
 import { PowerSyncProvider } from '@/services/powersync/provider';
 import { FIRST_SYNC_TIMEOUT_MS } from '@/services/powersync/first-sync';
+import { BleStickListenerProvider } from '@/services/ble/BleStickListenerProvider';
+import { FindOrCreateOverlay } from './_components/FindOrCreateOverlay';
+import { BleE2EBridge } from './_components/BleE2EBridge';
+import { isBleE2E } from './_components/ble-e2e-flag';
 
 // Fallback que destapa el splash si NADA resuelve (getSession/memberships colgados). DEBE ser MAYOR
 // que FIRST_SYNC_TIMEOUT_MS (la espera del primer sync en EstablishmentContext, ~4500ms): así, cuando
@@ -418,6 +422,23 @@ function RootGate() {
   );
 }
 
+/**
+ * Host del flujo BLE de BUSCAR ANIMAL (spec 09 chunk "BLE global", RB1.2): el <Stack> de navegación +
+ * el <FindOrCreateOverlay/> hermano (bottom-sheet que se renderiza POR ENCIMA de la pantalla activa sin
+ * desmontarla) + el bridge de E2E (solo bajo el flag de Playwright, FUERA de producción). Vive dentro de
+ * BleStickListenerProvider + los providers de datos → el overlay tiene Auth/PowerSync/Establishment/Rodeo
+ * en contexto y puede consumir useBleStickListener.
+ */
+function BleHost() {
+  return (
+    <>
+      <RootGate />
+      <FindOrCreateOverlay />
+      {isBleE2E() ? <BleE2EBridge /> : null}
+    </>
+  );
+}
+
 export default function RootLayout() {
   const [fontsLoaded, fontError] = useFonts({
     Inter: Inter_400Regular,
@@ -468,7 +489,17 @@ export default function RootLayout() {
                     gating de rodeo (bloqueo total R2.6) y las pantallas de C1 puedan usar useRodeo().
                     Sin campo activo queda en 'loading' y no fetcha (deps primitivas, sin loop). */}
                 <RodeoProvider>
-                  <RootGate />
+                  {/* BleStickListenerProvider (spec 04, montado por spec 09 chunk "BLE global", RB1.1):
+                      listener global del bastón. Monta ENTRE RodeoProvider y el host BLE para que el
+                      FindOrCreateOverlay tenga Auth/PowerSync/Establishment/Rodeo en contexto y pueda
+                      scopear el lookup al campo activo + leer el rodeo default. NO auto-conecta el
+                      transporte (RB1.3): la conexión la dispara un gesto (web-serial) o el MockAdapter
+                      en E2E. mode='mock' SOLO bajo el flag de E2E (isBleE2E, fuera de producción);
+                      'auto' en cualquier build normal (web-serial/manual por plataforma). baston-test
+                      queda intacto (su provider es self-contained). */}
+                  <BleStickListenerProvider mode={isBleE2E() ? 'mock' : 'auto'}>
+                    <BleHost />
+                  </BleStickListenerProvider>
                 </RodeoProvider>
               </EstablishmentProvider>
               </ProfileProvider>

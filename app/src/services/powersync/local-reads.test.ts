@@ -31,6 +31,7 @@ import {
   buildRodeoHeadCountsQuery,
   buildGroupHeadCountsQuery,
   buildSearchByTagQuery,
+  buildLookupTagAcrossFieldsQuery,
   buildSearchByIdvQuery,
   buildSearchLikeQuery,
   escapeLike,
@@ -525,6 +526,62 @@ test('buildSearchByTagQuery: exacto por animal_tag_electronic (b1), active, limi
   assert.doesNotMatch(q.sql, /FROM animals\b/);
   // args: synced (est, active, tag) ++ overlay (est, active, tag)
   assert.deepEqual(q.args, ['est-1', 'active', '982000123456789', 'est-1', 'active', '982000123456789']);
+});
+
+// ─── Lookup cross-campo del TAG bastoneado (spec 09 chunk BLE global, RB4.6 / design §3.3) ─────
+
+test('buildLookupTagAcrossFieldsQuery: matchea TAG activo SIN filtrar por establishment + JOIN a establishments(name) + LIMIT 2', () => {
+  const q = buildLookupTagAcrossFieldsQuery('982000123456789');
+  // proyecta profile_id + establishment_id + el name legible del campo
+  assert.match(q.sql, /ap\.id AS profile_id/);
+  assert.match(q.sql, /ap\.establishment_id AS establishment_id/);
+  assert.match(q.sql, /e\.name AS establishment_name/);
+  // JOIN local a establishments por el establishment_id del perfil
+  assert.match(q.sql, /JOIN establishments e ON e\.id = ap\.establishment_id/);
+  // filtros de dominio: TAG exacto + status active + deleted_at IS NULL
+  assert.match(q.sql, /ap\.animal_tag_electronic = \?/);
+  assert.match(q.sql, /ap\.status = 'active'/);
+  assert.match(q.sql, /ap\.deleted_at IS NULL/);
+  // LIMIT 2 (distinguir "solo otro campo" de duplicado raro)
+  assert.match(q.sql, /LIMIT 2/);
+  // CRÍTICO: NO scopea por establishment_id (es lo que la distingue de buildSearchByTagQuery)
+  assert.doesNotMatch(q.sql, /ap\.establishment_id = \?/);
+  // NO toca el overlay pending_* (transfer aplica sobre filas REALES sincronizadas)
+  assert.doesNotMatch(q.sql, /pending_animal_profiles/);
+  // un solo arg: el TAG
+  assert.deepEqual(q.args, ['982000123456789']);
+});
+
+test('buildLookupTagAcrossFieldsQuery: integración SQLite — encuentra el activo en OTRO campo, ignora deleted/no-activo, trae el name del campo', () => {
+  const db = new DatabaseSync(':memory:');
+  db.exec(
+    'CREATE TABLE animal_profiles (id TEXT PRIMARY KEY, establishment_id TEXT, animal_tag_electronic TEXT, status TEXT, deleted_at TEXT);' +
+      'CREATE TABLE establishments (id TEXT PRIMARY KEY, name TEXT);',
+  );
+  const insE = db.prepare('INSERT INTO establishments (id, name) VALUES (?, ?)');
+  insE.run('est-A', 'La Querencia');
+  insE.run('est-B', 'El Ombú');
+  const insP = db.prepare(
+    'INSERT INTO animal_profiles (id, establishment_id, animal_tag_electronic, status, deleted_at) VALUES (?, ?, ?, ?, ?)',
+  );
+  const TAG = '982000123456789';
+  insP.run('p-otra', 'est-B', TAG, 'active', null); // activo en OTRO campo → debe matchear
+  insP.run('p-vendido', 'est-A', TAG, 'sold', null); // mismo TAG pero no activo → NO matchea
+  insP.run('p-borrado', 'est-A', TAG, 'active', '2026-06-01'); // soft-deleted → NO matchea
+  insP.run('p-otro-tag', 'est-A', '111111111111111', 'active', null); // otro TAG → NO matchea
+
+  const q = buildLookupTagAcrossFieldsQuery(TAG);
+  const rows = db.prepare(q.sql).all(...(q.args as string[])) as {
+    profile_id: string;
+    establishment_id: string;
+    establishment_name: string;
+  }[];
+  db.close();
+
+  assert.equal(rows.length, 1, 'solo el activo no-borrado matchea');
+  assert.equal(rows[0].profile_id, 'p-otra');
+  assert.equal(rows[0].establishment_id, 'est-B');
+  assert.equal(rows[0].establishment_name, 'El Ombú', 'trae el name legible del otro campo (JOIN)');
 });
 
 test('buildSearchByIdvQuery: exacto por idv, active, limit 20, UNION overlay', () => {
