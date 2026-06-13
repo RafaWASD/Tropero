@@ -31,4 +31,8 @@
 
 **[GATE 2 — security code] PASS 0 HIGH** (`security_code_09resto-ble-global.md`): flag/bridge E2E aislado de prod (triple guard), query cross-campo no debilita multi-tenancy, transfer sin IDOR, sin leaks de log. 1 MED pre-existente (spec 15 err crudo de SQLite) + 2 LOW → backlog (2026-06-13).
 
-**⏸ Esperando**: **Puerta 2** de Raf (probar en `pnpm web` la puerta BLE: bastonear → overlay → editar/alta/transferir). Al aprobar: fold del chunk a la spec base 09 (R2/R3) + reconciliar nota de crear-animal (param tag) + commit selectivo (SOLO archivos del chunk — NO los de spec 08 de la terminal paralela) + marcar el chunk done. **No commiteo hasta tu OK.**
+**[PUERTA 2 — Raf] APROBADA (2026-06-13).** Chunk "BLE global" CERRADO + COMMITEADO + PUSHEADO: commit `d0abf5b` (`b0700ff..d0abf5b`, 34 archivos, commit SELECTIVO — NO incluye los `08-export-sigsa`/handoff de la terminal paralela ni `RAFAQ-resumen`/PNG scratch del veto). Fold a la spec base 09 R2 (AS-BUILT 2026-06-13) hecho. feature_list: 09 → `deferred` (chunk done; quedan dedup A/B + pairing + spp-android). Guía de testeo web con bastón: `docs/test-baston-web.md` (pedido de Raf).
+
+**Observación menor sin cerrar (no bloquea)**: OBS-1 del reviewer (el comentario de header de `crear-animal.tsx` no menciona la rama BLE del param tag) — cosmético, app-code; no lo toqué (el leader no edita código de app; no amerita run de implementer). Anotado.
+
+**Próximo (cuando Raf retome 09)**: chunk **dedup** (opción A `AssignTag` single + opción B `BulkTagAssignment` masiva, R7/R8) — el siguiente del frontend de 09. Necesita su propio Gate 0 (scope contra as-built). O lo que Raf priorice (spec 08 SIGSA la lleva otra terminal; 05/03/07 siguen gated por hardware/uso).
