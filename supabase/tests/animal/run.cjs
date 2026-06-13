@@ -3017,6 +3017,548 @@ test('spec 15-powersync — create_animal RPC (alta atómica, Run create-animal-
   });
 });
 
+// =====================================================================
+// spec 11 — transferencia-animal: RPC transfer_animal (re-parenting de historia).
+// Migraciones supabase/migrations/0087_transfer_animal_rpc.sql + 0088_animal_events_transfer_guc.sql.
+// ⚠️ Estos tests REQUIEREN 0087 + 0088 APLICADAS al remoto (las aplica el leader/implementer por
+// Management API tras gatear el SQL). Hasta entonces FALLAN — ESPERADO: la función transfer_animal no
+// existe (PGRST202) o el re-apuntado de animal_events revienta por inmutabilidad. Patrón 0075-0086.
+//
+// El RPC crea un perfil nuevo en Y reusando el animal_id global + re-apunta TODA la historia del perfil
+// viejo (X) al nuevo con establishment_id→Y (aislamiento del wire de sync) + session_id→NULL en las
+// tipadas + archiva el viejo (status='transferred'), ATÓMICAMENTE. Authz asimétrica: destino Y = rol
+// activo (CREATE); origen X = baja a paridad EXACTA con exit_animal_profile (0044).
+// =====================================================================
+test('spec 11 — transfer_animal RPC (re-parenting de historia)', async (t) => {
+  const uuid = () => require('node:crypto').randomUUID();
+  // Guard: distingue un error de DOMINIO (lo que el test quiere) de PGRST202 (la función no existe porque
+  // la migración 0087 no está aplicada). Sin esto, un mensaje de PGRST202 que casualmente contiene
+  // 'p_target_*' haría pasar las aserciones de error por la razón EQUIVOCADA (autorrevisión T5.3).
+  function assertRpcExists(error) {
+    if (error && error.code === 'PGRST202') {
+      assert.fail('transfer_animal no existe en el remoto (migración 0087 no aplicada) — este test no puede validar el comportamiento real.');
+    }
+  }
+  // userA: dueño de estX (origen) Y con rol activo en estY (destino) → puede transferir.
+  // userB: dueño de estY pero SIN rol en estX. userC: rol SOLO en estX. userD: tercero sin roles.
+  let userA, userB, clientA, clientB, estX, estY;
+  let rodeoX, rodeoY; // {id, systemId} en cria
+  let speciesId, sessionId;
+
+  // Helper: arma un animal en estX/rodeoX con historia rica y devuelve sus ids.
+  async function seedAnimalWithHistory(opts = {}) {
+    const idv = opts.idv === undefined ? `${RUN_TAG}_tr_${Math.random().toString(36).slice(2, 7)}` : opts.idv;
+    const r = await createAnimal(clientA, {
+      tag: opts.tag || null, idv, visualAlt: opts.visualAlt || 'vaca historia',
+      sex: opts.sex || 'female', birthDate: opts.birthDate || daysAgo(900),
+      rodeoId: rodeoX.id, establishmentId: estX, systemId: rodeoX.systemId,
+      categoryCode: opts.categoryCode || (opts.sex === 'male' ? 'torito' : 'vaquillona'),
+    });
+    if (r.error) throw new Error(`seedAnimal: ${r.error.message}`);
+    const profileId = r.profile.id;
+    const animalId = r.animalId;
+    // breed/coat_color via UPDATE (no es param de createAnimal).
+    await clientA.from('animal_profiles')
+      .update({ breed: 'Brangus', coat_color: 'colorado', notes: 'nota de X', entry_origin: 'bought', entry_weight: 200 })
+      .eq('id', profileId);
+    // 1 weight_event con session_id (para verificar session_id→NULL).
+    await admin.from('weight_events').insert({
+      animal_profile_id: profileId, session_id: sessionId, weight_kg: 320, weight_date: daysAgo(30), source: 'manual',
+    });
+    // 1 sanitary_event con session_id.
+    await admin.from('sanitary_events').insert({
+      animal_profile_id: profileId, session_id: sessionId, event_type: 'vaccination', product_name: 'Aftosa', event_date: daysAgo(20),
+    });
+    // 1 condition_score_event con session_id.
+    await admin.from('condition_score_events').insert({
+      animal_profile_id: profileId, session_id: sessionId, score: 3.0, event_date: daysAgo(15),
+    });
+    // 1 lab_sample con session_id.
+    await admin.from('lab_samples').insert({
+      animal_profile_id: profileId, session_id: sessionId, sample_type: 'blood', tube_number: 'T-1', collection_date: daysAgo(10),
+    });
+    // 1 observación (animal_events).
+    await admin.from('animal_events').insert({
+      animal_profile_id: profileId, establishment_id: estX, author_id: userA.id, event_type: 'observacion', text: 'obs de X',
+    });
+    return { profileId, animalId };
+  }
+
+  await t.test('setup: userA dueño de estX + rol en estY; rodeos cria en ambos; una sesión en X', async () => {
+    userA = await createTestUser('s11_A');
+    userB = await createTestUser('s11_B');
+    clientA = await getUserClient(userA.email);
+    clientB = await getUserClient(userB.email);
+    estX = await createEstablishmentAs(clientA, `${RUN_TAG} s11_estX`);
+    estY = await createEstablishmentAs(clientB, `${RUN_TAG} s11_estY`);
+    // userA recibe rol de field_operator en estY (tiene rol activo en X como owner + en Y).
+    await assignRoleAsService(userA.id, estY, 'field_operator');
+    rodeoX = await createRodeo(clientA, { establishmentId: estX, name: `${RUN_TAG}_rodeoX` });
+    rodeoY = await createRodeo(clientB, { establishmentId: estY, name: `${RUN_TAG}_rodeoY` });
+    speciesId = (await lookupSpeciesSystem(clientA, 'bovino', 'cria')).speciesId;
+    // Una sesión en X (para taggear eventos con session_id; el re-parenting debe nullearlo).
+    const { data: sess, error: sErr } = await admin.from('sessions')
+      .insert({ establishment_id: estX, rodeo_id: rodeoX.id, created_by: userA.id, status: 'active' })
+      .select('id').single();
+    if (sErr) throw new Error(`session seed: ${sErr.message}`);
+    sessionId = sess.id;
+  });
+
+  // -- T2.1: camino feliz con historia completa (incl. parto como madre con 1 ternero que queda en X). --
+  await t.test('T2.1 camino feliz: transfiere con historia → perfil en Y, viejo transferred, eventos re-apuntados (est=Y, session NULL)', async () => {
+    const { profileId, animalId } = await seedAnimalWithHistory({});
+    // Parto: el animal es MADRE de un ternero (register_birth crea el ternero en X).
+    const { data: birthId, error: bErr } = await clientA.rpc('register_birth', {
+      p_mother_profile_id: profileId, p_event_date: daysAgo(5), p_calves: [{ calf_sex: 'female' }],
+    });
+    assert.equal(bErr, null, bErr && bErr.message);
+    // 1 manual category change para poblar animal_category_history más allá del 'initial'.
+    await clientA.from('animal_profiles').update({ category_override: true, category_id: await categoryId(clientA, rodeoX.systemId, 'vaca_segundo_servicio') }).eq('id', profileId);
+
+    const newProfileId = uuid();
+    const catY = await categoryId(clientA, rodeoY.systemId, 'vaca_segundo_servicio');
+    const { data: ret, error } = await clientA.rpc('transfer_animal', {
+      p_source_profile_id: profileId,
+      p_target_establishment_id: estY,
+      p_target_rodeo_id: rodeoY.id,
+      p_target_profile_id: newProfileId,
+      p_target_category_id: catY,
+    });
+    assert.equal(error, null, error && error.message);
+    assert.equal(ret.target_profile_id, newProfileId);
+    assert.equal(ret.replay, false);
+
+    // Perfil nuevo activo en Y; reusa el animal_id global.
+    const { data: np } = await admin.from('animal_profiles')
+      .select('id, animal_id, establishment_id, rodeo_id, status, management_group_id, category_override, idv, breed, coat_color, visual_id_alt, entry_origin, entry_weight, notes, entry_date, created_by')
+      .eq('id', newProfileId).single();
+    assert.ok(np, 'perfil nuevo creado');
+    assert.equal(np.animal_id, animalId, 'reusa el animal_id global');
+    assert.equal(np.establishment_id, estY);
+    assert.equal(np.rodeo_id, rodeoY.id);
+    assert.equal(np.status, 'active');
+    assert.equal(np.management_group_id, null, 'llega sin lote (R2.3)');
+    assert.equal(np.category_override, false, 'category_override false (R2.9)');
+    assert.equal(np.created_by, userA.id, 'created_by forzado al caller (0043)');
+    // Descriptivos del animal VIAJAN (R2.12.a); de la relación con el campo RESETEAN (R2.12.b).
+    assert.equal(np.breed, 'Brangus', 'breed viaja');
+    assert.equal(np.coat_color, 'colorado', 'coat_color viaja');
+    assert.equal(np.visual_id_alt, 'vaca historia', 'visual_id_alt viaja');
+    assert.equal(np.entry_origin, null, 'entry_origin reset');
+    assert.equal(np.entry_weight, null, 'entry_weight reset');
+    assert.equal(np.notes, null, 'notes reset');
+    assert.equal(np.entry_date, new Date().toISOString().slice(0, 10), 'entry_date = hoy');
+
+    // Perfil viejo archivado (transferred, NO soft-delete) — rastro en X (R4.1).
+    const { data: op } = await admin.from('animal_profiles')
+      .select('status, exit_reason, exit_date, deleted_at, establishment_id').eq('id', profileId).single();
+    assert.equal(op.status, 'transferred');
+    assert.equal(op.exit_reason, 'transfer');
+    assert.ok(op.exit_date, 'exit_date seteado');
+    assert.equal(op.deleted_at, null, 'NO soft-delete (deleted_at NULL)');
+    assert.equal(op.establishment_id, estX, 'el viejo sigue en X (rastro)');
+
+    // R4.2: exactamente UN perfil activo para el animal (el de Y).
+    const { data: actives } = await admin.from('animal_profiles')
+      .select('id, establishment_id').eq('animal_id', animalId).eq('status', 'active').is('deleted_at', null);
+    assert.equal(actives.length, 1, 'exactamente 1 perfil activo');
+    assert.equal(actives[0].id, newProfileId);
+
+    // Eventos tipados re-apuntados: animal_profile_id=nuevo, establishment_id=Y, session_id=NULL (R3.1/R3.6/R3.8).
+    for (const tbl of ['weight_events', 'sanitary_events', 'condition_score_events', 'lab_samples']) {
+      const { data: rows } = await admin.from(tbl).select('animal_profile_id, establishment_id, session_id').eq('animal_profile_id', newProfileId);
+      assert.ok(rows.length >= 1, `${tbl}: al menos 1 fila re-apuntada`);
+      for (const row of rows) {
+        assert.equal(row.establishment_id, estY, `${tbl}: establishment_id→Y`);
+        assert.equal(row.session_id, null, `${tbl}: session_id→NULL`);
+      }
+      // El perfil viejo quedó SIN eventos propios (R3.9).
+      const { count: nOld } = await admin.from(tbl).select('id', { count: 'exact', head: true }).eq('animal_profile_id', profileId);
+      assert.equal(nOld, 0, `${tbl}: el viejo quedó sin eventos`);
+    }
+    // reproductive_events (el parto de la madre) re-apuntado a Y, session NULL.
+    {
+      const { data: re } = await admin.from('reproductive_events').select('establishment_id, session_id, event_type').eq('animal_profile_id', newProfileId);
+      assert.ok(re.length >= 1, 'reproductive_events re-apuntados');
+      for (const row of re) {
+        assert.equal(row.establishment_id, estY, 'reproductive establishment→Y');
+        assert.equal(row.session_id, null, 'reproductive session→NULL');
+      }
+    }
+    // animal_events (observación) re-apuntado a Y (R3.2/R3.7, vía GUC — NO rechazado por inmutabilidad).
+    {
+      const { data: ae } = await admin.from('animal_events').select('establishment_id, text').eq('animal_profile_id', newProfileId);
+      assert.ok(ae.length >= 1, 'animal_events re-apuntado (la GUC dejó cambiar las inmutables)');
+      assert.equal(ae[0].establishment_id, estY, 'animal_events establishment→Y');
+      const { count: nOldAe } = await admin.from('animal_events').select('id', { count: 'exact', head: true }).eq('animal_profile_id', profileId);
+      assert.equal(nOldAe, 0, 'el viejo quedó sin observaciones');
+    }
+    // animal_category_history re-apuntada a Y (R3.3/R3.6).
+    {
+      const { data: ach } = await admin.from('animal_category_history').select('establishment_id').eq('animal_profile_id', newProfileId);
+      assert.ok(ach.length >= 1, 'category_history re-apuntada');
+      for (const row of ach) assert.equal(row.establishment_id, estY, 'category_history establishment→Y');
+    }
+    // birth_calves del animal-como-MADRE: el establishment de la fila puente sigue a Y (DEC-A3), pero el
+    // perfil del ternero QUEDA en X (linaje cruzado R8.1).
+    {
+      // partos de la madre (ahora en Y).
+      const { data: births } = await admin.from('reproductive_events').select('id').eq('animal_profile_id', newProfileId).eq('event_type', 'birth');
+      const birthIds = (births || []).map((r) => r.id);
+      assert.ok(birthIds.length >= 1, 'la madre tiene su parto re-apuntado a Y');
+      const { data: bc } = await admin.from('birth_calves').select('establishment_id, calf_profile_id, birth_event_id').in('birth_event_id', birthIds);
+      assert.ok(bc.length >= 1, 'birth_calves del parto de la madre');
+      for (const row of bc) {
+        assert.equal(row.establishment_id, estY, 'birth_calves de la madre→Y (DEC-A3)');
+        // el ternero (calf_profile_id) sigue en X.
+        const { data: calf } = await admin.from('animal_profiles').select('establishment_id').eq('id', row.calf_profile_id).single();
+        assert.equal(calf.establishment_id, estX, 'el ternero QUEDA en X (linaje cruzado)');
+      }
+    }
+  });
+
+  // -- T2.2: invariante de unicidad — nunca 0 ni 2 perfiles activos. --
+  await t.test('T2.2 invariante: a lo sumo 1 perfil activo en todo momento (no viola el unique parcial)', async () => {
+    const { profileId, animalId } = await seedAnimalWithHistory({});
+    const before = await admin.from('animal_profiles').select('id', { count: 'exact', head: true }).eq('animal_id', animalId).eq('status', 'active').is('deleted_at', null);
+    assert.equal(before.count, 1, 'arranca con 1 activo');
+    const newId = uuid();
+    const { error } = await clientA.rpc('transfer_animal', {
+      p_source_profile_id: profileId, p_target_establishment_id: estY, p_target_rodeo_id: rodeoY.id,
+      p_target_profile_id: newId, p_target_category_id: await categoryId(clientA, rodeoY.systemId, 'vaquillona'),
+    });
+    assert.equal(error, null, error && error.message);
+    const after = await admin.from('animal_profiles').select('id', { count: 'exact', head: true }).eq('animal_id', animalId).eq('status', 'active').is('deleted_at', null);
+    assert.equal(after.count, 1, 'sigue con exactamente 1 activo (R4.2)');
+  });
+
+  // -- T2.3: atomicidad — category_id inválida para el system destino → rollback total. --
+  await t.test('T2.3 atomicidad: category_id inválida → rollback total, el animal queda intacto en X', async () => {
+    const { profileId, animalId } = await seedAnimalWithHistory({});
+    // category de OTRO system (la del rodeo de origen NO sirve si forzamos una inexistente para el destino;
+    // acá usamos un uuid random → el trigger de category_check (0021) la rechaza → aborta).
+    const badCat = uuid();
+    const newId = uuid();
+    const { error } = await clientA.rpc('transfer_animal', {
+      p_source_profile_id: profileId, p_target_establishment_id: estY, p_target_rodeo_id: rodeoY.id,
+      p_target_profile_id: newId, p_target_category_id: badCat,
+    });
+    assertRpcExists(error);
+    assert.notEqual(error, null, 'category inválida debe abortar la transferencia');
+    assert.match(String(error.message + ' ' + (error.code || '')), /23514|category|invalid|foreign key|violates/i);
+    // Rollback total: el animal sigue activo en X, sin perfil nuevo en Y, historia intacta.
+    const { data: src } = await admin.from('animal_profiles').select('status, establishment_id').eq('id', profileId).single();
+    assert.equal(src.status, 'active', 'el viejo sigue ACTIVO (rollback)');
+    assert.equal(src.establishment_id, estX);
+    const { data: created } = await admin.from('animal_profiles').select('id').eq('id', newId);
+    assert.deepEqual(created, [], 'NO se creó perfil en Y');
+    // Eventos siguen colgando del perfil viejo (en X).
+    const { count: nW } = await admin.from('weight_events').select('id', { count: 'exact', head: true }).eq('animal_profile_id', profileId);
+    assert.equal(nW, 1, 'los eventos siguen en el perfil viejo (historia intacta)');
+    assert.ok(animalId);
+  });
+
+  // -- T2.4: seguridad — caller con rol SOLO en Y (no en X) → 42501, nada tocado. --
+  await t.test('T2.4 seguridad: caller con rol SOLO en Y (no en X) → 42501, sin efectos', async () => {
+    const { profileId } = await seedAnimalWithHistory({});
+    // userB es dueño de Y pero NO tiene rol en X. Intenta sacar el animal de X.
+    const newId = uuid();
+    const { error } = await clientB.rpc('transfer_animal', {
+      p_source_profile_id: profileId, p_target_establishment_id: estY, p_target_rodeo_id: rodeoY.id,
+      p_target_profile_id: newId, p_target_category_id: await categoryId(clientB, rodeoY.systemId, 'vaquillona'),
+    });
+    assertRpcExists(error);
+    assert.notEqual(error, null, 'sin rol en X no puede transferir');
+    assert.equal(error.code, '42501', `debe ser 42501 (no autorizado): ${error.message}`);
+    const { data: src } = await admin.from('animal_profiles').select('status').eq('id', profileId).single();
+    assert.equal(src.status, 'active', 'el viejo sigue activo');
+    const { data: created } = await admin.from('animal_profiles').select('id').eq('id', newId);
+    assert.deepEqual(created, [], 'nada creado en Y');
+  });
+
+  // -- T2.5: seguridad — caller con rol SOLO en X (no en Y) → 42501. --
+  await t.test('T2.5 seguridad: caller con rol SOLO en X (no en Y) → 42501, sin efectos', async () => {
+    // userC: nuevo usuario con rol field_operator en X (creador del animal) pero SIN rol en Y.
+    const userC = await createTestUser('s11_C');
+    const clientC = await getUserClient(userC.email);
+    await assignRoleAsService(userC.id, estX, 'field_operator');
+    // userC crea su propio animal en X (será su creador → pasa el gate de owner-or-creator en X).
+    const rc = await createAnimal(clientC, {
+      idv: `${RUN_TAG}_trC_${Math.random().toString(36).slice(2, 6)}`, sex: 'female', birthDate: daysAgo(800),
+      rodeoId: rodeoX.id, establishmentId: estX, systemId: rodeoX.systemId, categoryCode: 'vaquillona',
+    });
+    assert.equal(rc.error, undefined, rc.error && rc.error.message);
+    const newId = uuid();
+    const { error } = await clientC.rpc('transfer_animal', {
+      p_source_profile_id: rc.profile.id, p_target_establishment_id: estY, p_target_rodeo_id: rodeoY.id,
+      p_target_profile_id: newId, p_target_category_id: await categoryId(clientC, rodeoY.systemId, 'vaquillona'),
+    });
+    assertRpcExists(error);
+    assert.notEqual(error, null, 'sin rol en Y no puede transferir (es un CREATE en Y)');
+    assert.equal(error.code, '42501', `debe ser 42501 (no autorizado en Y): ${error.message}`);
+    const { data: src } = await admin.from('animal_profiles').select('status').eq('id', rc.profile.id).single();
+    assert.equal(src.status, 'active', 'el viejo sigue activo en X');
+  });
+
+  // -- T2.6: anti-IDOR + authz de baja — operario ajeno (rol en X pero NO owner ni creador) → 42501. --
+  await t.test('T2.6 anti-IDOR: rol en X+Y pero NI owner NI creador del animal → 42501 (paridad 0044)', async () => {
+    // userE: field_operator en X y en Y, pero NO es owner de X ni creador del animal (lo creó userA).
+    const userE = await createTestUser('s11_E');
+    const clientE = await getUserClient(userE.email);
+    await assignRoleAsService(userE.id, estX, 'field_operator');
+    await assignRoleAsService(userE.id, estY, 'field_operator');
+    const { profileId } = await seedAnimalWithHistory({}); // creado por userA
+    const newId = uuid();
+    const { error } = await clientE.rpc('transfer_animal', {
+      p_source_profile_id: profileId, p_target_establishment_id: estY, p_target_rodeo_id: rodeoY.id,
+      p_target_profile_id: newId, p_target_category_id: await categoryId(clientE, rodeoY.systemId, 'vaquillona'),
+    });
+    assertRpcExists(error);
+    assert.notEqual(error, null, 'operario ajeno (no owner ni creador) no puede sacar el animal de X');
+    assert.equal(error.code, '42501', `debe ser 42501 (no owner ni creador en X): ${error.message}`);
+    const { data: src } = await admin.from('animal_profiles').select('status').eq('id', profileId).single();
+    assert.equal(src.status, 'active', 'el viejo sigue activo (la baja no autorizada no corrió)');
+    const { data: created } = await admin.from('animal_profiles').select('id').eq('id', newId);
+    assert.deepEqual(created, [], 'nada creado en Y');
+  });
+
+  // -- T2.7: perfil de origen ya inactivo/inexistente → 23503 sin efectos. --
+  await t.test('T2.7 origen inactivo/transferido/inexistente → 23503 sin efectos', async () => {
+    // (a) inexistente.
+    {
+      const { error } = await clientA.rpc('transfer_animal', {
+        p_source_profile_id: uuid(), p_target_establishment_id: estY, p_target_rodeo_id: rodeoY.id,
+        p_target_profile_id: uuid(), p_target_category_id: await categoryId(clientA, rodeoY.systemId, 'vaquillona'),
+      });
+      assertRpcExists(error);
+      assert.notEqual(error, null, 'perfil inexistente → error');
+      assert.equal(error.code, '23503', `debe ser 23503 (no encontrado): ${error.message}`);
+    }
+    // (b) ya transferido (transferimos uno, luego intentamos transferirlo de nuevo desde el viejo).
+    {
+      const { profileId } = await seedAnimalWithHistory({});
+      const okId = uuid();
+      const r1 = await clientA.rpc('transfer_animal', {
+        p_source_profile_id: profileId, p_target_establishment_id: estY, p_target_rodeo_id: rodeoY.id,
+        p_target_profile_id: okId, p_target_category_id: await categoryId(clientA, rodeoY.systemId, 'vaquillona'),
+      });
+      assert.equal(r1.error, null, r1.error && r1.error.message);
+      // El perfil viejo ahora está 'transferred' → re-transferirlo desde el viejo debe fallar 23503.
+      const { error } = await clientA.rpc('transfer_animal', {
+        p_source_profile_id: profileId, p_target_establishment_id: estY, p_target_rodeo_id: rodeoY.id,
+        p_target_profile_id: uuid(), p_target_category_id: await categoryId(clientA, rodeoY.systemId, 'vaquillona'),
+      });
+      assertRpcExists(error);
+      assert.notEqual(error, null, 'origen ya transferido → 23503');
+      assert.equal(error.code, '23503', `debe ser 23503 (ya transferido): ${error.message}`);
+    }
+  });
+
+  // -- T2.8: idv conservar-o-NULL. --
+  await t.test('T2.8 idv: (a) libre en Y → se conserva; (b) colisiona en Y → NULL + idv_dropped, transfiere igual', async () => {
+    // (a) idv libre en Y.
+    {
+      const idv = `${RUN_TAG}_idvkeep_${Math.random().toString(36).slice(2, 6)}`;
+      const { profileId } = await seedAnimalWithHistory({ idv });
+      const newId = uuid();
+      const { data: ret, error } = await clientA.rpc('transfer_animal', {
+        p_source_profile_id: profileId, p_target_establishment_id: estY, p_target_rodeo_id: rodeoY.id,
+        p_target_profile_id: newId, p_target_category_id: await categoryId(clientA, rodeoY.systemId, 'vaquillona'),
+      });
+      assert.equal(error, null, error && error.message);
+      assert.equal(ret.idv_dropped, false);
+      const { data: np } = await admin.from('animal_profiles').select('idv').eq('id', newId).single();
+      assert.equal(np.idv, idv, 'idv conservado');
+    }
+    // (b) idv colisiona en Y → NULL + flag.
+    {
+      const idv = `${RUN_TAG}_idvclash_${Math.random().toString(36).slice(2, 6)}`;
+      // un animal en Y que ya ocupa ese idv (lo crea userB, dueño de Y).
+      await createAnimal(clientB, { idv, sex: 'female', birthDate: daysAgo(700), rodeoId: rodeoY.id, establishmentId: estY, systemId: rodeoY.systemId, categoryCode: 'vaquillona' });
+      const { profileId } = await seedAnimalWithHistory({ idv });
+      const newId = uuid();
+      const { data: ret, error } = await clientA.rpc('transfer_animal', {
+        p_source_profile_id: profileId, p_target_establishment_id: estY, p_target_rodeo_id: rodeoY.id,
+        p_target_profile_id: newId, p_target_category_id: await categoryId(clientA, rodeoY.systemId, 'vaquillona'),
+      });
+      assert.equal(error, null, error && error.message);
+      assert.equal(ret.idv_dropped, true, 'idv_dropped=true por colisión');
+      const { data: np } = await admin.from('animal_profiles').select('idv').eq('id', newId).single();
+      assert.equal(np.idv, null, 'idv quedó NULL por colisión');
+    }
+  });
+
+  // -- T2.9: rodeo destino mismo sistema. --
+  // En MVP solo (bovino, cria) está activo en systems_by_species (0014). Para tener un rodeo de OTRO
+  // system en Y (y ejercer la rama cross-system del RPC, línea `system distinct`) activamos invernada
+  // TEMPORALMENTE vía service_role, creamos el rodeo, y RESTAURAMOS invernada a inactivo al final
+  // (try/finally). El catálogo es GLOBAL → la ventana de activación es mínima y se restaura siempre;
+  // los demás tests resuelven 'cria' explícito y no se ven afectados (riesgo de carrera con terminales
+  // paralelas: acotado y auto-restaurado).
+  await t.test('T2.9 rodeo destino: (a) otro system → 23514; (b) mismo system → OK', async () => {
+    const { data: sp } = await admin.from('species').select('id').eq('code', 'bovino').single();
+    const { data: invSys } = await admin.from('systems_by_species').select('id, active').eq('species_id', sp.id).eq('code', 'invernada').single();
+    let rodeoYInvId = null;
+    try {
+      await admin.from('systems_by_species').update({ active: true }).eq('id', invSys.id);
+      const { data: rInv, error: rErr } = await admin.from('rodeos')
+        .insert({ establishment_id: estY, name: `${RUN_TAG}_rodeoYinv`, species_id: sp.id, system_id: invSys.id })
+        .select('id').single();
+      assert.equal(rErr, null, rErr && rErr.message);
+      rodeoYInvId = rInv.id;
+
+      // (a) rodeo destino de OTRO system (invernada) → 23514 (cross-system).
+      {
+        const { profileId } = await seedAnimalWithHistory({});
+        const { error } = await clientA.rpc('transfer_animal', {
+          p_source_profile_id: profileId, p_target_establishment_id: estY, p_target_rodeo_id: rodeoYInvId,
+          p_target_profile_id: uuid(), p_target_category_id: await categoryId(clientA, rodeoX.systemId, 'vaquillona'),
+        });
+        assertRpcExists(error);
+        assert.notEqual(error, null, 'rodeo de otro system → rechazo');
+        assert.equal(error.code, '23514', `debe ser 23514 (cross-system): ${error.message}`);
+      }
+    } finally {
+      // Restaurar invernada a inactivo (hygiene del catálogo global). El rodeo creado lo limpia el
+      // cleanup vía el cascade de estY; igual lo borramos explícito para no dejar un rodeo de un system
+      // que vuelve a inactivo (consistencia).
+      if (rodeoYInvId) await admin.from('rodeos').delete().eq('id', rodeoYInvId);
+      await admin.from('systems_by_species').update({ active: invSys.active }).eq('id', invSys.id);
+    }
+
+    // (b) mismo system (cria) → OK.
+    {
+      const { profileId } = await seedAnimalWithHistory({});
+      const { error } = await clientA.rpc('transfer_animal', {
+        p_source_profile_id: profileId, p_target_establishment_id: estY, p_target_rodeo_id: rodeoY.id,
+        p_target_profile_id: uuid(), p_target_category_id: await categoryId(clientA, rodeoY.systemId, 'vaquillona'),
+      });
+      assertRpcExists(error);
+      assert.equal(error, null, `mismo system debe ser OK: ${error && error.message}`);
+    }
+  });
+
+  // -- T2.10: idempotencia — replay con el mismo p_target_profile_id = no-op. --
+  await t.test('T2.10 idempotencia: 2 invocaciones con el mismo p_target_profile_id → 2da es no-op (replay)', async () => {
+    const { profileId, animalId } = await seedAnimalWithHistory({});
+    const newId = uuid();
+    const args = {
+      p_source_profile_id: profileId, p_target_establishment_id: estY, p_target_rodeo_id: rodeoY.id,
+      p_target_profile_id: newId, p_target_category_id: await categoryId(clientA, rodeoY.systemId, 'vaquillona'),
+    };
+    const r1 = await clientA.rpc('transfer_animal', args);
+    assert.equal(r1.error, null, r1.error && r1.error.message);
+    assert.equal(r1.data.replay, false);
+    // Replay: el perfil target ya existe en Y → no-op.
+    const r2 = await clientA.rpc('transfer_animal', args);
+    assert.equal(r2.error, null, `el replay NO debe dar error: ${r2.error && r2.error.message}`);
+    assert.equal(r2.data.replay, true, 'la 2da es replay');
+    assert.equal(r2.data.target_profile_id, newId);
+    // Estado real: exactamente 1 perfil activo + el viejo transferred (no doble re-apuntado).
+    const { count: nActive } = await admin.from('animal_profiles').select('id', { count: 'exact', head: true }).eq('animal_id', animalId).eq('status', 'active').is('deleted_at', null);
+    assert.equal(nActive, 1, 'el replay no creó un 2do perfil activo');
+    const { count: nProfiles } = await admin.from('animal_profiles').select('id', { count: 'exact', head: true }).eq('animal_id', animalId);
+    assert.equal(nProfiles, 2, 'exactamente 2 perfiles (1 transferred en X + 1 activo en Y)');
+  });
+
+  // -- T2.11: linaje cruzado — descendencia que queda en X re-apunta su bull_id/calf_id al perfil nuevo. --
+  await t.test('T2.11 linaje cruzado: madre transferida → bull_id/calf_id de la cría (en X) apunta al perfil nuevo (Y); el evento sigue en X', async () => {
+    // Toro en X que será transferido a Y. Una cría en X tiene un service con bull_id=el toro.
+    const bull = await seedAnimalWithHistory({ sex: 'male', categoryCode: 'torito', idv: `${RUN_TAG}_bull_${Math.random().toString(36).slice(2, 6)}` });
+    const calf = await createAnimal(clientA, { idv: `${RUN_TAG}_calf_${Math.random().toString(36).slice(2, 6)}`, sex: 'female', birthDate: daysAgo(400), rodeoId: rodeoX.id, establishmentId: estX, systemId: rodeoX.systemId, categoryCode: 'vaquillona' });
+    // service event de la cría con bull_id = el toro (evento de OTRO animal que referencia al toro).
+    const { data: ev, error: evErr } = await admin.from('reproductive_events')
+      .insert({ animal_profile_id: calf.profile.id, event_type: 'service', event_date: daysAgo(100), service_type: 'natural', bull_id: bull.profileId })
+      .select('id, establishment_id').single();
+    assert.equal(evErr, null, evErr && evErr.message);
+    const evEstBefore = ev.establishment_id;
+
+    const newBullId = uuid();
+    const { error } = await clientA.rpc('transfer_animal', {
+      p_source_profile_id: bull.profileId, p_target_establishment_id: estY, p_target_rodeo_id: rodeoY.id,
+      p_target_profile_id: newBullId, p_target_category_id: await categoryId(clientA, rodeoY.systemId, 'torito'),
+    });
+    assert.equal(error, null, error && error.message);
+    // El service de la cría (que QUEDA en X) ahora apunta su bull_id al perfil nuevo del toro (en Y).
+    const { data: evAfter } = await admin.from('reproductive_events').select('bull_id, establishment_id, animal_profile_id').eq('id', ev.id).single();
+    assert.equal(evAfter.bull_id, newBullId, 'bull_id re-apuntado al perfil nuevo (R3.4)');
+    assert.equal(evAfter.animal_profile_id, calf.profile.id, 'el evento sigue siendo de la cría (no se movió)');
+    assert.equal(evAfter.establishment_id, evEstBefore, 'el evento NO cambió de establishment (sigue en X — R8.1)');
+    assert.equal(evAfter.establishment_id, estX, 'el evento de la descendencia sigue en X');
+  });
+
+  // -- T2.12: aislamiento de sync — NINGUNA fila hija queda con establishment_id=X; animal_events vía GUC. --
+  await t.test('T2.12 aislamiento de sync: ninguna fila hija re-apuntada queda con establishment_id=X', async () => {
+    const { profileId, animalId } = await seedAnimalWithHistory({});
+    const newId = uuid();
+    const { error } = await clientA.rpc('transfer_animal', {
+      p_source_profile_id: profileId, p_target_establishment_id: estY, p_target_rodeo_id: rodeoY.id,
+      p_target_profile_id: newId, p_target_category_id: await categoryId(clientA, rodeoY.systemId, 'vaquillona'),
+    });
+    assert.equal(error, null, error && error.message);
+    // Ninguna fila hija re-apuntada del animal apunta a X.
+    for (const tbl of ['weight_events', 'sanitary_events', 'condition_score_events', 'lab_samples', 'reproductive_events', 'animal_category_history']) {
+      const { data: leaked } = await admin.from(tbl).select('id').eq('animal_profile_id', newId).eq('establishment_id', estX);
+      assert.deepEqual(leaked, [], `${tbl}: NINGUNA fila re-apuntada quedó en X (fuga de sync)`);
+    }
+    // animal_events: re-apuntado, en Y (el trigger de inmutabilidad NO lo rechazó gracias a la GUC).
+    const { data: ae } = await admin.from('animal_events').select('establishment_id').eq('animal_profile_id', newId);
+    assert.ok(ae.length >= 1, 'animal_events re-apuntado (GUC permitió mover las inmutables)');
+    for (const row of ae) assert.equal(row.establishment_id, estY, 'animal_events en Y, no en X');
+    assert.ok(animalId);
+  });
+
+  // -- T2.13: grants — transfer_animal no es EXECUTE-able por anon/public; sí por authenticated. --
+  await t.test('T2.13 grants: transfer_animal NO invocable por anon (PostgREST sin JWT) — fail-closed', async () => {
+    // cliente anon (sin sesión).
+    const anonClient = createClient(SUPABASE_URL, ANON_KEY, { auth: { autoRefreshToken: false, persistSession: false } });
+    const { error } = await anonClient.rpc('transfer_animal', {
+      p_source_profile_id: uuid(), p_target_establishment_id: estY, p_target_rodeo_id: rodeoY.id,
+      p_target_profile_id: uuid(), p_target_category_id: uuid(),
+    });
+    assert.notEqual(error, null, 'anon NO debe poder invocar transfer_animal');
+    // anon sin EXECUTE → 404/permission denied (no llega a la lógica). El smoke-check del 0087 ya falla
+    // el deploy si quedara EXECUTE-able por anon/public; acá verificamos el comportamiento end-to-end.
+    assert.match(String(error.message + ' ' + (error.code || '')), /permission denied|not found|PGRST|42501|404/i);
+  });
+
+  // -- T2.14: is_castrated preserva (global); future_bull arranca false en Y. --
+  await t.test('T2.14 is_castrated preserva / future_bull no viaja', async () => {
+    // Macho castrado con future_bull=true en X.
+    const m = await seedAnimalWithHistory({ sex: 'male', categoryCode: 'torito', idv: `${RUN_TAG}_cast_${Math.random().toString(36).slice(2, 6)}` });
+    // castrar (write-through a animals) + marcar future_bull... future_bull se auto-clear al castrar (0085),
+    // así que para probar que NO viaja, lo seteamos en un macho NO castrado.
+    const m2 = await seedAnimalWithHistory({ sex: 'male', categoryCode: 'torito', idv: `${RUN_TAG}_fb_${Math.random().toString(36).slice(2, 6)}` });
+    await clientA.from('animal_profiles').update({ future_bull: true }).eq('id', m2.profileId);
+    // castrar m (is_castrated es estado global → debe preservarse en Y).
+    await clientA.from('animal_profiles').update({ is_castrated: true }).eq('id', m.profileId);
+
+    // transfiere m (castrado).
+    const newM = uuid();
+    {
+      const { error } = await clientA.rpc('transfer_animal', {
+        p_source_profile_id: m.profileId, p_target_establishment_id: estY, p_target_rodeo_id: rodeoY.id,
+        p_target_profile_id: newM, p_target_category_id: await categoryId(clientA, rodeoY.systemId, 'torito'),
+      });
+      assert.equal(error, null, error && error.message);
+      const { data: np } = await admin.from('animal_profiles').select('is_castrated, future_bull').eq('id', newM).single();
+      assert.equal(np.is_castrated, true, 'is_castrated preservado (estado global, R2.7)');
+      assert.equal(np.future_bull, false, 'future_bull arranca false en Y (R2.8)');
+    }
+    // transfiere m2 (future_bull=true en X) → arranca false en Y.
+    const newM2 = uuid();
+    {
+      const { error } = await clientA.rpc('transfer_animal', {
+        p_source_profile_id: m2.profileId, p_target_establishment_id: estY, p_target_rodeo_id: rodeoY.id,
+        p_target_profile_id: newM2, p_target_category_id: await categoryId(clientA, rodeoY.systemId, 'torito'),
+      });
+      assert.equal(error, null, error && error.message);
+      const { data: np } = await admin.from('animal_profiles').select('future_bull').eq('id', newM2).single();
+      assert.equal(np.future_bull, false, 'future_bull NO viaja entre campos (R2.8)');
+    }
+  });
+});
+
 test('cleanup', async () => {
   await cleanup();
 });

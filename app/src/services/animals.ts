@@ -48,6 +48,16 @@ import {
 } from './powersync/local-reads';
 import { runLocalQuery, runLocalQuerySingle, runLocalWrite } from './powersync/local-query';
 import { enqueueCreateAnimal, enqueueExitAnimal } from './powersync/outbox';
+import { assertOnline } from './powersync/online-guard';
+import { supabase } from './supabase';
+import {
+  type TransferAnimalInput,
+  type TransferAnimalResult,
+  type TransferAnimalRpcRow,
+  classifyTransferError,
+  mapTransferResult,
+  TRANSFER_OFFLINE_MESSAGE,
+} from './transfer-animal';
 
 // ─── Error / Result uniforme (mismo shape que rodeo-config.ts / establishments.ts) ──
 
@@ -1179,4 +1189,58 @@ function cleanStr(v: string | null | undefined): string | null {
 /** UUID v4. crypto.randomUUID está en RN (Hermes), web y Node — sin dependencia extra. */
 function randomUuid(): string {
   return globalThis.crypto.randomUUID();
+}
+
+// ─── Transferencia de animal entre campos (spec 11, ONLINE-only) ─────────────────────────
+
+export type { TransferAnimalInput, TransferAnimalResult } from './transfer-animal';
+
+/**
+ * Genera el `targetProfileId` (UUID estable) para una transferencia. El call-site debe GENERARLO UNA
+ * vez por intent y PERSISTIRLO para el reintento del mismo intent (idempotencia, R6.2): si el ACK se
+ * pierde, reintentar con el MISMO id hace que el RPC devuelva el resultado ya aplicado (replay) en vez
+ * de crear un 2do perfil. NO regenerar el id en cada reintento.
+ */
+export function newTransferTargetProfileId(): string {
+  return randomUuid();
+}
+
+/**
+ * Transfiere un animal de un campo X a otro Y PRESERVANDO su historia, vía el RPC `transfer_animal`
+ * (migración 0087, SECURITY DEFINER). El RPC: crea el perfil nuevo en Y (reusa el animal_id global) +
+ * re-apunta TODA la historia del viejo al nuevo (con establishment_id→Y, aislando el wire de sync) +
+ * archiva el viejo (status='transferred'), ATÓMICAMENTE.
+ *
+ * ONLINE-ONLY (R7.1): la transferencia toca datos de X que deben estar firmes (write cross-tenant,
+ * análogo a crear-campo, spec 01 R9.2) → NO se encola offline. Fast-fail con `assertOnline` antes del
+ * RPC: sin red devuelve un error `kind:'network'` accionable en vez de colgar la pantalla.
+ *
+ * El cliente NO arma el establishment_id de ORIGEN ni el animal_id: el RPC los deriva de la FILA REAL
+ * del perfil de origen (anti-IDOR, R5.4). Authz server-side (la barrera real): destino Y = rol activo;
+ * origen X = baja a paridad EXACTA con exit_animal_profile (has_role_in(X) AND owner-or-creator, R5.1).
+ * Un rechazo (42501/23514/23503) se mapea a copy es-AR accionable SIN exponer el sqlerrm crudo.
+ *
+ * `targetProfileId` debe ser un UUID estable entre reintentos del mismo intent (idempotencia, R6.2);
+ * usá `newTransferTargetProfileId()` UNA vez y persistilo. Si `idvDropped` viene true, la UI debe
+ * avisar al operario que complete el idv (R2.5).
+ */
+export async function transferAnimal(
+  input: TransferAnimalInput,
+): Promise<ServiceResult<TransferAnimalResult>> {
+  const off = assertOnline(TRANSFER_OFFLINE_MESSAGE);
+  if (off) return off;
+
+  const { data, error } = await supabase.rpc('transfer_animal', {
+    p_source_profile_id: input.sourceProfileId,
+    p_target_establishment_id: input.targetEstablishmentId,
+    p_target_rodeo_id: input.targetRodeoId,
+    p_target_profile_id: input.targetProfileId,
+    p_target_category_id: input.targetCategoryId,
+  });
+
+  if (error) {
+    return { ok: false, error: classifyTransferError(error) };
+  }
+
+  return { ok: true, value: mapTransferResult(data as TransferAnimalRpcRow | null, input.targetProfileId) };
 }
