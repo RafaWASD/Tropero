@@ -72,6 +72,8 @@
 
 **R4.1** Para la **vacunación masiva**, el sistema deberá usar como conjunto candidato por **default = todos los animales activos del grupo** (R1.3), y deberá permitir un **filtro opcional** por **categoría** y/o **sexo**. Para castración y destete este modelo **no aplica**: usan la pantalla de selección explícita (R11). (context §Selección; Gate 0 v2 D1)
 
+> **AS-BUILT (2026-06-14, delta vía-intranasal):** la **vía** de la vacunación (opcional, `sanitary_events.route`) se restringe en la UI a **3 vías curadas** — **Subcutánea · Intramuscular · Intranasal** — porque son las únicas vías reales de vacuna bovina (tópica = pour-on antiparasitario; oral = irrelevante en vacuna; "otra" innecesaria). El enum `public.sanitary_route` conserva los 6 valores (delta: la migración 0090 agrega `intranasal`) para otros sanitary_events (desparasitación/tratamiento); solo se cura la lista *ofrecida* en el contexto vacunación. (Decisión de producto cerrada con Raf; sub-detalle del pre-config — no abre un EARS propio, igual que la vía no lo tenía en el fix VIA-ENUM-MISMATCH.)
+
 **R4.2** Antes de aplicar la vacunación masiva, el sistema deberá mostrar un **preview obligatorio** ("vas a crear N eventos sobre N animales, uno por animal") y deberá requerir una **confirmación explícita**. (context §Selección)
 
 **R4.3** El sistema deberá excluir del conjunto a aplicar (**skip-and-report**) y reportar al operario, agrupados por motivo, los animales que no aplican a la vacunación masiva:

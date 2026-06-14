@@ -681,6 +681,7 @@ test('humanizeSampleType', () => {
 test('humanizeRoute', () => {
   assert.equal(humanizeRoute('subcutaneous'), 'Subcutánea');
   assert.equal(humanizeRoute('IM'), 'Intramuscular');
+  assert.equal(humanizeRoute('intranasal'), 'Intranasal'); // 0090: vacunas respiratorias vivas
   assert.equal(humanizeRoute('algo-raro'), 'algo-raro'); // pasa el valor tal cual si no mapea
   assert.equal(humanizeRoute(null), null);
 });

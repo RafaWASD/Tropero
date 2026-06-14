@@ -49,7 +49,7 @@ import {
   type VaccinationPreview,
 } from '@/utils/vaccination-preview';
 import type { AnimalSex } from '@/utils/animal-category';
-import { routeOptions, toRouteValue, type SanitaryRoute } from '@/utils/sanitary-route';
+import { vaccineRouteOptions, toRouteValue, type SanitaryRoute } from '@/utils/sanitary-route';
 import { backOr } from '@/utils/nav';
 import { buttonA11y } from '@/utils/a11y';
 
@@ -329,14 +329,15 @@ export default function VacunacionMasivaScreen() {
                 error={productError}
                 maxLength={PRODUCT_NAME_MAX}
               />
-              {/* Vía: OPCIONAL. Selector de chips con los 5 valores del enum sanitary_route (0027) — NO
-                  texto libre (fix VIA-ENUM-MISMATCH). Ninguna seleccionada = route null. */}
+              {/* Vía: OPCIONAL. Selector de chips con las 3 vías CURADAS de vacuna (SC/IM/Intranasal,
+                  `vaccineRouteOptions`) — NO las 6 del enum (tópica/oral/otra no son vías de vacuna) y
+                  NO texto libre (fix VIA-ENUM-MISMATCH). Ninguna seleccionada = route null. */}
               <YStack width="100%" gap="$2">
                 <Text fontFamily="$body" fontSize="$4" fontWeight="600" color="$textPrimary">
                   Vía (opcional)
                 </Text>
                 <FilterChipRow>
-                  {routeOptions().map((opt) => (
+                  {vaccineRouteOptions().map((opt) => (
                     <FilterChip
                       key={opt.code}
                       label={opt.label}

@@ -8,9 +8,10 @@
 //   pnpm exec playwright test e2e/captures/spec10-uib2-screenshots.capture.ts --config playwright.capture.config.ts
 //
 // Genera (design/spec10-ui-b2/):
-//   - vacunacion-preview.png  → la pantalla de vacunación: producto + vía (chips del enum sanitary_route,
-//     "Subcutánea" seleccionada — NO texto libre) + filtro opcional (categoría/sexo) + preview "N eventos
-//     sobre M animales" (una vacunación por animal) + CTA vivo "Vacunar M animales".
+//   - vacunacion-preview.png  → la pantalla de vacunación: producto + vía (3 chips CURADOS de vacuna —
+//     Subcutánea/Intramuscular/Intranasal, "Subcutánea" seleccionada — NO las 6 del enum ni texto libre)
+//     + filtro opcional (categoría/sexo) + preview "N eventos sobre M animales" (una vacunación por
+//     animal) + CTA vivo "Vacunar M animales".
 //   - vacunacion-skip.png     → el mismo flujo pero con un animal YA vacunado hoy → el preview muestra el
 //     skip-and-report ("1 animal se saltea · ya tiene esta vacunación cargada hoy").
 //
@@ -125,11 +126,15 @@ test('capturas spec 10 UI-B2 (vacunación masiva: preview + skip-and-report)', a
   // 1) PREVIEW por default (todos los activos): "N eventos sobre M animales". Cargar el producto para que
   //    el CTA quede habilitado (la pantalla se ve completa, lista para confirmar).
   await page.getByPlaceholder('Ej. Mancha-gangrena').fill('Mancha-gangrena');
-  // Vía: selector de CHIPS (fix VIA-ENUM-MISMATCH — ya NO es texto libre). Verificar que están los 5 del
-  // enum y seleccionar "Subcutánea" para que la captura muestre el chip activo (no texto tipeado a mano).
+  // Vía: selector de CHIPS (fix VIA-ENUM-MISMATCH — ya NO es texto libre). Verificar que están las 3
+  // vías CURADAS de vacuna (SC/IM/Intranasal) y que las que NO son de vacuna (Oral/Tópica/Otra) YA NO
+  // aparecen; seleccionar "Subcutánea" para que la captura muestre el chip activo (no texto a mano).
   await expect(page.getByText('Vía (opcional)', { exact: true })).toBeVisible({ timeout: 20_000 });
-  for (const label of ['Subcutánea', 'Intramuscular', 'Oral', 'Tópica', 'Otra']) {
+  for (const label of ['Subcutánea', 'Intramuscular', 'Intranasal']) {
     await expect(page.getByRole('button', { name: label, exact: true })).toBeVisible({ timeout: 20_000 });
+  }
+  for (const gone of ['Oral', 'Tópica', 'Otra']) {
+    await expect(page.getByRole('button', { name: gone, exact: true })).toHaveCount(0);
   }
   await page.getByRole('button', { name: 'Subcutánea', exact: true }).click();
   // El preview muestra "N eventos sobre M animales" (uno por animal). Esperamos que aparezca.

@@ -845,6 +845,7 @@ export function humanizeSampleType(t: string | null | undefined): string | null 
 const ROUTE_LABELS: Record<string, string> = {
   subcutaneous: 'Subcutánea',
   intramuscular: 'Intramuscular',
+  intranasal: 'Intranasal',
   intravenous: 'Intravenosa',
   oral: 'Oral',
   topical: 'Tópica',
