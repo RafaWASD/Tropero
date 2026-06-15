@@ -52,6 +52,21 @@ import {
   buildAddObservationInsert,
   buildAddVaccinationInsert,
   buildAddWeaningInsert,
+  // M3.1 — write-paths de las maniobras restantes (spec 03)
+  buildAddManeuverSanitaryInsert,
+  buildUpdateManeuverSanitary,
+  buildAddManeuverVaccinationInsert,
+  buildAddManeuverConditionScoreInsert,
+  buildUpdateManeuverConditionScore,
+  buildAddManeuverTactoVaquillonaInsert,
+  buildUpdateManeuverTactoVaquillona,
+  buildAddManeuverInseminationInsert,
+  buildUpdateManeuverInsemination,
+  buildAddManeuverLabSampleInsert,
+  buildUpdateManeuverLabSample,
+  buildSetTeethStateUpdate,
+  buildSetCutUpdate,
+  buildUnsetCutUpdate,
   buildSetCastratedUpdate,
   buildSetFutureBullUpdate,
   buildSoftDeleteEventUpdate,
@@ -1073,24 +1088,31 @@ test('buildMotherQuery: cadena birth_calves→parto→madre, b1 tag, sin filtro 
 // ─── eventos (T5.1) ──────────────────────────────────────────────────────────────────
 
 test('buildAddWeightInsert: INSERT weight_events, id cliente primero, sin establishment_id/created_by', () => {
+  // session_id default null (ficha de spec 02: evento suelto, sin jornada) — as-built M2.2 R5.11.
   const q = buildAddWeightInsert('w-id', 'prof-1', 320.5, '2026-06-09', 'gorda');
   assert.match(
     q.sql,
-    /^INSERT INTO weight_events \(id, animal_profile_id, weight_kg, weight_date, notes\) VALUES \(\?, \?, \?, \?, \?\)$/,
+    /^INSERT INTO weight_events \(id, animal_profile_id, weight_kg, weight_date, notes, session_id\) VALUES \(\?, \?, \?, \?, \?, \?\)$/,
   );
   // los triggers/defaults ponen estos al subir → NO van en el INSERT local
   assert.doesNotMatch(q.sql, /establishment_id/);
   assert.doesNotMatch(q.sql, /created_by/);
   assert.doesNotMatch(q.sql, /\bsource\b/);
-  // args en el ORDEN exacto de los placeholders
-  assert.deepEqual(q.args, ['w-id', 'prof-1', 320.5, '2026-06-09', 'gorda']);
+  // args en el ORDEN exacto de los placeholders; session_id null al final por default
+  assert.deepEqual(q.args, ['w-id', 'prof-1', 320.5, '2026-06-09', 'gorda', null]);
+});
+
+test('buildAddWeightInsert: session_id se vincula cuando viene (jornada de manga, R5.11)', () => {
+  const q = buildAddWeightInsert('w3', 'p', 412, '2026-06-09', null, 'sess-99');
+  assert.equal((q.sql.match(/\?/g) ?? []).length, 6);
+  assert.deepEqual(q.args, ['w3', 'p', 412, '2026-06-09', null, 'sess-99']);
 });
 
 test('buildAddWeightInsert: notes null se preserva (columna nullable, no se omite la posición)', () => {
   const q = buildAddWeightInsert('w2', 'p', 100, '2026-01-01', null);
-  // 5 placeholders SIEMPRE (no se "saltea" notes según presencia → el INSERT por posición no se corre)
-  assert.equal((q.sql.match(/\?/g) ?? []).length, 5);
-  assert.deepEqual(q.args, ['w2', 'p', 100, '2026-01-01', null]);
+  // 6 placeholders SIEMPRE (id, profile, kg, date, notes, session_id) — el INSERT por posición no se corre
+  assert.equal((q.sql.match(/\?/g) ?? []).length, 6);
+  assert.deepEqual(q.args, ['w2', 'p', 100, '2026-01-01', null, null]);
 });
 
 test('buildAddConditionScoreInsert: INSERT condition_score_events, score, sin establishment_id', () => {
@@ -1108,14 +1130,20 @@ test('buildAddConditionScoreInsert: INSERT condition_score_events, score, sin es
 const CA = '2026-06-09T12:00:00.000Z';
 
 test('buildAddTactoInsert: INSERT reproductive_events con event_type literal tacto + pregnancy_status + created_at de cliente', () => {
-  const q = buildAddTactoInsert('t-1', 'prof-3', 'pregnant', '2026-06-09', 'ok', CA);
+  // session_id default null (ficha de spec 02). as-built M2.2 R5.11.
+  const q = buildAddTactoInsert('t-1', 'prof-3', 'empty', '2026-06-09', 'ok', CA);
   assert.match(
     q.sql,
-    /^INSERT INTO reproductive_events \(id, animal_profile_id, event_type, event_date, pregnancy_status, notes, created_at\) VALUES \(\?, \?, 'tacto', \?, \?, \?, \?\)$/,
+    /^INSERT INTO reproductive_events \(id, animal_profile_id, event_type, event_date, pregnancy_status, notes, created_at, session_id\) VALUES \(\?, \?, 'tacto', \?, \?, \?, \?, \?\)$/,
   );
   // event_type es literal embebido (no placeholder) → los args NO lo incluyen
   assert.doesNotMatch(q.sql, /service_type/);
-  assert.deepEqual(q.args, ['t-1', 'prof-3', '2026-06-09', 'pregnant', 'ok', CA]);
+  assert.deepEqual(q.args, ['t-1', 'prof-3', '2026-06-09', 'empty', 'ok', CA, null]);
+});
+
+test('buildAddTactoInsert: session_id se vincula cuando viene (jornada de manga, R5.11)', () => {
+  const q = buildAddTactoInsert('t-2', 'prof-9', 'large', '2026-06-09', null, CA, 'sess-7');
+  assert.deepEqual(q.args, ['t-2', 'prof-9', '2026-06-09', 'large', null, CA, 'sess-7']);
 });
 
 test('buildAddServiceInsert: INSERT reproductive_events con event_type literal service + service_type + created_at de cliente', () => {
@@ -1356,16 +1384,19 @@ test('PENDING_OVERLAY_TABLES: las 7 tablas overlay (para clear/rollback por clie
 // ─── spec 10 (T-CL.8/T-CL.11/T-CL.13): builders de las operaciones masivas + castración/futuro torito ──
 
 test('T-CL.8 / R3.1: buildAddVaccinationInsert — sanitary_events vaccination, campaign_id NO se manda (NULL as-built)', () => {
-  const q = buildAddVaccinationInsert('id-1', 'p-1', 'Aftosa', 'subcutánea', '2026-06-11');
+  const q = buildAddVaccinationInsert('id-1', 'p-1', 'Aftosa', '2026-06-11');
   assert.match(q.sql, /INSERT INTO sanitary_events/);
   assert.match(q.sql, /'vaccination'/);
   // campaign_id NO está en la lista de columnas → queda NULL (sanitary_campaigns no existe, design §2.2).
   assert.ok(!/campaign_id/.test(q.sql), 'no debe setear campaign_id (NULL as-built)');
+  // La VÍA se eliminó (decisión de producto 2026-06-15): el INSERT NO setea `route` → queda NULL (la
+  // columna sigue dormida en la DB, no se dropeó). Esto verifica que el path no manda route.
+  assert.ok(!/\broute\b/.test(q.sql), 'no debe setear route (vía eliminada; columna dormida NULL)');
   // author_id/created_by/created_at/establishment_id NO se mandan (los fuerza el trigger al subir).
   for (const forbidden of ['author_id', 'created_by', 'created_at', 'establishment_id']) {
     assert.ok(!new RegExp(forbidden).test(q.sql), `no debe setear ${forbidden} (trigger server-side)`);
   }
-  assert.deepEqual(q.args, ['id-1', 'p-1', 'Aftosa', 'subcutánea', '2026-06-11']);
+  assert.deepEqual(q.args, ['id-1', 'p-1', 'Aftosa', '2026-06-11']);
 });
 
 test('T-CL.8 / R3.2: buildAddWeaningInsert — reproductive_events weaning con created_at de cliente', () => {
@@ -1564,4 +1595,128 @@ test('T-UI.8: buildSoftDeleteEventUpdate ejecuta — marca deleted_at + idempote
   assert.equal(res2.changes, 0);
 
   db.close();
+});
+
+// ════════════════════════════════════════════════════════════════════════════════════════════
+// M3.1 — write-paths de las maniobras restantes (spec 03) — INSERT con session_id + UPDATE corrección
+// ════════════════════════════════════════════════════════════════════════════════════════════
+
+test('M3.1: buildAddManeuverSanitaryInsert — sanitary_events deworming, product_name, session_id, SIN route (D10)', () => {
+  const q = buildAddManeuverSanitaryInsert('s-1', 'p-1', 'deworming', 'Ivermectina', '2026-06-14', 'sess-1');
+  assert.match(q.sql, /INSERT INTO sanitary_events/);
+  assert.match(q.sql, /session_id/);
+  assert.doesNotMatch(q.sql, /route/); // D10: la vía NO se persiste estructurada
+  assert.deepEqual(q.args, ['s-1', 'p-1', 'deworming', 'Ivermectina', '2026-06-14', 'sess-1']);
+});
+
+test('M3.1: buildUpdateManeuverSanitary — UPDATE product_name, filtra deleted_at', () => {
+  const q = buildUpdateManeuverSanitary('s-1', 'Doramectina', '2026-06-14');
+  assert.match(q.sql, /^UPDATE sanitary_events SET product_name/);
+  assert.match(q.sql, /deleted_at IS NULL/);
+  assert.deepEqual(q.args, ['Doramectina', '2026-06-14', 's-1']);
+});
+
+test('M3.1: buildAddManeuverVaccinationInsert — sanitary_events vaccination con session_id', () => {
+  const q = buildAddManeuverVaccinationInsert('v-1', 'p-1', 'Aftosa', '2026-06-14', 'sess-1');
+  assert.match(q.sql, /'vaccination'/);
+  assert.match(q.sql, /session_id/);
+  assert.deepEqual(q.args, ['v-1', 'p-1', 'Aftosa', '2026-06-14', 'sess-1']);
+});
+
+test('M3.1: buildAddManeuverConditionScoreInsert — condition_score_events con session_id', () => {
+  const q = buildAddManeuverConditionScoreInsert('cs-1', 'p-1', 3.5, '2026-06-14', 'sess-1');
+  assert.match(q.sql, /INSERT INTO condition_score_events/);
+  assert.match(q.sql, /session_id/);
+  assert.deepEqual(q.args, ['cs-1', 'p-1', 3.5, '2026-06-14', 'sess-1']);
+});
+
+test('M3.1: buildUpdateManeuverConditionScore — UPDATE score, deleted_at', () => {
+  const q = buildUpdateManeuverConditionScore('cs-1', 4.25, '2026-06-14');
+  assert.match(q.sql, /^UPDATE condition_score_events SET score/);
+  assert.deepEqual(q.args, [4.25, '2026-06-14', 'cs-1']);
+});
+
+test('M3.1: buildAddManeuverTactoVaquillonaInsert — reproductive_events tacto_vaquillona + heifer_fitness + session_id', () => {
+  const q = buildAddManeuverTactoVaquillonaInsert('tv-1', 'p-1', 'apta', '2026-06-14', '2026-06-14T10:00:00Z', 'sess-1');
+  assert.match(q.sql, /'tacto_vaquillona'/);
+  assert.match(q.sql, /heifer_fitness/);
+  assert.match(q.sql, /session_id/);
+  assert.deepEqual(q.args, ['tv-1', 'p-1', '2026-06-14', 'apta', '2026-06-14T10:00:00Z', 'sess-1']);
+});
+
+test('M3.1: buildUpdateManeuverTactoVaquillona — UPDATE heifer_fitness, filtra event_type', () => {
+  const q = buildUpdateManeuverTactoVaquillona('tv-1', 'no_apta', '2026-06-14');
+  assert.match(q.sql, /^UPDATE reproductive_events SET heifer_fitness/);
+  assert.match(q.sql, /event_type = 'tacto_vaquillona'/);
+  assert.deepEqual(q.args, ['no_apta', '2026-06-14', 'tv-1']);
+});
+
+test('M3.1: buildAddManeuverInseminationInsert — reproductive_events service ai, pajuela en notes, session_id', () => {
+  const q = buildAddManeuverInseminationInsert('i-1', 'p-1', 'Toro X', '2026-06-14', '2026-06-14T10:00:00Z', 'sess-1');
+  assert.match(q.sql, /'service'/);
+  assert.match(q.sql, /'ai'/);
+  assert.match(q.sql, /session_id/);
+  assert.deepEqual(q.args, ['i-1', 'p-1', '2026-06-14', 'Toro X', '2026-06-14T10:00:00Z', 'sess-1']);
+});
+
+test('M3.1: buildUpdateManeuverInsemination — UPDATE notes, filtra event_type service', () => {
+  const q = buildUpdateManeuverInsemination('i-1', 'Toro Y', '2026-06-14');
+  assert.match(q.sql, /^UPDATE reproductive_events SET notes/);
+  assert.match(q.sql, /event_type = 'service'/);
+  assert.deepEqual(q.args, ['Toro Y', '2026-06-14', 'i-1']);
+});
+
+test('M3.1: buildAddManeuverLabSampleInsert — lab_samples con sample_type variable + tube_number + session_id', () => {
+  const blood = buildAddManeuverLabSampleInsert('l-1', 'p-1', 'blood', '42', '2026-06-14', 'sess-1');
+  assert.match(blood.sql, /INSERT INTO lab_samples/);
+  assert.deepEqual(blood.args, ['l-1', 'p-1', 'blood', '42', '2026-06-14', 'sess-1']);
+  const tricho = buildAddManeuverLabSampleInsert('l-2', 'p-1', 'scrape_tricho', '7', '2026-06-14', 'sess-1');
+  assert.equal(tricho.args[2], 'scrape_tricho');
+});
+
+test('M3.1: buildUpdateManeuverLabSample — UPDATE tube_number, deleted_at', () => {
+  const q = buildUpdateManeuverLabSample('l-1', '99', '2026-06-14');
+  assert.match(q.sql, /^UPDATE lab_samples SET tube_number/);
+  assert.deepEqual(q.args, ['99', '2026-06-14', 'l-1']);
+});
+
+test('M3.1: buildSetTeethStateUpdate — UPDATE animal_profiles.teeth_state (propiedad, NO evento, sin session_id)', () => {
+  const q = buildSetTeethStateUpdate('p-1', 'sin_dientes');
+  assert.match(q.sql, /^UPDATE animal_profiles SET teeth_state/);
+  assert.doesNotMatch(q.sql, /session_id/);
+  assert.match(q.sql, /deleted_at IS NULL/);
+  assert.deepEqual(q.args, ['sin_dientes', 'p-1']);
+});
+
+test('M3.1: buildSetCutUpdate — UPDATE is_cut=1 + category_id + category_override=1 (R6.8)', () => {
+  const q = buildSetCutUpdate('p-1', 'cat-cut');
+  assert.match(q.sql, /SET is_cut = 1, category_id = \?, category_override = 1/);
+  assert.deepEqual(q.args, ['cat-cut', 'p-1']);
+});
+
+test('M3.1: buildUnsetCutUpdate — UPDATE is_cut=0 + category derivada + category_override=0 (revert R6.8)', () => {
+  const q = buildUnsetCutUpdate('p-1', 'cat-derivada');
+  assert.match(q.sql, /SET is_cut = 0, category_id = \?, category_override = 0/);
+  assert.deepEqual(q.args, ['cat-derivada', 'p-1']);
+});
+
+// ─── Ejecución real (node:sqlite): el split INSERT→UPDATE de una corrección NO duplica (R5.9) ─────────
+
+test('M3.1 (node:sqlite): corrección de score = INSERT luego UPDATE del MISMO id → 1 sola fila con el valor corregido', () => {
+  const db = new DatabaseSync(':memory:');
+  db.exec(
+    'CREATE TABLE condition_score_events (id TEXT PRIMARY KEY, animal_profile_id TEXT, score REAL, ' +
+      'event_date TEXT, session_id TEXT, deleted_at TEXT);',
+  );
+  const ins = buildAddManeuverConditionScoreInsert('cs-1', 'p-1', 3.0, '2026-06-14', 'sess-1');
+  db.prepare(ins.sql).run(...(ins.args as (string | number | null)[]));
+  const upd = buildUpdateManeuverConditionScore('cs-1', 4.5, '2026-06-14');
+  db.prepare(upd.sql).run(...(upd.args as (string | number)[]));
+  const rows = db.prepare('SELECT id, score, session_id FROM condition_score_events').all() as {
+    id: string; score: number; session_id: string;
+  }[];
+  db.close();
+  assert.equal(rows.length, 1, 'la corrección NO crea una 2da fila (R5.9)');
+  assert.equal(rows[0].score, 4.5, 'la fila quedó con el score corregido');
+  assert.equal(rows[0].session_id, 'sess-1', 'el session_id del INSERT se conserva (la corrección no lo toca)');
 });

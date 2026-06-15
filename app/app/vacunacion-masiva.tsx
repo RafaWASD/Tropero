@@ -3,7 +3,9 @@
 // pulgar/guante, legible a pleno sol.
 //
 // Modelo Gate 0 ORIGINAL (R4.1, "vacunación NO cambia" — NO selección por checkbox como castrar/destetar):
-//   - Pre-config: producto (obligatorio) + vía (opcional).
+//   - Pre-config: producto (obligatorio). La VÍA de aplicación se ELIMINÓ (decisión de producto cerrada
+//     por Raf/Facundo 2026-06-15): el producto YA implica la vía → capturarla aparte es redundante. La
+//     columna `sanitary_events.route` queda DORMIDA (nullable, no se escribe; sin migración).
 //   - Filtro OPCIONAL por categoría y/o sexo (default = TODOS los activos del grupo, sin filtro).
 //   - Preview obligatorio (R4.2): "N eventos sobre M animales" + "K saltados (motivos)" (skip-and-report,
 //     R4.3): ya-vacunados de esta fecha (idempotencia R6.3) + (lote cross-rodeo) rodeo sin `vacunacion`
@@ -49,7 +51,6 @@ import {
   type VaccinationPreview,
 } from '@/utils/vaccination-preview';
 import type { AnimalSex } from '@/utils/animal-category';
-import { vaccineRouteOptions, toRouteValue, type SanitaryRoute } from '@/utils/sanitary-route';
 import { backOr } from '@/utils/nav';
 import { buttonA11y } from '@/utils/a11y';
 
@@ -84,8 +85,6 @@ export default function VacunacionMasivaScreen() {
 
   // ── Pre-config + filtro (R4.1) ──────────────────────────────────────────────────────────────
   const [productName, setProductName] = useState('');
-  // Vía OPCIONAL: un código del enum `sanitary_route` o null (NUNCA texto libre — fix VIA-ENUM-MISMATCH).
-  const [route, setRoute] = useState<SanitaryRoute | null>(null);
   const [productTouched, setProductTouched] = useState(false);
   // Filtro opcional: categorías tildadas (vacío = todas) + sexo tildado (null = ambos).
   const [categoryFilter, setCategoryFilter] = useState<ReadonlySet<string>>(new Set());
@@ -197,11 +196,6 @@ export default function VacunacionMasivaScreen() {
     setSexFilter((prev) => (prev === sex ? null : sex));
   }, []);
 
-  // Vía: single-select toggle. Tocar la seleccionada la deselecciona → vuelve a null (vía OPCIONAL).
-  const toggleRoute = useCallback((code: SanitaryRoute) => {
-    setRoute((prev) => (prev === code ? null : code));
-  }, []);
-
   // ── Confirmar (R4.2 confirmación explícita → R4.4 solo se encolan los toApply) ────────────────
   const productError =
     productTouched && productName.trim().length === 0 ? 'Indicá qué producto se aplica.' : null;
@@ -221,11 +215,9 @@ export default function VacunacionMasivaScreen() {
     };
 
     // R4.4: SOLO los toApply (excluye ya-vacunados + rodeo deshabilitado) se encolan.
-    // `route` ya es un código del enum o null; toRouteValue es la barrera dura contra texto libre
-    // (fix VIA-ENUM-MISMATCH): NUNCA viaja un string fuera del enum al INSERT de sanitary_events.route.
     const result = await applyBulkVaccination(
       preview.toApply,
-      { productName: productName.trim(), route: toRouteValue(route), eventDate },
+      { productName: productName.trim(), eventDate },
       { onProgress },
     );
 
@@ -246,7 +238,7 @@ export default function VacunacionMasivaScreen() {
     );
     setProgressDone(result.value.enqueued);
     setApplyPhase('done');
-  }, [preview, productName, route, eventDate, profileById]);
+  }, [preview, productName, eventDate, profileById]);
 
   // ── Render: fase de PROGRESO (post-confirmar) ────────────────────────────────────────────────
   if (applyPhase) {
@@ -315,7 +307,7 @@ export default function VacunacionMasivaScreen() {
             }}
             keyboardShouldPersistTaps="handled"
           >
-            {/* Pre-config: producto (obligatorio) + vía (opcional → chips del enum sanitary_route). */}
+            {/* Pre-config: SOLO producto (obligatorio). La vía se eliminó (el producto la implica). */}
             <Card gap="$3">
               <FormField
                 label="Producto"
@@ -329,24 +321,6 @@ export default function VacunacionMasivaScreen() {
                 error={productError}
                 maxLength={PRODUCT_NAME_MAX}
               />
-              {/* Vía: OPCIONAL. Selector de chips con las 3 vías CURADAS de vacuna (SC/IM/Intranasal,
-                  `vaccineRouteOptions`) — NO las 6 del enum (tópica/oral/otra no son vías de vacuna) y
-                  NO texto libre (fix VIA-ENUM-MISMATCH). Ninguna seleccionada = route null. */}
-              <YStack width="100%" gap="$2">
-                <Text fontFamily="$body" fontSize="$4" fontWeight="600" color="$textPrimary">
-                  Vía (opcional)
-                </Text>
-                <FilterChipRow>
-                  {vaccineRouteOptions().map((opt) => (
-                    <FilterChip
-                      key={opt.code}
-                      label={opt.label}
-                      selected={route === opt.code}
-                      onPress={() => toggleRoute(opt.code)}
-                    />
-                  ))}
-                </FilterChipRow>
-              </YStack>
             </Card>
 
             {/* Filtro OPCIONAL por categoría y/o sexo (R4.1). Default = todos (sin filtro). */}

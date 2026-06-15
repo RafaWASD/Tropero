@@ -131,8 +131,8 @@ export async function applyBulkVaccination(
     candidates,
     params,
     existing.value,
-    (id, profileId, productName, route, eventDate) =>
-      toPlanned(buildAddVaccinationInsert(id, profileId, productName, route, eventDate)),
+    (id, profileId, productName, eventDate) =>
+      toPlanned(buildAddVaccinationInsert(id, profileId, productName, eventDate)),
     options.batchSize ?? DEFAULT_BATCH_SIZE,
   );
   return drainPlan(plan, options);

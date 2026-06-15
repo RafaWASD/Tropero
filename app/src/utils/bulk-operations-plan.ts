@@ -57,12 +57,10 @@ export type BulkPlan = {
   batches: number[][];
 };
 
-/** Parámetros de la VACUNACIÓN masiva (la pre-config — R3.1). */
+/** Parámetros de la VACUNACIÓN masiva (la pre-config — R3.1). La VÍA se eliminó: el producto la implica. */
 export type VaccinationParams = {
   /** product_name de la pre-config (NOT NULL en el INSERT). */
   productName: string;
-  /** route opcional (vía de aplicación). null si no se eligió. */
-  route?: string | null;
   /** Fecha 'YYYY-MM-DD' del evento (= la fecha de la clave idempotente, NO el timestamp de aplicación). */
   eventDate: string;
 };
@@ -94,7 +92,7 @@ export function planVaccination(
   candidates: readonly GroupProfile[],
   params: VaccinationParams,
   existingEventIds: ReadonlySet<string>,
-  buildVaccination: (id: string, profileId: string, productName: string, route: string | null, eventDate: string) => PlannedStatement,
+  buildVaccination: (id: string, profileId: string, productName: string, eventDate: string) => PlannedStatement,
   batchSize: number = DEFAULT_BATCH_SIZE,
 ): BulkPlan {
   return planEventOperation(
@@ -102,8 +100,7 @@ export function planVaccination(
     'vaccination',
     params.eventDate,
     existingEventIds,
-    (id, profileId) =>
-      buildVaccination(id, profileId, params.productName, params.route ?? null, params.eventDate),
+    (id, profileId) => buildVaccination(id, profileId, params.productName, params.eventDate),
     batchSize,
   );
 }

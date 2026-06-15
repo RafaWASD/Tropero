@@ -1295,23 +1295,24 @@ export function buildAddObservationInsert(
 /**
  * INSERT local de una VACUNACIÓN masiva en sanitary_events (R3.1). `event_type='vaccination'`,
  * `campaign_id` NULL (sanitary_campaigns NO existe as-built — design §2.2). `id` determinístico (UUIDv5,
- * R6.1) lo pasa el service. `product_name`/`route` de la pre-config. `established_id`/`created_by`/
- * `created_at`/`source` los pone el trigger/default al SUBIR (NO se mandan, igual que events.add*). El
- * gating capa 2 (`vacunacion` enabled, fail-closed) lo re-valida `tg_sanitary_events_gating` al subir.
+ * R6.1) lo pasa el service. `product_name` de la pre-config. La VÍA se eliminó (decisión de producto
+ * 2026-06-15: el producto la implica): el INSERT OMITE la columna `route` → queda NULL por default (la
+ * columna sigue en la DB, dormida — no se dropeó). `established_id`/`created_by`/`created_at`/`source`
+ * los pone el trigger/default al SUBIR (NO se mandan, igual que events.add*). El gating capa 2
+ * (`vacunacion` enabled, fail-closed) lo re-valida `tg_sanitary_events_gating` al subir.
  */
 export function buildAddVaccinationInsert(
   id: string,
   profileId: string,
   productName: string,
-  route: string | null,
   eventDate: string,
 ): LocalQuery {
   return {
     sql:
       'INSERT INTO sanitary_events ' +
-      '(id, animal_profile_id, event_type, product_name, route, event_date) ' +
-      "VALUES (?, ?, 'vaccination', ?, ?, ?)",
-    args: [id, profileId, productName, route, eventDate],
+      '(id, animal_profile_id, event_type, product_name, event_date) ' +
+      "VALUES (?, ?, 'vaccination', ?, ?)",
+    args: [id, profileId, productName, eventDate],
   };
 }
 

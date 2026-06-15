@@ -6,8 +6,9 @@
 // activos sembrados.
 //
 // Flujo (modelo Gate 0 ORIGINAL — filtro + preview, NO selección por checkbox):
-//   home → card del rodeo → vista de grupo → "Vacunar" → tipear un producto → seleccionar una vía por chip
-//   → preview "N eventos sobre M animales" (R4.2) → confirmar → N eventos encolados (R3.1) → Listo.
+//   home → card del rodeo → vista de grupo → "Vacunar" → tipear un producto (la VÍA se eliminó —
+//   decisión de producto 2026-06-15: el producto la implica) → preview "N eventos sobre M animales"
+//   (R4.2) → confirmar → N eventos encolados (R3.1) → Listo.
 //   RE-EJECUTAR la misma vacunación (mismo producto, misma fecha) → preview = 0 nuevos: TODOS saltados por
 //   idempotencia (R6.3 / already_applied) → el CTA queda deshabilitado.
 //
@@ -31,7 +32,7 @@ test.afterAll(async () => {
   await cleanupAll();
 });
 
-test('vacunación masiva: producto + vía → preview N/M → confirmar → N eventos → re-ejecutar = 0 nuevos (skip)', async ({
+test('vacunación masiva: producto → preview N/M → confirmar → N eventos → re-ejecutar = 0 nuevos (skip)', async ({
   page,
 }) => {
   const user = await createTestUser('vacunacion');
@@ -58,15 +59,9 @@ test('vacunación masiva: producto + vía → preview N/M → confirmar → N ev
   const productInput = page.getByLabel('Producto', { exact: true });
   await expect(productInput).toBeVisible({ timeout: 30_000 });
 
-  // Tipear el producto (obligatorio).
+  // Tipear el producto (obligatorio). La VÍA se eliminó (decisión de producto 2026-06-15: el producto
+  // la implica) → la pre-config es SOLO producto, no hay selector de vía.
   await productInput.fill('Mancha-gangrena');
-
-  // Seleccionar una VÍA por chip (opcional → enum sanitary_route; "Subcutánea" es un valor del enum).
-  // El chip es role="button" con su label; al tocarlo queda seleccionado (aria-pressed).
-  const subcutaneousChip = page.getByRole('button', { name: 'Subcutánea', exact: true });
-  await expect(subcutaneousChip).toBeVisible();
-  await subcutaneousChip.click();
-  await expect(subcutaneousChip).toHaveAttribute('aria-pressed', 'true');
 
   // ── Preview obligatorio (R4.2): "3 eventos sobre 3 animales". El preview baja con los animales sync. ──
   await expect(page.getByText('3 eventos sobre 3 animales', { exact: true })).toBeVisible({

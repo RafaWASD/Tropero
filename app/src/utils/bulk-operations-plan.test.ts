@@ -38,9 +38,10 @@ function profile(id: string, over: Partial<GroupProfile> = {}): GroupProfile {
 }
 
 // Builders inyectados (mismos shapes que los reales de local-reads, pero deterministas en el test).
-const vaccBuilder = (id: string, profileId: string, productName: string, route: string | null, eventDate: string) => ({
+// La VÍA se eliminó del path de vacunación (decisión de producto 2026-06-15): el builder ya no recibe route.
+const vaccBuilder = (id: string, profileId: string, productName: string, eventDate: string) => ({
   sql: 'INSERT INTO sanitary_events ... VALUES (?, ?, ...)',
-  args: [id, profileId, productName, route, eventDate],
+  args: [id, profileId, productName, eventDate],
 });
 const weanBuilder = (id: string, profileId: string, eventDate: string, createdAt: string) => ({
   sql: 'INSERT INTO reproductive_events ... weaning',
@@ -61,7 +62,7 @@ test('R3.1/R6.1: vacunación = 1 INSERT por animal con id UUIDv5 determinístico
   const candidates = [profile('p-1'), profile('p-2', { categoryCode: 'vaca' })];
   const plan = planVaccination(
     candidates,
-    { productName: 'Aftosa', route: 'subcutánea', eventDate: '2026-06-11' },
+    { productName: 'Aftosa', eventDate: '2026-06-11' },
     new Set(),
     vaccBuilder,
   );
@@ -71,7 +72,8 @@ test('R3.1/R6.1: vacunación = 1 INSERT por animal con id UUIDv5 determinístico
   const expectedId = bulkEventId({ animalProfileId: 'p-1', type: 'vaccination', date: '2026-06-11' });
   assert.equal(plan.mutations[0].statements[0].args[0], expectedId);
   assert.equal(plan.mutations[0].statements[0].args[2], 'Aftosa');
-  assert.equal(plan.mutations[0].statements[0].args[3], 'subcutánea');
+  // La VÍA se eliminó: el builder ya no recibe route → el último arg es eventDate (NO 'subcutánea').
+  assert.equal(plan.mutations[0].statements[0].args[3], '2026-06-11');
 });
 
 test('R6.3: re-ejecutar la MISMA vacunación (ids ya presentes) ⇒ 0 mutaciones nuevas', () => {
