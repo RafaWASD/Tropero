@@ -170,3 +170,64 @@ test('el sheet de "Guardar como rutina" NO se auto-cierra al abrirlo con un tap 
     await ctx.close();
   }
 });
+
+test('el sheet de confirmación de "Nueva jornada" (M4) NO se auto-cierra al abrirlo con un tap táctil (mismo race)', async ({
+  browser,
+}) => {
+  // MISMA clase de bug (M4, R10.6): el NuevaJornadaConfirmSheet se abre con el onPress del CTA "Nueva
+  // jornada" cuando hay una jornada abierta; en web táctil el click emulado del touch cae sobre el scrim
+  // recién montado y lo cerraría a ~1ms si no fuera por el guard readyToDismissRef (doble rAF).
+  const ctx = await browser.newContext({
+    hasTouch: true,
+    isMobile: true,
+    viewport: { width: 412, height: 915 },
+  });
+  const page = await ctx.newPage();
+  await applyEnvShim(page);
+  // Bastón mock (igual que los specs de identify): la jornada se arranca y aterriza en la identificación.
+  await page.addInitScript(() => {
+    (window as unknown as Record<string, unknown>).__RAFAQ_BLE_E2E__ = true;
+  });
+
+  try {
+    const user = await createTestUser('nueva-jornada-race');
+    await setUserPhone(user.id, '1123456789');
+    await seedEstablishmentWithRodeo(user.id, 'Campo Nueva Jornada Race');
+
+    await page.goto('/');
+    await signIn(page, user);
+    await waitForHome(page);
+
+    // Arrancamos una jornada de verdad → queda ABIERTA (local) → el landing ofrecerá retomar/confirmar.
+    await page.goto('/maniobra/jornada');
+    await expect(page.getByText('Elegí el rodeo', { exact: true })).toBeVisible({ timeout: 30_000 });
+    await page.getByRole('button', { name: /Elegir rodeo / }).first().click();
+    await expect(page.getByTestId('maneuver-reorder-list')).toBeVisible({ timeout: 20_000 });
+    await page.getByTestId('pool-row-pesaje').click();
+    await expect(page.getByTestId('selected-row-0')).toBeVisible();
+    await page.getByRole('button', { name: /^Continuar/ }).click();
+    await page.getByRole('button', { name: 'Arrancar jornada', exact: true }).click();
+    await expect(page.getByText('Conectá el bastón', { exact: true })).toBeVisible({ timeout: 20_000 });
+
+    // Volvemos al landing → esperamos a que se ofrezca retomar (señal de que getActiveSession resolvió).
+    await page.goto('/maniobra');
+    await expect(page.getByText('Retomar la jornada de hoy', { exact: true })).toBeVisible({ timeout: 20_000 });
+
+    // ── CASO 1: ABRIR con TAP TÁCTIL "Nueva jornada" → el sheet de confirmación QUEDA abierto ──
+    await touchTapButton(page, 'Nueva jornada');
+    await expect(page.getByTestId('nueva-jornada-sheet')).toBeVisible({ timeout: 10_000 });
+    await page.waitForTimeout(500); // > la ventana del click huérfano + el doble rAF
+    await expect(page.getByTestId('nueva-jornada-sheet')).toBeVisible();
+    await expect(page.getByText('Ya tenés una jornada abierta', { exact: true })).toBeVisible();
+
+    // ── CASO 2: el BACKDROP DELIBERADO SÍ cierra (no rompimos la salida por backdrop) ──
+    const box = await page.getByTestId('nueva-jornada-scrim').boundingBox();
+    if (!box) throw new Error('sin boundingBox para el scrim');
+    await page.touchscreen.tap(box.x + box.width / 2, box.y + 12); // bien arriba, sobre el scrim libre
+    await expect(page.getByTestId('nueva-jornada-sheet')).toHaveCount(0, { timeout: 10_000 });
+    // Cerramos por backdrop (no Empezar ni Retomar) → seguimos en el landing (no se cerró la abierta, no se navegó).
+    await expect(page.getByText('Retomar la jornada de hoy', { exact: true })).toBeVisible();
+  } finally {
+    await ctx.close();
+  }
+});

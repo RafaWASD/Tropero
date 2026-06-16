@@ -339,11 +339,11 @@ Archivos: `app/app/maniobra/carga.tsx` (preview transición), `app/src/utils/eve
 
 ### M4 — Offline / reanudación / surfacing
 
-#### [ ] M4.1 — `ManeuverSessionContext` + reanudación
-Satisface: R8.4, R10.5, R10.6.
-Detalle: `app/src/contexts/ManeuverSessionContext.tsx` — estado de la sesión activa (1 por dispositivo, R10.6); persistencia local del progreso del wizard (secure-store / SQLite); al abrir la app detecta la sesión `active` del dispositivo (lectura local) y ofrece retomar desde el último animal/maniobra (R10.5). Una segunda sesión activa ofrece retomar/cerrar la actual.
-Aceptación: component-tests: una sola sesión activa; reanudación tras "cierre" simulado retoma; intentar 2da sesión ofrece retomar/cerrar.
-Archivos: `app/src/contexts/ManeuverSessionContext.tsx`.
+#### [~] M4.1 — Reanudación en el landing (R10.5/R10.6 DONE; R8.4 pendiente)
+Satisface: R10.5, R10.6 **(as-built M4-reanudación, 2026-06-16)** · R8.4 **(pendiente)**.
+> **As-built (2026-06-16) — reconciliado a un patrón MÁS SIMPLE que el `ManeuverSessionContext` planeado.** NO se construyó un `ManeuverSessionContext` nuevo: la reanudación se resuelve en el **landing** (`app/app/maniobra.tsx`) reusando los servicios que YA existían (M1): `getActiveSession(establishmentId)` (lectura LOCAL offline) en el `useFocusEffect` + `closeSession`. Una sesión `active` del dispositivo → **tarjeta "Retomar la jornada de hoy"** (rodeo via RodeoContext + maniobras + N animales + fecha si no es hoy) → tap → `/maniobra/identificar?sessionId` (R10.5). "Nueva jornada" con una abierta → **`NuevaJornadaConfirmSheet`** (cerrar la abierta + empezar una nueva, fail-closed / retomar la abierta / cancelar) — "una sola sesión activa por dispositivo" con guard de carrera (R10.6). Lógica pura en `app/src/utils/maniobra-resume.ts` (+test). Ver `design.md` §6.bis.11 + notas as-built bajo R10.5/R10.6. **R8.4 (preview de transición de categoría offline) NO entra en este chunk** — queda como tarea pendiente (el frame de carga ya persiste eventos; la preview es un add-on de la ficha/resumen).
+Aceptación (cubierta): e2e `maniobra-reanudar.spec.ts` 4/4 (abierta→tarjeta retoma→identificar; "Nueva jornada"+abierta→sheet→"Empezar una nueva"→closeSession [oráculo server]+wizard; sin abierta→directo; sheet→"Retomar la abierta"→identificar) + regresión tap-through en `maniobra-config-sheet-race.spec.ts` + unit `maniobra-resume.test.ts`.
+Archivos: `app/app/maniobra.tsx`, `app/app/maniobra/_components/NuevaJornadaConfirmSheet.tsx`, `app/src/utils/maniobra-resume.ts` (+`.test.ts`), `app/e2e/maniobra-reanudar.spec.ts`, `app/e2e/captures/maniobra-reanudar.capture.ts`.
 
 #### [ ] M4.2 — Offline (PowerSync) + surfacing de rechazos + cierre
 Satisface: R10.1, R10.2, R10.3, R10.7, R10.8, R12.1.
