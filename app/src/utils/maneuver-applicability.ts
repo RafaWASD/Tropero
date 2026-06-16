@@ -1,0 +1,127 @@
+// Lógica PURA de APLICABILIDAD per-animal de una maniobra (spec 03 M3.1). Sin RN, sin red, sin SDK:
+// testeable con node:test (mismo patrón que maneuver-gating.ts).
+//
+// Distinta de `maneuver-gating.ts` (que decide qué maniobras aplican según el RODEO real del animal,
+// R5.5). Este módulo decide la aplicabilidad por ATRIBUTOS del propio animal (sexo, categoría):
+//   - R6.12: el RASPADO de toros es solo para machos → se SALTA en una hembra (aunque el rodeo lo habilite).
+//   - R6.2/R6.3: el TACTO de preñez y el TACTO de aptitud (vaquillonas) son solo para HEMBRAS → se SALTAN en
+//     un macho (un toro no se tacta), aunque el rodeo habilite `prenez`/`tacto_vaquillona`.
+//   - R6.9/R6.10: `pesaje` (peso de adulto/recría) y `pesaje_ternero` (peso de cría al pie) son
+//     MUTUAMENTE EXCLUYENTES por CATEGORÍA — ambos mapean al mismo data_key `peso` (maneuver-gating), así que
+//     SIN este filtro un animal pasaría por los DOS pasos de peso (el doble pesaje que reportó Raf). Un
+//     ternero/ternera → solo `pesaje_ternero`; cualquier otra categoría (incl. desconocida) → solo `pesaje`.
+//   - R6.8: el prompt CUT (transición por dientes) NO se ofrece para TERNEROS.
+//
+// Son predicados PUROS para que M3.2 los use al secuenciar (saltar la maniobra / no mostrar el prompt). El
+// orquestador (`maneuver-events.ts`) NO debe escribir un raspado de una hembra ni un CUT de un ternero —
+// estos predicados son la barrera de cliente; el gating server-side cubre el rodeo, no el sexo/categoría.
+
+import type { ManeuverKind } from './maneuver-gating';
+
+export type AnimalSex = 'male' | 'female';
+
+/** El subset de atributos del animal que la aplicabilidad per-animal necesita (lo lee el caller del SQLite). */
+export type AnimalApplicabilityInfo = {
+  /** Sexo del animal ('male' | 'female' | null si desconocido). Lo lee el caller de animal_profiles. */
+  sex: AnimalSex | null;
+  /**
+   * `code` de la categoría ACTUAL del animal (ternero/ternera/vaquillona/…). Para el gate del prompt CUT
+   * (R6.8: no para terneros). null si no se pudo resolver (fail-safe → se trata como NO-ternero salvo que
+   * el caller decida otra cosa; ver shouldOfferCutPrompt).
+   */
+  categoryCode: string | null;
+};
+
+// ─── Aplicabilidad per-animal por sexo/categoría (R6.12 raspado / R6.2-R6.3 tactos / R6.9-R6.10 pesaje) ───
+
+/**
+ * Los `code` de categoría de TERNERO/TERNERA (cría al pie). Usado por:
+ *   - el prompt CUT, que NO aplica a estos (R6.8);
+ *   - el split de pesaje: un ternero/ternera se pesa con `pesaje_ternero`, no con `pesaje` (R6.9/R6.10).
+ */
+const CALF_CATEGORY_CODES: ReadonlySet<string> = new Set(['ternero', 'ternera']);
+
+/**
+ * ¿La maniobra APLICA a ESTE animal por sus atributos (sexo/categoría)? (per-animal, ortogonal al gating por
+ * rodeo de maneuver-gating.ts). Las celdas validadas hoy (el resto de maniobras → `return true`; las demás
+ * exclusiones por categoría quedan PENDIENTES de validar con Facundo):
+ *
+ *   - `raspado` (R6.12): solo MACHOS → una HEMBRA lo SALTA. Sexo desconocido (`null`) → se SALTA (fail-safe:
+ *     no se escribe un raspado de campylo/trico sobre un animal cuyo sexo no se pudo confirmar; el operario
+ *     corrige el sexo y vuelve a pasarlo).
+ *   - `tacto` (R6.2, preñez) y `tacto_vaquillona` (R6.3, aptitud): solo HEMBRAS → un MACHO los SALTA (un toro
+ *     no se tacta). Sexo desconocido (`null`) → se SALTA (fail-safe: no se tacta un animal sin sexo confirmado).
+ *   - `pesaje` (R6.9) vs `pesaje_ternero` (R6.10): MUTUAMENTE EXCLUYENTES por categoría — ambos usan el data_key
+ *     `peso`, así que sin este split el animal pasaría por los DOS pasos de peso (el doble pesaje de Raf).
+ *       · `pesaje_ternero` aplica SSI `categoryCode ∈ CALF_CATEGORY_CODES` (ternero/ternera).
+ *       · `pesaje` aplica SSI `categoryCode ∉ CALF_CATEGORY_CODES` — INCLUYE el caso `categoryCode == null`
+ *         (categoría desconocida): se pesa como adulto (peso genérico) y NO como ternero (fail-safe — no se
+ *         pesa-como-ternero un animal de categoría que no se pudo resolver).
+ *
+ * NO bloquea la fila: una maniobra saltada por atributo simplemente se omite; las demás corren.
+ */
+export function appliesToAnimal(maneuver: ManeuverKind, animal: AnimalApplicabilityInfo): boolean {
+  switch (maneuver) {
+    case 'raspado':
+      // Raspado de toros: solo machos (R6.12). Sexo null → se salta (fail-safe).
+      return animal.sex === 'male';
+    case 'tacto':
+    case 'tacto_vaquillona':
+      // Tacto de preñez / de aptitud: solo hembras (R6.2/R6.3). Sexo null → se salta (fail-safe).
+      return animal.sex === 'female';
+    case 'pesaje_ternero':
+      // Peso de cría al pie: solo terneros/terneras (R6.10). Categoría desconocida → NO es ternero → se salta.
+      return animal.categoryCode != null && CALF_CATEGORY_CODES.has(animal.categoryCode);
+    case 'pesaje':
+      // Peso de adulto/recría: cualquier categoría que NO sea ternero/ternera (R6.9). null → aplica (genérico).
+      return !(animal.categoryCode != null && CALF_CATEGORY_CODES.has(animal.categoryCode));
+    default:
+      return true;
+  }
+}
+
+/**
+ * Filtra una lista de maniobras (las que ya pasaron el gating por rodeo, `applicable`) a SOLO las que
+ * aplican a ESTE animal por sus atributos (R6.12). Preserva el orden. Devuelve también las SALTADAS por
+ * atributo (p. ej. raspado en una hembra) para que la UI pueda informar por qué se omitió, si quiere.
+ */
+export function filterByAnimalApplicability(
+  maneuvers: readonly ManeuverKind[],
+  animal: AnimalApplicabilityInfo,
+): { applicable: ManeuverKind[]; skipped: ManeuverKind[] } {
+  const applicable: ManeuverKind[] = [];
+  const skipped: ManeuverKind[] = [];
+  for (const m of maneuvers) {
+    if (appliesToAnimal(m, animal)) applicable.push(m);
+    else skipped.push(m);
+  }
+  return { applicable, skipped };
+}
+
+// ─── R6.8 — Prompt CUT: no para terneros ───────────────────────────────────────────────────────
+
+/**
+ * Los estados dentarios que disparan el prompt CUT (R6.8): 1/2, 1/4, sin_dientes. NO 3/4. Exportado para
+ * que el paso de DIENTES (M3.2a, teeth-options.ts) marque visualmente cuáles son "boca de descarte" sin
+ * re-definir el set (única fuente de verdad del umbral CUT). El umbral exacto (incluir 3/4) queda a
+ * validar con Facundo (R6.8); hoy = los 3.
+ */
+export const CUT_PROMPT_TEETH: ReadonlySet<string> = new Set(['1/2', '1/4', 'sin_dientes']);
+
+/**
+ * ¿Se debe OFRECER el prompt CUT (transición a CUT) tras cargar este estado dentario? (R6.8). Condiciones:
+ *   - el `teethState` cargado ∈ {1/2, 1/4, sin_dientes} (boca gastada → candidato a "corte/CUT");
+ *   - el animal NO es un TERNERO/TERNERA (R6.8: "no deberá mostrar el prompt CUT para terneros").
+ *
+ * Es un predicado PURO: M3.2 lo usa para decidir si, después del paso de dientes, muestra el prompt CUT. Un
+ * `categoryCode` null (irresoluble) se trata como NO-ternero (fail-OPEN del prompt) — el peor caso es ofrecer
+ * el prompt a un animal cuya categoría no se pudo leer; el operario decide (no se aplica CUT sin su
+ * confirmación). El umbral exacto de estados (incluir 3/4) queda a validar con Facundo (R6.8); hoy = los 3.
+ */
+export function shouldOfferCutPrompt(teethState: string, animal: AnimalApplicabilityInfo): boolean {
+  if (!CUT_PROMPT_TEETH.has(teethState)) return false;
+  // No para terneros (R6.8). categoryCode null → NO es ternero conocido → se permite el prompt (el operario
+  // confirma; no se aplica CUT solo).
+  if (animal.categoryCode != null && CALF_CATEGORY_CODES.has(animal.categoryCode)) return false;
+  return true;
+}
