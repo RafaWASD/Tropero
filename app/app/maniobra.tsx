@@ -14,9 +14,11 @@
 //     (NuevaJornadaConfirmSheet): empezar una nueva CIERRA la abierta (con aviso) o retomar la abierta. SIN
 //     jornada abierta → va DIRECTO al wizard (como siempre). Decisión de Raf: una sola jornada activa.
 //
-// Servicios consumidos (M1-SERVICIOS, NO se tocan): fetchPresets + getActiveSession + closeSession (lectura/
-// escritura LOCAL offline). El establishment activo SIEMPRE del contexto (NUNCA hardcodeado, CLAUDE.md
-// ppio 6). El nombre del rodeo de la sesión se resuelve via RodeoContext (mismo patrón que identificar.tsx).
+// Servicios consumidos (M1-SERVICIOS): fetchPresets + getActiveSession (lectura LOCAL offline). El cierre de
+// la jornada abierta al "Empezar una nueva" NO se hace acá: lo hace `createSession` al arrancar la jornada
+// nueva en el wizard (cierra TODAS las activas del establishment ANTES de insertar → invariante ≤1 activa,
+// R10.6). El establishment activo SIEMPRE del contexto (NUNCA hardcodeado, CLAUDE.md ppio 6). El nombre del
+// rodeo de la sesión se resuelve via RodeoContext (mismo patrón que identificar.tsx).
 //
 // 🟡 mixto: targets grandes + CTA primario en zona del pulgar, pero permite la densidad de la lista de
 // presets. RECORTE DE DESCENDENTES (memoria): headings ≥$6 y Text con numberOfLines llevan lineHeight
@@ -32,7 +34,7 @@ import { ChevronRight, History, Sparkles, X, Zap } from 'lucide-react-native';
 import { Button, Card, InfoNote } from '@/components';
 import { useEstablishment, useRodeo } from '@/contexts';
 import { fetchPresets, type ManeuverPreset } from '@/services/maneuver-presets';
-import { getActiveSession, closeSession, type Session } from '@/services/sessions';
+import { getActiveSession, type Session } from '@/services/sessions';
 import { extractManeuvers } from '@/utils/maneuver-config';
 import { maneuverLabel } from '@/utils/maneuver-wizard';
 import {
@@ -115,18 +117,18 @@ export default function ManiobraInicioScreen() {
     router.push('/maniobra/jornada');
   }, [loading, openSession, router]);
 
-  // "Empezar una nueva" desde el sheet: cierra la abierta (R10.7) y, AL OK, va al wizard. Fail-closed: si
-  // closeSession falla, devolvemos false → el sheet superficia el error y NO se navega (no dejamos dos
-  // sesiones a medio cerrar).
+  // "Empezar una nueva" desde el sheet: va al wizard. NO cierra la abierta acá — el cierre lo hace
+  // `createSession` al ARRANCAR la jornada nueva en el wizard, que cierra TODAS las activas del
+  // establishment ANTES de insertar (invariante ≤1 activa, R10.6). Un solo camino de cierre → sin
+  // doble-close. La abierta queda `active` mientras el operario configura la nueva (si abandona el wizard
+  // sin arrancar, sigue siendo la única activa y el landing la vuelve a ofrecer retomar — coherente). El
+  // copy del sheet ("…esa queda cerrada") vale: al crear la nueva, la vieja queda cerrada. Devuelve true
+  // (no hay write acá que pueda fallar; el fail-closed real es del createSession en el wizard).
   const onConfirmStartNew = useCallback(async (): Promise<boolean> => {
-    if (!openSession) return true;
-    const res = await closeSession(openSession.id);
-    if (!res.ok) return false;
     setShowNuevaConfirm(false);
-    setOpenSession(null);
     router.push('/maniobra/jornada');
     return true;
-  }, [openSession, router]);
+  }, [router]);
 
   const onConfirmResume = useCallback(() => {
     if (!openSession) return;

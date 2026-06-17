@@ -255,6 +255,86 @@ export async function seedManeuverPreset(
 }
 
 /**
+ * Siembra una SESIÓN de maniobra ACTIVA (status='active') directamente en el server, vía service_role —
+ * para reproducir el estado del bug de R10.6 (sesiones `active` huérfanas ACUMULADAS que un arranque
+ * previo sin cierre + "Salir sin terminar" dejaban). El cliente NUNCA puede acumular esto post-fix (cada
+ * createSession cierra las activas antes de insertar), así que el seed server-side es la única forma de
+ * partir de N>1 activas. Se borra por CASCADE del establishment. Devuelve el session id.
+ *
+ * `started_at` explícito (default un instante fijo) para un orden determinístico de la "más reciente".
+ */
+export async function seedActiveSession(
+  establishmentId: string,
+  rodeoId: string,
+  opts: { config?: Record<string, unknown>; startedAt?: string } = {},
+): Promise<string> {
+  const { data, error } = await admin
+    .from('sessions')
+    .insert({
+      establishment_id: establishmentId,
+      rodeo_id: rodeoId,
+      config: opts.config ?? { maniobras: ['pesaje'] },
+      status: 'active',
+      animal_count: 0,
+      event_count: 0,
+      started_at: opts.startedAt ?? '2026-06-16T08:00:00Z',
+    })
+    .select('id')
+    .single();
+  if (error) throw new Error(`seedActiveSession insert: ${error.message}`);
+  return data.id as string;
+}
+
+/**
+ * Lee los ids de TODAS las sesiones ACTIVAS (status='active', no borradas) de un establishment, vía
+ * service_role. Para asertar el invariante R10.6 (≤1 activa) sin pollear. Orden por started_at DESC.
+ */
+export async function readServerActiveSessionIds(establishmentId: string): Promise<string[]> {
+  const { data, error } = await admin
+    .from('sessions')
+    .select('id')
+    .eq('establishment_id', establishmentId)
+    .eq('status', 'active')
+    .is('deleted_at', null)
+    .order('started_at', { ascending: false });
+  if (error) throw new Error(`readServerActiveSessionIds: ${error.message}`);
+  return (data ?? []).map((r) => r.id as string);
+}
+
+/**
+ * ORÁCULO SERVER del invariante R10.6: pollea hasta que la cantidad de sesiones ACTIVAS del establishment
+ * sea EXACTAMENTE `expected` (no solo "al menos una"). Lo usa el e2e de ≤1-activa: tras arrancar una jornada
+ * nueva con N activas pre-existentes, el close-all de createSession + el INSERT suben por la upload queue →
+ * el server debe converger a 1 activa (la nueva). Lanza si nunca converge.
+ */
+export async function waitForServerActiveSessionCount(
+  establishmentId: string,
+  expected: number,
+  opts: { tries?: number; delayMs?: number } = {},
+): Promise<void> {
+  const tries = opts.tries ?? 30;
+  const delayMs = opts.delayMs ?? 2000;
+  let last = -1;
+  for (let i = 0; i < tries; i++) {
+    const { count, error } = await admin
+      .from('sessions')
+      .select('id', { count: 'exact', head: true })
+      .eq('establishment_id', establishmentId)
+      .eq('status', 'active')
+      .is('deleted_at', null);
+    if (error) throw new Error(`waitForServerActiveSessionCount: ${error.message}`);
+    last = count ?? 0;
+    if (last === expected) return;
+    await new Promise((r) => setTimeout(r, delayMs));
+  }
+  throw new Error(
+    `waitForServerActiveSessionCount(${establishmentId}): la cantidad de sesiones activas NUNCA llegó a ` +
+      `${expected} (${tries} intentos; última vista: ${last}). El enforcement ≤1 activa (R10.6, createSession ` +
+      `→ closeActiveSessions) no sincronizó, o no cerró todas las activas.`,
+  );
+}
+
+/**
  * Normaliza el `config` de un session/preset materializado en el server al objeto que la APP lee. El
  * cliente persiste `config` como `JSON.stringify(config)` (CRUD-plano sobre la columna jsonb) → al subir,
  * PostgREST guarda ese STRING como un VALOR string JSON dentro del jsonb (no como objeto). Por eso la app

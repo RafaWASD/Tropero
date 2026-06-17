@@ -132,6 +132,56 @@ test('buildCloseSessionUpdate: pasa a closed + setea ended_at; ignora una sesió
   assert.equal(s2.ended_at, null);
 });
 
+// ─── sessions: closeActiveSessions (R10.6 — enforzar ≤1 activa por establishment) ──────
+
+import { buildCloseActiveSessionsUpdate } from './local-reads';
+
+test('buildCloseActiveSessionsUpdate: cierra TODAS las activas del establishment (no solo la más reciente)', () => {
+  const db = freshDb();
+  // 3 activas del MISMO establishment (las huérfanas acumuladas que el bug deja).
+  insSession(db, 's1', 'est-A', 'rod-1');
+  insSession(db, 's2', 'est-A', 'rod-1');
+  insSession(db, 's3', 'est-A', 'rod-2');
+
+  run(db, buildCloseActiveSessionsUpdate('est-A', '2026-06-16T12:00:00Z'));
+
+  const rows = all<{ id: string; status: string; ended_at: string | null }>(db, {
+    sql: 'SELECT id, status, ended_at FROM sessions ORDER BY id',
+    args: [],
+  });
+  for (const r of rows) {
+    assert.equal(r.status, 'closed', `sesión ${r.id} debería quedar closed`);
+    assert.equal(r.ended_at, '2026-06-16T12:00:00Z');
+  }
+});
+
+test('buildCloseActiveSessionsUpdate: NO toca otros establishments, ni sesiones cerradas, ni soft-deleted', () => {
+  const db = freshDb();
+  insSession(db, 's1', 'est-A', 'rod-1'); // activa de A → se cierra
+  insSession(db, 's2', 'est-B', 'rod-1'); // activa de OTRO establishment → intacta (multi-tenant)
+  insSession(db, 's3', 'est-A', 'rod-1'); // ya cerrada → no se re-toca (conserva su ended_at original)
+  db.prepare("UPDATE sessions SET status = 'closed', ended_at = '2026-01-01' WHERE id = 's3'").run();
+  insSession(db, 's4', 'est-A', 'rod-1'); // activa pero soft-deleted → intacta
+  db.prepare("UPDATE sessions SET deleted_at = '2026-01-01' WHERE id = 's4'").run();
+
+  run(db, buildCloseActiveSessionsUpdate('est-A', '2026-06-16T12:00:00Z'));
+
+  const byId = (id: string) =>
+    all<{ status: string; ended_at: string | null }>(db, {
+      sql: 'SELECT status, ended_at FROM sessions WHERE id = ?',
+      args: [id],
+    })[0];
+
+  assert.equal(byId('s1').status, 'closed'); // activa de A → cerrada
+  assert.equal(byId('s1').ended_at, '2026-06-16T12:00:00Z');
+  assert.equal(byId('s2').status, 'active'); // otro establishment → intacta
+  assert.equal(byId('s2').ended_at, null);
+  assert.equal(byId('s3').status, 'closed'); // ya cerrada → su ended_at NO se pisa
+  assert.equal(byId('s3').ended_at, '2026-01-01');
+  assert.equal(byId('s4').status, 'active'); // soft-deleted → el UPDATE la filtra
+  assert.equal(byId('s4').ended_at, null);
+});
+
 // ─── sessions: work_lot_label + counters ──────────────────────────────────────────────
 
 test('buildSetWorkLotLabelUpdate: setea y limpia (null) el label informativo', () => {

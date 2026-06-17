@@ -7,10 +7,11 @@
 //
 // Contexto arriba (decisión informada, Nielsen #1): "Tenés la jornada de [rodeo] abierta con N animales.
 // Si empezás una nueva, esa queda cerrada." Tres acciones, una columna, targets manga ≥56:
-//   1) EMPEZAR UNA NUEVA (primaria, verde botella $primary) → closeSession(openSessionId) (R10.7, cierra la
-//      abierta) y, AL OK, navega al wizard (onStartNew). Si closeSession devuelve ok:false → NO navega: se
-//      superficia un error accionable es-AR y se deja reintentar (FAIL-CLOSED — no empezamos una nueva
-//      dejando la vieja "a medio cerrar"). Mismo espíritu que ExitJornadaSheet.handleTerminar.
+//   1) EMPEZAR UNA NUEVA (primaria, verde botella $primary) → onStartNew, que NAVEGA al wizard. Este sheet
+//      NO cierra la abierta: el cierre de TODAS las jornadas activas del establishment lo hace
+//      `createSession` al ARRANCAR la nueva en el wizard (un solo camino de cierre → invariante ≤1 activa,
+//      R10.6/R10.7; ver design §6.bis.12). El copy "…esa queda cerrada" sigue valiendo: al crear la nueva,
+//      la vieja queda cerrada. onStartNew no hace I/O y no puede fallar → no hay fail-closed acá.
 //   2) RETOMAR LA ABIERTA (secundaria, outline) → onResume → va a la identificación de la sesión abierta
 //      (no cierra nada). Es el camino esperado la mayoría de las veces (el operario olvidó que la tenía).
 //   3) CANCELAR (terciario / texto) / tap en el scrim → cierra el sheet, no hace nada.
@@ -30,13 +31,13 @@
 // RECORTE DE DESCENDENTES (regla dura): título ("Empezar una jornada nueva" trae j/p/g) y todo Text con
 // numberOfLines llevan lineHeight matching. Cero hardcode (ADR-023 §4): tokens; es-AR voseo. Targets ≥$touchMin.
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { Platform, Pressable } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getTokenValue, Text, View, YStack } from 'tamagui';
 
 import { Button } from '@/components';
-import { buttonA11y, labelA11y } from '@/utils/a11y';
+import { buttonA11y } from '@/utils/a11y';
 
 export type NuevaJornadaConfirmSheetProps = {
   /** Nombre del rodeo de la jornada abierta (resuelto por el caller via RodeoContext). '' si no resuelve. */
@@ -44,10 +45,10 @@ export type NuevaJornadaConfirmSheetProps = {
   /** Cantidad de animales procesados en la jornada abierta (N) — contexto de la decisión. */
   animalCount: number;
   /**
-   * Cerrar la jornada abierta (R10.7) y empezar una nueva. Devuelve true al OK (→ el caller navega al
-   * wizard), false al fallo (→ NO se navega, se superficia el error y se deja reintentar — fail-closed). El
-   * caller envuelve closeSession(openSessionId) seguido de la navegación al wizard. */
-  onStartNew: () => Promise<boolean>;
+   * Empezar una jornada nueva: el caller NAVEGA al wizard. NO cierra la abierta acá — el cierre de TODAS las
+   * activas del establishment lo hace `createSession` al ARRANCAR la nueva (R10.6/R10.7, design §6.bis.12).
+   * Sin I/O ni posibilidad de fallo, así que no devuelve nada (no hay fail-closed que manejar). */
+  onStartNew: () => void;
   /** Retomar la jornada abierta (→ identificación con esa sesión). NO cierra nada. */
   onResume: () => void;
   /** Cerrar el sheet sin hacer nada (Cancelar / tap en el scrim). */
@@ -97,23 +98,15 @@ export function NuevaJornadaConfirmSheet({
     onClose();
   };
 
-  // ¿Cerrando la abierta en vuelo? (deshabilita el botón para no disparar dos closeSession).
-  const [starting, setStarting] = useState(false);
-  // Error de cierre (fail-closed): closeSession devolvió ok:false → NO se navega, se superficia + reintenta.
-  const [error, setError] = useState<string | null>(null);
+  // Guard anti doble-tap: onStartNew navega al wizard (síncrono, sin I/O) y este sheet se desmonta. El ref
+  // evita que un doble-tap rápido dispare dos navegaciones antes del desmontaje. No hay estado de "en vuelo"
+  // ni error que superficiar: el cierre de la abierta lo hace createSession al arrancar, no este sheet.
+  const startedRef = useRef(false);
 
-  const handleStartNew = async () => {
-    if (starting) return;
-    setStarting(true);
-    setError(null);
-    const ok = await onStartNew();
-    setStarting(false);
-    // ok:true → el caller ya navegó al wizard (este sheet se desmonta). Si false: fail-closed.
-    if (!ok) {
-      setError(
-        'No se pudo cerrar la jornada abierta. Tocá de nuevo para reintentar; si sigue fallando, revisá la conexión con la app.',
-      );
-    }
+  const handleStartNew = () => {
+    if (startedRef.current) return;
+    startedRef.current = true;
+    onStartNew();
   };
 
   // Contexto "con N animales" — pluralización es-AR (1 → "animal").
@@ -176,34 +169,10 @@ export function NuevaJornadaConfirmSheet({
           </Text>
         </YStack>
 
-        {/* ERROR de cierre (fail-closed): closeSession falló → NO se navegó. Accionable es-AR + reintentar.
-            Terracota (color de aviso del DS, no hay token de error). Recorte de descendentes: lineHeight. */}
-        {error ? (
-          <View
-            testID="nueva-jornada-error"
-            backgroundColor="$surface"
-            borderWidth={1}
-            borderColor="$terracota"
-            borderRadius="$card"
-            paddingHorizontal="$4"
-            paddingVertical="$3"
-            {...labelA11y(Platform.OS, error)}
-          >
-            <Text fontFamily="$body" fontSize="$4" lineHeight="$4" fontWeight="700" color="$terracota" numberOfLines={3}>
-              {error}
-            </Text>
-          </View>
-        ) : null}
-
         {/* ACCIONES — una columna, NADA rojo. Primaria verde / outline secundaria / texto terciario. */}
         <YStack gap="$3">
-          <Button
-            variant="primary"
-            fullWidth
-            disabled={starting}
-            onPress={() => void handleStartNew()}
-          >
-            {starting ? 'Cerrando la abierta…' : 'Empezar una nueva'}
+          <Button variant="primary" fullWidth onPress={handleStartNew}>
+            Empezar una nueva
           </Button>
           <Button variant="secondary" fullWidth onPress={onResume}>
             Retomar la abierta

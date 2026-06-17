@@ -21,8 +21,10 @@ import {
   seedEstablishmentWithRodeo,
   setUserPhone,
   waitForServerActiveSessionId,
+  waitForServerActiveSessionCount,
   waitForServerSessionClosed,
   readServerSessionStatus,
+  readServerActiveSessionIds,
   cleanupAll,
 } from './helpers/admin';
 import { signIn, waitForHome } from './helpers/ui';
@@ -47,11 +49,11 @@ async function gotoLanding(page: Page): Promise<void> {
 }
 
 /**
- * Arranca una jornada REAL desde el wizard (elige el primer rodeo + Pesaje → "Arrancar jornada") y aterriza
- * en la identificación → la sesión queda ABIERTA (status='active') en el SQLite local. NO toca el landing.
+ * Completa el wizard de jornada DESDE la etapa 1 ("Elegí el rodeo", ya visible): elige el primer rodeo +
+ * Pesaje → "Arrancar jornada" → aterriza en la identificación → la sesión queda ABIERTA (status='active')
+ * en el SQLite local (createSession cierra ANTES todas las activas del establishment → invariante ≤1).
  */
-async function startSessionViaWizard(page: Page): Promise<void> {
-  await page.goto('/maniobra/jornada');
+async function completeWizardFromStage1(page: Page): Promise<void> {
   await expect(page.getByText('Elegí el rodeo', { exact: true })).toBeVisible({ timeout: 30_000 });
   await page.getByRole('button', { name: /Elegir rodeo / }).first().click();
   await expect(page.getByTestId('maneuver-reorder-list')).toBeVisible({ timeout: 20_000 });
@@ -62,6 +64,15 @@ async function startSessionViaWizard(page: Page): Promise<void> {
   await page.getByRole('button', { name: 'Arrancar jornada', exact: true }).click();
   // Aterrizó en la identificación (sin conectar el bastón → ConnectHero "Conectá el bastón" en web).
   await expect(page.getByText('Conectá el bastón', { exact: true })).toBeVisible({ timeout: 20_000 });
+}
+
+/**
+ * Arranca una jornada REAL desde el wizard (navega a `/maniobra/jornada` + completa) → la sesión queda
+ * ABIERTA (status='active') en el SQLite local. NO toca el landing.
+ */
+async function startSessionViaWizard(page: Page): Promise<void> {
+  await page.goto('/maniobra/jornada');
+  await completeWizardFromStage1(page);
 }
 
 // (a) jornada abierta → tarjeta "Retomar la jornada de hoy" → tap → identificación de ESA sesión (R10.5).
@@ -95,8 +106,10 @@ test('(a) con una jornada abierta el landing ofrece RETOMARLA → tap lleva a la
   expect(await readServerSessionStatus(sessionId)).toBe('active');
 });
 
-// (b) "Nueva jornada" con abierta → sheet → "Empezar una nueva" → cierra la abierta + va al wizard (R10.6/R10.7).
-test('(b) "Nueva jornada" con una abierta → confirmar → "Empezar una nueva" cierra la abierta y va al wizard', async ({ page }) => {
+// (b) "Nueva jornada" con abierta → sheet → "Empezar una nueva" → wizard → al ARRANCAR, createSession cierra
+// la abierta (R10.6/R10.7) y queda EXACTAMENTE 1 activa (la nueva). El cierre lo hace createSession (único
+// camino de cierre, sin doble-close), NO un closeSession explícito en el sheet.
+test('(b) "Nueva jornada" con una abierta → "Empezar una nueva" → al arrancar, la abierta queda cerrada y queda 1 activa (la nueva)', async ({ page }) => {
   const user = await createTestUser('m4-startnew');
   await setUserPhone(user.id, '1123456789');
   const { establishmentId } = await seedEstablishmentWithRodeo(user.id, 'Campo M4 StartNew');
@@ -106,7 +119,7 @@ test('(b) "Nueva jornada" con una abierta → confirmar → "Empezar una nueva" 
   await waitForHome(page);
 
   await startSessionViaWizard(page);
-  const sessionId = await waitForServerActiveSessionId(establishmentId);
+  const oldSessionId = await waitForServerActiveSessionId(establishmentId);
 
   await gotoLanding(page);
   await expect(page.getByText('Retomar la jornada de hoy', { exact: true })).toBeVisible({ timeout: 20_000 });
@@ -116,12 +129,18 @@ test('(b) "Nueva jornada" con una abierta → confirmar → "Empezar una nueva" 
   await expect(page.getByTestId('nueva-jornada-sheet')).toBeVisible({ timeout: 10_000 });
   await expect(page.getByText('Ya tenés una jornada abierta', { exact: true })).toBeVisible();
 
-  // "Empezar una nueva" → closeSession(la abierta) → al OK navega al wizard (etapa 1: elegir rodeo).
+  // "Empezar una nueva" → navega al wizard (etapa 1). La abierta NO se cierra todavía (lo hace createSession
+  // al arrancar). Completamos el wizard → createSession cierra TODAS las activas ANTES de insertar la nueva.
   await page.getByRole('button', { name: 'Empezar una nueva', exact: true }).click();
-  await expect(page.getByText('Elegí el rodeo', { exact: true })).toBeVisible({ timeout: 20_000 });
+  await completeWizardFromStage1(page);
 
-  // ORÁCULO SERVER: la jornada que estaba abierta quedó CERRADA de verdad (no solo en la UI) — R10.7.
-  await waitForServerSessionClosed(sessionId);
+  // ORÁCULO SERVER: la jornada que estaba abierta quedó CERRADA de verdad — R10.7.
+  await waitForServerSessionClosed(oldSessionId);
+  // INVARIANTE R10.6: tras arrancar, queda EXACTAMENTE 1 activa (la nueva, distinta de la vieja).
+  await waitForServerActiveSessionCount(establishmentId, 1);
+  const activeIds = await readServerActiveSessionIds(establishmentId);
+  expect(activeIds).toHaveLength(1);
+  expect(activeIds[0]).not.toBe(oldSessionId);
 });
 
 // (c) "Nueva jornada" SIN abierta → va DIRECTO al wizard (sin sheet) — regresión del camino de siempre.

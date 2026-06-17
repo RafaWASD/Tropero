@@ -1961,6 +1961,29 @@ export function buildCloseSessionUpdate(id: string, endedAt: string): LocalQuery
 }
 
 /**
+ * UPDATE local que CIERRA TODAS las sesiones ACTIVAS de un establishment (R10.6: una sola sesión activa
+ * por dispositivo a la vez). Lo dispara `createSession` ANTES de insertar la jornada nueva → tras crear,
+ * queda a lo sumo 1 activa (la nueva). Espeja `buildCloseSessionUpdate` pero scopeado por
+ * `establishment_id` + `status='active'` (en vez de por `id`): cierra el set entero de huérfanas que
+ * "Salir sin terminar" (R10.5) o un arranque previo sin cierre hubieran dejado activas. Filtra
+ * `status='active'` (las cerradas no se re-tocan) + `deleted_at IS NULL`. El caller pasa el ended_at de
+ * cliente (wall-clock). La RLS sessions_update (has_role_in) re-valida al subir.
+ *
+ * Multi-tenant (CLAUDE.md ppio 6): el `establishment_id` lo pasa el caller (el establishment activo del
+ * contexto, NUNCA hardcodeado). La stream de PowerSync ya scopea el SQLite local a los establishments del
+ * usuario (has_role_in) → este UPDATE solo alcanza sesiones del propio establishment; la RLS lo re-confirma
+ * al subir.
+ */
+export function buildCloseActiveSessionsUpdate(establishmentId: string, endedAt: string): LocalQuery {
+  return {
+    sql:
+      "UPDATE sessions SET status = 'closed', ended_at = ? " +
+      "WHERE establishment_id = ? AND status = 'active' AND deleted_at IS NULL",
+    args: [endedAt, establishmentId],
+  };
+}
+
+/**
  * UPDATE local del `work_lot_label` (R9.4): metadata informativa NO-autoritativa de la jornada (texto
  * libre, NUNCA FK asignadora a management_groups). Filtra `deleted_at IS NULL`. El caller pasa null para
  * limpiarlo.

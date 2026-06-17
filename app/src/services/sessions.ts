@@ -26,6 +26,7 @@
 import {
   buildCreateSessionInsert,
   buildCloseSessionUpdate,
+  buildCloseActiveSessionsUpdate,
   buildSetWorkLotLabelUpdate,
   buildSetSessionCountsUpdate,
   buildSetSessionRodeoUpdate,
@@ -112,8 +113,23 @@ export type CreateSessionInput = {
  * los FUERZA el trigger al subir; el rodeo-check (0050) y la RLS (sessions_insert = has_role_in) re-validan
  * al SUBIR (un rodeo ajeno/inactivo o un caller sin rol es rechazado allí → superficiado por uploadData,
  * NO por el return de acá). Contrato T5.
+ *
+ * ⚠️ INVARIANTE ≤1 ACTIVA (R10.6 — "una sola sesión activa por dispositivo a la vez"): ANTES de insertar
+ * la nueva, cerramos TODAS las activas del establishment (`closeActiveSessions`). Es el ÚNICO punto de
+ * enforcement (único call-site de creación del flujo de maniobra) → tras `createSession` queda EXACTAMENTE
+ * 1 activa (la nueva), sin importar por dónde se llegó (wizard "Arrancar", o futuros call-sites como M4
+ * "Empezar una nueva" o presets). Sin esto se ACUMULABAN sesiones `active` huérfanas (cada arranque dejaba
+ * la anterior activa; "Salir sin terminar" tampoco cierra) → getActiveSession (ORDER BY started_at DESC
+ * LIMIT 1) devolvía una huérfana tras "Terminar jornada" → la tarjeta "Retomar" no desaparecía (bug de Raf).
+ * Ambos writes son LOCALES/offline; el close-all se encola ANTES del INSERT (FIFO de la upload queue → al
+ * subir cierran las viejas, después aparece la nueva). FAIL-CLOSED: si el close-all falla, NO insertamos
+ * (no dejamos la nueva conviviendo con activas viejas).
  */
 export async function createSession(input: CreateSessionInput): Promise<ServiceResult<Session>> {
+  // ── ENFORCEMENT R10.6: cerrar todas las activas del establishment ANTES de insertar la nueva ──
+  const closed = await closeActiveSessions(input.establishmentId);
+  if (!closed.ok) return { ok: false, error: closed.error };
+
   const id = randomUuid();
   const config = input.config ?? {};
   const workLotLabel = cleanStr(input.workLotLabel);
@@ -153,6 +169,28 @@ export async function createSession(input: CreateSessionInput): Promise<ServiceR
  */
 export async function closeSession(id: string): Promise<ServiceResult<true>> {
   const r = await runLocalWrite(buildCloseSessionUpdate(id, nowIso()));
+  if (!r.ok) return { ok: false, error: { kind: r.error.kind, message: r.error.message } };
+  return { ok: true, value: true };
+}
+
+// ─── Cerrar TODAS las activas del establishment (R10.6 — enforzar ≤1 activa) ───────────
+
+/**
+ * Cierra TODAS las sesiones ACTIVAS de un establishment (R10.6: una sola sesión activa por dispositivo a la
+ * vez). UPDATE local masivo (offline) → 1 CrudEntry por fila tocada → upload queue. Filtra `status='active'`
+ * (no re-toca cerradas) + `deleted_at IS NULL`. La RLS (sessions_update = has_role_in) re-valida al subir.
+ *
+ * Lo dispara `createSession` ANTES de insertar la jornada nueva → garantiza el invariante "tras crear,
+ * queda a lo sumo 1 activa (la nueva)". También es el cierre masivo idempotente que limpia las huérfanas
+ * acumuladas por el bug previo (arranques que no cerraban + "Salir sin terminar" que deja activa). Si NO
+ * había ninguna activa, el UPDATE no toca filas y devuelve ok (no-op idempotente). Contrato T5: el local
+ * write siempre tiene éxito offline.
+ *
+ * Multi-tenant (CLAUDE.md ppio 6): el `establishmentId` lo pasa el caller (establishment activo del
+ * contexto, NUNCA hardcodeado).
+ */
+export async function closeActiveSessions(establishmentId: string): Promise<ServiceResult<true>> {
+  const r = await runLocalWrite(buildCloseActiveSessionsUpdate(establishmentId, nowIso()));
   if (!r.ok) return { ok: false, error: { kind: r.error.kind, message: r.error.message } };
   return { ok: true, value: true };
 }
