@@ -421,11 +421,12 @@ Archivos: `supabase/tests/custom/run.cjs` (suite nueva dedicada), `scripts/run-t
 
 ### M5-CLIENTE — UI de creación + render genérico + services de captura (Gate 2 por sub-chunk)
 
-#### [ ] M5-C.1 — Services `custom-measurements.ts` + `custom-attributes.ts` (CRUD-plano feature 15)
+#### [x] M5-C.1 — Services `custom-measurements.ts` + `custom-attributes.ts` (CRUD-plano feature 15)
 Satisface: R13.11, R13.12, R13.13.
 Detalle (design §11.6): `app/src/services/custom-measurements.ts` (INSERT append-only con `session_id`, R13.11) y `app/src/services/custom-attributes.ts` (upsert por `(animal_profile_id, field_definition_id)`, R13.12). CRUD-plano (`runLocalWrite` → 1 CrudEntry → `uploadData`, mismo patrón que `events.ts`). `recorded_by`/`updated_by`/`establishment_id` los fuerza el trigger al subir (no se mandan). El gating capa 2 (M5-B.4) re-valida server-side.
 Aceptación: unit + integración liviana; captura offline → sincroniza; el gating/audit forzado se observan al subir.
 Archivos: `app/src/services/custom-measurements.ts`, `app/src/services/custom-attributes.ts`.
+AS-BUILT (implementer 2026-06-17): hechos los 2 services + el helper PURO `app/src/utils/custom-value.ts` (`serializeCustomValue`/`CustomValue`, único origen) + builders `buildAddCustomMeasurementInsert`/`buildSetCustomAttributeUpsert` en `local-reads.ts`. Dos gotchas de CRUD-plano de PowerSync resueltos en `connector.ts` + helpers puros `buildCrudUpsert`/`buildCrudPatch`/`decodeJsonbColumns` en `upload-classify.ts` (ver design §11.6 AS-BUILT): (1) PK COMPUESTA de `custom_attributes` (id sintético → 42703 si se sube como `id`) → upsert/patch por la PK natural; (2) TIPO jsonb de `value` (anti doble-encoding) → parse a nativo antes de subir. Tests: `custom-value.test.ts` (12), `maneuver-reads.test.ts` (+8 builders), `upload-classify.test.ts` (+18 connector). typecheck + client unit verdes (el rojo de check.mjs = flake `animals_tag_unique` de la suite backend spec-02, terminales paralelas — NO este chunk). Pendiente reviewer + Gate 2. **NO marcar feature done.**
 
 #### [ ] M5-C.2 — UI de creación custom (ambos `+` con/sin clasificación)
 Satisface: R13.5, R13.6, R13.7, R13.8, R13.9.

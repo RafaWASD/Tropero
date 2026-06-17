@@ -1563,6 +1563,80 @@ export function buildUnsetCutUpdate(profileId: string, derivedCategoryId: string
   };
 }
 
+// ─── Captura de datos/maniobras CUSTOM (spec 03 M5-C.1) — INSERT append-only + upsert current-value ────────
+//
+// Las dos tablas genéricas de M5 (0094/0095) escriben CRUD-plano sobre la tabla SINCRONIZADA, igual que el
+// resto: `value` es un jsonb serializado como TEXT (el caller pasa el JSON ya tipado según ui_component —
+// número/bool/string/array; ver serializeCustomValue en custom-measurements.ts). `recorded_by`/`updated_by`/
+// `establishment_id` los FUERZA el trigger server-side al SUBIR (0094/0095, audit forzado anti-spoof) → NO se
+// mandan en el write local. El gating capa 2 genérico (assert_custom_field_enabled, 0096, fail-closed) + la
+// validación de value por ui_component (assert_custom_value_valid, 0096) re-validan al SUBIR; un rechazo lo
+// maneja uploadData (descarta + superficia por R10.8) — NO el return del service.
+
+/**
+ * INSERT local de una captura de maniobra/dato CUSTOM (R13.11, append-only / time-series). `id` uuid de
+ * cliente (columna `id` REAL de `custom_measurements`, 0094) → CRUD-plano normal (sin el gotcha de PK
+ * compuesta). `value` es el jsonb YA serializado a TEXT por el caller. `sessionId` opcional vincula la
+ * captura a la jornada de manga (el tenant-check de la sesión NO aplica acá — `custom_measurements` no tiene
+ * tg_event_session_tenant_check; el session_id es FK `on delete set null`). `notes` opcional (CHECK ≤500
+ * server-side). `recorded_by`/`establishment_id`/`recorded_at` los fuerza el trigger al subir → no se mandan.
+ */
+export function buildAddCustomMeasurementInsert(
+  id: string,
+  profileId: string,
+  fieldDefinitionId: string,
+  valueJson: string,
+  sessionId: string | null,
+  notes: string | null,
+): LocalQuery {
+  return {
+    sql:
+      'INSERT INTO custom_measurements ' +
+      '(id, animal_profile_id, field_definition_id, value, session_id, notes) ' +
+      'VALUES (?, ?, ?, ?, ?, ?)',
+    args: [id, profileId, fieldDefinitionId, valueJson, sessionId, notes],
+  };
+}
+
+/**
+ * UPSERT local del CURRENT-VALUE de una propiedad CUSTOM (R13.12, editable en cualquier momento, sin
+ * historial). `custom_attributes` (0095) tiene PK COMPUESTA `(animal_profile_id, field_definition_id)` y NO
+ * tiene columna `id` real — la stream `est_custom_attributes` emite un `id` SINTÉTICO
+ * `animal_profile_id || ':' || field_definition_id` para el DOWN (PowerSync exige `id` por fila). Acá usamos
+ * ESE mismo id sintético como PK local determinística + `ON CONFLICT(id) DO UPDATE` → re-editar el mismo par
+ * actualiza el valor EN EL LUGAR (LWW), NO inserta una 2da fila (current-value, no time-series).
+ *
+ * ⚠️ GOTCHA de upsert offline (mismo tipo que M2.2 con los maneuver-events). El `ON CONFLICT(id)` LOCAL es
+ * correcto (la PK local es el id sintético, único por par; re-editar pisa el value sin duplicar). Lo que
+ * PowerSync NO captura bien es el UPLOAD: (a) el connector CRUD-plano por default haría
+ * `table.upsert({...opData, id: op.id})` / `.update(...).eq('id', op.id)` mandando/filtrando una columna `id`
+ * que en `custom_attributes` NO existe (PK compuesta) → 42703; (b) en una RE-EDICIÓN, SQLite resuelve por el
+ * branch UPDATE del ON CONFLICT → PowerSync lo trackea como PATCH con SOLO `value` (sin la PK natural en
+ * opData). Por eso el connector SPECIAL-CASEA `custom_attributes` en AMBOS verbos: el PUT (1ra captura) strip
+ * del id + upsert por la PK natural (`onConflict`); el PATCH (re-edición) decodifica la PK natural del id
+ * sintético `a:f` y filtra `.eq('animal_profile_id', a).eq('field_definition_id', f)`. Ver buildCrudUpsert /
+ * buildCrudPatch en upload-classify.ts.
+ *
+ * `updated_by`/`establishment_id`/`updated_at` los fuerza el trigger al subir → no se mandan.
+ */
+export function buildSetCustomAttributeUpsert(
+  profileId: string,
+  fieldDefinitionId: string,
+  valueJson: string,
+): LocalQuery {
+  // id sintético determinístico = el MISMO alias que emite la stream est_custom_attributes (DOWN) → al
+  // bajar la fila real por la stream, su id coincide con el local → PowerSync hace LWW sobre la misma fila
+  // (sin duplicar). Separador ':' (los uuid no lo contienen).
+  const syntheticId = `${profileId}:${fieldDefinitionId}`;
+  return {
+    sql:
+      'INSERT INTO custom_attributes (id, animal_profile_id, field_definition_id, value) ' +
+      'VALUES (?, ?, ?, ?) ' +
+      'ON CONFLICT(id) DO UPDATE SET value = excluded.value',
+    args: [syntheticId, profileId, fieldDefinitionId, valueJson],
+  };
+}
+
 /**
  * INSERT local de un evento reproductivo `service` (espeja events.addService). `id` + `createdAt` de
  * cliente. `service_type` de un selector CERRADO. NO dispara transición. `notes` opcional.

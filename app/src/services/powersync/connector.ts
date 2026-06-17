@@ -25,7 +25,7 @@ import { UpdateType, type AbstractPowerSyncDatabase, type CrudEntry, type PowerS
 
 import { supabase } from '../supabase';
 import { getEnv } from '../../utils/env';
-import { buildCredentials, isTransientUploadError } from './upload-classify';
+import { buildCredentials, buildCrudPatch, buildCrudUpsert, isTransientUploadError } from './upload-classify';
 import { mapIntentToRpc, classifyIntentUploadError } from './upload';
 import { clearOverlay, rollbackOverlay } from './outbox';
 import { recordUploadRejection } from './upload-rejections';
@@ -76,12 +76,27 @@ export class SupabaseConnector implements PowerSyncBackendConnector {
         const table = supabase.from(op.table);
         switch (op.op) {
           case UpdateType.PUT: {
-            const { error } = await table.upsert({ ...op.opData, id: op.id });
+            // buildCrudUpsert special-casea las tablas de PK COMPUESTA (custom_attributes, M5): para ésas
+            // descarta el id SINTÉTICO del payload y upsertea por la PK natural (onConflict) — un `id`
+            // sintético contra PostgREST sería 42703 (columna inexistente). El resto: id `id` real.
+            const plan = buildCrudUpsert(op.table, op.id, op.opData);
+            const { error } = plan.onConflict
+              ? await table.upsert(plan.payload, { onConflict: plan.onConflict })
+              : await table.upsert(plan.payload);
             if (error) throw error;
             break;
           }
           case UpdateType.PATCH: {
-            const { error } = await table.update(op.opData ?? {}).eq('id', op.id);
+            // buildCrudPatch special-casea custom_attributes (PK compuesta): la RE-EDICIÓN del atributo
+            // (INSERT...ON CONFLICT DO UPDATE) la trackea PowerSync como PATCH con solo `value` y un id
+            // SINTÉTICO `a:f` → se decodifica la PK natural y se filtra por (animal_profile_id,
+            // field_definition_id), NO por `id` (columna inexistente → 42703). El resto: filtro por `id` real.
+            const patch = buildCrudPatch(op.table, op.id, op.opData);
+            let q = table.update(patch.payload);
+            for (const [col, val] of Object.entries(patch.match)) {
+              q = q.eq(col, val);
+            }
+            const { error } = await q;
             if (error) throw error;
             break;
           }

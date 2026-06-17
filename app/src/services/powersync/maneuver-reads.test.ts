@@ -22,6 +22,8 @@ import {
   buildManeuverPresetByIdQuery,
   buildRodeoSystemQuery,
   buildActiveProfileRodeoQuery,
+  buildAddCustomMeasurementInsert,
+  buildSetCustomAttributeUpsert,
 } from './local-reads';
 
 // Espeja el AppSchema (TEXT/INTEGER; SQLite es laxo). started_at NO tiene default acá: el local write NO
@@ -37,7 +39,16 @@ const SCHEMA =
   'CREATE TABLE animal_profiles (id TEXT PRIMARY KEY, rodeo_id TEXT, deleted_at TEXT);' +
   // overlay optimista (localOnly): el soft-delete de preset escribe acá vía la OUTBOX → el preset se oculta.
   'CREATE TABLE pending_status_overrides (id TEXT, client_op_id TEXT, target_table TEXT, ' +
-  'target_id TEXT, effect TEXT, status TEXT, exit_date TEXT);';
+  'target_id TEXT, effect TEXT, status TEXT, exit_date TEXT);' +
+  // spec 03 M5: captura custom append-only (id REAL) + propiedad custom current-value (id SINTÉTICO local
+  // por la PK compuesta). recorded_by/updated_by/establishment_id NO se declaran acá (los fuerza el trigger
+  // al subir) → quedan NULL local, igual que en producción.
+  'CREATE TABLE custom_measurements (id TEXT PRIMARY KEY, animal_profile_id TEXT, ' +
+  'field_definition_id TEXT, value TEXT, session_id TEXT, notes TEXT, recorded_by TEXT, ' +
+  'establishment_id TEXT, recorded_at TEXT, created_at TEXT, deleted_at TEXT);' +
+  'CREATE TABLE custom_attributes (id TEXT PRIMARY KEY, animal_profile_id TEXT, ' +
+  'field_definition_id TEXT, value TEXT, updated_by TEXT, establishment_id TEXT, updated_at TEXT, ' +
+  'created_at TEXT);';
 
 function freshDb(): DatabaseSync {
   const db = new DatabaseSync(':memory:');
@@ -389,4 +400,95 @@ test('buildActiveProfileRodeoQuery: devuelve el rodeo del perfil ACTIVO; un perf
   assert.equal(all<{ rodeo_id: string }>(db, buildActiveProfileRodeoQuery('ap-2')).length, 0);
   // perfil inexistente → 0 filas.
   assert.equal(all<{ rodeo_id: string }>(db, buildActiveProfileRodeoQuery('nope')).length, 0);
+});
+
+// ─── custom_measurements: captura de maniobra custom (M5-C.1, R13.11 append-only) ──────────────
+
+test('buildAddCustomMeasurementInsert: inserta una captura con id REAL, value jsonb TEXT, session_id; audit NULL local', () => {
+  const db = freshDb();
+  run(db, buildAddCustomMeasurementInsert('cm1', 'ap-1', 'fd-angulo', '42.5', 's1', 'pezuña trasera'));
+  const r = all<{
+    id: string;
+    animal_profile_id: string;
+    field_definition_id: string;
+    value: string;
+    session_id: string | null;
+    notes: string | null;
+    recorded_by: string | null;
+    establishment_id: string | null;
+  }>(db, { sql: 'SELECT * FROM custom_measurements', args: [] })[0];
+  assert.equal(r.id, 'cm1');
+  assert.equal(r.animal_profile_id, 'ap-1');
+  assert.equal(r.field_definition_id, 'fd-angulo');
+  assert.equal(r.value, '42.5'); // el número JSON serializado por el service (no string)
+  assert.equal(r.session_id, 's1');
+  assert.equal(r.notes, 'pezuña trasera');
+  assert.equal(r.recorded_by, null); // lo FUERZA el trigger al subir (R13.23) — no se manda local
+  assert.equal(r.establishment_id, null); // idem (derivado del perfil, anti-spoof) — no se manda local
+});
+
+test('buildAddCustomMeasurementInsert: APPEND-ONLY — dos capturas del mismo (animal, field) son DOS filas (time-series)', () => {
+  const db = freshDb();
+  run(db, buildAddCustomMeasurementInsert('cm1', 'ap-1', 'fd-angulo', '42.5', 's1', null));
+  run(db, buildAddCustomMeasurementInsert('cm2', 'ap-1', 'fd-angulo', '44', 's2', null));
+  const rows = all<{ id: string; value: string }>(db, {
+    sql: 'SELECT id, value FROM custom_measurements ORDER BY id',
+    args: [],
+  });
+  assert.equal(rows.length, 2, 'append-only: NO pisa la captura anterior');
+  assert.deepEqual(rows.map((r) => r.value), ['42.5', '44']);
+});
+
+test('buildAddCustomMeasurementInsert: session_id y notes opcionales → NULL (captura desde la ficha, sin jornada)', () => {
+  const db = freshDb();
+  run(db, buildAddCustomMeasurementInsert('cm1', 'ap-1', 'fd-temp', 'true', null, null));
+  const r = all<{ value: string; session_id: string | null; notes: string | null }>(db, {
+    sql: 'SELECT value, session_id, notes FROM custom_measurements',
+    args: [],
+  })[0];
+  assert.equal(r.value, 'true'); // boolean JSON
+  assert.equal(r.session_id, null);
+  assert.equal(r.notes, null);
+});
+
+// ─── custom_attributes: current-value de propiedad custom (M5-C.1, R13.12 upsert por PK compuesta) ──────
+
+test('buildSetCustomAttributeUpsert: inserta el current-value con id SINTÉTICO (animal:field); audit NULL local', () => {
+  const db = freshDb();
+  run(db, buildSetCustomAttributeUpsert('ap-1', 'fd-color', '"overo"'));
+  const r = all<{
+    id: string;
+    animal_profile_id: string;
+    field_definition_id: string;
+    value: string;
+    updated_by: string | null;
+    establishment_id: string | null;
+  }>(db, { sql: 'SELECT * FROM custom_attributes', args: [] })[0];
+  assert.equal(r.id, 'ap-1:fd-color'); // id sintético = el alias de la stream (DOWN) → LWW al bajar la real
+  assert.equal(r.animal_profile_id, 'ap-1');
+  assert.equal(r.field_definition_id, 'fd-color');
+  assert.equal(r.value, '"overo"'); // string JSON
+  assert.equal(r.updated_by, null); // lo FUERZA el trigger al subir (R13.23) — no se manda local
+  assert.equal(r.establishment_id, null); // idem (derivado del perfil, anti-spoof)
+});
+
+test('buildSetCustomAttributeUpsert: UPSERT — re-editar el mismo (animal, field) PISA el valor (NO duplica, current-value)', () => {
+  const db = freshDb();
+  run(db, buildSetCustomAttributeUpsert('ap-1', 'fd-color', '"overo"'));
+  run(db, buildSetCustomAttributeUpsert('ap-1', 'fd-color', '"colorado"')); // editable anytime (R13.12)
+  const rows = all<{ id: string; value: string }>(db, {
+    sql: 'SELECT id, value FROM custom_attributes',
+    args: [],
+  });
+  assert.equal(rows.length, 1, 'current-value: una sola fila por (animal, field), no historial');
+  assert.equal(rows[0].value, '"colorado"'); // el ÚLTIMO valor gana (LWW)
+});
+
+test('buildSetCustomAttributeUpsert: distintos (animal, field) son filas distintas (id sintético único por par)', () => {
+  const db = freshDb();
+  run(db, buildSetCustomAttributeUpsert('ap-1', 'fd-color', '"overo"'));
+  run(db, buildSetCustomAttributeUpsert('ap-2', 'fd-color', '"negro"')); // otro animal
+  run(db, buildSetCustomAttributeUpsert('ap-1', 'fd-temperamento', '"manso"')); // mismo animal, otro field
+  const rows = all<{ id: string }>(db, { sql: 'SELECT id FROM custom_attributes ORDER BY id', args: [] });
+  assert.deepEqual(rows.map((r) => r.id), ['ap-1:fd-color', 'ap-1:fd-temperamento', 'ap-2:fd-color']);
 });
