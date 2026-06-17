@@ -24,6 +24,9 @@ import {
   buildActiveProfileRodeoQuery,
   buildAddCustomMeasurementInsert,
   buildSetCustomAttributeUpsert,
+  buildCreateCustomFieldInsert,
+  buildCustomDataKeysQuery,
+  buildEnabledCustomManeuversQuery,
 } from './local-reads';
 
 // Espeja el AppSchema (TEXT/INTEGER; SQLite es laxo). started_at NO tiene default acá: el local write NO
@@ -48,7 +51,16 @@ const SCHEMA =
   'establishment_id TEXT, recorded_at TEXT, created_at TEXT, deleted_at TEXT);' +
   'CREATE TABLE custom_attributes (id TEXT PRIMARY KEY, animal_profile_id TEXT, ' +
   'field_definition_id TEXT, value TEXT, updated_by TEXT, establishment_id TEXT, updated_at TEXT, ' +
-  'created_at TEXT);';
+  'created_at TEXT);' +
+  // spec 03 M5-C.2: field_definitions (custom + globales) + rodeo_data_config (+ su overlay) para el
+  // alta de dato custom y el tweak M1 (maniobras custom enabled). active/created_at/updated_at los pone
+  // el server (no se mandan en el INSERT local) → NULL local salvo el active=1 que sí seteamos explícito.
+  'CREATE TABLE field_definitions (id TEXT PRIMARY KEY, establishment_id TEXT, data_key TEXT, label TEXT, ' +
+  'description TEXT, category TEXT, data_type TEXT, ui_component TEXT, config_schema TEXT, ' +
+  'schema_version INTEGER, active INTEGER, deleted_at TEXT, created_at TEXT, updated_at TEXT);' +
+  'CREATE TABLE rodeo_data_config (field_definition_id TEXT, rodeo_id TEXT, enabled INTEGER);' +
+  'CREATE TABLE pending_rodeo_data_config (id TEXT, client_op_id TEXT, rodeo_id TEXT, ' +
+  'field_definition_id TEXT, enabled INTEGER);';
 
 function freshDb(): DatabaseSync {
   const db = new DatabaseSync(':memory:');
@@ -492,3 +504,90 @@ test('buildSetCustomAttributeUpsert: distintos (animal, field) son filas distint
   const rows = all<{ id: string }>(db, { sql: 'SELECT id FROM custom_attributes ORDER BY id', args: [] });
   assert.deepEqual(rows.map((r) => r.id), ['ap-1:fd-color', 'ap-1:fd-temperamento', 'ap-2:fd-color']);
 });
+
+// ─── field_definitions: creación de dato custom (M5-C.2, R13.5–R13.9) ──────────────────────────
+
+test('buildCreateCustomFieldInsert: crea la fila custom con active=1, config_schema NULL (no-enum), audit/timestamps NULL local', () => {
+  const db = freshDb();
+  run(db, buildCreateCustomFieldInsert('fd-1', 'est-A', 'angulo_pezuna', 'Ángulo de pezuña', 'maniobra', 'numeric', 'personalizado', null));
+  const r = all<{
+    id: string; establishment_id: string; data_key: string; label: string; data_type: string;
+    ui_component: string; category: string; config_schema: string | null; active: number;
+    created_at: string | null;
+  }>(db, { sql: 'SELECT * FROM field_definitions', args: [] })[0];
+  assert.equal(r.id, 'fd-1');
+  assert.equal(r.establishment_id, 'est-A'); // del contexto activo (no hardcodeado; el guard re-valida owner)
+  assert.equal(r.data_key, 'angulo_pezuna');
+  assert.equal(r.label, 'Ángulo de pezuña');
+  assert.equal(r.data_type, 'maniobra');
+  assert.equal(r.ui_component, 'numeric');
+  assert.equal(r.category, 'personalizado');
+  assert.equal(r.config_schema, null); // no-enum
+  assert.equal(r.active, 1);
+  assert.equal(r.created_at, null); // lo pone el default del server al subir
+});
+
+test('buildCreateCustomFieldInsert: enum lleva config_schema como JSON-TEXT (lo decodifica el connector antes de subir)', () => {
+  const db = freshDb();
+  const optsJson = JSON.stringify({ options: ['adentro', 'afuera', 'normal'] });
+  run(db, buildCreateCustomFieldInsert('fd-2', 'est-A', 'pezuna', 'Pezuña', 'maniobra', 'enum_single', 'personalizado', optsJson));
+  const r = all<{ config_schema: string }>(db, { sql: 'SELECT config_schema FROM field_definitions WHERE id = ?', args: ['fd-2'] })[0];
+  // jsonb-as-TEXT local (igual que sessions.config / value de custom_*); decodeJsonbColumns lo parsea al subir.
+  assert.deepEqual(JSON.parse(r.config_schema), { options: ['adentro', 'afuera', 'normal'] });
+});
+
+test('buildCustomDataKeysQuery: trae SOLO las custom vivas (establishment_id no-NULL, deleted_at NULL); no las globales ni las borradas', () => {
+  const db = freshDb();
+  // globales de fábrica (establishment_id NULL): NO deben aparecer (la unicidad del slug es per-establishment).
+  run(db, buildCreateCustomFieldInsertRaw(db, { id: 'g1', est: null, dataKey: 'peso', dataType: 'maniobra', uic: 'numeric', deleted: null }));
+  run(db, buildCreateCustomFieldInsertRaw(db, { id: 'c1', est: 'est-A', dataKey: 'angulo', dataType: 'maniobra', uic: 'numeric', deleted: null }));
+  run(db, buildCreateCustomFieldInsertRaw(db, { id: 'c2', est: 'est-A', dataKey: 'apodo', dataType: 'propiedad', uic: 'text', deleted: null }));
+  run(db, buildCreateCustomFieldInsertRaw(db, { id: 'c3', est: 'est-A', dataKey: 'viejo', dataType: 'maniobra', uic: 'numeric', deleted: '2026-06-17T00:00:00Z' }));
+  const rows = all<{ data_key: string }>(db, buildCustomDataKeysQuery());
+  assert.deepEqual(rows.map((r) => r.data_key).sort(), ['angulo', 'apodo']);
+});
+
+test('buildEnabledCustomManeuversQuery: trae las maniobra custom ENABLED del rodeo; no propiedades, no disabled, no de otro rodeo, no borradas', () => {
+  const db = freshDb();
+  // fields custom del campo
+  run(db, buildCreateCustomFieldInsertRaw(db, { id: 'm-on', est: 'est-A', dataKey: 'angulo', dataType: 'maniobra', uic: 'numeric', deleted: null }));
+  run(db, buildCreateCustomFieldInsertRaw(db, { id: 'm-off', est: 'est-A', dataKey: 'otra', dataType: 'maniobra', uic: 'numeric', deleted: null }));
+  run(db, buildCreateCustomFieldInsertRaw(db, { id: 'p-on', est: 'est-A', dataKey: 'apodo', dataType: 'propiedad', uic: 'text', deleted: null }));
+  run(db, buildCreateCustomFieldInsertRaw(db, { id: 'm-del', est: 'est-A', dataKey: 'borrada', dataType: 'maniobra', uic: 'numeric', deleted: '2026-06-17T00:00:00Z' }));
+  run(db, buildCreateCustomFieldInsertRaw(db, { id: 'g-on', est: null, dataKey: 'peso', dataType: 'maniobra', uic: 'numeric', deleted: null })); // global → no es custom
+  // config del rodeo R1 (synced)
+  db.prepare('INSERT INTO rodeo_data_config (field_definition_id, rodeo_id, enabled) VALUES (?, ?, ?)').run('m-on', 'R1', 1);
+  db.prepare('INSERT INTO rodeo_data_config (field_definition_id, rodeo_id, enabled) VALUES (?, ?, ?)').run('m-off', 'R1', 0);
+  db.prepare('INSERT INTO rodeo_data_config (field_definition_id, rodeo_id, enabled) VALUES (?, ?, ?)').run('p-on', 'R1', 1);
+  db.prepare('INSERT INTO rodeo_data_config (field_definition_id, rodeo_id, enabled) VALUES (?, ?, ?)').run('m-del', 'R1', 1);
+  db.prepare('INSERT INTO rodeo_data_config (field_definition_id, rodeo_id, enabled) VALUES (?, ?, ?)').run('g-on', 'R1', 1);
+  // m-on enabled en OTRO rodeo no debe traerlo para R1
+  db.prepare('INSERT INTO rodeo_data_config (field_definition_id, rodeo_id, enabled) VALUES (?, ?, ?)').run('m-off', 'R2', 1);
+  const rows = all<{ id: string; data_key: string; label: string }>(db, buildEnabledCustomManeuversQuery('R1'));
+  assert.deepEqual(rows.map((r) => r.id), ['m-on']); // solo la maniobra custom viva enabled en R1
+  assert.equal(rows[0].data_key, 'angulo');
+});
+
+test('buildEnabledCustomManeuversQuery: el OVERLAY offline del toggle PISA al synced (prender una maniobra custom sin red)', () => {
+  const db = freshDb();
+  run(db, buildCreateCustomFieldInsertRaw(db, { id: 'm-x', est: 'est-A', dataKey: 'nueva', dataType: 'maniobra', uic: 'numeric', deleted: null }));
+  // synced dice disabled, pero el overlay (edición offline) la prendió
+  db.prepare('INSERT INTO rodeo_data_config (field_definition_id, rodeo_id, enabled) VALUES (?, ?, ?)').run('m-x', 'R1', 0);
+  db.prepare('INSERT INTO pending_rodeo_data_config (id, client_op_id, rodeo_id, field_definition_id, enabled) VALUES (?, ?, ?, ?, ?)')
+    .run('ov-1', 'op-1', 'R1', 'm-x', 1);
+  const rows = all<{ id: string }>(db, buildEnabledCustomManeuversQuery('R1'));
+  assert.deepEqual(rows.map((r) => r.id), ['m-x']); // el overlay enabled=1 gana sobre el synced enabled=0
+});
+
+// helper: inserta una field_definitions cruda en el fixture (para sembrar globales/borradas/propiedades).
+function buildCreateCustomFieldInsertRaw(
+  _db: DatabaseSync,
+  f: { id: string; est: string | null; dataKey: string; dataType: string; uic: string; deleted: string | null },
+): { sql: string; args: unknown[] } {
+  return {
+    sql:
+      'INSERT INTO field_definitions (id, establishment_id, data_key, label, data_type, ui_component, ' +
+      'category, config_schema, active, deleted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)',
+    args: [f.id, f.est, f.dataKey, f.dataKey, f.dataType, f.uic, 'personalizado', null, f.deleted],
+  };
+}

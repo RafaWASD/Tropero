@@ -138,11 +138,19 @@ function decodeCompositeKey(table: string, id: string): Record<string, string> |
 //
 // `sessions.config`/`maneuver_presets.config` también son jsonb-as-TEXT, pero NO se validan por tipo
 // server-side (solo size CHECK) y su consumidor (el cliente) tolera el doble-encoding en la lectura → NO se
-// listan acá (cambiarlas sería un cambio de comportamiento fuera de scope). Acá SOLO las custom (validadas).
+// listan acá (cambiarlas sería un cambio de comportamiento fuera de scope). Acá SOLO las VALIDADAS por tipo.
+//
+// `field_definitions.config_schema` (M5-C.2, R13.8): el alta de un enum custom escribe config_schema como
+// {options:[...]} (jsonb). El guard tg_field_definitions_custom_guard (0093) lee `new.config_schema ->
+// 'options'` y exige `jsonb_typeof(options)='array'`. Si se subiera como string JS, PostgREST lo escribiría
+// como jsonb-STRING → `-> 'options'` daría NULL → "requires a config_schema.options array" (23514). Por eso
+// se decodifica acá ANTES de subir (mismo gotcha que el `value` de M5-C.1). Para los no-enum config_schema es
+// null → decodeJsonbColumns lo deja intacto (typeof null !== 'string' → continue).
 
 const JSONB_TEXT_COLUMNS: Record<string, readonly string[]> = {
   custom_measurements: ['value'],
   custom_attributes: ['value'],
+  field_definitions: ['config_schema'],
 };
 
 /**

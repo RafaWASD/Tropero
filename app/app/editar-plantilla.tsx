@@ -22,9 +22,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Platform, Pressable } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { ScrollView, Text, XStack, YStack } from 'tamagui';
+import { ScrollView, Text, View, XStack, YStack } from 'tamagui';
 import { getTokenValue } from 'tamagui';
-import { ChevronLeft } from 'lucide-react-native';
+import { ChevronLeft, Plus } from 'lucide-react-native';
 
 import { Button, FieldTemplateToggleList, FormError, InfoNote } from '@/components';
 import { useEstablishment, useRodeo } from '@/contexts';
@@ -34,6 +34,7 @@ import {
   fetchRodeoConfig,
   type RodeoFieldConfig,
 } from '@/services/rodeo-config';
+import { createCustomField } from '@/services/custom-fields';
 import { enqueueSetRodeoConfig } from '@/services/powersync/outbox';
 import {
   buildEditToggles,
@@ -42,7 +43,9 @@ import {
   setToggle,
   type TemplateToggle,
 } from '@/utils/rodeo-template';
+import type { CustomFieldDraft } from '@/utils/custom-field';
 import { buttonA11y } from '@/utils/a11y';
+import { CustomFieldSheet } from './maniobra/_components/CustomFieldSheet';
 
 const SAVE_ERROR_COPY = 'No se pudo guardar la plantilla. Reintentá.';
 
@@ -76,6 +79,10 @@ export default function EditarPlantillaScreen() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const saveBusy = useRef(false);
+  // `+` crear dato personalizado (M5-C.2, R13.5/R13.6): owner-only. Abre el sheet en modo 'classify'
+  // (pregunta propiedad/maniobra primero, R13.6).
+  const [customSheetOpen, setCustomSheetOpen] = useState(false);
+  const establishmentId = estState.status === 'active' ? estState.current.id : null;
 
   async function load() {
     if (!rodeoId || !systemId) {
@@ -159,6 +166,19 @@ export default function EditarPlantillaScreen() {
     router.back();
   }
 
+  // Crear un dato custom (R13.5/R13.6) desde el `+`: createCustomField (CRUD-plano offline; el server fuerza
+  // owner + valida). Al OK: cerramos el sheet + RECARGAMOS la plantilla (el field nuevo aparece en el
+  // catálogo local al instante, en su categoría "Personalizado", listo para tildar y Guardar). Devuelve un
+  // mensaje es-AR al fallo (el sheet lo superficia y no se cierra).
+  async function onCreateCustomField(draft: CustomFieldDraft): Promise<string | null> {
+    if (!establishmentId) return 'No pudimos resolver el campo. Volvé a intentar.';
+    const r = await createCustomField({ establishmentId, draft });
+    if (!r.ok) return r.error.message;
+    setCustomSheetOpen(false);
+    await load(); // el field nuevo entra al catálogo local → aparece como toggle "Personalizado".
+    return null;
+  }
+
   return (
     <YStack flex={1} width="100%" maxWidth="100%" overflow="hidden" backgroundColor="$bg">
       <YStack width="100%" paddingTop={insets.top} paddingHorizontal="$4">
@@ -209,7 +229,7 @@ export default function EditarPlantillaScreen() {
             </Button>
           </YStack>
         ) : toggles ? (
-          <YStack gap="$2" marginTop="$2">
+          <YStack gap="$3" marginTop="$2">
             <FieldTemplateToggleList
               sections={sections}
               header={EDIT_HEADER}
@@ -217,6 +237,40 @@ export default function EditarPlantillaScreen() {
                 setToggles((prev) => (prev ? setToggle(prev, id, enabled) : prev))
               }
             />
+            {/* `+` crear dato personalizado (R13.5/R13.6): pregunta propiedad/maniobra y arma el dato.
+                El dato nuevo aparece en su categoría "Personalizado" para tildarlo y Guardar. Owner-only. */}
+            <Pressable
+              onPress={() => setCustomSheetOpen(true)}
+              testID="config-add-custom-field"
+              {...buttonA11y(Platform.OS, { label: 'Crear dato personalizado' })}
+            >
+              <XStack
+                alignItems="center"
+                gap="$2"
+                minHeight="$touchMin"
+                paddingHorizontal="$3"
+                borderRadius="$card"
+                borderWidth={1}
+                borderColor="$primary"
+                borderStyle="dashed"
+                backgroundColor="$surface"
+                pressStyle={{ backgroundColor: '$greenLight' }}
+              >
+                <View
+                  width={28}
+                  height={28}
+                  borderRadius="$pill"
+                  alignItems="center"
+                  justifyContent="center"
+                  backgroundColor="$primary"
+                >
+                  <Plus size={18} color={getTokenValue('$white', 'color')} strokeWidth={3} />
+                </View>
+                <Text fontFamily="$body" fontSize="$4" lineHeight="$4" fontWeight="700" color="$primary" numberOfLines={1}>
+                  Crear dato personalizado
+                </Text>
+              </XStack>
+            </Pressable>
           </YStack>
         ) : null}
       </ScrollView>
@@ -237,6 +291,16 @@ export default function EditarPlantillaScreen() {
             {saving ? 'Guardando…' : 'Guardar plantilla'}
           </Button>
         </YStack>
+      ) : null}
+
+      {/* SHEET de creación de dato custom (R13.5/R13.6): modo 'classify' (pregunta propiedad/maniobra
+          primero). Solo se ofrece si isOwner (el `+` ya está dentro del bloque owner-only). */}
+      {isOwner && customSheetOpen ? (
+        <CustomFieldSheet
+          mode="classify"
+          onCreate={onCreateCustomField}
+          onClose={() => setCustomSheetOpen(false)}
+        />
       ) : null}
     </YStack>
   );

@@ -28,15 +28,22 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { getTokenValue, Text, View, XStack, YStack } from 'tamagui';
 import Animated, { useAnimatedRef, useScrollOffset, useSharedValue } from 'react-native-reanimated';
-import { ChevronLeft, Play } from 'lucide-react-native';
+import { ChevronLeft, Play, Plus } from 'lucide-react-native';
 
 import { Button, Card, FormError, InfoNote } from '@/components';
-import { labelA11y } from '@/utils/a11y';
+import { buttonA11y, labelA11y } from '@/utils/a11y';
 import { RodeoIcon } from '@/theme/icons';
 import { useEstablishment, useRodeo } from '@/contexts';
 import type { Rodeo } from '@/services/rodeos';
 import { createSession } from '@/services/sessions';
 import { createPreset, fetchPresets, loadPreset } from '@/services/maneuver-presets';
+import {
+  createCustomField,
+  enableCustomFieldInRodeo,
+  fetchEnabledCustomManeuvers,
+  type EnabledCustomManeuver,
+} from '@/services/custom-fields';
+import type { CustomFieldDraft } from '@/utils/custom-field';
 import { useManeuverGating } from '@/hooks/useManeuverGating';
 import { ALL_MANEUVERS, type ManeuverKind } from '@/utils/maneuver-gating';
 import {
@@ -50,6 +57,7 @@ import {
 import { ManeuverReorderList, type ReorderScrollContext } from './_components/ManeuverReorderList';
 import { ManeuverConfigSheet, type ManeuverConfigKind } from './_components/ManeuverConfigSheet';
 import { SavePresetSheet } from './_components/SavePresetSheet';
+import { CustomFieldSheet } from './_components/CustomFieldSheet';
 
 // Maniobras con preconfig de tanda de TEXTO LIBRE (R1.7/R1.8): la(s) vacuna(s) y la pajuela. Para cada
 // una: el título del sheet, el placeholder del input grande, el hint inline cuando no está cargada, y si
@@ -108,6 +116,12 @@ export default function JornadaWizardScreen() {
   const [savePresetOpen, setSavePresetOpen] = useState(false);
   // Feedback breve tras guardar la rutina ("Rutina guardada"): se muestra unos segundos y se va.
   const [presetSaved, setPresetSaved] = useState(false);
+  // M5-C.2 (R13.7): maniobras CUSTOM enabled en el rodeo elegido (tweak M1, §11.7) + el `+` para crear una.
+  const [customManeuvers, setCustomManeuvers] = useState<EnabledCustomManeuver[]>([]);
+  const [customSheetOpen, setCustomSheetOpen] = useState(false);
+
+  // El `+` de crear maniobra custom es OWNER-only (R13.2): el non-owner ve las custom enabled pero no el `+`.
+  const isOwner = estState.status === 'active' && estState.role === 'owner';
 
   const rodeoId = rodeo?.id ?? null;
   const gating = useManeuverGating(rodeoId);
@@ -147,6 +161,23 @@ export default function JornadaWizardScreen() {
     return gatingFilter(ALL_MANEUVERS).applicable;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gating.config]);
+
+  // Maniobras CUSTOM enabled en el rodeo (tweak M1, §11.7): se muestran en etapa 2 junto a las de fábrica.
+  // La selección/secuencia + el render per-animal de una maniobra custom es del chunk M5-C.3 (renderer
+  // genérico desde ui_component); acá la lista las EXHIBE (la fuente de maniobras incluye las custom enabled)
+  // y el `+` crea una nueva. Se recargan al cambiar de rodeo y tras crear una (refreshCustom).
+  const refreshCustom = useCallback(async () => {
+    if (!rodeoId) {
+      setCustomManeuvers([]);
+      return;
+    }
+    const r = await fetchEnabledCustomManeuvers(rodeoId);
+    setCustomManeuvers(r.ok ? r.value : []);
+  }, [rodeoId]);
+
+  useEffect(() => {
+    void refreshCustom();
+  }, [refreshCustom]);
 
   // Sembramos el autocompletar (R1.8) de los presets del campo: cada preset trae preconfig con valores
   // (vacuna/pajuela) usados antes. El `history` se pasa al bottom sheet (ManeuverConfigSheet), que filtra
@@ -293,6 +324,28 @@ export default function JornadaWizardScreen() {
     [establishmentId, buildCurrentConfig],
   );
 
+  // Crear una maniobra CUSTOM desde el `+` de la lista (R13.7): data_type='maniobra' fijo (sin pregunta de
+  // clasificación, por construcción) + se HABILITA en el rodeo en el mismo paso (R13.5b). createCustomField
+  // es CRUD-plano offline (el server fuerza owner + valida); enableCustomFieldInRodeo encola el toggle vía
+  // la RPC set_rodeo_config (owner-only). Al OK: cerramos el sheet + recargamos la lista de custom. Devuelve
+  // un mensaje es-AR al fallo (el sheet lo superficia y no se cierra).
+  const onCreateCustomManeuver = useCallback(
+    async (draft: CustomFieldDraft): Promise<string | null> => {
+      if (!establishmentId || !rodeoId) return 'No pudimos resolver el campo o el rodeo. Volvé a intentar.';
+      // mode='maniobra' del sheet ya fija data_type='maniobra'; lo reforzamos por las dudas (R13.7).
+      const r = await createCustomField({ establishmentId, draft: { ...draft, dataType: 'maniobra' } });
+      if (!r.ok) return r.error.message;
+      // Habilitarla en el rodeo de una (R13.5b). Si el enable fallara (DB local), el dato YA se creó; lo
+      // reportamos pero no perdemos la creación (el owner la puede prender luego desde la plantilla).
+      const en = await enableCustomFieldInRodeo({ rodeoId, fieldDefinitionId: r.value.fieldDefinitionId });
+      setCustomSheetOpen(false);
+      await refreshCustom();
+      if (!en.ok) return null; // creada pero no habilitada: cerramos igual (no es un fallo de creación).
+      return null;
+    },
+    [establishmentId, rodeoId, refreshCustom],
+  );
+
   // El toast "Rutina guardada" se desvanece solo tras unos segundos (no tapa el flujo de la etapa 3).
   useEffect(() => {
     if (!presetSaved) return;
@@ -350,6 +403,9 @@ export default function JornadaWizardScreen() {
               loading={gating.loading}
               gatingError={gating.error}
               presetOmitted={presetOmitted}
+              customManeuvers={customManeuvers}
+              canCreateCustom={isOwner}
+              onCreateCustom={() => setCustomSheetOpen(true)}
               onToggle={onToggle}
               onReorder={onReorder}
               onOpenConfig={onOpenConfig}
@@ -434,6 +490,16 @@ export default function JornadaWizardScreen() {
       {savePresetOpen ? (
         <SavePresetSheet onSave={onSavePreset} onClose={() => setSavePresetOpen(false)} />
       ) : null}
+
+      {/* SHEET de creación de MANIOBRA custom (R13.7): modo 'maniobra' (data_type fijo, SIN pregunta de
+          clasificación). Owner-only (el `+` ya está gateado a isOwner en StageManeuvers). */}
+      {isOwner && customSheetOpen ? (
+        <CustomFieldSheet
+          mode="maniobra"
+          onCreate={onCreateCustomManeuver}
+          onClose={() => setCustomSheetOpen(false)}
+        />
+      ) : null}
     </YStack>
   );
 }
@@ -480,6 +546,9 @@ function StageManeuvers({
   loading,
   gatingError,
   presetOmitted,
+  customManeuvers,
+  canCreateCustom,
+  onCreateCustom,
   onToggle,
   onReorder,
   onOpenConfig,
@@ -492,6 +561,9 @@ function StageManeuvers({
   loading: boolean;
   gatingError: string | null;
   presetOmitted: ManeuverKind[];
+  customManeuvers: EnabledCustomManeuver[];
+  canCreateCustom: boolean;
+  onCreateCustom: () => void;
   onToggle: (m: ManeuverKind) => void;
   onReorder: (from: number, to: number) => void;
   onOpenConfig: (m: ManeuverKind) => void;
@@ -504,7 +576,8 @@ function StageManeuvers({
   if (gatingError) {
     return <InfoNote>{gatingError}</InfoNote>;
   }
-  if (offered.length === 0) {
+  // La pantalla puede no tener maniobras de fábrica habilitadas pero SÍ ofrecer crear una custom (owner).
+  if (offered.length === 0 && customManeuvers.length === 0 && !canCreateCustom) {
     return <InfoNote>Este rodeo no tiene maniobras habilitadas en su plantilla de datos.</InfoNote>;
   }
 
@@ -530,16 +603,104 @@ function StageManeuvers({
           pool-abajo (tap para sumar). Zonas de toque en la fila seleccionada: el badge ✓/número = QUITAR;
           el CUERPO = abrir el sheet de preconfig si es configurable; el grip = drag. El preconfig se ve
           INLINE como segunda línea (valor cargado o hint "Tocá para elegir …"). */}
-      <ManeuverReorderList
-        offered={offered}
-        chosen={chosen}
-        onToggle={onToggle}
-        onReorder={onReorder}
-        onOpenConfig={onOpenConfig}
-        inlineConfig={inlineConfig}
-        scrollContext={scrollContext}
-        frozenDragIndex={frozenDragIndex}
+      {offered.length > 0 ? (
+        <ManeuverReorderList
+          offered={offered}
+          chosen={chosen}
+          onToggle={onToggle}
+          onReorder={onReorder}
+          onOpenConfig={onOpenConfig}
+          inlineConfig={inlineConfig}
+          scrollContext={scrollContext}
+          frozenDragIndex={frozenDragIndex}
+        />
+      ) : null}
+
+      {/* MANIOBRAS PERSONALIZADAS del rodeo (tweak M1, §11.7) + el `+` para crear una (R13.7). La lista de
+          maniobras del rodeo = 10 de fábrica gateadas + estas custom enabled. La carga per-animal de una
+          maniobra custom se cablea en M5-C.3 (renderer genérico desde ui_component); acá se EXHIBEN para que
+          el owner las vea creadas/habilitadas y para crear nuevas. El `+` es OWNER-only (R13.2). */}
+      <CustomManeuverSection
+        customManeuvers={customManeuvers}
+        canCreateCustom={canCreateCustom}
+        onCreateCustom={onCreateCustom}
       />
+    </YStack>
+  );
+}
+
+// ─── Sección de maniobras personalizadas (tweak M1, §11.7) + `+` crear (R13.7) ─────────────────────────
+
+function CustomManeuverSection({
+  customManeuvers,
+  canCreateCustom,
+  onCreateCustom,
+}: {
+  customManeuvers: EnabledCustomManeuver[];
+  canCreateCustom: boolean;
+  onCreateCustom: () => void;
+}) {
+  const WHITE = getTokenValue('$white', 'color');
+  if (customManeuvers.length === 0 && !canCreateCustom) return null;
+  return (
+    <YStack gap="$2">
+      <Text fontFamily="$body" fontSize="$4" lineHeight="$4" fontWeight="600" color="$textMuted" numberOfLines={1}>
+        Maniobras personalizadas
+      </Text>
+
+      {customManeuvers.map((c) => (
+        <XStack
+          key={c.fieldDefinitionId}
+          backgroundColor="$surface"
+          borderRadius="$card"
+          borderWidth={1}
+          borderColor="$divider"
+          paddingHorizontal="$3"
+          minHeight="$touchMin"
+          alignItems="center"
+          gap="$3"
+          testID={`custom-maneuver-${c.fieldDefinitionId}`}
+        >
+          <View width={28} height={28} borderRadius="$pill" alignItems="center" justifyContent="center" backgroundColor="$greenLight">
+            <Text fontFamily="$body" fontSize="$3" lineHeight="$3" fontWeight="700" color="$primary" numberOfLines={1}>
+              ★
+            </Text>
+          </View>
+          {/* lineHeight matching → un label custom con g/j/p no se recorta. */}
+          <Text flex={1} minWidth={0} fontFamily="$body" fontSize="$5" lineHeight="$5" fontWeight="600" color="$textPrimary" numberOfLines={1}>
+            {c.label}
+          </Text>
+        </XStack>
+      ))}
+
+      {/* `+` crear maniobra personalizada (R13.7). Owner-only. */}
+      {canCreateCustom ? (
+        <Pressable
+          onPress={onCreateCustom}
+          testID="maneuver-add-custom"
+          {...buttonA11y(Platform.OS, { label: 'Crear maniobra personalizada' })}
+        >
+          <XStack
+            alignItems="center"
+            gap="$2"
+            minHeight="$touchMin"
+            paddingHorizontal="$3"
+            borderRadius="$card"
+            borderWidth={1}
+            borderColor="$primary"
+            borderStyle="dashed"
+            backgroundColor="$surface"
+            pressStyle={{ backgroundColor: '$greenLight' }}
+          >
+            <View width={28} height={28} borderRadius="$pill" alignItems="center" justifyContent="center" backgroundColor="$primary">
+              <Plus size={18} color={WHITE} strokeWidth={3} />
+            </View>
+            <Text fontFamily="$body" fontSize="$4" lineHeight="$4" fontWeight="700" color="$primary" numberOfLines={1}>
+              Crear maniobra personalizada
+            </Text>
+          </XStack>
+        </Pressable>
+      ) : null}
     </YStack>
   );
 }

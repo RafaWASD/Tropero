@@ -1637,6 +1637,83 @@ export function buildSetCustomAttributeUpsert(
   };
 }
 
+// ─── Creación de un dato/maniobra CUSTOM (spec 03 M5-C.2, R13.5–R13.9) ─────────────────────────────────
+//
+// El dato custom es una fila de `field_definitions` con `establishment_id` del campo (CRUD-plano: `id` REAL).
+// El INSERT local sube por uploadData; la RLS owner-only + el guard tg_field_definitions_custom_guard (0093)
+// re-validan server-side (owner, establishment_id no-NULL, slug/≤64, data_type ∈ (maniobra,propiedad),
+// ui_component ∈ los 7, options 1..50/≤60). `config_schema` es jsonb-as-TEXT: el caller lo serializa con
+// JSON.stringify y el connector lo DECODIFICA antes de subir (JSONB_TEXT_COLUMNS.field_definitions, evita el
+// doble-encoding que rompería `config_schema -> 'options'`). `active`/`schema_version`/`created_at`/
+// `updated_at` los pone el default del server → no se mandan. NUNCA se hardcodea establishment_id (viene del
+// contexto activo, el caller lo pasa). `description` no se setea desde el form de creación (opcional, NULL).
+
+/**
+ * INSERT local de un dato/maniobra CUSTOM (R13.5–R13.9). `id` uuid de cliente (columna `id` REAL de
+ * field_definitions). `configSchemaJson` = NULL para no-enum, o el JSON-TEXT de `{options:[...]}` para enums
+ * (el connector lo decodifica a jsonb nativo antes de subir). Las columnas de audit/timestamps las pone el
+ * server. CRUD-plano: 1 CrudEntry → uploadData la sube y la RLS/guard re-validan (un rechazo → R10.8).
+ */
+export function buildCreateCustomFieldInsert(
+  id: string,
+  establishmentId: string,
+  dataKey: string,
+  label: string,
+  dataType: string,
+  uiComponent: string,
+  category: string,
+  configSchemaJson: string | null,
+): LocalQuery {
+  return {
+    sql:
+      'INSERT INTO field_definitions ' +
+      '(id, establishment_id, data_key, label, data_type, ui_component, category, config_schema, active) ' +
+      'VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)',
+    args: [id, establishmentId, dataKey, label, dataType, uiComponent, category, configSchemaJson],
+  };
+}
+
+/**
+ * Lee los `data_key` de las field_definitions CUSTOM (establishment_id no-NULL) NO borradas, para derivar un
+ * data_key único al crear (R13.5; el slug se desambigua contra estos). La stream est_field_definitions_custom
+ * ya scopea por establecimiento + filtra deleted_at; igual filtramos establishment_id NOT NULL + active para
+ * leer solo las custom vivas del campo. (No filtramos por un establishment_id puntual: el SQLite local solo
+ * trae las del/los campo(s) del usuario; el server re-valida la unicidad por (establishment_id, data_key).)
+ */
+export function buildCustomDataKeysQuery(): LocalQuery {
+  return {
+    sql:
+      'SELECT data_key FROM field_definitions ' +
+      'WHERE establishment_id IS NOT NULL AND deleted_at IS NULL',
+    args: [],
+  };
+}
+
+/**
+ * Lee las field_definitions CUSTOM de tipo MANIOBRA habilitadas en un rodeo (tweak M1, §11.7): join de
+ * rodeo_data_config (enabled del rodeo) con field_definitions (custom maniobra viva del campo). Devuelve
+ * id + data_key + label de cada maniobra custom enabled, para sumarlas a la lista del wizard junto a las 10
+ * de fábrica. El overlay pending_rodeo_data_config también aplica (alta/edición offline del toggle): se
+ * UNIONa con override (el overlay PISA la fila synced del mismo field) — mismo invariante que buildRodeoConfigQuery
+ * (≤1 fila por (rodeo,field) en el overlay). Solo trae las que están enabled=1 en el estado EFECTIVO.
+ */
+export function buildEnabledCustomManeuversQuery(rodeoId: string): LocalQuery {
+  return {
+    sql:
+      'SELECT fd.id AS id, fd.data_key AS data_key, fd.label AS label FROM field_definitions fd ' +
+      'JOIN ( ' +
+      'SELECT field_definition_id, enabled FROM rodeo_data_config ' +
+      'WHERE rodeo_id = ? AND field_definition_id NOT IN ' +
+      '(SELECT field_definition_id FROM pending_rodeo_data_config WHERE rodeo_id = ?) ' +
+      'UNION ALL ' +
+      'SELECT field_definition_id, enabled FROM pending_rodeo_data_config WHERE rodeo_id = ? ' +
+      ') cfg ON cfg.field_definition_id = fd.id ' +
+      "WHERE cfg.enabled = 1 AND fd.establishment_id IS NOT NULL AND fd.deleted_at IS NULL " +
+      "AND fd.data_type = 'maniobra' AND fd.active = 1",
+    args: [rodeoId, rodeoId, rodeoId],
+  };
+}
+
 /**
  * INSERT local de un evento reproductivo `service` (espeja events.addService). `id` + `createdAt` de
  * cliente. `service_type` de un selector CERRADO. NO dispara transición. `notes` opcional.

@@ -133,6 +133,32 @@ test('buildCrudUpsert: opData null/undefined → payload mínimo (tabla normal s
   assert.equal(plan.onConflict, undefined);
 });
 
+test('buildCrudUpsert: field_definitions ENUM (M5-C.2) → config_schema se PARSEA a jsonb nativo (anti doble-encoding del guard)', () => {
+  // El alta de un enum custom escribe config_schema como JSON-TEXT; el guard 0093 lee `-> options` y exige
+  // jsonb array. Sin decodificar, PostgREST lo subiría como jsonb-string → `-> options` NULL → 23514.
+  const plan = buildCrudUpsert('field_definitions', 'fd-1', {
+    establishment_id: 'est-A',
+    data_key: 'pezuna',
+    data_type: 'maniobra',
+    ui_component: 'enum_single',
+    config_schema: JSON.stringify({ options: ['adentro', 'afuera'] }),
+  });
+  assert.deepEqual(plan.payload.config_schema, { options: ['adentro', 'afuera'] }); // objeto nativo
+  assert.equal(plan.payload.id, 'fd-1'); // PK id real (no es PK compuesta)
+  assert.equal(plan.onConflict, undefined);
+});
+
+test('buildCrudUpsert: field_definitions NO-ENUM → config_schema null queda null (decodeJsonbColumns no toca null)', () => {
+  const plan = buildCrudUpsert('field_definitions', 'fd-2', {
+    establishment_id: 'est-A',
+    data_key: 'angulo',
+    data_type: 'maniobra',
+    ui_component: 'numeric',
+    config_schema: null,
+  });
+  assert.equal(plan.payload.config_schema, null);
+});
+
 test('buildCrudUpsert: NO muta el opData del caller (clona)', () => {
   const opData = { animal_profile_id: 'ap-1', field_definition_id: 'fd-1', value: '1' };
   const before = { ...opData };
