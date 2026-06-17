@@ -29,5 +29,26 @@ export function isBleE2E(): boolean {
   }
 }
 
+// Flag SECUNDARIO de E2E: fuerza el sub-estado "manual promovido" del hero adaptativo de la manga
+// (spec 03 M2.1, transport==null) → el provider monta SIN transporte buildable (solo el piso manual). Es
+// el ÚNICO modo en que el sub-estado manual-first es reproducible en web (el mock siempre tiene transporte).
+// SOLO se honra si TAMBIÉN está `isBleE2E()` (doble gate): en producción/dev normal ninguna de las dos
+// marcas existe → false → transporte real. NO se puede setear desde la UI ni desde un input → sin camino de
+// usuario. Lo pone Playwright con addInitScript antes del bundle, igual que la marca principal.
+const E2E_MANUAL_GLOBAL_KEY = '__RAFAQ_BLE_E2E_MANUAL__';
+
+/** ¿Forzar el modo manual-first (sin transporte) en la corrida E2E? Solo si además isBleE2E(). */
+export function isBleE2EManual(): boolean {
+  try {
+    return (
+      isBleE2E() &&
+      (globalThis as Record<string, unknown>)[E2E_MANUAL_GLOBAL_KEY] === true
+    );
+  } catch {
+    return false;
+  }
+}
+
 export const BLE_E2E_GLOBAL_KEY = E2E_GLOBAL_KEY;
+export const BLE_E2E_MANUAL_GLOBAL_KEY = E2E_MANUAL_GLOBAL_KEY;
 export const BLE_E2E_HANDLE_KEY = '__rafaqBle';

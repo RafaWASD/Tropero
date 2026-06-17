@@ -19,14 +19,16 @@ import {
   buildFieldCatalogQuery,
   buildSystemDefaultsQuery,
   buildRodeoConfigQuery,
+  buildRodeoSystemQuery,
   toBool,
 } from './powersync/local-reads';
-import { runLocalQuery } from './powersync/local-query';
+import { runLocalQuery, runLocalQuerySingle } from './powersync/local-query';
 import type {
   FieldDefinition,
   SystemDefaultField,
   RodeoFieldConfig,
 } from '../utils/rodeo-template';
+import type { RodeoDataKeyMap, RodeoDataKeyState } from '../utils/maneuver-gating';
 
 export type { FieldDefinition, SystemDefaultField, RodeoFieldConfig } from '../utils/rodeo-template';
 
@@ -124,4 +126,61 @@ export async function fetchRodeoConfig(
       enabled: toBool(row.enabled),
     })),
   };
+}
+
+// ─── Gating capa 1 a nivel data_key (spec 03 M1.1, ADR-021) ─────────────────────────────
+
+type RodeoSystemRow = { system_id: string };
+
+/**
+ * Construye el `RodeoDataKeyMap` de un rodeo: el estado (enabled + required) de cada data_key, a partir
+ * del SQLite local (R10.3, todo cacheado). Es la entrada del gating de maniobras puro (maneuver-gating.ts).
+ *
+ * Joina tres lecturas locales (ya sincronizadas, scope aplicado por la stream):
+ *   - rodeo_data_config (fetchRodeoConfig): qué field_definition_id está enabled en ESTE rodeo.
+ *   - field_definitions (fetchFieldCatalog): el data_key de cada field_definition_id (el catálogo es por id).
+ *   - system_default_fields (fetchSystemDefaults) del system del rodeo: required_for_system por field (R5.6).
+ *
+ * El required sale de system_default_fields (per-sistema): el rodeo_data_config NO tiene flag required
+ * (0018 — solo `enabled` + `custom_config`). En cría MVP ningún field es required → required = false en
+ * todos. El `required` solo se reporta si el data_key está enabled en el rodeo (lo aplica el módulo puro).
+ *
+ * Solo aparecen en el mapa los data_keys cuyo field_definition_id está EN rodeo_data_config (enabled o no):
+ * un data_key ausente del rodeo no aparece, y el módulo puro lo trata como NO enabled (la maniobra no
+ * aplica) — equivalente a `{ enabled: false }`.
+ */
+export async function fetchRodeoGating(rodeoId: string): Promise<ServiceResult<RodeoDataKeyMap>> {
+  // 1) catálogo global field_definitions: id → dataKey + requiredForSystem (este último viene de defaults).
+  const catalog = await fetchFieldCatalog();
+  if (!catalog.ok) return { ok: false, error: catalog.error };
+  const dataKeyById = new Map<string, string>();
+  for (const fd of catalog.value) dataKeyById.set(fd.id, fd.dataKey);
+
+  // 2) config efectiva del rodeo: field_definition_id → enabled.
+  const config = await fetchRodeoConfig(rodeoId);
+  if (!config.ok) return { ok: false, error: config.error };
+
+  // 3) system del rodeo → defaults (required_for_system por field). Si no se resuelve el system (rodeo
+  //    aún no sincronizado), degradamos required a false (cría MVP no tiene requireds → no cambia el set).
+  const requiredByField = new Map<string, boolean>();
+  const sysRow = await runLocalQuerySingle<RodeoSystemRow>(buildRodeoSystemQuery(rodeoId), {
+    emptyIsSyncing: false,
+  });
+  if (sysRow.ok && sysRow.value) {
+    const defaults = await fetchSystemDefaults(sysRow.value.system_id);
+    if (defaults.ok) {
+      for (const d of defaults.value) requiredByField.set(d.fieldDefinitionId, d.requiredForSystem);
+    }
+  }
+
+  const map: Record<string, RodeoDataKeyState> = {};
+  for (const row of config.value) {
+    const dataKey = dataKeyById.get(row.fieldDefinitionId);
+    if (!dataKey) continue; // field sin entrada en el catálogo (no debería) → se omite, no aplica.
+    map[dataKey] = {
+      enabled: row.enabled,
+      required: requiredByField.get(row.fieldDefinitionId) === true,
+    };
+  }
+  return { ok: true, value: map };
 }

@@ -210,6 +210,14 @@ const COLUMNS_READ_BY_BUILDERS: Record<string, string[]> = {
   establishments: ['name', 'province', 'city', 'deleted_at', 'total_hectares'],
   invitations: ['role', 'email', 'created_at', 'expires_at', 'token', 'establishment_id', 'status'],
   management_groups: ['name', 'establishment_id', 'active', 'deleted_at'],
+  // spec 03 M1.2/M1.3 — MODO MANIOBRAS: sessions + maneuver_presets (CRUD plano). Los builders de
+  // local-reads.ts (buildCreateSessionInsert/…/buildManeuverPresetByIdQuery) leen/escriben estas columnas;
+  // sin declararlas, PowerSync no las materializa → "no such column" en vivo.
+  sessions: [
+    'establishment_id', 'rodeo_id', 'config', 'status', 'work_lot_label', 'animal_count',
+    'event_count', 'started_at', 'ended_at', 'deleted_at',
+  ],
+  maneuver_presets: ['establishment_id', 'name', 'config', 'deleted_at'],
   // camino de datos
   animal_profiles: [
     'animal_id', 'establishment_id', 'idv', 'visual_id_alt', 'category_id', 'category_override',

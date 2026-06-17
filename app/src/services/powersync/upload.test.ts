@@ -38,9 +38,15 @@ test('mapIntentToRpc: exit_animal_profile NO recibe p_client_op_id (su firma no 
   assert.ok(!('p_client_op_id' in plan.args), 'exit_animal_profile NO debe llevar p_client_op_id');
 });
 
-test('mapIntentToRpc: soft_delete_management_group / soft_delete_rodeo → rpc SIN p_client_op_id', () => {
-  for (const opType of ['soft_delete_management_group', 'soft_delete_rodeo', 'soft_delete_animal_event', 'soft_delete_event']) {
-    const plan = mapIntentToRpc({ id: 'c', opData: { op_type: opType, params_json: '{"p_rodeo_id":"r1"}' } });
+test('mapIntentToRpc: soft_delete_* (incl. maneuver_preset, spec 03 M1.3) → rpc SIN p_client_op_id', () => {
+  for (const opType of [
+    'soft_delete_management_group',
+    'soft_delete_rodeo',
+    'soft_delete_animal_event',
+    'soft_delete_event',
+    'soft_delete_maneuver_preset',
+  ]) {
+    const plan = mapIntentToRpc({ id: 'c', opData: { op_type: opType, params_json: '{"p_preset_id":"p1"}' } });
     assert.equal(plan.kind, 'rpc');
     if (plan.kind !== 'rpc') continue;
     assert.equal(plan.rpcName, opType);
@@ -265,6 +271,8 @@ test('IDEMPOTENCIA: P0002 (not found) de un soft_delete_* ya aplicado → idempo
   assert.equal(classifyIntentUploadError({ code: 'P0002' }, 'soft_delete_management_group'), 'idempotent_discard');
   assert.equal(classifyIntentUploadError({ code: 'P0002' }, 'soft_delete_rodeo'), 'idempotent_discard');
   assert.equal(classifyIntentUploadError({ code: 'P0002' }, 'soft_delete_event'), 'idempotent_discard');
+  // spec 03 M1.3 — el soft-delete de preset reintentado (preset ya borrado) → descarte idempotente.
+  assert.equal(classifyIntentUploadError({ code: 'P0002' }, 'soft_delete_maneuver_preset'), 'idempotent_discard');
 });
 
 test('P0002 que NO es de un soft_delete (p.ej. register_birth) → permanent_reject (no idempotente acá)', () => {

@@ -67,7 +67,7 @@ import { FIRST_SYNC_TIMEOUT_MS } from '@/services/powersync/first-sync';
 import { BleStickListenerProvider } from '@/services/ble/BleStickListenerProvider';
 import { FindOrCreateOverlay } from './_components/FindOrCreateOverlay';
 import { BleE2EBridge } from './_components/BleE2EBridge';
-import { isBleE2E } from './_components/ble-e2e-flag';
+import { isBleE2E, isBleE2EManual } from './_components/ble-e2e-flag';
 
 // Fallback que destapa el splash si NADA resuelve (getSession/memberships colgados). DEBE ser MAYOR
 // que FIRST_SYNC_TIMEOUT_MS (la espera del primer sync en EstablishmentContext, ~4500ms): así, cuando
@@ -158,7 +158,14 @@ const GROUP_DESTINATIONS = new Set([
 // en native la ruta no funciona (Web Serial no existe) y queda gateada como cualquier otra.
 // Cero superficie de seguridad (frontend puro, sin red/DB). Reversible: borrar este Set + el
 // early-return del efecto de abajo.
-const DEV_WEB_ROUTES = new Set(['baston-test']);
+// Spec 03 M2.0 — DESIGN SPIKE de PESAJE (`maniobra/paso`): pantalla VISUAL 100% MOCK que el leader vetó
+// con design-review. Se expone alcanzable directo en web (sin gating de auth/establecimiento/rodeo) para
+// la captura e2e a 412×915 sin seed. NO es producción.
+// AS-BUILT M2.2 (2026-06-14): `maniobra/carga` SALIÓ de acá — ahora es el FRAME REAL de carga rápida
+// (autenticado, consume sesión + animal + gating, requiere sessionId+profileId; se llega por el auto-
+// avance de `identificar`). El paso de tacto vive cableado en el frame (TactoStep). Solo queda el spike
+// de pesaje (`maniobra/paso`), aún mock, como referencia visual hasta que M3 cablee el paso completo.
+const DEV_WEB_ROUTES = new Set(['baston-test', 'maniobra/paso']);
 
 /**
  * Gate unificado de navegación: auth (R1.3 / R7.*) + establecimiento (Fase 4: R6.4–R6.10).
@@ -257,7 +264,11 @@ function RootGate() {
 
     // Bypass de gating para harnesses de dev web (ver DEV_WEB_ROUTES): alcanzables directo en
     // `pnpm web` sin sesión / campo / rodeo, así Raf puede probar el bastón sin rebotar a login.
-    if (Platform.OS === 'web' && DEV_WEB_ROUTES.has(top)) {
+    // Matcheamos el top-segment (baston-test) Y la ruta anidada completa (maniobra/carga,
+    // maniobra/paso del spike M2.0) — el `maniobra` pelado (modal stub del FAB) NO bypassea: solo
+    // las dos sub-rutas del spike, que son las que el e2e captura sin auth.
+    const fullPath = segments.join('/');
+    if (Platform.OS === 'web' && (DEV_WEB_ROUTES.has(top) || DEV_WEB_ROUTES.has(fullPath))) {
       hideSplashOnce();
       return;
     }
@@ -377,6 +388,26 @@ function RootGate() {
       <Stack.Screen name="update-password" />
       <Stack.Screen name="(tabs)" />
       <Stack.Screen name="maniobra" options={{ presentation: 'modal' }} />
+      {/* Spec 03 M1.4 — WIZARD de config de jornada (inicio + 3 etapas). Pantalla autenticada real
+          (consume sessions/maneuver-presets/gating + el establishment/rodeo del contexto), gateada
+          como cualquier otra. Pantalla completa (no modal): es un flujo de varias etapas. */}
+      <Stack.Screen name="maniobra/jornada" />
+      {/* Spec 03 M2.2 — FRAME REAL de carga rápida (`maniobra/carga`): autenticado, consume la sesión +
+          el animal (fetchAnimalDetail) + el gating por rodeo real; recorre las maniobras de la jornada
+          (dispatcher genérico tacto/pesaje/placeholder), persiste con session_id, resumen corregible +
+          progreso. Se llega por el auto-avance de `identificar` (sessionId+profileId). Gateada como
+          cualquier otra — NO está en DEV_WEB_ROUTES. Pantalla completa (no modal). */}
+      <Stack.Screen name="maniobra/carga" />
+      {/* Spec 03 M2.0 — DESIGN SPIKE de PESAJE (`maniobra/paso`): pantalla VISUAL 100% MOCK, alcanzable
+          directo en web sin auth (DEV_WEB_ROUTES) para la captura e2e a 412×915. Referencia visual del
+          keypad hasta que M3 cablee el paso completo. Pantalla completa (no modal). */}
+      <Stack.Screen name="maniobra/paso" />
+      {/* Spec 03 M2.1-core — IDENTIFICACIÓN del animal (scan-first cableado: BLE + manual + find-or-create
+          + auto-avance). Pantalla AUTENTICADA real (consume la sesión + establishment/rodeo + el listener
+          del bastón), gateada como cualquier otra — NO está en DEV_WEB_ROUTES. Se llega desde el wizard de
+          jornada (createSession → /maniobra/identificar?sessionId=…). El listener BLE global (spec 09) se
+          suspende por ruta `maniobra` (R3.2). Pantalla completa. */}
+      <Stack.Screen name="maniobra/identificar" />
       {/* "Mis campos" (R6.6): pantalla standalone, header propio. */}
       <Stack.Screen name="mis-campos" />
       {/* Onboarding wizard (R6.5) — sin campos. */}
@@ -504,8 +535,10 @@ export default function RootLayout() {
                       transporte (RB1.3): la conexión la dispara un gesto (web-serial) o el MockAdapter
                       en E2E. mode='mock' SOLO bajo el flag de E2E (isBleE2E, fuera de producción);
                       'auto' en cualquier build normal (web-serial/manual por plataforma). baston-test
-                      queda intacto (su provider es self-contained). */}
-                  <BleStickListenerProvider mode={isBleE2E() ? 'mock' : 'auto'}>
+                      queda intacto (su provider es self-contained). El flag SECUNDARIO isBleE2EManual()
+                      (doble-gateado por isBleE2E) fuerza mode='manual' (sin transporte) para reproducir el
+                      sub-estado "manual promovido" del hero adaptativo (spec 03 M2.1) en la captura E2E. */}
+                  <BleStickListenerProvider mode={isBleE2E() ? (isBleE2EManual() ? 'manual' : 'mock') : 'auto'}>
                     <BleHost />
                   </BleStickListenerProvider>
                 </RodeoProvider>

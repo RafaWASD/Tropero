@@ -41,6 +41,16 @@ const palette = {
   surface: '#F8F6F1', // bone — surface de cards (cálido, solo para cards)
   // Acentos.
   terracota: '#C0451F', // alertas / tertiary (contraste AA 4.86 sobre $bg; fix WCAG)
+  // Ámbar de "espera/pausa" — bloque DIFERIDA del tacto vaquillona (spec 03 M3.2a, 🔴 manga). JIT,
+  // provisional (a canonizar al aprobar la dirección, mismo patrón que heroScan/StickIcon de M2.1).
+  // El tacto vaquillona tiene 3 resultados (apta/no_apta/diferida) que necesitan 3 colores INEQUÍVOCOS a
+  // pleno sol con guante: verde botella ($primary) = APTA, terracota ($terracota) = NO APTA, y este ÁMBAR
+  // = DIFERIDA (semántica universal de "pausa/espera/posponer", distinto de verde/rojo). Tono oscuro y
+  // saturado (no pastel) para que el bloque LLENE con peso visual igual que los otros dos y el texto
+  // BLANCO encima contraste bien (#9A6206 sobre blanco = 5.0:1, AA). NO se usa "neutro/gris" porque sobre
+  // los 2 bloques vivos se leería como "deshabilitado" — ambigüedad fatal en manga.
+  amber: '#9A6206', // DIFERIDA — ámbar oscuro (texto blanco encima ≈ 5.0:1 AA)
+  amberPress: '#7E5005', // estado pressed del amber (derivado, más oscuro)
   greenLight: '#93cfac', // verde claro — icon containers + halo del FAB
   // Halo del FAB (ADR-018): greenLight (#93cfac = rgb(147,207,172)) al 45% de alpha.
   // Es el MISMO verde claro translúcido — se expone como token de color propio para
@@ -91,6 +101,8 @@ const tokens = createTokens({
     primaryLight: palette.primaryLight,
     surface: palette.surface,
     terracota: palette.terracota,
+    amber: palette.amber, // DIFERIDA del tacto vaquillona (spec 03 M3.2a) — ámbar de "espera/pausa"
+    amberPress: palette.amberPress,
     greenLight: palette.greenLight,
     fabHalo: palette.fabHalo, // verde claro translúcido del halo del FAB (= greenLight @ 45%)
     scrim: palette.scrim, // negro translúcido del scrim de modales/sheets (= textPrimary @ 45%)
@@ -205,6 +217,36 @@ const tokens = createTokens({
     // Alto de cada segmento de la barra de progreso del wizard "Crear rodeo" (spec 02 C1). Barra
     // fina (estilo onboarding) — JIT lo necesitó el wizard.
     progressTrack: 6,
+    // ── HERO de escaneo de MODO MANIOBRAS (spec 03 M2.1, identificación del animal) — JIT, 🔴 manga-crítico.
+    // El escaneo del bastón es el 95% del flujo (manos ocupadas, no hay que tocar nada): el hero es el
+    // elemento DOMINANTE de la pantalla y tiene que leerse a metros, a pleno sol. Es un "target" pasivo
+    // (no se toca: el target real es el animal), así que NO sigue la escala de touch-targets — sigue la
+    // escala de figura-fondo (Gestalt). Tres tokens derivados del disco del pulso:
+    //   heroScan  = diámetro del disco/anillo de escaneo (el contenedor del pulso). 200 da una figura
+    //               grande y calma que domina el tercio central sin tocar el header ni la zona del pulgar.
+    //   heroRing  = grosor del anillo de "escuchando" (el borde que pulsa). Derivado para que el anillo
+    //               se lea como onda, no como un borde fino.
+    //   heroIcon  = tamaño del ícono del bastón (StickIcon) dentro del disco. ~40% del disco → el glifo
+    //               se reconoce de un vistazo sin llenar el círculo (deja aire para el pulso).
+    heroScan: 200,
+    heroRing: 8,
+    heroIcon: 80,
+    // ── STEPPER de CONDICIÓN CORPORAL (spec 03 M3.2a, R6.6) — JIT, 🔴 manga-crítico. Los botones − / +
+    // del stepper se tocan con guante a velocidad de manga → target GIGANTE, muy por encima del piso de
+    // 56px (touchMin) y del ≥80px que pide la dirección del leader. 88 da un cuadrado cómodo que el pulgar
+    // no erra, deja el VALOR hero ($11=64px) dominando el centro, y entra holgado a los lados en 412px de
+    // ancho. Cuadrado (width=height=stepperBtn) para que − y + se lean simétricos. Es un touch-target, no
+    // sigue la escala de figura-fondo del heroScan.
+    stepperBtn: 88,
+    // ── NÚMERO DE TUBO de lab (spec 03 M3.2b, R6.4/R6.11 sangrado/raspado) — JIT, 🔴 manga-crítico. El
+    // tube_number se tipea en un input de texto (alfanumérico, no keypad — la columna es `text`) pero se
+    // muestra GRANDE para leerlo de un vistazo al rotular el tubo en la mano: ~24px (un escalón sobre el
+    // $inputText=16 estándar) sin llegar al hero numérico del peso ($11=64) — es un código corto, no un
+    // valor de medición. Cruza al style.fontSize del <TextInput> de RN (pide número) → token de size leído
+    // con getTokenValue, mismo patrón que inputText/navLabel. NO se le aplica formato es-AR (código de máquina).
+    tubeText: 24,
+    // Indicador de progreso de jornada en el header SLIM ("12 hoy"): el punto/dot del chip de contador.
+    // Reusa $dot=8 para la marca; no necesita token propio.
   },
 });
 
@@ -259,6 +301,11 @@ const interFont = createFont({
     8: 23,
     9: 30,
     10: 38, // display / headlines
+    // Hero number GIGANTE (monto dominante estilo Cash App). JIT: lo necesitó el display de PESO de
+    // paso.tsx (spec 03 M2.0) — el valor que el operario carga y verifica (R12.4) tiene que ser el
+    // elemento MÁS grande de la pantalla, dominante sobre las teclas del teclado ($10=38px). 64px lo
+    // separa claramente del resto de la escala (no es un "headline más", es EL número).
+    11: 64, // hero number / monto dominante
   },
   lineHeight: {
     1: 16,
@@ -272,6 +319,7 @@ const interFont = createFont({
     8: 31,
     9: 38,
     10: 46,
+    11: 72, // matching del hero number $11 (64px) — evita recorte de descendentes
   },
   weight: {
     1: '400', // body

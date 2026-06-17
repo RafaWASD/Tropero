@@ -82,11 +82,15 @@ async function waitForProfileLocally(profileId: string, tries = 20, delayMs = 40
   }
 }
 
-// Ruta de la pantalla de asignación MASIVA (spec 09 chunk dedup opción B, RD5). Mientras esa pantalla
-// está montada, ESTE overlay global NO debe abrirse por un bastoneo: la pantalla masiva maneja los EIDs
-// con su PROPIO listener (anti-stacking, design §4.2). Suprimimos por ruta (no por `busyMode`, que en el
-// provider gatea TODO el listener incl. el de la masiva) — la vía que NO toca `ble/*`.
-const BULK_ASSIGN_ROUTE = 'asignar-caravanas';
+// Rutas que manejan los bastoneos con su PROPIO listener → este overlay global NO debe abrirse por un
+// bastoneo mientras están montadas (anti-stacking, design §4.2). Suprimimos por RUTA (top-segment), no por
+// `busyMode` (que en el provider gatea TODO el listener incl. el de la pantalla dueña — la apagaría a ella
+// también): así el transporte sigue escuchando y la pantalla dueña recibe las lecturas, mientras el overlay
+// las ignora. La vía que NO toca `ble/*`.
+//   - 'asignar-caravanas' (spec 09 chunk dedup opción B, RD5): cola de bastoneos masiva.
+//   - 'maniobra' (spec 03 M2.1, R3.2): MODO MANIOBRAS suspende el listener global y maneja el escaneo
+//     DENTRO del modo (la pantalla `maniobra/identificar` tiene su propio useBleStickListener).
+const BLE_OWNED_ROUTES = new Set(['asignar-caravanas', 'maniobra']);
 
 export function FindOrCreateOverlay() {
   const router = useRouter();
@@ -97,11 +101,12 @@ export function FindOrCreateOverlay() {
   const syncStatus = useStatus();
   const segments = useSegments();
 
-  // ¿Estamos en la pantalla de asignación masiva? (top-segment de la ruta activa). Si sí, el overlay no
-  // procesa bastoneos (la pantalla masiva los consume). Ref para leerlo dentro del callback sin re-crearlo.
-  const onBulkAssignRoute = (segments[0] ?? '') === BULK_ASSIGN_ROUTE;
-  const onBulkAssignRouteRef = useRef(onBulkAssignRoute);
-  onBulkAssignRouteRef.current = onBulkAssignRoute;
+  // ¿Estamos en una ruta que maneja los bastoneos por su cuenta (asignación masiva / MODO MANIOBRAS)?
+  // (top-segment de la ruta activa). Si sí, el overlay no procesa bastoneos (la pantalla dueña los
+  // consume). Ref para leerlo dentro del callback sin re-crearlo.
+  const onBleOwnedRoute = BLE_OWNED_ROUTES.has(segments[0] ?? '');
+  const onBleOwnedRouteRef = useRef(onBleOwnedRoute);
+  onBleOwnedRouteRef.current = onBleOwnedRoute;
 
   const establishmentId = est.status === 'active' ? est.current.id : null;
   const activeFieldName = est.status === 'active' ? est.current.name : '';
@@ -126,9 +131,10 @@ export function FindOrCreateOverlay() {
   const onTagRead = useCallback(
     (eid: string) => {
       if (!establishmentId) return; // defensa: enabled ya lo gatea, pero no disparamos sin campo
-      // Anti-stacking (design §4.2 / RD5.2): si la pantalla de asignación masiva está activa, ELLA maneja
-      // el bastoneo con su propio listener → el overlay global NO abre nada (sería doble proceso del EID).
-      if (onBulkAssignRouteRef.current) return;
+      // Anti-stacking (design §4.2 / RD5.2 / R3.2): si una ruta dueña del bastón está activa (asignación
+      // masiva o MODO MANIOBRAS), ELLA maneja el bastoneo con su propio listener → el overlay global NO
+      // abre nada (sería doble proceso del EID — dos consumidores compitiendo por la lectura).
+      if (onBleOwnedRouteRef.current) return;
       const ticket = ++seqRef.current;
       lookupEstablishmentRef.current = establishmentId;
       setState({ eid, status: 'loading' });
@@ -173,12 +179,12 @@ export function FindOrCreateOverlay() {
     }
   }, [establishmentId, state, close]);
 
-  // ─── Anti-stacking (design §4.2 / RD5.2): si entramos a la pantalla de asignación masiva con el overlay
-  // abierto (p. ej. un live-rescan lo abrió justo antes de navegar), lo cerramos — esa pantalla maneja los
-  // bastoneos por su cuenta y no debe quedar un sheet stale encima. ───
+  // ─── Anti-stacking (design §4.2 / RD5.2 / R3.2): si entramos a una ruta dueña del bastón (asignación
+  // masiva o MODO MANIOBRAS) con el overlay abierto (p. ej. un live-rescan lo abrió justo antes de navegar),
+  // lo cerramos — esa pantalla maneja los bastoneos por su cuenta y no debe quedar un sheet stale encima. ───
   useEffect(() => {
-    if (onBulkAssignRoute && state !== null) close();
-  }, [onBulkAssignRoute, state, close]);
+    if (onBleOwnedRoute && state !== null) close();
+  }, [onBleOwnedRoute, state, close]);
 
   if (state === null) return null;
 

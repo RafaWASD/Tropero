@@ -139,7 +139,7 @@ export async function seedEstablishment(
 export async function seedRodeo(
   establishmentId: string,
   name = 'Rodeo general',
-  opts: { speciesCode?: string; systemCode?: string } = {},
+  opts: { speciesCode?: string; systemCode?: string; rawName?: boolean } = {},
 ): Promise<string> {
   const speciesCode = opts.speciesCode ?? 'bovino';
   const systemCode = opts.systemCode ?? 'cria';
@@ -161,19 +161,23 @@ export async function seedRodeo(
   if (sysErr) throw new Error(`seedRodeo system: ${sysErr.message}`);
   if (!system) throw new Error(`seedRodeo: sistema "${systemCode}" no encontrado para ${speciesCode}`);
 
+  // El nombre va namespaced con el RUN_TAG por default (red de seguridad del barrido por nombre). Para
+  // CAPTURAS demo (donde el prefijo "e2e_…" ensucia la pantalla, R12.4) se pasa `rawName:true` → nombre
+  // limpio ("Cría hembras"). SEGURO: el rodeo se borra por CASCADE del establishment (FK on delete cascade,
+  // 0017) trackeado por id; su nombre NO participa del cleanup (el barrido por nombre es solo de
+  // `establishments`). El establishment SIGUE con su RUN_TAG → la red de seguridad no se debilita.
+  const rodeoName = opts.rawName ? name : `${RUN_TAG} ${name}`;
   const { data: ins, error: insErr } = await admin
     .from('rodeos')
     .insert({
       establishment_id: establishmentId,
-      name: `${RUN_TAG} ${name}`,
+      name: rodeoName,
       species_id: species.id,
       system_id: system.id,
     })
     .select('id')
     .single();
   if (insErr) throw new Error(`seedRodeo insert: ${insErr.message}`);
-  // El rodeo se borra en cascada al borrar el establishment (FK on delete cascade, 0017) → el
-  // cleanup de establishments ya lo cubre, no hace falta trackearlo aparte.
   return ins.id as string;
 }
 
@@ -185,11 +189,127 @@ export async function seedRodeo(
 export async function seedEstablishmentWithRodeo(
   ownerId: string,
   name: string,
-  opts: { province?: string; city?: string | null } = {},
+  opts: {
+    province?: string;
+    city?: string | null;
+    /** Nombre del rodeo (default "Rodeo general"). Para CAPTURAS demo: un nombre limpio ("Cría hembras"). */
+    rodeoName?: string;
+    /**
+     * Si true, el rodeo se siembra SIN el prefijo RUN_TAG (nombre limpio para capturas demo). SEGURO: el
+     * rodeo se borra por CASCADE del establishment (trackeado por id); el establishment conserva su RUN_TAG.
+     */
+    rodeoRawName?: boolean;
+  } = {},
 ): Promise<{ establishmentId: string; rodeoId: string }> {
   const establishmentId = await seedEstablishment(ownerId, name, opts);
-  const rodeoId = await seedRodeo(establishmentId);
+  const rodeoId = await seedRodeo(establishmentId, opts.rodeoName ?? 'Rodeo general', {
+    rawName: opts.rodeoRawName,
+  });
   return { establishmentId, rodeoId };
+}
+
+/**
+ * Habilita (o deshabilita) un data_key en el rodeo_data_config de un rodeo, vía service_role. Algunos
+ * data_keys nacen DESHABILITADOS por defecto en la plantilla de cría (0018 l.96: `inseminacion`,
+ * `peso_nacimiento`, `tuberculosis`) → para testear una maniobra cuyo data_key está off por default (ej.
+ * INSEMINACIÓN, R6.5) hay que prenderlo primero (lo que el owner haría desde la config del rodeo). El
+ * rodeo_data_config ya tiene una fila por field (la sembró el trigger 0018 al crear el rodeo) → UPDATE.
+ */
+export async function setRodeoDataKey(
+  rodeoId: string,
+  dataKey: string,
+  enabled: boolean,
+): Promise<void> {
+  const { data: fd, error: fdErr } = await admin
+    .from('field_definitions')
+    .select('id')
+    .eq('data_key', dataKey)
+    .single();
+  if (fdErr) throw new Error(`setRodeoDataKey field_definitions(${dataKey}): ${fdErr.message}`);
+  const { error } = await admin
+    .from('rodeo_data_config')
+    .update({ enabled })
+    .eq('rodeo_id', rodeoId)
+    .eq('field_definition_id', fd.id as string);
+  if (error) throw new Error(`setRodeoDataKey update(${dataKey}=${enabled}): ${error.message}`);
+}
+
+/**
+ * Siembra un maneuver_preset (scope establishment) con su config jsonb, vía service_role. Se usa para
+ * que el wizard tenga un HISTORIAL de preconfig que sembrar al autocompletar (R1.8, DM1-UI-1): el
+ * wizard lee los presets del campo y junta los valores de preconfig usados antes (vacuna/pajuela). Se
+ * borra en cascada al borrar el establishment (FK on delete cascade). Devuelve el preset id.
+ */
+export async function seedManeuverPreset(
+  establishmentId: string,
+  name: string,
+  config: Record<string, unknown>,
+): Promise<string> {
+  const { data, error } = await admin
+    .from('maneuver_presets')
+    .insert({ establishment_id: establishmentId, name: `${RUN_TAG} ${name}`, config })
+    .select('id')
+    .single();
+  if (error) throw new Error(`seedManeuverPreset insert: ${error.message}`);
+  return data.id as string;
+}
+
+/**
+ * Normaliza el `config` de un session/preset materializado en el server al objeto que la APP lee. El
+ * cliente persiste `config` como `JSON.stringify(config)` (CRUD-plano sobre la columna jsonb) → al subir,
+ * PostgREST guarda ese STRING como un VALOR string JSON dentro del jsonb (no como objeto). Por eso la app
+ * tolera ambas formas en `parseManeuverConfig` (string JSON → parse; objeto → tal cual). El oráculo del
+ * server debe espejar esa tolerancia: asertar el shape que la app GENUINAMENTE recupera, no el wire-shape
+ * crudo. Re-parsea hasta 2 niveles (cubre el doble-encoding observado), igual que el cliente.
+ */
+function normalizeManeuverConfig(raw: unknown): Record<string, unknown> {
+  let v = raw;
+  for (let i = 0; i < 2; i++) {
+    if (typeof v === 'string') {
+      try {
+        v = JSON.parse(v);
+      } catch {
+        return {};
+      }
+    } else break;
+  }
+  return v != null && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
+}
+
+/**
+ * ORÁCULO de persistencia server-side de un PRESET de maniobra (spec 03 R2.1 — "Guardar como rutina").
+ * Pollea `maneuver_presets` vía service_role hasta que exista una fila NO borrada del establishment con el
+ * `name` esperado (el wizard lo guarda SIN el RUN_TAG, así que se busca por el nombre tal cual lo tipeó el
+ * test). Verifica que el createPreset (CRUD-plano local + upload queue) llegó REAL al server (no solo al
+ * overlay/UI) — espeja waitForServerActiveSessionId. Devuelve el id + el config NORMALIZADO al shape que la
+ * app recupera (las maniobras + preconfig de la jornada), tolerando el doble-encoding del jsonb (igual que
+ * parseManeuverConfig del cliente).
+ */
+export async function waitForServerPreset(
+  establishmentId: string,
+  name: string,
+  opts: { tries?: number; delayMs?: number } = {},
+): Promise<{ id: string; config: Record<string, unknown> }> {
+  const tries = opts.tries ?? 30;
+  const delayMs = opts.delayMs ?? 2000;
+  for (let i = 0; i < tries; i++) {
+    const { data, error } = await admin
+      .from('maneuver_presets')
+      .select('id, config')
+      .eq('establishment_id', establishmentId)
+      .eq('name', name)
+      .is('deleted_at', null)
+      .limit(1);
+    if (error) throw new Error(`waitForServerPreset: ${error.message}`);
+    if (data && data.length > 0) {
+      return { id: data[0].id as string, config: normalizeManeuverConfig(data[0].config) };
+    }
+    await new Promise((r) => setTimeout(r, delayMs));
+  }
+  throw new Error(
+    `waitForServerPreset(${establishmentId}, "${name}"): el preset NUNCA llegó al server (${tries} ` +
+      `intentos) — el createPreset vive solo en el SQLite local / no se drenó la upload queue.`,
+  );
 }
 
 /**
@@ -361,6 +481,115 @@ export async function waitForServerAnimalProfile(
 }
 
 /**
+ * ORÁCULO de persistencia server-side del MOVIMIENTO DE RODEO de un perfil (spec 03 R4.4 — "pasar el
+ * animal a este rodeo"). Pollea vía service_role hasta que `animal_profiles.rodeo_id` del perfil dado sea
+ * `expectedRodeoId`. Verifica que el UPDATE de `rodeo_id` (CRUD-plano local + upload queue) llegó REAL al
+ * server (no solo al overlay/UI). Espeja `waitForServerAnimalProfile`.
+ */
+export async function waitForServerProfileRodeo(
+  profileId: string,
+  expectedRodeoId: string,
+  opts: { tries?: number; delayMs?: number } = {},
+): Promise<void> {
+  const tries = opts.tries ?? 30;
+  const delayMs = opts.delayMs ?? 2000;
+  let last: string | null = null;
+  for (let i = 0; i < tries; i++) {
+    const { data, error } = await admin
+      .from('animal_profiles')
+      .select('rodeo_id')
+      .eq('id', profileId)
+      .maybeSingle();
+    if (error) throw new Error(`waitForServerProfileRodeo: ${error.message}`);
+    last = (data?.rodeo_id as string | undefined) ?? null;
+    if (last === expectedRodeoId) return;
+    await new Promise((r) => setTimeout(r, delayMs));
+  }
+  throw new Error(
+    `waitForServerProfileRodeo(${profileId}): el rodeo_id NUNCA llegó a ${expectedRodeoId} en el server ` +
+      `(${tries} intentos; último visto: ${last ?? 'null'}). El UPDATE de animal_profiles.rodeo_id (R4.4 ` +
+      `"pasar a este rodeo") no sincronizó, o lo rechazó el trigger same-system (0047).`,
+  );
+}
+
+/**
+ * ORÁCULO de persistencia server-side del CIERRE de una jornada de manga (spec 03 R10.7 — "Terminar
+ * jornada" → closeSession). Pollea vía service_role hasta que `sessions.status` del id dado sea `'closed'`.
+ * Verifica que el UPDATE de cierre (CRUD-plano local + upload queue) llegó REAL al server (no solo a la UI).
+ * Espeja `waitForServerProfileRodeo`. Lo usa el e2e de salida de la jornada para probar que "Terminar
+ * jornada" cierra la sesión de verdad (no solo navega).
+ */
+export async function waitForServerSessionClosed(
+  sessionId: string,
+  opts: { tries?: number; delayMs?: number } = {},
+): Promise<void> {
+  const tries = opts.tries ?? 30;
+  const delayMs = opts.delayMs ?? 2000;
+  let last: string | null = null;
+  for (let i = 0; i < tries; i++) {
+    const { data, error } = await admin
+      .from('sessions')
+      .select('status')
+      .eq('id', sessionId)
+      .maybeSingle();
+    if (error) throw new Error(`waitForServerSessionClosed: ${error.message}`);
+    last = (data?.status as string | undefined) ?? null;
+    if (last === 'closed') return;
+    await new Promise((r) => setTimeout(r, delayMs));
+  }
+  throw new Error(
+    `waitForServerSessionClosed(${sessionId}): el status NUNCA llegó a 'closed' en el server ` +
+      `(${tries} intentos; último visto: ${last ?? 'null'}). El UPDATE de cierre (R10.7 closeSession) no ` +
+      `sincronizó, o lo rechazó la RLS (sessions_update = has_role_in).`,
+  );
+}
+
+/**
+ * Lee el `status` actual de una sesión vía service_role (sin pollear). Para asertar que "Salir sin terminar"
+ * NO cerró la sesión (queda 'active' + reanudable, R10.5/R10.6). Devuelve null si no existe.
+ */
+export async function readServerSessionStatus(sessionId: string): Promise<string | null> {
+  const { data, error } = await admin
+    .from('sessions')
+    .select('status')
+    .eq('id', sessionId)
+    .maybeSingle();
+  if (error) throw new Error(`readServerSessionStatus: ${error.message}`);
+  return (data?.status as string | undefined) ?? null;
+}
+
+/**
+ * Lee el `id` de la sesión ACTIVA de un establishment vía service_role. La pantalla de identificación NO
+ * expone el sessionId en el DOM → el e2e necesita el id real para los oráculos de cierre. Pollea hasta verla
+ * (la jornada se crea offline-local y sube por la upload queue). Devuelve el id o lanza si nunca aparece.
+ */
+export async function waitForServerActiveSessionId(
+  establishmentId: string,
+  opts: { tries?: number; delayMs?: number } = {},
+): Promise<string> {
+  const tries = opts.tries ?? 30;
+  const delayMs = opts.delayMs ?? 2000;
+  for (let i = 0; i < tries; i++) {
+    const { data, error } = await admin
+      .from('sessions')
+      .select('id')
+      .eq('establishment_id', establishmentId)
+      .eq('status', 'active')
+      .order('started_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) throw new Error(`waitForServerActiveSessionId: ${error.message}`);
+    const id = (data?.id as string | undefined) ?? null;
+    if (id) return id;
+    await new Promise((r) => setTimeout(r, delayMs));
+  }
+  throw new Error(
+    `waitForServerActiveSessionId(${establishmentId}): no apareció ninguna sesión activa en el server ` +
+      `(${tries} intentos). La jornada (createSession offline) no sincronizó.`,
+  );
+}
+
+/**
  * ORÁCULO de persistencia server-side de un EVENTO SIMPLE (spec 15 T7.3 — evento simple offline →
  * reconexión → fila REAL en el server). Pollea vía service_role hasta que `weight_events` contenga la
  * fila REAL para ese establishment + peso. Espeja `waitForServerAnimalProfile`: el bug de pérdida de
@@ -391,6 +620,318 @@ export async function waitForServerWeightEvent(
     `waitForServerWeightEvent(${establishmentId}, ${weightKg}kg): el peso NUNCA llegó al server ` +
       `(${tries} intentos) — el evento vive solo en el SQLite local / no se drenó la upload queue.`,
   );
+}
+
+/**
+ * ORÁCULO de persistencia server-side de un PESAJE de MANIOBRA con `session_id` (spec 03 M2.2, R5.11):
+ * pollea `weight_events` hasta encontrar la fila REAL del peso CON un `session_id` NO nulo (= cargada en la
+ * jornada de manga). Espeja waitForServerWeightEvent pero EXIGE el vínculo de sesión: prueba que el evento
+ * subió por el orquestador con session_id (no como evento suelto de la ficha). Devuelve el session_id real.
+ */
+export async function waitForServerWeightEventWithSession(
+  establishmentId: string,
+  weightKg: number,
+  opts: { tries?: number; delayMs?: number } = {},
+): Promise<{ id: string; sessionId: string }> {
+  const tries = opts.tries ?? 30;
+  const delayMs = opts.delayMs ?? 2000;
+  for (let i = 0; i < tries; i++) {
+    const { data, error } = await admin
+      .from('weight_events')
+      .select('id, establishment_id, weight_kg, session_id')
+      .eq('establishment_id', establishmentId)
+      .eq('weight_kg', weightKg)
+      .not('session_id', 'is', null)
+      .is('deleted_at', null)
+      .limit(1);
+    if (error) throw new Error(`waitForServerWeightEventWithSession: ${error.message}`);
+    if (data && data.length > 0) return { id: data[0].id as string, sessionId: data[0].session_id as string };
+    await new Promise((r) => setTimeout(r, delayMs));
+  }
+  throw new Error(
+    `waitForServerWeightEventWithSession(${establishmentId}, ${weightKg}kg): el peso NUNCA llegó al server ` +
+      `con session_id (${tries} intentos) — o no se drenó la upload queue, o subió sin vincular la jornada.`,
+  );
+}
+
+/**
+ * ORÁCULO de persistencia server-side de un TACTO de MANIOBRA con `session_id` (spec 03 M2.2, R5.11/R6.2):
+ * pollea `reproductive_events` hasta encontrar el `tacto` (event_type='tacto') de un perfil con un
+ * `session_id` NO nulo y el `pregnancy_status` esperado. Prueba que el tacto subió por el orquestador con
+ * session_id y el dato correcto (incl. el tamaño si preñada).
+ */
+export async function waitForServerTactoWithSession(
+  profileId: string,
+  pregnancyStatus: string,
+  opts: { tries?: number; delayMs?: number } = {},
+): Promise<{ id: string; sessionId: string }> {
+  const tries = opts.tries ?? 30;
+  const delayMs = opts.delayMs ?? 2000;
+  for (let i = 0; i < tries; i++) {
+    const { data, error } = await admin
+      .from('reproductive_events')
+      .select('id, animal_profile_id, event_type, pregnancy_status, session_id')
+      .eq('animal_profile_id', profileId)
+      .eq('event_type', 'tacto')
+      .eq('pregnancy_status', pregnancyStatus)
+      .not('session_id', 'is', null)
+      .is('deleted_at', null)
+      .limit(1);
+    if (error) throw new Error(`waitForServerTactoWithSession: ${error.message}`);
+    if (data && data.length > 0) return { id: data[0].id as string, sessionId: data[0].session_id as string };
+    await new Promise((r) => setTimeout(r, delayMs));
+  }
+  throw new Error(
+    `waitForServerTactoWithSession(${profileId}, ${pregnancyStatus}): el tacto NUNCA llegó al server ` +
+      `con session_id (${tries} intentos).`,
+  );
+}
+
+/**
+ * ORÁCULO de persistencia server-side de un TACTO VAQUILLONA de MANIOBRA con `session_id` (spec 03 M3.2a,
+ * R6.3/R5.13): pollea `reproductive_events` hasta encontrar el `tacto_vaquillona` de un perfil con
+ * `session_id` NO nulo y el `heifer_fitness` esperado (apta|no_apta|diferida). Prueba que el resultado de
+ * aptitud subió por el orquestador con session_id y el dato correcto.
+ */
+export async function waitForServerVaquillonaWithSession(
+  profileId: string,
+  heiferFitness: string,
+  opts: { tries?: number; delayMs?: number } = {},
+): Promise<{ id: string; sessionId: string }> {
+  const tries = opts.tries ?? 30;
+  const delayMs = opts.delayMs ?? 2000;
+  for (let i = 0; i < tries; i++) {
+    const { data, error } = await admin
+      .from('reproductive_events')
+      .select('id, animal_profile_id, event_type, heifer_fitness, session_id')
+      .eq('animal_profile_id', profileId)
+      .eq('event_type', 'tacto_vaquillona')
+      .eq('heifer_fitness', heiferFitness)
+      .not('session_id', 'is', null)
+      .is('deleted_at', null)
+      .limit(1);
+    if (error) throw new Error(`waitForServerVaquillonaWithSession: ${error.message}`);
+    if (data && data.length > 0) return { id: data[0].id as string, sessionId: data[0].session_id as string };
+    await new Promise((r) => setTimeout(r, delayMs));
+  }
+  throw new Error(
+    `waitForServerVaquillonaWithSession(${profileId}, ${heiferFitness}): el tacto vaquillona NUNCA llegó ` +
+      `al server con session_id (${tries} intentos).`,
+  );
+}
+
+/**
+ * ORÁCULO de persistencia server-side de una INSEMINACIÓN de MANIOBRA con `session_id` (spec 03 M3.2b,
+ * R6.5): pollea `reproductive_events` hasta encontrar el `service` (event_type='service', service_type='ai')
+ * de un perfil con `session_id` NO nulo y la pajuela esperada en `notes`. Prueba que la pajuela subió por el
+ * orquestador con session_id y el service_type IA correcto.
+ */
+export async function waitForServerInseminationWithSession(
+  profileId: string,
+  opts: { semenName?: string; tries?: number; delayMs?: number } = {},
+): Promise<{ id: string; sessionId: string; notes: string | null }> {
+  const tries = opts.tries ?? 30;
+  const delayMs = opts.delayMs ?? 2000;
+  for (let i = 0; i < tries; i++) {
+    let q = admin
+      .from('reproductive_events')
+      .select('id, animal_profile_id, event_type, service_type, notes, session_id')
+      .eq('animal_profile_id', profileId)
+      .eq('event_type', 'service')
+      .eq('service_type', 'ai')
+      .not('session_id', 'is', null)
+      .is('deleted_at', null);
+    if (opts.semenName) q = q.eq('notes', opts.semenName);
+    const { data, error } = await q.limit(1);
+    if (error) throw new Error(`waitForServerInseminationWithSession: ${error.message}`);
+    if (data && data.length > 0) {
+      return {
+        id: data[0].id as string,
+        sessionId: data[0].session_id as string,
+        notes: (data[0].notes ?? null) as string | null,
+      };
+    }
+    await new Promise((r) => setTimeout(r, delayMs));
+  }
+  throw new Error(
+    `waitForServerInseminationWithSession(${profileId}, ${opts.semenName ?? '*'}): la inseminación NUNCA ` +
+      `llegó al server con session_id (${tries} intentos).`,
+  );
+}
+
+/**
+ * ORÁCULO de persistencia server-side de una CONDICIÓN CORPORAL de MANIOBRA con `session_id` (spec 03
+ * M3.2a, R6.6): pollea `condition_score_events` hasta encontrar el score esperado de un perfil con
+ * `session_id` NO nulo. Prueba que el score (1,00–5,00 step 0,25) subió por el orquestador con session_id.
+ */
+export async function waitForServerConditionScoreWithSession(
+  profileId: string,
+  score: number,
+  opts: { tries?: number; delayMs?: number } = {},
+): Promise<{ id: string; sessionId: string }> {
+  const tries = opts.tries ?? 30;
+  const delayMs = opts.delayMs ?? 2000;
+  for (let i = 0; i < tries; i++) {
+    const { data, error } = await admin
+      .from('condition_score_events')
+      .select('id, animal_profile_id, score, session_id')
+      .eq('animal_profile_id', profileId)
+      .eq('score', score)
+      .not('session_id', 'is', null)
+      .is('deleted_at', null)
+      .limit(1);
+    if (error) throw new Error(`waitForServerConditionScoreWithSession: ${error.message}`);
+    if (data && data.length > 0) return { id: data[0].id as string, sessionId: data[0].session_id as string };
+    await new Promise((r) => setTimeout(r, delayMs));
+  }
+  throw new Error(
+    `waitForServerConditionScoreWithSession(${profileId}, ${score}): el score NUNCA llegó al server con ` +
+      `session_id (${tries} intentos).`,
+  );
+}
+
+/**
+ * ORÁCULO de la maniobra DIENTES (PROPIEDAD, NO evento — spec 03 M3.2a, R6.7/R6.8): pollea
+ * `animal_profiles` hasta que el `teeth_state` del perfil sea el esperado. Si `expectCut` es true, EXIGE
+ * además `is_cut = true` + `category_override = true` (la transición CUT, R6.8). Devuelve el estado del
+ * perfil para asertar la categoría. Prueba el UPDATE de propiedad (no hay tabla de evento para dientes).
+ */
+export async function waitForServerTeethState(
+  profileId: string,
+  teethState: string,
+  opts: { expectCut?: boolean; tries?: number; delayMs?: number } = {},
+): Promise<{ teethState: string; isCut: boolean; categoryOverride: boolean; categoryId: string }> {
+  const tries = opts.tries ?? 30;
+  const delayMs = opts.delayMs ?? 2000;
+  for (let i = 0; i < tries; i++) {
+    const { data, error } = await admin
+      .from('animal_profiles')
+      .select('teeth_state, is_cut, category_override, category_id')
+      .eq('id', profileId)
+      .single();
+    if (error) throw new Error(`waitForServerTeethState: ${error.message}`);
+    const matchesTeeth = data?.teeth_state === teethState;
+    const matchesCut = !opts.expectCut || (data?.is_cut === true && data?.category_override === true);
+    if (matchesTeeth && matchesCut) {
+      return {
+        teethState: data!.teeth_state as string,
+        isCut: data!.is_cut as boolean,
+        categoryOverride: data!.category_override as boolean,
+        categoryId: data!.category_id as string,
+      };
+    }
+    await new Promise((r) => setTimeout(r, delayMs));
+  }
+  throw new Error(
+    `waitForServerTeethState(${profileId}, ${teethState}, cut=${!!opts.expectCut}): el estado dentario ` +
+      `NUNCA llegó al server (${tries} intentos).`,
+  );
+}
+
+/** Lee el `code` de una categoría por id (para asertar que la categoría CUT del sistema quedó fijada). */
+export async function getCategoryCodeById(categoryId: string): Promise<string | null> {
+  const { data, error } = await admin
+    .from('categories_by_system')
+    .select('code')
+    .eq('id', categoryId)
+    .maybeSingle();
+  if (error) throw new Error(`getCategoryCodeById: ${error.message}`);
+  return (data?.code as string | undefined) ?? null;
+}
+
+/**
+ * ORÁCULO de una maniobra SANITARIA silent_apply (spec 03 M3.2b, R6.13/R6.15): pollea `sanitary_events`
+ * hasta que exista una fila del perfil con el `event_type` esperado (`deworming`=antiparasitario,
+ * `treatment`=antibiótico, `vaccination`=vacunación) CON `session_id`. Si `productName` viene, lo exige.
+ * Prueba que la maniobra silent escribió su sanitary_event vinculado a la jornada (R5.11). Para vacunación
+ * multi, devuelve el conteo de filas con ese event_type+session.
+ */
+export async function waitForServerSanitaryWithSession(
+  profileId: string,
+  eventType: 'deworming' | 'treatment' | 'vaccination',
+  opts: { productName?: string; minCount?: number; tries?: number; delayMs?: number } = {},
+): Promise<{ count: number; sessionId: string; productNames: string[] }> {
+  const tries = opts.tries ?? 30;
+  const delayMs = opts.delayMs ?? 2000;
+  const minCount = opts.minCount ?? 1;
+  for (let i = 0; i < tries; i++) {
+    let q = admin
+      .from('sanitary_events')
+      .select('id, animal_profile_id, event_type, product_name, session_id')
+      .eq('animal_profile_id', profileId)
+      .eq('event_type', eventType)
+      .not('session_id', 'is', null)
+      .is('deleted_at', null);
+    if (opts.productName != null) q = q.eq('product_name', opts.productName);
+    const { data, error } = await q;
+    if (error) throw new Error(`waitForServerSanitaryWithSession: ${error.message}`);
+    if (data && data.length >= minCount) {
+      return {
+        count: data.length,
+        sessionId: data[0].session_id as string,
+        productNames: data.map((r) => (r.product_name as string) ?? ''),
+      };
+    }
+    await new Promise((r) => setTimeout(r, delayMs));
+  }
+  throw new Error(
+    `waitForServerSanitaryWithSession(${profileId}, ${eventType}): no llegaron ≥${minCount} filas con ` +
+      `session_id (${tries} intentos).`,
+  );
+}
+
+/**
+ * ORÁCULO de una maniobra de LABORATORIO (spec 03 M3.2b, R6.4/R6.11): pollea `lab_samples` hasta que exista
+ * una fila del perfil con el `sample_type` esperado (`blood`=sangrado, `scrape_tricho`/`scrape_campylo`=
+ * raspado) CON `session_id` y el `tube_number` esperado (si viene). Prueba que el lab_sample se vinculó a la
+ * jornada (R5.11). Para el raspado (2 muestras) se llama dos veces (una por sample_type).
+ */
+export async function waitForServerLabSampleWithSession(
+  profileId: string,
+  sampleType: 'blood' | 'scrape_tricho' | 'scrape_campylo',
+  opts: { tubeNumber?: string; tries?: number; delayMs?: number } = {},
+): Promise<{ id: string; sessionId: string; tubeNumber: string }> {
+  const tries = opts.tries ?? 30;
+  const delayMs = opts.delayMs ?? 2000;
+  for (let i = 0; i < tries; i++) {
+    let q = admin
+      .from('lab_samples')
+      .select('id, animal_profile_id, sample_type, tube_number, session_id')
+      .eq('animal_profile_id', profileId)
+      .eq('sample_type', sampleType)
+      .not('session_id', 'is', null)
+      .is('deleted_at', null);
+    if (opts.tubeNumber != null) q = q.eq('tube_number', opts.tubeNumber);
+    const { data, error } = await q.limit(1);
+    if (error) throw new Error(`waitForServerLabSampleWithSession: ${error.message}`);
+    if (data && data.length > 0) {
+      return {
+        id: data[0].id as string,
+        sessionId: data[0].session_id as string,
+        tubeNumber: data[0].tube_number as string,
+      };
+    }
+    await new Promise((r) => setTimeout(r, delayMs));
+  }
+  throw new Error(
+    `waitForServerLabSampleWithSession(${profileId}, ${sampleType}): la muestra NUNCA llegó al server con ` +
+      `session_id (${tries} intentos).`,
+  );
+}
+
+/**
+ * Cuenta los `lab_samples` scrape_* (raspado) NO borrados de un perfil. Para asertar que el raspado NO corrió
+ * (hembra, R6.12): debe ser 0. Usa el cliente service_role (NO la app) → ve el estado real del server.
+ */
+export async function countScrapeSamples(profileId: string): Promise<number> {
+  const { count, error } = await admin
+    .from('lab_samples')
+    .select('id', { count: 'exact', head: true })
+    .eq('animal_profile_id', profileId)
+    .in('sample_type', ['scrape_tricho', 'scrape_campylo'])
+    .is('deleted_at', null);
+  if (error) throw new Error(`countScrapeSamples: ${error.message}`);
+  return count ?? 0;
 }
 
 /** Permite que un test trackee para cleanup un establishment creado por la UI (por nombre exacto). */

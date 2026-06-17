@@ -27,7 +27,7 @@ import { Pressable } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
-import { Boxes, Building2, Check, ChevronDown, Layers, User, X } from 'lucide-react-native';
+import { Check, ChevronDown, User, X } from 'lucide-react-native';
 import { useStatus } from '@powersync/react';
 
 import {
@@ -40,6 +40,7 @@ import {
   type StepperStep,
   type SwitcherField,
 } from '@/components';
+import { CampoIcon, LoteIcon, RodeoIcon } from '@/theme/icons';
 import { useAuth, useEstablishment, useProfile, useRodeo } from '@/contexts';
 import { localityOf, shouldShowReadyBanner } from '@/utils/establishment';
 import { allOnboardingStepsDone } from '@/utils/onboarding';
@@ -104,7 +105,7 @@ function HomeHeader({
           paddingVertical="$1"
           backgroundColor={highlight ? '$greenLight' : 'transparent'}
         >
-          <Building2 size={20} color={iconColor} />
+          <CampoIcon size={20} color={iconColor} />
           <Text
             fontFamily="$body"
             fontSize="$5"
@@ -661,7 +662,7 @@ export default function InicioScreen() {
             {rodeos.map((r) => (
               <GroupSummaryCard
                 key={r.id}
-                icon={Boxes}
+                icon={RodeoIcon}
                 name={r.name}
                 headCount={rodeoHeadCounts.get(r.id) ?? 0}
                 // Sistema productivo del rodeo (ej. "Cría") → "Cría · N cabezas" (R2.1). undefined si el
@@ -683,7 +684,7 @@ export default function InicioScreen() {
             {lotes.map((g) => (
               <GroupSummaryCard
                 key={g.id}
-                icon={Layers}
+                icon={LoteIcon}
                 name={g.name}
                 headCount={groupHeadCounts.get(g.id) ?? 0}
                 onPress={() => openLote(g.id)}

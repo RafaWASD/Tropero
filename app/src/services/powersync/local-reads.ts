@@ -371,6 +371,32 @@ export function buildRodeoSpeciesQuery(rodeoId: string): LocalQuery {
 }
 
 /**
+ * system_id de un rodeo (spec 03 M1.1): lo necesita el gating capa 1 para leer los defaults/required del
+ * sistema (system_default_fields) y derivar el `required` de cada data_key (R5.6). El rodeo ya está
+ * sincronizado (est_rodeos). LIMIT 1 = maybeSingle.
+ */
+export function buildRodeoSystemQuery(rodeoId: string): LocalQuery {
+  return {
+    sql: 'SELECT system_id FROM rodeos WHERE id = ? LIMIT 1',
+    args: [rodeoId],
+  };
+}
+
+/**
+ * rodeo_id del PERFIL ACTIVO de un animal (spec 03 M1.1 / R5.3 / SEC-SPEC-03-02): el gating capa 1
+ * resuelve el rodeo REAL del animal leyendo `animal_profiles.rodeo_id` del perfil ACTIVO (deleted_at IS
+ * NULL), NO vía una función `current_animal_rodeo` (NO existe as-built). Mismo criterio que la capa 2
+ * (assert_data_keys_enabled, 0054). LIMIT 1 (PK). Un perfil soft-deleted/inexistente → null (el caller
+ * NO debe ofrecer maniobras gateadas: fail-safe del lado UI, paralelo al fail-closed de la DB).
+ */
+export function buildActiveProfileRodeoQuery(profileId: string): LocalQuery {
+  return {
+    sql: 'SELECT rodeo_id FROM animal_profiles WHERE id = ? AND deleted_at IS NULL LIMIT 1',
+    args: [profileId],
+  };
+}
+
+/**
  * establishment_id de UN perfil (spec 10, T-CL.11): lo necesita la observación automática de castración
  * (R13.7) — animal_events.establishment_id tiene un trigger de VALIDACIÓN (no force) que exige que coincida
  * con el del PERFIL (23514 si no) → se deriva de ACÁ (el perfil), NUNCA del contexto activo (un usuario con
@@ -1151,6 +1177,11 @@ export function buildMotherQuery(calfProfileId: string): LocalQuery {
  * INSERT local de un weight_event (espeja events.addWeight). `id` de cliente. `establishment_id`/
  * `created_by`/`created_at`/`source` los pone el trigger/default al subir → no se mandan. `notes`
  * opcional: el caller pasa null si no vino (columna nullable).
+ *
+ * `sessionId` (spec 03 M2.2, R5.11) — opcional: vincula el evento a la JORNADA de manga (`session_id`).
+ * Default null (la ficha de spec 02 NO pasa session_id → evento "suelto", igual que hoy). El tenant-check
+ * server-side (`tg_event_session_tenant_check`, 0056) valida al SUBIR que la sesión sea del mismo
+ * establishment que el animal; un session_id ajeno es rechazado allí (NO local).
  */
 export function buildAddWeightInsert(
   id: string,
@@ -1158,12 +1189,13 @@ export function buildAddWeightInsert(
   weightKg: number,
   weightDate: string,
   notes: string | null,
+  sessionId: string | null = null,
 ): LocalQuery {
   return {
     sql:
-      'INSERT INTO weight_events (id, animal_profile_id, weight_kg, weight_date, notes) ' +
-      'VALUES (?, ?, ?, ?, ?)',
-    args: [id, profileId, weightKg, weightDate, notes],
+      'INSERT INTO weight_events (id, animal_profile_id, weight_kg, weight_date, notes, session_id) ' +
+      'VALUES (?, ?, ?, ?, ?, ?)',
+    args: [id, profileId, weightKg, weightDate, notes, sessionId],
   };
 }
 
@@ -1204,7 +1236,8 @@ export function buildAddConditionScoreInsert(
  * INSERT local de un evento reproductivo `tacto` (espeja events.addTacto). `id` + `createdAt` de cliente
  * (ver nota del banner). `pregnancy_status` de un selector CERRADO. El efecto colateral de TRANSICIÓN de
  * categoría de la madre lo dispara el trigger AFTER INSERT al SUBIR la fila a PostgREST (no local). `notes`
- * opcional.
+ * opcional. `sessionId` (spec 03 M2.2, R5.11) opcional: vincula el tacto a la jornada de manga; default
+ * null (la ficha de spec 02 no lo pasa). El tenant-check (0056) lo valida al subir.
  */
 export function buildAddTactoInsert(
   id: string,
@@ -1213,13 +1246,320 @@ export function buildAddTactoInsert(
   eventDate: string,
   notes: string | null,
   createdAt: string,
+  sessionId: string | null = null,
 ): LocalQuery {
   return {
     sql:
       'INSERT INTO reproductive_events ' +
-      '(id, animal_profile_id, event_type, event_date, pregnancy_status, notes, created_at) ' +
-      "VALUES (?, ?, 'tacto', ?, ?, ?, ?)",
-    args: [id, profileId, eventDate, pregnancyStatus, notes, createdAt],
+      '(id, animal_profile_id, event_type, event_date, pregnancy_status, notes, created_at, session_id) ' +
+      "VALUES (?, ?, 'tacto', ?, ?, ?, ?, ?)",
+    args: [id, profileId, eventDate, pregnancyStatus, notes, createdAt, sessionId],
+  };
+}
+
+// ─── UPDATE de evento de maniobra (spec 03 M2.2) — corrección desde el resumen (R5.9) ──────────────────
+//
+// En la manga, el id de cliente del evento es ESTABLE por (animal, maniobra). La 1ra captura usa INSERT
+// (buildAddWeightInsert/buildAddTactoInsert con session_id); CORREGIR desde el resumen (R5.9) re-captura con
+// el MISMO id → un 2do INSERT fallaría (PK duplicada) y un upsert `ON CONFLICT` NO lo captura bien PowerSync
+// (el evento no sube). Por eso la corrección hace un UPDATE explícito de la(s) columna(s) de dato. PowerSync
+// rastrea el UPDATE como un PATCH → el connector hace `table.update(...).eq('id', ...)` al subir → el server
+// queda con el valor corregido, sin duplicar. `created_at`/`session_id`/`animal_profile_id` NO se tocan en
+// la corrección (la jornada, el instante de creación y el animal no cambian). Filtra `deleted_at IS NULL`
+// (defensivo). NO afecta a la ficha (events.ts): cada peso de la ficha es un evento con id nuevo → INSERT.
+
+/** UPDATE del peso de un weight_event de manga ya cargado (R5.9 corrección). Solo weight_kg/date. */
+export function buildUpdateManeuverWeight(
+  id: string,
+  weightKg: number,
+  weightDate: string,
+): LocalQuery {
+  return {
+    sql: 'UPDATE weight_events SET weight_kg = ?, weight_date = ? WHERE id = ? AND deleted_at IS NULL',
+    args: [weightKg, weightDate, id],
+  };
+}
+
+/** UPDATE del resultado de un tacto de manga ya cargado (R5.9 corrección). Solo pregnancy_status/date. */
+export function buildUpdateManeuverTacto(
+  id: string,
+  pregnancyStatus: string,
+  eventDate: string,
+): LocalQuery {
+  return {
+    sql:
+      'UPDATE reproductive_events SET pregnancy_status = ?, event_date = ? ' +
+      "WHERE id = ? AND event_type = 'tacto' AND deleted_at IS NULL",
+    args: [pregnancyStatus, eventDate, id],
+  };
+}
+
+// ─── Write-paths de las maniobras restantes (spec 03 M3.1) — INSERT + UPDATE de corrección ─────────────
+//
+// Mismo contrato que los de M2.2 (arriba): INSERT LOCAL sobre la tabla SINCRONIZADA con `session_id`
+// (R5.11); `created_by`/`establishment_id` los FUERZA el trigger server-side al subir (R5.12, NO se mandan);
+// el gating capa 2 (0054 + 0091) y el tenant-check (0056) re-validan al SUBIR (fail-closed). La CORRECCIÓN
+// desde el resumen (R5.9) re-captura con el MISMO id → UPDATE explícito de la(s) columna(s) de dato (no un
+// 2do INSERT ni un upsert `ON CONFLICT` — PowerSync no captura bien el upsert). `id` de cliente lo pasa el
+// caller (determinístico/testeable). Filtran `deleted_at IS NULL` (defensivo) en los UPDATE.
+
+/**
+ * INSERT local de un sanitary_event silent_apply de UN producto para la manga (R6.13 antiparasitario →
+ * `deworming` / R6.15 antibiótico → `treatment`). `eventType` lo pasa el caller (uno de 'deworming' |
+ * 'treatment' — el orquestador NO permite otros). `product_name` texto libre (de la pre-config /
+ * autocompletar). ⚠️ NO se setea `route`: el antiparasitario es UNA maniobra SIN distinción estructurada
+ * interno/externo (D10 RESUELTO Raf 2026-06-14; la vía, si se anota, va en `product_name`/notas). El gating
+ * capa 2 (`tg_sanitary_events_gating`, 0091) re-valida `deworming` (OR antiparasitario_interno/externo) y
+ * `treatment` (antibiotico) fail-closed al subir.
+ */
+export function buildAddManeuverSanitaryInsert(
+  id: string,
+  profileId: string,
+  eventType: string,
+  productName: string,
+  eventDate: string,
+  sessionId: string,
+): LocalQuery {
+  return {
+    sql:
+      'INSERT INTO sanitary_events ' +
+      '(id, animal_profile_id, event_type, product_name, event_date, session_id) ' +
+      'VALUES (?, ?, ?, ?, ?, ?)',
+    args: [id, profileId, eventType, productName, eventDate, sessionId],
+  };
+}
+
+/** UPDATE del producto de un sanitary_event silent_apply de manga ya cargado (R5.9). Solo product_name/date. */
+export function buildUpdateManeuverSanitary(
+  id: string,
+  productName: string,
+  eventDate: string,
+): LocalQuery {
+  return {
+    sql:
+      'UPDATE sanitary_events SET product_name = ?, event_date = ? WHERE id = ? AND deleted_at IS NULL',
+    args: [productName, eventDate, id],
+  };
+}
+
+/**
+ * INSERT local de UNA vacunación de manga (R6.1). `event_type='vaccination'`, `product_name` texto libre.
+ * Multi-vacuna = el orquestador llama este builder UNA VEZ POR VACUNA (cada una con su id de cliente) →
+ * N `sanitary_events`. `route` NULL (la vía de vacuna no se captura en la manga — la maniobra es silent;
+ * si se quisiera, sería un refinamiento de M3.2). El gating capa 2 (`vacunacion` enabled) re-valida al subir.
+ */
+export function buildAddManeuverVaccinationInsert(
+  id: string,
+  profileId: string,
+  productName: string,
+  eventDate: string,
+  sessionId: string,
+): LocalQuery {
+  return {
+    sql:
+      'INSERT INTO sanitary_events ' +
+      '(id, animal_profile_id, event_type, product_name, event_date, session_id) ' +
+      "VALUES (?, ?, 'vaccination', ?, ?, ?)",
+    args: [id, profileId, productName, eventDate, sessionId],
+  };
+}
+
+/**
+ * INSERT local de una condición corporal de manga (R6.6). `score` ∈ 1.00–5.00 step 0.25 (selector cerrado
+ * → cumple el CHECK del DB al subir). Espeja `buildAddConditionScoreInsert` + `session_id`. El gating capa 2
+ * (`condicion_corporal` enabled) re-valida al subir.
+ */
+export function buildAddManeuverConditionScoreInsert(
+  id: string,
+  profileId: string,
+  score: number,
+  eventDate: string,
+  sessionId: string,
+): LocalQuery {
+  return {
+    sql:
+      'INSERT INTO condition_score_events (id, animal_profile_id, score, event_date, session_id) ' +
+      'VALUES (?, ?, ?, ?, ?)',
+    args: [id, profileId, score, eventDate, sessionId],
+  };
+}
+
+/** UPDATE del score de una condición corporal de manga ya cargada (R5.9). Solo score/date. */
+export function buildUpdateManeuverConditionScore(
+  id: string,
+  score: number,
+  eventDate: string,
+): LocalQuery {
+  return {
+    sql:
+      'UPDATE condition_score_events SET score = ?, event_date = ? WHERE id = ? AND deleted_at IS NULL',
+    args: [score, eventDate, id],
+  };
+}
+
+/**
+ * INSERT local de un tacto vaquillona de manga (R6.3 / R5.13). `event_type='tacto_vaquillona'` (enum 0053)
+ * + `heifer_fitness` ∈ apta|no_apta|diferida (enum 0053; selector cerrado). `created_at` de cliente (mismo
+ * patrón que el tacto vaca — desempate del estado repro del mismo día). El gating capa 2 (`tacto_vaquillona`
+ * enabled) re-valida al subir.
+ */
+export function buildAddManeuverTactoVaquillonaInsert(
+  id: string,
+  profileId: string,
+  heiferFitness: string,
+  eventDate: string,
+  createdAt: string,
+  sessionId: string,
+): LocalQuery {
+  return {
+    sql:
+      'INSERT INTO reproductive_events ' +
+      '(id, animal_profile_id, event_type, event_date, heifer_fitness, created_at, session_id) ' +
+      "VALUES (?, ?, 'tacto_vaquillona', ?, ?, ?, ?)",
+    args: [id, profileId, eventDate, heiferFitness, createdAt, sessionId],
+  };
+}
+
+/** UPDATE del resultado de un tacto vaquillona de manga ya cargado (R5.9). Solo heifer_fitness/date. */
+export function buildUpdateManeuverTactoVaquillona(
+  id: string,
+  heiferFitness: string,
+  eventDate: string,
+): LocalQuery {
+  return {
+    sql:
+      'UPDATE reproductive_events SET heifer_fitness = ?, event_date = ? ' +
+      "WHERE id = ? AND event_type = 'tacto_vaquillona' AND deleted_at IS NULL",
+    args: [heiferFitness, eventDate, id],
+  };
+}
+
+/**
+ * INSERT local de una inseminación de manga (R6.5). `event_type='service'`, `service_type='ai'` (IA;
+ * selector). La pajuela elegida (texto libre + autocompletar, R1.8) va en `notes` — NO hay columna
+ * estructurada de pajuela en `reproductive_events` (semen_id es FK a `semen_registry`, que el MVP no usa).
+ * `created_at` de cliente. NO dispara transición de categoría (un service es un registro). El gating capa 2
+ * (`inseminacion` enabled) re-valida al subir.
+ */
+export function buildAddManeuverInseminationInsert(
+  id: string,
+  profileId: string,
+  semenNote: string | null,
+  eventDate: string,
+  createdAt: string,
+  sessionId: string,
+): LocalQuery {
+  return {
+    sql:
+      'INSERT INTO reproductive_events ' +
+      '(id, animal_profile_id, event_type, service_type, event_date, notes, created_at, session_id) ' +
+      "VALUES (?, ?, 'service', 'ai', ?, ?, ?, ?)",
+    args: [id, profileId, eventDate, semenNote, createdAt, sessionId],
+  };
+}
+
+/** UPDATE de la pajuela (notes) de una inseminación de manga ya cargada (R5.9). Solo notes/date. */
+export function buildUpdateManeuverInsemination(
+  id: string,
+  semenNote: string | null,
+  eventDate: string,
+): LocalQuery {
+  return {
+    sql:
+      'UPDATE reproductive_events SET notes = ?, event_date = ? ' +
+      "WHERE id = ? AND event_type = 'service' AND deleted_at IS NULL",
+    args: [semenNote, eventDate, id],
+  };
+}
+
+/**
+ * INSERT local de UN lab_sample de manga (R6.4 sangrado / R6.11 raspado). `sampleType` lo pasa el caller
+ * (uno de 'blood' | 'scrape_tricho' | 'scrape_campylo'). `tube_number` texto libre (el resultado llega luego
+ * por import, spec 06 → `result` queda NULL). El raspado (R6.11) llama este builder DOS VECES (un id por
+ * tubo, scrape_tricho + scrape_campylo). El gating capa 2 ramifica por sample_type (blood→`brucelosis`,
+ * scrape_*→`raspado_toros`) y re-valida al subir.
+ */
+export function buildAddManeuverLabSampleInsert(
+  id: string,
+  profileId: string,
+  sampleType: string,
+  tubeNumber: string | null,
+  collectionDate: string,
+  sessionId: string,
+): LocalQuery {
+  return {
+    sql:
+      'INSERT INTO lab_samples ' +
+      '(id, animal_profile_id, sample_type, tube_number, collection_date, session_id) ' +
+      'VALUES (?, ?, ?, ?, ?, ?)',
+    args: [id, profileId, sampleType, tubeNumber, collectionDate, sessionId],
+  };
+}
+
+/** UPDATE del número de tubo de un lab_sample de manga ya cargado (R5.9). Solo tube_number/date. */
+export function buildUpdateManeuverLabSample(
+  id: string,
+  tubeNumber: string | null,
+  collectionDate: string,
+): LocalQuery {
+  return {
+    sql:
+      'UPDATE lab_samples SET tube_number = ?, collection_date = ? WHERE id = ? AND deleted_at IS NULL',
+    args: [tubeNumber, collectionDate, id],
+  };
+}
+
+/**
+ * UPDATE local del estado dentario de un animal (R6.7) — dientes es PROPIEDAD que sobrescribe
+ * `animal_profiles.teeth_state` (no es evento con historial). `teethState` ∈ enum teeth_state_enum (0020;
+ * selector cerrado). Es un UPDATE de `animal_profiles` → CrudEntry PATCH → uploadData lo sube. El gating
+ * capa 2 del DESTINO UPDATE (`tg_animal_profiles_teeth_gating`, 0054) re-valida al subir que el rodeo real
+ * tenga `dientes` enabled (cambio aditivo: teeth_state → no-NULL). Filtra `deleted_at IS NULL`.
+ *
+ * Idempotencia: el id es el del PERFIL (no un evento) → re-confirmar/corregir desde el resumen es OTRO
+ * UPDATE del mismo perfil (LWW), NO duplica (dientes no tiene historial). No lleva session_id (no es una
+ * tabla de evento; la propiedad no se vincula a la jornada — el seguimiento de dientes no es time-series).
+ */
+export function buildSetTeethStateUpdate(profileId: string, teethState: string): LocalQuery {
+  return {
+    sql: 'UPDATE animal_profiles SET teeth_state = ? WHERE id = ? AND deleted_at IS NULL',
+    args: [teethState, profileId],
+  };
+}
+
+/**
+ * UPDATE local de la transición a CUT (R6.8): marca `is_cut = true` + fija la categoría CUT del sistema
+ * (`category_id = ?` la pasa el caller, resuelta del catálogo local) + `category_override = true` (la
+ * elección de CUT es manual, el server NO la recalcula). UN solo statement → una CrudEntry PATCH. El gating
+ * capa 2 del UPDATE (0054) re-valida `dientes` enabled (cambio aditivo: is_cut false→true). `category_id`
+ * se valida server-side contra el sistema del rodeo (0021, 23514 si no cuadra). Filtra `deleted_at IS NULL`.
+ *
+ * NO se aplica a TERNEROS (R6.8) — ese gate es del cliente (predicado puro `shouldOfferCutPrompt`,
+ * maneuver-applicability.ts); el orquestador NO ofrece este builder para terneros.
+ */
+export function buildSetCutUpdate(profileId: string, cutCategoryId: string): LocalQuery {
+  return {
+    sql:
+      'UPDATE animal_profiles SET is_cut = 1, category_id = ?, category_override = 1 ' +
+      'WHERE id = ? AND deleted_at IS NULL',
+    args: [cutCategoryId, profileId],
+  };
+}
+
+/**
+ * UPDATE local que REVIERTE la marca CUT (corrección, R6.8): `is_cut = false` + restaura la categoría
+ * DERIVADA (`category_id = ?` la pasa el caller = la categoría que el espejo computa sin CUT) +
+ * `category_override = false` (vuelve al recálculo automático del server). Espeja el patrón de
+ * `buildRevertCategoryOverrideUpdate` (revert de override en un solo statement). El gating capa 2 PERMITE
+ * el cambio sustractivo (is_cut true→false NO se gatea, 0054 §D8) → la limpieza no requiere `dientes`
+ * enabled. Mantiene consistente la categoría (no deja un is_cut=false con la categoría CUT colgada).
+ */
+export function buildUnsetCutUpdate(profileId: string, derivedCategoryId: string): LocalQuery {
+  return {
+    sql:
+      'UPDATE animal_profiles SET is_cut = 0, category_id = ?, category_override = 0 ' +
+      'WHERE id = ? AND deleted_at IS NULL',
+    args: [derivedCategoryId, profileId],
   };
 }
 
@@ -1533,6 +1873,28 @@ export function buildRevertCategoryOverrideUpdate(profileId: string, categoryId:
 }
 
 /**
+ * UPDATE local del `rodeo_id` del PERFIL ACTIVO de un animal (spec 03 R4.4 — "pasar el animal a este
+ * rodeo"). Espeja `buildAssignAnimalToGroupUpdate`: CRUD-plano sobre la tabla SINCRONIZADA → su propia
+ * CrudEntry → uploadData lo sube como UPDATE de `rodeo_id`. Filtra `deleted_at IS NULL` (no se mueve un
+ * perfil borrado).
+ *
+ * La VALIDACIÓN vive server-side (NO en el cliente — design §4 / SEC): al subir el UPDATE, el trigger
+ * `tg_animal_profiles_rodeo_same_system_check` (0047, before update of rodeo_id) rechaza el cruce de
+ * sistemas productivos (R4.5.1, errcode 23514), y `tg_animal_profiles_rodeo_check` (0021) re-valida que
+ * el rodeo destino sea del MISMO establishment del perfil y esté activo. La RLS
+ * (`animal_profiles_update` = has_role_in) re-valida el tenant al SUBIR. El cliente solo APORTA el
+ * `rodeoId` destino (un rodeo del MISMO campo activo, de `rodeo.available` del RodeoContext — la UI nunca
+ * ofrece un rodeo ajeno). Contrato T5: el local write siempre "tiene éxito" offline; la authz real se
+ * valida al subir (un rodeo de otro sistema/inactivo es rechazado allí y superficiado por uploadData).
+ */
+export function buildMoveAnimalToRodeoUpdate(profileId: string, rodeoId: string): LocalQuery {
+  return {
+    sql: 'UPDATE animal_profiles SET rodeo_id = ? WHERE id = ? AND deleted_at IS NULL',
+    args: [rodeoId, profileId],
+  };
+}
+
+/**
  * UPDATE local que REASIGNA a NULL los management_group_id de TODOS los perfiles de un lote (paso 1 del
  * borrado de lote, anti-FK-colgante — espeja la 1ra mitad de softDeleteManagementGroup). CRUD plano sobre
  * la tabla SINCRONIZADA → su propia CrudEntry → uploadData lo sube como UPDATE antes del soft-delete (FIFO).
@@ -1542,6 +1904,203 @@ export function buildClearGroupMembersUpdate(groupId: string): LocalQuery {
   return {
     sql: 'UPDATE animal_profiles SET management_group_id = NULL WHERE management_group_id = ?',
     args: [groupId],
+  };
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════════
+// MODO MANIOBRAS (spec 03 M1.2/M1.3) — sessions + maneuver_presets (CRUD plano offline)
+// ════════════════════════════════════════════════════════════════════════════════════════════
+//
+// Mismo patrón CRUD-plano de events.ts / management-groups.ts: INSERT/UPDATE local sobre la tabla
+// SINCRONIZADA → 1 CrudEntry → uploadData la sube al reconectar (RLS+triggers+CHECK re-validan, 0050/0051).
+// `id` de cliente (R1.11/R2.5). `created_by`/`establishment_id` (audit) los FUERZA el trigger
+// tg_force_created_by_auth_uid (0050/0051) al subir → NO se mandan. `config` es jsonb pass-through: el
+// caller lo serializa con JSON.stringify (la columna es TEXT en SQLite; PostgREST lo castea a jsonb al subir).
+
+// ─── sessions (R1.9/R1.10/R10.7) ────────────────────────────────────────────────────
+
+/**
+ * INSERT local de una `session` (jornada de maniobra). `id` de cliente (R1.11). `establishment_id` +
+ * `rodeo_id` van en el INSERT (load-bearing: la sesión es de un establishment/rodeo, el trigger
+ * tg_sessions_rodeo_check 0050 los re-valida al subir). `config` = snapshot jsonb de la jornada
+ * (maniobras + pre-config), serializado por el caller. `status` arranca en 'active' (default del DB,
+ * lo seteamos explícito para que la fila local lo tenga). `created_by` lo FUERZA el trigger al subir.
+ *
+ * ⚠️ `started_at` de CLIENTE (wall-clock del inicio de la jornada): el DB lo tiene `default now()` SIN
+ * force-trigger (0050) → el valor del cliente PERSISTE al subir (instante de INICIO en el dispositivo,
+ * fiel a una jornada arrancada offline — mejor que el now() de subida). Lo necesita la reanudación local
+ * (R10.5: buildActiveSessionQuery ordena por started_at DESC) para tener un orden determinístico OFFLINE.
+ */
+export function buildCreateSessionInsert(
+  id: string,
+  establishmentId: string,
+  rodeoId: string,
+  configJson: string,
+  workLotLabel: string | null,
+  startedAt: string,
+): LocalQuery {
+  return {
+    sql:
+      'INSERT INTO sessions (id, establishment_id, rodeo_id, config, status, work_lot_label, ' +
+      'animal_count, event_count, started_at) ' +
+      "VALUES (?, ?, ?, ?, 'active', ?, 0, 0, ?)",
+    args: [id, establishmentId, rodeoId, configJson, workLotLabel, startedAt],
+  };
+}
+
+/**
+ * UPDATE local que CIERRA una sesión (R10.7): `status='closed'` + `ended_at`. Filtra `deleted_at IS NULL`
+ * (no se cierra una sesión borrada). El caller pasa el ended_at de cliente (wall-clock del cierre). La
+ * RLS sessions_update (has_role_in) re-valida al subir.
+ */
+export function buildCloseSessionUpdate(id: string, endedAt: string): LocalQuery {
+  return {
+    sql: "UPDATE sessions SET status = 'closed', ended_at = ? WHERE id = ? AND deleted_at IS NULL",
+    args: [endedAt, id],
+  };
+}
+
+/**
+ * UPDATE local del `work_lot_label` (R9.4): metadata informativa NO-autoritativa de la jornada (texto
+ * libre, NUNCA FK asignadora a management_groups). Filtra `deleted_at IS NULL`. El caller pasa null para
+ * limpiarlo.
+ */
+export function buildSetWorkLotLabelUpdate(id: string, label: string | null): LocalQuery {
+  return {
+    sql: 'UPDATE sessions SET work_lot_label = ? WHERE id = ? AND deleted_at IS NULL',
+    args: [label, id],
+  };
+}
+
+/**
+ * UPDATE local de los contadores app-maintained de la sesión (D5): `animal_count`/`event_count`. Se
+ * setean a un valor ABSOLUTO (el caller recomputa o incrementa client-side y pasa el total) — evita
+ * carreras de `count = count + 1` concurrentes que LWW de PowerSync resolvería mal. Filtra `deleted_at
+ * IS NULL`. NO son constraints de integridad: el conteo autoritativo se recomputa con count(*) por
+ * session_id (ver design §2.1 nota).
+ */
+export function buildSetSessionCountsUpdate(
+  id: string,
+  animalCount: number,
+  eventCount: number,
+): LocalQuery {
+  return {
+    sql:
+      'UPDATE sessions SET animal_count = ?, event_count = ? WHERE id = ? AND deleted_at IS NULL',
+    args: [animalCount, eventCount, id],
+  };
+}
+
+/**
+ * UPDATE local del `rodeo_id` de una sesión (R4.4 — cambiar el rodeo de la jornada). Lo dispara el flujo
+ * de manga cuando el operario decide cambiar la jornada al rodeo de un animal de otro rodeo del mismo
+ * establecimiento (o desde el aviso R4.7 de rodeo mal elegido). NO es destructivo: los animales ya
+ * procesados quedan con sus eventos correctos (vinculados a sus rodeos reales por session_id, no por
+ * el rodeo de la sesión) — solo cambia el rodeo por defecto de los próximos. Filtra `deleted_at IS NULL`
+ * y `status='active'` (no se re-apunta el rodeo de una sesión cerrada). La RLS (sessions_update =
+ * has_role_in) + el rodeo-check (tg_sessions_rodeo_check, 0050: rodeo del mismo establishment + activo)
+ * re-validan al SUBIR — un rodeo ajeno/inactivo es rechazado allí (superficiado por uploadData).
+ */
+export function buildSetSessionRodeoUpdate(id: string, rodeoId: string): LocalQuery {
+  return {
+    sql: "UPDATE sessions SET rodeo_id = ? WHERE id = ? AND status = 'active' AND deleted_at IS NULL",
+    args: [rodeoId, id],
+  };
+}
+
+/**
+ * Lee la sesión ACTIVA de un establishment (R10.6: una sola sesión activa por dispositivo a la vez). El
+ * scoping (has_role_in) ya lo aplicó la stream. Filtra `status='active'` + `deleted_at IS NULL`. Orden por
+ * started_at DESC + LIMIT 1: si por algún borde hubiera más de una activa, devolvemos la más reciente (el
+ * caller ofrece retomarla/cerrarla). Devuelve las columnas que el caller necesita para reanudar.
+ */
+export function buildActiveSessionQuery(establishmentId: string): LocalQuery {
+  return {
+    sql:
+      'SELECT id, establishment_id, rodeo_id, config, status, work_lot_label, ' +
+      'animal_count, event_count, started_at, ended_at ' +
+      "FROM sessions WHERE establishment_id = ? AND status = 'active' AND deleted_at IS NULL " +
+      'ORDER BY started_at DESC LIMIT 1',
+    args: [establishmentId],
+  };
+}
+
+/**
+ * Lee UNA sesión por id (para reanudación / lectura puntual). Filtra `deleted_at IS NULL`. Mismas columnas
+ * que buildActiveSessionQuery. LIMIT 1 (PK).
+ */
+export function buildSessionByIdQuery(id: string): LocalQuery {
+  return {
+    sql:
+      'SELECT id, establishment_id, rodeo_id, config, status, work_lot_label, ' +
+      'animal_count, event_count, started_at, ended_at ' +
+      'FROM sessions WHERE id = ? AND deleted_at IS NULL LIMIT 1',
+    args: [id],
+  };
+}
+
+// ─── maneuver_presets (R2.1/R2.2/R2.5) ──────────────────────────────────────────────
+
+/**
+ * INSERT local de un `maneuver_preset` (scope establishment, R2.4). `id` de cliente (R2.5). `name` ya
+ * trimeado/validado por el caller (el CHECK maneuver_presets_name_not_empty exige length(trim(name)) > 0).
+ * `config` = snapshot jsonb (maniobras + pre-config), serializado por el caller (mismo shape que
+ * sessions.config). `created_by` lo FUERZA el trigger al subir.
+ */
+export function buildCreateManeuverPresetInsert(
+  id: string,
+  establishmentId: string,
+  name: string,
+  configJson: string,
+): LocalQuery {
+  return {
+    sql: 'INSERT INTO maneuver_presets (id, establishment_id, name, config) VALUES (?, ?, ?, ?)',
+    args: [id, establishmentId, name, configJson],
+  };
+}
+
+/**
+ * UPDATE local de un preset (renombrar + reconfigurar). Filtra `deleted_at IS NULL` (no se edita un
+ * preset borrado). La RLS maneuver_presets_update (has_role_in) re-valida al subir.
+ */
+export function buildUpdateManeuverPresetUpdate(
+  id: string,
+  name: string,
+  configJson: string,
+): LocalQuery {
+  return {
+    sql:
+      'UPDATE maneuver_presets SET name = ?, config = ? WHERE id = ? AND deleted_at IS NULL',
+    args: [name, configJson, id],
+  };
+}
+
+/**
+ * Lista los presets ACTIVOS (no soft-deleted) de un establishment, al tope de la pantalla de inicio
+ * (R2.2). El scoping (has_role_in) ya lo aplicó la stream → no se re-filtra; SÍ se conserva el filtro de
+ * dominio `deleted_at IS NULL` (defensivo). Orden por nombre para una lista estable.
+ *
+ * UNION overlay (R6.11, mismo patrón que buildManagementGroupsQuery): oculta los presets con un
+ * `soft_deleted` pendiente (el borrado optimista de softDeletePreset, vía la OUTBOX, saca el preset de la
+ * lista al instante OFFLINE antes de que la RPC corra). Overlay vacío → idéntico al swap plano.
+ */
+export function buildManeuverPresetsQuery(establishmentId: string): LocalQuery {
+  return {
+    sql:
+      'SELECT id, name, config FROM maneuver_presets mp ' +
+      'WHERE mp.establishment_id = ? AND mp.deleted_at IS NULL AND ' +
+      notHiddenByOverride('maneuver_presets', 'mp.id', ['soft_deleted']) +
+      ' ORDER BY name ASC',
+    args: [establishmentId],
+  };
+}
+
+/** Lee UN preset por id (para cargarlo / loadPreset). Filtra `deleted_at IS NULL`. LIMIT 1 (PK). */
+export function buildManeuverPresetByIdQuery(id: string): LocalQuery {
+  return {
+    sql:
+      'SELECT id, name, config FROM maneuver_presets WHERE id = ? AND deleted_at IS NULL LIMIT 1',
+    args: [id],
   };
 }
 

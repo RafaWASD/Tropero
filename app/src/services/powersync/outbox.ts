@@ -362,6 +362,9 @@ const SOFT_DELETE_OP_BY_ENTITY = {
   rodeo: 'soft_delete_rodeo',
   animal_event: 'soft_delete_animal_event',
   event: 'soft_delete_event',
+  // spec 03 M1.3 — borrar un preset de maniobra: RPC SECURITY DEFINER (0057, has_role_in) — mismo gotcha
+  // RLS-on-RETURNING que el soft-delete de lote (la fila sale de la SELECT-policy tras el UPDATE).
+  maneuver_preset: 'soft_delete_maneuver_preset',
 } as const;
 
 const TARGET_TABLE_BY_ENTITY = {
@@ -369,6 +372,7 @@ const TARGET_TABLE_BY_ENTITY = {
   rodeo: 'rodeos',
   animal_event: 'animal_events',
   event: 'reproductive_events', // (placeholder; sin call site hoy — los eventos tipados no se borran en MVP)
+  maneuver_preset: 'maneuver_presets',
 } as const;
 
 export type SoftDeleteEntity = keyof typeof SOFT_DELETE_OP_BY_ENTITY;

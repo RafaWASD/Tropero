@@ -24,13 +24,13 @@ import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
 import {
   ChevronLeft,
   ChevronRight,
-  Layers,
   Pencil,
   Plus,
   Trash2,
 } from 'lucide-react-native';
 
 import { AnimalRow, Button, Card, FormError, FormField, InfoNote } from '@/components';
+import { LoteIcon } from '@/theme/icons';
 import { useEstablishment } from '@/contexts';
 import {
   createManagementGroup,
@@ -414,7 +414,7 @@ function LoteCard({
                 justifyContent="center"
                 flexShrink={0}
               >
-                <Layers size={16} color={primary} strokeWidth={2.5} />
+                <LoteIcon size={16} color={primary} strokeWidth={2.5} />
               </View>
               <Text
                 flex={1}

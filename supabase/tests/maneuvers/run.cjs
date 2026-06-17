@@ -511,9 +511,99 @@ test('maneuvers suite — spec 03', async (t) => {
     }
   });
 
+  // ---- T2.4c gating deworming + treatment (R7.7, R6.13-R6.15, M3.0-BACKEND) ----
+  // ⚠️ PENDIENTE DEPLOY: la migración 0091 que extiende tg_sanitary_events_gating para gatear
+  // deworming/treatment NO está aplicada hasta que el leader la deploye (Gate 1 + OK de Raf).
+  // Mientras tanto, los asserts de RECHAZO de este bloque FALLAN por la RAZÓN correcta: el trigger
+  // viejo (0054) solo gatea 'vaccination' → el INSERT de deworming/treatment sobre un rodeo SIN el
+  // data_key habilitado NO se rechaza (se acepta) → el assert de 23514 falla. NO es bug del test:
+  // es el estado pre-deploy. Pasa recién POST-DEPLOY de 0091.
+  await t.test('T2.4c gating deworming/treatment', async () => {
+    const rg = await createRodeo(clientA, { establishmentId: estA, name: 'Rodeo gating sanitario' });
+    const an = await createAnimal(clientA, { idv: `${RUN_TAG}_GS`, sex: 'female', birthDate: daysAgo(550), rodeoId: rg.id, establishmentId: estA, systemId: rg.systemId, categoryCode: 'vaquillona' });
+    assert.equal(an.error, undefined, an.error && an.error.message);
+
+    // --- treatment (antibiótico) → single key 'antibiotico', igual que vaccination ---
+    {
+      // antibiotico enabled (default de cría) → OK.
+      await setRodeoDataKey(clientA, rg.id, 'antibiotico', true);
+      const ok = await clientA.from('sanitary_events').insert({ animal_profile_id: an.profile.id, event_type: 'treatment', product_name: 'Oxitetraciclina', event_date: daysAgo(1) });
+      assert.equal(ok.error, null, ok.error ? `treatment enabled: ${ok.error.message}` : 'treatment con antibiotico enabled -> OK');
+      // antibiotico disabled → reject 23514.
+      await setRodeoDataKey(clientA, rg.id, 'antibiotico', false);
+      const bad = await clientA.from('sanitary_events').insert({ animal_profile_id: an.profile.id, event_type: 'treatment', product_name: 'Oxitetraciclina', event_date: daysAgo(1) });
+      assert.notEqual(bad.error, null, 'treatment con antibiotico disabled -> reject');
+      assert.match(pgcode(bad.error), /23514|missing enabled data_keys|none of the alternative/i, 'treatment disabled -> 23514');
+      await setRodeoDataKey(clientA, rg.id, 'antibiotico', true);
+    }
+
+    // --- deworming (antiparasitario) → OR de antiparasitario_interno / antiparasitario_externo (R6.14/D10) ---
+    {
+      // (1) NINGUNO enabled → reject 23514 (fail-closed de la OR).
+      await setRodeoDataKey(clientA, rg.id, 'antiparasitario_interno', false);
+      await setRodeoDataKey(clientA, rg.id, 'antiparasitario_externo', false);
+      const badNone = await clientA.from('sanitary_events').insert({ animal_profile_id: an.profile.id, event_type: 'deworming', product_name: 'Ivermectina', event_date: daysAgo(1) });
+      assert.notEqual(badNone.error, null, 'deworming con NINGUN antiparasitario enabled -> reject');
+      assert.match(pgcode(badNone.error), /23514|none of the alternative|missing enabled/i, 'deworming ninguno -> 23514');
+
+      // (2) SOLO interno enabled → OK (basta uno).
+      await setRodeoDataKey(clientA, rg.id, 'antiparasitario_interno', true);
+      await setRodeoDataKey(clientA, rg.id, 'antiparasitario_externo', false);
+      const okInterno = await clientA.from('sanitary_events').insert({ animal_profile_id: an.profile.id, event_type: 'deworming', product_name: 'Ivermectina', event_date: daysAgo(1) });
+      assert.equal(okInterno.error, null, okInterno.error ? `deworming solo interno: ${okInterno.error.message}` : 'deworming con solo antiparasitario_interno enabled -> OK');
+
+      // (3) SOLO externo enabled → OK (basta uno).
+      await setRodeoDataKey(clientA, rg.id, 'antiparasitario_interno', false);
+      await setRodeoDataKey(clientA, rg.id, 'antiparasitario_externo', true);
+      const okExterno = await clientA.from('sanitary_events').insert({ animal_profile_id: an.profile.id, event_type: 'deworming', product_name: 'Cipermetrina', event_date: daysAgo(1) });
+      assert.equal(okExterno.error, null, okExterno.error ? `deworming solo externo: ${okExterno.error.message}` : 'deworming con solo antiparasitario_externo enabled -> OK');
+
+      // (4) AMBOS enabled → OK.
+      await setRodeoDataKey(clientA, rg.id, 'antiparasitario_interno', true);
+      await setRodeoDataKey(clientA, rg.id, 'antiparasitario_externo', true);
+      const okAmbos = await clientA.from('sanitary_events').insert({ animal_profile_id: an.profile.id, event_type: 'deworming', product_name: 'Doramectina', event_date: daysAgo(1) });
+      assert.equal(okAmbos.error, null, okAmbos.error ? `deworming ambos: ${okAmbos.error.message}` : 'deworming con ambos antiparasitarios enabled -> OK');
+    }
+
+    // --- no-bypass (R7.3): INSERT directo PostgREST sobre rodeo sin el data_key -> rechazado igual ---
+    // (ya cubierto arriba: los inserts son PostgREST directos; este caso lo deja explícito con admin/service_role,
+    //  que TAMBIÉN debe ser rechazado porque el trigger corre BEFORE INSERT independiente del rol.)
+    {
+      await setRodeoDataKey(clientA, rg.id, 'antibiotico', false);
+      const badAdmin = await admin.from('sanitary_events').insert({ animal_profile_id: an.profile.id, event_type: 'treatment', product_name: 'X', event_date: daysAgo(1) });
+      assert.notEqual(badAdmin.error, null, 'treatment por service_role sobre rodeo sin antibiotico -> reject (no-bypass)');
+      assert.match(pgcode(badAdmin.error), /23514|missing enabled|none of the alternative/i, 'no-bypass treatment -> 23514');
+      await setRodeoDataKey(clientA, rg.id, 'antibiotico', true);
+    }
+
+    // --- fail-closed (R7.6): rodeo no resoluble (perfil soft-deleted) -> reject 23514 ---
+    {
+      const an2 = await createAnimal(clientA, { idv: `${RUN_TAG}_GS_FC`, sex: 'female', birthDate: daysAgo(550), rodeoId: rg.id, establishmentId: estA, systemId: rg.systemId, categoryCode: 'vaquillona' });
+      await admin.from('animal_profiles').update({ deleted_at: new Date().toISOString() }).eq('id', an2.profile.id);
+      const badDW = await admin.from('sanitary_events').insert({ animal_profile_id: an2.profile.id, event_type: 'deworming', product_name: 'Ivermectina', event_date: daysAgo(1) });
+      assert.notEqual(badDW.error, null, 'deworming sobre perfil soft-deleted -> reject (fail-closed)');
+      assert.match(pgcode(badDW.error), /23514|cannot resolve rodeo/i, 'fail-closed deworming -> 23514');
+      const badTR = await admin.from('sanitary_events').insert({ animal_profile_id: an2.profile.id, event_type: 'treatment', product_name: 'Oxi', event_date: daysAgo(1) });
+      assert.notEqual(badTR.error, null, 'treatment sobre perfil soft-deleted -> reject (fail-closed)');
+      assert.match(pgcode(badTR.error), /23514|cannot resolve rodeo/i, 'fail-closed treatment -> 23514');
+    }
+
+    // --- regresión: NO se rompió el gating de vaccination ni los event_type no gateados ---
+    {
+      // vaccination sigue gateado por 'vacunacion' (default enabled) -> OK.
+      const okVac = await clientA.from('sanitary_events').insert({ animal_profile_id: an.profile.id, event_type: 'vaccination', product_name: 'Aftosa', event_date: daysAgo(1) });
+      assert.equal(okVac.error, null, okVac.error ? `regresión vaccination: ${okVac.error.message}` : 'vaccination sigue OK (no se rompió 0054)');
+      // event_type='other' NO se gatea aunque ningún antiparasitario esté enabled -> OK.
+      await setRodeoDataKey(clientA, rg.id, 'antiparasitario_interno', false);
+      await setRodeoDataKey(clientA, rg.id, 'antiparasitario_externo', false);
+      const okOther = await clientA.from('sanitary_events').insert({ animal_profile_id: an.profile.id, event_type: 'other', product_name: 'Vitaminas', event_date: daysAgo(1) });
+      assert.equal(okOther.error, null, okOther.error ? `event_type other: ${okOther.error.message}` : "event_type='other' no se gatea -> OK");
+    }
+  });
+
   // ---- T2.5 binding data_key <-> field_definitions (R7.2) -----------------
   await t.test('T2.5 binding data_key existe en field_definitions', async () => {
-    const dataKeys = ['condicion_corporal', 'peso', 'brucelosis', 'raspado_toros', 'vacunacion', 'prenez', 'tamano_prenez', 'tacto_vaquillona', 'inseminacion', 'dientes'];
+    const dataKeys = ['condicion_corporal', 'peso', 'brucelosis', 'raspado_toros', 'vacunacion', 'prenez', 'tamano_prenez', 'tacto_vaquillona', 'inseminacion', 'dientes', 'antiparasitario_interno', 'antiparasitario_externo', 'antibiotico'];
     for (const dk of dataKeys) {
       const { data, error } = await clientA.from('field_definitions').select('data_key').eq('data_key', dk).maybeSingle();
       assert.equal(error, null, error && error.message);

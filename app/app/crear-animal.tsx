@@ -106,7 +106,7 @@ type WizardStep = 1 | 2 | 3 | 4;
 export default function CrearAnimalScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const params = useLocalSearchParams<{ idv?: string; visual?: string; tag?: string }>();
+  const params = useLocalSearchParams<{ idv?: string; visual?: string; tag?: string; sessionId?: string }>();
   const { state: authState } = useAuth();
   const { state: estState } = useEstablishment();
   const { state: rodeoState } = useRodeo();
@@ -133,6 +133,13 @@ export default function CrearAnimalScreen() {
         ? 'visual'
         : null;
   const prefilledId = prefilledTag || prefilledIdv || prefilledVisual; // lo que se muestra en "Creando: [id]"
+
+  // Contexto de MODO MANIOBRAS (spec 03 R4.1, M2.2): si el alta vino DESDE la manga (find-or-create
+  // inline), `identificar.tsx` pasa el `sessionId` de la jornada. Presente = "alta desde modo maniobras"
+  // → al crear (o tras un soft-fail), en vez de aterrizar en la ficha del animal (dead-end de la jornada)
+  // continuamos DIRECTO a la carga de la maniobra de ese animal nuevo (`/maniobra/carga`), sin
+  // re-identificarlo. Vacío = alta normal (desde la lista de animales) → ficha, como hoy (sin regresión).
+  const maneuverSessionId = typeof params.sessionId === 'string' ? params.sessionId : '';
 
   // Identificadores: el precargado va read-only (no editable); los otros quedan EDITABLES en el paso 4
   // (recomendados, no obligatorios — R4.3). Por la rama BLE (RB6.3) el TAG bastoneado llega precargado
@@ -344,10 +351,18 @@ export default function CrearAnimalScreen() {
 
   const onSubmit = useCallback(async () => {
     if (busyRef.current) return;
-    // Si el animal YA se creó (un evento post-create falló), NO re-creamos: navegamos a su ficha. Esto
-    // evita un DUPLICADO si el operario re-toca el CTA tras el aviso suave.
+    // Si el animal YA se creó (un evento post-create falló), NO re-creamos: navegamos sin re-crear (evita
+    // un DUPLICADO si el operario re-toca el CTA tras el aviso suave). En contexto MODO MANIOBRAS (M2.2)
+    // continuamos la carga de la maniobra del animal nuevo; si no, a su ficha (como hoy).
     if (createdProfileId) {
-      router.replace({ pathname: '/animal/[id]', params: { id: createdProfileId } });
+      if (maneuverSessionId) {
+        router.replace({
+          pathname: '/maniobra/carga',
+          params: { sessionId: maneuverSessionId, profileId: createdProfileId },
+        });
+      } else {
+        router.replace({ pathname: '/animal/[id]', params: { id: createdProfileId } });
+      }
       return;
     }
     setFormError(null);
@@ -461,19 +476,33 @@ export default function CrearAnimalScreen() {
 
     if (softFails.length > 0) {
       // El animal SE CREÓ; solo falló guardar un dato secundario (evento). NO navegamos automáticamente:
-      // mostramos el aviso suave en el form + marcamos createdProfileId → el CTA pasa a "Ver la ficha
-      // del animal" (sin re-crear → sin duplicado). El operario lee el aviso y agrega el dato faltante
-      // desde la ficha ("Agregar evento"). No es un error: es un aviso accionable que no traba.
+      // mostramos el aviso suave en el form + marcamos createdProfileId → el CTA pasa a "Continuar con la
+      // maniobra" (contexto manga) / "Ver la ficha del animal" (alta normal) — sin re-crear → sin
+      // duplicado. El operario lee el aviso y agrega el dato faltante después (desde la ficha o tras la
+      // jornada). No es un error: es un aviso accionable que no traba. En contexto MANIOBRA el animal ya
+      // existe → hay que poder CONTINUAR la jornada (el dato faltante se agrega luego desde la ficha).
       setCreatedProfileId(profileId);
       setFormError(
-        `El animal se creó, pero no pudimos guardar ${softFails.join(' ni ')}. Tocá "Ver la ficha" y agregalo desde ahí.`,
+        maneuverSessionId
+          ? `El animal se creó, pero no pudimos guardar ${softFails.join(' ni ')}. Tocá "Continuar con la maniobra"; lo agregás después desde la ficha.`
+          : `El animal se creó, pero no pudimos guardar ${softFails.join(' ni ')}. Tocá "Ver la ficha" y agregalo desde ahí.`,
       );
       return;
     }
-    // Happy-path (R4.7): a la ficha del recién creado. replace para no dejar el form en el back-stack.
-    router.replace({ pathname: '/animal/[id]', params: { id: profileId } });
+    // Happy-path (R4.7): al recién creado. En contexto MODO MANIOBRAS (M2.2) continuamos DIRECTO a la
+    // carga de la maniobra del animal nuevo (/maniobra/carga, sin re-identificarlo); si no, a su ficha.
+    // replace para no dejar el form en el back-stack.
+    if (maneuverSessionId) {
+      router.replace({
+        pathname: '/maniobra/carga',
+        params: { sessionId: maneuverSessionId, profileId },
+      });
+    } else {
+      router.replace({ pathname: '/animal/[id]', params: { id: profileId } });
+    }
   }, [
     createdProfileId,
+    maneuverSessionId,
     sex,
     birthYear,
     entryWeight,
@@ -662,7 +691,9 @@ export default function CrearAnimalScreen() {
               onPress={() => void onSubmit()}
             >
               {createdProfileId
-                ? 'Ver la ficha del animal'
+                ? maneuverSessionId
+                  ? 'Continuar con la maniobra'
+                  : 'Ver la ficha del animal'
                 : submitting
                   ? 'Creando…'
                   : 'Crear animal'}

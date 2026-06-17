@@ -14,7 +14,10 @@
 
 export type AdapterKind = 'manual' | 'mock' | 'web-serial' | 'spp-android' | 'hid-wedge';
 
-export type ProviderMode = 'auto' | 'mock';
+// 'auto' = elige por plataforma (web-serial en web). 'mock' = adapter-mock (CI/dev toggle, R10.2).
+// 'manual' = SIN transporte buildable, solo el piso manual (native manual-first / captura del sub-estado
+// "manual promovido" del hero adaptativo de la manga, spec 03 M2.1) → instantiateTransport devuelve null.
+export type ProviderMode = 'auto' | 'mock' | 'manual';
 
 export interface SelectionEnv {
   /** Platform.OS del runtime ('web' | 'ios' | 'android' | ...). */
@@ -31,6 +34,9 @@ export interface SelectionEnv {
  */
 export function selectTransportAdapter(env: SelectionEnv): AdapterKind {
   if (env.mode === 'mock') return 'mock';
+  // 'manual' fuerza el piso manual SIN transporte buildable (instantiateTransport('manual') → null). Lo usa
+  // el provider bajo el flag de E2E para reproducir el sub-estado "manual promovido" del hero (transport==null).
+  if (env.mode === 'manual') return 'manual';
   if (env.platformOS === 'web') return 'web-serial';
   // Android device → 'spp-android' cuando la Fase 4 esté construida; hasta entonces el piso
   // manual es el único transporte disponible en native (la app funciona, manual-first).

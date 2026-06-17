@@ -31,9 +31,10 @@ import { Alert, Platform, Pressable } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
-import { AlertTriangle, Boxes, Building2, CheckCircle2, ChevronRight, Layers, LogOut, Pencil, Radio, Trash2, Users } from 'lucide-react-native';
+import { AlertTriangle, CheckCircle2, ChevronRight, LogOut, Pencil, Radio, Trash2 } from 'lucide-react-native';
 
 import { Button, Card, FormField, FormError, InfoNote } from '@/components';
+import { CampoIcon, LoteIcon, MiembroIcon, RodeoIcon } from '@/theme/icons';
 import { useAuth, useEstablishment, useProfile } from '@/contexts';
 import {
   countActiveMembers,
@@ -574,7 +575,7 @@ function DeleteAccountSection({
                   borderRadius="$card"
                   paddingHorizontal="$3"
                 >
-                  <Building2 size={20} color={terracota} strokeWidth={2} />
+                  <CampoIcon size={20} color={terracota} strokeWidth={2} />
                   <Text
                     flex={1}
                     minWidth={0}
@@ -837,7 +838,7 @@ export default function MasScreen() {
               {/* Rodeos (spec 02 C1): la lista es visible a todos los roles; la gestión (crear /
                   editar plantilla / eliminar) es owner-only dentro de la pantalla (R2.3). */}
               <ActionRow
-                icon={<Boxes size={20} color={primary} strokeWidth={2} />}
+                icon={<RodeoIcon size={20} color={primary} strokeWidth={2} />}
                 label="Rodeos"
                 accessibilityLabel="Ver y gestionar los rodeos del campo"
                 trailing={<ChevronRight size={20} color={muted} strokeWidth={2} />}
@@ -848,7 +849,7 @@ export default function MasScreen() {
                   (crear / renombrar / borrar) es owner-only dentro de la pantalla. Asignar animales
                   a un lote (cualquier rol) pasa por la ficha del animal. */}
               <ActionRow
-                icon={<Layers size={20} color={primary} strokeWidth={2} />}
+                icon={<LoteIcon size={20} color={primary} strokeWidth={2} />}
                 label="Lotes"
                 accessibilityLabel="Ver y gestionar los lotes del campo"
                 trailing={<ChevronRight size={20} color={muted} strokeWidth={2} />}
@@ -899,7 +900,7 @@ export default function MasScreen() {
             <SectionTitle>Equipo</SectionTitle>
             <Card padding="$0" gap="$0" overflow="hidden">
               <ActionRow
-                icon={<Users size={20} color={primary} strokeWidth={2} />}
+                icon={<MiembroIcon size={20} color={primary} strokeWidth={2} />}
                 label="Miembros e invitaciones"
                 accessibilityLabel="Ver miembros e invitaciones del equipo"
                 trailing={<ChevronRight size={20} color={muted} strokeWidth={2} />}

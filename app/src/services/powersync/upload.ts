@@ -39,6 +39,10 @@ const RPC_OP_TYPES = new Set([
   'soft_delete_rodeo',
   'soft_delete_animal_event',
   'soft_delete_event',
+  // spec 03 M1.3 — borrar un preset de maniobra OFFLINE: soft_delete_maneuver_preset (0057). SIN
+  // p_client_op_id (dedup natural por la guarda deleted_at IS NULL → reintento levanta P0002 → descarte
+  // idempotente, igual que el resto de los soft_delete_*).
+  'soft_delete_maneuver_preset',
   // Run T9.8 — alta de rodeo OFFLINE: create_rodeo SÍ es RPC (0081). SIN p_client_op_id (dedup natural por
   // el id de cliente del rodeo + UPSERT de toggles → replay = no-op total, R6.10).
   'create_rodeo',

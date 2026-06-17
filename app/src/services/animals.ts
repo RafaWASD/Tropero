@@ -43,6 +43,7 @@ import {
   buildRodeoSpeciesQuery,
   buildSetCastratedUpdate,
   buildSetFutureBullUpdate,
+  buildMoveAnimalToRodeoUpdate,
   buildAddObservationInsert,
   buildProfileEstablishmentQuery,
   toBool,
@@ -1095,6 +1096,59 @@ async function resolveRevertCategory(
   };
 }
 
+/** code de la categoría CUT (descarte) en el catálogo de cría — el picker de alta lo EXCLUYE (no es elegible). */
+const CUT_CATEGORY_CODE = 'cut';
+
+/**
+ * Resuelve los `category_id` que la maniobra DIENTES/CUT (spec 03 M3.2a, R6.8) necesita para el write:
+ *   - `cutCategoryId`     → id de la categoría CUT del sistema del rodeo (para SET: marcar is_cut + fijar
+ *                           category_id = CUT, category_override = true). Resuelto por (system_id, 'cut').
+ *   - `derivedCategoryId` → id de la categoría AUTOMÁTICA a la que el animal volvería al DESMARCAR CUT
+ *                           (corrección, R6.8: revierte category_id + override). Reusa la MISMA derivación
+ *                           que el revert de override (`resolveRevertCategory`, espejo de compute_category)
+ *                           ⇒ desmarcar CUT aterriza en la categoría correcta, consistente con la ficha.
+ *
+ * SOLO LECTURA (todo SELECT del SQLite local, OFFLINE-safe, RC6.3.5): el caller (el frame de carga rápida)
+ * la invoca al ENTRAR al paso de dientes para tener ambos ids listos, y los pasa a `persistManeuverEvent`
+ * en el StepValue dientes (`cutCategoryId` = el CUT al confirmar, o la derivada al desmarcar). Fail-safe:
+ * si NO se puede resolver el CUT (sin system_id / sin fila 'cut' en el catálogo) → `cutCategoryId: null`,
+ * y el orquestador OMITE el write de CUT (solo setea teeth_state, R6.8 §M3.1) — nunca fija una categoría
+ * inválida (0021 la rechazaría con 23514). La derivada es opcional (solo la usa la corrección de desmarcado).
+ */
+export async function resolveCutCategory(
+  profileId: string,
+): Promise<ServiceResult<{ cutCategoryId: string | null; derivedCategoryId: string | null }>> {
+  // 1) system_id del perfil (para resolver code='cut' → id). emptyIsSyncing:false: "no encontrado" es de
+  //    negocio (el caller ya tiene el detalle; esto solo trae el system_id del rodeo).
+  const detailRes = await runLocalQuerySingle<LocalDetailRow>(buildAnimalDetailQuery(profileId), {
+    emptyIsSyncing: false,
+  });
+  if (!detailRes.ok) return { ok: false, error: detailRes.error };
+  if (!detailRes.value) {
+    return { ok: false, error: { kind: 'unknown', message: 'No se encontró el animal.' } };
+  }
+  const systemId = detailRes.value.system_id ?? null;
+
+  // 2) id de la categoría CUT del sistema (code='cut'). Sin system_id o sin fila 'cut' → null (fail-safe:
+  //    el orquestador solo setea teeth_state, no fija una categoría inválida).
+  let cutCategoryId: string | null = null;
+  if (systemId) {
+    const cutRes = await runLocalQuerySingle<{ id: string }>(
+      buildCategoryIdByCodeQuery(systemId, CUT_CATEGORY_CODE),
+      { emptyIsSyncing: false },
+    );
+    if (!cutRes.ok) return { ok: false, error: cutRes.error };
+    cutCategoryId = cutRes.value?.id ?? null;
+  }
+
+  // 3) Categoría DERIVADA (para el desmarcado, R6.8): reusa el espejo del revert. Irresoluble → null (la
+  //    corrección de desmarcar CUT no anticipa la categoría; el orquestador solo desmarca is_cut entonces).
+  const derivedRes = await resolveRevertCategory(profileId);
+  const derivedCategoryId = derivedRes.ok ? derivedRes.value.categoryId : null;
+
+  return { ok: true, value: { cutCategoryId, derivedCategoryId } };
+}
+
 /**
  * Anticipa la CONSECUENCIA del revert (C6 / RC6.4.6): devuelve el `name` legible de la categoría
  * AUTOMÁTICA a la que volvería el animal al quitar la fijación, para mostrarlo en la confirmación inline
@@ -1278,6 +1332,33 @@ export async function setFutureBull(
   value: boolean,
 ): Promise<ServiceResult<true>> {
   const r = await runLocalWrite(buildSetFutureBullUpdate(profileId, value));
+  if (!r.ok) return { ok: false, error: { kind: r.error.kind, message: r.error.message } };
+  return { ok: true, value: true };
+}
+
+// ─── Mover un animal de rodeo (spec 03 R4.4 — "pasar el animal a este rodeo") ─────────────
+
+/**
+ * Mueve el PERFIL ACTIVO de un animal a otro rodeo del MISMO establecimiento (spec 03 R4.4 — el operario
+ * decide pasar a este rodeo —el de la jornada— un animal que estaba en otro rodeo del mismo campo, para
+ * poder cargarlo sin que el tenant-check de sesión lo rechace, design §2.3). UN solo UPDATE local de
+ * `rodeo_id` (UNA CrudEntry) → upload queue (offline-first, CRUD-plano, igual que assignAnimalToGroup /
+ * setFutureBull). NO encola nada extra.
+ *
+ * La VALIDACIÓN es server-side (NO se replica en el cliente): al SUBIR el UPDATE, el trigger
+ * `tg_animal_profiles_rodeo_same_system_check` (0047) rechaza el cruce de sistemas productivos (R4.5.1,
+ * 23514) y `tg_animal_profiles_rodeo_check` (0021) re-valida que el rodeo destino sea del mismo
+ * establishment del perfil y esté activo; la RLS (`animal_profiles_update` = has_role_in) re-valida el
+ * tenant. Un rechazo lo maneja uploadData (descarta + superficia), NO el return de acá (contrato T5).
+ *
+ * Multi-tenant (CLAUDE.md ppio 6): el `rodeoId` destino lo pasa el caller (un rodeo del MISMO campo
+ * activo, de `rodeo.available` del RodeoContext — la UI NUNCA ofrece rodeos ajenos). Cero hardcode.
+ */
+export async function moveAnimalToRodeo(
+  profileId: string,
+  rodeoId: string,
+): Promise<ServiceResult<true>> {
+  const r = await runLocalWrite(buildMoveAnimalToRodeoUpdate(profileId, rodeoId));
   if (!r.ok) return { ok: false, error: { kind: r.error.kind, message: r.error.message } };
   return { ok: true, value: true };
 }
