@@ -987,6 +987,8 @@ Descartada: las maniobras escriben en las 5 tablas tipadas (analytics, spec 02).
 
 > **Numeración de migraciones — CONFIRMAR antes de fijar números.** As-built verificado: el último archivo es `0089_assign_tag_to_animal_rpc.sql` → el próximo libre es **0090**. **PERO**: hay otra terminal trabajando el repo (spec 08 SIGSA, `app/src/services/sigsa/` + edits a `specs/active/08-export-sigsa/*`); a la fecha del fold **no agregó migraciones** (es feature de capa pura/export), pero el implementer **debe re-confirmar el rango libre contra el árbol Y contra lo que la otra terminal tenga en vuelo** justo antes de crear los archivos (no hardcodear `0090..` sin re-chequear). Propuesta de orden (sujeta a re-confirmación): `0090_field_definitions_custom.sql` (ALTER de `field_definitions`) → `0091_custom_measurements.sql` → `0092_custom_attributes.sql` → `0093_custom_gating.sql` (gating genérico + validación de `value`) → `0094_check_grants.sql` (housekeeping de grants/revokes). El `ALTER TYPE`/constraint-drop que no sea transaccionable se aísla en su propia migración si el motor lo exige.
 
+> **AS-BUILT (M5-BACKEND, implementer 2026-06-17) — numeración real + ubicación del sync delta.** Entre la redacción del fold y la implementación, `0090`/`0091` fueron ocupadas por sanitary (otra feature) y `0092` quedó **reservada para spec-08**. M5 arrancó en **0093** (decisión del leader). Mapeo real (solo cambia el prefijo numérico; el CONTENIDO es el de §11.1–§11.5): `0093_field_definitions_custom.sql` (§11.1) · `0094_custom_measurements.sql` (§11.2) · `0095_custom_attributes.sql` (§11.3) · `0096_custom_gating.sql` (§11.4) · `0097_check_grants.sql` (housekeeping de grants/revokes + smoke check fail-closed, patrón `0055`). Los DROP CONSTRAINT / CREATE UNIQUE INDEX / ADD CONSTRAINT de `0093` son **transaccionables** (no hay `ALTER TYPE`) → la migración va en un solo `begin/commit`. El **delta de sync (§11.5) NO es una migración**: vive en `sync-streams/rafaq.yaml` (3 streams custom + `catalog_field_definitions` restringido a `establishment_id IS NULL`) + `app/src/services/powersync/schema.ts` (columnas + 2 `Table` nuevas). **Migraciones escritas, NO aplicadas** (deploy gateado por el leader post-Gate 2); suite de tests no-bypass en `supabase/tests/custom/run.cjs` (corre post-apply).
+
 ### 11.1 `field_definitions` — reabrir para custom (ALTER, migración `0090`)
 
 Hoy (as-built `0018`): `data_key text not null unique`; RLS `SELECT to authenticated using (true)`; **sin policy INSERT/UPDATE de cliente** (solo `grant all to service_role`); FK-eada por `id` desde `rodeo_data_config` y `system_default_fields`. El delta:
@@ -1031,10 +1033,16 @@ alter table public.field_definitions
 --   cierra el vector en la RAÍZ: una fila custom (establishment_id is not null) solo puede tener uno de los 7
 --   ui_component de R13.8. Las globales de fábrica (establishment_id is null) quedan LIBRES — usan
 --   'composite'/'silent_apply'/etc. as-built (0018) y la migración no debe abortar al validar esas filas.
+--   AS-BUILT (fix-loop POST-APPLY 2026-06-17): la versión drafteada `establishment_id is null OR ui_component
+--   in (...)` tenía un hueco NULL-en-CHECK — `ui_component` es NULLABLE (0018 l.14) → para custom (est NOT null)
+--   + ui_component=NULL daba `false OR (NULL in (...))` = NULL → un CHECK que evalúa a NULL PASA (no rechaza).
+--   El test (h) (custom con ui_component=NULL) lo cazó contra el remoto. Corregido EXIGIENDO no-null para
+--   custom: `is not null AND in (...)`. Globales (est null) quedan exentas por el primer disyunto (intacto).
 alter table public.field_definitions
   add constraint field_definitions_custom_ui_component_valid
     check (establishment_id is null
-           or ui_component in ('numeric','numeric_stepped','enum_single','enum_multi','text','boolean','date'));
+           or (ui_component is not null
+               and ui_component in ('numeric','numeric_stepped','enum_single','enum_multi','text','boolean','date')));
 
 -- (d.2) caps/sets-cerrados INPUT-1 de las columnas que recién ahora son escribibles por el cliente
 --   (M5-SEC-03 / regresión de la exclusión de field_definitions en 0070). data_key/description/category/data_type

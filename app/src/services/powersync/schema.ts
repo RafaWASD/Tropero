@@ -62,6 +62,11 @@ const field_definitions = new Table({
   config_schema: column.text,
   schema_version: column.integer,
   active: column.integer,
+  // spec 03 M5 — datos custom (0093): establishment_id (NULL=global de fábrica; no-NULL=custom del campo) +
+  // deleted_at (soft-delete R13.19). Bajan por dos streams distintas: catalog_field_definitions (globales,
+  // establishment_id IS NULL) + est_field_definitions_custom (custom, scope establishment). uuid→TEXT.
+  establishment_id: column.text,
+  deleted_at: column.text,
   created_at: column.text,
   updated_at: column.text,
 });
@@ -274,6 +279,34 @@ const maneuver_presets = new Table({
   created_at: column.text,
   updated_at: column.text,
   deleted_at: column.text,
+});
+
+// spec 03 M5 — captura de maniobra custom (append-only, time-series; 0094). value jsonb→TEXT. La fila baja
+// por est_custom_measurements (scope establishment). establishment_id/recorded_by los fuerza el trigger al
+// subir (CRUD-plano: no se mandan). value es JSON serializado (el render genérico lo parsea por ui_component).
+const custom_measurements = new Table({
+  animal_profile_id: column.text,
+  field_definition_id: column.text,
+  establishment_id: column.text,
+  value: column.text,
+  session_id: column.text,
+  recorded_by: column.text,
+  recorded_at: column.text,
+  notes: column.text,
+  created_at: column.text,
+  deleted_at: column.text,
+});
+
+// spec 03 M5 — valor actual de una propiedad custom (upsert, sin historial; 0095). PK compuesta
+// (animal_profile_id, field_definition_id) → la stream emite `id` sintético. value jsonb→TEXT.
+const custom_attributes = new Table({
+  animal_profile_id: column.text,
+  field_definition_id: column.text,
+  establishment_id: column.text,
+  value: column.text,
+  updated_by: column.text,
+  updated_at: column.text,
+  created_at: column.text,
 });
 
 const semen_registry = new Table({
@@ -565,6 +598,9 @@ export const AppSchema = new Schema({
   animal_category_history,
   sessions,
   maneuver_presets,
+  // spec 03 M5 — captura de datos custom (CRUD-plano; scope establishment vía est_custom_*)
+  custom_measurements,
+  custom_attributes,
   semen_registry,
   // eventos
   weight_events,

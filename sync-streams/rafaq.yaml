@@ -53,10 +53,10 @@ streams:
     auto_subscribe: true
     queries:
       - SELECT * FROM categories_by_system
-  catalog_field_definitions:
-    auto_subscribe: true
-    queries:
-      - SELECT * FROM field_definitions
+  catalog_field_definitions:                 # SOLO las globales de fábrica (spec 03 M5 / R13.21). Las
+    auto_subscribe: true                     # custom (establishment_id no-NULL) salen por su propia stream
+    queries:                                 # scope establishment (est_field_definitions_custom). Sin este
+      - SELECT * FROM field_definitions WHERE establishment_id IS NULL  # filtro las custom fugarían a TODOS.
   catalog_system_default_fields:
     auto_subscribe: true
     queries:
@@ -220,6 +220,34 @@ streams:
     queries:
       - SELECT (rodeo_id || ':' || field_definition_id) AS id, * FROM rodeo_data_config WHERE establishment_id IN org_scope
 
+  # ── DATOS/MANIOBRAS CUSTOM (spec 03 M5 / US-13) — frontera WAL R13.20/R13.21 ──────────────────────
+  #    Las filas custom de field_definitions (establishment_id no-NULL) + las dos tablas de captura genéricas
+  #    scopean por establishment_id IN org_scope (JOIN-free, mismo patrón probado). El catálogo GLOBAL sale
+  #    por catalog_field_definitions (restringido arriba a establishment_id IS NULL). Un device sin rol en el
+  #    establecimiento NO recibe sus filas custom (Gate 1 lo verifica). establishment_id en las dos tablas de
+  #    captura está DENORMALIZADO por trigger anti-spoof (0094/0095, paridad 0077) → fiel, no del payload.
+  est_field_definitions_custom:              # las custom del/los campo(s) del usuario (filtra su deleted_at)
+    auto_subscribe: true
+    with:
+      org_scope: SELECT establishment_id FROM user_roles WHERE user_id = auth.user_id() AND active = true
+    queries:
+      - SELECT * FROM field_definitions WHERE establishment_id IN org_scope AND deleted_at IS NULL
+
+  est_custom_measurements:                   # captura append-only (filtra su propio deleted_at)
+    auto_subscribe: true
+    with:
+      org_scope: SELECT establishment_id FROM user_roles WHERE user_id = auth.user_id() AND active = true
+    queries:
+      - SELECT * FROM custom_measurements WHERE establishment_id IN org_scope AND deleted_at IS NULL
+
+  est_custom_attributes:                      # current-value (sin deleted_at propio → solo scope por org_scope)
+    auto_subscribe: true
+    with:
+      org_scope: SELECT establishment_id FROM user_roles WHERE user_id = auth.user_id() AND active = true
+    queries:
+      # PK compuesta (animal_profile_id, field_definition_id) → `id` sintético (PowerSync exige `id` por fila).
+      - SELECT (animal_profile_id || ':' || field_definition_id) AS id, * FROM custom_attributes WHERE establishment_id IN org_scope
+
 # ══════════════════════════════════════════════════════════════════════════════════════════════════
 # ENTIDADES COMPARTIDAS — FUERA DEL SYNC SET (ADR-026 b1/c2):
 #   - `animals` (global) → NO se sincroniza. Su identidad (tag_electronic/sex/birth_date) se denormaliza
@@ -227,5 +255,6 @@ streams:
 #   - `users` (global)   → NO se sincroniza. El `name` se denormaliza sobre `user_roles.member_name` →
 #     rides on self_user_roles (nombre propio) + est_members_roles (coworkers). PII (email/phone) en
 #     user_private self-only (self_user_private), NUNCA se denormaliza (ADR-025).
-# Total: 25 streams (17 del paso 1 + 8 del paso 2). Bucket math para 2 campos: ~43 (design §2.4). << 1000.
+# Total: 28 streams (17 del paso 1 + 8 del paso 2 + 3 custom de spec 03 M5). Bucket math para 2 campos:
+# ~49 (design §2.4 + 3 streams custom scope-establishment). << 1000.
 # ══════════════════════════════════════════════════════════════════════════════════════════════════
