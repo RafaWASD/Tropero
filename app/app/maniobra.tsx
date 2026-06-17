@@ -24,17 +24,25 @@
 // presets. RECORTE DE DESCENDENTES (memoria): headings ≥$6 y Text con numberOfLines llevan lineHeight
 // matching. Cero hardcode (ADR-023 §4): tokens; lucide vía getTokenValue.
 
-import { useCallback, useState } from 'react';
-import { Pressable } from 'react-native';
+import { useCallback, useMemo, useState } from 'react';
+import { Platform, Pressable } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
-import { ChevronRight, History, Sparkles, X, Zap } from 'lucide-react-native';
+import { AlertTriangle, ChevronRight, History, Sparkles, X, Zap } from 'lucide-react-native';
 
 import { Button, Card, InfoNote } from '@/components';
 import { useEstablishment, useRodeo } from '@/contexts';
 import { fetchPresets, type ManeuverPreset } from '@/services/maneuver-presets';
 import { getActiveSession, type Session } from '@/services/sessions';
+import {
+  useUploadRejections,
+  isManeuverRejection,
+  acknowledgeUploadRejections,
+  recordUploadRejection,
+  rejectionBannerTitle,
+} from '@/services/powersync/upload-rejections';
+import { buttonA11y } from '@/utils/a11y';
 import { extractManeuvers } from '@/utils/maneuver-config';
 import { maneuverLabel } from '@/utils/maneuver-wizard';
 import {
@@ -43,6 +51,8 @@ import {
   resumeStartedDateLabel,
 } from '@/utils/maniobra-resume';
 import { NuevaJornadaConfirmSheet } from './maniobra/_components/NuevaJornadaConfirmSheet';
+import { SyncRechazoSheet } from './maniobra/_components/SyncRechazoSheet';
+import { consumeSyncRejectE2E } from './maniobra/_components/sync-rechazo-e2e';
 
 export default function ManiobraInicioScreen() {
   const router = useRouter();
@@ -57,12 +67,32 @@ export default function ManiobraInicioScreen() {
   const [loading, setLoading] = useState(true);
   // ¿Mostrar el sheet de confirmación de "Nueva jornada" (cuando hay una abierta, R10.6)?
   const [showNuevaConfirm, setShowNuevaConfirm] = useState(false);
+  // ¿Mostrar el sheet de detalle de RECHAZOS DE SYNC (R10.8)?
+  const [showRechazos, setShowRechazos] = useState(false);
+
+  // ── RECHAZOS DE SYNC (R10.8) — el store observable que el connector llena al descartar un upload
+  //    rechazado de forma permanente. Filtramos a las maniobras (un rechazo de otra tabla no es de manga).
+  const allRejections = useUploadRejections();
+  const maneuverRejections = useMemo(
+    () => allRejections.filter((r) => isManeuverRejection(r.table)),
+    [allRejections],
+  );
 
   // Cargamos presets + la sesión activa al enfocar (local, offline). Un campo sin presets es válido (solo
   // "Nueva jornada"); sin sesión activa también (no se muestra la tarjeta de retomar). Refrescar al enfocar
   // asegura que tras "Salir sin terminar" o tras terminar/arrancar una jornada, el landing refleje el estado.
   useFocusEffect(
     useCallback(() => {
+      // SOLO-E2E (gated fuera de prod, patrón `maneuver-e2e-fault.ts`): si Playwright armó un rechazo de
+      // sync, lo inyectamos en el store al enfocar (consume-y-desarma) para ejercer el banner+sheet sin
+      // forzar un rechazo server-side real. En prod/dev normal la marca no existe → no-op.
+      const injected = consumeSyncRejectE2E();
+      if (injected) {
+        recordUploadRejection(
+          { id: injected.id, table: injected.table, op: injected.op } as never,
+          { code: injected.code },
+        );
+      }
       if (!establishmentId) {
         setPresets([]);
         setOpenSession(null);
@@ -136,6 +166,13 @@ export default function ManiobraInicioScreen() {
     resumeOpenSession(openSession);
   }, [openSession, resumeOpenSession]);
 
+  // "Entendido" del sheet de rechazos (R10.8): marca esos rechazos como vistos + cierra. Marcamos SOLO los
+  // que se están mostrando (por id) — si llegara uno nuevo mientras el sheet está abierto, no se pierde.
+  const onAcknowledgeRechazos = useCallback(() => {
+    acknowledgeUploadRejections(maneuverRejections.map((r) => r.id));
+    setShowRechazos(false);
+  }, [maneuverRejections]);
+
   const onPreset = useCallback(
     (preset: ManeuverPreset) => {
       // Arranca el wizard desde el preset: el wizard pide el rodeo (etapa 1) y al elegirlo carga el
@@ -174,6 +211,15 @@ export default function ManiobraInicioScreen() {
         }}
         showsVerticalScrollIndicator={false}
       >
+        {/* ── BANNER de RECHAZOS DE SYNC (R10.8) — ARRIBA de todo (antes de retomar / rutinas) cuando hay
+              maniobras que el server rechazó al sincronizar. Tap → sheet de detalle. ── */}
+        {maneuverRejections.length > 0 ? (
+          <SyncRechazoBanner
+            count={maneuverRejections.length}
+            onPress={() => setShowRechazos(true)}
+          />
+        ) : null}
+
         {/* ── RETOMAR LA JORNADA ABIERTA (M4, R10.5/R10.6) — ARRIBA de todo cuando la hay ── */}
         {openSession ? (
           <ResumeJornadaCard
@@ -219,7 +265,56 @@ export default function ManiobraInicioScreen() {
           onClose={() => setShowNuevaConfirm(false)}
         />
       ) : null}
+
+      {/* ── SHEET de detalle de RECHAZOS DE SYNC (R10.8) ── */}
+      {showRechazos && maneuverRejections.length > 0 ? (
+        <SyncRechazoSheet
+          rejections={maneuverRejections}
+          onAcknowledge={onAcknowledgeRechazos}
+          onClose={() => setShowRechazos(false)}
+        />
+      ) : null}
     </YStack>
+  );
+}
+
+// Banner terracota (aviso, NO rojo) "⚠ N maniobra(s) no se sincronizaron" (R10.8). Tap → sheet de detalle.
+// Target grande (banner full-width tappable). Pluralización es-AR.
+function SyncRechazoBanner({ count, onPress }: { count: number; onPress: () => void }) {
+  const TERRACOTA = getTokenValue('$terracota', 'color');
+  const title = rejectionBannerTitle(count);
+  return (
+    <Pressable
+      onPress={onPress}
+      testID="sync-rechazo-banner"
+      style={{ marginBottom: getTokenValue('$5', 'space') }}
+      {...buttonA11y(Platform.OS, { label: `${title}. Ver detalle.` })}
+    >
+      {/* Borde + fondo de aviso terracota (color de aviso del DS, no hay token de error / no rojo). */}
+      <View
+        backgroundColor="$surface"
+        borderColor="$terracota"
+        borderWidth={2}
+        borderRadius="$card"
+        paddingHorizontal="$4"
+        paddingVertical="$4"
+      >
+        <XStack alignItems="center" gap="$3">
+          <AlertTriangle size={getTokenValue('$icon', 'size') * 0.6} color={TERRACOTA} />
+          <YStack flex={1} minWidth={0} gap="$1">
+            {/* Título — lineHeight matching ("sincronizaron" trae descenders). 2 líneas: en 360 no entra
+                en una sola y no queremos truncar la frase. */}
+            <Text fontFamily="$heading" fontSize="$6" lineHeight="$6" fontWeight="700" color="$textPrimary" numberOfLines={2}>
+              {title}
+            </Text>
+            <Text fontFamily="$body" fontSize="$3" lineHeight="$3" color="$textMuted" numberOfLines={1}>
+              Tocá para ver qué pasó
+            </Text>
+          </YStack>
+          <ChevronRight size={24} color={TERRACOTA} />
+        </XStack>
+      </View>
+    </Pressable>
   );
 }
 

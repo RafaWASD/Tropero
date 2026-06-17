@@ -28,6 +28,7 @@ import { getEnv } from '../../utils/env';
 import { buildCredentials, isTransientUploadError } from './upload-classify';
 import { mapIntentToRpc, classifyIntentUploadError } from './upload';
 import { clearOverlay, rollbackOverlay } from './outbox';
+import { recordUploadRejection } from './upload-rejections';
 
 /** Tabla outbox (insertOnly): genera CrudEntry pero se mapea a supabase.rpc (§5.4.2), NO a CRUD plano. */
 const OP_INTENTS_TABLE = 'op_intents';
@@ -160,7 +161,16 @@ export class SupabaseConnector implements PowerSyncBackendConnector {
   }
 }
 
-/** Registro observable de un rechazo permanente de upload (R10.2). Best-effort, sin filtrar datos. */
+/**
+ * Registro observable de un rechazo permanente de upload (R10.2 / R10.8). Best-effort, sin filtrar datos
+ * (NUNCA se loguea/guarda `opData` — puede traer datos del campo; solo tabla + op + code + id).
+ *
+ * DOS canales, ambos en su PROPIO try/catch (el drenado de la upload queue NO se puede romper por ninguno):
+ *   1. `console.warn` — diagnóstico (existía).
+ *   2. `recordUploadRejection` (spec 03 R10.8) — store observable que la UI de manga consume para
+ *      mostrarle al operario el rechazo (que un evento cargado offline y rechazado NO se pierda en
+ *      silencio). El store ya es best-effort internamente; lo blindamos igual acá.
+ */
 function surfaceUploadRejection(op: CrudEntry | null, error: unknown): void {
   try {
     const code = (error as { code?: unknown })?.code;
@@ -172,5 +182,13 @@ function surfaceUploadRejection(op: CrudEntry | null, error: unknown): void {
     });
   } catch {
     /* noop: el logger nunca rompe el drenado */
+  }
+  try {
+    // R10.8: materializar el rechazo en el store observable (la UI de manga lo muestra). Best-effort:
+    // un fallo acá NO debe interrumpir el drenado de la cola (por eso su propio try/catch, separado del
+    // console.warn — si el primero tirara, el segundo igual corre).
+    recordUploadRejection(op, error);
+  } catch {
+    /* noop: el surfacing de R10.8 nunca rompe el drenado de la upload queue */
   }
 }
