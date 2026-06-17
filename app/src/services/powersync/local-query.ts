@@ -104,3 +104,25 @@ export async function runLocalWrite(
   }
   return { ok: true, value: true };
 }
+
+/**
+ * Como runLocalWrite, pero devuelve `rowsAffected` del statement (para el patrón UPDATE-luego-INSERT de un
+ * current-value sobre una tabla que PowerSync expone como VIEW — donde `ON CONFLICT … DO UPDATE` falla con
+ * "cannot UPSERT a view"). El UPDATE de una view por INSTEAD OF trigger reporta `rowsAffected` correctamente.
+ */
+export async function runLocalWriteCount(
+  query: LocalQuery,
+  options: { db?: AbstractPowerSyncDatabase } = {},
+): Promise<LocalReadResult<number>> {
+  const db = options.db ?? getPowerSync();
+  try {
+    const r = await db.execute(query.sql, query.args as unknown[]);
+    return { ok: true, value: r.rowsAffected ?? 0 };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return {
+      ok: false,
+      error: { kind: 'unknown', message: message || 'Error al escribir datos locales.' },
+    };
+  }
+}

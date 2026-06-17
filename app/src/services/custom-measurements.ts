@@ -21,7 +21,10 @@
 // uploadData (descarta + superficia por el canal de R10.8) — NO el return de acá (que ya devolvió ok con la
 // fila local). El client genera el `id` (crypto.randomUUID, columna id REAL de custom_measurements).
 
-import { buildAddCustomMeasurementInsert } from './powersync/local-reads';
+import {
+  buildAddCustomMeasurementInsert,
+  buildUpdateCustomMeasurement,
+} from './powersync/local-reads';
 import { runLocalWrite } from './powersync/local-query';
 import { serializeCustomValue, type CustomValue } from '../utils/custom-value';
 
@@ -40,6 +43,14 @@ export type AddCustomMeasurementInput = {
   /** Jornada de manga (R5.11) — opcional: la captura desde la ficha no la pasa. */
   sessionId?: string | null;
   notes?: string | null;
+  /**
+   * id de cliente OPCIONAL. Por default uno nuevo (append-only normal). Cuando el frame de carga rápida CORRIGE
+   * la misma captura desde el resumen (R5.9), pasa el MISMO id + isCorrection:true → un UPDATE explícito de la
+   * fila (no un 2do INSERT ni un upsert ON CONFLICT, que PowerSync no captura bien al exponer la tabla como view).
+   */
+  id?: string;
+  /** true = corrección de una captura ya cargada (R5.9): UPDATE del value por id, no INSERT. Default false. */
+  isCorrection?: boolean;
 };
 
 /**
@@ -56,14 +67,18 @@ export async function addCustomMeasurement(
   if (!serialized.ok) {
     return { ok: false, error: { kind: 'unknown', message: serialized.message } };
   }
-  const q = buildAddCustomMeasurementInsert(
-    randomUuid(),
-    input.animalProfileId,
-    input.fieldDefinitionId,
-    serialized.json,
-    input.sessionId ?? null,
-    cleanStr(input.notes),
-  );
+  // Corrección desde el resumen (R5.9): UPDATE explícito del value por id (no INSERT/upsert). Requiere un id.
+  const q =
+    input.isCorrection && input.id
+      ? buildUpdateCustomMeasurement(input.id, serialized.json)
+      : buildAddCustomMeasurementInsert(
+          input.id ?? randomUuid(),
+          input.animalProfileId,
+          input.fieldDefinitionId,
+          serialized.json,
+          input.sessionId ?? null,
+          cleanStr(input.notes),
+        );
   const r = await runLocalWrite(q);
   if (!r.ok) return { ok: false, error: { kind: r.error.kind, message: r.error.message } };
   return { ok: true, value: true };

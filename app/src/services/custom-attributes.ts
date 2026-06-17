@@ -5,23 +5,29 @@
 // el VALOR ACTUAL, editable en cualquier momento (R13.12) — patrón `teeth_state` pero en una tabla genérica.
 // UPSERT por la PK compuesta: re-editar el mismo par PISA el valor (no agrega historial).
 //
-// ⚠️ GOTCHA de upsert offline de PowerSync (resuelto). `custom_attributes` (0095) tiene PK COMPUESTA
+// ⚠️ GOTCHA de current-value offline de PowerSync (resuelto). `custom_attributes` (0095) tiene PK COMPUESTA
 // `(animal_profile_id, field_definition_id)` y NO tiene columna `id` real; la stream le da un `id` SINTÉTICO
-// (`animal_profile_id || ':' || field_definition_id`) para el DOWN. El write LOCAL usa ese mismo id sintético
-// como PK local + `INSERT ... ON CONFLICT(id) DO UPDATE` (buildSetCustomAttributeUpsert) → actualiza EN EL
-// LUGAR (LWW), sin duplicar. El UPLOAD lo special-casea el connector (buildCrudUpsert en upload-classify.ts):
-// strip del id sintético + upsert por la PK natural (`onConflict:'animal_profile_id,field_definition_id'`).
-// Esto es lo que M2.2 aprendió con los maneuver-events: el `ON CONFLICT` correcto NO es el del UP (PostgREST
-// con un id inexistente = 42703) sino el del UP por la PK natural; el local sí puede `ON CONFLICT(id)`.
+// (`animal_profile_id || ':' || field_definition_id`) para el DOWN. El write LOCAL NO puede usar
+// `INSERT ... ON CONFLICT(id) DO UPDATE`: PowerSync expone la tabla como VIEW → el upsert falla con "cannot
+// UPSERT a view". Por eso el service hace UPDATE-luego-INSERT-si-0-filas (buildUpdateCustomAttribute →
+// buildInsertCustomAttribute, ambos por el id sintético) → current-value EN EL LUGAR (LWW), sin duplicar. El
+// UPLOAD lo special-casea el connector (buildCrudUpsert/buildCrudPatch en upload-classify.ts): strip del id
+// sintético + upsert/filtro por la PK natural (`onConflict:'animal_profile_id,field_definition_id'`).
 //
 // AUDIT FORZADO server-side (R13.23, 0095): `updated_by` (=auth.uid()), `establishment_id` (=del PERFIL,
 // anti-spoof) y `updated_at` los FUERZA el trigger en INSERT *Y* UPDATE → NUNCA se mandan en el write local.
 // NUNCA se hardcodea establishment_id (multi-tenant). El gating capa 2 (0096, BEFORE INSERT OR UPDATE) +
 // validación de value re-validan al SUBIR; un rechazo lo maneja uploadData (descarta + R10.8) — NO el return.
 
-import { buildSetCustomAttributeUpsert } from './powersync/local-reads';
-import { runLocalWrite } from './powersync/local-query';
+import {
+  buildCustomAttributesQuery,
+  buildInsertCustomAttribute,
+  buildUpdateCustomAttribute,
+} from './powersync/local-reads';
+import { runLocalQuery, runLocalWrite, runLocalWriteCount } from './powersync/local-query';
 import { serializeCustomValue, type CustomValue } from '../utils/custom-value';
+import { parseCustomOptions, parseCustomValueJson, type CustomCaptureValue } from '../utils/custom-render';
+import type { CustomUiComponent } from '../utils/custom-field';
 
 // ─── Error / Result uniforme (mismo shape que events.ts) ─────────────────────────────────────
 
@@ -52,12 +58,83 @@ export async function setCustomAttribute(
   if (!serialized.ok) {
     return { ok: false, error: { kind: 'unknown', message: serialized.message } };
   }
-  const q = buildSetCustomAttributeUpsert(
-    input.animalProfileId,
-    input.fieldDefinitionId,
-    serialized.json,
+  // UPDATE-luego-INSERT (NO upsert ON CONFLICT): PowerSync expone custom_attributes como VIEW → un
+  // `ON CONFLICT … DO UPDATE` falla con "cannot UPSERT a view". El UPDATE por INSTEAD OF trigger reporta
+  // rowsAffected; si no existía (0 filas), INSERTamos. Current-value sin duplicar (la PK natural es única). En
+  // un único device la carrera read/write es inocua (el operario edita una propiedad de a una).
+  const upd = await runLocalWriteCount(
+    buildUpdateCustomAttribute(input.animalProfileId, input.fieldDefinitionId, serialized.json),
   );
-  const r = await runLocalWrite(q);
-  if (!r.ok) return { ok: false, error: { kind: r.error.kind, message: r.error.message } };
+  if (!upd.ok) return { ok: false, error: { kind: upd.error.kind, message: upd.error.message } };
+  if (upd.value > 0) return { ok: true, value: true };
+  // No existía la fila → INSERT (1ra captura del par animal+field).
+  const ins = await runLocalWrite(
+    buildInsertCustomAttribute(input.animalProfileId, input.fieldDefinitionId, serialized.json),
+  );
+  if (!ins.ok) return { ok: false, error: { kind: ins.error.kind, message: ins.error.message } };
   return { ok: true, value: true };
+}
+
+// ─── Lectura: current-values de las propiedades custom de un animal (R13.10/R13.12, ficha) ──────
+
+const UI_COMPONENTS = new Set<string>([
+  'numeric',
+  'numeric_stepped',
+  'enum_single',
+  'enum_multi',
+  'text',
+  'boolean',
+  'date',
+]);
+
+/** Un current-value de propiedad custom de un animal, ya parseado por su ui_component (para la ficha). */
+export type CustomAttributeValue = {
+  fieldDefinitionId: string;
+  dataKey: string;
+  label: string;
+  uiComponent: CustomUiComponent;
+  /** Opciones del enum (enum_single/enum_multi); [] para los demás (para precargar el editor). */
+  options: string[];
+  /** El valor actual ya tipado (null si el value es incoherente con el ui_component — la ficha muestra "—"). */
+  value: CustomCaptureValue | null;
+};
+
+type AttributeRow = {
+  field_definition_id: string;
+  value: unknown;
+  ui_component: string;
+  config_schema: unknown;
+  label: string;
+  data_key: string;
+};
+
+/**
+ * Lee los CURRENT-VALUES de las propiedades custom de un animal (R13.10/R13.12), para la ficha (ver + precargar
+ * el editor). Cada fila trae el value jsonb + el ui_component → lo parseamos a CustomCaptureValue (parse
+ * TOLERANTE; un value incompatible cae a null = "—"). Read-only, local (offline). Vacío legítimo (un animal sin
+ * propiedades custom cargadas) NO degrada a "Sincronizando…".
+ */
+export async function fetchCustomAttributes(
+  profileId: string,
+): Promise<ServiceResult<CustomAttributeValue[]>> {
+  const r = await runLocalQuery<AttributeRow>(buildCustomAttributesQuery(profileId), {
+    emptyIsSyncing: false,
+  });
+  if (!r.ok) return { ok: false, error: { kind: r.error.kind, message: r.error.message } };
+  return {
+    ok: true,
+    value: r.value.map((row) => {
+      const uiComponent = UI_COMPONENTS.has(row.ui_component)
+        ? (row.ui_component as CustomUiComponent)
+        : 'text';
+      return {
+        fieldDefinitionId: row.field_definition_id,
+        dataKey: row.data_key,
+        label: row.label,
+        uiComponent,
+        options: parseCustomOptions(row.config_schema),
+        value: parseCustomValueJson(row.value, uiComponent),
+      };
+    }),
+  };
 }

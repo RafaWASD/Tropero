@@ -393,6 +393,186 @@ export async function waitForServerPreset(
 }
 
 /**
+ * Oráculo SERVER del alta de un dato/maniobra CUSTOM (spec 03 M5-C.2): la fila REAL aterrizó en
+ * field_definitions con su establishment_id (forzado/validado por la RLS owner-only + el guard 0093), su
+ * data_type (maniobra/propiedad), ui_component y config_schema. Busca por (establishment_id, label) — el
+ * label lo tipea el usuario tal cual. Prueba el camino OFFLINE → sync → CRUD-plano → 0093 end-to-end.
+ */
+export async function waitForServerCustomField(
+  establishmentId: string,
+  label: string,
+  opts: { tries?: number; delayMs?: number } = {},
+): Promise<{ id: string; dataKey: string; dataType: string; uiComponent: string; configSchema: unknown }> {
+  const tries = opts.tries ?? 30;
+  const delayMs = opts.delayMs ?? 2000;
+  for (let i = 0; i < tries; i++) {
+    const { data, error } = await admin
+      .from('field_definitions')
+      .select('id, data_key, data_type, ui_component, config_schema')
+      .eq('establishment_id', establishmentId)
+      .eq('label', label)
+      .is('deleted_at', null)
+      .limit(1);
+    if (error) throw new Error(`waitForServerCustomField: ${error.message}`);
+    if (data && data.length > 0) {
+      return {
+        id: data[0].id as string,
+        dataKey: data[0].data_key as string,
+        dataType: data[0].data_type as string,
+        uiComponent: data[0].ui_component as string,
+        configSchema: data[0].config_schema,
+      };
+    }
+    await new Promise((r) => setTimeout(r, delayMs));
+  }
+  throw new Error(
+    `waitForServerCustomField(${establishmentId}, "${label}"): el dato custom NUNCA llegó al server ` +
+      `(${tries} intentos) — el createCustomField vive solo en el SQLite local / no se drenó la cola.`,
+  );
+}
+
+/**
+ * Siembra un DATO/MANIOBRA CUSTOM (field_definitions con establishment_id) y lo HABILITA en un rodeo, vía
+ * service_role (spec 03 M5-C.3). Bypassea el form de creación (C.2 ya lo testea) para que el C.3 e2e se
+ * enfoque en seleccionar → secuenciar → renderizar → capturar. Inserta el field_definitions custom (data_type
+ * maniobra|propiedad, ui_component, config_schema {options} si enum) + un INSERT/UPDATE de rodeo_data_config
+ * enabled=true. Devuelve el field_definition_id (lo que config.customManiobras / custom_attributes referencian).
+ */
+export async function seedCustomField(
+  establishmentId: string,
+  rodeoId: string,
+  opts: {
+    label: string;
+    dataKey: string;
+    dataType: 'maniobra' | 'propiedad';
+    uiComponent: 'numeric' | 'numeric_stepped' | 'enum_single' | 'enum_multi' | 'text' | 'boolean' | 'date';
+    options?: string[];
+  },
+): Promise<string> {
+  const id = randomUUID();
+  const configSchema =
+    opts.uiComponent === 'enum_single' || opts.uiComponent === 'enum_multi'
+      ? { options: opts.options ?? [] }
+      : null;
+  const { error: fdErr } = await admin.from('field_definitions').insert({
+    id,
+    establishment_id: establishmentId,
+    data_key: opts.dataKey,
+    label: opts.label,
+    data_type: opts.dataType,
+    ui_component: opts.uiComponent,
+    category: 'personalizado',
+    config_schema: configSchema,
+    active: true,
+  });
+  if (fdErr) throw new Error(`seedCustomField field_definitions(${opts.label}): ${fdErr.message}`);
+
+  // Habilitar el field en el rodeo (rodeo_data_config). No hay fila previa (el trigger 0018 solo seedea los
+  // de fábrica) → INSERT directo (service_role bypassea la RLS owner-only).
+  const { error: cfgErr } = await admin
+    .from('rodeo_data_config')
+    .insert({ rodeo_id: rodeoId, field_definition_id: id, enabled: true });
+  if (cfgErr) throw new Error(`seedCustomField rodeo_data_config(${opts.label}): ${cfgErr.message}`);
+  return id;
+}
+
+/**
+ * ORÁCULO de persistencia server-side de una CAPTURA de maniobra CUSTOM (spec 03 M5-C.3, R13.11): pollea
+ * `custom_measurements` hasta encontrar la fila del `field_definition_id` de un perfil con `session_id` NO
+ * nulo y el `value` jsonb esperado. Prueba que la captura subió por addCustomMeasurement con session_id y el
+ * value tipado correcto (number/string/bool/array nativo, no double-encodeado). `expectedValue` se compara
+ * con JSON.stringify (jsonb nativo del server). Devuelve el session_id real.
+ */
+export async function waitForServerCustomMeasurement(
+  profileId: string,
+  fieldDefinitionId: string,
+  expectedValue: unknown,
+  opts: { tries?: number; delayMs?: number } = {},
+): Promise<{ id: string; sessionId: string; value: unknown }> {
+  const tries = opts.tries ?? 40;
+  const delayMs = opts.delayMs ?? 2000;
+  const want = JSON.stringify(expectedValue);
+  for (let i = 0; i < tries; i++) {
+    const { data, error } = await admin
+      .from('custom_measurements')
+      .select('id, animal_profile_id, field_definition_id, value, session_id')
+      .eq('animal_profile_id', profileId)
+      .eq('field_definition_id', fieldDefinitionId)
+      .not('session_id', 'is', null)
+      .is('deleted_at', null)
+      .limit(5);
+    if (error) throw new Error(`waitForServerCustomMeasurement: ${error.message}`);
+    const hit = (data ?? []).find((r) => JSON.stringify(r.value) === want);
+    if (hit) return { id: hit.id as string, sessionId: hit.session_id as string, value: hit.value };
+    await new Promise((r) => setTimeout(r, delayMs));
+  }
+  throw new Error(
+    `waitForServerCustomMeasurement(${profileId}, ${fieldDefinitionId}, ${want}): la captura custom NUNCA ` +
+      `llegó al server con session_id + ese value (${tries} intentos).`,
+  );
+}
+
+/**
+ * ORÁCULO de persistencia server-side de una PROPIEDAD CUSTOM (spec 03 M5-C.3, R13.12): pollea
+ * `custom_attributes` hasta encontrar el current-value del par (animal, field) con el `value` jsonb esperado.
+ * Prueba que setCustomAttribute subió el upsert por la PK natural con el value tipado correcto.
+ */
+export async function waitForServerCustomAttribute(
+  profileId: string,
+  fieldDefinitionId: string,
+  expectedValue: unknown,
+  opts: { tries?: number; delayMs?: number } = {},
+): Promise<{ value: unknown }> {
+  const tries = opts.tries ?? 40;
+  const delayMs = opts.delayMs ?? 2000;
+  const want = JSON.stringify(expectedValue);
+  for (let i = 0; i < tries; i++) {
+    const { data, error } = await admin
+      .from('custom_attributes')
+      .select('animal_profile_id, field_definition_id, value')
+      .eq('animal_profile_id', profileId)
+      .eq('field_definition_id', fieldDefinitionId)
+      .limit(1);
+    if (error) throw new Error(`waitForServerCustomAttribute: ${error.message}`);
+    if (data && data.length > 0 && JSON.stringify(data[0].value) === want) {
+      return { value: data[0].value };
+    }
+    await new Promise((r) => setTimeout(r, delayMs));
+  }
+  throw new Error(
+    `waitForServerCustomAttribute(${profileId}, ${fieldDefinitionId}, ${want}): la propiedad custom NUNCA ` +
+      `llegó al server con ese value (${tries} intentos).`,
+  );
+}
+
+/**
+ * Resuelve el animal_profile_id de un perfil ACTIVO por su `visual_id_alt` dentro de un establishment, vía
+ * service_role (spec 03 M5-C.3): para descubrir el id de un animal recién creado por la UI (cuyo id es de
+ * cliente) y poder consultar sus custom_attributes en el oráculo. Reintenta (la fila tarda en propagarse).
+ */
+export async function adminQueryProfileByVisual(
+  establishmentId: string,
+  visual: string,
+  opts: { tries?: number; delayMs?: number } = {},
+): Promise<string> {
+  const tries = opts.tries ?? 30;
+  const delayMs = opts.delayMs ?? 2000;
+  for (let i = 0; i < tries; i++) {
+    const { data, error } = await admin
+      .from('animal_profiles')
+      .select('id, visual_id_alt, establishment_id')
+      .eq('establishment_id', establishmentId)
+      .eq('visual_id_alt', visual)
+      .is('deleted_at', null)
+      .limit(1);
+    if (error) throw new Error(`adminQueryProfileByVisual: ${error.message}`);
+    if (data && data.length > 0) return data[0].id as string;
+    await new Promise((r) => setTimeout(r, delayMs));
+  }
+  throw new Error(`adminQueryProfileByVisual(${establishmentId}, "${visual}"): el perfil NUNCA apareció.`);
+}
+
+/**
  * Siembra un animal (animals + animal_profiles) en un rodeo, vía service_role (bypassea RLS).
  * Necesario para el test "buscar un animal EXISTENTE → ficha" (C2). Resuelve species/system/category
  * por code (no hardcodea UUIDs). La categoría inicial se computa simple por sexo (como el alta real):

@@ -14,11 +14,13 @@ import {
   maneuverDetail,
   moveManeuver,
   toggleManeuver,
+  toggleCustomManiobra,
   buildJornadaConfig,
   filterAutocomplete,
   splitMultiPreconfig,
   joinMultiPreconfig,
 } from './maneuver-wizard';
+import { extractCustomManiobras } from './maneuver-config';
 
 // ─── Labels (R1.6 / UI) ────────────────────────────────────────────────────────────────
 
@@ -125,6 +127,22 @@ test('toggleManeuver: ignora un token desconocido (defensivo)', () => {
   assert.deepEqual(toggleManeuver(chosen, 'xxx'), ['pesaje']);
 });
 
+// ─── toggleCustomManiobra (selección de maniobra custom por field_def id, R13.8) ────────────
+
+test('toggleCustomManiobra: agrega AL FINAL (orden de selección); re-toggle quita preservando orden', () => {
+  let chosen: string[] = [];
+  chosen = toggleCustomManiobra(chosen, 'fd-a');
+  chosen = toggleCustomManiobra(chosen, 'fd-b');
+  assert.deepEqual(chosen, ['fd-a', 'fd-b']);
+  assert.deepEqual(toggleCustomManiobra(chosen, 'fd-a'), ['fd-b']);
+});
+
+test('toggleCustomManiobra: ignora un id vacío (defensivo), no muta el original', () => {
+  const chosen = ['fd-a'];
+  assert.deepEqual(toggleCustomManiobra(chosen, '   '), ['fd-a']);
+  assert.notEqual(toggleCustomManiobra(chosen, 'fd-b'), chosen); // copia nueva
+});
+
 // ─── buildJornadaConfig (R1.13, shape §2.1.1) ────────────────────────────────────────────
 
 test('buildJornadaConfig: guarda maniobras EN ORDEN (drag) bajo la key maniobras', () => {
@@ -160,6 +178,32 @@ test('R1.13 round-trip: el config armado se re-parsea con extractManeuvers SIN p
   // extractManeuvers opera sobre el objeto parseado (parseManeuverConfig lo haría en sessions.ts).
   const reparsed = extractManeuvers(JSON.parse(serialized));
   assert.deepEqual(reparsed, order, 'el orden de maniobras debe sobrevivir serialize→parse');
+});
+
+// ─── buildJornadaConfig con maniobras CUSTOM (spec 03 M5-C.3, R13.8) — ADITIVO ─────────────
+
+test('buildJornadaConfig: SIN custom = byte-idéntico a antes (cero regresión, no agrega la key)', () => {
+  const config = buildJornadaConfig(['tacto', 'pesaje']);
+  assert.deepEqual(config.maniobras, ['tacto', 'pesaje']);
+  assert.equal('customManiobras' in config, false);
+  // también ausente con un array vacío explícito.
+  assert.equal('customManiobras' in buildJornadaConfig(['tacto'], undefined, []), false);
+});
+
+test('buildJornadaConfig: customManiobras PARALELO a maniobras (las 12 IDÉNTICAS), dedup + orden', () => {
+  const config = buildJornadaConfig(
+    ['tacto', 'pesaje'],
+    undefined,
+    ['fd-a', 'fd-b', 'fd-a', '  ', 'fd-c'],
+  );
+  assert.deepEqual(config.maniobras, ['tacto', 'pesaje']); // fábrica intacta
+  assert.deepEqual(config.customManiobras, ['fd-a', 'fd-b', 'fd-c']); // dedup + sin vacíos
+});
+
+test('buildJornadaConfig: round-trip de customManiobras (serialize→extractCustomManiobras)', () => {
+  const config = buildJornadaConfig(['tacto'], undefined, ['fd-x', 'fd-y']);
+  const reparsed = extractCustomManiobras(JSON.parse(JSON.stringify(config)));
+  assert.deepEqual(reparsed, ['fd-x', 'fd-y']);
 });
 
 // ─── filterAutocomplete (R1.8) ───────────────────────────────────────────────────────────

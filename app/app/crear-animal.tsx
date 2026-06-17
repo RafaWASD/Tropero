@@ -37,6 +37,11 @@ import { useAuth, useEstablishment, useRodeo } from '@/contexts';
 import { createAnimal, fetchSystemCategories, type SystemCategory } from '@/services/animals';
 import { useBusyWhileMounted } from '@/services/ble/stick';
 import { addConditionScore, addTacto } from '@/services/events';
+import { setCustomAttribute } from '@/services/custom-attributes';
+import {
+  CustomPropertiesForm,
+  type CustomPropertiesFormHandle,
+} from './maniobra/_components/CustomPropertiesSection';
 import { fetchManagementGroups, type ManagementGroup } from '@/services/management-groups';
 import {
   readLastRodeo,
@@ -200,6 +205,10 @@ export default function CrearAnimalScreen() {
   // (no se pierde). Guardamos su profileId acá para (a) NO permitir re-crear (duplicado) — el CTA pasa
   // a "Ver la ficha del animal" — y (b) mostrar el aviso suave en el form. El happy-path navega solo.
   const [createdProfileId, setCreatedProfileId] = useState<string | null>(null);
+
+  // Ref del form de PROPIEDADES CUSTOM (R13.10): el submit recolecta sus valores y los persiste post-create
+  // (custom_attributes), mismo patrón soft-fail que condición/preñez. Vive en el paso 4 (form dinámico).
+  const customPropsRef = useRef<CustomPropertiesFormHandle>(null);
 
   // Campos EXTRA que la categoría elegida pide (tabla §2). Vacío hasta elegir categoría (paso 3).
   const categoryFields: readonly CategoryDataField[] = useMemo(
@@ -471,6 +480,19 @@ export default function CrearAnimalScreen() {
       if (!r.ok) softFails.push('el estado de preñez');
     }
 
+    // Propiedades CUSTOM cargadas en el form (R13.10): current-value por (animal, field) → custom_attributes.
+    // Mismo patrón soft-fail: el animal YA existe; si una falla, se avisa y se sigue (se agrega luego desde la
+    // ficha). El gating capa 2 (0096) + el audit forzado los re-validan server-side al subir.
+    const customValues = customPropsRef.current?.collectValues() ?? [];
+    for (const cv of customValues) {
+      const r = await setCustomAttribute({
+        animalProfileId: profileId,
+        fieldDefinitionId: cv.fieldDefinitionId,
+        value: cv.value.value,
+      });
+      if (!r.ok) softFails.push(`el dato "${cv.label}"`);
+    }
+
     setSubmitting(false);
     busyRef.current = false;
 
@@ -654,6 +676,9 @@ export default function CrearAnimalScreen() {
               setGroupPickerOpen(false);
             }}
             muted={muted}
+            customProps={
+              <CustomPropertiesForm ref={customPropsRef} rodeoId={selectedRodeo?.id ?? null} />
+            }
           />
         )}
       </ScrollView>
@@ -954,6 +979,7 @@ function Step4Data({
   onToggleGroupPicker,
   onSelectGroup,
   muted,
+  customProps,
 }: {
   prefillKind: PrefillKind;
   idv: string;
@@ -992,6 +1018,8 @@ function Step4Data({
   onToggleGroupPicker: () => void;
   onSelectGroup: (id: string | null) => void;
   muted: string;
+  /** Form de propiedades CUSTOM (R13.10) — render desde el parent (carga por rodeo + ref de recolección). */
+  customProps: React.ReactNode;
 }) {
   const selectedGroupName = groups.find((g) => g.id === selectedGroupId)?.name ?? 'Sin lote';
   // ¿Hay algún dato EXTRA específico de la categoría? (para el título de la sección).
@@ -1171,6 +1199,11 @@ function Step4Data({
           />
         </YStack>
       ) : null}
+
+      {/* ── Datos PERSONALIZADOS del rodeo (R13.10): propiedades custom enabled → custom_attributes. El form
+            se renderiza desde el parent (carga por rodeo + ref para recolectar al submit). Si el rodeo no
+            tiene propiedades custom, no renderiza nada. ── */}
+      {customProps}
     </>
   );
 }

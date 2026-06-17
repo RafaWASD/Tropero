@@ -19,7 +19,7 @@ function tablesByName(): Map<string, TableJson> {
   return new Map(json.tables.map((t) => [t.name, t]));
 }
 
-// Las 26 tablas SINCRONIZADAS (espejo del schema as-built, design §3).
+// Las 28 tablas SINCRONIZADAS (espejo del schema as-built, design §3 + spec 03 M5 custom).
 const SYNCED_TABLES = [
   'species',
   'systems_by_species',
@@ -39,6 +39,9 @@ const SYNCED_TABLES = [
   'animal_category_history',
   'sessions',
   'maneuver_presets',
+  // spec 03 M5 — datos/maniobras custom (0094/0095): scope establishment vía est_custom_*.
+  'custom_measurements',
+  'custom_attributes',
   'semen_registry',
   'weight_events',
   'reproductive_events',
@@ -64,7 +67,7 @@ test('R2.1: AppSchema valida contra el SDK (no tira la validación de PowerSync)
   assert.doesNotThrow(() => AppSchema.validate());
 });
 
-test('R2.1: están las 26 tablas sincronizadas del schema as-built', () => {
+test('R2.1: están las 28 tablas sincronizadas del schema as-built', () => {
   const tables = tablesByName();
   for (const name of SYNCED_TABLES) {
     assert.ok(tables.has(name), `falta la tabla sincronizada ${name}`);
@@ -107,7 +110,9 @@ test('R6.8/R6.12: las tablas SINCRONIZADAS NO son localOnly ni insertOnly (sí g
 
 test('PK especial: user_private/rodeo_data_config/birth_calves NO declaran columna `id` (la implícita la porta el alias de la stream)', () => {
   const tables = tablesByName();
-  for (const name of ['user_private', 'rodeo_data_config', 'birth_calves']) {
+  // custom_attributes (spec 03 M5): PK compuesta (animal_profile_id, field_definition_id) → `id` sintético
+  // por la stream est_custom_attributes (igual que rodeo_data_config/birth_calves).
+  for (const name of ['user_private', 'rodeo_data_config', 'birth_calves', 'custom_attributes']) {
     const t = tables.get(name)!;
     const cols = t.columns.map((c) => c.name);
     assert.ok(!cols.includes('id'), `${name} no debe declarar 'id' (el SDK lo agrega implícito)`);
@@ -177,7 +182,7 @@ test('users NO trae email/phone (PII movida a user_private, 0068 / ADR-025)', ()
   assert.ok(!cols.includes('phone'), 'users no debe exponer phone');
 });
 
-test('el schema total = 26 sincronizadas + op_intents + 5 overlay = 32 tablas', () => {
+test('el schema total = 28 sincronizadas + op_intents + 7 overlay = 36 tablas', () => {
   const json = AppSchema.toJSON() as { tables: TableJson[] };
   assert.equal(json.tables.length, SYNCED_TABLES.length + 1 + PENDING_TABLES.length);
 });

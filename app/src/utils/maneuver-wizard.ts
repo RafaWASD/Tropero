@@ -111,6 +111,25 @@ export function toggleManeuver(
   return [...chosen, maneuver];
 }
 
+// ─── Toggle de una MANIOBRA CUSTOM elegida (etapa 2, R13.8) ────────────────────────────────────
+
+/**
+ * Alterna (toggle on/off) una maniobra CUSTOM (por field_definition_id) en la lista de elegidas (etapa 2).
+ * Espeja toggleManeuver pero para las custom: si ya está elegida, la quita (preservando el orden del resto);
+ * si no, la AGREGA AL FINAL (orden = orden de selección). Devuelve un nuevo array. Ignora un id vacío
+ * (defensivo). NO valida contra un catálogo (las custom son data-driven por id; la UI ya muestra solo las
+ * enabled del rodeo — el gating capa 2 server-side re-valida al subir).
+ */
+export function toggleCustomManiobra(
+  chosen: readonly string[],
+  fieldDefinitionId: string,
+): string[] {
+  const id = fieldDefinitionId.trim();
+  if (id.length === 0) return [...chosen];
+  if (chosen.includes(id)) return chosen.filter((c) => c !== id);
+  return [...chosen, id];
+}
+
 // ─── Armado del config snapshot de la jornada (R1.13, shape §2.1.1) ───────────────────────────
 
 /** La pre-config de tanda por maniobra (R1.7): texto libre por maniobra (vacuna(s)/pajuela/etc.). */
@@ -118,14 +137,19 @@ export type ManeuverPreconfig = Record<string, unknown>;
 
 /**
  * Arma el `config` jsonb de la jornada (R1.13, shape canónico §2.1.1): `{ maniobras: [<orden>],
- * preconfig: {…} }`. El array `maniobras` se guarda EN EL ORDEN del drag (presentación). Filtra
- * cualquier maniobra que no sea un ManeuverKind conocido y DEDUPLICA preservando el orden (no se
- * confía en el input de la UI — el jsonb es pass-through y lo re-parsea extractManeuvers). La
+ * customManiobras: [<ids>], preconfig: {…} }`. El array `maniobras` se guarda EN EL ORDEN del drag
+ * (presentación). Filtra cualquier maniobra que no sea un ManeuverKind conocido y DEDUPLICA preservando el
+ * orden (no se confía en el input de la UI — el jsonb es pass-through y lo re-parsea extractManeuvers). La
  * `preconfig` se incluye solo si tiene claves (no ensuciamos el jsonb con `{}` vacío).
+ *
+ * `customManiobras` (spec 03 M5-C.3, R13.8) es ADITIVO y PARALELO: array de field_definition_id (uuid) EN
+ * ORDEN, dedupeado, vacíos descartados. Se incluye solo si tiene elementos. Las 12 de fábrica de `maniobras`
+ * quedan IDÉNTICAS (cero regresión). Una custom NO es un ManeuverKind → nunca contamina `maniobras`.
  */
 export function buildJornadaConfig(
   maneuvers: readonly ManeuverKind[],
   preconfig?: ManeuverPreconfig,
+  customManiobras?: readonly string[],
 ): ManeuverConfig {
   const seen = new Set<string>();
   const maniobras: ManeuverKind[] = [];
@@ -136,6 +160,18 @@ export function buildJornadaConfig(
     }
   }
   const config: ManeuverConfig = { maniobras };
+  if (customManiobras && customManiobras.length > 0) {
+    const seenC = new Set<string>();
+    const custom: string[] = [];
+    for (const raw of customManiobras) {
+      if (typeof raw !== 'string') continue;
+      const id = raw.trim();
+      if (id.length === 0 || seenC.has(id)) continue;
+      seenC.add(id);
+      custom.push(id);
+    }
+    if (custom.length > 0) config.customManiobras = custom;
+  }
   if (preconfig && Object.keys(preconfig).length > 0) {
     config.preconfig = preconfig;
   }

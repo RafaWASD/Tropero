@@ -10,10 +10,24 @@ import {
   firstUncapturedIndex,
   summaryRows,
   describeStepValue,
+  sequenceItemKey,
   type CaptureMap,
+  type CustomCaptureMap,
+  type CustomManeuverSpec,
+  type SequenceItem,
   type SequenceStep,
 } from './maneuver-sequence';
 import type { ManeuverKind } from './maneuver-gating';
+
+/** Helper: un ítem de FÁBRICA con position/total para los tests (cero custom). */
+function factory(maneuver: ManeuverKind, position: number, total: number): SequenceStep {
+  return { source: 'factory', maneuver, position, total };
+}
+
+/** keys legibles de la secuencia (ManeuverKind o `c:<id>`) — para asertar orden y mezcla fábrica/custom. */
+function keys(seq: readonly SequenceItem[]): string[] {
+  return seq.map(sequenceItemKey);
+}
 
 // ─── buildSequence: orden de config ∩ gating (R5.14 + R5.5) ─────────────────────────────
 
@@ -21,14 +35,14 @@ test('buildSequence: respeta el ORDEN de config, no el de applicable (R5.14)', (
   const ordered: ManeuverKind[] = ['pesaje', 'tacto', 'vacunacion'];
   const applicable: ManeuverKind[] = ['vacunacion', 'tacto', 'pesaje']; // desordenado a propósito
   const seq = buildSequence(ordered, applicable);
-  assert.deepEqual(seq.map((s) => s.maneuver), ['pesaje', 'tacto', 'vacunacion']);
+  assert.deepEqual(keys(seq), ['pesaje', 'tacto', 'vacunacion']);
 });
 
 test('buildSequence: OMITE las maniobras que no aplican al rodeo real (R5.5), sin reordenar', () => {
   const ordered: ManeuverKind[] = ['tacto', 'vacunacion', 'pesaje'];
   const applicable: ManeuverKind[] = ['tacto', 'pesaje']; // vacunación NO aplica
   const seq = buildSequence(ordered, applicable);
-  assert.deepEqual(seq.map((s) => s.maneuver), ['tacto', 'pesaje']);
+  assert.deepEqual(keys(seq), ['tacto', 'pesaje']);
 });
 
 test('buildSequence: position 1-based y total reflejan la secuencia FILTRADA (contador "Tacto · 2 de 4")', () => {
@@ -48,7 +62,7 @@ test('buildSequence: deduplica (defensivo) preservando el primer orden', () => {
   const ordered: ManeuverKind[] = ['tacto', 'tacto', 'pesaje'];
   const applicable: ManeuverKind[] = ['tacto', 'pesaje'];
   const seq = buildSequence(ordered, applicable);
-  assert.deepEqual(seq.map((s) => s.maneuver), ['tacto', 'pesaje']);
+  assert.deepEqual(keys(seq), ['tacto', 'pesaje']);
 });
 
 test('buildSequence: ninguna aplica → secuencia vacía', () => {
@@ -56,12 +70,60 @@ test('buildSequence: ninguna aplica → secuencia vacía', () => {
   assert.deepEqual(seq, []);
 });
 
+// ─── buildSequence: maniobras CUSTOM (spec 03 M5-C.3, R13.8) — ADITIVO ───────────────────
+
+const pezunas: CustomManeuverSpec = {
+  fieldDefinitionId: 'fd-pezunas',
+  uiComponent: 'enum_single',
+  label: 'Ángulo de pezuñas',
+  options: ['Adentro', 'Afuera', 'Normal'],
+};
+const score: CustomManeuverSpec = {
+  fieldDefinitionId: 'fd-score',
+  uiComponent: 'numeric',
+  label: 'Score propio',
+  options: [],
+};
+
+test('buildSequence: SIN custom = IDÉNTICO a las de fábrica (cero regresión)', () => {
+  const seqA = buildSequence(['tacto', 'pesaje'], ['tacto', 'pesaje']);
+  const seqB = buildSequence(['tacto', 'pesaje'], ['tacto', 'pesaje'], []);
+  assert.deepEqual(seqA, seqB);
+  assert.deepEqual(keys(seqA), ['tacto', 'pesaje']);
+  assert.ok(seqA.every((s) => s.source === 'factory'));
+});
+
+test('buildSequence: las custom van DESPUÉS de las de fábrica, en su orden, contador COMBINADO', () => {
+  const seq = buildSequence(['tacto', 'pesaje'], ['tacto', 'pesaje'], [pezunas, score]);
+  assert.deepEqual(keys(seq), ['tacto', 'pesaje', 'c:fd-pezunas', 'c:fd-score']);
+  assert.deepEqual(seq.map((s) => [s.position, s.total]), [
+    [1, 4],
+    [2, 4],
+    [3, 4],
+    [4, 4],
+  ]);
+  const customItem = seq[2];
+  assert.equal(customItem.source, 'custom');
+  if (customItem.source === 'custom') {
+    assert.equal(customItem.custom.uiComponent, 'enum_single');
+    assert.deepEqual(customItem.custom.options, ['Adentro', 'Afuera', 'Normal']);
+  }
+});
+
+test('buildSequence: SOLO custom (rodeo sin maniobras de fábrica en la jornada)', () => {
+  const seq = buildSequence([], [], [pezunas]);
+  assert.deepEqual(keys(seq), ['c:fd-pezunas']);
+  assert.deepEqual(seq.map((s) => [s.position, s.total]), [[1, 1]]);
+});
+
+test('buildSequence: deduplica las custom por field_definition_id (defensivo)', () => {
+  const seq = buildSequence([], [], [pezunas, pezunas]);
+  assert.deepEqual(keys(seq), ['c:fd-pezunas']);
+});
+
 // ─── isSequenceComplete / firstUncapturedIndex ─────────────────────────────────────────
 
-const seqTactoPesaje: SequenceStep[] = [
-  { maneuver: 'tacto', position: 1, total: 2 },
-  { maneuver: 'pesaje', position: 2, total: 2 },
-];
+const seqTactoPesaje: SequenceStep[] = [factory('tacto', 1, 2), factory('pesaje', 2, 2)];
 
 test('isSequenceComplete: todo capturado con dato real → true', () => {
   const cap: CaptureMap = {
@@ -92,10 +154,7 @@ test('isSequenceComplete (M3.1): TODA maniobra del catálogo persiste → una sk
   // que el operario aún no cargó) deja la secuencia INCOMPLETA (a diferencia de M2.2 donde la vacunación era
   // placeholder y un skip contaba). La aplicabilidad per-animal (raspado en hembra, R6.12) se resuelve ANTES,
   // sacando la maniobra de la secuencia — no se modela como skipped.
-  const seq: SequenceStep[] = [
-    { maneuver: 'pesaje', position: 1, total: 2 },
-    { maneuver: 'vacunacion', position: 2, total: 2 },
-  ];
+  const seq: SequenceStep[] = [factory('pesaje', 1, 2), factory('vacunacion', 2, 2)];
   const cap: CaptureMap = {
     pesaje: { kind: 'pesaje', weightKg: 400 },
     vacunacion: { kind: 'skipped' },
@@ -108,6 +167,27 @@ test('isSequenceComplete (M3.1): TODA maniobra del catálogo persiste → una sk
 
 test('isSequenceComplete: secuencia vacía → true (no frena la fila)', () => {
   assert.equal(isSequenceComplete([], {}), true);
+});
+
+// ─── isSequenceComplete con maniobras CUSTOM (R13.8) ─────────────────────────────────────
+
+test('isSequenceComplete: una custom sin valor → incompleta; firstUncaptured la apunta', () => {
+  const seq = buildSequence(['tacto'], ['tacto'], [pezunas]);
+  const cap: CaptureMap = { tacto: { kind: 'tacto', pregnancy: 'empty' } };
+  const customCap: CustomCaptureMap = {};
+  assert.equal(isSequenceComplete(seq, cap, customCap), false);
+  assert.equal(firstUncapturedIndex(seq, cap, customCap), 1); // la custom es el índice 1
+  // Capturada la custom → completa.
+  customCap['fd-pezunas'] = { kind: 'string', value: 'Afuera' };
+  assert.equal(isSequenceComplete(seq, cap, customCap), true);
+  assert.equal(firstUncapturedIndex(seq, cap, customCap), -1);
+});
+
+test('firstUncapturedIndex: salta la fábrica capturada y apunta la PRIMERA custom sin valor', () => {
+  const seq = buildSequence(['tacto'], ['tacto'], [pezunas, score]);
+  const cap: CaptureMap = { tacto: { kind: 'tacto', pregnancy: 'large' } };
+  const customCap: CustomCaptureMap = { 'fd-pezunas': { kind: 'string', value: 'Normal' } };
+  assert.equal(firstUncapturedIndex(seq, cap, customCap), 2); // fd-score (índice 2) sin valor
 });
 
 // ─── describeStepValue: legibilidad es-AR del resumen (R5.9) ────────────────────────────
@@ -178,15 +258,38 @@ test('summaryRows: una fila por paso, en orden, con label es-AR + valor + flag c
   };
   const rows = summaryRows(seqTactoPesaje, cap);
   assert.deepEqual(rows, [
-    { maneuver: 'tacto', label: 'Tacto de preñez', value: 'Preñada · Cabeza', captured: true },
-    { maneuver: 'pesaje', label: 'Pesaje', value: '412 kg', captured: true },
+    { maneuver: 'tacto', source: 'factory', label: 'Tacto de preñez', value: 'Preñada · Cabeza', captured: true },
+    { maneuver: 'pesaje', source: 'factory', label: 'Pesaje', value: '412 kg', captured: true },
   ]);
 });
 
 test('summaryRows: una maniobra skipped (sin cargar) → captured false, valor "Sin cargar"', () => {
-  const seq: SequenceStep[] = [{ maneuver: 'vacunacion', position: 1, total: 1 }];
+  const seq: SequenceStep[] = [factory('vacunacion', 1, 1)];
   const rows = summaryRows(seq, { vacunacion: { kind: 'skipped' } });
   assert.deepEqual(rows, [
-    { maneuver: 'vacunacion', label: 'Vacunación', value: 'Sin cargar', captured: false },
+    { maneuver: 'vacunacion', source: 'factory', label: 'Vacunación', value: 'Sin cargar', captured: false },
+  ]);
+});
+
+test('summaryRows: una maniobra CUSTOM muestra su label + valor legible es-AR (R5.9/R13.8)', () => {
+  const seq = buildSequence(['tacto'], ['tacto'], [pezunas, score]);
+  const cap: CaptureMap = { tacto: { kind: 'tacto', pregnancy: 'empty' } };
+  const customCap: CustomCaptureMap = {
+    'fd-pezunas': { kind: 'string', value: 'Afuera' },
+    'fd-score': { kind: 'number', value: 4.5 },
+  };
+  const rows = summaryRows(seq, cap, customCap);
+  assert.deepEqual(rows, [
+    { maneuver: 'tacto', source: 'factory', label: 'Tacto de preñez', value: 'Vacía', captured: true },
+    { maneuver: 'fd-pezunas', source: 'custom', label: 'Ángulo de pezuñas', value: 'Afuera', captured: true },
+    { maneuver: 'fd-score', source: 'custom', label: 'Score propio', value: '4,5', captured: true },
+  ]);
+});
+
+test('summaryRows: una custom SIN valor → captured false, "Sin cargar"', () => {
+  const seq = buildSequence([], [], [pezunas]);
+  const rows = summaryRows(seq, {}, {});
+  assert.deepEqual(rows, [
+    { maneuver: 'fd-pezunas', source: 'custom', label: 'Ángulo de pezuñas', value: 'Sin cargar', captured: false },
   ]);
 });

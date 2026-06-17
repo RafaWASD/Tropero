@@ -23,10 +23,14 @@ import {
   buildRodeoSystemQuery,
   buildActiveProfileRodeoQuery,
   buildAddCustomMeasurementInsert,
-  buildSetCustomAttributeUpsert,
+  buildUpdateCustomMeasurement,
+  buildInsertCustomAttribute,
+  buildUpdateCustomAttribute,
   buildCreateCustomFieldInsert,
   buildCustomDataKeysQuery,
   buildEnabledCustomManeuversQuery,
+  buildEnabledCustomFieldsQuery,
+  buildCustomAttributesQuery,
 } from './local-reads';
 
 // Espeja el AppSchema (TEXT/INTEGER; SQLite es laxo). started_at NO tiene default acá: el local write NO
@@ -463,11 +467,33 @@ test('buildAddCustomMeasurementInsert: session_id y notes opcionales → NULL (c
   assert.equal(r.notes, null);
 });
 
+test('buildUpdateCustomMeasurement: corrección desde el resumen (R5.9) — UPDATE del value por id, no 2da fila', () => {
+  const db = freshDb();
+  run(db, buildAddCustomMeasurementInsert('cm1', 'ap-1', 'fd-angulo', '42.5', 's1', null));
+  // Corregir: mismo id → UPDATE explícito del value (no INSERT/upsert; PowerSync expone la tabla como view).
+  run(db, buildUpdateCustomMeasurement('cm1', '44'));
+  const rows = all<{ id: string; value: string }>(db, {
+    sql: 'SELECT id, value FROM custom_measurements',
+    args: [],
+  });
+  assert.equal(rows.length, 1); // sigue siendo UNA fila (la corrección pisó, no duplicó)
+  assert.equal(rows[0].value, '44');
+});
+
 // ─── custom_attributes: current-value de propiedad custom (M5-C.1, R13.12 upsert por PK compuesta) ──────
 
-test('buildSetCustomAttributeUpsert: inserta el current-value con id SINTÉTICO (animal:field); audit NULL local', () => {
+// helper: emula el setCustomAttribute del service (UPDATE-luego-INSERT; el upsert ON CONFLICT falla en la
+// VIEW de PowerSync, ver custom-attributes.ts). En el fixture SQLite plano, UPDATE de fila inexistente afecta
+// 0 filas → INSERT; UPDATE de existente la pisa.
+function setAttr(db: DatabaseSync, profileId: string, fieldId: string, valueJson: string): void {
+  const upd = buildUpdateCustomAttribute(profileId, fieldId, valueJson);
+  const r = db.prepare(upd.sql).run(...(upd.args as never[]));
+  if (Number(r.changes) === 0) run(db, buildInsertCustomAttribute(profileId, fieldId, valueJson));
+}
+
+test('buildInsertCustomAttribute: inserta el current-value con id SINTÉTICO (animal:field); audit NULL local', () => {
   const db = freshDb();
-  run(db, buildSetCustomAttributeUpsert('ap-1', 'fd-color', '"overo"'));
+  run(db, buildInsertCustomAttribute('ap-1', 'fd-color', '"overo"'));
   const r = all<{
     id: string;
     animal_profile_id: string;
@@ -484,10 +510,10 @@ test('buildSetCustomAttributeUpsert: inserta el current-value con id SINTÉTICO 
   assert.equal(r.establishment_id, null); // idem (derivado del perfil, anti-spoof)
 });
 
-test('buildSetCustomAttributeUpsert: UPSERT — re-editar el mismo (animal, field) PISA el valor (NO duplica, current-value)', () => {
+test('setAttr (UPDATE-luego-INSERT): re-editar el mismo (animal, field) PISA el valor (NO duplica, current-value)', () => {
   const db = freshDb();
-  run(db, buildSetCustomAttributeUpsert('ap-1', 'fd-color', '"overo"'));
-  run(db, buildSetCustomAttributeUpsert('ap-1', 'fd-color', '"colorado"')); // editable anytime (R13.12)
+  setAttr(db, 'ap-1', 'fd-color', '"overo"');
+  setAttr(db, 'ap-1', 'fd-color', '"colorado"'); // editable anytime (R13.12)
   const rows = all<{ id: string; value: string }>(db, {
     sql: 'SELECT id, value FROM custom_attributes',
     args: [],
@@ -496,11 +522,18 @@ test('buildSetCustomAttributeUpsert: UPSERT — re-editar el mismo (animal, fiel
   assert.equal(rows[0].value, '"colorado"'); // el ÚLTIMO valor gana (LWW)
 });
 
-test('buildSetCustomAttributeUpsert: distintos (animal, field) son filas distintas (id sintético único por par)', () => {
+test('buildUpdateCustomAttribute: en una fila INEXISTENTE afecta 0 filas (→ el service INSERTa)', () => {
   const db = freshDb();
-  run(db, buildSetCustomAttributeUpsert('ap-1', 'fd-color', '"overo"'));
-  run(db, buildSetCustomAttributeUpsert('ap-2', 'fd-color', '"negro"')); // otro animal
-  run(db, buildSetCustomAttributeUpsert('ap-1', 'fd-temperamento', '"manso"')); // mismo animal, otro field
+  const upd = buildUpdateCustomAttribute('ap-x', 'fd-y', '"z"');
+  const r = db.prepare(upd.sql).run(...(upd.args as never[]));
+  assert.equal(Number(r.changes), 0);
+});
+
+test('setAttr: distintos (animal, field) son filas distintas (id sintético único por par)', () => {
+  const db = freshDb();
+  setAttr(db, 'ap-1', 'fd-color', '"overo"');
+  setAttr(db, 'ap-2', 'fd-color', '"negro"'); // otro animal
+  setAttr(db, 'ap-1', 'fd-temperamento', '"manso"'); // mismo animal, otro field
   const rows = all<{ id: string }>(db, { sql: 'SELECT id FROM custom_attributes ORDER BY id', args: [] });
   assert.deepEqual(rows.map((r) => r.id), ['ap-1:fd-color', 'ap-1:fd-temperamento', 'ap-2:fd-color']);
 });
@@ -579,6 +612,77 @@ test('buildEnabledCustomManeuversQuery: el OVERLAY offline del toggle PISA al sy
   assert.deepEqual(rows.map((r) => r.id), ['m-x']); // el overlay enabled=1 gana sobre el synced enabled=0
 });
 
+// ─── buildEnabledCustomFieldsQuery (spec 03 M5-C.3, R13.8/R13.10) — enriquecida con ui_component/options ──
+
+test('buildEnabledCustomFieldsQuery(maniobra): trae id/data_key/label/ui_component/config_schema de la maniobra enabled', () => {
+  const db = freshDb();
+  run(db, buildCreateCustomFieldInsertRaw2(db, { id: 'm-on', est: 'est-A', dataKey: 'angulo', label: 'Ángulo de pezuñas', dataType: 'maniobra', uic: 'enum_single', cfg: '{"options":["Adentro","Afuera"]}', deleted: null }));
+  run(db, buildCreateCustomFieldInsertRaw2(db, { id: 'p-on', est: 'est-A', dataKey: 'apodo', label: 'Apodo', dataType: 'propiedad', uic: 'text', cfg: null, deleted: null }));
+  db.prepare('INSERT INTO rodeo_data_config (field_definition_id, rodeo_id, enabled) VALUES (?, ?, ?)').run('m-on', 'R1', 1);
+  db.prepare('INSERT INTO rodeo_data_config (field_definition_id, rodeo_id, enabled) VALUES (?, ?, ?)').run('p-on', 'R1', 1);
+  const rows = all<{ id: string; data_key: string; label: string; ui_component: string; config_schema: string | null }>(
+    db,
+    buildEnabledCustomFieldsQuery('R1', 'maniobra'),
+  );
+  assert.deepEqual(rows.map((r) => r.id), ['m-on']); // solo la maniobra (no la propiedad)
+  assert.equal(rows[0].label, 'Ángulo de pezuñas');
+  assert.equal(rows[0].ui_component, 'enum_single');
+  assert.deepEqual(JSON.parse(rows[0].config_schema as string), { options: ['Adentro', 'Afuera'] });
+});
+
+test('buildEnabledCustomFieldsQuery(propiedad): trae SOLO las propiedades custom enabled del rodeo', () => {
+  const db = freshDb();
+  run(db, buildCreateCustomFieldInsertRaw2(db, { id: 'm-on', est: 'est-A', dataKey: 'angulo', label: 'Ángulo', dataType: 'maniobra', uic: 'numeric', cfg: null, deleted: null }));
+  run(db, buildCreateCustomFieldInsertRaw2(db, { id: 'p-on', est: 'est-A', dataKey: 'apodo', label: 'Apodo', dataType: 'propiedad', uic: 'text', cfg: null, deleted: null }));
+  run(db, buildCreateCustomFieldInsertRaw2(db, { id: 'p-off', est: 'est-A', dataKey: 'color', label: 'Color', dataType: 'propiedad', uic: 'text', cfg: null, deleted: null }));
+  db.prepare('INSERT INTO rodeo_data_config (field_definition_id, rodeo_id, enabled) VALUES (?, ?, ?)').run('m-on', 'R1', 1);
+  db.prepare('INSERT INTO rodeo_data_config (field_definition_id, rodeo_id, enabled) VALUES (?, ?, ?)').run('p-on', 'R1', 1);
+  db.prepare('INSERT INTO rodeo_data_config (field_definition_id, rodeo_id, enabled) VALUES (?, ?, ?)').run('p-off', 'R1', 0);
+  const rows = all<{ id: string }>(db, buildEnabledCustomFieldsQuery('R1', 'propiedad'));
+  assert.deepEqual(rows.map((r) => r.id), ['p-on']); // solo la propiedad enabled
+});
+
+test('buildEnabledCustomFieldsQuery: el OVERLAY offline del toggle PISA al synced', () => {
+  const db = freshDb();
+  run(db, buildCreateCustomFieldInsertRaw2(db, { id: 'p-x', est: 'est-A', dataKey: 'nueva', label: 'Nueva', dataType: 'propiedad', uic: 'boolean', cfg: null, deleted: null }));
+  db.prepare('INSERT INTO rodeo_data_config (field_definition_id, rodeo_id, enabled) VALUES (?, ?, ?)').run('p-x', 'R1', 0);
+  db.prepare('INSERT INTO pending_rodeo_data_config (id, client_op_id, rodeo_id, field_definition_id, enabled) VALUES (?, ?, ?, ?, ?)')
+    .run('ov-1', 'op-1', 'R1', 'p-x', 1);
+  const rows = all<{ id: string }>(db, buildEnabledCustomFieldsQuery('R1', 'propiedad'));
+  assert.deepEqual(rows.map((r) => r.id), ['p-x']);
+});
+
+// ─── buildCustomAttributesQuery (spec 03 M5-C.3, R13.10/R13.12) — current-values de la ficha ──
+
+test('buildCustomAttributesQuery: trae los current-values de las propiedades custom del animal (con ui_component/label)', () => {
+  const db = freshDb();
+  run(db, buildCreateCustomFieldInsertRaw2(db, { id: 'p1', est: 'est-A', dataKey: 'apodo', label: 'Apodo', dataType: 'propiedad', uic: 'text', cfg: null, deleted: null }));
+  run(db, buildCreateCustomFieldInsertRaw2(db, { id: 'p2', est: 'est-A', dataKey: 'color', label: 'Color', dataType: 'propiedad', uic: 'enum_single', cfg: '{"options":["A","B"]}', deleted: null }));
+  // una MANIOBRA con una measurement NO debe salir (la query es de propiedades/custom_attributes).
+  run(db, buildCreateCustomFieldInsertRaw2(db, { id: 'm1', est: 'est-A', dataKey: 'angulo', label: 'Ángulo', dataType: 'maniobra', uic: 'numeric', cfg: null, deleted: null }));
+  setAttr(db, 'A1', 'p1', JSON.stringify('Pinto'));
+  setAttr(db, 'A1', 'p2', JSON.stringify('A'));
+  // un atributo de OTRO animal no debe salir para A1.
+  setAttr(db, 'A2', 'p1', JSON.stringify('Otro'));
+  const rows = all<{ field_definition_id: string; value: string; ui_component: string; label: string }>(
+    db,
+    buildCustomAttributesQuery('A1'),
+  );
+  assert.deepEqual(rows.map((r) => r.field_definition_id).sort(), ['p1', 'p2']);
+  const apodo = rows.find((r) => r.field_definition_id === 'p1')!;
+  assert.equal(apodo.label, 'Apodo');
+  assert.equal(apodo.ui_component, 'text');
+  assert.equal(JSON.parse(apodo.value), 'Pinto');
+});
+
+test('buildCustomAttributesQuery: NO trae el atributo de una propiedad BORRADA (deleted_at) ni de un field inactivo', () => {
+  const db = freshDb();
+  run(db, buildCreateCustomFieldInsertRaw2(db, { id: 'p-del', est: 'est-A', dataKey: 'viejo', label: 'Viejo', dataType: 'propiedad', uic: 'text', cfg: null, deleted: '2026-06-17T00:00:00Z' }));
+  setAttr(db, 'A1', 'p-del', JSON.stringify('x'));
+  const rows = all<{ field_definition_id: string }>(db, buildCustomAttributesQuery('A1'));
+  assert.deepEqual(rows, []);
+});
+
 // helper: inserta una field_definitions cruda en el fixture (para sembrar globales/borradas/propiedades).
 function buildCreateCustomFieldInsertRaw(
   _db: DatabaseSync,
@@ -589,5 +693,18 @@ function buildCreateCustomFieldInsertRaw(
       'INSERT INTO field_definitions (id, establishment_id, data_key, label, data_type, ui_component, ' +
       'category, config_schema, active, deleted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)',
     args: [f.id, f.est, f.dataKey, f.dataKey, f.dataType, f.uic, 'personalizado', null, f.deleted],
+  };
+}
+
+// variante con label + config_schema explícitos (para los tests del renderer genérico M5-C.3).
+function buildCreateCustomFieldInsertRaw2(
+  _db: DatabaseSync,
+  f: { id: string; est: string | null; dataKey: string; label: string; dataType: string; uic: string; cfg: string | null; deleted: string | null },
+): { sql: string; args: unknown[] } {
+  return {
+    sql:
+      'INSERT INTO field_definitions (id, establishment_id, data_key, label, data_type, ui_component, ' +
+      'category, config_schema, active, deleted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)',
+    args: [f.id, f.est, f.dataKey, f.label, f.dataType, f.uic, 'personalizado', f.cfg, f.deleted],
   };
 }

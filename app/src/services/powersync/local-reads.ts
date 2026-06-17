@@ -1589,6 +1589,11 @@ export function buildAddCustomMeasurementInsert(
   sessionId: string | null,
   notes: string | null,
 ): LocalQuery {
+  // PLAIN INSERT (sin ON CONFLICT): PowerSync expone la tabla sincronizada como VIEW (sobre ps_data__*) → un
+  // `ON CONFLICT … DO UPDATE` falla con "cannot UPSERT a view" + PowerSync NO captura bien el upsert (la fila no
+  // sube; lección de M2.2/M3.1, ver buildUpdate* de abajo). La CORRECCIÓN desde el resumen (R5.9) reusa el MISMO
+  // id pero hace un UPDATE explícito (buildUpdateCustomMeasurement). recorded_by/establishment_id/recorded_at los
+  // fuerza el trigger al subir (no se mandan).
   return {
     sql:
       'INSERT INTO custom_measurements ' +
@@ -1599,41 +1604,66 @@ export function buildAddCustomMeasurementInsert(
 }
 
 /**
- * UPSERT local del CURRENT-VALUE de una propiedad CUSTOM (R13.12, editable en cualquier momento, sin
- * historial). `custom_attributes` (0095) tiene PK COMPUESTA `(animal_profile_id, field_definition_id)` y NO
- * tiene columna `id` real — la stream `est_custom_attributes` emite un `id` SINTÉTICO
- * `animal_profile_id || ':' || field_definition_id` para el DOWN (PowerSync exige `id` por fila). Acá usamos
- * ESE mismo id sintético como PK local determinística + `ON CONFLICT(id) DO UPDATE` → re-editar el mismo par
- * actualiza el valor EN EL LUGAR (LWW), NO inserta una 2da fila (current-value, no time-series).
- *
- * ⚠️ GOTCHA de upsert offline (mismo tipo que M2.2 con los maneuver-events). El `ON CONFLICT(id)` LOCAL es
- * correcto (la PK local es el id sintético, único por par; re-editar pisa el value sin duplicar). Lo que
- * PowerSync NO captura bien es el UPLOAD: (a) el connector CRUD-plano por default haría
- * `table.upsert({...opData, id: op.id})` / `.update(...).eq('id', op.id)` mandando/filtrando una columna `id`
- * que en `custom_attributes` NO existe (PK compuesta) → 42703; (b) en una RE-EDICIÓN, SQLite resuelve por el
- * branch UPDATE del ON CONFLICT → PowerSync lo trackea como PATCH con SOLO `value` (sin la PK natural en
- * opData). Por eso el connector SPECIAL-CASEA `custom_attributes` en AMBOS verbos: el PUT (1ra captura) strip
- * del id + upsert por la PK natural (`onConflict`); el PATCH (re-edición) decodifica la PK natural del id
- * sintético `a:f` y filtra `.eq('animal_profile_id', a).eq('field_definition_id', f)`. Ver buildCrudUpsert /
- * buildCrudPatch en upload-classify.ts.
- *
- * `updated_by`/`establishment_id`/`updated_at` los fuerza el trigger al subir → no se mandan.
+ * UPDATE local del `value` de una captura custom ya cargada (R13.8/R5.9 corrección desde el resumen). Mismo
+ * patrón que buildUpdateManeuverWeight/Tacto: la 1ra captura es INSERT (id estable por animal+field); corregir
+ * re-captura con el MISMO id → UPDATE explícito (NO un 2do INSERT ni un upsert ON CONFLICT — PowerSync expone la
+ * tabla como view + no captura bien el upsert). PowerSync rastrea el UPDATE como PATCH → el connector hace
+ * `table.update(...).eq('id', ...)` al subir → el server queda con el value corregido, sin duplicar. No toca
+ * animal_profile_id/field_definition_id/session_id (la identidad de la medición no cambia al corregir el value).
  */
-export function buildSetCustomAttributeUpsert(
+export function buildUpdateCustomMeasurement(id: string, valueJson: string): LocalQuery {
+  return {
+    sql: 'UPDATE custom_measurements SET value = ? WHERE id = ? AND deleted_at IS NULL',
+    args: [valueJson, id],
+  };
+}
+
+/**
+ * id SINTÉTICO determinístico de un current-value de propiedad custom = el MISMO alias que emite la stream
+ * `est_custom_attributes` (DOWN): `animal_profile_id || ':' || field_definition_id`. Al bajar la fila real por
+ * la stream, su id coincide con el local → PowerSync hace LWW sobre la misma fila (sin duplicar). El ':' no
+ * aparece en un uuid → split inequívoco. `custom_attributes` (0095) tiene PK COMPUESTA y NO columna `id` real.
+ */
+export function customAttributeSyntheticId(profileId: string, fieldDefinitionId: string): string {
+  return `${profileId}:${fieldDefinitionId}`;
+}
+
+/**
+ * INSERT local del CURRENT-VALUE de una propiedad CUSTOM (R13.12), 1ra vez para ese (animal, field). PLAIN
+ * INSERT (NO `ON CONFLICT`): PowerSync expone la tabla como VIEW → un `ON CONFLICT … DO UPDATE` falla con
+ * "cannot UPSERT a view". El service hace UPDATE-luego-INSERT-si-0-filas (current-value sin duplicar). Usa el
+ * id sintético como PK local. `updated_by`/`establishment_id`/`updated_at` los fuerza el trigger al subir.
+ *
+ * El UPLOAD lo special-casea el connector (buildCrudUpsert, custom_attributes PK compuesta): strip del id
+ * sintético + upsert por la PK natural (`onConflict:'animal_profile_id,field_definition_id'`). Una re-edición
+ * (UPDATE) PowerSync la trackea como PATCH → buildCrudPatch decodifica `a:f` y filtra por la PK natural.
+ */
+export function buildInsertCustomAttribute(
   profileId: string,
   fieldDefinitionId: string,
   valueJson: string,
 ): LocalQuery {
-  // id sintético determinístico = el MISMO alias que emite la stream est_custom_attributes (DOWN) → al
-  // bajar la fila real por la stream, su id coincide con el local → PowerSync hace LWW sobre la misma fila
-  // (sin duplicar). Separador ':' (los uuid no lo contienen).
-  const syntheticId = `${profileId}:${fieldDefinitionId}`;
   return {
     sql:
       'INSERT INTO custom_attributes (id, animal_profile_id, field_definition_id, value) ' +
-      'VALUES (?, ?, ?, ?) ' +
-      'ON CONFLICT(id) DO UPDATE SET value = excluded.value',
-    args: [syntheticId, profileId, fieldDefinitionId, valueJson],
+      'VALUES (?, ?, ?, ?)',
+    args: [customAttributeSyntheticId(profileId, fieldDefinitionId), profileId, fieldDefinitionId, valueJson],
+  };
+}
+
+/**
+ * UPDATE local del CURRENT-VALUE de una propiedad CUSTOM (R13.12, re-edición = pisar el valor sin historial).
+ * Filtra por el id sintético (la PK local). Mismo motivo que buildInsertCustomAttribute para no usar upsert:
+ * la tabla es una view. El service prueba este UPDATE primero; si no afectó filas (no existía), INSERTa.
+ */
+export function buildUpdateCustomAttribute(
+  profileId: string,
+  fieldDefinitionId: string,
+  valueJson: string,
+): LocalQuery {
+  return {
+    sql: 'UPDATE custom_attributes SET value = ? WHERE id = ?',
+    args: [valueJson, customAttributeSyntheticId(profileId, fieldDefinitionId)],
   };
 }
 
@@ -1690,12 +1720,38 @@ export function buildCustomDataKeysQuery(): LocalQuery {
 }
 
 /**
- * Lee las field_definitions CUSTOM de tipo MANIOBRA habilitadas en un rodeo (tweak M1, §11.7): join de
- * rodeo_data_config (enabled del rodeo) con field_definitions (custom maniobra viva del campo). Devuelve
- * id + data_key + label de cada maniobra custom enabled, para sumarlas a la lista del wizard junto a las 10
- * de fábrica. El overlay pending_rodeo_data_config también aplica (alta/edición offline del toggle): se
- * UNIONa con override (el overlay PISA la fila synced del mismo field) — mismo invariante que buildRodeoConfigQuery
- * (≤1 fila por (rodeo,field) en el overlay). Solo trae las que están enabled=1 en el estado EFECTIVO.
+ * Lee las field_definitions CUSTOM de un `dataType` ('maniobra' | 'propiedad') HABILITADAS en un rodeo (spec 03
+ * M5-C.3, R13.8/R13.10): join de rodeo_data_config (enabled del rodeo) con field_definitions (custom viva del
+ * campo). Devuelve id + data_key + label + **ui_component + config_schema** de cada field enabled — el render
+ * genérico (CustomFieldInput / CustomManeuverStep) necesita el ui_component para elegir el input y el
+ * config_schema para las opciones de un enum (M5-C.3 generaliza el tweak M1 de M5-C.2, que solo traía id/data_key/
+ * label). El overlay pending_rodeo_data_config también aplica (alta/edición offline del toggle): se UNIONa con
+ * override (el overlay PISA la fila synced del mismo field) — mismo invariante que buildRodeoConfigQuery (≤1 fila
+ * por (rodeo,field) en el overlay). Solo trae las que están enabled=1 en el estado EFECTIVO. El `dataType` viaja
+ * por `?` parametrizado (NUNCA interpolado — siempre uno de los dos literales; el caller no lo elige libremente).
+ */
+export function buildEnabledCustomFieldsQuery(rodeoId: string, dataType: 'maniobra' | 'propiedad'): LocalQuery {
+  return {
+    sql:
+      'SELECT fd.id AS id, fd.data_key AS data_key, fd.label AS label, ' +
+      'fd.ui_component AS ui_component, fd.config_schema AS config_schema FROM field_definitions fd ' +
+      'JOIN ( ' +
+      'SELECT field_definition_id, enabled FROM rodeo_data_config ' +
+      'WHERE rodeo_id = ? AND field_definition_id NOT IN ' +
+      '(SELECT field_definition_id FROM pending_rodeo_data_config WHERE rodeo_id = ?) ' +
+      'UNION ALL ' +
+      'SELECT field_definition_id, enabled FROM pending_rodeo_data_config WHERE rodeo_id = ? ' +
+      ') cfg ON cfg.field_definition_id = fd.id ' +
+      'WHERE cfg.enabled = 1 AND fd.establishment_id IS NOT NULL AND fd.deleted_at IS NULL ' +
+      'AND fd.data_type = ? AND fd.active = 1',
+    args: [rodeoId, rodeoId, rodeoId, dataType],
+  };
+}
+
+/**
+ * @deprecated usar buildEnabledCustomFieldsQuery(rodeoId, 'maniobra'). Conservada para retrocompat del tweak M1
+ * de M5-C.2 (que solo necesitaba id/data_key/label de las maniobras custom enabled). El service ya migró a la
+ * query enriquecida (con ui_component/config_schema) para el renderer genérico de M5-C.3.
  */
 export function buildEnabledCustomManeuversQuery(rodeoId: string): LocalQuery {
   return {
@@ -1711,6 +1767,27 @@ export function buildEnabledCustomManeuversQuery(rodeoId: string): LocalQuery {
       "WHERE cfg.enabled = 1 AND fd.establishment_id IS NOT NULL AND fd.deleted_at IS NULL " +
       "AND fd.data_type = 'maniobra' AND fd.active = 1",
     args: [rodeoId, rodeoId, rodeoId],
+  };
+}
+
+/**
+ * Lee los CURRENT-VALUES de las propiedades CUSTOM de un animal (spec 03 M5-C.3, R13.10/R13.12), para mostrarlos
+ * en la ficha (ver) y precargar el editor (editar). Join de custom_attributes (el current-value, PK compuesta
+ * (animal_profile_id, field_definition_id)) con field_definitions (la propiedad custom viva del campo) →
+ * field_definition_id + value + ui_component + config_schema + label. Solo trae propiedades (no maniobras), vivas.
+ * NO filtra por enabled del rodeo: una propiedad con valor cargado se MUESTRA aunque luego se deshabilite el field
+ * (no perdemos el dato ya capturado; el form de alta/edición sí gatea por enabled — R13.10). Read-only.
+ */
+export function buildCustomAttributesQuery(profileId: string): LocalQuery {
+  return {
+    sql:
+      'SELECT ca.field_definition_id AS field_definition_id, ca.value AS value, ' +
+      'fd.ui_component AS ui_component, fd.config_schema AS config_schema, ' +
+      'fd.label AS label, fd.data_key AS data_key FROM custom_attributes ca ' +
+      'JOIN field_definitions fd ON fd.id = ca.field_definition_id ' +
+      'WHERE ca.animal_profile_id = ? AND fd.establishment_id IS NOT NULL AND fd.deleted_at IS NULL ' +
+      "AND fd.data_type = 'propiedad' AND fd.active = 1",
+    args: [profileId],
   };
 }
 

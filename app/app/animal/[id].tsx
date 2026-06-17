@@ -54,6 +54,7 @@ import {
 } from '@/services/animals';
 import { archivedBadgeLabel } from '@/services/exit-animal';
 import { useBusyWhileMounted } from '@/services/ble/stick';
+import { CustomPropertiesFicha } from '../maniobra/_components/CustomPropertiesSection';
 import { useAuth, useEstablishment } from '@/contexts';
 import {
   assignAnimalToGroup,
@@ -605,6 +606,15 @@ export default function AnimalDetailScreen() {
                 condición corporal) = el del último evento de ese tipo. Es un ATRIBUTO del animal,
                 no solo historia. El timeline de abajo sigue siendo la auditoría completa. */}
             <CurrentStateSection timeline={timeline} sex={detail.sex} />
+
+            {/* Datos PERSONALIZADOS (R13.10/R13.12): propiedades custom enabled del rodeo + sus current-values
+                (custom_attributes). Editable in-place por cualquier rol (R13.13), salvo modo archivado (solo
+                lectura). Si el rodeo no tiene propiedades custom (ni el animal valores), no renderiza nada. */}
+            <CustomPropertiesFicha
+              profileId={detail.profileId}
+              rodeoId={detail.rodeoId}
+              editable={detail.status === 'active'}
+            />
 
             {/* Historial real (C3.1): riel de eventos + CTA "Agregar evento". El CTA se OCULTA en modo
                 archivada (C3.3): un animal dado de baja no recibe eventos nuevos en MVP. */}

@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import {
   parseManeuverConfig,
   extractManeuvers,
+  extractCustomManiobras,
   preconfigStringFor,
   preconfigHistory,
   pajuelasFor,
@@ -93,6 +94,32 @@ test('extractManeuvers: deduplica preservando la primera aparición', () => {
 test('extractManeuvers: filtra no-strings (numbers/objects) sin tirar', () => {
   const cfg = { maniobras: ['tacto', 42, { x: 1 }, null, 'sangrado'] as unknown as never };
   assert.deepEqual(extractManeuvers(cfg), ['tacto', 'sangrado']);
+});
+
+// ─── extractCustomManiobras: namespace PARALELO de maniobras custom (spec 03 M5-C.3, R13.8) ──
+
+test('extractCustomManiobras: lista de field_definition_id → preserva orden', () => {
+  assert.deepEqual(
+    extractCustomManiobras({ customManiobras: ['fd-a', 'fd-b', 'fd-c'] }),
+    ['fd-a', 'fd-b', 'fd-c'],
+  );
+});
+
+test('extractCustomManiobras: ausente / no-array → [] (config solo con maniobras de fábrica)', () => {
+  assert.deepEqual(extractCustomManiobras({}), []);
+  assert.deepEqual(extractCustomManiobras({ maniobras: ['tacto'] }), []);
+  assert.deepEqual(extractCustomManiobras({ customManiobras: 'fd-a' as unknown as never }), []);
+});
+
+test('extractCustomManiobras: descarta vacíos/no-strings y DEDUPLICA preservando orden', () => {
+  const cfg = { customManiobras: ['fd-a', '  ', 42, null, 'fd-a', 'fd-b'] as unknown as never };
+  assert.deepEqual(extractCustomManiobras(cfg), ['fd-a', 'fd-b']);
+});
+
+test('extractCustomManiobras: NO contamina extractManeuvers (namespaces paralelos)', () => {
+  const cfg = parseManeuverConfig('{"maniobras":["tacto"],"customManiobras":["fd-x"]}');
+  assert.deepEqual(extractManeuvers(cfg), ['tacto']);
+  assert.deepEqual(extractCustomManiobras(cfg), ['fd-x']);
 });
 
 // ─── preconfigStringFor: producto de tanda por maniobra (R1.7) ─────────────────────────

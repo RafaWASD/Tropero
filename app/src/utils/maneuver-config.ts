@@ -9,6 +9,12 @@ import { ALL_MANEUVERS, type ManeuverKind } from './maneuver-gating';
 /** El snapshot de una jornada/preset. `maniobras` ordenadas; el resto es libre (pre-config de tanda). */
 export type ManeuverConfig = {
   maniobras?: ManeuverKind[];
+  /**
+   * Maniobras CUSTOM (spec 03 M5-C.3, R13.8): field_definition_id (uuid) EN ORDEN. Clave PARALELA a
+   * `maniobras` (las 12 de fábrica son ManeuverKind; una custom NO lo es → no caben en `maniobras`). El jsonb
+   * es pass-through: el array se re-parsea TOLERANTE con `extractCustomManiobras` (no se confía en su contenido).
+   */
+  customManiobras?: string[];
   /** Parámetros fijos de tanda por maniobra (R1.7). Pass-through libre (string o objeto por maniobra). */
   preconfig?: Record<string, unknown>;
   [key: string]: unknown;
@@ -64,6 +70,28 @@ export function extractManeuvers(config: ManeuverConfig): ManeuverKind[] {
       seen.add(m);
       out.push(m as ManeuverKind);
     }
+  }
+  return out;
+}
+
+/**
+ * Extrae las MANIOBRAS CUSTOM (field_definition_id) de un ManeuverConfig (spec 03 M5-C.3, R13.8): el array
+ * `customManiobras` del jsonb pass-through, filtrando vacíos/no-strings, preservando el orden y DEDUPLICANDO.
+ * `customManiobras` ausente o no-array → []. NO valida que el id exista/esté enabled (eso lo hace el gating del
+ * rodeo al construir la secuencia + la capa 2 server-side); acá solo se confía en la FORMA del jsonb.
+ * Espeja extractManeuvers (las de fábrica) para las custom — son dos namespaces paralelos en el mismo config.
+ */
+export function extractCustomManiobras(config: ManeuverConfig): string[] {
+  const raw = config.customManiobras;
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const id of raw) {
+    if (typeof id !== 'string') continue;
+    const v = id.trim();
+    if (v.length === 0 || seen.has(v)) continue;
+    seen.add(v);
+    out.push(v);
   }
   return out;
 }

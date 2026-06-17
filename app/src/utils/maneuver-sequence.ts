@@ -16,6 +16,8 @@
 import type { ManeuverKind } from './maneuver-gating';
 import { maneuverLabel } from './maneuver-wizard';
 import { stepKindFor, stepPersists } from './maneuver-step-kind';
+import type { CustomUiComponent } from './custom-field';
+import { describeCustomValue, type CustomCaptureValue } from './custom-render';
 
 // ─── El valor capturado por una maniobra ──────────────────────────────────────────────────────
 
@@ -58,55 +60,122 @@ export type StepValue =
   | { kind: 'dientes'; teethState: string; cut: boolean }
   | { kind: 'skipped' };
 
+/**
+ * Una MANIOBRA CUSTOM enabled de un rodeo (spec 03 M5-C.3, R13.8): su field_definition_id + el ui_component
+ * que la renderiza + label es-AR + las opciones (si es enum). Es la fuente data-driven del paso custom (el
+ * renderer genérico la dibuja por ui_component, escribe a custom_measurements). Espeja EnabledCustomManeuver
+ * del service (custom-fields.ts) pero enriquecida con ui_component/options (lo que el render necesita).
+ */
+export type CustomManeuverSpec = {
+  fieldDefinitionId: string;
+  uiComponent: CustomUiComponent;
+  label: string;
+  /** Opciones del enum (enum_single/enum_multi); [] para los demás. */
+  options: string[];
+};
+
 /** Mapa maniobra → valor capturado (o ausente). El frame lo mantiene en estado y lo persiste por paso. */
 export type CaptureMap = Partial<Record<ManeuverKind, StepValue>>;
 
+/** Mapa field_definition_id → valor custom capturado. Paralelo al CaptureMap de las de fábrica. */
+export type CustomCaptureMap = Record<string, CustomCaptureValue>;
+
 // ─── (a) La secuencia de pasos del animal (orden de config ∩ gating del rodeo real) ─────────────
 
-/** Un paso de la secuencia: la maniobra + su posición 1-based para el contador "Tacto · 2 de 4" (R5.14). */
-export type SequenceStep = {
-  maneuver: ManeuverKind;
-  /** Posición 1-based en la secuencia FILTRADA (la que el operario ve). */
-  position: number;
-  /** Total de pasos de la secuencia filtrada. */
-  total: number;
-};
+/**
+ * Un ÍTEM de la secuencia, unión discriminada por `source` (spec 03 M5-C.3 generaliza M2.2): una maniobra de
+ * FÁBRICA (las 12, por ManeuverKind) o una CUSTOM (por field_definition_id, renderer genérico). El contador
+ * "· 2 de 4" (R5.14) es COMBINADO (fábrica + custom). Antes era `SequenceStep` (solo factory); se conserva el
+ * alias `SequenceStep` = el item de fábrica para no romper a quien lo importe puntual.
+ */
+export type SequenceItem =
+  | {
+      source: 'factory';
+      maneuver: ManeuverKind;
+      /** Posición 1-based en la secuencia FILTRADA combinada (la que el operario ve). */
+      position: number;
+      /** Total de pasos de la secuencia filtrada combinada. */
+      total: number;
+    }
+  | {
+      source: 'custom';
+      custom: CustomManeuverSpec;
+      position: number;
+      total: number;
+    };
+
+/** @deprecated usar SequenceItem (source:'factory'). Alias retrocompat para los call-sites de fábrica. */
+export type SequenceStep = Extract<SequenceItem, { source: 'factory' }>;
+
+/** Clave estable de un ítem para el CaptureMap/keys de React: ManeuverKind (fábrica) o `c:<id>` (custom). */
+export function sequenceItemKey(item: SequenceItem): string {
+  return item.source === 'factory' ? item.maneuver : `c:${item.custom.fieldDefinitionId}`;
+}
 
 /**
- * Construye la secuencia ORDENADA de pasos a presentar para un animal: las maniobras de la sesión EN EL
- * ORDEN de `config.maniobras` (R5.14), quedándose SOLO con las que aplican al rodeo real del animal
- * (`applicable`, resuelto por el gating R5.5) y SIN reordenar. `applicable` puede venir desordenado o con
- * extras: el orden lo manda `ordered`, el filtro lo manda el set de `applicable`. Deduplica (defensivo: el
- * jsonb es pass-through, ya viene dedupeado por extractManeuvers, pero no se confía). Una maniobra de
- * `ordered` que no esté en `applicable` se OMITE (R5.5).
+ * Construye la secuencia ORDENADA COMBINADA de pasos a presentar para un animal (R5.14): primero las maniobras
+ * de FÁBRICA de la sesión EN EL ORDEN de `config.maniobras`, quedándose SOLO con las que aplican al rodeo real
+ * (`applicable`, gating R5.5) y SIN reordenar; LUEGO las maniobras CUSTOM enabled del rodeo (`customEnabled`,
+ * en su orden de `config.customManiobras`). El contador es combinado (fábrica + custom). Deduplica fábrica
+ * (defensivo) y custom (por field_definition_id). Una de `ordered` que no esté en `applicable` se OMITE (R5.5);
+ * las custom NO se filtran por aplicabilidad de atributos (el gating del rodeo + capa 2 son su barrera).
+ *
+ * ADITIVO: con `customEnabled` vacío (lo normal hasta que un campo cree maniobras custom) la secuencia es
+ * IDÉNTICA a la de las 12 de fábrica (cero regresión).
  */
 export function buildSequence(
   ordered: readonly ManeuverKind[],
   applicable: readonly ManeuverKind[],
-): SequenceStep[] {
+  customEnabled: readonly CustomManeuverSpec[] = [],
+): SequenceItem[] {
   const applicableSet = new Set<ManeuverKind>(applicable);
-  const seen = new Set<ManeuverKind>();
-  const kept: ManeuverKind[] = [];
+  const seenF = new Set<ManeuverKind>();
+  const keptFactory: ManeuverKind[] = [];
   for (const m of ordered) {
-    if (applicableSet.has(m) && !seen.has(m)) {
-      seen.add(m);
-      kept.push(m);
+    if (applicableSet.has(m) && !seenF.has(m)) {
+      seenF.add(m);
+      keptFactory.push(m);
     }
   }
-  const total = kept.length;
-  return kept.map((maneuver, i) => ({ maneuver, position: i + 1, total }));
+  const seenC = new Set<string>();
+  const keptCustom: CustomManeuverSpec[] = [];
+  for (const c of customEnabled) {
+    if (c.fieldDefinitionId.length === 0 || seenC.has(c.fieldDefinitionId)) continue;
+    seenC.add(c.fieldDefinitionId);
+    keptCustom.push(c);
+  }
+  const total = keptFactory.length + keptCustom.length;
+  const items: SequenceItem[] = [];
+  let pos = 0;
+  for (const maneuver of keptFactory) {
+    pos += 1;
+    items.push({ source: 'factory', maneuver, position: pos, total });
+  }
+  for (const custom of keptCustom) {
+    pos += 1;
+    items.push({ source: 'custom', custom, position: pos, total });
+  }
+  return items;
 }
 
 // ─── (b)/(d) Completitud de la secuencia ────────────────────────────────────────────────────────
 
 /**
- * ¿Se capturó todo lo que DEBE capturarse antes del resumen? Una maniobra cuenta como "lista" si tiene un
- * valor en el mapa (`tacto`/`pesaje` con su dato, o `skipped` para las de M3). Una secuencia vacía (ninguna
- * maniobra aplica) se considera completa → el resumen muestra "sin maniobras" y deja confirmar (no frena la
- * fila). Las maniobras PERSISTIBLES (tacto/pesaje) deben tener un valor REAL (no `skipped`) para contar.
+ * ¿Se capturó todo lo que DEBE capturarse antes del resumen? Un ítem cuenta como "listo" si tiene un valor en
+ * su mapa (las de fábrica en `captured` por ManeuverKind; las custom en `customCaptured` por field_def id). Una
+ * secuencia vacía (ninguna maniobra aplica) se considera completa → el resumen muestra "sin maniobras" y deja
+ * confirmar (no frena la fila). Las de fábrica PERSISTIBLES no pueden quedar `skipped`. Las custom cuentan si
+ * tienen un CustomCaptureValue (el gate de "completo" por ui_component lo hace el paso antes de capturar).
  */
-export function isSequenceComplete(steps: readonly SequenceStep[], captured: CaptureMap): boolean {
+export function isSequenceComplete(
+  steps: readonly SequenceItem[],
+  captured: CaptureMap,
+  customCaptured: CustomCaptureMap = {},
+): boolean {
   return steps.every((s) => {
+    if (s.source === 'custom') {
+      return customCaptured[s.custom.fieldDefinitionId] != null;
+    }
     const v = captured[s.maneuver];
     if (!v) return false;
     // Una maniobra persistible no puede quedar "skipped" (sería un dato faltante real).
@@ -116,9 +185,17 @@ export function isSequenceComplete(steps: readonly SequenceStep[], captured: Cap
 }
 
 /** El índice del primer paso AÚN sin capturar (para reanudar la secuencia). -1 si está completa. */
-export function firstUncapturedIndex(steps: readonly SequenceStep[], captured: CaptureMap): number {
+export function firstUncapturedIndex(
+  steps: readonly SequenceItem[],
+  captured: CaptureMap,
+  customCaptured: CustomCaptureMap = {},
+): number {
   for (let i = 0; i < steps.length; i++) {
     const s = steps[i];
+    if (s.source === 'custom') {
+      if (customCaptured[s.custom.fieldDefinitionId] == null) return i;
+      continue;
+    }
     const v = captured[s.maneuver];
     if (!v) return i;
     if (stepPersists(s.maneuver) && v.kind === 'skipped') return i;
@@ -130,12 +207,15 @@ export function firstUncapturedIndex(steps: readonly SequenceStep[], captured: C
 
 /** Una fila del resumen: la maniobra (label es-AR) + su valor legible + si es corregible (tocable). */
 export type SummaryRow = {
-  maneuver: ManeuverKind;
-  /** Nombre es-AR de la maniobra (R1.6). */
+  /** ManeuverKind (fábrica) o el field_definition_id (custom). Identifica la fila para corregir. */
+  maneuver: string;
+  /** `factory` | `custom` — el frame discrimina a qué paso volver al corregir desde el resumen (R5.9). */
+  source: 'factory' | 'custom';
+  /** Nombre es-AR de la maniobra (R1.6) o el label del dato custom. */
   label: string;
-  /** Valor legible es-AR del dato capturado ("Preñada · Cabeza", "385 kg", "Pendiente (M3)"). */
+  /** Valor legible es-AR del dato capturado ("Preñada · Cabeza", "385 kg", o el valor custom). */
   value: string;
-  /** ¿La fila tiene un dato REAL persistido? (tacto/pesaje capturados). Las skipped = false. */
+  /** ¿La fila tiene un dato REAL persistido? Las skipped (fábrica) = false; una custom sin valor = false. */
   captured: boolean;
 };
 
@@ -204,15 +284,31 @@ export function describeStepValue(value: StepValue | undefined): string {
 }
 
 /**
- * Arma las filas del resumen por animal (R5.9): una por cada paso de la secuencia, en el MISMO orden de
- * presentación, con su valor legible. Tocar una fila vuelve a su paso para corregir (lo hace el frame). Una
- * fila sin valor capturado se muestra "Sin cargar" (no debería pasar si la secuencia está completa).
+ * Arma las filas del resumen por animal (R5.9): una por cada paso de la secuencia (fábrica + custom), en el
+ * MISMO orden de presentación, con su valor legible. Tocar una fila vuelve a su paso para corregir (lo hace el
+ * frame). Las de fábrica leen del `captured` (por ManeuverKind); las custom del `customCaptured` (por field_def
+ * id) y formatean con describeCustomValue. Una fila sin valor → "Sin cargar".
  */
-export function summaryRows(steps: readonly SequenceStep[], captured: CaptureMap): SummaryRow[] {
+export function summaryRows(
+  steps: readonly SequenceItem[],
+  captured: CaptureMap,
+  customCaptured: CustomCaptureMap = {},
+): SummaryRow[] {
   return steps.map((s) => {
+    if (s.source === 'custom') {
+      const v = customCaptured[s.custom.fieldDefinitionId];
+      return {
+        maneuver: s.custom.fieldDefinitionId,
+        source: 'custom' as const,
+        label: s.custom.label,
+        value: describeCustomValue(v),
+        captured: v != null,
+      };
+    }
     const v = captured[s.maneuver];
     return {
       maneuver: s.maneuver,
+      source: 'factory' as const,
       label: maneuverLabel(s.maneuver),
       value: describeStepValue(v),
       captured: v != null && v.kind !== 'skipped',

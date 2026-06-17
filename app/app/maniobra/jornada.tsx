@@ -28,7 +28,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { getTokenValue, Text, View, XStack, YStack } from 'tamagui';
 import Animated, { useAnimatedRef, useScrollOffset, useSharedValue } from 'react-native-reanimated';
-import { ChevronLeft, Play, Plus } from 'lucide-react-native';
+import { Check, ChevronLeft, Play, Plus } from 'lucide-react-native';
 
 import { Button, Card, FormError, InfoNote } from '@/components';
 import { buttonA11y, labelA11y } from '@/utils/a11y';
@@ -46,12 +46,14 @@ import {
 import type { CustomFieldDraft } from '@/utils/custom-field';
 import { useManeuverGating } from '@/hooks/useManeuverGating';
 import { ALL_MANEUVERS, type ManeuverKind } from '@/utils/maneuver-gating';
+import { extractCustomManiobras } from '@/utils/maneuver-config';
 import {
   buildJornadaConfig,
   maneuverDetail,
   maneuverLabel,
   moveManeuver,
   toggleManeuver,
+  toggleCustomManiobra,
   type ManeuverPreconfig,
 } from '@/utils/maneuver-wizard';
 import { ManeuverReorderList, type ReorderScrollContext } from './_components/ManeuverReorderList';
@@ -103,6 +105,8 @@ export default function JornadaWizardScreen() {
   const [stage, setStage] = useState<Stage>(1);
   const [rodeo, setRodeo] = useState<Rodeo | null>(null);
   const [chosen, setChosen] = useState<ManeuverKind[]>([]);
+  // M5-C.3 (R13.8): maniobras CUSTOM elegidas para la jornada (por field_definition_id) → config.customManiobras.
+  const [chosenCustom, setChosenCustom] = useState<string[]>([]);
   const [preconfig, setPreconfig] = useState<ManeuverPreconfig>({});
   // Autocompletar (R1.8): valores de preconfig ya usados en los presets del campo, por maniobra.
   const [history, setHistory] = useState<Partial<Record<ManeuverKind, string[]>>>({});
@@ -220,6 +224,10 @@ export default function JornadaWizardScreen() {
       // Sembramos la preconfig del preset (R1.7) para las maniobras aplicables.
       const pre = (r.value.preset.config.preconfig ?? {}) as ManeuverPreconfig;
       setPreconfig(pre);
+      // Restaurar las maniobras CUSTOM del preset (R13.8): el config jsonb del preset lleva customManiobras
+      // (namespace paralelo). buildCurrentConfig las filtra luego a las que SIGUEN enabled en este rodeo.
+      const customIds = extractCustomManiobras(r.value.preset.config);
+      setChosenCustom(customIds);
     })();
     return () => {
       active = false;
@@ -227,13 +235,22 @@ export default function JornadaWizardScreen() {
   }, [presetId, rodeoId]);
 
   const onPickRodeo = useCallback((r: Rodeo) => {
-    setRodeo(r);
+    setRodeo((prev) => {
+      // Cambiar de rodeo → las maniobras custom elegidas (por id de OTRO rodeo) ya no aplican: limpiar.
+      if (prev && prev.id !== r.id) setChosenCustom([]);
+      return r;
+    });
     setError(null);
     setStage(2);
   }, []);
 
   const onToggle = useCallback((m: ManeuverKind) => {
     setChosen((prev) => toggleManeuver(prev, m));
+  }, []);
+
+  // Toggle de una maniobra CUSTOM (por field_definition_id) en la jornada (R13.8): entra/sale de chosenCustom.
+  const onToggleCustom = useCallback((fieldDefinitionId: string) => {
+    setChosenCustom((prev) => toggleCustomManiobra(prev, fieldDefinitionId));
   }, []);
 
   const onReorder = useCallback((from: number, to: number) => {
@@ -274,15 +291,19 @@ export default function JornadaWizardScreen() {
     for (const m of chosen) {
       if (preconfig[m] != null) cleanPre[m] = preconfig[m];
     }
-    return buildJornadaConfig(chosen, cleanPre);
-  }, [chosen, preconfig]);
+    // Solo las custom elegidas que SIGUEN enabled en el rodeo (defensivo: una deshabilitada/borrada no entra
+    // al config — el gating de la carga rápida igual la omitiría, pero no la guardamos de gusto).
+    const enabledIds = new Set(customManeuvers.map((c) => c.fieldDefinitionId));
+    const customIds = chosenCustom.filter((id) => enabledIds.has(id));
+    return buildJornadaConfig(chosen, cleanPre, customIds);
+  }, [chosen, preconfig, chosenCustom, customManeuvers]);
 
   const onArrancar = useCallback(async () => {
     if (!establishmentId || !rodeo) {
       setError('No pudimos resolver el campo o el rodeo. Volvé a intentar.');
       return;
     }
-    if (chosen.length === 0) {
+    if (chosen.length === 0 && chosenCustom.length === 0) {
       setError('Elegí al menos una maniobra para la jornada.');
       return;
     }
@@ -298,7 +319,7 @@ export default function JornadaWizardScreen() {
     // Navega a la IDENTIFICACIÓN del primer animal (M2.1-core): scan-first BLE + manual. La sesión ya está
     // local (offline). Identify resuelve el animal → auto-avance a la carga rápida (M2.2 cablea el frame real).
     router.replace({ pathname: '/maniobra/identificar', params: { sessionId: r.value.id } });
-  }, [establishmentId, rodeo, chosen, buildCurrentConfig, router]);
+  }, [establishmentId, rodeo, chosen, chosenCustom, buildCurrentConfig, router]);
 
   // Guardar como rutina (R2.1): crea un maneuver_preset con la config ACTUAL de la jornada (mismo
   // buildCurrentConfig que arranca la sesión — las maniobras en orden + la preconfig). INDEPENDIENTE de
@@ -404,16 +425,23 @@ export default function JornadaWizardScreen() {
               gatingError={gating.error}
               presetOmitted={presetOmitted}
               customManeuvers={customManeuvers}
+              chosenCustom={chosenCustom}
               canCreateCustom={isOwner}
               onCreateCustom={() => setCustomSheetOpen(true)}
               onToggle={onToggle}
+              onToggleCustom={onToggleCustom}
               onReorder={onReorder}
               onOpenConfig={onOpenConfig}
               scrollContext={scrollContext}
               frozenDragIndex={frozenDragIndex}
             />
           ) : (
-            <StageSummary rodeo={rodeo} chosen={chosen} preconfig={preconfig} />
+            <StageSummary
+              rodeo={rodeo}
+              chosen={chosen}
+              preconfig={preconfig}
+              customChosen={customManeuvers.filter((c) => chosenCustom.includes(c.fieldDefinitionId))}
+            />
           )}
         </Animated.ScrollView>
       </RNView>
@@ -421,16 +449,22 @@ export default function JornadaWizardScreen() {
       {/* ── CTA inferior (zona del pulgar). Etapa 1 no tiene CTA (tocar el rodeo avanza). ── */}
       {stage === 2 ? (
         <YStack paddingHorizontal="$4" paddingTop="$2" paddingBottom={bottomPad}>
-          <Button
-            fullWidth
-            disabled={chosen.length === 0}
-            onPress={() => {
-              setError(null);
-              setStage(3);
-            }}
-          >
-            {chosen.length === 0 ? 'Elegí maniobras' : `Continuar (${chosen.length})`}
-          </Button>
+          {(() => {
+            // Total elegido = maniobras de fábrica + maniobras custom (R13.8). Cualquiera de las dos habilita.
+            const totalChosen = chosen.length + chosenCustom.length;
+            return (
+              <Button
+                fullWidth
+                disabled={totalChosen === 0}
+                onPress={() => {
+                  setError(null);
+                  setStage(3);
+                }}
+              >
+                {totalChosen === 0 ? 'Elegí maniobras' : `Continuar (${totalChosen})`}
+              </Button>
+            );
+          })()}
         </YStack>
       ) : stage === 3 ? (
         <YStack paddingHorizontal="$4" paddingTop="$2" paddingBottom={bottomPad} gap="$2">
@@ -547,9 +581,11 @@ function StageManeuvers({
   gatingError,
   presetOmitted,
   customManeuvers,
+  chosenCustom,
   canCreateCustom,
   onCreateCustom,
   onToggle,
+  onToggleCustom,
   onReorder,
   onOpenConfig,
   scrollContext,
@@ -562,9 +598,11 @@ function StageManeuvers({
   gatingError: string | null;
   presetOmitted: ManeuverKind[];
   customManeuvers: EnabledCustomManeuver[];
+  chosenCustom: string[];
   canCreateCustom: boolean;
   onCreateCustom: () => void;
   onToggle: (m: ManeuverKind) => void;
+  onToggleCustom: (fieldDefinitionId: string) => void;
   onReorder: (from: number, to: number) => void;
   onOpenConfig: (m: ManeuverKind) => void;
   scrollContext: ReorderScrollContext;
@@ -622,8 +660,10 @@ function StageManeuvers({
           el owner las vea creadas/habilitadas y para crear nuevas. El `+` es OWNER-only (R13.2). */}
       <CustomManeuverSection
         customManeuvers={customManeuvers}
+        chosenCustom={chosenCustom}
         canCreateCustom={canCreateCustom}
         onCreateCustom={onCreateCustom}
+        onToggleCustom={onToggleCustom}
       />
     </YStack>
   );
@@ -633,14 +673,19 @@ function StageManeuvers({
 
 function CustomManeuverSection({
   customManeuvers,
+  chosenCustom,
   canCreateCustom,
   onCreateCustom,
+  onToggleCustom,
 }: {
   customManeuvers: EnabledCustomManeuver[];
+  chosenCustom: string[];
   canCreateCustom: boolean;
   onCreateCustom: () => void;
+  onToggleCustom: (fieldDefinitionId: string) => void;
 }) {
   const WHITE = getTokenValue('$white', 'color');
+  const chosenSet = new Set(chosenCustom);
   if (customManeuvers.length === 0 && !canCreateCustom) return null;
   return (
     <YStack gap="$2">
@@ -648,30 +693,42 @@ function CustomManeuverSection({
         Maniobras personalizadas
       </Text>
 
-      {customManeuvers.map((c) => (
-        <XStack
-          key={c.fieldDefinitionId}
-          backgroundColor="$surface"
-          borderRadius="$card"
-          borderWidth={1}
-          borderColor="$divider"
-          paddingHorizontal="$3"
-          minHeight="$touchMin"
-          alignItems="center"
-          gap="$3"
-          testID={`custom-maneuver-${c.fieldDefinitionId}`}
-        >
-          <View width={28} height={28} borderRadius="$pill" alignItems="center" justifyContent="center" backgroundColor="$greenLight">
-            <Text fontFamily="$body" fontSize="$3" lineHeight="$3" fontWeight="700" color="$primary" numberOfLines={1}>
-              ★
+      {/* Cada maniobra custom es SELECCIONABLE (R13.8): tocarla la agrega/saca de la jornada (toggle). El badge
+          pasa a ✓ verde cuando está elegida (entra a config.customManiobras → la carga rápida la secuencia). */}
+      {customManeuvers.map((c) => {
+        const selected = chosenSet.has(c.fieldDefinitionId);
+        return (
+          <XStack
+            key={c.fieldDefinitionId}
+            backgroundColor={selected ? '$greenLight' : '$surface'}
+            borderRadius="$card"
+            borderWidth={selected ? 2 : 1}
+            borderColor={selected ? '$primary' : '$divider'}
+            paddingHorizontal="$3"
+            minHeight="$touchMin"
+            alignItems="center"
+            gap="$3"
+            pressStyle={{ backgroundColor: '$greenLight' }}
+            onPress={() => onToggleCustom(c.fieldDefinitionId)}
+            testID={`custom-maneuver-${c.fieldDefinitionId}`}
+            {...buttonA11y(Platform.OS, { label: `${c.label}`, selected })}
+          >
+            <View width={28} height={28} borderRadius="$pill" alignItems="center" justifyContent="center" backgroundColor={selected ? '$primary' : '$greenLight'}>
+              {selected ? (
+                <Check size={16} color={WHITE} strokeWidth={3} />
+              ) : (
+                <Text fontFamily="$body" fontSize="$3" lineHeight="$3" fontWeight="700" color="$primary" numberOfLines={1}>
+                  ★
+                </Text>
+              )}
+            </View>
+            {/* lineHeight matching → un label custom con g/j/p no se recorta. */}
+            <Text flex={1} minWidth={0} fontFamily="$body" fontSize="$5" lineHeight="$5" fontWeight="600" color="$textPrimary" numberOfLines={1}>
+              {c.label}
             </Text>
-          </View>
-          {/* lineHeight matching → un label custom con g/j/p no se recorta. */}
-          <Text flex={1} minWidth={0} fontFamily="$body" fontSize="$5" lineHeight="$5" fontWeight="600" color="$textPrimary" numberOfLines={1}>
-            {c.label}
-          </Text>
-        </XStack>
-      ))}
+          </XStack>
+        );
+      })}
 
       {/* `+` crear maniobra personalizada (R13.7). Owner-only. */}
       {canCreateCustom ? (
@@ -711,12 +768,16 @@ function StageSummary({
   rodeo,
   chosen,
   preconfig,
+  customChosen,
 }: {
   rodeo: Rodeo | null;
   chosen: ManeuverKind[];
   preconfig: ManeuverPreconfig;
+  /** Maniobras custom elegidas para la jornada (R13.8), en el orden de selección. */
+  customChosen: EnabledCustomManeuver[];
 }) {
   const PRIMARY = getTokenValue('$primary', 'color');
+  const total = chosen.length + customChosen.length;
   return (
     <YStack gap="$4">
       <Card>
@@ -739,7 +800,7 @@ function StageSummary({
 
       <YStack gap="$2">
         <Text fontFamily="$body" fontSize="$4" lineHeight="$4" fontWeight="600" color="$textMuted" numberOfLines={1}>
-          {`Maniobras (${chosen.length}) — en este orden`}
+          {`Maniobras (${total}) — en este orden`}
         </Text>
         {chosen.map((m, i) => {
           // Detalle cargado desde config.preconfig (R1.9): "Brucelosis" bajo "Vacunación", la pajuela
@@ -777,6 +838,36 @@ function StageSummary({
             </XStack>
           );
         })}
+        {/* Maniobras CUSTOM de la jornada (R13.8) — DESPUÉS de las de fábrica (mismo orden que la secuencia de
+            carga). La numeración continúa la de fábrica (chosen.length + i + 1). Badge ★ para distinguirlas. */}
+        {customChosen.map((c, i) => (
+          <XStack
+            key={c.fieldDefinitionId}
+            backgroundColor="$surface"
+            borderRadius="$card"
+            borderWidth={1}
+            borderColor="$divider"
+            paddingHorizontal="$3"
+            minHeight="$touchMin"
+            alignItems="center"
+            gap="$3"
+            testID={`summary-custom-${c.fieldDefinitionId}`}
+          >
+            <View width={28} height={28} borderRadius="$pill" alignItems="center" justifyContent="center" backgroundColor="$primary">
+              <Text fontFamily="$body" fontSize="$3" lineHeight="$3" fontWeight="700" color="$white" numberOfLines={1}>
+                {chosen.length + i + 1}
+              </Text>
+            </View>
+            <YStack flex={1} minWidth={0}>
+              <Text fontFamily="$body" fontSize="$5" lineHeight="$5" fontWeight="600" color="$textPrimary" numberOfLines={1}>
+                {c.label}
+              </Text>
+              <Text fontFamily="$body" fontSize="$3" lineHeight="$3" color="$textMuted" numberOfLines={1}>
+                Personalizada
+              </Text>
+            </YStack>
+          </XStack>
+        ))}
       </YStack>
     </YStack>
   );

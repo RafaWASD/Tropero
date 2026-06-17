@@ -19,7 +19,7 @@
 import {
   buildCreateCustomFieldInsert,
   buildCustomDataKeysQuery,
-  buildEnabledCustomManeuversQuery,
+  buildEnabledCustomFieldsQuery,
 } from './powersync/local-reads';
 import { runLocalQuery, runLocalWrite } from './powersync/local-query';
 import { enqueueSetRodeoConfig } from './powersync/outbox';
@@ -27,7 +27,9 @@ import {
   buildCreateCustomFieldPayload,
   validateCustomFieldDraft,
   type CustomFieldDraft,
+  type CustomUiComponent,
 } from '../utils/custom-field';
+import { parseCustomOptions } from '../utils/custom-render';
 
 // ─── Error / Result uniforme (mismo shape que rodeo-config.ts / events.ts) ──────────────────────────
 
@@ -36,12 +38,23 @@ export type ServiceResult<T> = { ok: true; value: T } | { ok: false; error: AppE
 
 export type { CustomFieldDraft, CustomUiComponent, CustomDataType } from '../utils/custom-field';
 
-/** Una maniobra custom enabled en un rodeo (tweak M1): su field_definition_id + data_key + label. */
+/**
+ * Un dato CUSTOM enabled en un rodeo (spec 03 M5-C.3): su field_definition_id + data_key + label + el
+ * ui_component que lo renderiza + las opciones (si es enum). M5-C.3 enriqueció el shape de M5-C.2 (que solo
+ * traía id/data_key/label) con ui_component/options para el renderer genérico. Sirve tanto a maniobras
+ * (CustomManeuverStep, escribe a custom_measurements) como a propiedades (CustomFieldInput de alta/ficha).
+ */
 export type EnabledCustomManeuver = {
   fieldDefinitionId: string;
   dataKey: string;
   label: string;
+  uiComponent: CustomUiComponent;
+  /** Opciones del enum (enum_single/enum_multi); [] para los demás. */
+  options: string[];
 };
+
+/** Alias semántico: lo mismo, usado para las PROPIEDADES custom (alta/ficha) — el shape es idéntico. */
+export type EnabledCustomProperty = EnabledCustomManeuver;
 
 // ─── Lectura: data_keys custom ya usados (para la unicidad del slug) ────────────────────────────────
 
@@ -154,30 +167,68 @@ export async function enableCustomFieldInRodeo(
   return { ok: true, value: true };
 }
 
-// ─── Lectura: maniobras custom enabled en un rodeo (tweak M1, §11.7) ─────────────────────────────────
+// ─── Lectura: datos custom enabled en un rodeo (tweak M1 §11.7 + render genérico M5-C.3) ─────────────
 
-type EnabledManeuverRow = { id: string; data_key: string; label: string };
+type EnabledFieldRow = {
+  id: string;
+  data_key: string;
+  label: string;
+  ui_component: string;
+  config_schema: unknown;
+};
+
+/** Los 7 ui_component válidos (R13.8). El server (CHECK 0093) ya restringe la fila custom a estos. */
+const UI_COMPONENTS = new Set<string>([
+  'numeric',
+  'numeric_stepped',
+  'enum_single',
+  'enum_multi',
+  'text',
+  'boolean',
+  'date',
+]);
+
+/** Mapea una fila enriquecida a EnabledCustomManeuver, parseando options del config_schema (TOLERANTE). */
+function toEnabledCustomField(row: EnabledFieldRow): EnabledCustomManeuver {
+  return {
+    fieldDefinitionId: row.id,
+    dataKey: row.data_key,
+    label: row.label,
+    // El server garantiza el dominio (CHECK 0093); el fallback 'text' es defensivo ante una fila vieja/rara.
+    uiComponent: UI_COMPONENTS.has(row.ui_component) ? (row.ui_component as CustomUiComponent) : 'text',
+    options: parseCustomOptions(row.config_schema),
+  };
+}
 
 /**
- * Lee las field_definitions custom de tipo `maniobra` ENABLED en un rodeo (tweak M1, §11.7): la lista de
- * maniobras del wizard = 10 de fábrica gateadas + estas. Read-only, local (incluye el overlay del toggle
- * offline). Vacío legítimo (un rodeo sin maniobras custom) NO degrada a "Sincronizando…".
+ * Lee las field_definitions custom de tipo `maniobra` ENABLED en un rodeo (tweak M1 §11.7 + render genérico
+ * M5-C.3): la lista de maniobras del wizard = 10 de fábrica gateadas + estas; la carga rápida las renderiza
+ * por ui_component. Read-only, local (incluye el overlay del toggle offline). Vacío legítimo NO degrada a
+ * "Sincronizando…".
  */
 export async function fetchEnabledCustomManeuvers(
   rodeoId: string,
 ): Promise<ServiceResult<EnabledCustomManeuver[]>> {
-  const r = await runLocalQuery<EnabledManeuverRow>(buildEnabledCustomManeuversQuery(rodeoId), {
+  const r = await runLocalQuery<EnabledFieldRow>(buildEnabledCustomFieldsQuery(rodeoId, 'maniobra'), {
     emptyIsSyncing: false,
   });
   if (!r.ok) return { ok: false, error: r.error };
-  return {
-    ok: true,
-    value: r.value.map((row) => ({
-      fieldDefinitionId: row.id,
-      dataKey: row.data_key,
-      label: row.label,
-    })),
-  };
+  return { ok: true, value: r.value.map(toEnabledCustomField) };
+}
+
+/**
+ * Lee las field_definitions custom de tipo `propiedad` ENABLED en un rodeo (spec 03 M5-C.3, R13.10): el form
+ * de alta + la ficha del animal de ese rodeo las muestran (render por ui_component) → custom_attributes.
+ * Read-only, local (overlay-aware). Vacío legítimo NO degrada a "Sincronizando…".
+ */
+export async function fetchEnabledCustomProperties(
+  rodeoId: string,
+): Promise<ServiceResult<EnabledCustomProperty[]>> {
+  const r = await runLocalQuery<EnabledFieldRow>(buildEnabledCustomFieldsQuery(rodeoId, 'propiedad'), {
+    emptyIsSyncing: false,
+  });
+  if (!r.ok) return { ok: false, error: r.error };
+  return { ok: true, value: r.value.map(toEnabledCustomField) };
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────────────────────────────

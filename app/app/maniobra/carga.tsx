@@ -30,12 +30,16 @@ import { buttonA11y, labelA11y } from '@/utils/a11y';
 import { fetchAnimalDetail, resolveCutCategory, type AnimalDetail } from '@/services/animals';
 import { getSessionById, setSessionCounts, type Session } from '@/services/sessions';
 import { persistManeuverEvent, softDeleteManeuverEvents } from '@/services/maneuver-events';
+import { fetchEnabledCustomManeuvers, type EnabledCustomManeuver } from '@/services/custom-fields';
+import { addCustomMeasurement } from '@/services/custom-measurements';
+import { toCustomValue, type CustomCaptureValue } from '@/utils/custom-render';
 import {
   filterByAnimalApplicability,
   type AnimalApplicabilityInfo,
 } from '@/utils/maneuver-applicability';
 import { useManeuverGating } from '@/hooks/useManeuverGating';
 import {
+  extractCustomManiobras,
   extractManeuvers,
   pajuelasFor,
   parseManeuverConfig,
@@ -48,9 +52,13 @@ import { formatEidReadable } from '@/utils/eid-format';
 import { stepKindFor } from '@/utils/maneuver-step-kind';
 import {
   buildSequence,
+  sequenceItemKey,
   summaryRows,
   type CaptureMap,
+  type CustomCaptureMap,
+  type CustomManeuverSpec,
   type PregnancyStatus,
+  type SequenceItem,
   type SilentSanitaryType,
   type StepValue,
 } from '@/utils/maneuver-sequence';
@@ -68,6 +76,7 @@ import { SilentVaccinationStep } from './_components/SilentVaccinationStep';
 import { InseminacionStep } from './_components/InseminacionStep';
 import { LabSampleStep } from './_components/LabSampleStep';
 import { LabDoubleStep } from './_components/LabDoubleStep';
+import { CustomManeuverStep } from './_components/CustomManeuverStep';
 import { PlaceholderStep } from './_components/PlaceholderStep';
 import { AnimalSummary } from './_components/AnimalSummary';
 
@@ -139,6 +148,11 @@ export default function ManiobraCarga() {
   const [mode, setMode] = useState<FrameMode>('step');
   const [currentIndex, setCurrentIndex] = useState(0);
   const [captured, setCaptured] = useState<CaptureMap>({});
+  // Capturas de las maniobras CUSTOM del animal (R13.8): por field_definition_id (paralelo a `captured`).
+  const [customCaptured, setCustomCaptured] = useState<CustomCaptureMap>({});
+  // Maniobras CUSTOM enabled en el rodeo del animal (enriquecidas con ui_component/options, tweak M1 §11.7 +
+  // render genérico M5-C.3). Se cargan cuando se conoce el rodeo; vacío hasta que un campo cree maniobras custom.
+  const [customManeuvers, setCustomManeuvers] = useState<EnabledCustomManeuver[]>([]);
   // Error de PERSISTENCIA de la maniobra actual (R5.7/R10.8): si el write LOCAL falla (o tira), NO se
   // avanza y se SUPERFICIA un mensaje accionable es-AR debajo del paso (en vez de tragar el error y dejar
   // al operario tapeando sin que pase nada). Se limpia al re-intentar (nuevo tap) o al entrar a otro paso.
@@ -171,11 +185,24 @@ export default function ManiobraCarga() {
   // Sirve para soft-deletear los huérfanos al CORREGIR con MENOS vacunas (de 2 → 1: la 2da fila ya escrita
   // no se pisa por re-INSERT, hay que borrarla). El raspado es fijo (2) → no necesita esto.
   const lastWriteCountRef = useRef<Partial<Record<ManeuverKind, number>>>({});
+  // id de cliente de la CAPTURA custom ESTABLE por field_definition_id (custom_measurements tiene `id` REAL):
+  // al CORREGIR desde el resumen (R5.9) se reusa el MISMO id → el re-INSERT pisa la fila por PK (LWW) en vez de
+  // duplicar la medición. Se resetea al cambiar de animal.
+  const customIdsRef = useRef<Record<string, string>>({});
   useEffect(() => {
     eventIdsRef.current = {};
     extraIdsRef.current = {};
     lastWriteCountRef.current = {};
+    customIdsRef.current = {};
+    setCustomCaptured({});
   }, [profileId]);
+  const customIdFor = useCallback((fieldDefId: string): string => {
+    const existing = customIdsRef.current[fieldDefId];
+    if (existing) return existing;
+    const id = globalThis.crypto.randomUUID();
+    customIdsRef.current[fieldDefId] = id;
+    return id;
+  }, []);
   const eventIdFor = useCallback((maneuver: ManeuverKind): string => {
     const existing = eventIdsRef.current[maneuver];
     if (existing) return existing;
@@ -237,16 +264,61 @@ export default function ManiobraCarga() {
     [session],
   );
 
+  // Maniobras CUSTOM de la jornada en su orden (config.customManiobras, R13.8) — namespace paralelo.
+  const sessionCustomIds = useMemo<string[]>(
+    () => (session ? extractCustomManiobras(session.config) : []),
+    [session],
+  );
+
+  // Maniobras CUSTOM enabled en el rodeo REAL del animal (R13.8/R13.10): se cargan al conocer el rodeo. La
+  // barrera real es el gating capa 2 server-side (0096) al subir; acá filtramos por enabled del rodeo (capa 1).
+  const animalRodeoId = animal?.rodeoId ?? null;
+  useEffect(() => {
+    if (!animalRodeoId) {
+      setCustomManeuvers([]);
+      return;
+    }
+    let active = true;
+    void fetchEnabledCustomManeuvers(animalRodeoId).then((r) => {
+      if (!active) return;
+      setCustomManeuvers(r.ok ? r.value : []);
+    });
+    return () => {
+      active = false;
+    };
+  }, [animalRodeoId]);
+
+  // Las maniobras custom de la SESIÓN (config.customManiobras) ∩ las ENABLED del rodeo, EN EL ORDEN de la
+  // sesión, enriquecidas con ui_component/options para el renderer genérico. Una custom elegida en la jornada
+  // que ya no esté enabled en el rodeo (o se haya borrado el field) se OMITE (paridad con el gating de fábrica).
+  const customSequenceSpecs = useMemo<CustomManeuverSpec[]>(() => {
+    if (customManeuvers.length === 0 || sessionCustomIds.length === 0) return [];
+    const byId = new Map(customManeuvers.map((c) => [c.fieldDefinitionId, c]));
+    const specs: CustomManeuverSpec[] = [];
+    for (const id of sessionCustomIds) {
+      const c = byId.get(id);
+      if (c) {
+        specs.push({
+          fieldDefinitionId: c.fieldDefinitionId,
+          uiComponent: c.uiComponent,
+          label: c.label,
+          options: c.options,
+        });
+      }
+    }
+    return specs;
+  }, [customManeuvers, sessionCustomIds]);
+
   // La SECUENCIA del animal: orden de config ∩ gating del rodeo real (R5.14 + R5.5) ∩ aplicabilidad por
-  // ATRIBUTOS del animal (R6.12: raspado solo machos → se salta en hembras/sexo desconocido). Estable
-  // mientras no cambie el gating/animal (no reordena por capturar).
+  // ATRIBUTOS del animal (R6.12: raspado solo machos → se salta en hembras/sexo desconocido), MÁS las maniobras
+  // custom enabled de la jornada DESPUÉS (R13.8). Estable mientras no cambie el gating/animal/custom.
   const sequence = useMemo(() => {
     if (!animal || !session || gating.loading || gating.config === null) return [];
     const { applicable } = gating.filter(sessionManeuvers);
     // R6.12: filtra las maniobras que no aplican a ESTE animal por sus atributos (raspado en una hembra).
     const { applicable: perAnimal } = filterByAnimalApplicability(applicable, toApplicabilityInfo(animal));
-    return buildSequence(sessionManeuvers, perAnimal);
-  }, [animal, session, gating, sessionManeuvers]);
+    return buildSequence(sessionManeuvers, perAnimal, customSequenceSpecs);
+  }, [animal, session, gating, sessionManeuvers, customSequenceSpecs]);
 
   // ¿El gating del rodeo aún no está USABLE? config null (no fetcheó aún) o config VACÍO mientras la sesión
   // TIENE maniobras (sync en curso: la fila del rodeo_data_config aún no bajó al SQLite local). Un rodeo de
@@ -408,6 +480,65 @@ export default function ManiobraCarga() {
     [profileId, sessionId, sequence.length, eventIdFor, extraIdsFor, captured],
   );
 
+  // ─── Persistir el valor de una maniobra CUSTOM + avanzar (R13.8/R13.11) ───
+  //
+  // Espeja captureAndAdvance pero para custom_measurements (append-only, value tipado por ui_component). El
+  // gating capa 2 genérico + la validación de value (0096) re-validan server-side al SUBIR (no acá); el rechazo
+  // lo maneja uploadData (R10.8). FAIL-CLOSED igual que las de fábrica: si el write LOCAL falla, NO avanza y
+  // superficia. La corrección desde el resumen (R5.9) reusa el MISMO id de captura (customIdFor) → LWW, sin
+  // duplicar la medición.
+  const captureCustomAndAdvance = useCallback(
+    async (fieldDefinitionId: string, value: CustomCaptureValue) => {
+      if (!profileId || !sessionId) return;
+      if (capturingRef.current) return;
+      capturingRef.current = true;
+      setCaptureError(null);
+      try {
+        // Falla inyectada (solo E2E, mismo hook que las de fábrica) → superficia y NO avanza.
+        if (consumeManeuverPersistFault()) {
+          setCaptureError(buildCaptureError('e2e: fallo de persistencia inyectado'));
+          return;
+        }
+        // ¿La maniobra custom YA tenía una captura? (corrección desde el resumen, R5.9) → UPDATE; si no → INSERT.
+        const isCorrection = customCaptured[fieldDefinitionId] != null;
+        const res = await addCustomMeasurement({
+          animalProfileId: profileId,
+          fieldDefinitionId,
+          value: toCustomValue(value),
+          sessionId,
+          // id ESTABLE por field_def: corregir reusa el id → UPDATE explícito de la misma fila (no duplica).
+          id: customIdFor(fieldDefinitionId),
+          isCorrection,
+        });
+        if (!res.ok) {
+          setCaptureError(buildCaptureError(res.error.message));
+          return;
+        }
+        setCustomCaptured((c) => ({ ...c, [fieldDefinitionId]: value }));
+        if (editingFromSummaryRef.current) {
+          editingFromSummaryRef.current = false;
+          setMode('summary');
+          return;
+        }
+        setCurrentIndex((i) => {
+          const next = i + 1;
+          if (next >= sequence.length) {
+            setMode('summary');
+            return i;
+          }
+          return next;
+        });
+        setStepEntryNonce((n) => n + 1);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        setCaptureError(buildCaptureError(message));
+      } finally {
+        capturingRef.current = false;
+      }
+    },
+    [profileId, sessionId, sequence.length, customIdFor, customCaptured],
+  );
+
   // ─── Corregir desde el resumen: volver a un paso (R5.9) ───
   const onEdit = useCallback((index: number) => {
     editingFromSummaryRef.current = true;
@@ -483,7 +614,7 @@ export default function ManiobraCarga() {
 
       {mode === 'summary' ? (
         <AnimalSummary
-          rows={summaryRows(sequence, captured)}
+          rows={summaryRows(sequence, captured, customCaptured)}
           onEdit={onEdit}
           onConfirm={onConfirmAnimal}
         />
@@ -492,15 +623,13 @@ export default function ManiobraCarga() {
         <EmptySequence onConfirm={onConfirmAnimal} bottomPad={bottomPad} />
       ) : currentStep ? (
         <>
-          {/* ── LÍNEA DE MANIOBRA + CONTADOR "Tacto · 2 de 4" (R5.14, sobre la secuencia filtrada) ──
-                ROBUSTEZ a labels largos (ej. "Tacto de aptitud reproductiva", ~29 chars): el
-                label = flex/minWidth:0 + numberOfLines → elipsa con "…" si no entra (en RN-web numberOfLines
-                NO elipsa sin ancho constreñido: el default flexShrink:0 lo dejaría overflowear/empujar). El
-                contador = flexShrink:0 → NUNCA se recorta, siempre visible (cuál maniobra de cuántas importa
-                tanto como su nombre). ── */}
+          {/* ── LÍNEA DE MANIOBRA + CONTADOR "Tacto · 2 de 4" (R5.14, sobre la secuencia filtrada combinada) ──
+                ROBUSTEZ a labels largos (las custom también pueden ser largas): el label = flex/minWidth:0 +
+                numberOfLines → elipsa con "…"; el contador = flexShrink:0 → nunca se recorta. El label es el
+                maneuverLabel es-AR (fábrica) o el label del field custom (R13.8). ── */}
           <XStack paddingHorizontal="$4" paddingTop="$3" paddingBottom="$2" alignItems="center" gap="$2">
             <Text flex={1} minWidth={0} fontFamily="$body" fontSize="$5" lineHeight="$5" fontWeight="600" color="$textPrimary" numberOfLines={1}>
-              {maneuverLabel(currentStep.maneuver)}
+              {currentStep.source === 'custom' ? currentStep.custom.label : maneuverLabel(currentStep.maneuver)}
             </Text>
             <Text flexShrink={0} fontFamily="$body" fontSize="$5" lineHeight="$5" color="$textFaint" numberOfLines={1}>
               · {currentStep.position} de {currentStep.total}
@@ -508,21 +637,34 @@ export default function ManiobraCarga() {
           </XStack>
 
           {/* ── BANNER DE ERROR DE PERSISTENCIA (R5.7/R10.8): el write local falló → NO se avanzó. Mensaje
-                accionable es-AR (reintentar) + detalle atenuado para diagnóstico. Antes este error se
-                tragaba (el operario tapeaba sin que pasara nada). Visible solo cuando hay error. ── */}
+                accionable es-AR (reintentar) + detalle atenuado para diagnóstico. Visible solo cuando hay error. ── */}
           {captureError ? <ManeuverErrorBanner error={captureError} /> : null}
 
-          {/* ── PASO ACTUAL (dispatcher genérico por maniobra). La key (maniobra + nonce de entrada) fuerza
-                remount al avanzar/corregir → el paso re-lee su valor inicial (keypad con el peso ya cargado). ── */}
-          <ManeuverStep
-            key={`${currentStep.maneuver}-${stepEntryNonce}`}
-            maneuver={currentStep.maneuver}
-            captured={captured[currentStep.maneuver]}
-            animal={animal}
-            config={session.config}
-            bottomPad={bottomPad}
-            onCapture={(value) => void captureAndAdvance(currentStep.maneuver, value)}
-          />
+          {/* ── PASO ACTUAL (dispatcher por source). La key (item key + nonce de entrada) fuerza remount al
+                avanzar/corregir → el paso re-lee su valor inicial. Custom → renderer genérico por ui_component
+                (CustomManeuverStep, R13.8) → custom_measurements; fábrica → el dispatcher por StepKind. ── */}
+          {currentStep.source === 'custom' ? (
+            <CustomManeuverStep
+              key={`${sequenceItemKey(currentStep)}-${stepEntryNonce}`}
+              uiComponent={currentStep.custom.uiComponent}
+              options={currentStep.custom.options}
+              initialValue={customCaptured[currentStep.custom.fieldDefinitionId] ?? null}
+              bottomPad={bottomPad}
+              onConfirm={(value) =>
+                void captureCustomAndAdvance(currentStep.custom.fieldDefinitionId, value)
+              }
+            />
+          ) : (
+            <ManeuverStep
+              key={`${currentStep.maneuver}-${stepEntryNonce}`}
+              maneuver={currentStep.maneuver}
+              captured={captured[currentStep.maneuver]}
+              animal={animal}
+              config={session.config}
+              bottomPad={bottomPad}
+              onCapture={(value) => void captureAndAdvance(currentStep.maneuver, value)}
+            />
+          )}
         </>
       ) : null}
     </YStack>
