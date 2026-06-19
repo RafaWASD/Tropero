@@ -14,10 +14,11 @@
 import { Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
-import { Check, ChevronRight } from 'lucide-react-native';
+import { ArrowRight, Check, ChevronRight } from 'lucide-react-native';
 
-import { buttonA11y } from '@/utils/a11y';
+import { buttonA11y, labelA11y } from '@/utils/a11y';
 import type { SummaryRow } from '@/utils/maneuver-sequence';
+import type { CategoryTransitionPreview } from '@/utils/maneuver-category-preview';
 
 export type AnimalSummaryProps = {
   /** Filas del resumen (maniobra + valor legible), en orden de la secuencia. */
@@ -26,9 +27,15 @@ export type AnimalSummaryProps = {
   onEdit: (index: number) => void;
   /** Confirmar → avanzar al siguiente animal + contador++ (R5.10). */
   onConfirm: () => void;
+  /**
+   * Preview de la transición de categoría que el server aplicará al sincronizar (R8.4). Display-only:
+   * cuando NO es null, se muestra un banner destacado ("Categoría: <de> → <a>") ARRIBA de la lista. null
+   * (override / macho / sin cambio / sin catálogo) → no se muestra nada.
+   */
+  preview?: CategoryTransitionPreview | null;
 };
 
-export function AnimalSummary({ rows, onEdit, onConfirm }: AnimalSummaryProps) {
+export function AnimalSummary({ rows, onEdit, onConfirm, preview }: AnimalSummaryProps) {
   const insets = useSafeAreaInsets();
   const bottomPad = Math.max(insets.bottom, getTokenValue('$navBottomMin', 'size'));
   const chevron = getTokenValue('$navIcon', 'size');
@@ -46,6 +53,7 @@ export function AnimalSummary({ rows, onEdit, onConfirm }: AnimalSummaryProps) {
       </YStack>
 
       <ScrollView flex={1} contentContainerStyle={{ paddingHorizontal: getTokenValue('$4', 'size'), paddingBottom: getTokenValue('$3', 'size') }}>
+        {preview ? <CategoryPreviewBanner preview={preview} /> : null}
         {rows.length === 0 ? (
           <YStack paddingVertical="$6" alignItems="center">
             <Text fontFamily="$body" fontSize="$5" lineHeight="$5" fontWeight="500" color="$textMuted" textAlign="center">
@@ -114,6 +122,43 @@ export function AnimalSummary({ rows, onEdit, onConfirm }: AnimalSummaryProps) {
           </Text>
         </View>
       </YStack>
+    </YStack>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+// BANNER de PREVIEW de TRANSICIÓN DE CATEGORÍA (R8.4) — el operario VE el cambio que el server aplicará
+// al sincronizar, ANTES de subir (display-only; el server es la verdad). Es un BLOQUE destacado (NO una
+// fila tappable): "Categoría: <de> → <a>" + "Se actualiza al sincronizar." Acento $primary/$greenLight
+// (es una buena noticia, no error). Tokens, cero hardcode (ADR-023 §4). Recorte de descendentes: ambos
+// Text con heading o numberOfLines llevan lineHeight matching ("preñada" lleva ñ/p/q descendentes).
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+function CategoryPreviewBanner({ preview }: { preview: CategoryTransitionPreview }) {
+  const arrow = getTokenValue('$navIcon', 'size');
+  const primary = getTokenValue('$primary', 'color');
+  return (
+    <YStack
+      testID="summary-category-preview"
+      marginTop="$2"
+      backgroundColor="$greenLight"
+      borderRadius="$card"
+      paddingHorizontal="$4"
+      paddingVertical="$3"
+      gap="$1"
+      {...labelA11y(Platform.OS, `Categoría: ${preview.fromName} pasa a ${preview.toName}. Se actualiza al sincronizar.`)}
+    >
+      <XStack alignItems="center" flexWrap="wrap" gap="$2">
+        <Text fontFamily="$body" fontSize="$5" lineHeight="$5" fontWeight="600" color="$primary" numberOfLines={2}>
+          Categoría: {preview.fromName}
+        </Text>
+        <ArrowRight size={arrow} color={primary} strokeWidth={2.5} />
+        <Text fontFamily="$body" fontSize="$5" lineHeight="$5" fontWeight="700" color="$primary" numberOfLines={2}>
+          {preview.toName}
+        </Text>
+      </XStack>
+      <Text fontFamily="$body" fontSize="$3" lineHeight="$3" fontWeight="500" color="$primary" numberOfLines={2}>
+        Se actualiza al sincronizar.
+      </Text>
     </YStack>
   );
 }

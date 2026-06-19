@@ -439,3 +439,100 @@ de otra terminal ya está verde — no era mía.)
 
 UI del wizard / pantallas de carga (M1.4/M2/M3), backend (migraciones 0001-0057 intactas), sync rules (M4),
 feature_list.json. Solo lógica + servicios + builders + tests + reconciliación de design/tasks.
+
+---
+
+## Chunk R8.4 — preview de transición de categoría OFFLINE — 2026-06-17
+
+> Frontend PURO, display-only, offline, sin migraciones ni writes nuevos. **Gate 1 N/A.** El operario VE
+> en el RESUMEN del animal el cambio de categoría que el server aplicará al sincronizar (caso canónico
+> R8.1: tacto POSITIVO sobre una vaquillona → vaquillona_prenada), ANTES de subir. Reusa el espejo C6
+> `computeCategoryCode` (`@/utils/animal-category`) → CERO re-implementación de la máquina de estados de
+> categoría ⇒ CERO drift (el round-trip antidrift de los tests rompe si `compute_category` cambia).
+
+### Archivos creados / modificados
+
+- **NUEVO** `app/src/utils/maneuver-category-preview.ts` — util PURO (sin RN/red/supabase):
+  `previewManeuverCategoryTransition(args) → CategoryTransitionPreview | null` + helper exportado
+  `syntheticEventsForFemaleCategory(code) → ReproEventInput[] | null`.
+- **NUEVO** `app/src/utils/maneuver-category-preview.test.ts` — 19 tests node:test (registrado en
+  `scripts/run-tests.mjs` tras `maneuver-sequence.test.ts`).
+- **MOD** `app/src/services/animals.ts` (APPEND-ONLY, al final) — `fetchRodeoCategoryCatalog(rodeoId)`:
+  resuelve systemId con `buildRodeoSystemQuery` + catálogo con `fetchSystemCategories` (reusa lo existente).
+  Sin systemId → `{ok:true, value:[]}` (fail-safe). + import de `buildRodeoSystemQuery`.
+- **MOD** `app/app/maniobra/carga.tsx` — `useState<SystemCategory[]>` + useEffect (offline, patrón
+  customManeuvers/lastScrotalCm) + `useMemo` `transitionPreview` → prop `preview` al `<AnimalSummary>`.
+- **MOD** `app/app/maniobra/_components/AnimalSummary.tsx` — prop `preview?` + `CategoryPreviewBanner`
+  (bloque destacado NO tappable, $greenLight/$primary, `ArrowRight`, testID `summary-category-preview`,
+  "Categoría: <de> → <a>" + "Se actualiza al sincronizar.", lineHeight matching).
+- **NUEVO** `app/e2e/maniobra-preview-transicion.spec.ts` — 2 tests (canónico + negativo). Captura en
+  `design/maniobra-carga/resumen-preview-transicion.png`.
+- **MOD** `scripts/run-tests.mjs` — registra el test unit nuevo en el manifiesto del cliente.
+
+### Mapa R8.4 → archivo:test (trazabilidad)
+
+| Aspecto de R8.4 | Archivo:test |
+|---|---|
+| Reusa el espejo C6 (cero drift) — round-trip antidrift por female code | `maneuver-category-preview.test.ts` › "antidrift: syntheticEventsForFemaleCategory… reproduce el code vía computeCategoryCode" |
+| caso canónico tacto+ sobre vaquillona → vaquillona_prenada | `…test.ts` › "vaquillona + tacto+ (medium) → vaquillona_prenada"; e2e `maniobra-preview-transicion.spec.ts:74` |
+| ternera + tacto+ → vaquillona_prenada | `…test.ts` › "ternera + tacto+ → vaquillona_prenada" |
+| override=true → null (R8.1) | `…test.ts` › "override=true → null" |
+| macho → null | `…test.ts` › "macho → null" |
+| sin cambio (multipara/vaca_2do/preñada + tacto+) → null | `…test.ts` › "multipara…/vaca_segundo_servicio…/vaquillona_prenada + tacto+ → null" |
+| tacto 'empty' (no positivo) → null | `…test.ts` › "tacto vacío (empty) → null"; e2e test (2) |
+| ternera + inseminación(service) → vaquillona | `…test.ts` › "ternera + inseminación (service) → vaquillona" |
+| vaquillona + service → null | `…test.ts` › "vaquillona + inseminación (service) → null" |
+| toCode no en catálogo → null (nunca blanco) | `…test.ts` › "toCode no está en el catálogo (catálogo vacío) → null" |
+| sin tacto/inseminación capturados → null | `…test.ts` › "sin tacto ni inseminación capturados → null"; "captured vacío → null" |
+| code actual no-cría (no reconstruible) → null | `…test.ts` › "code actual no-cría → null"; "code desconocido → null" |
+| tacto_vaquillona (aptitud) NO alimenta compute_category | `…test.ts` › "tacto_vaquillona (aptitud) NO dispara preview" |
+| FROM = display actual del header | `…test.ts` › "FROM = currentCode/currentName tal cual"; e2e assert "Categoría: Vaquillona" |
+| catálogo del rodeo offline (systemId → categories_by_system) | service `fetchRodeoCategoryCatalog` (reusa builders ya testeados en `maneuver-reads.test.ts`/`local-reads.test.ts`); ejercitado end-to-end por la e2e |
+| banner display-only (testID summary-category-preview) | e2e `maniobra-preview-transicion.spec.ts` (visible con destino; NO visible en tacto vacío) |
+
+### Autorrevisión adversarial (paso 8) — qué busqué, qué encontré, cómo lo cerré
+
+1. **DRIFT del espejo** (mitigado): delega 100% en `computeCategoryCode`; el round-trip antidrift por los 5
+   female codes ATRAPA cualquier cambio de `compute_category`. Verde.
+2. **Fail-safes (nunca blanco/crash)** (cubierto): code no reconstruible → null; toCode sin fila → null;
+   catálogo vacío → null; `fetchRodeoCategoryCatalog` sin systemId → `{ok:true,value:[]}`. Tests.
+3. **El preview NO aparece cuando NO debe** (verificado): override/macho/sin-cambio/tacto-vacío/sin-evento →
+   null. Units + e2e negativa (`toHaveCount(0)` del banner en tacto vacío).
+4. **No rompe el resumen vacío ni el caso sin catálogo** (verificado): banner SOLO si `preview != null`,
+   independiente de `rows`; `transitionPreview` null mientras `animal` no resolvió.
+5. **tacto_vaquillona NO contamina** (verificado): `capturedReproEvents` ignora `kind:'vaquillona'`. Test.
+6. **Escaneo por VALUES, no por key** (cubierto): `Object.values(captured)` + discriminación por `kind`. Test.
+7. **Orden sintéticos vs capturados** (verificado): sintéticos sellados (pasado) ANTES; capturados "ahora"
+   (`createdAt:null`, today) DESPUÉS. Round-trip + caso canónico lo confirman.
+8. **Anti-hardcode REAL re-corrido** (`check-hardcode.mjs` → 0 violaciones): banner 100% tokens.
+9. **Descendentes vetados con valor con descendente**: captura con "Vaquillona **preñada**" (ñ/p/q/g) NO
+   recortada; lineHeight matching en todos los Text del banner.
+10. **Multi-tenant** (verificado): cero hardcode de establishment_id/system_id/codes.
+11. **Offline-first** (verificado): catálogo del SQLite local; preview PURO (sin I/O).
+
+### Reconciliación de specs (paso 9)
+
+- **design.md §5** (cobertura R8.4) reconciliado al as-built: nota AS-BUILT con los nombres reales
+  (`maneuver-category-preview.ts`, `fetchRodeoCategoryCatalog`, `CategoryPreviewBanner`, testID
+  `summary-category-preview`). El design ya apuntaba al espejo C6 → coincide.
+- **requirements.md** (EARS R8.4) NO cambió el *qué*; nota de reconciliación as-built con el alcance real
+  (caso canónico tacto+/vaquillona; macho/override/sin-cambio → no se muestra; fail-safe sin catálogo).
+- **tasks.md** — task de R8.4 (frame: preview transición) marcada `[x]` con los archivos as-built (pendiente
+  reviewer + Gate 2; NO marco done yo).
+
+### RC del check
+
+- **typecheck client OK** · **anti-hardcode 0 violaciones** · **client unit tests OK** (incluye los 19
+  nuevos + el round-trip antidrift) — verde.
+- **e2e** `maniobra-preview-transicion.spec.ts`: **2 passed** (el `UV_HANDLE_CLOSING` posterior = teardown
+  libuv de Windows DESPUÉS de pasar, NO un fallo).
+- **Backend `supabase/tests/animal/run.cjs`** (spec 02) dio rojo por `23505 … animals_tag_unique` (test
+  "tag_electronic borde 64") — colisión de tag en el REMOTO COMPARTIDO con la terminal paralela (flake
+  conocido). NO es mi chunk (frontend-puro, cero backend/migraciones/seed); en otra corrida la animal suite
+  PASÓ (72s) → transitorio.
+
+### NO toqué (chunk R8.4)
+
+`app/app/animal/[id].tsx`, `app/src/services/sigsa/**`, `specs/active/08-export-sigsa/**`, `feature_list.json`,
+`progress/current.md`, `docs/backlog.md`, `CONTEXT/07-pendientes.md`, otros `progress/*`. NO commit. NO
+`git add -A`. En `animals.ts` solo APPEND al final. Sin migraciones (frontend-puro).

@@ -42,6 +42,7 @@ import {
   buildCategoryMirrorEventsQuery,
   buildRevertCategoryOverrideUpdate,
   buildRodeoSpeciesQuery,
+  buildRodeoSystemQuery,
   buildSetCastratedUpdate,
   buildSetCutUpdate,
   buildUnsetCutUpdate,
@@ -1492,4 +1493,32 @@ export async function transferAnimal(
   }
 
   return { ok: true, value: mapTransferResult(data as TransferAnimalRpcRow | null, input.targetProfileId) };
+}
+
+// ─── Catálogo de categorías del RODEO (preview de transición de categoría offline, spec 03 R8.4) ──────
+
+/**
+ * Lee el catálogo code→name de las categorías del sistema del RODEO de un animal, desde el SQLite local
+ * (offline, R8.4). Resuelve primero el `system_id` del rodeo (`buildRodeoSystemQuery`) y luego el catálogo
+ * (`fetchSystemCategories(systemId)`) — reusa lo existente, NO duplica SQL. Es la fuente del `name` destino
+ * del preview de transición (`previewManeuverCategoryTransition`, `@/utils/maneuver-category-preview`): la
+ * carga rápida lo carga una vez al conocer el rodeo del animal y se lo pasa al `AnimalSummary` para anticipar
+ * el cambio de categoría que el server computará al subir la captura (display-only — el server es la verdad).
+ *
+ * FAIL-SAFE: si no se resuelve el `system_id` (rodeo aún no sincronizado al local), devuelve `{ ok:true,
+ * value: [] }` — sin catálogo el preview NO se muestra (el helper hace fail-safe a null), nunca crashea ni
+ * cuelga la pantalla de carga. Multi-tenant (CLAUDE.md ppio 6): el `rodeoId` lo pasa el caller (el rodeo
+ * REAL del animal, del contexto); cero hardcode de system_id ni de codes.
+ */
+export async function fetchRodeoCategoryCatalog(
+  rodeoId: string,
+): Promise<ServiceResult<SystemCategory[]>> {
+  // emptyIsSyncing:false → "el rodeo aún no bajó" se degrada a catálogo vacío (no error): el preview
+  // simplemente no se muestra hasta que el rodeo sincronice, sin frenar la carga rápida.
+  const sysRow = await runLocalQuerySingle<{ system_id: string }>(buildRodeoSystemQuery(rodeoId), {
+    emptyIsSyncing: false,
+  });
+  if (!sysRow.ok) return { ok: false, error: { kind: sysRow.error.kind, message: sysRow.error.message } };
+  if (!sysRow.value) return { ok: true, value: [] }; // sin system_id → sin catálogo (fail-safe, no crash)
+  return fetchSystemCategories(sysRow.value.system_id);
 }

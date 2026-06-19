@@ -27,7 +27,14 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { getTokenValue, Spinner, Text, View, XStack, YStack } from 'tamagui';
 
 import { buttonA11y, labelA11y } from '@/utils/a11y';
-import { fetchAnimalDetail, resolveCutCategory, type AnimalDetail } from '@/services/animals';
+import {
+  fetchAnimalDetail,
+  fetchRodeoCategoryCatalog,
+  resolveCutCategory,
+  type AnimalDetail,
+  type SystemCategory,
+} from '@/services/animals';
+import { previewManeuverCategoryTransition } from '@/utils/maneuver-category-preview';
 import { getSessionById, setSessionCounts, type Session } from '@/services/sessions';
 import { persistManeuverEvent, softDeleteManeuverEvents } from '@/services/maneuver-events';
 import { fetchEnabledCustomManeuvers, type EnabledCustomManeuver } from '@/services/custom-fields';
@@ -160,6 +167,10 @@ export default function ManiobraCarga() {
   // Última CE medida del animal (R14.5): valor inicial de la rueda. null = primera medición (la rueda
   // arranca en CE_DEFAULT_CM=36). Se lee local (offline) al conocer el perfil; undefined = aún cargando.
   const [lastScrotalCm, setLastScrotalCm] = useState<number | null | undefined>(undefined);
+  // Catálogo code→name de las categorías del sistema del rodeo del animal (R8.4): resuelve el `name` destino
+  // del preview de transición de categoría. Se carga una vez al conocer el rodeo, OFFLINE. Vacío = sin
+  // catálogo (rodeo aún no sincronizado) → el preview no se muestra (fail-safe).
+  const [categoryCatalog, setCategoryCatalog] = useState<SystemCategory[]>([]);
   // Error de PERSISTENCIA de la maniobra actual (R5.7/R10.8): si el write LOCAL falla (o tira), NO se
   // avanza y se SUPERFICIA un mensaje accionable es-AR debajo del paso (en vez de tragar el error y dejar
   // al operario tapeando sin que pase nada). Se limpia al re-intentar (nuevo tap) o al entrar a otro paso.
@@ -313,6 +324,24 @@ export default function ManiobraCarga() {
     };
   }, [animalRodeoId]);
 
+  // Catálogo de categorías del rodeo (R8.4): se carga una vez al conocer el rodeo del animal, OFFLINE
+  // (patrón idéntico al de customManeuvers/lastScrotalCm). Alimenta el preview de transición de categoría.
+  // Un error/rodeo-no-sincronizado → catálogo vacío → el preview no se muestra (fail-safe, nunca crash).
+  useEffect(() => {
+    if (!animalRodeoId) {
+      setCategoryCatalog([]);
+      return;
+    }
+    let active = true;
+    void fetchRodeoCategoryCatalog(animalRodeoId).then((r) => {
+      if (!active) return;
+      setCategoryCatalog(r.ok ? r.value : []);
+    });
+    return () => {
+      active = false;
+    };
+  }, [animalRodeoId]);
+
   // Las maniobras custom de la SESIÓN (config.customManiobras) ∩ las ENABLED del rodeo, EN EL ORDEN de la
   // sesión, enriquecidas con ui_component/options para el renderer genérico. Una custom elegida en la jornada
   // que ya no esté enabled en el rodeo (o se haya borrado el field) se OMITE (paridad con el gating de fábrica).
@@ -380,6 +409,26 @@ export default function ManiobraCarga() {
   if (contentReady) hasRenderedContentRef.current = true;
 
   const currentStep = sequence[currentIndex] ?? null;
+
+  // Preview de transición de categoría OFFLINE (R8.4): anticipa el cambio que el server aplicará al subir
+  // las capturas (caso canónico: tacto+ sobre vaquillona → vaquillona_prenada). Display-only (PURO): reusa
+  // el espejo C6 computeCategoryCode (cero drift). null cuando override / macho / sin cambio / sin catálogo
+  // → el banner no se muestra. Se pasa al AnimalSummary (resumen del animal).
+  const transitionPreview = useMemo(
+    () =>
+      animal
+        ? previewManeuverCategoryTransition({
+            sex: animal.sex,
+            birthDate: animal.birthDate,
+            currentCode: animal.categoryCode,
+            currentName: animal.categoryName,
+            categoryOverride: animal.categoryOverride,
+            captured,
+            catalog: categoryCatalog,
+          })
+        : null,
+    [animal, captured, categoryCatalog],
+  );
 
   // ─── Persistir el valor de una maniobra + avanzar (R5.8) ───
   //
@@ -642,6 +691,7 @@ export default function ManiobraCarga() {
           rows={summaryRows(sequence, captured, customCaptured)}
           onEdit={onEdit}
           onConfirm={onConfirmAnimal}
+          preview={transitionPreview}
         />
       ) : sequence.length === 0 ? (
         // Ninguna maniobra aplica a este animal en su rodeo (R5.5) → directo al resumen vacío (no frena la fila).
