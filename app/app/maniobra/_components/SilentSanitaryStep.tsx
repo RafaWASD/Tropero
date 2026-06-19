@@ -44,6 +44,7 @@ import { Check, Pencil } from 'lucide-react-native';
 import { buttonA11y, labelA11y } from '@/utils/a11y';
 import { filterAutocomplete } from '@/utils/maneuver-wizard';
 import { heroFontTokenForName } from '@/utils/hero-text-size';
+import { PRODUCT_NAME_MAX_LENGTH } from '@/utils/maneuver-sequence';
 
 export type SilentSanitaryStepProps = {
   /** Nombre es-AR de la maniobra (ej. "Antiparasitario"), para los títulos. */
@@ -152,7 +153,11 @@ export function SilentSanitaryStep({
             </Text>
             <TextInput
               value={typed}
-              onChangeText={setTyped}
+              // Tope de longitud (UX/defensa-en-profundidad) = cap server-side de sanitary_events.product_name
+              // (CHECK <= 160, 0070). `maxLength` corta en native; el `.slice` adicional asegura el tope también
+              // en web (react-native-web no siempre honra maxLength) — mismo patrón que LabSampleStep (tube).
+              onChangeText={(t) => setTyped(t.slice(0, PRODUCT_NAME_MAX_LENGTH))}
+              maxLength={PRODUCT_NAME_MAX_LENGTH}
               placeholder={inputPlaceholder}
               placeholderTextColor={placeholderColor}
               autoCapitalize="sentences"

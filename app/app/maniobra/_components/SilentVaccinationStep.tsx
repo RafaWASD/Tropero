@@ -28,6 +28,7 @@ import { Check, Plus, X } from 'lucide-react-native';
 
 import { buttonA11y, labelA11y } from '@/utils/a11y';
 import { filterAutocomplete } from '@/utils/maneuver-wizard';
+import { PRODUCT_NAME_MAX_LENGTH } from '@/utils/maneuver-sequence';
 
 export type SilentVaccinationStepProps = {
   /** Vacunas pre-cargadas de la tanda + corrección (ya parseadas a lista por el frame). */
@@ -143,7 +144,10 @@ export function SilentVaccinationStep({
           <View flex={1}>
             <TextInput
               value={typed}
-              onChangeText={setTyped}
+              // Tope de longitud (UX/defensa-en-profundidad) = cap server-side de sanitary_events.product_name
+              // (CHECK <= 160, 0070). `maxLength` corta en native; el `.slice` asegura el tope también en web.
+              onChangeText={(t) => setTyped(t.slice(0, PRODUCT_NAME_MAX_LENGTH))}
+              maxLength={PRODUCT_NAME_MAX_LENGTH}
               placeholder="Ej.: Aftosa"
               placeholderTextColor={placeholderColor}
               autoCapitalize="sentences"

@@ -683,6 +683,34 @@ test('(n) alta desde la manga → continúa la carga de la maniobra del animal n
   await expect(page.getByRole('button', { name: 'Dar de baja' })).toHaveCount(0);
 });
 
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+// MED-2 (Gate 2 / security_code_03) — la búsqueda manual TIENE `maxLength` UX = SEARCH_TERM_MAX_LENGTH (64).
+// Defensa-en-profundidad: el corte AUTORITATIVO ya lo hace classifySearchQuery (slice(0,64)); este test
+// asegura que el INPUT no deja tipear de más (paridad con el buscador de la lista de animales). Una sola
+// aserción barata: tipear un string > 64 y confirmar que el valor renderizado quedó topado en 64.
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+// (p) la entrada manual topa el término en SEARCH_TERM_MAX_LENGTH (64) — maxLength UX (MED-2).
+test('(p) la búsqueda manual topa el término en 64 caracteres (maxLength UX, MED-2)', async ({ page }) => {
+  const user = await createTestUser('mid-maxlen');
+  await setUserPhone(user.id, '1123456789');
+  await seedEstablishmentWithRodeo(user.id, 'Campo Identify MaxLen');
+
+  await gotoWithBle(page);
+  await signIn(page, user);
+  await waitForHome(page);
+  await startManiobraSession(page);
+
+  // Expandimos la entrada manual y tipeamos MÁS de 64 caracteres (100 'A').
+  await page.getByRole('button', { name: 'Sin chip, ingresá la caravana a mano' }).click();
+  const input = page.getByTestId('manual-entry-input');
+  await expect(input).toBeVisible({ timeout: 10_000 });
+  await input.fill('A'.repeat(100));
+
+  // El valor renderizado quedó topado en 64 (maxLength + slice — vale en web y native).
+  await expect(input).toHaveValue('A'.repeat(64));
+});
+
 // (o) REGRESIÓN — alta NORMAL (desde la lista de animales, SIN sessionId) → FICHA /animal/[id], como hoy.
 test('(o) regresión: alta sin sessionId (desde la lista) → ficha del animal (no la carga de maniobra)', async ({ page }) => {
   const user = await createTestUser('mid-alta-normal');

@@ -20,6 +20,17 @@ import { formatCmAR } from './wheel-picker';
 import type { CustomUiComponent } from './custom-field';
 import { describeCustomValue, type CustomCaptureValue } from './custom-render';
 
+// ─── Topes de longitud de los inputs de texto libre de las maniobras (UX, no autoritativos) ─────
+//
+// Tope de caracteres del NOMBRE DE PRODUCTO de las maniobras sanitarias/vacunación = cap server-side
+// de `sanitary_events.product_name` (CHECK <= 160, migración 0070, R1.30). El input no deja tipear más
+// → el INSERT nunca viola el CHECK al subir. Es UX/defensa-en-profundidad (el cap autoritativo es el DB);
+// la pajuela de inseminación (que delega en SilentSanitaryStep y persiste a `reproductive_events.notes`,
+// CHECK <= 4000) reusa este mismo tope: una pajuela es un identificador corto ("Toro 456") → 160 sobra y
+// queda consistente con product_name. FUENTE ÚNICA: esta constante, importada por los Step.tsx (mismo
+// patrón que MAX_PRESET_NAME_LEN / TUBE_MAX). Cazado por el Gate 2 (security_code_03, MED-1).
+export const PRODUCT_NAME_MAX_LENGTH = 160;
+
 // ─── El valor capturado por una maniobra ──────────────────────────────────────────────────────
 
 /** Resultado del tacto de vaca (R6.2): vacía o preñada con tamaño (Cola/Cuerpo/Cabeza). */

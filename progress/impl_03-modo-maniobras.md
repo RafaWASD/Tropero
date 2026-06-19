@@ -640,3 +640,91 @@ Como revisor hostil:
 (solo lo CONSUMÍ), `app/src/services/sigsa/**`, `specs/active/08-export-sigsa/**`, `feature_list.json`,
 `progress/current.md`, `docs/backlog.md`, `CONTEXT/07-pendientes.md`, otros `progress/*`. NO commit. NO `git add -A`.
 En `admin.ts` solo APPEND al final. Sin migraciones (frontend-puro).
+
+---
+
+## Chunk MED-1 / MED-2 — `maxLength` UX en inputs de texto libre (cierre de los 2 MEDIUM del Gate 2) — 2026-06-19
+
+> FRONTEND PURO, sin migraciones, sin cambios de lógica de datos. Cierra los **2 findings MEDIUM**
+> (defensa-en-profundidad) de `progress/security_code_03-m1-m2-m3-m6c1-r8-r9.md`: faltaba `maxLength`
+> VISUAL en inputs de texto libre. El cap AUTORITATIVO server-side YA existe (CHECK 0070 / `classifySearchQuery`);
+> esto es consistencia/UX (los inputs hermanos —LabSample, SavePreset, CE— ya lo tienen). **Gate 1 N/A.**
+> `baseline_commit` (línea 3, fase backend) NO se sobreescribe (feature multi-sesión). HEAD al arrancar: `fd36a4f`.
+
+### Mapa MED → archivo + constante
+
+| Finding | Input | Archivo | Cap | Constante (fuente única) |
+|---|---|---|---|---|
+| MED-1 | `product_name` sanitaria (`silent-product-input`) | `app/app/maniobra/_components/SilentSanitaryStep.tsx` | 160 | `PRODUCT_NAME_MAX_LENGTH` (NUEVA en `app/src/utils/maneuver-sequence.ts`) |
+| MED-1 | producto vacuna (`vaccine-input`) | `app/app/maniobra/_components/SilentVaccinationStep.tsx` | 160 | `PRODUCT_NAME_MAX_LENGTH` (misma) |
+| MED-1 | pajuela (inseminación) | `InseminacionStep.tsx` → **DELEGA en `SilentSanitaryStep`** (no toqué InseminacionStep) | 160 (heredado) | `PRODUCT_NAME_MAX_LENGTH` (vía delegación) |
+| MED-2 | término de búsqueda manual (`manual-entry-input`) | `app/app/maniobra/identificar.tsx` (`ManualEntry`) | 64 | `SEARCH_TERM_MAX_LENGTH` (IMPORTADA de `app/src/utils/animal-identifier.ts`, NO redefinida) |
+
+### Decisiones / detalle
+
+- **¿InseminacionStep delega o tiene input propio?** → **DELEGA**. El único input de texto libre de la
+  inseminación es la pajuela en modo single, que renderiza `SilentSanitaryStep` (con la copia "pajuela").
+  El modo selector (>1 pajuela) son bloques grandes sin input libre + "Otra pajuela" → cae al modo single
+  (delegación). Por eso el cap de MED-1.1 (`SilentSanitaryStep`) cubre la pajuela. NO hizo falta un prop
+  configurable: 160 es más que suficiente para un identificador corto ("Toro 456") y consistente con
+  product_name; la pajuela persiste a `reproductive_events.notes` (CHECK ≤4000) — 160 entra holgado.
+  **NO toqué `InseminacionStep.tsx`.**
+- **Valor del cap + dónde quedó la constante**:
+  - `PRODUCT_NAME_MAX_LENGTH = 160` — co-locada en `app/src/utils/maneuver-sequence.ts` (módulo de constantes
+    de maniobra que ya existía; mismo criterio que `MAX_PRESET_NAME_LEN`/`TUBE_MAX`). Alineada al CHECK
+    `sanitary_events.product_name ≤160` de la migración 0070. Reusada por los 2 (+1 vía delegación) puntos.
+  - `SEARCH_TERM_MAX_LENGTH = 64` — NO la redefiní; la **importé** de `app/src/utils/animal-identifier.ts`
+    (solo importé, NO la edité). Matchea el `slice(0, SEARCH_TERM_MAX_LENGTH)` autoritativo de `classifySearchQuery`.
+- **Patrón web+native**: `maxLength={N}` (corta en native) + `.slice(0, N)` en `onChangeText` (asegura el tope
+  en react-native-web, que no siempre honra `maxLength`) — réplica exacta de `LabSampleStep` (el hermano más
+  cercano). El e2e prueba el corte en web (que es el que podría fallar).
+- **testID nuevo**: `manual-entry-input` en el `TextInput` de `ManualEntry` (el sibling `(tabs)/animales.tsx`
+  no tenía testID en su buscador; lo agregué solo para la aserción e2e barata). No colisiona con `manualSearch`
+  (que usa `getByLabel`).
+
+### Autorrevisión adversarial (paso 8) — qué busqué, qué encontré, cómo lo cerré
+
+1. **¿El cap vale en web Y native?** (verificado): `maxLength` (native) + `.slice` (web). El e2e (p) tipea 100
+   chars y assert `toHaveValue('A'.repeat(64))` → el corte en web ESTÁ. ✅
+2. **¿Constante nombrada, reusada, NO duplicada / NO hardcodeada?** (verificado por grep): cero literal `160`/`64`
+   en el JSX de los 3 archivos; ambos inputs de producto referencian `PRODUCT_NAME_MAX_LENGTH`, el manual
+   referencia `SEARCH_TERM_MAX_LENGTH`. Una sola definición por cap. ✅
+3. **¿Rompí el comportamiento de confirmar/buscar/aplicar?** (verificado): solo cambié `onChangeText` (agregué
+   `.slice`) + agregué `maxLength`. `commitTyped`/`addItem`/`handleConfirm`/`onSearch`/`canSearch`/`canApply`/
+   `canConfirm` intactos. Los e2e existentes (d)/(e)/(n) usan valores cortos (idv) → el slice no los afecta. ✅
+4. **¿Toqué `animal-identifier.ts`?** NO — solo importé `SEARCH_TERM_MAX_LENGTH` (restricción respetada). ✅
+5. **¿InseminacionStep rompe?** No la toqué; delega → hereda el cap. El modo selector no tiene input libre. ✅
+6. **Anti-hardcode re-corrido** (`check-hardcode.mjs` → 0 violaciones): el `maxLength` numérico NO lo flaggea ese
+   linter (es de spacing/tokens), pero igual usé constante nombrada (práctica correcta + matchea SavePresetSheet). ✅
+7. **Restricciones de terminal paralela** (verificado por `git diff --name-only`): mis cambios son solo
+   `SilentSanitaryStep.tsx`, `SilentVaccinationStep.tsx`, `identificar.tsx`, `maneuver-sequence.ts`,
+   `e2e/maniobra-identify.spec.ts` + reconciliación de specs (`design.md`/`tasks.md` de spec-03). NO toqué
+   `animal/[id].tsx`, `crear-animal.tsx`, `sigsa/**`, `specs/08`, `feature_list.json`, `progress/current.md`,
+   `docs/backlog.md`, `CONTEXT/07-pendientes.md`. Los otros archivos modificados en el working tree son de la
+   otra terminal / sesiones previas (no los toqué). NO commit. NO `git add -A`. ✅
+
+### Reconciliación de specs (paso 9)
+
+- **`design.md` §6.bis.5** (cierre): nota as-built NUEVA "Caps de longitud UX de los inputs de texto libre"
+  con los archivos/constantes reales + el patrón web+native + el e2e.
+- **`tasks.md`**: el ledger de Gate 2 (línea del reporte M1/M2/M3) y la nota consolidada de Puerta 2 — los
+  "2 MEDIUM backlog" pasaron a **RESUELTOS** con los archivos/constantes. (No reescribí EARS; los inputs caps
+  son UX/defensa-en-profundidad, el *qué* no cambió.)
+- **`requirements.md`**: sin cambio (el cap autoritativo server-side ya estaba descrito; esto es la capa UX
+  espejo, ya prevista por el patrón de spec 13 R7.4 para el buscador).
+
+### RC del check
+
+- **typecheck client** → RC=0. **anti-hardcode** → 0 violaciones. **client unit tests** → verde
+  (`maneuver-sequence.test.ts` 41/41 con la constante nueva; `animal-identifier.test.ts` verde).
+- **e2e** `maniobra-identify.spec.ts` test **(p)** → **1 passed (12.5s)** (el `UV_HANDLE_CLOSING` posterior =
+  teardown libuv de Windows DESPUÉS de pasar, memoria `reference_playwright_win_teardown`).
+- **`node scripts/check.mjs`** → el ÚNICO rojo es `supabase/tests/animal/run.cjs` `23505 animals_tag_unique`
+  ("tag_electronic borde 64") = colisión de tag en el remoto COMPARTIDO con la terminal paralela (spec-08) —
+  flake conocido (memoria `reference_check_red_rate_limit`), NO mi chunk (frontend-puro, cero backend/migraciones/
+  seed). typecheck + client units + RLS + Edge corrieron verde ANTES del abort en esa suite.
+
+### NO marco done
+
+Eso es del reviewer + Gate 2 + Puerta humana. La feature 03 ya tiene Puerta 2 aprobada (ledger en tasks.md);
+este chunk solo cierra el backlog de los 2 MEDIUM de UX.

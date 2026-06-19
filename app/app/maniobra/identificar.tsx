@@ -46,6 +46,7 @@ import { closeSession, getSessionById, setSessionRodeo, type Session } from '@/s
 import { extractManeuvers } from '@/utils/maneuver-config';
 import { maneuverLabel } from '@/utils/maneuver-wizard';
 import { formatEidReadable } from '@/utils/eid-format';
+import { SEARCH_TERM_MAX_LENGTH } from '@/utils/animal-identifier';
 import {
   resolveBleIdentify,
   resolveManualIdentify,
@@ -1090,13 +1091,19 @@ function ManualEntry({
       >
         <TextInput
           value={value}
-          onChangeText={setValue}
+          // Tope de longitud (UX) = corte AUTORITATIVO de classifySearchQuery (slice(0, SEARCH_TERM_MAX_LENGTH=64)
+          // en animal-identifier.ts, server-consumido antes de toda query). Importamos la MISMA constante (no
+          // redefinir/hardcodear) — mismo patrón que el buscador de (tabs)/animales.tsx. `maxLength` corta en
+          // native; el `.slice` asegura el tope también en web. Cazado por el Gate 2 (security_code_03, MED-2).
+          onChangeText={(t) => setValue(t.slice(0, SEARCH_TERM_MAX_LENGTH))}
+          maxLength={SEARCH_TERM_MAX_LENGTH}
           onSubmitEditing={() => {
             if (canSearch) onSearch(value);
           }}
           placeholder="Número o caravana visual"
           placeholderTextColor={muted}
           accessibilityLabel="Número o caravana visual"
+          testID="manual-entry-input"
           autoCorrect={false}
           autoCapitalize="characters"
           returnKeyType="search"
