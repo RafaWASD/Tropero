@@ -33,8 +33,8 @@
 // idiom LOCKEADO de ManeuverConfigSheet/SavePresetSheet — el click huérfano del tap que abre el sheet no lo
 // auto-cierra; un tap deliberado posterior sí.
 
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Platform, Pressable, TextInput } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Platform, Pressable, Text as RNText, TextInput, type LayoutChangeEvent } from 'react-native';
 import { getTokenValue, Text, View, XStack, YStack } from 'tamagui';
 import { Check, Keyboard as KeyboardIcon, Pencil } from 'lucide-react-native';
 
@@ -51,6 +51,7 @@ import {
   indexToValue,
   parseCmInput,
   snapToWheel,
+  widestCmDisplay,
 } from '@/utils/wheel-picker';
 import { WheelPicker } from './WheelPicker';
 
@@ -216,11 +217,46 @@ function sanitizeCmTyping(raw: string): string {
   return out;
 }
 
+/** Largo máximo (en chars) que se permite TIPEAR en el draft del campo de CE: "XX,X" = 4. Damos 1 char de
+ *  holgura (5) por si el operario pega/tipea algo intermedio antes de que `parseCmInput` lo snapee en el
+ *  commit (ej. "40,55" → 40,5) — sin permitir un draft monstruoso que desborde la caja mientras escribe. El
+ *  clamp/grilla dura ya la hace `parseCmInput`; esto solo acota el ANCHO del draft en vuelo (anti-recorte). */
+const CE_DRAFT_MAXLENGTH = 5;
+
+/** Buffer (px) sumado al ancho MEDIDO del peor caso para el campo hero: cubre el caret/cursor del input
+ *  nativo, sub-píxel de medición y el `selectTextOnFocus` (el highlight de selección no debe rozar el borde).
+ *  No es un magic-number de tamaño del valor (ese sale de la medición) — es respiro de input. */
+const CE_FIELD_BUFFER = 12;
+
+/**
+ * Estilo compartido del NÚMERO hero (TextInput editable + medidor oculto). Se factoriza para que el medidor
+ * mida EXACTAMENTE la misma tipografía que el input renderiza (mismo fontSize/lineHeight/familia/peso) → el
+ * ancho medido es el ancho real del glifo. Tamaño FIJO $wheelHero=44 (NO adjustsFontSizeToFit — NO-OP web).
+ */
+function heroTextStyle() {
+  return {
+    fontSize: getTokenValue('$wheelHero', 'size'),
+    lineHeight: getTokenValue('$wheelHero', 'size'),
+    fontFamily: 'Inter',
+    fontWeight: '700' as const,
+    color: getTokenValue('$textPrimary', 'color'),
+  };
+}
+
 /**
  * CAMPO EDITABLE = HERO PRIMARIO de la CE (fix-loop v2, R14.5 sub-cláusula de teclado manual). Caja
  * estilo-input bordeada que muestra "36,5 cm" con un ícono de teclado (affordance de editable) y, al
  * tocarla, abre el TECLADO numérico del dispositivo (keyboardType="decimal-pad"; en web es el input nativo)
  * para tipear los cm a mano (es-AR, coma decimal).
+ *
+ * ANCHO AUTO-FIT MEDIDO (fix 🔴 manga 2026-06-19, captura `40,5-sale-recortado.png`): el campo NO usa más un
+ * ancho FIJO (el viejo 88px = `$stepperBtn` recortaba "40,5"/"49,5" — 4 glifos bold a 44px miden ~95-100px >
+ * 88px → con textAlign:center el número se cortaba de AMBOS lados). En su lugar, un `<Text>` MEDIDOR oculto
+ * renderiza el string MÁS ANCHO posible del rango (`widestCmDisplay()`, util pura, deriva "XX,X" de la grilla
+ * real) a la MISMA fuente hero y, vía `onLayout`, reporta su ancho en píxeles REAL (determinístico por
+ * device/fuente, sin magic number). El input se dimensiona a ese ancho + `CE_FIELD_BUFFER` → NINGÚN valor del
+ * rango se recorta, ni en reposo ni tipeando (el draft además está acotado por `maxLength`). Hasta que la
+ * medición aterriza, un fallback conservador (ancho-por-char) evita un flash recortado.
  *
  * SINCRONÍA BIDIRECCIONAL con la rueda (un único valor canónico `value`):
  *  - rueda → campo: cuando NO está enfocado, el campo muestra `formatCmAR(value)` (sigue a la rueda).
@@ -233,6 +269,23 @@ function CmInputField({ value, onCommit }: { value: number; onCommit: (cm: numbe
   const inputRef = useRef<TextInput>(null);
   const [focused, setFocused] = useState(false);
   const [draft, setDraft] = useState('');
+  // Ancho en píxeles del peor caso, medido en runtime por el `<Text>` oculto. 0 = aún no medido.
+  const [measuredWidth, setMeasuredWidth] = useState(0);
+
+  // Peor caso textual del rango (memoizado: depende solo de la grilla de CE, que es constante).
+  const widest = useMemo(() => widestCmDisplay(), []);
+
+  // Ancho del campo: el medido + buffer una vez que aterriza; mientras tanto, un fallback conservador
+  // derivado del peor caso (≈0,62·fontSize por glifo, holgado para Inter bold) para no recortar en el primer
+  // frame. El máx con el fallback es defensivo: nunca por debajo del piso seguro.
+  const heroSize = getTokenValue('$wheelHero', 'size');
+  const fallbackWidth = Math.ceil(widest.length * heroSize * 0.62) + CE_FIELD_BUFFER;
+  const fieldWidth = measuredWidth > 0 ? Math.ceil(measuredWidth) + CE_FIELD_BUFFER : fallbackWidth;
+
+  const onMeasure = useCallback((e: LayoutChangeEvent) => {
+    const w = e.nativeEvent.layout.width;
+    if (w > 0) setMeasuredWidth(w);
+  }, []);
 
   // Texto visible: mientras se edita, el draft tipeado; en reposo, el valor canónico formateado es-AR.
   const display = focused ? draft : formatCmAR(value);
@@ -246,6 +299,23 @@ function CmInputField({ value, onCommit }: { value: number; onCommit: (cm: numbe
 
   return (
     <View testID="ce-display" alignItems="center" width="100%">
+      {/* MEDIDOR OCULTO: mide el ancho REAL del peor caso del rango ("XX,X") a la fuente hero. position
+          absolute + opacity 0 + pointerEvents none → no ocupa layout ni es tappable; solo reporta su width
+          por onLayout. RNText crudo (no Tamagui) para aplicar el style idéntico al del input sin overrides. */}
+      <RNText
+        accessibilityElementsHidden
+        importantForAccessibility="no-hide-descendants"
+        pointerEvents="none"
+        onLayout={onMeasure}
+        style={{
+          ...heroTextStyle(),
+          position: 'absolute',
+          opacity: 0,
+        }}
+      >
+        {widest}
+      </RNText>
+
       <Pressable
         onPress={() => inputRef.current?.focus()}
         {...buttonA11y(Platform.OS, { label: 'Editar circunferencia escrotal con el teclado' })}
@@ -265,8 +335,10 @@ function CmInputField({ value, onCommit }: { value: number; onCommit: (cm: numbe
           minHeight="$touchMin"
         >
           {/* El número grande es el HERO: tamaño FIJO $wheelHero=44, NO adjustsFontSizeToFit (NO-OP web).
-              TextInput para abrir el teclado nativo al tocar (decimal-pad, es-AR). Ancho fijo (no flex) para
-              que la caja quede contenida y no se estire a 100 % en react-native-web. */}
+              TextInput para abrir el teclado nativo al tocar (decimal-pad, es-AR). Ancho AUTO-FIT MEDIDO
+              (`fieldWidth`) = ancho del peor caso "XX,X" + buffer → NINGÚN valor se recorta. Width explícito
+              (no flex) para que la caja quede contenida y no se estire a 100 % en react-native-web. maxLength
+              acota el draft tipeado para que no desborde mientras se escribe. */}
           <TextInput
             ref={inputRef}
             value={display}
@@ -280,15 +352,12 @@ function CmInputField({ value, onCommit }: { value: number; onCommit: (cm: numbe
             keyboardType="decimal-pad"
             returnKeyType="done"
             selectTextOnFocus
+            maxLength={CE_DRAFT_MAXLENGTH}
             testID="ce-input"
             style={{
-              width: getTokenValue('$stepperBtn', 'size'), // 88 — entra "36,5"/"40,5" sin estirar la caja
+              ...heroTextStyle(),
+              width: fieldWidth, // auto-fit al peor caso medido del rango (anti-recorte 🔴 manga)
               textAlign: 'center',
-              fontSize: getTokenValue('$wheelHero', 'size'),
-              lineHeight: getTokenValue('$wheelHero', 'size'),
-              fontFamily: 'Inter',
-              fontWeight: '700',
-              color: getTokenValue('$textPrimary', 'color'),
               paddingVertical: getTokenValue('$2', 'space'),
               // POLISH (web): el <input> nativo de react-native-web pinta su PROPIO outline de foco del
               // navegador (suele ser NARANJA/azul del UA) — choca con el DS. Lo SUPRIMIMOS: el tratamiento de

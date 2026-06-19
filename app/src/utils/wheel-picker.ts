@@ -168,6 +168,39 @@ export function formatCmWithUnitAR(cm: number): string {
 }
 
 /**
+ * String es-AR MÁS ANCHO (en glifos) que puede mostrar el campo hero de CE, derivado del rango REAL de la
+ * rueda de CE (NO un literal hardcodeado). El campo editable se dimensiona midiendo el ancho en píxeles de
+ * ESTE string a la fuente hero → garantiza que NINGÚN valor del rango se recorte (🔴 manga, captura de Raf
+ * 40,5 recortado). Recorre `wheelValues(CE_WHEEL)` con `formatCmAR` y se queda con el peor caso.
+ *
+ * "Más ancho" = mayor cantidad de caracteres y, a igual cantidad, peor caso por anchura de glifos: los
+ * dígitos de Inter son tabulares (mismo avance), pero la COMA es más angosta que un dígito → con el mismo
+ * largo, el string con MENOS comas (más dígitos) es más ancho. Por eso al empatar en largo elegimos el de
+ * menos comas. En la grilla de CE (20–50/0,5) el peor caso real es del tipo "XX,X" (4 glifos: "20,5"…"49,5"),
+ * más ancho que "50"/"20" (2 glifos). Se deriva del rango → sigue a la grilla aunque CE_WHEEL cambie.
+ *
+ * Atado a la rueda de CE a propósito: `formatCmAR` snapea/clampa al `CE_WHEEL` internamente (es el formato de
+ * CE), así que el peor caso solo tiene sentido para esa rueda. La edad usa otro formato (sin coma).
+ *
+ * PURO (sin RN): el STRING más ancho se testea sin montar UI. El ancho en PÍXELES sí necesita medición en
+ * runtime (depende de la fuente/device) y lo hace el componente; este helper solo le da el peor-caso textual.
+ */
+export function widestCmDisplay(): string {
+  let widest = '';
+  let widestCommas = Number.POSITIVE_INFINITY;
+  for (const v of wheelValues(CE_WHEEL)) {
+    const s = formatCmAR(v);
+    const commas = (s.match(/,/g) ?? []).length;
+    // Más largo gana; a igual largo, el de MENOS comas (más dígitos → más ancho con glifos tabulares).
+    if (s.length > widest.length || (s.length === widest.length && commas < widestCommas)) {
+      widest = s;
+      widestCommas = commas;
+    }
+  }
+  return widest;
+}
+
+/**
  * Parsea lo que el operario TIPEÓ en el campo editable (input híbrido del step, R14.5 sub-cláusula de
  * teclado manual) y lo lleva a un valor VÁLIDO de la rueda de CE, o `null` si no es un número.
  *

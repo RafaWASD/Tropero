@@ -66,6 +66,49 @@ async function shot(page: Page, name: string): Promise<void> {
   await page.setViewportSize({ width: 412, height: 915 });
 }
 
+// ── ANTI-RECORTE del campo hero (fix Raf 2026-06-19, captura `40,5-sale-recortado.png`) ──
+// El número del campo editable NO puede salir recortado en NINGÚN valor del rango (peor caso "XX,X" como
+// "40,5"/"49,5") a NINGÚN ancho. En react-native-web el <TextInput> renderiza como <input> nativo: si el
+// texto desborda, `scrollWidth > clientWidth` (el contenido es más ancho que el área visible). El campo se
+// auto-ajusta midiendo el peor caso → assertamos `scrollWidth ≤ clientWidth` (con 1px de tolerancia
+// sub-píxel). Helper: encuentra el <input> bajo el testID `ce-input` y devuelve su geometría de overflow.
+
+/** Geometría de overflow horizontal del <input> del campo de CE bajo `ce-input`. `clipped` = el texto
+ *  desborda el área visible (scrollWidth > clientWidth + tolerancia) → recortado. */
+async function ceInputOverflow(
+  page: Page,
+): Promise<{ scrollWidth: number; clientWidth: number; clipped: boolean; value: string }> {
+  return page.evaluate(() => {
+    const root = document.querySelector<HTMLElement>('[data-testid="ce-input"]');
+    if (!root) throw new Error('ce-input no encontrado');
+    // El testID puede caer en el wrapper de RN-web; el <input> real es él mismo o un descendiente.
+    const input =
+      root instanceof HTMLInputElement
+        ? root
+        : root.querySelector<HTMLInputElement>('input') ??
+          (root.closest('input') as HTMLInputElement | null);
+    if (!input) throw new Error('elemento <input> de ce-input no encontrado');
+    const scrollWidth = input.scrollWidth;
+    const clientWidth = input.clientWidth;
+    return {
+      scrollWidth,
+      clientWidth,
+      clipped: scrollWidth > clientWidth + 1, // 1px de tolerancia sub-píxel
+      value: input.value,
+    };
+  });
+}
+
+/** Pone el campo de CE en `value` (es-AR, ej. "40,5") vía el teclado y commitea con Enter. Deja el campo en
+ *  REPOSO mostrando el valor canónico (el peor caso para el recorte, que es la captura de Raf). */
+async function typeCeValue(page: Page, value: string): Promise<void> {
+  const input = page.getByTestId('ce-input');
+  await input.click();
+  await input.fill(value);
+  await input.press('Enter');
+  await expect(input).toHaveValue(value);
+}
+
 // ── SNAP/LOCK de la rueda (fix Raf 2026-06-18): al SOLTAR a mitad de camino, la rueda DEBE lockear EXACTO
 //    en la celda más cercana (no quedar descansando entre dos valores). En react-native-web el snapToInterval
 //    NO snapea → el lock es JS-driven (debounce de settle). El e2e ejercita el path real: encuentra el
@@ -415,4 +458,78 @@ test('SNAP: la rueda de CE y la de EDAD lockean EXACTO al soltar a mitad de cami
   // El encabezado live del sheet muestra el valor centrado en es-AR ("12 meses al medir").
   await expect(page.getByText(/12\s*meses al medir/)).toBeVisible({ timeout: 10_000 });
   await shot(page, 'age-snap-lock');
+});
+
+// ── ANTI-RECORTE: ningún valor del rango de CE se recorta en el campo hero (fix Raf 2026-06-19, R14.5) ──
+// El campo editable se auto-ajusta al peor caso del rango ("XX,X"). Se prueban los valores MÁS ANCHOS (40,5 /
+// 49,5 / 50,0→"50" / 20,0→"20") + un draft ENFOCADO tipeando "49,5", a 360 y 412, assertando que el <input>
+// NO desborda (scrollWidth ≤ clientWidth). Capturas de "40,5"/"49,5" entrando completos a ambos anchos.
+test('ANTI-RECORTE: ningún valor de CE se recorta en el campo hero, a 360 y 412 (R14.5, fix Raf)', async ({ page }) => {
+  test.setTimeout(220_000);
+  const user = await createTestUser('m6-ancho');
+  await setUserPhone(user.id, '1123456789');
+  const { establishmentId, rodeoId } = await seedEstablishmentWithRodeo(user.id, 'Campo CE Ancho', {
+    rodeoName: 'Cría ancho',
+    rodeoRawName: true,
+  });
+  const eid = makeEid();
+  const visual = '1011';
+  const birthDate = new Date(Date.now() - 26 * 30 * 24 * 3600 * 1000).toISOString().slice(0, 10);
+  await seedAnimal(establishmentId, rodeoId, {
+    tag: eid, visualAlt: visual, sex: 'male', categoryCode: 'torito', isCastrated: false, birthDate,
+  });
+
+  await gotoWithBle(page);
+  await signIn(page, user);
+  await waitForHome(page);
+  await gotoAnimales(page);
+  await expect(page.getByText(visual, { exact: true }).first()).toBeVisible({ timeout: 30_000 });
+
+  await startSessionCE(page);
+  await bastonazo(page, eid);
+  await expect(page.getByText('· 1 de 1', { exact: true })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId('ce-input')).toBeVisible({ timeout: 15_000 });
+
+  // Los valores MÁS ANCHOS del rango (peor caso "XX,X") + los extremos. En es-AR los .5 son los anchos.
+  const widestValues = ['40,5', '49,5', '50', '20', '20,5'];
+  const widths: Array<{ w: number; label: string }> = [
+    { w: 412, label: '412' },
+    { w: 360, label: '360' },
+  ];
+
+  for (const { w, label } of widths) {
+    await page.setViewportSize({ width: w, height: w === 412 ? 915 : 800 });
+    for (const val of widestValues) {
+      await typeCeValue(page, val);
+      // En REPOSO (no enfocado): el <input> muestra el valor canónico y NO desborda.
+      const ov = await ceInputOverflow(page);
+      expect(ov.value).toBe(val);
+      expect(ov.clipped, `"${val}" recortado a ${label} (scrollWidth=${ov.scrollWidth} > clientWidth=${ov.clientWidth})`).toBe(false);
+    }
+
+    // DRAFT ENFOCADO: mientras se tipea "49,5" (antes del commit), el draft tampoco desborda (maxLength + ancho).
+    const input = page.getByTestId('ce-input');
+    await input.click();
+    await input.fill('49,5');
+    await expect(input).toHaveValue('49,5');
+    const ovDraft = await ceInputOverflow(page);
+    expect(ovDraft.clipped, `draft "49,5" recortado a ${label} (scrollWidth=${ovDraft.scrollWidth} > clientWidth=${ovDraft.clientWidth})`).toBe(false);
+    // maxLength: no se puede tipear un draft monstruoso (intentar "499,55" queda acotado a 5 chars).
+    await input.fill('');
+    await input.fill('499,55');
+    const draftVal = await input.inputValue();
+    expect(draftVal.length).toBeLessThanOrEqual(5);
+    // Volver a un valor válido y blurear para dejar el campo estable para la captura.
+    await input.fill('40,5');
+    await input.press('Enter');
+    await expect(input).toHaveValue('40,5');
+
+    // Capturas del peor caso entrando COMPLETO a este ancho (40,5 y 49,5).
+    await typeCeValue(page, '40,5');
+    await page.screenshot({ path: path.join(OUT_DIR, `ce-input-ancho-40,5-${label}.png`) });
+    await typeCeValue(page, '49,5');
+    await page.screenshot({ path: path.join(OUT_DIR, `ce-input-ancho-49,5-${label}.png`) });
+  }
+
+  await page.setViewportSize({ width: 412, height: 915 });
 });

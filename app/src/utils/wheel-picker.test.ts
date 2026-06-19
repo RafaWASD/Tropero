@@ -32,6 +32,7 @@ import {
   valueToIndex,
   wheelCount,
   wheelValues,
+  widestCmDisplay,
 } from './wheel-picker';
 
 // ─── Parámetros (R14.5: CE 20–50/0,5, default 36; edad 6–120/1, default 24) ────────────────────────
@@ -207,6 +208,34 @@ test('formatCmAR: coma decimal, sin decimales superfluos', () => {
 test('formatCmWithUnitAR: agrega " cm"', () => {
   assert.equal(formatCmWithUnitAR(36.5), '36,5 cm');
   assert.equal(formatCmWithUnitAR(37), '37 cm');
+});
+
+// ─── widestCmDisplay: peor caso textual del rango (dimensiona el campo hero, anti-recorte 🔴 manga) ───
+
+test('widestCmDisplay: devuelve un "XX,X" (4 glifos) — el string más ancho de la grilla de CE', () => {
+  const w = widestCmDisplay();
+  // El peor caso de CE (20–50/0,5) es del tipo "XX,X" (dos dígitos + coma + decimal). NO "50"/"20" (2 glifos);
+  // todos los .5 del rango miden 4. El helper devuelve un 4-glifo válido del rango.
+  assert.equal(w.length, 4);
+  assert.match(w, /^\d\d,\d$/);
+  // Ningún valor del rango es MÁS ancho (en chars) que el peor caso devuelto.
+  for (const v of wheelValues(CE_WHEEL)) {
+    assert.ok(formatCmAR(v).length <= w.length, `"${formatCmAR(v)}" no debe ser más largo que el peor caso "${w}"`);
+  }
+});
+
+test('widestCmDisplay: el resultado es un valor REAL formateado del rango (no un literal inventado)', () => {
+  const w = widestCmDisplay();
+  const renderable = new Set(wheelValues(CE_WHEEL).map(formatCmAR));
+  assert.ok(renderable.has(w), `"${w}" debe ser un display real de la grilla`);
+});
+
+test('widestCmDisplay: cubre los valores que Raf reportó recortados (40,5 / 49,5 son del peor caso)', () => {
+  const w = widestCmDisplay();
+  // Los valores de la captura de Raf ("40,5") y el extremo del rango ("49,5") tienen el MISMO ancho en chars
+  // que el peor caso → el campo dimensionado por `w` los contiene a todos (dígitos tabulares de Inter).
+  assert.equal('40,5'.length, w.length);
+  assert.equal('49,5'.length, w.length);
 });
 
 // ─── parseCmInput: teclado manual (input híbrido, R14.5 sub-cláusula) ───────────────────────────────
