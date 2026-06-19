@@ -16,15 +16,28 @@
 // 🔴 manga: targets XL, una decisión por pantalla, idioms lockeados. Cero hardcode (ADR-023 §4): tokens; lucide
 // vía getTokenValue. es-AR. Recorte de descendentes: lineHeight matching en todo Text con numberOfLines.
 
-import { useMemo, useState } from 'react';
-import { Platform, Pressable, TextInput } from 'react-native';
+import { useMemo, useState, type ReactNode } from 'react';
+import {
+  Platform,
+  Pressable,
+  TextInput,
+  type LayoutChangeEvent,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
+} from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
-import { Check, Delete, Minus, Plus, X } from 'lucide-react-native';
+import { Check, ChevronDown, Delete, Minus, Plus, X } from 'lucide-react-native';
 
 import { buttonA11y, labelA11y } from '@/utils/a11y';
 import { maskDateInput } from '@/utils/animal-input';
 import type { CustomUiComponent } from '@/utils/custom-field';
 import { isCustomValueComplete, type CustomCaptureValue } from '@/utils/custom-render';
+import { scrollFades, type ScrollFades } from '@/utils/scroll-affordance';
+
+/** El tipo EXACTO del 1er arg de getTokenValue (token de la escala) — evita el `string` genérico que tsc
+ *  rechaza al pasar tokens dinámicos. */
+type TamaguiToken = Parameters<typeof getTokenValue>[0];
 
 export type CustomManeuverStepProps = {
   uiComponent: CustomUiComponent;
@@ -93,6 +106,133 @@ function ConfirmCta({
       </View>
     </YStack>
   );
+}
+
+// ─── ScrollAffordanceList — lista scrolleable con AFFORDANCE de scroll (bug cazado por Raf) ──────────────
+//
+// Cuando las opciones de un enum (single/multi) EXCEDEN el alto disponible, no se notaba que se podía
+// scrollear (el operario creía que las visibles eran TODAS). Esta lista deja CLARO que hay más:
+//   - FADE-gradiente en el borde con contenido oculto (abajo si falta scrollear; arriba si ya scrolleó) →
+//     decisión PURA en `scrollFades` (scroll-affordance.ts).
+//   - CHEVRON ▾ atenuado sobre el fade de abajo → señal explícita "seguí bajando".
+//   - PEEK: el contentContainer agrega `paddingBottom` extra → el último ítem NO termina justo en el borde,
+//     asoma un parcial → refuerza "hay más" (un borde limpio de ítem completo se lee como "esto es todo").
+// Los overlays son `pointerEvents="none"` → NO interceptan el scroll ni los taps de los ítems. Web-safe:
+// `onScroll`/`onContentSizeChange`/`onLayout` andan en react-native-web. testID en los fades para el e2e.
+
+const SCROLL_AFFORDANCE_THROTTLE = 16; // ~60fps; suficiente para el flag, sin floodear en web.
+// El LinearGradient (API no-Tamagui) llena su View contenedor (que ya tiene el posicionamiento por tokens).
+// `flex` no es spacing/color → no aplica el lint anti-hardcode; el tamaño/posición viven en el View padre.
+const fillStyle = { flex: 1 } as const;
+
+function ScrollAffordanceList({
+  children,
+  testIDPrefix,
+  bottomPad,
+  contentGap = '$2',
+  fillHeight = false,
+  fadeColorToken = '$bg',
+}: {
+  children: ReactNode;
+  /** Prefijo de testID para los fades (ej. "custom-enum" → "custom-enum-scroll-fade-bottom"). */
+  testIDPrefix: string;
+  /** Padding inferior del contentContainer (deja respirar + asegura el PEEK del último ítem). */
+  bottomPad: number;
+  /** gap entre ítems (token de space). */
+  contentGap?: TamaguiToken;
+  /** Token de color del fade (debe matchear el FONDO sobre el que va la lista: $bg fuera de card, $surface
+   *  adentro de una card). El gradiente va de transparente a este color para "desvanecer" lo oculto. */
+  fadeColorToken?: TamaguiToken;
+  /**
+   * `flexGrow:1` en el contentContainer → con POCAS opciones los ítems `flexGrow` se reparten el alto (bloques
+   * gigantes de manga, idiom DientesStep); con MUCHAS overflowea y scrollea (ítems a su minHeight). enum_single
+   * lo usa (bloques que llenan); enum_multi NO (vive dentro de una card con su propio layout top-aligned).
+   */
+  fillHeight?: boolean;
+}) {
+  const [fades, setFades] = useState<ScrollFades>({ top: false, bottom: false });
+  // Guardamos viewport y content por separado: el fade se recomputa ante CUALQUIER cambio de los tres.
+  const geomRef = useMemoGeomRef();
+
+  function recompute() {
+    setFades(scrollFades({ scrollY: geomRef.scrollY, viewportHeight: geomRef.viewport, contentHeight: geomRef.content }));
+  }
+  function onScroll(e: NativeSyntheticEvent<NativeScrollEvent>) {
+    geomRef.scrollY = e.nativeEvent.contentOffset.y;
+    geomRef.viewport = e.nativeEvent.layoutMeasurement.height;
+    geomRef.content = e.nativeEvent.contentSize.height;
+    recompute();
+  }
+  function onLayout(e: LayoutChangeEvent) {
+    geomRef.viewport = e.nativeEvent.layout.height;
+    recompute();
+  }
+  function onContentSizeChange(_w: number, h: number) {
+    geomRef.content = h;
+    recompute();
+  }
+
+  const bgHex = getTokenValue(fadeColorToken, 'color');
+  const fadeH = getTokenValue('$searchBarLg', 'size'); // alto del fade ≈ un ítem → cubre el parcial que asoma.
+  const transparent = 'transparent';
+  // El padding inferior del contentContainer (PEEK): un poco más que bottomPad → el último ítem asoma parcial.
+  const peekPadBottom = bottomPad + getTokenValue('$5', 'space');
+
+  return (
+    <View flex={1} position="relative">
+      <ScrollView
+        flex={1}
+        showsVerticalScrollIndicator
+        scrollEventThrottle={SCROLL_AFFORDANCE_THROTTLE}
+        onScroll={onScroll}
+        onLayout={onLayout}
+        onContentSizeChange={onContentSizeChange}
+        contentContainerStyle={{
+          gap: getTokenValue(contentGap, 'space'),
+          // PEEK: padding extra abajo → el último ítem no termina pegado al borde → asoma un parcial.
+          paddingBottom: peekPadBottom,
+          ...(fillHeight ? { flexGrow: 1 } : null),
+        }}
+      >
+        {children}
+      </ScrollView>
+
+      {/* FADE ARRIBA — solo cuando ya se scrolleó (hay contenido oculto arriba). El posicionamiento va en el
+          View de Tamagui (tokens $0); la altura del fade va en el `style` del gradiente (API no-Tamagui). */}
+      {fades.top ? (
+        <View position="absolute" top="$0" left="$0" right="$0" height={fadeH} pointerEvents="none">
+          <LinearGradient
+            testID={`${testIDPrefix}-scroll-fade-top`}
+            colors={[bgHex, transparent]}
+            pointerEvents="none"
+            style={fillStyle}
+          />
+        </View>
+      ) : null}
+
+      {/* FADE ABAJO + CHEVRON ▾ — cuando falta scrollear (hay contenido oculto abajo). */}
+      {fades.bottom ? (
+        <View position="absolute" bottom="$0" left="$0" right="$0" height={fadeH} pointerEvents="none" alignItems="center" justifyContent="flex-end">
+          <View position="absolute" top="$0" left="$0" right="$0" bottom="$0" pointerEvents="none">
+            <LinearGradient
+              testID={`${testIDPrefix}-scroll-fade-bottom`}
+              colors={[transparent, bgHex]}
+              pointerEvents="none"
+              style={fillStyle}
+            />
+          </View>
+          <View paddingBottom="$1">
+            <ChevronDown size={getTokenValue('$navIcon', 'size')} color={getTokenValue('$textMuted', 'color')} strokeWidth={2.5} />
+          </View>
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+/** Ref mutable simple para la geometría del scroll (evita re-renders por cada medida intermedia). */
+function useMemoGeomRef() {
+  return useMemo(() => ({ scrollY: 0, viewport: 0, content: 0 }), []);
 }
 
 // ─── numeric → keypad de PesajeStep (sin "kg") ─────────────────────────────────────────────────────────
@@ -282,44 +422,49 @@ function EnumSingleBlocks({ options, onConfirm, bottomPad }: CustomManeuverStepP
     onConfirm({ kind: 'string', value: opt });
   }
 
+  // Bloques DENTRO de un ScrollAffordanceList (fillHeight): pocas opciones → bloques gigantes que llenan el
+  // alto (idiom DientesStep); MUCHAS (las que reportó Raf) → scrollea con affordance (fade abajo + chevron +
+  // peek) → el operario VE que hay más opciones. Cada bloque tiene minHeight manga (no se aplasta con N alto).
   return (
-    <YStack flex={1} backgroundColor="$bg" paddingHorizontal="$4" paddingTop="$2" paddingBottom={bottomPad} gap="$2">
-      {opts.map((opt) => {
-        const isPicked = picked === opt;
-        return (
-          <View
-            key={opt}
-            testID={`custom-enum-block-${opt}`}
-            flexGrow={1}
-            flexBasis={0}
-            minHeight={getTokenValue('$searchBarLg', 'size')}
-            backgroundColor={isPicked ? '$primary' : '$surface'}
-            borderRadius="$card"
-            borderWidth={2}
-            borderColor={isPicked ? '$primary' : '$divider'}
-            flexDirection="row"
-            alignItems="center"
-            justifyContent="center"
-            gap="$2"
-            pressStyle={{ backgroundColor: '$greenLight' }}
-            onPress={() => pick(opt)}
-            {...buttonA11y(Platform.OS, { label: opt, selected: isPicked })}
-          >
-            {isPicked ? <Check size={ICON} color={WHITE} strokeWidth={3} /> : null}
-            <Text
-              fontFamily="$heading"
-              fontSize="$9"
-              lineHeight="$9"
-              fontWeight="700"
-              color={isPicked ? '$white' : '$textPrimary'}
-              textAlign="center"
-              numberOfLines={2}
+    <YStack flex={1} backgroundColor="$bg" paddingHorizontal="$4" paddingTop="$2">
+      <ScrollAffordanceList testIDPrefix="custom-enum" bottomPad={bottomPad} fillHeight>
+        {opts.map((opt) => {
+          const isPicked = picked === opt;
+          return (
+            <View
+              key={opt}
+              testID={`custom-enum-block-${opt}`}
+              flexGrow={1}
+              flexBasis={0}
+              minHeight={getTokenValue('$searchBarLg', 'size')}
+              backgroundColor={isPicked ? '$primary' : '$surface'}
+              borderRadius="$card"
+              borderWidth={2}
+              borderColor={isPicked ? '$primary' : '$divider'}
+              flexDirection="row"
+              alignItems="center"
+              justifyContent="center"
+              gap="$2"
+              pressStyle={{ backgroundColor: '$greenLight' }}
+              onPress={() => pick(opt)}
+              {...buttonA11y(Platform.OS, { label: opt, selected: isPicked })}
             >
-              {opt}
-            </Text>
-          </View>
-        );
-      })}
+              {isPicked ? <Check size={ICON} color={WHITE} strokeWidth={3} /> : null}
+              <Text
+                fontFamily="$heading"
+                fontSize="$9"
+                lineHeight="$9"
+                fontWeight="700"
+                color={isPicked ? '$white' : '$textPrimary'}
+                textAlign="center"
+                numberOfLines={2}
+              >
+                {opt}
+              </Text>
+            </View>
+          );
+        })}
+      </ScrollAffordanceList>
     </YStack>
   );
 }
@@ -398,10 +543,15 @@ function EnumMultiSelect({ options, initialValue, onConfirm, bottomPad }: Custom
         paddingVertical="$4"
         gap="$3"
       >
-        <Text fontFamily="$body" fontSize="$6" lineHeight="$6" fontWeight="600" color="$textPrimary" numberOfLines={1}>
+        {/* Sub-header de la card. numberOfLines={2} + lineHeight matching: "Elegí"/"correspondan" tienen
+            descendentes (g) → con {1} se recortaban en el borde superior de la card. */}
+        <Text fontFamily="$body" fontSize="$6" lineHeight="$6" fontWeight="600" color="$textPrimary" numberOfLines={2}>
           Elegí las que correspondan
         </Text>
-        <ScrollView flex={1} showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: getTokenValue('$2', 'space') }}>
+        {/* Lista con AFFORDANCE de scroll (fade $surface — el fondo de la card — + chevron + peek): con muchas
+            opciones se nota que hay más para scrollear (bug cazado por Raf). NO fillHeight: la card ya da el
+            alto; la lista es top-aligned (idiom SilentVaccinationStep). */}
+        <ScrollAffordanceList testIDPrefix="custom-multi" bottomPad={0} fadeColorToken="$surface">
           {opts.map((opt) => {
             const isOn = selectedSet.has(opt.toLowerCase());
             return (
@@ -430,14 +580,14 @@ function EnumMultiSelect({ options, initialValue, onConfirm, bottomPad }: Custom
                   lineHeight="$6"
                   fontWeight="600"
                   color={isOn ? '$white' : '$textPrimary'}
-                  numberOfLines={1}
+                  numberOfLines={2}
                 >
                   {opt}
                 </Text>
               </View>
             );
           })}
-        </ScrollView>
+        </ScrollAffordanceList>
       </YStack>
       {/* CTA habilitado SIEMPRE: una multi "sin nada elegido" igual es un dato válido (R13.16: array vacío es
           un enum_multi legítimo server-side). El operario confirma lo seleccionado (incluso vacío). */}

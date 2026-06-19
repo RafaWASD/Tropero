@@ -249,6 +249,14 @@ test('describeStepValue: dientes con/sin CUT', () => {
   assert.equal(describeStepValue({ kind: 'dientes', teethState: 'sin_dientes', cut: true }), 'Sin dientes · CUT');
 });
 
+test('describeStepValue: circunferencia escrotal en es-AR (coma decimal) + edad snapshot (R14.5/R14.8)', () => {
+  // CE con decimal + edad → "36,5 cm · 24 meses". CE entera → sin coma. Singular "1 mes".
+  assert.equal(describeStepValue({ kind: 'scrotal', circumferenceCm: 36.5, ageMonths: 24 }), '36,5 cm · 24 meses');
+  assert.equal(describeStepValue({ kind: 'scrotal', circumferenceCm: 38, ageMonths: 1 }), '38 cm · 1 mes');
+  // Edad desconocida (R14.7): solo la CE, sin la edad.
+  assert.equal(describeStepValue({ kind: 'scrotal', circumferenceCm: 40.5, ageMonths: null }), '40,5 cm');
+});
+
 // ─── summaryRows: filas del resumen (R5.9) ──────────────────────────────────────────────
 
 test('summaryRows: una fila por paso, en orden, con label es-AR + valor + flag captured', () => {

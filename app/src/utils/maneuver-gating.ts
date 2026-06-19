@@ -17,7 +17,7 @@
 //
 // 10 de fábrica + 2 sanitarias nuevas (sesión 26): antiparasitario (R6.13/R6.14) + antibiótico (R6.15).
 
-/** Las 12 maniobras tipadas del MVP cría. Claves estables = el ManeuverKind del cliente. */
+/** Las 13 maniobras tipadas del MVP cría (12 + circunferencia escrotal, s27). Claves estables = el ManeuverKind del cliente. */
 export type ManeuverKind =
   | 'tacto'
   | 'tacto_vaquillona'
@@ -31,7 +31,9 @@ export type ManeuverKind =
   | 'raspado'
   // Maniobras nuevas (sesión 26, R6.13/R6.15) → sanitary_events deworming/treatment, silent_apply.
   | 'antiparasitario'
-  | 'antibiotico';
+  | 'antibiotico'
+  // Circunferencia escrotal del toro (sesión 27, R14.1) → tabla typed scrotal_measurements, StepKind 'rueda'.
+  | 'circunferencia_escrotal';
 
 /**
  * Modo de match de los data_keys de una maniobra contra el rodeo real (R5.4):
@@ -79,6 +81,10 @@ export const MANEUVER_DATA_KEY_REQS: Record<ManeuverKind, ManeuverDataKeyReq> = 
   antiparasitario: { dataKeys: ['antiparasitario_interno', 'antiparasitario_externo'], match: 'any' },
   // Antibiótico: single key, igual que vacunación (R6.15).
   antibiotico: { dataKeys: ['antibiotico'], match: 'all' },
+  // Circunferencia escrotal: single key nuevo (R14.1). AND trivial. data_key seedeado enabled por defecto
+  // en cría (R14.18) → un rodeo de cría nuevo la ofrece sin config extra. Binding verificado por la suite
+  // de DB (el data_key 'circunferencia_escrotal' existe GLOBAL en field_definitions, 0099).
+  circunferencia_escrotal: { dataKeys: ['circunferencia_escrotal'], match: 'all' },
 };
 
 /**

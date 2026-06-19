@@ -165,7 +165,10 @@ const GROUP_DESTINATIONS = new Set([
 // (autenticado, consume sesión + animal + gating, requiere sessionId+profileId; se llega por el auto-
 // avance de `identificar`). El paso de tacto vive cableado en el frame (TactoStep). Solo queda el spike
 // de pesaje (`maniobra/paso`), aún mock, como referencia visual hasta que M3 cablee el paso completo.
-const DEV_WEB_ROUTES = new Set(['baston-test', 'maniobra/paso']);
+// Spec 03 M6-C.0 — DESIGN SPIKE de la RUEDA de CIRCUNFERENCIA ESCROTAL (`maniobra/rueda-ce`): pantalla
+// VISUAL 100% MOCK (paridad con el spike de pesaje), alcanzable directo en web sin auth para la captura
+// e2e a 360/412 en web táctil. Referencia visual del wheel picker hasta que M6-C.1 lo cablee al frame.
+const DEV_WEB_ROUTES = new Set(['baston-test', 'maniobra/paso', 'maniobra/rueda-ce']);
 
 /**
  * Gate unificado de navegación: auth (R1.3 / R7.*) + establecimiento (Fase 4: R6.4–R6.10).
@@ -402,6 +405,11 @@ function RootGate() {
           directo en web sin auth (DEV_WEB_ROUTES) para la captura e2e a 412×915. Referencia visual del
           keypad hasta que M3 cablee el paso completo. Pantalla completa (no modal). */}
       <Stack.Screen name="maniobra/paso" />
+      {/* Spec 03 M6-C.0 — DESIGN SPIKE de la RUEDA de CIRCUNFERENCIA ESCROTAL (`maniobra/rueda-ce`):
+          pantalla VISUAL 100% MOCK, alcanzable directo en web sin auth (DEV_WEB_ROUTES) para la captura
+          e2e a 360/412 en web táctil. Referencia visual del wheel picker hasta que M6-C.1 cablee el paso
+          al frame. Pantalla completa (no modal). */}
+      <Stack.Screen name="maniobra/rueda-ce" />
       {/* Spec 03 M2.1-core — IDENTIFICACIÓN del animal (scan-first cableado: BLE + manual + find-or-create
           + auto-avance). Pantalla AUTENTICADA real (consume la sesión + establishment/rodeo + el listener
           del bastón), gateada como cualquier otra — NO está en DEV_WEB_ROUTES. Se llega desde el wizard de

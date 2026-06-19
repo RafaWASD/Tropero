@@ -9,20 +9,33 @@ import assert from 'node:assert/strict';
 import {
   appliesToAnimal,
   filterByAnimalApplicability,
+  isBullEntire,
   shouldOfferCutPrompt,
   type AnimalApplicabilityInfo,
 } from './maneuver-applicability';
 import { buildSequence } from './maneuver-sequence';
 import type { ManeuverKind } from './maneuver-gating';
 
-const MALE: AnimalApplicabilityInfo = { sex: 'male', categoryCode: 'toro' };
-const FEMALE: AnimalApplicabilityInfo = { sex: 'female', categoryCode: 'vaca_segundo_servicio' };
-const CALF_M: AnimalApplicabilityInfo = { sex: 'male', categoryCode: 'ternero' };
-const CALF_F: AnimalApplicabilityInfo = { sex: 'female', categoryCode: 'ternera' };
-const UNKNOWN_SEX: AnimalApplicabilityInfo = { sex: null, categoryCode: 'vaquillona' };
+// isCastrated REAL del perfil (0084): entero por default en estos fixtures (false); los castrados y la
+// castración desconocida tienen fixtures propios abajo (sección CE, R14.2/R14.3).
+const MALE: AnimalApplicabilityInfo = { sex: 'male', categoryCode: 'toro', isCastrated: false };
+const FEMALE: AnimalApplicabilityInfo = { sex: 'female', categoryCode: 'vaca_segundo_servicio', isCastrated: false };
+const CALF_M: AnimalApplicabilityInfo = { sex: 'male', categoryCode: 'ternero', isCastrated: false };
+const CALF_F: AnimalApplicabilityInfo = { sex: 'female', categoryCode: 'ternera', isCastrated: false };
+const UNKNOWN_SEX: AnimalApplicabilityInfo = { sex: null, categoryCode: 'vaquillona', isCastrated: false };
 // Adulto/recría sin categoría resuelta (fail-safe del pesaje): se pesa como adulto, NO como ternero.
-const UNKNOWN_CATEGORY: AnimalApplicabilityInfo = { sex: 'female', categoryCode: null };
-const HEIFER: AnimalApplicabilityInfo = { sex: 'female', categoryCode: 'vaquillona' };
+const UNKNOWN_CATEGORY: AnimalApplicabilityInfo = { sex: 'female', categoryCode: null, isCastrated: false };
+const HEIFER: AnimalApplicabilityInfo = { sex: 'female', categoryCode: 'vaquillona', isCastrated: false };
+
+// ─── Fixtures de CE (R14.2/R14.3): macho entero (torito/toro), castrado (novillo), castración desconocida ──
+const TORITO: AnimalApplicabilityInfo = { sex: 'male', categoryCode: 'torito', isCastrated: false };
+const TORO: AnimalApplicabilityInfo = { sex: 'male', categoryCode: 'toro', isCastrated: false };
+const NOVILLO: AnimalApplicabilityInfo = { sex: 'male', categoryCode: 'novillo', isCastrated: true };
+const NOVILLITO: AnimalApplicabilityInfo = { sex: 'male', categoryCode: 'novillito', isCastrated: true };
+// Castrado por is_castrated pero con categoría aún torito/toro (espejo no recomputado todavía): se excluye.
+const TORO_CASTRADO: AnimalApplicabilityInfo = { sex: 'male', categoryCode: 'toro', isCastrated: true };
+// Castración DESCONOCIDA (null) en un torito → se INCLUYE (entero por defecto, R14.3).
+const TORITO_CAST_UNKNOWN: AnimalApplicabilityInfo = { sex: 'male', categoryCode: 'torito', isCastrated: null };
 
 // ─── R6.12 — Raspado solo machos ───────────────────────────────────────────────────────
 
@@ -179,5 +192,103 @@ test('R6.8: prompt CUT NO se ofrece para un TERNERO/TERNERA aunque tenga boca ga
 });
 
 test('R6.8: categoría desconocida (null) → se permite el prompt (el operario confirma; no se aplica CUT solo)', () => {
-  assert.equal(shouldOfferCutPrompt('1/4', { sex: 'female', categoryCode: null }), true);
+  assert.equal(shouldOfferCutPrompt('1/4', { sex: 'female', categoryCode: null, isCastrated: false }), true);
+});
+
+// ─── R14.2/R14.3 — Circunferencia escrotal: solo machos ENTEROS no-ternero ──────────────────────
+
+test('R14.2: CE APLICA a un torito y a un toro ENTEROS (is_castrated=false)', () => {
+  assert.equal(appliesToAnimal('circunferencia_escrotal', TORITO), true);
+  assert.equal(appliesToAnimal('circunferencia_escrotal', TORO), true);
+});
+
+test('R14.2: CE NO aplica a una HEMBRA (vaca/vaquillona) — se salta', () => {
+  assert.equal(appliesToAnimal('circunferencia_escrotal', FEMALE), false);
+  assert.equal(appliesToAnimal('circunferencia_escrotal', HEIFER), false);
+});
+
+test('R14.2: CE NO aplica a un TERNERO/TERNERA — se salta', () => {
+  assert.equal(appliesToAnimal('circunferencia_escrotal', CALF_M), false);
+  assert.equal(appliesToAnimal('circunferencia_escrotal', CALF_F), false);
+});
+
+test('R14.2: CE NO aplica a un NOVILLO/NOVILLITO (castrado por categoría) — se salta', () => {
+  assert.equal(appliesToAnimal('circunferencia_escrotal', NOVILLO), false);
+  assert.equal(appliesToAnimal('circunferencia_escrotal', NOVILLITO), false);
+});
+
+test('R14.2: CE NO aplica a un macho con is_castrated=true aunque la categoría siga siendo toro (espejo no recomputado)', () => {
+  assert.equal(appliesToAnimal('circunferencia_escrotal', TORO_CASTRADO), false);
+});
+
+test('R14.3: castración DESCONOCIDA (null) en un torito → CE se INCLUYE (entero por defecto; UX, no seguridad)', () => {
+  assert.equal(appliesToAnimal('circunferencia_escrotal', TORITO_CAST_UNKNOWN), true);
+});
+
+test('R14.2: CE con categoría null (irresoluble) → se salta (no se ofrece a un animal sin categoría)', () => {
+  assert.equal(
+    appliesToAnimal('circunferencia_escrotal', { sex: 'male', categoryCode: null, isCastrated: false }),
+    false,
+  );
+});
+
+test('R14.4: filterByAnimalApplicability saca la CE para una hembra/ternero/castrado, preserva el resto y el orden', () => {
+  const seq: ManeuverKind[] = ['vacunacion', 'circunferencia_escrotal', 'pesaje'];
+  // Hembra → CE se salta.
+  const f = filterByAnimalApplicability(seq, FEMALE);
+  assert.deepEqual(f.applicable, ['vacunacion', 'pesaje']);
+  assert.deepEqual(f.skipped, ['circunferencia_escrotal']);
+  // Novillo → CE se salta.
+  const n = filterByAnimalApplicability(seq, NOVILLO);
+  assert.deepEqual(n.applicable, ['vacunacion', 'pesaje']);
+  assert.deepEqual(n.skipped, ['circunferencia_escrotal']);
+});
+
+test('secuencia: un TORO entero con CE en la sesión → la CE entra en orden; una hembra la saltea', () => {
+  const ordered: ManeuverKind[] = ['vacunacion', 'circunferencia_escrotal', 'pesaje'];
+  const bull = filterByAnimalApplicability(ordered, TORO);
+  const bullSteps = buildSequence(ordered, bull.applicable).map((s) => s.maneuver);
+  assert.deepEqual(bullSteps, ['vacunacion', 'circunferencia_escrotal', 'pesaje']);
+
+  const cow = filterByAnimalApplicability(ordered, FEMALE);
+  const cowSteps = buildSequence(ordered, cow.applicable).map((s) => s.maneuver);
+  assert.deepEqual(cowSteps, ['vacunacion', 'pesaje']);
+});
+
+// ─── isBullEntire (spec 03 M6-C.2, R14.14): gate de la tarjeta de tendencia de CE en la ficha ─────
+
+test('isBullEntire: torito/toro entero → true; con castración desconocida (null) también → true (R14.3)', () => {
+  assert.equal(isBullEntire('torito', false), true);
+  assert.equal(isBullEntire('toro', false), true);
+  // Castración DESCONOCIDA → INCLUYE (entero por defecto, R14.3 — display, no seguridad).
+  assert.equal(isBullEntire('toro', null), true);
+  assert.equal(isBullEntire('torito', undefined), true);
+});
+
+test('isBullEntire: hembra/ternero/novillo/castrado/sin categoría → false (no se muestra la tarjeta)', () => {
+  assert.equal(isBullEntire('vaca_multipara', false), false);
+  assert.equal(isBullEntire('vaquillona', false), false);
+  assert.equal(isBullEntire('ternero', false), false); // ternero macho NO es entero adulto
+  assert.equal(isBullEntire('novillo', false), false); // castrado → categoría fuera del set
+  assert.equal(isBullEntire('toro', true), false); // entero adulto PERO castrado=true → no
+  assert.equal(isBullEntire('novillito', true), false);
+  assert.equal(isBullEntire(null, false), false); // categoría irresoluble → no se muestra
+  assert.equal(isBullEntire(undefined, null), false);
+});
+
+test('isBullEntire: paridad EXACTA con appliesToAnimal(circunferencia_escrotal, …) — mismo set, mismo criterio', () => {
+  // El gate de la tarjeta (display) debe coincidir con la aplicabilidad de la maniobra (carga). Barremos
+  // una matriz de (categoría × castración) y verificamos que ambos predicados dan lo MISMO.
+  const cats = ['torito', 'toro', 'novillo', 'novillito', 'ternero', 'vaquillona', 'vaca_multipara', null];
+  const casts: (boolean | null)[] = [true, false, null];
+  for (const c of cats) {
+    for (const k of casts) {
+      const info: AnimalApplicabilityInfo = { sex: 'male', categoryCode: c, isCastrated: k };
+      assert.equal(
+        isBullEntire(c, k),
+        appliesToAnimal('circunferencia_escrotal', info),
+        `desalineado para categoría=${c} castrado=${k}`,
+      );
+    }
+  }
 });

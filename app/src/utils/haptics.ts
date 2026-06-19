@@ -29,3 +29,13 @@ export function hapticPickUp(): void {
 export function hapticDrop(): void {
   vibrate(18);
 }
+
+/**
+ * Tick MUY corto al cruzar un valor de la RUEDA inercial (spec 03 M6 — circunferencia escrotal, R14.5):
+ * el operario siente cada valor sin mirar fijo (manga, operable con una mano + guante). Más ligero que
+ * pick/drop (8ms vs 12/18) porque se dispara por cada celda durante un fling → tiene que ser un toque, no
+ * un buzz. Best-effort/web-safe como el resto: degrada en silencio (la vibración de desktop es nula).
+ */
+export function hapticTick(): void {
+  vibrate(8);
+}

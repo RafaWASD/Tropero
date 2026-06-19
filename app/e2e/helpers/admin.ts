@@ -513,6 +513,55 @@ export async function waitForServerCustomMeasurement(
 }
 
 /**
+ * ORÁCULO de persistencia server-side de una CIRCUNFERENCIA ESCROTAL (spec 03 M6, R14.10): pollea
+ * `scrotal_measurements` hasta encontrar la fila del animal con el `circumference_cm` esperado (con
+ * tolerancia 0,01 por el numeric(4,1)) y `session_id` no nulo. Verifica que el write-path CRUD-plano
+ * aterrizó la CE con (a) la CE correcta, (b) session_id (jornada de manga), (c) establishment_id forzado
+ * (= del perfil, anti-spoof 0077) y (d) recorded_by forzado (= el caller). Reintenta (la fila tarda en subir).
+ */
+export async function waitForServerScrotalMeasurement(
+  profileId: string,
+  expectedCm: number,
+  opts: { tries?: number; delayMs?: number; expectedAgeMonths?: number | null } = {},
+): Promise<{
+  id: string;
+  sessionId: string | null;
+  circumferenceCm: number;
+  ageMonths: number | null;
+  establishmentId: string | null;
+  recordedBy: string | null;
+}> {
+  const tries = opts.tries ?? 40;
+  const delayMs = opts.delayMs ?? 2000;
+  for (let i = 0; i < tries; i++) {
+    const { data, error } = await admin
+      .from('scrotal_measurements')
+      .select('id, animal_profile_id, circumference_cm, age_months, session_id, establishment_id, recorded_by')
+      .eq('animal_profile_id', profileId)
+      .not('session_id', 'is', null)
+      .is('deleted_at', null)
+      .limit(10);
+    if (error) throw new Error(`waitForServerScrotalMeasurement: ${error.message}`);
+    const hit = (data ?? []).find((r) => Math.abs(Number(r.circumference_cm) - expectedCm) < 0.01);
+    if (hit) {
+      return {
+        id: hit.id as string,
+        sessionId: (hit.session_id as string | null) ?? null,
+        circumferenceCm: Number(hit.circumference_cm),
+        ageMonths: hit.age_months == null ? null : Number(hit.age_months),
+        establishmentId: (hit.establishment_id as string | null) ?? null,
+        recordedBy: (hit.recorded_by as string | null) ?? null,
+      };
+    }
+    await new Promise((r) => setTimeout(r, delayMs));
+  }
+  throw new Error(
+    `waitForServerScrotalMeasurement(${profileId}, ${expectedCm}): la CE NUNCA llegó al server con ` +
+      `session_id + ese cm (${tries} intentos).`,
+  );
+}
+
+/**
  * ORÁCULO de persistencia server-side de una PROPIEDAD CUSTOM (spec 03 M5-C.3, R13.12): pollea
  * `custom_attributes` hasta encontrar el current-value del par (animal, field) con el `value` jsonb esperado.
  * Prueba que setCustomAttribute subió el upsert por la PK natural con el value tipado correcto.
@@ -655,6 +704,30 @@ export async function seedAnimal(
   if (pErr) throw new Error(`seedAnimal animal_profiles: ${pErr.message}`);
 
   return profileId;
+}
+
+/**
+ * Siembra una medición de CIRCUNFERENCIA ESCROTAL (`scrotal_measurements`) directamente vía service_role
+ * (bypassea RLS), para el test de la TARJETA DE TENDENCIA en la ficha (spec 03 M6-C.2, R14.14). Cada llamada
+ * = una fila append-only (longitudinal). `establishment_id` lo DERIVA el trigger `tg_force_establishment_id_
+ * from_profile` (0077) del perfil → no se pasa. `recorded_by` lo fuerza `tg_scrotal_force_recorded_by` a
+ * auth.uid() (NULL bajo service_role; la ficha NO lo lee). `session_id` queda null (carga desde ficha →
+ * el tenant-check del session_id es no-op). Se borra en cascada al borrar el establishment.
+ */
+export async function seedScrotalMeasurement(
+  profileId: string,
+  opts: { circumferenceCm: number; ageMonths?: number | null; measuredAt: string },
+): Promise<string> {
+  const id = randomUUID();
+  const { error } = await admin.from('scrotal_measurements').insert({
+    id,
+    animal_profile_id: profileId,
+    circumference_cm: opts.circumferenceCm,
+    age_months: opts.ageMonths ?? null,
+    measured_at: opts.measuredAt,
+  });
+  if (error) throw new Error(`seedScrotalMeasurement: ${error.message}`);
+  return id;
 }
 
 /**

@@ -32,6 +32,8 @@ import {
   buildSetTeethStateUpdate,
   buildSetCutUpdate,
   buildUnsetCutUpdate,
+  buildAddScrotalInsert,
+  buildUpdateManeuverScrotal,
   type LocalQuery,
 } from '../services/powersync/local-reads';
 import type { StepValue } from './maneuver-sequence';
@@ -92,6 +94,7 @@ export type ManeuverEventInput = {
  *   - lab          → 1× lab_samples blood (sangrado, R6.4). Corrección → UPDATE tube_number.
  *   - lab_double   → 2× lab_samples scrape_tricho + scrape_campylo (raspado, R6.11). Sin corrección in-place.
  *   - dientes      → 1× UPDATE animal_profiles.teeth_state (R6.7) + (si cut) 1× UPDATE is_cut/category (R6.8).
+ *   - scrotal      → 1× scrotal_measurements (CE + edad snapshot, R14.10). Corrección → UPDATE cm/age/date.
  *   - skipped      → [] (no persiste).
  */
 export function buildManeuverEventQueries(input: ManeuverEventInput): LocalQuery[] {
@@ -206,6 +209,19 @@ export function buildManeuverEventQueries(input: ManeuverEventInput): LocalQuery
       }
       return writes;
     }
+
+    case 'scrotal':
+      // Circunferencia escrotal (R14.10): un único scrotal_measurements (CE + edad snapshot). cm ∈ [20,50]
+      // paso 0,5 (la rueda lo garantiza; el CHECK del DB re-valida al subir). ageMonths null = edad
+      // desconocida (R14.7). `establishment_id`/`recorded_by`/`source` los fuerza el trigger/default al
+      // subir (R14.9, no se mandan). Corrección desde el resumen (R5.9/R14.17) → UPDATE cm/age/date.
+      return [
+        isCorrection
+          ? buildUpdateManeuverScrotal(eventId, value.circumferenceCm, value.ageMonths, eventDate)
+          : buildAddScrotalInsert(
+              eventId, profileId, value.circumferenceCm, value.ageMonths, eventDate, sessionId,
+            ),
+      ];
 
     case 'skipped':
     default:

@@ -21,18 +21,22 @@
 import { useSyncExternalStore } from 'react';
 import type { CrudEntry } from '@powersync/common';
 
-// ─── Las 5 tablas de evento de MANIOBRA (R5.4) ─────────────────────────────────────────────────
+// ─── Las tablas de evento de MANIOBRA (R5.4) ───────────────────────────────────────────────────
 //
 // Un rechazo de upload puede venir de CUALQUIER tabla sincronizada (animal_profiles, rodeos, etc.). La UI
 // de manga (R10.8) SOLO muestra los rechazos de MANIOBRA — los eventos que el operario cargó en una jornada
 // (un rechazo de otra tabla no es de maniobra → lo maneja el surfacing genérico de su feature, no este).
 // El TIPO de maniobra (es-AR) sale de la tabla de destino (R5.4: maniobra → tabla de evento).
+// spec 03 M6 (M6-SEC-01): scrotal_measurements es tabla de evento de maniobra (CE) → un rechazo PERMANENTE
+// de su sync (gating capa 2 23514 / RLS 42501) debe ser VISIBLE en el banner/sheet de manga, no morir en
+// silencio. Cierra el loop capa1↔capa2↔surfacing del Gate 1.
 const MANEUVER_TABLE_LABELS: Record<string, string> = {
   weight_events: 'Pesaje',
   sanitary_events: 'Vacuna/sanitaria',
   reproductive_events: 'Tacto/servicio',
   lab_samples: 'Muestra de laboratorio',
   condition_score_events: 'Condición corporal',
+  scrotal_measurements: 'Circunferencia escrotal',
 };
 
 /**

@@ -48,10 +48,14 @@ test('stepKindFor: dientes → dientes (estado + prompt CUT)', () => {
   assert.equal(stepKindFor('dientes'), 'dientes');
 });
 
-test('stepKindFor: TODA maniobra del catálogo (12) resuelve a un StepKind conocido (exhaustivo)', () => {
+test('stepKindFor: circunferencia_escrotal → rueda (wheel picker, factory-only, R14.5)', () => {
+  assert.equal(stepKindFor('circunferencia_escrotal'), 'rueda');
+});
+
+test('stepKindFor: TODA maniobra del catálogo (13) resuelve a un StepKind conocido (exhaustivo)', () => {
   const valid: StepKind[] = [
     'tacto', 'vaquillona', 'pesaje', 'score', 'silent_single', 'silent_multi',
-    'inseminacion', 'lab_single', 'lab_double', 'dientes',
+    'inseminacion', 'lab_single', 'lab_double', 'dientes', 'rueda',
   ];
   for (const m of ALL_MANEUVERS) {
     assert.ok(valid.includes(stepKindFor(m)), `${m} resolvió a un StepKind desconocido`);

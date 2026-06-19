@@ -16,6 +16,7 @@
 import type { ManeuverKind } from './maneuver-gating';
 import { maneuverLabel } from './maneuver-wizard';
 import { stepKindFor, stepPersists } from './maneuver-step-kind';
+import { formatCmAR } from './wheel-picker';
 import type { CustomUiComponent } from './custom-field';
 import { describeCustomValue, type CustomCaptureValue } from './custom-render';
 
@@ -44,6 +45,8 @@ export type SilentSanitaryType = 'deworming' | 'treatment';
  *   - `lab`          → `{ tubeNumber }` — un lab_samples sample_type='blood' (sangrado, R6.4).
  *   - `lab_double`   → `{ tubeTricho, tubeCampylo }` — dos lab_samples scrape_* (raspado, R6.11).
  *   - `dientes`      → `{ teethState, cut }` — UPDATE animal_profiles.teeth_state (+ CUT, R6.7/R6.8).
+ *   - `scrotal`      → `{ circumferenceCm, ageMonths }` — scrotal_measurements (CE + edad snapshot, R14.5/
+ *                      R14.8). ageMonths null = edad desconocida (R14.7). StepKind 'rueda', factory-only.
  *   - `skipped`      → maniobra NO capturada (M2.2 placeholder / un paso que el operario salta). NO persiste.
  * `null`/ausente en el mapa = aún sin capturar.
  */
@@ -58,6 +61,7 @@ export type StepValue =
   | { kind: 'lab'; tubeNumber: string }
   | { kind: 'lab_double'; tubeTricho: string; tubeCampylo: string }
   | { kind: 'dientes'; teethState: string; cut: boolean }
+  | { kind: 'scrotal'; circumferenceCm: number; ageMonths: number | null }
   | { kind: 'skipped' };
 
 /**
@@ -276,6 +280,14 @@ export function describeStepValue(value: StepValue | undefined): string {
     }
     case 'dientes':
       return (TEETH_LABEL[value.teethState] ?? value.teethState) + (value.cut ? ' · CUT' : '');
+    case 'scrotal': {
+      // CE en es-AR (coma decimal, reusa formatCmAR — única fuente de verdad del formato de la rueda):
+      // "36,5 cm" + edad snapshot si está ("· 24 meses"); edad null (R14.7) → solo la CE.
+      const ce = `${formatCmAR(value.circumferenceCm)} cm`;
+      if (value.ageMonths == null) return ce;
+      const m = Math.round(value.ageMonths);
+      return `${ce} · ${m === 1 ? '1 mes' : `${m} meses`}`;
+    }
     case 'skipped':
       return 'Sin cargar';
     default:

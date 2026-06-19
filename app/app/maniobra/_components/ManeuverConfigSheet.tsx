@@ -200,28 +200,32 @@ export function ManeuverConfigSheet({
         gap="$4"
         testID="maneuver-config-sheet"
       >
-        {/* Grip visual del sheet. */}
-        <View
-          alignSelf="center"
-          width={getTokenValue('$icon', 'size')}
-          height={getTokenValue('$progressTrack', 'size')}
-          borderRadius="$pill"
-          backgroundColor="$divider"
-        />
+        {/* ── HEADER FIJO (grip + título). flexShrink:0 → el título nunca se recorta al crecer el cuerpo. ── */}
+        <YStack flexShrink={0} gap="$4">
+          {/* Grip visual del sheet. */}
+          <View
+            alignSelf="center"
+            width={getTokenValue('$icon', 'size')}
+            height={getTokenValue('$progressTrack', 'size')}
+            borderRadius="$pill"
+            backgroundColor="$divider"
+          />
 
-        {/* Título = nombre de la maniobra. lineHeight matching (Vacunación/Inseminación: g/j). */}
-        <YStack gap="$1">
-          <Text fontFamily="$heading" fontSize="$7" lineHeight="$7" fontWeight="700" color="$textPrimary" numberOfLines={1}>
-            {title}
-          </Text>
-          <Text fontFamily="$body" fontSize="$3" lineHeight="$3" color="$textMuted" numberOfLines={2}>
-            {kind === 'multi'
-              ? 'Cargá una o varias vacunas para toda la tanda.'
-              : 'Elegí la pajuela por defecto de la tanda.'}
-          </Text>
+          {/* Título = nombre de la maniobra. lineHeight matching (Vacunación/Inseminación: g/j). */}
+          <YStack gap="$1">
+            <Text fontFamily="$heading" fontSize="$7" lineHeight="$7" fontWeight="700" color="$textPrimary" numberOfLines={1}>
+              {title}
+            </Text>
+            <Text fontFamily="$body" fontSize="$3" lineHeight="$3" color="$textMuted" numberOfLines={2}>
+              {kind === 'multi'
+                ? 'Cargá una o varias vacunas para toda la tanda.'
+                : 'Elegí la pajuela por defecto de la tanda.'}
+            </Text>
+          </YStack>
         </YStack>
 
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: getTokenValue('$3', 'space') }}>
+        {/* ── CUERPO scrolleable (flex:1 + minHeight:0 web) → absorbe el alto, scrollea INTERNO. ── */}
+        <ScrollView flex={1} style={{ minHeight: 0 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: getTokenValue('$3', 'space') }}>
           {/* Chips de vacunas YA agregadas (solo multi). Tocar la × quita la vacuna. */}
           {kind === 'multi' && items.length > 0 ? (
             <XStack flexWrap="wrap" gap="$2">
@@ -334,8 +338,8 @@ export function ManeuverConfigSheet({
           ) : null}
         </ScrollView>
 
-        {/* Acciones: Guardar (primary) / Cancelar (secondary). */}
-        <YStack gap="$2">
+        {/* ── FOOTER FIJO (Guardar/Cancelar). flexShrink:0 → siempre abajo, nunca empujado fuera. ── */}
+        <YStack flexShrink={0} gap="$2">
           <Button variant="primary" fullWidth onPress={handleSave}>
             Guardar
           </Button>

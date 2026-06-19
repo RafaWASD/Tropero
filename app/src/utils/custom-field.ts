@@ -157,6 +157,38 @@ export function validateCustomFieldDraft(draft: CustomFieldDraft): ValidationRes
   return { ok: true };
 }
 
+// ─── A qué CAMPO del form pertenece un error de validación (presentación: scroll + resalte inline) ─────
+
+/** El campo del form al que apunta un error de validación (para resaltar + scrollear). */
+export type CustomFieldErrorTarget = 'label' | 'options';
+
+/**
+ * Dado un draft inválido, devuelve QUÉ campo del form es el culpable (para resaltarlo con borde de alerta +
+ * scrollear hasta él + mostrar el mensaje inline). PURA y PRESENTACIONAL: NO re-valida ni re-decide el mensaje
+ * (eso lo hace `validateCustomFieldDraft`, único origen de verdad). Solo MAPEA, con la MISMA precedencia que la
+ * validación, la falla → su campo, así el resalte y el mensaje quedan siempre consistentes:
+ *   - label vacío / demasiado largo            → 'label'
+ *   - enum sin opciones / opciones inválidas    → 'options'
+ *
+ * Devuelve null si el draft es válido (o si la falla no mapea a un campo visible — no debería pasar dado el
+ * conjunto actual de reglas). El caller llama a `validateCustomFieldDraft` para el MENSAJE y a esta para el
+ * TARGET; comparten precedencia (label antes que options) y por eso nunca se contradicen.
+ */
+export function customFieldErrorTarget(draft: CustomFieldDraft): CustomFieldErrorTarget | null {
+  const label = draft.label.trim();
+  if (label.length === 0 || label.length > LABEL_MAX) return 'label';
+
+  if (uiComponentNeedsOptions(draft.uiComponent)) {
+    const opts = (draft.options ?? []).map((o) => o.trim()).filter((o) => o.length > 0);
+    if (opts.length < 1) return 'options';
+    if (opts.length > OPTIONS_MAX) return 'options';
+    if (opts.some((o) => o.length > OPTION_LABEL_MAX)) return 'options';
+    const lower = opts.map((o) => o.toLowerCase());
+    if (new Set(lower).size !== lower.length) return 'options';
+  }
+  return null;
+}
+
 // ─── Payload del INSERT (shape EXACTO de field_definitions, 0093) ──────────────────────────────────────
 
 /** El payload del INSERT a field_definitions (las columnas que el cliente manda; el server fuerza el resto). */

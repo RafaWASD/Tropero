@@ -189,6 +189,15 @@ streams:
       org_scope: SELECT establishment_id FROM user_roles WHERE user_id = auth.user_id() AND active = true
     queries:
       - SELECT * FROM lab_samples WHERE establishment_id IN org_scope AND deleted_at IS NULL
+  # spec 03 M6 — circunferencia escrotal (0098). Tabla de evento TIPADA nueva con establishment_id denorm
+  # (forzado por trigger anti-spoof 0077). Paridad EXACTA con las ev_* de evento (JOIN-free, scope establishment,
+  # filtra deleted_at IS NULL). ⚠️ Solo deployar DESPUÉS de aplicar 0098 (la tabla debe existir o el Validate falla).
+  ev_scrotal_measurements:
+    auto_subscribe: true
+    with:
+      org_scope: SELECT establishment_id FROM user_roles WHERE user_id = auth.user_id() AND active = true
+    queries:
+      - SELECT * FROM scrotal_measurements WHERE establishment_id IN org_scope AND deleted_at IS NULL
 
   est_animal_category_history:               # sin deleted_at propio (0030) → solo scope por org_scope
     auto_subscribe: true

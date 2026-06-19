@@ -258,6 +258,37 @@ test('dientes REVERTIR CUT (cut=false + cutCategoryId derivada) → 2do UPDATE d
   assert.deepEqual(qs[1].args, ['cat-derivada', 'prof-1']);
 });
 
+// ─── circunferencia escrotal → scrotal_measurements con session_id (R14.10 / R5.11) ─────
+
+test('CE (1ra captura) → INSERT scrotal_measurements con cm/age/measured_at/session_id; SIN establishment_id/recorded_by', () => {
+  const ins = q1({
+    ...BASE, maneuver: 'circunferencia_escrotal',
+    value: { kind: 'scrotal', circumferenceCm: 36.5, ageMonths: 24 },
+  });
+  assert.match(ins.sql, /INSERT INTO scrotal_measurements/);
+  // establishment_id/recorded_by/source los fuerza el trigger al subir → NO en el INSERT (R14.9).
+  assert.doesNotMatch(ins.sql, /establishment_id|recorded_by/);
+  assert.deepEqual(ins.args, ['evt-1', 'prof-1', 36.5, 24, '2026-06-14', 'sess-1']);
+});
+
+test('CE con edad DESCONOCIDA (null) → age_months null en el INSERT (R14.7/R14.8)', () => {
+  const ins = q1({
+    ...BASE, maneuver: 'circunferencia_escrotal',
+    value: { kind: 'scrotal', circumferenceCm: 40, ageMonths: null },
+  });
+  assert.equal(ins.args[3], null); // age_months
+});
+
+test('CE CORRECCIÓN (R14.17/R5.9) → UPDATE cm/age/measured_at por id, NO re-INSERT', () => {
+  const upd = q1({
+    ...BASE, maneuver: 'circunferencia_escrotal',
+    value: { kind: 'scrotal', circumferenceCm: 38.5, ageMonths: 30 }, isCorrection: true,
+  });
+  assert.match(upd.sql, /^UPDATE scrotal_measurements SET circumference_cm = \?, age_months = \?, measured_at = \?/);
+  assert.match(upd.sql, /WHERE id = \? AND deleted_at IS NULL/);
+  assert.deepEqual(upd.args, [38.5, 30, '2026-06-14', 'evt-1']);
+});
+
 // ─── skipped → [] (no persiste) ────────────────────────────────────────────────────────
 
 test('skipped → 0 writes (no persiste)', () => {
@@ -278,6 +309,7 @@ test('toda 1ra captura de EVENTO lleva session_id (R5.11); dientes (propiedad) N
     { ...BASE, maneuver: 'inseminacion', value: { kind: 'inseminacion', semenName: 'Z' } },
     { ...BASE, maneuver: 'sangrado', value: { kind: 'lab', tubeNumber: '1' } },
     { ...BASE, maneuver: 'raspado', value: { kind: 'lab_double', tubeTricho: '1', tubeCampylo: '2' } },
+    { ...BASE, maneuver: 'circunferencia_escrotal', value: { kind: 'scrotal', circumferenceCm: 36, ageMonths: 24 } },
   ];
   for (const input of eventCases) {
     for (const q of buildManeuverEventQueries(input)) {
@@ -319,4 +351,24 @@ test('ejecución (node:sqlite): el INSERT de antiparasitario persiste la fila co
   assert.equal(row.product_name, 'Ivermectina');
   assert.equal(row.session_id, 'sess-1');
   assert.equal(row.route, null); // D10: route NO se escribe
+});
+
+test('ejecución (node:sqlite): el INSERT de CE persiste circumference_cm/age_months/session_id, sin establishment_id', () => {
+  const db = new DatabaseSync(':memory:');
+  db.exec(
+    'CREATE TABLE scrotal_measurements (id TEXT PRIMARY KEY, animal_profile_id TEXT, ' +
+      'circumference_cm REAL, age_months INTEGER, measured_at TEXT, session_id TEXT);',
+  );
+  const q = q1({
+    ...BASE, maneuver: 'circunferencia_escrotal',
+    value: { kind: 'scrotal', circumferenceCm: 36.5, ageMonths: 24 },
+  });
+  db.prepare(q.sql).run(...(q.args as (string | number | null)[]));
+  const row = db.prepare('SELECT circumference_cm, age_months, measured_at, session_id FROM scrotal_measurements WHERE id = ?')
+    .get('evt-1') as { circumference_cm: number; age_months: number; measured_at: string; session_id: string };
+  db.close();
+  assert.equal(row.circumference_cm, 36.5);
+  assert.equal(row.age_months, 24);
+  assert.equal(row.measured_at, '2026-06-14');
+  assert.equal(row.session_id, 'sess-1');
 });

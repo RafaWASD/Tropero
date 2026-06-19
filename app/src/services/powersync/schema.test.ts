@@ -19,7 +19,7 @@ function tablesByName(): Map<string, TableJson> {
   return new Map(json.tables.map((t) => [t.name, t]));
 }
 
-// Las 28 tablas SINCRONIZADAS (espejo del schema as-built, design §3 + spec 03 M5 custom).
+// Las 29 tablas SINCRONIZADAS (espejo del schema as-built, design §3 + spec 03 M5 custom + M6 CE).
 const SYNCED_TABLES = [
   'species',
   'systems_by_species',
@@ -48,6 +48,8 @@ const SYNCED_TABLES = [
   'sanitary_events',
   'condition_score_events',
   'lab_samples',
+  // spec 03 M6 — circunferencia escrotal (0098): scope establishment vía ev_scrotal_measurements.
+  'scrotal_measurements',
   'animal_events',
   'birth_calves',
 ];
@@ -67,7 +69,7 @@ test('R2.1: AppSchema valida contra el SDK (no tira la validación de PowerSync)
   assert.doesNotThrow(() => AppSchema.validate());
 });
 
-test('R2.1: están las 28 tablas sincronizadas del schema as-built', () => {
+test('R2.1: están las 29 tablas sincronizadas del schema as-built', () => {
   const tables = tablesByName();
   for (const name of SYNCED_TABLES) {
     assert.ok(tables.has(name), `falta la tabla sincronizada ${name}`);
@@ -182,7 +184,7 @@ test('users NO trae email/phone (PII movida a user_private, 0068 / ADR-025)', ()
   assert.ok(!cols.includes('phone'), 'users no debe exponer phone');
 });
 
-test('el schema total = 28 sincronizadas + op_intents + 7 overlay = 36 tablas', () => {
+test('el schema total = 29 sincronizadas + op_intents + 7 overlay = 37 tablas', () => {
   const json = AppSchema.toJSON() as { tables: TableJson[] };
   assert.equal(json.tables.length, SYNCED_TABLES.length + 1 + PENDING_TABLES.length);
 });

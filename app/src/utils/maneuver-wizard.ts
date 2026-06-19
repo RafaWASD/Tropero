@@ -31,6 +31,8 @@ export const MANEUVER_LABELS: Record<ManeuverKind, string> = {
   // Maniobras nuevas (sesión 26, R6.13/R6.15). Términos de campo de Facundo (sesión 26).
   antiparasitario: 'Antiparasitario',
   antibiotico: 'Antibiótico',
+  // Circunferencia escrotal del toro (sesión 27, R14.1). Término de campo (medida de aptitud reproductiva).
+  circunferencia_escrotal: 'Circunferencia escrotal',
 };
 
 /** Label es-AR de una maniobra (fallback al token crudo si llegara una desconocida — defensivo). */

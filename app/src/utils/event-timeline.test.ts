@@ -21,9 +21,14 @@ import {
   describeCategoryChange,
   deriveCurrentState,
   hasAbortion,
+  scrotalRowsToTimelineItems,
+  sortTimelineItems,
+  describeScrotalTimeline,
+  formatAgeMonthsAR,
   type TimelineRow,
   type TimelineItem,
   type PregnancyState,
+  type ScrotalTimelineRow,
 } from './event-timeline.ts';
 
 // ─── Parseo por kind (los 7 orígenes de la RPC 0035) ─────────────────────────────────────
@@ -1148,4 +1153,96 @@ test('hasAbortion: ignora un kind no-reproductive con eventType "abortion" espur
     { event_kind: 'observacion', event_id: 'o1', event_date: '2025-01-01T00:00:00Z', payload: { text: 'aborto?' } },
   ]);
   assert.equal(hasAbortion(items), false);
+});
+
+// ─── Circunferencia escrotal (spec 03 M6, R14.14): composición en el cliente del riel ─────
+
+test('scrotal: es date-only (measured_at es columna date, sin hora)', () => {
+  assert.equal(isDateOnlyKind('scrotal'), true);
+});
+
+test('formatAgeMonthsAR: es-AR, singular/plural, null → null, no snapea', () => {
+  assert.equal(formatAgeMonthsAR(24), '24 meses');
+  assert.equal(formatAgeMonthsAR(1), '1 mes');
+  assert.equal(formatAgeMonthsAR(null), null);
+  assert.equal(formatAgeMonthsAR(undefined), null);
+  // NO clampa al rango de la rueda de meses (snapshot histórico): un 200 se muestra tal cual redondeado.
+  assert.equal(formatAgeMonthsAR(200), '200 meses');
+  assert.equal(formatAgeMonthsAR(26.4), '26 meses'); // redondea
+});
+
+test('describeScrotalTimeline: "36,5 cm · 24 meses"; edad null → solo cm', () => {
+  assert.equal(describeScrotalTimeline({ circumferenceCm: 36.5, ageMonths: 24 }), '36,5 cm · 24 meses');
+  assert.equal(describeScrotalTimeline({ circumferenceCm: 38, ageMonths: null }), '38 cm');
+  assert.equal(describeScrotalTimeline({ circumferenceCm: 36.5, ageMonths: 1 }), '36,5 cm · 1 mes');
+});
+
+test('scrotalRowsToTimelineItems: mapea filas a TimelineItem kind scrotal; eventId=id, eventDate=measuredAt', () => {
+  const rows: ScrotalTimelineRow[] = [
+    { id: 'ce1', circumferenceCm: 34, ageMonths: 18, measuredAt: '2025-03-01', createdAt: '2025-03-01T10:00:00Z' },
+    { id: 'ce2', circumferenceCm: 37.5, ageMonths: 24, measuredAt: '2025-09-01', createdAt: null },
+  ];
+  const items = scrotalRowsToTimelineItems(rows);
+  assert.equal(items.length, 2);
+  assert.deepEqual(items[0], {
+    kind: 'scrotal',
+    eventId: 'ce1',
+    eventDate: '2025-03-01',
+    createdAt: '2025-03-01T10:00:00Z',
+    circumferenceCm: 34,
+    ageMonths: 18,
+  });
+  assert.equal(items[1].kind, 'scrotal');
+  if (items[1].kind === 'scrotal') {
+    assert.equal(items[1].ageMonths, 24);
+    assert.equal(items[1].createdAt, null);
+  }
+});
+
+test('scrotalRowsToTimelineItems: null/[] → []; descarta fila sin measuredAt (defensivo)', () => {
+  assert.deepEqual(scrotalRowsToTimelineItems(null), []);
+  assert.deepEqual(scrotalRowsToTimelineItems([]), []);
+  const items = scrotalRowsToTimelineItems([
+    { id: 'bad', circumferenceCm: 30, ageMonths: null, measuredAt: '', createdAt: null },
+    { id: 'ok', circumferenceCm: 35, ageMonths: null, measuredAt: '2025-01-01', createdAt: null },
+  ]);
+  assert.equal(items.length, 1);
+  assert.equal(items[0].eventId, 'ok');
+});
+
+test('sortTimelineItems: mergea la CE compuesta con el riel del server y re-ordena (día desc)', () => {
+  // Riel del server (un pesaje 2025-06) + dos CE compuestas en cliente (2025-03 y 2025-09). El merge
+  // re-ordena por DÍA calendario descendente → CE-sep arriba, pesaje-jun medio, CE-mar abajo.
+  const serverItems = parseTimeline([
+    { event_kind: 'weight', event_id: 'w1', event_date: '2025-06-01T00:00:00Z', payload: { weight_kg: 400 } },
+  ]);
+  const scrotal = scrotalRowsToTimelineItems([
+    { id: 'ce-mar', circumferenceCm: 34, ageMonths: 18, measuredAt: '2025-03-01', createdAt: null },
+    { id: 'ce-sep', circumferenceCm: 38, ageMonths: 24, measuredAt: '2025-09-01', createdAt: null },
+  ]);
+  const merged = sortTimelineItems([...serverItems, ...scrotal]);
+  assert.deepEqual(
+    merged.map((i) => i.eventId),
+    ['ce-sep', 'w1', 'ce-mar'],
+  );
+});
+
+test('sortTimelineItems: no muta el array de entrada', () => {
+  const a = scrotalRowsToTimelineItems([
+    { id: 'a', circumferenceCm: 30, ageMonths: null, measuredAt: '2025-01-01', createdAt: null },
+    { id: 'b', circumferenceCm: 31, ageMonths: null, measuredAt: '2025-02-01', createdAt: null },
+  ]);
+  const before = a.map((i) => i.eventId);
+  sortTimelineItems(a);
+  assert.deepEqual(a.map((i) => i.eventId), before); // la entrada quedó igual (sort copia)
+});
+
+test('deriveCurrentState: ignora la CE (no es peso/condición/preñez) — no rompe', () => {
+  const items = sortTimelineItems(
+    scrotalRowsToTimelineItems([
+      { id: 'ce1', circumferenceCm: 36, ageMonths: 24, measuredAt: '2025-09-01', createdAt: null },
+    ]),
+  );
+  // La CE no aporta weight/conditionScore/pregnancy → estado vacío (no la confunde con un peso).
+  assert.deepEqual(deriveCurrentState(items), {});
 });

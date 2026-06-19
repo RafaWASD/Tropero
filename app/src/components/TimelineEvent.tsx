@@ -28,6 +28,7 @@ import {
   Flag,
   FlaskConical,
   HeartCrack,
+  Ruler,
   Scale,
   StickyNote,
   Syringe,
@@ -37,6 +38,7 @@ import type { LucideIcon } from 'lucide-react-native';
 
 import {
   describeCategoryChange,
+  describeScrotalTimeline,
   formatEventDate,
   humanizePregnancyStatus,
   humanizeReproEventType,
@@ -137,6 +139,16 @@ function present(item: TimelineItem): Presentation {
         accent: 'primary',
         title: 'Observación',
         detail: item.text ?? null,
+      };
+    case 'scrotal':
+      // Circunferencia escrotal (spec 03 M6, R14.14): medida (no señal médica) → ícono Ruler + acento
+      // $primary. Detalle es-AR "36,5 cm · 24 meses" (reusa describeScrotalTimeline — único origen del
+      // formato). El TÍTULO es-AR del evento en el riel = "Circunferencia escrotal" (design §12.6).
+      return {
+        icon: Ruler,
+        accent: 'primary',
+        title: 'Circunferencia escrotal',
+        detail: describeScrotalTimeline(item),
       };
     default:
       // Exhaustividad defensiva (no debería ocurrir: la unión está cerrada).

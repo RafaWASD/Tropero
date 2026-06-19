@@ -12,7 +12,9 @@
 // El componente TimelineEvent consume estos TimelineItem para renderizar; el service events.ts hace
 // el parseo (llama parseTimelineRow) + resuelve los nombres de categoría de los category_change.
 
-// ─── Kinds + payloads tipados (espejo de los 7 orígenes de la RPC 0035) ──────────────────
+import { formatCmAR } from './wheel-picker';
+
+// ─── Kinds + payloads tipados (espejo de los 7 orígenes de la RPC 0035 + la CE compuesta en cliente) ──
 
 export type TimelineKind =
   | 'weight'
@@ -21,7 +23,13 @@ export type TimelineKind =
   | 'condition_score'
   | 'lab_sample'
   | 'category_change'
-  | 'observacion';
+  | 'observacion'
+  // Circunferencia escrotal (CE) del toro (spec 03 M6, US-14, R14.14). NO viene de la vista server
+  // `animal_timeline` (que no lee `scrotal_measurements`): la ficha la COMPONE en el cliente desde la
+  // lectura LOCAL (`fetchScrotalHistory`) y la mergea al riel (design §12.6 — default = composición en
+  // cliente, no toca la vista). Por eso no hay rama de parseo en `parseTimelineRow` (la RPC nunca la
+  // emite); el mapeo de las filas locales lo hace `scrotalRowsToTimelineItems` (abajo).
+  | 'scrotal';
 
 /**
  * Kinds cuyo `event_date` proviene de una columna Postgres `date` (sin hora): weight_events,
@@ -39,6 +47,9 @@ const DATE_ONLY_KINDS: ReadonlySet<TimelineKind> = new Set<TimelineKind>([
   'sanitary',
   'lab_sample',
   'reproductive',
+  // 'scrotal': `measured_at` es una columna `date` (sin hora) — fecha calendario que el operario fijó,
+  // igual que weight/condition_score. Va date-only para que una CE de hoy NO se vea como "Ayer" (UTC-3).
+  'scrotal',
 ]);
 
 /** ¿El `event_date` de este kind es una FECHA calendario (date-only) y no un instante real? */
@@ -200,6 +211,18 @@ export type TimelineItem =
       text: string | null;
       authorId: string | null;
       editWindowUntil: string | null;
+    }
+  | {
+      // Circunferencia escrotal (CE) del toro (spec 03 M6, R14.14). Compuesta en el cliente desde la
+      // lectura local (NO de la RPC animal_timeline). `eventDate` = measured_at (date-only). `circumferenceCm`
+      // siempre presente (la lectura solo trae filas reales); `ageMonths` snapshot nullable (R14.8).
+      kind: 'scrotal';
+      eventId: string;
+      eventDate: string;
+      createdAt: string | null;
+      seq?: number;
+      circumferenceCm: number;
+      ageMonths: number | null;
     };
 
 /** Fila cruda de la RPC animal_timeline (PostgREST devuelve el set como array de filas). */
@@ -373,7 +396,19 @@ export function parseTimeline(rows: readonly TimelineRow[]): TimelineItem[] {
     const item = parseTimelineRow(row);
     if (item) items.push(item);
   }
-  items.sort((a, b) => {
+  return sortTimelineItems(items);
+}
+
+/**
+ * Ordena un set de TimelineItem ya parseados con el MISMO criterio que `parseTimeline` (día calendario
+ * desc → createdAt desc dentro del día → seq desc → eventId). Extraído para que la ficha pueda MERGEAR la
+ * CE compuesta en cliente (`scrotalRowsToTimelineItems`) con el riel del server y re-ordenar el conjunto
+ * (la CE no viene de la RPC → no pasa por `parseTimeline`). NO muta el array de entrada (copia + sort).
+ * PURA, TZ-independiente.
+ */
+export function sortTimelineItems(items: readonly TimelineItem[]): TimelineItem[] {
+  const out = [...items];
+  out.sort((a, b) => {
     // (1) día calendario desc. Un día inválido (fecha no parseable) se trata como el MÁS VIEJO posible
     // (-Infinity) → cae al fondo, sin romper el orden del resto.
     const dayA = dayKey(a) ?? -Infinity;
@@ -395,7 +430,7 @@ export function parseTimeline(rows: readonly TimelineRow[]): TimelineItem[] {
     // fallback estable por eventId (mayor primero) — RPC sin seq / tests legados.
     return a.eventId < b.eventId ? 1 : a.eventId > b.eventId ? -1 : 0;
   });
-  return items;
+  return out;
 }
 
 /** Devuelve los UUIDs de categoría (from/to) únicos de un set de items, para resolver sus nombres. */
@@ -454,6 +489,47 @@ export function applyReproMeta(
     const serviceType = rawType != null && SERVICE_TYPES.has(rawType) ? (rawType as ServiceType) : null;
     return { ...it, serviceType };
   });
+}
+
+// ─── Circunferencia escrotal: composición en el cliente del riel (spec 03 M6, R14.14) ─────
+//
+// La CE NO está en la vista server `animal_timeline` (design §12.6 — default = composición en el
+// cliente, sin tocar el schema). La ficha lee el histórico LOCAL (`fetchScrotalHistory`) y lo mapea a
+// TimelineItem con estos helpers, los mergea con el resto del riel y re-ordena con `parseTimeline` (el
+// `eventDate` de la CE = `measured_at`, date-only) → la CE aparece en el riel como un evento más.
+
+/** Una fila del histórico de CE como la devuelve la lectura local (shape de `ScrotalMeasurementRow`). */
+export type ScrotalTimelineRow = {
+  id: string;
+  circumferenceCm: number;
+  ageMonths: number | null;
+  measuredAt: string;
+  createdAt: string | null;
+};
+
+/**
+ * Mapea las filas del histórico de CE a TimelineItem de kind 'scrotal'. PURO. El `eventId` = el id real de
+ * la medición (estable, no UUID random → desempate determinístico en `parseTimeline`); `eventDate` =
+ * measured_at (date-only). Tolerante: una fila sin `measuredAt` (no debería: la columna es NOT NULL) se
+ * descarta para no romper el orden por fecha. NO ordena (lo hace `parseTimeline` al mergear con el resto).
+ */
+export function scrotalRowsToTimelineItems(
+  rows: readonly ScrotalTimelineRow[] | null | undefined,
+): TimelineItem[] {
+  if (!rows) return [];
+  const items: TimelineItem[] = [];
+  for (const r of rows) {
+    if (!r.measuredAt) continue;
+    items.push({
+      kind: 'scrotal',
+      eventId: r.id,
+      eventDate: r.measuredAt,
+      createdAt: r.createdAt,
+      circumferenceCm: r.circumferenceCm,
+      ageMonths: r.ageMonths,
+    });
+  }
+  return items;
 }
 
 // ─── Estado actual del animal (último valor vigente por medición tipada) ──────────────────
@@ -881,4 +957,30 @@ export function describeCategoryChange(item: {
           ? ' (manual)'
           : '';
   return { title: `Cambió a ${to}`, detail: reasonSuffix ? reasonSuffix.trim() : null };
+}
+
+/**
+ * Edad en meses → label es-AR para el detalle de la CE ("24 meses" / "1 mes"). NO snapea a la rueda (es un
+ * valor SNAPSHOT histórico ya persistido, R14.8 — no se re-clampa al rango de la rueda). null → null (la CE
+ * sin edad solo muestra los cm). Redondea (la edad snapshot puede venir entera, pero defensivo).
+ */
+export function formatAgeMonthsAR(months: number | null | undefined): string | null {
+  if (months == null || !Number.isFinite(months)) return null;
+  const m = Math.round(months);
+  return m === 1 ? '1 mes' : `${m} meses`;
+}
+
+/**
+ * Detalle es-AR de una medición de CE para el riel/tarjeta: la CE en cm (coma decimal, reusa `formatCmAR`)
+ * + la edad snapshot si está ("36,5 cm · 24 meses"); edad null (R14.7/R14.8) → solo la CE ("36,5 cm").
+ * MISMA fuente de formato que `describeStepValue` (maneuver-sequence.ts) — un único origen del formato de CE.
+ * El TÍTULO del evento ("Circunferencia escrotal") lo pone el componente (TimelineEvent / la tarjeta).
+ */
+export function describeScrotalTimeline(item: {
+  circumferenceCm: number;
+  ageMonths: number | null;
+}): string {
+  const ce = `${formatCmAR(item.circumferenceCm)} cm`;
+  const age = formatAgeMonthsAR(item.ageMonths);
+  return age ? `${ce} · ${age}` : ce;
 }

@@ -46,12 +46,14 @@ test('R10.8: rejectionReason código desconocido → rechazo genérico del servi
   assert.match(rejectionReason('condition_score_events', null), /Condición corporal:.*servidor rechazó/);
 });
 
-test('R10.8: el tipo de maniobra sale de la tabla (las 5 tablas de evento)', () => {
+test('R10.8: el tipo de maniobra sale de la tabla (las tablas de evento, incl. CE M6)', () => {
   assert.equal(maneuverRejectionTypeLabel('weight_events'), 'Pesaje');
   assert.equal(maneuverRejectionTypeLabel('sanitary_events'), 'Vacuna/sanitaria');
   assert.equal(maneuverRejectionTypeLabel('reproductive_events'), 'Tacto/servicio');
   assert.equal(maneuverRejectionTypeLabel('lab_samples'), 'Muestra de laboratorio');
   assert.equal(maneuverRejectionTypeLabel('condition_score_events'), 'Condición corporal');
+  // spec 03 M6 (M6-SEC-01): la CE tiene su label es-AR en el surfacing de manga.
+  assert.equal(maneuverRejectionTypeLabel('scrotal_measurements'), 'Circunferencia escrotal');
   // Una tabla NO de maniobra → label genérico (no se usa en la UI de manga, que filtra antes).
   assert.equal(maneuverRejectionTypeLabel('animal_profiles'), 'Maniobra');
   assert.equal(maneuverRejectionTypeLabel(null), 'Maniobra');
@@ -86,13 +88,25 @@ test('R10.8: rejectionWhenLabel — recién / hace N min / hace N h / dd-mm', ()
 
 // ─── Filtro de maniobra ────────────────────────────────────────────────────────────────────────
 
-test('R10.8: isManeuverRejection true SOLO para las 5 tablas de evento de maniobra', () => {
-  for (const t of ['weight_events', 'sanitary_events', 'reproductive_events', 'lab_samples', 'condition_score_events']) {
+test('R10.8: isManeuverRejection true SOLO para las tablas de evento de maniobra (incl. CE M6)', () => {
+  for (const t of [
+    'weight_events', 'sanitary_events', 'reproductive_events', 'lab_samples', 'condition_score_events',
+    'scrotal_measurements', // spec 03 M6 — CE: el rechazo de sync se superficia en manga (M6-SEC-01).
+  ]) {
     assert.equal(isManeuverRejection(t), true, t);
   }
   for (const t of ['animal_profiles', 'rodeos', 'sessions', 'maneuver_presets', '', undefined, null]) {
     assert.equal(isManeuverRejection(t as string), false, String(t));
   }
+});
+
+test('R10.8 (M6-SEC-01): rejectionReason de la CE antepone el tipo "Circunferencia escrotal"', () => {
+  // 23514 = gating capa 2 / tenant-check del session_id: el rodeo dejó de habilitar la CE o el animal cambió.
+  const g = rejectionReason('scrotal_measurements', '23514');
+  assert.match(g, /Circunferencia escrotal:/);
+  assert.match(g, /rodeo dejó de habilitar|cambió de rodeo\/campo/);
+  // 42501 = RLS: sin permiso.
+  assert.match(rejectionReason('scrotal_measurements', '42501'), /Circunferencia escrotal:.*permiso/);
 });
 
 // ─── Store: record / snapshot ───────────────────────────────────────────────────────────────────

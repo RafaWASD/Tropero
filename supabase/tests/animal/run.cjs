@@ -267,13 +267,13 @@ test('animal suite — spec 02', async (t) => {
     rodeoA = await createRodeo(clientA, { establishmentId: estA, name: 'Rodeo principal' });
     rodeoB = await createRodeo(clientB, { establishmentId: estB, name: 'Rodeo principal' });
 
-    // El trigger pre-pobló rodeo_data_config (26 filas, 23 enabled).
+    // El trigger pre-pobló rodeo_data_config (27 filas, 24 enabled). // +1 por circunferencia_escrotal (spec 03 R14.18, seed 0099)
     {
       const { data, error } = await clientA
         .from('rodeo_data_config').select('enabled').eq('rodeo_id', rodeoA.id);
       assert.equal(error, null, error && error.message);
-      assert.equal(data.length, 26, 'rodeo_data_config debería tener 26 filas');
-      assert.equal(data.filter((r) => r.enabled).length, 23, '23 enabled');
+      assert.equal(data.length, 27, 'rodeo_data_config debería tener 27 filas'); // +1 por circunferencia_escrotal (spec 03 R14.18, seed 0099)
+      assert.equal(data.filter((r) => r.enabled).length, 24, '24 enabled'); // +1 por circunferencia_escrotal (spec 03 R14.18, seed 0099)
     }
   });
 
@@ -614,12 +614,12 @@ test('animal suite — spec 02', async (t) => {
       const { data } = await clientA.from('rodeos').select('id').eq('establishment_id', estC);
       assert.equal(data.length, 0, 'no hay rodeo default (R2.6)');
     }
-    // owner crea rodeo (bovino, cria) -> 26 filas rodeo_data_config (23 enabled).
+    // owner crea rodeo (bovino, cria) -> 27 filas rodeo_data_config (24 enabled). // +1 por circunferencia_escrotal (spec 03 R14.18, seed 0099)
     const rC = await createRodeo(clientA, { establishmentId: estC, name: 'Rodeo cría' });
     {
       const { data } = await clientA.from('rodeo_data_config').select('enabled').eq('rodeo_id', rC.id);
-      assert.equal(data.length, 26);
-      assert.equal(data.filter((r) => r.enabled).length, 23);
+      assert.equal(data.length, 27); // +1 por circunferencia_escrotal (spec 03 R14.18, seed 0099)
+      assert.equal(data.filter((r) => r.enabled).length, 24); // +1 por circunferencia_escrotal (spec 03 R14.18, seed 0099)
     }
     // owner intenta (bovino, invernada) -> falla (system inactive).
     {
@@ -885,22 +885,22 @@ test('animal suite — spec 02', async (t) => {
 
   // ---- T2.16 plantilla de datos (R2.8..R2.13) -----------------------------
   await t.test('T2.16 plantilla de datos', async () => {
-    // Caso 1: catálogo global 26 activos, data_key único.
+    // Caso 1: catálogo global 27 activos, data_key único. // +1 por circunferencia_escrotal (spec 03 R14.18, seed 0099)
     {
       const { data } = await clientA.from('field_definitions').select('data_key, label, category, data_type, ui_component').eq('active', true);
-      assert.equal(data.length, 26, '26 field_definitions activos');
+      assert.equal(data.length, 27, '27 field_definitions activos'); // +1 por circunferencia_escrotal (spec 03 R14.18, seed 0099)
       const keys = data.map((r) => r.data_key);
       assert.equal(new Set(keys).size, keys.length, 'data_key único');
       assert.ok(data.every((r) => r.label && r.category && r.data_type), 'columnas pobladas');
     }
-    // Caso 2: defaults por sistema cría = 26; 23 enabled; 3 off correctos.
+    // Caso 2: defaults por sistema cría = 27; 24 enabled; 3 off correctos. // +1 por circunferencia_escrotal (spec 03 R14.18, seed 0099)
     {
       const { data } = await clientA
         .from('system_default_fields')
         .select('default_enabled, field_definition_id, field_definitions(data_key)')
         .eq('system_id', rodeoA.systemId);
-      assert.equal(data.length, 26);
-      assert.equal(data.filter((r) => r.default_enabled).length, 23);
+      assert.equal(data.length, 27); // +1 por circunferencia_escrotal (spec 03 R14.18, seed 0099)
+      assert.equal(data.filter((r) => r.default_enabled).length, 24); // +1 por circunferencia_escrotal (spec 03 R14.18, seed 0099)
       const offKeys = data.filter((r) => !r.default_enabled).map((r) => r.field_definitions.data_key).sort();
       assert.deepEqual(offKeys, ['inseminacion', 'peso_nacimiento', 'tuberculosis'].sort());
     }
@@ -911,11 +911,11 @@ test('animal suite — spec 02', async (t) => {
       const { error: e2 } = await clientA.from('system_default_fields').insert({ system_id: rodeoA.systemId, field_definition_id: '00000000-0000-0000-0000-000000000000', default_enabled: true });
       assert.notEqual(e2, null, 'insert en system_default_fields debe fallar (no policy)');
     }
-    // Caso 4: pre-populate ya verificado en setup (26 filas, 23 enabled). Re-verificamos.
+    // Caso 4: pre-populate ya verificado en setup (27 filas, 24 enabled). Re-verificamos. // +1 por circunferencia_escrotal (spec 03 R14.18, seed 0099)
     {
       const { data } = await clientA.from('rodeo_data_config').select('enabled').eq('rodeo_id', rodeoA.id);
-      assert.equal(data.length, 26);
-      assert.equal(data.filter((r) => r.enabled).length, 23);
+      assert.equal(data.length, 27); // +1 por circunferencia_escrotal (spec 03 R14.18, seed 0099)
+      assert.equal(data.filter((r) => r.enabled).length, 24); // +1 por circunferencia_escrotal (spec 03 R14.18, seed 0099)
     }
     // Caso 5: toggle owner-only.
     {
@@ -929,7 +929,7 @@ test('animal suite — spec 02', async (t) => {
       await clientA.from('rodeo_data_config').update({ enabled: true }).eq('rodeo_id', rodeoA.id).eq('field_definition_id', fd.id);
     }
     // Caso 6: habilitar field no-default (caso tambo+preñez con cría: insertamos un field nuevo no presente).
-    // En cría los 26 ya están; para probar el INSERT de un field arbitrario del catálogo,
+    // En cría los 27 ya están; para probar el INSERT de un field arbitrario del catálogo, // +1 por circunferencia_escrotal (spec 03 R14.18, seed 0099)
     // primero borramos (vía service) una fila de rodeo_data_config y la re-insertamos como owner.
     {
       const { data: fd } = await clientA.from('field_definitions').select('id').eq('data_key', 'inseminacion').single();
@@ -957,7 +957,7 @@ test('animal suite — spec 02', async (t) => {
     {
       const rTmp = await createRodeo(clientA, { establishmentId: estA, name: `${RUN_TAG}_rcascade` });
       const before = await admin.from('rodeo_data_config').select('field_definition_id', { count: 'exact', head: true }).eq('rodeo_id', rTmp.id);
-      assert.equal(before.count, 26);
+      assert.equal(before.count, 27); // +1 por circunferencia_escrotal (spec 03 R14.18, seed 0099)
       await admin.from('rodeos').delete().eq('id', rTmp.id);
       const after = await admin.from('rodeo_data_config').select('field_definition_id', { count: 'exact', head: true }).eq('rodeo_id', rTmp.id);
       assert.equal(after.count, 0, 'CASCADE borró las filas de rodeo_data_config');
@@ -2507,10 +2507,10 @@ test('spec 15-powersync — create_rodeo RPC (alta de rodeo OFFLINE, Run T9.8)',
     assert.equal(rodeo.establishment_id, estA);
     assert.equal(rodeo.deleted_at, null);
 
-    // El trigger 0018 seedeó la plantilla (26 filas en cría).
+    // El trigger 0018 seedeó la plantilla (27 filas en cría). // +1 por circunferencia_escrotal (spec 03 R14.18, seed 0099)
     const { data: cfg } = await admin.from('rodeo_data_config')
       .select('field_definition_id, enabled, establishment_id').eq('rodeo_id', rodeoId);
-    assert.equal(cfg.length, 26, 'el trigger pre-pobló rodeo_data_config (26 filas en cría)');
+    assert.equal(cfg.length, 27, 'el trigger pre-pobló rodeo_data_config (27 filas en cría)'); // +1 por circunferencia_escrotal (spec 03 R14.18, seed 0099)
     // El toggle del usuario se aplicó: 'peso' quedó en false (era default ON).
     const peso = cfg.find((c) => c.field_definition_id === fdPeso);
     assert.equal(peso.enabled, false, 'el toggle de peso se aplicó (enabled=false sobre el default ON)');
@@ -2551,7 +2551,7 @@ test('spec 15-powersync — create_rodeo RPC (alta de rodeo OFFLINE, Run T9.8)',
     const cfgAfter = await admin.from('rodeo_data_config')
       .select('field_definition_id', { count: 'exact', head: true }).eq('rodeo_id', rodeoId);
     assert.equal(cfgAfter.count, cfgBefore.count, 'el replay NO duplicó la plantilla (trigger no re-dispara)');
-    assert.equal(cfgAfter.count, 26, 'la plantilla sigue siendo 26 filas (no 52)');
+    assert.equal(cfgAfter.count, 27, 'la plantilla sigue siendo 27 filas (no 54)'); // +1 por circunferencia_escrotal (spec 03 R14.18, seed 0099); el guard de duplicado pasa de 52 a 54
     // El toggle sigue en el mismo end-state (UPSERT idempotente).
     const { data: peso } = await admin.from('rodeo_data_config')
       .select('enabled').eq('rodeo_id', rodeoId).eq('field_definition_id', fdPeso).single();
@@ -2651,7 +2651,7 @@ test('spec 15-powersync — set_rodeo_config RPC (editar plantilla OFFLINE, Run 
     assert.ok(other, 'el sistema cría debe tener ≥2 defaults para elegir fdUpdate ≠ fdInsert');
     fdInsert = other;
 
-    // Creamos el rodeo de A vía create_rodeo (0081) — su trigger 0018 seedea la plantilla (las 26 filas).
+    // Creamos el rodeo de A vía create_rodeo (0081) — su trigger 0018 seedea la plantilla (las 27 filas). // +1 por circunferencia_escrotal (spec 03 R14.18, seed 0099)
     rodeoA = require('node:crypto').randomUUID();
     const { error } = await clientA.rpc('create_rodeo', {
       p_id: rodeoA, p_establishment_id: estA, p_name: `${RUN_TAG}_sc_rodeo`,

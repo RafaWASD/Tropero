@@ -255,6 +255,29 @@ const tokens = createTokens({
     // valor de medición. Cruza al style.fontSize del <TextInput> de RN (pide número) → token de size leído
     // con getTokenValue, mismo patrón que inputText/navLabel. NO se le aplica formato es-AR (código de máquina).
     tubeText: 24,
+    // ── RUEDA INERCIAL de CIRCUNFERENCIA ESCROTAL (spec 03 M6, R14.5) — JIT, 🔴 manga-crítico.
+    // wheelCell = alto de UNA celda/valor del drum picker (= snapToInterval del ScrollView). 64px: el
+    // valor centrado se lee GRANDE de un vistazo (es el dato que se carga, R12.4), y como snap-interval da
+    // un "click" de manga preciso (un valor por gesto de pulgar) sin que el fling se sienta pegajoso. Dos
+    // celdas de contexto arriba/abajo entran cómodas en el alto útil → la rueda domina el centro (densidad
+    // R12.5). Es geometría de scroll, no un touch-target (el target real es arrastrar la rueda, no tocar
+    // una celda) → no sigue la escala de touchMin/stepperBtn. wheelHero = tamaño del NÚMERO grande
+    // glanceable "36,5 cm" sobre la rueda: $10=38 ya está en la escala de display, pero la lectura de CE
+    // tiene que dominar como hero secundario sin robarle el rol a la rueda (que es la primaria) → 44, entre
+    // el display $10 y el hero number $11=64. Cruza a fontSize/lineHeight de un <Text> con tamaño FIJO
+    // (NO adjustsFontSizeToFit, NO-OP en react-native-web) → token leído con getTokenValue.
+    wheelCell: 64,
+    wheelHero: 44,
+    // wheelValueText = tamaño UNIFORME del texto de CADA celda/valor del drum (todas las celdas, incl. la
+    // central). 26px: legible de un vistazo pero MODERADO → con lineHeight matcheado (=26) entra HOLGADO en
+    // wheelCell=64 (≈19px de respiro arriba/abajo del glifo, incluidos los ".5" como "35,5"/"38,5"), así las
+    // dos líneas verdes de selección bracketean SOLO la celda central sin cruzar/recortar el texto de los
+    // vecinos (fix M6-C.0 fix-loop: antes la celda leía $8 de la escala de SIZE = 84px y desbordaba). La
+    // selección se comunica por (a) las líneas en los bordes exactos de la celda central y (b) el gradiente
+    // de opacidad (vecinos atenuados → centro sólido), NO por un número gigante. El HERO único es el readout
+    // fijo "36 cm" ($wheelHero) de arriba, estable durante el scroll (glanceable, manga). Cruza a
+    // fontSize/lineHeight de un <Text> → token leído con getTokenValue.
+    wheelValueText: 26,
     // Indicador de progreso de jornada en el header SLIM ("12 hoy"): el punto/dot del chip de contador.
     // Reusa $dot=8 para la marca; no necesita token propio.
   },

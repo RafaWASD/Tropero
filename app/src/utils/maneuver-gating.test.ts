@@ -43,7 +43,28 @@ test('R5.4: el mapeo MANEUVER_DATA_KEYS cubre las 12 maniobras con los data_keys
   // Maniobras nuevas (sesión 26, R6.13/R6.15).
   assert.deepEqual(MANEUVER_DATA_KEYS.antiparasitario, ['antiparasitario_interno', 'antiparasitario_externo']);
   assert.deepEqual(MANEUVER_DATA_KEYS.antibiotico, ['antibiotico']);
-  assert.equal(ALL_MANEUVERS.length, 12);
+  // Circunferencia escrotal (sesión 27, R14.1): single-key nuevo.
+  assert.deepEqual(MANEUVER_DATA_KEYS.circunferencia_escrotal, ['circunferencia_escrotal']);
+  assert.equal(ALL_MANEUVERS.length, 13);
+});
+
+test('R14.1: la CE single-key APLICA si circunferencia_escrotal está enabled; NO si está off/ausente', () => {
+  const on = resolveManeuverGating('circunferencia_escrotal', config(['circunferencia_escrotal']));
+  assert.equal(on.applies, true);
+  assert.equal(on.dataKeys.length, 1);
+  assert.equal(on.dataKeys[0].dataKey, 'circunferencia_escrotal');
+  // Rodeo sin el data_key (o con cualquier otro enabled) → la maniobra NO aplica (capa 1, R14.1).
+  const off = resolveManeuverGating('circunferencia_escrotal', config(['vacunacion']));
+  assert.equal(off.applies, false);
+});
+
+test('R14.1: filterApplicableManeuvers deja la CE solo si el rodeo la habilita (capa 1)', () => {
+  const seq: ManeuverKind[] = ['vacunacion', 'circunferencia_escrotal'];
+  const withCe = filterApplicableManeuvers(seq, config(['vacunacion', 'circunferencia_escrotal']));
+  assert.deepEqual(withCe.applicable, ['vacunacion', 'circunferencia_escrotal']);
+  const withoutCe = filterApplicableManeuvers(seq, config(['vacunacion']));
+  assert.deepEqual(withoutCe.applicable, ['vacunacion']);
+  assert.deepEqual(withoutCe.omitted, ['circunferencia_escrotal']);
 });
 
 test('pesaje y pesaje_ternero comparten el mismo data_key peso (R5.4)', () => {

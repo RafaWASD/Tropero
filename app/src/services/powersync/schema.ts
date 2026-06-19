@@ -398,6 +398,24 @@ const condition_score_events = new Table({
   deleted_at: column.text,
 });
 
+// spec 03 M6 — circunferencia escrotal (CE) del toro entero (0098). Tabla de evento TIPADA, append-only,
+// longitudinal. establishment_id/recorded_by los fuerza el trigger al subir (CRUD-plano: no se mandan).
+// circumference_cm numeric(4,1)→REAL; age_months int (snapshot, nullable)→INTEGER. La fila baja por
+// ev_scrotal_measurements (scope establishment). uuid/date→TEXT.
+const scrotal_measurements = new Table({
+  animal_profile_id: column.text,
+  establishment_id: column.text,
+  session_id: column.text,
+  circumference_cm: column.real,
+  age_months: column.integer,
+  measured_at: column.text,
+  source: column.text,
+  notes: column.text,
+  recorded_by: column.text,
+  created_at: column.text,
+  deleted_at: column.text,
+});
+
 const lab_samples = new Table({
   animal_profile_id: column.text,
   establishment_id: column.text,
@@ -608,6 +626,8 @@ export const AppSchema = new Schema({
   sanitary_events,
   condition_score_events,
   lab_samples,
+  // spec 03 M6 — circunferencia escrotal (CRUD-plano; scope establishment vía ev_scrotal_measurements)
+  scrotal_measurements,
   animal_events,
   birth_calves,
   // outbox (insertOnly, write-side)

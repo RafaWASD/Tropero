@@ -10,7 +10,7 @@
 //
 // El diff es la pieza crítica del flujo de creación: el trigger tg_rodeos_seed_data_config
 // (0018) ya pre-pobla rodeo_data_config con default_enabled por cada system_default_field;
-// el cliente NO debe re-escribir las 26 filas, solo las que el usuario tildó/destildó
+// el cliente NO debe re-escribir las 27 filas (cría; +1 por circunferencia_escrotal, spec 03 R14.18, seed 0099), solo las que el usuario tildó/destildó
 // distinto del default (UPDATE) o habilitó siendo no-default (INSERT).
 
 // ─── Tipos de dominio (espejan las tablas, sin acoplar a supabase-js) ────────────

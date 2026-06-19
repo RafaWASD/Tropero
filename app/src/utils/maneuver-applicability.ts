@@ -11,6 +11,10 @@
 //     SIN este filtro un animal pasaría por los DOS pasos de peso (el doble pesaje que reportó Raf). Un
 //     ternero/ternera → solo `pesaje_ternero`; cualquier otra categoría (incl. desconocida) → solo `pesaje`.
 //   - R6.8: el prompt CUT (transición por dientes) NO se ofrece para TERNEROS.
+//   - R14.2/R14.3: la CIRCUNFERENCIA ESCROTAL es solo para machos ENTEROS no-ternero (categoría ∈
+//     {torito, toro} ∧ is_castrated ≠ true) → se SALTA en hembras, terneros, novillos/castrados; castración
+//     DESCONOCIDA (null) → se INCLUYE (entero por defecto — UX, no seguridad: mostrar la maniobra no escribe
+//     dato prohibido; el gating capa 2 server-side cubre el rodeo).
 //
 // Son predicados PUROS para que M3.2 los use al secuenciar (saltar la maniobra / no mostrar el prompt). El
 // orquestador (`maneuver-events.ts`) NO debe escribir un raspado de una hembra ni un CUT de un ternero —
@@ -26,10 +30,18 @@ export type AnimalApplicabilityInfo = {
   sex: AnimalSex | null;
   /**
    * `code` de la categoría ACTUAL del animal (ternero/ternera/vaquillona/…). Para el gate del prompt CUT
-   * (R6.8: no para terneros). null si no se pudo resolver (fail-safe → se trata como NO-ternero salvo que
-   * el caller decida otra cosa; ver shouldOfferCutPrompt).
+   * (R6.8: no para terneros) y la aplicabilidad de la CE (R14.2: solo torito/toro). null si no se pudo
+   * resolver (fail-safe → se trata como NO-ternero salvo que el caller decida otra cosa; ver
+   * shouldOfferCutPrompt).
    */
   categoryCode: string | null;
+  /**
+   * `is_castrated` REAL denormalizado del perfil activo (animal_profiles.is_castrated, spec 10 / 0084). Lo
+   * lee el caller del SQLite local (mismo valor que AnimalDetail.isCastrated). Para la CE (R14.2/R14.3):
+   * `true` → castrado → se SALTA; `false` → entero → aplica si la categoría es torito/toro; `null` →
+   * castración DESCONOCIDA → se INCLUYE (entero por defecto, R14.3). Las demás maniobras no lo usan.
+   */
+  isCastrated: boolean | null;
 };
 
 // ─── Aplicabilidad per-animal por sexo/categoría (R6.12 raspado / R6.2-R6.3 tactos / R6.9-R6.10 pesaje) ───
@@ -40,6 +52,34 @@ export type AnimalApplicabilityInfo = {
  *   - el split de pesaje: un ternero/ternera se pesa con `pesaje_ternero`, no con `pesaje` (R6.9/R6.10).
  */
 const CALF_CATEGORY_CODES: ReadonlySet<string> = new Set(['ternero', 'ternera']);
+
+/**
+ * Los `code` de categoría de MACHO ENTERO no-ternero: `torito` (≥1 año entero) y `toro` (≥2 años entero).
+ * Verificado en `animal-category.ts` (AnimalCategoryCode): los CASTRADOS son `novillito`/`novillo` (no entran
+ * acá). Usado por la aplicabilidad de la CIRCUNFERENCIA ESCROTAL (R14.2): la CE solo aplica a estos códigos
+ * con `is_castrated ≠ true`.
+ */
+const BULL_ENTIRE_CATEGORY_CODES: ReadonlySet<string> = new Set(['torito', 'toro']);
+
+/**
+ * ¿Este animal es un MACHO ENTERO no-ternero? (categoría ∈ {torito, toro} ∧ `is_castrated` ≠ true). Es el
+ * MISMO criterio que la aplicabilidad de la CE (R14.2/R14.3) extraído como predicado reusable: la ficha
+ * (M6-C.2) lo usa para mostrar la tarjeta de tendencia de CE SOLO a machos enteros (paridad con la fila
+ * "Estado reproductivo" que solo se muestra a hembras). Castración DESCONOCIDA (`null`) → INCLUYE (entero
+ * por defecto, R14.3 — es display/UX, no seguridad: la RLS server-side es la barrera real de la lectura).
+ * `categoryCode` null (irresoluble) → false (no se muestra la tarjeta a un animal sin categoría resuelta).
+ * PURO. Única fuente de verdad del set de categorías enteras (no se duplica el literal).
+ */
+export function isBullEntire(
+  categoryCode: string | null | undefined,
+  isCastrated: boolean | null | undefined,
+): boolean {
+  return (
+    categoryCode != null &&
+    BULL_ENTIRE_CATEGORY_CODES.has(categoryCode) &&
+    isCastrated !== true
+  );
+}
 
 /**
  * ¿La maniobra APLICA a ESTE animal por sus atributos (sexo/categoría)? (per-animal, ortogonal al gating por
@@ -75,6 +115,12 @@ export function appliesToAnimal(maneuver: ManeuverKind, animal: AnimalApplicabil
     case 'pesaje':
       // Peso de adulto/recría: cualquier categoría que NO sea ternero/ternera (R6.9). null → aplica (genérico).
       return !(animal.categoryCode != null && CALF_CATEGORY_CODES.has(animal.categoryCode));
+    case 'circunferencia_escrotal':
+      // CE solo a machos ENTEROS no-ternero (R14.2): categoría ∈ {torito, toro} ∧ is_castrated ≠ true.
+      // Castración DESCONOCIDA (null) → INCLUYE (entero por defecto, R14.3 — UX, no seguridad). Hembra,
+      // ternero, novillo/castrado → se salta (categoría fuera del set o is_castrated=true). categoryCode
+      // null (irresoluble) → se salta. Reusa `isBullEntire` (única fuente del set de categorías enteras).
+      return isBullEntire(animal.categoryCode, animal.isCastrated);
     default:
       return true;
   }

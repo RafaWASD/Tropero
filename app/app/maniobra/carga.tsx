@@ -32,7 +32,9 @@ import { getSessionById, setSessionCounts, type Session } from '@/services/sessi
 import { persistManeuverEvent, softDeleteManeuverEvents } from '@/services/maneuver-events';
 import { fetchEnabledCustomManeuvers, type EnabledCustomManeuver } from '@/services/custom-fields';
 import { addCustomMeasurement } from '@/services/custom-measurements';
+import { fetchLastScrotalCm } from '@/services/scrotal';
 import { toCustomValue, type CustomCaptureValue } from '@/utils/custom-render';
+import { CE_DEFAULT_CM, prefillAgeMonths } from '@/utils/wheel-picker';
 import {
   filterByAnimalApplicability,
   type AnimalApplicabilityInfo,
@@ -48,6 +50,7 @@ import {
 } from '@/utils/maneuver-config';
 import { splitMultiPreconfig } from '@/utils/maneuver-wizard';
 import { maneuverLabel } from '@/utils/maneuver-wizard';
+import { maneuverTitleFontToken } from '@/utils/maneuver-title-size';
 import { formatEidReadable } from '@/utils/eid-format';
 import { stepKindFor } from '@/utils/maneuver-step-kind';
 import {
@@ -76,6 +79,7 @@ import { SilentVaccinationStep } from './_components/SilentVaccinationStep';
 import { InseminacionStep } from './_components/InseminacionStep';
 import { LabSampleStep } from './_components/LabSampleStep';
 import { LabDoubleStep } from './_components/LabDoubleStep';
+import { CircunferenciaEscrotalStep } from './_components/CircunferenciaEscrotalStep';
 import { CustomManeuverStep } from './_components/CustomManeuverStep';
 import { PlaceholderStep } from './_components/PlaceholderStep';
 import { AnimalSummary } from './_components/AnimalSummary';
@@ -153,6 +157,9 @@ export default function ManiobraCarga() {
   // Maniobras CUSTOM enabled en el rodeo del animal (enriquecidas con ui_component/options, tweak M1 §11.7 +
   // render genérico M5-C.3). Se cargan cuando se conoce el rodeo; vacío hasta que un campo cree maniobras custom.
   const [customManeuvers, setCustomManeuvers] = useState<EnabledCustomManeuver[]>([]);
+  // Última CE medida del animal (R14.5): valor inicial de la rueda. null = primera medición (la rueda
+  // arranca en CE_DEFAULT_CM=36). Se lee local (offline) al conocer el perfil; undefined = aún cargando.
+  const [lastScrotalCm, setLastScrotalCm] = useState<number | null | undefined>(undefined);
   // Error de PERSISTENCIA de la maniobra actual (R5.7/R10.8): si el write LOCAL falla (o tira), NO se
   // avanza y se SUPERFICIA un mensaje accionable es-AR debajo del paso (en vez de tragar el error y dejar
   // al operario tapeando sin que pase nada). Se limpia al re-intentar (nuevo tap) o al entrar a otro paso.
@@ -249,6 +256,24 @@ export default function ManiobraCarga() {
       if (!active) return;
       if (r.ok) setAnimal(r.value);
       else setLoadError(r.error.message);
+    });
+    return () => {
+      active = false;
+    };
+  }, [profileId]);
+
+  // Última CE del animal (R14.5): se lee al conocer el perfil. Solo se usa si la CE entra en la secuencia
+  // (rodeo con `circunferencia_escrotal` enabled + macho entero); leerla siempre es barato (1 query local) y
+  // evita un flash de spinner dentro del paso. Un error de lectura → null (la rueda arranca en el default 36).
+  useEffect(() => {
+    if (!profileId) {
+      setLastScrotalCm(undefined);
+      return;
+    }
+    let active = true;
+    setLastScrotalCm(undefined);
+    void fetchLastScrotalCm(profileId).then((cm) => {
+      if (active) setLastScrotalCm(cm);
     });
     return () => {
       active = false;
@@ -624,17 +649,42 @@ export default function ManiobraCarga() {
       ) : currentStep ? (
         <>
           {/* ── LÍNEA DE MANIOBRA + CONTADOR "Tacto · 2 de 4" (R5.14, sobre la secuencia filtrada combinada) ──
-                ROBUSTEZ a labels largos (las custom también pueden ser largas): el label = flex/minWidth:0 +
-                numberOfLines → elipsa con "…"; el contador = flexShrink:0 → nunca se recorta. El label es el
-                maneuverLabel es-AR (fábrica) o el label del field custom (R13.8). ── */}
-          <XStack paddingHorizontal="$4" paddingTop="$3" paddingBottom="$2" alignItems="center" gap="$2">
-            <Text flex={1} minWidth={0} fontFamily="$body" fontSize="$5" lineHeight="$5" fontWeight="600" color="$textPrimary" numberOfLines={1}>
-              {currentStep.source === 'custom' ? currentStep.custom.label : maneuverLabel(currentStep.maneuver)}
-            </Text>
-            <Text flexShrink={0} fontFamily="$body" fontSize="$5" lineHeight="$5" color="$textFaint" numberOfLines={1}>
-              · {currentStep.position} de {currentStep.total}
-            </Text>
-          </XStack>
+                ROBUSTEZ a labels largos (las custom también pueden ser largas — bug cazado por Raf: el label
+                de maniobra custom "Ángulo de inclinación de pezuña posterior" se recortaba a 1 línea con "…"):
+                el label = flex/minWidth:0 + numberOfLines={2} + tamaño length-aware (maneuverTitleFontToken:
+                $5 normal / $4 muy largo) + word-break (web) → ENTRA COMPLETO en ≤2 líneas (lineHeight matching
+                para no recortar descendentes g/p/q/y), elipsa a 2 líneas solo en el caso patológico. El
+                contador = flexShrink:0, alineado ARRIBA (alignItems flex-start) → nunca se recorta y queda en
+                la 1ra línea aunque el label envuelva. El label es el maneuverLabel es-AR (fábrica) o el label
+                del field custom (R13.8). ── */}
+          {(() => {
+            const titleLabel =
+              currentStep.source === 'custom' ? currentStep.custom.label : maneuverLabel(currentStep.maneuver);
+            const titleToken = maneuverTitleFontToken(titleLabel);
+            return (
+              <XStack paddingHorizontal="$4" paddingTop="$3" paddingBottom="$2" alignItems="flex-start" gap="$2">
+                <Text
+                  flex={1}
+                  minWidth={0}
+                  fontFamily="$body"
+                  fontSize={titleToken.fontSize}
+                  lineHeight={titleToken.lineHeight}
+                  fontWeight="600"
+                  color="$textPrimary"
+                  numberOfLines={2}
+                  ellipsizeMode="tail"
+                  // overflowWrap/wordBreak son CSS web-only (react-native-web): garantizan que un label largo
+                  // SIN espacios parta dentro del ancho en vez de overflowear. En native son no-op.
+                  style={Platform.OS === 'web' ? ({ overflowWrap: 'anywhere', wordBreak: 'break-word' } as object) : undefined}
+                >
+                  {titleLabel}
+                </Text>
+                <Text flexShrink={0} fontFamily="$body" fontSize="$5" lineHeight="$5" color="$textFaint" numberOfLines={1}>
+                  · {currentStep.position} de {currentStep.total}
+                </Text>
+              </XStack>
+            );
+          })()}
 
           {/* ── BANNER DE ERROR DE PERSISTENCIA (R5.7/R10.8): el write local falló → NO se avanzó. Mensaje
                 accionable es-AR (reintentar) + detalle atenuado para diagnóstico. Visible solo cuando hay error. ── */}
@@ -661,6 +711,7 @@ export default function ManiobraCarga() {
               captured={captured[currentStep.maneuver]}
               animal={animal}
               config={session.config}
+              lastScrotalCm={lastScrotalCm ?? null}
               bottomPad={bottomPad}
               onCapture={(value) => void captureAndAdvance(currentStep.maneuver, value)}
             />
@@ -680,6 +731,7 @@ function ManeuverStep({
   captured,
   animal,
   config,
+  lastScrotalCm,
   bottomPad,
   onCapture,
 }: {
@@ -689,6 +741,8 @@ function ManeuverStep({
   animal: AnimalDetail;
   /** El config jsonb de la sesión (pass-through) — para el preconfig de tanda de las sanitarias (R1.7/R1.8). */
   config: unknown;
+  /** Última CE medida del animal (R14.5): valor inicial de la rueda de circunferencia escrotal. null = 1ra vez. */
+  lastScrotalCm: number | null;
   bottomPad: number;
   onCapture: (value: StepValue) => void;
 }) {
@@ -807,6 +861,28 @@ function ManeuverStep({
           onConfirm={(semenName) => onCapture({ kind: 'inseminacion', semenName })}
         />
       );
+    case 'rueda': {
+      // Circunferencia escrotal (R14.5/R14.6/R14.7): rueda inercial de CE + edad en meses. El valor inicial
+      // de la rueda = la última CE corregida (si veníamos del resumen) o la última medida del animal, o 36
+      // (CE_DEFAULT_CM) si es la 1ra. La EDAD se PRELLENA de animal_birth_date (R14.6, prefillAgeMonths reusa
+      // monthsBetween) y queda SIEMPRE ajustable (R14.7, rueda de meses del sheet); sin fecha → null (la rueda
+      // de meses arranca en su default). onConfirm emite StepValue { kind:'scrotal', circumferenceCm, ageMonths }
+      // → el orquestador (maneuver-events) ramifica al write-path de scrotal_measurements.
+      const initialCm =
+        captured?.kind === 'scrotal' ? captured.circumferenceCm : (lastScrotalCm ?? CE_DEFAULT_CM);
+      const prefAge =
+        captured?.kind === 'scrotal' ? captured.ageMonths : prefillAgeMonths(animal.birthDate);
+      return (
+        <CircunferenciaEscrotalStep
+          initialCm={initialCm}
+          ageMonths={prefAge}
+          bottomPad={bottomPad}
+          onConfirm={({ circumferenceCm, ageMonths }) =>
+            onCapture({ kind: 'scrotal', circumferenceCm, ageMonths })
+          }
+        />
+      );
+    }
     default:
       return (
         <PlaceholderStep
@@ -818,9 +894,14 @@ function ManeuverStep({
   }
 }
 
-/** Subset de atributos del animal que la aplicabilidad per-animal necesita (R6.8 prompt CUT no-terneros). */
+/** Subset de atributos del animal que la aplicabilidad per-animal necesita (R6.8 prompt CUT no-terneros;
+ *  R14.2/R14.3 CE solo a machos enteros). isCastrated REAL del perfil (0084): el frame lo conoce de
+ *  AnimalDetail.isCastrated. La CE se salta en hembra/ternero/castrado; castración desconocida → incluye
+ *  (R14.3) — pero AnimalDetail.isCastrated es boolean no-nullable (el alta entra entero, false), así que
+ *  acá nunca es null; el null de la regla (R14.3) lo cubre el tipo de AnimalApplicabilityInfo para callers
+ *  que sí pudieran no resolverlo (tests, otros orígenes). */
 function toApplicabilityInfo(animal: AnimalDetail): AnimalApplicabilityInfo {
-  return { sex: animal.sex, categoryCode: animal.categoryCode || null };
+  return { sex: animal.sex, categoryCode: animal.categoryCode || null, isCastrated: animal.isCastrated };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════

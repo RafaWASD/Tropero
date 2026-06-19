@@ -36,6 +36,7 @@ test('maneuverLabel devuelve el label es-AR; fallback al token crudo si desconoc
   assert.equal(maneuverLabel('tacto'), 'Tacto de preñez');
   assert.equal(maneuverLabel('tacto_vaquillona'), 'Tacto de aptitud reproductiva');
   assert.equal(maneuverLabel('raspado'), 'Raspado de toros');
+  assert.equal(maneuverLabel('circunferencia_escrotal'), 'Circunferencia escrotal');
   // @ts-expect-error — probamos el fallback defensivo con un token fuera del enum.
   assert.equal(maneuverLabel('inexistente'), 'inexistente');
 });

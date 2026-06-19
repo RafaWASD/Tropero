@@ -34,6 +34,10 @@ import { ALL_MANEUVERS, type ManeuverKind } from './maneuver-gating';
  *                       Raspado de toros (solo machos, R6.12). (R6.11)
  *   - `dientes`       : selector de estado dentario → UPDATE `animal_profiles.teeth_state`; si 1/2 · 1/4 ·
  *                       sin_dientes → prompt CUT (no para terneros, R6.8). (R6.7/R6.8)
+ *   - `rueda`         : rueda inercial (wheel picker) de CIRCUNFERENCIA ESCROTAL (CE) del toro + edad en
+ *                       meses (snapshot) → `scrotal_measurements` (tabla typed, R14.5/R14.9). FACTORY-ONLY:
+ *                       el render genérico de M5 custom NO lo usa (las custom caen a su CustomManeuverStep
+ *                       por ui_component, no por StepKind). (R14.1/R14.5)
  *
  * NOTA: NO hay `placeholder` en M3.1 — todas las maniobras del catálogo tienen su StepKind real. El default
  * de `stepKindFor` (defensivo, ante un valor del jsonb pass-through fuera del catálogo) cae a `silent_single`
@@ -49,11 +53,14 @@ export type StepKind =
   | 'inseminacion'
   | 'lab_single'
   | 'lab_double'
-  | 'dientes';
+  | 'dientes'
+  // Circunferencia escrotal (R14.5): rueda inercial + edad. FACTORY-ONLY (el render custom de M5 no lo usa).
+  | 'rueda';
 
 /**
- * Mapeo ManeuverKind → StepKind (R5.4, destino de UI). Exhaustivo sobre las 12 maniobras del catálogo
- * (M3.1 cablea TODAS). M3.2 agrega el `case` de cada StepKind en el renderer del paso; el frame no cambia.
+ * Mapeo ManeuverKind → StepKind (R5.4, destino de UI). Exhaustivo sobre las 13 maniobras del catálogo
+ * (M3.1 cablea TODAS; s27 sumó circunferencia_escrotal → 'rueda'). M3.2 agrega el `case` de cada StepKind
+ * en el renderer del paso; el frame no cambia.
  */
 const STEP_KIND_BY_MANEUVER: Record<ManeuverKind, StepKind> = {
   tacto: 'tacto',
@@ -68,6 +75,8 @@ const STEP_KIND_BY_MANEUVER: Record<ManeuverKind, StepKind> = {
   raspado: 'lab_double',
   antiparasitario: 'silent_single',
   antibiotico: 'silent_single',
+  // Circunferencia escrotal (R14.5): rueda inercial de CE + edad → scrotal_measurements. Factory-only.
+  circunferencia_escrotal: 'rueda',
 };
 
 /**

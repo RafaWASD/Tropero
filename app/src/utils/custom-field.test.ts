@@ -7,6 +7,7 @@ import {
   baseSlug,
   slugifyDataKey,
   validateCustomFieldDraft,
+  customFieldErrorTarget,
   buildCreateCustomFieldPayload,
   uiComponentNeedsOptions,
   UI_COMPONENT_OPTIONS,
@@ -15,6 +16,7 @@ import {
   OPTIONS_MAX,
   OPTION_LABEL_MAX,
   CUSTOM_FIELD_CATEGORY,
+  type CustomFieldDraft,
 } from './custom-field.ts';
 
 // ─── baseSlug ──────────────────────────────────────────────────────────────────────────────────────
@@ -145,6 +147,77 @@ test('validate: opciones duplicadas (case-insensitive) → error', () => {
     label: 'X', dataType: 'maniobra', uiComponent: 'enum_multi', options: ['Adentro', 'adentro'],
   });
   assert.equal(r.ok, false);
+});
+
+// ─── customFieldErrorTarget (presentación: a qué campo apunta el error) ──────────────────────────────
+
+test('errorTarget: label vacío → "label"', () => {
+  assert.equal(customFieldErrorTarget({ label: '   ', dataType: 'maniobra', uiComponent: 'numeric' }), 'label');
+});
+
+test('errorTarget: label demasiado largo → "label"', () => {
+  assert.equal(
+    customFieldErrorTarget({ label: 'x'.repeat(LABEL_MAX + 1), dataType: 'maniobra', uiComponent: 'numeric' }),
+    'label',
+  );
+});
+
+test('errorTarget: enum sin opciones → "options"', () => {
+  assert.equal(
+    customFieldErrorTarget({ label: 'Pezuña', dataType: 'maniobra', uiComponent: 'enum_single', options: [] }),
+    'options',
+  );
+});
+
+test('errorTarget: enum con opciones inválidas (duplicadas / muy largas / demasiadas) → "options"', () => {
+  assert.equal(
+    customFieldErrorTarget({ label: 'X', dataType: 'maniobra', uiComponent: 'enum_multi', options: ['Adentro', 'adentro'] }),
+    'options',
+  );
+  assert.equal(
+    customFieldErrorTarget({ label: 'X', dataType: 'maniobra', uiComponent: 'enum_single', options: ['x'.repeat(OPTION_LABEL_MAX + 1)] }),
+    'options',
+  );
+  const tooMany = Array.from({ length: OPTIONS_MAX + 1 }, (_, i) => `opt_${i}`);
+  assert.equal(
+    customFieldErrorTarget({ label: 'X', dataType: 'maniobra', uiComponent: 'enum_multi', options: tooMany }),
+    'options',
+  );
+});
+
+test('errorTarget: precedencia label-antes-que-options (label vacío Y enum sin opciones → "label")', () => {
+  // El label vacío se resalta primero (mismo orden que valida el mensaje).
+  assert.equal(
+    customFieldErrorTarget({ label: '', dataType: 'maniobra', uiComponent: 'enum_single', options: [] }),
+    'label',
+  );
+});
+
+test('errorTarget: draft válido → null', () => {
+  assert.equal(customFieldErrorTarget({ label: 'Ángulo', dataType: 'maniobra', uiComponent: 'numeric' }), null);
+  assert.equal(
+    customFieldErrorTarget({ label: 'Pezuña', dataType: 'maniobra', uiComponent: 'enum_single', options: ['a', 'b'] }),
+    null,
+  );
+});
+
+test('errorTarget: SIEMPRE consistente con validateCustomFieldDraft (target sii inválido)', () => {
+  // Barrido de drafts que ejercen cada rama: si la validación falla, hay target; si pasa, no hay target.
+  const drafts: CustomFieldDraft[] = [
+    { label: '', dataType: 'maniobra', uiComponent: 'numeric' },
+    { label: 'x'.repeat(LABEL_MAX + 1), dataType: 'maniobra', uiComponent: 'numeric' },
+    { label: 'OK', dataType: 'maniobra', uiComponent: 'numeric' },
+    { label: 'OK', dataType: 'maniobra', uiComponent: 'enum_single', options: [] },
+    { label: 'OK', dataType: 'maniobra', uiComponent: 'enum_single', options: ['a', 'a'] },
+    { label: 'OK', dataType: 'maniobra', uiComponent: 'enum_multi', options: ['a', 'b'] },
+    { label: 'OK', dataType: 'propiedad', uiComponent: 'text' },
+    { label: 'OK', dataType: 'propiedad', uiComponent: 'boolean' },
+  ];
+  for (const d of drafts) {
+    const valid = validateCustomFieldDraft(d).ok;
+    const target = customFieldErrorTarget(d);
+    assert.equal(target === null, valid, `inconsistente para ${JSON.stringify(d)}`);
+  }
 });
 
 // ─── buildCreateCustomFieldPayload ───────────────────────────────────────────────────────────────────
