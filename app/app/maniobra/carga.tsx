@@ -39,6 +39,7 @@ import { getSessionById, setSessionCounts, type Session } from '@/services/sessi
 import { persistManeuverEvent, softDeleteManeuverEvents } from '@/services/maneuver-events';
 import { fetchEnabledCustomManeuvers, type EnabledCustomManeuver } from '@/services/custom-fields';
 import { addCustomMeasurement } from '@/services/custom-measurements';
+import { assignAnimalToGroup, fetchManagementGroups, type ManagementGroup } from '@/services/management-groups';
 import { fetchLastScrotalCm } from '@/services/scrotal';
 import { toCustomValue, type CustomCaptureValue } from '@/utils/custom-render';
 import { CE_DEFAULT_CM, prefillAgeMonths } from '@/utils/wheel-picker';
@@ -90,6 +91,7 @@ import { CircunferenciaEscrotalStep } from './_components/CircunferenciaEscrotal
 import { CustomManeuverStep } from './_components/CustomManeuverStep';
 import { PlaceholderStep } from './_components/PlaceholderStep';
 import { AnimalSummary } from './_components/AnimalSummary';
+import { LotePickerSheet } from './_components/LotePickerSheet';
 
 /** ¿Qué muestra el frame? El paso actual de la secuencia, o el resumen del animal. */
 type FrameMode = 'step' | 'summary';
@@ -171,6 +173,15 @@ export default function ManiobraCarga() {
   // del preview de transición de categoría. Se carga una vez al conocer el rodeo, OFFLINE. Vacío = sin
   // catálogo (rodeo aún no sincronizado) → el preview no se muestra (fail-safe).
   const [categoryCatalog, setCategoryCatalog] = useState<SystemCategory[]>([]);
+  // Lotes (management_groups, ADR-020) ACTIVOS del campo del animal (R9.2): se cargan al conocer el
+  // establishment, OFFLINE (mismo patrón que customManeuvers/categoryCatalog). Alimentan el sheet de lote.
+  // Vacío = campo sin lotes / aún sin sincronizar → el sheet muestra solo "Sin lote" + un hint (no crashea).
+  const [groups, setGroups] = useState<ManagementGroup[]>([]);
+  // ¿El sheet de elección de lote está abierto? (afordancia "Lote" del resumen, R9.2). Cerrado por default.
+  const [loteSheetOpen, setLoteSheetOpen] = useState(false);
+  // Error de la asignación de lote (R9.2): si el write LOCAL del UPDATE de management_group_id falla, NO se
+  // traga — se superficia un banner accionable es-AR en el resumen. null = sin error.
+  const [loteError, setLoteError] = useState<CaptureError | null>(null);
   // Error de PERSISTENCIA de la maniobra actual (R5.7/R10.8): si el write LOCAL falla (o tira), NO se
   // avanza y se SUPERFICIA un mensaje accionable es-AR debajo del paso (en vez de tragar el error y dejar
   // al operario tapeando sin que pase nada). Se limpia al re-intentar (nuevo tap) o al entrar a otro paso.
@@ -341,6 +352,25 @@ export default function ManiobraCarga() {
       active = false;
     };
   }, [animalRodeoId]);
+
+  // Lotes activos del campo del animal (R9.2): se cargan al conocer el establishment, OFFLINE (mismo patrón
+  // que customManeuvers/categoryCatalog). El establishment sale del animal real (NUNCA hardcodeado — multi-
+  // tenant, CLAUDE.md ppio 6). Un error/campo-sin-lotes → lista vacía → el sheet muestra solo "Sin lote".
+  const animalEstablishmentId = animal?.establishmentId ?? null;
+  useEffect(() => {
+    if (!animalEstablishmentId) {
+      setGroups([]);
+      return;
+    }
+    let active = true;
+    void fetchManagementGroups(animalEstablishmentId).then((r) => {
+      if (!active) return;
+      setGroups(r.ok ? r.value : []);
+    });
+    return () => {
+      active = false;
+    };
+  }, [animalEstablishmentId]);
 
   // Las maniobras custom de la SESIÓN (config.customManiobras) ∩ las ENABLED del rodeo, EN EL ORDEN de la
   // sesión, enriquecidas con ui_component/options para el renderer genérico. Una custom elegida en la jornada
@@ -622,6 +652,39 @@ export default function ManiobraCarga() {
     setStepEntryNonce((n) => n + 1); // entrar a corregir → remount con el valor ya cargado
   }, []);
 
+  // ─── Asignar / cambiar / quitar el LOTE del animal (R9.2) ───
+  //
+  // Acción MANUAL y per-animal (R9.1: nunca auto-asigna): el operario eligió un lote (o "Sin lote" → null)
+  // en el sheet. assignAnimalToGroup es un UPDATE local de animal_profiles.management_group_id (offline,
+  // CRUD-plano); el tenant-check del lote (mismo establishment, trigger 0037) y la RLS (has_role_in)
+  // re-validan server-side al SUBIR (no acá). Optimista: si el write local OK, actualizamos `animal` en
+  // memoria (managementGroupId + managementGroupName) → el resumen Y el header reflejan el cambio al
+  // instante (consistente con el resto del wizard). Si !ok → superficiamos un error accionable es-AR (NO se
+  // traga). El sheet se cierra en AMBOS casos (el frame lo controla).
+  const onAssignLote = useCallback(
+    async (groupId: string | null) => {
+      if (!profileId) {
+        setLoteSheetOpen(false);
+        return;
+      }
+      setLoteError(null);
+      const res = await assignAnimalToGroup(profileId, groupId);
+      setLoteSheetOpen(false);
+      if (!res.ok) {
+        setLoteError({
+          message: 'No se pudo cambiar el lote. Tocá de nuevo para reintentar.',
+          detail: res.error.message,
+        });
+        return;
+      }
+      // Optimista: reflejamos el nuevo lote en el animal en memoria. El name sale del grupo elegido (o null
+      // para "Sin lote") — leído de `groups` (la lista que alimenta el sheet), no re-fetcheado.
+      const name = groupId === null ? null : (groups.find((g) => g.id === groupId)?.name ?? null);
+      setAnimal((a) => (a ? { ...a, managementGroupId: groupId, managementGroupName: name } : a));
+    },
+    [profileId, groups],
+  );
+
   // ─── Confirmar el animal → contador++ → siguiente animal (R5.10) ───
   const onConfirmAnimal = useCallback(async () => {
     if (!sessionId || confirmingRef.current) return;
@@ -687,12 +750,21 @@ export default function ManiobraCarga() {
       />
 
       {mode === 'summary' ? (
-        <AnimalSummary
-          rows={summaryRows(sequence, captured, customCaptured)}
-          onEdit={onEdit}
-          onConfirm={onConfirmAnimal}
-          preview={transitionPreview}
-        />
+        <>
+          {/* Banner de error de la asignación de lote (R9.2): el UPDATE local falló → NO se tragó. */}
+          {loteError ? <ManeuverErrorBanner error={loteError} /> : null}
+          <AnimalSummary
+            rows={summaryRows(sequence, captured, customCaptured)}
+            onEdit={onEdit}
+            onConfirm={onConfirmAnimal}
+            preview={transitionPreview}
+            loteName={animal.managementGroupName ?? 'Sin lote'}
+            onOpenLote={() => {
+              setLoteError(null);
+              setLoteSheetOpen(true);
+            }}
+          />
+        </>
       ) : sequence.length === 0 ? (
         // Ninguna maniobra aplica a este animal en su rodeo (R5.5) → directo al resumen vacío (no frena la fila).
         <EmptySequence onConfirm={onConfirmAnimal} bottomPad={bottomPad} />
@@ -768,6 +840,19 @@ export default function ManiobraCarga() {
           )}
         </>
       ) : null}
+
+      {/* ── SHEET de elección de LOTE (R9.2). Overlay sobre el frame. Solo se ABRE desde la afordancia
+            "Lote" del resumen (mode === 'summary'); el sheet se auto-oculta con `open`. Tap en una opción →
+            onAssignLote (persiste + cierra). El lote es OPCIONAL y nunca se auto-asigna (R9.1/R9.3). ── */}
+      <LotePickerSheet
+        open={loteSheetOpen}
+        onClose={() => setLoteSheetOpen(false)}
+        groups={groups}
+        selectedId={animal.managementGroupId}
+        onSelect={(id) => {
+          void onAssignLote(id);
+        }}
+      />
     </YStack>
   );
 }

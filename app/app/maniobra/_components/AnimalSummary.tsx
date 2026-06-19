@@ -14,7 +14,7 @@
 import { Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
-import { ArrowRight, Check, ChevronRight } from 'lucide-react-native';
+import { ArrowRight, Check, ChevronRight, Tags } from 'lucide-react-native';
 
 import { buttonA11y, labelA11y } from '@/utils/a11y';
 import type { SummaryRow } from '@/utils/maneuver-sequence';
@@ -33,9 +33,13 @@ export type AnimalSummaryProps = {
    * (override / macho / sin cambio / sin catálogo) → no se muestra nada.
    */
   preview?: CategoryTransitionPreview | null;
+  /** Nombre del lote ACTUAL del animal (`managementGroupName` o "Sin lote"). Display de la afordancia (R9.2). */
+  loteName: string;
+  /** Abrir el sheet de elección de lote (el frame controla el sheet + la persistencia, R9.2). */
+  onOpenLote: () => void;
 };
 
-export function AnimalSummary({ rows, onEdit, onConfirm, preview }: AnimalSummaryProps) {
+export function AnimalSummary({ rows, onEdit, onConfirm, preview, loteName, onOpenLote }: AnimalSummaryProps) {
   const insets = useSafeAreaInsets();
   const bottomPad = Math.max(insets.bottom, getTokenValue('$navBottomMin', 'size'));
   const chevron = getTokenValue('$navIcon', 'size');
@@ -54,6 +58,13 @@ export function AnimalSummary({ rows, onEdit, onConfirm, preview }: AnimalSummar
 
       <ScrollView flex={1} contentContainerStyle={{ paddingHorizontal: getTokenValue('$4', 'size'), paddingBottom: getTokenValue('$3', 'size') }}>
         {preview ? <CategoryPreviewBanner preview={preview} /> : null}
+
+        {/* ── ORGANIZACIÓN: afordancia de LOTE (opcional, R9.2). VISUALMENTE DISTINTA de las filas de
+              corrección de maniobra (no es una maniobra; es el tercer eje del animal — ADR-020). Sección
+              propia + ícono de lote + etiqueta "Lote (opcional)" + valor actual + chevron. Tap → abre el
+              sheet (el frame persiste). ── */}
+        <LoteAffordance loteName={loteName} onOpenLote={onOpenLote} />
+
         {rows.length === 0 ? (
           <YStack paddingVertical="$6" alignItems="center">
             <Text fontFamily="$body" fontSize="$5" lineHeight="$5" fontWeight="500" color="$textMuted" textAlign="center">
@@ -159,6 +170,56 @@ function CategoryPreviewBanner({ preview }: { preview: CategoryTransitionPreview
       <Text fontFamily="$body" fontSize="$3" lineHeight="$3" fontWeight="500" color="$primary" numberOfLines={2}>
         Se actualiza al sincronizar.
       </Text>
+    </YStack>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+// AFORDANCIA de LOTE (R9.2) — asignar/cambiar/quitar el lote del animal desde el resumen. Es el TERCER
+// EJE del animal (management_group, ADR-020), NO una maniobra: por eso es VISUALMENTE DISTINTA de las
+// filas de corrección (sección "Organización" con su propio título + un ícono de lote + etiqueta
+// "Lote (opcional)" + el valor actual + chevron). Tap → abre el sheet (el frame controla sheet +
+// persistencia). El lote es OPCIONAL: si el operario no lo toca, no se escribe nada (R9.3); nunca se
+// auto-asigna (R9.1).
+//
+// Recorte de descendentes: el nombre del lote es texto LIBRE del usuario (g/p/q/y/j posibles) →
+// numberOfLines + lineHeight matching. Tokens, cero hardcode (ADR-023 §4).
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+function LoteAffordance({ loteName, onOpenLote }: { loteName: string; onOpenLote: () => void }) {
+  const tagIcon = getTokenValue('$navIcon', 'size');
+  const chevron = getTokenValue('$navIcon', 'size');
+  const muted = getTokenValue('$textMuted', 'color');
+  return (
+    <YStack paddingTop="$2" gap="$2">
+      <Text fontFamily="$body" fontSize="$3" lineHeight="$3" fontWeight="700" color="$textMuted" numberOfLines={1}>
+        Organización
+      </Text>
+      <XStack
+        testID="summary-lote-row"
+        minHeight="$touchMin"
+        alignItems="center"
+        gap="$3"
+        backgroundColor="$surface"
+        borderWidth={1}
+        borderColor="$divider"
+        borderRadius="$card"
+        paddingHorizontal="$4"
+        paddingVertical="$3"
+        pressStyle={{ backgroundColor: '$greenLight' }}
+        onPress={onOpenLote}
+        {...buttonA11y(Platform.OS, { label: `Cambiar lote. Lote actual: ${loteName}` })}
+      >
+        <Tags size={tagIcon} color={muted} strokeWidth={2} />
+        <YStack flex={1} minWidth={0} gap="$1">
+          <Text fontFamily="$body" fontSize="$5" lineHeight="$5" fontWeight="700" color="$textPrimary" numberOfLines={1}>
+            Lote (opcional)
+          </Text>
+          <Text fontFamily="$body" fontSize="$4" lineHeight="$4" fontWeight="600" color="$textMuted" numberOfLines={1}>
+            {loteName}
+          </Text>
+        </YStack>
+        <ChevronRight size={chevron} color={muted} strokeWidth={2} />
+      </XStack>
     </YStack>
   );
 }

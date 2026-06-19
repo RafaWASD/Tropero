@@ -1523,3 +1523,79 @@ export async function softDeleteProfile(profileId: string): Promise<void> {
 export function anonClient(): SupabaseClient {
   return makeClient(anonKey);
 }
+
+/**
+ * Siembra un LOTE (management_groups, ADR-020) ACTIVO en un establishment, vía service_role (spec 03 R9.2).
+ * Necesario para el e2e del lote opcional del wizard: el sheet de lote del resumen lista los grupos activos
+ * del campo. El nombre va namespaced con el RUN_TAG (red de seguridad del barrido por nombre del cleanup; el
+ * lote se borra igual por CASCADE del establishment). Devuelve el management_group id (lo que el wizard
+ * asigna a `animal_profiles.management_group_id`).
+ *
+ * `rawName:true` siembra el lote SIN el prefijo RUN_TAG (nombre limpio para CAPTURAS demo, mismo patrón que
+ * seedRodeo): el prefijo "e2e_…" empuja el nombre real fuera del recorte de una línea del sheet/resumen y
+ * arruina el veto de descendentes (g/p/q/y/j). SEGURO: el lote se borra por CASCADE del establishment
+ * (trackeado por el id del establishment, FK on delete cascade); su nombre NO participa del barrido por
+ * nombre del cleanup (ese barrido es solo de `establishments`, que conserva su RUN_TAG).
+ */
+export async function seedManagementGroup(
+  establishmentId: string,
+  name: string,
+  opts: { rawName?: boolean } = {},
+): Promise<{ id: string; name: string }> {
+  const id = randomUUID();
+  const fullName = opts.rawName ? name : `${RUN_TAG} ${name}`;
+  const { error } = await admin
+    .from('management_groups')
+    .insert({ id, establishment_id: establishmentId, name: fullName, active: true });
+  if (error) throw new Error(`seedManagementGroup(${name}): ${error.message}`);
+  return { id, name: fullName };
+}
+
+/**
+ * ORÁCULO de persistencia server-side de la ASIGNACIÓN DE LOTE de un perfil (spec 03 R9.2 — "asignar/cambiar
+ * el lote desde el wizard"). Pollea vía service_role hasta que `animal_profiles.management_group_id` del
+ * perfil dado sea `expectedGroupId` (`null` = "Sin lote" / lote quitado, R9.3). Verifica que el UPDATE de
+ * management_group_id (CRUD-plano local + upload queue) llegó REAL al server (no solo al overlay/UI). Espeja
+ * waitForServerProfileRodeo. El tenant-check del lote (mismo establishment, trigger 0037) lo valida el server
+ * al subir; este oráculo confirma que el valor esperado quedó persistido.
+ */
+export async function waitForServerProfileManagementGroup(
+  profileId: string,
+  expectedGroupId: string | null,
+  opts: { tries?: number; delayMs?: number } = {},
+): Promise<void> {
+  const tries = opts.tries ?? 30;
+  const delayMs = opts.delayMs ?? 2000;
+  let last: string | null | undefined = undefined;
+  for (let i = 0; i < tries; i++) {
+    const { data, error } = await admin
+      .from('animal_profiles')
+      .select('management_group_id')
+      .eq('id', profileId)
+      .maybeSingle();
+    if (error) throw new Error(`waitForServerProfileManagementGroup: ${error.message}`);
+    last = (data?.management_group_id as string | null | undefined) ?? null;
+    if (last === expectedGroupId) return;
+    await new Promise((r) => setTimeout(r, delayMs));
+  }
+  throw new Error(
+    `waitForServerProfileManagementGroup(${profileId}): el management_group_id NUNCA llegó a ` +
+      `${expectedGroupId ?? 'null'} en el server (${tries} intentos; último visto: ${last ?? 'null'}). El ` +
+      `UPDATE de animal_profiles.management_group_id (R9.2) no sincronizó, o lo rechazó el tenant-check (0037).`,
+  );
+}
+
+/**
+ * Lee (sin pollear) el `management_group_id` actual de un perfil vía service_role. Lo usa la contraprueba
+ * R9.1/R9.3: correr una maniobra SIN tocar el lote NO debe cambiar el management_group_id (sigue siendo el
+ * sembrado, posiblemente null). Devuelve el valor actual (null si no tiene lote o el perfil no existe).
+ */
+export async function readServerProfileManagementGroup(profileId: string): Promise<string | null> {
+  const { data, error } = await admin
+    .from('animal_profiles')
+    .select('management_group_id')
+    .eq('id', profileId)
+    .maybeSingle();
+  if (error) throw new Error(`readServerProfileManagementGroup: ${error.message}`);
+  return (data?.management_group_id as string | null | undefined) ?? null;
+}

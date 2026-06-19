@@ -536,3 +536,107 @@ feature_list.json. Solo lógica + servicios + builders + tests + reconciliación
 `app/app/animal/[id].tsx`, `app/src/services/sigsa/**`, `specs/active/08-export-sigsa/**`, `feature_list.json`,
 `progress/current.md`, `docs/backlog.md`, `CONTEXT/07-pendientes.md`, otros `progress/*`. NO commit. NO
 `git add -A`. En `animals.ts` solo APPEND al final. Sin migraciones (frontend-puro).
+
+---
+
+## Chunk R9.x — LOTE opcional/manual desde el wizard de maniobra — 2026-06-19
+
+> Frontend PURO, OFFLINE. **Gate 1 N/A** (sin migraciones; la columna `animal_profiles.management_group_id`
+> + los services `fetchManagementGroups`/`assignAnimalToGroup` ya existían — spec 02/ADR-020). El lote es el
+> TERCER eje del animal: per-animal, MANUAL, NUNCA auto-asignado por la sesión (R9.1 — una jornada puede
+> tocar 2 lotes). La asignación vive en el RESUMEN del animal. `baseline_commit` (línea 3) NO se sobreescribe.
+
+### Archivos creados / modificados
+
+**Creados:**
+- `app/src/utils/lote-picker.ts` (PURO) — `lotePickerOptions(groups, selectedId) → { id: string|null; name; selected }[]`:
+  "Sin lote" (id null) PRIMERO + grupos, con `selected` derivado. + `SIN_LOTE_LABEL`.
+- `app/src/utils/lote-picker.test.ts` — 6 casos (orden, selección grupo, selección null, lista vacía,
+  selectedId fantasma con lista vacía, selectedId no-null sin match → ninguna selected).
+- `app/app/maniobra/_components/LotePickerSheet.tsx` — sheet picker AISLADO (espeja `GroupOption` del alta,
+  no lo importa). Patrón canónico: scrim + guard tap-through (doble-rAF, re-armado en `open`) + header FIJO +
+  body SCROLLEABLE (`ScrollView flex:1 minHeight:0`) + footer Cancelar. Empty-state (sin grupos → solo "Sin
+  lote" + hint). testIDs `lote-sheet`/`lote-option-none`/`lote-option-<id>`/`lote-sheet-scrim`/`lote-sheet-cancelar`.
+- `app/e2e/maniobra-lote.spec.ts` — 2 tests (R9.2 offline + R9.1/R9.3 no-auto). Captura `design/maniobra-carga/resumen-lote.png`.
+
+**Modificados:**
+- `app/app/maniobra/_components/AnimalSummary.tsx` — props `loteName`/`onOpenLote` + sección "Organización"
+  con `LoteAffordance` (ícono `Tags` + "Lote (opcional)" + valor + chevron, testID `summary-lote-row`),
+  VISUALMENTE DISTINTA de las filas de corrección, arriba de la lista (debajo del preview R8.4 si existe).
+- `app/app/maniobra/carga.tsx` — `groups` (useEffect `fetchManagementGroups(animal.establishmentId)`, offline)
+  + `loteSheetOpen` + `loteError` + `onAssignLote(groupId|null)` (assignAnimalToGroup local; optimista setAnimal;
+  `!ok` → banner es-AR; cierra el sheet en ambos casos) + props a `AnimalSummary` + render `<LotePickerSheet>`.
+- `app/e2e/helpers/admin.ts` (APPEND al final) — `seedManagementGroup`, `waitForServerProfileManagementGroup`,
+  `readServerProfileManagementGroup`.
+- `scripts/run-tests.mjs` — registra `lote-picker.test.ts` (append tras `maneuver-applicability.test.ts`).
+
+### Mapa R9.x → archivo:test (trazabilidad)
+
+| Requirement | Archivo:test |
+|---|---|
+| R9.1 (NO auto-asignar lote desde la sesión) | `carga.tsx` (POR CONSTRUCCIÓN: cero auto-set de management_group_id en sesión/identificación/confirmación) · e2e `maniobra-lote.spec.ts` › "lote NO auto-asignado…" (maniobra sin tocar el lote → `readServerProfileManagementGroup` IGUAL al sembrado) |
+| R9.2 (asignar/cambiar el lote manual desde el wizard) | `lote-picker.test.ts` (opciones + selección) · `LotePickerSheet.tsx` + `AnimalSummary.tsx` (`LoteAffordance`) + `carga.tsx` (`onAssignLote`) · e2e `maniobra-lote.spec.ts` › "lote opcional: elegir un lote…" (abrir sheet → elegir grupo → display cambia → oráculo server `waitForServerProfileManagementGroup`==grupo, OFFLINE) |
+| R9.3 (opcional; "Sin lote" = null; sin tocar → conserva) | `lote-picker.test.ts` › "selectedId null → Sin lote seleccionada" · e2e `maniobra-lote.spec.ts` (quitar lote → "Sin lote" (null) round-trip; contraprueba sin tocar → conserva) |
+| R9.4 (work_lot_label no-autoritativo) | DEFERIDO/estructural — columna `sessions.work_lot_label` texto SIN FK asignadora (modelo de datos; builders M1 `buildSetWorkLotLabelUpdate` en `maneuver-reads.test.ts`); NO se cablea a UI (decisión de scope, ver Reconciliación) |
+
+### Autorrevisión adversarial (paso 8) — qué busqué, qué encontré, cómo lo cerré
+
+Como revisor hostil:
+1. **NO auto-asignar lote (R9.1)** (verificado): grep del código — `management_group_id` solo se escribe vía
+   `assignAnimalToGroup` desde `onAssignLote` (acción manual). CERO auto-set en identificación/confirmación/
+   sesión. La **contraprueba e2e** (correr una maniobra sin tocar el lote → server intacto) lo PRUEBA, no solo
+   lo afirma.
+2. **"Sin lote" QUITA el lote (null)** (cubierto): `lote-option-none` → `onSelect(null)` → `assignAnimalToGroup(profileId, null)`
+   (el service ya soporta null = NULL). EXTENDÍ la e2e con el round-trip asignar→quitar(null)→re-asignar (display
+   vuelve a "Sin lote" y luego al grupo) tras encontrar que el caso "Sin lote" no estaba ejercido end-to-end.
+3. **Sin grupos no crashea** (cubierto): empty-state del sheet (`groups.length===0` → solo "Sin lote" + hint).
+   `lote-picker.test.ts` cubre lista vacía. El sheet no asume `groups[0]`.
+4. **`!ok` del assign se superficia** (cubierto): `onAssignLote` chequea `res.ok`; si falla → `loteError` →
+   `ManeuverErrorBanner` accionable es-AR (no se traga). NO avanza el estado del animal en ese caso.
+5. **selectedId fantasma** (encontrado/cubierto): un lote borrado / sin sincronizar que el animal todavía
+   apunta → NINGUNA opción `selected`, NI "Sin lote" (no mentir sobre el estado). Test dedicado.
+6. **Recorte de descendentes** (verificado): nombres de lote = texto LIBRE → `numberOfLines` + lineHeight
+   matching en `LoteOption`, `LoteAffordance`, header del sheet. Veté con "Engorde primavera" (g/p) en el unit
+   y la e2e + screenshot `resumen-lote.png` (cero clip de descendentes).
+7. **Sheet header-fijo/body-scroll** (verificado): `flexShrink:0` header (título "Elegir lote" nunca recortado
+   al crecer la lista) + `ScrollView flex:1 minHeight:0` body + footer `flexShrink:0`. Idiom de `ManeuverConfigSheet`.
+8. **Tap-through web táctil** (cubierto): guard `readyToDismissRef` (doble-rAF + fallback), re-armado en cada
+   `open` (un sheet reabierto necesita el guard fresco — lo verifiqué reabriendo en la e2e para "quitar lote").
+9. **Anti-hardcode REAL re-corrido** (`check-hardcode.mjs` → 0 violaciones): sheet + summary 100% tokens; lucide
+   (`Tags`/`Check`/`ChevronRight`) vía `getTokenValue`. El helper puro no usa tokens.
+10. **Multi-tenant** (verificado): `establishmentId` del animal real (NUNCA hardcodeado); el tenant-check del
+    lote (mismo establishment, trigger 0037) re-valida server-side al subir.
+11. **Offline-first** (verificado): la asignación funciona OFFLINE (UPDATE local) — la e2e R9.2 corre con la red
+    CORTADA y el lote sube al reconectar (oráculo server tras `setOffline(false)`).
+12. **Optimismo consistente** (verificado): `setAnimal` actualiza `managementGroupId` + `managementGroupName` →
+    el resumen Y el header reflejan el cambio al instante (mismo patrón que el resto del wizard); el name sale
+    de `groups` (no re-fetch).
+13. **No-aislamiento del GroupCombo del alta** (verificado): NO importé ni refactoricé `crear-animal.tsx`
+    (restricción de terminal paralela) — el sheet es código nuevo aislado que ESPEJA el patrón visual.
+
+### Reconciliación de specs (paso 9)
+
+- **design.md §6.bis.13** (NUEVA) — as-built completo del lote con archivos reales + R9.1 por construcción +
+  R9.4 deferido/estructural. + línea de "Diferido a M3.2c → M4" actualizada (lote DONE).
+- **requirements.md** (EARS R9 sin cambios) — nota de reconciliación as-built bajo US-9 (afordancia en el
+  resumen, helper puro, R9.1 por construcción + contraprueba, R9.4 deferido/estructural).
+- **tasks.md M3.2c** — R9.1/R9.2/R9.3 marcadas DONE (as-built chunk R9.x); R9.4 deferido/estructural; archivos
+  R9.x listados. El `[~]→[x]` final lo deja el leader tras reviewer + Gate 2 (NO marco done yo).
+
+### RC del check
+
+- **typecheck client OK** (incluye e2e + admin helpers) · **anti-hardcode 0 violaciones** · **client unit
+  tests OK** (incluye `lote-picker.test.ts` 6 + 191 del bloque maneuver vecino) — verde.
+- **e2e** `maniobra-lote.spec.ts`: **2 passed** (el `UV_HANDLE_CLOSING` posterior = teardown libuv de Windows
+  DESPUÉS de pasar, NO un fallo — memoria `reference_playwright_win_teardown`).
+- **`node scripts/check.mjs`**: el ÚNICO rojo es `supabase/tests/animal/run.cjs` `23505 animals_tag_unique`
+  (colisión de tag en el remoto COMPARTIDO con la terminal paralela — flake conocido, memoria
+  `reference_check_red_rate_limit`/tag-unique). NO es mi chunk (frontend-puro, cero backend/migraciones/seed
+  propio en esa suite).
+
+### NO toqué (chunk R9.x)
+
+`app/app/animal/[id].tsx`, `app/app/crear-animal.tsx` (NO refactoricé el GroupCombo), `app/src/services/management-groups.ts`
+(solo lo CONSUMÍ), `app/src/services/sigsa/**`, `specs/active/08-export-sigsa/**`, `feature_list.json`,
+`progress/current.md`, `docs/backlog.md`, `CONTEXT/07-pendientes.md`, otros `progress/*`. NO commit. NO `git add -A`.
+En `admin.ts` solo APPEND al final. Sin migraciones (frontend-puro).
