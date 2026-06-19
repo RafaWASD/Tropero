@@ -862,6 +862,9 @@ export function buildAnimalDetailQuery(profileId: string): LocalQuery {
     // spec 10 (T-CL.12 / R13.6): is_castrated REAL (0084) → el espejo C6 lo usa con precedencia sobre la
     // inferencia. future_bull (0085) → la ficha lo muestra como badge ⭐ (R12.3, Fase 4) + el toggle.
     'ap.is_castrated AS is_castrated, ap.future_bull AS future_bull, ' +
+    // delta spec 02 (TCUT.3 / RCUT.4.1): is_cut REAL (marca de descarte denormalizada) → la ficha lo expone
+    // como AnimalDetail.isCut para elegir la afordancia CUT ("Marcar"/"Quitar") y pintar el badge amarillo.
+    'ap.is_cut AS is_cut, ' +
     // C6 (RC6.3.1): system_id del rodeo → el espejo resuelve code→name/id del catálogo local del sistema.
     'r.system_id AS system_id, ' +
     'r.name AS rodeo_name, c.code AS category_code, c.name AS category_name, ' +
@@ -885,6 +888,9 @@ export function buildAnimalDetailQuery(profileId: string): LocalQuery {
     // spec 10 (T-CL.12): is_castrated=0 / future_bull=0 del overlay (alta/ternero optimista nace entero,
     // sin ⭐); constantes para alinear las columnas del UNION (requisito del UNION ALL).
     '0 AS is_castrated, 0 AS future_bull, ' +
+    // delta spec 02 (TCUT.3 / RCUT.4.1): is_cut=0 del overlay (un alta optimista nace no-CUT); constante
+    // para alinear las columnas del UNION ALL con la rama synced.
+    '0 AS is_cut, ' +
     // C6 (RC6.3.1): system_id del rodeo (misma proyección que la rama synced, requisito del UNION).
     'r.system_id AS system_id, ' +
     'r.name AS rodeo_name, c.code AS category_code, c.name AS category_name, ' +
@@ -1431,6 +1437,79 @@ export function buildUpdateManeuverTactoVaquillona(
       'UPDATE reproductive_events SET heifer_fitness = ?, event_date = ? ' +
       "WHERE id = ? AND event_type = 'tacto_vaquillona' AND deleted_at IS NULL",
     args: [heiferFitness, eventDate, id],
+  };
+}
+
+// ─── Circunferencia escrotal (spec 03 M6, US-14) — write-path CRUD-plano + lectura del histórico ────────
+//
+// Tabla TIPADA nueva `scrotal_measurements` (0098, ya aplicada al remoto). Espeja weight_events/
+// condition_score_events: INSERT LOCAL sobre la tabla SINCRONIZADA con `session_id` (R14.10/R5.11);
+// `establishment_id`/`recorded_by` los FUERZA el trigger server-side al subir (0077 anti-spoof + force
+// recorded_by) → NO se mandan. El gating capa 2 (`tg_scrotal_gating` → assert_data_keys_enabled,
+// 'circunferencia_escrotal', 0100) + el tenant-check de `session_id` (tg_event_session_tenant_check, 0052)
+// re-validan al SUBIR (fail-closed). `circumference_cm` numeric(4,1) ∈ [20,50] (CHECK 0098; la rueda ya lo
+// garantiza). `age_months` snapshot nullable (R14.8). `measured_at` date NOT NULL. `source` default 'manual'
+// (no se manda). NUNCA se hardcodea establishment_id (lo deriva el trigger del perfil).
+
+/**
+ * INSERT local de una CIRCUNFERENCIA ESCROTAL de manga (R14.10, append-only, longitudinal). `id` uuid de
+ * cliente. `circumferenceCm` ∈ [20,50] paso 0,5 (la rueda lo snapea/clampa; el CHECK del DB re-valida al
+ * subir). `ageMonths` = edad snapshot confirmada o `null` (edad desconocida, R14.7/R14.8). `measuredAt`
+ * ISO 'YYYY-MM-DD'. `sessionId` vincula la jornada de manga (R14.10/R5.11); null si se cargara desde la
+ * ficha (M6-C.2, fuera de este chunk). `establishment_id`/`recorded_by`/`source` los pone el trigger/default
+ * server-side → NO se mandan (CRUD-plano). 1 CrudEntry → uploadData la sube; un rechazo → R10.8.
+ */
+export function buildAddScrotalInsert(
+  id: string,
+  profileId: string,
+  circumferenceCm: number,
+  ageMonths: number | null,
+  measuredAt: string,
+  sessionId: string | null = null,
+): LocalQuery {
+  return {
+    sql:
+      'INSERT INTO scrotal_measurements ' +
+      '(id, animal_profile_id, circumference_cm, age_months, measured_at, session_id) ' +
+      'VALUES (?, ?, ?, ?, ?, ?)',
+    args: [id, profileId, circumferenceCm, ageMonths, measuredAt, sessionId],
+  };
+}
+
+/**
+ * UPDATE local de una CE de manga ya cargada (R14.17/R5.9 corrección desde el resumen). Solo
+ * circumference_cm/age_months/measured_at (la identidad de la medición no cambia). Mismo patrón que
+ * buildUpdateManeuverWeight: la 1ra captura es INSERT (id estable por animal+maniobra); corregir re-captura
+ * con el MISMO id → UPDATE explícito (NO un 2do INSERT ni upsert ON CONFLICT — PowerSync expone la tabla
+ * como view + no captura bien el upsert). Filtra `deleted_at IS NULL` (defensivo).
+ */
+export function buildUpdateManeuverScrotal(
+  id: string,
+  circumferenceCm: number,
+  ageMonths: number | null,
+  measuredAt: string,
+): LocalQuery {
+  return {
+    sql:
+      'UPDATE scrotal_measurements SET circumference_cm = ?, age_months = ?, measured_at = ? ' +
+      'WHERE id = ? AND deleted_at IS NULL',
+    args: [circumferenceCm, ageMonths, measuredAt, id],
+  };
+}
+
+/**
+ * Histórico de CE de un animal (R14.5 valor inicial de la rueda = última medida; R14.14 tarjeta de tendencia
+ * de la ficha en M6-C.2). Más reciente primero (`measured_at DESC`), solo no-borradas. La 1ra fila = la
+ * última medida (la usa el frame para el `initialCm` de la rueda). Solo lectura LOCAL (offline).
+ */
+export function buildScrotalHistoryQuery(profileId: string): LocalQuery {
+  return {
+    sql:
+      'SELECT id, circumference_cm, age_months, measured_at, session_id, created_at ' +
+      'FROM scrotal_measurements ' +
+      'WHERE animal_profile_id = ? AND deleted_at IS NULL ' +
+      'ORDER BY measured_at DESC, created_at DESC',
+    args: [profileId],
   };
 }
 

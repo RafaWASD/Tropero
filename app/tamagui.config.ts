@@ -51,6 +51,14 @@ const palette = {
   // los 2 bloques vivos se leería como "deshabilitado" — ambigüedad fatal en manga.
   amber: '#9A6206', // DIFERIDA — ámbar oscuro (texto blanco encima ≈ 5.0:1 AA)
   amberPress: '#7E5005', // estado pressed del amber (derivado, más oscuro)
+  // Par AMBER de la marca de DESCARTE CUT (delta spec 02, RCUT.6 / ADR-023 §4). Espejo del par del badge
+  // verde ($primary texto / $greenLight fondo): el badge CUT se pinta amarillo para que el descarte se lea
+  // de un vistazo (no verde como el resto). NO se reusa $amber (semántica DIFERIDA + texto blanco encima, y
+  // su #9A6206 da <4.5:1 sobre un amber pálido). Contraste MEDIDO (WCAG 2.1 relative-luminance):
+  //   cutText #855300 sobre cutBg #FBE6AE = 5.27:1 (≥4.5 ✅) — supera la referencia verde (4.55:1).
+  //   cutText #855300 sobre blanco #FFFFFF = 6.49:1 (≥4.5 ✅).
+  cutText: '#855300', // amber oscuro — TEXTO del badge CUT (y del ícono/afordancia de la ficha)
+  cutBg: '#FBE6AE', // amber pálido — FONDO del badge CUT (inequívoco vs el $greenLight #93cfac)
   greenLight: '#93cfac', // verde claro — icon containers + halo del FAB
   // Halo del FAB (ADR-018): greenLight (#93cfac = rgb(147,207,172)) al 45% de alpha.
   // Es el MISMO verde claro translúcido — se expone como token de color propio para
@@ -103,6 +111,8 @@ const tokens = createTokens({
     terracota: palette.terracota,
     amber: palette.amber, // DIFERIDA del tacto vaquillona (spec 03 M3.2a) — ámbar de "espera/pausa"
     amberPress: palette.amberPress,
+    cutText: palette.cutText, // delta spec 02 (RCUT.6): TEXTO del badge CUT (descarte) — amber oscuro, 5.27:1
+    cutBg: palette.cutBg, // delta spec 02 (RCUT.6): FONDO del badge CUT — amber pálido (espejo $greenLight)
     greenLight: palette.greenLight,
     fabHalo: palette.fabHalo, // verde claro translúcido del halo del FAB (= greenLight @ 45%)
     scrim: palette.scrim, // negro translúcido del scrim de modales/sheets (= textPrimary @ 45%)

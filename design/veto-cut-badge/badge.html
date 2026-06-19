@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { width: 412px; background: #faf9f9; font-family: 'Inter', system-ui, sans-serif; color: #0F0E0C; padding: 20px; }
+  h2 { font-size: 12px; font-weight: 600; color: #6b6b6b; text-transform: uppercase; letter-spacing: .04em; margin: 22px 0 10px; }
+  .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  /* CategoryBadge md: pill, ph $3=12, pv $1=4, fontSize $4≈16, weight 600, lineHeight matcheado */
+  .badge { border-radius: 999px; padding: 4px 12px; font-size: 16px; line-height: 22px; font-weight: 600; align-self: flex-start; display: inline-flex; align-items: center; gap: 4px; }
+  .badge.sm { font-size: 13px; line-height: 18px; padding: 3px 8px; }
+  .green { background: #93cfac; color: #1e5a3e; }
+  .cut   { background: #FBE6AE; color: #855300; }
+  .dot { width: 6px; height: 6px; border-radius: 999px; }
+  .dot.green { background: #1e5a3e; }
+  .dot.cut { background: #855300; }
+  /* AbortionFlag / Archivada: $surface bg + terracota border/text */
+  .flag { background: #F8F6F1; border: 1px solid #C0451F; color: #C0451F; border-radius: 999px; padding: 4px 12px; font-size: 16px; line-height: 22px; font-weight: 600; }
+  .hero-id { font-size: 38px; line-height: 46px; font-weight: 700; color: #0F0E0C; }
+  .muted { color: #6b6b6b; font-size: 16px; font-weight: 500; }
+  .card { background: #F8F6F1; border-radius: 16px; padding: 16px; margin-top: 4px; }
+  .card .lbl { font-size: 13px; color: #6b6b6b; font-weight: 500; }
+  .card .val { font-size: 18px; color: #0F0E0C; font-weight: 600; line-height: 24px; }
+  .cutlink { color: #855300; font-size: 16px; font-weight: 600; line-height: 22px; }
+  .conseq { color: #6b6b6b; font-size: 13px; font-weight: 500; line-height: 18px; margin-top: 6px; }
+  .listrow { display: flex; align-items: center; gap: 10px; background: #fff; border: 1px solid #ececec; border-radius: 12px; padding: 12px 14px; margin-bottom: 8px; }
+  .listrow .idv { font-size: 17px; font-weight: 600; }
+  .sep { color: #b9b9b9; }
+</style>
+</head>
+<body>
+  <h2>1 · Comparación de señales (hero)</h2>
+  <div class="row">
+    <span class="badge green">Vaquillona<span class="dot green"></span></span>
+    <span class="badge cut">CUT<span class="dot cut"></span></span>
+    <span class="flag">Tuvo aborto</span>
+  </div>
+  <div class="conseq">verde = categoría normal · amarillo = CUT (descarte) · terracota = aborto / baja</div>
+
+  <h2>2 · Hero de la ficha (hembra CUT)</h2>
+  <div class="hero-id">1402</div>
+  <div class="row" style="margin-top:8px">
+    <span class="badge cut">CUT<span class="dot cut"></span></span>
+    <span class="muted">&#9792; Hembra</span>
+    <span class="sep">·</span>
+    <span class="muted">La Verde</span>
+  </div>
+
+  <h2>3 · Afordancia "Manejo" (CutRow, descendentes g/j/p)</h2>
+  <div class="card">
+    <div class="lbl">Descarte</div>
+    <div class="val">No</div>
+    <div class="cutlink">Marcar como CUT (descarte)</div>
+    <div class="conseq">La categoría pasará a CUT (descarte).</div>
+  </div>
+
+  <h2>4 · En la lista (AnimalRow)</h2>
+  <div class="listrow"><span class="idv">1402</span><span class="sep">·</span><span class="badge cut sm">CUT<span class="dot cut" style="width:5px;height:5px"></span></span></div>
+  <div class="listrow"><span class="idv">1188</span><span class="sep">·</span><span class="badge green sm">Multípara<span class="dot green" style="width:5px;height:5px"></span></span></div>
+</body>
+</html>

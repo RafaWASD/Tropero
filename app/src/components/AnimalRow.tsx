@@ -366,9 +366,10 @@ export function AnimalRow({
               {showStar ? <FutureBullBadge /> : null}
             </XStack>
           ) : (
-            // Subtítulo NORMAL: badge de categoría con COLOR (firma verde RAFAQ) + rodeo muted.
+            // Subtítulo NORMAL: badge de categoría con COLOR (firma verde RAFAQ; AMARILLA si es CUT, RCUT.6.2
+            // — ruta preferida con `code`) + rodeo muted.
             <XStack alignItems="center" gap="$2" minWidth={0}>
-              <CategoryBadge label={category} size="sm" />
+              <CategoryBadge label={category} code={categoryCode} size="sm" />
               <Text
                 fontFamily="$body"
                 fontSize="$3"

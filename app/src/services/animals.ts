@@ -23,6 +23,7 @@ import {
 } from '../utils/animal-category';
 import { classifyIdentifier, classifySearchQuery } from '../utils/animal-identifier';
 import { castrationObservationText } from '../utils/castration-copy';
+import { decideSetCut, decideUnsetCut } from './cut-service-core';
 import {
   type ExitReasonChoice,
   type ExitStatus,
@@ -42,6 +43,8 @@ import {
   buildRevertCategoryOverrideUpdate,
   buildRodeoSpeciesQuery,
   buildSetCastratedUpdate,
+  buildSetCutUpdate,
+  buildUnsetCutUpdate,
   buildSetFutureBullUpdate,
   buildMoveAnimalToRodeoUpdate,
   buildAddObservationInsert,
@@ -160,6 +163,13 @@ export type AnimalDetail = {
    * machos, badge ⭐ (R12.3), toggle desde la ficha (R12.2/setFutureBull). Auto-clear al castrar (R12.4).
    */
   futureBull: boolean;
+  /**
+   * is_cut REAL del perfil (animal_profiles.is_cut — marca de descarte denormalizada, ADR-008 / delta spec
+   * 02 RCUT.4). FUENTE DE VERDAD del estado CUT: la ficha la usa (NO infiere de categoryCode/categoryName,
+   * RCUT.4.2) para elegir la afordancia "Marcar como CUT" vs "Quitar CUT" y para suprimir la card genérica
+   * "Quitar fijación" (RCUT.5.7). 0/1 de SQLite → boolean. El overlay (alta optimista) nace en false.
+   */
+  isCut: boolean;
 };
 
 // ─── Filas crudas del SQLite local (shape PLANO; b1: identidad desde animal_profiles) ──
@@ -864,6 +874,9 @@ type LocalDetailRow = {
   // spec 10 (T-CL.12): is_castrated REAL (0084, espejo C6 con precedencia) + future_bull (0085, badge ⭐).
   is_castrated?: number | boolean | null;
   future_bull?: number | boolean | null;
+  // delta spec 02 (TCUT.3/TCUT.4 / RCUT.4): is_cut REAL (marca de descarte denormalizada) — la ficha lo
+  // expone como AnimalDetail.isCut. Proyectado por buildAnimalDetailQuery (synced: ap.is_cut; overlay: 0).
+  is_cut?: number | boolean | null;
 };
 
 /**
@@ -921,6 +934,8 @@ export async function fetchAnimalDetail(profileId: string): Promise<ServiceResul
       // spec 10: estado crudo del perfil (0/1 de SQLite → boolean) para la ficha (R13.1 toggle, R12.3 badge).
       isCastrated: toBool(row.is_castrated ?? 0),
       futureBull: toBool(row.future_bull ?? 0),
+      // delta spec 02 (RCUT.4.1): marca de descarte (0/1 → boolean). Fuente de verdad de la afordancia CUT.
+      isCut: toBool(row.is_cut ?? 0),
     },
   };
 }
@@ -1198,6 +1213,54 @@ export async function revertCategoryOverride(
   if (!writeRes.ok) return { ok: false, error: { kind: writeRes.error.kind, message: writeRes.error.message } };
 
   return { ok: true, value: { derivedCode: resolved.value.derivedCode } };
+}
+
+// ─── Marcar / quitar CUT (descarte) desde la ficha (delta spec 02, RCUT.1/RCUT.2) ────────
+//
+// Afordancia female-only equivalente a la maniobra dientes+CUT (spec 03 M3.2a), pero desde la ficha. Reuso
+// TOTAL de `resolveCutCategory` (offline-safe, fail-safe a null) + los builders `buildSetCutUpdate` /
+// `buildUnsetCutUpdate` (cero SQL nuevo). Cada uno es UN solo UPDATE local plano sobre animal_profiles
+// (una CrudEntry PATCH) → offline-first nativo (mismo camino que setCastrated/setFutureBull). La barrera
+// REAL es server-side AL SUBIR: la RLS `animal_profiles_update` (tenant) + el gating capa 2 `dientes`
+// (0054) para el SET (cambio aditivo is_cut false→true); un rechazo lo maneja uploadData (R10.8). El gate
+// de cliente por `dientes` (RCUT.7) vive en la FICHA (prevención, no autorización), no acá.
+//
+// La eligibilidad female-only la gatea la UI (canMarkCut/canUnmarkCut, cut-eligibility.ts): el servicio NO
+// re-valida el sexo (el predicado puro + el server son las barreras). SIN observación automática (a
+// diferencia de setCastrated): marcar CUT no encola un evento en el timeline (consistente con el as-built
+// de la maniobra dientes+CUT, que tampoco encola un evento por el flag).
+
+/**
+ * Marca un animal como CUT (descarte) desde la ficha (RCUT.1). Resuelve la categoría CUT del sistema del
+ * rodeo (resolveCutCategory) + ejecuta el UPDATE local `buildSetCutUpdate` (is_cut=1, category_id=<cut>,
+ * category_override=1). Si NO se resuelve el cutCategoryId (sin system_id / sin fila 'cut' en el catálogo
+ * local) → `{ ok:false }` es-AR sin escribir (RCUT.1.2: nunca fija una categoría que el server rechazaría
+ * 23514). Offline-first (RCUT.1.3): un solo write local plano; la RLS + el gating 0054 re-validan al subir.
+ * La DECISIÓN (id → write : error sin write) vive en el núcleo PURO `decideSetCut` (cut-service-core.ts),
+ * testeable con fakes (TCUT.7); acá solo se inyectan los deps reales (resolveCutCategory + el builder CUT).
+ */
+export async function setCut(profileId: string): Promise<ServiceResult<true>> {
+  // Decisión PURA (decideSetCut): null → error es-AR sin escribir; id → write. El write inyecta el builder
+  // CUT (is_cut=1, category_id=<cut>, override=1). resolveCutCategory ya es offline-safe (fail-safe a null).
+  return decideSetCut(await resolveCutCategory(profileId), (cutCategoryId) =>
+    runLocalWrite(buildSetCutUpdate(profileId, cutCategoryId)),
+  );
+}
+
+/**
+ * Quita la marca CUT (corrección, RCUT.2). Resuelve la categoría DERIVADA (resolveCutCategory.derivedCategoryId,
+ * el espejo del revert) + ejecuta el UPDATE local `buildUnsetCutUpdate` (is_cut=0, category_id=<derivada>,
+ * category_override=0) — el camino que SÍ resetea is_cut (cambio sustractivo, NO gateado por `dientes`,
+ * 0054 §D8). A diferencia de `revertCategoryOverride` (que NO toca is_cut → dejaría un is_cut=1 colgado con
+ * categoría no-CUT, RCUT.2.3), este es el ÚNICO desmarcado consistente de un CUT. Si la derivada no es
+ * resoluble localmente → `{ ok:false }` es-AR sin escribir (RCUT.2.2). Offline-first.
+ */
+export async function unsetCut(profileId: string): Promise<ServiceResult<true>> {
+  // Decisión PURA (decideUnsetCut): derivada null → error es-AR sin escribir; id → write con el builder
+  // sustractivo (is_cut=0, category_id=<derivada>, override=0) — el ÚNICO camino que resetea is_cut.
+  return decideUnsetCut(await resolveCutCategory(profileId), (derivedCategoryId) =>
+    runLocalWrite(buildUnsetCutUpdate(profileId, derivedCategoryId)),
+  );
 }
 
 // ─── Castración / futuro torito (spec 10, T-CL.11 — ficha) ───────────────────────────

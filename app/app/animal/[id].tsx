@@ -21,6 +21,7 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
 import {
   Archive,
+  Ban,
   Check,
   ChevronLeft,
   ChevronRight,
@@ -33,6 +34,7 @@ import {
   Milk,
   Pin,
   Plus,
+  Ruler,
   Scissors,
   Star,
   Tag,
@@ -48,10 +50,14 @@ import {
   previewRevertCategory,
   revertCategoryOverride,
   setCastrated,
+  setCut,
   setFutureBull,
+  unsetCut,
   type AnimalDetail,
   type AnimalStatus,
 } from '@/services/animals';
+import { fetchRodeoGating } from '@/services/rodeo-config';
+import { canMarkCut, canUnmarkCut } from '@/utils/cut-eligibility';
 import { archivedBadgeLabel } from '@/services/exit-animal';
 import { useBusyWhileMounted } from '@/services/ble/stick';
 import { CustomPropertiesFicha } from '../maniobra/_components/CustomPropertiesSection';
@@ -73,12 +79,19 @@ import {
 import { shouldShowFutureBullBadge } from '@/components/AnimalRow';
 import {
   deriveCurrentState,
+  formatAgeMonthsAR,
   formatEventDate,
   hasAbortion,
   humanizePregnancyState,
+  scrotalRowsToTimelineItems,
+  sortTimelineItems,
   type CurrentState,
 } from '@/utils/event-timeline';
 import { formatConditionScore } from '@/utils/event-input';
+import { isBullEntire } from '@/utils/maneuver-applicability';
+import { fetchScrotalHistory, type ScrotalMeasurementRow } from '@/services/scrotal';
+import { formatCmWithUnitAR } from '@/utils/wheel-picker';
+import { scrollFades, type ScrollFades } from '@/utils/scroll-affordance';
 import { buttonA11y, labelA11y } from '@/utils/a11y';
 import { backOr } from '@/utils/nav';
 
@@ -110,6 +123,18 @@ export default function AnimalDetailScreen() {
   // Link a la madre (R14.7). null = no es ternero con parto registrado (o falló el fetch blando) → la
   // ficha NO muestra la card "Madre". El fetch es blando: si falla, la cabecera/timeline siguen vivos.
   const [mother, setMother] = useState<MotherLink | null>(null);
+  // Gate de cliente de "Marcar como CUT" (delta spec 02, RCUT.7): true SOLO si el rodeo del animal habilita
+  // el data_key `dientes` (best-effort, leído del rodeo_data_config local). `buildSetCutUpdate` es un cambio
+  // ADITIVO (is_cut false→true) que el trigger 0054 rechaza al subir (23514) si `dientes` está off → no
+  // ofrecemos algo que el server rechazaría. FAIL-SAFE conservador (RCUT.7.3): estado inicial `false` (no se
+  // ofrece marcar a ciegas) y queda false si la lectura no resuelve / falla / no hay fila. NO gatea "Quitar
+  // CUT" (sustractivo, RCUT.7.2). Solo se resuelve para hembras (el gate no aplica a machos).
+  const [dientesEnabled, setDientesEnabled] = useState(false);
+  // Histórico de CE del animal (spec 03 M6, R14.14). Solo se lee para MACHOS ENTEROS (la tarjeta de
+  // tendencia se muestra solo a ellos — paridad con la fila repro solo-hembras). null = aún no cargado /
+  // no aplica (no es macho entero); [] = macho entero sin mediciones (la 1ra medición es un caso legítimo,
+  // no falta de sync). Lectura LOCAL blanda (fetchScrotalHistory): si falla, la tarjeta no se rompe (queda []).
+  const [scrotalHistory, setScrotalHistory] = useState<ScrotalMeasurementRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -156,6 +181,28 @@ export default function AnimalDetailScreen() {
     void fetchManagementGroups(detailR.value.establishmentId).then((gr) => {
       setGroups(gr.ok ? gr.value : []);
     });
+    // Gate de "Marcar como CUT" (RCUT.7): resolver si el rodeo habilita `dientes` (best-effort, local).
+    // Solo para HEMBRAS (el gate no aplica a machos; CUT es female-only). FAIL-SAFE conservador (RCUT.7.3):
+    // arrancamos en false y solo lo prendemos si la lectura resuelve con `dientes` enabled === true. Cualquier
+    // fallo / sin fila / sin rodeo → queda false (no ofrecer una acción que el server podría rechazar).
+    if (detailR.value.sex === 'female') {
+      void fetchRodeoGating(detailR.value.rodeoId).then((g) => {
+        setDientesEnabled(g.ok ? g.value['dientes']?.enabled === true : false);
+      });
+    } else {
+      setDientesEnabled(false);
+    }
+    // Histórico de CE (R14.14): solo para MACHOS ENTEROS (isBullEntire — mismo criterio que la aplicabilidad
+    // de la maniobra, R14.2/R14.3). Lectura LOCAL blanda: si falla → [] (la tarjeta omite la lista, no rompe
+    // la ficha). A hembra/ternero/castrado NO se lee (queda null → la tarjeta no se renderiza). El gate de
+    // DISPLAY usa la categoría del espejo C6 (categoryCode) + is_castrated REAL, igual que el resto de la ficha.
+    if (isBullEntire(detailR.value.categoryCode, detailR.value.isCastrated)) {
+      void fetchScrotalHistory(detailR.value.profileId).then((h) => {
+        setScrotalHistory(h.ok ? h.value : []);
+      });
+    } else {
+      setScrotalHistory(null);
+    }
     if (timelineR.ok) {
       setTimeline(timelineR.value);
     } else if (!silent) {
@@ -226,6 +273,19 @@ export default function AnimalDetailScreen() {
     () => detail?.idv ?? detail?.visualIdAlt ?? detail?.tagElectronic ?? 'Animal',
     [detail],
   );
+
+  // Timeline COMPUESTO en el cliente (R14.14): el riel del server (`timeline`) + las mediciones de CE
+  // (compuestas localmente, NO vienen de la vista server `animal_timeline` — design §12.6). Se mergean y
+  // re-ordenan con el MISMO criterio que el resto del riel (`sortTimelineItems`). Si no hay CE (null/[]),
+  // es el timeline tal cual. La CE solo se mergea para machos enteros (scrotalHistory queda null si no).
+  const composedTimeline = useMemo(() => {
+    if (timeline == null) return timeline; // aún cargando / error → no inventamos un riel
+    if (!scrotalHistory || scrotalHistory.length === 0) return timeline;
+    // ScrotalMeasurementRow es un superset estructural de ScrotalTimelineRow (id/circumferenceCm/ageMonths/
+    // measuredAt/createdAt) → se pasa directo; scrotalRowsToTimelineItems ignora el sessionId extra.
+    const scrotalItems = scrotalRowsToTimelineItems(scrotalHistory);
+    return sortTimelineItems([...timeline, ...scrotalItems]);
+  }, [timeline, scrotalHistory]);
 
   // ¿Mostramos "Dar de baja"? (C3.3, R4.14) Solo si:
   //   - el animal está ACTIVO (un archivado ya está de baja, no se vuelve a ofrecer), Y
@@ -402,6 +462,68 @@ export default function AnimalDetailScreen() {
     [detail, load],
   );
 
+  // ── Marcar / Quitar CUT (descarte) — delta spec 02 (RCUT.3/RCUT.5/RCUT.7). ──
+  // CUT es female-only (D3). El predicado PURO (canMarkCut/canUnmarkCut) decide a quién se ofrece; el gate
+  // de `dientes` (RCUT.7) lo AND-ea la ficha SOLO para marcar (el desmarcado es sustractivo, no gateado).
+  // Conservador con categoryCode irresoluble (canMarkCut → false). La afordancia solo se ofrece en activos.
+  const cutInfo = detail
+    ? { sex: detail.sex, status: detail.status, categoryCode: detail.categoryCode, isCut: detail.isCut }
+    : null;
+  // "Marcar como CUT": hembra activa ≠ ternera, no-CUT (canMarkCut) Y el rodeo habilita `dientes` (RCUT.7.1).
+  const canMark = cutInfo != null && canMarkCut(cutInfo) && dientesEnabled;
+  // "Quitar CUT": hembra activa que YA es CUT (canUnmarkCut) — SIN gate de `dientes` (RCUT.7.2).
+  const canUnmark = cutInfo != null && canUnmarkCut(cutInfo);
+
+  const onSetCut = useCallback(async (): Promise<{ ok: boolean; error?: string }> => {
+    if (!detail) return { ok: false };
+    const snapshot = detail; // para revertir el optimismo si la escritura falla
+    // OPTIMISMO EN SITIO (mismo principio que onSetCastrated): la categoría pasa a CUT al instante (badge del
+    // hero → amarillo) sin blanquear la ficha. isCut=true + override=true + categoryCode/Name = 'cut'/'CUT'
+    // (lo que el espejo C6 mostrará: con override=true NO recalcula, así que la guardada manda).
+    setDetail((d) =>
+      d == null
+        ? d
+        : { ...d, isCut: true, categoryOverride: true, categoryCode: 'cut', categoryName: 'CUT' },
+    );
+    const r = await setCut(detail.profileId);
+    if (!r.ok) {
+      setDetail(snapshot); // REVERT: no dejamos un estado mentido si la acción fue rechazada
+      return {
+        ok: false,
+        error:
+          r.error.kind === 'network'
+            ? 'Sin conexión: no pudimos marcar como CUT. Conectate y volvé a intentar.'
+            : r.error.message,
+      };
+    }
+    // Refresh SILENCIOSO: confirma la categoría CUT persistida (el UPDATE local ya pegó) sin saltar al tope.
+    void load({ silent: true });
+    return { ok: true };
+  }, [detail, load]);
+
+  const onUnsetCut = useCallback(async (): Promise<{ ok: boolean; error?: string }> => {
+    if (!detail) return { ok: false };
+    const snapshot = detail;
+    // OPTIMISMO EN SITIO: quitamos la marca CUT al instante (isCut=false + override=false). La categoría
+    // DERIVADA la trae el refresh silencioso (el espejo C6 la recomputa con override=false) — no la
+    // adivinamos acá para no mostrar una categoría equivocada; el badge sale de amarillo al quitar isCut.
+    setDetail((d) => (d == null ? d : { ...d, isCut: false, categoryOverride: false }));
+    const r = await unsetCut(detail.profileId);
+    if (!r.ok) {
+      setDetail(snapshot); // REVERT
+      return {
+        ok: false,
+        error:
+          r.error.kind === 'network'
+            ? 'Sin conexión: no pudimos quitar la marca CUT. Conectate y volvé a intentar.'
+            : r.error.message,
+      };
+    }
+    // Refresh SILENCIOSO: trae la categoría derivada (override=false) y el badge vuelve a verde.
+    void load({ silent: true });
+    return { ok: true };
+  }, [detail, load]);
+
   // ── Corrección individual de eventos (spec 10 T-UI.8 / R4.5). ──
   // Un evento de vacunación/destete del timeline es borrable (soft-delete) por OWNER del campo o AUTOR del
   // evento (reuso spec 02 R6.8.1). Gating de cliente best-effort: la RLS UPDATE (owner|autor) es la barrera
@@ -545,8 +667,12 @@ export default function AnimalDetailScreen() {
 
             {/* Categoría fijada manualmente (C6 / RC6.4.1): si el override está activo, un indicador
                 explícito bajo el hero + (si el animal está activo) la acción "Quitar fijación" con
-                confirmación inline. Para override=false → null (el espejo ya gobierna el display). */}
-            {detail.categoryOverride ? (
+                confirmación inline. Para override=false → null (el espejo ya gobierna el display).
+                Delta spec 02 (RCUT.5.7): un CUT (override=true + isCut=true) NO ofrece esta card genérica
+                ("Quitar fijación" usa revertCategoryOverride, que NO resetea is_cut → estado inconsistente);
+                su único desmarcado es "Quitar CUT" (en la sección Manejo). La card SÍ se sigue mostrando para
+                un override NO-CUT (ej. "vaca comprada" fijada a multípara manual). */}
+            {detail.categoryOverride && !detail.isCut ? (
               <CategoryOverrideCard
                 canRevert={canRevertOverride}
                 onRevert={onRevertOverride}
@@ -589,6 +715,15 @@ export default function AnimalDetailScreen() {
               />
             ) : null}
 
+            {/* Manejo de HEMBRAS (delta spec 02, RCUT.5): afordancia CUT (descarte). Se ofrece "Marcar como
+                CUT" si la hembra es activa ≠ ternera, no-CUT Y el rodeo habilita `dientes` (canMark); "Quitar
+                CUT" si ya es CUT (canUnmark). Si ninguna aplica, la sección no se renderiza para esa hembra. */}
+            {detail.sex === 'female' && (canMark || canUnmark) ? (
+              <DetailSection icon={Ban} title="Manejo">
+                <CutRow mode={canUnmark ? 'unmark' : 'mark'} onConfirm={canUnmark ? onUnsetCut : onSetCut} />
+              </DetailSection>
+            ) : null}
+
             {/* Lote (ADR-020 / C4): control para asignar / cambiar / quitar el lote. Cualquier rol
                 operativo puede asignar (RLS); el quick-create de un lote nuevo es owner-only. Modo
                 archivada (status ≠ active) → solo lectura (un animal de baja no se reorganiza). */}
@@ -607,6 +742,12 @@ export default function AnimalDetailScreen() {
                 no solo historia. El timeline de abajo sigue siendo la auditoría completa. */}
             <CurrentStateSection timeline={timeline} sex={detail.sex} />
 
+            {/* Tarjeta de tendencia de CIRCUNFERENCIA ESCROTAL (spec 03 M6, R14.14): la serie de mediciones
+                (cm + edad + fecha es-AR) + una mini-tendencia. Se muestra SOLO a machos ENTEROS (isBullEntire
+                — paridad con la fila "Estado reproductivo" solo-hembras). `scrotalHistory` queda null para el
+                resto (no se renderiza). Para un macho entero SIN mediciones aún ([]) se muestra un empty cálido. */}
+            {scrotalHistory != null ? <ScrotalTrendSection history={scrotalHistory} /> : null}
+
             {/* Datos PERSONALIZADOS (R13.10/R13.12): propiedades custom enabled del rodeo + sus current-values
                 (custom_attributes). Editable in-place por cualquier rol (R13.13), salvo modo archivado (solo
                 lectura). Si el rodeo no tiene propiedades custom (ni el animal valores), no renderiza nada. */}
@@ -617,9 +758,10 @@ export default function AnimalDetailScreen() {
             />
 
             {/* Historial real (C3.1): riel de eventos + CTA "Agregar evento". El CTA se OCULTA en modo
-                archivada (C3.3): un animal dado de baja no recibe eventos nuevos en MVP. */}
+                archivada (C3.3): un animal dado de baja no recibe eventos nuevos en MVP. Usa el timeline
+                COMPUESTO (server + CE mergeada en cliente, R14.14) → la CE aparece en el riel. */}
             <HistorySection
-              timeline={timeline}
+              timeline={composedTimeline}
               error={timelineError}
               onAddEvent={goToAddEvent}
               onRetry={() => void load()}
@@ -672,7 +814,9 @@ function AnimalHero({ detail, hadAbortion }: { detail: AnimalDetail; hadAbortion
       {/* Fila de chips de identidad: categoría (verde) · [flag aborto terracota] · sexo (ícono color)
           · rodeo. El flag "Tuvo aborto" (A2, marquita roja) va junto al CategoryBadge si hubo ≥1 aborto. */}
       <XStack width="100%" alignItems="center" gap="$2" flexWrap="wrap">
-        <CategoryBadge label={categoryLabel} manual={detail.categoryOverride} size="md" />
+        {/* code={detail.categoryCode}: ruta preferida de detección CUT (RCUT.6.2) → el badge del hero pasa a
+            AMARILLO al toque cuando se marca CUT (el optimismo en sitio setea categoryCode='cut'). */}
+        <CategoryBadge label={categoryLabel} code={detail.categoryCode} manual={detail.categoryOverride} size="md" />
         {hadAbortion ? <AbortionFlag /> : null}
         <XStack alignItems="center" gap="$1" {...labelA11y(Platform.OS, `Sexo ${sexLabel}`)}>
           <SexIcon size={18} color={primary} strokeWidth={2.5} />
@@ -914,6 +1058,142 @@ function CategoryOverrideCard({
         )
       ) : null}
     </View>
+  );
+}
+
+// ─── Fila CUT (descarte) de la ficha de HEMBRAS (delta spec 02, RCUT.5) ───────────────
+//
+// Espejo estructural de CastrationRow: confirmación INLINE (expande Confirmar/Cancelar, no navega ni abre
+// modal), optimismo EN SITIO (lo maneja el padre en onConfirm → setCut/unsetCut), error inline, `busy`.
+// Dos modos:
+//   - mark   → "Marcar como CUT (descarte)" + consecuencia literal "La categoría pasará a CUT (descarte)."
+//              (la consecuencia es FIJA, no consulta el catálogo — design §3). Confirmar → setCut.
+//   - unmark → "Quitar CUT" + pregunta "¿Quitar la marca CUT de este animal?" (sin línea de consecuencia,
+//              la derivada la trae el refresh). Confirmar → unsetCut.
+//
+// Lenguaje visual: la marca de descarte usa los tokens AMBER del badge CUT ($cutText / $cutBg) — coherencia
+// con el badge amarillo (RCUT.6) y señal de "esto saca al animal del rodeo productivo", distinta del verde
+// de manejo neutro. Cero hardcode (tokens + getTokenValue para el ícono lucide). a11y por helper. El texto
+// "Marcar como CUT (descarte)" tiene descendentes (g/j) → lineHeight matcheando el fontSize.
+function CutRow({
+  mode,
+  onConfirm,
+}: {
+  mode: 'mark' | 'unmark';
+  onConfirm: () => Promise<{ ok: boolean; error?: string }>;
+}) {
+  const cutText = getTokenValue('$cutText', 'color');
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const isMark = mode === 'mark';
+  const actionLabel = isMark ? 'Marcar como CUT (descarte)' : 'Quitar CUT';
+  const question = isMark ? '¿Marcar este animal como CUT (descarte)?' : '¿Quitar la marca CUT de este animal?';
+
+  const startConfirm = useCallback(() => {
+    setConfirming(true);
+    setError(null);
+  }, []);
+
+  const handleConfirm = useCallback(async () => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    const r = await onConfirm();
+    // El cambio es OPTIMISTA en el padre (la ficha NO se recarga blanqueando). En OK cerramos la confirmación
+    // (la fila ya refleja el estado nuevo / desmonta al cambiar canMark/canUnmark); en error mostramos el
+    // motivo y dejamos la confirmación abierta para reintentar (sin cambiar el estado mostrado, RCUT.5.3).
+    setBusy(false);
+    if (!r.ok) {
+      setError(r.error ?? 'No se pudo guardar el cambio.');
+      return;
+    }
+    setConfirming(false);
+  }, [busy, onConfirm]);
+
+  return (
+    <YStack gap="$2">
+      {/* Afordancia colapsada: el botón de acción (amber-outline, marca de descarte). Al tocar expande la
+          confirmación inline. Mientras confirma, se oculta (los botones Confirmar/Cancelar lo reemplazan). */}
+      {!confirming ? (
+        <Pressable
+          style={{ width: '100%' }}
+          onPress={startConfirm}
+          {...buttonA11y(Platform.OS, { label: actionLabel })}
+        >
+          <XStack
+            width="100%"
+            minHeight="$touchMin"
+            alignItems="center"
+            justifyContent="center"
+            gap="$2"
+            borderRadius="$pill"
+            backgroundColor="transparent"
+            borderWidth={2}
+            borderColor="$cutText"
+            paddingHorizontal="$5"
+            pressStyle={{ backgroundColor: '$cutBg' }}
+          >
+            <Ban size={18} color={cutText} strokeWidth={2.5} />
+            <Text
+              fontFamily="$body"
+              fontSize="$5"
+              lineHeight="$5"
+              fontWeight="600"
+              color="$cutText"
+              numberOfLines={1}
+            >
+              {actionLabel}
+            </Text>
+          </XStack>
+        </Pressable>
+      ) : null}
+
+      {error ? <FormError message={error} /> : null}
+
+      {/* Confirmación inline (RCUT.5.1). Anticipa la pregunta + (solo al marcar) la CONSECUENCIA literal. */}
+      {confirming ? (
+        <YStack gap="$3" paddingTop="$1">
+          <Text fontFamily="$body" fontSize="$4" lineHeight="$4" fontWeight="500" color="$textPrimary">
+            {question}
+          </Text>
+          {/* Consecuencia FIJA (RCUT.5.2): solo al MARCAR. Tipografía secundaria — informa sin competir. */}
+          {isMark ? (
+            <Text
+              fontFamily="$body"
+              fontSize="$3"
+              lineHeight="$3"
+              fontWeight="500"
+              color="$textMuted"
+              {...labelA11y(Platform.OS, 'La categoría pasará a CUT (descarte).')}
+            >
+              La categoría pasará a CUT (descarte).
+            </Text>
+          ) : null}
+          <XStack gap="$2">
+            <YStack flex={1}>
+              <Button
+                variant="secondary"
+                fullWidth
+                disabled={busy}
+                onPress={() => {
+                  setConfirming(false);
+                  setError(null);
+                }}
+              >
+                Cancelar
+              </Button>
+            </YStack>
+            <YStack flex={1}>
+              <Button variant="primary" fullWidth disabled={busy} onPress={() => void handleConfirm()}>
+                {busy ? 'Guardando…' : 'Confirmar'}
+              </Button>
+            </YStack>
+          </XStack>
+        </YStack>
+      ) : null}
+    </YStack>
   );
 }
 
@@ -1659,6 +1939,219 @@ function CurrentStateRow({ label, value }: { label: string; value: string | null
 function formatKg(n: number): string {
   if (Number.isInteger(n)) return String(n);
   return n.toFixed(2).replace(/0+$/, '').replace(/\.$/, '').replace('.', ',');
+}
+
+// ─── Tarjeta de tendencia de CIRCUNFERENCIA ESCROTAL (spec 03 M6, R14.14) ─────────────
+//
+// Card de la ficha (solo machos enteros, gateada por el caller con isBullEntire) con:
+//   1. una MINI-TENDENCIA: sparkline de barras (tokens, sin lib de charts) en orden CRONOLÓGICO (viejo→nuevo,
+//      izq→der → "subir" se lee natural). La altura de cada barra escala su cm dentro del rango [min,max] de
+//      la serie; una sola medición (o todas iguales) → barras al tope (no hay "tendencia" pero la card es
+//      legible). La última (más reciente) se resalta en $primary; las previas en $greenLight.
+//   2. la SERIE de mediciones (más reciente primero, igual que buildScrotalHistoryQuery): cada fila = la CE
+//      en cm (es-AR, grande) + "edad · fecha" (muted). Si la serie es larga, la lista scrollea con un FADE
+//      de affordance abajo (scrollFades) para que se note que hay más.
+//
+// Cero hardcode (ADR-023 §4): tokens + getTokenValue para los íconos lucide. a11y por helper. El título de la
+// card sin recorte (lineHeight matcheando el fontSize, igual que DetailSection — reference_descender_clipping).
+// es-AR (coma decimal "36,5 cm"). El empty (macho entero sin mediciones) es un caso de negocio legítimo (la
+// 1ra medición), no falta de sync → empty cálido $greenLight, NO un error.
+
+// Alturas de la mini-tendencia (geometría libre del sparkline, no tokens de spacing): el área tiene CHART_H
+// de alto; una barra va de CHART_MIN (la CE más baja de la serie) a CHART_H (la más alta).
+const CHART_H = 56;
+const CHART_MIN_H = 12;
+/** Alto de la franja de fade del affordance de scroll (geometría libre, decorativa). */
+const FADE_H = 20;
+
+/** Cuántas filas de la serie caben antes de que la lista pase a scrollear (con fade). Sobre esto, scroll. */
+const SCROTAL_VISIBLE_ROWS = 4;
+
+function ScrotalTrendSection({ history }: { history: ScrotalMeasurementRow[] }) {
+  const primary = getTokenValue('$primary', 'color');
+  // `now` por render para los timestamps relativos de cada medición (determinístico dentro del render).
+  const now = new Date();
+
+  return (
+    <DetailSection icon={Ruler} title="Circunferencia escrotal">
+      {history.length === 0 ? (
+        // Macho entero SIN mediciones: la 1ra medición es un caso legítimo (no falta de sync) → empty cálido.
+        <YStack width="100%" backgroundColor="$greenLight" borderRadius="$card" padding="$4" gap="$2">
+          <Text fontFamily="$body" fontSize="$5" lineHeight="$5" fontWeight="600" color="$primary">
+            Todavía no hay mediciones
+          </Text>
+          <Text fontFamily="$body" fontSize="$3" fontWeight="400" color="$primary">
+            Medí la circunferencia escrotal de este toro en una jornada de manga y vas a ver su evolución acá.
+          </Text>
+        </YStack>
+      ) : (
+        <YStack gap="$3">
+          <ScrotalSparkline history={history} primary={primary} />
+          <ScrotalSeriesList history={history} now={now} />
+        </YStack>
+      )}
+    </DetailSection>
+  );
+}
+
+/**
+ * Mini-tendencia: sparkline de barras en orden CRONOLÓGICO (viejo→nuevo). La altura escala la CE dentro del
+ * rango [min,max] de la serie (a igualdad de min/max → todas al tope). La más reciente en $primary; las
+ * previas en $greenLight. Una sola medición → una barra (sin tendencia, pero la card sigue legible).
+ */
+function ScrotalSparkline({ history, primary }: { history: ScrotalMeasurementRow[]; primary: string }) {
+  // history viene más-reciente-primero; la tendencia se dibuja viejo→nuevo (izq→der) → reversa.
+  const chrono = [...history].reverse();
+  const cms = chrono.map((m) => m.circumferenceCm);
+  const min = Math.min(...cms);
+  const max = Math.max(...cms);
+  const span = max - min;
+  // El índice de la barra más reciente (la última en orden cronológico) → se resalta en $primary.
+  const lastIdx = chrono.length - 1;
+
+  return (
+    <XStack
+      width="100%"
+      height={CHART_H}
+      alignItems="flex-end"
+      gap="$1"
+      {...labelA11y(
+        Platform.OS,
+        `Tendencia de circunferencia escrotal: de ${formatCmWithUnitAR(cms[0])} a ${formatCmWithUnitAR(cms[lastIdx])}`,
+      )}
+    >
+      {chrono.map((m, i) => {
+        // Altura proporcional: la CE más baja → CHART_MIN_H, la más alta → CHART_H. Sin span (1 sola medición
+        // o todas iguales) → todas al tope (no hay tendencia que mostrar, pero la barra se ve).
+        const ratio = span > 0 ? (m.circumferenceCm - min) / span : 1;
+        const h = CHART_MIN_H + ratio * (CHART_H - CHART_MIN_H);
+        const isLast = i === lastIdx;
+        return (
+          <View
+            key={m.id}
+            flex={1}
+            height={h}
+            minWidth={4}
+            borderTopLeftRadius="$1"
+            borderTopRightRadius="$1"
+            backgroundColor={isLast ? '$primary' : '$greenLight'}
+          />
+        );
+      })}
+    </XStack>
+  );
+}
+
+/**
+ * Lista de la serie de mediciones (más reciente primero). Cada fila: la CE en cm (es-AR, grande $primary) +
+ * "edad · fecha" (muted). Si hay más de SCROTAL_VISIBLE_ROWS, la lista scrollea con un FADE de affordance
+ * abajo (scrollFades) — que se note que hay más. La geometría del scroll se mide con onLayout/onContentSize/
+ * onScroll. Hasta el umbral, la lista crece natural (sin cap, sin fade).
+ */
+function ScrotalSeriesList({ history, now }: { history: ScrotalMeasurementRow[]; now: Date }) {
+  const [fades, setFades] = useState<ScrollFades>({ top: false, bottom: false });
+  const geomRef = useRef({ scrollY: 0, viewportHeight: 0, contentHeight: 0 });
+  const recompute = useCallback(() => {
+    setFades(scrollFades(geomRef.current));
+  }, []);
+
+  const overflows = history.length > SCROTAL_VISIBLE_ROWS;
+  // Alto de una fila (~$5 valor + $3 sub + gaps + el divisor) ≈ 64px. Cap a SCROTAL_VISIBLE_ROWS filas con un
+  // PEEK (medio ítem extra asomando) para que se vea que la lista sigue, además del fade.
+  const ROW_H = 64;
+  const maxHeight = overflows ? Math.round(ROW_H * (SCROTAL_VISIBLE_ROWS + 0.5)) : undefined;
+
+  const rows = history.map((m, i) => (
+    <ScrotalSeriesRow key={m.id} m={m} now={now} isLast={i === history.length - 1} />
+  ));
+
+  if (!overflows) {
+    return <YStack gap="$0">{rows}</YStack>;
+  }
+
+  return (
+    <View width="100%" position="relative">
+      <ScrollView
+        maxHeight={maxHeight}
+        showsVerticalScrollIndicator={false}
+        scrollEventThrottle={16}
+        onScroll={(e) => {
+          geomRef.current.scrollY = e.nativeEvent.contentOffset.y;
+          geomRef.current.viewportHeight = e.nativeEvent.layoutMeasurement.height;
+          geomRef.current.contentHeight = e.nativeEvent.contentSize.height;
+          recompute();
+        }}
+        onLayout={(e) => {
+          geomRef.current.viewportHeight = e.nativeEvent.layout.height;
+          recompute();
+        }}
+        onContentSizeChange={(_w, h) => {
+          geomRef.current.contentHeight = h;
+          recompute();
+        }}
+      >
+        <YStack gap="$0">{rows}</YStack>
+      </ScrollView>
+      {/* Fade de affordance: una franja $surface→transparente en el borde con contenido oculto. Decorativa
+          (pointerEvents none) → no roba el toque del scroll. Arriba se muestra al haber scrolleado. */}
+      {fades.top ? <ScrollFade edge="top" /> : null}
+      {fades.bottom ? <ScrollFade edge="bottom" /> : null}
+    </View>
+  );
+}
+
+/** Franja de fade (decorativa) en el borde de la lista scrolleable. Token $surface (el fondo de la card). */
+function ScrollFade({ edge }: { edge: 'top' | 'bottom' }) {
+  return (
+    <View
+      position="absolute"
+      left="$0"
+      right="$0"
+      height={FADE_H}
+      pointerEvents="none"
+      backgroundColor="$surface"
+      opacity={0.85}
+      {...(edge === 'top' ? { top: '$0' } : { bottom: '$0' })}
+    />
+  );
+}
+
+/**
+ * Una fila de la serie de CE: la CE en cm (es-AR, $primary 600, grande) + "edad · fecha" (muted). El divisor
+ * inferior separa de la siguiente (salvo la última). a11y por helper (la fila es display).
+ */
+function ScrotalSeriesRow({
+  m,
+  now,
+  isLast,
+}: {
+  m: ScrotalMeasurementRow;
+  now: Date;
+  isLast: boolean;
+}) {
+  // "edad · fecha": la edad snapshot (R14.8, nullable → omitida) + la fecha de medición (date-only, es-AR).
+  const age = formatAgeMonthsAR(m.ageMonths);
+  const date = formatEventDate(m.measuredAt, now, { dateOnly: true });
+  const subParts = [age, date].filter(Boolean) as string[];
+  const sub = subParts.join(' · ');
+  return (
+    <YStack
+      gap="$1"
+      paddingVertical="$2"
+      borderBottomWidth={isLast ? 0 : 1}
+      borderColor="$divider"
+      {...labelA11y(Platform.OS, `${formatCmWithUnitAR(m.circumferenceCm)}${sub ? `, ${sub}` : ''}`)}
+    >
+      <Text fontFamily="$body" fontSize="$6" lineHeight="$6" fontWeight="700" color="$primary" numberOfLines={1}>
+        {formatCmWithUnitAR(m.circumferenceCm)}
+      </Text>
+      {sub ? (
+        <Text fontFamily="$body" fontSize="$3" fontWeight="500" color="$textMuted" numberOfLines={1}>
+          {sub}
+        </Text>
+      ) : null}
+    </YStack>
+  );
 }
 
 // ─── Sección Historial (C3.1): riel de eventos + CTA "Agregar evento" ─────────────────

@@ -67,6 +67,10 @@ import {
   buildSetTeethStateUpdate,
   buildSetCutUpdate,
   buildUnsetCutUpdate,
+  // M6 — circunferencia escrotal (spec 03 US-14)
+  buildAddScrotalInsert,
+  buildUpdateManeuverScrotal,
+  buildScrotalHistoryQuery,
   buildSetCastratedUpdate,
   buildSetFutureBullUpdate,
   buildSoftDeleteEventUpdate,
@@ -768,6 +772,10 @@ test('buildAnimalDetailQuery: b1 identidad+birth_date, LEFT JOIN lote, deleted_a
   // synced; el overlay (alta optimista) proyecta 0/0 constantes (nace entero, sin ⭐) — alinea el UNION.
   assert.match(q.sql, /ap\.is_castrated AS is_castrated, ap\.future_bull AS future_bull/);
   assert.match(q.sql, /0 AS is_castrated, 0 AS future_bull/);
+  // delta spec 02 (TCUT.3 / RCUT.4.1): is_cut REAL (marca de descarte) en la rama synced + 0 en el overlay
+  // (un alta optimista nace no-CUT) → la ficha lo expone como AnimalDetail.isCut (afordancia + badge amarillo).
+  assert.match(q.sql, /ap\.is_cut AS is_cut/);
+  assert.match(q.sql, /0 AS is_cut/);
   assert.deepEqual(q.args, ['prof-7', 'prof-7']);
 });
 
@@ -1123,6 +1131,50 @@ test('buildAddConditionScoreInsert: INSERT condition_score_events, score, sin es
   );
   assert.doesNotMatch(q.sql, /establishment_id/);
   assert.deepEqual(q.args, ['cs-1', 'prof-2', 3.25, '2026-06-09', null]);
+});
+
+// ─── M6 — Circunferencia escrotal (spec 03 US-14): builders del write-path + lectura del histórico ──
+
+test('buildAddScrotalInsert: INSERT scrotal_measurements (cm/age/measured_at/session_id), SIN establishment_id/recorded_by/source', () => {
+  const q = buildAddScrotalInsert('ce-1', 'prof-1', 36.5, 24, '2026-06-18', 'sess-1');
+  assert.match(
+    q.sql,
+    /^INSERT INTO scrotal_measurements \(id, animal_profile_id, circumference_cm, age_months, measured_at, session_id\) VALUES \(\?, \?, \?, \?, \?, \?\)$/,
+  );
+  // los triggers/defaults los ponen al subir (R14.9) → NO van en el INSERT local
+  assert.doesNotMatch(q.sql, /establishment_id/);
+  assert.doesNotMatch(q.sql, /recorded_by/);
+  assert.doesNotMatch(q.sql, /\bsource\b/);
+  assert.deepEqual(q.args, ['ce-1', 'prof-1', 36.5, 24, '2026-06-18', 'sess-1']);
+});
+
+test('buildAddScrotalInsert: session_id default null (ficha de spec 02, sin jornada) + age null (R14.7/R14.8)', () => {
+  const q = buildAddScrotalInsert('ce-2', 'prof-1', 40, null, '2026-06-18');
+  // 6 placeholders SIEMPRE (id, profile, cm, age, measured_at, session_id) — INSERT por posición.
+  assert.equal((q.sql.match(/\?/g) ?? []).length, 6);
+  assert.deepEqual(q.args, ['ce-2', 'prof-1', 40, null, '2026-06-18', null]);
+});
+
+test('buildUpdateManeuverScrotal: UPDATE cm/age/measured_at por id (corrección R14.17), filtra deleted_at IS NULL', () => {
+  const q = buildUpdateManeuverScrotal('ce-1', 38.5, 30, '2026-06-18');
+  assert.match(
+    q.sql,
+    /^UPDATE scrotal_measurements SET circumference_cm = \?, age_months = \?, measured_at = \? WHERE id = \? AND deleted_at IS NULL$/,
+  );
+  assert.deepEqual(q.args, [38.5, 30, '2026-06-18', 'ce-1']);
+});
+
+test('buildUpdateManeuverScrotal: age null se preserva en la corrección (edad desconocida, R14.7)', () => {
+  const q = buildUpdateManeuverScrotal('ce-1', 41, null, '2026-06-18');
+  assert.deepEqual(q.args, [41, null, '2026-06-18', 'ce-1']);
+});
+
+test('buildScrotalHistoryQuery: SELECT del histórico, más reciente primero, solo no-borradas (R14.5/R14.14)', () => {
+  const q = buildScrotalHistoryQuery('prof-9');
+  assert.match(q.sql, /^SELECT id, circumference_cm, age_months, measured_at, session_id, created_at FROM scrotal_measurements/);
+  assert.match(q.sql, /WHERE animal_profile_id = \? AND deleted_at IS NULL/);
+  assert.match(q.sql, /ORDER BY measured_at DESC, created_at DESC$/);
+  assert.deepEqual(q.args, ['prof-9']);
 });
 
 // TAREA 2: los INSERT de reproductive_events setean `created_at` de CLIENTE (último arg) → instante real

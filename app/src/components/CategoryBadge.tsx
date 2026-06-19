@@ -17,6 +17,7 @@ import { Platform } from 'react-native';
 import { Text, View, XStack } from 'tamagui';
 
 import { labelA11y } from '../utils/a11y';
+import { isCutCategory } from '../utils/cut-eligibility';
 
 export type CategoryBadgeProps = {
   /** Etiqueta de categoría ya resuelta (es-AR), ej. "Vaquillona". Si vacía → no se renderiza. */
@@ -25,18 +26,29 @@ export type CategoryBadgeProps = {
   manual?: boolean;
   /** Densidad: 'sm' para la fila de lista, 'md' para el hero de la ficha. Default 'sm'. */
   size?: 'sm' | 'md';
+  /**
+   * code de la categoría (ej. 'cut', 'multipara') cuando el call-site lo tiene (hero de la ficha, AnimalRow)
+   * — delta spec 02 (RCUT.6.2). Ruta PREFERIDA de detección CUT (`code === 'cut'`). Sin `code`, una categoría
+   * llamada literalmente "CUT" igual cae amarilla por el fallback de `label` (valor fijo del catálogo 0015).
+   */
+  code?: string | null;
 };
 
-export function CategoryBadge({ label, manual = false, size = 'sm' }: CategoryBadgeProps) {
+export function CategoryBadge({ label, manual = false, size = 'sm', code }: CategoryBadgeProps) {
   const trimmed = label.trim();
   if (trimmed.length === 0) return null;
 
   const isMd = size === 'md';
+  // Delta spec 02 (RCUT.6.1/RCUT.6.2): la categoría CUT (descarte) se pinta AMARILLA (texto $cutText sobre
+  // fondo $cutBg), distinta del verde del resto, para que el descarte se lea de un vistazo. Detección por
+  // `code === 'cut'` (preferido) o fallback por `label === 'CUT'` (módulo puro). El a11yLabel NO cambia: la
+  // categoría se sigue comunicando por texto (el color es señal ADICIONAL, no la única — RCUT.6.4).
+  const isCut = isCutCategory({ code, label });
   const a11yLabel = manual ? `Categoría ${trimmed}, fijada manualmente` : `Categoría ${trimmed}`;
 
   return (
     <View
-      backgroundColor="$greenLight"
+      backgroundColor={isCut ? '$cutBg' : '$greenLight'}
       borderRadius="$pill"
       paddingHorizontal={isMd ? '$3' : '$2'}
       paddingVertical="$1"
@@ -50,14 +62,20 @@ export function CategoryBadge({ label, manual = false, size = 'sm' }: CategoryBa
           fontFamily="$body"
           fontSize={isMd ? '$4' : '$2'}
           fontWeight="600"
-          color="$primary"
+          color={isCut ? '$cutText' : '$primary'}
           numberOfLines={1}
         >
           {trimmed}
         </Text>
-        {/* Override manual: un punto $primary tras el texto (señal sutil, no rompe la firma). */}
+        {/* Override manual: un punto tras el texto (señal sutil, no rompe la firma). Toma el color del texto
+            (amber en CUT, verde en el resto) para mantener la coherencia de la variante. */}
         {manual ? (
-          <View width={isMd ? 6 : 5} height={isMd ? 6 : 5} borderRadius="$pill" backgroundColor="$primary" />
+          <View
+            width={isMd ? 6 : 5}
+            height={isMd ? 6 : 5}
+            borderRadius="$pill"
+            backgroundColor={isCut ? '$cutText' : '$primary'}
+          />
         ) : null}
       </XStack>
     </View>
