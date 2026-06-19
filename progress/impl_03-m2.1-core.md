@@ -127,3 +127,20 @@ quedó abierto). Verificado: no quedan dos consumidores compitiendo (el overlay 
 - R4.7 — heurística de rodeo de jornada mal elegido (primeros ~3 de otro rodeo).
 - R4.4 — pasar/saltar a otro rodeo del mismo establecimiento: el core resuelve EDIT directo (mismo campo);
   el aviso/acción de "otro rodeo mismo sistema" se evalúa en el frame de carga (M2.2) — ver nota más abajo.
+
+## T2.12 — Re-check cross-spec del find-or-create inline (R4.6 / SEC-SPEC-03-05) — CERRADO 2026-06-19
+
+Cerrado en el Gate 2 de seguridad de M2 (`progress/security_code_03-m1-m2-m3-m6c1-r8-r9.md`, PASS 0 HIGH). El
+find-or-create de la manga NO introduce superficie de tenant nueva ni un camino de alta paralelo:
+
+- **Resolución**: `identificar.tsx` usa `lookupByTag(eid, establishmentId)` (BLE) / `searchAnimals` (manual
+  idv exacto + visual fuzzy), con `establishmentId` derivado del CONTEXTO activo (`useEstablishment`), nunca
+  un param de tenant inyectado. El SQLite local ya está tenant-scopeado por las streams → un id ajeno no existe.
+- **Alta de desconocido**: navega a `/crear-animal` con SOLO el identificador precargado
+  (`resolvePrefilledCreateParams`: tag por BLE / idv|visual por manual). El INSERT real lo hace
+  `createAnimal` (spec 02/09) → fuerza `establishment_id` del contexto (no del payload), respeta el UNIQUE
+  global de `tag_electronic` + `(establishment_id, idv)` (0020), fuerza `created_by = auth.uid()` server-side
+  (`tg_force_created_by_auth_uid`, 0043) y usa la RPC idempotente `create_animal` (0083). NO hay alta propia
+  en la manga (frontend puro que delega al alta as-built ya gateada en spec 09).
+
+Conclusión: sin bypass cross-tenant; el `establishment_id` no es attacker-controlled hacia datos ajenos. T2.12 ✅.
