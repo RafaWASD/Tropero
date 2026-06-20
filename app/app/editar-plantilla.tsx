@@ -34,7 +34,13 @@ import {
   fetchRodeoConfig,
   type RodeoFieldConfig,
 } from '@/services/rodeo-config';
-import { createCustomField } from '@/services/custom-fields';
+import {
+  createCustomField,
+  updateCustomField,
+  softDeleteCustomField,
+  fetchCustomFieldDeleteImpact,
+  type CustomFieldDeleteImpact,
+} from '@/services/custom-fields';
 import { enqueueSetRodeoConfig } from '@/services/powersync/outbox';
 import {
   buildEditToggles,
@@ -42,10 +48,17 @@ import {
   computeEditDiff,
   setToggle,
   type TemplateToggle,
+  type FieldDefinition,
 } from '@/utils/rodeo-template';
-import type { CustomFieldDraft } from '@/utils/custom-field';
+import {
+  buildCustomFieldDeleteImpactLines,
+  type CustomFieldDraft,
+  type CustomUiComponent,
+} from '@/utils/custom-field';
 import { buttonA11y } from '@/utils/a11y';
 import { CustomFieldSheet } from './maniobra/_components/CustomFieldSheet';
+import { CustomFieldActionsSheet } from './maniobra/_components/CustomFieldActionsSheet';
+import { ConfirmDeleteSheet } from './maniobra/_components/ConfirmDeleteSheet';
 
 const SAVE_ERROR_COPY = 'No se pudo guardar la plantilla. Reintentá.';
 
@@ -83,6 +96,14 @@ export default function EditarPlantillaScreen() {
   // (pregunta propiedad/maniobra primero, R13.6).
   const [customSheetOpen, setCustomSheetOpen] = useState(false);
   const establishmentId = estState.status === 'active' ? estState.current.id : null;
+
+  // ── GESTIÓN DE DATOS CUSTOM (M7-B, R13.29/R13.31/R13.32) ──────────────────────────────────
+  // El dato custom sobre el que se abrió el menú ⋯ (null = ninguno). `customUiMode` discrimina qué sheet de
+  // ese dato está abierto (menú / editar / confirmar-borrar). El IMPACTO del borrado (N rodeos + M cargas) se
+  // pre-lee al abrir la confirmación (fetchCustomFieldDeleteImpact) y degrada a copy sin número si no resuelve.
+  const [actionField, setActionField] = useState<FieldDefinition | null>(null);
+  const [customUiMode, setCustomUiMode] = useState<'menu' | 'edit' | 'delete'>('menu');
+  const [deleteImpact, setDeleteImpact] = useState<CustomFieldDeleteImpact | null>(null);
 
   async function load() {
     if (!rodeoId || !systemId) {
@@ -179,6 +200,60 @@ export default function EditarPlantillaScreen() {
     return null;
   }
 
+  // ── GESTIÓN DE DATOS CUSTOM (M7-B, R13.29/R13.31/R13.32) ──────────────────────────────────
+
+  function closeCustomUi() {
+    setActionField(null);
+    setCustomUiMode('menu');
+    setDeleteImpact(null);
+  }
+
+  // Abrir el menú ⋯ de un dato custom (R13.29). Solo se llama desde filas custom owner-only (el ⋯ no aparece
+  // en filas de fábrica ni para no-owners).
+  function onOpenCustomMenu(field: FieldDefinition) {
+    setActionField(field);
+    setCustomUiMode('menu');
+    setDeleteImpact(null);
+  }
+
+  // Editar (R13.32): pasa al sheet CustomFieldSheet en modo 'edit' (precarga label + opciones).
+  async function onUpdateCustomField(label: string, options: string[]): Promise<string | null> {
+    if (!actionField) return 'No pudimos resolver el dato. Volvé a intentar.';
+    const r = await updateCustomField({
+      fieldDefinitionId: actionField.id,
+      label,
+      uiComponent: actionField.uiComponent as CustomUiComponent,
+      options,
+    });
+    if (!r.ok) return r.error.message;
+    closeCustomUi();
+    await load(); // el label/opciones nuevos entran al catálogo local.
+    return null;
+  }
+
+  // Eliminar (R13.31): pasa a la confirmación CON IMPACTO. Pre-lee N rodeos + M cargas (degrada a sin número
+  // si no resuelve). La lectura es local (sub-segundo); no bloquea la apertura del diálogo.
+  async function onOpenCustomDelete(field: FieldDefinition) {
+    setActionField(field);
+    setCustomUiMode('delete');
+    setDeleteImpact(null);
+    const r = await fetchCustomFieldDeleteImpact(field.id);
+    // Solo aplicamos el impacto si seguimos en el modo delete de ESTE field (evita pisar tras un cambio).
+    setDeleteImpact(r.ok ? r.value : null);
+  }
+
+  // Confirmar el borrado (R13.31): softDeleteCustomField (UPDATE plano offline). El dato se va del toggle-list
+  // al recargar (los reads de catálogo filtran deleted_at). Bajo Opción B (R13.30 MVP) la definición se prunea
+  // del device → las cargas previas dejan de verse en la ficha (la confirmación ya lo advirtió, R13.31).
+  async function onConfirmDeleteCustomField(): Promise<string | null> {
+    if (!actionField) return 'No pudimos resolver el dato. Volvé a intentar.';
+    const r = await softDeleteCustomField(actionField.id);
+    if (!r.ok) return r.error.message;
+    closeCustomUi();
+    await load(); // el dato borrado desaparece del toggle-list (catálogo filtra deleted_at).
+    return null;
+  }
+
   return (
     <YStack flex={1} width="100%" maxWidth="100%" overflow="hidden" backgroundColor="$bg">
       <YStack width="100%" paddingTop={insets.top} paddingHorizontal="$4">
@@ -236,6 +311,8 @@ export default function EditarPlantillaScreen() {
               onToggle={(id, enabled) =>
                 setToggles((prev) => (prev ? setToggle(prev, id, enabled) : prev))
               }
+              // ⋯ de gestión SOLO en filas custom (owner-only; este bloque ya es owner-only) — R13.29.
+              onCustomAction={onOpenCustomMenu}
             />
             {/* `+` crear dato personalizado (R13.5/R13.6): pregunta propiedad/maniobra y arma el dato.
                 El dato nuevo aparece en su categoría "Personalizado" para tildarlo y Guardar. Owner-only. */}
@@ -300,6 +377,46 @@ export default function EditarPlantillaScreen() {
           mode="classify"
           onCreate={onCreateCustomField}
           onClose={() => setCustomSheetOpen(false)}
+        />
+      ) : null}
+
+      {/* ── GESTIÓN DE DATOS CUSTOM (M7-B): menú ⋯ → Editar / Eliminar (owner-only, solo filas custom) ── */}
+      {isOwner && actionField && customUiMode === 'menu' ? (
+        <CustomFieldActionsSheet
+          fieldLabel={actionField.label}
+          onEdit={() => setCustomUiMode('edit')}
+          onDelete={() => void onOpenCustomDelete(actionField)}
+          onClose={closeCustomUi}
+        />
+      ) : null}
+
+      {/* Editar (R13.32): CustomFieldSheet en modo 'edit' (solo label + opciones; tipo inmutable; append-only). */}
+      {isOwner && actionField && customUiMode === 'edit' ? (
+        <CustomFieldSheet
+          mode="edit"
+          editInitial={{
+            label: actionField.label,
+            uiComponent: actionField.uiComponent as CustomUiComponent,
+            options: actionField.options,
+          }}
+          onUpdate={onUpdateCustomField}
+          onClose={() => setCustomUiMode('menu')}
+        />
+      ) : null}
+
+      {/* Eliminar (R13.31): confirmación con ADVERTENCIA destructiva (cargas dejan de verse + N rodeos) →
+          softDeleteCustomField. Bajo Opción B (R13.30 MVP) el copy advierte la pérdida de visibilidad. */}
+      {isOwner && actionField && customUiMode === 'delete' ? (
+        <ConfirmDeleteSheet
+          title={`¿Eliminar «${actionField.label}»?`}
+          confirmLabel="Eliminar"
+          impact={buildCustomFieldDeleteImpactLines({
+            rodeoCount: deleteImpact ? deleteImpact.rodeoCount : null,
+            captureCount: deleteImpact ? deleteImpact.captureCount : null,
+          })}
+          onConfirm={onConfirmDeleteCustomField}
+          onClose={() => setCustomUiMode('menu')}
+          testID="delete-custom-field"
         />
       ) : null}
     </YStack>

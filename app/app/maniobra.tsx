@@ -29,11 +29,16 @@ import { Platform, Pressable } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
-import { AlertTriangle, ChevronRight, History, Sparkles, X, Zap } from 'lucide-react-native';
+import { AlertTriangle, ChevronRight, History, MoreVertical, Sparkles, X, Zap } from 'lucide-react-native';
 
 import { Button, Card, InfoNote } from '@/components';
 import { useEstablishment, useRodeo } from '@/contexts';
-import { fetchPresets, type ManeuverPreset } from '@/services/maneuver-presets';
+import {
+  fetchPresets,
+  softDeletePreset,
+  updatePreset,
+  type ManeuverPreset,
+} from '@/services/maneuver-presets';
 import { getActiveSession, type Session } from '@/services/sessions';
 import {
   useUploadRejections,
@@ -52,6 +57,9 @@ import {
 } from '@/utils/maniobra-resume';
 import { NuevaJornadaConfirmSheet } from './maniobra/_components/NuevaJornadaConfirmSheet';
 import { SyncRechazoSheet } from './maniobra/_components/SyncRechazoSheet';
+import { PresetActionsSheet } from './maniobra/_components/PresetActionsSheet';
+import { ConfirmDeleteSheet } from './maniobra/_components/ConfirmDeleteSheet';
+import { SavePresetSheet } from './maniobra/_components/SavePresetSheet';
 import { consumeSyncRejectE2E } from './maniobra/_components/sync-rechazo-e2e';
 
 export default function ManiobraInicioScreen() {
@@ -69,6 +77,11 @@ export default function ManiobraInicioScreen() {
   const [showNuevaConfirm, setShowNuevaConfirm] = useState(false);
   // ¿Mostrar el sheet de detalle de RECHAZOS DE SYNC (R10.8)?
   const [showRechazos, setShowRechazos] = useState(false);
+  // ── GESTIÓN DE RUTINAS (M7-A, R2.6–R2.9) ──────────────────────────────────────────────────
+  // La rutina sobre la que se abrió el menú ⋯ (null = ningún menú abierto). Una superficie a la vez:
+  // `presetUiMode` discrimina qué sheet de esa rutina está abierto (menú / renombrar / confirmar-borrar).
+  const [actionPreset, setActionPreset] = useState<ManeuverPreset | null>(null);
+  const [presetUiMode, setPresetUiMode] = useState<'menu' | 'rename' | 'delete'>('menu');
 
   // ── RECHAZOS DE SYNC (R10.8) — el store observable que el connector llena al descartar un upload
   //    rechazado de forma permanente. Filtramos a las maniobras (un rechazo de otra tabla no es de manga).
@@ -182,6 +195,58 @@ export default function ManiobraInicioScreen() {
     [router],
   );
 
+  // ── GESTIÓN DE RUTINAS (M7-A, R2.6–R2.9) ──────────────────────────────────────────────────
+
+  // Abrir el menú ⋯ de una rutina (R2.6). El tap del CUERPO de la fila sigue arrancando la jornada (onPreset);
+  // este ⋯ es una zona de tap aparte.
+  const onOpenPresetMenu = useCallback((preset: ManeuverPreset) => {
+    setActionPreset(preset);
+    setPresetUiMode('menu');
+  }, []);
+
+  const closePresetUi = useCallback(() => {
+    setActionPreset(null);
+    setPresetUiMode('menu');
+  }, []);
+
+  // Editar → Renombrar (R2.7): abre el sheet de nombre precargado. La config NO cambia (solo el name).
+  const onPresetRename = useCallback(
+    async (newName: string): Promise<string | null> => {
+      if (!actionPreset) return 'No pudimos resolver la rutina. Volvé a intentar.';
+      const r = await updatePreset(actionPreset.id, newName, actionPreset.config);
+      if (!r.ok) return r.error.message;
+      // OK: cerramos el menú + refrescamos la lista (el nuevo nombre aparece). El overlay/local ya lo refleja.
+      closePresetUi();
+      setPresets((prev) =>
+        prev.map((p) => (p.id === actionPreset.id ? { ...p, name: newName.trim() } : p)),
+      );
+      return null;
+    },
+    [actionPreset, closePresetUi],
+  );
+
+  // Editar → Reconfigurar maniobras (R2.8): reabre el wizard en MODO EDICIÓN de preset (editPresetId). El
+  // wizard precarga loadPreset, deja cambiar maniobras/orden/preconfig y al guardar llama updatePreset (NO
+  // arranca jornada). NO usa presetId (ese ARRANCA desde el preset) — usa editPresetId (EDITA el preset).
+  const onPresetReconfigure = useCallback(() => {
+    if (!actionPreset) return;
+    const id = actionPreset.id;
+    closePresetUi();
+    router.push({ pathname: '/maniobra/jornada', params: { editPresetId: id } });
+  }, [actionPreset, closePresetUi, router]);
+
+  // Eliminar (R2.9): el menú cambia a la confirmación; al confirmar → softDeletePreset (RPC 0057, OUTBOX).
+  const onPresetDeleteConfirm = useCallback(async (): Promise<string | null> => {
+    if (!actionPreset) return 'No pudimos resolver la rutina. Volvé a intentar.';
+    const r = await softDeletePreset(actionPreset.id);
+    if (!r.ok) return r.error.message;
+    // OK: la rutina desaparece de la lista al instante (overlay pending_status_overrides + quita optimista).
+    const removedId = actionPreset.id;
+    closePresetUi();
+    setPresets((prev) => prev.filter((p) => p.id !== removedId));
+    return null;
+  }, [actionPreset, closePresetUi]);
+
   const PRIMARY = getTokenValue('$primary', 'color');
   const MUTED = getTokenValue('$textMuted', 'color');
   const bottomPad = Math.max(insets.bottom, getTokenValue('$navBottomMin', 'size'));
@@ -241,7 +306,7 @@ export default function ManiobraInicioScreen() {
         ) : (
           <YStack gap="$3">
             {presets.map((p) => (
-              <PresetRow key={p.id} preset={p} onPress={onPreset} />
+              <PresetRow key={p.id} preset={p} onPress={onPreset} onMenu={onOpenPresetMenu} />
             ))}
           </YStack>
         )}
@@ -272,6 +337,40 @@ export default function ManiobraInicioScreen() {
           rejections={maneuverRejections}
           onAcknowledge={onAcknowledgeRechazos}
           onClose={() => setShowRechazos(false)}
+        />
+      ) : null}
+
+      {/* ── GESTIÓN DE RUTINAS (M7-A): menú ⋯ → Editar (Renombrar/Reconfigurar) / Eliminar ── */}
+      {actionPreset && presetUiMode === 'menu' ? (
+        <PresetActionsSheet
+          presetName={actionPreset.name}
+          onRename={() => setPresetUiMode('rename')}
+          onReconfigure={onPresetReconfigure}
+          onDelete={() => setPresetUiMode('delete')}
+          onClose={closePresetUi}
+        />
+      ) : null}
+
+      {/* Renombrar (R2.7): reusa SavePresetSheet precargado con el nombre actual → updatePreset (config intacta). */}
+      {actionPreset && presetUiMode === 'rename' ? (
+        <SavePresetSheet
+          initialName={actionPreset.name}
+          title="Renombrar la rutina"
+          description="Cambiá el nombre de la rutina. Las maniobras no se tocan."
+          ctaLabel="Guardar nombre"
+          onSave={onPresetRename}
+          onClose={() => setPresetUiMode('menu')}
+        />
+      ) : null}
+
+      {/* Eliminar (R2.9): confirmación SIN "Deshacer" → softDeletePreset. */}
+      {actionPreset && presetUiMode === 'delete' ? (
+        <ConfirmDeleteSheet
+          title={`¿Eliminar la rutina ${actionPreset.name}?`}
+          confirmLabel="Eliminar rutina"
+          onConfirm={onPresetDeleteConfirm}
+          onClose={() => setPresetUiMode('menu')}
+          testID="delete-preset"
         />
       ) : null}
     </YStack>
@@ -379,31 +478,69 @@ function ResumeJornadaCard({
   );
 }
 
-function PresetRow({ preset, onPress }: { preset: ManeuverPreset; onPress: (p: ManeuverPreset) => void }) {
+function PresetRow({
+  preset,
+  onPress,
+  onMenu,
+}: {
+  preset: ManeuverPreset;
+  onPress: (p: ManeuverPreset) => void;
+  /** Abre el menú ⋯ de gestión (Editar/Eliminar) de la rutina (M7-A, R2.6). */
+  onMenu: (p: ManeuverPreset) => void;
+}) {
   const PRIMARY = getTokenValue('$primary', 'color');
   const FAINT = getTokenValue('$textFaint', 'color');
+  const MUTED = getTokenValue('$textMuted', 'color');
   // Resumen legible de las maniobras del preset (filtra desconocidas vía extractManeuvers).
   const maniobras = extractManeuvers(preset.config);
   const summary = maniobras.length > 0 ? maniobras.map(maneuverLabel).join(' · ') : 'Sin maniobras';
   return (
-    <Pressable onPress={() => onPress(preset)} accessibilityRole="button" accessibilityLabel={`Arrancar rutina ${preset.name}`}>
-      <Card>
-        <XStack alignItems="center" gap="$3">
-          <View backgroundColor="$greenLight" borderRadius="$pill" width={44} height={44} alignItems="center" justifyContent="center">
-            <Sparkles size={22} color={PRIMARY} />
+    <Card>
+      <XStack alignItems="center" gap="$2">
+        {/* CUERPO de la fila: tap = ARRANCAR la jornada (no se lo roba el ⋯, que va aparte a la derecha). */}
+        <Pressable
+          style={{ flex: 1, minWidth: 0 }}
+          onPress={() => onPress(preset)}
+          accessibilityRole="button"
+          accessibilityLabel={`Arrancar rutina ${preset.name}`}
+        >
+          <XStack alignItems="center" gap="$3">
+            <View backgroundColor="$greenLight" borderRadius="$pill" width={44} height={44} alignItems="center" justifyContent="center">
+              <Sparkles size={22} color={PRIMARY} />
+            </View>
+            <YStack flex={1} minWidth={0} gap="$1">
+              {/* Nombre del preset — lineHeight matching (puede traer descendentes). */}
+              <Text fontFamily="$body" fontSize="$6" lineHeight="$6" fontWeight="700" color="$textPrimary" numberOfLines={1}>
+                {preset.name}
+              </Text>
+              <Text fontFamily="$body" fontSize="$3" lineHeight="$3" color="$textMuted" numberOfLines={1}>
+                {summary}
+              </Text>
+            </YStack>
+            <ChevronRight size={22} color={FAINT} />
+          </XStack>
+        </Pressable>
+
+        {/* ⋯ MENÚ DE ACCIONES (M7-A, R2.6): editar/eliminar la rutina. Affordance EXPLÍCITA (no swipe/long-press).
+            Target XL (≥$touchMin) y zona de tap propia (no roba el tap del cuerpo que arranca la jornada). */}
+        <Pressable
+          onPress={() => onMenu(preset)}
+          hitSlop={8}
+          testID={`preset-menu-${preset.id}`}
+          {...buttonA11y(Platform.OS, { label: `Acciones de la rutina ${preset.name}` })}
+        >
+          <View
+            width="$touchMin"
+            height="$touchMin"
+            alignItems="center"
+            justifyContent="center"
+            borderRadius="$pill"
+            pressStyle={{ backgroundColor: '$greenLight' }}
+          >
+            <MoreVertical size={getTokenValue('$navIcon', 'size')} color={MUTED} />
           </View>
-          <YStack flex={1} minWidth={0} gap="$1">
-            {/* Nombre del preset — lineHeight matching (puede traer descendentes). */}
-            <Text fontFamily="$body" fontSize="$6" lineHeight="$6" fontWeight="700" color="$textPrimary" numberOfLines={1}>
-              {preset.name}
-            </Text>
-            <Text fontFamily="$body" fontSize="$3" lineHeight="$3" color="$textMuted" numberOfLines={1}>
-              {summary}
-            </Text>
-          </YStack>
-          <ChevronRight size={22} color={FAINT} />
-        </XStack>
-      </Card>
-    </Pressable>
+        </Pressable>
+      </XStack>
+    </Card>
   );
 }

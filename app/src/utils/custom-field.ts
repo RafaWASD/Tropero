@@ -57,7 +57,7 @@ export function uiComponentNeedsOptions(c: CustomUiComponent): boolean {
 
 // ─── Caps client-side (UX; el server re-valida) ──────────────────────────────────────────────────────
 
-/** Cap de largo del label (UX; el server no tiene CHECK de label pero sí ≤80 es razonable de manga). */
+/** Cap de largo del label (UX; coincide con el CHECK autoritativo del server `field_definitions_label_len` ≤80 — `0093:46`). */
 export const LABEL_MAX = 80;
 /** Cap de largo del data_key derivado (server: CHECK ≤64). */
 export const DATA_KEY_MAX = 64;
@@ -187,6 +187,61 @@ export function customFieldErrorTarget(draft: CustomFieldDraft): CustomFieldErro
     if (new Set(lower).size !== lower.length) return 'options';
   }
   return null;
+}
+
+// ─── Copy de ADVERTENCIA del BORRADO de un dato custom (spec 03 M7, R13.31 — Opción B) ──────────────────
+
+/**
+ * Arma las líneas de ADVERTENCIA (es-AR, voseo) de borrar un dato custom (R13.31, **Opción B** — MVP, decisión
+ * de Raf 2026-06-20). PURA, sin I/O.
+ *
+ * Bajo Opción B la sync-stream NO cambia: al soft-deletear, la definición del dato se PRUNEA del device
+ * (`est_field_definitions_custom` sigue filtrando `deleted_at IS NULL`), así que sus cargas previas **dejan de
+ * verse** en la ficha (el valor sigue en la DB, pero sin la definición no se renderiza; no se recupera desde la
+ * app en MVP). Por eso el copy NO promete "se conservan" — ADVIERTE pérdida de visibilidad, condicional al
+ * conteo de cargas:
+ *   - Con cargas (N>0): pérdida de datos visible (no recuperable desde la app) — advertencia FUERTE.
+ *   - Sin cargas (N=0 / null): advertencia liviana (no hay pérdida) — solo "se quita de M rodeos".
+ *
+ * NO incluye el "Esta acción no se puede deshacer" final — eso lo agrega el diálogo de confirmación
+ * (`ConfirmDeleteSheet`), común a todos los borrados. Pluralización es-AR (1 → singular). Si un conteo no
+ * resolvió (aún sincronizando), el caller pasa `null` → la línea omite el número pero conserva el mensaje.
+ *
+ * Recordatorio de producto: la **Opción A** (quitar el filtro `deleted_at` de la stream para preservar el
+ * histórico) queda como fast-follow/backlog; mientras tanto el copy es honesto sobre la pérdida en MVP.
+ */
+export function buildCustomFieldDeleteImpactLines(args: {
+  /** Cantidad de rodeos donde está habilitado, o null si no resolvió (sincronizando). */
+  rodeoCount: number | null;
+  /** Cantidad de cargas previas que dejarán de verse, o null si no resolvió. */
+  captureCount: number | null;
+}): string[] {
+  const { rodeoCount, captureCount } = args;
+  const lines: string[] = [];
+
+  // Línea 1 (la ADVERTENCIA destructiva): qué pasa con las cargas previas.
+  if (captureCount == null) {
+    lines.push('Las cargas que ya hiciste con este dato dejarán de verse y no vas a poder recuperarlas desde la app.');
+  } else if (captureCount === 0) {
+    // Sin cargas previas → no hay pérdida de datos; la advertencia se mantiene liviana (solo rodeos abajo).
+    lines.push('Todavía no cargaste ningún dato con este campo.');
+  } else if (captureCount === 1) {
+    lines.push('Su 1 carga previa dejará de verse y no vas a poder recuperarla desde la app.');
+  } else {
+    lines.push(`Sus ${captureCount} cargas previas dejarán de verse y no vas a poder recuperarlas desde la app.`);
+  }
+
+  // Línea 2 (de cuántos rodeos se saca — es objeto de establishment → se saca de TODOS). Solo si M>0.
+  if (rodeoCount == null) {
+    lines.push('Se quita de los rodeos donde está habilitado.');
+  } else if (rodeoCount === 1) {
+    lines.push('Se quita de 1 rodeo donde está habilitado.');
+  } else if (rodeoCount > 1) {
+    lines.push(`Se quita de ${rodeoCount} rodeos donde está habilitado.`);
+  }
+  // rodeoCount === 0 → no agrega línea de rodeos (no está habilitado en ninguno; nada que decir).
+
+  return lines;
 }
 
 // ─── Payload del INSERT (shape EXACTO de field_definitions, 0093) ──────────────────────────────────────

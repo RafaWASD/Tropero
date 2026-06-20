@@ -781,6 +781,46 @@ test('custom (M5) suite — spec 03', async (t) => {
     }
   });
 
+  // ---- (o) borrar + recrear mismo slug (R13.26 / R13.19) — índice UNIQUE PARCIAL sobre deleted_at ----
+  // ⚠️ PENDING-DEPLOY: este caso EJERCE la migración 0101 (índice custom parcial sobre deleted_at). Hasta que
+  // 0101 esté aplicada a la DB compartida, el sub-caso "recrear-mismo-slug tras soft-delete" FALLA con 23505
+  // (el índice viejo de 0093 no excluye la borrada → la fila soft-deleteada sigue ocupando el slot). Es el
+  // hallazgo HIGH del reviewer (progress/review_03-m7.md). El leader aplica 0101 en el gate de deploy → el caso
+  // pasa a verde. El sub-caso de control negativo (dos VIVAS mismo slug -> 23505) pasa con o sin 0101.
+  await t.test('(o) borrar+recrear mismo data_key: la soft-deleteada LIBERA el slot (R13.26); dos vivas colisionan (23505)', async () => {
+    const slug = (s) => s.toLowerCase().replace(/[^a-z0-9_]/g, '_');
+    const key = slug(`${RUN_TAG}_recreate`);
+
+    // 1) Crear un dato custom con data_key=key.
+    const first = await createCustomField(clientA, { establishmentId: estA, dataKey: key, label: 'Mansedumbre', dataType: 'maniobra', uiComponent: 'numeric' });
+    assert.equal(first.error, undefined, first.error && first.error.message);
+
+    // 2) CONTROL NEGATIVO: una SEGUNDA fila VIVA con el mismo (establishment_id, data_key) -> 23505 (el unique
+    //    sigue protegiendo el slot entre filas vivas; el cliente nunca lo intenta porque slugifyDataKey
+    //    desambigua, pero confirmamos que el índice sigue activo para las vivas).
+    {
+      const id = crypto.randomUUID();
+      const { error } = await clientA.from('field_definitions').insert({ id, establishment_id: estA, data_key: key, label: 'Dup', data_type: 'maniobra', ui_component: 'numeric', category: 'manejo' });
+      assert.notEqual(error, null, 'dos custom VIVAS con el mismo data_key deben colisionar');
+      assert.match(pgcode(error), /23505|duplicate|unique/i);
+    }
+
+    // 3) Soft-delete de la primera (UPDATE deleted_at) -> libera el slot bajo el índice parcial de 0101.
+    {
+      const sd = await clientA.from('field_definitions').update({ deleted_at: new Date().toISOString() }).eq('id', first.id);
+      assert.equal(sd.error, null, sd.error && sd.error.message);
+    }
+
+    // 4) RECREAR el dato con el MISMO data_key=key (= el flujo de R13.26 borrar+recrear; slugifyDataKey re-deriva
+    //    el slug original porque la borrada no figura en existingDataKeys) -> debe ENTRAR (no 23505).
+    {
+      const again = await createCustomField(clientA, { establishmentId: estA, dataKey: key, label: 'Mansedumbre (recreada)', dataType: 'maniobra', uiComponent: 'numeric' });
+      assert.equal(again.error, undefined,
+        `recrear el dato con el mismo data_key tras soft-delete NO debe fallar (requiere índice parcial 0101): ${again.error && again.error.message}`);
+      assert.ok(again.field && again.field.id !== first.id, 'la recreada es una fila NUEVA (id distinto), no la borrada');
+    }
+  });
+
   // ---- cleanup ----------------------------------------------------------
   await t.test('cleanup', async () => { await cleanup(); });
 });

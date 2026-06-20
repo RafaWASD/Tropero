@@ -117,12 +117,13 @@ test('toBool: 1/true/"1" → true; 0/false/"0"/null → false', () => {
 
 // ─── Catálogos (T3.1) ──────────────────────────────────────────────────────────────
 
-test('buildFieldCatalogQuery: filtro de dominio active=1, sin args, columnas as-built', () => {
+test('buildFieldCatalogQuery: filtro de dominio active=1 + deleted_at IS NULL (M7 R13.19), sin args, columnas as-built', () => {
   const q = buildFieldCatalogQuery();
   assert.match(q.sql, /FROM field_definitions/);
-  assert.match(q.sql, /WHERE active = 1/);
-  // columnas exactas que el mapper toFieldDefinition consume
-  assert.match(q.sql, /id, data_key, label, description, category, data_type, ui_component/);
+  assert.match(q.sql, /WHERE active = 1 AND deleted_at IS NULL/);
+  // columnas exactas que el mapper toFieldDefinition consume (M7 sumó establishment_id + config_schema:
+  // discriminar fila custom para el ⋯ R13.29 + precargar opciones del editor).
+  assert.match(q.sql, /id, establishment_id, data_key, label, description, category, data_type, ui_component, config_schema/);
   assert.deepEqual(q.args, []);
 });
 

@@ -38,13 +38,19 @@ export function toBool(v: unknown): boolean {
 
 /**
  * field_definitions activos (espeja rodeo-config.fetchFieldCatalog).
- * Filtro de DOMINIO conservado: `active = 1`. Catálogo global → sin scoping de tenant.
+ * Filtros de DOMINIO conservados: `active = 1` + `deleted_at IS NULL`. Catálogo global → sin scoping de
+ * tenant. El `deleted_at IS NULL` (spec 03 M7, R13.19): un dato CUSTOM soft-deleteado debe DESAPARECER de
+ * todo form/lista nuevo (plantilla del rodeo, gating, alta, lista de maniobras) — el catálogo alimenta
+ * todas esas superficies. La lectura de la ficha (`buildCustomAttributesQuery`) también filtra `deleted_at`
+ * (Opción B, R13.30 MVP: tras borrar, la definición se prunea y el valor deja de verse). Surface
+ * `establishment_id` para que la plantilla DISCRIMINE filas custom
+ * (`establishment_id` no-NULL) de las de fábrica (NULL) y muestre el menú ⋯ solo en las custom (R13.29).
  */
 export function buildFieldCatalogQuery(): LocalQuery {
   return {
     sql:
-      'SELECT id, data_key, label, description, category, data_type, ui_component ' +
-      'FROM field_definitions WHERE active = 1',
+      'SELECT id, establishment_id, data_key, label, description, category, data_type, ui_component, config_schema ' +
+      'FROM field_definitions WHERE active = 1 AND deleted_at IS NULL',
     args: [],
   };
 }
@@ -1850,12 +1856,26 @@ export function buildEnabledCustomManeuversQuery(rodeoId: string): LocalQuery {
 }
 
 /**
- * Lee los CURRENT-VALUES de las propiedades CUSTOM de un animal (spec 03 M5-C.3, R13.10/R13.12), para mostrarlos
- * en la ficha (ver) y precargar el editor (editar). Join de custom_attributes (el current-value, PK compuesta
- * (animal_profile_id, field_definition_id)) con field_definitions (la propiedad custom viva del campo) →
- * field_definition_id + value + ui_component + config_schema + label. Solo trae propiedades (no maniobras), vivas.
- * NO filtra por enabled del rodeo: una propiedad con valor cargado se MUESTRA aunque luego se deshabilite el field
- * (no perdemos el dato ya capturado; el form de alta/edición sí gatea por enabled — R13.10). Read-only.
+ * Lee los CURRENT-VALUES de las propiedades CUSTOM de un animal (spec 03 M5-C.3, R13.10/R13.12), para
+ * mostrarlos en la ficha (ver) y precargar el editor (editar). Join de custom_attributes (el current-value, PK
+ * compuesta (animal_profile_id, field_definition_id)) con field_definitions (la propiedad custom VIVA del
+ * campo) → field_definition_id + value + ui_component + config_schema + label. Solo trae propiedades (no
+ * maniobras), VIVAS (`fd.active = 1 AND fd.deleted_at IS NULL`).
+ *
+ * ⚠️ R13.30 bajo OPCIÓN B (MVP, Raf 2026-06-20): al soft-deletear un dato custom, su fila de field_definitions
+ * se PRUNEA del device (la sync-stream `est_field_definitions_custom` sigue filtrando `deleted_at IS NULL`),
+ * así que el INNER JOIN de esta query NO devuelve fila para un dato borrado → su valor histórico DEJA DE VERSE
+ * en la ficha (sin crash: simplemente no se muestra esa propiedad). Es la "desaparición prolija" esperada en
+ * MVP — la confirmación de borrado lo ADVIERTE (R13.31). Por eso el filtro `fd.deleted_at IS NULL` se conserva
+ * (defensa en profundidad: si la fila aún no fue pruneada localmente, igual no mostramos el valor de un dato
+ * borrado, coherente con Opción B). La Opción A (quitar el filtro de la stream para PRESERVAR el histórico)
+ * queda como fast-follow/backlog. (Se descartó el split `buildCustomAttributesViewQuery` de la 1ra pasada de
+ * M7: bajo Opción B no hay fila de field_definitions local a la que joinear → ese split quedaba como código
+ * muerto.)
+ *
+ * NO filtra por enabled del rodeo: una propiedad con valor cargado se MUESTRA aunque luego se DESHABILITE el
+ * field en el rodeo (no perdemos el dato ya capturado; el form de alta/edición sí gatea por enabled — R13.10).
+ * Read-only.
  */
 export function buildCustomAttributesQuery(profileId: string): LocalQuery {
   return {
@@ -1867,6 +1887,95 @@ export function buildCustomAttributesQuery(profileId: string): LocalQuery {
       'WHERE ca.animal_profile_id = ? AND fd.establishment_id IS NOT NULL AND fd.deleted_at IS NULL ' +
       "AND fd.data_type = 'propiedad' AND fd.active = 1",
     args: [profileId],
+  };
+}
+
+// ─── Datos/maniobras CUSTOM — gestión (editar + borrar) (spec 03 M7, R13.28/R13.32–R13.34) ────────────
+//
+// Soft-delete + edición de un dato custom por UPDATE PLANO CRUD-plano offline (NO RPC). Evidencia design
+// §13.1: la SELECT-policy `field_definitions_select` (0093) NO filtra `deleted_at` → un `UPDATE … SET
+// deleted_at = now()` deja la fila VISIBLE en el SELECT post-UPDATE → NO hay gotcha RLS-on-RETURNING (a
+// diferencia de `maneuver_presets_select`/0051 que SÍ filtra → por eso `softDeletePreset` es RPC 0057). La
+// RLS `field_definitions_update` (owner-only, no-global) + el guard `tg_field_definitions_custom_guard`
+// (que corre `before insert OR UPDATE`: owner-check + inmutabilidad de establishment_id/data_type/data_key/
+// ui_component + caps de options) re-validan TODO al subir. Un no-owner/global → reject permanente
+// superficiado por R10.8. NO se hace borrado físico (sin policy DELETE de cliente).
+
+/**
+ * UPDATE local de SOFT-DELETE de un dato custom (R13.28): setea `deleted_at = now()`. Filtra
+ * `deleted_at IS NULL` para no re-borrar (idempotencia local: un segundo borrado no toca la fila). El
+ * `now()` lo resuelve SQLite (`datetime('now')`, UTC ISO) → el server NO sobreescribe `deleted_at` en el
+ * UPDATE (el guard solo lo lee para distinguir soft-delete; no hay trigger que lo fuerce). CRUD-plano: 1
+ * CrudEntry → uploadData. La RLS owner-only + el guard re-validan al subir. Molde de
+ * buildUpdateManeuverPresetUpdate, pero por UPDATE plano (no RPC).
+ */
+export function buildSoftDeleteCustomFieldUpdate(fieldDefinitionId: string): LocalQuery {
+  return {
+    sql:
+      "UPDATE field_definitions SET deleted_at = datetime('now') " +
+      'WHERE id = ? AND deleted_at IS NULL',
+    args: [fieldDefinitionId],
+  };
+}
+
+/**
+ * UPDATE local de EDICIÓN de un dato custom (R13.32/R13.33): cambia SOLO `label` + `config_schema`. El guard
+ * `tg_field_definitions_custom_guard` (0093) BLOQUEA server-side cualquier cambio de `establishment_id`/
+ * `data_type`/`data_key`/`ui_component` (42501) — re-tipar es imposible aunque el cliente lo intentara
+ * (R13.26; defensa en profundidad — la UI tampoco lo ofrece). `configSchemaJson` = NULL para no-enum, o el
+ * JSON-TEXT de `{options:[...]}` para enums (el connector lo decodifica a jsonb nativo antes de subir,
+ * JSONB_TEXT_COLUMNS.field_definitions). Filtra `deleted_at IS NULL` (no se edita un dato borrado). El guard
+ * revalida los caps de options (cardinalidad/largo) en el UPDATE-path (corre `before insert OR UPDATE`,
+ * R13.34) → no requiere migración nueva. CRUD-plano.
+ */
+export function buildUpdateCustomFieldUpdate(
+  fieldDefinitionId: string,
+  label: string,
+  configSchemaJson: string | null,
+): LocalQuery {
+  return {
+    sql:
+      'UPDATE field_definitions SET label = ?, config_schema = ? ' +
+      'WHERE id = ? AND deleted_at IS NULL',
+    args: [label, configSchemaJson, fieldDefinitionId],
+  };
+}
+
+/**
+ * Cuenta de cuántos RODEOS tienen un dato custom HABILITADO (enabled=1) en su estado EFECTIVO (overlay-aware,
+ * spec 03 M7, R13.31): es el "se saca de N rodeos" de la confirmación de borrado. Une rodeo_data_config con
+ * el overlay pending_rodeo_data_config (el overlay del toggle offline PISA la fila synced del mismo
+ * (rodeo,field)) y cuenta los rodeos DISTINTOS con enabled=1 para ese field_definition_id. Mismo invariante
+ * de override que buildEnabledCustomFieldsQuery (≤1 fila por (rodeo,field) en el overlay).
+ */
+export function buildCustomFieldEnabledRodeoCountQuery(fieldDefinitionId: string): LocalQuery {
+  return {
+    sql:
+      'SELECT COUNT(DISTINCT rodeo_id) AS n FROM ( ' +
+      'SELECT rodeo_id, enabled FROM rodeo_data_config ' +
+      'WHERE field_definition_id = ? AND rodeo_id NOT IN ' +
+      '(SELECT rodeo_id FROM pending_rodeo_data_config WHERE field_definition_id = ?) ' +
+      'UNION ALL ' +
+      'SELECT rodeo_id, enabled FROM pending_rodeo_data_config WHERE field_definition_id = ? ' +
+      ') eff WHERE eff.enabled = 1',
+    args: [fieldDefinitionId, fieldDefinitionId, fieldDefinitionId],
+  };
+}
+
+/**
+ * Cuenta de cuántas CARGAS (custom_measurements append-only + custom_attributes current-value) referencian un
+ * dato custom (spec 03 M7, R13.31): es el "M cargas previas" de la ADVERTENCIA de borrado. El soft-delete NO
+ * las borra de la DB (R13.19), pero bajo Opción B la definición se prunea del device → esas cargas DEJAN DE
+ * VERSE en la ficha (no recuperables desde la app en MVP). Suma las dos tablas en un solo escalar. Read-only local.
+ */
+export function buildCustomFieldCaptureCountQuery(fieldDefinitionId: string): LocalQuery {
+  return {
+    sql:
+      'SELECT ( ' +
+      '(SELECT COUNT(*) FROM custom_measurements WHERE field_definition_id = ?) + ' +
+      '(SELECT COUNT(*) FROM custom_attributes WHERE field_definition_id = ?) ' +
+      ') AS n',
+    args: [fieldDefinitionId, fieldDefinitionId],
   };
 }
 

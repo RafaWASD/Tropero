@@ -31,6 +31,10 @@ import {
   buildEnabledCustomManeuversQuery,
   buildEnabledCustomFieldsQuery,
   buildCustomAttributesQuery,
+  buildSoftDeleteCustomFieldUpdate,
+  buildUpdateCustomFieldUpdate,
+  buildCustomFieldEnabledRodeoCountQuery,
+  buildCustomFieldCaptureCountQuery,
 } from './local-reads';
 
 // Espeja el AppSchema (TEXT/INTEGER; SQLite es laxo). started_at NO tiene default acá: el local write NO
@@ -652,9 +656,9 @@ test('buildEnabledCustomFieldsQuery: el OVERLAY offline del toggle PISA al synce
   assert.deepEqual(rows.map((r) => r.id), ['p-x']);
 });
 
-// ─── buildCustomAttributesQuery (spec 03 M5-C.3, R13.10/R13.12) — current-values de la ficha ──
+// ─── buildCustomAttributesQuery (spec 03 M5-C.3 + M7, R13.10/R13.12/R13.30 Opción B) — current-values de la ficha ──
 
-test('buildCustomAttributesQuery: trae los current-values de las propiedades custom del animal (con ui_component/label)', () => {
+test('buildCustomAttributesQuery: trae los current-values de las propiedades custom VIVAS del animal (con ui_component/label)', () => {
   const db = freshDb();
   run(db, buildCreateCustomFieldInsertRaw2(db, { id: 'p1', est: 'est-A', dataKey: 'apodo', label: 'Apodo', dataType: 'propiedad', uic: 'text', cfg: null, deleted: null }));
   run(db, buildCreateCustomFieldInsertRaw2(db, { id: 'p2', est: 'est-A', dataKey: 'color', label: 'Color', dataType: 'propiedad', uic: 'enum_single', cfg: '{"options":["A","B"]}', deleted: null }));
@@ -675,12 +679,82 @@ test('buildCustomAttributesQuery: trae los current-values de las propiedades cus
   assert.equal(JSON.parse(apodo.value), 'Pinto');
 });
 
-test('buildCustomAttributesQuery: NO trae el atributo de una propiedad BORRADA (deleted_at) ni de un field inactivo', () => {
+test('buildCustomAttributesQuery: NO trae el atributo de una propiedad BORRADA (R13.30 Opción B — la ficha YA NO lo muestra)', () => {
   const db = freshDb();
+  // Propiedad SOFT-DELETEADA con un valor ya cargado: bajo Opción B (la definición se prunea del device + el
+  // INNER JOIN filtra `deleted_at IS NULL`) la ficha YA NO la muestra → la query no devuelve la fila borrada.
   run(db, buildCreateCustomFieldInsertRaw2(db, { id: 'p-del', est: 'est-A', dataKey: 'viejo', label: 'Viejo', dataType: 'propiedad', uic: 'text', cfg: null, deleted: '2026-06-17T00:00:00Z' }));
-  setAttr(db, 'A1', 'p-del', JSON.stringify('x'));
-  const rows = all<{ field_definition_id: string }>(db, buildCustomAttributesQuery('A1'));
-  assert.deepEqual(rows, []);
+  // una VIVA, para confirmar que la query SÍ trae las vivas (no es que devuelva vacío por otra razón).
+  run(db, buildCreateCustomFieldInsertRaw2(db, { id: 'p-viva', est: 'est-A', dataKey: 'viva', label: 'Viva', dataType: 'propiedad', uic: 'text', cfg: null, deleted: null }));
+  setAttr(db, 'A1', 'p-del', JSON.stringify('histórico'));
+  setAttr(db, 'A1', 'p-viva', JSON.stringify('actual'));
+  const rows = all<{ field_definition_id: string; value: string }>(db, buildCustomAttributesQuery('A1'));
+  // solo la VIVA sale; la borrada queda fuera (desaparición prolija, sin crash).
+  assert.deepEqual(rows.map((r) => r.field_definition_id), ['p-viva']);
+  assert.equal(JSON.parse(rows[0].value), 'actual');
+});
+
+// ─── M7 — gestión de datos custom: soft-delete + editar + conteos de impacto (R13.28/R13.31–R13.34) ──
+
+test('buildSoftDeleteCustomFieldUpdate: setea deleted_at (UPDATE plano); idempotente (no re-toca una ya borrada)', () => {
+  const db = freshDb();
+  run(db, buildCreateCustomFieldInsertRaw2(db, { id: 'c1', est: 'est-A', dataKey: 'angulo', label: 'Ángulo', dataType: 'maniobra', uic: 'numeric', cfg: null, deleted: null }));
+  // 1er borrado: setea deleted_at.
+  const r1 = db.prepare(buildSoftDeleteCustomFieldUpdate('c1').sql).run(...(buildSoftDeleteCustomFieldUpdate('c1').args as never[]));
+  assert.equal(Number(r1.changes), 1);
+  const after = all<{ deleted_at: string | null }>(db, { sql: "SELECT deleted_at FROM field_definitions WHERE id='c1'", args: [] })[0];
+  assert.ok(after.deleted_at != null, 'deleted_at quedó seteado');
+  const firstStamp = after.deleted_at;
+  // 2do borrado: idempotente — el filtro `deleted_at IS NULL` lo excluye, no cambia filas ni el timestamp.
+  const r2 = db.prepare(buildSoftDeleteCustomFieldUpdate('c1').sql).run(...(buildSoftDeleteCustomFieldUpdate('c1').args as never[]));
+  assert.equal(Number(r2.changes), 0);
+  const after2 = all<{ deleted_at: string | null }>(db, { sql: "SELECT deleted_at FROM field_definitions WHERE id='c1'", args: [] })[0];
+  assert.equal(after2.deleted_at, firstStamp);
+});
+
+test('buildUpdateCustomFieldUpdate: cambia SOLO label + config_schema (NO data_type/ui_component/data_key/establishment_id); ignora borrada', () => {
+  const db = freshDb();
+  run(db, buildCreateCustomFieldInsertRaw2(db, { id: 'c1', est: 'est-A', dataKey: 'color', label: 'Color', dataType: 'propiedad', uic: 'enum_single', cfg: '{"options":["A"]}', deleted: null }));
+  run(db, buildCreateCustomFieldInsertRaw2(db, { id: 'c2', est: 'est-A', dataKey: 'borr', label: 'Borrada', dataType: 'propiedad', uic: 'text', cfg: null, deleted: '2026-06-17T00:00:00Z' }));
+  run(db, buildUpdateCustomFieldUpdate('c1', 'Color del manto', '{"options":["A","B","C"]}'));
+  run(db, buildUpdateCustomFieldUpdate('c2', 'No debe cambiar', '{"options":["X"]}'));
+  const c1 = all<{ label: string; config_schema: string; data_type: string; ui_component: string; data_key: string; establishment_id: string }>(db, { sql: "SELECT label, config_schema, data_type, ui_component, data_key, establishment_id FROM field_definitions WHERE id='c1'", args: [] })[0];
+  assert.equal(c1.label, 'Color del manto');
+  assert.equal(c1.config_schema, '{"options":["A","B","C"]}');
+  // inmutables NO tocados por el builder (el cliente no los manda; el guard 0093 los blinda server-side).
+  assert.equal(c1.data_type, 'propiedad');
+  assert.equal(c1.ui_component, 'enum_single');
+  assert.equal(c1.data_key, 'color');
+  assert.equal(c1.establishment_id, 'est-A');
+  // la borrada NO cambió (filtro deleted_at IS NULL).
+  const c2 = all<{ label: string }>(db, { sql: "SELECT label FROM field_definitions WHERE id='c2'", args: [] })[0];
+  assert.equal(c2.label, 'Borrada');
+});
+
+test('buildCustomFieldEnabledRodeoCountQuery: cuenta los rodeos DISTINTOS con el field enabled (overlay PISA la fila synced)', () => {
+  const db = freshDb();
+  // synced: rodeo R1 enabled, R2 disabled, R3 enabled.
+  db.prepare('INSERT INTO rodeo_data_config (field_definition_id, rodeo_id, enabled) VALUES (?,?,1)').run('c1', 'R1');
+  db.prepare('INSERT INTO rodeo_data_config (field_definition_id, rodeo_id, enabled) VALUES (?,?,0)').run('c1', 'R2');
+  db.prepare('INSERT INTO rodeo_data_config (field_definition_id, rodeo_id, enabled) VALUES (?,?,1)').run('c1', 'R3');
+  // overlay: R2 lo PRENDE (offline toggle); R3 lo APAGA. El override gana sobre el synced del mismo (rodeo,field).
+  db.prepare('INSERT INTO pending_rodeo_data_config (id, client_op_id, rodeo_id, field_definition_id, enabled) VALUES (?,?,?,?,1)').run('o1', 'op1', 'R2', 'c1');
+  db.prepare('INSERT INTO pending_rodeo_data_config (id, client_op_id, rodeo_id, field_definition_id, enabled) VALUES (?,?,?,?,0)').run('o2', 'op2', 'R3', 'c1');
+  // efectivo: R1 (synced ON), R2 (overlay ON) → 2; R3 (overlay OFF) no cuenta.
+  const n = all<{ n: number }>(db, buildCustomFieldEnabledRodeoCountQuery('c1'))[0].n;
+  assert.equal(Number(n), 2);
+});
+
+test('buildCustomFieldCaptureCountQuery: suma custom_measurements + custom_attributes que referencian el field', () => {
+  const db = freshDb();
+  // 2 measurements + 1 attribute del field c1 (las cargas afectadas al borrar — bajo Opción B dejan de verse, R13.31).
+  db.prepare('INSERT INTO custom_measurements (id, animal_profile_id, field_definition_id, value) VALUES (?,?,?,?)').run('m1', 'A1', 'c1', '1');
+  db.prepare('INSERT INTO custom_measurements (id, animal_profile_id, field_definition_id, value) VALUES (?,?,?,?)').run('m2', 'A2', 'c1', '2');
+  db.prepare('INSERT INTO custom_measurements (id, animal_profile_id, field_definition_id, value) VALUES (?,?,?,?)').run('m3', 'A3', 'OTRO', '3');
+  setAttr(db, 'A1', 'c1', '"x"');
+  setAttr(db, 'A2', 'OTRO', '"y"');
+  const n = all<{ n: number }>(db, buildCustomFieldCaptureCountQuery('c1'))[0].n;
+  assert.equal(Number(n), 3); // 2 measurements + 1 attribute de c1
 });
 
 // helper: inserta una field_definitions cruda en el fixture (para sembrar globales/borradas/propiedades).

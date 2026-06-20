@@ -17,10 +17,11 @@
 // primitivo Switch en la base v4 del proyecto). a11y: cada fila expone role switch + estado.
 
 import { Platform, Pressable } from 'react-native';
-import { Text, View, XStack, YStack } from 'tamagui';
+import { getTokenValue, Text, View, XStack, YStack } from 'tamagui';
+import { MoreVertical } from 'lucide-react-native';
 
-import { categoryLabel, type TemplateSection } from '../utils/rodeo-template';
-import { switchA11y } from '../utils/a11y';
+import { categoryLabel, isCustomField, type TemplateSection, type FieldDefinition } from '../utils/rodeo-template';
+import { buttonA11y, switchA11y } from '../utils/a11y';
 
 export type FieldTemplateToggleListProps = {
   /** Secciones agrupadas por categoría (de groupTogglesByCategory). */
@@ -31,6 +32,14 @@ export type FieldTemplateToggleListProps = {
   header?: string;
   /** Modo solo-lectura (no-owner, R2.3): muestra los toggles sin permitir cambios. */
   readOnly?: boolean;
+  /**
+   * Menú de acciones (⋯) por fila para los datos CUSTOM (spec 03 M7, R13.29). Si se pasa, las filas CUSTOM
+   * (`establishment_id` no-NULL) muestran un kebab ⋯ a la derecha (Editar/Eliminar viven en el caller); las
+   * filas de FÁBRICA (NULL) NO lo muestran (catálogo global inmutable, R13.4). Owner-only: el caller solo lo
+   * pasa cuando isOwner (hereda la puerta del bloque owner-only de la pantalla). Si se omite (wizard "Crear
+   * rodeo"), NINGUNA fila muestra el ⋯. El ⋯ NO interfiere con el tap del toggle (zona aparte, target XL).
+   */
+  onCustomAction?: (field: FieldDefinition) => void;
 };
 
 // ─── Toggle tokenizado (pista + thumb) ───────────────────────────────────────────
@@ -91,6 +100,7 @@ function ToggleRow({
   required,
   readOnly,
   onPress,
+  onMenu,
 }: {
   label: string;
   description: string | null;
@@ -98,6 +108,8 @@ function ToggleRow({
   required: boolean;
   readOnly: boolean;
   onPress: () => void;
+  /** Si se pasa, esta fila (custom) muestra un ⋯ que abre el menú de acciones (M7, R13.29). */
+  onMenu?: () => void;
 }) {
   const interactive = !required && !readOnly;
   // a11y: role switch + estado + label, ramificado por plataforma (switchA11y). En web SOLO atributos
@@ -150,15 +162,42 @@ function ToggleRow({
     </XStack>
   );
 
-  if (!interactive) {
+  // El cuerpo de la fila (label + descripción + toggle) tappable para el toggle; el ⋯ (si hay) va APARTE a la
+  // derecha (zona de tap propia, target XL) para no robar el toggle. El ⋯ se muestra solo en filas custom
+  // owner (M7, R13.29) — affordance EXPLÍCITA (no swipe/long-press).
+  const row = !interactive ? (
     // Required o readOnly: no tappable. Igual exponemos a11y (label + estado) para el lector.
-    return <View {...a11y}>{content}</View>;
-  }
-
-  return (
-    <Pressable onPress={onPress} {...a11y}>
+    <View flex={1} minWidth={0} {...a11y}>
+      {content}
+    </View>
+  ) : (
+    <Pressable style={{ flex: 1, minWidth: 0 }} onPress={onPress} {...a11y}>
       {content}
     </Pressable>
+  );
+
+  if (!onMenu) return row;
+
+  return (
+    <XStack width="100%" alignItems="center" gap="$2">
+      {row}
+      <Pressable
+        onPress={onMenu}
+        hitSlop={8}
+        {...buttonA11y(Platform.OS, { label: `Acciones de ${label}` })}
+      >
+        <View
+          width="$touchMin"
+          height="$touchMin"
+          alignItems="center"
+          justifyContent="center"
+          borderRadius="$pill"
+          pressStyle={{ backgroundColor: '$greenLight' }}
+        >
+          <MoreVertical size={getTokenValue('$navIcon', 'size')} color={getTokenValue('$textMuted', 'color')} />
+        </View>
+      </Pressable>
+    </XStack>
   );
 }
 
@@ -167,6 +206,7 @@ export function FieldTemplateToggleList({
   onToggle,
   header,
   readOnly = false,
+  onCustomAction,
 }: FieldTemplateToggleListProps) {
   return (
     <YStack width="100%">
@@ -189,19 +229,25 @@ export function FieldTemplateToggleList({
       {sections.map((section) => (
         <YStack key={section.category} width="100%">
           <SectionHeader category={section.category} />
-          {section.toggles.map((t, i) => (
-            <YStack key={t.field.id} width="100%">
-              {i > 0 ? <View height={1} backgroundColor="$divider" /> : null}
-              <ToggleRow
-                label={t.field.label}
-                description={t.field.description}
-                enabled={t.enabled}
-                required={t.required}
-                readOnly={readOnly}
-                onPress={() => onToggle(t.field.id, !t.enabled)}
-              />
-            </YStack>
-          ))}
+          {section.toggles.map((t, i) => {
+            // ⋯ solo en filas CUSTOM (establishment_id no-NULL) y solo si el caller pasó onCustomAction
+            // (owner-only, R13.29). Las de fábrica (NULL) o el wizard (sin callback) → sin ⋯.
+            const showMenu = onCustomAction != null && isCustomField(t.field);
+            return (
+              <YStack key={t.field.id} width="100%">
+                {i > 0 ? <View height={1} backgroundColor="$divider" /> : null}
+                <ToggleRow
+                  label={t.field.label}
+                  description={t.field.description}
+                  enabled={t.enabled}
+                  required={t.required}
+                  readOnly={readOnly}
+                  onPress={() => onToggle(t.field.id, !t.enabled)}
+                  onMenu={showMenu ? () => onCustomAction!(t.field) : undefined}
+                />
+              </YStack>
+            );
+          })}
         </YStack>
       ))}
     </YStack>

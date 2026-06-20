@@ -20,13 +20,15 @@ import {
 
 // ─── Fixtures: un mini-catálogo representativo de cría ───────────────────────────
 
+// establishmentId/options agregados a FieldDefinition por M7 (R13.29: discriminar fila custom; precargar
+// editor). Estos fixtures son de FÁBRICA (establishmentId: null, options: []).
 const FD = {
-  servicio: { id: 'fd-servicio', dataKey: 'servicio', label: 'Servicio / entore', description: 'Monta o IA', category: 'reproductivo', dataType: 'evento_individual', uiComponent: 'composite' },
-  prenez: { id: 'fd-prenez', dataKey: 'prenez', label: 'Preñez', description: 'Tacto', category: 'reproductivo', dataType: 'maniobra', uiComponent: 'enum_single' },
-  inseminacion: { id: 'fd-insem', dataKey: 'inseminacion', label: 'Inseminación artificial', description: 'IATF', category: 'reproductivo', dataType: 'maniobra', uiComponent: 'composite' },
-  peso: { id: 'fd-peso', dataKey: 'peso', label: 'Pesaje', description: 'Peso vivo', category: 'productivo', dataType: 'maniobra', uiComponent: 'numeric' },
-  vacunacion: { id: 'fd-vac', dataKey: 'vacunacion', label: 'Vacunación', description: 'Vacuna', category: 'sanitario', dataType: 'maniobra', uiComponent: 'silent_apply' },
-  dientes: { id: 'fd-dientes', dataKey: 'dientes', label: 'Estado de dientes', description: 'Dentario', category: 'manejo', dataType: 'maniobra', uiComponent: 'enum_single' },
+  servicio: { id: 'fd-servicio', dataKey: 'servicio', label: 'Servicio / entore', description: 'Monta o IA', category: 'reproductivo', dataType: 'evento_individual', uiComponent: 'composite', establishmentId: null, options: [] },
+  prenez: { id: 'fd-prenez', dataKey: 'prenez', label: 'Preñez', description: 'Tacto', category: 'reproductivo', dataType: 'maniobra', uiComponent: 'enum_single', establishmentId: null, options: [] },
+  inseminacion: { id: 'fd-insem', dataKey: 'inseminacion', label: 'Inseminación artificial', description: 'IATF', category: 'reproductivo', dataType: 'maniobra', uiComponent: 'composite', establishmentId: null, options: [] },
+  peso: { id: 'fd-peso', dataKey: 'peso', label: 'Pesaje', description: 'Peso vivo', category: 'productivo', dataType: 'maniobra', uiComponent: 'numeric', establishmentId: null, options: [] },
+  vacunacion: { id: 'fd-vac', dataKey: 'vacunacion', label: 'Vacunación', description: 'Vacuna', category: 'sanitario', dataType: 'maniobra', uiComponent: 'silent_apply', establishmentId: null, options: [] },
+  dientes: { id: 'fd-dientes', dataKey: 'dientes', label: 'Estado de dientes', description: 'Dentario', category: 'manejo', dataType: 'maniobra', uiComponent: 'enum_single', establishmentId: null, options: [] },
 } satisfies Record<string, FieldDefinition>;
 
 const CATALOG: FieldDefinition[] = Object.values(FD);
@@ -113,7 +115,7 @@ test('groupTogglesByCategory: orden canónico de categorías + sort_order dentro
 });
 
 test('groupTogglesByCategory: una categoría no prevista cae al final (defensivo)', () => {
-  const exotic: FieldDefinition = { id: 'fd-x', dataKey: 'x', label: 'X', description: null, category: 'experimental', dataType: 'propiedad', uiComponent: 'text' };
+  const exotic: FieldDefinition = { id: 'fd-x', dataKey: 'x', label: 'X', description: null, category: 'experimental', dataType: 'propiedad', uiComponent: 'text', establishmentId: null, options: [] };
   const toggles: TemplateToggle[] = [
     { field: FD.prenez, enabled: true, required: false, isDefault: true, sortOrder: 2 },
     { field: exotic, enabled: true, required: false, isDefault: true, sortOrder: 1 },

@@ -393,6 +393,136 @@ export async function waitForServerPreset(
 }
 
 /**
+ * ORÁCULO SERVER del BORRADO (soft-delete) de un PRESET de maniobra (spec 03 M7, R2.9): pollea
+ * `maneuver_presets` vía service_role hasta que la fila del `presetId` tenga `deleted_at` NO nulo — verifica
+ * que `softDeletePreset` (RPC 0057, OUTBOX) llegó REAL al server. Devuelve el `deleted_at`.
+ */
+export async function waitForServerPresetDeleted(
+  presetId: string,
+  opts: { tries?: number; delayMs?: number } = {},
+): Promise<string> {
+  const tries = opts.tries ?? 30;
+  const delayMs = opts.delayMs ?? 2000;
+  for (let i = 0; i < tries; i++) {
+    const { data, error } = await admin
+      .from('maneuver_presets')
+      .select('deleted_at')
+      .eq('id', presetId)
+      .limit(1);
+    if (error) throw new Error(`waitForServerPresetDeleted: ${error.message}`);
+    if (data && data.length > 0 && data[0].deleted_at != null) {
+      return data[0].deleted_at as string;
+    }
+    await new Promise((r) => setTimeout(r, delayMs));
+  }
+  throw new Error(
+    `waitForServerPresetDeleted(${presetId}): el soft-delete NUNCA llegó al server (${tries} intentos) — ` +
+      `softDeletePreset (RPC 0057, outbox) no drenó.`,
+  );
+}
+
+/**
+ * ORÁCULO SERVER de la EDICIÓN de un PRESET (spec 03 M7, R2.7/R2.8): pollea `maneuver_presets` por el `id`
+ * hasta que el `name` y/o el `config` coincidan con lo esperado — verifica que `updatePreset` (CRUD-plano)
+ * llegó al server SOBRE EL MISMO id (no creó uno nuevo). Devuelve `{ name, config }` normalizado.
+ */
+export async function waitForServerPresetUpdated(
+  presetId: string,
+  predicate: (row: { name: string; config: Record<string, unknown> }) => boolean,
+  opts: { tries?: number; delayMs?: number } = {},
+): Promise<{ name: string; config: Record<string, unknown> }> {
+  const tries = opts.tries ?? 30;
+  const delayMs = opts.delayMs ?? 2000;
+  let last: { name: string; config: Record<string, unknown> } | null = null;
+  for (let i = 0; i < tries; i++) {
+    const { data, error } = await admin
+      .from('maneuver_presets')
+      .select('name, config')
+      .eq('id', presetId)
+      .is('deleted_at', null)
+      .limit(1);
+    if (error) throw new Error(`waitForServerPresetUpdated: ${error.message}`);
+    if (data && data.length > 0) {
+      const row = { name: data[0].name as string, config: normalizeManeuverConfig(data[0].config) };
+      last = row;
+      if (predicate(row)) return row;
+    }
+    await new Promise((r) => setTimeout(r, delayMs));
+  }
+  throw new Error(
+    `waitForServerPresetUpdated(${presetId}): el preset NUNCA convergió a lo esperado (${tries} intentos; ` +
+      `última vista: ${JSON.stringify(last)}).`,
+  );
+}
+
+/**
+ * ORÁCULO SERVER del BORRADO (soft-delete) de un dato CUSTOM (spec 03 M7, R13.28): pollea `field_definitions`
+ * por el `fieldDefinitionId` hasta que `deleted_at` sea NO nulo — verifica que `softDeleteCustomField`
+ * (UPDATE plano CRUD-plano) llegó REAL al server. Devuelve el `deleted_at`.
+ */
+export async function waitForServerCustomFieldDeleted(
+  fieldDefinitionId: string,
+  opts: { tries?: number; delayMs?: number } = {},
+): Promise<string> {
+  const tries = opts.tries ?? 30;
+  const delayMs = opts.delayMs ?? 2000;
+  for (let i = 0; i < tries; i++) {
+    const { data, error } = await admin
+      .from('field_definitions')
+      .select('deleted_at')
+      .eq('id', fieldDefinitionId)
+      .limit(1);
+    if (error) throw new Error(`waitForServerCustomFieldDeleted: ${error.message}`);
+    if (data && data.length > 0 && data[0].deleted_at != null) {
+      return data[0].deleted_at as string;
+    }
+    await new Promise((r) => setTimeout(r, delayMs));
+  }
+  throw new Error(
+    `waitForServerCustomFieldDeleted(${fieldDefinitionId}): el soft-delete NUNCA llegó al server (${tries} ` +
+      `intentos) — softDeleteCustomField (UPDATE plano CRUD) no drenó.`,
+  );
+}
+
+/**
+ * ORÁCULO SERVER de la EDICIÓN de un dato CUSTOM (spec 03 M7, R13.32): pollea `field_definitions` por el
+ * `fieldDefinitionId` hasta que `label`/`config_schema` coincidan con el predicado, asertando además que
+ * `data_type` y `ui_component` NO cambiaron (inmutables, R13.26). Devuelve la fila.
+ */
+export async function waitForServerCustomFieldUpdated(
+  fieldDefinitionId: string,
+  predicate: (row: { label: string; dataType: string; uiComponent: string; configSchema: unknown }) => boolean,
+  opts: { tries?: number; delayMs?: number } = {},
+): Promise<{ label: string; dataType: string; uiComponent: string; configSchema: unknown }> {
+  const tries = opts.tries ?? 30;
+  const delayMs = opts.delayMs ?? 2000;
+  let last: { label: string; dataType: string; uiComponent: string; configSchema: unknown } | null = null;
+  for (let i = 0; i < tries; i++) {
+    const { data, error } = await admin
+      .from('field_definitions')
+      .select('label, data_type, ui_component, config_schema')
+      .eq('id', fieldDefinitionId)
+      .limit(1);
+    if (error) throw new Error(`waitForServerCustomFieldUpdated: ${error.message}`);
+    if (data && data.length > 0) {
+      const row = {
+        label: data[0].label as string,
+        dataType: data[0].data_type as string,
+        uiComponent: data[0].ui_component as string,
+        configSchema: data[0].config_schema,
+      };
+      last = row;
+      if (predicate(row)) return row;
+    }
+    await new Promise((r) => setTimeout(r, delayMs));
+  }
+  throw new Error(
+    `waitForServerCustomFieldUpdated(${fieldDefinitionId}): el dato custom NUNCA convergió a lo esperado ` +
+      `(${tries} intentos; última vista: ${JSON.stringify(last)}).`,
+  );
+}
+
+/**
  * Oráculo SERVER del alta de un dato/maniobra CUSTOM (spec 03 M5-C.2): la fila REAL aterrizó en
  * field_definitions con su establishment_id (forzado/validado por la RLS owner-only + el guard 0093), su
  * data_type (maniobra/propiedad), ui_component y config_schema. Busca por (establishment_id, label) — el
@@ -474,6 +604,23 @@ export async function seedCustomField(
     .insert({ rodeo_id: rodeoId, field_definition_id: id, enabled: true });
   if (cfgErr) throw new Error(`seedCustomField rodeo_data_config(${opts.label}): ${cfgErr.message}`);
   return id;
+}
+
+/**
+ * Siembra un CURRENT-VALUE de una PROPIEDAD CUSTOM (`custom_attributes`) de un animal vía service_role
+ * (spec 03 M7, R13.30): para probar que la VISTA histórica de la ficha sigue mostrándolo aunque el dato se
+ * borre. `value` es jsonb (el caller pasa el valor nativo: string/number/bool/array). `updated_by`/
+ * `establishment_id` los fuerza el trigger 0095 (anti-spoof); no se mandan. PK compuesta natural.
+ */
+export async function seedCustomAttribute(
+  profileId: string,
+  fieldDefinitionId: string,
+  value: unknown,
+): Promise<void> {
+  const { error } = await admin
+    .from('custom_attributes')
+    .insert({ animal_profile_id: profileId, field_definition_id: fieldDefinitionId, value });
+  if (error) throw new Error(`seedCustomAttribute(${fieldDefinitionId}): ${error.message}`);
 }
 
 /**

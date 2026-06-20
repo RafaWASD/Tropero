@@ -15,17 +15,30 @@
 
 // ─── Tipos de dominio (espejan las tablas, sin acoplar a supabase-js) ────────────
 
-/** Una fila del catálogo global field_definitions (R2.8). */
+/** Una fila del catálogo de field_definitions (R2.8). Incluye las globales de fábrica + las custom del campo. */
 export type FieldDefinition = {
   id: string;
   dataKey: string;
   label: string;
   description: string | null;
-  /** reproductivo | productivo | sanitario | manejo | comercial | identificacion */
+  /** reproductivo | productivo | sanitario | manejo | comercial | identificacion | personalizado */
   category: string;
   dataType: string;
   uiComponent: string | null;
+  /**
+   * establishment_id de la fila (spec 03 M7, R13.29): NULL = global de FÁBRICA (catálogo inmutable desde el
+   * cliente, R13.4); no-NULL = dato CUSTOM del campo (editable/borrable por el owner). La plantilla del rodeo
+   * usa esto para mostrar el menú ⋯ (editar/eliminar) SOLO en las filas custom.
+   */
+  establishmentId: string | null;
+  /** Opciones del enum (enum_single/enum_multi) de un dato custom; [] para los demás. Para precargar el editor (M7). */
+  options: string[];
 };
+
+/** ¿Esta fila del catálogo es un dato CUSTOM del campo (no global de fábrica)? (spec 03 M7, R13.29). */
+export function isCustomField(field: FieldDefinition): boolean {
+  return field.establishmentId != null;
+}
 
 /** Una fila de system_default_fields para un sistema (R2.9). */
 export type SystemDefaultField = {

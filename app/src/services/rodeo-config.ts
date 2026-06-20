@@ -28,6 +28,7 @@ import type {
   SystemDefaultField,
   RodeoFieldConfig,
 } from '../utils/rodeo-template';
+import { parseCustomOptions } from '../utils/custom-render';
 import type { RodeoDataKeyMap, RodeoDataKeyState } from '../utils/maneuver-gating';
 
 export type { FieldDefinition, SystemDefaultField, RodeoFieldConfig } from '../utils/rodeo-template';
@@ -41,12 +42,14 @@ export type ServiceResult<T> = { ok: true; value: T } | { ok: false; error: AppE
 
 type FieldDefinitionRow = {
   id: string;
+  establishment_id: string | null;
   data_key: string;
   label: string;
   description: string | null;
   category: string;
   data_type: string;
   ui_component: string | null;
+  config_schema: unknown;
 };
 
 function toFieldDefinition(r: FieldDefinitionRow): FieldDefinition {
@@ -58,6 +61,8 @@ function toFieldDefinition(r: FieldDefinitionRow): FieldDefinition {
     category: r.category,
     dataType: r.data_type,
     uiComponent: r.ui_component,
+    establishmentId: r.establishment_id ?? null,
+    options: parseCustomOptions(r.config_schema),
   };
 }
 

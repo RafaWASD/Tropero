@@ -36,7 +36,7 @@ import { RodeoIcon } from '@/theme/icons';
 import { useEstablishment, useRodeo } from '@/contexts';
 import type { Rodeo } from '@/services/rodeos';
 import { createSession } from '@/services/sessions';
-import { createPreset, fetchPresets, loadPreset } from '@/services/maneuver-presets';
+import { createPreset, fetchPresets, loadPreset, updatePreset } from '@/services/maneuver-presets';
 import {
   createCustomField,
   enableCustomFieldInRodeo,
@@ -87,7 +87,7 @@ type Stage = 1 | 2 | 3;
 export default function JornadaWizardScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const params = useLocalSearchParams<{ presetId?: string; dragFreeze?: string }>();
+  const params = useLocalSearchParams<{ presetId?: string; editPresetId?: string; dragFreeze?: string }>();
 
   const { state: estState } = useEstablishment();
   const { state: rodeoState } = useRodeo();
@@ -210,14 +210,25 @@ export default function JornadaWizardScreen() {
     };
   }, [establishmentId]);
 
-  // Si vino con presetId (arrancar desde un preset, R2.2/R2.3): al elegir el rodeo cargamos el preset y
-  // pre-seleccionamos sus maniobras aplicables + el aviso de omitidas. Se dispara una vez que hay rodeo.
+  // MODO del wizard (M7-A.2, R2.8): si vino `editPresetId` → EDITAR ese preset (el CTA terminal es "Guardar
+  // cambios" = updatePreset, NO arranca jornada, NO crea nada). Si vino `presetId` → ARRANCAR desde ese
+  // preset (CTA "Arrancar jornada" = createSession). Sin ninguno → jornada desde cero. `presetId` (arrancar)
+  // y `editPresetId` (editar) son EXCLUYENTES; el caller manda uno u otro.
   const presetId = params.presetId ?? null;
+  const editPresetId = params.editPresetId ?? null;
+  const isEditingPreset = editPresetId != null;
+  // El id del preset a CARGAR (en ambos modos se precarga loadPreset sobre el rodeo elegido).
+  const loadFromPresetId = editPresetId ?? presetId;
+  // Nombre del preset que se está editando (para persistirlo intacto en updatePreset — solo la config cambia).
+  const [editPresetName, setEditPresetName] = useState<string>('');
+
+  // Al elegir el rodeo, cargamos el preset (arrancar o editar) y pre-seleccionamos sus maniobras aplicables
+  // + el aviso de omitidas (R2.2/R2.3/R2.8). Se dispara una vez que hay rodeo.
   useEffect(() => {
-    if (!presetId || !rodeoId) return;
+    if (!loadFromPresetId || !rodeoId) return;
     let active = true;
     void (async () => {
-      const r = await loadPreset(presetId, rodeoId);
+      const r = await loadPreset(loadFromPresetId, rodeoId);
       if (!active || !r.ok) return;
       setChosen(r.value.maniobras);
       setPresetOmitted(r.value.omitted);
@@ -228,11 +239,13 @@ export default function JornadaWizardScreen() {
       // (namespace paralelo). buildCurrentConfig las filtra luego a las que SIGUEN enabled en este rodeo.
       const customIds = extractCustomManiobras(r.value.preset.config);
       setChosenCustom(customIds);
+      // En modo edición guardamos el nombre actual del preset (updatePreset lo persiste intacto).
+      setEditPresetName(r.value.preset.name);
     })();
     return () => {
       active = false;
     };
-  }, [presetId, rodeoId]);
+  }, [loadFromPresetId, rodeoId]);
 
   const onPickRodeo = useCallback((r: Rodeo) => {
     setRodeo((prev) => {
@@ -321,6 +334,34 @@ export default function JornadaWizardScreen() {
     router.replace({ pathname: '/maniobra/identificar', params: { sessionId: r.value.id } });
   }, [establishmentId, rodeo, chosen, chosenCustom, buildCurrentConfig, router]);
 
+  // GUARDAR CAMBIOS de un preset en modo edición (M7-A.2, R2.8): llama updatePreset(editPresetId, name,
+  // config) con la config ACTUAL de la jornada (mismo buildCurrentConfig que arranca/crea — un solo shape).
+  // NO llama createSession ni createPreset → NO arranca jornada, NO crea nada nuevo (R2.8). El name se
+  // persiste INTACTO (la edición de maniobras NO renombra; renombrar es otra acción, R2.7). Al OK → vuelve al
+  // landing. Fail-closed: si updatePreset falla, NO navegamos, se superficia el error y se deja reintentar.
+  const onGuardarCambios = useCallback(async () => {
+    if (!editPresetId) {
+      setError('No pudimos resolver la rutina. Volvé a intentar.');
+      return;
+    }
+    if (chosen.length === 0 && chosenCustom.length === 0) {
+      setError('Elegí al menos una maniobra para la rutina.');
+      return;
+    }
+    setSubmitting(true);
+    setError(null);
+    const config = buildCurrentConfig();
+    const r = await updatePreset(editPresetId, editPresetName, config);
+    setSubmitting(false);
+    if (!r.ok) {
+      setError(r.error.message);
+      return;
+    }
+    // OK: volvemos al landing del que vinimos (el wizard se abrió PUSHEADO sobre él). El preset actualizado
+    // se ve al re-enfocar (fetchPresets en focus). router.back() (no replace) → no apila un landing nuevo.
+    router.back();
+  }, [editPresetId, editPresetName, chosen, chosenCustom, buildCurrentConfig, router]);
+
   // Guardar como rutina (R2.1): crea un maneuver_preset con la config ACTUAL de la jornada (mismo
   // buildCurrentConfig que arranca la sesión — las maniobras en orden + la preconfig). INDEPENDIENTE de
   // arrancar: podés guardar sin arrancar (quedás en etapa 3) o arrancar sin guardar. `establishmentId`
@@ -391,10 +432,16 @@ export default function JornadaWizardScreen() {
         </Pressable>
         <YStack flex={1} minWidth={0}>
           <Text fontFamily="$heading" fontSize="$7" lineHeight="$7" fontWeight="700" color="$textPrimary" numberOfLines={1}>
-            {stage === 1 ? 'Elegí el rodeo' : stage === 2 ? 'Elegí las maniobras' : 'Revisá la jornada'}
+            {stage === 1
+              ? 'Elegí el rodeo'
+              : stage === 2
+                ? 'Elegí las maniobras'
+                : isEditingPreset
+                  ? 'Revisá la rutina'
+                  : 'Revisá la jornada'}
           </Text>
           <Text fontFamily="$body" fontSize="$3" lineHeight="$3" color="$textMuted" numberOfLines={1}>
-            Paso {stage} de 3
+            {isEditingPreset ? `Editando ${editPresetName || 'la rutina'} · paso ${stage} de 3` : `Paso ${stage} de 3`}
           </Text>
         </YStack>
       </XStack>
@@ -485,23 +532,32 @@ export default function JornadaWizardScreen() {
             </View>
           ) : null}
 
-          {/* PRIMARIO: arrancar la jornada (acción dominante, NO se degrada). */}
-          <ArrancarCTA submitting={submitting} onPress={onArrancar} />
+          {isEditingPreset ? (
+            // MODO EDICIÓN (M7-A.2, R2.8): el CTA terminal GUARDA los cambios sobre el MISMO preset (updatePreset)
+            // — NO arranca jornada. Se SUPRIME el secundario "Guardar como rutina" (redundante: ya estás editando
+            // una rutina existente).
+            <ArrancarCTA submitting={submitting} onPress={onGuardarCambios} label="Guardar cambios" />
+          ) : (
+            <>
+              {/* PRIMARIO: arrancar la jornada (acción dominante, NO se degrada). */}
+              <ArrancarCTA submitting={submitting} onPress={onArrancar} />
 
-          {/* SECUNDARIO (outline): guardar como rutina. Acción INDEPENDIENTE de arrancar (R2.1): no
-              compite con el primario (va debajo, outline). Deshabilitada mientras se arranca (no abrir el
-              sheet en medio del createSession). */}
-          <Button
-            variant="secondary"
-            fullWidth
-            disabled={submitting}
-            onPress={() => {
-              setPresetSaved(false);
-              setSavePresetOpen(true);
-            }}
-          >
-            Guardar como rutina
-          </Button>
+              {/* SECUNDARIO (outline): guardar como rutina. Acción INDEPENDIENTE de arrancar (R2.1): no
+                  compite con el primario (va debajo, outline). Deshabilitada mientras se arranca (no abrir el
+                  sheet en medio del createSession). */}
+              <Button
+                variant="secondary"
+                fullWidth
+                disabled={submitting}
+                onPress={() => {
+                  setPresetSaved(false);
+                  setSavePresetOpen(true);
+                }}
+              >
+                Guardar como rutina
+              </Button>
+            </>
+          )}
         </YStack>
       ) : null}
 
@@ -879,14 +935,26 @@ function StageSummary({
 // la manga. Confiado: un toque MÁS ALTO que el Button canónico ($touchMin=56 → 64) + un ícono ▶ leading
 // + el verde botella de marca. Copy claro ("Arrancar jornada"). No es el primitivo Button (que es
 // solo-texto y de alto fijo) — es un CTA propio de esta pantalla. Manga-friendly (≥$touchMin).
-function ArrancarCTA({ submitting, onPress }: { submitting: boolean; onPress: () => void }) {
+function ArrancarCTA({
+  submitting,
+  onPress,
+  label = 'Arrancar jornada',
+}: {
+  submitting: boolean;
+  onPress: () => void;
+  /** Texto del CTA. Default "Arrancar jornada"; en modo edición de preset = "Guardar cambios" (M7-A.2). */
+  label?: string;
+}) {
   const WHITE = getTokenValue('$white', 'color');
+  // En modo "guardar cambios" (edición de preset) el ícono ▶ de arrancar no aplica → ✓ Check; arrancar = ▶.
+  const isSave = label === 'Guardar cambios';
+  const busyLabel = isSave ? 'Guardando…' : 'Arrancando…';
   const a11y =
     Platform.OS === 'web'
       ? { role: 'button' as const, 'aria-disabled': submitting }
       : { accessibilityRole: 'button' as const, accessibilityState: { disabled: submitting } };
   return (
-    <Pressable onPress={submitting ? undefined : onPress} accessibilityLabel="Arrancar jornada" {...a11y}>
+    <Pressable onPress={submitting ? undefined : onPress} accessibilityLabel={label} {...a11y}>
       <XStack
         backgroundColor="$primary"
         borderRadius="$pill"
@@ -897,10 +965,10 @@ function ArrancarCTA({ submitting, onPress }: { submitting: boolean; onPress: ()
         opacity={submitting ? 0.5 : 1}
         pressStyle={{ backgroundColor: '$primaryPress' }}
       >
-        <Play size={22} color={WHITE} fill={WHITE} />
-        {/* lineHeight matching aunque "Arrancar jornada" trae 'j' descendente. */}
+        {isSave ? <Check size={24} color={WHITE} strokeWidth={3} /> : <Play size={22} color={WHITE} fill={WHITE} />}
+        {/* lineHeight matching aunque las copys traen 'j'/'g' descendentes. */}
         <Text fontFamily="$body" fontSize="$6" lineHeight="$6" fontWeight="700" color="$white" numberOfLines={1}>
-          {submitting ? 'Arrancando…' : 'Arrancar jornada'}
+          {submitting ? busyLabel : label}
         </Text>
       </XStack>
     </Pressable>

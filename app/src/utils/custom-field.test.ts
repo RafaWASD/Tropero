@@ -9,6 +9,7 @@ import {
   validateCustomFieldDraft,
   customFieldErrorTarget,
   buildCreateCustomFieldPayload,
+  buildCustomFieldDeleteImpactLines,
   uiComponentNeedsOptions,
   UI_COMPONENT_OPTIONS,
   DATA_KEY_MAX,
@@ -272,4 +273,62 @@ test('buildPayload: NUNCA manda recorded_by/establishment forzado/columnas inmut
   assert.deepEqual(keys, [
     'category', 'config_schema', 'data_key', 'data_type', 'establishment_id', 'id', 'label', 'ui_component',
   ]);
+});
+
+// ─── buildCustomFieldDeleteImpactLines (spec 03 M7, R13.31 — Opción B) — ADVERTENCIA destructiva ──────
+// Opción B (MVP, Raf 2026-06-20): al borrar, las cargas previas DEJAN DE VERSE (la definición se prunea del
+// device) → el copy ADVIERTE pérdida, NO promete "se conservan". Línea 0 = cargas (advertencia); línea 1 =
+// rodeos (solo si M>0). El cierre "Esta acción no se puede deshacer" lo agrega el diálogo, no estas líneas.
+
+test('advertencia: N cargas + M rodeos (plural) — las cargas DEJAN DE VERSE (no recuperables), se quita de los rodeos', () => {
+  const lines = buildCustomFieldDeleteImpactLines({ rodeoCount: 3, captureCount: 12 });
+  assert.equal(lines.length, 2);
+  // línea 0 = la advertencia destructiva sobre las cargas.
+  assert.match(lines[0], /12 cargas previas/);
+  assert.match(lines[0], /dejarán de verse/);
+  assert.match(lines[0], /no vas a poder recuperarlas/);
+  // NO promete "se conservan" (sería mentira bajo Opción B).
+  assert.doesNotMatch(lines[0], /se conserva/i);
+  // línea 1 = rodeos.
+  assert.match(lines[1], /3 rodeos/);
+  assert.match(lines[1], /Se quita de/);
+});
+
+test('advertencia: 1 carga + 1 rodeo → singular es-AR', () => {
+  const lines = buildCustomFieldDeleteImpactLines({ rodeoCount: 1, captureCount: 1 });
+  assert.equal(lines.length, 2);
+  assert.match(lines[0], /Su 1 carga previa dejará de verse/);
+  assert.match(lines[0], /no vas a poder recuperarla/);
+  assert.match(lines[1], /Se quita de 1 rodeo donde/);
+  assert.doesNotMatch(lines[1], /rodeos/);
+});
+
+test('advertencia liviana: 0 cargas → no hay pérdida; 0 rodeos → NO agrega línea de rodeos', () => {
+  const lines = buildCustomFieldDeleteImpactLines({ rodeoCount: 0, captureCount: 0 });
+  // sin cargas → mensaje liviano (no hay pérdida de datos), sin amenaza de "dejarán de verse".
+  assert.equal(lines.length, 1);
+  assert.match(lines[0], /Todavía no cargaste/);
+  assert.doesNotMatch(lines[0], /dejarán de verse/);
+});
+
+test('advertencia: cargas sin rodeos (N>0, M=0) → solo la advertencia de cargas, sin línea de rodeos', () => {
+  const lines = buildCustomFieldDeleteImpactLines({ rodeoCount: 0, captureCount: 4 });
+  assert.equal(lines.length, 1);
+  assert.match(lines[0], /4 cargas previas dejarán de verse/);
+});
+
+test('advertencia: conteos null (sincronizando) → copy SIN número, sin bloquear (R13.31 degradación)', () => {
+  const lines = buildCustomFieldDeleteImpactLines({ rodeoCount: null, captureCount: null });
+  assert.equal(lines.length, 2);
+  // sin dígitos, pero el mensaje (advertencia + rodeos) se conserva.
+  assert.doesNotMatch(lines[0], /\d/);
+  assert.doesNotMatch(lines[1], /\d/);
+  assert.match(lines[0], /dejarán de verse/);
+  assert.match(lines[0], /no vas a poder recuperarlas/);
+  assert.match(lines[1], /Se quita de los rodeos/);
+});
+
+test('advertencia: NO incluye "no se puede deshacer" (lo agrega el diálogo de confirmación)', () => {
+  const lines = buildCustomFieldDeleteImpactLines({ rodeoCount: 2, captureCount: 5 });
+  for (const l of lines) assert.doesNotMatch(l, /deshacer/i);
 });

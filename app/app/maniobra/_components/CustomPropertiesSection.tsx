@@ -152,15 +152,21 @@ export function CustomPropertiesFicha({ profileId, rodeoId, editable }: CustomPr
 
   // Lista UNIFICADA: propiedades enabled del rodeo (aunque sin valor) + las con valor cargado (aunque ya no
   // enabled). Indexada por field_definition_id; el valor (si hay) viene de attrs. Conserva el orden de enabled,
-  // luego las "huérfanas con valor" (deshabilitadas tras cargarse).
+  // luego las "huérfanas con valor" (deshabilitadas tras cargarse). Bajo Opción B (M7, R13.30 MVP), un dato
+  // SOFT-DELETEADO ya no llega acá: su definición se prunea del device y `fetchCustomAttributes` (INNER JOIN a
+  // field_definitions, filtra `deleted_at IS NULL`) ya no devuelve su valor → la propiedad desaparece prolija
+  // de la ficha (la confirmación de borrado lo advierte, R13.31). No hay rama display-only de borrados en MVP.
   const byId = new Map<string, { id: string; label: string; ui: EnabledCustomProperty | CustomAttributeValue; value: CustomCaptureValue | null }>();
   for (const p of enabled) {
     byId.set(p.fieldDefinitionId, { id: p.fieldDefinitionId, label: p.label, ui: p, value: null });
   }
   for (const a of attrs) {
     const existing = byId.get(a.fieldDefinitionId);
-    if (existing) existing.value = a.value;
-    else byId.set(a.fieldDefinitionId, { id: a.fieldDefinitionId, label: a.label, ui: a, value: a.value });
+    if (existing) {
+      existing.value = a.value;
+    } else {
+      byId.set(a.fieldDefinitionId, { id: a.fieldDefinitionId, label: a.label, ui: a, value: a.value });
+    }
   }
   const rows = Array.from(byId.values());
 
@@ -213,7 +219,10 @@ export function CustomPropertiesFicha({ profileId, rodeoId, editable }: CustomPr
       <YStack gap="$3">
         {rows.map((row) => {
           const ui = row.ui;
-          const isEditing = editingId === row.id;
+          // Bajo Opción B (M7, R13.30 MVP), las filas que llegan acá son TODAS de datos vivos (las borradas se
+          // pruneanan + el INNER JOIN las filtra → no llegan). El editable depende solo del modo de la ficha.
+          const rowEditable = editable;
+          const isEditing = editingId === row.id && rowEditable;
           return (
             <YStack key={row.id} gap="$2" testID={`ficha-custom-${row.id}`}>
               {isEditing ? (
@@ -278,7 +287,7 @@ export function CustomPropertiesFicha({ profileId, rodeoId, editable }: CustomPr
                 <FichaRow
                   label={row.label}
                   value={describeCustomValue(row.value)}
-                  editable={editable}
+                  editable={rowEditable}
                   onEdit={() => onStartEdit(row.id, row.value)}
                 />
               )}

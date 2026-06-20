@@ -17,6 +17,34 @@ No es un sustituto de `feature_list.json` ni de los ADRs — es la antesala dond
 
 ## Ítems pendientes
 
+## 2026-06-20 — Opción A de R13.30 (spec 03 M7): preservar el histórico de un dato custom borrado en la ficha
+
+**Origen**: fix-loop del chunk M7 de spec 03 (gestión de datos custom). El reviewer + el e2e cazaron que R13.30 ("la ficha sigue mostrando el valor de un dato custom borrado") NO se honra end-to-end: la sync-stream `est_field_definitions_custom` (`sync-streams/rafaq.yaml` l.243) filtra `deleted_at IS NULL` → al soft-deletear, la definición se prunea del device → el INNER JOIN del display no resuelve el `label` → el valor histórico desaparece. **Raf eligió la Opción B (MVP)**: no se cambia la stream; el cliente lo asume y la confirmación de borrado ADVIERTE que las cargas previas dejarán de verse (R13.30/R13.31 reconciliados al as-built).
+**Qué**: **Opción A** — quitar el `AND deleted_at IS NULL` de la sync-stream `est_field_definitions_custom` para que la fila soft-deleteada SIGA sincronizando (dentro del MISMO `org_scope` del tenant) → el JOIN del display resolvería el `label`/`config_schema` histórico, y la ficha volvería a mostrar el valor de un dato borrado (read-only). Los forms/listas NUEVAS ya filtran `deleted_at` por su cuenta (sin cambio). Implica además volver a separar el read de display (sin filtro `deleted_at`) del de los forms.
+**Por qué importa**: medio. El histórico de cargas de un dato custom borrado es valioso para analytics/trazabilidad (uno de los 3 pilares de RAFAQ), pero NO bloquea el MVP — la advertencia de Opción B es honesta y el dato sigue en la DB (no se pierde, solo deja de verse desde la app).
+**Próximo paso sugerido**: cambio de sync-rules + deploy a PowerSync (gateado por Raf) → **reabre la frontera WAL → Gate 1** (riesgo bajo: dato lógicamente-borrado del mismo campo/tenant). Foldear como chunk M8 o sub-chunk de M7-fast-follow. Detalle: `specs/active/03-modo-maniobras/design.md §13.5` + `requirements.md` nota R13.30.
+
+## 2026-06-20 — Bug pre-existente: editar in-place el valor de una propiedad custom falla con UNIQUE constraint
+
+**Origen**: regresión cazada durante el re-review/fix-loop del chunk M7 de spec 03. NO es de M7 (su diff a `custom-attributes.ts` es solo docstring, verificado por el leader) — es de **M5-C.3** (`setCustomAttribute`, `app/src/services/custom-attributes.ts:54`).
+**Qué**: editar in-place un `custom_attribute` (current-value de una propiedad custom ya cargada, R13.12) falla **determinísticamente** con `UNIQUE constraint failed: ps_data__custom_attributes.id` (e2e `maniobra-custom-render.spec.ts:195`). Causa: PowerSync expone la tabla como VIEW → no se puede UPSERT → el patrón es UPDATE-luego-INSERT-si-0-filas con un `id` SINTÉTICO (`animal_profile_id || ':' || field_definition_id`); una carrera/LWW entre el overlay y la fila synced hace que el UPDATE afecte 0 filas y el INSERT siguiente colisione el id sintético ya existente. El DISPLAY de un valor live SÍ funciona; solo rompe la EDICIÓN.
+**Por qué importa**: medio-alto. R13.12 promete "editable en cualquier momento"; hoy esa edición se rompe de forma reproducible. User-facing en el feature custom ya entregado (M5), no en M7.
+**Próximo paso sugerido**: fix-loop chico aparte sobre `setCustomAttribute` (revisar la lógica UPDATE-luego-INSERT contra la VIEW + overlay; quizás chequear existencia en synced+overlay antes de decidir UPDATE vs INSERT, o idempotencia por el id sintético). NO toca M7. Confirmar primero con un test rojo aislado.
+
+## 2026-06-14 — Tensión token `touchMin=56` vs piso EARS ≥60px para CTAs de manga (decisión de DS)
+
+**Origen**: OBS-1 del reviewer en Gate-review de M2.2 (spec 03), `progress/review_03-m2.2.md`. APPROVED — no bloqueante.
+**Qué**: R5.2/R12.2 de spec 03 declaran tap mínimo **≥60px** para pantallas de manga. Los CTAs full-width de la carga rápida (ej. "Confirmar", "Confirmar y siguiente") usan `minHeight=$touchMin=56px` (`tamagui.config.ts:110`), 4px bajo el piso EARS. Los bloques de decisión DOMINANTES (PREÑADA/VACÍA, tamaño, keypad) usan `flex:1` y exceden 60px (cumplen R12.5) — la tensión es solo en los CTAs full-width.
+**Por qué importa**: bajo. `touchMin=56` es el target canónico del DS usado en TODA la app (ya pasó Gate 2 + puertas humanas); los CTAs full-width son trivialmente tappables por ancho. Es tensión **EARS(≥60) vs token canónico(56)**, no defecto. Misma clase que la tensión `$chipMin=40` vs ≥44/48 (entrada 2026-06-12).
+**Próximo paso sugerido**: decisión de DS de Raf — (a) bumpear `$touchMin` a 60 (afecta TODA la app, pasada de design system, re-veto de pantallas) y/o crear un token `$touchManga≥60` solo para CTAs de pantallas 🔴; o (b) aceptar 56 como piso real y ajustar el EARS de spec 03 a ≥56. NO bloquea M2.2 ni el MVP. Resolver junto con `$chipMin`.
+
+## 2026-06-14 — Cota server-side de longitud para `work_lot_label` y `maneuver_presets.name` (hallazgo para Gate 1 puntual)
+
+**Origen**: Gate 2 (security_analyzer, code) del chunk M1 de spec 03, `progress/security_code_03-m1.md`. PASS 0 HIGH. 2 MEDIUM de defensa en profundidad (NO explotables HOY en M1).
+**Qué**: las columnas `sessions.work_lot_label` (`0050_sessions.sql:18`) y `maneuver_presets.name` (`0051_maneuver_presets.sql:16`) son `text` SIN cap de longitud máxima server-side (CHECK). El jsonb `config` que contiene el preconfig de tanda (único input editable expuesto en M1) SÍ tiene cota autoritativa (`CHECK octet_length(config::text) < 16384` en `0050:30`), así que el único campo cableado de M1 está cubierto — pero `work_lot_label` y `name` no.
+**Por qué importa**: hoy NINGÚN input de M1 escribe esas dos columnas (`setWorkLotLabel`/`createPreset` existen en los servicios pero sin call-site en la UI). El día que se cableen — **M5 ("guardar como rutina" = crear preset) y/o el input de "lote de trabajo"** — un write directo por PostgREST/PowerSync (que saltea cualquier `maxLength` del cliente) podría meter un texto gigante sin tope autoritativo (storage abuse). Es la misma clase que el cap del jsonb `config`, que sí está.
+**Próximo paso sugerido**: migración nueva con `CHECK char_length(work_lot_label) <= N` y `CHECK char_length(name) <= N` (N a definir, ej. 80/120) **ANTES** de exponer esos inputs en la UI. Como toca DB, la DDL pasa por **Gate 1 puntual** (no Gate 2). Foldear en el chunk que cablee el primero de esos inputs (probablemente M5). Mientras tanto, NO es bloqueante de M1.
+
 ## 2026-06-13 — Findings MED/LOW del Gate 2 del chunk "BLE global" de spec 09 (no bloquean)
 
 **Origen**: Gate 2 (security_analyzer, code) del chunk BLE global de spec 09, `progress/security_code_09resto-ble-global.md`. PASS 0 HIGH.

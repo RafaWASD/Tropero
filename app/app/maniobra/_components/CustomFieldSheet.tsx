@@ -53,21 +53,43 @@ import {
   type CustomFieldErrorTarget,
 } from '@/utils/custom-field';
 
-export type CustomFieldSheetMode = 'classify' | 'maniobra';
+export type CustomFieldSheetMode = 'classify' | 'maniobra' | 'edit';
+
+/** Datos iniciales para el modo EDIT (spec 03 M7, R13.32): el dato que se está editando. */
+export type CustomFieldEditInitial = {
+  label: string;
+  /** El ui_component del dato (INMUTABLE, R13.26 — se muestra deshabilitado). */
+  uiComponent: CustomUiComponent;
+  /** Las opciones EXISTENTES del enum (append-only: NO se pueden quitar; sí agregar/renombrar, R13.33). */
+  options: string[];
+};
 
 export type CustomFieldSheetProps = {
-  /** 'classify' = pregunta propiedad/maniobra primero; 'maniobra' = data_type fijo, sin pregunta (R13.7). */
+  /**
+   * 'classify' = pregunta propiedad/maniobra primero (crear, R13.6); 'maniobra' = data_type fijo, sin
+   * pregunta (crear, R13.7); 'edit' = EDITAR un dato existente (M7, R13.32): precarga label + opciones,
+   * BLOQUEA el tipo de dato (inmutable, R13.26), append-only en opciones (R13.33) → "Guardar cambios".
+   */
   mode: CustomFieldSheetMode;
-  /** Crea el dato custom con el draft. Devuelve null al OK, o un mensaje es-AR al fallo (no cierra el sheet). */
-  onCreate: (draft: CustomFieldDraft) => Promise<string | null>;
-  /** Cerrar sin crear. */
+  /** Crea el dato custom con el draft (modos classify/maniobra). Devuelve null al OK, o un mensaje es-AR al fallo. */
+  onCreate?: (draft: CustomFieldDraft) => Promise<string | null>;
+  /** Datos iniciales del dato a editar (modo 'edit'). */
+  editInitial?: CustomFieldEditInitial;
+  /** Guarda los cambios de label + opciones (modo 'edit'). Devuelve null al OK, o un mensaje es-AR al fallo. */
+  onUpdate?: (label: string, options: string[]) => Promise<string | null>;
+  /** Cerrar sin crear/guardar. */
   onClose: () => void;
 };
 
 type Step = 'classify' | 'form';
 
-export function CustomFieldSheet({ mode, onCreate, onClose }: CustomFieldSheetProps) {
+export function CustomFieldSheet({ mode, onCreate, editInitial, onUpdate, onClose }: CustomFieldSheetProps) {
   const insets = useSafeAreaInsets();
+  // Modo edición (M7, R13.32): el tipo de dato es INMUTABLE; las opciones son append-only.
+  const isEdit = mode === 'edit';
+  // Las opciones EXISTENTES (modo edit) que NO se pueden quitar (append-only, R13.33). Las nuevas agregadas en
+  // esta sesión SÍ se pueden quitar (todavía no persistidas). Se compara case-insensitive por valor.
+  const lockedOptions = isEdit ? (editInitial?.options ?? []) : [];
 
   // ── GUARD del backdrop contra el "click huérfano" del tap que abrió el sheet (BUG web) ──
   // Idéntico a ManeuverConfigSheet: el scrim ignora presses hasta el 2do frame (doble rAF). Así el click
@@ -99,14 +121,18 @@ export function CustomFieldSheet({ mode, onCreate, onClose }: CustomFieldSheetPr
     onClose();
   };
 
-  // mode 'maniobra' → data_type fijo + arranca en el form (sin pregunta, R13.7).
-  // mode 'classify' → pregunta primero (R13.6); el data_type se setea al elegir.
-  const [step, setStep] = useState<Step>(mode === 'maniobra' ? 'form' : 'classify');
+  // mode 'maniobra'/'edit' → arranca en el form (sin pregunta de clasificación). mode 'classify' → pregunta
+  // primero (R13.6); el data_type se setea al elegir. En 'edit' el data_type NO importa para el payload (no
+  // se persiste; es inmutable) — lo fijamos a 'propiedad' como placeholder neutro.
+  const [step, setStep] = useState<Step>(mode === 'classify' ? 'classify' : 'form');
   const [dataType, setDataType] = useState<CustomDataType>(mode === 'maniobra' ? 'maniobra' : 'propiedad');
 
-  const [label, setLabel] = useState('');
-  const [uiComponent, setUiComponent] = useState<CustomUiComponent>('numeric');
-  const [options, setOptions] = useState<string[]>([]);
+  // En modo edición precargamos label + ui_component + opciones del dato existente (R13.32).
+  const [label, setLabel] = useState(isEdit ? (editInitial?.label ?? '') : '');
+  const [uiComponent, setUiComponent] = useState<CustomUiComponent>(
+    isEdit ? (editInitial?.uiComponent ?? 'numeric') : 'numeric',
+  );
+  const [options, setOptions] = useState<string[]>(isEdit ? (editInitial?.options ?? []) : []);
   const [optionDraft, setOptionDraft] = useState('');
   // Error de validación: el MENSAJE (de validateCustomFieldDraft) + el CAMPO culpable (de customFieldErrorTarget).
   // El campo decide el resalte + el scroll + dónde va el mensaje inline. `null` = sin error.
@@ -261,7 +287,11 @@ export function CustomFieldSheet({ mode, onCreate, onClose }: CustomFieldSheetPr
     setError(null);
   };
 
+  // Una opción se puede QUITAR solo si NO es una opción EXISTENTE del dato (append-only, R13.33): las
+  // existentes están bloqueadas (no se orfanan capturas que las referencian); las agregadas en esta sesión sí.
+  const isLockedOption = (o: string) => lockedOptions.some((l) => l.toLowerCase() === o.toLowerCase());
   const removeOption = (target: string) => {
+    if (isLockedOption(target)) return; // existente: no se quita (append-only).
     setOptions((prev) => prev.filter((o) => o !== target));
   };
 
@@ -288,7 +318,10 @@ export function CustomFieldSheet({ mode, onCreate, onClose }: CustomFieldSheetPr
     submitBusy.current = true;
     setSubmitting(true);
     setError(null);
-    const message = await onCreate(draft);
+    // Modo EDIT (M7, R13.32): solo label + opciones (el resto es inmutable). Modo crear: el draft completo.
+    const message = isEdit
+      ? await (onUpdate ?? (async () => 'No se pudo guardar.'))(draft.label.trim(), needsOptions ? options : [])
+      : await (onCreate ?? (async () => 'No se pudo crear.'))(draft);
     setSubmitting(false);
     submitBusy.current = false;
     if (message) {
@@ -325,9 +358,11 @@ export function CustomFieldSheet({ mode, onCreate, onClose }: CustomFieldSheetPr
   const title =
     step === 'classify'
       ? '¿Qué tipo de dato es?'
-      : mode === 'maniobra'
-        ? 'Nueva maniobra'
-        : 'Nuevo dato';
+      : isEdit
+        ? 'Editar dato'
+        : mode === 'maniobra'
+          ? 'Nueva maniobra'
+          : 'Nuevo dato';
 
   return (
     <View
@@ -460,54 +495,84 @@ export function CustomFieldSheet({ mode, onCreate, onClose }: CustomFieldSheetPr
                 {labelInvalid ? <FieldError message={error!.message} testID="custom-field-label-error" /> : null}
               </YStack>
 
-              {/* TIPO DE INPUT (los 7 ui_component, R13.8) */}
-              <YStack gap="$2">
-                <Text fontFamily="$body" fontSize="$4" lineHeight="$4" fontWeight="600" color="$textPrimary" numberOfLines={1}>
-                  Tipo de dato
-                </Text>
+              {/* TIPO DE INPUT (los 7 ui_component, R13.8). En modo EDIT (M7, R13.26) el tipo es INMUTABLE → se
+                  muestra SOLO el tipo actual, deshabilitado, con una nota: re-tipar = borrar + recrear. */}
+              {isEdit ? (
                 <YStack gap="$2">
-                  {UI_COMPONENT_OPTIONS.map((opt) => {
-                    const selected = opt.uiComponent === uiComponent;
-                    return (
-                      <Pressable
-                        key={opt.uiComponent}
-                        onPress={() => pickType(opt.uiComponent)}
-                        testID={`type-${opt.uiComponent}`}
-                        {...buttonA11y(Platform.OS, { label: opt.label, selected })}
-                      >
-                        <XStack
-                          alignItems="center"
-                          gap="$3"
-                          minHeight="$touchMin"
-                          paddingHorizontal="$3"
-                          borderRadius="$card"
-                          borderWidth={1}
-                          backgroundColor={selected ? '$greenLight' : '$surface'}
-                          borderColor={selected ? '$primary' : '$divider'}
-                          pressStyle={{ opacity: 0.85 }}
-                        >
-                          <YStack flex={1} minWidth={0}>
-                            <Text
-                              fontFamily="$body"
-                              fontSize="$4"
-                              lineHeight="$4"
-                              fontWeight={selected ? '700' : '500'}
-                              color={selected ? '$primary' : '$textPrimary'}
-                              numberOfLines={1}
-                            >
-                              {opt.label}
-                            </Text>
-                            <Text fontFamily="$body" fontSize="$3" lineHeight="$3" color="$textMuted" numberOfLines={1}>
-                              {opt.hint}
-                            </Text>
-                          </YStack>
-                          {selected ? <Check size={iconSize} color={PRIMARY} strokeWidth={2.5} /> : null}
-                        </XStack>
-                      </Pressable>
-                    );
-                  })}
+                  <Text fontFamily="$body" fontSize="$4" lineHeight="$4" fontWeight="600" color="$textPrimary" numberOfLines={1}>
+                    Tipo de dato
+                  </Text>
+                  <XStack
+                    alignItems="center"
+                    gap="$3"
+                    minHeight="$touchMin"
+                    paddingHorizontal="$3"
+                    borderRadius="$card"
+                    borderWidth={1}
+                    backgroundColor="$surface"
+                    borderColor="$divider"
+                    opacity={0.7}
+                    testID="custom-field-type-locked"
+                  >
+                    <YStack flex={1} minWidth={0}>
+                      <Text fontFamily="$body" fontSize="$4" lineHeight="$4" fontWeight="700" color="$textPrimary" numberOfLines={1}>
+                        {UI_COMPONENT_OPTIONS.find((o) => o.uiComponent === uiComponent)?.label ?? uiComponent}
+                      </Text>
+                    </YStack>
+                  </XStack>
+                  <Text fontFamily="$body" fontSize="$3" lineHeight="$4" color="$textMuted" numberOfLines={2}>
+                    El tipo no se puede cambiar. Si te equivocaste de tipo, eliminá el dato y creá uno nuevo.
+                  </Text>
                 </YStack>
-              </YStack>
+              ) : (
+                <YStack gap="$2">
+                  <Text fontFamily="$body" fontSize="$4" lineHeight="$4" fontWeight="600" color="$textPrimary" numberOfLines={1}>
+                    Tipo de dato
+                  </Text>
+                  <YStack gap="$2">
+                    {UI_COMPONENT_OPTIONS.map((opt) => {
+                      const selected = opt.uiComponent === uiComponent;
+                      return (
+                        <Pressable
+                          key={opt.uiComponent}
+                          onPress={() => pickType(opt.uiComponent)}
+                          testID={`type-${opt.uiComponent}`}
+                          {...buttonA11y(Platform.OS, { label: opt.label, selected })}
+                        >
+                          <XStack
+                            alignItems="center"
+                            gap="$3"
+                            minHeight="$touchMin"
+                            paddingHorizontal="$3"
+                            borderRadius="$card"
+                            borderWidth={1}
+                            backgroundColor={selected ? '$greenLight' : '$surface'}
+                            borderColor={selected ? '$primary' : '$divider'}
+                            pressStyle={{ opacity: 0.85 }}
+                          >
+                            <YStack flex={1} minWidth={0}>
+                              <Text
+                                fontFamily="$body"
+                                fontSize="$4"
+                                lineHeight="$4"
+                                fontWeight={selected ? '700' : '500'}
+                                color={selected ? '$primary' : '$textPrimary'}
+                                numberOfLines={1}
+                              >
+                                {opt.label}
+                              </Text>
+                              <Text fontFamily="$body" fontSize="$3" lineHeight="$3" color="$textMuted" numberOfLines={1}>
+                                {opt.hint}
+                              </Text>
+                            </YStack>
+                            {selected ? <Check size={iconSize} color={PRIMARY} strokeWidth={2.5} /> : null}
+                          </XStack>
+                        </Pressable>
+                      );
+                    })}
+                  </YStack>
+                </YStack>
+              )}
 
               {/* EDITOR DE OPCIONES (solo enum_single / enum_multi, R13.8) */}
               {needsOptions ? (
@@ -535,33 +600,40 @@ export function CustomFieldSheet({ mode, onCreate, onClose }: CustomFieldSheetPr
                     padding={optionsInvalid ? '$2' : '$0'}
                     testID="custom-field-options-editor"
                   >
-                    {/* Chips de opciones agregadas; la × quita. */}
+                    {/* Chips de opciones; la × quita. Una opción EXISTENTE (modo edit) NO tiene × (append-only,
+                        R13.33): se muestra fija (no se puede quitar para no orfanar capturas). Las agregadas en
+                        esta sesión sí se pueden quitar. */}
                     {options.length > 0 ? (
                       <XStack flexWrap="wrap" gap="$2">
-                        {options.map((it) => (
-                          <XStack
-                            key={it}
-                            backgroundColor="$greenLight"
-                            borderRadius="$pill"
-                            paddingLeft="$3"
-                            paddingRight="$2"
-                            paddingVertical="$2"
-                            alignItems="center"
-                            gap="$2"
-                            testID={`option-chip-${it}`}
-                          >
-                            <Text fontFamily="$body" fontSize="$4" lineHeight="$4" fontWeight="600" color="$primary" numberOfLines={1}>
-                              {it}
-                            </Text>
-                            <Pressable
-                              onPress={() => removeOption(it)}
-                              hitSlop={8}
-                              {...buttonA11y(Platform.OS, { label: `Quitar ${it}` })}
+                        {options.map((it) => {
+                          const locked = isLockedOption(it);
+                          return (
+                            <XStack
+                              key={it}
+                              backgroundColor="$greenLight"
+                              borderRadius="$pill"
+                              paddingLeft="$3"
+                              paddingRight={locked ? '$3' : '$2'}
+                              paddingVertical="$2"
+                              alignItems="center"
+                              gap="$2"
+                              testID={`option-chip-${it}`}
                             >
-                              <X size={18} color={PRIMARY} strokeWidth={3} />
-                            </Pressable>
-                          </XStack>
-                        ))}
+                              <Text fontFamily="$body" fontSize="$4" lineHeight="$4" fontWeight="600" color="$primary" numberOfLines={1}>
+                                {it}
+                              </Text>
+                              {locked ? null : (
+                                <Pressable
+                                  onPress={() => removeOption(it)}
+                                  hitSlop={8}
+                                  {...buttonA11y(Platform.OS, { label: `Quitar ${it}` })}
+                                >
+                                  <X size={18} color={PRIMARY} strokeWidth={3} />
+                                </Pressable>
+                              )}
+                            </XStack>
+                          );
+                        })}
                       </XStack>
                     ) : null}
 
@@ -628,10 +700,10 @@ export function CustomFieldSheet({ mode, onCreate, onClose }: CustomFieldSheetPr
               {generalError ? <FieldError message={generalError} testID="custom-field-general-error" /> : null}
             </ScrollView>
 
-            {/* ── FOOTER FIJO (Crear/Cancelar). flexShrink:0 → siempre abajo, nunca empujado fuera. ── */}
+            {/* ── FOOTER FIJO (Crear/Guardar cambios + Cancelar). flexShrink:0 → siempre abajo, nunca fuera. ── */}
             <YStack flexShrink={0} gap="$2">
               <Button variant="primary" fullWidth disabled={submitting} onPress={() => void handleCreate()}>
-                {submitting ? 'Creando…' : 'Crear'}
+                {submitting ? (isEdit ? 'Guardando…' : 'Creando…') : isEdit ? 'Guardar cambios' : 'Crear'}
               </Button>
               <Button variant="secondary" fullWidth disabled={submitting} onPress={onClose}>
                 Cancelar

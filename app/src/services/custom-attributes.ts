@@ -109,10 +109,15 @@ type AttributeRow = {
 };
 
 /**
- * Lee los CURRENT-VALUES de las propiedades custom de un animal (R13.10/R13.12), para la ficha (ver + precargar
- * el editor). Cada fila trae el value jsonb + el ui_component → lo parseamos a CustomCaptureValue (parse
- * TOLERANTE; un value incompatible cae a null = "—"). Read-only, local (offline). Vacío legítimo (un animal sin
- * propiedades custom cargadas) NO degrada a "Sincronizando…".
+ * Lee los CURRENT-VALUES de las propiedades custom VIVAS de un animal (R13.10/R13.12), para MOSTRARLOS en la
+ * ficha y precargar el editor. Usa `buildCustomAttributesQuery` (INNER JOIN a field_definitions, que filtra
+ * `deleted_at IS NULL AND active = 1`).
+ *
+ * R13.30 bajo OPCIÓN B (MVP, Raf 2026-06-20): tras borrar un dato custom, su definición se prunea del device →
+ * el INNER JOIN no devuelve fila → la propiedad DEJA DE VERSE en la ficha (desaparición prolija, sin crash). La
+ * confirmación de borrado lo ADVIERTE (R13.31). La Opción A (preservar el histórico quitando el filtro de la
+ * stream) queda como fast-follow/backlog. El value jsonb se parsea por el ui_component (TOLERANTE; un value
+ * incompatible cae a null = "—"). Read-only, local (offline). Vacío legítimo NO degrada a "Sincronizando…".
  */
 export async function fetchCustomAttributes(
   profileId: string,

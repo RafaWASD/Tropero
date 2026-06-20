@@ -50,9 +50,26 @@ export type SavePresetSheetProps = {
   onSave: (name: string) => Promise<string | null>;
   /** Cerrar el sheet sin guardar (Cancelar / tap en el scrim). */
   onClose: () => void;
+  /**
+   * Valor inicial del nombre (spec 03 M7, R2.7 — RENOMBRAR precarga el nombre actual de la rutina). Default
+   * '' (crear una rutina nueva = el flujo original de R2.1). */
+  initialName?: string;
+  /** Título del sheet. Default "Guardar como rutina" (crear). Renombrar pasa "Renombrar la rutina". */
+  title?: string;
+  /** Sub-línea de ayuda. Default la de crear. */
+  description?: string;
+  /** Label del CTA primario. Default "Guardar". */
+  ctaLabel?: string;
 };
 
-export function SavePresetSheet({ onSave, onClose }: SavePresetSheetProps) {
+export function SavePresetSheet({
+  onSave,
+  onClose,
+  initialName = '',
+  title = 'Guardar como rutina',
+  description = 'Guardás esta combinación de maniobras para reusarla en otra jornada.',
+  ctaLabel = 'Guardar',
+}: SavePresetSheetProps) {
   const insets = useSafeAreaInsets();
 
   // ── GUARD del backdrop contra el "click huérfano" del tap que abrió el sheet (BUG web táctil) ──
@@ -89,7 +106,7 @@ export function SavePresetSheet({ onSave, onClose }: SavePresetSheetProps) {
     onClose();
   };
 
-  const [name, setName] = useState('');
+  const [name, setName] = useState(initialName);
   // ¿Guardar en vuelo? Deshabilita el botón para no disparar dos createPreset.
   const [saving, setSaving] = useState(false);
   // Error (fail-closed): createPreset devolvió ok:false → NO se cierra, se superficia + reintenta, sin
@@ -163,13 +180,13 @@ export function SavePresetSheet({ onSave, onClose }: SavePresetSheetProps) {
           backgroundColor="$divider"
         />
 
-        {/* Título + ayuda. lineHeight matching ("Guardar como rutina" trae g/p). */}
+        {/* Título + ayuda. lineHeight matching (los títulos traen g/p). */}
         <YStack gap="$1">
           <Text fontFamily="$heading" fontSize="$7" lineHeight="$7" fontWeight="700" color="$textPrimary" numberOfLines={1}>
-            Guardar como rutina
+            {title}
           </Text>
           <Text fontFamily="$body" fontSize="$3" lineHeight="$3" color="$textMuted" numberOfLines={2}>
-            Guardás esta combinación de maniobras para reusarla en otra jornada.
+            {description}
           </Text>
         </YStack>
 
@@ -221,7 +238,7 @@ export function SavePresetSheet({ onSave, onClose }: SavePresetSheetProps) {
         {/* Acciones: Guardar (primary, deshabilitado si vacío/whitespace) / Cancelar (secondary). */}
         <YStack gap="$2">
           <Button variant="primary" fullWidth disabled={!canSave} onPress={() => void handleSave()}>
-            {saving ? 'Guardando…' : 'Guardar'}
+            {saving ? 'Guardando…' : ctaLabel}
           </Button>
           <Button variant="secondary" fullWidth onPress={onClose}>
             Cancelar
