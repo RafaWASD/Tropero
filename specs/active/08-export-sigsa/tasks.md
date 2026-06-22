@@ -12,6 +12,24 @@
 
 ---
 
+## AS-BUILT — Capa pura T8/T9/T10 (2026-06-13, terminal paralela colisión-safe)
+
+> Primer chunk de spec 08 implementado: la **capa pura** (types + generador TXT + validador). Sin DB, sin PowerSync, sin UI. Reviewer APPROVED (`progress/review_08-sigsa-capa-pura.md`) + Gate 2 (security code) PASS 0 HIGH/0 MEDIUM (`progress/security_code_08-sigsa-capa-pura.md`). 32/32 unit tests + typecheck verde. Bitácora: `progress/impl_08-sigsa-capa-pura.md`.
+
+**Precisiones de implementación (reconciliadas con el código):**
+1. **Tests colocados**, no en `__tests__/` como decía la lista de "Archivos" del design: la convención REAL del repo es `*.test.ts` al lado del source (igual que `parse-sigsa-txt.test.ts`). Los archivos quedaron en `app/src/services/sigsa/sigsa-{txt-generator,validator}.test.ts`. Registrados en `scripts/run-tests.mjs`.
+2. **Contrato del validador**: T10 decía "recibe `AnimalExportRecord[]`" pero sus tests usan campos crudos nullables. AS-BUILT: `validateForExport(animals: PendingAnimalInfo[])` recibe lo **crudo** (de la query del design) y **emite** `{ exportable: AnimalExportRecord[]; incomplete: Array<{animalProfileId, reasons[]}> }`. El generador consume los `AnimalExportRecord` limpios. Sin contradicción dura con el design (que solo tipaba el generador).
+3. **RFID genérico `/^\d{15}$/`** (15 dígitos, prefijo `032` OK), NO el `isValidTag` del RS420 (que exige prefijo 982 Allflex y rechazaría TAG argentinos válidos). Mismo criterio que el parser inverso `parse-sigsa-txt.ts`.
+4. **Reuso** de `isKnownBreedCode` de `app/src/utils/import/breed-senasa.ts` (catálogo de 32 códigos ya sembrado) para R6.5 — no se re-siembra ni se inventan códigos. El generador es **round-trip-consistente** con `parse-sigsa-txt.ts` (test de round-trip sobre el ejemplo literal del manual).
+
+**Backlog (LOW, no bloqueante)**: el generador no tiene tope de registros tipo `MAX_SIGSA_RECORDS` del parser inverso. El Gate 2 lo juzgó no-vector (procesa el inventario propio del usuario, no input attacker-controlled). Considerar un cap cuando se implemente la capa de I/O (T11).
+
+**Diferido + gateado** (NO en este chunk): T1-T6 (migraciones a la DB compartida), T7 (PowerSync/`rafaq.yaml`), T11-T20 (servicio I/O, hook, pantallas). Las 4 decisiones abiertas de Puerta 1 se cierran al implementar esas capas.
+
+**Pendiente de reconvergencia de terminales** (no tocado por aislamiento): flip de `feature_list.json` + entrada en `progress/history.md` cuando la terminal dueña reconverja.
+
+---
+
 ## Bloque A — Deltas backend cross-spec (DB ya `done`)
 
 > Estas tasks tocan tablas de specs 01 y 02. Requieren cuidado: son incrementos sobre migrations existentes y producción.
@@ -52,13 +70,13 @@
 
 ## Bloque C — Módulo generador de TXT + validador
 
-- [ ] **T8** — Crear `app/src/services/sigsa/types.ts` con los tipos `AnimalExportRecord`, `SigsaTxtOptions`, `ExportValidationResult`, `PendingAnimalInfo`. Cubre: (tipos de soporte para todo el bloque C/D).
+- [x] **T8** — Crear `app/src/services/sigsa/types.ts` con los tipos `AnimalExportRecord`, `SigsaTxtOptions`, `ExportValidationResult`, `PendingAnimalInfo`. Cubre: (tipos de soporte para todo el bloque C/D). ✅ **DONE** (2026-06-13, capa pura).
 
-- [ ] **T9** — Crear `app/src/services/sigsa/sigsa-txt-generator.ts` como módulo **puro** (sin I/O, sin efectos, sin imports de PowerSync/Supabase). Implementar `generateSigsaTxt(records, options)` que produce `{RFID}-{SEXO}-{RAZA}-{MM/AAAA}` por registro, separados por `;`. Parámetro `trailingSemicolon: boolean` (default `false`). Mes en 2 dígitos (`08` no `8`). Cubre: R5.1, R5.2, R5.4, R5.5, R5.6, R6.1, R6.2, R6.3, R6.4, R6.5.
+- [x] **T9** ✅ **DONE** (2026-06-13, capa pura) — Crear `app/src/services/sigsa/sigsa-txt-generator.ts` como módulo **puro** (sin I/O, sin efectos, sin imports de PowerSync/Supabase). Implementar `generateSigsaTxt(records, options)` que produce `{RFID}-{SEXO}-{RAZA}-{MM/AAAA}` por registro, separados por `;`. Parámetro `trailingSemicolon: boolean` (default `false`). Mes en 2 dígitos (`08` no `8`). Cubre: R5.1, R5.2, R5.4, R5.5, R5.6, R6.1, R6.2, R6.3, R6.4, R6.5.
 
   **Tests**: (a) un animal `{rfid: '032010000000000', sex: 'M', breedCode: 'H', birthMonthYear: '08/2025'}` genera `032010000000000-M-H-08/2025`; (b) dos animales se separan con `;` sin trailing; (c) con `trailingSemicolon: true` el string termina en `;`; (d) mes `1` se formatea como `01`; (e) el módulo lanza si `rfid` no tiene 15 dígitos numéricos; (f) el módulo lanza si `breedCode` está vacío; (g) output es UTF-8 sin BOM (verificar que no hay `﻿`).
 
-- [ ] **T10** — Crear `app/src/services/sigsa/sigsa-validator.ts` que implemente la validación pre-export: separa `AnimalExportRecord[]` en `exportable` y `incomplete` con el campo faltante por animal. Cubre: R8.1, R8.2, R8.3, R8.6.
+- [x] **T10** ✅ **DONE** (2026-06-13, capa pura) — Crear `app/src/services/sigsa/sigsa-validator.ts` que implemente la validación pre-export: separa `AnimalExportRecord[]` en `exportable` y `incomplete` con el campo faltante por animal. Cubre: R8.1, R8.2, R8.3, R8.6.
 
   **Tests**: (a) animal con `tag_electronic = null` queda en `incomplete` con razón `'missing_rfid'`; (b) animal con RFID de 14 dígitos queda en `incomplete` con razón `'invalid_rfid'`; (c) animal con RFID de 15 dígitos numéricos pasa; (d) RFID con letras queda en `incomplete`; (e) animal con `birth_date = null` queda en `incomplete` con razón `'missing_birth_date'`; (f) animal con `breed_id = null` queda en `incomplete` con razón `'missing_breed'`; (g) animal que pasa las 3 validaciones queda en `exportable`.
 

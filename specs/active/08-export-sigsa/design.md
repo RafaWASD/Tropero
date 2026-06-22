@@ -162,7 +162,12 @@ WHERE re.breed_id IS NULL
 ALTER TABLE public.establishments
   ADD COLUMN renspa text;
 
--- Unicidad parcial (solo entre establecimientos no borrados)
+-- ⚠ DECISIÓN 3 ABIERTA (2026-06-13): el unique GLOBAL cross-tenant está EN ESPERA.
+-- El leader recomienda RELAJAR (causa colisión/fuga cross-tenant; el RENSPA ni va en el TXT).
+-- NO aplicar este índice tal cual hasta cerrar la decisión con Facundo (¿RENSPA 1:1 estricto,
+-- o repetible/transferible?). Ver requirements.md §"Decisiones abiertas" #3 + CONTEXT/07-pendientes.
+-- Resolución probable: quitar el unique global (texto opcional) o, a lo sumo, único por dueño.
+-- Unicidad parcial (solo entre establecimientos no borrados) — PROVISIONAL, sujeta a decisión 3
 CREATE UNIQUE INDEX idx_establishments_renspa_active
   ON public.establishments(renspa)
   WHERE renspa IS NOT NULL AND deleted_at IS NULL;
@@ -569,6 +574,7 @@ Se evaluó agregar directamente `sigsa_declared_at timestamptz` + `sigsa_export_
 > Audit trail. No se borra.
 
 - **2026-06-13 — Redacción inicial**.
+- **2026-06-13 — AS-BUILT capa pura (T8/T9/T10)**: implementada la capa pura (terminal paralela colisión-safe). Precisión de contrato sobre el §"Módulo generador de TXT": el design solo tipaba el **generador** (`AnimalExportRecord` → `string`). AS-BUILT se agregó el contrato del **validador**: `validateForExport(animals: PendingAnimalInfo[]) → { exportable: AnimalExportRecord[]; incomplete: Array<{animalProfileId, reasons: ExportValidationReason[]}> }`, donde `PendingAnimalInfo` es la fila CRUDA de la query de pendientes (animals JOIN animal_profiles LEFT JOIN breed_catalog; campos nullables) y el validador la normaliza (sex `male`→`M`/`female`→`H`, `birth_date` ISO → `MM/AAAA` sin corrimiento de TZ, breedCode del catálogo). RFID validado con `/^\d{15}$/` (genérico, prefijo 032; **no** el `isValidTag` 982-prefijo del RS420). Razas reusan `isKnownBreedCode` de `import/breed-senasa.ts`. Tests **colocados** (no en `__tests__/` como decía §"Archivos a crear"). Reviewer APPROVED + Gate 2 PASS 0 HIGH. Detalle en `tasks.md` §AS-BUILT. Las capas de DB/PowerSync/UI (migrations 0089+, T7, T11-T20) siguen DIFERIDAS y gateadas.
 - **2026-06-13 — Fold de Gate 1 (FAIL 2 HIGH/4 MEDIUM)**:
   - **HIGH-1**: agregados triggers `sigsa_declarations_set_declared_by` (migration 0093) y `export_log_set_generated_by` (migration 0094) que fuerzan `declared_by`/`generated_by = auth.uid()` server-side, ignorando el payload del cliente. Patrón: `tg_force_created_by_auth_uid` (0043) + `tg_force_imported_by_auth_uid` (0073).
   - **HIGH-2**: agregados constraints `export_log_file_content_size_chk` (5 MB, ~138k animales) y `export_log_file_name_len_chk` (255 chars) en la definición de `export_log` (migration 0094). Patrón: 0070 + 0073.

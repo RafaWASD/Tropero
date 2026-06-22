@@ -10,6 +10,18 @@
 - El caveat previo ("el manual es un PDF de imágenes, no extraíble") **era incorrecto**: el PDF v2.42.80 tiene **capa de texto**. `WebFetch` no la lee (stream comprimido), pero `pdftotext` la extrae sin OCR. **No hace falta login a SIGSA ni contacto con SENASA para esta tabla.**
 - Las 8 razas que el research s16 había confirmado parcialmente (H, AA, HA, B, BG, BF, OR, S/E) coinciden **100%** con la tabla completa → cross-check OK.
 
+## ⚠️ OJO: SIGSA tiene DOS catálogos de raza distintos — no mezclar
+
+Verificado en **sesión 25 (2026-06-13)** a raíz de una foto que Facundo sacó del sistema vivo. SIGSA usa **dos sets de códigos de raza diferentes según el flujo**:
+
+1. **Declaración de dispositivos RFID** (lo que genera la feature 08 — el TXT de alta) → usa los códigos de **ESTE documento** (Tabla 1 de abajo): `AA` Aberdeen Angus, `B` Brahman, `HA` Holando, `J` Jersey, `CR` Criolla, `FS` Simmental, `SI` San Ignacio… **Re-verificado directo del PDF oficial** con `pdftotext -layout` (s25); el ejemplo literal del manual usa `-H-`, `-AA-`, `-B-`. **Esta es la tabla autoritativa para el export.**
+
+2. **Nuevo movimiento / DT-e / TRI** (mover o vender animales — **FUERA de scope de 08**) → el picker del sistema vivo usa códigos "amigables" distintos: `A` Angus, `BR` Brahman, `HO` Holando, `JE` Jersey, `C` Criolla, `SI` **Simmental**. Incluye razas que NO están en la tabla de dispositivos (Piamontesa, Normando, Pardo Suizo, Guzerat, Nelore). Fuente: foto de Facundo del sistema vivo (s25), no transcripta entera.
+
+**Trampa peligrosa — el código `SI`**: en el flujo de dispositivos (Tabla 1) `SI` = **San Ignacio**; en el flujo de movimiento `SI` = **Simmental**. Usar los códigos del picker de movimiento en el TXT de dispositivos **mis-declararía la raza**. El export de 08 usa SIEMPRE la Tabla 1 de abajo.
+
+> **Para el GATE DURO de formato (08)**: cuando se haga el upload real, sacar la tabla de razas desde la pantalla de **declaración de dispositivos**, NO desde la de movimiento.
+
 ## Fuente primaria
 
 Manual oficial SENASA: **"Declaración de dispositivos de identificación RFID"**, versión SIGSA **2.42.80** (diciembre 2025), sección *"CÓDIGOS DE LAS RAZAS BOVINAS, BUBALINAS Y CÉRVIDOS"* (págs. 8-9 del PDF; el research s16 las citó como 7-8).
