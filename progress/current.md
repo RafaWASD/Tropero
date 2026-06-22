@@ -3,6 +3,12 @@
 > Este archivo se vacía al cerrar cada sesión y su resumen se mueve a `history.md`.
 > Mientras trabajás, **mantenelo actualizado en tiempo real**, no al final.
 
+### ✅ spec-03 M7 CERRADO (commit `e26f80b`, 2026-06-20) — gestión de rutinas y datos custom (editar/borrar)
+Feature `03-modo-maniobras`, chunk **M7**. Cerrado y commiteado (33 archivos, solo la superficie de M7; el resto del working-tree es ajeno / otra terminal). Recorrido SDD completo: Gate 0 + Puerta 1 + reviewer (tras reconciliación de docs, verificado por el leader) + Gate de seguridad (PASS, 0 HIGH).
+- **Entregado**: rutinas → ⋯ por fila (editar = renombrar + reconfigurar vía wizard/`updatePreset`; eliminar = `softDeletePreset` con confirmación). Datos custom (owner-only) → ⋯ en filas custom (editar `label`/opciones append-only; eliminar con advertencia de Opción B).
+- **Fix HIGH (R13.26)**: migración `0101` hace PARCIAL sobre `deleted_at` el índice UNIQUE `(establishment_id, data_key)` → habilita borrar+recrear. **Desplegada y verificada en remoto** (backend custom 19/19 incl. borrar+recrear; client unit 251/251; e2e M7 9/9).
+- **R13.30 = Opción B** (decisión de Raf): al borrar un dato custom su histórico deja de verse + el diálogo lo advierte. **Backlog/fast-follow**: Opción A de R13.30 (preservar histórico vía sync-rules) + bug pre-existente de `setCustomAttribute` (M5). Detalle: `progress/impl_03-m7.md` / `review_03-m7.md` / `security_code_03-m7.md`.
+
 ### ✅ CIERRE ADMINISTRATIVO spec-03 MODO MANIOBRAS — FEATURE `done` (2026-06-19)
 Cierre formal de la feature 03 tras la **Puerta 2 (código) aprobada por Raf** (commit `fd36a4f`). Las entradas de abajo predatan los commits finales — el estado real quedó cerrado por la tanda `3186215`→`7f5181c`:
 - `3186215` **R8.4** — preview de transición de categoría offline en el resumen de maniobra.
