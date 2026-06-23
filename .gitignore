@@ -42,6 +42,11 @@ ads-n-marketing/
 /tests/
 docs/Profile.pdf
 
+# Artefactos locales / personales (no van al repo de código)
+.claude.zip
+RAFAQ-resumen-app.*
+METODOLOGIA-SDD-PORTABLE.md
+
 # Override del .gitignore global del usuario
 # (~/.gitignore_global ignora CLAUDE.md por convenciones corporativas, pero
 # acá es el archivo principal del proyecto y debe estar versionado).
