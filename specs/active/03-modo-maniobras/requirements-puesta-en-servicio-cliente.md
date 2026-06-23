@@ -143,6 +143,8 @@ El Gate 0 movió el **servicio natural a nivel rodeo** (qué meses hace servicio
 
 **RPSC.7.3** El sistema **no** deberá capturar el **peso objetivo / diferencial del 66%** en la maniobra de aptitud (POST-MVP, Gate 0 §3; en el MVP el vet ya pondera el peso al dar el veredicto). Este delta lo deja explícitamente **fuera de alcance** (no agrega un sub-paso de peso a `tacto_vaquillona`).
 
+**RPSC.7.4** El **copy/ayuda** de los tres veredictos (si la UI los explica) deberá reflejar la semántica precisada por **Facundo (2026-06-23, Gate 0 §3)**: **DIFERIDA** = "todavía le falta, pero podrá ser apta más adelante" (transitoria, se re-evalúa — NO descarte); **NO_APTA** = "no lo será nunca" (descarte permanente). Si los labels/ayuda actuales ya lo transmiten, no se cambia; si no, alinear (cambio de copy, no de flujo). El **hook NO_APTA → sugerir descarte/CUT** queda **POST-MVP** (fuera de alcance de Stream B; se conecta con la feature CUT de spec 02 más adelante).
+
 ## RPSC.8 — Multi-tenant, offline-first y reconciliación (transversal)
 
 **RPSC.8.1** El sistema deberá mantener el aislamiento **multi-tenant** en todo el delta: la escritura de `service_months` (B1) va por las RPC owner-only de Stream A (la barrera real es server-side, RPS.3.3/RPS.3.4); el cliente nunca hardcodea `establishment_id` (lo deriva del contexto activo / la RPC lo deriva del rodeo). La UI de gestión de rodeos solo la ve el **owner** (spec 02 C1).
