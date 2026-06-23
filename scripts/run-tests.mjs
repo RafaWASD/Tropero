@@ -64,10 +64,11 @@ if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
   // spec 02 Stream A (modelo de puesta en servicio) — delta backend: columna service_months en rodeos +
   // CHECK (0102), camino de escritura offline owner-only/anti-IDOR + helper (0103), reescritura de
   // compute_category sin `service` (0104), contrato de derivación servidas/entoradas tenant-scoped (0105) +
-  // verificación del enum heifer_fitness. La suite no-bypass cubre RPS.1-RPS.6. ⚠️ DESCOMENTAR cuando el
-  // LEADER aplique 0102–0105 al remoto (Gate 1 PASS + reviewer + Gate 2 + Puerta 2 + OK de Raf); la suite corre
-  // contra la DB remota → FALLA antes del apply (roja-hasta-apply, patrón spec 12/14/M5/M6-backend).
-  // run('Puesta-en-servicio suite (spec 02 Stream A)', `node --test supabase/tests/puesta-en-servicio/run.cjs`);
+  // verificación del enum heifer_fitness. La suite no-bypass cubre RPS.1-RPS.6. ✅ APLICADAS 0102-0105 al
+  // remoto por el leader (2026-06-23: Gate 1 PASS + reviewer + Gate 2 + Puerta 2/3 + OK de Raf; 0102 con fix
+  // del CHECK vía función immutable service_months_is_valid — subquery directa en CHECK no se permite). Corre
+  // contra la DB remota.
+  run('Puesta-en-servicio suite (spec 02 Stream A)', `node --test supabase/tests/puesta-en-servicio/run.cjs`);
   // spec 03 chunk M5 (datos/maniobras CUSTOM) — delta backend: RLS reabierta de field_definitions +
   // custom_measurements/custom_attributes + gating genérico fail-closed + validación de value por
   // ui_component + inmutabilidad + caps INPUT-1. ⚠️ DESCOMENTAR cuando el LEADER aplique 0093–0097 al

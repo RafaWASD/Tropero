@@ -17,29 +17,31 @@
 
 begin;
 
+-- ⚠️ Postgres NO permite subqueries directas en un CHECK constraint (ERROR 0A000) — la validación que recorre
+-- el array (rango + unicidad) se encapsula en una función IMMUTABLE que el CHECK invoca. Opera SOLO sobre el
+-- array de entrada (sin acceso a tablas → verdaderamente immutable). [FIX del apply 2026-06-23: el design
+-- original metía las subqueries directo en el CHECK → falla al aplicar; encapsuladas acá.]
+-- NULL ("sin configurar", RPS.1.2) y '{}' (vacío = "no hace servicio", RPS.1.2) pasan ambos.
+--   (a) rango 1..12: `p <@ array[1..12]` — todo elemento contenido en el conjunto de meses válidos.
+--   (b) sin duplicados: cardinality(p) = nº de meses distintos.
+--   (c) ≤ 12 elementos: cota anti-input-abusivo (INPUT-1, espejo 0070).
+create or replace function public.service_months_is_valid (p smallint[])
+returns boolean language sql immutable as $$
+  select p is null or (
+    p <@ array[1,2,3,4,5,6,7,8,9,10,11,12]::smallint[]
+    and cardinality(p) <= 12
+    and cardinality(p) = (select count(distinct x)::int from unnest(p) as x)
+  );
+$$;
+
 alter table public.rodeos
   add column service_months smallint[];   -- nullable, sin default (DD-PS-3); 1..12, únicos, ≤12 (CHECK abajo)
 
 -- CHECK autoritativo server-side (RPS.1.3/.4/.5; regla INPUT-1, espejo 0070). El cliente Expo escribe a
--- PostgREST directo → este CHECK es la ÚNICA capa autoritativa de la columna. NULL pasa el CHECK ("sin
--- configurar", RPS.1.2). '{}' (vacío = "no hace servicio", RPS.1.2) DEBE pasar también.
---   Se usa cardinality() (NO array_length): cardinality('{}') = 0 (array_length('{}',1) sería NULL, lo que
---   complica la lógica del vacío). Así las 3 cláusulas dan booleanos bien definidos también para el vacío.
---   (a) rango 1..12: ningún elemento fuera de [1,12]. bool_and() sobre 0 filas (vacío) = TRUE.
---   (b) unicidad: cardinality(array) = nº de meses distintos (sin duplicados). Vacío: 0 = 0 = TRUE.
---   (c) cardinalidad ≤ 12: no más meses que los del año (cota anti-input-abusivo). Vacío: 0 <= 12 = TRUE.
+-- PostgREST directo → este CHECK es la ÚNICA capa autoritativa de la columna; invoca la función immutable.
 alter table public.rodeos
-  add constraint rodeos_service_months_valid check (
-    service_months is null
-    or (
-      -- (a) rango
-      (select bool_and(m between 1 and 12) from unnest(service_months) as m)
-      -- (b) sin duplicados
-      and cardinality(service_months) = (select count(distinct m)::int from unnest(service_months) as m)
-      -- (c) cardinalidad ≤ 12
-      and cardinality(service_months) <= 12
-    )
-  );
+  add constraint rodeos_service_months_valid
+  check (public.service_months_is_valid(service_months));
 
 comment on column public.rodeos.service_months is
   'Meses (1-12) en que el rodeo hace servicio (Gate 0 §6, Stream A). NULL = sin configurar; {} = no hace '

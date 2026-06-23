@@ -157,6 +157,19 @@ notify pgrst, 'reload schema';
 
 Conserva la firma y las propiedades del as-built (`SECURITY DEFINER STABLE`, `set search_path = public`, `grant execute … to authenticated`). Lee ahora también `a.is_castrated` (DD-2) y los eventos `service`/`weaning`/`abortion`. **El conteo de partos sigue contando eventos `birth` distintos** (no terneros, RT2.7.2) — se conserva el comentario firme del `0045`.
 
+> ⚠ **SUPERSEDED por Stream A / RPS.4.1 (2026-06-23) — el `service` ya NO es disparador de categoría.**
+> El SQL de abajo es el **as-built histórico de `0062`** (RT2.x), donde `v_has_service` promovía
+> `ternera → vaquillona`. La migración **`0104`** (Stream A, modelo de puesta en servicio, aplicada al
+> remoto) **eliminó `v_has_service`** (decl + `SELECT EXISTS event_type='service'` + el término `or
+> v_has_service` de la rama `vaquillona`); **nada más cambió** (rama macho, tacto+ RT2.7.5, conteo de partos,
+> SECURITY DEFINER STABLE, search_path, grant: idénticos). La promoción `ternera → vaquillona` queda **solo**
+> por **destete** (`v_has_weaning`) o **edad ≥365d**. La forma final deployada está en
+> `supabase/migrations/0104_compute_category_drop_service.sql` y reconciliada en
+> `design-puesta-en-servicio.md`. **Espejo client-side**: `app/src/utils/animal-category.ts` (y sus fixtures
+> "FIXTURES ESPEJO" en `animal-category.test.ts`) **todavía** usan `hasService` a propósito — el slice
+> frontend que lo alinea es **Stream B / RPS.7.4**; ese drift transitorio (display-only) es **esperado y
+> documentado** (no se toca en el delta backend de Stream A ni en este fix-loop de la suite animal).
+
 ```sql
 -- 0062_compute_category_rewrite.sql — reescritura completa (ADR-008 enmendado).
 -- Conserva: SECURITY DEFINER STABLE, conteo de PARTOS (no terneros), grant a authenticated.
@@ -236,9 +249,9 @@ begin
       v_target_code := 'vaca_segundo_servicio';             -- RT2.4.2 (desde cualquier categoría)
     elsif v_has_pos_tacto then
       v_target_code := 'vaquillona_prenada';                -- RT2.4.3
-    elsif v_has_weaning or v_has_service
+    elsif v_has_weaning or v_has_service   -- ⚠ `or v_has_service` ELIMINADO por 0104 (RPS.4.1, Stream A)
           or (v_age_days is not null and v_age_days >= 365) then
-      v_target_code := 'vaquillona';                        -- RT2.4.4
+      v_target_code := 'vaquillona';                        -- RT2.4.4 (deployado: SIN v_has_service)
     elsif v_age_days is not null and v_age_days < 365 then
       v_target_code := 'ternera';                           -- RT2.4.5
     else

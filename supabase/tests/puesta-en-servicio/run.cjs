@@ -634,7 +634,8 @@ test('puesta-en-servicio suite — spec 02 Stream A', async (t) => {
       const { data: denomBefore } = await clientA.rpc('rodeo_repro_denominator', { p_rodeo_id: r.id, p_year: thisYear() });
       const before = denomBefore[0];
       assert.equal(before.entoradas, before.serviced - before.retired, 'entoradas = serviced − retired (RPS.5.5)');
-      await admin.from('animal_profiles').update({ status: 'sold', exit_reason: 'venta', exit_date: daysAgo(1) }).eq('id', vacaBaja.profile.id);
+      const { error: bajaErr } = await admin.from('animal_profiles').update({ status: 'sold', exit_reason: 'sale', exit_date: daysAgo(1) }).eq('id', vacaBaja.profile.id);
+      assert.ifError(bajaErr); // baja debe persistir: un literal de enum inválido reverte el status='sold' silenciosamente y rompe el assert de membresía de abajo
       const { data: denomAfter } = await clientA.rpc('rodeo_repro_denominator', { p_rodeo_id: r.id, p_year: thisYear() });
       const after = denomAfter[0];
       // la vacaBaja (natural) sale del set serviced al no estar 'active' → serviced baja en 1.

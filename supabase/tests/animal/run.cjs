@@ -1492,16 +1492,22 @@ test('animal suite — spec 02', async (t) => {
     assert.equal(await computeCode(clientA, (await makeFemale({ birthDate: null })).profile.id), 'vaquillona');
   });
 
-  // ---- T2.23 transición SERVICIO (RT2.5.x) --------------------------------
-  await t.test('T2.23 servicio (ternera->vaquillona) (RT2.5.x)', async () => {
-    // ternera + service -> vaquillona, override sigue false (RT2.5.1)
+  // ---- T2.23 SERVICIO ya NO transiciona (RT2.5.x SUPERSEDED por RPS.4.1) ---
+  // ⚠ Stream A (modelo de puesta en servicio, RPS.4.1, migración 0104 aplicada al remoto): se eliminó el
+  // backstop `service→vaquillona` de compute_category. La promoción ternera→vaquillona ahora es SOLO por
+  // destete (T2.24) o corte de edad ≥365d. RT2.5.1 (servicio promovía ternera→vaquillona) queda SUPERSEDED.
+  // Las demás aserciones de este test (servicio sobre vaquillona/preñada/override = sin cambio) siguen vigentes.
+  await t.test('T2.23 servicio NO transiciona ternera (RT2.5.x SUPERSEDED por RPS.4.1)', async () => {
+    // ternera + service -> SIGUE ternera (RPS.4.1: el service ya no promueve; la promoción es por destete/edad).
     const tn = await createAnimal(clientA, { idv: `${RUN_TAG}_SV1`, sex: 'female', birthDate: daysAgo(180), rodeoId: rodeoA.id, establishmentId: estA, systemId: rodeoA.systemId, categoryCode: 'ternera' });
     await clientA.from('reproductive_events').insert({ animal_profile_id: tn.profile.id, event_type: 'service', event_date: daysAgo(1) });
-    assert.equal(await profileCode(clientA, tn.profile.id), 'vaquillona', 'servicio sobre ternera -> vaquillona (RT2.5.1)');
+    assert.equal(await profileCode(clientA, tn.profile.id), 'ternera', 'servicio sobre ternera <365d NO transiciona (RPS.4.1)');
     {
       const { data } = await clientA.from('animal_profiles').select('category_override').eq('id', tn.profile.id).single();
-      assert.equal(data.category_override, false, 'transición auto no marca override');
+      assert.equal(data.category_override, false, 'el service no tocó override (sigue false)');
     }
+    // y el recompute directo coincide: ternera+service sin destete/edad sigue ternera (RPS.4.5 consistencia).
+    assert.equal(await computeCode(clientA, tn.profile.id), 'ternera', 'compute_category con service histórico = ternera (RPS.4.5)');
     // servicio sobre vaquillona ya existente -> sin cambio (RT2.5.2)
     const vq = await createAnimal(clientA, { idv: `${RUN_TAG}_SV2`, sex: 'female', birthDate: daysAgo(550), rodeoId: rodeoA.id, establishmentId: estA, systemId: rodeoA.systemId, categoryCode: 'vaquillona' });
     await clientA.from('reproductive_events').insert({ animal_profile_id: vq.profile.id, event_type: 'service', event_date: daysAgo(1) });
@@ -1679,17 +1685,28 @@ test('animal suite — spec 02', async (t) => {
 
   // ---- T2.29 CONSISTENCIA trigger<->recompute (la clave, RT2.10) ----------
   await t.test('T2.29 consistencia trigger<->recompute (RT2.10/2.7.5)', async () => {
-    // borrar el service que promovió ternera->vaquillona -> vuelve a ternera (si <1 año) (RT2.10.2)
-    // El soft-delete de un evento desde el cliente va por la RPC soft_delete_event (0041; el UPDATE
-    // directo de deleted_at lo bloquea la RLS por visibilidad-on-RETURNING). El UPDATE de deleted_at
-    // que la RPC hace adentro (SECURITY DEFINER) dispara el trigger de recálculo (0046/0063).
+    // borrar el weaning que graduó ternera->vaquillona -> vuelve a ternera (si <1 año) (RT2.10.2)
+    // ⚠ Antes este bloque usaba un `service` (RT2.5.1, el backstop service→vaquillona). Stream A (RPS.4.1,
+    // migración 0104) eliminó ese backstop: el service ya NO transiciona, así que NO sirve para ejercitar la
+    // consistencia trigger↔recompute. Se usa el DESTETE (vía hembra), que sigue siendo disparador vivo y prueba
+    // el mismo invariante (un evento que promueve + su soft-delete revierte). El soft-delete va por la RPC
+    // soft_delete_event (0041; el UPDATE directo de deleted_at lo bloquea la RLS por visibilidad-on-RETURNING).
+    // El UPDATE de deleted_at que la RPC hace adentro (SECURITY DEFINER) dispara el recálculo (0046/0063).
     {
       const tn = await createAnimal(clientA, { idv: `${RUN_TAG}_CN1`, sex: 'female', birthDate: daysAgo(180), rodeoId: rodeoA.id, establishmentId: estA, systemId: rodeoA.systemId, categoryCode: 'ternera' });
-      const { data: ev } = await clientA.from('reproductive_events').insert({ animal_profile_id: tn.profile.id, event_type: 'service', event_date: daysAgo(1) }).select('id').single();
-      assert.equal(await profileCode(clientA, tn.profile.id), 'vaquillona', 'precondición: servicio promovió');
+      const { data: ev } = await clientA.from('reproductive_events').insert({ animal_profile_id: tn.profile.id, event_type: 'weaning', event_date: daysAgo(1) }).select('id').single();
+      assert.equal(await profileCode(clientA, tn.profile.id), 'vaquillona', 'precondición: destete graduó');
       const { error } = await clientA.rpc('soft_delete_event', { p_kind: 'reproductive', p_event_id: ev.id });
       assert.equal(error, null, error && error.message);
-      assert.equal(await profileCode(clientA, tn.profile.id), 'ternera', 'borrar el servicio revierte a ternera (RT2.10.2)');
+      assert.equal(await profileCode(clientA, tn.profile.id), 'ternera', 'borrar el destete revierte a ternera (RT2.10.2)');
+    }
+    // service NO transiciona y trigger==recompute igual (RPS.4.1 SUPERSEDE RT2.5.1): una ternera <365d con un
+    // service insertado SIGUE ternera tanto por el trigger incremental como por compute_category recomputado.
+    {
+      const tn = await createAnimal(clientA, { idv: `${RUN_TAG}_CN1b`, sex: 'female', birthDate: daysAgo(180), rodeoId: rodeoA.id, establishmentId: estA, systemId: rodeoA.systemId, categoryCode: 'ternera' });
+      await clientA.from('reproductive_events').insert({ animal_profile_id: tn.profile.id, event_type: 'service', event_date: daysAgo(1) });
+      assert.equal(await profileCode(clientA, tn.profile.id), 'ternera', 'service no transiciona (incremental) (RPS.4.1)');
+      assert.equal(await computeCode(clientA, tn.profile.id), 'ternera', 'service no transiciona (recompute) → trigger==recompute (RPS.4.1/RT2.10.1)');
     }
     // borrar el weaning que graduó ternero->torito -> vuelve a ternero (RT2.10.2)
     {
@@ -1731,7 +1748,9 @@ test('animal suite — spec 02', async (t) => {
       await clientA.from('reproductive_events').insert({ animal_profile_id: sq.profile.id, event_type: 'tacto', event_date: daysAgo(20), pregnancy_status: 'small' });
       await clientA.from('reproductive_events').insert({ animal_profile_id: sq.profile.id, event_type: 'birth', event_date: daysAgo(1), calf_sex: 'male' });
       assert.equal(await profileCode(clientA, sq.profile.id), await computeCode(clientA, sq.profile.id), 'materializada == compute_category tras secuencia (RT2.10.1)');
-      assert.equal(await profileCode(clientA, sq.profile.id), 'vaca_segundo_servicio', 'secuencia servicio+tacto+parto -> vaca');
+      // El parto la lleva a vaca (1 parto); el service es inerte para la categoría (RPS.4.1) — la consistencia
+      // trigger↔recompute se prueba igual sobre la secuencia completa.
+      assert.equal(await profileCode(clientA, sq.profile.id), 'vaca_segundo_servicio', 'secuencia (service inerte)+tacto+parto -> vaca por el parto');
     }
   });
 

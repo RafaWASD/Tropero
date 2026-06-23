@@ -127,3 +127,40 @@ Todos los tests viven en `supabase/tests/puesta-en-servicio/run.cjs` (subtests d
   4. **Encadenar el slice frontend del espejo** (RPS.7.4): quitar `hasService` de `app/src/utils/animal-category.ts` (C6) para no dejar drift transitorio del badge client-side. NO es de este chunk backend (lo ejecuta Stream B / slice C6).
   5. **PowerSync** (dependencia anotada en design §2): verificar que el schema de PowerSync (`AppSchema`) incluya `service_months` como columna TEXT del rodeo cuando se construya el selector de Stream B (no rompe nada ahora; el cliente aún no lee la columna).
 - **Gate 1**: ya PASS (`progress/security_spec_02-puesta-en-servicio.md`, 0 HIGH, RPS.5.10 foldeado). Falta **reviewer + Gate 2 (modo code)** sobre este as-built + **Puerta 2** humana.
+
+---
+
+## FIX-LOOP (implementer Opus, 2026-06-23) — reconciliar la suite animal (spec 02 base) al modelo de Stream A YA aplicado (0102-0105 live)
+
+**Contexto.** Stream A eliminó el backstop `service→vaquillona` de `compute_category` (RPS.4.1, `0104` aplicada). La suite animal vieja (`supabase/tests/animal/run.cjs`) seguía verde mientras las migraciones NO estaban aplicadas; ahora que están live, asertaba el comportamiento VIEJO. Verifiqué en aislamiento: **exactamente 2 leaf failures** (T2.23 línea 1500, T2.29 línea 1689; el "fail 3" del runner = el wrapper del suite padre, no un 3er leaf). Ambas deterministas (no flake de rate-limit: 0 "Request rate limit", 0 cascada de undefined; reproducidas idénticas en 2 corridas).
+
+**Tests tocados (qué asertan AHORA):**
+- **T2.23** (renombrado `servicio NO transiciona ternera (RT2.5.x SUPERSEDED por RPS.4.1)`): el 1er bloque ahora aserta **ternera + service → SIGUE ternera** (`profileCode==='ternera'`) + override sin tocar + **recompute coincide** (`computeCode==='ternera'`, RPS.4.5). Los otros 3 bloques (service sobre vaquillona → sin cambio; service sobre preñada → `vaquillona_prenada` por tacto+; service + override → sin cambio) NO se tocaron — siguen correctos bajo el modelo nuevo (RT2.5.2/RT2.5.3 vigentes).
+- **T2.29** (consistencia trigger↔recompute): el 1er bloque `CN1` ahora usa **destete** (hembra ternera + `weaning` → vaquillona; soft_delete del weaning → ternera) en vez del `service` viejo — ejercita el MISMO invariante (un disparador VIVO que promueve + su soft-delete revierte) sobre una transición que sigue existiendo. Agregué `CN1b`: **service NO transiciona** ni incremental ni recompute (`trigger==recompute`, la alternativa explícita que pedía la tarea). `CN5` (service+tacto+birth → `vaca_segundo_servicio`) NO cambió de aserción — el `vaca` es por el **birth** (1 parto), el service es inerte; solo aclaré el comentario.
+
+**Cobertura ternera→vaquillona por destete/edad NO se perdió:** sigue en **T2.24** (ternera + weaning → vaquillona, línea ~1537-1538) + **T2.22** (hembra ≥365d sin eventos → vaquillona) + el nuevo `CN1` por destete. El service dejó de cubrirla (correcto, RPS.4.1).
+
+**Otros `event_type:'service'` auditados (sin cambio, NO dependían de la promoción):** T2.30 `OV_SV` (override, base vaquillona → sin cambio); T2.11 (transfer, `bull_id` re-pointing, categoría irrelevante); `seedAnimalWithHistory` (no inserta service). Grep exhaustivo `'service'` en toda la suite → 7 sitios, todos revisados.
+
+**Reconciliación de specs (correcciones→specs):**
+- `requirements-tier2-categorias.md`: nota **SUPERSEDED por RPS.4.1** sobre la sección RT2.5 (histórico preservado, EARS de RT2.5.1 tachado con la aclaración del as-built; RT2.5.2/RT2.5.3 marcados vigentes). + marcador inline en **RT2.4.4** (service tachado como disparador). Patrón idéntico al SUPERSEDED de RT2.2.6 ya en el archivo.
+- `design-tier2-categorias.md`: nota SUPERSEDED arriba del SQL histórico de `0062` (apunta a `0104` + el espejo client-side `hasService` = drift esperado de Stream B/RPS.7.4) + marcador inline en la rama `or v_has_service`.
+- **NO toqué** `app/src/utils/animal-category.ts` ni `animal-category.test.ts` (mirror con `hasService` a propósito — RPS.7.4 = slice frontend de Stream B; drift transitorio display-only documentado y esperado). NO toqué migraciones, ni `feature_list.json`, ni otros `progress/`.
+
+**Estado de `node scripts/check.mjs`:**
+- **Animal suite (spec 02): VERDE** — 109 pass / 0 fail (confirmado aislada Y dentro de `check.mjs`: `<<< Animal suite (spec 02) OK`).
+- **Maneuvers suite (spec 03): VERDE** (`<<< Maneuvers suite (spec 03) OK`).
+- client unit 1601/0, RLS 22/0, Edge 42/0, typecheck + anti-hardcode 0 — todos VERDES.
+- **Puesta-en-servicio suite (spec 02 Stream A): VERDE** tras el fix de abajo (era 1 leaf determinista por un bug DEL TEST, no del deployado).
+
+### ✅ CORRECCIÓN del diagnóstico previo de TPS.15 — NO había mismatch, NO hace falta `0106` (bug del test, ya arreglado)
+
+> ⚠️ **El bloque que decía "🔴 MISMATCH REAL deployado↔on-disk en `0105` — requiere `0106`" era un diagnóstico ERRÓNEO.** Lo conservo reescrito acá para que el leader/futuro no lo persiga. La función deployada está bien; el `0106` NO existe ni hace falta.
+
+**Test que fallaba:** `TPS.15` (línea **641**), aserción `una baja de rama natural sale del set serviced (membresía active)`: `after.serviced === before.serviced - 1`. Determinista (no flake).
+
+**Causa raíz REAL (confirmada por el leader contra la DB):** el `admin.update` de la línea 637 usaba `exit_reason: 'venta'`, y **`'venta'` NO existe en el enum `exit_reason_enum`** (el remoto lo tiene en INGLÉS: `{sale,death,transfer,culling,theft,other}`). El update de `service_role` **tiraba error** (que el test NO chequeaba) → el `status='sold'` se revertía con el statement fallido → la `vacaBaja` quedaba `status='active'` → seguía contando en `rodeo_serviced_females` (rama natural) → `after.serviced` NO bajaba → fallaba el assert de la línea 641. El bug estaba **100% en el test** (literal de enum en español), no en la función.
+
+**Por qué mi diagnóstico anterior estaba MAL:** concluí "el `rodeo_serviced_females` deployado NO filtra `status='active'`" SIN consultar la DB (estaba bloqueado por el clasificador y la tarea pedía parar+reportar). El leader LEYÓ la definición **deployada** con `pg_get_functiondef`: la rama `eligible_natural` SÍ tiene `and p.status = 'active'` — coincide exacto con el on-disk `0105` + design + Gate 2. **No hay drift deployado↔on-disk.** Mi inferencia "como no baja, el deployado no filtra" era falsa: la verdadera razón de que no bajara era que el `status` nunca llegaba a `'sold'` (update fallido por el enum inválido).
+
+**Fix aplicado (lo único tocado en código):** `supabase/tests/puesta-en-servicio/run.cjs` línea 637 — `exit_reason: 'venta'` → `exit_reason: 'sale'` (valor válido, semánticamente = venta). `status='sold'` y `exit_date` quedan como estaban (válidos). Además robustecí el test con `assert.ifError(bajaErr)` sobre la respuesta del update, para que un enum inválido futuro falle ruidoso en vez de revertir silencioso. **NO se tocaron migraciones (0102-0105 quedan como están, correctas), ni `rodeo_serviced_females`, ni ninguna función. NO hay `0106`.**

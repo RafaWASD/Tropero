@@ -88,7 +88,7 @@ Este delta materializa esa máquina completa en backend, manteniendo **consisten
 
 **RT2.4.3** El sistema deberá hacer que `compute_category`, para una hembra con **0 partos** y un **tacto positivo vigente** (`reproductive_events` con `event_type = 'tacto'`, `pregnancy_status ∉ {NULL, 'empty'}`, no borrado, **y no revertido por un aborto posterior** — ver RT2.7), devuelva `vaquillona_prenada`.
 
-**RT2.4.4** El sistema deberá hacer que `compute_category`, para una hembra con **0 partos**, **sin** tacto positivo vigente, **y** con un disparador de "ya no es ternera" — **destete** (`event_type = 'weaning'`), **o** **servicio** (`event_type = 'service'`), **o** edad **≥ 1 año** (por `birth_date` conocido) — devuelva `vaquillona`.
+**RT2.4.4** El sistema deberá hacer que `compute_category`, para una hembra con **0 partos**, **sin** tacto positivo vigente, **y** con un disparador de "ya no es ternera" — **destete** (`event_type = 'weaning'`), ~~**o** **servicio** (`event_type = 'service'`)~~, **o** edad **≥ 1 año** (por `birth_date` conocido) — devuelva `vaquillona`. **[Servicio SUPERSEDED por RPS.4.1 — ver RT2.5]**: bajo Stream A (`0104`) el `service` ya **no** es disparador de `vaquillona`; los disparadores vigentes son **destete** y **edad ≥365d**.
 
 **RT2.4.5** El sistema deberá hacer que `compute_category`, para una hembra con **0 partos**, **sin** tacto positivo, **sin** destete, **sin** servicio, y **menor a 1 año** (por `birth_date` conocido), devuelva `ternera`.
 
@@ -100,11 +100,26 @@ Este delta materializa esa máquina completa en backend, manteniendo **consisten
 
 > ADR-008 enmendado: "servicio sobre una ternera → la promueve a vaquillona, sin importar la edad". Disparador nuevo respecto al as-built.
 
-**RT2.5.1** Cuando se inserta un `reproductive_events` con `event_type = 'service'` sobre un perfil activo en categoría `ternera` con `category_override = false`, el sistema deberá transicionar la categoría a `vaquillona` en la misma transacción.
+> ⚠ **SUPERSEDED por RPS.4.1 (Stream A, modelo de puesta en servicio, 2026-06-23)**: el evento `service`
+> **ya no transiciona categoría**. Stream A reformuló la puesta en servicio a nivel rodeo y desacopló
+> *categoría* de *elegibilidad reproductiva* (Gate 0 §2): la migración **`0104`** (aplicada al remoto)
+> eliminó el backstop `service → vaquillona` de `compute_category` (sacó `v_has_service`). La promoción
+> **ternera → vaquillona** queda **solo** por **destete** (RT2.6.2 / `has_weaning`) o **corte de edad ≥365d**
+> (RT2.4.4 + cron nocturno `0066`). Un evento `service` (incl. IA `service+ai`) ya no promueve por su sola
+> existencia; los `service` históricos siguen en el timeline pero `compute_category` no los lee. La IA sigue
+> contando como *servida* en el **denominador reproductivo** (`rodeo_serviced_females`, `0105`), que es
+> independiente de la categoría (RPS.4.8 / RPS.5.x). **Alcance del supersede**: solo **RT2.5.1** (la
+> transición por servicio) queda histórica; **RT2.5.2** (servicio no retrocede/avanza una vaquillona+) y
+> **RT2.5.3** (override manda) **siguen vigentes** — bajo el modelo nuevo se cumplen trivialmente (el service
+> es inerte para la categoría). Trazabilidad: `requirements-puesta-en-servicio.md` RPS.4.1/RPS.4.5,
+> `design-puesta-en-servicio.md` §2.1, migración `0104`, suite `supabase/tests/puesta-en-servicio/run.cjs`
+> (TPS.8/TPS.9) + reconciliación de la suite animal (T2.23/T2.29) en `progress/impl_02-puesta-en-servicio.md`.
 
-**RT2.5.2** El sistema **no** deberá cambiar la categoría por un evento de servicio si el perfil ya está en una categoría posterior a `ternera` (`vaquillona` o superior): un servicio sobre una vaquillona/vaca no la retrocede ni la avanza (la preñez la decide el tacto, RT2.4.3).
+**RT2.5.1** ~~Cuando se inserta un `reproductive_events` con `event_type = 'service'` sobre un perfil activo en categoría `ternera` con `category_override = false`, el sistema deberá transicionar la categoría a `vaquillona` en la misma transacción.~~ **[SUPERSEDED por RPS.4.1 — ver nota arriba]** Bajo el modelo de Stream A, una `ternera` + `service` (sin destete ni edad ≥365d) **sigue `ternera`**; el `service` ya no es disparador de categoría.
 
-**RT2.5.3** Mientras `category_override = true`, el sistema **no** deberá transicionar por servicio (override manda, R4.9 base).
+**RT2.5.2** El sistema **no** deberá cambiar la categoría por un evento de servicio si el perfil ya está en una categoría posterior a `ternera` (`vaquillona` o superior): un servicio sobre una vaquillona/vaca no la retrocede ni la avanza (la preñez la decide el tacto, RT2.4.3). *(Vigente: bajo RPS.4.1 se cumple trivialmente — el service es inerte para la categoría.)*
+
+**RT2.5.3** Mientras `category_override = true`, el sistema **no** deberá transicionar por servicio (override manda, R4.9 base). *(Vigente: el override siempre gana; con RPS.4.1 el service además ya no transiciona ni con override=false.)*
 
 ---
 
