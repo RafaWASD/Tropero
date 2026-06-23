@@ -37,10 +37,8 @@ El viejo backstop **`servicio→vaquillona` se ELIMINA**. Justificación: el **d
 - **Cómo se vincula**: la aptitud es el **gate de elegibilidad** de la vaquillona para entrar al denominador reproductivo. Una vaquillona **apta + en un rodeo con ventana de servicio activa** → cuenta como servida en esa campaña.
 - **Lo resuelve la estructura de rodeos**: en cría, las vaquillonas de **reposición** (pre-servicio → aptitud) y las **entoradas** se manejan en **rodeos/lotes SEPARADOS** (ya anotado en `CONTEXT/07-pendientes.md`). Entonces: aptitud se chequea en el rodeo de reposición; al pasar la vaquillona apta al rodeo de entore (con ventana activa) → entra al denominador. Sin preguntarle nada al operario — lo resuelve el gating por rodeo.
   - **Fallback**: si un campo NO hace el chequeo de aptitud, caer a "vaquillona de edad de servicio en rodeo con ventana activa = servida" (default por edad), para no dejarlas fuera del denominador.
-- **El 66% en el MVP**:
-  1. **Activar la captura de peso junto a la maniobra de aptitud** (`tacto_vaquillona`): peso + veredicto de tracto en una pasada.
-  2. **"Apta / no apta" = veredicto del vet** (que ya pondera el 66% + el tracto). No se automatiza el cálculo todavía.
-  3. El 66% como **guía visual, no gate duro**, hasta tener un config de **peso adulto objetivo por raza** (data gap, §7). Ahí se podrá auto-validar.
+- **MVP = solo el veredicto de aptitud (decisión Raf 2026-06-23)**: la maniobra `tacto_vaquillona` registra **APTA / NO APTA / DIFERIDA** (veredicto del vet; **DIFERIDA** = no apta todavía pero no se descarta, se re-evalúa más adelante). *(Confirmar/extender el enum `heifer_fitness` a 3 estados en el delta de Stream B.)*
+- **POST-MVP**: el **diferencial de peso (66% / lo que corresponda por raza)** y su auto-validación. Depende del **catálogo de razas con peso adulto objetivo** (§7), que hoy NO tenemos sólido. En el MVP el vet ya pondera el peso al dar el veredicto; no lo automatizamos ni capturamos lógica de 66%.
 
 ## 4. Distribución cabeza / cuerpo / cola (CCL) — el diferencial diagnóstico
 
@@ -58,7 +56,7 @@ El viejo backstop **`servicio→vaquillona` se ELIMINA**. Justificación: el **d
 
 ## 5. Vinculación nacimiento ↔ servicio (cruce tacto vs pariciones)
 
-- **Gestación = 284 días** (cifra de trabajo; **por raza**: Angus 278, Hereford 285 → usar **283-285 configurable por raza**, no constante).
+- **Gestación = 284 días** (**default único en el MVP** — sirve para las razas británicas dominantes en cría: Angus 278 / Hereford 285, 284 cae en el medio). La **parametrización por raza** es **POST-MVP** (depende del catálogo de razas con datos agronómicos, §7).
 - **A la fecha de parto se le restan ~284 días → mes de concepción → cae en un mes de servicio → etapa CCL.** Eso permite reconstruir la distribución **real** de pariciones por etapa.
 - **El cruce de oro**: comparar el **%CCL del tacto** (lo que el vet diagnosticó) contra la **distribución real de nacimientos por etapa**. Sirve para:
   1. **Localizar las pérdidas, no solo contarlas** (si en tacto había 40% cabeza pero nació 25% en la ventana de cabeza → perdiste preñeces tempranas → apunta a aborto infeccioso/estrés vs, en la cola, baja fertilidad).
@@ -73,11 +71,11 @@ El viejo backstop **`servicio→vaquillona` se ELIMINA**. Justificación: el **d
 
 ## 7. Parámetros por raza + gaps de datos (de la investigación)
 
-**Parametrizar por raza (no hardcodear)**: gestación (283-285 d) y peso adulto objetivo (66% templado / 75% subtropical-índico).
+**Catálogo de razas con datos agronómicos = POST-MVP (decisión Raf 2026-06-23).** Hoy NO hay un catálogo de razas sólido con biotipo / peso adulto / gestación: la lista controlada de razas (con código SENASA) llega con **spec 08** (pendiente de implementar), y los parámetros agronómicos por raza son una enriquecedura posterior. Por eso en el MVP: **gestación = 284 único** + **aptitud = veredicto del vet** (sin cálculo de 66%). La parametrización por raza (gestación 283-285; peso adulto 66% templado / 75% subtropical-índico) se suma POST-MVP sobre ese catálogo.
 
-**3 gaps de datos → backlog** (habilitan KPIs hoy imposibles):
-1. **Evento de muerte de ternero** (con fecha/causa) → mortandad peri/posnatal.
-2. **Peso adulto objetivo por raza** (config del catálogo de razas) → % de entore auto-validable.
+**Gaps de datos → backlog**:
+1. **Catálogo de razas con peso adulto objetivo + gestación por raza** → habilita el % de entore auto-validable y la gestación fina (POST-MVP).
+2. **Mortandad de terneros — matiz (corrige el reporte de research)**: **SÍ tenemos cómo marcar muerte** — la **baja con motivo `death`** (`exit_reason='death'`, spec 02 C3.3) sobre el perfil del ternero (que ya existe como animal desde el nacimiento — "ternero al pie"). → **la mortandad de terneros REGISTRADOS es computable** (conteo de bajas motivo muerte, categoría ternero/a). El **aborto es distinto**: pérdida de la PREÑEZ en la madre, antes de que el ternero nazca/exista. El gap fino restante es solo: (a) **nacidos muertos / muertos antes de registrarse** como animal, y (b) el **split peri/posnatal (48 h)** para esos KPIs específicos → requeriría un campo de mortalidad en el evento de parto o un evento de muerte con timestamp fino. NO bloquea la mortandad básica.
 3. **Superficie en ha** (rodeo/establecimiento) → kg/ha + económicos.
 
 **Tendencia/IEP/reposición/repetición** necesitan **historia multi-año** → la UI de reportes debe **degradar con gracia el primer año** ("se habilita con más campañas cargadas").
