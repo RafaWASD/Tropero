@@ -446,6 +446,11 @@ begin
   if not public.has_role_in(v_est) then
     raise exception 'not authorized to read this rodeo''s campaign' using errcode = '42501';
   end if;
+  -- Cota de p_year (RPS.5.10, Gate 1 MEDIUM-1) — DESPUÉS del guard de tenant. Las OTRAS DOS funciones
+  -- de derivación (rodeo_serviced_females, rodeo_repro_denominator) replican este mismo check tras su guard.
+  if p_year < 1900 or p_year > extract(year from current_date)::int + 1 then
+    raise exception 'p_year out of range (1900..current+1)' using errcode = '22023';
+  end if;
 
   is_configured := v_months is not null;            -- RPS.2.3
   n_months      := coalesce(array_length(v_months, 1), 0);
@@ -609,7 +614,7 @@ notify pgrst, 'reload schema';
 
 **Seguridad del contrato de derivación (Gate 1 lo audita a fondo):**
 - **Tenant-scoping (RPS.5.6):** cada función deriva `establishment_id` del rodeo y exige `has_role_in(v_est)` al entrar → un caller de otro tenant que conozca un `p_rodeo_id` ajeno recibe 42501 (sin IDOR, patrón `0066`/`0082`). SECURITY DEFINER se usa para encapsular la lógica de elegibilidad, **no** para saltarse el authz (el guard rige primero).
-- **Input cota server-side:** `p_rodeo_id` (uuid, validado por la existencia del rodeo) y `p_year` (int; el implementer agrega una cota razonable, p.ej. `1900 ≤ p_year ≤ extract(year from now())+1`, para no permitir años absurdos que generen `make_date` raros).
+- **Input cota server-side:** `p_rodeo_id` (uuid, validado por la existencia del rodeo) y `p_year` (int; cota `1900 ≤ p_year ≤ año_actual+1` **en el SQL de las 3 funciones, tras el guard de tenant** — RPS.5.10, Gate 1 MEDIUM-1; es contrato, no decisión suelta del implementer, ver §5.1).
 - **Read-only (RPS.5.9):** solo SELECTs; ninguna función muta filas. STABLE.
 - **No materializa nada nuevo sobre animales (RPS.5.9):** todo se deriva on-read de `service_months` + membresía + eventos; no hay columna "servida" en `animal_profiles`.
 
