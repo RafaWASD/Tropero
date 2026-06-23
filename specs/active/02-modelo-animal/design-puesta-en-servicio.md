@@ -661,6 +661,19 @@ Los 3 estados que el Gate 0 §3 pidió (**APTA / NO_APTA / DIFERIDA**) **ya exis
 
 > Numeración orientativa contigua; el implementer ajusta ≥ 0102 contra el as-built real **y** lo que una terminal paralela tenga en vuelo, respetando dependencias (`0102` antes de `0103`/`0105`; `0104` independiente). **`heifer_fitness` (RPS.6) NO genera migración** (es verificación del as-built `0053`). **Ninguna se aplica en este chunk** (deploy gateado por el leader post-Gate-2).
 
+### 8.1 Reconciliación AS-BUILT (implementación, 2026-06-23) — `progress/impl_02-puesta-en-servicio.md`
+
+**Numeración final confirmada**: `0102`–`0105` exactamente como la tabla (as-built en disco llegaba a `0101`; no había migraciones en vuelo de terminales paralelas que movieran el techo — verificado por Glob + git log). Las 4 escritas, **ninguna aplicada** (roja-hasta-apply; suite `supabase/tests/puesta-en-servicio/run.cjs` enganchada **COMENTADA** en `scripts/run-tests.mjs`, el leader la descomenta al aplicar). Las 4 **parsean** vía libpg_query (`pgsql-parser`). `node scripts/check.mjs` verde (typecheck + anti-hardcode + suites existentes; la suite nueva no corre por estar comentada).
+
+**3 desviaciones menores del SQL del design (as-built; misma semántica/contrato, implementación más robusta):**
+1. **`0102` CHECK usa `cardinality()` (no `array_length()`).** El design escribió la unicidad/cardinalidad con `array_length(service_months,1)`, que para el array **vacío** `'{}'` devuelve `NULL` (no 0) → la lógica del vacío quedaba dependiendo de "NULL no es FALSE pasa el CHECK". Se usa `cardinality()` (da 0 para `'{}'`) en las 3 cláusulas → `'{}'` (RPS.1.2 "no hace servicio") pasa por lógica booleana bien definida, y los duplicados/rango/cardinalidad se rechazan igual. **Mismo contrato, sin ambigüedad de NULL.**
+2. **`0105` `rodeo_serviced_females` rama IA filtra `a.sex='female'`.** El SQL del design (§5.2) no filtraba sexo en la rama AI. Como la función es `serviced_FEMALES` y RPS.5.1 dice "hembras con un evento de inseminación", se agrega `join animals a` + `a.sex='female'` en la rama AI: defensa contra un dato inconsistente (un `service`+`ai` sobre un macho no debe inflar el denominador). **Sin cambio de comportamiento para datos válidos.**
+3. **`0103` `set_rodeo_service_months` llama `assert_service_months_valid` incondicionalmente.** El design hacía `if p_service_months is not null then perform ...`; el helper ya short-circuitea en NULL (`if p_months is null then return`), así que la llamada incondicional es **equivalente** y más simple.
+
+**`heifer_fitness` (RPS.6)**: confirmado SIN migración (enum `0053` ya tiene los 3 valores) — solo suite de verificación (TPS.16).
+
+**`0063` (guard del trigger incremental)**: NO se tocó (recomendación firme DD-PS-4: se deja `'service'` en la lista; recompute idempotente). El delta toca SOLO `compute_category`.
+
 ## 9. Qué necesita verificar el leader / Gate 1
 
 - **Gate 1 OBLIGATORIO** (backend deployado): auditar (a) owner-only + anti-IDOR de la escritura de `service_months` (`create_rodeo`/`set_rodeo_service_months`); (b) las 3 funciones de derivación SECURITY DEFINER (guard de tenant al entrar, revoke/grant, IDOR cross-tenant, cota de `p_year`, read-only); (c) que la reescritura de `compute_category` preserve `SECURITY DEFINER STABLE` + `search_path=public` + el grant a `authenticated` y **no** introduzca lectura cross-tenant; (d) el cambio de firma de `create_rodeo` (DROP+CREATE vs overload) y su smoke-check de grants.
