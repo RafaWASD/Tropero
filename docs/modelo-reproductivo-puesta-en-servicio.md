@@ -66,7 +66,7 @@ El viejo backstop **`servicio→vaquillona` se ELIMINA**. Justificación: el **d
 
 ## 6. Config de campaña por rodeo (selector de 12 meses)
 
-- **Mecanismo (decisión Raf)**: al **crear un rodeo de cría**, un **selector/tilde de los 12 meses** — el usuario marca en qué meses ese rodeo hace servicio (primavera Oct/Nov/Dic; otoño Jun/Jul; ambos; o continuo). **Raf ya lo está construyendo** (delta de rodeo, spec 02) → spec 07/03 lo **consumen, no lo construyen**. *(Pendiente: confirmar nombre + shape del campo, ej. `service_months smallint[]` o bitmask.)*
+- **Mecanismo (decisión Raf)**: al **crear un rodeo de cría**, un **selector/tilde de los 12 meses** — el usuario marca en qué meses ese rodeo hace servicio (primavera Oct/Nov/Dic; otoño Jun/Jul; ambos; o continuo). **NO está construido todavía** (verificado 2026-06-23: no hay `service_months` en schema/código/commits; el intento previo en otra terminal NO quedó en el repo) → la **parte de schema/validación es Stream A** y el **selector en el wizard de alta de rodeo es Stream B**. Shape a definir (ej. `service_months smallint[]` 1-12 o bitmask de 12 bits).
 - **Default**: primavera (Oct/Nov/Dic) pre-tildado (caso dominante, no fricciona el alta). **Editable**. Rodeos existentes sin config → los KPIs reproductivos invitan a configurarla (o asumen el default). A definir en la spec.
 
 ## 7. Parámetros por raza + gaps de datos (de la investigación)
@@ -86,7 +86,7 @@ El viejo backstop **`servicio→vaquillona` se ELIMINA**. Justificación: el **d
 
 | Stream | Qué | Spec | Gate |
 |---|---|---|---|
-| **A — Modelo de puesta en servicio** (fundacional) | config de meses de servicio por rodeo (en curso, Raf) + regla de buckets CCL + "sin distinción" + derivación de `servidas` + reconciliar `compute_category` (sacar service→vaquillona) + flag/captura de aptitud | **delta backend de spec 02** | 🔴 **Gate 1** (motor de categorías deployado + rodeo) |
+| **A — Modelo de puesta en servicio** (fundacional) | config `service_months` por rodeo (**se construye acá; no está en el repo**) + derivación de `servidas/entoradas` + reconciliar `compute_category` (sacar service→vaquillona) + `heifer_fitness` a 3 estados (APTA/NO_APTA/DIFERIDA) | **delta backend de spec 02** | 🔴 **Gate 1** (motor de categorías deployado + rodeo) |
 | **B — Tacto configurable + baja del servicio manual** | wizard de config del tacto (tamaño sí/no, default desde rodeo) + `TactoStep` adapta buckets + captura de peso en aptitud + sacar/deprecar la maniobra de servicio manual | **delta de spec 03** | 🟡 frontend; Gate 2 |
 | **C — Reportes reproductivos** | %preñez, %parición (paridas/servidas), **distribución CCL**, %destete, cruce tacto↔nacimientos, peso por categoría, comparativas, alertas, denominador explícito | **spec 07** | 🔴 **Gate 1** (vistas/RPC cross-tabla) |
 
