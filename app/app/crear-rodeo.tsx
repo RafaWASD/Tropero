@@ -1,13 +1,16 @@
 // app/crear-rodeo.tsx — wizard "Crear rodeo" (spec 02 frontend, C1 / T4.3 — R2.6).
 //
-// 3 pasos, una decisión por pantalla (CLAUDE.md ppio 4, manga-friendly aunque crear rodeo es
+// 4 pasos, una decisión por pantalla (CLAUDE.md ppio 4, manga-friendly aunque crear rodeo es
 // operación de oficina):
 //   1. Sistema productivo: cards grandes. Solo (bovino, cría) seleccionable; el resto grisado
 //      con badge "Próximamente" (R2.4 / MVP). Lee systems_by_species de bovino.
 //   2. Nombre del rodeo: FormField con validación no-vacío (trim, máx 60).
 //   3. Plantilla de datos: lista agrupada por categoría (FieldTemplateToggleList), pre-tildada
-//      según system_default_fields. Confirmar → createRodeo (INSERT + trigger pre-pobla config +
-//      aplica el diff de toggles). R2.6/R2.8/R2.11/R2.12.
+//      según system_default_fields. R2.6/R2.8/R2.11/R2.12.
+//   4. Meses de servicio (spec 03 Stream B / B1, RPSC.2): ServiceMonthsSelector mode='alta' con la
+//      PRIMAVERA pre-tildada (RPSC.2.2) — un período contiguo. Confirmar → createRodeo (RPC create_rodeo
+//      con p_service_months + INSERT + trigger pre-pobla config + aplica el diff de toggles). Si el operario
+//      no toca el paso → primavera default (RPSC.2.5). Solo aplica a cría (único sistema MVP).
 //
 // DOBLE USO:
 //   - Ruta navegable: desde RodeosScreen ("Crear rodeo"), con back. Tras crear, vuelve a la lista.
@@ -45,7 +48,9 @@ import {
   setToggle,
   type TemplateToggle,
 } from '@/utils/rodeo-template';
+import { SPRING_DEFAULT } from '@/utils/service-months';
 import { buttonA11y } from '@/utils/a11y';
+import { ServiceMonthsSelector } from './_components/ServiceMonthsSelector';
 
 const OFFLINE_COPY =
   'Necesitás conexión para crear un rodeo. Conectate a internet y volvé a intentar.';
@@ -54,7 +59,8 @@ const TEMPLATE_HEADER =
   'Ya dejamos tildados los datos típicos de cría. Ajustá los que registres (o no) en este rodeo.';
 
 const NAME_MAX = 60;
-const TOTAL_STEPS = 3;
+// 4 pasos: sistema → nombre → plantilla → meses de servicio (B1, RPSC.2). El paso 4 es de cría (único MVP).
+const TOTAL_STEPS = 4;
 
 export default function CrearRodeoScreen() {
   const router = useRouter();
@@ -66,7 +72,7 @@ export default function CrearRodeoScreen() {
   // Modo bloqueo total (R2.6): el campo no tiene rodeos. Sin "atrás" (no hay a dónde volver).
   const isBlockingEmptyState = rodeoState.status === 'no_rodeos';
 
-  const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
 
   // Paso 1: sistemas disponibles + el elegido.
   const [systems, setSystems] = useState<ProductionSystem[] | null>(null);
@@ -81,6 +87,12 @@ export default function CrearRodeoScreen() {
   const [toggles, setToggles] = useState<TemplateToggle[] | null>(null);
   const [templateError, setTemplateError] = useState<string | null>(null);
   const [loadingTemplate, setLoadingTemplate] = useState(false);
+
+  // Paso 4: meses de servicio (B1, RPSC.2). Arranca con la PRIMAVERA pre-tildada (RPSC.2.2) — un período
+  // contiguo. Es estado controlado del ServiceMonthsSelector; siempre tiene un valor (no null en el alta),
+  // así que si el operario no toca el paso, se persiste primavera (RPSC.2.5). El array que produce el selector
+  // ya es contiguo + único + en rango.
+  const [serviceMonths, setServiceMonths] = useState<number[]>([...SPRING_DEFAULT]);
 
   const [creating, setCreating] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -169,6 +181,12 @@ export default function CrearRodeoScreen() {
     }
   }
 
+  // Paso 3 → 4 (meses de servicio, B1). Solo se habilita con la plantilla cargada (el CTA lo gatea).
+  function goToStep4() {
+    setFormError(null);
+    setStep(4);
+  }
+
   function goBack() {
     setFormError(null);
     if (step === 1) {
@@ -176,7 +194,7 @@ export default function CrearRodeoScreen() {
       if (!isBlockingEmptyState) router.back();
       return;
     }
-    setStep((s) => (s === 3 ? 2 : 1) as 1 | 2 | 3);
+    setStep((s) => (s === 4 ? 3 : s === 3 ? 2 : 1) as 1 | 2 | 3 | 4);
   }
 
   async function onCreate() {
@@ -189,6 +207,10 @@ export default function CrearRodeoScreen() {
       systemCode: selectedSystem.code,
       speciesCode: 'bovino',
       toggles,
+      // B1 (RPSC.2.4): los meses elegidos en el paso 4 → p_service_months. El estado arranca en primavera
+      // (RPSC.2.2), así que aunque el operario no toque el paso, viaja primavera (RPSC.2.5). El selector
+      // garantiza un período contiguo + único + en rango.
+      serviceMonths,
     });
     setCreating(false);
 
@@ -307,6 +329,16 @@ export default function CrearRodeoScreen() {
             ) : null}
           </YStack>
         ) : null}
+
+        {/* Paso 4 — meses de servicio (B1, RPSC.2): ServiceMonthsSelector mode='alta' (primavera
+            pre-tildada). El componente es controlado; el estado arranca en primavera (RPSC.2.2/RPSC.2.5). */}
+        {step === 4 ? (
+          <ServiceMonthsSelector
+            mode="alta"
+            value={serviceMonths}
+            onChange={setServiceMonths}
+          />
+        ) : null}
       </ScrollView>
 
       {/* CTAs fijos abajo (thumb-zone). */}
@@ -327,6 +359,10 @@ export default function CrearRodeoScreen() {
           </Button>
         ) : step === 2 ? (
           <Button variant="primary" fullWidth onPress={goToStep3}>
+            Continuar
+          </Button>
+        ) : step === 3 ? (
+          <Button variant="primary" fullWidth disabled={!toggles} onPress={goToStep4}>
             Continuar
           </Button>
         ) : (

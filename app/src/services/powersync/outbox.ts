@@ -24,6 +24,8 @@ import {
   buildPendingRodeoInsert,
   buildPendingRodeoConfigInsert,
   buildDeletePendingRodeoConfig,
+  buildPendingRodeoServiceMonthsInsert,
+  buildDeletePendingRodeoServiceMonths,
   buildClearOverlayDelete,
   PENDING_OVERLAY_TABLES,
   type LocalQuery,
@@ -130,6 +132,9 @@ export type EnqueueCreateRodeoInput = {
     name: string;
     speciesId: string;
     systemId: string;
+    /** spec 03 Stream B / B1: TEXT/JSON del array de meses de servicio (RPSC.2.4), o null. La pantalla de
+     *  edición lo muestra offline antes del ACK (overlay). createRodeo siempre lo pasa (al menos primavera). */
+    serviceMonths: string | null;
   };
   /** Plantilla COMPUTADA en el cliente (defaults del sistema + diff de toggles): lo que "editar plantilla"
    *  / el form dinámico muestran offline. Cada fila → pending_rodeo_data_config. */
@@ -159,6 +164,7 @@ export async function enqueueCreateRodeo(
       name: input.overlay.name,
       speciesId: input.overlay.speciesId,
       systemId: input.overlay.systemId,
+      serviceMonths: input.overlay.serviceMonths,
       createdAt,
     }),
   ];
@@ -223,6 +229,49 @@ export async function enqueueSetRodeoConfig(
       ),
     );
   }
+  return enqueue(intent, overlay, db);
+}
+
+// ─── set_rodeo_service_months — editar meses de servicio del rodeo (spec 03 Stream B / B1, DD-PSC-4) ───
+
+export type EnqueueSetRodeoServiceMonthsInput = {
+  /** id del rodeo cuyos meses se editan (el mismo que la RPC set_rodeo_service_months recibe en p_rodeo_id). */
+  rodeoId: string;
+  /** TEXT/JSON del array de meses tildados (ej. '[6,7]'), o '[]' (no hace servicio). El overlay optimista lo
+   *  pisa en pending_rodeo_service_months para que la pantalla de edición muestre el cambio offline (RPSC.3.4). */
+  serviceMonthsText: string;
+  /** Params del intent = exactamente los de la RPC set_rodeo_service_months (p_rodeo_id, p_service_months). */
+  params: Record<string, unknown>;
+};
+
+/**
+ * Encola una edición de meses de servicio `set_rodeo_service_months` (spec 03 Stream B / B1, RPSC.3.3): intent
+ * (params de la RPC; uploadData mapea a supabase.rpc('set_rodeo_service_months', params) SIN p_client_op_id —
+ * la firma no lo tiene; dedup natural por el UPDATE idempotente, RPSC.3.5) + overlay (pending_rodeo_service_months
+ * con DELETE-PRIOR → invariante ≤1 fila por rodeo). El cambio aparece al instante OFFLINE (buildRodeosQuery
+ * COALESCEa el overlay sobre rd.service_months → PISA la fila synced); al subir, la RPC re-valida (owner-only,
+ * establishment derivado del rodeo anti-IDOR) y aplica el UPDATE ATÓMICO, y el ACK limpia el overlay (la fila real
+ * con el nuevo service_months baja por est_rodeos → sin duplicado). Si el rodeo ya no existe (P0002), el rechazo
+ * PERMANENTE rollbackea el overlay (§5.4.4 / classifyIntentUploadError → 'set_rodeo_service_months' → P0002 →
+ * permanent_reject). GEMELO de enqueueSetRodeoConfig (mismo patrón outbox + overlay + DELETE-PRIOR).
+ */
+export async function enqueueSetRodeoServiceMonths(
+  input: EnqueueSetRodeoServiceMonthsInput,
+  options: { db?: AbstractPowerSyncDatabase } = {},
+): Promise<OutboxResult> {
+  const db = options.db ?? getPowerSync();
+  const clientOpId = newClientOpId();
+  const createdAt = nowIso();
+  const intent = buildOpIntentInsert(
+    clientOpId, 'set_rodeo_service_months', JSON.stringify(input.params), createdAt,
+  );
+  const overlay: TxWrite[] = [
+    // DELETE-PRIOR: ≤1 fila por rodeo (el COALESCE de buildRodeosQuery toma una fila por rodeo).
+    buildDeletePendingRodeoServiceMonths(input.rodeoId),
+    buildPendingRodeoServiceMonthsInsert(
+      newClientOpId(), clientOpId, input.rodeoId, input.serviceMonthsText,
+    ),
+  ];
   return enqueue(intent, overlay, db);
 }
 

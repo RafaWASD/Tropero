@@ -151,6 +151,13 @@ const rodeos = new Table({
   species_id: column.text,
   system_id: column.text,
   active: column.integer,
+  // service_months (spec 03 Stream B / B1, RPSC.3.7): los meses 1–12 en que el rodeo hace servicio
+  // (puesta en servicio, Stream A 0102). En Postgres es `smallint[]`; PowerSync materializa un array
+  // no-escalar como TEXT/JSON client-side → se declara `column.text` y se parsea TOLERANTE con
+  // `parseServiceMonths` (service-months.ts). La stream est_rodeos hace SELECT * → la columna baja sola
+  // (sin tocar rafaq.yaml). Sin esta declaración el SQLite local no la materializa y `SELECT rd.service_months`
+  // tiraría "no such column".
+  service_months: column.text,
   created_at: column.text,
   updated_at: column.text,
   deleted_at: column.text,
@@ -578,6 +585,10 @@ const pending_rodeos = new Table(
     species_id: column.text,
     system_id: column.text,
     active: column.integer,
+    // service_months (B1 alta optimista, RPSC.2.4): el array de meses (TEXT/JSON) que el alta optimista
+    // muestra offline en la pantalla de edición antes del ACK. Espeja rodeos.service_months para el UNION
+    // de buildRodeosQuery. Al ACK la fila real baja por est_rodeos (con su service_months) → sin duplicado.
+    service_months: column.text,
     created_at: column.text,
   },
   { localOnly: true },
@@ -589,6 +600,21 @@ const pending_rodeo_data_config = new Table(
     rodeo_id: column.text,
     field_definition_id: column.text,
     enabled: column.integer,
+  },
+  { localOnly: true },
+);
+
+// pending_rodeo_service_months (B1 edición optimista, RPSC.3.3/RPSC.3.4): overlay del cambio de meses de
+// servicio de un rodeo YA SINCRONIZADO (intent set_rodeo_service_months → RPC 0103). A diferencia del alta
+// (que vive en pending_rodeos), la edición es sobre la fila synced de `rodeos` → este overlay PISA su
+// `service_months` en buildRodeosQuery (COALESCE). Una fila por rodeo (INVARIANTE ≤1, garantizado por el
+// DELETE-PRIOR de enqueueSetRodeoServiceMonths, igual que pending_rodeo_data_config). service_months TEXT/JSON.
+// Al ACK clearOverlay la limpia por client_op_id y la fila real baja por est_rodeos.
+const pending_rodeo_service_months = new Table(
+  {
+    client_op_id: column.text,
+    rodeo_id: column.text,
+    service_months: column.text,
   },
   { localOnly: true },
 );
@@ -640,6 +666,7 @@ export const AppSchema = new Schema({
   pending_status_overrides,
   pending_rodeos,
   pending_rodeo_data_config,
+  pending_rodeo_service_months,
 });
 
 export type Database = (typeof AppSchema)['types'];

@@ -113,6 +113,7 @@ const FASE5_DESTINATIONS = new Set([INVITE_ROUTE, 'invitar', 'miembros']);
 const CREAR_RODEO_ROUTE = 'crear-rodeo'; // wizard (R2.6) — destino del bloqueo total + de RodeosScreen
 const RODEOS_ROUTE = 'rodeos'; // gestión de rodeos (owner) — destino navegable desde "Más"
 const EDITAR_PLANTILLA_ROUTE = 'editar-plantilla'; // editar plantilla (owner) — destino navegable
+const EDITAR_SERVICIO_ROUTE = 'editar-servicio'; // editar meses de servicio (owner, spec 03 B1) — destino navegable
 const LOTES_ROUTE = 'lotes'; // gestión de lotes (spec 02 C4, ADR-020) — destino desde Rodeos/"Más"
 const IMPORT_RODEO_ROUTE = 'import-rodeo'; // wizard de importación masiva (spec 12) — destino owner/vet desde Rodeos
 // Destinos de C1 que el usuario abre con un rodeo YA existente (estado 'active' de rodeo) y NO
@@ -122,6 +123,7 @@ const IMPORT_RODEO_ROUTE = 'import-rodeo'; // wizard de importación masiva (spe
 const RODEO_DESTINATIONS = new Set([
   RODEOS_ROUTE,
   EDITAR_PLANTILLA_ROUTE,
+  EDITAR_SERVICIO_ROUTE,
   CREAR_RODEO_ROUTE,
   IMPORT_RODEO_ROUTE,
   LOTES_ROUTE,
@@ -452,6 +454,8 @@ function RootGate() {
       {/* Spec 02 C1 — rodeos: wizard "Crear rodeo" (R2.6, también empty-state de bloqueo total),
           gestión de rodeos (owner) y editar plantilla de datos (owner, R2.12). */}
       <Stack.Screen name="crear-rodeo" />
+      {/* Editar meses de servicio del rodeo (owner, spec 03 Stream B / B1). Destino navegable desde Rodeos. */}
+      <Stack.Screen name="editar-servicio" />
       <Stack.Screen name="rodeos" />
       <Stack.Screen name="editar-plantilla" />
       {/* Spec 02 C4 — lotes (ADR-020): gestión (crear/renombrar/borrar + ver miembros), owner-gated.

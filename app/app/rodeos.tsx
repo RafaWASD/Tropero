@@ -20,6 +20,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
 import {
+  CalendarRange,
   ChevronLeft,
   ChevronRight,
   Layers,
@@ -32,6 +33,7 @@ import {
 import { Button, Card, InfoNote } from '@/components';
 import { useEstablishment, useRodeo } from '@/contexts';
 import { softDeleteRodeo, type Rodeo } from '@/services/rodeos';
+import { describeServicePeriod } from '@/utils/service-months';
 import { buttonA11y } from '@/utils/a11y';
 
 const OFFLINE_COPY = 'Necesitás conexión para esto. Conectate a internet y volvé a intentar.';
@@ -155,6 +157,9 @@ export default function RodeosScreen() {
                 onEditTemplate={() =>
                   router.push({ pathname: '/editar-plantilla', params: { rodeoId: r.id, name: r.name } })
                 }
+                onEditService={() =>
+                  router.push({ pathname: '/editar-servicio', params: { rodeoId: r.id, name: r.name } })
+                }
                 onDelete={() => void onDeleteRodeo(r)}
               />
             ))}
@@ -250,6 +255,7 @@ function RodeoCard({
   muted,
   terracota,
   onEditTemplate,
+  onEditService,
   onDelete,
 }: {
   rodeo: Rodeo;
@@ -260,8 +266,12 @@ function RodeoCard({
   muted: string;
   terracota: string;
   onEditTemplate: () => void;
+  onEditService: () => void;
   onDelete: () => void;
 }) {
+  // spec 03 Stream B / B1: descripción es-AR del período de servicio (RPSC.3.1/RPSC.3.2). null = "sin
+  // configurar"; [] = "no hace servicio"; un run = "Oct → Dic". El array ya viene parseado tolerante (RPSC.3.7).
+  const servicePeriod = describeServicePeriod(rodeo.serviceMonths);
   return (
     <Card gap="$3">
       <XStack alignItems="center" gap="$2">
@@ -296,6 +306,29 @@ function RodeoCard({
               <Text flex={1} minWidth={0} fontFamily="$body" fontSize="$4" fontWeight="500" color="$textPrimary">
                 Editar plantilla de datos
               </Text>
+              <ChevronRight size={20} color={muted} strokeWidth={2} />
+            </XStack>
+          </Pressable>
+          <View height={1} backgroundColor="$divider" />
+          {/* Meses de servicio (spec 03 Stream B / B1, RPSC.3.1): ver/editar la campaña reproductiva del
+              rodeo. El subtexto muestra el período actual ("Oct → Dic" / "Sin configurar" / "No hace servicio").
+              Mostrarlo NO depende del rol (la edición sí es owner-only, dentro de este bloque owner). */}
+          <Pressable
+            onPress={onEditService}
+            {...buttonA11y(Platform.OS, {
+              label: `Editar los meses de servicio de ${rodeo.name}. Actualmente: ${servicePeriod.text}`,
+            })}
+          >
+            <XStack alignItems="center" gap="$3" minHeight="$chipMin" pressStyle={{ opacity: 0.6 }}>
+              <CalendarRange size={20} color={primary} strokeWidth={2} />
+              <YStack flex={1} minWidth={0}>
+                <Text numberOfLines={1} fontFamily="$body" fontSize="$4" fontWeight="500" color="$textPrimary">
+                  Meses de servicio
+                </Text>
+                <Text numberOfLines={1} fontFamily="$body" fontSize="$2" fontWeight="500" color="$textMuted">
+                  {servicePeriod.text}
+                </Text>
+              </YStack>
               <ChevronRight size={20} color={muted} strokeWidth={2} />
             </XStack>
           </Pressable>

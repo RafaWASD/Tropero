@@ -63,6 +63,8 @@ const PENDING_TABLES = [
   // Run T9.8 — overlay del alta de rodeo OFFLINE (intent create_rodeo).
   'pending_rodeos',
   'pending_rodeo_data_config',
+  // spec 03 Stream B / B1 — overlay de la EDICIÓN de meses de servicio (intent set_rodeo_service_months).
+  'pending_rodeo_service_months',
 ];
 
 test('R2.1: AppSchema valida contra el SDK (no tira la validación de PowerSync)', () => {
@@ -184,7 +186,7 @@ test('users NO trae email/phone (PII movida a user_private, 0068 / ADR-025)', ()
   assert.ok(!cols.includes('phone'), 'users no debe exponer phone');
 });
 
-test('el schema total = 29 sincronizadas + op_intents + 7 overlay = 37 tablas', () => {
+test('el schema total = 29 sincronizadas + op_intents + 8 overlay = 38 tablas', () => {
   const json = AppSchema.toJSON() as { tables: TableJson[] };
   assert.equal(json.tables.length, SYNCED_TABLES.length + 1 + PENDING_TABLES.length);
 });
@@ -211,7 +213,9 @@ const COLUMNS_READ_BY_BUILDERS: Record<string, string[]> = {
   species: ['code', 'active'],
   systems_by_species: ['species_id', 'code', 'name', 'active'],
   // contexto de establecimiento / miembros
-  rodeos: ['establishment_id', 'name', 'species_id', 'system_id', 'active', 'deleted_at', 'created_at'],
+  // spec 03 Stream B / B1: service_months (0102) — buildRodeosQuery lo proyecta (COALESCE con el overlay
+  // de edición). Sin declararlo, "no such column: rd.service_months" en vivo.
+  rodeos: ['establishment_id', 'name', 'species_id', 'system_id', 'active', 'service_months', 'deleted_at', 'created_at'],
   user_roles: ['role', 'user_id', 'establishment_id', 'active', 'member_name'],
   user_private: ['phone', 'email', 'user_id'],
   establishments: ['name', 'province', 'city', 'deleted_at', 'total_hectares'],
@@ -293,8 +297,11 @@ const OVERLAY_COLUMNS_READ_BY_BUILDERS: Record<string, string[]> = {
   // exit_date (residual #2): buildAnimalDetailQuery lo COALESCEa para el badge "Vendido el {fecha}" offline.
   pending_status_overrides: ['client_op_id', 'target_table', 'target_id', 'effect', 'status', 'exit_date'],
   // Run T9.8 — buildRodeosQuery UNIONa pending_rodeos; buildRodeoConfigQuery UNIONa pending_rodeo_data_config.
-  pending_rodeos: ['client_op_id', 'establishment_id', 'name', 'species_id', 'system_id', 'active', 'created_at'],
+  // spec 03 Stream B / B1: pending_rodeos suma service_months (alta optimista); buildRodeosQuery synced
+  // COALESCEa pending_rodeo_service_months (edición optimista).
+  pending_rodeos: ['client_op_id', 'establishment_id', 'name', 'species_id', 'system_id', 'active', 'service_months', 'created_at'],
   pending_rodeo_data_config: ['client_op_id', 'rodeo_id', 'field_definition_id', 'enabled'],
+  pending_rodeo_service_months: ['client_op_id', 'rodeo_id', 'service_months'],
 };
 
 test('GUARD (T6): el overlay pending_* declara TODA columna que el UNION de lectura lee', () => {

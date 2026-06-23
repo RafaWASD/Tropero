@@ -101,6 +101,23 @@ test('mapIntentToRpc: set_rodeo_config → rpc SIN p_client_op_id (dedup natural
   ]);
 });
 
+test('mapIntentToRpc: set_rodeo_service_months → rpc SIN p_client_op_id (dedup natural por el UPDATE, spec 03 B1)', () => {
+  const plan = mapIntentToRpc({
+    id: 'cop-sm',
+    opData: {
+      op_type: 'set_rodeo_service_months',
+      params_json: JSON.stringify({ p_rodeo_id: 'rod-9', p_service_months: [6, 7] }),
+    },
+  });
+  assert.equal(plan.kind, 'rpc');
+  if (plan.kind !== 'rpc') return;
+  assert.equal(plan.rpcName, 'set_rodeo_service_months');
+  // Su firma NO tiene p_client_op_id (idempotencia natural por el UPDATE) → no se inyecta.
+  assert.ok(!('p_client_op_id' in plan.args), 'set_rodeo_service_months NO debe llevar p_client_op_id');
+  assert.equal(plan.args.p_rodeo_id, 'rod-9');
+  assert.deepEqual(plan.args.p_service_months, [6, 7]);
+});
+
 test('mapIntentToRpc: assign_tag_to_animal → rpc con p_client_op_id = op.id inyectado (passthrough, NO ancla la dedup, spec 09 / 0089)', () => {
   // op_type = NOMBRE EXACTO de la RPC (fold MED-1 de Gate 1): el mapeo genérico (rpcName: opType) lo cubre
   // sin case especial. SÍ recibe p_client_op_id (su firma (uuid,text,uuid) lo tiene) — passthrough del
@@ -265,6 +282,18 @@ test('set_rodeo_config: P0002 (rodeo not found / soft-deleteado) → permanent_r
   // rodeo a editar ya NO existe → la edición es void → rollback del overlay optimista + descarte. NO se trata
   // como idempotent_discard (no hubo un efecto real previo que preservar).
   assert.equal(classifyIntentUploadError({ code: 'P0002' }, 'set_rodeo_config'), 'permanent_reject');
+});
+
+test('set_rodeo_service_months: 42501 (no-owner / IDOR) / P0002 (rodeo borrado) → permanent_reject; red → transient (spec 03 B1)', () => {
+  // GEMELO de set_rodeo_config: la RPC es owner-only con el establishment DERIVADO del rodeo (anti-IDOR,
+  // RPS.3.4) → 42501 = no-owner o rodeo ajeno → rollback del overlay + descarte + superficia. P0002 (rodeo
+  // borrado entre la edición offline y el sync) → mismo trato que set_rodeo_config: la edición es void →
+  // permanent_reject (rollback), NO idempotent_discard. Red/5xx → transitorio (queda en cola, NO toca overlay).
+  assert.equal(classifyIntentUploadError({ code: '42501' }, 'set_rodeo_service_months'), 'permanent_reject');
+  assert.equal(classifyIntentUploadError({ code: 'P0002' }, 'set_rodeo_service_months'), 'permanent_reject');
+  assert.equal(classifyIntentUploadError({ code: '23514' }, 'set_rodeo_service_months'), 'permanent_reject');
+  assert.equal(classifyIntentUploadError({ message: 'fetch failed' }, 'set_rodeo_service_months'), 'transient');
+  assert.equal(classifyIntentUploadError({ status: 503 }, 'set_rodeo_service_months'), 'transient');
 });
 
 test('IDEMPOTENCIA: P0002 (not found) de un soft_delete_* ya aplicado → idempotent_discard (sin rollback)', () => {

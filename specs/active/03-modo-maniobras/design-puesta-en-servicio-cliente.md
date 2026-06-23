@@ -54,6 +54,15 @@ Por ADR-019, Gate 1 (`security_analyzer` modo `spec`) se invoca si la spec toca 
 
 **Lo que NO se toca** (explícito): el enum `service_type` (`natural`/`ai`/`te`), `reproductive_events`, `addService`/`buildAddServiceInsert` (B3 solo deja de ofrecer `natural` en la UI; la función puede quedar — la IA de manga NO la usa, usa `buildAddManeuverInseminationInsert`); el gating capa 1/2 de maniobras; el orden/drag de jornada; la aptitud (`tacto_vaquillona`); el contrato de derivación de `0105` (lo consume Stream C).
 
+> **AS-BUILT del CABLEADO de B1 (2026-06-23, `impl_03-streamB-b1-wiring.md`).** El selector (ya construido + aprobado por Raf) se enchufó por el camino offline existente:
+> - **Alta:** `crear-rodeo.tsx` pasó de 3 a **4 pasos** (sistema→nombre→plantilla→**meses de servicio**, `ServiceMonthsSelector mode='alta'` con primavera pre-tildada por el estado inicial `[...SPRING_DEFAULT]`). `createRodeo` acepta `serviceMonths` y lo manda como `p_service_months` a la RPC `create_rodeo` (`0103`) + lo lleva en el overlay `pending_rodeos.service_months` (columna nueva en el overlay). Si se omite el param (otros callers; el wizard SIEMPRE lo pasa) → el server defaultea primavera (RPS.1.6).
+> - **Edición:** pantalla DEDICADA nueva **`editar-servicio.tsx`** (DD-PSC-5 dejaba abierto "editar-plantilla.tsx y/o pantalla dedicada" → as-built: pantalla dedicada, mejor separación de la plantilla de datos), accesible desde `rodeos.tsx` (RodeoCard, fila "Meses de servicio" con el período actual de subtexto vía `describeServicePeriod`, owner-only). `setRodeoServiceMonths(rodeoId, months)` encola `enqueueSetRodeoServiceMonths` (intent `set_rodeo_service_months` + overlay `pending_rodeo_service_months`).
+> - **Overlay de edición:** tabla `pending_rodeo_service_months` (localOnly, gemela de `pending_rodeo_data_config`) con DELETE-PRIOR (≤1 fila/rodeo); `buildRodeosQuery` **synced** hace `COALESCE((SELECT service_months FROM pending_rodeo_service_months WHERE rodeo_id = rd.id), rd.service_months)` → la edición optimista PISA la fila synced (RPSC.3.4). En `PENDING_OVERLAY_TABLES` (clear/rollback por client_op_id).
+> - **upload.ts:** `'set_rodeo_service_months'` en `RPC_OP_TYPES` (sin `p_client_op_id`, idempotente) + `P0002 → permanent_reject` (compartido con `set_rodeo_config`: rodeo borrado → rollback del overlay, RPSC.3.6).
+> - **rodeos.ts:** `Rodeo.serviceMonths: number[] | null` (parseado tolerante con `parseServiceMonths` en `toRodeo`).
+> - **Ruta:** `editar-servicio` registrada en `_layout.tsx` (`RODEO_DESTINATIONS` + `<Stack.Screen>`, no re-ruteada en estado `active`).
+> Gate 1 N/A (frontend; `schema.ts` es el schema CLIENTE de PowerSync, TS, no migración). Sync rule = CASO A (ver §5).
+
 ---
 
 ## 2. Decisiones de design (las que el Gate 0 delegó)
@@ -247,6 +256,8 @@ El **resumen** del animal (`describeStepValue`, `maneuver-sequence.ts:264`) ya m
 - **Multi-tenant (RPSC.8.1):** B1 nunca hardcodea `establishment_id`; el alta usa el del contexto activo (como `createRodeo` hoy), la edición deriva el establishment del rodeo **server-side** (la RPC `set_rodeo_service_months` lo hace, anti-IDOR — RPS.3.4). La UI de gestión de rodeos solo la ve el owner (spec 02 C1, `rodeos.tsx:45`). B2/B3/B4 no escriben datos cross-tenant nuevos.
 - **Offline-first (RPSC.8.2):** B1 alta y edición van por outbox (overlay optimista + clasificación de rechazos), espejando `createRodeo`/`enqueueSetRodeoConfig`. B2 escribe el config jsonb local (CRUD-plano de `sessions`, ya offline). B3/B4 no cambian el modelo offline.
 - **PowerSync `rodeos.service_months` (RPSC.3.7, dependencia):** el implementer agrega `service_months: column.text` a la tabla `rodeos` del `AppSchema` (`schema.ts:148`). PowerSync materializa el `smallint[]` de Postgres como TEXT/JSON; `parseServiceMonths` (DD-PSC-5) lo convierte a `number[] | null` de forma tolerante. **Verificar** que la sync rule (`sync-streams/rafaq.yaml`, stream `est_rodeos`) incluye la columna (Stream A la agregó en la migración; el cliente debe declararla en el schema local o la lectura del rodeo no la trae). Si la stream NO la emite, es un gap de Stream A a anotar (no debería: `service_months` es columna de `rodeos`, que ya se sincroniza enteramente).
+
+> **AS-BUILT del CABLEADO (2026-06-23) — verificación de la sync rule = CASO A.** El stream `est_rodeos` (`sync-streams/rafaq.yaml:109-114`) es `SELECT * FROM rodeos WHERE establishment_id IN org_scope AND deleted_at IS NULL`. Es **`SELECT *`** → `service_months` (columna de `0102`) **fluye sola** por el WAL sin tocar el YAML. **CASO A: NO se edita ni deploya `rafaq.yaml`** (no hay deploy server-side gateado para esta pieza). El único trabajo client-side fue declarar `service_months` en el schema local de PowerSync (`schema.ts`, tabla `rodeos` + `pending_rodeos`) + un overlay nuevo `pending_rodeo_service_months` para la edición optimista.
 
 ---
 

@@ -61,7 +61,18 @@ export async function completeCrearRodeo(
     await expect(page.getByRole('switch').first()).toBeVisible({ timeout: 20_000 });
   }
 
-  // Crear. El botón dice "Crear rodeo".
+  // Paso 3 → 4 (spec 03 Stream B / B1): el CTA del paso 3 ahora dice "Continuar" (no "Crear rodeo");
+  // lleva al paso 4 = meses de servicio (ServiceMonthsSelector mode='alta', primavera pre-tildada). Dejamos
+  // la primavera por defecto (RPSC.2.5) y avanzamos a crear. Tolerante: si el árbol viejo (3 pasos) corriera,
+  // "Continuar" no existiría en el paso 3 y "Crear rodeo" ya estaría → el waitFor de abajo lo cubre.
+  const continuarStep3 = page.getByRole('button', { name: 'Continuar', exact: true });
+  if (await continuarStep3.isVisible().catch(() => false)) {
+    await continuarStep3.click();
+    // Paso 4: el selector de meses (su grilla). Esperamos a que aparezca antes de crear.
+    await expect(page.getByTestId('service-months-grid')).toBeVisible({ timeout: 15_000 });
+  }
+
+  // Crear. El botón dice "Crear rodeo" (ahora en el paso 4).
   const crear = page.getByRole('button', { name: 'Crear rodeo', exact: true });
   await expect(crear).toBeVisible({ timeout: 15_000 });
   await crear.click();

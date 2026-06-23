@@ -29,7 +29,13 @@ import {
   toBool,
 } from './powersync/local-reads';
 import { runLocalQuery, runLocalQuerySingle } from './powersync/local-query';
-import { enqueueSoftDelete, enqueueCreateRodeo, newClientOpId } from './powersync/outbox';
+import {
+  enqueueSoftDelete,
+  enqueueCreateRodeo,
+  enqueueSetRodeoServiceMonths,
+  newClientOpId,
+} from './powersync/outbox';
+import { parseServiceMonths } from '../utils/service-months';
 
 export type { AppError, ServiceResult } from './rodeo-config';
 
@@ -97,6 +103,11 @@ export type Rodeo = {
   speciesId: string;
   systemId: string;
   active: boolean;
+  /** spec 03 Stream B / B1: meses 1–12 en que el rodeo hace servicio (puesta en servicio), parseado
+   *  TOLERANTE del TEXT/JSON que PowerSync materializa (RPSC.3.7). `null` = "sin configurar" (rodeo sin
+   *  campaña declarada — distinto de `[]` = "no hace servicio"). Lo consume la pantalla de edición de meses
+   *  (B1) y el default del tacto (B2). */
+  serviceMonths: number[] | null;
 };
 
 // `active` es 0/1 en SQLite (column.integer); de PostgREST viene boolean → toBool unifica ambos.
@@ -107,6 +118,8 @@ type RodeoRow = {
   species_id: string;
   system_id: string;
   active: number | boolean;
+  // service_months: TEXT/JSON (PowerSync materializa el smallint[] como no-escalar) → parseServiceMonths.
+  service_months?: unknown;
 };
 
 function toRodeo(r: RodeoRow): Rodeo {
@@ -117,6 +130,8 @@ function toRodeo(r: RodeoRow): Rodeo {
     speciesId: r.species_id,
     systemId: r.system_id,
     active: toBool(r.active),
+    // Parseo TOLERANTE (RPSC.3.7): null/''/corrupto → null ("sin configurar"); valores fuera de 1–12 se filtran.
+    serviceMonths: parseServiceMonths(r.service_months),
   };
 }
 
@@ -146,6 +161,13 @@ export type CreateRodeoInput = {
   speciesCode?: string;
   /** Toggles tal como quedaron tras el paso 3 del wizard (para diffear contra los defaults). */
   toggles: TemplateToggle[];
+  /** spec 03 Stream B / B1 (RPSC.2.4): meses 1–12 en que el rodeo hace servicio, elegidos en el paso 4 del
+   *  wizard. Se manda como `p_service_months` a la RPC create_rodeo (0103). Si el caller no lo pasa
+   *  (undefined), se OMITE el param → el server defaultea a primavera {10,11,12} (RPS.1.6 / RPSC.2.5). El
+   *  array que llega acá ya viene CONTIGUO + en rango (lo arma el ServiceMonthsSelector); igual se sanea con
+   *  toServiceMonthsArray en la pantalla antes de pasarlo. `[]` explícito = "no hace servicio" (se respeta,
+   *  no se reemplaza por el default). Solo aplica al sistema cría (B1). */
+  serviceMonths?: number[];
 };
 
 /**
@@ -231,6 +253,15 @@ export async function createRodeo(
 
   const rodeoId = newClientOpId(); // uuid de cliente (R6.4): la RPC lo reusa por ON CONFLICT (idempotente).
 
+  // spec 03 Stream B / B1 (RPSC.2.4/RPSC.2.5/RPSC.2.6): meses de servicio del paso 4. Si el caller los pasa
+  // (incluido [] = "no hace servicio"), se mandan como p_service_months; si NO los pasa (undefined), se OMITE
+  // el param → el server defaultea a primavera {10,11,12} (RPS.1.6). El overlay optimista muestra el array
+  // elegido offline (o null si se omitió — la pantalla de edición lo verá como "sin configurar" hasta el sync,
+  // que baja la primavera real; el alta SIEMPRE pasa al menos primavera desde el selector, así que en la
+  // práctica serviceMonths viene definido). El array ya viene contiguo + en rango del selector.
+  const hasServiceMonths = input.serviceMonths !== undefined;
+  const serviceMonthsText = hasServiceMonths ? JSON.stringify(input.serviceMonths) : null;
+
   // 4) Encolar la intención create_rodeo + el overlay (rodeo + plantilla). Offline el rodeo Y su plantilla
   //    aparecen al instante (UNION en buildRodeosQuery / buildRodeoConfigQuery).
   const enq = await enqueueCreateRodeo({
@@ -242,12 +273,15 @@ export async function createRodeo(
       p_species_id: speciesId,
       p_system_id: systemId,
       p_toggles: pToggles,
+      // Solo se incluye la key si el caller pasó meses (undefined → omitir → default server primavera).
+      ...(hasServiceMonths ? { p_service_months: input.serviceMonths } : {}),
     },
     overlay: {
       establishmentId: input.establishmentId,
       name,
       speciesId,
       systemId,
+      serviceMonths: serviceMonthsText,
     },
     configRows,
   });
@@ -256,8 +290,45 @@ export async function createRodeo(
   // Devolvemos el rodeo OPTIMISTA (firma pública intacta, R11.1). active=true (recién creado).
   return {
     ok: true,
-    value: { id: rodeoId, establishmentId: input.establishmentId, name, speciesId, systemId, active: true },
+    value: {
+      id: rodeoId,
+      establishmentId: input.establishmentId,
+      name,
+      speciesId,
+      systemId,
+      active: true,
+      serviceMonths: hasServiceMonths ? (input.serviceMonths as number[]) : null,
+    },
   };
+}
+
+// ─── Editar meses de servicio del rodeo (owner) — spec 03 Stream B / B1 ─────────────
+
+/**
+ * Edita los meses de servicio de un rodeo OFFLINE-FIRST (RPSC.3.3, owner-only) vía la OUTBOX (DD-PSC-4).
+ * Gemelo de la edición de plantilla (set_rodeo_config): encola un intent `set_rodeo_service_months` (RPC 0103
+ * SECURITY DEFINER, owner-only con el establishment DERIVADO del rodeo — anti-IDOR, RPS.3.4) + overlay
+ * optimista en pending_rodeo_service_months (PISA service_months del rodeo en buildRodeosQuery → la pantalla
+ * de edición muestra el cambio al instante offline, RPSC.3.4). Encolar es 100% local → SIEMPRE OK offline; el
+ * único fallo posible es del DB local (defensivo). El éxito/rechazo REAL lo resuelve uploadData al subir
+ * (idempotente por el UPDATE — RPSC.3.5; P0002 si el rodeo ya no existe → rollback del overlay, RPSC.3.6).
+ *
+ * `months` viene del ServiceMonthsSelector (contiguo + en rango); se SANEA igual con toServiceMonthsArray en
+ * la pantalla (no se hardcodea nada — multi-tenant: el establishment lo deriva la RPC del rodeo, no el cliente).
+ * `[]` = "no hace servicio" (explícito) se respeta; "sin configurar" (null) NO se persiste por acá (la pantalla
+ * exige una selección antes de guardar — no se manda null).
+ */
+export async function setRodeoServiceMonths(
+  rodeoId: string,
+  months: number[],
+): Promise<ServiceResult<void>> {
+  const enq = await enqueueSetRodeoServiceMonths({
+    rodeoId,
+    serviceMonthsText: JSON.stringify(months),
+    params: { p_rodeo_id: rodeoId, p_service_months: months },
+  });
+  if (!enq.ok) return { ok: false, error: { kind: 'unknown', message: enq.error.message } };
+  return { ok: true, value: undefined };
 }
 
 // ─── Soft-delete (owner) ────────────────────────────────────────────────────────

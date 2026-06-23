@@ -97,6 +97,8 @@ import {
   buildPendingRodeoInsert,
   buildPendingRodeoConfigInsert,
   buildDeletePendingRodeoConfig,
+  buildPendingRodeoServiceMonthsInsert,
+  buildDeletePendingRodeoServiceMonths,
   buildClearOverlayDelete,
   PENDING_OVERLAY_TABLES,
   type PendingProfileFields,
@@ -295,14 +297,50 @@ test('buildRodeosQuery: filtros de dominio + orden created_at ASC + overlay ocul
   assert.match(q.sql, /FROM rodeos rd/);
   assert.match(q.sql, /WHERE rd\.establishment_id = \? AND rd\.active = 1 AND rd\.deleted_at IS NULL/);
   assert.match(q.sql, /ORDER BY created_at ASC/);
-  assert.match(q.sql, /id, establishment_id, name, species_id, system_id, active, created_at/);
+  assert.match(q.sql, /id, establishment_id, name, species_id, system_id, active/);
   // T6: oculta los rodeos con un override soft_deleted pendiente (rama synced y overlay).
   assert.match(q.sql, /NOT EXISTS \(SELECT 1 FROM pending_status_overrides pso WHERE pso\.target_table = 'rodeos' AND pso\.target_id = rd\.id AND pso\.effect IN \('soft_deleted'\)\)/);
   // Run T9.8: UNIONa los rodeos alta-optimistas (pending_rodeos) → el rodeo offline aparece en la lista.
-  assert.match(q.sql, /UNION ALL SELECT id, establishment_id, name, species_id, system_id, active, created_at FROM pending_rodeos pr/);
+  assert.match(q.sql, /FROM pending_rodeos pr/);
   assert.match(q.sql, /WHERE pr\.establishment_id = \? AND pr\.active = 1/);
   assert.match(q.sql, /pso\.target_id = pr\.id AND pso\.effect IN \('soft_deleted'\)/);
+  // spec 03 Stream B / B1: service_months en AMBAS ramas. Synced = COALESCE del overlay de edición
+  // (pending_rodeo_service_months PISA rd.service_months); overlay del alta = pr.service_months directo.
+  assert.match(
+    q.sql,
+    /COALESCE\(\(SELECT prsm\.service_months FROM pending_rodeo_service_months prsm WHERE prsm\.rodeo_id = rd\.id\), rd\.service_months\) AS service_months/,
+  );
+  assert.match(q.sql, /system_id, active, service_months, created_at FROM pending_rodeos pr/);
   assert.deepEqual(q.args, ['est-1', 'est-1']);
+});
+
+// COMPORTAMIENTO sobre node:sqlite — el overlay de la EDICIÓN PISA service_months de la fila synced (RPSC.3.4).
+test('buildRodeosQuery (comportamiento): la EDICIÓN optimista PISA service_months del rodeo synced (COALESCE)', () => {
+  const db = new DatabaseSync(':memory:');
+  db.exec(
+    'CREATE TABLE rodeos (id TEXT, establishment_id TEXT, name TEXT, species_id TEXT, system_id TEXT, active INTEGER, service_months TEXT, deleted_at TEXT, created_at TEXT);' +
+      'CREATE TABLE pending_rodeos (id TEXT, client_op_id TEXT, establishment_id TEXT, name TEXT, species_id TEXT, system_id TEXT, active INTEGER, service_months TEXT, created_at TEXT);' +
+      'CREATE TABLE pending_rodeo_service_months (id TEXT, client_op_id TEXT, rodeo_id TEXT, service_months TEXT);' +
+      'CREATE TABLE pending_status_overrides (id TEXT, client_op_id TEXT, target_table TEXT, target_id TEXT, effect TEXT, status TEXT, exit_date TEXT);',
+  );
+  // Rodeo synced con primavera persistida.
+  db.exec(
+    "INSERT INTO rodeos (id, establishment_id, name, species_id, system_id, active, service_months, deleted_at, created_at) " +
+      "VALUES ('r1', 'e1', 'Rodeo A', 's1', 'sys1', 1, '[10,11,12]', NULL, '2026-01-01')",
+  );
+  const q1 = buildRodeosQuery('e1');
+  const before = db.prepare(q1.sql).all(...(q1.args as string[])) as { id: string; service_months: string | null }[];
+  assert.equal(before.length, 1);
+  assert.equal(before[0].service_months, '[10,11,12]'); // sin overlay → la fila synced.
+
+  // Edición optimista: el operario cambia a otoño → overlay PISA.
+  db.exec(
+    "INSERT INTO pending_rodeo_service_months (id, client_op_id, rodeo_id, service_months) VALUES ('x', 'cop1', 'r1', '[6,7]')",
+  );
+  const after = db.prepare(q1.sql).all(...(q1.args as string[])) as { id: string; service_months: string | null }[];
+  assert.equal(after.length, 1, 'sigue siendo UNA fila (overlay PISA, no duplica)');
+  assert.equal(after[0].service_months, '[6,7]', 'el overlay de edición PISA service_months');
+  db.close();
 });
 
 // ─── Contexto de establecimiento (T3.2) ─────────────────────────────────────────────
@@ -1381,18 +1419,25 @@ test('buildPendingStatusOverrideInsert: override exited/soft_deleted con target 
   assert.deepEqual(del.args, ['o-2', 'cop-2', 'management_groups', 'g-1', 'soft_deleted', null, null]);
 });
 
-test('buildPendingRodeoInsert: pending_rodeos con id de cliente + active=1 literal (Run T9.8)', () => {
+test('buildPendingRodeoInsert: pending_rodeos con id de cliente + active=1 literal + service_months (Run T9.8 / B1)', () => {
   const q = buildPendingRodeoInsert('rod-1', 'cop-1', {
     establishmentId: 'est-1', name: 'Rodeo principal', speciesId: 'sp-1', systemId: 'sys-1',
+    serviceMonths: '[10,11,12]',
     createdAt: '2026-06-09T00:00:00.000Z',
   });
   assert.match(
     q.sql,
-    /INSERT INTO pending_rodeos \(id, client_op_id, establishment_id, name, species_id, system_id, active, created_at\) VALUES \(\?, \?, \?, \?, \?, \?, 1, \?\)/,
+    /INSERT INTO pending_rodeos \(id, client_op_id, establishment_id, name, species_id, system_id, active, service_months, created_at\) VALUES \(\?, \?, \?, \?, \?, \?, 1, \?, \?\)/,
   );
-  // active = 1 es LITERAL en el SQL (no es arg) → 7 placeholders, 7 args.
-  assert.equal((q.sql.match(/\?/g) ?? []).length, 7);
-  assert.deepEqual(q.args, ['rod-1', 'cop-1', 'est-1', 'Rodeo principal', 'sp-1', 'sys-1', '2026-06-09T00:00:00.000Z']);
+  // active = 1 es LITERAL en el SQL (no es arg) → 8 placeholders, 8 args (service_months sumado, B1).
+  assert.equal((q.sql.match(/\?/g) ?? []).length, 8);
+  assert.deepEqual(q.args, ['rod-1', 'cop-1', 'est-1', 'Rodeo principal', 'sp-1', 'sys-1', '[10,11,12]', '2026-06-09T00:00:00.000Z']);
+  // serviceMonths null (defensivo) → arg null, no rompe.
+  const qNull = buildPendingRodeoInsert('rod-2', 'cop-2', {
+    establishmentId: 'est-1', name: 'Rodeo B', speciesId: 'sp-1', systemId: 'sys-1',
+    serviceMonths: null, createdAt: '2026-06-09T00:00:00.000Z',
+  });
+  assert.equal(qNull.args[6], null);
 });
 
 test('buildPendingRodeoConfigInsert: una fila de la plantilla optimista, enabled 1/0 (Run T9.8)', () => {
@@ -1413,6 +1458,44 @@ test('buildDeletePendingRodeoConfig: DELETE por (rodeo_id, field_definition_id),
   assert.deepEqual(q.args, ['rod-1', 'fd-prenez']);
 });
 
+test('buildPendingRodeoServiceMonthsInsert: overlay de la EDICIÓN de meses, 4 placeholders (B1)', () => {
+  const q = buildPendingRodeoServiceMonthsInsert('x-1', 'cop-1', 'rod-1', '[6,7]');
+  assert.equal(
+    q.sql,
+    'INSERT INTO pending_rodeo_service_months (id, client_op_id, rodeo_id, service_months) VALUES (?, ?, ?, ?)',
+  );
+  assert.equal((q.sql.match(/\?/g) ?? []).length, 4);
+  assert.deepEqual(q.args, ['x-1', 'cop-1', 'rod-1', '[6,7]']);
+});
+
+test('buildDeletePendingRodeoServiceMonths: DELETE por rodeo_id, 1 placeholder (delete-prior, invariante ≤1 fila, B1)', () => {
+  const q = buildDeletePendingRodeoServiceMonths('rod-1');
+  assert.equal(q.sql, 'DELETE FROM pending_rodeo_service_months WHERE rodeo_id = ?');
+  assert.equal((q.sql.match(/\?/g) ?? []).length, 1);
+  assert.deepEqual(q.args, ['rod-1']);
+});
+
+// COMPORTAMIENTO: delete-prior + insert garantiza UNA sola fila por rodeo (invariante del COALESCE de
+// buildRodeosQuery) aun tras dos ediciones offline del mismo rodeo antes de syncear.
+test('buildPendingRodeoServiceMonthsInsert (comportamiento): doble-edición offline → UNA fila con el último valor (B1)', () => {
+  const db = new DatabaseSync(':memory:');
+  db.exec('CREATE TABLE pending_rodeo_service_months (id TEXT, client_op_id TEXT, rodeo_id TEXT, service_months TEXT);');
+  const apply = (id: string, cop: string, months: string) => {
+    const del = buildDeletePendingRodeoServiceMonths('rod-1');
+    db.prepare(del.sql).run(...(del.args as string[]));
+    const ins = buildPendingRodeoServiceMonthsInsert(id, cop, 'rod-1', months);
+    db.prepare(ins.sql).run(...(ins.args as string[]));
+  };
+  apply('x-1', 'cop-1', '[10,11,12]');
+  apply('x-2', 'cop-2', '[6,7]'); // 2da edición offline antes de syncear.
+  const rows = db
+    .prepare("SELECT service_months FROM pending_rodeo_service_months WHERE rodeo_id = 'rod-1'")
+    .all() as { service_months: string }[];
+  assert.equal(rows.length, 1, 'el delete-prior mantiene ≤1 fila por rodeo');
+  assert.equal(rows[0].service_months, '[6,7]', 'queda el último valor editado');
+  db.close();
+});
+
 test('buildClearOverlayDelete: DELETE por client_op_id en la tabla pending_* dada', () => {
   const q = buildClearOverlayDelete('pending_animal_profiles', 'cop-1');
   assert.equal(q.sql, 'DELETE FROM pending_animal_profiles WHERE client_op_id = ?');
@@ -1420,15 +1503,19 @@ test('buildClearOverlayDelete: DELETE por client_op_id en la tabla pending_* dad
   // Run T9.8: también limpia el overlay del alta de rodeo.
   const rodeo = buildClearOverlayDelete('pending_rodeos', 'cop-2');
   assert.equal(rodeo.sql, 'DELETE FROM pending_rodeos WHERE client_op_id = ?');
+  // B1: y el overlay de la edición de meses de servicio.
+  const sm = buildClearOverlayDelete('pending_rodeo_service_months', 'cop-3');
+  assert.equal(sm.sql, 'DELETE FROM pending_rodeo_service_months WHERE client_op_id = ?');
 });
 
-test('PENDING_OVERLAY_TABLES: las 7 tablas overlay (para clear/rollback por client_op_id)', () => {
+test('PENDING_OVERLAY_TABLES: las 8 tablas overlay (para clear/rollback por client_op_id)', () => {
   assert.deepEqual([...PENDING_OVERLAY_TABLES].sort(), [
     'pending_animal_profiles',
     'pending_animals',
     'pending_birth_calves',
     'pending_reproductive_events',
     'pending_rodeo_data_config',
+    'pending_rodeo_service_months',
     'pending_rodeos',
     'pending_status_overrides',
   ]);

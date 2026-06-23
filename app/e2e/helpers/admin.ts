@@ -182,6 +182,59 @@ export async function seedRodeo(
 }
 
 /**
+ * ORÁCULO de persistencia server-side de los MESES DE SERVICIO de un rodeo (spec 03 Stream B / B1,
+ * RPSC.2.4/RPSC.3.3): pollea `rodeos.service_months` vía service_role hasta que el SET de meses coincida
+ * (ignorando orden) con `expectedMonths`. Verifica que el alta (create_rodeo p_service_months) o la edición
+ * (set_rodeo_service_months) llegó REAL al server (no solo al overlay/UI). El servicio es OFFLINE-FIRST vía
+ * outbox → la RPC corre async cuando PowerSync drena la cola → un read-back único race-ea (flake). Devuelve el
+ * array ordenado tal cual lo guardó el server (smallint[] → number[] de PostgREST).
+ */
+export async function waitForServerRodeoServiceMonths(
+  rodeoId: string,
+  expectedMonths: number[],
+  opts: { tries?: number; delayMs?: number } = {},
+): Promise<number[]> {
+  const tries = opts.tries ?? 30;
+  const delayMs = opts.delayMs ?? 2000;
+  const want = [...expectedMonths].sort((a, b) => a - b).join(',');
+  let last: string | null = null;
+  for (let i = 0; i < tries; i++) {
+    const { data, error } = await admin
+      .from('rodeos')
+      .select('service_months')
+      .eq('id', rodeoId)
+      .maybeSingle();
+    if (error) throw new Error(`waitForServerRodeoServiceMonths: ${error.message}`);
+    const got = (data?.service_months as number[] | null) ?? null;
+    if (got !== null) {
+      const gotSorted = [...got].sort((a, b) => a - b);
+      last = gotSorted.join(',');
+      if (last === want) return gotSorted;
+    }
+    await new Promise((r) => setTimeout(r, delayMs));
+  }
+  throw new Error(
+    `waitForServerRodeoServiceMonths(${rodeoId}): service_months NUNCA llegó a [${want}] en el server ` +
+      `(${tries} intentos; último visto: ${last ?? 'null'}). El alta (create_rodeo p_service_months) o la ` +
+      `edición (set_rodeo_service_months) no sincronizó, o la RPC lo rechazó.`,
+  );
+}
+
+/**
+ * Lee `rodeos.service_months` actual de un rodeo vía service_role (sin pollear). Devuelve null si no existe /
+ * sin configurar. Útil para asertar el estado inicial de un rodeo sembrado (sin meses) antes de editar.
+ */
+export async function readServerRodeoServiceMonths(rodeoId: string): Promise<number[] | null> {
+  const { data, error } = await admin
+    .from('rodeos')
+    .select('service_months')
+    .eq('id', rodeoId)
+    .maybeSingle();
+  if (error) throw new Error(`readServerRodeoServiceMonths: ${error.message}`);
+  return (data?.service_months as number[] | null) ?? null;
+}
+
+/**
  * Conveniencia: siembra un establishment con rol owner activo PARA `ownerId` Y un rodeo bovino/cría,
  * de una. Es el estado de partida más común desde C1 (un usuario que aterriza en home, no en el
  * bloqueo total de rodeo). Devuelve { establishmentId, rodeoId, systemId }.

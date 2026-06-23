@@ -166,14 +166,26 @@ export function buildRodeosQuery(establishmentId: string): LocalQuery {
   // encola un intent create_rodeo + pending_rodeos, Run T9.8). Overlay vacío → idéntico al swap T3.3.
   // El rodeo offline aparece en la lista al instante; al ACK la fila real baja por est_rodeos y el
   // overlay se limpia (sin duplicado: el id del overlay = el id de cliente = el id real del rodeo).
+  //
+  // spec 03 Stream B / B1: `service_months` (RPSC.2/RPSC.3) se proyecta en AMBAS ramas. En la rama SYNCED se
+  // COALESCEa con el overlay de la EDICIÓN (`pending_rodeo_service_months`): un cambio de meses offline de un
+  // rodeo ya sincronizado PISA `rd.service_months` al instante (RPSC.3.4 optimista) — invariante ≤1 fila por
+  // rodeo en el overlay (DELETE-PRIOR de enqueueSetRodeoServiceMonths). Al ACK clearOverlay lo limpia y la
+  // fila real (con el nuevo service_months) baja por est_rodeos. En la rama del ALTA-optimista se proyecta
+  // `pr.service_months` directo (el overlay del alta lo trae). El parseo del TEXT a number[]|null lo hace el
+  // service (parseServiceMonths, tolerante — RPSC.3.7).
   const synced =
-    'SELECT id, establishment_id, name, species_id, system_id, active, created_at FROM rodeos rd ' +
+    'SELECT id, establishment_id, name, species_id, system_id, active, ' +
+    'COALESCE((SELECT prsm.service_months FROM pending_rodeo_service_months prsm WHERE prsm.rodeo_id = rd.id), ' +
+    'rd.service_months) AS service_months, created_at FROM rodeos rd ' +
     'WHERE rd.establishment_id = ? AND rd.active = 1 AND rd.deleted_at IS NULL AND ' +
     notHiddenByOverride('rodeos', 'rd.id', ['soft_deleted']);
   // Rama OVERLAY: el rodeo alta-optimista. active = 1 (lo escribe el builder del overlay) → pasa el filtro
-  // de dominio. Lo ocultamos si ya tiene un soft_delete pendiente (defensivo). Mismas columnas proyectadas.
+  // de dominio. Lo ocultamos si ya tiene un soft_delete pendiente (defensivo). Mismas columnas proyectadas
+  // (service_months del propio overlay del alta).
   const overlay =
-    'SELECT id, establishment_id, name, species_id, system_id, active, created_at FROM pending_rodeos pr ' +
+    'SELECT id, establishment_id, name, species_id, system_id, active, service_months, created_at ' +
+    'FROM pending_rodeos pr ' +
     'WHERE pr.establishment_id = ? AND pr.active = 1 AND ' +
     notHiddenByOverride('rodeos', 'pr.id', ['soft_deleted']);
   return {
@@ -2660,7 +2672,9 @@ export function buildPendingBirthCalfInsert(
 
 /** INSERT optimista en pending_rodeos (el rodeo ALTA-optimista, Run T9.8). `id` = id de CLIENTE del rodeo
  *  (el mismo que la RPC create_rodeo reusará por ON CONFLICT → idempotente por PK). `active = 1` para que
- *  buildRodeosQuery (que filtra active = 1) lo muestre al instante offline. created_at = now() de cliente. */
+ *  buildRodeosQuery (que filtra active = 1) lo muestre al instante offline. created_at = now() de cliente.
+ *  spec 03 Stream B / B1: `serviceMonths` es el TEXT/JSON del array de meses (RPSC.2.4) que el alta optimista
+ *  muestra offline; `null` si el alta no lo trae (defensivo — createRodeo siempre lo pasa, al menos primavera). */
 export function buildPendingRodeoInsert(
   id: string,
   clientOpId: string,
@@ -2669,18 +2683,52 @@ export function buildPendingRodeoInsert(
     name: string;
     speciesId: string;
     systemId: string;
+    /** TEXT/JSON del array de meses de servicio (ej. '[10,11,12]'), o null. */
+    serviceMonths: string | null;
     createdAt: string;
   },
 ): LocalQuery {
   return {
     sql:
       'INSERT INTO pending_rodeos ' +
-      '(id, client_op_id, establishment_id, name, species_id, system_id, active, created_at) ' +
-      'VALUES (?, ?, ?, ?, ?, ?, 1, ?)',
+      '(id, client_op_id, establishment_id, name, species_id, system_id, active, service_months, created_at) ' +
+      'VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)',
     args: [
       id, clientOpId, fields.establishmentId, fields.name, fields.speciesId, fields.systemId,
-      fields.createdAt,
+      fields.serviceMonths, fields.createdAt,
     ],
+  };
+}
+
+/**
+ * DELETE-PRIOR del overlay de meses de servicio por rodeo_id, de CUALQUIER client_op_id (spec 03 Stream B / B1).
+ * Lo corre `enqueueSetRodeoServiceMonths` ANTES de insertar el overlay, para mantener el INVARIANTE de ≤1
+ * fila por rodeo que `buildRodeosQuery` necesita (su COALESCE de `pending_rodeo_service_months` toma UNA fila
+ * por rodeo). Sin esto, dos ediciones offline del mismo rodeo antes de syncear dejarían 2 filas → COALESCE
+ * ambiguo. Mismo patrón que buildDeletePendingRodeoConfig (`rowid` no existe sobre las views de PowerSync).
+ */
+export function buildDeletePendingRodeoServiceMonths(rodeoId: string): LocalQuery {
+  return {
+    sql: 'DELETE FROM pending_rodeo_service_months WHERE rodeo_id = ?',
+    args: [rodeoId],
+  };
+}
+
+/** INSERT optimista en pending_rodeo_service_months (la EDICIÓN de meses de un rodeo ya sincronizado, B1).
+ *  `id` = uuid sintético de cliente (la fila se referencia por rodeo_id, no por id). `serviceMonths` = TEXT/JSON
+ *  del array (RPSC.3.3); buildRodeosQuery lo COALESCEa sobre rd.service_months (pisa la fila synced, RPSC.3.4).
+ *  Va PRECEDIDO de buildDeletePendingRodeoServiceMonths (invariante ≤1 fila por rodeo). */
+export function buildPendingRodeoServiceMonthsInsert(
+  id: string,
+  clientOpId: string,
+  rodeoId: string,
+  serviceMonths: string,
+): LocalQuery {
+  return {
+    sql:
+      'INSERT INTO pending_rodeo_service_months (id, client_op_id, rodeo_id, service_months) ' +
+      'VALUES (?, ?, ?, ?)',
+    args: [id, clientOpId, rodeoId, serviceMonths],
   };
 }
 
@@ -2745,7 +2793,7 @@ export function buildPendingStatusOverrideInsert(
   };
 }
 
-/** Las 7 tablas overlay (para limpiar/rollbackear todas por client_op_id en una sola pasada). */
+/** Las 8 tablas overlay (para limpiar/rollbackear todas por client_op_id en una sola pasada). */
 export const PENDING_OVERLAY_TABLES = [
   'pending_animals',
   'pending_animal_profiles',
@@ -2755,6 +2803,8 @@ export const PENDING_OVERLAY_TABLES = [
   // Run T9.8 — overlay del alta de rodeo OFFLINE.
   'pending_rodeos',
   'pending_rodeo_data_config',
+  // spec 03 Stream B / B1 — overlay de la EDICIÓN de meses de servicio.
+  'pending_rodeo_service_months',
 ] as const;
 
 /** DELETE de TODO el overlay de un client_op_id en una tabla pending_* (clear en ACK / rollback en rechazo). */

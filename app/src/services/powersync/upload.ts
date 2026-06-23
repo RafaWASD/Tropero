@@ -49,6 +49,9 @@ const RPC_OP_TYPES = new Set([
   // Run T9.9 — editar plantilla del rodeo OFFLINE: set_rodeo_config (0082). SIN p_client_op_id (su firma no
   // lo tiene; dedup natural por el UPSERT idempotente de toggles → replay = no-op total, R6.10).
   'set_rodeo_config',
+  // spec 03 Stream B / B1 — editar meses de servicio OFFLINE: set_rodeo_service_months (0103). SIN
+  // p_client_op_id (su firma no lo tiene; dedup natural por el UPDATE idempotente → replay = no-op, RPSC.3.5).
+  'set_rodeo_service_months',
   // spec 09 dedup A/B — asignar caravana OFFLINE: assign_tag_to_animal (0089). op_type = NOMBRE EXACTO de la
   // RPC (fold MED-1 de Gate 1: sin case especial frágil ni mismatch con la firma tipada del grant). SÍ recibe
   // p_client_op_id (como register_birth) — PASSTHROUGH del contrato del intent; NO ancla la dedup (state-based,
@@ -191,13 +194,13 @@ export function classifyIntentUploadError(error: unknown, opType: string): Inten
     return 'idempotent_discard';
   }
 
-  // (1-bis) P0002 (rodeo not found) de set_rodeo_config (Run T9.9): el rodeo objetivo de la edición ya NO
-  //     existe / fue soft-deleteado → la edición de su plantilla es VOID. A diferencia de los soft_delete_*
-  //     (donde P0002 = la baja YA ocurrió → idempotent_discard SIN rollback), acá el rollback del overlay
-  //     optimista ES lo correcto: el usuario editó la plantilla local de un rodeo que entretanto desapareció
-  //     → revertir esa vista optimista (la plantilla nunca se persistirá) + descartar el intent. Por eso
-  //     permanent_reject (rollback + descarte), NO idempotent_discard.
-  if (code === 'P0002' && opType === 'set_rodeo_config') {
+  // (1-bis) P0002 (rodeo not found) de una edición de rodeo (set_rodeo_config Run T9.9; set_rodeo_service_months
+  //     spec 03 B1): el rodeo objetivo ya NO existe / fue soft-deleteado → la edición es VOID. A diferencia de los
+  //     soft_delete_* (donde P0002 = la baja YA ocurrió → idempotent_discard SIN rollback), acá el rollback del
+  //     overlay optimista ES lo correcto: el usuario editó la plantilla / los meses de un rodeo que entretanto
+  //     desapareció → revertir esa vista optimista (nunca se persistirá) + descartar el intent. permanent_reject
+  //     (rollback + descarte), NO idempotent_discard. Ambas RPC de edición de rodeo comparten esta semántica.
+  if (code === 'P0002' && (opType === 'set_rodeo_config' || opType === 'set_rodeo_service_months')) {
     return 'permanent_reject';
   }
 
