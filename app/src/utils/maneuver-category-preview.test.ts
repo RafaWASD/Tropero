@@ -1,6 +1,8 @@
 // Tests de la lógica PURA del preview de transición de categoría offline (spec 03 R8.4). node:test.
 // Foco: ANTIDRIFT (round-trip contra computeCategoryCode), las reglas de null (override/male/sin-cambio/
 // sin-catálogo/sin-evento) y el caso canónico (vaquillona + tacto+ → vaquillona_prenada).
+// B4 (RPSC.1.5): la IA ya NO transiciona categoría (post-0104) → "ternera + inseminación" pasa a → null;
+// `vaquillona` se reconstruye con [weaning] (DD-PSC-7), no con [service].
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -142,21 +144,38 @@ test('ternera + tacto vacío → null (no positivo)', () => {
   );
 });
 
-// ─── Inseminación (service) ─────────────────────────────────────────────────────────────────────
+// ─── Inseminación (IA) — INVERTIDO (RPSC.1.5 / B4): la IA ya NO transiciona categoría ────────────
+// Post-0104 el `service`/IA NO promueve categoría (categoría ≠ elegibilidad reproductiva, RPS.4.8 — la IA
+// registra la servida en Stream C, no cambia el badge). Una IA capturada en la manga ya NO anticipa
+// `ternera → vaquillona`: `capturedReproEvents` dejó de inyectar un evento `service` por `kind:'inseminacion'`
+// → no hay disparador → el preview devuelve null.
 
-test('ternera + inseminación (service) → vaquillona (el servicio la promueve)', () => {
-  const r = preview({
-    currentCode: 'ternera',
-    currentName: 'Ternera',
-    birthDate: '2026-01-01',
-    captured: INSEM,
-  });
-  assert.equal(r?.toCode, 'vaquillona');
-  assert.equal(r?.toName, 'Vaquillona');
+test('ternera + inseminación (IA) → null (la IA ya NO promueve categoría — RPSC.1.5)', () => {
+  assert.equal(
+    preview({
+      currentCode: 'ternera',
+      currentName: 'Ternera',
+      birthDate: '2026-01-01',
+      captured: INSEM,
+    }),
+    null,
+  );
 });
 
-test('vaquillona + inseminación (service) → null (ya vaquillona, sin cambio)', () => {
+test('vaquillona + inseminación (IA) → null (la IA no dispara transición, sin cambio)', () => {
   assert.equal(preview({ currentCode: 'vaquillona', captured: INSEM }), null);
+});
+
+test('ternera + tacto+ Y inseminación (misma jornada) → vaquillona_prenada (el TACTO+ manda; la IA no estorba)', () => {
+  // Defensa de regresión: quitar la rama `inseminacion` de capturedReproEvents NO debe romper la extracción
+  // del tacto. Con ambos capturados, el tacto+ sigue disparando vaquillona_prenada (la IA es inerte).
+  const both: CaptureMap = {
+    tacto: { kind: 'tacto', pregnancy: 'medium' },
+    inseminacion: { kind: 'inseminacion', semenName: 'Toro X' },
+  };
+  const r = preview({ currentCode: 'ternera', currentName: 'Ternera', birthDate: '2026-01-01', captured: both });
+  assert.equal(r?.toCode, 'vaquillona_prenada');
+  assert.equal(r?.fromCode, 'ternera');
 });
 
 // ─── Catálogo / sin evento ──────────────────────────────────────────────────────────────────────

@@ -4,10 +4,13 @@
 // ══════════════════════════════════════════════════════════════════════════════════════════════
 // ⚠️ ANTI-DRIFT (RC6.5.1) — NOTA DE MANTENIMIENTO OBLIGATORIA
 // ══════════════════════════════════════════════════════════════════════════════════════════════
-// Este módulo ESPEJA la función `compute_category` de la migración `0062`
-// (`supabase/migrations/0062_compute_category_rewrite.sql`). Es un espejo client-side display-only
-// (chunk C6 de spec 02): permite ver la categoría derivada localmente OFFLINE, antes de que el
-// trigger server-side recompute y el cambio baje por sync.
+// Este módulo ESPEJA la función `compute_category` server-side. La base es la migración `0062`
+// (`supabase/migrations/0062_compute_category_rewrite.sql`); en lo que toca la rama `vaquillona`, el
+// espejo ahora refleja la RECONCILIACIÓN de `0104`
+// (`supabase/migrations/0104_compute_category_drop_service.sql`, spec 02 Stream A / RPS.4.1): la rama
+// `vaquillona` YA NO usa el evento `service` (Stream B B4 / RPSC.1.1). Es un espejo client-side
+// display-only (chunk C6 de spec 02): permite ver la categoría derivada localmente OFFLINE, antes de que
+// el trigger server-side recompute y el cambio baje por sync.
 //
 //   ➜ CUALQUIER MIGRACIÓN QUE TOQUE `compute_category` (ramas, cortes de edad, precedencia, tacto+,
 //     conteo de partos) DEBE ACTUALIZAR ESTE ESPEJO (`computeCategoryCode`) + SUS FIXTURES
@@ -80,9 +83,9 @@
 // completará cuando exista el toggle de castración en la ficha / la op masiva (spec 10). El backend
 // ya la cubre (0062); el espejo cliente la sumará con su disparador.
 //
-// Las transiciones posteriores (preñez, parto, destete, servicio, edad) las maneja el server vía
-// triggers + el job nocturno (spec 02 Tier 2); el cliente NO recomputa categoría tras eventos.
-// Acá solo el alta.
+// Las transiciones posteriores (preñez, parto, aborto, destete, edad) las maneja el server vía
+// triggers + el job nocturno (spec 02 Tier 2); el cliente NO recomputa categoría tras eventos. (El
+// `service`/IA ya NO transiciona categoría — RPSC.1.1 / 0104.) Acá solo el alta.
 
 /**
  * Códigos de categoría de (bovino, cría) que el modelo contempla para el alta.
@@ -217,15 +220,16 @@ export function computeInitialCategoryCode(
 }
 
 /**
- * Espejo COMPLETO de `compute_category` (migración 0062), RC6.1. Función PURA, determinística, sin I/O:
- * recibe TODOS los inputs (sexo, birth_date, is_castrated, eventos reproductivos crudos) + un `today`
- * inyectable, y devuelve el `code` de categoría que el server computaría. Replica:
+ * Espejo COMPLETO de `compute_category` (migración 0062, rama `vaquillona` reconciliada por 0104 —
+ * sin `service`), RC6.1. Función PURA, determinística, sin I/O: recibe TODOS los inputs (sexo, birth_date,
+ * is_castrated, eventos reproductivos crudos) + un `today` inyectable, y devuelve el `code` de categoría
+ * que el server computaría. Replica:
  *   - el corte de edad (1 año / 2 años) por sexo;
  *   - el conteo de PARTOS (eventos `birth` distintos no borrados, NUNCA terneros — el SQL ya filtró);
- *   - has_weaning / has_service (existencia de evento);
+ *   - has_weaning (existencia de evento) — el `service` ya NO entra al cómputo (RPSC.1.1 / 0104);
  *   - el tacto+ VIGENTE (RT2.7.5): un tacto positivo SIN un aborto posterior por la tupla
  *     (event_date, created_at);
- *   - la PRECEDENCIA de ramas LOAD-BEARING de 0062 (no reordenar).
+ *   - la PRECEDENCIA de ramas LOAD-BEARING de 0062/0104 (no reordenar).
  *
  * Display-only en el cliente (chunk C6): el server sigue siendo la única verdad; al sincronizar
  * convergen (misma función ⇒ mismo resultado). Ver el banner ANTI-DRIFT del header.
@@ -258,16 +262,19 @@ export function computeCategoryCode(inputs: CategoryMirrorInputs): MirrorCategor
   // deleted_at; mellizos = UN evento birth → cuentan los EVENTOS, nunca los terneros — RT2.7.2).
   const births = inputs.events.reduce((n, e) => (e.eventType === 'birth' ? n + 1 : n), 0);
   const hasWeaning = inputs.events.some((e) => e.eventType === 'weaning');
-  const hasService = inputs.events.some((e) => e.eventType === 'service');
+  // `hasService` ELIMINADO (RPSC.1.1 / Stream B B4): el espejo de `compute_category` `0104` ya NO usa
+  // `service` para promover a vaquillona (el destete + el corte de edad cubren la vía ternera→vaquillona;
+  // categoría ≠ elegibilidad reproductiva, Gate 0 §2). El `service`/IA se SIGUE leyendo en
+  // MIRROR_EVENT_TYPES (timeline, RPSC.1.6); solo dejó de influir en el `code` computado.
   const hasPosTacto = hasPositiveTactoVigente(inputs.events);
 
-  // Orden de ramas LOAD-BEARING (precedencia de la máquina de estados, 0062 líneas 85-100):
-  // partos≥2 > partos=1 > tacto+ > vaquillona(destete|servicio|≥1año) > ternera(<1año) > default.
+  // Orden de ramas LOAD-BEARING (precedencia de la máquina de estados, espejo de 0104 líneas 109-121):
+  // partos≥2 > partos=1 > tacto+ > vaquillona(destete|≥1año) > ternera(<1año) > default.
   if (births >= 2) return 'multipara'; // RT2.4.1
   if (births === 1) return 'vaca_segundo_servicio'; // RT2.4.2 (desde cualquier categoría, incl. ternera)
   if (hasPosTacto) return 'vaquillona_prenada'; // RT2.4.3
-  if (hasWeaning || hasService || (knownAge !== null && knownAge >= ONE_YEAR_DAYS)) {
-    return 'vaquillona'; // RT2.4.4
+  if (hasWeaning || (knownAge !== null && knownAge >= ONE_YEAR_DAYS)) {
+    return 'vaquillona'; // RT2.4.4 (RPSC.1.1: SIN `|| hasService`, espejo de 0104)
   }
   if (knownAge !== null && knownAge < ONE_YEAR_DAYS) return 'ternera'; // RT2.4.5
   return 'vaquillona'; // RT2.4.6 (sin birth_date, sin eventos) — default conservador

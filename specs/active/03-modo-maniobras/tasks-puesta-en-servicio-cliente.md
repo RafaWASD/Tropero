@@ -14,16 +14,16 @@
 
 > Lógica pura + tests. Sin UI nueva, sin design-spike. Cierra el drift vivo (server `0104` ya aplicado ≠ espejo cliente).
 
-- [ ] **T-B4.1** — `app/src/utils/animal-category.ts`: quitar la declaración `const hasService` y su uso `|| hasService` de la rama `vaquillona` de `computeCategoryCode` (líneas ~261/269). NADA MÁS de la función cambia (precedencia, rama macho, cortes de edad, tacto+ vigente, partos). Cubre: RPSC.1.1, RPSC.1.3.
-- [ ] **T-B4.2** — `animal-category.ts`: actualizar el comentario de precedencia ("vaquillona(destete|servicio|≥1año)" → sin "servicio") + el header anti-drift (RC6.5.1: la rama `vaquillona` espeja `0104`, ya no `0062` en lo que toca service). Cubre: RPSC.1.7.
-- [ ] **T-B4.3** — Test `animal-category.test.ts`: invertir T2.23 — ternera <1año + solo `service` (sin destete) → **`ternera`** (antes `vaquillona`); vaquillona por edad/destete + `service` → sigue `vaquillona`. Cubre: RPSC.1.1, RPSC.1.4.
-- [ ] **T-B4.4** — Test `animal-category.test.ts`: conservar verdes los casos de precedencia con `service` presente + evento dominante (parto → `vaca_segundo_servicio`; tacto+ → `vaquillona_prenada`) — el dominante manda, `service` ya no es disparador. Cubre: RPSC.1.3, RPSC.1.4.
-- [ ] **T-B4.5** — Test `animal-category.test.ts`: con destete → `vaquillona`; ≥1año conocido → `vaquillona` por edad (tras quitar `service`, las vías canónicas siguen). Cubre: RPSC.1.2.
-- [ ] **T-B4.6** — `app/src/utils/maneuver-category-preview.ts`: `syntheticEventsForFemaleCategory('vaquillona')` reconstruye con `[weaning]` (no `[service]`, DD-PSC-7) para que el estado de partida siga dando `vaquillona` post-`0104`. Cubre: RPSC.1.5.
-- [ ] **T-B4.7** — `maneuver-category-preview.ts`: `capturedReproEvents` deja de inyectar un evento `service` por `kind:'inseminacion'` (la IA ya no anticipa transición de categoría — RPS.4.8). Cubre: RPSC.1.5.
-- [ ] **T-B4.8** — Test `maneuver-category-preview.test.ts`: invertir "ternera + inseminación (service) → vaquillona" a **→ null** (sin transición); verificar que tacto+ sigue anticipando `vaquillona_prenada` (no se rompió). Cubre: RPSC.1.5.
-- [ ] **T-B4.9** — Verificar (NO tocar) que `MIRROR_EVENT_TYPES` (`local-reads.ts:936`) sigue incluyendo `'service'` (el evento se sigue leyendo para el timeline; solo dejó de influir en `computeCategoryCode`). Cubre: RPSC.1.6.
-- [ ] **T-B4.10** — Correr `node scripts/check.mjs` + la suite de unit del cliente (animal-category + maneuver-category-preview verdes) + regresión. Gate 2 (code) del chunk B4. Cubre: RPSC.8.5.
+- [x] **T-B4.1** — `app/src/utils/animal-category.ts`: quitar la declaración `const hasService` y su uso `|| hasService` de la rama `vaquillona` de `computeCategoryCode` (líneas ~261/269). NADA MÁS de la función cambia (precedencia, rama macho, cortes de edad, tacto+ vigente, partos). Cubre: RPSC.1.1, RPSC.1.3.
+- [x] **T-B4.2** — `animal-category.ts`: actualizar el comentario de precedencia ("vaquillona(destete|servicio|≥1año)" → sin "servicio") + el header anti-drift (RC6.5.1: la rama `vaquillona` espeja `0104`, ya no `0062` en lo que toca service). Cubre: RPSC.1.7.
+- [x] **T-B4.3** — Test `animal-category.test.ts`: invertir T2.23 — ternera <1año + solo `service` (sin destete) → **`ternera`** (antes `vaquillona`); vaquillona por edad/destete + `service` → sigue `vaquillona`. Cubre: RPSC.1.1, RPSC.1.4.
+- [x] **T-B4.4** — Test `animal-category.test.ts`: conservar verdes los casos de precedencia con `service` presente + evento dominante (parto → `vaca_segundo_servicio`; tacto+ → `vaquillona_prenada`) — el dominante manda, `service` ya no es disparador. Cubre: RPSC.1.3, RPSC.1.4.
+- [x] **T-B4.5** — Test `animal-category.test.ts`: con destete → `vaquillona`; ≥1año conocido → `vaquillona` por edad (tras quitar `service`, las vías canónicas siguen). Cubre: RPSC.1.2.
+- [x] **T-B4.6** — `app/src/utils/maneuver-category-preview.ts`: `syntheticEventsForFemaleCategory('vaquillona')` reconstruye con `[weaning]` (no `[service]`, DD-PSC-7) para que el estado de partida siga dando `vaquillona` post-`0104`. Cubre: RPSC.1.5.
+- [x] **T-B4.7** — `maneuver-category-preview.ts`: `capturedReproEvents` deja de inyectar un evento `service` por `kind:'inseminacion'` (la IA ya no anticipa transición de categoría — RPS.4.8). Cubre: RPSC.1.5.
+- [x] **T-B4.8** — Test `maneuver-category-preview.test.ts`: invertir "ternera + inseminación (service) → vaquillona" a **→ null** (sin transición); verificar que tacto+ sigue anticipando `vaquillona_prenada` (no se rompió). Cubre: RPSC.1.5.
+- [x] **T-B4.9** — Verificar (NO tocar) que `MIRROR_EVENT_TYPES` (`local-reads.ts:936`) sigue incluyendo `'service'` (el evento se sigue leyendo para el timeline; solo dejó de influir en `computeCategoryCode`). Cubre: RPSC.1.6. ✔ VERIFICADO: `local-reads.ts:936` sigue `('birth','weaning','service','tacto','abortion')` — NO tocado.
+- [x] **T-B4.10** — Correr `node scripts/check.mjs` + la suite de unit del cliente (animal-category + maneuver-category-preview verdes) + regresión. Gate 2 (code) del chunk B4. Cubre: RPSC.8.5.
 
 ---
 

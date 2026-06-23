@@ -257,15 +257,31 @@ test('RC6.1.6/T2.22: hembra birth_date NULL sin eventos → vaquillona (default 
   assert.equal(mirror('female', null), 'vaquillona');
 });
 
-// ─── T2.23 — transición SERVICIO (RT2.5.x) ────────────────────────────────────────────────
-test('RC6.1.6/T2.23: ternera <1 año + service → vaquillona (servicio gradúa)', () => {
-  assert.equal(mirror('female', isoDaysAgo(180), { events: [ev('service', isoDaysAgo(1))] }), 'vaquillona');
+// ─── T2.23 — el SERVICIO ya NO gradúa (Stream B B4 / RPSC.1.1, espejo de 0104) ──────────────
+// INVERTIDO: 0104 (RPS.4.1) eliminó el backstop `service→vaquillona`. El `service`/IA ya NO es disparador
+// de categoría (categoría ≠ elegibilidad reproductiva, Gate 0 §2). Las vías canónicas ternera→vaquillona
+// (destete + corte de edad ≥365) siguen; un evento dominante (parto/tacto+) sigue mandando. Acá se
+// verifica que `service` ya NO promueve por sí solo. RT2.5.x SUPERSEDED por RPS.4.1 (ver 0104).
+test('RC6.1.6/T2.23 (RPSC.1.1): ternera <1 año + SOLO service (sin destete) → ternera (el servicio ya NO gradúa)', () => {
+  assert.equal(mirror('female', isoDaysAgo(180), { events: [ev('service', isoDaysAgo(1))] }), 'ternera');
 });
-test('RC6.1.6/T2.23: vaquillona + service → sigue vaquillona (no avanza ni retrocede)', () => {
+test('RC6.1.6/T2.23 (RPSC.1.2): vaquillona por EDAD (≥1 año) + service → sigue vaquillona (la edad la sostiene, no el service)', () => {
+  // ≥365 días → vaquillona por el corte de edad; el `service` presente es irrelevante para el code.
   assert.equal(mirror('female', isoDaysAgo(550), { events: [ev('service', isoDaysAgo(1))] }), 'vaquillona');
 });
-test('RC6.1.6/T2.23: preñada + service → NO retrocede (el tacto+ vigente domina)', () => {
-  // tacto+ vigente + service → vaquillona_prenada (el tacto+ precede a la rama vaquillona). RT2.5.2.
+test('RC6.1.6/T2.23 (RPSC.1.2): ternera <1 año + service + DESTETE → vaquillona (el destete gradúa, no el service)', () => {
+  // El destete (has_weaning) es la vía canónica ternera→vaquillona post-0104 (Gate 0 §2.1) — gradúa aunque
+  // la edad sea <1 año; el `service` presente no aporta nada (ya NO es disparador).
+  assert.equal(
+    mirror('female', isoDaysAgo(180), {
+      events: [ev('service', isoDaysAgo(2)), ev('weaning', isoDaysAgo(1))],
+    }),
+    'vaquillona',
+  );
+});
+test('RC6.1.6/T2.23 (RPSC.1.3): preñada (tacto+ vigente) + service → vaquillona_prenada (el tacto+ domina; service no influye)', () => {
+  // tacto+ vigente → vaquillona_prenada (el tacto+ precede a la rama vaquillona). El `service` no cambia
+  // el resultado: el evento dominante manda, `service` ya no es disparador. RT2.5.2.
   assert.equal(
     mirror('female', isoDaysAgo(550), {
       events: [ev('tacto', isoDaysAgo(10), { pregnancyStatus: 'large' }), ev('service', isoDaysAgo(1))],
@@ -403,9 +419,10 @@ test('RC6.1.2 precedencia: 2 births GANAN a tacto+ → multipara', () => {
     'multipara',
   );
 });
-test('RC6.1.2 precedencia: tacto+ vigente GANA a destete/servicio/edad → vaquillona_prenada (no vaquillona)', () => {
-  // 0062: tacto+ (línea 91) PRECEDE a la rama vaquillona (destete|servicio|≥1año, línea 93). Una hembra con
-  // servicio + tacto+ es preñada, no "solo" vaquillona. Si se invirtiera, daría vaquillona (mal).
+test('RC6.1.2 precedencia: tacto+ vigente GANA a destete/edad → vaquillona_prenada (no vaquillona)', () => {
+  // 0104: tacto+ PRECEDE a la rama vaquillona (destete|≥1año). Una hembra con destete + tacto+ es preñada,
+  // no "solo" vaquillona. Si se invirtiera, daría vaquillona (mal). El `service` presente es irrelevante
+  // (post-0104 ya no es disparador) — se deja en el fixture para probar que NO altera el resultado.
   assert.equal(
     mirror('female', isoDaysAgo(550), {
       events: [

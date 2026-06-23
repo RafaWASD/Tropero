@@ -15,8 +15,8 @@
 // code. Acá NO tenemos el historial real (sería I/O); en cambio RECONSTRUIMOS los eventos sintéticos
 // MÍNIMOS que dejan al animal en su `currentCode` (helper `syntheticEventsForFemaleCategory`) y, sobre
 // esos, agregamos como "ahora" los eventos CAPTURADOS en la manga que alimentan compute_category
-// (tacto / inseminación). El code resultante es lo que el server hará al subir la captura. Si NO cambia
-// respecto del actual, no hay nada que mostrar (→ null).
+// (el TACTO; la inseminación/IA ya NO transiciona categoría post-0104 — RPSC.1.5). El code resultante es
+// lo que el server hará al subir la captura. Si NO cambia respecto del actual, no hay nada que mostrar (→ null).
 //
 // Los eventos sintéticos llevan `eventDate:'1970-01-01'` + `createdAt` SELLADO (pasado) → quedan ANTES
 // que los capturados ("ahora", `createdAt:null`, `eventDate:today`), tanto por la tupla (event_date,
@@ -51,12 +51,13 @@ export type CategoryTransitionPreview = {
  * reconstruir (desconocido / no-cría / macho) ⇒ la función pública devuelve null (fail-safe: si no podemos
  * razonar el estado de partida, NO mostramos un preview que podría ser falso).
  *
- * Mapeo (precedencia de la rama HEMBRA de 0062 — partos > tacto+ > vaquillona(servicio|destete|≥1año)):
+ * Mapeo (precedencia de la rama HEMBRA de 0104 — partos > tacto+ > vaquillona(destete|≥1año)):
  *   - 'multipara'              → [birth, birth]           (≥2 partos → multipara, gana a cualquier tacto+)
  *   - 'vaca_segundo_servicio'  → [birth]                  (1 parto → vaca de 2do servicio, gana al tacto+)
  *   - 'vaquillona_prenada'     → [tacto+ medium]          (tacto+ vigente, sin partos)
- *   - 'vaquillona'             → [service]                (evento calificante que la mantiene vaquillona
- *                                                          sin importar la edad — un service la promueve)
+ *   - 'vaquillona'             → [weaning]                (DD-PSC-7: el destete es la vía canónica
+ *                                                          ternera→vaquillona post-0104, RPSC.1.5 — el
+ *                                                          `service` YA NO la produce, espejo de 0104)
  *   - 'ternera'                → []                        (sin eventos; el corte de edad <1año la hace ternera)
  *   - cualquier OTRO code      → null                     (no reconstruible → fail-safe)
  *
@@ -71,8 +72,11 @@ export function syntheticEventsForFemaleCategory(code: string): ReproEventInput[
     createdAt: SEALED,
     pregnancyStatus: null,
   };
-  const service: ReproEventInput = {
-    eventType: 'service',
+  // DD-PSC-7 (RPSC.1.5): se reconstruye `vaquillona` con un DESTETE (la vía canónica ternera→vaquillona
+  // post-0104), no con un `service` — tras B4 el espejo `computeCategoryCode` ya NO promueve por `service`,
+  // así que un `[service]` dejaría de reproducir `vaquillona` y rompería el round-trip antidrift.
+  const weaning: ReproEventInput = {
+    eventType: 'weaning',
     eventDate: '1970-01-01',
     createdAt: SEALED,
     pregnancyStatus: null,
@@ -91,7 +95,7 @@ export function syntheticEventsForFemaleCategory(code: string): ReproEventInput[
     case 'vaquillona_prenada':
       return [positiveTacto];
     case 'vaquillona':
-      return [service];
+      return [weaning];
     case 'ternera':
       return [];
     default:
@@ -105,10 +109,13 @@ export function syntheticEventsForFemaleCategory(code: string): ReproEventInput[
  * Escanea los VALUES del mapa (NO asume el nombre de la key) buscando los StepValue discriminados:
  *   - kind:'tacto'        → { eventType:'tacto', pregnancyStatus: value.pregnancy }  (empty = no positivo →
  *                            no transiciona; small/medium/large = positivo → transiciona)
- *   - kind:'inseminacion' → { eventType:'service' }  (un servicio puede promover ternera → vaquillona)
- * NO considera kind:'vaquillona' (el tacto_vaquillona es aptitud, event_type DISTINTO — NO alimenta
- * compute_category). Devuelve [] si no hay ninguno de esos dos capturados (→ la pública devuelve null:
- * no hay evento que dispare transición).
+ *
+ * kind:'inseminacion' YA NO se mapea (RPSC.1.5 / B4): post-0104 el `service`/IA NO transiciona categoría
+ * (categoría ≠ elegibilidad reproductiva — la IA registra la SERVIDA en Stream C, no cambia el badge,
+ * RPS.4.8). Una IA capturada en la manga ya no anticipa `ternera → vaquillona`. Tampoco se considera
+ * kind:'vaquillona' (el tacto_vaquillona es aptitud, event_type DISTINTO — NO alimenta compute_category).
+ * Devuelve [] si no hay un tacto capturado (→ la pública devuelve null: no hay evento que dispare
+ * transición de CATEGORÍA).
  */
 function capturedReproEvents(captured: CaptureMap, todayIso: string): ReproEventInput[] {
   const events: ReproEventInput[] = [];
@@ -120,13 +127,6 @@ function capturedReproEvents(captured: CaptureMap, todayIso: string): ReproEvent
         eventDate: todayIso,
         createdAt: null,
         pregnancyStatus: value.pregnancy,
-      });
-    } else if (value.kind === 'inseminacion') {
-      events.push({
-        eventType: 'service',
-        eventDate: todayIso,
-        createdAt: null,
-        pregnancyStatus: null,
       });
     }
   }
@@ -147,11 +147,12 @@ function isoDay(d: Date): string {
  *   1. `categoryOverride === true` → null. El server NO recalcula con override (R8.1 "salvo
  *      category_override") → no hay destino derivable.
  *   2. `sex === 'male'` → null. NINGÚN evento de manga transiciona un macho vía compute_category (la rama
- *      macho del espejo solo reacciona a destete/edad, no a tacto/servicio; la castración es spec 10/ficha,
+ *      macho del espejo solo reacciona a destete/edad, no al tacto; la castración es spec 10/ficha,
  *      no entra acá).
  *   3. Reconstruir el estado de partida desde `currentCode` (syntheticEventsForFemaleCategory). Si el code
  *      no es reconstruible (desconocido / no-cría) → null (fail-safe).
- *   4. Si no hay tacto ni inseminación capturados → null (no hay evento que dispare transición).
+ *   4. Si no hay un TACTO capturado → null (no hay evento que dispare transición de categoría; la IA ya
+ *      no transiciona, RPSC.1.5).
  *   5. `toCode = computeCategoryCode(female, [...sinteticos, ...capturados])`. Si `toCode === currentCode`
  *      → null (no hubo cambio que mostrar).
  *   6. Resolver `toName` en el catálogo. Si el code destino no está en el catálogo → null (fail-safe, nunca
