@@ -53,7 +53,11 @@ El Gate 0 movió el **servicio natural a nivel rodeo** (qué meses hace servicio
 
 **RPSC.2.2** El sistema deberá pre-tildar, al abrir el selector en el alta, el **default de primavera** = octubre, noviembre y diciembre (`{10,11,12}`), para no friccionar el alta (caso dominante en cría, Gate 0 §6).
 
-**RPSC.2.3** El sistema deberá permitir al operario **destildar y tildar** cualquiera de los 12 meses libremente (incluido el caso de **ninguno tildado** = el rodeo no hace servicio, y el caso de **los 12** = servicio continuo).
+**RPSC.2.3** El sistema deberá permitir seleccionar **un único período CONTIGUO** de meses de servicio (incluido el caso de **ninguno** = el rodeo no hace servicio, y el caso de **los 12** = servicio continuo), y **NO** deberá permitir seleccionar **períodos separados/disjuntos** (decisión Raf 2026-06-23: **1 período por rodeo**; un campo con primavera **y** otoño los maneja en **rodeos separados**, no un rodeo con ambos). La contigüidad **admite wrap de fin de año** (ej. **Nov-Dic-Ene** es un período contiguo válido).
+
+**RPSC.2.8** El sistema deberá **garantizar la contigüidad por construcción** en el selector — la interacción solo debe poder armar un período conexo (NO validar-y-rechazar a posteriori un set disjunto). El mecanismo concreto (extender un run adyacente con wrap / rango desde-hasta / inicio+duración) lo decide el **design-spike** (§ design 3.1) bajo veto del leader. Los atajos (Primavera/Otoño/Todo/Ninguno) producen períodos contiguos válidos.
+
+**RPSC.2.9** El sistema deberá expresar la contigüidad (incluido el wrap) en la **lógica pura** `service-months.ts` (DD-PSC-5): un helper `isContiguousWrap(months)` / la construcción del run, testeable con node:test (casos: contiguo simple, contiguo con wrap, disjunto → inválido, vacío, los 12). **Server-side**: la contigüidad es regla de calidad-de-dato/UX (la derivación de Stream A tolera cualquier set por membership) → su enforcement en DB queda como **defensa-en-profundidad en backlog**, no bloquea (el camino de escritura real es el selector + la RPC owner-only).
 
 **RPSC.2.4** Cuando el operario confirma el alta del rodeo con el selector de meses, el sistema deberá enviar el conjunto de meses tildado como el parámetro `p_service_months` de la RPC `create_rodeo` (`0103`, RPS.3.1), por el **mismo camino offline** que el resto del alta (outbox `op_intents` + overlay optimista, sin requerir conexión).
 

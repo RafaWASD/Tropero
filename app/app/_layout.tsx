@@ -168,7 +168,16 @@ const GROUP_DESTINATIONS = new Set([
 // Spec 03 M6-C.0 — DESIGN SPIKE de la RUEDA de CIRCUNFERENCIA ESCROTAL (`maniobra/rueda-ce`): pantalla
 // VISUAL 100% MOCK (paridad con el spike de pesaje), alcanzable directo en web sin auth para la captura
 // e2e a 360/412 en web táctil. Referencia visual del wheel picker hasta que M6-C.1 lo cablee al frame.
-const DEV_WEB_ROUTES = new Set(['baston-test', 'maniobra/paso', 'maniobra/rueda-ce']);
+// Spec 03 Stream B / B1 — DESIGN SPIKE del SELECTOR DE MESES de servicio (`maniobra/service-months-spike`):
+// pantalla VISUAL 100% MOCK (paridad con los otros spikes), alcanzable directo en web sin auth para la
+// captura e2e a 360/412 en web táctil. Referencia visual del ServiceMonthsSelector (selección de un
+// período contiguo por construcción) hasta que el cableado (POST-VETO) lo enchufe al alta/edición real.
+const DEV_WEB_ROUTES = new Set([
+  'baston-test',
+  'maniobra/paso',
+  'maniobra/rueda-ce',
+  'maniobra/service-months-spike',
+]);
 
 /**
  * Gate unificado de navegación: auth (R1.3 / R7.*) + establecimiento (Fase 4: R6.4–R6.10).
@@ -410,6 +419,12 @@ function RootGate() {
           e2e a 360/412 en web táctil. Referencia visual del wheel picker hasta que M6-C.1 cablee el paso
           al frame. Pantalla completa (no modal). */}
       <Stack.Screen name="maniobra/rueda-ce" />
+      {/* Spec 03 Stream B / B1 — DESIGN SPIKE del SELECTOR DE MESES de servicio
+          (`maniobra/service-months-spike`): pantalla VISUAL 100% MOCK, alcanzable directo en web sin auth
+          (DEV_WEB_ROUTES) para la captura e2e a 360/412 en web táctil. Referencia visual del
+          ServiceMonthsSelector (período contiguo por construcción) hasta que el cableado (POST-VETO) lo
+          enchufe al alta/edición de rodeo. Pantalla completa (no modal). */}
+      <Stack.Screen name="maniobra/service-months-spike" />
       {/* Spec 03 M2.1-core — IDENTIFICACIÓN del animal (scan-first cableado: BLE + manual + find-or-create
           + auto-avance). Pantalla AUTENTICADA real (consume la sesión + establishment/rodeo + el listener
           del bastón), gateada como cualquier otra — NO está en DEV_WEB_ROUTES. Se llega desde el wizard de
