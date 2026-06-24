@@ -1,0 +1,352 @@
+// reports-format.ts — lógica PURA de presentación de los reportes (spec 07 Stream C — FRONTEND).
+// SIN RN, SIN supabase-js, SIN SDK → testeable con node:test (mismo patrón que online-guard-pure.ts /
+// service-months.ts). La capa de I/O (`reports.ts`) llama las RPC y delega acá el mapeo de filas crudas a
+// los tipos camelCase, el cálculo del porcentaje (con guard de 0 — la RPC NUNCA divide, R7.5.4/R7.6.3) y el
+// formato es-AR (coma decimal — referencia de formato es-AR). NO se replica la regla CCL ni la de buckets:
+// eso vive en `pregnancy-buckets.ts` / `calving-stage.ts` (fuente única).
+//
+// Por qué un módulo PURO separado del service: el service importa `supabase` (SDK) → no puede entrar al
+// grafo de node:test. Todo lo testeable (mappers + pct + es-AR) vive acá; `reports.ts` solo orquesta I/O.
+
+// ─── Porcentaje con guard de 0 (R7.5.4 / R7.6.3: servidas=0 → "—", nunca NaN/Infinity) ─────────────
+
+/**
+ * Porcentaje `num/den×100` con guard de denominador 0. Devuelve `null` cuando el denominador es 0 o
+ * inválido (la UI muestra "—"/"sin datos", R7.5.4/R7.6.3) — NUNCA NaN/Infinity. El redondeo lo decide
+ * `formatPercentAR`; acá se devuelve el número crudo (o null) para que el caller decida la presentación.
+ */
+export function safePercent(num: number, den: number): number | null {
+  if (!Number.isFinite(num) || !Number.isFinite(den) || den <= 0) return null;
+  return (num / den) * 100;
+}
+
+/**
+ * Formatea un porcentaje en es-AR: 1 decimal con coma, sin decimal superfluo ("85" no "85,0"), "%" pegado.
+ * `null` (denominador 0) → "—" (R7.5.4/R7.6.3: sin datos, no 0% ni NaN). 84.6 → "84,6 %"; 50 → "50 %".
+ */
+export function formatPercentAR(pct: number | null): string {
+  if (pct === null || !Number.isFinite(pct)) return '—';
+  const s = pct.toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 1 });
+  return `${s} %`;
+}
+
+// ─── Peso es-AR (R7.9.3: coma decimal, ej. "385,5 kg"; no aplica a formatos de máquina) ─────────────
+
+/**
+ * Formatea un peso en kg es-AR: separador de miles "." + coma decimal, hasta 1 decimal sin superfluo, " kg".
+ * `null`/no-finito (categoría sin pesaje, R7.9.4) → "—" ("sin pesar", no "0 kg"). 385.5 → "385,5 kg";
+ * 1050 → "1.050 kg"; 312 → "312 kg". (La RPC ya `round(...,2)`; acá normalizamos a 1 decimal de display.)
+ */
+export function formatKgAR(kg: number | null): string {
+  if (kg === null || !Number.isFinite(kg)) return '—';
+  const s = kg.toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 1 });
+  return `${s} kg`;
+}
+
+/**
+ * Formatea un DELTA de peso es-AR con signo explícito (comparativa de peso por sesiones, R7.9.5/R7.4):
+ * "+12,5 kg", "−8 kg" (menos tipográfico U+2212), "0 kg". `null` (una de las dos sesiones sin peso en esa
+ * categoría) → "—" (no se inventa un delta contra cero). Usa el menos tipográfico para no confundir con un
+ * guion de lista.
+ */
+export function formatKgDeltaAR(delta: number | null): string {
+  if (delta === null || !Number.isFinite(delta)) return '—';
+  const abs = Math.abs(delta).toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 1 });
+  if (delta > 0) return `+${abs} kg`;
+  if (delta < 0) return `−${abs} kg`;
+  return '0 kg';
+}
+
+/**
+ * Formatea un DELTA entero con signo (delta de conteo de eventos en la comparativa de sesiones, R7.4.1):
+ * "+3", "−1", "0". Menos tipográfico (U+2212). NO devuelve "—": un kind sin eventos en una sesión cuenta
+ * como 0 (R7.4.3), así que el delta siempre es un entero definido.
+ */
+export function formatCountDelta(delta: number): string {
+  const n = Math.trunc(delta);
+  if (n > 0) return `+${n}`;
+  if (n < 0) return `−${Math.abs(n)}`;
+  return '0';
+}
+
+// ─── Tamaño del número hero del KpiCard (web-safe, length-aware) ────────────────────────────────────
+//
+// `adjustsFontSizeToFit` es NO-OP en react-native-web (gotcha del repo, memoria reference_rn_web_pitfalls):
+// un valor largo NO se encoge, se TRUNCA ("82,6 %" → "82,6…" en una card de media-pantalla a 360px). Como
+// el KpiCard va en una fila de DOS (ancho ~130px útil a 360px), elegimos el tamaño por la LONGITUD del
+// string en buckets (web-safe, determinístico) en vez de medir en runtime. Mismo criterio que
+// hero-text-size.ts, recalibrado para el ancho de MEDIA card (no full): un valor corto ("50 %", "100 %",
+// "—") va GRANDE ($10=38px); uno de 6-7 chars ("82,6 %", "100,0 %") baja a $9=30px para entrar completo.
+
+/** Token de tamaño del número hero del KpiCard (de la escala Inter de tamagui.config.ts). */
+export type KpiSizeToken = '$9' | '$10';
+
+/**
+ * Elige el `fontSize`/`lineHeight` (par matching, anti-recorte de descendentes) del número hero del KpiCard
+ * según la longitud del valor ya formateado. ≤5 chars ("50 %", "100 %", "—") → `$10` (38px, dominante);
+ * 6+ chars ("82,6 %", "100,0 %", un peso largo) → `$9` (30px) para que entre completo en media card a 360px
+ * SIN truncarse (web-safe: no dependemos de adjustsFontSizeToFit). El par lineHeight = el mismo token.
+ */
+export function kpiValueFontToken(value: string): { fontSize: KpiSizeToken; lineHeight: KpiSizeToken } {
+  const len = (value ?? '').trim().length;
+  return len <= 5 ? { fontSize: '$10', lineHeight: '$10' } : { fontSize: '$9', lineHeight: '$9' };
+}
+
+// ─── Etiquetas de los tipos de evento de una sesión (R7.3.1) ────────────────────────────────────────
+//
+// Los 7 kinds que la RPC `session_event_summary` devuelve (snake del server) → label es-AR + orden de
+// presentación estable. animal_events NO tiene session_id → no entra (design §2.1).
+
+/** Los 7 kinds de evento de una sesión, en orden de presentación. Espejo del shape de la RPC. */
+export const SESSION_EVENT_KINDS = [
+  'weight',
+  'reproductive',
+  'sanitary',
+  'condition',
+  'lab',
+  'scrotal',
+  'custom',
+] as const;
+
+export type SessionEventKind = (typeof SESSION_EVENT_KINDS)[number];
+
+const EVENT_KIND_LABELS: Record<SessionEventKind, string> = {
+  weight: 'Pesajes',
+  reproductive: 'Reproductivos',
+  sanitary: 'Sanitarios',
+  condition: 'Condición corporal',
+  lab: 'Muestras de lab',
+  scrotal: 'Circunferencia escrotal',
+  custom: 'Personalizados',
+};
+
+/** Label es-AR de un kind de evento de sesión. Un kind desconocido → el code crudo (defensivo). */
+export function eventKindLabel(kind: string): string {
+  return EVENT_KIND_LABELS[kind as SessionEventKind] ?? kind;
+}
+
+// ─── Etiquetas de los buckets CCL (cabeza/cuerpo/cola) ──────────────────────────────────────────────
+
+export type CclStage = 'head' | 'body' | 'tail';
+
+const CCL_LABELS: Record<CclStage, string> = {
+  head: 'Cabeza',
+  body: 'Cuerpo',
+  tail: 'Cola',
+};
+
+/** Label es-AR de una etapa CCL. */
+export function cclStageLabel(stage: CclStage): string {
+  return CCL_LABELS[stage];
+}
+
+// ─── Buckets CCL a mostrar (R7.7.2 — espejo de la regla de pregnancy-buckets) ───────────────────────
+//
+// La RPC `rodeo_ccl_distribution` devuelve los 3 conteos crudos (head=large / body=medium / tail=small) +
+// el total. CUÁNTAS barras mostrar lo decide el CLIENTE con `sizeBucketsForServiceMonths(nMonths)`
+// (FUENTE ÚNICA, design §2.4/§8). Este helper toma los 3 conteos + la lista de buckets de esa fuente y
+// arma las barras a renderizar, plegando defensivamente un `body` (medium) extraviado cuando el rodeo
+// muestra sólo 2 buckets (cabeza/cola — un tacto de 2 meses no debería producir `medium`, pero si un dato
+// histórico lo trae, se pliega en CABEZA = la preñez más avanzada, para que las barras sumen el total y no
+// se pierda un animal del % — R7.7.5). Para 3 buckets, los tres se muestran tal cual.
+
+import { sizeBucketsForServiceMonths } from './pregnancy-buckets';
+
+/** Una barra CCL lista para renderizar: etapa + label + conteo + % sobre el total (0..100). */
+export type CclBar = {
+  stage: CclStage;
+  label: string;
+  count: number;
+  /** Porcentaje sobre el total (0 si total=0). Entero o 1 decimal, ya redondeado para la barra. */
+  percent: number;
+};
+
+/** Conteos crudos de la RPC de CCL (o del cruce de nacimientos, mismo shape head/body/tail). */
+export type CclCounts = { head: number; body: number; tail: number; total: number };
+
+/**
+ * Arma las barras CCL a mostrar para un rodeo de `nMonths` meses (R7.7.2). Devuelve `[]` cuando el rodeo
+ * no distingue etapas (1/12/0/null → la UI oculta CCL con una nota, R7.7.3). Para 2 buckets pliega
+ * `body`→`head` (defensivo). El % se calcula sobre `total` (R7.7.5); si total=0 todas las barras dan 0
+ * (la UI muestra el empty state, R7.7.4). Mantiene el orden cabeza→(cuerpo)→cola.
+ */
+export function cclBarsForMonths(nMonths: number | null, counts: CclCounts): CclBar[] {
+  const buckets = sizeBucketsForServiceMonths(nMonths);
+  if (buckets.length === 0) return [];
+
+  const total = counts.total > 0 ? counts.total : 0;
+  const pct = (n: number): number => (total > 0 ? Math.round((n / total) * 1000) / 10 : 0);
+
+  // 2 buckets (cabeza/cola): plegamos un medium extraviado en cabeza (la más avanzada).
+  if (buckets.length === 2) {
+    const head = counts.head + counts.body;
+    return [
+      { stage: 'head', label: cclStageLabel('head'), count: head, percent: pct(head) },
+      { stage: 'tail', label: cclStageLabel('tail'), count: counts.tail, percent: pct(counts.tail) },
+    ];
+  }
+
+  // 3 buckets (cabeza/cuerpo/cola): los tres tal cual.
+  return [
+    { stage: 'head', label: cclStageLabel('head'), count: counts.head, percent: pct(counts.head) },
+    { stage: 'body', label: cclStageLabel('body'), count: counts.body, percent: pct(counts.body) },
+    { stage: 'tail', label: cclStageLabel('tail'), count: counts.tail, percent: pct(counts.tail) },
+  ];
+}
+
+// ─── Comparativa de dos sesiones del mismo rodeo (R7.4) ─────────────────────────────────────────────
+//
+// Dadas las cuentas por tipo de evento de DOS sesiones (cada una = filas {kind, eventCount}), arma las
+// filas comparadas: un row POR CADA kind que aparece en alguna de las dos (R7.4.3: si una sesión no tiene
+// un kind que la otra sí, se muestra 0 + el delta — no se omite la fila). El delta = B − A.
+
+export type SessionCountRow = { kind: string; eventCount: number };
+
+/** Una fila de la comparativa: kind + conteo en A + conteo en B + delta (B − A). */
+export type CompareRow = {
+  kind: string;
+  label: string;
+  a: number;
+  b: number;
+  delta: number;
+};
+
+/**
+ * Arma las filas comparadas de dos sesiones (R7.4.1/.3). Toma los 7 kinds en su orden de presentación
+ * (SESSION_EVENT_KINDS) y, para cada uno, el conteo en A y en B (0 si falta). Omite los kinds que son 0 en
+ * AMBAS (no agregan información a la comparación). El delta = B − A.
+ */
+export function compareSessions(rowsA: SessionCountRow[], rowsB: SessionCountRow[]): CompareRow[] {
+  const mapA = new Map(rowsA.map((r) => [r.kind, r.eventCount]));
+  const mapB = new Map(rowsB.map((r) => [r.kind, r.eventCount]));
+  const out: CompareRow[] = [];
+  for (const kind of SESSION_EVENT_KINDS) {
+    const a = mapA.get(kind) ?? 0;
+    const b = mapB.get(kind) ?? 0;
+    if (a === 0 && b === 0) continue; // 0 en ambas → no aporta a la comparación.
+    out.push({ kind, label: eventKindLabel(kind), a, b, delta: b - a });
+  }
+  return out;
+}
+
+// ─── Comparativa de PESO por categoría entre dos sesiones (R7.9.5 / T7.3) ───────────────────────────
+
+export type WeightRowLite = { categoryId: string; categoryName: string; avgWeight: number };
+
+/** Una fila de la comparativa de peso: categoría + AVG en A + AVG en B + delta (B − A) o null si falta. */
+export type WeightCompareRow = {
+  categoryId: string;
+  categoryName: string;
+  a: number | null;
+  b: number | null;
+  delta: number | null;
+};
+
+/**
+ * Arma las filas de la comparativa de peso por categoría entre dos sesiones del mismo rodeo (R7.9.5). Un
+ * row por cada categoría presente en alguna de las dos. `a`/`b` = AVG en esa sesión (null si la categoría
+ * no tiene peso en esa sesión → "—", R7.9.4). `delta` = B − A sólo si AMBAS tienen valor (no se inventa un
+ * delta contra una categoría ausente). Orden: por nombre de categoría (estable).
+ */
+export function compareWeights(rowsA: WeightRowLite[], rowsB: WeightRowLite[]): WeightCompareRow[] {
+  const mapA = new Map(rowsA.map((r) => [r.categoryId, r]));
+  const mapB = new Map(rowsB.map((r) => [r.categoryId, r]));
+  const ids = new Set<string>([...mapA.keys(), ...mapB.keys()]);
+  const out: WeightCompareRow[] = [];
+  for (const id of ids) {
+    const ra = mapA.get(id);
+    const rb = mapB.get(id);
+    const a = ra ? ra.avgWeight : null;
+    const b = rb ? rb.avgWeight : null;
+    out.push({
+      categoryId: id,
+      categoryName: (rb?.categoryName ?? ra?.categoryName ?? '').trim(),
+      a,
+      b,
+      delta: a !== null && b !== null ? b - a : null,
+    });
+  }
+  out.sort((x, y) => x.categoryName.localeCompare(y.categoryName, 'es-AR'));
+  return out;
+}
+
+// ─── Días desde el último pesaje (alerta sin pesar, R7.11.3) ────────────────────────────────────────
+
+/**
+ * Texto es-AR de "días desde el último pesaje" para un ítem de la alerta sin pesar. `null` = nunca pesado
+ * (R7.11.3: "nunca pesado"). 1 → "hace 1 día"; 45 → "hace 45 días". Negativos (reloj raro) → se clampean a 0.
+ */
+export function daysSinceLabel(days: number | null): string {
+  if (days === null) return 'Nunca pesado';
+  const d = Math.max(0, Math.trunc(days));
+  return d === 1 ? 'hace 1 día' : `hace ${d} días`;
+}
+
+/** Identificador visible de un animal en una alerta: IDV si lo tiene, sino el visual_id_alt, sino "—". */
+export function animalLabel(idv: string | null, visualIdAlt: string | null): string {
+  const a = (idv ?? '').trim();
+  if (a.length > 0) return a;
+  const b = (visualIdAlt ?? '').trim();
+  if (b.length > 0) return b;
+  return 'Sin identificación';
+}
+
+// ─── Campaña (año) por defecto = última con datos (R7.5.7) ──────────────────────────────────────────
+//
+// R7.5.7 (Puerta de spec): el período por defecto NO es el año calendario actual, sino la ÚLTIMA campaña
+// con datos del rodeo. No hay RPC que devuelva "años con datos" → lo derivamos del año de la sesión más
+// reciente del rodeo (las sesiones son donde se cargan los eventos → un proxy honesto de "última campaña
+// con actividad"). Sin sesiones → año calendario actual (fallback razonable: el operario recién arranca).
+
+/**
+ * Año de campaña por defecto (R7.5.7): el año de la sesión más reciente (proxy de "última campaña con
+ * datos"). `startedAtIsos` = los `started_at` de las sesiones del rodeo (la lista ya viene desc, pero no
+ * dependemos del orden: tomamos el máximo año válido). `nowYear` = año actual (fallback sin sesiones).
+ */
+export function defaultCampaignYear(startedAtIsos: Array<string | null>, nowYear: number): number {
+  let best: number | null = null;
+  for (const iso of startedAtIsos) {
+    const y = isoYear(iso);
+    if (y === null) continue;
+    if (best === null || y > best) best = y;
+  }
+  return best ?? nowYear;
+}
+
+/**
+ * Año de una fecha ISO de forma DETERMINÍSTICA (sin depender de la timezone del runtime — evita flake en
+ * CI vs Argentina). Si el string arranca con `YYYY-` lo tomamos literal (el año stampeado en el dato, que
+ * es como el server keyea por `extract(year ...)`); si no, caemos a `getUTCFullYear` de un Date parseado.
+ */
+function isoYear(iso: string | null): number | null {
+  if (!iso) return null;
+  const m = /^(\d{4})-/.exec(iso.trim());
+  if (m) return Number(m[1]);
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? null : d.getUTCFullYear();
+}
+
+// ─── Etiqueta de una sesión para la lista (R7.3.6) ──────────────────────────────────────────────────
+
+/**
+ * Fecha es-AR corta de una sesión (started_at ISO) para la lista/encabezado: "24 jun 2026". `null`/inválida
+ * → "Sin fecha". No incluye hora (la lista es glanceable; el detalle puede mostrar el rango completo).
+ */
+export function sessionDateLabel(startedAtIso: string | null): string {
+  if (!startedAtIso) return 'Sin fecha';
+  const d = new Date(startedAtIso);
+  if (Number.isNaN(d.getTime())) return 'Sin fecha';
+  return d.toLocaleDateString('es-AR', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+/** Rango temporal es-AR de una sesión (started → ended) para el detalle (R7.3.2). "abierta" si no cerró. */
+export function sessionRangeLabel(startedAtIso: string | null, endedAtIso: string | null): string {
+  const start = sessionDateLabel(startedAtIso);
+  if (!endedAtIso) return `${start} · abierta`;
+  const end = new Date(endedAtIso);
+  if (Number.isNaN(end.getTime())) return start;
+  // Si arranca y termina el mismo día, no repetimos la fecha.
+  const startDay = startedAtIso ? new Date(startedAtIso).toDateString() : null;
+  if (startDay && startDay === end.toDateString()) return start;
+  return `${start} → ${sessionDateLabel(endedAtIso)}`;
+}

@@ -588,3 +588,50 @@ calved` (evita doble-conteo de mellizos o partos repetidos en la misma campaña)
 `app/src/utils/calving-stage.ts` (T5.1). **Deuda de consistencia** (Gate 0 §9, ya anotada en §2.5/§8): el
 bucketing 4-11 `[SUPUESTO]` se ajusta en AMBOS lugares (esta RPC + `calving-stage.ts` + `pregnancy-buckets.ts`)
 cuando Facundo cierre.
+
+---
+
+## 12. Reconciliación al as-built — FRONTEND Stream C (2026-06-24)
+
+> El FRONTEND (service online-only + pantallas + componentes + capturas) se implementó en
+> `progress/impl_07-reportes-frontend.md` (dispatch del leader, separado del backend). Diferencias de
+> empaquetado entre lo construido y §1/§6 (regla dura `docs/specs.md` — el design describe lo que el código
+> REALMENTE hace). Ninguna cambia el *qué* ni la seguridad (frontend consume las RPC ya gateadas → Gate 1
+> N/A); son precisiones de organización de archivos/contrato de error.
+
+### 12.1 — Lógica pura separada en `app/src/utils/reports-format.ts`
+§1 listaba `services/reports.ts` + `hooks/use-reports.ts` + el helper `calving-stage.ts` (ya existente).
+**As-built:** la lógica PURA de presentación (porcentaje con guard de 0, formato es-AR de %/peso/delta, armado
+de barras CCL vía `cclBarsForMonths`→`sizeBucketsForServiceMonths`, comparativas `compareSessions`/
+`compareWeights`, `defaultCampaignYear`) vive en `reports-format.ts` (testeable con node:test, 33 tests). Es el
+mismo criterio del split `online-guard.ts`/`online-guard-pure.ts`: lo testeable fuera del módulo que importa el
+SDK (`reports.ts` importa `supabase`). `reports.ts` queda como pura capa I/O.
+
+### 12.2 — `reports.ts` `ReportError` granular (superset de `{kind:'offline'}`)
+§4/§1 decían `Result.err({ kind: 'offline' })`. **As-built:** `ReportError` con kinds
+`offline | network | server | forbidden | validation` — para mapear los códigos del CONTRATO de las RPC
+(`42501`/`P0002` → `forbidden`, NO vacío silencioso, R7.12.3; `22023` → `validation`; fetch sin status →
+`network`). Superset del contrato; el *qué* (offline detectado ANTES de llamar, R7.2.2) se cumple igual
+(`assertOnline` como 1ª sentencia de cada wrapper).
+
+### 12.3 — Pantallas: `reportes/sesiones.tsx` agregada (lista) + `reportes-spike.tsx` (veto)
+§1 listaba `reportes/sesion/[id].tsx` + `reportes/comparar.tsx`. **As-built:** se agregó
+`reportes/sesiones.tsx` (la LISTA de sesiones del rodeo, R7.3.6) como entrada separada del detalle — §6 dice
+"Acceso a 'Resumen de sesión' (lista de sesiones del rodeo)", y la lista necesita su propia pantalla; el
+detalle es `sesion/[id]`. Además se agregó `reportes-spike.tsx` (spike VISUAL 100% mock, en `DEV_WEB_ROUTES`,
+para el veto `design-review` del leader sin seed/login — reusa los componentes reales; NO es producción,
+paridad con los spikes de Stream B). Las 3 rutas standalone (`reportes/sesiones`, `reportes/sesion/[id]`,
+`reportes/comparar`) se registran en `app/app/_layout.tsx` + `REPORT_DESTINATIONS` (no se re-rutean al wizard).
+
+### 12.4 — Selector de campaña = stepper con default `defaultCampaignYear`
+§6 decía "selector de campaña (año) … default = última campaña con datos". **As-built:** stepper ← año → con
+default derivado del año de la sesión más reciente del rodeo (`defaultCampaignYear` — no hay RPC de "años con
+datos"; el año de la última sesión es el proxy honesto de "última campaña con actividad", R7.5.7). Tope superior
+= año+1 (espeja la cota `p_year` del server). El wrap de fin de año lo resuelve el server por set-membership
+(R7.5.8) — el cliente solo manda `p_year`.
+
+### 12.5 — R7.2.3 (cache "datos de la última carga" offline) NO implementado (nice-to-have)
+R7.2.3 es explícitamente "Opcional — no bloquea el MVP". **As-built:** el anti-parpadeo (`reportView`)
+conserva el último `data` en memoria durante un refresh fallido (no blanquea), pero NO lo marca como "datos de
+la última carga". Si se quiere, es un add-on chico (flag `stale` en `reportView`). Anotado como limitación
+conocida en el ledger; no se reclama R7.2.3 cubierto.

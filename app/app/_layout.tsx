@@ -152,6 +152,11 @@ const GROUP_DESTINATIONS = new Set([
   'vacunacion-masiva',
 ]);
 
+// Destinos de spec 07 (reportes): la tab Reportes vive en (tabs), pero el resumen de sesión, su detalle y
+// la comparativa son rutas standalone bajo /reportes/* (top-segment 'reportes'). Se llega desde la tab con
+// un rodeo existente → navegación legítima en estado 'active'; NO se re-rutean al wizard ni a (tabs).
+const REPORT_DESTINATIONS = new Set(['reportes']);
+
 // Harness de DEV/TEST (spec 04 R5, /baston-test): pantalla WEB-ONLY para validar el
 // adapter-web-serial contra el RS420 real, sin pasar por el gating de auth/establecimiento/
 // rodeo. Sin este bypass, una sesión web no logueada (o sin campo/rodeo activo) rebotaría a
@@ -179,12 +184,18 @@ const GROUP_DESTINATIONS = new Set([
 // captura e2e a 360/412 en web táctil. Referencia visual del `TactoStep` adaptativo (N bloques de tamaño
 // según los meses de servicio del rodeo) + el config "¿medir tamaño?" hasta que el cableado (POST-VETO)
 // lo enchufe a la jornada real.
+// Spec 07 Stream C — DESIGN SPIKE de REPORTES (`reportes-spike`): pantalla VISUAL 100% MOCK (paridad con
+// los otros spikes), alcanzable directo en web sin auth para la captura e2e a 360/412 en web táctil.
+// Renderiza los MISMOS componentes reutilizables que la tab Reportes real con datos fixture (KPIs / resumen
+// de sesión / alertas / vacío / offline / configurar) — referencia visual para el veto del leader ANTES de
+// mostrar a Raf (la pantalla real consume las 9 RPC gateadas contra el remoto). NO es producción.
 const DEV_WEB_ROUTES = new Set([
   'baston-test',
   'maniobra/paso',
   'maniobra/rueda-ce',
   'maniobra/service-months-spike',
   'maniobra/tacto-spike',
+  'reportes-spike',
 ]);
 
 /**
@@ -353,6 +364,9 @@ function RootGate() {
     const onAnimalDestination = ANIMAL_DESTINATIONS.has(top);
     // Destinos de spec 10 (vista de grupo + operación masiva): navegables desde Inicio con rodeo.
     const onGroupDestination = GROUP_DESTINATIONS.has(top);
+    // Destinos de spec 07 (reportes standalone: resumen/comparativa de sesión): navegables desde la tab
+    // Reportes con un rodeo existente; no se re-rutean al wizard ni a (tabs).
+    const onReportDestination = REPORT_DESTINATIONS.has(top);
 
     if (est.status === 'no_establishments') {
       if (top !== ONBOARDING_ROUTE && !onCrearCampo && !onFase5Destination) router.replace('/onboarding');
@@ -390,7 +404,8 @@ function RootGate() {
           strandedOnGatingRoute &&
           !onRodeoDestination &&
           !onAnimalDestination &&
-          !onGroupDestination
+          !onGroupDestination &&
+          !onReportDestination
         ) {
           router.replace('/(tabs)');
         }
@@ -496,6 +511,15 @@ function RootGate() {
           STUB navegable en este chunk (la pantalla real es del próximo chunk de Fase 4). */}
       <Stack.Screen name="seleccion-masiva" />
       <Stack.Screen name="vacunacion-masiva" />
+      {/* Spec 07 Stream C — reportes standalone (se llegan desde la tab Reportes con un rodeo): lista de
+          sesiones del rodeo (R7.3.6), detalle de una sesión (R7.3.1), y comparativa de 2 sesiones (R7.4). */}
+      <Stack.Screen name="reportes/sesiones" />
+      <Stack.Screen name="reportes/sesion/[id]" />
+      <Stack.Screen name="reportes/comparar" />
+      {/* Spec 07 Stream C — DESIGN SPIKE de REPORTES (`reportes-spike`): pantalla VISUAL 100% MOCK,
+          alcanzable directo en web sin auth (DEV_WEB_ROUTES) para la captura e2e a 360/412. Referencia
+          visual para el veto del leader (reusa los componentes reales de la tab Reportes). NO es producción. */}
+      <Stack.Screen name="reportes-spike" />
     </Stack>
   );
 }

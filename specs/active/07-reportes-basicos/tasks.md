@@ -128,50 +128,58 @@
   por tercios de `service_months`, espejo de la regla de la RPC (T2.4). Cubre: R7.8.1 (etiquetado UI).
 - [x] **T5.2** — `app/src/utils/calving-stage.test.ts` (node:test): tercios para 3-11 meses, cabeza/cola para 2,
   vacío para 1/12/null (consistente con `pregnancy-buckets`). Cubre: R7.8.1.
-- [ ] **T5.3** — `app/src/services/reports.ts`: wrappers `supabase.rpc(...)` de TODAS las RPC; mapeo snake→camel;
-  **detección de offline antes de llamar** → `Result.err({ kind: 'offline' })`; traducción de errores a
-  `AppError` accionable. Única capa I/O (architecture.md). Cubre: R7.2.1, R7.2.2, R7.2.4.
-- [ ] **T5.4** — `app/src/hooks/use-reports.ts`: orquesta `reports.ts`; estado loading/online/error; **anti-
-  parpadeo** (`loading && data===null` para el spinner; refresh sin blanquear, conventions.md UI); cache
-  read-only opcional de la última carga (R7.2.3). Cubre: R7.2.2, R7.2.3, R7.2.4, R7.1.3.
+- [x] **T5.3** — `app/src/services/reports.ts`: wrappers `supabase.rpc(...)` de TODAS las RPC; mapeo snake→camel;
+  **detección de offline antes de llamar** (`assertOnline` → `{ kind: 'offline' }`); traducción de errores a
+  `ReportError` accionable. Única capa I/O (architecture.md). Cubre: R7.2.1, R7.2.2, R7.2.4.
+  *(As-built: la lógica PURA testeable [mapeo de %, formato es-AR, comparativas] vive en `app/src/utils/
+  reports-format.ts` — split SDK/puro, mismo criterio que online-guard/online-guard-pure; el `ReportError`
+  tiene kinds `offline|network|server|forbidden|validation` para mapear 42501/P0002/22023 del contrato. Detalle
+  en `progress/impl_07-reportes-frontend.md` §Reconciliación.)*
+- [x] **T5.4** — `app/src/hooks/use-reports.ts`: orquesta `reports.ts`; estado loading/online/error; **anti-
+  parpadeo** (`loading && data===null` vía `reportView`; refresh sin blanquear, conventions.md UI). Cubre:
+  R7.2.2, R7.2.4, R7.1.3. *(R7.2.3 cache "datos de la última carga" = nice-to-have NO implementado en el MVP —
+  el anti-parpadeo conserva el `data` previo en memoria pero NO lo marca "stale"; anotado como limitación
+  conocida en el ledger.)*
 
 ## Fase 6 — Cliente: pantalla Reportes (KPIs + alertas)
 
-- [ ] **T6.1** — `app/app/(tabs)/reportes.tsx`: reemplaza el stub; selector de rodeo + selector de campaña (año,
+- [x] **T6.1** — `app/app/(tabs)/reportes.tsx`: reemplaza el stub; selector de rodeo + selector de campaña (año,
   **default = última campaña con datos** del rodeo — Puerta de spec 2026-06-24, NO el año calendario; el wrap de
   fin de año lo resuelve el server por set-membership, R7.5.8); scope por establecimiento activo (recarga al
   cambiar de establecimiento). Cubre: R7.1.1, R7.1.2, R7.1.3, R7.1.4, R7.5.7, R7.5.8.
-- [ ] **T6.2** — Cards de KPI: %preñez (R7.5), %parición (R7.6) con **% grande + numerador/denominador absolutos**
+- [x] **T6.2** — Cards de KPI: %preñez (R7.5), %parición (R7.6) con **% grande + numerador/denominador absolutos**
   (denominador explícito, ej. "preñadas 41 / servidas 46"). **Base ÚNICA servidas, SIN toggle de denominador**
   (Puerta de spec 2026-06-24, R7.5.3/R7.6.4) — no se construye `DenominatorToggle`; la pérdida preñez→parición se
   lee comparando %preñez vs %parición. "—"/"sin datos" si servidas = 0 (no NaN). Cubre: R7.5.1, R7.5.3, R7.5.4,
   R7.5.5, R7.6.1, R7.6.3, R7.6.4, R7.6.5.
-- [ ] **T6.3** — Componente CCL (`components/reports/CclBars`): barras cabeza/cuerpo/cola, nº de barras decidido
+- [x] **T6.3** — Componente CCL (`components/reports/CclBars`): barras cabeza/cuerpo/cola, nº de barras decidido
   por `sizeBucketsForServiceMonths(n_months)` de `pregnancy-buckets.ts` (fuente única); oculta CCL para 1/12/sin
   config/override "sin distinción" con nota explicativa (R7.7.3); empty state si total=0 (R7.7.4); muestra el
   total base (R7.7.5). Cubre: R7.7.1, R7.7.2, R7.7.3, R7.7.4, R7.7.5.
-- [ ] **T6.4** — Cruce tacto↔nacimientos: muestra `rodeo_calving_by_stage` junto al CCL del tacto (R7.8.2);
+- [x] **T6.4** — Cruce tacto↔nacimientos: muestra `rodeo_calving_by_stage` junto al CCL del tacto (R7.8.2);
   degrada con gracia si no hay nacimientos de la campaña (R7.8.3). Usa `calving-stage.ts` para etiquetar. Cubre:
   R7.8.1, R7.8.2, R7.8.3.
-- [ ] **T6.5** — Peso por categoría: lista categorías con AVG + nº de animales; formato es-AR (coma decimal);
+- [x] **T6.5** — Peso por categoría: lista categorías con AVG + nº de animales; formato es-AR (coma decimal);
   categorías sin peso → "sin pesar"/"—". Cubre: R7.9.1, R7.9.2, R7.9.3, R7.9.4.
-- [ ] **T6.6** — Estado "configurá la estación de servicio" cuando `is_configured=false`, con CTA a la edición del
-  rodeo (cross-spec spec 02). Cubre: R7.5.6, R7.6.6.
-- [ ] **T6.7** — Sección de alertas: dosis vencida (R7.10) + sin pesar (R7.11) con ítems accionables (animal/
+- [x] **T6.6** — Estado "configurá la estación de servicio" cuando `is_configured=false`, con CTA a la edición del
+  rodeo (cross-spec spec 02, `/editar-servicio`). Cubre: R7.5.6, R7.6.6.
+- [x] **T6.7** — Sección de alertas: dosis vencida (R7.10) + sin pesar (R7.11) con ítems accionables (animal/
   producto/fecha · animal/categoría/días) y **empty states positivos**. Cubre: R7.10.2, R7.10.4, R7.11.3, R7.11.5.
-- [ ] **T6.8** — Estado offline ("necesitás conexión") + error con reintento, en toda la pantalla. Cubre: R7.2.2, R7.2.4.
+- [x] **T6.8** — Estado offline ("necesitás conexión") + error con reintento, por sección. Cubre: R7.2.2, R7.2.4.
 
 ## Fase 7 — Cliente: resumen y comparativa de sesión
 
-- [ ] **T7.1** — `app/app/reportes/sesion/[id].tsx`: conteos por tipo de evento + marco temporal (started/ended) +
-  animales intervenidos; empty state si no hay eventos. Lista de sesiones del rodeo para elegir (R7.3.6). Cubre:
+- [x] **T7.1** — `app/app/reportes/sesion/[id].tsx`: conteos por tipo de evento (RPC) + marco temporal
+  (started/ended, lectura LOCAL `getSessionById`) + animales intervenidos; empty state si no hay eventos.
+  *(As-built: la LISTA de sesiones para elegir [R7.3.6] se separó en `app/app/reportes/sesiones.tsx` — entrada
+  desde la tab Reportes; el detalle es `sesion/[id]`. 3 archivos en vez de los 2 de design §1.)* Cubre:
   R7.3.1, R7.3.2, R7.3.5, R7.3.6.
-- [ ] **T7.2** — `app/app/reportes/comparar.tsx`: elegir 2 sesiones del **mismo** rodeo (2ª restringida al rodeo
-  de la 1ª); tabla lado a lado con delta por tipo de evento (0 + delta en celdas faltantes). Cubre: R7.4.1,
-  R7.4.2, R7.4.3.
-- [ ] **T7.3** — Comparativa de peso por categoría entre **dos sesiones del mismo rodeo** (delta por categoría),
-  reusando la RPC de peso por sesión. **MVP = solo por sesiones** (Puerta de spec 2026-06-24); la comparativa por
-  campaña queda post-MVP (no se implementa). Cubre: R7.9.5.
+- [x] **T7.2** — `app/app/reportes/comparar.tsx`: elegir 2 sesiones del **mismo** rodeo (la lista ya está
+  scopeada al rodeo; la 2ª no puede repetir la 1ª); tabla lado a lado con delta por tipo de evento
+  (`compareSessions`: 0 + delta en celdas faltantes, no se omite la fila). Cubre: R7.4.1, R7.4.2, R7.4.3.
+- [x] **T7.3** — Comparativa de peso por categoría entre **dos sesiones del mismo rodeo** (`compareWeights`,
+  delta por categoría), reusando `rodeo_weight_by_category(rodeoId, sessionId)`. **MVP = solo por sesiones**;
+  la comparativa por campaña queda post-MVP (no se implementa). Cubre: R7.9.5.
 
 ## Fase 8 — Consistencia transversal + cierre
 
