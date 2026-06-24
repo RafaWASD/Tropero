@@ -50,7 +50,7 @@ capa `services/reports.ts`. Detalle y alternativa descartada en §3.
 | `app/src/services/reports.ts` | Capa `services` (boundary I/O): llama las RPC vía `supabase.rpc`, traduce a `Result<T, AppError>`, detecta offline. Única capa que toca I/O de reportes (`architecture.md`). |
 | `app/src/hooks/use-reports.ts` | Hooks que orquestan `reports.ts` y exponen estado a las pantallas (loading/online/error). |
 | `app/src/utils/calving-stage.ts` | **Helper PURO** del mapeo nacimiento↔etapa por MES (mes de parto − 9 → bucket del rodeo), espejo de `pregnancy-buckets.ts`. Testeable con `node:test`. Se usa para etiquetar la distribución de nacimientos en la UI y como espejo de la lógica SQL (R7.8). |
-| `app/src/components/reports/*` | Cards/empty-states reutilizables (KpiCard, DenominatorToggle, CclBars, AlertList, EmptyState). Sin fetch directo (`architecture.md`). |
+| `app/src/components/reports/*` | Cards/empty-states reutilizables (KpiCard, CclBars, AlertList, EmptyState). Sin fetch directo (`architecture.md`). **Sin `DenominatorToggle`** — base única servidas sin selector (Puerta de spec 2026-06-24, R7.5.3/R7.6.4). |
 
 ### Tests (runners Node-nativos backend — `architecture.md`)
 
@@ -79,8 +79,9 @@ Guard: deriva `establishment_id` de la sesión (`sessions.establishment_id`, val
 `sanitary_events`, `condition_score_events`, `lab_samples`, `scrotal_measurements`, `custom_measurements`), todos
 `deleted_at IS NULL`. El tenant en cada una se asegura por el **join a `animal_profiles` con `p.establishment_id =
 v_est`** (M2, §5.5) — defensa en profundidad sobre el guard de entrada. Para el histórico de sesión, R7.13.2
-permite incluir animales hoy archivados (la jornada es un hecho pasado), así que este conteo **no** filtra
-`p.status='active'` (a diferencia de los KPIs de rodeo, §5.6); sí filtra `p.deleted_at IS NULL` siempre (M3).
+**incluye** animales hoy archivados (la jornada es un hecho pasado — **decisión CERRADA en la Puerta de spec
+2026-06-24**), así que este conteo **no** filtra `p.status='active'` (a diferencia de los KPIs de rodeo, §5.6); sí
+filtra `p.deleted_at IS NULL` siempre (M3).
 **`animal_events` NO tiene `session_id`** (verificado `0034`/`0052`) → no entra:
 
 ```
@@ -114,8 +115,10 @@ returns table (
 Numerador `pregnant` = del conjunto `rodeo_serviced_females(p_rodeo_id, p_year)`, las hembras cuyo **último**
 `tacto` (event_type='tacto', `order by event_date desc, created_at desc`) tiene `pregnancy_status ≠ 'empty'`
 sin `abortion` posterior — **misma subquery que `compute_category` RT2.7.5** (`0104` líneas 91-104), para no
-duplicar la regla. La UI calcula `pregnant/serviced×100` o `pregnant/entoradas×100` según el toggle (R7.5.3); el
-denominador "0" → la UI muestra "—" (R7.5.4), la RPC nunca divide. Se devuelven absolutos para R7.5.5.
+duplicar la regla. La UI calcula `pregnant/serviced×100` — **base ÚNICA servidas, sin toggle** (Puerta de spec
+2026-06-24, R7.5.3); `serviced = 0` → la UI muestra "—" (R7.5.4), la RPC nunca divide. Se devuelven absolutos
+para el denominador explícito (R7.5.5: "preñadas 41 / servidas 46"). `entoradas` se sigue devolviendo como insumo
+(uso interno / coherencia con la firma de Stream A), pero el %preñez **no** ofrece alternar a esa base en el MVP.
 
 ### 2.3 %Parición — `rodeo_calving_kpi(p_rodeo_id uuid, p_year int)` (R7.6)
 
@@ -124,7 +127,7 @@ returns table (
   is_configured boolean,
   serviced      int,
   entoradas     int,
-  pregnant      int,   -- para la base "/ preñadas" (pérdida preñez→parición, R7.6.4)
+  pregnant      int,   -- insumo de la pérdida preñez→parición: se ve comparando %preñez vs %parición (R7.6.4), NO como base alterna
   calved        int    -- numerador: servidas con ≥1 birth mapeable a la campaña (R7.6.2)
 )
 ```
@@ -135,6 +138,17 @@ relevante = `p_year + 1` para meses de parto que caen después de la concepción
 parto ~9 meses después). **Esta ventana temporal del parto es el punto fino**: el MVP la deriva del mes de
 concepción ∈ `service_months` y el rango de fechas de parto coherente con `p_year` (concebidas en la campaña
 `p_year` → paren entre `p_year` y `p_year+1`). Se documenta y se cubre con fixtures en `reports/run.cjs`.
+
+> **Base del %parición (R7.6.4, Puerta de spec 2026-06-24):** la UI calcula `calved/serviced×100` — **base ÚNICA
+> servidas, sin toggle**, igual que %preñez. La **pérdida preñez→parición** se hace visible **comparando los dos
+> KPIs sobre la misma base servidas** (%preñez = `pregnant/serviced`, %parición = `calved/serviced`), no con un
+> selector de base "/ preñadas". Por eso `pregnant` se devuelve como insumo, pero la UI no lo usa como denominador
+> alterno. Selector de base = post-MVP si hace falta.
+>
+> **Wrap de fin de año (R7.5.8, Puerta de spec 2026-06-24):** el criterio `mes de concepción ∈ service_months` ya
+> resuelve por **set-membership** (no `BETWEEN window_start..window_end` con wrap) los servicios Nov-Dic-Ene —
+> consistente con cómo Stream A trata `p_year` ("conjunto de meses del año", `0105`). Esto aplica tanto acá como
+> en `rodeo_ccl_distribution`/`rodeo_calving_by_stage` (mismo conjunto servidas y mismo bucketing por mes).
 
 ### 2.4 Distribución CCL — `rodeo_ccl_distribution(p_rodeo_id uuid, p_year int)` (R7.7)
 
@@ -197,9 +211,10 @@ filtrando `p.establishment_id = v_est` + `p.deleted_at IS NULL` + `p.status = 'a
 categoría. Categorías del
 rodeo sin ningún peso → no aparecen en la RPC; la UI las muestra como "sin pesar" si quiere listarlas todas
 (R7.9.4). Formato es-AR (coma decimal) lo aplica la UI (R7.9.3). La **comparativa de peso** (R7.9.5) = la UI
-llama la RPC para dos contextos (dos sesiones o dos campañas) y computa el delta client-side; para "por sesión"
-se filtra por los animales/eventos de cada `session_id` (variante `..._for_session(p_session_id)` o parámetro
-opcional — el implementer elige; documentar).
+llama la RPC para **dos sesiones del mismo rodeo** y computa el delta client-side (Puerta de spec 2026-06-24: la
+comparativa del MVP es **por sesiones**, no por campañas). Para "por sesión" se filtra por los animales/eventos de
+cada `session_id` (variante `..._for_session(p_session_id)` o parámetro opcional — el implementer elige;
+documentar). *(La comparativa por campaña queda post-MVP — no se implementa la variante de dos campañas en el MVP.)*
 
 ### 2.7 Alertas
 
@@ -225,7 +240,7 @@ make_interval(days => p_lookback_days)`) y aplica `LIMIT p_limit` server-side (a
 export). Validar `p_lookback_days >= 0` y `p_limit between 1 and 1000` tras el guard (raise `22023` fuera de
 rango), espejo de la cota de `p_year` de `0105`. La UI ordena por `next_dose_date asc` (lo más vencido primero).
 
-`establishment_unweighed(p_establishment_id uuid, p_threshold_days int default 180, p_category_codes text[] default null)` (R7.11, `[SUPUESTO]`):
+`establishment_unweighed(p_establishment_id uuid, p_threshold_days int default 180, p_category_codes text[] default null)` (R7.11 — umbral 180 d = default-MVP CERRADO, parametrizado; alcance/categorías sigue `[SUPUESTO]`/Facundo):
 ```
 returns table (
   animal_profile_id uuid, idv text, visual_id_alt text,
@@ -235,12 +250,14 @@ returns table (
 )
 ```
 Animales activos del establecimiento sin `weight_event` no borrado, o con último pesaje `< current_date -
-p_threshold_days` (R7.11.1); filtrado por `p_category_codes` si se pasa (default null = el cliente pasa el
-conjunto `[SUPUESTO]` de categorías que se pesan en cría) (R7.11.2). Mismo scoping que arriba: **join a
+p_threshold_days` (R7.11.1, umbral **default-MVP 180 d CERRADO** — Puerta de spec 2026-06-24); filtrado por
+`p_category_codes` si se pasa (default null = el cliente pasa el conjunto `[SUPUESTO]` de categorías que se pesan
+en cría — **esto sigue abierto/Facundo, D2**) (R7.11.2). Mismo scoping que arriba: **join a
 `animal_profiles` con `p.establishment_id = v_est` + `p.deleted_at IS NULL` + `p.status = 'active'` en el join**
-(M2/M3), excluyendo `weight_events` con `deleted_at` (R7.11.4). **El umbral y el alcance son parámetros**, no
-hardcode — cuando Facundo cierre D2, se cambia el default que pasa el cliente (o el `default` de la firma) sin
-tocar la lógica. Guard `has_role_in(p_establishment_id)` como 1ª sentencia (M1). **Cota de input (M4 menor):**
+(M2/M3), excluyendo `weight_events` con `deleted_at` (R7.11.4). **Umbral y alcance siguen siendo parámetros** (no
+hardcode): el umbral por una razón de tuneabilidad ("quizá lo modifiquemos", Raf) aunque ya esté decidido el
+default; el alcance/categorías porque Facundo aún no lo cerró — cuando lo haga (D2), se cambia el conjunto que
+pasa el cliente sin tocar la lógica. Guard `has_role_in(p_establishment_id)` como 1ª sentencia (M1). **Cota de input (M4 menor):**
 validar `p_threshold_days between 0 and 3650` (0 a 10 años — tope concreto y holgado sobre cualquier cadencia
 real de pesaje; lo hace testeable de forma determinística, espejo de la cota cerrada de `p_year` de `0105` y del
 `p_limit between 1 and 1000` de `establishment_overdue_doses`) — raise `22023` fuera de rango — y acotar la
@@ -248,9 +265,10 @@ cardinalidad de `p_category_codes` (`cardinality <= 64`, holgado sobre el nº de
 que un array gigante no fuerce un escaneo desmedido; los params son tipados de PostgREST, no SQL string, no son
 vector de inyección (§5.8).
 
-> **Por qué la alerta lleva los parámetros y no constantes hardcodeadas:** Gate 0 §9 deja el umbral/alcance
-> abiertos a Facundo. Parametrizar es la forma de cumplir "default provisional, no número firme" (instrucción del
-> leader) sin reescribir la RPC después.
+> **Por qué la alerta lleva los parámetros y no constantes hardcodeadas:** el **alcance/categorías** sigue abierto
+> a Facundo (D2) → parametrizarlo es necesario para cerrarlo después sin reescribir la RPC. El **umbral (180 d)**
+> ya está DECIDIDO para el MVP (Puerta de spec 2026-06-24) pero se deja parametrizado igual porque Raf lo dejó
+> tuneable ("por ahora, quizá lo modifiquemos"): el default de la firma es 180, ajustable sin migración nueva.
 
 ---
 
@@ -309,8 +327,8 @@ protege la función ⇒ el guard interno es la defensa (Gate 1 lo audita).
   'offline' })` sin disparar la RPC. La pantalla muestra el estado "necesitás conexión para ver reportes"
   (R7.2.2) — copy accionable, botón "reintentar" (R7.2.4).
 - **Sin replicación client-side de la agregación** (R7.2.1): el cliente solo dibuja lo que la RPC devuelve. La
-  única lógica de cliente es **presentación** (formato es-AR, toggle de denominador, cuántas barras CCL vía el
-  helper compartido). No recomputa KPIs.
+  única lógica de cliente es **presentación** (formato es-AR, mostrar los absolutos num/den, cuántas barras CCL
+  vía el helper compartido). No recomputa KPIs ni alterna bases (base única servidas, R7.5.3/R7.6.4).
 - **Carga vs refresh (anti-parpadeo, `conventions.md` UI):** el spinner que reemplaza el contenido se muestra
   SOLO en la primera carga sin datos (`loading && data === null`); al cambiar de rodeo/campaña, el refresh no
   blanquea el contenido previo de golpe (se mantiene montado hasta que llega el nuevo resultado).
@@ -421,9 +439,12 @@ tipados de PostgREST (uuid/int/text[]), **no** SQL string concatenado → sin ve
   - **Selector de rodeo** arriba (reusa el contexto rodeo-céntrico de spec 10). Al elegir rodeo → se cargan sus KPIs.
   - **Cards de KPI del rodeo**: %preñez (R7.5), %parición (R7.6), distribución CCL como barras
     cabeza/cuerpo/cola (R7.7) + el cruce con nacimientos (R7.8) cuando hay datos, peso por categoría (R7.9). Cada
-    KPI con: % grande, numerador/denominador absolutos debajo, y un **toggle de denominador** (servidas/entoradas/
-    [preñadas]) donde aplica (R7.5.3/R7.6.4).
-  - **Selector de campaña (año)** por rodeo (default = campaña vigente/última, R7.5.7) — permite mirar campañas anteriores.
+    KPI con: % grande y **numerador/denominador absolutos** debajo (denominador explícito, ej. "preñadas 41 /
+    servidas 46"). **Base ÚNICA = servidas, SIN toggle de base** (Puerta de spec 2026-06-24, R7.5.3/R7.6.4) — el
+    `DenominatorToggle` queda fuera del MVP. La **pérdida preñez→parición** se lee comparando %preñez vs %parición
+    (misma base servidas), no con un selector.
+  - **Selector de campaña (año)** por rodeo (default = **última campaña con datos** del rodeo, R7.5.7; el wrap de
+    fin de año se resuelve por set-membership server-side, R7.5.8) — permite mirar campañas anteriores.
   - **Estado "configurá la estación de servicio"** cuando `is_configured = false` (R7.5.6/R7.6.6/R7.7.3) con CTA que
     lleva a la edición del rodeo (cross-spec spec 02).
   - **Alertas**: dos secciones (dosis vencida R7.10, sin pesar R7.11) con lista accionable + empty states positivos.
@@ -493,3 +514,23 @@ tipados de PostgREST (uuid/int/text[]), **no** SQL string concatenado → sin ve
 > archivados/borrados, aislamiento de tenant) ya estaba en R7.12.3 / R7.13 / R7.12 — son precisiones de *cómo* que
 > viven en el design y en los asserts de tasks. LOW L1 (cardinalidad de `p_category_codes`) absorbida en §5.4/R7.11.6;
 > L2 (`p_year+1` de `rodeo_calving_kpi`) ya estaba acotado por la cota de `p_year` (§5.3) — sin cambio.
+
+---
+
+## 10. Reconciliación Puerta de spec — 5 decisiones de Raf (2026-06-24)
+
+> Decisiones CERRADAS de Raf en la Puerta de spec. Se quitaron los `[SUPUESTO]`/preguntas-abiertas y se lockearon.
+> Qué sección de design / requirements tocó cada una:
+
+| Decisión (Raf, 2026-06-24) | Design | Requirements |
+|---|---|---|
+| **D1** — Umbral "sin pesar" = **180 d default-MVP CERRADO**, parametrizado (alcance/categorías sigue Facundo) | §2.7 (firma `establishment_unweighed` — umbral cerrado, alcance abierto; nota "por qué parámetros") | R7.11.1 (180 d confirmado) + §Supuestos (umbral cerrado / alcance pending) |
+| **D2** — Comparativa de peso = **por sesiones** (MVP) | §2.6 (`rodeo_weight_by_category` — dos sesiones del mismo rodeo; campaña→post-MVP) | R7.9.5 (lockeado a sesiones) |
+| **D3** — %preñez y %parición = **base ÚNICA servidas, sin selector**; se mantiene denominador explícito | §2.2 (%preñez `pregnant/serviced`, sin toggle) + §2.3 (nota: %parición sin toggle; pérdida visible comparando KPIs) + §1 (sin `DenominatorToggle`) + §4 + §6 (UI sin toggle de base) | R7.5.1/R7.5.3/R7.5.4 + R7.6.4 (toggle descartado; absolutos num/den se mantienen, R7.5.5) |
+| **D4** — Año default = **última campaña con datos**; wrap por **set-membership** | §2.3 (nota wrap `mes ∈ service_months`, no `BETWEEN`) + §6 (selector de campaña = última con datos) | R7.5.7 (default última con datos) + **R7.5.8 (nuevo)** (wrap por set-membership) |
+| **D5** — Archivados = **INCLUIR** en histórico de sesión | §2.1 (session_summary no filtra `status`, sí `deleted_at`) + §5.6 (histórico de sesión exento del filtro `status`) | R7.13.2 (lockeado a "incluir") |
+
+> **Nota de IDs:** la única adición de EARS de este fold es **R7.5.8** (wrap por set-membership, al final del grupo
+> R7.5 — IDs estables, sin reordenar). D1-D3/D5 lockean criterios existentes sin agregar IDs. Ningún cambio de
+> seguridad (no reabre Gate 1): D5 ya estaba alineado con §5.6 (histórico de sesión exento del filtro `status`);
+> D1 mantiene la cota `[0,3650]` de R7.11.6 intacta.

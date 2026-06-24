@@ -57,8 +57,11 @@
   conocidos; **denominador 0 → la RPC devuelve serviced=0 sin NaN** (R7.5.4/R7.6.3); rodeo sin `service_months`
   → `is_configured=false` (R7.5.6/R7.6.6); CCL vacío → total=0 (R7.7.4); cruce nacimientos degrada con total_born=0
   (R7.8.3); tenant-scope/anti-IDOR/read-only/grants en las 4. Cubre: R7.5.4, R7.6.3, R7.7.4, R7.8.3, R7.12.x.
-- [ ] **T2.6** — Test: numerador/denominador correctos al alternar bases (servidas vs entoradas) usando los
-  absolutos que devuelve la RPC; %parición/preñadas (pérdida) coherente. Cubre: R7.5.3, R7.6.4.
+- [ ] **T2.6** — Test: con **base única servidas** (sin alternar — R7.5.3/R7.6.4, Puerta de spec 2026-06-24), el
+  %preñez = `pregnant/serviced` y el %parición = `calved/serviced` salen correctos sobre los absolutos que devuelve
+  la RPC; la **pérdida preñez→parición** se verifica comparando los dos KPIs sobre la misma base servidas
+  (`pregnant ≥ calved`), no con una base alterna. La RPC sigue devolviendo `entoradas`/`pregnant` como insumo (no
+  se eliminan del shape), pero el test NO ejercita un toggle de base. Cubre: R7.5.3, R7.6.4.
 
 ## Fase 3 — Backend: peso por categoría
 
@@ -83,10 +86,12 @@
   guard (raise `22023`). Grants + smoke-check. Cubre: R7.10.1, R7.10.2, R7.10.3, R7.10.5, R7.12.2, R7.12.4.
 - [ ] **T4.2** — En la misma migración: RPC `establishment_unweighed(p_establishment_id, p_threshold_days int
   default 180, p_category_codes text[] default null)` → activos sin peso o último pesaje > umbral, filtrado por
-  categorías; identifica animal+categoría+días. **Parámetros, no hardcode** (`[SUPUESTO]`, Gate 0 §9). Mismo guard
-  1ª-sentencia (M1) + scoping por el join a `animal_profiles` con `deleted_at`/`status` en el join (M2/M3). **Cota
-  de input** (M4-menor/L1): validar `p_threshold_days between 0 and 3650` (tope concreto = 10 años, testeable) y
-  `cardinality(p_category_codes) <= 64` (raise `22023` fuera de rango). Cubre: R7.11.1, R7.11.2, R7.11.3, R7.11.4, R7.11.6.
+  categorías; identifica animal+categoría+días. **El umbral 180 d es el default-MVP CERRADO** (Puerta de spec
+  2026-06-24), parametrizado por tuneabilidad ("quizá lo modifiquemos", Raf); **el alcance/categorías sigue
+  `[SUPUESTO]`/Facundo (D2)**. Parámetros, no hardcode. Mismo guard 1ª-sentencia (M1) + scoping por el join a
+  `animal_profiles` con `deleted_at`/`status` en el join (M2/M3). **Cota de input** (M4-menor/L1): validar
+  `p_threshold_days between 0 and 3650` (tope concreto = 10 años, testeable) y `cardinality(p_category_codes) <= 64`
+  (raise `22023` fuera de rango). Cubre: R7.11.1, R7.11.2, R7.11.3, R7.11.4, R7.11.6.
 - [ ] **T4.3** — Test (`reports/run.cjs`): dosis vencida detecta el caso y excluye el que tiene dosis posterior
   (R7.10.1), excluye archivados/borrados (R7.10.3); sin pesar respeta umbral y `p_category_codes` (R7.11.1/.2),
   "nunca pesado" aparece (R7.11.3); empty = lista vacía (la UI muestra el positivo); tenant-scope/grants.
@@ -113,11 +118,14 @@
 ## Fase 6 — Cliente: pantalla Reportes (KPIs + alertas)
 
 - [ ] **T6.1** — `app/app/(tabs)/reportes.tsx`: reemplaza el stub; selector de rodeo + selector de campaña (año,
-  default = campaña vigente/última); scope por establecimiento activo (recarga al cambiar de establecimiento).
-  Cubre: R7.1.1, R7.1.2, R7.1.3, R7.1.4, R7.5.7.
+  **default = última campaña con datos** del rodeo — Puerta de spec 2026-06-24, NO el año calendario; el wrap de
+  fin de año lo resuelve el server por set-membership, R7.5.8); scope por establecimiento activo (recarga al
+  cambiar de establecimiento). Cubre: R7.1.1, R7.1.2, R7.1.3, R7.1.4, R7.5.7, R7.5.8.
 - [ ] **T6.2** — Cards de KPI: %preñez (R7.5), %parición (R7.6) con **% grande + numerador/denominador absolutos**
-  + **toggle de denominador** (servidas/entoradas/[preñadas] donde aplica); "—"/"sin datos" si denominador 0 (no
-  NaN). Cubre: R7.5.1, R7.5.3, R7.5.4, R7.5.5, R7.6.1, R7.6.3, R7.6.4, R7.6.5.
+  (denominador explícito, ej. "preñadas 41 / servidas 46"). **Base ÚNICA servidas, SIN toggle de denominador**
+  (Puerta de spec 2026-06-24, R7.5.3/R7.6.4) — no se construye `DenominatorToggle`; la pérdida preñez→parición se
+  lee comparando %preñez vs %parición. "—"/"sin datos" si servidas = 0 (no NaN). Cubre: R7.5.1, R7.5.3, R7.5.4,
+  R7.5.5, R7.6.1, R7.6.3, R7.6.4, R7.6.5.
 - [ ] **T6.3** — Componente CCL (`components/reports/CclBars`): barras cabeza/cuerpo/cola, nº de barras decidido
   por `sizeBucketsForServiceMonths(n_months)` de `pregnancy-buckets.ts` (fuente única); oculta CCL para 1/12/sin
   config/override "sin distinción" con nota explicativa (R7.7.3); empty state si total=0 (R7.7.4); muestra el
@@ -141,8 +149,9 @@
 - [ ] **T7.2** — `app/app/reportes/comparar.tsx`: elegir 2 sesiones del **mismo** rodeo (2ª restringida al rodeo
   de la 1ª); tabla lado a lado con delta por tipo de evento (0 + delta en celdas faltantes). Cubre: R7.4.1,
   R7.4.2, R7.4.3.
-- [ ] **T7.3** — Comparativa de peso por categoría entre dos sesiones del mismo rodeo (delta por categoría),
-  reusando la RPC de peso por sesión. Cubre: R7.9.5.
+- [ ] **T7.3** — Comparativa de peso por categoría entre **dos sesiones del mismo rodeo** (delta por categoría),
+  reusando la RPC de peso por sesión. **MVP = solo por sesiones** (Puerta de spec 2026-06-24); la comparativa por
+  campaña queda post-MVP (no se implementa). Cubre: R7.9.5.
 
 ## Fase 8 — Consistencia transversal + cierre
 
@@ -150,8 +159,8 @@
   R7.13.3) **filtrando `p.deleted_at IS NULL` + `p.status='active'` en el join a `animal_profiles`, NO confiando en
   `establishment_of_profile`** (M3, design §5.6: el helper 0023 no filtra `deleted_at`); confirmar que el scoping
   de tenant va por ese mismo join (`p.establishment_id = v_est`), no por la columna denorm de las tablas de evento
-  (M2, §5.5). Documentar la inclusión de archivados en el histórico de sesión (R7.13.2 — pregunta abierta #5; el
-  `session_event_summary` no filtra `status` pero sí `deleted_at`). Cubre: R7.13.1, R7.13.2, R7.13.3.
+  (M2, §5.5). Documentar la inclusión de archivados en el histórico de sesión (R7.13.2 — **CERRADO en la Puerta de
+  spec 2026-06-24: INCLUIR**; el `session_event_summary` no filtra `status` pero sí `deleted_at`). Cubre: R7.13.1, R7.13.2, R7.13.3.
 - [ ] **T8.2** — Confirmar que la ficha individual (`animal_timeline`) NO se reimplementa; dejar nota de
   trazabilidad. Cubre: R7.14.1.
 - [ ] **T8.3** — Veto `design-review` del leader sobre `reportes.tsx`, `sesion/[id].tsx`, `comparar.tsx` (títulos
@@ -173,9 +182,12 @@
   (RPC T2.4 + `calving-stage.ts` T5.1) es la parte nueva; cuando Facundo cierre el bucketing 4-11 (Gate 0 §9), se
   ajustan ambos lugares (deuda anotada en T2.4).
 - **Roja-hasta-apply** esperada para `reports/run.cjs` hasta T8.6 (patrón `puesta-en-servicio` / `0093-0097`).
-- **Preguntas abiertas** (requirements §"Preguntas abiertas") las cierra el leader con Raf/Facundo; la spec deja
-  defaults parametrizados para no frenar (alerta sin pesar, base "preñadas" del %preñez, año de campaña por
-  default, wrap de fin de año en KPIs, inclusión de archivados en histórico de sesión).
+- **Preguntas abiertas** (requirements §"Preguntas abiertas") — **4 de 5 CERRADAS por Raf en la Puerta de spec
+  (2026-06-24)**: comparativa de peso = sesiones (R7.9.5), %preñez/%parición base única servidas sin selector
+  (R7.5.3/R7.6.4), año default = última campaña con datos + wrap por set-membership (R7.5.7/R7.5.8), archivados
+  incluidos en histórico de sesión (R7.13.2). **Único pendiente = alcance/categorías de la alerta "sin pesar"**
+  (Facundo, D2 — el umbral 180 d YA está decidido, R7.11.1); la spec deja R7.11.2 parametrizado para cerrarlo sin
+  reescribir.
 - **Gate 1 (M1-M4) foldeado** antes de la Puerta de spec (`progress/security_spec_07-reportes.md`, PASS). El
   contrato de seguridad que Gate 2 valida vive en `design.md` §5 (§5.1 guard 1ª-sentencia/M1, §5.4 cota de
   escaneo/M4, §5.5 join a `animal_profiles`/M2, §5.6 `deleted_at`/`status` en el join/M3) + la tabla §9. Asserts:

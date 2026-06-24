@@ -109,30 +109,35 @@ mostrar `0` para esa celda y el delta correspondiente (no omitir la fila).
 ## R7.5 — % Preñez por rodeo
 
 **R7.5.1** Cuando el usuario pida el %preñez de un rodeo para una campaña (año), el sistema deberá calcularlo
-como **preñadas / denominador × 100**, donde el denominador por default es **servidas**
-(`rodeo_serviced_females`, Stream A) (context.md §5).
+como **preñadas / servidas × 100**, donde el denominador es **servidas** (`rodeo_serviced_females`, Stream A) —
+**base ÚNICA, sin selector** (Puerta de spec 2026-06-24; context.md §5).
 
 **R7.5.2** El sistema deberá contar como **preñada** a la hembra del conjunto servidas cuyo **último** evento
 `tacto` (por `event_date`, desempate `created_at`) tiene `pregnancy_status ≠ 'empty'` y NO tiene un evento
 `abortion` posterior (misma regla "tacto+ vigente" que `compute_category` RT2.7.5; Gate 0 §2).
 
-**R7.5.3** El sistema deberá mostrar el **denominador explícito** del %preñez, ofreciendo alternar la base
-entre **servidas** / **entoradas** / **preñadas** según la convención Bavera (context.md §11; entoradas y
-servidas vienen de `rodeo_repro_denominator`). *(Para %preñez las bases relevantes son servidas y entoradas;
-la base "preñadas" aplica a %parición/%pérdida — ver R7.6.4.)*
+**R7.5.3** El sistema deberá usar **servidas como base fija** del %preñez (sin toggle de base). El selector para
+alternar entre servidas/entoradas/preñadas queda **descartado** (Puerta de spec 2026-06-24: Raf "solo esa base").
+*(El denominador explícito de R7.5.5 igual hace visibles los absolutos. Selector de base = post-MVP si hace falta.)*
 
-**R7.5.4** Si el denominador (servidas o entoradas) es **0**, entonces el sistema deberá mostrar "—" o "sin
-datos" y nunca dividir por cero ni mostrar `NaN`/`Infinity` (context.md §9).
+**R7.5.4** Si **servidas** es **0**, entonces el sistema deberá mostrar "—" o "sin datos" y nunca dividir por
+cero ni mostrar `NaN`/`Infinity` (context.md §9).
 
 **R7.5.5** El sistema deberá mostrar, junto al %, el **numerador y el denominador absolutos** (ej. "preñadas 41
-de 50"), no solo el porcentaje.
+de 50", o "preñadas 41 / servidas 46"), no solo el porcentaje.
 
 **R7.5.6** Cuando un rodeo no tenga `service_months` configurado (`is_configured = false` en
 `rodeo_service_campaign`), el sistema deberá mostrar un estado "configurá la estación de servicio de este
 rodeo" en lugar del %preñez, con acceso a configurarla (cross-spec spec 02; context.md §10-D4 / Gate 0 §6).
 
-**R7.5.7** El sistema deberá computar el %preñez sobre la **campaña vigente/última** del rodeo por default,
-permitiendo cambiar de campaña (año) (context.md §12; período por defecto = campaña reproductiva).
+**R7.5.7** El sistema deberá computar el %preñez sobre la campaña vigente del rodeo por default, definida como la
+**última campaña (año) con datos** del rodeo (Puerta de spec 2026-06-24: NO el año calendario actual), permitiendo
+cambiar de campaña (año) (context.md §12; período por defecto = campaña reproductiva).
+
+**R7.5.8** El sistema deberá resolver la pertenencia de una campaña que **cruza el fin de año** (servicio
+Nov-Dic-Ene) por **set-membership** — un mes pertenece a la campaña si está en `service_months` del rodeo
+(`mes ∈ service_months`, igual que Stream A), **no** por un rango `BETWEEN window_start..window_end` con wrap
+(Puerta de spec 2026-06-24; `0105` trata `p_year` como "conjunto de meses del año", no rango con wrap).
 
 ---
 
@@ -149,9 +154,11 @@ servicios** (context.md "Nota sobre D4", §12).
 **R7.6.3** Si la cantidad de servidas es **0**, entonces el sistema deberá mostrar "—"/"sin datos" y nunca
 dividir por cero (context.md §9).
 
-**R7.6.4** El sistema deberá ofrecer alternar la base del %parición entre **servidas** / **entoradas** /
-**preñadas** (denominador explícito Bavera), donde "/ preñadas" expresa la **pérdida preñez→parición**
-(context.md §11; `research-kpis-cria.md §1`).
+**R7.6.4** El sistema deberá usar **servidas como base fija** del %parición (sin toggle de base), consistente con
+R7.5.3 (su definición ya es paridas/servidas, R7.6.1). El selector de base servidas/entoradas/preñadas queda
+**descartado** (Puerta de spec 2026-06-24). La **pérdida preñez→parición** queda VISIBLE comparando los dos KPIs
+sobre la misma base servidas (%preñez vs %parición), sin necesitar un selector dedicado. *(Selector de base =
+post-MVP si hace falta.)*
 
 **R7.6.5** El sistema deberá mostrar el numerador y el denominador absolutos junto al porcentaje.
 
@@ -217,8 +224,9 @@ sin romper el reporte de CCL del tacto.
 "sin pesar" / "—", no como `0 kg`.
 
 **R7.9.5** Donde el usuario pida una **comparativa de peso**, el sistema deberá comparar el peso promedio por
-categoría entre dos puntos (dos sesiones del mismo rodeo, o el rodeo en dos campañas) y mostrar el delta por
-categoría (context.md §4e/§4f).
+categoría entre **dos sesiones del mismo rodeo** y mostrar el delta por categoría (Puerta de spec 2026-06-24:
+la comparativa del MVP es **por sesiones**, no por campañas; context.md §4e/§4f). *(La comparativa por campaña
+queda post-MVP.)*
 
 ---
 
@@ -250,16 +258,18 @@ establecimiento sin cota (Gate 1 M4 / INPUT-1; design §5.4).
 
 ## R7.11 — Alerta: animales sin pesar
 
-> **`[SUPUESTO]` provisional** — el umbral y el alcance están EN CONSULTA con Facundo (context.md §10-D2,
-> Gate 0 §9). La spec implementa la alerta con un **default parametrizado** que se ajusta sin reescribir EARS.
+> **Umbral CERRADO (Puerta de spec, 2026-06-24): 180 días para el MVP, parametrizado.** Raf confirmó 180 d como
+> default del MVP ("por ahora, quizá lo modifiquemos"); NO es un `[SUPUESTO]`. Se mantiene parametrizado
+> (`p_threshold_days`, cota `[0, 3650]` de R7.11.6) para ajustarlo sin reescribir EARS.
+> El **alcance/categorías (R7.11.2) SIGUE `[SUPUESTO]` en consulta con Facundo (D2)** — eso NO se cierra acá.
 
 **R7.11.1** El sistema deberá listar como **sin pesar** a los animales activos del establecimiento que no tengan
 ningún `weight_event` no borrado, o cuyo último pesaje sea anterior a un **umbral de días** configurable
-(`[SUPUESTO]` default = **180 días**, context.md §6.2).
+(**default-MVP CONFIRMADO = 180 días**, parametrizado vía `p_threshold_days`; Puerta de spec 2026-06-24, context.md §6.2).
 
 **R7.11.2** El sistema deberá acotar la alerta a las **categorías relevantes** de cría (`[SUPUESTO]` default =
 las que sí se pesan en cría — terneros/recría/vaquillonas de reposición; el adulto casi no se pesa), de modo
-que no sea ruido (context.md §6.2 / Gate 0 §9-D2).
+que no sea ruido (context.md §6.2 / Gate 0 §9-D2). *(El alcance/categorías sigue en consulta con Facundo — D2.)*
 
 **R7.11.3** Cada ítem deberá identificar al animal (IDV / visual_id_alt), su categoría y los días desde el
 último pesaje (o "nunca pesado").
@@ -300,9 +310,9 @@ rechazar la operación (error de autorización), no devolver datos parciales ni 
 alertas) a los animales con `status ≠ 'active'`, salvo donde un denominador as-built ya los considere como
 "retiradas" (`rodeo_repro_denominator`) (context.md §9).
 
-**R7.13.2** El sistema deberá poder incluir animales archivados en el **histórico de una sesión** (R7.3), porque
-una jornada pasada refleja el estado de ese día — la decisión de inclusión por reporte se documenta en design
-(context.md §9: "¿incluibles en histórico de sesión?").
+**R7.13.2** El sistema deberá **incluir** animales archivados en el **histórico de una sesión** (R7.3), porque
+una jornada pasada refleja el estado de ese día (Puerta de spec 2026-06-24: decisión CERRADA — el resumen de
+sesión NO filtra `status='active'`; sí filtra `deleted_at IS NULL` siempre; context.md §9).
 
 **R7.13.3** El sistema deberá excluir SIEMPRE los eventos con `deleted_at IS NOT NULL` de todo reporte
 (context.md §9).
@@ -338,12 +348,12 @@ del `acceptance` original queda cubierto por el as-built.
 | §4d %parición = paridas/servidas | R7.6 |
 | §4e Peso prom. por categoría | R7.9 |
 | §4f Comparativa entre sesiones | R7.4, R7.9.5 |
-| §5/§11 Denominador explícito (Bavera) | R7.5.3, R7.5.5, R7.6.4, R7.6.5 |
+| §5/§11 Denominador explícito (absolutos num/den; base ÚNICA servidas, sin toggle — Puerta de spec 2026-06-24) | R7.5.3, R7.5.5, R7.6.4, R7.6.5 |
 | §6.1 Alerta dosis vencida (Facundo OK) | R7.10 (incl. R7.10.5 cota de escaneo — Gate 1 M4) |
 | §6.2 / §10-D2 Alerta sin pesar (Facundo pending) | R7.11 (`[SUPUESTO]`; incl. R7.11.6 cota de input — Gate 1 M4) |
 | §7 Cómputo online-only server-side + offline gracioso | R7.2, R7.12 |
 | §9 Edge cases (0 denominador, archivados, borrados, sesión abierta, NaN) | R7.5.4, R7.6.3, R7.7.4, R7.9.4, R7.3.4/.5, R7.13 |
-| §12 Campaña reproductiva como unidad temporal | R7.5.7, R7.6.2 |
+| §12 Campaña reproductiva como unidad temporal (default = última con datos; wrap por set-membership) | R7.5.7, R7.5.8, R7.6.2 |
 | Gate 0 §4 Distribución CCL + buckets por meses | R7.7 |
 | Gate 0 §5 Cruce nacimiento↔servicio (284d por mes) | R7.6.2, R7.8 |
 | Gate 0 §6 Rodeo sin `service_months` → invita a configurar | R7.5.6, R7.6.6, R7.7.3 |
@@ -358,10 +368,13 @@ reescribir EARS cuando Facundo cierre (Gate 0 §9). No son decisiones firmes de 
 
 - **`[SUPUESTO]` Bucketing CCL 4-11 meses = tercios** (R7.7.2). Espejo de `pregnancy-buckets.ts` (misma fuente
   única de la regla). Si Facundo define otro bucketing, se cambia en un solo lugar (ver design §CCL).
-- **`[SUPUESTO]` Umbral alerta "sin pesar" = 180 días** (R7.11.1). En consulta con Facundo (D2).
-- **`[SUPUESTO]` Alcance alerta "sin pesar" = categorías que se pesan en cría** (R7.11.2). En consulta con
-  Facundo (D2): ¿por días o por hito (destete sin peso / vaquillona al entore sin peso objetivo)?, ¿CC reemplaza
-  al peso en adultos?
+- ~~`[SUPUESTO]` Umbral alerta "sin pesar" = 180 días~~ → **CERRADO (Puerta de spec 2026-06-24): 180 d = default
+  del MVP confirmado por Raf, parametrizado** (`p_threshold_days`, cota `[0, 3650]`). Ya NO es supuesto. Ajustable
+  sin reescribir EARS (R7.11.1).
+- **`[SUPUESTO]` Alcance/categorías alerta "sin pesar" = categorías que se pesan en cría** (R7.11.2) — **SIGUE
+  abierto, en consulta con Facundo (D2)**: ¿por días o por hito (destete sin peso / vaquillona al entore sin peso
+  objetivo)?, ¿qué categorías?, ¿CC reemplaza al peso en adultos? (El umbral ya está cerrado; esto es lo único de
+  R7.11 que falta.)
 - **`[SUPUESTO]` "Retiradas" = no-activas hoy** (heredado de `rodeo_repro_denominator`, `0105` `[TENTATIVO]`): el
   recorte fino por "salió DURANTE la ventana" lo afina Stream C/Facundo. Spec 07 consume el contrato as-built.
 
@@ -369,32 +382,30 @@ reescribir EARS cuando Facundo cierre (Gate 0 §9). No son decisiones firmes de 
 
 ## Preguntas abiertas (para que el leader las lleve a Raf/Facundo — NO inventadas en la spec)
 
-1. **Alerta "sin pesar" (D2, EN CONSULTA ACTIVA).** Hasta que Facundo cierre: ¿días vs hito?, ¿qué categorías?,
-   ¿umbral concreto?, ¿CC reemplaza peso en adultos? La spec deja R7.11 parametrizada con default 180 d +
-   categorías-que-se-pesan. **Bloqueante leve**: la alerta funciona con el default, pero el valor/alcance final
-   es de Facundo. *(El `spec_author` NO lo cierra — context.md §10-D2 lo deja explícitamente a Facundo.)*
+> **Las 5 preguntas que estaban en esta sección se RESOLVIERON en la Puerta de spec (Raf, 2026-06-24).** Se dejan
+> listadas con su decisión para trazabilidad. **Lo único que sigue abierto es el ALCANCE/categorías de la alerta
+> "sin pesar"** (parte de #1 — Facundo, D2); el resto está cerrado.
 
-2. **¿La comparativa de peso (R7.9.5) compara sesiones, campañas, o ambos?** El acceptance pide "comparativa
-   entre dos sesiones"; el peso por categoría es más natural campaña-a-campaña (tendencia). Propuesta de design:
-   soportar comparativa de **sesiones** (acceptance literal) en MVP; la comparativa por campaña es nice-to-have.
-   Confirmar alcance con Raf.
+1. **RESUELTA (parcial) — Alerta "sin pesar" (D2).** ✅ **Umbral CERRADO: 180 d = default del MVP** (Raf, "por
+   ahora, quizá lo modifiquemos"), parametrizado (`p_threshold_days`, cota `[0,3650]`) → R7.11.1. ⏳ **SIGUE
+   abierto el ALCANCE/categorías** (R7.11.2): ¿días vs hito?, ¿qué categorías?, ¿CC reemplaza peso en adultos? —
+   en consulta con Facundo. La alerta funciona con el default `[SUPUESTO]` de categorías-que-se-pesan hasta que
+   Facundo cierre. *(El `spec_author` NO cierra el alcance — context.md §10-D2 lo deja a Facundo.)*
 
-3. **Denominador "preñadas" en %preñez (R7.5.3).** Bavera define el toggle entoradas/preñadas/paridas para
-   %destete/%parición; para %preñez las bases naturales son servidas y entoradas. ¿Se ofrece igualmente la base
-   "preñadas" por consistencia de UI, o se omite donde no aplica? Propuesta: ofrecer solo las bases que tienen
-   sentido por KPI (servidas/entoradas en %preñez). Confirmar con Facundo.
+2. **RESUELTA — Comparativa de peso (R7.9.5).** ✅ **Por SESIONES en el MVP** (Raf, Puerta de spec 2026-06-24); la
+   comparativa por campaña queda post-MVP.
 
-4. **Período/año de la campaña por default (R7.5.7).** `rodeo_service_campaign` toma `p_year`. ¿La "campaña
-   vigente" se deriva del año calendario actual, o de la última campaña con datos del rodeo? Para servicios que
-   cruzan fin de año (ej. Nov-Dic-Ene) el `p_year` tiene una semántica que Stream A trata como "conjunto de
-   meses del año `p_year`" (no rango con wrap, ver `0105` header). Propuesta de design: default = año de la
-   última campaña con eventos del rodeo; documentar la convención de `p_year` para servicios que wrapean.
-   Confirmar con Facundo si el wrap de fin de año necesita tratamiento especial en los KPIs (Stream A lo dejó
-   `[TENTATIVO]` para Stream C).
+3. **RESUELTA — Base del %preñez (R7.5.3).** ✅ **Base ÚNICA = servidas, SIN selector** (Raf: "solo esa base").
+   Por consistencia se aplicó lo mismo a %parición (R7.6.4): base fija servidas, sin toggle. Se mantiene el
+   denominador explícito (absolutos num/den, R7.5.5). Selector de base = post-MVP si hace falta.
 
-5. **Inclusión de animales archivados en el histórico de sesión (R7.13.2).** context.md §9 lo deja abierto.
-   Propuesta de design: el resumen de sesión cuenta los eventos tal como ocurrieron (incluye animales hoy
-   archivados, porque la jornada es un hecho histórico). Confirmar con Raf.
+4. **RESUELTA — Año de campaña por default + wrap de fin de año (R7.5.7/R7.5.8).** ✅ **Default = última campaña
+   con datos** del rodeo (NO el año calendario actual). ✅ **Wrap (Nov-Dic-Ene) por set-membership** (`mes ∈
+   service_months`, igual que Stream A), no por rango `BETWEEN` con wrap.
+
+5. **RESUELTA — Animales archivados en histórico de sesión (R7.13.2).** ✅ **INCLUIR** (Raf, Puerta de spec
+   2026-06-24): la jornada es un hecho histórico; el resumen de sesión no filtra `status='active'` (sí
+   `deleted_at IS NULL` siempre).
 
 ---
 
@@ -423,5 +434,30 @@ reescribir EARS cuando Facundo cierre (Gate 0 §9). No son decisiones firmes de 
       **`[0, 3650]`** (10 años) en R7.11.6 + design §2.7/§5.4 + tasks T4.2/T4.3, para que el assert de `22023`
       fuera-de-rango sea determinístico (espejo de la cota cerrada de `p_year` de `0105` y del `p_limit
       between 1 and 1000`). El default 180 y el alcance de la alerta siguen `[SUPUESTO]`/Facundo (NO cierra D2).
+      *(Estado al fold de Gate 1; el umbral 180 d se CERRÓ después como default-MVP en la Puerta de spec —
+      ver la entrada del 2026-06-24 "Fold de las 5 decisiones de Raf", D1. El alcance/categorías sí sigue Facundo.)*
     - **Referencia corregida**: T0.1 apuntaba al output futuro `security_spec_07-reportes-basicos.md`; se alineó
       al archivo real `progress/security_spec_07-reportes.md` (ya generado, PASS) para no mentir sobre su ubicación.
+- **2026-06-24** — Fold de las **5 decisiones de Raf en la Puerta de spec** (decisiones CERRADAS; se quitaron los
+  `[SUPUESTO]`/preguntas-abiertas correspondientes y se lockearon). EARS estricto + tablas de trazabilidad
+  mantenidas; sin reordenar IDs (solo se **agregó** R7.5.8 al final del grupo R7.5). *(Etiquetas Dec.1-Dec.5 =
+  las 5 decisiones de la Puerta de spec; NO confundir con los "D1-D4" de Gate 0/context.md.)* Reconciliación
+  R↔decisión:
+  - **Dec.1 (umbral sin-pesar = 180 d MVP, parametrizado; alcance sigue Facundo)** → R7.11.1 (180 d = default-MVP
+    confirmado, ya no `[SUPUESTO]`) + nota de cabecera de R7.11 + §Supuestos (umbral cerrado; alcance R7.11.2
+    explícito como Facundo-pending). **NO cierra el D2 de context.md** (alcance/categorías). Cota `[0,3650]` de
+    R7.11.6 intacta.
+  - **Dec.2 (comparativa de peso = por sesiones, MVP)** → R7.9.5 (lockeado a "dos sesiones del mismo rodeo";
+    campaña→post-MVP). Cierra pregunta abierta #2.
+  - **Dec.3 (%preñez base ÚNICA = servidas, sin selector; ídem %parición)** → **R7.5.3** (toggle servidas/entoradas/
+    preñadas **descartado**, base fija servidas) + R7.5.1/R7.5.4 (denominador = servidas) + **R7.6.4** (sin toggle,
+    base fija servidas; pérdida preñez→parición visible comparando %preñez vs %parición). Se **mantiene** el
+    denominador explícito (absolutos num/den) en R7.5.5. Fila de cobertura §5/§11 anotada. Cierra pregunta #3.
+  - **Dec.4 (año default = última campaña con datos; wrap por set-membership)** → R7.5.7 (default = última campaña
+    con datos, NO año calendario) + **R7.5.8 (nuevo)** (wrap Nov-Dic-Ene por `mes ∈ service_months`, no `BETWEEN`).
+    Fila de cobertura §12 anotada. Cierra pregunta #4.
+  - **Dec.5 (archivados → INCLUIR en histórico de sesión)** → R7.13.2 (lockeado a "deberá **incluir**"; sin filtro
+    de `status` en el resumen de sesión, sí `deleted_at`). Cierra pregunta #5.
+  - Sección "Preguntas abiertas" reescrita: 5 marcadas RESUELTAS; **único pendiente = alcance/categorías de la
+    alerta sin-pesar (Facundo, D2 de context.md)**. Ningún cambio de código (lo hace el implementer);
+    `feature_list.json` lo cambia el leader. Espejo en `design.md` §2/§5/§10 y `tasks.md`.
