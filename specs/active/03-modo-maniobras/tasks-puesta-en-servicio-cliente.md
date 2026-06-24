@@ -71,12 +71,14 @@
 
 > Frontend puro, sin design-spike. Solo IA y TE quedan en la ficha; la IA de manga intacta.
 
-- [ ] **T-B3.1** — `app/app/agregar-evento.tsx` (y/o `app/src/utils/event-input.ts`): quitar la opción **`natural`** del selector de servicio (`SERVICE_TYPE_OPTIONS` / render del `ServiceForm`). IA (`ai`) y TE (`te`) se conservan (DD-PSC-6). NO tocar el enum DB ni `addService`. Cubre: RPSC.6.1, RPSC.6.6.
-- [ ] **T-B3.2** — `agregar-evento.tsx`: ajustar el copy de la card "Servicio" del paso 1 (subtítulo "Monta natural, IA o TE" → "Inseminación / TE", default propuesto DD-PSC-6) — decisión menor de copy. Cubre: RPSC.6.1.
-- [ ] **T-B3.3** — Verificar (NO tocar) que `InseminacionStep` (manga, `service`+`ai`) sigue intacto y que los eventos `service` históricos siguen en el timeline (`fetchTimeline` no filtra por tipo). Cubre: RPSC.6.2, RPSC.6.3.
-- [ ] **T-B3.4** — Documentar en `progress/impl_…` la constatación RPSC.6.4 (no hay preset/secuencia/maniobra de servicio natural que romper — nunca fue `ManeuverKind`). Cubre: RPSC.6.4.
-- [ ] **T-B3.5** — `app/e2e/events.spec.ts`: actualizar el test del servicio (`:190`, "Monta natural") — el flujo de monta natural manual ya no existe; cubrir IA/TE y/o el resto de los reproductivos. El gate-por-sexo (`:147`) no cambia. Cubre: RPSC.6.5.
-- [ ] **T-B3.6** — `check.mjs` + e2e B3 verdes; Gate 2 (code) del chunk B3. Cubre: RPSC.8.5.
+- [x] **T-B3.1** — `app/src/utils/event-input.ts`: const NUEVA `SERVICE_TYPE_INPUT_OPTIONS` (`['ai','te']`, subset de `SERVICE_TYPE_OPTIONS` que queda como catálogo completo); `agregar-evento.tsx` `ServiceForm` apunta a ella (estado/props narroweados a `ManualServiceType='ai'|'te'`). NO tocado el enum DB ni `addService` (`AddServiceInput.serviceType` sigue siendo `ServiceType` completo). Cubre: RPSC.6.1, RPSC.6.6.
+- [x] **T-B3.2** — `agregar-evento.tsx`: subtítulo de la card "Servicio" del paso 1 "Monta natural, IA o TE" → **"Inseminación o TE"** (default DD-PSC-6). Cubre: RPSC.6.1.
+- [x] **T-B3.3** — Verificado (NO tocado): `InseminacionStep` (manga, `service`+`ai`) intacto; `fetchTimeline` no filtra por tipo + `humanizeServiceType('natural')='Monta natural'` sin tocar → los `service` históricos (incl. `natural`) siguen en el timeline. Cubre: RPSC.6.2, RPSC.6.3.
+- [x] **T-B3.4** — Constatación RPSC.6.4 documentada en `progress/impl_03-streamB-b3.md` (no hay preset/secuencia/maniobra de servicio natural que romper — nunca fue `ManeuverKind`). Cubre: RPSC.6.4.
+- [x] **T-B3.5** — `app/e2e/events.spec.ts`: 4 tests reescritos a "Inseminación (IA)" + test NUEVO `B3 baja monta natural…` (selector sin "Monta natural" + IA/TE presentes + `natural` histórico sembrado por admin sigue en el timeline). + unit `event-input.test.ts` (`SERVICE_TYPE_INPUT_OPTIONS`). El gate-por-sexo no cambia. Cubre: RPSC.6.5.
+- [x] **T-B3.6** — `check.mjs` VERDE end-to-end + e2e `events.spec.ts` 14/14; captura `tests/stream-b/b3-servicio-selector-{360,412}.png`. **Pendiente: veto liviano del leader + reviewer + Gate 2 (code) del chunk B3.** Cubre: RPSC.8.5.
+
+> **Nota de tracking del ledger (B3):** el ledger real de este chunk es `progress/impl_03-streamB-b3.md` (per-chunk, patrón establecido por B4/B1/B2), no `impl_03-puesta-en-servicio-cliente.md` del header.
 
 ---
 

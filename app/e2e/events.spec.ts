@@ -19,6 +19,7 @@ import {
   createTestUser,
   seedEstablishmentWithRodeo,
   seedAnimal,
+  seedReproductiveServiceEvent,
   setUserPhone,
   cleanupAll,
 } from './helpers/admin';
@@ -183,7 +184,8 @@ test('macho: el paso 1 NO ofrece eventos reproductivos (tacto/servicio/parto)', 
 //   - "Estado reproductivo" en "Estado actual" muestra "Preñada (cuerpo)" (deriveCurrentState),
 //   - la TRANSICIÓN de categoría server-side real: el CategoryBadge del hero pasa a "Vaquillona preñada"
 //     (un tacto positivo sobre una vaquillona dispara vaquillona → vaquillona_prenada),
-//   - un Servicio ("Monta natural") aparece luego en el timeline con su tipo enriquecido (service_type).
+//   - un Servicio ("Inseminación (IA)") aparece luego en el timeline con su tipo enriquecido (service_type).
+//     B3 (RPSC.6.1): la carga manual ya NO ofrece "Monta natural" → el alta de servicio usa IA.
 //
 // La hembra se siembra con seedAnimal (categoría inicial vaquillona por sexo female, category_override
 // false por default) → la transición server-side aplica al insertar el tacto positivo.
@@ -237,14 +239,15 @@ test('reproductivo: tacto (preñez media) → estado reproductivo + transición 
   // (empieza con "Vaquillona"), tolerante a mayúsc./minúsc. y a un cambio menor de copy del catálogo.
   await expect(page.getByText(/vaquillona pre[ñn]ada/i).first()).toBeVisible({ timeout: 20_000 });
 
-  // ── Agregar un SERVICIO (Monta natural). ────────────────────────────────────────────────
+  // ── Agregar un SERVICIO (Inseminación IA). ──────────────────────────────────────────────
   await page.getByRole('button', { name: 'Agregar evento', exact: true }).click();
   await page.getByRole('button', { name: 'Servicio', exact: true }).click();
 
-  // Selector vertical de tipo de servicio. Elegimos "Monta natural".
-  const natural = page.getByRole('button', { name: 'Monta natural', exact: true });
-  await expect(natural).toBeVisible({ timeout: 20_000 });
-  await natural.click();
+  // Selector vertical de tipo de servicio. B3: "Monta natural" YA NO se ofrece → elegimos "Inseminación (IA)".
+  await expect(page.getByRole('button', { name: 'Monta natural', exact: true })).toHaveCount(0);
+  const ia = page.getByRole('button', { name: 'Inseminación (IA)', exact: true });
+  await expect(ia).toBeVisible({ timeout: 20_000 });
+  await ia.click();
   // Esta hembra FIGURA preñada (el tacto Cuerpo de arriba) → registrar un servicio dispara el AVISO
   // SUAVE "figura preñada, ¿registrar el servicio igual?". Lo aceptamos (page.once('dialog')); sin este
   // handler Playwright auto-dismiss el confirm y el servicio NO se registraría.
@@ -256,12 +259,12 @@ test('reproductivo: tacto (preñez media) → estado reproductivo + transición 
   await page.getByRole('button', { name: 'Guardar evento', exact: true }).click();
   await expect.poll(() => serviceDialog, { timeout: 20_000 }).toMatch(/figura preñada/i);
 
-  // De vuelta en la ficha: el timeline muestra "Servicio" + el tipo enriquecido "Monta natural".
+  // De vuelta en la ficha: el timeline muestra "Servicio" + el tipo enriquecido "Inseminación (IA)".
   await expect(page.getByText('Cargando ficha…', { exact: true })).toHaveCount(0, { timeout: 20_000 });
   await expect(page.getByText('Servicio', { exact: true }).filter({ visible: true })).toBeVisible({
     timeout: 20_000,
   });
-  await expect(page.getByText('Monta natural', { exact: true }).filter({ visible: true })).toBeVisible();
+  await expect(page.getByText('Inseminación (IA)', { exact: true }).filter({ visible: true })).toBeVisible();
   // El tacto sigue en el timeline.
   await expect(page.getByText('Tacto', { exact: true }).filter({ visible: true }).first()).toBeVisible();
 });
@@ -601,12 +604,13 @@ test('servicio en hembra PREÑADA: aparece el aviso "figura preñada" → al con
   await expect(page.getByText('Tacto', { exact: true })).toBeVisible({ timeout: 20_000 });
   await expect(page.getByText(/Preñada \(cabeza\) · /)).toBeVisible({ timeout: 20_000 });
 
-  // ── 2) Registrar un SERVICIO → debe disparar el aviso suave "figura preñada". ───────────────
+  // ── 2) Registrar un SERVICIO (IA) → debe disparar el aviso suave "figura preñada". ──────────
   await page.getByRole('button', { name: 'Agregar evento', exact: true }).click();
   await page.getByRole('button', { name: 'Servicio', exact: true }).click();
-  const natural = page.getByRole('button', { name: 'Monta natural', exact: true });
-  await expect(natural).toBeVisible({ timeout: 20_000 });
-  await natural.click();
+  // B3: el alta manual ya NO ofrece "Monta natural" → usamos "Inseminación (IA)".
+  const ia = page.getByRole('button', { name: 'Inseminación (IA)', exact: true });
+  await expect(ia).toBeVisible({ timeout: 20_000 });
+  await ia.click();
 
   // El "Guardar evento" dispara el window.confirm del aviso suave: capturamos el dialog, verificamos el
   // copy ("figura preñada" / "registrar el servicio igual") y lo ACEPTAMOS.
@@ -620,10 +624,62 @@ test('servicio en hembra PREÑADA: aparece el aviso "figura preñada" → al con
   await expect.poll(() => dialogText, { timeout: 20_000 }).toMatch(/figura preñada/i);
   await expect.poll(() => dialogText).toMatch(/registrar el servicio igual/i);
 
-  // Tras confirmar, el servicio se registra: de vuelta en la ficha el nodo "Servicio" + "Monta natural".
+  // Tras confirmar, el servicio se registra: de vuelta en la ficha el nodo "Servicio" + "Inseminación (IA)".
   await expect(page.getByText('Cargando ficha…', { exact: true })).toHaveCount(0, { timeout: 20_000 });
   await expect(page.getByText('Servicio', { exact: true })).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByText('Monta natural', { exact: true })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText('Inseminación (IA)', { exact: true })).toBeVisible({ timeout: 20_000 });
+});
+
+// B3 (spec 03 Stream B / RPSC.6) — BAJA de la carga manual de "monta natural". Verifica:
+//   (1) RPSC.6.1: el alta manual de servicio de la ficha YA NO ofrece "Monta natural" como tipo.
+//   (2) RPSC.6.2 / DD-PSC-6: SÍ ofrece "Inseminación (IA)" y "Transferencia embrionaria (TE)" (intactas).
+//   (3) RPSC.6.3 (backward-compat): un evento `service` con service_type='natural' HISTÓRICO (sembrado
+//       por admin, como si se hubiera cargado antes de la baja) SIGUE renderizando en el timeline con su
+//       label "Monta natural" — la baja es de la VÍA DE CARGA nueva, no de la historia.
+test('B3 baja monta natural: el alta manual ofrece IA/TE y NO monta natural; el histórico natural sigue en el timeline', async ({
+  page,
+}) => {
+  const user = await createTestUser('b3montanatural');
+  await setUserPhone(user.id, '1123456789');
+  const { establishmentId, rodeoId } = await seedEstablishmentWithRodeo(user.id, 'Campo B3MontaNat');
+  const idv = `5533${Date.now().toString().slice(-5)}`;
+  const profileId = await seedAnimal(establishmentId, rodeoId, { idv, sex: 'female' });
+  // Evento HISTÓRICO de monta natural cargado "antes" de la baja (vía admin, service_role). Debe seguir
+  // visible en el timeline (RPSC.6.3) aunque ya no se pueda CREAR uno nuevo a mano.
+  await seedReproductiveServiceEvent(profileId, { serviceType: 'natural' });
+
+  await page.goto('/');
+  await signIn(page, user);
+  await waitForHome(page);
+  await gotoAnimales(page);
+
+  const row = page.getByRole('button', { name: new RegExp(idv) }).first();
+  await expect(row).toBeVisible({ timeout: 20_000 });
+  await row.click();
+  await expect(page.getByText('Historial', { exact: true })).toBeVisible({ timeout: 20_000 });
+
+  // (3) El servicio HISTÓRICO de monta natural sigue en el timeline (render intacto, label "Monta natural").
+  await expect(page.getByText('Servicio', { exact: true }).filter({ visible: true }).first()).toBeVisible({
+    timeout: 20_000,
+  });
+  await expect(
+    page.getByText('Monta natural', { exact: true }).filter({ visible: true }).first(),
+  ).toBeVisible({ timeout: 20_000 });
+
+  // ── Abrir el alta manual de servicio: el selector de tipo. ──────────────────────────────────
+  await page.getByRole('button', { name: 'Agregar evento', exact: true }).click();
+  await expect(page.getByText('¿Qué querés cargar?', { exact: true })).toBeVisible({ timeout: 20_000 });
+  await page.getByRole('button', { name: 'Servicio', exact: true }).click();
+
+  // (2) El selector OFRECE IA + TE (carga reproductiva real per-vaca, intactas).
+  await expect(page.getByRole('button', { name: 'Inseminación (IA)', exact: true })).toBeVisible({
+    timeout: 20_000,
+  });
+  await expect(
+    page.getByRole('button', { name: 'Transferencia embrionaria (TE)', exact: true }),
+  ).toBeVisible();
+  // (1) El selector YA NO ofrece "Monta natural" (RPSC.6.1).
+  await expect(page.getByRole('button', { name: 'Monta natural', exact: true })).toHaveCount(0);
 });
 
 // BUG DE ORDEN DEL TIMELINE (fix 0069 + parseTimeline): un evento TIPADO (date-only, vuelve 00:00 UTC)
@@ -657,16 +713,17 @@ test('orden del timeline: un SERVICIO cargado hoy aparece ARRIBA del "Cambió a�
   await row.click();
   await expect(page.getByText('Historial', { exact: true })).toBeVisible({ timeout: 20_000 });
 
-  // ── Cargar un SERVICIO (Monta natural). La hembra no figura preñada → guarda directo (sin aviso). ──
+  // ── Cargar un SERVICIO (IA). La hembra no figura preñada → guarda directo (sin aviso). ──
+  // B3: el alta manual ya NO ofrece "Monta natural" → usamos "Inseminación (IA)".
   await page.getByRole('button', { name: 'Agregar evento', exact: true }).click();
   await expect(page.getByText('¿Qué querés cargar?', { exact: true })).toBeVisible({ timeout: 20_000 });
   await page.getByRole('button', { name: 'Servicio', exact: true }).click();
-  const natural = page.getByRole('button', { name: 'Monta natural', exact: true });
-  await expect(natural).toBeVisible({ timeout: 20_000 });
-  await natural.click();
+  const ia = page.getByRole('button', { name: 'Inseminación (IA)', exact: true });
+  await expect(ia).toBeVisible({ timeout: 20_000 });
+  await ia.click();
   await page.getByRole('button', { name: 'Guardar evento', exact: true }).click();
 
-  // De vuelta en la ficha: el timeline muestra "Servicio" + "Monta natural" y el "Alta" del seed.
+  // De vuelta en la ficha: el timeline muestra "Servicio" + "Inseminación (IA)" y el "Alta" del seed.
   await expect(page.getByText('Cargando ficha…', { exact: true })).toHaveCount(0, { timeout: 20_000 });
   const servicio = page.getByText('Servicio', { exact: true }).filter({ visible: true }).first();
   // El nodo del seed: el category_change `initial` → título "Alta" (describeCategoryChange).
@@ -717,18 +774,19 @@ test('servicio en hembra NO preñada: NO aparece aviso → guarda directo (sin c
   // De partida NO figura preñada.
   await expect(page.getByText('Estado reproductivo', { exact: true })).toBeVisible();
 
-  // Registrar un SERVICIO directamente, SIN tacto previo → debe guardar sin aviso.
+  // Registrar un SERVICIO (IA) directamente, SIN tacto previo → debe guardar sin aviso.
+  // B3: el alta manual ya NO ofrece "Monta natural" → usamos "Inseminación (IA)".
   await page.getByRole('button', { name: 'Agregar evento', exact: true }).click();
   await page.getByRole('button', { name: 'Servicio', exact: true }).click();
-  const natural = page.getByRole('button', { name: 'Monta natural', exact: true });
-  await expect(natural).toBeVisible({ timeout: 20_000 });
-  await natural.click();
+  const ia = page.getByRole('button', { name: 'Inseminación (IA)', exact: true });
+  await expect(ia).toBeVisible({ timeout: 20_000 });
+  await ia.click();
   await page.getByRole('button', { name: 'Guardar evento', exact: true }).click();
 
-  // El servicio se creó sin confirmación: nodo "Servicio" + "Monta natural".
+  // El servicio se creó sin confirmación: nodo "Servicio" + "Inseminación (IA)".
   await expect(page.getByText('Cargando ficha…', { exact: true })).toHaveCount(0, { timeout: 20_000 });
   await expect(page.getByText('Servicio', { exact: true })).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByText('Monta natural', { exact: true })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText('Inseminación (IA)', { exact: true })).toBeVisible({ timeout: 20_000 });
   // Y NUNCA apareció un window.confirm (no figura preñada → guarda directo).
   expect(unexpectedDialog).toBe(false);
 });

@@ -15,6 +15,7 @@ import {
   OBSERVATION_MAX_LENGTH,
   PREGNANCY_OPTIONS,
   SERVICE_TYPE_OPTIONS,
+  SERVICE_TYPE_INPUT_OPTIONS,
   SEX_OPTIONS,
   validateCalves,
   shouldWarnUnconfirmedBirth,
@@ -181,7 +182,9 @@ test('PREGNANCY_OPTIONS: 4 opciones con los values del enum pregnancy_status', (
   }
 });
 
-test('SERVICE_TYPE_OPTIONS: 3 opciones con los values del enum service_type', () => {
+test('SERVICE_TYPE_OPTIONS: 3 opciones con los values del enum service_type (catálogo completo, backward-compat)', () => {
+  // El catálogo COMPLETO conserva los 3 valores del enum DB (incl. `natural`) para humanizar los eventos
+  // HISTÓRICOS de monta natural (RPSC.6.3). El enum NO se toca (RPSC.6.6).
   assert.equal(SERVICE_TYPE_OPTIONS.length, 3);
   assert.deepEqual(
     SERVICE_TYPE_OPTIONS.map((o) => o.value),
@@ -189,6 +192,27 @@ test('SERVICE_TYPE_OPTIONS: 3 opciones con los values del enum service_type', ()
   );
   for (const o of SERVICE_TYPE_OPTIONS) assert.ok(o.label.length > 0, `label vacío para ${o.value}`);
   assert.equal(SERVICE_TYPE_OPTIONS[0].label, 'Monta natural');
+});
+
+test('SERVICE_TYPE_INPUT_OPTIONS: B3 — la carga manual NO ofrece monta natural; sí IA + TE', () => {
+  // RPSC.6.1: la monta natural (`natural`) se deprecó de la vía de alta manual (servicio natural =
+  // nivel-rodeo). RPSC.6.2 / DD-PSC-6: IA y TE se conservan como carga reproductiva real per-vaca.
+  const values = SERVICE_TYPE_INPUT_OPTIONS.map((o) => o.value);
+  assert.deepEqual(values, ['ai', 'te']);
+  assert.equal(
+    values.includes('natural' as never),
+    false,
+    'la monta natural NO debe ofrecerse en el alta manual (B3)',
+  );
+  // Labels single-source: cada opción es la MISMA del catálogo completo (mismo label).
+  for (const o of SERVICE_TYPE_INPUT_OPTIONS) {
+    const fromCatalog = SERVICE_TYPE_OPTIONS.find((c) => c.value === o.value);
+    assert.ok(fromCatalog, `${o.value} debe existir en el catálogo completo`);
+    assert.equal(o.label, fromCatalog!.label, `label desincronizado para ${o.value}`);
+    assert.ok(o.label.length > 0, `label vacío para ${o.value}`);
+  }
+  // Es un SUBSET estricto del catálogo (no agrega valores nuevos al enum).
+  assert.ok(SERVICE_TYPE_INPUT_OPTIONS.length < SERVICE_TYPE_OPTIONS.length);
 });
 
 // ─── Parto: SEX_OPTIONS + validateCalves (R9 / R9.5 mellizos) ───────────────────────────────

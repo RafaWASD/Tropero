@@ -948,6 +948,31 @@ export async function seedScrotalMeasurement(
 }
 
 /**
+ * Siembra un evento reproductivo `service` HISTÓRICO directamente vía service_role (bypassea RLS), para
+ * el test de BACKWARD-COMPAT de B3 (spec 03 Stream B, RPSC.6.3): un servicio de MONTA NATURAL
+ * (`service_type='natural'`) cargado ANTES de la baja de la carga manual debe SEGUIR visible en el
+ * timeline. `establishment_id` lo DERIVA el trigger `tg_force_establishment_id_from_profile` (0077) del
+ * perfil → no se pasa. Default `service_type='natural'` (el caso que B3 deprecó). Se borra en cascada al
+ * borrar el establishment.
+ */
+export async function seedReproductiveServiceEvent(
+  profileId: string,
+  opts: { serviceType?: 'natural' | 'ai' | 'te'; eventDate?: string; notes?: string | null } = {},
+): Promise<string> {
+  const id = randomUUID();
+  const { error } = await admin.from('reproductive_events').insert({
+    id,
+    animal_profile_id: profileId,
+    event_type: 'service',
+    service_type: opts.serviceType ?? 'natural',
+    event_date: opts.eventDate ?? new Date().toISOString().slice(0, 10),
+    notes: opts.notes ?? null,
+  });
+  if (error) throw new Error(`seedReproductiveServiceEvent: ${error.message}`);
+  return id;
+}
+
+/**
  * Agrega a `userId` como MIEMBRO ACTIVO (no-owner) de un establishment existente, vía service_role.
  * Útil para sembrar un usuario que aterriza en HOME (estado 'active') pero NO es dueño único de
  * ningún campo (su baja de cuenta NO se bloquea). El rol default es 'field_operator'. (El índice

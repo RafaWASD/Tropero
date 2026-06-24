@@ -394,7 +394,11 @@ export async function addAbortion(input: AddAbortionInput): Promise<ServiceResul
 
 export type AddServiceInput = {
   profileId: string;
-  /** Tipo de servicio. Viene de un selector CERRADO (SERVICE_TYPE_OPTIONS) → siempre un enum válido. */
+  /**
+   * Tipo de servicio. La carga manual NUEVA viene de un selector CERRADO (SERVICE_TYPE_INPUT_OPTIONS =
+   * IA/TE; B3 dejó de ofrecer `natural` a mano) → siempre un enum válido. El tipo sigue siendo el enum
+   * completo (`ServiceType`) por backward-compat con el dato histórico (RPSC.6.3/RPSC.6.6).
+   */
   serviceType: ServiceType;
   /** ISO 'YYYY-MM-DD'. event_date es columna `date` NOT NULL. */
   eventDate: string;

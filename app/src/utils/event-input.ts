@@ -166,12 +166,32 @@ export const PREGNANCY_OPTIONS: readonly {
   { value: 'large', label: 'Cabeza' },
 ];
 
-/** Opciones del selector de tipo de SERVICIO (service_type). Labels es-AR. */
+/**
+ * Catálogo COMPLETO del enum service_type (DB) con sus labels es-AR. Fuente única de los labels (la usa
+ * SERVICE_TYPE_INPUT_OPTIONS para no duplicar el texto, y el humanizador del timeline espeja estos labels).
+ * Incluye `natural` porque el enum DB lo conserva y los eventos `service` HISTÓRICOS de monta natural se
+ * siguen leyendo/mostrando (RPSC.6.3, backward-compat). NO se ofrece `natural` para alta manual NUEVA —
+ * para eso está SERVICE_TYPE_INPUT_OPTIONS (B3 / RPSC.6.1).
+ */
 export const SERVICE_TYPE_OPTIONS: readonly { value: 'natural' | 'ai' | 'te'; label: string }[] = [
   { value: 'natural', label: 'Monta natural' },
   { value: 'ai', label: 'Inseminación (IA)' },
   { value: 'te', label: 'Transferencia embrionaria (TE)' },
 ];
+
+/**
+ * Opciones OFERTABLES para la carga manual per-vaca de un servicio desde "Agregar evento" (B3 / RPSC.6.1,
+ * DD-PSC-6): SOLO **IA** y **TE** — intervenciones reproductivas reales y puntuales sobre un animal. La
+ * **monta natural** (`natural`) se DEPRECA de la vía de carga nueva porque el servicio natural pasó a ser
+ * nivel-rodeo (derivado de `rodeos.service_months`, Gate 0 §1) → cargarlo a mano por animal era ficticio.
+ * Es un SUBSET de SERVICE_TYPE_OPTIONS (labels single-source); el enum DB NO cambia (RPSC.6.6) y los
+ * `natural` históricos siguen visibles en el timeline (RPSC.6.3). La IA de manga (InseminacionStep) es otra
+ * vía, intacta (RPSC.6.2).
+ */
+export const SERVICE_TYPE_INPUT_OPTIONS: readonly { value: 'ai' | 'te'; label: string }[] =
+  SERVICE_TYPE_OPTIONS.filter(
+    (o): o is { value: 'ai' | 'te'; label: string } => o.value !== 'natural',
+  );
 
 // ─── Parto: opciones de sexo del ternero + validación de la lista de terneros (R9/R9.5) ────
 // El parto crea 1..N terneros (mellizos, R9.5). Cada ternero necesita SEXO (requerido, selector

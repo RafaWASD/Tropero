@@ -69,11 +69,16 @@ import {
   reproductiveWarning,
   OBSERVATION_MAX_LENGTH,
   PREGNANCY_OPTIONS,
-  SERVICE_TYPE_OPTIONS,
+  SERVICE_TYPE_INPUT_OPTIONS,
   SEX_OPTIONS,
   type CalfDraft,
 } from '@/utils/event-input';
-import type { PregnancyStatus, ServiceType } from '@/utils/event-timeline';
+import type { PregnancyStatus } from '@/utils/event-timeline';
+
+// Tipo de servicio OFERTABLE para la carga manual NUEVA (B3 / RPSC.6.1): IA o TE. La monta natural
+// (`natural`) se deprecó de esta vía (servicio natural = nivel-rodeo). El enum DB `ServiceType` conserva
+// `natural` para los históricos; acá solo usamos el subset que el operario puede crear a mano.
+type ManualServiceType = (typeof SERVICE_TYPE_INPUT_OPTIONS)[number]['value'];
 import { buttonA11y } from '@/utils/a11y';
 import { backOr } from '@/utils/nav';
 import { confirmAction } from '@/utils/confirm';
@@ -170,8 +175,9 @@ export default function AgregarEventoScreen() {
   const [tactoStatusErr, setTactoStatusErr] = useState<string | null>(null);
   const [tactoDateErr, setTactoDateErr] = useState<string | null>(null);
 
-  // Campos de servicio (reproductivo). Notas OPCIONALES.
-  const [serviceType, setServiceType] = useState<ServiceType | null>(null);
+  // Campos de servicio (reproductivo). Notas OPCIONALES. Tipo restringido a IA/TE (B3: monta natural
+  // deprecada de la carga manual). addService acepta el enum completo → el subset es válido.
+  const [serviceType, setServiceType] = useState<ManualServiceType | null>(null);
   const [serviceDate, setServiceDate] = useState(todayIso());
   const [serviceNotes, setServiceNotes] = useState('');
   const [serviceTypeErr, setServiceTypeErr] = useState<string | null>(null);
@@ -718,7 +724,7 @@ function Step1ChooseType({
             <TypeCard
               icon={HeartHandshake}
               title="Servicio"
-              subtitle="Monta natural, IA o TE"
+              subtitle="Inseminación o TE"
               onPress={() => onChoose('service')}
             />
             <TypeCard
@@ -1033,7 +1039,9 @@ function TactoForm({
   );
 }
 
-// ─── Form: Servicio (selector cerrado de service_type + fecha + notas OPCIONALES) ──────────
+// ─── Form: Servicio (selector cerrado IA/TE + fecha + notas OPCIONALES) ────────────────────
+// B3 (RPSC.6.1): el selector ofrece SOLO IA y TE (SERVICE_TYPE_INPUT_OPTIONS). La monta natural se
+// deprecó de la carga manual (servicio natural = nivel-rodeo). Los `natural` históricos siguen en el timeline.
 
 function ServiceForm({
   type,
@@ -1046,8 +1054,8 @@ function ServiceForm({
   onNotes,
   notesErr,
 }: {
-  type: ServiceType | null;
-  onType: (t: ServiceType) => void;
+  type: ManualServiceType | null;
+  onType: (t: ManualServiceType) => void;
   typeErr: string | null;
   date: string;
   onDate: (t: string) => void;
@@ -1062,7 +1070,7 @@ function ServiceForm({
         <Text fontFamily="$body" fontSize="$3" fontWeight="500" color="$textMuted">
           Tipo de servicio
         </Text>
-        <OptionSelector options={SERVICE_TYPE_OPTIONS} value={type} onChange={onType} />
+        <OptionSelector options={SERVICE_TYPE_INPUT_OPTIONS} value={type} onChange={onType} />
         {typeErr ? (
           <Text fontFamily="$body" fontSize="$3" fontWeight="400" color="$terracota">
             {typeErr}
