@@ -534,3 +534,57 @@ tipados de PostgREST (uuid/int/text[]), **no** SQL string concatenado → sin ve
 > R7.5 — IDs estables, sin reordenar). D1-D3/D5 lockean criterios existentes sin agregar IDs. Ningún cambio de
 > seguridad (no reabre Gate 1): D5 ya estaba alineado con §5.6 (histórico de sesión exento del filtro `status`);
 > D1 mantiene la cota `[0,3650]` de R7.11.6 intacta.
+
+---
+
+## 11. Reconciliación al as-built — BACKEND Stream C (2026-06-24)
+
+> El BACKEND (las 9 RPC + suite no-bypass + helper puro) se implementó en `progress/impl_07-reportes-backend.md`
+> (dispatch del leader, separado del frontend). Diferencias entre lo construido y §1/§2 de arriba (regla dura
+> `docs/specs.md` — el design describe lo que el código REALMENTE hace). Ninguna reabre Gate 1 (el contrato de
+> seguridad §5.1-§5.10 se cumple LITERAL; estas son precisiones de empaquetado/derivación, no del *qué*).
+
+### 11.1 — Una sola migración `0106_reports_rpcs.sql` (no 4 archivos `01NN_*`)
+§1 listaba 4 migraciones (`01NN_reports_session_summary` / `_repro_kpis` / `_weight_by_category` / `_alerts`).
+**As-built:** las 9 funciones viven en **una sola** migración `supabase/migrations/0106_reports_rpcs.sql` (el
+leader la pidió consolidada), con un único bloque final de `revoke/grant` + smoke-check fail-closed (§5.8). El
+número real es `0106` (último as-built `0105`; `0092` saltada/spec-08). Mismo contrato; menos archivos.
+
+### 11.2 — `rodeo_weight_by_category(p_rodeo_id, p_session_id uuid default null)` — variante por sesión como parámetro
+§2.6 dejaba a elección "variante `..._for_session(p_session_id)` o parámetro opcional". **As-built:** parámetro
+opcional `p_session_id` (default null → toda la campaña; no-null → solo los pesajes de esa sesión, comparativa
+R7.9.5). **Defensa anti-IDOR adicional** sobre ese parámetro: si `p_session_id` no pertenece al mismo
+rodeo/tenant → `42501` (el guard de rodeo ya cubre el tenant; esto evita cruzar pesos de una sesión ajena al
+rodeo). Firma para grants: `(uuid, uuid)`.
+
+### 11.3 — Las 9 funciones (vs "8 RPC" del scope)
+El cómputo son 8 RPC (resumen sesión, %preñez, %parición, CCL, cruce por etapa, peso, 2 alertas). Se agregó la
+**9ª** `rodeo_sessions_list(p_rodeo_id)` (R7.3.6) como lister tenant-scopeado — §2.1 la marcaba OPCIONAL (la lista
+también se puede leer del SQLite local). Se expone igual para que el frontend elija; es read-only y barata.
+
+### 11.4 — Wrap de fin de año: anclaje por AÑO CALENDARIO de la concepción (precisión de §2.3)
+`rodeo_calving_kpi.calved` y `rodeo_calving_by_stage` cuentan un `birth` en la campaña `p_year` sii
+`extract(year from (event_date − interval '9 months')) = p_year AND extract(month …) = any(service_months)` —
+**espejo EXACTO de cómo Stream A (`0105`) define servidas** (cada mes tomado en su año calendario `p_year`, set-
+membership, no rango contiguo con wrap — R7.5.8). **Precisión sobre la frase de §2.3** ("la concepción es en
+`p_year`, el parto ~9 meses después" / "paren entre `p_year` y `p_year+1`"): para un servicio con wrap
+`{11,12,1}`, las concebidas en **Ene(`p_year`)** PAREN en **Oct(`p_year`)** — el MISMO año, no `p_year+1` (Ene +
+9 meses = Oct del mismo año). Las de Nov/Dic(`p_year`) sí paren en `p_year+1` (Ago/Sep). El anclaje por año
+calendario de la concepción lo resuelve correctamente sin lógica de wrap especial. (Se cubre en `reports/run.cjs`
+TR.4 con el caso wrap.)
+
+### 11.5 — Alerta dosis vencida: "dosis posterior" = última APLICACIÓN del producto (precisión de §2.7)
+§2.7/R7.10.1 decían "NOT EXISTS una dosis posterior del mismo `product_name`". **As-built:** "posterior" se
+keyea por `(event_date, created_at)` — `se` aparece sii es la **última aplicación** del producto sobre ese animal
+y su `next_dose_date < hoy`. Así el overdue refleja el estado VIGENTE: una re-vacunación posterior (aunque su
+próximo turno sea futuro) cubre la vencida vieja; si la última aplicación quedó con `next_dose` vencido, ESA
+aparece. (Antes se keyeaba tentativamente por `next_dose_date`; se corrigió en la autorrevisión para no marcar
+"cubierta" una vencida vieja por una posterior con turno aún más viejo. No cambia el *qué* de R7.10.1.)
+
+### 11.6 — `rodeo_calving_by_stage`: un parto por hembra/campaña (`distinct on`)
+La asignación por tercio toma **un** `birth` por hembra servida (el de concepción más temprana) → `total_born ==
+calved` (evita doble-conteo de mellizos o partos repetidos en la misma campaña). El bucketing mes→tercio
+(orden de servicio con wrap, tercios enteros `⌊n/3⌋`/`⌊2n/3⌋`) es el **espejo server-side** de
+`app/src/utils/calving-stage.ts` (T5.1). **Deuda de consistencia** (Gate 0 §9, ya anotada en §2.5/§8): el
+bucketing 4-11 `[SUPUESTO]` se ajusta en AMBOS lugares (esta RPC + `calving-stage.ts` + `pregnancy-buckets.ts`)
+cuando Facundo cierre.

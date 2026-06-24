@@ -12,6 +12,26 @@
 > **Dependencias:** Stream A (`0102`/`0104`/`0105`) y Stream B (tacto con `pregnancy_status`) deben estar
 > aplicados en remoto para que la suite de Stream C corra verde. Hasta el apply, `reports/run.cjs` es
 > roja-hasta-apply (esperado, patrón `puesta-en-servicio`).
+>
+> **Estado BACKEND (Stream C, 2026-06-24, ledger `progress/impl_07-reportes-backend.md`):** las 9 RPC (T1.1-T4.2)
+> + la suite no-bypass (T1.3/T2.5/T2.6/T3.2/T4.3) + el helper puro `calving-stage.ts` (T5.1/T5.2) están
+> IMPLEMENTADOS. **Reconciliaciones de as-built** (regla dura `docs/specs.md`; detalle en design §11):
+> - **Una sola migración** `supabase/migrations/0106_reports_rpcs.sql` (dispatch del leader), no las 4 `01NN_*`
+>   separadas que listaba design §1. Las 9 funciones viven en `0106` con un único bloque de grants + smoke-check.
+> - **`rodeo_weight_by_category(p_rodeo_id, p_session_id uuid default null)`**: la variante "por sesión" se
+>   implementó como **parámetro opcional** (no función `_for_session` aparte) — design §2.6 la dejaba a elección
+>   del implementer. Defensa anti-IDOR extra: si `p_session_id` no es de ese rodeo/tenant → `42501`.
+> - **Wrap de fin de año (R7.5.8)**: el `calved`/`calving_by_stage` anclan cada mes de concepción a su AÑO
+>   calendario `p_year` (`extract(year from event_date − 9mo) = p_year AND month ∈ service_months`), espejo de
+>   cómo Stream A define servidas. Precisión sobre la nota de design §2.3 ("paren entre p_year y p_year+1"): para
+>   un servicio con wrap {11,12,1}, las concebidas en Ene(p_year) PAREN en Oct(p_year) (mismo año), no p_year+1.
+> - **Alerta dosis vencida — "dosis posterior" (R7.10.1)** se define como "`se` es la ÚLTIMA APLICACIÓN del
+>   producto sobre el animal por `(event_date, created_at)`" (no por `next_dose_date`): el overdue refleja el
+>   estado vigente (una re-vacunación posterior con turno futuro cubre la vencida vieja). design §2.7 decía
+>   genéricamente "NOT EXISTS una dosis posterior"; esto lo precisa sin cambiar el *qué*.
+>
+> Pendiente del backend: leader aplica `0106` (con OK de Raf) → descomenta el hook de `reports/run.cjs` →
+> suite verde → reviewer + Gate 2. **Frontend (T5.3-T7.3 + T6.x) va aparte**, después.
 
 ---
 
@@ -27,37 +47,37 @@
 
 ## Fase 1 — Backend: resumen de sesión + lista de sesiones
 
-- [ ] **T1.1** — Migración `01NN_reports_session_summary.sql`: RPC `session_event_summary(p_session_id uuid)` →
+- [x] **T1.1** — Migración `01NN_reports_session_summary.sql`: RPC `session_event_summary(p_session_id uuid)` →
   conteo por tipo de evento de la sesión (las **7 tablas con FK `session_id`**: weight/reproductive/sanitary/
   condition/lab/scrotal/custom — NO `animal_events`, que no tiene `session_id`; `deleted_at IS NULL`) + animales
   distintos por kind. Guard `has_role_in` derivado de `sessions.establishment_id`, `STABLE`, revoke anon/public + grant
   authenticated + smoke-check fail-closed. Cubre: R7.3.1, R7.3.2, R7.3.3, R7.12.2, R7.12.4.
-- [ ] **T1.2** — En la misma migración: `rodeo_sessions_list(p_rodeo_id uuid)` (lista de sesiones del rodeo,
+- [x] **T1.2** — En la misma migración: `rodeo_sessions_list(p_rodeo_id uuid)` (lista de sesiones del rodeo,
   `order by started_at desc`, guard de tenant) **o** documentar que la lista se lee del SQLite local existente
   (`sessions.ts`) y omitir la RPC. Decisión documentada en el header de la migración / `impl_*`. Cubre: R7.3.6.
-- [ ] **T1.3** — Test (`reports/run.cjs`): resumen cuenta por tipo, excluye borrados (R7.3.3), funciona en sesión
+- [x] **T1.3** — Test (`reports/run.cjs`): resumen cuenta por tipo, excluye borrados (R7.3.3), funciona en sesión
   `active` (R7.3.4) y vacía → conteos 0 (R7.3.5); anti-IDOR cross-tenant (sesión de otro establecimiento →
   `42501`); read-only; anon/public sin EXECUTE. Cubre: R7.3.1, R7.3.3, R7.3.4, R7.3.5, R7.12.1, R7.12.3, R7.12.4.
 
 ## Fase 2 — Backend: KPIs reproductivos (consumen Stream A)
 
-- [ ] **T2.1** — Migración `01NN_reports_repro_kpis.sql`: RPC `rodeo_pregnancy_kpi(p_rodeo_id, p_year)` → invoca
+- [x] **T2.1** — Migración `01NN_reports_repro_kpis.sql`: RPC `rodeo_pregnancy_kpi(p_rodeo_id, p_year)` → invoca
   `rodeo_service_campaign` (is_configured), `rodeo_serviced_females`, `rodeo_repro_denominator`; numerador
   `pregnant` = tacto+ vigente (misma subquery que `compute_category` RT2.7.5). Guard + cota `p_year` + grants +
   smoke-check. Cubre: R7.5.1, R7.5.2, R7.5.5, R7.5.6, R7.5.7, R7.12.2, R7.12.4.
-- [ ] **T2.2** — RPC `rodeo_calving_kpi(p_rodeo_id, p_year)`: numerador `calved` = servidas con ≥1 `birth` cuyo
+- [x] **T2.2** — RPC `rodeo_calving_kpi(p_rodeo_id, p_year)`: numerador `calved` = servidas con ≥1 `birth` cuyo
   **mes de concepción** (mes parto − 9, wrap 1-12) ∈ `service_months` (alinea con servidas, Gate 0 §5); devuelve
   `serviced/entoradas/pregnant/calved`. Cubre: R7.6.1, R7.6.2, R7.6.5, R7.6.6.
-- [ ] **T2.3** — RPC `rodeo_ccl_distribution(p_rodeo_id, p_year)` → conteo head/body/tail (`large/medium/small`)
+- [x] **T2.3** — RPC `rodeo_ccl_distribution(p_rodeo_id, p_year)` → conteo head/body/tail (`large/medium/small`)
   del último tacto+ vigente de las preñadas de la campaña + `n_months` + `total`. Cubre: R7.7.1, R7.7.5.
-- [ ] **T2.4** — RPC `rodeo_calving_by_stage(p_rodeo_id, p_year)` → nacimientos por tercio de `service_months`
+- [x] **T2.4** — RPC `rodeo_calving_by_stage(p_rodeo_id, p_year)` → nacimientos por tercio de `service_months`
   (mes de concepción ubicado en cabeza/cuerpo/cola). Documentar la deuda de consistencia con `pregnancy-buckets`
   (bucketing 4-11 `[SUPUESTO]`, Gate 0 §9). Cubre: R7.8.1.
-- [ ] **T2.5** — Test (`reports/run.cjs`) de los 4 KPIs sobre fixtures: %preñez y %parición con valores
+- [x] **T2.5** — Test (`reports/run.cjs`) de los 4 KPIs sobre fixtures: %preñez y %parición con valores
   conocidos; **denominador 0 → la RPC devuelve serviced=0 sin NaN** (R7.5.4/R7.6.3); rodeo sin `service_months`
   → `is_configured=false` (R7.5.6/R7.6.6); CCL vacío → total=0 (R7.7.4); cruce nacimientos degrada con total_born=0
   (R7.8.3); tenant-scope/anti-IDOR/read-only/grants en las 4. Cubre: R7.5.4, R7.6.3, R7.7.4, R7.8.3, R7.12.x.
-- [ ] **T2.6** — Test: con **base única servidas** (sin alternar — R7.5.3/R7.6.4, Puerta de spec 2026-06-24), el
+- [x] **T2.6** — Test: con **base única servidas** (sin alternar — R7.5.3/R7.6.4, Puerta de spec 2026-06-24), el
   %preñez = `pregnant/serviced` y el %parición = `calved/serviced` salen correctos sobre los absolutos que devuelve
   la RPC; la **pérdida preñez→parición** se verifica comparando los dos KPIs sobre la misma base servidas
   (`pregnant ≥ calved`), no con una base alterna. La RPC sigue devolviendo `entoradas`/`pregnant` como insumo (no
@@ -65,17 +85,17 @@
 
 ## Fase 3 — Backend: peso por categoría
 
-- [ ] **T3.1** — Migración `01NN_reports_weight_by_category.sql`: RPC `rodeo_weight_by_category(p_rodeo_id)` →
+- [x] **T3.1** — Migración `01NN_reports_weight_by_category.sql`: RPC `rodeo_weight_by_category(p_rodeo_id)` →
   AVG del último `weight_event` no borrado por animal activo, group by categoría, con `n_animals`; guard +
   grants + smoke-check. Variante/param para "por sesión" (comparativa, R7.9.5). Cubre: R7.9.1, R7.9.2, R7.9.4,
   R7.9.5, R7.12.2, R7.12.4.
-- [ ] **T3.2** — Test (`reports/run.cjs`): promedio correcto sobre fixtures, excluye borrados (R7.9.3), categoría
+- [x] **T3.2** — Test (`reports/run.cjs`): promedio correcto sobre fixtures, excluye borrados (R7.9.3), categoría
   sin peso ausente (la UI la marca "sin pesar", R7.9.4), tenant-scope/read-only/grants. Cubre: R7.9.1, R7.9.3,
   R7.9.4, R7.12.x.
 
 ## Fase 4 — Backend: alertas
 
-- [ ] **T4.1** — Migración `01NN_reports_alerts.sql`: RPC `establishment_overdue_doses(p_establishment_id uuid,
+- [x] **T4.1** — Migración `01NN_reports_alerts.sql`: RPC `establishment_overdue_doses(p_establishment_id uuid,
   p_lookback_days int default 365, p_limit int default 500)` → `sanitary_events` no borrados, animal activo,
   `next_dose_date < hoy`, sin dosis posterior del mismo producto/animal; identifica animal+producto+fecha. **Guard
   `has_role_in(p_establishment_id)` como 1ª sentencia ejecutable** (M1, design §5.1; el `p_establishment_id` viene
@@ -84,7 +104,7 @@
   el join** (M3, §5.6). **Cota de escaneo** (M4, §5.4): piso `next_dose_date >= current_date - make_interval(days
   => p_lookback_days)` + `LIMIT p_limit`; validar `p_lookback_days >= 0` y `p_limit between 1 and 1000` tras el
   guard (raise `22023`). Grants + smoke-check. Cubre: R7.10.1, R7.10.2, R7.10.3, R7.10.5, R7.12.2, R7.12.4.
-- [ ] **T4.2** — En la misma migración: RPC `establishment_unweighed(p_establishment_id, p_threshold_days int
+- [x] **T4.2** — En la misma migración: RPC `establishment_unweighed(p_establishment_id, p_threshold_days int
   default 180, p_category_codes text[] default null)` → activos sin peso o último pesaje > umbral, filtrado por
   categorías; identifica animal+categoría+días. **El umbral 180 d es el default-MVP CERRADO** (Puerta de spec
   2026-06-24), parametrizado por tuneabilidad ("quizá lo modifiquemos", Raf); **el alcance/categorías sigue
@@ -92,7 +112,7 @@
   `animal_profiles` con `deleted_at`/`status` en el join (M2/M3). **Cota de input** (M4-menor/L1): validar
   `p_threshold_days between 0 and 3650` (tope concreto = 10 años, testeable) y `cardinality(p_category_codes) <= 64`
   (raise `22023` fuera de rango). Cubre: R7.11.1, R7.11.2, R7.11.3, R7.11.4, R7.11.6.
-- [ ] **T4.3** — Test (`reports/run.cjs`): dosis vencida detecta el caso y excluye el que tiene dosis posterior
+- [x] **T4.3** — Test (`reports/run.cjs`): dosis vencida detecta el caso y excluye el que tiene dosis posterior
   (R7.10.1), excluye archivados/borrados (R7.10.3); sin pesar respeta umbral y `p_category_codes` (R7.11.1/.2),
   "nunca pesado" aparece (R7.11.3); empty = lista vacía (la UI muestra el positivo); tenant-scope/grants.
   **(M1) assert IDOR explícito** — al estilo de T1.3/T2.5: un JWT del tenant B que llama
@@ -104,9 +124,9 @@
 
 ## Fase 5 — Cliente: capa de datos + helper puro
 
-- [ ] **T5.1** — `app/src/utils/calving-stage.ts` (PURO): mapeo mes-de-concepción → bucket (cabeza/cuerpo/cola)
+- [x] **T5.1** — `app/src/utils/calving-stage.ts` (PURO): mapeo mes-de-concepción → bucket (cabeza/cuerpo/cola)
   por tercios de `service_months`, espejo de la regla de la RPC (T2.4). Cubre: R7.8.1 (etiquetado UI).
-- [ ] **T5.2** — `app/src/utils/calving-stage.test.ts` (node:test): tercios para 3-11 meses, cabeza/cola para 2,
+- [x] **T5.2** — `app/src/utils/calving-stage.test.ts` (node:test): tercios para 3-11 meses, cabeza/cola para 2,
   vacío para 1/12/null (consistente con `pregnancy-buckets`). Cubre: R7.8.1.
 - [ ] **T5.3** — `app/src/services/reports.ts`: wrappers `supabase.rpc(...)` de TODAS las RPC; mapeo snake→camel;
   **detección de offline antes de llamar** → `Result.err({ kind: 'offline' })`; traducción de errores a
