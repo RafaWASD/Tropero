@@ -174,11 +174,17 @@ const GROUP_DESTINATIONS = new Set([
 // pantalla VISUAL 100% MOCK (paridad con los otros spikes), alcanzable directo en web sin auth para la
 // captura e2e a 360/412 en web táctil. Referencia visual del ServiceMonthsSelector (selección de un
 // período contiguo por construcción) hasta que el cableado (POST-VETO) lo enchufe al alta/edición real.
+// Spec 03 Stream B / B2 — DESIGN SPIKE del TACTO DE PREÑEZ CONFIGURABLE (`maniobra/tacto-spike`):
+// pantalla VISUAL 100% MOCK (paridad con los otros spikes), alcanzable directo en web sin auth para la
+// captura e2e a 360/412 en web táctil. Referencia visual del `TactoStep` adaptativo (N bloques de tamaño
+// según los meses de servicio del rodeo) + el config "¿medir tamaño?" hasta que el cableado (POST-VETO)
+// lo enchufe a la jornada real.
 const DEV_WEB_ROUTES = new Set([
   'baston-test',
   'maniobra/paso',
   'maniobra/rueda-ce',
   'maniobra/service-months-spike',
+  'maniobra/tacto-spike',
 ]);
 
 /**
@@ -427,6 +433,12 @@ function RootGate() {
           ServiceMonthsSelector (período contiguo por construcción) hasta que el cableado (POST-VETO) lo
           enchufe al alta/edición de rodeo. Pantalla completa (no modal). */}
       <Stack.Screen name="maniobra/service-months-spike" />
+      {/* Spec 03 Stream B / B2 — DESIGN SPIKE del TACTO DE PREÑEZ CONFIGURABLE (`maniobra/tacto-spike`):
+          pantalla VISUAL 100% MOCK, alcanzable directo en web sin auth (DEV_WEB_ROUTES) para la captura
+          e2e a 360/412 en web táctil. Referencia visual del TactoStep adaptativo (N bloques de tamaño
+          según los meses de servicio del rodeo) + el config "¿medir tamaño?" hasta que el cableado
+          (POST-VETO) lo enchufe a la jornada real. Pantalla completa (no modal). */}
+      <Stack.Screen name="maniobra/tacto-spike" />
       {/* Spec 03 M2.1-core — IDENTIFICACIÓN del animal (scan-first cableado: BLE + manual + find-or-create
           + auto-avance). Pantalla AUTENTICADA real (consume la sesión + establishment/rodeo + el listener
           del bastón), gateada como cualquier otra — NO está en DEV_WEB_ROUTES. Se llega desde el wizard de
