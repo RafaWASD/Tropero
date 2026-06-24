@@ -75,9 +75,12 @@ test('preview de transición: tacto+ sobre vaquillona muestra "Vaquillona preña
   test.setTimeout(150_000);
   const user = await createTestUser('r84-prenada');
   await setUserPhone(user.id, '1123456789');
+  // B2: rodeo con 3 meses de servicio → el tacto ofrece el sub-paso de tamaño (CABEZA/CUERPO/COLA). Este test
+  // toca CABEZA para un tacto+ → necesita el sub-paso (un rodeo sin configurar iría directo, DD-PSC-2).
   const { establishmentId, rodeoId } = await seedEstablishmentWithRodeo(user.id, 'Campo Preview R84', {
     rodeoName: 'Cría hembras',
     rodeoRawName: true,
+    serviceMonths: [10, 11, 12],
   });
   const eid = makeEid();
   const visual = '0410';

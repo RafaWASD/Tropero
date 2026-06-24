@@ -260,14 +260,24 @@ const TEETH_LABEL: Record<string, string> = {
   sin_dientes: 'Sin dientes',
 };
 
+/**
+ * Opciones de presentación del describe/resumen (spec 03 Stream B / B2). `tactoMeasuredSize` (DD-PSC-8): si
+ * `false`, la jornada NO midió tamaño de preñez (rodeo de 1/12 meses, sin configurar, o "medir = NO") → una
+ * preñez se persiste con `pregnancy_status='large'` por CONVENCIÓN (DD-PSC-2) pero el operario NO diagnosticó
+ * un tamaño → el resumen muestra solo "Preñada" (sin "· Cabeza"), para no exhibir un tamaño no medido.
+ * Ausente/`true` (default) → comportamiento as-built: "Preñada · Cabeza/Cuerpo/Cola".
+ */
+export type DescribeStepOpts = { tactoMeasuredSize?: boolean };
+
 /** Texto legible es-AR del valor de un paso, para el resumen (R5.9). es-AR en los números (coma decimal). */
-export function describeStepValue(value: StepValue | undefined): string {
+export function describeStepValue(value: StepValue | undefined, opts: DescribeStepOpts = {}): string {
   if (!value) return 'Sin cargar';
   switch (value.kind) {
     case 'tacto':
-      return value.pregnancy === 'empty'
-        ? 'Vacía'
-        : `Preñada · ${PREGNANCY_SIZE_LABEL[value.pregnancy]}`;
+      if (value.pregnancy === 'empty') return 'Vacía';
+      // DD-PSC-8: jornada sin distinción de tamaño → solo "Preñada" (el 'large' es convención, no diagnóstico).
+      if (opts.tactoMeasuredSize === false) return 'Preñada';
+      return `Preñada · ${PREGNANCY_SIZE_LABEL[value.pregnancy]}`;
     case 'pesaje':
       // es-AR: coma decimal + punto de miles (memoria reference_es_ar_number_format). 385 → "385 kg".
       return `${value.weightKg.toLocaleString('es-AR')} kg`;
@@ -316,6 +326,9 @@ export function summaryRows(
   steps: readonly SequenceItem[],
   captured: CaptureMap,
   customCaptured: CustomCaptureMap = {},
+  // DD-PSC-8 (B2): pasa al describe del tacto si la jornada midió tamaño (deriva de los buckets del rodeo +
+  // override del config, en el frame). Default `true` → comportamiento as-built (resumen con "· Cabeza").
+  opts: DescribeStepOpts = {},
 ): SummaryRow[] {
   return steps.map((s) => {
     if (s.source === 'custom') {
@@ -333,7 +346,8 @@ export function summaryRows(
       maneuver: s.maneuver,
       source: 'factory' as const,
       label: maneuverLabel(s.maneuver),
-      value: describeStepValue(v),
+      // Solo el tacto consume el flag de tamaño; los demás describe ignoran opts (sin efecto colateral).
+      value: describeStepValue(v, opts),
       captured: v != null && v.kind !== 'skipped',
     };
   });

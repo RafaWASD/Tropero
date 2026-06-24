@@ -138,9 +138,13 @@ test('flujo completo: identify → carga rápida (tacto + pesaje) → resumen �
   // Identidad LIMPIA para las capturas del demo (R12.4): rodeo "Cría hembras" sin el prefijo e2e + caravana
   // visual humana "0385" + categoría Vaquillona → consistente con identify-found.png. El campo está aislado
   // por usuario, así que "0385" no colisiona en la lista. La caravana electrónica (eid) va MUTED en el header.
+  // B2: rodeo con 3 meses de servicio → el tacto ofrece el sub-paso de tamaño cabeza/cuerpo/cola (RPSC.5.4).
+  // (Antes de B2 el tacto SIEMPRE mostraba los 3 bloques; ahora depende del service_months del rodeo → un
+  // rodeo configurado a 3 meses preserva ese flujo. Un rodeo sin configurar iría directo, DD-PSC-2/RPSC.4.4.)
   const { establishmentId, rodeoId } = await seedEstablishmentWithRodeo(user.id, 'Campo Carga M22', {
     rodeoName: 'Cría hembras',
     rodeoRawName: true,
+    serviceMonths: [10, 11, 12],
   });
   const eid = makeEid();
   const visual = '0385';
@@ -274,7 +278,10 @@ test('offline: cargar maniobras sin red → reconexión → los eventos aterriza
   test.setTimeout(180_000);
   const user = await createTestUser('m22-offline');
   await setUserPhone(user.id, '1123456789');
-  const { establishmentId, rodeoId } = await seedEstablishmentWithRodeo(user.id, 'Campo Offline M22');
+  // B2: 3 meses de servicio → el tacto ofrece el sub-paso de tamaño (cabeza/cuerpo/cola), como pre-B2.
+  const { establishmentId, rodeoId } = await seedEstablishmentWithRodeo(user.id, 'Campo Offline M22', {
+    serviceMonths: [10, 11, 12],
+  });
   const eid = makeEid();
   const visual = `${RUN_TAG}-OFF`;
   const profileId = await seedAnimal(establishmentId, rodeoId, { tag: eid, visualAlt: visual, sex: 'female' });

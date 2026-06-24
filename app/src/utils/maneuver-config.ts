@@ -172,6 +172,26 @@ export function pajuelasFor(config: ManeuverConfig): string[] {
 }
 
 /**
+ * Lee la elección "¿medir tamaño de preñez?" del TACTO (spec 03 Stream B / B2 — RPSC.4.1/RPSC.4.3) del config
+ * jsonb pass-through. La preconfig del tacto es UN OBJETO `{ measureSize: boolean }` bajo `preconfig.tacto`
+ * (a diferencia de las de texto libre de vacuna/pajuela). Es la elección de TANDA que el operario hizo (o no)
+ * en el wizard (`TactoConfigSheet`). Devuelve:
+ *   - `true` / `false` → la elección explícita persistida (override del operario, RPSC.4.3).
+ *   - `undefined` → NO se configuró (preconfig ausente, shape inesperado, o `measureSize` no booleano) → el
+ *     caller cae al DEFAULT derivado del rodeo (`defaultMeasureSize`, RPSC.4.2). NUNCA tira (jsonb no confiable).
+ * El nº de botones efectivo lo resuelve `effectiveSizeBuckets(nMonths, <esto>)` (pregnancy-buckets.ts, FUENTE
+ * ÚNICA de la regla CCL — RPSC.4.5/RPSC.5.8): este lector NO decide buckets, solo recupera el override.
+ */
+export function tactoMeasureSizeFromConfig(config: ManeuverConfig): boolean | undefined {
+  const pre = config.preconfig;
+  if (pre == null || typeof pre !== 'object' || Array.isArray(pre)) return undefined;
+  const raw = (pre as Record<string, unknown>).tacto;
+  if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const v = (raw as Record<string, unknown>).measureSize;
+  return typeof v === 'boolean' ? v : undefined;
+}
+
+/**
  * Histórico de valores "usados antes" (R1.8) para el autocompletar de un paso de carga: todos los valores de
  * preconfig de la jornada (de TODAS las maniobras), aplanados (los multi por coma), deduplicados
  * case-insensitive. Espeja la fuente source-agnostic de DM1-UI-1 (el preconfig SON valores ya cargados por

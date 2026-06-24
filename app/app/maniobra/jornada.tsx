@@ -46,7 +46,8 @@ import {
 import type { CustomFieldDraft } from '@/utils/custom-field';
 import { useManeuverGating } from '@/hooks/useManeuverGating';
 import { ALL_MANEUVERS, type ManeuverKind } from '@/utils/maneuver-gating';
-import { extractCustomManiobras } from '@/utils/maneuver-config';
+import { extractCustomManiobras, tactoMeasureSizeFromConfig } from '@/utils/maneuver-config';
+import { defaultMeasureSize } from '@/utils/pregnancy-buckets';
 import {
   buildJornadaConfig,
   maneuverDetail,
@@ -58,6 +59,7 @@ import {
 } from '@/utils/maneuver-wizard';
 import { ManeuverReorderList, type ReorderScrollContext } from './_components/ManeuverReorderList';
 import { ManeuverConfigSheet, type ManeuverConfigKind } from './_components/ManeuverConfigSheet';
+import { TactoConfigSheet } from './_components/TactoConfigSheet';
 import { SavePresetSheet } from './_components/SavePresetSheet';
 import { CustomFieldSheet } from './_components/CustomFieldSheet';
 
@@ -114,6 +116,9 @@ export default function JornadaWizardScreen() {
   const [presetOmitted, setPresetOmitted] = useState<ManeuverKind[]>([]);
   // Maniobra cuyo bottom sheet de preconfig está abierto (null = ninguno). Solo configurables (R1.7).
   const [configManeuver, setConfigManeuver] = useState<ManeuverKind | null>(null);
+  // ¿Está abierto el sheet "¿medir tamaño?" del TACTO (spec 03 Stream B / B2, RPSC.4.1)? El tacto tiene su
+  // propia preconfig BINARIA (no texto libre) → sheet aparte (TactoConfigSheet), no el ManeuverConfigSheet.
+  const [tactoConfigOpen, setTactoConfigOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // ¿Está abierto el sheet de "Guardar como rutina" (R2.1)? Independiente de arrancar.
@@ -270,9 +275,16 @@ export default function JornadaWizardScreen() {
     setChosen((prev) => moveManeuver(prev, from, to));
   }, []);
 
-  // Abrir el bottom sheet de preconfig de una maniobra configurable (R1.7). Tocar el cuerpo de la fila.
+  // nº de meses de servicio del rodeo elegido (para el default + el copy del sugerido del tacto, B2 RPSC.4.2).
+  // `serviceMonths === null` ("sin configurar") → null (defaultMeasureSize → NO); `[]` ("no hace servicio")
+  // → 0 (→ NO). NUNCA hardcodeado: sale del rodeo elegido (multi-tenant). undefined hasta elegir rodeo.
+  const serviceMonthsCount = rodeo?.serviceMonths == null ? null : rodeo.serviceMonths.length;
+
+  // Abrir el bottom sheet de preconfig de una maniobra configurable. TACTO (B2, RPSC.4.1) → su sheet binario
+  // (¿medir tamaño?); vacunación/inseminación (R1.7) → el de texto libre. Tocar el cuerpo de la fila.
   const onOpenConfig = useCallback((m: ManeuverKind) => {
-    if (FREE_TEXT_PRECONFIG[m]) setConfigManeuver(m);
+    if (m === 'tacto') setTactoConfigOpen(true);
+    else if (FREE_TEXT_PRECONFIG[m]) setConfigManeuver(m);
   }, []);
 
   // Guardar el preconfig desde el sheet → persiste en config.preconfig[<maniobra>] (R1.7); vacío = limpia.
@@ -284,6 +296,14 @@ export default function JornadaWizardScreen() {
       return next;
     });
     setConfigManeuver(null);
+  }, []);
+
+  // Guardar "¿medir tamaño?" del TACTO desde el TactoConfigSheet (B2, RPSC.4.1/4.3) → persiste el OBJETO
+  // `{ measureSize }` en config.preconfig.tacto (shape que tactoMeasureSizeFromConfig lee; lo consume la
+  // carga rápida vía effectiveSizeBuckets). Siempre se guarda explícito (true o false) — el operario decidió.
+  const onTactoConfigSave = useCallback((measureSize: boolean) => {
+    setPreconfig((prev) => ({ ...prev, tacto: { measureSize } }));
+    setTactoConfigOpen(false);
   }, []);
 
   const onBack = useCallback(() => {
@@ -468,6 +488,7 @@ export default function JornadaWizardScreen() {
               offered={offered}
               chosen={chosen}
               preconfig={preconfig}
+              serviceMonthsCount={serviceMonthsCount}
               loading={gating.loading}
               gatingError={gating.error}
               presetOmitted={presetOmitted}
@@ -487,6 +508,7 @@ export default function JornadaWizardScreen() {
               rodeo={rodeo}
               chosen={chosen}
               preconfig={preconfig}
+              serviceMonthsCount={serviceMonthsCount}
               customChosen={customManeuvers.filter((c) => chosenCustom.includes(c.fieldDefinitionId))}
             />
           )}
@@ -575,6 +597,19 @@ export default function JornadaWizardScreen() {
         />
       ) : null}
 
+      {/* BOTTOM SHEET "¿medir tamaño?" del TACTO (B2, RPSC.4.1): segmentado Sí/No, default DERIVADO del rodeo
+          elegido (defaultMeasureSize(serviceMonthsCount)) visible + override de un toque. Persiste el OBJETO
+          { measureSize } en config.preconfig.tacto. value = el override previo (si ya se configuró). */}
+      {tactoConfigOpen ? (
+        <TactoConfigSheet
+          suggested={defaultMeasureSize(serviceMonthsCount)}
+          serviceMonthsCount={serviceMonthsCount}
+          value={tactoMeasureSizeFromConfig({ preconfig })}
+          onSave={onTactoConfigSave}
+          onClose={() => setTactoConfigOpen(false)}
+        />
+      ) : null}
+
       {/* BOTTOM SHEET de "Guardar como rutina" (R2.1): nombre + Guardar → createPreset con la config
           ACTUAL de la jornada. Independiente de arrancar. Fail-closed (no cierra ni pierde lo tipeado). */}
       {savePresetOpen ? (
@@ -633,6 +668,7 @@ function StageManeuvers({
   offered,
   chosen,
   preconfig,
+  serviceMonthsCount,
   loading,
   gatingError,
   presetOmitted,
@@ -650,6 +686,8 @@ function StageManeuvers({
   offered: ManeuverKind[];
   chosen: ManeuverKind[];
   preconfig: ManeuverPreconfig;
+  /** nº de meses de servicio del rodeo elegido (B2): el inline del tacto muestra el sugerido derivado. */
+  serviceMonthsCount: number | null;
   loading: boolean;
   gatingError: string | null;
   presetOmitted: ManeuverKind[];
@@ -675,9 +713,22 @@ function StageManeuvers({
     return <InfoNote>Este rodeo no tiene maniobras habilitadas en su plantilla de datos.</InfoNote>;
   }
 
-  // Resuelve el preconfig INLINE de una maniobra (R1.7): valor cargado (string) o el hint si no hay nada.
-  // Solo las configurables (vacunación/inseminación) muestran segunda línea — el resto devuelve null.
+  // Resuelve el preconfig INLINE de una maniobra (R1.7 / B2): valor cargado o el hint si no hay nada. Las
+  // configurables muestran segunda línea + chevron (tocá el cuerpo → su sheet). Las demás devuelven null.
+  //  - TACTO (B2, RPSC.4.1/4.2): "¿medir tamaño?". Si el operario lo CONFIGURÓ → "Medí tamaño: Sí/No"
+  //    (valor cargado, énfasis); si NO → hint con el SUGERIDO derivado del rodeo ("Sugerido: Sí — tocá para
+  //    elegir"), para que no haya que abrir el sheet a ciegas. El default real (al no abrirlo) lo aplica la
+  //    carga rápida igual (effectiveSizeBuckets cae al defaultMeasureSize) → el inline es informativo, no
+  //    obligatorio.
+  //  - vacunación/inseminación (R1.7): texto libre (vacuna/pajuela).
   const inlineConfig = (m: ManeuverKind): { value: string | null; hint: string } | null => {
+    if (m === 'tacto') {
+      const explicit = tactoMeasureSizeFromConfig({ preconfig });
+      const suggested = defaultMeasureSize(serviceMonthsCount);
+      const value = explicit === undefined ? null : `Medí tamaño: ${explicit ? 'Sí' : 'No'}`;
+      const hint = `Sugerido: ${suggested ? 'Sí' : 'No'} — tocá para elegir`;
+      return { value, hint };
+    }
     const cfg = FREE_TEXT_PRECONFIG[m];
     if (!cfg) return null;
     const value = maneuverDetail(preconfig, m);
@@ -824,11 +875,14 @@ function StageSummary({
   rodeo,
   chosen,
   preconfig,
+  serviceMonthsCount,
   customChosen,
 }: {
   rodeo: Rodeo | null;
   chosen: ManeuverKind[];
   preconfig: ManeuverPreconfig;
+  /** nº de meses de servicio del rodeo (B2): el detalle del tacto muestra el efectivo (override o sugerido). */
+  serviceMonthsCount: number | null;
   /** Maniobras custom elegidas para la jornada (R13.8), en el orden de selección. */
   customChosen: EnabledCustomManeuver[];
 }) {
@@ -861,7 +915,12 @@ function StageSummary({
         {chosen.map((m, i) => {
           // Detalle cargado desde config.preconfig (R1.9): "Brucelosis" bajo "Vacunación", la pajuela
           // bajo "Inseminación", etc. Resuelto TOLERANTE por el helper puro (string o objeto → texto).
-          const detail = maneuverDetail(preconfig, m);
+          // TACTO (B2): muestra "Medí tamaño: Sí/No" — el override del operario o, si no configuró, el
+          // SUGERIDO derivado del rodeo (lo que la carga rápida aplicará por default).
+          const detail =
+            m === 'tacto'
+              ? `Medí tamaño: ${(tactoMeasureSizeFromConfig({ preconfig }) ?? defaultMeasureSize(serviceMonthsCount)) ? 'Sí' : 'No'}`
+              : maneuverDetail(preconfig, m);
           return (
             <XStack
               key={m}

@@ -26,6 +26,7 @@ import {
   buildSystemsBySpeciesQuery,
   buildSystemByCodeQuery,
   buildRodeosQuery,
+  buildRodeoServiceMonthsQuery,
   toBool,
 } from './powersync/local-reads';
 import { runLocalQuery, runLocalQuerySingle } from './powersync/local-query';
@@ -149,6 +150,30 @@ export async function fetchRodeos(establishmentId: string): Promise<ServiceResul
   const r = await runLocalQuery<RodeoRow>(buildRodeosQuery(establishmentId));
   if (!r.ok) return { ok: false, error: r.error };
   return { ok: true, value: r.value.map(toRodeo) };
+}
+
+/**
+ * Lee los MESES DE SERVICIO de un rodeo PUNTUAL desde el SQLite local (spec 03 Stream B / B2 — RPSC.4.2/
+ * RPSC.5.8). Lo consume la carga rápida de la jornada de tacto para derivar el nº de botones de tamaño +
+ * el default de "¿medir tamaño?" del nº de meses del rodeo del ANIMAL (NUNCA del contexto ni hardcodeado;
+ * el rodeo es el del animal real — multi-tenant). Devuelve `number[] | null` parseado TOLERANTE con
+ * `parseServiceMonths` (FUENTE ÚNICA de B1, RPSC.3.7): `null` = "sin configurar" (= rodeo sin la columna,
+ * sin sincronizar, o valor corrupto) → el tacto degrada con gracia a "sin tamaño" (RPSC.4.4). `[]` = "no
+ * hace servicio" (también → sin tamaño). NO re-derivo la regla de buckets acá: solo leo el nº de meses; la
+ * regla vive en `pregnancy-buckets.ts` (DD-PSC-3). emptyIsSyncing:false → "el rodeo aún no bajó" se degrada
+ * a null (no error), igual que `fetchRodeoCategoryCatalog`: el tacto no se frena.
+ */
+export async function fetchRodeoServiceMonths(
+  rodeoId: string,
+): Promise<ServiceResult<number[] | null>> {
+  const r = await runLocalQuerySingle<{ service_months?: unknown }>(
+    buildRodeoServiceMonthsQuery(rodeoId),
+    { emptyIsSyncing: false },
+  );
+  if (!r.ok) return { ok: false, error: r.error };
+  // Sin fila (rodeo no sincronizado / borrado) → "sin configurar" (fail-safe, no crash). Con fila, parseo
+  // tolerante del TEXT/JSON que PowerSync materializa (null/''/corrupto → null).
+  return { ok: true, value: r.value ? parseServiceMonths(r.value.service_months) : null };
 }
 
 // ─── Crear rodeo (owner) ──────────────────────────────────────────────────────────

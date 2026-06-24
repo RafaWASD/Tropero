@@ -41,6 +41,8 @@ import { fetchEnabledCustomManeuvers, type EnabledCustomManeuver } from '@/servi
 import { addCustomMeasurement } from '@/services/custom-measurements';
 import { assignAnimalToGroup, fetchManagementGroups, type ManagementGroup } from '@/services/management-groups';
 import { fetchLastScrotalCm } from '@/services/scrotal';
+import { fetchRodeoServiceMonths } from '@/services/rodeos';
+import { effectiveSizeBuckets, type SizeBucket } from '@/utils/pregnancy-buckets';
 import { toCustomValue, type CustomCaptureValue } from '@/utils/custom-render';
 import { CE_DEFAULT_CM, prefillAgeMonths } from '@/utils/wheel-picker';
 import {
@@ -55,6 +57,7 @@ import {
   parseManeuverConfig,
   preconfigHistory,
   preconfigStringFor,
+  tactoMeasureSizeFromConfig,
 } from '@/utils/maneuver-config';
 import { splitMultiPreconfig } from '@/utils/maneuver-wizard';
 import { maneuverLabel } from '@/utils/maneuver-wizard';
@@ -173,6 +176,11 @@ export default function ManiobraCarga() {
   // del preview de transición de categoría. Se carga una vez al conocer el rodeo, OFFLINE. Vacío = sin
   // catálogo (rodeo aún no sincronizado) → el preview no se muestra (fail-safe).
   const [categoryCatalog, setCategoryCatalog] = useState<SystemCategory[]>([]);
+  // Meses de servicio del RODEO del animal (spec 03 Stream B / B2, RPSC.4.2/RPSC.5.8): el tacto adaptativo
+  // deriva de acá el nº de botones de tamaño + el default de "¿medir tamaño?". Se carga al conocer el rodeo,
+  // OFFLINE (patrón de categoryCatalog/lastScrotalCm). `null` = "sin configurar" (rodeo sin la columna / sin
+  // sincronizar / vacío) → el tacto degrada a "sin tamaño" (RPSC.4.4, no frena). undefined = aún cargando.
+  const [rodeoServiceMonths, setRodeoServiceMonths] = useState<number[] | null | undefined>(undefined);
   // Lotes (management_groups, ADR-020) ACTIVOS del campo del animal (R9.2): se cargan al conocer el
   // establishment, OFFLINE (mismo patrón que customManeuvers/categoryCatalog). Alimentan el sheet de lote.
   // Vacío = campo sin lotes / aún sin sincronizar → el sheet muestra solo "Sin lote" + un hint (no crashea).
@@ -353,6 +361,25 @@ export default function ManiobraCarga() {
     };
   }, [animalRodeoId]);
 
+  // Meses de servicio del rodeo del animal (B2, RPSC.4.2/RPSC.5.8): se cargan al conocer el rodeo, OFFLINE
+  // (mismo patrón que categoryCatalog). Un error/rodeo-no-sincronizado → null ("sin configurar") → el tacto
+  // degrada a "sin tamaño" (RPSC.4.4), nunca crash. El establishment/rodeo sale del animal real (multi-tenant).
+  useEffect(() => {
+    if (!animalRodeoId) {
+      setRodeoServiceMonths(undefined);
+      return;
+    }
+    let active = true;
+    setRodeoServiceMonths(undefined);
+    void fetchRodeoServiceMonths(animalRodeoId).then((r) => {
+      if (!active) return;
+      setRodeoServiceMonths(r.ok ? r.value : null);
+    });
+    return () => {
+      active = false;
+    };
+  }, [animalRodeoId]);
+
   // Lotes activos del campo del animal (R9.2): se cargan al conocer el establishment, OFFLINE (mismo patrón
   // que customManeuvers/categoryCatalog). El establishment sale del animal real (NUNCA hardcodeado — multi-
   // tenant, CLAUDE.md ppio 6). Un error/campo-sin-lotes → lista vacía → el sheet muestra solo "Sin lote".
@@ -439,6 +466,23 @@ export default function ManiobraCarga() {
   if (contentReady) hasRenderedContentRef.current = true;
 
   const currentStep = sequence[currentIndex] ?? null;
+
+  // Buckets de TAMAÑO efectivos del tacto para ESTE rodeo (B2, RPSC.5.8): el nº de meses del rodeo del animal
+  // (FUENTE del nº de botones) combinado con el override "¿medir tamaño?" del config de la jornada (RPSC.4.3),
+  // en la FUNCIÓN PURA única (effectiveSizeBuckets, pregnancy-buckets.ts — NO se re-deriva la regla CCL acá).
+  //  - `rodeoServiceMonths === null/undefined` (sin configurar / aún cargando) → nMonths null → `[]` (RPSC.4.4).
+  //  - override `false` → `[]` aunque el rodeo admita; `true`/`undefined` → los del rodeo.
+  // `[]` → al marcar PREÑADA el TactoStep persiste 'large' directo, sin sub-paso de tamaño (DD-PSC-2).
+  const tactoBuckets = useMemo(() => {
+    const nMonths = rodeoServiceMonths == null ? null : rodeoServiceMonths.length;
+    const override = session ? tactoMeasureSizeFromConfig(parseManeuverConfig(session.config)) : undefined;
+    return effectiveSizeBuckets(nMonths, override);
+  }, [rodeoServiceMonths, session]);
+
+  // ¿La jornada MIDIÓ tamaño en el tacto? (DD-PSC-8): si no hay buckets, una preñez persiste 'large' por
+  // convención (DD-PSC-2) PERO el operario no diagnosticó tamaño → el resumen muestra solo "Preñada" (sin
+  // "· Cabeza"). Deriva de la MISMA fuente que los buckets (sin segunda regla).
+  const tactoMeasuredSize = tactoBuckets.length > 0;
 
   // Preview de transición de categoría OFFLINE (R8.4): anticipa el cambio que el server aplicará al subir
   // las capturas (caso canónico: tacto+ sobre vaquillona → vaquillona_prenada). Display-only (PURO): reusa
@@ -754,7 +798,7 @@ export default function ManiobraCarga() {
           {/* Banner de error de la asignación de lote (R9.2): el UPDATE local falló → NO se tragó. */}
           {loteError ? <ManeuverErrorBanner error={loteError} /> : null}
           <AnimalSummary
-            rows={summaryRows(sequence, captured, customCaptured)}
+            rows={summaryRows(sequence, captured, customCaptured, { tactoMeasuredSize })}
             onEdit={onEdit}
             onConfirm={onConfirmAnimal}
             preview={transitionPreview}
@@ -834,6 +878,7 @@ export default function ManiobraCarga() {
               animal={animal}
               config={session.config}
               lastScrotalCm={lastScrotalCm ?? null}
+              tactoBuckets={tactoBuckets}
               bottomPad={bottomPad}
               onCapture={(value) => void captureAndAdvance(currentStep.maneuver, value)}
             />
@@ -867,6 +912,7 @@ function ManeuverStep({
   animal,
   config,
   lastScrotalCm,
+  tactoBuckets,
   bottomPad,
   onCapture,
 }: {
@@ -878,6 +924,9 @@ function ManeuverStep({
   config: unknown;
   /** Última CE medida del animal (R14.5): valor inicial de la rueda de circunferencia escrotal. null = 1ra vez. */
   lastScrotalCm: number | null;
+  /** Buckets de tamaño del tacto (B2, RPSC.5.8): derivados del rodeo + override del config en el FRAME. `[]` =
+   *  preñada sin tamaño (DD-PSC-2). El TactoStep los recibe ya resueltos (no re-deriva la regla CCL). */
+  tactoBuckets: SizeBucket[];
   bottomPad: number;
   onCapture: (value: StepValue) => void;
 }) {
@@ -887,9 +936,12 @@ function ManeuverStep({
   const history = preconfigHistory(parsedConfig);
   switch (kind) {
     case 'tacto':
+      // El nº de botones de TAMAÑO = los buckets del rodeo (B2, RPSC.5): 2 meses→cabeza/cola; 3..11→
+      // cabeza/cuerpo/cola; 1/12/sin-configurar/no-medir→[] (PREÑADA persiste 'large' directo, DD-PSC-2).
       return (
         <TactoStep
           bottomPad={bottomPad}
+          buckets={tactoBuckets}
           onConfirm={(status: PregnancyStatus) => onCapture({ kind: 'tacto', pregnancy: status })}
         />
       );

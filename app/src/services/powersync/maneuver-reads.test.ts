@@ -21,6 +21,7 @@ import {
   buildManeuverPresetsQuery,
   buildManeuverPresetByIdQuery,
   buildRodeoSystemQuery,
+  buildRodeoServiceMonthsQuery,
   buildActiveProfileRodeoQuery,
   buildAddCustomMeasurementInsert,
   buildUpdateCustomMeasurement,
@@ -46,7 +47,7 @@ const SCHEMA =
   'CREATE TABLE maneuver_presets (id TEXT PRIMARY KEY, establishment_id TEXT, name TEXT, config TEXT, ' +
   'created_by TEXT, created_at TEXT, updated_at TEXT, deleted_at TEXT);' +
   'CREATE TABLE rodeos (id TEXT PRIMARY KEY, establishment_id TEXT, name TEXT, species_id TEXT, ' +
-  'system_id TEXT, active INTEGER, deleted_at TEXT);' +
+  'system_id TEXT, active INTEGER, service_months TEXT, deleted_at TEXT);' +
   'CREATE TABLE animal_profiles (id TEXT PRIMARY KEY, rodeo_id TEXT, deleted_at TEXT);' +
   // overlay optimista (localOnly): el soft-delete de preset escribe acá vía la OUTBOX → el preset se oculta.
   'CREATE TABLE pending_status_overrides (id TEXT, client_op_id TEXT, target_table TEXT, ' +
@@ -405,6 +406,22 @@ test('buildRodeoSystemQuery: devuelve el system_id del rodeo', () => {
   const rows = all<{ system_id: string }>(db, buildRodeoSystemQuery('rod-1'));
   assert.equal(rows.length, 1);
   assert.equal(rows[0].system_id, 'sys-cria');
+});
+
+test('buildRodeoServiceMonthsQuery: devuelve service_months del rodeo (TEXT que PowerSync materializa); rodeo inexistente → 0 filas', () => {
+  const db = freshDb();
+  // PowerSync materializa el smallint[] como TEXT/JSON no-escalar → guardamos el string tal cual.
+  db.prepare('INSERT INTO rodeos (id, service_months) VALUES (?, ?)').run('rod-2m', '[10,11]');
+  db.prepare('INSERT INTO rodeos (id, service_months) VALUES (?, ?)').run('rod-null', null);
+  const rows = all<{ service_months: string | null }>(db, buildRodeoServiceMonthsQuery('rod-2m'));
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].service_months, '[10,11]');
+  // rodeo "sin configurar" (service_months NULL) → la fila EXISTE pero la columna es null (el service la parsea).
+  const nullRows = all<{ service_months: string | null }>(db, buildRodeoServiceMonthsQuery('rod-null'));
+  assert.equal(nullRows.length, 1);
+  assert.equal(nullRows[0].service_months, null);
+  // rodeo inexistente → 0 filas (el service lo trata como "sin configurar", fail-safe).
+  assert.equal(all(db, buildRodeoServiceMonthsQuery('nope')).length, 0);
 });
 
 test('buildActiveProfileRodeoQuery: devuelve el rodeo del perfil ACTIVO; un perfil soft-deleted → 0 filas (fail-safe UI)', () => {

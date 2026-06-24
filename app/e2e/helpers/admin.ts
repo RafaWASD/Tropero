@@ -139,7 +139,19 @@ export async function seedEstablishment(
 export async function seedRodeo(
   establishmentId: string,
   name = 'Rodeo general',
-  opts: { speciesCode?: string; systemCode?: string; rawName?: boolean } = {},
+  opts: {
+    speciesCode?: string;
+    systemCode?: string;
+    rawName?: boolean;
+    /**
+     * spec 03 Stream B / B2: meses de servicio del rodeo (1–12) seteados DIRECTO en la columna vía
+     * service_role (bypassa la RPC create_rodeo — es un fixture, no el camino de UI). `undefined` (default) →
+     * la columna queda NULL ("sin configurar", como un rodeo viejo). `[]` → "no hace servicio". El CHECK
+     * server (service_months_is_valid: 1–12, únicos, ≤12 — SIN contigüidad, RPSC.2.9) valida; arrays como
+     * [1] / [10,11] / [6,7,8] son válidos. Lo consume el e2e del tacto adaptativo (nº de botones por rodeo).
+     */
+    serviceMonths?: number[];
+  } = {},
 ): Promise<string> {
   const speciesCode = opts.speciesCode ?? 'bovino';
   const systemCode = opts.systemCode ?? 'cria';
@@ -174,6 +186,8 @@ export async function seedRodeo(
       name: rodeoName,
       species_id: species.id,
       system_id: system.id,
+      // B2: meses de servicio directo en la columna (fixture). undefined → la columna queda NULL.
+      ...(opts.serviceMonths !== undefined ? { service_months: opts.serviceMonths } : {}),
     })
     .select('id')
     .single();
@@ -252,11 +266,14 @@ export async function seedEstablishmentWithRodeo(
      * rodeo se borra por CASCADE del establishment (trackeado por id); el establishment conserva su RUN_TAG.
      */
     rodeoRawName?: boolean;
+    /** spec 03 Stream B / B2: meses de servicio del rodeo (1–12) directo en la columna (ver seedRodeo). */
+    serviceMonths?: number[];
   } = {},
 ): Promise<{ establishmentId: string; rodeoId: string }> {
   const establishmentId = await seedEstablishment(ownerId, name, opts);
   const rodeoId = await seedRodeo(establishmentId, opts.rodeoName ?? 'Rodeo general', {
     rawName: opts.rodeoRawName,
+    serviceMonths: opts.serviceMonths,
   });
   return { establishmentId, rodeoId };
 }

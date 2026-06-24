@@ -12,6 +12,7 @@ import {
   preconfigStringFor,
   preconfigHistory,
   pajuelasFor,
+  tactoMeasureSizeFromConfig,
 } from './maneuver-config';
 
 // ─── parseManeuverConfig: tolerante ───────────────────────────────────────────────────
@@ -216,4 +217,33 @@ test('pajuelasFor: sin preconfig / ausente / shape raro → [] (pide pajuela lib
 test('pajuelasFor: pajuelas[] con no-strings → los descarta sin tirar', () => {
   const cfg = { preconfig: { inseminacion: { pajuelas: ['Toro 1', 42, null, { x: 1 }, 'Toro 2'] as unknown[] } } };
   assert.deepEqual(pajuelasFor(cfg as never), ['Toro 1', 'Toro 2']);
+});
+
+// ─── tactoMeasureSizeFromConfig: override "¿medir tamaño?" del tacto (B2, RPSC.4.1/4.3) ──────────
+
+test('tactoMeasureSizeFromConfig: lee el booleano persistido (true y false)', () => {
+  assert.equal(tactoMeasureSizeFromConfig({ preconfig: { tacto: { measureSize: true } } }), true);
+  assert.equal(tactoMeasureSizeFromConfig({ preconfig: { tacto: { measureSize: false } } }), false);
+});
+
+test('tactoMeasureSizeFromConfig: sin configurar (ausente/preconfig vacío/sin tacto) → undefined (cae al default del rodeo)', () => {
+  assert.equal(tactoMeasureSizeFromConfig({}), undefined);
+  assert.equal(tactoMeasureSizeFromConfig({ preconfig: {} }), undefined);
+  assert.equal(tactoMeasureSizeFromConfig({ preconfig: { vacunacion: 'Aftosa' } }), undefined);
+});
+
+test('tactoMeasureSizeFromConfig: shapes inesperados del jsonb → undefined, nunca tira', () => {
+  // tacto no es objeto (string/number), measureSize no booleano, preconfig array.
+  assert.equal(tactoMeasureSizeFromConfig({ preconfig: { tacto: 'sí' } }), undefined);
+  assert.equal(tactoMeasureSizeFromConfig({ preconfig: { tacto: 1 } as unknown as Record<string, unknown> }), undefined);
+  assert.equal(tactoMeasureSizeFromConfig({ preconfig: { tacto: { measureSize: 'true' } } }), undefined);
+  assert.equal(tactoMeasureSizeFromConfig({ preconfig: { tacto: {} } }), undefined);
+  assert.equal(tactoMeasureSizeFromConfig({ preconfig: ['x'] as unknown as Record<string, unknown> }), undefined);
+});
+
+test('tactoMeasureSizeFromConfig: round-trip por parseManeuverConfig (string JSON del INSERT local)', () => {
+  // El config se persiste como JSON.stringify(config) en SQLite; al releerlo, parseManeuverConfig lo
+  // recupera y tactoMeasureSizeFromConfig debe leer el override igual (camino real del cableado).
+  const raw = JSON.stringify({ maniobras: ['tacto'], preconfig: { tacto: { measureSize: false } } });
+  assert.equal(tactoMeasureSizeFromConfig(parseManeuverConfig(raw)), false);
 });

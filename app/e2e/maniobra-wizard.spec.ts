@@ -120,7 +120,8 @@ test('captura wizard de jornada: inicio → rodeo → maniobras (reorder) → re
   await expect(page.getByTestId('selected-row-2')).toBeVisible();
 
   // PRECONFIG INLINE (UX 3): Vacunación es configurable → su fila muestra segunda línea. Sin cargar,
-  // el hint "Tocá para elegir vacuna" (R1.7). Tacto/Pesaje (no configurables) NO muestran segunda línea.
+  // el hint "Tocá para elegir vacuna" (R1.7). Tacto TAMBIÉN es configurable desde B2 (¿medir tamaño?) →
+  // muestra su propia 2da línea ("Sugerido: …"); Pesaje (no configurable) NO muestra segunda línea.
   await expect(page.getByText('Tocá para elegir vacuna', { exact: true })).toBeVisible();
   // Cargamos el preconfig DESDE EL SHEET: tocar el cuerpo de la fila de Vacunación lo abre (la fila de
   // vacunación es la #3 → index 2). Capturamos el sheet ABIERTO con el input + autocompletar para el veto.

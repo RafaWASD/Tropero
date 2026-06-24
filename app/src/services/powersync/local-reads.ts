@@ -401,6 +401,20 @@ export function buildRodeoSystemQuery(rodeoId: string): LocalQuery {
 }
 
 /**
+ * service_months de un rodeo (spec 03 Stream B / B2 — RPSC.4.2/RPSC.5.8): el tacto adaptativo deriva el
+ * default de "¿medir tamaño?" + el nº de botones de tamaño del nº de meses de servicio del rodeo de la
+ * jornada. PowerSync materializa el `smallint[]` de Postgres como TEXT/JSON no-escalar → el caller lo
+ * parsea TOLERANTE con `parseServiceMonths` (RPSC.3.7; null/''/corrupto → "sin configurar"). El rodeo ya
+ * está sincronizado (est_rodeos `SELECT *`, B1 §5 CASO A → la columna fluye sola). LIMIT 1 (PK).
+ */
+export function buildRodeoServiceMonthsQuery(rodeoId: string): LocalQuery {
+  return {
+    sql: 'SELECT service_months FROM rodeos WHERE id = ? LIMIT 1',
+    args: [rodeoId],
+  };
+}
+
+/**
  * rodeo_id del PERFIL ACTIVO de un animal (spec 03 M1.1 / R5.3 / SEC-SPEC-03-02): el gating capa 1
  * resuelve el rodeo REAL del animal leyendo `animal_profiles.rodeo_id` del perfil ACTIVO (deleted_at IS
  * NULL), NO vía una función `current_animal_rodeo` (NO existe as-built). Mismo criterio que la capa 2

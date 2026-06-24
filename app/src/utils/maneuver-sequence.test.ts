@@ -199,6 +199,19 @@ test('describeStepValue: tacto vacía / preñada con tamaño (labels de campo as
   assert.equal(describeStepValue({ kind: 'tacto', pregnancy: 'large' }), 'Preñada · Cabeza');
 });
 
+test('describeStepValue (B2, DD-PSC-8): jornada SIN tamaño → solo "Preñada" (sin "· Cabeza"); con tamaño → "· Cabeza"', () => {
+  // tactoMeasuredSize=false (rodeo 1/12 meses, sin configurar, o "medir=NO"): el 'large' es convención
+  // (DD-PSC-2), no diagnóstico → el resumen no exhibe un tamaño no medido.
+  assert.equal(describeStepValue({ kind: 'tacto', pregnancy: 'large' }, { tactoMeasuredSize: false }), 'Preñada');
+  // VACÍA no cambia (no hay tamaño que ocultar).
+  assert.equal(describeStepValue({ kind: 'tacto', pregnancy: 'empty' }, { tactoMeasuredSize: false }), 'Vacía');
+  // tactoMeasuredSize=true (o ausente) → comportamiento as-built con el tamaño.
+  assert.equal(describeStepValue({ kind: 'tacto', pregnancy: 'large' }, { tactoMeasuredSize: true }), 'Preñada · Cabeza');
+  assert.equal(describeStepValue({ kind: 'tacto', pregnancy: 'small' }, { tactoMeasuredSize: true }), 'Preñada · Cola');
+  // El flag NO afecta a otras maniobras (pesaje ignora opts).
+  assert.equal(describeStepValue({ kind: 'pesaje', weightKg: 385 }, { tactoMeasuredSize: false }), '385 kg');
+});
+
 test('describeStepValue: pesaje en es-AR (punto de miles)', () => {
   assert.equal(describeStepValue({ kind: 'pesaje', weightKg: 385 }), '385 kg');
   assert.equal(describeStepValue({ kind: 'pesaje', weightKg: 1050 }), '1.050 kg');
@@ -300,4 +313,16 @@ test('summaryRows: una custom SIN valor → captured false, "Sin cargar"', () =>
   assert.deepEqual(rows, [
     { maneuver: 'fd-pezunas', source: 'custom', label: 'Ángulo de pezuñas', value: 'Sin cargar', captured: false },
   ]);
+});
+
+test('summaryRows (B2, DD-PSC-8): tactoMeasuredSize=false → la fila del tacto preñado dice solo "Preñada"', () => {
+  const cap: CaptureMap = { tacto: { kind: 'tacto', pregnancy: 'large' }, pesaje: { kind: 'pesaje', weightKg: 412 } };
+  const rows = summaryRows(seqTactoPesaje, cap, {}, { tactoMeasuredSize: false });
+  assert.deepEqual(rows, [
+    { maneuver: 'tacto', source: 'factory', label: 'Tacto de preñez', value: 'Preñada', captured: true },
+    { maneuver: 'pesaje', source: 'factory', label: 'Pesaje', value: '412 kg', captured: true },
+  ]);
+  // Con tamaño medido (default) → la fila muestra "· Cabeza" (no se rompe el as-built).
+  const withSize = summaryRows(seqTactoPesaje, cap);
+  assert.equal(withSize[0].value, 'Preñada · Cabeza');
 });
