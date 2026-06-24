@@ -1,0 +1,182 @@
+# Tasks — Feature 07: Reportes / Analytics (Stream C)
+
+> Pasos discretos en orden, cada uno con `[ ]` y los `R<n>` que cubre (`docs/specs.md`). El implementer marca
+> `[x]`. El reviewer rechaza si queda `[ ]` sin justificar.
+>
+> **Gates (context.md §11):**
+> - **Gate 1 (security spec)** — OBLIGATORIO. Corre **antes de la Puerta de spec humana**, sobre este design
+>   (RPC cross-tabla tenant-scoped). No se implementa nada de SQL hasta Gate 1 PASS + aprobación humana de la spec.
+> - **Gate 2 (security code)** — por chunk de implementación, después del reviewer.
+> - **Veto `design-review`** del leader sobre cada pantalla antes de mostrarla a Raf.
+>
+> **Dependencias:** Stream A (`0102`/`0104`/`0105`) y Stream B (tacto con `pregnancy_status`) deben estar
+> aplicados en remoto para que la suite de Stream C corra verde. Hasta el apply, `reports/run.cjs` es
+> roja-hasta-apply (esperado, patrón `puesta-en-servicio`).
+
+---
+
+## Fase 0 — Gate 1 (pre-implementación, pre-Puerta de spec)
+
+- [ ] **T0.1** — Gate 1: `security_analyzer` modo `spec` audita `design.md` §2 y §5 (RPC `SECURITY DEFINER`
+  tenant-scoped, guard `has_role_in` fail-closed, revoke anon/public, read-only, sin PII de `_private`).
+  Output: `progress/security_spec_07-reportes.md` (ya generado, PASS — 2026-06-24). Veredicto PASS requerido. Cubre: R7.12.
+- [ ] **T0.2** — ⏸ **Puerta de spec (humana)**: Raf aprueba requirements/design/tasks (tras Gate 1 PASS). *(No es
+  tarea del implementer; la ejecuta el leader. Bloquea todo lo de abajo.)*
+
+---
+
+## Fase 1 — Backend: resumen de sesión + lista de sesiones
+
+- [ ] **T1.1** — Migración `01NN_reports_session_summary.sql`: RPC `session_event_summary(p_session_id uuid)` →
+  conteo por tipo de evento de la sesión (las **7 tablas con FK `session_id`**: weight/reproductive/sanitary/
+  condition/lab/scrotal/custom — NO `animal_events`, que no tiene `session_id`; `deleted_at IS NULL`) + animales
+  distintos por kind. Guard `has_role_in` derivado de `sessions.establishment_id`, `STABLE`, revoke anon/public + grant
+  authenticated + smoke-check fail-closed. Cubre: R7.3.1, R7.3.2, R7.3.3, R7.12.2, R7.12.4.
+- [ ] **T1.2** — En la misma migración: `rodeo_sessions_list(p_rodeo_id uuid)` (lista de sesiones del rodeo,
+  `order by started_at desc`, guard de tenant) **o** documentar que la lista se lee del SQLite local existente
+  (`sessions.ts`) y omitir la RPC. Decisión documentada en el header de la migración / `impl_*`. Cubre: R7.3.6.
+- [ ] **T1.3** — Test (`reports/run.cjs`): resumen cuenta por tipo, excluye borrados (R7.3.3), funciona en sesión
+  `active` (R7.3.4) y vacía → conteos 0 (R7.3.5); anti-IDOR cross-tenant (sesión de otro establecimiento →
+  `42501`); read-only; anon/public sin EXECUTE. Cubre: R7.3.1, R7.3.3, R7.3.4, R7.3.5, R7.12.1, R7.12.3, R7.12.4.
+
+## Fase 2 — Backend: KPIs reproductivos (consumen Stream A)
+
+- [ ] **T2.1** — Migración `01NN_reports_repro_kpis.sql`: RPC `rodeo_pregnancy_kpi(p_rodeo_id, p_year)` → invoca
+  `rodeo_service_campaign` (is_configured), `rodeo_serviced_females`, `rodeo_repro_denominator`; numerador
+  `pregnant` = tacto+ vigente (misma subquery que `compute_category` RT2.7.5). Guard + cota `p_year` + grants +
+  smoke-check. Cubre: R7.5.1, R7.5.2, R7.5.5, R7.5.6, R7.5.7, R7.12.2, R7.12.4.
+- [ ] **T2.2** — RPC `rodeo_calving_kpi(p_rodeo_id, p_year)`: numerador `calved` = servidas con ≥1 `birth` cuyo
+  **mes de concepción** (mes parto − 9, wrap 1-12) ∈ `service_months` (alinea con servidas, Gate 0 §5); devuelve
+  `serviced/entoradas/pregnant/calved`. Cubre: R7.6.1, R7.6.2, R7.6.5, R7.6.6.
+- [ ] **T2.3** — RPC `rodeo_ccl_distribution(p_rodeo_id, p_year)` → conteo head/body/tail (`large/medium/small`)
+  del último tacto+ vigente de las preñadas de la campaña + `n_months` + `total`. Cubre: R7.7.1, R7.7.5.
+- [ ] **T2.4** — RPC `rodeo_calving_by_stage(p_rodeo_id, p_year)` → nacimientos por tercio de `service_months`
+  (mes de concepción ubicado en cabeza/cuerpo/cola). Documentar la deuda de consistencia con `pregnancy-buckets`
+  (bucketing 4-11 `[SUPUESTO]`, Gate 0 §9). Cubre: R7.8.1.
+- [ ] **T2.5** — Test (`reports/run.cjs`) de los 4 KPIs sobre fixtures: %preñez y %parición con valores
+  conocidos; **denominador 0 → la RPC devuelve serviced=0 sin NaN** (R7.5.4/R7.6.3); rodeo sin `service_months`
+  → `is_configured=false` (R7.5.6/R7.6.6); CCL vacío → total=0 (R7.7.4); cruce nacimientos degrada con total_born=0
+  (R7.8.3); tenant-scope/anti-IDOR/read-only/grants en las 4. Cubre: R7.5.4, R7.6.3, R7.7.4, R7.8.3, R7.12.x.
+- [ ] **T2.6** — Test: numerador/denominador correctos al alternar bases (servidas vs entoradas) usando los
+  absolutos que devuelve la RPC; %parición/preñadas (pérdida) coherente. Cubre: R7.5.3, R7.6.4.
+
+## Fase 3 — Backend: peso por categoría
+
+- [ ] **T3.1** — Migración `01NN_reports_weight_by_category.sql`: RPC `rodeo_weight_by_category(p_rodeo_id)` →
+  AVG del último `weight_event` no borrado por animal activo, group by categoría, con `n_animals`; guard +
+  grants + smoke-check. Variante/param para "por sesión" (comparativa, R7.9.5). Cubre: R7.9.1, R7.9.2, R7.9.4,
+  R7.9.5, R7.12.2, R7.12.4.
+- [ ] **T3.2** — Test (`reports/run.cjs`): promedio correcto sobre fixtures, excluye borrados (R7.9.3), categoría
+  sin peso ausente (la UI la marca "sin pesar", R7.9.4), tenant-scope/read-only/grants. Cubre: R7.9.1, R7.9.3,
+  R7.9.4, R7.12.x.
+
+## Fase 4 — Backend: alertas
+
+- [ ] **T4.1** — Migración `01NN_reports_alerts.sql`: RPC `establishment_overdue_doses(p_establishment_id uuid,
+  p_lookback_days int default 365, p_limit int default 500)` → `sanitary_events` no borrados, animal activo,
+  `next_dose_date < hoy`, sin dosis posterior del mismo producto/animal; identifica animal+producto+fecha. **Guard
+  `has_role_in(p_establishment_id)` como 1ª sentencia ejecutable** (M1, design §5.1; el `p_establishment_id` viene
+  del cliente, no se deriva de una fila). **Tenant en el join a `animal_profiles` (`p.establishment_id = v_est`),
+  no por la columna denorm de `sanitary_events`** (M2, §5.5), con **`p.deleted_at IS NULL` + `p.status='active'` en
+  el join** (M3, §5.6). **Cota de escaneo** (M4, §5.4): piso `next_dose_date >= current_date - make_interval(days
+  => p_lookback_days)` + `LIMIT p_limit`; validar `p_lookback_days >= 0` y `p_limit between 1 and 1000` tras el
+  guard (raise `22023`). Grants + smoke-check. Cubre: R7.10.1, R7.10.2, R7.10.3, R7.10.5, R7.12.2, R7.12.4.
+- [ ] **T4.2** — En la misma migración: RPC `establishment_unweighed(p_establishment_id, p_threshold_days int
+  default 180, p_category_codes text[] default null)` → activos sin peso o último pesaje > umbral, filtrado por
+  categorías; identifica animal+categoría+días. **Parámetros, no hardcode** (`[SUPUESTO]`, Gate 0 §9). Mismo guard
+  1ª-sentencia (M1) + scoping por el join a `animal_profiles` con `deleted_at`/`status` en el join (M2/M3). **Cota
+  de input** (M4-menor/L1): validar `p_threshold_days between 0 and 3650` (tope concreto = 10 años, testeable) y
+  `cardinality(p_category_codes) <= 64` (raise `22023` fuera de rango). Cubre: R7.11.1, R7.11.2, R7.11.3, R7.11.4, R7.11.6.
+- [ ] **T4.3** — Test (`reports/run.cjs`): dosis vencida detecta el caso y excluye el que tiene dosis posterior
+  (R7.10.1), excluye archivados/borrados (R7.10.3); sin pesar respeta umbral y `p_category_codes` (R7.11.1/.2),
+  "nunca pesado" aparece (R7.11.3); empty = lista vacía (la UI muestra el positivo); tenant-scope/grants.
+  **(M1) assert IDOR explícito** — al estilo de T1.3/T2.5: un JWT del tenant B que llama
+  `establishment_overdue_doses(est_A, ...)` (y `establishment_unweighed(est_A, ...)`) recibe `42501`, **no** un set
+  vacío silencioso (R7.12.3). **(M4) assert de cota de escaneo** — `establishment_overdue_doses` respeta la ventana
+  `p_lookback_days` (una dosis vencida más vieja que la ventana NO aparece) y el `LIMIT`; `p_lookback_days < 0` o
+  `p_limit` fuera de `[1,1000]` → `22023`; `establishment_unweighed` rechaza `p_threshold_days` fuera de `[0,3650]`
+  (`< 0` y `> 3650`) y `cardinality(p_category_codes) > 64` con `22023`. Cubre: R7.10.x, R7.11.x, R7.12.1, R7.12.3, R7.12.4.
+
+## Fase 5 — Cliente: capa de datos + helper puro
+
+- [ ] **T5.1** — `app/src/utils/calving-stage.ts` (PURO): mapeo mes-de-concepción → bucket (cabeza/cuerpo/cola)
+  por tercios de `service_months`, espejo de la regla de la RPC (T2.4). Cubre: R7.8.1 (etiquetado UI).
+- [ ] **T5.2** — `app/src/utils/calving-stage.test.ts` (node:test): tercios para 3-11 meses, cabeza/cola para 2,
+  vacío para 1/12/null (consistente con `pregnancy-buckets`). Cubre: R7.8.1.
+- [ ] **T5.3** — `app/src/services/reports.ts`: wrappers `supabase.rpc(...)` de TODAS las RPC; mapeo snake→camel;
+  **detección de offline antes de llamar** → `Result.err({ kind: 'offline' })`; traducción de errores a
+  `AppError` accionable. Única capa I/O (architecture.md). Cubre: R7.2.1, R7.2.2, R7.2.4.
+- [ ] **T5.4** — `app/src/hooks/use-reports.ts`: orquesta `reports.ts`; estado loading/online/error; **anti-
+  parpadeo** (`loading && data===null` para el spinner; refresh sin blanquear, conventions.md UI); cache
+  read-only opcional de la última carga (R7.2.3). Cubre: R7.2.2, R7.2.3, R7.2.4, R7.1.3.
+
+## Fase 6 — Cliente: pantalla Reportes (KPIs + alertas)
+
+- [ ] **T6.1** — `app/app/(tabs)/reportes.tsx`: reemplaza el stub; selector de rodeo + selector de campaña (año,
+  default = campaña vigente/última); scope por establecimiento activo (recarga al cambiar de establecimiento).
+  Cubre: R7.1.1, R7.1.2, R7.1.3, R7.1.4, R7.5.7.
+- [ ] **T6.2** — Cards de KPI: %preñez (R7.5), %parición (R7.6) con **% grande + numerador/denominador absolutos**
+  + **toggle de denominador** (servidas/entoradas/[preñadas] donde aplica); "—"/"sin datos" si denominador 0 (no
+  NaN). Cubre: R7.5.1, R7.5.3, R7.5.4, R7.5.5, R7.6.1, R7.6.3, R7.6.4, R7.6.5.
+- [ ] **T6.3** — Componente CCL (`components/reports/CclBars`): barras cabeza/cuerpo/cola, nº de barras decidido
+  por `sizeBucketsForServiceMonths(n_months)` de `pregnancy-buckets.ts` (fuente única); oculta CCL para 1/12/sin
+  config/override "sin distinción" con nota explicativa (R7.7.3); empty state si total=0 (R7.7.4); muestra el
+  total base (R7.7.5). Cubre: R7.7.1, R7.7.2, R7.7.3, R7.7.4, R7.7.5.
+- [ ] **T6.4** — Cruce tacto↔nacimientos: muestra `rodeo_calving_by_stage` junto al CCL del tacto (R7.8.2);
+  degrada con gracia si no hay nacimientos de la campaña (R7.8.3). Usa `calving-stage.ts` para etiquetar. Cubre:
+  R7.8.1, R7.8.2, R7.8.3.
+- [ ] **T6.5** — Peso por categoría: lista categorías con AVG + nº de animales; formato es-AR (coma decimal);
+  categorías sin peso → "sin pesar"/"—". Cubre: R7.9.1, R7.9.2, R7.9.3, R7.9.4.
+- [ ] **T6.6** — Estado "configurá la estación de servicio" cuando `is_configured=false`, con CTA a la edición del
+  rodeo (cross-spec spec 02). Cubre: R7.5.6, R7.6.6.
+- [ ] **T6.7** — Sección de alertas: dosis vencida (R7.10) + sin pesar (R7.11) con ítems accionables (animal/
+  producto/fecha · animal/categoría/días) y **empty states positivos**. Cubre: R7.10.2, R7.10.4, R7.11.3, R7.11.5.
+- [ ] **T6.8** — Estado offline ("necesitás conexión") + error con reintento, en toda la pantalla. Cubre: R7.2.2, R7.2.4.
+
+## Fase 7 — Cliente: resumen y comparativa de sesión
+
+- [ ] **T7.1** — `app/app/reportes/sesion/[id].tsx`: conteos por tipo de evento + marco temporal (started/ended) +
+  animales intervenidos; empty state si no hay eventos. Lista de sesiones del rodeo para elegir (R7.3.6). Cubre:
+  R7.3.1, R7.3.2, R7.3.5, R7.3.6.
+- [ ] **T7.2** — `app/app/reportes/comparar.tsx`: elegir 2 sesiones del **mismo** rodeo (2ª restringida al rodeo
+  de la 1ª); tabla lado a lado con delta por tipo de evento (0 + delta en celdas faltantes). Cubre: R7.4.1,
+  R7.4.2, R7.4.3.
+- [ ] **T7.3** — Comparativa de peso por categoría entre dos sesiones del mismo rodeo (delta por categoría),
+  reusando la RPC de peso por sesión. Cubre: R7.9.5.
+
+## Fase 8 — Consistencia transversal + cierre
+
+- [ ] **T8.1** — Verificar exclusión transversal de archivados/borrados en todas las RPC de rodeo (R7.13.1,
+  R7.13.3) **filtrando `p.deleted_at IS NULL` + `p.status='active'` en el join a `animal_profiles`, NO confiando en
+  `establishment_of_profile`** (M3, design §5.6: el helper 0023 no filtra `deleted_at`); confirmar que el scoping
+  de tenant va por ese mismo join (`p.establishment_id = v_est`), no por la columna denorm de las tablas de evento
+  (M2, §5.5). Documentar la inclusión de archivados en el histórico de sesión (R7.13.2 — pregunta abierta #5; el
+  `session_event_summary` no filtra `status` pero sí `deleted_at`). Cubre: R7.13.1, R7.13.2, R7.13.3.
+- [ ] **T8.2** — Confirmar que la ficha individual (`animal_timeline`) NO se reimplementa; dejar nota de
+  trazabilidad. Cubre: R7.14.1.
+- [ ] **T8.3** — Veto `design-review` del leader sobre `reportes.tsx`, `sesion/[id].tsx`, `comparar.tsx` (títulos
+  sin recorte de descendentes, empty states cálidos, error accionable, densidad legible) **antes** de mostrar a Raf.
+- [ ] **T8.4** — Autorrevisión adversarial del implementer (paso 8 del agente) + mapa `R<n> → archivo:test` en
+  `progress/impl_07-reportes-basicos.md`; reconciliar specs↔as-built (regla dura `docs/specs.md`).
+- [ ] **T8.5** — **Gate 2 (security code)** por chunk: `security_analyzer` modo `code` sobre el diff (RLS/guards
+  de las RPC, grants, sin filtración cross-tenant). Output `progress/security_code_07-reportes-basicos.md`.
+- [ ] **T8.6** — Leader aplica las migraciones en remoto (post-Gate-2 + autorización de Raf), descomenta el hook
+  de `reports/run.cjs` en `scripts/run-tests.mjs`, corre la suite → verde. ⏸ Puerta 2 (humana) → `done`.
+
+---
+
+## Notas de ejecución
+
+- **No tocar Stream A.** Si una RPC de Stream C necesita el conjunto de `animal_profile_id` (no solo conteos), lo
+  resuelve reusando `rodeo_serviced_females(...)` dentro de la propia RPC (design §8).
+- **Fuente única de la regla CCL por meses** = `pregnancy-buckets.ts` (nº de barras). La asignación mes→tercio
+  (RPC T2.4 + `calving-stage.ts` T5.1) es la parte nueva; cuando Facundo cierre el bucketing 4-11 (Gate 0 §9), se
+  ajustan ambos lugares (deuda anotada en T2.4).
+- **Roja-hasta-apply** esperada para `reports/run.cjs` hasta T8.6 (patrón `puesta-en-servicio` / `0093-0097`).
+- **Preguntas abiertas** (requirements §"Preguntas abiertas") las cierra el leader con Raf/Facundo; la spec deja
+  defaults parametrizados para no frenar (alerta sin pesar, base "preñadas" del %preñez, año de campaña por
+  default, wrap de fin de año en KPIs, inclusión de archivados en histórico de sesión).
+- **Gate 1 (M1-M4) foldeado** antes de la Puerta de spec (`progress/security_spec_07-reportes.md`, PASS). El
+  contrato de seguridad que Gate 2 valida vive en `design.md` §5 (§5.1 guard 1ª-sentencia/M1, §5.4 cota de
+  escaneo/M4, §5.5 join a `animal_profiles`/M2, §5.6 `deleted_at`/`status` en el join/M3) + la tabla §9. Asserts:
+  T4.3 (IDOR + cota), T8.1 (join, no helper). Sin reabrir decisiones de Gate 0.
