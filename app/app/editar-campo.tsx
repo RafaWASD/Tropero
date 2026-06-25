@@ -25,10 +25,12 @@ import { useEstablishment } from '@/contexts';
 import {
   loadEstablishmentDetail,
   updateEstablishment,
+  updateRenspa,
   type EstablishmentDetail,
 } from '@/services/establishments';
 import { formatHectares, hasDuplicateName, parseHectares } from '@/utils/establishment';
 import { validateCreateEstablishment } from '@/utils/validation';
+import { validateRenspa, RENSPA_MAX_LENGTH } from '@/utils/renspa-validate';
 
 // Copy accionable ante falta de conexión (editar es operación online, igual que crear).
 const OFFLINE_COPY =
@@ -155,6 +157,10 @@ function EditForm({
   const [province, setProvince] = useState(detail.province);
   const [city, setCity] = useState(detail.city ?? '');
   const [hectares, setHectares] = useState(formatHectares(detail.totalHectares));
+  // RENSPA (spec 08, R2.1/R2.3): editable acá (owner-only — esta pantalla ya es owner-only). Persiste por la
+  // RPC update_renspa (no por el UPDATE directo de updateEstablishment). Validación inline (1-20 chars).
+  const [renspa, setRenspa] = useState(detail.renspa ?? '');
+  const [renspaError, setRenspaError] = useState<string | null>(null);
 
   const [nameError, setNameError] = useState<string | null>(null);
   const [provinceError, setProvinceError] = useState<string | null>(null);
@@ -170,7 +176,11 @@ function EditForm({
     const v = validateCreateEstablishment({ name, province });
     setNameError(v.name);
     setProvinceError(v.province);
-    if (!v.valid) return;
+    // RENSPA: valida en vivo (1-20 chars; vacío = borrar, legítimo). Si falla, scroll-al-campo lo da el borde
+    // rojo del FormField (error inline, NO banner global — gotcha de la skill design-review).
+    const rv = validateRenspa(renspa);
+    setRenspaError(rv.ok ? null : rv.error);
+    if (!v.valid || !rv.ok) return;
 
     setSaving(true);
     const result = await updateEstablishment(detail.id, {
@@ -179,13 +189,31 @@ function EditForm({
       city: city.trim() || null,
       totalHectares: parseHectares(hectares),
     });
-    setSaving(false);
-
-    if (result.ok) {
-      await onSaved();
-    } else {
+    if (!result.ok) {
+      setSaving(false);
       setFormError(result.error.kind === 'network' ? OFFLINE_COPY : result.error.message);
+      return;
     }
+
+    // RENSPA por la RPC update_renspa (R2.3), SOLO si cambió (evita un round-trip inútil). `rv.value` ya es el
+    // valor normalizado a persistir (trim, o null si vacío). El UPDATE de datos del campo ya pasó; si el
+    // RENSPA falla, avisamos pero NO revertimos el resto (el RENSPA se re-intenta volviendo a guardar).
+    const renspaChanged = (rv.value ?? null) !== (detail.renspa ?? null);
+    if (renspaChanged) {
+      const rr = await updateRenspa(detail.id, rv.value);
+      if (!rr.ok) {
+        setSaving(false);
+        setFormError(
+          rr.error.kind === 'network'
+            ? 'Guardamos los datos del campo, pero no pudimos guardar el RENSPA (sin conexión). Volvé a intentar.'
+            : rr.error.message,
+        );
+        return;
+      }
+    }
+
+    setSaving(false);
+    await onSaved();
   }
 
   return (
@@ -228,6 +256,20 @@ function EditForm({
           onChangeText={setHectares}
           placeholder="Ej. 1200"
           keyboardType="numeric"
+        />
+        {/* RENSPA (spec 08, R2.1/R2.3): identificador SENASA del establecimiento. Opcional; se usa como
+            recordatorio al exportar a SIGSA (NO va en el archivo). Validación inline (1-20 chars). */}
+        <FormField
+          label="RENSPA (opcional)"
+          value={renspa}
+          onChangeText={(t) => {
+            setRenspa(t);
+            if (renspaError) setRenspaError(null);
+          }}
+          placeholder="Ej. 01.001.0.00001"
+          autoCapitalize="characters"
+          maxLength={RENSPA_MAX_LENGTH}
+          error={renspaError}
         />
 
         <FormError message={formError} />

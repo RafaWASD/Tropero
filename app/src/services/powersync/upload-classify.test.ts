@@ -11,6 +11,7 @@ import {
   decodeJsonbColumns,
   isTransientUploadError,
   isPermanentServerCode,
+  isAppendOnlyInsertTable,
 } from './upload-classify.ts';
 
 const ENDPOINT = 'https://inst.powersync.journeyapps.com';
@@ -84,7 +85,47 @@ test('isPermanentServerCode: clases 22/23/42 + 42501; vacío/otros → no perman
 test('buildCrudUpsert: tabla normal (PK id real) → re-inyecta id en el payload, SIN onConflict (= comportamiento previo)', () => {
   const plan = buildCrudUpsert('weight_events', 'evt-1', { animal_profile_id: 'ap-1', weight_kg: 385 });
   assert.equal(plan.onConflict, undefined);
+  assert.equal(plan.insertOnly, undefined, 'una tabla normal NO es insertOnly (va por upsert)');
   assert.deepEqual(plan.payload, { animal_profile_id: 'ap-1', weight_kg: 385, id: 'evt-1' });
+});
+
+// ── Append-only (spec 08, R11.3): sigsa_declarations / export_log suben por INSERT plano, NO upsert. El
+//    upsert exigiría grant UPDATE (que no tienen) → 42501 → descarte silencioso de la declaración. ──
+test('isAppendOnlyInsertTable: sigsa_declarations / export_log → true; otras (weight_events) → false', () => {
+  assert.equal(isAppendOnlyInsertTable('sigsa_declarations'), true);
+  assert.equal(isAppendOnlyInsertTable('export_log'), true);
+  assert.equal(isAppendOnlyInsertTable('weight_events'), false);
+  assert.equal(isAppendOnlyInsertTable('animal_profiles'), false);
+});
+
+test('buildCrudUpsert: sigsa_declarations (append-only) → insertOnly:true + id real en el payload (sin onConflict)', () => {
+  const plan = buildCrudUpsert('sigsa_declarations', 'dec-1', {
+    establishment_id: 'est-1',
+    animal_profile_id: 'ap-1',
+    export_log_id: null,
+  });
+  assert.equal(plan.insertOnly, true, 'append-only → INSERT plano (sin UPDATE, R11.3)');
+  assert.equal(plan.onConflict, undefined);
+  assert.deepEqual(plan.payload, {
+    establishment_id: 'est-1',
+    animal_profile_id: 'ap-1',
+    export_log_id: null,
+    id: 'dec-1',
+  });
+  // ⚠ NO se manda declared_by (lo fuerza el trigger 0111). El service tampoco lo encola → no aparece acá.
+  assert.ok(!('declared_by' in plan.payload));
+});
+
+test('buildCrudUpsert: export_log (append-only) → insertOnly:true', () => {
+  const plan = buildCrudUpsert('export_log', 'log-1', {
+    establishment_id: 'est-1',
+    animal_count: 3,
+    file_name: 'sigsa_campo_20260301_101500.txt',
+    file_content: '032010000000000-H-AA-08/2025',
+  });
+  assert.equal(plan.insertOnly, true);
+  assert.equal(plan.payload.id, 'log-1');
+  assert.ok(!('generated_by' in plan.payload), 'generated_by lo fuerza el trigger 0112 (no se encola)');
 });
 
 test('buildCrudUpsert: custom_attributes (PK compuesta) → DESCARTA el id sintético + onConflict por la PK natural + value PARSEADO a jsonb nativo', () => {

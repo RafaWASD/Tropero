@@ -90,7 +90,28 @@ export type CrudUpsertPlan = {
   payload: Record<string, unknown>;
   /** Columnas de conflicto (PostgREST `onConflict`); undefined = conflicto por PK `id` (default). */
   onConflict?: string;
+  /**
+   * Si la fila va por un INSERT PLANO (no upsert). Para las tablas APPEND-ONLY (sigsa_declarations,
+   * export_log, spec 08 R11.3) que NO tienen GRANT/policy de UPDATE server-side: un `upsert` de PostgREST
+   * compila `INSERT ... ON CONFLICT DO UPDATE`, que EXIGE privilegio UPDATE aunque no haya conflicto → la
+   * fila se rechazaría con 42501 y se DESCARTARÍA en silencio (la declaración nunca llegaría al server).
+   * Con `.insert()` solo se necesita el grant INSERT (que sí tienen). Un re-intento (mismo id, o el UNIQUE
+   * de dominio) levanta 23505 → el connector lo descarta como permanente (la fila ya existe = idempotente
+   * en efecto). PRESERVA la propiedad de auditoría no-spoofeable (sin UPDATE desde el cliente, R11.3).
+   */
+  insertOnly?: boolean;
 };
+
+// ─── Tablas APPEND-ONLY sincronizadas (spec 08 R11.3): suben por INSERT plano, NO upsert ────────────────
+// Sin GRANT/policy de UPDATE server-side (0111/0112): el upsert (INSERT ... ON CONFLICT DO UPDATE) exigiría
+// UPDATE → 42501 → descarte silencioso. Se suben con `.insert()` (solo grant INSERT). La idempotencia la da
+// el UNIQUE de dominio (un re-intento = 23505 = descarte permanente, fila ya presente).
+const APPEND_ONLY_INSERT_TABLES: ReadonlySet<string> = new Set(['sigsa_declarations', 'export_log']);
+
+/** ¿La tabla es append-only (sube por INSERT plano, no upsert)? Spec 08 (sigsa_declarations / export_log). */
+export function isAppendOnlyInsertTable(table: string): boolean {
+  return APPEND_ONLY_INSERT_TABLES.has(table);
+}
 
 /** Plan de un PATCH CRUD-plano para PostgREST: el payload + el/los filtro(s) de igualdad de la fila. */
 export type CrudPatchPlan = {
@@ -193,6 +214,11 @@ export function buildCrudUpsert(
   if (spec) {
     delete data.id; // PK compuesta: el `id` (sintético) NO es columna real → no lo mandamos.
     return { payload: data, onConflict: spec.onConflict };
+  }
+  // Append-only (spec 08, R11.3): INSERT plano (sin upsert) — la tabla no tiene grant UPDATE → un upsert
+  // exigiría UPDATE y se rechazaría 42501. PK `id` real (de cliente) en el payload.
+  if (isAppendOnlyInsertTable(table)) {
+    return { payload: { ...data, id }, insertOnly: true };
   }
   return { payload: { ...data, id } }; // PK `id` real.
 }

@@ -46,6 +46,7 @@ import {
   buildSetCastratedUpdate,
   buildSetCutUpdate,
   buildUnsetCutUpdate,
+  buildSetBreedUpdate,
   buildSetFutureBullUpdate,
   buildMoveAnimalToRodeoUpdate,
   buildAddObservationInsert,
@@ -682,6 +683,9 @@ export type CreateAnimalInput = {
   tagElectronic?: string | null;
   idv?: string | null;
   visualIdAlt?: string | null;
+  /** Raza texto-libre (`animal_profiles.breed`). En el alta lo setea el BreedPicker (spec 08, T18) con el
+   *  NOMBRE de la raza elegida del catálogo SENASA (ej. "Aberdeen Angus") — es la columna que PERSISTE por la
+   *  RPC create_animal (0083, p_breed). Ver la nota de breed_id abajo. */
   breed?: string | null;
   coatColor?: string | null;
   entryDate?: string | null;
@@ -798,6 +802,13 @@ export async function createAnimal(
   if (idv) profilePayload.idv = idv;
   if (visual) profilePayload.visual_id_alt = visual;
   if (breed) profilePayload.breed = breed;
+  // ⚠ breed_id NO se manda acá A PROPÓSITO (spec 08, T18 reconciliación — leader): la RPC ATÓMICA
+  // create_animal (0083) que drena el alta NO tiene parámetro p_breed_id ni inserta breed_id (su INSERT
+  // enumera columnas sin breed_id; el mapeo de upload.ts tampoco lo pasa). Mandarlo en el payload se PERDERÍA
+  // en silencio al subir (la fila server-side quedaría con breed_id NULL). Por eso el BreedPicker del alta
+  // setea el NOMBRE de la raza en `breed` (texto, que SÍ persiste por p_breed), no breed_id. Setear breed_id
+  // desde el alta requiere patchear el RPC 0083 (agregar p_breed_id + columna al INSERT) + upload.ts =
+  // MIGRACIÓN, fuera de scope de este run (NO deploys). Documentado en progress/impl_08-sigsa-ui-run2.md.
   if (coat) profilePayload.coat_color = coat;
   if (input.entryDate) profilePayload.entry_date = input.entryDate;
   if (input.entryWeight != null) profilePayload.entry_weight = input.entryWeight;
@@ -1423,6 +1434,33 @@ export async function moveAnimalToRodeo(
   rodeoId: string,
 ): Promise<ServiceResult<true>> {
   const r = await runLocalWrite(buildMoveAnimalToRodeoUpdate(profileId, rodeoId));
+  if (!r.ok) return { ok: false, error: { kind: r.error.kind, message: r.error.message } };
+  return { ok: true, value: true };
+}
+
+// ─── Editar la RAZA desde la ficha (spec 08, T18 — cierre del GAP breed_id) ────────────────────
+
+/**
+ * Setea la RAZA de un animal desde la ficha (spec 08, T18). `breed` = el NOMBRE EXACTO de la raza elegida del
+ * catálogo SENASA (texto, ej. 'Aberdeen Angus'), o null para "sin raza". UN solo UPDATE local de `breed` (UNA
+ * CrudEntry) → upload queue (offline-first, CRUD-plano, igual que setFutureBull / moveAnimalToRodeo). NO encola
+ * nada extra.
+ *
+ * ⚠ El cliente manda SOLO `breed` (el nombre), NUNCA `breed_id`: el trigger server-side
+ * `tg_derive_breed_id_from_breed` (0113) DERIVA el `breed_id` desde este `breed` al SUBIR (mismo criterio que
+ * el alta — createAnimal NO manda breed_id porque la RPC 0083 no lo soporta, y el import). Centralizar la
+ * derivación en el trigger evita drift entre cliente/server y arregla alta+import+edición de forma uniforme.
+ *
+ * RLS: el UPDATE de `animal_profiles` lo gatea `animal_profiles_update` (has_role_in, 0022) al SUBIR —
+ * cualquier rol activo del campo puede editar la raza (mismo path que la CUT-ficha). Un rechazo lo maneja
+ * uploadData (descarta + superficia), NO el return de acá (contrato T5). Multi-tenant (CLAUDE.md ppio 6): el
+ * `profileId` ya identifica el perfil de su campo; no se hardcodea establishment_id.
+ */
+export async function setBreed(
+  profileId: string,
+  breed: string | null,
+): Promise<ServiceResult<true>> {
+  const r = await runLocalWrite(buildSetBreedUpdate(profileId, breed));
   if (!r.ok) return { ok: false, error: { kind: r.error.kind, message: r.error.message } };
   return { ok: true, value: true };
 }

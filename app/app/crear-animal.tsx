@@ -33,8 +33,11 @@ import { Check, ChevronDown, ChevronLeft, Mars, Venus } from 'lucide-react-nativ
 import type { LucideIcon } from 'lucide-react-native';
 
 import { Button, Card, FormField, FormError, InfoNote } from '@/components';
+import { BreedPickerSheet } from '@/components/sigsa';
 import { useAuth, useEstablishment, useRodeo } from '@/contexts';
 import { createAnimal, fetchSystemCategories, type SystemCategory } from '@/services/animals';
+import { fetchBreedCatalog } from '@/services/sigsa/sigsa-export-service';
+import { selectedBreedLabel, type BreedCatalogEntry } from '@/utils/breed-picker';
 import { useBusyWhileMounted } from '@/services/ble/stick';
 import { addConditionScore, addTacto } from '@/services/events';
 import { setCustomAttribute } from '@/services/custom-attributes';
@@ -86,8 +89,8 @@ import { backOr } from '@/utils/nav';
 const OFFLINE_COPY =
   'Necesitás conexión para dar de alta un animal. Conectate a internet y volvé a intentar.';
 
-// Topes de texto libre (raza / pelaje): acotados para que no se vuelvan campos de párrafo.
-const BREED_MAX_LENGTH = 40;
+// Tope de texto libre (pelaje): acotado para que no se vuelva un campo de párrafo. (La raza ya no es texto
+// libre: el BreedPicker la elige del catálogo SENASA — spec 08, T18 — y setea `breed` con el nombre del catálogo.)
 const COAT_MAX_LENGTH = 40;
 
 const TOTAL_STEPS = 4;
@@ -178,7 +181,14 @@ export default function CrearAnimalScreen() {
   //    la categoría pide (los no-mostrados quedan en su default y NO se mandan).
   const [birthYear, setBirthYear] = useState(''); // año-only (AAAA → AAAA-07-01); base de la edad
   const [birthYearError, setBirthYearError] = useState<string | null>(null);
+  // Raza CONTROLADA (spec 08, T18): el BreedPicker setea el NOMBRE elegido en `breed` (texto, que persiste por
+  // la RPC create_animal) + recuerda el CÓDIGO SENASA para el resumen del trigger + la selección del sheet.
+  // ⚠ breed_id NO se persiste desde el alta (la RPC 0083 no lo soporta — ver createAnimal + el progress). El
+  // picker es la entrada de raza del alta; el hint "Completá para SIGSA" refleja que sin breed_id queda "a completar".
   const [breed, setBreed] = useState('');
+  const [breedCode, setBreedCode] = useState<string | null>(null);
+  const [breedPickerOpen, setBreedPickerOpen] = useState(false);
+  const [breedCatalog, setBreedCatalog] = useState<BreedCatalogEntry[]>([]);
   const [coatColor, setCoatColor] = useState('');
   // recría: peso (= entry_weight).
   const [entryWeight, setEntryWeight] = useState('');
@@ -275,6 +285,21 @@ export default function CrearAnimalScreen() {
     };
   }, [establishmentId]);
 
+  // ── Cargar el catálogo de razas SENASA (global, offline) para el BreedPicker del paso 4 (spec 08, T13). ──
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      const r = await fetchBreedCatalog();
+      if (!active) return;
+      if (r.ok) setBreedCatalog(r.value);
+      // Si falla (sin sync aún), el catálogo queda vacío → el sheet muestra su empty-state; el alta NO se
+      // bloquea (la raza es opcional). No mostramos error duro acá (degradación graciosa).
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
+
   // ── Cargar el catálogo de categorías del SISTEMA del rodeo (para el paso 3). Dep PRIMITIVA: el
   //    systemId (string) — no el objeto rodeo (que se recrea). Se recarga si cambia el rodeo elegido
   //    (sistemas distintos → catálogos distintos). El filtrado por sexo es en render (categoriesForSex).
@@ -343,6 +368,24 @@ export default function CrearAnimalScreen() {
       return s;
     });
   }, []);
+
+  // Elegir raza del BreedPicker (spec 08, T18): recuerda el CÓDIGO (para el resumen + re-abrir el sheet con la
+  // selección) y setea `breed` (texto) con el NOMBRE elegido — la columna que PERSISTE por la RPC create_animal
+  // (breed_id no se manda desde el alta, ver createAnimal). "Sin raza" (null, null) limpia ambos. Cierra el sheet.
+  const onSelectBreed = useCallback(
+    (_breedId: string | null, senasaCode: string | null) => {
+      if (senasaCode == null) {
+        setBreedCode(null);
+        setBreed('');
+      } else {
+        setBreedCode(senasaCode);
+        const label = selectedBreedLabel(breedCatalog, senasaCode);
+        setBreed(label?.name ?? '');
+      }
+      setBreedPickerOpen(false);
+    },
+    [breedCatalog],
+  );
 
   // Paso 1 (rodeo): con 1 rodeo, auto-avanzamos al paso 2 (no hay decisión que tomar) UNA sola vez.
   // Con ≥2 rodeos, el usuario elige y toca "Continuar". Guard one-shot para no re-saltar si el
@@ -644,8 +687,9 @@ export default function CrearAnimalScreen() {
               setBirthYear(sanitizeBirthYearInput(t));
               if (birthYearError) setBirthYearError(null);
             }}
-            breed={breed}
-            onBreed={(t) => setBreed(t.slice(0, BREED_MAX_LENGTH))}
+            breedCode={breedCode}
+            breedLabel={selectedBreedLabel(breedCatalog, breedCode)}
+            onOpenBreedPicker={() => setBreedPickerOpen(true)}
             coatColor={coatColor}
             onCoatColor={(t) => setCoatColor(t.slice(0, COAT_MAX_LENGTH))}
             showWeight={showWeight}
@@ -726,6 +770,16 @@ export default function CrearAnimalScreen() {
           )}
         </YStack>
       ) : null}
+
+      {/* BreedPicker (spec 08, T13/T18): sheet de raza del catálogo SENASA. Montado al ROOT (cubre la pantalla
+          con su scrim). Setea `breed` (texto) con el nombre elegido. */}
+      <BreedPickerSheet
+        open={breedPickerOpen}
+        onClose={() => setBreedPickerOpen(false)}
+        breeds={breedCatalog}
+        selectedCode={breedCode}
+        onSelect={onSelectBreed}
+      />
     </YStack>
   );
 }
@@ -953,8 +1007,9 @@ function Step4Data({
   birthYear,
   birthYearError,
   onBirthYear,
-  breed,
-  onBreed,
+  breedCode,
+  breedLabel,
+  onOpenBreedPicker,
   coatColor,
   onCoatColor,
   showWeight,
@@ -992,8 +1047,12 @@ function Step4Data({
   birthYear: string;
   birthYearError: string | null;
   onBirthYear: (t: string) => void;
-  breed: string;
-  onBreed: (t: string) => void;
+  /** Código SENASA de la raza elegida (null = sin raza). Controla el resumen + el hint del trigger. */
+  breedCode: string | null;
+  /** Nombre + código de la raza elegida (de selectedBreedLabel), o null si sin raza. */
+  breedLabel: { senasaCode: string; name: string } | null;
+  /** Abre el BreedPickerSheet (spec 08, T18). */
+  onOpenBreedPicker: () => void;
   coatColor: string;
   onCoatColor: (t: string) => void;
   showWeight: boolean;
@@ -1102,13 +1161,14 @@ function Step4Data({
           keyboardType="number-pad"
           error={birthYearError}
         />
-        <FormField
-          label="Raza (opcional)"
-          value={breed}
-          onChangeText={onBreed}
-          autoCapitalize="sentences"
-          maxLength={BREED_MAX_LENGTH}
-          placeholder="Ej. Angus"
+        {/* Raza CONTROLADA (spec 08, T18): trigger → BreedPickerSheet (catálogo SENASA). Reemplaza al input de
+            texto libre. Muestra la raza elegida (código + nombre) o el placeholder; el hint recuerda que sin
+            raza el animal queda "a completar" para SIGSA. */}
+        <BreedPickerTrigger
+          breedLabel={breedLabel}
+          hasBreed={breedCode != null}
+          onOpen={onOpenBreedPicker}
+          muted={muted}
         />
         <FormField
           label="Pelaje (opcional)"
@@ -1327,6 +1387,83 @@ function OptionRows({
           </Pressable>
         );
       })}
+    </YStack>
+  );
+}
+
+// ─── Trigger del BreedPicker (spec 08, T18) — abre el sheet de raza del catálogo SENASA ────
+//
+// Espeja la afordancia del GroupCombo (pill ancho con chevron) pero abre un SHEET (no un acordeón inline): la
+// lista de razas es larga (~28 + búsqueda) y el sheet con header/body/footer fijos la maneja mejor. Muestra el
+// CÓDIGO + NOMBRE de la raza elegida, o "Elegí la raza" si no hay; + un hint recordando que sin raza el animal
+// queda "a completar" para SIGSA (R1.4 UX). Target ≥$touchMin (Fitts).
+
+function BreedPickerTrigger({
+  breedLabel,
+  hasBreed,
+  onOpen,
+  muted,
+}: {
+  breedLabel: { senasaCode: string; name: string } | null;
+  hasBreed: boolean;
+  onOpen: () => void;
+  muted: string;
+}) {
+  return (
+    <YStack gap="$2">
+      <Text fontFamily="$body" fontSize="$3" fontWeight="500" color="$textMuted">
+        Raza (opcional)
+      </Text>
+      <Pressable onPress={onOpen} {...buttonA11y(Platform.OS, { label: 'Elegir raza' })}>
+        <XStack
+          width="100%"
+          minHeight="$touchMin"
+          alignItems="center"
+          gap="$3"
+          backgroundColor="$white"
+          borderRadius="$card"
+          borderWidth={1}
+          borderColor="$divider"
+          paddingHorizontal="$4"
+          pressStyle={{ backgroundColor: '$surface' }}
+        >
+          {/* Chip del código SENASA cuando hay raza elegida (slot que alinea el nombre). */}
+          {breedLabel ? (
+            <View
+              minWidth="$icon"
+              height="$chipMin"
+              paddingHorizontal="$2"
+              borderRadius="$pill"
+              backgroundColor="$greenLight"
+              alignItems="center"
+              justifyContent="center"
+              flexShrink={0}
+            >
+              <Text fontFamily="$body" fontSize="$3" lineHeight="$3" fontWeight="700" color="$primary" numberOfLines={1}>
+                {breedLabel.senasaCode}
+              </Text>
+            </View>
+          ) : null}
+          <Text
+            flex={1}
+            minWidth={0}
+            numberOfLines={1}
+            fontFamily="$body"
+            fontSize="$5"
+            fontWeight={hasBreed ? '600' : '400'}
+            color={hasBreed ? '$textPrimary' : '$textMuted'}
+          >
+            {breedLabel ? breedLabel.name : 'Elegí la raza'}
+          </Text>
+          <ChevronDown size={22} color={muted} strokeWidth={2} />
+        </XStack>
+      </Pressable>
+      {/* Hint: sin raza del catálogo, el animal queda "a completar" para la exportación SIGSA (R1.4). */}
+      {!hasBreed ? (
+        <Text fontFamily="$body" fontSize="$2" lineHeight="$2" fontWeight="400" color="$textFaint">
+          Completá la raza para poder exportar el animal a SIGSA.
+        </Text>
+      ) : null}
     </YStack>
   );
 }

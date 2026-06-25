@@ -257,6 +257,33 @@ streams:
       # PK compuesta (animal_profile_id, field_definition_id) → `id` sintético (PowerSync exige `id` por fila).
       - SELECT (animal_profile_id || ':' || field_definition_id) AS id, * FROM custom_attributes WHERE establishment_id IN org_scope
 
+  # ── SIGSA (spec 08) ──────────────────────────────────────────────────────────────────────────────
+  #    Export de identificaciones electrónicas a SENASA. Una stream GLOBAL read-only (catálogo de razas) +
+  #    dos scope-establishment JOIN-FREE (mismo patrón org_scope ya probado). ⚠️ Solo deployar DESPUÉS de
+  #    aplicar las migraciones 0107/0111/0112 (las tablas deben existir o el Validate del dashboard falla).
+  catalog_breed:                             # catálogo GLOBAL de razas SENASA (0107), read-only. 1 bucket global.
+    auto_subscribe: true                     # Mismo trato que catalog_species/catalog_categories (sin `with:`).
+    queries:
+      # SIN `WHERE active = true`: la tabla es de 32 filas (trivial), y sincronizar TODAS (incl. las bubalinas
+      # active=false) evita el edge F6 — un animal con breed_id de una raza inactiva igual resuelve su
+      # nombre/código en el cliente (con el filtro, ese breed_id no bajaría → "raza desconocida" en la UI).
+      - SELECT * FROM breed_catalog
+
+  sigsa_declarations:                        # marcador de declaración por (est, animal) (0111). Scope establishment.
+    auto_subscribe: true                     # Append-only inmutable (R11.3) → SIN filtro deleted_at (no existe la
+    with:                                    # columna, igual que est_animal_category_history). JOIN-FREE.
+      org_scope: SELECT establishment_id FROM user_roles WHERE user_id = auth.user_id() AND active = true
+    queries:
+      - SELECT * FROM sigsa_declarations WHERE establishment_id IN org_scope
+
+  sigsa_export_log:                          # audit de exports + file_content del TXT (0112). Scope establishment.
+    auto_subscribe: true                     # ⚠️ file_content = TXT COMPLETO con TODOS los RFIDs del lote → el dato
+    with:                                    # MÁS sensible de la feature. El scope DEBE ser org_scope estándar
+      org_scope: SELECT establishment_id FROM user_roles WHERE user_id = auth.user_id() AND active = true
+    queries:                                 # (establishment_id IN user_roles activos), NUNCA más amplio: un scope
+      # mal definido fugaría los RFIDs de un campo a OTRO TENANT. Mismo org_scope que las demás per-establishment.
+      - SELECT * FROM export_log WHERE establishment_id IN org_scope
+
 # ══════════════════════════════════════════════════════════════════════════════════════════════════
 # ENTIDADES COMPARTIDAS — FUERA DEL SYNC SET (ADR-026 b1/c2):
 #   - `animals` (global) → NO se sincroniza. Su identidad (tag_electronic/sex/birth_date) se denormaliza
@@ -264,6 +291,7 @@ streams:
 #   - `users` (global)   → NO se sincroniza. El `name` se denormaliza sobre `user_roles.member_name` →
 #     rides on self_user_roles (nombre propio) + est_members_roles (coworkers). PII (email/phone) en
 #     user_private self-only (self_user_private), NUNCA se denormaliza (ADR-025).
-# Total: 28 streams (17 del paso 1 + 8 del paso 2 + 3 custom de spec 03 M5). Bucket math para 2 campos:
-# ~49 (design §2.4 + 3 streams custom scope-establishment). << 1000.
+# Total: 31 streams (17 del paso 1 + 8 del paso 2 + 3 custom de spec 03 M5 + 3 de SIGSA spec 08). Bucket math
+# para 2 campos: ~52 (49 previos + sigsa_declarations/sigsa_export_log scope-establishment + catalog_breed
+# global). << 1000. (catalog_breed es 1 bucket global, no escala con campos.)
 # ══════════════════════════════════════════════════════════════════════════════════════════════════

@@ -263,7 +263,9 @@ export function buildOwnEmailPhoneQuery(userId: string): LocalQuery {
 export function buildEstablishmentDetailQuery(establishmentId: string): LocalQuery {
   return {
     sql:
-      'SELECT id, name, province, city, total_hectares FROM establishments ' +
+      // renspa (spec 08, 0110): se lee acá para pre-cargar el form de edición del campo (R2.3) + el banner /
+      // checklist de SIGSA (R13.3). La columna baja por la stream est_establishments (SELECT *).
+      'SELECT id, name, province, city, total_hectares, renspa FROM establishments ' +
       'WHERE id = ? AND deleted_at IS NULL LIMIT 1',
     args: [establishmentId],
   };
@@ -1639,6 +1641,31 @@ export function buildSetTeethStateUpdate(profileId: string, teethState: string):
 }
 
 /**
+ * UPDATE local de la RAZA de un animal desde la ficha (spec 08, T18 / cierre del GAP breed_id). `breed` es
+ * el NOMBRE EXACTO de la raza elegida del catálogo SENASA (texto libre, ej. 'Aberdeen Angus'), o NULL para
+ * "sin raza". Es un UPDATE de `animal_profiles` → CrudEntry PATCH → uploadData lo sube. El trigger
+ * server-side `tg_derive_breed_id_from_breed` (0113) DERIVA `breed_id` desde este `breed` al subir → el
+ * cliente manda SOLO `breed`, NUNCA `breed_id` (idéntico al alta: createAnimal líneas 804-810). Filtra
+ * `deleted_at IS NULL`.
+ *
+ * ⚠ SOLO escribe `breed` — NO toca `breed_id` localmente. El SQLite local materializa `breed_id` (espejo de
+ * la columna server, 0108): tras el UPDATE local, `breed_id` queda STALE hasta que la fila baje re-sincronizada
+ * con el `breed_id` derivado por el trigger (LWW). Para la UI esto es benigno: la ficha muestra `breed` (el
+ * nombre, optimista en sitio) y el export lee `breed_id` del set ya sincronizado (la declaración aplica sobre
+ * el inventario REAL, no el overlay). NO replicamos el match del trigger en el cliente (la verdad es el server;
+ * duplicarlo arriesga drift si el catálogo cambia).
+ *
+ * Idempotencia: el id es el del PERFIL (no un evento) → re-elegir la raza desde la ficha es OTRO UPDATE del
+ * mismo perfil (LWW), NO duplica. No lleva session_id (es una propiedad, no un evento de jornada).
+ */
+export function buildSetBreedUpdate(profileId: string, breed: string | null): LocalQuery {
+  return {
+    sql: 'UPDATE animal_profiles SET breed = ? WHERE id = ? AND deleted_at IS NULL',
+    args: [breed, profileId],
+  };
+}
+
+/**
  * UPDATE local de la transición a CUT (R6.8): marca `is_cut = true` + fija la categoría CUT del sistema
  * (`category_id = ?` la pasa el caller, resuelta del catálogo local) + `category_override = true` (la
  * elección de CUT es manual, el server NO la recalcula). UN solo statement → una CrudEntry PATCH. El gating
@@ -2826,5 +2853,235 @@ export function buildClearOverlayDelete(table: string, clientOpId: string): Loca
   return {
     sql: `DELETE FROM ${table} WHERE client_op_id = ?`,
     args: [clientOpId],
+  };
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════════
+// EXPORT SIGSA (spec 08, T11/T19/T20) — query de pendientes + escrituras de declaración / export_log
+// ════════════════════════════════════════════════════════════════════════════════════════════
+//
+// Lecturas/escrituras 100% LOCALES (SQLite de PowerSync), offline-first (R14): la generación del TXT no
+// toca la red; los inserts de sigsa_declarations / export_log van por la cola de sync (R14.1/R14.2).
+//
+// ⚠ RECONCILIACIÓN OFFLINE (leader 2026-06-24, design §"Flujo de datos — Export"): la query de pendientes
+// NO hace `JOIN animals`. La tabla global `animals` NO entra al sync set de PowerSync (ADR-026) → NO está
+// en el SQLite local → un JOIN a ella rompería la generación offline. La identidad del animal (tag
+// electrónico / sexo / fecha de nacimiento) se lee de las columnas DENORMALIZADAS sobre `animal_profiles`
+// (`animal_tag_electronic` / `animal_sex` / `animal_birth_date`, migración 0079) — el MISMO criterio b1 que
+// usan buildAnimalsListQuery/buildSearchByTagQuery. El JOIN al catálogo de razas (breed_catalog, global, SÍ
+// sincroniza) resuelve el código SENASA; el LEFT JOIN a sigsa_declarations descarta los YA declarados.
+//
+// Scoping de tenant: ya lo aplicó la stream (est_animal_profiles, has_role_in) → NO se re-filtra; SÍ se
+// conservan los filtros de DOMINIO del design: establishment_id propio + `animal_tag_electronic IS NOT NULL`
+// + no-declarado (sd.id IS NULL) + status='active' + deleted_at IS NULL + filtros opcionales rodeo/fecha.
+// NUNCA se hardcodea establishment_id (CLAUDE.md ppio 6): llega por param.
+
+/** Fila CRUDA del catálogo de razas (lo que devuelve buildBreedCatalogQuery). El service la mapea al
+ *  `BreedCatalogEntry` del helper puro del picker (breed-picker.ts). */
+export type BreedCatalogRow = {
+  id: string;
+  senasa_code: string;
+  name: string;
+  species: string;
+  /** SQLite: 0/1 (column.integer en AppSchema). El mapper lo coerce con toBool. */
+  active: number | null;
+  sort_order: number | null;
+};
+
+/**
+ * Catálogo COMPLETO de razas del SQLite local (T13 — para el BreedPicker). Lee `breed_catalog` (catálogo
+ * GLOBAL read-only, sincronizado COMPLETO por la stream catalog_breed — 32 filas, sin scope de
+ * establecimiento). Trae TODAS las filas (bovine + bubaline + generic, active y no-active): el FILTRO del
+ * picker (species='bovine' AND active=1) lo aplica el helper PURO breedPickerOptions (testeable sin device),
+ * NO el SQL — así el mismo catálogo sirve para resolver el nombre de un breed_id de raza inactiva (edge F6)
+ * sin re-query. Orden por sort_order ASC (nulls al final) para que el render no dependa del orden de inserción.
+ *
+ * No hay scoping de tenant (el catálogo es global); offline-first (la stream lo bajó al primer login, R1.8).
+ */
+export function buildBreedCatalogQuery(): LocalQuery {
+  return {
+    sql:
+      'SELECT id, senasa_code, name, species, active, sort_order ' +
+      'FROM breed_catalog ORDER BY sort_order ASC',
+    args: [],
+  };
+}
+
+/** Fila CRUDA de la query de pendientes SIGSA (lo que devuelve buildPendingSigsaAnimalsQuery). El mapper
+ *  del service la transforma al `PendingAnimalInfo` de la capa pura (sigsa-validator.ts). */
+export type SigsaPendingRow = {
+  /** animal_profiles.id */
+  animal_profile_id: string;
+  /** animal_profiles.animal_tag_electronic (denormalizado 0079) — RFID crudo; null si sin dispositivo. */
+  animal_tag_electronic: string | null;
+  /** animal_profiles.animal_sex (denormalizado 0079) — 'male'|'female'; null defensivo. */
+  animal_sex: string | null;
+  /** animal_profiles.animal_birth_date (denormalizado 0079) — ISO 'YYYY-MM-DD'; null si falta. */
+  animal_birth_date: string | null;
+  /** breed_catalog.senasa_code resuelto por el LEFT JOIN; null si breed_id es null. */
+  senasa_code: string | null;
+  /** animal_profiles.breed_id — FK al catálogo; null si no se asignó raza. */
+  breed_id: string | null;
+};
+
+/** Filtros opcionales de la query de pendientes (R9.1 — acotar el conjunto a exportar). */
+export type SigsaPendingFilters = {
+  /** Solo animales de este rodeo (null/undefined = todos los rodeos del campo). */
+  rodeoId?: string | null;
+  /** Fecha de nacimiento desde (ISO 'YYYY-MM-DD'), inclusive. Compara sobre animal_birth_date. */
+  dateFrom?: string | null;
+  /** Fecha de nacimiento hasta (ISO 'YYYY-MM-DD'), inclusive. */
+  dateTo?: string | null;
+};
+
+/**
+ * Query de animales PENDIENTES de declarar SIGSA del establecimiento (T11 / R9.1, design §"Flujo de datos").
+ *
+ * SIGUE EXACTAMENTE el SQL corregido del design: SOLO animal_profiles (identidad denormalizada b1) +
+ * LEFT JOIN breed_catalog (código SENASA) + LEFT JOIN sigsa_declarations (descartar declarados). NUNCA toca
+ * la tabla `animals` (no está en el SQLite local). El LEFT JOIN a sigsa_declarations + `sd.id IS NULL` deja
+ * SOLO los NO declarados (un animal con declaración previa — por export o por marca manual — desaparece).
+ *
+ * Filtros de dominio (no de scoping): establishment_id + tag NOT NULL + sd.id IS NULL + status='active' +
+ * deleted_at IS NULL + opcionales rodeo_id / rango de animal_birth_date. Los opcionales se agregan dinámico
+ * (mismo estilo que buildAnimalsListQuery) → los placeholders y args quedan alineados.
+ *
+ * NO consulta el overlay pending_* : la declaración SIGSA aplica sobre el inventario REAL sincronizado del
+ * campo (un alta optimista todavía sin ACK no es candidato a declarar — su perfil no existe server-side aún).
+ */
+export function buildPendingSigsaAnimalsQuery(
+  establishmentId: string,
+  filters: SigsaPendingFilters = {},
+): LocalQuery {
+  // SELECT + JOINs (idénticos al design). Aliases al shape SigsaPendingRow (snake_case, que el mapper lee).
+  let sql =
+    'SELECT ap.id AS animal_profile_id, ap.animal_tag_electronic AS animal_tag_electronic, ' +
+    'ap.animal_sex AS animal_sex, ap.animal_birth_date AS animal_birth_date, ' +
+    'bc.senasa_code AS senasa_code, ap.breed_id AS breed_id ' +
+    'FROM animal_profiles ap ' +
+    'LEFT JOIN breed_catalog bc ON bc.id = ap.breed_id ' +
+    'LEFT JOIN sigsa_declarations sd ' +
+    'ON sd.animal_profile_id = ap.id AND sd.establishment_id = ap.establishment_id ' +
+    'WHERE ap.establishment_id = ? ' +
+    'AND ap.animal_tag_electronic IS NOT NULL ' +
+    'AND sd.id IS NULL ' + // no declarados (R3.4 — el LEFT JOIN + IS NULL es el filtro de "pendiente")
+    "AND ap.status = 'active' " +
+    'AND ap.deleted_at IS NULL';
+  const args: unknown[] = [establishmentId];
+
+  // Filtros opcionales (R9.1). Solo se agregan si vienen con valor → cero placeholders huérfanos.
+  if (filters.rodeoId) {
+    sql += ' AND ap.rodeo_id = ?';
+    args.push(filters.rodeoId);
+  }
+  if (filters.dateFrom) {
+    sql += ' AND ap.animal_birth_date >= ?';
+    args.push(filters.dateFrom);
+  }
+  if (filters.dateTo) {
+    sql += ' AND ap.animal_birth_date <= ?';
+    args.push(filters.dateTo);
+  }
+  // Orden estable por id (display lo reordena la UI; la generación del TXT no depende del orden).
+  sql += ' ORDER BY ap.id ASC';
+  return { sql, args };
+}
+
+/**
+ * INSERT local de UNA fila de export_log (T11 / R4.1-R4.3). `id` de cliente. CRUD plano sobre la tabla
+ * SINCRONIZADA → 1 CrudEntry → uploadData la sube al reconectar (RLS owner/vet la re-valida, 0112).
+ *
+ * ⚠ NO se manda `generated_by`: el trigger `export_log_set_generated_by` (0112, HIGH-1) lo FUERZA =
+ * auth.uid() server-side, ignorando cualquier valor del payload. Mandarlo es inútil (el trigger lo pisa) y
+ * confuso. Mismo criterio que created_by en los CRUD del repo (management_groups, sessions). `generated_at`
+ * tiene `default now()` server-side (no se manda). `file_content` lo CHECKea el server (≤5 MB, HIGH-2);
+ * `file_name` ≤255. `animal_count` = N de la corrida. rodeo_filter_id / date_from / date_to opcionales
+ * (registran el filtro aplicado, R4.3). El tope de tamaño NO se valida acá: el local write siempre tiene
+ * éxito offline; un file_content >5 MB lo rechaza el server al subir (superficiado por uploadData).
+ */
+export function buildExportLogInsert(
+  id: string,
+  establishmentId: string,
+  fields: {
+    animalCount: number;
+    fileName: string;
+    fileContent: string;
+    rodeoFilterId: string | null;
+    dateFrom: string | null;
+    dateTo: string | null;
+  },
+): LocalQuery {
+  return {
+    sql:
+      'INSERT INTO export_log ' +
+      '(id, establishment_id, animal_count, file_name, file_content, rodeo_filter_id, date_from, date_to) ' +
+      'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    args: [
+      id,
+      establishmentId,
+      fields.animalCount,
+      fields.fileName,
+      fields.fileContent,
+      fields.rodeoFilterId,
+      fields.dateFrom,
+      fields.dateTo,
+    ],
+  };
+}
+
+/**
+ * INSERT local de UNA fila de sigsa_declarations (T11 export + T19 marca manual / R3.1-R3.4). `id` de
+ * cliente. CRUD plano sobre la tabla SINCRONIZADA → 1 CrudEntry → uploadData la sube (RLS owner/vet +
+ * IDOR-check la re-validan, 0111). El UNIQUE(establishment_id, animal_profile_id) server-side evita doble
+ * declaración del mismo par (un reintento o una marca-tras-export levanta 23505 → uploadData lo trata).
+ *
+ * ⚠ NO se manda `declared_by`: el trigger `sigsa_declarations_set_declared_by` (0111, HIGH-1) lo FUERZA =
+ * auth.uid() server-side. `declared_at` tiene `default now()` (no se manda).
+ *
+ * @param exportLogId  el export_log_id de la corrida (T11 export con archivo RAFAQ), o `null` para la
+ *                     MARCA MANUAL (T19 — "ya declarado por otro medio"): el NULL distingue las dos. La FK
+ *                     export_log_id (0112) es ON DELETE SET NULL.
+ */
+export function buildSigsaDeclarationInsert(
+  id: string,
+  establishmentId: string,
+  animalProfileId: string,
+  exportLogId: string | null,
+): LocalQuery {
+  return {
+    sql:
+      'INSERT INTO sigsa_declarations ' +
+      '(id, establishment_id, animal_profile_id, export_log_id) ' +
+      'VALUES (?, ?, ?, ?)',
+    args: [id, establishmentId, animalProfileId, exportLogId],
+  };
+}
+
+/**
+ * Lee el `file_content` + `file_name` de una fila de export_log del SQLite local (T20 re-descarga / R10.1).
+ * La stream sigsa_export_log ya scopeó por establishment (org_scope) → un export_log_id de OTRO campo no
+ * está local (devuelve null). LIMIT 1 (PK). emptyIsSyncing=false en el caller: "no encontrado" es un caso
+ * de negocio (el export pudo borrarse), no necesariamente falta de sync.
+ */
+export function buildExportLogContentQuery(exportLogId: string): LocalQuery {
+  return {
+    sql: 'SELECT id, file_name, file_content FROM export_log WHERE id = ? LIMIT 1',
+    args: [exportLogId],
+  };
+}
+
+/**
+ * Lista el historial de export_log del establecimiento (R10.1 — acceso a re-descarga), ordenado por
+ * generated_at DESC (más reciente primero, igual que idx_export_log_establishment). Scoping de tenant ya
+ * aplicado por la stream → solo establishment_id propio + orden. Proyecta lo que la UI del historial
+ * necesita (sin file_content, que es pesado: la re-descarga lo lee aparte por id con buildExportLogContentQuery).
+ */
+export function buildExportLogHistoryQuery(establishmentId: string): LocalQuery {
+  return {
+    sql:
+      'SELECT id, generated_at, generated_by, animal_count, file_name, ' +
+      'rodeo_filter_id, date_from, date_to ' +
+      'FROM export_log WHERE establishment_id = ? ORDER BY generated_at DESC',
+    args: [establishmentId],
   };
 }

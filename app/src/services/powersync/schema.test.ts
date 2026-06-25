@@ -19,7 +19,7 @@ function tablesByName(): Map<string, TableJson> {
   return new Map(json.tables.map((t) => [t.name, t]));
 }
 
-// Las 29 tablas SINCRONIZADAS (espejo del schema as-built, design §3 + spec 03 M5 custom + M6 CE).
+// Las 32 tablas SINCRONIZADAS (espejo del schema as-built, design §3 + spec 03 M5 custom + M6 CE + spec 08 SIGSA).
 const SYNCED_TABLES = [
   'species',
   'systems_by_species',
@@ -52,6 +52,11 @@ const SYNCED_TABLES = [
   'scrotal_measurements',
   'animal_events',
   'birth_calves',
+  // spec 08 — SIGSA: breed_catalog (catálogo global, stream catalog_breed) + sigsa_declarations/export_log
+  // (scope establishment vía sigsa_declarations/sigsa_export_log, 0107/0111/0112).
+  'breed_catalog',
+  'sigsa_declarations',
+  'export_log',
 ];
 
 const PENDING_TABLES = [
@@ -71,7 +76,7 @@ test('R2.1: AppSchema valida contra el SDK (no tira la validación de PowerSync)
   assert.doesNotThrow(() => AppSchema.validate());
 });
 
-test('R2.1: están las 29 tablas sincronizadas del schema as-built', () => {
+test('R2.1: están las 32 tablas sincronizadas del schema as-built', () => {
   const tables = tablesByName();
   for (const name of SYNCED_TABLES) {
     assert.ok(tables.has(name), `falta la tabla sincronizada ${name}`);
@@ -172,6 +177,45 @@ test('spec 10 (T-CL.12 / R13.3, R12.1): animal_profiles declara is_castrated + f
   assert.ok(cols.includes('future_bull'), 'animal_profiles debe declarar future_bull (0085, badge ⭐/toggle)');
 });
 
+test('spec 08 (T7 / R1.8): animal_profiles declara breed_id (FK a breed_catalog, 0108)', () => {
+  const cols = tablesByName().get('animal_profiles')!.columns.map((c) => c.name);
+  // breed_id (0108): la query de pendientes hace `SELECT ap.breed_id` + JOIN breed_catalog para sacar el
+  // código RAZA del TXT (R5.2). Sin declararla, la stream est_animal_profiles (SELECT *) NO la materializa
+  // en SQLite → "no such column: ap.breed_id" en vivo.
+  assert.ok(cols.includes('breed_id'), 'animal_profiles debe declarar breed_id (0108, query de pendientes SIGSA)');
+});
+
+test('spec 08 (T7 / R14.2, R14.3, R15.1): las 3 tablas SIGSA tienen sus columnas as-built (0107/0111/0112)', () => {
+  const tables = tablesByName();
+  // breed_catalog (0107): catálogo global read-only. PK `id` implícita (NO declarada).
+  const breed = tables.get('breed_catalog');
+  assert.ok(breed, 'falta breed_catalog');
+  const breedCols = breed.columns.map((c) => c.name).sort();
+  assert.deepEqual(breedCols, ['active', 'created_at', 'name', 'senasa_code', 'sort_order', 'species']);
+  assert.ok(!breedCols.includes('id'), 'breed_catalog no debe declarar id (PK implícita del SDK)');
+
+  // sigsa_declarations (0111): append-only inmutable → SIN deleted_at (no existe la columna). PK `id` implícita.
+  const decl = tables.get('sigsa_declarations');
+  assert.ok(decl, 'falta sigsa_declarations');
+  const declCols = decl.columns.map((c) => c.name).sort();
+  assert.deepEqual(declCols, [
+    'animal_profile_id', 'created_at', 'declared_at', 'declared_by', 'establishment_id', 'export_log_id',
+  ]);
+  assert.ok(!declCols.includes('deleted_at'), 'sigsa_declarations es append-only: NO debe declarar deleted_at');
+
+  // export_log (0112): file_content (TXT con RFIDs) + audit. PK `id` implícita.
+  const log = tables.get('export_log');
+  assert.ok(log, 'falta export_log');
+  const logCols = log.columns.map((c) => c.name).sort();
+  assert.deepEqual(logCols, [
+    'animal_count', 'created_at', 'date_from', 'date_to', 'establishment_id', 'file_content',
+    'file_name', 'generated_at', 'generated_by', 'rodeo_filter_id',
+  ]);
+  // file_content es el dato sensible que el scope org_scope del YAML protege (la stream sigsa_export_log
+  // lo escopa server-side; acá solo verificamos que la columna se materializa local para la re-descarga R10.1).
+  assert.ok(logCols.includes('file_content'), 'export_log debe declarar file_content (re-descarga R10.1)');
+});
+
 test('PASO 2 (ADR-026 §C, c2 / 0080): user_roles declara member_name (nombres de coworkers offline)', () => {
   const cols = tablesByName().get('user_roles')!.columns.map((c) => c.name);
   assert.ok(cols.includes('member_name'), 'user_roles debe declarar member_name (c2) — lo leen buildMembersQuery/buildOwnNameQuery');
@@ -186,7 +230,7 @@ test('users NO trae email/phone (PII movida a user_private, 0068 / ADR-025)', ()
   assert.ok(!cols.includes('phone'), 'users no debe exponer phone');
 });
 
-test('el schema total = 29 sincronizadas + op_intents + 8 overlay = 38 tablas', () => {
+test('el schema total = 32 sincronizadas + op_intents + 8 overlay = 41 tablas', () => {
   const json = AppSchema.toJSON() as { tables: TableJson[] };
   assert.equal(json.tables.length, SYNCED_TABLES.length + 1 + PENDING_TABLES.length);
 });
@@ -218,7 +262,9 @@ const COLUMNS_READ_BY_BUILDERS: Record<string, string[]> = {
   rodeos: ['establishment_id', 'name', 'species_id', 'system_id', 'active', 'service_months', 'deleted_at', 'created_at'],
   user_roles: ['role', 'user_id', 'establishment_id', 'active', 'member_name'],
   user_private: ['phone', 'email', 'user_id'],
-  establishments: ['name', 'province', 'city', 'deleted_at', 'total_hectares'],
+  // spec 08 (0110): renspa — buildEstablishmentDetailQuery lo proyecta (edición del campo + checklist/banner
+  // de SIGSA, R13.3). Sin declararlo, PowerSync no lo materializa → "no such column: renspa" offline.
+  establishments: ['name', 'province', 'city', 'deleted_at', 'total_hectares', 'renspa'],
   invitations: ['role', 'email', 'created_at', 'expires_at', 'token', 'establishment_id', 'status'],
   management_groups: ['name', 'establishment_id', 'active', 'deleted_at'],
   // spec 03 M1.2/M1.3 — MODO MANIOBRAS: sessions + maneuver_presets (CRUD plano). Los builders de

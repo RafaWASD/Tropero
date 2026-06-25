@@ -1,7 +1,7 @@
 # Spec 08 — Exportación SIGSA — Requirements
 
-**Status**: spec_ready + **Puerta 1 APROBADA por Raf (2026-06-13)** — flip de feature_list.json diferido a reconvergencia (ver nota al final). 4 decisiones abiertas quedan para cerrar al implementar (Ola 4).
-**Fecha**: 2026-06-13
+**Status**: in_progress (capa DB) — Puerta 1 APROBADA (2026-06-13) + **las 4 decisiones abiertas CERRADAS (Raf, 2026-06-24)**. Capa pura T8/T9/T10 done (terminal paralela). Migraciones renumeradas **0107-0112** (la DB avanzó a 0106 desde la redacción).
+**Fecha**: 2026-06-13 (decisiones cerradas 2026-06-24)
 **Autor**: spec_author
 
 ## Resumen
@@ -33,9 +33,24 @@ Genera el archivo `.txt` importable en SIGSA web para declarar ante SENASA los d
 
 **R1.4** El sistema deberá agregar la columna `animal_profiles.breed_id` (FK nullable a `breed_catalog(id)`) en coexistencia con la columna existente `animal_profiles.breed` (texto libre) durante la migración. La columna `breed_id` se usará going forward; `breed` queda como legacy hasta la limpieza post-MVP.
 
+> **Nota de reconciliación (as-built, Run 3 impl 2026-06-25, migración 0113).** La POBLACIÓN de `breed_id`
+> going-forward (alta + import + edición) se centraliza en un **trigger** `tg_derive_breed_id_from_breed`
+> (`BEFORE INSERT OR UPDATE OF breed ON animal_profiles`) que DERIVA `breed_id` desde `breed` (el nombre del
+> catálogo) por match normalizado, en vez de que cada write-path (RPC `create_animal` 0083, import, ficha)
+> setee `breed_id` directamente. Razón (decisión del leader): el BreedPicker setea `breed` (texto, nombre
+> exacto), no `breed_id`, y la RPC `create_animal` no tiene `p_breed_id` → sin esto ningún animal nuevo era
+> exportable. El trigger arregla alta + import + edición de forma uniforme sin cambiar firmas de RPC. El
+> cliente escribe SIEMPRE solo `breed`; el trigger pone `breed_id`. Guard `breed IS NOT NULL` preserva el
+> `breed_id` heredado del ternero al pie (R1.7). La UX de "completar la raza" (alta: BreedPicker en
+> `crear-animal.tsx`; edición: `BreedRow` + `BreedPickerSheet` en la ficha `[id].tsx`) escribe `breed` →
+> el trigger deriva `breed_id` → el animal pasa a exportable (cierra el loop "A completar → completar" de
+> R8.2/R8.3). Detalle en `progress/impl_08-sigsa-breed-trigger.md` + `design.md` §"Migration 0113".
+
 **R1.5** Cuando existe `animal_profiles.breed` (texto libre) y `breed_id` es `NULL`, el sistema deberá ejecutar una migración best-effort que haga matching por nombre normalizado (case-insensitive, trim) al catálogo `breed_catalog` y asigne `breed_id` si encuentra exactamente un match. Los registros sin match quedan con `breed_id = NULL` ("a completar").
 
 **R1.6** El sistema deberá migrar `reproductive_events.breed` (raza del ternero al parto, migration 0026) de la misma manera: agregar `breed_id` FK nullable + migración best-effort de texto libre.
+
+> **Nota de reconciliación (as-built, impl 2026-06-24, migración 0109).** `reproductive_events` (0026) **no tiene** columna `breed` (texto libre) — el supuesto de R1.6 era incorrecto (el `breed` texto libre vive en `animal_profiles`, 0020, cubierto por R1.5; el único `breed` en `reproductive_events`-adyacente es `semen_registry.breed`, otra tabla). Por lo tanto: la columna `breed_id` FK nullable **se agrega** (parte cumplida, la usa el sync de PowerSync T7) pero la **migración best-effort es un no-op** (no hay columna fuente que matchear; el `UPDATE` original habría abortado la migración). `reproductive_events.breed_id` queda como columna forward-compat sin path de población automática en MVP — la herencia de raza del ternero al pie que importa (R1.7) va al `animal_profiles.breed_id` **del ternero**, no a esta columna, y el código RAZA del TXT sale de ahí (R5.2). Detalle en `progress/impl_08-sigsa-db.md` §Reconciliación y `design.md` migración 0109.
 
 **R1.7** Cuando se crea un ternero al pie (`R9` de spec 02), el sistema deberá heredar el `breed_id` de la madre en el `animal_profile` del ternero, en lugar de texto libre. Si la madre no tiene `breed_id`, el ternero nace con `breed_id = NULL`.
 
@@ -45,7 +60,7 @@ Genera el archivo `.txt` importable en SIGSA web para declarar ante SENASA los d
 
 > Delta sobre spec 01 (`establishments`). Toca backend ya `done`.
 
-**R2.1** El sistema deberá agregar la columna `establishments.renspa` (text, nullable, UNIQUE parcial sobre `deleted_at IS NULL`) a la tabla `establishments`.
+**R2.1** El sistema deberá agregar la columna `establishments.renspa` (text, nullable, **SIN constraint de unicidad**) a la tabla `establishments`. *(Decisión 3 cerrada 2026-06-24: texto opcional sin unique. El RENSPA no va en el TXT — R2.4 — y un unique global causaría colisión/fuga cross-tenant en casos legítimos. La unicidad como señal anti-fraude queda POST-MVP, atada a la cardinalidad real del RENSPA que valida Facundo.)*
 
 **R2.2** Cuando un usuario guarda un RENSPA en el establecimiento, el sistema deberá validar que el formato sea un string no vacío de hasta 20 caracteres. La validación de formato RENSPA más estricta (estructura SENASA) queda como mejora post-MVP.
 
@@ -220,8 +235,8 @@ Genera el archivo `.txt` importable en SIGSA web para declarar ante SENASA los d
 
 1. **Raza desconocida: ¿bloquear o `OR`?** → ✅ **RESUELTA (Raf, 2026-06-13): soft-block + `OR` de un tap.** Se mantiene el bloqueo por `breed_id` NULL (animal queda "a completar", nunca se exporta silencioso, R8.2) PERO el `BreedPicker` bovino expone `OR` (Otra Raza) como opción de un tap (ya está en el seed bovino; `S/E` queda fuera del picker bovino por ser `generic`). Así "no sé la raza" no choca con el plazo de 10 días hábiles. **Pendiente Facundo** (no bloquea): confirmar si SENASA espera `OR` o `S/E` para desconocida en el flujo de declaración de dispositivos (ambos son códigos oficiales; riesgo bajo). Afecta T13 (BreedPicker), capa de UI diferida.
 2. **R10.2 (marcar declarado a mano)**: → ✅ **RESUELTA (Raf, 2026-06-13): ENTRA al MVP.** Owner/vet pueden marcar un animal como ya declarado sin generar archivo (declaraciones hechas por oficina SENASA / SIGBIOTRAZA directo). Razón: sin esto, esos animales aparecen como "pendientes" para siempre → ruido que mina la lista de pendientes (el valor central de la feature). El backend ya lo soporta entero (INSERT en `sigsa_declarations`, gateado); se cablea la UI al construir la capa diferida (T19). R10.2 queda firme (no tentativa).
-3. **RENSPA único global**: → 🟡 **ABIERTA (Raf pidió explicación + consulta a Facundo, 2026-06-13).** El diseño actual (migration 0092) hace `renspa` único entre TODOS los establecimientos (cross-tenant). **Problema identificado por el leader**: causa colisión cross-tenant (el usuario A queda bloqueado por un RENSPA de un usuario B que no ve → error confuso + fuga sutil) en casos legítimos (venta del campo, contador+dueño), y el RENSPA **ni siquiera va en el TXT** (R2.4, es solo recordatorio en pantalla). **Recomendación del leader: RELAJAR** (texto opcional validado por largo, sin unique global; a lo sumo único por dueño). **Pendiente Facundo**: ¿un RENSPA puede repetirse legítimamente entre dos campos/personas, o es 1:1 estricto e intransferible? (ver `CONTEXT/07-pendientes.md`). Mientras siga abierta, la migration 0092 NO se aplica con el unique global — espera esta decisión. Relajar NO reabre Gate 1 (saca superficie, no agrega).
-4. **GATE DURO de formato**: → ✅ **RESUELTA (Raf, 2026-06-13): lo hace Facundo.** Facundo hace un upload de prueba (2-3 animales) a SIGSA web con su clave fiscal y reporta las 5 incógnitas (¿`;` final?, ¿espacios?, ¿rango de fechas?, validación exacta del RFID, ¿mayúsc/minúsc?). Gatea el flip a `done` de feature 08 (NO bloquea construir las capas restantes contra los defaults documentados; el generador es swappable). Anotado en `CONTEXT/07-pendientes.md`. ⚠ La tabla de razas se saca de la pantalla de DECLARACIÓN DE DISPOSITIVOS, no la de movimiento (trampa del código `SI`, ver `razas-senasa-codigos.md` s25).
+3. **RENSPA único global**: → ✅ **RESUELTA (Raf, 2026-06-24): texto opcional, SIN unique de ningún tipo.** El `renspa` queda como columna nullable validada solo por largo (CHECK 1-20 chars) + escritura owner-only vía RPC `update_renspa`. **Sin** unique global ni por-dueño. Razón: el unique global causaba colisión cross-tenant (usuario A bloqueado por un RENSPA de B que no ve → error confuso + fuga de existencia, LOW-4 de Gate 1) en casos legítimos (venta del campo, contador+dueño), y el RENSPA **ni va en el TXT** (R2.4, es solo recordatorio en pantalla). Recomendación del leader (más fuerte que "único por dueño"): un dueño podría tener legítimamente el mismo RENSPA en dos registros — no lo sabemos hasta Facundo — y no hay caso de uso MVP para unicidad; es trivial agregar el índice post-MVP, doloroso sacarlo si la data ya lo violó. La unicidad como **señal anti-fraude** queda POST-MVP (`CONTEXT/07-pendientes.md`), atada a que Facundo confirme si el RENSPA es 1:1 estricto o repetible/transferible. Decisión que **desacopla el MVP de Facundo** (su respuesta solo importa para el anti-fraude futuro). Relajar NO reabre Gate 1 (saca superficie, no agrega).
+4. **GATE DURO de formato**: → ✅ **RESUELTA (Raf, 2026-06-13): lo hace Facundo.** Facundo hace un upload de prueba (2-3 animales) a SIGSA web con su clave fiscal y reporta las 5 incógnitas (¿`;` final?, ¿espacios?, ¿rango de fechas?, validación exacta del RFID, ¿mayúsc/minúsc?). Gatea el flip a `done` de feature 08 (NO bloquea construir las capas restantes contra los defaults documentados; el generador es swappable). Anotado en `CONTEXT/07-pendientes.md`. ⚠ La tabla de razas se saca de la pantalla de DECLARACIÓN DE DISPOSITIVOS, no la de movimiento (trampa del código `SI`, ver `razas-senasa-codigos.md` s25). ⚠ **RIESGO a confirmar ANTES del upload (leader, 2026-06-24)**: SIGSA es el sistema de compliance del gobierno — hay que confirmar si el upload con clave fiscal es un **preview/dry-run** o una **declaración legal firme** ante SENASA (Art. 8°, plazo de 10 días hábiles). Si es firme, Facundo NO debe usar RFIDs inventados (quedarían declarados); debe usar caravanas reales que efectivamente quiera declarar de su campo, o credenciales de test de SENASA. Esto condiciona el timing del gate.
 
 ## Historial de refinamiento
 

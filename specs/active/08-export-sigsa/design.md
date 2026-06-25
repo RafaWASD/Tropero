@@ -7,7 +7,7 @@
 
 1. **Gate duro de formato**: el formato exacto del TXT (trailing `;`, espacios, validación exacta de RFID en servidor) NO está confirmado con upload real. El generador del TXT es un módulo **aislado** y **swappable**. Ver sección "Módulo generador de TXT".
 
-2. **Deltas cross-spec**: esta spec toca tablas de specs anteriores (`done`). Las migrations cross-spec se numeran como 0089+, arrancan donde dejó 0088. El implementer debe aplicarlas con cuidado: no hay risk de migration destructiva en las columnas nuevas (todas nullable o nuevas tablas), pero las migraciones best-effort de breed requieren revisión.
+2. **Deltas cross-spec**: esta spec toca tablas de specs anteriores (`done`). Las migrations cross-spec se numeran **0107-0112** (la DB avanzó a `0106` desde la redacción del design — modelo reproductivo specs 02/03/07; los números 0089-0094 del design original ya están tomados). El implementer debe aplicarlas con cuidado: no hay risk de migration destructiva en las columnas nuevas (todas nullable o nuevas tablas), pero las migraciones best-effort de breed requieren revisión. **Mapa de renumeración**: 0107 breed_catalog · 0108 animal_profiles.breed_id · 0109 reproductive_events.breed_id · 0110 establishments.renspa · 0111 sigsa_declarations · 0112 export_log.
 
 3. **Offline-first**: la generación del TXT es 100% local (SQLite de PowerSync). Los inserts post-generación (`sigsa_declarations`, `export_log`) van por la cola de sync.
 
@@ -33,11 +33,11 @@
 ┌─────────────────────────────────────────────────────────────┐
 │  Supabase                                                    │
 │  ┌──────────────────────────────────────────────────────┐    │
-│  │  Migrations 0089..0096+ (este spec):                 │    │
-│  │   - breed_catalog (nuevo)                            │    │
-│  │   - animal_profiles.breed_id FK (delta spec 02)      │    │
-│  │   - reproductive_events.breed_id FK (delta spec 02)  │    │
-│  │   - establishments.renspa (delta spec 01)            │    │
+│  │  Migrations 0107..0112 (este spec):                  │    │
+│  │   - breed_catalog (nuevo, 0107)                      │    │
+│  │   - animal_profiles.breed_id FK (delta spec 02, 0108)│    │
+│  │   - reproductive_events.breed_id FK (spec 02, 0109)  │    │
+│  │   - establishments.renspa (delta spec 01, 0110)      │    │
 │  │   - sigsa_declarations (nuevo)                       │    │
 │  │   - export_log (nuevo)                               │    │
 │  │   - RLS policies por tabla nueva                     │    │
@@ -50,7 +50,7 @@
 
 ## SQL — Schema completo
 
-### Migration 0089 — `breed_catalog` (tabla nueva + seed)
+### Migration 0107 — `breed_catalog` (tabla nueva + seed)
 
 ```sql
 -- Tabla de catálogo de razas con códigos SENASA oficiales
@@ -111,7 +111,7 @@ INSERT INTO public.breed_catalog (senasa_code, name, species, active, sort_order
   ('MU',  'Murrah',            'bubaline', false, 102);
 ```
 
-### Migration 0090 — `animal_profiles.breed_id` (delta spec 02)
+### Migration 0108 — `animal_profiles.breed_id` (delta spec 02)
 
 ```sql
 -- Agrega breed_id FK nullable (coexiste con breed texto libre legacy)
@@ -134,45 +134,61 @@ CREATE INDEX idx_animal_profiles_breed_id ON public.animal_profiles(breed_id)
 -- RLS no cambia: breed_id hereda las policies de animal_profiles (ya scoped por establishment_id)
 ```
 
-### Migration 0091 — `reproductive_events.breed_id` (delta spec 02)
+> **AS-BUILT (reconciliado, impl 2026-06-24).** La herencia de R1.7 para el camino **MONO-ternero** se
+> implementa AQUÍ (no en 0109): `CREATE OR REPLACE` del trigger `tg_reproductive_events_create_calf`
+> (último as-built 0048) agregando `p.breed_id` al SELECT de la madre + `breed_id` al INSERT del
+> `animal_profiles` del ternero. Byte-idéntico a 0048 salvo esas adiciones (preserva SECURITY DEFINER,
+> search_path, y el `exception ... raise` de rollback atómico R9.4). El camino MELLIZOS (`register_birth`)
+> se actualiza en 0109. Ver `progress/impl_08-sigsa-db.md` §Reconciliación.
+
+### Migration 0109 — `reproductive_events.breed_id` (delta spec 02)
+
+> **AS-BUILT (reconciliado, impl 2026-06-24).** Dos correcciones contra el schema real (ver
+> `progress/impl_08-sigsa-db.md` §Reconciliación):
+> 1. **`reproductive_events.breed` (texto libre) NO existe** → el `UPDATE` best-effort del diseño
+>    original habría abortado con `column re.breed does not exist`. Verificado: `reproductive_events`
+>    (0026) se creó sin `breed`; ninguna migración la agrega; el único `breed` cercano es
+>    `semen_registry.breed`, otra tabla. La columna `breed_id` se agrega igual (R1.6 lo pide + la usa
+>    el sync de PowerSync, T7), pero **se OMITE el UPDATE best-effort** (no hay columna fuente). Queda
+>    forward-compat sin path de población automática en MVP.
+> 2. **El trigger NO es `tg_create_calf_on_birth`** (no existe). El ternero al pie se crea por DOS
+>    caminos: (a) MONO = trigger `tg_reproductive_events_create_calf` (último as-built 0048,
+>    actualizado en **0108**); (b) MELLIZOS = RPC `register_birth` (último as-built 0075, actualizado
+>    aquí en **0109**). La herencia de R1.7 va al `animal_profiles.breed_id` DEL TERNERO (texto de
+>    R1.7), no a `reproductive_events.breed_id`. `register_birth` se redefine MÍNIMO (agrega
+>    `p.breed_id` al SELECT de la madre + `breed_id` al INSERT de cada ternero), preservando byte-a-byte
+>    el guard de idempotencia HIGH-D1, la authz de la fila real y los GRANT/REVOKE de 0075.
 
 ```sql
--- Agrega breed_id para el ternero al parto (coexiste con breed texto libre)
+-- (1) breed_id FK nullable (R1.6). Forward-compat; coexiste con NADA (reproductive_events no tiene
+-- breed texto libre, a diferencia de animal_profiles 0020).
 ALTER TABLE public.reproductive_events
-  ADD COLUMN breed_id uuid REFERENCES public.breed_catalog(id);
+  ADD COLUMN IF NOT EXISTS breed_id uuid REFERENCES public.breed_catalog(id);
 
--- Migración best-effort análoga
-UPDATE public.reproductive_events re
-SET breed_id = bc.id
-FROM public.breed_catalog bc
-WHERE re.breed_id IS NULL
-  AND re.breed IS NOT NULL
-  AND lower(trim(re.breed)) = lower(trim(bc.name));
+-- (2) Best-effort: NO-OP documentado. reproductive_events NO tiene columna `breed` → no hay nada que
+-- matchear. El UPDATE del diseño original (WHERE re.breed IS NOT NULL ...) se OMITE (abortaría).
 
--- Actualiza trigger de ternero al pie para heredar breed_id de la madre
--- (el trigger existente 'tg_create_calf_on_birth' debe actualizarse para
---  copiar animal_profiles.breed_id de la madre al profile del ternero)
--- El implementer ajusta el trigger existente en esta misma migration.
+-- (3) Herencia de breed_id de la madre al ternero — camino MELLIZOS (R1.7): CREATE OR REPLACE de
+-- register_birth (firma de 4 args de 0075) agregando p.breed_id al SELECT de la madre y breed_id al
+-- INSERT de cada ternero del loop. (El camino MONO se actualiza en 0108.) Ver el .sql para el cuerpo
+-- completo (idéntico a 0075 salvo las adiciones de breed_id).
 ```
 
-### Migration 0092 — `establishments.renspa` (delta spec 01)
+### Migration 0110 — `establishments.renspa` (delta spec 01)
 
 ```sql
 -- Campo RENSPA opcional en establecimientos
 ALTER TABLE public.establishments
   ADD COLUMN renspa text;
 
--- ⚠ DECISIÓN 3 ABIERTA (2026-06-13): el unique GLOBAL cross-tenant está EN ESPERA.
--- El leader recomienda RELAJAR (causa colisión/fuga cross-tenant; el RENSPA ni va en el TXT).
--- NO aplicar este índice tal cual hasta cerrar la decisión con Facundo (¿RENSPA 1:1 estricto,
--- o repetible/transferible?). Ver requirements.md §"Decisiones abiertas" #3 + CONTEXT/07-pendientes.
--- Resolución probable: quitar el unique global (texto opcional) o, a lo sumo, único por dueño.
--- Unicidad parcial (solo entre establecimientos no borrados) — PROVISIONAL, sujeta a decisión 3
-CREATE UNIQUE INDEX idx_establishments_renspa_active
-  ON public.establishments(renspa)
-  WHERE renspa IS NOT NULL AND deleted_at IS NULL;
+-- ✅ DECISIÓN 3 CERRADA (Raf, 2026-06-24): texto opcional, SIN constraint de unicidad.
+-- NO se crea índice unique (ni global ni por-dueño). El unique global causaba colisión + fuga
+-- de existencia cross-tenant (LOW-4 de Gate 1) en casos legítimos (venta del campo, contador+dueño),
+-- y el RENSPA NI VA EN EL TXT (R2.4, es solo recordatorio en pantalla). La unicidad como señal
+-- anti-fraude queda POST-MVP, atada a la cardinalidad real del RENSPA (Facundo). Ver requirements.md
+-- §"Decisiones abiertas" #3 + CONTEXT/07-pendientes.
 
--- Validación de longitud básica
+-- Validación de longitud básica (única validación server-side de renspa)
 ALTER TABLE public.establishments
   ADD CONSTRAINT chk_establishments_renspa_length
   CHECK (renspa IS NULL OR (char_length(trim(renspa)) > 0 AND char_length(renspa) <= 20));
@@ -210,7 +226,7 @@ REVOKE EXECUTE ON FUNCTION public.update_renspa(uuid, text) FROM public, anon;
 GRANT  EXECUTE ON FUNCTION public.update_renspa(uuid, text) TO authenticated;
 ```
 
-### Migration 0093 — `sigsa_declarations` (tabla nueva)
+### Migration 0111 — `sigsa_declarations` (tabla nueva)
 
 ```sql
 CREATE TABLE public.sigsa_declarations (
@@ -218,7 +234,7 @@ CREATE TABLE public.sigsa_declarations (
   establishment_id  uuid        NOT NULL REFERENCES public.establishments(id) ON DELETE CASCADE,
   animal_profile_id uuid        NOT NULL REFERENCES public.animal_profiles(id) ON DELETE CASCADE,
   declared_at       timestamptz NOT NULL DEFAULT now(),
-  export_log_id     uuid,       -- FK a export_log; se agrega AFTER migration 0094
+  export_log_id     uuid,       -- FK a export_log; se agrega AFTER migration 0112
   declared_by       uuid        NOT NULL REFERENCES auth.users(id),
   created_at        timestamptz NOT NULL DEFAULT now(),
   UNIQUE(establishment_id, animal_profile_id)
@@ -284,7 +300,7 @@ CREATE INDEX idx_sigsa_declarations_est_profile
 
 > **Nota**: `sigsa_declarations` no tiene `deleted_at` porque es un registro inmutable append-only (R11.3). Si se quiere "desmarcar", es un caso de corrección administrativa fuera de scope MVP. El SELECT **no** filtra por `deleted_at` (la columna no existe); si se agrega soft-delete post-MVP, actualizar la policy. *(Fix de veto del leader 2026-06-13: la policy original referenciaba `deleted_at IS NULL` sobre columna inexistente → habría fallado al crear la tabla.)*
 
-### Migration 0094 — `export_log` (tabla nueva) + FK en sigsa_declarations
+### Migration 0112 — `export_log` (tabla nueva) + FK en sigsa_declarations
 
 ```sql
 CREATE TABLE public.export_log (
@@ -333,7 +349,7 @@ CREATE POLICY "export_log_insert"
 -- Sin UPDATE ni DELETE desde el cliente
 
 -- HIGH-1 (Gate 1): forzar generated_by = auth.uid() server-side (no confiar el valor del cliente).
--- Mismo patrón que tg_force_created_by_auth_uid (0043) y sigsa_declarations_set_declared_by (0093).
+-- Mismo patrón que tg_force_created_by_auth_uid (0043) y sigsa_declarations_set_declared_by (0111).
 CREATE OR REPLACE FUNCTION public.tg_force_generated_by_auth_uid()
 RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
@@ -356,6 +372,55 @@ ALTER TABLE public.sigsa_declarations
 
 CREATE INDEX idx_export_log_establishment ON public.export_log(establishment_id, generated_at DESC);
 ```
+
+### Migration 0113 — `derive breed_id from breed` (trigger, cierre del GAP breed_id / T18)
+
+> **AS-BUILT (Run 3, impl 2026-06-25).** Cierra el GAP documentado en el changelog 2026-06-25 (el BreedPicker
+> setea `animal_profiles.breed` TEXTO pero NO `breed_id` → ningún animal nuevo es exportable). Trigger
+> `BEFORE INSERT OR UPDATE OF breed ON public.animal_profiles` que DERIVA `breed_id` desde `breed` por match
+> de nombre normalizado contra `breed_catalog` (mismo criterio que la migración best-effort de 0108). El
+> cliente (alta + ficha + import) escribe SOLO `breed` (el nombre); el trigger pone el `breed_id`. Centraliza
+> la derivación en un solo lugar (no cambia firmas de RPC; arregla alta + import + edición uniformemente).
+>
+> **Guard de la herencia del ternero al pie (riesgo #1, verificado por test T18(c)):** el guard
+> `NEW.breed IS NOT NULL` asegura que el trigger NO pise el `breed_id` heredado de la madre en el ternero al
+> pie (que entra con `breed` NULL + `breed_id` seteado por 0108/0109). Con `breed` NULL NO se toca `breed_id`
+> (sin rama ELSE que lo anule).
+>
+> **NO SECURITY DEFINER** (corre en contexto del writer; `breed_catalog` tiene SELECT abierto a authenticated)
+> + `revoke execute` (defensa: no invocable como RPC, alinea con el patrón de las trigger-fns de 0084).
+> **NO interfiere con compute_category** (`breed_id` no entra en el cálculo de categoría) ni con los otros
+> `BEFORE ... OF <col>` (ortogonales por columna). **Sin recursión** (setear `NEW.breed_id` no re-dispara
+> `OF breed`). Idempotente (`CREATE OR REPLACE FUNCTION` + `DROP TRIGGER IF EXISTS` + `CREATE TRIGGER`).
+
+```sql
+create or replace function public.tg_derive_breed_id_from_breed ()
+returns trigger language plpgsql as $$
+begin
+  if new.breed is not null then
+    new.breed_id := (
+      select bc.id from public.breed_catalog bc
+      where lower(trim(bc.name)) = lower(trim(new.breed))
+      limit 1
+    );
+  end if;
+  return new;
+end; $$;
+
+revoke execute on function public.tg_derive_breed_id_from_breed () from public, authenticated, anon;
+
+drop trigger if exists animal_profiles_derive_breed_id on public.animal_profiles;
+create trigger animal_profiles_derive_breed_id
+  before insert or update of breed on public.animal_profiles
+  for each row execute function public.tg_derive_breed_id_from_breed();
+```
+
+**Edición de raza en la ficha (parte B del cierre):** la ficha (`app/app/animal/[id].tsx`) agrega una fila
+"Raza" editable (`BreedRow`) que abre el `BreedPickerSheet` (ya existente) → al elegir, hace un UPDATE
+offline-safe de `animal_profiles.breed` (patrón CUT/0040: `buildSetBreedUpdate` → `runLocalWrite` → CrudEntry
+PATCH → uploadData; service `setBreed`). El cliente actualiza SOLO `breed` (NUNCA `breed_id` — lo deriva el
+trigger). Sin raza → CTA "Completá la raza para SIGSA". El RLS `animal_profiles_update` (has_role_in, 0022)
+ya permite el UPDATE de `breed` a cualquier rol activo (mismo path que la CUT-ficha) — NO se crea policy nueva.
 
 ---
 
@@ -430,12 +495,27 @@ establecido en spec 15. `sigsa_declarations` y `export_log` contienen datos sens
 marcadores de declaración SENASA): el scope debe ser **el mismo `org_scope` que las demás tablas
 per-establishment**, no más amplio.
 
+> **AS-BUILT (reconciliado, impl T7 2026-06-24).** Dos diferencias menores contra el snippet original
+> (ver `progress/impl_08-sigsa-t7-powersync.md`):
+> 1. **Nombre de la stream del catálogo: `catalog_breed`** (no `sigsa_breed_catalog`). Alinea con la
+>    convención YA establecida de las globales del YAML, que TODAS empiezan con `catalog_`
+>    (`catalog_species`, `catalog_systems`, `catalog_categories`, `catalog_field_definitions`,
+>    `catalog_system_default_fields`). Las dos scope-establishment conservan `sigsa_declarations` /
+>    `sigsa_export_log` (la primera espeja el nombre de su tabla; el design nombraba la 2da `sigsa_export_log`).
+> 2. **El catálogo se sincroniza COMPLETO — se OMITE el `WHERE active = true`** (sugerencia del leader).
+>    Razón: `breed_catalog` son 32 filas (volumen trivial); con el filtro, un animal con `breed_id` de una
+>    raza inactiva (las 3 bubalinas `active=false`, o cualquier futura desactivación) NO recibiría su fila
+>    en el SQLite local → el JOIN de la query de pendientes resolvería `senasa_code = NULL` → la UI mostraría
+>    "raza desconocida" (edge F6 de Gate 1). Sincronizar todas evita ese edge sin costo de buckets (es 1
+>    bucket global, independiente de campos). No expone nada: el catálogo es información pública del manual
+>    SIGSA, sin `establishment_id`.
+
 ```yaml
   # ── SIGSA (spec 08) ────────────────────────────────────────────────────────────────
-  sigsa_breed_catalog:                         # catálogo global, read-only
+  catalog_breed:                               # catálogo GLOBAL read-only (convención catalog_*, sin `with:`)
     auto_subscribe: true
     queries:
-      - SELECT * FROM breed_catalog WHERE active = true
+      - SELECT * FROM breed_catalog            # COMPLETO (sin WHERE active = true): evita el edge F6 (32 filas)
 
   sigsa_declarations:                          # scoped por establishment (org_scope)
     auto_subscribe: true                       # el TXT con RFIDs NO debe sobre-sincronizarse
@@ -467,12 +547,12 @@ igual que `est_animal_category_history` en el YAML existente.
 ### Nuevos
 
 ```
-supabase/migrations/0089_breed_catalog.sql
-supabase/migrations/0090_animal_profiles_breed_id.sql
-supabase/migrations/0091_reproductive_events_breed_id.sql
-supabase/migrations/0092_establishments_renspa.sql
-supabase/migrations/0093_sigsa_declarations.sql
-supabase/migrations/0094_export_log.sql
+supabase/migrations/0107_breed_catalog.sql
+supabase/migrations/0108_animal_profiles_breed_id.sql
+supabase/migrations/0109_reproductive_events_breed_id.sql
+supabase/migrations/0110_establishments_renspa.sql
+supabase/migrations/0111_sigsa_declarations.sql
+supabase/migrations/0112_export_log.sql
 
 app/src/services/sigsa/sigsa-txt-generator.ts     (módulo puro, swappable)
 app/src/services/sigsa/sigsa-validator.ts          (validación pre-export)
@@ -485,7 +565,7 @@ app/src/components/sigsa/BreedPicker.tsx            (selector de catálogo)
 app/src/components/sigsa/SigsaChecklistReminder.tsx (checklist post-export)
 app/src/components/sigsa/ExportAnimalRow.tsx        (fila de animal en lista)
 
-supabase/tests/rls/sigsa.test.cjs                  (tests RLS de tablas nuevas)
+supabase/tests/sigsa/run.cjs                       (tests RLS de tablas nuevas — convención REAL del repo: <area>/run.cjs registrado en scripts/run-tests.mjs, NO un .test.cjs suelto en rls/. AS-BUILT 2026-06-24)
 app/src/services/sigsa/__tests__/sigsa-txt-generator.test.ts
 app/src/services/sigsa/__tests__/sigsa-validator.test.ts
 ```
@@ -493,9 +573,9 @@ app/src/services/sigsa/__tests__/sigsa-validator.test.ts
 ### Modificados (deltas cross-spec)
 
 ```
-supabase/migrations/  -- migration 0090 toca animal_profiles (spec 02)
-                      -- migration 0091 toca reproductive_events + trigger (spec 02)
-                      -- migration 0092 toca establishments (spec 01)
+supabase/migrations/  -- migration 0108 toca animal_profiles (spec 02)
+                      -- migration 0109 toca reproductive_events + trigger (spec 02)
+                      -- migration 0110 toca establishments (spec 01)
 supabase/config.toml  -- agregar breed_catalog, sigsa_declarations, export_log al sync scope
 app/src/services/powersync/schema.ts  -- agregar tablas nuevas al schema PowerSync
 sync-streams/rafaq.yaml               -- agregar streams sigsa_breed_catalog, sigsa_declarations, sigsa_export_log (MEDIUM-2)
@@ -509,23 +589,28 @@ sync-streams/rafaq.yaml               -- agregar streams sigsa_breed_catalog, si
 ExportSigsaScreen
   → useExportSigsa.prepareExport(filters)
     → SigsaExportService.queryPendingAnimals(establishmentId, filters)
-      → PowerSync (SQLite local): 
-          SELECT ap.id, a.tag_electronic, a.sex, a.birth_date,
+      → PowerSync (SQLite local):
+          -- ⚠ RECONCILIACIÓN OFFLINE (leader 2026-06-24): la tabla `animals` (global) NO entra al
+          -- sync set de PowerSync (ADR-026 / rafaq.yaml §"Entidades compartidas") → NO está en el
+          -- SQLite local → un `JOIN animals` rompería la generación offline (viola R14). La identidad
+          -- (tag_electronic/sex/birth_date) se lee de las columnas DENORMALIZADAS sobre animal_profiles
+          -- (animal_tag_electronic/animal_sex/animal_birth_date, migración 0079, "swap T4"). El query
+          -- usa SOLO animal_profiles + breed_catalog (global, sí sincroniza) + sigsa_declarations.
+          SELECT ap.id, ap.animal_tag_electronic, ap.animal_sex, ap.animal_birth_date,
                  bc.senasa_code, ap.breed_id
           FROM animal_profiles ap
-          JOIN animals a ON a.id = ap.animal_id
           LEFT JOIN breed_catalog bc ON bc.id = ap.breed_id
-          LEFT JOIN sigsa_declarations sd 
-            ON sd.animal_profile_id = ap.id 
+          LEFT JOIN sigsa_declarations sd
+            ON sd.animal_profile_id = ap.id
            AND sd.establishment_id = ap.establishment_id
           WHERE ap.establishment_id = :estId
-            AND a.tag_electronic IS NOT NULL
+            AND ap.animal_tag_electronic IS NOT NULL
             AND sd.id IS NULL  -- no declarados
             AND ap.status = 'active'
             AND ap.deleted_at IS NULL
             AND (:rodeoId IS NULL OR ap.rodeo_id = :rodeoId)
-            AND (:dateFrom IS NULL OR a.birth_date >= :dateFrom)
-            AND (:dateTo IS NULL OR a.birth_date <= :dateTo)
+            AND (:dateFrom IS NULL OR ap.animal_birth_date >= :dateFrom)
+            AND (:dateTo IS NULL OR ap.animal_birth_date <= :dateTo)
   → SigsaValidator.validate(animals)
     → separa exportables vs. "a completar"
   → [usuario decide exportar los que pasan]
@@ -559,6 +644,8 @@ Post-share, `SigsaChecklistReminder` se muestra en un modal o banner con los 4 d
 
 El `BreedPicker` es el selector de raza para el form de animal. Lee el `breed_catalog` desde el SQLite local (PowerSync). Muestra las razas ordenadas por `sort_order` (pampeanas primero). Si el animal tiene `breed` texto libre legacy sin `breed_id`, muestra un aviso "completar raza para poder exportar a SIGSA" con el picker prefiltrado.
 
+**Decisión 1 (raza desconocida) — refinamiento del leader 2026-06-24**: `OR` (Otra Raza) está disponible como opción de un tap pero **NO se promueve** — se renderiza en su `sort_order` natural (28 = último entre las bovinas), con AA/H/PH/BG/BF arriba. Razón: bajo presión de manga, un `OR` promovido como "atajo rápido" se convertiría en el default perezoso y degradaría el benchmarking/analytics (uno de los 3 pilares del producto). El picker NO debe flotar `OR` al tope ni ofrecerlo como CTA destacada. `S/E` (Sin Especificar, `species='generic'`) queda **fuera** del picker bovino. (Pendiente Facundo, no bloqueante: ¿SENASA espera `OR` o `S/E` para desconocida en el flujo de declaración de dispositivos? Default interino: `OR`.)
+
 ---
 
 ## Alternativa descartada
@@ -582,3 +669,50 @@ Se evaluó agregar directamente `sigsa_declared_at timestamptz` + `sigsa_export_
   - **MEDIUM-2**: sync rules explícitas para `sigsa_declarations`, `export_log` y `breed_catalog` en `sync-streams/rafaq.yaml` siguiendo el patrón JOIN-free del repo. Scope: `org_scope` estándar (establishment_id IN user_roles activos). `file_content` no sobre-sincroniza a campos ajenos.
   - **MEDIUM-4**: WITH CHECK de `sigsa_declarations_insert` endurecido con EXISTS que verifica que `animal_profile_id` pertenece al `establishment_id` de la fila (previene IDOR cross-tenant).
   - **MEDIUM-3**: resuelto en tasks.md (test de guard de rol en T19) — no requería cambio de design.
+- **2026-06-24 — Cierre de las 4 decisiones abiertas + renumeración de migraciones (leader, terminal dueña)**:
+  - **Renumeración 0089-0094 → 0107-0112**: la DB avanzó a `0106` desde la redacción (modelo reproductivo specs 02/03/07); los números originales del design ya estaban tomados. Mapa: 0107 breed_catalog · 0108 animal_profiles.breed_id · 0109 reproductive_events.breed_id · 0110 establishments.renspa · 0111 sigsa_declarations · 0112 export_log. Actualizadas todas las cabeceras de migración, el diagrama de arquitectura, los cross-refs internos (incl. el comentario del trigger en 0112 → 0111) y la lista de "Archivos a crear". Los números 0089-0094 en el **changelog histórico** (entradas del 2026-06-13) se dejan como estaban (audit trail no se reescribe); esta entrada los supersede.
+  - **Decisión 3 (RENSPA) CERRADA — relajada a texto opcional sin unique**: removido el `CREATE UNIQUE INDEX idx_establishments_renspa_active` de la migración 0110. Queda solo el `CHECK` de largo (1-20) + la RPC `update_renspa` (sin cambios). Razón: colisión/fuga cross-tenant en casos legítimos + el RENSPA no va en el TXT. Anti-fraude por unicidad = POST-MVP (Facundo). NO reabre Gate 1 (saca superficie).
+  - **Decisión 1 (raza desconocida)**: refinamiento en §BreedPicker — `OR` disponible pero NO promovido (sort_order natural, no degradar analytics).
+  - **Decisiones 2 y 4**: sin cambio de design (2 = backend ya cubierto; 4 = proceso/gate de `done`). Copy de markAsDeclared y riesgo "upload real = declaración legal" anotados en requirements + tasks.
+- **2026-06-24 — AS-BUILT capa DB (migraciones 0107-0112, T1-T6)**: implementadas las 6 migraciones + la suite RLS `supabase/tests/sigsa/run.cjs` (hook **comentado** en run-tests.mjs hasta el apply del leader). `node scripts/check.mjs` verde. **NO aplicadas al remoto** (deploy gateado por el leader). Dos reconciliaciones contra el schema real (detalle en `progress/impl_08-sigsa-db.md`):
+  - **El trigger del design (`tg_create_calf_on_birth`) NO existe.** El ternero al pie se crea por DOS caminos: MONO = trigger `tg_reproductive_events_create_calf` (último as-built 0048) → herencia de R1.7 inyectada en **0108**; MELLIZOS = RPC `register_birth` (último as-built 0075, firma 4 args) → herencia inyectada en **0109**. Ambas redefiniciones verificadas con `diff` contra el as-built: minimales (solo `breed_id`), preservan la lógica de seguridad (guard idempotencia HIGH-D1, authz de la fila real de la madre, rollback atómico R9.4, GRANT/REVOKE). La herencia va al `animal_profiles.breed_id` DEL TERNERO (texto de R1.7).
+  - **`reproductive_events.breed` (texto libre) NO existe** → el `UPDATE` best-effort de R1.6/0109 era un no-op que habría abortado la migración (`column re.breed does not exist`). Se agrega la columna `breed_id` (R1.6 lo pide + la usa el sync T7) pero se **omite el UPDATE**. Columna forward-compat sin populación automática en MVP. Reconciliado en §"Migration 0109", nota bajo R1.6 en requirements.md.
+  - **Cross-check del seed (breed_catalog ↔ `import/breed-senasa.ts` ↔ razas-senasa-codigos.md)**: PASA 1:1, 32 pares código↔nombre idénticos en los 3, sin discrepancia.
+  - **Idempotencia**: todas las migraciones re-corribles (`IF NOT EXISTS` / `CREATE OR REPLACE` / `DROP ... IF EXISTS` / `ON CONFLICT DO NOTHING`).
+  - **RLS (read-only catalog)**: `breed_catalog` con SELECT-only a authenticated + `grant all` a service_role, sin policies de escritura — mismo patrón verificado contra `categories_by_system` (0015).
+- **2026-06-25 — AS-BUILT capa de servicio + hook (T11/T12/T19/T20)**: implementado el boundary de I/O `app/src/services/sigsa/sigsa-export-service.ts` + el hook `app/src/hooks/useExportSigsa.ts` + los SQL builders puros en `powersync/local-reads.ts` + suite `app/src/services/sigsa/sigsa-export-service.test.ts` (23 tests node:sqlite, registrada en run-tests.mjs). `pnpm typecheck` verde + 23/23 tests nuevos + 217/217 de las suites adyacentes (local-reads/maneuver-reads/schema/sigsa puras). NO se corrió `check.mjs` completo (flake conocido del leader en el Animal suite — huérfano `tag_electronic='9'`). Reconciliaciones contra el design (detalle en `progress/impl_08-sigsa-service.md`):
+  - **Query de pendientes SIN `JOIN animals`** (ya reconciliado por el leader en §"Flujo de datos"): `buildPendingSigsaAnimalsQuery` lee SOLO `animal_profiles` (identidad denormalizada b1/0079: `animal_tag_electronic`/`animal_sex`/`animal_birth_date`) + `LEFT JOIN breed_catalog` + `LEFT JOIN sigsa_declarations` (sd.id IS NULL = pendiente). Verificado por test que el SQL NO contiene `\banimals\b`. El `animal_birth_date` es `date` (0079) → PowerSync lo materializa como `YYYY-MM-DD` → el filtro de rango por string es chronológico-correcto e inclusivo (R9.3). NO consulta el overlay `pending_*` (la declaración aplica sobre el inventario REAL sincronizado).
+  - **`saveAndShare` usa el File API v56** (`new File(Paths.cache, name).create()/.write(content)` + `Sharing.shareAsync(file.uri)`), NO el `FileSystem.writeAsStringAsync` legacy que citaba §"Flujo de datos" (deprecado en expo-file-system 56; el repo ya usa el File API en useImportRodeo). UTF-8 sin BOM (R5.6): `File.write(string)` no antepone BOM. Se **agregó la dependencia `expo-sharing` (~56.0.16 → 56.0.18)** al `app/package.json` (no estaba instalada; el design la asumía). `Sharing.isAvailableAsync()` evita lanzar donde no hay share (web).
+  - **`persistDeclarations(profileIds, exportLog, establishmentId)`** — el design tipaba `persistDeclarations(animals, exportLogEntry, …)`, pero el `AnimalExportRecord` limpio (de `validateForExport`) NO porta `animalProfileId`. AS-BUILT: recibe `profileIds: string[]` (los ids de los exportables, que el hook deriva alineados 1:1 con los records = pendientes cuyo id NO está en `incomplete`, en orden) + `ExportLogInput` (metadata). Inserta 1 `export_log` (con `id` de cliente) y N `sigsa_declarations` ligadas a ese `export_log_id`, en ese orden (FIFO de la upload queue). **NO manda `declared_by`/`generated_by`** (los fuerzan los triggers 0111/0112; verificado por test que las columnas no aparecen en el INSERT).
+  - **`markAsDeclared` (T19)**: INSERT de 1 `sigsa_declarations` con `export_log_id = NULL` (distingue la marca manual del export con archivo). Copy de la UI fijado en el código: "Marcar como ya declarado por otro medio" (decisión 2, leader 2026-06-24). El RLS owner/vet + IDOR-check + 42501 a field_operator (MEDIUM-3) son la barrera al SUBIR (no el cliente).
+  - **`redownload` (T20)**: `buildExportLogContentQuery` (SELECT read-only de `file_content`/`file_name` por id) → `saveAndShare`. NO inserta declaraciones (verificado por test: el SQL no contiene INSERT/UPDATE/DELETE). Métodos de soporte agregados: `fetchExportHistory` + `buildExportLogHistoryQuery` (lista del historial sin `file_content`, orden `generated_at DESC`, R10.1) — la UI del historial (T16) los consumirá.
+  - **Nombre de archivo (R5.3)**: `buildFileName` produce `sigsa_<slug>_<YYYYMMDD_HHMMSS>.txt` (con SEGUNDOS → único por export del día, evita colisión; slug NFD+lowercase+hyphenate acotado a 80 chars, dentro del CHECK ≤255). Corregido contra una primera versión que usaba `-` y solo la fecha.
+  - **Contrato del local write (T5/spec 15)**: el write local SIEMPRE devuelve ok offline (R14.1); el reject de RLS (field_operator que intenta exportar/declarar — owner/vet only) lo resuelve `uploadData` (descarta + superficia por status), NO el return del service. Mismo patrón que management-groups.ts/sessions.ts. NUNCA se hardcodea `establishment_id` (CLAUDE.md ppio 6): llega por param del EstablishmentContext.
+- **2026-06-25 — ⚠ FIX DE CONTRATO DE UPLOAD (superficie COMPARTIDA del connector PowerSync)**: el connector subía TODO el CRUD-plano por `.upsert()` (= `INSERT … ON CONFLICT DO UPDATE`), que EXIGE privilegio UPDATE aunque no haya conflicto. `sigsa_declarations`/`export_log` son append-only (`GRANT SELECT, INSERT` solamente, sin policy UPDATE — R11.3) → el upsert daba **42501 → descarte silencioso → la feature 08 estaba ROTA end-to-end** (ninguna declaración ni export_log llegaba al server; cazado al agregar un assert server-side al e2e de markAsDeclared, no quedándose en la UI). **Fix**: `isAppendOnlyInsertTable` (Set de 2 tablas) en `upload-classify.ts` → `buildCrudUpsert` marca `insertOnly` → el connector ejecuta `.insert()` plano (solo grant INSERT). **Retry-safe**: un reintento PowerSync (at-least-once) del mismo INSERT da 23505 → `isPermanentServerCode` lo clasifica permanente → el connector lo DESCARTA (no re-lanza, no loop) → la fila ya está = idempotente en efecto (sin outbox trabada). **Quirúrgico**: ninguna otra tabla cambia de rama (custom_attributes PK-compuesta y el resto mantienen su `.upsert()`/`onConflict`). Preserva la auditoría no-spoofeable (sin UPDATE de cliente + triggers force-auth.uid). **Nota de diseño**: el GRANT-sin-UPDATE de 0111/0112 (correcto para R11.3) es INCOMPATIBLE con el `.upsert()` default de PowerSync — toda tabla append-only sincronizada debe rutearse por insert en el connector. reviewer APPROVED + Gate 2 PASS sobre el cambio (superficie compartida verificada: no afecta otras tablas, 23505-discard no filtra datos).
+- **2026-06-25 — AS-BUILT UI (T13-T18 + R10.2 + R9.3)**: pantalla flagship `app/app/export-sigsa.tsx` (card-resumen + filtros colapsables rodeo+fecha + tabs Listos/A-completar/Historial + estados + **CTA sticky-bottom** + checklist post-export) + `ExportAnimalRow` + `SigsaChecklistReminder` (4 datos SENASA + plazo 10 días hábiles, prepopula RENSPA si está, R13.3) + `BreedPickerSheet` (buscable, `sort_order`, "sin raza" primero, `OR` no promovido — decisión 1) + integración en `crear-animal.tsx` (T18) + CTA/edición de RENSPA (campo en editar-campo vía RPC `update_renspa` + banner en `/mas`, T17) + `renspa` en el schema LOCAL de establishments. **Decisiones de diseño del leader** (Raf delegó: "elegí la mejor y seguí"): terracota "N a completar" → `$textMuted` (no es alerta); CTA export → sticky-bottom (acción primaria, lista potencialmente larga, thumb-zone); markAsDeclared → action-sheet por fila Listos (R10.2 MVP); filtro fechas R9.3 con validación inline (no banner global); metadata categoría/rodeo en fila → diferida post-MVP. Veto design-review del leader PASS (capturas `design/veto-sigsa-{export,run2}/`). reviewer APPROVED + Gate 2 PASS.
+- **2026-06-25 — GAP de breed_id (T18 parcial) → plan Run 3 (migración + Gate 1)**: el BreedPicker en el alta setea el `breed` TEXTO-LIBRE (nombre exacto del catálogo), NO `breed_id` — la RPC `create_animal` (0083, pre-spec-08) no tiene `p_breed_id` y `upload.ts` no lo pasa; además no hay pantalla de edición de animal para fijar `breed_id` en animales existentes. **Sin esto, ningún animal nuevo obtiene `breed_id` → aparece "Falta la raza" → no exportable, y el link "A completar → ficha" no tiene dónde completar.** **Decisión del leader (la mejor, centralizada — evita cambiar firmas de RPC y arregla alta+import+edición uniformemente)**: una migración nueva (Run 3) con un **trigger** `BEFORE INSERT OR UPDATE OF breed ON animal_profiles` que DERIVA `breed_id` desde `breed` por match de nombre exacto al catálogo (`lower(trim(name)) = lower(trim(NEW.breed))`), con **guard `NEW.breed IS NOT NULL`** para NO pisar el `breed_id` heredado de la madre en el ternero al pie (que entra con `breed` NULL + `breed_id` seteado). El BreedPicker setea el nombre EXACTO → el trigger deriva el id. + afordancia de editar raza en la ficha (`[id].tsx`) que hace un UPDATE de `breed` offline-safe (patrón CUT/0040) → el trigger deriva `breed_id`. La migración toca el write-path de animal_profiles → **Gate 1 obligatorio** + deploy gateado. (T18 se cierra con Run 3.)
+- **2026-06-25 — AS-BUILT Run 3 (cierre del GAP breed_id / T18)**: implementado el plan de arriba.
+  - **Migración 0113** `0113_derive_breed_id_from_breed.sql`: trigger `tg_derive_breed_id_from_breed`
+    (`BEFORE INSERT OR UPDATE OF breed ON animal_profiles`) — DERIVA `breed_id` del `breed` (nombre) por match
+    normalizado contra `breed_catalog`. Guard `NEW.breed IS NOT NULL` preserva el `breed_id` heredado del
+    ternero al pie. NO SECURITY DEFINER + `revoke execute`. Idempotente. Sección SQL agregada arriba (Migration
+    0113). **NO aplicada al remoto** (deploy gateado por el leader; pendiente Gate 1 puntual + apply).
+  - **Edición de raza en la ficha**: `app/app/animal/[id].tsx` — `BreedRow` (fila "Raza" editable: CTA
+    "Completá la raza para SIGSA" si no hay raza, valor + link "Cambiar" si la hay) → abre el `BreedPickerSheet`
+    (reusado de Run 2) → `onSelectBreed` persiste `breed` (nombre) vía `setBreed` (animals.ts) →
+    `buildSetBreedUpdate` (local-reads.ts, patrón CUT/0040, UPDATE offline-safe de `animal_profiles.breed`,
+    NUNCA breed_id). Optimismo en sitio + revert + refresh silencioso (mismo patrón que onAssignLote/onSetCastrated).
+    Catálogo de razas cargado con `fetchBreedCatalog` (one-shot `useEffect`). RLS `animal_profiles_update`
+    (has_role_in, 0022) ya permite el UPDATE de `breed` — verificado, NO se inventa policy.
+  - **Helper puro `breedCodeForName`** (breed-picker.ts): name → senasa_code (espeja el match del trigger),
+    para resolver el `selectedCode` del picker desde el `breed` (nombre) guardado en la ficha.
+  - **Tests**: trigger (6 casos: match/nomatch/guard-herencia/UPDATE-re-deriva/UPDATE-a-NULL/case-insensitive)
+    en `supabase/tests/sigsa/run.cjs` (§T18) — **gated al apply de 0113** (igual que T1-T6 esperaron 0107-0112).
+    Unit: `breedCodeForName` (breed-picker.test.ts) + `buildSetBreedUpdate` (local-reads.test.ts) — verdes ahora.
+    e2e (`sigsa-breed-renspa.spec.ts`): alta con raza → server-side assert breed_id=AA derivado + ficha-edit
+    completa raza → server-side assert breed='Hereford'+breed_id=H — **los asserts de breed_id gated al apply**
+    (el flujo UI funciona ya; capturado en `design/veto-sigsa-run3/`). `pnpm typecheck` verde. NO se corrió
+    check.mjs completo (flake Animal suite + el suite SIGSA §T18 falla hasta el apply de 0113).
+  - **R1.4** queda CUBIERTO end-to-end (alta + ficha setean breed → trigger deriva breed_id → exportable);
+    cierra el loop "A completar → completar" (R8.2/R8.3). El `breed_id` en el SQLite local queda stale tras el
+    UPDATE local hasta el re-sync (benigno: la ficha muestra `breed`, el export lee el set sincronizado).

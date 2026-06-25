@@ -38,6 +38,7 @@
     "expo-notifications": "^56.0.13",
     "expo-router": "~56.2.7",
     "expo-secure-store": "^56.0.4",
+    "expo-sharing": "~56.0.16",
     "expo-splash-screen": "~56.0.10",
     "expo-status-bar": "~56.0.4",
     "lucide-react-native": "1.17.0",

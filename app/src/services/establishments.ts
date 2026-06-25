@@ -311,6 +311,8 @@ export type EstablishmentDetail = {
   province: string;
   city: string | null;
   totalHectares: number | null;
+  /** RENSPA (spec 08, R2.1): identificador SENASA, nullable. Editable solo por owner vía RPC update_renspa. */
+  renspa: string | null;
 };
 
 export type LoadEstablishmentDetailResult =
@@ -335,6 +337,7 @@ export async function loadEstablishmentDetail(
     province: string;
     city: string | null;
     total_hectares: number | null;
+    renspa: string | null;
   }>(buildEstablishmentDetailQuery(establishmentId), { emptyIsSyncing: true });
   if (!r.ok) return { ok: false, error: r.error };
   if (!r.value) {
@@ -352,6 +355,7 @@ export async function loadEstablishmentDetail(
       province: data.province,
       city: data.city ?? null,
       totalHectares: data.total_hectares ?? null,
+      renspa: data.renspa ?? null,
     },
   };
 }
@@ -408,6 +412,50 @@ export async function updateEstablishment(
       ok: false,
       error: { kind: 'unknown', message: 'No se pudo editar el campo. Verificá que seguís teniendo permiso.' },
     };
+  }
+  return { ok: true };
+}
+
+/**
+ * Actualiza el RENSPA del establecimiento (spec 08, R2.1/R2.3, owner-only). La escritura va EXCLUSIVAMENTE
+ * por la RPC `update_renspa(p_establishment_id, p_renspa)` SECURITY DEFINER (0110), NO por un UPDATE directo
+ * de PostgREST: la RPC verifica el rol `owner` server-side (`is_owner_of`) antes del UPDATE → un
+ * veterinarian/field_operator recibe 42501 (R2.3). La UI ya oculta el campo a no-owners, pero la RPC es la
+ * barrera real. El CHECK de largo (1-20 chars) es server-side (0110); la UI valida en vivo (renspa-validate.ts)
+ * para feedback inmediato, pero el server es la autoridad.
+ *
+ * ⚠ ONLINE-only (R9.2): la RPC es un round-trip a Supabase. `establishments.renspa` no está en el sync set de
+ * escritura offline (no hay intent/overlay para esto — es admin del campo, no carga de manga) → fast-fail
+ * accionable sin red. Para BORRAR el renspa, pasar `null` (la RPC hace SET renspa = NULL).
+ *
+ * NUNCA se hardcodea establishmentId (CLAUDE.md ppio 6): lo pasa el caller desde el contexto del campo activo.
+ */
+export async function updateRenspa(
+  establishmentId: string,
+  renspa: string | null,
+): Promise<SaveResult> {
+  const off = assertOnline('Necesitás conexión para guardar el RENSPA.');
+  if (off) return off;
+
+  // Trim defensivo + null si queda vacío (la columna acepta NULL = "sin RENSPA"; el CHECK server-side rechaza
+  // el string vacío no-null). El cliente NO confía solo en esto: el CHECK de la DB (0110) es la autoridad.
+  const trimmed = renspa == null ? null : renspa.trim();
+  const value = trimmed && trimmed.length > 0 ? trimmed : null;
+
+  const { error } = await supabase.rpc('update_renspa', {
+    p_establishment_id: establishmentId,
+    p_renspa: value,
+  });
+
+  if (error) {
+    // 42501 = la RPC rechazó por no-owner (R2.3). Lo distinguimos para copy accionable; el resto → genérico.
+    if (error.code === '42501' || /only owner/i.test(error.message ?? '')) {
+      return {
+        ok: false,
+        error: { kind: 'unknown', message: 'Solo el dueño del campo puede editar el RENSPA.' },
+      };
+    }
+    return { ok: false, error: classifyError(error) };
   }
   return { ok: true };
 }

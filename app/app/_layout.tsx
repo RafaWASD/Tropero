@@ -491,6 +491,11 @@ function RootGate() {
       {/* Spec 12 — importación masiva de rodeo: wizard owner/vet (fuente+destino → mapeo →
           preview → resultado), destino navegable desde Rodeos con un rodeo existente. */}
       <Stack.Screen name="import-rodeo" />
+      {/* Spec 08 — exportación SIGSA: pantalla flagship de declaración de caravanas electrónicas ante
+          SENASA (lista de pendientes + filtros + tabs Listos/A-completar/Historial + checklist post-export).
+          Destino navegable desde "Más" (owner/vet, gateado por rol adentro). Como editar-campo: NO está en
+          strandedOnGatingRoute, así el gate no lo expulsa a (tabs) mientras se usa. */}
+      <Stack.Screen name="export-sigsa" />
       {/* Spec 02 C2 — animales: alta find-or-create (R4) y ficha del animal (R5). Destinos
           navegables desde la tab Animales con un rodeo existente (no se re-rutean al wizard). */}
       <Stack.Screen name="crear-animal" />

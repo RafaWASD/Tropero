@@ -31,13 +31,14 @@ import { Alert, Platform, Pressable } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
-import { AlertTriangle, CheckCircle2, ChevronRight, LogOut, Pencil, Radio, Trash2 } from 'lucide-react-native';
+import { AlertTriangle, CheckCircle2, ChevronRight, FileUp, Info, LogOut, Pencil, Radio, Trash2 } from 'lucide-react-native';
 
 import { Button, Card, FormField, FormError, InfoNote } from '@/components';
 import { CampoIcon, LoteIcon, MiembroIcon, RodeoIcon } from '@/theme/icons';
 import { useAuth, useEstablishment, useProfile } from '@/contexts';
 import {
   countActiveMembers,
+  loadEstablishmentDetail,
   saveProfile,
   softDeleteEstablishment,
 } from '@/services/establishments';
@@ -85,6 +86,78 @@ function SectionTitle({ children }: { children: string }) {
     >
       {children}
     </Text>
+  );
+}
+
+// ─── Banner RENSPA (spec 08, R13.3) — INFORMATIVO (no destructivo) ──────────────
+//
+// Cuando el campo activo NO tiene RENSPA guardado, mostramos un aviso suave (azul/verde informativo, NO
+// terracota — no es una alerta ni una acción destructiva) que linkea a "Editar campo" para completarlo. El
+// RENSPA es el dato de pantalla nº1 del checklist de SIGSA (R13.2); tenerlo cargado lo prepuebla (R13.3).
+// Solo OWNER (es quien puede editar el RENSPA, R2.3) → el caller ya lo gatea (isOwner). Carga el renspa con
+// loadEstablishmentDetail (lectura LOCAL offline); mientras carga, no muestra nada (evita un flash del banner
+// que luego desaparece si el campo ya tiene RENSPA).
+
+function RenspaBanner({ establishmentId, onComplete }: { establishmentId: string; onComplete: () => void }) {
+  const primary = getTokenValue('$primary', 'color');
+  const [phase, setPhase] = useState<'loading' | 'has' | 'missing'>('loading');
+
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+      setPhase('loading');
+      (async () => {
+        const r = await loadEstablishmentDetail(establishmentId);
+        if (!active) return;
+        // Si la carga falla (sin sync), NO mostramos el banner (no molestamos con un CTA que quizá no aplica).
+        if (!r.ok) {
+          setPhase('has');
+          return;
+        }
+        const renspa = r.establishment.renspa;
+        setPhase(renspa != null && renspa.trim().length > 0 ? 'has' : 'missing');
+      })();
+      return () => {
+        active = false;
+      };
+    }, [establishmentId]),
+  );
+
+  if (phase !== 'missing') return null;
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel="Completá el RENSPA del campo para la exportación a SIGSA"
+      onPress={onComplete}
+    >
+      <XStack
+        width="100%"
+        alignItems="center"
+        gap="$3"
+        minHeight="$touchMin"
+        borderRadius="$card"
+        borderWidth={1}
+        borderColor="$greenLight"
+        backgroundColor="$surface"
+        paddingHorizontal="$4"
+        paddingVertical="$3"
+        pressStyle={{ backgroundColor: '$bg' }}
+      >
+        <View flexShrink={0}>
+          <Info size={20} color={primary} strokeWidth={2} />
+        </View>
+        <YStack flex={1} minWidth={0} gap="$1">
+          <Text fontFamily="$body" fontSize="$4" lineHeight="$4" fontWeight="600" color="$textPrimary">
+            Completá tu RENSPA
+          </Text>
+          <Text fontFamily="$body" fontSize="$3" lineHeight="$3" fontWeight="400" color="$textMuted" numberOfLines={2}>
+            Lo vas a necesitar para declarar tus caravanas en SIGSA web.
+          </Text>
+        </YStack>
+        <ChevronRight size={20} color={getTokenValue('$textMuted', 'color')} strokeWidth={2} />
+      </XStack>
+    </Pressable>
   );
 }
 
@@ -722,6 +795,10 @@ export default function MasScreen() {
       ? { id: estState.current.id, name: estState.current.name }
       : null;
   const isOwner = estState.status === 'active' && estState.role === 'owner';
+  // Exportar a SENASA (spec 08, R7.2): owner o veterinarian. field_operator NO (la pantalla también
+  // lo gatea + el RLS lo rechaza al subir; acá ni se ofrece). El rol sale del contexto del campo activo.
+  const canExportSigsa =
+    estState.status === 'active' && (estState.role === 'owner' || estState.role === 'veterinarian');
 
   // `busy` = re-entrancy guard (cubre TODO el flujo: contar + confirmar + borrar) para que un
   // doble-tap no dispare dos borrados. `deleting` = solo el label visible "Eliminando…", que se
@@ -891,6 +968,32 @@ export default function MasScreen() {
                 campo.
               </InfoNote>
             ) : null}
+          </>
+        ) : null}
+
+        {/* ── SENASA (spec 08): exportar caravanas electrónicas a SIGSA. owner/vet only (R7.2). ── */}
+        {activeField && canExportSigsa ? (
+          <>
+            <SectionTitle>SENASA</SectionTitle>
+            {/* Banner RENSPA (R13.3): solo OWNER (es quien edita el RENSPA, R2.3) y solo si falta. Linkea a
+                "Editar campo" donde está el campo de RENSPA. */}
+            {isOwner ? (
+              <YStack marginBottom="$2">
+                <RenspaBanner
+                  establishmentId={activeField.id}
+                  onComplete={() => router.push('/editar-campo')}
+                />
+              </YStack>
+            ) : null}
+            <Card padding="$0" gap="$0" overflow="hidden">
+              <ActionRow
+                icon={<FileUp size={20} color={primary} strokeWidth={2} />}
+                label="Exportar a SENASA"
+                accessibilityLabel="Exportar las caravanas electrónicas para declarar en SIGSA"
+                trailing={<ChevronRight size={20} color={muted} strokeWidth={2} />}
+                onPress={() => router.push('/export-sigsa')}
+              />
+            </Card>
           </>
         ) : null}
 

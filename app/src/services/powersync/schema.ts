@@ -122,6 +122,13 @@ const establishments = new Table({
   latitude: column.real,
   longitude: column.real,
   total_hectares: column.real,
+  // renspa (spec 08, 0110): identificador SENASA del establecimiento (text, nullable, sin unique). NO va en
+  // el TXT (R2.4) — es el recordatorio de pantalla del checklist post-export (R13.3) + el dato que la edición
+  // del campo (editar-campo) carga vía la RPC update_renspa (owner-only, R2.3). Baja por la stream
+  // est_establishments (SELECT *). Sin declararla, el SQLite local NO la materializa → la lectura offline del
+  // checklist/edición no la vería (`SELECT renspa` tiraría "no such column"). Cambio de schema CLIENTE (no
+  // toca rafaq.yaml ni se deploya: la columna server-side ya existe).
+  renspa: column.text,
   plan_type: column.text,
   plan_started_at: column.text,
   plan_limits: column.text,
@@ -196,6 +203,11 @@ const animal_profiles = new Table({
   category_id: column.text,
   category_override: column.integer,
   breed: column.text,
+  // breed_id (spec 08, 0108): raza CONTROLADA (FK a breed_catalog, códigos SENASA) en coexistencia con
+  // `breed` texto libre legacy. Es la fuente del código RAZA del TXT SIGSA (R5.2) y lo que lee la query de
+  // pendientes (design §"Flujo de datos": SELECT ap.breed_id + JOIN breed_catalog). Baja por est_animal_profiles
+  // (SELECT *). Sin declararla, el SQLite local NO la materializa y `SELECT ap.breed_id` tira "no such column".
+  breed_id: column.text,
   coat_color: column.text,
   birth_weight: column.real,
   teeth_state: column.text,
@@ -463,6 +475,55 @@ const birth_calves = new Table({
   created_at: column.text,
 });
 
+// ─── SIGSA (spec 08 — export de identificaciones electrónicas a SENASA) ────────────────────
+// breed_catalog: catálogo GLOBAL read-only de razas con códigos SENASA (0107). Mismo trato que los
+// catálogos globales (species/categories_by_system): baja por un bucket global (stream catalog_breed,
+// SIN scope de establecimiento). El BreedPicker lo lee del SQLite local (offline) ordenado por sort_order;
+// la query de pendientes lo JOINea para sacar el código RAZA del TXT (R5.2). PK `id` implícita. boolean→
+// INTEGER (active), int→INTEGER (sort_order). 32 filas (trivial) → se sincroniza COMPLETO (sin filtro
+// active=true) para que un breed_id de raza inactiva igual resuelva su nombre/código (evita el edge F6).
+const breed_catalog = new Table({
+  senasa_code: column.text,
+  name: column.text,
+  species: column.text,
+  active: column.integer,
+  sort_order: column.integer,
+  created_at: column.text,
+});
+
+// sigsa_declarations: marcador de declaración por (establecimiento, animal) (0111). Append-only inmutable
+// (R11.3) → NO tiene deleted_at (igual que animal_category_history). Scoped por establishment (org_scope,
+// stream sigsa_declarations). La lista de "pendientes" (R9.1) = animales con RFID SIN fila acá → la query
+// de pendientes la LEFT JOINea. El INSERT local (export / marcar-declarado) entra a la cola de sync (CRUD
+// plano); declared_by lo fuerza el trigger server-side (no se manda). PK `id` implícita. uuid/timestamptz→TEXT.
+const sigsa_declarations = new Table({
+  establishment_id: column.text,
+  animal_profile_id: column.text,
+  declared_at: column.text,
+  export_log_id: column.text,
+  declared_by: column.text,
+  created_at: column.text,
+});
+
+// export_log: audit de cada generación de TXT + el file_content para re-descarga (0112). Scoped por
+// establishment (org_scope, stream sigsa_export_log). ⚠ file_content guarda el TXT COMPLETO con TODOS los
+// RFIDs del lote → el dato MÁS sensible de la feature: el scope DEBE ser org_scope estándar (establishment_id
+// IN user_roles activos), NUNCA más amplio, o se fugarían los RFIDs de un campo a otro tenant. El INSERT local
+// (1 fila por export) entra a la cola de sync (CRUD plano); generated_by lo fuerza el trigger server-side. La
+// re-descarga (R10.1) lee file_content del SQLite local. PK `id` implícita. animal_count int→INTEGER; date→TEXT.
+const export_log = new Table({
+  establishment_id: column.text,
+  generated_at: column.text,
+  generated_by: column.text,
+  animal_count: column.integer,
+  file_name: column.text,
+  file_content: column.text,
+  rodeo_filter_id: column.text,
+  date_from: column.text,
+  date_to: column.text,
+  created_at: column.text,
+});
+
 // ─── OUTBOX (write-side, NO sincronizada) — op_intents (insertOnly, R6.8) ──────────────
 // insertOnly: genera CrudEntry para que uploadData() la procese (→ supabase.rpc), pero NO replica
 // la fila como CRUD plano ni persiste como dato local. El `id` implícito = client_op_id (idempotencia
@@ -656,6 +717,10 @@ export const AppSchema = new Schema({
   scrotal_measurements,
   animal_events,
   birth_calves,
+  // spec 08 — SIGSA: breed_catalog (catálogo global) + sigsa_declarations/export_log (scope establishment)
+  breed_catalog,
+  sigsa_declarations,
+  export_log,
   // outbox (insertOnly, write-side)
   op_intents,
   // overlay optimista (localOnly)

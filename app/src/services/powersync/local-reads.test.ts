@@ -21,6 +21,7 @@ import {
   buildOwnNameQuery,
   buildOwnEmailPhoneQuery,
   buildEstablishmentDetailQuery,
+  buildBreedCatalogQuery,
   buildCountActiveMembersQuery,
   buildMembersQuery,
   buildCountOtherMembersQuery,
@@ -67,6 +68,7 @@ import {
   buildSetTeethStateUpdate,
   buildSetCutUpdate,
   buildUnsetCutUpdate,
+  buildSetBreedUpdate,
   // M6 — circunferencia escrotal (spec 03 US-14)
   buildAddScrotalInsert,
   buildUpdateManeuverScrotal,
@@ -377,11 +379,33 @@ test('buildOwnPhoneQuery / buildOwnNameQuery / buildOwnEmailPhoneQuery: self por
   assert.deepEqual(emailPhone.args, ['u3']);
 });
 
-test('buildEstablishmentDetailQuery: filtro de dominio deleted_at IS NULL + LIMIT 1', () => {
+test('buildEstablishmentDetailQuery: filtro de dominio deleted_at IS NULL + LIMIT 1 + renspa (spec 08)', () => {
   const q = buildEstablishmentDetailQuery('est-9');
   assert.match(q.sql, /FROM establishments WHERE id = \? AND deleted_at IS NULL LIMIT 1/);
-  assert.match(q.sql, /id, name, province, city, total_hectares/);
+  assert.match(q.sql, /id, name, province, city, total_hectares, renspa/);
   assert.deepEqual(q.args, ['est-9']);
+});
+
+test('buildBreedCatalogQuery (spec 08, T13): catálogo COMPLETO ordenado por sort_order, sin scoping ni filtro', () => {
+  const q = buildBreedCatalogQuery();
+  // Sin args (catálogo global) + sin WHERE (trae bovine/bubaline/generic, active y no-active: el filtro
+  // bovine+active lo aplica el helper puro breedPickerOptions, no el SQL).
+  assert.deepEqual(q.args, []);
+  assert.match(q.sql, /FROM breed_catalog ORDER BY sort_order ASC/);
+  assert.doesNotMatch(q.sql, /WHERE/, 'el catálogo se trae COMPLETO (sin filtro active=1)');
+  assert.match(q.sql, /id, senasa_code, name, species, active, sort_order/);
+
+  // Comportamiento contra sqlite: 3 filas (bovine activa, bubaline inactiva, generic) → todas vuelven, ordenadas.
+  const db = new DatabaseSync(':memory:');
+  db.exec(
+    'CREATE TABLE breed_catalog (id TEXT PRIMARY KEY, senasa_code TEXT, name TEXT, species TEXT, active INTEGER, sort_order INTEGER);',
+  );
+  db.prepare('INSERT INTO breed_catalog VALUES (?,?,?,?,?,?)').run('a', 'OR', 'Otra Raza', 'bovine', 1, 28);
+  db.prepare('INSERT INTO breed_catalog VALUES (?,?,?,?,?,?)').run('b', 'AA', 'Aberdeen Angus', 'bovine', 1, 1);
+  db.prepare('INSERT INTO breed_catalog VALUES (?,?,?,?,?,?)').run('c', 'MU', 'Murrah', 'bubaline', 0, 102);
+  const rows = db.prepare(q.sql).all() as Array<{ senasa_code: string }>;
+  assert.deepEqual(rows.map((r) => r.senasa_code), ['AA', 'OR', 'MU'], 'todas las filas, por sort_order ASC');
+  db.close();
 });
 
 test('buildCountActiveMembersQuery: COUNT(*), active=1, excluye al owner', () => {
@@ -1838,6 +1862,21 @@ test('M3.1: buildUnsetCutUpdate — UPDATE is_cut=0 + category derivada + catego
   const q = buildUnsetCutUpdate('p-1', 'cat-derivada');
   assert.match(q.sql, /SET is_cut = 0, category_id = \?, category_override = 0/);
   assert.deepEqual(q.args, ['cat-derivada', 'p-1']);
+});
+
+test('T18: buildSetBreedUpdate — UPDATE animal_profiles.breed (nombre); NUNCA toca breed_id (lo deriva el trigger 0113)', () => {
+  const q = buildSetBreedUpdate('p-1', 'Aberdeen Angus');
+  assert.match(q.sql, /^UPDATE animal_profiles SET breed = \?/);
+  // El cliente manda SOLO breed — breed_id lo deriva el trigger server-side 0113 (anti-drift).
+  assert.doesNotMatch(q.sql, /breed_id/);
+  assert.doesNotMatch(q.sql, /session_id/);
+  assert.match(q.sql, /deleted_at IS NULL/);
+  assert.deepEqual(q.args, ['Aberdeen Angus', 'p-1']);
+});
+
+test('T18: buildSetBreedUpdate — "sin raza" persiste breed = null (el trigger deja breed_id NULL)', () => {
+  const q = buildSetBreedUpdate('p-1', null);
+  assert.deepEqual(q.args, [null, 'p-1']);
 });
 
 // ─── Ejecución real (node:sqlite): el split INSERT→UPDATE de una corrección NO duplica (R5.9) ─────────

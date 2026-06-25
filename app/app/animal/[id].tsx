@@ -14,7 +14,7 @@
 // Criticidad 🟡. Cero hardcode (ADR-023 §4): tokens + componentes; íconos lucide con getTokenValue.
 // Voseo es-AR. a11y por helper (utils/a11y).
 
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Platform, Pressable } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
@@ -49,6 +49,7 @@ import {
   previewCastrationCategory,
   previewRevertCategory,
   revertCategoryOverride,
+  setBreed,
   setCastrated,
   setCut,
   setFutureBull,
@@ -56,6 +57,13 @@ import {
   type AnimalDetail,
   type AnimalStatus,
 } from '@/services/animals';
+import { fetchBreedCatalog } from '@/services/sigsa/sigsa-export-service';
+import { BreedPickerSheet } from '@/components/sigsa';
+import {
+  breedCodeForName,
+  selectedBreedLabel,
+  type BreedCatalogEntry,
+} from '@/utils/breed-picker';
 import { fetchRodeoGating } from '@/services/rodeo-config';
 import { canMarkCut, canUnmarkCut } from '@/utils/cut-eligibility';
 import { archivedBadgeLabel } from '@/services/exit-animal';
@@ -135,6 +143,11 @@ export default function AnimalDetailScreen() {
   // no aplica (no es macho entero); [] = macho entero sin mediciones (la 1ra medición es un caso legítimo,
   // no falta de sync). Lectura LOCAL blanda (fetchScrotalHistory): si falla, la tarjeta no se rompe (queda []).
   const [scrotalHistory, setScrotalHistory] = useState<ScrotalMeasurementRow[] | null>(null);
+  // Catálogo de razas SENASA (offline, breed_catalog global) para el BreedPickerSheet de la ficha (spec 08,
+  // T18 — editar la raza para completar breed_id). Carga blanda: si falla, el sheet muestra su empty-state
+  // ("el catálogo no se descargó") y la fila Raza queda solo-lectura — no rompe la ficha.
+  const [breedCatalog, setBreedCatalog] = useState<BreedCatalogEntry[]>([]);
+  const [breedPickerOpen, setBreedPickerOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -238,6 +251,15 @@ export default function AnimalDetailScreen() {
     didInitialLoadRef.current = false;
   }
 
+  // Catálogo de razas SENASA (global, breed_catalog del SQLite local) para el BreedPickerSheet de la ficha
+  // (spec 08, T18). UNA sola lectura (es global e inmutable → no depende del animal ni del refresh). Blando:
+  // si falla, queda [] → el sheet muestra su empty-state y la fila Raza queda solo-lectura, sin romper la ficha.
+  useEffect(() => {
+    void fetchBreedCatalog().then((bc) => {
+      if (bc.ok) setBreedCatalog(bc.value);
+    });
+  }, []);
+
   const goToAddEvent = useCallback(() => {
     if (!detail) return;
     // Pasamos el SEXO del animal: el wizard oculta la sección "Reproductivo" (tacto/servicio/parto)
@@ -333,6 +355,17 @@ export default function AnimalDetailScreen() {
     const animalInActiveEst = activeEstId != null && activeEstId === detail.establishmentId;
     return animalInActiveEst && canManageGroups(estState.status === 'active' ? estState.role : null);
   }, [detail, estState]);
+
+  // ── Raza (spec 08, T18): editar la raza desde la ficha para completar breed_id (exportable a SIGSA). ──
+  // Editable SOLO si el animal está ACTIVO (un archivado no se re-clasifica). Cualquier rol operativo del
+  // campo puede editar `breed` (RLS animal_profiles_update = has_role_in, mismo path que la CUT-ficha); la
+  // RLS es la barrera real. El `selectedCode` del picker = el senasa_code que matchea el `breed` (nombre)
+  // guardado (espeja el match del trigger 0113); null si el animal no tiene raza o el texto es legacy sin match.
+  const canEditBreed = detail != null && detail.status === 'active';
+  const selectedBreedCode = useMemo(
+    () => breedCodeForName(breedCatalog, detail?.breed ?? null),
+    [breedCatalog, detail?.breed],
+  );
 
   // ── Quitar fijación de categoría (C6 / RC6.4). ──
   // Se ofrece SOLO si la categoría está fijada manualmente (override) Y el animal está ACTIVO (un
@@ -596,6 +629,33 @@ export default function AnimalDetailScreen() {
     [detail, groups, load],
   );
 
+  // Editar la RAZA desde la ficha (spec 08, T18 — completar/cambiar la raza para que el animal sea exportable
+  // a SIGSA). El BreedPickerSheet llama con (breedId, senasaCode); persistimos el NOMBRE de la raza en `breed`
+  // (texto), que es la columna que el trigger 0113 usa para DERIVAR breed_id al subir. "Sin raza" → (null,null)
+  // → breed = null (el trigger deja breed_id NULL). NUNCA mandamos breed_id (lo deriva el trigger).
+  const onSelectBreed = useCallback(
+    async (_breedId: string | null, senasaCode: string | null): Promise<void> => {
+      setBreedPickerOpen(false);
+      if (!detail) return;
+      // El nombre EXACTO del catálogo (lo que persiste en `breed`). "Sin raza" (senasaCode null) → null.
+      const label = senasaCode == null ? null : selectedBreedLabel(breedCatalog, senasaCode);
+      const newBreed = label ? label.name : null;
+      if (newBreed === (detail.breed ?? null)) return; // sin cambio → no escribir
+      const snapshot = detail;
+      // OPTIMISMO EN SITIO: la raza mostrada salta a la elegida sin blanquear ni resetear el scroll.
+      setDetail((d) => (d == null ? d : { ...d, breed: newBreed }));
+      const r = await setBreed(detail.profileId, newBreed);
+      if (!r.ok) {
+        setDetail(snapshot); // REVERT si la escritura falló (no dejamos un estado mentido)
+        return;
+      }
+      // Refresh SILENCIOSO para reconciliar (sin parpadeo ni salto al tope). breed_id lo deriva el trigger al
+      // subir; el SQLite local convergerá al re-sincronizar (la ficha muestra `breed`, ya optimista).
+      void load({ silent: true });
+    },
+    [detail, breedCatalog, load],
+  );
+
   // Quick-create de un lote (owner) sin salir de la ficha + asignarlo de una. Devuelve el grupo nuevo
   // (para que el selector lo seleccione) o un error es-AR. Refresca los grupos del campo del animal.
   const onQuickCreateLote = useCallback(
@@ -696,7 +756,13 @@ export default function AnimalDetailScreen() {
               <AttributeRow label="Sexo" value={detail.sex === 'male' ? 'Macho' : 'Hembra'} />
               <AttributeRow label="Nacimiento" value={detail.birthDate ?? '—'} />
               <AttributeRow label="Rodeo" value={detail.rodeoName || '—'} />
-              {detail.breed ? <AttributeRow label="Raza" value={detail.breed} /> : null}
+              {/* Raza (spec 08, T18): muestra la raza actual + afordancia para editarla (abre el BreedPickerSheet).
+                  Sin raza → CTA "Completar raza para SIGSA". El trigger 0113 deriva breed_id del nombre al subir. */}
+              <BreedRow
+                breed={detail.breed}
+                editable={canEditBreed}
+                onEdit={() => setBreedPickerOpen(true)}
+              />
               {detail.coatColor ? <AttributeRow label="Pelaje" value={detail.coatColor} /> : null}
             </DetailSection>
 
@@ -776,6 +842,19 @@ export default function AnimalDetailScreen() {
           </>
         ) : null}
       </ScrollView>
+
+      {/* BreedPickerSheet (spec 08, T18): overlay para editar la raza (completar breed_id → exportable a SIGSA).
+          Montado al ROOT (cubre toda la pantalla con su scrim). Solo si el animal cargó y es editable. Setea
+          `breed` (nombre); el trigger 0113 deriva breed_id al subir. */}
+      {detail && canEditBreed ? (
+        <BreedPickerSheet
+          open={breedPickerOpen}
+          onClose={() => setBreedPickerOpen(false)}
+          breeds={breedCatalog}
+          selectedCode={selectedBreedCode}
+          onSelect={onSelectBreed}
+        />
+      ) : null}
     </YStack>
   );
 }
@@ -1579,6 +1658,90 @@ function AttributeRow({ label, value }: { label: string; value: string }) {
         minWidth={0}
       >
         {value}
+      </Text>
+    </YStack>
+  );
+}
+
+// ─── Fila de RAZA editable (spec 08, T18) ─────────────────────────────────────────────
+//
+// Muestra la raza actual del animal + una afordancia para editarla (abre el BreedPickerSheet). Tres estados:
+//   - CON raza + editable → valor (nombre) + link discreto "Cambiar" (toca → abre el picker).
+//   - SIN raza + editable → CTA cálido "Completá la raza para SIGSA" ($primary, Fitts ≥$touchMin) — cierra el
+//     loop "A completar → completar" del export (el animal sin breed_id no es exportable, R8.2).
+//   - read-only (animal archivado) → solo el valor o "—" (un animal de baja no se re-clasifica).
+//
+// La raza se persiste como `breed` (NOMBRE del catálogo); el trigger 0113 deriva breed_id al subir. a11y por
+// helper (buttonA11y, NUNCA accessibilityLabel crudo en Pressable RN-web). Cero hardcode (tokens + getTokenValue).
+function BreedRow({
+  breed,
+  editable,
+  onEdit,
+}: {
+  breed: string | null;
+  editable: boolean;
+  onEdit: () => void;
+}) {
+  const primary = getTokenValue('$primary', 'color');
+  const hasBreed = breed != null && breed.trim().length > 0;
+
+  // Sin raza + editable → CTA "Completar raza para SIGSA" (cierra el loop del export).
+  if (!hasBreed && editable) {
+    return (
+      <YStack gap="$1">
+        <Text fontFamily="$body" fontSize="$3" fontWeight="500" color="$textMuted">
+          Raza
+        </Text>
+        <XStack
+          testID="ficha-breed-completar"
+          minHeight="$touchMin"
+          alignItems="center"
+          gap="$2"
+          alignSelf="flex-start"
+          pressStyle={{ opacity: 0.6 }}
+          onPress={onEdit}
+          {...buttonA11y(Platform.OS, { label: 'Completá la raza para SIGSA' })}
+        >
+          <Plus size={18} color={primary} strokeWidth={2.5} />
+          <Text fontFamily="$body" fontSize="$5" lineHeight="$5" fontWeight="700" color="$primary" numberOfLines={1}>
+            Completá la raza para SIGSA
+          </Text>
+        </XStack>
+      </YStack>
+    );
+  }
+
+  // Con raza (o read-only sin raza): label + valor; si editable, link "Cambiar" a la derecha.
+  return (
+    <YStack gap="$1">
+      <XStack alignItems="center" justifyContent="space-between" gap="$2">
+        <Text fontFamily="$body" fontSize="$3" fontWeight="500" color="$textMuted">
+          Raza
+        </Text>
+        {editable ? (
+          <Text
+            testID="ficha-breed-cambiar"
+            fontFamily="$body"
+            fontSize="$3"
+            fontWeight="700"
+            color="$primary"
+            pressStyle={{ opacity: 0.6 }}
+            onPress={onEdit}
+            {...buttonA11y(Platform.OS, { label: 'Cambiar la raza' })}
+          >
+            Cambiar
+          </Text>
+        ) : null}
+      </XStack>
+      <Text
+        fontFamily="$body"
+        fontSize="$5"
+        fontWeight="600"
+        color="$textPrimary"
+        numberOfLines={1}
+        minWidth={0}
+      >
+        {hasBreed ? (breed as string) : '—'}
       </Text>
     </YStack>
   );

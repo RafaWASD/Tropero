@@ -79,10 +79,16 @@ export class SupabaseConnector implements PowerSyncBackendConnector {
             // buildCrudUpsert special-casea las tablas de PK COMPUESTA (custom_attributes, M5): para ésas
             // descarta el id SINTÉTICO del payload y upsertea por la PK natural (onConflict) — un `id`
             // sintético contra PostgREST sería 42703 (columna inexistente). El resto: id `id` real.
+            // Las tablas APPEND-ONLY (sigsa_declarations / export_log, spec 08 R11.3) van por INSERT PLANO
+            // (insertOnly): NO tienen grant UPDATE → un upsert (INSERT...ON CONFLICT DO UPDATE) exigiría
+            // UPDATE → 42501 → descarte silencioso. Con .insert() basta el grant INSERT; un re-intento =
+            // 23505 (UNIQUE de dominio) = descarte permanente (fila ya presente, idempotente en efecto).
             const plan = buildCrudUpsert(op.table, op.id, op.opData);
-            const { error } = plan.onConflict
-              ? await table.upsert(plan.payload, { onConflict: plan.onConflict })
-              : await table.upsert(plan.payload);
+            const { error } = plan.insertOnly
+              ? await table.insert(plan.payload)
+              : plan.onConflict
+                ? await table.upsert(plan.payload, { onConflict: plan.onConflict })
+                : await table.upsert(plan.payload);
             if (error) throw error;
             break;
           }
