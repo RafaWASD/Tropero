@@ -716,3 +716,32 @@ Se evaluó agregar directamente `sigsa_declared_at timestamptz` + `sigsa_export_
   - **R1.4** queda CUBIERTO end-to-end (alta + ficha setean breed → trigger deriva breed_id → exportable);
     cierra el loop "A completar → completar" (R8.2/R8.3). El `breed_id` en el SQLite local queda stale tras el
     UPDATE local hasta el re-sync (benigno: la ficha muestra `breed`, el export lee el set sincronizado).
+- **2026-06-25 — VERIFICACIÓN POST-DEPLOY (0107-0113 aplicadas + sync rules deployadas) — 2 fixes E2E**:
+  con las migraciones aplicadas y el YAML de PowerSync deployado (las 3 tablas + columnas nuevas ya bajan al
+  SQLite local), la corrida REAL de `sigsa-breed-renspa.spec.ts` destapó 2 fallas deterministas — ambas
+  ROOT-CAUSEADAS y corregidas (backend SIGSA suite sigue 72/72; `sigsa-export.spec.ts` 6/6; el spec entero 4/4):
+  - **(1) breed_id del alta nunca aterrizaba** — el test del alta creaba el animal SIN ningún identificador
+    (tag/idv/visual). El overlay local lo mostraba (la ficha pasaba), pero `create_animal` lo RECHAZABA al
+    subir con **23514** (`animal_profiles_identity_check`, 0021 / "animal must have at least one of
+    tag_electronic, idv or visual_id_alt") → rollback del overlay → el animal NUNCA llegaba a Postgres → el
+    poll de `breed_id` daba `null`. El trigger 0113 estaba PERFECTO (lo prueba el path de UPDATE de la ficha
+    `:130` + el backend §T18); el problema era que NO había fila sobre la cual derivar. **Dos correcciones**:
+    (a) **PRODUCTO (cross-spec, surfaced acá)** — el wizard de alta (`crear-animal.tsx`) ahora valida en el
+    cliente que haya **al menos un identificador** ANTES de encolar el intent (`hasAtLeastOneIdentifier`,
+    `animal-form.ts` + tests). El diseño original asumía un identificador SIEMPRE precargado (R4.2,
+    find-or-create), pero el ALTA EN BLANCO ("Dar de alta tu primer animal", sin precarga) podía llegar al
+    submit con los tres vacíos → `create_animal` lo perdía en SILENCIO (data loss offline). Ahora se bloquea
+    con copy accionable, espejando el constraint del server. (b) **TEST** — `:50` ahora carga un visual antes
+    de "Crear animal" (gesto que TODO otro e2e de alta ya hacía: `animals.spec.ts` etc.) → el animal PERSISTE
+    y el trigger 0113 deriva `breed_id` sobre la fila real. 30 tests de alta (`animals` + `maniobra-identify`)
+    verdes → la validación nueva no regresiona ningún flujo (todos prefijan o cargan un id).
+  - **(2) el banner de RENSPA no desaparecía tras guardar** — la RPC `update_renspa` persiste en Postgres al
+    instante (el assert server-side PASA), pero `RenspaBanner` (en `/mas`) leía `renspa` del SQLite LOCAL con un
+    `useFocusEffect` de **una sola lectura al enfocar**, NO-reactivo. Como el RENSPA se escribe por RPC (online)
+    y BAJA al SQLite local por la stream `est_establishments` de forma asíncrona, al volver a "Más" el banner
+    leía el valor stale (todavía NULL) y se quedaba mostrándose para siempre (el usuario acababa de cargar el
+    RENSPA y la app lo seguía nagueando). **Corrección (PRODUCTO)**: `RenspaBanner` ahora es REACTIVO — se
+    suscribe a `subscribeSyncUiState` y RE-LEE el renspa local en cada `statusChanged` (mismo patrón que
+    `ProfileContext::loadFor` sobre `lastSyncedAt`) → el banner desaparece cuando el valor recién guardado
+    aterriza por el sync-down. Sin re-set a 'loading' en cada tick (no flashea). El e2e da margen de 20s al
+    round-trip (en la corrida real desaparece en <5s).

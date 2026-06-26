@@ -84,6 +84,14 @@ test('BreedPicker en el alta: abrir el sheet → buscar → elegir una raza → 
   // El hint de "completá la raza" ya no debe estar (hay raza elegida).
   await expect(page.getByText('Completá la raza para poder exportar el animal a SIGSA.', { exact: true })).toHaveCount(0);
 
+  // Identificación visual (recomendado): el alta EN BLANCO no precarga ningún identificador, pero el
+  // server exige al menos UNO (animal_profiles_identity_check, 0021 / R6.2) — sin él, create_animal
+  // rechaza con 23514 al subir y el alta NO aterriza en Postgres (el cliente ahora lo valida antes de
+  // encolar, hasAtLeastOneIdentifier). Cargamos un visual para que el animal PERSISTA y el trigger 0113
+  // pueda derivar breed_id sobre la fila real. Mismo gesto que animals.spec.ts (toda alta lleva un id).
+  const visualLabel = `${RUN_TAG}-AA1`;
+  await page.getByLabel('Identificación visual (recomendado)', { exact: true }).fill(visualLabel);
+
   // Creamos el animal.
   await page.getByRole('button', { name: 'Crear animal', exact: true }).click();
 
@@ -253,6 +261,10 @@ test('RENSPA: campo sin RENSPA → banner en Más → editar campo → guardar �
   await page.getByRole('button', { name: 'Guardar cambios', exact: true }).click();
 
   // Tras guardar, volvemos a "Más" (router.back). El banner ya NO debe estar (el campo tiene RENSPA).
+  // ⚠ El RENSPA se guarda por la RPC update_renspa (online) → Postgres; el valor BAJA por la stream
+  // est_establishments al SQLite local de forma asíncrona. El banner es REACTIVO al sync-down (re-lee en
+  // cada statusChanged, fix s26) → desaparece cuando el valor recién guardado aterriza. Damos margen al
+  // round-trip (20s) por eso.
   await expect(page.getByText('Perfil', { exact: true })).toBeVisible({ timeout: 20_000 });
   await expect(
     page.getByRole('button', { name: 'Completá el RENSPA del campo para la exportación a SIGSA' }),

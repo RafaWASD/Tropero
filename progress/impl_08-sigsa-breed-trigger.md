@@ -255,3 +255,82 @@ El as-built quedó alineado con las specs:
 ## Listo para el leader
 Review del SQL de 0113 + (Gate 1 puntual, toca write-path de animal_profiles) + apply al remoto + correr
 `supabase/tests/sigsa/run.cjs` §T18 (post-apply) + el e2e con los asserts de breed_id + gates (reviewer + Gate 2).
+
+---
+
+# POST-DEPLOY (2026-06-25) — Verificación con 0107-0113 aplicadas + sync rules deployadas: 2 fixes E2E
+
+> Raf deployó las sync rules en el dashboard (las 3 tablas + columnas nuevas ya bajan al SQLite local). La
+> corrida REAL de `sigsa-breed-renspa.spec.ts` (asserts de breed_id que NUNCA habían corrido verdes —
+> gateados pre-apply) destapó 2 fallas DETERMINISTAS. Ambas root-causeadas con instrumentación (captura de
+> `console`/`pageerror` del connector + dump directo de Postgres + reproducción de la RPC como usuario real).
+
+## Falla 1 — `:50` breed_id del alta = null (poll 30s) — ROOT CAUSE: 23514, no el trigger
+
+**Evidencia (no especulación):**
+- Connector log: `[powersync] upload rechazado (descartado) {table: op_intents, op: PUT, code: 23514}`.
+- Dump Postgres: `animal_profiles` del establishment = `[]` (vacío) durante 60s → el alta NUNCA aterrizó.
+- Reproducción de `create_animal` como usuario real:
+  `{code:"23514", message:"animal must have at least one of tag_electronic, idv or visual_id_alt"}`
+  = `animal_profiles_identity_check` (0021 / R6.2).
+
+**Por qué:** el test del alta clickeaba "Crear animal" SIN cargar ningún identificador. El overlay local lo
+mostraba (la ficha pasaba), pero `create_animal` lo rechazaba al subir → rollback del overlay → nunca llegó a
+Postgres → el poll de `breed_id` daba null. **El trigger 0113 estaba PERFECTO** — lo prueban el path de UPDATE
+de la ficha (`:130`, server-side breed='Hereford'+breed_id=H VERDE) y el backend §T18 (72/72). No había fila
+sobre la cual derivar. NO es regresión de spec 08: es la 1ª verificación real del assert (antes gateado).
+
+**Fix (a) PRODUCTO — cross-spec, surfaced acá (silent data loss):**
+- `app/src/utils/animal-form.ts`: helper puro `hasAtLeastOneIdentifier(tag, idv, visual)` (trim defensivo).
+- `app/src/utils/animal-form.test.ts`: +2 tests (R6.2 mínima: vacíos/espacios → false; cualquiera presente → true).
+- `app/app/crear-animal.tsx` `onSubmit`: valida `hasAtLeastOneIdentifier` ANTES de encolar el intent; sin
+  identificador → `setFormError` accionable + return (no encola un alta condenada). El diseño original asumía
+  identificador SIEMPRE precargado (R4.2), pero el ALTA EN BLANCO podía llegar al submit con los tres vacíos →
+  `create_animal` perdía el animal en SILENCIO. Ahora espeja el constraint del server (0021). Cero regresión:
+  30 e2e de alta (`animals` + `maniobra-identify`) verdes (todos prefijan o cargan un id).
+
+**Fix (b) TEST:** `:50` carga un visual antes de "Crear animal" (gesto que TODO otro e2e de alta ya hacía).
+
+## Falla 2 — `:222` el banner RENSPA no desaparece tras guardar — ROOT CAUSE: banner NO-reactivo
+
+**Evidencia:** dump mostró `postgres.renspa="01.001.0.00001"` desde el 1er poll (la RPC `update_renspa`
+persiste al instante → el assert server-side PASA) pero `bannerCount=1` durante 24s. El banner NUNCA re-leyó.
+
+**Por qué:** `RenspaBanner` (`/mas`) leía `renspa` del SQLite LOCAL con un `useFocusEffect` de UNA lectura al
+enfocar, NO-reactivo. El RENSPA se escribe por RPC (online) y BAJA al SQLite local async por la stream
+`est_establishments` → al volver a "Más" el banner leía stale (NULL) y se quedaba para siempre.
+
+**Fix (PRODUCTO):** `app/app/(tabs)/mas.tsx` — `RenspaBanner` ahora se suscribe a `subscribeSyncUiState` y
+RE-LEE el renspa local en cada `statusChanged` (patrón `ProfileContext::loadFor` sobre `lastSyncedAt`) → el
+banner desaparece cuando el valor recién guardado aterriza por sync-down. Dispose en blur. Sin re-set a
+'loading' por tick (no flashea).
+
+## Verificación final
+- `cd app && pnpm e2e:build` + `playwright test e2e/sigsa-breed-renspa.spec.ts e2e/sigsa-export.spec.ts` →
+  **10 passed / 0 failed** (sigsa-breed-renspa 4/4 incluidos los 2 que fallaban; sigsa-export 6/6 sin regresión).
+- Regresión alta: `playwright test animals.spec.ts maniobra-identify.spec.ts` → **30 passed / 0 failed**.
+- `pnpm typecheck` (app) VERDE. `animal-form.test.ts` 11/11 (incluye los 2 nuevos).
+
+## Autorrevisión adversarial (paso 8)
+1. **¿Causa raíz o síntoma?** Falla 1: el síntoma era "breed_id null"; la causa real era 23514 (alta sin id no
+   persiste). Ataqué la causa (validar id antes de encolar) + corregí el test. Falla 2: causa = no-reactividad;
+   ataqué la reactividad (no subí timeouts para "pintar verde").
+2. **¿Rompe algo?** La validación de id es un gate que SOLO dispara con los 3 vacíos — verifiqué por inspección
+   + 30 e2e de alta que todo flujo legítimo prefija/carga un id (un alta sin id es IMPOSIBLE en el server, 0021
+   → cero riesgo de bloquear algo válido). El banner reactivo: dispose en blur (sin leak); re-lecturas son reads
+   locales baratos; no flashea.
+3. **¿Tests que mienten?** `:50` ahora ejercita el path INSERT real (RPC → trigger 0113 → breed_id=AA sobre la
+   fila persistida); el poll solo pasa si la fila está EN Postgres con breed_id. `:222` el banner desaparece solo
+   si el sync-down del renspa aterriza + el assert server-side confirma Postgres. Verificación genuina.
+4. **Multi-tenant/offline:** la validación es client-side input (sin hardcode de establishment_id); MEJORA
+   offline-first (no se pierde un alta en silencio). El banner lee `loadEstablishmentDetail(establishmentId)` del
+   contexto del campo activo (sin hardcode).
+
+## Reconciliación de specs (paso 9)
+- `design.md`: entrada de changelog "VERIFICACIÓN POST-DEPLOY — 2 fixes E2E" (root-cause + fixes de ambas).
+- `requirements.md`: nota de reconciliación bajo R13.3 (el banner debe ser reactivo al sync-down; el QUÉ no cambia).
+- ⚠️ **Cross-spec (decisión del leader):** `hasAtLeastOneIdentifier` es robustez del ALTA (spec 02, R4.2/R6.2),
+  surfaced por el e2e de spec 08. La home canónica de ese requisito es spec 02; lo documenté en el changelog de
+  spec 08 + acá, pero NO toqué las specs de spec 02 (las gatea el leader). Recomiendo reconciliar spec 02
+  (requirements: "el alta valida ≥1 identificador en cliente, espejando 0021") y/o anotar en backlog si se
+  prefiere diferir. El fix de código ya está y es zero-risk.

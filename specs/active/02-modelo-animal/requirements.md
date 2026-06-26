@@ -401,6 +401,8 @@ El alta del/los ternero(s) al pie (`R9`) sigue ocurriendo en el mismo flujo del 
 
 **R13.3** Mientras el cliente está offline, el sistema deberá permitir validar el constraint de identificación (R4.2) localmente — la validación CHECK del DB es la última red, pero el cliente debe rechazar el form si los tres identificadores están vacíos antes de enviarlo a la cola.
 
+> **As-built (2026-06-25, cerrado vía verificación post-deploy de spec 08).** Hasta ahora R13.3 quedaba tácitamente cubierta solo en el camino find-or-create (siempre precarga un identificador), pero el **alta EN BLANCO** ("Dar de alta tu primer animal") podía llegar al submit con los tres vacíos → `create_animal` rechazaba con `23514` (`animal_profiles_identity_check`, 0021) al subir y el alta se PERDÍA en silencio (solo en el overlay local). Implementado el gate cliente de R13.3 que faltaba: helper puro `hasAtLeastOneIdentifier` (`app/src/utils/animal-form.ts`, trim defensivo espejando `nullif(trim())` del server) + bloqueo en `crear-animal.tsx::onSubmit` con error accionable antes de encolar el intent. Espeja el constraint server (defensa en profundidad), no lo relaja.
+
 **R13.4** Mientras el cliente está offline, las transiciones automáticas de categoría (R7) deberán ser previsualizadas en el cliente vía un módulo TypeScript compartido. Al sincronizar, el trigger Postgres revalida; si hay divergencia (raro), gana el server (`last-write-wins`).
 
 **R13.5** Las tablas de configuración (`species`, `systems_by_species`, `categories_by_system`, `field_definitions`, `system_default_fields`) deberán cargarse en SQLite local al primer login y refrescarse periódicamente (TTL ~24 hs). Cambios de seed se propagan vía nueva migration y sync.

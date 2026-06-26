@@ -97,6 +97,14 @@ function SectionTitle({ children }: { children: string }) {
 // Solo OWNER (es quien puede editar el RENSPA, R2.3) → el caller ya lo gatea (isOwner). Carga el renspa con
 // loadEstablishmentDetail (lectura LOCAL offline); mientras carga, no muestra nada (evita un flash del banner
 // que luego desaparece si el campo ya tiene RENSPA).
+//
+// ⚠ REACTIVO al sync-down (no solo al focus): el RENSPA se guarda por la RPC update_renspa (online) →
+// Postgres; el valor nuevo BAJA por la stream est_establishments al SQLite local de forma ASÍNCRONA. Una
+// lectura SOLO-en-focus quedaba STALE: al guardar el RENSPA y volver a "Más", el sync-down todavía no había
+// aterrizado → el banner seguía mostrándose ("Completá tu RENSPA") aunque el usuario lo acababa de cargar.
+// Nos suscribimos a subscribeSyncUiState (statusChanged de PowerSync) y RE-LEEMOS el renspa local cada vez
+// que avanza el sync → el banner desaparece cuando el valor recién guardado aterriza (mismo patrón reactivo
+// que ProfileContext::loadFor sobre lastSyncedAt). Sin re-leer en loading en cada tick (no flashea).
 
 function RenspaBanner({ establishmentId, onComplete }: { establishmentId: string; onComplete: () => void }) {
   const primary = getTokenValue('$primary', 'color');
@@ -105,8 +113,7 @@ function RenspaBanner({ establishmentId, onComplete }: { establishmentId: string
   useFocusEffect(
     useCallback(() => {
       let active = true;
-      setPhase('loading');
-      (async () => {
+      const reload = async () => {
         const r = await loadEstablishmentDetail(establishmentId);
         if (!active) return;
         // Si la carga falla (sin sync), NO mostramos el banner (no molestamos con un CTA que quizá no aplica).
@@ -116,9 +123,16 @@ function RenspaBanner({ establishmentId, onComplete }: { establishmentId: string
         }
         const renspa = r.establishment.renspa;
         setPhase(renspa != null && renspa.trim().length > 0 ? 'has' : 'missing');
-      })();
+      };
+      void reload();
+      // Re-lee al avanzar el sync (el sync-down del RENSPA recién guardado por la RPC). emit() corre una
+      // vez al suscribir (redundante con el reload de arriba, inocuo) y luego en cada statusChanged.
+      const dispose = subscribeSyncUiState(() => {
+        void reload();
+      });
       return () => {
         active = false;
+        dispose();
       };
     }, [establishmentId]),
   );

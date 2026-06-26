@@ -114,7 +114,7 @@
 
 - [x] **T17** — Agregar CTA/aviso de RENSPA en la pantalla de configuración del establecimiento: si `renspa` es `NULL`, mostrar banner "Completá tu RENSPA para facilitar la exportación SIGSA" con botón de acción. Cubre: R2.1, R2.3, R13.3.
 
-- [~] **T18** (PARCIAL — el BreedPicker setea `breed` texto, no `breed_id`; se cierra en Run 3 con el trigger derive-breed_id, ver design.md changelog 2026-06-25) — Integrar `BreedPicker` en el form de alta/edición de animal (pantalla del animal, spec 02/09). Cuando se edita un animal sin `breed_id`, mostrar el picker con la raza actual (texto libre) como sugerencia. Cubre: R1.4, R1.5 (vía UX de completar).
+- [x] **T18** ✅ **CERRADA** (Run 3, 2026-06-25) — el `BreedPicker` setea `breed` texto y la migración **0113** (`trigger BEFORE INSERT OR UPDATE OF breed` derive-breed_id) deriva el `breed_id` automáticamente del código SENASA; cubierto por la SIGSA suite (`spec 08 — T18 derive breed_id (0113)`, 72/72 verde). Integrado en el form de alta/edición de animal (pantalla del animal, spec 02/09): al editar un animal sin `breed_id`, el picker muestra la raza actual (texto libre) como sugerencia. Cubre: R1.4, R1.5 (vía UX de completar).
 
 ---
 

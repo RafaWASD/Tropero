@@ -2,7 +2,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { validateAnimalCreate, parseWeight, type AnimalCreateForm } from './animal-form.ts';
+import {
+  validateAnimalCreate,
+  parseWeight,
+  hasAtLeastOneIdentifier,
+  type AnimalCreateForm,
+} from './animal-form.ts';
 
 const TODAY = new Date(Date.UTC(2026, 5, 1)); // 2026-06-01
 
@@ -100,4 +105,21 @@ test('parseWeight: coma o punto decimal, rechaza basura', () => {
   assert.equal(parseWeight(''), null);
   assert.equal(parseWeight('abc'), null);
   assert.equal(parseWeight('3a'), null);
+});
+
+test('R6.2 identidad mínima: sin ningún identificador → false (alta condenada al 23514)', () => {
+  // Los tres vacíos = el caso del ALTA EN BLANCO sin precarga → el server rechazaría con 23514.
+  assert.equal(hasAtLeastOneIdentifier('', '', ''), false);
+  assert.equal(hasAtLeastOneIdentifier(null, null, null), false);
+  assert.equal(hasAtLeastOneIdentifier(undefined, undefined, undefined), false);
+  // Solo espacios NO cuenta (el server hace nullif(trim(...)) → quedaría NULL → 23514).
+  assert.equal(hasAtLeastOneIdentifier('   ', '  ', ' '), false);
+});
+
+test('R6.2 identidad mínima: al menos uno presente → true', () => {
+  assert.equal(hasAtLeastOneIdentifier('982000123456789', '', ''), true); // tag
+  assert.equal(hasAtLeastOneIdentifier('', '12345', ''), true); // idv
+  assert.equal(hasAtLeastOneIdentifier('', '', 'R-14'), true); // visual
+  assert.equal(hasAtLeastOneIdentifier('  982  ', '', ''), true); // con espacios pero contenido real
+  assert.equal(hasAtLeastOneIdentifier(null, '12345', undefined), true); // mezcla null/valor
 });

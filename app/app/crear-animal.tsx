@@ -53,7 +53,7 @@ import {
   resolveDefaultRodeoId,
 } from '@/services/last-rodeo';
 import type { Rodeo } from '@/services/rodeos';
-import { parseWeight } from '@/utils/animal-form';
+import { parseWeight, hasAtLeastOneIdentifier } from '@/utils/animal-form';
 import {
   sanitizeTagInput,
   sanitizeIdvInput,
@@ -458,7 +458,18 @@ export default function CrearAnimalScreen() {
 
     const tagOk = isValidTagElectronic(tag);
     setTagError(tagOk ? null : `La caravana electrónica tiene que tener ${TAG_ELECTRONIC_LENGTH} dígitos.`);
-    if (!yearV.ok || !tagOk) return;
+
+    // Identidad MÍNIMA (animal_profiles_identity_check, 0021 / R6.2): el alta DEBE llevar al menos UN
+    // identificador (caravana electrónica, IDV o visual). Por find-or-create siempre hay uno precargado
+    // (R4.2), pero el ALTA EN BLANCO puede llegar acá con los tres vacíos → create_animal rechaza con
+    // 23514 al subir y el animal se PIERDE en silencio (queda en el overlay local, nunca aterriza en
+    // Postgres). Lo validamos ANTES de encolar el intent: no encolamos un alta condenada. El error va al
+    // formError (cross-campo: "al menos uno de tres", no atado a un solo input) sobre el CTA, zona pulgar.
+    const hasIdentifier = hasAtLeastOneIdentifier(tag, idv, visual);
+    if (!hasIdentifier) {
+      setFormError('Cargá al menos un identificador: caravana electrónica, número/IDV o identificación visual.');
+    }
+    if (!yearV.ok || !tagOk || !hasIdentifier) return;
 
     const birthDate = birthYearToDate(yearV.year, new Date());
     // Preñez capturada (solo si la categoría la pide Y es positiva): refina el override (vaquillona

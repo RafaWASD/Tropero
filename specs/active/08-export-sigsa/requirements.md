@@ -207,6 +207,8 @@ Genera el archivo `.txt` importable en SIGSA web para declarar ante SENASA los d
 
 **R13.3** Si el establecimiento tiene `renspa` guardado (R2), el checklist deberá pre-popularlo en el ítem 1 para facilitar la tarea del productor. Si no tiene RENSPA guardado, deberá mostrar un CTA para completarlo en la configuración del establecimiento.
 
+> **Reconciliación as-built (2026-06-25, verificación post-deploy).** El CTA "completá tu RENSPA" se materializó como `RenspaBanner` en `/mas`. Dado que la escritura del RENSPA va por la RPC `update_renspa` (online → Postgres, R2.3) y el valor BAJA al SQLite local de forma asíncrona por la stream `est_establishments`, el banner debe ser **reactivo al sync-down** para no quedar stale: re-lee el `renspa` local en cada `statusChanged` de PowerSync (no solo al enfocar). Sin esto, tras guardar el RENSPA el banner seguía mostrándose hasta la próxima navegación. (Refinamiento de implementación; el QUÉ de R13.3 no cambia.)
+
 **R13.4** El checklist deberá incluir una nota sobre el plazo: "Recordá declararlos dentro de los 10 días hábiles de ocurrida la novedad (Art. 8°, Res. 841/2025)".
 
 ### R14. Offline-first
