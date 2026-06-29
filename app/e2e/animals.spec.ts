@@ -945,3 +945,124 @@ test('FIX3: con un filtro de Estado activo y 0 resultados, el empty es contextua
   await page.getByRole('button', { name: 'Limpiar filtro' }).click();
   await expect(page.getByText('No hay animales vendidos.')).toHaveCount(0);
 });
+
+// ─── Delta caravana-ficha (#6 manual): agregar caravana visual/electrónica desde la ficha (RCF.1–RCF.5) ──
+//
+// Afordancia "Agregar caravana …" en la sección "Identificación" para completar lo VACÍO (NULL→valor); lo
+// seteado queda solo-lectura (inmutabilidad R4.13). idv = UPDATE local (offline-first); tag = RPC existente.
+// NOTA (reconciliación estática): estos e2e NO se corren en vivo en esta sesión (la red a Supabase flakea —
+// ver progress/current.md); las aserciones están reconciliadas contra el as-built de [id].tsx.
+
+test('caravana-ficha (RCF.1.3/RCF.3.3/RCF.3.5): "Agregar caravana visual" → tipear idv → confirmar → idv en solo-lectura (UPDATE local optimista)', async ({
+  page,
+}) => {
+  const user = await createTestUser('cfidv');
+  await setUserPhone(user.id, '1123456789');
+  const { establishmentId, rodeoId } = await seedEstablishmentWithRodeo(user.id, 'Campo CFIdv');
+  // Animal ACTIVO SIN idv y SIN tag (ambos vacíos → ambas afordancias se ofrecen). Identificable por su
+  // visual_id_alt (es el hero, ya que no hay idv/tag).
+  const visualLabel = `${RUN_TAG}-CFIDV`;
+  await seedAnimal(establishmentId, rodeoId, { visualAlt: visualLabel, sex: 'female' });
+
+  await page.goto('/');
+  await signIn(page, user);
+  await waitForHome(page);
+  await gotoAnimales(page);
+
+  // Abrimos la ficha (la fila lleva el visual en su a11y label, al ser el hero).
+  const row = page.getByRole('button', { name: new RegExp(visualLabel) }).first();
+  await expect(row).toBeVisible({ timeout: 20_000 });
+  await row.click();
+  await expect(page.getByText('Identificación', { exact: true })).toBeVisible({ timeout: 20_000 });
+
+  // La afordancia "Agregar caravana visual" está disponible (idv vacío + activo → canAssignIdv true).
+  const addIdv = page.getByRole('button', { name: 'Agregar caravana visual', exact: true });
+  await expect(addIdv).toBeVisible();
+  await addIdv.click();
+
+  // Se expande el FormField "Caravana / IDV" → tipeamos el idv (solo dígitos) → Confirmar.
+  const idv = `7733${Date.now().toString().slice(-6)}`;
+  const idvInput = page.getByLabel('Caravana / IDV', { exact: true });
+  await expect(idvInput).toBeVisible();
+  await idvInput.fill(idv);
+  await page.getByTestId('assign-idv-confirm').click();
+
+  // OPTIMISMO EN SITIO (RCF.3.5): la fila pasa a mostrar el idv en SOLO-LECTURA al instante (UPDATE local,
+  // offline-first) → ya no se ofrece la afordancia "Agregar caravana visual".
+  await expect(page.getByText(idv, { exact: true }).first()).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByRole('button', { name: 'Agregar caravana visual', exact: true })).toHaveCount(0);
+});
+
+test('caravana-ficha (RCF.2.1/RCF.2.2/RCF.2.4/RCF.2.7): "Agregar caravana electrónica" → 14 díg = error sin invocar; 15 díg → optimismo en sitio', async ({
+  page,
+}) => {
+  const user = await createTestUser('cftag');
+  await setUserPhone(user.id, '1123456789');
+  const { establishmentId, rodeoId } = await seedEstablishmentWithRodeo(user.id, 'Campo CFTag');
+  const visualLabel = `${RUN_TAG}-CFTAG`;
+  await seedAnimal(establishmentId, rodeoId, { visualAlt: visualLabel, sex: 'female' });
+
+  await page.goto('/');
+  await signIn(page, user);
+  await waitForHome(page);
+  await gotoAnimales(page);
+
+  const row = page.getByRole('button', { name: new RegExp(visualLabel) }).first();
+  await expect(row).toBeVisible({ timeout: 20_000 });
+  await row.click();
+  await expect(page.getByText('Identificación', { exact: true })).toBeVisible({ timeout: 20_000 });
+
+  // Afordancia "Agregar caravana electrónica" (tag vacío + activo).
+  await page.getByRole('button', { name: 'Agregar caravana electrónica', exact: true }).click();
+  const tagInput = page.getByLabel('Caravana electrónica', { exact: true });
+  await expect(tagInput).toBeVisible();
+
+  // 14 díg → error inline "…15 dígitos." y NO se invoca el RPC (la afordancia sigue abierta).
+  await tagInput.fill('12345678901234'); // 14 díg
+  await expect(tagInput).toHaveValue('12345678901234'); // sanitize cap = 15, 14 entra tal cual
+  await page.getByTestId('assign-tag-confirm').click();
+  await expect(page.getByText('La caravana electrónica tiene que tener 15 dígitos.')).toBeVisible({
+    timeout: 10_000,
+  });
+  // Sigue expandida (no se confirmó): el input sigue visible.
+  await expect(tagInput).toBeVisible();
+
+  // 15 díg → confirmar → optimismo en sitio: el tag aparece en solo-lectura (RCF.2.7).
+  const tag = `98200${Date.now().toString().slice(-10)}`.slice(0, 15).padEnd(15, '0');
+  await tagInput.fill(tag);
+  await expect(tagInput).toHaveValue(tag);
+  await page.getByTestId('assign-tag-confirm').click();
+  await expect(page.getByText(tag, { exact: true }).first()).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByRole('button', { name: 'Agregar caravana electrónica', exact: true })).toHaveCount(0);
+});
+
+test('caravana-ficha (RCF.1.2/RCF.1.4): un identificador YA seteado NO ofrece afordancia (solo-lectura, inmutable R4.13)', async ({
+  page,
+}) => {
+  const user = await createTestUser('cfset');
+  await setUserPhone(user.id, '1123456789');
+  const { establishmentId, rodeoId } = await seedEstablishmentWithRodeo(user.id, 'Campo CFSet');
+  // Animal con idv Y tag YA seteados → ninguno debe ofrecer la afordancia de asignación.
+  const idv = `6622${Date.now().toString().slice(-6)}`;
+  const tag = `03200${Date.now().toString().slice(-10)}`.slice(0, 15).padEnd(15, '0');
+  await seedAnimal(establishmentId, rodeoId, { idv, tag, sex: 'female' });
+
+  await page.goto('/');
+  await signIn(page, user);
+  await waitForHome(page);
+  await gotoAnimales(page);
+
+  // El idv es el hero → la fila lo lleva en su a11y label.
+  const row = page.getByRole('button', { name: new RegExp(idv) }).first();
+  await expect(row).toBeVisible({ timeout: 20_000 });
+  await row.click();
+  await expect(page.getByText('Identificación', { exact: true })).toBeVisible({ timeout: 20_000 });
+
+  // El idv seteado se muestra en solo-lectura; NO se ofrece "Agregar caravana visual" (R4.13).
+  await expect(page.getByText(idv, { exact: true }).first()).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Agregar caravana visual', exact: true })).toHaveCount(0);
+  // El tag seteado (propagado a animal_profiles.animal_tag_electronic por el trigger 0079) → solo-lectura;
+  // NO se ofrece "Agregar caravana electrónica".
+  await expect(page.getByText(tag, { exact: true }).first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole('button', { name: 'Agregar caravana electrónica', exact: true })).toHaveCount(0);
+});

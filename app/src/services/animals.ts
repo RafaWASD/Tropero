@@ -55,6 +55,7 @@ import {
   buildSetCutUpdate,
   buildUnsetCutUpdate,
   buildSetBreedUpdate,
+  buildSetIdvUpdate,
   buildSetFutureBullUpdate,
   buildMoveAnimalToRodeoUpdate,
   buildAddObservationInsert,
@@ -1606,6 +1607,30 @@ export async function setBreed(
   breed: string | null,
 ): Promise<ServiceResult<true>> {
   const r = await runLocalWrite(buildSetBreedUpdate(profileId, breed));
+  if (!r.ok) return { ok: false, error: { kind: r.error.kind, message: r.error.message } };
+  return { ok: true, value: true };
+}
+
+// ─── Asignar la caravana visual / IDV desde la ficha (delta spec 02 caravana-ficha, RCF.3.3) ─────
+
+/**
+ * Asigna la caravana visual (`idv`) de un animal que NO la tiene (NULL→valor) desde la ficha (RCF.3.3). UN
+ * solo UPDATE local de `idv` (UNA CrudEntry PATCH) → upload queue → OFFLINE-FIRST, mismo patrón que
+ * `setCastrated`/`setFutureBull`/`setBreed`/`setCut`. NO encola nada extra (no es un evento; el idv es una
+ * propiedad del perfil).
+ *
+ * La VALIDACIÓN de "no vacío" vive en la UI (RCF.3.2) — acá no se re-valida (el caller llama con un valor ya
+ * sanitizado/no-vacío, igual que el resto de los wrappers). Las barreras REALES son server-side al SUBIR (NO
+ * se replican en el cliente): la inmutabilidad R4.13 (0036) permite NULL→valor y rechaza valor→otro; el unique
+ * parcial `(establishment_id, idv)` (0020) rechaza un idv duplicado en el campo (uploadData lo superficia como
+ * `duplicate_idv`, RCF.3.5); la RLS `animal_profiles_update` (has_role_in) re-valida el tenant. Un rechazo lo
+ * maneja uploadData (descarta + superficia), NO el return de acá (mismo contrato que setBreed/setCut).
+ *
+ * Multi-tenant (CLAUDE.md ppio 6): el `profileId` ya identifica el perfil de su campo; NO se hardcodea
+ * establishment_id (el WHERE es por id de perfil + la RLS deriva el tenant de la fila real).
+ */
+export async function setIdv(profileId: string, idv: string): Promise<ServiceResult<true>> {
+  const r = await runLocalWrite(buildSetIdvUpdate(profileId, idv));
   if (!r.ok) return { ok: false, error: { kind: r.error.kind, message: r.error.message } };
   return { ok: true, value: true };
 }

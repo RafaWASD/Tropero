@@ -1769,6 +1769,30 @@ export function buildUnsetCutUpdate(profileId: string, derivedCategoryId: string
   };
 }
 
+/**
+ * UPDATE local de ASIGNACIÓN INICIAL de la caravana visual / IDV desde la ficha (delta spec 02 caravana-ficha,
+ * RCF.3.3/RCF.3.4): NULL→valor, UNA CrudEntry PATCH, éxito local inmediato, OFFLINE-FIRST. Espejo de
+ * `buildSetCutUpdate`/`buildSetBreedUpdate` — escribe SOLO la columna `idv`, no toca ninguna otra. Filtra
+ * `deleted_at IS NULL`.
+ *
+ * Garantías server-side ya vigentes (NO se replican en el cliente — se enforzan al SUBIR):
+ *   - inmutabilidad R4.13 (`tg_animal_profiles_block_idv_change`, 0036:30-32) PERMITE el caso NULL→valor; un
+ *     valor→otro/valor→NULL lo rechaza (23514) — por eso la UI solo OFRECE asignar lo vacío (canAssignIdv).
+ *   - unicidad por campo (`animal_profiles_idv_unique` on (establishment_id, idv), 0020:50-53): un idv
+ *     duplicado en el campo se rechaza al sincronizar (RCF.3.5) → uploadData lo superficia (duplicate_idv),
+ *     mismo manejo que el alta; el cliente NO inventa una validación de unicidad nueva.
+ *   - RLS (`animal_profiles_update` = has_role_in del campo del perfil): gobierna el UPDATE al subir (RCF.5.2).
+ *
+ * Multi-tenant: el `profileId` ya identifica el perfil de su campo; NO se hardcodea ni se pasa establishment_id
+ * (el WHERE es por id de perfil + la RLS deriva el tenant de la fila real).
+ */
+export function buildSetIdvUpdate(profileId: string, idv: string): LocalQuery {
+  return {
+    sql: 'UPDATE animal_profiles SET idv = ? WHERE id = ? AND deleted_at IS NULL',
+    args: [idv, profileId],
+  };
+}
+
 // ─── Captura de datos/maniobras CUSTOM (spec 03 M5-C.1) — INSERT append-only + upsert current-value ────────
 //
 // Las dos tablas genéricas de M5 (0094/0095) escriben CRUD-plano sobre la tabla SINCRONIZADA, igual que el

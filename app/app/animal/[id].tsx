@@ -43,9 +43,11 @@ import {
 } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
 
-import { Button, Card, CategoryBadge, InfoNote, FormError, FormField, TimelineEvent } from '@/components';
+import { Button, Card, CategoryBadge, InfoNote, FormError, FormField, IdentifierAssignRow, TimelineEvent } from '@/components';
 import {
+  assignTagToAnimal,
   fetchAnimalDetail,
+  lookupByTag,
   previewCastrationCategory,
   previewRevertCategory,
   revertCategoryOverride,
@@ -53,10 +55,19 @@ import {
   setCastrated,
   setCut,
   setFutureBull,
+  setIdv,
   unsetCut,
   type AnimalDetail,
   type AnimalStatus,
 } from '@/services/animals';
+import { canAssignIdv, canAssignTag } from '@/utils/identifier-assign';
+import {
+  IDV_MAX_LENGTH,
+  TAG_ELECTRONIC_LENGTH,
+  isValidTagElectronic,
+  sanitizeIdvInput,
+  sanitizeTagInput,
+} from '@/utils/animal-input';
 import { fetchBreedCatalog } from '@/services/sigsa/sigsa-export-service';
 import { BreedPickerSheet } from '@/components/sigsa';
 import {
@@ -559,6 +570,83 @@ export default function AnimalDetailScreen() {
     return { ok: true };
   }, [detail, load]);
 
+  // ── Asignar caravana VISUAL (idv) desde la ficha (delta caravana-ficha, RCF.3). ──
+  // UPDATE local plano (offline-first, patrón CUT). `value` ya viene sanitizado/validado (no-vacío) por el
+  // IdentifierAssignRow (RCF.3.1/RCF.3.2). Optimismo en sitio + refresh silencioso (RCF.3.5); revert si falla.
+  const onAssignIdv = useCallback(
+    async (value: string): Promise<{ ok: boolean; error?: string }> => {
+      if (!detail) return { ok: false };
+      const trimmed = value.trim();
+      // Defensa (la validación de no-vacío vive en el componente, RCF.3.2): no escribir un idv vacío.
+      if (trimmed.length === 0) return { ok: false, error: 'Ingresá el número de caravana.' };
+      const snapshot = detail;
+      // OPTIMISMO EN SITIO (RCF.3.5): la fila pasa a mostrar el idv recién asignado al instante, sin blanquear.
+      setDetail((d) => (d == null ? d : { ...d, idv: trimmed }));
+      const r = await setIdv(detail.profileId, trimmed);
+      if (!r.ok) {
+        setDetail(snapshot); // REVERT: no dejamos un idv mentido si el write fue rechazado (RCF.3.6)
+        return {
+          ok: false,
+          error:
+            r.error.kind === 'network'
+              ? 'Sin conexión: no pudimos guardar la caravana. Conectate y volvé a intentar.'
+              : r.error.message,
+        };
+      }
+      // Refresh SILENCIOSO: reconcilia con el server (sin blanquear / saltar al tope). El idv ya pegó local.
+      void load({ silent: true });
+      return { ok: true };
+    },
+    [detail, load],
+  );
+
+  // ── Asignar caravana ELECTRÓNICA (tag_electronic) desde la ficha (delta caravana-ficha, RCF.2). ──
+  // Reuso TOTAL del plumbing existente: pre-check de dup (lookupByTag) + encolar por el RPC assign_tag_to_animal
+  // (assignTagToAnimal → outbox). `value` ya viene sanitizado/validado a 15 díg por el IdentifierAssignRow.
+  // CRÍTICO multi-tenant (RCF.2.5): el establishmentId del pre-check SALE DEL PERFIL (detail.establishmentId),
+  // NUNCA del contexto activo — el usuario podría mirar la ficha del campo A con el campo B activo.
+  const onAssignTag = useCallback(
+    async (value: string): Promise<{ ok: boolean; error?: string }> => {
+      if (!detail) return { ok: false };
+      const trimmed = value.trim();
+      // 1) Pre-check de DUP local (RCF.2.3): si el TAG ya resuelve a un animal de los campos del usuario
+      //    (mismo campo → 'edit'; otro campo → 'transfer'), error accionable y NO encolar (reuso señal R5.6).
+      const lookup = await lookupByTag(trimmed, detail.establishmentId);
+      if (!lookup.ok) {
+        return {
+          ok: false,
+          error:
+            lookup.error.kind === 'network'
+              ? 'Sin conexión: no pudimos verificar la caravana. Conectate y volvé a intentar.'
+              : 'No pudimos verificar la caravana. Probá de nuevo.',
+        };
+      }
+      if (lookup.value.mode === 'edit' || lookup.value.mode === 'transfer') {
+        return { ok: false, error: 'Esa caravana ya está asignada a otro animal de tus campos.' };
+      }
+      // 2) Encolar la asignación por el RPC existente (RCF.2.4). `animals` NO existe en el SQLite local
+      //    (ADR-026) → NO hay UPDATE local; el valor canónico baja a animal_profiles.animal_tag_electronic por
+      //    el trigger 0079 al sincronizar. El rechazo real (23505/23514/42501) lo resuelve uploadData al SUBIR.
+      const snapshot = detail;
+      // OPTIMISMO EN SITIO (RCF.2.7): mostramos el TAG recién tipeado en la fila sin blanquear la ficha.
+      setDetail((d) => (d == null ? d : { ...d, tagElectronic: trimmed }));
+      const r = await assignTagToAnimal(detail.profileId, trimmed);
+      if (!r.ok) {
+        setDetail(snapshot); // REVERT el optimismo si el encolado falló (RCF.2.6)
+        return { ok: false, error: r.error.message };
+      }
+      // ⚠ A DIFERENCIA del idv (UPDATE local → lectura inmediata lo refleja), acá NO disparamos un refresh
+      // silencioso: `assignTagToAnimal` solo ENCOLA el RPC (sin overlay — `animals` no está en el SQLite local,
+      // ADR-026), así que `animal_profiles.animal_tag_electronic` sigue NULL localmente hasta que el RPC drene
+      // ONLINE + el trigger 0079 propague + baje por la stream. Un refresh inmediato re-leería ese NULL y
+      // BLANQUEARÍA el optimismo (rompiendo "sin blanquear la ficha", RCF.2.7). El valor canónico (mismos
+      // dígitos) entra en el próximo re-focus DESPUÉS de sincronizar; un rechazo real lo superficia uploadData
+      // por el canal de status (no por blanquear la ficha acá).
+      return { ok: true };
+    },
+    [detail],
+  );
+
   // ── Corrección individual de eventos (spec 10 T-UI.8 / R4.5). ──
   // Un evento de vacunación/destete del timeline es borrable (soft-delete) por OWNER del campo o AUTOR del
   // evento (reuso spec 02 R6.8.1). Gating de cliente best-effort: la RLS UPDATE (owner|autor) es la barrera
@@ -746,10 +834,53 @@ export default function AnimalDetailScreen() {
                 → ficha de la madre. Tolera madre archivada (status ≠ active): indicador + navega igual. */}
             {mother ? <MotherCard mother={mother} onPress={goToMother} /> : null}
 
-            {/* Identificación: los 3 identificadores, truncados si son largos. */}
+            {/* Identificación (delta caravana-ficha, RCF.1): por cada identificador (electrónica / visual),
+                render condicional — valor solo-lectura si está SETEADO (inmutable, R4.13), o la afordancia
+                "Agregar caravana …" si está VACÍO en un animal ACTIVO (canAssignTag/canAssignIdv). Si está
+                vacío pero el animal NO está activo, "—" (no se ofrece, RCF.1.5). `visual_id_alt` (identificación
+                visual) y "Detectar bastoneo" quedan FUERA de alcance (RCF.1.6): sin cambios / sin botón muerto. */}
             <DetailSection icon={Tag} title="Identificación">
-              <AttributeRow label="Caravana electrónica" value={detail.tagElectronic ?? '—'} />
-              <AttributeRow label="Caravana / IDV" value={detail.idv ?? '—'} />
+              {/* Caravana electrónica → RPC existente assign_tag_to_animal (online, vía outbox). */}
+              {detail.tagElectronic != null ? (
+                <AttributeRow label="Caravana electrónica" value={detail.tagElectronic} />
+              ) : canAssignTag(detail) ? (
+                <IdentifierAssignRow
+                  kind="tag"
+                  label="Caravana electrónica"
+                  placeholder="982 0001 2345 6789"
+                  keyboardType="number-pad"
+                  sanitize={sanitizeTagInput}
+                  maxLength={TAG_ELECTRONIC_LENGTH}
+                  validate={(v) =>
+                    isValidTagElectronic(v) && v.trim().length === TAG_ELECTRONIC_LENGTH
+                      ? null
+                      : 'La caravana electrónica tiene que tener 15 dígitos.'
+                  }
+                  onConfirm={onAssignTag}
+                />
+              ) : (
+                <AttributeRow label="Caravana electrónica" value="—" />
+              )}
+
+              {/* Caravana visual / IDV → UPDATE local sobre animal_profiles (offline-first, patrón CUT). */}
+              {detail.idv != null ? (
+                <AttributeRow label="Caravana / IDV" value={detail.idv} />
+              ) : canAssignIdv(detail) ? (
+                <IdentifierAssignRow
+                  kind="idv"
+                  label="Caravana / IDV"
+                  placeholder="Número de caravana oficial"
+                  keyboardType="number-pad"
+                  sanitize={sanitizeIdvInput}
+                  maxLength={IDV_MAX_LENGTH}
+                  validate={(v) => (v.trim().length > 0 ? null : 'Ingresá el número de caravana.')}
+                  onConfirm={onAssignIdv}
+                />
+              ) : (
+                <AttributeRow label="Caravana / IDV" value="—" />
+              )}
+
+              {/* Identificación visual (visual_id_alt): SIN cambios — solo lectura, fuera de alcance (RCF.1.6). */}
               <AttributeRow label="Identificación visual" value={detail.visualIdAlt ?? '—'} />
             </DetailSection>
 

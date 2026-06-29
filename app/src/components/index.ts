@@ -62,3 +62,5 @@ export type {
 export { BleConnectionChip } from './BleConnectionChip';
 export { bleConnectionView } from './ble-connection-view';
 export type { BleConnectionView, BleStatusColorToken } from './ble-connection-view';
+export { IdentifierAssignRow } from './IdentifierAssignRow';
+export type { IdentifierAssignRowProps } from './IdentifierAssignRow';

@@ -1,0 +1,188 @@
+# Requirements (delta spec 02) — Agregar caravana desde la ficha (parte manual: electrónica + visual)
+
+**Status**: `spec_ready` (delta de spec 02 — frontend puro). Gate 0 auto-aprobado en
+`context-caravana-ficha.md` (trabajo autónomo de Raf, 2026-06-29; defaults del leader, a confirmar en Puerta 2).
+**Fecha**: 2026-06-29
+**Autor**: spec_author
+
+> **Delta, no refundición.** Estas requirements EXTIENDEN spec 02 (modelo-animal) sin tocar `requirements.md`
+> base. Numeradas `RCF.n` (Caravana-Ficha) para no colisionar con los IDs estables de spec 02
+> (`R`/`RT2`/`RC6`/`RCUT`/`RPS`/`RAR`/`RAF2`). Fuente de verdad: el contexto refinado y aprobado
+> `specs/active/02-modelo-animal/context-caravana-ficha.md`. Cubre la **parte manual** de la corrección #6 del
+> testeo en vivo ("agregar caravana desde la ficha, visual y electrónica"). El **botón de bastoneo queda
+> DEFERIDO** (hardware, feature 04 — no se especifica un botón muerto).
+>
+> El plumbing ya existe: la asignación de TAG por RPC (`assignTagToAnimal` / `assign_tag_to_animal`, 0089,
+> `app/src/services/animals.ts:1176`), el pre-check de dup-TAG (`lookupByTag`, `animals.ts:747`) y el patrón de
+> UPDATE local sobre `animal_profiles` (`buildSetCutUpdate`, `app/src/services/powersync/local-reads.ts:1746`).
+> Esto es una **afordancia nueva en la sección "Identificación" de la ficha** (hoy solo-lectura,
+> `app/app/animal/[id].tsx:749-754`) + un builder de UPDATE local nuevo para `idv`.
+
+## Alcance
+
+Afordancia manual en la ficha para **completar lo que está VACÍO** (NULL→valor), respetando la inmutabilidad
+post-completitud R4.13 (lo ya seteado queda solo-lectura):
+
+1. **Caravana electrónica** (`animals.tag_electronic`, NO sincronizada — ADR-026) → asignación por el **RPC
+   existente** `assignTagToAnimal` (online vía outbox). Input 15 dígitos (`^\d{15}$`).
+2. **Caravana visual** (`animal_profiles.idv`, sincronizada) → asignación por **UPDATE local** (offline-safe,
+   mismo patrón que CUT). Input numérico ≤20 dígitos.
+
+**Fuera de alcance** (límites del Gate 0, no se especifican): botón "Detectar bastoneo" (DEFERIDO — feature 04);
+`visual_id_alt` / "Nombre/apodo" (es el delta de #2); edición de un identificador YA seteado (inmutabilidad
+R4.13 — no es caso de uso).
+
+Cada "Caso y decisión" de `context-caravana-ficha.md` queda cubierto por ≥1 requirement (ver trazabilidad al
+final).
+
+---
+
+## RCF.1 — Afordancia en la sección "Identificación" (gating por NULL + animal activo)
+
+- **RCF.1.1** — Mientras la ficha de un animal **activo** (`status === 'active'`) tiene `tagElectronic == null`,
+  el sistema deberá ofrecer en la sección "Identificación" la acción **"Agregar caravana electrónica"**.
+- **RCF.1.2** — Mientras `tagElectronic != null` (ya seteada), el sistema no deberá ofrecer asignarla ni
+  editarla; deberá seguir mostrando su valor en **solo lectura** (inmutabilidad post-completitud, R4.13).
+- **RCF.1.3** — Mientras la ficha de un animal **activo** tiene `idv == null`, el sistema deberá ofrecer en la
+  sección "Identificación" la acción **"Agregar caravana visual"**.
+- **RCF.1.4** — Mientras `idv != null` (ya seteado), el sistema no deberá ofrecer asignarlo ni editarlo; deberá
+  seguir mostrando su valor en **solo lectura** (R4.13).
+- **RCF.1.5** — Si el animal no está activo (`status !== 'active'`), entonces el sistema no deberá ofrecer
+  ninguna afordancia de asignación de identificadores (consistente con el resto de acciones de la ficha, que
+  solo se ofrecen en animales activos).
+- **RCF.1.6** — El sistema no deberá renderizar en la sección "Identificación" ninguna afordancia para
+  `visual_id_alt` ni un botón "Detectar bastoneo" (ambos fuera de alcance de este delta).
+- **RCF.1.7** — El predicado de elegibilidad de cada afordancia (`status === 'active'` AND el identificador es
+  `null`) deberá ser una función PURA y testeable (sin RN/red/SDK), con `status` y el valor del identificador
+  como entradas.
+
+## RCF.2 — Asignar caravana electrónica (`tag_electronic`) por el RPC existente
+
+- **RCF.2.1** — Cuando el usuario tipea en el campo de caravana electrónica, el sistema deberá sanitizar la
+  entrada a **solo dígitos, máximo 15** (reuso de `sanitizeTagInput` / `TAG_ELECTRONIC_LENGTH`,
+  `app/src/utils/animal-input.ts:16,32`).
+- **RCF.2.2** — Cuando el usuario confirma la asignación, si el valor no satisface `^\d{15}$` (reuso de
+  `isValidTagElectronic`, `animal-input.ts:120`), entonces el sistema deberá mostrar el error inline es-AR
+  **"La caravana electrónica tiene que tener 15 dígitos."** con borde rojo en el campo y **no** invocar el RPC.
+- **RCF.2.3** — Antes de encolar la asignación, el sistema deberá ejecutar el pre-check local
+  `lookupByTag(tag, establishmentId)` (`animals.ts:747`, lectura local offline-safe); si el TAG ya resuelve a
+  un animal de los campos del usuario, entonces el sistema deberá mostrar un error accionable es-AR
+  (**"Esa caravana ya está asignada a otro animal de tus campos."**, reuso de la señal R5.6 del alta /
+  `asignar-caravanas.tsx:321-324`) y **no** encolar la asignación.
+- **RCF.2.4** — Cuando el valor es válido (15 díg) y el pre-check no detecta dup, el sistema deberá invocar
+  `assignTagToAnimal(profileId, tag)` (RPC existente `assign_tag_to_animal`, 0089, vía outbox), sin escribir la
+  tabla `animals` localmente (no existe en el SQLite local — ADR-026).
+- **RCF.2.5** — El `establishmentId` que se pasa a `lookupByTag` deberá derivarse de `detail.establishmentId`
+  (el establecimiento del **perfil**), nunca hardcodeado ni tomado del contexto activo del usuario.
+- **RCF.2.6** — Si `assignTagToAnimal` devuelve error en el encolado, entonces el sistema deberá mostrar el
+  error accionable inline y dejar la afordancia abierta para reintentar, sin cambiar el estado mostrado.
+- **RCF.2.7** — Cuando el encolado tiene éxito, el sistema deberá reflejar el valor recién asignado con
+  optimismo en sitio (sin blanquear la ficha); el valor canónico baja a
+  `animal_profiles.animal_tag_electronic` al sincronizar (propagación del trigger 0079). El rechazo real
+  (TAG ya existente 23505 / race 23514 / sin-rol 42501) lo resuelve `uploadData` al SUBIR (la barrera real es
+  server-side, no el cliente).
+  > **Reconciliación as-built (impl, 2026-06-29)**: el "+ refresh silencioso" que esta requirement preveía se
+  > **OMITE para el TAG** — `assignTagToAnimal` encola el RPC SIN overlay local (`animals` fuera del sync set,
+  > ADR-026), así que el denorm `animal_profiles.animal_tag_electronic` sigue NULL localmente hasta sincronizar;
+  > un refresh inmediato re-leería ese NULL y blanquearía el optimismo (rompiendo el propio "sin blanquear la
+  > ficha"). El optimismo en sitio ALCANZA el intento de la requirement; el valor canónico entra en el próximo
+  > re-focus tras la sync. (El `idv`, UPDATE local, SÍ conserva optimismo + refresh silencioso — RCF.3.5 — porque
+  > la lectura local lo refleja al instante sin blanquear.) Ver design §4.6.
+
+## RCF.3 — Asignar caravana visual (`idv`) por UPDATE local (offline-safe)
+
+- **RCF.3.1** — Cuando el usuario tipea en el campo de caravana visual, el sistema deberá sanitizar la entrada a
+  **solo dígitos, máximo 20** (reuso de `sanitizeIdvInput` / `IDV_MAX_LENGTH`, `animal-input.ts:18,40`).
+- **RCF.3.2** — Cuando el usuario confirma la asignación, si el valor (trim) está vacío, entonces el sistema
+  deberá mostrar un error inline es-AR con borde rojo en el campo y **no** escribir nada.
+- **RCF.3.3** — Cuando el valor es válido (no vacío), el sistema deberá ejecutar un **UPDATE local plano** sobre
+  `animal_profiles.idv` vía el builder nuevo `buildSetIdvUpdate(profileId, idv)`
+  (`UPDATE animal_profiles SET idv = ? WHERE id = ? AND deleted_at IS NULL`) — una sola CrudEntry PATCH, éxito
+  local inmediato, **offline-first** (mismo patrón que `buildSetCutUpdate`, `local-reads.ts:1746`).
+- **RCF.3.4** — El builder `buildSetIdvUpdate` deberá escribir **solo** la columna `idv` (NULL→valor) y no tocar
+  ninguna otra columna; la inmutabilidad R4.13 (`tg_animal_profiles_block_idv_change`,
+  `supabase/migrations/0036_immutability_identifiers.sql:27-42`) permite el caso `NULL → valor` al subir, y la
+  unicidad parcial `(establishment_id, idv)` (`animal_profiles_idv_unique`,
+  `supabase/migrations/0020_animal_profiles.sql:50-53`) la enforza al sincronizar — **sin policy, RPC ni
+  migración nuevos**.
+- **RCF.3.5** — Cuando el UPDATE local tiene éxito, el sistema deberá reflejar el `idv` recién asignado con
+  optimismo en sitio + refresh silencioso (visible al instante, offline). Si el `idv` ya existe en el campo, el
+  índice único parcial lo rechaza al SUBIR (mismo manejo que el alta — `uploadData` lo superficia,
+  `duplicate_idv`); el sistema **no** deberá inventar una validación de unicidad nueva en el cliente.
+- **RCF.3.6** — Si el UPDATE local falla, entonces el sistema deberá mostrar el error accionable inline y dejar
+  la afordancia abierta para reintentar, sin cambiar el estado mostrado.
+
+## RCF.4 — UX de campo (MUSTs de forms en manga)
+
+- **RCF.4.1** — Todos los textos visibles de la afordancia deberán estar en español argentino (voseo); cero
+  hardcode de colores/espaciados (tokens + `getTokenValue` para íconos lucide); a11y por los helpers de
+  `utils/a11y` (ADR-023 §4).
+- **RCF.4.2** — Cada afordancia de asignación deberá presentar **una sola decisión** (un identificador por
+  afordancia) con un target táctil grande (≥ el tap mínimo del DS), apto para operar con una mano en la manga.
+- **RCF.4.3** — La validación deberá ser **inline**: borde rojo + mensaje de error en el propio campo (patrón
+  `FormField error`), sin un banner global que tape el título; el campo de entrada deberá quedar visible al
+  validar (si la afordancia se resuelve en un sheet, deberá hacer scroll-al-campo con error; si es inline, el
+  campo ya está en vista al expandirse).
+- **RCF.4.4** — Cualquier heading o título con descendentes (g/q/p/j/y) de la afordancia deberá usar
+  `lineHeight` matching para no recortar (regla recurrente del DS).
+- **RCF.4.5** — Los campos de caravana son identificadores de máquina (solo dígitos, sin separadores): el
+  sistema deberá teclado numérico y sanitización a dígitos, y **no** deberá aplicar el formato es-AR de
+  coma/punto (consistente con `animal-input.ts`; el formato es-AR aplica a magnitudes, no a identificadores).
+
+## RCF.5 — Offline & multi-tenant
+
+- **RCF.5.1** — La asignación de `idv` deberá funcionar OFFLINE (UPDATE local plano, sin red). La asignación de
+  `tag_electronic` deberá tener éxito de **encolado** offline (la intención queda en la outbox); el efecto real
+  se completa al SUBIR cuando hay red — la afordancia no deberá bloquearse por falta de conectividad, pero la
+  confirmación del TAG es eventual (online).
+- **RCF.5.2** — El sistema no deberá hardcodear `establishment_id`: el aislamiento multi-tenant lo enforza al
+  SUBIR la RLS `animal_profiles_update` (para `idv`) y la authz server-side del RPC `assign_tag_to_animal` (para
+  `tag`, que deriva el tenant de la fila real del perfil — anti-IDOR); el cliente no replica esa autorización.
+
+---
+
+## ¿Toca DB? — NO (Gate 1 N/A)
+
+Este delta es **frontend puro**. No crea ni modifica: tablas, columnas, índices, triggers, RLS policies, RPCs
+ni Edge Functions.
+
+- **`tag_electronic`** → RPC **existente** `assign_tag_to_animal` (0089). Sin cambios server-side.
+- **`idv`** → **UPDATE local** sobre `animal_profiles` (tabla y columna ya existentes). El trigger de
+  inmutabilidad (`tg_animal_profiles_block_idv_change`, 0036) **ya permite** `NULL → valor`, y el índice único
+  parcial `(establishment_id, idv)` (0020) **ya está vigente**. No requiere RPC nuevo ni policy nueva.
+
+→ **Gate 1 N/A.** (Si la implementación descubriera que el path de `idv` necesita un RPC/policy/migración, se
+detiene y se eleva a Gate 1 — pero el as-built verificado dice que no.)
+
+## Trazabilidad context → requirement
+
+| Caso / decisión de `context-caravana-ficha.md` | Requirement(s) |
+|---|---|
+| #1 — Solo asignar lo VACÍO (NULL→valor); lo seteado queda solo-lectura (R4.13) | RCF.1.1–RCF.1.4 |
+| #2 — Electrónica = RPC existente (online); visual/idv = UPDATE local (offline-safe) | RCF.2.4, RCF.3.3 |
+| #2 — spec_author confirma el builder de idv contra el trigger R4.13 | RCF.3.4 (verificado: 0036 permite NULL→valor) |
+| #3 — Dup TAG → error accionable (reuso R5.6); idv dup → unique parcial al subir | RCF.2.3, RCF.3.5 |
+| #4 — Bastoneo deferido (no se muestra botón muerto) | RCF.1.6 |
+| #5 — UX de campo (target grande, una decisión, es-AR, validación inline, tokens, lineHeight) | RCF.4 |
+| Inmutabilidad post-completitud R4.13 (NULL→valor sí, valor→otro/NULL no) | RCF.1.2, RCF.1.4, RCF.3.4 |
+| Multi-tenant (CLAUDE.md ppio 6) + offline-first (ppio 3) | RCF.5 |
+
+## Cobertura de tests (cada RCF verificable)
+
+- **Unit (node:test, puro)** — predicado de elegibilidad `canAssignTag`/`canAssignIdv` (activo + null→ofrece;
+  no-activo NO; valor seteado NO) (RCF.1.1–RCF.1.5, RCF.1.7); `sanitizeTagInput`/`isValidTagElectronic`
+  (≤15 díg, `^\d{15}$`) ya testeados (RCF.2.1/RCF.2.2); `sanitizeIdvInput` (≤20 díg) ya testeado (RCF.3.1);
+  shape SQL de `buildSetIdvUpdate` (`SET idv = ?` solo, `WHERE id = ? AND deleted_at IS NULL`) (RCF.3.3/RCF.3.4).
+- **E2E (Playwright)** — desde la ficha de un animal activo sin caravana: (a) "Agregar caravana visual" → tipear
+  idv → confirmar → la fila pasa a mostrar el idv en solo-lectura (RCF.1.3/RCF.3.3/RCF.3.5); (b) "Agregar
+  caravana electrónica" → tipear 15 díg → confirmar → optimismo en sitio (RCF.2.4/RCF.2.7); (c) validación: 14
+  díg → error inline + sin invocar (RCF.2.2); (d) un identificador ya seteado no ofrece afordancia (RCF.1.2/
+  RCF.1.4).
+
+## Historial de refinamiento
+
+- 2026-06-29 — Redacción inicial del delta caravana-ficha desde `context-caravana-ficha.md` (Gate 0
+  auto-aprobado bajo trabajo autónomo, defaults del leader). IDs nuevos `RCF.n` (no tocan los IDs estables de
+  spec 02). Sin re-decidir los casos del context. **Verificado el as-built**: el trigger de inmutabilidad de
+  `idv` (0036:30-32) permite `NULL→valor` y el unique parcial `(establishment_id, idv)` (0020:50-53) está
+  vigente → el path de `idv` es **UPDATE-local frontend (Gate 1 N/A)**, no requiere DB.

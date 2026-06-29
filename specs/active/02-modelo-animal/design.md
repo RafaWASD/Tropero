@@ -25,6 +25,7 @@
 | `puesta-en-servicio` | Stream A backend del modelo reproductivo (`service_months`, servidas/entoradas, 0102-0105) | done |
 | `aptitud-reproductiva` | badge único de estado reproductivo (lista+ficha) + prompt de aptitud en el alta + fix inseminación hembra+apta (#5/#6/#1b) — **frontend puro, sin migración** | done (Puerta 2, 2026-06-29) |
 | `alta-form-refinamiento` | alta: fecha DD/MM opcional separada del año + condición corporal stepper (comparte `ConditionScoreStepper` con la maniobra) + destildar opcionales (#3/#13/#14) — **frontend puro, sin migración** | gateado, ⏸ Puerta 2 (2026-06-29) |
+| `caravana-ficha` | ficha: asignar caravana electrónica (RPC existente) y visual/idv (UPDATE local, patrón CUT) desde la sección Identificación, solo lo vacío (R4.13); bastoneo DEFERIDO (hardware) (#6 manual) — **frontend puro, sin migración** | gateado, ⏸ Puerta 2 (2026-06-29) |
 
 **Reconciliación as-built del delta `aptitud-reproductiva`** (bajo R10/R14 — estado de la ficha — y R4 — alta): la ficha y la lista ahora muestran un **badge único de estado reproductivo** derivado client-side (espejo de `0105` + `deriveCurrentState`, sin columna nueva); el alta de una `vaquillona` ofrece un prompt opcional de aptitud que crea un evento `tacto_vaquillona`; la aplicabilidad de inseminación quedó gateada a hembra apta (con fallback de edad ≥365d, alineado a `0105`). Detalle en `{requirements,design,tasks}-aptitud-reproductiva.md`.
 

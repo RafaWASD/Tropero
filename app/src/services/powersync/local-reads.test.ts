@@ -71,6 +71,7 @@ import {
   buildSetCutUpdate,
   buildUnsetCutUpdate,
   buildSetBreedUpdate,
+  buildSetIdvUpdate,
   // M6 — circunferencia escrotal (spec 03 US-14)
   buildAddScrotalInsert,
   buildUpdateManeuverScrotal,
@@ -1952,6 +1953,16 @@ test('T18: buildSetBreedUpdate — UPDATE animal_profiles.breed (nombre); NUNCA 
 test('T18: buildSetBreedUpdate — "sin raza" persiste breed = null (el trigger deja breed_id NULL)', () => {
   const q = buildSetBreedUpdate('p-1', null);
   assert.deepEqual(q.args, [null, 'p-1']);
+});
+
+test('RCF.3.3/RCF.3.4: buildSetIdvUpdate — UPDATE animal_profiles.idv SOLO; WHERE id + deleted_at IS NULL; args [idv, profileId]', () => {
+  const q = buildSetIdvUpdate('p-1', '01234567');
+  // SET escribe SOLO idv — no toca ninguna otra columna (NULL→valor, inmutabilidad R4.13 lo permite al subir).
+  assert.match(q.sql, /^UPDATE animal_profiles SET idv = \? WHERE id = \? AND deleted_at IS NULL$/);
+  assert.doesNotMatch(q.sql, /tag_electronic|visual_id_alt|category_id|is_cut|establishment_id/);
+  assert.doesNotMatch(q.sql, /session_id/);
+  // El cliente NO pasa establishment_id (la RLS/unique lo enforzan al subir desde la fila real).
+  assert.deepEqual(q.args, ['01234567', 'p-1']);
 });
 
 // ─── Ejecución real (node:sqlite): el split INSERT→UPDATE de una corrección NO duplica (R5.9) ─────────
