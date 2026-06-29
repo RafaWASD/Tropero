@@ -21,6 +21,8 @@
 // estos predicados son la barrera de cliente; el gating server-side cubre el rodeo, no el sexo/categoría.
 
 import type { ManeuverKind } from './maneuver-gating';
+import { isReproApt } from './repro-status';
+import type { HeiferFitness } from './maneuver-sequence';
 
 export type AnimalSex = 'male' | 'female';
 
@@ -42,6 +44,18 @@ export type AnimalApplicabilityInfo = {
    * castración DESCONOCIDA → se INCLUYE (entero por defecto, R14.3). Las demás maniobras no lo usan.
    */
   isCastrated: boolean | null;
+  /**
+   * Aptitud reproductiva VIGENTE (último `tacto_vaquillona`, RAR.6.1) — SOLO la consume `inseminacion`. La
+   * provee el caller desde el espejo local (`deriveReproAptitude`). `undefined`/ausente → se trata como `null`
+   * (sin veredicto): los call-sites legacy (DientesStep, tests de CE, etc.) NO la pasan y siguen funcionando.
+   */
+  aptitude?: HeiferFitness | null;
+  /**
+   * Edad en DÍAS del animal (de `birth_date`, RAR.6.1) — SOLO la consume `inseminacion` (fallback de edad de
+   * la vaquillona sin veredicto, RAR.6.2/6.5, espeja `0105`). `undefined`/`null` → sin edad → el fallback NO
+   * aplica. La deriva el caller (`ageInDaysFromBirthDate`).
+   */
+  ageDays?: number | null;
 };
 
 // ─── Aplicabilidad per-animal por sexo/categoría (R6.12 raspado / R6.2-R6.3 tactos / R6.9-R6.10 pesaje) ───
@@ -109,6 +123,18 @@ export function appliesToAnimal(maneuver: ManeuverKind, animal: AnimalApplicabil
     case 'tacto_vaquillona':
       // Tacto de preñez / de aptitud: solo hembras (R6.2/R6.3). Sexo null → se salta (fail-safe).
       return animal.sex === 'female';
+    case 'inseminacion':
+      // Inseminación (RAR.6, corrección #1b): hembra ∧ reproductivamente apta (categoría probada ∨ vaquillona
+      // apta ∨ vaquillona sin veredicto con edad ≥365 d, fallback alineado a 0105). Cierra el `default: return
+      // true` que dejaba inseminar machos. Excluye macho/ternera/no_apta/diferida/<365d/CUT. La elegibilidad
+      // vive en isReproApt (FUENTE ÚNICA, espeja 0105). `aptitude`/`ageDays` los provee el caller (carga.tsx)
+      // desde el espejo local; ausentes (undefined) → null (sin veredicto / sin edad).
+      return isReproApt({
+        sex: animal.sex,
+        categoryCode: animal.categoryCode,
+        aptitude: animal.aptitude ?? null,
+        ageDays: animal.ageDays ?? null,
+      });
     case 'pesaje_ternero':
       // Peso de cría al pie: solo terneros/terneras (R6.10). Categoría desconocida → NO es ternero → se salta.
       return animal.categoryCode != null && CALF_CATEGORY_CODES.has(animal.categoryCode);

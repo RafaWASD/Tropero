@@ -21,6 +21,13 @@ import {
   computeDisplayOverrides,
   resolveCastrationTargetCategory,
 } from '../utils/animal-category';
+import {
+  type ReproStatus,
+  type ReproEventInput as ReproBadgeEventInput,
+  deriveReproStatus,
+  deriveReproAptitude,
+} from '../utils/repro-status';
+import type { HeiferFitness } from '../utils/maneuver-sequence';
 import { classifyIdentifier, classifySearchQuery } from '../utils/animal-identifier';
 import { castrationObservationText } from '../utils/castration-copy';
 import { decideSetCut, decideUnsetCut } from './cut-service-core';
@@ -40,6 +47,7 @@ import {
   buildCategoryIdByCodeQuery,
   buildCategoryByCodeQuery,
   buildCategoryMirrorEventsQuery,
+  buildReproBadgeEventsQuery,
   buildRevertCategoryOverrideUpdate,
   buildRodeoSpeciesQuery,
   buildRodeoSystemQuery,
@@ -108,6 +116,12 @@ export type AnimalListItem = {
    * vista de grupo para el badge (solo positivo, oculto en `toro`). 0 en el overlay (alta nace sin flag).
    */
   futureBull: boolean;
+  /**
+   * Estado reproductivo VIGENTE single-slot (delta spec 02 aptitud, RAR.2/RAR.3) — DERIVADO client-side
+   * (display-only, cero writes RAR.8.1) por `deriveReproStatus` del SQLite local. `{ kind: 'none' }` para
+   * machos/terneras (sin badge, RAR.3.2). Lo pinta `AnimalRow` (ReproStatusChip) en la vista normal.
+   */
+  reproStatus: ReproStatus;
 };
 
 export type AnimalStatus = 'active' | 'sold' | 'dead' | 'transferred';
@@ -172,6 +186,18 @@ export type AnimalDetail = {
    * "Quitar fijación" (RCUT.5.7). 0/1 de SQLite → boolean. El overlay (alta optimista) nace en false.
    */
   isCut: boolean;
+  /**
+   * Estado reproductivo VIGENTE single-slot (delta spec 02 aptitud, RAR.4) — DERIVADO client-side (display-only,
+   * RAR.8.1). La ficha lo usa para la fila "Estado reproductivo" (Preñada/Vacía/Servida sin tacto). `{kind:'none'}`
+   * para machos (RAR.4.3).
+   */
+  reproStatus: ReproStatus;
+  /**
+   * Aptitud reproductiva VIGENTE (último `tacto_vaquillona`, RAR.2.1 / RAR.4.1) — DERIVADA client-side. La ficha
+   * la muestra en la fila "Aptitud reproductiva" (vaquillona: Apta/Diferida/No apta/Sin evaluar) y la consume la
+   * aplicabilidad de inseminación de la manga (RAR.6.1, vía carga.tsx). null = sin veredicto.
+   */
+  reproAptitude: HeiferFitness | null;
 };
 
 // ─── Filas crudas del SQLite local (shape PLANO; b1: identidad desde animal_profiles) ──
@@ -205,6 +231,10 @@ type LocalListRow = {
   // spec 10 (T-UI.1/T-UI.3 / R12.3): future_bull (0085) — badge ⭐ de la fila compacta de la vista de
   // grupo. Proyectado por LOCAL_LIST_SELECT (overlay = 0 constante). Lo expone AnimalListItem.
   future_bull?: number | boolean | null;
+  // delta spec 02 (aptitud RAR.2.4.2): is_cut REAL — input del espejo del badge de estado reproductivo
+  // (CUT → "No apta"). Proyectado por LOCAL_LIST_SELECT (overlay = 0). No se expone en AnimalListItem; lo
+  // lee SOLO computeReproStatuses.
+  is_cut?: number | boolean | null;
 };
 
 function toLocalListItem(
@@ -212,6 +242,8 @@ function toLocalListItem(
   // C6 (RC6.3.2): si el espejo derivó una categoría para esta fila (override=false), pisa code/name en
   // memoria; sin override → la guardada. Display-only, sin tocar el shape público.
   mirror?: { code: string; name: string },
+  // delta aptitud (RAR.3.1): estado reproductivo derivado por el espejo del badge. Ausente → none (sin chip).
+  reproStatus?: ReproStatus,
 ): AnimalListItem {
   return {
     profileId: r.id,
@@ -228,6 +260,7 @@ function toLocalListItem(
     managementGroupId: r.management_group_id,
     animalBirthDate: r.birth_date ?? null,
     futureBull: toBool(r.future_bull ?? 0),
+    reproStatus: reproStatus ?? { kind: 'none' },
   };
 }
 
@@ -341,6 +374,91 @@ async function computeMirrorOverrides(
   );
 }
 
+// ─── Espejo del badge de ESTADO REPRODUCTIVO display-only (delta spec 02 aptitud, RAR.2/RAR.3) ──────
+//
+// Análogo a computeMirrorOverrides (C6) pero para el badge de estado reproductivo. Lee del SQLite local los
+// eventos reproductivos batched (buildReproBadgeEventsQuery) de las HEMBRAS y delega la DECISIÓN al núcleo PURO
+// `deriveReproStatus` (repro-status.ts) — que NO puede escribir nada (RAR.8.1, propiedad estructural). Devuelve
+// un Map profileId → ReproStatus para las hembras; los machos/terneras NO entran (su badge es `none`, RAR.3.2).
+//
+// La `categoryCode` que se le pasa a deriveReproStatus es la VIGENTE/DISPLAY (override del espejo C6 aplicado):
+// la "probada" (RAR.2.4.4) y la fase vaquillona (RAR.2.4.5) dependen de la categoría que el server computaría,
+// no de la guardada stale. Fail-safe: si la lectura local falla, se omite (las filas quedan con `none` → sin
+// chip), nunca rompe la vista. La ÚNICA operación de DB acá es SELECT (runLocalQuery); NUNCA un write (RAR.8.1).
+
+type ReproStatusableRow = {
+  id: string;
+  sex: AnimalSex | null;
+  category_code: string | null;
+  is_cut?: number | boolean | null;
+};
+
+/**
+ * Carga batched (SELECT puro) los eventos reproductivos del badge (synced + overlay) de un set de perfiles,
+ * agrupados por perfil en el orden de la query (ORDER BY event_date, created_at). Helper compartido por
+ * computeReproStatuses (lista/búsqueda) y fetchAnimalDetail (ficha) — UNA sola query. Fail-safe: lectura fallida
+ * → Map vacío (las filas quedan con `none`/null, nunca crash). NUNCA un write (RAR.8.1).
+ */
+async function loadReproBadgeEvents(
+  profileIds: readonly string[],
+): Promise<Map<string, ReproBadgeEventInput[]>> {
+  const byProfile = new Map<string, ReproBadgeEventInput[]>();
+  if (profileIds.length === 0) return byProfile;
+  // emptyIsSyncing:false → "sin eventos repro" es legítimo (una vaquillona recién dada de alta) — no degrada.
+  const eventsRes = await runLocalQuery<{
+    animal_profile_id: string;
+    event_type: string;
+    event_date: string;
+    created_at: string | null;
+    pregnancy_status: string | null;
+    heifer_fitness: string | null;
+    service_type: string | null;
+  }>(buildReproBadgeEventsQuery(profileIds), { emptyIsSyncing: false });
+  if (!eventsRes.ok) return byProfile; // fail-safe: sin eventos legibles → none (sin chip), nunca crash
+  for (const e of eventsRes.value) {
+    const list = byProfile.get(e.animal_profile_id) ?? [];
+    list.push({
+      eventType: e.event_type,
+      eventDate: e.event_date,
+      createdAt: e.created_at,
+      pregnancyStatus: e.pregnancy_status,
+      heiferFitness: (e.heifer_fitness as HeiferFitness | null) ?? null,
+      serviceType: e.service_type,
+    });
+    byProfile.set(e.animal_profile_id, list);
+  }
+  return byProfile;
+}
+
+async function computeReproStatuses(
+  rows: readonly ReproStatusableRow[],
+  // Override del espejo C6 (categoría VIGENTE): si una fila lo tiene, su code manda sobre la guardada.
+  mirror: ReadonlyMap<string, DisplayCategory>,
+): Promise<Map<string, ReproStatus>> {
+  // Solo las HEMBRAS necesitan badge (machos/terneras → none, RAR.3.2). La ternera (hembra) igual entra y
+  // deriveReproStatus la resuelve a `none` por categoría — barato, no se filtra acá.
+  const females = rows.filter((r) => r.sex === 'female');
+  if (females.length === 0) return new Map();
+
+  const eventsByProfile = await loadReproBadgeEvents(females.map((r) => r.id));
+
+  const out = new Map<string, ReproStatus>();
+  for (const r of females) {
+    // Categoría VIGENTE: el override del espejo C6 (si lo hay) manda sobre la guardada (RAR.7.2).
+    const effectiveCode = mirror.get(r.id)?.code ?? r.category_code ?? null;
+    out.set(
+      r.id,
+      deriveReproStatus({
+        sex: r.sex,
+        categoryCode: effectiveCode,
+        isCut: toBool(r.is_cut ?? 0),
+        events: eventsByProfile.get(r.id) ?? [],
+      }),
+    );
+  }
+  return out;
+}
+
 // ─── Lista (R1.1, R1.5) ────────────────────────────────────────────────────────────
 
 export type FetchAnimalsFilter = {
@@ -387,7 +505,13 @@ export async function fetchAnimals(
   // C6 (RC6.3.2): espejo de categoría display-only — la lista muestra la categoría derivada localmente
   // cuando override=false (incluye eventos cargados offline). Cero writes (RC6.3.5).
   const overrides = await computeMirrorOverrides(r.value);
-  return { ok: true, value: r.value.map((row) => toLocalListItem(row, overrides.get(row.id))) };
+  // delta aptitud (RAR.3.1): espejo del badge de estado reproductivo, display-only. Usa la categoría VIGENTE
+  // (override del espejo C6). Cero writes (RAR.8.1).
+  const reproStatuses = await computeReproStatuses(r.value, overrides);
+  return {
+    ok: true,
+    value: r.value.map((row) => toLocalListItem(row, overrides.get(row.id), reproStatuses.get(row.id))),
+  };
 }
 
 // ─── Conteo liviano (home: paso "Cargá tu primer animal" por estado real) ────────────
@@ -500,7 +624,12 @@ export async function searchAnimals(
   // C6 (RC6.3.2): mismo espejo que la lista — la búsqueda find-or-create muestra la categoría derivada
   // localmente cuando override=false. Una sola pasada batched sobre el set deduplicado. Cero writes.
   const overrides = await computeMirrorOverrides(rawRows);
-  return { ok: true, value: rawRows.map((row) => toLocalListItem(row, overrides.get(row.id))) };
+  // delta aptitud (RAR.3.1): mismo espejo del badge que la lista, sobre el set deduplicado.
+  const reproStatuses = await computeReproStatuses(rawRows, overrides);
+  return {
+    ok: true,
+    value: rawRows.map((row) => toLocalListItem(row, overrides.get(row.id), reproStatuses.get(row.id))),
+  };
 }
 
 /** Acumula las filas crudas deduplicadas por profileId (los exactos priorizados se agregan primero). */
@@ -917,6 +1046,19 @@ export async function fetchAnimalDetail(profileId: string): Promise<ServiceResul
   // sigue recibiendo categoryOverride sin tocar (RC6.4.1).
   const overrides = await computeMirrorOverrides([row]);
   const mirror = overrides.get(row.id);
+  // delta aptitud (RAR.4): estado reproductivo + aptitud vigente, display-only (RAR.8.1). Solo para HEMBRAS
+  // (RAR.4.3); el macho no necesita la query (none/null). Categoría VIGENTE = override del espejo C6 (RAR.7.2).
+  const isFemale = (row.sex ?? 'female') === 'female';
+  const reproEvents = isFemale ? (await loadReproBadgeEvents([row.id])).get(row.id) ?? [] : [];
+  const reproStatus: ReproStatus = isFemale
+    ? deriveReproStatus({
+        sex: 'female',
+        categoryCode: mirror?.code ?? row.category_code ?? null,
+        isCut: toBool(row.is_cut ?? 0),
+        events: reproEvents,
+      })
+    : { kind: 'none' };
+  const reproAptitude: HeiferFitness | null = isFemale ? deriveReproAptitude(reproEvents) : null;
   return {
     ok: true,
     value: {
@@ -948,6 +1090,9 @@ export async function fetchAnimalDetail(profileId: string): Promise<ServiceResul
       futureBull: toBool(row.future_bull ?? 0),
       // delta spec 02 (RCUT.4.1): marca de descarte (0/1 → boolean). Fuente de verdad de la afordancia CUT.
       isCut: toBool(row.is_cut ?? 0),
+      // delta spec 02 (aptitud RAR.4): estado reproductivo + aptitud vigente derivados (display-only).
+      reproStatus,
+      reproAptitude,
     },
   };
 }

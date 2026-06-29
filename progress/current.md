@@ -32,7 +32,15 @@ Implementer (`a5d802b9a1548fd62`) entregó los 3 fixes + autorrevisión:
 
 **Estados**: spec 08 → `blocked` (2 gates externos: deploy YAML PowerSync [Raf] + upload SIGSA [Facundo]); spec 02 → `in_progress` (delta aptitud). Un solo in_progress (validado).
 
-**EN CURSO**: implementer (`ae17ca0e4552beb79`, background) construyendo el delta. Al volver: veto de diseño del badge → reviewer → Gate 2 → Puerta 2.
+**Implementer DONE** (`progress/impl_02-aptitud-reproductiva.md`): `repro-status.ts` (+test) + fix `appliesToAnimal` (+test) + `local-reads` builders (+test) + `animals.ts`/`events.ts`/`AnimalRow.tsx`/`animales.tsx`/`[id].tsx`/`crear-animal.tsx`/`carga.tsx` + e2e. **417/417 unit + typecheck + anti-hardcode verdes, NO tocó DB** (Gate 1 N/A confirmado). Constante única `PROVEN_FEMALE_CATEGORY_CODES` + `SERVICE_AGE_THRESHOLD_DAYS=365` (cita 0105). Divergencia badge/inseminación respetada (vaquillona sin veredicto ≥365d → badge "Sin evaluar" pero inseminable). `aptitude`/`ageDays` opcionales (no rompe call-sites legacy).
+
+**Veto de diseño del leader: PASS** — chip 3 tiers por token, sin doble-amarillo con CUT, lineHeight matcheado. Tradeoff de layout notado (rodeo trunca primero ante "Multípara"+"Servida sin tacto" en pantalla angosta; prioridad correcta) → a confirmar por Raf en la app.
+
+**Gate 2 PASS** 0 HIGH/0 MEDIUM + **reviewer APPROVED** + **Puerta 2 APROBADA por Raf** (2026-06-29). **DELTA APTITUD CERRADO.** Reconciliado el baseline (ADR-028: índice "Deltas posteriores" introducido en `design.md` de spec 02 + backfill de previos + nota as-built; T15 [x]). Spec 02 → `deferred`. Código committeado (ver hash abajo). Layout del badge: pendiente que Raf lo confirme en la app (tradeoff de truncado del rodeo, no bloqueante).
+
+**ESTADO DE LAS 15 CORRECCIONES**: Fase 1 done (#9/#11/#12) · Aptitud done (#5/#6/#1b). PENDIENTE: A cluster ternero (gatea peso destete/Facundo, en backlog) · #8 parición · #10 destete (gatea peso) · #2 caravana/nombre-apodo · #3 fecha dd/mm · #13 condición stepper · #14 destildar · #6-ficha caravana+bastoneo (bastoneo gated por hardware) · #16 tapear wheels.
+
+Commit `0d447cd` = fase de spec del delta (Gate 0 + RAR.1-8 + Puerta 1 + estados). Fase 1 (#9/#12/#11) en `2009104`+`d67ea3e`.
 
 ## PENDIENTE (próximos segmentos, por orden)
 - **A** cluster ternero (#7/#4/#15/#1a) — delta-02, **gatea peso destete (Facundo)**.

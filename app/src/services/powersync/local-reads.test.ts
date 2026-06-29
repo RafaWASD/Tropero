@@ -39,6 +39,7 @@ import {
   escapeLike,
   buildAnimalDetailQuery,
   buildCategoryMirrorEventsQuery,
+  buildReproBadgeEventsQuery,
   buildRevertCategoryOverrideUpdate,
   buildManagementGroupsQuery,
   buildTimelineQuery,
@@ -60,6 +61,7 @@ import {
   buildAddManeuverConditionScoreInsert,
   buildUpdateManeuverConditionScore,
   buildAddManeuverTactoVaquillonaInsert,
+  buildAddTactoVaquillonaInsert,
   buildUpdateManeuverTactoVaquillona,
   buildAddManeuverInseminationInsert,
   buildUpdateManeuverInsemination,
@@ -485,6 +487,10 @@ test('buildAnimalsListQuery: b1 identidad desde animal_profiles, JOINs, status d
   assert.match(q.sql, /ap\.future_bull AS future_bull/);
   assert.match(q.sql, /0 AS future_bull/);
   assert.match(q.sql, /ap\.animal_birth_date AS birth_date/);
+  // delta spec 02 (aptitud RAR.2.4.2/RAR.3.1): is_cut REAL → input del espejo del badge de estado
+  // reproductivo (CUT → "No apta"). Proyectado en AMBAS ramas (synced: ap.is_cut; overlay: 0 constante).
+  assert.match(q.sql, /ap\.is_cut AS is_cut/);
+  assert.match(q.sql, /0 AS is_cut/);
   // args = synced (est, active) ++ overlay (est, active)
   assert.deepEqual(q.args, ['est-1', 'active', 'est-1', 'active']);
 });
@@ -540,7 +546,7 @@ test('buildAnimalsListQuery (comportamiento): orderBy updated_at ordena candidat
   db.exec(
     'CREATE TABLE animal_profiles (id TEXT, animal_id TEXT, idv TEXT, visual_id_alt TEXT, category_id TEXT, ' +
       'rodeo_id TEXT, status TEXT, management_group_id TEXT, animal_tag_electronic TEXT, animal_sex TEXT, ' +
-      'category_override INTEGER, animal_birth_date TEXT, is_castrated INTEGER, future_bull INTEGER, ' +
+      'category_override INTEGER, animal_birth_date TEXT, is_castrated INTEGER, future_bull INTEGER, is_cut INTEGER, ' +
       'establishment_id TEXT, deleted_at TEXT, created_at TEXT, updated_at TEXT);' +
       'CREATE TABLE pending_animal_profiles (id TEXT, animal_id TEXT, idv TEXT, visual_id_alt TEXT, category_id TEXT, ' +
       'rodeo_id TEXT, status TEXT, management_group_id TEXT, animal_tag_electronic TEXT, animal_sex TEXT, ' +
@@ -929,6 +935,64 @@ test('buildCategoryMirrorEventsQuery: COMPORTAMIENTO — synced no-borrados + ov
   assert.equal(birth?.pregnancy_status, null);
   const tacto = rows.find((r) => r.event_type === 'tacto');
   assert.equal(tacto?.pregnancy_status, 'large');
+});
+
+// ─── delta spec 02 (aptitud): buildReproBadgeEventsQuery (RAR.2.3) ─────────────────────
+
+test('buildReproBadgeEventsQuery: SQL — proyecta heifer_fitness/service_type + incluye tacto_vaquillona, UNION overlay, ORDER BY', () => {
+  const q = buildReproBadgeEventsQuery(['p1', 'p2']);
+  // synced: filtro deleted_at + event_type acotado (incluye tacto_vaquillona y service)
+  assert.match(q.sql, /FROM reproductive_events WHERE animal_profile_id IN \(\?, \?\) AND deleted_at IS NULL/);
+  assert.match(q.sql, /AND event_type IN \('tacto','birth','abortion','service','tacto_vaquillona'\)/);
+  // proyecta las 2 columnas extra sobre el espejo C6
+  assert.match(q.sql, /SELECT animal_profile_id, event_type, event_date, created_at, pregnancy_status, heifer_fitness, service_type/);
+  // overlay: pending_reproductive_events (solo partos → NULL en las 3 columnas de dato)
+  assert.match(q.sql, /UNION ALL/);
+  assert.match(q.sql, /NULL AS heifer_fitness, NULL AS service_type/);
+  assert.match(q.sql, /ORDER BY event_date ASC, created_at ASC/);
+  // NO re-scopea tenant
+  assert.doesNotMatch(q.sql, /has_role_in|establishment_id/);
+  assert.deepEqual(q.args, ['p1', 'p2', 'p1', 'p2']);
+});
+
+test('buildReproBadgeEventsQuery: COMPORTAMIENTO — trae tacto_vaquillona/service no-borrados + birth del overlay, excluye deleted y tipos irrelevantes', () => {
+  const db = new DatabaseSync(':memory:');
+  db.exec(
+    'CREATE TABLE reproductive_events (animal_profile_id TEXT, event_type TEXT, event_date TEXT, created_at TEXT, pregnancy_status TEXT, heifer_fitness TEXT, service_type TEXT, deleted_at TEXT);' +
+      'CREATE TABLE pending_reproductive_events (animal_profile_id TEXT, event_type TEXT, event_date TEXT, created_at TEXT);',
+  );
+  const insS = db.prepare(
+    'INSERT INTO reproductive_events (animal_profile_id, event_type, event_date, created_at, pregnancy_status, heifer_fitness, service_type, deleted_at) VALUES (?,?,?,?,?,?,?,?)',
+  );
+  insS.run('p1', 'tacto_vaquillona', '2026-04-01', '2026-04-01T10:00:00Z', null, 'apta', null, null);
+  insS.run('p1', 'service', '2026-05-01', '2026-05-01T10:00:00Z', null, null, 'natural', null);
+  // un tacto_vaquillona BORRADO → NO se trae
+  insS.run('p1', 'tacto_vaquillona', '2026-03-01', '2026-03-01T10:00:00Z', null, 'no_apta', null, '2026-03-05T00:00:00Z');
+  // tipo irrelevante (weaning NO está en el set del badge) → NO se trae
+  insS.run('p1', 'weaning', '2026-02-01', '2026-02-01T10:00:00Z', null, null, null, null);
+  // evento de OTRO perfil → no aparece
+  insS.run('p2', 'tacto_vaquillona', '2026-04-01', '2026-04-01T10:00:00Z', null, 'diferida', null, null);
+  // overlay: parto optimista de p1
+  db.prepare('INSERT INTO pending_reproductive_events (animal_profile_id, event_type, event_date, created_at) VALUES (?,?,?,?)')
+    .run('p1', 'birth', '2026-06-01', '2026-06-01T09:00:00Z');
+
+  const q = buildReproBadgeEventsQuery(['p1']);
+  const rows = (db.prepare(q.sql).all(...(q.args as string[])) as {
+    event_type: string;
+    heifer_fitness: string | null;
+    service_type: string | null;
+  }[]).map((r) => ({ ...r }));
+  db.close();
+
+  // tacto_vaquillona(apta) + service(natural) + birth(overlay); NO el borrado, NO weaning, NO p2.
+  assert.deepEqual(
+    rows.map((r) => r.event_type),
+    ['tacto_vaquillona', 'service', 'birth'],
+  );
+  assert.equal(rows.find((r) => r.event_type === 'tacto_vaquillona')?.heifer_fitness, 'apta');
+  assert.equal(rows.find((r) => r.event_type === 'service')?.service_type, 'natural');
+  // el overlay proyecta NULL en heifer_fitness/service_type
+  assert.equal(rows.find((r) => r.event_type === 'birth')?.heifer_fitness, null);
 });
 
 // ─── C6: buildRevertCategoryOverrideUpdate (RC6.4.3) ───────────────────────────────────
@@ -1813,6 +1877,17 @@ test('M3.1: buildUpdateManeuverTactoVaquillona — UPDATE heifer_fitness, filtra
   assert.match(q.sql, /^UPDATE reproductive_events SET heifer_fitness/);
   assert.match(q.sql, /event_type = 'tacto_vaquillona'/);
   assert.deepEqual(q.args, ['no_apta', '2026-06-14', 'tv-1']);
+});
+
+test('delta aptitud: buildAddTactoVaquillonaInsert (alta) — tacto_vaquillona + heifer_fitness + created_at, SIN session_id', () => {
+  const q = buildAddTactoVaquillonaInsert('av-1', 'p-1', 'apta', '2026-06-29', '2026-06-29T10:00:00Z');
+  assert.match(
+    q.sql,
+    /^INSERT INTO reproductive_events \(id, animal_profile_id, event_type, event_date, heifer_fitness, created_at\) VALUES \(\?, \?, 'tacto_vaquillona', \?, \?, \?\)$/,
+  );
+  // el alta NO es jornada de manga → SIN columna session_id (RAR.8.2)
+  assert.doesNotMatch(q.sql, /session_id/);
+  assert.deepEqual(q.args, ['av-1', 'p-1', '2026-06-29', 'apta', '2026-06-29T10:00:00Z']);
 });
 
 test('M3.1: buildAddManeuverInseminationInsert — reproductive_events service ai, pajuela en notes, session_id', () => {

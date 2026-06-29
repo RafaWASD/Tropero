@@ -25,6 +25,7 @@ import { Check, ChevronRight, Star } from 'lucide-react-native';
 
 import { CategoryBadge } from './CategoryBadge';
 import { labelA11y } from '../utils/a11y';
+import { reproStatusLabel, type ReproStatus } from '../utils/repro-status';
 
 // ─── Tipos públicos ───────────────────────────────────────────────────────────
 
@@ -44,6 +45,12 @@ export type AnimalRowProps = {
   sex: AnimalSex;
   /** Nombre del rodeo al que pertenece. Default (no-compact): segunda línea muted. */
   rodeo: string;
+  /**
+   * Estado reproductivo VIGENTE single-slot (delta spec 02 aptitud, RAR.3) — chip ÚNICO en la vista NORMAL
+   * (junto al badge de categoría). `{kind:'none'}` / ausente / macho-ternera → sin chip (RAR.3.2). Display-only,
+   * no tappable (RAR.5.4). NO se muestra en la variante compacta (su subtítulo es "categoría · edad").
+   */
+  reproStatus?: ReproStatus;
   /** Foto del animal (JIT: casi siempre ausente en MVP → fallback avatar neutro). */
   photoUrl?: string;
   /** Toda la fila es tappable → abre EDIT (R1.3) o el flujo correspondiente. */
@@ -221,6 +228,64 @@ function FutureBullBadge() {
 }
 
 /**
+ * Tier visual del chip de estado reproductivo (RAR.5.1, design §5) — 3 señales semánticas (Hick):
+ *   - `good`    verde: Apta / Preñada → relleno $greenLight + texto $primary (firma RAFAQ, igual que CategoryBadge).
+ *   - `attn`    ámbar: Diferida / Vacía → outline $amber sobre $surface (≈5:1 AA).
+ *   - `neutral` neutro: Servida sin tacto / No apta / CUT / Sin evaluar → outline $divider, texto $textMuted
+ *     (igual que NoTagChip). NO reusa $cutBg/$cutText (firma amarilla del badge de CATEGORÍA CUT — evita doble
+ *     amarillo en la misma fila, design §5).
+ */
+type ReproChipTier = 'good' | 'attn' | 'neutral';
+
+function reproChipTier(status: ReproStatus): ReproChipTier {
+  switch (status.kind) {
+    case 'pregnant':
+      return 'good';
+    case 'empty':
+      return 'attn';
+    case 'fitness':
+      return status.fitness === 'apta' ? 'good' : status.fitness === 'diferida' ? 'attn' : 'neutral';
+    // served_untested / cut / unknown → neutro (sin info / fuera del eje productivo).
+    default:
+      return 'neutral';
+  }
+}
+
+/**
+ * Chip ÚNICO de estado reproductivo (RAR.3/RAR.5): un `View` no tappable (RAR.5.4) con el label es-AR del
+ * estado (RAR.3.4). El estado se comunica por TEXTO además del color (RAR.5.2, accesibilidad/daltonismo), con
+ * `lineHeight` matcheado al `fontSize` (anti-recorte de descendentes, por convención). a11y por `labelA11y`
+ * (RAR.5.3 — un `View` de Tamagui no mapea accessibilityLabel a aria-label en web). `none`/label null → null
+ * (macho/ternera, RAR.3.2). Cero hardcode (ADR-023 §4): solo tokens.
+ */
+function ReproStatusChip({ status }: { status: ReproStatus }) {
+  const label = reproStatusLabel(status);
+  if (label === null) return null; // none → sin chip (macho/ternera)
+  const tier = reproChipTier(status);
+  // Tokens por tier (sin hardcode): good=relleno verde; attn=outline ámbar; neutral=outline neutro.
+  const bg = tier === 'good' ? '$greenLight' : '$surface';
+  const textColor = tier === 'good' ? '$primary' : tier === 'attn' ? '$amber' : '$textMuted';
+  const borderColor = tier === 'attn' ? '$amber' : '$divider';
+  const borderWidth = tier === 'good' ? 0 : 1;
+  return (
+    <View
+      backgroundColor={bg}
+      borderWidth={borderWidth}
+      borderColor={borderColor}
+      borderRadius="$pill"
+      paddingHorizontal="$2"
+      paddingVertical="$1"
+      flexShrink={0}
+      {...labelA11y(Platform.OS, `Estado reproductivo: ${label}`)}
+    >
+      <Text fontFamily="$body" fontSize="$2" lineHeight="$2" fontWeight="600" color={textColor} numberOfLines={1}>
+        {label}
+      </Text>
+    </View>
+  );
+}
+
+/**
  * Checkbox cuadrado de la selección masiva (R11.9): $navIcon (24px) de caja, redondeo $4, borde
  * $divider; tildado → relleno $primary + check blanco. Decorativo (el toque lo maneja la fila entera);
  * el estado a11y (selected) lo emite el Pressable de la fila. Cero hardcode (tokens + getTokenValue
@@ -255,6 +320,7 @@ export function AnimalRow({
   category,
   sex,
   rodeo,
+  reproStatus,
   photoUrl,
   onPress,
   compact = false,
@@ -367,9 +433,11 @@ export function AnimalRow({
             </XStack>
           ) : (
             // Subtítulo NORMAL: badge de categoría con COLOR (firma verde RAFAQ; AMARILLA si es CUT, RCUT.6.2
-            // — ruta preferida con `code`) + rodeo muted.
+            // — ruta preferida con `code`) + chip de estado reproductivo (RAR.3.1, hembras) + rodeo muted. El
+            // rodeo (flexShrink) trunca primero si falta ancho; los dos chips quedan completos (flexShrink 0).
             <XStack alignItems="center" gap="$2" minWidth={0}>
               <CategoryBadge label={category} code={categoryCode} size="sm" />
+              {reproStatus ? <ReproStatusChip status={reproStatus} /> : null}
               <Text
                 fontFamily="$body"
                 fontSize="$3"

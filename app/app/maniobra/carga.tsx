@@ -49,6 +49,7 @@ import {
   filterByAnimalApplicability,
   type AnimalApplicabilityInfo,
 } from '@/utils/maneuver-applicability';
+import { ageInDaysFromBirthDate } from '@/utils/repro-status';
 import { useManeuverGating } from '@/hooks/useManeuverGating';
 import {
   extractCustomManiobras,
@@ -1088,7 +1089,15 @@ function ManeuverStep({
  *  acá nunca es null; el null de la regla (R14.3) lo cubre el tipo de AnimalApplicabilityInfo para callers
  *  que sí pudieran no resolverlo (tests, otros orígenes). */
 function toApplicabilityInfo(animal: AnimalDetail): AnimalApplicabilityInfo {
-  return { sex: animal.sex, categoryCode: animal.categoryCode || null, isCastrated: animal.isCastrated };
+  return {
+    sex: animal.sex,
+    categoryCode: animal.categoryCode || null,
+    isCastrated: animal.isCastrated,
+    // delta aptitud (RAR.6.1): aptitud vigente + edad en días → la inseminación filtra hembra+apta (RAR.6.2).
+    // La aptitud sale del espejo (AnimalDetail.reproAptitude); la edad se deriva de birth_date (fallback 0105).
+    aptitude: animal.reproAptitude,
+    ageDays: ageInDaysFromBirthDate(animal.birthDate, new Date()),
+  };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════

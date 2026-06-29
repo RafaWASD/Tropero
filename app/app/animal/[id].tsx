@@ -96,6 +96,8 @@ import {
   type CurrentState,
 } from '@/utils/event-timeline';
 import { formatConditionScore } from '@/utils/event-input';
+import { reproStatusLabel, type ReproStatus } from '@/utils/repro-status';
+import type { HeiferFitness } from '@/utils/maneuver-sequence';
 import { isBullEntire } from '@/utils/maneuver-applicability';
 import { fetchScrotalHistory, type ScrotalMeasurementRow } from '@/services/scrotal';
 import { formatCmWithUnitAR } from '@/utils/wheel-picker';
@@ -806,7 +808,13 @@ export default function AnimalDetailScreen() {
             {/* Estado actual (fix-loop 2 FIX C): el VALOR VIGENTE de cada medición tipada (peso /
                 condición corporal) = el del último evento de ese tipo. Es un ATRIBUTO del animal,
                 no solo historia. El timeline de abajo sigue siendo la auditoría completa. */}
-            <CurrentStateSection timeline={timeline} sex={detail.sex} />
+            <CurrentStateSection
+              timeline={timeline}
+              sex={detail.sex}
+              categoryCode={detail.categoryCode}
+              reproStatus={detail.reproStatus}
+              reproAptitude={detail.reproAptitude}
+            />
 
             {/* Tarjeta de tendencia de CIRCUNFERENCIA ESCROTAL (spec 03 M6, R14.14): la serie de mediciones
                 (cm + edad + fecha es-AR) + una mini-tendencia. Se muestra SOLO a machos ENTEROS (isBullEntire
@@ -2029,12 +2037,27 @@ function LoteOption({
 // (vaquillona → vaquillona_prenada) la hace el server y la refleja el CategoryBadge del hero; esta
 // fila muestra el estado de preñez crudo del último tacto/parto/aborto. La observación libre NO va
 // acá (solo timeline: no tiene "valor actual").
+// Etiqueta es-AR de la aptitud para la fila de la ficha (RAR.4.1): null (sin veredicto) → "Sin evaluar".
+function aptitudeRowLabel(aptitude: HeiferFitness | null): string {
+  if (aptitude === 'apta') return 'Apta';
+  if (aptitude === 'diferida') return 'Diferida';
+  if (aptitude === 'no_apta') return 'No apta';
+  return 'Sin evaluar';
+}
+
 function CurrentStateSection({
   timeline,
   sex,
+  categoryCode,
+  reproStatus,
+  reproAptitude,
 }: {
   timeline: TimelineItem[] | null;
   sex: 'male' | 'female';
+  // delta aptitud (RAR.4): categoría VIGENTE + estado/aptitud derivados (de fetchAnimalDetail, display-only).
+  categoryCode: string;
+  reproStatus: ReproStatus;
+  reproAptitude: HeiferFitness | null;
 }) {
   // `now` para el timestamp relativo de cada valor (un Date por render, determinístico acá).
   const now = new Date();
@@ -2047,20 +2070,30 @@ function CurrentStateSection({
     ? `${formatConditionScore(state.conditionScore.score)} / 5 · ${formatEventDate(state.conditionScore.date, now, { dateOnly: true })}`
     : null;
 
-  // Estado reproductivo (solo hembras): texto del estado (humanizePregnancyState) + fecha del evento
-  // determinante. Si no hay evento reproductivo que determine preñez → null → "Sin registrar".
+  // Estado reproductivo (solo hembras): preñez del último evento determinante (humanizePregnancyState + fecha);
+  // si no hay preñez pero la hembra está servida/probada sin tacto → "Servida sin tacto" (RAR.4.2); si no →
+  // null → "Sin registrar". La preñez sigue saliendo del timeline (conserva "(cabeza) · fecha", RAR.4.4).
   const pregnancyText = humanizePregnancyState(state.pregnancy);
-  const pregnancyValue =
+  const reproValue =
     pregnancyText && state.pregnancy
       ? `${pregnancyText} · ${formatEventDate(state.pregnancy.date, now, { dateOnly: true })}`
-      : null;
+      : reproStatus.kind === 'served_untested'
+        ? reproStatusLabel(reproStatus)
+        : null;
+
+  // Aptitud reproductiva (RAR.4.1): SOLO hembra y SOLO en la fase de vaquillona (con o sin veredicto). Las
+  // adultas probadas no tienen eje de aptitud → se omite la fila (su estado vive en "Estado reproductivo").
+  const showAptitude = sex === 'female' && categoryCode === 'vaquillona';
 
   return (
     <DetailSection icon={Gauge} title="Estado actual">
       <CurrentStateRow label="Peso actual" value={weightValue} />
       <CurrentStateRow label="Condición corporal" value={scoreValue} />
+      {showAptitude ? (
+        <CurrentStateRow label="Aptitud reproductiva" value={aptitudeRowLabel(reproAptitude)} />
+      ) : null}
       {sex === 'female' ? (
-        <CurrentStateRow label="Estado reproductivo" value={pregnancyValue} />
+        <CurrentStateRow label="Estado reproductivo" value={reproValue} />
       ) : null}
     </DetailSection>
   );

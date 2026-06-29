@@ -9,6 +9,24 @@
 >
 > **Nota de alcance del fold Tier 1 (sesión 20)**: la sección **"Fold del Tier 1 — bloque backend delta s17/s18"** (abajo) deja **firmes** 5 de esas decisiones (`created_by`, `exit_reason` enum, `birth_calves`/mellizos, recálculo de categoría `R6.14`, `R4.5.1` relajada) y les asigna **migrations concretas 0043+**. Los bloques SQL de esa sección son **especificación de diseño firme** (el implementer escribe los `.sql` + tests, pero el modelado queda cerrado). Lo que sigue marcado **DEFERIDO** (Tier 2: ramas `weaning`/`abortion`; Tier 3: razas SENASA + `castracion`) **no** entra en este fold — pendiente de Facundo/research.
 
+## Deltas posteriores (ADR-028)
+
+> Índice de los delta-specs que extienden esta feature `done`. El baseline de abajo **no se reescribe**; cada
+> delta vive en su propio `{context,requirements,design,tasks}-<slug>.md` en esta carpeta. (Índice introducido
+> al cerrar el delta `aptitud-reproductiva`; backfill de los previos para que el baseline no mienta por omisión.)
+
+| Slug | Qué agrega | Estado |
+|---|---|---|
+| `tier2-categorias` | novillito/novillo + `is_castrated` + reescritura `compute_category`/triggers (0059-0067) | done |
+| `c4-lotes` | frontend de `management_groups` (ADR-020) | done |
+| `c6-categoria-espejo` | espejo client-side display-only de `compute_category` + badge de override | done |
+| `cut-ficha` | marcar/quitar CUT desde la ficha + badge de categoría amarillo | done |
+| `c3.3-baja` | baja/egreso desde la ficha (R14.9) | done |
+| `puesta-en-servicio` | Stream A backend del modelo reproductivo (`service_months`, servidas/entoradas, 0102-0105) | done |
+| `aptitud-reproductiva` | badge único de estado reproductivo (lista+ficha) + prompt de aptitud en el alta + fix inseminación hembra+apta (#5/#6/#1b) — **frontend puro, sin migración** | done (Puerta 2, 2026-06-29) |
+
+**Reconciliación as-built del delta `aptitud-reproductiva`** (bajo R10/R14 — estado de la ficha — y R4 — alta): la ficha y la lista ahora muestran un **badge único de estado reproductivo** derivado client-side (espejo de `0105` + `deriveCurrentState`, sin columna nueva); el alta de una `vaquillona` ofrece un prompt opcional de aptitud que crea un evento `tacto_vaquillona`; la aplicabilidad de inseminación quedó gateada a hembra apta (con fallback de edad ≥365d, alineado a `0105`). Detalle en `{requirements,design,tasks}-aptitud-reproductiva.md`.
+
 ## Arquitectura general
 
 ```

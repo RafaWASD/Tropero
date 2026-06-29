@@ -532,6 +532,10 @@ const LOCAL_LIST_SELECT =
   'ap.animal_tag_electronic AS tag_electronic, ap.animal_sex AS sex, ' +
   'ap.category_override AS category_override, ap.animal_birth_date AS birth_date, ' +
   'ap.is_castrated AS is_castrated, ap.future_bull AS future_bull, ' +
+  // delta spec 02 (aptitud reproductiva RAR.2.4.2/RAR.3.1): is_cut REAL → input del espejo del badge de
+  // estado reproductivo (CUT → "No apta"). El shape público (AnimalListItem) NO lo expone (lo descarta el
+  // mapper); lo lee SOLO computeReproStatuses. En detalle ya se proyectaba (línea ~901); acá se suma a la lista.
+  'ap.is_cut AS is_cut, ' +
   'r.system_id AS system_id, ' +
   'r.name AS rodeo_name, c.code AS category_code, c.name AS category_name, ' +
   'ap.created_at AS created_at ' +
@@ -555,6 +559,9 @@ const LOCAL_LIST_SELECT_OVERLAY =
   // (el flag se marca desde la ficha de un animal ya sincronizado, R12.2 — nunca en el alta). Constantes
   // para alinear las columnas del UNION (requisito del UNION ALL: ambas ramas, idéntico set/orden).
   '0 AS is_castrated, 0 AS future_bull, ' +
+  // delta spec 02 (aptitud reproductiva): is_cut=0 del overlay (un alta optimista nace no-CUT); constante
+  // para alinear las columnas del UNION ALL con la rama synced (requisito del UNION ALL: mismo set/orden).
+  '0 AS is_cut, ' +
   'r.system_id AS system_id, ' +
   'r.name AS rodeo_name, c.code AS category_code, c.name AS category_name, ' +
   'pap.created_at AS created_at ' +
@@ -979,6 +986,42 @@ export function buildCategoryMirrorEventsQuery(profileIds: readonly string[]): L
     'SELECT animal_profile_id, event_type, event_date, created_at, NULL AS pregnancy_status ' +
     'FROM pending_reproductive_events ' +
     `WHERE animal_profile_id IN (${placeholders}) AND event_type IN ${MIRROR_EVENT_TYPES} ` +
+    'ORDER BY event_date ASC, created_at ASC';
+  return { sql, args: [...profileIds, ...profileIds] };
+}
+
+// ─── Espejo del badge de estado reproductivo (delta spec 02 aptitud, RAR.2.3) ─────────────────
+//
+// Builder BATCHED de los eventos reproductivos que alimentan el espejo client-side del badge de estado
+// reproductivo (`deriveReproStatus`, repro-status.ts). Sirve para la ficha (1 id) y para la lista (≤200 ids).
+// Espeja `buildCategoryMirrorEventsQuery` (mismo patrón synced ∪ overlay) PERO:
+//   - proyecta dos columnas MÁS: `heifer_fitness` (veredicto de aptitud, RAR.2.1) y `service_type`;
+//   - suma `tacto_vaquillona` al `event_type IN (...)` (el eje aptitud).
+// Se mantiene SEPARADO de `buildCategoryMirrorEventsQuery` (NO se acopla el path C6 probado, que ignora esas
+// dos columnas) — design §3 + §11 alternativa #1. El overlay solo porta partos optimistas (`birth`) → proyecta
+// NULL en pregnancy_status/heifer_fitness/service_type, y el `event_type IN (...)` igual lo acota a 'birth'.
+// El scoping de tenant ya lo aplicó la stream est_reproductive_events → NO se re-filtra. El tie-break de
+// `created_at NULL` (null-as-newest, RC6.1.4) lo resuelve el espejo (repro-status.ts), no este ORDER BY.
+
+const REPRO_BADGE_EVENT_TYPES = "('tacto','birth','abortion','service','tacto_vaquillona')";
+
+/**
+ * Eventos reproductivos crudos (synced + overlay) de un conjunto de perfiles, para el espejo del badge de
+ * estado reproductivo (RAR.2.3/RAR.3.1/RAR.4.1). `profileIds` ≥ 1. Devuelve filas `{ animal_profile_id,
+ * event_type, event_date, created_at, pregnancy_status, heifer_fitness, service_type }`.
+ */
+export function buildReproBadgeEventsQuery(profileIds: readonly string[]): LocalQuery {
+  const placeholders = profileIds.map(() => '?').join(', ');
+  const sql =
+    'SELECT animal_profile_id, event_type, event_date, created_at, pregnancy_status, heifer_fitness, service_type ' +
+    'FROM reproductive_events ' +
+    `WHERE animal_profile_id IN (${placeholders}) AND deleted_at IS NULL ` +
+    `AND event_type IN ${REPRO_BADGE_EVENT_TYPES} ` +
+    'UNION ALL ' +
+    'SELECT animal_profile_id, event_type, event_date, created_at, NULL AS pregnancy_status, ' +
+    'NULL AS heifer_fitness, NULL AS service_type ' +
+    'FROM pending_reproductive_events ' +
+    `WHERE animal_profile_id IN (${placeholders}) AND event_type IN ${REPRO_BADGE_EVENT_TYPES} ` +
     'ORDER BY event_date ASC, created_at ASC';
   return { sql, args: [...profileIds, ...profileIds] };
 }
@@ -1457,6 +1500,31 @@ export function buildAddManeuverTactoVaquillonaInsert(
       '(id, animal_profile_id, event_type, event_date, heifer_fitness, created_at, session_id) ' +
       "VALUES (?, ?, 'tacto_vaquillona', ?, ?, ?, ?)",
     args: [id, profileId, eventDate, heiferFitness, createdAt, sessionId],
+  };
+}
+
+/**
+ * INSERT local de un evento `tacto_vaquillona` desde el ALTA (delta spec 02 aptitud, RAR.1.3/RAR.8.2). Espeja
+ * `buildAddManeuverTactoVaquillonaInsert` pero SIN la columna `session_id`: el alta NO es una jornada de manga
+ * → `session_id` queda NULL (el tenant-check 0056 solo dispara cuando hay session_id). Mismo enum/columna
+ * `heifer_fitness` (0053) — SIN schema nuevo. `created_at` de cliente (mismo patrón que el tacto de vaca —
+ * desempate del estado repro del mismo día). `created_by`/`establishment_id` los FUERZA el trigger server-side
+ * al subir (0077); la RLS `reproductive_events` (with check has_role_in) es la barrera real. CRUD plano,
+ * offline-safe (éxito local inmediato; RLS al subir). 1 CrudEntry → uploadData la sube.
+ */
+export function buildAddTactoVaquillonaInsert(
+  id: string,
+  profileId: string,
+  heiferFitness: string,
+  eventDate: string,
+  createdAt: string,
+): LocalQuery {
+  return {
+    sql:
+      'INSERT INTO reproductive_events ' +
+      '(id, animal_profile_id, event_type, event_date, heifer_fitness, created_at) ' +
+      "VALUES (?, ?, 'tacto_vaquillona', ?, ?, ?)",
+    args: [id, profileId, eventDate, heiferFitness, createdAt],
   };
 }
 

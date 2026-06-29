@@ -116,6 +116,88 @@ test('alta guiada desde empty → wizard (sexo→categoría→datos) → el anim
   await expect(page.getByText('Cargá tu primer animal', { exact: true })).toHaveCount(0);
 });
 
+test('delta aptitud (RAR.1/RAR.3/RAR.4): alta de VAQUILLONA "Sí, apta" → fila Aptitud "Apta" en la ficha + chip "Apta" en la lista', async ({
+  page,
+}) => {
+  // RAR.1.1: el prompt de aptitud aparece SOLO para vaquillona. RAR.1.3: "Sí, apta" → tacto_vaquillona apta.
+  // RAR.4.1: la ficha muestra la fila "Aptitud reproductiva" = "Apta". RAR.3.1: la lista muestra el chip único.
+  const user = await createTestUser('aptitud');
+  await setUserPhone(user.id, '1123456789');
+  await seedEstablishmentWithRodeo(user.id, 'Campo Aptitud');
+
+  await page.goto('/');
+  await signIn(page, user);
+  await waitForHome(page);
+  await gotoAnimales(page);
+
+  await page.getByRole('button', { name: 'Dar de alta tu primer animal' }).click();
+  await walkWizardToData(page, { sex: 'Hembra', categoryName: 'Vaquillona' });
+
+  // El prompt de aptitud (RAR.1.1) está presente para la vaquillona, con las 3 opciones es-AR.
+  await expect(page.getByText('¿Está apta para servicio? (opcional)', { exact: true })).toBeVisible();
+  const visualLabel = `${RUN_TAG}-APTA`;
+  await page.getByLabel('Identificación visual (recomendado)', { exact: true }).fill(visualLabel);
+  // Elegimos "Sí, apta" (a11y label "Aptitud Sí, apta", buttonA11y).
+  await page.getByRole('button', { name: 'Aptitud Sí, apta', exact: true }).click();
+
+  await page.getByRole('button', { name: 'Crear animal', exact: true }).click();
+
+  // Ficha: la fila "Aptitud reproductiva" con valor "Apta" (RAR.4.1) en "Estado actual".
+  await expect(page.getByText('Identificación', { exact: true })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText('Estado actual', { exact: true })).toBeVisible();
+  await expect(page.getByText('Aptitud reproductiva', { exact: true })).toBeVisible();
+  await expect(page.getByText('Apta', { exact: true }).first()).toBeVisible({ timeout: 20_000 });
+
+  // Volvemos a la lista → el chip de estado reproductivo "Apta" (RAR.3.1, a11y "Estado reproductivo: Apta").
+  await page.getByRole('button', { name: 'Volver', exact: true }).click();
+  await expect(page.getByText(visualLabel, { exact: true }).first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByLabel('Estado reproductivo: Apta').first()).toBeVisible();
+});
+
+test('delta aptitud (RAR.1.3): alta de VAQUILLONA "Aún no sé" → fila Aptitud "Diferida" (diferida, NO servida)', async ({
+  page,
+}) => {
+  // RAR.1.3/RAR.1.6: "Aún no sé" = diferida → la ficha muestra "Diferida"; 0105 la EXCLUYE de servidas aun con
+  // edad (el veredicto explícito gana al fallback; verificado a nivel de la función 0105, que NO se modifica).
+  const user = await createTestUser('diferida');
+  await setUserPhone(user.id, '1123456789');
+  await seedEstablishmentWithRodeo(user.id, 'Campo Diferida');
+
+  await page.goto('/');
+  await signIn(page, user);
+  await waitForHome(page);
+  await gotoAnimales(page);
+
+  await page.getByRole('button', { name: 'Dar de alta tu primer animal' }).click();
+  await walkWizardToData(page, { sex: 'Hembra', categoryName: 'Vaquillona' });
+
+  await page.getByLabel('Identificación visual (recomendado)', { exact: true }).fill(`${RUN_TAG}-DIF`);
+  await page.getByRole('button', { name: 'Aptitud Aún no sé', exact: true }).click();
+  await page.getByRole('button', { name: 'Crear animal', exact: true }).click();
+
+  await expect(page.getByText('Aptitud reproductiva', { exact: true })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText('Diferida', { exact: true }).first()).toBeVisible();
+});
+
+test('delta aptitud (RAR.1.2): el prompt de aptitud NO aparece para una categoría que no es vaquillona (ternera)', async ({
+  page,
+}) => {
+  // RAR.1.2: el prompt está gateado por categoría. Una ternera (recría) NO lo muestra.
+  const user = await createTestUser('noaptitud');
+  await setUserPhone(user.id, '1123456789');
+  await seedEstablishmentWithRodeo(user.id, 'Campo NoAptitud');
+
+  await page.goto('/');
+  await signIn(page, user);
+  await waitForHome(page);
+  await gotoAnimales(page);
+
+  await page.getByRole('button', { name: 'Dar de alta tu primer animal' }).click();
+  await walkWizardToData(page, { sex: 'Hembra', categoryName: 'Ternera' });
+
+  await expect(page.getByText('¿Está apta para servicio? (opcional)', { exact: true })).toHaveCount(0);
+});
+
 test('B: alta de una MULTÍPARA → el form NO pide peso, SÍ dientes/condición/preñez/cría al pie; se crea con override + condición en Estado actual', async ({
   page,
 }) => {

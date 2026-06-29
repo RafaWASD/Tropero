@@ -39,7 +39,8 @@ import { createAnimal, fetchSystemCategories, type SystemCategory } from '@/serv
 import { fetchBreedCatalog } from '@/services/sigsa/sigsa-export-service';
 import { selectedBreedLabel, type BreedCatalogEntry } from '@/utils/breed-picker';
 import { useBusyWhileMounted } from '@/services/ble/stick';
-import { addConditionScore, addTacto } from '@/services/events';
+import { addConditionScore, addTacto, addTactoVaquillona } from '@/services/events';
+import type { HeiferFitness } from '@/utils/maneuver-sequence';
 import { setCustomAttribute } from '@/services/custom-attributes';
 import {
   CustomPropertiesForm,
@@ -199,6 +200,9 @@ export default function CrearAnimalScreen() {
   const [conditionScore, setConditionScore] = useState<number | null>(null);
   // hembras preñables: estado de preñez (tacto, evento post-create si es positivo).
   const [pregnancyStatus, setPregnancyStatus] = useState<PregnancyStatus | null>(null);
+  // vaquillonas: aptitud reproductiva (tacto_vaquillona, evento post-create soft-fail). null = no elegida (se
+  // omite). delta spec 02 aptitud (RAR.1): prompt gateado a vaquillona, opcional.
+  const [heiferFitness, setHeiferFitness] = useState<HeiferFitness | null>(null);
   // vacas con servicio: cría al pie (nursing, columna). null = no elegido (se omite).
   const [nursing, setNursing] = useState<boolean | null>(null);
 
@@ -230,6 +234,9 @@ export default function CrearAnimalScreen() {
   const showCondition = categoryFields.includes('conditionScore');
   const showPregnancy = categoryFields.includes('pregnancy');
   const showNursing = categoryFields.includes('nursing');
+  // delta spec 02 aptitud (RAR.1.1/RAR.1.2): el prompt de aptitud aparece SOLO para la vaquillona (gateado por
+  // categoría, igual que el resto de los campos extra del paso 4). Es la categoría con eje de aptitud pre-servicio.
+  const showFitness = selectedCategoryCode === 'vaquillona';
 
   // Rodeo elegido + sus datos (system_id para resolver categoría/picker).
   //
@@ -533,6 +540,13 @@ export default function CrearAnimalScreen() {
       const r = await addTacto({ profileId, pregnancyStatus, eventDate });
       if (!r.ok) softFails.push('el estado de preñez');
     }
+    // Aptitud reproductiva (delta aptitud RAR.1.3/RAR.1.5): solo vaquillona + opción elegida → evento
+    // tacto_vaquillona post-create (mismo patrón soft-fail). "Aún no sé"=diferida (RAR.1.6: el veredicto
+    // explícito EXCLUYE de servidas aunque tenga edad, vía 0105 existente). Sin opción → no se manda (RAR.1.4).
+    if (showFitness && heiferFitness != null) {
+      const r = await addTactoVaquillona({ profileId, fitness: heiferFitness, eventDate });
+      if (!r.ok) softFails.push('la aptitud reproductiva');
+    }
 
     // Propiedades CUSTOM cargadas en el form (R13.10): current-value por (animal, field) → custom_attributes.
     // Mismo patrón soft-fail: el animal YA existe; si una falla, se avisa y se sigue (se agrega luego desde la
@@ -596,9 +610,11 @@ export default function CrearAnimalScreen() {
     showCondition,
     showPregnancy,
     showNursing,
+    showFitness,
     teethState,
     conditionScore,
     pregnancyStatus,
+    heiferFitness,
     nursing,
     router,
   ]); // isValidTagElectronic/TAG_ELECTRONIC_LENGTH/validateBirthYear/categoryOverrideFor son puras
@@ -719,6 +735,9 @@ export default function CrearAnimalScreen() {
             showPregnancy={showPregnancy}
             pregnancyStatus={pregnancyStatus}
             onPregnancy={setPregnancyStatus}
+            showFitness={showFitness}
+            heiferFitness={heiferFitness}
+            onFitness={setHeiferFitness}
             showNursing={showNursing}
             nursing={nursing}
             onNursing={setNursing}
@@ -1036,6 +1055,9 @@ function Step4Data({
   showPregnancy,
   pregnancyStatus,
   onPregnancy,
+  showFitness,
+  heiferFitness,
+  onFitness,
   showNursing,
   nursing,
   onNursing,
@@ -1079,6 +1101,10 @@ function Step4Data({
   showPregnancy: boolean;
   pregnancyStatus: PregnancyStatus | null;
   onPregnancy: (s: PregnancyStatus) => void;
+  /** delta aptitud (RAR.1): prompt de aptitud de vaquillona — gateado a `vaquillona`, opcional. */
+  showFitness: boolean;
+  heiferFitness: HeiferFitness | null;
+  onFitness: (f: HeiferFitness) => void;
   showNursing: boolean;
   nursing: boolean | null;
   onNursing: (v: boolean) => void;
@@ -1093,7 +1119,7 @@ function Step4Data({
 }) {
   const selectedGroupName = groups.find((g) => g.id === selectedGroupId)?.name ?? 'Sin lote';
   // ¿Hay algún dato EXTRA específico de la categoría? (para el título de la sección).
-  const hasExtra = showWeight || showTeeth || showCondition || showPregnancy || showNursing;
+  const hasExtra = showWeight || showTeeth || showCondition || showPregnancy || showFitness || showNursing;
   return (
     <>
       {/* ── Identificadores (R4.2 precargado read-only + R4.3 recomendados). BASE. ── */}
@@ -1234,6 +1260,14 @@ function Step4Data({
                 onChange={(v) => onPregnancy(v as PregnancyStatus)}
                 a11yPrefix="Preñez"
               />
+            </FieldGroup>
+          ) : null}
+
+          {/* delta aptitud (RAR.1.1): prompt de aptitud de la vaquillona — 3 opciones es-AR con el lenguaje de
+              color de TactoVaquillonaStep (apta=verde/diferida=ámbar/no_apta=terracota). Opcional (RAR.1.4). */}
+          {showFitness ? (
+            <FieldGroup label="¿Está apta para servicio? (opcional)">
+              <FitnessOptionRows value={heiferFitness} onChange={onFitness} />
             </FieldGroup>
           ) : null}
 
@@ -1379,6 +1413,68 @@ function OptionRows({
               borderWidth={2}
               borderColor={selected ? '$primary' : '$divider'}
               backgroundColor={selected ? '$primary' : '$white'}
+              paddingHorizontal="$4"
+              paddingVertical="$3"
+              pressStyle={{ opacity: 0.85 }}
+            >
+              <Text
+                flex={1}
+                minWidth={0}
+                fontFamily="$body"
+                fontSize="$5"
+                fontWeight="600"
+                color={selected ? '$white' : '$textPrimary'}
+              >
+                {opt.label}
+              </Text>
+              {selected ? <Check size={20} color={white} strokeWidth={2.5} /> : null}
+            </XStack>
+          </Pressable>
+        );
+      })}
+    </YStack>
+  );
+}
+
+// ─── Selector de APTITUD de vaquillona (delta spec 02 aptitud, RAR.1.1) ──────────────────────
+//
+// Espeja OptionRows (fila ancha, borde 2px, selected = relleno + texto $white + check) PERO conserva el
+// LENGUAJE DE COLOR de TactoVaquillonaStep (apta=verde $primary / diferida=ámbar $amber / no_apta=terracota
+// $terracota) en vez del verde único de OptionRows — para que la aptitud se lea por color además del texto.
+// Las 3 opciones es-AR fijadas por RAR.1.1: "Sí, apta" / "Aún no sé" / "No es apta". Cero hardcode: tokens.
+const FITNESS_OPTIONS: readonly { value: HeiferFitness; label: string; bg: '$primary' | '$amber' | '$terracota' }[] = [
+  { value: 'apta', label: 'Sí, apta', bg: '$primary' },
+  { value: 'diferida', label: 'Aún no sé', bg: '$amber' },
+  { value: 'no_apta', label: 'No es apta', bg: '$terracota' },
+];
+
+function FitnessOptionRows({
+  value,
+  onChange,
+}: {
+  value: HeiferFitness | null;
+  onChange: (v: HeiferFitness) => void;
+}) {
+  const white = getTokenValue('$white', 'color');
+  return (
+    <YStack width="100%" gap="$2">
+      {FITNESS_OPTIONS.map((opt) => {
+        const selected = value === opt.value;
+        return (
+          <Pressable
+            key={opt.value}
+            onPress={() => onChange(opt.value)}
+            {...buttonA11y(Platform.OS, { label: `Aptitud ${opt.label}`, selected })}
+          >
+            <XStack
+              width="100%"
+              alignItems="center"
+              gap="$2"
+              minHeight="$touchMin"
+              borderRadius="$card"
+              borderWidth={2}
+              borderColor={selected ? opt.bg : '$divider'}
+              backgroundColor={selected ? opt.bg : '$white'}
               paddingHorizontal="$4"
               paddingVertical="$3"
               pressStyle={{ opacity: 0.85 }}

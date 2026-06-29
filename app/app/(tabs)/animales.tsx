@@ -390,8 +390,10 @@ export default function AnimalesScreen() {
                 visualId={animal.visualIdAlt ?? undefined}
                 tagElectronic={animal.tagElectronic}
                 category={animal.categoryName || animal.categoryCode}
+                categoryCode={animal.categoryCode}
                 sex={animal.sex}
                 rodeo={animal.rodeoName}
+                reproStatus={animal.reproStatus}
                 onPress={() => onOpenAnimal(animal.profileId)}
               />
             ))}

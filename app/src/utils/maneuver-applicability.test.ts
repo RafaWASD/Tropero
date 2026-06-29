@@ -53,9 +53,10 @@ test('R6.12: raspado con sexo desconocido → NO aplica (fail-safe, no escribe r
 
 test('las maniobras sin filtro de sexo/categoría aplican a cualquier animal (sangrado/vacunación/etc.)', () => {
   // SOLO las maniobras que NO filtran por sexo ni categoría. Las filtradas (raspado, tacto, tacto_vaquillona,
-  // pesaje, pesaje_ternero) tienen sus propios tests abajo — incluirlas acá daría falsos verdaderos.
+  // pesaje, pesaje_ternero, inseminacion) tienen sus propios tests abajo — incluirlas acá daría falsos
+  // verdaderos. `inseminacion` SALIÓ de este set (delta aptitud RAR.6): ya NO es agnóstica (filtra hembra+apta).
   const agnostic: ManeuverKind[] = [
-    'sangrado', 'vacunacion', 'inseminacion', 'condicion_corporal', 'dientes', 'antiparasitario', 'antibiotico',
+    'sangrado', 'vacunacion', 'condicion_corporal', 'dientes', 'antiparasitario', 'antibiotico',
   ];
   for (const m of agnostic) {
     assert.equal(appliesToAnimal(m, FEMALE), true, `${m} debería aplicar a una hembra`);
@@ -103,6 +104,66 @@ test('R6.2/R6.3: filterByAnimalApplicability saca AMBOS tactos de un macho (deja
   const r = filterByAnimalApplicability(seq, MALE);
   assert.deepEqual(r.applicable, ['pesaje', 'raspado']);
   assert.deepEqual(r.skipped, ['tacto', 'tacto_vaquillona']);
+});
+
+// ─── RAR.6 — Inseminación: hembra + apta (corrección #1b) con fallback de edad ──────────────────
+// FEMALE = vaca_segundo_servicio (probada) → apta. HEIFER = vaquillona sin veredicto ni edad → NO apta.
+
+const HEIFER_APTA: AnimalApplicabilityInfo = {
+  sex: 'female', categoryCode: 'vaquillona', isCastrated: false, aptitude: 'apta', ageDays: 200,
+};
+const HEIFER_NO_APTA: AnimalApplicabilityInfo = {
+  sex: 'female', categoryCode: 'vaquillona', isCastrated: false, aptitude: 'no_apta', ageDays: 9999,
+};
+const HEIFER_DIFERIDA: AnimalApplicabilityInfo = {
+  sex: 'female', categoryCode: 'vaquillona', isCastrated: false, aptitude: 'diferida', ageDays: 9999,
+};
+// Vaquillona SIN veredicto con edad de servicio (≥365 d) → apta por fallback de edad (alineado a 0105).
+const HEIFER_OLD_NO_VERDICT: AnimalApplicabilityInfo = {
+  sex: 'female', categoryCode: 'vaquillona', isCastrated: false, aptitude: null, ageDays: 365,
+};
+// Vaquillona SIN veredicto y <365 d → NO apta (no llegó a edad de servicio).
+const HEIFER_YOUNG_NO_VERDICT: AnimalApplicabilityInfo = {
+  sex: 'female', categoryCode: 'vaquillona', isCastrated: false, aptitude: null, ageDays: 364,
+};
+const MULTIPARA: AnimalApplicabilityInfo = {
+  sex: 'female', categoryCode: 'multipara', isCastrated: false,
+};
+const CUT: AnimalApplicabilityInfo = { sex: 'female', categoryCode: 'cut', isCastrated: false };
+
+test('RAR.6.2: inseminación APLICA a hembra probada (multipara/vaca_segundo_servicio) y a vaquillona apta', () => {
+  assert.equal(appliesToAnimal('inseminacion', MULTIPARA), true);
+  assert.equal(appliesToAnimal('inseminacion', FEMALE), true); // vaca_segundo_servicio (probada)
+  assert.equal(appliesToAnimal('inseminacion', HEIFER_APTA), true);
+});
+
+test('RAR.6.3: inseminación NO aplica a macho (cierra #1b: hoy dejaba inseminar machos) ni a sexo desconocido', () => {
+  assert.equal(appliesToAnimal('inseminacion', MALE), false);
+  assert.equal(appliesToAnimal('inseminacion', UNKNOWN_SEX), false);
+});
+
+test('RAR.6.4: inseminación NO aplica a ternera', () => {
+  assert.equal(appliesToAnimal('inseminacion', CALF_F), false);
+});
+
+test('RAR.6.5: inseminación NO aplica a vaquillona no_apta/diferida; SÍ a sin-veredicto ≥365 d; NO a <365 d', () => {
+  assert.equal(appliesToAnimal('inseminacion', HEIFER_NO_APTA), false);
+  assert.equal(appliesToAnimal('inseminacion', HEIFER_DIFERIDA), false);
+  assert.equal(appliesToAnimal('inseminacion', HEIFER_OLD_NO_VERDICT), true); // fallback de edad (0105)
+  assert.equal(appliesToAnimal('inseminacion', HEIFER_YOUNG_NO_VERDICT), false);
+  // vaquillona sin veredicto y SIN aptitude/ageDays (call-site que no los pasa) → NO apta (fail-safe)
+  assert.equal(appliesToAnimal('inseminacion', HEIFER), false);
+});
+
+test('RAR.6.6: inseminación NO aplica a un animal CUT (categoría cut)', () => {
+  assert.equal(appliesToAnimal('inseminacion', CUT), false);
+});
+
+test('RAR.6.3: filterByAnimalApplicability saca la inseminación de un macho, preserva el resto y el orden', () => {
+  const seq: ManeuverKind[] = ['pesaje', 'inseminacion', 'vacunacion'];
+  const r = filterByAnimalApplicability(seq, MALE);
+  assert.deepEqual(r.applicable, ['pesaje', 'vacunacion']);
+  assert.deepEqual(r.skipped, ['inseminacion']);
 });
 
 // ─── R6.9/R6.10 — Pesaje vs pesaje_ternero: excluyentes por categoría (mata el doble pesaje) ────

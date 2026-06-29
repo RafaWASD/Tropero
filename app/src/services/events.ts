@@ -37,6 +37,7 @@ import {
   type PregnancyStatus,
   type ServiceType,
 } from '../utils/event-timeline';
+import type { HeiferFitness } from '../utils/maneuver-sequence';
 import {
   buildTimelineQuery,
   buildReproServiceTypesQuery,
@@ -45,6 +46,7 @@ import {
   buildAddWeightInsert,
   buildAddConditionScoreInsert,
   buildAddTactoInsert,
+  buildAddTactoVaquillonaInsert,
   buildAddServiceInsert,
   buildAddAbortionInsert,
   buildAddObservationInsert,
@@ -347,6 +349,46 @@ export async function addTacto(input: AddTactoInput): Promise<ServiceResult<true
     input.pregnancyStatus,
     input.eventDate,
     cleanStr(input.notes),
+    nowIso(),
+  );
+  const r = await runLocalWrite(q);
+  if (!r.ok) return { ok: false, error: { kind: r.error.kind, message: r.error.message } };
+  return { ok: true, value: true };
+}
+
+// ─── Escritura: reproductivo — tacto vaquillona desde el ALTA (delta aptitud, RAR.1.3/RAR.8.2) ──────
+//
+// MISMO patrón que addTacto: INSERT mínimo local en reproductive_events (event_type 'tacto_vaquillona' +
+// heifer_fitness), tenant por RLS (with check has_role_in), created_by/establishment_id por trigger (0077),
+// SIN .select(). A diferencia del tacto de manga (addTactoVaquillona vive acá, no es jornada): NO lleva
+// session_id (buildAddTactoVaquillonaInsert lo omite). El alta lo crea POST-create con patrón soft-fail
+// (crear-animal.tsx) — un fallo NO pierde el animal. `heifer_fitness` viene de un selector CERRADO → cumple
+// el enum 0053 al subir.
+//
+// ⚠️ Efecto colateral server-side (NO se toca desde el cliente): un `tacto_vaquillona` NO transiciona la
+// categoría (a diferencia del tacto+ de preñez); es un veredicto de aptitud que `0105` consume para el
+// denominador de servidas. El "Aún no sé"=diferida EXCLUYE a la vaquillona de servidas aunque tenga edad
+// (RAR.1.6 — el veredicto explícito gana al fallback de edad, vía la función 0105 existente, NO se modifica).
+
+export type AddTactoVaquillonaInput = {
+  profileId: string;
+  /** Aptitud. Viene de un selector CERRADO ("Sí, apta"/"Aún no sé"/"No es apta") → siempre un enum válido. */
+  fitness: HeiferFitness;
+  /** ISO 'YYYY-MM-DD'. event_date es columna `date` NOT NULL (el alta lo fecha HOY). */
+  eventDate: string;
+};
+
+/**
+ * Inserta un evento reproductivo `tacto_vaquillona` LOCAL desde el alta (RAR.1.3, offline) → upload queue. id
+ * + created_at de cliente. created_by/establishment_id por trigger; SIN session_id (el alta no es jornada).
+ * R6.3: sin .select(). Offline-safe (RAR.8.2): éxito local inmediato; la RLS valida al subir.
+ */
+export async function addTactoVaquillona(input: AddTactoVaquillonaInput): Promise<ServiceResult<true>> {
+  const q = buildAddTactoVaquillonaInsert(
+    randomUuid(),
+    input.profileId,
+    input.fitness,
+    input.eventDate,
     nowIso(),
   );
   const r = await runLocalWrite(q);
