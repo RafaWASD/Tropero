@@ -21,7 +21,18 @@ Implementer (`a5d802b9a1548fd62`) entregó los 3 fixes + autorrevisión:
 - **Veto de diseño del leader: PASS** con 2 ajustes (EN CURSO en background): (a) consistencia riel/lista — el nodo CE del timeline también muestra años ≥24m (`describeScrotalTimeline`); (b) `lineHeight="$3"` al sub-Text "edad·fecha" (descender clipping de jun/jul/ago, bug recurrente).
 - **Verificación**: typecheck + lint anti-hardcode + 117 unit verdes. E2E NO corrido en vivo (riesgo de flake 2-terminales); aserciones reconciliadas estáticamente.
 
-**Fase 1 CODE-COMPLETE + GATEADA** (2026-06-29): 2 ajustes del veto aplicados (riel↔lista consistentes en años, `formatAgeMonthsAR` removida limpia, `lineHeight="$3"`). **reviewer APPROVED** + **Gate 2 PASS 0 HIGH** (`progress/security_code_correcciones-fase1.md`). 116/116 unit + typecheck + anti-hardcode verdes; e2e reconciliado estáticamente (no corrido en vivo por riesgo de flake 2-terminales). **PENDIENTE: Puerta 2 (Raf)** + decidir si correr e2e/check completo y commitear.
+**Fase 1 DONE + COMMITEADA** (2026-06-29): reviewer APPROVED + Gate 2 PASS 0 HIGH + **Puerta 2 aprobada por Raf**. 2 commits en `main`: `2009104` (ADR-028 + triage) + `d67ea3e` (código #9/#12/#11). 116/116 unit + typecheck + anti-hardcode verdes; e2e reconciliado estáticamente (no corrido en vivo por riesgo de flake 2-terminales — quedó como deuda menor).
+
+## EN CURSO — Gate 0 del delta de APTITUD REPRODUCTIVA (keystone, elegido por Raf)
+**Gate 0 APROBADO** (Puerta 0, Raf 2026-06-29) → `context-aptitud-reproductiva.md`. **Hallazgo clave**: el backend YA hace casi todo (servidas en vivo + gateada por aptitud, `0105`); delta **frontend puro, SIN migración → Gate 1 N/A**. Cubre #6 (prompt aptitud en alta → evento `tacto_vaquillona`), #1b (inseminación = hembra+apta, fix de `appliesToAnimal`), #5 (badge **único** de estado reproductivo, desglosado en ficha). Guard server-side de macho → backlog.
+
+**spec_author DONE** → `{requirements,design,tasks}-aptitud-reproductiva.md` (RAR.1–RAR.8). Espejo puro `repro-status.ts` (reusa `deriveCurrentState`), fix `appliesToAnimal`, badge `ReproStatusChip` (3 tiers), prompt de aptitud en `crear-animal.tsx`. **Gate 1 N/A** (frontend puro). Veto del leader PASS.
+
+**Puerta 1 APROBADA por Raf** (2026-06-29) con 1 cambio: inseminación **SÍ aplica el fallback de edad** (vaquillona ≥365d sin veredicto = inseminable, alineada a `0105`). Spec reconciliada (RAR.6.1/6.2/6.5 + design §2/§6/§10 + Historial). Las otras 3 decisiones (colores 3-tier · "No apta" neutro · "Sin evaluar") avaladas.
+
+**Estados**: spec 08 → `blocked` (2 gates externos: deploy YAML PowerSync [Raf] + upload SIGSA [Facundo]); spec 02 → `in_progress` (delta aptitud). Un solo in_progress (validado).
+
+**EN CURSO**: implementer (`ae17ca0e4552beb79`, background) construyendo el delta. Al volver: veto de diseño del badge → reviewer → Gate 2 → Puerta 2.
 
 ## PENDIENTE (próximos segmentos, por orden)
 - **A** cluster ternero (#7/#4/#15/#1a) — delta-02, **gatea peso destete (Facundo)**.

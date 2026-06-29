@@ -17,6 +17,13 @@ No es un sustituto de `feature_list.json` ni de los ADRs — es la antesala dond
 
 ## Ítems pendientes
 
+## 2026-06-29 — Guard server-side: rechazar servicio/inseminación sobre macho (defensa en profundidad)
+
+**Origen**: Gate 0 del delta de aptitud reproductiva (`specs/active/02-modelo-animal/context-aptitud-reproductiva.md`, decisión 5). El fix de #1b (inseminación solo a hembra apta) se hace **client-side** para el MVP (igual que todo el gating de maniobra hoy).
+**Qué**: agregar una barrera **server-side** que rechace un `reproductive_events` de `event_type='service'` (o tacto/inseminación) sobre un animal `sex='male'`. Hoy `appliesToAnimal` filtra client-side, pero un INSERT directo por PostgREST/PowerSync (que saltea el cliente) podría crear un servicio sobre un macho.
+**Por qué importa**: bajo-medio. Integridad del dato reproductivo (un servicio sobre un toro es basura semántica que ensucia denominadores). NO explotable cross-tenant (la RLS ya scopea por establecimiento); es defensa en profundidad, misma clase que el cap de `work_lot_label` (2026-06-14).
+**Próximo paso sugerido**: trigger `BEFORE INSERT` sobre `reproductive_events` que valide `sex='female'` para los event_types reproductivos de hembra. Como toca DB → **Gate 1 puntual**. Foldear en el primer delta que toque triggers de `reproductive_events`. Mientras tanto, el fix client-side de #1b cubre el flujo normal de la app.
+
 ## 2026-06-29 — Peso de destete: cómo se captura (gatea %destete de reportes)
 
 **Origen**: correcciones del testeo en vivo con Facundo (`docs/correcciones-prueba-en-vivo-2026-06-27.md`, #7 y #10). Raf lo dejó pendiente de charlar con Facundo.
