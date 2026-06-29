@@ -136,6 +136,26 @@ Triple cobertura para que no dependa de la memoria de nadie:
 - **reviewer** la verifica —rechaza con CHANGES_REQUESTED si el `design.md` quedó mintiendo.
 - **leader** la exige como pre-condición de `done` (no aprueba con specs sin reconciliar).
 
+## SDD sobre features `done`: in-place vs delta-spec (ADR-028)
+
+La regla de reconciliación de arriba cubre los fixes **dentro del ciclo de una spec activa**. Para **cambios nuevos sobre una feature ya `done`** (ej: correcciones de un testeo en vivo), la regla es de **dos niveles** — elige *cuánta* documentación según el tamaño del cambio, sin agregar estados al ciclo. Detalle y razonamiento en `docs/adr/ADR-028-documentacion-sdd-cambios-sobre-features-done.md`.
+
+**Nivel A — Reconciliación in-place (sin spec nueva).** Cambios que **no cambian el *qué* declarado**, solo el *cómo*: copy, reordenar opciones, sacar/relabelar un elemento, ajustar un formato.
+- No se crea spec. Se edita el `design.md` baseline + 1 línea de changelog (+ nota de reconciliación bajo el `R<n>` si su wording quedó mintiendo).
+- Igual pasa por implementer → reviewer → **Gate 2**. Sin Gate 0 ni Gate 1.
+
+**Nivel B — Delta-spec.** Cambio sustancial o capacidad nueva.
+- Set nuevo `{context,requirements,design,tasks}-<slug>.md` en la **misma carpeta** `specs/active/<name>/` (patrón ya usado: `cut-ficha`, `tier2-categorias`, `09resto-dedup`…).
+- **El baseline NO se reescribe; el `tasks.md` original NO se toca** (es el ledger histórico del incremento; el delta trae el suyo).
+- Gates proporcionales: Gate 0 siempre · Gate 1 si toca RLS/schema/Edge/RPC/datos regulados · Gate 2 siempre.
+- Un cambio que cruza features genera un delta por feature, coordinados por un mismo `context-<slug>.md`.
+
+**Reconciliación de cierre + índice de deltas** (para que el baseline no mienta por omisión):
+- Al cerrar el delta (Puerta 2), se folda al baseline un puntero + nota as-built de alto nivel bajo el/los `R<n>` afectados (no reescritura).
+- Cada `design.md` baseline lleva al inicio un bloque **"Deltas posteriores"**: lista de `<slug>` + 1 línea + estado.
+
+**Cómo elegir el nivel:** ¿cambia el comportamiento declarado / agrega capacidad / toca schema-RLS-RPC? → **B**. ¿Solo corrige presentación sin cambiar lo que el sistema hace? → **A**. Ante la duda, **B**.
+
 ## Política de pipeline (orden entre refinar, spec-ear e implementar)
 
 Tres actividades, tres ritmos. La implementación es la prioridad; refinar y spec-ear van adelante lo justo para no frenarla nunca:

@@ -17,6 +17,13 @@ No es un sustituto de `feature_list.json` ni de los ADRs — es la antesala dond
 
 ## Ítems pendientes
 
+## 2026-06-29 — Peso de destete: cómo se captura (gatea %destete de reportes)
+
+**Origen**: correcciones del testeo en vivo con Facundo (`docs/correcciones-prueba-en-vivo-2026-06-27.md`, #7 y #10). Raf lo dejó pendiente de charlar con Facundo.
+**Qué**: definir cómo se carga el **peso de destete** del ternero al destetar: ¿en una maniobra de destete dedicada? ¿peso manual o por balanza? ¿obligatorio u opcional? Hoy el destete es solo un evento `weaning` en `reproductive_events` **sin columna de peso**.
+**Por qué importa**: medio-alto. Es el **numerador** del %destete (#10, segmento B de las correcciones) y parte del historial de la madre (#7). Sin definirlo no se puede aterrizar el delta de %destete ni guardar el peso de destete junto a cada cría en la ficha de la madre. **Bloquea el cierre del segmento A (cluster ternero) y la parte de destete del segmento B.**
+**Próximo paso sugerido**: refinar con Facundo (cómo lo hacen en el campo) → Gate 0 del delta del cluster ternero (delta-spec sobre 02 + 07). Migración nueva `weaning_weight` en `reproductive_events` (o tabla de destete). Foldear en el delta-02 "cluster ternero".
+
 ## 2026-06-20 — Opción A de R13.30 (spec 03 M7): preservar el histórico de un dato custom borrado en la ficha
 
 **Origen**: fix-loop del chunk M7 de spec 03 (gestión de datos custom). El reviewer + el e2e cazaron que R13.30 ("la ficha sigue mostrando el valor de un dato custom borrado") NO se honra end-to-end: la sync-stream `est_field_definitions_custom` (`sync-streams/rafaq.yaml` l.243) filtra `deleted_at IS NULL` → al soft-deletear, la definición se prunea del device → el INNER JOIN del display no resuelve el `label` → el valor histórico desaparece. **Raf eligió la Opción B (MVP)**: no se cambia la stream; el cliente lo asume y la confirmación de borrado ADVIERTE que las cargas previas dejarán de verse (R13.30/R13.31 reconciliados al as-built).
