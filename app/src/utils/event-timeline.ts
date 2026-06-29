@@ -960,27 +960,38 @@ export function describeCategoryChange(item: {
 }
 
 /**
- * Edad en meses → label es-AR para el detalle de la CE ("24 meses" / "1 mes"). NO snapea a la rueda (es un
- * valor SNAPSHOT histórico ya persistido, R14.8 — no se re-clampa al rango de la rueda). null → null (la CE
- * sin edad solo muestra los cm). Redondea (la edad snapshot puede venir entera, pero defensivo).
+ * Edad en meses → label es-AR con AÑOS tras los 24 meses (FIX #11, 2026-06-29 — pedido de Raf para la CE de
+ * la ficha). ÚNICO formateador de edad de CE: lo usan la LISTA (ScrotalSeriesRow) y el RIEL/timeline
+ * (describeScrotalTimeline) → mismo dato, mismo formato en las dos pantallas (consistencia, no divergencia).
+ *   - < 24 meses → en meses ("18 meses", "1 mes")
+ *   - ≥ 24 meses → años + meses ("2 años 3 meses"; "2 años" si no sobran meses; "2 años 1 mes" en singular).
+ *
+ * null/no-finito → null (la CE sin edad solo muestra los cm). Redondea (snapshot histórico, R14.8 — NO snapea
+ * a rueda). No guarda negativos (la edad snapshot no es negativa).
  */
-export function formatAgeMonthsAR(months: number | null | undefined): string | null {
+export function formatAgeYearsAR(months: number | null | undefined): string | null {
   if (months == null || !Number.isFinite(months)) return null;
   const m = Math.round(months);
-  return m === 1 ? '1 mes' : `${m} meses`;
+  if (m < 24) return m === 1 ? '1 mes' : `${m} meses`;
+  const years = Math.floor(m / 12);
+  const rem = m % 12;
+  const yearsLabel = years === 1 ? '1 año' : `${years} años`;
+  if (rem === 0) return yearsLabel;
+  const monthsLabel = rem === 1 ? '1 mes' : `${rem} meses`;
+  return `${yearsLabel} ${monthsLabel}`;
 }
 
 /**
  * Detalle es-AR de una medición de CE para el riel/tarjeta: la CE en cm (coma decimal, reusa `formatCmAR`)
- * + la edad snapshot si está ("36,5 cm · 24 meses"); edad null (R14.7/R14.8) → solo la CE ("36,5 cm").
- * MISMA fuente de formato que `describeStepValue` (maneuver-sequence.ts) — un único origen del formato de CE.
- * El TÍTULO del evento ("Circunferencia escrotal") lo pone el componente (TimelineEvent / la tarjeta).
+ * + la edad snapshot si está, en años tras 24m ("36,5 cm · 2 años"); edad null (R14.7/R14.8) → solo la CE
+ * ("36,5 cm"). MISMA fuente de edad que la LISTA de la ficha (`formatAgeYearsAR`, FIX #11) → riel y lista
+ * consistentes. El TÍTULO del evento ("Circunferencia escrotal") lo pone el componente (TimelineEvent / la tarjeta).
  */
 export function describeScrotalTimeline(item: {
   circumferenceCm: number;
   ageMonths: number | null;
 }): string {
   const ce = `${formatCmAR(item.circumferenceCm)} cm`;
-  const age = formatAgeMonthsAR(item.ageMonths);
+  const age = formatAgeYearsAR(item.ageMonths);
   return age ? `${ce} · ${age}` : ce;
 }

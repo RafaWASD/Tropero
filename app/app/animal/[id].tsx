@@ -87,7 +87,7 @@ import {
 import { shouldShowFutureBullBadge } from '@/components/AnimalRow';
 import {
   deriveCurrentState,
-  formatAgeMonthsAR,
+  formatAgeYearsAR,
   formatEventDate,
   hasAbortion,
   humanizePregnancyState,
@@ -2106,24 +2106,19 @@ function formatKg(n: number): string {
 
 // ─── Tarjeta de tendencia de CIRCUNFERENCIA ESCROTAL (spec 03 M6, R14.14) ─────────────
 //
-// Card de la ficha (solo machos enteros, gateada por el caller con isBullEntire) con:
-//   1. una MINI-TENDENCIA: sparkline de barras (tokens, sin lib de charts) en orden CRONOLÓGICO (viejo→nuevo,
-//      izq→der → "subir" se lee natural). La altura de cada barra escala su cm dentro del rango [min,max] de
-//      la serie; una sola medición (o todas iguales) → barras al tope (no hay "tendencia" pero la card es
-//      legible). La última (más reciente) se resalta en $primary; las previas en $greenLight.
-//   2. la SERIE de mediciones (más reciente primero, igual que buildScrotalHistoryQuery): cada fila = la CE
-//      en cm (es-AR, grande) + "edad · fecha" (muted). Si la serie es larga, la lista scrollea con un FADE
-//      de affordance abajo (scrollFades) para que se note que hay más.
+// Card de la ficha (solo machos enteros, gateada por el caller con isBullEntire). Muestra la SERIE de
+// mediciones (más reciente primero, igual que buildScrotalHistoryQuery): cada fila = la CE en cm (es-AR,
+// grande) + "edad · fecha" (muted). La edad va en AÑOS tras los 24 meses (FIX #11). Si la serie es larga, la
+// lista scrollea con un FADE de affordance abajo (scrollFades) para que se note que hay más.
+//
+// (FIX #11, 2026-06-29 — pedido de Raf): se REMOVIÓ la mini-tendencia (sparkline de barras verde). La card
+// queda solo con la lista de todas las mediciones (sin hueco muerto); la evolución se lee en la lista y el riel.
 //
 // Cero hardcode (ADR-023 §4): tokens + getTokenValue para los íconos lucide. a11y por helper. El título de la
 // card sin recorte (lineHeight matcheando el fontSize, igual que DetailSection — reference_descender_clipping).
 // es-AR (coma decimal "36,5 cm"). El empty (macho entero sin mediciones) es un caso de negocio legítimo (la
 // 1ra medición), no falta de sync → empty cálido $greenLight, NO un error.
 
-// Alturas de la mini-tendencia (geometría libre del sparkline, no tokens de spacing): el área tiene CHART_H
-// de alto; una barra va de CHART_MIN (la CE más baja de la serie) a CHART_H (la más alta).
-const CHART_H = 56;
-const CHART_MIN_H = 12;
 /** Alto de la franja de fade del affordance de scroll (geometría libre, decorativa). */
 const FADE_H = 20;
 
@@ -2131,7 +2126,6 @@ const FADE_H = 20;
 const SCROTAL_VISIBLE_ROWS = 4;
 
 function ScrotalTrendSection({ history }: { history: ScrotalMeasurementRow[] }) {
-  const primary = getTokenValue('$primary', 'color');
   // `now` por render para los timestamps relativos de cada medición (determinístico dentro del render).
   const now = new Date();
 
@@ -2148,60 +2142,10 @@ function ScrotalTrendSection({ history }: { history: ScrotalMeasurementRow[] }) 
           </Text>
         </YStack>
       ) : (
-        <YStack gap="$3">
-          <ScrotalSparkline history={history} primary={primary} />
-          <ScrotalSeriesList history={history} now={now} />
-        </YStack>
+        // FIX #11 (2026-06-29): sin sparkline — solo la lista de todas las mediciones (sin hueco muerto).
+        <ScrotalSeriesList history={history} now={now} />
       )}
     </DetailSection>
-  );
-}
-
-/**
- * Mini-tendencia: sparkline de barras en orden CRONOLÓGICO (viejo→nuevo). La altura escala la CE dentro del
- * rango [min,max] de la serie (a igualdad de min/max → todas al tope). La más reciente en $primary; las
- * previas en $greenLight. Una sola medición → una barra (sin tendencia, pero la card sigue legible).
- */
-function ScrotalSparkline({ history, primary }: { history: ScrotalMeasurementRow[]; primary: string }) {
-  // history viene más-reciente-primero; la tendencia se dibuja viejo→nuevo (izq→der) → reversa.
-  const chrono = [...history].reverse();
-  const cms = chrono.map((m) => m.circumferenceCm);
-  const min = Math.min(...cms);
-  const max = Math.max(...cms);
-  const span = max - min;
-  // El índice de la barra más reciente (la última en orden cronológico) → se resalta en $primary.
-  const lastIdx = chrono.length - 1;
-
-  return (
-    <XStack
-      width="100%"
-      height={CHART_H}
-      alignItems="flex-end"
-      gap="$1"
-      {...labelA11y(
-        Platform.OS,
-        `Tendencia de circunferencia escrotal: de ${formatCmWithUnitAR(cms[0])} a ${formatCmWithUnitAR(cms[lastIdx])}`,
-      )}
-    >
-      {chrono.map((m, i) => {
-        // Altura proporcional: la CE más baja → CHART_MIN_H, la más alta → CHART_H. Sin span (1 sola medición
-        // o todas iguales) → todas al tope (no hay tendencia que mostrar, pero la barra se ve).
-        const ratio = span > 0 ? (m.circumferenceCm - min) / span : 1;
-        const h = CHART_MIN_H + ratio * (CHART_H - CHART_MIN_H);
-        const isLast = i === lastIdx;
-        return (
-          <View
-            key={m.id}
-            flex={1}
-            height={h}
-            minWidth={4}
-            borderTopLeftRadius="$1"
-            borderTopRightRadius="$1"
-            backgroundColor={isLast ? '$primary' : '$greenLight'}
-          />
-        );
-      })}
-    </XStack>
   );
 }
 
@@ -2293,7 +2237,8 @@ function ScrotalSeriesRow({
   isLast: boolean;
 }) {
   // "edad · fecha": la edad snapshot (R14.8, nullable → omitida) + la fecha de medición (date-only, es-AR).
-  const age = formatAgeMonthsAR(m.ageMonths);
+  // Edad en AÑOS tras los 24 meses (FIX #11): < 24m → "18 meses"; ≥ 24m → "2 años 3 meses".
+  const age = formatAgeYearsAR(m.ageMonths);
   const date = formatEventDate(m.measuredAt, now, { dateOnly: true });
   const subParts = [age, date].filter(Boolean) as string[];
   const sub = subParts.join(' · ');
@@ -2309,7 +2254,9 @@ function ScrotalSeriesRow({
         {formatCmWithUnitAR(m.circumferenceCm)}
       </Text>
       {sub ? (
-        <Text fontFamily="$body" fontSize="$3" fontWeight="500" color="$textMuted" numberOfLines={1}>
+        // lineHeight matcheando el fontSize: Tamagui NO aplica el lineHeight del token con `fontSize` suelto
+        // → sin esto, numberOfLines={1} recorta los descendentes de las abreviaturas de mes (jun/jul/ago).
+        <Text fontFamily="$body" fontSize="$3" lineHeight="$3" fontWeight="500" color="$textMuted" numberOfLines={1}>
           {sub}
         </Text>
       ) : null}

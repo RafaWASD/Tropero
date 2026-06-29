@@ -13,6 +13,11 @@
 > - `compute_category` sin service (`0104`) y `pregnancy_status` del tacto (`0026`, Stream B).
 > - `pregnancy-buckets.ts` (regla CCL cliente, DD-PSC-3) — **fuente única** de la regla de buckets por meses.
 
+> **Cambios in-place posteriores (Nivel A — ADR-028):**
+> - **#9 copy "KPIs"→"Datos" (2026-06-29):** en `app/app/(tabs)/reportes.tsx` el texto visible al usuario dejó
+>   de decir "KPIs" — el spinner ahora dice "Calculando los datos…" y el empty de servicio "…ni los datos
+>   reproductivos." (los identificadores de código `KpiCard`/`useRodeoKpis`/`kpis` NO cambian, no son visibles).
+
 ---
 
 ## 0. Resumen de la decisión arquitectónica

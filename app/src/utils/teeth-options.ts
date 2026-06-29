@@ -7,10 +7,11 @@
 // componente DientesStep solo dibuja esta lista (un bloque gigante por opción); el umbral CUT lo manda
 // `CUT_PROMPT_TEETH` (maneuver-applicability.ts) — única fuente de verdad, no se re-define acá.
 //
-// El ORDEN es de progresión de boca: dientes de leche en aumento (2d→4d→6d→boca llena = adulto pleno) y
-// luego boca gastada/descarte (3/4 → 1/2 → 1/4 → sin dientes). Las 3 últimas-gastadas (1/2, 1/4, sin
-// dientes) son las que disparan CUT; 3/4 NO (R6.8). Las etiquetas espejan humanizeTeeth / el resumen
-// (maneuver-sequence.TEETH_LABEL): "2 dientes", "Boca llena", "Sin dientes", etc.
+// El ORDEN (FIX #12, 2026-06-29 — pedido de Raf) va de boca MÁS GASTADA a más joven: descarte/vejez
+// arriba (sin dientes → 1/4 → 1/2 → 3/4), boca llena (adulto pleno) al medio, y dientes de leche en
+// bajada (6d → 4d → 2d). Es el REVERSO de la progresión etaria (joven→gastada). Las 3 más-gastadas
+// (1/2, 1/4, sin dientes) son las que disparan CUT; 3/4 NO (R6.8). Las etiquetas espejan humanizeTeeth /
+// el resumen (maneuver-sequence.TEETH_LABEL): "2 dientes", "Boca llena", "Sin dientes", etc.
 
 import { CUT_PROMPT_TEETH } from './maneuver-applicability';
 
@@ -25,19 +26,20 @@ export type TeethOption = {
 };
 
 /**
- * Las 8 opciones del enum `teeth_state_enum` (0020) en ORDEN de progresión de boca (joven → gastada). El
- * `cutTrigger` se DERIVA de `CUT_PROMPT_TEETH` (no se hardcodea por opción) → si el umbral CUT cambia
- * (Facundo decide incluir 3/4), basta tocar el set en maneuver-applicability.ts y esta lista lo refleja.
+ * Las 8 opciones del enum `teeth_state_enum` (0020) en ORDEN gastada → joven (FIX #12, 2026-06-29 —
+ * reverso de la progresión etaria). El `cutTrigger` se DERIVA de `CUT_PROMPT_TEETH` (no se hardcodea por
+ * opción) → si el umbral CUT cambia (Facundo decide incluir 3/4), basta tocar el set en
+ * maneuver-applicability.ts y esta lista lo refleja.
  */
 export const TEETH_OPTIONS: readonly TeethOption[] = [
-  { value: '2d', label: '2 dientes', cutTrigger: CUT_PROMPT_TEETH.has('2d') },
-  { value: '4d', label: '4 dientes', cutTrigger: CUT_PROMPT_TEETH.has('4d') },
-  { value: '6d', label: '6 dientes', cutTrigger: CUT_PROMPT_TEETH.has('6d') },
-  { value: 'boca_llena', label: 'Boca llena', cutTrigger: CUT_PROMPT_TEETH.has('boca_llena') },
-  { value: '3/4', label: '3/4', cutTrigger: CUT_PROMPT_TEETH.has('3/4') },
-  { value: '1/2', label: '1/2', cutTrigger: CUT_PROMPT_TEETH.has('1/2') },
-  { value: '1/4', label: '1/4', cutTrigger: CUT_PROMPT_TEETH.has('1/4') },
   { value: 'sin_dientes', label: 'Sin dientes', cutTrigger: CUT_PROMPT_TEETH.has('sin_dientes') },
+  { value: '1/4', label: '1/4', cutTrigger: CUT_PROMPT_TEETH.has('1/4') },
+  { value: '1/2', label: '1/2', cutTrigger: CUT_PROMPT_TEETH.has('1/2') },
+  { value: '3/4', label: '3/4', cutTrigger: CUT_PROMPT_TEETH.has('3/4') },
+  { value: 'boca_llena', label: 'Boca llena', cutTrigger: CUT_PROMPT_TEETH.has('boca_llena') },
+  { value: '6d', label: '6 dientes', cutTrigger: CUT_PROMPT_TEETH.has('6d') },
+  { value: '4d', label: '4 dientes', cutTrigger: CUT_PROMPT_TEETH.has('4d') },
+  { value: '2d', label: '2 dientes', cutTrigger: CUT_PROMPT_TEETH.has('2d') },
 ] as const;
 
 /** Etiqueta es-AR de un valor de dientes (fallback al valor crudo si no está en el catálogo). */

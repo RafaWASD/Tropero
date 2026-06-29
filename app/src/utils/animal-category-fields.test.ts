@@ -75,6 +75,15 @@ test('TEETH_OPTIONS cubre exactamente los 8 valores del enum teeth_state_enum (D
   assert.deepEqual(values, ['1/2', '1/4', '2d', '3/4', '4d', '6d', 'boca_llena', 'sin_dientes'].sort());
 });
 
+test('TEETH_OPTIONS orden de presentación gastada→joven (FIX #12, 2026-06-29) — igual que la maniobra', () => {
+  // Pedido de Raf: descarte/vejez arriba, boca llena al medio, dientes de leche en bajada. MISMO orden
+  // que `teeth-options.ts` (la maniobra) → alta y maniobra muestran la lista igual.
+  assert.deepEqual(
+    TEETH_OPTIONS.map((o) => o.value),
+    ['sin_dientes', '1/4', '1/2', '3/4', 'boca_llena', '6d', '4d', '2d'],
+  );
+});
+
 test('TEETH_OPTIONS labels de campo (Facundo): sin_dientes→"Sin dientes", 2d→"2 dientes", boca_llena→"Boca llena"', () => {
   const byValue = Object.fromEntries(TEETH_OPTIONS.map((o) => [o.value, o.label]));
   assert.equal(byValue['sin_dientes'], 'Sin dientes');

@@ -3,12 +3,15 @@
 //
 // Cubre el display read-only (frontend puro) de M6-C.2:
 //   A) TORO ENTERO con ≥1 CE → la ficha muestra la tarjeta "Circunferencia escrotal" con la SERIE (cm + edad
-//      + fecha, es-AR coma decimal "36,5 cm") + la mini-tendencia, y la CE aparece en el TIMELINE de eventos.
+//      + fecha, es-AR coma decimal "36,5 cm"; edad en años tras 24m, FIX #11) y la CE aparece en el TIMELINE.
 //   B) HEMBRA → NO se muestra la tarjeta (paridad con la fila repro solo-hembras, al revés).
 //   C) CASTRADO (novillo) → NO se muestra la tarjeta (macho NO entero).
 //
+// FIX #11 (2026-06-29): se removió el sparkline/mini-tendencia de la tarjeta — queda solo la lista; y la edad
+// va en años tras los 24 meses, en la lista Y en el riel/timeline (mismo formateador → consistencia).
+//
 // Capturas web TÁCTIL (hasTouch, 412 + 360) → tests/modo-maniobra/:
-//   - ficha-ce-tarjeta-{360,412}.png — la ficha del toro con la tarjeta de tendencia (serie + mini-tendencia)
+//   - ficha-ce-tarjeta-{360,412}.png — la ficha del toro con la tarjeta de tendencia (lista de mediciones)
 //
 // La CE se siembra DIRECTO por service_role (seedScrotalMeasurement) — el display lee el histórico LOCAL
 // (fetchScrotalHistory) tras el sync. Web táctil real (memoria reference_rn_web_pitfalls). Cleanup en afterAll.
@@ -65,7 +68,7 @@ test('ficha de un TORO entero con CE: tarjeta de tendencia (serie cm+edad+fecha 
     birthDate: '2022-06-01',
   });
   // Serie longitudinal de 3 mediciones (la CE crece con la edad): 32 → 35,5 → 38 cm. La más reciente (38)
-  // es la que la mini-tendencia resalta + la 1ra fila de la serie (más reciente primero).
+  // es la 1ra fila de la serie (más reciente primero).
   await seedScrotalMeasurement(profileId, { circumferenceCm: 32, ageMonths: 18, measuredAt: '2024-01-15' });
   await seedScrotalMeasurement(profileId, { circumferenceCm: 35.5, ageMonths: 24, measuredAt: '2024-07-20' });
   await seedScrotalMeasurement(profileId, { circumferenceCm: 38, ageMonths: 30, measuredAt: '2025-01-10' });
@@ -84,9 +87,10 @@ test('ficha de un TORO entero con CE: tarjeta de tendencia (serie cm+edad+fecha 
   await expect(page.getByText('38 cm', { exact: true }).first()).toBeVisible({ timeout: 15_000 });
   await expect(page.getByText('35,5 cm', { exact: true }).first()).toBeVisible();
   await expect(page.getByText('32 cm', { exact: true }).first()).toBeVisible();
-  // La edad snapshot + fecha de la medición más reciente: "30 meses · 10 ene" (es-AR; el día depende del
-  // formateo date-only). Verificamos al menos la edad en meses.
-  await expect(page.getByText(/30\s*meses/).first()).toBeVisible();
+  // La edad snapshot + fecha de la medición más reciente. FIX #11 (2026-06-29): la edad va en AÑOS tras los
+  // 24 meses → 30 meses se muestra "2 años 6 meses" (no "30 meses"), tanto en la LISTA como en el RIEL
+  // (mismo formateador formatAgeYearsAR → consistencia). Verificamos el formato en años en la lista.
+  await expect(page.getByText(/2\s*años\s*6\s*meses/).first()).toBeVisible();
 
   // Scrolleamos la tarjeta de CE a la vista para la captura (vive debajo del fold de la ficha).
   await page.getByText('Circunferencia escrotal', { exact: true }).first().scrollIntoViewIfNeeded();
@@ -99,8 +103,9 @@ test('ficha de un TORO entero con CE: tarjeta de tendencia (serie cm+edad+fecha 
   // La CE aparece en el TIMELINE de eventos (riel) — el evento "Circunferencia escrotal" se compone en el
   // cliente. Hay al menos un nodo de CE con su valor (puede haber 3). El título "Historial" está presente.
   await expect(page.getByText('Historial', { exact: true })).toBeVisible({ timeout: 15_000 });
-  // En el riel el evento de CE lleva el título "Circunferencia escrotal" + el detalle "38 cm · 30 meses".
-  const timelineNode = page.getByText(/38\s*cm\s*·\s*30\s*meses/).first();
+  // En el riel el evento de CE lleva el título "Circunferencia escrotal" + el detalle "38 cm · 2 años 6 meses"
+  // (FIX #11: edad en años tras 24m, MISMO formato que la lista de arriba → riel y lista consistentes).
+  const timelineNode = page.getByText(/38\s*cm\s*·\s*2\s*años\s*6\s*meses/).first();
   await expect(timelineNode).toBeVisible({ timeout: 15_000 });
   // Captura del riel con la CE (la más reciente arriba del historial).
   await timelineNode.scrollIntoViewIfNeeded();
@@ -144,7 +149,7 @@ test('ficha de un TORO con serie LARGA de CE: la lista scrollea (affordance), mu
   await expect(page.getByText('Circunferencia escrotal', { exact: true }).first()).toBeVisible({ timeout: 20_000 });
   // La más reciente (40 cm) está arriba de la serie (visible sin scrollear la lista interna).
   await expect(page.getByText('40 cm', { exact: true }).first()).toBeVisible({ timeout: 15_000 });
-  // Captura de la serie larga (lista capeada + fade de affordance abajo + mini-tendencia de 7 barras).
+  // Captura de la serie larga (lista capeada + fade de affordance abajo; sin sparkline desde FIX #11).
   await page.getByText('Circunferencia escrotal', { exact: true }).first().scrollIntoViewIfNeeded();
   await page.screenshot({ path: path.join(OUT_DIR, 'ficha-ce-serie-larga-412.png') });
   // La más vieja (30 cm) existe pero está bajo el fold de la lista capeada → reachable por scroll interno.

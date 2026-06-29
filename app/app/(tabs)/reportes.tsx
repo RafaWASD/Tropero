@@ -337,7 +337,7 @@ function ReproSection({
   // Estado del bloque: usamos %preñez como reporte "líder" (los 4 comparten guard/cota). Si está cargando
   // por primera vez / offline / error → un solo estado para todo el bloque (no 4 spinners).
   const pv = reportView(pregnancy);
-  if (pv.showSpinner) return <ReportLoading label="Calculando KPIs…" />;
+  if (pv.showSpinner) return <ReportLoading label="Calculando los datos…" />;
   if (pv.showOffline) return <ReportOffline onRetry={() => reloadRepro(kpis)} />;
   if (pv.showError) return <ReportError message={pregnancy.error?.message} onRetry={() => reloadRepro(kpis)} />;
 
@@ -352,7 +352,7 @@ function ReproSection({
           Configurá la estación de servicio
         </Text>
         <Text fontFamily="$body" fontSize="$3" color="$textMuted">
-          Sin los meses de servicio de este rodeo no podemos calcular la campaña ni los KPIs reproductivos.
+          Sin los meses de servicio de este rodeo no podemos calcular la campaña ni los datos reproductivos.
         </Text>
         <Button variant="primary" fullWidth onPress={onConfigure}>
           Configurar servicio

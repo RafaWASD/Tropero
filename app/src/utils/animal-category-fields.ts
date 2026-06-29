@@ -97,17 +97,19 @@ export type TeethState =
 
 /**
  * Opciones del selector CERRADO de DIENTES (teeth_state). value = enum DB; label = término de campo
- * (Facundo §2). Orden de presentación: progresión de la boca (sin dientes → boca llena).
+ * (Facundo §2). Orden de presentación: gastada → joven (FIX #12, 2026-06-29 — pedido de Raf: descarte/
+ * vejez arriba, boca llena al medio, dientes de leche en bajada). MISMO orden que `teeth-options.ts`
+ * (la maniobra) — alta y maniobra muestran la lista igual.
  */
 export const TEETH_OPTIONS: readonly { value: TeethState; label: string }[] = [
   { value: 'sin_dientes', label: 'Sin dientes' },
   { value: '1/4', label: '1/4' },
   { value: '1/2', label: '1/2' },
   { value: '3/4', label: '3/4' },
-  { value: '2d', label: '2 dientes' },
-  { value: '4d', label: '4 dientes' },
-  { value: '6d', label: '6 dientes' },
   { value: 'boca_llena', label: 'Boca llena' },
+  { value: '6d', label: '6 dientes' },
+  { value: '4d', label: '4 dientes' },
+  { value: '2d', label: '2 dientes' },
 ];
 
 const TEETH_VALUES: ReadonlySet<string> = new Set(TEETH_OPTIONS.map((o) => o.value));

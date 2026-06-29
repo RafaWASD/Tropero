@@ -7,22 +7,26 @@ import assert from 'node:assert/strict';
 import { TEETH_OPTIONS, teethLabel } from './teeth-options';
 import { CUT_PROMPT_TEETH } from './maneuver-applicability';
 
-// El enum real `teeth_state_enum` (migración 0020).
-const ENUM_VALUES = ['2d', '4d', '6d', 'boca_llena', '3/4', '1/2', '1/4', 'sin_dientes'];
+// El enum real `teeth_state_enum` (migración 0020), en el ORDEN de presentación pedido por Raf (FIX #12,
+// 2026-06-29): gastada → joven (reverso de la progresión etaria). Este array es el ORÁCULO del orden.
+const ENUM_VALUES = ['sin_dientes', '1/4', '1/2', '3/4', 'boca_llena', '6d', '4d', '2d'];
 
 // ─── Cobertura del enum + orden de boca ──────────────────────────────────────────────────────
 
-test('R6.7: las opciones cubren EXACTAMENTE el enum teeth_state_enum (0020), sin faltar ni sobrar', () => {
+test('R6.7: las opciones cubren EXACTAMENTE el enum teeth_state_enum (0020), en el orden gastada→joven (FIX #12)', () => {
   assert.deepEqual(
     TEETH_OPTIONS.map((o) => o.value),
     ENUM_VALUES,
   );
 });
 
-test('R6.7: el orden es de boca joven a gastada (2d…boca_llena, luego 3/4…sin_dientes)', () => {
+test('R6.7: el orden es de boca gastada a joven (sin_dientes…boca_llena…2d) — FIX #12', () => {
   const values = TEETH_OPTIONS.map((o) => o.value);
-  assert.equal(values.indexOf('2d') < values.indexOf('boca_llena'), true);
-  assert.equal(values.indexOf('boca_llena') < values.indexOf('sin_dientes'), true);
+  // sin_dientes (vejez/descarte) arriba, boca_llena al medio, 2d (leche, joven) al final.
+  assert.equal(values.indexOf('sin_dientes') < values.indexOf('boca_llena'), true);
+  assert.equal(values.indexOf('boca_llena') < values.indexOf('2d'), true);
+  assert.equal(values[0], 'sin_dientes');
+  assert.equal(values[values.length - 1], '2d');
 });
 
 // ─── Mapeo valor → CUT-trigger (R6.8) ────────────────────────────────────────────────────────

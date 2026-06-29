@@ -24,7 +24,7 @@ import {
   scrotalRowsToTimelineItems,
   sortTimelineItems,
   describeScrotalTimeline,
-  formatAgeMonthsAR,
+  formatAgeYearsAR,
   type TimelineRow,
   type TimelineItem,
   type PregnancyState,
@@ -1161,19 +1161,30 @@ test('scrotal: es date-only (measured_at es columna date, sin hora)', () => {
   assert.equal(isDateOnlyKind('scrotal'), true);
 });
 
-test('formatAgeMonthsAR: es-AR, singular/plural, null → null, no snapea', () => {
-  assert.equal(formatAgeMonthsAR(24), '24 meses');
-  assert.equal(formatAgeMonthsAR(1), '1 mes');
-  assert.equal(formatAgeMonthsAR(null), null);
-  assert.equal(formatAgeMonthsAR(undefined), null);
-  // NO clampa al rango de la rueda de meses (snapshot histórico): un 200 se muestra tal cual redondeado.
-  assert.equal(formatAgeMonthsAR(200), '200 meses');
-  assert.equal(formatAgeMonthsAR(26.4), '26 meses'); // redondea
+test('formatAgeYearsAR (FIX #11): < 24m en meses; ≥ 24m en años + meses', () => {
+  // < 24 meses → en meses.
+  assert.equal(formatAgeYearsAR(18), '18 meses');
+  assert.equal(formatAgeYearsAR(1), '1 mes');
+  assert.equal(formatAgeYearsAR(23), '23 meses'); // justo por debajo del umbral
+  // umbral: 24 meses exactos → "2 años" (sin meses sobrantes).
+  assert.equal(formatAgeYearsAR(24), '2 años');
+  assert.equal(formatAgeYearsAR(25), '2 años 1 mes'); // singular del mes sobrante
+  assert.equal(formatAgeYearsAR(27), '2 años 3 meses');
+  assert.equal(formatAgeYearsAR(36), '3 años');
+  assert.equal(formatAgeYearsAR(13), '13 meses'); // < 24 sigue en meses aunque >12
+  // null/undefined/no-finito → null; redondea (snapshot histórico, no snapea a rueda).
+  assert.equal(formatAgeYearsAR(null), null);
+  assert.equal(formatAgeYearsAR(undefined), null);
+  assert.equal(formatAgeYearsAR(26.4), '2 años 2 meses'); // 26 → 2 años 2 meses
+  assert.equal(formatAgeYearsAR(120), '10 años');
 });
 
-test('describeScrotalTimeline: "36,5 cm · 24 meses"; edad null → solo cm', () => {
-  assert.equal(describeScrotalTimeline({ circumferenceCm: 36.5, ageMonths: 24 }), '36,5 cm · 24 meses');
+test('describeScrotalTimeline: edad en años tras 24m (FIX #11, consistente con la lista); edad null → solo cm', () => {
+  // ≥ 24m → años (mismo formateador que la lista de la ficha, formatAgeYearsAR).
+  assert.equal(describeScrotalTimeline({ circumferenceCm: 36.5, ageMonths: 24 }), '36,5 cm · 2 años');
+  assert.equal(describeScrotalTimeline({ circumferenceCm: 38, ageMonths: 30 }), '38 cm · 2 años 6 meses');
   assert.equal(describeScrotalTimeline({ circumferenceCm: 38, ageMonths: null }), '38 cm');
+  // < 24m sigue en meses.
   assert.equal(describeScrotalTimeline({ circumferenceCm: 36.5, ageMonths: 1 }), '36,5 cm · 1 mes');
 });
 
