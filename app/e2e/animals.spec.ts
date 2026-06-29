@@ -14,6 +14,7 @@
 
 import { test, expect } from './helpers/fixtures';
 import {
+  admin,
   createTestUser,
   seedEstablishmentWithRodeo,
   seedAnimal,
@@ -228,7 +229,10 @@ test('B: alta de una MULTÍPARA → el form NO pide peso, SÍ dientes/condición
   const visualLabel = `${RUN_TAG}-MP`;
   await page.getByLabel('Identificación visual (recomendado)', { exact: true }).fill(visualLabel);
   await page.getByRole('button', { name: 'Dientes Boca llena', exact: true }).click();
-  await page.getByRole('button', { name: 'Condición 3', exact: true }).click();
+  // Condición por STEPPER (delta #13): arranca "sin cargar" en 3,00 (atenuado) → + y − la cargan en 3,00.
+  await page.getByTestId('score-plus').click();
+  await page.getByTestId('score-minus').click();
+  await expect(page.getByTestId('score-display').getByText('3,00', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Cría al pie Con cría al pie', exact: true }).click();
 
   await page.getByRole('button', { name: 'Crear animal', exact: true }).click();
@@ -647,6 +651,272 @@ test('C3.3 baja: owner da de baja (Venta) → desaparece de la tab Animales y la
   await page.getByRole('button', { name: 'Filtrar por estado' }).click();
   await page.getByRole('button', { name: 'Vendidos', exact: true }).click();
   await expect(page.getByText(idv, { exact: true }).first()).toBeVisible({ timeout: 20_000 });
+});
+
+// ─── Delta alta-form-refinamiento (#3 fecha DD/MM separada del año · #13 condición stepper · #14 destildar) ──
+//
+// RAF2.1 (fecha DD/MM), RAF2.2/RAF2.3.2/2.3.3 (condición por stepper con tri-estado), RAF2.3.1 (re-tap
+// deselecciona los opcionales). Oráculos server-side: birth_date exacta vs midpoint (tabla animals);
+// condición persiste / NO persiste (condition_score_events sin session_id, vienen del alta post-create).
+
+/** Pollea `animals.birth_date` (la fecha vive en `animals`, no en `animal_profiles`) por animal_id. */
+async function readServerBirthDate(animalId: string): Promise<string | null> {
+  for (let i = 0; i < 30; i++) {
+    const { data, error } = await admin
+      .from('animals')
+      .select('birth_date')
+      .eq('id', animalId)
+      .maybeSingle();
+    if (error) throw new Error(`readServerBirthDate: ${error.message}`);
+    if (data?.birth_date) return data.birth_date as string;
+    await new Promise((r) => setTimeout(r, 2000));
+  }
+  return null;
+}
+
+/** Cuenta los condition_score_events del alta (sin session_id) de un perfil. */
+async function countConditionScores(profileId: string): Promise<{ count: number; scores: number[] }> {
+  const { data, error } = await admin
+    .from('condition_score_events')
+    .select('score')
+    .eq('animal_profile_id', profileId)
+    .is('deleted_at', null);
+  if (error) throw new Error(`countConditionScores: ${error.message}`);
+  return { count: data?.length ?? 0, scores: (data ?? []).map((r) => r.score as number) };
+}
+
+test('delta #3 (RAF2.1.4): alta con Año + DD/MM → birth_date EXACTA (AAAA-MM-DD)', async ({ page }) => {
+  test.setTimeout(120_000); // alta + 2 polls server (perfil + birth_date) → headroom sobre el default 60s.
+  const user = await createTestUser('ddmmexact');
+  await setUserPhone(user.id, '1123456789');
+  const { establishmentId } = await seedEstablishmentWithRodeo(user.id, 'Campo DDMMExact');
+
+  await page.goto('/');
+  await signIn(page, user);
+  await waitForHome(page);
+  await gotoAnimales(page);
+
+  await page.getByRole('button', { name: 'Dar de alta tu primer animal' }).click();
+  await walkWizardToData(page, { sex: 'Hembra', categoryName: 'Vaquillona' });
+
+  const visualLabel = `${RUN_TAG}-DDMM`;
+  await page.getByLabel('Identificación visual (recomendado)', { exact: true }).fill(visualLabel);
+  await page.getByLabel('Año de nacimiento (opcional, AAAA)', { exact: true }).fill('2022');
+  // El sanitizer en vivo formatea "1503" → "15/03" (día-primero es-AR).
+  const dm = page.getByLabel('Día y mes (opcional, DD/MM)', { exact: true });
+  await dm.fill('0107');
+  await expect(dm).toHaveValue('01/07');
+
+  await page.getByRole('button', { name: 'Crear animal', exact: true }).click();
+
+  // "Historial" sólo existe en la FICHA (no en el form) → confirma que el alta navegó (create OK).
+  await expect(page.getByText('Historial', { exact: true })).toBeVisible({ timeout: 20_000 });
+  const { animal_id } = await waitForServerAnimalProfile(establishmentId, { visualAlt: visualLabel });
+  expect(await readServerBirthDate(animal_id)).toBe('2022-07-01');
+});
+
+test('delta #3 (RAF2.1.3): alta SOLO con Año (sin DD/MM) → birth_date midpoint AAAA-07-01', async ({
+  page,
+}) => {
+  test.setTimeout(120_000); // alta + 2 polls server (perfil + birth_date) → headroom sobre el default 60s.
+  const user = await createTestUser('ddmmmid');
+  await setUserPhone(user.id, '1123456789');
+  const { establishmentId } = await seedEstablishmentWithRodeo(user.id, 'Campo DDMMMid');
+
+  await page.goto('/');
+  await signIn(page, user);
+  await waitForHome(page);
+  await gotoAnimales(page);
+
+  await page.getByRole('button', { name: 'Dar de alta tu primer animal' }).click();
+  await walkWizardToData(page, { sex: 'Hembra', categoryName: 'Vaquillona' });
+
+  const visualLabel = `${RUN_TAG}-MID`;
+  await page.getByLabel('Identificación visual (recomendado)', { exact: true }).fill(visualLabel);
+  await page.getByLabel('Año de nacimiento (opcional, AAAA)', { exact: true }).fill('2022');
+  // Sin tocar el campo DD/MM → midpoint (no se rompe el camino año-solo).
+
+  await page.getByRole('button', { name: 'Crear animal', exact: true }).click();
+
+  await expect(page.getByText('Historial', { exact: true })).toBeVisible({ timeout: 20_000 });
+  const { animal_id } = await waitForServerAnimalProfile(establishmentId, { visualAlt: visualLabel });
+  expect(await readServerBirthDate(animal_id)).toBe('2022-07-01');
+});
+
+test('delta #3 (RAF2.1.7): DD/MM inválido (31/02) → error inline + animal NO creado', async ({ page }) => {
+  const user = await createTestUser('ddmmbad');
+  await setUserPhone(user.id, '1123456789');
+  await seedEstablishmentWithRodeo(user.id, 'Campo DDMMBad');
+
+  await page.goto('/');
+  await signIn(page, user);
+  await waitForHome(page);
+  await gotoAnimales(page);
+
+  await page.getByRole('button', { name: 'Dar de alta tu primer animal' }).click();
+  await walkWizardToData(page, { sex: 'Hembra', categoryName: 'Vaquillona' });
+
+  await page.getByLabel('Identificación visual (recomendado)', { exact: true }).fill(`${RUN_TAG}-BAD`);
+  await page.getByLabel('Año de nacimiento (opcional, AAAA)', { exact: true }).fill('2022');
+  await page.getByLabel('Día y mes (opcional, DD/MM)', { exact: true }).fill('3102'); // 31/02 inexistente
+
+  await page.getByRole('button', { name: 'Crear animal', exact: true }).click();
+
+  // Error inline (sin clamp) + NO navega a la ficha (la ficha tiene "Historial").
+  await expect(page.getByText('El día y mes no son válidos (revisá DD/MM).')).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText('Historial', { exact: true })).toHaveCount(0);
+});
+
+test('delta #3 (RAF2.1.5): DD/MM sin año → error inline en el campo día/mes + animal NO creado', async ({
+  page,
+}) => {
+  const user = await createTestUser('ddmmnoyear');
+  await setUserPhone(user.id, '1123456789');
+  await seedEstablishmentWithRodeo(user.id, 'Campo DDMMNoYear');
+
+  await page.goto('/');
+  await signIn(page, user);
+  await waitForHome(page);
+  await gotoAnimales(page);
+
+  await page.getByRole('button', { name: 'Dar de alta tu primer animal' }).click();
+  await walkWizardToData(page, { sex: 'Hembra', categoryName: 'Vaquillona' });
+
+  await page.getByLabel('Identificación visual (recomendado)', { exact: true }).fill(`${RUN_TAG}-NOYEAR`);
+  // DD/MM presente SIN año → no hay fecha sin año.
+  await page.getByLabel('Día y mes (opcional, DD/MM)', { exact: true }).fill('1503');
+
+  await page.getByRole('button', { name: 'Crear animal', exact: true }).click();
+
+  await expect(page.getByText('Cargá el año para poder usar el día y mes.')).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText('Historial', { exact: true })).toHaveCount(0);
+});
+
+test('delta #13 (RAF2.2): condición por STEPPER → cargar 3,25 con + → persiste (condition_score_event)', async ({
+  page,
+}) => {
+  test.setTimeout(120_000); // alta + 2 polls server (perfil + condition_score) → headroom sobre el default 60s.
+  const user = await createTestUser('condstep');
+  await setUserPhone(user.id, '1123456789');
+  const { establishmentId } = await seedEstablishmentWithRodeo(user.id, 'Campo CondStep');
+
+  await page.goto('/');
+  await signIn(page, user);
+  await waitForHome(page);
+  await gotoAnimales(page);
+
+  await page.getByRole('button', { name: 'Dar de alta tu primer animal' }).click();
+  await walkWizardToData(page, { sex: 'Hembra', categoryName: 'Multípara' });
+
+  const visualLabel = `${RUN_TAG}-COND`;
+  await page.getByLabel('Identificación visual (recomendado)', { exact: true }).fill(visualLabel);
+
+  // El stepper arranca "sin cargar" mostrando 3,00 (atenuado); el 1er + lo marca cargado en 3,25.
+  await expect(page.getByTestId('score-display').getByText('3,00', { exact: true })).toBeVisible();
+  await page.getByTestId('score-plus').click();
+  await expect(page.getByTestId('score-display').getByText('3,25', { exact: true })).toBeVisible();
+  // Cargado → aparece la afordancia "Sin cargar" (RAF2.3.2).
+  await expect(page.getByRole('button', { name: 'Quitar condición corporal', exact: true })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Crear animal', exact: true }).click();
+
+  await expect(page.getByText('Historial', { exact: true })).toBeVisible({ timeout: 20_000 });
+  const { id: profileId } = await waitForServerAnimalProfile(establishmentId, { visualAlt: visualLabel });
+  // El score 3,25 se persiste como evento post-create (sin session_id, del alta).
+  await expect
+    .poll(async () => (await countConditionScores(profileId)).scores, { timeout: 30_000 })
+    .toContain(3.25);
+});
+
+test('delta #14 (RAF2.3.3): condición SIN tocar (3,00 atenuado) NO persiste; "Sin cargar" la limpia', async ({
+  page,
+}) => {
+  test.setTimeout(120_000); // alta + poll server (perfil) → headroom sobre el default 60s.
+  const user = await createTestUser('condnone');
+  await setUserPhone(user.id, '1123456789');
+  const { establishmentId } = await seedEstablishmentWithRodeo(user.id, 'Campo CondNone');
+
+  await page.goto('/');
+  await signIn(page, user);
+  await waitForHome(page);
+  await gotoAnimales(page);
+
+  await page.getByRole('button', { name: 'Dar de alta tu primer animal' }).click();
+  await walkWizardToData(page, { sex: 'Hembra', categoryName: 'Multípara' });
+
+  const visualLabel = `${RUN_TAG}-NOCOND`;
+  await page.getByLabel('Identificación visual (recomendado)', { exact: true }).fill(visualLabel);
+
+  // Sin cargar → no hay afordancia "Sin cargar" todavía (estado null, 3,00 atenuado).
+  await expect(page.getByRole('button', { name: 'Quitar condición corporal', exact: true })).toHaveCount(0);
+  // La toco (+ → 3,25) y la limpio con "Sin cargar" → vuelve a 3,00 (sin cargar) y la afordancia desaparece.
+  await page.getByTestId('score-plus').click();
+  await page.getByRole('button', { name: 'Quitar condición corporal', exact: true }).click();
+  await expect(page.getByTestId('score-display').getByText('3,00', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Quitar condición corporal', exact: true })).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'Crear animal', exact: true }).click();
+
+  await expect(page.getByText('Historial', { exact: true })).toBeVisible({ timeout: 20_000 });
+  const { id: profileId } = await waitForServerAnimalProfile(establishmentId, { visualAlt: visualLabel });
+  // El animal llegó al server pero la condición quedó "sin cargar" → NO se creó ningún condition_score_event.
+  expect((await countConditionScores(profileId)).count).toBe(0);
+});
+
+test('delta #14 (RAF2.3.1): re-tap del valor seleccionado DESELECCIONA dientes y preñez (opt-in)', async ({
+  page,
+}) => {
+  const user = await createTestUser('deselect');
+  await setUserPhone(user.id, '1123456789');
+  await seedEstablishmentWithRodeo(user.id, 'Campo Deselect');
+
+  await page.goto('/');
+  await signIn(page, user);
+  await waitForHome(page);
+  await gotoAnimales(page);
+
+  await page.getByRole('button', { name: 'Dar de alta tu primer animal' }).click();
+  await walkWizardToData(page, { sex: 'Hembra', categoryName: 'Multípara' });
+
+  // Dientes: tap "Boca llena" → seleccionado (aria-pressed true); re-tap → deseleccionado (aria-pressed false).
+  const teeth = page.getByRole('button', { name: 'Dientes Boca llena', exact: true });
+  await teeth.click();
+  await expect(teeth).toHaveAttribute('aria-pressed', 'true');
+  await teeth.click();
+  await expect(teeth).toHaveAttribute('aria-pressed', 'false');
+
+  // Preñez: idéntico.
+  const preg = page.getByRole('button', { name: 'Preñez Cabeza', exact: true });
+  await preg.click();
+  await expect(preg).toHaveAttribute('aria-pressed', 'true');
+  await preg.click();
+  await expect(preg).toHaveAttribute('aria-pressed', 'false');
+});
+
+test('delta #14 (RAF2.3.6): el selector REQUERIDO de categoría NO es deseleccionable (re-tap lo mantiene)', async ({
+  page,
+}) => {
+  const user = await createTestUser('reqsel');
+  await setUserPhone(user.id, '1123456789');
+  await seedEstablishmentWithRodeo(user.id, 'Campo ReqSel');
+
+  await page.goto('/');
+  await signIn(page, user);
+  await waitForHome(page);
+  await gotoAnimales(page);
+
+  await page.getByRole('button', { name: 'Dar de alta tu primer animal' }).click();
+
+  // Paso 3 — categoría (requerido): elegir Vaquillona, re-tocar → SIGUE seleccionada (no deselecciona).
+  await expect(page.getByText('¿Es macho o hembra?', { exact: true })).toBeVisible({ timeout: 20_000 });
+  await page.getByRole('button', { name: 'Sexo Hembra', exact: true }).click();
+  await page.getByRole('button', { name: 'Continuar', exact: true }).click();
+  await expect(page.getByText('¿Qué categoría es?', { exact: true })).toBeVisible({ timeout: 20_000 });
+  const cat = page.getByRole('button', { name: 'Categoría Vaquillona', exact: true });
+  await cat.click();
+  await expect(cat).toHaveAttribute('aria-pressed', 'true');
+  await cat.click(); // re-tap del requerido → NO deselecciona
+  await expect(cat).toHaveAttribute('aria-pressed', 'true');
 });
 
 test('FIX3: con un filtro de Estado activo y 0 resultados, el empty es contextual (no "no cargaste")', async ({

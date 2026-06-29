@@ -25,14 +25,14 @@
 // paso 4 se conservan tal cual; el selector de categoría es CERRADO.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Platform, Pressable } from 'react-native';
+import { Platform, Pressable, type ScrollView as RNScrollView } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
-import { Check, ChevronDown, ChevronLeft, Mars, Venus } from 'lucide-react-native';
+import { Check, ChevronDown, ChevronLeft, Mars, Venus, X } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
 
-import { Button, Card, FormField, FormError, InfoNote } from '@/components';
+import { Button, Card, ConditionScoreStepper, FormField, FormError, InfoNote } from '@/components';
 import { BreedPickerSheet } from '@/components/sigsa';
 import { useAuth, useEstablishment, useRodeo } from '@/contexts';
 import { createAnimal, fetchSystemCategories, type SystemCategory } from '@/services/animals';
@@ -72,15 +72,12 @@ import {
   type CategoryDataField,
   type TeethState,
 } from '@/utils/animal-category-fields';
-import {
-  CONDITION_SCORES,
-  formatConditionScore,
-  PREGNANCY_OPTIONS,
-} from '@/utils/event-input';
+import { PREGNANCY_OPTIONS } from '@/utils/event-input';
+import { SCORE_DEFAULT } from '@/utils/condition-stepper';
 import {
   sanitizeBirthYearInput,
-  birthYearToDate,
-  validateBirthYear,
+  sanitizeDayMonthInput,
+  validateBirthDate,
   isPregnantStatus,
   type PregnancyStatus,
 } from '@/utils/animal-birth-year';
@@ -182,6 +179,9 @@ export default function CrearAnimalScreen() {
   //    la categoría pide (los no-mostrados quedan en su default y NO se mandan).
   const [birthYear, setBirthYear] = useState(''); // año-only (AAAA → AAAA-07-01); base de la edad
   const [birthYearError, setBirthYearError] = useState<string | null>(null);
+  // Día/mes OPCIONAL separado del año (delta RAF2.1): con DD/MM → fecha exacta; sin → midpoint del año.
+  const [birthDayMonth, setBirthDayMonth] = useState('');
+  const [dayMonthError, setDayMonthError] = useState<string | null>(null);
   // Raza CONTROLADA (spec 08, T18): el BreedPicker setea el NOMBRE elegido en `breed` (texto, que persiste por
   // la RPC create_animal) + recuerda el CÓDIGO SENASA para el resumen del trigger + la selección del sheet.
   // ⚠ breed_id NO se persiste desde el alta (la RPC 0083 no lo soporta — ver createAnimal + el progress). El
@@ -223,6 +223,37 @@ export default function CrearAnimalScreen() {
   // Ref del form de PROPIEDADES CUSTOM (R13.10): el submit recolecta sus valores y los persiste post-create
   // (custom_attributes), mismo patrón soft-fail que condición/preñez. Vive en el paso 4 (form dinámico).
   const customPropsRef = useRef<CustomPropertiesFormHandle>(null);
+
+  // ── Scroll-al-campo del error (RAF2.4.4, MUST de forms): cuando una validación del paso 4 falla, además
+  //    del borde rojo + error inline, traemos el campo culpable a la vista. Medimos por GEOMETRÍA (onLayout)
+  //    igual que CustomFieldSheet: cada SECCIÓN (datos base / datos de la categoría) reporta su `y` RELATIVO
+  //    al contentContainer (es hija directa del ScrollView vía el Fragment de Step4Data), y cada CAMPO
+  //    validado su `y` RELATIVO a su sección; la suma es la posición absoluta dentro del scroll. Robusto en
+  //    web y native, sin depender de measureLayout. Si no hay geometría aún, el error inline + borde igual
+  //    se muestran (no rompe). En scope: DD/MM; por coherencia con el MUST, también año y peso (decisión (d)).
+  const scrollRef = useRef<RNScrollView | null>(null);
+  const sectionYRef = useRef<Record<string, number>>({});
+  const fieldYRef = useRef<Record<string, { section: string; y: number }>>({});
+  const onSectionLayout = useCallback((key: string, y: number) => {
+    sectionYRef.current[key] = y;
+  }, []);
+  const onFieldLayout = useCallback((field: string, section: string, y: number) => {
+    fieldYRef.current[field] = { section, y };
+  }, []);
+  const scrollToField = useCallback((field: 'year' | 'dayMonth' | 'weight') => {
+    const f = fieldYRef.current[field];
+    const sv = scrollRef.current;
+    if (!f || !sv) return;
+    const sectionY = sectionYRef.current[f.section] ?? 0;
+    const pad = getTokenValue('$4', 'space');
+    const y = Math.max(0, sectionY + f.y - pad);
+    // Diferimos un frame: el error inline recién se montó (cambia el layout); el scroll corre después.
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(() => sv.scrollTo({ y, animated: true }));
+    } else {
+      sv.scrollTo({ y, animated: true });
+    }
+  }, []);
 
   // Campos EXTRA que la categoría elegida pide (tabla §2). Vacío hasta elegir categoría (paso 3).
   const categoryFields: readonly CategoryDataField[] = useMemo(
@@ -441,23 +472,29 @@ export default function CrearAnimalScreen() {
       return;
     }
 
-    // Validación del paso 4 (campos base + los EXTRA que la categoría pide). El año es base (todas las
-    // categorías); el peso solo si la categoría lo pide (showWeight). El resto de los extras son
-    // selectores cerrados (no necesitan validación de formato) y opcionales.
-    const yearV = validateBirthYear(birthYear, new Date());
-    setBirthYearError(yearV.ok ? null : yearV.error);
+    // Validación del paso 4 (campos base + los EXTRA que la categoría pide). La FECHA DE NACIMIENTO es base
+    // (todas las categorías): UNA sola validación combinada año + día/mes (delta RAF2.1) → fecha exacta
+    // (AAAA-MM-DD si hay DD/MM) o midpoint (AAAA-07-01 si solo año) o null (todo vacío). El peso solo si la
+    // categoría lo pide (showWeight). El resto de los extras son selectores cerrados (opcionales, sin formato).
+    const now = new Date();
+    const dateV = validateBirthDate(birthYear, birthDayMonth, now);
+    const dateErrField = dateV.ok ? null : dateV.field;
+    setBirthYearError(!dateV.ok && dateV.field === 'year' ? dateV.error : null);
+    setDayMonthError(!dateV.ok && dateV.field === 'dayMonth' ? dateV.error : null);
 
     let entryWeightKg: number | null = null;
+    let weightBad = false;
     if (showWeight) {
       const trimmedW = entryWeight.trim();
       if (trimmedW.length > 0) {
         const w = parseWeight(trimmedW);
         if (w == null || w <= 0) {
           setEntryWeightError('El peso tiene que ser un número mayor a 0.');
-          return;
+          weightBad = true;
+        } else {
+          setEntryWeightError(null);
+          entryWeightKg = w;
         }
-        setEntryWeightError(null);
-        entryWeightKg = w;
       } else {
         setEntryWeightError(null);
       }
@@ -476,9 +513,16 @@ export default function CrearAnimalScreen() {
     if (!hasIdentifier) {
       setFormError('Cargá al menos un identificador: caravana electrónica, número/IDV o identificación visual.');
     }
-    if (!yearV.ok || !tagOk || !hasIdentifier) return;
+    if (!dateV.ok || weightBad || !tagOk || !hasIdentifier) {
+      // Scroll-al-campo (RAF2.4.4): al primer campo con error en orden del form (fecha arriba, luego peso).
+      // El tag (inline en su FormField) y el identificador (banner sobre el CTA) viven al alcance del pulgar.
+      if (dateErrField === 'year') scrollToField('year');
+      else if (dateErrField === 'dayMonth') scrollToField('dayMonth');
+      else if (weightBad) scrollToField('weight');
+      return;
+    }
 
-    const birthDate = birthYearToDate(yearV.year, new Date());
+    const birthDate = dateV.date;
     // Preñez capturada (solo si la categoría la pide Y es positiva): refina el override (vaquillona
     // preñada derivable) y dispara el tacto+ post-create. Un "Vacía" del alta NO cuenta como preñez.
     const pregnantCaptured = showPregnancy && isPregnantStatus(pregnancyStatus);
@@ -595,6 +639,7 @@ export default function CrearAnimalScreen() {
     maneuverSessionId,
     sex,
     birthYear,
+    birthDayMonth,
     entryWeight,
     breed,
     coatColor,
@@ -605,6 +650,7 @@ export default function CrearAnimalScreen() {
     selectedRodeo,
     selectedCategoryCode,
     selectedGroupId,
+    scrollToField,
     showWeight,
     showTeeth,
     showCondition,
@@ -656,6 +702,7 @@ export default function CrearAnimalScreen() {
       </YStack>
 
       <ScrollView
+        ref={scrollRef}
         flex={1}
         width="100%"
         maxWidth="100%"
@@ -714,6 +761,12 @@ export default function CrearAnimalScreen() {
               setBirthYear(sanitizeBirthYearInput(t));
               if (birthYearError) setBirthYearError(null);
             }}
+            birthDayMonth={birthDayMonth}
+            dayMonthError={dayMonthError}
+            onBirthDayMonth={(t) => {
+              setBirthDayMonth(sanitizeDayMonthInput(t));
+              if (dayMonthError) setDayMonthError(null);
+            }}
             breedCode={breedCode}
             breedLabel={selectedBreedLabel(breedCatalog, breedCode)}
             onOpenBreedPicker={() => setBreedPickerOpen(true)}
@@ -732,6 +785,7 @@ export default function CrearAnimalScreen() {
             showCondition={showCondition}
             conditionScore={conditionScore}
             onCondition={setConditionScore}
+            onClearCondition={() => setConditionScore(null)}
             showPregnancy={showPregnancy}
             pregnancyStatus={pregnancyStatus}
             onPregnancy={setPregnancyStatus}
@@ -750,6 +804,8 @@ export default function CrearAnimalScreen() {
               setGroupPickerOpen(false);
             }}
             muted={muted}
+            onSectionLayout={onSectionLayout}
+            onFieldLayout={onFieldLayout}
             customProps={
               <CustomPropertiesForm ref={customPropsRef} rodeoId={selectedRodeo?.id ?? null} />
             }
@@ -883,7 +939,9 @@ function Step1Rodeo({
       <OptionRows
         options={rodeos.map((r) => ({ value: r.id, label: r.name }))}
         value={selectedId}
-        onChange={onSelect}
+        onChange={(v) => {
+          if (v != null) onSelect(v); // REQUERIDO: sin allowDeselect nunca llega null (RAF2.3.6).
+        }}
         a11yPrefix="Rodeo"
       />
     </YStack>
@@ -1010,7 +1068,9 @@ function Step3Category({
         <OptionRows
           options={options.map((c) => ({ value: c.code, label: c.name }))}
           value={value}
-          onChange={onChange}
+          onChange={(v) => {
+            if (v != null) onChange(v); // REQUERIDO: sin allowDeselect nunca llega null (RAF2.3.6).
+          }}
           a11yPrefix="Categoría"
         />
       )}
@@ -1037,6 +1097,9 @@ function Step4Data({
   birthYear,
   birthYearError,
   onBirthYear,
+  birthDayMonth,
+  dayMonthError,
+  onBirthDayMonth,
   breedCode,
   breedLabel,
   onOpenBreedPicker,
@@ -1052,6 +1115,7 @@ function Step4Data({
   showCondition,
   conditionScore,
   onCondition,
+  onClearCondition,
   showPregnancy,
   pregnancyStatus,
   onPregnancy,
@@ -1067,6 +1131,8 @@ function Step4Data({
   onToggleGroupPicker,
   onSelectGroup,
   muted,
+  onSectionLayout,
+  onFieldLayout,
   customProps,
 }: {
   prefillKind: PrefillKind;
@@ -1080,6 +1146,10 @@ function Step4Data({
   birthYear: string;
   birthYearError: string | null;
   onBirthYear: (t: string) => void;
+  /** Día/mes opcional DD/MM (delta RAF2.1), separado del año, día-primero es-AR. */
+  birthDayMonth: string;
+  dayMonthError: string | null;
+  onBirthDayMonth: (t: string) => void;
   /** Código SENASA de la raza elegida (null = sin raza). Controla el resumen + el hint del trigger. */
   breedCode: string | null;
   /** Nombre + código de la raza elegida (de selectedBreedLabel), o null si sin raza. */
@@ -1094,26 +1164,35 @@ function Step4Data({
   onEntryWeight: (t: string) => void;
   showTeeth: boolean;
   teethState: TeethState | null;
-  onTeeth: (t: TeethState) => void;
+  /** null = re-tap deselecciona (delta RAF2.3.1). */
+  onTeeth: (t: TeethState | null) => void;
   showCondition: boolean;
   conditionScore: number | null;
   onCondition: (s: number) => void;
+  /** Vuelve la condición a "sin cargar" (delta RAF2.3.2). */
+  onClearCondition: () => void;
   showPregnancy: boolean;
   pregnancyStatus: PregnancyStatus | null;
-  onPregnancy: (s: PregnancyStatus) => void;
+  /** null = re-tap deselecciona (delta RAF2.3.1). */
+  onPregnancy: (s: PregnancyStatus | null) => void;
   /** delta aptitud (RAR.1): prompt de aptitud de vaquillona — gateado a `vaquillona`, opcional. */
   showFitness: boolean;
   heiferFitness: HeiferFitness | null;
-  onFitness: (f: HeiferFitness) => void;
+  /** null = re-tap deselecciona (delta RAF2.3.1). */
+  onFitness: (f: HeiferFitness | null) => void;
   showNursing: boolean;
   nursing: boolean | null;
-  onNursing: (v: boolean) => void;
+  /** null = re-tap deselecciona (delta RAF2.3.1). */
+  onNursing: (v: boolean | null) => void;
   groups: ManagementGroup[];
   selectedGroupId: string | null;
   groupPickerOpen: boolean;
   onToggleGroupPicker: () => void;
   onSelectGroup: (id: string | null) => void;
   muted: string;
+  /** Scroll-al-campo (RAF2.4.4): reportan la geometría de la sección / campo validado para traerlo a la vista. */
+  onSectionLayout: (key: string, y: number) => void;
+  onFieldLayout: (field: string, section: string, y: number) => void;
   /** Form de propiedades CUSTOM (R13.10) — render desde el parent (carga por rodeo + ref de recolección). */
   customProps: React.ReactNode;
 }) {
@@ -1188,16 +1267,30 @@ function Step4Data({
         ) : null}
       </YStack>
 
-      {/* ── Datos base de cría (TODAS las categorías): AÑO de nacimiento + raza + pelaje. ── */}
-      <YStack gap="$3">
-        <FormField
-          label="Año de nacimiento (opcional, AAAA)"
-          value={birthYear}
-          onChangeText={onBirthYear}
-          placeholder="Ej. 2022"
-          keyboardType="number-pad"
-          error={birthYearError}
-        />
+      {/* ── Datos base de cría (TODAS las categorías): AÑO + día/mes opcional + raza + pelaje. ── */}
+      <YStack gap="$3" onLayout={(e) => onSectionLayout('base', e.nativeEvent.layout.y)}>
+        <View onLayout={(e) => onFieldLayout('year', 'base', e.nativeEvent.layout.y)}>
+          <FormField
+            label="Año de nacimiento (opcional, AAAA)"
+            value={birthYear}
+            onChangeText={onBirthYear}
+            placeholder="Ej. 2022"
+            keyboardType="number-pad"
+            error={birthYearError}
+          />
+        </View>
+        {/* Día / Mes OPCIONAL (delta RAF2.1): separado del año, día-primero es-AR (DD/MM), teclado numérico.
+            Con DD/MM → fecha exacta; sin DD/MM → midpoint del año (AAAA-07-01). Todo-o-nada al submit. */}
+        <View onLayout={(e) => onFieldLayout('dayMonth', 'base', e.nativeEvent.layout.y)}>
+          <FormField
+            label="Día y mes (opcional, DD/MM)"
+            value={birthDayMonth}
+            onChangeText={onBirthDayMonth}
+            placeholder="Ej. 15/03"
+            keyboardType="number-pad"
+            error={dayMonthError}
+          />
+        </View>
         {/* Raza CONTROLADA (spec 08, T18): trigger → BreedPickerSheet (catálogo SENASA). Reemplaza al input de
             texto libre. Muestra la raza elegida (código + nombre) o el placeholder; el hint recuerda que sin
             raza el animal queda "a completar" para SIGSA. */}
@@ -1219,36 +1312,56 @@ function Step4Data({
 
       {/* ── Datos ESPECÍFICOS de la categoría (tabla §2). Solo se muestran los que la categoría pide. ── */}
       {hasExtra ? (
-        <YStack gap="$4">
+        <YStack gap="$4" onLayout={(e) => onSectionLayout('cat', e.nativeEvent.layout.y)}>
           <Text fontFamily="$body" fontSize="$6" lineHeight="$6" fontWeight="600" color="$textPrimary">
             Datos de la categoría
           </Text>
 
           {showWeight ? (
-            <FormField
-              label="Peso en kg (opcional)"
-              value={entryWeight}
-              onChangeText={onEntryWeight}
-              keyboardType="decimal-pad"
-              placeholder="Ej. 180"
-              error={entryWeightError}
-            />
+            <View onLayout={(e) => onFieldLayout('weight', 'cat', e.nativeEvent.layout.y)}>
+              <FormField
+                label="Peso en kg (opcional)"
+                value={entryWeight}
+                onChangeText={onEntryWeight}
+                keyboardType="decimal-pad"
+                placeholder="Ej. 180"
+                error={entryWeightError}
+              />
+            </View>
           ) : null}
 
+          {/* Opcionales del paso 4: re-tap del valor ya elegido lo DESELECCIONA → "sin cargar" (delta RAF2.3.1).
+              `allowDeselect` distingue estos opcionales de los selectores REQUERIDOS (rodeo/categoría), que NO
+              son deseleccionables. Lo "sin cargar" (null) no se envía a create_animal (RAF2.3.5). */}
           {showTeeth ? (
             <FieldGroup label="Dientes (opcional)">
               <OptionRows
                 options={TEETH_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
                 value={teethState}
-                onChange={(v) => onTeeth(v as TeethState)}
+                onChange={(v) => onTeeth(v as TeethState | null)}
                 a11yPrefix="Dientes"
+                allowDeselect
               />
             </FieldGroup>
           ) : null}
 
+          {/* Condición corporal: stepper +/− (delta RAF2.2) con TRI-ESTADO (RAF2.3.2/2.3.3): arranca "sin cargar"
+              mostrando 3,00 ATENUADO; el 1er −/+ lo marca cargado; "Sin cargar" lo vuelve a null (no se envía). */}
           {showCondition ? (
             <FieldGroup label="Condición corporal (opcional, 1 a 5)">
-              <ScoreChips value={conditionScore} onChange={onCondition} />
+              <ConditionScoreStepper
+                compact
+                score={conditionScore ?? SCORE_DEFAULT}
+                dimmed={conditionScore == null}
+                onChange={onCondition}
+              />
+              {conditionScore != null ? (
+                <ClearOptionalControl
+                  label="Sin cargar"
+                  a11yLabel="Quitar condición corporal"
+                  onPress={onClearCondition}
+                />
+              ) : null}
             </FieldGroup>
           ) : null}
 
@@ -1257,8 +1370,9 @@ function Step4Data({
               <OptionRows
                 options={PREGNANCY_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
                 value={pregnancyStatus}
-                onChange={(v) => onPregnancy(v as PregnancyStatus)}
+                onChange={(v) => onPregnancy(v as PregnancyStatus | null)}
                 a11yPrefix="Preñez"
+                allowDeselect
               />
             </FieldGroup>
           ) : null}
@@ -1267,7 +1381,7 @@ function Step4Data({
               color de TactoVaquillonaStep (apta=verde/diferida=ámbar/no_apta=terracota). Opcional (RAR.1.4). */}
           {showFitness ? (
             <FieldGroup label="¿Está apta para servicio? (opcional)">
-              <FitnessOptionRows value={heiferFitness} onChange={onFitness} />
+              <FitnessOptionRows value={heiferFitness} onChange={onFitness} allowDeselect />
             </FieldGroup>
           ) : null}
 
@@ -1279,8 +1393,9 @@ function Step4Data({
                   { value: 'without', label: 'Sin cría al pie' },
                 ]}
                 value={nursing == null ? null : nursing ? 'with' : 'without'}
-                onChange={(v) => onNursing(v === 'with')}
+                onChange={(v) => onNursing(v == null ? null : v === 'with')}
                 a11yPrefix="Cría al pie"
+                allowDeselect
               />
             </FieldGroup>
           ) : null}
@@ -1326,53 +1441,28 @@ function FieldGroup({ label, children }: { label: string; children: React.ReactN
 }
 
 /**
- * Selector CERRADO de los 17 scores de condición corporal (1.00→5.00 paso 0.25) — chips en grilla.
- * Espeja el ScoreSelector de agregar-evento.tsx (mismo lenguaje: borde 2px, selected = relleno verde).
- * NUNCA texto libre → siempre cumple el CHECK del DB (0028). Reusa CONDITION_SCORES/formatConditionScore.
+ * Control "Sin cargar" / limpiar de un opcional del paso 4 (delta RAF2.3.2): afordancia EXPLÍCITA para volver
+ * un campo a "sin cargar" después de haberlo tocado (hoy se usa para la condición corporal, que distingue
+ * "tocado" de "default 3,00"). Text-button discreto (✕ + label muted), target ≥ $chipMin (Fitts). Tokens-only.
  */
-function ScoreChips({
-  value,
-  onChange,
+function ClearOptionalControl({
+  label,
+  a11yLabel,
+  onPress,
 }: {
-  value: number | null;
-  onChange: (s: number) => void;
+  label: string;
+  a11yLabel: string;
+  onPress: () => void;
 }) {
   return (
-    <XStack width="100%" flexWrap="wrap" gap="$2">
-      {CONDITION_SCORES.map((s) => {
-        const selected = value != null && Math.abs(value - s) < 1e-9;
-        const label = formatConditionScore(s);
-        return (
-          <Pressable
-            key={s}
-            onPress={() => onChange(s)}
-            {...buttonA11y(Platform.OS, { label: `Condición ${label}`, selected })}
-          >
-            <View
-              minWidth="$chipMin"
-              minHeight="$chipMin"
-              alignItems="center"
-              justifyContent="center"
-              borderRadius="$pill"
-              borderWidth={2}
-              borderColor={selected ? '$primary' : '$divider'}
-              backgroundColor={selected ? '$primary' : '$white'}
-              paddingHorizontal="$3"
-              pressStyle={{ opacity: 0.85 }}
-            >
-              <Text
-                fontFamily="$body"
-                fontSize="$5"
-                fontWeight="600"
-                color={selected ? '$white' : '$textPrimary'}
-              >
-                {label}
-              </Text>
-            </View>
-          </Pressable>
-        );
-      })}
-    </XStack>
+    <Pressable onPress={onPress} {...buttonA11y(Platform.OS, { label: a11yLabel })}>
+      <XStack alignItems="center" gap="$1" minHeight="$chipMin" paddingHorizontal="$1" pressStyle={{ opacity: 0.6 }}>
+        <X size={16} color={getTokenValue('$textMuted', 'color')} strokeWidth={2.5} />
+        <Text fontFamily="$body" fontSize="$3" lineHeight="$3" fontWeight="600" color="$textMuted">
+          {label}
+        </Text>
+      </XStack>
+    </Pressable>
   );
 }
 
@@ -1386,12 +1476,17 @@ function OptionRows({
   value,
   onChange,
   a11yPrefix,
+  allowDeselect = false,
 }: {
   options: readonly { value: string; label: string }[];
   value: string | null;
-  onChange: (v: string) => void;
+  /** null sólo cuando `allowDeselect` y se re-toca el valor ya seleccionado (delta RAF2.3.1). */
+  onChange: (v: string | null) => void;
   /** Prefijo del a11y label de cada fila (ej. "Categoría", "Rodeo") → "Categoría Multípara". */
   a11yPrefix: string;
+  /** Opt-in (delta RAF2.3.1/2.3.6): re-tap del valor seleccionado lo deselecciona (→ null). Default false
+   *  → los selectores REQUERIDOS (rodeo paso 1, categoría paso 3) conservan su comportamiento idéntico. */
+  allowDeselect?: boolean;
 }) {
   const white = getTokenValue('$white', 'color');
   return (
@@ -1401,7 +1496,7 @@ function OptionRows({
         return (
           <Pressable
             key={opt.value}
-            onPress={() => onChange(opt.value)}
+            onPress={() => onChange(allowDeselect && selected ? null : opt.value)}
             {...buttonA11y(Platform.OS, { label: `${a11yPrefix} ${opt.label}`, selected })}
           >
             <XStack
@@ -1451,9 +1546,12 @@ const FITNESS_OPTIONS: readonly { value: HeiferFitness; label: string; bg: '$pri
 function FitnessOptionRows({
   value,
   onChange,
+  allowDeselect = false,
 }: {
   value: HeiferFitness | null;
-  onChange: (v: HeiferFitness) => void;
+  /** null sólo cuando `allowDeselect` y se re-toca el valor ya seleccionado (delta RAF2.3.1). */
+  onChange: (v: HeiferFitness | null) => void;
+  allowDeselect?: boolean;
 }) {
   const white = getTokenValue('$white', 'color');
   return (
@@ -1463,7 +1561,7 @@ function FitnessOptionRows({
         return (
           <Pressable
             key={opt.value}
-            onPress={() => onChange(opt.value)}
+            onPress={() => onChange(allowDeselect && selected ? null : opt.value)}
             {...buttonA11y(Platform.OS, { label: `Aptitud ${opt.label}`, selected })}
           >
             <XStack

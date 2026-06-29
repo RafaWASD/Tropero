@@ -6,6 +6,8 @@ export { Card } from './Card';
 export type { CardProps } from './Card';
 export { FormField } from './FormField';
 export type { FormFieldProps } from './FormField';
+export { ConditionScoreStepper } from './ConditionScoreStepper';
+export type { ConditionScoreStepperProps } from './ConditionScoreStepper';
 export { AuthScreenShell } from './AuthScreenShell';
 export type { AuthScreenShellProps } from './AuthScreenShell';
 export { FormError, InfoNote, LinkButton } from './AuthBits';

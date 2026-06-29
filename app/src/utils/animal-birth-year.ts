@@ -76,6 +76,104 @@ export function birthYearToDate(year: number | null, now: Date = new Date()): st
   return midYear > todayIso ? `${yyyy}-01-01` : midYear;
 }
 
+// ─── Fecha de nacimiento DÍA/MES opcional separada del año (delta alta-form-refinamiento, RAF2.1) ──────
+//
+// El campo Año (arriba) se mantiene intacto (year-only → midpoint). ACÁ se agrega un campo OPCIONAL de
+// día/mes (DD/MM, día-primero es-AR): con DD/MM válidos la fecha es EXACTA; con solo año cae al midpoint
+// (birthYearToDate, intacto). Todo es lógica PURA client-side (offline, testeable con node:test).
+
+/**
+ * Sanitiza el input de día/mes EN VIVO (prevenir-no-errorear, RAF2.1.11): solo dígitos, día-primero, con
+ * "/" automático tras 2 dígitos, tope DD/MM (4 dígitos). "1502" → "15/02"; "3/" → "3"; "abc" → ""; idempotente.
+ */
+export function sanitizeDayMonthInput(raw: string): string {
+  const digits = raw.replace(/\D/g, '').slice(0, 4); // DDMM, máximo 4 dígitos
+  if (digits.length <= 2) return digits; // "", "3", "15" — todavía sin mes
+  return `${digits.slice(0, 2)}/${digits.slice(2)}`; // "1502" → "15/02"; "150" → "15/0"
+}
+
+export type BirthDateValidation =
+  | { ok: true; date: string } // ISO 'AAAA-MM-DD' (exacta si hay DD/MM; midpoint si solo año)
+  | { ok: true; date: null } // todo vacío (año y DD/MM): birth_date null (opcional, válido)
+  | { ok: false; error: string; field: 'year' | 'dayMonth' };
+
+/** Año bisiesto (regla gregoriana estándar): divisible por 4, salvo los seculares no divisibles por 400. */
+function isLeapYear(year: number): boolean {
+  return (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+}
+
+/** Días del mes (1–12) para un año dado; febrero = 29 en bisiesto, 28 si no. */
+function daysInMonth(month: number, year: number): number {
+  if (month === 2) return isLeapYear(year) ? 29 : 28;
+  return [1, 3, 5, 7, 8, 10, 12].includes(month) ? 31 : 30;
+}
+
+/** ISO local 'AAAA-MM-DD' de `now` para comparar fechas como strings (orden lexicográfico = orden de fecha). */
+function todayIso(now: Date): string {
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(
+    now.getDate(),
+  ).padStart(2, '0')}`;
+}
+
+/**
+ * Valida la fecha de nacimiento COMPLETA al submit (RAF2.1.3–2.1.10). `yearRaw`/`dayMonthRaw` son los strings
+ * crudos del form (ya sanitizados en vivo). `now` inyectable (tests deterministas). Reglas:
+ *   - año vacío + DD/MM vacío → { ok:true, date:null } (opcional).
+ *   - año válido + DD/MM vacío → { ok:true, date: birthYearToDate(year, now) } (midpoint, RAF2.1.3).
+ *   - año vacío + DD/MM presente → { ok:false, field:'dayMonth' } (no hay fecha sin año, RAF2.1.5).
+ *   - DD/MM incompleto (solo día) → { ok:false, field:'dayMonth' } (todo-o-nada, RAF2.1.6).
+ *   - mes ∉ 1..12 / día ∉ 1..daysInMonth / 00 / 31-en-mes-de-30 / 29-02 no bisiesto → { ok:false } (sin clamp, 2.1.7/2.1.8).
+ *   - fecha exacta futura → { ok:false, field:'dayMonth' } (RAF2.1.9, criterio propio).
+ *   - año válido + DD/MM válido y no-futuro → { ok:true, date: 'AAAA-MM-DD' } (RAF2.1.4).
+ * Reusa `validateBirthYear` (eje año: 4 díg / no futuro / ≥ MIN_BIRTH_YEAR) y `birthYearToDate` (midpoint, intacto).
+ */
+export function validateBirthDate(
+  yearRaw: string,
+  dayMonthRaw: string,
+  now: Date = new Date(),
+): BirthDateValidation {
+  // Eje AÑO (reusa la util existente, sin duplicar): formato / no futuro / cota inferior.
+  const yearV = validateBirthYear(yearRaw, now);
+  if (!yearV.ok) return { ok: false, error: yearV.error, field: 'year' };
+
+  const dm = dayMonthRaw.trim();
+  if (dm.length === 0) {
+    // Sin día/mes: año-solo → midpoint; ambos vacíos → null (ambos delegan en birthYearToDate, intacto).
+    return { ok: true, date: birthYearToDate(yearV.year, now) };
+  }
+
+  // Hay día/mes → REQUIERE año (no hay fecha exacta sin año), RAF2.1.5.
+  if (yearV.year == null) {
+    return { ok: false, error: 'Cargá el año para poder usar el día y mes.', field: 'dayMonth' };
+  }
+
+  // Todo-o-nada (RAF2.1.6): la fecha exacta necesita día Y mes. El sanitizer inserta "/" recién al 3er
+  // dígito → sin "/" sólo hay día (incompleto). Con "/" siempre hay 2 díg de día + ≥1 díg de mes.
+  const parts = dm.split('/');
+  const dayStr = parts[0] ?? '';
+  const monthStr = parts[1] ?? '';
+  if (dayStr.length === 0 || monthStr.length === 0) {
+    return { ok: false, error: 'Completá el día y el mes (DD/MM).', field: 'dayMonth' };
+  }
+
+  const day = Number(dayStr);
+  const month = Number(monthStr);
+  const year = yearV.year;
+  // Rango (sin clamp silencioso, RAF2.1.7/2.1.8): mes 1..12, día 1..díasDelMes (febrero respeta bisiesto).
+  if (month < 1 || month > 12 || day < 1 || day > daysInMonth(month, year)) {
+    return { ok: false, error: 'El día y mes no son válidos (revisá DD/MM).', field: 'dayMonth' };
+  }
+
+  const iso = `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  // Fecha exacta futura (RAF2.1.9): el año ya pasó el filtro de "no futuro", pero el día/mes en el año en
+  // curso puede caer adelante de hoy → lo rechaza el eje día/mes (sin clamp).
+  if (iso > todayIso(now)) {
+    return { ok: false, error: 'La fecha de nacimiento no puede ser futura.', field: 'dayMonth' };
+  }
+
+  return { ok: true, date: iso };
+}
+
 /**
  * ¿El estado de preñez capturado en el alta es POSITIVO (preñada)? small=cola/medium=cuerpo/large=cabeza
  * → true (hay diagnóstico de preñez). 'empty' (Vacía) o null → false (no preñada / sin diagnóstico). Lo

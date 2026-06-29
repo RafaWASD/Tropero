@@ -7,6 +7,8 @@ import {
   validateBirthYear,
   birthYearToDate,
   isPregnantStatus,
+  sanitizeDayMonthInput,
+  validateBirthDate,
   MIN_BIRTH_YEAR,
 } from './animal-birth-year.ts';
 
@@ -81,4 +83,96 @@ test('isPregnantStatus: small/medium/large → true; empty/null → false', () =
   assert.equal(isPregnantStatus('empty'), false);
   assert.equal(isPregnantStatus(null), false);
   assert.equal(isPregnantStatus(undefined), false);
+});
+
+// ─── sanitizeDayMonthInput: solo dígitos, día-primero, "/" automático, tope DD/MM (RAF2.1.11) ─────────
+
+test('sanitizeDayMonthInput: dígitos día-primero con "/" automático y tope 4 díg', () => {
+  assert.equal(sanitizeDayMonthInput('1502'), '15/02');
+  assert.equal(sanitizeDayMonthInput('3/'), '3'); // 1 díg → todavía sin mes, sin slash
+  assert.equal(sanitizeDayMonthInput('abc'), '');
+  assert.equal(sanitizeDayMonthInput(''), '');
+  assert.equal(sanitizeDayMonthInput('15'), '15'); // 2 díg → día completo, sin slash aún
+  assert.equal(sanitizeDayMonthInput('150'), '15/0'); // 3 díg → mes parcial
+  assert.equal(sanitizeDayMonthInput('15022026'), '15/02'); // corta a 4 díg
+  assert.equal(sanitizeDayMonthInput('1a5/b02'), '15/02'); // descarta no-dígitos
+});
+
+test('sanitizeDayMonthInput: idempotente (re-sanitizar no cambia)', () => {
+  for (const s of ['', '3', '15', '15/0', '15/02']) {
+    assert.equal(sanitizeDayMonthInput(s), s);
+  }
+});
+
+// ─── validateBirthDate: año-solo / exacta / todo-o-nada / rangos / bisiesto / futuro (RAF2.1.3–2.1.9) ─
+
+test('validateBirthDate: ambos vacíos → { ok:true, date:null } (opcional)', () => {
+  assert.deepEqual(validateBirthDate('', '', NOW), { ok: true, date: null });
+  assert.deepEqual(validateBirthDate('   ', '  ', NOW), { ok: true, date: null });
+});
+
+test('validateBirthDate: año válido + DD/MM vacío → midpoint AAAA-07-01 (RAF2.1.3)', () => {
+  assert.deepEqual(validateBirthDate('2022', '', NOW), { ok: true, date: '2022-07-01' });
+});
+
+test('validateBirthDate: año válido + DD/MM válido → fecha EXACTA AAAA-MM-DD (RAF2.1.4)', () => {
+  assert.deepEqual(validateBirthDate('2022', '15/02', NOW), { ok: true, date: '2022-02-15' });
+  assert.deepEqual(validateBirthDate('2022', '01/12', NOW), { ok: true, date: '2022-12-01' });
+  // día/mes de 1 dígito de mes ("15/2" = 15 de febrero) también vale.
+  assert.deepEqual(validateBirthDate('2022', '15/2', NOW), { ok: true, date: '2022-02-15' });
+});
+
+test('validateBirthDate: DD/MM sin año → error en el campo dayMonth (RAF2.1.5)', () => {
+  const r = validateBirthDate('', '15/02', NOW);
+  assert.equal(r.ok, false);
+  assert.equal(r.ok === false && r.field, 'dayMonth');
+});
+
+test('validateBirthDate: DD/MM incompleto (solo día) → error todo-o-nada (RAF2.1.6)', () => {
+  const r = validateBirthDate('2022', '15', NOW); // sin "/" → sólo día
+  assert.equal(r.ok, false);
+  assert.equal(r.ok === false && r.field, 'dayMonth');
+  // mes parcial vacío ("15/0" tiene mes "0" → cae en rango, no en incompleto): el incompleto real es sin mes.
+  const r2 = validateBirthDate('2022', '7', NOW);
+  assert.equal(r2.ok, false);
+});
+
+test('validateBirthDate: día/mes fuera de rango → error sin clamp (RAF2.1.7)', () => {
+  assert.equal(validateBirthDate('2022', '31/02', NOW).ok, false); // 31 de febrero
+  assert.equal(validateBirthDate('2022', '00/00', NOW).ok, false); // 00/00
+  assert.equal(validateBirthDate('2022', '31/04', NOW).ok, false); // 31 en abril (30 días)
+  assert.equal(validateBirthDate('2022', '15/00', NOW).ok, false); // mes 0
+  assert.equal(validateBirthDate('2022', '15/13', NOW).ok, false); // mes 13
+  // un borde válido: 30/04 (abril tiene 30) y 31/01 (enero tiene 31).
+  assert.deepEqual(validateBirthDate('2022', '30/04', NOW), { ok: true, date: '2022-04-30' });
+  assert.deepEqual(validateBirthDate('2022', '31/01', NOW), { ok: true, date: '2022-01-31' });
+});
+
+test('validateBirthDate: 29/02 — bisiesto OK / no bisiesto ERROR sin clamp (RAF2.1.8)', () => {
+  assert.deepEqual(validateBirthDate('2020', '29/02', NOW), { ok: true, date: '2020-02-29' }); // bisiesto
+  assert.equal(validateBirthDate('2021', '29/02', NOW).ok, false); // no bisiesto
+  assert.deepEqual(validateBirthDate('2000', '29/02', NOW), { ok: true, date: '2000-02-29' }); // div 400 → bisiesto
+  assert.equal(validateBirthDate('1900', '29/02', NOW).ok, false); // secular no div 400 → no bisiesto
+  // 28/02 siempre vale.
+  assert.deepEqual(validateBirthDate('2021', '28/02', NOW), { ok: true, date: '2021-02-28' });
+});
+
+test('validateBirthDate: fecha exacta FUTURA → error en dayMonth (RAF2.1.9)', () => {
+  // NOW = 2026-06-05. Una fecha del año en curso posterior a hoy es futura.
+  const r = validateBirthDate('2026', '15/12', NOW);
+  assert.equal(r.ok, false);
+  assert.equal(r.ok === false && r.field, 'dayMonth');
+  // El mismo día de hoy NO es futuro (válido).
+  assert.deepEqual(validateBirthDate('2026', '05/06', NOW), { ok: true, date: '2026-06-05' });
+  // Un día anterior a hoy en el año en curso es válido.
+  assert.deepEqual(validateBirthDate('2026', '01/01', NOW), { ok: true, date: '2026-01-01' });
+});
+
+test('validateBirthDate: año inválido propaga el error con field:year (RAF2.1.1 intacto)', () => {
+  const r = validateBirthDate('203', '15/02', NOW); // año de 3 dígitos
+  assert.equal(r.ok, false);
+  assert.equal(r.ok === false && r.field, 'year');
+  const r2 = validateBirthDate('2027', '', NOW); // año futuro
+  assert.equal(r2.ok, false);
+  assert.equal(r2.ok === false && r2.field, 'year');
 });

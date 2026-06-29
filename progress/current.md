@@ -36,9 +36,18 @@ Implementer (`a5d802b9a1548fd62`) entregó los 3 fixes + autorrevisión:
 
 **Veto de diseño del leader: PASS** — chip 3 tiers por token, sin doble-amarillo con CUT, lineHeight matcheado. Tradeoff de layout notado (rodeo trunca primero ante "Multípara"+"Servida sin tacto" en pantalla angosta; prioridad correcta) → a confirmar por Raf en la app.
 
-**Gate 2 PASS** 0 HIGH/0 MEDIUM + **reviewer APPROVED** + **Puerta 2 APROBADA por Raf** (2026-06-29). **DELTA APTITUD CERRADO.** Reconciliado el baseline (ADR-028: índice "Deltas posteriores" introducido en `design.md` de spec 02 + backfill de previos + nota as-built; T15 [x]). Spec 02 → `deferred`. Código committeado (ver hash abajo). Layout del badge: pendiente que Raf lo confirme en la app (tradeoff de truncado del rodeo, no bloqueante).
+**Gate 2 PASS** 0 HIGH/0 MEDIUM + **reviewer APPROVED** + **Puerta 2 APROBADA por Raf** (2026-06-29). **DELTA APTITUD CERRADO.** Reconciliado el baseline (ADR-028: índice "Deltas posteriores" introducido en `design.md` de spec 02 + backfill de previos + nota as-built; T15 [x]). Spec 02 → `deferred`. Commits: `0d447cd` (spec) + `b7c2554` (código). **`check.mjs` completo VERDE end-to-end (exit 0)** — validado a fondo. Layout del badge: pendiente que Raf lo confirme en la app (tradeoff de truncado del rodeo, no bloqueante).
 
-**ESTADO DE LAS 15 CORRECCIONES**: Fase 1 done (#9/#11/#12) · Aptitud done (#5/#6/#1b). PENDIENTE: A cluster ternero (gatea peso destete/Facundo, en backlog) · #8 parición · #10 destete (gatea peso) · #2 caravana/nombre-apodo · #3 fecha dd/mm · #13 condición stepper · #14 destildar · #6-ficha caravana+bastoneo (bastoneo gated por hardware) · #16 tapear wheels.
+**ESTADO DE LAS 16 CORRECCIONES**: Fase 1 done (#9/#11/#12) · Aptitud done (#5/#6/#1b).
+
+**MODO AUTÓNOMO** (Raf 2026-06-29: "hacé todo lo que puedas, no necesites nada de mí"): avanzo todo lo que no requiera decisión suya ni de Facundo ni deploy a la DB compartida; apilo las Puertas 2 para su vuelta. Puerta 0/1 de chunks frontend-puros con decisiones menores → defaults del leader (auto-aprobados, confirmables en Puerta 2). NO toco la DB compartida (deploy gated por Raf, memoria project_supabase_mcp_write) ni salto Puerta 2.
+
+**EN CURSO**: delta **alta-form-refinamiento** (#3 fecha dd/mm + #13 condición stepper + #14 destildar) — frontend puro, Gate 1 N/A, Gate 0 auto-aprobado. spec_author (`ad0ad434dd9add2f5`) en background → seguirá implementer → gates → **stack para Puerta 2**.
+
+**EN CURSO 2**: delta **alta-form** (#3/#13/#14). El implementer (`a1cb86e9c5152cae3`) **CRASHEÓ** (el proceso anterior salió mid-run) pero dejó el trabajo COMPLETO en disco; el leader lo **recuperó y verificó**: typecheck VERDE + 35/35 unit + anti-hardcode 0 + extracción `ConditionScoreStepper` behavior-preserving (testIDs `score-*`/`confirm-step` intactos → maniobra sin regresión) + revertidos 4 .png espurios de design/. Veto de diseño del leader PASS. **Gate 2 PASS 0 HIGH/0 MEDIUM + reviewer APPROVED** (3 obs menores no-bloqueantes, reconciliadas). **DELTA ALTA-FORM GATEADO + COMMITEADO** (modo autónomo) → ⏸ **Puerta 2 post-hoc de Raf** (la única acción humana pendiente). Baseline reconciliado (índice de deltas + snippet `dimmed?`). Spec 02 → deferred. Recuperación del crash documentada en `impl_02-alta-form-refinamiento.md`.
+
+**AUTÓNOMO-COMPLETABLE (cola, secuencial — comparten files con el alta, no paralelizar)**: **#6-ficha caravana manual** = CONFIRMADO frontend puro (electrónica vía RPC existente `assign_tag_to_animal` NULL→valor; visual vía UPDATE local sobre `animal_profiles` patrón CUT, editable R4.13; bastoneo DEFERIDO por hardware). · #2 nombre/apodo (toca `rodeo_data_config` — probablemente DB/gate de Raf; verificar al llegar).
+**NECESITAN A RAF/FACUNDO/DEPLOY (queda para su vuelta)**: #8 parición + #10 destete (RPC → Gate 1 + deploy; #10 además gatea peso destete/Facundo) · A cluster ternero (peso destete/Facundo + register_birth RPC/deploy) · #6-bastoneo (hardware) · #16 wheels (Raf dijo "hacer después").
 
 Commit `0d447cd` = fase de spec del delta (Gate 0 + RAR.1-8 + Puerta 1 + estados). Fase 1 (#9/#12/#11) en `2009104`+`d67ea3e`.
 
