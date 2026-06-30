@@ -24,6 +24,9 @@ test-results/
 playwright-report/
 blob-report/
 .playwright/
+# Capturas del Gate 2.5 (ADR-029): los .capture.ts SÍ se versionan; los .png son de
+# corrida (regenerables, diffs espurios) → gitignored. Se le muestran a Raf en la Puerta 2.
+e2e/captures/__shots__/
 
 # Native
 .kotlin/

@@ -47,6 +47,13 @@
 - [ ] Configurada en bucket de PowerSync correcto.
 - [ ] Conflict resolution documentada o usa default explícito (last-write-wins).
 
+## C9 — Verificación E2E + visual (UI, ADR-029)
+> Aplica solo a features/deltas con UI. Backend-only → N/A (documentar).
+- [ ] La feature tiene suite E2E de regresión (`app/e2e/*.spec.ts`) verde.
+- [ ] La feature tiene capture file (`app/e2e/captures/<feature>.capture.ts`) con capturas nombradas de cada estado clave (pantallas/sheets, validación, pickers, avisos, vacío/loading/error).
+- [ ] El leader corrió el Gate 2.5 (E2E + capturas + veto visual contra spec + criterios de diseño) y adjuntó las capturas a la Puerta 2.
+- [ ] Los `__shots__/*.png` NO están commiteados (solo el `.capture.ts`).
+
 ---
 
 **Uso:** el `reviewer` recorre cada checkbox aplicable a la feature, marca `[x]`/`[ ]`, y rechaza el cierre si quedan boxes vacíos en checkpoints aplicables.

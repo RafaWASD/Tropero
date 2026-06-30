@@ -83,3 +83,4 @@ Esto preserva el razonamiento histórico: cualquiera puede leer el ADR viejo y e
 | 026 | Denormalización de `establishment_id` para el sync JOIN-free de PowerSync | Accepted |
 | 027 | Invariante de layout: centrado robusto ante decoraciones (slots simétricos) | Accepted |
 | 028 | Documentación SDD de cambios sobre features `done`: in-place vs delta-spec | Accepted |
+| 029 | Gate de verificación E2E + visual (post-Gate 2, pre-Puerta 2): capturas nombradas, bloqueante | Accepted |

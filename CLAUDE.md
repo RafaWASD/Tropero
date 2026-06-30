@@ -11,7 +11,7 @@ En este repo actuás SIEMPRE como el subagente `leader` definido en `.claude/age
 - ❌ No marcás features como `done` en `feature_list.json`.
 - ❌ No saltás el refinamiento ni la fase de spec. Toda feature con `"sdd": true` pasa por refinamiento de contexto (Gate 0) y `spec_author` antes de implementar.
 - ❌ No saltás las puertas de aprobación humana (contexto, spec, código).
-- ✅ Para tareas de código: refinás contexto (vos + Raf) → ⏸ aprobación → `context_ready` → `spec_author` → ⏸ aprobación → `implementer` → `reviewer` → Gate 2 → ⏸ aprobación final.
+- ✅ Para tareas de código: refinás contexto (vos + Raf) → ⏸ aprobación → `context_ready` → `spec_author` → ⏸ aprobación → `implementer` → `reviewer` → Gate 2 → **Gate 2.5 (E2E + capturas + veto visual, si hay UI — ADR-029)** → ⏸ aprobación final (con capturas a la vista).
 
 ### Cuándo NO aplica este rol
 - Preguntas conceptuales o de exploración (lectura pura) → respondés directamente.

@@ -33,12 +33,14 @@ pending → [refinamiento: leader + humano] → context.md
                               ↓
                   [security_analyzer modo `code`] ← Gate 2 (SIEMPRE)
                               ↓
-                       ⏸ HUMANO APRUEBA FINAL
+                  [leader: E2E + capturas + veto visual] ← Gate 2.5 (UI, BLOQUEANTE)
+                              ↓
+                       ⏸ HUMANO APRUEBA FINAL (con capturas a la vista)
                               ↓
                             done
 ```
 
-NUNCA saltás el refinamiento ni la fase de spec. NUNCA lanzás `spec_author` si la feature no está `context_ready`. NUNCA lanzás `implementer` si no está aprobada la spec. NUNCA saltás Gate 2.
+NUNCA saltás el refinamiento ni la fase de spec. NUNCA lanzás `spec_author` si la feature no está `context_ready`. NUNCA lanzás `implementer` si no está aprobada la spec. NUNCA saltás Gate 2 ni Gate 2.5 (este último cuando hay UI).
 
 ## Gates de seguridad (ADR-019)
 
@@ -73,12 +75,25 @@ El `security_analyzer` calcula el diff desde el `baseline_commit` que el impleme
 
 El output va a `progress/security_code_<feature>.md`. Veredictos posibles: PASS / FAIL.
 
-- **PASS**: seguís al ⏸ aprobación humana final.
+- **PASS**: seguís al Gate 2.5 (si hay UI) o directo al ⏸ aprobación humana final (si es backend-only).
 - **FAIL**: relanzás `implementer` con los findings HIGH-confidence como input para fix. Reviewer revalida. Loop hasta PASS.
+
+### Gate 2.5 — Verificación E2E + visual (UI, BLOQUEANTE) — ADR-029
+
+Tras Gate 2 PASS, **si la feature/delta toca UI** (pantallas, componentes, sheets, formularios), corrés vos un gate de verificación E2E + visual ANTES de presentar la Puerta 2. **Es bloqueante.** Backend-only (sin UI) → N/A (documentás el N/A, igual que Gate 1 para frontend puro).
+
+Pasos:
+1. **E2E funcional**: corrés la suite de regresión del feature (`cd app && pnpm e2e` o `playwright test -g "<patrón>"` para el subset del feature). Debe estar **verde**. (Memoria: una "N passed" + assertion libuv al final en Windows = crash de teardown, NO fallo — ver `reference_playwright_win_teardown`.)
+2. **Capturas**: corrés el capture file del feature (`pnpm exec playwright test e2e/captures/<feature>.capture.ts --config playwright.capture.config.ts`) → screenshots NOMBRADOS a `app/e2e/captures/__shots__/<feature>/` (gitignored). El implementer entrega ese `.capture.ts` (es su deliverable de UI). Si no existe, volvés al implementer.
+3. **Veto visual**: mirás las capturas (`Read` de los PNG) contra (a) el **flujo de la spec** (¿hace lo planeado?, cada `R<n>`/`RCAP.<n>` con UI reflejado) y (b) los **criterios de diseño** (skill `design-review`: manga-friendly, anti-recorte de descendentes, tokens ADR-023, jerarquía, Fitts, es-AR, sheets header-fijo/body-scroll/footer-fijo). Podés delegar la revisión a un subagente con la skill `design-review`.
+4. **Bloqueo**: E2E rojo, o diseño que no cumple, o flujo que no coincide con la spec → relanzás `implementer` (fix-loop) ANTES de la Puerta 2. Loop hasta verde + visual OK.
+5. **Surface**: con todo OK, adjuntás las capturas clave a la Puerta 2 vía `SendUserFile` → el humano aprueba el código CON evidencia visual.
+
+**NO `git add` de los `__shots__/*.png` ni de `design/**/*.png`** tras correr capturas (diffs espurios — `reference_e2e_design_png_rerender`). El `.capture.ts` SÍ se commitea.
 
 **Reconciliación antes de `done`**: cada vuelta del fix-loop puede haber cambiado comportamiento o estructura. Antes de presentar al humano, confirmá que las specs (`requirements/design/tasks.md`) quedaron reconciladas con el as-built — el implementer las actualiza (su paso 9) y el reviewer lo controla. Si detectás specs viejas que contradicen el código, relanzás `implementer` solo para reconciliar antes de `done`.
 
-NUNCA aprobás `done` sin Gate 2 PASS ni con specs sin reconciliar.
+NUNCA aprobás `done` sin Gate 2 PASS, sin Gate 2.5 (cuando hay UI), ni con specs sin reconciliar.
 
 ## Cómo descomponer "implementá la siguiente feature pendiente"
 
@@ -102,7 +117,7 @@ El refinamiento lo conducís **vos mismo, en conversación con el humano** (es d
 2. Lanzás 1 `implementer` con la ruta `specs/active/<name>/` como input.
 3. Al terminar → 1 `reviewer`.
 4. Si reviewer APPROVED → lanzás Gate 2 con `security_analyzer` modo `code`.
-5. Si Gate 2 PASS → confirmás specs reconciladas al as-built → ⏸ humano aprueba final → `done`.
+5. Si Gate 2 PASS → **Gate 2.5 (si hay UI): E2E + capturas + veto visual** (ADR-029; bloqueante, loop al implementer si rojo/diseño no cumple) → confirmás specs reconciladas al as-built → ⏸ humano aprueba final **con capturas a la vista** → `done`.
 6. Si Gate 2 FAIL → relanzás implementer con findings HIGH como input.
 
 ### Caso C — `spec_ready` SIN aprobación humana
@@ -119,9 +134,9 @@ Los subagentes **escriben resultados en archivos**. Vos solo recibís referencia
 
 | Complejidad | Subagentes |
 |---|---|
-| Trivial | refinamiento → ⏸ → 1 spec_author → ⏸ → 1 implementer → 1 reviewer → Gate 2 |
-| Media | refinamiento → ⏸ → 1 spec_author → [Gate 1 si aplica] → ⏸ → 1 implementer → 1 reviewer → Gate 2 |
-| Compleja | refinamiento (+Explore) → ⏸ → 1 spec_author → [Gate 1 si aplica] → ⏸ → 1 implementer → 1 reviewer → Gate 2 |
+| Trivial | refinamiento → ⏸ → 1 spec_author → ⏸ → 1 implementer → 1 reviewer → Gate 2 → [Gate 2.5 si UI] |
+| Media | refinamiento → ⏸ → 1 spec_author → [Gate 1 si aplica] → ⏸ → 1 implementer → 1 reviewer → Gate 2 → [Gate 2.5 si UI] |
+| Compleja | refinamiento (+Explore) → ⏸ → 1 spec_author → [Gate 1 si aplica] → ⏸ → 1 implementer → 1 reviewer → Gate 2 → [Gate 2.5 si UI] |
 | Muy compleja | Dividí en sub-features y reaplicá la tabla |
 
 ## Qué NO hacés
@@ -132,6 +147,7 @@ Los subagentes **escriben resultados en archivos**. Vos solo recibís referencia
 - ❌ Lanzar `spec_author` sobre una feature que no esté `context_ready`.
 - ❌ Aceptar resultados de subagentes sin referencia a archivo.
 - ❌ Saltar Gate 2 (code security review). Es SIEMPRE obligatorio antes de aprobación final.
+- ❌ Saltar Gate 2.5 (verificación E2E + visual, ADR-029) cuando la feature/delta toca UI. Es BLOQUEANTE: no presentás la Puerta 2 con E2E rojo o capturas con problemas de diseño.
 - ❌ Aprobar `done` con specs (`requirements/design/tasks`) sin reconciliar al as-built tras un fix-loop o decisión de gate.
 - ❌ Saltar Gate 1 sin justificar en `progress/current.md` por qué no aplica.
 
