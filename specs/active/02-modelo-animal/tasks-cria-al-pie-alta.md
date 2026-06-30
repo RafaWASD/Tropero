@@ -50,7 +50,7 @@
 
 ## Fase G — Cierre
 
-- [ ] **T22** — Reconciliación: mapa `RCAP.<n> → archivo:test` en `progress/impl_cria-al-pie-alta.md`; reflejar cualquier fix de Gate 1/2 en estos 3 archivos antes de cerrar (regla dura `docs/specs.md`). El leader folda al baseline (puntero + bloque "Deltas posteriores") al cerrar la Puerta 2 — NO en este delta.
+- [x] **T22** — Reconciliación: mapa `RCAP.<n> → archivo:test` en `progress/impl_cria-al-pie-alta.md`; reflejar cualquier fix de Gate 1/2 en estos 3 archivos antes de cerrar (regla dura `docs/specs.md`). El leader folda al baseline (puntero + bloque "Deltas posteriores") al cerrar la Puerta 2 — NO en este delta.
 
 ---
 

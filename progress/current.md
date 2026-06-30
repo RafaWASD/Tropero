@@ -5,12 +5,12 @@
 
 **SESIÓN 2026-06-29/30 — CORRECCIONES DEL TESTEO EN VIVO CON FACUNDO (16) + CONVENCIÓN SDD PARA FIXES (ADR-028).**
 
-## 🆕 2026-06-30 — DELTA CRÍA-AL-PIE-ALTA (#15) — backend + frontend GATEADOS
+## 🆕 2026-06-30 — DELTA CRÍA-AL-PIE-ALTA (#15) — ✅ DONE + PUERTA 2 APROBADA (Raf)
 Al dar de alta una vaca con cría al pie (`nursing=true`) → **prompt saltable** "¿Vincular su cría al pie?" → caravana del ternero (find-or-create) → **vincular** existente (RPC nueva `link_calf_to_mother`) o **crear+vincular** nuevo (`register_birth` 6-arg con rodeo del ternero editable + leyenda "Mismo rodeo que la madre"). Delta Nivel B CON BACKEND (Gate 1 obligatorio; deploy autorizado por Raf en Gate 0).
 - **BACKEND commiteado `70c2efd`**: 0114 (RPC nuevo, 8 guards anti-IDOR/idempotencia) + 0115/0116 (`register_birth` extendido; **0116 fix Gate 2 HIGH** = restaura herencia `breed_id` madre→ternero que 0115 había borrado al moldearse sobre 0075 en vez del as-built 0109 — SIGSA R1.7). Aplicadas al remoto. 200/200 backend (animal + SIGSA). Plumbing outbox/upload/events. Memoria `reference_function_recreate_base`.
 - **FRONTEND (este commit)**: `LinkCalfPrompt.tsx` (bottom-sheet 3 fases ask→found→create, molde `BreedPickerSheet`) + `link-calf-query.ts` (clasificador puro EID/IDV) + wiring `crear-animal.tsx`. **Veto de diseño del leader**: re-iteré para agregar la affordance "← Cambiar caravana" (control&freedom Nielsen #3 — un mistype en la manga no debe forzar abandonar ni crear un ternero bogus). Gate 2 PASS 0 HIGH + reviewer APPROVED (tras fix de 1 aserción E2E mal escrita = bug de test, no de producto). typecheck + 12 unit + E2E (#15 6/6 + back round-trip + RCAP.4.2) verdes. Specs reconciliadas (T1-T21 [x]).
 - **Gate 2.5 (ADR-029 — verificación E2E + visual, PRIMER CASO)**: capture file `app/e2e/captures/cria-al-pie-alta.capture.ts` → 10 capturas nombradas (412×915), 2/2 tests verdes. **Veto visual del leader: PASS** (anti-recorte, sheet anatomy, manga-friendly, validación inline, es-AR, flujo de la spec). 2 observaciones menores no bloqueantes (nombre de rodeo del seed de test; 2da opción del picker bajo el fold con scroll-fade). Capturas adjuntadas a la Puerta 2.
-- **⏸ Puerta 2 post-hoc de Raf**: probar en la app el prompt (o mirar las 10 capturas adjuntas) — vincular existente / crear+vincular con rodeo editable / "Cambiar caravana" / "ya tiene madre" / "Ahora no".
+- **✅ Puerta 2 APROBADA (Raf, 2026-06-30)** mirando las 10 capturas del Gate 2.5. Foldeado al baseline (`design.md` índice Deltas posteriores) + T22 [x]. Commits: backend `70c2efd`, frontend `c2fcebc`, capture `d577a64`, cierre `<este>`.
 
 ## Resumen
 Raf + Facundo testearon la app en vivo (PRE-campo, sin datos reales, bastón no probado) → 16 correcciones. El leader hizo el triage (`docs/correcciones-prueba-en-vivo-2026-06-27.md`), formalizó la convención de delta-specs (ADR-028), y cerró 6 correcciones en 4 deltas. Las últimas 2 en **modo autónomo** ("hacé todo lo que puedas, no necesites nada de mí").
@@ -52,4 +52,4 @@ Suite completa: **176 passed / 10 failed** (1ra corrida en vivo de los e2e de lo
 
 ## Otro estado (no de esta sesión)
 - **Spec 08 (SIGSA)** → `blocked` (status corregido in_progress→blocked esta sesión): espera (a) deploy YAML PowerSync [Raf] + (b) upload formato SIGSA [Facundo].
-- Spec 02 → `in_progress` (delta #15 cría-al-pie-alta gateado 2026-06-30, ⏸ Puerta 2; vuelve a `deferred` al cerrarla). 4 deltas previos cerrados.
+- Spec 02 → `in_progress` (#15 cría-al-pie-alta ✅ DONE/Puerta 2 aprobada 2026-06-30; arrancando el delta `parto-rodeo-caravana` #4/#1a — frontend-only, backend ya deployado). `alta-form-refinamiento` + `caravana-ficha` ⏸ Puerta 2 pendiente. Resto de deltas previos done.
