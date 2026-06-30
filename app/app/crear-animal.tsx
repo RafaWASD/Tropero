@@ -32,7 +32,7 @@ import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
 import { Check, ChevronDown, ChevronLeft, Mars, Venus, X } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
 
-import { Button, Card, ConditionScoreStepper, FormField, FormError, InfoNote } from '@/components';
+import { Button, Card, ConditionScoreStepper, FormField, FormError, InfoNote, LinkCalfPrompt } from '@/components';
 import { BreedPickerSheet } from '@/components/sigsa';
 import { useAuth, useEstablishment, useRodeo } from '@/contexts';
 import { createAnimal, fetchSystemCategories, type SystemCategory } from '@/services/animals';
@@ -219,6 +219,12 @@ export default function CrearAnimalScreen() {
   // (no se pierde). Guardamos su profileId acá para (a) NO permitir re-crear (duplicado) — el CTA pasa
   // a "Ver la ficha del animal" — y (b) mostrar el aviso suave en el form. El happy-path navega solo.
   const [createdProfileId, setCreatedProfileId] = useState<string | null>(null);
+
+  // Prompt "Vincular la cría al pie" (delta #15, RCAP.1): tras crear una vaca con cría al pie (nursing=true)
+  // en el happy path, en vez de navegar, mostramos el prompt saltable. `linkPromptMotherId` = el profileId
+  // de la madre recién creada (id de cliente, offline-safe) → controla el montaje del prompt. Tras "Ahora no"
+  // o un vínculo exitoso, navegamos por la MISMA rama (maniobra→carga / alta→ficha) — la vaca ya existe.
+  const [linkPromptMotherId, setLinkPromptMotherId] = useState<string | null>(null);
 
   // Ref del form de PROPIEDADES CUSTOM (R13.10): el submit recolecta sus valores y los persiste post-create
   // (custom_attributes), mismo patrón soft-fail que condición/preñez. Vive en el paso 4 (form dinámico).
@@ -439,20 +445,39 @@ export default function CrearAnimalScreen() {
     }
   }, [step, noRodeo, rodeos.length, selectedRodeo]);
 
+  // Navegación post-create (R4.7 / M2.2): en contexto MODO MANIOBRAS continuamos DIRECTO a la carga de la
+  // maniobra del animal nuevo (/maniobra/carga, sin re-identificarlo); si no, a su ficha. `replace` para no
+  // dejar el form en el back-stack. Fuente ÚNICA de la navegación post-create (la usan el happy-path, el
+  // re-tap tras soft-fail, y el cierre del prompt de cría al pie).
+  const navigateAfterCreate = useCallback(
+    (profileId: string) => {
+      if (maneuverSessionId) {
+        router.replace({
+          pathname: '/maniobra/carga',
+          params: { sessionId: maneuverSessionId, profileId },
+        });
+      } else {
+        router.replace({ pathname: '/animal/[id]', params: { id: profileId } });
+      }
+    },
+    [maneuverSessionId, router],
+  );
+
+  // Cierre del prompt de cría al pie (RCAP.1.3/3.5/4.5): "Ahora no" o vínculo/creación con éxito → cerramos
+  // el prompt y navegamos por la rama normal (la vaca ya existe; no se re-crea ni se modifica).
+  const finishLinkPrompt = useCallback(() => {
+    const id = linkPromptMotherId;
+    setLinkPromptMotherId(null);
+    if (id) navigateAfterCreate(id);
+  }, [linkPromptMotherId, navigateAfterCreate]);
+
   const onSubmit = useCallback(async () => {
     if (busyRef.current) return;
     // Si el animal YA se creó (un evento post-create falló), NO re-creamos: navegamos sin re-crear (evita
     // un DUPLICADO si el operario re-toca el CTA tras el aviso suave). En contexto MODO MANIOBRAS (M2.2)
     // continuamos la carga de la maniobra del animal nuevo; si no, a su ficha (como hoy).
     if (createdProfileId) {
-      if (maneuverSessionId) {
-        router.replace({
-          pathname: '/maniobra/carga',
-          params: { sessionId: maneuverSessionId, profileId: createdProfileId },
-        });
-      } else {
-        router.replace({ pathname: '/animal/[id]', params: { id: createdProfileId } });
-      }
+      navigateAfterCreate(createdProfileId);
       return;
     }
     setFormError(null);
@@ -623,17 +648,16 @@ export default function CrearAnimalScreen() {
       );
       return;
     }
-    // Happy-path (R4.7): al recién creado. En contexto MODO MANIOBRAS (M2.2) continuamos DIRECTO a la
-    // carga de la maniobra del animal nuevo (/maniobra/carga, sin re-identificarlo); si no, a su ficha.
-    // replace para no dejar el form en el back-stack.
-    if (maneuverSessionId) {
-      router.replace({
-        pathname: '/maniobra/carga',
-        params: { sessionId: maneuverSessionId, profileId },
-      });
-    } else {
-      router.replace({ pathname: '/animal/[id]', params: { id: profileId } });
+    // Happy-path. Delta #15 (RCAP.1.1): si la vaca se creó CON cría al pie (nursing=true), en vez de navegar
+    // mostramos el prompt SALTABLE de vinculación ANTES de irnos. Guardamos createdProfileId para blindar
+    // contra un re-tap del CTA (no re-crear) mientras el prompt está arriba; el cierre del prompt navega por
+    // la rama normal (navigateAfterCreate). Si NO hay cría al pie → navegamos como siempre (sin prompt).
+    if (showNursing && nursing === true) {
+      setCreatedProfileId(profileId);
+      setLinkPromptMotherId(profileId);
+      return;
     }
+    navigateAfterCreate(profileId);
   }, [
     createdProfileId,
     maneuverSessionId,
@@ -662,7 +686,7 @@ export default function CrearAnimalScreen() {
     pregnancyStatus,
     heiferFitness,
     nursing,
-    router,
+    navigateAfterCreate,
   ]); // isValidTagElectronic/TAG_ELECTRONIC_LENGTH/validateBirthYear/categoryOverrideFor son puras
 
   const muted = getTokenValue('$textMuted', 'color');
@@ -865,6 +889,21 @@ export default function CrearAnimalScreen() {
         breeds={breedCatalog}
         selectedCode={breedCode}
         onSelect={onSelectBreed}
+      />
+
+      {/* Prompt SALTABLE "Vincular la cría al pie" (delta #15, RCAP.1–RCAP.5). Montado al ROOT (cubre la
+          pantalla con su scrim). Se dispara tras el alta de una vaca con cría al pie (nursing=true) en el
+          happy path; "Ahora no" o un vínculo/creación exitoso navegan por la rama normal (finishLinkPrompt). */}
+      <LinkCalfPrompt
+        open={linkPromptMotherId != null}
+        motherProfileId={linkPromptMotherId}
+        establishmentId={establishmentId}
+        motherRodeoId={selectedRodeo?.id ?? null}
+        motherRodeoName={selectedRodeo?.name ?? null}
+        motherSystemId={selectedRodeo?.systemId ?? null}
+        rodeos={rodeos}
+        onSkip={finishLinkPrompt}
+        onLinked={finishLinkPrompt}
       />
     </YStack>
   );

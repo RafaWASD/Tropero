@@ -15,12 +15,16 @@
 import { test, expect } from './helpers/fixtures';
 import {
   admin,
+  anonClient,
   createTestUser,
   seedEstablishmentWithRodeo,
+  seedRodeo,
   seedAnimal,
   addMember,
   setUserPhone,
   waitForServerAnimalProfile,
+  waitForServerBirth,
+  getServerBirthState,
   cleanupAll,
   RUN_TAG,
 } from './helpers/admin';
@@ -238,6 +242,12 @@ test('B: alta de una MULTÍPARA → el form NO pide peso, SÍ dientes/condición
   await page.getByRole('button', { name: 'Cría al pie Con cría al pie', exact: true }).click();
 
   await page.getByRole('button', { name: 'Crear animal', exact: true }).click();
+
+  // Delta #15 (RCAP.1.1): la vaca se creó CON cría al pie (nursing=true) → aparece el prompt SALTABLE de
+  // vinculación ANTES de navegar. Acá no vinculamos (la cría al pie se prueba aparte); "Ahora no" cierra el
+  // prompt y sigue a la ficha (la vaca queda intacta con nursing=true, RCAP.1.3/1.4).
+  await expect(page.getByText('¿Vincular su cría al pie?', { exact: true })).toBeVisible({ timeout: 20_000 });
+  await page.getByRole('button', { name: 'Ahora no', exact: true }).click();
 
   // Ficha: badge "Multípara" (override, no derivable) + condición corporal en "Estado actual".
   await expect(page.getByText('Identificación', { exact: true })).toBeVisible({ timeout: 20_000 });
@@ -1076,4 +1086,229 @@ test('caravana-ficha (RCF.1.2/RCF.1.4): un identificador YA seteado NO ofrece af
   // NO se ofrece "Agregar caravana electrónica".
   await expect(page.getByText(tag, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 20_000 });
   await expect(page.getByRole('button', { name: 'Agregar caravana electrónica', exact: true })).toHaveCount(0);
+});
+
+// ─── Delta VINCULAR LA CRÍA AL PIE (#15): prompt saltable post-alta (RCAP.1–RCAP.5 / RCAP.10.7) ──────────
+//
+// Tras crear una vaca CON cría al pie (nursing=true) en el happy path, aparece un prompt SALTABLE que pide
+// la caravana del ternero y lo VINCULA (find-or-create): encontrado → linkCalfToMother; nuevo → registerBirth
+// (crea+vincula). "Ahora no" cierra sin vincular (la vaca queda intacta). Cubre RCAP.10.7.
+
+test('delta #15 (RCAP.1.2): alta de una vaca SIN cría al pie → el prompt de vinculación NO aparece', async ({
+  page,
+}) => {
+  // RCAP.1.2: el prompt está gateado por nursing=true. "Sin cría al pie" (nursing=false) → no prompt.
+  const user = await createTestUser('criano');
+  await setUserPhone(user.id, '1123456789');
+  await seedEstablishmentWithRodeo(user.id, 'Campo CriaNo');
+
+  await page.goto('/');
+  await signIn(page, user);
+  await waitForHome(page);
+  await gotoAnimales(page);
+
+  await page.getByRole('button', { name: 'Dar de alta tu primer animal' }).click();
+  await walkWizardToData(page, { sex: 'Hembra', categoryName: 'Multípara' });
+
+  await page.getByLabel('Nombre / seña (opcional)', { exact: true }).fill(`${RUN_TAG}-SN`);
+  // Elegimos EXPLÍCITAMENTE "Sin cría al pie" (nursing=false) → showNursing true pero nursing !== true.
+  await page.getByRole('button', { name: 'Cría al pie Sin cría al pie', exact: true }).click();
+  await page.getByRole('button', { name: 'Crear animal', exact: true }).click();
+
+  // Sin cría al pie → NO se dispara el prompt; navega directo a la ficha.
+  await expect(page.getByText('Identificación', { exact: true })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText('¿Vincular su cría al pie?', { exact: true })).toHaveCount(0);
+});
+
+test('delta #15 (RCAP.1.1/1.3/1.4): vaca CON cría al pie → prompt → "Ahora no" preserva la vaca SIN crear vínculo', async ({
+  page,
+}) => {
+  test.setTimeout(120_000); // alta + poll server (perfil + estado de partos) → headroom.
+  const user = await createTestUser('criaskip');
+  await setUserPhone(user.id, '1123456789');
+  const { establishmentId } = await seedEstablishmentWithRodeo(user.id, 'Campo CriaSkip');
+
+  await page.goto('/');
+  await signIn(page, user);
+  await waitForHome(page);
+  await gotoAnimales(page);
+
+  const motherVisual = `${RUN_TAG}-SK`;
+  await page.getByRole('button', { name: 'Dar de alta tu primer animal' }).click();
+  await walkWizardToData(page, { sex: 'Hembra', categoryName: 'Multípara' });
+  await page.getByLabel('Nombre / seña (opcional)', { exact: true }).fill(motherVisual);
+  await page.getByRole('button', { name: 'Cría al pie Con cría al pie', exact: true }).click();
+  await page.getByRole('button', { name: 'Crear animal', exact: true }).click();
+
+  // RCAP.1.1: el prompt SALTABLE aparece. RCAP.1.3: "Ahora no" lo cierra y navega a la ficha.
+  await expect(page.getByText('¿Vincular su cría al pie?', { exact: true })).toBeVisible({ timeout: 20_000 });
+  await page.getByRole('button', { name: 'Ahora no', exact: true }).click();
+  await expect(page.getByText('Identificación', { exact: true })).toBeVisible({ timeout: 20_000 });
+
+  // RCAP.1.4: la vaca quedó creada (aterriza server-side) y NO se creó NINGÚN vínculo/parto (el skip no linkea).
+  const { id: motherId } = await waitForServerAnimalProfile(establishmentId, { visualAlt: motherVisual });
+  expect((await getServerBirthState(motherId)).birthEventCount).toBe(0);
+});
+
+test('delta #15 (RCAP.3.1/3.2/3.5): vaca con cría al pie → vincular un ternero EXISTENTE → parto + birth_calf en el server', async ({
+  page,
+}) => {
+  test.setTimeout(150_000);
+  const user = await createTestUser('crialink');
+  await setUserPhone(user.id, '1123456789');
+  const { establishmentId, rodeoId } = await seedEstablishmentWithRodeo(user.id, 'Campo CriaLink');
+  // Ternero EXISTENTE en el campo (find-or-create lo encuentra por su caravana visual/idv).
+  const calfIdv = `7711${Date.now().toString().slice(-6)}`;
+  await seedAnimal(establishmentId, rodeoId, { idv: calfIdv, sex: 'male' });
+
+  await page.goto('/');
+  await signIn(page, user);
+  await waitForHome(page);
+  await gotoAnimales(page);
+  // Gate de sync: el ternero sembrado aparece en la lista → está en el SQLite local → el find-or-create lo verá.
+  await expect(page.getByText(calfIdv, { exact: true }).first()).toBeVisible({ timeout: 20_000 });
+
+  // El campo ya tiene un animal → el alta arranca por el buscador (un id fresco no-match → "Dar de alta este animal").
+  const motherIdv = `5512${Date.now().toString().slice(-6)}`;
+  await page.getByLabel('Buscar animal por caravana o número', { exact: true }).fill(motherIdv);
+  await page.getByRole('button', { name: 'Dar de alta este animal' }).click();
+  await walkWizardToData(page, { sex: 'Hembra', categoryName: 'Multípara' });
+  await page.getByRole('button', { name: 'Cría al pie Con cría al pie', exact: true }).click();
+  await page.getByRole('button', { name: 'Crear animal', exact: true }).click();
+
+  // Prompt → tipear la caravana del ternero existente → Buscar → ENCONTRADO → Vincular.
+  await expect(page.getByText('¿Vincular su cría al pie?', { exact: true })).toBeVisible({ timeout: 20_000 });
+  await page.getByLabel('Caravana del ternero', { exact: true }).fill(calfIdv);
+  await page.getByTestId('link-calf-search').click();
+  await expect(page.getByText('Ternero encontrado', { exact: true })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText(calfIdv, { exact: true }).first()).toBeVisible();
+  await page.getByTestId('link-calf-confirm').click();
+
+  // Navega a la ficha de la vaca (reflejo optimista). Oráculo server: 1 parto con 1 birth_calf.
+  await expect(page.getByText('Identificación', { exact: true })).toBeVisible({ timeout: 20_000 });
+  const { id: motherId } = await waitForServerAnimalProfile(establishmentId, { idv: motherIdv });
+  const birth = await waitForServerBirth(motherId, { expectedCalves: 1 });
+  expect(birth.birthEventCount).toBe(1);
+  expect(birth.calfCount).toBe(1);
+});
+
+test('delta #15 (RCAP.4/RCAP.5): vaca con cría al pie → ternero NUEVO con rodeo preseleccionado + leyenda, editable → parto en el server', async ({
+  page,
+}) => {
+  test.setTimeout(150_000);
+  const user = await createTestUser('criacreate');
+  await setUserPhone(user.id, '1123456789');
+  const { establishmentId } = await seedEstablishmentWithRodeo(user.id, 'Campo CriaCreate'); // rodeo A = "Rodeo general"
+  // 2do rodeo del MISMO sistema (cría) → el picker del ternero lo ofrece como destino editable (RCAP.5.3/5.4).
+  await seedRodeo(establishmentId, 'Destete'); // rodeo B = "{RUN_TAG} Destete"
+
+  await page.goto('/');
+  await signIn(page, user);
+  await waitForHome(page);
+  await gotoAnimales(page);
+
+  const motherVisual = `${RUN_TAG}-CR`;
+  await page.getByRole('button', { name: 'Dar de alta tu primer animal' }).click();
+  // 2 rodeos → el wizard pide el rodeo (paso 1). La madre va al rodeo A ("general").
+  await expect(page.getByText('¿A qué rodeo va este animal?', { exact: true })).toBeVisible({ timeout: 20_000 });
+  await page.getByRole('button', { name: /Rodeo .*general/i }).click();
+  await page.getByRole('button', { name: 'Continuar', exact: true }).click();
+  await walkWizardToData(page, { sex: 'Hembra', categoryName: 'Multípara' });
+  await page.getByLabel('Nombre / seña (opcional)', { exact: true }).fill(motherVisual);
+  await page.getByRole('button', { name: 'Cría al pie Con cría al pie', exact: true }).click();
+  await page.getByRole('button', { name: 'Crear animal', exact: true }).click();
+
+  // Prompt → caravana NUEVA (no existe) → Buscar → camino CREATE (mini-form).
+  await expect(page.getByText('¿Vincular su cría al pie?', { exact: true })).toBeVisible({ timeout: 20_000 });
+  const calfIdv = `8811${Date.now().toString().slice(-6)}`;
+  await page.getByLabel('Caravana del ternero', { exact: true }).fill(calfIdv);
+  await page.getByTestId('link-calf-search').click();
+  await expect(page.getByText('Sexo del ternero', { exact: true })).toBeVisible({ timeout: 20_000 });
+
+  // "Cambiar caravana" (control & freedom): desde CREATE volver a la captura CONSERVANDO lo tipeado → un typo
+  // en la manga no obliga a crear un ternero bogus. Reaparece el campo con el valor previo y se puede re-buscar.
+  await page.getByTestId('link-calf-back').click();
+  const calfField = page.getByLabel('Caravana del ternero', { exact: true });
+  await expect(calfField).toBeVisible();
+  await expect(calfField).toHaveValue(calfIdv);
+  await page.getByTestId('link-calf-search').click();
+
+  // RCAP.5.1/5.2: el rodeo del ternero arranca PRESELECCIONADO al de la madre, con la leyenda.
+  await expect(page.getByText('Sexo del ternero', { exact: true })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText('(Mismo rodeo que la madre)', { exact: true })).toBeVisible();
+
+  // RCAP.5.3: editar a OTRO rodeo del mismo sistema (Destete) → la leyenda desaparece (ya no coincide).
+  await page.getByRole('button', { name: 'Elegir rodeo del ternero' }).click();
+  await page.getByRole('button', { name: /Rodeo .*Destete/i }).click();
+  await expect(page.getByText('(Mismo rodeo que la madre)', { exact: true })).toHaveCount(0);
+
+  // RCAP.4.2 (rama de ERROR): "Crear y vincular" SIN elegir sexo → error inline, NO crea ni navega
+  // (sigue en la fase create). El sexo es requerido.
+  await page.getByTestId('link-calf-create').click();
+  await expect(page.getByText('Elegí el sexo del ternero.', { exact: true })).toBeVisible();
+  await expect(page.getByTestId('link-calf-create')).toBeVisible(); // sigue en CREATE (no navegó a la ficha)
+
+  // Sexo REQUERIDO (RCAP.4.2) → elegir → "Crear y vincular".
+  await page.getByRole('button', { name: 'Sexo Macho', exact: true }).click();
+  await page.getByTestId('link-calf-create').click();
+
+  await expect(page.getByText('Identificación', { exact: true })).toBeVisible({ timeout: 20_000 });
+  const { id: motherId } = await waitForServerAnimalProfile(establishmentId, { visualAlt: motherVisual });
+  const birth = await waitForServerBirth(motherId, { expectedCalves: 1 });
+  expect(birth.calfCount).toBe(1);
+});
+
+test('delta #15 (RCAP.3.3): un ternero que YA tiene madre no se re-vincula → aviso "ya tiene una madre registrada"', async ({
+  page,
+}) => {
+  test.setTimeout(150_000);
+  const user = await createTestUser('criamadre');
+  await setUserPhone(user.id, '1123456789');
+  const { establishmentId, rodeoId } = await seedEstablishmentWithRodeo(user.id, 'Campo CriaMadre');
+  // Madre PRE-EXISTENTE + ternero, vinculados por un parto. birth_calves es server-only (sin GRANT de INSERT
+  // a NADIE salvo el DEFINER — ni siquiera service_role lo puede insertar directo, RCAP.6.10), así que el
+  // vínculo lo crea la RPC REAL link_calf_to_mother desde un cliente AUTENTICADO (el propio owner) — es el
+  // único camino server-side legítimo (mismo que usa la app).
+  const pmIdv = `4411${Date.now().toString().slice(-6)}`;
+  const calfIdv = `6611${Date.now().toString().slice(-6)}`;
+  const motherProfileId = await seedAnimal(establishmentId, rodeoId, { idv: pmIdv, sex: 'female' });
+  const calfProfileId = await seedAnimal(establishmentId, rodeoId, { idv: calfIdv, sex: 'male' });
+  const authed = anonClient();
+  const { error: signErr } = await authed.auth.signInWithPassword({ email: user.email, password: user.password });
+  if (signErr) throw new Error(`seed sign-in: ${signErr.message}`);
+  const { error: linkErr } = await authed.rpc('link_calf_to_mother', {
+    p_mother_profile_id: motherProfileId,
+    p_calf_profile_id: calfProfileId,
+    p_event_date: '2026-01-15',
+  });
+  if (linkErr) throw new Error(`seed link_calf_to_mother: ${linkErr.message}`);
+  await authed.auth.signOut();
+
+  await page.goto('/');
+  await signIn(page, user);
+  await waitForHome(page);
+  await gotoAnimales(page);
+
+  // Gate de sync DETERMINISTA: la ficha del ternero muestra la card "Madre" (fetchMother LOCAL) → el
+  // birth_calf sembrado YA bajó al SQLite local → el prompt lo verá como "ya tiene madre" (sin race de sync).
+  await expect(page.getByText(calfIdv, { exact: true }).first()).toBeVisible({ timeout: 20_000 });
+  await page.getByRole('button', { name: new RegExp(calfIdv) }).first().click();
+  await expect(page.getByLabel(`Ver la ficha de la madre: ${pmIdv}`)).toBeVisible({ timeout: 20_000 });
+  await page.getByRole('button', { name: 'Volver', exact: true }).click();
+
+  // Alta de una NUEVA vaca con cría al pie → prompt → buscar el ternero que YA tiene madre.
+  const newMotherIdv = `5513${Date.now().toString().slice(-6)}`;
+  await page.getByLabel('Buscar animal por caravana o número', { exact: true }).fill(newMotherIdv);
+  await page.getByRole('button', { name: 'Dar de alta este animal' }).click();
+  await walkWizardToData(page, { sex: 'Hembra', categoryName: 'Multípara' });
+  await page.getByRole('button', { name: 'Cría al pie Con cría al pie', exact: true }).click();
+  await page.getByRole('button', { name: 'Crear animal', exact: true }).click();
+
+  await expect(page.getByText('¿Vincular su cría al pie?', { exact: true })).toBeVisible({ timeout: 20_000 });
+  await page.getByLabel('Caravana del ternero', { exact: true }).fill(calfIdv);
+  await page.getByTestId('link-calf-search').click();
+
+  // RCAP.3.3: aviso "ya tiene una madre" + NO se ofrece confirmar el vínculo (sigue en la fase de captura).
+  await expect(page.getByText(/ya tiene una madre registrada/)).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId('link-calf-confirm')).toHaveCount(0);
 });

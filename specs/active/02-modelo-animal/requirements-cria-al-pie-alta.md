@@ -47,7 +47,7 @@ Frontend: prompt saltable, offline-safe, con los MUSTs de forms (validación inl
 
 **RCAP.2.4** Cuando el find-or-create **no encuentre** ningún animal con ese identificador, el sistema deberá ofrecer **crear** el ternero (camino NO ENCONTRADO, RCAP.4), precargando el identificador ingresado.
 
-**RCAP.2.5** Si el identificador ingresado está vacío o es inválido para su tipo (EID que no cumple el largo/dígitos), entonces el sistema deberá mostrar un **error inline** en el campo y **no deberá** disparar el find-or-create.
+**RCAP.2.5** Si el identificador ingresado está vacío o es demasiado corto / no-numérico, entonces el sistema deberá mostrar un **error inline** en el campo y **no deberá** disparar el find-or-create. *(Reconciliación as-built: el campo es numérico — `sanitizeIdvInput`, dígitos, tope 20 — y `classifyCalfQuery` clasifica: vacío → "Ingresá la caravana del ternero"; `<3` díg o no-numérico → "Revisá la caravana: es muy corta". 15 díg puros → EID (`lookupByTag`); ≥3 díg ≠15 → IDV (`searchAnimals`). NO hay un rechazo separado ">15 díg = EID inválido": 16-20 díg numéricos se tratan como IDV largo legítimo. Si el find-or-create devuelve **>1 match** (ambiguo), el sistema avisa "Encontramos varios animales con esa caravana" y NO vincula — honra RCAP.2.3 "exactamente uno".)*
 
 ## RCAP.3 — Camino ENCONTRADO: vincular un ternero existente
 
@@ -141,7 +141,7 @@ Frontend: prompt saltable, offline-safe, con los MUSTs de forms (validación inl
 
 **RCAP.9.2** Todo título o valor con descendentes del prompt deberá renderizarse **sin recortarse** (`lineHeight` matcheado al `fontSize`, regla anti-recorte).
 
-**RCAP.9.3** La validación de los campos del mini-form (sexo requerido, identificador, fecha) deberá ser **inline** (borde rojo + error junto al campo + scroll-al-campo), sin banner global que tape el título.
+**RCAP.9.3** La validación de los campos del mini-form (sexo requerido, identificador, fecha) deberá ser **inline** (borde rojo + error junto al campo), sin banner global que tape el título. *(Reconciliación as-built: el auto-`scroll-al-campo` es **N/A** acá — el mini-form es corto y entra completo en el sheet (`maxHeight 88%`) sin scrollear en la práctica; el error de sexo va arriba del form y el `actionError` va en el footer FIJO, ambos siempre visibles sin scroll. Verificado por el reviewer.)*
 
 **RCAP.9.4** Toda fecha capturada en el mini-form deberá mostrarse y parsearse en formato **es-AR** (DD/MM, sin clamp silencioso de bordes inválidos), reusando las utils de fecha del alta.
 

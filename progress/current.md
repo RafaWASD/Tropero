@@ -3,7 +3,13 @@
 > Este archivo se vacía al cerrar cada sesión y su resumen se mueve a `history.md`.
 > Mientras trabajás, **mantenelo actualizado en tiempo real**, no al final.
 
-**SESIÓN 2026-06-29 — CORRECCIONES DEL TESTEO EN VIVO CON FACUNDO (16) + CONVENCIÓN SDD PARA FIXES (ADR-028).**
+**SESIÓN 2026-06-29/30 — CORRECCIONES DEL TESTEO EN VIVO CON FACUNDO (16) + CONVENCIÓN SDD PARA FIXES (ADR-028).**
+
+## 🆕 2026-06-30 — DELTA CRÍA-AL-PIE-ALTA (#15) — backend + frontend GATEADOS
+Al dar de alta una vaca con cría al pie (`nursing=true`) → **prompt saltable** "¿Vincular su cría al pie?" → caravana del ternero (find-or-create) → **vincular** existente (RPC nueva `link_calf_to_mother`) o **crear+vincular** nuevo (`register_birth` 6-arg con rodeo del ternero editable + leyenda "Mismo rodeo que la madre"). Delta Nivel B CON BACKEND (Gate 1 obligatorio; deploy autorizado por Raf en Gate 0).
+- **BACKEND commiteado `70c2efd`**: 0114 (RPC nuevo, 8 guards anti-IDOR/idempotencia) + 0115/0116 (`register_birth` extendido; **0116 fix Gate 2 HIGH** = restaura herencia `breed_id` madre→ternero que 0115 había borrado al moldearse sobre 0075 en vez del as-built 0109 — SIGSA R1.7). Aplicadas al remoto. 200/200 backend (animal + SIGSA). Plumbing outbox/upload/events. Memoria `reference_function_recreate_base`.
+- **FRONTEND (este commit)**: `LinkCalfPrompt.tsx` (bottom-sheet 3 fases ask→found→create, molde `BreedPickerSheet`) + `link-calf-query.ts` (clasificador puro EID/IDV) + wiring `crear-animal.tsx`. **Veto de diseño del leader**: re-iteré para agregar la affordance "← Cambiar caravana" (control&freedom Nielsen #3 — un mistype en la manga no debe forzar abandonar ni crear un ternero bogus). Gate 2 PASS 0 HIGH + reviewer APPROVED (tras fix de 1 aserción E2E mal escrita = bug de test, no de producto). typecheck + 12 unit + E2E (#15 6/6 + back round-trip + RCAP.4.2) verdes. Specs reconciliadas (T1-T21 [x]).
+- **⏸ Puerta 2 post-hoc de Raf**: probar en la app el prompt (vincular existente / crear+vincular con rodeo editable / "Cambiar caravana" / "ya tiene madre" / "Ahora no").
 
 ## Resumen
 Raf + Facundo testearon la app en vivo (PRE-campo, sin datos reales, bastón no probado) → 16 correcciones. El leader hizo el triage (`docs/correcciones-prueba-en-vivo-2026-06-27.md`), formalizó la convención de delta-specs (ADR-028), y cerró 6 correcciones en 4 deltas. Las últimas 2 en **modo autónomo** ("hacé todo lo que puedas, no necesites nada de mí").
@@ -45,4 +51,4 @@ Suite completa: **176 passed / 10 failed** (1ra corrida en vivo de los e2e de lo
 
 ## Otro estado (no de esta sesión)
 - **Spec 08 (SIGSA)** → `blocked` (status corregido in_progress→blocked esta sesión): espera (a) deploy YAML PowerSync [Raf] + (b) upload formato SIGSA [Facundo].
-- Spec 02 → `deferred` (4 deltas de esta sesión cerrados; sin trabajo activo).
+- Spec 02 → `in_progress` (delta #15 cría-al-pie-alta gateado 2026-06-30, ⏸ Puerta 2; vuelve a `deferred` al cerrarla). 4 deltas previos cerrados.

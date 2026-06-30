@@ -25,8 +25,8 @@
 - **MODIFICAR** `app/src/services/powersync/upload.ts` — agregar `'link_calf_to_mother'` al set `RPC_OP_TYPES`, a la lista de op_types que reciben `p_client_op_id` (junto a `register_birth`/`assign_tag_to_animal`), **Y a la rama `idempotent_discard` del `23505` (`upload.ts:212`, fold Gate 1 MED-2)**: hoy esa clasificación es `register_birth`-only → sin agregar `link_calf_to_mother`, un `23505` concurrente del link (índice único compuesto `client_op_id`) caería a `permanent_reject` (rollback + error espurio) pese a haberse aplicado server-side, reabriendo el MED-1 de `0075`. Con el fix, el `23505` del link se descarta como idempotente (el efecto ya está).
 
 ### Frontend (UI)
-- **CREAR** `app/app/crear-animal/_components/LinkCalfPrompt.tsx` (o equivalente embebido en `crear-animal.tsx`) — el prompt saltable + el mini-form de creación (sexo/fecha/rodeo). Reusa el motor de identificadores (`classifyIdentifier`), `lookupByTag`/`findOrCreateLookup` (spec 09), `fetchMother` (events.ts), las utils de fecha del alta y el `RodeoPicker` existente.
-- **MODIFICAR** `app/app/crear-animal.tsx` — tras `createAnimal` ok + eventos post-create, si `nursing===true` mostrar el prompt antes de navegar (`crear-animal.tsx:611`–`636`, zona de navegación post-create).
+- **CREAR** `app/src/components/LinkCalfPrompt.tsx` *(as-built: componente "smart" en `src/components` + export del barrel `index.ts`, NO en `app/app/crear-animal/_components/` — precedente `BleConnectionChip` que consume servicios; el reviewer lo validó contra `architecture.md`)* — el prompt saltable + el mini-form de creación (sexo/fecha/rodeo). Reusa `lookupByTag`/`searchAnimals` (spec 09), `fetchMother` (events.ts), las utils de fecha del alta (`animal-birth-year.ts`) y el selector de rodeo inline alimentado por `useRodeo()` (no hay un `RodeoPicker` componente standalone). La clasificación EID/IDV usa un helper PURO dedicado **`app/src/utils/link-calf-query.ts`** (`classifyCalfQuery`), NO `classifyIdentifier` — ver §5.
+- **MODIFICAR** `app/app/crear-animal.tsx` — tras `createAnimal` ok + eventos post-create (en el happy-path, `softFails===0`), si `showNursing && nursing===true` mostrar el prompt antes de navegar (refactor de la navegación post-create a `navigateAfterCreate(profileId)` como fuente única; el prompt se monta al root y `finishLinkPrompt` navega por la rama normal tras "Ahora no"/éxito).
 
 ### Frontend (tests)
 - **EXTENDER** `app/e2e/animals.spec.ts` (o suite nueva) — prompt solo con cría al pie, skip, vincular existente, crear+vincular con rodeo editable, aviso "ya tiene madre". + tests unitarios de `enqueueLinkCalfToMother`/`mapIntentToRpc` en los `*.test.ts` correspondientes.
@@ -129,19 +129,23 @@ Cambios respecto de `0075`:
 Disparo en `crear-animal.tsx` tras `createAnimal` ok (profileId de la madre = id de cliente, disponible offline) + eventos post-create. Si `nursing===true` (showNursing) → render del prompt; si no → navegación actual.
 
 ```
-[Prompt: "¿Vincular su cría al pie?"]
+[Prompt: "¿Vincular su cría al pie?"]   (máquina de 3 fases: ask → found → create)
   ├─ "Ahora no" ──────────────────────────→ navegar a la ficha de la vaca (vaca queda nursing=true)
-  └─ caravana del ternero (EID|IDV) → classifyIdentifier
-        ├─ EID  → lookupByTag(tag, est)
-        └─ IDV  → findOrCreateLookup/searchAnimals(est, idv)
-        ┌─ ENCONTRADO en campo activo → fetchMother(calf)
-        │     ├─ tiene madre → aviso, no re-vincular (RCAP.3.3)
-        │     └─ sin madre   → linkCalfToMother(madre, calf, eventDate = calfBirthDate ?? hoy)
-        ├─ ENCONTRADO en OTRO campo (transfer) → aviso "está en otro campo" (RCAP.3.4)
-        └─ NO ENCONTRADO → mini-form [sexo* | fecha opc. | rodeo] (la caravana tipeada YA está, no se re-pide)
-              rodeo = RodeoPicker(rodeos del campo, mismo sistema), preseleccionado=rodeo madre,
+  └─ caravana del ternero (EID|IDV) → classifyCalfQuery   (as-built: helper PURO dedicado, NO classifyIdentifier)
+        ├─ vacío / <3 díg / no-numérico → error inline, NO dispara el find-or-create (RCAP.2.5)
+        ├─ EID  (15 díg puros)          → lookupByTag(tag, est)
+        └─ IDV  (≥3 díg, ≠15)           → searchAnimals(est, idv)
+        ┌─ ENCONTRADO (exactamente 1) en campo activo → fetchMother(calf)
+        │     ├─ tiene madre → aviso "ya tiene una madre registrada", no re-vincular (RCAP.3.3)
+        │     └─ sin madre   → fase `found` → "Vincular" → linkCalfToMother(madre, calf, eventDate = calfBirthDate ?? hoy)
+        ├─ ENCONTRADO en OTRO campo (lookupByTag mode `transfer`) → aviso "está en otro campo" (RCAP.3.4)
+        ├─ >1 MATCH (ambiguo, searchAnimals) → aviso "Encontramos varios…", no adivina cuál (guard as-built, honra RCAP.2.3 "exactamente uno")
+        └─ NO ENCONTRADO → fase `create` → mini-form [sexo* | fecha opc. | rodeo] (la caravana tipeada YA está, no se re-pide)
+              rodeo = selector inline (rodeos de useRodeo() del campo, MISMO sistema), preseleccionado=rodeo madre,
                       leyenda "(Mismo rodeo que la madre)" si coincide
               "Crear y vincular" → registerBirth(madre, [{sex, birthDate?, caravana tipeada}], calfRodeoId)
+  └─ "← Cambiar caravana" (as-built, control & freedom Nielsen #3): disponible en fases `found`/`create` →
+        vuelve a `ask` CONSERVANDO lo tipeado (un mistype en la manga no debe forzar abandonar ni crear un ternero bogus)
 
 **Fold Gate 1 LOW-1 (la caravana tipeada DEBE fluir al ternero creado):** la caravana que el usuario tipeó para
 buscar (y que NO se encontró) es la del ternero al pie → se usa al CREAR. **EID** → `calf_tag_electronic` (ya
