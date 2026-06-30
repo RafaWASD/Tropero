@@ -25,7 +25,7 @@ Suite completa: **176 passed / 10 failed** (1ra corrida en vivo de los e2e de lo
 - **2 inseminación** (`maniobra-sanitaria`) → TEST setup (`categoryOverride` para que el animal sea apta) → **confirma que #1b es CORRECTO**. Verdes.
 - **1 BUG DE PRODUCTO REAL** (no de los deltas; el alta lo destapó) → `setCustomAttribute` decidía UPDATE/INSERT por `rowsAffected` (no confiable sobre VIEW de PowerSync) → colisión de PK. **Fix frontend** (SELECT de existencia determinista) + test de regresión. **Cierra el backlog 2026-06-20.** Verde.
 - **2 flakes pre-existentes** (NO tocados por los deltas, confirmados aislado): `events:282` mellizos · `maniobra-single-active:68` sesiones.
-**Gateando**: reviewer (`a26d431f...`) + Gate 2 (`ad60a280...`) sobre el fix de producto. Al volver: commit + re-correr la suite para confirmar 8/8 verdes. Veto del leader del fix de producto: PASS.
+**GATEADO + COMMITEADO** (`4504cbe`, enmendado para sacar 41 `design/*.png` espurios que el e2e re-renderizó — memoria `reference_e2e_design_png_rerender`): veto leader PASS + Gate 2 PASS 0 HIGH + reviewer APPROVED. Los 8 fixes verdes (animals 28/28, maniobra-sanitaria 6/6, custom-render 3/3); 2 flakes pre-existentes documentados. **`check.mjs` completo VERDE end-to-end (exit 0)** — entorno validado (backend + unit + typecheck), red recuperada. **Los 4 deltas quedaron validados E2E en vivo, no solo unit.**
 
 ## ⏸ ESPERAN A RAF (su vuelta)
 1. **Puertas 2 post-hoc** de `alta-form-refinamiento` + `caravana-ficha` (revisar los 2 commits autónomos; defaults del leader documentados en cada `design-*.md` §decisiones de criterio propio).

@@ -17,6 +17,15 @@ No es un sustituto de `feature_list.json` ni de los ADRs — es la antesala dond
 
 ## Ítems pendientes
 
+## 2026-06-29 — Higiene de test: la suite E2E re-renderiza design/**/*.png (byte diffs espurios)
+
+**Origen**: correr `pnpm -C app e2e` (full) o `e2e:build` re-genera 40+ screenshots de `design/maniobra-*/`, `design/veto-sigsa-*/`, etc. con diffs de bytes no-deterministas (anti-aliasing/timing) → se cuelan en `git add -A`. Pasó 2× en la sesión 2026-06-29.
+**Qué**: identificar qué test/paso del e2e (o del build) escribe en `design/` y **dejarlo de hacer** (los `design/*.png` son referencia de los vetos de diseño, no output de e2e). Candidatos: un test de captura/veto que apunta a `design/` en vez de a `test-results/` o a un dir efímero.
+**Por qué importa**: bajo, pero recurrente — obliga a revertir `design/` a mano antes de cada commit post-e2e (workaround en memoria `reference_e2e_design_png_rerender`). Ensucia diffs y arriesga commits con ruido.
+**Próximo paso sugerido**: `grep` en `app/e2e/` por escrituras a `../design/` / `design/`; redirigir esas capturas a `test-results/` (gitignored) o a un flag explícito. Test-infra, no producto.
+
+
+
 ## 2026-06-29 — Guard server-side: rechazar servicio/inseminación sobre macho (defensa en profundidad)
 
 **Origen**: Gate 0 del delta de aptitud reproductiva (`specs/active/02-modelo-animal/context-aptitud-reproductiva.md`, decisión 5). El fix de #1b (inseminación solo a hembra apta) se hace **client-side** para el MVP (igual que todo el gating de maniobra hoy).
