@@ -227,7 +227,7 @@ test('propiedad custom: aparece en el alta (paso 4) → custom_attributes; visib
   // Visual CORTO (≤VISUAL_MAX_LENGTH=30) + único por campo (el establishment está aislado por usuario) → el
   // oráculo lo resuelve exacto. Un RUN_TAG completo excedería el cap y se truncaría (no matchearía la query).
   const visual = '0931';
-  await page.getByLabel('Identificación visual (recomendado)', { exact: true }).fill(visual);
+  await page.getByLabel('Nombre / seña (opcional)', { exact: true }).fill(visual);
 
   // La SECCIÓN "Datos personalizados" del alta muestra la propiedad custom (text).
   await expect(page.getByText('Datos personalizados', { exact: true })).toBeVisible({ timeout: 15_000 });

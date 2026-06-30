@@ -511,7 +511,7 @@ export default function CrearAnimalScreen() {
     // formError (cross-campo: "al menos uno de tres", no atado a un solo input) sobre el CTA, zona pulgar.
     const hasIdentifier = hasAtLeastOneIdentifier(tag, idv, visual);
     if (!hasIdentifier) {
-      setFormError('Cargá al menos un identificador: caravana electrónica, número/IDV o identificación visual.');
+      setFormError('Cargá al menos un identificador: caravana electrónica, caravana visual o nombre/seña.');
     }
     if (!dateV.ok || weightBad || !tagOk || !hasIdentifier) {
       // Scroll-al-campo (RAF2.4.4): al primer campo con error en orden del form (fecha arriba, luego peso).
@@ -1220,23 +1220,25 @@ function Step4Data({
           />
         ) : prefillKind === 'idv' ? (
           <FormField
-            label="Caravana / IDV (no editable)"
+            label="Caravana visual (no editable)"
             value={idv}
             onChangeText={() => {}}
             editable={false}
           />
         ) : prefillKind === 'visual' ? (
           <FormField
-            label="Identificación visual (no editable)"
+            label="Nombre / seña (no editable)"
             value={visual}
             onChangeText={() => {}}
             editable={false}
           />
         ) : null}
 
+        {/* Corrección #2 (testeo en vivo): se leían 3 "caravanas". Ahora el idv es "Caravana visual"
+            (2da caravana real) y visual_id_alt es "Nombre / seña" (texto libre, no caravana). */}
         {prefillKind !== 'idv' ? (
           <FormField
-            label="Caravana / IDV (recomendado)"
+            label="Caravana visual (recomendado)"
             value={idv}
             onChangeText={onIdv}
             keyboardType="number-pad"
@@ -1245,7 +1247,7 @@ function Step4Data({
         ) : null}
         {prefillKind !== 'visual' ? (
           <FormField
-            label="Identificación visual (recomendado)"
+            label="Nombre / seña (opcional)"
             value={visual}
             onChangeText={onVisual}
             autoCapitalize="sentences"

@@ -81,7 +81,7 @@ test('alta guiada desde empty → wizard (sexo→categoría→datos) → el anim
 
   // Paso 4: identificación visual (recomendado; el alta en blanco no precarga ninguno).
   const visualLabel = `${RUN_TAG}-V1`;
-  const visualInput = page.getByLabel('Identificación visual (recomendado)', { exact: true });
+  const visualInput = page.getByLabel('Nombre / seña (opcional)', { exact: true });
   await expect(visualInput).toBeVisible({ timeout: 20_000 });
   await visualInput.fill(visualLabel);
 
@@ -139,7 +139,7 @@ test('delta aptitud (RAR.1/RAR.3/RAR.4): alta de VAQUILLONA "Sí, apta" → fila
   // Visual CORTO: el form aplica VISUAL_MAX_LENGTH=30 (sanitizeVisualInput) y RUN_TAG ya mide 26 → un sufijo
   // largo ('-APTA') se TRUNCA al tipear y la búsqueda exacta en la lista no matchearía. ≤4 chars de sufijo.
   const visualLabel = `${RUN_TAG}-AP`;
-  await page.getByLabel('Identificación visual (recomendado)', { exact: true }).fill(visualLabel);
+  await page.getByLabel('Nombre / seña (opcional)', { exact: true }).fill(visualLabel);
   // Elegimos "Sí, apta" (a11y label "Aptitud Sí, apta", buttonA11y).
   await page.getByRole('button', { name: 'Aptitud Sí, apta', exact: true }).click();
 
@@ -174,7 +174,7 @@ test('delta aptitud (RAR.1.3): alta de VAQUILLONA "Aún no sé" → fila Aptitud
   await page.getByRole('button', { name: 'Dar de alta tu primer animal' }).click();
   await walkWizardToData(page, { sex: 'Hembra', categoryName: 'Vaquillona' });
 
-  await page.getByLabel('Identificación visual (recomendado)', { exact: true }).fill(`${RUN_TAG}-DIF`);
+  await page.getByLabel('Nombre / seña (opcional)', { exact: true }).fill(`${RUN_TAG}-DIF`);
   await page.getByRole('button', { name: 'Aptitud Aún no sé', exact: true }).click();
   await page.getByRole('button', { name: 'Crear animal', exact: true }).click();
 
@@ -229,7 +229,7 @@ test('B: alta de una MULTÍPARA → el form NO pide peso, SÍ dientes/condición
 
   // Identificación + dientes + condición 3 + con cría al pie.
   const visualLabel = `${RUN_TAG}-MP`;
-  await page.getByLabel('Identificación visual (recomendado)', { exact: true }).fill(visualLabel);
+  await page.getByLabel('Nombre / seña (opcional)', { exact: true }).fill(visualLabel);
   await page.getByRole('button', { name: 'Dientes Boca llena', exact: true }).click();
   // Condición por STEPPER (delta #13): arranca "sin cargar" en 3,00 (atenuado) → + y − la cargan en 3,00.
   await page.getByTestId('score-plus').click();
@@ -276,7 +276,7 @@ test('B: alta de un TERNERO → el form pide PESO, NO dientes/preñez', async ({
 
   // Cargamos identificación + peso → se crea.
   const visualLabel = `${RUN_TAG}-TERB`;
-  await page.getByLabel('Identificación visual (recomendado)', { exact: true }).fill(visualLabel);
+  await page.getByLabel('Nombre / seña (opcional)', { exact: true }).fill(visualLabel);
   await page.getByLabel('Peso en kg (opcional)', { exact: true }).fill('180');
 
   await page.getByRole('button', { name: 'Crear animal', exact: true }).click();
@@ -315,7 +315,7 @@ test('B: alta de una VAQUILLONA PREÑADA con preñez "Cabeza" → estado reprodu
   await expect(page.getByText('Cría al pie (opcional)', { exact: true })).toHaveCount(0);
 
   const visualLabel = `${RUN_TAG}-VQP`;
-  await page.getByLabel('Identificación visual (recomendado)', { exact: true }).fill(visualLabel);
+  await page.getByLabel('Nombre / seña (opcional)', { exact: true }).fill(visualLabel);
   await page.getByRole('button', { name: 'Preñez Cabeza', exact: true }).click();
 
   await page.getByRole('button', { name: 'Crear animal', exact: true }).click();
@@ -357,7 +357,7 @@ test('alta guiada: elegir una categoría que DIFIERE de la computada → overrid
   // Identificación + año de nacimiento VIEJO (computaría vaquillona) → override aplica (la multípara
   // no es derivable del alta, así que el override es true por code; el año viejo refuerza el caso).
   const visualLabel = `${RUN_TAG}-MULTI`;
-  await page.getByLabel('Identificación visual (recomendado)', { exact: true }).fill(visualLabel);
+  await page.getByLabel('Nombre / seña (opcional)', { exact: true }).fill(visualLabel);
   await page.getByLabel('Año de nacimiento (opcional, AAAA)', { exact: true }).fill('2020');
 
   await page.getByRole('button', { name: 'Crear animal', exact: true }).click();
@@ -393,7 +393,7 @@ test('alta guiada: elegir la categoría que COINCIDE con la computada → sin ov
   await walkWizardToData(page, { sex: 'Hembra', categoryName: 'Vaquillona' });
 
   const visualLabel = `${RUN_TAG}-VQ`;
-  await page.getByLabel('Identificación visual (recomendado)', { exact: true }).fill(visualLabel);
+  await page.getByLabel('Nombre / seña (opcional)', { exact: true }).fill(visualLabel);
   // Sin año → hembra computa vaquillona → coincide con la elegida → sin override.
 
   await page.getByRole('button', { name: 'Crear animal', exact: true }).click();
@@ -472,11 +472,11 @@ test('buscar un identificador INEXISTENTE → CTA "Dar de alta" → CREATE con e
   await walkWizardToData(page, { sex: 'Macho', categoryName: 'Ternero' });
 
   // CREATE: como el texto es numérico/estructurado (R1.4), se precarga en idv READ-ONLY.
-  const idvReadonly = page.getByLabel('Caravana / IDV (no editable)', { exact: true });
+  const idvReadonly = page.getByLabel('Caravana visual (no editable)', { exact: true });
   await expect(idvReadonly).toBeVisible({ timeout: 20_000 });
   await expect(idvReadonly).toHaveValue('77123');
   // Y NO debe haber un input editable de IDV (el precargado ocupa ese rol).
-  await expect(page.getByLabel('Caravana / IDV (recomendado)', { exact: true })).toHaveCount(0);
+  await expect(page.getByLabel('Caravana visual (recomendado)', { exact: true })).toHaveCount(0);
 });
 
 test('buscar un animal EXISTENTE → tocar el resultado → ficha', async ({ page }) => {
@@ -704,7 +704,7 @@ test('delta #3 (RAF2.1.4): alta con Año + DD/MM → birth_date EXACTA (AAAA-MM-
   // Visual CORTO (RUN_TAG=26 + VISUAL_MAX_LENGTH=30 del form → ≤4 chars de sufijo, si no se TRUNCA al tipear
   // y el oráculo server por visual_alt no matchearía).
   const visualLabel = `${RUN_TAG}-DM`;
-  await page.getByLabel('Identificación visual (recomendado)', { exact: true }).fill(visualLabel);
+  await page.getByLabel('Nombre / seña (opcional)', { exact: true }).fill(visualLabel);
   await page.getByLabel('Año de nacimiento (opcional, AAAA)', { exact: true }).fill('2022');
   // El sanitizer en vivo formatea "1503" → "15/03" (día-primero es-AR).
   const dm = page.getByLabel('Día y mes (opcional, DD/MM)', { exact: true });
@@ -736,7 +736,7 @@ test('delta #3 (RAF2.1.3): alta SOLO con Año (sin DD/MM) → birth_date midpoin
   await walkWizardToData(page, { sex: 'Hembra', categoryName: 'Vaquillona' });
 
   const visualLabel = `${RUN_TAG}-MID`;
-  await page.getByLabel('Identificación visual (recomendado)', { exact: true }).fill(visualLabel);
+  await page.getByLabel('Nombre / seña (opcional)', { exact: true }).fill(visualLabel);
   await page.getByLabel('Año de nacimiento (opcional, AAAA)', { exact: true }).fill('2022');
   // Sin tocar el campo DD/MM → midpoint (no se rompe el camino año-solo).
 
@@ -760,7 +760,7 @@ test('delta #3 (RAF2.1.7): DD/MM inválido (31/02) → error inline + animal NO 
   await page.getByRole('button', { name: 'Dar de alta tu primer animal' }).click();
   await walkWizardToData(page, { sex: 'Hembra', categoryName: 'Vaquillona' });
 
-  await page.getByLabel('Identificación visual (recomendado)', { exact: true }).fill(`${RUN_TAG}-BAD`);
+  await page.getByLabel('Nombre / seña (opcional)', { exact: true }).fill(`${RUN_TAG}-BAD`);
   await page.getByLabel('Año de nacimiento (opcional, AAAA)', { exact: true }).fill('2022');
   await page.getByLabel('Día y mes (opcional, DD/MM)', { exact: true }).fill('3102'); // 31/02 inexistente
 
@@ -786,7 +786,7 @@ test('delta #3 (RAF2.1.5): DD/MM sin año → error inline en el campo día/mes 
   await page.getByRole('button', { name: 'Dar de alta tu primer animal' }).click();
   await walkWizardToData(page, { sex: 'Hembra', categoryName: 'Vaquillona' });
 
-  await page.getByLabel('Identificación visual (recomendado)', { exact: true }).fill(`${RUN_TAG}-NOYEAR`);
+  await page.getByLabel('Nombre / seña (opcional)', { exact: true }).fill(`${RUN_TAG}-NOYEAR`);
   // DD/MM presente SIN año → no hay fecha sin año.
   await page.getByLabel('Día y mes (opcional, DD/MM)', { exact: true }).fill('1503');
 
@@ -815,7 +815,7 @@ test('delta #13 (RAF2.2): condición por STEPPER → cargar 3,25 con + → persi
   // Visual CORTO (RUN_TAG=26 + VISUAL_MAX_LENGTH=30 del form → ≤4 chars de sufijo; si no se TRUNCA al tipear y
   // el oráculo server por visual_alt no matchearía).
   const visualLabel = `${RUN_TAG}-CO`;
-  await page.getByLabel('Identificación visual (recomendado)', { exact: true }).fill(visualLabel);
+  await page.getByLabel('Nombre / seña (opcional)', { exact: true }).fill(visualLabel);
 
   // El stepper arranca "sin cargar" mostrando 3,00 (atenuado); el 1er + lo marca cargado en 3,25.
   await expect(page.getByTestId('score-display').getByText('3,00', { exact: true })).toBeVisible();
@@ -853,7 +853,7 @@ test('delta #14 (RAF2.3.3): condición SIN tocar (3,00 atenuado) NO persiste; "S
   // Visual CORTO (RUN_TAG=26 + VISUAL_MAX_LENGTH=30 del form → ≤4 chars de sufijo; si no se TRUNCA al tipear y
   // el oráculo server por visual_alt no matchearía).
   const visualLabel = `${RUN_TAG}-NC`;
-  await page.getByLabel('Identificación visual (recomendado)', { exact: true }).fill(visualLabel);
+  await page.getByLabel('Nombre / seña (opcional)', { exact: true }).fill(visualLabel);
 
   // Sin cargar → no hay afordancia "Sin cargar" todavía (estado null, 3,00 atenuado).
   await expect(page.getByRole('button', { name: 'Quitar condición corporal', exact: true })).toHaveCount(0);
@@ -988,9 +988,9 @@ test('caravana-ficha (RCF.1.3/RCF.3.3/RCF.3.5): "Agregar caravana visual" → ti
   await expect(addIdv).toBeVisible();
   await addIdv.click();
 
-  // Se expande el FormField "Caravana / IDV" → tipeamos el idv (solo dígitos) → Confirmar.
+  // Se expande el FormField "Caravana visual" → tipeamos el idv (solo dígitos) → Confirmar.
   const idv = `7733${Date.now().toString().slice(-6)}`;
-  const idvInput = page.getByLabel('Caravana / IDV', { exact: true });
+  const idvInput = page.getByLabel('Caravana visual', { exact: true });
   await expect(idvInput).toBeVisible();
   await idvInput.fill(idv);
   await page.getByTestId('assign-idv-confirm').click();

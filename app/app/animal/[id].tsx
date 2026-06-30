@@ -862,13 +862,16 @@ export default function AnimalDetailScreen() {
                 <AttributeRow label="Caravana electrónica" value="—" />
               )}
 
-              {/* Caravana visual / IDV → UPDATE local sobre animal_profiles (offline-first, patrón CUT). */}
+              {/* Caravana visual (idv) → UPDATE local sobre animal_profiles (offline-first, patrón CUT).
+                  Corrección #2 (testeo en vivo): label "Caravana visual" (antes "Caravana / IDV"). La
+                  afordancia de asignar idv vacío NO cambia (IdentifierAssignRow kind="idv", CTA "Agregar
+                  caravana visual"); solo cambia el LABEL de la fila. */}
               {detail.idv != null ? (
-                <AttributeRow label="Caravana / IDV" value={detail.idv} />
+                <AttributeRow label="Caravana visual" value={detail.idv} />
               ) : canAssignIdv(detail) ? (
                 <IdentifierAssignRow
                   kind="idv"
-                  label="Caravana / IDV"
+                  label="Caravana visual"
                   placeholder="Número de caravana oficial"
                   keyboardType="number-pad"
                   sanitize={sanitizeIdvInput}
@@ -877,11 +880,17 @@ export default function AnimalDetailScreen() {
                   onConfirm={onAssignIdv}
                 />
               ) : (
-                <AttributeRow label="Caravana / IDV" value="—" />
+                <AttributeRow label="Caravana visual" value="—" />
               )}
 
-              {/* Identificación visual (visual_id_alt): SIN cambios — solo lectura, fuera de alcance (RCF.1.6). */}
-              <AttributeRow label="Identificación visual" value={detail.visualIdAlt ?? '—'} />
+              {/* Nombre / seña (visual_id_alt): texto libre OPCIONAL, NO una caravana. Corrección #2 (testeo
+                  en vivo): se mostraban 3 "caravanas" (electrónica + idv + visual_id_alt) y las 2 visuales se
+                  leían como "doble". Ahora esta fila solo aparece SI tiene valor (visualIdAlt != null) → quedan
+                  2 caravanas + nombre/seña condicional. NO lleva IdentifierAssignRow (no se asigna como caravana
+                  acá; es texto libre que se carga en el alta o se edita en otro lugar). */}
+              {detail.visualIdAlt != null ? (
+                <AttributeRow label="Nombre / seña" value={detail.visualIdAlt} />
+              ) : null}
             </DetailSection>
 
             {/* Datos del animal. */}

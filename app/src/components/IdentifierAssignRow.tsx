@@ -27,7 +27,7 @@ import { buttonA11y } from '@/utils/a11y';
 export type IdentifierAssignRowProps = {
   /** Qué identificador asigna esta fila: caravana electrónica (`tag`) o caravana visual (`idv`). */
   kind: 'tag' | 'idv';
-  /** Label muted de la fila + label del FormField al expandir (ej. "Caravana electrónica" / "Caravana / IDV"). */
+  /** Label muted de la fila + label del FormField al expandir (ej. "Caravana electrónica" / "Caravana visual"). */
   label: string;
   /** Placeholder del input al expandir. */
   placeholder?: string;

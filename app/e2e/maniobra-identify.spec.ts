@@ -149,7 +149,7 @@ async function walkCrearAnimalWizard(
 
   await expect(page.getByText('Datos del animal', { exact: true })).toBeVisible({ timeout: 20_000 });
   if (opts.visual) {
-    await page.getByLabel('Identificación visual (recomendado)', { exact: true }).fill(opts.visual);
+    await page.getByLabel('Nombre / seña (opcional)', { exact: true }).fill(opts.visual);
   }
   await page.getByRole('button', { name: 'Crear animal', exact: true }).click();
 }

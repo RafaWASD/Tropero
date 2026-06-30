@@ -84,13 +84,13 @@ test('BreedPicker en el alta: abrir el sheet → buscar → elegir una raza → 
   // El hint de "completá la raza" ya no debe estar (hay raza elegida).
   await expect(page.getByText('Completá la raza para poder exportar el animal a SIGSA.', { exact: true })).toHaveCount(0);
 
-  // Identificación visual (recomendado): el alta EN BLANCO no precarga ningún identificador, pero el
+  // Nombre / seña (opcional): el alta EN BLANCO no precarga ningún identificador, pero el
   // server exige al menos UNO (animal_profiles_identity_check, 0021 / R6.2) — sin él, create_animal
   // rechaza con 23514 al subir y el alta NO aterriza en Postgres (el cliente ahora lo valida antes de
   // encolar, hasAtLeastOneIdentifier). Cargamos un visual para que el animal PERSISTA y el trigger 0113
   // pueda derivar breed_id sobre la fila real. Mismo gesto que animals.spec.ts (toda alta lleva un id).
   const visualLabel = `${RUN_TAG}-AA1`;
-  await page.getByLabel('Identificación visual (recomendado)', { exact: true }).fill(visualLabel);
+  await page.getByLabel('Nombre / seña (opcional)', { exact: true }).fill(visualLabel);
 
   // Creamos el animal.
   await page.getByRole('button', { name: 'Crear animal', exact: true }).click();

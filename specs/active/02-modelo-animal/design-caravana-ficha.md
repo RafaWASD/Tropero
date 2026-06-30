@@ -52,27 +52,39 @@ Estructura de la sección "Identificación" tras el cambio (pseudo):
           onConfirm={onAssignTag} />
       : <AttributeRow label="Caravana electrónica" value="—" />}
 
-  {/* Caravana visual / IDV */}
+  {/* Caravana visual (idv) — label "Caravana visual" desde el relabel #2 (ver reconciliación abajo) */}
   {detail.idv != null
-    ? <AttributeRow label="Caravana / IDV" value={detail.idv} />
+    ? <AttributeRow label="Caravana visual" value={detail.idv} />
     : canAssignIdv(detail)
       ? <IdentifierAssignRow kind="idv"
-          label="Caravana / IDV"
+          label="Caravana visual"
           placeholder="Número de caravana oficial"
           keyboardType="number-pad"
           sanitize={sanitizeIdvInput}
           validate={(v) => v.trim().length > 0 ? null : 'Ingresá el número de caravana.'}
           onConfirm={onAssignIdv} />
-      : <AttributeRow label="Caravana / IDV" value="—" />}
+      : <AttributeRow label="Caravana visual" value="—" />}
 
-  {/* Identificación visual (visual_id_alt): SIN cambios — solo lectura, fuera de alcance (RCF.1.6) */}
-  <AttributeRow label="Identificación visual" value={detail.visualIdAlt ?? '—'} />
+  {/* visual_id_alt → "Nombre / seña", CONDICIONAL: solo si tiene valor (relabel #2). Vacío → no se renderiza
+      (así quedan 2 caravanas + opcionalmente nombre/seña). NO es una caravana ni lleva IdentifierAssignRow. */}
+  {detail.visualIdAlt != null
+    ? <AttributeRow label="Nombre / seña" value={detail.visualIdAlt} />
+    : null}
 </DetailSection>
 ```
 
 - `canAssignTag`/`canAssignIdv` = `status === 'active' && <id> == null` (módulo puro §3). Si el animal está
   archivado y el id está vacío → cae al `AttributeRow value="—"` (no se ofrece, RCF.1.5).
-- `visual_id_alt` y el "Detectar bastoneo" NO se tocan / NO se agregan (RCF.1.6).
+- "Detectar bastoneo" NO se agrega (RCF.1.6, deferido a hardware). `visual_id_alt` no lleva afordancia de
+  asignación (RCF.1.6 sigue vigente: no se "asigna" como caravana) — **PERO** se relabeló a "Nombre / seña" y se
+  hace condicional (`!= null`) por la corrección **#2** (caravana 3→2); ver reconciliación abajo.
+
+> **Reconciliación as-built (corrección #2, 2026-06-30 — relabel de caravanas 3→2)**: el modelo presenta 2
+> caravanas + nombre/seña. Labels actualizados: `idv` = **"Caravana visual"** (era "Caravana / IDV"),
+> `visual_id_alt` = **"Nombre / seña"** y **condicional** (solo se renderiza si tiene valor; era siempre con
+> `?? '—'`). La afordancia `IdentifierAssignRow` de `idv` vacío NO cambió (solo su label). RCF.1.6 (no se asigna
+> `visual_id_alt` como caravana) sigue cierto. Hecho Nivel A (ADR-028) en `[id].tsx`/`crear-animal.tsx`; gateado
+> (reviewer + Gate 2). Pendiente: gating por toggle de rodeo de "Nombre / seña" (necesita `rodeo_data_config`, DB).
 
 ## 3. Módulo puro `identifier-assign.ts` (RCF.1.7)
 

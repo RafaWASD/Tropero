@@ -101,7 +101,7 @@ test('offline: el animal creado (overlay) SIGUE en la lista tras navegar Más �
   await walkWizardWithTwoRodeos(page);
 
   // Paso 4 — datos: IDV "12" (el identificador del repro).
-  await page.getByLabel('Caravana / IDV (recomendado)', { exact: true }).fill('12');
+  await page.getByLabel('Caravana visual (recomendado)', { exact: true }).fill('12');
   await page.getByRole('button', { name: 'Crear animal', exact: true }).click();
 
   // Ficha del recién creado, servida 100% del overlay local (sin red).
@@ -191,7 +191,7 @@ test('offline: alta vía BUSCADOR no-match → al volver de la ficha el animal s
 
   // El id vino precargado (read-only). "34" tiene 2 dígitos (<3) → classifyIdentifier lo manda a
   // VISUAL (R1.4), no a IDV. Solo crear.
-  await expect(page.getByLabel('Identificación visual (no editable)', { exact: true })).toHaveValue('34');
+  await expect(page.getByLabel('Nombre / seña (no editable)', { exact: true })).toHaveValue('34');
   await page.getByRole('button', { name: 'Crear animal', exact: true }).click();
 
   // Ficha del recién creado (overlay local).
