@@ -57,6 +57,11 @@ const RPC_OP_TYPES = new Set([
   // p_client_op_id (como register_birth) — PASSTHROUGH del contrato del intent; NO ancla la dedup (state-based,
   // RD1.6). El default `permanent_reject` cubre 23505/23514/42501/23503; el replay devuelve 2xx (no es error).
   'assign_tag_to_animal',
+  // spec 02 delta #15 — vincular un ternero EXISTENTE a una madre OFFLINE: link_calf_to_mother (0114). op_type
+  // = NOMBRE EXACTO de la RPC (fold MED-1). SÍ recibe p_client_op_id (firma (uuid,uuid,date,uuid), dedup
+  // EXPLÍCITA por el guard de replay scopeado del 0075 reusado). Un 23505 del índice compuesto
+  // reproductive_events_client_op_id_uq en el reintento concurrente → idempotent_discard (fold MED-2, abajo).
+  'link_calf_to_mother',
 ]);
 
 /**
@@ -137,13 +142,15 @@ export function mapIntentToRpc(op: OpIntentEntry): IntentPlan {
     throw new PermanentIntentError(`op_intent op_type desconocido: ${opType || '(vacío)'}`);
   }
 
-  // p_client_op_id a register_birth (dedup explícita, delta 0075) y a assign_tag_to_animal (passthrough del
-  // contrato del intent; su firma (uuid,text,uuid) lo recibe pero la dedup es state-based, RD1.6 / 0089). Las
-  // demás firmas NO lo tienen → pasarlo daría "function ... does not exist" / arg desconocido. Como
-  // op_type === rpcName === 'assign_tag_to_animal', el mapeo genérico (rpcName: opType) lo cubre sin case
-  // especial (fold MED-1 de Gate 1). El client_op_id = el id de la fila op_intents.
+  // p_client_op_id a register_birth (dedup explícita, delta 0075), a assign_tag_to_animal (passthrough del
+  // contrato del intent; dedup state-based, RD1.6 / 0089) y a link_calf_to_mother (dedup explícita por el guard
+  // de replay scopeado del 0114, firma (uuid,uuid,date,uuid)). Las demás firmas NO lo tienen → pasarlo daría
+  // "function ... does not exist" / arg desconocido. Como op_type === rpcName en estos casos, el mapeo genérico
+  // (rpcName: opType) los cubre sin case especial (fold MED-1 de Gate 1). El client_op_id = el id de op_intents.
   const args =
-    opType === 'register_birth' || opType === 'assign_tag_to_animal'
+    opType === 'register_birth' ||
+    opType === 'assign_tag_to_animal' ||
+    opType === 'link_calf_to_mother'
       ? { ...params, p_client_op_id: op.id }
       : params;
   return { kind: 'rpc', rpcName: opType, args };
@@ -204,14 +211,17 @@ export function classifyIntentUploadError(error: unknown, opType: string): Inten
     return 'permanent_reject';
   }
 
-  // (2) 23505 del índice UNIQUE de idempotencia de register_birth (reproductive_events_client_op_id_uq):
-  //     race del MISMO caller — la RPC ya corrió server-side (finding MED-1, Run 2). Descarte idempotente
-  //     SIN rollback ni loop de reintento. Un 23505 de OTRO índice (p.ej. tag duplicado) NO matchea acá →
-  //     cae a permanente (rollback + superficia). La detección es por el nombre del índice/columna en el
-  //     mensaje o details de Postgres (la colisión del índice compuesto los incluye).
+  // (2) 23505 del índice UNIQUE de idempotencia de register_birth / link_calf_to_mother
+  //     (reproductive_events_client_op_id_uq): race del MISMO caller — la RPC ya corrió server-side (finding
+  //     MED-1, Run 2; fold MED-2 de Gate 1 del delta #15 → link_calf_to_mother comparte el índice compuesto).
+  //     Descarte idempotente SIN rollback ni loop de reintento. Un 23505 de OTRO índice (p.ej. tag duplicado)
+  //     NO matchea acá → cae a permanente (rollback + superficia). La detección es por el nombre del índice/
+  //     columna en el mensaje o details de Postgres (la colisión del índice compuesto los incluye). Sin este
+  //     case, un 23505 concurrente del link caería a permanent_reject (rollback + error espurio) pese a
+  //     haberse aplicado server-side, reabriendo el MED-1 de 0075 (design §1, fold MED-2).
   if (
     code === '23505' &&
-    opType === 'register_birth' &&
+    (opType === 'register_birth' || opType === 'link_calf_to_mother') &&
     /reproductive_events_client_op_id_uq|client_op_id/i.test(`${msg} ${details}`)
   ) {
     return 'idempotent_discard';

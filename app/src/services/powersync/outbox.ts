@@ -333,6 +333,60 @@ export async function enqueueRegisterBirth(
   return enqueue(intent, overlay, db);
 }
 
+// ─── link_calf_to_mother — vincular un ternero EXISTENTE a una madre (spec 02 delta #15) ──────
+
+export type EnqueueLinkCalfToMotherInput = {
+  /** Params del intent = los de la RPC link_calf_to_mother (uploadData inyecta p_client_op_id = op.id). El
+   *  p_client_op_id NO va en los params (lo reinyecta mapIntentToRpc, igual que register_birth). */
+  params: { p_mother_profile_id: string; p_calf_profile_id: string; p_event_date: string };
+  /** profileId de la madre (para el overlay del evento de parto optimista). */
+  motherProfileId: string;
+  /** profileId del ternero EXISTENTE (para el overlay del puente birth_calves). Ya existe local → SIN
+   *  pending_animals/pending_animal_profiles (no se crea un ternero, se vincula uno existente). */
+  calfProfileId: string;
+  /** ISO 'YYYY-MM-DD'. event_date del evento de parto del vínculo (= birth_date del ternero ?? hoy). */
+  eventDate: string;
+  /** profileId PROVISIONAL del evento de parto (cliente; el real lo asigna la RPC al subir). */
+  birthEventId: string;
+};
+
+/**
+ * Encola la vinculación de un ternero EXISTENTE `link_calf_to_mother` (RCAP.8.1): intent (op_type =
+ * 'link_calf_to_mother' = NOMBRE EXACTO de la RPC, fold MED-1 → el mapeo genérico de upload lo cubre sin un
+ * case especial frágil) + overlay optimista MÍNIMO: el evento de parto de la madre en pending_reproductive_events
+ * + la fila puente en pending_birth_calves que linkea el calfProfileId EXISTENTE. SIN pending_animals /
+ * pending_animal_profiles (el ternero ya existe local; no se crea nada nuevo — a diferencia de
+ * enqueueRegisterBirth, que sí los encola por cada ternero CREADO).
+ *
+ * Al subir, uploadData mapea a supabase.rpc('link_calf_to_mother', { ...params, p_client_op_id = op.id }):
+ * crea el reproductive_events(birth) + la fila birth_calves ATÓMICO server-side, idempotente por client_op_id
+ * (delta 0075 reusado → un reintento at-least-once NO crea un 2do vínculo: el guard de replay devuelve el
+ * evento existente con replay:true → ACK normal, sin error). El ACK limpia el overlay (las filas reales bajan
+ * por la stream). El rechazo REAL (madre/ternero inexistente, ya con madre, sin rol) lo clasifica uploadData
+ * como permanent_reject (rollback del overlay + superficia) — NO el return de acá (siempre ok offline).
+ */
+export async function enqueueLinkCalfToMother(
+  input: EnqueueLinkCalfToMotherInput,
+  options: { db?: AbstractPowerSyncDatabase } = {},
+): Promise<OutboxResult> {
+  const db = options.db ?? getPowerSync();
+  const clientOpId = newClientOpId();
+  const createdAt = nowIso();
+  const intent = buildOpIntentInsert(clientOpId, 'link_calf_to_mother', JSON.stringify(input.params), createdAt);
+  const overlay: TxWrite[] = [
+    buildPendingReproductiveEventInsert(input.birthEventId, clientOpId, {
+      animalProfileId: input.motherProfileId,
+      eventType: 'birth',
+      eventDate: input.eventDate,
+      notes: null,
+      createdAt,
+    }),
+    // Puente parto↔ternero EXISTENTE (id sintético de cliente para la fila de overlay). SIN crear el ternero.
+    buildPendingBirthCalfInsert(newClientOpId(), clientOpId, input.birthEventId, input.calfProfileId),
+  ];
+  return enqueue(intent, overlay, db);
+}
+
 // ─── exit_animal_profile — baja (override 'exited') ───────────────────────────────────
 
 export type EnqueueExitInput = {

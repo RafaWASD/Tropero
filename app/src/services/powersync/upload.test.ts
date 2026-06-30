@@ -138,6 +138,69 @@ test('mapIntentToRpc: assign_tag_to_animal → rpc con p_client_op_id = op.id in
   assert.equal(plan.args.p_client_op_id, 'cop-at');
 });
 
+test('mapIntentToRpc: link_calf_to_mother → rpc con p_client_op_id = op.id inyectado (dedup explícita, delta #15 / 0114, RCAP.8.2)', () => {
+  // op_type = NOMBRE EXACTO de la RPC (fold MED-1): el mapeo genérico (rpcName: opType) lo cubre sin case
+  // especial. SÍ recibe p_client_op_id (firma (uuid,uuid,date,uuid), dedup explícita por el guard de replay
+  // scopeado del 0114) — igual que register_birth.
+  const plan = mapIntentToRpc({
+    id: 'cop-link',
+    opData: {
+      op_type: 'link_calf_to_mother',
+      params_json: JSON.stringify({ p_mother_profile_id: 'm1', p_calf_profile_id: 'c1', p_event_date: '2026-06-30' }),
+    },
+  });
+  assert.equal(plan.kind, 'rpc');
+  if (plan.kind !== 'rpc') return;
+  assert.equal(plan.rpcName, 'link_calf_to_mother', 'rpcName === op_type (sin remapeo)');
+  assert.equal(plan.args.p_mother_profile_id, 'm1');
+  assert.equal(plan.args.p_calf_profile_id, 'c1');
+  assert.equal(plan.args.p_event_date, '2026-06-30');
+  // CRÍTICO (RCAP.8.2): p_client_op_id = el id de la fila op_intents (idempotencia at-least-once del link).
+  assert.equal(plan.args.p_client_op_id, 'cop-link');
+});
+
+test('mapIntentToRpc: register_birth con p_calf_rodeo_id/p_calf_idv (camino cría al pie CREATE, 0115) → pasan TAL CUAL + p_client_op_id', () => {
+  // RCAP.7: el camino CREATE del prompt encola register_birth con el rodeo elegido (+ el IDV tipado, LOW-1).
+  // mapIntentToRpc NO cambia para esto: hace { ...params, p_client_op_id } → los params nuevos fluyen solos.
+  const plan = mapIntentToRpc({
+    id: 'cop-rb-cria',
+    opData: {
+      op_type: 'register_birth',
+      params_json: JSON.stringify({
+        p_mother_profile_id: 'm1',
+        p_event_date: '2026-06-30',
+        p_calves: [{ calf_sex: 'female' }],
+        p_calf_rodeo_id: 'rod-9',
+        p_calf_idv: '0420',
+      }),
+    },
+  });
+  assert.equal(plan.kind, 'rpc');
+  if (plan.kind !== 'rpc') return;
+  assert.equal(plan.rpcName, 'register_birth');
+  assert.equal(plan.args.p_calf_rodeo_id, 'rod-9', 'el rodeo elegido fluye a la RPC');
+  assert.equal(plan.args.p_calf_idv, '0420', 'el IDV tipado (LOW-1) fluye a la RPC');
+  assert.deepEqual(plan.args.p_calves, [{ calf_sex: 'female' }]);
+  assert.equal(plan.args.p_client_op_id, 'cop-rb-cria', 'register_birth recibe p_client_op_id (dedup explícita)');
+});
+
+test('mapIntentToRpc: register_birth SIN p_calf_rodeo_id/p_calf_idv (parto normal) → params idénticos al as-built (sin keys nuevas)', () => {
+  // Regresión backward-compat (RCAP.7.2): el parto normal/mellizos NO encola las keys nuevas → el intent es
+  // idéntico al de antes del delta; la RPC 0115 resuelve por los defaults null de los params opcionales.
+  const plan = mapIntentToRpc({
+    id: 'cop-rb-normal',
+    opData: {
+      op_type: 'register_birth',
+      params_json: JSON.stringify({ p_mother_profile_id: 'm1', p_event_date: '2026-06-30', p_calves: [{ calf_sex: 'male' }] }),
+    },
+  });
+  assert.equal(plan.kind, 'rpc');
+  if (plan.kind !== 'rpc') return;
+  assert.ok(!('p_calf_rodeo_id' in plan.args), 'el parto normal NO lleva p_calf_rodeo_id');
+  assert.ok(!('p_calf_idv' in plan.args), 'el parto normal NO lleva p_calf_idv');
+  assert.equal(plan.args.p_client_op_id, 'cop-rb-normal');
+});
+
 test('mapIntentToRpc: create_animal → RPC atómica 0083 con args p_* (payload COMPLETO traducido)', () => {
   // Run create-animal-rpc: el alta YA NO son 2 upserts (perdían el dato bajo reintento, backlog
   // 2026-06-10) — mapea a supabase.rpc('create_animal', p_*). El shape del intent es el HISTÓRICO
@@ -382,6 +445,42 @@ test('assign_tag_to_animal: 23505 (dup global) / 23514 (race o formato) / 42501 
   // Red / 5xx → transitorio (queda en cola, NO toca nada — no hay overlay para esta op).
   assert.equal(classifyIntentUploadError({ message: 'fetch failed' }, 'assign_tag_to_animal'), 'transient');
   assert.equal(classifyIntentUploadError({ status: 503 }, 'assign_tag_to_animal'), 'transient');
+});
+
+test('IDEMPOTENCIA MED-2 (delta #15): 23505 del índice reproductive_events_client_op_id_uq de link_calf_to_mother → idempotent_discard', () => {
+  // Fold MED-2 de Gate 1: link_calf_to_mother comparte el índice compuesto (animal_profile_id, client_op_id)
+  // con register_birth (delta 0075). Un 23505 de ESE índice en el reintento concurrente del link = la RPC ya
+  // corrió server-side → descarte idempotente SIN rollback (RCAP.8.3). Sin este case, caería a permanent_reject
+  // (rollback + error espurio) pese a haberse aplicado, reabriendo el MED-1 de 0075.
+  assert.equal(
+    classifyIntentUploadError(
+      { code: '23505', message: 'duplicate key value violates unique constraint "reproductive_events_client_op_id_uq"' },
+      'link_calf_to_mother',
+    ),
+    'idempotent_discard',
+  );
+  assert.equal(
+    classifyIntentUploadError({ code: '23505', details: 'Key (animal_profile_id, client_op_id)=(...) already exists.' }, 'link_calf_to_mother'),
+    'idempotent_discard',
+  );
+});
+
+test('link_calf_to_mother: 23514 (ya tiene madre / ternero=madre / especie) / 23503 (madre o ternero inexistente) / 42501 (sin rol) → permanent_reject; red → transient (RCAP.8.5)', () => {
+  // El rechazo de dominio del link es PERMANENTE (no loop): se surfacea accionable, SIN perder la vaca (ya
+  // existe). 23514 = re-link / ternero=madre / especie distinta; 23503 = madre o ternero inexistente / de otro
+  // tenant (genérico, anti-oráculo); 42501 = sin rol. Todos → rollback del overlay optimista + descarte.
+  assert.equal(classifyIntentUploadError({ code: '23514', message: 'calf already linked to a mother' }, 'link_calf_to_mother'), 'permanent_reject');
+  assert.equal(classifyIntentUploadError({ code: '23503', message: 'calf not found in this establishment' }, 'link_calf_to_mother'), 'permanent_reject');
+  assert.equal(classifyIntentUploadError({ code: '42501' }, 'link_calf_to_mother'), 'permanent_reject');
+  // CRÍTICO: un 23505 de OTRO índice (NO el de idempotencia) en el link → permanent_reject (no se confunde con
+  // el idempotent_discard del índice compuesto).
+  assert.equal(
+    classifyIntentUploadError({ code: '23505', message: 'duplicate key value violates unique constraint "animal_profiles_idv_unique"' }, 'link_calf_to_mother'),
+    'permanent_reject',
+  );
+  // Red / 5xx → transitorio (queda en cola; el reintento es un no-op idempotente por el guard de replay).
+  assert.equal(classifyIntentUploadError({ message: 'fetch failed' }, 'link_calf_to_mother'), 'transient');
+  assert.equal(classifyIntentUploadError({ status: 503 }, 'link_calf_to_mother'), 'transient');
 });
 
 test('op corrupto: mapIntentToRpc tira PermanentIntentError → classifyIntentUploadError = permanent_reject (no loop)', () => {

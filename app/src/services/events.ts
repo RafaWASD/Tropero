@@ -58,7 +58,11 @@ import {
   type PendingProfileFields,
 } from './powersync/local-reads';
 import { runLocalQuery, runLocalQuerySingle, runLocalWrite } from './powersync/local-query';
-import { enqueueRegisterBirth, type EnqueueBirthCalfOverlay } from './powersync/outbox';
+import {
+  enqueueRegisterBirth,
+  enqueueLinkCalfToMother,
+  type EnqueueBirthCalfOverlay,
+} from './powersync/outbox';
 
 // ─── Error / Result uniforme (mismo shape que animals.ts) ──────────────────────────────────
 
@@ -501,6 +505,19 @@ export type RegisterBirthInput = {
   eventDate: string;
   /** Al menos 1 ternero (lo garantiza validateCalves en el caller). */
   calves: BirthCalfInput[];
+  /**
+   * Camino CREATE del prompt de cría al pie (spec 02 delta #15, RCAP.7): rodeo EDITABLE del ternero creado.
+   * NULL/undefined → rodeo de la madre (comportamiento as-built del parto normal/mellizos → callers
+   * existentes INALTERADOS). Provisto → la RPC valida activo + del tenant de la madre + mismo sistema (23514
+   * si no) y crea el ternero en ese rodeo; el overlay optimista lo refleja. (RCAP.5.x lo resuelve el prompt.)
+   */
+  calfRodeoId?: string | null;
+  /**
+   * Fold Gate 1 LOW-1: IDV/caravana visual TIPEADA del ternero al pie (camino CREATE, find-or-create no
+   * encontró nada → la caravana ingresada es la del ternero). NULL/undefined → as-built (sin idv). Pensado
+   * para el flujo de UN solo ternero (cría al pie); el parto normal/mellizos NO lo pasa.
+   */
+  calfIdv?: string | null;
 };
 
 /**
@@ -557,6 +574,12 @@ export async function registerBirth(
     }
   }
 
+  // Rodeo efectivo del ternero (RCAP.7): el elegido en el prompt de cría al pie ?? el de la madre (as-built).
+  // La RPC lo re-valida server-side (activo, tenant de la madre, mismo sistema); acá solo refleja el overlay.
+  const calfRodeoId = cleanStr(input.calfRodeoId) ?? rodeo_id;
+  // LOW-1: IDV tipado del ternero al pie (camino CREATE) ?? null (parto normal/mellizos).
+  const calfIdv = cleanStr(input.calfIdv);
+
   const birthEventId = randomUuid();
   const createdAt = new Date().toISOString();
   const overlayCalves: EnqueueBirthCalfOverlay[] = input.calves.map((c) => {
@@ -568,9 +591,9 @@ export async function registerBirth(
     const profile: PendingProfileFields = {
       animalId: calfAnimalId,
       establishmentId: establishment_id,
-      rodeoId: rodeo_id,
+      rodeoId: calfRodeoId,
       managementGroupId: null,
-      idv: null,
+      idv: calfIdv,
       visualIdAlt: visualFallback,
       categoryId: catByCode[c.sex] ?? '',
       categoryOverride: false,
@@ -593,16 +616,66 @@ export async function registerBirth(
     };
   });
 
+  // Params de la RPC. p_calf_rodeo_id / p_calf_idv SOLO se incluyen cuando se proveyeron (camino cría al pie
+  // CREATE) → el intent del parto normal/mellizos queda IDÉNTICO al as-built (compat con intents ya encolados
+  // + resolución de la firma por los defaults null de 0115). uploadData inyecta p_client_op_id al subir.
+  const params: Record<string, unknown> = {
+    p_mother_profile_id: input.motherProfileId,
+    p_event_date: input.eventDate,
+    p_calves: calvesPayload,
+  };
+  if (cleanStr(input.calfRodeoId)) params.p_calf_rodeo_id = cleanStr(input.calfRodeoId);
+  if (calfIdv) params.p_calf_idv = calfIdv;
+
   const enq = await enqueueRegisterBirth({
-    params: {
-      p_mother_profile_id: input.motherProfileId,
-      p_event_date: input.eventDate,
-      p_calves: calvesPayload,
-    },
+    params,
     motherProfileId: input.motherProfileId,
     eventDate: input.eventDate,
     birthEventId,
     calves: overlayCalves,
+  });
+  if (!enq.ok) return { ok: false, error: { kind: 'unknown', message: enq.error.message } };
+  return { ok: true, value: { birthEventId } };
+}
+
+// ─── Escritura: VINCULAR un ternero EXISTENTE a una madre — link_calf_to_mother (spec 02 delta #15) ───────
+//
+// Camino ENCONTRADO del prompt de cría al pie (RCAP.3): el ternero ya existe local (lo resolvió el
+// find-or-create de spec 09) → se VINCULA a la madre vía la RPC nueva link_calf_to_mother (0114), encolada en
+// la outbox. A diferencia de registerBirth (que CREA el ternero), acá NO se crea nada: la RPC inserta solo el
+// evento de parto de la madre + la fila puente birth_calves con el calf_profile_id EXISTENTE (ATÓMICO
+// server-side, idempotente por client_op_id). El overlay optimista refleja el vínculo (el ternero aparece como
+// cría al pie de la madre antes de sincronizar, RCAP.3.5).
+//
+// Multi-tenant: el cliente manda SOLO motherProfileId + calfProfileId + fecha. La RPC deriva el tenant de la
+// fila REAL de la madre + has_role_in, y deriva el ternero scopeado a ese tenant (un ternero/madre ajeno
+// rebota por authz/23503, sin parentesco fabricado). NO se manda establishment_id.
+
+/**
+ * Vincula un ternero EXISTENTE a una madre OFFLINE-FIRST vía la OUTBOX (RCAP.3.1). Thin sobre
+ * enqueueLinkCalfToMother: arma los params de la RPC (p_mother_profile_id / p_calf_profile_id / p_event_date)
+ * y el overlay (evento de parto de la madre + puente al ternero existente). `eventDate` lo resuelve el caller
+ * (birth_date local del ternero ?? hoy, RCAP.3.2). El encolado SIEMPRE tiene éxito offline; el rechazo REAL
+ * (ternero ya con madre 23514, madre/ternero inexistente 23503, sin rol 42501) lo resuelve uploadData al
+ * subir (permanent_reject → rollback del overlay + superficia, RCAP.8.5) — NO el return de acá. Devuelve el
+ * id PROVISIONAL del evento de parto (offline-first: el real lo asigna la RPC).
+ */
+export async function linkCalfToMother(
+  motherProfileId: string,
+  calfProfileId: string,
+  eventDate: string,
+): Promise<ServiceResult<{ birthEventId: string }>> {
+  const birthEventId = randomUuid();
+  const enq = await enqueueLinkCalfToMother({
+    params: {
+      p_mother_profile_id: motherProfileId,
+      p_calf_profile_id: calfProfileId,
+      p_event_date: eventDate,
+    },
+    motherProfileId,
+    calfProfileId,
+    eventDate,
+    birthEventId,
   });
   if (!enq.ok) return { ok: false, error: { kind: 'unknown', message: enq.error.message } };
   return { ok: true, value: { birthEventId } };

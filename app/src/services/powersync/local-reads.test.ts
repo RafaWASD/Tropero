@@ -1497,6 +1497,41 @@ test('buildPendingBirthCalfInsert: puente parto→ternero del overlay', () => {
   assert.deepEqual(q.args, ['bc-1', 'cop-1', 'e-1', 'calf-prof-1']);
 });
 
+// ─── shape del intent + overlay de link_calf_to_mother (spec 02 delta #15, RCAP.8.1) ──────────────────
+// enqueueLinkCalfToMother (outbox.ts) importa el SDK (getPowerSync → react-native) → NO entra al grafo de
+// node:test (igual que el resto de las funciones enqueue*). Su CONTRATO de shape es 100% determinado por los
+// builders puros de acá: el intent (op_type EXACTO = nombre de la RPC, fold MED-1) + EXACTAMENTE 2 filas de
+// overlay (evento de parto de la madre + puente al ternero EXISTENTE), SIN pending_animals/pending_animal_profiles
+// (no se crea un ternero; se vincula uno existente — a diferencia de enqueueRegisterBirth). Este test reconstruye
+// esa composición con los mismos builders y la fija; la orquestación de la writeTransaction la cubre el E2E.
+test('link_calf_to_mother: shape del intent (op_type = nombre EXACTO de la RPC) + overlay = evento madre + puente al ternero EXISTENTE (RCAP.8.1)', () => {
+  const motherProfileId = 'mother-prof-1';
+  const calfProfileId = 'calf-prof-existing';
+  const eventDate = '2026-06-30';
+  const birthEventId = 'birth-evt-prov';
+  const clientOpId = 'cop-link';
+  const createdAt = '2026-06-30T12:00:00.000Z';
+  const params = { p_mother_profile_id: motherProfileId, p_calf_profile_id: calfProfileId, p_event_date: eventDate };
+
+  // (1) intent: op_type = 'link_calf_to_mother' (= nombre EXACTO de la RPC, fold MED-1) + los 3 params.
+  const intent = buildOpIntentInsert(clientOpId, 'link_calf_to_mother', JSON.stringify(params), createdAt);
+  assert.deepEqual(intent.args, [clientOpId, 'link_calf_to_mother', JSON.stringify(params), createdAt]);
+  // p_client_op_id NO va en los params (lo reinyecta mapIntentToRpc al subir).
+  assert.ok(!('p_client_op_id' in params), 'p_client_op_id NO va en los params del intent (lo inyecta upload)');
+
+  // (2) overlay fila 1: el evento de parto OPTIMISTA de la MADRE (birth).
+  const ev = buildPendingReproductiveEventInsert(birthEventId, clientOpId, {
+    animalProfileId: motherProfileId, eventType: 'birth', eventDate, notes: null, createdAt,
+  });
+  assert.deepEqual(ev.args, [birthEventId, clientOpId, motherProfileId, 'birth', eventDate, null, createdAt]);
+
+  // (3) overlay fila 2: el puente parto↔ternero EXISTENTE (linkea el calf_profile_id existente, NO uno nuevo).
+  const bridge = buildPendingBirthCalfInsert('bc-synth', clientOpId, birthEventId, calfProfileId);
+  assert.deepEqual(bridge.args, ['bc-synth', clientOpId, birthEventId, calfProfileId]);
+  // El 4to arg del puente es el calf_profile_id EXISTENTE (no un id provisional de un ternero recién creado).
+  assert.equal(bridge.args[3], calfProfileId, 'el puente apunta al ternero EXISTENTE');
+});
+
 test('buildPendingStatusOverrideInsert: override exited/soft_deleted con target + status + exit_date (residual #2)', () => {
   // exit con fecha → el badge "Vendido el {fecha}" funciona offline.
   const exit = buildPendingStatusOverrideInsert('o-1', 'cop-1', 'animal_profiles', 'prof-9', 'exited', 'sold', '2026-06-09');

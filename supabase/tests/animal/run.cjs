@@ -3802,6 +3802,454 @@ test('spec 09 — assign_tag_to_animal RPC (asignación de caravana NULL→valor
   });
 });
 
+// =====================================================================
+// spec 02 — delta VINCULAR LA CRÍA AL PIE (#15): RPC link_calf_to_mother (0114) + register_birth con rodeo
+// del ternero (0115). Suites TOP-LEVEL propias con setup aislado (espejo de las suites 0075/0089).
+//
+// El delta vive en supabase/migrations/0114_link_calf_to_mother_rpc.sql + 0115_register_birth_calf_rodeo.sql.
+// ⚠️ Estos tests REQUIEREN 0114 + 0115 APLICADAS al remoto (las aplica el LEADER por Supabase MCP / Management
+// API tras gatear el SQL — Gate 1 PASS + Gate 2 + reviewer + autorización de Raf). Hasta entonces FALLAN —
+// ESPERADO: link_calf_to_mother no existe (PGRST202) y register_birth sigue con la firma vieja (un call con
+// p_calf_rodeo_id/p_calf_idv da PGRST202). El implementer NO aplica las migraciones. Patrón 0075-0089.
+// =====================================================================
+test('spec 02 delta #15 — link_calf_to_mother RPC (vincular ternero EXISTENTE)', async (t) => {
+  const uuid = () => require('node:crypto').randomUUID();
+  // Distingue un error de DOMINIO (lo que el test quiere) de PGRST202 (función inexistente porque 0114 no está
+  // aplicada). Sin esto, un PGRST202 que casualmente matchee un código esperado haría pasar las aserciones por
+  // la razón EQUIVOCADA (autorrevisión adversarial).
+  function assertRpcExists(error) {
+    if (error && error.code === 'PGRST202') {
+      assert.fail('link_calf_to_mother no existe en el remoto (migración 0114 no aplicada) — este test no puede validar el comportamiento real.');
+    }
+  }
+
+  let userA, userB, clientA, clientB, estA, estB, rodeoA, rodeoB;
+
+  // Crea una MADRE (vaquillona_prenada → tras el vínculo debe avanzar a vaca_segundo_servicio).
+  async function makeMother(client, est, rodeo, idvSuffix) {
+    const r = await createAnimal(client, {
+      idv: `${RUN_TAG}_lcm_M_${idvSuffix}`, sex: 'female', birthDate: daysAgo(900),
+      rodeoId: rodeo.id, establishmentId: est, systemId: rodeo.systemId, categoryCode: 'vaquillona_prenada',
+    });
+    assert.equal(r.error, undefined, r.error && r.error.message);
+    return r.profile.id;
+  }
+  // Crea un TERNERO EXISTENTE (activo, sin madre todavía).
+  async function makeCalf(client, est, rodeo, idvSuffix, sex = 'male') {
+    const r = await createAnimal(client, {
+      idv: `${RUN_TAG}_lcm_C_${idvSuffix}`, sex, birthDate: daysAgo(30),
+      rodeoId: rodeo.id, establishmentId: est, systemId: rodeo.systemId,
+      categoryCode: sex === 'male' ? 'ternero' : 'ternera',
+    });
+    assert.equal(r.error, undefined, r.error && r.error.message);
+    return { profileId: r.profile.id, animalId: r.animalId };
+  }
+
+  await t.test('setup: userA owner de estA, userB owner de estB; rodeos cria en ambos', async () => {
+    userA = await createTestUser('lcm_A');
+    userB = await createTestUser('lcm_B');
+    clientA = await getUserClient(userA.email);
+    clientB = await getUserClient(userB.email);
+    estA = await createEstablishmentAs(clientA, `${RUN_TAG} lcm_estA`);
+    estB = await createEstablishmentAs(clientB, `${RUN_TAG} lcm_estB`);
+    rodeoA = await createRodeo(clientA, { establishmentId: estA, name: `${RUN_TAG}_lcm_rA` });
+    rodeoB = await createRodeo(clientB, { establishmentId: estB, name: `${RUN_TAG}_lcm_rB` });
+  });
+
+  // -- T5 / RCAP.10.1: happy. 1 reproductive_events(birth) + 1 birth_calves; madre nursing=true (0067) +
+  //    recompute de categoría (0031/0063: vaquillona_prenada → vaca_segundo_servicio). --
+  await t.test('T5 (RCAP.10.1): happy — vincula 1 ternero existente → 1 parto + 1 birth_calves + nursing + categoría', async () => {
+    const motherId = await makeMother(clientA, estA, rodeoA, 'happy');
+    const calf = await makeCalf(clientA, estA, rodeoA, 'happy');
+
+    const evBefore = await admin.from('reproductive_events')
+      .select('id', { count: 'exact', head: true }).eq('animal_profile_id', motherId).eq('event_type', 'birth');
+
+    const { data: ret, error } = await clientA.rpc('link_calf_to_mother', {
+      p_mother_profile_id: motherId, p_calf_profile_id: calf.profileId,
+      p_event_date: daysAgo(30), p_client_op_id: uuid(),
+    });
+    assertRpcExists(error);
+    assert.equal(error, null, error && error.message);
+    assert.ok(ret && ret.birth_event_id, 'devuelve { birth_event_id }');
+    assert.equal(ret.replay, false, 'replay:false en la 1ra vinculación');
+    const birthId = ret.birth_event_id;
+
+    // Exactamente UN evento de parto nuevo.
+    const evAfter = await admin.from('reproductive_events')
+      .select('id', { count: 'exact', head: true }).eq('animal_profile_id', motherId).eq('event_type', 'birth');
+    assert.equal(evAfter.count, evBefore.count + 1, 'exactamente UN evento de parto creado');
+    // El evento es de la madre y persiste su client_op_id.
+    const { data: ev } = await admin.from('reproductive_events')
+      .select('animal_profile_id, event_type, client_op_id').eq('id', birthId).single();
+    assert.equal(ev.animal_profile_id, motherId, 'el evento de parto es de la madre');
+    assert.equal(ev.event_type, 'birth');
+
+    // Exactamente UNA fila birth_calves, apuntando al ternero EXISTENTE (no a uno nuevo).
+    const { data: bc } = await admin.from('birth_calves').select('calf_profile_id').eq('birth_event_id', birthId);
+    assert.equal(bc.length, 1, 'exactamente 1 fila birth_calves');
+    assert.equal(bc[0].calf_profile_id, calf.profileId, 'la fila puente apunta al ternero EXISTENTE');
+
+    // Madre nursing=true (0067) + categoría recomputada (vaquillona_prenada → vaca_segundo_servicio).
+    const { data: m } = await admin.from('animal_profiles').select('nursing, category_id').eq('id', motherId).single();
+    assert.equal(m.nursing, true, 'la madre queda nursing=true (trigger 0067)');
+    const { data: mcat } = await admin.from('categories_by_system').select('code').eq('id', m.category_id).single();
+    assert.equal(mcat.code, 'vaca_segundo_servicio', 'la madre recomputa categoría por el parto (0031/0063)');
+  });
+
+  // -- T6 / RCAP.10.2: re-link rechazado. Ternero ya con madre → 23514, sin filas nuevas. --
+  await t.test('T6 (RCAP.10.2): re-vincular un ternero que ya tiene madre → 23514, sin filas nuevas', async () => {
+    const mother1 = await makeMother(clientA, estA, rodeoA, 'relink1');
+    const mother2 = await makeMother(clientA, estA, rodeoA, 'relink2');
+    const calf = await makeCalf(clientA, estA, rodeoA, 'relink');
+
+    // 1er vínculo: OK.
+    const r1 = await clientA.rpc('link_calf_to_mother', {
+      p_mother_profile_id: mother1, p_calf_profile_id: calf.profileId, p_event_date: daysAgo(30), p_client_op_id: uuid(),
+    });
+    assertRpcExists(r1.error);
+    assert.equal(r1.error, null, r1.error && r1.error.message);
+
+    const ev2Before = await admin.from('reproductive_events')
+      .select('id', { count: 'exact', head: true }).eq('animal_profile_id', mother2);
+    const bcBefore = await admin.from('birth_calves')
+      .select('calf_profile_id', { count: 'exact', head: true }).eq('calf_profile_id', calf.profileId);
+
+    // 2do vínculo del MISMO ternero a OTRA madre → rechazado (23514, "ya tiene madre"). client_op_id NUEVO
+    // (no es un replay) para ejercer el guard (f), no el de idempotencia (e).
+    const r2 = await clientA.rpc('link_calf_to_mother', {
+      p_mother_profile_id: mother2, p_calf_profile_id: calf.profileId, p_event_date: daysAgo(20), p_client_op_id: uuid(),
+    });
+    assertRpcExists(r2.error);
+    assert.notEqual(r2.error, null, 're-vincular un ternero con madre debe rebotar');
+    assert.equal(r2.error.code, '23514', `debe ser 23514 (ya tiene madre): ${r2.error.message}`);
+
+    // Sin filas nuevas: mother2 no recibió un parto, el ternero sigue con UNA sola fila puente.
+    const ev2After = await admin.from('reproductive_events')
+      .select('id', { count: 'exact', head: true }).eq('animal_profile_id', mother2);
+    assert.equal(ev2After.count, ev2Before.count, 'mother2 NO recibió un evento de parto');
+    const bcAfter = await admin.from('birth_calves')
+      .select('calf_profile_id', { count: 'exact', head: true }).eq('calf_profile_id', calf.profileId);
+    assert.equal(bcAfter.count, bcBefore.count, 'el ternero sigue con su único vínculo (sin fila puente nueva)');
+  });
+
+  // -- T7 / RCAP.10.3: cross-tenant. (a) caller sin rol en el tenant de la madre → 42501. (b) ternero de
+  //    otro tenant (scopeado a la madre) → 23503 genérico (sin oráculo). --
+  await t.test('T7 (RCAP.10.3): cross-tenant — sin rol en la madre → 42501; ternero de otro tenant → 23503 genérico', async () => {
+    // (a) Madre de estB; userA (sin rol en estB) intenta vincular → 42501 (has_role_in(v_est) falla).
+    const motherB = await makeMother(clientB, estB, rodeoB, 'xtB');
+    const calfB = await makeCalf(clientB, estB, rodeoB, 'xtB');
+    const evBBefore = await admin.from('reproductive_events')
+      .select('id', { count: 'exact', head: true }).eq('animal_profile_id', motherB);
+
+    const rA = await clientA.rpc('link_calf_to_mother', {
+      p_mother_profile_id: motherB, p_calf_profile_id: calfB.profileId, p_event_date: daysAgo(30), p_client_op_id: uuid(),
+    });
+    assertRpcExists(rA.error);
+    assert.notEqual(rA.error, null, 'userA sin rol en estB debe rebotar');
+    assert.equal(rA.error.code, '42501', `debe ser 42501 (sin rol en el tenant de la madre): ${rA.error.message}`);
+    // El mensaje no filtra datos de estB (anti-oráculo).
+    assert.ok(!String(rA.error.message).includes(calfB.profileId), 'el error NO debe revelar el ternero de estB');
+    // estB intacto: ningún parto nuevo para motherB.
+    const evBAfter = await admin.from('reproductive_events')
+      .select('id', { count: 'exact', head: true }).eq('animal_profile_id', motherB);
+    assert.equal(evBAfter.count, evBBefore.count, 'estB queda intacto (sin parto fabricado)');
+
+    // (b) Madre de estA (userA SÍ tiene rol) + ternero de estB → la derivación del ternero scopeada a estA NO
+    //     lo encuentra → 23503 GENÉRICO (mismo error que "no existe", sin revelar que existe en estB).
+    const motherA = await makeMother(clientA, estA, rodeoA, 'xtAmother');
+    const rB = await clientA.rpc('link_calf_to_mother', {
+      p_mother_profile_id: motherA, p_calf_profile_id: calfB.profileId, p_event_date: daysAgo(30), p_client_op_id: uuid(),
+    });
+    assertRpcExists(rB.error);
+    assert.notEqual(rB.error, null, 'un ternero de otro tenant debe rebotar');
+    assert.equal(rB.error.code, '23503', `debe ser 23503 genérico (ternero no encontrado en el tenant): ${rB.error.message}`);
+    assert.ok(!String(rB.error.message).includes('estB') && !String(rB.error.message).includes(estB),
+      'el 23503 NO debe revelar que el ternero existe en otro tenant (sin oráculo cross-tenant)');
+    // motherA no recibió ningún parto (rebotó antes del insert).
+    const { data: evA } = await admin.from('reproductive_events').select('id').eq('animal_profile_id', motherA);
+    assert.equal(evA.length, 0, 'la madre de estA no recibió un parto con el ternero ajeno');
+  });
+
+  // -- T8 / RCAP.10.4: anti-IDOR. El tenant se deriva de las filas reales (la firma NO tiene establishment_id);
+  //    un p_mother_profile_id ajeno rebota por authz, sin parentesco fabricado. --
+  await t.test('T8 (RCAP.10.4): anti-IDOR — el cliente no pasa establishment_id; madre ajena rebota por authz, sin parentesco fabricado', async () => {
+    // Madre de estB + ternero PROPIO de estA: userA intenta colgar SU ternero de la madre de estB. Rebota por
+    // has_role_in(estB) = 42501 ANTES de tocar nada → no se fabrica parentesco. (El cliente NUNCA pasa el
+    // establishment: la RPC lo deriva de la fila real de la madre.)
+    const motherB = await makeMother(clientB, estB, rodeoB, 'idor');
+    const calfA = await makeCalf(clientA, estA, rodeoA, 'idor');
+    const bcBefore = await admin.from('birth_calves')
+      .select('calf_profile_id', { count: 'exact', head: true }).eq('calf_profile_id', calfA.profileId);
+
+    const r = await clientA.rpc('link_calf_to_mother', {
+      p_mother_profile_id: motherB, p_calf_profile_id: calfA.profileId, p_event_date: daysAgo(30), p_client_op_id: uuid(),
+    });
+    assertRpcExists(r.error);
+    assert.notEqual(r.error, null, 'la madre ajena debe rebotar por authz');
+    assert.equal(r.error.code, '42501', `debe ser 42501 (authz sobre el tenant derivado de la madre): ${r.error.message}`);
+    // El ternero de estA sigue SIN madre (no se fabricó parentesco cruzado).
+    const bcAfter = await admin.from('birth_calves')
+      .select('calf_profile_id', { count: 'exact', head: true }).eq('calf_profile_id', calfA.profileId);
+    assert.equal(bcAfter.count, bcBefore.count, 'no se fabricó un vínculo cruzado para el ternero de estA');
+  });
+
+  // -- T9 / RCAP.10.5: idempotencia. Dos calls con el mismo p_client_op_id (misma madre) → un solo vínculo;
+  //    la 2da devuelve el id existente con replay:true. --
+  await t.test('T9 (RCAP.10.5): idempotencia — doble call con el mismo p_client_op_id → un solo vínculo (replay:true)', async () => {
+    const motherId = await makeMother(clientA, estA, rodeoA, 'idemp');
+    const calf = await makeCalf(clientA, estA, rodeoA, 'idemp');
+    const opId = uuid();
+
+    const r1 = await clientA.rpc('link_calf_to_mother', {
+      p_mother_profile_id: motherId, p_calf_profile_id: calf.profileId, p_event_date: daysAgo(30), p_client_op_id: opId,
+    });
+    assertRpcExists(r1.error);
+    assert.equal(r1.error, null, r1.error && r1.error.message);
+    assert.equal(r1.data.replay, false, '1er call: replay:false');
+    const birthId = r1.data.birth_event_id;
+
+    // 2do call: MISMO client_op_id, MISMA madre (reintento at-least-once tras perder el ACK).
+    const r2 = await clientA.rpc('link_calf_to_mother', {
+      p_mother_profile_id: motherId, p_calf_profile_id: calf.profileId, p_event_date: daysAgo(30), p_client_op_id: opId,
+    });
+    assertRpcExists(r2.error);
+    assert.equal(r2.error, null, r2.error && r2.error.message);
+    assert.equal(r2.data.birth_event_id, birthId, 'el reintento devuelve el MISMO birth_event_id');
+    assert.equal(r2.data.replay, true, 'el reintento marca replay:true (no-op idempotente)');
+
+    // Estado real: UN solo evento de parto + UNA sola fila birth_calves (no 2).
+    const ev = await admin.from('reproductive_events')
+      .select('id', { count: 'exact', head: true }).eq('animal_profile_id', motherId).eq('event_type', 'birth');
+    assert.equal(ev.count, 1, 'exactamente UN evento de parto (el reintento no creó un 2do)');
+    const { data: bc } = await admin.from('birth_calves').select('calf_profile_id').eq('birth_event_id', birthId);
+    assert.equal(bc.length, 1, 'exactamente UNA fila birth_calves (sin doble vínculo)');
+  });
+
+  // -- guard: ternero = madre → 23514 (RCAP.6.5). --
+  await t.test('guard: p_calf_profile_id = p_mother_profile_id → 23514 (un animal no puede ser su propia cría)', async () => {
+    const motherId = await makeMother(clientA, estA, rodeoA, 'self');
+    const { error } = await clientA.rpc('link_calf_to_mother', {
+      p_mother_profile_id: motherId, p_calf_profile_id: motherId, p_event_date: daysAgo(30), p_client_op_id: uuid(),
+    });
+    assertRpcExists(error);
+    assert.notEqual(error, null, 'ternero = madre debe rebotar');
+    assert.equal(error.code, '23514', `debe ser 23514: ${error.message}`);
+  });
+
+  // -- guard de especie (criterio propio #4, defensa en profundidad): ternero de OTRA especie → 23514.
+  //    El catálogo MVP solo tiene bovino ACTIVO; para tener un ternero de otra especie en estA activamos
+  //    'equino' TEMPORALMENTE (admin) para sortear el trigger animals_validate_species (0019), creamos el
+  //    animal, y RESTAURAMOS equino=inactive en finally. El flip solo afecta a 'equino' (ninguna otra suite
+  //    lo usa) y se revierte siempre. --
+  await t.test('guard de especie: ternero de otra especie (equino) → 23514 (no se liga un potrillo a una vaca)', async () => {
+    const { data: sp } = await admin.from('species').select('id, active').eq('code', 'equino').single();
+    if (!sp) { assert.ok(true, 'sin especie equino seedeada — guard no ejercitable en este entorno'); return; }
+    const motherId = await makeMother(clientA, estA, rodeoA, 'species');
+    const ternCat = await categoryId(clientA, rodeoA.systemId, 'ternero');  // categoría cría válida (bovino)
+    const equinoAnimalId = uuid();
+    const equinoProfileId = uuid();
+    try {
+      // Activar equino TEMPORALMENTE para que el trigger animals_validate_species permita el insert.
+      await admin.from('species').update({ active: true }).eq('id', sp.id);
+      // Animal de especie equino, perfil en rodeoA (cria) con categoría cría — inconsistente pero válido a
+      // nivel de constraints; el RPC solo compara species_id (madre bovino vs ternero equino).
+      const { error: aErr } = await clientA.from('animals').insert({
+        id: equinoAnimalId, species_id: sp.id, sex: 'male', birth_date: daysAgo(30),
+      });
+      assert.equal(aErr, null, aErr && `insert animal equino: ${aErr.message}`);
+      const { error: pErr } = await clientA.from('animal_profiles').insert({
+        id: equinoProfileId, animal_id: equinoAnimalId, establishment_id: estA, rodeo_id: rodeoA.id,
+        category_id: ternCat, status: 'active', idv: `${RUN_TAG}_lcm_equino`,
+      });
+      assert.equal(pErr, null, pErr && `insert profile equino: ${pErr.message}`);
+    } finally {
+      await admin.from('species').update({ active: sp.active }).eq('id', sp.id);  // RESTAURAR equino=inactive
+    }
+
+    const { error } = await clientA.rpc('link_calf_to_mother', {
+      p_mother_profile_id: motherId, p_calf_profile_id: equinoProfileId, p_event_date: daysAgo(30), p_client_op_id: uuid(),
+    });
+    assertRpcExists(error);
+    assert.notEqual(error, null, 'un ternero de otra especie debe rebotar');
+    assert.equal(error.code, '23514', `debe ser 23514 (especie distinta de la madre): ${error.message}`);
+  });
+
+  // -- grants: link_calf_to_mother NO invocable por anon (fail-closed, paridad con 0087/0089). --
+  await t.test('grants: link_calf_to_mother NO invocable por anon (PostgREST sin JWT) — fail-closed', async () => {
+    const anonClient = createClient(SUPABASE_URL, ANON_KEY, { auth: { autoRefreshToken: false, persistSession: false } });
+    const { error } = await anonClient.rpc('link_calf_to_mother', {
+      p_mother_profile_id: uuid(), p_calf_profile_id: uuid(), p_event_date: daysAgo(30), p_client_op_id: uuid(),
+    });
+    assert.notEqual(error, null, 'anon NO debe poder invocar link_calf_to_mother');
+    assert.match(String(error.message + ' ' + (error.code || '')), /permission denied|not found|PGRST|42501|404/i);
+  });
+});
+
+// =====================================================================
+test('spec 02 delta #15 — register_birth extendido con rodeo del ternero (0115)', async (t) => {
+  const uuid = () => require('node:crypto').randomUUID();
+  function assertRpcExists(error) {
+    if (error && error.code === 'PGRST202') {
+      assert.fail('register_birth con la firma nueva (p_calf_rodeo_id/p_calf_idv) no existe en el remoto (0115 no aplicada) — este test no puede validar el comportamiento real.');
+    }
+  }
+
+  let userA, userB, clientA, clientB, estA, estB, rodeoA, rodeoA2, rodeoB;
+
+  async function makeMother(idvSuffix) {
+    const r = await createAnimal(clientA, {
+      idv: `${RUN_TAG}_rbr_M_${idvSuffix}`, sex: 'female', birthDate: daysAgo(900),
+      rodeoId: rodeoA.id, establishmentId: estA, systemId: rodeoA.systemId, categoryCode: 'vaquillona_prenada',
+    });
+    assert.equal(r.error, undefined, r.error && r.error.message);
+    return r.profile.id;
+  }
+  // calf_profile_id del único ternero creado por un birthId.
+  async function calfRodeoOf(birthId) {
+    const { data: bc } = await admin.from('birth_calves').select('calf_profile_id').eq('birth_event_id', birthId);
+    assert.equal(bc.length, 1, 'el parto creó 1 ternero');
+    const { data: prof } = await admin.from('animal_profiles').select('rodeo_id, idv').eq('id', bc[0].calf_profile_id).single();
+    return prof;
+  }
+
+  await t.test('setup: estA con 2 rodeos cria (rodeoA, rodeoA2); estB con su rodeo cria', async () => {
+    userA = await createTestUser('rbr_A');
+    userB = await createTestUser('rbr_B');
+    clientA = await getUserClient(userA.email);
+    clientB = await getUserClient(userB.email);
+    estA = await createEstablishmentAs(clientA, `${RUN_TAG} rbr_estA`);
+    estB = await createEstablishmentAs(clientB, `${RUN_TAG} rbr_estB`);
+    rodeoA = await createRodeo(clientA, { establishmentId: estA, name: `${RUN_TAG}_rbr_rA` });
+    rodeoA2 = await createRodeo(clientA, { establishmentId: estA, name: `${RUN_TAG}_rbr_rA2` });  // 2do rodeo cria, mismo sistema
+    rodeoB = await createRodeo(clientB, { establishmentId: estB, name: `${RUN_TAG}_rbr_rB` });
+  });
+
+  // -- T10a / RCAP.10.6(a): p_calf_rodeo_id = NULL → ternero en el rodeo de la madre (regresión inalterada). --
+  await t.test('T10a (RCAP.7.2): p_calf_rodeo_id ausente → ternero en el rodeo de la MADRE (regresión)', async () => {
+    const motherId = await makeMother('nullrodeo');
+    const { data: birthId, error } = await clientA.rpc('register_birth', {
+      p_mother_profile_id: motherId, p_event_date: daysAgo(2), p_calves: [{ calf_sex: 'female' }], p_client_op_id: uuid(),
+    });
+    assertRpcExists(error);
+    assert.equal(error, null, error && error.message);
+    const prof = await calfRodeoOf(birthId);
+    assert.equal(prof.rodeo_id, rodeoA.id, 'sin p_calf_rodeo_id el ternero hereda el rodeo de la madre');
+  });
+
+  // -- T10b / RCAP.10.6(b): rodeo válido del campo (mismo sistema) → ternero en ESE rodeo. --
+  await t.test('T10b (RCAP.7.4): p_calf_rodeo_id válido del campo (mismo sistema) → ternero en ESE rodeo', async () => {
+    const motherId = await makeMother('validrodeo');
+    const { data: birthId, error } = await clientA.rpc('register_birth', {
+      p_mother_profile_id: motherId, p_event_date: daysAgo(2), p_calves: [{ calf_sex: 'female' }],
+      p_client_op_id: uuid(), p_calf_rodeo_id: rodeoA2.id,
+    });
+    assertRpcExists(error);
+    assert.equal(error, null, error && error.message);
+    const prof = await calfRodeoOf(birthId);
+    assert.equal(prof.rodeo_id, rodeoA2.id, 'el ternero se crea en el rodeo elegido (mismo sistema, mismo campo)');
+  });
+
+  // -- T10c / RCAP.10.6(c) parte 1: rodeo de OTRO tenant → 23514. --
+  await t.test('T10c (RCAP.7.3): p_calf_rodeo_id de OTRO tenant (rodeo de estB) → 23514', async () => {
+    const motherId = await makeMother('xtrodeo');
+    const evBefore = await admin.from('reproductive_events')
+      .select('id', { count: 'exact', head: true }).eq('animal_profile_id', motherId);
+    const { error } = await clientA.rpc('register_birth', {
+      p_mother_profile_id: motherId, p_event_date: daysAgo(2), p_calves: [{ calf_sex: 'female' }],
+      p_client_op_id: uuid(), p_calf_rodeo_id: rodeoB.id,
+    });
+    assertRpcExists(error);
+    assert.notEqual(error, null, 'un rodeo de otro tenant debe rebotar');
+    assert.equal(error.code, '23514', `debe ser 23514 (rodeo no del tenant de la madre): ${error.message}`);
+    // Atomicidad: NO se creó el parto (rebotó antes/durante el insert → rollback).
+    const evAfter = await admin.from('reproductive_events')
+      .select('id', { count: 'exact', head: true }).eq('animal_profile_id', motherId);
+    assert.equal(evAfter.count, evBefore.count, 'no se creó el parto (rollback atómico)');
+  });
+
+  // -- T10c parte 2: rodeo de OTRO sistema (mismo campo) → 23514. El catálogo MVP solo tiene 'cria' ACTIVO;
+  //    activamos 'invernada' TEMPORALMENTE (admin) para crear un rodeo de otro sistema en estA y lo
+  //    RESTAURAMOS en finally. El flip solo afecta a 'invernada' (ninguna suite lo usa). --
+  await t.test('T10c (RCAP.7.3): p_calf_rodeo_id de OTRO sistema productivo (mismo campo) → 23514', async () => {
+    const { data: sp } = await admin.from('species').select('id').eq('code', 'bovino').single();
+    const { data: sysInv } = await admin.from('systems_by_species')
+      .select('id, active').eq('species_id', sp.id).eq('code', 'invernada').single();
+    if (!sysInv) { assert.ok(true, 'sin sistema invernada seedeado — branch no ejercitable'); return; }
+    const motherId = await makeMother('othersys');
+    let invRodeoId;
+    try {
+      await admin.from('systems_by_species').update({ active: true }).eq('id', sysInv.id);  // activar invernada
+      // Rodeo de invernada en estA (mismo campo de la madre, distinto sistema). Lo crea el owner (clientA).
+      const { error: rErr } = await clientA.from('rodeos').insert({
+        establishment_id: estA, name: `${RUN_TAG}_rbr_inv`, species_id: sp.id, system_id: sysInv.id,
+      });
+      assert.equal(rErr, null, rErr && `insert rodeo invernada: ${rErr.message}`);
+      const { data: invR } = await clientA.from('rodeos').select('id')
+        .eq('establishment_id', estA).eq('name', `${RUN_TAG}_rbr_inv`).single();
+      invRodeoId = invR.id;
+    } finally {
+      await admin.from('systems_by_species').update({ active: sysInv.active }).eq('id', sysInv.id);  // RESTAURAR
+    }
+    const { error } = await clientA.rpc('register_birth', {
+      p_mother_profile_id: motherId, p_event_date: daysAgo(2), p_calves: [{ calf_sex: 'female' }],
+      p_client_op_id: uuid(), p_calf_rodeo_id: invRodeoId,
+    });
+    assertRpcExists(error);
+    assert.notEqual(error, null, 'un rodeo de otro sistema debe rebotar');
+    assert.equal(error.code, '23514', `debe ser 23514 (rodeo de otro sistema productivo): ${error.message}`);
+  });
+
+  // -- LOW-1 (Gate 1): p_calf_idv → el ternero nace con ESE idv. --
+  await t.test('LOW-1: p_calf_idv setea animal_profiles.idv del ternero creado', async () => {
+    const motherId = await makeMother('calfidv');
+    const idv = `${RUN_TAG}_rbr_calfIDV`;
+    const { data: birthId, error } = await clientA.rpc('register_birth', {
+      p_mother_profile_id: motherId, p_event_date: daysAgo(2), p_calves: [{ calf_sex: 'female' }],
+      p_client_op_id: uuid(), p_calf_idv: idv,
+    });
+    assertRpcExists(error);
+    assert.equal(error, null, error && error.message);
+    const prof = await calfRodeoOf(birthId);
+    assert.equal(prof.idv, idv, 'el ternero creado lleva el IDV tipado (LOW-1)');
+  });
+
+  // -- LOW-2 (Gate 1): cap del tag del ternero (> 15 díg → 23514). --
+  await t.test('LOW-2: calf_tag_electronic de más de 15 dígitos → 23514 (cap autoritativo del tag)', async () => {
+    const motherId = await makeMother('tagcap');
+    const evBefore = await admin.from('reproductive_events')
+      .select('id', { count: 'exact', head: true }).eq('animal_profile_id', motherId);
+    const { error } = await clientA.rpc('register_birth', {
+      p_mother_profile_id: motherId, p_event_date: daysAgo(2),
+      p_calves: [{ calf_sex: 'female', calf_tag_electronic: '1234567890123456' }],  // 16 díg → supera el cap
+      p_client_op_id: uuid(),
+    });
+    assertRpcExists(error);
+    assert.notEqual(error, null, 'un tag de más de 15 díg debe rebotar');
+    assert.equal(error.code, '23514', `debe ser 23514 (cap del tag): ${error.message}`);
+    const evAfter = await admin.from('reproductive_events')
+      .select('id', { count: 'exact', head: true }).eq('animal_profile_id', motherId);
+    assert.equal(evAfter.count, evBefore.count, 'no se creó el parto (rollback atómico del cap)');
+  });
+
+  // -- regresión: parto normal SIN params nuevos (3 args) → comportamiento as-built (firma resuelve por defaults). --
+  await t.test('regresión: register_birth (3 args, sin params nuevos) → parto normal inalterado, ternero en rodeo de la madre', async () => {
+    const motherId = await makeMother('regress');
+    const { data: birthId, error } = await clientA.rpc('register_birth', {
+      p_mother_profile_id: motherId, p_event_date: daysAgo(2), p_calves: [{ calf_sex: 'male' }, { calf_sex: 'female' }],
+    });
+    assertRpcExists(error);
+    assert.equal(error, null, error && error.message);
+    const { data: bc } = await admin.from('birth_calves').select('calf_profile_id').eq('birth_event_id', birthId);
+    assert.equal(bc.length, 2, 'mellizos = 2 terneros (as-built)');
+    for (const row of bc) {
+      const { data: prof } = await admin.from('animal_profiles').select('rodeo_id, idv').eq('id', row.calf_profile_id).single();
+      assert.equal(prof.rodeo_id, rodeoA.id, 'sin p_calf_rodeo_id los terneros van al rodeo de la madre');
+      assert.equal(prof.idv, null, 'sin p_calf_idv los terneros nacen sin idv (as-built)');
+    }
+  });
+});
+
 test('cleanup', async () => {
   await cleanup();
 });
