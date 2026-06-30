@@ -9,7 +9,7 @@
 import type { ReactNode } from 'react';
 import { KeyboardAvoidingView, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ScrollView, Text, YStack } from 'tamagui';
+import { getTokenValue, ScrollView, Text, YStack } from 'tamagui';
 
 export type AuthScreenShellProps = {
   title: string;
@@ -34,7 +34,10 @@ export function AuthScreenShell({ title, subtitle, children }: AuthScreenShellPr
           contentContainerStyle={{
             flexGrow: 1,
             paddingTop: insets.top,
-            paddingBottom: insets.bottom,
+            // Aire inferior token + safe-area bottom inset (mismo patrón que el ScrollView de
+            // crear-animal): sin el `$6` el último botón (ej. "Cancelar" de editar/crear campo) queda
+            // glued al borde del teléfono cuando el inset es 0. El `flexGrow:1` mantiene el top-align.
+            paddingBottom: insets.bottom + getTokenValue('$6', 'space'),
           }}
           showsHorizontalScrollIndicator={false}
         >

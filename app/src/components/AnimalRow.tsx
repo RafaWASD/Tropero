@@ -21,7 +21,7 @@
 
 import { Platform, Pressable } from 'react-native';
 import { getTokenValue, Text, View, XStack, YStack } from 'tamagui';
-import { Check, ChevronRight, Star } from 'lucide-react-native';
+import { Check, ChevronRight, Star, Tag } from 'lucide-react-native';
 
 import { CategoryBadge } from './CategoryBadge';
 import { labelA11y } from '../utils/a11y';
@@ -176,11 +176,14 @@ function AnimalAvatar({ sex, photoUrl, compact }: { sex: AnimalSex; photoUrl?: s
 }
 
 /**
- * Chip neutro outline "sin caravana": estado neutral (NO alarma de color), gancho del filtro
- * R1.5 y de las opciones A/B (asignar caravana a un animal cargado solo con visual). Mismo
- * lenguaje que el RoleBadge de EstablishmentCard: $surface + borde $divider + texto $textMuted.
+ * Chip "Sin caravana" (gancho del filtro R1.5 + opciones A/B: asignar caravana a un animal cargado
+ * solo con visual). Mismo patrón ícono + label que el FutureBullBadge, pero NEUTRO (estado "falta",
+ * NO alerta): pill $surface + borde $divider + ícono/texto $textMuted (sin terracota ni verde). El
+ * ícono `Tag` (lucide) comunica el CONCEPTO "caravana"; el label "Sin caravana" la ausencia — mismo
+ * reparto ícono-concepto / texto-cualificador que el ⭐ del FutureBullBadge. Cero hardcode (ADR-023 §4).
  */
 function NoTagChip() {
+  const muted = getTokenValue('$textMuted', 'color');
   return (
     <View
       backgroundColor="$surface"
@@ -190,10 +193,14 @@ function NoTagChip() {
       paddingHorizontal="$2"
       paddingVertical="$1"
       flexShrink={0}
+      {...labelA11y(Platform.OS, 'Sin caravana')}
     >
-      <Text fontFamily="$body" fontSize="$2" fontWeight="500" color="$textMuted">
-        sin caravana
-      </Text>
+      <XStack alignItems="center" gap="$1">
+        <Tag size={12} color={muted} strokeWidth={2} />
+        <Text fontFamily="$body" fontSize="$2" lineHeight="$2" fontWeight="600" color="$textMuted" numberOfLines={1}>
+          Sin caravana
+        </Text>
+      </XStack>
     </View>
   );
 }
