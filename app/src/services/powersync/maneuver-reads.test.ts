@@ -27,6 +27,7 @@ import {
   buildUpdateCustomMeasurement,
   buildInsertCustomAttribute,
   buildUpdateCustomAttribute,
+  buildCustomAttributeExistsQuery,
   buildCreateCustomFieldInsert,
   buildCustomDataKeysQuery,
   buildEnabledCustomManeuversQuery,
@@ -503,13 +504,14 @@ test('buildUpdateCustomMeasurement: corrección desde el resumen (R5.9) — UPDA
 
 // ─── custom_attributes: current-value de propiedad custom (M5-C.1, R13.12 upsert por PK compuesta) ──────
 
-// helper: emula el setCustomAttribute del service (UPDATE-luego-INSERT; el upsert ON CONFLICT falla en la
-// VIEW de PowerSync, ver custom-attributes.ts). En el fixture SQLite plano, UPDATE de fila inexistente afecta
-// 0 filas → INSERT; UPDATE de existente la pisa.
+// helper: emula el setCustomAttribute del service (SELECT-existencia → UPDATE-o-INSERT; el upsert ON CONFLICT
+// falla en la VIEW de PowerSync y el rowsAffected del UPDATE sobre la view no es confiable, ver
+// custom-attributes.ts). Decide por un SELECT del id sintético: existe → UPDATE (pisa); no existe → INSERT.
 function setAttr(db: DatabaseSync, profileId: string, fieldId: string, valueJson: string): void {
-  const upd = buildUpdateCustomAttribute(profileId, fieldId, valueJson);
-  const r = db.prepare(upd.sql).run(...(upd.args as never[]));
-  if (Number(r.changes) === 0) run(db, buildInsertCustomAttribute(profileId, fieldId, valueJson));
+  const ex = buildCustomAttributeExistsQuery(profileId, fieldId);
+  const exists = db.prepare(ex.sql).all(...(ex.args as never[])).length > 0;
+  if (exists) run(db, buildUpdateCustomAttribute(profileId, fieldId, valueJson));
+  else run(db, buildInsertCustomAttribute(profileId, fieldId, valueJson));
 }
 
 test('buildInsertCustomAttribute: inserta el current-value con id SINTÉTICO (animal:field); audit NULL local', () => {
@@ -548,6 +550,36 @@ test('buildUpdateCustomAttribute: en una fila INEXISTENTE afecta 0 filas (→ el
   const upd = buildUpdateCustomAttribute('ap-x', 'fd-y', '"z"');
   const r = db.prepare(upd.sql).run(...(upd.args as never[]));
   assert.equal(Number(r.changes), 0);
+});
+
+test('buildCustomAttributeExistsQuery: detecta la fila por id sintético (NO depende de rowsAffected del UPDATE de la view)', () => {
+  const db = freshDb();
+  const exQ = buildCustomAttributeExistsQuery('ap-1', 'fd-color');
+  // No existe todavía → 0 filas → el service INSERTa.
+  assert.equal(db.prepare(exQ.sql).all(...(exQ.args as never[])).length, 0);
+  // Tras crearla (alta) → el SELECT la encuentra → el service UPDATEa (sin INSERT plano que colisione la PK).
+  run(db, buildInsertCustomAttribute('ap-1', 'fd-color', '"overo"'));
+  assert.equal(db.prepare(exQ.sql).all(...(exQ.args as never[])).length, 1);
+  // Otro (animal, field) NO matchea (id sintético único por par).
+  const otherQ = buildCustomAttributeExistsQuery('ap-2', 'fd-color');
+  assert.equal(db.prepare(otherQ.sql).all(...(otherQ.args as never[])).length, 0);
+});
+
+// Regresión del bug del testeo en vivo 2026-06-29: editar un current-value YA EXISTENTE (creado en el alta)
+// debe PISAR vía UPDATE — NUNCA caer a un INSERT plano que colisiona la PK sintética. setAttr ahora decide por
+// SELECT-existencia (no por rowsAffected, no confiable sobre la VIEW de PowerSync) → sin UNIQUE constraint.
+test('setAttr: re-editar una propiedad creada en el alta NO colisiona la PK (UPDATE, no INSERT duplicado)', () => {
+  const db = freshDb();
+  // "Alta": crea el current-value.
+  run(db, buildInsertCustomAttribute('ap-1', 'fd-apodo', '"Pinto"'));
+  // "Ficha edit": re-setea el MISMO par → debe UPDATE (no un 2do INSERT con el mismo id sintético).
+  assert.doesNotThrow(() => setAttr(db, 'ap-1', 'fd-apodo', '"Manchado"'));
+  const rows = all<{ id: string; value: string }>(db, {
+    sql: 'SELECT id, value FROM custom_attributes',
+    args: [],
+  });
+  assert.equal(rows.length, 1, 'una sola fila (la edición pisó, no duplicó)');
+  assert.equal(rows[0].value, '"Manchado"');
 });
 
 test('setAttr: distintos (animal, field) son filas distintas (id sintético único por par)', () => {

@@ -332,11 +332,17 @@ test('inseminación con 1 pajuela preconfigurada confirma de un toque (R6.5)', a
   await setRodeoDataKey(rodeoId, 'inseminacion', true);
   const eid = makeEid();
   const visual = '0631';
+  // categoryOverride: la inseminación SOLO aplica a hembra reproductivamente APTA (corrección #1b, RAR.6:
+  // categoría PROBADA ∨ vaquillona apta ∨ ≥365d). Un perfil 'multipara' SIN override + sin birth_date/eventos
+  // lo RECALCULA el espejo C6 a 'vaquillona' (sin veredicto, sin edad) → NO apta → la maniobra se SALTA
+  // ("Sin maniobras para este animal"). Fijamos la categoría probada con override (el espejo no recalcula) →
+  // multipara real → apta. (El #1b es correcto; el setup viejo asumía el `default:true` previo a la corrección.)
   const profileId = await seedAnimal(establishmentId, rodeoId, {
     tag: eid,
     visualAlt: visual,
     sex: 'female',
     categoryCode: 'multipara',
+    categoryOverride: true,
   });
 
   await gotoWithBle(page);
@@ -374,11 +380,15 @@ test('inseminación con >1 pajuela ofrece selector (R6.5)', async ({ page }) => 
   await setRodeoDataKey(rodeoId, 'inseminacion', true);
   const eid = makeEid();
   const visual = `${RUN_TAG}-IA2`;
+  // categoryOverride: misma razón que el test de 1 pajuela — la inseminación gatea hembra APTA (#1b, RAR.6);
+  // sin override el espejo C6 recalcula 'multipara' → 'vaquillona' (no apta) y la maniobra se salta. Override
+  // fija la categoría probada → apta.
   const profileId = await seedAnimal(establishmentId, rodeoId, {
     tag: eid,
     visualAlt: visual,
     sex: 'female',
     categoryCode: 'multipara',
+    categoryOverride: true,
   });
 
   await gotoWithBle(page);

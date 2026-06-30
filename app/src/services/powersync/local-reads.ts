@@ -1882,9 +1882,29 @@ export function buildInsertCustomAttribute(
 }
 
 /**
+ * ¿EXISTE ya el current-value de una propiedad CUSTOM para ese (animal, field)? SELECT por el id sintético (la
+ * PK local). Lo usa `setCustomAttribute` para decidir UPDATE vs INSERT de forma DETERMINISTA — NO se puede
+ * confiar en el `rowsAffected` de un UPDATE sobre la VIEW de PowerSync: SQLite NO cuenta los cambios hechos por
+ * un INSTEAD OF trigger (`sqlite3_changes()` excluye trigger programs) y en la web (wa-sqlite) el UPDATE de una
+ * fila SINCRONIZADA reporta 0 aunque matchee → el patrón "UPDATE-luego-INSERT-si-0" caía a un INSERT plano que
+ * COLISIONA con la PK sintética de una fila creada en el alta (bug del testeo en vivo 2026-06-29). El SELECT es
+ * view-safe (lee, no muta) y reproduce la semántica LWW (existe → pisar; no existe → crear).
+ */
+export function buildCustomAttributeExistsQuery(
+  profileId: string,
+  fieldDefinitionId: string,
+): LocalQuery {
+  return {
+    sql: 'SELECT 1 AS one FROM custom_attributes WHERE id = ? LIMIT 1',
+    args: [customAttributeSyntheticId(profileId, fieldDefinitionId)],
+  };
+}
+
+/**
  * UPDATE local del CURRENT-VALUE de una propiedad CUSTOM (R13.12, re-edición = pisar el valor sin historial).
  * Filtra por el id sintético (la PK local). Mismo motivo que buildInsertCustomAttribute para no usar upsert:
- * la tabla es una view. El service prueba este UPDATE primero; si no afectó filas (no existía), INSERTa.
+ * la tabla es una view. El service decide UPDATE vs INSERT con `buildCustomAttributeExistsQuery` (NO con el
+ * `rowsAffected` de la view, que no es confiable — ver ese builder).
  */
 export function buildUpdateCustomAttribute(
   profileId: string,

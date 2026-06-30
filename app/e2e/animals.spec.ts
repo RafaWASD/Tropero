@@ -136,7 +136,9 @@ test('delta aptitud (RAR.1/RAR.3/RAR.4): alta de VAQUILLONA "Sí, apta" → fila
 
   // El prompt de aptitud (RAR.1.1) está presente para la vaquillona, con las 3 opciones es-AR.
   await expect(page.getByText('¿Está apta para servicio? (opcional)', { exact: true })).toBeVisible();
-  const visualLabel = `${RUN_TAG}-APTA`;
+  // Visual CORTO: el form aplica VISUAL_MAX_LENGTH=30 (sanitizeVisualInput) y RUN_TAG ya mide 26 → un sufijo
+  // largo ('-APTA') se TRUNCA al tipear y la búsqueda exacta en la lista no matchearía. ≤4 chars de sufijo.
+  const visualLabel = `${RUN_TAG}-AP`;
   await page.getByLabel('Identificación visual (recomendado)', { exact: true }).fill(visualLabel);
   // Elegimos "Sí, apta" (a11y label "Aptitud Sí, apta", buttonA11y).
   await page.getByRole('button', { name: 'Aptitud Sí, apta', exact: true }).click();
@@ -699,7 +701,9 @@ test('delta #3 (RAF2.1.4): alta con Año + DD/MM → birth_date EXACTA (AAAA-MM-
   await page.getByRole('button', { name: 'Dar de alta tu primer animal' }).click();
   await walkWizardToData(page, { sex: 'Hembra', categoryName: 'Vaquillona' });
 
-  const visualLabel = `${RUN_TAG}-DDMM`;
+  // Visual CORTO (RUN_TAG=26 + VISUAL_MAX_LENGTH=30 del form → ≤4 chars de sufijo, si no se TRUNCA al tipear
+  // y el oráculo server por visual_alt no matchearía).
+  const visualLabel = `${RUN_TAG}-DM`;
   await page.getByLabel('Identificación visual (recomendado)', { exact: true }).fill(visualLabel);
   await page.getByLabel('Año de nacimiento (opcional, AAAA)', { exact: true }).fill('2022');
   // El sanitizer en vivo formatea "1503" → "15/03" (día-primero es-AR).
@@ -808,7 +812,9 @@ test('delta #13 (RAF2.2): condición por STEPPER → cargar 3,25 con + → persi
   await page.getByRole('button', { name: 'Dar de alta tu primer animal' }).click();
   await walkWizardToData(page, { sex: 'Hembra', categoryName: 'Multípara' });
 
-  const visualLabel = `${RUN_TAG}-COND`;
+  // Visual CORTO (RUN_TAG=26 + VISUAL_MAX_LENGTH=30 del form → ≤4 chars de sufijo; si no se TRUNCA al tipear y
+  // el oráculo server por visual_alt no matchearía).
+  const visualLabel = `${RUN_TAG}-CO`;
   await page.getByLabel('Identificación visual (recomendado)', { exact: true }).fill(visualLabel);
 
   // El stepper arranca "sin cargar" mostrando 3,00 (atenuado); el 1er + lo marca cargado en 3,25.
@@ -844,7 +850,9 @@ test('delta #14 (RAF2.3.3): condición SIN tocar (3,00 atenuado) NO persiste; "S
   await page.getByRole('button', { name: 'Dar de alta tu primer animal' }).click();
   await walkWizardToData(page, { sex: 'Hembra', categoryName: 'Multípara' });
 
-  const visualLabel = `${RUN_TAG}-NOCOND`;
+  // Visual CORTO (RUN_TAG=26 + VISUAL_MAX_LENGTH=30 del form → ≤4 chars de sufijo; si no se TRUNCA al tipear y
+  // el oráculo server por visual_alt no matchearía).
+  const visualLabel = `${RUN_TAG}-NC`;
   await page.getByLabel('Identificación visual (recomendado)', { exact: true }).fill(visualLabel);
 
   // Sin cargar → no hay afordancia "Sin cargar" todavía (estado null, 3,00 atenuado).
@@ -1059,10 +1067,13 @@ test('caravana-ficha (RCF.1.2/RCF.1.4): un identificador YA seteado NO ofrece af
   await expect(page.getByText('Identificación', { exact: true })).toBeVisible({ timeout: 20_000 });
 
   // El idv seteado se muestra en solo-lectura; NO se ofrece "Agregar caravana visual" (R4.13).
-  await expect(page.getByText(idv, { exact: true }).first()).toBeVisible();
+  // `.filter({ visible: true })`: este animal NO tiene visual → su identificador PRIMARIO en la lista es el
+  // propio idv, y la fila de la lista sigue MONTADA (oculta) bajo el overlay de la ficha → `.first()` pelado
+  // caería en esa ocurrencia HIDDEN. Acá afirmamos el valor solo-lectura VISIBLE del bloque "Identificación".
+  await expect(page.getByText(idv, { exact: true }).filter({ visible: true }).first()).toBeVisible();
   await expect(page.getByRole('button', { name: 'Agregar caravana visual', exact: true })).toHaveCount(0);
   // El tag seteado (propagado a animal_profiles.animal_tag_electronic por el trigger 0079) → solo-lectura;
   // NO se ofrece "Agregar caravana electrónica".
-  await expect(page.getByText(tag, { exact: true }).first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText(tag, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 20_000 });
   await expect(page.getByRole('button', { name: 'Agregar caravana electrónica', exact: true })).toHaveCount(0);
 });

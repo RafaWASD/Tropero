@@ -9,10 +9,14 @@
 // `(animal_profile_id, field_definition_id)` y NO tiene columna `id` real; la stream le da un `id` SINTÉTICO
 // (`animal_profile_id || ':' || field_definition_id`) para el DOWN. El write LOCAL NO puede usar
 // `INSERT ... ON CONFLICT(id) DO UPDATE`: PowerSync expone la tabla como VIEW → el upsert falla con "cannot
-// UPSERT a view". Por eso el service hace UPDATE-luego-INSERT-si-0-filas (buildUpdateCustomAttribute →
-// buildInsertCustomAttribute, ambos por el id sintético) → current-value EN EL LUGAR (LWW), sin duplicar. El
-// UPLOAD lo special-casea el connector (buildCrudUpsert/buildCrudPatch en upload-classify.ts): strip del id
-// sintético + upsert/filtro por la PK natural (`onConflict:'animal_profile_id,field_definition_id'`).
+// UPSERT a view". El primer intento (UPDATE-luego-INSERT-si-rowsAffected==0) tenía un bug: el `rowsAffected` de
+// un UPDATE sobre la VIEW vía INSTEAD OF trigger NO es confiable (SQLite no cuenta los cambios de un trigger
+// program; en la web wa-sqlite un UPDATE de fila SINCRONIZADA reporta 0 aunque matchee) → caía a un INSERT
+// plano que COLISIONABA con la PK sintética de una fila creada en el ALTA (UNIQUE constraint failed —
+// testeo en vivo 2026-06-29). Por eso el service decide UPDATE vs INSERT por un SELECT DETERMINISTA del id
+// sintético (buildCustomAttributeExistsQuery), NO por rowsAffected → current-value EN EL LUGAR (LWW), sin
+// duplicar. El UPLOAD lo special-casea el connector (buildCrudUpsert/buildCrudPatch en upload-classify.ts):
+// strip del id sintético + upsert/filtro por la PK natural (`onConflict:'animal_profile_id,field_definition_id'`).
 //
 // AUDIT FORZADO server-side (R13.23, 0095): `updated_by` (=auth.uid()), `establishment_id` (=del PERFIL,
 // anti-spoof) y `updated_at` los FUERZA el trigger en INSERT *Y* UPDATE → NUNCA se mandan en el write local.
@@ -21,10 +25,11 @@
 
 import {
   buildCustomAttributesQuery,
+  buildCustomAttributeExistsQuery,
   buildInsertCustomAttribute,
   buildUpdateCustomAttribute,
 } from './powersync/local-reads';
-import { runLocalQuery, runLocalWrite, runLocalWriteCount } from './powersync/local-query';
+import { runLocalQuery, runLocalWrite } from './powersync/local-query';
 import { serializeCustomValue, type CustomValue } from '../utils/custom-value';
 import { parseCustomOptions, parseCustomValueJson, type CustomCaptureValue } from '../utils/custom-render';
 import type { CustomUiComponent } from '../utils/custom-field';
@@ -58,15 +63,28 @@ export async function setCustomAttribute(
   if (!serialized.ok) {
     return { ok: false, error: { kind: 'unknown', message: serialized.message } };
   }
-  // UPDATE-luego-INSERT (NO upsert ON CONFLICT): PowerSync expone custom_attributes como VIEW → un
-  // `ON CONFLICT … DO UPDATE` falla con "cannot UPSERT a view". El UPDATE por INSTEAD OF trigger reporta
-  // rowsAffected; si no existía (0 filas), INSERTamos. Current-value sin duplicar (la PK natural es única). En
-  // un único device la carrera read/write es inocua (el operario edita una propiedad de a una).
-  const upd = await runLocalWriteCount(
-    buildUpdateCustomAttribute(input.animalProfileId, input.fieldDefinitionId, serialized.json),
+  // SELECT-existencia-luego-UPDATE-o-INSERT (NO upsert ON CONFLICT, NO rowsAffected): PowerSync expone
+  // custom_attributes como VIEW → un `ON CONFLICT … DO UPDATE` falla con "cannot UPSERT a view", Y el
+  // `rowsAffected` de un UPDATE sobre la view vía INSTEAD OF trigger NO es confiable — SQLite no cuenta los
+  // cambios de un trigger program (`sqlite3_changes()`) y en la web (wa-sqlite) un UPDATE de fila SINCRONIZADA
+  // reporta 0 aunque matchee. Confiar en él hacía caer a un INSERT plano que COLISIONABA con la PK sintética de
+  // una fila creada en el ALTA (UNIQUE constraint failed: ps_data__custom_attributes.id — bug del testeo en
+  // vivo 2026-06-29). Por eso decidimos UPDATE vs INSERT por un SELECT DETERMINISTA del id sintético. La
+  // semántica LWW se mantiene (existe → pisar; no existe → crear). En un único device la carrera read/write es
+  // inocua (el operario edita una propiedad de a una).
+  const exists = await runLocalQuery<{ one: number }>(
+    buildCustomAttributeExistsQuery(input.animalProfileId, input.fieldDefinitionId),
+    { emptyIsSyncing: false },
   );
-  if (!upd.ok) return { ok: false, error: { kind: upd.error.kind, message: upd.error.message } };
-  if (upd.value > 0) return { ok: true, value: true };
+  if (!exists.ok) return { ok: false, error: { kind: exists.error.kind, message: exists.error.message } };
+  if (exists.value.length > 0) {
+    // Ya hay un current-value para ese (animal, field) → UPDATE (pisa el valor, sin historial).
+    const upd = await runLocalWrite(
+      buildUpdateCustomAttribute(input.animalProfileId, input.fieldDefinitionId, serialized.json),
+    );
+    if (!upd.ok) return { ok: false, error: { kind: upd.error.kind, message: upd.error.message } };
+    return { ok: true, value: true };
+  }
   // No existía la fila → INSERT (1ra captura del par animal+field).
   const ins = await runLocalWrite(
     buildInsertCustomAttribute(input.animalProfileId, input.fieldDefinitionId, serialized.json),
