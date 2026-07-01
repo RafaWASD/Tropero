@@ -20,7 +20,12 @@
 
 import { supabase } from './supabase';
 import { assertOnline } from './powersync/online-guard';
-import { asCalvingStatus, type CalvingStatus } from '../utils/reports-format';
+import {
+  asCalvingStatus,
+  type CalvingStatus,
+  asWeaningStatus,
+  type WeaningStatus,
+} from '../utils/reports-format';
 
 // ─── Result tipado de un reporte ────────────────────────────────────────────────────────────────────
 
@@ -80,6 +85,19 @@ export type CalvingKpi = {
   calved: number;
   status: CalvingStatus;
   pendingPregnant: number;
+};
+
+/**
+ * %Destete de un rodeo en una campaña (delta #10/RWK). `status` gatea el DISPLAY de la card (D3/D5);
+ * `weaned` = crías destetadas de la campaña (numerador; %destete puede >100% con mellizos); `pendingWeaning`
+ * = crías de la campaña al pie sin destetar (D4). Cierra el ciclo servida → preñada → parida → DESTETADA.
+ */
+export type WeaningKpi = {
+  isConfigured: boolean;
+  serviced: number;
+  weaned: number;
+  pendingWeaning: number;
+  status: WeaningStatus;
 };
 
 /** Distribución CCL (cabeza/cuerpo/cola) de las preñadas (R7.7). `nMonths` gobierna cuántas barras (cliente). */
@@ -202,6 +220,11 @@ type CalvingRow = {
   // status/pending_pregnant vienen de la migración 0117; ausentes si el cliente corre antes del apply (CD-6).
   status?: string; pending_pregnant?: number | string;
 };
+type WeaningRow = {
+  is_configured: boolean; serviced: number;
+  // status/weaned/pending_weaning vienen de la migración 0118; ausentes si el cliente corre antes del apply (CD-7).
+  weaned?: number | string; pending_weaning?: number | string; status?: string;
+};
 type CclRow = { n_months: number; head: number; body: number; tail: number; total: number };
 type StageRow = { n_months: number; head_born: number; body_born: number; tail_born: number; total_born: number };
 type WeightRow = { category_id: string; category_code: string; category_name: string; avg_weight: number | string; n_animals: number };
@@ -278,6 +301,22 @@ export function fetchCalvingKpi(rodeoId: string, year: number): Promise<ReportRe
       // default defensivo (CD-6): status ausente/desconocido → 'ok'; pending ausente → 0.
       status: asCalvingStatus(r.status),
       pendingPregnant: toNum(r.pending_pregnant),
+    }),
+  );
+}
+
+/** %Destete de un rodeo en una campaña (delta #10/RWK). */
+export function fetchWeaningKpi(rodeoId: string, year: number): Promise<ReportResult<WeaningKpi | null>> {
+  return callRpcSingle<WeaningRow, WeaningKpi>(
+    'rodeo_weaning_kpi',
+    { p_rodeo_id: rodeoId, p_year: year },
+    (r) => ({
+      isConfigured: r.is_configured,
+      serviced: toNum(r.serviced),
+      weaned: toNum(r.weaned),
+      pendingWeaning: toNum(r.pending_weaning),
+      // default defensivo (CD-7): status ausente/desconocido → 'ok'; pending/weaned ausentes → 0.
+      status: asWeaningStatus(r.status),
     }),
   );
 }

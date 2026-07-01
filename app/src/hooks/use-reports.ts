@@ -17,6 +17,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   fetchPregnancyKpi,
   fetchCalvingKpi,
+  fetchWeaningKpi,
   fetchCclDistribution,
   fetchCalvingByStage,
   fetchWeightByCategory,
@@ -26,6 +27,7 @@ import {
   fetchSessionSummary,
   type PregnancyKpi,
   type CalvingKpi,
+  type WeaningKpi,
   type CclDistribution,
   type CalvingByStage,
   type WeightByCategory,
@@ -122,15 +124,16 @@ function useReport<T>(
 export type RodeoKpis = {
   pregnancy: ReportPhase<PregnancyKpi | null>;
   calving: ReportPhase<CalvingKpi | null>;
+  weaning: ReportPhase<WeaningKpi | null>;
   ccl: ReportPhase<CclDistribution | null>;
   calvingByStage: ReportPhase<CalvingByStage | null>;
   weight: ReportPhase<WeightByCategory[]>;
 };
 
 /**
- * Carga los 5 reportes de un rodeo+campaña (R7.5–R7.9). Cada uno es independiente (un fallo de CCL no
- * tumba %preñez). `rodeoId`/`year` null → todos deshabilitados (rodeo sin elegir). Recarga al cambiar
- * rodeo/año (R7.1.3/R7.5.7). Los fetchers se memoizan por (rodeoId, year) → estables entre renders.
+ * Carga los 6 reportes de un rodeo+campaña (R7.5–R7.9 + delta #10 destete). Cada uno es independiente (un
+ * fallo de destete no tumba %preñez). `rodeoId`/`year` null → todos deshabilitados (rodeo sin elegir).
+ * Recarga al cambiar rodeo/año (R7.1.3/R7.5.7). Los fetchers se memoizan por (rodeoId, year) → estables.
  */
 export function useRodeoKpis(rodeoId: string | null, year: number | null): RodeoKpis {
   const ready = rodeoId !== null && year !== null;
@@ -141,6 +144,10 @@ export function useRodeoKpis(rodeoId: string | null, year: number | null): Rodeo
   );
   const calvingFetcher = useCallback(
     () => fetchCalvingKpi(rodeoId as string, year as number),
+    [rodeoId, year],
+  );
+  const weaningFetcher = useCallback(
+    () => fetchWeaningKpi(rodeoId as string, year as number),
     [rodeoId, year],
   );
   const cclFetcher = useCallback(
@@ -159,6 +166,7 @@ export function useRodeoKpis(rodeoId: string | null, year: number | null): Rodeo
   return {
     pregnancy: useReport(ready ? pregnancyFetcher : null),
     calving: useReport(ready ? calvingFetcher : null),
+    weaning: useReport(ready ? weaningFetcher : null),
     ccl: useReport(ready ? cclFetcher : null),
     calvingByStage: useReport(ready ? stageFetcher : null),
     weight: useReport(ready ? weightFetcher : null),

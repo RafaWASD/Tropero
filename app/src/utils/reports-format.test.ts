@@ -25,6 +25,9 @@ import {
   calvingCardView,
   asCalvingStatus,
   CALVING_PENDING_LEGEND,
+  weaningCardView,
+  asWeaningStatus,
+  WEANING_PENDING_LEGEND,
   SESSION_EVENT_KINDS,
 } from './reports-format';
 
@@ -176,6 +179,86 @@ test('asCalvingStatus: pasa los 4 estados válidos; ausente/desconocido → "ok"
   assert.equal(asCalvingStatus(null), 'ok');
   assert.equal(asCalvingStatus('garbage'), 'ok');
   assert.equal(asCalvingStatus(42), 'ok');
+});
+
+// ─── weaningCardView + asWeaningStatus: presentación de la card de Destete (delta #10, RWK.7.2) ──────
+// Verifica la traducción status → presentación (tabla design §3.2): el %destete SOLO en 'ok' con servidas>0
+// (incl. >100% con mellizos — RWK.1.3), los mensajes accionables (NO un 0% engañoso) en los otros estados, la
+// leyenda D4 SOLO con ok + pendingWeaning>0, y el normalizador defensivo de status (CD-7). Es la cobertura
+// frontend de RWK.1.3/1.4/3.3/3.4/4.1/4.2/5.4/5.5.
+
+test('weaningCardView: ok con servidas>0 → %destete es-AR + detalle "N destetados / M servidas", sin leyenda (RWK.3.4)', () => {
+  const wv = weaningCardView({ status: 'ok', weaned: 40, serviced: 46, pendingWeaning: 0 });
+  assert.equal(wv.value, '87 %'); // safePercent(40,46)=86.9565…, redondea a 1 decimal → 87 %
+  assert.equal(wv.detail, '40 destetados / 46 servidas');
+  assert.equal(wv.legend, undefined); // pending=0 → sin leyenda (RWK.4.2)
+  assert.equal(wv.muted, false);
+  assert.equal(wv.note, undefined);
+});
+
+test('weaningCardView: ok con pendingWeaning>0 → leyenda D4 (RWK.4.1)', () => {
+  const wv = weaningCardView({ status: 'ok', weaned: 28, serviced: 46, pendingWeaning: 9 });
+  assert.equal(wv.value, '60,9 %'); // 28/46 = 60,8695… → 60,9 %
+  assert.equal(wv.detail, '28 destetados / 46 servidas');
+  assert.equal(wv.legend, WEANING_PENDING_LEGEND); // "todavía hay crías sin destetar, esto puede afectar el dato"
+  assert.equal(wv.muted, false);
+});
+
+test('weaningCardView: ok con %>100% (mellizos: weaned>serviced) → NO trunca (RWK.1.3)', () => {
+  // 2 crías destetadas de 1 servida = 200% → correcto (mide terneros logrados por vaca servida).
+  const wv = weaningCardView({ status: 'ok', weaned: 2, serviced: 1, pendingWeaning: 0 });
+  assert.equal(wv.value, '200 %'); // safePercent(2,1)=200, sin truncar
+  assert.equal(wv.detail, '2 destetados / 1 servidas');
+  assert.equal(wv.muted, false);
+});
+
+test('weaningCardView: ok con serviced=0 → "—" ("sin datos de esta campaña"), NO 0% (RWK.1.4)', () => {
+  const wv = weaningCardView({ status: 'ok', weaned: 0, serviced: 0, pendingWeaning: 0 });
+  assert.equal(wv.value, '—');
+  assert.equal(wv.note, 'sin datos de esta campaña');
+  assert.equal(wv.muted, true);
+  assert.equal(wv.detail, undefined);
+  assert.equal(wv.legend, undefined);
+});
+
+test('weaningCardView: not_weaning_season → "—" + "todavía no empezó el destete", NO 0% prematuro (RWK.3.3)', () => {
+  const wv = weaningCardView({ status: 'not_weaning_season', weaned: 0, serviced: 46, pendingWeaning: 0 });
+  assert.equal(wv.value, '—');
+  assert.equal(wv.note, 'todavía no empezó el destete');
+  assert.equal(wv.muted, true);
+  assert.equal(wv.legend, undefined); // leyenda D4 SOLO en 'ok' (RWK.4.2)
+});
+
+test('weaningCardView: no_service_months → "—" + "sin meses de servicio configurados" (RWK.5.4)', () => {
+  const wv = weaningCardView({ status: 'no_service_months', weaned: 0, serviced: 0, pendingWeaning: 0 });
+  assert.equal(wv.value, '—');
+  assert.equal(wv.note, 'sin meses de servicio configurados');
+  assert.equal(wv.muted, true);
+});
+
+test('weaningCardView: not_applicable_12m → "—" + "no aplica (servicio todo el año)" (RWK.5.5)', () => {
+  const wv = weaningCardView({ status: 'not_applicable_12m', weaned: 0, serviced: 46, pendingWeaning: 0 });
+  assert.equal(wv.value, '—');
+  assert.equal(wv.note, 'no aplica (servicio todo el año)');
+  assert.equal(wv.muted, true);
+});
+
+test('weaningCardView: kpi=null → "—" ("sin datos"), sin crash (defensivo)', () => {
+  const wv = weaningCardView(null);
+  assert.equal(wv.value, '—');
+  assert.equal(wv.note, 'sin datos');
+  assert.equal(wv.muted, true);
+});
+
+test('asWeaningStatus: pasa los 4 estados válidos; ausente/desconocido → "ok" (CD-7 default defensivo)', () => {
+  assert.equal(asWeaningStatus('ok'), 'ok');
+  assert.equal(asWeaningStatus('not_weaning_season'), 'not_weaning_season');
+  assert.equal(asWeaningStatus('no_service_months'), 'no_service_months');
+  assert.equal(asWeaningStatus('not_applicable_12m'), 'not_applicable_12m');
+  assert.equal(asWeaningStatus(undefined), 'ok'); // DB sin la migración 0118 → compat, muestra el %
+  assert.equal(asWeaningStatus(null), 'ok');
+  assert.equal(asWeaningStatus('garbage'), 'ok');
+  assert.equal(asWeaningStatus(42), 'ok');
 });
 
 // ─── eventKindLabel (R7.3.1) ─────────────────────────────────────────────────────────────────────────

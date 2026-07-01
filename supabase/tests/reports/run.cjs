@@ -23,7 +23,13 @@
 //            de rango); IDOR M1 (42501, no vacío).
 //   - TR.9  establishment_unweighed: nunca-pesado + umbral + p_category_codes (R7.11.1/.2/.3); cota M4
 //            (p_threshold_days [0,3650], cardinality ≤64 → 22023); IDOR M1 (42501).
-//   - TR.10 transversal: anon/public sin EXECUTE en las 9; read-only; tenant-isolation A↮B.
+//   - TR.11 rodeo_weaning_kpi delta #10 (RWK.1-9): status no_service_months (D5) / not_applicable_12m (D5,
+//            precede) / not_weaning_season (D3, weaned=0 DATA-DRIVEN) / ok (D1) + weaned/pending_weaning (D2/D4)
+//            imputados por AÑO DE SERVICIO (concepción ∈ ventana, incl. WRAP; weaning en año calendario
+//            siguiente pero contado en la campaña de origen) + mellizos (weaned>serviced, %>100%) + soft-delete
+//            del weaning (vuelve a pending) + IDOR (42501) + cota p_year (22023) + rodeo inexistente (P0002).
+//            ROJA-HASTA-APPLY de la migración 0118 (la aplica el LEADER por MCP).
+//   - TR.10 transversal: anon/public sin EXECUTE en las 10 (incl. rodeo_weaning_kpi); read-only; tenant-iso A↮B.
 //
 // 🔴 ROJA-HASTA-APPLY: la migración 0106 NO está aplicada (el deploy lo gatea el LEADER por CLI/Management-API
 // + autorización de Raf, patrón Stream A 0102-0105). Hasta entonces ESTA SUITE FALLA — es ESPERADO (mismo
@@ -194,6 +200,54 @@ async function createSession(client, { establishmentId, rodeoId, status = 'activ
   const { error } = await client.from('sessions').insert(payload);
   if (error) throw new Error(`createSession: ${error.message}`);
   return id;
+}
+
+// ── Helpers de DESTETE (delta #10/TR.11): sembrar el vínculo madre → parto → birth_calves → cría → weaning.
+// Un parto MONO se siembra insertando un reproductive_events {event_type:'birth', calf_sex} → el trigger
+// mono-ternero (0045/0032, SECURITY DEFINER) crea la cría + la fila birth_calves EN LA MISMA TX. Se lee la
+// cría vía admin (service_role) porque birth_calves es select-only para el cliente y poblada server-side.
+async function seedBirthWithCalf(client, { motherProfileId, eventDate, calfSex = 'male' }) {
+  const { error: insErr } = await client.from('reproductive_events').insert({
+    animal_profile_id: motherProfileId, event_type: 'birth', event_date: eventDate, calf_sex: calfSex,
+  });
+  if (insErr) throw new Error(`seedBirthWithCalf insert: ${insErr.message}`);
+  const { data: ev, error: evErr } = await client.from('reproductive_events')
+    .select('id').eq('animal_profile_id', motherProfileId).eq('event_type', 'birth').eq('event_date', eventDate)
+    .order('created_at', { ascending: false }).limit(1).single();
+  if (evErr) throw new Error(`seedBirthWithCalf select ev: ${evErr.message}`);
+  const { data: bc } = await eventually(
+    async () => await admin.from('birth_calves').select('calf_profile_id').eq('birth_event_id', ev.id),
+    (res) => res && Array.isArray(res.data) && res.data.length >= 1,
+  );
+  return { birthEventId: ev.id, calfProfileIds: (bc || []).map((r) => r.calf_profile_id) };
+}
+
+// Parto de MELLIZOS vía register_birth (0116, SECURITY DEFINER): crea N crías + N filas birth_calves. Inserta
+// el parto con calf_sex NULL (el trigger mono NO actúa) → register_birth arma las crías él mismo.
+async function seedRegisterBirth(client, { motherProfileId, eventDate, calves }) {
+  const { data: birthId, error } = await client.rpc('register_birth', {
+    p_mother_profile_id: motherProfileId, p_event_date: eventDate, p_calves: calves,
+  });
+  if (error) throw new Error(`seedRegisterBirth: ${error.message}`);
+  const { data: bc } = await eventually(
+    async () => await admin.from('birth_calves').select('calf_profile_id').eq('birth_event_id', birthId),
+    (res) => res && Array.isArray(res.data) && res.data.length >= calves.length,
+  );
+  return { birthEventId: birthId, calfProfileIds: (bc || []).map((r) => r.calf_profile_id) };
+}
+
+// Destete de una cría: inserta un reproductive_events {event_type:'weaning'} SOBRE el perfil de la CRÍA
+// (animal_profile_id = ternero, como en buildAddWeaningInsert). Devuelve el id del evento (para soft-delete).
+async function seedWeaning(client, calfProfileId, eventDate) {
+  const { error } = await client.from('reproductive_events').insert({
+    animal_profile_id: calfProfileId, event_type: 'weaning', event_date: eventDate,
+  });
+  if (error) throw new Error(`seedWeaning: ${error.message}`);
+  const { data, error: selErr } = await client.from('reproductive_events')
+    .select('id').eq('animal_profile_id', calfProfileId).eq('event_type', 'weaning')
+    .order('created_at', { ascending: false }).limit(1).single();
+  if (selErr) throw new Error(`seedWeaning select: ${selErr.message}`);
+  return data.id;
 }
 
 function pgcode(error) {
@@ -557,6 +611,157 @@ test('reports suite — spec 07 Stream C (RPC de reportes)', async (t) => {
   });
 
   // =====================================================================
+  // TR.11 — rodeo_weaning_kpi: status (D3/D5) + weaned/pending_weaning (D1/D2/D4) — delta #10 (RWK.1-9)
+  // =====================================================================
+  // Fechas RELATIVAS a new Date() (determinismo del CI, design §5). El %destete NO depende de la fecha del
+  // test (a diferencia de #8): not_weaning_season es DATA-DRIVEN (weaned=0), no date-driven. Uso p_year=lastYear
+  // con service_months que dan una ventana de concepción en el pasado, y siembro el vínculo servida → parto
+  // (birth_calves via el trigger mono / register_birth para mellizos) → cría → weaning. La imputación es por AÑO
+  // DE SERVICIO: el weaning cae ~6mo tras el parto (año calendario siguiente) pero se cuenta en la campaña de
+  // ORIGEN de la cría (RWK.2.2) → los destetes los sello en lastYear+1 a propósito.
+  await t.test('TR.11 weaning_kpi: no_service_months / not_applicable_12m / not_weaning_season / ok + weaned/pending_weaning + wrap + mellizos + IDOR', async () => {
+    const year = thisYear();
+    const lastYear = year - 1;
+
+    // ── RWK.9.1 — service_months NULL o {} → status='no_service_months' (D5), weaned/pending=0. ──
+    const rNull = await createRodeo(clientA, { establishmentId: estA, name: 'W st-null' });
+    const { data: dNull, error: eNull } = await clientA.rpc('rodeo_weaning_kpi', { p_rodeo_id: rNull.id, p_year: year });
+    assert.equal(eNull, null, eNull ? `W st-null: ${eNull.message}` : 'ejecutó');
+    assert.equal(row1(dNull).status, 'no_service_months', 'service_months NULL → no_service_months (RWK.5.1)');
+    assert.equal(row1(dNull).weaned, 0, 'weaned=0 sin partos (RWK.1.4)');
+    assert.equal(row1(dNull).pending_weaning, 0, 'pending_weaning=0 sin partos');
+
+    const rEmptyM = await createRodeo(clientA, { establishmentId: estA, name: 'W st-empty' });
+    await setServiceMonths(rEmptyM.id, []); // {} = "no hace servicio" (pasa el CHECK 0102: cardinality 0)
+    const { data: dEmpty } = await clientA.rpc('rodeo_weaning_kpi', { p_rodeo_id: rEmptyM.id, p_year: year });
+    assert.equal(row1(dEmpty).is_configured, true, 'service_months {} → is_configured=true (distinto de NULL)');
+    assert.equal(row1(dEmpty).status, 'no_service_months', 'service_months {} → no_service_months (RWK.5.1)');
+
+    // ── RWK.9.2 — los 12 meses → not_applicable_12m (D5); PRECEDE a not_weaning_season (RWK.5.3). ──
+    // weaned=0 acá: si el 12m NO precediera, caería en not_weaning_season → la aserción prueba la precedencia.
+    const r12 = await createRodeo(clientA, { establishmentId: estA, name: 'W st-12m' });
+    await setServiceMonths(r12.id, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+    const { data: d12 } = await clientA.rpc('rodeo_weaning_kpi', { p_rodeo_id: r12.id, p_year: year });
+    assert.equal(row1(d12).status, 'not_applicable_12m', '12 meses → not_applicable_12m, precede a not_weaning_season (RWK.5.2/5.3)');
+
+    // ── RWK.9.3 — campaña con partos (concepción ∈ ventana ya pasada) pero SIN destete → not_weaning_season,
+    // weaned=0, pending_weaning>=1 (la cría al pie, D4). ──
+    const rNws = await createRodeo(clientA, { establishmentId: estA, name: 'W st-nws' });
+    await setServiceMonths(rNws.id, [1]); // Enero → ventana ya pasada con lastYear
+    const nwsM = await createAnimal(clientA, { idv: `${RUN_TAG}_nws1`, sex: 'female', birthDate: daysAgo(1500), rodeoId: rNws.id, establishmentId: estA, systemId: rNws.systemId, categoryCode: 'multipara' });
+    // parto Oct(lastYear) → concepción Ene(lastYear) (∈ {1}, año lastYear) → cría de la campaña. SIN weaning.
+    await seedBirthWithCalf(clientA, { motherProfileId: nwsM.profile.id, eventDate: dateOn(lastYear, 10, 15) });
+    const { data: dNws } = await eventually(
+      async () => await clientA.rpc('rodeo_weaning_kpi', { p_rodeo_id: rNws.id, p_year: lastYear }),
+      (res) => res && res.data && row1(res.data) && row1(res.data).pending_weaning >= 1,
+    );
+    assert.equal(row1(dNws).status, 'not_weaning_season', 'partos sin destete → not_weaning_season (RWK.3.2)');
+    assert.equal(row1(dNws).weaned, 0, 'weaned=0 (ninguna cría destetada, RWK.3.2)');
+    assert.ok(row1(dNws).pending_weaning >= 1, 'pending_weaning>=1 (cría de la campaña al pie, RWK.3.1)');
+
+    // ── RWK.9.4 — destetar la cría de la campaña → status='ok', weaned correcto (incl. WRAP). El weaning se
+    // sella en lastYear+1 (año calendario siguiente al parto) pero se imputa a la campaña lastYear (RWK.2.2). ──
+    const rOk = await createRodeo(clientA, { establishmentId: estA, name: 'W st-ok-wrap' });
+    await setServiceMonths(rOk.id, [11, 12, 1]); // WRAP
+    const okM = await createAnimal(clientA, { idv: `${RUN_TAG}_wok1`, sex: 'female', birthDate: daysAgo(1500), rodeoId: rOk.id, establishmentId: estA, systemId: rOk.systemId, categoryCode: 'multipara' });
+    // parto Oct(lastYear) → concepción Ene(lastYear) (∈ {11,12,1}, WRAP, MISMO año lastYear) → cuenta.
+    const okBirth = await seedBirthWithCalf(clientA, { motherProfileId: okM.profile.id, eventDate: dateOn(lastYear, 10, 15) });
+    await seedWeaning(clientA, okBirth.calfProfileIds[0], dateOn(lastYear + 1, 4, 15)); // destete ~6mo tras el parto
+    const { data: dOk } = await eventually(
+      async () => await clientA.rpc('rodeo_weaning_kpi', { p_rodeo_id: rOk.id, p_year: lastYear }),
+      (res) => res && res.data && row1(res.data) && row1(res.data).weaned >= 1,
+    );
+    assert.equal(row1(dOk).status, 'ok', 'cría destetada de la campaña → status=ok (RWK.3.4)');
+    assert.equal(row1(dOk).serviced, 1, 'serviced=1 (la multipara)');
+    assert.equal(row1(dOk).weaned, 1, 'weaned=1 (cría destetada, concepción Ene ∈ {11,12,1} WRAP, RWK.2.1)');
+    assert.equal(row1(dOk).pending_weaning, 0, 'pending_weaning=0 (todas destetadas, RWK.3.1)');
+
+    // ── RWK.9.5 — pending_weaning: 2 crías de la campaña, 1 destetada → weaned=1/pending=1; destetar la 2ª →
+    // weaned=2/pending=0; soft-delete del weaning de la 1ª → weaned=1/pending=1 (RWK.2.4/3.1). ──
+    const rPw = await createRodeo(clientA, { establishmentId: estA, name: 'W st-pending' });
+    await setServiceMonths(rPw.id, [1]);
+    const pwA = await createAnimal(clientA, { idv: `${RUN_TAG}_pwA`, sex: 'female', birthDate: daysAgo(1500), rodeoId: rPw.id, establishmentId: estA, systemId: rPw.systemId, categoryCode: 'multipara' });
+    const pwB = await createAnimal(clientA, { idv: `${RUN_TAG}_pwB`, sex: 'female', birthDate: daysAgo(1500), rodeoId: rPw.id, establishmentId: estA, systemId: rPw.systemId, categoryCode: 'multipara' });
+    const pwBirthA = await seedBirthWithCalf(clientA, { motherProfileId: pwA.profile.id, eventDate: dateOn(lastYear, 10, 15) });
+    const pwBirthB = await seedBirthWithCalf(clientA, { motherProfileId: pwB.profile.id, eventDate: dateOn(lastYear, 10, 16) });
+    // destetar SOLO la cría de pwA.
+    const weanA = await seedWeaning(clientA, pwBirthA.calfProfileIds[0], dateOn(lastYear + 1, 4, 15));
+    const { data: dPw1 } = await eventually(
+      async () => await clientA.rpc('rodeo_weaning_kpi', { p_rodeo_id: rPw.id, p_year: lastYear }),
+      (res) => res && res.data && row1(res.data) && row1(res.data).weaned >= 1,
+    );
+    assert.equal(row1(dPw1).weaned, 1, 'weaned=1 (solo la cría de pwA destetada, RWK.3.1)');
+    assert.equal(row1(dPw1).pending_weaning, 1, 'pending_weaning=1 (la cría de pwB al pie, RWK.3.1)');
+    // destetar la 2ª.
+    await seedWeaning(clientA, pwBirthB.calfProfileIds[0], dateOn(lastYear + 1, 4, 20));
+    const { data: dPw2 } = await eventually(
+      async () => await clientA.rpc('rodeo_weaning_kpi', { p_rodeo_id: rPw.id, p_year: lastYear }),
+      (res) => res && res.data && row1(res.data) && row1(res.data).weaned >= 2,
+    );
+    assert.equal(row1(dPw2).weaned, 2, 'weaned=2 (ambas destetadas)');
+    assert.equal(row1(dPw2).pending_weaning, 0, 'pending_weaning=0 (ninguna al pie)');
+    // soft-delete del weaning de pwA → la cría VUELVE a pending (RWK.2.4: un weaning borrado no cuenta).
+    await admin.from('reproductive_events').update({ deleted_at: new Date().toISOString() }).eq('id', weanA);
+    const { data: dPw3 } = await eventually(
+      async () => await clientA.rpc('rodeo_weaning_kpi', { p_rodeo_id: rPw.id, p_year: lastYear }),
+      (res) => res && res.data && row1(res.data) && row1(res.data).weaned <= 1,
+    );
+    assert.equal(row1(dPw3).weaned, 1, 'weaned=1 tras soft-delete del weaning de pwA (RWK.2.4)');
+    assert.equal(row1(dPw3).pending_weaning, 1, 'pending_weaning=1 (la cría de pwA vuelve al pie, RWK.2.4)');
+
+    // ── RWK.9.6 — imputación por campaña: un parto cuya concepción cae FUERA de service_months NO aporta ni a
+    // weaned ni a pending_weaning; + mellizos (2 crías destetadas de 1 servida → weaned=2 > serviced=1, %>100%). ──
+    const rOut = await createRodeo(clientA, { establishmentId: estA, name: 'W st-outside' });
+    await setServiceMonths(rOut.id, [1]); // solo Enero
+    const outM = await createAnimal(clientA, { idv: `${RUN_TAG}_out1`, sex: 'female', birthDate: daysAgo(1500), rodeoId: rOut.id, establishmentId: estA, systemId: rOut.systemId, categoryCode: 'multipara' });
+    // parto Jun(lastYear) → concepción Sep(lastYear-1) (mes 9 ∉ {1}) → FUERA de la campaña. Aunque se deste-
+    // te, NO aporta a weaned ni a pending.
+    const outBirth = await seedBirthWithCalf(clientA, { motherProfileId: outM.profile.id, eventDate: dateOn(lastYear, 6, 15) });
+    await seedWeaning(clientA, outBirth.calfProfileIds[0], dateOn(lastYear, 12, 15));
+    const { data: dOut } = await eventually(
+      async () => await clientA.rpc('rodeo_weaning_kpi', { p_rodeo_id: rOut.id, p_year: lastYear }),
+      (res) => res && res.data && row1(res.data) && row1(res.data).serviced >= 1,
+    );
+    assert.equal(row1(dOut).weaned, 0, 'parto fuera de service_months → NO aporta a weaned (RWK.2.1)');
+    assert.equal(row1(dOut).pending_weaning, 0, 'parto fuera de service_months → tampoco a pending_weaning (RWK.3.1)');
+
+    const rMel = await createRodeo(clientA, { establishmentId: estA, name: 'W st-mellizos' });
+    await setServiceMonths(rMel.id, [1]);
+    const melM = await createAnimal(clientA, { idv: `${RUN_TAG}_mel1`, sex: 'female', birthDate: daysAgo(1500), rodeoId: rMel.id, establishmentId: estA, systemId: rMel.systemId, categoryCode: 'multipara' });
+    // parto de MELLIZOS Oct(lastYear) → concepción Ene(lastYear) ∈ {1} → 2 crías de la campaña, de 1 servida.
+    // Ambas crías MACHO ('ternero') a propósito: rodeo_serviced_females filtra a.sex='female' → una cría macho
+    // NUNCA infla `serviced` (una cría HEMBRA destetada se promueve a 'vaquillona' por compute_category y, si
+    // la corre >365 días, entraría al fallback de servidas → non-determinismo por fecha del CI). Con machos,
+    // serviced=1 es determinístico sin importar cuándo corra el leader la suite post-apply.
+    const twins = await seedRegisterBirth(clientA, {
+      motherProfileId: melM.profile.id, eventDate: dateOn(lastYear, 10, 15),
+      calves: [{ calf_sex: 'male' }, { calf_sex: 'male' }],
+    });
+    assert.equal(twins.calfProfileIds.length, 2, 'register_birth de mellizos crea 2 filas birth_calves');
+    await seedWeaning(clientA, twins.calfProfileIds[0], dateOn(lastYear + 1, 4, 15));
+    await seedWeaning(clientA, twins.calfProfileIds[1], dateOn(lastYear + 1, 4, 16));
+    const { data: dMel } = await eventually(
+      async () => await clientA.rpc('rodeo_weaning_kpi', { p_rodeo_id: rMel.id, p_year: lastYear }),
+      (res) => res && res.data && row1(res.data) && row1(res.data).weaned >= 2,
+    );
+    assert.equal(row1(dMel).serviced, 1, 'serviced=1 (la única multipara; las crías ternero macho no cuentan)');
+    assert.equal(row1(dMel).weaned, 2, 'weaned=2 (2 crías destetadas de 1 servida — mellizos, RWK.2.3/9.6)');
+    assert.equal(row1(dMel).pending_weaning, 0, 'pending_weaning=0 (ambas crías destetadas)');
+    assert.ok(row1(dMel).weaned > row1(dMel).serviced, '%destete puede exceder 100% con mellizos (D1/RWK.1.3)');
+
+    // ── RWK.9.7 — IDOR: owner B pide el weaning_kpi de un rodeo de A → 42501 (no un set vacío silencioso). ──
+    const idor = await clientB.rpc('rodeo_weaning_kpi', { p_rodeo_id: rOk.id, p_year: lastYear });
+    assert.match(pgcode(idor.error), /42501|not authorized/i, 'owner B no lee weaning_kpi de A (RWK.6.2/9.7)');
+
+    // cota de p_year (RWK.6.3): fuera de rango → 22023.
+    const badYear = await clientA.rpc('rodeo_weaning_kpi', { p_rodeo_id: rOk.id, p_year: 1800 });
+    assert.match(pgcode(badYear.error), /22023/i, 'p_year<1900 → 22023 (RWK.6.3)');
+    // rodeo inexistente (RWK.6.4): P0002.
+    const ghostR = await clientA.rpc('rodeo_weaning_kpi', { p_rodeo_id: crypto.randomUUID(), p_year: lastYear });
+    assert.match(pgcode(ghostR.error), /P0002|not found|42501/i, 'rodeo inexistente → P0002 (RWK.6.4)');
+  });
+
+  // =====================================================================
   // TR.5 — rodeo_ccl_distribution — R7.7
   // =====================================================================
   await t.test('TR.5 rodeo_ccl_distribution: head/body/tail + total + empty total=0', async () => {
@@ -826,7 +1031,7 @@ test('reports suite — spec 07 Stream C (RPC de reportes)', async (t) => {
   // =====================================================================
   // TR.10 — transversal: grants (anon/public sin EXECUTE) + read-only + tenant-isolation
   // =====================================================================
-  await t.test('TR.10 grants: anon/public NO ejecutan ninguna de las 9 RPC', async () => {
+  await t.test('TR.10 grants: anon/public NO ejecutan ninguna de las 10 RPC', async () => {
     const anon = createClient(SUPABASE_URL, ANON_KEY, { auth: { autoRefreshToken: false, persistSession: false } });
     const ghost = crypto.randomUUID();
     const calls = [
@@ -834,6 +1039,9 @@ test('reports suite — spec 07 Stream C (RPC de reportes)', async (t) => {
       ['rodeo_sessions_list', { p_rodeo_id: ghost }],
       ['rodeo_pregnancy_kpi', { p_rodeo_id: ghost, p_year: thisYear() }],
       ['rodeo_calving_kpi', { p_rodeo_id: ghost, p_year: thisYear() }],
+      // delta #10/RWK.9.7: la RPC NUEVA rodeo_weaning_kpi también debe estar revocada de anon/public (default
+      // Postgres = EXECUTE a PUBLIC → el revoke de la 0118 es OBLIGATORIO).
+      ['rodeo_weaning_kpi', { p_rodeo_id: ghost, p_year: thisYear() }],
       ['rodeo_ccl_distribution', { p_rodeo_id: ghost, p_year: thisYear() }],
       ['rodeo_calving_by_stage', { p_rodeo_id: ghost, p_year: thisYear() }],
       ['rodeo_weight_by_category', { p_rodeo_id: ghost }],
@@ -859,6 +1067,7 @@ test('reports suite — spec 07 Stream C (RPC de reportes)', async (t) => {
     // llamadas repetidas a todas las RPC de rodeo + alertas.
     await clientA.rpc('rodeo_pregnancy_kpi', { p_rodeo_id: r.id, p_year: thisYear() });
     await clientA.rpc('rodeo_calving_kpi', { p_rodeo_id: r.id, p_year: thisYear() });
+    await clientA.rpc('rodeo_weaning_kpi', { p_rodeo_id: r.id, p_year: thisYear() }); // delta #10: read-only
     await clientA.rpc('rodeo_ccl_distribution', { p_rodeo_id: r.id, p_year: thisYear() });
     await clientA.rpc('rodeo_calving_by_stage', { p_rodeo_id: r.id, p_year: thisYear() });
     await clientA.rpc('rodeo_weight_by_category', { p_rodeo_id: r.id });

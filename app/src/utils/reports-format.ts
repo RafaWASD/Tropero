@@ -120,6 +120,99 @@ export function calvingCardView(
   }
 }
 
+// ─── Destete: estado + presentación de la card (delta #10 / RWK.1-5) ────────────────────────────────
+//
+// La RPC `rodeo_weaning_kpi` devuelve, además de `weaned`/`serviced`, un `status` que GATEA el DISPLAY de la
+// card de Destete (mismo espíritu que #8) y `pending_weaning` (crías de la campaña al pie, D4). El conteo
+// (`weaned`/`pending_weaning`) es honesto SIEMPRE; el `status` solo decide qué se MUESTRA:
+//   - ok                 → el %destete (`weaned/serviced`, puede >100% con mellizos — D1/RWK.1.3).
+//   - not_weaning_season → todavía no empezó el destete de la campaña (weaned=0, DATA-DRIVEN — D3/CD-2): NO 0%.
+//   - no_service_months  → el rodeo no tiene meses de servicio configurados: NO 0% engañoso (D5).
+//   - not_applicable_12m → servicio continuo 12 meses: no se reporta destete de campaña (D5, precede).
+// La leyenda D4 ("todavía hay crías sin destetar…") aparece SOLO con status='ok' y pendingWeaning>0.
+//
+// `weaningCardView` es PURO/testeable (node:test) — reusa `safePercent`/`formatPercentAR` (guard de 0).
+// Espejo 1:1 de `calvingCardView`: misma forma de retorno, solo cambian los copys y el numerador `weaned`.
+
+/** Estado de presentación de la card de Destete (espejo del `status` de la RPC, RWK.7.1). */
+export type WeaningStatus = 'ok' | 'not_weaning_season' | 'no_service_months' | 'not_applicable_12m';
+
+/** Los 4 estados válidos, en un array para el normalizador defensivo del mapeo (CD-7). */
+export const WEANING_STATUSES: readonly WeaningStatus[] = [
+  'ok',
+  'not_weaning_season',
+  'no_service_months',
+  'not_applicable_12m',
+];
+
+/**
+ * Normaliza el `status` crudo de la RPC a un `WeaningStatus`. Un valor ausente/desconocido → `'ok'` (default
+ * defensivo, CD-7): si el cliente corre contra una DB SIN la migración 0118 (sin la RPC/columna `status`), la
+ * card se comporta como antes (muestra el %). No inventa estados que la RPC no mandó.
+ */
+export function asWeaningStatus(raw: unknown): WeaningStatus {
+  return typeof raw === 'string' && (WEANING_STATUSES as readonly string[]).includes(raw)
+    ? (raw as WeaningStatus)
+    : 'ok';
+}
+
+/** Texto FIJO de la leyenda D4 (context §D4; solo se muestra con ok + pendingWeaning>0). */
+export const WEANING_PENDING_LEGEND = 'todavía hay crías sin destetar, esto puede afectar el dato';
+
+/** Presentación derivada de la card de Destete (RWK.7.2): value/detail/note/legend + muted. */
+export type WeaningCardView = {
+  /** El número grande ya formateado ("87 %" | "—"). */
+  value: string;
+  /** El denominador explícito cuando hay % ("40 destetados / 46 servidas"). */
+  detail?: string;
+  /** Mensaje de estado cuando NO hay % (ocupa el slot `detail` de la KpiCard). */
+  note?: string;
+  /** Leyenda D4 (solo status='ok' + pendingWeaning>0). */
+  legend?: string;
+  /** true → el valor es "—" (atenuado): sin % que mostrar. */
+  muted: boolean;
+};
+
+/**
+ * Deriva la presentación de la card de Destete a partir del `status` + conteos (RWK.7.2, tabla design §3.2).
+ * `status='ok'` con servidas>0 → el %destete + el detalle "N destetados / M servidas" (+ leyenda D4 si quedan
+ * crías al pie). El %destete puede exceder 100 % (mellizos: dos crías destetadas de una servida — D1/RWK.1.3):
+ * `safePercent`/`formatPercentAR` lo formatean tal cual ("150 %"), sin truncar. `status='ok'` con servidas=0 →
+ * "—" ("sin datos de esta campaña", defensivo — RWK.1.4). Los otros estados → "—" + el mensaje accionable
+ * correspondiente (NO un 0% engañoso, D3/D5). `kpi === null` → "—" ("sin datos").
+ */
+export function weaningCardView(
+  kpi: { status: WeaningStatus; weaned: number; serviced: number; pendingWeaning: number } | null,
+): WeaningCardView {
+  if (kpi === null) {
+    return { value: '—', note: 'sin datos', muted: true };
+  }
+  switch (kpi.status) {
+    case 'ok': {
+      const pct = safePercent(kpi.weaned, kpi.serviced);
+      if (pct === null) {
+        // serviced=0 → no hay base para el % (la campaña todavía no tiene servidas). No es 0% (RWK.1.4).
+        return { value: '—', note: 'sin datos de esta campaña', muted: true };
+      }
+      return {
+        value: formatPercentAR(pct),
+        detail: `${kpi.weaned} destetados / ${kpi.serviced} servidas`,
+        legend: kpi.pendingWeaning > 0 ? WEANING_PENDING_LEGEND : undefined,
+        muted: false,
+      };
+    }
+    case 'not_weaning_season':
+      return { value: '—', note: 'todavía no empezó el destete', muted: true };
+    case 'no_service_months':
+      return { value: '—', note: 'sin meses de servicio configurados', muted: true };
+    case 'not_applicable_12m':
+      return { value: '—', note: 'no aplica (servicio todo el año)', muted: true };
+    default:
+      // status desconocido (defensivo; el mapeo ya normaliza a un WeaningStatus válido) → "sin datos".
+      return { value: '—', note: 'sin datos', muted: true };
+  }
+}
+
 // ─── Peso es-AR (R7.9.3: coma decimal, ej. "385,5 kg"; no aplica a formatos de máquina) ─────────────
 
 /**

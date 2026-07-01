@@ -42,10 +42,12 @@ import {
   formatCountDelta,
   cclBarsForMonths,
   calvingCardView,
+  weaningCardView,
   eventKindLabel,
   compareSessions,
   compareWeights,
   type CalvingStatus,
+  type WeaningStatus,
 } from '@/utils/reports-format';
 
 type SpikeVariant =
@@ -61,7 +63,13 @@ type SpikeVariant =
   | 'paricion-leyenda'
   | 'paricion-fuera-ventana'
   | 'paricion-sin-meses'
-  | 'paricion-12m';
+  | 'paricion-12m'
+  // delta #10/RWK.8 — los 5 estados de la card de Destete (mock, para el capture del Gate 2.5).
+  | 'destete-ok'
+  | 'destete-leyenda'
+  | 'destete-sin-destete'
+  | 'destete-sin-meses'
+  | 'destete-12m';
 
 export default function ReportesSpikeScreen() {
   const insets = useSafeAreaInsets();
@@ -112,6 +120,21 @@ export default function ReportesSpikeScreen() {
         ) : null}
         {variant === 'paricion-12m' ? (
           <ParicionVariant status="not_applicable_12m" calved={0} serviced={46} pendingPregnant={0} />
+        ) : null}
+        {variant === 'destete-ok' ? (
+          <DesteteVariant status="ok" weaned={40} serviced={46} pendingWeaning={0} />
+        ) : null}
+        {variant === 'destete-leyenda' ? (
+          <DesteteVariant status="ok" weaned={28} serviced={46} pendingWeaning={9} />
+        ) : null}
+        {variant === 'destete-sin-destete' ? (
+          <DesteteVariant status="not_weaning_season" weaned={0} serviced={46} pendingWeaning={0} />
+        ) : null}
+        {variant === 'destete-sin-meses' ? (
+          <DesteteVariant status="no_service_months" weaned={0} serviced={0} pendingWeaning={0} />
+        ) : null}
+        {variant === 'destete-12m' ? (
+          <DesteteVariant status="not_applicable_12m" weaned={0} serviced={46} pendingWeaning={0} />
         ) : null}
       </ScrollView>
     </YStack>
@@ -519,6 +542,51 @@ function ParicionVariant({
         <KpiCard label="Parición" value={cv.value} detail={cv.detail ?? cv.note} muted={cv.muted} />
       </KpiRow>
       {cv.legend ? <InfoNote>{cv.legend}</InfoNote> : null}
+    </>
+  );
+}
+
+// ─── Variantes de DESTETE (delta #10/RWK.8) — los 5 estados de la card de Destete ────────────────────
+// MOCK que reusa los MISMOS componentes que producción (weaningCardView + KpiCard + InfoNote) para que el
+// leader vete lo REAL en el Gate 2.5: el %destete (ok), "todavía no empezó el destete" (weaned=0, D3), "sin
+// meses de servicio configurados" (D5), "no aplica (servicio todo el año)" (D5), y la leyenda D4. La card va
+// en un SEGUNDO KpiRow a ancho completo debajo de Preñez | Parición (layout CD-3 de la tab real) → se vetea
+// el layout verdadero del funnel (servida → preñada → parida → DESTETADA).
+
+function DesteteVariant({
+  status,
+  weaned,
+  serviced,
+  pendingWeaning,
+}: {
+  status: WeaningStatus;
+  weaned: number;
+  serviced: number;
+  pendingWeaning: number;
+}) {
+  const wv = weaningCardView({ status, weaned, serviced, pendingWeaning });
+  const pregnant = 41;
+  const pregServiced = 46;
+  const calved = 38;
+  return (
+    <>
+      <ReportSectionHeader title="Reproductivo" hint={`Campaña ${new Date().getFullYear()} · base servidas`} />
+      <KpiRow>
+        <KpiCard
+          label="Preñez"
+          value={formatPercentAR(safePercent(pregnant, pregServiced))}
+          detail={`${pregnant} preñadas / ${pregServiced} servidas`}
+        />
+        <KpiCard
+          label="Parición"
+          value={formatPercentAR(safePercent(calved, pregServiced))}
+          detail={`${calved} paridas / ${pregServiced} servidas`}
+        />
+      </KpiRow>
+      <KpiRow>
+        <KpiCard label="Destete" value={wv.value} detail={wv.detail ?? wv.note} muted={wv.muted} />
+      </KpiRow>
+      {wv.legend ? <InfoNote>{wv.legend}</InfoNote> : null}
     </>
   );
 }

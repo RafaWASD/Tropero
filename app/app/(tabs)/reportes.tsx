@@ -52,6 +52,7 @@ import {
   formatKgAR,
   cclBarsForMonths,
   calvingCardView,
+  weaningCardView,
   defaultCampaignYear,
   animalLabel,
   daysSinceLabel,
@@ -98,6 +99,7 @@ export default function ReportesScreen() {
     useCallback(() => {
       kpis.pregnancy.reload();
       kpis.calving.reload();
+      kpis.weaning.reload();
       kpis.ccl.reload();
       kpis.calvingByStage.reload();
       kpis.weight.reload();
@@ -333,7 +335,7 @@ function ReproSection({
   kpis: ReturnType<typeof useRodeoKpis>;
   onConfigure: () => void;
 }) {
-  const { pregnancy, calving, ccl, calvingByStage } = kpis;
+  const { pregnancy, calving, weaning, ccl, calvingByStage } = kpis;
 
   // Estado del bloque: usamos %preñez como reporte "líder" (los 4 comparten guard/cota). Si está cargando
   // por primera vez / offline / error → un solo estado para todo el bloque (no 4 spinners).
@@ -366,6 +368,10 @@ function ReproSection({
   // La card de Parición NO arma el % a mano: deriva su presentación del `status` de la RPC (delta #8/RPF.6.2)
   // — fix del "0 %" engañoso (D2/D3/D5) + leyenda D4. `calv` es CalvingKpi | null.
   const cv = calvingCardView(calv);
+  // La card de Destete deriva su presentación del `status` de la RPC (delta #10/RWK.7.2) — %destete (puede
+  // >100% con mellizos), o el mensaje accionable fuera de estado 'ok', + leyenda D4. `weaning.data` es
+  // WeaningKpi | null.
+  const wv = weaningCardView(weaning.data);
   const noData = (preg?.serviced ?? 0) === 0;
 
   return (
@@ -391,6 +397,21 @@ function ReproSection({
       {/* Leyenda D4 (RPF.4.2): solo con status='ok' + preñadas sin parir → cartel de aviso informativo. */}
       {cv.legend ? <InfoNote>{cv.legend}</InfoNote> : null}
 
+      {/* Card de DESTETE (delta #10/RWK.7.3, layout CD-3): segundo KpiRow a ancho completo debajo de Preñez |
+          Parición → cierra el funnel del ciclo (servida → preñada → parida → DESTETADA). Full-width evita el
+          recorte del número a 412px (el 3-across trunca "84,6 %" a $9). */}
+      <KpiRow>
+        <KpiCard
+          label="Destete"
+          value={wv.value}
+          detail={wv.detail ?? wv.note}
+          muted={wv.muted}
+        />
+      </KpiRow>
+
+      {/* Leyenda D4 destete (RWK.4.1): solo con status='ok' + crías al pie sin destetar. */}
+      {wv.legend ? <InfoNote>{wv.legend}</InfoNote> : null}
+
       {noData ? (
         <ReportEmpty
           title="Sin datos de esta campaña"
@@ -410,6 +431,7 @@ function ReproSection({
 function reloadRepro(kpis: ReturnType<typeof useRodeoKpis>) {
   kpis.pregnancy.reload();
   kpis.calving.reload();
+  kpis.weaning.reload();
   kpis.ccl.reload();
   kpis.calvingByStage.reload();
 }
