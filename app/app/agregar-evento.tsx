@@ -20,7 +20,7 @@
 // texto con maxLength. Cero hardcode (ADR-023 §4): tokens + componentes; íconos lucide con
 // getTokenValue. Voseo es-AR. a11y por helper (utils/a11y).
 
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Platform, Pressable, TextInput, type TextStyle } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter, type Href } from 'expo-router';
@@ -29,6 +29,7 @@ import {
   Activity,
   Baby,
   Check,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   HeartCrack,
@@ -43,6 +44,8 @@ import type { LucideIcon } from 'lucide-react-native';
 
 import { Button, Card, FormField, FormError, InfoNote } from '@/components';
 import { useBusyWhileMounted } from '@/services/ble/stick';
+import { useRodeo } from '@/contexts';
+import type { Rodeo } from '@/services/rodeos';
 import {
   addWeight,
   addConditionScore,
@@ -51,13 +54,22 @@ import {
   addService,
   addAbortion,
   registerBirth,
+  fetchMotherRodeoContext,
 } from '@/services/events';
 import {
   sanitizeWeightInput,
   sanitizeTagInput,
+  sanitizeIdvInput,
   maskDateInput,
   TAG_ELECTRONIC_LENGTH,
 } from '@/utils/animal-input';
+import {
+  resolveEffectiveCalfRodeoId,
+  resolveMotherSystemId,
+  eligibleCalfRodeos,
+  canEditCalfRodeo,
+  calfIdvForSubmit,
+} from '@/utils/calf-birth';
 import {
   CONDITION_SCORES,
   formatConditionScore,
@@ -137,10 +149,18 @@ export default function AgregarEventoScreen() {
     establishmentId?: string;
     sex?: string;
     pregnant?: string;
+    rodeoId?: string;
+    rodeoName?: string;
   }>();
   const profileId = typeof params.profileId === 'string' ? params.profileId : null;
   const establishmentId =
     typeof params.establishmentId === 'string' ? params.establishmentId : null;
+  // Rodeo de la madre por PARAMS (seed inmediato del picker del parto — evita el flash de "—" mientras el
+  // read local resuelve + nombre del rodeo en el fallback cross-field RPRC.1.8). La resolución AUTORITATIVA
+  // (rodeoId + systemId) la hace el read local de abajo (fetchMotherRodeoContext), uniforme para todo caller.
+  const paramRodeoId = typeof params.rodeoId === 'string' && params.rodeoId ? params.rodeoId : null;
+  const paramRodeoName =
+    typeof params.rodeoName === 'string' && params.rodeoName ? params.rodeoName : null;
   // Los eventos REPRODUCTIVOS (tacto/servicio/parto) son SOLO de hembras. Gateamos la sección
   // "Reproductivo" del paso 1 por el sexo del animal (viene de la ficha). Conservador: solo `'female'`
   // exacto habilita reproductivo; macho o sexo ausente/desconocido → NO se ofrecen esos eventos.
@@ -189,6 +209,14 @@ export default function AgregarEventoScreen() {
   const [calves, setCalves] = useState<CalfRow[]>(() => [newCalf()]);
   const [birthDateErr, setBirthDateErr] = useState<string | null>(null);
   const [calvesErr, setCalvesErr] = useState<string | null>(null);
+  // Delta parto-rodeo-caravana (#4/#1a): rodeo a nivel PARTO (toda la camada) + caravana visual del ternero
+  // (solo single-calf). `calfRodeoId` = null → usar el de la madre (RPRC.1.2); un valor = rodeo editado
+  // (RPRC.1.5). `calfIdv` = caravana visual sanitizada (RPRC.2.2), solo se envía con 1 ternero (RPRC.3.2/3.3).
+  const [calfRodeoId, setCalfRodeoId] = useState<string | null>(null);
+  const [calfIdv, setCalfIdv] = useState('');
+  const [rodeoPickerOpen, setRodeoPickerOpen] = useState(false);
+  // Rodeo/sistema de la madre resueltos DESDE LOCAL (offline, uniforme para todo caller — veto leader #1).
+  const [motherCtx, setMotherCtx] = useState<{ rodeoId: string; systemId: string } | null>(null);
 
   // Campos de aborto (reproductivo). Fecha + notas OPCIONALES (mismo shape que el servicio).
   const [abortionDate, setAbortionDate] = useState(todayIso());
@@ -203,6 +231,45 @@ export default function AgregarEventoScreen() {
   const missingParams = !profileId;
 
   const muted = getTokenValue('$textMuted', 'color');
+
+  // ── Rodeo del parto (delta parto-rodeo-caravana, RPRC.1). ──
+  // Rodeos del campo activo (lectura LOCAL vía useRodeo → offline, RPRC.4.4). `available` = [] si el contexto
+  // no está `active` (loading/no_rodeos) → dispara el fallback no-editable (RPRC.1.8).
+  const { state: rodeoState } = useRodeo();
+  const availableRodeos = rodeoState.status === 'active' ? rodeoState.available : [];
+
+  // Read LOCAL del perfil de la madre → rodeoId + systemId AUTORITATIVOS (uniforme para todo caller que pase
+  // profileId, offline). El nombre lo resuelve la UI desde availableRodeos ?? el param. Solo corre con
+  // profileId (no depende del eventType: es barato y deja el picker listo si el operario elige "Parto").
+  useEffect(() => {
+    let alive = true;
+    if (!profileId) {
+      setMotherCtx(null);
+      return;
+    }
+    void fetchMotherRodeoContext(profileId).then((r) => {
+      if (!alive) return;
+      setMotherCtx(r.ok ? r.value : null);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [profileId]);
+
+  // Resolución del rodeo de la madre (read local primero; params como seed/fallback del id y nombre).
+  const motherRodeoId = motherCtx?.rodeoId ?? paramRodeoId;
+  // systemId: read local primero; si aún no resolvió, el helper lo deriva de availableRodeos (RPRC.1.6).
+  const motherSystemId = motherCtx?.systemId ?? resolveMotherSystemId(availableRodeos, motherRodeoId);
+  const eligibleRodeos = useMemo(
+    () => eligibleCalfRodeos(availableRodeos, motherSystemId),
+    [availableRodeos, motherSystemId],
+  );
+  const canEditRodeo = canEditCalfRodeo(eligibleRodeos, motherRodeoId);
+  const effectiveCalfRodeoId = resolveEffectiveCalfRodeoId(calfRodeoId, motherRodeoId);
+  const isSameRodeoAsMother = effectiveCalfRodeoId === motherRodeoId;
+  // Nombre a mostrar en el trigger: el del rodeo efectivo (desde availableRodeos) ?? el param de la madre ?? "—".
+  const effectiveRodeoName =
+    availableRodeos.find((r) => r.id === effectiveCalfRodeoId)?.name ?? paramRodeoName ?? '—';
 
   // Destino de fallback para el "Volver" robusto (backOr): volvemos a la FICHA del animal
   // (de donde se llega a "Agregar evento"). Si faltan params (profileId null), caemos a la tab
@@ -420,10 +487,17 @@ export default function AgregarEventoScreen() {
       // La RPC register_birth crea el evento + 1..N terneros + transición de la madre ATÓMICAMENTE
       // server-side (R9.4/R9.5). El cliente manda solo motherProfileId + fecha + terneros — el tenant
       // lo deriva el server de la fila real de la madre. Al volver, useFocusEffect refresca la ficha.
+      // Delta parto-rodeo-caravana (RPRC.3): rodeo EFECTIVO del parto (el elegido en el picker ?? el de la
+      // madre) → calfRodeoId para TODA la camada (RPRC.3.1). calfIdv (caravana visual) SOLO con 1 ternero y
+      // valor no vacío (RPRC.3.2); con mellizos se omite aunque se haya tipeado antes de agregar el 2º
+      // (RPRC.3.3). El RPC 6-arg re-valida server-side (rodeo activo/tenant/sistema → 23514; idv único/
+      // inmutable → 23505). El resto del payload queda intacto (RPRC.3.4).
       const r = await registerBirth({
         motherProfileId: profileId,
         eventDate: d.value,
         calves: v.value.map((c) => ({ sex: c.sex, weightKg: c.weightKg, tag: c.tag })),
+        calfRodeoId: effectiveCalfRodeoId,
+        calfIdv: calfIdvForSubmit(calves.length, calfIdv),
       });
       finishSubmit(r);
       return;
@@ -477,6 +551,8 @@ export default function AgregarEventoScreen() {
     serviceNotes,
     birthDate,
     calves,
+    calfIdv,
+    effectiveCalfRodeoId,
     abortionDate,
     abortionNotes,
     figuresPregnant,
@@ -614,6 +690,20 @@ export default function AgregarEventoScreen() {
             onRemoveCalf={removeCalf}
             onUpdateCalf={updateCalf}
             calvesErr={calvesErr}
+            rodeoName={effectiveRodeoName}
+            isSameRodeoAsMother={isSameRodeoAsMother}
+            canEditRodeo={canEditRodeo}
+            eligibleRodeos={eligibleRodeos}
+            selectedRodeoId={effectiveCalfRodeoId}
+            rodeoPickerOpen={rodeoPickerOpen}
+            onToggleRodeoPicker={() => setRodeoPickerOpen((v) => !v)}
+            onSelectRodeo={(id) => {
+              setCalfRodeoId(id);
+              setRodeoPickerOpen(false);
+            }}
+            calfIdv={calfIdv}
+            onCalfIdv={(t) => setCalfIdv(sanitizeIdvInput(t))}
+            muted={muted}
           />
         ) : eventType === 'abortion' ? (
           <AbortionForm
@@ -1139,12 +1229,14 @@ function AbortionForm({
   );
 }
 
-// ─── Form: Parto (fecha + lista dinámica de terneros, R9.5 mellizos) ───────────────────────
+// ─── Form: Parto (fecha + rodeo a nivel parto + caravana visual single-calf + terneros) ────────
 //
-// La fecha del parto + una o más cards "Ternero N". Cada card: sexo (REQUERIDO, OptionSelector
-// Macho/Hembra) + peso al nacer (opcional, kg) + caravana electrónica (opcional, FDX-B 15 díg). El
-// botón "+ Agregar otro ternero" suma una card (mellizos); cada card (salvo cuando hay una sola)
-// tiene "Quitar". El estado vive en el screen como array con id local estable (key de React).
+// La fecha del parto + el RODEO del parto (a nivel camada, delta parto-rodeo-caravana RPRC.1) + la
+// CARAVANA VISUAL del ternero (solo con 1 ternero, RPRC.2) + una o más cards "Ternero N". Cada card:
+// sexo (REQUERIDO, OptionSelector Macho/Hembra) + peso al nacer (opcional, kg) + caravana ELECTRÓNICA
+// (opcional, FDX-B 15 díg, sigue por-ternero RPRC.2.5). El botón "+ Agregar otro ternero" suma una card
+// (mellizos); cada card (salvo cuando hay una sola) tiene "Quitar". El estado vive en el screen como
+// array con id local estable (key de React).
 function PartoForm({
   date,
   onDate,
@@ -1154,6 +1246,17 @@ function PartoForm({
   onRemoveCalf,
   onUpdateCalf,
   calvesErr,
+  rodeoName,
+  isSameRodeoAsMother,
+  canEditRodeo,
+  eligibleRodeos,
+  selectedRodeoId,
+  rodeoPickerOpen,
+  onToggleRodeoPicker,
+  onSelectRodeo,
+  calfIdv,
+  onCalfIdv,
+  muted,
 }: {
   date: string;
   onDate: (t: string) => void;
@@ -1163,8 +1266,25 @@ function PartoForm({
   onRemoveCalf: (localId: string) => void;
   onUpdateCalf: (localId: string, patch: Partial<Omit<CalfRow, 'localId'>>) => void;
   calvesErr: string | null;
+  /** Nombre del rodeo efectivo del parto (a mostrar en el trigger). */
+  rodeoName: string;
+  /** ¿El rodeo elegido coincide con el de la madre? → leyenda "(Mismo rodeo que la madre)" (RPRC.1.3). */
+  isSameRodeoAsMother: boolean;
+  /** ¿El picker es editable? false → fallback no-editable (RPRC.1.8). */
+  canEditRodeo: boolean;
+  /** Rodeos elegibles (mismo sistema que la madre, campo activo). */
+  eligibleRodeos: Rodeo[];
+  selectedRodeoId: string | null;
+  rodeoPickerOpen: boolean;
+  onToggleRodeoPicker: () => void;
+  onSelectRodeo: (id: string) => void;
+  /** Caravana visual del ternero (single-calf, RPRC.2). Ya sanitizada por el caller. */
+  calfIdv: string;
+  onCalfIdv: (t: string) => void;
+  muted: string;
 }) {
   const primary = getTokenValue('$primary', 'color');
+  const singleCalf = calves.length === 1;
   return (
     <YStack gap="$4">
       <FormField
@@ -1175,6 +1295,38 @@ function PartoForm({
         placeholder="AAAA-MM-DD"
         error={dateErr}
       />
+
+      {/* ── Rodeo del PARTO (RPRC.1): a nivel camada (entre la fecha y los terneros, design §3). Patrón
+          calcado del picker de rodeo de #15 (LinkCalfPrompt CreateCalfForm): trigger + ChevronDown + lista
+          expandible + RodeoOptionRow + leyenda "(Mismo rodeo que la madre)". ── */}
+      <CalfRodeoPicker
+        rodeoName={rodeoName}
+        isSameRodeoAsMother={isSameRodeoAsMother}
+        canEdit={canEditRodeo}
+        eligibleRodeos={eligibleRodeos}
+        selectedRodeoId={selectedRodeoId}
+        pickerOpen={rodeoPickerOpen}
+        onTogglePicker={onToggleRodeoPicker}
+        onSelectRodeo={onSelectRodeo}
+        muted={muted}
+      />
+
+      {/* ── Caravana VISUAL del ternero (RPRC.2): SOLO con 1 ternero. Con ≥2 (mellizos) se oculta y aparece
+          la nota (el idv se asigna después desde la ficha de cada ternero). El tag ELECTRÓNICO sigue por
+          ternero dentro de cada CalfBlock (RPRC.2.5). ── */}
+      {singleCalf ? (
+        <FormField
+          label="Caravana visual del ternero (opcional)"
+          value={calfIdv}
+          onChangeText={onCalfIdv}
+          keyboardType="number-pad"
+          placeholder="Ej. 0234"
+        />
+      ) : (
+        <InfoNote>
+          Las caravanas visuales de mellizos se asignan después desde la ficha de cada ternero.
+        </InfoNote>
+      )}
 
       <YStack gap="$3">
         {calves.map((calf, i) => (
@@ -1223,6 +1375,177 @@ function PartoForm({
         </XStack>
       </Pressable>
     </YStack>
+  );
+}
+
+// ─── Picker de rodeo del PARTO (a nivel camada) — patrón de #15 (LinkCalfPrompt CreateCalfForm) ─────
+//
+// Trigger (nombre del rodeo efectivo + ChevronDown) + leyenda "(Mismo rodeo que la madre)" condicional +
+// lista expandible de rodeos del MISMO sistema. `canEdit=false` (fallback RPRC.1.8: madre de un campo
+// distinto del activo / sistema irresoluble) → trigger ESTÁTICO sin chevron ni lista (preseleccionado al
+// de la madre, sin ofrecer opciones; el RPC re-valida con 23514). Cero hardcode: tokens + getTokenValue.
+function CalfRodeoPicker({
+  rodeoName,
+  isSameRodeoAsMother,
+  canEdit,
+  eligibleRodeos,
+  selectedRodeoId,
+  pickerOpen,
+  onTogglePicker,
+  onSelectRodeo,
+  muted,
+}: {
+  rodeoName: string;
+  isSameRodeoAsMother: boolean;
+  canEdit: boolean;
+  eligibleRodeos: Rodeo[];
+  selectedRodeoId: string | null;
+  pickerOpen: boolean;
+  onTogglePicker: () => void;
+  onSelectRodeo: (id: string) => void;
+  muted: string;
+}) {
+  // Leyenda "(Mismo rodeo que la madre)" (RPRC.1.3/1.4): lineHeight="$2" matcheado (anti-recorte; "madre"
+  // no tiene descendente pero conservamos la regla). Un solo Text reusable arriba y abajo del trigger.
+  const legend = isSameRodeoAsMother ? (
+    <Text
+      fontFamily="$body"
+      fontSize="$2"
+      lineHeight="$2"
+      fontWeight="500"
+      color="$textFaint"
+      numberOfLines={1}
+    >
+      (Mismo rodeo que la madre)
+    </Text>
+  ) : null;
+
+  return (
+    <YStack gap="$2">
+      <Text fontFamily="$body" fontSize="$3" fontWeight="500" color="$textMuted">
+        Rodeo del parto
+      </Text>
+      {canEdit ? (
+        <Pressable
+          onPress={onTogglePicker}
+          {...buttonA11y(Platform.OS, { label: 'Elegir rodeo del parto', selected: pickerOpen })}
+        >
+          <XStack
+            width="100%"
+            minHeight="$touchMin"
+            alignItems="center"
+            gap="$3"
+            backgroundColor="$white"
+            borderRadius="$card"
+            borderWidth={1}
+            borderColor="$divider"
+            paddingHorizontal="$4"
+            pressStyle={{ backgroundColor: '$surface' }}
+          >
+            <Text
+              flex={1}
+              minWidth={0}
+              numberOfLines={1}
+              fontFamily="$body"
+              fontSize="$5"
+              lineHeight="$5"
+              fontWeight="600"
+              color="$textPrimary"
+            >
+              {rodeoName}
+            </Text>
+            <ChevronDown size={22} color={muted} strokeWidth={2} />
+          </XStack>
+        </Pressable>
+      ) : (
+        // Fallback no-editable (RPRC.1.8): trigger estático (sin chevron, sin lista), preseleccionado al de
+        // la madre. Fondo $surface (no $white) para comunicar "no editable" sin un disabled agresivo.
+        <XStack
+          width="100%"
+          minHeight="$touchMin"
+          alignItems="center"
+          backgroundColor="$surface"
+          borderRadius="$card"
+          borderWidth={1}
+          borderColor="$divider"
+          paddingHorizontal="$4"
+        >
+          <Text
+            flex={1}
+            minWidth={0}
+            numberOfLines={1}
+            fontFamily="$body"
+            fontSize="$5"
+            lineHeight="$5"
+            fontWeight="600"
+            color="$textPrimary"
+          >
+            {rodeoName}
+          </Text>
+        </XStack>
+      )}
+      {legend}
+      {canEdit && pickerOpen && eligibleRodeos.length > 0 ? (
+        <YStack
+          gap="$1"
+          borderRadius="$card"
+          borderWidth={1}
+          borderColor="$divider"
+          backgroundColor="$bg"
+          paddingVertical="$2"
+          paddingHorizontal="$2"
+        >
+          {eligibleRodeos.map((r) => (
+            <RodeoOptionRow
+              key={r.id}
+              label={r.name}
+              selected={r.id === selectedRodeoId}
+              onPress={() => onSelectRodeo(r.id)}
+            />
+          ))}
+        </YStack>
+      ) : null}
+    </YStack>
+  );
+}
+
+/** Fila de un rodeo elegible del parto (lista expandible del picker) — espeja RodeoOptionRow de #15. */
+function RodeoOptionRow({
+  label,
+  selected,
+  onPress,
+}: {
+  label: string;
+  selected: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable onPress={onPress} {...buttonA11y(Platform.OS, { label: `Rodeo ${label}`, selected })}>
+      <XStack
+        alignItems="center"
+        gap="$2"
+        minHeight="$chipMin"
+        paddingHorizontal="$2"
+        paddingVertical="$2"
+        pressStyle={{ opacity: 0.6 }}
+      >
+        <Text
+          flex={1}
+          minWidth={0}
+          numberOfLines={1}
+          fontFamily="$body"
+          fontSize="$4"
+          lineHeight="$4"
+          fontWeight="500"
+          color="$textPrimary"
+        >
+          {label}
+        </Text>
+        {selected ? (
+          <Check size={20} color={getTokenValue('$primary', 'color')} strokeWidth={2.5} />
+        ) : null}
+      </XStack>
+    </Pressable>
   );
 }
 

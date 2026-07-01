@@ -291,6 +291,13 @@ export default function AnimalDetailScreen() {
         establishmentId: detail.establishmentId,
         sex: detail.sex,
         pregnant: pregnant ? '1' : '0',
+        // Rodeo de la madre (spec 02 delta parto-rodeo-caravana, RPRC.1.2/1.3): SEED inmediato del picker
+        // de rodeo del parto (evita el flash de "—" mientras el read local resuelve) + NOMBRE del rodeo en
+        // el fallback no-editable RPRC.1.8 (parto sobre un animal de un campo distinto del activo, cuyo
+        // rodeo no figura en useRodeo().available). La resolución AUTORITATIVA (rodeoId/systemId) la hace
+        // agregar-evento con un read local del perfil (fetchMotherRodeoContext) — uniforme para todo caller.
+        rodeoId: detail.rodeoId,
+        rodeoName: detail.rodeoName,
       },
     });
   }, [detail, timeline, router]);

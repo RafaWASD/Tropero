@@ -18,6 +18,7 @@ import { test, expect } from './helpers/fixtures';
 import {
   createTestUser,
   seedEstablishmentWithRodeo,
+  seedRodeo,
   seedAnimal,
   seedReproductiveServiceEvent,
   setUserPhone,
@@ -896,4 +897,112 @@ test('C6 override: badge "Categoría fijada manualmente" + quitar fijación → 
     timeout: 20_000,
   });
   await expect(page.getByLabel('Categoría Vaquillona', { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 20_000 });
+});
+
+// ─── Delta parto-rodeo-caravana (#4/#1a) — RPRC.1/2/3: rodeo del parto + caravana visual del ternero ──────
+//
+// Regresión del delta: en el form de Parto (agregar-evento, eventType='birth'),
+//   - RPRC.1: aparece el picker de RODEO a nivel parto, preseleccionado al de la madre + leyenda "(Mismo
+//     rodeo que la madre)", editable a otro rodeo del MISMO sistema (Destete). Al elegir Destete la leyenda
+//     desaparece (RPRC.1.4).
+//   - RPRC.2: con 1 ternero aparece el campo de CARAVANA VISUAL; al agregar un 2º ternero (mellizos) el
+//     campo desaparece y aparece la NOTA (RPRC.2.3/2.4); al quitar el 2º vuelve. El tag ELECTRÓNICO sigue
+//     por ternero (RPRC.2.5, sin cambios — cubierto por el test de mellizos de arriba).
+//   - RPRC.3: el rodeo (Destete) y la caravana visual (idv) elegidos LLEGAN a registerBirth → el ternero
+//     creado aparece con SU idv en la lista (prueba de calfIdv) y su ficha muestra Rodeo "Destete" (prueba
+//     de calfRodeoId — distinto del rodeo de la madre "Rodeo general").
+//
+// La madre es una hembra SIN tacto previo → "no figura preñada" → el "Guardar" dispara el aviso suave
+// (window.confirm): lo capturamos + aceptamos (patrón del test "parto en hembra NO preñada" de arriba).
+test('delta parto-rodeo-caravana: picker de rodeo + caravana visual (single) / nota (mellizos) → llegan a registerBirth (RPRC.1/2/3)', async ({
+  page,
+}) => {
+  test.setTimeout(210_000);
+
+  const user = await createTestUser('partorc');
+  await setUserPhone(user.id, '1123456789');
+  // Campo con 2 rodeos del MISMO sistema (cría) → el picker ofrece "Destete" como destino editable.
+  const { establishmentId, rodeoId } = await seedEstablishmentWithRodeo(user.id, 'Campo PartoRC'); // rodeo A "Rodeo general"
+  await seedRodeo(establishmentId, 'Destete'); // rodeo B, mismo sistema (cría) → RPRC.1.5/1.6
+  const motherIdv = `4412${Date.now().toString().slice(-5)}`;
+  await seedAnimal(establishmentId, rodeoId, { idv: motherIdv, sex: 'female' });
+
+  await page.goto('/');
+  await signIn(page, user);
+  await waitForHome(page);
+  await gotoAnimales(page);
+
+  const motherRow = page.getByRole('button', { name: new RegExp(motherIdv) }).first();
+  await expect(motherRow).toBeVisible({ timeout: 20_000 });
+  await motherRow.click();
+  await expect(page.getByText('Historial', { exact: true })).toBeVisible({ timeout: 20_000 });
+
+  // ── Abrir el form de Parto. ──
+  await page.getByRole('button', { name: 'Agregar evento', exact: true }).click();
+  await expect(page.getByText('¿Qué querés cargar?', { exact: true })).toBeVisible({ timeout: 20_000 });
+  await page.getByRole('button', { name: 'Parto', exact: true }).click();
+  await expect(page.getByText('Ternero 1', { exact: true })).toBeVisible({ timeout: 20_000 });
+
+  // ── RPRC.1.1/1.2/1.3: el picker de rodeo del parto aparece, preseleccionado al de la madre + leyenda. ──
+  await expect(page.getByText('Rodeo del parto', { exact: true })).toBeVisible();
+  await expect(page.getByText('(Mismo rodeo que la madre)', { exact: true })).toBeVisible();
+
+  // ── RPRC.2.1: con 1 ternero, el campo de caravana visual aparece. ──
+  await expect(page.getByLabel('Caravana visual del ternero (opcional)', { exact: true })).toBeVisible();
+
+  // ── RPRC.2.3/2.4: agregar un 2º ternero (mellizos) → el campo idv desaparece + aparece la nota. ──
+  await page.getByRole('button', { name: 'Agregar otro ternero', exact: true }).click();
+  await expect(page.getByText('Ternero 2', { exact: true })).toBeVisible();
+  await expect(page.getByLabel('Caravana visual del ternero (opcional)', { exact: true })).toHaveCount(0);
+  await expect(
+    page.getByText(/Las caravanas visuales de mellizos se asignan después/),
+  ).toBeVisible();
+  // El picker de rodeo sigue presente (aplica a toda la camada, RPRC.1.7).
+  await expect(page.getByText('Rodeo del parto', { exact: true })).toBeVisible();
+
+  // ── Quitar el 2º ternero → el campo de caravana visual vuelve. ──
+  await page.getByRole('button', { name: 'Quitar ternero 2', exact: true }).click();
+  await expect(page.getByText('Ternero 2', { exact: true })).toHaveCount(0);
+  const idvField = page.getByLabel('Caravana visual del ternero (opcional)', { exact: true });
+  await expect(idvField).toBeVisible();
+
+  // ── RPRC.2.2/3.2: tipear la caravana visual (single-calf). Empieza con '0' → prueba que el campo NO
+  //     clampa el leading cero (sanitizeIdvInput solo filtra no-dígitos). ──
+  const calfIdv = `0${Date.now().toString().slice(-6)}`;
+  await idvField.fill(calfIdv);
+  await expect(idvField).toHaveValue(calfIdv);
+
+  // ── RPRC.1.5/1.4: abrir el picker → "Destete" (mismo sistema) → elegirlo → la leyenda desaparece. ──
+  await page.getByRole('button', { name: 'Elegir rodeo del parto' }).click();
+  const destete = page.getByRole('button', { name: /Rodeo .*Destete/i });
+  await expect(destete).toBeVisible();
+  await destete.click();
+  await expect(page.getByText('(Mismo rodeo que la madre)', { exact: true })).toHaveCount(0);
+
+  // ── Sexo del ternero (requerido) + Guardar. Hembra NO preñada → aviso suave (window.confirm) → aceptar. ──
+  await page.getByRole('button', { name: 'Macho', exact: true }).first().click();
+  page.once('dialog', async (dialog) => {
+    await dialog.accept();
+  });
+  await page.getByRole('button', { name: 'Guardar evento', exact: true }).click();
+
+  // ── De vuelta en la ficha de la madre: el nodo "Parto" (se persistió). ──
+  await expect(page.getByText('Cargando ficha…', { exact: true })).toHaveCount(0, { timeout: 20_000 });
+  await expect(page.getByText('Parto', { exact: true })).toBeVisible({ timeout: 20_000 });
+
+  // ── RPRC.3.1/3.2 (llegaron a registerBirth): el ternero aparece con SU caravana visual (calfIdv) en la
+  //     lista → prueba que calfIdv se envió; su ficha muestra Rodeo "Destete" → prueba que calfRodeoId se
+  //     envió (el ternero NO heredó el "Rodeo general" de la madre). ──
+  await page.getByRole('button', { name: 'Volver', exact: true }).click();
+  await gotoAnimales(page);
+  const calfRow = page.getByRole('button', { name: new RegExp(calfIdv) }).first();
+  await expect(calfRow).toBeVisible({ timeout: 20_000 });
+  await calfRow.click();
+  await expect(page.getByText('Historial', { exact: true })).toBeVisible({ timeout: 20_000 });
+  // La ficha del ternero: Rodeo "Destete" (el elegido en el picker), NO "Rodeo general" de la madre.
+  // filter({visible:true}): en web Expo Router deja montadas DETRÁS las pantallas previas del stack
+  // (aria-hidden) → "Destete" aparece en instancias OCULTAS (picker/fichas viejas); anclamos a la VISIBLE.
+  await expect(
+    page.getByText(/Destete/).filter({ visible: true }).first(),
+  ).toBeVisible({ timeout: 20_000 });
 });

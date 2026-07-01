@@ -258,6 +258,37 @@ export async function fetchMother(calfProfileId: string): Promise<ServiceResult<
   };
 }
 
+// ─── Lectura: rodeo + sistema de la madre para el picker de rodeo del parto (spec 02 delta parto-rodeo-caravana) ──
+
+/** Rodeo (id) + su sistema productivo (id) de una madre, resueltos DESDE LOCAL para el picker del parto. */
+export type MotherRodeoContext = { rodeoId: string; systemId: string };
+
+/**
+ * Resuelve el `rodeo_id` de la madre + el `system_id` de ese rodeo, DESDE EL SQLite local (offline-first),
+ * para preseleccionar/filtrar el picker de rodeo del ternero al PARTO (RPRC.1.2/1.6). Reusa
+ * `buildBirthOverlayContextQuery` (el MISMO read que ya usa `registerBirth` para el overlay) → sin query
+ * nueva. Funciona para CUALQUIER caller que tenga el `profileId` de la madre (uniforme + offline), sin
+ * depender de que cada caller pase el rodeo por params (veto del leader). El NOMBRE del rodeo lo resuelve la
+ * UI desde `useRodeo().available` (o el param de la ficha en el fallback cross-field, RPRC.1.8).
+ *
+ * `null` cuando la madre / su rodeo no resuelven localmente (madre de un campo no sincronizado, o rodeo
+ * optimista aún sin bajar) → la UI cae al fallback no-editable (RPRC.1.8) con el nombre del param. NO es un
+ * error de red: `emptyIsSyncing:false` (la ausencia es un resultado tolerable para la UI, no un degrade).
+ */
+export async function fetchMotherRodeoContext(
+  motherProfileId: string,
+): Promise<ServiceResult<MotherRodeoContext | null>> {
+  const r = await runLocalQuerySingle<{
+    establishment_id: string;
+    rodeo_id: string;
+    species_id: string;
+    system_id: string;
+  }>(buildBirthOverlayContextQuery(motherProfileId), { emptyIsSyncing: false });
+  if (!r.ok) return { ok: false, error: { kind: r.error.kind, message: r.error.message } };
+  if (!r.value) return { ok: true, value: null };
+  return { ok: true, value: { rodeoId: r.value.rodeo_id, systemId: r.value.system_id } };
+}
+
 // ─── Escritura: peso (R6.1) ─────────────────────────────────────────────────────────────────
 
 export type AddWeightInput = {
