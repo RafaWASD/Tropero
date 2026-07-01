@@ -30,6 +30,96 @@ export function formatPercentAR(pct: number | null): string {
   return `${s} %`;
 }
 
+// ─── Parición: estado + presentación de la card (delta #8 / RPF.1-4) ────────────────────────────────
+//
+// La RPC `rodeo_calving_kpi` devuelve, además de `calved`/`serviced`/`pregnant`, un `status` que GATEA el
+// DISPLAY de la card (fix del "0 %" engañoso, decisiones D1-D5 del context) y `pending_pregnant` (D4). El
+// conteo (`calved`/`pending_pregnant`) es honesto SIEMPRE; el `status` solo decide qué se MUESTRA:
+//   - ok                 → el % (`calved/serviced`), en/desde los meses de parto de la campaña (D1/D2).
+//   - not_calving_season → todavía no es época de parición (antes de la ventana +9): NO 0% prematuro (D2).
+//   - no_service_months  → el rodeo no tiene meses de servicio configurados: NO 0% engañoso (D3).
+//   - not_applicable_12m → servicio continuo 12 meses: no se reporta parición (D5).
+// La leyenda D4 ("todavía hay vacas que no parieron…") aparece SOLO con status='ok' y pendingPregnant>0.
+//
+// `calvingCardView` es PURO/testeable (node:test) — reusa `safePercent`/`formatPercentAR` (guard de 0).
+
+/** Estado de presentación de la card de Parición (espejo del `status` de la RPC, RPF.6.1). */
+export type CalvingStatus = 'ok' | 'not_calving_season' | 'no_service_months' | 'not_applicable_12m';
+
+/** Los 4 estados válidos, en un array para el normalizador defensivo del mapeo (CD-6). */
+export const CALVING_STATUSES: readonly CalvingStatus[] = [
+  'ok',
+  'not_calving_season',
+  'no_service_months',
+  'not_applicable_12m',
+];
+
+/**
+ * Normaliza el `status` crudo de la RPC a un `CalvingStatus`. Un valor ausente/desconocido → `'ok'` (default
+ * defensivo, CD-6): si el cliente corre contra una DB SIN la migración 0117 (sin la columna `status`), la card
+ * se comporta como antes (muestra el %). No inventa estados que la RPC no mandó.
+ */
+export function asCalvingStatus(raw: unknown): CalvingStatus {
+  return typeof raw === 'string' && (CALVING_STATUSES as readonly string[]).includes(raw)
+    ? (raw as CalvingStatus)
+    : 'ok';
+}
+
+/** Texto FIJO de la leyenda D4 (context §D4; solo se muestra con ok + pendingPregnant>0). */
+export const CALVING_PENDING_LEGEND = 'todavía hay vacas que no parieron, esto puede afectar el dato';
+
+/** Presentación derivada de la card de Parición (RPF.6.2): value/detail/note/legend + muted. */
+export type CalvingCardView = {
+  /** El número grande ya formateado ("84,6 %" | "—"). */
+  value: string;
+  /** El denominador explícito cuando hay % ("38 paridas / 46 servidas"). */
+  detail?: string;
+  /** Mensaje de estado cuando NO hay % (ocupa el slot `detail` de la KpiCard). */
+  note?: string;
+  /** Leyenda D4 (solo status='ok' + pendingPregnant>0). */
+  legend?: string;
+  /** true → el valor es "—" (atenuado): sin % que mostrar. */
+  muted: boolean;
+};
+
+/**
+ * Deriva la presentación de la card de Parición a partir del `status` + conteos (RPF.6.2, tabla design §3.2).
+ * `status='ok'` con servidas>0 → el % + el detalle "N paridas / M servidas" (+ leyenda D4 si quedan preñadas
+ * sin parir). `status='ok'` con servidas=0 → "—" ("sin datos de esta campaña"). Los otros estados → "—" + el
+ * mensaje accionable correspondiente (NO un 0% engañoso, D2/D3/D5). `kpi === null` → "—" ("sin datos").
+ */
+export function calvingCardView(
+  kpi: { status: CalvingStatus; calved: number; serviced: number; pendingPregnant: number } | null,
+): CalvingCardView {
+  if (kpi === null) {
+    return { value: '—', note: 'sin datos', muted: true };
+  }
+  switch (kpi.status) {
+    case 'ok': {
+      const pct = safePercent(kpi.calved, kpi.serviced);
+      if (pct === null) {
+        // serviced=0 → no hay base para el % (la campaña todavía no tiene servidas). No es 0%.
+        return { value: '—', note: 'sin datos de esta campaña', muted: true };
+      }
+      return {
+        value: formatPercentAR(pct),
+        detail: `${kpi.calved} paridas / ${kpi.serviced} servidas`,
+        legend: kpi.pendingPregnant > 0 ? CALVING_PENDING_LEGEND : undefined,
+        muted: false,
+      };
+    }
+    case 'not_calving_season':
+      return { value: '—', note: 'todavía no es época de parición', muted: true };
+    case 'no_service_months':
+      return { value: '—', note: 'sin meses de servicio configurados', muted: true };
+    case 'not_applicable_12m':
+      return { value: '—', note: 'no aplica (servicio todo el año)', muted: true };
+    default:
+      // status desconocido (defensivo; el mapeo ya normaliza a un CalvingStatus válido) → "sin datos".
+      return { value: '—', note: 'sin datos', muted: true };
+  }
+}
+
 // ─── Peso es-AR (R7.9.3: coma decimal, ej. "385,5 kg"; no aplica a formatos de máquina) ─────────────
 
 /**

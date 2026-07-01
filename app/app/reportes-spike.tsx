@@ -22,7 +22,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams } from 'expo-router';
 import { ScrollView, Text, XStack, YStack, getTokenValue } from 'tamagui';
 
-import { Button, Card } from '@/components';
+import { Button, Card, InfoNote } from '@/components';
 import {
   KpiCard,
   KpiRow,
@@ -41,12 +41,27 @@ import {
   formatKgDeltaAR,
   formatCountDelta,
   cclBarsForMonths,
+  calvingCardView,
   eventKindLabel,
   compareSessions,
   compareWeights,
+  type CalvingStatus,
 } from '@/utils/reports-format';
 
-type SpikeVariant = 'kpis' | 'sesion' | 'alertas' | 'vacio' | 'offline' | 'config' | 'comparar';
+type SpikeVariant =
+  | 'kpis'
+  | 'sesion'
+  | 'alertas'
+  | 'vacio'
+  | 'offline'
+  | 'config'
+  | 'comparar'
+  // delta #8/RPF.7 — los 5 estados de la card de Parición (mock, para el capture del Gate 2.5).
+  | 'paricion-ok'
+  | 'paricion-leyenda'
+  | 'paricion-fuera-ventana'
+  | 'paricion-sin-meses'
+  | 'paricion-12m';
 
 export default function ReportesSpikeScreen() {
   const insets = useSafeAreaInsets();
@@ -83,6 +98,21 @@ export default function ReportesSpikeScreen() {
         {variant === 'offline' ? <OfflineVariant /> : null}
         {variant === 'config' ? <ConfigVariant /> : null}
         {variant === 'comparar' ? <CompararVariant /> : null}
+        {variant === 'paricion-ok' ? (
+          <ParicionVariant status="ok" calved={38} serviced={46} pendingPregnant={0} />
+        ) : null}
+        {variant === 'paricion-leyenda' ? (
+          <ParicionVariant status="ok" calved={30} serviced={46} pendingPregnant={8} />
+        ) : null}
+        {variant === 'paricion-fuera-ventana' ? (
+          <ParicionVariant status="not_calving_season" calved={0} serviced={46} pendingPregnant={0} />
+        ) : null}
+        {variant === 'paricion-sin-meses' ? (
+          <ParicionVariant status="no_service_months" calved={0} serviced={0} pendingPregnant={0} />
+        ) : null}
+        {variant === 'paricion-12m' ? (
+          <ParicionVariant status="not_applicable_12m" calved={0} serviced={46} pendingPregnant={0} />
+        ) : null}
       </ScrollView>
     </YStack>
   );
@@ -453,6 +483,42 @@ function CompararVariant() {
           </YStack>
         ))}
       </Card>
+    </>
+  );
+}
+
+// ─── Variantes de PARICIÓN (delta #8/RPF.7) — los 5 estados de la card de Parición ───────────────────
+// MOCK que reusa los MISMOS componentes que producción (calvingCardView + KpiCard + InfoNote) para que el
+// leader vete lo REAL en el Gate 2.5: el % (ok), "todavía no es época de parición" (fuera de ventana, D2),
+// "sin meses de servicio configurados" (D3), "no aplica (servicio todo el año)" (D5), y la leyenda D4.
+// La card va en fila de DOS (Preñez | Parición) como en la tab real → se vetea el layout verdadero.
+
+function ParicionVariant({
+  status,
+  calved,
+  serviced,
+  pendingPregnant,
+}: {
+  status: CalvingStatus;
+  calved: number;
+  serviced: number;
+  pendingPregnant: number;
+}) {
+  const cv = calvingCardView({ status, calved, serviced, pendingPregnant });
+  const pregnant = 41;
+  const pregServiced = 46;
+  return (
+    <>
+      <ReportSectionHeader title="Reproductivo" hint={`Campaña ${new Date().getFullYear()} · base servidas`} />
+      <KpiRow>
+        <KpiCard
+          label="Preñez"
+          value={formatPercentAR(safePercent(pregnant, pregServiced))}
+          detail={`${pregnant} preñadas / ${pregServiced} servidas`}
+        />
+        <KpiCard label="Parición" value={cv.value} detail={cv.detail ?? cv.note} muted={cv.muted} />
+      </KpiRow>
+      {cv.legend ? <InfoNote>{cv.legend}</InfoNote> : null}
     </>
   );
 }

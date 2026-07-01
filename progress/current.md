@@ -5,6 +5,12 @@
 
 **SESIÓN 2026-06-29/30 — CORRECCIONES DEL TESTEO EN VIVO CON FACUNDO (16) + CONVENCIÓN SDD PARA FIXES (ADR-028).**
 
+## 🆕 2026-07-01 — DELTA %PARICIÓN-FIX (#8) — GATEADO + DEPLOYED, ⏸ Puerta 2
+El KPI `rodeo_calving_kpi` daba **0% con `service_months` vacío** (rompía la confianza). Fix + lógica ya decidida por Raf: **migración `0117`** (DROP+CREATE, agrega `status` [`no_service_months`/`not_calving_season`/`not_applicable_12m`/`ok`] + `pending_pregnant`; el conteo `calved` NO cambia). **APLICADA al remoto por el leader por MCP** (deploy autorizado por Raf) — reports suite **15/15** (TR.4b nuevo + TR.4 sin regresión + grants + IDOR). Frontend: `calvingCardView` puro (la card muestra "—" + mensaje accionable en vez del 0%, % real en ok, leyenda D4 si quedan preñadas sin parir).
+- **Recuperación**: el 1er implementer lo frenó Raf sin querer → el 2º cazó que `reports-format.test.ts` importaba `calvingCardView` SIN testearlo (imports muertos, "34/34" falso) → agregó 8 tests reales (42/42). Lección `reference_crashed_agent_recovery` en vivo otra vez.
+- **GATES**: veto SQL leader (moldeado sobre el remoto, sin drift) + migración aplicada + Gate 1 PASS + Puerta 1 + reviewer APPROVED + Gate 2 PASS 0 HIGH + **Gate 2.5** (5 capturas, veto visual PASS).
+- **⏸ Puerta 2 de Raf** (con las 5 capturas): confirmar los estados de la card. Se folda al baseline (R7.6) al aprobar; feature 07 vuelve a `done`.
+
 ## 🆕 2026-06-30 — DELTA PARTO-RODEO-CARAVANA (#4/#1a) — GATEADO, ⏸ Puerta 2
 Al registrar un **parto** (`agregar-evento.tsx`) ahora se elige el **rodeo del ternero** (picker preseleccionado al de la madre + leyenda "(Mismo rodeo que la madre)", editable al mismo sistema, aplica a toda la camada → `calfRodeoId`) y la **caravana visual (idv)** del ternero **solo cuando hay 1 ternero** (con mellizos: oculto + nota a la ficha — consecuencia de `p_calf_idv` escalar). **Frontend-only** (`register_birth` 6-arg de #15 ya deployado; `git diff supabase/` vacío → **Gate 1 N/A**).
 - **Read local del rodeo de la madre** (`fetchMotherRodeoContext`, cubre todo caller offline). Descubrimiento del implementer: el **único caller de parto es la ficha** (la maniobra NO rutea a parto) → el punto de vet "ambos entry points" quedó moot. Matiz cazado: `system_id` es catálogo **global** → filtro por sistema solo no alcanza; guard `canEditCalfRodeo` + scope por campo activo (`useRodeo().available`) cierran el tenant-scoping.

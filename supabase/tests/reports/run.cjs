@@ -11,6 +11,9 @@
 //            is_configured=false sin service_months (R7.5.6); cota p_year.
 //   - TR.4  rodeo_calving_kpi: calved por mes de concepción ∈ service_months (R7.6.2) incl. WRAP (R7.5.8);
 //            pregnant ≥ calved (pérdida, base única servidas R7.6.4); serviced=0 sin NaN (R7.6.3).
+//   - TR.4b rodeo_calving_kpi delta #8 (RPF.1-4/8): status no_service_months (D3) / not_calving_season (D2) /
+//            ok (D1/D2) / not_applicable_12m (D5, precede a la ventana) + pending_pregnant (D4). calved/
+//            pregnant/pending_pregnant se computan SIEMPRE; status gatea solo el display.
 //   - TR.5  rodeo_ccl_distribution: head/body/tail del último tacto+ vigente; total; empty total=0 (R7.7.4).
 //   - TR.6  rodeo_calving_by_stage: nacimientos por tercio; total_born=0 degrada (R7.8.3); 1/12 → todo 0.
 //   - TR.7  rodeo_weight_by_category: AVG último peso por categoría, excluye borrados (R7.9.3), categoría sin
@@ -470,6 +473,87 @@ test('reports suite — spec 07 Stream C (RPC de reportes)', async (t) => {
     // IDOR.
     const idor = await clientB.rpc('rodeo_calving_kpi', { p_rodeo_id: r.id, p_year: year });
     assert.match(pgcode(idor.error), /42501|not authorized/i, 'owner B no lee calving_kpi de A');
+  });
+
+  // =====================================================================
+  // TR.4b — rodeo_calving_kpi: status (D1/D2/D3/D5) + pending_pregnant (D4) — delta #8 (RPF.1-4/8)
+  // =====================================================================
+  // Fechas RELATIVAS a new Date() (determinismo del CI, design §5): la ventana de parto = min(mes servicio +
+  // 9 meses). Para forzar 'ok' (ventana ya pasada) uso p_year=lastYear con service_months=[1] → ventana =
+  // Ene(lastYear)+9mo = Oct(lastYear), SIEMPRE en el pasado. Para 'not_calving_season' uso [mesActual] con
+  // p_year=thisYear → ventana = mesActual+9, SIEMPRE futura. status gatea SOLO el display: calved/pregnant/
+  // pending_pregnant se computan igual (asserts de conteo válidos sin importar la fecha del CI).
+  await t.test('TR.4b calving_kpi status: no_service_months / not_calving_season / ok / not_applicable_12m + pending_pregnant', async () => {
+    const year = thisYear();
+    const lastYear = year - 1;
+    const thisMonth = new Date().getMonth() + 1; // 1..12
+
+    // ── RPF.8.1 — service_months NULL o {} → status='no_service_months' (D3), NO un %/0% engañoso. ──
+    const rNull = await createRodeo(clientA, { establishmentId: estA, name: 'R st-null' });
+    // (sin setServiceMonths → service_months NULL = "sin configurar")
+    const { data: dNull, error: eNull } = await clientA.rpc('rodeo_calving_kpi', { p_rodeo_id: rNull.id, p_year: year });
+    assert.equal(eNull, null, eNull ? `st-null: ${eNull.message}` : 'ejecutó');
+    assert.equal(row1(dNull).status, 'no_service_months', 'service_months NULL → no_service_months (RPF.1.1)');
+
+    const rEmptyM = await createRodeo(clientA, { establishmentId: estA, name: 'R st-empty' });
+    await setServiceMonths(rEmptyM.id, []); // {} = "no hace servicio" (pasa el CHECK 0102: cardinality 0)
+    const { data: dEmpty } = await clientA.rpc('rodeo_calving_kpi', { p_rodeo_id: rEmptyM.id, p_year: year });
+    assert.equal(row1(dEmpty).is_configured, true, 'service_months {} → is_configured=true (distinto de NULL, RPF.1 nota)');
+    assert.equal(row1(dEmpty).status, 'no_service_months', 'service_months {} → no_service_months (RPF.1.1)');
+
+    // ── RPF.8.2 — service_months=[mesActual], p_year=thisYear → ventana +9 futura → not_calving_season (D2). ──
+    const rFut = await createRodeo(clientA, { establishmentId: estA, name: 'R st-future' });
+    await setServiceMonths(rFut.id, [thisMonth]);
+    const { data: dFut } = await clientA.rpc('rodeo_calving_kpi', { p_rodeo_id: rFut.id, p_year: year });
+    assert.equal(row1(dFut).status, 'not_calving_season', 'ventana de parto futura → not_calving_season (RPF.2.2)');
+
+    // ── RPF.8.4 — los 12 meses → not_applicable_12m (D5); PRECEDE a la ventana (RPF.3.2). ──
+    const r12 = await createRodeo(clientA, { establishmentId: estA, name: 'R st-12m' });
+    await setServiceMonths(r12.id, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+    const { data: d12 } = await clientA.rpc('rodeo_calving_kpi', { p_rodeo_id: r12.id, p_year: year });
+    assert.equal(row1(d12).status, 'not_applicable_12m', '12 meses → not_applicable_12m (RPF.3.1)');
+
+    // ── RPF.8.3 — ventana +9 YA pasada + parto ∈ ventana → status='ok' + calved correcto (D1/D2). ──
+    // service_months=[1] (Enero), p_year=lastYear → ventana = Ene(lastYear)+9mo = Oct(lastYear), en el PASADO.
+    const rOk = await createRodeo(clientA, { establishmentId: estA, name: 'R st-ok' });
+    await setServiceMonths(rOk.id, [1]);
+    const ok1 = await createAnimal(clientA, { idv: `${RUN_TAG}_ok1`, sex: 'female', birthDate: daysAgo(1500), rodeoId: rOk.id, establishmentId: estA, systemId: rOk.systemId, categoryCode: 'multipara' });
+    // parto Oct(lastYear) → concepción Ene(lastYear) (∈ {1}, año lastYear) → CUENTA.
+    await clientA.from('reproductive_events').insert({ animal_profile_id: ok1.profile.id, event_type: 'birth', event_date: dateOn(lastYear, 10, 15) });
+    const { data: dOk } = await eventually(
+      async () => await clientA.rpc('rodeo_calving_kpi', { p_rodeo_id: rOk.id, p_year: lastYear }),
+      (res) => res && res.data && row1(res.data) && row1(res.data).calved >= 1,
+    );
+    assert.equal(row1(dOk).status, 'ok', 'ventana de parto ya pasada → status=ok (RPF.2.3)');
+    assert.equal(row1(dOk).serviced, 1, 'serviced=1 (la multipara)');
+    assert.equal(row1(dOk).calved, 1, 'calved=1 (parto Oct → concepción Ene ∈ {1} lastYear, RPF.5.2)');
+
+    // ── RPF.8.5 — pending_pregnant: 2 preñadas vigentes, 1 con parto contado → pending=1; agregar el 2º → 0. ──
+    const rPp = await createRodeo(clientA, { establishmentId: estA, name: 'R st-pp' });
+    await setServiceMonths(rPp.id, [1]); // Enero → misma ventana ya pasada con lastYear (status ok)
+    const pp1 = await createAnimal(clientA, { idv: `${RUN_TAG}_pp1`, sex: 'female', birthDate: daysAgo(1500), rodeoId: rPp.id, establishmentId: estA, systemId: rPp.systemId, categoryCode: 'multipara' });
+    const pp2 = await createAnimal(clientA, { idv: `${RUN_TAG}_pp2`, sex: 'female', birthDate: daysAgo(1500), rodeoId: rPp.id, establishmentId: estA, systemId: rPp.systemId, categoryCode: 'multipara' });
+    // ambas preñadas VIGENTES (último tacto+ <> empty, sin aborto posterior).
+    await clientA.from('reproductive_events').insert({ animal_profile_id: pp1.profile.id, event_type: 'tacto', event_date: dateOn(lastYear, 2, 10), pregnancy_status: 'large' });
+    await clientA.from('reproductive_events').insert({ animal_profile_id: pp2.profile.id, event_type: 'tacto', event_date: dateOn(lastYear, 2, 10), pregnancy_status: 'medium' });
+    // pp1 con parto CONTADO (concepción Ene(lastYear) ∈ {1}); pp2 sin parto todavía.
+    await clientA.from('reproductive_events').insert({ animal_profile_id: pp1.profile.id, event_type: 'birth', event_date: dateOn(lastYear, 10, 15) });
+    const { data: dPp } = await eventually(
+      async () => await clientA.rpc('rodeo_calving_kpi', { p_rodeo_id: rPp.id, p_year: lastYear }),
+      (res) => res && res.data && row1(res.data) && row1(res.data).pregnant >= 2 && row1(res.data).calved >= 1,
+    );
+    assert.equal(row1(dPp).pregnant, 2, 'pregnant=2 (ambas tacto+ vigente)');
+    assert.equal(row1(dPp).calved, 1, 'calved=1 (solo pp1 con parto contado)');
+    assert.equal(row1(dPp).pending_pregnant, 1, 'pending_pregnant=1 (pp2 preñada SIN parto contado, RPF.4.1)');
+
+    // agregar el parto de pp2 (concepción Ene ∈ {1}) → todas las preñadas parieron → pending_pregnant=0.
+    await clientA.from('reproductive_events').insert({ animal_profile_id: pp2.profile.id, event_type: 'birth', event_date: dateOn(lastYear, 10, 20) });
+    const { data: dPp0 } = await eventually(
+      async () => await clientA.rpc('rodeo_calving_kpi', { p_rodeo_id: rPp.id, p_year: lastYear }),
+      (res) => res && res.data && row1(res.data) && row1(res.data).calved >= 2,
+    );
+    assert.equal(row1(dPp0).calved, 2, 'calved=2 (ambas parieron)');
+    assert.equal(row1(dPp0).pending_pregnant, 0, 'pending_pregnant=0 (ninguna preñada sin parir, RPF.4.3)');
   });
 
   // =====================================================================

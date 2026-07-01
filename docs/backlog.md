@@ -611,3 +611,7 @@ arreglada.
 **Relacionado**: misma clase que la nota del implementer sobre el cleanup sin paginar de las suites hermanas (animal/maneuvers/operaciones_rodeo). El leak grande (import, 4006/run) ya se arregló con keyset pagination.
 **Por qué importa**: ~33/run reacumula bloat lento en `animals` (acabamos de purgar 829K). No urgente, pero conviene un pase de higiene de los cleanups de test.
 **Próximo paso sugerido**: en el cleanup del animal suite, además de los `animal_id` de perfiles en test-ests, capturar los `animals` creados por los helpers de los tests de transferencia (trackear ids creados, o borrar por anti-join `animals` sin perfil cuyo `created_at` cae en la ventana del RUN_TAG). Considerar un helper compartido `selectAllPaged` + tracking explícito de animal_ids creados. Mientras tanto, purga manual ocasional: `DELETE FROM animals a WHERE NOT EXISTS (SELECT 1 FROM animal_profiles p WHERE p.animal_id = a.id);`.
+
+## KpiCard label sin lineHeight explícito (endurecimiento baseline)
+- **Origen**: reviewer del delta #8 (%parición-fix), 2026-07-01.
+- `app/src/components/reports/KpiCard.tsx:49` — el label (p.ej. "Parición") usa `numberOfLines={1}` sin `lineHeight` explícito matcheado al `fontSize` (patrón que `feedback_descender_clipping` marca como riesgo de recorte de descendentes). Es código **baseline** (no tocado por el delta #8; el capture de #8 confirma empíricamente que hoy NO recorta "Parición"). No es regresión. Endurecerlo (agregar `lineHeight` matcheado) al pasar por reportes de nuevo.

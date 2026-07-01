@@ -51,6 +51,7 @@ import {
   formatPercentAR,
   formatKgAR,
   cclBarsForMonths,
+  calvingCardView,
   defaultCampaignYear,
   animalLabel,
   daysSinceLabel,
@@ -362,7 +363,9 @@ function ReproSection({
   }
 
   const pregPct = preg ? safePercent(preg.pregnant, preg.serviced) : null;
-  const calvPct = calv ? safePercent(calv.calved, calv.serviced) : null;
+  // La card de Parición NO arma el % a mano: deriva su presentación del `status` de la RPC (delta #8/RPF.6.2)
+  // — fix del "0 %" engañoso (D2/D3/D5) + leyenda D4. `calv` es CalvingKpi | null.
+  const cv = calvingCardView(calv);
   const noData = (preg?.serviced ?? 0) === 0;
 
   return (
@@ -379,11 +382,14 @@ function ReproSection({
         />
         <KpiCard
           label="Parición"
-          value={formatPercentAR(calvPct)}
-          detail={calv ? `${calv.calved} paridas / ${calv.serviced} servidas` : undefined}
-          muted={calvPct === null}
+          value={cv.value}
+          detail={cv.detail ?? cv.note}
+          muted={cv.muted}
         />
       </KpiRow>
+
+      {/* Leyenda D4 (RPF.4.2): solo con status='ok' + preñadas sin parir → cartel de aviso informativo. */}
+      {cv.legend ? <InfoNote>{cv.legend}</InfoNote> : null}
 
       {noData ? (
         <ReportEmpty

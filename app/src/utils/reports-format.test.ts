@@ -22,6 +22,9 @@ import {
   defaultCampaignYear,
   compareSessions,
   compareWeights,
+  calvingCardView,
+  asCalvingStatus,
+  CALVING_PENDING_LEGEND,
   SESSION_EVENT_KINDS,
 } from './reports-format';
 
@@ -102,6 +105,77 @@ test('formatCountDelta: entero con signo, 0 sin signo', () => {
   assert.equal(formatCountDelta(3), '+3');
   assert.equal(formatCountDelta(-1), '−1'); // U+2212
   assert.equal(formatCountDelta(0), '0');
+});
+
+// ─── calvingCardView + asCalvingStatus: presentación de la card de Parición (delta #8, RPF.6.2) ──────
+// Verifica la traducción status → presentación (tabla design §3.2): el % SOLO en 'ok' con servidas>0, los
+// mensajes accionables (NO un 0% engañoso) en los otros estados, la leyenda D4 SOLO con ok + pending>0, y el
+// normalizador defensivo de status (CD-6). Es la cobertura frontend de RPF.1.3/2.4/2.5/3.3/4.2/4.3.
+
+test('calvingCardView: ok con servidas>0 → % es-AR + detalle "N paridas / M servidas", sin leyenda (RPF.2.5)', () => {
+  const cv = calvingCardView({ status: 'ok', calved: 38, serviced: 46, pendingPregnant: 0 });
+  assert.equal(cv.value, '82,6 %'); // safePercent(38,46)=82.6086…, coma decimal es-AR
+  assert.equal(cv.detail, '38 paridas / 46 servidas');
+  assert.equal(cv.legend, undefined); // pending=0 → sin leyenda (RPF.4.3)
+  assert.equal(cv.muted, false);
+  assert.equal(cv.note, undefined);
+});
+
+test('calvingCardView: ok con pendingPregnant>0 → leyenda D4 (RPF.4.2)', () => {
+  const cv = calvingCardView({ status: 'ok', calved: 30, serviced: 46, pendingPregnant: 8 });
+  assert.equal(cv.value, '65,2 %');
+  assert.equal(cv.detail, '30 paridas / 46 servidas');
+  assert.equal(cv.legend, CALVING_PENDING_LEGEND); // "todavía hay vacas que no parieron, esto puede afectar el dato"
+  assert.equal(cv.muted, false);
+});
+
+test('calvingCardView: ok con serviced=0 → "—" ("sin datos de esta campaña"), NO 0% (RPF.2.5 guard)', () => {
+  const cv = calvingCardView({ status: 'ok', calved: 0, serviced: 0, pendingPregnant: 0 });
+  assert.equal(cv.value, '—');
+  assert.equal(cv.note, 'sin datos de esta campaña');
+  assert.equal(cv.muted, true);
+  assert.equal(cv.detail, undefined);
+  assert.equal(cv.legend, undefined);
+});
+
+test('calvingCardView: not_calving_season → "—" + "todavía no es época de parición", NO 0% prematuro (RPF.2.4)', () => {
+  const cv = calvingCardView({ status: 'not_calving_season', calved: 0, serviced: 46, pendingPregnant: 0 });
+  assert.equal(cv.value, '—');
+  assert.equal(cv.note, 'todavía no es época de parición');
+  assert.equal(cv.muted, true);
+  assert.equal(cv.legend, undefined); // leyenda D4 SOLO en 'ok' (RPF.4.3)
+});
+
+test('calvingCardView: no_service_months → "—" + "sin meses de servicio configurados" (RPF.1.3)', () => {
+  const cv = calvingCardView({ status: 'no_service_months', calved: 0, serviced: 0, pendingPregnant: 0 });
+  assert.equal(cv.value, '—');
+  assert.equal(cv.note, 'sin meses de servicio configurados');
+  assert.equal(cv.muted, true);
+});
+
+test('calvingCardView: not_applicable_12m → "—" + "no aplica (servicio todo el año)" (RPF.3.3)', () => {
+  const cv = calvingCardView({ status: 'not_applicable_12m', calved: 0, serviced: 46, pendingPregnant: 0 });
+  assert.equal(cv.value, '—');
+  assert.equal(cv.note, 'no aplica (servicio todo el año)');
+  assert.equal(cv.muted, true);
+});
+
+test('calvingCardView: kpi=null → "—" ("sin datos"), sin crash (defensivo)', () => {
+  const cv = calvingCardView(null);
+  assert.equal(cv.value, '—');
+  assert.equal(cv.note, 'sin datos');
+  assert.equal(cv.muted, true);
+});
+
+test('asCalvingStatus: pasa los 4 estados válidos; ausente/desconocido → "ok" (CD-6 default defensivo)', () => {
+  assert.equal(asCalvingStatus('ok'), 'ok');
+  assert.equal(asCalvingStatus('not_calving_season'), 'not_calving_season');
+  assert.equal(asCalvingStatus('no_service_months'), 'no_service_months');
+  assert.equal(asCalvingStatus('not_applicable_12m'), 'not_applicable_12m');
+  assert.equal(asCalvingStatus(undefined), 'ok'); // DB sin la migración 0117 → compat, muestra el %
+  assert.equal(asCalvingStatus(null), 'ok');
+  assert.equal(asCalvingStatus('garbage'), 'ok');
+  assert.equal(asCalvingStatus(42), 'ok');
 });
 
 // ─── eventKindLabel (R7.3.1) ─────────────────────────────────────────────────────────────────────────
