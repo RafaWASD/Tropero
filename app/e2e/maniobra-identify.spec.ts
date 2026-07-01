@@ -137,7 +137,7 @@ async function manualSearch(page: Page, query: string): Promise<void> {
  */
 async function walkCrearAnimalWizard(
   page: Page,
-  opts: { sex: 'Macho' | 'Hembra'; categoryName: string; visual?: string },
+  opts: { sex: 'Macho' | 'Hembra'; categoryName: string; idv?: string },
 ): Promise<void> {
   await expect(page.getByText('¿Es macho o hembra?', { exact: true })).toBeVisible({ timeout: 20_000 });
   await page.getByRole('button', { name: `Sexo ${opts.sex}`, exact: true }).click();
@@ -148,8 +148,11 @@ async function walkCrearAnimalWizard(
   await page.getByRole('button', { name: 'Continuar', exact: true }).click();
 
   await expect(page.getByText('Datos del animal', { exact: true })).toBeVisible({ timeout: 20_000 });
-  if (opts.visual) {
-    await page.getByLabel('Nombre / seña (opcional)', { exact: true }).fill(opts.visual);
+  // El built-in editable "Nombre / seña" fue removido del alta (delta #2 NOMBRE/APODO, RNA.2.1): el
+  // identificador libre del paso 4 es la caravana visual (idv). Solo se rellena si el llamador lo pide
+  // (el camino con idv PRECARGADO read-only ya trae su identificador y no necesita rellenar nada).
+  if (opts.idv) {
+    await page.getByLabel('Caravana visual (recomendado)', { exact: true }).fill(opts.idv);
   }
   await page.getByRole('button', { name: 'Crear animal', exact: true }).click();
 }
@@ -668,10 +671,9 @@ test('(n) alta desde la manga → continúa la carga de la maniobra del animal n
   await page.getByRole('button', { name: 'Dar de alta', exact: true }).click();
   await expect(page.getByText(`Creando: ${idv}`, { exact: true })).toBeVisible({ timeout: 20_000 });
 
-  // Completamos el wizard de alta (1 rodeo → auto-avanza a sexo) → "Crear animal". Visual CORTO (el RUN_TAG
-  // ya es largo; el header de la carga trunca con numberOfLines → un visual largo no se matchearía exact).
-  const visual = `${RUN_TAG}-N`;
-  await walkCrearAnimalWizard(page, { sex: 'Hembra', categoryName: 'Vaquillona', visual });
+  // Completamos el wizard de alta (1 rodeo → auto-avanza a sexo) → "Crear animal". El idv 8090 ya viene
+  // PRECARGADO read-only (find-or-create por el buscador de la manga) → es el identificador; no rellenamos nada.
+  await walkCrearAnimalWizard(page, { sex: 'Hembra', categoryName: 'Vaquillona' });
 
   // CLAVE (M2.2): NO aterriza en la ficha del animal → CONTINÚA en la carga de la maniobra del nuevo animal
   // (/maniobra/carga: la única maniobra es Pesaje → su display + contador "· 1 de 1" + el keypad lo
@@ -724,8 +726,9 @@ test('(o) regresión: alta sin sessionId (desde la lista) → ficha del animal (
 
   // Alta NORMAL: empty-state de la lista → "Dar de alta tu primer animal" → wizard SIN sessionId.
   await page.getByRole('button', { name: 'Dar de alta tu primer animal' }).click();
-  const visual = `${RUN_TAG}-N`;
-  await walkCrearAnimalWizard(page, { sex: 'Hembra', categoryName: 'Vaquillona', visual });
+  // Identificador = caravana visual numérica (el built-in "Nombre / seña" fue removido, delta #2 RNA.2.1).
+  const idv = `6192${Date.now().toString().slice(-6)}`;
+  await walkCrearAnimalWizard(page, { sex: 'Hembra', categoryName: 'Vaquillona', idv });
 
   // Sin sessionId → aterriza en la FICHA del recién creado (marcadores EXCLUSIVOS de /animal/[id]:
   // Identificación / Historial / Dar de baja), NO en la carga de maniobra. El alta normal NO cambió.
@@ -737,5 +740,5 @@ test('(o) regresión: alta sin sessionId (desde la lista) → ficha del animal (
   await expect(page.getByText('· 1 de 1', { exact: true })).toHaveCount(0);
 
   // Oráculo server-side: el alta llegó de verdad a animal_profiles (el drenado online de la outbox corre).
-  await waitForServerAnimalProfile(establishmentId, { visualAlt: visual });
+  await waitForServerAnimalProfile(establishmentId, { idv });
 });

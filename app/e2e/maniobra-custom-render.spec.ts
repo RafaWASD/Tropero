@@ -25,6 +25,7 @@ import {
   seedCustomField,
   setUserPhone,
   cleanupAll,
+  waitForServerAnimalProfile,
   waitForServerCustomMeasurement,
   waitForServerCustomAttribute,
 } from './helpers/admin';
@@ -224,10 +225,10 @@ test('propiedad custom: aparece en el alta (paso 4) → custom_attributes; visib
   await page.getByRole('button', { name: 'Continuar', exact: true }).click();
   await expect(page.getByText('Datos del animal', { exact: true })).toBeVisible({ timeout: 20_000 });
 
-  // Visual CORTO (≤VISUAL_MAX_LENGTH=30) + único por campo (el establishment está aislado por usuario) → el
-  // oráculo lo resuelve exacto. Un RUN_TAG completo excedería el cap y se truncaría (no matchearía la query).
-  const visual = '0931';
-  await page.getByLabel('Nombre / seña (opcional)', { exact: true }).fill(visual);
+  // Identificador = caravana visual numérica (el built-in "Nombre / seña" fue removido, delta #2 RNA.2.1). El
+  // establishment está aislado por usuario → el idv resuelve el perfil exacto en el oráculo server.
+  const idv = `6194${Date.now().toString().slice(-6)}`;
+  await page.getByLabel('Caravana visual (recomendado)', { exact: true }).fill(idv);
 
   // La SECCIÓN "Datos personalizados" del alta muestra la propiedad custom (text).
   await expect(page.getByText('Datos personalizados', { exact: true })).toBeVisible({ timeout: 15_000 });
@@ -242,8 +243,8 @@ test('propiedad custom: aparece en el alta (paso 4) → custom_attributes; visib
   await expect(page.getByText('Identificación', { exact: true }).first()).toBeVisible({ timeout: 20_000 });
 
   // Oráculo SERVER: el apodo aterrizó en custom_attributes (value="Pinto" jsonb string).
-  // El profileId lo descubrimos por el visual del animal recién creado.
-  const profileId = await resolveProfileIdByVisual(establishmentId, visual);
+  // El profileId lo descubrimos por el idv del animal recién creado.
+  const { id: profileId } = await waitForServerAnimalProfile(establishmentId, { idv });
   await waitForServerCustomAttribute(profileId, fieldId, 'Pinto');
 
   // ── La FICHA muestra "Datos personalizados" con el current-value + permite editar ──
@@ -262,10 +263,3 @@ test('propiedad custom: aparece en el alta (paso 4) → custom_attributes; visib
   await expect(page.getByText('Manchado', { exact: true }).first()).toBeVisible({ timeout: 15_000 });
   await waitForServerCustomAttribute(profileId, fieldId, 'Manchado');
 });
-
-/** Resuelve el animal_profile_id de un animal recién creado por su visual_id_alt, vía service_role. */
-async function resolveProfileIdByVisual(establishmentId: string, visual: string): Promise<string> {
-  // Import perezoso del admin para no exponer el cliente fuera de los helpers; reusamos el patrón de polling.
-  const { adminQueryProfileByVisual } = await import('./helpers/admin');
-  return adminQueryProfileByVisual(establishmentId, visual);
-}

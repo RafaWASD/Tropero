@@ -58,11 +58,9 @@ import { parseWeight, hasAtLeastOneIdentifier } from '@/utils/animal-form';
 import {
   sanitizeTagInput,
   sanitizeIdvInput,
-  sanitizeVisualInput,
   sanitizeWeightInput,
   isValidTagElectronic,
   TAG_ELECTRONIC_LENGTH,
-  VISUAL_MAX_LENGTH,
 } from '@/utils/animal-input';
 import { categoryOverrideFor, type AnimalSex } from '@/utils/animal-category';
 import { categoriesForSex } from '@/utils/animal-category-picker';
@@ -153,7 +151,11 @@ export default function CrearAnimalScreen() {
   // vacío y editable (idv/visual son el precargado). El find-or-create no cambia.
   const [tag, setTag] = useState(prefillKind === 'tag' ? prefilledTag : '');
   const [idv, setIdv] = useState(prefillKind === 'idv' ? prefilledIdv : '');
-  const [visual, setVisual] = useState(prefillKind === 'visual' ? prefilledVisual : '');
+  // "Nombre / seña" (visual_id_alt) dejó de ser un campo EDITABLE del alta (delta #2 NOMBRE/APODO, RNA.2.1):
+  // el apodo ahora es un dato custom opt-in por rodeo (CustomPropertiesForm). `visual` queda como valor
+  // READ-ONLY: solo lo puebla el camino find-or-create-por-texto (prefillKind === 'visual', spec 09 R1.4),
+  // donde el operario ya comprometió ese identificador en el buscador (RNA.2.3). Nunca se muta desde el alta.
+  const visual = prefillKind === 'visual' ? prefilledVisual : '';
 
   // ── Paso actual del wizard. ──
   const [step, setStep] = useState<WizardStep>(1);
@@ -536,7 +538,7 @@ export default function CrearAnimalScreen() {
     // formError (cross-campo: "al menos uno de tres", no atado a un solo input) sobre el CTA, zona pulgar.
     const hasIdentifier = hasAtLeastOneIdentifier(tag, idv, visual);
     if (!hasIdentifier) {
-      setFormError('Cargá al menos un identificador: caravana electrónica, caravana visual o nombre/seña.');
+      setFormError('Cargá al menos un identificador: caravana electrónica o caravana visual.');
     }
     if (!dateV.ok || weightBad || !tagOk || !hasIdentifier) {
       // Scroll-al-campo (RAF2.4.4): al primer campo con error en orden del form (fecha arriba, luego peso).
@@ -774,7 +776,6 @@ export default function CrearAnimalScreen() {
             tag={tag}
             tagError={tagError}
             onIdv={(t) => setIdv(sanitizeIdvInput(t))}
-            onVisual={(t) => setVisual(sanitizeVisualInput(t))}
             onTag={(t) => {
               setTag(sanitizeTagInput(t));
               if (tagError) setTagError(null);
@@ -1131,7 +1132,6 @@ function Step4Data({
   tag,
   tagError,
   onIdv,
-  onVisual,
   onTag,
   birthYear,
   birthYearError,
@@ -1180,7 +1180,6 @@ function Step4Data({
   tag: string;
   tagError: string | null;
   onIdv: (t: string) => void;
-  onVisual: (t: string) => void;
   onTag: (t: string) => void;
   birthYear: string;
   birthYearError: string | null;
@@ -1273,8 +1272,11 @@ function Step4Data({
           />
         ) : null}
 
-        {/* Corrección #2 (testeo en vivo): se leían 3 "caravanas". Ahora el idv es "Caravana visual"
-            (2da caravana real) y visual_id_alt es "Nombre / seña" (texto libre, no caravana). */}
+        {/* Delta #2 NOMBRE/APODO (RNA.2.1): el "Nombre / seña" (visual_id_alt) DEJÓ de ser un campo editable
+            del alta — el apodo ahora es un dato custom opt-in por rodeo (sección "Datos personalizados" abajo,
+            CustomPropertiesForm). Los identificadores editables del alta son SOLO caravana visual (idv) +
+            caravana electrónica (tag). El display read-only de "Nombre / seña" se conserva arriba únicamente
+            para el camino find-or-create-por-texto (prefillKind === 'visual', RNA.2.3). */}
         {prefillKind !== 'idv' ? (
           <FormField
             label="Caravana visual (recomendado)"
@@ -1282,16 +1284,6 @@ function Step4Data({
             onChangeText={onIdv}
             keyboardType="number-pad"
             placeholder="Número de caravana oficial"
-          />
-        ) : null}
-        {prefillKind !== 'visual' ? (
-          <FormField
-            label="Nombre / seña (opcional)"
-            value={visual}
-            onChangeText={onVisual}
-            autoCapitalize="sentences"
-            maxLength={VISUAL_MAX_LENGTH}
-            placeholder="Ej. 112 o una seña"
           />
         ) : null}
         {/* TAG editable SOLO en la puerta manual (sin TAG precargado). Por la rama BLE el TAG ya se mostró

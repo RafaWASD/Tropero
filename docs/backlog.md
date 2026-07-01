@@ -17,6 +17,14 @@ No es un sustituto de `feature_list.json` ni de los ADRs — es la antesala dond
 
 ## Ítems pendientes
 
+## 2026-07-01 — Auto-seed SEGURO del dato "apodo" para establecimientos FUTUROS (DP2 diferida del delta nombre-apodo)
+
+**Origen**: delta NOMBRE/APODO de spec 02 (`specs/active/02-modelo-animal/{context,requirements,design,tasks}-nombre-apodo.md`, DP2). El delta seedea el `field_definition` "apodo" (per-est, `data_type='propiedad'`, `ui_component='text'`, deshabilitado) **solo para los establecimientos EXISTENTES** (backfill de `0119`). Un establecimiento creado DESPUÉS de la migración NO queda auto-seedeado → su owner crea el "apodo" on-demand con el `+` de `editar-plantilla` (poca fricción; MVP tiene 1 est beta).
+**Qué**: auto-seedear el "apodo" per-est al crear un establecimiento nuevo, de forma **segura**. Se evaluó y **descartó** un trigger separado `AFTER INSERT ON establishments`: el INSERT a `field_definitions` dispara el guard `tg_field_definitions_custom_guard` (0093, before insert), que con `auth.uid()` no-null (onboarding autenticado) exige `is_owner_of(new.id)`; ese rol lo crea el otro trigger `on_establishment_created` (0011), y Postgres dispara los AFTER ROW triggers en **orden alfabético de nombre** → el trigger del apodo dependería de sortear después de `on_establishment_created`. Un mis-ordering **rompe el alta de establecimientos** (spec 01). Riesgo inmediato de onboarding por valor diferido (2º+ est) → no va.
+**Forma segura sugerida**: **foldear el seed dentro de `handle_new_establishment` (0011)** vía `CREATE OR REPLACE`, insertando el fd "apodo" **después** del `INSERT` del rol owner en la MISMA función (secuencia explícita intra-función: el 2º statement ve el 1º → `is_owner_of` true, sin depender del orden de nombres de triggers). Idempotente (`on conflict ... do nothing` sobre el índice parcial `field_definitions_data_key_per_est` de 0093).
+**Por qué importa**: bajo hoy (1 est beta, y el on-demand cubre el caso), medio cuando haya multi-est real — sin esto, la feature "apodo" queda silenciosamente sin pre-seedear para cada campo nuevo. Cero riesgo de la forma foldeada; el diferido es por prioridad + para no cruzar el baseline de spec 01 desde este delta.
+**Próximo paso sugerido**: migración que hace `CREATE OR REPLACE handle_new_establishment` (0011) agregando el INSERT del "apodo" tras el rol owner. Toca DB → **Gate 1 puntual** + test backend (crear un est por el path autenticado → apodo fd per-est + creación exitosa + rol owner). Foldear cuando se priorice multi-est o al tocar `handle_new_establishment` por otra razón.
+
 ## 2026-06-29 — Higiene de test: la suite E2E re-renderiza design/**/*.png (byte diffs espurios)
 
 **Origen**: correr `pnpm -C app e2e` (full) o `e2e:build` re-genera 40+ screenshots de `design/maniobra-*/`, `design/veto-sigsa-*/`, etc. con diffs de bytes no-deterministas (anti-aliasing/timing) → se cuelan en `git add -A`. Pasó 2× en la sesión 2026-06-29.

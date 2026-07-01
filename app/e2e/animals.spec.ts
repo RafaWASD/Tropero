@@ -20,10 +20,12 @@ import {
   seedEstablishmentWithRodeo,
   seedRodeo,
   seedAnimal,
+  seedCustomField,
   addMember,
   setUserPhone,
   waitForServerAnimalProfile,
   waitForServerBirth,
+  waitForServerCustomAttribute,
   getServerBirthState,
   cleanupAll,
   RUN_TAG,
@@ -83,11 +85,12 @@ test('alta guiada desde empty → wizard (sexo→categoría→datos) → el anim
   // elegimos "Vaquillona" para que coincida y no haya override en este caso base).
   await walkWizardToData(page, { sex: 'Hembra', categoryName: 'Vaquillona' });
 
-  // Paso 4: identificación visual (recomendado; el alta en blanco no precarga ninguno).
-  const visualLabel = `${RUN_TAG}-V1`;
-  const visualInput = page.getByLabel('Nombre / seña (opcional)', { exact: true });
-  await expect(visualInput).toBeVisible({ timeout: 20_000 });
-  await visualInput.fill(visualLabel);
+  // Paso 4: caravana visual (recomendado; el alta en blanco no precarga ningún identificador). El delta #2
+  // NOMBRE/APODO removió el built-in editable "Nombre / seña" (RNA.2.1) → el idv es el identificador libre.
+  const idv = `6111${Date.now().toString().slice(-6)}`;
+  const idvInput = page.getByLabel('Caravana visual (recomendado)', { exact: true });
+  await expect(idvInput).toBeVisible({ timeout: 20_000 });
+  await idvInput.fill(idv);
 
   // Crear.
   await page.getByRole('button', { name: 'Crear animal', exact: true }).click();
@@ -95,7 +98,7 @@ test('alta guiada desde empty → wizard (sexo→categoría→datos) → el anim
   // R4.7: aterriza en la ficha del recién creado. La ficha tiene el bloque "Identificación" y el
   // valor visual cargado (aparece en el hero Y en la fila → .first()).
   await expect(page.getByText('Identificación', { exact: true })).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByText(visualLabel, { exact: true }).first()).toBeVisible();
+  await expect(page.getByText(idv, { exact: true }).first()).toBeVisible();
   // El badge de categoría refleja la elegida ("Vaquillona") — coincide con la computada → sin override.
   await expect(page.getByText('Vaquillona', { exact: true }).first()).toBeVisible();
   // Sección Historial (C3.1) — reemplaza el teaser "Próximamente". Un animal recién creado tiene
@@ -107,12 +110,12 @@ test('alta guiada desde empty → wizard (sexo→categoría→datos) → el anim
   // exactamente por asertar solo la UI: ninguna alta aterrizaba server-side y la suite seguía verde).
   // Acá esperamos la fila REAL en animal_profiles vía admin (el drenado online de la outbox → RPC
   // create_animal 0083 corre enseguida con red).
-  await waitForServerAnimalProfile(establishmentId, { visualAlt: visualLabel });
+  await waitForServerAnimalProfile(establishmentId, { idv });
 
   // Volvemos a la lista vía "Volver" (el create se hizo con replace → back desde la ficha cae en
   // (tabs)/Animales). El animal aparece.
   await page.getByRole('button', { name: 'Volver', exact: true }).click();
-  await expect(page.getByText(visualLabel, { exact: true }).first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText(idv, { exact: true }).first()).toBeVisible({ timeout: 20_000 });
 
   // fix-loop 3: volvemos a Inicio → el paso de animal ahora está HECHO (count real = 1, no
   // hardcodeado). useFocusEffect recarga el count al re-enfocar la home tras crear el animal.
@@ -140,10 +143,9 @@ test('delta aptitud (RAR.1/RAR.3/RAR.4): alta de VAQUILLONA "Sí, apta" → fila
 
   // El prompt de aptitud (RAR.1.1) está presente para la vaquillona, con las 3 opciones es-AR.
   await expect(page.getByText('¿Está apta para servicio? (opcional)', { exact: true })).toBeVisible();
-  // Visual CORTO: el form aplica VISUAL_MAX_LENGTH=30 (sanitizeVisualInput) y RUN_TAG ya mide 26 → un sufijo
-  // largo ('-APTA') se TRUNCA al tipear y la búsqueda exacta en la lista no matchearía. ≤4 chars de sufijo.
-  const visualLabel = `${RUN_TAG}-AP`;
-  await page.getByLabel('Nombre / seña (opcional)', { exact: true }).fill(visualLabel);
+  // Identificador libre = caravana visual numérica (el built-in "Nombre / seña" fue removido, delta #2 RNA.2.1).
+  const idv = `6112${Date.now().toString().slice(-6)}`;
+  await page.getByLabel('Caravana visual (recomendado)', { exact: true }).fill(idv);
   // Elegimos "Sí, apta" (a11y label "Aptitud Sí, apta", buttonA11y).
   await page.getByRole('button', { name: 'Aptitud Sí, apta', exact: true }).click();
 
@@ -157,7 +159,7 @@ test('delta aptitud (RAR.1/RAR.3/RAR.4): alta de VAQUILLONA "Sí, apta" → fila
 
   // Volvemos a la lista → el chip de estado reproductivo "Apta" (RAR.3.1, a11y "Estado reproductivo: Apta").
   await page.getByRole('button', { name: 'Volver', exact: true }).click();
-  await expect(page.getByText(visualLabel, { exact: true }).first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText(idv, { exact: true }).first()).toBeVisible({ timeout: 20_000 });
   await expect(page.getByLabel('Estado reproductivo: Apta').first()).toBeVisible();
 });
 
@@ -178,7 +180,7 @@ test('delta aptitud (RAR.1.3): alta de VAQUILLONA "Aún no sé" → fila Aptitud
   await page.getByRole('button', { name: 'Dar de alta tu primer animal' }).click();
   await walkWizardToData(page, { sex: 'Hembra', categoryName: 'Vaquillona' });
 
-  await page.getByLabel('Nombre / seña (opcional)', { exact: true }).fill(`${RUN_TAG}-DIF`);
+  await page.getByLabel('Caravana visual (recomendado)', { exact: true }).fill(`6113${Date.now().toString().slice(-6)}`);
   await page.getByRole('button', { name: 'Aptitud Aún no sé', exact: true }).click();
   await page.getByRole('button', { name: 'Crear animal', exact: true }).click();
 
@@ -231,9 +233,8 @@ test('B: alta de una MULTÍPARA → el form NO pide peso, SÍ dientes/condición
   await expect(page.getByText('Estado de preñez (opcional)', { exact: true })).toBeVisible();
   await expect(page.getByText('Cría al pie (opcional)', { exact: true })).toBeVisible();
 
-  // Identificación + dientes + condición 3 + con cría al pie.
-  const visualLabel = `${RUN_TAG}-MP`;
-  await page.getByLabel('Nombre / seña (opcional)', { exact: true }).fill(visualLabel);
+  // Identificación (caravana visual) + dientes + condición 3 + con cría al pie.
+  await page.getByLabel('Caravana visual (recomendado)', { exact: true }).fill(`6114${Date.now().toString().slice(-6)}`);
   await page.getByRole('button', { name: 'Dientes Boca llena', exact: true }).click();
   // Condición por STEPPER (delta #13): arranca "sin cargar" en 3,00 (atenuado) → + y − la cargan en 3,00.
   await page.getByTestId('score-plus').click();
@@ -284,9 +285,8 @@ test('B: alta de un TERNERO → el form pide PESO, NO dientes/preñez', async ({
   await expect(page.getByText('Estado de preñez (opcional)', { exact: true })).toHaveCount(0);
   await expect(page.getByText('Condición corporal (opcional, 1 a 5)', { exact: true })).toHaveCount(0);
 
-  // Cargamos identificación + peso → se crea.
-  const visualLabel = `${RUN_TAG}-TERB`;
-  await page.getByLabel('Nombre / seña (opcional)', { exact: true }).fill(visualLabel);
+  // Cargamos identificación (caravana visual) + peso → se crea.
+  await page.getByLabel('Caravana visual (recomendado)', { exact: true }).fill(`6115${Date.now().toString().slice(-6)}`);
   await page.getByLabel('Peso en kg (opcional)', { exact: true }).fill('180');
 
   await page.getByRole('button', { name: 'Crear animal', exact: true }).click();
@@ -324,8 +324,7 @@ test('B: alta de una VAQUILLONA PREÑADA con preñez "Cabeza" → estado reprodu
   await expect(page.getByText('Dientes (opcional)', { exact: true })).toHaveCount(0);
   await expect(page.getByText('Cría al pie (opcional)', { exact: true })).toHaveCount(0);
 
-  const visualLabel = `${RUN_TAG}-VQP`;
-  await page.getByLabel('Nombre / seña (opcional)', { exact: true }).fill(visualLabel);
+  await page.getByLabel('Caravana visual (recomendado)', { exact: true }).fill(`6116${Date.now().toString().slice(-6)}`);
   await page.getByRole('button', { name: 'Preñez Cabeza', exact: true }).click();
 
   await page.getByRole('button', { name: 'Crear animal', exact: true }).click();
@@ -366,8 +365,7 @@ test('alta guiada: elegir una categoría que DIFIERE de la computada → overrid
 
   // Identificación + año de nacimiento VIEJO (computaría vaquillona) → override aplica (la multípara
   // no es derivable del alta, así que el override es true por code; el año viejo refuerza el caso).
-  const visualLabel = `${RUN_TAG}-MULTI`;
-  await page.getByLabel('Nombre / seña (opcional)', { exact: true }).fill(visualLabel);
+  await page.getByLabel('Caravana visual (recomendado)', { exact: true }).fill(`6117${Date.now().toString().slice(-6)}`);
   await page.getByLabel('Año de nacimiento (opcional, AAAA)', { exact: true }).fill('2020');
 
   await page.getByRole('button', { name: 'Crear animal', exact: true }).click();
@@ -402,8 +400,7 @@ test('alta guiada: elegir la categoría que COINCIDE con la computada → sin ov
 
   await walkWizardToData(page, { sex: 'Hembra', categoryName: 'Vaquillona' });
 
-  const visualLabel = `${RUN_TAG}-VQ`;
-  await page.getByLabel('Nombre / seña (opcional)', { exact: true }).fill(visualLabel);
+  await page.getByLabel('Caravana visual (recomendado)', { exact: true }).fill(`6118${Date.now().toString().slice(-6)}`);
   // Sin año → hembra computa vaquillona → coincide con la elegida → sin override.
 
   await page.getByRole('button', { name: 'Crear animal', exact: true }).click();
@@ -711,10 +708,10 @@ test('delta #3 (RAF2.1.4): alta con Año + DD/MM → birth_date EXACTA (AAAA-MM-
   await page.getByRole('button', { name: 'Dar de alta tu primer animal' }).click();
   await walkWizardToData(page, { sex: 'Hembra', categoryName: 'Vaquillona' });
 
-  // Visual CORTO (RUN_TAG=26 + VISUAL_MAX_LENGTH=30 del form → ≤4 chars de sufijo, si no se TRUNCA al tipear
-  // y el oráculo server por visual_alt no matchearía).
-  const visualLabel = `${RUN_TAG}-DM`;
-  await page.getByLabel('Nombre / seña (opcional)', { exact: true }).fill(visualLabel);
+  // Identificador = caravana visual numérica (el built-in "Nombre / seña" fue removido, delta #2 RNA.2.1);
+  // el oráculo server matchea por idv.
+  const idv = `6131${Date.now().toString().slice(-6)}`;
+  await page.getByLabel('Caravana visual (recomendado)', { exact: true }).fill(idv);
   await page.getByLabel('Año de nacimiento (opcional, AAAA)', { exact: true }).fill('2022');
   // El sanitizer en vivo formatea "1503" → "15/03" (día-primero es-AR).
   const dm = page.getByLabel('Día y mes (opcional, DD/MM)', { exact: true });
@@ -725,7 +722,7 @@ test('delta #3 (RAF2.1.4): alta con Año + DD/MM → birth_date EXACTA (AAAA-MM-
 
   // "Historial" sólo existe en la FICHA (no en el form) → confirma que el alta navegó (create OK).
   await expect(page.getByText('Historial', { exact: true })).toBeVisible({ timeout: 20_000 });
-  const { animal_id } = await waitForServerAnimalProfile(establishmentId, { visualAlt: visualLabel });
+  const { animal_id } = await waitForServerAnimalProfile(establishmentId, { idv });
   expect(await readServerBirthDate(animal_id)).toBe('2022-07-01');
 });
 
@@ -745,15 +742,15 @@ test('delta #3 (RAF2.1.3): alta SOLO con Año (sin DD/MM) → birth_date midpoin
   await page.getByRole('button', { name: 'Dar de alta tu primer animal' }).click();
   await walkWizardToData(page, { sex: 'Hembra', categoryName: 'Vaquillona' });
 
-  const visualLabel = `${RUN_TAG}-MID`;
-  await page.getByLabel('Nombre / seña (opcional)', { exact: true }).fill(visualLabel);
+  const idv = `6132${Date.now().toString().slice(-6)}`;
+  await page.getByLabel('Caravana visual (recomendado)', { exact: true }).fill(idv);
   await page.getByLabel('Año de nacimiento (opcional, AAAA)', { exact: true }).fill('2022');
   // Sin tocar el campo DD/MM → midpoint (no se rompe el camino año-solo).
 
   await page.getByRole('button', { name: 'Crear animal', exact: true }).click();
 
   await expect(page.getByText('Historial', { exact: true })).toBeVisible({ timeout: 20_000 });
-  const { animal_id } = await waitForServerAnimalProfile(establishmentId, { visualAlt: visualLabel });
+  const { animal_id } = await waitForServerAnimalProfile(establishmentId, { idv });
   expect(await readServerBirthDate(animal_id)).toBe('2022-07-01');
 });
 
@@ -770,7 +767,7 @@ test('delta #3 (RAF2.1.7): DD/MM inválido (31/02) → error inline + animal NO 
   await page.getByRole('button', { name: 'Dar de alta tu primer animal' }).click();
   await walkWizardToData(page, { sex: 'Hembra', categoryName: 'Vaquillona' });
 
-  await page.getByLabel('Nombre / seña (opcional)', { exact: true }).fill(`${RUN_TAG}-BAD`);
+  await page.getByLabel('Caravana visual (recomendado)', { exact: true }).fill(`6133${Date.now().toString().slice(-6)}`);
   await page.getByLabel('Año de nacimiento (opcional, AAAA)', { exact: true }).fill('2022');
   await page.getByLabel('Día y mes (opcional, DD/MM)', { exact: true }).fill('3102'); // 31/02 inexistente
 
@@ -796,7 +793,7 @@ test('delta #3 (RAF2.1.5): DD/MM sin año → error inline en el campo día/mes 
   await page.getByRole('button', { name: 'Dar de alta tu primer animal' }).click();
   await walkWizardToData(page, { sex: 'Hembra', categoryName: 'Vaquillona' });
 
-  await page.getByLabel('Nombre / seña (opcional)', { exact: true }).fill(`${RUN_TAG}-NOYEAR`);
+  await page.getByLabel('Caravana visual (recomendado)', { exact: true }).fill(`6134${Date.now().toString().slice(-6)}`);
   // DD/MM presente SIN año → no hay fecha sin año.
   await page.getByLabel('Día y mes (opcional, DD/MM)', { exact: true }).fill('1503');
 
@@ -822,10 +819,10 @@ test('delta #13 (RAF2.2): condición por STEPPER → cargar 3,25 con + → persi
   await page.getByRole('button', { name: 'Dar de alta tu primer animal' }).click();
   await walkWizardToData(page, { sex: 'Hembra', categoryName: 'Multípara' });
 
-  // Visual CORTO (RUN_TAG=26 + VISUAL_MAX_LENGTH=30 del form → ≤4 chars de sufijo; si no se TRUNCA al tipear y
-  // el oráculo server por visual_alt no matchearía).
-  const visualLabel = `${RUN_TAG}-CO`;
-  await page.getByLabel('Nombre / seña (opcional)', { exact: true }).fill(visualLabel);
+  // Identificador = caravana visual numérica (el built-in "Nombre / seña" fue removido, delta #2 RNA.2.1);
+  // el oráculo server matchea por idv.
+  const idv = `6135${Date.now().toString().slice(-6)}`;
+  await page.getByLabel('Caravana visual (recomendado)', { exact: true }).fill(idv);
 
   // El stepper arranca "sin cargar" mostrando 3,00 (atenuado); el 1er + lo marca cargado en 3,25.
   await expect(page.getByTestId('score-display').getByText('3,00', { exact: true })).toBeVisible();
@@ -837,7 +834,7 @@ test('delta #13 (RAF2.2): condición por STEPPER → cargar 3,25 con + → persi
   await page.getByRole('button', { name: 'Crear animal', exact: true }).click();
 
   await expect(page.getByText('Historial', { exact: true })).toBeVisible({ timeout: 20_000 });
-  const { id: profileId } = await waitForServerAnimalProfile(establishmentId, { visualAlt: visualLabel });
+  const { id: profileId } = await waitForServerAnimalProfile(establishmentId, { idv });
   // El score 3,25 se persiste como evento post-create (sin session_id, del alta).
   await expect
     .poll(async () => (await countConditionScores(profileId)).scores, { timeout: 30_000 })
@@ -860,10 +857,10 @@ test('delta #14 (RAF2.3.3): condición SIN tocar (3,00 atenuado) NO persiste; "S
   await page.getByRole('button', { name: 'Dar de alta tu primer animal' }).click();
   await walkWizardToData(page, { sex: 'Hembra', categoryName: 'Multípara' });
 
-  // Visual CORTO (RUN_TAG=26 + VISUAL_MAX_LENGTH=30 del form → ≤4 chars de sufijo; si no se TRUNCA al tipear y
-  // el oráculo server por visual_alt no matchearía).
-  const visualLabel = `${RUN_TAG}-NC`;
-  await page.getByLabel('Nombre / seña (opcional)', { exact: true }).fill(visualLabel);
+  // Identificador = caravana visual numérica (el built-in "Nombre / seña" fue removido, delta #2 RNA.2.1);
+  // el oráculo server matchea por idv.
+  const idv = `6136${Date.now().toString().slice(-6)}`;
+  await page.getByLabel('Caravana visual (recomendado)', { exact: true }).fill(idv);
 
   // Sin cargar → no hay afordancia "Sin cargar" todavía (estado null, 3,00 atenuado).
   await expect(page.getByRole('button', { name: 'Quitar condición corporal', exact: true })).toHaveCount(0);
@@ -876,7 +873,7 @@ test('delta #14 (RAF2.3.3): condición SIN tocar (3,00 atenuado) NO persiste; "S
   await page.getByRole('button', { name: 'Crear animal', exact: true }).click();
 
   await expect(page.getByText('Historial', { exact: true })).toBeVisible({ timeout: 20_000 });
-  const { id: profileId } = await waitForServerAnimalProfile(establishmentId, { visualAlt: visualLabel });
+  const { id: profileId } = await waitForServerAnimalProfile(establishmentId, { idv });
   // El animal llegó al server pero la condición quedó "sin cargar" → NO se creó ningún condition_score_event.
   expect((await countConditionScores(profileId)).count).toBe(0);
 });
@@ -1110,7 +1107,7 @@ test('delta #15 (RCAP.1.2): alta de una vaca SIN cría al pie → el prompt de v
   await page.getByRole('button', { name: 'Dar de alta tu primer animal' }).click();
   await walkWizardToData(page, { sex: 'Hembra', categoryName: 'Multípara' });
 
-  await page.getByLabel('Nombre / seña (opcional)', { exact: true }).fill(`${RUN_TAG}-SN`);
+  await page.getByLabel('Caravana visual (recomendado)', { exact: true }).fill(`6151${Date.now().toString().slice(-6)}`);
   // Elegimos EXPLÍCITAMENTE "Sin cría al pie" (nursing=false) → showNursing true pero nursing !== true.
   await page.getByRole('button', { name: 'Cría al pie Sin cría al pie', exact: true }).click();
   await page.getByRole('button', { name: 'Crear animal', exact: true }).click();
@@ -1133,10 +1130,11 @@ test('delta #15 (RCAP.1.1/1.3/1.4): vaca CON cría al pie → prompt → "Ahora 
   await waitForHome(page);
   await gotoAnimales(page);
 
-  const motherVisual = `${RUN_TAG}-SK`;
+  // Identificador = caravana visual numérica (el built-in "Nombre / seña" fue removido, delta #2 RNA.2.1).
+  const motherIdv = `6152${Date.now().toString().slice(-6)}`;
   await page.getByRole('button', { name: 'Dar de alta tu primer animal' }).click();
   await walkWizardToData(page, { sex: 'Hembra', categoryName: 'Multípara' });
-  await page.getByLabel('Nombre / seña (opcional)', { exact: true }).fill(motherVisual);
+  await page.getByLabel('Caravana visual (recomendado)', { exact: true }).fill(motherIdv);
   await page.getByRole('button', { name: 'Cría al pie Con cría al pie', exact: true }).click();
   await page.getByRole('button', { name: 'Crear animal', exact: true }).click();
 
@@ -1146,7 +1144,7 @@ test('delta #15 (RCAP.1.1/1.3/1.4): vaca CON cría al pie → prompt → "Ahora 
   await expect(page.getByText('Identificación', { exact: true })).toBeVisible({ timeout: 20_000 });
 
   // RCAP.1.4: la vaca quedó creada (aterriza server-side) y NO se creó NINGÚN vínculo/parto (el skip no linkea).
-  const { id: motherId } = await waitForServerAnimalProfile(establishmentId, { visualAlt: motherVisual });
+  const { id: motherId } = await waitForServerAnimalProfile(establishmentId, { idv: motherIdv });
   expect((await getServerBirthState(motherId)).birthEventCount).toBe(0);
 });
 
@@ -1207,14 +1205,15 @@ test('delta #15 (RCAP.4/RCAP.5): vaca con cría al pie → ternero NUEVO con rod
   await waitForHome(page);
   await gotoAnimales(page);
 
-  const motherVisual = `${RUN_TAG}-CR`;
+  // Identificador = caravana visual numérica (el built-in "Nombre / seña" fue removido, delta #2 RNA.2.1).
+  const motherIdv = `6153${Date.now().toString().slice(-6)}`;
   await page.getByRole('button', { name: 'Dar de alta tu primer animal' }).click();
   // 2 rodeos → el wizard pide el rodeo (paso 1). La madre va al rodeo A ("general").
   await expect(page.getByText('¿A qué rodeo va este animal?', { exact: true })).toBeVisible({ timeout: 20_000 });
   await page.getByRole('button', { name: /Rodeo .*general/i }).click();
   await page.getByRole('button', { name: 'Continuar', exact: true }).click();
   await walkWizardToData(page, { sex: 'Hembra', categoryName: 'Multípara' });
-  await page.getByLabel('Nombre / seña (opcional)', { exact: true }).fill(motherVisual);
+  await page.getByLabel('Caravana visual (recomendado)', { exact: true }).fill(motherIdv);
   await page.getByRole('button', { name: 'Cría al pie Con cría al pie', exact: true }).click();
   await page.getByRole('button', { name: 'Crear animal', exact: true }).click();
 
@@ -1253,7 +1252,7 @@ test('delta #15 (RCAP.4/RCAP.5): vaca con cría al pie → ternero NUEVO con rod
   await page.getByTestId('link-calf-create').click();
 
   await expect(page.getByText('Identificación', { exact: true })).toBeVisible({ timeout: 20_000 });
-  const { id: motherId } = await waitForServerAnimalProfile(establishmentId, { visualAlt: motherVisual });
+  const { id: motherId } = await waitForServerAnimalProfile(establishmentId, { idv: motherIdv });
   const birth = await waitForServerBirth(motherId, { expectedCalves: 1 });
   expect(birth.calfCount).toBe(1);
 });
@@ -1311,4 +1310,93 @@ test('delta #15 (RCAP.3.3): un ternero que YA tiene madre no se re-vincula → a
   // RCAP.3.3: aviso "ya tiene una madre" + NO se ofrece confirmar el vínculo (sigue en la fase de captura).
   await expect(page.getByText(/ya tiene una madre registrada/)).toBeVisible({ timeout: 20_000 });
   await expect(page.getByTestId('link-calf-confirm')).toHaveCount(0);
+});
+
+// ─── Delta #2 NOMBRE/APODO por rodeo (RNA.2/RNA.3/RNA.8) ─────────────────────────────────────────────────
+//
+// El built-in editable "Nombre / seña" (visual_id_alt) DEJÓ de mostrarse por default en el alta (RNA.2.1); el
+// apodo pasa a ser un dato custom opt-in por rodeo (CustomPropertiesForm → custom_attributes). El mensaje de
+// identificador mínimo ya no menciona "nombre/seña" (RNA.3.1), sin relajar hasAtLeastOneIdentifier (RNA.3.2).
+
+test('delta #2 nombre/apodo (RNA.2.1/RNA.3.1): el alta NO muestra "Nombre / seña" por default + el mensaje de identificador mínimo no lo menciona', async ({
+  page,
+}) => {
+  const user = await createTestUser('apodo-off');
+  await setUserPhone(user.id, '1123456789');
+  await seedEstablishmentWithRodeo(user.id, 'Campo ApodoOff');
+
+  await page.goto('/');
+  await signIn(page, user);
+  await waitForHome(page);
+  await gotoAnimales(page);
+
+  await page.getByRole('button', { name: 'Dar de alta tu primer animal' }).click();
+  await walkWizardToData(page, { sex: 'Hembra', categoryName: 'Vaquillona' });
+
+  // RNA.2.1: paso 4 SIN el input editable "Nombre / seña (opcional)" por default; el identificador libre es la
+  // caravana visual. Ninguna mención a "Nombre / seña" en el form (ni label ni copy de validación).
+  await expect(page.getByLabel('Caravana visual (recomendado)', { exact: true })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByLabel('Nombre / seña (opcional)', { exact: true })).toHaveCount(0);
+  await expect(page.getByText(/nombre\s*\/\s*seña/i)).toHaveCount(0);
+
+  // RNA.3.1/RNA.3.2: alta EN BLANCO (sin ningún identificador) → "Crear animal" muestra el mensaje mínimo
+  // ENUMERANDO solo caravana electrónica + caravana visual (sin "nombre/seña"); no encola el alta.
+  await page.getByRole('button', { name: 'Crear animal', exact: true }).click();
+  await expect(
+    page.getByText('Cargá al menos un identificador: caravana electrónica o caravana visual.', { exact: true }),
+  ).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText(/nombre\s*\/\s*seña/i)).toHaveCount(0);
+  // NO navegó a la ficha (la ficha tiene "Historial"): el alta condenada no se encoló (RNA.3.2).
+  await expect(page.getByText('Historial', { exact: true })).toHaveCount(0);
+});
+
+test('delta #2 nombre/apodo (RNA.2.2/RNA.4.2/RNA.8.2): con el "apodo" habilitado por rodeo → aparece en el alta (Datos personalizados) → custom_attributes → ficha', async ({
+  page,
+}) => {
+  test.setTimeout(180_000);
+  const user = await createTestUser('apodo-on');
+  await setUserPhone(user.id, '1123456789');
+  const { establishmentId, rodeoId } = await seedEstablishmentWithRodeo(user.id, 'Campo ApodoOn');
+  // Habilitamos el "apodo" en el rodeo vía service_role (espejo del seed 0119 + set_rodeo_config del owner; el
+  // fd per-est del alta lo enable por rodeo). El E2E NO depende de la migración 0119: siembra su propio fd apodo.
+  const fieldId = await seedCustomField(establishmentId, rodeoId, {
+    label: 'Nombre / apodo',
+    dataKey: 'apodo',
+    dataType: 'propiedad',
+    uiComponent: 'text',
+  });
+
+  await page.goto('/');
+  await signIn(page, user);
+  await waitForHome(page);
+  await gotoAnimales(page);
+
+  const emptyCta = page.getByRole('button', { name: 'Dar de alta tu primer animal' });
+  await expect(emptyCta).toBeVisible({ timeout: 20_000 });
+  // Dwell: el fd apodo + su rodeo_data_config se asientan en el SQLite local antes del alta.
+  await page.waitForTimeout(3000);
+  await emptyCta.click();
+  await walkWizardToData(page, { sex: 'Hembra', categoryName: 'Vaquillona' });
+
+  const idv = `6120${Date.now().toString().slice(-6)}`;
+  await page.getByLabel('Caravana visual (recomendado)', { exact: true }).fill(idv);
+
+  // RNA.2.2: el built-in "Nombre / seña" sigue AUSENTE; el apodo se ofrece por la sección "Datos personalizados".
+  await expect(page.getByLabel('Nombre / seña (opcional)', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('Datos personalizados', { exact: true })).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText('Nombre / apodo', { exact: true }).first()).toBeVisible();
+  const apodoInput = page.getByTestId('custom-prop-text').first();
+  await expect(apodoInput).toBeVisible();
+  await apodoInput.fill('Pinto');
+
+  await page.getByRole('button', { name: 'Crear animal', exact: true }).click();
+
+  // Aterriza en la ficha del recién creado. Oráculo SERVER: el apodo aterrizó en custom_attributes ("Pinto").
+  await expect(page.getByText('Identificación', { exact: true }).first()).toBeVisible({ timeout: 20_000 });
+  const { id: profileId } = await waitForServerAnimalProfile(establishmentId, { idv });
+  await waitForServerCustomAttribute(profileId, fieldId, 'Pinto');
+
+  // RNA.4.2: la ficha muestra el apodo por "Datos personalizados" (sin fila dedicada nueva).
+  await expect(page.getByText('Datos personalizados', { exact: true })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText('Pinto', { exact: true }).first()).toBeVisible({ timeout: 15_000 });
 });

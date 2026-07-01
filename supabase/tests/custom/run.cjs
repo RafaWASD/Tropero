@@ -821,6 +821,95 @@ test('custom (M5) suite — spec 03', async (t) => {
     }
   });
 
+  // ---- (p) delta #2 NOMBRE/APODO: seed per-est del "apodo" (spec 02, RNA.1/RNA.6/RNA.8.3) ---------------
+  // El seed 0119 backfillea un fd "apodo" (propiedad/text, category 'identificacion') POR ESTABLECIMIENTO,
+  // deshabilitado por default. Es BACKFILL-ONLY (sin trigger sobre establishments) → un establishment CREADO
+  // por este test NO queda auto-seedeado, así que replicamos el INSERT del seed (mismo cuerpo, service_role:
+  // auth.uid() NULL → tg_field_definitions_custom_guard hace return new) sobre estA y verificamos la fila +
+  // no-auto-enable + idempotencia (índice parcial 0101) + enable-por-owner + gating de value. El backfill de los
+  // establecimientos PRE-EXISTENTES lo aplica + verifica el leader por MCP (select count(*) ... data_key='apodo'
+  // and category='identificacion'). El test NO depende de 0119 aplicado: prueba la LÓGICA del seed, determinista.
+  await t.test('(p) delta #2 NOMBRE/APODO: seed per-est del "apodo" (deshabilitado, enable-able, gating string)', async () => {
+    const apodoId = crypto.randomUUID();
+    // INSERT del seed 0119 (columnas EXACTAS) por service_role para estA.
+    {
+      const { error } = await admin.from('field_definitions').insert({
+        id: apodoId,
+        establishment_id: estA,
+        data_key: 'apodo',
+        label: 'Nombre / apodo',
+        description: 'Nombre o apodo del animal (texto libre). Por rodeo, opt-in del owner.',
+        category: 'identificacion',
+        data_type: 'propiedad',
+        ui_component: 'text',
+        active: true,
+      });
+      assert.equal(error, null, `seed del apodo per-est (service_role) no debe fallar: ${error && error.message}`);
+    }
+
+    // RNA.1.1/RNA.1.4: la fila existe per-est con la forma del seed (establishment_id = estA, NO NULL).
+    {
+      const { data, error } = await admin.from('field_definitions')
+        .select('establishment_id, data_key, label, category, data_type, ui_component, active, deleted_at')
+        .eq('id', apodoId).single();
+      assert.equal(error, null, error && error.message);
+      assert.equal(data.establishment_id, estA, 'apodo per-est (establishment_id = estA, no global)');
+      assert.equal(data.data_key, 'apodo');
+      assert.equal(data.label, 'Nombre / apodo');
+      assert.equal(data.category, 'identificacion');
+      assert.equal(data.data_type, 'propiedad');
+      assert.equal(data.ui_component, 'text');
+      assert.equal(data.active, true);
+      assert.equal(data.deleted_at, null);
+    }
+
+    // RNA.6.2: el apodo NO está en system_default_fields → el trigger tg_rodeos_seed_data_config NO lo
+    // pre-puebla en rodeos nuevos (nadie lo tiene enabled sin opt-in del owner).
+    {
+      const { data, error } = await admin.from('system_default_fields')
+        .select('field_definition_id').eq('field_definition_id', apodoId);
+      assert.equal(error, null, error && error.message);
+      assert.equal((data || []).length, 0, 'apodo NO debe estar en system_default_fields');
+    }
+
+    // RNA.1.3: el apodo NO quedó auto-enabled en ningún rodeo (rodeo_data_config vacío para el apodo).
+    {
+      const { data, error } = await admin.from('rodeo_data_config')
+        .select('rodeo_id').eq('field_definition_id', apodoId);
+      assert.equal(error, null, error && error.message);
+      assert.equal((data || []).length, 0, 'apodo NO debe estar habilitado en ningún rodeo por default');
+    }
+
+    // RNA.1.2 (base de la idempotencia): un 2do apodo VIVO para estA colisiona (índice parcial
+    // field_definitions_data_key_per_est, 0101) → 23505. Es lo que hace no-op al `on conflict do nothing` del seed.
+    {
+      const { error } = await admin.from('field_definitions').insert({
+        id: crypto.randomUUID(), establishment_id: estA, data_key: 'apodo', label: 'Dup',
+        category: 'identificacion', data_type: 'propiedad', ui_component: 'text', active: true,
+      });
+      assert.notEqual(error, null, 'un 2do apodo vivo para estA debe colisionar (unique per-est)');
+      assert.match(pgcode(error), /23505|duplicate|unique/i);
+    }
+
+    // RNA.8.3: el owner HABILITA el apodo en rodeoA → enabled=true.
+    await enableCustomFieldInRodeo(clientA, rodeoA.id, apodoId, true);
+    {
+      const { data } = await admin.from('rodeo_data_config')
+        .select('enabled').eq('rodeo_id', rodeoA.id).eq('field_definition_id', apodoId).single();
+      assert.equal(data.enabled, true, 'el owner habilitó el apodo en rodeoA');
+    }
+
+    // RNA.6.3: con el apodo enabled, un custom_attribute STRING valida OK; un NÚMERO lo rechaza
+    // assert_custom_value_valid (ui_component=text → 23514).
+    {
+      const okStr = await upsertAttribute(clientA, { animalProfileId: animA.profile.id, fieldId: apodoId, value: 'Pinto' });
+      assert.equal(okStr.error, null, `apodo string debe validar: ${okStr.error && okStr.error.message}`);
+      const badNum = await upsertAttribute(clientA, { animalProfileId: animA.profile.id, fieldId: apodoId, value: 42 });
+      assert.notEqual(badNum.error, null, 'apodo con value numérico debe rechazar (ui_component=text)');
+      assert.match(pgcode(badNum.error), /23514/);
+    }
+  });
+
   // ---- cleanup ----------------------------------------------------------
   await t.test('cleanup', async () => { await cleanup(); });
 });
