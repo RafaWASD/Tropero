@@ -623,3 +623,9 @@ arreglada.
 ## KpiCard label sin lineHeight explícito (endurecimiento baseline)
 - **Origen**: reviewer del delta #8 (%parición-fix), 2026-07-01.
 - `app/src/components/reports/KpiCard.tsx:49` — el label (p.ej. "Parición") usa `numberOfLines={1}` sin `lineHeight` explícito matcheado al `fontSize` (patrón que `feedback_descender_clipping` marca como riesgo de recorte de descendentes). Es código **baseline** (no tocado por el delta #8; el capture de #8 confirma empíricamente que hoy NO recorta "Parición"). No es regresión. Endurecerlo (agregar `lineHeight` matcheado) al pasar por reportes de nuevo.
+
+## Test hygiene: INPUT-1 de la animal suite usa un tag fijo `'9'*64` (colisión entre corridas)
+- **Origen**: flake que bloqueó el Gate 2.5 de #16 (2026-07-03).
+- `supabase/tests/animal/run.cjs` (spec 13 INPUT-1, ~L1941): el test UPDATEa su animal-fixture a `tag_electronic = '9'.repeat(64)` (valor borde del CHECK de 64) esperando que **persista**. Pero el tag es **inmutable** (0036) → el cleanup del test NO puede resetearlo ni borra el fixture → queda un `animals` con `'9'*64`. La corrida SIGUIENTE colisiona en `animals_tag_unique` (23505) en vez de persistir → check.mjs rojo (no es regresión).
+- **Workaround aplicado (2026-07-03)**: el leader borró el fixture leftover (`animals` con `'9'*64` + su perfil + 3 eventos de test) por MCP → animal suite 128/128.
+- **Fix real (pendiente)**: que INPUT-1 use un tag **único por run** para el borde de 64 (p.ej. `RUN_TAG` + relleno hasta 64) en vez del fijo `'9'*64`, o que el cleanup del test borre el fixture del animal aunque el tag sea inmutable. Así no deja leftover que colisione. Relacionado con el bloat de `animals` huérfanos (otra entrada de este backlog).

@@ -29,6 +29,7 @@ import {
   prefillAgeMonths,
   snapOffset,
   snapToWheel,
+  tapTarget,
   valueToIndex,
   wheelCount,
   wheelValues,
@@ -192,6 +193,102 @@ test('isOffsetSnapped: true SOLO cuando el offset descansa en el centro de una c
   assert.equal(isOffsetSnapped(beyond, CELL, CE_WHEEL), false);
   // cellHeight inválido → false (defensivo, no rompe).
   assert.equal(isOffsetSnapped(100, 0, CE_WHEEL), false);
+});
+
+// ─── tapTarget: destino de un TAP sobre una celda visible (delta #16, RTW.6) ───────────────────────
+
+test('tapTarget: tap de una celda NO central → offset/valor de esa celda, isCentral false (CE)', () => {
+  const CELL = 64;
+  // Rueda descansando en 36 cm (índice 32, offset 2048). Tap en la celda de índice 34 (37 cm, dos arriba).
+  const currentOffset = indexToOffset(32, CELL); // 2048
+  const t = tapTarget(currentOffset, 34, CELL, CE_WHEEL);
+  assert.equal(t.index, 34);
+  assert.equal(t.offset, indexToOffset(34, CELL)); // 2176, múltiplo exacto de CELL (snap-point)
+  assert.equal(t.value, indexToValue(34, CE_WHEEL)); // 37 cm
+  assert.equal(t.value, 37);
+  assert.equal(t.isCentral, false);
+  // Tap de una celda ABAJO del centro (índice 30 → 35 cm).
+  const down = tapTarget(currentOffset, 30, CELL, CE_WHEEL);
+  assert.equal(down.index, 30);
+  assert.equal(down.value, 35);
+  assert.equal(down.isCentral, false);
+});
+
+test('tapTarget: tap de la celda YA central → isCentral true (no-op de valor, RTW.1.4)', () => {
+  const CELL = 64;
+  const currentOffset = indexToOffset(32, CELL); // centrado en 36 cm
+  const t = tapTarget(currentOffset, 32, CELL, CE_WHEEL);
+  assert.equal(t.index, 32);
+  assert.equal(t.value, indexToValue(32, CE_WHEEL)); // 36 cm
+  assert.equal(t.isCentral, true);
+});
+
+test('tapTarget: isCentral usa el índice CENTRADO por el offset (tolerante al sub-píxel / mitad de camino)', () => {
+  const CELL = 64;
+  // Offset a mitad de camino (32,4·cell) → el índice centrado es 32 (Math.round). Tap en 32 → central,
+  // aunque el offset no sea el múltiplo exacto (el caller igual snapeará; no-op de valor).
+  const central = tapTarget(CELL * 32.4, 32, CELL, CE_WHEEL);
+  assert.equal(central.isCentral, true);
+  // Desde ese mismo offset, tap en 33 → NO central, va a 36,5.
+  const off = tapTarget(CELL * 32.4, 33, CELL, CE_WHEEL);
+  assert.equal(off.isCentral, false);
+  assert.equal(off.index, 33);
+  assert.equal(off.value, 36.5);
+});
+
+test('tapTarget: clampa el índice tapeado a [0, n-1] (bordes)', () => {
+  const CELL = 64;
+  const currentOffset = indexToOffset(5, CELL);
+  // Índice negativo → clampa a 0 (min del rango).
+  const lo = tapTarget(currentOffset, -3, CELL, CE_WHEEL);
+  assert.equal(lo.index, 0);
+  assert.equal(lo.offset, 0);
+  assert.equal(lo.value, CE_MIN_CM); // 20
+  // Índice gigante → clampa al último (max del rango).
+  const last = wheelCount(CE_WHEEL) - 1; // 60
+  const hi = tapTarget(currentOffset, 999, CELL, CE_WHEEL);
+  assert.equal(hi.index, last);
+  assert.equal(hi.offset, indexToOffset(last, CELL));
+  assert.equal(hi.value, CE_MAX_CM); // 50
+});
+
+test('tapTarget: índice fraccional se redondea (defensivo)', () => {
+  const CELL = 64;
+  const t = tapTarget(indexToOffset(10, CELL), 33.4, CELL, CE_WHEEL);
+  assert.equal(t.index, 33);
+  const u = tapTarget(indexToOffset(10, CELL), 33.6, CELL, CE_WHEEL);
+  assert.equal(u.index, 34);
+});
+
+test('tapTarget: round-trip — el offset destino re-mapea al índice tapeado (offsetToIndex∘tapTarget)', () => {
+  const CELL = 64;
+  const currentOffset = indexToOffset(32, CELL);
+  for (const idx of [0, 1, 30, 31, 33, 34, 60]) {
+    const t = tapTarget(currentOffset, idx, CELL, CE_WHEEL);
+    assert.equal(offsetToIndex(t.offset, CELL, CE_WHEEL), idx);
+    // El offset destino es un múltiplo exacto de la celda (snap-point) → el lock posterior es no-op.
+    assert.equal(isOffsetSnapped(t.offset, CELL, CE_WHEEL), true);
+  }
+});
+
+test('tapTarget: AGE_WHEEL (rueda de meses) — mismo comportamiento', () => {
+  const CELL = 64;
+  // Rueda de meses en 24 (índice 18, offset). Tap en índice 20 → 26 meses.
+  const currentOffset = indexToOffset(18, CELL);
+  const t = tapTarget(currentOffset, 20, CELL, AGE_WHEEL);
+  assert.equal(t.index, 20);
+  assert.equal(t.value, indexToValue(20, AGE_WHEEL)); // 6 + 20 = 26 meses
+  assert.equal(t.value, 26);
+  assert.equal(t.isCentral, false);
+  // Tap de la celda central (índice 18 → 24 meses) → no-op.
+  const c = tapTarget(currentOffset, 18, CELL, AGE_WHEEL);
+  assert.equal(c.isCentral, true);
+  assert.equal(c.value, 24);
+  // Borde superior de la rueda de meses: índice > último → clampa a 120 meses.
+  const last = wheelCount(AGE_WHEEL) - 1; // 114
+  const hi = tapTarget(currentOffset, 999, CELL, AGE_WHEEL);
+  assert.equal(hi.index, last);
+  assert.equal(hi.value, AGE_MAX_MONTHS); // 120
 });
 
 // ─── formato es-AR ─────────────────────────────────────────────────────────────────────────────────

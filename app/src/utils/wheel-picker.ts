@@ -150,6 +150,43 @@ export function isOffsetSnapped(offset: number, cellHeight: number, spec: WheelS
   return Math.abs(offset - snapped) <= eps;
 }
 
+// ─── TAP-TO-SELECT: destino de un TAP sobre una celda visible (delta #16, RTW.6) ────────────────────
+
+/** Destino de un TAP sobre una celda del drum: el `WheelSnap` de esa celda + si YA es la centrada. */
+export type WheelTapTarget = WheelSnap & {
+  /** El índice tapeado coincide con el índice centrado por `currentOffset` → el caller hace no-op de valor. */
+  isCentral: boolean;
+};
+
+/**
+ * Destino de un TAP sobre la celda `tappedIndex`, dado el offset ACTUAL del scroller (delta #16, RTW.6).
+ *
+ * El operario tapea una celda VISIBLE (arriba/abajo del centro) que ya conoce su índice (D3/RTW.3.2 — sin
+ * mapeo de coordenada-a-valor). Este helper devuelve el offset destino EXACTO que centra ese índice
+ * (`indexToOffset`, múltiplo de `cellHeight`), su valor de grilla (`indexToValue`) y `isCentral` = la celda
+ * tapeada YA es la centrada por el offset actual (`offsetToIndex(currentOffset)`) → el caller hace no-op de
+ * valor (RTW.1.4: no re-dispara `onValueChange`). El índice tapeado se CLAMPEA a [0, n-1] por robustez
+ * (defensivo ante un índice fuera de rango). REUSA `offsetToIndex`/`indexToOffset`/`indexToValue`/`wheelCount`
+ * — cero aritmética nueva (misma grilla que el snap por drag → el tap y el drag comparten el valor canónico).
+ *
+ * PURO (sin RN): el destino del tap se testea sin montar UI, igual que `snapOffset`/`isOffsetSnapped`.
+ */
+export function tapTarget(
+  currentOffset: number,
+  tappedIndex: number,
+  cellHeight: number,
+  spec: WheelSpec,
+): WheelTapTarget {
+  const centeredIndex = offsetToIndex(currentOffset, cellHeight, spec);
+  const index = Math.min(wheelCount(spec) - 1, Math.max(0, Math.round(tappedIndex)));
+  return {
+    index,
+    offset: indexToOffset(index, cellHeight),
+    value: indexToValue(index, spec),
+    isCentral: index === centeredIndex,
+  };
+}
+
 // ─── Formato es-AR de los valores (display) ────────────────────────────────────────────────────────
 
 /**

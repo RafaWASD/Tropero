@@ -34,7 +34,7 @@
 // cruzan a APIs no-Tamagui. Targets: la rueda se ARRASTRA (el target es el área, no una celda).
 
 import { useCallback, useEffect, useMemo, useRef } from 'react';
-import { Platform, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native';
+import { Platform, Pressable, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native';
 import { getTokenValue, Text, View, YStack } from 'tamagui';
 import Animated, {
   runOnJS,
@@ -44,13 +44,14 @@ import Animated, {
   type SharedValue,
 } from 'react-native-reanimated';
 
-import { labelA11y } from '@/utils/a11y';
+import { buttonA11y, labelA11y } from '@/utils/a11y';
 import { hapticTick } from '@/utils/haptics';
 import {
   indexToOffset,
   indexToValue,
   isOffsetSnapped,
   snapOffset,
+  tapTarget,
   valueToIndex,
   wheelValues,
   type WheelSpec,
@@ -93,19 +94,31 @@ const OPACITY_DROP = 0.46; // cuánto baja la opacidad por celda de distancia: d
 /** Una celda de la rueda: el GRADIENTE de tamaño (scale) + opacidad lo da la distancia al centro en el UI
  *  thread (drum 3D + jerarquía: la central RESALTA, los vecinos se subordinan). La escala se aplica sobre un
  *  texto base CHICO ($wheelValueText=26) → la central escalada (~32px) entra HOLGADA en `cell`=64 con
- *  lineHeight matcheado → NINGÚN valor, ni los ".5", desborda la celda ni cruza las líneas de selección. */
+ *  lineHeight matcheado → NINGÚN valor, ni los ".5", desborda la celda ni cruza las líneas de selección.
+ *
+ *  TAP-TO-SELECT (delta #16, RTW.1.1/RTW.3.1/RTW.3.2/RTW.5.3): la celda es un `Pressable` que, al tocarla,
+ *  llama `onTap(index)` — el índice lo CONOCE la celda (sin mapeo de coordenada-a-valor, D3). El área tappable
+ *  es la caja de layout de la celda (alto `cell`, ancho completo → target grande 🔴 manga; la escala visual
+ *  no afecta el layout). Solo las celdas del `values.map` que quedan DENTRO del drum (viewport) se pueden
+ *  tocar; las scrolleadas fuera están clipeadas por el overflow → no son alcanzables (RTW.3.1). A11y de botón
+ *  con el valor como label (RTW.5.3, DOM-válida en web vía `buttonA11y`). El press-responder del `ScrollView`
+ *  cancela el press si el gesto se vuelve un DRAG → el arrastre inercial no queda roto (RTW.2.1). */
 function WheelCell({
   label,
   index,
   scrollIndex,
   cell,
   cellTextSize,
+  onTap,
+  cellTestID,
 }: {
   label: string;
   index: number;
   scrollIndex: SharedValue<number>;
   cell: number;
   cellTextSize: number;
+  onTap: (index: number) => void;
+  cellTestID?: string;
 }) {
   const style = useAnimatedStyle(() => {
     'worklet';
@@ -120,22 +133,29 @@ function WheelCell({
 
   // La celda mide exactamente `cell` de alto (= snapToInterval, y lo que bracketean las líneas). El texto
   // base chico ($wheelValueText) con lineHeight matcheado, ESCALADO en el centro, entra centrado con respiro
-  // → ni el centro grande ni los ".5" de los vecinos desbordan la celda ni son cruzados por las líneas.
+  // → ni el centro grande ni los ".5" de los vecinos desbordan la celda ni son cruzados por las líneas. El
+  // `Pressable` envuelve el contenido (el gradiente vive en el Animated.View interno, intacto): tap → onTap.
   return (
-    <Animated.View style={[{ height: cell, alignItems: 'center', justifyContent: 'center' }, style]}>
-      <Text
-        fontFamily="$heading"
-        fontSize={cellTextSize}
-        lineHeight={cellTextSize}
-        fontWeight="700"
-        color="$textPrimary"
-        numberOfLines={1}
-        allowFontScaling={false}
-        textAlign="center"
-      >
-        {label}
-      </Text>
-    </Animated.View>
+    <Pressable
+      onPress={() => onTap(index)}
+      testID={cellTestID}
+      {...buttonA11y(Platform.OS, { label: `Seleccionar ${label}` })}
+    >
+      <Animated.View style={[{ height: cell, alignItems: 'center', justifyContent: 'center' }, style]}>
+        <Text
+          fontFamily="$heading"
+          fontSize={cellTextSize}
+          lineHeight={cellTextSize}
+          fontWeight="700"
+          color="$textPrimary"
+          numberOfLines={1}
+          allowFontScaling={false}
+          textAlign="center"
+        >
+          {label}
+        </Text>
+      </Animated.View>
+    </Pressable>
   );
 }
 
@@ -279,6 +299,38 @@ export function WheelPicker({
     },
   });
 
+  // ── TAP-TO-SELECT (delta #16, RTW.1/RTW.2/RTW.4/RTW.5) ──────────────────────────────────────────────
+  // El operario tapeó una celda VISIBLE del drum (`tappedIndex` lo conoce la celda — sin coordenada-a-valor,
+  // D3/RTW.3.2). Corre en el JS thread (lee `.value` de los shared values). Replica el patrón de
+  // `lockToOffset` pero keyed en un ÍNDICE CONOCIDO (no en un offset crudo): el destino sale de `tapTarget`
+  // (offset = múltiplo exacto de `cell`), se SINCRONIZAN los shared values ANTES del scrollTo (el valor final
+  // committeado es el de la celda tapeada, no un intermedio), se ANIMA suave hasta centrar (reusa el
+  // scrollTo({animated:true}) existente) y se dispara la MISMA háptica de settle + onValueChange que el drag.
+  const handleCellTap = useCallback(
+    (tappedIndex: number) => {
+      const t = tapTarget(offsetY.value, tappedIndex, cell, spec);
+      if (t.isCentral) return; // celda YA centrada → no-op de valor (RTW.1.4: sin onValueChange espurio).
+      if (settleTimer.current) {
+        clearTimeout(settleTimer.current); // cancela settle/lock diferido pendiente (RTW.2.3, RTW.5.1).
+        settleTimer.current = null;
+      }
+      // Sync ANTES del scrollTo (mismo patrón que `lockToOffset`): cuando el onScroll programático de la
+      // animación aterrice en el índice destino, `idx === lastNotified` → NO re-notifica; y el momentum-end
+      // (native) / settle (web) que cierre la animación ve el offset ya snapeado → `lockToOffset` no-op
+      // (RTW.2.2/2.4). El efecto value→rueda ve el eco del propio tap y no re-mueve la rueda (RTW.5.4).
+      offsetY.value = t.offset;
+      scrollIndex.value = t.index;
+      lastNotified.value = t.index;
+      // Anima suave hasta centrar el valor tapeado (RTW.1.2). Un fling en curso lo interrumpe este scrollTo al
+      // nuevo target + el cancel del settle diferido → se asienta en el TAP, no donde iba el fling (RTW.5.1).
+      scrollRef.current?.scrollTo({ y: t.offset, animated: true });
+      notifyIndex(t.index); // háptica settle + onValueChange UNA vez, mismo camino que el drag (RTW.1.3/RTW.4.1).
+    },
+    // shared values y refs no son deps reactivas; cell/spec/notifyIndex sí (mismo criterio que lockToOffset).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [cell, spec, notifyIndex],
+  );
+
   // SINCRONÍA EXTERNA → rueda (fix-loop v2, R14.5 sub-cláusula): cuando el `value` controlado cambia por una
   // fuente EXTERNA (el operario tipeó en el CAMPO editable y commiteó), la rueda se mueve/snapea a ese valor.
   // `lastNotified` guarda el índice que la PROPIA rueda emitió por scroll → si el `value` entrante mapea a un
@@ -357,6 +409,8 @@ export function WheelPicker({
             scrollIndex={scrollIndex}
             cell={cell}
             cellTextSize={cellTextSize}
+            onTap={handleCellTap}
+            cellTestID={testID ? `${testID}-cell-${i}` : undefined}
           />
         ))}
       </Animated.ScrollView>
