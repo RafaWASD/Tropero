@@ -275,6 +275,11 @@ function ReproStatusChip({ status }: { status: ReproStatus }) {
   const borderColor = tier === 'attn' ? '$amber' : '$divider';
   const borderWidth = tier === 'good' ? 0 : 1;
   return (
+    // flexShrink 1 + minWidth 0 (NO flexShrink 0): en el caso apretado (categoría LARGA + "Sin caravana")
+    // el chip es el ÚLTIMO recurso — puede ENCOGERSE y su texto TRUNCAR con "…" (numberOfLines 1) antes de
+    // desbordar hacia el chip "Sin caravana" de la derecha (fix overlap AnimalRow). El rodeo cede PRIMERO
+    // (flexShrink mayor), así el chip solo trunca cuando ya no queda rodeo. minWidth 0 es LOAD-BEARING: sin
+    // él, el min-content del chip impediría encogerlo por debajo de su texto (y volvería el desborde).
     <View
       backgroundColor={bg}
       borderWidth={borderWidth}
@@ -282,7 +287,8 @@ function ReproStatusChip({ status }: { status: ReproStatus }) {
       borderRadius="$pill"
       paddingHorizontal="$2"
       paddingVertical="$1"
-      flexShrink={0}
+      flexShrink={1}
+      minWidth={0}
       {...labelA11y(Platform.OS, `Estado reproductivo: ${label}`)}
     >
       <Text fontFamily="$body" fontSize="$2" lineHeight="$2" fontWeight="600" color={textColor} numberOfLines={1}>
@@ -440,18 +446,33 @@ export function AnimalRow({
             </XStack>
           ) : (
             // Subtítulo NORMAL: badge de categoría con COLOR (firma verde RAFAQ; AMARILLA si es CUT, RCUT.6.2
-            // — ruta preferida con `code`) + chip de estado reproductivo (RAR.3.1, hembras) + rodeo muted. El
-            // rodeo (flexShrink) trunca primero si falta ancho; los dos chips quedan completos (flexShrink 0).
-            <XStack alignItems="center" gap="$2" minWidth={0}>
-              <CategoryBadge label={category} code={categoryCode} size="sm" />
+            // — ruta preferida con `code`) + chip de estado reproductivo (RAR.3.1, hembras) + rodeo muted.
+            //
+            // Degradación anti-overlap (fix overlap AnimalRow — el subtítulo NUNCA debe pisar el chip "Sin
+            // caravana" de la derecha, que vive FUERA del centro). Prioridad, de más a menos protegido:
+            //   1. Badge de categoría: SIEMPRE completo → wrapper flexShrink 0 (no trunca su texto).
+            //   2. Chip repro (RAR.3.1): ÚLTIMO recurso → flexShrink 1 (trunca "Servida sin t…" al final).
+            //   3. Rodeo: cede PRIMERO → flexShrink alto (se va antes de que el chip repro empiece a truncar).
+            //   4. overflow hidden: RED DE SEGURIDAD — si algo aún no puede encoger (categoría descomunal), se
+            //      CLIPEA en el borde del centro en vez de superponerse (mejor un corte que un pisón).
+            <XStack alignItems="center" gap="$2" minWidth={0} overflow="hidden">
+              <View flexShrink={0}>
+                <CategoryBadge label={category} code={categoryCode} size="sm" />
+              </View>
               {reproStatus ? <ReproStatusChip status={reproStatus} /> : null}
               <Text
                 fontFamily="$body"
                 fontSize="$3"
+                lineHeight="$3"
                 fontWeight="400"
                 color="$textMuted"
                 numberOfLines={1}
-                flexShrink={1}
+                // flexShrink DELIBERADAMENTE enorme: el `numberOfLines={1}` hace que el flex-basis del rodeo
+                // resuelva a MIN-content (chico), así que con un peso moderado el chip repro igual absorbería
+                // parte del encogimiento y truncaría de más en el caso normal. Un peso muy alto hace que el
+                // rodeo absorba ~todo el shrink PRIMERO (se va antes de que el chip repro empiece a truncar),
+                // preservando el comportamiento previo (chip completo, rodeo cede) salvo en el caso apretado real.
+                flexShrink={5000}
                 minWidth={0}
               >
                 {rodeo}

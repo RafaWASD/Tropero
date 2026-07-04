@@ -5,6 +5,9 @@
 
 **SESIÓN 2026-06-29/30 — CORRECCIONES DEL TESTEO EN VIVO CON FACUNDO (16) + CONVENCIÓN SDD PARA FIXES (ADR-028).**
 
+## 🆕 2026-07-04 — FIX SUPERPOSICIÓN "Sin caravana" ↔ estado repro (Nivel A) — ✅
+Raf mandó captura (`tests/tag_sin_caravana.png`): en la lista de Animales el chip "Sin caravana" se superponía con el estado repro ("Servida sin tacto") cuando la categoría es larga. Root cause: en `AnimalRow.tsx` la línea 2 tenía el badge de categoría + el chip repro como `flexShrink 0` → con categoría larga ("Vaca segundo servicio") desbordaban hacia la derecha y pisaban el `NoTagChip` (RN no clipea). **Fix (Nivel A, frontend-only)**: prioridad de degradación — categoría + "Sin caravana" siempre completos, el chip repro trunca ("Se…") como último recurso, el rodeo cede primero (flexShrink alto), + `overflow:hidden` de red de seguridad. Verificado con capture (oráculo `reproBox.x+w <= noTagBox.x`; caso normal 5501 intacto). ⚠ En el peor caso (categoría más larga + repro + sin caravana en 412px) el chip repro queda como "Se…" — a refinar si Raf prefiere dropear el chip o acortar el label de categoría.
+
 ## 🆕 2026-07-03 — REORDER CATEGORÍAS MACHO DEL ALTA (Nivel A) — ✅ APLICADO
 Raf notó que las categorías macho del alta estaban desordenadas (Ternero → **Toro → Torito** → Novillito → Novillo, accidente del sort_order de siembra). Le di 3 opciones con preview y eligió la **A** (rama reproductiva primero). **Migración `0120`** (UPDATE `sort_order` del sistema cría: ternero=10 primero, torito=91, toro=92, novillito=93, novillo=94; scope join-by-code, sin tocar hembras/otros sistemas) **APLICADA** → orden nuevo **Ternero → Torito → Toro → Novillito → Novillo**. Frontend sin cambios (el picker ordena por `sort_order`). Nivel A (sin delta-spec); verificado por query al remoto + veto SQL. El implementer murió (ConnectionRefused) tras escribir el `.sql`; el leader lo recuperó/vetó/aplicó/verificó.
 
