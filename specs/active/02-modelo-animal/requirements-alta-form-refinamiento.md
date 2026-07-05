@@ -29,6 +29,8 @@ Tres correcciones del testeo en vivo, **todas en el paso 4 del wizard de alta** 
 
 **RAF2.1.3** Cuando el usuario haya cargado un año válido **sin** día/mes, el sistema deberá fijar `birth_date` = `AAAA-07-01` (midpoint, comportamiento actual `birthYearToDate`).
 
+> **Reconciliación as-built (delta `override-imputacion-categoria`, ADR-028 Nivel A, 2026-07)**: `validateBirthDate`/`birthYearToDate` siguen devolviendo el midpoint `AAAA-07-01` (RAF2.1.3 intacto a nivel util). PERO en el **alta**, cuando solo hay año (`precision:'year'`), `crear-animal.tsx` **re-imputa** ese midpoint a un día CONSCIENTE de la categoría elegida (`imputeBirthDateForCategory`): el `birth_date` almacenado cae dentro del cruce `año ∩ ventana-etaria-de-la-categoría ∩ pasado`, de modo que `compute_category(birth_date)` coincide con la elegida y el cron nocturno NO la flipea (`category_override=false`). Si la categoría es imposible para el año (cruce vacío) o no es age-derivable, se conserva el midpoint ciego `AAAA-07-01` y el override queda `true` (pin). La fecha exacta (RAF2.1.4) NO se toca. Ver `progress/impl_02-override-imputacion-categoria.md`.
+
 **RAF2.1.4** Cuando el usuario haya cargado un año válido **y** un día/mes válidos, el sistema deberá fijar `birth_date` = la fecha exacta `AAAA-MM-DD`.
 
 **RAF2.1.5** Si el usuario carga día/mes **sin** año, entonces el sistema deberá rechazar el alta y mostrar un error inline en el campo de día/mes (con scroll-al-campo y borde rojo), sin crear el animal (no hay fecha sin año).

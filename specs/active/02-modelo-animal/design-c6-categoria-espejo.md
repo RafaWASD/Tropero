@@ -3,6 +3,17 @@
 **Fuente**: `context-c6-categoria-espejo.md` (Gate 0 ✅) + `requirements-c6-categoria-espejo.md` (RC6.x).
 **Alcance**: frontend puro. Cero migraciones, cero RLS nueva, cero triggers. Gate 1 N/A (si algún paso descubre necesidad de backend → finding al leader, no se implementa acá).
 
+> **RECONCILIACIÓN as-built (delta `override-imputacion-categoria`, ADR-028 Nivel A, 2026-07)**: `animal-category.ts`
+> ganó una función PURA exportada nueva, **`imputeBirthDateForCategory(chosen, sex, yearOnlyIso, today?)`**, que
+> imputa un `birth_date` para el alta year-only usando la categoría elegida (midpoint del cruce `año ∩
+> ventana-etaria ∩ pasado`), con fallback al midpoint ciego `birthYearToDate` si la categoría no es age-derivable
+> o el cruce es vacío. Sus **ventanas etarias** (`AGE_WINDOWS`, en días, reusando `ONE_YEAR_DAYS`/`TWO_YEAR_DAYS`)
+> son la **INVERSA** de los cortes de `computeCategoryCode`/`compute_category` → quedan **sujetas al mismo
+> anti-drift (RC6.5.1)**: si una migración cambia los cortes/ramas, actualizar también estas ventanas. NO cambia
+> `computeCategoryCode`, `computeInitialCategoryCode` ni `categoryOverrideFor` (firmas ni cuerpos intactos): la
+> inteligencia year-only vive solo en la fecha imputada, y el override se resuelve por la comparación puntual de
+> siempre. Ver `progress/impl_02-override-imputacion-categoria.md`.
+
 ---
 
 ## 1. Archivos a crear / modificar

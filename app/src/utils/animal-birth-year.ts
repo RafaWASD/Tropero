@@ -93,8 +93,13 @@ export function sanitizeDayMonthInput(raw: string): string {
 }
 
 export type BirthDateValidation =
-  | { ok: true; date: string } // ISO 'AAAA-MM-DD' (exacta si hay DD/MM; midpoint si solo año)
-  | { ok: true; date: null } // todo vacío (año y DD/MM): birth_date null (opcional, válido)
+  // `precision` expone al caller CÓMO se derivó la fecha (delta override-imputacion-categoria):
+  //   'exact' = se cargó DD/MM válido → fecha exacta; 'year' = solo año → midpoint ciego (birthYearToDate);
+  //   'none'  = todo vacío → sin fecha. El caller usa 'year' para imputar una fecha CONSCIENTE de la
+  //   categoría elegida (imputeBirthDateForCategory) y evitar el flip del midpoint ciego. Es ADITIVO: los
+  //   callers que solo destructuran `date` (LinkCalfPrompt) siguen andando sin cambios.
+  | { ok: true; date: string; precision: 'exact' | 'year' } // ISO 'AAAA-MM-DD' (exacta si hay DD/MM; midpoint si solo año)
+  | { ok: true; date: null; precision: 'none' } // todo vacío (año y DD/MM): birth_date null (opcional, válido)
   | { ok: false; error: string; field: 'year' | 'dayMonth' };
 
 /** Año bisiesto (regla gregoriana estándar): divisible por 4, salvo los seculares no divisibles por 400. */
@@ -118,13 +123,15 @@ function todayIso(now: Date): string {
 /**
  * Valida la fecha de nacimiento COMPLETA al submit (RAF2.1.3–2.1.10). `yearRaw`/`dayMonthRaw` son los strings
  * crudos del form (ya sanitizados en vivo). `now` inyectable (tests deterministas). Reglas:
- *   - año vacío + DD/MM vacío → { ok:true, date:null } (opcional).
- *   - año válido + DD/MM vacío → { ok:true, date: birthYearToDate(year, now) } (midpoint, RAF2.1.3).
+ *   - año vacío + DD/MM vacío → { ok:true, date:null, precision:'none' } (opcional).
+ *   - año válido + DD/MM vacío → { ok:true, date: birthYearToDate(year, now), precision:'year' } (midpoint, RAF2.1.3).
  *   - año vacío + DD/MM presente → { ok:false, field:'dayMonth' } (no hay fecha sin año, RAF2.1.5).
  *   - DD/MM incompleto (solo día) → { ok:false, field:'dayMonth' } (todo-o-nada, RAF2.1.6).
  *   - mes ∉ 1..12 / día ∉ 1..daysInMonth / 00 / 31-en-mes-de-30 / 29-02 no bisiesto → { ok:false } (sin clamp, 2.1.7/2.1.8).
  *   - fecha exacta futura → { ok:false, field:'dayMonth' } (RAF2.1.9, criterio propio).
- *   - año válido + DD/MM válido y no-futuro → { ok:true, date: 'AAAA-MM-DD' } (RAF2.1.4).
+ *   - año válido + DD/MM válido y no-futuro → { ok:true, date: 'AAAA-MM-DD', precision:'exact' } (RAF2.1.4).
+ * El `precision` (delta override-imputacion-categoria) le dice al caller si la fecha es EXACTA ('exact'),
+ * imputada solo por año ('year' → el caller la re-imputa consciente de la categoría) o inexistente ('none').
  * Reusa `validateBirthYear` (eje año: 4 díg / no futuro / ≥ MIN_BIRTH_YEAR) y `birthYearToDate` (midpoint, intacto).
  */
 export function validateBirthDate(
@@ -138,8 +145,12 @@ export function validateBirthDate(
 
   const dm = dayMonthRaw.trim();
   if (dm.length === 0) {
-    // Sin día/mes: año-solo → midpoint; ambos vacíos → null (ambos delegan en birthYearToDate, intacto).
-    return { ok: true, date: birthYearToDate(yearV.year, now) };
+    // Sin día/mes: año-solo → midpoint (precision 'year'); ambos vacíos → null (precision 'none').
+    // Ambos delegan en birthYearToDate (intacto); `date == null` ⟺ año no provisto.
+    const date = birthYearToDate(yearV.year, now);
+    return date == null
+      ? { ok: true, date: null, precision: 'none' }
+      : { ok: true, date, precision: 'year' };
   }
 
   // Hay día/mes → REQUIERE año (no hay fecha exacta sin año), RAF2.1.5.
@@ -171,7 +182,7 @@ export function validateBirthDate(
     return { ok: false, error: 'La fecha de nacimiento no puede ser futura.', field: 'dayMonth' };
   }
 
-  return { ok: true, date: iso };
+  return { ok: true, date: iso, precision: 'exact' };
 }
 
 /**

@@ -106,20 +106,20 @@ test('sanitizeDayMonthInput: idempotente (re-sanitizar no cambia)', () => {
 
 // ─── validateBirthDate: año-solo / exacta / todo-o-nada / rangos / bisiesto / futuro (RAF2.1.3–2.1.9) ─
 
-test('validateBirthDate: ambos vacíos → { ok:true, date:null } (opcional)', () => {
-  assert.deepEqual(validateBirthDate('', '', NOW), { ok: true, date: null });
-  assert.deepEqual(validateBirthDate('   ', '  ', NOW), { ok: true, date: null });
+test('validateBirthDate: ambos vacíos → { ok:true, date:null, precision:none } (opcional)', () => {
+  assert.deepEqual(validateBirthDate('', '', NOW), { ok: true, date: null, precision: 'none' });
+  assert.deepEqual(validateBirthDate('   ', '  ', NOW), { ok: true, date: null, precision: 'none' });
 });
 
-test('validateBirthDate: año válido + DD/MM vacío → midpoint AAAA-07-01 (RAF2.1.3)', () => {
-  assert.deepEqual(validateBirthDate('2022', '', NOW), { ok: true, date: '2022-07-01' });
+test('validateBirthDate: año válido + DD/MM vacío → midpoint AAAA-07-01, precision year (RAF2.1.3)', () => {
+  assert.deepEqual(validateBirthDate('2022', '', NOW), { ok: true, date: '2022-07-01', precision: 'year' });
 });
 
-test('validateBirthDate: año válido + DD/MM válido → fecha EXACTA AAAA-MM-DD (RAF2.1.4)', () => {
-  assert.deepEqual(validateBirthDate('2022', '15/02', NOW), { ok: true, date: '2022-02-15' });
-  assert.deepEqual(validateBirthDate('2022', '01/12', NOW), { ok: true, date: '2022-12-01' });
+test('validateBirthDate: año válido + DD/MM válido → fecha EXACTA AAAA-MM-DD, precision exact (RAF2.1.4)', () => {
+  assert.deepEqual(validateBirthDate('2022', '15/02', NOW), { ok: true, date: '2022-02-15', precision: 'exact' });
+  assert.deepEqual(validateBirthDate('2022', '01/12', NOW), { ok: true, date: '2022-12-01', precision: 'exact' });
   // día/mes de 1 dígito de mes ("15/2" = 15 de febrero) también vale.
-  assert.deepEqual(validateBirthDate('2022', '15/2', NOW), { ok: true, date: '2022-02-15' });
+  assert.deepEqual(validateBirthDate('2022', '15/2', NOW), { ok: true, date: '2022-02-15', precision: 'exact' });
 });
 
 test('validateBirthDate: DD/MM sin año → error en el campo dayMonth (RAF2.1.5)', () => {
@@ -144,17 +144,17 @@ test('validateBirthDate: día/mes fuera de rango → error sin clamp (RAF2.1.7)'
   assert.equal(validateBirthDate('2022', '15/00', NOW).ok, false); // mes 0
   assert.equal(validateBirthDate('2022', '15/13', NOW).ok, false); // mes 13
   // un borde válido: 30/04 (abril tiene 30) y 31/01 (enero tiene 31).
-  assert.deepEqual(validateBirthDate('2022', '30/04', NOW), { ok: true, date: '2022-04-30' });
-  assert.deepEqual(validateBirthDate('2022', '31/01', NOW), { ok: true, date: '2022-01-31' });
+  assert.deepEqual(validateBirthDate('2022', '30/04', NOW), { ok: true, date: '2022-04-30', precision: 'exact' });
+  assert.deepEqual(validateBirthDate('2022', '31/01', NOW), { ok: true, date: '2022-01-31', precision: 'exact' });
 });
 
 test('validateBirthDate: 29/02 — bisiesto OK / no bisiesto ERROR sin clamp (RAF2.1.8)', () => {
-  assert.deepEqual(validateBirthDate('2020', '29/02', NOW), { ok: true, date: '2020-02-29' }); // bisiesto
+  assert.deepEqual(validateBirthDate('2020', '29/02', NOW), { ok: true, date: '2020-02-29', precision: 'exact' }); // bisiesto
   assert.equal(validateBirthDate('2021', '29/02', NOW).ok, false); // no bisiesto
-  assert.deepEqual(validateBirthDate('2000', '29/02', NOW), { ok: true, date: '2000-02-29' }); // div 400 → bisiesto
+  assert.deepEqual(validateBirthDate('2000', '29/02', NOW), { ok: true, date: '2000-02-29', precision: 'exact' }); // div 400 → bisiesto
   assert.equal(validateBirthDate('1900', '29/02', NOW).ok, false); // secular no div 400 → no bisiesto
   // 28/02 siempre vale.
-  assert.deepEqual(validateBirthDate('2021', '28/02', NOW), { ok: true, date: '2021-02-28' });
+  assert.deepEqual(validateBirthDate('2021', '28/02', NOW), { ok: true, date: '2021-02-28', precision: 'exact' });
 });
 
 test('validateBirthDate: fecha exacta FUTURA → error en dayMonth (RAF2.1.9)', () => {
@@ -163,9 +163,9 @@ test('validateBirthDate: fecha exacta FUTURA → error en dayMonth (RAF2.1.9)', 
   assert.equal(r.ok, false);
   assert.equal(r.ok === false && r.field, 'dayMonth');
   // El mismo día de hoy NO es futuro (válido).
-  assert.deepEqual(validateBirthDate('2026', '05/06', NOW), { ok: true, date: '2026-06-05' });
+  assert.deepEqual(validateBirthDate('2026', '05/06', NOW), { ok: true, date: '2026-06-05', precision: 'exact' });
   // Un día anterior a hoy en el año en curso es válido.
-  assert.deepEqual(validateBirthDate('2026', '01/01', NOW), { ok: true, date: '2026-01-01' });
+  assert.deepEqual(validateBirthDate('2026', '01/01', NOW), { ok: true, date: '2026-01-01', precision: 'exact' });
 });
 
 test('validateBirthDate: año inválido propaga el error con field:year (RAF2.1.1 intacto)', () => {
@@ -175,4 +175,28 @@ test('validateBirthDate: año inválido propaga el error con field:year (RAF2.1.
   const r2 = validateBirthDate('2027', '', NOW); // año futuro
   assert.equal(r2.ok, false);
   assert.equal(r2.ok === false && r2.field, 'year');
+});
+
+// ─── precision: expone al caller CÓMO se derivó la fecha (delta override-imputacion-categoria) ─────────
+// 'exact' (DD/MM cargado) / 'year' (solo año → midpoint ciego, el caller la re-imputa) / 'none' (vacío).
+test('validateBirthDate: precision "exact" con DD/MM válido cargado', () => {
+  const r = validateBirthDate('2022', '15/02', NOW);
+  assert.equal(r.ok && r.precision, 'exact');
+  assert.equal(r.ok && r.date, '2022-02-15');
+});
+
+test('validateBirthDate: precision "year" con solo año (midpoint ciego)', () => {
+  const r = validateBirthDate('2022', '', NOW);
+  assert.equal(r.ok && r.precision, 'year');
+  assert.equal(r.ok && r.date, '2022-07-01');
+  // También cuando el año en curso clampea a 01-01: sigue siendo 'year' (imputada por año), no 'exact'.
+  const rClamp = validateBirthDate('2026', '', NOW); // 2026-07-01 futuro → clampa a 2026-01-01
+  assert.equal(rClamp.ok && rClamp.precision, 'year');
+  assert.equal(rClamp.ok && rClamp.date, '2026-01-01');
+});
+
+test('validateBirthDate: precision "none" con todo vacío (date null)', () => {
+  const r = validateBirthDate('', '', NOW);
+  assert.equal(r.ok && r.precision, 'none');
+  assert.equal(r.ok && r.date, null);
 });

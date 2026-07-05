@@ -27,6 +27,7 @@ import {
   waitForServerBirth,
   waitForServerCustomAttribute,
   getServerBirthState,
+  readServerProfileCategory,
   cleanupAll,
   RUN_TAG,
 } from './helpers/admin';
@@ -752,6 +753,80 @@ test('delta #3 (RAF2.1.3): alta SOLO con Año (sin DD/MM) → birth_date midpoin
   await expect(page.getByText('Historial', { exact: true })).toBeVisible({ timeout: 20_000 });
   const { animal_id } = await waitForServerAnimalProfile(establishmentId, { idv });
   expect(await readServerBirthDate(animal_id)).toBe('2022-07-01');
+});
+
+test('delta override-imputación: macho "Torito" con SOLO el año (borde 2 años) → categoría NO flipeada + category_override=false', async ({
+  page,
+}) => {
+  test.setTimeout(120_000); // alta + 2 polls server (perfil + categoría) → headroom sobre el default 60s.
+  const user = await createTestUser('imputetorito');
+  await setUserPhone(user.id, '1123456789');
+  const { establishmentId } = await seedEstablishmentWithRodeo(user.id, 'Campo ImputeTorito');
+
+  await page.goto('/');
+  await signIn(page, user);
+  await waitForHome(page);
+  await gotoAnimales(page);
+
+  await page.getByRole('button', { name: 'Dar de alta tu primer animal' }).click();
+  await walkWizardToData(page, { sex: 'Macho', categoryName: 'Torito' });
+
+  // Año = hace 2 años (borde del corte de 2 años). El midpoint CIEGO 'AAAA-07-01' caería ≈2 años → el
+  // server computaría "toro" y, con override=false, el cron nocturno FLIPEARÍA la elección a toro. La
+  // imputación consciente de la categoría (delta) elige un día del cruce [1,2) años → compute da "torito"
+  // → override=false SIN flip. Año dinámico para que el test no envejezca.
+  const year = new Date().getFullYear() - 2;
+  const idv = `6134${Date.now().toString().slice(-6)}`;
+  await page.getByLabel('Caravana visual (recomendado)', { exact: true }).fill(idv);
+  await page.getByLabel('Año de nacimiento (opcional, AAAA)', { exact: true }).fill(String(year));
+  // Sin DD/MM → year-only → dispara la imputación consciente de la categoría.
+
+  await page.getByRole('button', { name: 'Crear animal', exact: true }).click();
+
+  // Aterriza en la ficha (create OK) y el badge muestra la categoría ELEGIDA (Torito), no la flipeada.
+  await expect(page.getByText('Historial', { exact: true })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText('Torito', { exact: true }).first()).toBeVisible();
+
+  // ORÁCULO server: la categoría almacenada = Torito y category_override=FALSE (auto-avanza sin flip). Sin
+  // el fix, el midpoint ciego daría category_override=TRUE (la elección quedaría pineada/congelada).
+  const { id: profileId } = await waitForServerAnimalProfile(establishmentId, { idv });
+  const { categoryOverride, categoryCode } = await readServerProfileCategory(profileId);
+  expect(categoryCode).toBe('torito');
+  expect(categoryOverride).toBe(false);
+});
+
+test('delta override-imputación: macho "Ternero" con SOLO el año en curso → ternero consistente + category_override=false', async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  const user = await createTestUser('imputeternero');
+  await setUserPhone(user.id, '1123456789');
+  const { establishmentId } = await seedEstablishmentWithRodeo(user.id, 'Campo ImputeTernero');
+
+  await page.goto('/');
+  await signIn(page, user);
+  await waitForHome(page);
+  await gotoAnimales(page);
+
+  await page.getByRole('button', { name: 'Dar de alta tu primer animal' }).click();
+  await walkWizardToData(page, { sex: 'Macho', categoryName: 'Ternero' });
+
+  // Año en curso → un ternero (<1 año). La imputación cae dentro del cruce [0,1) año ∩ año en curso ∩
+  // pasado → compute da "ternero" → override=false (la categoría elegida coincide con la derivable).
+  const year = new Date().getFullYear();
+  const idv = `6135${Date.now().toString().slice(-6)}`;
+  await page.getByLabel('Caravana visual (recomendado)', { exact: true }).fill(idv);
+  await page.getByLabel('Año de nacimiento (opcional, AAAA)', { exact: true }).fill(String(year));
+
+  await page.getByRole('button', { name: 'Crear animal', exact: true }).click();
+
+  await expect(page.getByText('Historial', { exact: true })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText('Ternero', { exact: true }).first()).toBeVisible();
+
+  const { id: profileId } = await waitForServerAnimalProfile(establishmentId, { idv });
+  const { categoryOverride, categoryCode } = await readServerProfileCategory(profileId);
+  expect(categoryCode).toBe('ternero');
+  expect(categoryOverride).toBe(false);
 });
 
 test('delta #3 (RAF2.1.7): DD/MM inválido (31/02) → error inline + animal NO creado', async ({ page }) => {

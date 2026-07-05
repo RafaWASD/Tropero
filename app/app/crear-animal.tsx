@@ -62,7 +62,7 @@ import {
   isValidTagElectronic,
   TAG_ELECTRONIC_LENGTH,
 } from '@/utils/animal-input';
-import { categoryOverrideFor, type AnimalSex } from '@/utils/animal-category';
+import { categoryOverrideFor, imputeBirthDateForCategory, type AnimalSex } from '@/utils/animal-category';
 import { categoriesForSex } from '@/utils/animal-category-picker';
 import {
   fieldsForCategory,
@@ -549,14 +549,26 @@ export default function CrearAnimalScreen() {
       return;
     }
 
-    const birthDate = dateV.date;
+    // Fecha year-only (solo año, sin DD/MM) → IMPUTACIÓN CONSCIENTE DE LA CATEGORÍA (delta
+    // override-imputacion-categoria): en vez del midpoint ciego 'AAAA-07-01' (que puede caer del lado
+    // equivocado del corte de edad y hacer que compute_category flipee la categoría elegida), imputamos un
+    // día dentro del cruce (año ∩ ventana-etaria-de-la-elegida ∩ pasado) → la fecha queda category-consistent
+    // → categoryOverrideFor da override=FALSE (auto-avanza sin flip). Si la categoría es imposible para el
+    // año (cruce vacío), imputeBirthDateForCategory cae al MISMO midpoint ciego → override=true (pin). Con
+    // fecha EXACTA (precision 'exact') o sin fecha ('none') NO se toca nada.
+    let birthDate = dateV.date;
+    if (birthDate != null && dateV.precision === 'year') {
+      birthDate = imputeBirthDateForCategory(selectedCategoryCode, sex, birthDate, now);
+    }
     // Preñez capturada (solo si la categoría la pide Y es positiva): refina el override (vaquillona
     // preñada derivable) y dispara el tacto+ post-create. Un "Vacía" del alta NO cuenta como preñez.
     const pregnantCaptured = showPregnancy && isPregnantStatus(pregnancyStatus);
 
     // OVERRIDE (alta guiada #4, refinado en B): la categoría elegida vs. la que el sistema computaría
-    // por sexo + edad + PREÑEZ capturada. vaquillona_prenada + preñez → coincide → override=false.
+    // por sexo + edad + PREÑEZ capturada. vaquillona_prenada + preñez → coincide → override=false. La
+    // comparación puntual queda IGUAL; toda la inteligencia year-only está en la fecha imputada de arriba.
     const categoryOverride = categoryOverrideFor(selectedCategoryCode, sex, birthDate, {
+      today: now,
       pregnant: pregnantCaptured,
     });
 

@@ -87,6 +87,11 @@
 // triggers + el job nocturno (spec 02 Tier 2); el cliente NO recomputa categoría tras eventos. (El
 // `service`/IA ya NO transiciona categoría — RPSC.1.1 / 0104.) Acá solo el alta.
 
+// Fallback del alta year-only: el midpoint CIEGO 'AAAA-07-01' (o el clamp a no-futuro) al que cae
+// `imputeBirthDateForCategory` cuando la categoría no es age-derivable o el cruce es vacío. NO hay ciclo de
+// imports: animal-birth-year importa solo event-timeline (→ wheel-picker), nunca este módulo.
+import { birthYearToDate } from './animal-birth-year';
+
 /**
  * Códigos de categoría de (bovino, cría) que el modelo contempla para el alta.
  *
@@ -129,6 +134,86 @@ export type AnimalSex = 'male' | 'female';
 
 const ONE_YEAR_DAYS = 365;
 const TWO_YEAR_DAYS = 730;
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// Ventanas etarias INVERSAS de los cortes de `compute_category` (alta = animal ENTERO, is_castrated=false;
+// el alta no tiene toggle de castración → nunca novillito/novillo). Días, intervalo [minAge, maxAge)
+// (maxAge=Infinity = sin cota superior). Es la INVERSA de la rama sin-eventos de `computeCategoryCode`
+// (macho: <1año ternero / [1,2) torito / ≥2 toro · hembra: <1año ternera / ≥1 vaquillona).
+//
+//   ➜ ANTI-DRIFT (ver banner del header, RC6.5.1): estas ventanas ESPEJAN LOS CORTES de `compute_category`
+//     (`computeCategoryCode`, cortes ONE_YEAR_DAYS / TWO_YEAR_DAYS). Si una migración cambia esos cortes o
+//     las ramas de la máquina de estados, ACTUALIZAR estas ventanas EN EL MISMO COMMIT (junto al espejo y
+//     sus fixtures). Cero números mágicos: reusa ONE_YEAR_DAYS / TWO_YEAR_DAYS.
+const AGE_WINDOWS: Record<AnimalSex, Record<string, { minAge: number; maxAge: number }>> = {
+  male: {
+    ternero: { minAge: 0, maxAge: ONE_YEAR_DAYS },
+    torito: { minAge: ONE_YEAR_DAYS, maxAge: TWO_YEAR_DAYS },
+    toro: { minAge: TWO_YEAR_DAYS, maxAge: Infinity },
+  },
+  female: {
+    ternera: { minAge: 0, maxAge: ONE_YEAR_DAYS },
+    vaquillona: { minAge: ONE_YEAR_DAYS, maxAge: Infinity },
+  },
+};
+
+const DAY_MS = 1000 * 60 * 60 * 24;
+
+/**
+ * Imputa una birth_date ISO 'YYYY-MM-DD' para el alta cuando SOLO se conoce el AÑO, usando la categoría
+ * elegida para caer del lado correcto del corte de edad (evita el flip del midpoint ciego). Devuelve el
+ * MIDPOINT del cruce (año ∩ ventana-etaria-de-la-categoría ∩ pasado). Si la categoría no es age-derivable
+ * (multipara/vaca_segundo_servicio/vaquillona_prenada/novillito/novillo — el alta entra entero, sin
+ * castración) o el cruce es VACÍO (categoría imposible para el año) → cae al midpoint ciego `birthYearToDate`
+ * (fallback). NUNCA devuelve una fecha futura (hi acotado a hoy). PURA, testeable con node:test.
+ *
+ * INSIGHT (por qué esto resuelve el flip sin tocar `categoryOverrideFor`): con la fecha imputada
+ * category-consistent, `computeInitialCategoryCode(sex, fechaImputada) === chosen` → la comparación puntual
+ * de `categoryOverrideFor` da `override=false` (auto-avanza sin flip). En el fallback (cruce vacío), la
+ * computada difiere de la elegida → `override=true` (preserva la elección rara, congelada). Toda la
+ * inteligencia vive acá; `categoryOverrideFor` queda IGUAL.
+ *
+ * Aritmética de días en UTC (consistente con `ageInDays`/`startOfDay`; edad = floor((today - birth)/día)).
+ */
+export function imputeBirthDateForCategory(
+  chosen: string,
+  sex: AnimalSex,
+  yearOnlyIso: string, // el midpoint ciego que ya calculó validateBirthDate (year-only), ej '2024-07-01'
+  today?: Date,
+): string {
+  const year = Number(yearOnlyIso.slice(0, 4));
+  const window = AGE_WINDOWS[sex]?.[chosen.trim()];
+  // Categoría NO age-derivable (sin ventana) → midpoint ciego. El override lo resuelve después
+  // categoryOverrideFor (con `pregnant` para vaquillona_prenada; el resto queda override=true).
+  if (!window) return birthYearToDate(year, today) as string;
+
+  const todayMid = startOfDay(today ?? new Date());
+  // age >= minAge  ⟺ birth <= today - minAge          (latestBirth, inclusive).
+  const latestBirth = todayMid.getTime() - window.minAge * DAY_MS;
+  // age <  maxAge  ⟺ birth >= today - (maxAge - 1)     (earliestBirth, inclusive; maxAge=∞ → sin cota inferior).
+  const yearStart = Date.UTC(year, 0, 1);
+  const yearEnd = Date.UTC(year, 11, 31);
+  const earliestBirth =
+    window.maxAge === Infinity ? yearStart : todayMid.getTime() - (window.maxAge - 1) * DAY_MS;
+
+  const lo = Math.max(earliestBirth, yearStart);
+  const hi = Math.min(latestBirth, yearEnd, todayMid.getTime());
+  // Cruce VACÍO (categoría imposible para el año, ej. 'toro' para un nacido este año) → midpoint ciego.
+  if (lo > hi) return birthYearToDate(year, today) as string;
+
+  // Midpoint del cruce, redondeado a día ENTERO (floor del medio en días → siempre queda dentro de [lo, hi]).
+  const spanDays = Math.floor((hi - lo) / DAY_MS);
+  const mid = new Date(lo + Math.floor(spanDays / 2) * DAY_MS);
+  return isoUtcDate(mid);
+}
+
+/** ISO 'YYYY-MM-DD' (UTC, padded) de un Date normalizado a medianoche UTC. */
+function isoUtcDate(d: Date): string {
+  const yyyy = String(d.getUTCFullYear()).padStart(4, '0');
+  const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(d.getUTCDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
 
 /**
  * Evento reproductivo CRUDO del SQLite local (synced u overlay) que alimenta el espejo (RC6.1.1). El

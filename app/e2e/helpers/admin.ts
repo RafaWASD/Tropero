@@ -1056,6 +1056,38 @@ export async function waitForServerAnimalProfile(
 }
 
 /**
+ * Lee el `category_override` + el CODE de categoría de un perfil (server-side, service_role). Oráculo del
+ * delta override-imputacion-categoria: tras un alta year-only category-consistent, el override debe quedar
+ * en FALSE (auto-avanza sin flip) y la categoría almacenada = la elegida. `category_override` vive en
+ * `animal_profiles`; el CODE se resuelve en dos pasos por el FK `animal_profiles.category_id →
+ * categories_by_system(id)` (join por **id**, NO por code — `categories_by_system` es la única tabla de
+ * categorías; mismo patrón que seedAnimal / getCategoryCodeById / animal suite run.cjs). `category_id` ya
+ * está seteado atómicamente por create_animal.
+ */
+export async function readServerProfileCategory(
+  profileId: string,
+): Promise<{ categoryOverride: boolean; categoryCode: string | null }> {
+  const { data, error } = await admin
+    .from('animal_profiles')
+    .select('category_override, category_id')
+    .eq('id', profileId)
+    .maybeSingle();
+  if (error) throw new Error(`readServerProfileCategory: ${error.message}`);
+  if (!data) throw new Error(`readServerProfileCategory: perfil ${profileId} no encontrado`);
+  let categoryCode: string | null = null;
+  if (data.category_id) {
+    const { data: cat, error: cErr } = await admin
+      .from('categories_by_system')
+      .select('code')
+      .eq('id', data.category_id)
+      .maybeSingle();
+    if (cErr) throw new Error(`readServerProfileCategory categories_by_system: ${cErr.message}`);
+    categoryCode = (cat?.code as string) ?? null;
+  }
+  return { categoryOverride: Boolean(data.category_override), categoryCode };
+}
+
+/**
  * ORÁCULO de persistencia server-side del MOVIMIENTO DE RODEO de un perfil (spec 03 R4.4 — "pasar el
  * animal a este rodeo"). Pollea vía service_role hasta que `animal_profiles.rodeo_id` del perfil dado sea
  * `expectedRodeoId`. Verifica que el UPDATE de `rodeo_id` (CRUD-plano local + upload queue) llegó REAL al

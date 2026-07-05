@@ -7,14 +7,17 @@ import {
   computeInitialCategoryCode,
   categoryOverrideFor,
   computeCategoryCode,
+  imputeBirthDateForCategory,
   inferIsCastrated,
   deriveDisplayCategory,
   computeDisplayOverrides,
   resolveCastrationTargetCategory,
+  type AnimalSex,
   type ReproEventInput,
   type MirrorRowInput,
   type CategoryCatalogEntry,
 } from './animal-category.ts';
+import { birthYearToDate } from './animal-birth-year.ts';
 
 // Fecha fija para determinismo.
 const TODAY = new Date(Date.UTC(2026, 5, 1)); // 2026-06-01
@@ -185,6 +188,136 @@ test('B: recría coincidente sigue override=false con la firma de opciones', () 
   // Y un macho ternero coincidente con opciones vacías → false (today default; isoDaysAgo es relativo a
   // TODAY, así que pasamos today para determinismo).
   assert.equal(categoryOverrideFor('ternero', 'male', isoDaysAgo(180), { today: TODAY }), false);
+});
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// imputeBirthDateForCategory (delta override-imputacion-categoria) — imputación year-only CONSCIENTE de
+// la categoría elegida. El corazón del fix: la fecha imputada es category-consistent → categoryOverrideFor
+// da override=FALSE (auto-avanza sin flip); si la categoría es imposible para el año → fallback midpoint
+// ciego → override=TRUE (pin). today INYECTADO (2026-07-05 UTC), determinista.
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+
+const TODAY_IMPUTE = new Date(Date.UTC(2026, 6, 5)); // 2026-07-05 UTC
+
+/** El midpoint CIEGO que validateBirthDate pasa como yearOnlyIso (solo el año es load-bearing). */
+function yearMid(year: number): string {
+  return birthYearToDate(year, TODAY_IMPUTE) as string;
+}
+
+/** Invariantes propios del contrato: ISO válido, DENTRO del año pedido, NUNCA futuro (≤ today UTC). */
+function assertImputeInvariants(res: string, year: number, today: Date): void {
+  assert.match(res, /^\d{4}-\d{2}-\d{2}$/, `${res} debe ser ISO YYYY-MM-DD`);
+  assert.equal(res.slice(0, 4), String(year), `${res} debe caer en el año ${year}`);
+  const todayIsoUtc = today.toISOString().slice(0, 10);
+  assert.ok(res <= todayIsoUtc, `${res} no puede ser futuro (> ${todayIsoUtc})`);
+}
+
+// ─── Casos age-derivables: la fecha imputada es category-consistent ⟺ override=false (el corazón) ──
+const IMPUTE_CONSISTENT: Array<{ chosen: string; sex: AnimalSex; year: number; expect: string }> = [
+  { chosen: 'ternero', sex: 'male', year: 2025, expect: 'ternero' },
+  { chosen: 'torito', sex: 'male', year: 2024, expect: 'torito' },
+  { chosen: 'toro', sex: 'male', year: 2024, expect: 'toro' },
+  { chosen: 'ternera', sex: 'female', year: 2025, expect: 'ternera' },
+  { chosen: 'vaquillona', sex: 'female', year: 2024, expect: 'vaquillona' },
+];
+for (const c of IMPUTE_CONSISTENT) {
+  test(`impute consistente: ${c.sex} ${c.chosen} año ${c.year} → compute(res)=${c.expect} + override=false`, () => {
+    const res = imputeBirthDateForCategory(c.chosen, c.sex, yearMid(c.year), TODAY_IMPUTE);
+    assertImputeInvariants(res, c.year, TODAY_IMPUTE);
+    // consistencia: compute_category de la fecha imputada COINCIDE con lo elegido (evita el flip nocturno).
+    assert.equal(computeInitialCategoryCode(c.sex, res, { today: TODAY_IMPUTE }), c.expect);
+    // ⟹ el override se resuelve solo: category-consistent → override=false (auto-avanza, sin flip).
+    assert.equal(categoryOverrideFor(c.chosen, c.sex, res, { today: TODAY_IMPUTE }), false);
+  });
+}
+
+test('impute: torito año 2024 cae en la segunda mitad del año (dentro del cruce, no el midpoint ciego 07-01)', () => {
+  // El midpoint ciego sería 2024-07-01 (≈2 años → flip a toro). El consciente cae MÁS TARDE en 2024 para
+  // quedar en [1,2) años → torito. Verificamos que NO es el ciego y que es ≥ julio.
+  const res = imputeBirthDateForCategory('torito', 'male', yearMid(2024), TODAY_IMPUTE);
+  assert.notEqual(res, '2024-07-01');
+  assert.ok(res >= '2024-07-01' && res <= '2024-12-31');
+});
+
+// ─── Cruce VACÍO (categoría imposible para el año) → fallback midpoint ciego + override=true (pin) ──
+test('impute fallback: macho TORO año 2025 (imposible: <2 años) → midpoint ciego + override=true', () => {
+  const res = imputeBirthDateForCategory('toro', 'male', yearMid(2025), TODAY_IMPUTE);
+  assert.equal(res, birthYearToDate(2025, TODAY_IMPUTE)); // '2025-07-01' (midpoint ciego)
+  assert.equal(categoryOverrideFor('toro', 'male', res, { today: TODAY_IMPUTE }), true);
+});
+
+test('impute fallback: macho TORITO año 2026 (nacido este año, imposible: <1 año) → midpoint ciego + override=true', () => {
+  const res = imputeBirthDateForCategory('torito', 'male', yearMid(2026), TODAY_IMPUTE);
+  assert.equal(res, birthYearToDate(2026, TODAY_IMPUTE));
+  assert.equal(categoryOverrideFor('torito', 'male', res, { today: TODAY_IMPUTE }), true);
+});
+
+// ─── Categorías NO age-derivables (sin ventana) → siempre fallback midpoint ciego ──────────────────
+test('impute: vaquillona_prenada (no derivable por edad) → midpoint ciego; +preñez → override=false, sin → true', () => {
+  const res = imputeBirthDateForCategory('vaquillona_prenada', 'female', yearMid(2024), TODAY_IMPUTE);
+  assert.equal(res, birthYearToDate(2024, TODAY_IMPUTE)); // '2024-07-01' (midpoint ciego, no toca la ventana)
+  // Con la preñez capturada el tacto+ sintético la vuelve derivable → coincide → override=false.
+  assert.equal(
+    categoryOverrideFor('vaquillona_prenada', 'female', res, { today: TODAY_IMPUTE, pregnant: true }),
+    false,
+  );
+  // Sin preñez computa vaquillona → difiere → override=true (comportamiento intacto).
+  assert.equal(
+    categoryOverrideFor('vaquillona_prenada', 'female', res, { today: TODAY_IMPUTE, pregnant: false }),
+    true,
+  );
+});
+
+test('impute: multipara / novillito / novillo / code desconocido → midpoint ciego (sin ventana etaria)', () => {
+  assert.equal(imputeBirthDateForCategory('multipara', 'female', yearMid(2020), TODAY_IMPUTE), birthYearToDate(2020, TODAY_IMPUTE));
+  assert.equal(imputeBirthDateForCategory('vaca_segundo_servicio', 'female', yearMid(2021), TODAY_IMPUTE), birthYearToDate(2021, TODAY_IMPUTE));
+  assert.equal(imputeBirthDateForCategory('novillito', 'male', yearMid(2024), TODAY_IMPUTE), birthYearToDate(2024, TODAY_IMPUTE));
+  assert.equal(imputeBirthDateForCategory('novillo', 'male', yearMid(2022), TODAY_IMPUTE), birthYearToDate(2022, TODAY_IMPUTE));
+  assert.equal(imputeBirthDateForCategory('code_raro', 'female', yearMid(2023), TODAY_IMPUTE), birthYearToDate(2023, TODAY_IMPUTE));
+});
+
+test('impute: code con espacios accidentales igual matchea la ventana (trim, robustez del picker)', () => {
+  const res = imputeBirthDateForCategory('  torito  ', 'male', yearMid(2024), TODAY_IMPUTE);
+  assert.equal(computeInitialCategoryCode('male', res, { today: TODAY_IMPUTE }), 'torito');
+});
+
+// ─── Invariantes globales sobre una matriz amplia (nunca futuro, dentro del año, ISO válido) ───────
+test('impute invariantes: nunca futuro + dentro del año + ISO válido (matriz derivable y fallback)', () => {
+  const combos: Array<[string, AnimalSex, number]> = [
+    ['ternero', 'male', 2026],
+    ['torito', 'male', 2024],
+    ['toro', 'male', 2020],
+    ['ternera', 'female', 2026],
+    ['vaquillona', 'female', 2024],
+    ['toro', 'male', 2026], // imposible → fallback, igual cumple invariantes
+    ['multipara', 'female', 2019], // no derivable → fallback
+  ];
+  for (const [chosen, sex, year] of combos) {
+    const res = imputeBirthDateForCategory(chosen, sex, yearMid(year), TODAY_IMPUTE);
+    assertImputeInvariants(res, year, TODAY_IMPUTE);
+  }
+});
+
+// ─── Límite propio: today = 2026-01-01, año en curso 2026 (borde del año) ──────────────────────────
+test('impute límite: today=2026-01-01 — ternero año 2026 consistente (nacido hoy), torito imposible → pin', () => {
+  const jan1 = new Date(Date.UTC(2026, 0, 1));
+  const yearMidJan = birthYearToDate(2026, jan1) as string; // clamp a 2026-01-01 (07-01 sería futuro)
+  const ternRes = imputeBirthDateForCategory('ternero', 'male', yearMidJan, jan1);
+  assert.equal(ternRes, '2026-01-01'); // único día posible del cruce (nacido hoy)
+  assert.equal(computeInitialCategoryCode('male', ternRes, { today: jan1 }), 'ternero');
+  assertImputeInvariants(ternRes, 2026, jan1);
+  // torito para un nacido HOY es imposible (age 0 < 1 año) → cruce vacío → midpoint ciego → override=true.
+  const toritoRes = imputeBirthDateForCategory('torito', 'male', yearMidJan, jan1);
+  assert.equal(categoryOverrideFor('torito', 'male', toritoRes, { today: jan1 }), true);
+});
+
+// ─── No-regresión: categoryOverrideFor con fecha EXACTA (no pasa por impute) no cambió ─────────────
+test('no-regresión: override con fecha EXACTA sigue por comparación puntual (impute no aplica)', () => {
+  // '2024-10-03' en 2026-07-05 ≈ 640 días → torito. La imputación NO interviene con fecha exacta.
+  assert.equal(categoryOverrideFor('torito', 'male', '2024-10-03', { today: TODAY_IMPUTE }), false);
+  assert.equal(categoryOverrideFor('toro', 'male', '2024-10-03', { today: TODAY_IMPUTE }), true); // computa torito → difiere
+  // hembra exacta <1 año elegida ternera → false (idéntico a antes del delta).
+  assert.equal(categoryOverrideFor('ternera', 'female', '2026-01-10', { today: TODAY_IMPUTE }), false);
 });
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════

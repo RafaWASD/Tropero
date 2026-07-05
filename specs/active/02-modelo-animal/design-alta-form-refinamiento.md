@@ -5,6 +5,15 @@
 
 > **Nota de delta (ADR-028)**: el baseline (`requirements.md`/`design.md`/`tasks.md` y los deltas previos) NO se reescribe ni se re-tilda. Al cerrar este delta (Puerta 2) se folda al `design.md` baseline un puntero en "Deltas posteriores" + nota as-built bajo el/los `R<n>` afectados (R4 alta; los campos del paso 4 que toca RT2/RAR).
 
+> **RECONCILIACIÓN as-built (delta posterior `override-imputacion-categoria`, ADR-028 Nivel A, 2026-07)**: el
+> tipo `BirthDateValidation` ganó un campo **`precision`** (`'exact' | 'year' | 'none'`) en los casos
+> `ok:true` — **aditivo** (los callers que solo leen `date`/`field`, ej. `LinkCalfPrompt`, no cambian). Sirve
+> para que el alta detecte el caso year-only y **re-impute** la fecha consciente de la categoría elegida
+> (`imputeBirthDateForCategory`, en `animal-category.ts`) ANTES de `categoryOverrideFor`, evitando el flip del
+> midpoint ciego. `validateBirthDate`/`birthYearToDate` NO cambian su lógica (siguen devolviendo el midpoint
+> `AAAA-07-01` con precision `'year'`); la re-imputación vive en el caller `crear-animal.tsx`. Detalle abajo en
+> §2.1 y en `progress/impl_02-override-imputacion-categoria.md`.
+
 ---
 
 ## 1. Archivos a crear / modificar
@@ -33,8 +42,10 @@
 export function sanitizeDayMonthInput(raw: string): string; // "1502" → "15/02" ; "3/" → "3" ; "abc" → ""
 
 export type BirthDateValidation =
-  | { ok: true; date: string }           // ISO 'YYYY-MM-DD' (exacta si hay DD/MM; midpoint si solo año)
-  | { ok: true; date: null }             // todo vacío (año y DD/MM): birth_date null (opcional, válido)
+  // `precision` (reconciliación delta override-imputacion-categoria): 'exact' (DD/MM cargado), 'year'
+  // (solo año → midpoint, el caller la re-imputa consciente de la categoría), 'none' (vacío). ADITIVO.
+  | { ok: true; date: string; precision: 'exact' | 'year' } // ISO 'YYYY-MM-DD' (exacta si hay DD/MM; midpoint si solo año)
+  | { ok: true; date: null; precision: 'none' }             // todo vacío (año y DD/MM): birth_date null (opcional, válido)
   | { ok: false; error: string; field: 'year' | 'dayMonth' };
 
 /**
