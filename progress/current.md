@@ -5,6 +5,12 @@
 
 **SESIÓN 2026-06-29/30 — CORRECCIONES DEL TESTEO EN VIVO CON FACUNDO (16) + CONVENCIÓN SDD PARA FIXES (ADR-028).**
 
+## 🆕 2026-07-05 — #3/#13/#14 PUERTA 2 APROBADA + override consciente de rango (en curso)
+- **✅ `alta-form-refinamiento` (#3/#13/#14) Puerta 2 APROBADA por Raf.** Foldeado al baseline (`design.md` Deltas posteriores → done + nota as-built R4) + `feature_list` notes. Código ya estaba en `8926e16`; fold docs-only. Feature 02 sigue `deferred`.
+- **Override consciente del rango etario (recomendación de Raf, aprobada "dale"):** el pin de categoría del alta (`categoryOverrideFor`) hoy compara la elegida contra la computada del **midpoint único** → con fecha **año-solo** el midpoint puede cruzar el borde de categoría (1/2 años) y **fijar de más** (ej. torito año 2024 → midpoint 2024-07-01 ≈ 2 años → computa `toro` → pin). Rompe la auto-transición (ADR-008) justo en el import de rodeo.
+  - **ARRUGA cazada al diseñar el fix**: el simple "no fijar" (override=false) NO alcanza — el cron nocturno (0066) recomputaría desde el midpoint y **flipearía el label elegido** al derivado (torito→toro), PEOR que hoy (hoy lo preserva congelado). El fix correcto es **imputar una fecha consciente de la categoría** (el midpoint del rango año ∩ ventana-etaria de la categoría elegida) → `compute_category` coincide con lo elegido, override=false, auto-avanza sin flip. Cambia el midpoint 1-jul (que a Raf le gustaba) por uno category-aware SOLO en year-only. **⏸ pendiente confirmación de Raf** antes de construir (Nivel A: implementer→reviewer→Gate 2→reconcile→Puerta 2).
+  - Punto 2 de Raf (fecha futura si aún no llegó julio) YA resuelto por el clamp a 1-ene (`birthYearToDate:67-77` = patrón `max_dates` CDISC). Research: `admiral`/CDISC + PhUSE (midpoint distorsiona duraciones — y derivamos edad→categoría de la fecha).
+
 ## 🆕 2026-07-04 — FIX SUPERPOSICIÓN "Sin caravana" ↔ estado repro (Nivel A) — ✅
 Raf mandó captura (`tests/tag_sin_caravana.png`): en la lista de Animales el chip "Sin caravana" se superponía con el estado repro ("Servida sin tacto") cuando la categoría es larga. Root cause: en `AnimalRow.tsx` la línea 2 tenía el badge de categoría + el chip repro como `flexShrink 0` → con categoría larga ("Vaca segundo servicio") desbordaban hacia la derecha y pisaban el `NoTagChip` (RN no clipea). **Fix (Nivel A, frontend-only)**: prioridad de degradación — categoría + "Sin caravana" siempre completos, el chip repro trunca ("Se…") como último recurso, el rodeo cede primero (flexShrink alto), + `overflow:hidden` de red de seguridad. Verificado con capture (oráculo `reproBox.x+w <= noTagBox.x`; caso normal 5501 intacto). ⚠ En el peor caso (categoría más larga + repro + sin caravana en 412px) el chip repro queda como "Se…" — a refinar si Raf prefiere dropear el chip o acortar el label de categoría.
 
@@ -51,7 +57,7 @@ Raf + Facundo testearon la app en vivo (PRE-campo, sin datos reales, bastón no 
 |---|---|---|---|
 | #9 KPIs→Datos · #11 circunferencia escrotal · #12 dientes | Fase 1 (Nivel A) | `2009104`+`d67ea3e` | ✅ Raf (presente) |
 | #5 badge repro · #6 prompt aptitud alta · #1b inseminación | `aptitud-reproductiva` | `0d447cd`+`b7c2554` | ✅ Raf (presente) |
-| #3 fecha dd/mm · #13 condición stepper · #14 destildar | `alta-form-refinamiento` | `8926e16` | ⏸ **post-hoc (Raf)** |
+| #3 fecha dd/mm · #13 condición stepper · #14 destildar | `alta-form-refinamiento` | `8926e16` | ✅ Raf (2026-07-05) |
 | #6 caravana manual (electrónica+visual desde ficha) | `caravana-ficha` | `19f89bd` | ⏸ **post-hoc (Raf)** |
 
 Todos frontend puro → Gate 1 N/A. Gates automáticos (veto leader + Gate 2 + reviewer) verdes en los 4.
