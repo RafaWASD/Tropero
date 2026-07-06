@@ -63,6 +63,33 @@
   `RCF.n → archivo:test` en `progress/impl_caravana-ficha.md`. Reconciliar specs al as-built si algo cambió.
   Cubre: (trazabilidad / cierre).
 
+## Delta bastoneo (2026-07-06) — RCF.6 (el bastoneo deja de estar DEFERIDO)
+
+- [x] **T16** — Módulo puro `app/src/services/ble/listener-gate.ts` con
+  `resolveListening({ scopedScannerActive, enabled, busy })` (= `scopedScannerActive || (enabled && !busy)`) +
+  test `listener-gate.test.ts` (scanner acotado fuerza la escucha aunque busy; al liberar vuelve a
+  `enabled && !busy`). Registrado en `scripts/run-tests.mjs`. Cubre: RCF.6.7, RCF.6.5.
+- [x] **T17** — `BleStickListenerProvider`: `+scopedCount` (contador) → `scopedScannerActive` +
+  `acquireScopedScanner()` (release idempotente) en el `ProviderApi`; `listening` pasa a `resolveListening`.
+  `stick.ts`: `+useScopedScannerControls()` (ref estable). Cubre: RCF.6.5.
+- [x] **T18** — `FindOrCreateOverlay`: guard `scopedScannerActive` en `onTagRead` (retorno temprano, paralelo a
+  `BLE_OWNED_ROUTES`) + cierre defensivo del overlay si un scanner acotado se activa con él abierto +
+  `testID="find-or-create-overlay"` (oráculo E2E). Cubre: RCF.6.5.
+- [x] **T19** — `TagScanSheet.tsx` (nuevo): adquiere el scanner acotado (mount/unmount), hero adaptativo
+  (`resolveListenConnState`: scan/connect/manual-promovido), confirmación pre-commit (`formatEidReadable` +
+  "Asignar … a este animal") + assign a ESTE animal (`onAssignTag`), error inline fail-closed. Export en el
+  barrel. Cubre: RCF.6.1, RCF.6.2, RCF.6.3, RCF.6.4, RCF.6.6.
+- [x] **T20** — `IdentifierAssignRow`: `+prop hideLabel`. Ficha `[id].tsx`: afordancia "Bastonear la caravana"
+  (`TagScanCta`) + la carga manual (piso, `hideLabel`) bajo un solo label; monta `TagScanSheet` condicional a
+  `scanOpen && canAssignTag`. Cubre: RCF.6.1, RCF.6.6.
+- [x] **T21** — E2E `app/e2e/baston-ficha.spec.ts` (adaptador mock): (a) bastoneo desde la ficha → asigna a ESTE
+  animal (oráculo server) + overlay NO se abre (ausencia del testID exclusivo); (b) al cerrar, un bastonazo
+  posterior no dispara nada; (c) sin transporte → manual-promovido + carga manual sigue funcionando. Cubre:
+  RCF.6.1–RCF.6.6.
+- [x] **T22** — Capture file `app/e2e/captures/caravana-ficha-bastoneo.capture.ts` (Gate 2.5, ADR-029): 6
+  capturas nombradas (afordancia / connect / scan / lectura+confirmación / post-asignación / manual-promovido).
+  Reconciliación de specs (context/requirements/design/tasks) al as-built. Cubre: (Gate 2.5 / cierre).
+
 ## Notas
 
 - **¿Toca DB?** NO. `idv` por UPDATE local (trigger 0036 permite NULL→valor; unique parcial 0020 vigente); `tag`

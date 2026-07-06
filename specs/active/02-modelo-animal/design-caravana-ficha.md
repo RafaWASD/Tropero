@@ -7,6 +7,10 @@
 > Delta chico, plumbing casi todo existente. **No toca el backend**: la caravana electrónica reusa el RPC
 > `assign_tag_to_animal` (0089) y el `idv` se asigna por UPDATE local sobre `animal_profiles` (tabla, trigger de
 > inmutabilidad y unique parcial ya vigentes). No crea schema, RLS, RPC ni Edge → **Gate 1 N/A** (sección 8).
+>
+> **Ampliación (delta bastoneo, 2026-07-06)**: se agregó el **bastoneo de la caravana electrónica desde la
+> ficha** (RCF.6) reusando la infraestructura BLE de ADR-024 (el MISMO listener/contrato de ingesta que MODO
+> MANIOBRAS y el FindOrCreateOverlay). Sigue siendo **frontend puro** (Gate 1 N/A). Detalle en **§10**.
 
 ## 1. Archivos a crear / modificar
 
@@ -17,10 +21,19 @@
 | `app/src/services/animals.ts` | **+`setIdv(profileId, idv)`** (RCF.3.3): orquestador delgado `ServiceResult<true>` que delega en `runLocalWrite(buildSetIdvUpdate(...))` (mismo patrón que `setCastrated`/`setFutureBull`). El TAG **no** agrega service nuevo (reusa `assignTagToAnimal` `:1176` + `lookupByTag` `:747`). ⚠️ archivo con cambios sin commitear de otra terminal — editar con cuidado. |
 | `app/src/components/IdentifierAssignRow.tsx` | **NUEVO** — fila de asignación inline parametrizada por `kind` (`'tag'` \| `'idv'`): muestra el CTA "Agregar caravana …", expande un `FormField` (numérico) + Confirmar/Cancelar (espejo del patrón inline de `CastrationRow`/`CutRow`), validación inline (`error`), `busy`. Recibe `onConfirm(value)` y `validate(value)`. **As-built (impl)**: props finales = `kind, label, placeholder?, keyboardType?='number-pad', sanitize, maxLength?, validate, onConfirm`; la copy del CTA se **deriva de `kind`** ("Agregar caravana electrónica"/"Agregar caravana visual", RCF.1.1/1.3 — no es prop); importa `Button`/`FormField` directo (no del barrel) para evitar el ciclo con `index.ts`. `maxLength?` (opcional, belt-and-suspenders del `sanitize`) se agregó para topear el input nativo. |
 | `app/app/animal/[id].tsx` | En la sección "Identificación" (`:749-754`): por cada identificador, render condicional **valor solo-lectura** (`AttributeRow`, si `!= null`) **o** `IdentifierAssignRow` (si `== null && status==='active'`, RCF.1). Cablear: idv → `setIdv` (local; optimismo en sitio **+ refresh silencioso**); tag → pre-check `lookupByTag(detail.establishmentId)` + `assignTagToAnimal` (optimismo en sitio, **refresh del tag se OMITE** — ver §4.6 reconciliación: un refresh inmediato blanquearía el denorm no-propagado). ⚠️ advertencia "cambios sin commitear de otra terminal" = **espuria** (el leader verificó `git status` limpio; se editó con normalidad). |
-| `app/src/components/index.ts` | Export del nuevo `IdentifierAssignRow`. ⚠️ archivo modificado por otra terminal — append-only. |
+| `app/src/components/index.ts` | Export del nuevo `IdentifierAssignRow` (+ `TagScanSheet`, delta bastoneo). ⚠️ archivo modificado por otra terminal — append-only. |
 | `app/src/services/powersync/local-reads.test.ts` (o el suite de builders) | Unit del shape SQL de `buildSetIdvUpdate`. |
 | `app/src/utils/identifier-assign.test.ts` | **NUEVO** — unit de los predicados. |
 | `app/e2e/animals.spec.ts` | E2E asignar idv (offline-local) + asignar tag (15 díg) + validación + read-only de lo seteado. |
+| **Delta bastoneo (2026-07-06) — §10:** | |
+| `app/src/services/ble/listener-gate.ts` (+`.test.ts`) | **NUEVO** — `resolveListening({ scopedScannerActive, enabled, busy })` PURO (RCF.6.7) + unit. |
+| `app/src/services/ble/BleStickListenerProvider.tsx` | **+`acquireScopedScanner()` + `scopedScannerActive`** en el `ProviderApi`; `listening` pasa a usar `resolveListening` (un scanner acotado fuerza la escucha aunque busyMode esté prendido). |
+| `app/src/services/ble/stick.ts` | **+`useScopedScannerControls()`** (devuelve el `acquireScopedScanner` estable del provider). |
+| `app/app/_components/FindOrCreateOverlay.tsx` | **Guard `scopedScannerActive`** en `onTagRead` (retorno temprano, paralelo a `BLE_OWNED_ROUTES`) + `testID="find-or-create-overlay"` (oráculo E2E) + cierre defensivo si un scanner acotado se activa con el overlay abierto. |
+| `app/src/components/TagScanSheet.tsx` | **NUEVO** — bottom-sheet de scan ACOTADO (RCF.6): adquiere la propiedad exclusiva del listener, hero adaptativo (scan/connect/manual-promovido), confirmación pre-commit + assign a ESTE animal. |
+| `app/src/components/IdentifierAssignRow.tsx` | **+prop `hideLabel`** (la ficha agrupa scan + manual bajo un solo label "Caravana electrónica"). |
+| `app/app/animal/[id].tsx` | En la caravana electrónica vacía: afordancia "Bastonear la caravana" (`TagScanCta`) + la carga manual (piso, `hideLabel`); monta `TagScanSheet` al root, condicional a `scanOpen`. |
+| `app/e2e/baston-ficha.spec.ts` + `app/e2e/captures/caravana-ficha-bastoneo.capture.ts` | **NUEVOS** — E2E de regresión (mock) + capture del Gate 2.5. |
 
 ## 2. Afordancia en la sección "Identificación" (criterio: inline vs sheet)
 
@@ -242,7 +255,84 @@ nuevos, el delta se detiene y va a Gate 1. El as-built verificado dice que no.)
 - **Un editor genérico de identificadores en la ficha** (poder cambiar cualquier identificador, incluso los
   seteados). Descartada: fuera del Gate 0 (`context-caravana-ficha.md` §No entra) y contra R4.13 (inmutabilidad
   post-completitud) — solo se asigna lo VACÍO.
-- **Resolver la afordancia en un sheet** en vez de inline. Descartada como default (no como prohibición): para un
-  solo campo por identificador, el sheet es overhead frente al patrón inline canónico de la ficha
-  (`CastrationRow`/`CutRow`); el contrato de `IdentifierAssignRow` queda agnóstico del contenedor por si el review
-  de diseño prefiere sheet.
+- **Resolver la afordancia manual en un sheet** en vez de inline. Descartada como default (no como prohibición):
+  para un solo campo por identificador, el sheet es overhead frente al patrón inline canónico de la ficha
+  (`CastrationRow`/`CutRow`); el contrato de `IdentifierAssignRow` queda agnóstico del contenedor.
+- **(bastoneo) El sheet togglea `busy` directamente** para des-suspender el listener global, en vez del scanner
+  acotado. Descartada: `busy` tiene un solo dueño (`useBusyWhileMounted` de la ficha); dos escritores del mismo
+  booleano es frágil (orden de efectos, re-runs). El scanner acotado (contador propio + `resolveListening`) deja
+  a `busy` intacto y devuelve la escucha EXACTA al soltar → sin estado colgado (§10.1).
+- **(bastoneo) Refactorizar los heroes de `maniobra/identificar.tsx` a un módulo compartido**. Descartada: tocar
+  un archivo de una feature `done` para extraer ~200 líneas arriesga regresiones en la suite de maniobra. Se
+  REPLICÓ el lenguaje visual a escala de sheet en `TagScanSheet` (RCF.6.2 permite "replicalo/compartilo").
+
+## 10. Bastoneo de la caravana electrónica desde la ficha (RCF.6) — delta 2026-07-06
+
+Reuso TOTAL de la infraestructura BLE de ADR-024 (contrato de ingesta + provider global + adaptadores). Cero
+backend nuevo (Gate 1 sigue N/A). El sheet asigna a ESTE animal por el MISMO `assignTagToAnimal` que la carga
+manual (RCF.2) — no es find-or-create, no hay picker.
+
+### 10.1 El punto CRÍTICO — propiedad EXCLUSIVA del listener
+
+La ficha suspende el listener global con `useBusyWhileMounted` (busyMode → `listening = enabled && !busy` =
+false) para que un bastonazo no dispare el `FindOrCreateOverlay` encima. El sheet de scan necesita lo INVERSO
+**pero exclusivo**: la lectura debe entrar al sheet, y el overlay global NO debe procesarla.
+
+**Solución (la más limpia / menos invasiva)**: un **"scanner acotado"** en el provider — un CONTADOR
+(`scopedCount`, tolerante a re-montajes/StrictMode) expuesto como `scopedScannerActive` + `acquireScopedScanner()`
+(devuelve un `release` idempotente). El sheet lo adquiere en un efecto (acquire al montar / release en el
+cleanup, incl. back-gesture). Con ≥1 scanner acotado activo:
+
+1. **La escucha se FUERZA** — `listening = resolveListening({ scopedScannerActive, enabled, busy }) =
+   scopedScannerActive || (enabled && !busy)` (módulo puro `listener-gate.ts`, RCF.6.7). Así el listener entrega
+   la lectura aunque busyMode esté prendido. Se eligió esto por sobre "el sheet togglea `busy`": `busy` tiene un
+   solo dueño (`useBusyWhileMounted` de la ficha) → el sheet NUNCA lo toca (evita el estado compartido frágil de
+   dos escritores). Cuando el scanner se libera, `listening` vuelve EXACTAMENTE a `enabled && !busy` → la ficha
+   re-suspende sola (un bastonazo posterior no hace nada) — **sin transporte colgado ni busyMode inconsistente**.
+2. **El FindOrCreateOverlay IGNORA la lectura** — `onTagRead` chequea `scopedScannerActiveRef.current` y retorna
+   temprano (paralelo EXACTO a `onBleOwnedRouteRef`). La ficha no es una `BLE_OWNED_ROUTE` (y encima apaga
+   busyMode via el scanner) → el flag de contexto es la señal correcta, no la ruta.
+
+Así hay UN solo consumidor efectivo del bastón (el sheet), sin doble proceso del EID.
+
+### 10.2 El sheet (`TagScanSheet.tsx`)
+
+- **Ownership**: `useScopedScannerControls()` → acquire en un efecto (mount) / release (unmount). Se monta
+  CONDICIONAL a `scanOpen` en la ficha → mount/unmount mapea 1:1 al acquire/release (limpieza robusta).
+- **Suscripción**: `useBleStickListener({ enabled: true, onTagRead })` (el EID llega YA validado+dedupeado del
+  contrato). `useBleProviderApi()` para `transport` (conectable) + `connect()`.
+- **Hero adaptativo** (RCF.6.2, REPLICADO de `maniobra/identificar.tsx`, sin refactorizarlo — menor riesgo de
+  regresión en la maniobra): `resolveListenConnState({ isConnected, conectable })` → `connected` (ScanHero
+  pulso) / `connectable` (ConnectHero disco tappable + badge Bluetooth, tap = gesto que web-serial exige) /
+  `manual` (prompt NEUTRO "El bastón no está disponible en este dispositivo" → CTA a la carga manual).
+- **Lectura → confirmación pre-commit** (RCF.6.3, integridad SENASA ADR-024): `formatEidReadable` (15 díg
+  legibles) + "Asignar esta caravana a este animal" + [Asignar caravana] / [Volver a escanear]. Un bastonazo
+  nuevo reemplaza la lectura a confirmar (live-rescan), salvo assign en vuelo (`assigningRef`).
+- **Assign** (RCF.6.4): `onAssignTag(eid)` (el MISMO del host: pre-check `lookupByTag(detail.establishmentId)` +
+  `assignTagToAnimal` + optimismo en sitio). Éxito → `onClose()` (el optimismo deja la fila read-only → el sheet
+  ya no aplica). Error → inline, sheet ABIERTO (fail-closed).
+
+### 10.3 Afordancia en la ficha (`[id].tsx`)
+
+Con `canAssignTag(detail)` (tag null + activo), la caravana electrónica agrupa bajo UN solo label "Caravana
+electrónica": (1) `TagScanCta` "Bastonear la caravana" (prominente, StickIcon + `$greenLight`, ≥ `$touchMin`) →
+abre el sheet; (2) `IdentifierAssignRow kind="tag" hideLabel` (la carga MANUAL, piso siempre presente, RCF.6.6 —
+`hideLabel` evita duplicar el label). El sheet se monta al root condicional a `scanOpen && canAssignTag`.
+
+### 10.4 Degradación sin transporte (native Expo Go hoy)
+
+En native no hay transporte buildable todavía (`spp-android` es Fase 4 de spec 04) → `transport == null` →
+`resolveListenConnState` da `manual` → el sheet muestra el prompt NEUTRO y deriva a la carga manual (que sigue
+presente en la ficha). NO es un botón muerto: es una degradación honesta con tono neutro. En WEB (web-serial) y
+en el mock de E2E el transporte existe → el scan funciona.
+
+### 10.5 Verificación del punto crítico (a/b/c)
+
+- **(a)** con el sheet abierto, una lectura se asigna a ESTE animal y el overlay NO se abre → E2E
+  `baston-ficha.spec.ts (a)` (oráculo server `waitForServerTagAssigned` + ausencia del testID
+  `find-or-create-overlay`).
+- **(b)** al cerrar el sheet, la ficha re-suspende el listener (un bastonazo posterior no hace nada) → E2E `(b)`
+  + unit `resolveListening` (al liberar, vuelve a `enabled && !busy`).
+- **(c)** no queda transporte escuchando de más ni busyMode mal seteado → el `release` idempotente + el
+  `listening` effect (`if (listening) transport.enable(); else transport.disable()`) apagan el transporte al
+  cerrar; `busy` nunca lo toca el sheet (un solo dueño).

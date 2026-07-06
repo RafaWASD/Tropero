@@ -9,8 +9,15 @@
 > base. Numeradas `RCF.n` (Caravana-Ficha) para no colisionar con los IDs estables de spec 02
 > (`R`/`RT2`/`RC6`/`RCUT`/`RPS`/`RAR`/`RAF2`). Fuente de verdad: el contexto refinado y aprobado
 > `specs/active/02-modelo-animal/context-caravana-ficha.md`. Cubre la **parte manual** de la corrección #6 del
-> testeo en vivo ("agregar caravana desde la ficha, visual y electrónica"). El **botón de bastoneo queda
-> DEFERIDO** (hardware, feature 04 — no se especifica un botón muerto).
+> testeo en vivo ("agregar caravana desde la ficha, visual y electrónica").
+>
+> **Reconciliación as-built (delta bastoneo, 2026-07-06 — el bastoneo DEJA de estar DEFERIDO).** El Gate 0
+> original difirió el "botón de bastoneo" (leer el EID del bastón desde la ficha) por el supuesto "hardware
+> spp-android no probado". Ese supuesto NO aplica al MVP de campo: la infraestructura BLE del bastón YA existe
+> y funciona en WEB (web-serial) y en el mock de E2E — es el MISMO contrato de ingesta (ADR-024) que consumen
+> MODO MANIOBRAS y el FindOrCreateOverlay global. El bastoneo desde la ficha se construyó reusando esa
+> infraestructura, con degradación NEUTRA en dispositivos sin transporte (native Expo Go hoy). **Se agregan
+> las requirements `RCF.6`** (bastoneo desde la ficha) — frontend puro, **Gate 1 sigue N/A**.
 >
 > El plumbing ya existe: la asignación de TAG por RPC (`assignTagToAnimal` / `assign_tag_to_animal`, 0089,
 > `app/src/services/animals.ts:1176`), el pre-check de dup-TAG (`lookupByTag`, `animals.ts:747`) y el patrón de
@@ -28,9 +35,12 @@ post-completitud R4.13 (lo ya seteado queda solo-lectura):
 2. **Caravana visual** (`animal_profiles.idv`, sincronizada) → asignación por **UPDATE local** (offline-safe,
    mismo patrón que CUT). Input numérico ≤20 dígitos.
 
-**Fuera de alcance** (límites del Gate 0, no se especifican): botón "Detectar bastoneo" (DEFERIDO — feature 04);
-`visual_id_alt` / "Nombre/apodo" (es el delta de #2); edición de un identificador YA seteado (inmutabilidad
-R4.13 — no es caso de uso).
+3. **Bastoneo de la caravana electrónica** (delta posterior, RCF.6) → un sheet de scan ACOTADO a ESTE animal
+   que lee el EID del bastón (reuso de la infraestructura BLE existente, ADR-024) y lo asigna al perfil, con
+   confirmación pre-commit (integridad SENASA). La carga manual (RCF.2) queda como **piso siempre presente**.
+
+**Fuera de alcance**: `visual_id_alt` / "Nombre/apodo" (es el delta de #2); edición de un identificador YA
+seteado (inmutabilidad R4.13 — no es caso de uso).
 
 Cada "Caso y decisión" de `context-caravana-ficha.md` queda cubierto por ≥1 requirement (ver trazabilidad al
 final).
@@ -51,7 +61,12 @@ final).
   ninguna afordancia de asignación de identificadores (consistente con el resto de acciones de la ficha, que
   solo se ofrecen en animales activos).
 - **RCF.1.6** — El sistema no deberá renderizar en la sección "Identificación" ninguna afordancia para
-  `visual_id_alt` ni un botón "Detectar bastoneo" (ambos fuera de alcance de este delta).
+  `visual_id_alt` (fuera de alcance de este delta).
+  > **Reconciliación as-built (delta bastoneo, 2026-07-06)**: la parte "ni un botón 'Detectar bastoneo'" de
+  > esta requirement queda SUPERADA por RCF.6 — el bastoneo de la caravana ELECTRÓNICA sí se ofrece ahora
+  > (afordancia "Bastonear la caravana" + sheet de scan acotado). `visual_id_alt` sigue sin afordancia (no es
+  > una caravana). El bastoneo NO es un "botón muerto": abre un sheet que degrada con tono neutro donde no hay
+  > transporte (RCF.6.2/RCF.6.6).
 - **RCF.1.7** — El predicado de elegibilidad de cada afordancia (`status === 'active'` AND el identificador es
   `null`) deberá ser una función PURA y testeable (sin RN/red/SDK), con `status` y el valor del identificador
   como entradas.
@@ -139,6 +154,43 @@ final).
   SUBIR la RLS `animal_profiles_update` (para `idv`) y la authz server-side del RPC `assign_tag_to_animal` (para
   `tag`, que deriva el tenant de la fila real del perfil — anti-IDOR); el cliente no replica esa autorización.
 
+## RCF.6 — Bastoneo de la caravana electrónica desde la ficha (delta posterior, 2026-07-06)
+
+Reuso de la infraestructura BLE del bastón (ADR-024) para leer el EID y asignarlo a ESTE animal (el de la
+ficha) — NO es find-or-create, NO hay picker (el animal es conocido). Frontend puro (Gate 1 N/A).
+
+- **RCF.6.1** — Mientras la ficha de un animal **activo** tiene `tagElectronic == null`, el sistema deberá
+  ofrecer en la sección "Identificación", **además** de la carga manual (RCF.2), la acción **"Bastonear la
+  caravana"** que abre un sheet de scan acotado a ESTE animal. Con `tagElectronic != null`, no se ofrece
+  (read-only, RCF.1.2).
+- **RCF.6.2** — El sheet de scan deberá presentar el **mismo lenguaje adaptativo** que la identificación de la
+  maniobra (`maniobra/identificar.tsx`), reusando `resolveListenConnState`: transporte **conectado** → hero
+  de escaneo; transporte **conectable** (web-serial antes de elegir puerto / bastón caído) → hero "conectá el
+  bastón" (tap = gesto de conexión); **sin transporte** (native Expo Go hoy) → prompt **manual-promovido** con
+  tono **neutro** ("El bastón no está disponible en este dispositivo"), sin botón muerto.
+- **RCF.6.3** — Al leer un EID (que llega YA validado + des-duplicado del contrato de ingesta), el sistema
+  deberá mostrar la **confirmación visual pre-commit** (integridad SENASA, ADR-024): los **15 dígitos
+  legibles** (`formatEidReadable`) + el texto **"Asignar … a este animal"**, ANTES de asignar. "Volver a
+  escanear" descarta la lectura y vuelve a escuchar (por si leyó la caravana equivocada).
+- **RCF.6.4** — Al confirmar, el sistema deberá asignar el EID **SOLO a ESTE animal**
+  (`assignTagToAnimal(thisProfileId, eid)`, el MISMO camino offline-safe que RCF.2 — pre-check de dup +
+  encolar el RPC + optimismo en sitio). Éxito → cerrar el sheet (el optimismo deja la fila read-only). Error
+  (dup / encolado) → surfacear inline **sin cerrar** (fail-closed), para reintentar o re-escanear.
+- **RCF.6.5** — **Propiedad EXCLUSIVA del listener** (el punto crítico): la ficha suspende el listener global
+  con `useBusyWhileMounted` (busyMode) para que un bastonazo no dispare el FindOrCreateOverlay encima.
+  Mientras el sheet de scan esté abierto: (a) el listener deberá estar **activo para el sheet** (des-suspender
+  la escucha SOLO para él, aunque busyMode siga prendido), y (b) el FindOrCreateOverlay **NO deberá procesar**
+  esas lecturas (un flag de "scanner acotado activo", paralelo a `BLE_OWNED_ROUTES`, que el overlay chequea y
+  retorna temprano). Al cerrar/desmontar el sheet (incl. back-gesture) el listener deberá **volver a
+  suspenderse** (busyMode manda de nuevo: un bastonazo posterior en la ficha no hace nada) sin dejar transporte
+  escuchando de más ni busyMode inconsistente.
+- **RCF.6.6** — **Manual-first**: la carga manual de 15 dígitos (RCF.2) deberá quedar como **piso siempre
+  presente**; el sheet de scan deriva a ella (link "Cargá la caravana a mano" / CTA en el estado
+  manual-promovido) sin romperla.
+- **RCF.6.7** — La decisión de si el listener escucha (`scopedScannerActive || (enabled && !busy)`) deberá ser
+  una función **PURA y testeable** (`resolveListening`, `app/src/services/ble/listener-gate.ts`), con el flag
+  del scanner acotado, `enabled` y `busy` como entradas.
+
 ---
 
 ## ¿Toca DB? — NO (Gate 1 N/A)
@@ -162,10 +214,11 @@ detiene y se eleva a Gate 1 — pero el as-built verificado dice que no.)
 | #2 — Electrónica = RPC existente (online); visual/idv = UPDATE local (offline-safe) | RCF.2.4, RCF.3.3 |
 | #2 — spec_author confirma el builder de idv contra el trigger R4.13 | RCF.3.4 (verificado: 0036 permite NULL→valor) |
 | #3 — Dup TAG → error accionable (reuso R5.6); idv dup → unique parcial al subir | RCF.2.3, RCF.3.5 |
-| #4 — Bastoneo deferido (no se muestra botón muerto) | RCF.1.6 |
-| #5 — UX de campo (target grande, una decisión, es-AR, validación inline, tokens, lineHeight) | RCF.4 |
+| #4 — Bastoneo (reconciliado: ya NO deferido → sheet de scan acotado desde la ficha) | RCF.6 (supera "no botón muerto" de RCF.1.6) |
+| #5 — UX de campo (target grande, una decisión, es-AR, validación inline, tokens, lineHeight) | RCF.4, RCF.6.2 |
 | Inmutabilidad post-completitud R4.13 (NULL→valor sí, valor→otro/NULL no) | RCF.1.2, RCF.1.4, RCF.3.4 |
-| Multi-tenant (CLAUDE.md ppio 6) + offline-first (ppio 3) | RCF.5 |
+| Multi-tenant (CLAUDE.md ppio 6) + offline-first (ppio 3) | RCF.5, RCF.6.4 |
+| Confirmación pre-commit SENASA (ADR-024) + propiedad exclusiva del listener | RCF.6.3, RCF.6.5, RCF.6.7 |
 
 ## Cobertura de tests (cada RCF verificable)
 
@@ -173,11 +226,19 @@ detiene y se eleva a Gate 1 — pero el as-built verificado dice que no.)
   no-activo NO; valor seteado NO) (RCF.1.1–RCF.1.5, RCF.1.7); `sanitizeTagInput`/`isValidTagElectronic`
   (≤15 díg, `^\d{15}$`) ya testeados (RCF.2.1/RCF.2.2); `sanitizeIdvInput` (≤20 díg) ya testeado (RCF.3.1);
   shape SQL de `buildSetIdvUpdate` (`SET idv = ?` solo, `WHERE id = ? AND deleted_at IS NULL`) (RCF.3.3/RCF.3.4).
+- **Unit del bastoneo (node:test, puro)** — `resolveListening` (RCF.6.7): un scanner acotado fuerza la escucha
+  aunque busy esté prendido; al liberarse, la escucha vuelve exactamente a `enabled && !busy`
+  (`listener-gate.test.ts`); `resolveListenConnState` (RCF.6.2) ya testeado en `maniobra-listen-state.test.ts`.
 - **E2E (Playwright)** — desde la ficha de un animal activo sin caravana: (a) "Agregar caravana visual" → tipear
   idv → confirmar → la fila pasa a mostrar el idv en solo-lectura (RCF.1.3/RCF.3.3/RCF.3.5); (b) "Agregar
   caravana electrónica" → tipear 15 díg → confirmar → optimismo en sitio (RCF.2.4/RCF.2.7); (c) validación: 14
   díg → error inline + sin invocar (RCF.2.2); (d) un identificador ya seteado no ofrece afordancia (RCF.1.2/
   RCF.1.4).
+- **E2E del bastoneo** (`app/e2e/baston-ficha.spec.ts`, adaptador mock): (a) "Bastonear" → sheet acotado → una
+  lectura se asigna a ESTE animal (oráculo server-side `waitForServerTagAssigned`) Y el FindOrCreateOverlay NO
+  se abre (ausencia del testID exclusivo `find-or-create-overlay`) (RCF.6.1/RCF.6.3/RCF.6.4/RCF.6.5); (b) al
+  cerrar el sheet, un bastonazo posterior en la ficha no dispara nada (listener re-suspendido, RCF.6.5); (c) sin
+  transporte → sheet manual-promovido neutro + deriva a la carga manual que sigue funcionando (RCF.6.2/RCF.6.6).
 
 ## Historial de refinamiento
 
@@ -186,3 +247,9 @@ detiene y se eleva a Gate 1 — pero el as-built verificado dice que no.)
   spec 02). Sin re-decidir los casos del context. **Verificado el as-built**: el trigger de inmutabilidad de
   `idv` (0036:30-32) permite `NULL→valor` y el unique parcial `(establishment_id, idv)` (0020:50-53) está
   vigente → el path de `idv` es **UPDATE-local frontend (Gate 1 N/A)**, no requiere DB.
+- 2026-07-06 — **Delta bastoneo (reconciliación al as-built)**: se REVIRTIÓ el deferral del bastoneo. Se
+  agregó `RCF.6` (bastonear la caravana electrónica desde la ficha, reusando la infraestructura BLE de
+  ADR-024) + la reconciliación de RCF.1.6. Frontend puro → **Gate 1 sigue N/A** (`git diff supabase/` vacío).
+  El punto crítico (propiedad exclusiva del listener) se resolvió con un "scanner acotado" en el provider
+  (`scopedScannerActive`) que fuerza la escucha y hace que el FindOrCreateOverlay ignore la lectura — ver
+  `design-caravana-ficha.md §BASTONEO`.

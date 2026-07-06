@@ -64,5 +64,7 @@ export { bleConnectionView } from './ble-connection-view';
 export type { BleConnectionView, BleStatusColorToken } from './ble-connection-view';
 export { IdentifierAssignRow } from './IdentifierAssignRow';
 export type { IdentifierAssignRowProps } from './IdentifierAssignRow';
+export { TagScanSheet } from './TagScanSheet';
+export type { TagScanSheetProps } from './TagScanSheet';
 export { LinkCalfPrompt } from './LinkCalfPrompt';
 export type { LinkCalfPromptProps } from './LinkCalfPrompt';

@@ -29,6 +29,12 @@ export type IdentifierAssignRowProps = {
   kind: 'tag' | 'idv';
   /** Label muted de la fila + label del FormField al expandir (ej. "Caravana electrónica" / "Caravana visual"). */
   label: string;
+  /**
+   * Oculta el label muted de la fila COLAPSADA (no el del FormField al expandir). Lo usa la ficha cuando la
+   * caravana electrónica agrupa el scan (bastonear) + la carga manual bajo UN solo label de sección — así no
+   * se duplica "Caravana electrónica". Default false (la fila muestra su label, como el idv).
+   */
+  hideLabel?: boolean;
   /** Placeholder del input al expandir. */
   placeholder?: string;
   /** Teclado del input (number-pad para identificadores de máquina, RCF.4.5). */
@@ -53,6 +59,7 @@ export type IdentifierAssignRowProps = {
 export function IdentifierAssignRow({
   kind,
   label,
+  hideLabel = false,
   placeholder,
   keyboardType = 'number-pad',
   sanitize,
@@ -118,9 +125,11 @@ export function IdentifierAssignRow({
   if (!expanded) {
     return (
       <YStack gap="$1">
-        <Text fontFamily="$body" fontSize="$3" fontWeight="500" color="$textMuted">
-          {label}
-        </Text>
+        {hideLabel ? null : (
+          <Text fontFamily="$body" fontSize="$3" fontWeight="500" color="$textMuted">
+            {label}
+          </Text>
+        )}
         <XStack
           testID={`assign-${kind}-cta`}
           minHeight="$touchMin"

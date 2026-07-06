@@ -43,7 +43,8 @@ import {
 } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
 
-import { Button, Card, CategoryBadge, InfoNote, FormError, FormField, IdentifierAssignRow, TimelineEvent } from '@/components';
+import { Button, Card, CategoryBadge, InfoNote, FormError, FormField, IdentifierAssignRow, TagScanSheet, TimelineEvent } from '@/components';
+import { StickIcon } from '@/theme/icons';
 import {
   assignTagToAnimal,
   fetchAnimalDetail,
@@ -161,6 +162,9 @@ export default function AnimalDetailScreen() {
   // ("el catálogo no se descargó") y la fila Raza queda solo-lectura — no rompe la ficha.
   const [breedCatalog, setBreedCatalog] = useState<BreedCatalogEntry[]>([]);
   const [breedPickerOpen, setBreedPickerOpen] = useState(false);
+  // Sheet de BASTONEO de la caravana electrónica (delta caravana-ficha bastoneo, RCF.6): lee el EID del bastón
+  // y lo asigna a ESTE animal. Solo se ofrece con `tag_electronic` vacío + animal activo (canAssignTag).
+  const [scanOpen, setScanOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -841,30 +845,41 @@ export default function AnimalDetailScreen() {
                 → ficha de la madre. Tolera madre archivada (status ≠ active): indicador + navega igual. */}
             {mother ? <MotherCard mother={mother} onPress={goToMother} /> : null}
 
-            {/* Identificación (delta caravana-ficha, RCF.1): por cada identificador (electrónica / visual),
-                render condicional — valor solo-lectura si está SETEADO (inmutable, R4.13), o la afordancia
-                "Agregar caravana …" si está VACÍO en un animal ACTIVO (canAssignTag/canAssignIdv). Si está
-                vacío pero el animal NO está activo, "—" (no se ofrece, RCF.1.5). `visual_id_alt` (identificación
-                visual) y "Detectar bastoneo" quedan FUERA de alcance (RCF.1.6): sin cambios / sin botón muerto. */}
+            {/* Identificación (delta caravana-ficha, RCF.1/RCF.6): por cada identificador (electrónica / visual),
+                render condicional — valor solo-lectura si está SETEADO (inmutable, R4.13), o la afordancia de
+                asignación si está VACÍO en un animal ACTIVO (canAssignTag/canAssignIdv). Si está vacío pero el
+                animal NO está activo, "—" (no se ofrece, RCF.1.5). Para la caravana ELECTRÓNICA vacía la
+                afordancia ofrece BASTONEAR (scan del EID, RCF.6) ADEMÁS de la carga manual (piso siempre
+                presente). `visual_id_alt` (identificación visual) queda FUERA de alcance (RCF.1.6). */}
             <DetailSection icon={Tag} title="Identificación">
-              {/* Caravana electrónica → RPC existente assign_tag_to_animal (online, vía outbox). */}
+              {/* Caravana electrónica → bastoneo (scan → assign a ESTE animal, RCF.6) + carga manual (RPC
+                  existente assign_tag_to_animal, online vía outbox). */}
               {detail.tagElectronic != null ? (
                 <AttributeRow label="Caravana electrónica" value={detail.tagElectronic} />
               ) : canAssignTag(detail) ? (
-                <IdentifierAssignRow
-                  kind="tag"
-                  label="Caravana electrónica"
-                  placeholder="982 0001 2345 6789"
-                  keyboardType="number-pad"
-                  sanitize={sanitizeTagInput}
-                  maxLength={TAG_ELECTRONIC_LENGTH}
-                  validate={(v) =>
-                    isValidTagElectronic(v) && v.trim().length === TAG_ELECTRONIC_LENGTH
-                      ? null
-                      : 'La caravana electrónica tiene que tener 15 dígitos.'
-                  }
-                  onConfirm={onAssignTag}
-                />
+                <YStack gap="$2">
+                  <Text fontFamily="$body" fontSize="$3" fontWeight="500" color="$textMuted">
+                    Caravana electrónica
+                  </Text>
+                  {/* BASTONEAR (RCF.6): abre el sheet de scan acotado → lee el EID y lo asigna a este animal. */}
+                  <TagScanCta onPress={() => setScanOpen(true)} />
+                  {/* Carga MANUAL (piso siempre presente): el label ya lo puso el YStack → hideLabel. */}
+                  <IdentifierAssignRow
+                    kind="tag"
+                    label="Caravana electrónica"
+                    hideLabel
+                    placeholder="982 0001 2345 6789"
+                    keyboardType="number-pad"
+                    sanitize={sanitizeTagInput}
+                    maxLength={TAG_ELECTRONIC_LENGTH}
+                    validate={(v) =>
+                      isValidTagElectronic(v) && v.trim().length === TAG_ELECTRONIC_LENGTH
+                        ? null
+                        : 'La caravana electrónica tiene que tener 15 dígitos.'
+                    }
+                    onConfirm={onAssignTag}
+                  />
+                </YStack>
               ) : (
                 <AttributeRow label="Caravana electrónica" value="—" />
               )}
@@ -1009,6 +1024,15 @@ export default function AnimalDetailScreen() {
           selectedCode={selectedBreedCode}
           onSelect={onSelectBreed}
         />
+      ) : null}
+
+      {/* Sheet de BASTONEO de la caravana electrónica (delta caravana-ficha bastoneo, RCF.6). Montado al ROOT
+          (scrim propio). CONDICIONAL a `scanOpen` → montar/desmontar mapea 1:1 al acquire/release del scanner
+          acotado (propiedad exclusiva del listener). Solo si el tag sigue vacío + activo (canAssignTag): tras
+          un assign optimista `tagElectronic` deja de ser null → el sheet ya no aplica y se desmonta. Reusa el
+          MISMO `onAssignTag` que la carga manual (pre-check dup + encolar RPC + optimismo en sitio). */}
+      {detail && scanOpen && canAssignTag(detail) ? (
+        <TagScanSheet onClose={() => setScanOpen(false)} onAssignTag={onAssignTag} />
       ) : null}
     </YStack>
   );
@@ -1815,6 +1839,34 @@ function AttributeRow({ label, value }: { label: string; value: string }) {
         {value}
       </Text>
     </YStack>
+  );
+}
+
+// ─── CTA "Bastonear la caravana" (delta caravana-ficha bastoneo, RCF.6) ───────────────
+//
+// Afordancia PROMINENTE del path de scan (el bastón es el 95% del flujo en manga): abre el TagScanSheet.
+// Target grande (≥ $touchMin, Fitts, una mano) con el StickIcon + label $primary sobre $greenLight — la
+// distingue del CTA manual plano ("Agregar caravana electrónica") que va debajo como piso. lineHeight
+// matching en el label (tiene descendentes). Cero hardcode: tokens + getTokenValue para el ícono lucide.
+function TagScanCta({ onPress }: { onPress: () => void }) {
+  return (
+    <XStack
+      testID="tag-scan-open"
+      minHeight="$touchMin"
+      alignItems="center"
+      gap="$2"
+      backgroundColor="$greenLight"
+      borderRadius="$pill"
+      paddingHorizontal="$4"
+      pressStyle={{ opacity: 0.7 }}
+      onPress={onPress}
+      {...buttonA11y(Platform.OS, { label: 'Bastonear la caravana' })}
+    >
+      <StickIcon size={20} color={getTokenValue('$primary', 'color')} strokeWidth={2.5} />
+      <Text fontFamily="$body" fontSize="$5" lineHeight="$5" fontWeight="700" color="$primary" numberOfLines={1}>
+        Bastonear la caravana
+      </Text>
+    </XStack>
   );
 }
 

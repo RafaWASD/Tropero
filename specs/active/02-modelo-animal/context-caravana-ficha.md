@@ -1,8 +1,15 @@
 # Contexto (Gate 0) — Agregar caravana desde la ficha (#6, parte manual)
 
 > Delta Nivel B (ADR-028) sobre spec 02. Cubre la **parte manual** de la corrección #6 del testeo en vivo
-> ("agregar caravana desde la ficha, visual y electrónica"). El **botón de bastoneo queda DEFERIDO** (hardware:
-> bastón spp-android no probado). Origen: `docs/correcciones-prueba-en-vivo-2026-06-27.md`.
+> ("agregar caravana desde la ficha, visual y electrónica"). Origen:
+> `docs/correcciones-prueba-en-vivo-2026-06-27.md`.
+>
+> **Reconciliación (delta bastoneo, 2026-07-06 — el bastoneo DEJA de estar DEFERIDO).** El deferral original se
+> apoyaba en "bastón spp-android no probado". Ese supuesto NO aplica al MVP: la infraestructura BLE del bastón YA
+> existe y corre en WEB (web-serial) + mock de E2E — el MISMO contrato de ingesta (ADR-024) que consumen MODO
+> MANIOBRAS y el FindOrCreateOverlay global. El bastoneo desde la ficha se construyó reusando esa infraestructura
+> (sheet de scan acotado a ESTE animal), con degradación NEUTRA donde no hay transporte (native Expo Go hoy). Ver
+> `requirements-caravana-ficha.md §RCF.6` + `design-caravana-ficha.md §10`. Sigue frontend puro (Gate 1 N/A).
 >
 > **Nota de proceso (trabajo autónomo)**: Raf pidió (2026-06-29) "hacé todo lo que puedas, no necesites nada de
 > mí". Decisiones = defaults menores del leader; **Puerta 0 auto-aprobada**, a confirmar en **Puerta 2** (post-hoc).
@@ -28,10 +35,12 @@
 - **Caravana visual** (`idv`): si está vacía → "Agregar caravana visual" (UPDATE local sobre `animal_profiles.idv`,
   NULL→valor; respeta unicidad `(establishment_id, idv)` + R4.13). Si ya tiene valor → read-only.
 
+**Entra (delta bastoneo, 2026-07-06 — reconciliado, ya NO deferido):**
+- **Bastoneo de la caravana electrónica** (leer el EID del bastón y asignarlo a ESTE animal) → sheet de scan
+  ACOTADO desde la ficha, reusando la infraestructura BLE existente (ADR-024). Degradación neutra sin transporte
+  (no es un botón muerto: abre un sheet que explica + deriva a la carga manual). Ver §RCF.6.
+
 **No entra:**
-- **Botón "Detectar bastoneo"** (leer EID del bastón y asignarlo al animal) → **DEFERIDO** (gated por dev build
-  Android + bastón spp-android real, no probado; ver feature 04). Se anota como fast-follow del hardware. No se
-  muestra un botón muerto.
 - `visual_id_alt` "Nombre/apodo" → delta de #2.
 - Edición de un identificador YA seteado (inmutabilidad R4.13 — no es caso de uso).
 
@@ -44,7 +53,9 @@
 3. **Detección de duplicado al asignar**: reusar las señales existentes — TAG ya existente → error accionable
    (R5.6, ya implementado en el alta); `idv` duplicado en el campo → el unique parcial lo rechaza al sincronizar
    (mismo manejo que el alta). No se inventa validación nueva.
-4. **Bastoneo deferido**: no se muestra botón; se documenta para el chunk de hardware (feature 04 / dev build).
+4. ~~**Bastoneo deferido**~~ → **RECONCILIADO (2026-07-06)**: el bastoneo se construyó (delta bastoneo) reusando
+   la infraestructura BLE existente (ADR-024). Ver `requirements §RCF.6` + `design §10`. El punto crítico
+   (propiedad exclusiva del listener con la ficha suspendiendo el global) se resolvió con un "scanner acotado".
 5. **UX de campo**: la afordancia respeta los MUSTs (target grande, una decisión, es-AR, validación scroll-al-campo
    + borde rojo + inline; tokens; lineHeight). Afordancia inline en la sección "Identificación" (o sheet).
 

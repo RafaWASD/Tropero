@@ -31,6 +31,7 @@ import { ArrowRightLeft, ChevronRight, PlusCircle, Radio, Search, Tag, X } from 
 import { Button, Card, CategoryBadge } from '@/components';
 import { useAuth, useEstablishment, useRodeo } from '@/contexts';
 import { useBleStickListener } from '@/services/ble/stick';
+import { useBleProviderApi } from '@/services/ble/BleStickListenerProvider';
 import {
   assignTagToAnimal,
   fetchAnimalDetail,
@@ -108,6 +109,17 @@ export function FindOrCreateOverlay() {
   const onBleOwnedRouteRef = useRef(onBleOwnedRoute);
   onBleOwnedRouteRef.current = onBleOwnedRoute;
 
+  // Scanner ACOTADO activo (delta caravana-ficha bastoneo, RCF.6): un sheet de scan de una pantalla NO-dueña
+  // (la ficha del animal — no es una BLE_OWNED_ROUTE, y encima suspende el listener global con busyMode) tomó
+  // la propiedad exclusiva del bastón para asignar a ESE animal. Mientras esté activo, el overlay global NO
+  // procesa las lecturas (las consume el sheet acotado) — mismo mecanismo que `onBleOwnedRouteRef`, pero por
+  // FLAG de contexto en vez de por ruta (la ficha no tiene una ruta dueña propia). Ref para leerlo en el
+  // callback sin re-crearlo.
+  const bleApi = useBleProviderApi();
+  const scopedScannerActive = bleApi?.scopedScannerActive ?? false;
+  const scopedScannerActiveRef = useRef(scopedScannerActive);
+  scopedScannerActiveRef.current = scopedScannerActive;
+
   const establishmentId = est.status === 'active' ? est.current.id : null;
   const activeFieldName = est.status === 'active' ? est.current.name : '';
   const userId = auth.status === 'authenticated' ? auth.user.id : null;
@@ -135,6 +147,9 @@ export function FindOrCreateOverlay() {
       // masiva o MODO MANIOBRAS), ELLA maneja el bastoneo con su propio listener → el overlay global NO
       // abre nada (sería doble proceso del EID — dos consumidores compitiendo por la lectura).
       if (onBleOwnedRouteRef.current) return;
+      // Idem para un scanner ACOTADO (RCF.6): el sheet de bastoneo de la ficha tomó la propiedad exclusiva del
+      // bastón para asignar a ESE animal → el overlay global ignora la lectura (la consume el sheet acotado).
+      if (scopedScannerActiveRef.current) return;
       const ticket = ++seqRef.current;
       lookupEstablishmentRef.current = establishmentId;
       setState({ eid, status: 'loading' });
@@ -186,12 +201,20 @@ export function FindOrCreateOverlay() {
     if (onBleOwnedRoute && state !== null) close();
   }, [onBleOwnedRoute, state, close]);
 
+  // ─── Anti-stacking (RCF.6): si un scanner ACOTADO se activa con el overlay abierto (un sheet de bastoneo
+  // de la ficha tomó la propiedad exclusiva), cerramos el overlay global — el sheet acotado maneja el bastón
+  // por su cuenta y no debe quedar un sheet global stale encima. Paralelo al cierre por ruta dueña. ───
+  useEffect(() => {
+    if (scopedScannerActive && state !== null) close();
+  }, [scopedScannerActive, state, close]);
+
   if (state === null) return null;
 
   const eidReadable = formatEidReadable(state.eid);
 
   return (
     <View
+      testID="find-or-create-overlay"
       position="absolute"
       top="$0"
       left="$0"

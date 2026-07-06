@@ -96,3 +96,20 @@ export function useStickListenerControls(): {
     disableListener: api?.disableListener ?? (() => undefined),
   };
 }
+
+// Noops ESTABLES a nivel de módulo: cuando no hay provider, devolver siempre la MISMA referencia para que
+// el efecto del consumidor (dep = la función acquire) no se re-dispare en cada render (RCF.6).
+const NOOP_RELEASE = (): void => undefined;
+const NOOP_ACQUIRE = (): (() => void) => NOOP_RELEASE;
+
+/**
+ * Devuelve la función `acquireScopedScanner` del provider (delta caravana-ficha bastoneo, RCF.6): un sheet
+ * de scan la llama en un efecto (acquire al montar, release en el cleanup) para tomar la PROPIEDAD
+ * EXCLUSIVA del listener mientras está abierto — el listener escucha para él (aunque la ficha tenga
+ * busyMode prendido) y el FindOrCreateOverlay ignora esas lecturas. La referencia es ESTABLE (la función
+ * del provider es un useCallback([]); sin provider, un noop estable de módulo) → segura como dep de efecto.
+ */
+export function useScopedScannerControls(): () => () => void {
+  const api = useBleProviderApi();
+  return api?.acquireScopedScanner ?? NOOP_ACQUIRE;
+}

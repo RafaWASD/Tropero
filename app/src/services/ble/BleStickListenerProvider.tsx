@@ -32,6 +32,7 @@ import { Platform } from 'react-native';
 import type { StickAdapter, ConnectionStatus } from './stick-adapter';
 import { ConnectionStatusContext, isConnectedStatus } from './connection-status';
 import { EidIngestEngine } from './contract';
+import { resolveListening } from './listener-gate';
 import { selectTransportAdapter, type ProviderMode } from './adapter-selection';
 import { ManualAdapter } from './adapter-manual';
 import { MockAdapter } from './adapter-mock';
@@ -47,7 +48,21 @@ interface ProviderApi {
   enableListener: () => void;
   /** Marca/desmarca el modo "ocupado" (form CREATE/EDIT activo, R10.6). */
   setBusy: (busy: boolean) => void;
-  /** ¿La escucha está activa ahora? (enabled && !busy). */
+  /**
+   * Adquiere la PROPIEDAD EXCLUSIVA del listener por un "scanner acotado" (delta caravana-ficha bastoneo,
+   * RCF.6): un sheet de scan que quiere las lecturas para SÍ (ej. bastonear la caravana desde la ficha),
+   * SIN que el FindOrCreateOverlay global las procese. Mientras hay ≥1 scanner acotado activo:
+   *   (1) el listener queda ACTIVO aunque busyMode esté prendido (la ficha suspende el global con
+   *       useBusyWhileMounted; el scanner acotado des-suspende SOLO para él), y
+   *   (2) el FindOrCreateOverlay se auto-suprime (chequea `scopedScannerActive` y retorna temprano, igual
+   *       que con `BLE_OWNED_ROUTES`) → un solo consumidor efectivo del bastón.
+   * Devuelve la función de RELEASE (idempotente por el contador): llamarla al cerrar/desmontar el sheet.
+   * Es un CONTADOR (no un booleano): tolera re-montajes/StrictMode sin dejar el estado colgado.
+   */
+  acquireScopedScanner: () => () => void;
+  /** ¿Hay ≥1 scanner acotado activo? (lo consulta el FindOrCreateOverlay para ignorar las lecturas). */
+  scopedScannerActive: boolean;
+  /** ¿La escucha está activa ahora? (scopedScannerActive || (enabled && !busy)). */
   isListening: boolean;
   /** ¿El transporte está conectado? */
   isConnected: boolean;
@@ -88,6 +103,10 @@ export function BleStickListenerProvider({
 }) {
   const [enabled, setEnabled] = useState(true);
   const [busy, setBusy] = useState(false);
+  // Contador de "scanners acotados" activos (delta caravana-ficha bastoneo, RCF.6): un sheet de scan que
+  // toma la propiedad exclusiva del listener. >0 → el listener escucha aunque busyMode esté prendido, y el
+  // FindOrCreateOverlay se auto-suprime. Contador (no booleano) → re-montajes/StrictMode no lo dejan colgado.
+  const [scopedCount, setScopedCount] = useState(0);
   const [status, setStatus] = useState<ConnectionStatus>('off');
 
   // El motor de ingesta (validate + dedup) es por-provider (una ventana de dedup global del
@@ -104,9 +123,27 @@ export function BleStickListenerProvider({
     [mode],
   );
 
-  const listening = enabled && !busy;
+  // Un scanner acotado (RCF.6) FUERZA la escucha: quiere las lecturas para SÍ, aunque la ficha haya
+  // prendido busyMode (useBusyWhileMounted) para suspender el listener global. Sin scanner acotado, la
+  // escucha vale lo de siempre (enabled && !busy). El overlay global ignora las lecturas mientras el
+  // scanner acotado esté activo (chequea `scopedScannerActive`), así hay un SOLO consumidor efectivo.
+  const scopedScannerActive = scopedCount > 0;
+  const listening = resolveListening({ scopedScannerActive, enabled, busy });
   const listeningRef = useRef(listening);
   listeningRef.current = listening;
+
+  // Adquiere/libera la propiedad exclusiva del listener por un scanner acotado (RCF.6). El acquire
+  // incrementa el contador y devuelve un release que lo decrementa (idempotente por el clamp a 0). El
+  // sheet de scan lo llama en un efecto: acquire al montar, release en el cleanup (incl. back-gesture).
+  const acquireScopedScanner = useCallback(() => {
+    setScopedCount((c) => c + 1);
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      setScopedCount((c) => Math.max(0, c - 1));
+    };
+  }, []);
 
   // ─── Ingesta de una lectura (cruda de stream o EID limpio) → confirmación → tag_read ────
   const handleReading = useCallback((rawOrEid: string, isRawStream: boolean) => {
@@ -192,13 +229,24 @@ export function BleStickListenerProvider({
       disableListener,
       enableListener,
       setBusy,
+      acquireScopedScanner,
+      scopedScannerActive,
       isListening: listening,
       isConnected: isConnectedStatus(status),
       subscribeTagRead,
       transport,
       manual: manualRef.current,
     }),
-    [disableListener, enableListener, listening, status, subscribeTagRead, transport],
+    [
+      disableListener,
+      enableListener,
+      acquireScopedScanner,
+      scopedScannerActive,
+      listening,
+      status,
+      subscribeTagRead,
+      transport,
+    ],
   );
 
   return (
