@@ -115,3 +115,107 @@ El design describe lo que el código hace (scanner acotado, contador, resolveLis
 ## Cambios requeridos
 
 Ninguno.
+
+---
+
+# UX update (2026-07-06) — carga manual movida DENTRO del sheet
+
+**Reviewer**: reviewer (Opus 4.8) · **Fecha**: 2026-07-06 · **Baseline**: `20df0d2` (ajuste sin commitear)
+**Alcance**: ajuste de UX acotado sobre el delta bastoneo. La ficha ofrece SOLO "Bastonear la caravana"; la
+carga manual del EID por teclado se movió DENTRO del sheet (estado `manualMode`).
+
+## Veredicto: APPROVED
+
+Ajuste PURAMENTE ADITIVO en la UI del sheet. La maquinaria de ownership (el punto load-bearing) NO se tocó; el
+input manual valida bien (15 díg, fail-closed) por el MISMO `onAssignTag` que el BLE. Verde en todo.
+
+## 1. Ficha (`[id].tsx`, seccion Identificacion) — PASS
+
+- `IdentifierAssignRow kind="tag"` ELIMINADO. Con `tagElectronic == null` + activo, la electronica muestra solo
+  el label "Caravana electronica" + `TagScanCta` (`[id].tsx:855-861`). Ternario read-only / "—" intacto.
+- `IdentifierAssignRow kind="idv"` INTACTO (`[id].tsx:873-882`, sin `hideLabel`, con su label propio).
+- Imports colgados: NO. Linea 65 quedo `import { IDV_MAX_LENGTH, sanitizeIdvInput }` — se removieron
+  `TAG_ELECTRONIC_LENGTH`/`isValidTagElectronic`/`sanitizeTagInput` (ahora viven en el sheet). Grep confirma 0
+  referencias residuales a esos 3 simbolos en `[id].tsx`.
+- `onAssignTag` intacto (`[id].tsx:613`) y pasado al sheet (`[id].tsx:1014`). Sheet montado condicional a
+  `scanOpen && canAssignTag(detail)` — sin cambios.
+- `hideLabel` REVERTIDO en `IdentifierAssignRow.tsx`: prop removido del type, del destructure y del render. Sin
+  uso residual.
+
+## 2. Sheet (`TagScanSheet.tsx`, `ManualTagEntry`) — PASS
+
+- `manualMode` state + `manualModeRef` (`:77,83-84`). Render: `manualMode ? ManualTagEntry : readEid ?
+  ReadConfirmation : hero…` (`:187-203`).
+- `ManualTagEntry` (`:374-442`): `FormField` numerico (`number-pad`, `maxLength=TAG_ELECTRONIC_LENGTH`,
+  `handleChange`→`sanitizeTagInput` en vivo ≤15) + [Asignar caravana] + [Volver].
+- Valida 15 dig ANTES de asignar (`:396`): `isValidTagElectronic(value) && value.trim().length ===
+  TAG_ELECTRONIC_LENGTH`, misma copy que el alta; recien despues `onAssignTag(value)` — MISMO callback que el BLE
+  (dup pre-check + RPC + optimismo, `[id].tsx:613`).
+- Fail-closed (`:404-408`): `!r.ok` → `setBusy(false)` + `setError`, sheet ABIERTO, retryable (`handleChange`
+  limpia el error). Exito → `onClose()`. `disabled={busy}` en ambos botones + guard `if (busy) return`.
+- "Volver" = `onBack` = `exitManual` = `setManualMode(false)` → vuelve al estado de scan (readEid sigue null en
+  manual → sin confirmacion fantasma al volver).
+- Links "¿Sin baston?" (ScanHero+ConnectHero) y CTA (ManualPromptHero) → `enterManual` (setManualMode(true),
+  `:198,200,202`). `ConnectHero.onManual` paso de `onClose` a `enterManual` — correcto.
+
+## 3. Ownership INTACTO (load-bearing) — PASS
+
+- En `manualMode` se IGNORAN las lecturas BLE: `onTagRead` (`:89-93`) `if (assigningRef.current ||
+  manualModeRef.current) return;` — el scoped scanner NO se suelta.
+- Acquire/release del scoped scanner atado a mount/unmount del sheet SIN cambios (`:66-70`). El diff no lo toca.
+- `resolveListening`/`listener-gate.ts`/provider/`stick.ts`/`FindOrCreateOverlay.tsx` FUERA del diff (0 cambios)
+  → supresion del overlay por el flag + maquina de escucha identicas. Aditivo puro, como pedia el brief. FOCO
+  #1/#2/#3 de la review original siguen validos.
+
+## 4. e2e (`baston-ficha.spec.ts`) — PASS
+
+- (a)/(b) ownership SIN cambios.
+- (c) reescrito (`:164-205`): ficha NO ofrece manual directo (`getByRole('button',{name:'Agregar caravana
+  electronica'})` → `toHaveCount(0)`, `:177`); abre sheet → manual-promovido → tap `tag-scan-to-manual` →
+  `tag-scan-manual` VISIBLE (NO cerro, `:187`); 14 dig → `tag-scan-manual-assign` → error inline + sigue en
+  manual (`:192-195`); 15 dig → assign → sheet cierra (`:200-201`) + oraculo server `waitForServerTagAssigned`
+  (`:204`). Sin asserts del row manual viejo en la ficha.
+- Capture: 01 = ficha solo-bastonear; `+07-sheet-carga-manual`. 7 shots.
+
+## 5. Verificacion (UX round)
+
+- `tsc --noEmit` (client): VERDE (exit 0).
+- Unit de lo tocado: 25/25 (`animal-input` [validacion del sheet] + `listener-gate` 3/3 + `maniobra-listen-state`
+  4/4 + `eid-format` + `identifier-assign`). 0 fail.
+- Anti-hardcode (ADR-023 §4): 0 violaciones.
+- e2e/capture typecheck: 0 errores en `baston-ficha.spec.ts` y el capture (unico error de tsc = `admin.ts:19`
+  [ws types, artefacto de mi config temporal] + `admin.ts:1742` [cast Supabase], ambos PREEXISTENTES en un helper
+  de test SIN tocar por el delta). `seedAnimal` (retorna `profileId`) y `waitForServerTagAssigned` verificados en
+  `admin.ts:850/923/1728`.
+- `git diff supabase/` vacio → Gate 1 N/A. Sin `design/*.png` en el arbol. `e2e:build` NO corrido (Gate 2.5 leader).
+
+## Trazabilidad reconciliada (as-built del ajuste)
+
+- RCF.6.1 (unica afordancia "Bastonear" en la ficha) ↔ `[id].tsx:855-861` · e2e (c) `toHaveCount(0)` + (a).
+- RCF.6.6 (manual-first DENTRO del sheet: link/CTA → `ManualTagEntry`, valida 15 dig, MISMO `onAssignTag`, ignora
+  lecturas en manual sin soltar el scanner) ↔ `TagScanSheet.tsx:187-203,374-442` + guard `:90` · e2e (c) · unit
+  `animal-input`.
+- RCF.2.1–RCF.2.7 (contenedor movido al sheet; logica identica) ↔ `ManualTagEntry` + `onAssignTag` · e2e (c).
+
+## Exactitud specs (codigo → spec): OK
+
+- `context`: §Alcance — electronica = SOLO "Bastonear" en la ficha, manual DENTRO del sheet; idv sin cambios.
+- `requirements`: RCF.6.1 (unica afordancia) + RCF.6.6 (manual dentro del sheet + ignora lecturas) reescritos +
+  nota en RCF.2 + cobertura (c) actualizada.
+- `design`: tabla de archivos sin fila `hideLabel` + §10.2 (ManualTagEntry) + §10.3/§10.4 + alternativa "manual
+  en sheet" = default de la electronica.
+- `tasks`: T20 + **T20b** (UX Raf) + T21/(c) + T22 (7 capturas), todas `[x]`.
+El design NO quedo mintiendo: describe `ManualTagEntry`, el guard `manualModeRef`, la validacion y el reuso de
+`onAssignTag`.
+
+## Observacion (NO bloqueante)
+
+El guard "ignorar lecturas BLE mientras se tipea" (`onTagRead` con `manualModeRef`) no tiene test dedicado (el
+e2e (c) corre SIN transporte → no puede inyectar un bastonazo en manual). RCF.6.6 en su conjunto SI esta cubierto
+(manual reachable + valida + asigna). El guard es un early-return trivial y la maquinaria de ownership esta bien
+testeada → no bloquea. Mejora futura: un e2e con transporte (`gotoWithBle`) que entre a manual e inyecte un
+bastonazo, asertando `tag-scan-read` ausente y `tag-scan-manual` visible.
+
+## Cambios requeridos (UX update)
+
+Ninguno.

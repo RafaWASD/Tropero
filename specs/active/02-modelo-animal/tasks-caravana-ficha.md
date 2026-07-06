@@ -78,17 +78,23 @@
 - [x] **T19** — `TagScanSheet.tsx` (nuevo): adquiere el scanner acotado (mount/unmount), hero adaptativo
   (`resolveListenConnState`: scan/connect/manual-promovido), confirmación pre-commit (`formatEidReadable` +
   "Asignar … a este animal") + assign a ESTE animal (`onAssignTag`), error inline fail-closed. Export en el
-  barrel. Cubre: RCF.6.1, RCF.6.2, RCF.6.3, RCF.6.4, RCF.6.6.
-- [x] **T20** — `IdentifierAssignRow`: `+prop hideLabel`. Ficha `[id].tsx`: afordancia "Bastonear la caravana"
-  (`TagScanCta`) + la carga manual (piso, `hideLabel`) bajo un solo label; monta `TagScanSheet` condicional a
-  `scanOpen && canAssignTag`. Cubre: RCF.6.1, RCF.6.6.
+  barrel. Cubre: RCF.6.1, RCF.6.2, RCF.6.3, RCF.6.4.
+- [x] **T20** — Ficha `[id].tsx`: **una única** afordancia "Bastonear la caravana" (`TagScanCta`) para la
+  electrónica vacía (sin carga manual directa en la ficha); monta `TagScanSheet` condicional a `scanOpen &&
+  canAssignTag`. Cubre: RCF.6.1.
+- [x] **T20b — UX Raf (2026-07-06): carga manual de la electrónica DENTRO del sheet.** `TagScanSheet`: `+estado
+  manualMode` + vista `ManualTagEntry` (FormField numérico, `sanitizeTagInput`, valida 15 díg con la copy de
+  RCF.2.2, asigna por `onAssignTag`, "Volver"); links "¿Sin bastón?" en scan/connect + CTA en manual-promovido →
+  `setManualMode(true)`; en manualMode `onTagRead` ignora las lecturas (`manualModeRef`), scoped scanner intacto.
+  Ficha: se ELIMINÓ el `IdentifierAssignRow kind="tag"` (y se revirtió el prop `hideLabel`, quedó sin uso).
+  Cubre: RCF.6.6, RCF.2 (contenedor movido al sheet).
 - [x] **T21** — E2E `app/e2e/baston-ficha.spec.ts` (adaptador mock): (a) bastoneo desde la ficha → asigna a ESTE
   animal (oráculo server) + overlay NO se abre (ausencia del testID exclusivo); (b) al cerrar, un bastonazo
-  posterior no dispara nada; (c) sin transporte → manual-promovido + carga manual sigue funcionando. Cubre:
-  RCF.6.1–RCF.6.6.
-- [x] **T22** — Capture file `app/e2e/captures/caravana-ficha-bastoneo.capture.ts` (Gate 2.5, ADR-029): 6
-  capturas nombradas (afordancia / connect / scan / lectura+confirmación / post-asignación / manual-promovido).
-  Reconciliación de specs (context/requirements/design/tasks) al as-built. Cubre: (Gate 2.5 / cierre).
+  posterior no dispara nada; (c) la ficha NO ofrece manual directo; sin transporte → carga manual DENTRO del
+  sheet (14 díg = error, 15 díg → asigna + oráculo server). Cubre: RCF.6.1–RCF.6.6 + RCF.2.
+- [x] **T22** — Capture file `app/e2e/captures/caravana-ficha-bastoneo.capture.ts` (Gate 2.5, ADR-029): 7
+  capturas nombradas (afordancia solo-bastonear / connect / scan / lectura+confirmación / post-asignación /
+  manual-promovido / carga manual dentro del sheet). Reconciliación de specs al as-built. Cubre: (Gate 2.5 / cierre).
 
 ## Notas
 

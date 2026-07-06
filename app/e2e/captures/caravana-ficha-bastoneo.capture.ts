@@ -77,7 +77,8 @@ test('captura RCF.6: bastoneo desde la ficha (afordancia / connect / scan / lect
   await waitForHome(page);
   await openFicha(page, idv);
 
-  // ── 01 — la sección "Identificación" con la afordancia "Bastonear la caravana" + la carga manual (piso). ──
+  // ── 01 — la sección "Identificación": ÚNICA afordancia de la electrónica vacía = "Bastonear la caravana"
+  //         (la carga manual por teclado vive DENTRO del sheet, no en la ficha — UX Raf 2026-07-06). ──
   await expect(page.getByTestId('tag-scan-open')).toBeVisible({ timeout: 15_000 });
   await shot(page, '01-afordancia-ficha-bastonear');
 
@@ -112,8 +113,9 @@ test('captura RCF.6: bastoneo desde la ficha (afordancia / connect / scan / lect
   await shot(page, '05-post-asignacion-readonly');
 });
 
-// ─── PASADA B (sin transporte, manual-promovido): el sheet degrada al prompt neutro + deriva a la carga manual ──
-test('captura RCF.6: sheet en manual-promovido (sin bastón)', async ({ page }) => {
+// ─── PASADA B (sin transporte, manual-promovido): el sheet degrada al prompt neutro + la carga MANUAL vive
+//     DENTRO del sheet (detrás del CTA) — el campo de texto de 15 díg. ──
+test('captura RCF.6: sheet manual-promovido + carga manual DENTRO del sheet', async ({ page }) => {
   test.setTimeout(150_000);
 
   const user = await createTestUser('cfscapm');
@@ -137,4 +139,10 @@ test('captura RCF.6: sheet en manual-promovido (sin bastón)', async ({ page }) 
   await expect(page.getByTestId('tag-scan-sheet')).toBeVisible({ timeout: 10_000 });
   await expect(page.getByText('El bastón no está disponible en este dispositivo', { exact: true })).toBeVisible();
   await shot(page, '06-sheet-manual-promovido');
+
+  // ── 07 — tap el CTA → la carga MANUAL vive DENTRO del sheet: campo de texto de 15 díg + "Asignar caravana". ──
+  await page.getByTestId('tag-scan-to-manual').click();
+  await expect(page.getByTestId('tag-scan-manual')).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByLabel('Caravana electrónica', { exact: true })).toBeVisible();
+  await shot(page, '07-sheet-carga-manual');
 });

@@ -6,6 +6,15 @@ baseline_commit: ac709d2
 Delta Nivel B (ADR-028), extensión de `caravana-ficha`. **Frontend puro → Gate 1 N/A.** Reuso TOTAL de la
 infraestructura BLE de ADR-024 (contrato de ingesta + provider global + adaptadores).
 
+> **UX UPDATE (2026-07-06, sobre `20df0d2`).** Raf no quiso DOS afordancias separadas en la ficha (Bastonear +
+> manual). **Ahora**: la ficha ofrece SOLO **"Bastonear la caravana"** para la electrónica vacía; la carga MANUAL
+> por teclado se movió **DENTRO del sheet** (estado `manualMode`), detrás del link "¿Sin bastón? Cargá la caravana
+> a mano" (scan/connect) y del CTA del estado manual-promovido. En `manualMode` el sheet **ignora** las lecturas
+> BLE (el usuario está tipeando) SIN soltar la propiedad exclusiva del listener. Se eliminó el
+> `IdentifierAssignRow kind="tag"` de la ficha y se **revirtió** el prop `hideLabel` (quedó sin uso). El `idv`
+> conserva su `IdentifierAssignRow` inline en la ficha (sin cambios). Verde: typecheck 0, hardcode 0, unit 25/25
+> de lo tocado, e2e/capture typecheckean, `supabase/`+`design/` sin cambios. Detalle abajo (§UX update).
+
 ## Veredicto: 🟢 VERDE
 
 - `pnpm typecheck` (tsc --noEmit): **VERDE** (exit 0).
@@ -122,12 +131,43 @@ Busqué (y cerré / verifiqué):
   degradación, verificación a/b/c) + 2 alternativas descartadas nuevas (togglear `busy` / refactor de heroes).
 - `tasks-caravana-ficha.md` — T16–T22 `[x]` (bastoneo).
 
+## UX update (2026-07-06) — carga manual movida DENTRO del sheet
+
+**Qué cambió** (sobre `20df0d2`, árbol limpio):
+- **Ficha `[id].tsx`**: eliminado el `<IdentifierAssignRow kind="tag">` (manual de la electrónica). La electrónica
+  vacía muestra ahora SOLO el label "Caravana electrónica" + `<TagScanCta>` ("Bastonear la caravana"). Imports
+  `sanitizeTagInput`/`TAG_ELECTRONIC_LENGTH`/`isValidTagElectronic` removidos de `[id].tsx` (los usa ahora el
+  sheet). `onAssignTag` intacto (lo consume el sheet). El `idv` sin cambios (su `IdentifierAssignRow` inline queda).
+- **`TagScanSheet.tsx`**: `+estado manualMode` + `+manualModeRef` + sub-componente `ManualTagEntry` (FormField
+  numérico → `sanitizeTagInput` en vivo, `maxLength=TAG_ELECTRONIC_LENGTH`; valida `isValidTagElectronic && len===15`
+  con la copy "La caravana electrónica tiene que tener 15 dígitos." ANTES de asignar; `onAssignTag(value)` — MISMO
+  path que el BLE; [Asignar caravana] / [Volver]). Links "¿Sin bastón?" agregados a `ScanHero` + `ConnectHero`; el
+  CTA de `ManualPromptHero` y los links → `setManualMode(true)` (ya no `onClose`). `onTagRead` ignora las lecturas
+  si `manualModeRef.current` (el usuario tipea) — el scoped scanner **sigue activo** (ownership intacto). Importa
+  `FormField` + los helpers de `animal-input`.
+- **`IdentifierAssignRow.tsx`**: revertido el prop `hideLabel` (quedó sin uso tras sacar el row de la electrónica).
+- **e2e `baston-ficha.spec.ts (c)`**: reescrito — la ficha NO ofrece manual directo de la electrónica; sin
+  transporte → sheet → tap "Cargar la caravana a mano" → carga manual DENTRO del sheet: 14 díg = error inline, 15
+  díg → asigna (oráculo server `waitForServerTagAssigned`) + sheet cierra. Tests (a)/(b) (ownership) SIN cambios.
+- **capture**: 01 = ficha solo-bastonear; `+07-sheet-carga-manual` (el FormField dentro del sheet). Total 7 shots.
+
+**Cómo se ve el manual dentro del sheet**: header "Bastonear la caravana" (fijo) → en scan/connect un link discreto
+"¿Sin bastón? Cargá la caravana a mano"; al tocarlo (o el CTA "Cargar la caravana a mano" del estado sin-bastón) la
+vista del sheet pasa a un `FormField` "Caravana electrónica" (teclado numérico, placeholder "982 0001 2345 6789") +
+[Asignar caravana] primario + [Volver] secundario. Error inline en rojo bajo el campo. Éxito → cierra el sheet
+(optimismo → fila read-only).
+
+**Números (UX round)**: typecheck 0 · anti-hardcode 0 · unit 25/25 de lo tocado (incl. `animal-input` que cubre la
+validación del sheet) · e2e + capture typecheckean (0 errores en mis archivos) · `git status supabase/`+`design/`
+vacío (Gate 1 N/A, sin re-render de PNGs).
+
 ## Notas para el leader
 
 - **Gate 2.5**: correr `pnpm exec playwright test e2e/captures/caravana-ficha-bastoneo.capture.ts --config
-  playwright.capture.config.ts --workers=1` → 6 capturas. Vetar diseño (anti-recorte de descendentes en
-  "Cargá…" con 'g'; sheet anatomy; manga-friendly; es-AR; el scan como path prominente + manual como piso).
-- **Decisión de layout confirmable en Puerta 2**: la caravana electrónica vacía muestra "Bastonear la caravana"
-  (prominente, verde) + "Agregar caravana electrónica" (manual, piso) bajo un solo label. Alternativa si Raf
-  prefiere: manual dentro del sheet (más código, rompería el e2e existente del inline). Elegí lo menos invasivo.
+  playwright.capture.config.ts --workers=1` → **7 capturas** (01 ficha solo-bastonear · 02 conectar · 03 escaneando
+  · 04 lectura+confirmación · 05 post-asignación read-only · 06 manual-promovido · 07 carga manual dentro del
+  sheet). Vetar diseño (anti-recorte de descendentes en "Cargá…" con 'g'; sheet anatomy; manga-friendly; es-AR).
+- **As-built de layout (UX Raf 2026-07-06)**: la ficha ofrece SOLO "Bastonear la caravana" para la electrónica; la
+  carga manual por teclado vive DENTRO del sheet (detrás de "¿Sin bastón?"). El `idv` conserva su carga manual
+  inline en la ficha.
 - NO commiteado. NO toqué `feature_list.json` ni `current.md` (per instrucción).

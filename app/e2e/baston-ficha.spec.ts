@@ -157,39 +157,49 @@ test('(b) RCF.6: al cerrar el sheet, un bastonazo posterior en la ficha no dispa
 });
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────────────
-// (c) DEGRADACIÓN sin transporte (manual-promovido): el sheet muestra el prompt NEUTRO y deriva a la carga
-//     MANUAL de la ficha (piso siempre presente) → el input de 15 díg sigue funcionando (RCF.6 + RCF.2).
+// (c) CARGA MANUAL DENTRO DEL SHEET (RCF.6.6): la ficha ya NO ofrece carga manual directa de la electrónica —
+//     solo "Bastonear la caravana". La carga manual por teclado vive DENTRO del sheet, detrás de "¿Sin
+//     bastón?" / el CTA del estado manual-promovido. Validación (14 díg → error) + assign (15 díg) → server.
 // ─────────────────────────────────────────────────────────────────────────────────────────────────────
-test('(c) RCF.6: sin transporte el sheet degrada a "no disponible" + deriva a la carga manual (piso), que sigue funcionando', async ({ page }) => {
+test('(c) RCF.6.6: sin transporte → carga MANUAL dentro del sheet (validación 14 díg + assign 15 díg → server)', async ({ page }) => {
   const user = await createTestUser('cfman');
   await setUserPhone(user.id, '1123456789');
   const { establishmentId, rodeoId } = await seedEstablishmentWithRodeo(user.id, 'Campo CFMan');
   const idv = `9201${Date.now().toString().slice(-6)}`;
-  await seedAnimal(establishmentId, rodeoId, { tag: null, idv, visualAlt: `${RUN_TAG}-CFM`, sex: 'female' });
+  const profileId = await seedAnimal(establishmentId, rodeoId, { tag: null, idv, visualAlt: `${RUN_TAG}-CFM`, sex: 'female' });
 
   await gotoWithBleManual(page);
   await signIn(page, user);
   await waitForHome(page);
   await openFicha(page, idv);
 
+  // La ficha NO ofrece carga manual directa de la electrónica: solo "Bastonear la caravana" (UX Raf 2026-07-06).
+  await expect(page.getByRole('button', { name: 'Agregar caravana electrónica', exact: true })).toHaveCount(0);
+  await expect(page.getByTestId('tag-scan-open')).toBeVisible({ timeout: 15_000 });
+
   // Abrir el sheet → sin transporte cae al hero manual-promovido (tono NEUTRO, no es un error).
   await page.getByTestId('tag-scan-open').click();
   await expect(page.getByTestId('tag-scan-sheet')).toBeVisible({ timeout: 10_000 });
   await expect(page.getByText('El bastón no está disponible en este dispositivo', { exact: true })).toBeVisible();
 
-  // "Cargar la caravana a mano" → cierra el sheet → la afordancia manual de la ficha queda a la vista.
+  // "Cargar la caravana a mano" → la carga manual vive DENTRO del sheet (NO cierra).
   await page.getByTestId('tag-scan-to-manual').click();
-  await expect(page.getByTestId('tag-scan-sheet')).toHaveCount(0, { timeout: 10_000 });
-
-  // La carga MANUAL (piso siempre presente) sigue funcionando: expandir → 15 díg → confirmar → optimismo.
-  await page.getByRole('button', { name: 'Agregar caravana electrónica', exact: true }).click();
+  await expect(page.getByTestId('tag-scan-manual')).toBeVisible({ timeout: 10_000 });
   const tagInput = page.getByLabel('Caravana electrónica', { exact: true });
   await expect(tagInput).toBeVisible();
+
+  // 14 díg → error inline "…15 dígitos." sin asignar (sigue en la vista manual).
+  await tagInput.fill('12345678901234');
+  await page.getByTestId('tag-scan-manual-assign').click();
+  await expect(page.getByText('La caravana electrónica tiene que tener 15 dígitos.')).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByTestId('tag-scan-manual')).toBeVisible();
+
+  // 15 díg → "Asignar caravana" → encola el RPC (mismo path que el BLE) → el sheet cierra.
   const tag = `98209${Date.now().toString().slice(-10)}`.slice(0, 15).padEnd(15, '0');
   await tagInput.fill(tag);
-  await page.getByTestId('assign-tag-confirm').click();
-  // Optimismo en sitio (RCF.2.7): el tag aparece en solo-lectura → ya no se ofrece ni scan ni carga manual.
-  await expect(page.getByText(tag, { exact: true }).first()).toBeVisible({ timeout: 10_000 });
-  await expect(page.getByTestId('tag-scan-open')).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Agregar caravana electrónica', exact: true })).toHaveCount(0);
+  await page.getByTestId('tag-scan-manual-assign').click();
+  await expect(page.getByTestId('tag-scan-sheet')).toHaveCount(0, { timeout: 10_000 });
+
+  // ORÁCULO SERVER: el assign MANUAL persistió end-to-end (outbox → RPC → animals → propagación 0079).
+  await waitForServerTagAssigned(profileId, tag);
 });

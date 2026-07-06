@@ -73,6 +73,14 @@ final).
 
 ## RCF.2 — Asignar caravana electrónica (`tag_electronic`) por el RPC existente
 
+> **Reconciliación as-built (UX Raf, 2026-07-06)**: la carga MANUAL por teclado de la caravana ELECTRÓNICA ya
+> **NO vive como un row inline en la ficha** — se movió **DENTRO del sheet de bastoneo** (RCF.6), detrás de "¿Sin
+> bastón? Cargá la caravana a mano" / el CTA del estado manual-promovido. Toda la lógica RCF.2.1–RCF.2.7 sigue
+> vigente **igual** (sanitize ≤15, validación `^\d{15}$` con la misma copy, pre-check de dup, encolar el RPC,
+> optimismo en sitio) — solo cambió el CONTENEDOR (una vista `ManualTagEntry` del sheet, no un `IdentifierAssignRow`
+> en la ficha). La ficha ofrece SOLO "Bastonear la caravana" para la electrónica vacía. (El `idv`/RCF.3 mantiene su
+> `IdentifierAssignRow` inline en la ficha, sin cambios.)
+
 - **RCF.2.1** — Cuando el usuario tipea en el campo de caravana electrónica, el sistema deberá sanitizar la
   entrada a **solo dígitos, máximo 15** (reuso de `sanitizeTagInput` / `TAG_ELECTRONIC_LENGTH`,
   `app/src/utils/animal-input.ts:16,32`).
@@ -160,9 +168,10 @@ Reuso de la infraestructura BLE del bastón (ADR-024) para leer el EID y asignar
 ficha) — NO es find-or-create, NO hay picker (el animal es conocido). Frontend puro (Gate 1 N/A).
 
 - **RCF.6.1** — Mientras la ficha de un animal **activo** tiene `tagElectronic == null`, el sistema deberá
-  ofrecer en la sección "Identificación", **además** de la carga manual (RCF.2), la acción **"Bastonear la
-  caravana"** que abre un sheet de scan acotado a ESTE animal. Con `tagElectronic != null`, no se ofrece
-  (read-only, RCF.1.2).
+  ofrecer en la sección "Identificación" **una única** afordancia de la caravana electrónica: **"Bastonear la
+  caravana"**, que abre un sheet de scan acotado a ESTE animal. No deberá ofrecer una carga manual DIRECTA de la
+  electrónica en la ficha (la carga manual por teclado vive DENTRO del sheet, RCF.6.6). Con `tagElectronic !=
+  null`, no se ofrece (read-only, RCF.1.2). (UX Raf, 2026-07-06.)
 - **RCF.6.2** — El sheet de scan deberá presentar el **mismo lenguaje adaptativo** que la identificación de la
   maniobra (`maniobra/identificar.tsx`), reusando `resolveListenConnState`: transporte **conectado** → hero
   de escaneo; transporte **conectable** (web-serial antes de elegir puerto / bastón caído) → hero "conectá el
@@ -184,9 +193,13 @@ ficha) — NO es find-or-create, NO hay picker (el animal es conocido). Frontend
   retorna temprano). Al cerrar/desmontar el sheet (incl. back-gesture) el listener deberá **volver a
   suspenderse** (busyMode manda de nuevo: un bastonazo posterior en la ficha no hace nada) sin dejar transporte
   escuchando de más ni busyMode inconsistente.
-- **RCF.6.6** — **Manual-first**: la carga manual de 15 dígitos (RCF.2) deberá quedar como **piso siempre
-  presente**; el sheet de scan deriva a ella (link "Cargá la caravana a mano" / CTA en el estado
-  manual-promovido) sin romperla.
+- **RCF.6.6** — **Manual-first (dentro del sheet)**: la carga manual de 15 dígitos (RCF.2) deberá estar
+  **siempre alcanzable DESDE el sheet**: en cualquier estado de scan por el link "¿Sin bastón? Cargá la caravana
+  a mano", y en el estado manual-promovido (sin transporte) por su CTA. Al elegirla se muestra un campo de texto
+  numérico (sanitiza ≤15, valida `^\d{15}$` con la misma copy, asigna por el MISMO `onAssignTag`), con "Volver"
+  al estado de scan. Mientras la carga manual está activa, el sistema deberá **ignorar** las lecturas del bastón
+  (el usuario eligió tipear — un bastonazo no debe pisar lo que escribe), sin soltar la propiedad exclusiva del
+  listener (el sheet sigue siendo dueño; solo no actúa sobre las lecturas).
 - **RCF.6.7** — La decisión de si el listener escucha (`scopedScannerActive || (enabled && !busy)`) deberá ser
   una función **PURA y testeable** (`resolveListening`, `app/src/services/ble/listener-gate.ts`), con el flag
   del scanner acotado, `enabled` y `busy` como entradas.
@@ -237,8 +250,10 @@ detiene y se eleva a Gate 1 — pero el as-built verificado dice que no.)
 - **E2E del bastoneo** (`app/e2e/baston-ficha.spec.ts`, adaptador mock): (a) "Bastonear" → sheet acotado → una
   lectura se asigna a ESTE animal (oráculo server-side `waitForServerTagAssigned`) Y el FindOrCreateOverlay NO
   se abre (ausencia del testID exclusivo `find-or-create-overlay`) (RCF.6.1/RCF.6.3/RCF.6.4/RCF.6.5); (b) al
-  cerrar el sheet, un bastonazo posterior en la ficha no dispara nada (listener re-suspendido, RCF.6.5); (c) sin
-  transporte → sheet manual-promovido neutro + deriva a la carga manual que sigue funcionando (RCF.6.2/RCF.6.6).
+  cerrar el sheet, un bastonazo posterior en la ficha no dispara nada (listener re-suspendido, RCF.6.5); (c) la
+  ficha NO ofrece carga manual directa de la electrónica; sin transporte → sheet manual-promovido → la carga
+  MANUAL vive DENTRO del sheet: 14 díg = error inline "…15 dígitos.", 15 díg → asigna (oráculo server) + el
+  sheet cierra (RCF.6.1/RCF.6.2/RCF.6.6 + RCF.2).
 
 ## Historial de refinamiento
 

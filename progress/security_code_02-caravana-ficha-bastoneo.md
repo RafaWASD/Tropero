@@ -103,3 +103,75 @@ Leídos para trazar el flujo (no modificados por el delta, contexto):
 ## Cobertura indirecta (advertencia)
 
 La skill `sentry-skills:security-review` no cubre nativamente Deno/Edge, RLS/Postgres, PowerSync sync rules ni BLE. En este delta **no aplica**: no hay Edge Functions, ni migrations, ni policies, ni sync rules nuevas (Gate 1 N/A confirmado por `git diff supabase/` vacío). La revisión BLE/offline se hizo manualmente contra el catálogo RAFAQ (dominios C y G arriba). La autorización real del assign vive en el RPC server-side, **fuera de este diff** — no re-auditada acá porque el contrato no cambió; su corrección se asume del gate previo de la feature que lo introdujo.
+
+---
+
+## UX update (2026-07-06) — carga manual del EID movida DENTRO del sheet
+
+**Modo**: `code` (re-auditoría del ajuste UX). **Base de comparación**: HEAD `20df0d2` (working tree sin commitear).
+**Skill**: `sentry-skills:security-review` re-corrida sobre el diff sin commitear + validación manual + catálogo RAFAQ.
+`git diff supabase/` **vacío** → Gate 1 N/A confirmado (sin migrations/Edge/policies/sync rules).
+
+### Veredicto: **PASS — 0 findings HIGH**
+
+Reshuffle de UI puro: el `<IdentifierAssignRow kind="tag">` se sacó de la ficha y la carga manual del EID por teclado se movió DENTRO del `TagScanSheet` (nuevo `manualMode` + sub-componente `ManualTagEntry`). Es el **mismo dato regulado**, la **misma validación** y el **mismo `onAssignTag`** — solo cambió la superficie de render. No hay endpoint nuevo, ni parseo nuevo sin acotar, ni relajación de autorización/tenant, ni superficie server tocada.
+
+### Archivos analizados (diff working-tree vs `20df0d2`)
+
+- `app/src/components/TagScanSheet.tsx` — `+manualMode`/`+manualModeRef` + `+ManualTagEntry` (FormField 15 díg) + links "¿Sin bastón?" → `setManualMode(true)`; `onTagRead` ignora lecturas si `manualModeRef.current`.
+- `app/app/animal/[id].tsx` — eliminado el `<IdentifierAssignRow kind="tag">` de la electrónica vacía (queda solo `<TagScanCta>`); imports `sanitizeTagInput`/`TAG_ELECTRONIC_LENGTH`/`isValidTagElectronic` removidos (los usa ahora el sheet). `onAssignTag` intacto.
+- `app/src/components/IdentifierAssignRow.tsx` — **revertido** el prop `hideLabel` (quedó sin uso al sacar el row). El label colapsado vuelve a renderizarse siempre.
+- Fuera de scope de findings: `app/e2e/baston-ficha.spec.ts` (caso `(c)` reescrito), `app/e2e/captures/caravana-ficha-bastoneo.capture.ts` (+shot 07).
+
+Leídos para trazar el flujo: `app/src/utils/animal-input.ts` (`sanitizeTagInput`, `isValidTagElectronic`, `TAG_ELECTRONIC_LENGTH`), `app/src/components/FormField.tsx` (passthrough de `maxLength`/`keyboardType` al `TextInput` nativo), `app/app/animal/[id].tsx:613-653` (`onAssignTag`), `app/src/services/animals.ts:748-787` (`lookupByTag`).
+
+### Foco A — Input del EID manual (nueva superficie, MISMO dato regulado)
+
+**OK. La validación NO se debilitó al reubicarla — es idéntica a la del `IdentifierAssignRow` que se removió.** Tres capas cliente + la autoritativa server-side sin cambios:
+
+1. **Sanitize en vivo**: `ManualTagEntry.handleChange` → `sanitizeTagInput(raw)` = `raw.replace(/\D/g, '').slice(0, 15)` (`animal-input.ts:32-34`) → solo dígitos, tope 15 (cubre paste). `TagScanSheet.tsx:~388`.
+2. **Cap nativo real**: `FormField maxLength={TAG_ELECTRONIC_LENGTH}` (=15) se reenvía al `TextInput` de react-native (`FormField.tsx:34-35, 97`) — no es cosmético.
+3. **Validación de forma ANTES de asignar**: `handleConfirm` gatea en `isValidTagElectronic(value) && value.trim().length === TAG_ELECTRONIC_LENGTH` (`isValidTagElectronic` = `/^\d{15}$/`, `animal-input.ts:120-124`) y sólo entonces llama `onAssignTag(value)`; si no, `setError('…15 dígitos.')` y **no** invoca nada. Misma copy y misma regla que el row removido (comparado contra el diff de `[id].tsx`: el `validate` viejo era literal-idéntico).
+4. **Autoritativa server-side (sin cambios)**: RPC `assign_tag_to_animal` + constraints de DB (23505 unique / 23514 CHECK / 42501 RLS) resueltas por `uploadData` al subir. El move no tocó esta capa.
+
+No se agregó ningún parseo sin acotar. El input manual es el único campo nuevo tipeable y queda constreñido a `^\d{15}$` antes de cualquier assign.
+
+### Foco B — assign (mismo path, sin bypass)
+
+**OK.** `ManualTagEntry` recibe `onAssignTag={onAssignTag}` — la **misma referencia** del host que usa el path BLE (`TagScanSheet.tsx:187`, `[id].tsx:1014`), no está en el diff. Preserva íntegro: pre-check de dup con `lookupByTag(trimmed, detail.establishmentId)` (establishmentId **del perfil**, anti-IDOR RCF.2.5, `[id].tsx:611-631`) → `assignTagToAnimal(detail.profileId, trimmed)` con params escalares (sin spread de body → sin mass assignment). El manual no introduce ninguna ruta de assign alternativa ni relaja el tenant/autorización.
+
+### Foco C — Ownership del listener (manualMode ignora lecturas sin soltar el scanner)
+
+**OK. El cambio es aditivo; no cruza lecturas entre consumidores ni deja el listener colgado.**
+
+- `onTagRead` sólo suma un guard: `if (assigningRef.current || manualModeRef.current) return;` (`TagScanSheet.tsx:~93`). En manual **descarta** la lectura BLE (no toca `readEid`). El **scoped scanner sigue adquirido** — el acquire/release está atado al mount/unmount del sheet (sin cambios), `manualMode` NO libera nada. Comentario y código lo confirman.
+- `manualMode`/`manualModeRef` son estado/ref **locales del componente** (`useState`/`useRef`) — sin estado a nivel de módulo ni compartido → cero cruce entre consumidores; se resetean al desmontar el sheet.
+- **Sin contaminación de EID entre paths**: el render prioriza `manualMode` > `readEid !== null` > heroes (`TagScanSheet.tsx:187-203`). El link/CTA que setea `manualMode=true` sólo existe en los heroes (que se renderizan con `readEid === null`) → al entrar a manual, `readEid` es null; mientras se tipea, las lecturas se ignoran → `readEid` sigue null. `ManualTagEntry` usa su **propio** `value` local, nunca `readEid`. El assign manual asigna `value` (tipeado); el assign BLE asigna `readEid` (leído). No se mezclan.
+- **Sin listener colgado**: salir de manual (`onBack` → `exitManual` → `setManualMode(false)`) reanuda las lecturas; el `release` del scanner sigue ocurriendo en el cleanup del sheet igual que antes. Invariante de liberación intacta (`resolveListening` vuelve a `enabled && !busy`).
+
+### Foco D — supabase/ diff
+
+`git diff supabase/` vacío → **Gate 1 N/A confirmado**. Sin superficie server nueva.
+
+### Tabla de inputs (delta UX)
+
+| campo | límite | validación | OK? |
+|---|---|---|---|
+| EID por carga manual DENTRO del sheet (`ManualTagEntry`) | `maxLength=15` nativo + `sanitizeTagInput` (solo díg, slice 15) | cliente `isValidTagElectronic` (`/^\d{15}$/`) ANTES de asignar (UX, idéntica al row removido) + RPC `assign_tag_to_animal` server-side (autoritativa, sin cambios) | ✅ |
+| EID por bastoneo (`TagScanSheet`, path BLE) | 15 díg, formato EID | motor de ingesta upstream (rechaza malformado) + confirmación pre-commit + RPC server-side | ✅ (sin cambios) |
+
+### Tabla de rate limits (delta UX)
+
+| acción | rate limit | keyeo | fail-closed? | nota |
+|---|---|---|---|---|
+| assign EID (manual o BLE → encolar RPC `assign_tag_to_animal`) | n.a. en este delta | server deriva tenant + `has_role_in` | sí (`busy` guard en `ManualTagEntry` + `assigningRef` en BLE; error → inline, sheet abierto sin asignar) | Mismo RPC/superficie que la review base; el move de UI no agrega vector de abuso. UPDATE NULL→valor puntual (1 animal), no bulk/email/SMS/API externa. |
+
+### False positives descartados / considerados
+
+- **`ManualTagEntry` devuelve `r.error ?? 'No se pudo guardar el cambio.'` (B1 information disclosure)**: el `r.error` proviene del `onAssignTag` del host, que devuelve mensajes ya curados (errores de verificación de red / dup accionable) o `r.error.message` del clasificador de outbox — path **preexistente, no en este diff**, y es un mensaje de encolado client-side, no un `err.message` crudo de DB/Edge. No es finding.
+- **F1 filter injection vía `lookupByTag`**: el EID llega constreñido a `^\d{15}$` antes del pre-check, y `lookupByTag` usa queries locales parametrizadas (`buildSearchByTagQuery`/`buildLookupTagAcrossFieldsQuery`, `animals.ts:748-787`), sin `.or()/.ilike()` con concatenación. Sin riesgo. Además es código preexistente fuera del diff.
+- **Reversión de `hideLabel`**: sólo re-habilita el render del label colapsado del `IdentifierAssignRow` (`idv`). Sin implicancia de seguridad.
+
+### Conclusión UX update
+
+Los cuatro focos verificados (no asumidos). El ajuste es un reshuffle de UI que **preserva** la validación del dato regulado (idéntica, sólo reubicada), el path de assign (misma referencia, mismo anti-IDOR/tenant) y la propiedad exclusiva del listener (guard aditivo, scanner no se suelta, estado local sin cruce). **PASS — 0 findings HIGH.**

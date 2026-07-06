@@ -62,13 +62,7 @@ import {
   type AnimalStatus,
 } from '@/services/animals';
 import { canAssignIdv, canAssignTag } from '@/utils/identifier-assign';
-import {
-  IDV_MAX_LENGTH,
-  TAG_ELECTRONIC_LENGTH,
-  isValidTagElectronic,
-  sanitizeIdvInput,
-  sanitizeTagInput,
-} from '@/utils/animal-input';
+import { IDV_MAX_LENGTH, sanitizeIdvInput } from '@/utils/animal-input';
 import { fetchBreedCatalog } from '@/services/sigsa/sigsa-export-service';
 import { BreedPickerSheet } from '@/components/sigsa';
 import {
@@ -852,8 +846,10 @@ export default function AnimalDetailScreen() {
                 afordancia ofrece BASTONEAR (scan del EID, RCF.6) ADEMÁS de la carga manual (piso siempre
                 presente). `visual_id_alt` (identificación visual) queda FUERA de alcance (RCF.1.6). */}
             <DetailSection icon={Tag} title="Identificación">
-              {/* Caravana electrónica → bastoneo (scan → assign a ESTE animal, RCF.6) + carga manual (RPC
-                  existente assign_tag_to_animal, online vía outbox). */}
+              {/* Caravana electrónica → BASTONEAR (RCF.6): única afordancia de la electrónica vacía. Abre el
+                  sheet de scan acotado → lee el EID y lo asigna a ESTE animal. La carga MANUAL por teclado vive
+                  DENTRO del sheet (detrás de "¿Sin bastón? Cargá la caravana a mano") — NO hay carga manual
+                  directa de la electrónica desde la ficha (decisión de UX de Raf, 2026-07-06). */}
               {detail.tagElectronic != null ? (
                 <AttributeRow label="Caravana electrónica" value={detail.tagElectronic} />
               ) : canAssignTag(detail) ? (
@@ -861,24 +857,7 @@ export default function AnimalDetailScreen() {
                   <Text fontFamily="$body" fontSize="$3" fontWeight="500" color="$textMuted">
                     Caravana electrónica
                   </Text>
-                  {/* BASTONEAR (RCF.6): abre el sheet de scan acotado → lee el EID y lo asigna a este animal. */}
                   <TagScanCta onPress={() => setScanOpen(true)} />
-                  {/* Carga MANUAL (piso siempre presente): el label ya lo puso el YStack → hideLabel. */}
-                  <IdentifierAssignRow
-                    kind="tag"
-                    label="Caravana electrónica"
-                    hideLabel
-                    placeholder="982 0001 2345 6789"
-                    keyboardType="number-pad"
-                    sanitize={sanitizeTagInput}
-                    maxLength={TAG_ELECTRONIC_LENGTH}
-                    validate={(v) =>
-                      isValidTagElectronic(v) && v.trim().length === TAG_ELECTRONIC_LENGTH
-                        ? null
-                        : 'La caravana electrónica tiene que tener 15 dígitos.'
-                    }
-                    onConfirm={onAssignTag}
-                  />
                 </YStack>
               ) : (
                 <AttributeRow label="Caravana electrónica" value="—" />

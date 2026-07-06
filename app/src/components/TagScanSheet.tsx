@@ -2,25 +2,29 @@
 // bastoneo, RCF.6). Bottom-sheet de scan ACOTADO: lee el EID del bastón y lo asigna a ESTE animal (el de la
 // ficha) — NO es find-or-create, NO hay picker (el animal es conocido). Mucho más simple que el flujo global.
 //
+// UX (Raf, 2026-07-06): en la ficha queda SOLO "Bastonear la caravana". La carga MANUAL del EID por teclado
+// vive DENTRO de este sheet, detrás de "¿Sin bastón? Cargá la caravana a mano" (o el CTA del estado
+// manual-promovido). NO hay carga manual directa de la electrónica desde la ficha.
+//
 // Propiedad EXCLUSIVA del listener (el punto crítico, RCF.6): la ficha suspende el listener global con
 // `useBusyWhileMounted` (busyMode) para que un bastonazo no dispare el FindOrCreateOverlay encima. Este sheet
 // necesita lo INVERSO pero exclusivo → mientras está montado ADQUIERE un "scanner acotado" en el provider
 // (`useScopedScannerControls`): (1) el listener escucha para ÉL aunque busyMode esté prendido, y (2) el
 // FindOrCreateOverlay ignora esas lecturas (chequea `scopedScannerActive`). Acquire al montar / release en el
 // cleanup (incl. back-gesture / desmontaje de la ficha) → sin transporte colgado ni busyMode inconsistente.
+// En modo MANUAL el scoped scanner sigue IGUAL (dueño exclusivo); solo IGNORA las lecturas entrantes (el
+// usuario eligió tipear — un bastonazo no debe pisar lo que escribe).
 //
 // Lenguaje visual ADAPTATIVO REPLICADO de la maniobra (`maniobra/identificar.tsx`, `resolveListenConnState`):
-//   - CONECTADO      → hero de escaneo (pulso pasivo, "Acercá el bastón al animal").
-//   - CONECTABLE     → hero "Conectá el bastón" (disco tappable, gesto que web-serial exige antes de elegir
-//                      puerto / bastón caído).
+//   - CONECTADO      → hero de escaneo (pulso pasivo, "Acercá el bastón al animal") + link "¿Sin bastón?".
+//   - CONECTABLE     → hero "Conectá el bastón" (disco tappable) + link "¿Sin bastón?".
 //   - MANUAL (sin transporte, native Expo Go hoy) → prompt NEUTRO "El bastón no está disponible en este
-//                      dispositivo" → deriva a la carga MANUAL de la ficha (piso siempre presente).
-// La carga MANUAL de 15 díg (IdentifierAssignRow de la ficha) NO se toca — queda como fallback siempre
-// presente; el sheet ofrece "Cargá la caravana a mano" que cierra y aterriza en esa afordancia.
+//                      dispositivo" → CTA "Cargar la caravana a mano".
 //
 // Al leer un EID (ya validado+dedupeado por el contrato) → confirmación visual pre-commit (integridad SENASA,
 // ADR-024): los 15 díg legibles + "Asignar caravana … a este animal" → onAssignTag(eid) (offline-safe, encola
-// por outbox) → éxito → cierra; error → surface sin cerrar (fail-closed).
+// por outbox) → éxito → cierra; error → surface sin cerrar (fail-closed). El path MANUAL usa el MISMO
+// onAssignTag (pre-check dup + encolar RPC), con validación de forma (15 díg) inline previa.
 //
 // Cero hardcode (ADR-023 §4): tokens + getTokenValue para íconos lucide. Voseo es-AR. lineHeight matching en
 // todo heading con descendentes. a11y por los helpers de utils/a11y.
@@ -36,9 +40,11 @@ import { useBleStickListener, useScopedScannerControls } from '@/services/ble/st
 import { useBleProviderApi } from '@/services/ble/BleStickListenerProvider';
 import { resolveListenConnState } from '@/utils/maniobra-listen-state';
 import { formatEidReadable } from '@/utils/eid-format';
+import { TAG_ELECTRONIC_LENGTH, isValidTagElectronic, sanitizeTagInput } from '@/utils/animal-input';
 import { buttonA11y, labelA11y } from '@/utils/a11y';
 
 import { Button } from './Button';
+import { FormField } from './FormField';
 
 export type TagScanSheetProps = {
   /** Cierra el sheet (X, backdrop, o tras un assign exitoso). El host lo desmonta al cerrar. */
@@ -67,15 +73,21 @@ export function TagScanSheet({ onClose, onAssignTag }: TagScanSheetProps) {
   const [readEid, setReadEid] = useState<string | null>(null);
   const [assigning, setAssigning] = useState(false);
   const [assignError, setAssignError] = useState<string | null>(null);
-  // Mientras estamos ASIGNANDO no dejamos que un bastonazo nuevo pise la confirmación en vuelo (evita
-  // asignar un EID distinto del que el operario confirmó). Ref para leerlo dentro del callback sin re-sub.
+  // Modo carga MANUAL por teclado (detrás de "¿Sin bastón?"): el usuario eligió tipear el EID.
+  const [manualMode, setManualMode] = useState(false);
+  // Refs para leer estos flags dentro del callback del listener sin re-suscribir:
+  //   - assigning: no yanquear la confirmación mientras se asigna.
+  //   - manualMode: en carga manual IGNORAMOS las lecturas BLE (un bastonazo no pisa lo que se escribe).
   const assigningRef = useRef(assigning);
   assigningRef.current = assigning;
+  const manualModeRef = useRef(manualMode);
+  manualModeRef.current = manualMode;
 
   // ── Lectura del bastón (RCF.6): el EID llega YA validado+dedupeado del contrato. Live-rescan: un EID nuevo
-  //    reemplaza al que estaba a confirmar (escanear-escanear es el ritmo del bastón), salvo assign en vuelo. ──
+  //    reemplaza al que estaba a confirmar (escanear-escanear es el ritmo del bastón), salvo assign en vuelo
+  //    o carga manual activa (el usuario está tipeando → ignoramos el bastón). ──
   const onTagRead = useCallback((eid: string) => {
-    if (assigningRef.current) return; // no yanquear la confirmación mientras se asigna
+    if (assigningRef.current || manualModeRef.current) return;
     setAssignError(null);
     setReadEid(eid);
   }, []);
@@ -92,6 +104,9 @@ export function TagScanSheet({ onClose, onAssignTag }: TagScanSheetProps) {
   const connectStick = useCallback(() => {
     void bleApi?.transport?.connect().catch(() => undefined);
   }, [bleApi]);
+
+  const enterManual = useCallback(() => setManualMode(true), []);
+  const exitManual = useCallback(() => setManualMode(false), []);
 
   const onAssign = useCallback(async () => {
     if (!readEid || assigningRef.current) return;
@@ -169,7 +184,9 @@ export function TagScanSheet({ onClose, onAssignTag }: TagScanSheetProps) {
           </Pressable>
         </XStack>
 
-        {readEid !== null ? (
+        {manualMode ? (
+          <ManualTagEntry onAssignTag={onAssignTag} onClose={onClose} onBack={exitManual} />
+        ) : readEid !== null ? (
           <ReadConfirmation
             eid={readEid}
             assigning={assigning}
@@ -178,11 +195,11 @@ export function TagScanSheet({ onClose, onAssignTag }: TagScanSheetProps) {
             onBack={backToScanning}
           />
         ) : listenConn === 'connected' ? (
-          <ScanHero />
+          <ScanHero onManual={enterManual} />
         ) : listenConn === 'connectable' ? (
-          <ConnectHero onConnect={connectStick} onManual={onClose} />
+          <ConnectHero onConnect={connectStick} onManual={enterManual} />
         ) : (
-          <ManualPromptHero onManual={onClose} />
+          <ManualPromptHero onManual={enterManual} />
         )}
       </YStack>
     </View>
@@ -191,9 +208,9 @@ export function TagScanSheet({ onClose, onAssignTag }: TagScanSheetProps) {
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
 // HERO "ESCUCHANDO" (CONECTADO) — el bastón lee solo. Disco de pulso PASIVO (no se toca: el target es el
-// animal). Replica el lenguaje de maniobra/identificar a escala de sheet. + link a la carga manual (piso).
+// animal). Replica el lenguaje de maniobra/identificar a escala de sheet. + link a la carga manual (dentro).
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
-function ScanHero() {
+function ScanHero({ onManual }: { onManual: () => void }) {
   const disc = getTokenValue('$heroScan', 'size') * 0.6;
   const heroIcon = getTokenValue('$heroIcon', 'size') * 0.6;
   const ring = getTokenValue('$heroRing', 'size');
@@ -225,6 +242,8 @@ function ScanHero() {
           La lectura entra sola, sin tocar la pantalla
         </Text>
       </YStack>
+
+      <ManualFallbackLink onPress={onManual} />
     </YStack>
   );
 }
@@ -232,7 +251,7 @@ function ScanHero() {
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
 // HERO "CONECTÁ EL BASTÓN" (CONECTABLE) — desconectado pero con un transporte conectable (web-serial antes de
 // elegir puerto / bastón caído). El disco es un BOTÓN (tap = gesto que web-serial exige → connect()). Mismo
-// lenguaje que la maniobra (StickIcon + badge Bluetooth). + link a la carga manual (piso).
+// lenguaje que la maniobra (StickIcon + badge Bluetooth). + link a la carga manual (dentro del sheet).
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
 function ConnectHero({ onConnect, onManual }: { onConnect: () => void; onManual: () => void }) {
   const disc = getTokenValue('$heroScan', 'size') * 0.6;
@@ -297,9 +316,8 @@ function ConnectHero({ onConnect, onManual }: { onConnect: () => void; onManual:
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
 // HERO "MANUAL PROMOVIDO" (sin transporte, native Expo Go hoy) — SIN disco de scan ni botón de conectar (no
-// hay nada que conectar). Prompt NEUTRO (no es un error, es lo normal en ese dispositivo) → deriva a la carga
-// MANUAL de la ficha (piso siempre presente). El botón primario CIERRA el sheet → la afordancia manual de la
-// sección "Identificación" queda a la vista.
+// hay nada que conectar). Prompt NEUTRO (no es un error, es lo normal en ese dispositivo) → CTA "Cargar la
+// caravana a mano" que ABRE la carga manual DENTRO del sheet (no cierra).
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
 function ManualPromptHero({ onManual }: { onManual: () => void }) {
   const heroIcon = getTokenValue('$heroIcon', 'size') * 0.6;
@@ -334,16 +352,92 @@ function ManualPromptHero({ onManual }: { onManual: () => void }) {
   );
 }
 
-// ─── Link a la carga MANUAL (piso siempre presente): cierra el sheet → la afordancia manual de la ficha. ───
+// ─── Link a la carga MANUAL (dentro del sheet, detrás de "¿Sin bastón?"): abre el TextInput de 15 díg. ───
 function ManualFallbackLink({ onPress }: { onPress: () => void }) {
   return (
-    <Pressable onPress={onPress} {...buttonA11y(Platform.OS, { label: 'Cargá la caravana a mano' })}>
+    <Pressable testID="tag-scan-manual-link" onPress={onPress} {...buttonA11y(Platform.OS, { label: 'Cargá la caravana a mano' })}>
       <View paddingHorizontal="$3" paddingVertical="$2">
         <Text fontFamily="$body" fontSize="$4" lineHeight="$4" fontWeight="600" color="$primary" textAlign="center">
           ¿Sin bastón? Cargá la caravana a mano
         </Text>
       </View>
     </Pressable>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+// CARGA MANUAL del EID DENTRO del sheet (RCF.6.6) — el usuario tipea los 15 díg (sin bastón). Sanitiza en vivo
+// (solo dígitos ≤15), valida la forma al confirmar (misma copy que el alta) ANTES de asignar, y usa el MISMO
+// onAssignTag que el path BLE (pre-check de dup + encolar RPC + optimismo en sitio). Éxito → cierra; error →
+// inline, sheet abierto (fail-closed). "Volver" regresa al estado de scan.
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+function ManualTagEntry({
+  onAssignTag,
+  onClose,
+  onBack,
+}: {
+  onAssignTag: (eid: string) => Promise<{ ok: boolean; error?: string }>;
+  onClose: () => void;
+  onBack: () => void;
+}) {
+  const [value, setValue] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const handleChange = useCallback((raw: string) => {
+    setValue(sanitizeTagInput(raw));
+    // Al re-tipear, limpiamos el error (no-op si ya era null → React bail-out, sin re-render inútil).
+    setError((e) => (e ? null : e));
+  }, []);
+
+  const handleConfirm = useCallback(async () => {
+    if (busy) return;
+    // 1) Validación de FORMA (15 díg) — inline, sin invocar nada (misma copy que la carga manual del alta).
+    if (!(isValidTagElectronic(value) && value.trim().length === TAG_ELECTRONIC_LENGTH)) {
+      setError('La caravana electrónica tiene que tener 15 dígitos.');
+      return;
+    }
+    // 2) Asignación real (pre-check de dup + encolar). El optimismo en sitio lo hace el host.
+    setBusy(true);
+    setError(null);
+    const r = await onAssignTag(value);
+    if (!r.ok) {
+      // Fail-closed: error accionable inline, la afordancia queda ABIERTA para reintentar.
+      setBusy(false);
+      setError(r.error ?? 'No se pudo guardar el cambio.');
+      return;
+    }
+    // Éxito: el host reflejó el TAG optimista → cerramos (no setBusy(false): el sheet se desmonta).
+    onClose();
+  }, [busy, value, onAssignTag, onClose]);
+
+  return (
+    <YStack testID="tag-scan-manual" gap="$4">
+      <FormField
+        label="Caravana electrónica"
+        value={value}
+        onChangeText={handleChange}
+        error={error}
+        placeholder="982 0001 2345 6789"
+        keyboardType="number-pad"
+        maxLength={TAG_ELECTRONIC_LENGTH}
+        autoCapitalize="none"
+        returnKeyType="done"
+        onSubmitEditing={() => void handleConfirm()}
+      />
+      <Button
+        testID="tag-scan-manual-assign"
+        variant="primary"
+        fullWidth
+        disabled={busy}
+        onPress={() => void handleConfirm()}
+      >
+        {busy ? 'Asignando…' : 'Asignar caravana'}
+      </Button>
+      <Button variant="secondary" fullWidth disabled={busy} onPress={onBack}>
+        Volver
+      </Button>
+    </YStack>
   );
 }
 

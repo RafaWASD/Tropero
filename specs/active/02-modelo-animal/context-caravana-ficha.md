@@ -29,16 +29,21 @@
 
 ## Alcance
 
-**Entra** (afordancia manual en la ficha):
-- **Caravana electrónica** (`tag_electronic`): si está vacía → "Agregar caravana electrónica" (input 15 díg,
-  valida `^\d{15}$`, llama `assignTagToAnimal`/RPC existente). Si ya tiene valor → read-only (inmutable R4.13).
+**Entra** (afordancia en la ficha):
+- **Caravana electrónica** (`tag_electronic`): si está vacía → **"Bastonear la caravana"** (única afordancia en la
+  ficha) → sheet de scan acotado; la carga manual por teclado (input 15 díg, valida `^\d{15}$`, llama
+  `assignTagToAnimal`/RPC existente) vive DENTRO del sheet. Si ya tiene valor → read-only (inmutable R4.13).
+  > **Reconciliación (UX Raf, 2026-07-06)**: originalmente la electrónica ofrecía un "Agregar caravana electrónica"
+  > manual inline en la ficha; Raf pidió que la ficha muestre SOLO "Bastonear" y que la carga manual se mueva
+  > DENTRO del sheet (detrás de "¿Sin bastón?"). La lógica de asignación es la misma; cambió el contenedor.
 - **Caravana visual** (`idv`): si está vacía → "Agregar caravana visual" (UPDATE local sobre `animal_profiles.idv`,
-  NULL→valor; respeta unicidad `(establishment_id, idv)` + R4.13). Si ya tiene valor → read-only.
+  NULL→valor; respeta unicidad `(establishment_id, idv)` + R4.13). Si ya tiene valor → read-only. **Sin cambios**
+  por el delta bastoneo (el idv conserva su afordancia manual inline en la ficha).
 
 **Entra (delta bastoneo, 2026-07-06 — reconciliado, ya NO deferido):**
 - **Bastoneo de la caravana electrónica** (leer el EID del bastón y asignarlo a ESTE animal) → sheet de scan
   ACOTADO desde la ficha, reusando la infraestructura BLE existente (ADR-024). Degradación neutra sin transporte
-  (no es un botón muerto: abre un sheet que explica + deriva a la carga manual). Ver §RCF.6.
+  (no es un botón muerto: abre un sheet que explica + ofrece la carga manual DENTRO del sheet). Ver §RCF.6.
 
 **No entra:**
 - `visual_id_alt` "Nombre/apodo" → delta de #2.

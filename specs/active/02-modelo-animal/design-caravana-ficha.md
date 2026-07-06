@@ -30,9 +30,8 @@
 | `app/src/services/ble/BleStickListenerProvider.tsx` | **+`acquireScopedScanner()` + `scopedScannerActive`** en el `ProviderApi`; `listening` pasa a usar `resolveListening` (un scanner acotado fuerza la escucha aunque busyMode esté prendido). |
 | `app/src/services/ble/stick.ts` | **+`useScopedScannerControls()`** (devuelve el `acquireScopedScanner` estable del provider). |
 | `app/app/_components/FindOrCreateOverlay.tsx` | **Guard `scopedScannerActive`** en `onTagRead` (retorno temprano, paralelo a `BLE_OWNED_ROUTES`) + `testID="find-or-create-overlay"` (oráculo E2E) + cierre defensivo si un scanner acotado se activa con el overlay abierto. |
-| `app/src/components/TagScanSheet.tsx` | **NUEVO** — bottom-sheet de scan ACOTADO (RCF.6): adquiere la propiedad exclusiva del listener, hero adaptativo (scan/connect/manual-promovido), confirmación pre-commit + assign a ESTE animal. |
-| `app/src/components/IdentifierAssignRow.tsx` | **+prop `hideLabel`** (la ficha agrupa scan + manual bajo un solo label "Caravana electrónica"). |
-| `app/app/animal/[id].tsx` | En la caravana electrónica vacía: afordancia "Bastonear la caravana" (`TagScanCta`) + la carga manual (piso, `hideLabel`); monta `TagScanSheet` al root, condicional a `scanOpen`. |
+| `app/src/components/TagScanSheet.tsx` | **NUEVO** — bottom-sheet de scan ACOTADO (RCF.6): adquiere la propiedad exclusiva del listener, hero adaptativo (scan/connect/manual-promovido), **carga manual DENTRO del sheet** (`ManualTagEntry`, detrás de "¿Sin bastón?"), confirmación pre-commit + assign a ESTE animal. |
+| `app/app/animal/[id].tsx` | En la caravana electrónica vacía: **una única** afordancia "Bastonear la caravana" (`TagScanCta`); NO hay carga manual directa de la electrónica en la ficha (UX Raf 2026-07-06). Monta `TagScanSheet` al root, condicional a `scanOpen && canAssignTag`. (El `idv` conserva su `IdentifierAssignRow` inline.) |
 | `app/e2e/baston-ficha.spec.ts` + `app/e2e/captures/caravana-ficha-bastoneo.capture.ts` | **NUEVOS** — E2E de regresión (mock) + capture del Gate 2.5. |
 
 ## 2. Afordancia en la sección "Identificación" (criterio: inline vs sheet)
@@ -255,9 +254,11 @@ nuevos, el delta se detiene y va a Gate 1. El as-built verificado dice que no.)
 - **Un editor genérico de identificadores en la ficha** (poder cambiar cualquier identificador, incluso los
   seteados). Descartada: fuera del Gate 0 (`context-caravana-ficha.md` §No entra) y contra R4.13 (inmutabilidad
   post-completitud) — solo se asigna lo VACÍO.
-- **Resolver la afordancia manual en un sheet** en vez de inline. Descartada como default (no como prohibición):
-  para un solo campo por identificador, el sheet es overhead frente al patrón inline canónico de la ficha
-  (`CastrationRow`/`CutRow`); el contrato de `IdentifierAssignRow` queda agnóstico del contenedor.
+- **Resolver la afordancia manual en un sheet** en vez de inline. Sigue siendo el default para el `idv` (patrón
+  inline canónico de la ficha, `CastrationRow`/`CutRow`). Para la **caravana ELECTRÓNICA**, en cambio, Raf pidió
+  (2026-07-06) que la ficha ofrezca SOLO "Bastonear" y que la carga manual viva DENTRO del sheet (menos ruido en
+  la ficha; el scan es el path principal, el teclado es su fallback) → la electrónica NO usa `IdentifierAssignRow`
+  inline; su manual es la vista `ManualTagEntry` del sheet (§10.2). El `idv` mantiene el `IdentifierAssignRow` inline.
 - **(bastoneo) El sheet togglea `busy` directamente** para des-suspender el listener global, en vez del scanner
   acotado. Descartada: `busy` tiene un solo dueño (`useBusyWhileMounted` de la ficha); dos escritores del mismo
   booleano es frágil (orden de efectos, re-runs). El scanner acotado (contador propio + `resolveListening`) deja
@@ -303,8 +304,16 @@ Así hay UN solo consumidor efectivo del bastón (el sheet), sin doble proceso d
   contrato). `useBleProviderApi()` para `transport` (conectable) + `connect()`.
 - **Hero adaptativo** (RCF.6.2, REPLICADO de `maniobra/identificar.tsx`, sin refactorizarlo — menor riesgo de
   regresión en la maniobra): `resolveListenConnState({ isConnected, conectable })` → `connected` (ScanHero
-  pulso) / `connectable` (ConnectHero disco tappable + badge Bluetooth, tap = gesto que web-serial exige) /
-  `manual` (prompt NEUTRO "El bastón no está disponible en este dispositivo" → CTA a la carga manual).
+  pulso + link "¿Sin bastón?") / `connectable` (ConnectHero disco tappable + badge Bluetooth, tap = gesto que
+  web-serial exige, + link "¿Sin bastón?") / `manual` (prompt NEUTRO "El bastón no está disponible en este
+  dispositivo" + CTA "Cargar la caravana a mano").
+- **Carga MANUAL DENTRO del sheet** (RCF.6.6, UX Raf 2026-07-06): estado `manualMode` → vista `ManualTagEntry`
+  (un `FormField` numérico: `sanitizeTagInput` en vivo, `maxLength=TAG_ELECTRONIC_LENGTH`; al confirmar valida
+  `isValidTagElectronic && len===15` con la copy "La caravana electrónica tiene que tener 15 dígitos." ANTES de
+  asignar; luego `onAssignTag(value)` — el MISMO path que el BLE; [Asignar caravana] / [Volver]). Se entra por
+  el link "¿Sin bastón?" (scan/connect) o el CTA (manual-promovido). En `manualMode`, `onTagRead` **ignora** las
+  lecturas del bastón (`manualModeRef`) — el usuario está tipeando; el scoped scanner sigue activo (no se suelta
+  la propiedad, solo no se actúa sobre las lecturas).
 - **Lectura → confirmación pre-commit** (RCF.6.3, integridad SENASA ADR-024): `formatEidReadable` (15 díg
   legibles) + "Asignar esta caravana a este animal" + [Asignar caravana] / [Volver a escanear]. Un bastonazo
   nuevo reemplaza la lectura a confirmar (live-rescan), salvo assign en vuelo (`assigningRef`).
@@ -314,17 +323,18 @@ Así hay UN solo consumidor efectivo del bastón (el sheet), sin doble proceso d
 
 ### 10.3 Afordancia en la ficha (`[id].tsx`)
 
-Con `canAssignTag(detail)` (tag null + activo), la caravana electrónica agrupa bajo UN solo label "Caravana
-electrónica": (1) `TagScanCta` "Bastonear la caravana" (prominente, StickIcon + `$greenLight`, ≥ `$touchMin`) →
-abre el sheet; (2) `IdentifierAssignRow kind="tag" hideLabel` (la carga MANUAL, piso siempre presente, RCF.6.6 —
-`hideLabel` evita duplicar el label). El sheet se monta al root condicional a `scanOpen && canAssignTag`.
+Con `canAssignTag(detail)` (tag null + activo), la caravana electrónica muestra el label "Caravana electrónica"
++ **una única** afordancia: `TagScanCta` "Bastonear la caravana" (prominente, StickIcon + `$greenLight`, ≥
+`$touchMin`) → abre el sheet. **NO hay carga manual directa de la electrónica en la ficha** (UX Raf 2026-07-06):
+la carga manual por teclado vive DENTRO del sheet (§10.2). El sheet se monta al root condicional a `scanOpen &&
+canAssignTag`. (El `idv`/RCF.3 mantiene su `IdentifierAssignRow` inline en la ficha, sin cambios.)
 
 ### 10.4 Degradación sin transporte (native Expo Go hoy)
 
 En native no hay transporte buildable todavía (`spp-android` es Fase 4 de spec 04) → `transport == null` →
-`resolveListenConnState` da `manual` → el sheet muestra el prompt NEUTRO y deriva a la carga manual (que sigue
-presente en la ficha). NO es un botón muerto: es una degradación honesta con tono neutro. En WEB (web-serial) y
-en el mock de E2E el transporte existe → el scan funciona.
+`resolveListenConnState` da `manual` → el sheet muestra el prompt NEUTRO y su CTA abre la carga MANUAL **dentro
+del sheet** (§10.2). NO es un botón muerto: es una degradación honesta con tono neutro. En WEB (web-serial) y en
+el mock de E2E el transporte existe → el scan funciona.
 
 ### 10.5 Verificación del punto crítico (a/b/c)
 
