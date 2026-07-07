@@ -1,0 +1,38 @@
+{
+  "cli": {
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "preview": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_SUPABASE_URL": "https://xrhlxxdnfzvdnztacofj.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "sb_publishable_iCiWUjiUycJJlHT0XSKs4w_HJ6bdktb",
+        "EXPO_PUBLIC_POWERSYNC_URL": "https://6a260fd035ca576ca0dad778.powersync.journeyapps.com"
+      }
+    },
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_SUPABASE_URL": "https://xrhlxxdnfzvdnztacofj.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "sb_publishable_iCiWUjiUycJJlHT0XSKs4w_HJ6bdktb",
+        "EXPO_PUBLIC_POWERSYNC_URL": "https://6a260fd035ca576ca0dad778.powersync.journeyapps.com"
+      }
+    },
+    "production": {
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_SUPABASE_URL": "https://xrhlxxdnfzvdnztacofj.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "sb_publishable_iCiWUjiUycJJlHT0XSKs4w_HJ6bdktb",
+        "EXPO_PUBLIC_POWERSYNC_URL": "https://6a260fd035ca576ca0dad778.powersync.journeyapps.com"
+      }
+    }
+  }
+}

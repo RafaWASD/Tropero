@@ -44,7 +44,12 @@
       "expo-splash-screen"
     ],
     "extra": {
-      "supabaseUrl": "https://xrhlxxdnfzvdnztacofj.supabase.co"
-    }
+      "supabaseUrl": "https://xrhlxxdnfzvdnztacofj.supabase.co",
+      "router": {},
+      "eas": {
+        "projectId": "d8cf3a19-e8f7-4d7f-b417-54123e7f0d3e"
+      }
+    },
+    "owner": "rafaqsorg"
   }
 }
