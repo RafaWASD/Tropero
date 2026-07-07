@@ -5,6 +5,9 @@
 // FLUJO (design §5):
 //   [¿Vincular su cría al pie?]
 //     ├─ "Ahora no" ───────────────────────→ cerrar + navegar (la vaca queda nursing=true, RCAP.1.3/1.4)
+//     ├─ [Bastonear la caravana del ternero] → TagScanSheet (modo captura, hideManualEntry) → el EID leído
+//     │                                        LLENA el campo de búsqueda y AVANZA el find-or-create (scan-para-
+//     │                                        llenar): classifyCalfQuery lo ve como `eid` → lookupByTag → …
 //     └─ caravana del ternero (EID|IDV) → classifyCalfQuery
 //           ├─ EID  → lookupByTag(tag, est) ── edit → ternero del campo activo
 //           │                               ├─ transfer → aviso "está en otro campo" (RCAP.3.4)
@@ -15,6 +18,15 @@
 //           NO ENCONTRADO → mini-form [sexo* | fecha opc. es-AR | rodeo] → registerBirth (crea+vincula)
 //                 rodeo = preseleccionado al de la madre + leyenda "(Mismo rodeo que la madre)",
 //                         editable a otro rodeo del MISMO SISTEMA del campo (RCAP.5.x).
+//
+// BASTONEO (scan-para-llenar, delta bastoneo-cría-al-pie): el CTA "Bastonear la caravana del ternero" abre el
+// TagScanSheet en modo CAPTURA con `hideManualEntry` (el sheet NO carga la electrónica adentro — este buscador
+// acepta EID **o** IDV y ya tiene su propio campo). Al leer un EID, el sheet llama `onScanSubmit(eid)` que SETEA
+// el query del buscador al EID y dispara el MISMO find-or-create (`runSearch(eid)`). La lógica de clasificación y
+// el camino IDV (tipear) quedan INTACTOS — el bastón solo agrega el camino de llenar-por-scan. Ownership: el
+// prompt vive sobre crear-animal, que suspende el listener global (useBusyWhileMounted); el TagScanSheet toma el
+// SCOPED SCANNER exclusivo mientras está abierto → la lectura entra al sheet y el FindOrCreateOverlay global la
+// ignora (flag scopedScannerActive); al cerrarse, la escucha se re-suspende. NO se usa el listener global crudo.
 //
 // OFFLINE-FIRST (RCAP.1.5): la captura, el find-or-create (lectura LOCAL PowerSync) y el encolado del
 // vínculo/creación (outbox) funcionan SIN red; el rechazo real lo resuelve uploadData al subir.
@@ -35,6 +47,8 @@ import type { LucideIcon } from 'lucide-react-native';
 import { Button } from './Button';
 import { FormField } from './FormField';
 import { InfoNote } from './AuthBits';
+import { TagScanCta } from './TagScanCta';
+import { TagScanSheet } from './TagScanSheet';
 import { buttonA11y } from '../utils/a11y';
 import { lookupByTag, searchAnimals, type AnimalListItem } from '../services/animals';
 import { fetchMother, linkCalfToMother, registerBirth } from '../services/events';
@@ -104,6 +118,9 @@ export function LinkCalfPrompt({
   const [info, setInfo] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
+  // Sheet de BASTONEO de la caravana del ternero (scan-para-llenar): montado SOBRE el prompt (sobre crear-animal,
+  // que ya suspende el listener global) → el TagScanSheet toma el scoped scanner exclusivo mientras está abierto.
+  const [scanOpen, setScanOpen] = useState(false);
 
   // ── Mini-form del camino CREATE (RCAP.4 / RCAP.5) ──
   const [sex, setSex] = useState<AnimalSex | null>(null);
@@ -152,6 +169,7 @@ export function LinkCalfPrompt({
     setSelectedCalfRodeoId(null);
     setRodeoPickerOpen(false);
     setActionError(null);
+    setScanOpen(false);
 
     let raf1 = 0;
     let raf2 = 0;
@@ -193,13 +211,15 @@ export function LinkCalfPrompt({
     setInfo(null);
   }, []);
 
-  // ── Find-or-create del ternero por la caravana tipeada (RCAP.2 / RCAP.3). ──
-  const onSearch = useCallback(async () => {
+  // ── Find-or-create del ternero por una caravana (RCAP.2 / RCAP.3). PARAMETRIZADO por `rawQuery` (no lee
+  //    `query` del closure) para que el bastoneo pueda dispararlo con el EID recién leído SIN esperar al
+  //    re-render del setState (scan-para-llenar): el path tipeado pasa `query`, el path scan pasa el EID. ──
+  const runSearch = useCallback(async (rawQuery: string) => {
     if (busyRef.current) return;
     setFieldError(null);
     setInfo(null);
 
-    const c = classifyCalfQuery(query);
+    const c = classifyCalfQuery(rawQuery);
     if (c.kind === 'empty') {
       setFieldError('Ingresá la caravana del ternero.');
       return;
@@ -300,7 +320,31 @@ export function LinkCalfPrompt({
     }
     setActionError(null);
     setPhase({ kind: 'found', calf: found });
-  }, [query, establishmentId, motherProfileId]);
+  }, [establishmentId, motherProfileId]);
+
+  // Path TIPEADO: "Buscar ternero" / Enter en el campo → busca lo que hay en `query`.
+  const onSearch = useCallback(() => {
+    void runSearch(query);
+  }, [runSearch, query]);
+
+  // ── BASTONEO (scan-para-llenar). El CTA abre el sheet; el sheet toma el scoped scanner exclusivo (ownership).
+  const openScan = useCallback(() => {
+    if (busyRef.current) return;
+    setScanOpen(true);
+  }, []);
+  const closeScan = useCallback(() => setScanOpen(false), []);
+  // onSubmit del sheet en modo captura: el EID leído (15 díg, ya validado+dedupeado por el contrato) LLENA el
+  // campo de búsqueda y AVANZA el find-or-create existente (classifyCalfQuery lo verá como `eid` → lookupByTag).
+  // Devolvemos ok:true → el sheet se cierra. Awaiteamos runSearch para que la fase (found|create) ya esté
+  // resuelta cuando el sheet se cierra (sin flash de la fase ask). Un fallo del lookup deja el error en `ask`.
+  const onScanSubmit = useCallback(
+    async (eid: string): Promise<{ ok: boolean; error?: string }> => {
+      setQuery(eid);
+      await runSearch(eid);
+      return { ok: true };
+    },
+    [runSearch],
+  );
 
   // ── Confirmar el vínculo de un ternero EXISTENTE (RCAP.3.1/3.5). ──
   const onConfirmLink = useCallback(
@@ -449,6 +493,14 @@ export function LinkCalfPrompt({
         >
           {phase.kind === 'ask' ? (
             <YStack gap="$3">
+              {/* BASTONEO (scan-para-llenar): el bastón es el 95% del flujo en manga. El CTA llena el campo de
+                  abajo con el EID leído y avanza el find-or-create. El campo de texto QUEDA como fallback y como
+                  el camino para tipear un IDV (que el bastón no lee). */}
+              <TagScanCta
+                onPress={openScan}
+                label="Bastonear la caravana del ternero"
+                testID="link-calf-scan-open"
+              />
               <FormField
                 label="Caravana del ternero"
                 value={query}
@@ -602,6 +654,21 @@ export function LinkCalfPrompt({
           </View>
         </YStack>
       </YStack>
+
+      {/* Sheet de BASTONEO (scan-para-llenar), ÚLTIMO hijo → su scrim se pinta SOBRE el prompt. hideManualEntry:
+          este buscador ya tiene su campo (EID **o** IDV) → el sheet ofrece "Cerrá y escribí la caravana" en vez
+          del manual EID-only. onScanSubmit llena el query + avanza el find-or-create. El scoped scanner exclusivo
+          se adquiere al montar / libera al desmontar (incl. cierre del prompt) → ownership limpio (ver cabecera). */}
+      {scanOpen ? (
+        <TagScanSheet
+          onClose={closeScan}
+          onSubmit={onScanSubmit}
+          hideManualEntry
+          title="Bastonear la caravana"
+          confirmLabel="Usar caravana"
+          confirmSublabel="Usar esta caravana para buscar el ternero al pie."
+        />
+      ) : null}
     </View>
   );
 }

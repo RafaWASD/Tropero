@@ -15,6 +15,12 @@
 // vive DENTRO de este sheet, detrás de "¿Sin bastón? Cargá la caravana a mano" (o el CTA del estado
 // manual-promovido). NO hay carga manual directa de la electrónica desde la ficha.
 //
+// `hideManualEntry` (delta bastoneo-cría-al-pie, RCAP): para superficies que YA tienen su PROPIO campo de
+// texto (el buscador de cría al pie acepta EID **o** IDV → la carga manual del sheet, EID-only 15 díg, NO
+// aplica). Con hideManualEntry=true, los controles de "¿Sin bastón?" hacen `onClose` (cierran el sheet para
+// que el operario tipee en el campo externo) en vez de abrir el `ManualTagEntry`, que NUNCA se muestra. El
+// default (false) deja el comportamiento de ficha/alta/parto intacto (manual anidado dentro del sheet).
+//
 // Propiedad EXCLUSIVA del listener (el punto crítico, RCF.6): la ficha suspende el listener global con
 // `useBusyWhileMounted` (busyMode) para que un bastonazo no dispare el FindOrCreateOverlay encima. Este sheet
 // necesita lo INVERSO pero exclusivo → mientras está montado ADQUIERE un "scanner acotado" en el provider
@@ -74,6 +80,13 @@ export type TagScanSheetProps = {
   confirmLabel?: string;
   /** Sub-texto sobre el EID leído en la confirmación pre-commit (default "Asignar esta caravana a este animal."). */
   confirmSublabel?: string;
+  /**
+   * Oculta la carga MANUAL del EID dentro del sheet (default false). Para superficies con su PROPIO campo de
+   * texto (buscador de cría al pie, EID **o** IDV): los controles de "¿Sin bastón?" hacen `onClose` (cerrar
+   * para tipear afuera) en vez de abrir el `ManualTagEntry`, que nunca se muestra. false → comportamiento de
+   * ficha/alta/parto (manual anidado). Solo aplica a los controles del path BLE; el path de confirmación no cambia.
+   */
+  hideManualEntry?: boolean;
 };
 
 export function TagScanSheet({
@@ -82,6 +95,7 @@ export function TagScanSheet({
   title = 'Bastonear la caravana',
   confirmLabel = 'Asignar caravana',
   confirmSublabel = 'Asignar esta caravana a este animal.',
+  hideManualEntry = false,
 }: TagScanSheetProps) {
   const insets = useSafeAreaInsets();
 
@@ -131,6 +145,10 @@ export function TagScanSheet({
 
   const enterManual = useCallback(() => setManualMode(true), []);
   const exitManual = useCallback(() => setManualMode(false), []);
+  // Acción de los controles de "¿Sin bastón?": con hideManualEntry el sheet NO tiene carga manual propia (la
+  // superficie tiene su campo externo) → cerramos para que el operario tipee afuera. Sin él, abrimos el
+  // ManualTagEntry anidado (comportamiento de ficha/alta/parto). Estable entre renders.
+  const onManualAction = hideManualEntry ? onClose : enterManual;
 
   const onAssign = useCallback(async () => {
     if (!readEid || assigningRef.current) return;
@@ -208,7 +226,9 @@ export function TagScanSheet({
           </Pressable>
         </XStack>
 
-        {manualMode ? (
+        {/* manualMode nunca es true con hideManualEntry (onManualAction=onClose no lo prende) → ManualTagEntry
+            NUNCA se muestra en ese modo; el guard `&& !hideManualEntry` lo blinda de forma defensiva. */}
+        {manualMode && !hideManualEntry ? (
           <ManualTagEntry onSubmit={onSubmit} confirmLabel={confirmLabel} onClose={onClose} onBack={exitManual} />
         ) : readEid !== null ? (
           <ReadConfirmation
@@ -221,11 +241,11 @@ export function TagScanSheet({
             onBack={backToScanning}
           />
         ) : listenConn === 'connected' ? (
-          <ScanHero onManual={enterManual} />
+          <ScanHero onManual={onManualAction} hideManualEntry={hideManualEntry} />
         ) : listenConn === 'connectable' ? (
-          <ConnectHero onConnect={connectStick} onManual={enterManual} />
+          <ConnectHero onConnect={connectStick} onManual={onManualAction} hideManualEntry={hideManualEntry} />
         ) : (
-          <ManualPromptHero onManual={enterManual} />
+          <ManualPromptHero onManual={onManualAction} hideManualEntry={hideManualEntry} />
         )}
       </YStack>
     </View>
@@ -236,7 +256,7 @@ export function TagScanSheet({
 // HERO "ESCUCHANDO" (CONECTADO) — el bastón lee solo. Disco de pulso PASIVO (no se toca: el target es el
 // animal). Replica el lenguaje de maniobra/identificar a escala de sheet. + link a la carga manual (dentro).
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
-function ScanHero({ onManual }: { onManual: () => void }) {
+function ScanHero({ onManual, hideManualEntry }: { onManual: () => void; hideManualEntry: boolean }) {
   const disc = getTokenValue('$heroScan', 'size') * 0.6;
   const heroIcon = getTokenValue('$heroIcon', 'size') * 0.6;
   const ring = getTokenValue('$heroRing', 'size');
@@ -269,7 +289,7 @@ function ScanHero({ onManual }: { onManual: () => void }) {
         </Text>
       </YStack>
 
-      <ManualFallbackLink onPress={onManual} />
+      <ManualFallbackLink onPress={onManual} hideManualEntry={hideManualEntry} />
     </YStack>
   );
 }
@@ -279,7 +299,15 @@ function ScanHero({ onManual }: { onManual: () => void }) {
 // elegir puerto / bastón caído). El disco es un BOTÓN (tap = gesto que web-serial exige → connect()). Mismo
 // lenguaje que la maniobra (StickIcon + badge Bluetooth). + link a la carga manual (dentro del sheet).
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
-function ConnectHero({ onConnect, onManual }: { onConnect: () => void; onManual: () => void }) {
+function ConnectHero({
+  onConnect,
+  onManual,
+  hideManualEntry,
+}: {
+  onConnect: () => void;
+  onManual: () => void;
+  hideManualEntry: boolean;
+}) {
   const disc = getTokenValue('$heroScan', 'size') * 0.6;
   const heroIcon = getTokenValue('$heroIcon', 'size') * 0.6;
   const white = getTokenValue('$white', 'color');
@@ -335,7 +363,7 @@ function ConnectHero({ onConnect, onManual }: { onConnect: () => void; onManual:
         </Text>
       </YStack>
 
-      <ManualFallbackLink onPress={onManual} />
+      <ManualFallbackLink onPress={onManual} hideManualEntry={hideManualEntry} />
     </YStack>
   );
 }
@@ -345,8 +373,13 @@ function ConnectHero({ onConnect, onManual }: { onConnect: () => void; onManual:
 // hay nada que conectar). Prompt NEUTRO (no es un error, es lo normal en ese dispositivo) → CTA "Cargar la
 // caravana a mano" que ABRE la carga manual DENTRO del sheet (no cierra).
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
-function ManualPromptHero({ onManual }: { onManual: () => void }) {
+function ManualPromptHero({ onManual, hideManualEntry }: { onManual: () => void; hideManualEntry: boolean }) {
   const heroIcon = getTokenValue('$heroIcon', 'size') * 0.6;
+  // Con hideManualEntry el sheet NO carga la electrónica adentro (la superficie tiene su campo externo, EID o
+  // IDV) → el CTA CIERRA el sheet para tipear afuera. Sin él, abre el ManualTagEntry (15 díg) anidado.
+  const title = 'Cargá la caravana a mano';
+  const subtitle = 'El bastón no está disponible en este dispositivo';
+  const cta = hideManualEntry ? 'Cerrá y escribí la caravana' : 'Cargar la caravana a mano';
 
   return (
     <YStack alignItems="center" justifyContent="center" paddingVertical="$4" gap="$5">
@@ -357,34 +390,36 @@ function ManualPromptHero({ onManual }: { onManual: () => void }) {
         backgroundColor="$greenLight"
         alignItems="center"
         justifyContent="center"
-        {...labelA11y(Platform.OS, 'El bastón no está disponible en este dispositivo')}
+        {...labelA11y(Platform.OS, subtitle)}
       >
         <Keyboard size={heroIcon} color={getTokenValue('$primary', 'color')} strokeWidth={2} />
       </View>
 
       <YStack alignItems="center" gap="$2">
         <Text fontFamily="$heading" fontSize="$7" lineHeight="$7" fontWeight="700" color="$textPrimary" textAlign="center">
-          Cargá la caravana a mano
+          {title}
         </Text>
         <Text fontFamily="$body" fontSize="$4" lineHeight="$4" fontWeight="500" color="$textMuted" textAlign="center">
-          El bastón no está disponible en este dispositivo
+          {subtitle}
         </Text>
       </YStack>
 
       <Button testID="tag-scan-to-manual" variant="primary" fullWidth onPress={onManual}>
-        Cargar la caravana a mano
+        {cta}
       </Button>
     </YStack>
   );
 }
 
-// ─── Link a la carga MANUAL (dentro del sheet, detrás de "¿Sin bastón?"): abre el TextInput de 15 díg. ───
-function ManualFallbackLink({ onPress }: { onPress: () => void }) {
+// ─── Link a la carga MANUAL (detrás de "¿Sin bastón?"). Sin hideManualEntry abre el TextInput de 15 díg DENTRO
+//     del sheet; con hideManualEntry CIERRA el sheet para tipear en el campo externo de la superficie. ───
+function ManualFallbackLink({ onPress, hideManualEntry }: { onPress: () => void; hideManualEntry: boolean }) {
+  const label = hideManualEntry ? '¿Sin bastón? Cerrá y escribí la caravana' : '¿Sin bastón? Cargá la caravana a mano';
   return (
-    <Pressable testID="tag-scan-manual-link" onPress={onPress} {...buttonA11y(Platform.OS, { label: 'Cargá la caravana a mano' })}>
+    <Pressable testID="tag-scan-manual-link" onPress={onPress} {...buttonA11y(Platform.OS, { label })}>
       <View paddingHorizontal="$3" paddingVertical="$2">
         <Text fontFamily="$body" fontSize="$4" lineHeight="$4" fontWeight="600" color="$primary" textAlign="center">
-          ¿Sin bastón? Cargá la caravana a mano
+          {label}
         </Text>
       </View>
     </Pressable>

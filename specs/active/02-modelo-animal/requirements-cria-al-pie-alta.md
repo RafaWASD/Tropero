@@ -39,7 +39,7 @@ Frontend: prompt saltable, offline-safe, con los MUSTs de forms (validación inl
 
 ## RCAP.2 — Captura del identificador del ternero + find-or-create
 
-**RCAP.2.1** El sistema deberá pedir en el prompt la **caravana del ternero**, aceptando tanto una **caravana electrónica (EID)** como una **caravana visual/IDV**, clasificando el identificador con el motor existente (`classifyIdentifier`).
+**RCAP.2.1** El sistema deberá pedir en el prompt la **caravana del ternero**, aceptando tanto una **caravana electrónica (EID)** como una **caravana visual/IDV**, clasificando el identificador con el motor existente (`classifyIdentifier`). *(Reconciliación as-built, delta bastoneo-cría-al-pie 2026-07-06: además del campo tipeable, el prompt ofrece un CTA **"Bastonear la caravana del ternero"** — "scan-para-llenar": el EID leído por el bastón LLENA el campo de búsqueda y AVANZA el mismo find-or-create (`classifyCalfQuery` → `eid` → `lookupByTag`). El campo tipeable QUEDA como fallback y como el único camino para un IDV (que el bastón no lee). No cambia la clasificación ni las ramas del motor; solo agrega el camino de llenar-por-scan. El sheet de scan usa `hideManualEntry` — su carga manual EID-only no aplica acá porque el campo externo ya acepta EID **o** IDV. Ownership del bastón vía scoped scanner exclusivo, ver `design-cria-al-pie-alta.md §11`.)*
 
 **RCAP.2.2** El sistema deberá resolver el identificador ingresado mediante el motor **find-or-create** existente de spec 09 (`lookupByTag` para EID; `searchAnimals`/`findOrCreateLookup` para IDV/visual), scopeado al establecimiento activo, **sin red** (lectura local PowerSync).
 

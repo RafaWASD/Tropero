@@ -190,3 +190,41 @@ Reusos: `classifyIdentifier`/`classifySearchQuery` (animal-identifier.ts), `look
 - **LOW-3 (rango de `p_event_date`)** → cota server-side en ambos RPC (`1900 ≤ year ≤ current+1`, no-futura razonable), patrón `0105` `p_year`.
 
 Estos folds NO cambian la superficie aprobada (mismo-tenant, sin schema/policy nuevos más allá de los params opcionales declarados); el implementer los aplica en `0114`/`0115`/`upload.ts`. RCAP afectados: 6.6/6.8 (MED-1), 8.3/8.5 (MED-2), 2.4/4/7 (LOW-1), 7.x (LOW-2/3).
+
+## 11. As-built — BASTONEO del ternero (scan-para-llenar, delta bastoneo-cría-al-pie, 2026-07-06)
+
+**Frontend puro, Gate 1 N/A** (`git diff supabase/` vacío). Delta Nivel B. Cierra el Run 2 de "replicar el
+bastoneo en toda superficie que asigna caravana electrónica" (Runs previos: ficha, alta, parto — ver
+`design-caravana-ficha.md §10`). La cría al pie era la 3ra superficie manual-only y la **distinta**: no es una
+captura pura, es un **buscador find-or-create que acepta EID *o* IDV** (`classifyCalfQuery`).
+
+**Enfoque aprobado por Raf: "scan-para-llenar".** El bastón NO es una segunda entrada paralela; **llena el campo
+de búsqueda con el EID leído y avanza el find-or-create existente** — un solo motor, sin duplicar lógica:
+
+- En la fase **ask** se agrega el `TagScanCta` compartido **"Bastonear la caravana del ternero"** ARRIBA del
+  campo de texto. El campo (EID **o** IDV) QUEDA: es el fallback y el ÚNICO camino para tipear un **IDV** (que el
+  bastón no lee). El bastón es el 95% del flujo en manga → el CTA va primero (Fitts / jerarquía).
+- El CTA abre el `TagScanSheet` en modo **CAPTURA** con **`hideManualEntry`** (ver `design-caravana-ficha.md
+  §10.7`) + `title="Bastonear la caravana"` + `confirmLabel="Usar caravana"`. Con `hideManualEntry` el sheet NO
+  ofrece la carga manual EID-only anidada (redundante con el campo externo): el control de "sin bastón" reza
+  **"Cerrá y escribí la caravana"** → cierra el sheet → el operario tipea en el campo (EID o IDV) como hoy.
+- `onSubmit(eid)` del sheet: **setea el `query` del buscador al EID** y dispara el **mismo** find-or-create
+  (`runSearch(eid)`). `classifyCalfQuery(eid)` lo ve como `eid` (15 díg) → `lookupByTag` → `found | create |
+  transfer | "ya tiene madre"`, exactamente igual que al tipear. Devuelve `{ ok: true }` → el sheet se cierra.
+- **Refactor mínimo**: `onSearch()` (leía `query` del closure) se parametrizó en **`runSearch(rawQuery)`** para
+  que el scan pueda dispararlo con el EID recién leído SIN esperar el re-render del `setState`. El path tipeado
+  (`onSearch` = `runSearch(query)`), la clasificación EID/IDV y todos los avisos (transfer / ya-tiene-madre /
+  varios) quedan **INTACTOS**. Contratos `registerBirth`/`lookupByTag`/`link_calf_to_mother` sin tocar.
+
+**Ownership (RCF.6, el punto crítico).** El prompt vive SOBRE `crear-animal`, que suspende el listener global
+con `useBusyWhileMounted`. El `TagScanSheet` se monta como ÚLTIMO hijo del root del prompt (su scrim se pinta
+encima) y toma el **scoped scanner exclusivo** mientras está abierto (acquire al montar / release al desmontar,
+incl. cierre del prompt). Así la lectura entra AL SHEET (no al `FindOrCreateOverlay` global, que la ignora por
+`scopedScannerActive`) aunque `busyMode` esté prendido; al cerrarse, la escucha se re-suspende. **NO** se usa el
+listener global crudo. Verificado E2E: overlay global ausente con el sheet abierto (a/b) + re-suspensión al
+cerrar sin confirmar (c).
+
+**Archivos**: `TagScanSheet.tsx` (`hideManualEntry`), `LinkCalfPrompt.tsx` (CTA + `runSearch`/`onScanSubmit` +
+mount del sheet). **Tests**: `e2e/cria-al-pie-bastoneo.spec.ts` (scan→create con oráculo `waitForServerCalfTags`;
+scan→found con `waitForServerBirth`; ownership) + `e2e/captures/cria-al-pie-bastoneo.capture.ts` (Gate 2.5). Sin
+nuevo código PURO extraíble → sin unit nuevo (la clasificación EID/IDV ya está cubierta por `link-calf-query.test.ts`).

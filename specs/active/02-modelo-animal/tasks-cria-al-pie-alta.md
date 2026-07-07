@@ -52,6 +52,12 @@
 
 - [x] **T22** — Reconciliación: mapa `RCAP.<n> → archivo:test` en `progress/impl_cria-al-pie-alta.md`; reflejar cualquier fix de Gate 1/2 en estos 3 archivos antes de cerrar (regla dura `docs/specs.md`). El leader folda al baseline (puntero + bloque "Deltas posteriores") al cerrar la Puerta 2 — NO en este delta.
 
+## Fase H — Delta bastoneo-cría-al-pie (Run 2, scan-para-llenar, 2026-07-06) · frontend puro, Gate 1 N/A
+
+- [x] **T23** — `TagScanSheet.hideManualEntry?` (default false): con true, los controles de "¿Sin bastón?" hacen `onClose` (no `setManualMode`), `ManualTagEntry` nunca se muestra, copy "Cerrá y escribí la caravana". Default (false) NO cambia ficha/alta/parto. Ver `design-caravana-ficha.md §10.7`.
+- [x] **T24** — Cablear el bastoneo en `LinkCalfPrompt` (fase ask): `TagScanCta` "Bastonear la caravana del ternero" arriba del campo; el CTA abre el `TagScanSheet` (captura + `hideManualEntry` + "Usar caravana"); `onSubmit(eid)` llena el `query` + dispara el find-or-create (`onSearch`→`runSearch(rawQuery)`); campo EID/IDV intacto como fallback / camino IDV. Ownership vía scoped scanner exclusivo (crear-animal suspende el listener global). Reconcilia RCAP.2.1. Ver `design-cria-al-pie-alta.md §11`.
+- [x] **T25** — Tests: `e2e/cria-al-pie-bastoneo.spec.ts` (scan→create con oráculo server `waitForServerCalfTags`; scan→found con `waitForServerBirth`; ownership: overlay global ausente + re-suspensión al cerrar) + capture `e2e/captures/cria-al-pie-bastoneo.capture.ts` (Gate 2.5). Sin código PURO nuevo → sin unit nuevo (clasificación EID/IDV ya cubierta por `link-calf-query.test.ts`).
+
 ---
 
 ## Notas de ejecución

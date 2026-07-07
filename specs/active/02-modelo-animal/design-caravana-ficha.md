@@ -383,3 +383,25 @@ ver `design-alta-form-refinamiento.md`), `agregar-evento.tsx` (§ del parto, ver
 `e2e/alta-bastoneo.spec.ts` + `e2e/parto-bastoneo.spec.ts` (regresión) + sus capture files (Gate 2.5) +
 `e2e/helpers/admin.ts` (`waitForServerCalfTags`). `animals.spec.ts` FIX2 se ajustó (el campo tipeable suelto ya
 no existe; el límite 15 díg se ejercita en la carga manual DENTRO del sheet).
+
+### 10.7 As-built — `hideManualEntry` para superficies con campo externo (delta bastoneo-cría-al-pie, 2026-07-06)
+
+Un tercer reuso del `TagScanSheet` (después de ficha/alta/parto): el prompt **VINCULAR LA CRÍA AL PIE**
+(`LinkCalfPrompt.tsx`, ver `design-cria-al-pie-alta.md §11`). A diferencia de los anteriores, ahí el sheet NO es
+una captura pura sino que alimenta un **buscador find-or-create que acepta EID *o* IDV** que YA tiene su propio
+campo de texto. La carga MANUAL del sheet (EID-only 15 díg) NO aplica (el operario tipea EID **o** IDV en el
+campo externo). Se agregó el prop **`hideManualEntry?: boolean`** (default **false**, no cambia ficha/alta/parto):
+
+- Con `hideManualEntry=true`, los controles de "¿Sin bastón?" (el link `ManualFallbackLink` de los heroes
+  conectado/conectable **y** el CTA del `ManualPromptHero` sin-transporte) hacen **`onClose`** en vez de
+  `setManualMode(true)`, y el `ManualTagEntry` (campo de 15 díg anidado) **nunca** se muestra (guard defensivo
+  `manualMode && !hideManualEntry`).
+- La copy de esos controles cambia a **"¿Sin bastón? Cerrá y escribí la caravana"** (link) / **"Cerrá y escribí
+  la caravana"** (CTA sin-transporte) — cierra el sheet para tipear en el campo EXTERNO de la superficie.
+- El path BLE (heroes de scan/connect + confirmación pre-commit + `onSubmit`) es **idéntico**; solo cambia el
+  destino de los controles de "sin bastón". El scoped scanner / ownership es el MISMO (§10.1) — la superficie
+  suspende el listener global (`useBusyWhileMounted`), el sheet toma el scanner acotado exclusivo.
+
+Archivos as-built: `TagScanSheet.tsx` (`hideManualEntry` + copy alternativa en `ManualFallbackLink`/
+`ManualPromptHero`), `LinkCalfPrompt.tsx` (mount del sheet + wiring scan-para-llenar), `e2e/cria-al-pie-bastoneo.spec.ts`
++ `e2e/captures/cria-al-pie-bastoneo.capture.ts`. Frontend puro → Gate 1 N/A.
