@@ -91,6 +91,7 @@ Suite completa: **176 passed / 10 failed** (1ra corrida en vivo de los e2e de lo
 1. **Puertas 2 post-hoc** de `alta-form-refinamiento` + `caravana-ficha` (revisar los 2 commits autónomos; defaults del leader documentados en cada `design-*.md` §decisiones de criterio propio).
 2. **Mirar en la app**: badge reproductivo (tradeoff de truncado del rodeo) · stepper/DD-MM del alta · afordancia de caravana en la ficha.
 3. **Re-correr `check.mjs` completo** cuando la red a Supabase se estabilice (ver ⚠ abajo).
+4. **Fix visual combo eje-central** (`7dda4aa`, 2026-07-07): el label de las filas de combo/lista con tilde se corría a la izquierda al seleccionarse (el ✓ le comía ancho). Nuevo `ComboOptionRow` (slots simétricos) → centrado sobre el eje real en ambos estados; reemplaza los 3 combos duplicados (parto/cría al pie/lote del alta) + `LoteOption` de maniobra (inline). Verificado por medición Playwright (`textCenter==rowCenter==206`). Frontend puro, tsc verde, specs reconciliadas. **Mirar en la app** el combo de rodeo del parto (captura de Raf).
 
 ## ⏳ PENDIENTE — necesitan Raf / Facundo / deploy / hardware (NO autónomo)
 - **#8 %parición** + **#10 %destete** → tocan RPC `0106` (Gate 1 + **deploy a la DB compartida, gateado a Raf**). #10 además gatea **peso de destete** (a charlar con Facundo, en `docs/backlog.md`).
