@@ -5,8 +5,11 @@
 //
 // Lista (helper PURO lotePickerOptions): PRIMERO "Sin lote" (selecciona null → quita el lote, R9.3), luego
 // los grupos activos del campo. Tap en una opción = selecciona + cierra (onSelect → el frame persiste vía
-// assignAnimalToGroup; onClose). Espeja el GroupOption del alta (crear-animal.tsx) pero AISLADO (no se
-// importa de ahí, restricción de terminal paralela): fila tappable con el nombre + check si seleccionada.
+// assignAnimalToGroup; onClose). La opción (LoteOption) es una fila de CARD CON BORDE propia del sheet
+// (borde $primary/$divider según selección, testID, fontWeight 700 al elegir): por eso NO se importa el
+// ComboOptionRow de @/components (ese es la fila PLANA de lista-expandible del alta, sin borde). Comparte
+// con ComboOptionRow la MISMA corrección de eje central por slots simétricos, pero se mantiene aparte por
+// su look de card. Fila tappable con el nombre + check si seleccionada.
 //
 // PATRÓN canónico de sheet (regla de la skill design-review): backdrop $scrim tappable (con guard anti
 // tap-through web, reference_rn_web_pitfalls) + sheet anclado abajo con grip + maxHeight → HEADER FIJO
@@ -184,9 +187,12 @@ export function LotePickerSheet({ open, onClose, groups, selectedId, onSelect }:
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
-// OPCIÓN de lote — fila tappable (espeja el GroupOption del alta, pero AISLADA). Nombre + check si
-// seleccionada. Alto ≥$touchMin (manga, Fitts). El nombre = texto libre con posibles descendentes →
-// lineHeight matching (regla dura de recorte). Tap = elige y cierra (el frame lo cablea).
+// OPCIÓN de lote — fila de CARD CON BORDE propia del sheet (borde $primary/$divider según selección,
+// testID, fontWeight 700 al elegir). Nombre + check si seleccionada. Label CENTRADO sobre el eje REAL de
+// la card en AMBOS estados vía SLOTS SIMÉTRICOS (spacer izq. = slot del tilde der.) — misma técnica que
+// ComboOptionRow (@/components), pero mantenida aparte por su look de card bordeada. Alto ≥$touchMin
+// (manga, Fitts). El nombre = texto libre con posibles descendentes → lineHeight matching (regla dura de
+// recorte). Tap = elige y cierra (el frame lo cablea).
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
 function LoteOption({
   name,
@@ -199,12 +205,18 @@ function LoteOption({
   onPress: () => void;
   testID: string;
 }) {
+  // Slot de ancho fijo SIMÉTRICO (misma técnica que ComboOptionRow): el <Text flex={1}> centra por
+  // default; el <Check> a la derecha le comía ancho al flex → el label seleccionado se corría ~2-4px a la
+  // izquierda vs. los no-seleccionados. Un spacer izquierdo del MISMO ancho que el slot del tilde deja el
+  // label centrado sobre el eje real de la card en ambos estados. SLOT = tamaño real del check acá
+  // ($navIcon) + un aire chico ($2 ≈ 8px, ~4px por lado) para no pegar el ícono al borde; el alto de la
+  // card NO cambia (el ícono queda centrado dentro del slot). Sin `gap` (el espaciado lo dan los slots).
+  const SLOT = getTokenValue('$navIcon', 'size') + getTokenValue('$2', 'space');
   return (
     <XStack
       testID={testID}
       minHeight="$touchMin"
       alignItems="center"
-      gap="$3"
       backgroundColor="$surface"
       borderWidth={1}
       borderColor={selected ? '$primary' : '$divider'}
@@ -215,6 +227,8 @@ function LoteOption({
       onPress={onPress}
       {...buttonA11y(Platform.OS, { label: `Lote ${name}`, selected })}
     >
+      {/* Spacer izquierdo = MISMO ancho que el slot del tilde → el label centrado cae en el eje real. */}
+      <View width={SLOT} flexShrink={0} />
       <Text
         flex={1}
         minWidth={0}
@@ -227,9 +241,12 @@ function LoteOption({
       >
         {name}
       </Text>
-      {selected ? (
-        <Check size={getTokenValue('$navIcon', 'size')} color={getTokenValue('$primary', 'color')} strokeWidth={2.5} />
-      ) : null}
+      {/* Slot derecho: tilde cuando selected, vacío si no. Ancho fijo = spacer izquierdo. */}
+      <View width={SLOT} alignItems="center" justifyContent="center" flexShrink={0}>
+        {selected ? (
+          <Check size={getTokenValue('$navIcon', 'size')} color={getTokenValue('$primary', 'color')} strokeWidth={2.5} />
+        ) : null}
+      </View>
     </XStack>
   );
 }

@@ -32,7 +32,7 @@ import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
 import { Check, ChevronDown, ChevronLeft, Mars, Venus, X } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
 
-import { Button, Card, CapturedTagRow, ConditionScoreStepper, FormField, FormError, InfoNote, LinkCalfPrompt, TagScanCta, TagScanSheet } from '@/components';
+import { Button, Card, CapturedTagRow, ComboOptionRow, ConditionScoreStepper, FormField, FormError, InfoNote, LinkCalfPrompt, TagScanCta, TagScanSheet } from '@/components';
 import { BreedPickerSheet } from '@/components/sigsa';
 import { useAuth, useEstablishment, useRodeo } from '@/contexts';
 import { createAnimal, fetchSystemCategories, type SystemCategory } from '@/services/animals';
@@ -1797,10 +1797,11 @@ function GroupCombo({
       </Pressable>
       {open ? (
         <Card gap="$1" paddingVertical="$2">
-          <GroupOption label="Sin lote" selected={selectedId === null} onPress={() => onSelect(null)} />
+          <ComboOptionRow a11yLabel="Lote Sin lote" label="Sin lote" selected={selectedId === null} onPress={() => onSelect(null)} />
           {groups.map((g) => (
-            <GroupOption
+            <ComboOptionRow
               key={g.id}
+              a11yLabel={`Lote ${g.name}`}
               label={g.name}
               selected={g.id === selectedId}
               onPress={() => onSelect(g.id)}
@@ -1809,26 +1810,5 @@ function GroupCombo({
         </Card>
       ) : null}
     </YStack>
-  );
-}
-
-function GroupOption({
-  label,
-  selected,
-  onPress,
-}: {
-  label: string;
-  selected: boolean;
-  onPress: () => void;
-}) {
-  return (
-    <Pressable onPress={onPress} {...buttonA11y(Platform.OS, { label: `Lote ${label}`, selected })}>
-      <XStack alignItems="center" gap="$2" minHeight="$chipMin" paddingHorizontal="$2" pressStyle={{ opacity: 0.6 }}>
-        <Text flex={1} minWidth={0} numberOfLines={1} fontFamily="$body" fontSize="$4" fontWeight="500" color="$textPrimary">
-          {label}
-        </Text>
-        {selected ? <Check size={20} color={getTokenValue('$primary', 'color')} strokeWidth={2.5} /> : null}
-      </XStack>
-    </Pressable>
   );
 }

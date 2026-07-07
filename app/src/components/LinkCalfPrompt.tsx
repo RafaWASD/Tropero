@@ -41,10 +41,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Platform, Pressable } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
-import { Check, ChevronDown, Mars, Venus } from 'lucide-react-native';
+import { ChevronDown, Mars, Venus } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
 
 import { Button } from './Button';
+import { ComboOptionRow } from './ComboOptionRow';
 import { FormField } from './FormField';
 import { InfoNote } from './AuthBits';
 import { TagScanCta } from './TagScanCta';
@@ -828,8 +829,9 @@ function CreateCalfForm({
             paddingHorizontal="$2"
           >
             {rodeoOptions.map((r) => (
-              <RodeoOptionRow
+              <ComboOptionRow
                 key={r.id}
+                a11yLabel={`Rodeo ${r.name}`}
                 label={r.name}
                 selected={r.id === selectedRodeoId}
                 onPress={() => onSelectRodeo(r.id)}
@@ -883,28 +885,6 @@ function SexOption({
         >
           {label}
         </Text>
-      </XStack>
-    </Pressable>
-  );
-}
-
-/** Fila de un rodeo elegible para el ternero (lista expandible del picker). */
-function RodeoOptionRow({
-  label,
-  selected,
-  onPress,
-}: {
-  label: string;
-  selected: boolean;
-  onPress: () => void;
-}) {
-  return (
-    <Pressable onPress={onPress} {...buttonA11y(Platform.OS, { label: `Rodeo ${label}`, selected })}>
-      <XStack alignItems="center" gap="$2" minHeight="$chipMin" paddingHorizontal="$2" paddingVertical="$2" pressStyle={{ opacity: 0.6 }}>
-        <Text flex={1} minWidth={0} numberOfLines={1} fontFamily="$body" fontSize="$4" lineHeight="$4" fontWeight="500" color="$textPrimary">
-          {label}
-        </Text>
-        {selected ? <Check size={20} color={getTokenValue('$primary', 'color')} strokeWidth={2.5} /> : null}
       </XStack>
     </Pressable>
   );

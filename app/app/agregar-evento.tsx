@@ -42,7 +42,7 @@ import {
 } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
 
-import { Button, CapturedTagRow, Card, FormField, FormError, InfoNote, TagScanCta, TagScanSheet } from '@/components';
+import { Button, CapturedTagRow, Card, ComboOptionRow, FormField, FormError, InfoNote, TagScanCta, TagScanSheet } from '@/components';
 import { useBusyWhileMounted } from '@/services/ble/stick';
 import { useRodeo } from '@/contexts';
 import type { Rodeo } from '@/services/rodeos';
@@ -1323,7 +1323,7 @@ function PartoForm({
 
       {/* ── Rodeo del PARTO (RPRC.1): a nivel camada (entre la fecha y los terneros, design §3). Patrón
           calcado del picker de rodeo de #15 (LinkCalfPrompt CreateCalfForm): trigger + ChevronDown + lista
-          expandible + RodeoOptionRow + leyenda "(Mismo rodeo que la madre)". ── */}
+          expandible + ComboOptionRow + leyenda "(Mismo rodeo que la madre)". ── */}
       <CalfRodeoPicker
         rodeoName={rodeoName}
         isSameRodeoAsMother={isSameRodeoAsMother}
@@ -1522,8 +1522,9 @@ function CalfRodeoPicker({
           paddingHorizontal="$2"
         >
           {eligibleRodeos.map((r) => (
-            <RodeoOptionRow
+            <ComboOptionRow
               key={r.id}
+              a11yLabel={`Rodeo ${r.name}`}
               label={r.name}
               selected={r.id === selectedRodeoId}
               onPress={() => onSelectRodeo(r.id)}
@@ -1532,46 +1533,6 @@ function CalfRodeoPicker({
         </YStack>
       ) : null}
     </YStack>
-  );
-}
-
-/** Fila de un rodeo elegible del parto (lista expandible del picker) — espeja RodeoOptionRow de #15. */
-function RodeoOptionRow({
-  label,
-  selected,
-  onPress,
-}: {
-  label: string;
-  selected: boolean;
-  onPress: () => void;
-}) {
-  return (
-    <Pressable onPress={onPress} {...buttonA11y(Platform.OS, { label: `Rodeo ${label}`, selected })}>
-      <XStack
-        alignItems="center"
-        gap="$2"
-        minHeight="$chipMin"
-        paddingHorizontal="$2"
-        paddingVertical="$2"
-        pressStyle={{ opacity: 0.6 }}
-      >
-        <Text
-          flex={1}
-          minWidth={0}
-          numberOfLines={1}
-          fontFamily="$body"
-          fontSize="$4"
-          lineHeight="$4"
-          fontWeight="500"
-          color="$textPrimary"
-        >
-          {label}
-        </Text>
-        {selected ? (
-          <Check size={20} color={getTokenValue('$primary', 'color')} strokeWidth={2.5} />
-        ) : null}
-      </XStack>
-    </Pressable>
   );
 }
 

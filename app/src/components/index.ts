@@ -70,3 +70,5 @@ export { TagScanCta, CapturedTagRow } from './TagScanCta';
 export type { TagScanCtaProps, CapturedTagRowProps } from './TagScanCta';
 export { LinkCalfPrompt } from './LinkCalfPrompt';
 export type { LinkCalfPromptProps } from './LinkCalfPrompt';
+export { ComboOptionRow } from './ComboOptionRow';
+export type { ComboOptionRowProps } from './ComboOptionRow';

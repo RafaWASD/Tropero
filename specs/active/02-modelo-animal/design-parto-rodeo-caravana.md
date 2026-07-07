@@ -33,7 +33,7 @@ Al cerrar la Puerta 2, el leader folda al `design.md` baseline de spec 02 un pun
 ### Frontend (reúso, NO crear de cero)
 - `useRodeo()` (`RodeoContext`) → `available: Rodeo[]` del campo activo; `Rodeo.systemId` para el filtro (RPRC.1.6).
 - `sanitizeIdvInput` (`utils/animal-input`) para la caravana visual (RPRC.2.2).
-- El **patrón de selector de rodeo inline** (picker + `ChevronDown` + lista expandible + `RodeoOptionRow` + leyenda) del `CreateCalfForm` de `LinkCalfPrompt.tsx` (§ mapa de reúso).
+- El **patrón de selector de rodeo inline** (picker + `ChevronDown` + lista expandible + fila de opción + leyenda) del `CreateCalfForm` de `LinkCalfPrompt.tsx` (§ mapa de reúso). _[Delta `combo-eje-central`, 2026-07-07: la fila de opción, antes `RodeoOptionRow` local, es ahora el componente compartido `ComboOptionRow` (`@/components`) — label centrado sobre el eje real vía slots simétricos.]_
 - `registerBirth` (`services/events.ts`) con `RegisterBirthInput.calfRodeoId?`/`calfIdv?` **ya soportados** (events.ts:514/520, 627/628) — el cliente solo los completa.
 
 ### Frontend (tests)
@@ -47,7 +47,7 @@ El delta #15 (`RCAP.5`, `LinkCalfPrompt.tsx`) ya resolvió **exactamente** este 
 
 | Necesidad de este delta | Pieza de #15 a reusar | Fuente |
 |---|---|---|
-| Selector de rodeo inline (trigger + `ChevronDown` + lista + `RodeoOptionRow`) | `CreateCalfForm` (subcomponente del prompt) | `app/src/components/LinkCalfPrompt.tsx:723-773`, `:824-844` |
+| Selector de rodeo inline (trigger + `ChevronDown` + lista + fila `ComboOptionRow`, ex-`RodeoOptionRow`) | `CreateCalfForm` (subcomponente del prompt) | `app/src/components/LinkCalfPrompt.tsx:723-773`, `:824-844` |
 | Filtro de rodeos por sistema de la madre | `calfRodeoOptions = rodeos.filter(r => r.systemId === motherSystemId)` | `LinkCalfPrompt.tsx:122-125` |
 | Preselección al rodeo de la madre + rodeo efectivo | `effectiveCalfRodeoId = selectedCalfRodeoId ?? motherRodeoId` | `LinkCalfPrompt.tsx:126` |
 | Leyenda "(Mismo rodeo que la madre)" condicional | `isSameRodeoAsMother = effectiveCalfRodeoId === motherRodeoId` | `LinkCalfPrompt.tsx:127`, `:748-752` |
