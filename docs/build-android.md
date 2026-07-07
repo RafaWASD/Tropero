@@ -22,11 +22,11 @@
 
 1. ✅ `eas.json` (hecho).
 2. ✅ Cuenta Expo `rafaqsorg` + login + `eas init` (2026-07-07): proyecto `@rafaqsorg/rafaq-app` linkeado, `projectId d8cf3a19-e8f7-4d7f-b417-54123e7f0d3e` escrito en `app.json`. Dashboard: https://expo.dev/accounts/rafaqsorg/projects/rafaq-app
-3. ⏳ Esperar a que la terminal de fixes commitee (EAS empaqueta el working tree — no buildear con WIP ajeno; y `pnpm add` reescribe node_modules bajo un Metro/Playwright ajeno).
-4. Instalar `expo-updates` + configurar canal `preview`.
-5. `npx eas build -p android --profile preview` → APK.
+3. ✅ `expo-updates` (OTA) instalado + configurado (2026-07-07) en la **rama `apk-prep`** (`5426d99`, hecha desde el worktree `C:\DEV\RAFAQ\apk-worktree` para no tocar el árbol principal): `expo-updates ~56.0.21`, `runtimeVersion policy appVersion`, `updates.url`, canales `preview`/`development`/`production` en `eas.json`. **Mergear `apk-prep` a `main` cuando la terminal de fixes cierre.**
+4. ⚠️ **Build 1 intentado (2026-07-07) y FALLÓ en Gradle** (nube EAS, desde worktree limpio en `97f559b`): keystore + upload + versionCode 1 OK; error en fase "Run gradlew". **Diagnóstico pendiente** (bajar el log del build al retomar): https://expo.dev/accounts/rafaqsorg/projects/rafaq-app/builds/68cc88d7-e64b-4515-b4be-e887c7bc06e0 — este fallo va a reproducirse en el build 2 si no se arregla antes; es de código/config, no del WIP.
+5. ⏳ Al cerrar la terminal de fixes: mergear `apk-prep` → diagnosticar/arreglar el error de Gradle → `npx eas-cli build -p android --profile preview` → APK.
 6. Validación en el teléfono de Facundo (checklist abajo).
-7. Fix-loop de lo que rompa (vía SDD normal; fixes de JS salen por OTA).
+7. Fix-loop de lo que rompa (vía SDD normal; fixes de JS salen por OTA sin re-instalar APK).
 8. Entrega al peón con Facundo presente los primeros días.
 
 ## Checklist de validación (escalón Facundo)
