@@ -22,7 +22,6 @@ import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
 import {
   Archive,
   Ban,
-  Check,
   ChevronLeft,
   ChevronRight,
   ClipboardList,
@@ -43,7 +42,7 @@ import {
 } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
 
-import { Button, Card, CategoryBadge, InfoNote, FormError, FormField, IdentifierAssignRow, TagScanCta, TagScanSheet, TimelineEvent } from '@/components';
+import { Button, Card, CategoryBadge, ComboOptionRow, InfoNote, FormError, FormField, IdentifierAssignRow, TagScanCta, TagScanSheet, TimelineEvent } from '@/components';
 import {
   assignTagToAnimal,
   fetchAnimalDetail,
@@ -1938,7 +1937,6 @@ function LoteControl({
 }) {
   const primary = getTokenValue('$primary', 'color');
   const muted = getTokenValue('$textMuted', 'color');
-  const checkSize = getTokenValue('$navIcon', 'size'); // 24
 
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -2080,20 +2078,18 @@ function LoteControl({
               ) : (
                 <Card gap="$1" paddingVertical="$2">
                   {/* "Sin lote" (quitar). */}
-                  <LoteOption
+                  <ComboOptionRow
+                    a11yLabel="Lote Sin lote"
                     label="Sin lote"
                     selected={currentGroupId === null}
-                    primary={primary}
-                    checkSize={checkSize}
                     onPress={() => void onPick(null)}
                   />
                   {groups.map((g) => (
-                    <LoteOption
+                    <ComboOptionRow
                       key={g.id}
+                      a11yLabel={`Lote ${g.name}`}
                       label={g.name}
                       selected={g.id === currentGroupId}
-                      primary={primary}
-                      checkSize={checkSize}
                       onPress={() => void onPick(g.id)}
                     />
                   ))}
@@ -2134,42 +2130,6 @@ function LoteControl({
         ) : null}
       </YStack>
     </DetailSection>
-  );
-}
-
-/** Una fila de opción del selector de lote. Target ≥ $chipMin; la elegida lleva un check $primary. */
-function LoteOption({
-  label,
-  selected,
-  primary,
-  checkSize,
-  onPress,
-}: {
-  label: string;
-  selected: boolean;
-  primary: string;
-  checkSize: number;
-  onPress: () => void;
-}) {
-  return (
-    <Pressable onPress={onPress} {...buttonA11y(Platform.OS, { label: `Lote ${label}`, selected })}>
-      <XStack alignItems="center" gap="$2" minHeight="$chipMin" paddingHorizontal="$2" pressStyle={{ opacity: 0.6 }}>
-        <Text
-          flex={1}
-          minWidth={0}
-          numberOfLines={1}
-          fontFamily="$body"
-          fontSize="$4"
-          fontWeight={selected ? '600' : '500'}
-          color={selected ? '$primary' : '$textPrimary'}
-        >
-          {label}
-        </Text>
-        <View width={checkSize} alignItems="center" justifyContent="center" flexShrink={0}>
-          {selected ? <Check size={20} color={primary} strokeWidth={2.5} /> : null}
-        </View>
-      </XStack>
-    </Pressable>
   );
 }
 
