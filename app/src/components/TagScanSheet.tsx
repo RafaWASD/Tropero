@@ -1,6 +1,15 @@
-// TagScanSheet — BASTONEAR la caravana electrónica desde la FICHA del animal (delta caravana-ficha
-// bastoneo, RCF.6). Bottom-sheet de scan ACOTADO: lee el EID del bastón y lo asigna a ESTE animal (el de la
-// ficha) — NO es find-or-create, NO hay picker (el animal es conocido). Mucho más simple que el flujo global.
+// TagScanSheet — BASTONEAR la caravana electrónica (delta caravana-ficha bastoneo, RCF.6; generalizado al
+// ALTA y al PARTO en el delta bastoneo-captura-alta-parto). Bottom-sheet de scan ACOTADO: lee el EID del
+// bastón — NO es find-or-create, NO hay picker (el contexto es conocido). Mucho más simple que el flujo global.
+//
+// DOS MODOS (por el prop `onSubmit`, neutral):
+//   - ASIGNAR (ficha): el animal YA existe → `onSubmit` hace el RPC assign_tag_to_animal (pre-check dup +
+//     encolar) → devuelve ok=false accionable si falla (fail-closed). Copy default ("Asignar caravana …").
+//   - CAPTURAR (alta / parto): el animal NO existe todavía → `onSubmit` solo SETEA el estado del form del
+//     caller (setTag / onUpdate) y devuelve ok=true sincrónico (sin RPC). El caller pasa copy propia
+//     (title/confirmLabel/confirmSublabel) para que el texto encaje ("Usar caravana … para este ternero").
+// El sheet no sabe cuál es: llama `onSubmit(eid)` y reacciona a su ok/error. Todo lo demás (scoped scanner,
+// heroes adaptativos, validación 15 díg, manualModeRef) es IDÉNTICO en ambos modos.
 //
 // UX (Raf, 2026-07-06): en la ficha queda SOLO "Bastonear la caravana". La carga MANUAL del EID por teclado
 // vive DENTRO de este sheet, detrás de "¿Sin bastón? Cargá la caravana a mano" (o el CTA del estado
@@ -22,9 +31,9 @@
 //                      dispositivo" → CTA "Cargar la caravana a mano".
 //
 // Al leer un EID (ya validado+dedupeado por el contrato) → confirmación visual pre-commit (integridad SENASA,
-// ADR-024): los 15 díg legibles + "Asignar caravana … a este animal" → onAssignTag(eid) (offline-safe, encola
-// por outbox) → éxito → cierra; error → surface sin cerrar (fail-closed). El path MANUAL usa el MISMO
-// onAssignTag (pre-check dup + encolar RPC), con validación de forma (15 díg) inline previa.
+// ADR-024): los 15 díg legibles + la copy de confirmación (confirmLabel/confirmSublabel) → onSubmit(eid)
+// (assign encolado por outbox en la ficha / captura al form en alta-parto) → éxito → cierra; error → surface
+// sin cerrar (fail-closed). El path MANUAL usa el MISMO onSubmit, con validación de forma (15 díg) inline previa.
 //
 // Cero hardcode (ADR-023 §4): tokens + getTokenValue para íconos lucide. Voseo es-AR. lineHeight matching en
 // todo heading con descendentes. a11y por los helpers de utils/a11y.
@@ -47,18 +56,33 @@ import { Button } from './Button';
 import { FormField } from './FormField';
 
 export type TagScanSheetProps = {
-  /** Cierra el sheet (X, backdrop, o tras un assign exitoso). El host lo desmonta al cerrar. */
+  /** Cierra el sheet (X, backdrop, o tras un submit exitoso). El host lo desmonta al cerrar. */
   onClose: () => void;
   /**
-   * Asigna la caravana electrónica leída/tipeada a ESTE animal (el de la ficha): pre-check de dup +
-   * encolar el RPC `assign_tag_to_animal` (offline-safe) + optimismo en sitio. Devuelve ok=false con un
-   * mensaje accionable si falla (dup / encolado) → se surfacea inline y el sheet queda ABIERTO para
-   * reintentar (fail-closed). En éxito, el host ya reflejó el TAG optimista → este sheet se cierra.
+   * Consume la caravana electrónica leída/tipeada (15 díg, ya validada+dedupeada). Neutral entre modos:
+   *   - ASIGNAR (ficha): pre-check de dup + encolar el RPC `assign_tag_to_animal` (offline-safe) + optimismo
+   *     en sitio.
+   *   - CAPTURAR (alta / parto): setea el EID en el estado del form del caller (setTag / onUpdate) y devuelve
+   *     ok=true (sin RPC — el animal no existe todavía).
+   * Devuelve ok=false con un mensaje accionable si falla (dup / encolado) → se surfacea inline y el sheet
+   * queda ABIERTO para reintentar (fail-closed). En éxito, el host ya reflejó el TAG → este sheet se cierra.
    */
-  onAssignTag: (eid: string) => Promise<{ ok: boolean; error?: string }>;
+  onSubmit: (eid: string) => Promise<{ ok: boolean; error?: string }>;
+  /** Título del header (default "Bastonear la caravana"). */
+  title?: string;
+  /** Label del botón primario de confirmación, en ambos estados BLE y manual (default "Asignar caravana"). */
+  confirmLabel?: string;
+  /** Sub-texto sobre el EID leído en la confirmación pre-commit (default "Asignar esta caravana a este animal."). */
+  confirmSublabel?: string;
 };
 
-export function TagScanSheet({ onClose, onAssignTag }: TagScanSheetProps) {
+export function TagScanSheet({
+  onClose,
+  onSubmit,
+  title = 'Bastonear la caravana',
+  confirmLabel = 'Asignar caravana',
+  confirmSublabel = 'Asignar esta caravana a este animal.',
+}: TagScanSheetProps) {
   const insets = useSafeAreaInsets();
 
   // ── Propiedad EXCLUSIVA del listener mientras el sheet está montado (RCF.6). Acquire al montar, release en
@@ -112,16 +136,16 @@ export function TagScanSheet({ onClose, onAssignTag }: TagScanSheetProps) {
     if (!readEid || assigningRef.current) return;
     setAssigning(true);
     setAssignError(null);
-    const r = await onAssignTag(readEid);
+    const r = await onSubmit(readEid);
     if (!r.ok) {
       // Fail-closed: surfaceamos el error inline y dejamos el sheet ABIERTO para reintentar/re-escanear.
       setAssigning(false);
       setAssignError(r.error ?? 'No pudimos asignar la caravana. Probá de nuevo.');
       return;
     }
-    // Éxito del encolado (offline-safe): el host reflejó el TAG optimista → cerramos el sheet.
+    // Éxito (assign encolado / captura seteada): el host reflejó el TAG → cerramos el sheet.
     onClose();
-  }, [readEid, onAssignTag, onClose]);
+  }, [readEid, onSubmit, onClose]);
 
   const backToScanning = useCallback(() => {
     setReadEid(null);
@@ -177,7 +201,7 @@ export function TagScanSheet({ onClose, onAssignTag }: TagScanSheetProps) {
             color="$textPrimary"
             numberOfLines={1}
           >
-            Bastonear la caravana
+            {title}
           </Text>
           <Pressable testID="tag-scan-close" onPress={onClose} {...buttonA11y(Platform.OS, { label: 'Cerrar' })}>
             <X size={getTokenValue('$navIcon', 'size')} color={getTokenValue('$textMuted', 'color')} strokeWidth={2.25} />
@@ -185,12 +209,14 @@ export function TagScanSheet({ onClose, onAssignTag }: TagScanSheetProps) {
         </XStack>
 
         {manualMode ? (
-          <ManualTagEntry onAssignTag={onAssignTag} onClose={onClose} onBack={exitManual} />
+          <ManualTagEntry onSubmit={onSubmit} confirmLabel={confirmLabel} onClose={onClose} onBack={exitManual} />
         ) : readEid !== null ? (
           <ReadConfirmation
             eid={readEid}
             assigning={assigning}
             error={assignError}
+            confirmLabel={confirmLabel}
+            confirmSublabel={confirmSublabel}
             onAssign={() => void onAssign()}
             onBack={backToScanning}
           />
@@ -367,16 +393,18 @@ function ManualFallbackLink({ onPress }: { onPress: () => void }) {
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
 // CARGA MANUAL del EID DENTRO del sheet (RCF.6.6) — el usuario tipea los 15 díg (sin bastón). Sanitiza en vivo
-// (solo dígitos ≤15), valida la forma al confirmar (misma copy que el alta) ANTES de asignar, y usa el MISMO
-// onAssignTag que el path BLE (pre-check de dup + encolar RPC + optimismo en sitio). Éxito → cierra; error →
+// (solo dígitos ≤15), valida la forma al confirmar (misma copy que el alta) ANTES de confirmar, y usa el MISMO
+// onSubmit que el path BLE (assign RPC en la ficha / captura al form en alta-parto). Éxito → cierra; error →
 // inline, sheet abierto (fail-closed). "Volver" regresa al estado de scan.
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
 function ManualTagEntry({
-  onAssignTag,
+  onSubmit,
+  confirmLabel,
   onClose,
   onBack,
 }: {
-  onAssignTag: (eid: string) => Promise<{ ok: boolean; error?: string }>;
+  onSubmit: (eid: string) => Promise<{ ok: boolean; error?: string }>;
+  confirmLabel: string;
   onClose: () => void;
   onBack: () => void;
 }) {
@@ -397,19 +425,19 @@ function ManualTagEntry({
       setError('La caravana electrónica tiene que tener 15 dígitos.');
       return;
     }
-    // 2) Asignación real (pre-check de dup + encolar). El optimismo en sitio lo hace el host.
+    // 2) Confirmación real (assign: pre-check dup + encolar / captura: setea el form). El optimismo lo hace el host.
     setBusy(true);
     setError(null);
-    const r = await onAssignTag(value);
+    const r = await onSubmit(value);
     if (!r.ok) {
       // Fail-closed: error accionable inline, la afordancia queda ABIERTA para reintentar.
       setBusy(false);
       setError(r.error ?? 'No se pudo guardar el cambio.');
       return;
     }
-    // Éxito: el host reflejó el TAG optimista → cerramos (no setBusy(false): el sheet se desmonta).
+    // Éxito: el host reflejó el TAG → cerramos (no setBusy(false): el sheet se desmonta).
     onClose();
-  }, [busy, value, onAssignTag, onClose]);
+  }, [busy, value, onSubmit, onClose]);
 
   return (
     <YStack testID="tag-scan-manual" gap="$4">
@@ -432,7 +460,7 @@ function ManualTagEntry({
         disabled={busy}
         onPress={() => void handleConfirm()}
       >
-        {busy ? 'Asignando…' : 'Asignar caravana'}
+        {busy ? 'Guardando…' : confirmLabel}
       </Button>
       <Button variant="secondary" fullWidth disabled={busy} onPress={onBack}>
         Volver
@@ -442,20 +470,25 @@ function ManualTagEntry({
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
-// CONFIRMACIÓN PRE-COMMIT (integridad SENASA, ADR-024) — el EID leído en 15 díg LEGIBLES + "Asignar caravana
-// … a este animal". El operario verifica de un vistazo, con una mano, a pleno sol. Asignar → onAssignTag;
-// "Volver a escanear" → vuelve a escuchar (por si leyó la caravana equivocada). Error inline (fail-closed).
+// CONFIRMACIÓN PRE-COMMIT (integridad SENASA, ADR-024) — el EID leído en 15 díg LEGIBLES + la copy de
+// confirmación (default "Asignar … a este animal"; captura: "Usar … para este ternero"). El operario verifica
+// de un vistazo, con una mano, a pleno sol. Confirmar → onSubmit; "Volver a escanear" → vuelve a escuchar (por
+// si leyó la caravana equivocada). Error inline (fail-closed).
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
 function ReadConfirmation({
   eid,
   assigning,
   error,
+  confirmLabel,
+  confirmSublabel,
   onAssign,
   onBack,
 }: {
   eid: string;
   assigning: boolean;
   error: string | null;
+  confirmLabel: string;
+  confirmSublabel: string;
   onAssign: () => void;
   onBack: () => void;
 }) {
@@ -482,7 +515,7 @@ function ReadConfirmation({
           {eidReadable}
         </Text>
         <Text fontFamily="$body" fontSize="$4" lineHeight="$4" fontWeight="500" color="$textMuted">
-          Asignar esta caravana a este animal.
+          {confirmSublabel}
         </Text>
         {error ? (
           <Text fontFamily="$body" fontSize="$3" lineHeight="$3" fontWeight="500" color="$terracota">
@@ -492,7 +525,7 @@ function ReadConfirmation({
       </YStack>
 
       <Button testID="tag-scan-assign" variant="primary" fullWidth disabled={assigning} onPress={onAssign}>
-        {assigning ? 'Asignando…' : 'Asignar caravana'}
+        {assigning ? 'Guardando…' : confirmLabel}
       </Button>
       <Button variant="secondary" fullWidth disabled={assigning} onPress={onBack}>
         Volver a escanear

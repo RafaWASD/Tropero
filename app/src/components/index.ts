@@ -66,5 +66,7 @@ export { IdentifierAssignRow } from './IdentifierAssignRow';
 export type { IdentifierAssignRowProps } from './IdentifierAssignRow';
 export { TagScanSheet } from './TagScanSheet';
 export type { TagScanSheetProps } from './TagScanSheet';
+export { TagScanCta, CapturedTagRow } from './TagScanCta';
+export type { TagScanCtaProps, CapturedTagRowProps } from './TagScanCta';
 export { LinkCalfPrompt } from './LinkCalfPrompt';
 export type { LinkCalfPromptProps } from './LinkCalfPrompt';

@@ -32,7 +32,7 @@ import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
 import { Check, ChevronDown, ChevronLeft, Mars, Venus, X } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
 
-import { Button, Card, ConditionScoreStepper, FormField, FormError, InfoNote, LinkCalfPrompt } from '@/components';
+import { Button, Card, CapturedTagRow, ConditionScoreStepper, FormField, FormError, InfoNote, LinkCalfPrompt, TagScanCta, TagScanSheet } from '@/components';
 import { BreedPickerSheet } from '@/components/sigsa';
 import { useAuth, useEstablishment, useRodeo } from '@/contexts';
 import { createAnimal, fetchSystemCategories, type SystemCategory } from '@/services/animals';
@@ -56,7 +56,6 @@ import {
 import type { Rodeo } from '@/services/rodeos';
 import { parseWeight, hasAtLeastOneIdentifier } from '@/utils/animal-form';
 import {
-  sanitizeTagInput,
   sanitizeIdvInput,
   sanitizeWeightInput,
   isValidTagElectronic,
@@ -214,6 +213,11 @@ export default function CrearAnimalScreen() {
   const [groupPickerOpen, setGroupPickerOpen] = useState(false);
 
   const [tagError, setTagError] = useState<string | null>(null);
+  // Sheet de BASTONEO de la caravana electrónica (delta bastoneo-captura-alta-parto, RCF.6 generalizado): en
+  // el alta el EID se CAPTURA al estado `tag` (el animal no existe todavía). El montaje (tagScanOpen) mapea
+  // 1:1 al acquire/release del scoped scanner → la lectura entra al sheet y el FindOrCreateOverlay global NO
+  // se dispara (el alta ya suspende el listener global con busyMode; el scoped scanner des-suspende SOLO para él).
+  const [tagScanOpen, setTagScanOpen] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const busyRef = useRef(false);
@@ -788,8 +792,9 @@ export default function CrearAnimalScreen() {
             tag={tag}
             tagError={tagError}
             onIdv={(t) => setIdv(sanitizeIdvInput(t))}
-            onTag={(t) => {
-              setTag(sanitizeTagInput(t));
+            onOpenTagScan={() => setTagScanOpen(true)}
+            onClearTag={() => {
+              setTag('');
               if (tagError) setTagError(null);
             }}
             birthYear={birthYear}
@@ -903,6 +908,24 @@ export default function CrearAnimalScreen() {
         selectedCode={breedCode}
         onSelect={onSelectBreed}
       />
+
+      {/* Sheet de BASTONEO de la caravana electrónica (RCF.6 generalizado, modo CAPTURA). Montado al ROOT
+          (cubre la pantalla con su scrim). El scoped scanner del sheet toma la propiedad EXCLUSIVA del bastón
+          mientras está abierto → la lectura entra acá (no al FindOrCreateOverlay global) aunque el alta tenga
+          busyMode prendido; al cerrar/desmontar se libera → el listener global vuelve a estar suspendido. En
+          captura el onSubmit solo SETEA `tag` (sin RPC — el animal no existe todavía) y devuelve ok=true. */}
+      {tagScanOpen ? (
+        <TagScanSheet
+          onClose={() => setTagScanOpen(false)}
+          onSubmit={async (eid) => {
+            setTag(eid);
+            if (tagError) setTagError(null);
+            return { ok: true };
+          }}
+          confirmLabel="Usar caravana"
+          confirmSublabel="Usar esta caravana para el animal."
+        />
+      ) : null}
 
       {/* Prompt SALTABLE "Vincular la cría al pie" (delta #15, RCAP.1–RCAP.5). Montado al ROOT (cubre la
           pantalla con su scrim). Se dispara tras el alta de una vaca con cría al pie (nursing=true) en el
@@ -1144,7 +1167,8 @@ function Step4Data({
   tag,
   tagError,
   onIdv,
-  onTag,
+  onOpenTagScan,
+  onClearTag,
   birthYear,
   birthYearError,
   onBirthYear,
@@ -1192,7 +1216,10 @@ function Step4Data({
   tag: string;
   tagError: string | null;
   onIdv: (t: string) => void;
-  onTag: (t: string) => void;
+  /** Abre el TagScanSheet (modo captura) para bastonear/tipear la caravana electrónica del animal nuevo. */
+  onOpenTagScan: () => void;
+  /** Limpia el EID capturado (mis-scan corregible antes de confirmar el alta) → re-muestra el CTA. */
+  onClearTag: () => void;
   birthYear: string;
   birthYearError: string | null;
   onBirthYear: (t: string) => void;
@@ -1298,17 +1325,27 @@ function Step4Data({
             placeholder="Número de caravana oficial"
           />
         ) : null}
-        {/* TAG editable SOLO en la puerta manual (sin TAG precargado). Por la rama BLE el TAG ya se mostró
-            read-only arriba — no se ofrece un 2do campo editable que lo pisaría. */}
+        {/* Caravana electrónica → BASTONEAR (RCF.6 generalizado al alta): SOLO en la puerta manual (sin TAG
+            precargado). Por la rama BLE el TAG ya se mostró read-only arriba. En vez de un campo tipeable
+            suelto, el CTA "Bastonear la caravana (opcional)" abre el TagScanSheet en modo captura (la carga
+            manual del EID vive DENTRO del sheet, detrás de "¿Sin bastón?"). Capturado → CapturedTagRow
+            read-only con "Cambiar" (un mis-scan se corrige antes de confirmar el alta) → vuelve al CTA. */}
         {prefillKind !== 'tag' ? (
-          <FormField
-            label={`Caravana electrónica (recomendado, ${TAG_ELECTRONIC_LENGTH} dígitos)`}
-            value={tag}
-            onChangeText={onTag}
-            keyboardType="number-pad"
-            placeholder="982 0001 2345 6789"
-            error={tagError}
-          />
+          tag ? (
+            <CapturedTagRow eid={tag} onClear={onClearTag} />
+          ) : (
+            <YStack gap="$2">
+              <Text fontFamily="$body" fontSize="$3" fontWeight="500" color="$textMuted">
+                Caravana electrónica
+              </Text>
+              <TagScanCta label="Bastonear la caravana (opcional)" onPress={onOpenTagScan} />
+              {tagError ? (
+                <Text fontFamily="$body" fontSize="$3" lineHeight="$3" fontWeight="500" color="$terracota">
+                  {tagError}
+                </Text>
+              ) : null}
+            </YStack>
+          )
         ) : null}
       </YStack>
 

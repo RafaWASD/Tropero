@@ -42,7 +42,7 @@ import {
 } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
 
-import { Button, Card, FormField, FormError, InfoNote } from '@/components';
+import { Button, CapturedTagRow, Card, FormField, FormError, InfoNote, TagScanCta, TagScanSheet } from '@/components';
 import { useBusyWhileMounted } from '@/services/ble/stick';
 import { useRodeo } from '@/contexts';
 import type { Rodeo } from '@/services/rodeos';
@@ -58,10 +58,8 @@ import {
 } from '@/services/events';
 import {
   sanitizeWeightInput,
-  sanitizeTagInput,
   sanitizeIdvInput,
   maskDateInput,
-  TAG_ELECTRONIC_LENGTH,
 } from '@/utils/animal-input';
 import {
   resolveEffectiveCalfRodeoId,
@@ -215,6 +213,11 @@ export default function AgregarEventoScreen() {
   const [calfRodeoId, setCalfRodeoId] = useState<string | null>(null);
   const [calfIdv, setCalfIdv] = useState('');
   const [rodeoPickerOpen, setRodeoPickerOpen] = useState(false);
+  // Sheet de BASTONEO de la caravana electrónica POR TERNERO (delta bastoneo-captura-alta-parto, RCF.6
+  // generalizado, modo CAPTURA). Solo UN sheet abierto a la vez → trackeamos el localId del ternero que está
+  // escaneando (más robusto que un índice: inmune a reordenamientos, aunque con el sheet abierto la lista no
+  // se puede mutar). null = ningún sheet. El scoped scanner se adquiere/suelta UNA vez por apertura.
+  const [scanCalfLocalId, setScanCalfLocalId] = useState<string | null>(null);
   // Rodeo/sistema de la madre resueltos DESDE LOCAL (offline, uniforme para todo caller — veto leader #1).
   const [motherCtx, setMotherCtx] = useState<{ rodeoId: string; systemId: string } | null>(null);
 
@@ -689,6 +692,7 @@ export default function AgregarEventoScreen() {
             onAddCalf={addCalf}
             onRemoveCalf={removeCalf}
             onUpdateCalf={updateCalf}
+            onOpenCalfScan={(localId) => setScanCalfLocalId(localId)}
             calvesErr={calvesErr}
             rodeoName={effectiveRodeoName}
             isSameRodeoAsMother={isSameRodeoAsMother}
@@ -752,6 +756,24 @@ export default function AgregarEventoScreen() {
             Cambiar de tipo
           </Button>
         </YStack>
+      ) : null}
+
+      {/* Sheet de BASTONEO de la caravana electrónica POR TERNERO (RCF.6 generalizado, modo CAPTURA). Montado
+          al ROOT (cubre la pantalla con su scrim). Solo UNO a la vez (scanCalfLocalId). El scoped scanner del
+          sheet toma la propiedad EXCLUSIVA del bastón mientras está abierto → la lectura entra acá (no al
+          FindOrCreateOverlay global) aunque el parto tenga busyMode prendido; al cerrar/desmontar se libera →
+          el listener global vuelve a estar suspendido. En captura el onSubmit solo escribe `tagRaw` en ESE
+          ternero (sin RPC — el ternero no existe todavía) y devuelve ok=true. */}
+      {scanCalfLocalId != null ? (
+        <TagScanSheet
+          onClose={() => setScanCalfLocalId(null)}
+          onSubmit={async (eid) => {
+            updateCalf(scanCalfLocalId, { tagRaw: eid });
+            return { ok: true };
+          }}
+          confirmLabel="Usar caravana"
+          confirmSublabel="Usar esta caravana para este ternero."
+        />
       ) : null}
     </YStack>
   );
@@ -1245,6 +1267,7 @@ function PartoForm({
   onAddCalf,
   onRemoveCalf,
   onUpdateCalf,
+  onOpenCalfScan,
   calvesErr,
   rodeoName,
   isSameRodeoAsMother,
@@ -1265,6 +1288,8 @@ function PartoForm({
   onAddCalf: () => void;
   onRemoveCalf: (localId: string) => void;
   onUpdateCalf: (localId: string, patch: Partial<Omit<CalfRow, 'localId'>>) => void;
+  /** Abre el TagScanSheet (modo captura) para bastonear/tipear la caravana electrónica de ESE ternero. */
+  onOpenCalfScan: (localId: string) => void;
   calvesErr: string | null;
   /** Nombre del rodeo efectivo del parto (a mostrar en el trigger). */
   rodeoName: string;
@@ -1337,6 +1362,7 @@ function PartoForm({
             canRemove={calves.length > 1}
             onRemove={() => onRemoveCalf(calf.localId)}
             onUpdate={(patch) => onUpdateCalf(calf.localId, patch)}
+            onOpenScan={() => onOpenCalfScan(calf.localId)}
           />
         ))}
       </YStack>
@@ -1556,12 +1582,15 @@ function CalfBlock({
   canRemove,
   onRemove,
   onUpdate,
+  onOpenScan,
 }: {
   index: number;
   calf: CalfRow;
   canRemove: boolean;
   onRemove: () => void;
   onUpdate: (patch: Partial<Omit<CalfRow, 'localId'>>) => void;
+  /** Abre el TagScanSheet (modo captura) para bastonear/tipear la caravana electrónica de ESTE ternero. */
+  onOpenScan: () => void;
 }) {
   const terracota = getTokenValue('$terracota', 'color');
   return (
@@ -1600,13 +1629,30 @@ function CalfBlock({
         placeholder="Ej. 35"
       />
 
-      <FormField
-        label={`Caravana electrónica (opcional, ${TAG_ELECTRONIC_LENGTH} dígitos)`}
-        value={calf.tagRaw}
-        onChangeText={(t) => onUpdate({ tagRaw: sanitizeTagInput(t) })}
-        keyboardType="number-pad"
-        placeholder="982 0001 2345 6789"
-      />
+      {/* Caravana electrónica → BASTONEAR (RCF.6 generalizado al parto): en vez de un campo tipeable suelto,
+          el CTA "Bastonear la caravana (opcional)" abre el TagScanSheet en modo captura PARA ESTE ternero (la
+          carga manual del EID vive DENTRO del sheet). Capturado → CapturedTagRow read-only con "Cambiar" (un
+          mis-scan se corrige antes de guardar el parto) → vuelve al CTA. Cada ternero su afordancia independiente
+          (mellizos, RPRC.2.5); el testID lleva el índice para distinguirlos en e2e. */}
+      {calf.tagRaw ? (
+        <CapturedTagRow
+          eid={calf.tagRaw}
+          onClear={() => onUpdate({ tagRaw: '' })}
+          testID={`tag-captured-${index}`}
+          clearTestID={`tag-captured-clear-${index}`}
+        />
+      ) : (
+        <YStack gap="$2">
+          <Text fontFamily="$body" fontSize="$3" fontWeight="500" color="$textMuted">
+            Caravana electrónica
+          </Text>
+          <TagScanCta
+            label="Bastonear la caravana (opcional)"
+            testID={`tag-scan-open-${index}`}
+            onPress={onOpenScan}
+          />
+        </YStack>
+      )}
     </Card>
   );
 }

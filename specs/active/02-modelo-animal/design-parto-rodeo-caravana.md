@@ -79,7 +79,17 @@ PARTO (eventType='birth')
 
 - El picker de rodeo se coloca **entre la fecha y el bloque de terneros** (nivel parto, no dentro de una card de ternero) — comunica visualmente que aplica a toda la camada.
 - La caravana visual se coloca **a nivel parto** también (no dentro de la card del ternero), reflejando que es un único idv del parto; se muestra/oculta según `calves.length`.
-- El **tag electrónico** permanece **dentro de cada `CalfBlock`** (sin cambios, RPRC.2.5).
+- El **tag electrónico** permanece **dentro de cada `CalfBlock`** (por ternero, RPRC.2.5).
+  > **[Reconciliado al as-built — delta `bastoneo-captura-alta-parto`, 2026-07-06]** El campo electrónico
+  > **tipeable suelto** de cada `CalfBlock` se reemplazó por el **bastoneo**: un CTA `TagScanCta` "Bastonear la
+  > caravana (opcional)" (compartido) abre el **`TagScanSheet` en modo CAPTURA** para ESE ternero (la carga
+  > manual del EID vive DENTRO del sheet, detrás de "¿Sin bastón?"). Capturado → `CapturedTagRow` read-only con
+  > "Cambiar" (mis-scan corregible antes de guardar). Sigue siendo por ternero (mellizos: un CTA independiente
+  > por card; **un solo sheet a la vez**, ruteado por `scanCalfLocalId`). El `tagRaw` capturado fluye a
+  > `registerBirth({ calves:[{ tag }] })` **sin cambios** de contrato. Frontend puro (Gate 1 N/A). El sheet toma
+  > la propiedad EXCLUSIVA del bastón (scoped scanner) porque el parto suspende el listener global con
+  > `useBusyWhileMounted`, igual que la ficha (ver `design-caravana-ficha.md §10.1/§10.6`). Regresión:
+  > `e2e/parto-bastoneo.spec.ts` (1 ternero + mellizos, oráculo server `waitForServerCalfTags`).
 
 ## 4. Resolución del rodeo de la madre + su sistema (client-side)
 

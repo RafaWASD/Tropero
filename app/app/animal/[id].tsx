@@ -43,8 +43,7 @@ import {
 } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
 
-import { Button, Card, CategoryBadge, InfoNote, FormError, FormField, IdentifierAssignRow, TagScanSheet, TimelineEvent } from '@/components';
-import { StickIcon } from '@/theme/icons';
+import { Button, Card, CategoryBadge, InfoNote, FormError, FormField, IdentifierAssignRow, TagScanCta, TagScanSheet, TimelineEvent } from '@/components';
 import {
   assignTagToAnimal,
   fetchAnimalDetail,
@@ -1011,7 +1010,7 @@ export default function AnimalDetailScreen() {
           un assign optimista `tagElectronic` deja de ser null → el sheet ya no aplica y se desmonta. Reusa el
           MISMO `onAssignTag` que la carga manual (pre-check dup + encolar RPC + optimismo en sitio). */}
       {detail && scanOpen && canAssignTag(detail) ? (
-        <TagScanSheet onClose={() => setScanOpen(false)} onAssignTag={onAssignTag} />
+        <TagScanSheet onClose={() => setScanOpen(false)} onSubmit={onAssignTag} />
       ) : null}
     </YStack>
   );
@@ -1818,34 +1817,6 @@ function AttributeRow({ label, value }: { label: string; value: string }) {
         {value}
       </Text>
     </YStack>
-  );
-}
-
-// ─── CTA "Bastonear la caravana" (delta caravana-ficha bastoneo, RCF.6) ───────────────
-//
-// Afordancia PROMINENTE del path de scan (el bastón es el 95% del flujo en manga): abre el TagScanSheet.
-// Target grande (≥ $touchMin, Fitts, una mano) con el StickIcon + label $primary sobre $greenLight — la
-// distingue del CTA manual plano ("Agregar caravana electrónica") que va debajo como piso. lineHeight
-// matching en el label (tiene descendentes). Cero hardcode: tokens + getTokenValue para el ícono lucide.
-function TagScanCta({ onPress }: { onPress: () => void }) {
-  return (
-    <XStack
-      testID="tag-scan-open"
-      minHeight="$touchMin"
-      alignItems="center"
-      gap="$2"
-      backgroundColor="$greenLight"
-      borderRadius="$pill"
-      paddingHorizontal="$4"
-      pressStyle={{ opacity: 0.7 }}
-      onPress={onPress}
-      {...buttonA11y(Platform.OS, { label: 'Bastonear la caravana' })}
-    >
-      <StickIcon size={20} color={getTokenValue('$primary', 'color')} strokeWidth={2.5} />
-      <Text fontFamily="$body" fontSize="$5" lineHeight="$5" fontWeight="700" color="$primary" numberOfLines={1}>
-        Bastonear la caravana
-      </Text>
-    </XStack>
   );
 }
 

@@ -346,3 +346,40 @@ el mock de E2E el transporte existe → el scan funciona.
 - **(c)** no queda transporte escuchando de más ni busyMode mal seteado → el `release` idempotente + el
   `listening` effect (`if (listening) transport.enable(); else transport.disable()`) apagan el transporte al
   cerrar; `busy` nunca lo toca el sheet (un solo dueño).
+
+### 10.6 As-built — generalización a modo CAPTURA (delta bastoneo-captura-alta-parto, 2026-07-06)
+
+El `TagScanSheet` (RCF.6) se **generalizó** para reusarlo también en el **ALTA** (`crear-animal.tsx`) y el
+**PARTO** (`agregar-evento.tsx`, por ternero), donde el animal NO existe todavía y el EID se CAPTURA al estado
+del form en vez de asignarse por RPC. Frontend puro (Gate 1 sigue N/A); reuso TOTAL del scoped scanner / heroes
+/ validación 15 díg / `manualModeRef` — el punto crítico de propiedad exclusiva (§10.1) es IDÉNTICO (el alta y
+el parto también suspenden el listener global con `useBusyWhileMounted`, así que el scoped scanner es el patrón
+correcto, no el listener global crudo).
+
+**Contrato generalizado** (`TagScanSheetProps`):
+- El prop `onAssignTag` se renombró a **`onSubmit`** (neutral): `(eid) => Promise<{ ok; error? }>`. En modo
+  ASIGNAR (ficha) hace lo de hoy (pre-check dup + `assignTagToAnimal` + optimismo); en modo CAPTURA
+  (alta/parto) el caller solo SETEA su estado (`setTag` / `onUpdate({ tagRaw })`) y devuelve `{ ok: true }`
+  sincrónico (sin RPC). El sheet no distingue: llama `onSubmit(eid)` y reacciona a su `ok`/`error` (fail-closed
+  igual). El caller de la ficha se actualizó a `onSubmit={onAssignTag}` (mismo handler, nuevo nombre de prop).
+- Props de COPY opcionales (defaults = la copy de la ficha, para no cambiarla): `title` (default "Bastonear la
+  caravana"), `confirmLabel` (default "Asignar caravana", aplicado a `ReadConfirmation` **y** `ManualTagEntry`),
+  `confirmSublabel` (default "Asignar esta caravana a este animal."). En captura el caller pasa `confirmLabel=
+  "Usar caravana"` + `confirmSublabel="Usar esta caravana para el animal." / "…para este ternero."` El label de
+  ocupado pasó de "Asignando…" a **"Guardando…"** (neutral entre asignar y capturar; transitorio, casi invisible
+  en captura porque `onSubmit` resuelve sincrónico).
+
+**`TagScanCta` extraído a componente compartido** (`app/src/components/TagScanCta.tsx`, exportado por
+`components/index.ts`): mismo look (StickIcon + label `$primary` sobre `$greenLight`, ≥`$touchMin`), con props
+`label?` (default "Bastonear la caravana"; alta/parto usan "Bastonear la caravana (opcional)") y `testID?`
+(default `tag-scan-open`; en parto se distingue por ternero: `tag-scan-open-<i>`). La ficha (`[id].tsx`) ahora lo
+IMPORTA (ya no lo define local). En el MISMO archivo se agregó **`CapturedTagRow`** (estado read-only tras
+capturar un EID en un form): EID legible + link "Cambiar" que LIMPIA el tag (un mis-scan se corrige antes de
+confirmar — en la ficha el tag asignado es inmutable, en un form NO). NO se usa en la ficha.
+
+Archivos as-built de este delta: `TagScanSheet.tsx` (contrato + copy), `TagScanCta.tsx` (**NUEVO**, compartido),
+`components/index.ts` (exports), `[id].tsx` (`onSubmit` + import de `TagScanCta`), `crear-animal.tsx` (§ del alta,
+ver `design-alta-form-refinamiento.md`), `agregar-evento.tsx` (§ del parto, ver `design-parto-rodeo-caravana.md`),
+`e2e/alta-bastoneo.spec.ts` + `e2e/parto-bastoneo.spec.ts` (regresión) + sus capture files (Gate 2.5) +
+`e2e/helpers/admin.ts` (`waitForServerCalfTags`). `animals.spec.ts` FIX2 se ajustó (el campo tipeable suelto ya
+no existe; el límite 15 díg se ejercita en la carga manual DENTRO del sheet).

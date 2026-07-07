@@ -572,12 +572,6 @@ test('FIX2: el alta LIMITA los inputs en vivo (caravana 15 díg, fecha/peso sin 
   // Caminamos al paso de DATOS, donde están los inputs de texto que SÍ se acotan en vivo.
   await walkWizardToData(page, { sex: 'Macho', categoryName: 'Torito' });
 
-  // Caravana electrónica: tipeamos letras + 40 dígitos → debe quedar SOLO 15 dígitos (FDX-B).
-  const tagInput = page.getByLabel('Caravana electrónica (recomendado, 15 dígitos)', { exact: true });
-  await expect(tagInput).toBeVisible({ timeout: 20_000 });
-  await tagInput.fill('abc1234567890123456789012345');
-  await expect(tagInput).toHaveValue('123456789012345'); // 15 dígitos, sin letras
-
   // Año de nacimiento: tipeamos basura → solo 4 dígitos numéricos (year-only, sub-chunk B).
   const yearInput = page.getByLabel('Año de nacimiento (opcional, AAAA)', { exact: true });
   await yearInput.fill('asdasd');
@@ -592,12 +586,27 @@ test('FIX2: el alta LIMITA los inputs en vivo (caravana 15 díg, fecha/peso sin 
   await weightInput.fill('180');
   await expect(weightInput).toHaveValue('180');
 
-  // Dejamos la caravana INCOMPLETA (8 díg) → submit debe mostrar el error de largo y NO navegar
-  // (seguimos en el paso de datos; el error es accionable, no rompe el flujo — R4.8).
+  // Caravana electrónica (delta bastoneo-captura-alta-parto, RCF.6 generalizado al alta): YA NO hay un campo
+  // tipeable suelto en el form — se captura vía el CTA "Bastonear la caravana (opcional)" que abre el
+  // TagScanSheet. La carga MANUAL del EID + su límite en vivo (15 díg) viven DENTRO del sheet, detrás de
+  // "¿Sin bastón?" (sin mock BLE, el transporte web-serial cae al hero "Conectá el bastón" con ese link).
+  await expect(page.getByLabel('Caravana electrónica (recomendado, 15 dígitos)', { exact: true })).toHaveCount(0);
+  await page.getByTestId('tag-scan-open').click();
+  await expect(page.getByTestId('tag-scan-sheet')).toBeVisible({ timeout: 10_000 });
+  await page.getByTestId('tag-scan-manual-link').click();
+  await expect(page.getByTestId('tag-scan-manual')).toBeVisible({ timeout: 10_000 });
+  const tagInput = page.getByLabel('Caravana electrónica', { exact: true });
+  // Límite en vivo: letras + 40 dígitos → SOLO 15 dígitos (FDX-B).
+  await tagInput.fill('abc1234567890123456789012345');
+  await expect(tagInput).toHaveValue('123456789012345');
+  // Caravana INCOMPLETA (8 díg) → "Usar caravana" muestra el error de largo y NO cierra (fail-closed).
   await tagInput.fill('12345678'); // 8 díg < 15
-  await page.getByRole('button', { name: 'Crear animal', exact: true }).click();
+  await page.getByTestId('tag-scan-manual-assign').click();
   await expect(page.getByText('La caravana electrónica tiene que tener 15 dígitos.')).toBeVisible({ timeout: 10_000 });
-  // Sigue en el paso de datos del wizard (no aterrizó en una ficha — la ficha tiene "Historial").
+  await expect(page.getByTestId('tag-scan-manual')).toBeVisible(); // sigue en la carga manual del sheet
+  // Cerramos el sheet: seguimos en el paso de datos del wizard (no aterrizó en una ficha — la ficha tiene "Historial").
+  await page.getByTestId('tag-scan-close').click();
+  await expect(page.getByTestId('tag-scan-sheet')).toHaveCount(0, { timeout: 10_000 });
   await expect(page.getByText('Historial', { exact: true })).toHaveCount(0);
 });
 

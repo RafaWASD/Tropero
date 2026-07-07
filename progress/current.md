@@ -5,6 +5,12 @@
 
 **SESIÓN 2026-06-29/30 — CORRECCIONES DEL TESTEO EN VIVO CON FACUNDO (16) + CONVENCIÓN SDD PARA FIXES (ADR-028).**
 
+## 🆕 2026-07-06 — REPLICAR BASTONEO EN CAPTURA DE TAG (alta + parto) — GATEADO, ⏸ Puerta 2
+Raf: "revisá todos los lugares donde se asigna caravana electrónica y replicá el bastoneo". Inventario (Explore): 3 superficies manual-only → **alta**, **parto**, **cría al pie**; el resto ya scan-driven (overlay global / masiva / identify de maniobra) o es idv/visual (no lo lee el bastón). **Run 1 (este): ALTA + PARTO** (cría al pie = Run 2).
+- **`TagScanSheet` generalizado a modo CAPTURA**: `onAssignTag`→`onSubmit` (neutral asignar/capturar) + copy props (captura = "Usar caravana"). `TagScanCta` + `CapturedTagRow` extraídos a `TagScanCta.tsx` compartido (`CapturedTagRow` = read-only + "Cambiar" para re-escanear; en el form el tag es mutable pre-confirm, a diferencia de la ficha).
+- **ALTA** (`crear-animal` Step4Data, `prefillKind!=='tag'`): CTA→sheet captura→`setTag`, sin campo manual suelto (manual anidado en el sheet). **PARTO** (`agregar-evento`, por ternero): CTA por ternero, un sheet a la vez ruteado por `scanCalfLocalId`; mellizos con 2 caravanas independientes (verificado en captura). Ambas suspenden el listener global → scoped scanner exclusivo; ownership intacto.
+- **GATES**: veto leader PASS + Gate 2 PASS 0 HIGH (EID no debilitado; parto más estricto) + reviewer APPROVED (tras reconciliar RPRC.2.5/5.2 "SUPERADA por bastoneo"; 134/134 unit) + Gate 2.5 (13 capturas, veto visual PASS). Frontend puro → Gate 1 N/A. progress/{impl,review,security_code}_02-bastoneo-captura-alta-parto.md. **⏸ Puerta 2.** Pendiente Run 2: cría al pie.
+
 ## 🆕 2026-07-06 — DELTA CARAVANA-FICHA BASTONEO (#6) — GATEADO, ⏸ Puerta 2
 Raf cuestionó el deferral del bastoneo de #6 ("deberíamos agregarlo tal como en la maniobra; no sé qué falta de hardware"). **Tenía razón**: el deferral fue conservador de más. Investigué → toda la infra BLE (contrato de ingesta ADR-024 + 5 adaptadores + parser + el `FindOrCreateOverlay` que YA asigna caravana) está construida; lo único que necesita hardware es VALIDAR el RS420-SPP real (dev build + Android), igual que la maniobra — que degrada a manual sin bastón. Omitirlo en la ficha era incoherente.
 - **Construido**: "Bastonear la caravana" en la ficha (Identificación, electrónica vacía) → `TagScanSheet` reusa el contrato + `assignTagToAnimal`, scopeado a ESTE animal (no find-or-create). Las 2 afordancias (Bastonear + manual) siempre visibles, sin loop.

@@ -52,7 +52,8 @@ Dos correcciones del testeo en vivo, **ambas en el form de Parto** (`app/app/agr
 
 **RPRC.2.4** Cuando la camada tenga **≥2 terneros**, el sistema deberá mostrar una **nota**: *"Las caravanas visuales de mellizos se asignan después desde la ficha de cada ternero."*
 
-**RPRC.2.5** El sistema deberá mantener el **tag electrónico (caravana electrónica)** como campo **por ternero** dentro de cada card "Ternero N" (sin cambios respecto del baseline).
+**RPRC.2.5** El sistema deberá mantener el **tag electrónico (caravana electrónica)** como dato **por ternero** dentro de cada card "Ternero N".
+> **SUPERADA por el delta `bastoneo-captura-alta-parto` (RCF.6 generalizado, 2026-07-06)**: el tag electrónico por ternero ya **no es un campo tipeable** — se **captura por bastoneo** (CTA `TagScanCta` → `TagScanSheet` en **modo captura** `onSubmit`, con la carga manual anidada detrás de "¿Sin bastón?"), **un ternero a la vez** (ruteo por `scanCalfLocalId`), y queda read-only tras capturar (`CapturedTagRow`) con "Cambiar" para re-escanear. El `tag` por ternero **sigue fluyendo a `registerBirth` sin cambios**. Mismo patrón que la ficha (RCF.6) y el alta. Ver `design-caravana-ficha.md §10.6` + `impl_02-bastoneo-captura-alta-parto.md`.
 
 ## RPRC.3 — Paso de datos a `registerBirth` (D2 / restricción del RPC escalar)
 
@@ -78,7 +79,8 @@ Dos correcciones del testeo en vivo, **ambas en el form de Parto** (`app/app/agr
 
 **RPRC.5.1** El delta **no deberá** introducir migraciones ni tocar `supabase/` (sin schema, RLS, triggers ni RPC nuevos): el RPC `register_birth` 6-arg y `RegisterBirthInput.calfRodeoId`/`calfIdv` ya existen (**frontend-only, Gate 1 N/A**, confirmable con `git diff supabase/` vacío).
 
-**RPRC.5.2** El sistema deberá conservar **sin cambios** el resto del form de parto (fecha del parto, lista dinámica de terneros con sexo/peso/tag electrónico, `validateCalves`, mínimo de 1 ternero, "Agregar/Quitar ternero", aviso suave reproductivo) y el resto de `agregar-evento.tsx` (peso, condición, observación, tacto, servicio, aborto).
+**RPRC.5.2** El sistema deberá conservar **sin cambios** el resto del form de parto (fecha del parto, lista dinámica de terneros con sexo/peso, `validateCalves`, mínimo de 1 ternero, "Agregar/Quitar ternero", aviso suave reproductivo) y el resto de `agregar-evento.tsx` (peso, condición, observación, tacto, servicio, aborto).
+> **Nota (delta `bastoneo-captura-alta-parto`)**: el **input** del tag electrónico por ternero cambió de campo tipeable a **bastoneo** (ver RPRC.2.5 superada); todo lo demás del form de parto queda sin cambios, y el `tag` sigue entrando a `validateCalves`/`registerBirth` por el mismo camino.
 
 **RPRC.5.3** El cambio deberá cubrir el parto registrado **desde la ficha del animal** y **desde la maniobra** con **un solo cambio**, por compartir ambos la pantalla `agregar-evento.tsx`.
 
