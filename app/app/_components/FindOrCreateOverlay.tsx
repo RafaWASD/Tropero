@@ -53,6 +53,7 @@ import { resolveCreateOrAssign } from '@/services/tag-lookup';
 import { readLastRodeo, queryLastUsedRodeoFromDb, resolveDefaultRodeoId } from '@/services/last-rodeo';
 import { TRANSFER_OFFLINE_MESSAGE } from '@/services/transfer-animal';
 import { formatEidReadable } from '@/utils/eid-format';
+import { pickHeroIdentifier } from '@/utils/animal-identifier';
 import { buttonA11y, labelA11y } from '@/utils/a11y';
 
 // El cuerpo resuelto del sheet para un lookup `mode:'create'` (opción A del chunk dedup): o la intermedia
@@ -387,7 +388,8 @@ function EditBody({ profileId, onClose }: { profileId: string; onClose: () => vo
     router.push({ pathname: '/animal/[id]', params: { id: profileId } });
   }, [router, profileId, onClose]);
 
-  const hero = detail ? (detail.idv ?? detail.visualIdAlt ?? detail.tagElectronic ?? 'Animal') : '';
+  // delta IDU: AnimalDetail ya no trae visual_id_alt → hero degrada a idv → tag → "Animal".
+  const hero = detail ? (detail.idv ?? detail.tagElectronic ?? 'Animal') : '';
   const sexLabel = detail ? (detail.sex === 'male' ? 'Macho' : 'Hembra') : '';
 
   return (
@@ -675,8 +677,14 @@ function CandidateRow({
   candidate: AnimalListItem;
   onPress: () => void;
 }) {
-  // Hero: IDV si existe, si no el visual, si no un genérico (siempre hay algo que mostrar).
-  const hero = candidate.idv ?? candidate.visualIdAlt ?? 'Sin identificación';
+  // Hero (delta IDU): apodo (si el rodeo usa apodo) → idv → tag → genérico. Secundario = caravana chica.
+  const heroResult = pickHeroIdentifier({
+    apodo: candidate.apodo,
+    rodeoUsesApodo: candidate.rodeoUsesApodo,
+    idv: candidate.idv,
+    tag: candidate.tagElectronic,
+  });
+  const hero = heroResult.value ?? 'Sin identificación';
   const sexLabel = candidate.sex === 'male' ? 'Macho' : 'Hembra';
   // Chevron de afford de tap (patrón Jakob de fila tappable iOS/Android): a pleno sol, una mano,
   // <1s, deja inequívoco que TOCAR el candidato asigna la caravana. Decoración lateral DERECHA
@@ -698,9 +706,9 @@ function CandidateRow({
               <Text fontFamily="$body" fontSize="$6" lineHeight="$6" fontWeight="700" color="$textPrimary" numberOfLines={1}>
                 {hero}
               </Text>
-              {candidate.visualIdAlt && candidate.idv ? (
+              {heroResult.secondary ? (
                 <Text fontFamily="$body" fontSize="$3" fontWeight="500" color="$textMuted" numberOfLines={1}>
-                  {candidate.visualIdAlt}
+                  {`#${heroResult.secondary.value}`}
                 </Text>
               ) : null}
             </XStack>
@@ -721,7 +729,13 @@ function CandidateRow({
 
 // ─── Resumen del candidato en el paso de confirmación (sin Pressable: solo info) ───
 function CandidateSummary({ candidate }: { candidate: AnimalListItem }) {
-  const hero = candidate.idv ?? candidate.visualIdAlt ?? 'Sin identificación';
+  const hero =
+    pickHeroIdentifier({
+      apodo: candidate.apodo,
+      rodeoUsesApodo: candidate.rodeoUsesApodo,
+      idv: candidate.idv,
+      tag: candidate.tagElectronic,
+    }).value ?? 'Sin identificación';
   const sexLabel = candidate.sex === 'male' ? 'Macho' : 'Hembra';
   return (
     <YStack

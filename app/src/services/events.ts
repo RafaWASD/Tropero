@@ -202,7 +202,7 @@ export async function fetchTimeline(profileId: string): Promise<ServiceResult<Ti
 export type MotherLink = {
   /** profileId de la madre (para navegar a su ficha). */
   profileId: string;
-  /** idv ?? visual ?? tag ?? "Madre" — el identificador a mostrar. */
+  /** idv ?? tag ?? "Madre" — el identificador a mostrar (delta IDU: sin visual_id_alt). */
   label: string;
   /** status de la madre (active/sold/dead/transferred) — para el indicador de archivada (R14.7). */
   status: 'active' | 'sold' | 'dead' | 'transferred';
@@ -214,7 +214,6 @@ export type MotherLink = {
 type LocalMotherRow = {
   id: string;
   idv: string | null;
-  visual_id_alt: string | null;
   status: 'active' | 'sold' | 'dead' | 'transferred';
   tag_electronic: string | null;
   category_name: string | null;
@@ -243,7 +242,6 @@ export async function fetchMother(calfProfileId: string): Promise<ServiceResult<
 
   const label =
     cleanStr(mother.idv) ??
-    cleanStr(mother.visual_id_alt) ??
     cleanStr(mother.tag_electronic) ??
     'Madre';
 
@@ -633,17 +631,15 @@ export async function registerBirth(
     // idv POR CRÍA con precedencia sobre el top-level (PCV.4.3, espeja el coalesce del RPC): el idv del
     // elemento gana; si vacío/ausente, cae al idv top-level (cría al pie #15).
     const idv = cleanStr(c.idv) ?? calfIdv;
-    // Fallback visual del overlay REFINADO (PCV.4.5): solo cuando la cría NO tiene tag NI idv (both-null) —
-    // así el overlay optimista matchea el visual_id_alt que pondrá el RPC (con idv, no aplica → evita un
-    // flash inconsistente antes del ACK).
-    const visualFallback = tag == null && idv == null ? 'recién nacido — pendiente de caravana' : null;
+    // delta IDU (IDU.2.2): el fallback visual_id_alt del overlay se ELIMINA (SUPERA PCV.4.5). El RPC
+    // register_birth (Fase A) ya no escribe el placeholder — el trigger de identidad se dropea, así que una
+    // cría both-null (sin tag ni idv) persiste sin fallback. El overlay espeja ese estado (idv/tag null → nada).
     const profile: PendingProfileFields = {
       animalId: calfAnimalId,
       establishmentId: establishment_id,
       rodeoId: calfRodeoId,
       managementGroupId: null,
       idv,
-      visualIdAlt: visualFallback,
       categoryId: catByCode[c.sex] ?? '',
       categoryOverride: false,
       breed: null,

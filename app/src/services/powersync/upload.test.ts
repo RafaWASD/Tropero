@@ -213,7 +213,7 @@ test('mapIntentToRpc: create_animal → RPC atómica 0083 con args p_* (payload 
         animals: { id: 'a1', sex: 'female', species_id: 'sp1', tag_electronic: 'TAG1', birth_date: '2024-07-01' },
         animal_profiles: {
           id: 'p1', animal_id: 'a1', establishment_id: 'e1', rodeo_id: 'r1', category_id: 'c1',
-          category_override: true, status: 'active', idv: 'IDV1', visual_id_alt: 'V1', breed: 'Angus',
+          category_override: true, status: 'active', idv: 'IDV1', breed: 'Angus',
           coat_color: 'negro', entry_date: '2026-06-01', entry_weight: 180.5, management_group_id: 'mg1',
           teeth_state: '2d', nursing: true,
         },
@@ -234,7 +234,8 @@ test('mapIntentToRpc: create_animal → RPC atómica 0083 con args p_* (payload 
   assert.equal(plan.args.p_tag_electronic, 'TAG1');
   assert.equal(plan.args.p_birth_date, '2024-07-01');
   assert.equal(plan.args.p_idv, 'IDV1');
-  assert.equal(plan.args.p_visual_id_alt, 'V1');
+  // p_visual_id_alt ELIMINADO (IDU.3.3): el connector ya no lo mapea.
+  assert.ok(!('p_visual_id_alt' in plan.args), 'create_animal NO debe llevar p_visual_id_alt');
   assert.equal(plan.args.p_breed, 'Angus');
   assert.equal(plan.args.p_coat_color, 'negro');
   assert.equal(plan.args.p_entry_date, '2026-06-01');
@@ -271,7 +272,7 @@ test('mapIntentToRpc: create_animal MINIMAL (intent VIEJO ya encolado, keys opci
   // Opcionales ausentes en el intent viejo → null explícito (NO undefined: el arg viaja y la RPC decide).
   assert.equal(plan.args.p_tag_electronic, null);
   assert.equal(plan.args.p_birth_date, null);
-  assert.equal(plan.args.p_visual_id_alt, null);
+  assert.ok(!('p_visual_id_alt' in plan.args), 'create_animal NO debe llevar p_visual_id_alt');
   assert.equal(plan.args.p_breed, null);
   assert.equal(plan.args.p_coat_color, null);
   assert.equal(plan.args.p_entry_date, null);

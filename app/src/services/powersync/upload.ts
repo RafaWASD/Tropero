@@ -126,7 +126,9 @@ export function mapIntentToRpc(op: OpIntentEntry): IntentPlan {
         p_tag_electronic: animals.tag_electronic ?? null,
         p_birth_date: animals.birth_date ?? null,
         p_idv: profile.idv ?? null,
-        p_visual_id_alt: profile.visual_id_alt ?? null,
+        // p_visual_id_alt ELIMINADO (delta IDU, IDU.3.3): el connector deja de mapear la columna. El RPC viejo
+        // (create_animal 0083) todavía tiene el parámetro con DEFAULT NULL → llamarlo SIN él es válido (deploy
+        // PASO 1 tolera el server viejo, design §11). La firma nueva sin p_visual_id_alt llega en la Fase A (0122).
         p_breed: profile.breed ?? null,
         p_coat_color: profile.coat_color ?? null,
         p_entry_date: profile.entry_date ?? null,

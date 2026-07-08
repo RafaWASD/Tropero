@@ -18,6 +18,7 @@ import { getTokenValue, Spinner, Text, View, XStack, YStack } from 'tamagui';
 import { Check, SlidersHorizontal } from 'lucide-react-native';
 
 import { Card } from '@/components';
+import { useEstablishment } from '@/contexts';
 import { buttonA11y } from '@/utils/a11y';
 import {
   fetchEnabledCustomProperties,
@@ -28,8 +29,54 @@ import {
   setCustomAttribute,
   type CustomAttributeValue,
 } from '@/services/custom-attributes';
+import { fetchFieldApodos } from '@/services/animals';
 import { describeCustomValue, type CustomCaptureValue } from '@/utils/custom-render';
+import { sanitizeApodoInput } from '@/utils/animal-input';
+import { isApodoDuplicateInField } from '@/utils/animal-identifier';
 import { CustomFieldInput } from './CustomFieldInput';
+
+// ─── delta IDU: warning-soft de apodo duplicado por campo (IDU.5.4–5.7) ──────────────────────────
+//
+// El campo custom `apodo` (data_key='apodo') es el 3er identificador. Al ingresarlo/editarlo, si YA lo usa
+// otro animal activo del campo (case-insensitive, trim) se muestra un aviso inline muted — NO bloquea el
+// guardado (IDU.5.5; dos "Manchada" se permiten). El helper puro isApodoDuplicateInField hace la comparación.
+
+const APODO_DATA_KEY = 'apodo';
+const APODO_DUPLICATE_WARNING = 'Ya hay otro animal con ese nombre en este campo.';
+
+/** Carga (una vez) los apodos activos del campo para el warning-soft. Vacío hasta resolver / si no hay campo. */
+function useFieldApodos(establishmentId: string | null): { profileId: string; apodo: string }[] {
+  const [apodos, setApodos] = useState<{ profileId: string; apodo: string }[]>([]);
+  useEffect(() => {
+    if (!establishmentId) {
+      setApodos([]);
+      return;
+    }
+    let active = true;
+    void fetchFieldApodos(establishmentId).then((r) => {
+      if (active) setApodos(r.ok ? r.value : []);
+    });
+    return () => {
+      active = false;
+    };
+  }, [establishmentId]);
+  return apodos;
+}
+
+/** ¿El apodo candidato duplica a OTRO animal del campo? Excluye `excludeProfileId` (el propio, IDU.5.6). */
+function isApodoDup(
+  apodos: readonly { profileId: string; apodo: string }[],
+  candidate: string,
+  excludeProfileId: string | null,
+): boolean {
+  const others = apodos.filter((a) => a.profileId !== excludeProfileId).map((a) => a.apodo);
+  return isApodoDuplicateInField(candidate, others);
+}
+
+/** El string plano del value de un apodo (o '' si el value no es un string). */
+function apodoText(value: CustomCaptureValue | null): string {
+  return value && value.kind === 'string' ? value.value : '';
+}
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
 // ALTA — form de propiedades custom (estado local + ref para que el submit las recolecte)
@@ -57,6 +104,10 @@ export const CustomPropertiesForm = forwardRef<CustomPropertiesFormHandle, Custo
   function CustomPropertiesForm({ rodeoId }, ref) {
     const [props, setProps] = useState<EnabledCustomProperty[]>([]);
     const [values, setValues] = useState<Record<string, CustomCaptureValue | null>>({});
+    // delta IDU: apodos del campo para el warning-soft (IDU.5.4). Alta = animal NUEVO → sin propio a excluir.
+    const { state: estState } = useEstablishment();
+    const establishmentId = estState.status === 'active' ? estState.current.id : null;
+    const fieldApodos = useFieldApodos(establishmentId);
 
     useEffect(() => {
       if (!rodeoId) {
@@ -94,16 +145,29 @@ export const CustomPropertiesForm = forwardRef<CustomPropertiesFormHandle, Custo
         <Text fontFamily="$body" fontSize="$6" lineHeight="$6" fontWeight="600" color="$textPrimary">
           Datos personalizados
         </Text>
-        {props.map((p) => (
-          <CustomFieldInput
-            key={p.fieldDefinitionId}
-            label={p.label}
-            uiComponent={p.uiComponent}
-            options={p.options}
-            value={values[p.fieldDefinitionId] ?? null}
-            onChange={(v) => setValues((prev) => ({ ...prev, [p.fieldDefinitionId]: v }))}
-          />
-        ))}
+        {props.map((p) => {
+          const isApodo = p.dataKey === APODO_DATA_KEY;
+          const current = values[p.fieldDefinitionId] ?? null;
+          // delta IDU: solo el apodo aplica sanitizeApodoInput (§5.2) + el warning-soft (§9). Alta = sin propio.
+          const showApodoWarning = isApodo && isApodoDup(fieldApodos, apodoText(current), null);
+          return (
+            <YStack key={p.fieldDefinitionId} gap="$1">
+              <CustomFieldInput
+                label={p.label}
+                uiComponent={p.uiComponent}
+                options={p.options}
+                value={current}
+                onChange={(v) => setValues((prev) => ({ ...prev, [p.fieldDefinitionId]: v }))}
+                sanitize={isApodo ? sanitizeApodoInput : undefined}
+              />
+              {showApodoWarning ? (
+                <Text fontFamily="$body" fontSize="$3" lineHeight="$3" fontWeight="500" color="$textMuted" numberOfLines={2}>
+                  {APODO_DUPLICATE_WARNING}
+                </Text>
+              ) : null}
+            </YStack>
+          );
+        })}
       </YStack>
     );
   },
@@ -134,6 +198,10 @@ export function CustomPropertiesFicha({ profileId, rodeoId, editable }: CustomPr
   const [draft, setDraft] = useState<CustomCaptureValue | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  // delta IDU: apodos del campo para el warning-soft (IDU.5.4), EXCLUYENDO el propio animal (IDU.5.6).
+  const { state: estState } = useEstablishment();
+  const establishmentId = estState.status === 'active' ? estState.current.id : null;
+  const fieldApodos = useFieldApodos(establishmentId);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -223,6 +291,10 @@ export function CustomPropertiesFicha({ profileId, rodeoId, editable }: CustomPr
           // pruneanan + el INNER JOIN las filtra → no llegan). El editable depende solo del modo de la ficha.
           const rowEditable = editable;
           const isEditing = editingId === row.id && rowEditable;
+          // delta IDU: el apodo (data_key='apodo') sanea el tipeo (§5.2) + muestra el warning-soft (§9),
+          // EXCLUYENDO el propio animal (IDU.5.6). Cualquier otro custom text no cambia.
+          const isApodo = ui.dataKey === APODO_DATA_KEY;
+          const showApodoWarning = isApodo && isApodoDup(fieldApodos, apodoText(draft), profileId);
           return (
             <YStack key={row.id} gap="$2" testID={`ficha-custom-${row.id}`}>
               {isEditing ? (
@@ -233,7 +305,13 @@ export function CustomPropertiesFicha({ profileId, rodeoId, editable }: CustomPr
                     options={ui.options}
                     value={draft}
                     onChange={setDraft}
+                    sanitize={isApodo ? sanitizeApodoInput : undefined}
                   />
+                  {showApodoWarning ? (
+                    <Text fontFamily="$body" fontSize="$3" lineHeight="$3" fontWeight="500" color="$textMuted" numberOfLines={2}>
+                      {APODO_DUPLICATE_WARNING}
+                    </Text>
+                  ) : null}
                   {saveError ? (
                     <Text fontFamily="$body" fontSize="$3" lineHeight="$3" fontWeight="600" color="$terracota" numberOfLines={2}>
                       {saveError}

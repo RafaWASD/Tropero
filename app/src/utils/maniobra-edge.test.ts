@@ -125,7 +125,7 @@ test('R4.7 — umbral configurable: con threshold=2 dispara antes', () => {
 test('R4.2 — el dominante es la caravana visual (visual > idv)', () => {
   const c: DisambiguationCandidate = {
     profileId: 'p1',
-    visualIdAlt: '0385',
+    apodo: '0385',
     idv: '4721',
     tagElectronic: '982000111122223',
     rodeoName: 'Cría hembras',
@@ -137,7 +137,7 @@ test('R4.2 — el dominante es la caravana visual (visual > idv)', () => {
 test('R4.2 — sin visual, el dominante cae al idv', () => {
   const c: DisambiguationCandidate = {
     profileId: 'p2',
-    visualIdAlt: null,
+    apodo: null,
     idv: '4721',
     tagElectronic: null,
     rodeoName: 'Cría hembras',
@@ -149,7 +149,7 @@ test('R4.2 — sin visual, el dominante cae al idv', () => {
 test('R4.2 — sin visual ni idv, el dominante es null (la UI mostrará el tag)', () => {
   const c: DisambiguationCandidate = {
     profileId: 'p3',
-    visualIdAlt: null,
+    apodo: null,
     idv: null,
     tagElectronic: '982000111122223',
     rodeoName: 'Cría hembras',
@@ -160,7 +160,7 @@ test('R4.2 — sin visual ni idv, el dominante es null (la UI mostrará el tag)'
 
 test('R4.2 — el distinguidor es "rodeo · categoría" y omite las partes vacías (sin idv suelto)', () => {
   const full: DisambiguationCandidate = {
-    profileId: 'p1', visualIdAlt: '0385', idv: null, tagElectronic: null,
+    profileId: 'p1', apodo: '0385', idv: null, tagElectronic: null,
     rodeoName: 'Cría hembras', categoryName: 'Vaquillona',
   };
   assert.equal(candidateDistinguisher(full), 'Cría hembras · Vaquillona');
@@ -176,7 +176,7 @@ test('R4.2 — cuando el VISUAL está duplicado (mismo dominante), el idv intern
   // El caso real de R4.2: dos animales con el MISMO visual + mismo rodeo + misma categoría. El idv
   // interno (único por establecimiento) es lo que los distingue → debe aparecer en el distinguidor.
   const a: DisambiguationCandidate = {
-    profileId: 'a', visualIdAlt: '0385', idv: '5001', tagElectronic: null,
+    profileId: 'a', apodo: '0385', idv: '5001', tagElectronic: null,
     rodeoName: 'Cría hembras', categoryName: 'Vaquillona',
   };
   const b: DisambiguationCandidate = { ...a, profileId: 'b', idv: '5002' };
@@ -191,7 +191,7 @@ test('R4.2 — cuando el VISUAL está duplicado (mismo dominante), el idv intern
 
 test('R4.2 — si el visual NO existe, el idv YA es el dominante → no se repite en el distinguidor', () => {
   const c: DisambiguationCandidate = {
-    profileId: 'c', visualIdAlt: null, idv: '5001', tagElectronic: null,
+    profileId: 'c', apodo: null, idv: '5001', tagElectronic: null,
     rodeoName: 'Cría hembras', categoryName: 'Vaquillona',
   };
   assert.equal(candidateDominantId(c), '5001');

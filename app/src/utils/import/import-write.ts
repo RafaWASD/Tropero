@@ -51,7 +51,7 @@ export type RpcRow = {
   tag_electronic: string | null;
   birth_date: string | null;
   idv: string | null;
-  visual_id_alt: string | null;
+  // delta IDU (IDU.3.7): `visual_id_alt` ya no se manda al RPC import_rodeo (la columna se elimina en Fase A).
   breed: string | null;
   /** code del catálogo del system del rodeo, o null → placeholder por sexo (R10.5). El RPC lo resuelve. */
   category_code: string | null;
@@ -254,7 +254,6 @@ export function buildRpcRow(candidate: CandidateRow, loteId: string | null): Rpc
     tag_electronic: row.tagElectronic,
     birth_date: row.birthDate,
     idv: row.idv,
-    visual_id_alt: row.visualIdAlt,
     breed: row.breed,
     category_code: categoryCode,
     category_override: categoryOverride,

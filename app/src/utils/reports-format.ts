@@ -465,12 +465,14 @@ export function daysSinceLabel(days: number | null): string {
   return d === 1 ? 'hace 1 día' : `hace ${d} días`;
 }
 
-/** Identificador visible de un animal en una alerta: IDV si lo tiene, sino el visual_id_alt, sino "—". */
-export function animalLabel(idv: string | null, visualIdAlt: string | null): string {
+/**
+ * Identificador visible de un animal en una alerta (delta IDU, design §3): IDV si lo tiene, sino
+ * "Sin identificación". Los reportes NO adoptan el hero-por-apodo (fuera de alcance, restringido a lista +
+ * ficha) — degradan solo al idv (el canal `visual_id_alt` se eliminó).
+ */
+export function animalLabel(idv: string | null): string {
   const a = (idv ?? '').trim();
   if (a.length > 0) return a;
-  const b = (visualIdAlt ?? '').trim();
-  if (b.length > 0) return b;
   return 'Sin identificación';
 }
 

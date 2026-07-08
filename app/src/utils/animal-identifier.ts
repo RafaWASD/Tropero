@@ -1,132 +1,147 @@
-// Lógica PURA de clasificación de identificadores de animal (spec 09 R1.4 / R3, spec 02 R5).
-// Sin RN, sin red, sin supabase-js: testeable con node:test (mismo patrón que validation.ts /
-// rodeo-template.ts de C1).
+// Lógica PURA de clasificación de identificadores de animal (spec 09 R1.4 / R3, spec 02 R5) + el hero de
+// la lista/ficha + el warning-soft del apodo. Sin RN, sin red, sin supabase-js: testeable con node:test
+// (mismo patrón que validation.ts / rodeo-template.ts de C1).
 //
-// Dos responsabilidades, ambas puras:
-//   1. classifyIdentifier(query): heurística R1.4 — decide en qué campo precargar el texto que
-//      el operario tipeó cuando NO hubo match y va a dar de alta:
-//        - numérico/estructurado (caravana oficial / IDV) → 'idv'
-//        - texto libre (descripción visual: "vaca blanca", "R-14") → 'visual_id_alt'
-//   2. classifySearchQuery(query): para la búsqueda (R5), decide qué primitivas disparar
-//      (match exacto por TAG, match exacto por IDV, fuzzy por visual). Un mismo texto puede
-//      gatillar varias (ej. "982000..." es candidato a TAG y a IDV); siempre se intenta fuzzy
-//      por visual como red. El motor find-or-create (services/animals.ts) consume esto.
+// Delta `identificadores-unificados` (IDU): modelo de 3 identificadores OPCIONALES —
+//   1. Caravana Electrónica (tag_electronic, 15 díg, única global)
+//   2. Caravana Visual (idv, alfanum ≤15, única por campo)
+//   3. Nombre/Apodo (custom `apodo`, alfanum ≤15 + espacios/guiones, soft-warning por campo)
+// El 4to histórico `visual_id_alt` se ELIMINA del todo (backend + PowerSync + frontend). Este módulo ya
+// NO clasifica ni busca por visual_id_alt (se quitó `tryVisual` / `classifyIdentifier → 'visual'`).
 //
-// POR QUÉ acá y no en el screen: la heurística es la pieza que decide "idv vs visual" del CTA
-// "Dar de alta" (R1.4) y el orden de búsqueda (R5); meterla en el screen la dejaría sin test y
-// acoplada a la UI. Extraída a util pura como exige el brief de C2.
+// Responsabilidades PURAS:
+//   1. classifySearchQuery(query): para la búsqueda unificada (IDU.4), decide qué canales disparar (match
+//      exacto por TAG, exacto/substring por IDV, substring por APODO). Un mismo texto puede gatillar varios
+//      (ej. 15 díg = TAG y/o IDV); se prueban en PARALELO y el motor (services/animals.ts) prioriza los
+//      exactos. Todo término no-vacío (con letras o dígitos) es candidato a idv + apodo (IDU.4.2/4.3).
+//   2. pickHeroIdentifier(...): el identificador HERO de la lista/ficha (apodo → idv → tag → none, IDU.6).
+//   3. isApodoDuplicateInField(...): el warning-soft de apodo duplicado por campo (IDU.5.4–5.7).
 
 // Tope de largo del TÉRMINO del buscador de animales (spec 13 — F1-1, R7.3). Coherente con el techo
-// de identificadores de INPUT-1 (64): un IDV/visual/TAG legítimo nunca lo supera. FUENTE ÚNICA del
+// de identificadores de INPUT-1 (64): un IDV/apodo/TAG legítimo nunca lo supera. FUENTE ÚNICA del
 // tope: classifySearchQuery (abajo) lo aplica server-side (autoritativo, recorta el término antes de
 // cualquier query a PostgREST); el TextInput del buscador lo importa como `maxLength` (capa de UX,
 // bypasseable). Vive acá (no en animal-input.ts) porque el corte vive en classifySearchQuery y así
 // evitamos un import de valor cross-file que el type-stripping de node:test no resuelve sin extensión.
 export const SEARCH_TERM_MAX_LENGTH = 64;
 
-/** En qué campo precargar el texto tipeado al dar de alta tras un no-match (R1.4). */
-export type IdentifierKind = 'idv' | 'visual';
-
-// Una caravana electrónica ISO 11784/11785 FDX-B tiene 15 dígitos (prefijo de país, p.ej. 982
-// para Argentina). El IDV/caravana oficial es numérico o "casi numérico" (puede traer espacios
-// o guiones de formato: "ARG 0241 5567" igual es estructurada). El visual_id_alt es texto libre
-// (descripción: color/seña, o un número de manga corto pintado).
-
-/** Caracteres que cuentan como "estructura" de un identificador oficial (no letras de palabra). */
+// Una caravana electrónica ISO 11784/11785 FDX-B tiene 15 dígitos (prefijo de país, p.ej. 982 para
+// Argentina). El IDV/caravana visual es alfanumérico (CUIG/binomio). El apodo es un nombre libre (letras,
+// dígitos, espacios, guiones). Los separadores de formato (espacio, guion, punto, barra) que el operario
+// puede tipear entre dígitos de una caravana se descartan al COMPACTAR para el match exacto por TAG/IDV;
+// para el apodo se usa el término NORMALIZADO (los espacios/guiones SÍ importan en un nombre).
+/** Caracteres que cuentan como "estructura" de una caravana (no letras de palabra). */
 const STRUCTURED_SEPARATORS = /[\s\-./]/g;
 
-/**
- * Heurística R1.4: ¿el texto tipeado parece un identificador numérico/estructurado (→ idv) o
- * texto libre descriptivo (→ visual_id_alt)?
- *
- * Regla (deliberadamente simple y predecible para el operario):
- *   - Se descartan separadores de formato (espacio, guion, punto, barra).
- *   - Si lo que queda es SOLO dígitos y tiene ≥3 dígitos → 'idv' (caravana/IDV oficial).
- *   - Cualquier otra cosa (tiene letras, o es muy corto) → 'visual' (texto libre).
- *
- * Casos:
- *   "0241 5567"        → idv     (números con espacios de formato)
- *   "982000123456789"  → idv     (caravana FDX-B 15 díg)
- *   "112"              → idv     (3+ dígitos puros: lo tratamos como IDV/caravana corta)
- *   "ARG 0241"         → visual  (tiene letras → no es un IDV numérico puro)
- *   "vaca blanca"      → visual  (texto libre)
- *   "R-14"             → visual  (mezcla letra+número, seña pintada)
- *   "12"               → visual  (menos de 3 dígitos: probablemente un número de manga corto)
- *   ""                 → visual  (degenerado; el caller no debería llamar con vacío)
- *
- * Nota: una caravana oficial argentina suele ser numérica; "ARG ..." que a veces se ve en la UI
- * es un prefijo de display, no parte del IDV tipeable, así que un texto CON letras cae a visual
- * (más seguro: visual_id_alt es texto libre y no tiene constraint de formato; el operario puede
- * corregir el campo en el form de alta si se equivocó — los 3 identificadores se muestran).
- */
-export function classifyIdentifier(query: string): IdentifierKind {
-  const trimmed = query.trim();
-  if (trimmed.length === 0) return 'visual';
-  const compact = trimmed.replace(STRUCTURED_SEPARATORS, '');
-  if (/^\d+$/.test(compact) && compact.length >= 3) {
-    return 'idv';
-  }
-  return 'visual';
-}
-
-/** Qué primitivas de búsqueda (R5) tiene sentido disparar para un texto tipeado. */
+/** Qué canales de búsqueda (IDU.4) tiene sentido disparar para un texto tipeado. */
 export type SearchPlan = {
-  /** Probar match exacto contra animals.tag_electronic (caravana electrónica FDX-B, 15 díg). */
-  tryTag: boolean;
-  /** Probar match exacto contra animal_profiles.idv (numérico/estructurado). */
-  tryIdv: boolean;
-  /**
-   * Probar match PARCIAL (substring/prefijo, ilike) contra idv Y tag_electronic. Se habilita para
-   * cualquier texto numérico de ≥1 dígito (fix-loop 2): tipear un prefijo como "03200" debe
-   * encontrar animales cuyo idv o caravana electrónica CONTENGAN ese texto, no solo el match exacto
-   * de 15 díg. El exacto sigue priorizado arriba (lo concatena el motor antes que el substring).
-   */
-  tryNumericSubstring: boolean;
-  /** Probar fuzzy contra animal_profiles.visual_id_alt (siempre — red de seguridad). */
-  tryVisual: boolean;
-  /** Texto normalizado (trim) que se usa en las queries. */
+  /** compact = 15 dígitos → candidato a match EXACTO de Caravana Electrónica (tag_electronic). */
+  tryTagExact: boolean;
+  /** término no vacío → match EXACTO de idv (alfanumérico; el motor lo prioriza sobre substring/apodo). */
+  tryIdvExact: boolean;
+  /** término no vacío → match PARCIAL (LIKE) sobre idv + tag_electronic denormalizado. */
+  tryIdvSubstring: boolean;
+  /** término no vacío → match PARCIAL (LIKE) sobre el apodo (custom_attributes join). NUEVO. */
+  tryApodo: boolean;
+  /** Texto normalizado (trim + cap) — el que se usa para el LIKE de apodo (conserva espacios/guiones). */
   normalized: string;
-  /** Texto compacto (sin separadores) — el que se usa para el match exacto de TAG/IDV. */
+  /** Texto compacto (sin separadores) — el que se usa para el match exacto/substring de TAG/IDV. */
   compact: string;
 };
 
-// Una caravana electrónica FDX-B son exactamente 15 dígitos. Si el texto compacto tiene 15
-// dígitos, es un candidato fuerte a TAG; igual probamos IDV (un IDV podría coincidir) y visual.
+// Una caravana electrónica FDX-B son exactamente 15 dígitos. Si el texto compacto tiene 15 dígitos, es un
+// candidato fuerte a TAG; igual probamos IDV (un IDV podría ser 15 dígitos) y apodo.
 const TAG_DIGITS = 15;
 
 /**
- * Decide el plan de búsqueda (R5) para un texto tipeado. NO ejecuta queries — solo dice cuáles
- * vale la pena intentar, para que `services/animals.ts` no malgaste round-trips (ej. no buscar
- * por IDV si el texto tiene letras: el IDV/caravana son numéricos).
- *
- *   - tryTag  : el texto compacto es 15 dígitos puros (forma de caravana electrónica) — match EXACTO.
- *   - tryIdv  : el texto compacto es solo dígitos (cualquier longitud ≥1) — match EXACTO de IDV.
- *   - tryNumericSubstring : el texto compacto es solo dígitos (≥1) → match PARCIAL (ilike) sobre
- *               idv Y tag_electronic. Fix-loop 2: un prefijo numérico ("03200") debe encontrar
- *               animales cuya caravana/IDV lo CONTENGAN, no solo el match exacto. El exacto queda
- *               priorizado arriba; este es el que hace andar el buscador por caravana/número.
- *   - tryVisual: SIEMPRE true si hay texto (el visual_id_alt es texto libre; el fuzzy lo cubre).
- *
- * El orden de prioridad al resolver el resultado (exactos TAG/IDV → substring numérico → visual) lo
- * aplica el motor, no acá.
+ * Decide el plan de búsqueda unificada (IDU.4.1/4.2/4.3/4.5) para un texto tipeado. NO ejecuta queries —
+ * solo dice qué canales vale la pena intentar. Cambios del delta vs. el modelo viejo:
+ *   - `tryIdvExact`/`tryIdvSubstring` dejan de gatear por `isDigits`: se habilitan para TODO término no
+ *     vacío (un idv alfanumérico o su prefijo se encuentra; antes solo dígitos disparaban idv).
+ *   - Se ELIMINA `tryVisual` (visual_id_alt se borró del todo).
+ *   - Se AGREGA `tryApodo` (todo término no vacío → LIKE sobre el apodo).
+ *   - `tryTagExact` = el compact es 15 dígitos (sin cambio conceptual).
+ * La desambiguación (un mismo texto matchea varios canales) la resuelve el motor (searchAnimals), que
+ * prioriza los EXACTOS (tag/idv) sobre los substring/apodo y deduplica por profileId.
  */
 export function classifySearchQuery(query: string): SearchPlan {
-  // F1-1 (R7.3): recorte AUTORITATIVO server-side del término antes de cualquier query. El
-  // service consume `normalized`/`compact` derivados de acá → topar la entrada acá topa TODAS
-  // las sub-queries (idv/tag/visual). Recorte silencioso (truncar) en vez de rechazo: mejor UX
-  // (el operario que pega texto de más igual busca por el prefijo). El TextInput tiene el mismo
-  // maxLength como UX, pero el cliente es attacker-controlled (pega a PostgREST directo) → este
-  // es el corte real que impide mandar un término de miles de chars a PostgREST.
+  // F1-1 (R7.3): recorte AUTORITATIVO server-side del término antes de cualquier query. El service consume
+  // `normalized`/`compact` derivados de acá → topar la entrada acá topa TODOS los canales. Recorte silencioso
+  // (truncar) en vez de rechazo: mejor UX (el operario que pega texto de más igual busca por el prefijo).
   const capped = query.slice(0, SEARCH_TERM_MAX_LENGTH);
   const normalized = capped.trim();
   const compact = normalized.replace(STRUCTURED_SEPARATORS, '');
+  const nonEmpty = normalized.length > 0;
   const isDigits = compact.length > 0 && /^\d+$/.test(compact);
   return {
-    tryTag: isDigits && compact.length === TAG_DIGITS,
-    tryIdv: isDigits,
-    tryNumericSubstring: isDigits,
-    tryVisual: normalized.length > 0,
+    tryTagExact: isDigits && compact.length === TAG_DIGITS,
+    tryIdvExact: nonEmpty,
+    tryIdvSubstring: nonEmpty,
+    tryApodo: nonEmpty,
     normalized,
     compact,
   };
+}
+
+// ─── Hero de la lista / ficha (IDU.6) ─────────────────────────────────────────────────────
+
+/** Qué tipo de identificador quedó como HERO (campo grande) de la fila/ficha. */
+export type HeroKind = 'apodo' | 'idv' | 'tag' | 'none';
+
+export type HeroResult = {
+  kind: HeroKind;
+  /** El texto hero (null si kind==='none' — el caller elige el fallback: "sin caravana" / "Animal"). */
+  value: string | null;
+  /** La caravana a mostrar CHICA cuando el hero es apodo (idv o electrónica). null si el hero ya es caravana. */
+  secondary: { kind: 'idv' | 'tag'; value: string } | null;
+};
+
+/** Trim + null si queda vacío (un idv/apodo/tag "  " no cuenta como identificador presente). */
+function cleanHero(v: string | null | undefined): string | null {
+  const t = (v ?? '').trim();
+  return t.length > 0 ? t : null;
+}
+
+/**
+ * Resuelve el identificador HERO de un animal (IDU.6.1/6.4/6.6), PURO. Prioridad:
+ *   apodo (SOLO si el rodeo usa apodo Y el animal tiene apodo) → idv → tag_electronic → none.
+ * Cuando el hero es el apodo, la caravana (idv o electrónica) baja a `secondary` (línea chica). El copy del
+ * fallback (kind==='none') lo elige el call site (AnimalRow: "sin caravana"; ficha: "Animal") — la función
+ * pura NO hardcodea copy de UI, así se testea sin acoplar a la vista.
+ */
+export function pickHeroIdentifier(input: {
+  apodo: string | null;
+  rodeoUsesApodo: boolean;
+  idv: string | null;
+  tag: string | null;
+}): HeroResult {
+  const apodo = cleanHero(input.apodo);
+  const idv = cleanHero(input.idv);
+  const tag = cleanHero(input.tag);
+  if (input.rodeoUsesApodo && apodo) {
+    const secondary: HeroResult['secondary'] = idv
+      ? { kind: 'idv', value: idv }
+      : tag
+        ? { kind: 'tag', value: tag }
+        : null;
+    return { kind: 'apodo', value: apodo, secondary };
+  }
+  if (idv) return { kind: 'idv', value: idv, secondary: null };
+  if (tag) return { kind: 'tag', value: tag, secondary: null };
+  return { kind: 'none', value: null, secondary: null };
+}
+
+// ─── Warning-soft de apodo duplicado por campo (IDU.5.4–5.7) ───────────────────────────────
+
+/**
+ * ¿El apodo candidato ya lo usa OTRO animal del campo? (PURO, IDU.5.4/5.6/5.7). Case-insensitive, trim.
+ * `others` = los apodos de los DEMÁS animales activos del establecimiento (el propio ya lo excluyó el
+ * caller por profile_id, IDU.5.6). Un apodo vacío nunca dispara el aviso. El scope "por campo" (IDU.5.7) lo
+ * garantiza el caller al leer solo los apodos del establecimiento activo. NO bloquea el guardado (IDU.5.5):
+ * el caller solo muestra un aviso informativo.
+ */
+export function isApodoDuplicateInField(candidate: string, others: readonly string[]): boolean {
+  const c = candidate.trim().toLowerCase();
+  if (c.length === 0) return false;
+  return others.some((o) => o.trim().toLowerCase() === c);
 }

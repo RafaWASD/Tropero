@@ -31,8 +31,10 @@ export type GroupRef = { groupType: 'rodeo' | 'lote'; groupId: string };
 export type GroupSelectionProfile = GroupProfile & {
   /** Caravana oficial / IDV (identificador hero de la fila). */
   idv: string | null;
-  /** Número visible pintado en el animal (`visual_id_alt`). */
-  visualIdAlt: string | null;
+  /** Nombre/Apodo del animal (delta IDU: reemplaza visual_id_alt). null = sin apodo. */
+  apodo: string | null;
+  /** ¿El rodeo del animal habilita el campo apodo? (para el hero por nombre en la fila compacta). */
+  rodeoUsesApodo: boolean;
   /** Caravana electrónica (null → sin caravana). */
   tagElectronic: string | null;
   /** Sexo NO-null para la fila (AnimalRow exige male|female; un perfil sin sexo no es candidato igual). */
@@ -103,7 +105,8 @@ function toSelectionProfile(
     categoryOverride: flags?.categoryOverride ?? false,
     // Display
     idv: a.idv,
-    visualIdAlt: a.visualIdAlt,
+    apodo: a.apodo,
+    rodeoUsesApodo: a.rodeoUsesApodo,
     tagElectronic: a.tagElectronic,
     rowSex: a.sex,
     categoryName: a.categoryName,

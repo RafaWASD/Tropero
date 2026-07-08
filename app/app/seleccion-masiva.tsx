@@ -491,7 +491,8 @@ function SelectionSectionBlock({
                 key={p.profileId}
                 compact
                 idv={p.idv ?? undefined}
-                visualId={p.visualIdAlt ?? undefined}
+                apodo={p.apodo}
+                rodeoUsesApodo={p.rodeoUsesApodo}
                 tagElectronic={p.tagElectronic}
                 category={p.categoryName || p.categoryCode}
                 categoryCode={p.categoryCode}
@@ -513,10 +514,10 @@ function SelectionSectionBlock({
 
 // ─── Helpers ────────────────────────────────────────────────────────────────────────────────
 
-/** Etiqueta legible de un animal para el reporte de rechazo (R10.3): su identificador hero. */
+/** Etiqueta legible de un animal para el reporte de rechazo (R10.3): idv → apodo → "Animal" (delta IDU). */
 function labelOfProfile(p: GroupSelectionProfile | undefined): string {
   if (!p) return 'Animal';
-  return p.idv ?? p.visualIdAlt ?? 'Animal';
+  return p.idv ?? p.apodo ?? 'Animal';
 }
 
 /**

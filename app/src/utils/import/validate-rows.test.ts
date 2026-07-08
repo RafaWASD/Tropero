@@ -35,12 +35,12 @@ test('R5.1+R5.2 fila válida (idv + sexo) pasa', () => {
   assert.equal(res.intraDuplicates.length, 0);
 });
 
-test('R5.1 identificador válido puede ser TAG o visual (no solo idv)', () => {
+test('R5.1 identificador válido puede ser TAG o IDV (delta IDU: sin visual_id_alt)', () => {
   const byTag = validateRows(norm([{ tag_electronic: '982000123456789', sex: 'H' }]));
   assert.deepEqual(byTag.valid, [0]);
 
-  const byVisual = validateRows(norm([{ visual_id_alt: 'R-14', sex: 'H' }]));
-  assert.deepEqual(byVisual.valid, [0]);
+  const byIdv = validateRows(norm([{ idv: 'AB123', sex: 'H' }]));
+  assert.deepEqual(byIdv.valid, [0]);
 });
 
 test('R5.1 TAG inválido SIN otro id → missing_identifier (no cuenta como id)', () => {
@@ -86,11 +86,11 @@ test('R7.1 idvs distintos no colisionan; las dos válidas', () => {
 });
 
 test('R7.1 idv vacío NO colisiona con otro idv vacío (solo identificadores no vacíos)', () => {
-  // Ambas resuelven por visual; idv ausente no debe agruparlas.
+  // Ambas resuelven por TAG distinto; idv ausente no debe agruparlas (delta IDU: sin visual_id_alt).
   const res = validateRows(
     norm([
-      { visual_id_alt: 'A', sex: 'M' },
-      { visual_id_alt: 'B', sex: 'H' },
+      { tag_electronic: '982000000000001', sex: 'M' },
+      { tag_electronic: '982000000000002', sex: 'H' },
     ]),
   );
   assert.deepEqual(res.valid, [0, 1]);
@@ -110,7 +110,7 @@ test('R7.1 grupo de 3 con mismo idv → las 3 en el grupo', () => {
 });
 
 test('R3.4 fila con campo sobre-tope → error field_over_cap', () => {
-  const res = validateRows(norm([{ idv: 'a'.repeat(65), sex: 'M', visual_id_alt: 'R-14' }]));
+  const res = validateRows(norm([{ idv: 'a'.repeat(65), sex: 'M' }]));
   assert.ok(res.errors[0].reasons.includes('field_over_cap'));
   assert.equal(res.valid.length, 0);
 });

@@ -624,7 +624,8 @@ function GroupMembers({
         <AnimalRow
           key={a.profileId}
           idv={a.idv ?? undefined}
-          visualId={a.visualIdAlt ?? undefined}
+          apodo={a.apodo}
+          rodeoUsesApodo={a.rodeoUsesApodo}
           tagElectronic={a.tagElectronic}
           category={a.categoryName || a.categoryCode}
           sex={a.sex}

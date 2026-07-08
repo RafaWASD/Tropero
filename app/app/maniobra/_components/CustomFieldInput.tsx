@@ -32,6 +32,13 @@ export type CustomFieldInputProps = {
   onChange: (value: CustomCaptureValue | null) => void;
   /** read-only (la ficha archivada lo deshabilita). Default editable. */
   editable?: boolean;
+  /**
+   * Transformador OPCIONAL/ADITIVO del tipeo EN VIVO de la rama `text` (delta IDU §5.2). El caller lo setea a
+   * `sanitizeApodoInput` cuando `data_key==='apodo'` (formato de identificador: alfanum + ñ/tildes + espacio +
+   * guion, cap 15). Sin `sanitize` la rama `text` no cambia de comportamiento (backward-compat). Solo aplica a
+   * `ui_component==='text'` (los demás controles tienen su propio saneo).
+   */
+  sanitize?: (raw: string) => string;
 };
 
 export function CustomFieldInput({
@@ -41,6 +48,7 @@ export function CustomFieldInput({
   value,
   onChange,
   editable = true,
+  sanitize,
 }: CustomFieldInputProps) {
   return (
     <YStack gap="$2" opacity={editable ? 1 : 0.6}>
@@ -53,6 +61,7 @@ export function CustomFieldInput({
         value={value}
         onChange={onChange}
         editable={editable}
+        sanitize={sanitize}
       />
     </YStack>
   );
@@ -64,6 +73,7 @@ function FieldControl({
   value,
   onChange,
   editable,
+  sanitize,
 }: Omit<CustomFieldInputProps, 'label'> & { editable: boolean }) {
   switch (uiComponent) {
     case 'numeric':
@@ -80,7 +90,7 @@ function FieldControl({
       return <DateField value={value} onChange={onChange} editable={editable} options={options} />;
     case 'text':
     default:
-      return <TextField value={value} onChange={onChange} editable={editable} options={options} />;
+      return <TextField value={value} onChange={onChange} editable={editable} sanitize={sanitize} />;
   }
 }
 
@@ -179,12 +189,19 @@ function TextField({
   value,
   onChange,
   editable,
-}: Omit<CustomFieldInputProps, 'label' | 'uiComponent' | 'options'> & { editable: boolean; options: readonly string[] }) {
+  sanitize,
+}: Omit<CustomFieldInputProps, 'label' | 'uiComponent' | 'options'> & { editable: boolean }) {
   const text = value && value.kind === 'string' ? value.value : '';
+  // delta IDU §5.2: `sanitize` (ej. sanitizeApodoInput para data_key='apodo') filtra el tipeo EN VIVO. Sin
+  // `sanitize` (la mayoría de los custom text libres) el valor entra tal cual (backward-compat).
+  const emit = (raw: string) => {
+    const t = sanitize ? sanitize(raw) : raw;
+    onChange(t.length === 0 ? null : { kind: 'string', value: t });
+  };
   return (
     <PlainInput
       value={text}
-      onChangeText={(t) => onChange(t.length === 0 ? null : { kind: 'string', value: t })}
+      onChangeText={emit}
       placeholder="Escribí el dato"
       autoCapitalize="sentences"
       editable={editable}

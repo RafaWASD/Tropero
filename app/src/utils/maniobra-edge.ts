@@ -159,9 +159,9 @@ export function shouldWarnMisconfiguredRodeo(
 /** Un candidato del picker de desambiguación (R4.2): lo que distingue a un animal de otro a la vista. */
 export type DisambiguationCandidate = {
   profileId: string;
-  /** Caravana visual humana (visual_id_alt). El identificador DOMINANTE (lo que el operario lee en la oreja). */
-  visualIdAlt: string | null;
-  /** idv (número interno) — fallback de identidad si no hay visual. */
+  /** Nombre/Apodo (delta IDU: reemplaza visual_id_alt). El identificador humano DOMINANTE (lo que lee). */
+  apodo: string | null;
+  /** idv (caravana visual alfanumérica) — fallback de identidad si no hay apodo. */
   idv: string | null;
   /** Caravana electrónica (tag) — la confirmación fina; única global → desempata sin ambigüedad. */
   tagElectronic: string | null;
@@ -172,14 +172,13 @@ export type DisambiguationCandidate = {
 };
 
 /**
- * Texto DOMINANTE de un candidato (PURA, R4.2): la caravana visual humana que el operario LEE en la oreja
- * (visual > idv > tag formateado-no, lo deja crudo el caller), consistente con `displayIdentity` de la
- * carga (visual > idv > tag). Acá NO formateamos el EID (eso lo hace la UI con formatEidReadable si cae
- * al tag); devolvemos el visual o el idv, o null si no hay ninguno de los dos (caso raro: el caller
- * mostrará el tag).
+ * Texto DOMINANTE de un candidato (PURA, R4.2): el nombre humano que el operario LEE (apodo > idv, lo deja
+ * crudo el caller), consistente con `displayIdentity` de la carga (apodo > idv > tag). Acá NO formateamos el
+ * EID (eso lo hace la UI con formatEidReadable si cae al tag); devolvemos el apodo o el idv, o null si no hay
+ * ninguno de los dos (caso raro: el caller mostrará el tag).
  */
 export function candidateDominantId(c: DisambiguationCandidate): string | null {
-  if (c.visualIdAlt) return c.visualIdAlt;
+  if (c.apodo) return c.apodo;
   if (c.idv) return c.idv;
   return null;
 }

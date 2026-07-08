@@ -535,10 +535,10 @@ function groupBackPath(groupType: 'rodeo' | 'lote'): string {
   return groupType === 'lote' ? '/lotes' : '/(tabs)';
 }
 
-/** Etiqueta legible de un animal para el reporte de rechazo (R10.3): su identificador hero. */
+/** Etiqueta legible de un animal para el reporte de rechazo (R10.3): idv → apodo → "Animal" (delta IDU). */
 function labelOfProfile(p: GroupSelectionProfile | undefined): string {
   if (!p) return 'Animal';
-  return p.idv ?? p.visualIdAlt ?? 'Animal';
+  return p.idv ?? p.apodo ?? 'Animal';
 }
 
 /**

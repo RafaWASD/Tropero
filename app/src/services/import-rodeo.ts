@@ -8,8 +8,9 @@
 // Forzado server-side (R9): establishment_id / created_by / imported_by / species_id / system_id /
 // category_id se derivan/fuerzan en el RPC y los triggers (0043/0021/0037), NO se mandan desde acá.
 // El cliente SOLO manda el shape de censo de cada fila (contrato `p_rows` del header de 0074):
-// row_index + sex + tag_electronic + birth_date + idv + visual_id_alt + breed + category_code +
-// category_override + management_group_id. Nunca category_id ni establishment_id ni autoría.
+// row_index + sex + tag_electronic + birth_date + idv + breed + category_code + category_override +
+// management_group_id (delta IDU: visual_id_alt eliminado del contrato). Nunca category_id ni
+// establishment_id ni autoría.
 //
 // La LÓGICA PURA (merge de dedup, armado de p_rows, chunking, resumen/truncado de error_details,
 // guard de tamaño, escapeIlike) vive en app/src/utils/import/import-write.ts (sin RN/expo/supabase),

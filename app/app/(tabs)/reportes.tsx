@@ -584,7 +584,7 @@ function OverdueSection({
           icon="dose"
           items={(phase.data ?? []).map<AlertItem>((d) => ({
             key: `${d.animalProfileId}:${d.productName}`,
-            animal: animalLabel(d.idv, d.visualIdAlt),
+            animal: animalLabel(d.idv),
             primary: d.productName,
             secondary: `venció el ${sessionDateLabel(d.nextDoseDate)}`,
             onPress: () => onAnimal(d.animalProfileId),
@@ -621,7 +621,7 @@ function UnweighedSection({
           icon="weight"
           items={(phase.data ?? []).map<AlertItem>((a) => ({
             key: a.animalProfileId,
-            animal: animalLabel(a.idv, a.visualIdAlt),
+            animal: animalLabel(a.idv),
             primary: a.categoryName,
             secondary: daysSinceLabel(a.daysSince),
             onPress: () => onAnimal(a.animalProfileId),

@@ -68,19 +68,19 @@ test('R3.5: manual con 0 candidatos → unknown (find-or-create con el texto pre
 });
 
 test('R3.5: manual con 1 candidato que matchea EXACTO el idv → found (auto-avance, camino rápido)', () => {
-  const out = resolveManualIdentify([{ profileId: 'pX', idv: '0421', visualIdAlt: null }], '0421');
+  const out = resolveManualIdentify([{ profileId: 'pX', idv: '0421', apodo: null }], '0421');
   assert.equal(out.kind, 'found');
   if (out.kind === 'found') assert.equal(out.animal.profileId, 'pX');
 });
 
-test('R3.5: 1 candidato que matchea EXACTO el visual (case-insensitive + trim) → found', () => {
-  const out = resolveManualIdentify([{ profileId: 'pV', idv: null, visualIdAlt: 'Rojo-12' }], ' ROJO-12 ');
+test('IDU.4.11: 1 candidato que matchea EXACTO el APODO (case-insensitive + trim) → found', () => {
+  const out = resolveManualIdentify([{ profileId: 'pV', idv: null, apodo: 'Manchada' }], ' MANCHADA ');
   assert.equal(out.kind, 'found');
   if (out.kind === 'found') assert.equal(out.animal.profileId, 'pV');
 });
 
 test('R3.5: 1 candidato que matchea EXACTO el tag electrónico → found', () => {
-  const out = resolveManualIdentify([{ profileId: 'pT', idv: null, visualIdAlt: null, tagElectronic: EID }], EID);
+  const out = resolveManualIdentify([{ profileId: 'pT', idv: null, apodo: null, tagElectronic: EID }], EID);
   assert.equal(out.kind, 'found');
   if (out.kind === 'found') assert.equal(out.animal.profileId, 'pT');
 });
@@ -89,7 +89,7 @@ test('R3.5: 1 candidato que matchea EXACTO el tag electrónico → found', () =>
 // el texto, ej. tecleo "42" → idv "1428") NO auto-avanza: se devuelve ambiguous → confirmación explícita.
 test('FIX otra-caravana: 1 candidato substring (NO exacto) → ambiguous (confirmar, NO auto-cargar el equivocado)', () => {
   const out = resolveManualIdentify(
-    [{ profileId: 'wrong', idv: '1428', visualIdAlt: 'X-1428', tagElectronic: null, rodeoName: 'Cría hembras', categoryName: 'Vaquillona' }],
+    [{ profileId: 'wrong', idv: '1428', apodo: 'X-1428', tagElectronic: null, rodeoName: 'Cría hembras', categoryName: 'Vaquillona' }],
     '42',
   );
   assert.equal(out.kind, 'ambiguous');
@@ -111,8 +111,8 @@ test('FIX otra-caravana: 1 candidato SIN campos de display (no se puede probar e
 test('R4.2: manual con >1 candidatos → ambiguous (estado SEGURO, NO auto-elige) + candidatos enriquecidos', () => {
   const out = resolveManualIdentify(
     [
-      { profileId: 'a', visualIdAlt: '0385', idv: null, tagElectronic: '982000111122223', rodeoName: 'Cría hembras', categoryName: 'Vaquillona' },
-      { profileId: 'b', visualIdAlt: '0385', idv: '4721', tagElectronic: null, rodeoName: 'Vaquillonas', categoryName: 'Multípara' },
+      { profileId: 'a', apodo: 'Manchada', idv: null, tagElectronic: '982000111122223', rodeoName: 'Cría hembras', categoryName: 'Vaquillona' },
+      { profileId: 'b', apodo: 'Manchada', idv: '4721', tagElectronic: null, rodeoName: 'Vaquillonas', categoryName: 'Multípara' },
     ],
     'ROJO-12',
   );
@@ -132,7 +132,7 @@ test('R4.2: candidatos sin campos de display (compat M2.1-core) caen a null/"" s
   assert.equal(out.kind, 'ambiguous');
   if (out.kind === 'ambiguous') {
     assert.deepEqual(out.candidateProfileIds, ['a', 'b']);
-    assert.equal(out.candidates[0].visualIdAlt, null);
+    assert.equal(out.candidates[0].apodo, null);
     assert.equal(out.candidates[0].rodeoName, '');
   }
 });
@@ -160,8 +160,8 @@ test('auto-avance: SOLO found auto-avanza; el resto requiere acción explícita'
     identifier: 't',
     candidateProfileIds: ['a', 'b'],
     candidates: [
-      { profileId: 'a', visualIdAlt: 't', idv: null, tagElectronic: null, rodeoName: 'R1', categoryName: 'C1' },
-      { profileId: 'b', visualIdAlt: 't', idv: null, tagElectronic: null, rodeoName: 'R2', categoryName: 'C2' },
+      { profileId: 'a', apodo: 't', idv: null, tagElectronic: null, rodeoName: 'R1', categoryName: 'C1' },
+      { profileId: 'b', apodo: 't', idv: null, tagElectronic: null, rodeoName: 'R2', categoryName: 'C2' },
     ],
   };
   assert.equal(shouldAutoAdvance(found), true);
@@ -172,15 +172,16 @@ test('auto-avance: SOLO found auto-avanza; el resto requiere acción explícita'
 
 // ─── Precargado del find-or-create (R4.1) ──────────────────────────────────────────────────
 
-test('R4.1: precargado BLE → tag; manual numérico → idv; manual alfanumérico → visual', () => {
+test('IDU.4.10: precargado BLE → tag; manual (numérico o alfanumérico) → idv (colapsa a idv, sin visual)', () => {
   assert.deepEqual(resolvePrefilledCreateParams({ kind: 'unknown', source: 'ble', identifier: EID }), {
     tag: EID,
   });
   assert.deepEqual(resolvePrefilledCreateParams({ kind: 'unknown', source: 'manual', identifier: '0421' }), {
     idv: '0421',
   });
+  // El destino histórico `visual` (visual_id_alt) se eliminó: el texto tipeado se precarga SIEMPRE en idv.
   assert.deepEqual(
     resolvePrefilledCreateParams({ kind: 'unknown', source: 'manual', identifier: ' ROJO-12 ' }),
-    { visual: 'ROJO-12' },
+    { idv: 'ROJO-12' },
   );
 });

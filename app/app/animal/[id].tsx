@@ -61,6 +61,7 @@ import {
 } from '@/services/animals';
 import { canAssignIdv, canAssignTag } from '@/utils/identifier-assign';
 import { IDV_MAX_LENGTH, sanitizeIdvInput } from '@/utils/animal-input';
+import { pickHeroIdentifier } from '@/utils/animal-identifier';
 import { fetchBreedCatalog } from '@/services/sigsa/sigsa-export-service';
 import { BreedPickerSheet } from '@/components/sigsa';
 import {
@@ -305,10 +306,18 @@ export default function AnimalDetailScreen() {
     router.push({ pathname: '/animal/[id]', params: { id: mother.profileId } });
   }, [mother, router]);
 
-  // Identificador HERO del animal (idv → visual → caravana → "Animal"): lo mismo que muestra el hero,
-  // reusado para el resumen del sheet de baja. Memo: depende solo del detalle.
+  // Identificador HERO del animal (delta IDU, IDU.6.3): apodo (si el rodeo usa apodo) → idv → caravana →
+  // "Animal". Reusado para el resumen del sheet de baja. Memo: depende solo del detalle.
   const heroLabel = useMemo(
-    () => detail?.idv ?? detail?.visualIdAlt ?? detail?.tagElectronic ?? 'Animal',
+    () =>
+      detail
+        ? pickHeroIdentifier({
+            apodo: detail.apodo,
+            rodeoUsesApodo: detail.rodeoUsesApodo,
+            idv: detail.idv,
+            tag: detail.tagElectronic,
+          }).value ?? 'Animal'
+        : 'Animal',
     [detail],
   );
 
@@ -842,7 +851,8 @@ export default function AnimalDetailScreen() {
                 asignación si está VACÍO en un animal ACTIVO (canAssignTag/canAssignIdv). Si está vacío pero el
                 animal NO está activo, "—" (no se ofrece, RCF.1.5). Para la caravana ELECTRÓNICA vacía la
                 afordancia ofrece BASTONEAR (scan del EID, RCF.6) ADEMÁS de la carga manual (piso siempre
-                presente). `visual_id_alt` (identificación visual) queda FUERA de alcance (RCF.1.6). */}
+                presente). delta IDU: el 4to campo visual_id_alt se eliminó; el Nombre/Apodo vive en "Datos
+                personalizados", no acá. */}
             <DetailSection icon={Tag} title="Identificación">
               {/* Caravana electrónica → BASTONEAR (RCF.6): única afordancia de la electrónica vacía. Abre el
                   sheet de scan acotado → lee el EID y lo asigna a ESTE animal. La carga MANUAL por teclado vive
@@ -882,14 +892,9 @@ export default function AnimalDetailScreen() {
                 <AttributeRow label="Caravana visual" value="—" />
               )}
 
-              {/* Nombre / seña (visual_id_alt): texto libre OPCIONAL, NO una caravana. Corrección #2 (testeo
-                  en vivo): se mostraban 3 "caravanas" (electrónica + idv + visual_id_alt) y las 2 visuales se
-                  leían como "doble". Ahora esta fila solo aparece SI tiene valor (visualIdAlt != null) → quedan
-                  2 caravanas + nombre/seña condicional. NO lleva IdentifierAssignRow (no se asigna como caravana
-                  acá; es texto libre que se carga en el alta o se edita en otro lugar). */}
-              {detail.visualIdAlt != null ? (
-                <AttributeRow label="Nombre / seña" value={detail.visualIdAlt} />
-              ) : null}
+              {/* delta IDU (IDU.3.6): la fila "Nombre / seña" (visual_id_alt) se ELIMINÓ del todo. El
+                  Nombre/Apodo es ahora un dato custom opt-in por rodeo → se ve/edita en "Datos personalizados"
+                  (CustomPropertiesFicha) con su warning-soft de duplicado, no acá. */}
             </DetailSection>
 
             {/* Datos del animal. */}
@@ -1018,13 +1023,19 @@ export default function AnimalDetailScreen() {
 // ─── Hero de identidad del animal ─────────────────────────────────────────────────────
 
 /**
- * Hero header: el identificador HERO grande (idv → visual → caravana) + CategoryBadge (firma verde)
- * + (si tuvo aborto) el flag "Tuvo aborto" terracota + sexo con ícono en color + rodeo muted. Es la
- * "cara" de la ficha — da personalidad donde antes había un título negro pelado.
+ * Hero header: el identificador HERO grande (delta IDU, IDU.6.3: apodo → idv → caravana) + la caravana
+ * secundaria muted cuando el hero es el apodo + CategoryBadge (firma verde) + (si tuvo aborto) el flag "Tuvo
+ * aborto" terracota + sexo con ícono en color + rodeo muted. Es la "cara" de la ficha.
  */
 function AnimalHero({ detail, hadAbortion }: { detail: AnimalDetail; hadAbortion: boolean }) {
   const primary = getTokenValue('$primary', 'color');
-  const hero = detail.idv ?? detail.visualIdAlt ?? detail.tagElectronic ?? 'Animal';
+  const heroResult = pickHeroIdentifier({
+    apodo: detail.apodo,
+    rodeoUsesApodo: detail.rodeoUsesApodo,
+    idv: detail.idv,
+    tag: detail.tagElectronic,
+  });
+  const hero = heroResult.value ?? 'Animal';
   const SexIcon = detail.sex === 'male' ? Mars : Venus;
   const sexLabel = detail.sex === 'male' ? 'Macho' : 'Hembra';
   const categoryLabel = detail.categoryName || detail.categoryCode;
@@ -1034,17 +1045,34 @@ function AnimalHero({ detail, hadAbortion }: { detail: AnimalDetail; hadAbortion
       {/* Identificador hero: grande, bold, truncado a 1 línea (un IDV de 40 díg no wrappea).
           lineHeight="$9" (= fontSize "$9") para que el line-box no clipee el glifo arriba/abajo
           (mismo bug que el título "Equipo" de B.1.3, resuelto seteando lineHeight al fontSize). */}
-      <Text
-        fontFamily="$body"
-        fontSize="$9"
-        lineHeight="$9"
-        fontWeight="700"
-        color="$textPrimary"
-        numberOfLines={1}
-        minWidth={0}
-      >
-        {hero}
-      </Text>
+      <XStack width="100%" alignItems="baseline" gap="$2" minWidth={0}>
+        <Text
+          fontFamily="$body"
+          fontSize="$9"
+          lineHeight="$9"
+          fontWeight="700"
+          color="$textPrimary"
+          numberOfLines={1}
+          flexShrink={1}
+          minWidth={0}
+        >
+          {hero}
+        </Text>
+        {/* Caravana secundaria muted cuando el hero es el apodo (IDU.6.3). */}
+        {heroResult.secondary ? (
+          <Text
+            fontFamily="$body"
+            fontSize="$5"
+            lineHeight="$5"
+            fontWeight="500"
+            color="$textMuted"
+            numberOfLines={1}
+            flexShrink={0}
+          >
+            {`#${heroResult.secondary.value}`}
+          </Text>
+        ) : null}
+      </XStack>
 
       {/* Fila de chips de identidad: categoría (verde) · [flag aborto terracota] · sexo (ícono color)
           · rodeo. El flag "Tuvo aborto" (A2, marquita roja) va junto al CategoryBadge si hubo ≥1 aborto. */}

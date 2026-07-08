@@ -6,8 +6,8 @@
 //
 // Rules:
 //   R5.1 — every row must resolve at least one non-empty identifier: a valid tag_electronic
-//          (already validated by normalize-row R4.5), idv, or visual_id_alt (ADR-005). A row
-//          with none is an error "a completar".
+//          (already validated by normalize-row R4.5) or idv (delta IDU: visual_id_alt eliminado). A
+//          row with none is an error "a completar".
 //   R5.2 — sex must be present AND mappable to male/female (normalize-row already set it to
 //          null when unmappable). Missing/unmappable sex is an error.
 //   R3.4 — a field-over-cap issue carried from normalization makes the row an error.
@@ -79,12 +79,11 @@ export function validateRows(rows: NormalizedRow[]): ValidationResult {
       for (const i of overCap) details.push(`${i.field}: ${i.reason}`);
     }
 
-    // R5.1 — at least one identifier.
-    const hasIdentifier =
-      !!row.tagElectronic || !!nonEmpty(row.idv) || !!nonEmpty(row.visualIdAlt);
+    // R5.1 — at least one identifier (delta IDU: sin visual_id_alt; TAG o caravana visual/IDV).
+    const hasIdentifier = !!row.tagElectronic || !!nonEmpty(row.idv);
     if (!hasIdentifier) {
       reasons.push('missing_identifier');
-      details.push('falta un identificador (TAG válido, IDV o identificación visual) — a completar');
+      details.push('falta un identificador (TAG válido o caravana visual/IDV) — a completar');
     }
 
     // R5.2 — sex present and mappable.

@@ -199,7 +199,10 @@ const animal_profiles = new Table({
   rodeo_id: column.text,
   management_group_id: column.text,
   idv: column.text,
-  visual_id_alt: column.text,
+  // visual_id_alt ELIMINADA (delta identificadores-unificados, IDU.3.1): la columna se dropea del server
+  // en la migración 0122 (Fase A). PowerSync ignora columnas server ausentes del schema local → quitarla acá
+  // es tolerante mientras el server aún la tenga (deploy PASO 1, design §11). El apodo (3er identificador) vive
+  // en custom_attributes (no en animal_profiles), así que NO se agrega una columna nueva acá.
   category_id: column.text,
   category_override: column.integer,
   breed: column.text,
@@ -570,7 +573,7 @@ const pending_animal_profiles = new Table(
     rodeo_id: column.text,
     management_group_id: column.text,
     idv: column.text,
-    visual_id_alt: column.text,
+    // visual_id_alt ELIMINADA del overlay optimista (IDU.3.1) — espeja animal_profiles (sin la columna).
     category_id: column.text,
     category_override: column.integer,
     breed: column.text,

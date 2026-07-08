@@ -88,7 +88,8 @@ export default function RodeoGroupScreen() {
           key={a.profileId}
           compact
           idv={a.idv ?? undefined}
-          visualId={a.visualIdAlt ?? undefined}
+          apodo={a.apodo}
+          rodeoUsesApodo={a.rodeoUsesApodo}
           tagElectronic={a.tagElectronic}
           category={a.categoryName || a.categoryCode}
           categoryCode={a.categoryCode}

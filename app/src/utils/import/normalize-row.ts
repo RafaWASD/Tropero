@@ -8,8 +8,8 @@
 // ISO 11784/11785 FDX-B, 15 digits). We do NOT reimplement tag logic here.
 //
 // Length caps (R3.4) MIRROR the authoritative server-side CHECK char_length of migration
-// 0070: idv/visual_id_alt/breed/coat_color ≤ 64, entry_origin ≤ 120, notes ≤ 4000,
-// tag_electronic ≤ 64. The client cap is a UX/perf barrier; the DB is the final authority
+// 0070: idv/breed/coat_color ≤ 64, entry_origin ≤ 120, notes ≤ 4000, tag_electronic ≤ 64
+// (delta IDU: visual_id_alt eliminada). The client cap is a UX/perf barrier; the DB is the final authority
 // (R9.5). A field exceeding its cap becomes a ROW ERROR (R5) — we do NOT silently truncate.
 
 import { normalizeTag, isValidTag } from '../../services/ble/parser-rs420';
@@ -17,7 +17,6 @@ import { normalizeTag, isValidTag } from '../../services/ble/parser-rs420';
 /** Server-side length caps mirrored from migration 0070 (R3.4). Single source of truth here. */
 export const FIELD_CAPS = Object.freeze({
   idv: 64,
-  visual_id_alt: 64,
   breed: 64,
   coat_color: 64,
   tag_electronic: 64,
@@ -37,10 +36,8 @@ export type FieldIssue = {
 export type NormalizedRow = {
   /** Valid 15-digit EID, or null if the mapped TAG was absent/invalid (R4.5). */
   tagElectronic: string | null;
-  /** Internal visual ID (idv), trimmed, or null if absent. */
+  /** Caravana visual (idv), trimmed, or null if absent. (delta IDU: visualIdAlt eliminado.) */
   idv: string | null;
-  /** Alternative visual mark, trimmed, or null if absent. */
-  visualIdAlt: string | null;
   /** male | female, or null if absent / not mappable (R4.3). */
   sex: Sex | null;
   /** birth_date as 'YYYY-MM-DD', or null if absent / unparseable (R4.4 — nullable, never blocks). */
@@ -59,7 +56,6 @@ export type NormalizedRow = {
 export type RawMappedRow = {
   tag_electronic?: string;
   idv?: string;
-  visual_id_alt?: string;
   sex?: string;
   birth_date?: string;
   breed?: string;
@@ -199,7 +195,6 @@ export function normalizeRow(raw: RawMappedRow): NormalizedRow {
   return {
     tagElectronic,
     idv: normalizeCapped(raw.idv, 'idv', issues),
-    visualIdAlt: normalizeCapped(raw.visual_id_alt, 'visual_id_alt', issues),
     sex,
     birthDate: parseBirthDate(raw.birth_date),
     breed: normalizeCapped(raw.breed, 'breed', issues),

@@ -2,50 +2,51 @@
 // RCAP.2). Sin RN, sin red, sin supabase-js: testeable con node:test (mismo patrón que
 // animal-identifier.ts / animal-birth-year.ts).
 //
-// El prompt pide UNA caravana del ternero (numérica: caravana electrónica EID de 15 díg o caravana
-// visual/IDV). Esta función decide la RAMA del find-or-create de spec 09 que dispara el componente:
-//   - EID (15 díg puros)      → lookupByTag (match exacto + lectura cross-campo → detecta "está en otro
-//                               campo", RCAP.3.4).
-//   - IDV (≥3 díg, ≠15)       → searchAnimals (idv exacto + substring + visual fuzzy, campo activo).
-//   - vacío / <3 díg          → error inline, NO dispara el find-or-create (RCAP.2.5).
+// El prompt pide UNA caravana/identificador del ternero. Esta función decide la RAMA del find-or-create de
+// spec 09 que dispara el componente (delta IDENTIFICADORES UNIFICADOS, IDU.4.7 — busca por los 3):
+//   - EID (15 díg puros)      → lookupByTag (match exacto + lectura cross-campo → "está en otro campo").
+//   - término no vacío        → searchAnimals (idv EXACTO/substring alfanumérico + APODO, campo activo).
+//   - vacío                   → error inline, NO dispara el find-or-create (RCAP.2.5).
 //
-// Para el camino CREATE (no encontrado), el valor TIPEADO fluye al ternero creado: EID → calves[0].tag;
-// IDV numérico → p_calf_idv (RCAP.7.6 / fold Gate 1 LOW-1). El `value` ya viene COMPACTO (sin separadores
-// de formato), listo para pasarse a la RPC / al lookup.
+// El delta relaja el gate numérico (antes solo aceptaba dígitos ≥3): ahora un idv ALFANUMÉRICO ("AB123") o
+// un APODO ("Manchada") disparan la rama de búsqueda. Para el camino CREATE (no encontrado), el valor
+// tipeado fluye al ternero creado: EID → calves[0].tag; el resto → p_calf_idv (que ahora es alfanumérico;
+// `calfIdvForSubmit` lo trimea). El `value` del EID viene COMPACTO (15 díg); el de la rama search viene
+// TRIMEADO (conserva letras/espacios para la búsqueda por apodo).
 
-/** Separadores de formato de un identificador (espacio, guion, punto, barra) — se descartan al clasificar. */
+/** Separadores de formato de una caravana (espacio, guion, punto, barra) — se descartan solo para el EID. */
 const STRUCTURED_SEPARATORS = /[\s\-./]/g;
 
 /** Largo exacto de una caravana electrónica FDX-B (ISO 11784/11785), prefijo país 982/032… */
 export const CALF_EID_LENGTH = 15;
-/** Mínimo de dígitos para tratar el texto como una caravana/IDV (espeja el ≥3 de classifyIdentifier). */
-export const CALF_MIN_DIGITS = 3;
 
 /**
- * Clasificación de la caravana del ternero tipeada en el prompt:
- *   - `empty`     → campo vacío → error inline, sin find-or-create (RCAP.2.5).
- *   - `too-short` → menos de 3 dígitos (o no-numérico, defensivo) → error inline, sin find-or-create.
- *   - `eid`       → 15 dígitos puros → caravana electrónica → lookupByTag (RCAP.2.2 rama EID).
- *   - `idv`       → ≥3 dígitos, ≠15 → caravana visual/IDV → searchAnimals (RCAP.2.2 rama IDV).
+ * Clasificación del identificador del ternero tipeado en el prompt (delta IDU, IDU.4.7):
+ *   - `empty` → campo vacío → error inline, sin find-or-create (RCAP.2.5).
+ *   - `eid`   → 15 dígitos puros → caravana electrónica → lookupByTag (RCAP.2.2 rama EID).
+ *   - `idv`   → cualquier otro término no vacío (idv alfanumérico o apodo) → searchAnimals (rama búsqueda).
  */
 export type CalfQueryClass =
   | { kind: 'empty' }
-  | { kind: 'too-short' }
   | { kind: 'eid'; value: string }
   | { kind: 'idv'; value: string };
 
 /**
- * Clasifica la caravana del ternero (PURA, RCAP.2.1/2.5). Descarta separadores de formato y decide la
- * rama del find-or-create. NO ejecuta queries — solo dice qué rama disparar + el valor compacto que fluye
- * al lookup o al CREATE. El sanitizer del campo deja solo dígitos; igual chequeamos numericidad por si
- * llega un paste con letras (degrada a `too-short` → error inline, nunca dispara el motor con basura).
+ * Clasifica el identificador del ternero (PURA, RCAP.2.1/2.5 + IDU.4.7). Decide la rama del find-or-create:
+ * 15 dígitos puros = EID (lookupByTag); cualquier otro término no vacío (idv alfanumérico, número de
+ * caravana, apodo) = rama de búsqueda (searchAnimals, que ahora cubre idv alfanumérico + apodo). NO ejecuta
+ * queries — solo dice qué rama disparar + el valor a pasar. Ya NO exige "≥3 dígitos" ni numericidad: el
+ * apodo puede ser "Manchada" (IDU.4.7). Vacío → `empty` (error inline, nunca dispara el motor con basura).
  */
 export function classifyCalfQuery(raw: string): CalfQueryClass {
-  const compact = raw.trim().replace(STRUCTURED_SEPARATORS, '');
-  if (compact.length === 0) return { kind: 'empty' };
-  if (!/^\d+$/.test(compact) || compact.length < CALF_MIN_DIGITS) return { kind: 'too-short' };
-  if (compact.length === CALF_EID_LENGTH) return { kind: 'eid', value: compact };
-  return { kind: 'idv', value: compact };
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return { kind: 'empty' };
+  const compact = trimmed.replace(STRUCTURED_SEPARATORS, '');
+  // 15 dígitos PUROS → caravana electrónica (el compacto quita separadores de formato de un tipeo humano).
+  if (/^\d{15}$/.test(compact)) return { kind: 'eid', value: compact };
+  // Cualquier otro término no vacío → rama de búsqueda (idv alfanumérico + apodo). Se pasa TRIMEADO (los
+  // espacios de un apodo importan para el LIKE; el CREATE lo trimea con calfIdvForSubmit).
+  return { kind: 'idv', value: trimmed };
 }
 
 /** ISO 'YYYY-MM-DD' local de `now` (orden lexicográfico = orden de fecha). `now` inyectable (tests). */

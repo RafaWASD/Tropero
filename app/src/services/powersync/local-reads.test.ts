@@ -36,6 +36,8 @@ import {
   buildLookupTagAcrossFieldsQuery,
   buildSearchByIdvQuery,
   buildSearchLikeQuery,
+  buildApodoSearchQuery,
+  buildApodoListQuery,
   escapeLike,
   buildAnimalDetailQuery,
   buildCategoryMirrorEventsQuery,
@@ -545,39 +547,45 @@ test('buildAnimalsListQuery (comportamiento): orderBy updated_at ordena candidat
   // Esquema mínimo con las columnas que LOCAL_LIST_SELECT (synced) y LOCAL_LIST_SELECT_OVERLAY proyectan,
   // + las tablas JOINeadas (rodeos, categories_by_system) y la de override (vacía).
   db.exec(
-    'CREATE TABLE animal_profiles (id TEXT, animal_id TEXT, idv TEXT, visual_id_alt TEXT, category_id TEXT, ' +
+    'CREATE TABLE animal_profiles (id TEXT, animal_id TEXT, idv TEXT, category_id TEXT, ' +
       'rodeo_id TEXT, status TEXT, management_group_id TEXT, animal_tag_electronic TEXT, animal_sex TEXT, ' +
       'category_override INTEGER, animal_birth_date TEXT, is_castrated INTEGER, future_bull INTEGER, is_cut INTEGER, ' +
       'establishment_id TEXT, deleted_at TEXT, created_at TEXT, updated_at TEXT);' +
-      'CREATE TABLE pending_animal_profiles (id TEXT, animal_id TEXT, idv TEXT, visual_id_alt TEXT, category_id TEXT, ' +
+      'CREATE TABLE pending_animal_profiles (id TEXT, animal_id TEXT, idv TEXT, category_id TEXT, ' +
       'rodeo_id TEXT, status TEXT, management_group_id TEXT, animal_tag_electronic TEXT, animal_sex TEXT, ' +
       'category_override INTEGER, animal_birth_date TEXT, establishment_id TEXT, created_at TEXT);' +
       'CREATE TABLE rodeos (id TEXT, system_id TEXT, name TEXT);' +
       'CREATE TABLE categories_by_system (id TEXT, code TEXT, name TEXT);' +
-      'CREATE TABLE pending_status_overrides (target_table TEXT, target_id TEXT, effect TEXT);',
+      'CREATE TABLE pending_status_overrides (target_table TEXT, target_id TEXT, effect TEXT);' +
+      // delta IDU: la lista enriquece con apodo/apodo_enabled por subconsulta a estas tablas (vacías → apodo
+      // NULL / apodo_enabled 0). Deben existir o el SQL revienta con "no such table".
+      'CREATE TABLE custom_attributes (animal_profile_id TEXT, field_definition_id TEXT, value TEXT);' +
+      'CREATE TABLE field_definitions (id TEXT, data_key TEXT, establishment_id TEXT);' +
+      'CREATE TABLE rodeo_data_config (rodeo_id TEXT, field_definition_id TEXT, enabled INTEGER);' +
+      'CREATE TABLE pending_rodeo_data_config (rodeo_id TEXT, field_definition_id TEXT, enabled INTEGER);',
   );
   db.prepare('INSERT INTO rodeos (id, system_id, name) VALUES (?,?,?)').run('rod-1', 'sys-1', 'Rodeo 1');
   db.prepare('INSERT INTO categories_by_system (id, code, name) VALUES (?,?,?)').run('cat-1', 'ternero', 'Ternero');
   // 3 synced sin caravana con updated_at distintos + 1 synced CON caravana (debe quedar fuera por noTag).
   const insSync = db.prepare(
-    'INSERT INTO animal_profiles (id, animal_id, idv, visual_id_alt, category_id, rodeo_id, status, ' +
+    'INSERT INTO animal_profiles (id, animal_id, idv, category_id, rodeo_id, status, ' +
       'management_group_id, animal_tag_electronic, animal_sex, category_override, animal_birth_date, ' +
       'is_castrated, future_bull, establishment_id, deleted_at, created_at, updated_at) ' +
-      'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+      'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
   );
   // updated_at: A es el más reciente, luego B, luego C. (created_at deliberadamente "al revés" para probar
   // que ordena por updated_at, no por created_at.)
-  insSync.run('p-A', 'an-A', 'A1', null, 'cat-1', 'rod-1', 'active', null, null, 'female', 0, null, 0, 0, 'est-1', null, '2024-01-01T00:00:00Z', '2024-06-03T00:00:00Z');
-  insSync.run('p-B', 'an-B', 'B1', null, 'cat-1', 'rod-1', 'active', null, null, 'female', 0, null, 0, 0, 'est-1', null, '2024-01-02T00:00:00Z', '2024-06-02T00:00:00Z');
-  insSync.run('p-C', 'an-C', 'C1', null, 'cat-1', 'rod-1', 'active', null, null, 'female', 0, null, 0, 0, 'est-1', null, '2024-01-03T00:00:00Z', '2024-06-01T00:00:00Z');
+  insSync.run('p-A', 'an-A', 'A1', 'cat-1', 'rod-1', 'active', null, null, 'female', 0, null, 0, 0, 'est-1', null, '2024-01-01T00:00:00Z', '2024-06-03T00:00:00Z');
+  insSync.run('p-B', 'an-B', 'B1', 'cat-1', 'rod-1', 'active', null, null, 'female', 0, null, 0, 0, 'est-1', null, '2024-01-02T00:00:00Z', '2024-06-02T00:00:00Z');
+  insSync.run('p-C', 'an-C', 'C1', 'cat-1', 'rod-1', 'active', null, null, 'female', 0, null, 0, 0, 'est-1', null, '2024-01-03T00:00:00Z', '2024-06-01T00:00:00Z');
   // CON caravana → noTag debe excluirlo.
-  insSync.run('p-tagged', 'an-T', 'T1', null, 'cat-1', 'rod-1', 'active', null, '982000000000001', 'female', 0, null, 0, 0, 'est-1', null, '2024-01-04T00:00:00Z', '2024-06-09T00:00:00Z');
+  insSync.run('p-tagged', 'an-T', 'T1', 'cat-1', 'rod-1', 'active', null, '982000000000001', 'female', 0, null, 0, 0, 'est-1', null, '2024-01-04T00:00:00Z', '2024-06-09T00:00:00Z');
   // 1 overlay (alta optimista sin caravana): su created_at lo ubica entre A y B (overlay usa created_at AS updated_at).
   db.prepare(
-    'INSERT INTO pending_animal_profiles (id, animal_id, idv, visual_id_alt, category_id, rodeo_id, status, ' +
+    'INSERT INTO pending_animal_profiles (id, animal_id, idv, category_id, rodeo_id, status, ' +
       'management_group_id, animal_tag_electronic, animal_sex, category_override, animal_birth_date, ' +
-      'establishment_id, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-  ).run('p-OPT', 'an-O', 'O1', null, 'cat-1', 'rod-1', 'active', null, null, 'female', 0, null, 'est-1', '2024-06-02T12:00:00Z');
+      'establishment_id, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
+  ).run('p-OPT', 'an-O', 'O1', 'cat-1', 'rod-1', 'active', null, null, 'female', 0, null, 'est-1', '2024-06-02T12:00:00Z');
 
   const q = buildAnimalsListQuery('est-1', { noTag: true, orderBy: 'updated_at' });
   const rows = db.prepare(q.sql).all(...(q.args as string[])) as { id: string }[];
@@ -792,10 +800,10 @@ test('buildSearchByIdvQuery: exacto por idv, active, limit 20, UNION overlay', (
 });
 
 test('buildSearchLikeQuery: LIKE %term% local con ESCAPE, sobre la columna whitelisteada, UNION overlay', () => {
-  const q = buildSearchLikeQuery('est-1', 'visual_id_alt', 'R12');
+  const q = buildSearchLikeQuery('est-1', 'idv', 'R12');
   // el SQL contiene ESCAPE '\' (un solo backslash); en regex un backslash literal es \\
-  assert.match(q.sql, /AND ap\.visual_id_alt LIKE \? ESCAPE '\\'/);
-  assert.match(q.sql, /AND pap\.visual_id_alt LIKE \? ESCAPE '\\'/);
+  assert.match(q.sql, /AND ap\.idv LIKE \? ESCAPE '\\'/);
+  assert.match(q.sql, /AND pap\.idv LIKE \? ESCAPE '\\'/);
   assert.match(q.sql, /LIMIT 20/);
   assert.deepEqual(q.args, ['est-1', 'active', '%R12%', 'est-1', 'active', '%R12%']);
 });
@@ -809,6 +817,80 @@ test('buildSearchLikeQuery: degradación fuzzy → tag y idv también van por LI
   assert.match(idv.sql, /ap\.idv LIKE \?/);
   assert.match(idv.sql, /pap\.idv LIKE \?/);
   assert.deepEqual(idv.args, ['est-1', 'active', '%0320%', 'est-1', 'active', '%0320%']);
+});
+
+// ─── delta IDU: canal de búsqueda por APODO (IDU.4.4) ───────────────────────────────────────
+
+test('buildApodoSearchQuery: EXISTS sobre custom_attributes por data_key=apodo, escapado + scopeado, UNION overlay', () => {
+  const q = buildApodoSearchQuery('est-1', 'Manch');
+  // La rama synced correla por ap.id; la overlay por pap.id. data_key='apodo' constante (no input).
+  assert.match(q.sql, /EXISTS \(SELECT 1 FROM custom_attributes ca/);
+  assert.match(q.sql, /ca\.animal_profile_id = ap\.id AND fd\.data_key = 'apodo'/);
+  assert.match(q.sql, /ca\.animal_profile_id = pap\.id AND fd\.data_key = 'apodo'/);
+  assert.match(q.sql, /ca\.value LIKE \? ESCAPE '\\'/);
+  // scope de tenant por establishment (buildSearchUnion) + status active; LIMIT del UNION.
+  assert.match(q.sql, /ap\.establishment_id = \?/);
+  assert.match(q.sql, /LIMIT 20/);
+  // el término va escapado (%_ \ neutralizados) + envuelto en %…%; un arg por rama.
+  assert.deepEqual(q.args, ['est-1', 'active', '%Manch%', 'est-1', 'active', '%Manch%']);
+});
+
+test('buildApodoSearchQuery: escapa los comodines del término (anti-widening del LIKE)', () => {
+  const q = buildApodoSearchQuery('est-1', '50%_x');
+  assert.deepEqual(q.args, ['est-1', 'active', '%50\\%\\_x%', 'est-1', 'active', '%50\\%\\_x%']);
+});
+
+// COMPORTAMIENTO contra node:sqlite: matchea el apodo por LIKE sobre el value JSON-string, scopeado al campo.
+test('buildApodoSearchQuery (comportamiento): encuentra el animal cuyo apodo contiene el término, dentro del campo', () => {
+  const db = new DatabaseSync(':memory:');
+  db.exec(
+    'CREATE TABLE animal_profiles (id TEXT, animal_id TEXT, idv TEXT, category_id TEXT, rodeo_id TEXT, status TEXT, ' +
+      'management_group_id TEXT, animal_tag_electronic TEXT, animal_sex TEXT, category_override INTEGER, ' +
+      'animal_birth_date TEXT, is_castrated INTEGER, future_bull INTEGER, is_cut INTEGER, establishment_id TEXT, ' +
+      'deleted_at TEXT, created_at TEXT);' +
+      'CREATE TABLE pending_animal_profiles (id TEXT, animal_id TEXT, idv TEXT, category_id TEXT, rodeo_id TEXT, status TEXT, ' +
+      'management_group_id TEXT, animal_tag_electronic TEXT, animal_sex TEXT, category_override INTEGER, ' +
+      'animal_birth_date TEXT, establishment_id TEXT, created_at TEXT);' +
+      'CREATE TABLE rodeos (id TEXT, system_id TEXT, name TEXT);' +
+      'CREATE TABLE categories_by_system (id TEXT, code TEXT, name TEXT);' +
+      'CREATE TABLE pending_status_overrides (target_table TEXT, target_id TEXT, effect TEXT);' +
+      'CREATE TABLE custom_attributes (animal_profile_id TEXT, field_definition_id TEXT, value TEXT);' +
+      'CREATE TABLE field_definitions (id TEXT, data_key TEXT, establishment_id TEXT);' +
+      'CREATE TABLE rodeo_data_config (rodeo_id TEXT, field_definition_id TEXT, enabled INTEGER);' +
+      'CREATE TABLE pending_rodeo_data_config (rodeo_id TEXT, field_definition_id TEXT, enabled INTEGER);',
+  );
+  db.prepare('INSERT INTO rodeos (id, system_id, name) VALUES (?,?,?)').run('rod-1', 'sys-1', 'Rodeo 1');
+  db.prepare('INSERT INTO categories_by_system (id, code, name) VALUES (?,?,?)').run('cat-1', 'vaca', 'Vaca');
+  db.prepare('INSERT INTO field_definitions (id, data_key, establishment_id) VALUES (?,?,?)').run('fd-apodo', 'apodo', 'est-1');
+  db.prepare('INSERT INTO field_definitions (id, data_key, establishment_id) VALUES (?,?,?)').run('fd-apodo-2', 'apodo', 'est-2');
+  const insP = db.prepare(
+    'INSERT INTO animal_profiles (id, animal_id, idv, category_id, rodeo_id, status, animal_sex, category_override, ' +
+      'is_castrated, future_bull, is_cut, establishment_id, deleted_at, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+  );
+  insP.run('p-1', 'an-1', null, 'cat-1', 'rod-1', 'active', 'female', 0, 0, 0, 0, 'est-1', null, 't1');
+  insP.run('p-2', 'an-2', null, 'cat-1', 'rod-1', 'active', 'female', 0, 0, 0, 0, 'est-1', null, 't2');
+  // p-otro-campo NO debe aparecer (scope por campo).
+  insP.run('p-x', 'an-x', null, 'cat-1', 'rod-1', 'active', 'female', 0, 0, 0, 0, 'est-2', null, 't3');
+  const insCA = db.prepare('INSERT INTO custom_attributes (animal_profile_id, field_definition_id, value) VALUES (?,?,?)');
+  insCA.run('p-1', 'fd-apodo', JSON.stringify('Manchada')); // value JSON-string con comillas
+  insCA.run('p-2', 'fd-apodo', JSON.stringify('Lola'));
+  insCA.run('p-x', 'fd-apodo-2', JSON.stringify('Manchada')); // otro campo, mismo apodo
+  const q = buildApodoSearchQuery('est-1', 'Manch');
+  const rows = db.prepare(q.sql).all(...(q.args as string[])) as { id: string; apodo: string | null }[];
+  db.close();
+  assert.deepEqual(rows.map((r) => r.id), ['p-1'], 'solo el del campo activo con apodo que contiene "Manch"');
+  // El value viene JSON-string; el mapper lo decodifica aguas arriba (parseCustomValueJson).
+  assert.equal(rows[0].apodo, JSON.stringify('Manchada'));
+});
+
+// ─── delta IDU: apodos del campo para el warning-soft (IDU.5.4) ──────────────────────────────
+
+test('buildApodoListQuery: apodos activos del campo con profile_id, scopeado por establishment', () => {
+  const q = buildApodoListQuery('est-9');
+  assert.match(q.sql, /SELECT ca\.animal_profile_id AS profile_id, ca\.value AS value/);
+  assert.match(q.sql, /fd\.data_key = 'apodo' AND fd\.establishment_id IS NOT NULL/);
+  assert.match(q.sql, /ap\.establishment_id = \? AND ap\.deleted_at IS NULL AND ap\.status = 'active'/);
+  assert.deepEqual(q.args, ['est-9']);
 });
 
 test('escapeLike: neutraliza %, _ y \\ del término (anti-comodín), no toca el resto', () => {
@@ -1449,7 +1531,6 @@ const PROFILE_FIELDS: PendingProfileFields = {
   rodeoId: 'rod-1',
   managementGroupId: null,
   idv: '0320',
-  visualIdAlt: null,
   categoryId: 'cat-1',
   categoryOverride: true,
   breed: 'angus',
@@ -1464,23 +1545,24 @@ const PROFILE_FIELDS: PendingProfileFields = {
   createdAt: '2026-06-09T00:00:00.000Z',
 };
 
-test('buildPendingAnimalProfileInsert: 20 columnas, category_override 1/0, identidad b1 denormalizada', () => {
+test('buildPendingAnimalProfileInsert: 19 columnas (sin visual_id_alt), category_override 1/0, identidad b1 denormalizada', () => {
   const q = buildPendingAnimalProfileInsert('p-1', 'cop-1', PROFILE_FIELDS);
-  // 20 placeholders
-  assert.equal((q.sql.match(/\?/g) ?? []).length, 20);
-  assert.equal(q.args.length, 20);
-  // id, client_op_id primero; category_override → 1 (true)
+  // 19 placeholders (delta IDU: visual_id_alt eliminada, era 20).
+  assert.equal((q.sql.match(/\?/g) ?? []).length, 19);
+  assert.equal(q.args.length, 19);
+  assert.doesNotMatch(q.sql, /visual_id_alt/);
+  // id, client_op_id primero; category_override → 1 (true) — ahora en el índice 8 (sin visual_id_alt).
   assert.equal(q.args[0], 'p-1');
   assert.equal(q.args[1], 'cop-1');
-  assert.equal(q.args[9], 1); // category_override true → 1
+  assert.equal(q.args[8], 1); // category_override true → 1
   // identidad denormalizada (b1) para que el UNION de lectura la muestre
   assert.match(q.sql, /animal_tag_electronic, animal_sex, animal_birth_date/);
-  assert.deepEqual(q.args.slice(16, 19), ['982000000000001', 'female', '2026-06-01']);
+  assert.deepEqual(q.args.slice(15, 18), ['982000000000001', 'female', '2026-06-01']);
 });
 
 test('buildPendingAnimalProfileInsert: category_override false → 0', () => {
   const q = buildPendingAnimalProfileInsert('p-2', 'cop-2', { ...PROFILE_FIELDS, categoryOverride: false });
-  assert.equal(q.args[9], 0);
+  assert.equal(q.args[8], 0);
 });
 
 test('buildPendingReproductiveEventInsert: el parto optimista con animal_profile_id + event_type', () => {
@@ -1994,7 +2076,7 @@ test('RCF.3.3/RCF.3.4: buildSetIdvUpdate — UPDATE animal_profiles.idv SOLO; WH
   const q = buildSetIdvUpdate('p-1', '01234567');
   // SET escribe SOLO idv — no toca ninguna otra columna (NULL→valor, inmutabilidad R4.13 lo permite al subir).
   assert.match(q.sql, /^UPDATE animal_profiles SET idv = \? WHERE id = \? AND deleted_at IS NULL$/);
-  assert.doesNotMatch(q.sql, /tag_electronic|visual_id_alt|category_id|is_cut|establishment_id/);
+  assert.doesNotMatch(q.sql, /tag_electronic|category_id|is_cut|establishment_id/);
   assert.doesNotMatch(q.sql, /session_id/);
   // El cliente NO pasa establishment_id (la RLS/unique lo enforzan al subir desde la fila real).
   assert.deepEqual(q.args, ['01234567', 'p-1']);

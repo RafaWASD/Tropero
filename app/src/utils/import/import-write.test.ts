@@ -40,7 +40,6 @@ function row(partial: Partial<NormalizedRow>): NormalizedRow {
   return {
     tagElectronic: null,
     idv: null,
-    visualIdAlt: null,
     sex: 'female',
     birthDate: null,
     breed: null,
@@ -173,7 +172,6 @@ test('T3.3: buildRpcRow arma el shape exacto del header 0074 — SIN establishme
     tagElectronic: '982000123456789',
     birthDate: '2025-08-01',
     idv: '1234',
-    visualIdAlt: 'A5',
     breed: 'Hereford',
     category: 'Torito',
     lote: 'Lote A',
@@ -185,7 +183,6 @@ test('T3.3: buildRpcRow arma el shape exacto del header 0074 — SIN establishme
     tag_electronic: '982000123456789',
     birth_date: '2025-08-01',
     idv: '1234',
-    visual_id_alt: 'A5',
     breed: 'Hereford',
     category_code: 'torito',
     category_override: true,

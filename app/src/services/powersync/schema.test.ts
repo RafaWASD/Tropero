@@ -277,7 +277,7 @@ const COLUMNS_READ_BY_BUILDERS: Record<string, string[]> = {
   maneuver_presets: ['establishment_id', 'name', 'config', 'deleted_at'],
   // camino de datos
   animal_profiles: [
-    'animal_id', 'establishment_id', 'idv', 'visual_id_alt', 'category_id', 'category_override',
+    'animal_id', 'establishment_id', 'idv', 'category_id', 'category_override',
     'breed', 'coat_color', 'entry_date', 'entry_weight', 'status', 'created_by', 'exit_date',
     'exit_reason', 'rodeo_id', 'management_group_id', 'animal_tag_electronic', 'animal_sex',
     'animal_birth_date', 'deleted_at', 'created_at',
@@ -331,7 +331,7 @@ const OVERLAY_COLUMNS_READ_BY_BUILDERS: Record<string, string[]> = {
   // lista/detalle/count UNIONan pending_animal_profiles (espejo de animal_profiles + identidad b1).
   pending_animal_profiles: [
     'client_op_id', 'animal_id', 'establishment_id', 'rodeo_id', 'management_group_id', 'idv',
-    'visual_id_alt', 'category_id', 'category_override', 'breed', 'coat_color', 'entry_date',
+    'category_id', 'category_override', 'breed', 'coat_color', 'entry_date',
     'entry_weight', 'status', 'created_by', 'exit_date', 'exit_reason', 'animal_tag_electronic',
     'animal_sex', 'animal_birth_date', 'created_at',
   ],

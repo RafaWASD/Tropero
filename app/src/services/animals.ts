@@ -28,7 +28,8 @@ import {
   deriveReproAptitude,
 } from '../utils/repro-status';
 import type { HeiferFitness } from '../utils/maneuver-sequence';
-import { classifyIdentifier, classifySearchQuery } from '../utils/animal-identifier';
+import { classifySearchQuery } from '../utils/animal-identifier';
+import { parseCustomValueJson } from '../utils/custom-render';
 import { castrationObservationText } from '../utils/castration-copy';
 import { decideSetCut, decideUnsetCut } from './cut-service-core';
 import {
@@ -43,6 +44,8 @@ import {
   buildLookupTagAcrossFieldsQuery,
   buildSearchByIdvQuery,
   buildSearchLikeQuery,
+  buildApodoSearchQuery,
+  buildApodoListQuery,
   buildAnimalDetailQuery,
   buildCategoryIdByCodeQuery,
   buildCategoryByCodeQuery,
@@ -96,7 +99,17 @@ export type AnimalListItem = {
   profileId: string;
   animalId: string;
   idv: string | null;
-  visualIdAlt: string | null;
+  /**
+   * Nombre/Apodo del animal (delta IDU, IDU.6.5) — el 3er identificador, leído de custom_attributes
+   * (data_key='apodo'). Reemplaza el histórico `visualIdAlt`. null = sin apodo cargado. Lo consume
+   * `pickHeroIdentifier` (junto con `rodeoUsesApodo`) para el hero de la fila (AnimalRow).
+   */
+  apodo: string | null;
+  /**
+   * ¿El rodeo del animal habilita el campo apodo? (IDU.6.5, overlay-aware). Solo cuando true Y el animal
+   * tiene apodo el apodo pasa a hero (IDU.6.1). Se resuelve per-animal (la lista mezcla rodeos).
+   */
+  rodeoUsesApodo: boolean;
   tagElectronic: string | null;
   categoryCode: string;
   categoryName: string;
@@ -139,7 +152,14 @@ export type AnimalDetail = {
    */
   establishmentId: string;
   idv: string | null;
-  visualIdAlt: string | null;
+  /**
+   * Nombre/Apodo del animal (delta IDU, IDU.6.3) — reemplaza `visualIdAlt`. Leído de custom_attributes
+   * (data_key='apodo') por la misma subconsulta que la lista. null = sin apodo. Lo usa el hero de la ficha
+   * (pickHeroIdentifier) + el badge secundario.
+   */
+  apodo: string | null;
+  /** ¿El rodeo del animal habilita el campo apodo? (IDU.6.3/6.5). Solo con true + apodo el apodo es hero. */
+  rodeoUsesApodo: boolean;
   tagElectronic: string | null;
   sex: AnimalSex;
   birthDate: string | null;
@@ -211,7 +231,10 @@ type LocalListRow = {
   id: string;
   animal_id: string;
   idv: string | null;
-  visual_id_alt: string | null;
+  // delta IDU: `apodo` (custom_attributes value, JSON-string) + `apodo_enabled` (¿rodeo habilita apodo?)
+  // reemplazan `visual_id_alt`. El mapper decodifica `apodo` con parseCustomValueJson y coerce apodo_enabled.
+  apodo?: string | null;
+  apodo_enabled?: number | boolean | null;
   category_id: string;
   rodeo_id: string;
   status: AnimalStatus;
@@ -238,6 +261,19 @@ type LocalListRow = {
   is_cut?: number | boolean | null;
 };
 
+/**
+ * Decodifica el `apodo` crudo (JSON-string del custom_attributes.value, ej. `"Manchada"`) a un string plano
+ * (delta IDU). Reusa parseCustomValueJson (el mismo que la ficha) — TOLERANTE: value NULL/incoherente → null.
+ * Un apodo cargado como texto plano local (sin comillas JSON) igual se resuelve (parseCustomValueJson lo trata
+ * como string literal si no parsea). Un string vacío se normaliza a null (no es un apodo real).
+ */
+function decodeApodo(raw: string | null | undefined): string | null {
+  const parsed = parseCustomValueJson(raw ?? null, 'text');
+  if (parsed?.kind !== 'string') return null;
+  const v = parsed.value.trim();
+  return v.length > 0 ? v : null;
+}
+
 function toLocalListItem(
   r: LocalListRow,
   // C6 (RC6.3.2): si el espejo derivó una categoría para esta fila (override=false), pisa code/name en
@@ -250,7 +286,10 @@ function toLocalListItem(
     profileId: r.id,
     animalId: r.animal_id,
     idv: r.idv,
-    visualIdAlt: r.visual_id_alt,
+    // delta IDU: el apodo llega como JSON-string ("Manchada" con comillas); parseCustomValueJson lo decodifica
+    // a string (o null si no hay/ es incoherente). rodeoUsesApodo = apodo_enabled (0/1 de SQLite → boolean).
+    apodo: decodeApodo(r.apodo),
+    rodeoUsesApodo: toBool(r.apodo_enabled ?? 0),
     tagElectronic: r.tag_electronic,
     categoryCode: mirror?.code ?? r.category_code ?? '',
     categoryName: mirror?.name ?? r.category_name ?? '',
@@ -538,25 +577,22 @@ export async function countAnimals(
 // ─── Búsqueda (R5 de spec 02: TAG/IDV exacto + visual fuzzy) ─────────────────────────
 
 /**
- * Busca animales del establishment activo (R1.2/R5). Para texto NUMÉRICO corre, en este orden:
- *   1) TAG exacto (caravana electrónica FDX-B, solo si son 15 díg)
- *   2) IDV exacto (animal_profiles.idv)
- *   3) substring PARCIAL (ilike) sobre idv Y tag_electronic — fix-loop 2: un prefijo/fragmento
- *      como "03200" ENCUENTRA los animales cuya caravana/IDV lo contengan (antes solo el exacto
- *      de 15 díg matcheaba la caravana → un prefijo daba "no encontramos").
- * Para CUALQUIER texto corre además el fuzzy de visual_id_alt (red de seguridad).
- *
- * Devuelve resultados deduplicados por profileId, con los exactos priorizados arriba (se concatenan
- * antes que el substring/fuzzy; el dedup descarta el duplicado posterior). Cada sub-query es
- * scopeada por establishment_id + deleted_at + status active (la tab busca el rodeo vivo). RLS es
- * la barrera real (R10.2): el cliente NO fuerza permisos.
+ * Búsqueda UNIFICADA por los 3 identificadores del establishment activo (delta IDU, IDU.4). Corre, en este
+ * orden (los EXACTOS priorizados arriba, IDU.4.2):
+ *   1) TAG exacto (caravana electrónica FDX-B, solo si el compacto son 15 díg).
+ *   2) IDV exacto (animal_profiles.idv) — para TODO término no vacío (idv alfanumérico incluido, IDU.4.3).
+ *   3) substring PARCIAL (LIKE) sobre idv Y tag_electronic — un prefijo/fragmento encuentra la caravana/IDV.
+ *   4) APODO (custom_attributes, IDU.4.4) por LIKE — encuentra por Nombre/Apodo (nuevo canal).
+ * El canal `visual_id_alt` se ELIMINÓ (IDU.4.5). Devuelve resultados deduplicados por profileId, con los
+ * exactos concatenados antes que el substring/apodo (el dedup descarta el duplicado posterior). Cada
+ * sub-query es scopeada por establishment_id + deleted_at + status active. RLS es la barrera real (R10.2).
  */
 export async function searchAnimals(
   establishmentId: string,
   rawQuery: string,
 ): Promise<ServiceResult<AnimalListItem[]>> {
   const plan = classifySearchQuery(rawQuery);
-  if (!plan.tryTag && !plan.tryIdv && !plan.tryNumericSubstring && !plan.tryVisual) {
+  if (!plan.tryTagExact && !plan.tryIdvExact && !plan.tryIdvSubstring && !plan.tryApodo) {
     return { ok: true, value: [] };
   }
 
@@ -566,9 +602,9 @@ export async function searchAnimals(
   // espejo batched, en vez de por sub-query).
   const rawRows: LocalListRow[] = [];
 
-  // 1) TAG exacto (b1: animal_profiles.animal_tag_electronic) — solo si el texto tiene forma de
+  // 1) TAG exacto (b1: animal_profiles.animal_tag_electronic) — solo si el compacto tiene forma de
   //    caravana FDX-B. Priorizado arriba: un escaneo exacto de 15 díg es el match más fuerte.
-  if (plan.tryTag) {
+  if (plan.tryTagExact) {
     const r = await runLocalQuery<LocalListRow>(
       buildSearchByTagQuery(establishmentId, plan.compact),
       { emptyIsSyncing: false },
@@ -577,9 +613,9 @@ export async function searchAnimals(
     pushLocalRows(r.value, seen, rawRows);
   }
 
-  // 2) IDV exacto (animal_profiles.idv) — solo si el texto es numérico. Priorizado sobre el
-  //    substring (el operario que tipea el IDV completo ve su animal primero).
-  if (plan.tryIdv) {
+  // 2) IDV exacto (animal_profiles.idv) — para todo término no vacío (idv alfanumérico incluido, IDU.4.3).
+  //    Priorizado sobre el substring (el operario que tipea el IDV completo ve su animal primero).
+  if (plan.tryIdvExact) {
     const r = await runLocalQuery<LocalListRow>(
       buildSearchByIdvQuery(establishmentId, plan.compact),
       { emptyIsSyncing: false },
@@ -588,12 +624,11 @@ export async function searchAnimals(
     pushLocalRows(r.value, seen, rawRows);
   }
 
-  // 3) Substring numérico (LIKE PARCIAL local) sobre idv Y tag_electronic — fix-loop 2: tipear
-  //    "03200" (prefijo/fragmento de una caravana o IDV) debe ENCONTRAR los animales que lo
-  //    contengan, no solo el match exacto. DEGRADACIÓN: SQLite no tiene pg_trgm → el fuzzy/ilike de
-  //    PostgREST se reescribe como `LIKE '%term%' ESCAPE '\'` local (buildSearchLikeQuery escapa los
-  //    comodines del término). Son DOS sub-queries (una por columna), el dedup por profileId las une.
-  if (plan.tryNumericSubstring) {
+  // 3) Substring (LIKE PARCIAL local) sobre idv Y tag_electronic — tipear un prefijo/fragmento ("03200",
+  //    "AB1") ENCUENTRA los animales que lo contengan, no solo el match exacto. SQLite no tiene pg_trgm →
+  //    `LIKE '%term%' ESCAPE '\'` local (buildSearchLikeQuery escapa los comodines). Dos sub-queries (una
+  //    por columna), el dedup por profileId las une. Usa el compacto (sin separadores, como el idv guardado).
+  if (plan.tryIdvSubstring) {
     const idvRes = await runLocalQuery<LocalListRow>(
       buildSearchLikeQuery(establishmentId, 'idv', plan.compact),
       { emptyIsSyncing: false },
@@ -609,13 +644,12 @@ export async function searchAnimals(
     pushLocalRows(tagRes.value, seen, rawRows);
   }
 
-  // 4) visual_id_alt fuzzy → DEGRADADO a `LIKE '%term%'` local (sin trigram). Cubre el caso operativo
-  //    de tipear un fragmento del identificador visual. El ranking por similaridad (pg_trgm) es
-  //    post-MVP; el LIKE alcanza para el buscador de campo. El recorte de largo del término lo hizo
-  //    classifySearchQuery (R7.3); buildSearchLikeQuery escapa los comodines del término.
-  if (plan.tryVisual) {
+  // 4) APODO (custom_attributes, IDU.4.4) → `LIKE '%term%'` local sobre el value del field apodo, scopeado
+  //    al campo. Usa el NORMALIZADO (conserva espacios/guiones — un apodo es "La Colorada"). Va último: los
+  //    matches por caravana (exactos + substring) tienen prioridad; el apodo es el canal humano de nombre.
+  if (plan.tryApodo) {
     const r = await runLocalQuery<LocalListRow>(
-      buildSearchLikeQuery(establishmentId, 'visual_id_alt', plan.normalized),
+      buildApodoSearchQuery(establishmentId, plan.normalized),
       { emptyIsSyncing: false },
     );
     if (!r.ok) return { ok: false, error: r.error };
@@ -644,6 +678,29 @@ function pushLocalRows(
     seen.add(r.id);
     out.push(r);
   }
+}
+
+/**
+ * Apodos activos del campo (delta IDU, IDU.5.4) para el warning-soft de duplicado. Devuelve, por cada animal
+ * activo con apodo cargado, su `{ profileId, apodo }` (decodificado). El caller EXCLUYE el propio (IDU.5.6) y
+ * compara con `isApodoDuplicateInField`. Lectura LOCAL (offline). El scope "por campo" (IDU.5.7) lo garantiza
+ * buildApodoListQuery (ap.establishment_id = ?). Vacío legítimo (nadie tiene apodo aún) NO degrada a
+ * "Sincronizando" (emptyIsSyncing:false). Multi-tenant: el establishment llega por param, nunca hardcode.
+ */
+export async function fetchFieldApodos(
+  establishmentId: string,
+): Promise<ServiceResult<{ profileId: string; apodo: string }[]>> {
+  const r = await runLocalQuery<{ profile_id: string; value: string | null }>(
+    buildApodoListQuery(establishmentId),
+    { emptyIsSyncing: false },
+  );
+  if (!r.ok) return { ok: false, error: r.error };
+  const out: { profileId: string; apodo: string }[] = [];
+  for (const row of r.value) {
+    const apodo = decodeApodo(row.value);
+    if (apodo) out.push({ profileId: row.profile_id, apodo });
+  }
+  return { ok: true, value: out };
 }
 
 // ─── Catálogo de categorías del sistema (picker de la alta guiada, paso 3) ────────────
@@ -686,7 +743,7 @@ export async function fetchSystemCategories(
  */
 export type LookupResult =
   | { found: true; mode: 'edit'; profileId: string }
-  | { found: false; mode: 'create'; prefilled: { idv?: string; visual?: string } };
+  | { found: false; mode: 'create'; prefilled: { idv?: string } };
 
 /**
  * Motor find-or-create de la PUERTA MANUAL (R3, R1.3/R1.4). Recibe el texto que el operario tipeó.
@@ -714,10 +771,10 @@ export async function findOrCreateLookup(
     return { ok: true, value: { found: true, mode: 'edit', profileId: result.value[0].profileId } };
   }
 
-  // No-match (o múltiple-ambiguo del CTA directo) → CREATE con el id precargado (heurística R1.4).
-  const kind = classifyIdentifier(identifier);
-  const trimmed = identifier.trim();
-  const prefilled = kind === 'idv' ? { idv: trimmed } : { visual: trimmed };
+  // No-match (o múltiple-ambiguo del CTA directo) → CREATE con el texto tipeado precargado en `idv` (delta
+  // IDU, IDU.4.10): la caravana visual es alfanumérica → absorbe cualquier texto tecleado; el destino
+  // histórico `visual` (visual_id_alt) se eliminó con la columna.
+  const prefilled = { idv: identifier.trim() };
   return { ok: true, value: { found: false, mode: 'create', prefilled } };
 }
 
@@ -809,10 +866,9 @@ export type CreateAnimalInput = {
   categoryOverride: boolean;
   /** ISO 'YYYY-MM-DD' o null. */
   birthDate?: string | null;
-  /** Identificadores (al menos uno debe venir no vacío — lo garantiza el precargado de R4.2). */
+  /** Identificadores — TODOS opcionales (delta IDU, IDU.1.4: un animal puede crearse con cero). */
   tagElectronic?: string | null;
   idv?: string | null;
-  visualIdAlt?: string | null;
   /** Raza texto-libre (`animal_profiles.breed`). En el alta lo setea el BreedPicker (spec 08, T18) con el
    *  NOMBRE de la raza elegida del catálogo SENASA (ej. "Aberdeen Angus") — es la columna que PERSISTE por la
    *  RPC create_animal (0083, p_breed). Ver la nota de breed_id abajo. */
@@ -916,7 +972,6 @@ export async function createAnimal(
   //    denormalizada (animal_*) los FUERZA el trigger server-side al subir (NO se mandan, igual que online).
   const profileId = randomUuid();
   const idv = cleanStr(input.idv);
-  const visual = cleanStr(input.visualIdAlt);
   const breed = cleanStr(input.breed);
   const coat = cleanStr(input.coatColor);
   const teeth = cleanStr(input.teethState);
@@ -930,7 +985,7 @@ export async function createAnimal(
     status: 'active',
   };
   if (idv) profilePayload.idv = idv;
-  if (visual) profilePayload.visual_id_alt = visual;
+  // delta IDU: `visual_id_alt` ya no se mapea (columna eliminada; el connector tampoco pasa p_visual_id_alt).
   if (breed) profilePayload.breed = breed;
   // ⚠ breed_id NO se manda acá A PROPÓSITO (spec 08, T18 reconciliación — leader): la RPC ATÓMICA
   // create_animal (0083) que drena el alta NO tiene parámetro p_breed_id ni inserta breed_id (su INSERT
@@ -962,7 +1017,6 @@ export async function createAnimal(
         rodeoId: input.rodeoId,
         managementGroupId: input.managementGroupId ?? null,
         idv,
-        visualIdAlt: visual,
         categoryId,
         categoryOverride: input.categoryOverride,
         breed,
@@ -991,7 +1045,9 @@ type LocalDetailRow = {
   animal_id: string;
   establishment_id: string;
   idv: string | null;
-  visual_id_alt: string | null;
+  // delta IDU: visual_id_alt eliminada; apodo + apodo_enabled la reemplazan (subconsulta correlada, IDU.6.3).
+  apodo?: string | null;
+  apodo_enabled?: number | boolean | null;
   category_id: string;
   category_override: number | boolean;
   breed: string | null;
@@ -1067,7 +1123,8 @@ export async function fetchAnimalDetail(profileId: string): Promise<ServiceResul
       animalId: row.animal_id,
       establishmentId: row.establishment_id,
       idv: row.idv,
-      visualIdAlt: row.visual_id_alt,
+      apodo: decodeApodo(row.apodo),
+      rodeoUsesApodo: toBool(row.apodo_enabled ?? 0),
       tagElectronic: row.tag_electronic,
       sex: row.sex ?? 'female',
       birthDate: row.birth_date,

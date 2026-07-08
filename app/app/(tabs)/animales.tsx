@@ -35,7 +35,7 @@ import {
   type AnimalStatus,
 } from '@/services/animals';
 import type { Rodeo } from '@/services/rodeos';
-import { classifyIdentifier, SEARCH_TERM_MAX_LENGTH } from '@/utils/animal-identifier';
+import { SEARCH_TERM_MAX_LENGTH } from '@/utils/animal-identifier';
 import { buttonA11y } from '@/utils/a11y';
 
 const SEARCH_DEBOUNCE_MS = 250; // R1.2
@@ -219,14 +219,14 @@ export default function AnimalesScreen() {
   // Empty real del establecimiento: 0 animales SIN ningún filtro.
   const showEmptyEstablishment = listEmpty && !hasActiveFilter;
 
-  // No-match (R1.4): el CTA "Dar de alta" abre /crear-animal con el id precargado en el campo
-  // apropiado (idv si parece numérico/estructurado, visual si texto libre). Heurística pura.
+  // No-match (R1.4 / IDU.4.10): el CTA "Dar de alta" abre /crear-animal con el texto tipeado precargado en
+  // `idv` (la caravana visual es alfanumérica → absorbe cualquier texto; el destino histórico `visual` se
+  // eliminó con visual_id_alt).
   const onCreateFromNoMatch = useCallback(() => {
     const q = debouncedQuery.trim();
-    const kind = classifyIdentifier(q);
     router.push({
       pathname: '/crear-animal',
-      params: kind === 'idv' ? { idv: q } : { visual: q },
+      params: { idv: q },
     });
   }, [debouncedQuery, router]);
 
@@ -387,7 +387,8 @@ export default function AnimalesScreen() {
               <AnimalRow
                 key={animal.profileId}
                 idv={animal.idv ?? undefined}
-                visualId={animal.visualIdAlt ?? undefined}
+                apodo={animal.apodo}
+                rodeoUsesApodo={animal.rodeoUsesApodo}
                 tagElectronic={animal.tagElectronic}
                 category={animal.categoryName || animal.categoryCode}
                 categoryCode={animal.categoryCode}

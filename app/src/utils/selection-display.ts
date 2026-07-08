@@ -6,7 +6,8 @@
 /** Forma mínima de un perfil para ordenar/buscar por identificador (la cumple GroupSelectionProfile). */
 export type DisplayProfile = {
   idv: string | null;
-  visualIdAlt: string | null;
+  /** Nombre/Apodo del animal (delta IDU: reemplaza visual_id_alt) — busca/ordena por él. */
+  apodo: string | null;
   tagElectronic: string | null;
 };
 
@@ -17,9 +18,9 @@ export type DisplayProfile = {
  */
 export const SEARCH_THRESHOLD = 20;
 
-/** Identificador "hero" por el que se ordena/busca: idv → visualId → '' (orden estable). */
+/** Identificador "hero" por el que se ordena/busca: idv → apodo → '' (orden estable, delta IDU). */
 function identifierOf(p: DisplayProfile): string {
-  return (p.idv ?? p.visualIdAlt ?? '').trim();
+  return (p.idv ?? p.apodo ?? '').trim();
 }
 
 /**
@@ -55,15 +56,15 @@ export function shouldShowSearch(totalCandidates: number): boolean {
 }
 
 /**
- * Filtra candidatos por una query de búsqueda (R11.9), case-insensitive, sobre idv / visualId / caravana
- * electrónica (los identificadores que el operario lee del animal). Query vacía/espacios → devuelve TODO
- * (sin filtrar). NO muta. PURA.
+ * Filtra candidatos por una query de búsqueda (R11.9), case-insensitive, sobre idv / apodo / caravana
+ * electrónica (los identificadores que el operario lee del animal — delta IDU: apodo reemplaza visual_id_alt).
+ * Query vacía/espacios → devuelve TODO (sin filtrar). NO muta. PURA.
  */
 export function filterBySearch<T extends DisplayProfile>(profiles: readonly T[], rawQuery: string): T[] {
   const q = rawQuery.trim().toLocaleLowerCase('es-AR');
   if (q === '') return [...profiles];
   return profiles.filter((p) => {
-    const haystack = [p.idv, p.visualIdAlt, p.tagElectronic]
+    const haystack = [p.idv, p.apodo, p.tagElectronic]
       .filter((s): s is string => s != null)
       .join(' ')
       .toLocaleLowerCase('es-AR');

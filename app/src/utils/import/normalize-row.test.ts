@@ -107,7 +107,6 @@ test('normalizeRow: fila completa válida normaliza todo', () => {
   const row = normalizeRow({
     tag_electronic: '982000123456789',
     idv: '0241',
-    visual_id_alt: 'R-14',
     sex: 'macho',
     birth_date: '05/03/2024',
     breed: 'Angus',
@@ -118,7 +117,6 @@ test('normalizeRow: fila completa válida normaliza todo', () => {
     {
       tag: row.tagElectronic,
       idv: row.idv,
-      visual: row.visualIdAlt,
       sex: row.sex,
       birth: row.birthDate,
       breed: row.breed,
@@ -128,7 +126,6 @@ test('normalizeRow: fila completa válida normaliza todo', () => {
     {
       tag: '982000123456789',
       idv: '0241',
-      visual: 'R-14',
       sex: 'male',
       birth: '2024-03-05',
       breed: 'Angus',

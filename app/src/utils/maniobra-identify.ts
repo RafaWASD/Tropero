@@ -125,7 +125,8 @@ export function resolveBleIdentify(result: TagLookupResult, eid: string): Identi
  */
 export type ManualCandidate = {
   profileId: string;
-  visualIdAlt?: string | null;
+  /** Nombre/Apodo (delta IDU: reemplaza visual_id_alt). El identificador humano de nombre. */
+  apodo?: string | null;
   idv?: string | null;
   tagElectronic?: string | null;
   rodeoName?: string;
@@ -136,7 +137,7 @@ export type ManualCandidate = {
 function toDisambiguationCandidate(c: ManualCandidate): DisambiguationCandidate {
   return {
     profileId: c.profileId,
-    visualIdAlt: c.visualIdAlt ?? null,
+    apodo: c.apodo ?? null,
     idv: c.idv ?? null,
     tagElectronic: c.tagElectronic ?? null,
     rodeoName: c.rodeoName ?? '',
@@ -151,15 +152,15 @@ function normalizeId(v: string | null | undefined): string {
 
 /**
  * ¿El candidato matchea EXACTAMENTE el texto tecleado (no solo por substring/fuzzy)? Un match exacto es por
- * idv === texto, visual_id_alt === texto, o tag_electronic === texto (todo case-insensitive, trim). El
- * substring fuzzy (`searchAnimals` corre `LIKE '%texto%'` sobre idv/tag/visual) puede devolver un animal cuya
- * caravana sólo CONTIENE el texto (ej. tecleo "42" → matchea idv "1428") — ese NO es exacto. Distinguirlo es
- * lo que evita auto-cargar la caravana EQUIVOCADA (bug "otra caravana").
+ * idv === texto, apodo === texto, o tag_electronic === texto (todo case-insensitive, trim — IDU.4.11). El
+ * substring fuzzy (`searchAnimals` corre `LIKE '%texto%'` sobre idv/tag/apodo) puede devolver un animal cuyo
+ * identificador sólo CONTIENE el texto (ej. tecleo "42" → matchea idv "1428") — ese NO es exacto. Distinguirlo
+ * es lo que evita auto-cargar la caravana EQUIVOCADA (bug "otra caravana").
  */
 function isExactMatch(c: ManualCandidate, text: string): boolean {
   const t = normalizeId(text);
   if (t.length === 0) return false;
-  return normalizeId(c.idv) === t || normalizeId(c.visualIdAlt) === t || normalizeId(c.tagElectronic) === t;
+  return normalizeId(c.idv) === t || normalizeId(c.apodo) === t || normalizeId(c.tagElectronic) === t;
 }
 
 /**
@@ -219,21 +220,19 @@ export function shouldAutoAdvance(outcome: IdentifyOutcome): boolean {
 // ─── Validación del rodeo de la sesión para el find-or-create (R4.1) ───────────────────────────
 
 /**
- * Resuelve el identificador precargado del find-or-create inline (R4.1) según cómo se identificó: por BLE
- * va en `tag` (caravana electrónica), por manual va en el campo que la heurística elija (numérico → idv;
- * si no → visual). PURA: la heurística numérica es la misma que classifyIdentifier de animals.ts, pero la
- * replicamos mínima acá para no arrastrar el SDK al test (un texto que es solo dígitos → idv; si no → visual).
+ * Resuelve el identificador precargado del find-or-create inline (R4.1 / IDU.4.10) según cómo se identificó:
+ * por BLE va en `tag` (caravana electrónica); por manual el texto tipeado se precarga SIEMPRE en `idv` (la
+ * caravana visual es ahora alfanumérica, así que absorbe el número o el texto tecleado — el destino histórico
+ * `visual` de `visual_id_alt` se eliminó con la columna). PURA.
  *
  * @returns el shape de params para `/crear-animal` (solo el campo que corresponde precargado).
  */
 export function resolvePrefilledCreateParams(
   outcome: Extract<IdentifyOutcome, { kind: 'unknown' }>,
-): { tag?: string; idv?: string; visual?: string } {
+): { tag?: string; idv?: string } {
   if (outcome.source === 'ble') {
     return { tag: outcome.identifier };
   }
-  const trimmed = outcome.identifier.trim();
-  // Manual: numérico puro → idv; cualquier otro → visual (caravana visual alfanumérica).
-  if (/^\d+$/.test(trimmed)) return { idv: trimmed };
-  return { visual: trimmed };
+  // Manual: el texto tipeado se precarga en idv (alfanumérico); el sanitizer del campo lo depura al mostrarlo.
+  return { idv: outcome.identifier.trim() };
 }

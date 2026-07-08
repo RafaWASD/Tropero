@@ -6,13 +6,13 @@ import assert from 'node:assert/strict';
 import {
   sanitizeTagInput,
   sanitizeIdvInput,
-  sanitizeVisualInput,
+  sanitizeApodoInput,
   maskDateInput,
   sanitizeWeightInput,
   isValidTagElectronic,
   TAG_ELECTRONIC_LENGTH,
   IDV_MAX_LENGTH,
-  VISUAL_MAX_LENGTH,
+  APODO_MAX_LENGTH,
 } from './animal-input.ts';
 
 // ─── Caravana electrónica: solo dígitos, máx 15 ─────────────────────────────────────────
@@ -56,13 +56,35 @@ test('FIX2 sanitizeIdvInput: alfanumérico (CUIG/binomio), máx IDV_MAX_LENGTH',
   assert.equal(IDV_MAX_LENGTH, 15);
 });
 
-// ─── Visual: texto libre acotado ────────────────────────────────────────────────────────
+// ─── Apodo: alfanum + ñ/tildes + espacio + guion, cap 15 (IDU.5.1) ──────────────────────
 
-test('FIX2 sanitizeVisualInput: NO filtra caracteres, solo acota el largo', () => {
-  assert.equal(sanitizeVisualInput('vaca blanca'), 'vaca blanca');
-  assert.equal(sanitizeVisualInput('R-14'), 'R-14');
-  const long = 'a'.repeat(60);
-  assert.equal(sanitizeVisualInput(long).length, VISUAL_MAX_LENGTH);
+test('IDU.5.1 sanitizeApodoInput: conserva letras/dígitos/espacios/guiones', () => {
+  assert.equal(sanitizeApodoInput('Manchada'), 'Manchada');
+  assert.equal(sanitizeApodoInput('La Colorada'), 'La Colorada'); // espacio + 11 chars
+  assert.equal(sanitizeApodoInput('R-14'), 'R-14'); // guion
+  assert.equal(sanitizeApodoInput('vaca 3'), 'vaca 3'); // alfanumérico + espacio
+});
+
+test('IDU.5.1 sanitizeApodoInput: conserva ñ y tildes (es-AR, charset Puerta 1)', () => {
+  assert.equal(sanitizeApodoInput('Toño'), 'Toño');
+  assert.equal(sanitizeApodoInput('Ñata'), 'Ñata');
+  assert.equal(sanitizeApodoInput('Piñón Güí'), 'Piñón Güí');
+  assert.equal(sanitizeApodoInput('MANÍ'), 'MANÍ');
+});
+
+test('IDU.5.1 sanitizeApodoInput: descarta símbolos fuera del charset', () => {
+  assert.equal(sanitizeApodoInput('Manchada#1!'), 'Manchada1');
+  assert.equal(sanitizeApodoInput('a@b_c.d/e'), 'abcde'); // @ _ . / descartados
+  assert.equal(sanitizeApodoInput('emoji🐄x'), 'emojix');
+  assert.equal(sanitizeApodoInput(''), '');
+});
+
+test('IDU.5.1 sanitizeApodoInput: corta a APODO_MAX_LENGTH (15)', () => {
+  assert.equal(APODO_MAX_LENGTH, 15);
+  assert.equal(sanitizeApodoInput('unnombremuylargoquesepasa'), 'unnombremuylarg');
+  assert.equal(sanitizeApodoInput('unnombremuylargoquesepasa').length, APODO_MAX_LENGTH);
+  // El corte es tras filtrar: los símbolos NO cuentan para el cap.
+  assert.equal(sanitizeApodoInput('###La Colorada###'), 'La Colorada');
 });
 
 // ─── Fecha: máscara AAAA-MM-DD en vivo ──────────────────────────────────────────────────

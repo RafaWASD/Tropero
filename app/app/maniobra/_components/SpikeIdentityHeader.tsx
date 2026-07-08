@@ -6,8 +6,8 @@
 // (`identify-found.png`: "Caravana 0385" grande + "982 000412345678" muted). Luego rodeo + categoría en
 // muted, y un chip de progreso. Fondo $surface (bone) → CONTEXTO, distinto de la zona de acción ($bg) →
 // figura-fondo. Compartido por carga.tsx (decisión binaria) y paso.tsx (pesaje) para que las dos pantallas
-// hero tengan EXACTAMENTE la misma capa de identidad. El call-site (carga.tsx) decide la PRIORIDAD
-// visual > electrónico (`visual_id_alt || idv`); el tag electrónico va acá como secundario.
+// hero tengan EXACTAMENTE la misma capa de identidad. El call-site (carga.tsx) decide la PRIORIDAD de la
+// identidad dominante (delta IDU: idv → tag; el 4to campo visual_id_alt se eliminó); el tag va acá secundario.
 //
 // JERARQUÍA (regla de campo, R12.4): el operario verifica el animal por la caravana VISUAL que lee en la
 // oreja, NO por el RFID de 15 dígitos. Por eso `idv` (grande) = caravana visual humana, y `tagElectronic`
@@ -21,7 +21,7 @@
 import { Text, View, XStack, YStack } from 'tamagui';
 
 export type SpikeIdentityHeaderProps = {
-  /** Caravana VISUAL humana (`visual_id_alt || idv`) — la verificación #1 (grande y bold, R12.4). */
+  /** Identidad dominante ya resuelta por el caller (delta IDU: idv → tag) — la verificación #1 (grande, R12.4). */
   idv: string;
   /**
    * Tag electrónico (RFID 15 díg, ya formateado legible) — confirmación de la lectura BLE, MUTED y

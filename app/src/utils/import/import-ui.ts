@@ -27,7 +27,6 @@ import type { SigsaRecord } from './parse-sigsa-txt';
 export const CENSUS_FIELDS: readonly CensusField[] = Object.freeze([
   'tag_electronic',
   'idv',
-  'visual_id_alt',
   'sex',
   'birth_date',
   'breed',
@@ -37,18 +36,16 @@ export const CENSUS_FIELDS: readonly CensusField[] = Object.freeze([
 
 /** Census fields that are REQUIRED for a row to be writable (≥1 identifier + sex, R5.1/R5.2). */
 export const REQUIRED_CENSUS_FIELDS: readonly CensusField[] = Object.freeze(['sex']);
-/** The identifier fields — at least one mapped is needed (ADR-005, R5.1). */
+/** The identifier fields — at least one mapped is needed (ADR-005, R5.1). delta IDU: sin visual_id_alt. */
 export const IDENTIFIER_FIELDS: readonly CensusField[] = Object.freeze([
   'tag_electronic',
   'idv',
-  'visual_id_alt',
 ]);
 
 /** Spanish label for each census field (UI — voseo, manga-friendly). */
 const CENSUS_FIELD_LABELS: Readonly<Record<CensusField, string>> = Object.freeze({
   tag_electronic: 'Caravana electrónica',
   idv: 'Caravana visual (IDV)',
-  visual_id_alt: 'Otro ID visual',
   sex: 'Sexo',
   birth_date: 'Fecha de nacimiento',
   breed: 'Raza',
@@ -163,7 +160,7 @@ export function normalizeSigsaRows(records: SigsaRecord[]): NormalizedRow[] {
 // preview/result UI shows a generic legible line for it instead of the raw detail.
 
 const ROW_ERROR_COPY: Readonly<Record<RowErrorReason, string>> = Object.freeze({
-  missing_identifier: 'Falta un identificador (caravana electrónica, IDV u otro ID visual).',
+  missing_identifier: 'Falta un identificador (caravana electrónica o caravana visual/IDV).',
   missing_sex: 'Falta el sexo o no se entiende el valor.',
   field_over_cap: 'Un campo es demasiado largo.',
   invalid_field: 'Un dato de la fila no es válido.',
@@ -232,10 +229,9 @@ export type PreviewItem =
   | { index: number; status: 'error'; label: string; reason: string }
   | { index: number; status: 'duplicate'; label: string; reason: string };
 
-/** A short human label for a row in the preview list (its best identifier or "Fila N"). PURE. */
+/** A short human label for a row in the preview list (its best identifier or "Fila N"). PURE. (delta IDU: sin visual_id_alt.) */
 export function rowLabel(row: NormalizedRow, index: number): string {
   if (row.idv) return `IDV ${row.idv}`;
-  if (row.visualIdAlt) return row.visualIdAlt;
   if (row.tagElectronic) return `TAG ${row.tagElectronic}`;
   return `Fila ${index + 1}`;
 }

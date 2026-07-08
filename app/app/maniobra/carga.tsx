@@ -101,16 +101,13 @@ import { LotePickerSheet } from './_components/LotePickerSheet';
 type FrameMode = 'step' | 'summary';
 
 /**
- * Identidad DOMINANTE del header (R5.1/R12.4): la CARAVANA VISUAL HUMANA que el operario LEE en la oreja,
- * NO el RFID de 15 dígitos. Prioridad visual > electrónico (consistente con `identify-found.png`, que
- * lidera con "Caravana 0385"):
- *   visual_id_alt → idv → (fallback) tag electrónico formateado → "—".
- * El tag electrónico solo es dominante cuando el animal NO tiene NINGUNA caravana visual (animal sin idv
- * ni visual cargados): recién ahí lo mostramos legible como identidad. Si hay visual/idv, el tag va MUTED
- * (ver `mutedTag`).
+ * Identidad DOMINANTE del header (R5.1/R12.4): la caravana VISUAL (idv) que el operario LEE en la oreja, NO
+ * el RFID de 15 dígitos. delta IDU: el 4to campo `visual_id_alt` se eliminó → prioridad idv → (fallback) tag
+ * electrónico formateado → "—". El tag electrónico solo es dominante cuando el animal NO tiene idv: recién
+ * ahí lo mostramos legible como identidad. Si hay idv, el tag va MUTED (ver `mutedTag`). El apodo NO se usa
+ * como identidad de manga (el flujo es scan/idv-driven; AnimalDetail no lo transporta).
  */
 function displayIdentity(a: AnimalDetail): string {
-  if (a.visualIdAlt) return a.visualIdAlt;
   if (a.idv) return a.idv;
   if (a.tagElectronic) return formatEidReadable(a.tagElectronic);
   return '—';
@@ -118,14 +115,14 @@ function displayIdentity(a: AnimalDetail): string {
 
 /**
  * Tag electrónico MUTED (secundario) para confirmar la lectura BLE debajo de la caravana visual. Solo se
- * muestra cuando la identidad dominante NO es ya el tag (es decir, cuando hay visual/idv): si el animal no
- * tiene caravana visual, el tag ya subió a dominante (displayIdentity) → no lo repetimos abajo. Devuelve
- * null si no hay tag o si el tag ya es la identidad dominante.
+ * muestra cuando la identidad dominante NO es ya el tag (es decir, cuando hay idv): si el animal no tiene
+ * idv, el tag ya subió a dominante (displayIdentity) → no lo repetimos abajo. Devuelve null si no hay tag o
+ * si el tag ya es la identidad dominante.
  */
 function mutedTag(a: AnimalDetail): string | null {
   if (!a.tagElectronic) return null;
-  // ¿El tag YA es la identidad dominante? (no hay visual ni idv) → no repetirlo muted.
-  if (!a.visualIdAlt && !a.idv) return null;
+  // ¿El tag YA es la identidad dominante? (no hay idv) → no repetirlo muted.
+  if (!a.idv) return null;
   return formatEidReadable(a.tagElectronic);
 }
 

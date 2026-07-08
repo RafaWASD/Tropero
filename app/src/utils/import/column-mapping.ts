@@ -15,11 +15,10 @@
 // accent-stripped, punctuation→space) and matched against the synonym table. We never
 // match by cell CONTENT here — only the header label.
 
-/** The census fields an imported column can map to (design §1.1 / R4.1). */
+/** The census fields an imported column can map to (design §1.1 / R4.1). delta IDU: `visual_id_alt` removido. */
 export type CensusField =
   | 'tag_electronic'
   | 'idv'
-  | 'visual_id_alt'
   | 'sex'
   | 'birth_date'
   | 'breed'
@@ -47,18 +46,17 @@ const SYNONYMS: Readonly<Record<CensusField, readonly string[]>> = Object.freeze
     'dispositivo',
     'identificacion electronica',
   ],
-  // Internal visual ID (caravana visual numérica / DIV).
-  idv: ['idv', 'caravana', 'caravana visual', 'numero de caravana', 'nro caravana', 'div'],
-  // Alternative / painted visual mark.
-  visual_id_alt: [
+  // Caravana visual (idv), alfanumérica (CUIG/binomio). delta IDU: absorbe los sinónimos "visuales" (el
+  // 4to campo visual_id_alt se eliminó); un header "identificación visual"/"seña" mapea al idv.
+  idv: [
+    'idv',
+    'caravana',
+    'caravana visual',
+    'numero de caravana',
+    'nro caravana',
+    'div',
     'identificacion visual',
     'id visual',
-    'sena',
-    'senal',
-    'marca',
-    'visual',
-    'alias',
-    'apodo',
   ],
   sex: ['sexo', 'sex', 'genero', 'macho hembra', 'm h'],
   birth_date: [

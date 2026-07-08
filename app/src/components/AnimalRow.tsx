@@ -26,6 +26,7 @@ import { Check, ChevronRight, Star, Tag } from 'lucide-react-native';
 import { CategoryBadge } from './CategoryBadge';
 import { labelA11y } from '../utils/a11y';
 import { reproStatusLabel, type ReproStatus } from '../utils/repro-status';
+import { pickHeroIdentifier } from '../utils/animal-identifier';
 
 // ─── Tipos públicos ───────────────────────────────────────────────────────────
 
@@ -33,10 +34,15 @@ export type AnimalSex = 'male' | 'female';
 export type AnimalStatus = 'active' | 'sold' | 'dead' | 'transferred';
 
 export type AnimalRowProps = {
-  /** Caravana oficial / IDV (numérica/estructurada). Identificador primario si existe. */
+  /** Caravana visual (idv), alfanumérica. Identificador primario si no hay apodo hero. */
   idv?: string;
-  /** Número/texto visible pintado en el animal (`visual_id_alt`). */
-  visualId?: string;
+  /**
+   * Nombre/Apodo del animal (delta IDU: reemplaza `visualId`). Cuando el rodeo usa apodo (`rodeoUsesApodo`)
+   * Y el animal tiene apodo, pasa a HERO (campo grande) y la caravana baja a la línea secundaria (IDU.6).
+   */
+  apodo?: string | null;
+  /** ¿El rodeo del animal habilita el campo apodo? (IDU.6.5). Solo con true + apodo el apodo es hero. */
+  rodeoUsesApodo?: boolean;
   /** Caravana electrónica. Si null/undefined → chip neutro "sin caravana" (gancho R1.5). */
   tagElectronic?: string | null;
   /** Categoría (texto, SIN color de estado): "Vaca" | "Vaquillona" | "Ternero"… */
@@ -328,7 +334,8 @@ function RowCheckbox({ checked }: { checked: boolean }) {
 
 export function AnimalRow({
   idv,
-  visualId,
+  apodo,
+  rodeoUsesApodo,
   tagElectronic,
   category,
   sex,
@@ -348,10 +355,16 @@ export function AnimalRow({
   const chevronColor = getTokenValue('$textFaint', 'color');
   const chevronSize = getTokenValue('$navIcon', 'size'); // 24
 
-  // Identificador HERO (el dato por el que el operario toca la fila): idv → visualId → "—".
-  const hero = idv ?? visualId ?? '—'; // —
-  // Si existen AMBOS, el hero es idv y el visualId va como secundario inline muted.
-  const showSecondaryVisual = idv != null && visualId != null;
+  // Identificador HERO (delta IDU, IDU.6): apodo (si el rodeo usa apodo y el animal lo tiene) → idv → tag →
+  // "—". Cuando el hero es el apodo, la caravana (idv o electrónica) baja a la línea secundaria muted.
+  const heroResult = pickHeroIdentifier({
+    apodo: apodo ?? null,
+    rodeoUsesApodo: rodeoUsesApodo ?? false,
+    idv: idv ?? null,
+    tag: tagElectronic ?? null,
+  });
+  const hero = heroResult.value ?? '—'; // fallback "sin caravana" cuando kind==='none'
+  const secondary = heroResult.secondary; // caravana chica cuando el hero es apodo (o null)
 
   // Estado de caravana electrónica: null/undefined → estado neutral "sin caravana".
   const hasTag = tagElectronic != null;
@@ -365,7 +378,7 @@ export function AnimalRow({
   const a11ySuffix = compact
     ? `${age ? `, ${age}` : ''}${showStar ? ', futuro torito' : ''}`
     : `, ${rodeo}${hasTag ? '' : ', sin caravana'}`;
-  const a11yLabel = `${category}, ${idv ?? visualId ?? 'sin identificador'}${a11ySuffix}`;
+  const a11yLabel = `${category}, ${heroResult.value ?? 'sin identificador'}${a11ySuffix}`;
 
   const a11yProps = hasCheckbox
     ? { accessibilityRole: 'checkbox' as const, accessibilityState: { checked: checked ?? false } }
@@ -399,8 +412,8 @@ export function AnimalRow({
 
         {/* Centro (flex): hero + subtítulo. minWidth=0 para permitir truncado sin empujar. */}
         <YStack flex={1} minWidth={0} gap="$1">
-          {/* Hero: identificador primario que POP-EA (bold, $6/18px, $textPrimary). Si hay
-              ambos, el visualId va inline a la derecha como secundario muted. */}
+          {/* Hero: identificador primario que POP-EA (bold, $6/18px, $textPrimary). Cuando el hero es el
+              apodo (IDU.6.2), la caravana (idv o electrónica) va inline a la derecha como secundario muted. */}
           <XStack alignItems="baseline" gap="$2" minWidth={0}>
             <Text
               fontFamily="$body"
@@ -413,7 +426,7 @@ export function AnimalRow({
             >
               {hero}
             </Text>
-            {showSecondaryVisual ? (
+            {secondary ? (
               <Text
                 fontFamily="$body"
                 fontSize="$3"
@@ -423,7 +436,7 @@ export function AnimalRow({
                 flexShrink={1}
                 minWidth={0}
               >
-                {`· #${visualId}`}
+                {`· #${secondary.value}`}
               </Text>
             ) : null}
           </XStack>

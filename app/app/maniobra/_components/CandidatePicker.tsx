@@ -1,14 +1,13 @@
 // app/maniobra/_components/CandidatePicker.tsx — PICKER de desambiguación manual (spec 03 M2.1-edge, R4.2).
 //
 // 🔴 PANTALLA DE MANGA (se usa con una mano, a pleno sol, con guantes/barro): cuando la búsqueda MANUAL
-// por caravana visual (visual_id_alt) devuelve >1 candidato (caravana visual duplicada), el operario
-// elige el correcto de una lista de filas GRANDES tappables — NO se auto-elige el equivocado (M2.1-core
-// dejaba el estado seguro `ambiguous`; esto le da la UI de selección).
+// por nombre/caravana devuelve >1 candidato (identificador duplicado), el operario elige el correcto de
+// una lista de filas GRANDES tappables — NO se auto-elige el equivocado (M2.1-core dejaba el estado seguro
+// `ambiguous`; esto le da la UI de selección).
 //
-// JERARQUÍA DE LA FILA (consistente con el header de identidad de la carga, displayIdentity: visual >
-// electrónico):
-//   - DOMINANTE: la caravana visual humana (visual_id_alt → idv), grande y bold — lo que el operario LEE
-//     en la oreja. Si no hay ninguna, cae al tag electrónico formateado.
+// JERARQUÍA DE LA FILA (delta IDU — apodo reemplaza visual_id_alt):
+//   - DOMINANTE: el nombre humano (apodo → idv), grande y bold — lo que el operario LEE en la oreja. Si no
+//     hay ninguno, cae al tag electrónico formateado.
 //   - SECUNDARIO DISTINTIVO: "rodeo · categoría" (lo que diferencia dos "0385": están en rodeos/categorías
 //     distintos). Es el dato que DESAMBIGUA.
 //   - CONFIRMACIÓN FINA: el tag electrónico muted (si lo tiene) — único global, la prueba definitiva.

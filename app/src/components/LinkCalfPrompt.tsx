@@ -222,11 +222,7 @@ export function LinkCalfPrompt({
 
     const c = classifyCalfQuery(rawQuery);
     if (c.kind === 'empty') {
-      setFieldError('Ingresá la caravana del ternero.');
-      return;
-    }
-    if (c.kind === 'too-short') {
-      setFieldError('Revisá la caravana: es muy corta.');
+      setFieldError('Ingresá la caravana o el nombre del ternero.');
       return;
     }
     if (!establishmentId || !motherProfileId) {
@@ -674,11 +670,11 @@ export function LinkCalfPrompt({
   );
 }
 
-/** Etiqueta legible del ternero encontrado: idv ?? visual ?? caravana electrónica ?? "el ternero". */
+/** Etiqueta legible del ternero encontrado (delta IDU): idv ?? apodo ?? caravana electrónica ?? "el ternero". */
 function calfLabel(item: AnimalListItem): string {
   return (
     cleanLabel(item.idv) ??
-    cleanLabel(item.visualIdAlt) ??
+    cleanLabel(item.apodo) ??
     cleanLabel(item.tagElectronic) ??
     'el ternero'
   );

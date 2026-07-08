@@ -7,15 +7,8 @@
 //   - birth_date no futuro (no podés cargar un animal nacido mañana).
 //   - entry_date ≥ birth_date si ambas presentes (no entró antes de nacer).
 //   - entry_weight / birth_weight > 0 si presentes (numeric, peso positivo).
-//   - identidad MÍNIMA: al menos uno de tag_electronic / idv / visual_id_alt (hasAtLeastOneIdentifier).
-//
-// IDENTIDAD MÍNIMA (animal_profiles_identity_check, 0021 / R6.2): el server EXIGE al menos un
-// identificador. En el camino de find-or-create siempre hay uno PRECARGADO (R4.2) → se cumple solo.
-// PERO el ALTA EN BLANCO (entrada "Dar de alta tu primer animal", sin precarga) puede llegar al submit
-// con los tres vacíos: ahí create_animal rechaza con 23514 al subir y el alta se PIERDE en silencio
-// (queda solo en el overlay local, nunca aterriza en Postgres). Por eso `hasAtLeastOneIdentifier`
-// valida en el CLIENTE antes de encolar el intent — no encolamos un alta condenada (offline-first sin
-// pérdida). Espeja el constraint del server; no relajamos la validación cliente.
+//   (delta IDU, IDU.1.4/IDU.1.5: la regla de "identidad mínima ≥1" se ELIMINÓ — un animal puede crearse con
+//   cero identificadores; el trigger animal_profiles_identity_check se dropea en la migración 0122).
 
 import type { AnimalSex } from './animal-category';
 
@@ -105,24 +98,10 @@ export function validateAnimalCreate(
   return { ...errors, valid };
 }
 
-/**
- * ¿El alta lleva al menos UN identificador? El server (animal_profiles_identity_check, 0021 / R6.2)
- * exige al menos uno de tag_electronic / idv / visual_id_alt; sin ninguno, create_animal rechaza con
- * 23514 al subir y el alta se PIERDE en silencio (queda solo en el overlay local). Validamos en el
- * cliente ANTES de encolar el intent (camino de ALTA EN BLANCO, sin identificador precargado). Trim
- * defensivo: un campo con solo espacios NO cuenta (el server hace nullif(trim(...)) → quedaría NULL).
- */
-export function hasAtLeastOneIdentifier(
-  tag: string | null | undefined,
-  idv: string | null | undefined,
-  visual: string | null | undefined,
-): boolean {
-  return (
-    (tag ?? '').trim().length > 0 ||
-    (idv ?? '').trim().length > 0 ||
-    (visual ?? '').trim().length > 0
-  );
-}
+// delta IDU (IDU.1.4/IDU.1.5): `hasAtLeastOneIdentifier` se ELIMINÓ. El server ya no exige "al menos uno"
+// (el trigger animal_profiles_identity_check se dropea en la migración 0122) → un animal puede crearse y
+// persistir con CERO identificadores de usuario (tag/idv/apodo todos ausentes) sin 23514. El alta en blanco
+// deja de bloquearse en el cliente (no hay pérdida silenciosa que prevenir).
 
 /** Parsea el peso aceptando coma decimal (es-AR): "320,5" → 320.5. null si no es número. */
 export function parseWeight(raw: string): number | null {

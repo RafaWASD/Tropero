@@ -14,7 +14,7 @@ import { buttonA11y } from '../../utils/a11y';
 export type AlertItem = {
   /** Clave estable (animal_profile_id + discriminador si un animal aparece dos veces). */
   key: string;
-  /** Identificador visible del animal (IDV / visual_id_alt resuelto). */
+  /** Identificador visible del animal (delta IDU: IDV resuelto por animalLabel, o "Sin identificación"). */
   animal: string;
   /** Línea principal del dato accionable (ej. "Aftosa" / "Vaquillona"). */
   primary: string;

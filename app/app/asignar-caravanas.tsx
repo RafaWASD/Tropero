@@ -54,6 +54,7 @@ import {
   type AnimalListItem,
 } from '@/services/animals';
 import { formatEidReadable } from '@/utils/eid-format';
+import { pickHeroIdentifier } from '@/utils/animal-identifier';
 import { buttonA11y, labelA11y } from '@/utils/a11y';
 import { backOr } from '@/utils/nav';
 
@@ -637,7 +638,13 @@ function CandidateRow({
   candidate: AnimalListItem;
   onPress: () => void;
 }) {
-  const hero = candidate.idv ?? candidate.visualIdAlt ?? 'Sin identificación';
+  const heroResult = pickHeroIdentifier({
+    apodo: candidate.apodo,
+    rodeoUsesApodo: candidate.rodeoUsesApodo,
+    idv: candidate.idv,
+    tag: candidate.tagElectronic,
+  });
+  const hero = heroResult.value ?? 'Sin identificación';
   const sexLabel = candidate.sex === 'male' ? 'Macho' : 'Hembra';
   const chevronSize = getTokenValue('$navIcon', 'size');
   const chevronColor = getTokenValue('$textMuted', 'color');
@@ -653,9 +660,9 @@ function CandidateRow({
               <Text fontFamily="$body" fontSize="$6" lineHeight="$6" fontWeight="700" color="$textPrimary" numberOfLines={1}>
                 {hero}
               </Text>
-              {candidate.visualIdAlt && candidate.idv ? (
+              {heroResult.secondary ? (
                 <Text fontFamily="$body" fontSize="$3" fontWeight="500" color="$textMuted" numberOfLines={1}>
-                  {candidate.visualIdAlt}
+                  {`#${heroResult.secondary.value}`}
                 </Text>
               ) : null}
             </XStack>
@@ -676,7 +683,13 @@ function CandidateRow({
 
 // ─── Resumen del candidato en el paso de confirmación (sin Pressable: solo info) ───
 function CandidateSummary({ candidate }: { candidate: AnimalListItem }) {
-  const hero = candidate.idv ?? candidate.visualIdAlt ?? 'Sin identificación';
+  const hero =
+    pickHeroIdentifier({
+      apodo: candidate.apodo,
+      rodeoUsesApodo: candidate.rodeoUsesApodo,
+      idv: candidate.idv,
+      tag: candidate.tagElectronic,
+    }).value ?? 'Sin identificación';
   const sexLabel = candidate.sex === 'male' ? 'Macho' : 'Hembra';
   return (
     <YStack

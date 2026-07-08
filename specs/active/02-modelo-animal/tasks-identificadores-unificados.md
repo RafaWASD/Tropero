@@ -23,34 +23,34 @@
 
 ## Fase B — PowerSync: schema + reads + connector `[FRONTEND/PowerSync]`
 
-- [ ] **B1** — `schema.ts`: quitar `visual_id_alt` de `animal_profiles` y `pending_animal_profiles`. Cubre: IDU.3.1.
-- [ ] **B2** — `local-reads.ts`: quitar `visual_id_alt` de `LOCAL_LIST_SELECT`, `LOCAL_LIST_SELECT_OVERLAY`, la whitelist de `buildSearchLikeQuery`, y la lectura de la madre del vínculo cría-al-pie (synced + overlay). Cubre: IDU.3.2, IDU.4.5.
-- [ ] **B3** — `upload.ts`: el connector deja de mapear `visual_id_alt` (INSERT/PATCH de `animal_profiles`) y `p_visual_id_alt` (replay de `create_animal`). Cubre: IDU.3.3.
-- [ ] **B4** — `local-reads.ts`: `buildApodoSearchQuery(establishmentId, term)` (join `custom_attributes`+`field_definitions` por `data_key='apodo'`, scope `ap.establishment_id`, LIKE escapado sobre `value`) devolviendo `LocalListRow`. Cubre: IDU.4.4. `[unit]` test del SQL builder.
-- [ ] **B5** — `local-reads.ts`: enriquecer `LOCAL_LIST_SELECT`/`_OVERLAY` con `apodo` (LEFT JOIN custom_attributes+fd) + `apodo_enabled` (LEFT JOIN `rodeo_data_config` con overlay `pending_rodeo_data_config`, subconsulta del apodo fd id) (design §8). Cubre: IDU.6.5.
-- [ ] **B6** — `local-reads.ts`: `buildApodoListQuery(establishmentId)` (todos los apodos activos del campo con su `profile_id`) para el warning-soft. Cubre: IDU.5.4.
+- [x] **B1** — `schema.ts`: quitar `visual_id_alt` de `animal_profiles` y `pending_animal_profiles`. Cubre: IDU.3.1.
+- [x] **B2** — `local-reads.ts`: quitar `visual_id_alt` de `LOCAL_LIST_SELECT`, `LOCAL_LIST_SELECT_OVERLAY`, la whitelist de `buildSearchLikeQuery`, y la lectura de la madre del vínculo cría-al-pie (synced + overlay). Cubre: IDU.3.2, IDU.4.5.
+- [x] **B3** — `upload.ts`: el connector deja de mapear `visual_id_alt` (INSERT/PATCH de `animal_profiles`) y `p_visual_id_alt` (replay de `create_animal`). Cubre: IDU.3.3.
+- [x] **B4** — `local-reads.ts`: `buildApodoSearchQuery(establishmentId, term)` (EXISTS correlado sobre `custom_attributes`+`field_definitions` por `data_key='apodo'`, scope `ap.establishment_id`, LIKE escapado sobre `value`) devolviendo `LocalListRow` vía `buildSearchUnion` (hereda `LIMIT 20` → cierra LOW-1). Cubre: IDU.4.4. `[unit]` test del SQL builder + behavior sqlite.
+- [x] **B5** — `local-reads.ts`: enriquecer `LOCAL_LIST_SELECT`/`_OVERLAY` **y `buildAnimalDetailQuery`** con `apodo` (subconsulta correlada custom_attributes+fd) + `apodo_enabled` (COALESCE overlay `pending_rodeo_data_config` → synced `rodeo_data_config`, apodo fd id correlado por establishment) (design §8). Cubre: IDU.6.5. **As-built**: subconsultas correladas (no LEFT JOIN → no multiplica filas); FIX de `injectProjection` (buscaba el FROM de la subconsulta → ahora el de la tabla principal).
+- [x] **B6** — `local-reads.ts`: `buildApodoListQuery(establishmentId)` (todos los apodos activos del campo con su `profile_id`) para el warning-soft + `fetchFieldApodos` en `animals.ts`. Cubre: IDU.5.4.
 
 ## Fase C — Clasificadores + búsqueda (utils PUROS + data-layer)
 
-- [ ] **C1** — `animal-identifier.ts`: reescribir `SearchPlan` + `classifySearchQuery` al modelo de 3 (`tryTagExact`/`tryIdvExact`/`tryIdvSubstring`/`tryApodo`, sin `tryVisual`; idv habilitado para todo término no vacío; design §6). `[unit]` tests. Cubre: IDU.4.1, IDU.4.2, IDU.4.3, IDU.4.5.
-- [ ] **C2** — `animal-identifier.ts`: colapsar `classifyIdentifier` (precarga) a destino `idv` (o eliminar si el caller ya no ramifica); idem la réplica `resolvePrefillIdentifier` en `maniobra-identify.ts`. `[unit]` tests. Cubre: IDU.4.10.
-- [ ] **C3** — `animals.ts` `searchAnimals`: ejecutar el plan nuevo (tag exacto → idv exacto → idv/tag substring → apodo), quitar la rama `visual_id_alt`, dedupe por `profileId` con exactos priorizados. Cubre: IDU.4.2, IDU.4.3, IDU.4.4, IDU.4.6.
-- [ ] **C4** — `link-calf-query.ts` `classifyCalfQuery`: aceptar idv alfanumérico + apodo en la rama `search` (relajar el gate `^\d+$`/`too-short`); `eid` (15 díg) intacto. `[unit]` tests. Cubre: IDU.4.7.
-- [ ] **C5** — `maniobra-identify.ts`: `ManualCandidate` cambia `visualIdAlt`→`apodo`; `candidateMatchesExactly` compara idv/apodo/tag. Verificar `identificar.tsx` + `CandidatePicker.tsx` + `FindOrCreateOverlay.tsx` (búsqueda por los 3, sin visual). `[unit]` tests. Cubre: IDU.4.8, IDU.4.11.
-- [ ] **C6** — Verificar que el "Bastonear" duplicate-check de ficha/alta sigue **solo-electrónica** (NO agregar canales). Cubre: IDU.4.9.
+- [x] **C1** — `animal-identifier.ts`: reescrito `SearchPlan` + `classifySearchQuery` al modelo de 3 (`tryTagExact`/`tryIdvExact`/`tryIdvSubstring`/`tryApodo`, sin `tryVisual`; idv habilitado para todo término no vacío; design §6). `[unit]` tests. Cubre: IDU.4.1, IDU.4.2, IDU.4.3, IDU.4.5.
+- [x] **C2** — `animal-identifier.ts`: `classifyIdentifier`/`IdentifierKind` **ELIMINADOS** (el caller ya no ramifica: precarga siempre en idv); `resolvePrefilledCreateParams` (maniobra-identify) colapsa a `{ tag?, idv? }`. `[unit]` tests. Cubre: IDU.4.10.
+- [x] **C3** — `animals.ts` `searchAnimals`: ejecuta el plan nuevo (tag exacto → idv exacto → idv/tag substring → apodo), sin rama `visual_id_alt`, dedupe por `profileId` con exactos priorizados. Cubre: IDU.4.2, IDU.4.3, IDU.4.4, IDU.4.6.
+- [x] **C4** — `link-calf-query.ts` `classifyCalfQuery`: acepta idv alfanumérico + apodo (relajado el gate `^\d+$`/`too-short` → eliminado `too-short`/`CALF_MIN_DIGITS`); `eid` (15 díg) intacto. `[unit]` tests. Cubre: IDU.4.7.
+- [x] **C5** — `maniobra-identify.ts`: `ManualCandidate.visualIdAlt`→`apodo`; `isExactMatch` compara idv/apodo/tag; `maniobra-edge.ts` `DisambiguationCandidate.apodo` + `candidateDominantId`. Verificados `identificar.tsx` + `CandidatePicker.tsx` + `FindOrCreateOverlay.tsx` (búsqueda por los 3, sin visual). `[unit]` tests. Cubre: IDU.4.8, IDU.4.11.
+- [x] **C6** — Verificado: el "Bastonear" duplicate-check de ficha/alta sigue **solo-electrónica** (`TagScanSheet`/`assignTagToAnimal` intactos, sin idv/apodo). Cubre: IDU.4.9.
 
 ## Fase D — Frontend: hero, apodo (formato + warning), remoción de visual_id_alt
 
-- [ ] **D1** — `animal-input.ts`: `sanitizeApodoInput` + `APODO_MAX_LENGTH` (charset design §5, incluye `ñ`/tildes por default — flag Puerta 1). `[unit]` tests (símbolos descartados, espacios/guiones OK, cap 10, `ñ`/tildes conservados). Cubre: IDU.5.1.
-- [ ] **D2** — `pickHeroIdentifier` (PURO, design §10) + `[unit]` tests (prioridad apodo→idv→tag→none; secondary cuando hero=apodo). Cubre: IDU.6.1, IDU.6.4, IDU.6.6.
-- [ ] **D3** — `isApodoDuplicateInField` (PURO, design §9) + `[unit]` tests (case-insensitive, trim, excluye propio, vacío no matchea). Cubre: IDU.5.4, IDU.5.6, IDU.5.7.
-- [ ] **D4** — `AnimalRow.tsx`: quitar prop `visualId`; sumar `apodo`/`rodeoUsesApodo`; render por `pickHeroIdentifier` (hero + secundario muted). Cubre: IDU.3.5, IDU.6.2.
-- [ ] **D5** — `animales.tsx` / `seleccion-masiva.tsx` / `asignar-caravanas.tsx` / `bulk-selection-data.ts` / `selection-display.ts`: pasar `apodo`+`rodeoUsesApodo` desde la lista enriquecida (B5); quitar `visualIdAlt`. Cubre: IDU.3.4, IDU.6.2, IDU.6.5.
-- [ ] **D6** — `CustomFieldInput.tsx`: prop OPCIONAL/ADITIVA `sanitize?` en la rama `text`; el caller la setea a `sanitizeApodoInput` cuando `data_key==='apodo'`. Cubre: IDU.5.2, IDU.5.3.
-- [ ] **D7** — `crear-animal.tsx` (CustomPropertiesForm): aplicar `sanitize` del apodo + el warning-soft (lectura `buildApodoListQuery` → `isApodoDuplicateInField`, aviso inline muted, no bloquea). Cubre: IDU.5.2, IDU.5.4, IDU.5.5.
-- [ ] **D8** — `animal/[id].tsx`: eliminar la fila "Nombre / seña" (`visual_id_alt`); hero por `pickHeroIdentifier` (`heroLabel`); en la edición del apodo aplicar `sanitize` + warning-soft (excluye el propio, IDU.5.6). Cubre: IDU.3.6, IDU.6.3, IDU.5.3, IDU.5.4, IDU.5.6.
-- [ ] **D9** — Quitar `visualIdAlt`/`visual_id_alt` de los servicios/tipos restantes: `animals.ts` (`LocalAnimalRow`/`NewAnimalInput`/`createAnimal`), `events.ts` (overlay de cría + `coalesce` del label de madre → `idv ?? tag`), `import-rodeo.ts`, `reports.ts` + `reports-format.ts` (`animalLabel(idv)` → `idv ?? 'Sin identificación'`), `AlertList.tsx`/`reportes.tsx`. Cubre: IDU.3.4.
-- [ ] **D10** — Flujo de import (`normalize-row.ts`, `validate-rows.ts`, `import-write.ts`, `column-mapping.ts`, `import-ui.ts`): dejar de mapear la columna `visual_id_alt`. `[unit]` tests actualizados. Cubre: IDU.3.7.
+- [x] **D1** — `animal-input.ts`: `sanitizeApodoInput` + `APODO_MAX_LENGTH=15` (charset design §5, incluye `ñ`/tildes). QUITADO `sanitizeVisualInput`/`VISUAL_MAX_LENGTH` (sin uso). `[unit]` tests. Cubre: IDU.5.1.
+- [x] **D2** — `pickHeroIdentifier` (PURO, en `animal-identifier.ts`, design §10) + `[unit]` tests. Cubre: IDU.6.1, IDU.6.4, IDU.6.6.
+- [x] **D3** — `isApodoDuplicateInField` (PURO, en `animal-identifier.ts`, design §9) + `[unit]` tests. Cubre: IDU.5.4, IDU.5.6, IDU.5.7.
+- [x] **D4** — `AnimalRow.tsx`: quitado `visualId`; sumado `apodo`/`rodeoUsesApodo`; render por `pickHeroIdentifier`. Cubre: IDU.3.5, IDU.6.2.
+- [x] **D5** — `animales.tsx` / `seleccion-masiva.tsx` / `asignar-caravanas.tsx` / `bulk-selection-data.ts` / `selection-display.ts` (+ `lotes`/`lote/[id]`/`rodeo/[id]`/`vacunacion-masiva`): pasan `apodo`+`rodeoUsesApodo`; sin `visualIdAlt`. Cubre: IDU.3.4, IDU.6.2, IDU.6.5.
+- [x] **D6** — `CustomFieldInput.tsx`: prop OPCIONAL/ADITIVA `sanitize?` en la rama `text`; el caller la setea a `sanitizeApodoInput` cuando `data_key==='apodo'`. Cubre: IDU.5.2, IDU.5.3.
+- [x] **D7** — `crear-animal.tsx` (CustomPropertiesForm): `sanitize` del apodo + warning-soft (`fetchFieldApodos` → `isApodoDuplicateInField`, aviso inline muted, no bloquea). QUITADO el guard `hasAtLeastOneIdentifier` (IDU.1.4). Cubre: IDU.5.2, IDU.5.4, IDU.5.5.
+- [x] **D8** — `animal/[id].tsx`: ELIMINADA la fila "Nombre / seña"; hero por `pickHeroIdentifier` (`heroLabel` + `AnimalHero` + secundario); edición del apodo en `CustomPropertiesFicha` con `sanitize` + warning-soft (excluye el propio). Cubre: IDU.3.6, IDU.6.3, IDU.5.3, IDU.5.4, IDU.5.6.
+- [x] **D9** — Quitado `visualIdAlt`/`visual_id_alt` de: `animals.ts` (`LocalListRow`/`AnimalDetail`/`CreateAnimalInput`/`createAnimal`), `events.ts` (overlay de cría sin fallback + label madre `idv ?? tag`), `import-rodeo.ts`, `reports.ts` + `reports-format.ts` (`animalLabel(idv)`), `AlertList.tsx`/`reportes.tsx`. Cubre: IDU.3.4.
+- [x] **D10** — Flujo de import (`normalize-row`/`validate-rows`/`import-write`/`column-mapping`/`import-ui`): dejó de mapear `visual_id_alt`; sinónimos "visuales" → `idv`. `[unit]` tests actualizados. Cubre: IDU.3.7.
 
 ## Fase E — E2E + capturas (Gate 2.5)
 

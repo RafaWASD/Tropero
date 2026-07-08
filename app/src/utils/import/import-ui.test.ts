@@ -144,9 +144,8 @@ test('writeErrorCopy: NUNCA devuelve el sqlerrm crudo (nota de seguridad #2)', (
   assert.match(other, /no se pudo escribir/i);
 });
 
-test('rowLabel: usa el mejor identificador disponible, o "Fila N"', () => {
+test('rowLabel: usa el mejor identificador disponible, o "Fila N" (delta IDU: idv → tag → "Fila N")', () => {
   assert.equal(rowLabel(normalizeRow({ idv: '0241' }), 0), 'IDV 0241');
-  assert.equal(rowLabel(normalizeRow({ visual_id_alt: 'La pinta' }), 0), 'La pinta');
   assert.equal(
     rowLabel(normalizeRow({ tag_electronic: '982000123456789' }), 0),
     'TAG 982000123456789',

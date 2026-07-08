@@ -127,11 +127,10 @@ export type WeightByCategory = {
   nAnimals: number;
 };
 
-/** Un ítem de la alerta de dosis vencida (R7.10). */
+/** Un ítem de la alerta de dosis vencida (R7.10). delta IDU: sin visualIdAlt (el label degrada a idv). */
 export type OverdueDose = {
   animalProfileId: string;
   idv: string | null;
-  visualIdAlt: string | null;
   productName: string;
   nextDoseDate: string;
 };
@@ -140,7 +139,6 @@ export type OverdueDose = {
 export type UnweighedAnimal = {
   animalProfileId: string;
   idv: string | null;
-  visualIdAlt: string | null;
   categoryCode: string;
   categoryName: string;
   lastWeightDate: string | null;
@@ -228,9 +226,11 @@ type WeaningRow = {
 type CclRow = { n_months: number; head: number; body: number; tail: number; total: number };
 type StageRow = { n_months: number; head_born: number; body_born: number; tail_born: number; total_born: number };
 type WeightRow = { category_id: string; category_code: string; category_name: string; avg_weight: number | string; n_animals: number };
-type OverdueRow = { animal_profile_id: string; idv: string | null; visual_id_alt: string | null; product_name: string; next_dose_date: string };
+// delta IDU: los RPC de reportes retornan sin visual_id_alt (la migración 0122 lo quita del RETURNS TABLE);
+// el frontend deja de leerlo desde el PASO 1 del deploy (tolera el retorno viejo — no mapea la columna).
+type OverdueRow = { animal_profile_id: string; idv: string | null; product_name: string; next_dose_date: string };
 type UnweighedRow = {
-  animal_profile_id: string; idv: string | null; visual_id_alt: string | null;
+  animal_profile_id: string; idv: string | null;
   category_code: string; category_name: string; last_weight_date: string | null; days_since: number | null;
 };
 
@@ -380,7 +380,6 @@ export function fetchOverdueDoses(
   return callRpcRows<OverdueRow, OverdueDose>('establishment_overdue_doses', args, (r) => ({
     animalProfileId: r.animal_profile_id,
     idv: r.idv,
-    visualIdAlt: r.visual_id_alt,
     productName: r.product_name,
     nextDoseDate: r.next_dose_date,
   }));
@@ -400,7 +399,6 @@ export function fetchUnweighed(
   return callRpcRows<UnweighedRow, UnweighedAnimal>('establishment_unweighed', args, (r) => ({
     animalProfileId: r.animal_profile_id,
     idv: r.idv,
-    visualIdAlt: r.visual_id_alt,
     categoryCode: r.category_code,
     categoryName: r.category_name,
     lastWeightDate: r.last_weight_date,

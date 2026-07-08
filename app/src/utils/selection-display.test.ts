@@ -15,7 +15,7 @@ import {
 type Row = {
   profileId: string;
   idv: string | null;
-  visualIdAlt: string | null;
+  apodo: string | null;
   tagElectronic: string | null;
 };
 
@@ -23,7 +23,7 @@ function row(over: Partial<Row>): Row {
   return {
     profileId: over.profileId ?? 'p-' + Math.random().toString(36).slice(2),
     idv: over.idv ?? null,
-    visualIdAlt: over.visualIdAlt ?? null,
+    apodo: over.apodo ?? null,
     tagElectronic: over.tagElectronic ?? null,
   };
 }
@@ -43,10 +43,10 @@ test('R11.9: ordena por identificador NUMÉRICO de caravana (no lexicográfico)'
 
 test('R11.9: usa visualId cuando no hay idv; alfabético para no-numéricos', () => {
   const input = [
-    row({ profileId: 'a', visualIdAlt: 'Zeta' }),
-    row({ profileId: 'b', visualIdAlt: 'Alfa' }),
+    row({ profileId: 'a', apodo: 'Zeta' }),
+    row({ profileId: 'b', apodo: 'Alfa' }),
   ];
-  const ids = sortByIdentifier(input).map((p) => p.visualIdAlt);
+  const ids = sortByIdentifier(input).map((p) => p.apodo);
   assert.deepEqual(ids, ['Alfa', 'Zeta']);
 });
 
@@ -80,7 +80,7 @@ test('R11.9: el buscador aparece SOLO cuando se supera el umbral (~20)', () => {
 test('R11.9: filtra por idv / visualId / caravana, case-insensitive', () => {
   const input = [
     row({ profileId: 'a', idv: '1042' }),
-    row({ profileId: 'b', visualIdAlt: 'Manchada' }),
+    row({ profileId: 'b', apodo: 'Manchada' }),
     row({ profileId: 'c', tagElectronic: '900111222333444' }),
   ];
   assert.deepEqual(filterBySearch(input, '104').map((p) => p.profileId), ['a']);

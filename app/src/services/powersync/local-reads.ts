@@ -505,6 +505,46 @@ function notHiddenByOverride(table: string, idExpr: string, effects: readonly st
   );
 }
 
+// ─── Enriquecimiento con el 3er identificador APODO (delta IDU, IDU.6.5) ─────────────────────
+//
+// El apodo vive en custom_attributes (NO en animal_profiles): un current-value del field `apodo`
+// (data_key='apodo', per-establishment por el seed 0119). La lista lo lee por subconsulta CORRELADA sobre
+// el perfil, para no multiplicar filas (un LEFT JOIN a custom_attributes duplicaría si hubiera >1 fila —
+// que no debería, pero la subconsulta es más segura). `<alias>` es 'ap' (synced) o 'pap' (overlay) — valor
+// CONTROLADO por el código, no input de usuario (mismo trato que notHiddenByOverride) → sin injection.
+// data_key='apodo' es constante literal (no input). El scope de tenant lo cierra la stream (el SQLite local
+// solo tiene datos del establishment que el usuario sincroniza) + la correlación por establishment del perfil.
+
+/** Subconsulta del VALOR del apodo del perfil `<alias>` (jsonb-as-TEXT; el mapper lo decodifica). NULL si no tiene. */
+function apodoValueSubquery(alias: string): string {
+  return (
+    `(SELECT ca.value FROM custom_attributes ca ` +
+    `JOIN field_definitions fd ON fd.id = ca.field_definition_id ` +
+    `WHERE ca.animal_profile_id = ${alias}.id AND fd.data_key = 'apodo' AND fd.establishment_id IS NOT NULL ` +
+    `LIMIT 1)`
+  );
+}
+
+/**
+ * Subconsulta de APODO_ENABLED del perfil `<alias>` (¿el rodeo del animal habilita el campo apodo?): overlay-aware
+ * (pending_rodeo_data_config PISA a rodeo_data_config — un toggle offline se refleja), mismo idiom que
+ * buildEnabledCustomFieldsQuery. El apodo fd id se resuelve CORRELADO por el establishment del propio perfil (1
+ * apodo fd por campo, seed 0119) — no un id global ambiguo entre campos. Devuelve 1/0 (default 0 = no habilitado).
+ */
+function apodoEnabledSubquery(alias: string): string {
+  const fdId =
+    `(SELECT fd.id FROM field_definitions fd WHERE fd.data_key = 'apodo' ` +
+    `AND fd.establishment_id = ${alias}.establishment_id LIMIT 1)`;
+  return (
+    `COALESCE(` +
+    `(SELECT prdc.enabled FROM pending_rodeo_data_config prdc ` +
+    `WHERE prdc.rodeo_id = ${alias}.rodeo_id AND prdc.field_definition_id = ${fdId}), ` +
+    `(SELECT rdc.enabled FROM rodeo_data_config rdc ` +
+    `WHERE rdc.rodeo_id = ${alias}.rodeo_id AND rdc.field_definition_id = ${fdId}), ` +
+    `0)`
+  );
+}
+
 /**
  * SELECT compartido por la lista y la búsqueda. Reescribe el LIST_SELECT de PostgREST (que embebía
  * `animals!inner`/`rodeos!inner`/`categories_by_system!inner`) como JOINs SQLite sobre las tablas
@@ -527,7 +567,12 @@ function notHiddenByOverride(table: string, idExpr: string, effects: readonly st
 // compacta de la vista de grupo (AnimalRow `compact`) los necesita por animal.
 const LOCAL_LIST_SELECT =
   'SELECT ap.id AS id, ap.animal_id AS animal_id, ap.idv AS idv, ' +
-  'ap.visual_id_alt AS visual_id_alt, ap.category_id AS category_id, ap.rodeo_id AS rodeo_id, ' +
+  // delta IDU (IDU.3.2): `visual_id_alt` ELIMINADA de la proyección. En su lugar, el enriquecimiento con el
+  // 3er identificador (IDU.6.5): `apodo` (custom_attributes value, decodificado por el mapper) + `apodo_enabled`
+  // (¿el rodeo del animal habilita el campo apodo?, overlay-aware). Ambos por subconsulta correlada scopeada
+  // al establishment del propio perfil (no filtra cross-tenant; el set local ya está scopeado por la stream).
+  `${apodoValueSubquery('ap')} AS apodo, ${apodoEnabledSubquery('ap')} AS apodo_enabled, ` +
+  'ap.category_id AS category_id, ap.rodeo_id AS rodeo_id, ' +
   'ap.status AS status, ap.management_group_id AS management_group_id, ' +
   'ap.animal_tag_electronic AS tag_electronic, ap.animal_sex AS sex, ' +
   'ap.category_override AS category_override, ap.animal_birth_date AS birth_date, ' +
@@ -550,7 +595,11 @@ const LOCAL_LIST_SELECT =
 // idéntico set (requisito del UNION ALL).
 const LOCAL_LIST_SELECT_OVERLAY =
   'SELECT pap.id AS id, pap.animal_id AS animal_id, pap.idv AS idv, ' +
-  'pap.visual_id_alt AS visual_id_alt, pap.category_id AS category_id, pap.rodeo_id AS rodeo_id, ' +
+  // delta IDU: mismas proyecciones apodo/apodo_enabled que la rama synced (requisito del UNION ALL: idéntico
+  // set/orden). Un alta optimista puede tener su apodo en custom_attributes local (setCustomAttribute post-create
+  // usa el mismo profileId = pap.id) → la subconsulta lo encuentra; si no, apodo NULL / apodo_enabled 0.
+  `${apodoValueSubquery('pap')} AS apodo, ${apodoEnabledSubquery('pap')} AS apodo_enabled, ` +
+  'pap.category_id AS category_id, pap.rodeo_id AS rodeo_id, ' +
   'pap.status AS status, pap.management_group_id AS management_group_id, ' +
   'pap.animal_tag_electronic AS tag_electronic, pap.animal_sex AS sex, ' +
   'pap.category_override AS category_override, pap.animal_birth_date AS birth_date, ' +
@@ -591,15 +640,18 @@ function listDomainFiltersOverlay(establishmentId: string, status: string): { wh
 const HIDE_EXITED_PROFILE = notHiddenByOverride('animal_profiles', 'ap.id', ['exited', 'soft_deleted']);
 
 /**
- * Inyecta una columna EXTRA en la lista de proyección de un `SELECT ... FROM ...`, justo antes del primer
- * ` FROM ` (la columna se agrega al final de la lista de columnas, no como tabla del FROM). Lo usa la
- * opción A para agregar el alias `updated_at` a `LOCAL_LIST_SELECT`/`_OVERLAY` (que YA incluyen FROM/JOINs)
- * sin reescribir el SELECT entero. `expr` es una expresión CONTROLADA por el código (nunca input de
- * usuario) → sin riesgo de injection.
+ * Inyecta una columna EXTRA en la lista de proyección de `LOCAL_LIST_SELECT`/`_OVERLAY`, justo antes del FROM
+ * de la tabla PRINCIPAL (`animal_profiles ap` / `pending_animal_profiles pap`). NO se puede usar el PRIMER
+ * ` FROM ` (delta IDU): el enriquecimiento del apodo agregó subconsultas correladas que contienen su propio
+ * ` FROM custom_attributes … ` / ` FROM rodeo_data_config … ` ANTES del FROM principal — inyectar ahí rompería
+ * la subconsulta. Lo usa la opción A para el alias `updated_at`. `expr` es CONTROLADA por el código (nunca
+ * input de usuario) → sin injection.
  */
 function injectProjection(select: string, expr: string): string {
-  const idx = select.indexOf(' FROM ');
-  if (idx === -1) return select; // defensivo: un SELECT sin FROM no debería pasar acá
+  const marker = / FROM (?:animal_profiles ap|pending_animal_profiles pap)\b/;
+  const m = marker.exec(select);
+  if (!m) return select; // defensivo: un SELECT sin el FROM principal no debería pasar acá
+  const idx = m.index;
   return `${select.slice(0, idx)}, ${expr}${select.slice(idx)}`;
 }
 
@@ -846,11 +898,13 @@ export function buildSearchByIdvQuery(establishmentId: string, idv: string): Loc
  * de comodín). status active + deleted_at IS NULL + LIMIT 20. UNION synced + overlay (T6).
  *
  * @param column  columna de animal_profiles sobre la que matchear (whitelist: 'animal_tag_electronic',
- *                'idv', 'visual_id_alt'). NO es input de usuario — la elige el service (anti-injection).
+ *                'idv'). NO es input de usuario — la elige el service (anti-injection). `visual_id_alt` se
+ *                ELIMINÓ de la whitelist (delta IDU, IDU.4.5); el apodo tiene su propio canal
+ *                (buildApodoSearchQuery) porque vive en custom_attributes, no en animal_profiles.
  */
 export function buildSearchLikeQuery(
   establishmentId: string,
-  column: 'animal_tag_electronic' | 'idv' | 'visual_id_alt',
+  column: 'animal_tag_electronic' | 'idv',
   term: string,
 ): LocalQuery {
   const pattern = `%${escapeLike(term)}%`;
@@ -873,6 +927,46 @@ export function escapeLike(term: string): string {
 }
 
 /**
+ * Canal de búsqueda por APODO (delta IDU, IDU.4.4): matchea el `apodo` (custom_attributes value del field
+ * data_key='apodo', per-establishment por el seed 0119) por LIKE '%term%'. Devuelve el MISMO shape
+ * LocalListRow que las otras ramas de searchAnimals (reusa LOCAL_LIST_SELECT vía buildSearchUnion) para que
+ * el motor concatene/deduplique por profileId uniformemente. El filtro es un `EXISTS` correlado sobre el
+ * perfil (no un JOIN → no multiplica filas). El value es JSON-string ("Manchada" con comillas); el `%term%`
+ * matchea el interior sin problema. El término va escapado (escapeLike) + parametrizado (anti-injection); el
+ * `data_key='apodo'` es constante literal, no input. El scope de tenant lo cierra buildSearchUnion
+ * (ap.establishment_id = ?) + la stream. Mismo LIMIT 20 del UNION que las otras ramas (acota el heno).
+ */
+export function buildApodoSearchQuery(establishmentId: string, term: string): LocalQuery {
+  const pattern = `%${escapeLike(term)}%`;
+  const existsFor = (alias: string): string =>
+    `EXISTS (SELECT 1 FROM custom_attributes ca ` +
+    `JOIN field_definitions fd ON fd.id = ca.field_definition_id ` +
+    `WHERE ca.animal_profile_id = ${alias}.id AND fd.data_key = 'apodo' AND fd.establishment_id IS NOT NULL ` +
+    `AND ca.value LIKE ? ESCAPE '\\')`;
+  return buildSearchUnion(establishmentId, existsFor('ap'), existsFor('pap'), pattern);
+}
+
+/**
+ * TODOS los apodos activos del campo (delta IDU, IDU.5.4) — con su `profile_id`, para el warning-soft de
+ * duplicado. El caller decodifica cada `value` (parseCustomValueJson), EXCLUYE el profile_id del animal en
+ * edición (IDU.5.6) y llama isApodoDuplicateInField. El scope `ap.establishment_id = ?` cubre IDU.5.7 (por
+ * campo). Read-only local. NO consulta el overlay (un apodo recién tipeado aún no editado no cuenta como
+ * "otro animal"; el propio se excluye por profile_id). Multi-tenant: el establishment llega por param.
+ */
+export function buildApodoListQuery(establishmentId: string): LocalQuery {
+  return {
+    sql:
+      'SELECT ca.animal_profile_id AS profile_id, ca.value AS value ' +
+      'FROM custom_attributes ca ' +
+      'JOIN field_definitions fd ON fd.id = ca.field_definition_id ' +
+      'JOIN animal_profiles ap ON ap.id = ca.animal_profile_id ' +
+      "WHERE fd.data_key = 'apodo' AND fd.establishment_id IS NOT NULL " +
+      "AND ap.establishment_id = ? AND ap.deleted_at IS NULL AND ap.status = 'active'",
+    args: [establishmentId],
+  };
+}
+
+/**
  * Detalle de un animal_profile para la ficha (espeja animals.fetchAnimalDetail). Identidad (tag/sex/
  * birth_date) desde `animal_profiles` (b1). LEFT JOIN management_groups (el lote puede estar
  * soft-deleted; la UI muestra "sin lote" si management_group_id es null). Filtro de DOMINIO:
@@ -891,7 +985,11 @@ export function buildAnimalDetailQuery(profileId: string): LocalQuery {
   // animal dado de baja sigue visible/archivado, R4.12/R4.15) — solo la lista activa lo oculta.
   const synced =
     'SELECT ap.id AS id, ap.animal_id AS animal_id, ap.establishment_id AS establishment_id, ' +
-    'ap.idv AS idv, ap.visual_id_alt AS visual_id_alt, ap.category_id AS category_id, ' +
+    // delta IDU (IDU.3.6/IDU.6.3): `visual_id_alt` ELIMINADA. En su lugar el apodo (hero por nombre en la
+    // ficha) + apodo_enabled (¿el rodeo usa apodo?) por subconsulta correlada — mismo enriquecimiento que la
+    // lista, así el heroLabel de [id].tsx usa pickHeroIdentifier sin plomería cross-componente.
+    `${apodoValueSubquery('ap')} AS apodo, ${apodoEnabledSubquery('ap')} AS apodo_enabled, ` +
+    'ap.idv AS idv, ap.category_id AS category_id, ' +
     'ap.category_override AS category_override, ap.breed AS breed, ap.coat_color AS coat_color, ' +
     'ap.entry_date AS entry_date, ap.entry_weight AS entry_weight, ' +
     'COALESCE(pso.status, ap.status) AS status, ' +
@@ -919,7 +1017,9 @@ export function buildAnimalDetailQuery(profileId: string): LocalQuery {
     'WHERE ap.id = ? AND ap.deleted_at IS NULL';
   const overlay =
     'SELECT pap.id AS id, pap.animal_id AS animal_id, pap.establishment_id AS establishment_id, ' +
-    'pap.idv AS idv, pap.visual_id_alt AS visual_id_alt, pap.category_id AS category_id, ' +
+    // delta IDU: mismas proyecciones apodo/apodo_enabled que la rama synced (requisito del UNION ALL).
+    `${apodoValueSubquery('pap')} AS apodo, ${apodoEnabledSubquery('pap')} AS apodo_enabled, ` +
+    'pap.idv AS idv, pap.category_id AS category_id, ' +
     'pap.category_override AS category_override, pap.breed AS breed, pap.coat_color AS coat_color, ' +
     'pap.entry_date AS entry_date, pap.entry_weight AS entry_weight, pap.status AS status, ' +
     'pap.created_by AS created_by, pap.exit_date AS exit_date, pap.exit_reason AS exit_reason, ' +
@@ -1205,7 +1305,8 @@ export function buildCategoryNamesQuery(categoryIds: readonly string[]): LocalQu
 export function buildMotherQuery(calfProfileId: string): LocalQuery {
   // Rama SINCRONIZADA: calf → birth_calves → reproductive_events (parto) → animal_profiles (madre).
   const synced =
-    'SELECT m.id AS id, m.idv AS idv, m.visual_id_alt AS visual_id_alt, m.status AS status, ' +
+    // delta IDU (IDU.3.2): sin visual_id_alt. El label de la madre degrada a idv → tag → "Madre" (events.ts).
+    'SELECT m.id AS id, m.idv AS idv, m.status AS status, ' +
     'm.animal_tag_electronic AS tag_electronic, c.name AS category_name ' +
     'FROM birth_calves bc ' +
     'JOIN reproductive_events re ON re.id = bc.birth_event_id AND re.deleted_at IS NULL ' +
@@ -1218,7 +1319,7 @@ export function buildMotherQuery(calfProfileId: string): LocalQuery {
   // Al limpiarse el overlay (ACK), la rama synced lo resuelve. Sin override de status de la madre acá
   // (el link debe funcionar aunque la madre esté archivada, R14.7/R4.15).
   const overlay =
-    'SELECT m.id AS id, m.idv AS idv, m.visual_id_alt AS visual_id_alt, m.status AS status, ' +
+    'SELECT m.id AS id, m.idv AS idv, m.status AS status, ' +
     'm.animal_tag_electronic AS tag_electronic, c.name AS category_name ' +
     'FROM pending_birth_calves pbc ' +
     'JOIN pending_reproductive_events pre ON pre.client_op_id = pbc.client_op_id ' +
@@ -2756,7 +2857,6 @@ export type PendingProfileFields = {
   rodeoId: string;
   managementGroupId: string | null;
   idv: string | null;
-  visualIdAlt: string | null;
   categoryId: string;
   categoryOverride: boolean;
   breed: string | null;
@@ -2781,12 +2881,13 @@ export function buildPendingAnimalProfileInsert(
     sql:
       'INSERT INTO pending_animal_profiles (' +
       'id, client_op_id, animal_id, establishment_id, rodeo_id, management_group_id, idv, ' +
-      'visual_id_alt, category_id, category_override, breed, coat_color, entry_date, entry_weight, ' +
+      // delta IDU: sin visual_id_alt (columna eliminada del overlay).
+      'category_id, category_override, breed, coat_color, entry_date, entry_weight, ' +
       'status, created_by, animal_tag_electronic, animal_sex, animal_birth_date, created_at) ' +
-      'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
     args: [
       id, clientOpId, f.animalId, f.establishmentId, f.rodeoId, f.managementGroupId, f.idv,
-      f.visualIdAlt, f.categoryId, f.categoryOverride ? 1 : 0, f.breed, f.coatColor, f.entryDate,
+      f.categoryId, f.categoryOverride ? 1 : 0, f.breed, f.coatColor, f.entryDate,
       f.entryWeight, f.status, f.createdBy, f.animalTagElectronic, f.animalSex, f.animalBirthDate,
       f.createdAt,
     ],

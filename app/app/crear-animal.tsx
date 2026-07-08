@@ -54,7 +54,7 @@ import {
   resolveDefaultRodeoId,
 } from '@/services/last-rodeo';
 import type { Rodeo } from '@/services/rodeos';
-import { parseWeight, hasAtLeastOneIdentifier } from '@/utils/animal-form';
+import { parseWeight } from '@/utils/animal-form';
 import {
   sanitizeIdvInput,
   sanitizeWeightInput,
@@ -102,7 +102,7 @@ function todayIso(): string {
 // Qué identificador vino precargado y en qué campo. 'idv' | 'visual' (puerta MANUAL, heurística R1.4) |
 // 'tag' (rama BLE: el EID bastoneado llega por el param `tag` desde el overlay del chunk BLE global —
 // spec 09 RB6.3). Sin params → alta "en blanco" (no hay id precargado en el header).
-type PrefillKind = 'idv' | 'visual' | 'tag' | null;
+type PrefillKind = 'idv' | 'tag' | null;
 
 type WizardStep = 1 | 2 | 3 | 4;
 
@@ -123,19 +123,13 @@ export default function CrearAnimalScreen() {
   useBusyWhileMounted();
 
   // El identificador precargado (R4.2): viene por params. read-only durante el alta. Se muestra en el
-  // header del wizard ("Creando: [id]"). Prioridad: tag (BLE bastoneado, RB6.3) > idv > visual — si
-  // (por error) llegaran varios, el TAG manda (es la identidad SENASA confirmada por el bastón).
+  // header del wizard ("Creando: [id]"). Prioridad: tag (BLE bastoneado, RB6.3) > idv. delta IDU (IDU.4.10):
+  // el destino histórico `visual` (visual_id_alt) se eliminó — el texto tipeado en el buscador se precarga en
+  // `idv` (caravana visual alfanumérica). Si (por error) llegaran varios, el TAG manda (identidad SENASA).
   const prefilledTag = typeof params.tag === 'string' ? params.tag : '';
   const prefilledIdv = typeof params.idv === 'string' ? params.idv : '';
-  const prefilledVisual = typeof params.visual === 'string' ? params.visual : '';
-  const prefillKind: PrefillKind = prefilledTag
-    ? 'tag'
-    : prefilledIdv
-      ? 'idv'
-      : prefilledVisual
-        ? 'visual'
-        : null;
-  const prefilledId = prefilledTag || prefilledIdv || prefilledVisual; // lo que se muestra en "Creando: [id]"
+  const prefillKind: PrefillKind = prefilledTag ? 'tag' : prefilledIdv ? 'idv' : null;
+  const prefilledId = prefilledTag || prefilledIdv; // lo que se muestra en "Creando: [id]"
 
   // Contexto de MODO MANIOBRAS (spec 03 R4.1, M2.2): si el alta vino DESDE la manga (find-or-create
   // inline), `identificar.tsx` pasa el `sessionId` de la jornada. Presente = "alta desde modo maniobras"
@@ -150,11 +144,8 @@ export default function CrearAnimalScreen() {
   // vacío y editable (idv/visual son el precargado). El find-or-create no cambia.
   const [tag, setTag] = useState(prefillKind === 'tag' ? prefilledTag : '');
   const [idv, setIdv] = useState(prefillKind === 'idv' ? prefilledIdv : '');
-  // "Nombre / seña" (visual_id_alt) dejó de ser un campo EDITABLE del alta (delta #2 NOMBRE/APODO, RNA.2.1):
-  // el apodo ahora es un dato custom opt-in por rodeo (CustomPropertiesForm). `visual` queda como valor
-  // READ-ONLY: solo lo puebla el camino find-or-create-por-texto (prefillKind === 'visual', spec 09 R1.4),
-  // donde el operario ya comprometió ese identificador en el buscador (RNA.2.3). Nunca se muta desde el alta.
-  const visual = prefillKind === 'visual' ? prefilledVisual : '';
+  // delta IDU: el "Nombre / seña" (visual_id_alt) se eliminó del todo. El apodo es un dato custom opt-in por
+  // rodeo (CustomPropertiesForm). El texto de un no-match del buscador llega precargado en `idv` (IDU.4.10).
 
   // ── Paso actual del wizard. ──
   const [step, setStep] = useState<WizardStep>(1);
@@ -534,19 +525,12 @@ export default function CrearAnimalScreen() {
     const tagOk = isValidTagElectronic(tag);
     setTagError(tagOk ? null : `La caravana electrónica tiene que tener ${TAG_ELECTRONIC_LENGTH} dígitos.`);
 
-    // Identidad MÍNIMA (animal_profiles_identity_check, 0021 / R6.2): el alta DEBE llevar al menos UN
-    // identificador (caravana electrónica, IDV o visual). Por find-or-create siempre hay uno precargado
-    // (R4.2), pero el ALTA EN BLANCO puede llegar acá con los tres vacíos → create_animal rechaza con
-    // 23514 al subir y el animal se PIERDE en silencio (queda en el overlay local, nunca aterriza en
-    // Postgres). Lo validamos ANTES de encolar el intent: no encolamos un alta condenada. El error va al
-    // formError (cross-campo: "al menos uno de tres", no atado a un solo input) sobre el CTA, zona pulgar.
-    const hasIdentifier = hasAtLeastOneIdentifier(tag, idv, visual);
-    if (!hasIdentifier) {
-      setFormError('Cargá al menos un identificador: caravana electrónica o caravana visual.');
-    }
-    if (!dateV.ok || weightBad || !tagOk || !hasIdentifier) {
+    // delta IDU (IDU.1.4/IDU.1.5): el guard de "al menos un identificador" se ELIMINÓ. El trigger
+    // server-side (animal_profiles_identity_check) se dropea en la migración 0122, así que un ALTA EN BLANCO
+    // (tag/idv/apodo todos ausentes) persiste sin 23514 — ya no hay pérdida silenciosa que prevenir. El alta
+    // solo se bloquea por errores REALES de formato (fecha/peso/tag).
+    if (!dateV.ok || weightBad || !tagOk) {
       // Scroll-al-campo (RAF2.4.4): al primer campo con error en orden del form (fecha arriba, luego peso).
-      // El tag (inline en su FormField) y el identificador (banner sobre el CTA) viven al alcance del pulgar.
       if (dateErrField === 'year') scrollToField('year');
       else if (dateErrField === 'dayMonth') scrollToField('dayMonth');
       else if (weightBad) scrollToField('weight');
@@ -588,7 +572,6 @@ export default function CrearAnimalScreen() {
       birthDate,
       tagElectronic: tag.trim() || null,
       idv: idv.trim() || null,
-      visualIdAlt: visual.trim() || null,
       breed: breed.trim() || null,
       coatColor: coatColor.trim() || null,
       // entry_weight solo en recría (showWeight); el resto de categorías no lo mandan.
@@ -687,7 +670,6 @@ export default function CrearAnimalScreen() {
     coatColor,
     tag,
     idv,
-    visual,
     establishmentId,
     selectedRodeo,
     selectedCategoryCode,
@@ -788,7 +770,6 @@ export default function CrearAnimalScreen() {
           <Step4Data
             prefillKind={prefillKind}
             idv={idv}
-            visual={visual}
             tag={tag}
             tagError={tagError}
             onIdv={(t) => setIdv(sanitizeIdvInput(t))}
@@ -1163,7 +1144,6 @@ function Step3Category({
 function Step4Data({
   prefillKind,
   idv,
-  visual,
   tag,
   tagError,
   onIdv,
@@ -1212,7 +1192,6 @@ function Step4Data({
 }: {
   prefillKind: PrefillKind;
   idv: string;
-  visual: string;
   tag: string;
   tagError: string | null;
   onIdv: (t: string) => void;
@@ -1302,20 +1281,11 @@ function Step4Data({
             onChangeText={() => {}}
             editable={false}
           />
-        ) : prefillKind === 'visual' ? (
-          <FormField
-            label="Nombre / seña (no editable)"
-            value={visual}
-            onChangeText={() => {}}
-            editable={false}
-          />
         ) : null}
 
-        {/* Delta #2 NOMBRE/APODO (RNA.2.1): el "Nombre / seña" (visual_id_alt) DEJÓ de ser un campo editable
-            del alta — el apodo ahora es un dato custom opt-in por rodeo (sección "Datos personalizados" abajo,
-            CustomPropertiesForm). Los identificadores editables del alta son SOLO caravana visual (idv) +
-            caravana electrónica (tag). El display read-only de "Nombre / seña" se conserva arriba únicamente
-            para el camino find-or-create-por-texto (prefillKind === 'visual', RNA.2.3). */}
+        {/* delta IDU: el "Nombre / seña" (visual_id_alt) se eliminó del todo — el apodo es un dato custom
+            opt-in por rodeo (sección "Datos personalizados" abajo, CustomPropertiesForm). Los identificadores
+            editables del alta son SOLO caravana visual (idv) + caravana electrónica (tag). */}
         {prefillKind !== 'idv' ? (
           <FormField
             label="Caravana visual (recomendado)"

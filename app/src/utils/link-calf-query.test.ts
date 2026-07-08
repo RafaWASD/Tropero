@@ -7,7 +7,6 @@ import {
   resolveLinkEventDate,
   todayIsoLocal,
   CALF_EID_LENGTH,
-  CALF_MIN_DIGITS,
 } from './link-calf-query.ts';
 
 const NOW = new Date(2026, 5, 30); // 2026-06-30 (local)
@@ -19,14 +18,16 @@ test('classifyCalfQuery: vacío / solo espacios → empty (no dispara find-or-cr
   assert.deepEqual(classifyCalfQuery('   '), { kind: 'empty' });
 });
 
-test('classifyCalfQuery: menos de 3 dígitos → too-short (RCAP.2.5)', () => {
-  assert.deepEqual(classifyCalfQuery('1'), { kind: 'too-short' });
-  assert.deepEqual(classifyCalfQuery('12'), { kind: 'too-short' });
+test('IDU.4.7 classifyCalfQuery: dígitos cortos → idv (rama búsqueda, ya no rebota como too-short)', () => {
+  assert.deepEqual(classifyCalfQuery('1'), { kind: 'idv', value: '1' });
+  assert.deepEqual(classifyCalfQuery('12'), { kind: 'idv', value: '12' });
 });
 
-test('classifyCalfQuery: texto con letras → too-short (defensivo, paste — nunca dispara el motor con basura)', () => {
-  assert.deepEqual(classifyCalfQuery('vaca blanca'), { kind: 'too-short' });
-  assert.deepEqual(classifyCalfQuery('R-14'), { kind: 'too-short' });
+test('IDU.4.7 classifyCalfQuery: texto con letras / apodo → idv (rama búsqueda, alfanumérico + apodo)', () => {
+  // El delta relaja el gate numérico: un idv alfanumérico o un apodo disparan la rama de búsqueda.
+  assert.deepEqual(classifyCalfQuery('AB123'), { kind: 'idv', value: 'AB123' });
+  assert.deepEqual(classifyCalfQuery('Manchada'), { kind: 'idv', value: 'Manchada' });
+  assert.deepEqual(classifyCalfQuery('  La Colorada '), { kind: 'idv', value: 'La Colorada' });
 });
 
 test('classifyCalfQuery: 15 dígitos puros → eid (rama lookupByTag, RCAP.2.2)', () => {
@@ -52,13 +53,13 @@ test('classifyCalfQuery: 16+ dígitos (más largo que un EID) → idv (numérico
   assert.deepEqual(classifyCalfQuery('1234567890123456'), { kind: 'idv', value: '1234567890123456' });
 });
 
-test('classifyCalfQuery: idv con separadores de formato → compacto', () => {
-  assert.deepEqual(classifyCalfQuery('0241 5567'), { kind: 'idv', value: '02415567' });
+test('classifyCalfQuery: idv numérico con separadores de formato → se conserva trimeado (búsqueda lo compacta)', () => {
+  // La rama de búsqueda pasa el término TRIMEADO; searchAnimals lo re-clasifica/compacta internamente.
+  assert.deepEqual(classifyCalfQuery('0241 5567'), { kind: 'idv', value: '0241 5567' });
 });
 
-test('constantes de forma del EID/IDV', () => {
+test('constantes de forma del EID', () => {
   assert.equal(CALF_EID_LENGTH, 15);
-  assert.equal(CALF_MIN_DIGITS, 3);
 });
 
 // ─── todayIsoLocal ───────────────────────────────────────────────────────────────────────────

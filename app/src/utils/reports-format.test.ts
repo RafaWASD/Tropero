@@ -355,12 +355,11 @@ test('daysSinceLabel: null → nunca pesado; singular/plural', () => {
 
 // ─── animalLabel ─────────────────────────────────────────────────────────────────────────────────────
 
-test('animalLabel: IDV primero, sino visual_id_alt, sino fallback', () => {
-  assert.equal(animalLabel('AR123', 'V99'), 'AR123');
-  assert.equal(animalLabel(null, 'V99'), 'V99');
-  assert.equal(animalLabel('  ', 'V99'), 'V99'); // IDV en blanco → cae al alt
-  assert.equal(animalLabel(null, null), 'Sin identificación');
-  assert.equal(animalLabel('', ''), 'Sin identificación');
+test('animalLabel (delta IDU): IDV si lo tiene, sino "Sin identificación" (sin visual_id_alt)', () => {
+  assert.equal(animalLabel('AR123'), 'AR123');
+  assert.equal(animalLabel(null), 'Sin identificación');
+  assert.equal(animalLabel('  '), 'Sin identificación'); // IDV en blanco → fallback
+  assert.equal(animalLabel(''), 'Sin identificación');
 });
 
 // ─── sessionDateLabel / sessionRangeLabel (R7.3.2 / R7.3.6) ─────────────────────────────────────────

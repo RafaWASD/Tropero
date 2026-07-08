@@ -247,6 +247,8 @@ Es la parte **más "de fondo"** (contexto §4/§5): toca la query central de la 
 
 > **Alternativa (más simple) considerada**: computar `rodeoUsesApodo` a nivel screen (una vez por rodeo) en vez de per-row join. Descartada para el MVP porque la lista general mezcla rodeos (no hay un único "rodeo activo") → el per-row join es lo correcto. Si el costo de la query pesa, el implementer puede cachear el set de rodeos-con-apodo y resolver `apodo_enabled` en memoria (optimización, no cambia el contrato).
 
+> **As-built (Fase B, `impl_identificadores-unificados`)**: `apodo`/`apodo_enabled` se resuelven con **subconsultas CORRELADAS** en la lista de proyección (no LEFT JOIN → no multiplican filas): `apodoValueSubquery(alias)` (`SELECT ca.value … WHERE ca.animal_profile_id = <alias>.id AND fd.data_key='apodo'`) + `apodoEnabledSubquery(alias)` (`COALESCE(pending_rodeo_data_config, rodeo_data_config, 0)`, apodo fd id correlado por `<alias>.establishment_id`). **Bug cazado + fijado en la autorrevisión**: `injectProjection` (que agrega el alias `updated_at` en el orderBy de la lista) buscaba el PRIMER ` FROM `, que ahora es el de una subconsulta del apodo → inyectaba en el lugar equivocado ("ORDER BY term does not match any column"). Fix: inyecta antes del FROM de la tabla PRINCIPAL (`FROM animal_profiles ap` / `FROM pending_animal_profiles pap`). Verde en el behavior test contra node:sqlite.
+
 ## 9. Warning-soft de duplicado de apodo (PURO + lectura local, IDU.5.4–5.7)
 
 **Helper puro (testeable):**
@@ -304,6 +306,8 @@ export function pickHeroIdentifier(input: {
 - **Fallback de display (IDU.6.6)**: el call site elige el texto para `kind==='none'` — `AnimalRow` usa "sin caravana" (el chip neutro ya existente), la ficha usa "Animal". La función pura NO hardcodea el copy (lo pasa el caller), así se testea sin acoplar a la UI.
 - **`AnimalRow`**: reemplaza `hero = idv ?? visualId ?? '—'` + `showSecondaryVisual` por `pickHeroIdentifier(...)`. Gana props `apodo?: string | null` + `rodeoUsesApodo?: boolean`; pierde `visualId`. El secundario (cuando el hero es apodo) se muestra inline muted (`· #<caravana>`), reusando el idiom actual del secundario visual.
 - **Ficha** (`animal/[id].tsx`): `heroLabel` pasa de `idv ?? visualIdAlt ?? tagElectronic ?? 'Animal'` a `pickHeroIdentifier({ apodo, rodeoUsesApodo, idv, tag }).value ?? 'Animal'`; la ficha ya lee `custom_attributes` (datos personalizados) → tiene el apodo; el `rodeoUsesApodo` sale del set de fields habilitados que la ficha ya consulta.
+
+> **As-built (Fase B)**: en vez de plomear el apodo desde el hijo `CustomPropertiesFicha` al `heroLabel` del padre, `buildAnimalDetailQuery` proyecta las MISMAS subconsultas del apodo que la lista (§8) → `AnimalDetail` gana `apodo` + `rodeoUsesApodo` → `[id].tsx` (`heroLabel` + `AnimalHero`) usa `pickHeroIdentifier` self-contained + muestra la caravana secundaria muted cuando el hero es apodo. Es la lectura correcta de "la ficha ya lee custom_attributes → tiene el apodo", por el mismo mecanismo que la lista (más robusto/testeable que el data-plumbing cross-componente). La sección "Datos personalizados" sigue siendo donde se VE/EDITA el apodo (con el warning-soft).
 
 ## 11. Orden de deploy (contexto §7.3) — para no dejar ventana rota
 

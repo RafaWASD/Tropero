@@ -19,8 +19,12 @@ export const TAG_ELECTRONIC_LENGTH = 15;
 // verificador ≈ 15 chars, replicando los 15 de la electrónica; la vieja "AR"+9 dígitos = 11 entra
 // holgada. Tope alineado a esos 15.
 export const IDV_MAX_LENGTH = 15;
-// Identificación visual: texto libre (color, seña, número de manga corto) pero acotado.
-export const VISUAL_MAX_LENGTH = 30;
+// Nombre/Apodo (delta identificadores-unificados, IDU.1.3/IDU.5.1): el 3er identificador. Alfanumérico
+// (incl. `ñ`/tildes — es-AR, el apodo es un nombre en español) + espacios + guiones, tope 15 (Puerta 1:
+// subido de 10 — "La Colorada"=11 cortaba). NO es la validación genérica de custom fields: es formato de
+// IDENTIFICADOR específico del apodo (design §5). El server (assert_custom_value_valid, migración 0122 =
+// Fase A) es autoritativo; este sanitizer es SOLO UX (previene, no errorea).
+export const APODO_MAX_LENGTH = 15;
 // Fecha ISO 'YYYY-MM-DD' = 10 caracteres con los guiones.
 const DATE_MASK_LENGTH = 10;
 // Peso de bovino: máximo 4 cifras ENTERAS. El bovino más pesado registrado pesó 1.740 kg; ninguno
@@ -46,12 +50,28 @@ export function sanitizeIdvInput(raw: string): string {
   return raw.replace(/[^A-Za-z0-9]/g, '').slice(0, IDV_MAX_LENGTH);
 }
 
+// ─── Nombre/Apodo (delta identificadores-unificados) ──────────────────────────────────
+// Charset del apodo (DECIDIDO en Puerta 1): letras (incl. acentuadas + `ñ`) + dígitos + espacios +
+// guiones. ASCII estricto comería la `ñ`/tildes de "Toño"/"Ñata" (es-AR). Cualquier otro símbolo se
+// descarta. El `\-` es un guion literal dentro de la clase; el resto son rangos de letras/dígitos.
+const APODO_DISALLOWED = /[^A-Za-z0-9áéíóúüñÁÉÍÓÚÜÑ \-]/g;
+
 /**
- * Identificación visual: texto libre acotado. No filtra caracteres (puede ser "vaca blanca", "R-14"),
- * solo limita el largo para que un IDV de 40+ chars no wrappee la ficha.
+ * Nombre/Apodo (IDU.5.1): filtra EN VIVO (onChangeText) el input del campo `apodo` a letras (incl.
+ * `ñ`/tildes) + dígitos + espacios + guiones, con tope APODO_MAX_LENGTH (15). PREVENIR, no errorear:
+ * descarta cualquier carácter fuera del charset y corta el largo. Es formato de IDENTIFICADOR, NO la
+ * validación genérica de custom fields (solo el apodo lo usa, por `data_key==='apodo'`).
+ *
+ * El sanitizer de cliente es UX/attacker-controlled → el server (assert_custom_value_valid, migración
+ * 0122, Fase A) es autoritativo sobre el mismo largo/charset (IDU.5.1b). Acá solo prevenimos el tipeo.
+ *
+ *   "Toño"          → "Toño"          (tildes/ñ conservadas)
+ *   "La Colorada"   → "La Colorada"   (espacios OK, 11 chars)
+ *   "Manchada#1!"   → "Manchada1"     (símbolos descartados)
+ *   "unnombremuylargo" → "unnombremuyla" (cortado a 15)
  */
-export function sanitizeVisualInput(raw: string): string {
-  return raw.slice(0, VISUAL_MAX_LENGTH);
+export function sanitizeApodoInput(raw: string): string {
+  return raw.replace(APODO_DISALLOWED, '').slice(0, APODO_MAX_LENGTH);
 }
 
 /**

@@ -210,7 +210,7 @@ export default function ManiobraIdentificar() {
         resolveManualIdentify(
           res.value.map((a) => ({
             profileId: a.profileId,
-            visualIdAlt: a.visualIdAlt,
+            apodo: a.apodo,
             idv: a.idv,
             tagElectronic: a.tagElectronic,
             rodeoName: a.rodeoName,
@@ -275,7 +275,8 @@ export default function ManiobraIdentificar() {
         // si el rodeo del animal no se resolvió en available (systemId ''), canChange queda false (solo saltar).
         setOtherRodeo({
           profileId,
-          animalLabel: animal.visualIdAlt ?? animal.idv ?? (animal.tagElectronic ? formatEidReadable(animal.tagElectronic) : 'Este animal'),
+          // delta IDU: sin visual_id_alt → idv → tag → genérico.
+          animalLabel: animal.idv ?? (animal.tagElectronic ? formatEidReadable(animal.tagElectronic) : 'Este animal'),
           animalRodeoId: animal.rodeoId,
           animalRodeoName: animal.rodeoName,
           canChange: animalRodeo != null && canChangeSessionRodeo(animalRodeoInfo, sessionRodeoInfo),
@@ -361,12 +362,12 @@ export default function ManiobraIdentificar() {
       // El operario eligió el correcto → se reusa el mismo camino del `found`: lo seteamos como outcome
       // found → el efecto de resolución de rodeo (R4.4/R4.7) lo evalúa igual que cualquier found (si está
       // en otro rodeo, ofrece cambiar/saltar; si no, auto-avanza).
-      // El identificador del flash de confirmación = la caravana REAL del animal ELEGIDO (visual > idv >
-      // tag), NO el texto tecleado. Importa en el caso de match por substring (fix "otra caravana"): el
+      // El identificador del flash de confirmación = el nombre REAL del animal ELEGIDO (delta IDU: apodo >
+      // idv > tag), NO el texto tecleado. Importa en el caso de match por substring (fix "otra caravana"): el
       // operario tecleó "42" y eligió el animal "1428" → el flash debe mostrar "1428", no "42".
       const typed = outcome?.kind === 'ambiguous' ? outcome.identifier : '';
       const id =
-        candidate.visualIdAlt ??
+        candidate.apodo ??
         candidate.idv ??
         (candidate.tagElectronic ? formatEidReadable(candidate.tagElectronic) : null) ??
         typed;

@@ -5,7 +5,6 @@ import assert from 'node:assert/strict';
 import {
   validateAnimalCreate,
   parseWeight,
-  hasAtLeastOneIdentifier,
   type AnimalCreateForm,
 } from './animal-form.ts';
 
@@ -107,19 +106,6 @@ test('parseWeight: coma o punto decimal, rechaza basura', () => {
   assert.equal(parseWeight('3a'), null);
 });
 
-test('R6.2 identidad mínima: sin ningún identificador → false (alta condenada al 23514)', () => {
-  // Los tres vacíos = el caso del ALTA EN BLANCO sin precarga → el server rechazaría con 23514.
-  assert.equal(hasAtLeastOneIdentifier('', '', ''), false);
-  assert.equal(hasAtLeastOneIdentifier(null, null, null), false);
-  assert.equal(hasAtLeastOneIdentifier(undefined, undefined, undefined), false);
-  // Solo espacios NO cuenta (el server hace nullif(trim(...)) → quedaría NULL → 23514).
-  assert.equal(hasAtLeastOneIdentifier('   ', '  ', ' '), false);
-});
-
-test('R6.2 identidad mínima: al menos uno presente → true', () => {
-  assert.equal(hasAtLeastOneIdentifier('982000123456789', '', ''), true); // tag
-  assert.equal(hasAtLeastOneIdentifier('', '12345', ''), true); // idv
-  assert.equal(hasAtLeastOneIdentifier('', '', 'R-14'), true); // visual
-  assert.equal(hasAtLeastOneIdentifier('  982  ', '', ''), true); // con espacios pero contenido real
-  assert.equal(hasAtLeastOneIdentifier(null, '12345', undefined), true); // mezcla null/valor
-});
+// delta IDU (IDU.1.4/IDU.1.5): la regla de "al menos un identificador" (hasAtLeastOneIdentifier) se ELIMINÓ.
+// El trigger server-side (animal_profiles_identity_check) se dropea en la migración 0122, así que un alta en
+// blanco (tag/idv/apodo todos ausentes) persiste sin 23514 — no hay guard de cliente que testear acá.
