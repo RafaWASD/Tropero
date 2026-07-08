@@ -1,11 +1,12 @@
 // Lógica PURA del rodeo + caravana visual del ternero AL PARTO (spec 02 delta parto-rodeo-caravana,
 // RPRC.1/RPRC.2/RPRC.3). Sin RN, sin red: testeable con node:test (mismo patrón que event-input.ts /
 // animal-input.ts). Espeja la lógica que en #15 (cría al pie) vive inline en LinkCalfPrompt.tsx:122-127;
-// extraerla acá la hace verificable por test unitario sin render (trazabilidad RPRC.1.6/1.7/3.2/3.3).
+// extraerla acá la hace verificable por test unitario sin render (trazabilidad RPRC.1.6/1.7).
 //
 // Diferencia clave vs #15: acá el parto soporta MELLIZOS (lista dinámica de N terneros). El RODEO aplica a
-// TODA la camada (p_calf_rodeo_id escalar → un valor), pero la CARAVANA VISUAL (idv) solo se ofrece/envía
-// con 1 ternero (p_calf_idv escalar → ofrecer N idvs rompería el contrato del RPC — ver design §7).
+// TODA la camada (p_calf_rodeo_id escalar → un valor), pero la CARAVANA VISUAL (idv) es POR CRÍA (delta
+// parto-caravana-visual-por-ternero, PCV.3: cada elemento de p_calves lleva su calf_idv — el RPC lo lee por
+// cría; SUPERA RPRC.3.2/3.3 que la enviaban single-calf-only). Simétrica con la caravana electrónica.
 //
 // NO value-import de un sibling: solo `import type` (el runner node:test carga estos utils sin bundler;
 // la resolución de extensiones difiere de Metro — lección event-input.ts).
@@ -62,13 +63,13 @@ export function canEditCalfRodeo(eligible: Rodeo[], motherRodeoId: string | null
 }
 
 /**
- * Caravana visual (idv) a ENVIAR a registerBirth (RPRC.3.2/3.3). Solo con EXACTAMENTE 1 ternero y un valor
- * no vacío; `null` con ≥2 terneros (mellizos) o con el campo vacío. Descartar el idv cuando hay mellizos es
- * intencional (D2): `p_calf_idv` es un escalar único → no se puede repartir a N terneros; el mellizo asigna
- * su visual después desde la ficha. El valor ya viene sanitizado por `sanitizeIdvInput` en el campo; acá
- * solo se recorta el trailing/leading whitespace defensivo (sanitizeIdvInput ya deja solo dígitos).
+ * Caravana visual (idv) POR CRÍA a ENVIAR a registerBirth (delta parto-caravana-visual-por-ternero, PCV.3.1/
+ * 3.3). Se aplica al idv de CADA ternero (dentro de su `CalfBlock`), single Y mellizos: un valor no vacío →
+ * el idv; vacío → `null` (omitido — sin forzar, PCV.2). SUPERA el gate por longitud de camada del delta madre
+ * (RPRC.3.2/3.3): ya no hay "solo single-calf" — cada cría manda su calf_idv. El valor ya viene sanitizado por
+ * `sanitizeIdvInput` en el campo (solo dígitos); acá solo se recorta el whitespace defensivo.
  */
-export function calfIdvForSubmit(calvesLength: number, idvRaw: string): string | null {
+export function calfIdvForSubmit(idvRaw: string): string | null {
   const trimmed = idvRaw.trim();
-  return calvesLength === 1 && trimmed.length > 0 ? trimmed : null;
+  return trimmed.length > 0 ? trimmed : null;
 }

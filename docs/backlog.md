@@ -17,6 +17,13 @@ No es un sustituto de `feature_list.json` ni de los ADRs — es la antesala dond
 
 ## Ítems pendientes
 
+## 2026-07-07 — Cota de longitud del array `p_calves` en `register_birth` (defense-in-depth)
+
+**Origen**: Gate 1 + Gate 2 del delta `parto-caravana-visual-por-ternero` (VERIFY-002). Ambos gates lo marcaron LOW / no-HIGH, pre-existente (no lo introdujo el delta).
+**Qué**: `register_birth` valida `jsonb_array_length(p_calves) >= 1` pero NO tiene cota superior. Un caller autenticado con rol en su tenant podría mandar un array enorme → N inserts (`animals`+`animal_profiles`+`birth_calves`) en una sola transacción.
+**Por qué importa**: bajo. Requiere auth + rol en el propio establecimiento; el daño es a su propio tenant (no escala privilegios, no cross-tenant). Es availability/DoS auto-infligido. Un parto real tiene 1-2 crías (raro 3-4). No urgente.
+**Próximo paso sugerido**: agregar `if v_count > <N> then raise using errcode='22023'` (ej. N=10, holgado sobre cualquier parición real) la próxima vez que se toque `register_birth` por otra razón — o ya, si se prioriza hardening. NO se metió en `0121` para mantener la migración = exactamente los 3 cambios revisados por los gates (scope discipline). Toca DB → Gate 1 puntual + test.
+
 ## 2026-07-01 — Auto-seed SEGURO del dato "apodo" para establecimientos FUTUROS (DP2 diferida del delta nombre-apodo)
 
 **Origen**: delta NOMBRE/APODO de spec 02 (`specs/active/02-modelo-animal/{context,requirements,design,tasks}-nombre-apodo.md`, DP2). El delta seedea el `field_definition` "apodo" (per-est, `data_type='propiedad'`, `ui_component='text'`, deshabilitado) **solo para los establecimientos EXISTENTES** (backfill de `0119`). Un establecimiento creado DESPUÉS de la migración NO queda auto-seedeado → su owner crea el "apodo" on-demand con el `+` de `editar-plantilla` (poca fricción; MVP tiene 1 est beta).

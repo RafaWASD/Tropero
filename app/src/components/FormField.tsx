@@ -33,6 +33,12 @@ export type FormFieldProps = {
   onSubmitEditing?: TextInputProps['onSubmitEditing'];
   /** Tope de caracteres tipeables (delega en el maxLength nativo del TextInput). */
   maxLength?: number;
+  /**
+   * testID del <TextInput> (ADITIVO, opcional). RN-web lo mapea a `data-testid` → desambigua inputs con el
+   * MISMO label (ej. el idv por ternero en el parto de mellizos: `calf-idv-0` / `calf-idv-1`). Sin él, el
+   * comportamiento es idéntico al as-built (todos los callers previos siguen sin testID).
+   */
+  testID?: string;
 };
 
 export const FormField = forwardRef<TextInput, FormFieldProps>(function FormField(
@@ -51,6 +57,7 @@ export const FormField = forwardRef<TextInput, FormFieldProps>(function FormFiel
     returnKeyType,
     onSubmitEditing,
     maxLength,
+    testID,
   },
   ref,
 ) {
@@ -95,6 +102,7 @@ export const FormField = forwardRef<TextInput, FormFieldProps>(function FormFiel
         returnKeyType={returnKeyType}
         onSubmitEditing={onSubmitEditing}
         maxLength={maxLength}
+        testID={testID}
         style={{
           minHeight,
           borderRadius: radius,

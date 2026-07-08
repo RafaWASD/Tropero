@@ -40,6 +40,8 @@ Al cerrar la Puerta 2, el leader folda al `design.md` baseline de spec 02 (bajo 
 - `FormField` (`@/components`), `sanitizeIdvInput` (`utils/animal-input`) — ya usados por el campo idv camada actual; se **mueven** al `CalfBlock`.
 - El `TagScanCta`/`CapturedTagRow`/`TagScanSheet` del bastoneo por ternero (RCF.6) quedan **intactos** — el idv se ubica junto a ellos.
 
+> **[Reconciliación as-built]** `FormField` **no** aceptaba un `testID` (a diferencia de `TagScanCta`/`CapturedTagRow`). Para poder desambiguar el idv por ternero en E2E (`calf-idv-0` / `calf-idv-1`, PCV.1.4/8.5), se le agregó un prop **`testID?: string` OPCIONAL y ADITIVO** que se pasa al `<TextInput>` (RN-web lo mapea a `data-testid`). Cambio backward-compat: todos los callers previos siguen sin `testID` (comportamiento idéntico). Es la única modificación a un componente compartido de este delta.
+
 ### Tests (backend + E2E)
 - **EXTENDER** las suites backend de `register_birth` (donde vivan los tests de parto/mellizos — `supabase/tests/animal/` o equivalente): idv per-calf (mellizos con idv distinto persisten con su idv); **23505** por idv duplicado en el mismo parto → rollback atómico (0/0); backward-compat `p_calf_idv` (cría al pie 1 cría). Re-correr **todas** las suites que tocan el RPC (animal + SIGSA por el `breed_id`).
 - **CREAR** helper de oráculo `waitForServerCalfIdvs(motherProfileId, expectedIdvs)` en `app/e2e/helpers/admin.ts` — análogo a `waitForServerCalfTags` pero leyendo `animal_profiles.idv` (el idv vive en `animal_profiles`, no en `animals`): cadena `reproductive_events(birth) → birth_calves.calf_profile_id → animal_profiles.idv`.

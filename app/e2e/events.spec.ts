@@ -23,6 +23,9 @@ import {
   seedReproductiveServiceEvent,
   setUserPhone,
   cleanupAll,
+  waitForServerBirth,
+  waitForServerCalfIdvs,
+  getServerBirthState,
 } from './helpers/admin';
 import { signIn, waitForHome, gotoAnimales } from './helpers/ui';
 
@@ -899,33 +902,36 @@ test('C6 override: badge "Categoría fijada manualmente" + quitar fijación → 
   await expect(page.getByLabel('Categoría Vaquillona', { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 20_000 });
 });
 
-// ─── Delta parto-rodeo-caravana (#4/#1a) — RPRC.1/2/3: rodeo del parto + caravana visual del ternero ──────
+// ─── Delta parto-caravana-visual-por-ternero — PCV.1/3/5/8.5: caravana visual (idv) POR CRÍA ──────
 //
-// Regresión del delta: en el form de Parto (agregar-evento, eventType='birth'),
-//   - RPRC.1: aparece el picker de RODEO a nivel parto, preseleccionado al de la madre + leyenda "(Mismo
-//     rodeo que la madre)", editable a otro rodeo del MISMO sistema (Destete). Al elegir Destete la leyenda
-//     desaparece (RPRC.1.4).
-//   - RPRC.2: con 1 ternero aparece el campo de CARAVANA VISUAL; al agregar un 2º ternero (mellizos) el
-//     campo desaparece y aparece la NOTA (RPRC.2.3/2.4); al quitar el 2º vuelve. El tag ELECTRÓNICO sigue
-//     por ternero (RPRC.2.5, sin cambios — cubierto por el test de mellizos de arriba).
-//   - RPRC.3: el rodeo (Destete) y la caravana visual (idv) elegidos LLEGAN a registerBirth → el ternero
-//     creado aparece con SU idv en la lista (prueba de calfIdv) y su ficha muestra Rodeo "Destete" (prueba
-//     de calfRodeoId — distinto del rodeo de la madre "Rodeo general").
+// ⚠️ DEPLOY-GATED: estos tests requieren la migración 0121 APLICADA al remoto (idv per-calf en register_birth,
+// la aplica el LEADER con autorización de Raf). Con el RPC VIEJO el `calf_idv` per-elemento se ignora → el idv
+// del ternero NO persiste → los oráculos waitForServerCalfIdvs FALLAN. Es ESPERADO hasta el deploy — el leader
+// corre esta suite post-deploy (patrón 0075-0089). NO correr esperando verde antes del deploy.
+//
+// Reconcilia el delta madre parto-rodeo-caravana (RPRC.2.1/2.3/2.4 SUPERADAS): la caravana visual ya NO es un
+// campo a nivel camada single-calf con nota de mellizos — es un campo POR CRÍA dentro de cada CalfBlock
+// (testID calf-idv-${index}), simétrico con la caravana electrónica. RPRC.1 (rodeo del parto a nivel camada)
+// queda INTACTO y se sigue cubriendo acá.
 //
 // La madre es una hembra SIN tacto previo → "no figura preñada" → el "Guardar" dispara el aviso suave
 // (window.confirm): lo capturamos + aceptamos (patrón del test "parto en hembra NO preñada" de arriba).
-test('delta parto-rodeo-caravana: picker de rodeo + caravana visual (single) / nota (mellizos) → llegan a registerBirth (RPRC.1/2/3)', async ({
+
+// (a) PCV.8.5(a) + RPRC.1: 1 ternero con idv POR CRÍA + rodeo del parto (Destete) → ambos llegan a
+// registerBirth: el ternero persiste con SU idv (oráculo server-side waitForServerCalfIdvs) y su ficha muestra
+// Rodeo "Destete" (calfRodeoId, RPRC.1 intacto).
+test('delta parto-caravana-visual: 1 ternero con idv POR CRÍA + rodeo del parto → llegan a registerBirth (PCV.8.5a/RPRC.1)', async ({
   page,
 }) => {
   test.setTimeout(210_000);
 
-  const user = await createTestUser('partorc');
+  const user = await createTestUser('pcvsingle');
   await setUserPhone(user.id, '1123456789');
   // Campo con 2 rodeos del MISMO sistema (cría) → el picker ofrece "Destete" como destino editable.
-  const { establishmentId, rodeoId } = await seedEstablishmentWithRodeo(user.id, 'Campo PartoRC'); // rodeo A "Rodeo general"
+  const { establishmentId, rodeoId } = await seedEstablishmentWithRodeo(user.id, 'Campo PCVSingle'); // rodeo A "Rodeo general"
   await seedRodeo(establishmentId, 'Destete'); // rodeo B, mismo sistema (cría) → RPRC.1.5/1.6
   const motherIdv = `4412${Date.now().toString().slice(-5)}`;
-  await seedAnimal(establishmentId, rodeoId, { idv: motherIdv, sex: 'female' });
+  const motherProfileId = await seedAnimal(establishmentId, rodeoId, { idv: motherIdv, sex: 'female' });
 
   await page.goto('/');
   await signIn(page, user);
@@ -947,30 +953,17 @@ test('delta parto-rodeo-caravana: picker de rodeo + caravana visual (single) / n
   await expect(page.getByText('Rodeo del parto', { exact: true })).toBeVisible();
   await expect(page.getByText('(Mismo rodeo que la madre)', { exact: true })).toBeVisible();
 
-  // ── RPRC.2.1: con 1 ternero, el campo de caravana visual aparece. ──
-  await expect(page.getByLabel('Caravana visual del ternero (opcional)', { exact: true })).toBeVisible();
+  // ── PCV.1.1/1.2: con 1 ternero, el campo de caravana visual vive DENTRO del CalfBlock (testID calf-idv-0);
+  //     NO existe el viejo campo a nivel camada ni la nota de mellizos (PCV.1.5). ──
+  const idv0Field = page.getByTestId('calf-idv-0');
+  await expect(idv0Field).toBeVisible();
+  await expect(page.getByText(/Las caravanas visuales de mellizos se asignan después/)).toHaveCount(0);
 
-  // ── RPRC.2.3/2.4: agregar un 2º ternero (mellizos) → el campo idv desaparece + aparece la nota. ──
-  await page.getByRole('button', { name: 'Agregar otro ternero', exact: true }).click();
-  await expect(page.getByText('Ternero 2', { exact: true })).toBeVisible();
-  await expect(page.getByLabel('Caravana visual del ternero (opcional)', { exact: true })).toHaveCount(0);
-  await expect(
-    page.getByText(/Las caravanas visuales de mellizos se asignan después/),
-  ).toBeVisible();
-  // El picker de rodeo sigue presente (aplica a toda la camada, RPRC.1.7).
-  await expect(page.getByText('Rodeo del parto', { exact: true })).toBeVisible();
-
-  // ── Quitar el 2º ternero → el campo de caravana visual vuelve. ──
-  await page.getByRole('button', { name: 'Quitar ternero 2', exact: true }).click();
-  await expect(page.getByText('Ternero 2', { exact: true })).toHaveCount(0);
-  const idvField = page.getByLabel('Caravana visual del ternero (opcional)', { exact: true });
-  await expect(idvField).toBeVisible();
-
-  // ── RPRC.2.2/3.2: tipear la caravana visual (single-calf). Empieza con '0' → prueba que el campo NO
-  //     clampa el leading cero (sanitizeIdvInput solo filtra no-dígitos). ──
+  // ── PCV.1.3: tipear la caravana visual del ternero. Empieza con '0' → prueba que el campo NO clampa el
+  //     leading cero (sanitizeIdvInput solo filtra no-dígitos). ──
   const calfIdv = `0${Date.now().toString().slice(-6)}`;
-  await idvField.fill(calfIdv);
-  await expect(idvField).toHaveValue(calfIdv);
+  await idv0Field.fill(calfIdv);
+  await expect(idv0Field).toHaveValue(calfIdv);
 
   // ── RPRC.1.5/1.4: abrir el picker → "Destete" (mismo sistema) → elegirlo → la leyenda desaparece. ──
   await page.getByRole('button', { name: 'Elegir rodeo del parto' }).click();
@@ -990,19 +983,127 @@ test('delta parto-rodeo-caravana: picker de rodeo + caravana visual (single) / n
   await expect(page.getByText('Cargando ficha…', { exact: true })).toHaveCount(0, { timeout: 20_000 });
   await expect(page.getByText('Parto', { exact: true })).toBeVisible({ timeout: 20_000 });
 
-  // ── RPRC.3.1/3.2 (llegaron a registerBirth): el ternero aparece con SU caravana visual (calfIdv) en la
-  //     lista → prueba que calfIdv se envió; su ficha muestra Rodeo "Destete" → prueba que calfRodeoId se
-  //     envió (el ternero NO heredó el "Rodeo general" de la madre). ──
+  // ── PCV.8.5(a) oráculo server-side: el ternero creado persiste con SU idv (calf_idv per-calf → RPC). ──
+  const idvs = await waitForServerCalfIdvs(motherProfileId, [calfIdv]);
+  expect(idvs).toContain(calfIdv);
+
+  // ── RPRC.1 (intacto): la ficha del ternero muestra Rodeo "Destete" (calfRodeoId, NO el de la madre). ──
   await page.getByRole('button', { name: 'Volver', exact: true }).click();
   await gotoAnimales(page);
   const calfRow = page.getByRole('button', { name: new RegExp(calfIdv) }).first();
   await expect(calfRow).toBeVisible({ timeout: 20_000 });
   await calfRow.click();
   await expect(page.getByText('Historial', { exact: true })).toBeVisible({ timeout: 20_000 });
-  // La ficha del ternero: Rodeo "Destete" (el elegido en el picker), NO "Rodeo general" de la madre.
-  // filter({visible:true}): en web Expo Router deja montadas DETRÁS las pantallas previas del stack
-  // (aria-hidden) → "Destete" aparece en instancias OCULTAS (picker/fichas viejas); anclamos a la VISIBLE.
+  // filter({visible:true}): en web Expo Router deja montadas DETRÁS las pantallas previas del stack (aria-hidden).
   await expect(
     page.getByText(/Destete/).filter({ visible: true }).first(),
   ).toBeVisible({ timeout: 20_000 });
+});
+
+// (b) PCV.8.5(b): mellizos con idv DISTINTO cada uno (calf-idv-0 / calf-idv-1) → AMBOS persisten con su idv.
+test('delta parto-caravana-visual: mellizos con idv DISTINTO cada uno → ambos persisten con su idv (PCV.5.1/5.2/8.5b)', async ({
+  page,
+}) => {
+  test.setTimeout(210_000);
+
+  const user = await createTestUser('pcvtwin');
+  await setUserPhone(user.id, '1123456789');
+  const { establishmentId, rodeoId } = await seedEstablishmentWithRodeo(user.id, 'Campo PCVTwin');
+  const motherIdv = `4414${Date.now().toString().slice(-5)}`;
+  const motherProfileId = await seedAnimal(establishmentId, rodeoId, { idv: motherIdv, sex: 'female' });
+
+  await page.goto('/');
+  await signIn(page, user);
+  await waitForHome(page);
+  await gotoAnimales(page);
+
+  const motherRow = page.getByRole('button', { name: new RegExp(motherIdv) }).first();
+  await expect(motherRow).toBeVisible({ timeout: 20_000 });
+  await motherRow.click();
+  await expect(page.getByText('Historial', { exact: true })).toBeVisible({ timeout: 20_000 });
+
+  await page.getByRole('button', { name: 'Agregar evento', exact: true }).click();
+  await expect(page.getByText('¿Qué querés cargar?', { exact: true })).toBeVisible({ timeout: 20_000 });
+  await page.getByRole('button', { name: 'Parto', exact: true }).click();
+  await expect(page.getByText('Ternero 1', { exact: true })).toBeVisible({ timeout: 20_000 });
+
+  // ── PCV.5.1: agregar un 2º ternero → cada CalfBlock tiene SU campo idv (calf-idv-0 / calf-idv-1), sin nota. ──
+  await page.getByRole('button', { name: 'Agregar otro ternero', exact: true }).click();
+  await expect(page.getByText('Ternero 2', { exact: true })).toBeVisible();
+  await expect(page.getByTestId('calf-idv-0')).toBeVisible();
+  await expect(page.getByTestId('calf-idv-1')).toBeVisible();
+  await expect(page.getByText(/Las caravanas visuales de mellizos se asignan después/)).toHaveCount(0);
+
+  // ── PCV.5.2: idv DISTINTO por cría. ──
+  const idv0 = `0${Date.now().toString().slice(-6)}`;
+  const idv1 = `1${Date.now().toString().slice(-6)}`;
+  expect(idv0).not.toBe(idv1);
+  await page.getByTestId('calf-idv-0').fill(idv0);
+  await page.getByTestId('calf-idv-1').fill(idv1);
+  // El idv del ternero 0 NO se pisa al tipear el del ternero 1 (PCV.1.4).
+  await expect(page.getByTestId('calf-idv-0')).toHaveValue(idv0);
+
+  // ── Sexo de cada ternero (requerido) + Guardar. ──
+  await page.getByRole('button', { name: 'Macho', exact: true }).first().click();
+  await page.getByRole('button', { name: 'Hembra', exact: true }).last().click();
+  page.once('dialog', async (dialog) => {
+    await dialog.accept();
+  });
+  await page.getByRole('button', { name: 'Guardar evento', exact: true }).click();
+
+  await expect(page.getByText('Cargando ficha…', { exact: true })).toHaveCount(0, { timeout: 20_000 });
+  await expect(page.getByText('Parto', { exact: true })).toBeVisible({ timeout: 20_000 });
+
+  // ── PCV.8.5(b) oráculo: AMBOS terneros persisten, cada uno con SU idv. ──
+  const idvs = await waitForServerCalfIdvs(motherProfileId, [idv0, idv1]);
+  expect(idvs).toContain(idv0);
+  expect(idvs).toContain(idv1);
+});
+
+// (c) PCV.8.5(c) + PCV.2: ambos vacíos (ningún ternero con idv ni tag) → el parto se registra OK y los
+// terneros quedan SIN caravana (constraint de opcionalidad — ninguna validación fuerza cargar).
+test('delta parto-caravana-visual: parto SIN ninguna caravana (opcionalidad) → OK, ternero sin idv (PCV.2/8.5c)', async ({
+  page,
+}) => {
+  test.setTimeout(210_000);
+
+  const user = await createTestUser('pcvempty');
+  await setUserPhone(user.id, '1123456789');
+  const { establishmentId, rodeoId } = await seedEstablishmentWithRodeo(user.id, 'Campo PCVEmpty');
+  const motherIdv = `4415${Date.now().toString().slice(-5)}`;
+  const motherProfileId = await seedAnimal(establishmentId, rodeoId, { idv: motherIdv, sex: 'female' });
+
+  await page.goto('/');
+  await signIn(page, user);
+  await waitForHome(page);
+  await gotoAnimales(page);
+
+  const motherRow = page.getByRole('button', { name: new RegExp(motherIdv) }).first();
+  await expect(motherRow).toBeVisible({ timeout: 20_000 });
+  await motherRow.click();
+  await expect(page.getByText('Historial', { exact: true })).toBeVisible({ timeout: 20_000 });
+
+  await page.getByRole('button', { name: 'Agregar evento', exact: true }).click();
+  await expect(page.getByText('¿Qué querés cargar?', { exact: true })).toBeVisible({ timeout: 20_000 });
+  await page.getByRole('button', { name: 'Parto', exact: true }).click();
+  await expect(page.getByText('Ternero 1', { exact: true })).toBeVisible({ timeout: 20_000 });
+
+  // ── PCV.2.1/2.2: NO cargamos idv ni tag. Solo el sexo (requerido) → Guardar debe proceder sin error inline. ──
+  await page.getByRole('button', { name: 'Macho', exact: true }).first().click();
+  page.once('dialog', async (dialog) => {
+    await dialog.accept();
+  });
+  await page.getByRole('button', { name: 'Guardar evento', exact: true }).click();
+
+  await expect(page.getByText('Cargando ficha…', { exact: true })).toHaveCount(0, { timeout: 20_000 });
+  await expect(page.getByText('Parto', { exact: true })).toBeVisible({ timeout: 20_000 });
+
+  // ── PCV.8.5(c) oráculo: el parto se materializó CON su ternero (calfCount === 1). Esto ES la prueba de la
+  //     opcionalidad segura (PCV.2.4): un ternero sin idv NI tag pasa el trigger animal_profiles_identity_check
+  //     SOLO porque el RPC le puso el fallback visual_id_alt; sin él, el INSERT sería 23514 → rollback →
+  //     calfCount 0. calfCount === 1 prueba que la cría sin ninguna caravana se creó igual. ──
+  const snap = await waitForServerBirth(motherProfileId, { expectedCalves: 1 });
+  expect(snap.calfCount).toBe(1);
+  const state = await getServerBirthState(motherProfileId);
+  expect(state.birthEventCount).toBe(1); // exactamente UN parto, sin duplicación
 });

@@ -521,13 +521,19 @@ export async function addService(input: AddServiceInput): Promise<ServiceResult<
 // Multi-tenant: el cliente manda SOLO motherProfileId + fecha + terneros. La RPC deriva el tenant de
 // la fila REAL de la madre + has_role_in (un caller sin rol recibe 42501). NO se manda establishment_id.
 
-/** Un ternero del parto (lo que el form arma). sexo REQUERIDO; peso/tag opcionales. */
+/** Un ternero del parto (lo que el form arma). sexo REQUERIDO; peso/tag/idv opcionales. */
 export type BirthCalfInput = {
   sex: 'male' | 'female';
   /** Peso al nacer en kg (> 0 si viene). Opcional. */
   weightKg?: number | null;
-  /** Caravana electrónica FDX-B (15 díg). Opcional — sin TAG el server pone el fallback visual. */
+  /** Caravana electrónica FDX-B (15 díg). Opcional — sin TAG (ni idv) el server pone el fallback visual. */
   tag?: string | null;
+  /**
+   * Caravana visual (idv) POR CRÍA (delta parto-caravana-visual-por-ternero, PCV.3.1). Opcional — SIEMPRE
+   * (constraint duro de Raf, PCV.2: ninguna validación la fuerza). Viaja como `calf_idv` en el elemento del
+   * payload `p_calves`; el RPC le da precedencia sobre el `p_calf_idv` top-level (cría al pie #15).
+   */
+  idv?: string | null;
 };
 
 export type RegisterBirthInput = {
@@ -544,9 +550,10 @@ export type RegisterBirthInput = {
    */
   calfRodeoId?: string | null;
   /**
-   * Fold Gate 1 LOW-1: IDV/caravana visual TIPEADA del ternero al pie (camino CREATE, find-or-create no
-   * encontró nada → la caravana ingresada es la del ternero). NULL/undefined → as-built (sin idv). Pensado
-   * para el flujo de UN solo ternero (cría al pie); el parto normal/mellizos NO lo pasa.
+   * IDV/caravana visual TIPEADA del ternero al pie, TOP-LEVEL (camino CREATE de cría al pie #15, find-or-create
+   * no encontró nada → la caravana ingresada es la del ternero). NULL/undefined → sin idv top-level. EXCLUSIVO
+   * de ese flujo mono-cría: el parto normal/mellizos NO lo pasa — manda el idv POR CRÍA en `calves[].idv`
+   * (delta parto-caravana-visual-por-ternero, PCV.3.2/6.2). El RPC da precedencia al per-calf sobre este.
    */
   calfIdv?: string | null;
 };
@@ -577,6 +584,11 @@ export async function registerBirth(
     if (c.weightKg != null) payload.calf_weight = c.weightKg;
     const tag = cleanStr(c.tag);
     if (tag) payload.calf_tag_electronic = tag;
+    // Caravana visual (idv) POR CRÍA (PCV.3.1): se manda en el elemento cuando viene, paralelo a
+    // calf_tag_electronic. Vacío/ausente → se omite (PCV.3.3, sin forzar). El RPC le da precedencia sobre
+    // p_calf_idv (top-level, exclusivo de cría al pie #15).
+    const idv = cleanStr(c.idv);
+    if (idv) payload.calf_idv = idv;
     return payload;
   });
 
@@ -608,7 +620,8 @@ export async function registerBirth(
   // Rodeo efectivo del ternero (RCAP.7): el elegido en el prompt de cría al pie ?? el de la madre (as-built).
   // La RPC lo re-valida server-side (activo, tenant de la madre, mismo sistema); acá solo refleja el overlay.
   const calfRodeoId = cleanStr(input.calfRodeoId) ?? rodeo_id;
-  // LOW-1: IDV tipado del ternero al pie (camino CREATE) ?? null (parto normal/mellizos).
+  // IDV top-level: EXCLUSIVO del camino cría al pie #15 (mono-cría, PCV.6.2). El parto normal/mellizos manda
+  // el idv POR CRÍA (c.idv). El overlay le da precedencia per-calf → top-level (espeja el coalesce del RPC).
   const calfIdv = cleanStr(input.calfIdv);
 
   const birthEventId = randomUuid();
@@ -617,14 +630,19 @@ export async function registerBirth(
     const calfAnimalId = randomUuid();
     const calfProfileId = randomUuid();
     const tag = cleanStr(c.tag);
-    // El ternero sin tag muestra el fallback visual de la RPC (R9.1) en el overlay.
-    const visualFallback = tag ? null : 'recién nacido — pendiente de caravana';
+    // idv POR CRÍA con precedencia sobre el top-level (PCV.4.3, espeja el coalesce del RPC): el idv del
+    // elemento gana; si vacío/ausente, cae al idv top-level (cría al pie #15).
+    const idv = cleanStr(c.idv) ?? calfIdv;
+    // Fallback visual del overlay REFINADO (PCV.4.5): solo cuando la cría NO tiene tag NI idv (both-null) —
+    // así el overlay optimista matchea el visual_id_alt que pondrá el RPC (con idv, no aplica → evita un
+    // flash inconsistente antes del ACK).
+    const visualFallback = tag == null && idv == null ? 'recién nacido — pendiente de caravana' : null;
     const profile: PendingProfileFields = {
       animalId: calfAnimalId,
       establishmentId: establishment_id,
       rodeoId: calfRodeoId,
       managementGroupId: null,
-      idv: calfIdv,
+      idv,
       visualIdAlt: visualFallback,
       categoryId: catByCode[c.sex] ?? '',
       categoryOverride: false,
@@ -647,9 +665,11 @@ export async function registerBirth(
     };
   });
 
-  // Params de la RPC. p_calf_rodeo_id / p_calf_idv SOLO se incluyen cuando se proveyeron (camino cría al pie
-  // CREATE) → el intent del parto normal/mellizos queda IDÉNTICO al as-built (compat con intents ya encolados
-  // + resolución de la firma por los defaults null de 0115). uploadData inyecta p_client_op_id al subir.
+  // Params de la RPC. p_calf_rodeo_id / p_calf_idv (top-level) SOLO se incluyen cuando se proveyeron. El
+  // p_calf_idv top-level queda EXCLUSIVO del camino cría al pie #15 (CREATE, mono-cría, PCV.6.2): el parto
+  // normal/mellizos manda el idv POR CRÍA (calf_idv en cada elemento de calvesPayload) y NO setea input.calfIdv
+  // → el intent del parto queda sin p_calf_idv top-level (el idv viaja per-calf, PCV.3.2). uploadData inyecta
+  // p_client_op_id al subir.
   const params: Record<string, unknown> = {
     p_mother_profile_id: input.motherProfileId,
     p_event_date: input.eventDate,

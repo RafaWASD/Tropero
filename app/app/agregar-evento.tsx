@@ -115,13 +115,15 @@ const REPRO_DIALOG_TITLE: Partial<Record<EventType, string>> = {
 
 // Un ternero del form de parto, con un id LOCAL estable (no el índice del array): permite borrar un
 // ternero del MEDIO sin que React confunda los keys (lección de listas dinámicas — key=índice rompe
-// el reconciliado al remover). `sex`/`weightRaw`/`tagRaw` espejan CalfDraft (validateCalves).
-type CalfRow = { localId: string; sex: 'male' | 'female' | null; weightRaw: string; tagRaw: string };
+// el reconciliado al remover). `sex`/`weightRaw`/`tagRaw` espejan CalfDraft (validateCalves). `idvRaw` =
+// caravana VISUAL POR CRÍA (delta parto-caravana-visual-por-ternero, PCV.1.4): cada ternero lleva su idv en
+// el estado → agregar/quitar un mellizo no mezcla ni pierde los idv de los demás.
+type CalfRow = { localId: string; sex: 'male' | 'female' | null; weightRaw: string; tagRaw: string; idvRaw: string };
 
 let calfIdSeq = 0;
 function newCalf(): CalfRow {
   calfIdSeq += 1;
-  return { localId: `calf-${calfIdSeq}`, sex: null, weightRaw: '', tagRaw: '' };
+  return { localId: `calf-${calfIdSeq}`, sex: null, weightRaw: '', tagRaw: '', idvRaw: '' };
 }
 
 // Fecha de hoy en ISO 'YYYY-MM-DD' (local) para pre-cargar el campo de fecha (el caso típico es
@@ -207,11 +209,10 @@ export default function AgregarEventoScreen() {
   const [calves, setCalves] = useState<CalfRow[]>(() => [newCalf()]);
   const [birthDateErr, setBirthDateErr] = useState<string | null>(null);
   const [calvesErr, setCalvesErr] = useState<string | null>(null);
-  // Delta parto-rodeo-caravana (#4/#1a): rodeo a nivel PARTO (toda la camada) + caravana visual del ternero
-  // (solo single-calf). `calfRodeoId` = null → usar el de la madre (RPRC.1.2); un valor = rodeo editado
-  // (RPRC.1.5). `calfIdv` = caravana visual sanitizada (RPRC.2.2), solo se envía con 1 ternero (RPRC.3.2/3.3).
+  // Delta parto-rodeo-caravana (#4/#1a): rodeo a nivel PARTO (toda la camada). `calfRodeoId` = null → usar el
+  // de la madre (RPRC.1.2); un valor = rodeo editado (RPRC.1.5). La caravana VISUAL (idv) ya NO vive acá a
+  // nivel camada: pasó a ser POR CRÍA (cada CalfRow.idvRaw, delta parto-caravana-visual-por-ternero PCV.1).
   const [calfRodeoId, setCalfRodeoId] = useState<string | null>(null);
-  const [calfIdv, setCalfIdv] = useState('');
   const [rodeoPickerOpen, setRodeoPickerOpen] = useState(false);
   // Sheet de BASTONEO de la caravana electrónica POR TERNERO (delta bastoneo-captura-alta-parto, RCF.6
   // generalizado, modo CAPTURA). Solo UN sheet abierto a la vez → trackeamos el localId del ternero que está
@@ -491,16 +492,22 @@ export default function AgregarEventoScreen() {
       // server-side (R9.4/R9.5). El cliente manda solo motherProfileId + fecha + terneros — el tenant
       // lo deriva el server de la fila real de la madre. Al volver, useFocusEffect refresca la ficha.
       // Delta parto-rodeo-caravana (RPRC.3): rodeo EFECTIVO del parto (el elegido en el picker ?? el de la
-      // madre) → calfRodeoId para TODA la camada (RPRC.3.1). calfIdv (caravana visual) SOLO con 1 ternero y
-      // valor no vacío (RPRC.3.2); con mellizos se omite aunque se haya tipeado antes de agregar el 2º
-      // (RPRC.3.3). El RPC 6-arg re-valida server-side (rodeo activo/tenant/sistema → 23514; idv único/
-      // inmutable → 23505). El resto del payload queda intacto (RPRC.3.4).
+      // madre) → calfRodeoId para TODA la camada (RPRC.3.1). Delta parto-caravana-visual-por-ternero (PCV.3):
+      // la caravana visual (idv) viaja POR CRÍA — el idv de cada ternero (calves[i].idvRaw) va en su elemento
+      // del payload (single Y mellizos), sin el `calfIdv` a nivel camada (PCV.3.2). validateCalves devuelve
+      // v.value EN EL MISMO ORDEN que `calves` (los drafts se arman calves.map) → zippeo por índice. El RPC
+      // 6-arg re-valida server-side (rodeo activo/tenant/sistema → 23514; idv duplicado → 23505). El resto del
+      // payload queda intacto (PCV.3.4).
       const r = await registerBirth({
         motherProfileId: profileId,
         eventDate: d.value,
-        calves: v.value.map((c) => ({ sex: c.sex, weightKg: c.weightKg, tag: c.tag })),
+        calves: v.value.map((c, i) => ({
+          sex: c.sex,
+          weightKg: c.weightKg,
+          tag: c.tag,
+          idv: calfIdvForSubmit(calves[i].idvRaw),
+        })),
         calfRodeoId: effectiveCalfRodeoId,
-        calfIdv: calfIdvForSubmit(calves.length, calfIdv),
       });
       finishSubmit(r);
       return;
@@ -554,7 +561,6 @@ export default function AgregarEventoScreen() {
     serviceNotes,
     birthDate,
     calves,
-    calfIdv,
     effectiveCalfRodeoId,
     abortionDate,
     abortionNotes,
@@ -705,8 +711,6 @@ export default function AgregarEventoScreen() {
               setCalfRodeoId(id);
               setRodeoPickerOpen(false);
             }}
-            calfIdv={calfIdv}
-            onCalfIdv={(t) => setCalfIdv(sanitizeIdvInput(t))}
             muted={muted}
           />
         ) : eventType === 'abortion' ? (
@@ -1251,14 +1255,15 @@ function AbortionForm({
   );
 }
 
-// ─── Form: Parto (fecha + rodeo a nivel parto + caravana visual single-calf + terneros) ────────
+// ─── Form: Parto (fecha + rodeo a nivel parto + terneros con sus 2 caravanas) ────────
 //
-// La fecha del parto + el RODEO del parto (a nivel camada, delta parto-rodeo-caravana RPRC.1) + la
-// CARAVANA VISUAL del ternero (solo con 1 ternero, RPRC.2) + una o más cards "Ternero N". Cada card:
-// sexo (REQUERIDO, OptionSelector Macho/Hembra) + peso al nacer (opcional, kg) + caravana ELECTRÓNICA
-// (opcional, FDX-B 15 díg, sigue por-ternero RPRC.2.5). El botón "+ Agregar otro ternero" suma una card
-// (mellizos); cada card (salvo cuando hay una sola) tiene "Quitar". El estado vive en el screen como
-// array con id local estable (key de React).
+// La fecha del parto + el RODEO del parto (a nivel camada, delta parto-rodeo-caravana RPRC.1) + una o más
+// cards "Ternero N". Cada card: sexo (REQUERIDO, OptionSelector Macho/Hembra) + peso al nacer (opcional, kg)
+// + caravana VISUAL (idv, opcional, POR CRÍA — delta parto-caravana-visual-por-ternero PCV.1) + caravana
+// ELECTRÓNICA (opcional, FDX-B 15 díg, bastoneo por-ternero RPRC.2.5). Las DOS caravanas son SIEMPRE
+// opcionales (PCV.2) y viven DENTRO de cada card → simetría "cada ternero, sus dos caravanas". El botón
+// "+ Agregar otro ternero" suma una card (mellizos); cada card (salvo cuando hay una sola) tiene "Quitar".
+// El estado vive en el screen como array con id local estable (key de React), idv incluido POR CRÍA.
 function PartoForm({
   date,
   onDate,
@@ -1277,8 +1282,6 @@ function PartoForm({
   rodeoPickerOpen,
   onToggleRodeoPicker,
   onSelectRodeo,
-  calfIdv,
-  onCalfIdv,
   muted,
 }: {
   date: string;
@@ -1303,13 +1306,9 @@ function PartoForm({
   rodeoPickerOpen: boolean;
   onToggleRodeoPicker: () => void;
   onSelectRodeo: (id: string) => void;
-  /** Caravana visual del ternero (single-calf, RPRC.2). Ya sanitizada por el caller. */
-  calfIdv: string;
-  onCalfIdv: (t: string) => void;
   muted: string;
 }) {
   const primary = getTokenValue('$primary', 'color');
-  const singleCalf = calves.length === 1;
   return (
     <YStack gap="$4">
       <FormField
@@ -1336,22 +1335,9 @@ function PartoForm({
         muted={muted}
       />
 
-      {/* ── Caravana VISUAL del ternero (RPRC.2): SOLO con 1 ternero. Con ≥2 (mellizos) se oculta y aparece
-          la nota (el idv se asigna después desde la ficha de cada ternero). El tag ELECTRÓNICO sigue por
-          ternero dentro de cada CalfBlock (RPRC.2.5). ── */}
-      {singleCalf ? (
-        <FormField
-          label="Caravana visual del ternero (opcional)"
-          value={calfIdv}
-          onChangeText={onCalfIdv}
-          keyboardType="number-pad"
-          placeholder="Ej. 0234"
-        />
-      ) : (
-        <InfoNote>
-          Las caravanas visuales de mellizos se asignan después desde la ficha de cada ternero.
-        </InfoNote>
-      )}
+      {/* La caravana VISUAL del ternero (idv) ya NO vive acá a nivel camada: pasó a ser POR CRÍA (delta
+          parto-caravana-visual-por-ternero, PCV.1.5) → cada CalfBlock tiene SU campo idv, junto a la
+          electrónica. Se eliminó el FormField single-calf + la nota de mellizos. */}
 
       <YStack gap="$3">
         {calves.map((calf, i) => (
@@ -1588,6 +1574,20 @@ function CalfBlock({
         onChangeText={(t) => onUpdate({ weightRaw: sanitizeWeightInput(t) })}
         keyboardType="decimal-pad"
         placeholder="Ej. 35"
+      />
+
+      {/* Caravana VISUAL del ternero (idv) POR CRÍA (delta parto-caravana-visual-por-ternero, PCV.1): un
+          campo por CalfBlock (single Y mellizos), OPCIONAL (PCV.2 — sin validación que la fuerce), junto a la
+          electrónica → simetría "cada ternero, sus dos caravanas". sanitizeIdvInput en vivo (solo dígitos, sin
+          clamp que oculte un error de tipeo). testID indexado para desambiguar mellizos en E2E (paralelo a
+          tag-scan-open-${index}). */}
+      <FormField
+        label="Caravana visual del ternero (opcional)"
+        value={calf.idvRaw}
+        onChangeText={(t) => onUpdate({ idvRaw: sanitizeIdvInput(t) })}
+        keyboardType="number-pad"
+        placeholder="Ej. 0234"
+        testID={`calf-idv-${index}`}
       />
 
       {/* Caravana electrónica → BASTONEAR (RCF.6 generalizado al parto): en vez de un campo tipeable suelto,

@@ -4250,6 +4250,203 @@ test('spec 02 delta #15 — register_birth extendido con rodeo del ternero (0115
   });
 });
 
+// =====================================================================
+// spec 02 — delta PARTO: CARAVANA VISUAL DEL TERNERO POR CRÍA (parto-caravana-visual-por-ternero, PCV.4/5/6).
+// El idv del ternero al parto pasa a computarse POR CRÍA (leyendo `calf_idv` de cada elemento de `p_calves`),
+// con precedencia per-calf sobre el param top-level `p_calf_idv` (conservado para cría al pie #15). Fallback
+// `visual_id_alt` refinado (solo both-null: sin tag NI idv).
+//
+// ⚠️ Estos tests REQUIEREN la migración 0121 APLICADA al remoto (la aplica el LEADER por Supabase MCP tras
+// Gate 1 PASS + reviewer + Gate 2 + autorización de Raf). La firma NO cambia (6-arg) → un call con `calf_idv`
+// per-elemento NO da PGRST202: con el cuerpo VIEJO el `calf_idv` per-elemento se IGNORA (idv escalar único
+// antes del loop) → los mellizos con idv distinto nacen ambos SIN idv → estas aserciones FALLAN. Es ESPERADO
+// hasta el deploy de 0121 (patrón 0075-0089 / 0114-0116). El implementer NO aplica la migración.
+// =====================================================================
+test('spec 02 delta parto-caravana-visual — register_birth idv POR CRÍA (0121)', async (t) => {
+  const uuid = () => require('node:crypto').randomUUID();
+  const FALLBACK = 'recién nacido — pendiente de caravana';
+
+  let userA, userB, clientA, clientB, estA, estB, rodeoA, rodeoB;
+
+  async function makeMother(idvSuffix) {
+    const r = await createAnimal(clientA, {
+      idv: `${RUN_TAG}_pcv_M_${idvSuffix}`, sex: 'female', birthDate: daysAgo(900),
+      rodeoId: rodeoA.id, establishmentId: estA, systemId: rodeoA.systemId, categoryCode: 'vaquillona_prenada',
+    });
+    assert.equal(r.error, undefined, r.error && r.error.message);
+    return r.profile.id;
+  }
+  // Perfiles de los terneros de un parto → { idv, visual_id_alt, tag_electronic } por cría (para las matrices).
+  async function calvesOf(birthId) {
+    const { data: bc } = await admin.from('birth_calves').select('calf_profile_id').eq('birth_event_id', birthId);
+    const out = [];
+    for (const row of bc) {
+      const { data: prof } = await admin.from('animal_profiles')
+        .select('idv, visual_id_alt, animals(tag_electronic)').eq('id', row.calf_profile_id).single();
+      out.push({ idv: prof.idv, visual_id_alt: prof.visual_id_alt, tag: prof.animals?.tag_electronic ?? null });
+    }
+    return out;
+  }
+  // Estado server-side del parto de una madre (contraprueba del rollback atómico): eventos birth + terneros.
+  async function birthState(motherId) {
+    const { data: ev } = await admin.from('reproductive_events')
+      .select('id').eq('animal_profile_id', motherId).eq('event_type', 'birth').is('deleted_at', null);
+    const eventIds = (ev ?? []).map((e) => e.id);
+    let calfCount = 0;
+    if (eventIds.length > 0) {
+      const { count } = await admin.from('birth_calves').select('*', { count: 'exact', head: true }).in('birth_event_id', eventIds);
+      calfCount = count ?? 0;
+    }
+    return { eventCount: eventIds.length, calfCount };
+  }
+
+  await t.test('setup: userA owner de estA (rodeo cria); userB owner de estB', async () => {
+    userA = await createTestUser('pcv_A');
+    userB = await createTestUser('pcv_B');
+    clientA = await getUserClient(userA.email);
+    clientB = await getUserClient(userB.email);
+    estA = await createEstablishmentAs(clientA, `${RUN_TAG} pcv_estA`);
+    estB = await createEstablishmentAs(clientB, `${RUN_TAG} pcv_estB`);
+    rodeoA = await createRodeo(clientA, { establishmentId: estA, name: `${RUN_TAG}_pcv_rA` });
+    rodeoB = await createRodeo(clientB, { establishmentId: estB, name: `${RUN_TAG}_pcv_rB` });
+  });
+
+  // -- PCV.5.1/5.2: mellizos con idv DISTINTO cada uno → ambos persisten con SU idv. --
+  await t.test('PCV.5.1/5.2: mellizos con calf_idv distinto → ambos animal_profiles.idv persisten', async () => {
+    const motherId = await makeMother('twindistinct');
+    const idv0 = `${RUN_TAG}_pcv_calfA`;
+    const idv1 = `${RUN_TAG}_pcv_calfB`;
+    const { data: birthId, error } = await clientA.rpc('register_birth', {
+      p_mother_profile_id: motherId, p_event_date: daysAgo(2), p_client_op_id: uuid(),
+      p_calves: [{ calf_sex: 'female', calf_idv: idv0 }, { calf_sex: 'male', calf_idv: idv1 }],
+    });
+    assert.equal(error, null, error && error.message);
+    const calves = await calvesOf(birthId);
+    assert.equal(calves.length, 2, 'mellizos = 2 terneros');
+    const idvs = calves.map((c) => c.idv).sort();
+    assert.deepEqual(idvs, [idv0, idv1].sort(), 'cada mellizo persiste con SU idv independiente (PCV.5.2)');
+    // Cada cría con idv (sin tag) → visual_id_alt null (el idv ya identifica; PCV.4.5).
+    assert.ok(calves.every((c) => c.visual_id_alt === null), 'con idv (sin tag) el fallback NO aplica (visual_id_alt null)');
+  });
+
+  // -- PCV.5.3: idv DUPLICADO en el MISMO parto (dos crías, mismo calf_idv) → 23505 + rollback atómico (0/0). --
+  await t.test('PCV.5.3: dos mellizos con el MISMO calf_idv → 23505 + rollback atómico (0 eventos / 0 terneros)', async () => {
+    const motherId = await makeMother('twindup');
+    const dupIdv = `${RUN_TAG}_pcv_dup`;
+    const before = await birthState(motherId);
+    const { error } = await clientA.rpc('register_birth', {
+      p_mother_profile_id: motherId, p_event_date: daysAgo(2), p_client_op_id: uuid(),
+      p_calves: [{ calf_sex: 'female', calf_idv: dupIdv }, { calf_sex: 'male', calf_idv: dupIdv }],
+    });
+    assert.notEqual(error, null, 'dos crías con el mismo idv debe rebotar');
+    assert.equal(error.code, '23505', `debe ser 23505 (índice parcial animal_profiles_idv_unique): ${error.message}`);
+    const after = await birthState(motherId);
+    assert.equal(after.eventCount, before.eventCount, 'rollback atómico: NO se creó el evento de parto');
+    assert.equal(after.calfCount, before.calfCount, 'rollback atómico: NO se creó ningún ternero');
+  });
+
+  // -- PCV.5.3: idv que COLISIONA con el rebaño ((establishment_id, idv) ya existe) → 23505 + rollback. --
+  await t.test('PCV.5.3: calf_idv que colisiona con un idv ya usado en el campo → 23505 + rollback atómico', async () => {
+    // Animal pre-existente en estA con un idv conocido.
+    const existingIdv = `${RUN_TAG}_pcv_herd`;
+    const pre = await createAnimal(clientA, {
+      idv: existingIdv, sex: 'female', birthDate: daysAgo(600),
+      rodeoId: rodeoA.id, establishmentId: estA, systemId: rodeoA.systemId, categoryCode: 'vaquillona',
+    });
+    assert.equal(pre.error, undefined, pre.error && pre.error.message);
+
+    const motherId = await makeMother('herdcollide');
+    const before = await birthState(motherId);
+    const { error } = await clientA.rpc('register_birth', {
+      p_mother_profile_id: motherId, p_event_date: daysAgo(2), p_client_op_id: uuid(),
+      p_calves: [{ calf_sex: 'female', calf_idv: existingIdv }],  // choca con el pre-existente
+    });
+    assert.notEqual(error, null, 'un idv ya usado en el campo debe rebotar');
+    assert.equal(error.code, '23505', `debe ser 23505 (idv ya existe en (establishment_id, idv)): ${error.message}`);
+    const after = await birthState(motherId);
+    assert.equal(after.eventCount, before.eventCount, 'rollback atómico: sin evento de parto');
+    assert.equal(after.calfCount, before.calfCount, 'rollback atómico: sin ternero');
+  });
+
+  // -- PCV.2.3/2.4: ternero SIN idv y SIN tag → creado con éxito, visual_id_alt = fallback (opcionalidad).
+  //    Esto GUARDA el trigger animal_profiles_identity_check: sin el fallback el INSERT del profile sería
+  //    23514 (design §5). El idv null. --
+  await t.test('PCV.2.3/2.4: ternero sin idv ni tag → creado OK con visual_id_alt = fallback (opcionalidad; guarda el trigger)', async () => {
+    const motherId = await makeMother('nocaravana');
+    const { data: birthId, error } = await clientA.rpc('register_birth', {
+      p_mother_profile_id: motherId, p_event_date: daysAgo(2), p_client_op_id: uuid(),
+      p_calves: [{ calf_sex: 'female' }],  // ni calf_idv ni calf_tag_electronic
+    });
+    assert.equal(error, null, `un ternero sin ninguna caravana debe crearse (opcionalidad): ${error && error.message}`);
+    const calves = await calvesOf(birthId);
+    assert.equal(calves.length, 1, 'se creó el ternero');
+    assert.equal(calves[0].idv, null, 'sin idv → idv null');
+    assert.equal(calves[0].tag, null, 'sin tag → tag null');
+    assert.equal(calves[0].visual_id_alt, FALLBACK, 'both-null → visual_id_alt = fallback (LOAD-BEARING, PCV.2.4)');
+  });
+
+  // -- PCV.4.5: ternero con idv pero SIN tag → visual_id_alt null (el idv satisface el trigger; el fallback
+  //    NO aplica porque ya está identificado). --
+  await t.test('PCV.4.5: ternero con idv sin tag → visual_id_alt null (el fallback NO aplica)', async () => {
+    const motherId = await makeMother('idvnotag');
+    const idv = `${RUN_TAG}_pcv_idvnotag`;
+    const { data: birthId, error } = await clientA.rpc('register_birth', {
+      p_mother_profile_id: motherId, p_event_date: daysAgo(2), p_client_op_id: uuid(),
+      p_calves: [{ calf_sex: 'male', calf_idv: idv }],
+    });
+    assert.equal(error, null, error && error.message);
+    const calves = await calvesOf(birthId);
+    assert.equal(calves[0].idv, idv, 'el ternero lleva su idv');
+    assert.equal(calves[0].visual_id_alt, null, 'con idv el fallback NO aplica (visual_id_alt null)');
+  });
+
+  // -- PCV.4.3: precedencia per-calf sobre el top-level. calf_idv del elemento GANA sobre p_calf_idv. --
+  await t.test('PCV.4.3: el calf_idv del elemento GANA sobre el p_calf_idv top-level (precedencia per-calf)', async () => {
+    const motherId = await makeMother('precedence');
+    const perCalf = `${RUN_TAG}_pcv_perCalf`;
+    const topLevel = `${RUN_TAG}_pcv_topLevel`;
+    const { data: birthId, error } = await clientA.rpc('register_birth', {
+      p_mother_profile_id: motherId, p_event_date: daysAgo(2), p_client_op_id: uuid(),
+      p_calf_idv: topLevel,  // top-level presente…
+      p_calves: [{ calf_sex: 'female', calf_idv: perCalf }],  // …pero el elemento trae el suyo → gana el del elemento
+    });
+    assert.equal(error, null, error && error.message);
+    const calves = await calvesOf(birthId);
+    assert.equal(calves[0].idv, perCalf, 'el calf_idv del elemento tiene precedencia sobre p_calf_idv (PCV.4.3)');
+  });
+
+  // -- PCV.6.1 (T4): backward-compat CRÍA AL PIE (#15). p_calf_idv top-level, SIN calf_idv en el elemento
+  //    (1 cría) → el coalesce cae al p_calf_idv y el ternero se crea con ese idv. --
+  await t.test('PCV.6.1: cría al pie (#15) — p_calf_idv top-level, sin calf_idv en el elemento → ternero con ese idv', async () => {
+    const motherId = await makeMother('criaalpie');
+    const idv = `${RUN_TAG}_pcv_criaalpie`;
+    const { data: birthId, error } = await clientA.rpc('register_birth', {
+      p_mother_profile_id: motherId, p_event_date: daysAgo(2), p_client_op_id: uuid(),
+      p_calf_idv: idv,  // top-level (camino cría al pie), sin calf_idv en el elemento
+      p_calves: [{ calf_sex: 'female' }],
+    });
+    assert.equal(error, null, error && error.message);
+    const calves = await calvesOf(birthId);
+    assert.equal(calves[0].idv, idv, 'el ternero cae por el coalesce al p_calf_idv (backward-compat #15, PCV.6.1)');
+    assert.equal(calves[0].visual_id_alt, null, 'con idv (aunque venga del top-level) el fallback NO aplica');
+  });
+
+  // -- PCV.4.6: regresión — mellizos SIN idv ni tag (parto normal) → 2 terneros, ambos con fallback, idv null.
+  //    (el CREATE OR REPLACE no rompió la creación de mellizos ni la herencia de rodeo). --
+  await t.test('PCV.4.6: regresión — mellizos sin caravana → 2 terneros con fallback (idv null), rodeo de la madre', async () => {
+    const motherId = await makeMother('regressplain');
+    const { data: birthId, error } = await clientA.rpc('register_birth', {
+      p_mother_profile_id: motherId, p_event_date: daysAgo(2), p_client_op_id: uuid(),
+      p_calves: [{ calf_sex: 'male' }, { calf_sex: 'female' }],
+    });
+    assert.equal(error, null, error && error.message);
+    const calves = await calvesOf(birthId);
+    assert.equal(calves.length, 2, 'mellizos = 2 terneros (as-built)');
+    assert.ok(calves.every((c) => c.idv === null), 'sin idv → idv null');
+    assert.ok(calves.every((c) => c.visual_id_alt === FALLBACK), 'sin tag ni idv → ambos con el fallback');
+  });
+});
+
 test('cleanup', async () => {
   await cleanup();
 });

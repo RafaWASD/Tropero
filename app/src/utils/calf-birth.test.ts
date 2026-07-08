@@ -109,23 +109,22 @@ test('canEditCalfRodeo: sin rodeo de madre → NO editable', () => {
   assert.equal(canEditCalfRodeo(elig, null), false);
 });
 
-// ─── calfIdvForSubmit (RPRC.3.2/3.3) ───────────────────────────────────────────────────────
+// ─── calfIdvForSubmit POR CRÍA (delta parto-caravana-visual-por-ternero, PCV.3.1/3.3) ───────
 
-test('calfIdvForSubmit: 1 ternero + idv no vacío → el idv (trim)', () => {
-  assert.equal(calfIdvForSubmit(1, '982000123'), '982000123');
-  assert.equal(calfIdvForSubmit(1, '  982000123  '), '982000123');
+test('calfIdvForSubmit: idv no vacío → el idv (trim)', () => {
+  assert.equal(calfIdvForSubmit('982000123'), '982000123');
+  assert.equal(calfIdvForSubmit('  982000123  '), '982000123');
 });
 
-test('calfIdvForSubmit: 1 ternero + idv vacío → null', () => {
-  assert.equal(calfIdvForSubmit(1, ''), null);
-  assert.equal(calfIdvForSubmit(1, '   '), null);
+test('calfIdvForSubmit: idv vacío → null (omitido, sin forzar — PCV.2/3.3)', () => {
+  assert.equal(calfIdvForSubmit(''), null);
+  assert.equal(calfIdvForSubmit('   '), null);
 });
 
-test('calfIdvForSubmit: ≥2 terneros (mellizos) → null AUNQUE haya idv tipeado (RPRC.3.3)', () => {
-  assert.equal(calfIdvForSubmit(2, '982000123'), null);
-  assert.equal(calfIdvForSubmit(3, '982000123'), null);
-});
-
-test('calfIdvForSubmit: 0 terneros → null (defensivo; el form garantiza ≥1)', () => {
-  assert.equal(calfIdvForSubmit(0, '982000123'), null);
+test('calfIdvForSubmit: es POR CRÍA — cada cría con su idv → su idv (ya NO se descarta con mellizos; supera RPRC.3.3)', () => {
+  // Cada CalfBlock (single o mellizo) resuelve su idv de forma INDEPENDIENTE, sin gate por longitud de camada.
+  assert.equal(calfIdvForSubmit('0234'), '0234');
+  assert.equal(calfIdvForSubmit('0235'), '0235');
+  // El leading cero NO se clampa (el campo solo sanitiza a dígitos, no clampa un tipeo).
+  assert.equal(calfIdvForSubmit('0500'), '0500');
 });

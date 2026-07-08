@@ -1741,6 +1741,65 @@ export async function waitForServerCalfTags(
 }
 
 /**
+ * ORÁCULO de persistencia server-side de la CARAVANA VISUAL (idv) de los TERNEROS de un parto (delta
+ * parto-caravana-visual-por-ternero, PCV.8.5). Análogo a waitForServerCalfTags pero leyendo
+ * `animal_profiles.idv` (el idv vive en animal_profiles, NO en animals). Pollea vía service_role hasta que el
+ * conjunto de idv de los terneros de la madre CONTENGA todas las `expectedIdvs`. Cadena:
+ * reproductive_events (birth de la madre) → birth_calves.calf_profile_id → animal_profiles.idv. Prueba que el
+ * `idvRaw` de cada CalfBlock llegó a registerBirth({ calves:[{ idv }] }) → RPC register_birth (calf_idv por
+ * cría) → animal_profiles.idv. `birth_calves` es server-only (sin GRANT de INSERT) → un ternero con ese idv
+ * SOLO existe si la RPC corrió.
+ */
+export async function waitForServerCalfIdvs(
+  motherProfileId: string,
+  expectedIdvs: string[],
+  opts: { tries?: number; delayMs?: number } = {},
+): Promise<string[]> {
+  const tries = opts.tries ?? 30;
+  const delayMs = opts.delayMs ?? 2000;
+  const want = new Set(expectedIdvs);
+  let lastSeen: string[] = [];
+  for (let i = 0; i < tries; i++) {
+    // 1) Eventos birth (vivos) de la madre.
+    const { data: events, error: evErr } = await admin
+      .from('reproductive_events')
+      .select('id')
+      .eq('animal_profile_id', motherProfileId)
+      .eq('event_type', 'birth')
+      .is('deleted_at', null);
+    if (evErr) throw new Error(`waitForServerCalfIdvs events: ${evErr.message}`);
+    const eventIds = (events ?? []).map((e) => e.id as string);
+    if (eventIds.length > 0) {
+      // 2) calf_profile_ids del puente.
+      const { data: bridge, error: bErr } = await admin
+        .from('birth_calves')
+        .select('calf_profile_id')
+        .in('birth_event_id', eventIds);
+      if (bErr) throw new Error(`waitForServerCalfIdvs birth_calves: ${bErr.message}`);
+      const calfProfileIds = (bridge ?? []).map((b) => b.calf_profile_id as string);
+      if (calfProfileIds.length > 0) {
+        // 3) idv de los terneros (directo de animal_profiles — el idv NO está en `animals`).
+        const { data: profiles, error: pErr } = await admin
+          .from('animal_profiles')
+          .select('idv')
+          .in('id', calfProfileIds);
+        if (pErr) throw new Error(`waitForServerCalfIdvs profiles: ${pErr.message}`);
+        lastSeen = (profiles ?? [])
+          .map((p) => (p as { idv: string | null }).idv ?? null)
+          .filter((t): t is string => t != null);
+        if ([...want].every((t) => lastSeen.includes(t))) return lastSeen;
+      }
+    }
+    await new Promise((r) => setTimeout(r, delayMs));
+  }
+  throw new Error(
+    `waitForServerCalfIdvs(${motherProfileId}, [${[...want].join(', ')}]): las caravanas visuales (idv) de los ` +
+      `terneros NUNCA aparecieron completas en el server (${tries} intentos; última lectura: [${lastSeen.join(', ')}]). ` +
+      `El idv per-calf no llegó a register_birth (¿migración 0121 sin aplicar?) / la outbox no drenó.`,
+  );
+}
+
+/**
  * ORÁCULO de persistencia server-side de una BAJA (spec 15 T7.9 — baja offline → reconexión → el
  * status/exit_reason REAL aterriza en el server, R6.10). Pollea `animal_profiles` vía service_role
  * hasta que el perfil tenga el `status` egresado esperado (sold/dead/transferred). Devuelve la fila
