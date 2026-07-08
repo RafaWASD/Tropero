@@ -40,6 +40,19 @@ Base **blanco neutro** (sin tinte frío ni cálido — se mató el `#f8f9ff` de 
 
 **Colores de estado (success / warning / error)** → **JIT**: el v4 todavía no los define (la home/nav no los necesitaron). Se agregan cuando se construya la **primera pantalla con chips de estado** (ej. ficha de animal con "preñada"/"vencido"). Insumo para esa decisión: la paleta de estado del draft archivado (`design/explorations/`). Por ahora, alertas puntuales usan `$terracota`.
 
+### 2.1 Botones/chips de realce verde — regla A/B (legibilidad al sol) — canonizado 2026-07-07
+
+`$greenLight` (#93cfac) es, por rol, **fondo de contenedores de ícono y halos** (ver tabla) — un ícono lucide `$primary` encima pasa el **3:1** de objetos gráficos (WCAG 1.4.11) y se lee bien. **NO es, por default, un fondo para TEXTO.** El combo **texto `$primary` (#1e5a3e) sobre `$greenLight` mide 4.55:1** (medido) — al filo de AA y **se vuelve ilegible al sol** (el glare de manga baja el contraste efectivo ~a la mitad). Ese combo se coló en varios botones/chips con texto (drift del rol documentado).
+
+**Regla (para cualquier botón/chip de realce VERDE con TEXTO):**
+
+| | Recipe | Contraste | Cuándo |
+|---|---|---|---|
+| **A — sólido / alto contraste** | fondo `$primary` + **texto e ícono `$white`** | **8:1** (AAA) | **En modo maniobra** (`app/maniobra/**`) y todo botón verde manga-crítico que deba destacar. Es la misma polaridad del CTA primario (`Guardar evento`). |
+| **B — suave** | fondo `$greenLight` + **texto `$textPrimary`** (#0F0E0C casi-negro); el ícono puede quedar `$primary` (gráfico, pasa 3:1) o ir `$textPrimary` | **10.8:1** (texto, AAA) | **Fuera de modo maniobra**. Conserva el look "pill suave / afordancia secundaria" sin sacrificar legibilidad (no compite con el CTA de commit). |
+
+❌ **Prohibido**: texto esencial `$primary` sobre `$greenLight` (4.55:1). ✅ Sigue OK: `$greenLight` como **container de ícono / halo / pulso / pressStyle transitorio** (sin texto encima). Ambas recetas usan **tokens existentes** (sin hex nuevo). Al elegir, guiarse por la **criticidad-manga graduada** (§1.4): maniobra = A, resto = B. Validar lo dudoso con **APCA** (Chrome DevTools) + prueba real al sol, no solo el ratio WCAG.
+
 ---
 
 ## 3. Tipografía

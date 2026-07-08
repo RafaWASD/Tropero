@@ -2,8 +2,9 @@
 // caravana-ficha bastoneo, RCF.6; generalizado a ALTA y PARTO en el delta bastoneo-captura-alta-parto).
 //
 // TagScanCta: el CTA prominente que ABRE el TagScanSheet (el bastón es el 95% del flujo en manga). Target
-//   grande (≥ $touchMin, Fitts, una mano) con el StickIcon + label $primary sobre $greenLight — lo distingue
-//   de un input plano. Nace en la FICHA (app/animal/[id].tsx, definido local); acá se EXTRAE para reusarlo en
+//   grande (≥ $touchMin, Fitts, una mano) con el StickIcon $primary + label $textPrimary (regla B, design-system
+//   §2.1) sobre $greenLight — lo distingue de un input plano, legible al sol. Nace en la FICHA (app/animal/[id].tsx,
+//   definido local); acá se EXTRAE para reusarlo en
 //   el alta (crear-animal) y el parto (agregar-evento, por ternero). `label` configurable ("Bastonear la
 //   caravana" en la ficha; "Bastonear la caravana (opcional)" en alta/parto, donde el tag es recomendado).
 //
@@ -46,7 +47,7 @@ export function TagScanCta({ onPress, label = 'Bastonear la caravana', testID = 
       {...buttonA11y(Platform.OS, { label })}
     >
       <StickIcon size={20} color={getTokenValue('$primary', 'color')} strokeWidth={2.5} />
-      <Text flex={1} minWidth={0} fontFamily="$body" fontSize="$5" lineHeight="$5" fontWeight="700" color="$primary" numberOfLines={1}>
+      <Text flex={1} minWidth={0} fontFamily="$body" fontSize="$5" lineHeight="$5" fontWeight="700" color="$textPrimary" numberOfLines={1}>
         {label}
       </Text>
     </XStack>

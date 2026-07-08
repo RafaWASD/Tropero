@@ -346,6 +346,7 @@ export function CustomFieldSheet({ mode, onCreate, editInitial, onUpdate, onClos
   const radius = getTokenValue('$card', 'radius');
   const padH = getTokenValue('$4', 'space');
   const PRIMARY = getTokenValue('$primary', 'color');
+  const WHITE = getTokenValue('$white', 'color');
   const FAINT = getTokenValue('$textFaint', 'color');
   const iconSize = getTokenValue('$navIcon', 'size');
   const bottomPad = Math.max(insets.bottom, getTokenValue('$4', 'space'));
@@ -546,7 +547,11 @@ export function CustomFieldSheet({ mode, onCreate, editInitial, onUpdate, onClos
                             paddingHorizontal="$3"
                             borderRadius="$card"
                             borderWidth={1}
-                            backgroundColor={selected ? '$greenLight' : '$surface'}
+                            // Regla A (sólido, modo maniobra — design-system §2.1): la opción SELECCIONADA va
+                            // fondo $primary + texto/Check $white (8:1). El borde $primary sobre fill $primary
+                            // no deja costura visible (el sólido ya distingue) — se conserva sin efecto. La rama
+                            // NO seleccionada ($surface + $textPrimary + borde $divider) queda igual.
+                            backgroundColor={selected ? '$primary' : '$surface'}
                             borderColor={selected ? '$primary' : '$divider'}
                             pressStyle={{ opacity: 0.85 }}
                           >
@@ -556,16 +561,25 @@ export function CustomFieldSheet({ mode, onCreate, editInitial, onUpdate, onClos
                                 fontSize="$4"
                                 lineHeight="$4"
                                 fontWeight={selected ? '700' : '500'}
-                                color={selected ? '$primary' : '$textPrimary'}
+                                color={selected ? '$white' : '$textPrimary'}
                                 numberOfLines={1}
                               >
                                 {opt.label}
                               </Text>
-                              <Text fontFamily="$body" fontSize="$3" lineHeight="$3" color="$textMuted" numberOfLines={1}>
+                              {/* El hint sigue al fondo: sobre $primary (selected) $textMuted queda ~1.38:1
+                                  (ilegible) → va $white como el label (regla A); la jerarquía la da el
+                                  peso/tamaño ($3 vs $4/700). Fuera de selected mantiene $textMuted sobre $surface. */}
+                              <Text
+                                fontFamily="$body"
+                                fontSize="$3"
+                                lineHeight="$3"
+                                color={selected ? '$white' : '$textMuted'}
+                                numberOfLines={1}
+                              >
                                 {opt.hint}
                               </Text>
                             </YStack>
-                            {selected ? <Check size={iconSize} color={PRIMARY} strokeWidth={2.5} /> : null}
+                            {selected ? <Check size={iconSize} color={WHITE} strokeWidth={2.5} /> : null}
                           </XStack>
                         </Pressable>
                       );
@@ -610,7 +624,7 @@ export function CustomFieldSheet({ mode, onCreate, editInitial, onUpdate, onClos
                           return (
                             <XStack
                               key={it}
-                              backgroundColor="$greenLight"
+                              backgroundColor="$primary"
                               borderRadius="$pill"
                               paddingLeft="$3"
                               paddingRight={locked ? '$3' : '$2'}
@@ -619,7 +633,7 @@ export function CustomFieldSheet({ mode, onCreate, editInitial, onUpdate, onClos
                               gap="$2"
                               testID={`option-chip-${it}`}
                             >
-                              <Text fontFamily="$body" fontSize="$4" lineHeight="$4" fontWeight="600" color="$primary" numberOfLines={1}>
+                              <Text fontFamily="$body" fontSize="$4" lineHeight="$4" fontWeight="600" color="$white" numberOfLines={1}>
                                 {it}
                               </Text>
                               {locked ? null : (
@@ -628,7 +642,7 @@ export function CustomFieldSheet({ mode, onCreate, editInitial, onUpdate, onClos
                                   hitSlop={8}
                                   {...buttonA11y(Platform.OS, { label: `Quitar ${it}` })}
                                 >
-                                  <X size={18} color={PRIMARY} strokeWidth={3} />
+                                  <X size={18} color={WHITE} strokeWidth={3} />
                                 </Pressable>
                               )}
                             </XStack>

@@ -1361,7 +1361,8 @@ function PartoForm({
       ) : null}
 
       {/* Agregar otro ternero (mellizos, R9.5). Pressable estilado al lenguaje (borde discontinuo no
-          existe en tokens → borde sólido $primary + texto $primary), a11y por helper. */}
+          existe en tokens → borde sólido $primary + bg $greenLight + texto $textPrimary / ícono $primary,
+          regla B de design-system §2.1: legible al sol fuera de modo maniobra), a11y por helper. */}
       <Pressable
         style={{ width: '100%' }}
         onPress={onAddCalf}
@@ -1381,7 +1382,7 @@ function PartoForm({
           pressStyle={{ opacity: 0.85 }}
         >
           <Plus size={20} color={primary} strokeWidth={2.5} />
-          <Text fontFamily="$body" fontSize="$5" fontWeight="600" color="$primary">
+          <Text fontFamily="$body" fontSize="$5" fontWeight="600" color="$textPrimary">
             Agregar otro ternero
           </Text>
         </XStack>

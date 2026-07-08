@@ -156,6 +156,7 @@ export function ManeuverConfigSheet({
   };
 
   const PRIMARY = getTokenValue('$primary', 'color');
+  const WHITE = getTokenValue('$white', 'color');
   const FAINT = getTokenValue('$textFaint', 'color');
   const placeholderColor = getTokenValue('$textMuted', 'color');
   const textColor = getTokenValue('$textPrimary', 'color');
@@ -232,7 +233,7 @@ export function ManeuverConfigSheet({
               {items.map((it) => (
                 <XStack
                   key={it}
-                  backgroundColor="$greenLight"
+                  backgroundColor="$primary"
                   borderRadius="$pill"
                   paddingLeft="$3"
                   paddingRight="$2"
@@ -241,7 +242,7 @@ export function ManeuverConfigSheet({
                   gap="$2"
                   testID={`config-chip-${it}`}
                 >
-                  <Text fontFamily="$body" fontSize="$4" lineHeight="$4" fontWeight="600" color="$primary" numberOfLines={1}>
+                  <Text fontFamily="$body" fontSize="$4" lineHeight="$4" fontWeight="600" color="$white" numberOfLines={1}>
                     {it}
                   </Text>
                   <Pressable
@@ -249,7 +250,7 @@ export function ManeuverConfigSheet({
                     hitSlop={8}
                     {...buttonA11y(Platform.OS, { label: `Quitar ${it}` })}
                   >
-                    <X size={18} color={PRIMARY} strokeWidth={3} />
+                    <X size={18} color={WHITE} strokeWidth={3} />
                   </Pressable>
                 </XStack>
               ))}
