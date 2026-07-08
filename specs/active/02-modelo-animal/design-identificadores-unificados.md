@@ -129,6 +129,12 @@ drop function if exists public.tg_reproductive_events_create_calf() cascade;
 --     reportes: DROP+CREATE (RETURNS TABLE, §3). Re-grants fail-closed en cada una.
 --     [cuerpos completos → los redacta el implementer sobre el remoto vigente]
 
+-- (2b) M1 (Gate 1, Puerta 1) — validación SERVER-AUTORITATIVA del apodo. Re-crear assert_custom_value_valid
+--      (0096, CREATE OR REPLACE sobre el cuerpo VIGENTE) agregando: cuando el field es el apodo
+--      (data_key='apodo'), enforçar char_length(value) <= 15 Y el charset (letras/dígitos/ñ/tildes/espacio/
+--      guion). raise con errcode propio si no cumple. Resto de la validación (type=string, cap 4096) intacto.
+--      [cuerpo → el implementer sobre el vigente; confirmar cómo la función resuelve el data_key del field]
+
 -- (3) IDU.7.1 — rename del label del apodo.
 update public.field_definitions set label = 'Nombre/Apodo'
  where data_key = 'apodo' and label is distinct from 'Nombre/Apodo';
@@ -153,7 +159,7 @@ commit;
 ## 5. `sanitizeApodoInput` (PURO, en `animal-input.ts`)
 
 ```ts
-export const APODO_MAX_LENGTH = 10;
+export const APODO_MAX_LENGTH = 15;   // Puerta 1: subido de 10 (cortaba nombres de 2 palabras, "La Colorada"=11).
 
 /**
  * Nombre/Apodo: letras + dígitos + espacios + guiones, cap 10. Formato de IDENTIFICADOR específico del apodo
@@ -164,7 +170,8 @@ export function sanitizeApodoInput(raw: string): string {
 }
 ```
 
-- **Charset (decisión de criterio, confirmable en Puerta 1)**: `APODO_DISALLOWED = /[^A-Za-z0-9áéíóúüñÁÉÍÓÚÜÑ \-]/g` — **incluye letras acentuadas + `ñ`** (superset del ASCII "alfanumérico"), porque el apodo es un nombre en español y un charset ASCII estricto comería la `ñ`/tildes ("Toño", "Ñata"). El contexto §7.2 dijo "alfanumérico + espacio + guion"; esta es la lectura es-AR de "alfanumérico". Si Raf prefiere ASCII estricto en Puerta 1 → `/[^A-Za-z0-9 \-]/g`. **Ambas** variantes: espacios y guiones permitidos, cap 10, otros símbolos descartados.
+- **Charset (DECIDIDO en Puerta 1)**: `APODO_DISALLOWED = /[^A-Za-z0-9áéíóúüñÁÉÍÓÚÜÑ \-]/g` — **incluye letras acentuadas + `ñ`** (es-AR: el apodo es un nombre en español; ASCII estricto comería la `ñ`/tildes de "Toño"/"Ñata"). Espacios y guiones permitidos, cap **15**, otros símbolos descartados.
+- **Validación SERVER-AUTORITATIVA (M1 de Gate 1, DECIDIDO en Puerta 1)**: el sanitizer de cliente es UX/attacker-controlled → hay que enforçar el formato del apodo **server-side** también (regla dura de Raf). En la migración `0122` se **re-crea `assert_custom_value_valid` (0096)** (moldeando sobre el cuerpo VIGENTE) agregando: cuando el `field_definition` es el apodo (`data_key='apodo'`), validar `char_length(value) <= 15` **y** el charset (letras/dígitos/ñ/tildes/espacio/guion) — `raise` con errcode propio si no cumple. El resto de la validación (type=string, cap genérico 4096) intacto. Así el largo/charset del apodo son autoritativos en el server, no solo en el input. El implementer confirma cómo `assert_custom_value_valid` recibe/resuelve el `data_key` del field (si no lo tiene a mano, lo joinea a `field_definitions`).
 - **Aplicación (IDU.5.2/5.3)**: el `CustomFieldInput` (rama `text`) gana un hook por `data_key`. El caller (`crear-animal` `CustomPropertiesForm` y la ficha) sabe el `data_key` de cada field: cuando `data_key === 'apodo'`, pasa `sanitizeApodoInput` como transformador del `onChangeText` (paralelo a como el `date` usa `maskDateInput`). Se agrega a `CustomFieldInputProps` una prop OPCIONAL y ADITIVA (ej. `sanitize?: (raw: string) => string`) — backward-compat: los callers sin `sanitize` no cambian de comportamiento.
 
 ## 6. Clasificadores de búsqueda (PUROS, `animal-identifier.ts` + `link-calf-query.ts`)

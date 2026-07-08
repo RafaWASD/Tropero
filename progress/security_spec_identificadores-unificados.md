@@ -7,7 +7,13 @@
 
 ---
 
-## VEREDICTO: NEEDS_CLARIFICATION
+## VEREDICTO: NEEDS_CLARIFICATION → **RESUELTO a PASS** (leader, Puerta 1, 2026-07-08)
+
+> **Resolución de M1 (Raf "dale" + decisión leader en Puerta 1):** se cierra server-side (opción a). La migración `0122` re-crea **`assert_custom_value_valid`** (0096, sobre el cuerpo vigente) para enforçar, cuando `data_key='apodo'`: `char_length(value) <= 15` + charset (letras/dígitos/ñ/tildes/espacio/guion), con `raise` propio. Así el largo/charset del apodo son **autoritativos en el server**, no solo en el sanitizer de cliente → honra la regla dura de Raf. Charset DECIDIDO: ñ/tildes incluidos (es-AR). Largo DECIDIDO: 15 (subido de 10). Ver design §4 (2b) + §5. **Watch de Gate 2 anotado**: verificar que los `DROP+CREATE` de `create_animal`/reportes re-emitan `revoke public,anon` + `grant authenticated` con la lista de tipos EXACTA de la firma nueva (el DROP resetea EXECUTE a PUBLIC). **Gate 1 cerrado como PASS** — habilitado a implementer.
+
+---
+
+## VEREDICTO original: NEEDS_CLARIFICATION
 
 Los **6 focos** del design §13 (drop del trigger de identidad, `register_birth` sin fallback, re-create de RPC, canal de búsqueda por apodo, orden de deploy, drop de columna) **pasan con evidencia** — el modelo server-side de aislamiento y anti-spoof queda intacto y coherente. **Un único bloqueante**: el tercer identificador (**apodo**), que este delta promueve a identificador de primera clase (buscable + hero + warning), **no tiene límite ni charset autoritativos server-side** — su formato (≤10 + charset) vive sólo en el sanitizer de cliente. Por la regla dura de Raf ("límite claro + validación server-side en CADA campo de entrada para aprobar"), no puede PASS sin una decisión explícita en Puerta 1.
 

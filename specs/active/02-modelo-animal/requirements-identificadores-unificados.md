@@ -16,7 +16,7 @@ Tres identificadores de usuario, **TODOS OPCIONALES**; el animal siempre tiene s
 |---|---|---|---|---|
 | 1 | Caravana Electrónica | `animals.tag_electronic` | numérica 15 díg (FDX-B) | dura, GLOBAL |
 | 2 | Caravana Visual (idv) | `animal_profiles.idv` | alfanumérica ≤15 (CUIG/binomio) | dura, por campo |
-| 3 | Nombre/Apodo | custom field `apodo` (`custom_attributes`) | alfanum ≤10 + espacios/guiones | soft-warning, por campo |
+| 3 | Nombre/Apodo | custom field `apodo` (`custom_attributes`) | alfanum ≤15 (incl. ñ/tildes) + espacios/guiones | soft-warning, por campo |
 
 El 4to campo histórico `animal_profiles.visual_id_alt` se **elimina del todo** (backend + PowerSync + frontend). Datos existentes: **se descartan** (contexto §7.1).
 
@@ -26,7 +26,7 @@ El 4to campo histórico `animal_profiles.visual_id_alt` se **elimina del todo** 
 
 - **IDU.1.1** El sistema deberá aceptar como Caravana Electrónica (`tag_electronic`) un valor de exactamente 15 dígitos, único a nivel global. *(Sin cambio de formato ni de unicidad — estado vigente; se enuncia para trazar el modelo.)*
 - **IDU.1.2** El sistema deberá aceptar como Caravana Visual (`idv`) un valor alfanumérico de hasta 15 caracteres, único por establecimiento. *(Sanitizer alfanumérico + `keyboardType` ya corregidos en commit `53fd77e` — NO se re-especifican; se enuncian para trazar el modelo.)*
-- **IDU.1.3** Donde el rodeo tenga habilitado el campo `apodo`, el sistema deberá aceptar como Nombre/Apodo un valor de letras, dígitos, espacios y guiones, de hasta 10 caracteres.
+- **IDU.1.3** Donde el rodeo tenga habilitado el campo `apodo`, el sistema deberá aceptar como Nombre/Apodo un valor de letras (incl. `ñ`/tildes), dígitos, espacios y guiones, de hasta **15** caracteres. *(Puerta 1: 15, subido de 10 — cortaba nombres de 2 palabras.)*
 - **IDU.1.4** El sistema deberá permitir crear y persistir un animal con cero identificadores de usuario (tag, idv y apodo todos ausentes).
 - **IDU.1.5** El sistema no deberá rechazar la inserción ni la actualización de un `animal_profile` por la ausencia de tag, idv y `visual_id_alt`. *(Se elimina la regla de completitud "al menos uno" — ver IDU.2.1.)*
 - **IDU.1.6** El sistema deberá rechazar con error de unicidad (23505) el intento de asignar a un `idv` un valor ya usado por otro animal activo del mismo establecimiento. *(Estado vigente — índice `animal_profiles_idv_unique`; se enuncia para trazar el modelo de unicidad coherente.)*
@@ -67,7 +67,8 @@ El 4to campo histórico `animal_profiles.visual_id_alt` se **elimina del todo** 
 
 ## IDU.5 — Formato y warning-soft del Nombre/Apodo (alta + edición)
 
-- **IDU.5.1** El sistema deberá limitar en vivo el input del campo `apodo` a letras, dígitos, espacios y guiones, con un tope de 10 caracteres (`sanitizeApodoInput`), descartando cualquier otro carácter.
+- **IDU.5.1** El sistema deberá limitar en vivo el input del campo `apodo` a letras (incl. `ñ`/tildes), dígitos, espacios y guiones, con un tope de **15** caracteres (`sanitizeApodoInput`), descartando cualquier otro carácter.
+- **IDU.5.1b** *(M1 de Gate 1, Puerta 1)* El sistema deberá enforçar el formato del apodo (≤15 + charset) **server-side** además del cliente: la migración `0122` re-crea `assert_custom_value_valid` para rechazar (`raise`) un `apodo` que exceda 15 o traiga caracteres fuera del charset. El sanitizer de cliente es solo UX; el server es autoritativo.
 - **IDU.5.2** El sistema deberá aplicar `sanitizeApodoInput` al input del `apodo` en el alta de animal (`crear-animal`, formulario de datos personalizados del rodeo).
 - **IDU.5.3** El sistema deberá aplicar `sanitizeApodoInput` al input del `apodo` en la edición desde la ficha (`animal/[id].tsx`, datos personalizados).
 - **IDU.5.4** Cuando el operario ingrese o edite un `apodo` que ya usa otro animal activo del mismo establecimiento (comparación case-insensitive, trim), el sistema deberá mostrar un aviso "ya hay otro animal con ese nombre en el campo".
