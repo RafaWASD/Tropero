@@ -10,8 +10,9 @@
 --   (1)  drop del trigger de completitud `animal_profiles_identity_check` (+ su función) → un animal puede
 --        quedar con CERO identificadores de usuario (siempre tiene su PK). El anti-spoof (0079) y la unicidad
 --        del idv NO se tocan.
---   (1b) drop de la función MUERTA tg_reproductive_events_create_calf (0032, sin trigger activo — verificado
---        por el leader vía pg_trigger) que referenciaba la columna.
+--   (1b) re-CREATE de tg_reproductive_events_create_calf (0032/0108) SIN visual_id_alt. Su trigger
+--        `reproductive_events_create_calf` (BEFORE INSERT) está VIVO — crea la cría mono-ternero. NO se dropea
+--        (el reviewer cazó que la premisa "función muerta" era falsa: fn_refs_visual=true, tgenabled='O').
 --   (2)  re-create de las 6 funciones que referencian la columna, SIN ella (moldeadas sobre el cuerpo VIGENTE
 --        del remoto, reference_function_recreate_base): register_birth (sin fallback), create_animal
 --        (DROP+CREATE, quita p_visual_id_alt), import_rodeo_bulk, transfer_animal, y los 2 reportes
@@ -31,8 +32,61 @@ begin;
 drop trigger  if exists animal_profiles_identity_check on public.animal_profiles;
 drop function if exists public.tg_animal_profiles_identity_check ();
 
--- ─── (1b) Función muerta (0032) que referencia la columna ────────────────────────────────────────
-drop function if exists public.tg_reproductive_events_create_calf () cascade;
+-- ─── (1b) tg_reproductive_events_create_calf (0032/0108) — trigger VIVO (reproductive_events_create_calf,
+--        BEFORE INSERT, crea la cría mono-ternero). Se RE-CREATE sin visual_id_alt (NO se dropea — moldeado
+--        sobre el cuerpo vigente 0108, reference_function_recreate_base). Igual que register_birth: una cría
+--        sin tag persiste con idv/visual ambos NULL (el trigger de completitud ya no existe, IDU.2.1).
+create or replace function public.tg_reproductive_events_create_calf ()
+returns trigger
+language plpgsql security definer
+set search_path = public as $$
+declare
+  v_mother_species_id uuid;
+  v_mother_est_id uuid;
+  v_mother_rodeo_id uuid;
+  v_mother_breed_id uuid;   -- (R1.7) breed_id de la madre, heredado al ternero
+  v_system_id uuid;
+  v_calf_animal_id uuid;
+  v_calf_profile_id uuid;
+  v_calf_category_id uuid;
+  v_calf_category_code text;
+begin
+  if new.event_type <> 'birth' then return new; end if;
+  if new.calf_id is not null then return new; end if;
+  if new.calf_sex is null then return new; end if;   -- register_birth (mellizos) inserta sin calf_sex → este trigger no actúa
+
+  select a.species_id, p.establishment_id, p.rodeo_id, r.system_id, p.breed_id
+    into v_mother_species_id, v_mother_est_id, v_mother_rodeo_id, v_system_id, v_mother_breed_id
+  from public.animal_profiles p
+  join public.animals a on a.id = p.animal_id
+  join public.rodeos r on r.id = p.rodeo_id
+  where p.id = new.animal_profile_id;
+
+  v_calf_category_code := case when new.calf_sex = 'male' then 'ternero' else 'ternera' end;
+  select id into v_calf_category_id from public.categories_by_system
+    where system_id = v_system_id and code = v_calf_category_code and active = true;
+
+  insert into public.animals (tag_electronic, species_id, sex, birth_date)
+  values (nullif(trim(new.calf_tag_electronic), ''), v_mother_species_id, new.calf_sex, new.event_date)
+  returning id into v_calf_animal_id;
+
+  -- IDU.2.2: sin visual_id_alt (ni la columna ni el fallback). Una cría sin tag persiste con idv/visual NULL —
+  -- el trigger de completitud ya no existe (IDU.2.1), no hay 23514.
+  insert into public.animal_profiles (
+    animal_id, establishment_id, rodeo_id, category_id, category_override,
+    breed_id, birth_weight, entry_date, entry_origin, status
+  ) values (
+    v_calf_animal_id, v_mother_est_id, v_mother_rodeo_id, v_calf_category_id, false,
+    v_mother_breed_id,        -- (R1.7) heredado de la madre (NULL si la madre no tiene breed_id)
+    new.calf_weight, new.event_date, 'born_here', 'active'
+  ) returning id into v_calf_profile_id;
+
+  new.calf_id := v_calf_profile_id;
+  return new;
+exception
+  when others then
+    raise;   -- R9.4: re-raise asegura rollback del parto completo. NO tragar la excepción.
+end; $$;
 
 -- ─── (2) register_birth — SIN el fallback visual_id_alt. Misma firma 6-arg (CREATE OR REPLACE). ───
 create or replace function public.register_birth (
@@ -206,6 +260,8 @@ end; $$;
 
 revoke execute on function public.create_animal (uuid, uuid, uuid, uuid, uuid, text, uuid, boolean, text, text, date, text, text, text, date, numeric, uuid, text, boolean) from public, anon;
 grant  execute on function public.create_animal (uuid, uuid, uuid, uuid, uuid, text, uuid, boolean, text, text, date, text, text, text, date, numeric, uuid, text, boolean) to authenticated;
+comment on function public.create_animal (uuid, uuid, uuid, uuid, uuid, text, uuid, boolean, text, text, date, text, text, text, date, numeric, uuid, text, boolean) is
+  'Alta de animal ATÓMICA (drenada desde la outbox de PowerSync; reemplaza los 2 upserts no atómicos que perdían datos bajo reintento — backlog 2026-06-10). SECURITY DEFINER con guard has_role_in PRIMERO (paridad con animal_profiles_insert 0022). INSERT de animals + animal_profiles con ids de CLIENTE, ambos ON CONFLICT (id) DO NOTHING → replay at-least-once = no-op total y SANA el half-state (animals huérfano del camino viejo → DO NOTHING → crea el perfil). Guards anti-IDOR post-insert (la fila debe matchear el intent). Los 23505 de dominio (tag de OTRO animal, idv duplicado) SALEN como error. created_by lo fuerza 0043; la identidad denormalizada la fuerza 0079. No necesita client_op_id (dedup natural por los ids). (0122: se quitó p_visual_id_alt.)';
 
 -- ─── (2) import_rodeo_bulk — CREATE OR REPLACE, quita visual_id_alt del INSERT. ──────────────────
 create or replace function public.import_rodeo_bulk (p_rodeo_id uuid, p_rows jsonb)
@@ -401,6 +457,8 @@ end; $$;
 
 revoke execute on function public.establishment_overdue_doses (uuid, integer, integer) from public, anon;
 grant  execute on function public.establishment_overdue_doses (uuid, integer, integer) to authenticated;
+comment on function public.establishment_overdue_doses (uuid, integer, integer) is
+  'Alerta de dosis vencida (R7.10): sanitary_events no borrados de animales activos con next_dose_date < hoy sin dosis posterior del mismo producto/animal. Read-only/STABLE, SECURITY DEFINER. M1: has_role_in(p_establishment_id) como 1ª sentencia (IDOR del cliente). M2/M3: tenant/status/deleted_at por el join a animal_profiles. M4: cota de escaneo (ventana p_lookback_days + LIMIT p_limit; 22023 fuera de rango).';
 
 drop function if exists public.establishment_unweighed (uuid, integer, text[]);
 
@@ -439,6 +497,8 @@ end; $$;
 
 revoke execute on function public.establishment_unweighed (uuid, integer, text[]) from public, anon;
 grant  execute on function public.establishment_unweighed (uuid, integer, text[]) to authenticated;
+comment on function public.establishment_unweighed (uuid, integer, text[]) is
+  'Alerta de animales sin pesar (R7.11): activos sin weight_event o con último pesaje < hoy − p_threshold_days (default-MVP 180 d, parametrizado), filtrado por p_category_codes (sigue Facundo/D2). Read-only/STABLE, SECURITY DEFINER. M1: has_role_in(p_establishment_id) como 1ª sentencia. M2/M3: tenant/status/deleted_at por el join. M4: cota p_threshold_days [0,3650] + cardinality(p_category_codes) <= 64 (22023 fuera de rango).';
 
 -- ─── (2b) assert_custom_value_valid — validación SERVER del apodo (M1). CREATE OR REPLACE. ────────
 create or replace function public.assert_custom_value_valid (p_field_definition_id uuid, p_value jsonb)

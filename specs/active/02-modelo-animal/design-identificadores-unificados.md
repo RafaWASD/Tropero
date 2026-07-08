@@ -162,7 +162,7 @@ commit;
 export const APODO_MAX_LENGTH = 15;   // Puerta 1: subido de 10 (cortaba nombres de 2 palabras, "La Colorada"=11).
 
 /**
- * Nombre/Apodo: letras + dígitos + espacios + guiones, cap 10. Formato de IDENTIFICADOR específico del apodo
+ * Nombre/Apodo: letras + dígitos + espacios + guiones, cap 15. Formato de IDENTIFICADOR específico del apodo
  * (NO la validación genérica de custom fields). Filtra en vivo (onChangeText) — PREVENIR, no errorear.
  */
 export function sanitizeApodoInput(raw: string): string {
@@ -330,7 +330,7 @@ Dropea el trigger de identidad, re-crea los RPC sin la columna (incluida la firm
 
 1. **Migrar `visual_id_alt` con data real → `apodo`.** Descartada (contexto §7.1, decisión de Raf): escala beta mínima, los placeholders son basura, migrar a apodo ensuciaría rodeos que NO usan apodo (el apodo es opt-in) y forzaría habilitarlo. Al dropear la columna se descarta todo.
 2. **Conservar la columna `visual_id_alt` y solo ocultarla en la UI.** Descartada (contexto §3.1): el objetivo es limpiar el modelo del todo y documentado; una columna muerta se superpone conceptualmente con el apodo y vuelve a confundir en 6 meses.
-3. **Generalizar `sanitizeApodoInput` a TODOS los custom fields `text`.** Descartada (contexto §7.2): solo el apodo tiene formato de identificador (alfanum ≤10 + espacios/guiones); los demás custom `text` son texto libre. Se aplica por `data_key==='apodo'`, no al genérico.
+3. **Generalizar `sanitizeApodoInput` a TODOS los custom fields `text`.** Descartada (contexto §7.2): solo el apodo tiene formato de identificador (alfanum ≤15 + espacios/guiones); los demás custom `text` son texto libre. Se aplica por `data_key==='apodo'`, no al genérico.
 4. **`create_animal`: mantener `p_visual_id_alt` como no-op (ignorarlo) en vez de DROP+CREATE.** Descartada: dejaría un parámetro muerto en la firma pública (contradice "borrar del todo"). El costo del DROP+CREATE (re-grant) es bajo y el paso 1 del deploy ya garantiza que el connector no lo manda. Se elige la firma limpia.
 5. **Extender los reportes (`0106`) a hero-por-apodo.** Descartada: el contexto §5 restringe el hero-por-nombre a **lista + ficha**. Los reportes solo pierden la columna `visual_id_alt` del retorno y `animalLabel` degrada a `idv → "Sin identificación"` (cambio mecánico, sin decisión de producto).
 6. **Constraint DB de unicidad para el apodo.** Descartada (contexto §2/§6): el apodo es soft-warning (dos "Manchada" en el mismo campo se permiten). El chequeo es client-side sobre la lectura local; sin constraint nuevo.

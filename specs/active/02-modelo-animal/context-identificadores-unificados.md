@@ -26,7 +26,7 @@ Defectos concretos: (a) el idv se sanitizaba numérico → comía las letras del
 |---|---|---|---|---|---|
 | 1 | **Caravana Electrónica** | `tag_electronic` | numérica **15 dígitos** (FDX-B) | dura | **GLOBAL** (chip físico único en el mundo) |
 | 2 | **Caravana Visual** | `idv` | **alfanumérica ≤15** (CUIG: 2 letras+3 números + individual `A000..ZZZ9` + verificador; SENASA Res.841/2025 binomio) | dura | **por campo** (establecimiento) |
-| 3 | **Nombre/Apodo** | custom field `apodo` | **alfanumérico ≤10 + espacios/guiones** | **soft warning** (no bloquea) | **por campo** (establecimiento) |
+| 3 | **Nombre/Apodo** | custom field `apodo` | **alfanumérico ≤15 + espacios/guiones** (Gate 0 lo puso en ≤10; Puerta 1 lo subió a ≤15 — "La Colorada"=11 cortaba) | **soft warning** (no bloquea) | **por campo** (establecimiento) |
 
 - **Todas opcionales**: un animal puede tener 0..3. Siempre tiene su **PK interna** del sistema (`animals.id` / `animal_profiles.id`).
 - **Apodo = opt-in por rodeo** (la app anda perfecto sin él); electrónica + visual = disponibles en todo rodeo (no obligatorias por animal, recomendables).
@@ -74,6 +74,6 @@ Defectos concretos: (a) el idv se sanitizaba numérico → comía las letras del
 ## 7. Preguntas abiertas — RESUELTAS
 
 1. **Datos reales de `visual_id_alt`**: **DESCARTAR** (decisión de Raf, 2026-07-08). Al dropear la columna se pierde todo (placeholders + cualquier seña real). No se migra a apodo.
-2. **Formato del apodo** (alfanum ≤10 + espacios/guiones): **regla apodo-específica** (decisión leader) — un `sanitizeApodoInput` propio (alfanumérico + espacio + guion, cap 10), aplicado al input del campo apodo. NO se generaliza a todos los custom fields (solo el apodo tiene este formato de identificador). La spec lo define.
+2. **Formato del apodo** (alfanum + espacios/guiones): **regla apodo-específica** (decisión leader) — un `sanitizeApodoInput` propio (alfanumérico + espacio + guion), aplicado al input del campo apodo. NO se generaliza a todos los custom fields (solo el apodo tiene este formato de identificador). La spec lo define. **Cap**: Gate 0 lo puso en 10; **Puerta 1 lo subió a 15** ("La Colorada"=11 cortaba) — 15 es el valor firme (requirements IDU.5.1/5.1b + design §5 + código).
 3. **Orden de deploy** (decisión leader, a detallar en la spec): coordinar para no dejar ventana rota. Secuencia segura: **(1)** frontend + schema PowerSync que ya NO referencian `visual_id_alt` (dejan de escribir/leer/proyectar la columna, tolerando que aún exista en el server), **(2)** luego la migración DB que dropea el trigger + la columna. Así nunca hay un lado esperando la columna que el otro ya sacó. El deploy de la migración y del schema PowerSync los coordina/gatea Raf.
 4. **Warning-soft de apodo al EDITAR** (decisión leader): **SÍ** — el chequeo por campo corre al setear el apodo en el alta Y al editarlo desde la ficha (mismo helper). No bloquea; solo avisa "ya hay otro animal con ese nombre en el campo".
