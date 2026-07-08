@@ -512,7 +512,7 @@ export function LinkCalfPrompt({
                 }}
                 error={fieldError}
                 placeholder="Caravana electrónica o visual"
-                keyboardType="number-pad"
+                keyboardType="default"
                 autoCapitalize="none"
                 returnKeyType="search"
                 onSubmitEditing={() => void onSearch()}

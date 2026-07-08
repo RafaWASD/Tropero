@@ -36,13 +36,24 @@ test('FIX2 isValidTagElectronic: vacío OK (opcional) o exactamente 15 dígitos'
   assert.equal(isValidTagElectronic('9820001234567890'), false); // 16
 });
 
-// ─── IDV: numérico, acotado ─────────────────────────────────────────────────────────────
+// ─── IDV: caravana VISUAL alfanumérica (CUIG/binomio), acotada ──────────────────────────
 
-test('FIX2 sanitizeIdvInput: solo dígitos, máx IDV_MAX_LENGTH', () => {
+test('FIX2 sanitizeIdvInput: alfanumérico (CUIG/binomio), máx IDV_MAX_LENGTH', () => {
+  // Dígitos puros (compat retro con la vieja numérica) se conservan.
   assert.equal(sanitizeIdvInput('0241'), '0241');
-  assert.equal(sanitizeIdvInput('ARG 0241'), '0241'); // descarta letras/espacios
-  const long = '9'.repeat(40);
+  // Las LETRAS ya NO se comen (bug: la caravana visual argentina es alfanumérica).
+  assert.equal(sanitizeIdvInput('abc123'), 'abc123');
+  // Formato CUIG real (2 letras + 3 díg + individual) se conserva intacto.
+  assert.equal(sanitizeIdvInput('AB123A0001'), 'AB123A0001');
+  // Separadores/espacios se descartan, pero las letras quedan.
+  assert.equal(sanitizeIdvInput('AB123-A0001'), 'AB123A0001');
+  assert.equal(sanitizeIdvInput('ARG 0241'), 'ARG0241');
+  // NO fuerza mayúsculas: se acepta como se tipea.
+  assert.equal(sanitizeIdvInput('ab123'), 'ab123');
+  // Cap a IDV_MAX_LENGTH (=15) sobre cualquier mezcla larga.
+  const long = 'A9'.repeat(40);
   assert.equal(sanitizeIdvInput(long).length, IDV_MAX_LENGTH);
+  assert.equal(IDV_MAX_LENGTH, 15);
 });
 
 // ─── Visual: texto libre acotado ────────────────────────────────────────────────────────

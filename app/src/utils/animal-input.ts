@@ -14,8 +14,11 @@
 // ─── Topes de longitud (formato real del dominio) ──────────────────────────────────────
 // Caravana electrónica FDX-B / ISO 11784/11785: exactamente 15 dígitos (prefijo país 982/032…).
 export const TAG_ELECTRONIC_LENGTH = 15;
-// IDV / caravana oficial: numérica/estructurada; tope razonable (una caravana SENASA no llega a 20).
-export const IDV_MAX_LENGTH = 20;
+// IDV / caravana VISUAL oficial: ALFANUMÉRICA (formato CUIG/binomio, NO numérica). El binomio actual
+// (SENASA Res. 841/2025) es CUIG "AB123" + identificación individual "A000".."ZZZ9" + dígito
+// verificador ≈ 15 chars, replicando los 15 de la electrónica; la vieja "AR"+9 dígitos = 11 entra
+// holgada. Tope alineado a esos 15.
+export const IDV_MAX_LENGTH = 15;
 // Identificación visual: texto libre (color, seña, número de manga corto) pero acotado.
 export const VISUAL_MAX_LENGTH = 30;
 // Fecha ISO 'YYYY-MM-DD' = 10 caracteres con los guiones.
@@ -34,11 +37,13 @@ export function sanitizeTagInput(raw: string): string {
 }
 
 /**
- * IDV / caravana oficial: numérica. Filtra a solo dígitos y acota a IDV_MAX_LENGTH. (La caravana
- * oficial argentina es numérica; los separadores de display no se tipean en el campo.)
+ * IDV / caravana VISUAL oficial: ALFANUMÉRICA (formato CUIG/binomio). Filtra a letras + dígitos,
+ * descartando separadores/espacios/otros, y acota a IDV_MAX_LENGTH. La caravana visual argentina NO
+ * es numérica: es el binomio CUIG ("AB123") + identificación individual + dígito verificador. NO
+ * fuerza mayúsculas (se acepta como se tipea); los separadores de display no se tipean en el campo.
  */
 export function sanitizeIdvInput(raw: string): string {
-  return raw.replace(/\D/g, '').slice(0, IDV_MAX_LENGTH);
+  return raw.replace(/[^A-Za-z0-9]/g, '').slice(0, IDV_MAX_LENGTH);
 }
 
 /**

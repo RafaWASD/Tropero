@@ -871,8 +871,8 @@ export default function AnimalDetailScreen() {
                 <IdentifierAssignRow
                   kind="idv"
                   label="Caravana visual"
-                  placeholder="Número de caravana oficial"
-                  keyboardType="number-pad"
+                  placeholder="Ej. AB123A0001"
+                  keyboardType="default"
                   sanitize={sanitizeIdvInput}
                   maxLength={IDV_MAX_LENGTH}
                   validate={(v) => (v.trim().length > 0 ? null : 'Ingresá el número de caravana.')}

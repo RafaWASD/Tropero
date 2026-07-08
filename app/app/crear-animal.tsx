@@ -1321,8 +1321,8 @@ function Step4Data({
             label="Caravana visual (recomendado)"
             value={idv}
             onChangeText={onIdv}
-            keyboardType="number-pad"
-            placeholder="Número de caravana oficial"
+            keyboardType="default"
+            placeholder="Ej. AB123A0001"
           />
         ) : null}
         {/* Caravana electrónica → BASTONEAR (RCF.6 generalizado al alta): SOLO en la puerta manual (sin TAG

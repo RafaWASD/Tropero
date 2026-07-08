@@ -1579,15 +1579,15 @@ function CalfBlock({
 
       {/* Caravana VISUAL del ternero (idv) POR CRÍA (delta parto-caravana-visual-por-ternero, PCV.1): un
           campo por CalfBlock (single Y mellizos), OPCIONAL (PCV.2 — sin validación que la fuerce), junto a la
-          electrónica → simetría "cada ternero, sus dos caravanas". sanitizeIdvInput en vivo (solo dígitos, sin
-          clamp que oculte un error de tipeo). testID indexado para desambiguar mellizos en E2E (paralelo a
+          electrónica → simetría "cada ternero, sus dos caravanas". sanitizeIdvInput en vivo (alfanumérico —
+          CUIG/binomio, sin clamp que oculte un error de tipeo). testID indexado para desambiguar mellizos en E2E (paralelo a
           tag-scan-open-${index}). */}
       <FormField
         label="Caravana visual del ternero (opcional)"
         value={calf.idvRaw}
         onChangeText={(t) => onUpdate({ idvRaw: sanitizeIdvInput(t) })}
-        keyboardType="number-pad"
-        placeholder="Ej. 0234"
+        keyboardType="default"
+        placeholder="Ej. AB123A0001"
         testID={`calf-idv-${index}`}
       />
 
