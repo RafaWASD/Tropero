@@ -255,9 +255,10 @@ function SelectedRow({
     };
   });
 
-  const PRIMARY = getTokenValue('$primary', 'color');
-  const MUTED = getTokenValue('$textMuted', 'color');
-  const FAINT = getTokenValue('$textFaint', 'color');
+  // Fila SELECCIONADA = recipe A (§2.1): fondo $primary (oscuro) → texto/íconos $white; el hint sin-valor
+  // usa $greenLight (se lee como "muted" sobre el fondo oscuro sin caer en $primary/$textMuted ilegibles).
+  const WHITE = getTokenValue('$white', 'color');
+  const GREENLIGHT = getTokenValue('$greenLight', 'color');
   const SHADOW_COLOR = shadows.card.shadowColor;
   const HANDLE_SIZE = 24;
 
@@ -302,7 +303,7 @@ function SelectedRow({
       ]}
     >
       <XStack
-        backgroundColor="$greenLight"
+        backgroundColor="$primary"
         borderRadius={frozen ? '$pill' : '$card'}
         borderWidth={1}
         borderColor="$primary"
@@ -324,8 +325,8 @@ function SelectedRow({
               ? { role: 'button' as const, 'aria-label': `Quitar ${maneuverLabel(maneuver)}` }
               : { accessibilityRole: 'button' as const, accessibilityLabel: `Quitar ${maneuverLabel(maneuver)}` })}
           >
-            <View width={26} height={26} borderRadius="$pill" alignItems="center" justifyContent="center" backgroundColor="$primary">
-              <Text fontFamily="$body" fontSize="$3" lineHeight="$3" fontWeight="700" color="$white" numberOfLines={1}>
+            <View width={26} height={26} borderRadius="$pill" alignItems="center" justifyContent="center" backgroundColor="$white">
+              <Text fontFamily="$body" fontSize="$3" lineHeight="$3" fontWeight="700" color="$primary" numberOfLines={1}>
                 {index + 1}
               </Text>
             </View>
@@ -356,26 +357,27 @@ function SelectedRow({
                   accessibilityState: { selected: true },
                 })}
           >
-            <Check size={18} color={PRIMARY} strokeWidth={3} />
+            <Check size={18} color={WHITE} strokeWidth={3} />
             <YStack flex={1} minWidth={0}>
               <Text
                 fontFamily="$body"
                 fontSize="$5"
                 lineHeight="$5"
                 fontWeight="700"
-                color="$primary"
+                color="$white"
                 numberOfLines={1}
               >
                 {maneuverLabel(maneuver)}
               </Text>
-              {/* 2da LÍNEA INLINE (solo configurables, R1.7): valor cargado (verde, énfasis) o hint (muted). */}
+              {/* 2da LÍNEA INLINE (solo configurables, R1.7): valor cargado ($white, énfasis) o hint ($greenLight,
+                  muted sobre el fondo oscuro — recipe A §2.1). */}
               {configurable ? (
                 <Text
                   fontFamily="$body"
                   fontSize="$3"
                   lineHeight="$3"
                   fontWeight={hasValue ? '600' : '400'}
-                  color={hasValue ? '$primary' : '$textFaint'}
+                  color={hasValue ? '$white' : '$greenLight'}
                   numberOfLines={1}
                   testID={`selected-config-${index}`}
                 >
@@ -384,7 +386,7 @@ function SelectedRow({
               ) : null}
             </YStack>
             {/* Chevroncito de "configurable" (solo si lo es): señal de affordance del cuerpo. */}
-            {configurable ? <ChevronRight size={18} color={hasValue ? PRIMARY : FAINT} /> : null}
+            {configurable ? <ChevronRight size={18} color={hasValue ? WHITE : GREENLIGHT} /> : null}
           </XStack>
         </GestureDetector>
 
@@ -401,7 +403,7 @@ function SelectedRow({
               ? { role: 'button' as const, 'aria-label': `Reordenar ${maneuverLabel(maneuver)}` }
               : { accessibilityRole: 'button' as const, accessibilityLabel: `Reordenar ${maneuverLabel(maneuver)}` })}
           >
-            <GripVertical size={HANDLE_SIZE} color={MUTED} />
+            <GripVertical size={HANDLE_SIZE} color={WHITE} />
           </View>
         </GestureDetector>
       </XStack>

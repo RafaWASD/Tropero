@@ -7,8 +7,10 @@
 // POR QUÉ un trigger PILL con afordancia fuerte (resuelve el defecto de UX del paso de mapeo del
 // import): un trigger `$white` sobre `$bg` (#FFFFFF sobre #faf9f9) era casi el mismo color, sin
 // señal de "esto se despliega". Acá el pill contrasta: ASIGNADO = verde claro ($greenLight) con
-// texto $primary; SIN ASIGNAR = surface bone con borde $divider + texto muted. En ambos casos un
-// chevron (down cerrado / up abierto) marca que es un combo (Nielsen #6: reconocer > recordar).
+// texto $textPrimary (recipe B §2.1 — el chevron sí queda $primary, es ícono/gráfico 3:1; el texto
+// pasó de $primary a $textPrimary por legibilidad al sol, era 4.55:1); SIN ASIGNAR = surface bone con
+// borde $divider + texto muted. En ambos casos un chevron (down cerrado / up abierto) marca que es un
+// combo (Nielsen #6: reconocer > recordar).
 //
 // CONTROLADO por el padre: `open` + `onToggle` los maneja el llamador para tener UN solo Select
 // abierto a la vez (acordeón) sin estado global. `onChange(null)` = se eligió el placeholder
@@ -103,7 +105,7 @@ export function Select({
             fontFamily="$body"
             fontSize="$4"
             fontWeight={assigned ? '600' : '400'}
-            color={assigned ? '$primary' : '$textMuted'}
+            color={assigned ? '$textPrimary' : '$textMuted'}
           >
             {label}
           </Text>

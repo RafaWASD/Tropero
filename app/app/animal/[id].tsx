@@ -2276,10 +2276,10 @@ function ScrotalTrendSection({ history }: { history: ScrotalMeasurementRow[] }) 
       {history.length === 0 ? (
         // Macho entero SIN mediciones: la 1ra medición es un caso legítimo (no falta de sync) → empty cálido.
         <YStack width="100%" backgroundColor="$greenLight" borderRadius="$card" padding="$4" gap="$2">
-          <Text fontFamily="$body" fontSize="$5" lineHeight="$5" fontWeight="600" color="$primary">
+          <Text fontFamily="$body" fontSize="$5" lineHeight="$5" fontWeight="600" color="$textPrimary">
             Todavía no hay mediciones
           </Text>
-          <Text fontFamily="$body" fontSize="$3" fontWeight="400" color="$primary">
+          <Text fontFamily="$body" fontSize="$3" fontWeight="400" color="$textPrimary">
             Medí la circunferencia escrotal de este toro en una jornada de manga y vas a ver su evolución acá.
           </Text>
         </YStack>
@@ -2482,10 +2482,10 @@ function HistorySection({
         <InfoNote>Cargando el historial…</InfoNote>
       ) : isSparse ? (
         <YStack width="100%" backgroundColor="$greenLight" borderRadius="$card" padding="$4" gap="$2">
-          <Text fontFamily="$body" fontSize="$5" fontWeight="600" color="$primary">
+          <Text fontFamily="$body" fontSize="$5" fontWeight="600" color="$textPrimary">
             Todavía no hay eventos
           </Text>
-          <Text fontFamily="$body" fontSize="$3" fontWeight="400" color="$primary">
+          <Text fontFamily="$body" fontSize="$3" fontWeight="400" color="$textPrimary">
             Cargá el primer evento de este animal —un pesaje, su condición corporal o una
             observación— y va a aparecer acá arriba.
           </Text>

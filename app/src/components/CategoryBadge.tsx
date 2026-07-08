@@ -1,7 +1,8 @@
 // CategoryBadge — pill de categoría del animal (capa de identidad RAFAQ, spec 02/09 fix-loop C2).
 //
-// FIRMA VISUAL de RAFAQ: fondo $greenLight + texto $primary (verde botella), el MISMO lenguaje que
-// la pill activa del bottom-nav (NavTabIcon: ícono $primary sobre $greenLight). Reusable a través de
+// FIRMA VISUAL de RAFAQ: fondo $greenLight + texto $textPrimary (casi-negro, recipe B §2.1 — era
+// $primary/#1e5a3e sobre $greenLight, 4.55:1 ilegible al sol). Mismo FONDO que la pill activa del
+// bottom-nav (NavTabIcon: ícono $primary sobre $greenLight — ahí es ícono, pasa 3:1). Reusable a través de
 // la ficha (hero), la fila de la lista (AnimalRow) y, a futuro, C3 (ficha completa) — base de la
 // "capa de identidad" que pide el fix-loop. Da color y personalidad donde antes había una etiqueta
 // neutra en gris (genérico).
@@ -62,7 +63,7 @@ export function CategoryBadge({ label, manual = false, size = 'sm', code }: Cate
           fontFamily="$body"
           fontSize={isMd ? '$4' : '$2'}
           fontWeight="600"
-          color={isCut ? '$cutText' : '$primary'}
+          color={isCut ? '$cutText' : '$textPrimary'}
           numberOfLines={1}
         >
           {trimmed}
@@ -74,7 +75,7 @@ export function CategoryBadge({ label, manual = false, size = 'sm', code }: Cate
             width={isMd ? 6 : 5}
             height={isMd ? 6 : 5}
             borderRadius="$pill"
-            backgroundColor={isCut ? '$cutText' : '$primary'}
+            backgroundColor={isCut ? '$cutText' : '$textPrimary'}
           />
         ) : null}
       </XStack>

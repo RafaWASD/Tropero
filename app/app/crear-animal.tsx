@@ -1726,7 +1726,7 @@ function BreedPickerTrigger({
               justifyContent="center"
               flexShrink={0}
             >
-              <Text fontFamily="$body" fontSize="$3" lineHeight="$3" fontWeight="700" color="$primary" numberOfLines={1}>
+              <Text fontFamily="$body" fontSize="$3" lineHeight="$3" fontWeight="700" color="$textPrimary" numberOfLines={1}>
                 {breedLabel.senasaCode}
               </Text>
             </View>

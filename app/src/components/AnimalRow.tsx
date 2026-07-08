@@ -271,7 +271,7 @@ function ReproStatusChip({ status }: { status: ReproStatus }) {
   const tier = reproChipTier(status);
   // Tokens por tier (sin hardcode): good=relleno verde; attn=outline ámbar; neutral=outline neutro.
   const bg = tier === 'good' ? '$greenLight' : '$surface';
-  const textColor = tier === 'good' ? '$primary' : tier === 'attn' ? '$amber' : '$textMuted';
+  const textColor = tier === 'good' ? '$textPrimary' : tier === 'attn' ? '$amber' : '$textMuted';
   const borderColor = tier === 'attn' ? '$amber' : '$divider';
   const borderWidth = tier === 'good' ? 0 : 1;
   return (

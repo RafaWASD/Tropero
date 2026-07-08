@@ -140,13 +140,14 @@ export function AnimalSummary({ rows, onEdit, onConfirm, preview, loteName, onOp
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
 // BANNER de PREVIEW de TRANSICIÓN DE CATEGORÍA (R8.4) — el operario VE el cambio que el server aplicará
 // al sincronizar, ANTES de subir (display-only; el server es la verdad). Es un BLOQUE destacado (NO una
-// fila tappable): "Categoría: <de> → <a>" + "Se actualiza al sincronizar." Acento $primary/$greenLight
-// (es una buena noticia, no error). Tokens, cero hardcode (ADR-023 §4). Recorte de descendentes: ambos
+// fila tappable): "Categoría: <de> → <a>" + "Se actualiza al sincronizar." Fondo $greenLight + texto
+// $textPrimary (cartel INFO → recipe B §2.1, legibilidad al sol — decisión Raf; era $primary sobre
+// $greenLight, 4.55:1). Tokens, cero hardcode (ADR-023 §4). Recorte de descendentes: ambos
 // Text con heading o numberOfLines llevan lineHeight matching ("preñada" lleva ñ/p/q descendentes).
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
 function CategoryPreviewBanner({ preview }: { preview: CategoryTransitionPreview }) {
   const arrow = getTokenValue('$navIcon', 'size');
-  const primary = getTokenValue('$primary', 'color');
+  const textPrimary = getTokenValue('$textPrimary', 'color');
   return (
     <YStack
       testID="summary-category-preview"
@@ -159,15 +160,15 @@ function CategoryPreviewBanner({ preview }: { preview: CategoryTransitionPreview
       {...labelA11y(Platform.OS, `Categoría: ${preview.fromName} pasa a ${preview.toName}. Se actualiza al sincronizar.`)}
     >
       <XStack alignItems="center" flexWrap="wrap" gap="$2">
-        <Text fontFamily="$body" fontSize="$5" lineHeight="$5" fontWeight="600" color="$primary" numberOfLines={2}>
+        <Text fontFamily="$body" fontSize="$5" lineHeight="$5" fontWeight="600" color="$textPrimary" numberOfLines={2}>
           Categoría: {preview.fromName}
         </Text>
-        <ArrowRight size={arrow} color={primary} strokeWidth={2.5} />
-        <Text fontFamily="$body" fontSize="$5" lineHeight="$5" fontWeight="700" color="$primary" numberOfLines={2}>
+        <ArrowRight size={arrow} color={textPrimary} strokeWidth={2.5} />
+        <Text fontFamily="$body" fontSize="$5" lineHeight="$5" fontWeight="700" color="$textPrimary" numberOfLines={2}>
           {preview.toName}
         </Text>
       </XStack>
-      <Text fontFamily="$body" fontSize="$3" lineHeight="$3" fontWeight="500" color="$primary" numberOfLines={2}>
+      <Text fontFamily="$body" fontSize="$3" lineHeight="$3" fontWeight="500" color="$textPrimary" numberOfLines={2}>
         Se actualiza al sincronizar.
       </Text>
     </YStack>

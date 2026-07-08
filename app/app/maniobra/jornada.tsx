@@ -541,14 +541,14 @@ export default function JornadaWizardScreen() {
           {presetSaved ? (
             <View
               testID="preset-saved-toast"
-              backgroundColor="$greenLight"
+              backgroundColor="$primary"
               borderRadius="$card"
               paddingHorizontal="$4"
               paddingVertical="$3"
               alignItems="center"
               {...labelA11y(Platform.OS, 'Rutina guardada')}
             >
-              <Text fontFamily="$body" fontSize="$4" lineHeight="$4" fontWeight="700" color="$primary" numberOfLines={1}>
+              <Text fontFamily="$body" fontSize="$4" lineHeight="$4" fontWeight="700" color="$white" numberOfLines={1}>
                 Rutina guardada
               </Text>
             </View>
