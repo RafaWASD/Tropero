@@ -1,8 +1,10 @@
 // e2e/captures/parto-rodeo-caravana.capture.ts — CAPTURE FILE del Gate 2.5 (ADR-029) para el delta
-// "PARTO: RODEO + CARAVANA VISUAL DEL TERNERO" (#4/#1a, spec 02, RPRC.1/2/3). Recorre el form de Parto
-// (agregar-evento, eventType='birth') y saca CAPTURAS NOMBRADAS de cada estado clave a
-// `e2e/captures/__shots__/parto-rodeo-caravana/NN-estado.png` para que el leader las vete (design-review)
-// y se las muestre a Raf en la Puerta 2 con evidencia visual.
+// "PARTO: RODEO DEL PARTO" (#4, spec 02, RPRC.1). Recorre el form de Parto (agregar-evento, eventType='birth')
+// y saca CAPTURAS NOMBRADAS de los estados del RODEO DEL PARTO (a nivel camada: el picker, la leyenda
+// "(Mismo rodeo que la madre)", el cambio de rodeo) a `e2e/captures/__shots__/parto-rodeo-caravana/NN-estado.png`
+// para que el leader las vete (design-review) y se las muestre a Raf en la Puerta 2 con evidencia visual.
+// La caravana VISUAL del ternero (idv) YA NO se captura acá: migró a ser POR CRÍA (delta
+// parto-caravana-visual-por-ternero) y su captura vive en parto-caravana-visual-por-ternero.capture.ts.
 //
 // ⚠️ NO es un test de regresión (.capture.ts, no .spec.ts → NO corre en `pnpm e2e`; se dispara a mano con
 // --config playwright.capture.config.ts, viewport mobile real 412×915). La RED DE REGRESIÓN del delta vive
@@ -19,13 +21,14 @@
 // Salida: app/e2e/captures/__shots__/parto-rodeo-caravana/  (gitignoreado — app/.gitignore + ADR-029 §Artefactos).
 //
 // Estados capturados (RPRC.7.1):
-//   01-parto-single-rodeo-idv  — 1 ternero: picker de rodeo + leyenda "(Mismo rodeo que la madre)" + campo idv.
-//   02-parto-mellizos-sin-idv  — 2 terneros: SIN el campo idv + la nota de mellizos.
-//   03-rodeo-picker-open       — picker de rodeo abierto (rodeos del mismo sistema).
-//   04-rodeo-cambiado          — rodeo cambiado a "Destete" → la leyenda desaparece.
-//   (05 validación inline — N/A en este delta: el rodeo siempre es válido por preselección/filtro y el idv
-//    solo se sanitiza [sin rechazo client-side de duplicado/formato; la unicidad la valida el server]. No se
-//    agrega validación client-side nueva → no hay estado de error inline propio que capturar, design §8.4.)
+//   01-parto-single-rodeo          — 1 ternero: picker de "Rodeo del parto" + leyenda "(Mismo rodeo que la madre)".
+//   02-parto-mellizos-rodeo-camada — 2 terneros (mellizos): el "Rodeo del parto" NO se duplica por cría — sigue
+//                                    habiendo UN SOLO picker a nivel camada + la leyenda sigue visible (RPRC.1).
+//   03-rodeo-picker-open           — picker de rodeo abierto (rodeos del mismo sistema).
+//   04-rodeo-cambiado              — rodeo cambiado a "Destete" → la leyenda desaparece.
+//   (El campo idv del ternero NO se captura acá: migró a POR CRÍA — ver parto-caravana-visual-por-ternero.capture.ts.)
+//   (05 validación inline — N/A en este delta: el rodeo siempre es válido por preselección/filtro. No se agrega
+//    validación client-side nueva → no hay estado de error inline propio que capturar, design §8.4.)
 
 import path from 'node:path';
 
@@ -61,7 +64,7 @@ async function shot(page: Page, name: string): Promise<void> {
 // Campo con 2 rodeos del MISMO sistema (cría) → el picker del parto ofrece "Destete" como destino editable.
 // La madre va al rodeo "general" → la leyenda "(Mismo rodeo que la madre)" arranca visible y desaparece al
 // elegir "Destete".
-test('captura delta parto-rodeo-caravana: rodeo del parto + caravana visual (single / mellizos / picker)', async ({
+test('captura delta parto-rodeo-caravana: rodeo del parto a nivel camada (single / mellizos / picker)', async ({
   page,
 }) => {
   test.setTimeout(210_000);
@@ -89,26 +92,24 @@ test('captura delta parto-rodeo-caravana: rodeo del parto + caravana visual (sin
   await page.getByRole('button', { name: 'Parto', exact: true }).click();
   await expect(page.getByText('Ternero 1', { exact: true })).toBeVisible({ timeout: 20_000 });
 
-  // ── 01 — parto SINGLE: picker de rodeo + leyenda + campo de caravana visual. ──
+  // ── 01 — parto SINGLE: picker de "Rodeo del parto" (a nivel camada) + leyenda "(Mismo rodeo que la madre)".
+  //         El campo idv del ternero vive DENTRO del CalfBlock y su captura es del capture nuevo (POR CRÍA):
+  //         acá NO se asierta ni se tipea idv, este capture es solo del RODEO del parto. ──
   await expect(page.getByText('Rodeo del parto', { exact: true })).toBeVisible();
   await expect(page.getByText('(Mismo rodeo que la madre)', { exact: true })).toBeVisible();
-  const idvField = page.getByLabel('Caravana visual del ternero (opcional)', { exact: true });
-  await expect(idvField).toBeVisible();
-  // Tipear una caravana visual (muestra el campo con valor, no vacío).
-  await idvField.fill(`0${Date.now().toString().slice(-6)}`);
-  await shot(page, '01-parto-single-rodeo-idv');
+  await shot(page, '01-parto-single-rodeo');
 
-  // ── 02 — parto MELLIZOS: agregar un 2º ternero → SIN campo idv + la nota de mellizos. ──
+  // ── 02 — parto MELLIZOS: agregar un 2º ternero → el "Rodeo del parto" NO se duplica por cría: sigue habiendo
+  //         UN SOLO picker a nivel camada (RPRC.1) y la leyenda sigue visible. (El idv es POR CRÍA → no se asierta.) ──
   await page.getByRole('button', { name: 'Agregar otro ternero', exact: true }).click();
   await expect(page.getByText('Ternero 2', { exact: true })).toBeVisible();
-  await expect(page.getByLabel('Caravana visual del ternero (opcional)', { exact: true })).toHaveCount(0);
-  await expect(page.getByText(/Las caravanas visuales de mellizos se asignan después/)).toBeVisible();
-  await shot(page, '02-parto-mellizos-sin-idv');
+  await expect(page.getByRole('button', { name: 'Elegir rodeo del parto' })).toHaveCount(1);
+  await expect(page.getByText('(Mismo rodeo que la madre)', { exact: true })).toBeVisible();
+  await shot(page, '02-parto-mellizos-rodeo-camada');
 
   // Volver a SINGLE (quitar el 2º ternero) para capturar el picker de rodeo abierto/cambiado.
   await page.getByRole('button', { name: 'Quitar ternero 2', exact: true }).click();
   await expect(page.getByText('Ternero 2', { exact: true })).toHaveCount(0);
-  await expect(page.getByLabel('Caravana visual del ternero (opcional)', { exact: true })).toBeVisible();
 
   // ── 03 — picker de rodeo ABIERTO: lista de rodeos del mismo sistema (incluye "Destete") + leyenda. ──
   await page.getByRole('button', { name: 'Elegir rodeo del parto' }).click();
