@@ -44,7 +44,9 @@ Dos correcciones del testeo en vivo, **ambas en el form de Parto** (`app/app/agr
 
 ## RPRC.2 — Caravana visual del ternero al parto: campo idv solo single-calf (#1a / D2)
 
-**RPRC.2.1** Mientras la camada tenga **exactamente 1 ternero**, el sistema deberá mostrar un campo **opcional** de **caravana visual (idv)** del ternero.
+> **⚠️ SUPERADA (2026-07-07) por el delta `parto-caravana-visual-por-ternero` (PCV):** la caravana visual (idv) del ternero al parto pasó a ser **POR CRÍA** (mellizos incluidos), simétrica con la electrónica. En consecuencia quedan superadas **RPRC.2.1** (el campo idv ya no vive a nivel camada sino DENTRO de cada `CalfBlock`), **RPRC.2.3** (con mellizos SÍ se muestra un campo idv por cría — ya no se oculta), **RPRC.2.4** (la nota "se asignan después" se ELIMINÓ), **RPRC.3.2** y **RPRC.3.3** (el parto ya no manda un `calfIdv` escalar single-calf: manda `calf_idv` POR CRÍA en `p_calves`; el `p_calf_idv` top-level quedó exclusivo de cría al pie #15). El RPC `register_birth` (0121) computa el idv por cría con `coalesce(calf_idv del elemento, p_calf_idv top-level)`. RPRC.2.2/2.5 (sanitización + tag electrónico por cría) y RPRC.1 (rodeo escalar a nivel camada) siguen intactas. Deployado + verificado (animal+SIGSA+e2e verdes). Ver `{requirements,design}-parto-caravana-visual-por-ternero.md` (`PCV.<n>`).
+
+**RPRC.2.1** ~~Mientras la camada tenga **exactamente 1 ternero**, el sistema deberá mostrar un campo **opcional** de **caravana visual (idv)** del ternero.~~ (SUPERADA — ver nota de arriba: el campo idv es ahora por cría, dentro de cada `CalfBlock`.)
 
 **RPRC.2.2** El sistema deberá **sanitizar en vivo** el input de caravana visual con `sanitizeIdvInput` (reúso de #15 / alta), sin clamp que oculte un error de tipeo.
 
