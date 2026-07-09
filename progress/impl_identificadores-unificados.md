@@ -135,6 +135,66 @@ CÓDIGO a `visual_id_alt`/`visualIdAlt`/`visualId` en `app/` (solo comentarios q
 - `requirements.md`: sin reescritura de EARS (el *qué* no cambió; el *cómo* de la ficha se documenta en design §10 as-built).
 
 ## Pendiente (fuera de este pass)
-- **Fase A** (migración `0122` + RPC + `assert_custom_value_valid`) — otro build.
 - **Fase E** (E2E + capturas Gate 2.5) — el leader corre el capture + veta el diseño. El feature TOCA UI → el `app/e2e/captures/identificadores-unificados.capture.ts` es deliverable de Fase E (E5), NO de este pass (instrucción explícita: "NO corras e2e:build/suite"). Documentado como N/A-en-este-pass.
 - **Optimización potencial** (no bloqueante): el enriquecimiento apodo/apodo_enabled es per-row correlado (≤200 filas MVP, OK). Design §8 ofrece cachear el set de rodeos-con-apodo si pesa.
+
+---
+
+## Fase E backend (A7 + A8) — suites `supabase/tests/` sobre el remoto YA MIGRADO (0122)
+
+**Contexto**: la migración `0122` YA está desplegada + verificada por el leader. Este pass actualiza/extiende las
+suites backend al schema NUEVO (sin `visual_id_alt`, sin trigger de completitud, `create_animal` 19 args, apodo
+server-validado) y las corre VERDES contra el remoto. NO se tocó `supabase/migrations/**` ni frontend.
+
+### Barrido de `visual_id_alt` / `p_visual_id_alt` / `visualAlt` (schema nuevo)
+- **Helpers `createAnimal` (INSERT directo a `animal_profiles`)** de `animal`/`reports`/`maneuvers`/`operaciones_rodeo`/
+  `puesta-en-servicio`: quitado el param `visualAlt` + la línea `profilePayload.visual_id_alt = visualAlt` (ningún
+  caller lo pasaba). El perfil sin idv/tag ahora persiste (trigger de completitud dropeado).
+- **`sigsa`**: `visualAlt` era el identificador de ~25 fixtures → **remapeado a `idv`** (la caravana visual es ahora
+  el idv alfanumérico). Helper: quitado `visualAlt`; callers `visualAlt:` → `idv:`; el insert directo del perfil
+  destino (T5g) `visual_id_alt:` → `idv:`. Sin colisiones de idv (verificado: 72/72 verde; SIGSA no asserta idv).
+- **`import`**: `makeRow` usaba `visual_id_alt` como identidad mínima → **remapeado a `idv`** (el `import_rodeo_bulk`
+  re-creado lee `v_row->>'idv'`, ya no `visual_id_alt`). Callers `{ visual_id_alt: X }` → `{ idv: X }`; los filtros
+  `.like('visual_id_alt', …)` → `.like('idv', …)`; el `.select` de verificación idem.
+- **Llamadas al RPC `create_animal`**: son named-param (objeto), NUNCA pasaban `p_visual_id_alt` → compatibles con la
+  firma nueva de 19 args sin tocarlas.
+- Grep final: CERO referencias de código a `visual_id_alt`/`visualAlt`/`p_visual_id_alt` (solo comentarios que explican la eliminación).
+
+### A7 — `register_birth` + mono-ternero (trace `IDU.<n> → archivo:test`)
+- **IDU.1.4 / IDU.2.2** (cría both-null persiste sin 23514 + `birth_calves` creada) → `animal/run.cjs::IDU.1.4/2.2: ternero sin idv ni tag → persiste con idv/tag NULL (sin 23514) + birth_calves creada`.
+- **IDU.2.2** (mellizos idv distinto siguen OK) → `animal/run.cjs::PCV.5.1/5.2` (idv per-cría, tag null).
+- **IDU.1.6** (idv duplicado → 23505 + rollback atómico) → `animal/run.cjs::PCV.5.3` (mellizos mismo idv; idv del rebaño).
+- **IDU.2.2** (mono-ternero por trigger `tg_reproductive_events_create_calf`, INSERT directo de `reproductive_events` con `calf_sex`, sin tag → cría persiste) → `animal/run.cjs::T2.7 ternero al pie` (sin tag → idv NULL; con tag → idv NULL).
+- **IDU.1.4** (regresión mellizos sin caravana) → `animal/run.cjs::PCV.4.6/IDU.1.4`.
+
+### A8 — resto de RPC + apodo server-side (trace)
+- **IDU.1.4 / IDU.2.5** (`create_animal` 19 args, 0 identificadores persiste) → `animal/run.cjs::caso 8 (IDU.1.4): create_animal sin idv ni tag → persiste con idv/tag NULL`.
+- **IDU.1.4 / IDU.2.5** (alta directa sin identificadores persiste) → `animal/run.cjs::T2.2 Caso 3` (reemplaza el viejo "solo visual" + "sin ninguno → 23514") + `T2.14 Caso 4`.
+- **IDU.2.5** (`import_rodeo_bulk` sin `visual_id_alt`, importa por `idv`) → `import/run.cjs::T2.5 R8.1/R8.2/R8.4/SEC-12B` (todo el bloque RPC).
+- **IDU.2.5** (`transfer_animal` sin leer/escribir `visual_id_alt`, historia preservada) → `animal/run.cjs::spec 11 transfer_animal` (T2.1 camino feliz — el perfil destino ya no proyecta la columna).
+- **IDU.2.5** (reportes `establishment_overdue_doses`/`establishment_unweighed` retornan sin la columna, leen `idv`) → `reports/run.cjs::TR.8` (`rowA1.idv`) + `TR.9`.
+- **IDU.4.3 / IDU.4.5** (búsqueda por substring sobre `idv`, no `visual_id_alt`; anti-injection) → `animal/run.cjs::T2.11 búsqueda` + `R8.1 .ilike(col, pattern) parametrizado`.
+- **IDU.5.1b** (apodo server-autoritativo: ≤15 + charset alfanum/ñ/tildes/espacio/guion; `#`/`!`/emoji → 23514) → `custom/run.cjs::(p) delta #2 NOMBRE/APODO` (bloque IDU.5.1b agregado; `assert_custom_value_valid` vía trigger `custom_attributes_gating`).
+- **IDU.2.1** (trigger de completitud `animal_profiles_identity_check` ELIMINADO — ya no está entre los BEFORE) → `operaciones_rodeo/run.cjs::T-DB.4(f)` (assert `idx(...)===-1`).
+
+### Resultado de las suites (remoto migrado, verde)
+| suite | tests | resultado |
+|---|---|---|
+| `animal` | 139 | ✅ pass |
+| `sigsa` | 72 | ✅ pass |
+| `import` | 25 | ✅ pass |
+| `reports` | 16 | ✅ pass |
+| `custom` | 20 | ✅ pass |
+| `maneuvers` | 14 | ✅ pass |
+| `operaciones_rodeo` | 22 | ✅ pass (T-DB.4(f) actualizado; T-DB.9/T-DB.10 fueron flake de rate-limit del Management API en la 1ª corrida, verde al reintentar) |
+| `puesta-en-servicio` | 11 | ✅ pass |
+| `scrotal` | 12 | ✅ pass (regresión — inserta en `animal_profiles`) |
+| `sync_streams` | 25 | ✅ pass (regresión) |
+
+### Autorrevisión adversarial (Fase E backend)
+- **¿Quedó algún `visual_id_alt` vivo?** No — grep final: solo comentarios. Ningún `.select`/`.like`/insert/param lo referencia.
+- **¿Algún `create_animal` con 20 args?** No — todas las llamadas son named-param sin `p_visual_id_alt`; la firma nueva (19) las acepta.
+- **¿Los asserts prueban el comportamiento NUEVO?** Sí — cría both-null PERSISTE (no fallback, no 23514) + `birth_calves` creada; create_animal 0-identificadores persiste; mono-ternero por trigger persiste; apodo server-rechaza >15/charset. Se ELIMINÓ el viejo assert "sin identificador → 23514" (T2.2) y "visual_id_alt = fallback" (parto) y "visual_id_alt editable" (T2.14) y "identity_check existe" (T-DB.4(f)).
+- **Falsos verdes**: el 23505 de idv duplicado sigue verificando el reject real + rollback (0/0 eventos/terneros). El apodo-charset verifica el reject con errcode 23514 (no un OK espurio). El mono-ternero verifica que la cría SÍ se crea (calf_id no null + categoría).
+- **Multi-tenant**: SIGSA idv remapeado NO cruza campos (idv unique per-est; ests frescos por corrida). `establishment_id` siempre del contexto, nunca hardcode.
+- **Flake vs regresión**: T-DB.9/T-DB.10 (Management API) fallaron 1 vez con `adminQuery HTTP` (rate-limit, no tocan `visual_id_alt`) → reintento verde. T-DB.4(f) fue regresión REAL (trigger dropeado) → corregido, no reintentado a ciegas.

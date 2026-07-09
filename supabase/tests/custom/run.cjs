@@ -908,6 +908,39 @@ test('custom (M5) suite — spec 03', async (t) => {
       assert.notEqual(badNum.error, null, 'apodo con value numérico debe rechazar (ui_component=text)');
       assert.match(pgcode(badNum.error), /23514/);
     }
+
+    // IDU.5.1b (M1 de Gate 1): el apodo tiene formato SERVER-AUTORITATIVO (≤15 + charset alfanum + ñ/tildes +
+    // espacio + guion). assert_custom_value_valid (0122) lo enforça vía el trigger custom_attributes_gating,
+    // NO solo el sanitizer de cliente (attacker-controlled). data_key='apodo'.
+    {
+      // (a) apodo con ñ/tildes/espacio/guion, ≤15 → OK.
+      const okAccents = await upsertAttribute(clientA, { animalProfileId: animA.profile.id, fieldId: apodoId, value: 'Toño-José Ñu' });
+      assert.equal(okAccents.error, null, `apodo con ñ/tildes/espacio/guion (≤15) debe validar (IDU.5.1b): ${okAccents.error && okAccents.error.message}`);
+
+      // (b) apodo de >15 caracteres (todo alfanumérico) → 23514 por LARGO.
+      const tooLong = await upsertAttribute(clientA, { animalProfileId: animA.profile.id, fieldId: apodoId, value: 'ManchadaLaLinda1' }); // 16 chars
+      assert.notEqual(tooLong.error, null, 'apodo de >15 debe rechazar (IDU.5.1b)');
+      assert.match(pgcode(tooLong.error), /23514/, 'apodo >15 → 23514');
+
+      // (c) apodo con carácter fuera del charset (#) → 23514.
+      const badHash = await upsertAttribute(clientA, { animalProfileId: animA.profile.id, fieldId: apodoId, value: 'Toño#' });
+      assert.notEqual(badHash.error, null, "apodo con '#' debe rechazar (charset, IDU.5.1b)");
+      assert.match(pgcode(badHash.error), /23514/, "apodo con '#' → 23514");
+
+      // (c-bis) apodo con '!' → 23514.
+      const badBang = await upsertAttribute(clientA, { animalProfileId: animA.profile.id, fieldId: apodoId, value: 'Hey!' });
+      assert.notEqual(badBang.error, null, "apodo con '!' debe rechazar (charset, IDU.5.1b)");
+      assert.match(pgcode(badBang.error), /23514/, "apodo con '!' → 23514");
+
+      // (c-ter) apodo con emoji → 23514 (carácter fuera del charset).
+      const badEmoji = await upsertAttribute(clientA, { animalProfileId: animA.profile.id, fieldId: apodoId, value: 'Vaca😀' });
+      assert.notEqual(badEmoji.error, null, 'apodo con emoji debe rechazar (charset, IDU.5.1b)');
+      assert.match(pgcode(badEmoji.error), /23514/, 'apodo con emoji → 23514');
+
+      // (d) apodo simple válido (guion + dígitos) → OK (control positivo tras los rechazos: la fila sigue upsert-able).
+      const okSimple = await upsertAttribute(clientA, { animalProfileId: animA.profile.id, fieldId: apodoId, value: 'La-Colorada 3' });
+      assert.equal(okSimple.error, null, `apodo válido (guion + dígito) debe validar: ${okSimple.error && okSimple.error.message}`);
+    }
   });
 
   // ---- cleanup ----------------------------------------------------------

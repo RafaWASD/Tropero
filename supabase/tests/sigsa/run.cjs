@@ -186,7 +186,7 @@ async function createRodeo(client, { establishmentId, name }) {
 // breed_id, breed (texto libre), tag y birth_date para los tests de export/herencia.
 async function createAnimal(client, {
   establishmentId, rodeoId, systemId, sex = 'female', categoryCode = null,
-  tag = null, idv = null, visualAlt = null, birthDate = null, breed = null, breedId = null,
+  tag = null, idv = null, birthDate = null, breed = null, breedId = null,
 }) {
   const { speciesId } = await lookupSpeciesSystem(client, 'bovino', 'cria');
   const animalId = crypto.randomUUID();
@@ -203,7 +203,8 @@ async function createAnimal(client, {
     rodeo_id: rodeoId, category_id: catId, status: 'active',
   };
   if (idv) profilePayload.idv = idv;
-  if (visualAlt) profilePayload.visual_id_alt = visualAlt;
+  // IDU: visual_id_alt eliminado (0122). La caravana visual es ahora el idv alfanumérico; los fixtures que
+  // antes usaban visualAlt como identificador ahora pasan idv (ver callers). Un perfil sin idv/tag persiste.
   if (breed) profilePayload.breed = breed;
   if (breedId) profilePayload.breed_id = breedId;
   const { error: pErr } = await client.from('animal_profiles').insert(profilePayload);
@@ -363,7 +364,7 @@ test('spec 08 — T2 animal_profiles.breed_id (FK + best-effort + herencia mono)
 
   // T2 (a): columna existe y acepta NULL.
   await t.test('T2(a) R1.4: animal_profiles.breed_id existe y acepta NULL', async () => {
-    const r = await createAnimal(client, { establishmentId: est, rodeoId: rodeo.id, systemId: rodeo.systemId, visualAlt: `${RUN_TAG}_null` });
+    const r = await createAnimal(client, { establishmentId: est, rodeoId: rodeo.id, systemId: rodeo.systemId, idv: `${RUN_TAG}_null` });
     assert.equal(r.error, undefined, r.error && r.error.message);
     const { data } = await admin.from('animal_profiles').select('breed_id').eq('id', r.profileId).single();
     assert.equal(data.breed_id, null, 'breed_id debe poder ser NULL');
@@ -371,7 +372,7 @@ test('spec 08 — T2 animal_profiles.breed_id (FK + best-effort + herencia mono)
 
   // T2 (b): acepta un breed_id válido.
   await t.test('T2(b) R1.4: animal_profiles acepta un breed_id válido del catálogo', async () => {
-    const r = await createAnimal(client, { establishmentId: est, rodeoId: rodeo.id, systemId: rodeo.systemId, visualAlt: `${RUN_TAG}_valid`, breedId: aaId });
+    const r = await createAnimal(client, { establishmentId: est, rodeoId: rodeo.id, systemId: rodeo.systemId, idv: `${RUN_TAG}_valid`, breedId: aaId });
     assert.equal(r.error, undefined, r.error && r.error.message);
     const { data } = await admin.from('animal_profiles').select('breed_id').eq('id', r.profileId).single();
     assert.equal(data.breed_id, aaId, 'breed_id debe haberse guardado');
@@ -379,7 +380,7 @@ test('spec 08 — T2 animal_profiles.breed_id (FK + best-effort + herencia mono)
 
   // T2 (c): rechaza un breed_id inexistente (FK).
   await t.test('T2(c) R1.4: rechaza un breed_id que no existe en breed_catalog (FK)', async () => {
-    const r = await createAnimal(client, { establishmentId: est, rodeoId: rodeo.id, systemId: rodeo.systemId, visualAlt: `${RUN_TAG}_badfk`, breedId: crypto.randomUUID() });
+    const r = await createAnimal(client, { establishmentId: est, rodeoId: rodeo.id, systemId: rodeo.systemId, idv: `${RUN_TAG}_badfk`, breedId: crypto.randomUUID() });
     assert.notEqual(r.error, undefined, 'un breed_id inexistente debe violar la FK');
   });
 
@@ -388,8 +389,8 @@ test('spec 08 — T2 animal_profiles.breed_id (FK + best-effort + herencia mono)
   // sentencia best-effort vía service_role sobre filas con breed texto libre y breed_id NULL.
   // (d): 'Aberdeen Angus' → AA; (e): 'texto_raro_sin_match' → NULL.
   await t.test('T2(d/e) R1.5: best-effort matchea por nombre normalizado; sin match queda NULL', async () => {
-    const rMatch = await createAnimal(client, { establishmentId: est, rodeoId: rodeo.id, systemId: rodeo.systemId, visualAlt: `${RUN_TAG}_be_match`, breed: 'aberdeen angus' });
-    const rNoMatch = await createAnimal(client, { establishmentId: est, rodeoId: rodeo.id, systemId: rodeo.systemId, visualAlt: `${RUN_TAG}_be_nomatch`, breed: 'texto_raro_sin_match' });
+    const rMatch = await createAnimal(client, { establishmentId: est, rodeoId: rodeo.id, systemId: rodeo.systemId, idv: `${RUN_TAG}_be_match`, breed: 'aberdeen angus' });
+    const rNoMatch = await createAnimal(client, { establishmentId: est, rodeoId: rodeo.id, systemId: rodeo.systemId, idv: `${RUN_TAG}_be_nomatch`, breed: 'texto_raro_sin_match' });
     assert.equal(rMatch.error, undefined, rMatch.error && rMatch.error.message);
     assert.equal(rNoMatch.error, undefined, rNoMatch.error && rNoMatch.error.message);
 
@@ -411,7 +412,7 @@ test('spec 08 — T2 animal_profiles.breed_id (FK + best-effort + herencia mono)
   // T2 (f): ternero al pie (camino MONO) hereda breed_id de la madre.
   await t.test('T2(f) R1.7: ternero al pie (mono) hereda breed_id de la madre', async () => {
     // Madre con breed_id = AA. Insertar un evento birth con calf_sex → dispara el trigger mono.
-    const mother = await createAnimal(client, { establishmentId: est, rodeoId: rodeo.id, systemId: rodeo.systemId, visualAlt: `${RUN_TAG}_mother_mono`, breedId: aaId });
+    const mother = await createAnimal(client, { establishmentId: est, rodeoId: rodeo.id, systemId: rodeo.systemId, idv: `${RUN_TAG}_mother_mono`, breedId: aaId });
     assert.equal(mother.error, undefined, mother.error && mother.error.message);
     const { error: bErr } = await client.from('reproductive_events').insert({
       animal_profile_id: mother.profileId,
@@ -432,7 +433,7 @@ test('spec 08 — T2 animal_profiles.breed_id (FK + best-effort + herencia mono)
 
   // T2 (f-bis): madre SIN breed_id → ternero nace con breed_id NULL (R1.7 caso null).
   await t.test('T2(f-bis) R1.7: madre sin breed_id → ternero (mono) nace con breed_id NULL', async () => {
-    const mother = await createAnimal(client, { establishmentId: est, rodeoId: rodeo.id, systemId: rodeo.systemId, visualAlt: `${RUN_TAG}_mother_mono_null` });
+    const mother = await createAnimal(client, { establishmentId: est, rodeoId: rodeo.id, systemId: rodeo.systemId, idv: `${RUN_TAG}_mother_mono_null` });
     const { error: bErr } = await client.from('reproductive_events').insert({
       animal_profile_id: mother.profileId, event_type: 'birth',
       event_date: new Date().toISOString().slice(0, 10), calf_sex: 'male',
@@ -465,7 +466,7 @@ test('spec 08 — T3 reproductive_events.breed_id (FK + herencia mellizos)', asy
   // T3 (a): columna existe y acepta NULL.
   await t.test('T3(a) R1.6: reproductive_events.breed_id existe y acepta NULL', async () => {
     // Un evento service (sin parto) — debe poder existir con breed_id NULL.
-    const animal = await createAnimal(client, { establishmentId: est, rodeoId: rodeo.id, systemId: rodeo.systemId, visualAlt: `${RUN_TAG}_re_null` });
+    const animal = await createAnimal(client, { establishmentId: est, rodeoId: rodeo.id, systemId: rodeo.systemId, idv: `${RUN_TAG}_re_null` });
     const { error } = await client.from('reproductive_events').insert({
       animal_profile_id: animal.profileId, event_type: 'service',
       event_date: new Date().toISOString().slice(0, 10), service_type: 'natural',
@@ -478,7 +479,7 @@ test('spec 08 — T3 reproductive_events.breed_id (FK + herencia mellizos)', asy
 
   // T3 (b): acepta un breed_id válido (FK a breed_catalog).
   await t.test('T3(b) R1.6: reproductive_events acepta un breed_id válido / rechaza inexistente (FK)', async () => {
-    const animal = await createAnimal(client, { establishmentId: est, rodeoId: rodeo.id, systemId: rodeo.systemId, visualAlt: `${RUN_TAG}_re_fk` });
+    const animal = await createAnimal(client, { establishmentId: est, rodeoId: rodeo.id, systemId: rodeo.systemId, idv: `${RUN_TAG}_re_fk` });
     // válido (vía service_role, la columna no tiene path de cliente en MVP pero la FK debe validar)
     const { error: okErr } = await admin.from('reproductive_events').insert({
       animal_profile_id: animal.profileId, event_type: 'tacto',
@@ -497,7 +498,7 @@ test('spec 08 — T3 reproductive_events.breed_id (FK + herencia mellizos)', asy
   // del design es un NO-OP documentado. Verificamos que NO existe esa columna (anti-regresión: si
   // alguien la agrega, este test obliga a revisar la migración 0109).
   await t.test('T3(c) R1.6 [reconciliado]: reproductive_events NO tiene columna breed (best-effort = no-op)', async () => {
-    const animal = await createAnimal(client, { establishmentId: est, rodeoId: rodeo.id, systemId: rodeo.systemId, visualAlt: `${RUN_TAG}_re_nobreed` });
+    const animal = await createAnimal(client, { establishmentId: est, rodeoId: rodeo.id, systemId: rodeo.systemId, idv: `${RUN_TAG}_re_nobreed` });
     // Intentar insertar `breed` (texto libre) debe fallar: la columna no existe.
     const { error } = await admin.from('reproductive_events').insert({
       animal_profile_id: animal.profileId, event_type: 'service',
@@ -508,7 +509,7 @@ test('spec 08 — T3 reproductive_events.breed_id (FK + herencia mellizos)', asy
 
   // T3 herencia mellizos: register_birth (2 terneros) → ambos heredan breed_id de la madre (R1.7).
   await t.test('T3 R1.7: register_birth (mellizos) → ambos terneros heredan breed_id de la madre', async () => {
-    const mother = await createAnimal(client, { establishmentId: est, rodeoId: rodeo.id, systemId: rodeo.systemId, visualAlt: `${RUN_TAG}_mother_twins`, breedId: hId });
+    const mother = await createAnimal(client, { establishmentId: est, rodeoId: rodeo.id, systemId: rodeo.systemId, idv: `${RUN_TAG}_mother_twins`, breedId: hId });
     const { data: birthId, error } = await client.rpc('register_birth', {
       p_mother_profile_id: mother.profileId,
       p_event_date: new Date().toISOString().slice(0, 10),
@@ -528,7 +529,7 @@ test('spec 08 — T3 reproductive_events.breed_id (FK + herencia mellizos)', asy
 
   // T3 herencia mellizos null: madre sin breed_id → terneros con breed_id NULL.
   await t.test('T3 R1.7: register_birth con madre sin breed_id → terneros con breed_id NULL', async () => {
-    const mother = await createAnimal(client, { establishmentId: est, rodeoId: rodeo.id, systemId: rodeo.systemId, visualAlt: `${RUN_TAG}_mother_twins_null` });
+    const mother = await createAnimal(client, { establishmentId: est, rodeoId: rodeo.id, systemId: rodeo.systemId, idv: `${RUN_TAG}_mother_twins_null` });
     const { data: birthId, error } = await client.rpc('register_birth', {
       p_mother_profile_id: mother.profileId,
       p_event_date: new Date().toISOString().slice(0, 10),
@@ -680,9 +681,9 @@ test('spec 08 — T5 sigsa_declarations (RLS, IDOR, declared_by forzado, UNIQUE)
     estB = await createEstablishmentAs(ownerClientB, `${RUN_TAG} sd estB`);
     rodeoB = await createRodeo(ownerClientB, { establishmentId: estB, name: `${RUN_TAG} sd rodeoB` });
 
-    profA1 = (await createAnimal(ownerClientA, { establishmentId: estA, rodeoId: rodeoA.id, systemId: rodeoA.systemId, tag: `032${Date.now().toString().slice(-12)}`, visualAlt: `${RUN_TAG}_a1` })).profileId;
-    profA2 = (await createAnimal(ownerClientA, { establishmentId: estA, rodeoId: rodeoA.id, systemId: rodeoA.systemId, visualAlt: `${RUN_TAG}_a2` })).profileId;
-    profB1 = (await createAnimal(ownerClientB, { establishmentId: estB, rodeoId: rodeoB.id, systemId: rodeoB.systemId, visualAlt: `${RUN_TAG}_b1` })).profileId;
+    profA1 = (await createAnimal(ownerClientA, { establishmentId: estA, rodeoId: rodeoA.id, systemId: rodeoA.systemId, tag: `032${Date.now().toString().slice(-12)}`, idv: `${RUN_TAG}_a1` })).profileId;
+    profA2 = (await createAnimal(ownerClientA, { establishmentId: estA, rodeoId: rodeoA.id, systemId: rodeoA.systemId, idv: `${RUN_TAG}_a2` })).profileId;
+    profB1 = (await createAnimal(ownerClientB, { establishmentId: estB, rodeoId: rodeoB.id, systemId: rodeoB.systemId, idv: `${RUN_TAG}_b1` })).profileId;
     assert.ok(profA1 && profA2 && profB1, 'setup: perfiles no creados');
   });
 
@@ -701,7 +702,7 @@ test('spec 08 — T5 sigsa_declarations (RLS, IDOR, declared_by forzado, UNIQUE)
   // T5 (c): field_operator NO puede INSERT.
   await t.test('T5(c) R3.5/R7.2: field_operator NO puede INSERT', async () => {
     // usar un perfil nuevo para no chocar con el UNIQUE de profA1/profA2 ya declarados
-    const profA3 = (await createAnimal(ownerClientA, { establishmentId: estA, rodeoId: rodeoA.id, systemId: rodeoA.systemId, visualAlt: `${RUN_TAG}_a3` })).profileId;
+    const profA3 = (await createAnimal(ownerClientA, { establishmentId: estA, rodeoId: rodeoA.id, systemId: rodeoA.systemId, idv: `${RUN_TAG}_a3` })).profileId;
     const { error } = await opClientA.from('sigsa_declarations').insert({ establishment_id: estA, animal_profile_id: profA3 });
     assert.notEqual(error, null, 'el field_operator no debería poder insertar una declaración');
     const { data } = await admin.from('sigsa_declarations').select('id').eq('animal_profile_id', profA3);
@@ -736,7 +737,7 @@ test('spec 08 — T5 sigsa_declarations (RLS, IDOR, declared_by forzado, UNIQUE)
   // (una por establishment) coexisten sin chocar.
   await t.test('T5(g) R3.2: mismo animal en 2 campos → cada uno declara su propio perfil (UNIQUE por est+perfil)', async () => {
     // animal con perfil activo en estA (el "origen").
-    const moved = await createAnimal(ownerClientA, { establishmentId: estA, rodeoId: rodeoA.id, systemId: rodeoA.systemId, visualAlt: `${RUN_TAG}_moved` });
+    const moved = await createAnimal(ownerClientA, { establishmentId: estA, rodeoId: rodeoA.id, systemId: rodeoA.systemId, idv: `${RUN_TAG}_moved` });
     assert.equal(moved.error, undefined, moved.error && moved.error.message);
     // estA declara su perfil.
     const { error: decAErr } = await ownerClientA.from('sigsa_declarations').insert({ establishment_id: estA, animal_profile_id: moved.profileId });
@@ -749,7 +750,7 @@ test('spec 08 — T5 sigsa_declarations (RLS, IDOR, declared_by forzado, UNIQUE)
     const destProfileId = crypto.randomUUID();
     const { error: destErr } = await admin.from('animal_profiles').insert({
       id: destProfileId, animal_id: moved.animalId, establishment_id: estB,
-      rodeo_id: rodeoB.id, category_id: destCatId, status: 'active', visual_id_alt: `${RUN_TAG}_moved_dest`,
+      rodeo_id: rodeoB.id, category_id: destCatId, status: 'active', idv: `${RUN_TAG}_moved_dest`,
     });
     assert.equal(destErr, null, destErr && destErr.message);
     // estB declara SU perfil del mismo animal → debe pasar (no hereda el marcador de estA, R3.2).
@@ -766,7 +767,7 @@ test('spec 08 — T5 sigsa_declarations (RLS, IDOR, declared_by forzado, UNIQUE)
 
   // T5 (h): declared_by forzado a auth.uid() aunque el payload mande otro UUID (HIGH-1).
   await t.test('T5(h) R3.6: declared_by se fuerza a auth.uid() (ignora el UUID del payload)', async () => {
-    const profA4 = (await createAnimal(ownerClientA, { establishmentId: estA, rodeoId: rodeoA.id, systemId: rodeoA.systemId, visualAlt: `${RUN_TAG}_a4` })).profileId;
+    const profA4 = (await createAnimal(ownerClientA, { establishmentId: estA, rodeoId: rodeoA.id, systemId: rodeoA.systemId, idv: `${RUN_TAG}_a4` })).profileId;
     const { error } = await ownerClientA.from('sigsa_declarations').insert({
       establishment_id: estA, animal_profile_id: profA4,
       declared_by: outsider.id, // intento de spoof
@@ -830,7 +831,7 @@ test('spec 08 — T6 export_log (RLS, CHECKs 5MB/255, generated_by forzado, FK e
     await assignRoleAsService(opA.id, estA, 'field_operator');
     rodeoA = await createRodeo(ownerClientA, { establishmentId: estA, name: `${RUN_TAG} el rodeoA` });
     estB = await createEstablishmentAs(ownerClientB, `${RUN_TAG} el estB`);
-    profA1 = (await createAnimal(ownerClientA, { establishmentId: estA, rodeoId: rodeoA.id, systemId: rodeoA.systemId, tag: `032${Date.now().toString().slice(-12)}`, visualAlt: `${RUN_TAG}_el_a1` })).profileId;
+    profA1 = (await createAnimal(ownerClientA, { establishmentId: estA, rodeoId: rodeoA.id, systemId: rodeoA.systemId, tag: `032${Date.now().toString().slice(-12)}`, idv: `${RUN_TAG}_el_a1` })).profileId;
   });
 
   // T6 (a): owner puede INSERT.
@@ -914,7 +915,7 @@ test('spec 08 — T6 export_log (RLS, CHECKs 5MB/255, generated_by forzado, FK e
     });
     assert.equal(okErr, null, okErr && okErr.message);
     // un export_log_id inexistente → viola la FK fk_sigsa_declarations_export_log
-    const profA9 = (await createAnimal(ownerClientA, { establishmentId: estA, rodeoId: rodeoA.id, systemId: rodeoA.systemId, visualAlt: `${RUN_TAG}_el_a9` })).profileId;
+    const profA9 = (await createAnimal(ownerClientA, { establishmentId: estA, rodeoId: rodeoA.id, systemId: rodeoA.systemId, idv: `${RUN_TAG}_el_a9` })).profileId;
     const { error: badErr } = await ownerClientA.from('sigsa_declarations').insert({
       establishment_id: estA, animal_profile_id: profA9, export_log_id: crypto.randomUUID(),
     });
@@ -929,7 +930,7 @@ test('spec 08 — T6 export_log (RLS, CHECKs 5MB/255, generated_by forzado, FK e
     });
     assert.equal(insErr, null, insErr && insErr.message);
     const { data: el } = await admin.from('export_log').select('id').eq('establishment_id', estA).eq('file_name', 'sigsa_del.txt').single();
-    const profA8 = (await createAnimal(ownerClientA, { establishmentId: estA, rodeoId: rodeoA.id, systemId: rodeoA.systemId, visualAlt: `${RUN_TAG}_el_a8` })).profileId;
+    const profA8 = (await createAnimal(ownerClientA, { establishmentId: estA, rodeoId: rodeoA.id, systemId: rodeoA.systemId, idv: `${RUN_TAG}_el_a8` })).profileId;
     const { error: decErr } = await ownerClientA.from('sigsa_declarations').insert({
       establishment_id: estA, animal_profile_id: profA8, export_log_id: el.id,
     });
@@ -974,7 +975,7 @@ test('spec 08 — T18 derive breed_id (0113): trigger BEFORE INSERT OR UPDATE OF
   await t.test('T18(a) R1.4: INSERT con breed="Aberdeen Angus" → breed_id derivado a AA', async () => {
     const r = await createAnimal(client, {
       establishmentId: est, rodeoId: rodeo.id, systemId: rodeo.systemId,
-      visualAlt: `${RUN_TAG}_d_aa`, breed: 'Aberdeen Angus',
+      idv: `${RUN_TAG}_d_aa`, breed: 'Aberdeen Angus',
     });
     assert.equal(r.error, undefined, r.error && r.error.message);
     const { data } = await admin.from('animal_profiles').select('breed_id').eq('id', r.profileId).single();
@@ -985,7 +986,7 @@ test('spec 08 — T18 derive breed_id (0113): trigger BEFORE INSERT OR UPDATE OF
   await t.test('T18(b) R1.4: INSERT con breed sin match → breed_id NULL', async () => {
     const r = await createAnimal(client, {
       establishmentId: est, rodeoId: rodeo.id, systemId: rodeo.systemId,
-      visualAlt: `${RUN_TAG}_d_nomatch`, breed: 'nomatch_xyz_raza_inexistente',
+      idv: `${RUN_TAG}_d_nomatch`, breed: 'nomatch_xyz_raza_inexistente',
     });
     assert.equal(r.error, undefined, r.error && r.error.message);
     const { data } = await admin.from('animal_profiles').select('breed_id').eq('id', r.profileId).single();
@@ -998,7 +999,7 @@ test('spec 08 — T18 derive breed_id (0113): trigger BEFORE INSERT OR UPDATE OF
   await t.test('T18(c) R1.7: breed NULL + breed_id seteado (ternero) → breed_id PRESERVADO (guard)', async () => {
     const r = await createAnimal(client, {
       establishmentId: est, rodeoId: rodeo.id, systemId: rodeo.systemId,
-      visualAlt: `${RUN_TAG}_d_calf`, breedId: aaId, // breed queda NULL (createAnimal solo setea breed si viene)
+      idv: `${RUN_TAG}_d_calf`, breedId: aaId, // breed queda NULL (createAnimal solo setea breed si viene)
     });
     assert.equal(r.error, undefined, r.error && r.error.message);
     const { data } = await admin.from('animal_profiles').select('breed, breed_id').eq('id', r.profileId).single();
@@ -1011,7 +1012,7 @@ test('spec 08 — T18 derive breed_id (0113): trigger BEFORE INSERT OR UPDATE OF
     // Perfil que arranca con AA (por nombre).
     const r = await createAnimal(client, {
       establishmentId: est, rodeoId: rodeo.id, systemId: rodeo.systemId,
-      visualAlt: `${RUN_TAG}_d_upd`, breed: 'Aberdeen Angus',
+      idv: `${RUN_TAG}_d_upd`, breed: 'Aberdeen Angus',
     });
     assert.equal(r.error, undefined, r.error && r.error.message);
     // El cliente actualiza SOLO breed (NUNCA breed_id) — exactamente lo que hace la ficha (setBreed).
@@ -1025,7 +1026,7 @@ test('spec 08 — T18 derive breed_id (0113): trigger BEFORE INSERT OR UPDATE OF
   await t.test('T18(d-bis) R1.4: UPDATE de breed a texto sin match → breed_id NULL', async () => {
     const r = await createAnimal(client, {
       establishmentId: est, rodeoId: rodeo.id, systemId: rodeo.systemId,
-      visualAlt: `${RUN_TAG}_d_updnull`, breed: 'Hereford',
+      idv: `${RUN_TAG}_d_updnull`, breed: 'Hereford',
     });
     assert.equal(r.error, undefined, r.error && r.error.message);
     const { error: updErr } = await client.from('animal_profiles').update({ breed: 'raza_que_no_existe' }).eq('id', r.profileId);
@@ -1038,7 +1039,7 @@ test('spec 08 — T18 derive breed_id (0113): trigger BEFORE INSERT OR UPDATE OF
   await t.test('T18(e) R1.4: match case/trim-insensitive ("  aberdeen angus  " → AA)', async () => {
     const r = await createAnimal(client, {
       establishmentId: est, rodeoId: rodeo.id, systemId: rodeo.systemId,
-      visualAlt: `${RUN_TAG}_d_ci`, breed: '  aberdeen angus  ', // el trigger hace lower(trim(...))
+      idv: `${RUN_TAG}_d_ci`, breed: '  aberdeen angus  ', // el trigger hace lower(trim(...))
     });
     assert.equal(r.error, undefined, r.error && r.error.message);
     const { data } = await admin.from('animal_profiles').select('breed_id').eq('id', r.profileId).single();

@@ -140,7 +140,7 @@ async function createRodeo(client, { establishmentId, name, systemCode = 'cria' 
 }
 
 // createAnimal: crea animals + animal_profiles (split, IDs cliente). Devuelve el id conocido.
-async function createAnimal(client, { tag = null, idv = null, visualAlt = null, sex, birthDate = null, isCastrated = null, rodeoId, establishmentId, systemId, categoryCode = null }) {
+async function createAnimal(client, { tag = null, idv = null, sex, birthDate = null, isCastrated = null, rodeoId, establishmentId, systemId, categoryCode = null }) {
   const { speciesId } = await lookupSpeciesSystem(client, 'bovino', 'cria');
   const animalId = crypto.randomUUID();
   const animalPayload = { id: animalId, sex, species_id: speciesId };
@@ -158,7 +158,7 @@ async function createAnimal(client, { tag = null, idv = null, visualAlt = null, 
   const profileId = crypto.randomUUID();
   const profilePayload = { id: profileId, animal_id: animalId, establishment_id: establishmentId, rodeo_id: rodeoId, category_id: catId, status: 'active' };
   if (idv) profilePayload.idv = idv;
-  if (visualAlt) profilePayload.visual_id_alt = visualAlt;
+  // IDU: visual_id_alt eliminado (0122). Un perfil sin idv/tag persiste (trigger de completitud dropeado).
   const { error: pErr } = await client.from('animal_profiles').insert(profilePayload);
   if (pErr) return { error: pErr, animalId };
 
@@ -397,13 +397,16 @@ test('operaciones-rodeo suite — spec 10 Fase 1 (backend delta)', async (t) => 
     `);
     const names = rows.map((r) => r.tgname);
     const idx = (nm) => names.indexOf(nm);
-    for (const nm of ['animal_profiles_force_animal_identity', 'animal_profiles_force_is_castrated', 'animal_profiles_identity_check', 'animal_profiles_normalize_future_bull']) {
+    // IDU.2.1: el trigger de completitud animal_profiles_identity_check se ELIMINÓ (0122) → ya no debe existir
+    // entre los BEFORE (un perfil puede persistir con 0 identificadores de usuario). El resto de los BEFORE y su
+    // orden relativo (design §4.1) siguen intactos.
+    assert.equal(idx('animal_profiles_identity_check'), -1, 'animal_profiles_identity_check YA NO existe (eliminado en 0122, IDU.2.1)');
+    for (const nm of ['animal_profiles_force_animal_identity', 'animal_profiles_force_is_castrated', 'animal_profiles_normalize_future_bull']) {
       assert.ok(idx(nm) >= 0, `${nm} debe existir entre los BEFORE de animal_profiles`);
     }
-    // Orden requerido por el design §4.1: force_animal_identity < force_is_castrated < identity_check < normalize_future_bull.
+    // Orden requerido por el design §4.1 (sin identity_check): force_animal_identity < force_is_castrated < normalize_future_bull.
     assert.ok(idx('animal_profiles_force_animal_identity') < idx('animal_profiles_force_is_castrated'), 'force_animal_identity antes que force_is_castrated');
-    assert.ok(idx('animal_profiles_force_is_castrated') < idx('animal_profiles_identity_check'), 'force_is_castrated antes que identity_check');
-    assert.ok(idx('animal_profiles_identity_check') < idx('animal_profiles_normalize_future_bull'), 'identity_check antes que normalize_future_bull');
+    assert.ok(idx('animal_profiles_force_is_castrated') < idx('animal_profiles_normalize_future_bull'), 'force_is_castrated antes que normalize_future_bull');
     // Carga clave: normalize_future_bull corre DESPUÉS de force_animal_identity (lee animal_sex ya forzado).
     assert.ok(idx('animal_profiles_force_animal_identity') < idx('animal_profiles_normalize_future_bull'), 'normalize_future_bull corre después de force_animal_identity (lee el sexo forzado)');
   });

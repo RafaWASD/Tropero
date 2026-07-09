@@ -145,7 +145,7 @@ async function createRodeo(client, { establishmentId, name, systemCode = 'cria' 
   return { id: data.id, systemId: data.system_id };
 }
 
-async function createAnimal(client, { tag = null, idv = null, visualAlt = null, sex, birthDate = null, rodeoId, establishmentId, systemId, categoryCode = null }) {
+async function createAnimal(client, { tag = null, idv = null, sex, birthDate = null, rodeoId, establishmentId, systemId, categoryCode = null }) {
   const { speciesId } = await lookupSpeciesSystem(client, 'bovino', 'cria');
   const animalId = require('node:crypto').randomUUID();
   const animalPayload = { id: animalId, sex, species_id: speciesId };
@@ -164,7 +164,7 @@ async function createAnimal(client, { tag = null, idv = null, visualAlt = null, 
     rodeo_id: rodeoId, category_id: catId, status: 'active',
   };
   if (idv) profilePayload.idv = idv;
-  if (visualAlt) profilePayload.visual_id_alt = visualAlt;
+  // IDU: visual_id_alt eliminado (0122). Un perfil sin idv/tag persiste (trigger de completitud dropeado).
   const { error: pErr } = await client.from('animal_profiles').insert(profilePayload);
   if (pErr) return { error: pErr, animalId };
   return {

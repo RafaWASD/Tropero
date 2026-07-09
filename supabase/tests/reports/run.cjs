@@ -163,7 +163,7 @@ async function setServiceMonths(rodeoId, months) {
 }
 
 // Crea un animal + perfil. Devuelve { profile:{id, category_id}, animalId }.
-async function createAnimal(client, { idv = null, visualAlt = null, sex, birthDate = null, rodeoId, establishmentId, systemId, categoryCode = null, status = 'active' }) {
+async function createAnimal(client, { idv = null, sex, birthDate = null, rodeoId, establishmentId, systemId, categoryCode = null, status = 'active' }) {
   const { speciesId } = await lookupSpeciesSystem(client, 'bovino', 'cria');
   const animalId = crypto.randomUUID();
   const animalPayload = { id: animalId, sex, species_id: speciesId };
@@ -180,7 +180,7 @@ async function createAnimal(client, { idv = null, visualAlt = null, sex, birthDa
     category_override: true,
   };
   if (idv) profilePayload.idv = idv;
-  if (visualAlt) profilePayload.visual_id_alt = visualAlt;
+  // IDU: visual_id_alt eliminado (0122). Un perfil sin idv/tag persiste (trigger de completitud dropeado).
   const { error: pErr } = await client.from('animal_profiles').insert(profilePayload);
   if (pErr) throw new Error(`createAnimal profile: ${pErr.message}`);
   return { profile: { id: profileId, category_id: catId }, animalId };

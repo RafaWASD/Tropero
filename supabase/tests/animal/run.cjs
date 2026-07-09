@@ -154,7 +154,7 @@ async function createRodeo(client, { establishmentId, name, systemCode = 'cria' 
 // deriva de la presencia de un perfil con has_role_in), así que NO se puede
 // re-seleccionar por TAG antes de crear el perfil. Generar el UUID resuelve esto y
 // replica cómo un cliente real haría el find-or-create.
-async function createAnimal(client, { tag = null, idv = null, visualAlt = null, sex, birthDate = null, rodeoId, establishmentId, systemId, categoryCode = null }) {
+async function createAnimal(client, { tag = null, idv = null, sex, birthDate = null, rodeoId, establishmentId, systemId, categoryCode = null }) {
   const { speciesId } = await lookupSpeciesSystem(client, 'bovino', 'cria');
   const animalId = require('node:crypto').randomUUID();
   const animalPayload = { id: animalId, sex, species_id: speciesId };
@@ -182,7 +182,7 @@ async function createAnimal(client, { tag = null, idv = null, visualAlt = null, 
     status: 'active',
   };
   if (idv) profilePayload.idv = idv;
-  if (visualAlt) profilePayload.visual_id_alt = visualAlt;
+  // IDU: visual_id_alt eliminado (0122). Un perfil sin idv/tag persiste (trigger de completitud dropeado).
   const { error: pErr } = await client.from('animal_profiles').insert(profilePayload);
   if (pErr) return { error: pErr, animalId };
 
@@ -291,17 +291,15 @@ test('animal suite — spec 02', async (t) => {
       assert.equal(r.error, undefined, r.error && r.error.message);
       assert.ok(r.profile.id);
     }
-    // Caso 3: solo visual_id_alt.
-    {
-      const r = await createAnimal(clientA, { visualAlt: 'vaca pinta', sex: 'female', birthDate: daysAgo(400), rodeoId: rodeoA.id, establishmentId: estA, systemId: rodeoA.systemId });
-      assert.equal(r.error, undefined, r.error && r.error.message);
-      assert.ok(r.profile.id);
-    }
-    // Caso 4: sin ninguno -> falla (23514).
+    // Caso 3 (IDU.1.4/1.5): sin NINGÚN identificador de usuario (tag/idv/apodo) -> PERSISTE. El trigger de
+    // completitud animal_profiles_identity_check se eliminó (0122); un perfil sin idv ni tag es válido
+    // (el animal siempre tiene su PK interna). Reemplaza el viejo "solo visual_id_alt" + el "sin ninguno -> 23514".
     {
       const r = await createAnimal(clientA, { sex: 'female', birthDate: daysAgo(400), rodeoId: rodeoA.id, establishmentId: estA, systemId: rodeoA.systemId });
-      assert.notEqual(r.error, undefined, 'animal sin identificador debería fallar');
-      assert.match(String(r.error.message + ' ' + (r.error.code || '')), /23514|at least one/i);
+      assert.equal(r.error, undefined, `alta sin identificadores debe persistir (IDU.1.4): ${r.error && r.error.message}`);
+      assert.ok(r.profile.id, 'el perfil sin identificadores se creó (idv/tag NULL, sin 23514)');
+      const { data: prof } = await admin.from('animal_profiles').select('idv').eq('id', r.profile.id).single();
+      assert.equal(prof.idv, null, 'idv NULL persiste (IDU.1.4)');
     }
     // Caso 5: TAG duplicado entre campos -> unique violation.
     {
@@ -504,11 +502,14 @@ test('animal suite — spec 02', async (t) => {
         .order('created_at', { ascending: false }).limit(1).single();
       assert.ok(ev.calf_id, 'calf_id no debe ser null tras el parto');
       const { data: calf } = await clientA.from('animal_profiles')
-        .select('category_id, entry_origin, visual_id_alt, management_group_id').eq('id', ev.calf_id).single();
+        .select('category_id, entry_origin, idv, management_group_id').eq('id', ev.calf_id).single();
       const { data: cat } = await clientA.from('categories_by_system').select('code').eq('id', calf.category_id).single();
       assert.equal(cat.code, 'ternera');
       assert.equal(calf.entry_origin, 'born_here');
-      assert.equal(calf.visual_id_alt, 'recién nacido — pendiente de caravana');
+      // IDU.2.2/1.4: la cría mono-ternero SIN tag ni idv persiste con ambos NULL (el fallback visual_id_alt
+      // se eliminó en 0122 junto al trigger de completitud) — el trigger tg_reproductive_events_create_calf
+      // re-creado sin visual_id_alt sigue creando la cría.
+      assert.equal(calf.idv, null, 'cría sin caravana → idv NULL (sin fallback, IDU.2.2)');
       assert.equal(calf.management_group_id, null, 'ternero nace sin lote (R9.1)');
       // madre transicionó a vaca_segundo_servicio.
       const { data: m } = await clientA.from('animal_profiles').select('category_id').eq('id', madre.profile.id).single();
@@ -527,8 +528,8 @@ test('animal suite — spec 02', async (t) => {
       const { data: ev } = await clientA.from('reproductive_events')
         .select('calf_id').eq('animal_profile_id', m2.profile.id).eq('event_type', 'birth')
         .order('created_at', { ascending: false }).limit(1).single();
-      const { data: calf } = await clientA.from('animal_profiles').select('visual_id_alt, animal_id').eq('id', ev.calf_id).single();
-      assert.equal(calf.visual_id_alt, null, 'con TAG no se aplica fallback visual (R9.3)');
+      const { data: calf } = await clientA.from('animal_profiles').select('idv, animal_id').eq('id', ev.calf_id).single();
+      assert.equal(calf.idv, null, 'cría con TAG → idv NULL (R9.3; sin fallback visual, IDU.2.2)');
       const { data: an } = await clientA.from('animals').select('tag_electronic').eq('id', calf.animal_id).single();
       assert.equal(an.tag_electronic, calfTag);
     }
@@ -686,29 +687,23 @@ test('animal suite — spec 02', async (t) => {
   });
 
   // ---- T2.11 búsqueda fuzzy (R5) ------------------------------------------
+  // IDU.4.3/4.5: visual_id_alt se eliminó (0122); la caravana visual es ahora el `idv` alfanumérico → la
+  // búsqueda por substring corre sobre `idv` (canal unificado). Se reemplaza el viejo substring sobre visual.
   await t.test('T2.11 búsqueda', async () => {
-    const visual = 'vaca blanca mancha pata izquierda';
+    const visualIdv = `${RUN_TAG}_vacablanca`;
     const tag = `${RUN_TAG}_SEARCHTAG`;
-    await createAnimal(clientA, { visualAlt: visual, tag, sex: 'female', birthDate: daysAgo(400), rodeoId: rodeoA.id, establishmentId: estA, systemId: rodeoA.systemId });
-    // fuzzy 'vaca blanca' -> encuentra (similarity >= 0.3).
+    await createAnimal(clientA, { idv: visualIdv, tag, sex: 'female', birthDate: daysAgo(400), rodeoId: rodeoA.id, establishmentId: estA, systemId: rodeoA.systemId });
+    // substring del idv -> encuentra.
     {
       const { data, error } = await clientA.rpc('animal_timeline', { profile_id: '00000000-0000-0000-0000-000000000000' }); // noop to ensure rpc path ok
       assert.equal(error, null);
-      // búsqueda fuzzy directa
-      const { data: found, error: fErr } = await clientA
-        .from('animal_profiles')
-        .select('id, visual_id_alt')
-        .eq('establishment_id', estA)
-        .is('deleted_at', null)
-        .textSearch === undefined ? { data: null } : { data: null };
-      // textSearch trigram no está disponible vía PostgREST builder; usamos ilike como proxy + verificación del índice por SQL real abajo.
       const { data: ilikeFound } = await clientA
-        .from('animal_profiles').select('id').ilike('visual_id_alt', '%vaca blanca%').eq('establishment_id', estA);
-      assert.ok(ilikeFound.length >= 1, 'búsqueda por substring de visual_id_alt encuentra');
+        .from('animal_profiles').select('id').ilike('idv', '%vacablanca%').eq('establishment_id', estA);
+      assert.ok(ilikeFound.length >= 1, 'búsqueda por substring de idv encuentra (IDU.4.3)');
     }
-    // 'toro negro' -> no encuentra.
+    // término no relacionado -> no encuentra.
     {
-      const { data } = await clientA.from('animal_profiles').select('id').ilike('visual_id_alt', '%toro negro%').eq('establishment_id', estA);
+      const { data } = await clientA.from('animal_profiles').select('id').ilike('idv', '%toronegro%').eq('establishment_id', estA);
       assert.deepEqual(data, [], 'consulta no relacionada no encuentra');
     }
     // TAG exacto -> encuentra; userC sin rol -> 0.
@@ -831,15 +826,12 @@ test('animal suite — spec 02', async (t) => {
       const { data: upd } = await clientA.from('animal_profiles').update({ idv: `${RUN_TAG}_IMIDV2` }).eq('id', an.profile.id).select();
       assert.ok(!upd || upd.length === 0, 'idv valor->otro valor debe fallar (R4.13.b)');
     }
-    // Caso 3: visual_id_alt editable.
+    // Caso 3 (IDU): el viejo "visual_id_alt editable" se eliminó junto a la columna (0122). La mutabilidad de
+    // identificadores queda cubierta por tag/idv (inmutables, casos 1/2) y el apodo (custom, editable).
+    // Caso 4 (permitido): NULL -> valor. El animal se crea SIN identificador (0 identificadores persisten,
+    // IDU.1.4) y luego se le asigna el tag por primera vez (NULL->valor).
     {
-      const an = await createAnimal(clientA, { visualAlt: 'original', sex: 'female', birthDate: daysAgo(400), rodeoId: rodeoA.id, establishmentId: estA, systemId: rodeoA.systemId });
-      const { error } = await clientA.from('animal_profiles').update({ visual_id_alt: 'corregida' }).eq('id', an.profile.id);
-      assert.equal(error, null, 'visual_id_alt es editable');
-    }
-    // Caso 4 (permitido): NULL -> valor.
-    {
-      const an = await createAnimal(clientA, { visualAlt: 'sin tag aun', sex: 'female', birthDate: daysAgo(400), rodeoId: rodeoA.id, establishmentId: estA, systemId: rodeoA.systemId });
+      const an = await createAnimal(clientA, { sex: 'female', birthDate: daysAgo(400), rodeoId: rodeoA.id, establishmentId: estA, systemId: rodeoA.systemId });
       const { error } = await clientA.from('animals').update({ tag_electronic: `${RUN_TAG}_IMNEW` }).eq('id', an.animalId);
       assert.equal(error, null, 'NULL->valor permitido (R4.13.a)');
     }
@@ -2033,48 +2025,49 @@ test('spec 13 — INPUT-1 / A1-1 / F1-1 (DB layer)', async (t) => {
   // término malicioso NO debe traer filas que el literal no traería (no inyecta condición).
   // -------------------------------------------------------------------
   await t.test('R8.1: .ilike(col, pattern) parametrizado neutraliza filter-injection de .or()', async () => {
-    // Dos animales de A: uno con visual_id_alt que contiene texto, otro con idv distinto.
-    const aVisual = await createAnimal(clientA, {
-      visualAlt: `vaca ${RUN_TAG}_marca`, sex: 'female', birthDate: daysAgo(500),
+    // IDU.4.5: visual_id_alt se eliminó (0122) → el canal de búsqueda por substring es ahora `idv`. La prueba
+    // de anti-injection se ejerce sobre `idv` (mismo builder .ilike(col, pattern) parametrizado).
+    // Dos animales de A: uno con un idv que contiene un texto buscable, otro con un idv distinto.
+    const aMarca = await createAnimal(clientA, {
+      idv: `${RUN_TAG}_marca`, sex: 'female', birthDate: daysAgo(500),
       rodeoId: rodeoA.id, establishmentId: estA, systemId: rodeoA.systemId,
     });
-    assert.ok(aVisual.profile, aVisual.error && aVisual.error.message);
+    assert.ok(aMarca.profile, aMarca.error && aMarca.error.message);
     const aOther = await createAnimal(clientA, {
       idv: `${RUN_TAG}_s13_other`, sex: 'female', birthDate: daysAgo(500),
       rodeoId: rodeoA.id, establishmentId: estA, systemId: rodeoA.systemId,
     });
     assert.ok(aOther.profile, aOther.error && aOther.error.message);
 
-    // Término MALICIOSO: intenta inyectar una condición sobre idv vía sintaxis de .or().
-    // Con .ilike(visual_id_alt, `%term%`) parametrizado, el valor viaja FUERA del filtro →
-    // se busca LITERALMENTE en visual_id_alt y no matchea nada (ningún visual contiene esa basura),
-    // y NO trae la fila de aOther (no cruzó a idv).
+    // Término MALICIOSO: intenta inyectar una condición vía sintaxis de .or() sobre el idv de aOther.
+    // Con .ilike(idv, `%term%`) parametrizado, el valor viaja FUERA del filtro → se busca LITERALMENTE en
+    // idv y no matchea nada (ningún idv contiene esa basura), y NO trae la fila de aOther (no inyecta condición).
     const malicious = `idv.eq.${RUN_TAG}_s13_other`;
     const { data: malData, error: malErr } = await clientA
       .from('animal_profiles')
-      .select('id, visual_id_alt')
+      .select('id, idv')
       .eq('establishment_id', estA)
       .eq('status', 'active')
       .is('deleted_at', null)
-      .ilike('visual_id_alt', `%${malicious}%`)
+      .ilike('idv', `%${malicious}%`)
       .limit(20);
     assert.equal(malErr, null, malErr && malErr.message);
     const broughtOther = (malData || []).some((r) => r.id === aOther.profile.id);
-    assert.equal(broughtOther, false, 'el término malicioso NO debe traer la fila de idv (no cruza columna)');
-    assert.equal((malData || []).length, 0, 'el término malicioso (buscado literal en visual) no matchea nada');
+    assert.equal(broughtOther, false, 'el término malicioso NO debe traer la fila de aOther (no inyecta condición)');
+    assert.equal((malData || []).length, 0, 'el término malicioso (buscado literal en idv) no matchea nada');
 
-    // Control: un término LEGÍTIMO que sí está en visual_id_alt trae su fila (no rompimos la búsqueda).
+    // Control: un término LEGÍTIMO que sí está en el idv trae su fila (no rompimos la búsqueda).
     const { data: okData, error: okErr } = await clientA
       .from('animal_profiles')
-      .select('id, visual_id_alt')
+      .select('id, idv')
       .eq('establishment_id', estA)
       .eq('status', 'active')
       .is('deleted_at', null)
-      .ilike('visual_id_alt', `%${RUN_TAG}_marca%`)
+      .ilike('idv', `%${RUN_TAG}_marca%`)
       .limit(20);
     assert.equal(okErr, null, okErr && okErr.message);
-    const foundVisual = (okData || []).some((r) => r.id === aVisual.profile.id);
-    assert.equal(foundVisual, true, 'un término legítimo en visual_id_alt SÍ trae su fila (R7.5)');
+    const foundMarca = (okData || []).some((r) => r.id === aMarca.profile.id);
+    assert.equal(foundMarca, true, 'un término legítimo en idv SÍ trae su fila (R7.5)');
   });
 });
 
@@ -3034,6 +3027,21 @@ test('spec 15-powersync — create_animal RPC (alta atómica, Run create-animal-
     const { data: atkProf } = await admin.from('animal_profiles').select('id').eq('id', atk.p_profile_id);
     assert.deepEqual(atkProf, [], 'el perfil del atacante NO se creó');
   });
+
+  // -- Caso 8 (IDU.1.4/2.5): alta SIN identificadores (p_idv NULL + p_tag_electronic NULL) → PERSISTE con
+  //    idv/tag ambos NULL (firma de 19 params, sin p_visual_id_alt; el trigger de completitud se eliminó, 0122). --
+  await t.test('caso 8 (IDU.1.4): create_animal sin idv ni tag → persiste con idv/tag NULL (0 identificadores)', async () => {
+    const args = buildArgs({}); // sin p_tag_electronic, sin p_idv → 0 identificadores de usuario
+    const { data: ret, error } = await clientA.rpc('create_animal', args);
+    assert.equal(error, null, `un alta sin identificadores debe persistir (IDU.1.4): ${error && error.message}`);
+    assert.equal(ret, args.p_profile_id, 'devuelve el id del perfil');
+    const { data: prof } = await admin.from('animal_profiles')
+      .select('id, idv, animal_tag_electronic').eq('id', args.p_profile_id).single();
+    assert.ok(prof, 'el perfil sin identificadores se creó');
+    assert.equal(prof.idv, null, 'idv NULL (IDU.1.4)');
+    const { data: an } = await admin.from('animals').select('tag_electronic').eq('id', args.p_animal_id).single();
+    assert.equal(an.tag_electronic, null, 'tag_electronic NULL (IDU.1.4)');
+  });
 });
 
 // =====================================================================
@@ -3068,7 +3076,7 @@ test('spec 11 — transfer_animal RPC (re-parenting de historia)', async (t) => 
   async function seedAnimalWithHistory(opts = {}) {
     const idv = opts.idv === undefined ? `${RUN_TAG}_tr_${Math.random().toString(36).slice(2, 7)}` : opts.idv;
     const r = await createAnimal(clientA, {
-      tag: opts.tag || null, idv, visualAlt: opts.visualAlt || 'vaca historia',
+      tag: opts.tag || null, idv,
       sex: opts.sex || 'female', birthDate: opts.birthDate || daysAgo(900),
       rodeoId: rodeoX.id, establishmentId: estX, systemId: rodeoX.systemId,
       categoryCode: opts.categoryCode || (opts.sex === 'male' ? 'torito' : 'vaquillona'),
@@ -3149,7 +3157,7 @@ test('spec 11 — transfer_animal RPC (re-parenting de historia)', async (t) => 
 
     // Perfil nuevo activo en Y; reusa el animal_id global.
     const { data: np } = await admin.from('animal_profiles')
-      .select('id, animal_id, establishment_id, rodeo_id, status, management_group_id, category_override, idv, breed, coat_color, visual_id_alt, entry_origin, entry_weight, notes, entry_date, created_by')
+      .select('id, animal_id, establishment_id, rodeo_id, status, management_group_id, category_override, idv, breed, coat_color, entry_origin, entry_weight, notes, entry_date, created_by')
       .eq('id', newProfileId).single();
     assert.ok(np, 'perfil nuevo creado');
     assert.equal(np.animal_id, animalId, 'reusa el animal_id global');
@@ -3162,7 +3170,8 @@ test('spec 11 — transfer_animal RPC (re-parenting de historia)', async (t) => 
     // Descriptivos del animal VIAJAN (R2.12.a); de la relación con el campo RESETEAN (R2.12.b).
     assert.equal(np.breed, 'Brangus', 'breed viaja');
     assert.equal(np.coat_color, 'colorado', 'coat_color viaja');
-    assert.equal(np.visual_id_alt, 'vaca historia', 'visual_id_alt viaja');
+    // IDU.2.5: visual_id_alt eliminado (0122) → transfer_animal ya no lo lee/escribe. El idv sí viaja (o NUL
+    // por colisión) — cubierto por los tests de idv de esta suite (T5.x); acá basta con que el perfil no lo referencie.
     assert.equal(np.entry_origin, null, 'entry_origin reset');
     assert.equal(np.entry_weight, null, 'entry_weight reset');
     assert.equal(np.notes, null, 'notes reset');
@@ -3620,7 +3629,6 @@ test('spec 09 — assign_tag_to_animal RPC (asignación de caravana NULL→valor
   async function seedNoTagAnimal(opts = {}) {
     const r = await createAnimal(clientA, {
       idv: opts.idv === undefined ? `${RUN_TAG}_at_${Math.random().toString(36).slice(2, 7)}` : opts.idv,
-      visualAlt: opts.visualAlt || 'vaca sin caravana',
       sex: opts.sex || 'female', birthDate: opts.birthDate || daysAgo(700),
       rodeoId: rodeoA.id, establishmentId: estA, systemId: rodeoA.systemId,
       categoryCode: opts.categoryCode || (opts.sex === 'male' ? 'torito' : 'vaquillona'),
@@ -4251,20 +4259,16 @@ test('spec 02 delta #15 — register_birth extendido con rodeo del ternero (0115
 });
 
 // =====================================================================
-// spec 02 — delta PARTO: CARAVANA VISUAL DEL TERNERO POR CRÍA (parto-caravana-visual-por-ternero, PCV.4/5/6).
-// El idv del ternero al parto pasa a computarse POR CRÍA (leyendo `calf_idv` de cada elemento de `p_calves`),
-// con precedencia per-calf sobre el param top-level `p_calf_idv` (conservado para cría al pie #15). Fallback
-// `visual_id_alt` refinado (solo both-null: sin tag NI idv).
+// spec 02 — delta PARTO: CARAVANA VISUAL DEL TERNERO POR CRÍA (parto-caravana-visual-por-ternero, PCV.4/5/6)
+// + delta IDENTIFICADORES UNIFICADOS (IDU.1.4/2.2). El idv del ternero al parto se computa POR CRÍA (leyendo
+// `calf_idv` de cada elemento de `p_calves`), con precedencia per-calf sobre el top-level `p_calf_idv` (cría al
+// pie #15). El fallback `visual_id_alt` se ELIMINÓ (0122, IDU.2.2): una cría sin tag ni idv persiste con AMBOS
+// NULL, SIN 23514 (el trigger de completitud animal_profiles_identity_check se dropeó en la misma migración).
 //
-// ⚠️ Estos tests REQUIEREN la migración 0121 APLICADA al remoto (la aplica el LEADER por Supabase MCP tras
-// Gate 1 PASS + reviewer + Gate 2 + autorización de Raf). La firma NO cambia (6-arg) → un call con `calf_idv`
-// per-elemento NO da PGRST202: con el cuerpo VIEJO el `calf_idv` per-elemento se IGNORA (idv escalar único
-// antes del loop) → los mellizos con idv distinto nacen ambos SIN idv → estas aserciones FALLAN. Es ESPERADO
-// hasta el deploy de 0121 (patrón 0075-0089 / 0114-0116). El implementer NO aplica la migración.
+// Ambas migraciones (0121 idv-por-cría, 0122 sin-fallback) están APLICADAS al remoto. Firma 6-arg intacta.
 // =====================================================================
-test('spec 02 delta parto-caravana-visual — register_birth idv POR CRÍA (0121)', async (t) => {
+test('spec 02 delta parto — register_birth idv POR CRÍA (0121) + sin fallback visual (0122, IDU.2.2)', async (t) => {
   const uuid = () => require('node:crypto').randomUUID();
-  const FALLBACK = 'recién nacido — pendiente de caravana';
 
   let userA, userB, clientA, clientB, estA, estB, rodeoA, rodeoB;
 
@@ -4276,14 +4280,14 @@ test('spec 02 delta parto-caravana-visual — register_birth idv POR CRÍA (0121
     assert.equal(r.error, undefined, r.error && r.error.message);
     return r.profile.id;
   }
-  // Perfiles de los terneros de un parto → { idv, visual_id_alt, tag_electronic } por cría (para las matrices).
+  // Perfiles de los terneros de un parto → { idv, tag_electronic } por cría (para las matrices).
   async function calvesOf(birthId) {
     const { data: bc } = await admin.from('birth_calves').select('calf_profile_id').eq('birth_event_id', birthId);
     const out = [];
     for (const row of bc) {
       const { data: prof } = await admin.from('animal_profiles')
-        .select('idv, visual_id_alt, animals(tag_electronic)').eq('id', row.calf_profile_id).single();
-      out.push({ idv: prof.idv, visual_id_alt: prof.visual_id_alt, tag: prof.animals?.tag_electronic ?? null });
+        .select('idv, animals(tag_electronic)').eq('id', row.calf_profile_id).single();
+      out.push({ idv: prof.idv, tag: prof.animals?.tag_electronic ?? null });
     }
     return out;
   }
@@ -4325,8 +4329,7 @@ test('spec 02 delta parto-caravana-visual — register_birth idv POR CRÍA (0121
     assert.equal(calves.length, 2, 'mellizos = 2 terneros');
     const idvs = calves.map((c) => c.idv).sort();
     assert.deepEqual(idvs, [idv0, idv1].sort(), 'cada mellizo persiste con SU idv independiente (PCV.5.2)');
-    // Cada cría con idv (sin tag) → visual_id_alt null (el idv ya identifica; PCV.4.5).
-    assert.ok(calves.every((c) => c.visual_id_alt === null), 'con idv (sin tag) el fallback NO aplica (visual_id_alt null)');
+    assert.ok(calves.every((c) => c.tag === null), 'sin tag → tag null en ambos mellizos');
   });
 
   // -- PCV.5.3: idv DUPLICADO en el MISMO parto (dos crías, mismo calf_idv) → 23505 + rollback atómico (0/0). --
@@ -4368,26 +4371,28 @@ test('spec 02 delta parto-caravana-visual — register_birth idv POR CRÍA (0121
     assert.equal(after.calfCount, before.calfCount, 'rollback atómico: sin ternero');
   });
 
-  // -- PCV.2.3/2.4: ternero SIN idv y SIN tag → creado con éxito, visual_id_alt = fallback (opcionalidad).
-  //    Esto GUARDA el trigger animal_profiles_identity_check: sin el fallback el INSERT del profile sería
-  //    23514 (design §5). El idv null. --
-  await t.test('PCV.2.3/2.4: ternero sin idv ni tag → creado OK con visual_id_alt = fallback (opcionalidad; guarda el trigger)', async () => {
+  // -- IDU.1.4/2.2 (ex PCV.2.3/2.4): ternero SIN idv y SIN tag → PERSISTE con idv/tag AMBOS NULL, SIN 23514.
+  //    El fallback visual_id_alt se eliminó (0122); el trigger de completitud animal_profiles_identity_check ya
+  //    no existe → la cría both-null es válida. La fila-puente birth_calves se crea. --
+  await t.test('IDU.1.4/2.2: ternero sin idv ni tag → persiste con idv/tag NULL (sin 23514) + birth_calves creada', async () => {
     const motherId = await makeMother('nocaravana');
     const { data: birthId, error } = await clientA.rpc('register_birth', {
       p_mother_profile_id: motherId, p_event_date: daysAgo(2), p_client_op_id: uuid(),
-      p_calves: [{ calf_sex: 'female' }],  // ni calf_idv ni calf_tag_electronic
+      p_calves: [{ calf_sex: 'female' }],  // ni calf_idv ni calf_tag_electronic → 0 identificadores
     });
-    assert.equal(error, null, `un ternero sin ninguna caravana debe crearse (opcionalidad): ${error && error.message}`);
+    assert.equal(error, null, `un ternero sin ninguna caravana debe crearse sin 23514 (IDU.1.4): ${error && error.message}`);
     const calves = await calvesOf(birthId);
     assert.equal(calves.length, 1, 'se creó el ternero');
-    assert.equal(calves[0].idv, null, 'sin idv → idv null');
+    assert.equal(calves[0].idv, null, 'sin idv → idv null (sin fallback, IDU.2.2)');
     assert.equal(calves[0].tag, null, 'sin tag → tag null');
-    assert.equal(calves[0].visual_id_alt, FALLBACK, 'both-null → visual_id_alt = fallback (LOAD-BEARING, PCV.2.4)');
+    // la fila-puente birth_calves existe (el parto quedó bien armado pese a 0 identificadores en la cría).
+    const { count: bcCount } = await admin.from('birth_calves')
+      .select('*', { count: 'exact', head: true }).eq('birth_event_id', birthId);
+    assert.equal(bcCount, 1, 'birth_calves creada para la cría sin caravana (IDU.1.4)');
   });
 
-  // -- PCV.4.5: ternero con idv pero SIN tag → visual_id_alt null (el idv satisface el trigger; el fallback
-  //    NO aplica porque ya está identificado). --
-  await t.test('PCV.4.5: ternero con idv sin tag → visual_id_alt null (el fallback NO aplica)', async () => {
+  // -- PCV.4.5: ternero con idv pero SIN tag → persiste con su idv (tag null). --
+  await t.test('PCV.4.5: ternero con idv sin tag → persiste con su idv (tag null)', async () => {
     const motherId = await makeMother('idvnotag');
     const idv = `${RUN_TAG}_pcv_idvnotag`;
     const { data: birthId, error } = await clientA.rpc('register_birth', {
@@ -4397,7 +4402,7 @@ test('spec 02 delta parto-caravana-visual — register_birth idv POR CRÍA (0121
     assert.equal(error, null, error && error.message);
     const calves = await calvesOf(birthId);
     assert.equal(calves[0].idv, idv, 'el ternero lleva su idv');
-    assert.equal(calves[0].visual_id_alt, null, 'con idv el fallback NO aplica (visual_id_alt null)');
+    assert.equal(calves[0].tag, null, 'sin tag → tag null');
   });
 
   // -- PCV.4.3: precedencia per-calf sobre el top-level. calf_idv del elemento GANA sobre p_calf_idv. --
@@ -4428,22 +4433,23 @@ test('spec 02 delta parto-caravana-visual — register_birth idv POR CRÍA (0121
     assert.equal(error, null, error && error.message);
     const calves = await calvesOf(birthId);
     assert.equal(calves[0].idv, idv, 'el ternero cae por el coalesce al p_calf_idv (backward-compat #15, PCV.6.1)');
-    assert.equal(calves[0].visual_id_alt, null, 'con idv (aunque venga del top-level) el fallback NO aplica');
+    assert.equal(calves[0].tag, null, 'sin tag → tag null');
   });
 
-  // -- PCV.4.6: regresión — mellizos SIN idv ni tag (parto normal) → 2 terneros, ambos con fallback, idv null.
-  //    (el CREATE OR REPLACE no rompió la creación de mellizos ni la herencia de rodeo). --
-  await t.test('PCV.4.6: regresión — mellizos sin caravana → 2 terneros con fallback (idv null), rodeo de la madre', async () => {
+  // -- PCV.4.6/IDU.1.4: regresión — mellizos SIN idv ni tag (parto normal) → 2 terneros, ambos persisten con
+  //    idv/tag NULL (sin fallback, sin 23514). El CREATE OR REPLACE no rompió la creación de mellizos ni la
+  //    herencia de rodeo. --
+  await t.test('PCV.4.6/IDU.1.4: regresión — mellizos sin caravana → 2 terneros persisten (idv/tag null), rodeo de la madre', async () => {
     const motherId = await makeMother('regressplain');
     const { data: birthId, error } = await clientA.rpc('register_birth', {
       p_mother_profile_id: motherId, p_event_date: daysAgo(2), p_client_op_id: uuid(),
       p_calves: [{ calf_sex: 'male' }, { calf_sex: 'female' }],
     });
-    assert.equal(error, null, error && error.message);
+    assert.equal(error, null, `mellizos sin caravana deben persistir sin 23514 (IDU.1.4): ${error && error.message}`);
     const calves = await calvesOf(birthId);
     assert.equal(calves.length, 2, 'mellizos = 2 terneros (as-built)');
-    assert.ok(calves.every((c) => c.idv === null), 'sin idv → idv null');
-    assert.ok(calves.every((c) => c.visual_id_alt === FALLBACK), 'sin tag ni idv → ambos con el fallback');
+    assert.ok(calves.every((c) => c.idv === null), 'sin idv → idv null (sin fallback, IDU.2.2)');
+    assert.ok(calves.every((c) => c.tag === null), 'sin tag → tag null');
   });
 });
 

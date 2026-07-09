@@ -205,14 +205,15 @@ async function createRodeo(client, { establishmentId, name }) {
   return { id: data.id, systemId: data.system_id };
 }
 
-// Una fila válida para el RPC (sólo identidad mínima: visual_id_alt + sexo).
+// Una fila válida para el RPC (sólo identidad mínima: idv + sexo).
+// IDU (0122): visual_id_alt se eliminó; la caravana visual es ahora el idv alfanumérico → el import_rodeo_bulk
+// re-creado ya NO lee visual_id_alt. Los fixtures usan idv como identificador mínimo buscable.
 function makeRow(i, extra = {}) {
   return {
     row_index: i,
     sex: extra.sex || 'female',
-    visual_id_alt: extra.visual_id_alt ?? `${RUN_TAG}_v${i}`,
     tag_electronic: extra.tag_electronic ?? null,
-    idv: extra.idv ?? null,
+    idv: extra.idv ?? `${RUN_TAG}_v${i}`,
     birth_date: extra.birth_date ?? null,
     breed: extra.breed ?? null,
     category_code: extra.category_code ?? null,
@@ -498,9 +499,9 @@ test('spec 12 — RPC import_rodeo_bulk (SECURITY DEFINER, authz + import parcia
     // Verificación: los 2 perfiles existen en estA, en rodeoA, con establishment derivado del rodeo.
     const { data: profs, error: pErr } = await admin
       .from('animal_profiles')
-      .select('id, establishment_id, rodeo_id, visual_id_alt, created_by')
+      .select('id, establishment_id, rodeo_id, idv, created_by')
       .eq('rodeo_id', rodeoA)
-      .like('visual_id_alt', `${RUN_TAG}_v%`);
+      .like('idv', `${RUN_TAG}_v%`);
     assert.equal(pErr, null, pErr && pErr.message);
     assert.equal(profs.length, 2, 'deberían existir 2 animal_profiles del import');
     for (const p of profs) {
@@ -513,7 +514,7 @@ test('spec 12 — RPC import_rodeo_bulk (SECURITY DEFINER, authz + import parcia
   await t.test('T2.5 R9.4: el veterinarian del est correcto SÍ puede importar', async () => {
     const { data, error } = await vetClientA.rpc('import_rodeo_bulk', {
       p_rodeo_id: rodeoA,
-      p_rows: [makeRow(100, { visual_id_alt: `${RUN_TAG}_vet100` })],
+      p_rows: [makeRow(100, { idv: `${RUN_TAG}_vet100` })],
     });
     assert.equal(error, null, error && error.message);
     assert.equal(data.imported_ok, 1);
@@ -523,7 +524,7 @@ test('spec 12 — RPC import_rodeo_bulk (SECURITY DEFINER, authz + import parcia
   await t.test('T2.5 R9.4/R2.4: field_operator del est → RECHAZADO (raise exception adentro del RPC)', async () => {
     const { data, error } = await opClientA.rpc('import_rodeo_bulk', {
       p_rodeo_id: rodeoA,
-      p_rows: [makeRow(200, { visual_id_alt: `${RUN_TAG}_op200` })],
+      p_rows: [makeRow(200, { idv: `${RUN_TAG}_op200` })],
     });
     assert.notEqual(error, null, 'el field_operator no debería poder llamar el bulk insert');
     assert.match(error.message || '', /owner|veterinarian|not/i, 'el rechazo debe ser por authz de rol');
@@ -532,7 +533,7 @@ test('spec 12 — RPC import_rodeo_bulk (SECURITY DEFINER, authz + import parcia
       .from('animal_profiles')
       .select('id')
       .eq('rodeo_id', rodeoA)
-      .like('visual_id_alt', `${RUN_TAG}_op200`);
+      .like('idv', `${RUN_TAG}_op200`);
     assert.deepEqual(profs, [], 'no debería haber quedado un perfil del field_operator');
   });
 
@@ -540,7 +541,7 @@ test('spec 12 — RPC import_rodeo_bulk (SECURITY DEFINER, authz + import parcia
   await t.test('T2.5 R9.4: caller con rol solo en OTRO est (ownerB) → RECHAZADO al importar a rodeoA', async () => {
     const { error } = await ownerClientB.rpc('import_rodeo_bulk', {
       p_rodeo_id: rodeoA, // rodeo de estA; ownerB no tiene rol en estA
-      p_rows: [makeRow(300, { visual_id_alt: `${RUN_TAG}_b300` })],
+      p_rows: [makeRow(300, { idv: `${RUN_TAG}_b300` })],
     });
     assert.notEqual(error, null, 'ownerB no debería poder importar a un rodeo de estA');
     assert.match(error.message || '', /owner|veterinarian|not/i, 'el rechazo debe ser por authz de rol');
@@ -551,7 +552,7 @@ test('spec 12 — RPC import_rodeo_bulk (SECURITY DEFINER, authz + import parcia
   await t.test('T2.5 R9.2/R9.4: p_rodeo_id de otro est (rodeoB) → RECHAZADO', async () => {
     const { error } = await ownerClientA.rpc('import_rodeo_bulk', {
       p_rodeo_id: rodeoB, // rodeo de estB; ownerA no tiene rol en estB
-      p_rows: [makeRow(400, { visual_id_alt: `${RUN_TAG}_cross400` })],
+      p_rows: [makeRow(400, { idv: `${RUN_TAG}_cross400` })],
     });
     assert.notEqual(error, null, 'no debería poder escribir a un rodeo de otro establishment');
     // Adversarial: rodeoB no recibió el perfil.
@@ -559,7 +560,7 @@ test('spec 12 — RPC import_rodeo_bulk (SECURITY DEFINER, authz + import parcia
       .from('animal_profiles')
       .select('id')
       .eq('rodeo_id', rodeoB)
-      .like('visual_id_alt', `${RUN_TAG}_cross400`);
+      .like('idv', `${RUN_TAG}_cross400`);
     assert.deepEqual(profs, [], 'no debería haber quedado un perfil en rodeoB');
   });
 
@@ -588,9 +589,9 @@ test('spec 12 — RPC import_rodeo_bulk (SECURITY DEFINER, authz + import parcia
   await t.test('T2.5 R8.2/R8.4: TAG duplicado en el batch → esa fila se saltea, el resto entra (import parcial)', async () => {
     const dupTag = `9820000${Date.now().toString().slice(-8)}`; // 15 díg aprox., único de la corrida
     const rows = [
-      makeRow(700, { tag_electronic: dupTag, visual_id_alt: `${RUN_TAG}_dup700` }),
-      makeRow(701, { tag_electronic: dupTag, visual_id_alt: `${RUN_TAG}_dup701` }), // mismo TAG → colisión unique
-      makeRow(702, { visual_id_alt: `${RUN_TAG}_dup702` }),
+      makeRow(700, { tag_electronic: dupTag, idv: `${RUN_TAG}_dup700` }),
+      makeRow(701, { tag_electronic: dupTag, idv: `${RUN_TAG}_dup701` }), // mismo TAG → colisión unique
+      makeRow(702, { idv: `${RUN_TAG}_dup702` }),
     ];
     const { data, error } = await ownerClientA.rpc('import_rodeo_bulk', {
       p_rodeo_id: rodeoA,
@@ -612,7 +613,7 @@ test('spec 12 — RPC import_rodeo_bulk (SECURITY DEFINER, authz + import parcia
       .from('animal_profiles')
       .select('id')
       .eq('rodeo_id', rodeoA)
-      .like('visual_id_alt', `${RUN_TAG}_dup702`);
+      .like('idv', `${RUN_TAG}_dup702`);
     assert.equal(third.length, 1, 'la 3ra fila (sin TAG) debe haber entrado pese al error de la 2da');
   });
 
@@ -620,8 +621,8 @@ test('spec 12 — RPC import_rodeo_bulk (SECURITY DEFINER, authz + import parcia
   // (CHECK char_length de 0070) DENTRO del RPC, como error de fila (no aborta el chunk).
   await t.test('T2.5 R9.5/R9.4(e): TAG > 64 chars → error de fila (CHECK 0070 enforça dentro del definer)', async () => {
     const rows = [
-      makeRow(800, { tag_electronic: 'X'.repeat(80), visual_id_alt: `${RUN_TAG}_long800` }),
-      makeRow(801, { visual_id_alt: `${RUN_TAG}_long801` }),
+      makeRow(800, { tag_electronic: 'X'.repeat(80), idv: `${RUN_TAG}_long800` }),
+      makeRow(801, { idv: `${RUN_TAG}_long801` }),
     ];
     const { data, error } = await ownerClientA.rpc('import_rodeo_bulk', {
       p_rodeo_id: rodeoA,
@@ -637,13 +638,13 @@ test('spec 12 — RPC import_rodeo_bulk (SECURITY DEFINER, authz + import parcia
   // SEC-12B-HIGH-01 (R3.2/R9.4): tope DURO de filas server-side. Un batch > 5000 filas se rechaza
   // ENTERO (no skip-and-report) y NO inserta NADA — el cap del cliente (R3.2) es UX/bypasseable con
   // curl; el RPC SECURITY DEFINER es la frontera autoritativa contra DoW/amplificación. Filas mínimas
-  // (un visual_id_alt único por fila) para que generar 5001 sea barato.
+  // (un idv único por fila) para que generar 5001 sea barato.
   await t.test('T2.5 SEC-12B-HIGH-01: batch > 5000 filas → RECHAZADO entero (cap server-side, nada se inserta)', async () => {
     const tooMany = 5001;
     const bigBatch = new Array(tooMany);
     for (let i = 0; i < tooMany; i += 1) {
-      // fila mínima y barata: solo identidad (visual_id_alt) + sexo. Prefijo único para el assert adversarial.
-      bigBatch[i] = { row_index: i, sex: 'female', visual_id_alt: `${RUN_TAG}_cap${i}` };
+      // fila mínima y barata: solo identidad (idv) + sexo. Prefijo único para el assert adversarial.
+      bigBatch[i] = { row_index: i, sex: 'female', idv: `${RUN_TAG}_cap${i}` };
     }
     const { data, error } = await ownerClientA.rpc('import_rodeo_bulk', {
       p_rodeo_id: rodeoA,
@@ -662,7 +663,7 @@ test('spec 12 — RPC import_rodeo_bulk (SECURITY DEFINER, authz + import parcia
       .from('animal_profiles')
       .select('id')
       .eq('rodeo_id', rodeoA)
-      .like('visual_id_alt', `${RUN_TAG}_cap%`);
+      .like('idv', `${RUN_TAG}_cap%`);
     assert.equal(pErr, null, pErr && pErr.message);
     assert.deepEqual(profs, [], 'un batch rechazado por el cap NO debe insertar ninguna fila');
   });
@@ -673,7 +674,7 @@ test('spec 12 — RPC import_rodeo_bulk (SECURITY DEFINER, authz + import parcia
   await t.test('T2.5 SEC-12B-HIGH-01: field_operator con batch > 5000 → rechazado por AUTHZ (cap es posterior)', async () => {
     const huge = new Array(5001);
     for (let i = 0; i < 5001; i += 1) {
-      huge[i] = { row_index: i, sex: 'female', visual_id_alt: `${RUN_TAG}_opcap${i}` };
+      huge[i] = { row_index: i, sex: 'female', idv: `${RUN_TAG}_opcap${i}` };
     }
     const { error } = await opClientA.rpc('import_rodeo_bulk', {
       p_rodeo_id: rodeoA,
@@ -691,7 +692,7 @@ test('spec 12 — RPC import_rodeo_bulk (SECURITY DEFINER, authz + import parcia
     const exact = 5000;
     const okBatch = new Array(exact);
     for (let i = 0; i < exact; i += 1) {
-      okBatch[i] = { row_index: i, sex: 'female', visual_id_alt: `${RUN_TAG}_edge${i}` };
+      okBatch[i] = { row_index: i, sex: 'female', idv: `${RUN_TAG}_edge${i}` };
     }
     const { data, error } = await ownerClientA.rpc('import_rodeo_bulk', {
       p_rodeo_id: rodeoA,
