@@ -270,3 +270,77 @@ Capturas (gitignored en `app/e2e/captures/__shots__/identificadores-unificados/`
   Contra el remoto migrado, un `seedAnimal({ visualAlt })` fallaría (columna inexistente) y el test de parto que asserta el
   fallback "recién nacido — pendiente de caravana" ya no aplica. NO lo toqué (fuera del scope E1–E5, cambio transversal a
   la suite existente) — se registra para reconciliar la suite legacy al schema nuevo en un pass aparte.
+
+---
+
+## Fix-loop (2026-07) — relabel chip/label "Sin caravana" → "Sin electrónica" en la lista de animales
+
+**Aprobado por Raf en Puerta 2.** El chip se dispara con `tag_electronic == null` → señala la caravana
+ELECTRÓNICA (SENASA) que falta, no la visual. Con `idv`/`apodo` como hero (delta IDU), "Sin caravana" en un
+animal que SÍ tiene caravana visual (ej. "La Colorada · #AR0457") se leía contradictorio. "Sin electrónica"
+resuelve el contrasentido y es el señalador operativo real. Cambio de COPY (sin lógica nueva).
+
+### Archivos + líneas tocados
+- **`app/src/components/AnimalRow.tsx`** — badge por fila (`NoTagChip`):
+  - visible `Sin caravana` → `Sin electrónica`; a11y `labelA11y('Sin caravana')` → `'Sin electrónica'`.
+  - sufijo a11y de la FILA `, sin caravana` → `, sin electrónica` (mirror del badge, WCAG 2.5.3).
+  - comentarios que quoteaban el label (docstring de `NoTagChip` + jerarquía anti-overlap + fallback hero
+    corregido a "—") → actualizados. Único remanente "Sin caravana" = nota de historia en el docstring (el porqué).
+- **`app/app/(tabs)/animales.tsx`** — chip de FILTRO:
+  - visible `label="Sin caravana"` → `"Sin electrónica"`.
+  - a11y `accessibilityLabel="Filtrar animales sin caravana electrónica"` → `"Filtrar animales sin electrónica"`
+    (WCAG 2.5.3: el label visible debe estar contenido en el accessible name).
+  - empty-state del filtro `'No hay animales sin caravana electrónica.'` → `'No hay animales sin electrónica.'`
+    (consistencia de término en la pantalla; no está aserta­do en ningún test).
+  - comentarios que quoteaban el label → actualizados; dejadas 2 líneas de prosa "sin caravana electrónica"
+    (explícito, no contradictorio) que describen el concepto, no el label.
+- **`app/e2e/baston-dedup.spec.ts`** (210, 280) + **`app/e2e/dedup-screenshot.spec.ts`** (137, 182, +comentario 136)
+  — el selector de navegación `getByRole('button', { name: 'Filtrar animales sin caravana electrónica' })` →
+  `'Filtrar animales sin electrónica'` (consecuencia del cambio de a11y del filtro).
+- **`app/e2e/captures/animalrow-overlap.capture.ts`** (128 selector `getByLabel('Sin caravana')` → `'Sin electrónica'`
+  + comentarios) — capture del fix de overlap que localiza el chip por su a11y.
+- **`specs/active/02-modelo-animal/design-identificadores-unificados.md`** (§306) — label del chip actualizado +
+  nota de reconciliación (fix-loop).
+- **`specs/active/02-modelo-animal/requirements-identificadores-unificados.md`** (bajo IDU.6) — nota de reconciliación
+  (sin reescribir los EARS; el *qué* de IDU.6.1/6.6 no cambió, solo el copy del chip).
+
+### Fuera de scope (deliberado — NO tocado)
+- **Flujo de ASIGNACIÓN** ("¿Es uno de tus animales sin caravana?" / "¿A cuál de tus animales sin caravana?" /
+  "No hay animales sin caravana en este campo." en `FindOrCreateOverlay.tsx` + `asignar-caravanas.tsx`): otra
+  pantalla, no la lista; frases-pregunta gramaticales y no contradictorias; aserta­das intensamente por
+  baston-dedup/dedup-screenshot. El task acotó a la LISTA.
+- **`sigsa-display.ts` / `.test.ts`** (`formatRfidMasked(null) → "Sin caravana"`): display del RFID en el export
+  SIGSA, contexto distinto. Intacto → `check.mjs` verde lo prueba.
+
+### Trazabilidad R<n> → verificación
+- **IDU.6.6** (señal de ausencia de caravana electrónica en la lista, relabelada) →
+  `identificadores-unificados.capture.ts::01` (verificación VISUAL: chip de filtro "Sin electrónica" + badge
+  "Sin electrónica" en AR1050/La Colorada/Manchada, con AR0912 (con tag) mostrando chevron) +
+  `baston-dedup.spec.ts::(c)/(d)` + `dedup-screenshot.spec.ts::2/3` (navegan por el a11y relabelado
+  "Filtrar animales sin electrónica" → prueban que el nuevo accessible name resuelve). Cambio de copy sin
+  lógica → sin unit nuevo; la cobertura es visual (capture) + a11y-navigation (e2e).
+
+### Verificación
+- `node scripts/check.mjs` → **verde** (typecheck + 72/72 unit; `sigsa-display` con 'Sin caravana' intacto, sin regresión).
+- `identificadores-unificados.capture.ts` (`playwright.capture.config.ts`, 412×915) → **3/3 pass**; **captura 01
+  re-generada y confirmada** mostrando "Sin electrónica" (filtro + badges).
+- `baston-dedup.spec.ts` → **5/5 pass**. `dedup-screenshot.spec.ts` → **3/3 pass**. `animalrow-overlap.capture.ts`
+  → **1/1 pass** (el oráculo de no-overlap localiza el chip por `getByLabel('Sin electrónica')`).
+- Trailing `UV_HANDLE_CLOSING` en las corridas de Playwright = teardown de Node en Windows POST-pase (conocido, OK).
+- `design/**/*.png` quedan sucios por el re-render de `e2e:build`/captures — el leader los revierte (no `git add`).
+
+### Autorrevisión adversarial
+- **Grep de completitud**: cero "Sin caravana"/"sin caravana" standalone user-facing en `AnimalRow.tsx` (solo la nota
+  de historia) y `animales.tsx` (solo 2 comentarios de prosa "sin caravana electrónica", explícitos).
+- **WCAG 2.5.3 (label-in-name)**: el visible "Sin electrónica" queda CONTENIDO en el a11y "Filtrar animales sin
+  electrónica" (por eso se cambió el a11y y no solo el visible) → sin regresión de accesibilidad ni voice-control.
+- **Selectores regex de fila** (`/Manchada/`, `/AR0912/`, `/Vaca segundo servicio, 2210/`): siguen matcheando tras
+  cambiar el sufijo a11y `, sin caravana` → `, sin electrónica` (son match parcial, el sufijo va al final).
+- **`getByLabel('Sin electrónica')` en animalrow-overlap** está scopeado a los descendientes de la fila
+  (`tightRow.getByLabel(...)`) → resuelve SOLO al chip (no al aria-label propio de la fila). Verificado verde.
+- **Falsos verdes**: baston-dedup (c/d) y dedup-screenshot (2/3) FALLARÍAN si el a11y nuevo no matcheara (el click
+  del filtro es el gate para llegar al CTA "Asignar caravanas en masa") → su verde prueba el wiring real.
+
+### Reconciliación de specs
+- `design-identificadores-unificados.md §306` + `requirements-identificadores-unificados.md` (nota bajo IDU.6)
+  reconciliados al as-built (label del chip + a11y). Sin reescritura de EARS (el *qué* no cambió).

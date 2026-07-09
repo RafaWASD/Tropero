@@ -43,7 +43,7 @@ export type AnimalRowProps = {
   apodo?: string | null;
   /** ¿El rodeo del animal habilita el campo apodo? (IDU.6.5). Solo con true + apodo el apodo es hero. */
   rodeoUsesApodo?: boolean;
-  /** Caravana electrónica. Si null/undefined → chip neutro "sin caravana" (gancho R1.5). */
+  /** Caravana electrónica. Si null/undefined → chip neutro "Sin electrónica" (gancho R1.5). */
   tagElectronic?: string | null;
   /** Categoría (texto, SIN color de estado): "Vaca" | "Vaquillona" | "Ternero"… */
   category: string;
@@ -65,7 +65,7 @@ export type AnimalRowProps = {
   // ─── Variante COMPACTA (spec 10 T-UI.3 / R11.9) ───────────────────────────────────────
   /**
    * Densidad compacta (spec 10): fila ≥56px (vs ≥72px), subtítulo "categoría · edad" (en vez del
-   * badge de categoría + rodeo), avatar más chico, SIN chip "sin caravana" ni chevron por default.
+   * badge de categoría + rodeo), avatar más chico, SIN chip "Sin electrónica" ni chevron por default.
    * Es la fila de la pantalla de selección masiva (castrar/destetar) y de la lista de la vista de
    * grupo. Default: false (la tab Animales y la lista de lote siguen con la fila grande).
    */
@@ -182,11 +182,13 @@ function AnimalAvatar({ sex, photoUrl, compact }: { sex: AnimalSex; photoUrl?: s
 }
 
 /**
- * Chip "Sin caravana" (gancho del filtro R1.5 + opciones A/B: asignar caravana a un animal cargado
- * solo con visual). Mismo patrón ícono + label que el FutureBullBadge, pero NEUTRO (estado "falta",
- * NO alerta): pill $surface + borde $divider + ícono/texto $textMuted (sin terracota ni verde). El
- * ícono `Tag` (lucide) comunica el CONCEPTO "caravana"; el label "Sin caravana" la ausencia — mismo
- * reparto ícono-concepto / texto-cualificador que el ⭐ del FutureBullBadge. Cero hardcode (ADR-023 §4).
+ * Chip "Sin electrónica" (gancho del filtro R1.5 + opciones A/B: asignar caravana a un animal cargado
+ * solo con visual). El gancho es tag_electronic == null → señala la caravana ELECTRÓNICA (SENASA) que falta,
+ * no la visual (delta fix-loop 2026-07: "Sin caravana" se leía contradictorio con la caravana visual como hero).
+ * Mismo patrón ícono + label que el FutureBullBadge, pero NEUTRO (estado "falta", NO alerta): pill $surface +
+ * borde $divider + ícono/texto $textMuted (sin terracota ni verde). El ícono `Tag` (lucide) comunica el CONCEPTO
+ * "caravana"; el label "Sin electrónica" la ausencia — mismo reparto ícono-concepto / texto-cualificador que el
+ * ⭐ del FutureBullBadge. Cero hardcode (ADR-023 §4).
  */
 function NoTagChip() {
   const muted = getTokenValue('$textMuted', 'color');
@@ -199,12 +201,12 @@ function NoTagChip() {
       paddingHorizontal="$2"
       paddingVertical="$1"
       flexShrink={0}
-      {...labelA11y(Platform.OS, 'Sin caravana')}
+      {...labelA11y(Platform.OS, 'Sin electrónica')}
     >
       <XStack alignItems="center" gap="$1">
         <Tag size={12} color={muted} strokeWidth={2} />
         <Text fontFamily="$body" fontSize="$2" lineHeight="$2" fontWeight="600" color="$textMuted" numberOfLines={1}>
-          Sin caravana
+          Sin electrónica
         </Text>
       </XStack>
     </View>
@@ -281,9 +283,9 @@ function ReproStatusChip({ status }: { status: ReproStatus }) {
   const borderColor = tier === 'attn' ? '$amber' : '$divider';
   const borderWidth = tier === 'good' ? 0 : 1;
   return (
-    // flexShrink 1 + minWidth 0 (NO flexShrink 0): en el caso apretado (categoría LARGA + "Sin caravana")
+    // flexShrink 1 + minWidth 0 (NO flexShrink 0): en el caso apretado (categoría LARGA + "Sin electrónica")
     // el chip es el ÚLTIMO recurso — puede ENCOGERSE y su texto TRUNCAR con "…" (numberOfLines 1) antes de
-    // desbordar hacia el chip "Sin caravana" de la derecha (fix overlap AnimalRow). El rodeo cede PRIMERO
+    // desbordar hacia el chip "Sin electrónica" de la derecha (fix overlap AnimalRow). El rodeo cede PRIMERO
     // (flexShrink mayor), así el chip solo trunca cuando ya no queda rodeo. minWidth 0 es LOAD-BEARING: sin
     // él, el min-content del chip impediría encogerlo por debajo de su texto (y volvería el desborde).
     <View
@@ -363,10 +365,10 @@ export function AnimalRow({
     idv: idv ?? null,
     tag: tagElectronic ?? null,
   });
-  const hero = heroResult.value ?? '—'; // fallback "sin caravana" cuando kind==='none'
+  const hero = heroResult.value ?? '—'; // fallback "—" cuando kind==='none' (el chip "Sin electrónica" comunica la ausencia)
   const secondary = heroResult.secondary; // caravana chica cuando el hero es apodo (o null)
 
-  // Estado de caravana electrónica: null/undefined → estado neutral "sin caravana".
+  // Estado de caravana electrónica: null/undefined → estado neutral "Sin electrónica".
   const hasTag = tagElectronic != null;
 
   // ¿La fila lleva checkbox (selección masiva)? El tap TOGGLEA en vez de navegar.
@@ -374,10 +376,10 @@ export function AnimalRow({
   const showStar = shouldShowFutureBullBadge(futureBull, categoryCode);
   const handlePress = hasCheckbox ? onToggle : onPress;
 
-  // a11y: categoría + identificador legible + rodeo/edad + (sin caravana / futuro torito si aplica).
+  // a11y: categoría + identificador legible + rodeo/edad + (sin electrónica / futuro torito si aplica).
   const a11ySuffix = compact
     ? `${age ? `, ${age}` : ''}${showStar ? ', futuro torito' : ''}`
-    : `, ${rodeo}${hasTag ? '' : ', sin caravana'}`;
+    : `, ${rodeo}${hasTag ? '' : ', sin electrónica'}`;
   const a11yLabel = `${category}, ${heroResult.value ?? 'sin identificador'}${a11ySuffix}`;
 
   const a11yProps = hasCheckbox
@@ -462,7 +464,7 @@ export function AnimalRow({
             // — ruta preferida con `code`) + chip de estado reproductivo (RAR.3.1, hembras) + rodeo muted.
             //
             // Degradación anti-overlap (fix overlap AnimalRow — el subtítulo NUNCA debe pisar el chip "Sin
-            // caravana" de la derecha, que vive FUERA del centro). Prioridad, de más a menos protegido:
+            // electrónica" de la derecha, que vive FUERA del centro). Prioridad, de más a menos protegido:
             //   1. Badge de categoría: SIEMPRE completo → wrapper flexShrink 0 (no trunca su texto).
             //   2. Chip repro (RAR.3.1): ÚLTIMO recurso → flexShrink 1 (trunca "Servida sin t…" al final).
             //   3. Rodeo: cede PRIMERO → flexShrink alto (se va antes de que el chip repro empiece a truncar).
@@ -496,7 +498,7 @@ export function AnimalRow({
 
         {/* Derecha: en compacto sin checkbox no hay afford de navegación extra (la categoría · edad
             ya describe la fila); con checkbox el estado lo da el check. En la fila NORMAL: sin tag →
-            chip neutro "sin caravana"; con tag → chevron (afford de "se abre"). */}
+            chip neutro "Sin electrónica"; con tag → chevron (afford de "se abre"). */}
         {compact ? null : (
           <View flexShrink={0} alignItems="flex-end" justifyContent="center">
             {hasTag ? (

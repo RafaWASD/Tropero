@@ -303,7 +303,9 @@ export function pickHeroIdentifier(input: {
 }
 ```
 
-- **Fallback de display (IDU.6.6)**: el call site elige el texto para `kind==='none'` — `AnimalRow` usa "sin caravana" (el chip neutro ya existente), la ficha usa "Animal". La función pura NO hardcodea el copy (lo pasa el caller), así se testea sin acoplar a la UI.
+- **Fallback de display (IDU.6.6)**: el call site elige el texto para `kind==='none'` — `AnimalRow` muestra el hero "—" y el chip neutro ya existente ("Sin electrónica") comunica la ausencia de caravana electrónica; la ficha usa "Animal". La función pura NO hardcodea el copy (lo pasa el caller), así se testea sin acoplar a la UI.
+
+> **Reconciliación (fix-loop, 2026-07)**: el chip neutro que comunica este estado se relabeló **"Sin caravana" → "Sin electrónica"** (se dispara con `tag_electronic == null`, i.e. señala la caravana ELECTRÓNICA/SENASA que falta, no la visual). Con la caravana visual/apodo como hero, "Sin caravana" se leía contradictorio (ej. "La Colorada · #AR0457" + "Sin caravana"). Mismo relabel en el **chip de FILTRO** de la lista de animales + los **a11y labels** asociados (`labelA11y` del badge, `accessibilityLabel` del filtro "Filtrar animales sin electrónica", sufijo a11y de fila). La semántica del gancho NO cambió.
 - **`AnimalRow`**: reemplaza `hero = idv ?? visualId ?? '—'` + `showSecondaryVisual` por `pickHeroIdentifier(...)`. Gana props `apodo?: string | null` + `rodeoUsesApodo?: boolean`; pierde `visualId`. El secundario (cuando el hero es apodo) se muestra inline muted (`· #<caravana>`), reusando el idiom actual del secundario visual.
 - **Ficha** (`animal/[id].tsx`): `heroLabel` pasa de `idv ?? visualIdAlt ?? tagElectronic ?? 'Animal'` a `pickHeroIdentifier({ apodo, rodeoUsesApodo, idv, tag }).value ?? 'Animal'`; la ficha ya lee `custom_attributes` (datos personalizados) → tiene el apodo; el `rodeoUsesApodo` sale del set de fields habilitados que la ficha ya consulta.
 

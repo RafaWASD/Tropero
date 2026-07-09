@@ -62,6 +62,7 @@ final).
   solo se ofrecen en animales activos).
 - **RCF.1.6** — El sistema no deberá renderizar en la sección "Identificación" ninguna afordancia para
   `visual_id_alt` (fuera de alcance de este delta).
+  > **SUPERADA por `identificadores-unificados` (2026-07-09)**: `visual_id_alt` fue **eliminado** del modelo (columna dropeada en `0122`, datos descartados — beta sin data real) → no hay afordancia posible ni dato que mostrar. La "Identificación" queda con electrónica + visual (idv). Ver IDU.1.4.
   > **Reconciliación as-built (delta bastoneo, 2026-07-06)**: la parte "ni un botón 'Detectar bastoneo'" de
   > esta requirement queda SUPERADA por RCF.6 — el bastoneo de la caravana ELECTRÓNICA sí se ofrece ahora
   > (afordancia "Bastonear la caravana" + sheet de scan acotado). `visual_id_alt` sigue sin afordancia (no es

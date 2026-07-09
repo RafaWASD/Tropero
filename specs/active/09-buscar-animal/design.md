@@ -7,6 +7,14 @@
 
 - **2026-05-26 — Creación inicial.** Design redactado siguiendo decisiones de sesiones 9-11 del proyecto. Consume primitives de spec 02 (sin redefinir schema), declara dependencia con spec 04 (BLE bastón) y con ADR-018 (estructura de navegación principal). Documenta TODO de refinamiento de R4.13 de spec 02 para los flujos R7/R8 (opciones A y B de duplicados lógicos).
 
+## Deltas posteriores (ADR-028)
+
+> Índice de delta-specs que extienden la búsqueda. El baseline de abajo **no se reescribe**; cada delta vive en su propio `{context,requirements,design,tasks}-<slug>.md` (en `specs/active/02-modelo-animal/`, donde nació).
+
+| Slug | Qué agrega a la búsqueda | Estado |
+|---|---|---|
+| `identificadores-unificados` | **búsqueda unificada por los 3 identificadores**: electrónica (15 díg exacto + substring numérico), visual `idv` **alfanumérico** (antes solo se encontraba si era todo-dígitos), y **apodo** (custom_attributes, canal nuevo — `buildApodoSearchQuery`). Aplica al buscador general, cría al pie y la entrada manual "sin bastón" de maniobra. El único camino solo-electrónica sigue siendo el "Bastonear" (duplicate-check del EID). **CON BACKEND** (`0122`). Ver `{context,requirements,design,tasks}-identificadores-unificados.md` | done (Puerta 2, 2026-07-09) |
+
 ## Arquitectura general
 
 ```

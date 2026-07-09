@@ -63,7 +63,7 @@
 
 ## Fase F — Cierre + reconciliación (Puerta 2, leader)
 
-- [ ] **F1** — Reconciliar deltas previos (design §0, IDU.8): nota "SUPERADA por `identificadores-unificados`" bajo `PCV.2.4` (+ refs §2c/§5) de `parto-caravana-visual-por-ternero`, `RCF.1.6` de `caravana-ficha`, y `D3` de `nombre-apodo`. NO reescribir los EARS. Cubre: IDU.8.1, IDU.8.2, IDU.8.3.
-- [ ] **F2** — Folder al `design.md` baseline de spec 02 + `design.md` de spec 09 el bloque "Deltas posteriores" con puntero a este delta (bajo R4.2/R4.13 y R5). Cubre: IDU.8.4.
-- [ ] **F3** — `impl_identificadores-unificados.md`: mapa `R<n> → archivo:test`. Verificar que cada IDU.<n> tiene ≥1 test. Reconciliar specs al as-built antes de commitear (memoria `feedback_correcciones_en_specs`).
-- [ ] **F4** — Deploy (GATEADO a Raf): PASO 1 (frontend + schema PowerSync) → PASO 2 (migración `0122` por MCP con autorización de Raf) + coordinación del schema/sync-rules PowerSync con Raf (design §11).
+- [x] **F1** — Reconciliar deltas previos: nota "SUPERADA por `identificadores-unificados`" agregada bajo `PCV.2.4` (parto-caravana-visual-por-ternero, + cubre refs D2/Edge), `RCF.1.6` (caravana-ficha), y `RNA.4.1`/D3 (nombre-apodo). EARS intactos. Cubre IDU.8.1/8.2/8.3.
+- [x] **F2** — Fold: fila `identificadores-unificados` agregada al bloque "Deltas posteriores (ADR-028)" del baseline `design.md` de spec 02; bloque "Deltas posteriores" nuevo agregado al `design.md` de spec 09 (búsqueda por los 3). Cubre IDU.8.4.
+- [x] **F3** — `impl_identificadores-unificados.md`: mapa `R<n> → archivo:test` documentado (Fase E) + trazabilidad verificada por el reviewer. Fix-loop del chip "Sin electrónica" aplicado y reconciliado en specs (design §306 + nota IDU.6). As-built = specs (`feedback_correcciones_en_specs`).
+- [x] **F4** — Deploy: PASO 1 (frontend + schema PowerSync) + PASO 2 (migración `0122` por MCP, **autorizado por Raf**) hechos + verificados (estructural 7/7 + grants 7/7). PowerSync `rafaq.yaml` usa `SELECT *` → tolera el drop de columna, sin edit.

@@ -86,6 +86,8 @@ El 4to campo histórico `animal_profiles.visual_id_alt` se **elimina del todo** 
 - **IDU.6.5** El sistema deberá leer, para cada animal de la lista, el valor de su `apodo` y si el rodeo del animal tiene el campo `apodo` habilitado (honrando el overlay de configuración pendiente offline).
 - **IDU.6.6** Cuando un animal no tenga ningún identificador de usuario, el sistema deberá mostrar el fallback "sin caravana" (lista) o "Animal" (ficha) como hero.
 
+> **Reconciliación (fix-loop, 2026-07)**: el chip user-facing que señala la ausencia de caravana ELECTRÓNICA en la lista (gancho `tag_electronic == null` — badge por fila + chip de FILTRO + a11y) se relabeló **"Sin caravana" → "Sin electrónica"**. Motivo: con `idv`/`apodo` como hero, "Sin caravana" en un animal que SÍ tiene caravana visual se leía contradictorio. No cambia el *qué* de IDU.6.1/IDU.6.6 (el hero fallback es "—" y el chip comunica la señal de estado); solo el copy del chip y sus a11y labels. Ver `design §306`.
+
 ## IDU.7 — Rename del concepto Nombre
 
 - **IDU.7.1** El sistema deberá presentar el concepto de nombre del animal bajo la etiqueta "Nombre/Apodo": actualizando el `label` del `field_definition` `apodo` a "Nombre/Apodo" y eliminando la etiqueta histórica "Nombre / seña" (que rotulaba `visual_id_alt`).

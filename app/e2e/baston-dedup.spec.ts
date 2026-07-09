@@ -207,7 +207,7 @@ test('(c) opción B: masiva — 2 bastoneos → asignar a 2 candidatos → conta
   await expect(page.getByText('5002', { exact: true }).first()).toBeVisible({ timeout: 30_000 });
 
   // Entramos a la masiva por el entry point de la tab Animales (filtro noTag → CTA).
-  await page.getByRole('button', { name: 'Filtrar animales sin caravana electrónica' }).click();
+  await page.getByRole('button', { name: 'Filtrar animales sin electrónica' }).click();
   await page.getByRole('button', { name: 'Asignar caravanas en masa' }).click();
   await expect(page.getByText('Bastoneá para empezar', { exact: true })).toBeVisible({ timeout: 15_000 });
   // Contador arranca en 0.
@@ -277,7 +277,7 @@ test('(d) opción B: bastonear un EID ya asignado NO encola y avisa (prevención
   await expect(page.getByText('6001', { exact: true }).first()).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText('6050', { exact: true }).first()).toBeVisible({ timeout: 30_000 });
 
-  await page.getByRole('button', { name: 'Filtrar animales sin caravana electrónica' }).click();
+  await page.getByRole('button', { name: 'Filtrar animales sin electrónica' }).click();
   await page.getByRole('button', { name: 'Asignar caravanas en masa' }).click();
   await expect(page.getByText('Bastoneá para empezar', { exact: true })).toBeVisible({ timeout: 15_000 });
 

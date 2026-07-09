@@ -47,6 +47,7 @@ Un solo cambio de capacidad, en tres capas coordinadas:
 **PCV.2.3** El RPC `register_birth` **no deberá** exigir server-side el idv ni el tag de un ternero (sin `NOT NULL`, sin check de obligatoriedad): un ternero con `calf_idv` vacío/ausente y `calf_tag_electronic` vacío/ausente deberá crearse con éxito.
 
 **PCV.2.4** Cuando un ternero se cree **sin idv y sin tag**, el RPC deberá poner el **fallback** `visual_id_alt = '<fallback recién nacido>'` para satisfacer el check "al menos una identidad" (R4.2, `0021`), sin que el operario haya tenido que cargar nada.
+> **SUPERADA por `identificadores-unificados` (2026-07-09, delta CON BACKEND, `0122`)**: se **eliminó `visual_id_alt`** (columna + fallback) y se **dropeó** el trigger de identidad (R4.2 / `0021`) → todas las identidades pasan a ser **opcionales**, un ternero puede crearse con cero. `register_birth` se re-CREATE **sin** el fallback (ya no hay check que satisfacer). Cubre también los refs de `visual_id_alt` en la tabla de decisiones (D2) y en la sección Edge. Ver `requirements-identificadores-unificados.md` IDU.1.4/IDU.1.5.
 
 ## PCV.3 — Paso del idv per-calf a `registerBirth` (D1)
 

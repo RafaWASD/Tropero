@@ -9,7 +9,7 @@
 //   - Lista: fetchAnimals(establishmentId, filtros) scopeado por EstablishmentContext (R1.1).
 //   - Búsqueda permanente con DEBOUNCE 250ms → searchAnimals (TAG/IDV exacto + visual fuzzy, R1.2/R5).
 //   - Filtros reales (R1.5): rodeo (desde useRodeo), estado (active/sold/dead/transferred),
-//     "sin caravana" (tag_electronic IS NULL).
+//     "Sin electrónica" (tag_electronic IS NULL).
 //   - No-match (R1.4): CTA "Dar de alta este animal" → /crear-animal con el id precargado en el
 //     campo apropiado (heurística R1.4 = classifyIdentifier, util pura).
 //   - Tap en fila (R1.3): → ficha /animal/[id].
@@ -58,7 +58,7 @@ function formatThousands(n: number): string {
 }
 
 // Copy contextual del empty-state cuando hay un filtro activo y 0 resultados (R1.5). Prioriza el
-// filtro más específico para el mensaje: estado → sin caravana → rodeo. Voseo es-AR.
+// filtro más específico para el mensaje: estado → sin electrónica → rodeo. Voseo es-AR.
 function filteredEmptyCopy(
   statusFilter: AnimalStatus,
   statusLabel: string,
@@ -70,7 +70,7 @@ function filteredEmptyCopy(
     return `No hay animales ${statusLabel.toLowerCase()}.`;
   }
   if (onlyNoTag) {
-    return 'No hay animales sin caravana electrónica.';
+    return 'No hay animales sin electrónica.';
   }
   if (rodeoName) {
     return `No hay animales en «${rodeoName}».`;
@@ -209,7 +209,7 @@ export default function AnimalesScreen() {
   const visible = isSearching ? searchResults : list;
   const showNoMatch = isSearching && !searching && searchResults.length === 0;
 
-  // ¿Hay algún filtro activo? (estado distinto del default 'active', rodeo elegido, o "sin caravana").
+  // ¿Hay algún filtro activo? (estado distinto del default 'active', rodeo elegido, o "sin electrónica").
   // Distingue el empty-state "no hay resultados PARA ESTE FILTRO" del "el campo no tiene animales".
   const hasActiveFilter = statusFilter !== 'active' || rodeoFilter !== null || onlyNoTag;
 
@@ -252,8 +252,8 @@ export default function AnimalesScreen() {
   );
 
   // Entry point a la asignación MASIVA (spec 09 chunk dedup opción B, RD5.1 / D-c): aparece con el filtro
-  // "sin caravana" activo — el operario que está mirando sus animales sin caravana es exactamente quien va
-  // a caravanearlos en serie en la manga.
+  // "Sin electrónica" activo — el operario que está mirando sus animales sin caravana electrónica es
+  // exactamente quien va a caravanearlos en serie en la manga.
   const onBulkAssign = useCallback(() => {
     router.push('/asignar-caravanas');
   }, [router]);
@@ -286,7 +286,7 @@ export default function AnimalesScreen() {
           <AnimalSearchBar value={query} onChangeText={setQuery} />
         </YStack>
 
-        {/* Chips de filtro (R1.5): rodeo / estado / sin caravana. */}
+        {/* Chips de filtro (R1.5): rodeo / estado / sin electrónica. */}
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
@@ -316,9 +316,9 @@ export default function AnimalesScreen() {
             }}
           />
           <FilterChip
-            label="Sin caravana"
+            label="Sin electrónica"
             selected={onlyNoTag}
-            accessibilityLabel="Filtrar animales sin caravana electrónica"
+            accessibilityLabel="Filtrar animales sin electrónica"
             onPress={() => setOnlyNoTag((v) => !v)}
           />
         </ScrollView>
@@ -345,9 +345,9 @@ export default function AnimalesScreen() {
           />
         ) : null}
 
-        {/* CTA a la asignación MASIVA (spec 09 chunk dedup opción B, RD5.1): visible con el filtro "sin
-            caravana" activo. El operario que filtró sus animales sin caravana es quien va a caravanearlos
-            en serie con el bastón. */}
+        {/* CTA a la asignación MASIVA (spec 09 chunk dedup opción B, RD5.1): visible con el filtro "Sin
+            electrónica" activo. El operario que filtró sus animales sin caravana electrónica es quien va a
+            caravanearlos en serie con el bastón. */}
         {onlyNoTag ? (
           <YStack width="100%" paddingBottom="$3">
             <Button variant="primary" fullWidth onPress={onBulkAssign}>

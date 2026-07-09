@@ -133,8 +133,8 @@ test('captura: BulkTagAssignmentScreen (opción B, asignación masiva) — vací
   await gotoAnimales(page);
   await expect(page.getByText('0512', { exact: true }).first()).toBeVisible({ timeout: 30_000 });
 
-  // Filtro "Sin caravana" → aparece el CTA "Asignar caravanas en masa" → entra a la pantalla masiva.
-  await page.getByRole('button', { name: 'Filtrar animales sin caravana electrónica' }).click();
+  // Filtro "Sin electrónica" → aparece el CTA "Asignar caravanas en masa" → entra a la pantalla masiva.
+  await page.getByRole('button', { name: 'Filtrar animales sin electrónica' }).click();
   await page.getByRole('button', { name: 'Asignar caravanas en masa' }).click();
 
   // Estado VACÍO: cola vacía → "bastoneá para empezar" + contador en 0.
@@ -179,7 +179,7 @@ test('opción B: bastonear un EID ya asignado NO encola y avisa (prevención cli
   await expect(page.getByText('3050', { exact: true }).first()).toBeVisible({ timeout: 30_000 });
 
   // Entramos a la masiva (tab Más sirve también, pero reusamos el filtro + CTA de la tab Animales).
-  await page.getByRole('button', { name: 'Filtrar animales sin caravana electrónica' }).click();
+  await page.getByRole('button', { name: 'Filtrar animales sin electrónica' }).click();
   await page.getByRole('button', { name: 'Asignar caravanas en masa' }).click();
   await expect(page.getByText('Bastoneá para empezar', { exact: true })).toBeVisible({ timeout: 15_000 });
 

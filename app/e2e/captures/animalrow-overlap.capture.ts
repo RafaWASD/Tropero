@@ -1,5 +1,5 @@
 // e2e/captures/animalrow-overlap.capture.ts — CAPTURE FILE del Gate 2.5 (ADR-029) para el FIX de
-// LAYOUT "overlap AnimalRow": en la lista de Animales, el chip "Sin caravana" (derecha) se superponía
+// LAYOUT "overlap AnimalRow": en la lista de Animales, el chip "Sin electrónica" (derecha) se superponía
 // con el chip de estado reproductivo "Servida sin tacto" cuando la categoría era larga ("Vaca segundo
 // servicio"). Bug Nivel A (ADR-028, sin delta-spec).
 //
@@ -76,7 +76,7 @@ test('capturas fix overlap AnimalRow (fila apretada sin superposición + fila no
 
   // (a) FILA APRETADA = el caso del bug: hembra con categoría LARGA "Vaca segundo servicio" (badge) +
   //     estado reproductivo "Servida sin tacto" (categoría PROBADA → served_untested, sin eventos) +
-  //     SIN caravana electrónica (→ chip "Sin caravana" a la derecha). categoryOverride=true FIJA la
+  //     SIN caravana electrónica (→ chip "Sin electrónica" a la derecha). categoryOverride=true FIJA la
   //     categoría de display en vaca_segundo_servicio (si no, el espejo C6 la recomputaría a vaquillona
   //     sin partos → cambiaría badge Y estado). idv '2210' identifica la fila.
   await seedAnimal(establishmentId, rodeoId, {
@@ -87,7 +87,7 @@ test('capturas fix overlap AnimalRow (fila apretada sin superposición + fila no
   });
 
   // (b) FILA NORMAL = categoría corta + chevron: macho ternero CON caravana electrónica (→ chevron, no
-  //     chip "Sin caravana"). Sin chip repro (macho). Debe verse idéntica al comportamiento previo.
+  //     chip "Sin electrónica"). Sin chip repro (macho). Debe verse idéntica al comportamiento previo.
   await seedAnimal(establishmentId, rodeoId, {
     idv: '3301',
     sex: 'male',
@@ -98,7 +98,7 @@ test('capturas fix overlap AnimalRow (fila apretada sin superposición + fila no
 
   // (c) CONTROL = categoría corta + chip repro + chevron (no apretado): multípara CON caravana → "Multípara"
   //     + "Servida sin tacto" + chevron. Confirma que el chip repro se ve COMPLETO cuando hay lugar (chevron
-  //     ~24px deja mucho más ancho que el chip "Sin caravana"), i.e. el caso normal NO cambió.
+  //     ~24px deja mucho más ancho que el chip "Sin electrónica"), i.e. el caso normal NO cambió.
   await seedAnimal(establishmentId, rodeoId, {
     idv: '5501',
     sex: 'female',
@@ -122,10 +122,10 @@ test('capturas fix overlap AnimalRow (fila apretada sin superposición + fila no
   await expect(controlRow).toBeVisible({ timeout: 30_000 });
 
   // ── ORÁCULO de NO-SUPERPOSICIÓN (el corazón del fix). En la fila apretada, el borde DERECHO del chip
-  //    de estado repro ("Servida sin tacto") NO debe cruzar el borde IZQUIERDO del chip "Sin caravana".
+  //    de estado repro ("Servida sin tacto") NO debe cruzar el borde IZQUIERDO del chip "Sin electrónica".
   //    Scopeamos ambos DENTRO de la fila del bug (hay otro "Servida sin tacto" en la multípara). ──
   const reproChip = tightRow.getByLabel('Estado reproductivo: Servida sin tacto');
-  const noTagChip = tightRow.getByLabel('Sin caravana');
+  const noTagChip = tightRow.getByLabel('Sin electrónica');
   await expect(reproChip).toBeVisible();
   await expect(noTagChip).toBeVisible();
   const reproBox = await reproChip.boundingBox();
@@ -133,7 +133,7 @@ test('capturas fix overlap AnimalRow (fila apretada sin superposición + fila no
   expect(reproBox).not.toBeNull();
   expect(noTagBox).not.toBeNull();
   if (reproBox && noTagBox) {
-    // Sin superposición horizontal: fin del chip repro ≤ inicio del chip "Sin caravana" (tolerancia 0.5px
+    // Sin superposición horizontal: fin del chip repro ≤ inicio del chip "Sin electrónica" (tolerancia 0.5px
     // por redondeo sub-pixel del layout web).
     expect(reproBox.x + reproBox.width).toBeLessThanOrEqual(noTagBox.x + 0.5);
   }
@@ -142,7 +142,7 @@ test('capturas fix overlap AnimalRow (fila apretada sin superposición + fila no
   // 01 — la lista completa: la fila apretada (bug) + la normal + el control, todas sin superposición.
   await shot(page, '01-lista-sin-overlap');
   // 02 — detalle de la fila APRETADA (el caso del bug): badge "Vaca segundo servicio" completo + chip
-  //      repro truncado si hace falta + chip "Sin caravana" completo, SIN pisarse.
+  //      repro truncado si hace falta + chip "Sin electrónica" completo, SIN pisarse.
   await shotRow(page, tightRow, '02-fila-apretada-sin-overlap');
   // 03 — detalle de la fila NORMAL (categoría corta + chevron): sin cambios respecto al comportamiento previo.
   await shotRow(page, normalRow, '03-fila-normal-chevron');

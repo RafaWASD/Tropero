@@ -73,6 +73,7 @@ Se remueve **solo** el input **editable** "Nombre / seña (opcional)" (el que se
 ### RNA.4 — Ficha: display legacy conservado + apodo por custom_attributes (D3)
 
 **RNA.4.1** — La ficha (`animal/[id].tsx`) deberá seguir mostrando la fila "Nombre / seña" (`visual_id_alt`) solo cuando el animal tiene un `visual_id_alt` no nulo (display condicional de `a25e21f`, sin cambios) — para no perder datos legacy.
+> **SUPERADA por `identificadores-unificados` (2026-07-09)**: `visual_id_alt` fue **eliminado** (columna dropeada en `0122`, datos descartados — beta sin data real). La ficha ya **no** muestra "Nombre / seña"; el "apodo" (custom_attributes) es el único nombre. **RNA.4.2 sigue vigente** (apodo por "Datos personalizados"). Ver IDU.1.4.
 
 **RNA.4.2** — Donde el rodeo del animal tiene el "apodo" habilitado, la ficha deberá mostrar su valor por la sección "Datos personalizados" existente (`CustomPropertiesFicha`), sin una fila dedicada nueva.
 
