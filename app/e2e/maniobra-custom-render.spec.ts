@@ -250,7 +250,9 @@ test('propiedad custom: aparece en el alta (paso 4) → custom_attributes; visib
   // ── La FICHA muestra "Datos personalizados" con el current-value + permite editar ──
   const fichaSection = page.getByText('Datos personalizados', { exact: true });
   await expect(fichaSection).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByText('Pinto', { exact: true }).first()).toBeVisible({ timeout: 15_000 });
+  // El apodo es HERO → la fila de la lista (montada hidden detrás de la ficha) tiene su propio <span>Pinto</span>;
+  // filtramos por `visible:true` para apuntar al de la ficha, no al oculto (memoria reference_e2e_sheet_no_nav_oracle).
+  await expect(page.getByText('Pinto', { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 15_000 });
   await fichaSection.scrollIntoViewIfNeeded(); // la sección de custom va al fondo → scroll para la captura
   await shot(page, 'custom-prop-ficha');
 

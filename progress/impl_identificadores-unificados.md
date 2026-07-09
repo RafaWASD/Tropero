@@ -198,3 +198,75 @@ server-validado) y las corre VERDES contra el remoto. NO se tocó `supabase/migr
 - **Falsos verdes**: el 23505 de idv duplicado sigue verificando el reject real + rollback (0/0 eventos/terneros). El apodo-charset verifica el reject con errcode 23514 (no un OK espurio). El mono-ternero verifica que la cría SÍ se crea (calf_id no null + categoría).
 - **Multi-tenant**: SIGSA idv remapeado NO cruza campos (idv unique per-est; ests frescos por corrida). `establishment_id` siempre del contexto, nunca hardcode.
 - **Flake vs regresión**: T-DB.9/T-DB.10 (Management API) fallaron 1 vez con `adminQuery HTTP` (rate-limit, no tocan `visual_id_alt`) → reintento verde. T-DB.4(f) fue regresión REAL (trigger dropeado) → corregido, no reintentado a ciegas.
+
+---
+
+## Fase E frontend (E1–E5) — E2E de regresión + capturas Gate 2.5 (contra el remoto MIGRADO 0122)
+
+**Scope**: SOLO e2e nuevos + capture (Fase E, tareas E1–E5). NO se tocó código de app ni tests unit ni migraciones.
+El frontend (Fase B/C/D, commit `865e954`) + la migración `0122` YA están en `main`/el remoto. `e2e:build` (dist)
++ los e2e corren contra ese estado. Archivos NUEVOS (los únicos del diff de esta pasada):
+- `app/e2e/identificadores-unificados.spec.ts` — red de regresión E1–E4 (8 tests).
+- `app/e2e/captures/identificadores-unificados.capture.ts` — capture Gate 2.5 (3 tests → 9 capturas nombradas).
+
+**Import de fixtures**: `test`/`expect` de `./helpers/fixtures` (NO `@playwright/test`) + `type Page` de `@playwright/test`
+(fixtures no exporta `Page`; `e2e/` está EXCLUIDO del tsconfig → Playwright compila con esbuild, tsc no lo mira).
+
+### Resultado de las corridas (remoto migrado)
+| suite/capture | tests | resultado |
+|---|---|---|
+| `identificadores-unificados.spec.ts` | 8 | ✅ 8/8 pass (59.5s) |
+| `identificadores-unificados.capture.ts` (`playwright.capture.config.ts`, 412×915) | 3 | ✅ 3/3 pass → 9 PNGs |
+
+Capturas (gitignored en `app/e2e/captures/__shots__/identificadores-unificados/`, NO staged): `01-lista-hero-por-apodo-vs-caravana`,
+`02-busqueda-electronica-exacta`, `03-busqueda-idv-alfanumerico`, `04-busqueda-por-apodo`, `05-ficha-hero-por-apodo`,
+`06-ficha-identificacion-sin-nombre-sena`, `07-alta-paso4-sin-caravana`, `08-ficha-alta-sin-caravana-hero-animal`,
+`09-warning-apodo-duplicado`. El leader las veta visualmente antes de la Puerta 2.
+
+### Trazabilidad IDU.<n> → test (Fase E)
+- **IDU.4.3** (idv alfanumérico exacto/parcial) → `identificadores-unificados.spec.ts::E1a` (búsqueda "VAQ12" → "VAQ12AB") + `::E1c` (maniobra manual "VQ88AB").
+- **IDU.4.4** (apodo, custom_attributes) → `::E1a` (búsqueda "Manchada") + `::E1d` (maniobra manual "Pinta").
+- **IDU.4.6** (los 3 en el buscador general) → `::E1a` (electrónica exacta 15 díg + idv alfanum + apodo).
+- **IDU.4.7** (cría al pie / classifyCalfQuery: idv alfanum + apodo + eid) → `::E1b` (LinkCalfPrompt: "CR12XY" → found · "Lucera" → found · tag 15 díg → eid→edit→found).
+- **IDU.4.8** (maniobra manual "sin bastón") → `::E1c` (idv alfanumérico → found → auto-avance) + `::E1d` (apodo → found → auto-avance).
+- **IDU.1.4** (0 identificadores persiste, sin 23514) → `::E2a` (alta en blanco → perfil con idv NULL + tag NULL, oráculo server `waitForSoleProfile`) + `::E2b` (parto de cría sin caravana → `waitForServerBirth` calfCount=1, birth_calves server-only prueba que register_birth no rechazó con 23514).
+- **IDU.6.2** (hero apodo en lista) → `::E3` (fila "Manchada" hero + "· #AA111" secundaria; contraste "AA222" idv hero sin "· #AA222").
+- **IDU.6.3** (hero apodo en ficha) → `::E3` (ficha "Manchada" hero + "#AA111" secundaria + "Datos personalizados").
+- **IDU.6.4** (sin apodo → idv/tag hero) → `::E3` (A2 en rodeo sin apodo → "AA222" caravana grande).
+- **IDU.5.4** (aviso de duplicado por campo) → `::E4` (apodo "Pinta" ya usado en el campo activo → aviso inline).
+- **IDU.5.5** (no bloquea el guardado) → `::E4` ("Crear animal" con el aviso presente → ficha + `waitForServerAnimalProfile`).
+- **IDU.5.7** (mismo apodo en OTRO campo → sin aviso) → `::E4` ("Manchada" solo en field2 → NO aparece el aviso en field1, 2 campos).
+- **IDU.3.6** (ficha sin "Nombre / seña") → `capture::06` (aserción `getByText('Nombre / seña').toHaveCount(0)` + shot de la sección Identificación).
+
+### Autorrevisión adversarial (Fase E)
+- **¿Los tests prueban el comportamiento REAL o pasan por casualidad?** Sí — self-review VISUAL de las capturas: `01`
+  muestra "Manchada"/"La Colorada" como HERO con "· #idv" secundario vs "AR0912"/"AR1050" con la caravana grande;
+  `05` muestra la ficha "Manchada" hero + "#AB123A0001" secundario + Identificación SIN "Nombre / seña" (solo
+  electrónica/visual); `08` muestra el hero "Animal" (0 identificadores) + afordancias vacías; `09` muestra el aviso
+  muted bajo el input + "Crear animal" habilitado (no bloquea). No son pantallas en blanco.
+- **Oráculos server-side (no solo UI)**: E2a poll de `animal_profiles` (idv NULL) + `animals.tag_electronic` NULL;
+  E2b `waitForServerBirth` (calfCount=1, `birth_calves` es server-only → la RPC corrió sin 23514); E4 `waitForServerAnimalProfile`.
+  Evita el patrón-trampa del backlog 2026-06-10 (asertar solo el overlay).
+- **Multi-tenant**: `establishmentId` SIEMPRE del contexto (seeds namespaced RUN_TAG); IDU.5.7 prueba el scope por
+  campo (Manchada en field2 no filtra a field1). Cero hardcode de `establishment_id`.
+- **Offline-first**: la búsqueda (general/cría al pie/maniobra), el hero y el warning son lecturas LOCALES (SQLite
+  PowerSync); se esperó el sync a la lista antes de cada búsqueda (proxy de "ya bajó al local").
+- **NO se usó `visual_id_alt` en ningún seed** (la columna se dropeó): los animales se siembran con `idv`/`tag`/apodo
+  (custom_attribute) solamente. `seedAnimal` sin `visualAlt` no toca la columna eliminada.
+- **Bug cazado + fijado en la autorrevisión**: la lista queda MONTADA (hidden) detrás de la ficha pusheada →
+  `getByText(hero).first()` agarraba el nodo OCULTO de la lista (E3 + capture rojos). Fix: `.filter({ visible: true }).first()`
+  para apuntar a la ficha (memoria `reference_e2e_sheet_no_nav_oracle`). Re-verde. Idem el shot `09`: scrolleaba el header
+  de sección (recortaba el aviso contra el footer) → scroll del AVISO mismo a la vista → shot bien enmarcado.
+
+### Reconciliación de specs (Fase E)
+- `tasks-identificadores-unificados.md` E1–E5 pasan a `[x]` con el as-built (los archivos + qué cubre cada uno).
+- Sin cambio de `requirements`/`design` (el *qué*/*cómo* no cambió; los e2e solo VERIFICAN los IDU ya especificados).
+- **`design/` NO fue tocado** por esta corrida aislada (mis specs no escriben a `design/`; `e2e:build`/mi capture tampoco).
+  `git status` = solo los 2 archivos nuevos; ningún PNG staged; los `__shots__/*.png` gitignored.
+
+### Pendiente (fuera de esta pasada, para el leader / otras terminales)
+- **Suite e2e PRE-EXISTENTE con `visualAlt`**: `app/e2e/helpers/admin.ts` (`seedAnimal.visualAlt`, `waitForServerAnimalProfile.visualAlt`,
+  `adminQueryProfileByVisual`) y varios specs (`maniobra-identify`, `events`, `sigsa`, …) SIGUEN referenciando `visual_id_alt`.
+  Contra el remoto migrado, un `seedAnimal({ visualAlt })` fallaría (columna inexistente) y el test de parto que asserta el
+  fallback "recién nacido — pendiente de caravana" ya no aplica. NO lo toqué (fuera del scope E1–E5, cambio transversal a
+  la suite existente) — se registra para reconciliar la suite legacy al schema nuevo en un pass aparte.

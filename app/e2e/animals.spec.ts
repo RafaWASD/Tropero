@@ -1427,10 +1427,13 @@ test('delta #15 (RCAP.3.3): un ternero que YA tiene madre no se re-vincula → a
 // ─── Delta #2 NOMBRE/APODO por rodeo (RNA.2/RNA.3/RNA.8) ─────────────────────────────────────────────────
 //
 // El built-in editable "Nombre / seña" (visual_id_alt) DEJÓ de mostrarse por default en el alta (RNA.2.1); el
-// apodo pasa a ser un dato custom opt-in por rodeo (CustomPropertiesForm → custom_attributes). El mensaje de
-// identificador mínimo ya no menciona "nombre/seña" (RNA.3.1), sin relajar hasAtLeastOneIdentifier (RNA.3.2).
+// apodo pasa a ser un dato custom opt-in por rodeo (CustomPropertiesForm → custom_attributes).
+//
+// RECONCILIACIÓN (delta IDU, IDU.1.4/IDU.1.5): el guard "al menos un identificador" (RNA.3.1/RNA.3.2) se
+// ELIMINÓ después — el alta en blanco ahora PERSISTE (cubierto por E2a en identificadores-unificados.spec.ts).
+// Este test conserva solo la parte VIGENTE (RNA.2.1: sin "Nombre / seña" en el alta).
 
-test('delta #2 nombre/apodo (RNA.2.1/RNA.3.1): el alta NO muestra "Nombre / seña" por default + el mensaje de identificador mínimo no lo menciona', async ({
+test('delta #2 nombre/apodo (RNA.2.1): el alta NO muestra "Nombre / seña" por default', async ({
   page,
 }) => {
   const user = await createTestUser('apodo-off');
@@ -1451,15 +1454,9 @@ test('delta #2 nombre/apodo (RNA.2.1/RNA.3.1): el alta NO muestra "Nombre / señ
   await expect(page.getByLabel('Nombre / seña (opcional)', { exact: true })).toHaveCount(0);
   await expect(page.getByText(/nombre\s*\/\s*seña/i)).toHaveCount(0);
 
-  // RNA.3.1/RNA.3.2: alta EN BLANCO (sin ningún identificador) → "Crear animal" muestra el mensaje mínimo
-  // ENUMERANDO solo caravana electrónica + caravana visual (sin "nombre/seña"); no encola el alta.
-  await page.getByRole('button', { name: 'Crear animal', exact: true }).click();
-  await expect(
-    page.getByText('Cargá al menos un identificador: caravana electrónica o caravana visual.', { exact: true }),
-  ).toBeVisible({ timeout: 10_000 });
-  await expect(page.getByText(/nombre\s*\/\s*seña/i)).toHaveCount(0);
-  // NO navegó a la ficha (la ficha tiene "Historial"): el alta condenada no se encoló (RNA.3.2).
-  await expect(page.getByText('Historial', { exact: true })).toHaveCount(0);
+  // RECONCILIACIÓN (delta IDU): el guard "al menos un identificador" (RNA.3.1/RNA.3.2) se eliminó — el alta en
+  // blanco ahora persiste (ver E2a en identificadores-unificados.spec.ts). Ya no se asserta el mensaje mínimo
+  // ni el no-enqueue: contradirían el as-built.
 });
 
 test('delta #2 nombre/apodo (RNA.2.2/RNA.4.2/RNA.8.2): con el "apodo" habilitado por rodeo → aparece en el alta (Datos personalizados) → custom_attributes → ficha', async ({
@@ -1508,7 +1505,9 @@ test('delta #2 nombre/apodo (RNA.2.2/RNA.4.2/RNA.8.2): con el "apodo" habilitado
   const { id: profileId } = await waitForServerAnimalProfile(establishmentId, { idv });
   await waitForServerCustomAttribute(profileId, fieldId, 'Pinto');
 
-  // RNA.4.2: la ficha muestra el apodo por "Datos personalizados" (sin fila dedicada nueva).
+  // RNA.4.2: la ficha muestra el apodo por "Datos personalizados" (sin fila dedicada nueva). El apodo es HERO,
+  // así que la fila de la lista (montada hidden detrás de la ficha) tiene su propio <span>Pinto</span> → filtramos
+  // por `visible:true` para apuntar al de la ficha y no al oculto (memoria reference_e2e_sheet_no_nav_oracle).
   await expect(page.getByText('Datos personalizados', { exact: true })).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByText('Pinto', { exact: true }).first()).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText('Pinto', { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 15_000 });
 });

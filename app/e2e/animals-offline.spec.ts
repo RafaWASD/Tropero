@@ -189,9 +189,9 @@ test('offline: alta vía BUSCADOR no-match → al volver de la ficha el animal s
   await expect(page.getByText('Creando: 34', { exact: true })).toBeVisible({ timeout: 20_000 });
   await walkWizardWithTwoRodeos(page);
 
-  // El id vino precargado (read-only). "34" tiene 2 dígitos (<3) → classifyIdentifier lo manda a
-  // VISUAL (R1.4), no a IDV. Solo crear.
-  await expect(page.getByLabel('Nombre / seña (no editable)', { exact: true })).toHaveValue('34');
+  // El id vino precargado (read-only) en la CARAVANA VISUAL: el no-match manda el texto tipeado a `idv`
+  // (IDU.4.10; el destino histórico visual_id_alt / "Nombre / seña" se eliminó con el delta IDU). Solo crear.
+  await expect(page.getByLabel('Caravana visual (no editable)', { exact: true })).toHaveValue('34');
   await page.getByRole('button', { name: 'Crear animal', exact: true }).click();
 
   // Ficha del recién creado (overlay local).

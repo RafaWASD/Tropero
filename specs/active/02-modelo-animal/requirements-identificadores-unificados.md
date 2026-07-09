@@ -63,6 +63,7 @@ El 4to campo histórico `animal_profiles.visual_id_alt` se **elimina del todo** 
 - **IDU.4.8** El sistema deberá aplicar la búsqueda unificada por los tres identificadores en la entrada manual "sin bastón" de MODO MANIOBRAS (`identificar.tsx`).
 - **IDU.4.9** El sistema deberá mantener el flujo "Bastonear" de ficha/alta como duplicate-check exclusivo por Caravana Electrónica (EID), sin agregar los canales `idv`/`apodo`.
 - **IDU.4.10** Cuando el operario dé de alta un animal tras un no-match, el sistema deberá precargar el texto tipeado en el campo `idv` (que ahora es alfanumérico), reemplazando el destino histórico `visual_id_alt` del clasificador de precarga (`classifyIdentifier` + su réplica en `maniobra-identify.ts`).
+  - *Reconciliación (as-built): con `prefillKind === 'idv'` el texto precargado se muestra en un campo read-only rotulado "Caravana visual (no editable)" (crear-animal.tsx), reemplazando al histórico "Nombre / seña (no editable)" que rotulaba el prefill de `visual_id_alt`. Verificado por E2E en `animals-offline.spec.ts`.*
 - **IDU.4.11** El sistema deberá comparar un candidato como "match exacto" contra el término por su `idv`, su `apodo` o su `tag_electronic` (todo case-insensitive, trim), reemplazando la comparación por `visual_id_alt`.
 
 ## IDU.5 — Formato y warning-soft del Nombre/Apodo (alta + edición)

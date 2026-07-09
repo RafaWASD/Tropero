@@ -17,6 +17,15 @@ No es un sustituto de `feature_list.json` ni de los ADRs — es la antesala dond
 
 ## Ítems pendientes
 
+## 2026-07-09 — 2 e2e legacy rojos latentes en main (614 electrónica maxLength, 777 birthdate midpoint)
+
+**Origen**: sesión 2026-07-09, corriendo la suite e2e COMPLETA como Gate 2.5 del delta `identificadores-unificados` (reviewer read-only). Primer full-run en un tiempo → destapó 2 rojos DETERMINISTAS que NO son del delta identificadores (blame + fechas lo confirman; el delta propio pasa 8/8 y sus 4 reconciliaciones legacy quedaron verdes).
+**Qué**:
+- `app/e2e/animals.spec.ts:~614` — delta **bastoneo-ficha/captura (#6/RCF.6)**, commits `c402a38d`+`9a1d193` (2026-07-06): el input manual del EID en `TagScanSheet.tsx` tiene `maxLength={TAG_ELECTRONIC_LENGTH}` (15) + `onChangeText → sanitizeTagInput` (strip no-dígitos + `slice(0,15)`). Con `fill('abc…+dígitos')` el browser trunca el RAW a 15 chars ANTES de que el sanitizer saque las letras → quedan <15 dígitos (12). El test espera 15. Bug de orden: el `maxLength` cuenta letras que después se descartan. Fix candidato: sacar el `maxLength` del input (que el sanitizer acote la longitud) o sanitizar en el value binding, no solo en `onChangeText`.
+- `app/e2e/animals.spec.ts:~777` — delta **alta-form (#3/#13/#14)**, commit `8926e16` (2026-06-29): el midpoint de fecha year-only da `2022-07-02` en el browser vs `2022-07-01` esperado (y que el unit SÍ da, 35/35). Off-by-one de timezone en `animal-birth-year.ts` (UTC vs local) que el unit no captura. A determinar si es expectativa stale del test o bug de tz real.
+**Por qué importa**: medio. Son 2 features ya commiteadas a main con estos e2e rojos que nadie vio — se cerraron con verificación PARCIAL (unit/typecheck o subset e2e) sin correr la suite completa verde (`reference_crashed_agent_recovery`: unit verde no basta). Hueco de proceso + 2 bugs: 614 es UX real (tipear letras en el EID come dígitos); 777 puede ser test stale o tz real.
+**Próximo paso sugerido**: cada uno como fix-loop en SU delta (NO en identificadores). 614 → bastoneo-ficha (frontend + test); 777 → alta-form (determinar test vs tz). Regla reforzada: correr la suite e2e COMPLETA verde antes de cantar `done` en cualquier delta con UI (Gate 2.5, ADR-029) — este par se coló por no hacerlo.
+
 ## 2026-07-07 — Cota de longitud del array `p_calves` en `register_birth` (defense-in-depth)
 
 **Origen**: Gate 1 + Gate 2 del delta `parto-caravana-visual-por-ternero` (VERIFY-002). Ambos gates lo marcaron LOW / no-HIGH, pre-existente (no lo introdujo el delta).
