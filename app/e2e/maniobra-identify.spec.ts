@@ -28,6 +28,8 @@ import {
   seedEstablishmentWithRodeo,
   seedRodeo,
   seedAnimal,
+  seedCustomField,
+  seedCustomAttribute,
   setUserPhone,
   waitForServerProfileRodeo,
   waitForServerSessionClosed,
@@ -104,6 +106,17 @@ async function startManiobraSession(page: Page): Promise<void> {
  * camino conectado (bastonazo / scan), CONECTAMOS el mock antes de asertar el ScanHero (el escenario real:
  * el operario ya conectó el bastón). Los sub-estados desconectado/conectable/manual tienen sus tests propios.
  */
+/** Habilita el campo `apodo` (data_key='apodo') en un rodeo (fd per-est propiedad/text + rodeo_data_config
+ *  enabled), espejo del seed 0119 + el opt-in del owner por rodeo. Devuelve el field_definition_id. */
+async function enableApodo(establishmentId: string, rodeoId: string): Promise<string> {
+  return seedCustomField(establishmentId, rodeoId, {
+    label: 'Nombre/Apodo',
+    dataKey: 'apodo',
+    dataType: 'propiedad',
+    uiComponent: 'text',
+  });
+}
+
 async function startManiobraSessionOnRodeo(page: Page, rodeoLabel?: string): Promise<void> {
   await page.goto('/maniobra/jornada');
   await expect(page.getByText('Elegí el rodeo', { exact: true })).toBeVisible({ timeout: 30_000 });
@@ -164,7 +177,7 @@ test('(a) bastonazo a un animal del campo → encontrado → auto-avance a la ca
   const { establishmentId, rodeoId } = await seedEstablishmentWithRodeo(user.id, 'Campo Identify Found');
   const eid = makeEid();
   const visual = `${RUN_TAG}-FOUND`;
-  await seedAnimal(establishmentId, rodeoId, { tag: eid, visualAlt: visual, sex: 'female' });
+  await seedAnimal(establishmentId, rodeoId, { tag: eid, idv: visual, sex: 'female' });
 
   await gotoWithBle(page);
   await signIn(page, user);
@@ -217,7 +230,7 @@ test('(c) bastonazo a un animal de OTRO campo → aviso "está en otro campo" �
   const active = await seedEstablishmentWithRodeo(user.id, 'Campo Identify Activo');
   const other = await seedEstablishmentWithRodeo(user.id, 'Campo Identify Vecino');
   const eid = makeEid();
-  await seedAnimal(other.establishmentId, other.rodeoId, { tag: eid, visualAlt: `${RUN_TAG}-OF`, sex: 'female' });
+  await seedAnimal(other.establishmentId, other.rodeoId, { tag: eid, sex: 'female' });
 
   await gotoWithBle(page);
   await signIn(page, user);
@@ -250,17 +263,16 @@ test('(d) búsqueda manual por idv → encontrado → auto-avance a la carga rá
   await setUserPhone(user.id, '1123456789');
   const { establishmentId, rodeoId } = await seedEstablishmentWithRodeo(user.id, 'Campo Identify Manual');
   const idv = '4721';
-  const visual = `${RUN_TAG}-MAN`;
   // Sin caravana electrónica (animal cargado a mano): se identifica por idv.
-  await seedAnimal(establishmentId, rodeoId, { idv, visualAlt: visual, sex: 'female' });
+  await seedAnimal(establishmentId, rodeoId, { idv, sex: 'female' });
 
   await gotoWithBle(page);
   await signIn(page, user);
   await waitForHome(page);
   await gotoAnimales(page);
-  // Proxy de "ya sincronizó al SQLite local": para un animal SIN caravana el HERO de la fila es el IDV
-  // (AnimalRow: idv → visual → "—"); el visual va como secundario inline → esperamos el IDV (hero), que
-  // es exact-matchable. El campo es namespaced (RUN_TAG) → el IDV corto no colisiona con otro animal.
+  // Proxy de "ya sincronizó al SQLite local": para un animal SIN caravana electrónica el HERO de la fila es
+  // el IDV (AnimalRow: apodo → idv → tag → "—"); acá no hay apodo → esperamos el IDV (hero), que es
+  // exact-matchable. El idv corto no colisiona con otro animal (el campo es fresco por test).
   await expect(page.getByText(idv, { exact: true }).first()).toBeVisible({ timeout: 30_000 });
 
   await startManiobraSession(page);
@@ -280,8 +292,7 @@ test('(e) desconexión del bastón → fallback a manual sin perder la sesión',
   await setUserPhone(user.id, '1123456789');
   const { establishmentId, rodeoId } = await seedEstablishmentWithRodeo(user.id, 'Campo Identify Disc');
   const idv = '3310';
-  const visual = `${RUN_TAG}-DISC`;
-  await seedAnimal(establishmentId, rodeoId, { idv, visualAlt: visual, sex: 'female' });
+  await seedAnimal(establishmentId, rodeoId, { idv, sex: 'female' });
 
   await gotoWithBle(page);
   await signIn(page, user);
@@ -314,11 +325,12 @@ test('(e) desconexión del bastón → fallback a manual sin perder la sesión',
 
 const SHOT_DIR = path.join(process.cwd(), '..', 'design', 'maniobra-identify');
 
-// (f) R4.2 — MANUAL con caravana visual DUPLICADA → picker de candidatos → elegir el correcto → carga.
-// MOCK LIMPIO (captura): caravana visual "0385" (no e2e_…), rodeo "Cría hembras", categoría Vaquillona.
-// El visual "0385" no es idv de ningún animal (idv 5001/5002) → la búsqueda cae a la rama visual-fuzzy →
-// devuelve 2 candidatos que comparten visual+rodeo+categoría → el N° interno (idv) los DESEMPATA.
-test('(f) manual con visual duplicado → picker de candidatos → elegir → carga (R4.2)', async ({ page }) => {
+// (f) R4.2 — MANUAL con NOMBRE/APODO DUPLICADO → picker de candidatos → elegir el correcto → carga.
+// delta IDU: el 4to canal `visual_id_alt` se eliminó → el ÚNICO identificador NO-único (que puede repetirse
+// en un campo, warning-soft) es el Nombre/Apodo. Dos animales comparten el apodo "0385" (idv 5001/5002 los
+// desempata): buscar "0385" no matchea ningún idv → cae al canal APODO (LIKE) → 2 candidatos → picker.
+// MOCK LIMPIO (captura): apodo "0385" (no e2e_…), rodeo "Cría hembras", categoría Vaquillona.
+test('(f) manual con apodo duplicado → picker de candidatos → elegir → carga (R4.2)', async ({ page }) => {
   const user = await createTestUser('mid-dup');
   await setUserPhone(user.id, '1123456789');
   // rodeoRawName → rodeo "Cría hembras" limpio en la captura (sin prefijo e2e_…). SEGURO: cleanup por CASCADE.
@@ -326,25 +338,29 @@ test('(f) manual con visual duplicado → picker de candidatos → elegir → ca
     rodeoName: 'Cría hembras',
     rodeoRawName: true,
   });
-  const dupVisual = '0385';
-  await seedAnimal(establishmentId, rodeoId, { idv: '5001', visualAlt: dupVisual, sex: 'female' });
-  await seedAnimal(establishmentId, rodeoId, { idv: '5002', visualAlt: dupVisual, sex: 'female' });
+  const apodoFd = await enableApodo(establishmentId, rodeoId);
+  const dupApodo = '0385';
+  const p1 = await seedAnimal(establishmentId, rodeoId, { idv: '5001', sex: 'female' });
+  await seedCustomAttribute(p1, apodoFd, dupApodo);
+  const p2 = await seedAnimal(establishmentId, rodeoId, { idv: '5002', sex: 'female' });
+  await seedCustomAttribute(p2, apodoFd, dupApodo);
 
   await gotoWithBle(page);
   await signIn(page, user);
   await waitForHome(page);
   await gotoAnimales(page);
-  // Proxy de sync: el hero de ambas filas (sin tag) es el idv → esperamos a ver uno de los dos.
-  await expect(page.getByText('5001', { exact: true }).first()).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByText('5002', { exact: true }).first()).toBeVisible({ timeout: 30_000 });
+  // Proxy de sync: el hero de ambas filas es el apodo "0385" (rodeo con apodo + apodo cargado); el idv baja a
+  // la línea secundaria (#5001/#5002) → esperamos ver ambos idv (substring, el secundario los distingue).
+  await expect(page.getByText('5001').first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText('5002').first()).toBeVisible({ timeout: 30_000 });
 
   await startManiobraSessionOnRodeo(page, 'Cría hembras');
 
-  // Buscamos por la caravana visual DUPLICADA → >1 candidato → picker (NO se auto-elige).
-  await manualSearch(page, dupVisual);
+  // Buscamos por el APODO DUPLICADO → >1 candidato → picker (NO se auto-elige).
+  await manualSearch(page, dupApodo);
   await expect(page.getByTestId('candidate-picker')).toBeVisible({ timeout: 15_000 });
   await expect(page.getByText('¿Cuál es?', { exact: true })).toBeVisible();
-  // Las dos filas comparten la caravana visual DOMINANTE "0385" (es lo duplicado); el N° interno (idv) las
+  // Las dos filas comparten el apodo DOMINANTE "0385" (es lo duplicado); el N° interno (idv) las
   // DESEMPATA en el distinguidor → se eligen por "N° 5001" / "N° 5002".
   await expect(page.getByRole('button', { name: /Elegir .*N° 5001/ })).toBeVisible();
   await expect(page.getByRole('button', { name: /Elegir .*N° 5002/ })).toBeVisible();
@@ -373,7 +389,7 @@ test('(g) animal de otro rodeo del mismo campo → pasar el animal a este rodeo 
   });
   const rodeoB = await seedRodeo(establishmentId, 'Vaquillonas', { rawName: true });
   const idv = '6010';
-  const profileId = await seedAnimal(establishmentId, rodeoB, { idv, visualAlt: '0386', sex: 'female' });
+  const profileId = await seedAnimal(establishmentId, rodeoB, { idv, sex: 'female' });
 
   await gotoWithBle(page);
   await signIn(page, user);
@@ -418,9 +434,9 @@ test('(h) 3 consecutivos de otro rodeo → aviso "rodeo de jornada mal elegido" 
   const longRodeo = 'Rodeo de cría de reposición 2024';
   const rodeoB = await seedRodeo(establishmentId, longRodeo, { rawName: true });
   // 3 animales en el rodeo B (todos del mismo otro-rodeo → disparan la heurística al 3ro). Caravanas limpias.
-  await seedAnimal(establishmentId, rodeoB, { idv: '7001', visualAlt: '0390', sex: 'female' });
-  await seedAnimal(establishmentId, rodeoB, { idv: '7002', visualAlt: '0391', sex: 'female' });
-  await seedAnimal(establishmentId, rodeoB, { idv: '7003', visualAlt: '0392', sex: 'female' });
+  await seedAnimal(establishmentId, rodeoB, { idv: '7001', sex: 'female' });
+  await seedAnimal(establishmentId, rodeoB, { idv: '7002', sex: 'female' });
+  await seedAnimal(establishmentId, rodeoB, { idv: '7003', sex: 'female' });
 
   await gotoWithBle(page);
   await signIn(page, user);

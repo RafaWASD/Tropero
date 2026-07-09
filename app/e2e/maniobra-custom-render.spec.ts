@@ -110,7 +110,7 @@ test('maniobra custom enum_single: seleccionable → secuencia → bloques → c
   const visual = '0512';
   const profileId = await seedAnimal(establishmentId, rodeoId, {
     tag: eid,
-    visualAlt: visual,
+    idv: visual,
     sex: 'female',
     categoryCode: 'vaquillona',
   });
@@ -167,7 +167,7 @@ test('maniobra custom numeric: render keypad → captura número a custom_measur
   });
   const eid = makeEid();
   const visual = '0777';
-  const profileId = await seedAnimal(establishmentId, rodeoId, { tag: eid, visualAlt: visual, sex: 'male', categoryCode: 'torito' });
+  const profileId = await seedAnimal(establishmentId, rodeoId, { tag: eid, idv: visual, sex: 'male', categoryCode: 'torito' });
 
   await gotoWithBle(page);
   await signIn(page, user);

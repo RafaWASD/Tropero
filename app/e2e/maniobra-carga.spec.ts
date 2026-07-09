@@ -151,7 +151,7 @@ test('flujo completo: identify → carga rápida (tacto + pesaje) → resumen �
   // Hembra (el tacto aplica a hembras) → categoría Vaquillona. Con caravana electrónica → se identifica por bastonazo.
   const profileId = await seedAnimal(establishmentId, rodeoId, {
     tag: eid,
-    visualAlt: visual,
+    idv: visual,
     sex: 'female',
     categoryCode: 'vaquillona',
   });
@@ -226,7 +226,7 @@ test('resumen corregible: tocar el pesaje vuelve al keypad y reescribe el valor'
   const { establishmentId, rodeoId } = await seedEstablishmentWithRodeo(user.id, 'Campo Fix M22');
   const eid = makeEid();
   const visual = `${RUN_TAG}-FIX`;
-  await seedAnimal(establishmentId, rodeoId, { tag: eid, visualAlt: visual, sex: 'female' });
+  await seedAnimal(establishmentId, rodeoId, { tag: eid, idv: visual, sex: 'female' });
 
   await gotoWithBle(page);
   await signIn(page, user);
@@ -284,7 +284,7 @@ test('offline: cargar maniobras sin red → reconexión → los eventos aterriza
   });
   const eid = makeEid();
   const visual = `${RUN_TAG}-OFF`;
-  const profileId = await seedAnimal(establishmentId, rodeoId, { tag: eid, visualAlt: visual, sex: 'female' });
+  const profileId = await seedAnimal(establishmentId, rodeoId, { tag: eid, idv: visual, sex: 'female' });
 
   await gotoWithBle(page);
   await signIn(page, user);

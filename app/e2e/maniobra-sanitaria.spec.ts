@@ -104,7 +104,7 @@ test('sanitarias + sangrado + raspado sobre un macho persisten con session_id', 
   const visual = '0512';
   const profileId = await seedAnimal(establishmentId, rodeoId, {
     tag: eid,
-    visualAlt: visual,
+    idv: visual,
     sex: 'male',
     categoryCode: 'toro',
   });
@@ -202,7 +202,7 @@ test('raspado se salta para una hembra (R6.12); el resto de la jornada corre', a
   const visual = `${RUN_TAG}-F`;
   const profileId = await seedAnimal(establishmentId, rodeoId, {
     tag: eid,
-    visualAlt: visual,
+    idv: visual,
     sex: 'female',
     categoryCode: 'multipara',
   });
@@ -248,7 +248,7 @@ test('pesaje de ternero persiste con session_id (R6.10)', async ({ page }) => {
   recentBirth.setMonth(recentBirth.getMonth() - 5); // 5 meses → ternera (< 1 año)
   const profileId = await seedAnimal(establishmentId, rodeoId, {
     tag: eid,
-    visualAlt: visual,
+    idv: visual,
     sex: 'female',
     categoryCode: 'ternera',
     birthDate: recentBirth.toISOString().slice(0, 10),
@@ -339,7 +339,7 @@ test('inseminación con 1 pajuela preconfigurada confirma de un toque (R6.5)', a
   // multipara real → apta. (El #1b es correcto; el setup viejo asumía el `default:true` previo a la corrección.)
   const profileId = await seedAnimal(establishmentId, rodeoId, {
     tag: eid,
-    visualAlt: visual,
+    idv: visual,
     sex: 'female',
     categoryCode: 'multipara',
     categoryOverride: true,
@@ -385,7 +385,7 @@ test('inseminación con >1 pajuela ofrece selector (R6.5)', async ({ page }) => 
   // fija la categoría probada → apta.
   const profileId = await seedAnimal(establishmentId, rodeoId, {
     tag: eid,
-    visualAlt: visual,
+    idv: visual,
     sex: 'female',
     categoryCode: 'multipara',
     categoryOverride: true,
@@ -439,7 +439,7 @@ test('el hero del producto silent_apply nunca overflowea horizontal a 360 ni 412
   const visual = '0900';
   await seedAnimal(establishmentId, rodeoId, {
     tag: eid,
-    visualAlt: visual,
+    idv: visual,
     sex: 'male',
     categoryCode: 'toro',
   });

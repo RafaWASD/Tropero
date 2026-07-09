@@ -68,16 +68,16 @@ test('captura: modo assign_or_create del bottom-sheet (≥3 candidatos + buscado
   await setUserPhone(user.id, '1123456789');
   const { establishmentId, rodeoId } = await seedEstablishmentWithRodeo(user.id, 'Campo Dedup Shot');
 
-  // 4 animales SIN caravana (tag:null) → candidatos de la intermedia. Identificación visual variada
-  // (idv/visual) para que la lista se vea realista al vetear.
-  const visuals = [
-    { idv: '1024', visualAlt: `${RUN_TAG}-V1`, sex: 'female' as const },
-    { idv: '1077', visualAlt: `${RUN_TAG}-V2`, sex: 'male' as const },
-    { idv: '0319', visualAlt: null, sex: 'female' as const },
-    { idv: null, visualAlt: `${RUN_TAG}-V4`, sex: 'female' as const },
+  // 4 animales SIN caravana electrónica (tag:null) → candidatos de la intermedia. Identificación por idv
+  // variada (uno sin idv → "sin identificación") para que la lista se vea realista al vetear.
+  const candidates = [
+    { idv: '1024', sex: 'female' as const },
+    { idv: '1077', sex: 'male' as const },
+    { idv: '0319', sex: 'female' as const },
+    { idv: null, sex: 'female' as const },
   ];
-  for (const v of visuals) {
-    await seedAnimal(establishmentId, rodeoId, { tag: null, idv: v.idv, visualAlt: v.visualAlt, sex: v.sex });
+  for (const v of candidates) {
+    await seedAnimal(establishmentId, rodeoId, { tag: null, idv: v.idv, sex: v.sex });
   }
 
   await gotoWithBle(page);
@@ -85,7 +85,7 @@ test('captura: modo assign_or_create del bottom-sheet (≥3 candidatos + buscado
   await waitForHome(page);
 
   // Esperamos a que los candidatos BAJEN por la stream (visibles en la lista = ya sincronizó al SQLite
-  // local). El hero de IDV '0319' se renderiza completo (los visual_id_alt largos se truncan en la fila).
+  // local). El hero de IDV '0319' se renderiza completo.
   await gotoAnimales(page);
   await expect(page.getByText('0319', { exact: true }).first()).toBeVisible({ timeout: 30_000 });
 
@@ -114,15 +114,15 @@ test('captura: BulkTagAssignmentScreen (opción B, asignación masiva) — vací
   await setUserPhone(user.id, '1123456789');
   const { establishmentId, rodeoId } = await seedEstablishmentWithRodeo(user.id, 'Campo Bulk Shot');
 
-  // 4 animales SIN caravana → candidatos de la masiva.
-  const visuals = [
-    { idv: '2048', visualAlt: `${RUN_TAG}-B1`, sex: 'female' as const },
-    { idv: '2099', visualAlt: `${RUN_TAG}-B2`, sex: 'male' as const },
-    { idv: '0512', visualAlt: null, sex: 'female' as const },
-    { idv: null, visualAlt: `${RUN_TAG}-B4`, sex: 'female' as const },
+  // 4 animales SIN caravana electrónica → candidatos de la masiva.
+  const candidates = [
+    { idv: '2048', sex: 'female' as const },
+    { idv: '2099', sex: 'male' as const },
+    { idv: '0512', sex: 'female' as const },
+    { idv: null, sex: 'female' as const },
   ];
-  for (const v of visuals) {
-    await seedAnimal(establishmentId, rodeoId, { tag: null, idv: v.idv, visualAlt: v.visualAlt, sex: v.sex });
+  for (const v of candidates) {
+    await seedAnimal(establishmentId, rodeoId, { tag: null, idv: v.idv, sex: v.sex });
   }
 
   await gotoWithBle(page);
@@ -164,9 +164,9 @@ test('opción B: bastonear un EID ya asignado NO encola y avisa (prevención cli
   // EID YA usado: lo sembramos en un animal CON caravana (mode 'edit' al bastonearlo). 15 díg FDX-B válido.
   // Único por corrida (makeEid) — un EID hardcodeado leakeaba el unique global de animals entre runs.
   const usedEid = makeEid();
-  await seedAnimal(establishmentId, rodeoId, { tag: usedEid, idv: '3001', visualAlt: `${RUN_TAG}-DUP`, sex: 'male' });
+  await seedAnimal(establishmentId, rodeoId, { tag: usedEid, idv: '3001', sex: 'male' });
   // Un candidato SIN caravana, para confirmar que la lista de candidatos NO se ofrece para el EID dup.
-  await seedAnimal(establishmentId, rodeoId, { tag: null, idv: '3050', visualAlt: `${RUN_TAG}-FREE`, sex: 'female' });
+  await seedAnimal(establishmentId, rodeoId, { tag: null, idv: '3050', sex: 'female' });
 
   await gotoWithBle(page);
   await signIn(page, user);

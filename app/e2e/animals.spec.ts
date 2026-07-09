@@ -21,6 +21,7 @@ import {
   seedRodeo,
   seedAnimal,
   seedCustomField,
+  seedCustomAttribute,
   addMember,
   setUserPhone,
   waitForServerAnimalProfile,
@@ -40,6 +41,18 @@ test.afterAll(async () => {
 // Helper: camina el wizard de la alta guiada desde el paso 2 (sexo) hasta el paso 4 (datos),
 // eligiendo el sexo y la categoría indicados. Con 1 rodeo el wizard auto-avanza el paso 1 → arranca
 // en sexo. Selectores robustos por a11y (buttonA11y emite role=button + aria-label en web).
+/** Habilita el campo `apodo` (data_key='apodo') en un rodeo (fd per-est propiedad/text + rodeo_data_config
+ *  enabled), espejo del seed 0119 + el opt-in del owner por rodeo. Devuelve el field_definition_id. delta IDU:
+ *  un animal SIN caravana (idv/tag vacíos) sigue identificable por su Nombre/Apodo (el hero). */
+async function enableApodo(establishmentId: string, rodeoId: string): Promise<string> {
+  return seedCustomField(establishmentId, rodeoId, {
+    label: 'Nombre/Apodo',
+    dataKey: 'apodo',
+    dataType: 'propiedad',
+    uiComponent: 'text',
+  });
+}
+
 async function walkWizardToData(
   page: import('@playwright/test').Page,
   opts: { sex: 'Macho' | 'Hembra'; categoryName: string },
@@ -1058,18 +1071,20 @@ test('caravana-ficha (RCF.1.3/RCF.3.3/RCF.3.5): "Agregar caravana visual" → ti
   const user = await createTestUser('cfidv');
   await setUserPhone(user.id, '1123456789');
   const { establishmentId, rodeoId } = await seedEstablishmentWithRodeo(user.id, 'Campo CFIdv');
-  // Animal ACTIVO SIN idv y SIN tag (ambos vacíos → ambas afordancias se ofrecen). Identificable por su
-  // visual_id_alt (es el hero, ya que no hay idv/tag).
-  const visualLabel = `${RUN_TAG}-CFIDV`;
-  await seedAnimal(establishmentId, rodeoId, { visualAlt: visualLabel, sex: 'female' });
+  // Animal ACTIVO SIN idv y SIN tag (ambos vacíos → ambas afordancias se ofrecen). delta IDU: el 4to canal
+  // visual_id_alt se eliminó → identificable por su Nombre/Apodo (el hero, ya que no hay idv/tag).
+  const apodoFd = await enableApodo(establishmentId, rodeoId);
+  const apodoLabel = `Cara${Date.now().toString().slice(-6)}`;
+  const profileId = await seedAnimal(establishmentId, rodeoId, { sex: 'female' });
+  await seedCustomAttribute(profileId, apodoFd, apodoLabel);
 
   await page.goto('/');
   await signIn(page, user);
   await waitForHome(page);
   await gotoAnimales(page);
 
-  // Abrimos la ficha (la fila lleva el visual en su a11y label, al ser el hero).
-  const row = page.getByRole('button', { name: new RegExp(visualLabel) }).first();
+  // Abrimos la ficha (la fila lleva el apodo en su a11y label, al ser el hero).
+  const row = page.getByRole('button', { name: new RegExp(apodoLabel) }).first();
   await expect(row).toBeVisible({ timeout: 20_000 });
   await row.click();
   await expect(page.getByText('Identificación', { exact: true })).toBeVisible({ timeout: 20_000 });
@@ -1092,15 +1107,24 @@ test('caravana-ficha (RCF.1.3/RCF.3.3/RCF.3.5): "Agregar caravana visual" → ti
   await expect(page.getByRole('button', { name: 'Agregar caravana visual', exact: true })).toHaveCount(0);
 });
 
-test('caravana-ficha (RCF.2.1/RCF.2.2/RCF.2.4/RCF.2.7): "Agregar caravana electrónica" → 14 díg = error sin invocar; 15 díg → optimismo en sitio', async ({
+test('caravana-ficha (RCF.2.1/RCF.2.2/RCF.2.4/RCF.2.7): la electrónica se carga por el sheet de bastoneo → manual 14 díg = error; 15 díg → asigna + optimismo en sitio', async ({
   page,
 }) => {
   const user = await createTestUser('cftag');
   await setUserPhone(user.id, '1123456789');
   const { establishmentId, rodeoId } = await seedEstablishmentWithRodeo(user.id, 'Campo CFTag');
+  // delta IDU: sin visual_id_alt → el animal es identificable por su idv (hero); el tag queda vacío para
+  // ejercer la asignación de la caravana electrónica.
   const visualLabel = `${RUN_TAG}-CFTAG`;
-  await seedAnimal(establishmentId, rodeoId, { visualAlt: visualLabel, sex: 'female' });
+  await seedAnimal(establishmentId, rodeoId, { idv: visualLabel, sex: 'female' });
 
+  // Transporte MANUAL (sin bastón): delta UX 2026-07-06 — la ficha ya NO ofrece "Agregar caravana
+  // electrónica" directa; la electrónica se carga por el sheet de bastoneo, con la entrada manual detrás del
+  // CTA (paridad con baston-ficha.spec.ts (c); la marca MANUAL cae al hero manual-promovido, sin transporte).
+  await page.addInitScript(() => {
+    (window as unknown as Record<string, unknown>).__RAFAQ_BLE_E2E__ = true;
+    (window as unknown as Record<string, unknown>).__RAFAQ_BLE_E2E_MANUAL__ = true;
+  });
   await page.goto('/');
   await signIn(page, user);
   await waitForHome(page);
@@ -1111,28 +1135,32 @@ test('caravana-ficha (RCF.2.1/RCF.2.2/RCF.2.4/RCF.2.7): "Agregar caravana electr
   await row.click();
   await expect(page.getByText('Identificación', { exact: true })).toBeVisible({ timeout: 20_000 });
 
-  // Afordancia "Agregar caravana electrónica" (tag vacío + activo).
-  await page.getByRole('button', { name: 'Agregar caravana electrónica', exact: true }).click();
+  // RCF.2.1: la ficha NO ofrece carga manual DIRECTA de la electrónica — solo "Bastonear la caravana".
+  await expect(page.getByRole('button', { name: 'Agregar caravana electrónica', exact: true })).toHaveCount(0);
+  await page.getByTestId('tag-scan-open').click();
+  await expect(page.getByTestId('tag-scan-sheet')).toBeVisible({ timeout: 10_000 });
+
+  // Sin transporte → abrir la carga MANUAL dentro del sheet (detrás del CTA).
+  await page.getByTestId('tag-scan-to-manual').click();
+  await expect(page.getByTestId('tag-scan-manual')).toBeVisible({ timeout: 10_000 });
   const tagInput = page.getByLabel('Caravana electrónica', { exact: true });
   await expect(tagInput).toBeVisible();
 
-  // 14 díg → error inline "…15 dígitos." y NO se invoca el RPC (la afordancia sigue abierta).
+  // 14 díg → error inline "…15 dígitos." sin asignar (RCF.2.2/2.4: sigue en la vista manual).
   await tagInput.fill('12345678901234'); // 14 díg
-  await expect(tagInput).toHaveValue('12345678901234'); // sanitize cap = 15, 14 entra tal cual
-  await page.getByTestId('assign-tag-confirm').click();
+  await page.getByTestId('tag-scan-manual-assign').click();
   await expect(page.getByText('La caravana electrónica tiene que tener 15 dígitos.')).toBeVisible({
     timeout: 10_000,
   });
-  // Sigue expandida (no se confirmó): el input sigue visible.
-  await expect(tagInput).toBeVisible();
+  await expect(page.getByTestId('tag-scan-manual')).toBeVisible();
 
-  // 15 díg → confirmar → optimismo en sitio: el tag aparece en solo-lectura (RCF.2.7).
+  // 15 díg → "Asignar caravana" → encola el RPC → optimismo en sitio (RCF.2.7): el sheet cierra + ya no se
+  // ofrece "Bastonear la caravana" (tag seteado).
   const tag = `98200${Date.now().toString().slice(-10)}`.slice(0, 15).padEnd(15, '0');
   await tagInput.fill(tag);
-  await expect(tagInput).toHaveValue(tag);
-  await page.getByTestId('assign-tag-confirm').click();
-  await expect(page.getByText(tag, { exact: true }).first()).toBeVisible({ timeout: 10_000 });
-  await expect(page.getByRole('button', { name: 'Agregar caravana electrónica', exact: true })).toHaveCount(0);
+  await page.getByTestId('tag-scan-manual-assign').click();
+  await expect(page.getByTestId('tag-scan-sheet')).toHaveCount(0, { timeout: 10_000 });
+  await expect(page.getByTestId('tag-scan-open')).toHaveCount(0);
 });
 
 test('caravana-ficha (RCF.1.2/RCF.1.4): un identificador YA seteado NO ofrece afordancia (solo-lectura, inmutable R4.13)', async ({

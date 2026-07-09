@@ -91,7 +91,7 @@ test('(a) RCF.6: bastoneo desde la ficha → sheet acotado asigna a ESTE animal 
   const { establishmentId, rodeoId } = await seedEstablishmentWithRodeo(user.id, 'Campo CFScan');
   // Animal ACTIVO SIN caravana electrónica (tag null) → la afordancia "Bastonear la caravana" se ofrece.
   const idv = `9001${Date.now().toString().slice(-6)}`;
-  const profileId = await seedAnimal(establishmentId, rodeoId, { tag: null, idv, visualAlt: `${RUN_TAG}-CFS`, sex: 'female' });
+  const profileId = await seedAnimal(establishmentId, rodeoId, { tag: null, idv, sex: 'female' });
 
   await gotoWithBle(page);
   await signIn(page, user);
@@ -132,7 +132,7 @@ test('(b) RCF.6: al cerrar el sheet, un bastonazo posterior en la ficha no dispa
   await setUserPhone(user.id, '1123456789');
   const { establishmentId, rodeoId } = await seedEstablishmentWithRodeo(user.id, 'Campo CFClose');
   const idv = `9101${Date.now().toString().slice(-6)}`;
-  await seedAnimal(establishmentId, rodeoId, { tag: null, idv, visualAlt: `${RUN_TAG}-CFC`, sex: 'female' });
+  await seedAnimal(establishmentId, rodeoId, { tag: null, idv, sex: 'female' });
 
   await gotoWithBle(page);
   await signIn(page, user);
@@ -166,7 +166,7 @@ test('(c) RCF.6.6: sin transporte → carga MANUAL dentro del sheet (validación
   await setUserPhone(user.id, '1123456789');
   const { establishmentId, rodeoId } = await seedEstablishmentWithRodeo(user.id, 'Campo CFMan');
   const idv = `9201${Date.now().toString().slice(-6)}`;
-  const profileId = await seedAnimal(establishmentId, rodeoId, { tag: null, idv, visualAlt: `${RUN_TAG}-CFM`, sex: 'female' });
+  const profileId = await seedAnimal(establishmentId, rodeoId, { tag: null, idv, sex: 'female' });
 
   await gotoWithBleManual(page);
   await signIn(page, user);

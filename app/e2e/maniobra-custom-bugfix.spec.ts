@@ -147,7 +147,7 @@ test('custom enum_single: título largo SIN recorte + lista con affordance de sc
   });
   const eid = makeEid();
   const visual = '0611';
-  await seedAnimal(establishmentId, rodeoId, { tag: eid, visualAlt: visual, sex: 'female', categoryCode: 'vaquillona' });
+  await seedAnimal(establishmentId, rodeoId, { tag: eid, idv: visual, sex: 'female', categoryCode: 'vaquillona' });
 
   await gotoWithBle(page);
   await signIn(page, user);
@@ -204,7 +204,7 @@ test('custom enum_multi: título largo SIN recorte + multi-select con affordance
   });
   const eid = makeEid();
   const visual = '0822';
-  await seedAnimal(establishmentId, rodeoId, { tag: eid, visualAlt: visual, sex: 'male', categoryCode: 'torito' });
+  await seedAnimal(establishmentId, rodeoId, { tag: eid, idv: visual, sex: 'male', categoryCode: 'torito' });
 
   await gotoWithBle(page);
   await signIn(page, user);

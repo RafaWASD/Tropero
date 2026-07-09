@@ -80,9 +80,8 @@ test('(a) opción A: bastoneo sin match con candidatos → asignar candidato →
   const { establishmentId, rodeoId } = await seedEstablishmentWithRodeo(user.id, 'Campo Dedup A');
 
   // El candidato AL QUE asignamos (sin caravana) + un distractor (para que la lista NO sea trivial de 1).
-  const targetVisual = `${RUN_TAG}-A-TARGET`;
-  const targetProfileId = await seedAnimal(establishmentId, rodeoId, { tag: null, idv: '4001', visualAlt: targetVisual, sex: 'female' });
-  await seedAnimal(establishmentId, rodeoId, { tag: null, idv: '4002', visualAlt: `${RUN_TAG}-A-OTHER`, sex: 'male' });
+  const targetProfileId = await seedAnimal(establishmentId, rodeoId, { tag: null, idv: '4001', sex: 'female' });
+  await seedAnimal(establishmentId, rodeoId, { tag: null, idv: '4002', sex: 'male' });
 
   await gotoWithBle(page);
   await signIn(page, user);
@@ -109,11 +108,11 @@ test('(a) opción A: bastoneo sin match con candidatos → asignar candidato →
   // Confirmar → el flujo de asignación se invoca (assignTagToAnimal, offline) → navega a la ficha del candidato.
   await page.getByRole('button', { name: 'Asignar caravana', exact: true }).click();
 
-  // Aterriza en la ficha del candidato 4001 (bloque "Identificación" + su visual) = el flujo de asignación
+  // Aterriza en la ficha del candidato 4001 (bloque "Identificación" + su idv) = el flujo de asignación
   // navegó al perfil CORRECTO (RD3.6). El overlay se cerró (la intermedia ya no está).
   await expect(page.getByText('Identificación', { exact: true })).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText('¿Es uno de tus animales sin caravana?', { exact: true })).toHaveCount(0);
-  await expect(page.getByText(targetVisual, { exact: true })).not.toHaveCount(0);
+  await expect(page.getByText('4001', { exact: true })).not.toHaveCount(0);
 
   // PRUEBA END-TO-END de que SE ASIGNÓ (no solo que se navegó): el assign encolado offline SINCRONIZA → el
   // connector llama al RPC assign_tag_to_animal (0089) → setea animals.tag_electronic → el trigger 0079
@@ -133,7 +132,7 @@ test('(b) opción A: intermedia → "es nuevo" → crear-animal con el EID preca
   const { establishmentId, rodeoId } = await seedEstablishmentWithRodeo(user.id, 'Campo Dedup A New');
 
   // Un candidato sin caravana → la intermedia se abre (≥1 candidato). Pero el operario dice "es nuevo".
-  await seedAnimal(establishmentId, rodeoId, { tag: null, idv: '4100', visualAlt: `${RUN_TAG}-AN`, sex: 'female' });
+  await seedAnimal(establishmentId, rodeoId, { tag: null, idv: '4100', sex: 'female' });
 
   await gotoWithBle(page);
   await signIn(page, user);
@@ -165,7 +164,7 @@ test('(a\') opción A: bastoneo sin match SIN candidatos noTag → CREATE direct
   // Un animal CON caravana (NO es candidato noTag) → el campo tiene 0 candidatos sin caravana. Lo sembramos
   // para que el campo no esté vacío (y para esperar el first-sync), pero NO debe ofrecerse la intermedia.
   const otherEid = makeEid();
-  await seedAnimal(establishmentId, rodeoId, { tag: otherEid, idv: '4200', visualAlt: `${RUN_TAG}-Z`, sex: 'male' });
+  await seedAnimal(establishmentId, rodeoId, { tag: otherEid, idv: '4200', sex: 'male' });
 
   await gotoWithBle(page);
   await signIn(page, user);
@@ -195,8 +194,8 @@ test('(c) opción B: masiva — 2 bastoneos → asignar a 2 candidatos → conta
 
   // EXACTAMENTE 2 candidatos sin caravana: tras asignar el 1º, debe salir de la sesión y NO re-aparecer al
   // bastonear el 2º EID (RD2.5 / excludedProfileIds). El 2º candidato cubre el 2º bastoneo.
-  await seedAnimal(establishmentId, rodeoId, { tag: null, idv: '5001', visualAlt: `${RUN_TAG}-B1`, sex: 'female' });
-  await seedAnimal(establishmentId, rodeoId, { tag: null, idv: '5002', visualAlt: `${RUN_TAG}-B2`, sex: 'male' });
+  await seedAnimal(establishmentId, rodeoId, { tag: null, idv: '5001', sex: 'female' });
+  await seedAnimal(establishmentId, rodeoId, { tag: null, idv: '5002', sex: 'male' });
 
   await gotoWithBle(page);
   await signIn(page, user);
@@ -265,9 +264,9 @@ test('(d) opción B: bastonear un EID ya asignado NO encola y avisa (prevención
 
   // EID YA usado: sembrado en un animal CON caravana (mode 'edit' al bastonearlo). 15 díg FDX-B válido.
   const usedEid = makeEid();
-  await seedAnimal(establishmentId, rodeoId, { tag: usedEid, idv: '6001', visualAlt: `${RUN_TAG}-DUP`, sex: 'male' });
+  await seedAnimal(establishmentId, rodeoId, { tag: usedEid, idv: '6001', sex: 'male' });
   // Un candidato SIN caravana, para confirmar que la lista NO se ofrece para el EID dup.
-  await seedAnimal(establishmentId, rodeoId, { tag: null, idv: '6050', visualAlt: `${RUN_TAG}-FREE`, sex: 'female' });
+  await seedAnimal(establishmentId, rodeoId, { tag: null, idv: '6050', sex: 'female' });
 
   await gotoWithBle(page);
   await signIn(page, user);

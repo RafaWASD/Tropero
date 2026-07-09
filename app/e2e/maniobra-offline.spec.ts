@@ -121,8 +121,7 @@ test('offline: jornada por manual → vacunación + pesaje → cerrar la jornada
   // idv (identificable a mano por el idv exacto, R3.5). El pesaje aplica (categoría no-ternero); la vacunación
   // aplica siempre en cría (vacunacion enabled por default).
   const idv = '4815';
-  const visual = `${RUN_TAG}-OFF`;
-  const profileId = await seedAnimal(establishmentId, rodeoId, { idv, visualAlt: visual, sex: 'female' });
+  const profileId = await seedAnimal(establishmentId, rodeoId, { idv, sex: 'female' });
   // Peso único e improbable de colisionar (oráculo server-side por establishment + peso).
   const weightKg = 300 + (Date.now() % 90); // 300–389
   const vaccine = `Aftosa-${RUN_TAG.slice(-6)}`; // product_name único → oráculo server-side determinista

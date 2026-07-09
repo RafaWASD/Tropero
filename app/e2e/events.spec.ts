@@ -278,7 +278,7 @@ test('reproductivo: tacto (preñez media) → estado reproductivo + transición 
 //   - register_birth crea ATÓMICAMENTE el evento + 2 terneros + transición de categoría server-side,
 //   - de vuelta en la madre: nodo "Parto" en el timeline; "Estado reproductivo → Vacía" (parió);
 //     el CategoryBadge transicionó (vaquillona_prenada → "vaca…", contiene "vaca"),
-//   - los 2 terneros aparecen en la tab Animales con el visual "recién nacido — pendiente de caravana",
+//   - los 2 terneros aparecen en la tab Animales SIN caravana (delta IDU: sin fallback visual_id_alt),
 //   - abrir UN ternero → la card "Madre" muestra el idv de la madre → tocarla → ficha de la madre.
 //
 // Para que la madre sea vaquillona_prenada (y el parto la transicione a vaca_segundo_servicio),
@@ -356,14 +356,18 @@ test('parto con mellizos: register_birth crea 2 terneros + transición + link a 
   // + el estado reproductivo "Vacía" + el nodo "Parto", todos ya asertados arriba.
   await expect(page.getByText(/vaca/i).first()).toBeVisible({ timeout: 20_000 });
 
-  // ── 4) Los 2 terneros aparecen en la tab Animales con el visual de "pendiente de caravana". ─
+  // ── 4) Los 2 terneros aparecen en la tab Animales SIN caravana (delta IDU: sin fallback visual_id_alt). ─
   await page.getByRole('button', { name: 'Volver', exact: true }).click();
   await gotoAnimales(page);
-  // El visual_id_alt fallback "recién nacido — pendiente de caravana" aparece (hay 2; tomamos uno).
-  const calfRow = page
-    .getByRole('button', { name: /recién nacido — pendiente de caravana/ })
-    .first();
-  await expect(calfRow).toBeVisible({ timeout: 20_000 });
+  // delta IDU: el fallback visual_id_alt "recién nacido — pendiente de caravana" se eliminó → una cría sin
+  // caravana aparece con hero "—" y a11y "<categoría>, sin identificador, …, sin caravana". La madre tiene
+  // idv → "sin identificador" solo matchea a las crías; esperamos a que las DOS bajen (antes el fallback,
+  // que venía del server, era el proxy de "cría ya sincronizada"; sin él, contamos las 2 mellizas + margen
+  // para que el DETALLE local de la cría (server-only) se materialice antes de abrir su ficha).
+  const calfRows = page.getByRole('button', { name: /sin identificador/ });
+  await expect(calfRows).toHaveCount(2, { timeout: 20_000 });
+  await page.waitForTimeout(1500);
+  const calfRow = calfRows.first();
 
   // ── 5) Abrir UN ternero → card "Madre" → tocarla → ficha de la madre. ─────────────────────
   await calfRow.click();
@@ -1099,9 +1103,9 @@ test('delta parto-caravana-visual: parto SIN ninguna caravana (opcionalidad) →
   await expect(page.getByText('Parto', { exact: true })).toBeVisible({ timeout: 20_000 });
 
   // ── PCV.8.5(c) oráculo: el parto se materializó CON su ternero (calfCount === 1). Esto ES la prueba de la
-  //     opcionalidad segura (PCV.2.4): un ternero sin idv NI tag pasa el trigger animal_profiles_identity_check
-  //     SOLO porque el RPC le puso el fallback visual_id_alt; sin él, el INSERT sería 23514 → rollback →
-  //     calfCount 0. calfCount === 1 prueba que la cría sin ninguna caravana se creó igual. ──
+  //     opcionalidad segura (PCV.2.4): un ternero sin idv NI tag persiste porque el delta IDU DROPEÓ el trigger
+  //     de completitud animal_profiles_identity_check (0122) — ya no hay 23514 ni fallback visual_id_alt.
+  //     calfCount === 1 prueba que la cría sin ninguna caravana se creó igual. ──
   const snap = await waitForServerBirth(motherProfileId, { expectedCalves: 1 });
   expect(snap.calfCount).toBe(1);
   const state = await getServerBirthState(motherProfileId);

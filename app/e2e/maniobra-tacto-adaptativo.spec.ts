@@ -124,7 +124,7 @@ test('(1) rodeo de 2 meses de servicio → tacto preñada ofrece CABEZA y COLA (
   const eid = makeEid();
   const profileId = await seedAnimal(establishmentId, rodeoId, {
     tag: eid,
-    visualAlt: `${RUN_TAG}-2M`,
+    idv: `${RUN_TAG}-2M`,
     sex: 'female',
     categoryCode: 'vaquillona',
   });
@@ -176,7 +176,7 @@ test.describe('tacto adaptativo (web táctil 360)', () => {
     const eid = makeEid();
     const profileId = await seedAnimal(establishmentId, rodeoId, {
       tag: eid,
-      visualAlt: `${RUN_TAG}-360`,
+      idv: `${RUN_TAG}-360`,
       sex: 'female',
       categoryCode: 'vaquillona',
     });
@@ -226,7 +226,7 @@ test('(2) rodeo de 1 mes de servicio → PREÑADA sin sub-paso de tamaño; resum
   const eid = makeEid();
   const profileId = await seedAnimal(establishmentId, rodeoId, {
     tag: eid,
-    visualAlt: `${RUN_TAG}-1M`,
+    idv: `${RUN_TAG}-1M`,
     sex: 'female',
     categoryCode: 'vaquillona',
   });
@@ -270,7 +270,7 @@ test('(3) override "no medir" sobre un rodeo de 3 meses → PREÑADA va directo;
   const eid = makeEid();
   const profileId = await seedAnimal(establishmentId, rodeoId, {
     tag: eid,
-    visualAlt: `${RUN_TAG}-OVR`,
+    idv: `${RUN_TAG}-OVR`,
     sex: 'female',
     categoryCode: 'vaquillona',
   });

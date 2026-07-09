@@ -125,7 +125,7 @@ test('elegir: tacto vaquillona (apta) + condición corporal (3,25) + dientes (1/
   const visual = '0420';
   const profileId = await seedAnimal(establishmentId, rodeoId, {
     tag: eid,
-    visualAlt: visual,
+    idv: visual,
     sex: 'female',
     categoryCode: 'vaquillona',
   });
@@ -205,7 +205,7 @@ test('dientes: el prompt CUT NO aparece para un ternero (R6.8)', async ({ page }
   recentBirth.setMonth(recentBirth.getMonth() - 6); // 6 meses → ternera (< 1 año)
   const profileId = await seedAnimal(establishmentId, rodeoId, {
     tag: eid,
-    visualAlt: visual,
+    idv: visual,
     sex: 'female',
     categoryCode: 'ternera',
     birthDate: recentBirth.toISOString().slice(0, 10),

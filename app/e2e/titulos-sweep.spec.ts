@@ -39,7 +39,7 @@ test('título "Agregar evento" (g) no recorta la descendente', async ({ page }) 
   const user = await createTestUser('titulo-evento');
   const { establishmentId, rodeoId } = await seedEstablishmentWithRodeo(user.id, 'Campo Titulo Evento');
   const idv = '7301';
-  await seedAnimal(establishmentId, rodeoId, { tag: null, idv, visualAlt: `${RUN_TAG}-EV`, sex: 'female' });
+  await seedAnimal(establishmentId, rodeoId, { tag: null, idv, sex: 'female' });
 
   await page.goto('/');
   await signIn(page, user);
@@ -78,7 +78,7 @@ test('título "Mis campos" (p) no recorta la descendente', async ({ page }) => {
 test('header de la tab "Animales" intacto tras el fix preventivo (sin descendente)', async ({ page }) => {
   const user = await createTestUser('titulo-animales');
   const { establishmentId, rodeoId } = await seedEstablishmentWithRodeo(user.id, 'Campo Titulo Animales');
-  await seedAnimal(establishmentId, rodeoId, { tag: null, idv: '8800', visualAlt: `${RUN_TAG}-AN`, sex: 'female' });
+  await seedAnimal(establishmentId, rodeoId, { tag: null, idv: '8800', sex: 'female' });
 
   await page.goto('/');
   await signIn(page, user);

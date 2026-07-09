@@ -287,8 +287,11 @@ test('offline: agregar un PESO offline → reconexión → el weight_event aterr
   }
 });
 
-// El label visual del ternero SIN tag en la lista/ficha (RPC + overlay usan el mismo fallback, R9.1).
-const CALF_FALLBACK = 'recién nacido — pendiente de caravana';
+// delta IDU: el fallback visual_id_alt "recién nacido — pendiente de caravana" se eliminó (RPC + overlay). Un
+// ternero SIN caravana (idv/tag/apodo ausentes) tiene hero "—" y a11y "…, sin identificador, …, sin caravana"
+// (AnimalRow). La MADRE siempre tiene idv → "sin identificador" distingue a la cría (funciona en la fila
+// SYNCED y en la del OVERLAY optimista, sin depender del label de categoría).
+const CALF_ROW = /sin identificador/;
 
 // Abre la ficha de un animal YA sincronizado desde la lista por su idv (lectura local del detalle).
 // La ficha /animal/[id] es un screen PUSHEADO (sin bottom-nav): se sale con "Volver" (no con la tab).
@@ -335,7 +338,7 @@ async function registerBirthFromProfile(
   }
   // Cada card "Ternero N": elegir sexo (REQUERIDO). El OptionSelector del parto rotula la opción con su
   // label crudo ("Hembra"/"Macho") — NO "Sexo Hembra" (ese es el wizard de alta). Hembra para todos
-  // (sin tag → la lista los muestra con el fallback visual de la RPC, R9.1).
+  // (sin tag ni idv → la lista los muestra sin caravana; delta IDU: sin fallback visual_id_alt).
   for (let i = 0; i < calfCount; i++) {
     await page.getByRole('button', { name: 'Hembra', exact: true }).nth(i).click();
   }
@@ -387,10 +390,10 @@ for (const { label, calves } of [
       throw err;
     }
 
-    // El/los ternero(s) optimista(s) aparecen en la lista (overlay pending_animal_profiles, fallback visual).
+    // El/los ternero(s) optimista(s) aparecen en la lista (overlay pending_animal_profiles, sin caravana).
     // La ficha es un screen pusheado → "Volver" para reaparecer la tab Animales antes de ver la lista.
     await backToAnimalesList(page);
-    await expect(page.getByText(CALF_FALLBACK, { exact: true })).toHaveCount(calves, { timeout: 20_000 });
+    await expect(page.getByRole('button', { name: CALF_ROW })).toHaveCount(calves, { timeout: 20_000 });
 
     // ── RECONEXIÓN → ORÁCULO server-side: UN solo parto + N terneros REALES. ──
     await page.context().setOffline(false);
@@ -508,7 +511,7 @@ test('offline: PARTO offline + madre soft-deleteada server-side → reconexión 
   // El parto se ve offline (cronología) y el ternero en la lista (overlay): la BASE que el rollback borra.
   await expect(page.getByText('Parto', { exact: true }).first()).toBeVisible({ timeout: 20_000 });
   await backToAnimalesList(page);
-  await expect(page.getByText(CALF_FALLBACK, { exact: true })).toHaveCount(1, { timeout: 20_000 });
+  await expect(page.getByRole('button', { name: CALF_ROW })).toHaveCount(1, { timeout: 20_000 });
 
   // ── Romper la precondición server-side MIENTRAS el cliente sigue offline: la madre deja de existir. ──
   // (El soft-delete viaja recién al reconectar; server-side la madre YA está borrada → la RPC fallará 23503.)
@@ -529,7 +532,7 @@ test('offline: PARTO offline + madre soft-deleteada server-side → reconexión 
     //     client_op_id). La lista lee one-shot → rebotamos por "Más" para forzar el re-fetch tras el
     //     rollback (que ocurrió mientras la tab ya estaba en foco).
     await refreshAnimalesList(page);
-    await expect(page.getByText(CALF_FALLBACK, { exact: true })).toHaveCount(0, { timeout: 20_000 });
+    await expect(page.getByRole('button', { name: CALF_ROW })).toHaveCount(0, { timeout: 20_000 });
 
     // (b) NADA quedó escrito server-side: la RPC abortó ATÓMICA → 0 eventos de parto, 0 terneros para la madre.
     const serverState = await getServerBirthState(motherProfileId);
@@ -540,7 +543,7 @@ test('offline: PARTO offline + madre soft-deleteada server-side → reconexión 
     // re-aparece el ternero (el intent corrupto/rechazado NO vuelve a la cola).
     await page.waitForTimeout(6_000);
     await refreshAnimalesList(page);
-    await expect(page.getByText(CALF_FALLBACK, { exact: true })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: CALF_ROW })).toHaveCount(0);
   } catch (err) {
     console.log('[diag] consola del page al fallar (rollback in-vivo):\n' + consoleLines.join('\n'));
     throw err;
@@ -583,7 +586,7 @@ test('offline: PARTO offline + sigue sin red (transitorio) → el overlay NO se 
   try {
     // El overlay PERSISTE: el ternero sigue en la lista, el parto en la cronología.
     await backToAnimalesList(page);
-    await expect(page.getByText(CALF_FALLBACK, { exact: true })).toHaveCount(1, { timeout: 20_000 });
+    await expect(page.getByRole('button', { name: CALF_ROW })).toHaveCount(1, { timeout: 20_000 });
     // Y NO se superficó ningún rechazo (un transitorio NO emite el warn — eso es del permanente).
     const rejected = consoleLines.filter((l) => l.includes('upload rechazado'));
     expect(rejected, `un transitorio NO debe superficiar un rechazo:\n${rejected.join('\n')}`).toEqual([]);

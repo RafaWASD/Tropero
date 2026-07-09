@@ -100,7 +100,7 @@ test('lote opcional: elegir un lote desde el resumen lo asigna al animal (R9.2, 
   const eid = makeEid();
   const visual = `${RUN_TAG}-L`;
   // Animal SIN lote (management_group_id null) → el resumen muestra "Sin lote" hasta que se asigne.
-  const profileId = await seedAnimal(establishmentId, rodeoId, { tag: eid, visualAlt: visual, sex: 'female' });
+  const profileId = await seedAnimal(establishmentId, rodeoId, { tag: eid, idv: visual, sex: 'female' });
 
   await gotoWithBle(page);
   await signIn(page, user);
@@ -185,7 +185,7 @@ test('lote NO auto-asignado: una maniobra sin tocar el lote deja el management_g
   const grupo = await seedManagementGroup(establishmentId, 'Recría');
   const eid = makeEid();
   const visual = `${RUN_TAG}-N`;
-  const profileId = await seedAnimal(establishmentId, rodeoId, { tag: eid, visualAlt: visual, sex: 'female' });
+  const profileId = await seedAnimal(establishmentId, rodeoId, { tag: eid, idv: visual, sex: 'female' });
   // Asignarlo al lote vía service_role (estado de partida: ya tiene lote).
   {
     const { error } = await admin

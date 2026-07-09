@@ -812,33 +812,6 @@ export async function waitForServerCustomAttribute(
 }
 
 /**
- * Resuelve el animal_profile_id de un perfil ACTIVO por su `visual_id_alt` dentro de un establishment, vía
- * service_role (spec 03 M5-C.3): para descubrir el id de un animal recién creado por la UI (cuyo id es de
- * cliente) y poder consultar sus custom_attributes en el oráculo. Reintenta (la fila tarda en propagarse).
- */
-export async function adminQueryProfileByVisual(
-  establishmentId: string,
-  visual: string,
-  opts: { tries?: number; delayMs?: number } = {},
-): Promise<string> {
-  const tries = opts.tries ?? 30;
-  const delayMs = opts.delayMs ?? 2000;
-  for (let i = 0; i < tries; i++) {
-    const { data, error } = await admin
-      .from('animal_profiles')
-      .select('id, visual_id_alt, establishment_id')
-      .eq('establishment_id', establishmentId)
-      .eq('visual_id_alt', visual)
-      .is('deleted_at', null)
-      .limit(1);
-    if (error) throw new Error(`adminQueryProfileByVisual: ${error.message}`);
-    if (data && data.length > 0) return data[0].id as string;
-    await new Promise((r) => setTimeout(r, delayMs));
-  }
-  throw new Error(`adminQueryProfileByVisual(${establishmentId}, "${visual}"): el perfil NUNCA apareció.`);
-}
-
-/**
  * Siembra un animal (animals + animal_profiles) en un rodeo, vía service_role (bypassea RLS).
  * Necesario para el test "buscar un animal EXISTENTE → ficha" (C2). Resuelve species/system/category
  * por code (no hardcodea UUIDs). La categoría inicial se computa simple por sexo (como el alta real):
@@ -852,7 +825,6 @@ export async function seedAnimal(
   rodeoId: string,
   opts: {
     idv?: string | null;
-    visualAlt?: string | null;
     tag?: string | null;
     sex?: 'male' | 'female';
     /** code de categoría explícito (default torito/vaquillona por sexo). Para sembrar una categoría manual. */
@@ -913,7 +885,6 @@ export async function seedAnimal(
     status: 'active',
   };
   if (opts.idv) profilePayload.idv = opts.idv;
-  if (opts.visualAlt) profilePayload.visual_id_alt = opts.visualAlt;
   if (opts.categoryOverride) profilePayload.category_override = true;
   // future_bull (0085): solo machos no-castrados; el trigger de normalización lo fuerza a false si no aplica.
   if (opts.futureBull) profilePayload.future_bull = true;
@@ -1030,7 +1001,7 @@ export async function getLatestInvitationToken(
  */
 export async function waitForServerAnimalProfile(
   establishmentId: string,
-  match: { idv?: string; visualAlt?: string },
+  match: { idv?: string },
   opts: { tries?: number; delayMs?: number } = {},
 ): Promise<{ id: string; animal_id: string }> {
   const tries = opts.tries ?? 30;
@@ -1042,7 +1013,6 @@ export async function waitForServerAnimalProfile(
       .eq('establishment_id', establishmentId)
       .is('deleted_at', null);
     if (match.idv) q = q.eq('idv', match.idv);
-    if (match.visualAlt) q = q.eq('visual_id_alt', match.visualAlt);
     const { data, error } = await q.limit(1);
     if (error) throw new Error(`waitForServerAnimalProfile: ${error.message}`);
     if (data && data.length > 0) return data[0] as { id: string; animal_id: string };

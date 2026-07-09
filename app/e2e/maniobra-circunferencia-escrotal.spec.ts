@@ -228,7 +228,7 @@ test('CE en un TORITO entero (cría): aparece en la secuencia → rueda + campo 
   const birthDate = new Date(Date.now() - 26 * 30 * 24 * 3600 * 1000).toISOString().slice(0, 10);
   const profileId = await seedAnimal(establishmentId, rodeoId, {
     tag: eid,
-    visualAlt: visual,
+    idv: visual,
     sex: 'male',
     categoryCode: 'torito',
     isCastrated: false,
@@ -298,7 +298,7 @@ test('CE NO aparece para una HEMBRA ni un TERNERO (se saltea, R14.2/R14.4)', asy
   // Hembra (vaquillona) + ternero (macho) — a ninguno aplica la CE.
   const cowEid = makeEid();
   const cowVisual = '0701';
-  await seedAnimal(establishmentId, rodeoId, { tag: cowEid, visualAlt: cowVisual, sex: 'female', categoryCode: 'vaquillona' });
+  await seedAnimal(establishmentId, rodeoId, { tag: cowEid, idv: cowVisual, sex: 'female', categoryCode: 'vaquillona' });
   const calfEid = makeEid();
   const calfVisual = '0702';
   // Ternero macho: el espejo client-side recomputa la categoría por sexo+birth_date+is_castrated (RT2.20), NO
@@ -306,7 +306,7 @@ test('CE NO aparece para una HEMBRA ni un TERNERO (se saltea, R14.2/R14.4)', asy
   // → para un TERNERO real hay que darle un birth_date reciente (<1 año) → el espejo lo computa 'ternero'.
   const calfBirthDate = new Date(Date.now() - 4 * 30 * 24 * 3600 * 1000).toISOString().slice(0, 10);
   await seedAnimal(establishmentId, rodeoId, {
-    tag: calfEid, visualAlt: calfVisual, sex: 'male', categoryCode: 'ternero', birthDate: calfBirthDate,
+    tag: calfEid, idv: calfVisual, sex: 'male', categoryCode: 'ternero', birthDate: calfBirthDate,
   });
 
   await gotoWithBle(page);
@@ -341,13 +341,13 @@ test('CE: castrado (novillo) la saltea; castración desconocida en un torito la 
   const steerEid = makeEid();
   const steerVisual = '0801';
   await seedAnimal(establishmentId, rodeoId, {
-    tag: steerEid, visualAlt: steerVisual, sex: 'male', categoryCode: 'novillo', isCastrated: true,
+    tag: steerEid, idv: steerVisual, sex: 'male', categoryCode: 'novillo', isCastrated: true,
   });
   // ENTERO sin fecha de nacimiento (la edad NO se prellena → "Edad sin definir", R14.7) → CE aparece.
   const bullEid = makeEid();
   const bullVisual = '0802';
   const bullProfileId = await seedAnimal(establishmentId, rodeoId, {
-    tag: bullEid, visualAlt: bullVisual, sex: 'male', categoryCode: 'toro', isCastrated: false,
+    tag: bullEid, idv: bullVisual, sex: 'male', categoryCode: 'toro', isCastrated: false,
   });
 
   await gotoWithBle(page);
@@ -406,7 +406,7 @@ test('SNAP: la rueda de CE y la de EDAD lockean EXACTO al soltar a mitad de cami
   // Torito entero CON fecha → la CE aparece y la edad se prellena (para poder ajustar la rueda de meses).
   const birthDate = new Date(Date.now() - 26 * 30 * 24 * 3600 * 1000).toISOString().slice(0, 10);
   await seedAnimal(establishmentId, rodeoId, {
-    tag: eid, visualAlt: visual, sex: 'male', categoryCode: 'torito', isCastrated: false, birthDate,
+    tag: eid, idv: visual, sex: 'male', categoryCode: 'torito', isCastrated: false, birthDate,
   });
 
   await gotoWithBle(page);
@@ -476,7 +476,7 @@ test('ANTI-RECORTE: ningún valor de CE se recorta en el campo hero, a 360 y 412
   const visual = '1011';
   const birthDate = new Date(Date.now() - 26 * 30 * 24 * 3600 * 1000).toISOString().slice(0, 10);
   await seedAnimal(establishmentId, rodeoId, {
-    tag: eid, visualAlt: visual, sex: 'male', categoryCode: 'torito', isCastrated: false, birthDate,
+    tag: eid, idv: visual, sex: 'male', categoryCode: 'torito', isCastrated: false, birthDate,
   });
 
   await gotoWithBle(page);

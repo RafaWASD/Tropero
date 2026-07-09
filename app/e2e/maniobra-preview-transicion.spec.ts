@@ -87,7 +87,7 @@ test('preview de transición: tacto+ sobre vaquillona muestra "Vaquillona preña
   // VAQUILLONA (sin override) → el espejo C6 la muestra "Vaquillona"; el tacto+ la transicionará a preñada.
   await seedAnimal(establishmentId, rodeoId, {
     tag: eid,
-    visualAlt: visual,
+    idv: visual,
     sex: 'female',
     categoryCode: 'vaquillona',
   });
@@ -135,7 +135,7 @@ test('preview de transición: tacto VACÍO no muestra el banner (sin transición
   const visual = `${RUN_TAG}-V`;
   await seedAnimal(establishmentId, rodeoId, {
     tag: eid,
-    visualAlt: visual,
+    idv: visual,
     sex: 'female',
     categoryCode: 'vaquillona',
   });

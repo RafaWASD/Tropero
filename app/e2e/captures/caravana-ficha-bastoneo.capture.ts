@@ -67,7 +67,7 @@ test('captura RCF.6: bastoneo desde la ficha (afordancia / connect / scan / lect
   await setUserPhone(user.id, '1123456789');
   const { establishmentId, rodeoId } = await seedEstablishmentWithRodeo(user.id, 'Campo CFScap');
   const idv = `9301${Date.now().toString().slice(-6)}`;
-  await seedAnimal(establishmentId, rodeoId, { tag: null, idv, visualAlt: `${RUN_TAG}-CAP`, sex: 'female' });
+  await seedAnimal(establishmentId, rodeoId, { tag: null, idv, sex: 'female' });
 
   await page.addInitScript(() => {
     (window as unknown as Record<string, unknown>).__RAFAQ_BLE_E2E__ = true;
@@ -122,7 +122,7 @@ test('captura RCF.6: sheet manual-promovido + carga manual DENTRO del sheet', as
   await setUserPhone(user.id, '1123456789');
   const { establishmentId, rodeoId } = await seedEstablishmentWithRodeo(user.id, 'Campo CFScapM');
   const idv = `9401${Date.now().toString().slice(-6)}`;
-  await seedAnimal(establishmentId, rodeoId, { tag: null, idv, visualAlt: `${RUN_TAG}-CAPM`, sex: 'female' });
+  await seedAnimal(establishmentId, rodeoId, { tag: null, idv, sex: 'female' });
 
   await page.addInitScript(() => {
     (window as unknown as Record<string, unknown>).__RAFAQ_BLE_E2E__ = true;

@@ -73,7 +73,7 @@ test('(a) bastonazo a un animal del campo → overlay editar → "Ver ficha" →
   const { establishmentId, rodeoId } = await seedEstablishmentWithRodeo(user.id, 'Campo Baston Edit');
   const eid = makeEid();
   const visual = `${RUN_TAG}-EDIT`;
-  await seedAnimal(establishmentId, rodeoId, { tag: eid, visualAlt: visual, sex: 'female' });
+  await seedAnimal(establishmentId, rodeoId, { tag: eid, idv: visual, sex: 'female' });
 
   await gotoWithBle(page);
   await signIn(page, user);
@@ -155,7 +155,7 @@ test('(d) bastonazo a un animal en OTRO campo → overlay transferir → transfe
   const dest = await seedEstablishmentWithRodeo(user.id, 'Campo Destino');
   const origin = await seedEstablishmentWithRodeo(user.id, 'Campo Origen');
   const eid = makeEid();
-  await seedAnimal(origin.establishmentId, origin.rodeoId, { tag: eid, visualAlt: `${RUN_TAG}-TR`, sex: 'female' });
+  await seedAnimal(origin.establishmentId, origin.rodeoId, { tag: eid, sex: 'female' });
 
   await gotoWithBle(page);
   await signIn(page, user);

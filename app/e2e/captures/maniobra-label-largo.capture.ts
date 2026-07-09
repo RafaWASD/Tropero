@@ -90,7 +90,7 @@ for (const width of WIDTHS) {
       const visual = '0385';
       await seedAnimal(establishmentId, rodeoId, {
         tag: eid,
-        visualAlt: visual,
+        idv: visual,
         sex: 'female',
         categoryCode: 'vaquillona',
       });

@@ -95,7 +95,7 @@ test('(1) substring manual NO auto-carga la caravana equivocada → picker de co
     rodeoRawName: true,
   });
   // ÚNICO animal: idv "1428". El operario teclea "42" (su caravana "1428" CONTIENE "42" como substring).
-  await seedAnimal(establishmentId, rodeoId, { idv: '1428', visualAlt: 'X-1428', sex: 'female', categoryCode: 'vaquillona' });
+  await seedAnimal(establishmentId, rodeoId, { idv: '1428', sex: 'female', categoryCode: 'vaquillona' });
 
   await gotoWithBle(page);
   await signIn(page, user);
@@ -112,11 +112,12 @@ test('(1) substring manual NO auto-carga la caravana equivocada → picker de co
   await expect(page.getByText(/No hay ninguna caravana/)).toBeVisible();
   // NO está en el paso de tacto (no se auto-cargó).
   await expect(page.getByRole('button', { name: 'VACÍA', exact: true })).toHaveCount(0);
-  // El operario CONFIRMA tocando el candidato → ahora sí carga sobre él (el animal correcto que eligió).
-  await page.getByText('X-1428', { exact: true }).click();
+  // El operario CONFIRMA tocando el candidato → ahora sí carga sobre él (el animal correcto que eligió). El
+  // dominante del candidato es su idv "1428" (delta IDU: sin visual_id_alt, sin apodo) → lo elegimos por a11y.
+  await page.getByRole('button', { name: /^Elegir 1428/ }).click();
   await expect(page.getByRole('button', { name: 'VACÍA', exact: true })).toBeVisible({ timeout: 20_000 });
-  // El header muestra la caravana del animal ELEGIDO (X-1428), no "42".
-  await expect(page.getByText('X-1428', { exact: true })).toBeVisible();
+  // El header muestra el idv del animal ELEGIDO (1428), no "42".
+  await expect(page.getByText('1428', { exact: true })).toBeVisible();
 });
 
 test('(1b) match EXACTO por idv → auto-avance directo a la carga (camino rápido preservado)', async ({ page }) => {
@@ -127,21 +128,20 @@ test('(1b) match EXACTO por idv → auto-avance directo a la carga (camino rápi
     rodeoName: 'Cría hembras',
     rodeoRawName: true,
   });
-  const visual = '0385';
-  await seedAnimal(establishmentId, rodeoId, { idv: '385', visualAlt: visual, sex: 'female', categoryCode: 'vaquillona' });
+  await seedAnimal(establishmentId, rodeoId, { idv: '385', sex: 'female', categoryCode: 'vaquillona' });
 
   await gotoWithBle(page);
   await signIn(page, user);
   await waitForHome(page);
   await gotoAnimales(page);
-  await expect(page.getByText(visual, { exact: false }).first()).toBeVisible({ timeout: 45_000 });
+  await expect(page.getByText('385', { exact: false }).first()).toBeVisible({ timeout: 45_000 });
   await page.waitForTimeout(2000);
 
   await startSessionTacto(page);
   // Tecleo EXACTO del idv "385" → auto-avance directo (sin picker) al paso de tacto del animal correcto.
   await manualSearch(page, '385');
   await expect(page.getByRole('button', { name: 'VACÍA', exact: true })).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByText('0385', { exact: true })).toBeVisible();
+  await expect(page.getByText('385', { exact: true })).toBeVisible();
 });
 
 // ── BUG (2) "NO AVANZA": el persist falla → el error se SUPERFICIA (no se traga) y NO se avanza; el
@@ -157,7 +157,7 @@ test('(2) persist falla → banner de error visible + NO avanza; reintento → a
   const eid = makeEid();
   const profileId = await seedAnimal(establishmentId, rodeoId, {
     tag: eid,
-    visualAlt: `${RUN_TAG}-FAIL`,
+    idv: `${RUN_TAG}-FAIL`,
     sex: 'female',
     categoryCode: 'vaquillona',
   });
