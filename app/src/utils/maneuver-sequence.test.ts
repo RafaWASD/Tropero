@@ -248,7 +248,9 @@ test('describeStepValue: vacunación multi (coma-join) / inseminación / lab', (
     describeStepValue({ kind: 'vaccination', products: ['Aftosa', 'Mancha'] }),
     'Aftosa, Mancha',
   );
-  assert.equal(describeStepValue({ kind: 'vaccination', products: [] }), 'Aplicada');
+  // 0 vacunas (delta-fix D1): el operario NO vacunó a este animal → resumen HONESTO "Sin vacuna" (no
+  // "Aplicada": no se persistió ninguna fila). Espeja el CTA "Seguir sin aplicar" del SilentVaccinationStep.
+  assert.equal(describeStepValue({ kind: 'vaccination', products: [] }), 'Sin vacuna');
   assert.equal(describeStepValue({ kind: 'inseminacion', semenName: 'Toro X' }), 'Toro X');
   assert.equal(describeStepValue({ kind: 'lab', tubeNumber: '42' }), 'Tubo 42');
   assert.equal(

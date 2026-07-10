@@ -1,5 +1,6 @@
 // Tests de la lógica PURA de aplicabilidad per-animal (spec 03 M3.1). node:test.
-// Foco: R6.12 (raspado solo machos → se salta para hembras), R6.2/R6.3 (tactos solo hembras),
+// Foco: R6.12 (raspado solo machos → se salta para hembras), R6.2/R6.3 (bug B: tacto de PREÑEZ solo hembras
+// SERVIDAS, tacto de APTITUD solo vaquillonas AÚN NO aptas — una ternera no pasa por ninguno),
 // R6.9/R6.10 (pesaje vs pesaje_ternero excluyentes por categoría → mata el doble pesaje) + R6.8 (prompt
 // CUT no para terneros).
 
@@ -80,29 +81,140 @@ test('R6.12: filterByAnimalApplicability deja el raspado para un macho (incluido
   assert.deepEqual(r.skipped, []);
 });
 
-// ─── R6.2/R6.3 — Tacto de preñez / de aptitud: solo hembras ────────────────────────────
+// ─── R6.2/R6.3 (bug B) — Tacto de PREÑEZ solo servidas / tacto de APTITUD solo vaquillonas-no-aptas ──
+// El caller (carga.tsx) pasa `reproStatus` desde AnimalDetail.reproStatus (mismo espejo que la ficha,
+// deriveReproStatus). Reglas de dominio (correcciones-demo-facundo-padre-2026-07-10, bug B):
+//   - tacto (preñez): hembra SERVIDA = categoría PROBADA ∨ reproStatus ∈ {served_untested, pregnant, empty}.
+//   - tacto_vaquillona (aptitud): vaquillona AÚN NO apta = categoría 'vaquillona' ∧ reproStatus 'unknown' ∨
+//     'fitness' con veredicto ≠ 'apta'.
+//   - ternera → NINGUNO; vaquillona apta sin servicio → NINGUNO; macho / sexo desconocido → NINGUNO.
 
-test('R6.2/R6.3: tacto y tacto_vaquillona APLICAN a una hembra', () => {
+// Ternera (reproStatus 'none' — la preñez/aptitud no aplican a la cría al pie).
+const CALF_F_REPRO: AnimalApplicabilityInfo = {
+  sex: 'female', categoryCode: 'ternera', isCastrated: false, reproStatus: { kind: 'none' },
+};
+// Vaquillona SIN evaluar (unknown): candidata a la 1ª aptitud, NO servida.
+const HEIFER_UNEVAL: AnimalApplicabilityInfo = {
+  sex: 'female', categoryCode: 'vaquillona', isCastrated: false, reproStatus: { kind: 'unknown' },
+};
+// Vaquillona con veredicto no_apta / diferida: re-evaluar aptitud, NO servida.
+const HEIFER_NO_APTA_REPRO: AnimalApplicabilityInfo = {
+  sex: 'female', categoryCode: 'vaquillona', isCastrated: false, reproStatus: { kind: 'fitness', fitness: 'no_apta' },
+};
+const HEIFER_DIFERIDA_REPRO: AnimalApplicabilityInfo = {
+  sex: 'female', categoryCode: 'vaquillona', isCastrated: false, reproStatus: { kind: 'fitness', fitness: 'diferida' },
+};
+// Vaquillona APTA pero SIN servicio (fitness apta): ya es apta y no fue servida → NINGÚN tacto (espera servicio).
+const HEIFER_APTA_UNSERVED: AnimalApplicabilityInfo = {
+  sex: 'female', categoryCode: 'vaquillona', isCastrated: false, reproStatus: { kind: 'fitness', fitness: 'apta' },
+};
+// Vaquillona SERVIDA (served_untested: tiene evento service; el espejo aún NO recomputó a vaquillona_prenada):
+// tacto de preñez sí; aptitud NO (ya servida → precedencia served > fitness).
+const HEIFER_SERVED: AnimalApplicabilityInfo = {
+  sex: 'female', categoryCode: 'vaquillona', isCastrated: false, reproStatus: { kind: 'served_untested' },
+};
+// Vaca probada servida sin tacto (multipara → served_untested).
+const COW_SERVED: AnimalApplicabilityInfo = {
+  sex: 'female', categoryCode: 'multipara', isCastrated: false, reproStatus: { kind: 'served_untested' },
+};
+// Vaca preñada (tacto positivo previo → fue servida).
+const COW_PREGNANT: AnimalApplicabilityInfo = {
+  sex: 'female', categoryCode: 'vaca_segundo_servicio', isCastrated: false, reproStatus: { kind: 'pregnant', status: 'medium' },
+};
+// Vaca vacía (tacto negativo previo — fue tactada, tactable de nuevo).
+const COW_EMPTY: AnimalApplicabilityInfo = {
+  sex: 'female', categoryCode: 'multipara', isCastrated: false, reproStatus: { kind: 'empty' },
+};
+// Vaca PROBADA marcada CUT: reproStatus 'cut' (precedencia > served) PERO categoría probada → tacto de preñez
+// sí (aún tactable antes de venderla, vía la cláusula de categoría probada); aptitud no (no es vaquillona).
+const COW_PROVEN_CUT: AnimalApplicabilityInfo = {
+  sex: 'female', categoryCode: 'multipara', isCastrated: false, reproStatus: { kind: 'cut' },
+};
+
+test('R6.2 (bug B): tacto de preñez APLICA a hembras SERVIDAS (servida sin tacto / preñada / vacía / probada)', () => {
+  assert.equal(appliesToAnimal('tacto', HEIFER_SERVED), true);
+  assert.equal(appliesToAnimal('tacto', COW_SERVED), true);
+  assert.equal(appliesToAnimal('tacto', COW_PREGNANT), true);
+  assert.equal(appliesToAnimal('tacto', COW_EMPTY), true);
+  // Categoría PROBADA aunque el reproStatus resuelva a 'cut' (precedencia): sigue siendo servida → tactable.
+  assert.equal(appliesToAnimal('tacto', COW_PROVEN_CUT), true);
+  // Categoría PROBADA sin reproStatus (fixture legacy FEMALE = vaca_segundo_servicio) → tactable por categoría.
   assert.equal(appliesToAnimal('tacto', FEMALE), true);
-  assert.equal(appliesToAnimal('tacto_vaquillona', FEMALE), true);
-  assert.equal(appliesToAnimal('tacto', HEIFER), true);
-  assert.equal(appliesToAnimal('tacto_vaquillona', HEIFER), true);
 });
 
-test('R6.2/R6.3: tacto y tacto_vaquillona NO aplican a un macho (un toro no se tacta → se saltan)', () => {
+test('R6.2 (bug B): tacto de preñez NO aplica a NO-servidas (ternera / vaquillona sin evaluar / no_apta / apta sin servicio)', () => {
+  assert.equal(appliesToAnimal('tacto', CALF_F_REPRO), false);
+  assert.equal(appliesToAnimal('tacto', HEIFER_UNEVAL), false);
+  assert.equal(appliesToAnimal('tacto', HEIFER_NO_APTA_REPRO), false);
+  assert.equal(appliesToAnimal('tacto', HEIFER_APTA_UNSERVED), false); // apta PERO no servida
+});
+
+test('R6.3 (bug B): tacto de aptitud APLICA a vaquillonas AÚN NO aptas (sin evaluar / no_apta / diferida)', () => {
+  assert.equal(appliesToAnimal('tacto_vaquillona', HEIFER_UNEVAL), true);
+  assert.equal(appliesToAnimal('tacto_vaquillona', HEIFER_NO_APTA_REPRO), true);
+  assert.equal(appliesToAnimal('tacto_vaquillona', HEIFER_DIFERIDA_REPRO), true);
+});
+
+test('R6.3 (bug B): tacto de aptitud NO aplica a vaquillona ya apta, ni a servida/preñada, ni a ternera/vaca', () => {
+  assert.equal(appliesToAnimal('tacto_vaquillona', HEIFER_APTA_UNSERVED), false); // ya es apta
+  assert.equal(appliesToAnimal('tacto_vaquillona', HEIFER_SERVED), false); // ya servida (served_untested)
+  assert.equal(appliesToAnimal('tacto_vaquillona', COW_PREGNANT), false); // ya servida/preñada
+  assert.equal(appliesToAnimal('tacto_vaquillona', CALF_F_REPRO), false); // ternera
+  assert.equal(appliesToAnimal('tacto_vaquillona', COW_SERVED), false); // no es vaquillona
+  assert.equal(appliesToAnimal('tacto_vaquillona', COW_PROVEN_CUT), false); // no es vaquillona
+});
+
+test('R6.2/R6.3 (bug B): una TERNERA NO pasa por NINGÚN tacto (el bug reportado: pasaba por ambos)', () => {
+  assert.equal(appliesToAnimal('tacto', CALF_F_REPRO), false);
+  assert.equal(appliesToAnimal('tacto_vaquillona', CALF_F_REPRO), false);
+});
+
+test('R6.2/R6.3 (bug B): una vaquillona SERVIDA pasa SOLO por el tacto de preñez (NO por aptitud)', () => {
+  assert.equal(appliesToAnimal('tacto', HEIFER_SERVED), true);
+  assert.equal(appliesToAnimal('tacto_vaquillona', HEIFER_SERVED), false);
+});
+
+test('R6.2/R6.3 (bug B): una vaquillona NO apta pasa SOLO por el tacto de aptitud (NO por preñez)', () => {
+  assert.equal(appliesToAnimal('tacto', HEIFER_NO_APTA_REPRO), false);
+  assert.equal(appliesToAnimal('tacto_vaquillona', HEIFER_NO_APTA_REPRO), true);
+});
+
+test('R6.2/R6.3 (bug B): una vaquillona APTA sin servicio NO pasa por NINGÚN tacto (espera ser servida)', () => {
+  assert.equal(appliesToAnimal('tacto', HEIFER_APTA_UNSERVED), false);
+  assert.equal(appliesToAnimal('tacto_vaquillona', HEIFER_APTA_UNSERVED), false);
+});
+
+test('R6.2/R6.3 (bug B): tacto y tacto_vaquillona NO aplican a un macho (un toro no se tacta → se saltan)', () => {
   assert.equal(appliesToAnimal('tacto', MALE), false);
   assert.equal(appliesToAnimal('tacto_vaquillona', MALE), false);
 });
 
-test('R6.2/R6.3: tacto/tacto_vaquillona con sexo desconocido → NO aplican (fail-safe, no se tacta sin sexo)', () => {
-  assert.equal(appliesToAnimal('tacto', UNKNOWN_SEX), false);
-  assert.equal(appliesToAnimal('tacto_vaquillona', UNKNOWN_SEX), false);
+test('R6.2/R6.3 (bug B): sexo desconocido → NO aplican (fail-safe, no se tacta sin sexo confirmado)', () => {
+  // Aunque fuera una vaquillona sin evaluar, sin sexo confirmado NO se tacta (mismo criterio que el raspado).
+  const noSex: AnimalApplicabilityInfo = { ...UNKNOWN_SEX, reproStatus: { kind: 'unknown' } };
+  assert.equal(appliesToAnimal('tacto', noSex), false);
+  assert.equal(appliesToAnimal('tacto_vaquillona', noSex), false);
 });
 
-test('R6.2/R6.3: filterByAnimalApplicability saca AMBOS tactos de un macho (deja el peso de adulto + raspado)', () => {
+test('R6.2/R6.3 (bug B): sin reproStatus (fail-safe) → tacto solo por categoría PROBADA; vaquillona sin dato se salta', () => {
+  // Vaquillona sin reproStatus (call-site que no lo pasa): sin el espejo NO se confirma servicio ni veredicto →
+  // ambos tactos se saltan (fail-safe). Categoría probada sin reproStatus → tactable por la cláusula de categoría.
+  assert.equal(appliesToAnimal('tacto', HEIFER), false);
+  assert.equal(appliesToAnimal('tacto_vaquillona', HEIFER), false);
+  assert.equal(appliesToAnimal('tacto', MULTIPARA), true);
+});
+
+test('R6.2/R6.3 (bug B): filterByAnimalApplicability saca AMBOS tactos de un macho (deja el peso + raspado)', () => {
   const seq: ManeuverKind[] = ['tacto', 'tacto_vaquillona', 'pesaje', 'raspado'];
   const r = filterByAnimalApplicability(seq, MALE);
   assert.deepEqual(r.applicable, ['pesaje', 'raspado']);
+  assert.deepEqual(r.skipped, ['tacto', 'tacto_vaquillona']);
+});
+
+test('R6.2/R6.3 (bug B): filterByAnimalApplicability saca AMBOS tactos de una TERNERA (deja el peso de ternero)', () => {
+  const seq: ManeuverKind[] = ['tacto', 'tacto_vaquillona', 'pesaje_ternero'];
+  const r = filterByAnimalApplicability(seq, CALF_F_REPRO);
+  assert.deepEqual(r.applicable, ['pesaje_ternero']);
   assert.deepEqual(r.skipped, ['tacto', 'tacto_vaquillona']);
 });
 
@@ -225,11 +337,18 @@ test('secuencia: un MACHO con tacto/tacto_vaquillona en la sesión → ambos se 
   assert.deepEqual(steps, ['raspado', 'pesaje']);
 });
 
-test('secuencia: una HEMBRA → tactos según rodeo (sí), raspado se salta', () => {
+test('secuencia (bug B): una VACA servida → tacto de preñez (sí), aptitud NO (no es vaquillona), raspado se salta', () => {
   const ordered: ManeuverKind[] = ['tacto', 'tacto_vaquillona', 'raspado', 'pesaje'];
-  const { applicable } = filterByAnimalApplicability(ordered, FEMALE);
+  const { applicable } = filterByAnimalApplicability(ordered, COW_SERVED);
   const steps = buildSequence(ordered, applicable).map((s) => s.maneuver);
-  assert.deepEqual(steps, ['tacto', 'tacto_vaquillona', 'pesaje']);
+  assert.deepEqual(steps, ['tacto', 'pesaje']);
+});
+
+test('secuencia (bug B): una VAQUILLONA no-apta → tacto de aptitud (sí), preñez NO (no servida), raspado se salta', () => {
+  const ordered: ManeuverKind[] = ['tacto', 'tacto_vaquillona', 'raspado', 'pesaje'];
+  const { applicable } = filterByAnimalApplicability(ordered, HEIFER_NO_APTA_REPRO);
+  const steps = buildSequence(ordered, applicable).map((s) => s.maneuver);
+  assert.deepEqual(steps, ['tacto_vaquillona', 'pesaje']);
 });
 
 // ─── R6.8 — Prompt CUT no para terneros ────────────────────────────────────────────────

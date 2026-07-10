@@ -5,10 +5,11 @@
 // (preconfig de M1, ej. ["Aftosa","Mancha"]) se muestran como CHIPS pre-cargados, editables (× quita,
 // input + autocompletar agrega). CTA GIGANTE "Aplicar y seguir" → el frame persiste N sanitary_events.
 //
-// Igual que el silent de un producto, "Aplicar y seguir" está habilitado SIEMPRE (la maniobra es silent: se
-// puede registrar "vacunado" sin tipear los nombres exactos — el dato útil es que se aplicó). Si el operario
-// tipeó algo sin "Agregar", se incluye al confirmar (no se pierde el último tipeo). El gating capa 2
-// (vacunacion enabled) lo re-valida server-side.
+// El CTA está habilitado SIEMPRE (delta-fix D1, triage 2026-07-10): el operario TIENE que poder NO vacunar a
+// un animal puntual (la vacuna no le aplica) y seguir. Con ≥1 vacuna el CTA dice "Aplicar y seguir" (persiste
+// N sanitary_events); con CERO vacunas dice "Seguir sin aplicar" y NO persiste ninguna fila (path honesto: el
+// animal no recibe vacuna — el resumen lo muestra como "Sin vacuna", no "Aplicada"). Si el operario tipeó algo
+// sin "Agregar", se incluye al confirmar (no se pierde el último tipeo). El gating capa 2 lo re-valida server.
 //
 // Reusa el patrón multi del wizard (ManeuverConfigSheet): chips con × + input $searchBarLg=56 + botón "+" +
 // autocompletar "Usadas antes" (filterAutocomplete). NO se rediseña. Cero hardcode (ADR-023 §4): tokens;
@@ -24,7 +25,7 @@
 import { useMemo, useState } from 'react';
 import { Platform, Pressable, TextInput } from 'react-native';
 import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
-import { Check, Plus, X } from 'lucide-react-native';
+import { ArrowRight, Check, Plus, X } from 'lucide-react-native';
 
 import { buttonA11y, labelA11y } from '@/utils/a11y';
 import { filterAutocomplete } from '@/utils/maneuver-wizard';
@@ -87,11 +88,11 @@ export function SilentVaccinationStep({
     onConfirm(dedup(pending ? [...items, trimmed] : items));
   }
 
-  // A diferencia del silent de UN producto (antiparasitario/antibiótico, que SÍ puede aplicarse sin nombrar
-  // el producto — el evento "se aplicó" igual existe), la vacunación escribe UN sanitary_event POR VACUNA
-  // (R6.1): con CERO vacunas no hay nada que aplicar → CTA deshabilitado (evita un resumen "Aplicada" que no
-  // persistió ninguna fila). Basta una vacuna agregada o tipeada para habilitarlo.
-  const canApply = items.length > 0 || trimmed.length > 0;
+  // ¿Hay al menos UNA vacuna que se va a aplicar? (una agregada como chip, o algo tipeado sin "Agregar" que se
+  // incluye al confirmar). Con CERO → el animal NO recibe vacuna: el CTA cambia a "Seguir sin aplicar" y NO se
+  // persiste ninguna fila (la vacunación escribe UN sanitary_event POR VACUNA — R6.1 — así que 0 vacunas = 0
+  // filas, path honesto). El CTA queda SIEMPRE habilitado (delta-fix D1): poder no vacunar un animal puntual.
+  const hasVaccines = items.length > 0 || trimmed.length > 0;
 
   return (
     <YStack flex={1} backgroundColor="$bg" paddingHorizontal="$4" paddingTop="$2" paddingBottom={bottomPad} gap="$3">
@@ -218,24 +219,28 @@ export function SilentVaccinationStep({
       </ScrollView>
       </YStack>
 
-      {/* ── CTA GIGANTE "Aplicar y seguir" (botella). Deshabilitado con CERO vacunas (R6.1: una fila por vacuna). ── */}
+      {/* ── CTA GIGANTE (botella). SIEMPRE habilitado (delta-fix D1): con ≥1 vacuna "Aplicar y seguir" (✓,
+            persiste N filas); con CERO "Seguir sin aplicar" (→, no persiste ninguna — el animal no se vacuna). ── */}
       <View
         testID="silent-apply"
-        backgroundColor={canApply ? '$primary' : '$divider'}
+        backgroundColor="$primary"
         borderRadius="$pill"
         minHeight="$touchMin"
         flexDirection="row"
         alignItems="center"
         justifyContent="center"
         gap="$2"
-        opacity={canApply ? 1 : 0.7}
-        pressStyle={canApply ? { backgroundColor: '$primaryPress' } : undefined}
-        onPress={canApply ? handleConfirm : undefined}
-        {...buttonA11y(Platform.OS, { label: 'Aplicar y seguir', disabled: !canApply })}
+        pressStyle={{ backgroundColor: '$primaryPress' }}
+        onPress={handleConfirm}
+        {...buttonA11y(Platform.OS, { label: hasVaccines ? 'Aplicar y seguir' : 'Seguir sin aplicar' })}
       >
-        <Check size={getTokenValue('$fabIcon', 'size')} color={getTokenValue('$white', 'color')} strokeWidth={3} />
+        {hasVaccines ? (
+          <Check size={getTokenValue('$fabIcon', 'size')} color={getTokenValue('$white', 'color')} strokeWidth={3} />
+        ) : (
+          <ArrowRight size={getTokenValue('$fabIcon', 'size')} color={getTokenValue('$white', 'color')} strokeWidth={3} />
+        )}
         <Text fontFamily="$body" fontSize="$6" lineHeight="$6" fontWeight="700" color="$white" numberOfLines={1}>
-          Aplicar y seguir
+          {hasVaccines ? 'Aplicar y seguir' : 'Seguir sin aplicar'}
         </Text>
       </View>
     </YStack>

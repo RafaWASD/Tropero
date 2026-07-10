@@ -28,6 +28,10 @@ import {
   buildManeuverEventQueries,
   type ManeuverEventInput,
 } from '../utils/maneuver-event-query';
+import {
+  buildManeuverEventSoftDeleteQuery,
+  type ManeuverDiscardTarget,
+} from '../utils/maneuver-skip';
 
 // ─── Error / Result uniforme (mismo shape que events.ts) ────────────────────────────────────
 
@@ -86,6 +90,29 @@ export async function softDeleteManeuverEvents(
     const r = await runLocalWrite(buildSoftDeleteEventUpdate(table, id));
     if (!r.ok) return { ok: false, error: { kind: r.error.kind, message: r.error.message } };
     deleted += 1;
+  }
+  return { ok: true, value: { deleted } };
+}
+
+/**
+ * DESCARTA lo cargado al SALTEAR un animal (spec 03 delta `skip-animal-maniobra`, R5.15): soft-borra, por
+ * tabla, las filas de evento que ESTE mismo frame escribió para ESTE animal (targets armados en el cliente por
+ * `collectManeuverDiscardTargets` a partir del CaptureMap + los ids estables del frame). Mismo espíritu que
+ * `softDeleteManeuverEvents` (retira SOLO filas que la sesión acaba de escribir, por ids de cliente — nunca un
+ * borrado cross-tenant; la RLS UPDATE owner|autor 0026/0027 es la barrera real al subir). Offline-safe +
+ * idempotente (`deleted_at IS NULL`). `dientes` (UPDATE de propiedad) queda FUERA por construcción del target.
+ * FAIL-CLOSED: si UN write local falla, se corta y devuelve el error (el caller NO navega, deja reintentar).
+ */
+export async function discardManeuverEvents(
+  targets: readonly ManeuverDiscardTarget[],
+): Promise<ServiceResult<{ deleted: number }>> {
+  let deleted = 0;
+  for (const target of targets) {
+    for (const id of target.ids) {
+      const r = await runLocalWrite(buildManeuverEventSoftDeleteQuery(target.table, id));
+      if (!r.ok) return { ok: false, error: { kind: r.error.kind, message: r.error.message } };
+      deleted += 1;
+    }
   }
   return { ok: true, value: { deleted } };
 }

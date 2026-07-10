@@ -4,8 +4,11 @@
 // Distinta de `maneuver-gating.ts` (que decide qué maniobras aplican según el RODEO real del animal,
 // R5.5). Este módulo decide la aplicabilidad por ATRIBUTOS del propio animal (sexo, categoría):
 //   - R6.12: el RASPADO de toros es solo para machos → se SALTA en una hembra (aunque el rodeo lo habilite).
-//   - R6.2/R6.3: el TACTO de preñez y el TACTO de aptitud (vaquillonas) son solo para HEMBRAS → se SALTAN en
-//     un macho (un toro no se tacta), aunque el rodeo habilite `prenez`/`tacto_vaquillona`.
+//   - R6.2/R6.3 (bug B, correcciones-demo-facundo-padre): el TACTO de preñez (`tacto`) y el TACTO de aptitud
+//     (`tacto_vaquillona`) NO son "cualquier hembra". Se distinguen por el ESTADO REPRODUCTIVO (reproStatus):
+//     el tacto de PREÑEZ es solo para hembras SERVIDAS (categoría PROBADA o con evidencia de servicio/tacto
+//     previo); el tacto de APTITUD es solo para VAQUILLONAS que AÚN NO son aptas. Una ternera no pasa por
+//     ninguno; una vaquillona apta sin servicio tampoco. Un macho se SALTA ambos (un toro no se tacta).
 //   - R6.9/R6.10: `pesaje` (peso de adulto/recría) y `pesaje_ternero` (peso de cría al pie) son
 //     MUTUAMENTE EXCLUYENTES por CATEGORÍA — ambos mapean al mismo data_key `peso` (maneuver-gating), así que
 //     SIN este filtro un animal pasaría por los DOS pasos de peso (el doble pesaje que reportó Raf). Un
@@ -21,7 +24,7 @@
 // estos predicados son la barrera de cliente; el gating server-side cubre el rodeo, no el sexo/categoría.
 
 import type { ManeuverKind } from './maneuver-gating';
-import { isReproApt } from './repro-status';
+import { isReproApt, PROVEN_FEMALE_CATEGORY_CODES, type ReproStatus } from './repro-status';
 import type { HeiferFitness } from './maneuver-sequence';
 
 export type AnimalSex = 'male' | 'female';
@@ -50,6 +53,16 @@ export type AnimalApplicabilityInfo = {
    * (sin veredicto): los call-sites legacy (DientesStep, tests de CE, etc.) NO la pasan y siguen funcionando.
    */
   aptitude?: HeiferFitness | null;
+  /**
+   * Estado reproductivo VIGENTE single-slot (delta spec 02 aptitud, RAR.4) — lo consumen los TACTOS (bug B,
+   * correcciones-demo-facundo-padre): `tacto` (preñez) distingue una hembra SERVIDA (served_untested/pregnant/
+   * empty o categoría PROBADA) de una que no fue servida; `tacto_vaquillona` (aptitud) distingue una vaquillona
+   * AÚN NO apta (unknown / fitness≠apta) de una ya apta o ya servida. Es la MISMA fuente que la ficha
+   * (`deriveReproStatus`, AnimalDetail.reproStatus) — encapsula la precedencia (no se recompone acá). La provee
+   * el caller (carga.tsx). `undefined`/ausente → sin dato: los tactos caen a fail-safe (tacto → solo categorías
+   * PROBADAS; tacto_vaquillona → se salta). Los call-sites legacy (DientesStep, tests de CE/pesaje) NO la pasan.
+   */
+  reproStatus?: ReproStatus;
   /**
    * Edad en DÍAS del animal (de `birth_date`, RAR.6.1) — SOLO la consume `inseminacion` (fallback de edad de
    * la vaquillona sin veredicto, RAR.6.2/6.5, espeja `0105`). `undefined`/`null` → sin edad → el fallback NO
@@ -96,6 +109,33 @@ export function isBullEntire(
 }
 
 /**
+ * ¿El estado reproductivo evidencia que la hembra fue SERVIDA? (gate del tacto de PREÑEZ, bug B). true si ya
+ * hay evidencia de servicio o de un tacto previo: `served_untested` (servida sin tacto — categoría probada o
+ * evento `service`), `pregnant` o `empty` (ya tactada). Una vaquillona apta/sin evaluar (`fitness`/`unknown`),
+ * una hembra CUT (`cut`), una ternera/macho (`none`) o sin dato (`undefined`) → false: NO fueron servidas, no se
+ * tacta su preñez. PURO. `reproStatus` encapsula la precedencia RAR.2.4 (no se recompone acá).
+ */
+function isServedReproStatus(status: ReproStatus | undefined): boolean {
+  return (
+    status !== undefined &&
+    (status.kind === 'served_untested' || status.kind === 'pregnant' || status.kind === 'empty')
+  );
+}
+
+/**
+ * ¿La vaquillona AÚN NO es apta y todavía NO fue servida? (gate del tacto de APTITUD, bug B). true SSI el
+ * estado reproductivo es `unknown` (sin evaluar → candidata a la primera aptitud) o `fitness` con veredicto
+ * ≠ 'apta' (no_apta/diferida → re-evaluar). Excluye: `fitness` apta (ya es apta), `served_untested`/`pregnant`/
+ * `empty` (ya servida — precedencia > fitness, no se re-evalúa aptitud de una servida), `cut`, `none` y sin dato
+ * (`undefined`, fail-safe → se salta). PURO. `reproStatus` es la fuente única (encapsula la precedencia RAR.2.4).
+ */
+function needsFitnessEvaluation(status: ReproStatus | undefined): boolean {
+  if (status === undefined) return false;
+  if (status.kind === 'unknown') return true;
+  return status.kind === 'fitness' && status.fitness !== 'apta';
+}
+
+/**
  * ¿La maniobra APLICA a ESTE animal por sus atributos (sexo/categoría)? (per-animal, ortogonal al gating por
  * rodeo de maneuver-gating.ts). Las celdas validadas hoy (el resto de maniobras → `return true`; las demás
  * exclusiones por categoría quedan PENDIENTES de validar con Facundo):
@@ -103,8 +143,13 @@ export function isBullEntire(
  *   - `raspado` (R6.12): solo MACHOS → una HEMBRA lo SALTA. Sexo desconocido (`null`) → se SALTA (fail-safe:
  *     no se escribe un raspado de campylo/trico sobre un animal cuyo sexo no se pudo confirmar; el operario
  *     corrige el sexo y vuelve a pasarlo).
- *   - `tacto` (R6.2, preñez) y `tacto_vaquillona` (R6.3, aptitud): solo HEMBRAS → un MACHO los SALTA (un toro
- *     no se tacta). Sexo desconocido (`null`) → se SALTA (fail-safe: no se tacta un animal sin sexo confirmado).
+ *   - `tacto` (R6.2, preñez) y `tacto_vaquillona` (R6.3, aptitud) — bug B (correcciones-demo-facundo-padre):
+ *     NO son "cualquier hembra". `tacto` (preñez) aplica solo a hembras SERVIDAS (categoría PROBADA ∨
+ *     reproStatus ∈ {served_untested, pregnant, empty}); `tacto_vaquillona` (aptitud) aplica solo a VAQUILLONAS
+ *     que AÚN NO son aptas (reproStatus 'unknown' ∨ 'fitness' con veredicto ≠ 'apta'). Una ternera no pasa por
+ *     ninguno; una vaquillona apta sin servicio tampoco; un MACHO los SALTA ambos (un toro no se tacta). Sexo
+ *     desconocido (`null`) → se SALTA (fail-safe: no se tacta sin sexo confirmado). Ver isServedReproStatus /
+ *     needsFitnessEvaluation (encapsulan la precedencia del reproStatus).
  *   - `pesaje` (R6.9) vs `pesaje_ternero` (R6.10): MUTUAMENTE EXCLUYENTES por categoría — ambos usan el data_key
  *     `peso`, así que sin este split el animal pasaría por los DOS pasos de peso (el doble pesaje de Raf).
  *       · `pesaje_ternero` aplica SSI `categoryCode ∈ CALF_CATEGORY_CODES` (ternero/ternera).
@@ -120,9 +165,30 @@ export function appliesToAnimal(maneuver: ManeuverKind, animal: AnimalApplicabil
       // Raspado de toros: solo machos (R6.12). Sexo null → se salta (fail-safe).
       return animal.sex === 'male';
     case 'tacto':
+      // Tacto de PREÑEZ (bug B): solo hembras SERVIDAS. Una hembra está servida si su categoría es PROBADA
+      // (PROVEN_FEMALE_CATEGORY_CODES: vaquillona_preñada/vaca_segundo_servicio/multípara/vaca_cabaña — todas
+      // "probadamente servidas", fuente única de repro-status.ts) O su estado reproductivo evidencia servicio
+      // o tacto previo (served_untested = servida sin tacto; pregnant/empty = ya tactada). Una vaquillona APTA
+      // pero SIN servicio (reproStatus 'fitness'), una vaquillona sin evaluar ('unknown'), una ternera ('none')
+      // y un macho NO entran → no se tacta la preñez de quien no fue servida. Sexo null → se salta (fail-safe).
+      // reproStatus ausente → solo categorías PROBADAS (fail-safe: sin el espejo no se confirma el servicio).
+      return (
+        animal.sex === 'female' &&
+        (PROVEN_FEMALE_CATEGORY_CODES.has(animal.categoryCode ?? '') ||
+          isServedReproStatus(animal.reproStatus))
+      );
     case 'tacto_vaquillona':
-      // Tacto de preñez / de aptitud: solo hembras (R6.2/R6.3). Sexo null → se salta (fail-safe).
-      return animal.sex === 'female';
+      // Tacto de APTITUD (bug B): solo VAQUILLONAS que AÚN NO son aptas. = hembra ∧ categoría 'vaquillona' ∧
+      // aptitud no resuelta como apta y todavía NO servida. Fuente única = reproStatus (encapsula la precedencia
+      // RAR.2.4): aplica SSI kind='unknown' (sin evaluar → candidata a la 1ª aptitud) o kind='fitness' con
+      // veredicto ≠ 'apta' (no_apta/diferida → re-evaluar). Se EXCLUYE: apta (fitness+apta → ya es apta), ya
+      // servida (served_untested/pregnant/empty → precedencia > fitness; no se re-evalúa aptitud de una servida),
+      // cut, ternera, macho. Sexo null / categoría ≠ vaquillona / reproStatus ausente → se salta (fail-safe).
+      return (
+        animal.sex === 'female' &&
+        animal.categoryCode === 'vaquillona' &&
+        needsFitnessEvaluation(animal.reproStatus)
+      );
     case 'inseminacion':
       // Inseminación (RAR.6, corrección #1b): hembra ∧ reproductivamente apta (categoría probada ∨ vaquillona
       // apta ∨ vaquillona sin veredicto con edad ≥365 d, fallback alineado a 0105). Cierra el `default: return

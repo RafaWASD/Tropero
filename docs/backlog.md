@@ -17,6 +17,20 @@ No es un sustituto de `feature_list.json` ni de los ADRs — es la antesala dond
 
 ## Ítems pendientes
 
+## 2026-07-10 — Defensa server-side del gating de eventos reproductivos por ATRIBUTOS del animal
+
+**Origen**: delta-fix B (gating tacto preñez vs aptitud, `docs/correcciones-demo-facundo-padre-2026-07-10.md`). El implementer + reviewer lo flaguearon.
+**Qué**: el fix B corrige el gating **cliente** (qué tactos OFRECER por animal: preñez solo a servidas, aptitud solo a vaquillonas-no-aptas, ternera a ninguno). Pero el trigger de gating capa 2 `0054` **NO valida sexo/categoría/estado-reproductivo del animal** contra el evento reproductivo — gatea por rodeo/`data_key`, no por atributos. Un cliente autenticado podría insertar un `reproductive_events` (`event_type='tacto'`) sobre una ternera, o `tacto_vaquillona` sobre una vaca preñada, vía API directa.
+**Por qué importa**: bajo. Requiere auth + rol en el propio tenant; el daño es calidad de dato auto-infligida en su propio establecimiento (no cross-tenant, no escala privilegios). Hueco pre-existente (ya lo tenían tacto/tacto_vaquillona/raspado por sexo), NO lo introdujo el delta.
+**Próximo paso sugerido**: cuando se toque el gating server-side por otra razón, agregar validación de atributos (sexo/categoría/estado repro) en el trigger de `reproductive_events`. Toca DB → Gate 1 puntual + test. No urgente.
+
+## 2026-07-10 — Reversión fiel de `dientes`/CUT al SALTEAR un animal en la maniobra
+
+**Origen**: delta-feature C (botón skip, `docs/correcciones-demo-facundo-padre-2026-07-10.md`). El implementer lo flagueó; el reviewer lo evaluó ACEPTABLE como limitación documentada (no blocker).
+**Qué**: al saltear un animal, el descarte soft-borra las **filas de evento** que ese frame escribió (por ids de cliente estables). PERO la maniobra `dientes` es un **UPDATE de propiedad** (`animal_profiles.teeth_state` + posible CUT), no una fila de evento → NO se revierte al saltear (el frame no transporta el estado previo para restaurarlo). Es la única maniobra de propiedad; el resto (eventos + custom) sí se descartan. La transición de categoría del tacto+ SÍ se revierte (trigger `0063`/`0046` recomputa al subir el soft-delete).
+**Por qué importa**: bajo. Escenario raro (confirmar dientes y DESPUÉS saltear el mismo animal; el skip se usa dominantemente ANTES de cargar nada). Si `dientes` disparó CUT, exige confirmación explícita del operario (R6.8) → decisión deliberada que razonablemente persiste. La observación de dientes es un dato legítimo (el operario miró la boca).
+**Próximo paso sugerido**: si algún día se quiere reversión fiel, transportar el `teeth_state`/`is_cut` previo en el frame de la maniobra para poder restaurarlo al saltear. Frontend + posible ajuste de la captura del estado previo. No urgente.
+
 ## 2026-07-09 — 2 e2e legacy rojos latentes en main (614 electrónica maxLength, 777 birthdate midpoint) ✅ RESUELTO (2026-07-10, commit `e70eea5`)
 
 **RESOLUCIÓN (2026-07-10, `e70eea5`)**: ambos verdes. **614** → se eliminó el `maxLength={TAG_ELECTRONIC_LENGTH}` del input EID manual en `TagScanSheet.tsx`; `sanitizeTagInput` (strip + `slice(0,15)`) queda como único limitador → el test pasa sin tocarlo (bug UX real corregido). **777** → confirmado TEST STALE (la app es correcta): la aserción del test año-solo pasó de `toBe('2022-07-01')` a `toMatch(/^2022-/)` (año-scoped); el path DD/MM EXACTO sigue en `2022-07-01`; precisión cubierta por unit deterministas. Reconciliado as-built en RCF.2.1 y RAF2.1.3. `check.mjs` verde + 3 e2e afectados pasan. **NOTA**: esto NO cierra la Puerta 2 de esos deltas (#6 bastoneo-ficha, #3 alta-form), que siguen ⏸ pendientes por separado.

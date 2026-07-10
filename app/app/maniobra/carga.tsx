@@ -36,7 +36,7 @@ import {
 } from '@/services/animals';
 import { previewManeuverCategoryTransition } from '@/utils/maneuver-category-preview';
 import { getSessionById, setSessionCounts, type Session } from '@/services/sessions';
-import { persistManeuverEvent, softDeleteManeuverEvents } from '@/services/maneuver-events';
+import { discardManeuverEvents, persistManeuverEvent, softDeleteManeuverEvents } from '@/services/maneuver-events';
 import { fetchEnabledCustomManeuvers, type EnabledCustomManeuver } from '@/services/custom-fields';
 import { addCustomMeasurement } from '@/services/custom-measurements';
 import { assignAnimalToGroup, fetchManagementGroups, type ManagementGroup } from '@/services/management-groups';
@@ -62,6 +62,7 @@ import {
 } from '@/utils/maneuver-config';
 import { splitMultiPreconfig } from '@/utils/maneuver-wizard';
 import { maneuverLabel } from '@/utils/maneuver-wizard';
+import { collectManeuverDiscardTargets, countPersistedCaptures } from '@/utils/maneuver-skip';
 import { maneuverTitleFontToken } from '@/utils/maneuver-title-size';
 import { formatEidReadable } from '@/utils/eid-format';
 import { stepKindFor } from '@/utils/maneuver-step-kind';
@@ -96,6 +97,7 @@ import { CustomManeuverStep } from './_components/CustomManeuverStep';
 import { PlaceholderStep } from './_components/PlaceholderStep';
 import { AnimalSummary } from './_components/AnimalSummary';
 import { LotePickerSheet } from './_components/LotePickerSheet';
+import { SkipAnimalSheet } from './_components/SkipAnimalSheet';
 
 /** ¿Qué muestra el frame? El paso actual de la secuencia, o el resumen del animal. */
 type FrameMode = 'step' | 'summary';
@@ -185,6 +187,8 @@ export default function ManiobraCarga() {
   const [groups, setGroups] = useState<ManagementGroup[]>([]);
   // ¿El sheet de elección de lote está abierto? (afordancia "Lote" del resumen, R9.2). Cerrado por default.
   const [loteSheetOpen, setLoteSheetOpen] = useState(false);
+  // ¿El sheet de confirmación de SALTEAR está abierto? (afordancia "Saltear" del header, R5.15). Cerrado default.
+  const [skipSheetOpen, setSkipSheetOpen] = useState(false);
   // Error de la asignación de lote (R9.2): si el write LOCAL del UPDATE de management_group_id falla, NO se
   // traga — se superficia un banner accionable es-AR en el resumen. null = sin error.
   const [loteError, setLoteError] = useState<CaptureError | null>(null);
@@ -205,6 +209,8 @@ export default function ManiobraCarga() {
 
   // Guard de doble-confirmación del animal (el setSessionCounts + navegación corren UNA vez).
   const confirmingRef = useRef(false);
+  // Guard de doble-salteo (el descarte + navegación de "Saltear" corren UNA vez, R5.15).
+  const skippingRef = useRef(false);
 
   // id de cliente del evento ESTABLE por maniobra (UUID válido). Generado lazy la 1ra vez que se captura;
   // al CORREGIR desde el resumen (R5.9) se reusa el MISMO id → el re-INSERT pisa la fila por PK (LWW de
@@ -739,6 +745,37 @@ export default function ManiobraCarga() {
     router.replace({ pathname: '/maniobra/identificar', params: { sessionId } });
   }, [router, sessionId, session]);
 
+  // ─── Saltear el animal (R5.15): descarta lo cargado → vuelve a identify-first SIN contarlo ───
+  //
+  // Pedido Facundo/productor: un botón para no cargarle NINGUNA maniobra a un animal y seguir con el próximo.
+  // El frame persiste cada maniobra al confirmarla (R5.8, per-step) → "saltear los descarta" = soft-delete de
+  // las filas de evento que ESTE frame escribió para ESTE animal (por sus ids de cliente estables, mismo
+  // espíritu que el borrado de vacunas huérfanas). `dientes` (UPDATE de propiedad) queda FUERA por construcción
+  // del target (no es fila de evento; revertirlo necesita el estado previo que el frame no transporta). Con 0
+  // datos cargados, no hay nada que descartar → navega directo. FAIL-CLOSED: si el descarte falla, el sheet NO
+  // navega (dejaría huérfanos) y deja reintentar. Saltear NO incrementa el contador (el animal no se procesó).
+  const onConfirmSkip = useCallback(async (): Promise<string | null> => {
+    const targets = collectManeuverDiscardTargets(captured, customCaptured, {
+      event: eventIdsRef.current,
+      extra: extraIdsRef.current,
+      custom: customIdsRef.current,
+    });
+    if (targets.length > 0) {
+      const r = await discardManeuverEvents(targets);
+      if (!r.ok) {
+        return 'No se pudo saltear el animal. Tocá de nuevo para reintentar; si sigue fallando, revisá la conexión con la app.';
+      }
+    }
+    return null;
+  }, [captured, customCaptured]);
+
+  const onSkipDone = useCallback(() => {
+    if (!sessionId || skippingRef.current) return;
+    skippingRef.current = true;
+    // A diferencia de onConfirmAnimal (R5.10), saltear NO llama setSessionCounts: el animal NO se procesó.
+    router.replace({ pathname: '/maniobra/identificar', params: { sessionId } });
+  }, [router, sessionId]);
+
   const bottomPad = Math.max(insets.bottom, getTokenValue('$navBottomMin', 'size'));
 
   // ─── Estados de carga / error ───
@@ -780,15 +817,22 @@ export default function ManiobraCarga() {
   const electronicMuted = mutedTag(animal);
   const progreso = `Animal ${(session.animalCount ?? 0) + 1}`;
 
+  // Saltear (R5.15): la afordancia va en el header. Se OCULTA en la secuencia vacía (esa pantalla ya trae su
+  // CTA "Siguiente animal", saltear ahí sería redundante); disponible en carga (paso) y resumen. capturedCount
+  // decide el TONO de la confirmación (liviano sin datos / aviso de descarte con datos).
+  const isEmptySequence = mode !== 'summary' && sequence.length === 0;
+  const capturedCount = countPersistedCaptures(captured, customCaptured);
+
   return (
     <YStack flex={1} backgroundColor="$bg" paddingTop={insets.top}>
-      {/* ── HEADER DE IDENTIDAD (sticky, SIEMPRE visible — R12.4) ── */}
+      {/* ── HEADER DE IDENTIDAD (sticky, SIEMPRE visible — R12.4) + afordancia "Saltear" (R5.15) ── */}
       <SpikeIdentityHeader
         idv={identity}
         tagElectronic={electronicMuted}
         rodeo={animal.rodeoName || '—'}
         categoria={animal.categoryName || '—'}
         progreso={progreso}
+        onSkip={isEmptySequence ? undefined : () => setSkipSheetOpen(true)}
       />
 
       {mode === 'summary' ? (
@@ -896,6 +940,18 @@ export default function ManiobraCarga() {
           void onAssignLote(id);
         }}
       />
+
+      {/* ── SHEET de confirmación de SALTEAR (R5.15). Overlay abierto desde la afordancia "Saltear" del header.
+            Confirma antes de abandonar (anti-tap-accidental en la manga); con datos parciales avisa el descarte.
+            onConfirm descarta lo cargado (fail-closed) → onDone navega al próximo animal SIN contar este. ── */}
+      {skipSheetOpen ? (
+        <SkipAnimalSheet
+          capturedCount={capturedCount}
+          onConfirm={onConfirmSkip}
+          onDone={onSkipDone}
+          onClose={() => setSkipSheetOpen(false)}
+        />
+      ) : null}
     </YStack>
   );
 }
@@ -1080,7 +1136,8 @@ function ManeuverStep({
 }
 
 /** Subset de atributos del animal que la aplicabilidad per-animal necesita (R6.8 prompt CUT no-terneros;
- *  R14.2/R14.3 CE solo a machos enteros). isCastrated REAL del perfil (0084): el frame lo conoce de
+ *  R14.2/R14.3 CE solo a machos enteros; bug B: reproStatus/reproAptitude para gatear los tactos y la
+ *  inseminación). isCastrated REAL del perfil (0084): el frame lo conoce de
  *  AnimalDetail.isCastrated. La CE se salta en hembra/ternero/castrado; castración desconocida → incluye
  *  (R14.3) — pero AnimalDetail.isCastrated es boolean no-nullable (el alta entra entero, false), así que
  *  acá nunca es null; el null de la regla (R14.3) lo cubre el tipo de AnimalApplicabilityInfo para callers
@@ -1094,6 +1151,10 @@ function toApplicabilityInfo(animal: AnimalDetail): AnimalApplicabilityInfo {
     // La aptitud sale del espejo (AnimalDetail.reproAptitude); la edad se deriva de birth_date (fallback 0105).
     aptitude: animal.reproAptitude,
     ageDays: ageInDaysFromBirthDate(animal.birthDate, new Date()),
+    // bug B (correcciones-demo-facundo-padre): estado reproductivo del MISMO espejo que la ficha
+    // (AnimalDetail.reproStatus) → los tactos distinguen una hembra SERVIDA (tacto de preñez) de una vaquillona
+    // AÚN NO apta (tacto de aptitud). Sin esto una ternera/vaquillona pasaba por ambos tactos.
+    reproStatus: animal.reproStatus,
   };
 }
 

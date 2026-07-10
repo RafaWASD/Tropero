@@ -289,7 +289,9 @@ export function describeStepValue(value: StepValue | undefined, opts: DescribeSt
     case 'sanitary':
       return value.productName.trim() || 'Aplicado';
     case 'vaccination':
-      return value.products.length > 0 ? value.products.join(', ') : 'Aplicada';
+      // 0 vacunas = el operario decidió NO vacunar a este animal (delta-fix D1): resumen HONESTO "Sin vacuna",
+      // no "Aplicada" (no se persistió ningún sanitary_events — nada se aplicó). ≥1 → coma-join de las vacunas.
+      return value.products.length > 0 ? value.products.join(', ') : 'Sin vacuna';
     case 'inseminacion':
       return value.semenName.trim() || 'Inseminada';
     case 'lab':
