@@ -51,28 +51,26 @@ los datos de la salida.
 ## 3. Motivo y mapeo de la baja en tanda (A-3)
 
 **RLV.4** — Cuando el usuario avanza a registrar la salida de la selección, el sistema deberá permitir elegir
-un único motivo para la tanda entre: **Venta**, **Descarte** y **Muerte**.
+un único motivo para la tanda entre: **Venta** y **Muerte**.
 
 **RLV.4.1** — El sistema deberá mapear cada motivo a un par `(status, exit_reason)` de la baja per-animal
-existente (`exit_animal_profile`, 0044), según:
+existente (`exit_animal_profile`, 0044), reusando el subconjunto correspondiente de `EXIT_REASON_MAPPINGS`
+(`exit-animal.ts`), según:
 
 | Motivo (UI) | `status` | `exit_reason` | Captura datos de venta |
 |---|---|---|---|
 | Venta | `sold` | `sale` | sí (peso + precio, opcionales) |
-| Descarte | `sold` | `culling` | sí (peso + precio, opcionales) |
 | Muerte | `dead` | `death` | no |
 
-> **Decisión de criterio propio (Puerta 1) — mapeo de "Descarte".** El enum `exit_reason_enum` (0044) ya tiene
-> `culling`; el enum `animal_status` (0020) NO tiene un estado "descartado" — solo `active/sold/dead/transferred`.
-> El descarte de una vaca (vieja/vacía/CUT) es un animal que **sale del campo vendido para faena** → se mapea a
-> `status='sold'` + `exit_reason='culling'`, capturando peso/precio opcionales como una venta. Esto reabre
-> parcialmente la semántica de `culling` que el delta `c3.3-baja` había diferido "hasta validar con Facundo";
-> se valida en Puerta 1. Si Raf prefiere no exponer "Descarte" como motivo separado en v1, el fallback es
-> ofrecer solo Venta/Muerte y tratar "Descarte" como un nombre de lote (la salida se registra como Venta).
+> **RESUELTO en Puerta 1 (Raf, 2026-07-10) — "Venta simple".** La venta de una vaca vacía desde el lote se
+> registra como **motivo Venta normal** (`exit_reason='sale'`); **"Descarte" queda SOLO como nombre de lote
+> sugerido** (RLV.13), NO como motivo de baja. La variante que mapeaba "Descarte" a `status='sold'` +
+> `exit_reason='culling'` fue **evaluada y DESCARTADA por Raf**: no se reabre la semántica de `culling` (sigue
+> diferida a validar con Facundo, como en `c3.3-baja`). El set de motivos de la tanda NO incluye `culling`.
 
-**RLV.4.2** — El sistema no deberá exponer en el flujo de baja en tanda los motivos `transfer`/`theft`/`other`
-(la transferencia per-animal sigue disponible desde la ficha, delta `c3.3-baja`; `theft`/`other` quedan
-diferidos como en `c3.3-baja`).
+**RLV.4.2** — El sistema no deberá exponer en el flujo de baja en tanda los motivos `culling`/`transfer`/
+`theft`/`other` (la transferencia per-animal sigue disponible desde la ficha, delta `c3.3-baja`;
+`culling`/`theft`/`other` quedan diferidos como en `c3.3-baja`).
 
 ## 4. Datos comunes ajustables por animal (A-4)
 
@@ -178,7 +176,8 @@ incorporación de las vacías al lote elegido/creado.
 
 ## Notas de verificación (cada RLV → ≥1 test)
 
-- Puras/unitarias: RLV.4.1 (mapeo motivo→status/reason, extensión de `EXIT_REASON_MAPPINGS`), RLV.5.2/RLV.6
+- Puras/unitarias: RLV.4.1 (mapeo motivo→status/reason = subconjunto Venta/Muerte de `EXIT_REASON_MAPPINGS`,
+  sin `culling`), RLV.5.2/RLV.6
   (resolución valor común vs override, función pura), RLV.6.1 (validaciones reusadas), RLV.10.1 (derivación de
   vacías de la sesión desde filas de reproductive_events, builder puro), RLV.3/RLV.3.1/RLV.3.2 (lógica de
   selección, función pura), RLV.13 (nombre default "Descarte").
@@ -192,3 +191,7 @@ incorporación de las vacías al lote elegido/creado.
 
 - 2026-07-10 — Creación del delta (spec_author) a partir de `context-lotes-venta.md` (Gate 0 cerrado). Sin
   cambios sobre los IDs (delta nuevo).
+- 2026-07-10 — **Puerta 1 (Raf): decisión "Venta simple".** El motivo "Descarte" (→`culling`) se elimina del
+  set de la tanda; quedan **Venta / Muerte**. "Descarte" sigue solo como **nombre de lote sugerido** (RLV.13).
+  `culling` NO se reabre (diferido a Facundo). Actualizados **RLV.4, RLV.4.1, RLV.4.2** (IDs preservados; los
+  demás RLV intactos — el resto de A quedó aprobado tal cual).

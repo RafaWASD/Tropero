@@ -7,10 +7,10 @@
 
 ## Fase 1 — Lógica pura (sin I/O, node:test)
 
-- [ ] **T1.1** — `services/exit-animal.ts`: extender el motivo a `culling` y agregar el mapping **Descarte**
-  (`{ choice:'culling', status:'sold', exitReason:'culling', label:'Descarte', capturesSaleData:true }`).
-  Exponer un set de la TANDA (Venta/Descarte/Muerte) SIN romper el set de 3 de la ficha (`app/animal/baja.tsx`).
-  Cubre: RLV.4, RLV.4.1, RLV.4.2.
+- [ ] **T1.1** — `services/exit-animal.ts`: exponer el set de motivos de la TANDA `BATCH_EXIT_MAPPINGS` =
+  subconjunto **Venta / Muerte** de `EXIT_REASON_MAPPINGS` (`sale`→`sold`/`sale`, `death`→`dead`/`death`), **sin
+  agregar `culling` ni tocar `ExitReasonChoice`** (decisión "Venta simple" de Raf, Puerta 1), sin romper el set
+  de 3 de la ficha (`app/animal/baja.tsx`). Cubre: RLV.4, RLV.4.1, RLV.4.2.
 - [ ] **T1.2** — `services/exit-animal.ts`: `resolveEffectiveSaleData(...)` (override gana sobre común; nullable).
   Cubre: RLV.5.2, RLV.6.
 - [ ] **T1.3** — `utils/batch-exit-selection.ts`: estado de selección del subconjunto (toggle por animal,
@@ -18,7 +18,8 @@
 - [ ] **T1.4** — `services/powersync/local-reads.ts`: `buildSessionEmptyFemalesQuery(sessionId)` (reproductive_events
   synced + overlay `pending_reproductive_events`, `event_type='tacto'`, `pregnancy_status='empty'`, no borrado,
   DISTINCT por animal, unido a `animal_profiles` activos del establecimiento). Cubre: RLV.10.1.
-- [ ] **T1.5** — Tests unit: `exit-animal.test.ts` (Descarte + `resolveEffectiveSaleData`),
+- [ ] **T1.5** — Tests unit: `exit-animal.test.ts` (`BATCH_EXIT_MAPPINGS` = Venta/Muerte sin culling +
+  `resolveEffectiveSaleData`),
   `batch-exit-selection.test.ts`, extender `local-reads.test.ts` (`buildSessionEmptyFemalesQuery`, incl. overlay
   y el filtro DISTINCT). Cubre: RLV.3, RLV.4.1, RLV.5.2, RLV.6, RLV.10.1.
 
@@ -38,7 +39,7 @@
 - [ ] **T3.1** — `app/lote/[id].tsx`: acción "Vender / Descartar" (visible con ≥1 activo) → **modo selección**
   (checkbox por `AnimalRow`, "seleccionar todos", contador) + CTA "Registrar salida (N)" (habilitado con ≥1).
   Navega a `app/lote/venta.tsx` con los `profileId`s + `groupId`. Cubre: RLV.2, RLV.3, RLV.3.1, RLV.3.2.
-- [ ] **T3.2** — `app/lote/venta.tsx` (molde de `app/animal/baja.tsx`): paso 1 motivo (Venta/Descarte/Muerte);
+- [ ] **T3.2** — `app/lote/venta.tsx` (molde de `app/animal/baja.tsx`): paso 1 motivo (Venta/Muerte);
   paso 2 fecha común (default hoy) + precio/peso comunes (motivos con `capturesSaleData`) + lista de N animales
   con override de precio/peso + resumen + aviso irreversibilidad + botón "Registrar salida" (guard anti
   doble-tap, disabled en vuelo). Al OK → `exitAnimalsBatch` → `router.back()` al lote. Cubre: RLV.4, RLV.5,

@@ -115,12 +115,11 @@ columna de tipo").
 ### 4.1 Baja en tanda (lote operable)
 
 - **`app/src/services/exit-animal.ts`** (MODIFICAR, lógica pura, sin I/O):
-  - Extender `ExitReasonChoice` a `'sale' | 'death' | 'culling'` y `EXIT_REASON_MAPPINGS` con la entrada
-    **Descarte** → `{ choice:'culling', status:'sold', exitReason:'culling', label:'Descarte',
-    capturesSaleData:true }` (RLV.4.1). Mantener Muerte; **quitar Transferencia del set de la TANDA** (sigue en
-    la ficha per-animal, que usa su propio subconjunto). Nota: el set del flujo en tanda y el de la ficha pueden
-    divergir — parametrizar o exponer dos constantes (`BATCH_EXIT_MAPPINGS` vs las 3 de la ficha) para no
-    romper `app/animal/baja.tsx`.
+  - Definir el set de motivos de la TANDA = subconjunto **Venta / Muerte** de `EXIT_REASON_MAPPINGS`
+    (`sale`→`sold`/`sale`, `death`→`dead`/`death`), **sin agregar `culling` ni tocar `ExitReasonChoice`**
+    (RLV.4.1 — decisión "Venta simple" de Raf en Puerta 1, ver §8). Exponerlo como una constante propia
+    (`BATCH_EXIT_MAPPINGS`) para dejar afuera `transfer` (que sí sigue en la ficha per-animal) sin romper las 3
+    de `app/animal/baja.tsx`. **NO se reabre `culling`** (sigue diferido a Facundo, como en `c3.3-baja`).
   - Nueva función pura `resolveEffectiveSaleData({ commonPrice, commonWeight, overridePrice, overrideWeight })`
     → `{ price, weight }` (RLV.5.2/RLV.6): el override gana sobre el común; ambos pueden ser null.
   - Reusar `validateExitWeight`/`validateExitPrice`/`sanitizePriceInput` (RLV.6.1) sin cambios.
@@ -136,7 +135,7 @@ columna de tipo").
   "Registrar salida (N)" habilitado con ≥1 seleccionado (RLV.3.x). El CTA navega a la pantalla/sheet de datos de
   la tanda pasando los `profileId`s seleccionados + el `groupId`.
 - **`app/app/lote/venta.tsx`** (CREAR) — pantalla de datos de la tanda (molde de `app/animal/baja.tsx`):
-  - Paso 1: motivo (Venta / Descarte / Muerte), 3 cards grandes (RLV.4).
+  - Paso 1: motivo (Venta / Muerte), cards grandes (RLV.4). "Descarte" NO es motivo (es nombre de lote).
   - Paso 2: fecha común (default hoy) + (motivos con `capturesSaleData`) precio + peso comunes opcionales
     (RLV.5) + lista de los N animales con opción de **ajustar** precio/peso por animal (override, RLV.6) +
     resumen "Vas a dar de baja N animales · Motivo" + aviso de irreversibilidad (RLV.17) + botón destructivo
@@ -172,7 +171,8 @@ columna de tipo").
 
 ### 4.3 Tests
 
-- Unit (node:test): `exit-animal.test.ts` (mapeo Descarte + `resolveEffectiveSaleData`),
+- Unit (node:test): `exit-animal.test.ts` (`BATCH_EXIT_MAPPINGS` = Venta/Muerte sin culling +
+  `resolveEffectiveSaleData`),
   `batch-exit-selection.test.ts` (selección/deseleccionar-todos/contador), `local-reads.test.ts`
   (`buildSessionEmptyFemalesQuery`), test de servicio del loop `exitAnimalsBatch` (encola N intents + N clears,
   overlay optimista, fail-closed).
@@ -221,11 +221,14 @@ en `management_groups` (§3).
 
 ## 8. Decisiones de criterio propio (para Puerta 1)
 
-1. **Mapeo de "Descarte"** → `status='sold'` + `exit_reason='culling'`, con peso/precio opcionales (reabre
-   parcialmente la semántica de `culling` diferida en `c3.3-baja`). Ver RLV.4.1. Fallback si Raf prefiere:
-   ofrecer solo Venta/Muerte y usar "Descarte" solo como nombre de lote.
-2. **Motivos de la tanda = Venta / Descarte / Muerte** (sin Transferencia; sin theft/other). La transferencia
-   per-animal sigue en la ficha (RLV.4.2).
+1. **RESUELTO en Puerta 1 (Raf, 2026-07-10) — "Venta simple".** La venta de una vaca vacía desde el lote se
+   registra como **motivo Venta normal** (`exit_reason='sale'`); **"Descarte" queda SOLO como nombre de lote
+   sugerido** (RLV.13), no como motivo de baja. La variante que mapeaba "Descarte" → `status='sold'` +
+   `exit_reason='culling'` fue **evaluada y DESCARTADA por Raf**: `culling` sigue diferido a validar con Facundo
+   (como en `c3.3-baja`). Ver RLV.4.1 / RLV.4.2.
+2. **Motivos de la tanda = Venta / Muerte** (aprobado en Puerta 1). El set de mappings de la tanda
+   (`BATCH_EXIT_MAPPINGS`) es el subconjunto Venta/Muerte de `EXIT_REASON_MAPPINGS` — **sin `culling`**, sin
+   `transfer` (la transferencia per-animal sigue en la ficha), sin `theft`/`other` (RLV.4.2).
 3. **Clear de membresía en la baja** (`management_group_id → NULL`, RLV.9.1) para que "dejan el lote" sea
    literal, aun cuando el filtro activo ya los oculta (§2.3).
 4. **Punto de inserción de la sugerencia = fase `'terminated'` del `ExitJornadaSheet`** (al cerrar la jornada),
