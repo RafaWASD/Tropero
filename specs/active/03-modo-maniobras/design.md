@@ -10,6 +10,17 @@
 
 ---
 
+## Deltas posteriores (ADR-028)
+
+> Índice de los delta-specs que extienden esta feature `done`. El baseline no se reescribe; cada delta vive en
+> su propio `{context,requirements,design,tasks}-<slug>.md` en esta carpeta.
+
+| Slug | Qué agrega | Estado |
+|---|---|---|
+| `tap-wheel` | tapear una celda visible de la rueda inercial (`WheelPicker.tsx`) la selecciona (anima + snap), no solo arrastrando. Un fix cubre los 2 wheels del paso de circunferencia escrotal (CE + edad en meses, ambos instancias del componente). Helper puro `tapTarget` + `WheelCell` tappable enganchado al lock determinístico (sync de shared values antes del `scrollTo`, cancela el settle, misma háptica); cero regresión del drag. **Frontend puro, sin migración** (Gate 1 N/A). Ver `{context,requirements,design,tasks}-tap-wheel.md` | done (Puerta 2, 2026-07-10) |
+
+---
+
 ## 1. Arquitectura
 
 ### 1.1 Componentes nuevos (cliente) — RECONCILIADO AL LAYOUT REAL (2026-06-13)

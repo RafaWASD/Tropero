@@ -5,6 +5,19 @@
 
 **SESIÓN 2026-06-29/30 — CORRECCIONES DEL TESTEO EN VIVO CON FACUNDO (16) + CONVENCIÓN SDD PARA FIXES (ADR-028).**
 
+## 🆕 2026-07-09/10 — FORMATO FECHAS es-AR + FIX 2 ROJOS E2E LATENTES + CIERRE DEL BACKLOG DE PUERTAS 2
+
+**Formato de fechas es-AR (commit `9f83a00`)**: util único `app/src/utils/format-date-es-ar.ts` (TZ-SAFE: date-only por manipulación de STRING, instantes por getters locales) — `formatDateEsAr` (dd/mm/aaaa), `formatDateCompactEsAr` (dd/mm mismo-año), `formatDateTimeEsAr` (dd/mm/aaaa · HH:MM). 10 displays migrados (ficha Nacimiento, badge "Vendido el", reportes sesión/rango, SIGSA log, timeline, maniobra-resume, miembros, alerta de dosis — con un −1 latente arreglado). Convención en `docs/conventions.md`. Relativos "Hoy/Ayer" intactos. Aprobado por Raf.
+
+**Fix 2 rojos e2e latentes (commit `e70eea5`; backlog RESUELTO `4150328`)**: destapados por el full-run del delta identificadores (NO eran de él). **614** (bastoneo-ficha #6): saqué el `maxLength` del input EID manual en `TagScanSheet` — `sanitizeTagInput` (strip + slice(0,15)) es el único limitador (el maxLength recortaba el RAW contando letras antes del strip). **777** (alta-form #3): TEST STALE, la app es CORRECTA — el alta year-only imputa el midpoint consciente de categoría (Vaquillona-2022 → `2022-07-02`), no el ciego `2022-07-01`; destildé la aserción a `/^2022-/` (el path DD/MM exacto sigue en `2022-07-01`). Reconciliado RCF.2.1 + RAF2.1.3. check.mjs verde.
+
+**Cierre del backlog de Puertas 2 (2026-07-10)**: Raf aprobó en tanda mirando las capturas de Gate 2.5. **Los headers `⏸ Puerta 2` de abajo quedan SUPERSEDIDOS por esta entrada.** Foldeados a `done` (tabla "Deltas posteriores" de spec 02/03 actualizada):
+- **Bastoneo (3 superficies)**: `bastoneo-captura-alta-parto` + `bastoneo-cria-al-pie` (Run 2) → completa "el bastón en todos lados" (alta/parto/cría al pie + ficha).
+- **KPIs**: `%parición` (#8) + `%destete` (#10) — backend ya deployado. **Casing fix EN CURSO**: los `note` de las cards estaban en minúscula inicial (único caso user-facing de la app) → Raf lo cazó; corrigiéndose a sentence-case (implementer) antes de foldear los 2 a spec 07.
+- **`override-imputacion-categoria`** (Nivel A, sin UI) — el delta del test 777.
+- **`tap-wheel`** (#16, spec 03) — nueva sección "Deltas posteriores" agregada a spec 03.
+- Bookkeeping: `nombre-apodo` foldeado como **subsumido por `identificadores-unificados`**; `parto-rodeo-caravana` ya estaba `done` en la tabla de fold.
+
 ## 🆕 2026-07-08/09 — DELTA IDENTIFICADORES UNIFICADOS — ✅ PUERTA 2 APROBADA (2026-07-09) + fold hecho
 Arrancó por un bug (la caravana visual del parto se sanitizaba como numérica) y escaló a limpiar TODO el modelo de identificadores. **Modelo objetivo: 3 identificadores, TODOS opcionales** — Caravana Electrónica (`tag_electronic`, num 15, única global), Caravana Visual (`idv`, **alfanum ≤15** CUIG/binomio SENASA 841/2025, única por campo), **Nombre/Apodo** (custom field, alfanum **≤15** + ñ/tildes/espacios/guiones, opt-in por rodeo, warning-soft por campo). **`visual_id_alt` (el 4to, medio-muerto) ELIMINADO del todo** (Raf: "borrá el 4to, dejá todo limpio"; aceptó el laburo de PowerSync). Búsqueda unificada por los 3. Hero por nombre cuando el rodeo usa apodo. Delta Nivel B (ADR-028) CON BACKEND + PowerSync.
 - **Apodo 15 (no 10)**: Raf pidió literal 10; Puerta 1 lo subió a 15 ("La Colorada"=11 cortaba) y **Raf delegó la decisión al leader ("mandale lo que te parezca") → firme en 15** (cliente + server alineados).
