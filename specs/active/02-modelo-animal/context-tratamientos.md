@@ -44,6 +44,19 @@ Requisitos funcionales (del pedido):
 
 ## 4. Decisiones para cerrar el Gate 0 (Raf)
 
+> **✅ GATE 0 CERRADO (2026-07-10, Raf una-por-una):**
+> - **D-3 Tipos** → **antibiótico + antiparasitario + otro** (con comentario libre). Vacuna NO (es campaña, por maniobra).
+> - **D-2 Quién** → **cualquier rol del campo, incluido el peón** (el peón aplica → registra → vigilancia real).
+> - **D-6 Dónde se inicia** → **solo desde la ficha del animal** (v1). Iniciar desde la maniobra = v2 (diferido).
+> - **D-1 Marca** → **color distintivo propio** (el leader diseña un azul/turquesa "sanitario", distinto del terracota de alertas y del amarillo de CUT; se veta en Gate 2.5). NO reusar terracota.
+> - **D-4 Pin** → **ambas listas** (rodeo + general), en-tratamiento arriba (default confirmado, ya en el pedido).
+> - **D-5 `next_dose_date`** → opcional por aplicación, se muestra en la ficha; sin push (post-MVP).
+> - **D-7 Reporte "N en tratamiento"** → post-MVP, fuera de alcance.
+>
+> Próximo: `spec_author` redacta `{requirements,design,tasks}-tratamientos.md` → Gate 1 (schema) → Puerta 1 → implementer → deploy gateado a Raf.
+
+
+
 | # | Decisión | Mi recomendación (default si no decís otra) |
 |---|---|---|
 | **D-1** | **Color de la marca** "en tratamiento" | **Terracota/naranja** (ya es el color de alerta/acción del DS — coherente con el warning del skip). Rojo lo reservamos para destructivo. Confirmar el par de tokens (contraste WCAG). |
