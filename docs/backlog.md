@@ -17,7 +17,9 @@ No es un sustituto de `feature_list.json` ni de los ADRs — es la antesala dond
 
 ## Ítems pendientes
 
-## 2026-07-09 — 2 e2e legacy rojos latentes en main (614 electrónica maxLength, 777 birthdate midpoint)
+## 2026-07-09 — 2 e2e legacy rojos latentes en main (614 electrónica maxLength, 777 birthdate midpoint) ✅ RESUELTO (2026-07-10, commit `e70eea5`)
+
+**RESOLUCIÓN (2026-07-10, `e70eea5`)**: ambos verdes. **614** → se eliminó el `maxLength={TAG_ELECTRONIC_LENGTH}` del input EID manual en `TagScanSheet.tsx`; `sanitizeTagInput` (strip + `slice(0,15)`) queda como único limitador → el test pasa sin tocarlo (bug UX real corregido). **777** → confirmado TEST STALE (la app es correcta): la aserción del test año-solo pasó de `toBe('2022-07-01')` a `toMatch(/^2022-/)` (año-scoped); el path DD/MM EXACTO sigue en `2022-07-01`; precisión cubierta por unit deterministas. Reconciliado as-built en RCF.2.1 y RAF2.1.3. `check.mjs` verde + 3 e2e afectados pasan. **NOTA**: esto NO cierra la Puerta 2 de esos deltas (#6 bastoneo-ficha, #3 alta-form), que siguen ⏸ pendientes por separado.
 
 **Origen**: sesión 2026-07-09, corriendo la suite e2e COMPLETA como Gate 2.5 del delta `identificadores-unificados` (reviewer read-only). Primer full-run en un tiempo → destapó 2 rojos DETERMINISTAS que NO son del delta identificadores (blame + fechas lo confirman; el delta propio pasa 8/8 y sus 4 reconciliaciones legacy quedaron verdes).
 **Qué**:
