@@ -91,7 +91,10 @@ test('captura delta #10 %destete: los 5 estados de la card de Destete (ok / sin-
   // ── 01 — status 'ok': muestra el %destete + el detalle "N destetados / M servidas" (D1, sin leyenda). ──
   await gotoDestete(page, 'destete-ok');
   // 40 destetados / 46 servidas = 86,96 % → redondea a 87 % (coma decimal es-AR, sin decimal superfluo).
-  await expect(page.getByText('87 %', { exact: true })).toBeVisible();
+  // El valor se renderiza SPLIT (número hero + "%" chico al lado, anti-recorte bug F) → dos Text nodes:
+  // asertamos el número (único en esta pantalla) + que la unidad "%" está presente.
+  await expect(page.getByText('87', { exact: true })).toBeVisible();
+  await expect(page.getByText('%', { exact: true }).first()).toBeVisible();
   await expect(page.getByText('40 destetados / 46 servidas', { exact: false })).toBeVisible();
   // Sin leyenda D4 (pendingWeaning=0).
   await expect(page.getByText(/Todavía hay crías sin destetar/)).toHaveCount(0);
@@ -120,8 +123,9 @@ test('captura delta #10 %destete: los 5 estados de la card de Destete (ok / sin-
 
   // ── 05 — status 'ok' + leyenda D4: quedan crías al pie sin destetar (pendingWeaning>0). ──
   await gotoDestete(page, 'destete-leyenda');
-  // 28 destetados / 46 servidas = 60,87 % → 60,9 %.
-  await expect(page.getByText('60,9 %', { exact: true })).toBeVisible();
+  // 28 destetados / 46 servidas = 60,87 % → 60,9 %. Value SPLIT (número hero + "%" chico, bug F).
+  await expect(page.getByText('60,9', { exact: true })).toBeVisible();
+  await expect(page.getByText('%', { exact: true }).first()).toBeVisible();
   await expect(page.getByText('28 destetados / 46 servidas', { exact: false })).toBeVisible();
   await expect(
     page.getByText('Todavía hay crías sin destetar, esto puede afectar el dato', { exact: false }),

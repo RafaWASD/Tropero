@@ -252,27 +252,50 @@ export function formatCountDelta(delta: number): string {
   return '0';
 }
 
-// ─── Tamaño del número hero del KpiCard (web-safe, length-aware) ────────────────────────────────────
+// ─── Número hero del KpiCard: split unidad + tamaño length-aware (web-safe) ──────────────────────────
 //
 // `adjustsFontSizeToFit` es NO-OP en react-native-web (gotcha del repo, memoria reference_rn_web_pitfalls):
-// un valor largo NO se encoge, se TRUNCA ("82,6 %" → "82,6…" en una card de media-pantalla a 360px). Como
-// el KpiCard va en una fila de DOS (ancho ~130px útil a 360px), elegimos el tamaño por la LONGITUD del
-// string en buckets (web-safe, determinístico) en vez de medir en runtime. Mismo criterio que
-// hero-text-size.ts, recalibrado para el ancho de MEDIA card (no full): un valor corto ("50 %", "100 %",
-// "—") va GRANDE ($10=38px); uno de 6-7 chars ("82,6 %", "100,0 %") baja a $9=30px para entrar completo.
+// un valor largo NO se encoge, se TRUNCA con ellipsis ("84,6 %" → "84,6…" en una media card a 320-360px).
+// Dos medidas web-safe (determinísticas, sin medir en runtime) contra el recorte del bug F:
+//   1) `splitKpiValue` separa el número de la unidad "%": el número va GRANDE (héroe, patrón de UIs
+//      financieras — el monto manda) y el "%" al lado, más chico. Al sacar del texto grande el glifo "%"
+//      (~0.9em en Inter) + su espacio, se libera el ancho que empujaba "84,6 %" fuera de la media card.
+//   2) `kpiValueFontToken` elige el tamaño del NÚMERO (sin la unidad) por su longitud: ≤3 chars ("100",
+//      "50", "—") van $10=38px; 4+ chars ("84,6", "150,5") bajan a $9=30px.
+//
+// Anchos reales VERIFICADOS (render de Inter con el mismo faux-bold de la web build — el peso 800 no tiene
+// face cargada, así que el navegador lo sintetiza y ENSANCHA los glifos), sobre la media card (2-por-fila,
+// ancho útil de texto ≈ 98px @320 / 118px @360 / 144px @412):
+//   • "84,6 %" pegado @ $9=30px = 101px  → TRUNCA a 320px (el bug que vio Raf).
+//   • "84,6 %" split: número "84,6" @ $9=30px + "%" @ $6=18px = grupo 84px  → ENTRA a 320/360/412.
+//   • Peor caso real en 2-por-fila ("100 %" → número "100" @ $10=38px + "%" = 84px)  → ENTRA a 320.
+// El par lineHeight matchea el token (regla anti-recorte de descendentes del DS).
 
 /** Token de tamaño del número hero del KpiCard (de la escala Inter de tamagui.config.ts). */
 export type KpiSizeToken = '$9' | '$10';
 
 /**
+ * Separa el valor del KpiCard en `number` + `percent` para renderizar el número GRANDE (héroe) y la unidad
+ * "%" más chica al lado (libera el ancho del "%" que hacía truncar la media card angosta — bug F). Sólo
+ * separa un "%" al final: "84,6 %" → { number: "84,6", percent: "%" }; "100 %" → { number: "100",
+ * percent: "%" }. Un valor SIN "%" ("—", o defensivamente cualquier otra unidad) → { number: <el valor>,
+ * percent: null } (se renderiza entero al tamaño del número).
+ */
+export function splitKpiValue(value: string): { number: string; percent: string | null } {
+  const v = (value ?? '').trim();
+  const m = /^(.*\S)\s*%$/.exec(v);
+  return m ? { number: m[1], percent: '%' } : { number: v, percent: null };
+}
+
+/**
  * Elige el `fontSize`/`lineHeight` (par matching, anti-recorte de descendentes) del número hero del KpiCard
- * según la longitud del valor ya formateado. ≤5 chars ("50 %", "100 %", "—") → `$10` (38px, dominante);
- * 6+ chars ("82,6 %", "100,0 %", un peso largo) → `$9` (30px) para que entre completo en media card a 360px
- * SIN truncarse (web-safe: no dependemos de adjustsFontSizeToFit). El par lineHeight = el mismo token.
+ * según la longitud del NÚMERO (sin la unidad, vía `splitKpiValue`). ≤3 chars ("100", "50", "—") → `$10`
+ * (38px, dominante); 4+ chars ("84,6", "100,0", "150,5") → `$9` (30px) para que el grupo número+"%" entre
+ * completo en media card a 320px SIN truncar (web-safe: no dependemos de adjustsFontSizeToFit).
  */
 export function kpiValueFontToken(value: string): { fontSize: KpiSizeToken; lineHeight: KpiSizeToken } {
-  const len = (value ?? '').trim().length;
-  return len <= 5 ? { fontSize: '$10', lineHeight: '$10' } : { fontSize: '$9', lineHeight: '$9' };
+  const len = splitKpiValue(value).number.length;
+  return len <= 3 ? { fontSize: '$10', lineHeight: '$10' } : { fontSize: '$9', lineHeight: '$9' };
 }
 
 // ─── Etiquetas de los tipos de evento de una sesión (R7.3.1) ────────────────────────────────────────

@@ -89,8 +89,10 @@ test('captura delta #8 %parición: los 5 estados de la card de Parición (ok / f
 
   // ── 01 — status 'ok': muestra el %parición + el detalle "N paridas / M servidas" (D1/D2, sin leyenda). ──
   await gotoParicion(page, 'paricion-ok');
-  // 38 paridas / 46 servidas = 82,6 % (coma decimal es-AR).
-  await expect(page.getByText('82,6 %', { exact: true })).toBeVisible();
+  // 38 paridas / 46 servidas = 82,6 % (coma decimal es-AR). El valor se renderiza SPLIT (número hero + "%"
+  // chico al lado, anti-recorte bug F) → dos Text nodes: asertamos el número (único: preñez=89,1) + la "%".
+  await expect(page.getByText('82,6', { exact: true })).toBeVisible();
+  await expect(page.getByText('%', { exact: true }).first()).toBeVisible();
   await expect(page.getByText('38 paridas / 46 servidas', { exact: false })).toBeVisible();
   // Sin leyenda D4 (pendingPregnant=0).
   await expect(page.getByText(/Todavía hay vacas que no parieron/)).toHaveCount(0);
@@ -119,8 +121,9 @@ test('captura delta #8 %parición: los 5 estados de la card de Parición (ok / f
 
   // ── 05 — status 'ok' + leyenda D4: quedan preñadas sin parto contado (pendingPregnant>0). ──
   await gotoParicion(page, 'paricion-leyenda');
-  // 30 paridas / 46 servidas = 65,2 %.
-  await expect(page.getByText('65,2 %', { exact: true })).toBeVisible();
+  // 30 paridas / 46 servidas = 65,2 %. Value SPLIT (número hero + "%" chico, bug F).
+  await expect(page.getByText('65,2', { exact: true })).toBeVisible();
+  await expect(page.getByText('%', { exact: true }).first()).toBeVisible();
   await expect(page.getByText('30 paridas / 46 servidas', { exact: false })).toBeVisible();
   await expect(
     page.getByText('Todavía hay vacas que no parieron, esto puede afectar el dato', { exact: false }),

@@ -15,6 +15,7 @@ import {
   cclStageLabel,
   cclBarsForMonths,
   kpiValueFontToken,
+  splitKpiValue,
   daysSinceLabel,
   animalLabel,
   sessionDateLabel,
@@ -285,14 +286,42 @@ test('SESSION_EVENT_KINDS: son exactamente los 7 con FK session_id (animal_event
   );
 });
 
-// ─── kpiValueFontToken (web-safe length-aware; adjustsFontSizeToFit es no-op en rn-web) ─────────────
+// ─── splitKpiValue (separa número + "%" — anti-recorte bug F; adjustsFontSizeToFit es no-op en rn-web) ─
+// El valor viene del caller con el "%" pegado (formatPercentAR); el KpiCard lo separa para renderizar el
+// número GRANDE (héroe) y la unidad "%" más chica al lado → libera el ancho del "%" que truncaba la media
+// card a 320-360px. Sólo separa un "%" AL FINAL; un valor sin "%" ("—") se devuelve entero con percent=null.
 
-test('kpiValueFontToken: valores cortos → $10, 6+ chars → $9 (no truncar en media card 360px)', () => {
-  assert.deepEqual(kpiValueFontToken('—'), { fontSize: '$10', lineHeight: '$10' });
-  assert.deepEqual(kpiValueFontToken('50 %'), { fontSize: '$10', lineHeight: '$10' });
-  assert.deepEqual(kpiValueFontToken('100 %'), { fontSize: '$10', lineHeight: '$10' }); // 5 chars
-  assert.deepEqual(kpiValueFontToken('82,6 %'), { fontSize: '$9', lineHeight: '$9' }); // 6 chars
-  assert.deepEqual(kpiValueFontToken('100,0 %'), { fontSize: '$9', lineHeight: '$9' }); // 7 chars
+test('splitKpiValue: separa el número de la unidad "%" (con y sin decimal)', () => {
+  assert.deepEqual(splitKpiValue('84,6 %'), { number: '84,6', percent: '%' });
+  assert.deepEqual(splitKpiValue('89,1 %'), { number: '89,1', percent: '%' });
+  assert.deepEqual(splitKpiValue('100 %'), { number: '100', percent: '%' });
+  assert.deepEqual(splitKpiValue('50 %'), { number: '50', percent: '%' });
+  assert.deepEqual(splitKpiValue('0 %'), { number: '0', percent: '%' });
+  assert.deepEqual(splitKpiValue('200 %'), { number: '200', percent: '%' }); // destete >100% (mellizos)
+  assert.deepEqual(splitKpiValue('150,5 %'), { number: '150,5', percent: '%' });
+});
+
+test('splitKpiValue: valor sin "%" ("—" muted, o cualquier otra unidad) → entero, percent=null', () => {
+  assert.deepEqual(splitKpiValue('—'), { number: '—', percent: null });
+  assert.deepEqual(splitKpiValue(''), { number: '', percent: null });
+  // defensivo: una unidad que NO es "%" no se parte (se renderiza entera al tamaño del número).
+  assert.deepEqual(splitKpiValue('385,5 kg'), { number: '385,5 kg', percent: null });
+});
+
+// ─── kpiValueFontToken (web-safe, length-aware sobre el NÚMERO; adjustsFontSizeToFit no-op en rn-web) ──
+// Ahora el tamaño se decide por la longitud del NÚMERO (sin la unidad "%"): ≤3 chars → $10 (38px), 4+ → $9
+// (30px). Con el "%" separado, el número entra completo en media card a 320px sin truncar (ver comentario
+// del módulo: anchos reales medidos con el faux-bold de la web build).
+
+test('kpiValueFontToken: número ≤3 chars → $10; 4+ chars → $9 (no truncar en media card 320px)', () => {
+  assert.deepEqual(kpiValueFontToken('—'), { fontSize: '$10', lineHeight: '$10' }); // número "—" (1)
+  assert.deepEqual(kpiValueFontToken('50 %'), { fontSize: '$10', lineHeight: '$10' }); // número "50" (2)
+  assert.deepEqual(kpiValueFontToken('100 %'), { fontSize: '$10', lineHeight: '$10' }); // número "100" (3)
+  assert.deepEqual(kpiValueFontToken('200 %'), { fontSize: '$10', lineHeight: '$10' }); // número "200" (3)
+  assert.deepEqual(kpiValueFontToken('82,6 %'), { fontSize: '$9', lineHeight: '$9' }); // número "82,6" (4)
+  assert.deepEqual(kpiValueFontToken('89,1 %'), { fontSize: '$9', lineHeight: '$9' }); // número "89,1" (4)
+  assert.deepEqual(kpiValueFontToken('100,0 %'), { fontSize: '$9', lineHeight: '$9' }); // número "100,0" (5)
+  assert.deepEqual(kpiValueFontToken('150,5 %'), { fontSize: '$9', lineHeight: '$9' }); // número "150,5" (5)
 });
 
 // ─── cclStageLabel ───────────────────────────────────────────────────────────────────────────────────
