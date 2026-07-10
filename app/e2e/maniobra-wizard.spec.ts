@@ -119,10 +119,11 @@ test('captura wizard de jornada: inicio → rodeo → maniobras (reorder) → re
   await page.getByTestId('pool-row-vacunacion').click();
   await expect(page.getByTestId('selected-row-2')).toBeVisible();
 
-  // PRECONFIG INLINE (UX 3): Vacunación es configurable → su fila muestra segunda línea. Sin cargar,
-  // el hint "Tocá para elegir vacuna" (R1.7). Tacto TAMBIÉN es configurable desde B2 (¿medir tamaño?) →
-  // muestra su propia 2da línea ("Sugerido: …"); Pesaje (no configurable) NO muestra segunda línea.
-  await expect(page.getByText('Tocá para elegir vacuna', { exact: true })).toBeVisible();
+  // PRECONFIG INLINE (UX 3): Vacunación es configurable → su fila muestra segunda línea. Sin cargar, D2
+  // (endurecimiento etapa 2) muestra la marca "Faltan vacunas" (antes el hint "Tocá para elegir vacuna").
+  // Tacto TAMBIÉN es configurable desde B2 (¿medir tamaño?) → muestra su propia 2da línea ("Sugerido: …");
+  // Pesaje (no configurable) NO muestra segunda línea.
+  await expect(page.getByText('Faltan vacunas', { exact: true })).toBeVisible();
   // Cargamos el preconfig DESDE EL SHEET: tocar el cuerpo de la fila de Vacunación lo abre (la fila de
   // vacunación es la #3 → index 2). Capturamos el sheet ABIERTO con el input + autocompletar para el veto.
   // NOTA: el race "el sheet se abre y se cierra al instante" (click huérfano del tap táctil sobre el scrim,
@@ -165,9 +166,12 @@ test('captura wizard de jornada: inicio → rodeo → maniobras (reorder) → re
   // Guardar habilitado con el sheet vacío → limpia el preconfig (round-trip de borrado).
   await page.getByRole('button', { name: 'Guardar', exact: true }).click();
   await expect(page.getByTestId('maneuver-config-sheet')).toHaveCount(0, { timeout: 10_000 });
-  // La fila vuelve a mostrar el HINT (no el valor viejo) → config.preconfig.vacunacion quedó vacío.
-  // La 2da línea SIGUE montada (Vacunación es configurable) pero ahora muestra el hint, no "Brucelosis".
-  await expect(page.getByTestId('selected-config-2')).toHaveText('Tocá para elegir vacuna');
+  // La fila vuelve a la marca "Faltan vacunas" (no el valor viejo) → config.preconfig.vacunacion quedó vacío.
+  // D2: sin vacuna, la 2da línea es la MARCA de alto contraste (testID `selected-config-warn-2`), y el testID
+  // del valor normal (`selected-config-2`) ya no está montado.
+  await expect(page.getByTestId('selected-config-2')).toHaveCount(0);
+  await expect(page.getByTestId('selected-config-warn-2')).toBeVisible();
+  await expect(page.getByText('Faltan vacunas', { exact: true })).toBeVisible();
   // Restauramos "Brucelosis" para no alterar el resto del flujo (etapa 3 espera el valor cargado).
   await page.getByTestId('selected-body-2').click();
   await expect(page.getByTestId('maneuver-config-sheet')).toBeVisible({ timeout: 10_000 });
@@ -205,6 +209,14 @@ test('captura wizard de jornada: inicio → rodeo → maniobras (reorder) → re
   // Las 8 quedan arriba numeradas; la 9na (pesaje_ternero) sigue en el pool bajo "Sumá más maniobras".
   await expect(page.getByTestId('selected-row-7')).toBeVisible();
   await expect(page.getByTestId('pool-row-pesaje_ternero')).toBeAttached();
+  // D2 (endurecimiento etapa 2): con Vacunación entre las elegidas, el continue exige ≥1 vacuna definida →
+  // la definimos (Vacunación es la 3ra seleccionada = índice 2) para que el CTA quede "Continuar (8)".
+  await page.getByTestId('selected-body-2').click();
+  await expect(page.getByTestId('maneuver-config-sheet')).toBeVisible({ timeout: 10_000 });
+  await page.getByTestId('maneuver-config-input').fill('Brucelosis');
+  await page.getByRole('button', { name: 'Agregar vacuna', exact: true }).click();
+  await page.getByRole('button', { name: 'Guardar', exact: true }).click();
+  await expect(page.getByTestId('maneuver-config-sheet')).toHaveCount(0, { timeout: 10_000 });
   // Scrolleamos la lista hasta abajo: el pool + el CTA "Continuar (8)" deben quedar a la vista (eran
   // inalcanzables antes del fix). scrollIntoViewIfNeeded ejercita el scroll real del Animated.ScrollView.
   await page.getByTestId('pool-row-pesaje_ternero').scrollIntoViewIfNeeded();

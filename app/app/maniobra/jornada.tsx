@@ -55,6 +55,7 @@ import {
   moveManeuver,
   toggleManeuver,
   toggleCustomManiobra,
+  vaccinationMissingProducts,
   type ManeuverPreconfig,
 } from '@/utils/maneuver-wizard';
 import { ManeuverReorderList, type ReorderScrollContext } from './_components/ManeuverReorderList';
@@ -517,21 +518,37 @@ export default function JornadaWizardScreen() {
 
       {/* ── CTA inferior (zona del pulgar). Etapa 1 no tiene CTA (tocar el rodeo avanza). ── */}
       {stage === 2 ? (
-        <YStack paddingHorizontal="$4" paddingTop="$2" paddingBottom={bottomPad}>
+        <YStack paddingHorizontal="$4" paddingTop="$2" paddingBottom={bottomPad} gap="$2">
           {(() => {
             // Total elegido = maniobras de fábrica + maniobras custom (R13.8). Cualquiera de las dos habilita.
             const totalChosen = chosen.length + chosenCustom.length;
+            // D2 (endurecimiento etapa 2): si Vacunación está elegida SIN ≥1 vacuna definida → NO se puede
+            // continuar (bloqueo) + mensaje que señala QUÉ maniobra y DÓNDE completar (la marca "Faltan
+            // vacunas" ya está en la fila). El mensaje va sobre el CTA (zona del pulgar). Reusa FormError
+            // (terracota, accesible) — no ensucia el `error` de arriba.
+            const vaxMissing = vaccinationMissingProducts(chosen, preconfig);
+            const label =
+              totalChosen === 0
+                ? 'Elegí maniobras'
+                : vaxMissing
+                  ? 'Completá las vacunas'
+                  : `Continuar (${totalChosen})`;
             return (
-              <Button
-                fullWidth
-                disabled={totalChosen === 0}
-                onPress={() => {
-                  setError(null);
-                  setStage(3);
-                }}
-              >
-                {totalChosen === 0 ? 'Elegí maniobras' : `Continuar (${totalChosen})`}
-              </Button>
+              <>
+                {vaxMissing ? (
+                  <FormError message="Falta definir la vacuna de la tanda. Tocá “Vacunación” y elegí al menos una." />
+                ) : null}
+                <Button
+                  fullWidth
+                  disabled={totalChosen === 0 || vaxMissing}
+                  onPress={() => {
+                    setError(null);
+                    setStage(3);
+                  }}
+                >
+                  {label}
+                </Button>
+              </>
             );
           })()}
         </YStack>
@@ -721,7 +738,7 @@ function StageManeuvers({
   //    carga rápida igual (effectiveSizeBuckets cae al defaultMeasureSize) → el inline es informativo, no
   //    obligatorio.
   //  - vacunación/inseminación (R1.7): texto libre (vacuna/pajuela).
-  const inlineConfig = (m: ManeuverKind): { value: string | null; hint: string } | null => {
+  const inlineConfig = (m: ManeuverKind): { value: string | null; hint: string; warn?: boolean } | null => {
     if (m === 'tacto') {
       const explicit = tactoMeasureSizeFromConfig({ preconfig });
       const suggested = defaultMeasureSize(serviceMonthsCount);
@@ -732,6 +749,11 @@ function StageManeuvers({
     const cfg = FREE_TEXT_PRECONFIG[m];
     if (!cfg) return null;
     const value = maneuverDetail(preconfig, m);
+    // D2 (endurecimiento etapa 2): Vacunación EXIGE ≥1 vacuna definida. Sin valor → marca "Faltan vacunas"
+    // (alto contraste) en la fila + continue bloqueado. Inseminación NO exige pajuela (queda hint normal).
+    if (m === 'vacunacion' && value == null) {
+      return { value, hint: 'Faltan vacunas', warn: true };
+    }
     return { value, hint: cfg.hint };
   };
 

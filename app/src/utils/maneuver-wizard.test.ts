@@ -19,8 +19,42 @@ import {
   filterAutocomplete,
   splitMultiPreconfig,
   joinMultiPreconfig,
+  definedVaccines,
+  vaccinationMissingProducts,
 } from './maneuver-wizard';
 import { extractCustomManiobras } from './maneuver-config';
+
+// ─── Validación de vacunas definidas para la etapa 2 (delta-fix D2) ──────────────────────
+
+test('definedVaccines: string coma-separado → lista partida (reusa splitMultiPreconfig)', () => {
+  assert.deepEqual(definedVaccines({ vacunacion: 'Aftosa, Mancha' }), ['Aftosa', 'Mancha']);
+  assert.deepEqual(definedVaccines({ vacunacion: 'Aftosa' }), ['Aftosa']);
+});
+
+test('definedVaccines: sin clave / vacía / solo espacios → []', () => {
+  assert.deepEqual(definedVaccines({}), []);
+  assert.deepEqual(definedVaccines(undefined), []);
+  assert.deepEqual(definedVaccines({ vacunacion: '' }), []);
+  assert.deepEqual(definedVaccines({ vacunacion: '   ' }), []);
+});
+
+test('definedVaccines: tolerante al shape objeto { products:[...] } (jsonb pass-through)', () => {
+  assert.deepEqual(definedVaccines({ vacunacion: { products: ['Aftosa', 'Mancha'] } }), ['Aftosa', 'Mancha']);
+});
+
+test('vaccinationMissingProducts: Vacunación elegida SIN vacunas → true (bloquea + marca)', () => {
+  assert.equal(vaccinationMissingProducts(['vacunacion'], {}), true);
+  assert.equal(vaccinationMissingProducts(['tacto', 'vacunacion'], { vacunacion: '  ' }), true);
+});
+
+test('vaccinationMissingProducts: Vacunación elegida CON ≥1 vacuna → false (puede continuar)', () => {
+  assert.equal(vaccinationMissingProducts(['vacunacion'], { vacunacion: 'Aftosa' }), false);
+});
+
+test('vaccinationMissingProducts: Vacunación NO elegida → false (no aplica la exigencia)', () => {
+  assert.equal(vaccinationMissingProducts(['tacto', 'pesaje'], {}), false);
+  assert.equal(vaccinationMissingProducts([], undefined), false);
+});
 
 // ─── Labels (R1.6 / UI) ────────────────────────────────────────────────────────────────
 

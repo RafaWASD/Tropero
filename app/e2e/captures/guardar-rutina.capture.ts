@@ -62,6 +62,14 @@ for (const width of WIDTHS) {
       await page.getByTestId('pool-row-tacto').click();
       await page.getByTestId('pool-row-vacunacion').click();
       await expect(page.getByTestId('selected-row-2')).toBeVisible();
+      // D2 (endurecimiento etapa 2): Vacunación exige ≥1 vacuna definida → la definimos (índice 2) para
+      // poder continuar. Sheet abierto con .click() sintético (sin el race del click huérfano táctil).
+      await page.getByTestId('selected-body-2').click();
+      await expect(page.getByTestId('maneuver-config-sheet')).toBeVisible({ timeout: 10_000 });
+      await page.getByTestId('maneuver-config-input').fill('Brucelosis');
+      await page.getByRole('button', { name: 'Agregar vacuna', exact: true }).click();
+      await page.getByRole('button', { name: 'Guardar', exact: true }).click();
+      await expect(page.getByTestId('maneuver-config-sheet')).toHaveCount(0, { timeout: 10_000 });
       await page.getByRole('button', { name: /^Continuar/ }).click();
       await expect(page.getByText('Revisá la jornada', { exact: true })).toBeVisible({ timeout: 20_000 });
 

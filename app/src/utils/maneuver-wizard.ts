@@ -76,6 +76,32 @@ export function maneuverDetail(preconfig: ManeuverPreconfig | undefined, m: Mane
   return null;
 }
 
+// ─── Validación de "vacunas definidas" para la etapa 2 (delta-fix D2) ──────────────────────────
+
+/**
+ * Las vacunas DEFINIDAS en la preconfig de la tanda (R1.7): reusa `maneuverDetail` (tolerante al shape jsonb
+ * string u objeto `{products:[...]}`) + `splitMultiPreconfig` para partir el string coma-separado. `[]` si no
+ * hay ninguna definida (clave ausente, vacía o solo espacios). FUENTE ÚNICA de "qué vacunas trae la tanda".
+ */
+export function definedVaccines(preconfig: ManeuverPreconfig | undefined): string[] {
+  const detail = maneuverDetail(preconfig, 'vacunacion');
+  return detail ? splitMultiPreconfig(detail) : [];
+}
+
+/**
+ * ¿La jornada tiene Vacunación ELEGIDA pero SIN al menos una vacuna definida? (D2, endurecimiento de la
+ * etapa 2). `true` → se BLOQUEA el continue + se marca "Faltan vacunas" en la fila de Vacunación (alto
+ * contraste). Si Vacunación no está elegida → `false` (no aplica la exigencia). Con ≥1 vacuna definida →
+ * `false` (puede continuar). Puro: no toca gating ni datos, solo lee `chosen` + `preconfig`.
+ */
+export function vaccinationMissingProducts(
+  chosen: readonly ManeuverKind[],
+  preconfig: ManeuverPreconfig | undefined,
+): boolean {
+  if (!chosen.includes('vacunacion')) return false;
+  return definedVaccines(preconfig).length === 0;
+}
+
 // ─── Reorder PURO del array de maniobras (drag-reorder, R1.12) ─────────────────────────────────
 
 /**

@@ -5,6 +5,22 @@
 
 **SESIÓN 2026-06-29/30 — CORRECCIONES DEL TESTEO EN VIVO CON FACUNDO (16) + CONVENCIÓN SDD PARA FIXES (ADR-028).**
 
+## 🆕 2026-07-10 — 2da DEMO EN VIVO (Facundo + su PADRE, productor real) → triage 6 ítems
+Segunda ronda de feedback en vivo (usuario final real). Triage + grounding (4 exploradores) en `docs/correcciones-demo-facundo-padre-2026-07-10.md`. 6 ítems: B/F/C/D1 (quick fixes) + D2 (rediseño vacunas) + A (lotes de venta, Gate 0) + E (tratamientos, Gate 0).
+
+**QUICK FIXES B/F/C/D1 — DONE + gateados + committeados** (reviewer APPROVED · Gate 2.5 veto PASS · check.mjs verde):
+- **F** (`5b08e24`): el "%" de las KPI cards ya no se recorta en anchos angostos (número héroe + "%" sufijo chico; sin tocar `formatPercentAR`).
+- **B** (`a2354d9`): gating tacto preñez vs aptitud (`maneuver-applicability.ts`) — una ternera ya NO pasa por ambos; preñez=solo servidas, aptitud=solo vaquillonas-no-aptas, ternera=ninguno (consume `reproStatus`, tests reescritos).
+- **D1** (`a2354d9`): vacunas — dejar continuar sin aplicar (CTA siempre habilitado; 0 → "Sin vacuna" honesto, no "Aplicada" falso).
+- **C** (`a2354d9`): botón SKIP en la carga rápida (afordancia "Saltear" + confirmación terracota + descarte de eventos + no cuenta). Scrim aria-label "Cerrar" (fix a11y). Excepción `dientes` documentada → backlog.
+- Backlog: 2 huecos anotados (gating server-side por atributos de tacto; reversión fiel de `dientes` al saltear).
+
+**D2 · VACUNAS APLICA/NO-APLICA — DONE + gateado** (este commit): rediseño — vacunas se definen SOLO pre-maniobra; por animal = CHECKLIST (todas tildadas APLICA por default, destildar = NO APLICA en terracota; sin input libre por animal). Endurecer etapa 2: exigir ≥1 vacuna definida si Vacunación elegida (bloquea continue + marca terracota "Faltan vacunas"). Respeta el 0-path de D1. ADR-028 Nivel A (frontend puro, Gate 1 N/A). reviewer APPROVED (1 hallazgo 🟢 no bloqueante: divergencia de predicado inalcanzable) · Gate 2.5 veto PASS (6 estados) · **5 e2e reconciliados corren verde** (`maniobra-sanitaria/offline/config-sheet-race/wizard` + `guardar-rutina`) + verificada la completitud (operaciones-vacunacion pasa, castracion/spec10-uib2 no afectados). Detalle: `progress/impl_03-vacunas-aplica-no-aplica.md`.
+
+**A · LOTES DE VENTA/DESCARTE — Gate 0 (charla en curso)**: sugerir agregar vacías tras el tacto a una cola de venta/descarte; vender/descartar en tanda. Hallazgo estructural: lotes de hoy = membresía única → recomiendo **estado ortogonal (flag `cull_pending`)**, no un lote de manejo. Re-preguntado a Raf en criollo (marca vs mover a grupo aparte; venta total o por partes). Toca schema → Gate 1.
+
+**E · TRATAMIENTOS EN LA FICHA — Gate 0 draft** (`d6ecc9a`, `context-tratamientos.md`): iniciar/aplicar/finalizar + marca de color + pin arriba. Estructura aprobada por Raf (tabla `treatments` header + aplicaciones = `sanitary_events` linkeadas). 4 decisiones pendientes (color, roles, tipos, iniciar-desde-maniobra). Toca schema → Gate 1.
+
 ## 🆕 2026-07-09/10 — FORMATO FECHAS es-AR + FIX 2 ROJOS E2E LATENTES + CIERRE DEL BACKLOG DE PUERTAS 2
 
 **Formato de fechas es-AR (commit `9f83a00`)**: util único `app/src/utils/format-date-es-ar.ts` (TZ-SAFE: date-only por manipulación de STRING, instantes por getters locales) — `formatDateEsAr` (dd/mm/aaaa), `formatDateCompactEsAr` (dd/mm mismo-año), `formatDateTimeEsAr` (dd/mm/aaaa · HH:MM). 10 displays migrados (ficha Nacimiento, badge "Vendido el", reportes sesión/rango, SIGSA log, timeline, maniobra-resume, miembros, alerta de dosis — con un −1 latente arreglado). Convención en `docs/conventions.md`. Relativos "Hoy/Ayer" intactos. Aprobado por Raf.

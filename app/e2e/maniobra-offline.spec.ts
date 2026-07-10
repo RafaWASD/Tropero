@@ -53,7 +53,7 @@ test.afterAll(async () => {
  * SIN red la completa el test: el frame de carga re-resuelve la secuencia ESTANDO OFFLINE a exactamente esas
  * 2 maniobras (`· 1 de 2`/`· 2 de 2`), confirmando que la resolución no depende del server.
  */
-async function configureSessionVacPesaje(page: Page): Promise<void> {
+async function configureSessionVacPesaje(page: Page, vaccine: string): Promise<void> {
   await page.goto('/maniobra/jornada');
   await expect(page.getByText('Elegí el rodeo', { exact: true })).toBeVisible({ timeout: 30_000 });
   await page.getByRole('button', { name: /Elegir rodeo / }).first().click();
@@ -75,6 +75,16 @@ async function configureSessionVacPesaje(page: Page): Promise<void> {
   await page.getByTestId('pool-row-vacunacion').click();
   await page.getByTestId('pool-row-pesaje').click();
   await expect(page.getByTestId('selected-row-1')).toBeVisible();
+
+  // Delta D2 (endurecimiento etapa 2): la Vacunación EXIGE ≥1 vacuna definida antes de continuar. Vacunación
+  // es el índice 0 (primera seleccionada) → abrir su config (selected-body-0) y definir la vacuna de la tanda.
+  await page.getByTestId('selected-body-0').click();
+  await expect(page.getByTestId('maneuver-config-sheet')).toBeVisible({ timeout: 10_000 });
+  await page.getByTestId('maneuver-config-input').fill(vaccine);
+  await page.getByRole('button', { name: 'Agregar vacuna', exact: true }).click();
+  await page.getByRole('button', { name: 'Guardar', exact: true }).click();
+  await expect(page.getByTestId('maneuver-config-sheet')).toHaveCount(0, { timeout: 10_000 });
+
   await page.getByRole('button', { name: /^Continuar/ }).click();
   await expect(page.getByRole('button', { name: 'Arrancar jornada', exact: true })).toBeVisible({ timeout: 20_000 });
 }
@@ -137,7 +147,7 @@ test('offline: jornada por manual → vacunación + pesaje → cerrar la jornada
   // Configurar la jornada (elegir rodeo + maniobras + verificar el gating del cache local, R10.3). Esta parte
   // navega a `/maniobra/jornada` (carga de página SPA) → necesita el server → ONLINE. Deja "Arrancar jornada"
   // visible. El corte de red se hace JUSTO ANTES de crear la sesión.
-  await configureSessionVacPesaje(page);
+  await configureSessionVacPesaje(page, vaccine);
 
   // ── OFFLINE (igual que DevTools → Network → Offline). TODO lo que sigue corre SIN red: createSession (la
   // jornada NACE offline), identificación manual, carga de las 2 maniobras y el CIERRE de la jornada. ──
@@ -156,12 +166,10 @@ test('offline: jornada por manual → vacunación + pesaje → cerrar la jornada
   await manualIdentify(page, idv);
   await expect(page.getByText('Lectura recibida', { exact: true })).toBeVisible({ timeout: 15_000 });
 
-  // ── CARGA RÁPIDA OFFLINE — paso 1: VACUNACIÓN (silent_apply, · 1 de 2) → escribe sanitary_events. ──
+  // ── CARGA RÁPIDA OFFLINE — paso 1: VACUNACIÓN (D2: checklist APLICA/NO-APLICA, · 1 de 2). La vacuna de la
+  // tanda ya está definida (etapa 2) y TILDADA (APLICA) por default → Aplicar y seguir → escribe sanitary_events. ──
   await expect(page.getByText('· 1 de 2', { exact: true })).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByTestId('vaccine-input')).toBeVisible({ timeout: 15_000 });
-  await page.getByTestId('vaccine-input').fill(vaccine);
-  await page.getByRole('button', { name: 'Agregar vacuna' }).click();
-  await expect(page.getByTestId(`vaccine-chip-${vaccine}`)).toBeVisible();
+  await expect(page.getByTestId(`vaccine-check-${vaccine}`)).toBeVisible({ timeout: 15_000 });
   await page.getByRole('button', { name: 'Aplicar y seguir' }).click();
 
   // ── Paso 2: PESAJE (keypad, · 2 de 2) → escribe weight_events. ──

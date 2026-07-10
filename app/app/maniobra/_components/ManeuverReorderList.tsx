@@ -40,7 +40,7 @@
 import { useCallback, useEffect, useMemo } from 'react';
 import { Platform } from 'react-native';
 import { getTokenValue, Text, View, XStack, YStack } from 'tamagui';
-import { Check, ChevronRight, GripVertical, Plus } from 'lucide-react-native';
+import { AlertTriangle, Check, ChevronRight, GripVertical, Plus } from 'lucide-react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   runOnJS,
@@ -92,8 +92,14 @@ export type ReorderScrollContext = {
  * Preconfig INLINE de una maniobra (R1.7): si la maniobra es configurable (vacunación/inseminación),
  * devuelve su valor cargado (`value`) o el `hint` cuando no hay nada. Las NO configurables devuelven
  * null → su fila NO muestra segunda línea ni abre el sheet (el cuerpo es inerte).
+ *
+ * `warn` (delta-fix D2): la maniobra EXIGE un preconfig que FALTA (Vacunación sin ≥1 vacuna definida) →
+ * su fila muestra una MARCA de alto contraste "Faltan vacunas" (terracota) en vez del hint muted, y el
+ * continue de la etapa 2 queda bloqueado (jornada.tsx). Solo pesa cuando no hay `value`.
  */
-export type InlineConfigResolver = (m: ManeuverKind) => { value: string | null; hint: string } | null;
+export type InlineConfigResolver = (
+  m: ManeuverKind,
+) => { value: string | null; hint: string; warn?: boolean } | null;
 
 export type ManeuverReorderListProps = {
   /** TODAS las maniobras ofrecidas por el gating del rodeo (capa 1), en su orden de catálogo. */
@@ -146,8 +152,8 @@ function SelectedRow({
   onToggle: (m: ManeuverKind) => void;
   /** Abrir el sheet de preconfig (cuerpo de la fila, solo si es configurable). */
   onOpenConfig?: (m: ManeuverKind) => void;
-  /** Preconfig inline de ESTA maniobra: valor cargado o hint. null = no configurable (sin 2da línea). */
-  inline: { value: string | null; hint: string } | null;
+  /** Preconfig inline de ESTA maniobra: valor cargado o hint (+ warn si falta un preconfig exigido). null = no configurable. */
+  inline: { value: string | null; hint: string; warn?: boolean } | null;
   scrollContext?: ReorderScrollContext;
   frozen: boolean;
 }) {
@@ -264,6 +270,8 @@ function SelectedRow({
 
   const configurable = inline != null;
   const hasValue = inline?.value != null && inline.value.length > 0;
+  // Marca de alto contraste "Faltan vacunas" (D2): la maniobra exige un preconfig que falta y no hay valor.
+  const warnMissing = inline?.warn === true && !hasValue;
 
   // ZONAS DE TOQUE (UX 3, Raf):
   //  - BADGE (✓/número, izquierda) = QUITAR la maniobra (deseleccionar). Siempre.
@@ -370,23 +378,44 @@ function SelectedRow({
                 {maneuverLabel(maneuver)}
               </Text>
               {/* 2da LÍNEA INLINE (solo configurables, R1.7): valor cargado ($white, énfasis) o hint ($greenLight,
-                  muted sobre el fondo oscuro — recipe A §2.1). */}
+                  muted sobre el fondo oscuro — recipe A §2.1). D2: si el preconfig EXIGIDO falta (warnMissing),
+                  MARCA de alto contraste — pill terracota "Faltan vacunas" (blanco sobre terracota, ~5.8:1) que
+                  pop-ea contra el verde botella y señala QUÉ maniobra completar. */}
               {configurable ? (
-                <Text
-                  fontFamily="$body"
-                  fontSize="$3"
-                  lineHeight="$3"
-                  fontWeight={hasValue ? '600' : '400'}
-                  color={hasValue ? '$white' : '$greenLight'}
-                  numberOfLines={1}
-                  testID={`selected-config-${index}`}
-                >
-                  {hasValue ? inline!.value : inline!.hint}
-                </Text>
+                warnMissing ? (
+                  <XStack
+                    alignSelf="flex-start"
+                    alignItems="center"
+                    gap="$1"
+                    backgroundColor="$terracota"
+                    borderRadius="$pill"
+                    paddingHorizontal="$2"
+                    paddingVertical="$1"
+                    testID={`selected-config-warn-${index}`}
+                  >
+                    <AlertTriangle size={14} color={WHITE} strokeWidth={3} />
+                    <Text fontFamily="$body" fontSize="$3" lineHeight="$3" fontWeight="700" color="$white" numberOfLines={1}>
+                      {inline!.hint}
+                    </Text>
+                  </XStack>
+                ) : (
+                  <Text
+                    fontFamily="$body"
+                    fontSize="$3"
+                    lineHeight="$3"
+                    fontWeight={hasValue ? '600' : '400'}
+                    color={hasValue ? '$white' : '$greenLight'}
+                    numberOfLines={1}
+                    testID={`selected-config-${index}`}
+                  >
+                    {hasValue ? inline!.value : inline!.hint}
+                  </Text>
+                )
               ) : null}
             </YStack>
-            {/* Chevroncito de "configurable" (solo si lo es): señal de affordance del cuerpo. */}
-            {configurable ? <ChevronRight size={18} color={hasValue ? WHITE : GREENLIGHT} /> : null}
+            {/* Chevroncito de "configurable" (solo si lo es): señal de affordance del cuerpo. Blanco cuando hay
+                valor o falta un preconfig exigido (D2, para que salte a completar); muted en el hint normal. */}
+            {configurable ? <ChevronRight size={18} color={hasValue || warnMissing ? WHITE : GREENLIGHT} /> : null}
           </XStack>
         </GestureDetector>
 

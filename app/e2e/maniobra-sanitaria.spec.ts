@@ -79,6 +79,21 @@ async function startSession(page: Page, maniobras: readonly string[]): Promise<v
     await page.getByTestId(`pool-row-${m}`).click();
   }
   await expect(page.getByTestId(`selected-row-${maniobras.length - 1}`)).toBeVisible();
+
+  // Delta D2 (endurecimiento etapa 2): si Vacunación está elegida, EXIGE ≥1 vacuna definida antes de continuar.
+  // Definimos 2 (Aftosa + Mancha) en su config (por su índice de selección) → el checklist por animal las trae.
+  const vacIdx = maniobras.indexOf('vacunacion');
+  if (vacIdx >= 0) {
+    await page.getByTestId(`selected-body-${vacIdx}`).click();
+    await expect(page.getByTestId('maneuver-config-sheet')).toBeVisible({ timeout: 10_000 });
+    for (const v of ['Aftosa', 'Mancha']) {
+      await page.getByTestId('maneuver-config-input').fill(v);
+      await page.getByRole('button', { name: 'Agregar vacuna', exact: true }).click();
+    }
+    await page.getByRole('button', { name: 'Guardar', exact: true }).click();
+    await expect(page.getByTestId('maneuver-config-sheet')).toHaveCount(0, { timeout: 10_000 });
+  }
+
   await page.getByRole('button', { name: /^Continuar/ }).click();
   await expect(page.getByRole('button', { name: 'Arrancar jornada', exact: true })).toBeVisible({ timeout: 20_000 });
   await page.getByRole('button', { name: 'Arrancar jornada', exact: true }).click();
@@ -120,14 +135,10 @@ test('sanitarias + sangrado + raspado sobre un macho persisten con session_id', 
   await bastonazo(page, eid);
   await expect(page.getByText('· 1 de 5', { exact: true })).toBeVisible({ timeout: 30_000 });
 
-  // ── VACUNACIÓN (· 1 de 5): agregar 2 vacunas → Aplicar y seguir → 2 sanitary_events. ──
-  await expect(page.getByTestId('vaccine-input')).toBeVisible();
-  await page.getByTestId('vaccine-input').fill('Aftosa');
-  await page.getByRole('button', { name: 'Agregar vacuna' }).click();
-  await page.getByTestId('vaccine-input').fill('Mancha');
-  await page.getByRole('button', { name: 'Agregar vacuna' }).click();
-  await expect(page.getByTestId('vaccine-chip-Aftosa')).toBeVisible();
-  await expect(page.getByTestId('vaccine-chip-Mancha')).toBeVisible();
+  // ── VACUNACIÓN (· 1 de 5, D2): checklist de las 2 vacunas definidas en la tanda (Aftosa + Mancha), ambas
+  // TILDADAS (APLICA) por default → Aplicar y seguir → 2 sanitary_events. ──
+  await expect(page.getByTestId('vaccine-check-Aftosa')).toBeVisible();
+  await expect(page.getByTestId('vaccine-check-Mancha')).toBeVisible();
   await page.screenshot({ path: path.join(OUT_DIR, 'vacunacion.png') });
   await page.getByRole('button', { name: 'Aplicar y seguir' }).click();
 

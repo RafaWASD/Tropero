@@ -50,8 +50,9 @@ async function gotoStage2WithVacunacion(page: Page): Promise<void> {
   // Vacunación es la única configurable ofrecida en cría por default (inseminación está OFF por gating).
   await page.getByTestId('pool-row-vacunacion').click();
   await expect(page.getByTestId('selected-row-0')).toBeVisible();
-  // Su fila muestra el hint de configurable (R1.7).
-  await expect(page.getByText('Tocá para elegir vacuna', { exact: true })).toBeVisible();
+  // D2 (endurecimiento etapa 2): sin vacuna definida, su fila muestra la marca "Faltan vacunas" (antes el
+  // hint "Tocá para elegir vacuna"). El cuerpo sigue abriendo el sheet de preconfig igual.
+  await expect(page.getByText('Faltan vacunas', { exact: true })).toBeVisible();
 }
 
 /** Tap TÁCTIL real (touchstart/touchend → click emulado por el browser) en el centro de un elemento. */
@@ -71,6 +72,14 @@ async function touchTapButton(page: Page, name: string): Promise<void> {
 /** Lleva el wizard hasta la ETAPA 3 (resumen) con una maniobra elegida. */
 async function gotoStage3(page: Page): Promise<void> {
   await gotoStage2WithVacunacion(page);
+  // D2: la etapa 2 EXIGE ≥1 vacuna definida para continuar → definimos una vía el sheet de preconfig
+  // (abierto con .click() sintético → sin el race del click huérfano, ver cabecera del archivo).
+  await page.getByTestId('selected-body-0').click();
+  await expect(page.getByTestId('maneuver-config-sheet')).toBeVisible({ timeout: 10_000 });
+  await page.getByTestId('maneuver-config-input').fill('Brucelosis');
+  await page.getByRole('button', { name: 'Agregar vacuna', exact: true }).click();
+  await page.getByRole('button', { name: 'Guardar', exact: true }).click();
+  await expect(page.getByTestId('maneuver-config-sheet')).toHaveCount(0, { timeout: 10_000 });
   await touchTapButton(page, 'Continuar (1)');
   await expect(page.getByText('Revisá la jornada', { exact: true })).toBeVisible({ timeout: 20_000 });
 }
@@ -118,8 +127,9 @@ test('el sheet de preconfig NO se auto-cierra al abrirlo con un tap táctil (cli
     if (!box) throw new Error('sin boundingBox para el scrim');
     await page.touchscreen.tap(box.x + box.width / 2, box.y + 12); // bien arriba, sobre el scrim libre
     await expect(page.getByTestId('maneuver-config-sheet')).toHaveCount(0, { timeout: 10_000 });
-    // Cerramos por backdrop (no Guardar) → el preconfig NO se cargó → la fila sigue mostrando el hint.
-    await expect(page.getByText('Tocá para elegir vacuna', { exact: true })).toBeVisible();
+    // Cerramos por backdrop (no Guardar) → el preconfig NO se cargó → la fila sigue con la marca "Faltan
+    // vacunas" (D2: sin vacuna definida; antes era el hint "Tocá para elegir vacuna").
+    await expect(page.getByText('Faltan vacunas', { exact: true })).toBeVisible();
   } finally {
     await ctx.close();
   }

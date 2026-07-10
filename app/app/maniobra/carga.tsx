@@ -1053,16 +1053,15 @@ function ManeuverStep({
       );
     }
     case 'silent_multi':
-      // Vacunación (R6.1): silent_apply MULTI (N vacunas → N sanitary_events vaccination). Vacunas de la
-      // tanda (preconfig) pre-cargadas como chips, editables.
+      // Vacunación (R6.1, delta D2): silent_apply MULTI → CHECKLIST APLICA/NO-APLICA de las vacunas DEFINIDAS
+      // en la tanda (preconfig). `definedProducts` = universo del checklist (SIEMPRE del preconfig, también al
+      // corregir → no se pierden las destildadas de la vista); `appliedProducts` = subset ya aplicado al
+      // corregir (undefined = primer paso → todas APLICA por default). Solo se persisten las TILDADAS (el
+      // componente devuelve el subset) → N sanitary_events vaccination (persist SIN cambios).
       return (
         <SilentVaccinationStep
-          initialProducts={
-            captured?.kind === 'vaccination'
-              ? captured.products
-              : splitMultiPreconfig(preconfigStringFor(parsedConfig, maneuver))
-          }
-          history={history}
+          definedProducts={splitMultiPreconfig(preconfigStringFor(parsedConfig, maneuver))}
+          appliedProducts={captured?.kind === 'vaccination' ? captured.products : undefined}
           bottomPad={bottomPad}
           onConfirm={(products) => onCapture({ kind: 'vaccination', products })}
         />
