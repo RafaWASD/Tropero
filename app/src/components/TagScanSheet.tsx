@@ -483,7 +483,10 @@ function ManualTagEntry({
         error={error}
         placeholder="982 0001 2345 6789"
         keyboardType="number-pad"
-        maxLength={TAG_ELECTRONIC_LENGTH}
+        // Sin maxLength a propósito: `sanitizeTagInput` (strip no-dígitos + slice(0,15)) es el limitador
+        // real (ver handleChange). Un maxLength sobre el RAW contaría letras que después se descartan → al
+        // pegar contenido mezclado (ej. "abc123…") recortaría el string crudo ANTES del strip y dejaría
+        // < 15 dígitos (bug bastoneo-ficha #6). El sanitizer, viendo el string completo, corta a 15 díg.
         autoCapitalize="none"
         returnKeyType="done"
         onSubmitEditing={() => void handleConfirm()}

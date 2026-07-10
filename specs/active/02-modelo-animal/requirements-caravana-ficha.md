@@ -85,6 +85,13 @@ final).
 - **RCF.2.1** — Cuando el usuario tipea en el campo de caravana electrónica, el sistema deberá sanitizar la
   entrada a **solo dígitos, máximo 15** (reuso de `sanitizeTagInput` / `TAG_ELECTRONIC_LENGTH`,
   `app/src/utils/animal-input.ts:16,32`).
+  > **Reconciliación as-built (fix e2e-latentes 614, 2026-07-10)**: el largo lo acota **exclusivamente el
+  > sanitizer** (`sanitizeTagInput` = strip no-dígitos + `slice(0,15)` en `onChangeText`), **NO** un
+  > `maxLength` sobre el input crudo. El `maxLength={TAG_ELECTRONIC_LENGTH}` que tenía el `FormField` manual
+  > del EID (`TagScanSheet.tsx`) se **eliminó**: recortaba el string RAW (contando letras) ANTES del strip →
+  > al pegar contenido mezclado (ej. `"abc123…"`) quedaban < 15 dígitos. Sin `maxLength`, el sanitizer ve el
+  > string completo, descarta las letras y corta a 15 díg. La regla RCF.2.1 (≤15) queda intacta a nivel de
+  > comportamiento.
 - **RCF.2.2** — Cuando el usuario confirma la asignación, si el valor no satisface `^\d{15}$` (reuso de
   `isValidTagElectronic`, `animal-input.ts:120`), entonces el sistema deberá mostrar el error inline es-AR
   **"La caravana electrónica tiene que tener 15 dígitos."** con borde rojo en el campo y **no** invocar el RPC.

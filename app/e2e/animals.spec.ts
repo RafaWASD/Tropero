@@ -749,7 +749,7 @@ test('delta #3 (RAF2.1.4): alta con Año + DD/MM → birth_date EXACTA (AAAA-MM-
   expect(await readServerBirthDate(animal_id)).toBe('2022-07-01');
 });
 
-test('delta #3 (RAF2.1.3): alta SOLO con Año (sin DD/MM) → birth_date midpoint AAAA-07-01', async ({
+test('delta #3 (RAF2.1.3): alta SOLO con Año (sin DD/MM) → birth_date imputado consciente-de-categoría, dentro del año', async ({
   page,
 }) => {
   test.setTimeout(120_000); // alta + 2 polls server (perfil + birth_date) → headroom sobre el default 60s.
@@ -768,13 +768,19 @@ test('delta #3 (RAF2.1.3): alta SOLO con Año (sin DD/MM) → birth_date midpoin
   const idv = `6132${Date.now().toString().slice(-6)}`;
   await page.getByLabel('Caravana visual (recomendado)', { exact: true }).fill(idv);
   await page.getByLabel('Año de nacimiento (opcional, AAAA)', { exact: true }).fill('2022');
-  // Sin tocar el campo DD/MM → midpoint (no se rompe el camino año-solo).
+  // Sin tocar el campo DD/MM → año-solo → imputación CONSCIENTE de la categoría (no se rompe el camino).
 
   await page.getByRole('button', { name: 'Crear animal', exact: true }).click();
 
   await expect(page.getByText('Historial', { exact: true })).toBeVisible({ timeout: 20_000 });
   const { animal_id } = await waitForServerAnimalProfile(establishmentId, { idv });
-  expect(await readServerBirthDate(animal_id)).toBe('2022-07-01');
+  // El alta year-only YA NO usa el midpoint CIEGO 'AAAA-07-01'. Desde el delta imputación-consciente-de-
+  // categoría (ac709d2), la fecha la imputa `imputeBirthDateForCategory` = midpoint del cruce
+  // [año ∩ ventana-etaria-de-la-categoría ∩ pasado]. Para una Vaquillona-2022 hoy da '2022-07-02' (día 182
+  // del año), y el día exacto depende de la categoría/`now` → el e2e (que corre con el `now` real, sin
+  // inyección) asierta el contrato relevante: año-solo persiste una fecha DENTRO de ese año. La precisión
+  // del midpoint consciente la cubren los unit deterministas de animal-category.test.ts / animal-birth-year.test.ts.
+  expect(await readServerBirthDate(animal_id)).toMatch(/^2022-/);
 });
 
 test('delta override-imputación: macho "Torito" con SOLO el año (borde 2 años) → categoría NO flipeada + category_override=false', async ({
