@@ -729,21 +729,6 @@ export function hasAbortion(timeline: readonly TimelineItem[] | null | undefined
 
 // ─── Fecha humana es-AR (PURA: `now` inyectado) ──────────────────────────────────────────
 
-const MESES_ES = [
-  'ene',
-  'feb',
-  'mar',
-  'abr',
-  'may',
-  'jun',
-  'jul',
-  'ago',
-  'sep',
-  'oct',
-  'nov',
-  'dic',
-];
-
 function pad2(n: number): string {
   return n < 10 ? `0${n}` : String(n);
 }
@@ -772,12 +757,12 @@ export type FormatEventDateOpts = {
  * NO date-only (instante real: observacion `created_at`, category_change `changed_at`) — huso LOCAL:
  *   - hoy        → "Hoy HH:MM"
  *   - ayer       → "Ayer"
- *   - mismo año  → "DD MMM" (mes es-AR abreviado, ej. "15 mar")
- *   - otro año   → "DD/MM/AAAA"
+ *   - mismo año  → "dd/mm" (numérico es-AR, ej. "15/03")
+ *   - otro año   → "dd/mm/aaaa"
  *
  * date-only (columna `date`: weight/condition_score/sanitary/lab_sample/reproductive) — la fecha es
  * el día calendario que el usuario tipeó (componentes UTC del valor), SIN huso y SIN hora:
- *   - mismo día → "Hoy" (sin hora)  ·  ayer → "Ayer"  ·  mismo año → "DD MMM"  ·  otro año → "DD/MM/AAAA"
+ *   - mismo día → "Hoy" (sin hora)  ·  ayer → "Ayer"  ·  mismo año → "dd/mm"  ·  otro año → "dd/mm/aaaa"
  *
  * `now` se inyecta (NO Date.now() interno) para tests deterministas. Si `iso` no parsea, devuelve ''.
  */
@@ -805,7 +790,7 @@ export function formatEventDate(
       return 'Ayer';
     }
     if (y === now.getFullYear()) {
-      return `${day} ${MESES_ES[mo]}`;
+      return `${pad2(day)}/${pad2(mo + 1)}`;
     }
     return `${pad2(day)}/${pad2(mo + 1)}/${y}`;
   }
@@ -821,7 +806,7 @@ export function formatEventDate(
   }
 
   if (d.getFullYear() === now.getFullYear()) {
-    return `${d.getDate()} ${MESES_ES[d.getMonth()]}`;
+    return `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)}`;
   }
 
   return `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)}/${d.getFullYear()}`;

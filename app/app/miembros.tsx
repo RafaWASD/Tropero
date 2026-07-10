@@ -49,6 +49,7 @@ import {
 } from '@/services/members';
 import { inviteErrorCopy } from '@/utils/invite';
 import { roleLabel } from '@/utils/establishment';
+import { formatDateCompactEsAr } from '@/utils/format-date-es-ar';
 import type { UserRole } from '@/types';
 
 const OFFLINE_COPY = 'Necesitás conexión para esto. Conectate a internet y volvé a intentar.';
@@ -70,14 +71,6 @@ function confirmDestructive(title: string, message: string, confirmLabel: string
       { text: confirmLabel, style: 'destructive', onPress: () => resolve(true) },
     ]);
   });
-}
-
-// ─── Formato de fecha (es-AR, corto) ──────────────────────────────────────────────
-
-function formatDate(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '';
-  return d.toLocaleDateString('es-AR', { day: '2-digit', month: 'short' });
 }
 
 // ─── Pantalla ─────────────────────────────────────────────────────────────────
@@ -608,7 +601,8 @@ function PendingInvitationCard({
           ) : null}
         </XStack>
         <Text fontFamily="$body" fontSize="$2" fontWeight="400" color="$textFaint">
-          Creada {formatDate(invitation.createdAt)} · vence {formatDate(invitation.expiresAt)}
+          Creada {formatDateCompactEsAr(invitation.createdAt)} · vence{' '}
+          {formatDateCompactEsAr(invitation.expiresAt)}
         </Text>
       </YStack>
 

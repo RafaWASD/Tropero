@@ -5,6 +5,7 @@
 
 import { extractManeuvers, type ManeuverConfig } from './maneuver-config';
 import { maneuverLabel } from './maneuver-wizard';
+import { formatDateCompactEsAr } from './format-date-es-ar';
 
 /**
  * Resumen legible de las maniobras de la jornada (R10.5): `extractManeuvers(config).map(maneuverLabel)`
@@ -31,18 +32,16 @@ export function resumeAnimalCountLabel(animalCount: number): string {
  * crearla, sessions.ts). `now` es inyectable para testear determinísticamente. Devuelve null si:
  *   - startedAt es null/invalíd (no rompe: la tarjeta omite la fecha);
  *   - startedAt cae en el MISMO día calendario que `now` (= hoy → no se muestra).
+ *
+ * El formato lo da `formatDateCompactEsAr` (formato ÚNICO es-AR, anti-drift): dd/mm en el año corriente
+ * (el caso normal de reanudar hoy/ayer) y dd/mm/aaaa si la jornada quedó abierta de otro año (más claro).
  */
 export function resumeStartedDateLabel(startedAt: string | null, now: Date = new Date()): string | null {
   if (startedAt == null) return null;
   const started = new Date(startedAt);
   if (Number.isNaN(started.getTime())) return null;
   if (isSameLocalDay(started, now)) return null;
-  // Fecha corta es-AR (día/mes), sin hora — la tarjeta es un resumen, no un detalle. Formato manual con
-  // zero-padding determinístico (dd/mm): NO uso toLocaleDateString — el ICU de es-AR no zero-padea el mes
-  // de forma consistente entre Node/runtimes ("15/6" vs "15/06"), y queremos un formato estable y testeable.
-  const dd = String(started.getDate()).padStart(2, '0');
-  const mm = String(started.getMonth() + 1).padStart(2, '0');
-  return `${dd}/${mm}`;
+  return formatDateCompactEsAr(startedAt, now);
 }
 
 /** ¿`a` y `b` caen en el mismo día calendario local? (año + mes + día). */

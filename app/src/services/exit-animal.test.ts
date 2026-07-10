@@ -184,13 +184,14 @@ test('sanitizePriceInput descarta letras, acepta 1 separador es-AR y acota el la
 
 // ─── Badge de modo archivada ───────────────────────────────────────────────────────────
 
-test('badge: sold con fecha → "Vendido el {fecha}"', () => {
-  assert.equal(archivedBadgeLabel('sold', '2026-06-07'), 'Vendido el 2026-06-07');
+test('badge: sold con fecha → "Vendido el {dd/mm/aaaa}" (es-AR, NO ISO crudo)', () => {
+  // exit_date es columna `date` → formatDateEsAr string-puro, sin drift (07/06/2026, no 2026-06-07).
+  assert.equal(archivedBadgeLabel('sold', '2026-06-07'), 'Vendido el 07/06/2026');
 });
 
-test('badge: dead/transferred con fecha → verbo correcto + fecha', () => {
-  assert.equal(archivedBadgeLabel('dead', '2026-06-01'), 'Muerto el 2026-06-01');
-  assert.equal(archivedBadgeLabel('transferred', '2026-05-20'), 'Transferido el 2026-05-20');
+test('badge: dead/transferred con fecha → verbo correcto + fecha dd/mm/aaaa', () => {
+  assert.equal(archivedBadgeLabel('dead', '2026-06-01'), 'Muerto el 01/06/2026');
+  assert.equal(archivedBadgeLabel('transferred', '2026-05-20'), 'Transferido el 20/05/2026');
 });
 
 test('badge: archivado SIN fecha (datos viejos) → solo el verbo, NUNCA "null"', () => {

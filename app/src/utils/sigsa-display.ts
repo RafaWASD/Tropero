@@ -6,6 +6,7 @@
 // testeen sin montar componentes.
 
 import type { ExportValidationReason } from '../services/sigsa/types';
+import { formatDateTimeEsAr } from './format-date-es-ar';
 
 // ─── RFID legible (R12.1 / design §"ExportAnimalRow") ────────────────────────────────────────────────
 
@@ -66,17 +67,14 @@ export function incompleteReasonLabels(reasons: ExportValidationReason[]): strin
 // ─── Fecha del historial (R10.1 / R12.2) ─────────────────────────────────────────────────────────────
 
 /**
- * Fecha + hora es-AR de una entrada del historial de exports (`export_log.generated_at`). El productor
- * reconoce "cuándo lo generé" → mostramos día + mes + año + hora:minuto (no segundos, ruido). null /
- * fecha inválida → "Sin fecha" (no se inventa). Usa la zona local del dispositivo.
+ * Fecha + hora es-AR de una entrada del historial de exports (`export_log.generated_at`, timestamptz). El
+ * productor reconoce "cuándo lo generé" → dd/mm/aaaa · HH:MM (hora:minuto, sin segundos ruidosos). Delega
+ * en `formatDateTimeEsAr` (formato ÚNICO es-AR, zona local del dispositivo). null / fecha inválida →
+ * "Sin fecha" (copy específico de esta pantalla; no se inventa una fecha).
  */
 export function exportLogDateLabel(generatedAtIso: string | null | undefined): string {
-  if (!generatedAtIso) return 'Sin fecha';
-  const d = new Date(generatedAtIso);
-  if (Number.isNaN(d.getTime())) return 'Sin fecha';
-  const date = d.toLocaleDateString('es-AR', { day: 'numeric', month: 'short', year: 'numeric' });
-  const time = d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
-  return `${date} · ${time}`;
+  const s = formatDateTimeEsAr(generatedAtIso);
+  return s === '—' ? 'Sin fecha' : s;
 }
 
 /**

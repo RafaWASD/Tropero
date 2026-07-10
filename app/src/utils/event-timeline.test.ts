@@ -520,9 +520,9 @@ test('formatEventDate: AYER → "Ayer"', () => {
   assert.equal(formatEventDate(iso, NOW), 'Ayer');
 });
 
-test('formatEventDate: mismo año → "DD MMM" (mes es-AR)', () => {
+test('formatEventDate: mismo año → "dd/mm" (numérico es-AR)', () => {
   const iso = new Date(2025, 0, 8, 0, 0, 0).toISOString(); // 8 ene 2025
-  assert.equal(formatEventDate(iso, NOW), '8 ene');
+  assert.equal(formatEventDate(iso, NOW), '08/01');
 });
 
 test('formatEventDate: otro año → "DD/MM/AAAA"', () => {
@@ -571,7 +571,7 @@ test('formatEventDate: MISMO ISO sin dateOnly se ubica por su día LOCAL (por es
   // Como instante, `iso` cae el día local `local`; `now` es el día siguiente → "Ayer".
   assert.equal(formatEventDate(iso, now), 'Ayer');
   // …y con dateOnly el MISMO par no es "Ayer": la fecha calendario (UTC) es el 2 jun, distinta del
-  // 3 jun de `now` → "DD MMM" (no "Ayer"). Confirma que el flag cambia el resultado.
+  // 3 jun de `now` → "dd/mm" (no "Ayer"). Confirma que el flag cambia el resultado.
   assert.notEqual(formatEventDate(iso, now, { dateOnly: true }), 'Ayer');
 });
 
@@ -581,10 +581,10 @@ test('formatEventDate dateOnly: AYER → "Ayer"', () => {
   assert.equal(formatEventDate(iso, now, { dateOnly: true }), 'Ayer');
 });
 
-test('formatEventDate dateOnly: mismo año → "DD MMM" (es-AR, sin hora)', () => {
+test('formatEventDate dateOnly: mismo año → "dd/mm" (numérico es-AR, sin hora)', () => {
   const iso = '2026-01-08T00:00:00+00:00';
   const now = new Date(2026, 5, 2, 12, 0, 0);
-  assert.equal(formatEventDate(iso, now, { dateOnly: true }), '8 ene');
+  assert.equal(formatEventDate(iso, now, { dateOnly: true }), '08/01');
 });
 
 test('formatEventDate dateOnly: otro año → "DD/MM/AAAA" (sin hora)', () => {

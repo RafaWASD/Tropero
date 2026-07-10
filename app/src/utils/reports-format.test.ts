@@ -364,12 +364,20 @@ test('animalLabel (delta IDU): IDV si lo tiene, sino "Sin identificación" (sin 
 
 // ─── sessionDateLabel / sessionRangeLabel (R7.3.2 / R7.3.6) ─────────────────────────────────────────
 
-test('sessionDateLabel: fecha es-AR o "Sin fecha"', () => {
+test('sessionDateLabel: fecha es-AR dd/mm/aaaa o "Sin fecha"', () => {
   assert.equal(sessionDateLabel(null), 'Sin fecha');
   assert.equal(sessionDateLabel('no-es-fecha'), 'Sin fecha');
-  // una fecha válida produce un string no vacío con el año (no asertamos el formato exacto del locale)
+  // Instante real (started_at): día LOCAL. 10:00Z es media mañana en todo huso realista → sigue el 24.
   const s = sessionDateLabel('2026-06-24T10:00:00Z');
-  assert.ok(s.includes('2026') && s !== 'Sin fecha');
+  assert.match(s, /^\d{2}\/\d{2}\/\d{4}$/);
+  assert.ok(s.includes('2026'));
+});
+
+test('sessionDateLabel: date-only (next_dose_date de la alerta de dosis) → dd/mm/aaaa SIN drift', () => {
+  // `next_dose_date` es columna `date`: llega como `AAAA-MM-DD`. formatDateEsAr la formatea por string
+  // → NO driftea −1 día en AR (el bug que traía `new Date().toLocaleDateString`). Determinístico.
+  assert.equal(sessionDateLabel('2026-06-07'), '07/06/2026');
+  assert.equal(sessionDateLabel('2026-01-01'), '01/01/2026');
 });
 
 test('sessionRangeLabel: abierta cuando no hay ended_at', () => {

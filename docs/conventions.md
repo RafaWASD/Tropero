@@ -20,6 +20,24 @@
 - **Commits**: español, presente, descriptivos. Ej: `agrega validación de email en signup`.
 - **Specs / ADRs / docs**: español.
 
+## Formato de datos para el usuario (es-AR)
+
+Todo dato **mostrado al usuario** va en formato argentino. Los formatos de **MÁQUINA** (SIGSA/CSV/DB/RPC,
+payloads, comparaciones lexicográficas, entrada en vivo de la rueda/máscara) NO se tocan: son ISO / punto
+decimal por diseño.
+
+- **Números**: coma decimal + punto de miles (`385 kg`, `4,5`, `1.050`). El teclado numérico usa `,`.
+  Formateo centralizado en los helpers es-AR (`formatKgAR`, `formatPercentAR`, `formatCmAR`, …).
+- **Fechas**: `dd/mm/aaaa` (ej. `07/06/2026`); **contextual `dd/mm`** cuando el año es obvio (año corriente
+  — invitaciones, "retomar la jornada", timeline mismo-año). Con hora: `dd/mm/aaaa · HH:MM`. Formateo
+  centralizado en **`app/src/utils/format-date-es-ar.ts`** (`formatDateEsAr` / `formatDateCompactEsAr` /
+  `formatDateTimeEsAr`) + `formatEventDate` (timeline, con sus relativos "Hoy HH:MM" / "Ayer"). NUNCA se
+  muestra un ISO crudo (`2026-06-07`) ni un mes abreviado (`15 abr`).
+  - **TZ-safe (regla dura, lección del rojo e2e 777)**: una fecha **date-only** (`AAAA-MM-DD`, columna
+    Postgres `date`) se formatea por **manipulación de STRING** (split del prefijo → reordenar), **NUNCA**
+    `new Date(iso)` (parsea como UTC-medianoche y en huso AR (UTC-3) corre −1 día). Un **instante real**
+    (timestamptz con hora) sí usa `new Date` + getters LOCALES (el día calendario que ve el operario).
+
 ## Nombres
 
 - **Archivos**: kebab-case (`animal-profile.ts`).

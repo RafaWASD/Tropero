@@ -7,6 +7,7 @@
 // clasificación de errores del RPC `exit_animal_profile` (migration 0044) a un AppError accionable.
 
 import type { AppError } from './animals';
+import { formatDateEsAr } from '../utils/format-date-es-ar';
 
 // ─── Motivo de baja (UI) → (status, exit_reason) ─────────────────────────────────────
 //
@@ -136,16 +137,16 @@ function archivedVerb(status: string): string | null {
 }
 
 /**
- * Texto del badge de modo archivada (R14.9): "Vendido el {exitDate}" / "Muerto el …" / "Transferido
+ * Texto del badge de modo archivada (R14.9): "Vendido el {dd/mm/aaaa}" / "Muerto el …" / "Transferido
  * el …". Si exitDate es null/vacío (datos viejos), solo el verbo sin la fecha. status 'active' → null
- * (la ficha no muestra badge). PURO: no formatea la fecha (la pasa tal cual, ISO) — la UI puede
- * mostrarla así; un formateo bonito es refinamiento posterior, pero NUNCA un "null" literal.
+ * (la ficha no muestra badge). La fecha se muestra en formato es-AR dd/mm/aaaa (formatDateEsAr, tz-safe
+ * para la columna date `exit_date`); NUNCA un "null" literal ni el ISO crudo.
  */
 export function archivedBadgeLabel(status: string, exitDate: string | null): string | null {
   const verb = archivedVerb(status);
   if (verb === null) return null;
   const date = exitDate?.trim();
-  return date ? `${verb} el ${date}` : verb;
+  return date ? `${verb} el ${formatDateEsAr(exitDate)}` : verb;
 }
 
 // ─── Validación OPCIONAL de los datos de venta (peso + precio) ────────────────────────

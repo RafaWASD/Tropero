@@ -101,6 +101,7 @@ import {
   type CurrentState,
 } from '@/utils/event-timeline';
 import { formatConditionScore } from '@/utils/event-input';
+import { formatDateEsAr } from '@/utils/format-date-es-ar';
 import { reproStatusLabel, type ReproStatus } from '@/utils/repro-status';
 import type { HeiferFitness } from '@/utils/maneuver-sequence';
 import { isBullEntire } from '@/utils/maneuver-applicability';
@@ -900,7 +901,7 @@ export default function AnimalDetailScreen() {
             {/* Datos del animal. */}
             <DetailSection icon={ClipboardList} title="Datos del animal">
               <AttributeRow label="Sexo" value={detail.sex === 'male' ? 'Macho' : 'Hembra'} />
-              <AttributeRow label="Nacimiento" value={detail.birthDate ?? '—'} />
+              <AttributeRow label="Nacimiento" value={formatDateEsAr(detail.birthDate)} />
               <AttributeRow label="Rodeo" value={detail.rodeoName || '—'} />
               {/* Raza (spec 08, T18): muestra la raza actual + afordancia para editarla (abre el BreedPickerSheet).
                   Sin raza → CTA "Completar raza para SIGSA". El trigger 0113 deriva breed_id del nombre al subir. */}

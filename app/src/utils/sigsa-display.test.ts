@@ -2,7 +2,7 @@
 // node:test. Foco en los BORDES que la pantalla muestra:
 //   - formatRfidMasked: 15 díg → prefijo·sufijo; null/'' → "Sin caravana"; longitud != 15 → completo.
 //   - incompleteReasonLabel(s): cada motivo → label es-AR; orden + dedup; vacío → [].
-//   - exportLogDateLabel: ISO válido → "día mes año · hh:mm"; null/inválido → "Sin fecha".
+//   - exportLogDateLabel: ISO válido → "dd/mm/aaaa · hh:mm"; null/inválido → "Sin fecha".
 //   - animalCountLabel: singular/plural; 0; negativo defensivo.
 
 import test from 'node:test';
@@ -62,13 +62,18 @@ test('incompleteReasonLabels: lista vacía → []', () => {
 
 // ─── exportLogDateLabel ──────────────────────────────────────────────────────────────────────────────
 
-test('exportLogDateLabel: ISO válido → fecha + hora es-AR (no segundos)', () => {
+test('exportLogDateLabel: ISO válido → dd/mm/aaaa · HH:MM es-AR (no segundos)', () => {
   const label = exportLogDateLabel('2026-03-15T14:32:09.000Z');
-  // No fijamos el string EXACTO (depende de la TZ del runner), pero debe tener el separador "·" y un
-  // "hh:mm" (2 grupos de 2 dígitos), y NO debe contener los segundos (":09").
-  assert.match(label, /·/);
-  assert.match(label, /\d{1,2}:\d{2}/);
+  // No fijamos el string EXACTO (depende de la TZ del runner), pero debe tener la fecha dd/mm/aaaa, el
+  // separador "·" y un "HH:MM", y NO debe contener los segundos (":09").
+  assert.match(label, /^\d{2}\/\d{2}\/\d{4} · \d{2}:\d{2}$/);
   assert.ok(!label.includes(':09'), `no debería incluir segundos: "${label}"`);
+});
+
+test('exportLogDateLabel: formato numérico dd/mm/aaaa EXACTO (instante local, determinístico)', () => {
+  // Construido con componentes LOCALES → el resultado es el mismo en cualquier huso del runner.
+  const inst = new Date(2026, 2, 15, 14, 32, 9).toISOString(); // 15 mar 2026, 14:32:09 local
+  assert.equal(exportLogDateLabel(inst), '15/03/2026 · 14:32');
 });
 
 test('exportLogDateLabel: null / undefined / fecha inválida → "Sin fecha"', () => {

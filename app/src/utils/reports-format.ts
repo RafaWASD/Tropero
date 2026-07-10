@@ -334,6 +334,7 @@ export function cclStageLabel(stage: CclStage): string {
 // se pierda un animal del % — R7.7.5). Para 3 buckets, los tres se muestran tal cual.
 
 import { sizeBucketsForServiceMonths } from './pregnancy-buckets';
+import { formatDateEsAr } from './format-date-es-ar';
 
 /** Una barra CCL lista para renderizar: etapa + label + conteo + % sobre el total (0..100). */
 export type CclBar = {
@@ -514,14 +515,14 @@ function isoYear(iso: string | null): number | null {
 // ─── Etiqueta de una sesión para la lista (R7.3.6) ──────────────────────────────────────────────────
 
 /**
- * Fecha es-AR corta de una sesión (started_at ISO) para la lista/encabezado: "24 jun 2026". `null`/inválida
- * → "Sin fecha". No incluye hora (la lista es glanceable; el detalle puede mostrar el rango completo).
+ * Fecha es-AR corta de una sesión para la lista/encabezado: "24/06/2026" (dd/mm/aaaa). `null`/inválida →
+ * "Sin fecha". No incluye hora (la lista es glanceable; el detalle muestra el rango completo). Delega en
+ * `formatDateEsAr` (formato ÚNICO es-AR + tz-safe): un `started_at` (instante real) usa su día LOCAL; una
+ * fecha date-only (ej. `next_dose_date` de la alerta de dosis) se formatea por string SIN drift.
  */
 export function sessionDateLabel(startedAtIso: string | null): string {
-  if (!startedAtIso) return 'Sin fecha';
-  const d = new Date(startedAtIso);
-  if (Number.isNaN(d.getTime())) return 'Sin fecha';
-  return d.toLocaleDateString('es-AR', { day: 'numeric', month: 'short', year: 'numeric' });
+  const s = formatDateEsAr(startedAtIso);
+  return s === '—' ? 'Sin fecha' : s;
 }
 
 /** Rango temporal es-AR de una sesión (started → ended) para el detalle (R7.3.2). "abierta" si no cerró. */
