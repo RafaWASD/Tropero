@@ -139,14 +139,15 @@ export function calvingCardView(kpi: {
 Mapeo (D1–D5):
 | `status` | `value` | `detail`/`note` | `legend` |
 |---|---|---|---|
-| `ok` (serviced>0) | `formatPercentAR(safePercent(calved, serviced))` | detail "N paridas / M servidas" | "todavía hay vacas que no parieron, esto puede afectar el dato" si `pendingPregnant>0` |
-| `ok` (serviced=0) | "—" (muted) | note "sin datos de esta campaña" | — |
-| `not_calving_season` | "—" (muted) | note "todavía no es época de parición" | — |
-| `no_service_months` | "—" (muted) | note "sin meses de servicio configurados" | — |
-| `not_applicable_12m` | "—" (muted) | note "no aplica (servicio todo el año)" | — |
-| `kpi === null` | "—" (muted) | note "sin datos" | — |
+| `ok` (serviced>0) | `formatPercentAR(safePercent(calved, serviced))` | detail "N paridas / M servidas" | "Todavía hay vacas que no parieron, esto puede afectar el dato" si `pendingPregnant>0` |
+| `ok` (serviced=0) | "—" (muted) | note "Sin datos de esta campaña" | — |
+| `not_calving_season` | "—" (muted) | note "Todavía no es época de parición" | — |
+| `no_service_months` | "—" (muted) | note "Sin meses de servicio configurados" | — |
+| `not_applicable_12m` | "—" (muted) | note "No aplica (servicio todo el año)" | — |
+| `kpi === null` | "—" (muted) | note "Sin datos" | — |
 
 Reusa `safePercent`/`formatPercentAR` vigentes (guard de 0 → nunca NaN). RPF.6.2.
+(Copy de la card: casing corregido a sentence-case, 2026-07-10 — inicial en mayúscula, resto idéntico.)
 
 ### §3.3 — Pantalla (`app/app/(tabs)/reportes.tsx`, `ReproSection`)
 
@@ -205,7 +206,7 @@ La suite ya corre contra el remoto y falla-hasta-apply; verde tras aplicar `0117
 - **CD-2 — "época de parición" (D2)**: `not_calving_season` = `current_date < min(make_date(p_year,m,1)+9mo)`. Es decir, se oculta el % **solo ANTES** del primer mes de parto (que es el problema del 0% prematuro); una vez llegada la temporada, se muestra el % **también después** de que la temporada termina (es el resultado final honesto de la campaña). *A confirmar*: que "solo en los meses de parto" se lee como "desde el primer mes de parto en adelante", no "únicamente durante la ventana y oculto al terminar".
 - **CD-3 — Detección del 12m (D5)**: `cardinality(service_months) = 12`, evaluado con precedencia sobre la ventana. Alcance del delta: solo la **card de Parición** refleja `not_applicable_12m`; ocultar los OTROS KPIs repro de un rodeo 12m (que D5 también menciona) queda **fuera de alcance** de este delta (es #8 = parición), como cambio futuro separado.
 - **CD-4 — `pending_pregnant` (D4)**: preñadas vigentes (tacto+ `<> empty` sin aborto posterior) **sin** parto contado en la ventana. La leyenda aparece solo con `status='ok'` y `pending_pregnant>0`.
-- **CD-5 — Copys es-AR** propuestos (a ajustar por Raf): "sin meses de servicio configurados" · "todavía no es época de parición" · "no aplica (servicio todo el año)" · leyenda D4 textual del context ("todavía hay vacas que no parieron, esto puede afectar el dato").
+- **CD-5 — Copys es-AR** (casing corregido a sentence-case, 2026-07-10): "Sin meses de servicio configurados" · "Todavía no es época de parición" · "No aplica (servicio todo el año)" · leyenda D4 textual del context ("Todavía hay vacas que no parieron, esto puede afectar el dato").
 - **CD-6 — Default defensivo del cliente**: `status` ausente/desconocido → `'ok'` (compat si el cliente corre antes de aplicar `0117`).
 
 ---

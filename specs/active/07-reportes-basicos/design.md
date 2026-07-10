@@ -20,6 +20,25 @@
 
 ---
 
+## Deltas posteriores (ADR-028)
+
+> Índice de los delta-specs que extienden esta feature `done` (Stream C). El baseline no se reescribe; cada
+> delta vive en su propio `{context,requirements,design,tasks}-<slug>.md` en esta carpeta.
+
+| Slug | Qué agrega | Estado |
+|---|---|---|
+| `paricion-fix` | **#8** — el KPI `rodeo_calving_kpi` daba **0% engañoso** con `service_months` vacío. Migración `0117` (DROP+CREATE, agrega `status` [`no_service_months`/`not_calving_season`/`not_applicable_12m`/`ok`] + `pending_pregnant`; el conteo `calved` NO cambia). La card muestra "—" + mensaje accionable en vez del 0%, % real en `ok`, leyenda si quedan preñadas sin parir. `calvingCardView` puro. **CON BACKEND** (`0117`, deployado). | done (Puerta 2, 2026-07-10) |
+| `destete-kpi` | **#10** — RPC **nueva** `rodeo_weaning_kpi` (migración `0118`, CREATE): cierra el ciclo servida→parida→**destetada** (%destete = destetados/servidas, imputado por año de servicio). `status` (no_service_months / not_applicable_12m / **not_weaning_season** data-driven / ok) + leyenda de destete parcial. Card **Destete** nueva. `weaningCardView` puro (espejo de `calvingCardView`). **CON BACKEND** (`0118`, deployado). | done (Puerta 2, 2026-07-10) |
+
+> **Fix de casing es-AR (2026-07-10, foldeado con la Puerta 2):** los mensajes de estado (`note`) y las 2
+> leyendas de ambas cards (`calvingCardView`/`weaningCardView` en `reports-format.ts`) estaban en **minúscula
+> inicial** (único caso user-facing de la app; el resto va sentence-case) — Raf lo cazó en la Puerta 2. Se
+> corrigieron a **sentence-case** (solo la inicial): "Todavía no es época de parición", "Sin meses de servicio
+> configurados", "No aplica (servicio todo el año)", "Todavía no empezó el destete", "Sin datos", etc. El copy
+> citado en `design-paricion-fix.md`/`design-destete-kpi.md`/requirements/context/tasks quedó reconciliado.
+
+---
+
 ## 0. Resumen de la decisión arquitectónica
 
 **El cómputo de reportes se hace con funciones SQL `SECURITY DEFINER STABLE` (RPC vía PostgREST), NO con Edge

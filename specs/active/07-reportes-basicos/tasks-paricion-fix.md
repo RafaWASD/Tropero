@@ -51,7 +51,7 @@ Cada tarea lleva `[ ]` (la marca el implementer) + los `RPF.<n>` que cubre. El r
 
 ## Bloque E — Gate 2.5 (capture)
 
-- [x] **T15 — Crear `app/e2e/captures/paricion-fix.capture.ts`** (**as-built: molde ADR-029** `cria-al-pie-alta.capture.ts`/`parto-rodeo-caravana.capture.ts`, no `reportes-spike.capture.ts`): 5 capturas NOMBRADAS de los 5 estados navegando al spike (`?variant=paricion-*`) a viewport mobile 412×915 + `assertTextNotClipped` sobre "Parición", "todavía no es época de parición", "sin meses de servicio configurados". Salida `e2e/captures/__shots__/paricion-fix/<NN>-<estado>.png` (gitignored). Cubre: RPF.7.1, RPF.7.2.
+- [x] **T15 — Crear `app/e2e/captures/paricion-fix.capture.ts`** (**as-built: molde ADR-029** `cria-al-pie-alta.capture.ts`/`parto-rodeo-caravana.capture.ts`, no `reportes-spike.capture.ts`): 5 capturas NOMBRADAS de los 5 estados navegando al spike (`?variant=paricion-*`) a viewport mobile 412×915 + `assertTextNotClipped` sobre "Parición", "Todavía no es época de parición", "Sin meses de servicio configurados". Salida `e2e/captures/__shots__/paricion-fix/<NN>-<estado>.png` (gitignored). Cubre: RPF.7.1, RPF.7.2.
 
 - [x] **T16 — Correr el capture** (`playwright.capture.config.ts`) y vetar (leader design-review) antes de mostrar a Raf; revertir `design/**` si el build re-renderizó PNGs (`reference_e2e_design_png_rerender`). Cubre: RPF.7.1.
 

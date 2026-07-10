@@ -24,12 +24,12 @@
 //
 // Estados capturados (RPF.7.1):
 //   01-ok-con-porcentaje   — status 'ok': el %parición + "N paridas / M servidas" (D1/D2, sin leyenda).
-//   02-not-calving-season  — "todavía no es época de parición" (antes de la ventana +9, D2): NO 0% prematuro.
-//   03-no-service-months   — "sin meses de servicio configurados" (service_months vacío/NULL, D3): NO 0%.
-//   04-not-applicable-12m  — "no aplica (servicio todo el año)" (servicio continuo 12 meses, D5).
-//   05-ok-con-leyenda      — status 'ok' + la leyenda D4 "todavía hay vacas que no parieron…" (pending>0).
-// + ANTI-RECORTE de descendentes (RPF.7.2) sobre "Parición", "todavía no es época de parición",
-//   "sin meses de servicio configurados" (memoria feedback_descender_clipping: p/q/g/j/y).
+//   02-not-calving-season  — "Todavía no es época de parición" (antes de la ventana +9, D2): NO 0% prematuro.
+//   03-no-service-months   — "Sin meses de servicio configurados" (service_months vacío/NULL, D3): NO 0%.
+//   04-not-applicable-12m  — "No aplica (servicio todo el año)" (servicio continuo 12 meses, D5).
+//   05-ok-con-leyenda      — status 'ok' + la leyenda D4 "Todavía hay vacas que no parieron…" (pending>0).
+// + ANTI-RECORTE de descendentes (RPF.7.2) sobre "Parición", "Todavía no es época de parición",
+//   "Sin meses de servicio configurados" (memoria feedback_descender_clipping: p/q/g/j/y).
 
 import path from 'node:path';
 
@@ -93,27 +93,27 @@ test('captura delta #8 %parición: los 5 estados de la card de Parición (ok / f
   await expect(page.getByText('82,6 %', { exact: true })).toBeVisible();
   await expect(page.getByText('38 paridas / 46 servidas', { exact: false })).toBeVisible();
   // Sin leyenda D4 (pendingPregnant=0).
-  await expect(page.getByText(/todavía hay vacas que no parieron/)).toHaveCount(0);
+  await expect(page.getByText(/Todavía hay vacas que no parieron/)).toHaveCount(0);
   await assertTextNotClipped(page, 'Parición');
   await shot(page, '01-ok-con-porcentaje');
 
-  // ── 02 — 'not_calving_season': "todavía no es época de parición" en lugar de un 0% prematuro (D2). ──
+  // ── 02 — 'not_calving_season': "Todavía no es época de parición" en lugar de un 0% prematuro (D2). ──
   await gotoParicion(page, 'paricion-fuera-ventana');
-  await expect(page.getByText('todavía no es época de parición', { exact: false })).toBeVisible();
+  await expect(page.getByText('Todavía no es época de parición', { exact: false })).toBeVisible();
   await assertTextNotClipped(page, 'Parición');
-  await assertTextNotClipped(page, 'todavía no es época de parición');
+  await assertTextNotClipped(page, 'Todavía no es época de parición');
   await shot(page, '02-not-calving-season');
 
-  // ── 03 — 'no_service_months': "sin meses de servicio configurados" en lugar de un 0% engañoso (D3). ──
+  // ── 03 — 'no_service_months': "Sin meses de servicio configurados" en lugar de un 0% engañoso (D3). ──
   await gotoParicion(page, 'paricion-sin-meses');
-  await expect(page.getByText('sin meses de servicio configurados', { exact: false })).toBeVisible();
+  await expect(page.getByText('Sin meses de servicio configurados', { exact: false })).toBeVisible();
   await assertTextNotClipped(page, 'Parición');
-  await assertTextNotClipped(page, 'sin meses de servicio configurados');
+  await assertTextNotClipped(page, 'Sin meses de servicio configurados');
   await shot(page, '03-no-service-months');
 
-  // ── 04 — 'not_applicable_12m': "no aplica (servicio todo el año)" (servicio continuo 12 meses, D5). ──
+  // ── 04 — 'not_applicable_12m': "No aplica (servicio todo el año)" (servicio continuo 12 meses, D5). ──
   await gotoParicion(page, 'paricion-12m');
-  await expect(page.getByText('no aplica (servicio todo el año)', { exact: false })).toBeVisible();
+  await expect(page.getByText('No aplica (servicio todo el año)', { exact: false })).toBeVisible();
   await assertTextNotClipped(page, 'Parición');
   await shot(page, '04-not-applicable-12m');
 
@@ -123,8 +123,8 @@ test('captura delta #8 %parición: los 5 estados de la card de Parición (ok / f
   await expect(page.getByText('65,2 %', { exact: true })).toBeVisible();
   await expect(page.getByText('30 paridas / 46 servidas', { exact: false })).toBeVisible();
   await expect(
-    page.getByText('todavía hay vacas que no parieron, esto puede afectar el dato', { exact: false }),
+    page.getByText('Todavía hay vacas que no parieron, esto puede afectar el dato', { exact: false }),
   ).toBeVisible();
-  await assertTextNotClipped(page, 'todavía hay vacas que no parieron');
+  await assertTextNotClipped(page, 'Todavía hay vacas que no parieron');
   await shot(page, '05-ok-con-leyenda');
 });

@@ -58,7 +58,7 @@ Cada tarea lleva `[ ]` (la marca el implementer) + los `RWK.<n>` que cubre. El r
 
 ## Bloque E — Gate 2.5 (capture)
 
-- [x] **T18 — Crear `app/e2e/captures/destete-kpi.capture.ts`** (molde ADR-029 `paricion-fix.capture.ts`): 5 capturas NOMBRADAS de los 5 estados navegando al spike (`?variant=destete-*`) a viewport mobile 412×915 + `assertTextNotClipped` sobre "Destete", "todavía no empezó el destete", "sin meses de servicio configurados". Salida `e2e/captures/__shots__/destete-kpi/<NN>-<estado>.png` (gitignored). Cubre: RWK.8.1, RWK.8.2.
+- [x] **T18 — Crear `app/e2e/captures/destete-kpi.capture.ts`** (molde ADR-029 `paricion-fix.capture.ts`): 5 capturas NOMBRADAS de los 5 estados navegando al spike (`?variant=destete-*`) a viewport mobile 412×915 + `assertTextNotClipped` sobre "Destete", "Todavía no empezó el destete", "Sin meses de servicio configurados". Salida `e2e/captures/__shots__/destete-kpi/<NN>-<estado>.png` (gitignored). Cubre: RWK.8.1, RWK.8.2.
 
 - [ ] **T19 — Correr el capture** (`playwright.capture.config.ts`) y vetar (leader design-review) antes de mostrar a Raf; revertir `design/**` si el build re-renderizó PNGs (`reference_e2e_design_png_rerender`). Cubre: RWK.8.1. **[LEADER — Gate 2.5]**: el `.capture.ts` está escrito y usa el spike MOCK (NO depende del apply de `0118`); el leader lo corre en el Gate 2.5.
 

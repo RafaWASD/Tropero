@@ -16,8 +16,8 @@ Hoy **no existe** un KPI de %destete (`rodeo_weaning_kpi`). El destete es solo u
 
 - **D1 — %destete = terneros destetados / servidas.** Numerador = terneros **destetados** (evento `weaning`) de la campaña; denominador = **servidas** del rodeo en la campaña (mismo `rodeo_repro_denominator` que parición). *(Puede superar 100% con mellizos — es correcto: mide terneros logrados por vaca servida.)*
 - **D2 — Imputación por AÑO DE SERVICIO (campaña).** Un destete se imputa a la campaña de la que viene el ternero: se sigue el vínculo **servida → parto (concepción ∈ meses de servicio del `p_year`) → `birth_calves` → cría → evento `weaning` de la cría**. El %destete de la campaña `p_year` cuenta crías de esa campaña que se destetaron, **sin importar el año calendario** del destete (el destete cae ~6-8 meses tras el parto, ya en el año siguiente). *(NO se cuenta por año calendario del evento de destete — mezclaría camadas.)*
-- **D3 — Mostrar desde el 1er destete de la campaña.** Antes de que se destete la primera cría de la campaña → estado `not_weaning_season` ("todavía no empezó el destete"), NO 0% prematuro (mismo espíritu que `not_calving_season` de #8).
-- **D4 — Cartel de destete parcial (mismo patrón que #8/D4).** Si quedan **crías al pie de la campaña sin destetar** (`pending_weaning > 0`), mostrar la leyenda "todavía hay crías sin destetar, esto puede afectar el dato".
+- **D3 — Mostrar desde el 1er destete de la campaña.** Antes de que se destete la primera cría de la campaña → estado `not_weaning_season` ("Todavía no empezó el destete"), NO 0% prematuro (mismo espíritu que `not_calving_season` de #8).
+- **D4 — Cartel de destete parcial (mismo patrón que #8/D4).** Si quedan **crías al pie de la campaña sin destetar** (`pending_weaning > 0`), mostrar la leyenda "Todavía hay crías sin destetar, esto puede afectar el dato".
 - **D5 — `service_months` vacío / 12 meses**: mismos estados que #8 (`no_service_months` / `not_applicable_12m`), por consistencia (un rodeo sin meses de servicio o de servicio continuo no reporta destete de campaña).
 
 ## Alcance

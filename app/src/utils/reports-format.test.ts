@@ -128,45 +128,45 @@ test('calvingCardView: ok con pendingPregnant>0 → leyenda D4 (RPF.4.2)', () =>
   const cv = calvingCardView({ status: 'ok', calved: 30, serviced: 46, pendingPregnant: 8 });
   assert.equal(cv.value, '65,2 %');
   assert.equal(cv.detail, '30 paridas / 46 servidas');
-  assert.equal(cv.legend, CALVING_PENDING_LEGEND); // "todavía hay vacas que no parieron, esto puede afectar el dato"
+  assert.equal(cv.legend, CALVING_PENDING_LEGEND); // "Todavía hay vacas que no parieron, esto puede afectar el dato"
   assert.equal(cv.muted, false);
 });
 
-test('calvingCardView: ok con serviced=0 → "—" ("sin datos de esta campaña"), NO 0% (RPF.2.5 guard)', () => {
+test('calvingCardView: ok con serviced=0 → "—" ("Sin datos de esta campaña"), NO 0% (RPF.2.5 guard)', () => {
   const cv = calvingCardView({ status: 'ok', calved: 0, serviced: 0, pendingPregnant: 0 });
   assert.equal(cv.value, '—');
-  assert.equal(cv.note, 'sin datos de esta campaña');
+  assert.equal(cv.note, 'Sin datos de esta campaña');
   assert.equal(cv.muted, true);
   assert.equal(cv.detail, undefined);
   assert.equal(cv.legend, undefined);
 });
 
-test('calvingCardView: not_calving_season → "—" + "todavía no es época de parición", NO 0% prematuro (RPF.2.4)', () => {
+test('calvingCardView: not_calving_season → "—" + "Todavía no es época de parición", NO 0% prematuro (RPF.2.4)', () => {
   const cv = calvingCardView({ status: 'not_calving_season', calved: 0, serviced: 46, pendingPregnant: 0 });
   assert.equal(cv.value, '—');
-  assert.equal(cv.note, 'todavía no es época de parición');
+  assert.equal(cv.note, 'Todavía no es época de parición');
   assert.equal(cv.muted, true);
   assert.equal(cv.legend, undefined); // leyenda D4 SOLO en 'ok' (RPF.4.3)
 });
 
-test('calvingCardView: no_service_months → "—" + "sin meses de servicio configurados" (RPF.1.3)', () => {
+test('calvingCardView: no_service_months → "—" + "Sin meses de servicio configurados" (RPF.1.3)', () => {
   const cv = calvingCardView({ status: 'no_service_months', calved: 0, serviced: 0, pendingPregnant: 0 });
   assert.equal(cv.value, '—');
-  assert.equal(cv.note, 'sin meses de servicio configurados');
+  assert.equal(cv.note, 'Sin meses de servicio configurados');
   assert.equal(cv.muted, true);
 });
 
-test('calvingCardView: not_applicable_12m → "—" + "no aplica (servicio todo el año)" (RPF.3.3)', () => {
+test('calvingCardView: not_applicable_12m → "—" + "No aplica (servicio todo el año)" (RPF.3.3)', () => {
   const cv = calvingCardView({ status: 'not_applicable_12m', calved: 0, serviced: 46, pendingPregnant: 0 });
   assert.equal(cv.value, '—');
-  assert.equal(cv.note, 'no aplica (servicio todo el año)');
+  assert.equal(cv.note, 'No aplica (servicio todo el año)');
   assert.equal(cv.muted, true);
 });
 
-test('calvingCardView: kpi=null → "—" ("sin datos"), sin crash (defensivo)', () => {
+test('calvingCardView: kpi=null → "—" ("Sin datos"), sin crash (defensivo)', () => {
   const cv = calvingCardView(null);
   assert.equal(cv.value, '—');
-  assert.equal(cv.note, 'sin datos');
+  assert.equal(cv.note, 'Sin datos');
   assert.equal(cv.muted, true);
 });
 
@@ -200,7 +200,7 @@ test('weaningCardView: ok con pendingWeaning>0 → leyenda D4 (RWK.4.1)', () => 
   const wv = weaningCardView({ status: 'ok', weaned: 28, serviced: 46, pendingWeaning: 9 });
   assert.equal(wv.value, '60,9 %'); // 28/46 = 60,8695… → 60,9 %
   assert.equal(wv.detail, '28 destetados / 46 servidas');
-  assert.equal(wv.legend, WEANING_PENDING_LEGEND); // "todavía hay crías sin destetar, esto puede afectar el dato"
+  assert.equal(wv.legend, WEANING_PENDING_LEGEND); // "Todavía hay crías sin destetar, esto puede afectar el dato"
   assert.equal(wv.muted, false);
 });
 
@@ -212,41 +212,41 @@ test('weaningCardView: ok con %>100% (mellizos: weaned>serviced) → NO trunca (
   assert.equal(wv.muted, false);
 });
 
-test('weaningCardView: ok con serviced=0 → "—" ("sin datos de esta campaña"), NO 0% (RWK.1.4)', () => {
+test('weaningCardView: ok con serviced=0 → "—" ("Sin datos de esta campaña"), NO 0% (RWK.1.4)', () => {
   const wv = weaningCardView({ status: 'ok', weaned: 0, serviced: 0, pendingWeaning: 0 });
   assert.equal(wv.value, '—');
-  assert.equal(wv.note, 'sin datos de esta campaña');
+  assert.equal(wv.note, 'Sin datos de esta campaña');
   assert.equal(wv.muted, true);
   assert.equal(wv.detail, undefined);
   assert.equal(wv.legend, undefined);
 });
 
-test('weaningCardView: not_weaning_season → "—" + "todavía no empezó el destete", NO 0% prematuro (RWK.3.3)', () => {
+test('weaningCardView: not_weaning_season → "—" + "Todavía no empezó el destete", NO 0% prematuro (RWK.3.3)', () => {
   const wv = weaningCardView({ status: 'not_weaning_season', weaned: 0, serviced: 46, pendingWeaning: 0 });
   assert.equal(wv.value, '—');
-  assert.equal(wv.note, 'todavía no empezó el destete');
+  assert.equal(wv.note, 'Todavía no empezó el destete');
   assert.equal(wv.muted, true);
   assert.equal(wv.legend, undefined); // leyenda D4 SOLO en 'ok' (RWK.4.2)
 });
 
-test('weaningCardView: no_service_months → "—" + "sin meses de servicio configurados" (RWK.5.4)', () => {
+test('weaningCardView: no_service_months → "—" + "Sin meses de servicio configurados" (RWK.5.4)', () => {
   const wv = weaningCardView({ status: 'no_service_months', weaned: 0, serviced: 0, pendingWeaning: 0 });
   assert.equal(wv.value, '—');
-  assert.equal(wv.note, 'sin meses de servicio configurados');
+  assert.equal(wv.note, 'Sin meses de servicio configurados');
   assert.equal(wv.muted, true);
 });
 
-test('weaningCardView: not_applicable_12m → "—" + "no aplica (servicio todo el año)" (RWK.5.5)', () => {
+test('weaningCardView: not_applicable_12m → "—" + "No aplica (servicio todo el año)" (RWK.5.5)', () => {
   const wv = weaningCardView({ status: 'not_applicable_12m', weaned: 0, serviced: 46, pendingWeaning: 0 });
   assert.equal(wv.value, '—');
-  assert.equal(wv.note, 'no aplica (servicio todo el año)');
+  assert.equal(wv.note, 'No aplica (servicio todo el año)');
   assert.equal(wv.muted, true);
 });
 
-test('weaningCardView: kpi=null → "—" ("sin datos"), sin crash (defensivo)', () => {
+test('weaningCardView: kpi=null → "—" ("Sin datos"), sin crash (defensivo)', () => {
   const wv = weaningCardView(null);
   assert.equal(wv.value, '—');
-  assert.equal(wv.note, 'sin datos');
+  assert.equal(wv.note, 'Sin datos');
   assert.equal(wv.muted, true);
 });
 

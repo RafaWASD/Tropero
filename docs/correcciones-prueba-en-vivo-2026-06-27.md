@@ -211,7 +211,7 @@ Importancia menor (no rompen nada) pero suman fricción en la manga; casi todo U
   asusta al dueño que entra desde la ciudad a mirar cómo va el campo. No se reporta una métrica de campaña
   antes de que sus eventos puedan ocurrir.
 - **(#8) Leyenda OBLIGATORIA al activarse el mes de parto**: si todavía hay vacas **preñadas que no parieron
-  ni abortaron**, mostrar aviso "todavía hay vacas que no parieron, esto puede afectar el dato". (Mismo patrón
+  ni abortaron**, mostrar aviso "Todavía hay vacas que no parieron, esto puede afectar el dato" (casing corregido a sentence-case, 2026-07-10). (Mismo patrón
   que el cartel de destete parcial de #10 — denominador incompleto.)
 - **(#8/servicio 12 m)**: los campos de servicio continuo 12 m **no hacen tacto ni controlan preñez** → los
   reportes reproductivos no les sirven. No mostrar parición (ni la mayoría de KPIs repro) para esos rodeos.

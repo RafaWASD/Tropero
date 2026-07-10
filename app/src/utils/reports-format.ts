@@ -66,7 +66,7 @@ export function asCalvingStatus(raw: unknown): CalvingStatus {
 }
 
 /** Texto FIJO de la leyenda D4 (context §D4; solo se muestra con ok + pendingPregnant>0). */
-export const CALVING_PENDING_LEGEND = 'todavía hay vacas que no parieron, esto puede afectar el dato';
+export const CALVING_PENDING_LEGEND = 'Todavía hay vacas que no parieron, esto puede afectar el dato';
 
 /** Presentación derivada de la card de Parición (RPF.6.2): value/detail/note/legend + muted. */
 export type CalvingCardView = {
@@ -92,14 +92,14 @@ export function calvingCardView(
   kpi: { status: CalvingStatus; calved: number; serviced: number; pendingPregnant: number } | null,
 ): CalvingCardView {
   if (kpi === null) {
-    return { value: '—', note: 'sin datos', muted: true };
+    return { value: '—', note: 'Sin datos', muted: true };
   }
   switch (kpi.status) {
     case 'ok': {
       const pct = safePercent(kpi.calved, kpi.serviced);
       if (pct === null) {
         // serviced=0 → no hay base para el % (la campaña todavía no tiene servidas). No es 0%.
-        return { value: '—', note: 'sin datos de esta campaña', muted: true };
+        return { value: '—', note: 'Sin datos de esta campaña', muted: true };
       }
       return {
         value: formatPercentAR(pct),
@@ -109,14 +109,14 @@ export function calvingCardView(
       };
     }
     case 'not_calving_season':
-      return { value: '—', note: 'todavía no es época de parición', muted: true };
+      return { value: '—', note: 'Todavía no es época de parición', muted: true };
     case 'no_service_months':
-      return { value: '—', note: 'sin meses de servicio configurados', muted: true };
+      return { value: '—', note: 'Sin meses de servicio configurados', muted: true };
     case 'not_applicable_12m':
-      return { value: '—', note: 'no aplica (servicio todo el año)', muted: true };
+      return { value: '—', note: 'No aplica (servicio todo el año)', muted: true };
     default:
       // status desconocido (defensivo; el mapeo ya normaliza a un CalvingStatus válido) → "sin datos".
-      return { value: '—', note: 'sin datos', muted: true };
+      return { value: '—', note: 'Sin datos', muted: true };
   }
 }
 
@@ -157,7 +157,7 @@ export function asWeaningStatus(raw: unknown): WeaningStatus {
 }
 
 /** Texto FIJO de la leyenda D4 (context §D4; solo se muestra con ok + pendingWeaning>0). */
-export const WEANING_PENDING_LEGEND = 'todavía hay crías sin destetar, esto puede afectar el dato';
+export const WEANING_PENDING_LEGEND = 'Todavía hay crías sin destetar, esto puede afectar el dato';
 
 /** Presentación derivada de la card de Destete (RWK.7.2): value/detail/note/legend + muted. */
 export type WeaningCardView = {
@@ -185,14 +185,14 @@ export function weaningCardView(
   kpi: { status: WeaningStatus; weaned: number; serviced: number; pendingWeaning: number } | null,
 ): WeaningCardView {
   if (kpi === null) {
-    return { value: '—', note: 'sin datos', muted: true };
+    return { value: '—', note: 'Sin datos', muted: true };
   }
   switch (kpi.status) {
     case 'ok': {
       const pct = safePercent(kpi.weaned, kpi.serviced);
       if (pct === null) {
         // serviced=0 → no hay base para el % (la campaña todavía no tiene servidas). No es 0% (RWK.1.4).
-        return { value: '—', note: 'sin datos de esta campaña', muted: true };
+        return { value: '—', note: 'Sin datos de esta campaña', muted: true };
       }
       return {
         value: formatPercentAR(pct),
@@ -202,14 +202,14 @@ export function weaningCardView(
       };
     }
     case 'not_weaning_season':
-      return { value: '—', note: 'todavía no empezó el destete', muted: true };
+      return { value: '—', note: 'Todavía no empezó el destete', muted: true };
     case 'no_service_months':
-      return { value: '—', note: 'sin meses de servicio configurados', muted: true };
+      return { value: '—', note: 'Sin meses de servicio configurados', muted: true };
     case 'not_applicable_12m':
-      return { value: '—', note: 'no aplica (servicio todo el año)', muted: true };
+      return { value: '—', note: 'No aplica (servicio todo el año)', muted: true };
     default:
       // status desconocido (defensivo; el mapeo ya normaliza a un WeaningStatus válido) → "sin datos".
-      return { value: '—', note: 'sin datos', muted: true };
+      return { value: '—', note: 'Sin datos', muted: true };
   }
 }
 

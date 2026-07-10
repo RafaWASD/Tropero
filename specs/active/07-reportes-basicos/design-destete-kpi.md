@@ -262,7 +262,7 @@ export function asWeaningStatus(raw: unknown): WeaningStatus {
     ? (raw as WeaningStatus) : 'ok';
 }
 
-export const WEANING_PENDING_LEGEND = 'todavía hay crías sin destetar, esto puede afectar el dato';
+export const WEANING_PENDING_LEGEND = 'Todavía hay crías sin destetar, esto puede afectar el dato';
 
 export type WeaningCardView = {
   value: string; detail?: string; note?: string; legend?: string; muted: boolean;
@@ -277,11 +277,13 @@ Mapeo (D1–D5):
 | `status` | `value` | `detail`/`note` | `legend` |
 |---|---|---|---|
 | `ok` (serviced>0) | `formatPercentAR(safePercent(weaned, serviced))` | detail "N destetados / M servidas" | `WEANING_PENDING_LEGEND` si `pendingWeaning>0` |
-| `ok` (serviced=0) | "—" (muted) | note "sin datos de esta campaña" | — (defensivo; con serviced=0 → weaned=0 → status ya sería `not_weaning_season`) |
-| `not_weaning_season` | "—" (muted) | note "todavía no empezó el destete" | — |
-| `no_service_months` | "—" (muted) | note "sin meses de servicio configurados" | — |
-| `not_applicable_12m` | "—" (muted) | note "no aplica (servicio todo el año)" | — |
-| `kpi === null` | "—" (muted) | note "sin datos" | — |
+| `ok` (serviced=0) | "—" (muted) | note "Sin datos de esta campaña" | — (defensivo; con serviced=0 → weaned=0 → status ya sería `not_weaning_season`) |
+| `not_weaning_season` | "—" (muted) | note "Todavía no empezó el destete" | — |
+| `no_service_months` | "—" (muted) | note "Sin meses de servicio configurados" | — |
+| `not_applicable_12m` | "—" (muted) | note "No aplica (servicio todo el año)" | — |
+| `kpi === null` | "—" (muted) | note "Sin datos" | — |
+
+(Copy de la card: casing corregido a sentence-case, 2026-07-10 — inicial en mayúscula, resto idéntico.)
 
 Reusa `safePercent`/`formatPercentAR` (guard de 0 → nunca NaN; `%destete>100` se formatea normal, ej. "150 %"). RWK.7.2. Espejo 1:1 de `calvingCardView` (misma forma de retorno, solo cambian los copys y el numerador `weaned`).
 
@@ -319,12 +321,12 @@ Reusa `safePercent`/`formatPercentAR` (guard de 0 → nunca NaN; `%destete>100` 
 
 Molde = `paricion-fix.capture.ts` (convención ADR-029: `test`/`expect` de `./helpers/fixtures`; viewport mobile 412×915 de `playwright.capture.config.ts`; `shot(page, name)` + `assertTextNotClipped`; salida a `e2e/captures/__shots__/destete-kpi/<NN>-<estado>.png`, gitignored). `.capture.ts` → NO corre en `pnpm e2e`. Para cada estado: `goto('/reportes-spike?variant=destete-*')` → asserts del texto clave visible → screenshot nombrado:
 - `01-ok-con-porcentaje` — el %destete + "N destetados / M servidas" (sin leyenda).
-- `02-not-weaning-season` — "todavía no empezó el destete" (NO 0%).
-- `03-no-service-months` — "sin meses de servicio configurados".
-- `04-not-applicable-12m` — "no aplica (servicio todo el año)".
-- `05-ok-con-leyenda` — % + "todavía hay crías sin destetar, esto puede afectar el dato".
+- `02-not-weaning-season` — "Todavía no empezó el destete" (NO 0%).
+- `03-no-service-months` — "Sin meses de servicio configurados".
+- `04-not-applicable-12m` — "No aplica (servicio todo el año)".
+- `05-ok-con-leyenda` — % + "Todavía hay crías sin destetar, esto puede afectar el dato".
 
-Anti-recorte (RWK.8.2) sobre "Destete", "todavía no empezó el destete", "sin meses de servicio configurados" (memoria `feedback_descender_clipping`: g/j/p/q/y). Cuidado `reference_e2e_design_png_rerender`: revertir `design/**` si el build re-renderiza PNGs (no `git add -A` tras el capture).
+Anti-recorte (RWK.8.2) sobre "Destete", "Todavía no empezó el destete", "Sin meses de servicio configurados" (memoria `feedback_descender_clipping`: g/j/p/q/y). Cuidado `reference_e2e_design_png_rerender`: revertir `design/**` si el build re-renderiza PNGs (no `git add -A` tras el capture).
 
 ---
 
@@ -370,7 +372,7 @@ Notas de cómo quedó construido TR.11 (no cambian el contrato ni la semántica;
 - **CD-3 — Layout de la card**: Destete en un segundo `KpiRow` a ancho completo, debajo de Preñez | Parición (funnel del ciclo). Descartado el 3-across por riesgo de recorte a 412px. (§3.4)
 - **CD-4 — Definición exacta de `weaned`/`pending_weaning`**: crías DISTINCT (`birth_calves.calf_profile_id`) de partos de servidas con concepción ∈ (p_year, service_months), split por `exists`/`not exists` de un `weaning` no borrado sobre la cría. `weaned` cuenta crías (no eventos, no partos) → mellizos suman ambos; `%destete` puede exceder 100 % (D1, correcto). (§2.2)
 - **CD-5 — El JOIN de la ventana** reusa TAL CUAL el set-membership del `calved` de `0117:84-94` (concepción = `event_date − interval '9 months'`, set-membership con wrap), extendido con `join birth_calves` + `exists/not exists weaning` (molde `compute_nursing` `0061`). (§2.2)
-- **CD-6 — Copys es-AR** propuestos (a ajustar por Raf): "todavía no empezó el destete" · "sin meses de servicio configurados" · "no aplica (servicio todo el año)" · leyenda D4 textual del context ("todavía hay crías sin destetar, esto puede afectar el dato") · detalle "N destetados / M servidas".
+- **CD-6 — Copys es-AR** (casing corregido a sentence-case, 2026-07-10): "Todavía no empezó el destete" · "Sin meses de servicio configurados" · "No aplica (servicio todo el año)" · leyenda D4 textual del context ("Todavía hay crías sin destetar, esto puede afectar el dato") · detalle "N destetados / M servidas".
 - **CD-7 — Default defensivo del cliente**: `status` ausente/desconocido → `'ok'`; `pending_weaning` ausente → 0 (compat si el cliente corre antes de aplicar `0118`).
 
 ---

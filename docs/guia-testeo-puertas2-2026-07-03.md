@@ -98,10 +98,10 @@ Paso a paso para probar cada delta gateado antes de aprobar su Puerta 2. Cada un
 
 **Pasos + qué esperar (según el rodeo):**
 1. Rodeo **con servicio + partos, en época** → el **%** (ej. `82,6 %`) + "N paridas / M servidas".
-2. Rodeo **sin meses de servicio** → **"sin meses de servicio configurados"** (NO `0 %`).
-3. Rodeo **antes de la época de parto** → **"todavía no es época de parición"** (NO `0 %`).
-4. Rodeo **12 meses** (continuo) → **"no aplica (servicio todo el año)"**.
-5. En época, con **preñadas sin parir** → leyenda **"todavía hay vacas que no parieron, esto puede afectar el dato"**.
+2. Rodeo **sin meses de servicio** → **"Sin meses de servicio configurados"** (NO `0 %`).
+3. Rodeo **antes de la época de parto** → **"Todavía no es época de parición"** (NO `0 %`).
+4. Rodeo **12 meses** (continuo) → **"No aplica (servicio todo el año)"**.
+5. En época, con **preñadas sin parir** → leyenda **"Todavía hay vacas que no parieron, esto puede afectar el dato"**.
 
 > Para ver el **%** real necesitás un rodeo con datos. Si no, verificá que **ya no aparece el 0%** en rodeos sin datos (era el bug). 5 vistas en las capturas que te mandé.
 
@@ -115,10 +115,10 @@ Paso a paso para probar cada delta gateado antes de aprobar su Puerta 2. Cada un
 
 **Pasos + qué esperar:**
 1. Rodeo con **destetes cargados** → **%** (ej. `87 %`) + "N destetados / M servidas".
-2. Rodeo **antes del 1er destete de la campaña** → **"todavía no empezó el destete"** (NO 0%).
-3. Rodeo **sin meses de servicio** → "sin meses de servicio configurados".
-4. Rodeo **12 meses** → "no aplica (servicio todo el año)".
-5. Con **crías al pie sin destetar** → **"todavía hay crías sin destetar, esto puede afectar el dato"**.
+2. Rodeo **antes del 1er destete de la campaña** → **"Todavía no empezó el destete"** (NO 0%).
+3. Rodeo **sin meses de servicio** → "Sin meses de servicio configurados".
+4. Rodeo **12 meses** → "No aplica (servicio todo el año)".
+5. Con **crías al pie sin destetar** → **"Todavía hay crías sin destetar, esto puede afectar el dato"**.
 
 > **Imputación por año de servicio**: el %destete de una campaña cuenta las crías **de esa campaña** que se destetaron, sin importar en qué año calendario (lo confirmaste en la charla).
 

@@ -12,12 +12,14 @@
 | Decisión (context) | Requisito(s) que la cubre |
 |---|---|
 | **D1** — meses de parto = meses de servicio **+9** (por mes, no por día) | RPF.2.1 |
-| **D2** — %parición se muestra SOLO en/desde los meses de parto; fuera → "todavía no es época de parición" (no 0%) | RPF.2.2, RPF.2.3, RPF.2.4, RPF.2.5 |
-| **D3** — `service_months` vacío/NULL ≠ 0% → "sin meses de servicio configurados" | RPF.1.1, RPF.1.2, RPF.1.3 |
+| **D2** — %parición se muestra SOLO en/desde los meses de parto; fuera → "Todavía no es época de parición" (no 0%) | RPF.2.2, RPF.2.3, RPF.2.4, RPF.2.5 |
+| **D3** — `service_months` vacío/NULL ≠ 0% → "Sin meses de servicio configurados" | RPF.1.1, RPF.1.2, RPF.1.3 |
 | **D4** — leyenda OBLIGATORIA si quedan preñadas sin parir ni abortar | RPF.4.1, RPF.4.2, RPF.4.3 |
 | **D5** — rodeo de servicio continuo 12 meses → no mostrar parición | RPF.3.1, RPF.3.2, RPF.3.3 |
 
 Requisitos transversales (contrato/seguridad/UI/tests): RPF.5, RPF.6, RPF.7, RPF.8.
+
+> **Reconciliación (casing corregido a sentence-case, 2026-07-10)**: los copys user-facing de la card citados abajo se muestran con inicial en mayúscula (sentence-case, resto idéntico), alineados con el resto de la app. Solo cambia la primera letra; la lógica no se toca.
 
 ---
 
@@ -25,7 +27,7 @@ Requisitos transversales (contrato/seguridad/UI/tests): RPF.5, RPF.6, RPF.7, RPF
 
 - **RPF.1.1** — Cuando se invoca `rodeo_calving_kpi(p_rodeo_id, p_year)` y el rodeo tiene `service_months` NULL o de cardinalidad 0, el sistema deberá devolver `status = 'no_service_months'`.
 - **RPF.1.2** — Si el estado es `no_service_months`, entonces el sistema no deberá exponer un porcentaje de parición (la card no calcula ni muestra `calved / serviced × 100`).
-- **RPF.1.3** — Cuando la card de Parición recibe `status = 'no_service_months'`, el sistema deberá mostrar el mensaje accionable "sin meses de servicio configurados" en lugar de un 0%.
+- **RPF.1.3** — Cuando la card de Parición recibe `status = 'no_service_months'`, el sistema deberá mostrar el mensaje accionable "Sin meses de servicio configurados" en lugar de un 0%.
 
 > Nota de composición (no re-decisión): con `service_months` NULL, la sección Reproductivo ya corta antes con la card "Configurá la estación de servicio" (`is_configured = false`, baseline R7.5.6 sin cambios). El estado `no_service_months` de la RPC se materializa en la card de Parición en el caso `{}` (array vacío = "no hace servicio", `is_configured = true`) y como cinturón defensivo. Ver design §3.3.
 
@@ -34,19 +36,19 @@ Requisitos transversales (contrato/seguridad/UI/tests): RPF.5, RPF.6, RPF.7, RPF
 - **RPF.2.1** — El sistema deberá derivar el inicio de la ventana de meses de parto de la campaña como el menor `make_date(p_year, m, 1) + interval '9 months'` sobre cada `m ∈ service_months` (mes de parto = mes de servicio +9; año calendario derivado de esa suma, consistente con el modelo set-membership vigente).
 - **RPF.2.2** — Mientras `current_date` sea anterior al inicio de la ventana de meses de parto de la campaña (y el rodeo no sea de servicio continuo 12 meses), el sistema deberá devolver `status = 'not_calving_season'`.
 - **RPF.2.3** — Cuando `current_date` sea igual o posterior al inicio de la ventana de meses de parto (y el rodeo tenga entre 1 y 11 meses de servicio), el sistema deberá devolver `status = 'ok'`.
-- **RPF.2.4** — Cuando la card de Parición recibe `status = 'not_calving_season'`, el sistema deberá mostrar "todavía no es época de parición" en lugar de un 0%.
+- **RPF.2.4** — Cuando la card de Parición recibe `status = 'not_calving_season'`, el sistema deberá mostrar "Todavía no es época de parición" en lugar de un 0%.
 - **RPF.2.5** — Cuando la card de Parición recibe `status = 'ok'`, el sistema deberá mostrar el %parición (`calved / serviced × 100`, formato es-AR) y el detalle "N paridas / M servidas".
 
 ## RPF.3 — Rodeo de servicio continuo 12 meses → estado `not_applicable_12m` (D5)
 
 - **RPF.3.1** — Cuando el rodeo tiene los 12 meses en `service_months` (cardinalidad = 12), el sistema deberá devolver `status = 'not_applicable_12m'`.
 - **RPF.3.2** — El sistema deberá evaluar `not_applicable_12m` con precedencia sobre `not_calving_season` (un rodeo de 12 meses nunca cae en `not_calving_season`).
-- **RPF.3.3** — Cuando la card de Parición recibe `status = 'not_applicable_12m'`, el sistema deberá mostrar "no aplica (servicio todo el año)" en lugar de un porcentaje.
+- **RPF.3.3** — Cuando la card de Parición recibe `status = 'not_applicable_12m'`, el sistema deberá mostrar "No aplica (servicio todo el año)" en lugar de un porcentaje.
 
 ## RPF.4 — Leyenda de preñadas que no parieron (D4)
 
 - **RPF.4.1** — El sistema deberá calcular `pending_pregnant` = cantidad de hembras servidas actualmente preñadas (último tacto+ vigente: `pregnancy_status <> 'empty'` sin aborto posterior, mismo criterio que `pregnant`) que NO tienen un parto contado en la ventana de la campaña.
-- **RPF.4.2** — Cuando `status = 'ok'` y `pending_pregnant > 0`, el sistema deberá mostrar la leyenda "todavía hay vacas que no parieron, esto puede afectar el dato".
+- **RPF.4.2** — Cuando `status = 'ok'` y `pending_pregnant > 0`, el sistema deberá mostrar la leyenda "Todavía hay vacas que no parieron, esto puede afectar el dato".
 - **RPF.4.3** — Si `pending_pregnant = 0` o `status <> 'ok'`, entonces el sistema no deberá mostrar la leyenda.
 
 ## RPF.5 — Preservar denominador + tenant-scoping + contrato de seguridad (as-built de `0106`)
@@ -68,7 +70,7 @@ Requisitos transversales (contrato/seguridad/UI/tests): RPF.5, RPF.6, RPF.7, RPF
 ## RPF.7 — Gate 2.5: capture file de los estados de la card
 
 - **RPF.7.1** — El sistema deberá incluir `app/e2e/captures/paricion-fix.capture.ts` que capture los estados de la card de Parición: (a) `ok` con %, (b) `not_calving_season`, (c) `no_service_months`, (d) `not_applicable_12m`, (e) `ok` con la leyenda de preñadas sin parir.
-- **RPF.7.2** — El capture deberá verificar anti-recorte de descendentes (`scrollHeight ≤ clientHeight`) en los textos con descendentes: "Parición", "todavía no es época de parición", "sin meses de servicio configurados".
+- **RPF.7.2** — El capture deberá verificar anti-recorte de descendentes (`scrollHeight ≤ clientHeight`) en los textos con descendentes: "Parición", "Todavía no es época de parición", "Sin meses de servicio configurados".
 
 ## RPF.8 — Tests no-bypass del backend (suite `supabase/tests/reports/run.cjs`)
 

@@ -25,12 +25,12 @@
 //
 // Estados capturados (RWK.8.1):
 //   01-ok-con-porcentaje   — status 'ok': el %destete + "N destetados / M servidas" (D1, sin leyenda).
-//   02-not-weaning-season  — "todavía no empezó el destete" (weaned=0, D3): NO 0% prematuro.
-//   03-no-service-months   — "sin meses de servicio configurados" (service_months vacío/NULL, D5): NO 0%.
-//   04-not-applicable-12m  — "no aplica (servicio todo el año)" (servicio continuo 12 meses, D5).
-//   05-ok-con-leyenda      — status 'ok' + la leyenda D4 "todavía hay crías sin destetar…" (pending>0).
-// + ANTI-RECORTE de descendentes (RWK.8.2) sobre "Destete", "todavía no empezó el destete",
-//   "sin meses de servicio configurados" (memoria feedback_descender_clipping: p/q/g/j/y).
+//   02-not-weaning-season  — "Todavía no empezó el destete" (weaned=0, D3): NO 0% prematuro.
+//   03-no-service-months   — "Sin meses de servicio configurados" (service_months vacío/NULL, D5): NO 0%.
+//   04-not-applicable-12m  — "No aplica (servicio todo el año)" (servicio continuo 12 meses, D5).
+//   05-ok-con-leyenda      — status 'ok' + la leyenda D4 "Todavía hay crías sin destetar…" (pending>0).
+// + ANTI-RECORTE de descendentes (RWK.8.2) sobre "Destete", "Todavía no empezó el destete",
+//   "Sin meses de servicio configurados" (memoria feedback_descender_clipping: p/q/g/j/y).
 
 import path from 'node:path';
 
@@ -94,27 +94,27 @@ test('captura delta #10 %destete: los 5 estados de la card de Destete (ok / sin-
   await expect(page.getByText('87 %', { exact: true })).toBeVisible();
   await expect(page.getByText('40 destetados / 46 servidas', { exact: false })).toBeVisible();
   // Sin leyenda D4 (pendingWeaning=0).
-  await expect(page.getByText(/todavía hay crías sin destetar/)).toHaveCount(0);
+  await expect(page.getByText(/Todavía hay crías sin destetar/)).toHaveCount(0);
   await assertTextNotClipped(page, 'Destete');
   await shot(page, '01-ok-con-porcentaje');
 
-  // ── 02 — 'not_weaning_season': "todavía no empezó el destete" en lugar de un 0% prematuro (D3). ──
+  // ── 02 — 'not_weaning_season': "Todavía no empezó el destete" en lugar de un 0% prematuro (D3). ──
   await gotoDestete(page, 'destete-sin-destete');
-  await expect(page.getByText('todavía no empezó el destete', { exact: false })).toBeVisible();
+  await expect(page.getByText('Todavía no empezó el destete', { exact: false })).toBeVisible();
   await assertTextNotClipped(page, 'Destete');
-  await assertTextNotClipped(page, 'todavía no empezó el destete');
+  await assertTextNotClipped(page, 'Todavía no empezó el destete');
   await shot(page, '02-not-weaning-season');
 
-  // ── 03 — 'no_service_months': "sin meses de servicio configurados" en lugar de un 0% engañoso (D5). ──
+  // ── 03 — 'no_service_months': "Sin meses de servicio configurados" en lugar de un 0% engañoso (D5). ──
   await gotoDestete(page, 'destete-sin-meses');
-  await expect(page.getByText('sin meses de servicio configurados', { exact: false })).toBeVisible();
+  await expect(page.getByText('Sin meses de servicio configurados', { exact: false })).toBeVisible();
   await assertTextNotClipped(page, 'Destete');
-  await assertTextNotClipped(page, 'sin meses de servicio configurados');
+  await assertTextNotClipped(page, 'Sin meses de servicio configurados');
   await shot(page, '03-no-service-months');
 
-  // ── 04 — 'not_applicable_12m': "no aplica (servicio todo el año)" (servicio continuo 12 meses, D5). ──
+  // ── 04 — 'not_applicable_12m': "No aplica (servicio todo el año)" (servicio continuo 12 meses, D5). ──
   await gotoDestete(page, 'destete-12m');
-  await expect(page.getByText('no aplica (servicio todo el año)', { exact: false })).toBeVisible();
+  await expect(page.getByText('No aplica (servicio todo el año)', { exact: false })).toBeVisible();
   await assertTextNotClipped(page, 'Destete');
   await shot(page, '04-not-applicable-12m');
 
@@ -124,8 +124,8 @@ test('captura delta #10 %destete: los 5 estados de la card de Destete (ok / sin-
   await expect(page.getByText('60,9 %', { exact: true })).toBeVisible();
   await expect(page.getByText('28 destetados / 46 servidas', { exact: false })).toBeVisible();
   await expect(
-    page.getByText('todavía hay crías sin destetar, esto puede afectar el dato', { exact: false }),
+    page.getByText('Todavía hay crías sin destetar, esto puede afectar el dato', { exact: false }),
   ).toBeVisible();
-  await assertTextNotClipped(page, 'todavía hay crías sin destetar');
+  await assertTextNotClipped(page, 'Todavía hay crías sin destetar');
   await shot(page, '05-ok-con-leyenda');
 });

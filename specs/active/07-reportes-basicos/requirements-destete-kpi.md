@@ -13,11 +13,13 @@
 |---|---|
 | **D1** — %destete = terneros destetados / servidas (puede >100% con mellizos) | RWK.1.1, RWK.1.3, RWK.1.4 |
 | **D2** — imputación por AÑO DE SERVICIO (campaña): servida → parto (concepción ∈ campaña) → `birth_calves` → cría → `weaning` | RWK.2.1, RWK.2.2, RWK.2.3, RWK.2.4 |
-| **D3** — mostrar desde el 1er destete de la campaña; `weaned=0` → "todavía no empezó el destete", NO 0% | RWK.3.1, RWK.3.2, RWK.3.3 |
+| **D3** — mostrar desde el 1er destete de la campaña; `weaned=0` → "Todavía no empezó el destete", NO 0% | RWK.3.1, RWK.3.2, RWK.3.3 |
 | **D4** — cartel de destete parcial si quedan crías al pie sin destetar | RWK.4.1, RWK.4.2 |
 | **D5** — `service_months` vacío/NULL o 12 meses → mismos estados que #8, con precedencia | RWK.5.1, RWK.5.2, RWK.5.3, RWK.5.4, RWK.5.5 |
 
 Requisitos transversales (contrato/seguridad/UI/capture/tests): RWK.1.2, RWK.6, RWK.7, RWK.8, RWK.9.
+
+> **Reconciliación (casing corregido a sentence-case, 2026-07-10)**: los copys user-facing de la card citados abajo se muestran con inicial en mayúscula (sentence-case, resto idéntico), alineados con el resto de la app. Solo cambia la primera letra; la lógica no se toca.
 
 ---
 
@@ -39,12 +41,12 @@ Requisitos transversales (contrato/seguridad/UI/capture/tests): RWK.1.2, RWK.6, 
 
 - **RWK.3.1** — El sistema deberá calcular `pending_weaning` como la cantidad de crías DISTINCT de los partos de la campaña (el MISMO conjunto de partos que RWK.2.1) SIN ningún evento `weaning` no borrado (todavía al pie).
 - **RWK.3.2** — Cuando `weaned = 0` y el rodeo tiene entre 1 y 11 meses de servicio, el sistema deberá devolver `status = 'not_weaning_season'`.
-- **RWK.3.3** — Cuando la card de Destete recibe `status = 'not_weaning_season'`, el sistema deberá mostrar "todavía no empezó el destete" en lugar de un 0 %.
+- **RWK.3.3** — Cuando la card de Destete recibe `status = 'not_weaning_season'`, el sistema deberá mostrar "Todavía no empezó el destete" en lugar de un 0 %.
 - **RWK.3.4** — Cuando la card de Destete recibe `status = 'ok'`, el sistema deberá mostrar el %destete (`weaned / serviced × 100`, formato es-AR) y el detalle "N destetados / M servidas".
 
 ## RWK.4 — Leyenda de destete parcial (D4)
 
-- **RWK.4.1** — Cuando `status = 'ok'` y `pending_weaning > 0`, el sistema deberá mostrar la leyenda "todavía hay crías sin destetar, esto puede afectar el dato".
+- **RWK.4.1** — Cuando `status = 'ok'` y `pending_weaning > 0`, el sistema deberá mostrar la leyenda "Todavía hay crías sin destetar, esto puede afectar el dato".
 - **RWK.4.2** — Si `pending_weaning = 0` o `status <> 'ok'`, entonces el sistema no deberá mostrar la leyenda.
 
 ## RWK.5 — `service_months` vacío/NULL o 12 meses → estados con precedencia (D5)
@@ -52,8 +54,8 @@ Requisitos transversales (contrato/seguridad/UI/capture/tests): RWK.1.2, RWK.6, 
 - **RWK.5.1** — Cuando el rodeo tiene `service_months` NULL o de cardinalidad 0, el sistema deberá devolver `status = 'no_service_months'`.
 - **RWK.5.2** — Cuando el rodeo tiene los 12 meses en `service_months` (cardinalidad = 12), el sistema deberá devolver `status = 'not_applicable_12m'`.
 - **RWK.5.3** — El sistema deberá evaluar el `status` con la precedencia: `no_service_months` → `not_applicable_12m` → `not_weaning_season` → `ok` (un rodeo de 12 meses nunca cae en `not_weaning_season`).
-- **RWK.5.4** — Cuando la card de Destete recibe `status = 'no_service_months'`, el sistema deberá mostrar "sin meses de servicio configurados" en lugar de un porcentaje.
-- **RWK.5.5** — Cuando la card de Destete recibe `status = 'not_applicable_12m'`, el sistema deberá mostrar "no aplica (servicio todo el año)" en lugar de un porcentaje.
+- **RWK.5.4** — Cuando la card de Destete recibe `status = 'no_service_months'`, el sistema deberá mostrar "Sin meses de servicio configurados" en lugar de un porcentaje.
+- **RWK.5.5** — Cuando la card de Destete recibe `status = 'not_applicable_12m'`, el sistema deberá mostrar "No aplica (servicio todo el año)" en lugar de un porcentaje.
 
 ## RWK.6 — Contrato de seguridad (Gate 1) — RPC nueva SECURITY DEFINER
 
@@ -69,13 +71,13 @@ Requisitos transversales (contrato/seguridad/UI/capture/tests): RWK.1.2, RWK.6, 
 - **RWK.7.1** — El sistema deberá mapear las columnas `status`/`weaned`/`pending_weaning` a un tipo `WeaningKpi` (`status: WeaningStatus`, `weaned`, `pendingWeaning`) en la capa de datos (`reports.ts`/`fetchWeaningKpi`), con default defensivo (`status` ausente/desconocido → `'ok'`; `pending_weaning` ausente → 0).
 - **RWK.7.2** — La card de Destete deberá derivar su presentación (porcentaje / mensaje de estado / leyenda) del `status` + `pendingWeaning` mediante una función pura testeable `weaningCardView`, reusando `KpiCard`, `safePercent` y `formatPercentAR`.
 - **RWK.7.3** — El sistema deberá renderizar la card de Destete en la sección Reproductivo de la pantalla de reportes junto a las cards de Preñez y Parición.
-- **RWK.7.4** — El sistema deberá respetar tokens (ADR-023), formato es-AR (coma decimal) y anti-recorte de descendentes (`lineHeight` matcheado) en todos los textos nuevos ("Destete", "todavía no empezó el destete", "sin meses de servicio configurados", la leyenda D4).
+- **RWK.7.4** — El sistema deberá respetar tokens (ADR-023), formato es-AR (coma decimal) y anti-recorte de descendentes (`lineHeight` matcheado) en todos los textos nuevos ("Destete", "Todavía no empezó el destete", "Sin meses de servicio configurados", la leyenda D4).
 - **RWK.7.5** — El sistema no deberá romper el render de las otras secciones de la pantalla de reportes (preñez, parición, distribución CCL, cruce con nacimientos, peso por categoría, alertas, sesiones).
 
 ## RWK.8 — Gate 2.5: capture file de los estados de la card
 
 - **RWK.8.1** — El sistema deberá incluir `app/e2e/captures/destete-kpi.capture.ts` que capture los estados de la card de Destete: (a) `ok` con %, (b) `not_weaning_season`, (c) `no_service_months`, (d) `not_applicable_12m`, (e) `ok` con la leyenda de destete parcial.
-- **RWK.8.2** — El capture deberá verificar anti-recorte de descendentes (`scrollHeight ≤ clientHeight`) en los textos con descendentes: "Destete", "todavía no empezó el destete", "sin meses de servicio configurados".
+- **RWK.8.2** — El capture deberá verificar anti-recorte de descendentes (`scrollHeight ≤ clientHeight`) en los textos con descendentes: "Destete", "Todavía no empezó el destete", "Sin meses de servicio configurados".
 
 ## RWK.9 — Tests no-bypass del backend (suite `supabase/tests/reports/run.cjs`)
 

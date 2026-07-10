@@ -16,10 +16,12 @@ El KPI de **%parición** (`rodeo_calving_kpi`, `supabase/migrations/0106_reports
 
 De `docs/correcciones-prueba-en-vivo-2026-06-27.md` §"Decisiones de dominio confirmadas (ronda 2026-06-29)":
 
+> Nota: los copys de card citados abajo se muestran con casing corregido a sentence-case (2026-07-10) — inicial en mayúscula, resto idéntico. La decisión de dominio no cambia.
+
 - **D1 — Meses de parto = meses de servicio + 9** (NO 284 días). El servicio se anota por **mes** (monta natural), no por día. La ventana de parto de la campaña son esos meses corridos +9.
-- **D2 — %parición se muestra SOLO en los meses de parto.** Antes de la ventana la parición es estructuralmente 0% (todavía no pudo haber partos) → NO se reporta la métrica antes de que sus eventos puedan ocurrir. Fuera de la ventana, la card muestra un estado "todavía no es época de parición" (no un 0%).
-- **D3 — `service_months` vacío ≠ 0%.** Si el rodeo no tiene meses de servicio configurados, la card debe decir **"sin meses de servicio configurados"** (o equivalente accionable), NO un 0% engañoso.
-- **D4 — Leyenda OBLIGATORIA al activarse el mes de parto**: si todavía hay vacas **preñadas que no parieron ni abortaron**, mostrar el aviso *"todavía hay vacas que no parieron, esto puede afectar el dato"* (denominador/numerador incompleto). Mismo patrón que el cartel de destete parcial de #10.
+- **D2 — %parición se muestra SOLO en los meses de parto.** Antes de la ventana la parición es estructuralmente 0% (todavía no pudo haber partos) → NO se reporta la métrica antes de que sus eventos puedan ocurrir. Fuera de la ventana, la card muestra un estado "Todavía no es época de parición" (no un 0%).
+- **D3 — `service_months` vacío ≠ 0%.** Si el rodeo no tiene meses de servicio configurados, la card debe decir **"Sin meses de servicio configurados"** (o equivalente accionable), NO un 0% engañoso.
+- **D4 — Leyenda OBLIGATORIA al activarse el mes de parto**: si todavía hay vacas **preñadas que no parieron ni abortaron**, mostrar el aviso *"Todavía hay vacas que no parieron, esto puede afectar el dato"* (denominador/numerador incompleto). Mismo patrón que el cartel de destete parcial de #10.
 - **D5 — Rodeos de servicio continuo 12 meses**: NO hacen tacto ni controlan preñez → **no mostrar parición** (ni la mayoría de KPIs repro) para esos rodeos. Usan la app para consultar/cargar animales.
 
 ## Alcance
