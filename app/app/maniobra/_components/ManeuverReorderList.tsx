@@ -413,9 +413,30 @@ function SelectedRow({
                 )
               ) : null}
             </YStack>
-            {/* Chevroncito de "configurable" (solo si lo es): señal de affordance del cuerpo. Blanco cuando hay
-                valor o falta un preconfig exigido (D2, para que salte a completar); muted en el hint normal. */}
-            {configurable ? <ChevronRight size={18} color={hasValue || warnMissing ? WHITE : GREENLIGHT} /> : null}
+            {/* Chevroncito de "configurable" (solo si lo es): señal de affordance del cuerpo (tocá la fila →
+                abre la config). D2 ENHANCEMENT (Puerta 2, pedido de Raf): cuando faltan vacunas, el chevron NO
+                alcanza como señal → se vuelve un CTA de ALTO CONTRASTE = círculo TERRACOTA lleno + chevron
+                BLANCO ("tocá acá para completar", ~5.1:1 blanco/terracota). Terracota SUELTO sobre el verde
+                botella ($primary) da 1.59:1 (falla WCAG para gráficos) → el círculo lleno con contenido blanco
+                es lo que da contraste + lee como "botón". Sin warn: chevron normal (blanco con valor, muted en
+                el hint). Todo dentro del cuerpo tappable → tocarlo abre la config (arregla el faltante). */}
+            {configurable ? (
+              warnMissing ? (
+                <View
+                  width={28}
+                  height={28}
+                  borderRadius="$pill"
+                  backgroundColor="$terracota"
+                  alignItems="center"
+                  justifyContent="center"
+                  testID={`selected-config-fix-${index}`}
+                >
+                  <ChevronRight size={18} color={WHITE} strokeWidth={3} />
+                </View>
+              ) : (
+                <ChevronRight size={18} color={hasValue ? WHITE : GREENLIGHT} />
+              )
+            ) : null}
           </XStack>
         </GestureDetector>
 

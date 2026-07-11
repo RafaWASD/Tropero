@@ -42,6 +42,7 @@ import {
   buildAnimalDetailQuery,
   buildCategoryMirrorEventsQuery,
   buildReproBadgeEventsQuery,
+  buildSessionEmptyFemalesQuery,
   buildRevertCategoryOverrideUpdate,
   buildManagementGroupsQuery,
   buildTimelineQuery,
@@ -82,6 +83,12 @@ import {
   buildSetFutureBullUpdate,
   buildSoftDeleteEventUpdate,
   DELETABLE_EVENT_TABLE,
+  // delta tratamientos (spec 02) — writes CRUD-plano + lecturas
+  buildStartTreatmentInsert,
+  buildRegisterApplicationInsert,
+  buildFinalizeTreatmentUpdate,
+  buildAnimalTreatmentsQuery,
+  buildTreatmentApplicationsQuery,
   buildExistingVaccinationIdsQuery,
   buildExistingWeaningIdsQuery,
   buildProfileEstablishmentQuery,
@@ -477,8 +484,12 @@ test('buildAnimalsListQuery: b1 identidad desde animal_profiles, JOINs, status d
   assert.match(q.sql, /UNION ALL/);
   assert.match(q.sql, /FROM pending_animal_profiles pap/);
   assert.match(q.sql, /pso\.target_table = 'animal_profiles' AND pso\.target_id = ap\.id AND pso\.effect IN \('exited', 'soft_deleted'\)/);
-  // orden + limit (ahora por el alias proyectado created_at, sobre el UNION completo)
-  assert.match(q.sql, /ORDER BY created_at DESC LIMIT 200/);
+  // orden + limit: delta tratamientos (RTR.5) — PIN de los en-tratamiento arriba (in_treatment DESC), luego
+  // el orden actual (created_at DESC), sobre el UNION completo.
+  assert.match(q.sql, /ORDER BY in_treatment DESC, created_at DESC LIMIT 200/);
+  // delta tratamientos: in_treatment inyectado en AMBAS ramas (synced = EXISTS treatment abierto; overlay = 0).
+  assert.match(q.sql, /EXISTS \(SELECT 1 FROM treatments t WHERE t\.animal_profile_id = ap\.id AND t\.ended_at IS NULL AND t\.deleted_at IS NULL\) AS in_treatment/);
+  assert.match(q.sql, /0 AS in_treatment/);
   // NO re-scopea tenant (has_role_in)
   assert.doesNotMatch(q.sql, /has_role_in/);
   // spec 10 (T-CL.12): el espejo C6 necesita is_castrated REAL → la lista lo proyecta en AMBAS ramas
@@ -524,8 +535,8 @@ test('buildAnimalsListQuery: orderBy updated_at → ambas ramas proyectan el ali
   // La rama synced usa la columna REAL ap.updated_at; la overlay (sin updated_at) usa pap.created_at AS updated_at.
   assert.match(q.sql, /ap\.updated_at AS updated_at/);
   assert.match(q.sql, /pap\.created_at AS updated_at/);
-  // El ORDER BY es por el alias proyectado updated_at (no created_at) — recientes primero.
-  assert.match(q.sql, /ORDER BY updated_at DESC LIMIT 200/);
+  // El ORDER BY antepone el PIN de tratamiento (RTR.5) y luego el alias updated_at (recientes primero).
+  assert.match(q.sql, /ORDER BY in_treatment DESC, updated_at DESC LIMIT 200/);
   // El filtro noTag sigue en AMBAS ramas.
   assert.match(q.sql, /AND ap\.animal_tag_electronic IS NULL/);
   assert.match(q.sql, /AND pap\.animal_tag_electronic IS NULL/);
@@ -535,7 +546,7 @@ test('buildAnimalsListQuery: orderBy updated_at → ambas ramas proyectan el ali
 test('buildAnimalsListQuery: orderBy default (created_at) NO proyecta updated_at (cero regresión sobre los callers históricos)', () => {
   const q = buildAnimalsListQuery('est-1');
   assert.doesNotMatch(q.sql, /AS updated_at/);
-  assert.match(q.sql, /ORDER BY created_at DESC LIMIT 200/);
+  assert.match(q.sql, /ORDER BY in_treatment DESC, created_at DESC LIMIT 200/);
 });
 
 // COMPORTAMIENTO contra node:sqlite (tablas reales): el orden updated_at DESC respeta la frescura, mezclando
@@ -562,7 +573,11 @@ test('buildAnimalsListQuery (comportamiento): orderBy updated_at ordena candidat
       'CREATE TABLE custom_attributes (animal_profile_id TEXT, field_definition_id TEXT, value TEXT);' +
       'CREATE TABLE field_definitions (id TEXT, data_key TEXT, establishment_id TEXT);' +
       'CREATE TABLE rodeo_data_config (rodeo_id TEXT, field_definition_id TEXT, enabled INTEGER);' +
-      'CREATE TABLE pending_rodeo_data_config (rodeo_id TEXT, field_definition_id TEXT, enabled INTEGER);',
+      'CREATE TABLE pending_rodeo_data_config (rodeo_id TEXT, field_definition_id TEXT, enabled INTEGER);' +
+      // delta tratamientos: buildAnimalsListQuery inyecta un EXISTS sobre `treatments` (in_treatment) → la
+      // tabla debe existir o el SQL revienta con "no such table". Los tests que no insertan tratamientos ven
+      // in_treatment 0 para todos (sin alterar su orden).
+      'CREATE TABLE treatments (id TEXT, animal_profile_id TEXT, ended_at TEXT, deleted_at TEXT);',
   );
   db.prepare('INSERT INTO rodeos (id, system_id, name) VALUES (?,?,?)').run('rod-1', 'sys-1', 'Rodeo 1');
   db.prepare('INSERT INTO categories_by_system (id, code, name) VALUES (?,?,?)').run('cat-1', 'ternero', 'Ternero');
@@ -857,7 +872,11 @@ test('buildApodoSearchQuery (comportamiento): encuentra el animal cuyo apodo con
       'CREATE TABLE custom_attributes (animal_profile_id TEXT, field_definition_id TEXT, value TEXT);' +
       'CREATE TABLE field_definitions (id TEXT, data_key TEXT, establishment_id TEXT);' +
       'CREATE TABLE rodeo_data_config (rodeo_id TEXT, field_definition_id TEXT, enabled INTEGER);' +
-      'CREATE TABLE pending_rodeo_data_config (rodeo_id TEXT, field_definition_id TEXT, enabled INTEGER);',
+      'CREATE TABLE pending_rodeo_data_config (rodeo_id TEXT, field_definition_id TEXT, enabled INTEGER);' +
+      // delta tratamientos: buildAnimalsListQuery inyecta un EXISTS sobre `treatments` (in_treatment) → la
+      // tabla debe existir o el SQL revienta con "no such table". Los tests que no insertan tratamientos ven
+      // in_treatment 0 para todos (sin alterar su orden).
+      'CREATE TABLE treatments (id TEXT, animal_profile_id TEXT, ended_at TEXT, deleted_at TEXT);',
   );
   db.prepare('INSERT INTO rodeos (id, system_id, name) VALUES (?,?,?)').run('rod-1', 'sys-1', 'Rodeo 1');
   db.prepare('INSERT INTO categories_by_system (id, code, name) VALUES (?,?,?)').run('cat-1', 'vaca', 'Vaca');
@@ -1076,6 +1095,173 @@ test('buildReproBadgeEventsQuery: COMPORTAMIENTO — trae tacto_vaquillona/servi
   assert.equal(rows.find((r) => r.event_type === 'service')?.service_type, 'natural');
   // el overlay proyecta NULL en heifer_fitness/service_type
   assert.equal(rows.find((r) => r.event_type === 'birth')?.heifer_fitness, null);
+});
+
+// ─── delta lotes-venta: buildSessionEmptyFemalesQuery (RLV.10.1) ───────────────────────
+
+test('buildSessionEmptyFemalesQuery: SQL — reproductive_events JOIN animal_profiles, DISTINCT, filtros de dominio, SIN overlay', () => {
+  const q = buildSessionEmptyFemalesQuery('sess-1');
+  // DISTINCT por animal + join a animal_profiles.
+  assert.match(q.sql, /SELECT DISTINCT ap\.id AS profile_id/);
+  assert.match(q.sql, /FROM reproductive_events re JOIN animal_profiles ap ON ap\.id = re\.animal_profile_id/);
+  // filtros de dominio: session_id + tacto + empty + no borrado + perfil activo/no borrado.
+  assert.match(q.sql, /re\.session_id = \?/);
+  assert.match(q.sql, /re\.event_type = 'tacto'/);
+  assert.match(q.sql, /re\.pregnancy_status = 'empty'/);
+  assert.match(q.sql, /re\.deleted_at IS NULL/);
+  assert.match(q.sql, /ap\.status = 'active' AND ap\.deleted_at IS NULL/);
+  // RECONCILIACIÓN as-built: el tacto de manga es CRUD-plano a la tabla SYNCED → NO hay overlay UNION
+  // (pending_reproductive_events solo porta partos 'birth', nunca un tacto 'empty').
+  assert.doesNotMatch(q.sql, /pending_reproductive_events/);
+  assert.doesNotMatch(q.sql, /UNION/);
+  // NO re-scopea tenant (la stream ya lo hizo; la session_id acota al campo).
+  assert.doesNotMatch(q.sql, /has_role_in|establishment_id/);
+  assert.deepEqual(q.args, ['sess-1']);
+});
+
+test('buildSessionEmptyFemalesQuery: COMPORTAMIENTO — trae solo vacías activas de la sesión, DISTINCT por animal', () => {
+  const db = new DatabaseSync(':memory:');
+  db.exec(
+    'CREATE TABLE reproductive_events (id TEXT, animal_profile_id TEXT, event_type TEXT, event_date TEXT, pregnancy_status TEXT, session_id TEXT, deleted_at TEXT);' +
+      'CREATE TABLE animal_profiles (id TEXT, idv TEXT, animal_tag_electronic TEXT, status TEXT, deleted_at TEXT);',
+  );
+  const insP = db.prepare('INSERT INTO animal_profiles (id, idv, animal_tag_electronic, status, deleted_at) VALUES (?,?,?,?,?)');
+  insP.run('p1', '101', null, 'active', null);
+  insP.run('p2', '102', '982000000000001', 'active', null);
+  insP.run('p3', '103', null, 'active', null); // preñada, NO vacía
+  insP.run('p4', '104', null, 'sold', null); // vacía pero YA archivada → excluida
+  insP.run('p5', '105', null, 'active', '2026-07-01T00:00:00Z'); // vacía pero perfil borrado → excluida
+  const insE = db.prepare('INSERT INTO reproductive_events (id, animal_profile_id, event_type, event_date, pregnancy_status, session_id, deleted_at) VALUES (?,?,?,?,?,?,?)');
+  insE.run('e1', 'p1', 'tacto', '2026-07-10', 'empty', 'sess-1', null);
+  // p1 con DOS tactos empty en la sesión (corrección duplicada) → DISTINCT colapsa a 1.
+  insE.run('e1b', 'p1', 'tacto', '2026-07-10', 'empty', 'sess-1', null);
+  insE.run('e2', 'p2', 'tacto', '2026-07-10', 'empty', 'sess-1', null);
+  insE.run('e3', 'p3', 'tacto', '2026-07-10', 'large', 'sess-1', null); // preñada → no
+  insE.run('e4', 'p4', 'tacto', '2026-07-10', 'empty', 'sess-1', null); // perfil sold → no
+  insE.run('e5', 'p5', 'tacto', '2026-07-10', 'empty', 'sess-1', null); // perfil borrado → no
+  insE.run('e6', 'p1', 'tacto', '2026-07-10', 'empty', 'sess-OTHER', null); // otra sesión → no
+  insE.run('e7', 'p2', 'tacto', '2026-06-01', 'empty', 'sess-1', '2026-06-02T00:00:00Z'); // tacto borrado → no dup
+
+  const q = buildSessionEmptyFemalesQuery('sess-1');
+  const rows = (db.prepare(q.sql).all(...(q.args as string[])) as { profile_id: string; idv: string | null; tag_electronic: string | null }[]).map((r) => ({ ...r }));
+  db.close();
+
+  const ids = rows.map((r) => r.profile_id).sort();
+  assert.deepEqual(ids, ['p1', 'p2']); // solo las vacías activas de sess-1, DISTINCT (p1 una sola vez)
+  assert.equal(rows.length, 2);
+  // Proyecta idv + tag para el hero legible del caller.
+  assert.equal(rows.find((r) => r.profile_id === 'p2')?.tag_electronic, '982000000000001');
+});
+
+// ─── delta tratamientos (spec 02) — writes CRUD-plano + lecturas + pin ─────────────────────────
+
+test('buildStartTreatmentInsert: INSERT header, id/started_at cliente, OMITE establishment_id/created_by (trigger)', () => {
+  const q = buildStartTreatmentInsert('t-1', 'prof-1', 'antibiotico', 'Oxitetraciclina', 'nota', '2026-07-10T12:00:00Z');
+  assert.match(q.sql, /^INSERT INTO treatments \(id, animal_profile_id, kind, product_name, notes, started_at\) VALUES \(\?, \?, \?, \?, \?, \?\)$/);
+  // NO se mandan establishment_id/created_by (los fuerza el trigger, anti-spoof RTR.7.2/7.7).
+  assert.doesNotMatch(q.sql, /establishment_id/);
+  assert.doesNotMatch(q.sql, /created_by/);
+  assert.deepEqual(q.args, ['t-1', 'prof-1', 'antibiotico', 'Oxitetraciclina', 'nota', '2026-07-10T12:00:00Z']);
+});
+
+test('buildStartTreatmentInsert: notes null se pasa (columna nullable)', () => {
+  const q = buildStartTreatmentInsert('t-2', 'prof-1', 'otro', 'Vitaminas', null, '2026-07-10T12:00:00Z');
+  assert.deepEqual(q.args, ['t-2', 'prof-1', 'otro', 'Vitaminas', null, '2026-07-10T12:00:00Z']);
+});
+
+test('buildRegisterApplicationInsert: INSERT sanitary_event con treatment_id + dosis/vía/próxima dosis, OMITE established/created_by', () => {
+  const q = buildRegisterApplicationInsert('ev-1', 'prof-1', 't-1', 'treatment', 'Oxitetraciclina', '2026-07-10', 5, 'intramuscular', '2026-07-13');
+  assert.match(q.sql, /^INSERT INTO sanitary_events \(id, animal_profile_id, treatment_id, event_type, product_name, event_date, dose_ml, route, next_dose_date\) VALUES \(\?, \?, \?, \?, \?, \?, \?, \?, \?\)$/);
+  assert.doesNotMatch(q.sql, /establishment_id/);
+  assert.doesNotMatch(q.sql, /created_by/);
+  assert.deepEqual(q.args, ['ev-1', 'prof-1', 't-1', 'treatment', 'Oxitetraciclina', '2026-07-10', 5, 'intramuscular', '2026-07-13']);
+});
+
+test('buildRegisterApplicationInsert: dosis/vía/próxima dosis null (opcionales, nullable)', () => {
+  const q = buildRegisterApplicationInsert('ev-2', 'prof-1', 't-1', 'deworming', 'Ivermectina', '2026-07-10', null, null, null);
+  assert.deepEqual(q.args, ['ev-2', 'prof-1', 't-1', 'deworming', 'Ivermectina', '2026-07-10', null, null, null]);
+});
+
+test('buildFinalizeTreatmentUpdate: UPDATE ended_at = now, IDEMPOTENTE (guard ended_at IS NULL, RTR.3.4)', () => {
+  const q = buildFinalizeTreatmentUpdate('t-1');
+  assert.match(q.sql, /^UPDATE treatments SET ended_at = datetime\('now'\) WHERE id = \? AND ended_at IS NULL$/);
+  assert.deepEqual(q.args, ['t-1']);
+});
+
+test('buildAnimalTreatmentsQuery: en curso primero (ended_at IS NULL DESC) luego started_at DESC + deleted_at IS NULL', () => {
+  const q = buildAnimalTreatmentsQuery('prof-1');
+  assert.match(q.sql, /FROM treatments WHERE animal_profile_id = \? AND deleted_at IS NULL/);
+  assert.match(q.sql, /ORDER BY \(ended_at IS NULL\) DESC, started_at DESC/);
+  assert.deepEqual(q.args, ['prof-1']);
+});
+
+test('buildTreatmentApplicationsQuery: por treatment_id, recientes primero + deleted_at IS NULL + proyecta dosis/vía/próxima', () => {
+  const q = buildTreatmentApplicationsQuery('t-1');
+  assert.match(q.sql, /SELECT id, event_type, product_name, dose_ml, route, event_date, next_dose_date/);
+  assert.match(q.sql, /FROM sanitary_events WHERE treatment_id = \? AND deleted_at IS NULL/);
+  assert.match(q.sql, /ORDER BY event_date DESC, created_at DESC/);
+  assert.deepEqual(q.args, ['t-1']);
+});
+
+// COMPORTAMIENTO contra node:sqlite: el DERIVADO "en tratamiento" y el PIN. Un treatment ABIERTO (ended_at NULL)
+// prende in_treatment=1 → el animal queda ARRIBA; al finalizar (ended_at seteado) in_treatment vuelve a 0 →
+// baja. Cubre RTR.4.1/4.6 + RTR.5.1/5.4 sobre el SQL real (un assert de string no captura el orden efectivo).
+test('buildAnimalsListQuery (comportamiento): el animal EN TRATAMIENTO se pinnea arriba; al finalizar baja (RTR.4/5)', () => {
+  const db = new DatabaseSync(':memory:');
+  db.exec(
+    'CREATE TABLE animal_profiles (id TEXT, animal_id TEXT, idv TEXT, category_id TEXT, rodeo_id TEXT, status TEXT, ' +
+      'management_group_id TEXT, animal_tag_electronic TEXT, animal_sex TEXT, category_override INTEGER, ' +
+      'animal_birth_date TEXT, is_castrated INTEGER, future_bull INTEGER, is_cut INTEGER, establishment_id TEXT, ' +
+      'deleted_at TEXT, created_at TEXT);' +
+      'CREATE TABLE pending_animal_profiles (id TEXT, animal_id TEXT, idv TEXT, category_id TEXT, rodeo_id TEXT, status TEXT, ' +
+      'management_group_id TEXT, animal_tag_electronic TEXT, animal_sex TEXT, category_override INTEGER, ' +
+      'animal_birth_date TEXT, establishment_id TEXT, created_at TEXT);' +
+      'CREATE TABLE rodeos (id TEXT, system_id TEXT, name TEXT);' +
+      'CREATE TABLE categories_by_system (id TEXT, code TEXT, name TEXT);' +
+      'CREATE TABLE pending_status_overrides (target_table TEXT, target_id TEXT, effect TEXT);' +
+      'CREATE TABLE custom_attributes (animal_profile_id TEXT, field_definition_id TEXT, value TEXT);' +
+      'CREATE TABLE field_definitions (id TEXT, data_key TEXT, establishment_id TEXT);' +
+      'CREATE TABLE rodeo_data_config (rodeo_id TEXT, field_definition_id TEXT, enabled INTEGER);' +
+      'CREATE TABLE pending_rodeo_data_config (rodeo_id TEXT, field_definition_id TEXT, enabled INTEGER);' +
+      'CREATE TABLE treatments (id TEXT, animal_profile_id TEXT, ended_at TEXT, deleted_at TEXT);',
+  );
+  db.prepare('INSERT INTO rodeos (id, system_id, name) VALUES (?,?,?)').run('rod-1', 'sys-1', 'Rodeo 1');
+  db.prepare('INSERT INTO categories_by_system (id, code, name) VALUES (?,?,?)').run('cat-1', 'vaca', 'Vaca');
+  const ins = db.prepare(
+    'INSERT INTO animal_profiles (id, animal_id, idv, category_id, rodeo_id, status, management_group_id, ' +
+      'animal_tag_electronic, animal_sex, category_override, animal_birth_date, is_castrated, future_bull, ' +
+      'is_cut, establishment_id, deleted_at, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+  );
+  // p-new es el MÁS reciente (created_at) → sin tratamientos estaría primero. p-old es más viejo.
+  ins.run('p-new', 'an-N', 'N1', 'cat-1', 'rod-1', 'active', null, null, 'female', 0, null, 0, 0, 0, 'est-1', null, '2026-07-10T00:00:00Z');
+  ins.run('p-old', 'an-O', 'O1', 'cat-1', 'rod-1', 'active', null, null, 'female', 0, null, 0, 0, 0, 'est-1', null, '2026-07-01T00:00:00Z');
+
+  const q = buildAnimalsListQuery('est-1');
+
+  // Sin tratamientos: orden por created_at DESC → p-new arriba.
+  {
+    const rows = db.prepare(q.sql).all(...(q.args as string[])) as { id: string; in_treatment: number }[];
+    assert.deepEqual(rows.map((r) => r.id), ['p-new', 'p-old']);
+    assert.equal(rows.find((r) => r.id === 'p-old')?.in_treatment, 0);
+  }
+
+  // p-old EN TRATAMIENTO (treatment abierto) → se pinnea ARRIBA pese a ser más viejo (RTR.4.1/5.1).
+  db.prepare('INSERT INTO treatments (id, animal_profile_id, ended_at, deleted_at) VALUES (?,?,?,?)')
+    .run('t-1', 'p-old', null, null);
+  {
+    const rows = db.prepare(q.sql).all(...(q.args as string[])) as { id: string; in_treatment: number }[];
+    assert.deepEqual(rows.map((r) => r.id), ['p-old', 'p-new']);
+    assert.equal(rows.find((r) => r.id === 'p-old')?.in_treatment, 1);
+  }
+
+  // Un treatment soft-deleteado o finalizado NO cuenta: al finalizar p-old baja de nuevo (RTR.4.6/5.4).
+  db.prepare("UPDATE treatments SET ended_at = '2026-07-11T00:00:00Z' WHERE id = 't-1'").run();
+  {
+    const rows = db.prepare(q.sql).all(...(q.args as string[])) as { id: string; in_treatment: number }[];
+    assert.deepEqual(rows.map((r) => r.id), ['p-new', 'p-old']);
+    assert.equal(rows.find((r) => r.id === 'p-old')?.in_treatment, 0);
+  }
+  db.close();
 });
 
 // ─── C6: buildRevertCategoryOverrideUpdate (RC6.4.3) ───────────────────────────────────

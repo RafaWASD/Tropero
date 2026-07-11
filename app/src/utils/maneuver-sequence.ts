@@ -58,8 +58,10 @@ export type SilentSanitaryType = 'deworming' | 'treatment';
  *   - `dientes`      → `{ teethState, cut }` — UPDATE animal_profiles.teeth_state (+ CUT, R6.7/R6.8).
  *   - `scrotal`      → `{ circumferenceCm, ageMonths }` — scrotal_measurements (CE + edad snapshot, R14.5/
  *                      R14.8). ageMonths null = edad desconocida (R14.7). StepKind 'rueda', factory-only.
- *   - `skipped`      → maniobra NO capturada (M2.2 placeholder / un paso que el operario salta). NO persiste.
- * `null`/ausente en el mapa = aún sin capturar.
+ *   - `skipped`      → maniobra SALTEADA A PROPÓSITO por el operario (skip POR-PASO, R5.15): cuenta como
+ *                      HECHA (no bloquea el resumen, no la re-surfacea la reanudación), NO persiste ninguna
+ *                      fila. El resumen la muestra "Salteado" (corregible: se puede volver y cargarla).
+ * `null`/ausente en el mapa = aún sin capturar (a diferencia de `skipped`, que sí es una decisión tomada).
  */
 export type StepValue =
   | { kind: 'tacto'; pregnancy: PregnancyStatus }
@@ -88,6 +90,36 @@ export type CustomManeuverSpec = {
   /** Opciones del enum (enum_single/enum_multi); [] para los demás. */
   options: string[];
 };
+
+// ─── Label del botón "Saltear <maniobra>" del header (skip POR-PASO, R5.15) ─────────────────────
+//
+// La afordancia PRIMARIA de skip NOMBRA la maniobra que se saltea (pedido de Raf: "comunicar QUÉ se saltea"):
+// "Saltear tacto" / "Saltear pesaje". El nombre completo (maneuverLabel: "Tacto de preñez") no entra en el
+// pill del header (compite con la caravana) → usamos una palabra CORTA por maniobra. Las que no tienen una
+// palabra corta natural (antiparasitario/antibiótico/inseminación) caen al fallback "Saltear paso".
+const MANEUVER_SKIP_SHORT: Partial<Record<ManeuverKind, string>> = {
+  tacto: 'tacto',
+  tacto_vaquillona: 'aptitud',
+  sangrado: 'sangrado',
+  vacunacion: 'vacunas',
+  condicion_corporal: 'condición',
+  dientes: 'dientes',
+  pesaje: 'pesaje',
+  pesaje_ternero: 'pesaje',
+  raspado: 'raspado',
+  circunferencia_escrotal: 'CE',
+  // inseminacion/antiparasitario/antibiotico: sin palabra corta clara → fallback "Saltear paso".
+};
+
+/**
+ * Texto del botón de SKIP POR-PASO del header (R5.15). "Saltear <palabra-corta>" si la maniobra tiene una
+ * (≤ 9 chars, entra en el pill sin recortar la caravana); "Saltear paso" para las de nombre largo. PURO,
+ * testeable. El texto de la maniobra va en minúscula (sustantivo común tras "Saltear").
+ */
+export function skipStepButtonLabel(maneuver: ManeuverKind): string {
+  const short = MANEUVER_SKIP_SHORT[maneuver];
+  return short && short.length > 0 && short.length <= 9 ? `Saltear ${short}` : 'Saltear paso';
+}
 
 /** Mapa maniobra → valor capturado (o ausente). El frame lo mantiene en estado y lo persiste por paso. */
 export type CaptureMap = Partial<Record<ManeuverKind, StepValue>>;
@@ -176,11 +208,15 @@ export function buildSequence(
 // ─── (b)/(d) Completitud de la secuencia ────────────────────────────────────────────────────────
 
 /**
- * ¿Se capturó todo lo que DEBE capturarse antes del resumen? Un ítem cuenta como "listo" si tiene un valor en
+ * ¿Se resolvió todo lo que DEBE resolverse antes del resumen? Un ítem cuenta como "listo" si tiene un valor en
  * su mapa (las de fábrica en `captured` por ManeuverKind; las custom en `customCaptured` por field_def id). Una
  * secuencia vacía (ninguna maniobra aplica) se considera completa → el resumen muestra "sin maniobras" y deja
- * confirmar (no frena la fila). Las de fábrica PERSISTIBLES no pueden quedar `skipped`. Las custom cuentan si
- * tienen un CustomCaptureValue (el gate de "completo" por ui_component lo hace el paso antes de capturar).
+ * confirmar (no frena la fila).
+ *
+ * SKIP POR-PASO (R5.15, delta v2): un `{kind:'skipped'}` es una DECISIÓN DELIBERADA (el operario salteó ESE
+ * paso) → cuenta como HECHO (no bloquea el resumen), igual que una captura real. Solo `undefined` (ausente en
+ * el mapa) = aún sin resolver. Las custom no tienen marcador de skip (su gate de "completo" por ui_component
+ * lo hace el paso antes de capturar) → cuentan si tienen un CustomCaptureValue.
  */
 export function isSequenceComplete(
   steps: readonly SequenceItem[],
@@ -191,15 +227,16 @@ export function isSequenceComplete(
     if (s.source === 'custom') {
       return customCaptured[s.custom.fieldDefinitionId] != null;
     }
-    const v = captured[s.maneuver];
-    if (!v) return false;
-    // Una maniobra persistible no puede quedar "skipped" (sería un dato faltante real).
-    if (stepPersists(s.maneuver)) return v.kind !== 'skipped';
-    return true;
+    // Un valor presente (captura REAL o SALTEADO deliberado) = resuelto; ausente (undefined) = falta.
+    return captured[s.maneuver] != null;
   });
 }
 
-/** El índice del primer paso AÚN sin capturar (para reanudar la secuencia). -1 si está completa. */
+/**
+ * El índice del primer paso AÚN sin resolver (para reanudar la secuencia). -1 si está completa. Un SALTEADO
+ * deliberado (skip por-paso, R5.15) cuenta como resuelto → NO se re-surfacea al reanudar (a diferencia de
+ * M2.2, donde el placeholder skipped sí volvía). Solo un paso ausente (undefined) se apunta.
+ */
 export function firstUncapturedIndex(
   steps: readonly SequenceItem[],
   captured: CaptureMap,
@@ -211,9 +248,7 @@ export function firstUncapturedIndex(
       if (customCaptured[s.custom.fieldDefinitionId] == null) return i;
       continue;
     }
-    const v = captured[s.maneuver];
-    if (!v) return i;
-    if (stepPersists(s.maneuver) && v.kind === 'skipped') return i;
+    if (captured[s.maneuver] == null) return i;
   }
   return -1;
 }
@@ -312,7 +347,9 @@ export function describeStepValue(value: StepValue | undefined, opts: DescribeSt
       return `${ce} · ${m === 1 ? '1 mes' : `${m} meses`}`;
     }
     case 'skipped':
-      return 'Sin cargar';
+      // Skip POR-PASO (R5.15): el operario decidió NO cargar ESTE paso → "Salteado" (decisión tomada), NO
+      // "Sin cargar" (que se lee como error/olvido). La fila del resumen sigue corregible (volver y cargar).
+      return 'Salteado';
     default:
       return 'Sin cargar';
   }

@@ -25,14 +25,20 @@
 
 import { test, expect } from './helpers/fixtures';
 import {
+  admin,
   createTestUser,
   seedEstablishmentWithRodeo,
   seedAnimal,
+  seedManagementGroup,
   setUserPhone,
   cleanupAll,
+  waitForServerExit,
+  waitForServerProfileManagementGroup,
+  readServerProfileManagementGroup,
+  getServerProfileStatus,
   RUN_TAG,
 } from './helpers/admin';
-import { signIn, waitForHome, gotoAnimales, gotoTab } from './helpers/ui';
+import { signIn, waitForHome, gotoAnimales, gotoLoteGroup, gotoTab } from './helpers/ui';
 
 test.afterAll(async () => {
   await cleanupAll();
@@ -189,4 +195,58 @@ test('borrar lote → su animal queda reasignado a NULL (D1)', async ({ page }) 
   await page.getByRole('button', { name: new RegExp(idv) }).first().click();
   await expect(page.getByText('Lote actual', { exact: true })).toBeVisible({ timeout: 20_000 });
   await expect(page.getByText('Sin lote', { exact: true }).first()).toBeVisible();
+});
+
+// ── delta lotes-venta (RLV.2/RLV.3/RLV.7/RLV.9): BAJA EN TANDA desde el lote. Vender/Descartar → modo
+//    selección → tildar UN subconjunto → Venta → registrar salida → el lote queda con MENOS cabezas, el
+//    animal vendido queda archivado (status 'sold') y SIN lote (management_group_id NULL), y el que NO se
+//    seleccionó sigue activo en el lote (no-atomicidad correcta). Oráculo SERVER (tras drenar la outbox). ──
+test('vender en tanda un subconjunto del lote → menos cabezas + archivado sin lote (RLV.2/3/7/9)', async ({ page }) => {
+  test.setTimeout(180_000);
+  const user = await createTestUser('lotevta');
+  await setUserPhone(user.id, '1123456789');
+  const { establishmentId, rodeoId } = await seedEstablishmentWithRodeo(user.id, 'Campo Venta');
+  const grupo = await seedManagementGroup(establishmentId, 'Venta');
+  const idvA = `5551${Date.now().toString().slice(-5)}`;
+  const idvB = `5552${Date.now().toString().slice(-5)}`;
+  const pA = await seedAnimal(establishmentId, rodeoId, { idv: idvA, sex: 'female' });
+  const pB = await seedAnimal(establishmentId, rodeoId, { idv: idvB, sex: 'female' });
+  // Ambas hembras en el lote (estado de partida).
+  {
+    const { error } = await admin.from('animal_profiles').update({ management_group_id: grupo.id }).in('id', [pA, pB]);
+    if (error) throw new Error(`seed assign lote: ${error.message}`);
+  }
+
+  await page.goto('/');
+  await signIn(page, user);
+  await waitForHome(page);
+
+  // Vista de grupo del lote (card de Inicio). Ambos animales activos visibles.
+  await gotoLoteGroup(page, grupo.name);
+  await expect(page.getByText(idvA, { exact: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(idvB, { exact: true }).first()).toBeVisible();
+
+  // Vender / Descartar → modo selección → tildar SOLO A (subconjunto).
+  await page.getByTestId('lote-vender-descartar').click();
+  await expect(page.getByText('Elegí los animales', { exact: true })).toBeVisible({ timeout: 10_000 });
+  await page.getByRole('checkbox', { name: new RegExp(idvA) }).first().click();
+  await expect(page.getByText('1 seleccionado', { exact: true })).toBeVisible();
+
+  // Registrar salida → paso 1 motivo Venta → paso 2 registrar (fecha default hoy, sin precio/peso).
+  await page.getByTestId('lote-registrar-salida').click();
+  await expect(page.getByText('¿Qué pasó con estos animales?', { exact: true })).toBeVisible({ timeout: 10_000 });
+  await page.getByRole('button', { name: 'Venta', exact: true }).click();
+  await expect(page.getByText('Vas a dar de baja', { exact: true })).toBeVisible({ timeout: 10_000 });
+  await page.getByTestId('venta-registrar-salida').click();
+
+  // Volvemos al lote (modo normal, re-leído): A ya no está; B sigue.
+  await expect(page.getByTestId('lote-vender-descartar')).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText(idvB, { exact: true }).first()).toBeVisible();
+  await expect(page.getByText(idvA, { exact: true })).toHaveCount(0, { timeout: 20_000 });
+
+  // ORÁCULO SERVER (tras drenar la outbox): A archivado (sold) + SIN lote; B intacto (activo, en el lote).
+  await waitForServerExit(pA, 'sold', { tries: 40 });
+  await waitForServerProfileManagementGroup(pA, null, { tries: 40 });
+  expect(await readServerProfileManagementGroup(pB)).toBe(grupo.id);
+  expect((await getServerProfileStatus(pB)).status).toBe('active');
 });

@@ -19,7 +19,8 @@ function tablesByName(): Map<string, TableJson> {
   return new Map(json.tables.map((t) => [t.name, t]));
 }
 
-// Las 32 tablas SINCRONIZADAS (espejo del schema as-built, design §3 + spec 03 M5 custom + M6 CE + spec 08 SIGSA).
+// Las 33 tablas SINCRONIZADAS (espejo del schema as-built, design §3 + spec 03 M5 custom + M6 CE + spec 08
+// SIGSA + spec 02 delta tratamientos).
 const SYNCED_TABLES = [
   'species',
   'systems_by_species',
@@ -46,6 +47,8 @@ const SYNCED_TABLES = [
   'weight_events',
   'reproductive_events',
   'sanitary_events',
+  // spec 02 delta tratamientos (0123) — header de tratamiento: scope establishment vía ev_treatments.
+  'treatments',
   'condition_score_events',
   'lab_samples',
   // spec 03 M6 — circunferencia escrotal (0098): scope establishment vía ev_scrotal_measurements.
@@ -76,7 +79,7 @@ test('R2.1: AppSchema valida contra el SDK (no tira la validación de PowerSync)
   assert.doesNotThrow(() => AppSchema.validate());
 });
 
-test('R2.1: están las 32 tablas sincronizadas del schema as-built', () => {
+test('R2.1: están las 33 tablas sincronizadas del schema as-built', () => {
   const tables = tablesByName();
   for (const name of SYNCED_TABLES) {
     assert.ok(tables.has(name), `falta la tabla sincronizada ${name}`);
@@ -230,7 +233,7 @@ test('users NO trae email/phone (PII movida a user_private, 0068 / ADR-025)', ()
   assert.ok(!cols.includes('phone'), 'users no debe exponer phone');
 });
 
-test('el schema total = 32 sincronizadas + op_intents + 8 overlay = 41 tablas', () => {
+test('el schema total = 33 sincronizadas + op_intents + 8 overlay = 42 tablas', () => {
   const json = AppSchema.toJSON() as { tables: TableJson[] };
   assert.equal(json.tables.length, SYNCED_TABLES.length + 1 + PENDING_TABLES.length);
 });
@@ -292,7 +295,18 @@ const COLUMNS_READ_BY_BUILDERS: Record<string, string[]> = {
     'event_type', 'pregnancy_status', 'calf_id', 'notes', 'event_date', 'created_at',
     'animal_profile_id', 'deleted_at', 'service_type',
   ],
-  sanitary_events: ['event_type', 'product_name', 'route', 'notes', 'event_date', 'created_at', 'animal_profile_id', 'deleted_at'],
+  sanitary_events: [
+    'event_type', 'product_name', 'route', 'notes', 'event_date', 'created_at', 'animal_profile_id', 'deleted_at',
+    // spec 02 delta tratamientos (0123): link a treatments — lo lee buildTreatmentApplicationsQuery + lo escribe
+    // buildRegisterApplicationInsert. next_dose_date/dose_ml los proyecta la lectura de aplicaciones.
+    'treatment_id', 'next_dose_date', 'dose_ml',
+  ],
+  // spec 02 delta tratamientos (0123): header — buildAnimalTreatmentsQuery lee estas columnas; los writes
+  // (buildStartTreatmentInsert/buildFinalizeTreatmentUpdate) escriben id/animal_profile_id/kind/product_name/
+  // notes/started_at/ended_at.
+  treatments: [
+    'animal_profile_id', 'kind', 'product_name', 'notes', 'started_at', 'ended_at', 'created_by', 'deleted_at',
+  ],
   condition_score_events: ['score', 'notes', 'event_date', 'created_at', 'animal_profile_id', 'deleted_at'],
   lab_samples: [
     'sample_type', 'tube_number', 'result', 'result_received_date', 'collection_date',

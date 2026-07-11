@@ -64,6 +64,69 @@ export function exitReasonToStatus(choice: ExitReasonChoice): ExitReasonMapping 
   return EXIT_REASON_MAPPINGS.find((m) => m.choice === choice) ?? null;
 }
 
+// ─── Motivos de la BAJA EN TANDA (delta lotes-venta, RLV.4/RLV.4.1/RLV.4.2) ────────────
+//
+// La baja en tanda desde un lote (LOOP CLIENT-SIDE de exit_animal_profile, sin RPC nueva) ofrece SOLO
+// **Venta** y **Muerte** — "Venta simple" (Raf, Puerta 1 2026-07-10). NO se agrega `culling` (sigue diferido
+// a validar con Facundo, como en `c3.3-baja`); "Descarte" queda SOLO como NOMBRE de lote sugerido (RLV.13),
+// NO como motivo. La `Transferencia` per-animal sigue en la ficha (`app/animal/baja.tsx`), pero NO en la
+// tanda (RLV.4.2). Se DERIVA como subconjunto de `EXIT_REASON_MAPPINGS` (fuente única) para no duplicar el
+// mapeo ni desincronizarse: si mañana cambia el status/label de Venta/Muerte, cambia en un solo lugar. El
+// filtro por `choice` garantiza que `culling`/`theft`/`other`/`transfer` NO caigan en el set de la tanda.
+
+/** Los motivos que la baja EN TANDA ofrece (RLV.4): Venta y Muerte, en ese orden de presentación. */
+export type BatchExitChoice = Extract<ExitReasonChoice, 'sale' | 'death'>;
+
+/**
+ * Subconjunto Venta/Muerte de `EXIT_REASON_MAPPINGS` (RLV.4.1). Fuente única del paso 1 del form de venta
+ * de la tanda (`app/lote/venta.tsx`). Derivado por filtro (no reescrito): garantiza `sale`→(sold,sale) +
+ * `death`→(dead,death), SIN `culling`/`transfer`/`theft`/`other` (RLV.4.2). Orden = Venta, Muerte.
+ */
+export const BATCH_EXIT_MAPPINGS: readonly ExitReasonMapping[] = EXIT_REASON_MAPPINGS.filter(
+  (m): m is ExitReasonMapping & { choice: BatchExitChoice } =>
+    m.choice === 'sale' || m.choice === 'death',
+);
+
+/** ¿`choice` es un motivo válido de la baja en tanda (Venta/Muerte)? Defensivo (RLV.4.2). */
+export function isBatchExitChoice(choice: string): choice is BatchExitChoice {
+  return BATCH_EXIT_MAPPINGS.some((m) => m.choice === choice);
+}
+
+/**
+ * Resuelve el mapping de un motivo de la TANDA (RLV.4.1). Como `exitReasonToStatus` pero acotado al set de
+ * la tanda: devuelve null para cualquier motivo que NO sea Venta/Muerte (p.ej. `transfer`, `culling`) — la
+ * UI de la tanda nunca ofrece otro, pero el contrato es fail-safe.
+ */
+export function batchExitReasonToStatus(choice: string): ExitReasonMapping | null {
+  return BATCH_EXIT_MAPPINGS.find((m) => m.choice === choice) ?? null;
+}
+
+// ─── Precio/peso EFECTIVO por animal de la tanda (datos comunes ajustables, RLV.5.2/RLV.6) ─────
+//
+// La tanda carga datos COMUNES (un precio/peso para todos) que el operario puede AJUSTAR por animal
+// (override). Esta función PURA resuelve el valor efectivo de UN animal: el override GANA sobre el común;
+// ambos pueden ser null (campo vacío → no se manda → el RPC coalesce, no pisa nada). "Vacío" del override =
+// `null`/`undefined` → cae al común (el operario que no toca a un animal usa el valor de la tanda, RLV.5.2);
+// un override presente (incl. un número) PISA el común aunque el común exista (RLV.6). NO valida rangos
+// (eso es validateExitPrice/validateExitWeight, RLV.6.1): acá solo se elige QUÉ valor va, ya validado.
+
+export type EffectiveSaleData = { price: number | null; weight: number | null };
+
+/**
+ * Resuelve el precio y peso EFECTIVOS de un animal de la tanda (RLV.5.2/RLV.6): el override gana sobre el
+ * común; `null`/`undefined` en el override → cae al común; ambos pueden ser null. PURA (testeable).
+ */
+export function resolveEffectiveSaleData(input: {
+  commonPrice: number | null;
+  commonWeight: number | null;
+  overridePrice?: number | null;
+  overrideWeight?: number | null;
+}): EffectiveSaleData {
+  const price = input.overridePrice ?? input.commonPrice ?? null;
+  const weight = input.overrideWeight ?? input.commonWeight ?? null;
+  return { price, weight };
+}
+
 // ─── Clasificación de errores del RPC exit_animal_profile (0044) ──────────────────────
 //
 // El RPC lanza, por `errcode`:

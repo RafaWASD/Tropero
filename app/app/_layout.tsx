@@ -512,6 +512,9 @@ function RootGate() {
           animales activos + acciones masivas. Destino navegable desde Inicio (card de rodeo/lote). */}
       <Stack.Screen name="rodeo/[id]" />
       <Stack.Screen name="lote/[id]" />
+      {/* Delta lotes-venta (spec 02, ADR-028): baja EN TANDA (venta/descarte) de un subconjunto de un lote —
+          loop client-side de exit_animal_profile. Se llega desde el modo selección de /lote/[id]. */}
+      <Stack.Screen name="lote/venta" />
       {/* Spec 10 — flujos de operación masiva (selección explícita castrar/destetar; vacunación masiva).
           STUB navegable en este chunk (la pantalla real es del próximo chunk de Fase 4). */}
       <Stack.Screen name="seleccion-masiva" />

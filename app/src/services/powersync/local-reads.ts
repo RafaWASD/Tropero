@@ -684,20 +684,29 @@ export function buildAnimalsListQuery(
 ): LocalQuery {
   const status = filter.status ?? 'active';
   const orderBy = filter.orderBy ?? 'created_at';
+  // spec 02 delta tratamientos (RTR.5 / design §4.1): PIN de los "en tratamiento" arriba. Se inyecta SIEMPRE
+  // (independiente de orderBy) la columna computada `in_treatment` (0/1) en AMBAS ramas del UNION, porque el
+  // ORDER BY la referencia. Rama SINCRONIZADA: EXISTS de un treatment ABIERTO del perfil (ended_at IS NULL AND
+  // deleted_at IS NULL — el DERIVADO, RTR.4.1) correlado a `ap.id`; el índice parcial treatments_open_by_profile
+  // lo sirve O(log n) server-side, y local es un EXISTS sobre la tabla synced (offline-correcto, RTR.8.4). Rama
+  // OVERLAY: `0 AS in_treatment` (un alta optimista pending no tiene tratamiento — los tratamientos se inician
+  // solo desde la ficha de un animal YA existente, RTR.1.7). Cubre la lista general Y la del rodeo (ambas usan
+  // este builder; la del rodeo pasa filter.rodeoId) — un solo cambio, RTR.5.1/RTR.5.2.
+  const IN_TREATMENT_SYNCED =
+    'EXISTS (SELECT 1 FROM treatments t WHERE t.animal_profile_id = ap.id ' +
+    'AND t.ended_at IS NULL AND t.deleted_at IS NULL) AS in_treatment';
   // Cuando ordenamos por updated_at, AMBAS ramas deben PROYECTAR el alias `updated_at` (el ORDER BY de un
   // UNION solo referencia columnas proyectadas). La synced usa ap.updated_at REAL; la overlay no tiene esa
   // columna → proyecta pap.created_at AS updated_at (señal de frescura del alta optimista). Para el orden
-  // por created_at (default) NO se proyecta nada extra (cero cambio sobre los callers históricos).
+  // por created_at (default) NO se proyecta nada extra por updated_at. `in_treatment` se inyecta SIEMPRE.
   // El alias va INYECTADO en la lista de proyección (antes del ` FROM`), NO concatenado al final del SELECT
   // (que ya incluye FROM/JOINs — concatenar ahí lo tomaría como una tabla del FROM).
-  const syncedSelect =
-    orderBy === 'updated_at'
-      ? injectProjection(LOCAL_LIST_SELECT, 'ap.updated_at AS updated_at')
-      : LOCAL_LIST_SELECT;
-  const overlaySelect =
-    orderBy === 'updated_at'
-      ? injectProjection(LOCAL_LIST_SELECT_OVERLAY, 'pap.created_at AS updated_at')
-      : LOCAL_LIST_SELECT_OVERLAY;
+  let syncedSelect = injectProjection(LOCAL_LIST_SELECT, IN_TREATMENT_SYNCED);
+  let overlaySelect = injectProjection(LOCAL_LIST_SELECT_OVERLAY, '0 AS in_treatment');
+  if (orderBy === 'updated_at') {
+    syncedSelect = injectProjection(syncedSelect, 'ap.updated_at AS updated_at');
+    overlaySelect = injectProjection(overlaySelect, 'pap.created_at AS updated_at');
+  }
   // Parte SINCRONIZADA (con ocultación de exits/soft-deletes pendientes).
   const dom = listDomainFilters(establishmentId, status);
   let synced = `${syncedSelect} WHERE ${dom.where} AND ${HIDE_EXITED_PROFILE}`;
@@ -719,8 +728,9 @@ export function buildAnimalsListQuery(
     synced += ' AND ap.animal_tag_electronic IS NULL';
     overlay += ' AND pap.animal_tag_electronic IS NULL';
   }
-  // El ORDER BY usa el alias proyectado por ambas ramas (created_at por default; updated_at en opción A).
-  const sql = `${synced} UNION ALL ${overlay} ORDER BY ${orderBy} DESC LIMIT 200`;
+  // El ORDER BY pone los EN TRATAMIENTO arriba (in_treatment DESC, RTR.5.1/5.2), y dentro de cada grupo
+  // conserva el orden actual (created_at/updated_at DESC, RTR.5.3) — criterio secundario.
+  const sql = `${synced} UNION ALL ${overlay} ORDER BY in_treatment DESC, ${orderBy} DESC LIMIT 200`;
   return { sql, args: [...args, ...overlayArgs] };
 }
 
@@ -1126,6 +1136,44 @@ export function buildReproBadgeEventsQuery(profileIds: readonly string[]): Local
   return { sql, args: [...profileIds, ...profileIds] };
 }
 
+// ─── Vacías de una sesión de tacto (delta lotes-venta, RLV.10.1) ──────────────────────────────
+//
+// Deriva el conjunto "vacías de la sesión" para la sugerencia post-tacto (RLV.10): los perfiles ACTIVOS con
+// un evento de tacto de esa `session_id` cuyo `pregnancy_status` vigente es 'empty', SIN duplicados por
+// animal (DISTINCT). Alimenta el conteo ("Encontramos N vacías", RLV.10.2) + la asignación al lote (RLV.14).
+//
+// ⚠️ SIN overlay `pending_reproductive_events` (RECONCILIACIÓN as-built — ver design §4.2 / RLV.10.1). Un
+// tacto de MANGA se persiste por CRUD-PLANO directo sobre la tabla SINCRONIZADA `reproductive_events`
+// (buildAddTactoInsert → runLocalWrite), con `session_id` + `pregnancy_status` → queda LOCAL al instante,
+// OFFLINE (RLV.22/RLV.23), y esta query lo ve sin sincronizar. El overlay `pending_reproductive_events` SOLO
+// porta PARTOS optimistas de register_birth (`event_type='birth'`, `pregnancy_status` NULL, sin session_id)
+// → NUNCA contiene un tacto 'empty'; un UNION a él matchearía CERO filas (dead code). Por eso se lee solo
+// `reproductive_events`. El scoping de tenant ya lo aplicó la stream est_reproductive_events → NO se re-filtra.
+//
+// DISTINCT por animal (RLV.10.1): dos tactos 'empty' de la misma sesión sobre el mismo animal (raro: una
+// corrección UPDATEa la misma fila) colapsan a UNA fila. Se proyecta `idv` + `animal_tag_electronic` (b1)
+// para que el caller arme un identificador legible por vaca (fetchSessionEmptyFemales).
+
+/**
+ * Vacías de una sesión de tacto (RLV.10.1): perfiles ACTIVOS con tacto 'empty' de esa `session_id`, DISTINCT
+ * por animal. Devuelve `{ profile_id, idv, tag_electronic }`. Lee `reproductive_events` (la tabla synced que
+ * ya contiene el tacto CRUD-plano offline). El `establishment_id` NO se pasa (el scoping lo hizo la stream;
+ * la `session_id` ya acota al campo de la jornada) — CLAUDE.md ppio 6 respetado (sin hardcode).
+ */
+export function buildSessionEmptyFemalesQuery(sessionId: string): LocalQuery {
+  return {
+    sql:
+      'SELECT DISTINCT ap.id AS profile_id, ap.idv AS idv, ' +
+      'ap.animal_tag_electronic AS tag_electronic ' +
+      'FROM reproductive_events re ' +
+      'JOIN animal_profiles ap ON ap.id = re.animal_profile_id ' +
+      "WHERE re.session_id = ? AND re.event_type = 'tacto' " +
+      "AND re.pregnancy_status = 'empty' AND re.deleted_at IS NULL " +
+      "AND ap.status = 'active' AND ap.deleted_at IS NULL",
+    args: [sessionId],
+  };
+}
+
 // ─── Lotes / management_groups (T4.3) ───────────────────────────────────────────────
 
 /**
@@ -1329,6 +1377,113 @@ export function buildMotherQuery(calfProfileId: string): LocalQuery {
   return {
     sql: `${synced} UNION ALL ${overlay} LIMIT 1`,
     args: [calfProfileId, calfProfileId],
+  };
+}
+
+// ─── Tratamientos (spec 02 delta tratamientos, RTR.1/2/3/9) — lecturas + writes CRUD-plano ─────
+//
+// Capa de ESTADO sobre sanitary_events. `treatments` (header) + aplicaciones = sanitary_events linkeadas por
+// `treatment_id`. Los 3 writes (iniciar/aplicar/finalizar) son CRUD-plano sobre las tablas SINCRONIZADAS (NO
+// overlay pending_*: no son RPC-bound, igual que addWeight/addTacto) → éxito local inmediato offline (RTR.8),
+// el trigger-force del server pone establishment_id/created_by al subir (se OMITEN en el INSERT local), y la
+// RLS/CHECK/tenant-check re-validan al subir (el rechazo lo superficia uploadData, RTR.8.5). El scoping de
+// tenant de las lecturas ya lo aplicó la stream ev_treatments → NO se re-filtra; SÍ se conserva el
+// `deleted_at IS NULL` (filtro defensivo, RTR.7.6). `started_at` = wall-clock de cliente (offline, criterio 7).
+
+/**
+ * INSERT local del HEADER de un tratamiento (RTR.1.2). `id`/`started_at` de cliente. `establishment_id` y
+ * `created_by` los FUERZA el trigger al subir (anti-spoof, RTR.7.2/7.7) → se OMITEN local (la ficha lee por
+ * `animal_profile_id`; quedan NULL local, sin romper la lectura). `notes` opcional (nullable). `ended_at` NULL
+ * = EN CURSO (RTR.4.1). El CHECK de tope 120/1000 (SEC-TRT-02) + not-empty re-validan al subir (el sanitizer
+ * del cliente corta antes, misma constante). R6.3: sin .select()/RETURNING.
+ */
+export function buildStartTreatmentInsert(
+  id: string,
+  profileId: string,
+  kind: string,
+  productName: string,
+  notes: string | null,
+  startedAt: string,
+): LocalQuery {
+  return {
+    sql:
+      'INSERT INTO treatments (id, animal_profile_id, kind, product_name, notes, started_at) ' +
+      'VALUES (?, ?, ?, ?, ?, ?)',
+    args: [id, profileId, kind, productName, notes, startedAt],
+  };
+}
+
+/**
+ * INSERT local de una APLICACIÓN de tratamiento (RTR.2.2) = un sanitary_event linkeado por `treatment_id`. El
+ * `event_type` viene derivado del `kind` del tratamiento en el service (antibiotico→treatment,
+ * antiparasitario→deworming, otro→other). `product_name` NOT NULL (default = el del header). `dose_ml`/`route`/
+ * `next_dose_date` opcionales (RTR.2.3, nullable). El tenant-check del `treatment_id` (mismo animal, anti-IDOR
+ * SEC-TRT-03) + la exención de gating (RTR.2.7, treatment_id no nulo + event_type≠vaccination) re-validan al
+ * subir. `establishment_id`/`created_by` por trigger (se omiten). R6.3: sin .select().
+ */
+export function buildRegisterApplicationInsert(
+  id: string,
+  profileId: string,
+  treatmentId: string,
+  eventType: string,
+  productName: string,
+  eventDate: string,
+  doseMl: number | null,
+  route: string | null,
+  nextDoseDate: string | null,
+): LocalQuery {
+  return {
+    sql:
+      'INSERT INTO sanitary_events ' +
+      '(id, animal_profile_id, treatment_id, event_type, product_name, event_date, dose_ml, route, next_dose_date) ' +
+      'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    args: [id, profileId, treatmentId, eventType, productName, eventDate, doseMl, route, nextDoseDate],
+  };
+}
+
+/**
+ * UPDATE local de FINALIZAR un tratamiento (RTR.3.2): setea `ended_at = datetime('now')`. IDEMPOTENTE (RTR.3.4):
+ * el guard `ended_at IS NULL` hace que re-finalizar sea no-op (no altera el `ended_at` original). Mismo idiom
+ * que buildSoftDeleteEventUpdate. El trigger de inmutabilidad server-side (SEC-TRT-01) permite EXACTAMENTE esta
+ * mutación (ended_at NULL→instante) y pinnea todo lo demás. Al subir, la RLS UPDATE amplia (has_role_in, D-2)
+ * deja finalizar a cualquier rol activo. `datetime('now')` lo resuelve SQLite; el server persiste el UPDATE.
+ */
+export function buildFinalizeTreatmentUpdate(treatmentId: string): LocalQuery {
+  return {
+    sql: "UPDATE treatments SET ended_at = datetime('now') WHERE id = ? AND ended_at IS NULL",
+    args: [treatmentId],
+  };
+}
+
+/**
+ * Tratamientos de un animal para la ficha (RTR.9.1): EN CURSO primero (ended_at IS NULL), luego por
+ * started_at DESC. Filtra `deleted_at IS NULL` (defensivo, RTR.7.6). El scoping ya lo aplicó ev_treatments.
+ * Proyecta `created_by` (el "quién" de la vigilancia). El caller (fetchTreatments) agrupa las aplicaciones por
+ * treatment con buildTreatmentApplicationsQuery.
+ */
+export function buildAnimalTreatmentsQuery(profileId: string): LocalQuery {
+  return {
+    sql:
+      'SELECT id, kind, product_name, notes, started_at, ended_at, created_by ' +
+      'FROM treatments WHERE animal_profile_id = ? AND deleted_at IS NULL ' +
+      'ORDER BY (ended_at IS NULL) DESC, started_at DESC',
+    args: [profileId],
+  };
+}
+
+/**
+ * Aplicaciones de un tratamiento (RTR.9.2/9.3): los sanitary_events linkeados por `treatment_id`, recientes
+ * primero (event_date DESC, created_at DESC). Proyecta fecha, dosis (dose_ml), vía (route) y próxima dosis
+ * (next_dose_date) — la vigilancia QUÉ/CUÁNTO/CADA CUÁNTO. Filtra `deleted_at IS NULL` (defensivo). El scoping
+ * ya lo aplicó ev_sanitary_events.
+ */
+export function buildTreatmentApplicationsQuery(treatmentId: string): LocalQuery {
+  return {
+    sql:
+      'SELECT id, event_type, product_name, dose_ml, route, event_date, next_dose_date ' +
+      'FROM sanitary_events WHERE treatment_id = ? AND deleted_at IS NULL ' +
+      'ORDER BY event_date DESC, created_at DESC',
+    args: [treatmentId],
   };
 }
 

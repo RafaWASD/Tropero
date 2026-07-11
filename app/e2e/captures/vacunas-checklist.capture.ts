@@ -4,7 +4,8 @@
 //
 // Recorre el flujo del feature y saca capturas NOMBRADAS de cada estado clave a __shots__/vacunas-checklist/:
 //   01 — etapa 2: Vacunación ELEGIDA SIN vacunas → marca "Faltan vacunas" (terracota) en la fila +
-//        mensaje + continue BLOQUEADO ("Completá las vacunas").
+//        el CHEVRON de la fila coloreado en TERRACOTA (D2 enhancement Puerta 2 — CTA "tocá acá para
+//        completar") + mensaje + continue BLOQUEADO ("Completá las vacunas").
 //   02 — sheet de preconfig de Vacunación: 2 vacunas cargadas (Aftosa + Mancha).
 //   03 — etapa 2: Vacunación CON vacunas → fila con "Aftosa, Mancha" + continue habilitado.
 //   04 — carga rápida (por animal): checklist con TODAS tildadas (APLICA por default) → CTA "Aplicar y seguir".
@@ -108,9 +109,11 @@ test('capturas vacunas APLICA/NO-APLICA (checklist + pre-maniobra) @ 412px', asy
     await page.waitForTimeout(3000); // dwell: el rodeo_data_config se asienta
     await page.getByTestId('pool-row-vacunacion').click();
 
-    // (01) Vacunación elegida SIN vacunas → marca "Faltan vacunas" + continue bloqueado.
+    // (01) Vacunación elegida SIN vacunas → marca "Faltan vacunas" + CHEVRON terracota (CTA) + continue bloqueado.
     await expect(page.getByTestId('selected-config-warn-0')).toBeVisible({ timeout: 15_000 });
     await expect(page.getByText('Faltan vacunas', { exact: true })).toBeVisible();
+    // D2 enhancement (Puerta 2): el chevron '>' de la fila es un CTA terracota ("tocá acá para completar").
+    await expect(page.getByTestId('selected-config-fix-0')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Completá las vacunas', exact: true })).toBeVisible();
     await expect(page.getByText(/Falta definir la vacuna de la tanda/)).toBeVisible();
     await page.screenshot({ path: path.join(SHOT_DIR, '01-etapa2-faltan-vacunas.png') });

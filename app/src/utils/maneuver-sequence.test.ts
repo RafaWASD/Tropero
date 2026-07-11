@@ -10,6 +10,7 @@ import {
   firstUncapturedIndex,
   summaryRows,
   describeStepValue,
+  skipStepButtonLabel,
   sequenceItemKey,
   type CaptureMap,
   type CustomCaptureMap,
@@ -140,29 +141,34 @@ test('isSequenceComplete: falta un paso → false, y firstUncaptured lo apunta',
   assert.equal(firstUncapturedIndex(seqTactoPesaje, cap), 1); // pesaje sin cargar
 });
 
-test('isSequenceComplete: una maniobra PERSISTIBLE marcada skipped NO cuenta como completa', () => {
+test('isSequenceComplete (R5.15): un SALTEADO deliberado cuenta como HECHO (skip por-paso)', () => {
+  // delta v2: saltear el tacto y seguir con el pesaje NO debe frenar el resumen. `{kind:'skipped'}` es una
+  // decisión tomada (no un dato faltante) → cuenta como resuelto, igual que una captura real.
   const cap: CaptureMap = {
-    tacto: { kind: 'skipped' }, // tacto persiste → skipped es un dato faltante
+    tacto: { kind: 'skipped' }, // salteado a propósito
     pesaje: { kind: 'pesaje', weightKg: 400 },
   };
-  assert.equal(isSequenceComplete(seqTactoPesaje, cap), false);
-  assert.equal(firstUncapturedIndex(seqTactoPesaje, cap), 0);
+  assert.equal(isSequenceComplete(seqTactoPesaje, cap), true);
+  assert.equal(firstUncapturedIndex(seqTactoPesaje, cap), -1);
 });
 
-test('isSequenceComplete (M3.1): TODA maniobra del catálogo persiste → una skipped NO cuenta como lista', () => {
-  // En M3.1 todas las maniobras tienen write-path → stepPersists siempre true → un valor `skipped` (un paso
-  // que el operario aún no cargó) deja la secuencia INCOMPLETA (a diferencia de M2.2 donde la vacunación era
-  // placeholder y un skip contaba). La aplicabilidad per-animal (raspado en hembra, R6.12) se resuelve ANTES,
-  // sacando la maniobra de la secuencia — no se modela como skipped.
+test('isSequenceComplete (R5.15): solo un paso AUSENTE (undefined) frena; un skipped no', () => {
   const seq: SequenceStep[] = [factory('pesaje', 1, 2), factory('vacunacion', 2, 2)];
-  const cap: CaptureMap = {
-    pesaje: { kind: 'pesaje', weightKg: 400 },
-    vacunacion: { kind: 'skipped' },
-  };
+  // pesaje salteado + vacunación sin resolver → falta la vacunación (la salteada NO frena).
+  const cap: CaptureMap = { pesaje: { kind: 'skipped' } };
   assert.equal(isSequenceComplete(seq, cap), false);
-  // Con la vacunación capturada de verdad → completa.
-  cap.vacunacion = { kind: 'vaccination', products: ['Aftosa'] };
+  assert.equal(firstUncapturedIndex(seq, cap), 1); // apunta la vacunación ausente, NO el pesaje salteado
+  // Salteada también la vacunación → completa (dos decisiones tomadas).
+  cap.vacunacion = { kind: 'skipped' };
   assert.equal(isSequenceComplete(seq, cap), true);
+  assert.equal(firstUncapturedIndex(seq, cap), -1);
+});
+
+test('firstUncapturedIndex (R5.15): reanudar NO re-surfacea un paso salteado', () => {
+  // Secuencia tacto(salteado) → pesaje(ausente): al reanudar, se apunta el pesaje, no se vuelve al tacto.
+  const seq = seqTactoPesaje;
+  const cap: CaptureMap = { tacto: { kind: 'skipped' } };
+  assert.equal(firstUncapturedIndex(seq, cap), 1);
 });
 
 test('isSequenceComplete: secuencia vacía → true (no frena la fila)', () => {
@@ -217,8 +223,10 @@ test('describeStepValue: pesaje en es-AR (punto de miles)', () => {
   assert.equal(describeStepValue({ kind: 'pesaje', weightKg: 1050 }), '1.050 kg');
 });
 
-test('describeStepValue: skipped / ausente → "Sin cargar"', () => {
-  assert.equal(describeStepValue({ kind: 'skipped' }), 'Sin cargar');
+test('describeStepValue (R5.15): un SALTEADO deliberado → "Salteado"; ausente → "Sin cargar"', () => {
+  // delta v2: el skip por-paso es una decisión tomada → "Salteado" (no "Sin cargar", que se lee como olvido).
+  assert.equal(describeStepValue({ kind: 'skipped' }), 'Salteado');
+  // undefined (nunca se entró al paso) sigue siendo "Sin cargar" (defensivo — no debería llegar al resumen).
   assert.equal(describeStepValue(undefined), 'Sin cargar');
 });
 
@@ -286,11 +294,13 @@ test('summaryRows: una fila por paso, en orden, con label es-AR + valor + flag c
   ]);
 });
 
-test('summaryRows: una maniobra skipped (sin cargar) → captured false, valor "Sin cargar"', () => {
+test('summaryRows (R5.15): una maniobra SALTEADA → captured false, valor "Salteado" (corregible)', () => {
   const seq: SequenceStep[] = [factory('vacunacion', 1, 1)];
   const rows = summaryRows(seq, { vacunacion: { kind: 'skipped' } });
+  // captured:false → la fila se pinta en muted (no verde de "cargado"), pero el TEXTO es "Salteado"
+  // (decisión tomada), no "Sin cargar". Sigue tappable → volver al paso y cargarla si cambia de idea.
   assert.deepEqual(rows, [
-    { maneuver: 'vacunacion', source: 'factory', label: 'Vacunación', value: 'Sin cargar', captured: false },
+    { maneuver: 'vacunacion', source: 'factory', label: 'Vacunación', value: 'Salteado', captured: false },
   ]);
 });
 
@@ -327,4 +337,25 @@ test('summaryRows (B2, DD-PSC-8): tactoMeasuredSize=false → la fila del tacto 
   // Con tamaño medido (default) → la fila muestra "· Cabeza" (no se rompe el as-built).
   const withSize = summaryRows(seqTactoPesaje, cap);
   assert.equal(withSize[0].value, 'Preñada · Cabeza');
+});
+
+// ─── skipStepButtonLabel: texto del botón de skip POR-PASO del header (R5.15) ────────────────────
+
+test('skipStepButtonLabel: nombra la maniobra cuando tiene palabra corta ("Saltear tacto"/"Saltear pesaje")', () => {
+  assert.equal(skipStepButtonLabel('tacto'), 'Saltear tacto');
+  assert.equal(skipStepButtonLabel('pesaje'), 'Saltear pesaje');
+  assert.equal(skipStepButtonLabel('pesaje_ternero'), 'Saltear pesaje');
+  assert.equal(skipStepButtonLabel('vacunacion'), 'Saltear vacunas');
+  assert.equal(skipStepButtonLabel('tacto_vaquillona'), 'Saltear aptitud');
+  assert.equal(skipStepButtonLabel('condicion_corporal'), 'Saltear condición');
+  assert.equal(skipStepButtonLabel('dientes'), 'Saltear dientes');
+  assert.equal(skipStepButtonLabel('sangrado'), 'Saltear sangrado');
+  assert.equal(skipStepButtonLabel('raspado'), 'Saltear raspado');
+  assert.equal(skipStepButtonLabel('circunferencia_escrotal'), 'Saltear CE');
+});
+
+test('skipStepButtonLabel: fallback "Saltear paso" para las de nombre largo (no entran en el pill)', () => {
+  assert.equal(skipStepButtonLabel('antiparasitario'), 'Saltear paso');
+  assert.equal(skipStepButtonLabel('antibiotico'), 'Saltear paso');
+  assert.equal(skipStepButtonLabel('inseminacion'), 'Saltear paso');
 });

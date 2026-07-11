@@ -5,12 +5,21 @@
 
 **SESIÓN 2026-06-29/30 — CORRECCIONES DEL TESTEO EN VIVO CON FACUNDO (16) + CONVENCIÓN SDD PARA FIXES (ADR-028).**
 
-## 🔜 PRÓXIMA SESIÓN (retomar acá) — IMPLEMENTAR A + E (las 2 aprobadas en Puerta 1)
-**Pausa deliberada (2026-07-10)**: el contexto de esta sesión quedó enorme; las implementaciones de A y E se hacen en sesión FRESCA (mejor orquestación del leader, specs durables en el repo, evita la compactación mid-implementación). Raf de acuerdo. Ambas features **Puerta 1 APROBADAS**, listas para implementer:
-- **A · lotes-venta** — frontend puro, **Gate 1 N/A** → implementer sobre `specs/active/02-modelo-animal/tasks-lotes-venta.md`. Reusa `exit_animal_profile` (loop client-side, offline-first). NO toca schema. Baja = 'Venta' simple; motivos tanda = Venta/Muerte; "Descarte" = nombre de lote.
-- **E · tratamientos** — **CON BACKEND: migración `0123`, DEPLOY GATEADO A RAF** → implementer sobre `tasks-tratamientos.md`. Gate 1 PASS. El **token de color** de la marca "en tratamiento" (azul/turquesa sanitario, distinto de terracota/amber) lo define el leader + veta en Gate 2.5.
-- **Orden**: leer las 6 specs → implementer(s) → reviewer → Gate 2 (E toca schema) → Gate 2.5 (capturas) → Puerta 2. Deploy de E gateado a Raf.
-- **También ⏸ pendiente**: Puerta 2 de los 5 fixes de la demo (B/F/C/D1/D2 — mostrarle las capturas, ya renderizadas).
+## 🆕 SESIÓN 2026-07-10/11 — IMPLEMENTADAS A + C-rediseño + D2 + E(WIP) (sesión fresca, orquestada por el leader)
+Se implementaron en paralelo (implementers file-disjuntos, 2 crashearon por API y se resumieron OK). Gates SDD completos por feature. **check.mjs verde** (lo corrió el reviewer de A con las 3 features en el árbol).
+
+**✅ A · lotes-venta — Puerta 2 APROBADA (Raf, 2026-07-11) + COMMITTEADA.** Frontend puro (Gate 1 N/A, sin migración). Loop client-side de `exit_animal_profile` + clear de membresía + sugerencia post-tacto de vacías (`ExitJornadaSheet` 'terminated' → `SugerenciaVaciasSheet`). "Venta simple" (Venta/Muerte). reviewer APPROVED (tras fix de 1 línea stale en `design-lotes-venta.md`) · Gate 2 PASS 0 HIGH (anti-IDOR `fetchGroupMembers` ∩ ids) · Gate 2.5 7 capturas veto PASS (seed fix `vaca`→`multipara`). Divergencias validadas: query de vacías SIN overlay UNION (el tacto es CRUD-plano a la tabla synced) + "crear lote" owner-only. Foldeada a la tabla de deltas de spec 02.
+
+**✅ C-rediseño (skip-por-paso) + D2-chevron — Puerta 2 APROBADA (Raf, 2026-07-11) + COMMITTEADA.** El skip per-animal de `skip-animal-maniobra` (C v1) fue **rechazado por Raf**: rediseñado a **skip POR-PASO** (pill "Saltear <maniobra>" primario → saltea ese paso y avanza al siguiente del MISMO animal; `{kind:'skipped'}` = HECHO, resumen "Salteado"; el skip animal-entero sobrevive demovido a "⋮" secundario). + D2: chevron de "Faltan vacunas" → CTA terracota. reviewer APPROVED + Gate 2 PASS + Gate 2.5 veto PASS (5 shots skip-por-paso + chevron). Spec 03 deltas foldeadas (`skip-por-paso-v2` done; `skip-animal-maniobra` supersedido a secundario; `vacunas-aplica-no-aplica` done).
+
+**✅ B / F / D1 — Puerta 2 APROBADA (Raf, 2026-07-11).** Ya estaban committeadas (`5b08e24` F, `a2354d9` B/D1). B=gating tacto (ternera no pasa por ambos), F=% KPI no se recorta, D1=continuar sin vacunar. C v1 del mismo commit quedó supersedido por skip-por-paso.
+
+## 🔜 PRÓXIMA SESIÓN (retomar acá) — CERRAR E (tratamientos)
+**E quedó código-completo + reviewer APPROVED + Gate 2 PASS**, committeada como **checkpoint WIP** (comparte `local-reads.ts` con A → fue en el mismo commit; `feature_list` spec 02 sigue `deferred`, E no es done). Token teal `#106B7A`/`#DBEEF3` aplicado. Falta (EN ORDEN):
+1. **Fix de reliability (Gate 2, quedó a medias por el LÍMITE DE SUBAGENTES que cortó ~00:00 ART)**: `TREATMENT_ROUTE_OPTIONS` (`app/src/utils/treatment-input.ts`) ofrece la vía `intravenous` que NO existe en el enum `sanitary_route` (0027/0090 = {intramuscular, subcutaneous, oral, topical, other, intranasal}) → rechazaría al sync (poison-pill). Resumir implementer `abd47ff3` (o uno nuevo) → quitar `intravenous`, alinear el selector al enum, verificar que ningún test/capture la use.
+2. **DEPLOY de `0123` (GATEADO A RAF)**: aplicar `supabase/migrations/0123_treatments.sql` por MCP (moldeada sobre 0091 vigente, verificado byte-a-byte por reviewer+Gate 2) → pegar la stream `ev_treatments` (de `sync-streams/rafaq.yaml`) en el dashboard PowerSync (Validate+Deploy — la tabla debe existir ANTES) → `notify pgrst`.
+3. **Post-deploy**: descomentar+correr `supabase/tests/treatments/run.cjs` (RLS a-j) + re-correr las suites del gating (maniobras spec 03 + animal/sanitary, tras el CREATE OR REPLACE) + `app/e2e/treatments.spec.ts` + `check.mjs` full.
+4. **Gate 2.5 + Puerta 2**: renderizar `app/e2e/captures/tratamientos.capture.ts` (13 shots) + veto visual del token teal → Puerta 2 → foldear la fila `tratamientos` a done. Detalle: `progress/impl_tratamientos.md` + `security_code_tratamientos.md` + `review` (inline).
 
 ## 🆕 2026-07-10 — 2da DEMO EN VIVO (Facundo + su PADRE, productor real) → triage 6 ítems
 Segunda ronda de feedback en vivo (usuario final real). Triage + grounding (4 exploradores) en `docs/correcciones-demo-facundo-padre-2026-07-10.md`. 6 ítems: B/F/C/D1 (quick fixes) + D2 (rediseño vacunas) + A (lotes de venta, Gate 0) + E (tratamientos, Gate 0).

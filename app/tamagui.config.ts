@@ -59,6 +59,12 @@ const palette = {
   //   cutText #855300 sobre blanco #FFFFFF = 6.49:1 (≥4.5 ✅).
   cutText: '#855300', // amber oscuro — TEXTO del badge CUT (y del ícono/afordancia de la ficha)
   cutBg: '#FBE6AE', // amber pálido — FONDO del badge CUT (inequívoco vs el $greenLight #93cfac)
+  // Par SANITARIO de la marca "en tratamiento" (delta spec 02 tratamientos, RTR.4.5). Teal-cian = semántica
+  // clínica, distinto de verde (identidad), terracota (alertas) y amber (CUT/diferida). Contraste WCAG 2.1
+  // MEDIDO: treatmentText #106B7A sobre $bg 5.87:1 / $surface 5.71:1 / blanco 6.17:1; par treatmentText sobre
+  // treatmentBg #DBEEF3 = 5.15:1 (≥4.5 ✅, supera la ref verde 4.55).
+  treatmentText: '#106B7A', // teal-cian — texto/ícono/borde de la marca "en tratamiento"
+  treatmentBg: '#DBEEF3', // cian pálido — fondo del chip
   greenLight: '#93cfac', // verde claro — icon containers + halo del FAB
   // Halo del FAB (ADR-018): greenLight (#93cfac = rgb(147,207,172)) al 45% de alpha.
   // Es el MISMO verde claro translúcido — se expone como token de color propio para
@@ -113,6 +119,8 @@ const tokens = createTokens({
     amberPress: palette.amberPress,
     cutText: palette.cutText, // delta spec 02 (RCUT.6): TEXTO del badge CUT (descarte) — amber oscuro, 5.27:1
     cutBg: palette.cutBg, // delta spec 02 (RCUT.6): FONDO del badge CUT — amber pálido (espejo $greenLight)
+    treatmentText: palette.treatmentText, // delta spec 02 (RTR.4.5): TEXTO/ícono/borde de la marca "en tratamiento" — teal-cian, 6.17:1 sobre blanco
+    treatmentBg: palette.treatmentBg, // delta spec 02 (RTR.4.5): FONDO del chip "en tratamiento" — cian pálido (par 5.15:1)
     greenLight: palette.greenLight,
     fabHalo: palette.fabHalo, // verde claro translúcido del halo del FAB (= greenLight @ 45%)
     scrim: palette.scrim, // negro translúcido del scrim de modales/sheets (= textPrimary @ 45%)

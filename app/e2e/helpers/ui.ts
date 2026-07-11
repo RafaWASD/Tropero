@@ -126,6 +126,19 @@ export async function gotoRodeoGroup(page: Page, rodeoName: string): Promise<voi
   await expect(page.getByRole('button', { name: 'Castrar', exact: true })).toBeVisible({ timeout: 30_000 });
 }
 
+/**
+ * Inicio rodeo-céntrico (spec 10 R2.2) → VISTA DE GRUPO de un LOTE (lote/[id]). La card del lote es un
+ * GroupSummaryCard (role="button" cuyo nombre accesible incluye el nombre del lote). Aterriza en la vista de
+ * grupo del lote; la ancla es la afordancia "Vender / Descartar" (delta lotes-venta, RLV.2 — presente con
+ * ≥1 activo). El lote debe tener animales activos para figurar en la home.
+ */
+export async function gotoLoteGroup(page: Page, loteName: string): Promise<void> {
+  const card = page.getByRole('button', { name: new RegExp(escapeRegExp(loteName)) }).first();
+  await expect(card).toBeVisible({ timeout: 30_000 });
+  await card.click();
+  await expect(page.getByTestId('lote-vender-descartar')).toBeVisible({ timeout: 30_000 });
+}
+
 /** Escapa los metacaracteres de regex de un literal (el RUN_TAG no los tiene, pero defensivo). */
 export function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

@@ -32,9 +32,11 @@ import {
   buildSetSessionRodeoUpdate,
   buildActiveSessionQuery,
   buildSessionByIdQuery,
+  buildSessionEmptyFemalesQuery,
 } from './powersync/local-reads';
-import { runLocalWrite, runLocalQuerySingle } from './powersync/local-query';
+import { runLocalWrite, runLocalQuery, runLocalQuerySingle } from './powersync/local-query';
 import { parseManeuverConfig, type ManeuverConfig } from '../utils/maneuver-config';
+import { formatEidReadable } from '../utils/eid-format';
 
 // ─── Error / Result uniforme (mismo shape que events.ts / management-groups.ts) ──────────────
 
@@ -282,6 +284,52 @@ export async function getSessionById(id: string): Promise<ServiceResult<Session 
   });
   if (!r.ok) return { ok: false, error: { kind: r.error.kind, message: r.error.message } };
   return { ok: true, value: r.value ? toSession(r.value) : null };
+}
+
+// ─── Vacías de la sesión — sugerencia post-tacto (delta lotes-venta, RLV.10.1/RLV.10.2) ───────
+
+/** Una vaca vacía de la sesión: su perfil + un identificador legible (para el conteo + la asignación). */
+export type SessionEmptyFemale = {
+  profileId: string;
+  /** Identificador HERO legible es-AR (idv → caravana electrónica agrupada → "Animal"). */
+  hero: string;
+};
+
+type EmptyFemaleRow = { profile_id: string; idv: string | null; tag_electronic: string | null };
+
+/**
+ * Lista las VACÍAS de una sesión de tacto (RLV.10.1): perfiles activos con tacto 'empty' de esa `session_id`,
+ * DISTINCT por animal. Lectura LOCAL (offline): el tacto de manga vive por CRUD-plano en `reproductive_events`
+ * (tabla synced) desde el instante de la carga → esta lectura lo ve sin sincronizar. Alimenta el conteo de la
+ * sugerencia ("Encontramos N vacías", RLV.10.2) y la asignación al lote (RLV.14). emptyIsSyncing:false — "no
+ * hay vacías" es un resultado legítimo (la sugerencia simplemente no se ofrece), NO falta de sync.
+ *
+ * Multi-tenant (CLAUDE.md ppio 6): NO recibe establishment_id (la `session_id` ya acota al campo de la
+ * jornada; el scoping lo aplicó la stream). El `hero` se deriva de idv/tag (sin apodo: el conteo prima).
+ */
+export async function fetchSessionEmptyFemales(
+  sessionId: string,
+): Promise<ServiceResult<SessionEmptyFemale[]>> {
+  const r = await runLocalQuery<EmptyFemaleRow>(buildSessionEmptyFemalesQuery(sessionId), {
+    emptyIsSyncing: false,
+  });
+  if (!r.ok) return { ok: false, error: { kind: r.error.kind, message: r.error.message } };
+  return {
+    ok: true,
+    value: r.value.map((row) => ({
+      profileId: row.profile_id,
+      hero: emptyFemaleHero(row.idv, row.tag_electronic),
+    })),
+  };
+}
+
+/** Identificador legible de una vaca vacía: idv → caravana electrónica agrupada → "Animal". */
+function emptyFemaleHero(idv: string | null, tag: string | null): string {
+  const v = idv?.trim();
+  if (v) return v;
+  const t = tag?.trim();
+  if (t) return formatEidReadable(t);
+  return 'Animal';
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────────

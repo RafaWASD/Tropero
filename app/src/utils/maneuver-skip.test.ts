@@ -121,6 +121,34 @@ test('dedupe por tabla (defensivo: el mismo id no se repite)', () => {
   assert.deepEqual(targets, [{ table: 'sanitary_events', ids: ['s-0', 's-1'] }]);
 });
 
+// ─── (b.bis) corrección de UN paso YA capturado → SALTEADO (skip por-paso v2, R5.15) ─────────
+//
+// El frame arma `{[maneuver]: prev}` (un ÚNICO paso) y descarta SOLO las filas de ese paso — el resto de las
+// capturas del animal quedan intactas. Es el mismo collectManeuverDiscardTargets, ACOTADO a un paso (no al
+// animal entero). Estos tests fijan ese contrato (lo que consume carga.tsx al corregir captura→salteado).
+
+test('corrección captura→salteado: target de UN solo paso (acotado, no todo el animal)', () => {
+  // Se saltea el pesaje (ya capturado) desde el resumen → solo weight_events (su fila). Nada más se toca.
+  const prev: CaptureMap = { pesaje: { kind: 'pesaje', weightKg: 412 } };
+  const ids: CapturedEventIds = { event: { pesaje: 'w-1' }, extra: {}, custom: {} };
+  assert.deepEqual(collectManeuverDiscardTargets(prev, {}, ids), [{ table: 'weight_events', ids: ['w-1'] }]);
+});
+
+test('corrección captura→salteado de vacunación: soft-borra TODAS las filas del paso (eventId + extras)', () => {
+  const prev: CaptureMap = { vacunacion: { kind: 'vaccination', products: ['Aftosa', 'Mancha'] } };
+  const ids: CapturedEventIds = { event: { vacunacion: 's-0' }, extra: { vacunacion: ['s-1'] }, custom: {} };
+  assert.deepEqual(collectManeuverDiscardTargets(prev, {}, ids), [
+    { table: 'sanitary_events', ids: ['s-0', 's-1'] },
+  ]);
+});
+
+test('corrección dientes→salteado: NO borra (propiedad de animal_profiles, el teeth_state queda)', () => {
+  // dientes es un UPDATE de propiedad (no fila de evento) → excluido del descarte, igual que en skip-animal.
+  const prev: CaptureMap = { dientes: { kind: 'dientes', teethState: 'boca_llena', cut: false } };
+  const ids: CapturedEventIds = { event: { dientes: 'x' }, extra: {}, custom: {} };
+  assert.deepEqual(collectManeuverDiscardTargets(prev, {}, ids), []);
+});
+
 // ─── (c) soft-delete idempotente ─────────────────────────────────────────────────────────
 
 test('buildManeuverEventSoftDeleteQuery → UPDATE deleted_at guard, id como arg', () => {

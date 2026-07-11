@@ -122,6 +122,15 @@ diagnosticó al menos una hembra como vacía, el sistema deberá ofrecer agregar
 con un evento de tacto de esa `session_id` cuyo `pregnancy_status` vigente (no borrado) es `empty`, sin
 duplicados por animal.
 
+> **Reconciliación as-built (implementer, 2026-07-10).** La query (`buildSessionEmptyFemalesQuery`) lee SOLO
+> `reproductive_events` (tabla sincronizada), **sin** UNION al overlay `pending_reproductive_events`. Motivo:
+> un tacto de MANGA se persiste por **CRUD-plano directo sobre `reproductive_events`** (`buildAddTactoInsert`
+> → `runLocalWrite`), con `session_id` + `pregnancy_status`, quedando LOCAL al instante (offline, RLV.22/23) —
+> esta query lo ve sin sincronizar. El overlay `pending_reproductive_events` solo porta PARTOS optimistas
+> (`event_type='birth'`, `pregnancy_status` NULL) → jamás contiene un tacto `empty`; un UNION a él sería dead
+> code. La offline-first se cumple igual (el tacto CRUD-plano ya está local). Ajusta lo previsto en `design`
+> §4.2 / tasks T1.4-T1.5 (que mencionaban "overlay UNION").
+
 **RLV.10.2** — El sistema deberá mostrar la cantidad de vacías encontradas en la sugerencia.
 
 **RLV.11** — El sistema deberá permitir saltar la sugerencia de las vacías sin agregar ningún animal a un lote.
@@ -131,6 +140,13 @@ existente del establecimiento activo para agregarlas.
 
 **RLV.13** — Cuando el usuario acepta la sugerencia de las vacías, el sistema deberá permitir crear un lote
 nuevo ahí mismo para agregarlas, proponiendo el nombre "Descarte" por default (editable).
+
+> **Reconciliación as-built (implementer, 2026-07-10).** La afordancia "Crear lote nuevo" se ofrece SOLO al
+> **owner** (`canManageGroups`, RLS `management_groups_insert = is_owner_of`, 0037). Un no-owner
+> (field_operator/veterinarian) puede ELEGIR un lote existente (RLV.12, `assignAnimalToGroup = has_role_in`)
+> pero NO crear uno: ofrecérselo dejaría un INSERT que el server rechaza al subir (42501), con la asignación
+> de las vacías colgando (FK a un lote inexistente). Mismo criterio de honestidad-de-UI que la pantalla de
+> gestión de lotes (`/lotes`). El default "Descarte" y la edición del nombre se conservan tal cual.
 
 **RLV.14** — Cuando el usuario elige o crea el lote para las vacías, el sistema deberá asignar cada vaca vacía
 de la sesión a ese lote (`assignAnimalToGroup`), sin tocar su rodeo.

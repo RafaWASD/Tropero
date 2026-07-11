@@ -172,6 +172,10 @@ test('captura wizard de jornada: inicio → rodeo → maniobras (reorder) → re
   await expect(page.getByTestId('selected-config-2')).toHaveCount(0);
   await expect(page.getByTestId('selected-config-warn-2')).toBeVisible();
   await expect(page.getByText('Faltan vacunas', { exact: true })).toBeVisible();
+  // D2 ENHANCEMENT (Puerta 2): el chevron '>' de la fila se vuelve un CTA TERRACOTA (círculo lleno) para
+  // señalar "tocá acá para completar" — reforzando la marca "Faltan vacunas". Y el continue queda BLOQUEADO.
+  await expect(page.getByTestId('selected-config-fix-2')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Completá las vacunas', exact: true })).toBeVisible();
   // Restauramos "Brucelosis" para no alterar el resto del flujo (etapa 3 espera el valor cargado).
   await page.getByTestId('selected-body-2').click();
   await expect(page.getByTestId('maneuver-config-sheet')).toBeVisible({ timeout: 10_000 });

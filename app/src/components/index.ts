@@ -53,6 +53,13 @@ export { GroupSummaryCard } from './GroupSummaryCard';
 export type { GroupSummaryCardProps } from './GroupSummaryCard';
 export { BulkConfirmSheet } from './BulkConfirmSheet';
 export type { BulkConfirmSheetProps } from './BulkConfirmSheet';
+// delta spec 02 tratamientos — sección de la ficha + sheets de iniciar/aplicar
+export { TreatmentsSection } from './TreatmentsSection';
+export type { TreatmentsSectionProps } from './TreatmentsSection';
+export { TreatmentStartSheet } from './TreatmentStartSheet';
+export type { TreatmentStartSheetProps, TreatmentStartSubmit } from './TreatmentStartSheet';
+export { TreatmentApplicationSheet } from './TreatmentApplicationSheet';
+export type { TreatmentApplicationSheetProps, TreatmentApplicationSubmit } from './TreatmentApplicationSheet';
 export { BulkProgressPanel } from './BulkProgressPanel';
 export type {
   BulkProgressPanelProps,

@@ -404,6 +404,30 @@ const sanitary_events = new Table({
   adverse_reaction: column.integer,
   notes: column.text,
   created_by: column.text,
+  // treatment_id (spec 02 delta tratamientos, 0123): FK a treatments (nullable — los sanitarios sueltos de
+  // maniobra siguen sin header). Una APLICACIÓN de tratamiento es un sanitary_event con este link. La stream
+  // ev_sanitary_events hace SELECT * → la columna baja; sin declararla el SQLite local no la materializa y
+  // buildTreatmentApplicationsQuery (`WHERE treatment_id = ?`) tiraría "no such column". uuid→TEXT.
+  treatment_id: column.text,
+  created_at: column.text,
+  deleted_at: column.text,
+});
+
+// spec 02 delta tratamientos (0123) — HEADER del tratamiento (ciclo started_at→ended_at). "En tratamiento" =
+// DERIVADO (existe una fila con ended_at IS NULL AND deleted_at IS NULL). Sin flag en animal_profiles (RTR.4.2).
+// establishment_id/created_by los FUERZA el trigger server-side al subir (CRUD-plano: no se mandan en el
+// INSERT local). Baja por la stream ev_treatments (scope establishment). timestamptz/uuid → TEXT; enum kind →
+// TEXT. Los 3 writes (iniciar/aplicar/finalizar) son CRUD-plano sobre tablas SINCRONIZADAS (no RPC-bound) →
+// sin overlay pending_* (igual que addWeight/addTacto).
+const treatments = new Table({
+  animal_profile_id: column.text,
+  establishment_id: column.text,
+  kind: column.text,
+  product_name: column.text,
+  notes: column.text,
+  started_at: column.text,
+  ended_at: column.text,
+  created_by: column.text,
   created_at: column.text,
   deleted_at: column.text,
 });
@@ -714,6 +738,8 @@ export const AppSchema = new Schema({
   weight_events,
   reproductive_events,
   sanitary_events,
+  // spec 02 delta tratamientos (0123) — header de tratamiento (scope establishment vía ev_treatments)
+  treatments,
   condition_score_events,
   lab_samples,
   // spec 03 M6 — circunferencia escrotal (CRUD-plano; scope establishment vía ev_scrotal_measurements)

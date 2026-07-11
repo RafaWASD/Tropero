@@ -97,6 +97,7 @@ export default function RodeoGroupScreen() {
           sex={a.sex}
           rodeo={a.rodeoName}
           futureBull={a.futureBull}
+          inTreatment={a.inTreatment}
           onPress={() => router.push({ pathname: '/animal/[id]', params: { id: a.profileId } })}
         />
       )}

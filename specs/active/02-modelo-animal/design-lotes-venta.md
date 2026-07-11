@@ -123,11 +123,19 @@ columna de tipo").
   - Nueva función pura `resolveEffectiveSaleData({ commonPrice, commonWeight, overridePrice, overrideWeight })`
     → `{ price, weight }` (RLV.5.2/RLV.6): el override gana sobre el común; ambos pueden ser null.
   - Reusar `validateExitWeight`/`validateExitPrice`/`sanitizePriceInput` (RLV.6.1) sin cambios.
-- **`app/src/services/management-groups.ts`** (MODIFICAR) o un módulo nuevo `batch-exit.ts` (I/O):
-  - Nueva función `exitAnimalsBatch(input)` que recorre los animales seleccionados y, por cada uno, llama
-    `enqueueExitAnimal(...)` (con su precio/peso efectivo) y `assignAnimalToGroup(profileId, null)` (RLV.7/RLV.9.1).
-    Devuelve un resumen `{ ok, count }` (fail-closed en error de DB local). El rechazo server-side lo maneja la
-    outbox (RLV.8), no el return.
+- **`app/src/services/batch-exit.ts`** (CREADO, I/O — as-built) + **`app/src/utils/batch-exit-plan.ts`**
+  (CREADO, lógica PURA — as-built):
+  - **`exitAnimalsBatch(input)`** (en `services/batch-exit.ts`) es un THIN wrapper de I/O que llama a
+    `planBatchExit(...)` + `runBatchExit(...)`. Devuelve `{ ok, count }` (fail-closed en error de DB local); el
+    rechazo server-side lo maneja la outbox (RLV.8).
+  - **Split pure/io (as-built, decisión de testabilidad):** la lógica del loop vive PURA en
+    `utils/batch-exit-plan.ts` — `planBatchExit(common, targets)` deriva los params por animal
+    (motivo→status/reason vía `batchExitReasonToStatus`, fecha común, precio/peso efectivo vía
+    `resolveEffectiveSaleData`; Muerte fuerza precio/peso null) y `runBatchExit(planned, deps)` recorre el plan
+    con las OPERACIONES DE I/O **inyectadas** (`enqueueExit`/`clearMembership`), fail-closed en orden
+    enqueue→clear. `services/batch-exit.ts` importa el SDK (vía outbox/management-groups) → NO carga bajo
+    node:test; el loop se testea vía `runBatchExit` con fakes (`batch-exit-plan.test.ts`, T2.3). Mismo patrón
+    pure↔io que `exit-animal.ts`↔`animals.ts` / `bulk-operations-plan.ts`↔`bulk-operations.ts`.
 - **`app/src/utils/batch-exit-selection.ts`** (CREAR, lógica pura): estado de selección del subconjunto
   (toggle por animal, seleccionar/deseleccionar todos, contador) — RLV.3/RLV.3.1/RLV.3.2. Testeable con node:test.
 - **`app/app/lote/[id].tsx`** (MODIFICAR): agregar la acción "Vender / Descartar" (RLV.2). Al activarla → **modo
@@ -149,10 +157,14 @@ columna de tipo").
 - **`app/src/services/powersync/local-reads.ts`** (MODIFICAR): nuevo builder puro
   `buildSessionEmptyFemalesQuery(sessionId)` → SELECT sobre `reproductive_events` (unido a `animal_profiles`
   activos) de esa `session_id` con `event_type='tacto'`, `pregnancy_status='empty'`, `deleted_at IS NULL`,
-  `DISTINCT` por `animal_profile_id`, filtrando perfiles `status='active'` y no borrados (RLV.10.1). Debe
-  considerar el overlay (una vaca vacía cargada offline en esta misma sesión vive en `pending_reproductive_events`
-  hasta sincronizar) — mismo patrón UNION overlay/synced que las otras queries de reproductive_events. Testeable
+  `DISTINCT` por `animal_profile_id`, filtrando perfiles `status='active'` y no borrados (RLV.10.1). Testeable
   en `local-reads.test.ts`.
+  > **Reconciliación as-built (implementer): SIN overlay UNION.** El plan preveía un UNION a
+  > `pending_reproductive_events`. As-built NO se incluye: un tacto de MANGA se persiste por **CRUD-plano
+  > directo sobre la tabla sincronizada `reproductive_events`** (`buildAddTactoInsert` → `runLocalWrite`) →
+  > queda LOCAL al instante (offline-first satisfecho, RLV.22/23) y esta query lo ve sin sincronizar. El
+  > overlay `pending_reproductive_events` solo porta PARTOS optimistas (`birth`, `pregnancy_status` NULL) →
+  > nunca un tacto `empty`; un UNION sería dead code. Ver RLV.10.1 (nota).
 - **`app/src/services/sessions.ts`** (MODIFICAR) o `management-groups.ts`: `fetchSessionEmptyFemales(sessionId)`
   (thin sobre `runLocalQuery(buildSessionEmptyFemalesQuery(...))`) → lista de `{ profileId, hero }` para mostrar
   el conteo y asignar.
@@ -161,9 +173,12 @@ columna de tipo").
   saltable "Encontramos {N} vacías. ¿Agregarlas a un lote?" con acciones **"Elegir lote"** / **"Ahora no"**
   (RLV.10/RLV.11). "Elegir lote" abre el picker.
 - **`app/app/maniobra/_components/SugerenciaVaciasSheet.tsx`** (CREAR) o extensión del picker: lista los lotes
-  del campo (`fetchManagementGroups`) con "Sin lote" reemplazado por **"Crear lote nuevo"** (default "Descarte",
-  RLV.12/RLV.13). Al elegir/crear → `assignAnimalToGroup(profileId, groupId)` por cada vaca (RLV.14) →
-  confirmación + salir del flujo. Molde de `LotePickerSheet` (patrón de sheet, header fijo, guard tap-through).
+  del campo (`fetchManagementGroups`) + una fila **"Crear lote nuevo"** (default "Descarte", RLV.12/RLV.13). Es
+  PRESENTACIONAL (no llama services): expone `onChooseExisting(groupId)` / `onCreateNew(name)` y el caller
+  (`identificar.tsx`) persiste — `createManagementGroup` + `assignAnimalToGroup(profileId, groupId)` por cada
+  vaca (RLV.14) → confirmación + salir del flujo. Molde de `LotePickerSheet` (header fijo, body scroll, guard
+  tap-through). **As-built:** "Crear lote nuevo" se ofrece SOLO al owner (`canCreate` = `canManageGroups`, RLS
+  0037 create=owner-only) — ver reconciliación de RLV.13.
 - **`app/app/maniobra/identificar.tsx`** (MODIFICAR): calcular `emptyCount` al abrir el sheet de salida (o al
   pasar a `'terminated'`): `fetchSessionEmptyFemales(sessionId)` solo si la config de la jornada incluía tacto
   (leer de la sesión); pasar el conteo + la lista al `ExitJornadaSheet`. Cero hardcode de `establishment_id`
@@ -191,7 +206,7 @@ columna de tipo").
 - **Offline-first (RLV.22/RLV.23):** todo el flujo es local + outbox. Baja en tanda = N `enqueueExitAnimal`
   (intent + overlay `'exited'`) + N `assignAnimalToGroup(null)` (UPDATE local). Sugerencia de vacías =
   `createManagementGroup` (INSERT local) y/o `assignAnimalToGroup` (UPDATE local), todo offline con efecto
-  optimista al instante. Derivación de vacías = query al SQLite local (incluye overlay `pending_reproductive_events`).
+  optimista al instante. Derivación de vacías = query al SQLite local (SIN overlay `pending_reproductive_events` — ver §4.2: el tacto de manga es CRUD-plano directo a la tabla synced `reproductive_events`, ya local offline; el overlay solo porta partos).
 
 ## 6. Alternativa descartada (design.md exige ≥1)
 

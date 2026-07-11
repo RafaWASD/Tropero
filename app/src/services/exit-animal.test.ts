@@ -16,6 +16,10 @@ import {
   archivedBadgeLabel,
   EXIT_REASON_MAPPINGS,
   EXIT_ERROR_COPY,
+  BATCH_EXIT_MAPPINGS,
+  batchExitReasonToStatus,
+  isBatchExitChoice,
+  resolveEffectiveSaleData,
   type ExitReasonChoice,
 } from './exit-animal.ts';
 
@@ -205,4 +209,74 @@ test('badge: archivado SIN fecha (datos viejos) → solo el verbo, NUNCA "null"'
 test('badge: status active → null (la ficha NO muestra badge para un animal vivo)', () => {
   assert.equal(archivedBadgeLabel('active', '2026-06-07'), null);
   assert.equal(archivedBadgeLabel('active', null), null);
+});
+
+// ─── delta lotes-venta: BATCH_EXIT_MAPPINGS (RLV.4/RLV.4.1/RLV.4.2) ─────────────────────
+
+test('RLV.4.1: la tanda ofrece EXACTAMENTE Venta + Muerte (subconjunto, no los 3 de la ficha)', () => {
+  assert.equal(BATCH_EXIT_MAPPINGS.length, 2);
+  const choices = BATCH_EXIT_MAPPINGS.map((m) => m.choice).sort();
+  assert.deepEqual(choices, ['death', 'sale']);
+});
+
+test('RLV.4.1: Venta→(sold,sale)+captura datos; Muerte→(dead,death) sin datos', () => {
+  const venta = BATCH_EXIT_MAPPINGS.find((m) => m.choice === 'sale');
+  const muerte = BATCH_EXIT_MAPPINGS.find((m) => m.choice === 'death');
+  assert.ok(venta && muerte);
+  assert.deepEqual([venta.status, venta.exitReason, venta.capturesSaleData], ['sold', 'sale', true]);
+  assert.deepEqual([muerte.status, muerte.exitReason, muerte.capturesSaleData], ['dead', 'death', false]);
+});
+
+test('RLV.4.2: la tanda NUNCA expone culling/transfer/theft/other (Venta simple, Puerta 1)', () => {
+  for (const forbidden of ['culling', 'transfer', 'theft', 'other']) {
+    assert.ok(!BATCH_EXIT_MAPPINGS.some((m) => m.choice === forbidden), `${forbidden} no va en la tanda`);
+    assert.equal(batchExitReasonToStatus(forbidden), null, `${forbidden} → mapping null`);
+    assert.equal(isBatchExitChoice(forbidden), false, `${forbidden} no es batch choice`);
+  }
+  // La transferencia SÍ sigue en la ficha per-animal (EXIT_REASON_MAPPINGS), NO en la tanda.
+  assert.ok(EXIT_REASON_MAPPINGS.some((m) => m.choice === 'transfer'));
+});
+
+test('RLV.4.1: BATCH es un SUBCONJUNTO FIEL de EXIT_REASON_MAPPINGS (mismo status/label, sin duplicar)', () => {
+  for (const m of BATCH_EXIT_MAPPINGS) {
+    const src = exitReasonToStatus(m.choice);
+    assert.deepEqual(src, m, `${m.choice} debe ser la MISMA entrada que en la ficha`);
+  }
+});
+
+test('isBatchExitChoice / batchExitReasonToStatus resuelven Venta y Muerte', () => {
+  assert.equal(isBatchExitChoice('sale'), true);
+  assert.equal(isBatchExitChoice('death'), true);
+  assert.equal(batchExitReasonToStatus('sale')?.status, 'sold');
+  assert.equal(batchExitReasonToStatus('death')?.status, 'dead');
+});
+
+// ─── delta lotes-venta: resolveEffectiveSaleData (RLV.5.2/RLV.6) ────────────────────────
+
+test('RLV.5.2: sin override, el animal usa el precio/peso COMÚN de la tanda', () => {
+  const r = resolveEffectiveSaleData({ commonPrice: 250000, commonWeight: 380, overridePrice: null, overrideWeight: null });
+  assert.deepEqual(r, { price: 250000, weight: 380 });
+});
+
+test('RLV.5.2: override undefined (el operario no tocó el animal) → cae al común', () => {
+  const r = resolveEffectiveSaleData({ commonPrice: 250000, commonWeight: 380 });
+  assert.deepEqual(r, { price: 250000, weight: 380 });
+});
+
+test('RLV.6: el override GANA sobre el común (precio y peso, independientes)', () => {
+  const r = resolveEffectiveSaleData({ commonPrice: 250000, commonWeight: 380, overridePrice: 300000, overrideWeight: 410 });
+  assert.deepEqual(r, { price: 300000, weight: 410 });
+  // Solo uno de los dos con override → el otro sigue el común.
+  const soloPrecio = resolveEffectiveSaleData({ commonPrice: 250000, commonWeight: 380, overridePrice: 300000 });
+  assert.deepEqual(soloPrecio, { price: 300000, weight: 380 });
+});
+
+test('RLV.5.2/RLV.6: común null + sin override → null (no se manda); override 0 no aplica (validado aparte)', () => {
+  // Ambos null → efectivo null (el RPC coalesce: null no pisa nada).
+  assert.deepEqual(resolveEffectiveSaleData({ commonPrice: null, commonWeight: null }), { price: null, weight: null });
+  // Override presente PISA un común null.
+  assert.deepEqual(
+    resolveEffectiveSaleData({ commonPrice: null, commonWeight: null, overridePrice: 100000, overrideWeight: 350 }),
+    { price: 100000, weight: 350 },
+  );
 });

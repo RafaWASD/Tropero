@@ -1,17 +1,23 @@
 // e2e/captures/skip-animal-maniobra.capture.ts — CAPTURAS para el veto visual del leader (Gate 2.5, ADR-029)
-// del delta `skip-animal-maniobra` (spec 03 R5.15, ítem C triage demo-facundo-padre): botón SALTEAR un animal
-// en la carga rápida de MODO MANIOBRA.
+// del delta `skip-por-paso-v2` (spec 03 R5.15, Puerta 2 demo-facundo-padre): REDISEÑO del SALTEAR en la carga
+// rápida de MODO MANIOBRA. El skip pasa de per-animal (v1, rechazado) a POR-PASO (primario) + animal-entero
+// (secundario).
 //
-// Recorre el flujo del feature y saca capturas NOMBRADAS de cada estado clave a __shots__/skip-animal-maniobra/:
-//   01 — carga rápida (paso 1) con la afordancia "Saltear" en la esquina sup-der del header (sin datos aún).
-//   02 — SkipAnimalSheet TONO LIVIANO (sin datos): "No cargaste ninguna maniobra…".
-//   03 — SkipAnimalSheet TONO AVISO (con datos parciales): terracota "Se descarta lo cargado (N maniobra/s)".
-//   04 — vuelta al identify-first tras saltear (el próximo animal; el contador NO se incrementó: "0 hoy").
+// Recorre el flujo del feature y saca capturas NOMBRADAS de cada estado clave a __shots__/skip-por-paso/:
+//   01 — carga rápida (paso 1, tacto de aptitud) con la afordancia PRIMARIA "Saltear aptitud" (pill) + la
+//        SECUNDARIA "⋯" (overflow, saltar animal) en el header. Jerarquía clara: el pill domina, el "⋯" no.
+//   02 — tras tocar "Saltear aptitud": el frame avanza al SIGUIENTE paso del MISMO animal (pesaje · 2 de 2) —
+//        el animal NO se abandonó, se saltó SOLO ese paso.
+//   03 — resumen del animal: la maniobra salteada muestra "Salteado" (decisión tomada, corregible), el pesaje
+//        su valor. El "⋯" (saltar animal, secundario) sigue disponible en el header del resumen.
+//   04 — SkipAnimalSheet (SECUNDARIO) abierto desde el "⋯": tono AVISO con datos → terracota "Se descarta lo
+//        cargado (1 maniobra)".
+//   05 — vuelta al identify-first tras saltar el animal (el próximo animal; el contador NO se incrementó:
+//        "0 hoy").
 //
-// Setup espejado de maniobra-label-largo.capture.ts: rodeo "Cría hembras" (0018 habilita tacto_vaquillona por
-// default) + hembra vaquillona con EID → identificación por bastonazo del MockAdapter (flag __RAFAQ_BLE_E2E__,
-// fuera de prod). Secuencia tacto_vaquillona + pesaje → 2 pasos. Confirmar "APTA" persiste el 1er evento →
-// datos PARCIALES (1 maniobra) para la captura 03. NO corras esto en `pnpm e2e` (es un `.capture.ts`); lo
+// Setup espejado del original: rodeo "Cría hembras" (0018 habilita tacto_vaquillona por default) + hembra
+// vaquillona con EID → identificación por bastonazo del MockAdapter (flag __RAFAQ_BLE_E2E__, fuera de prod).
+// Secuencia tacto_vaquillona + pesaje → 2 pasos. NO corras esto en `pnpm e2e` (es un `.capture.ts`); lo
 // dispara el leader:
 //   pnpm exec playwright test e2e/captures/skip-animal-maniobra.capture.ts --config playwright.capture.config.ts
 
@@ -31,7 +37,7 @@ test.afterAll(async () => {
   await cleanupAll();
 });
 
-const SHOT_DIR = path.join(process.cwd(), 'e2e', 'captures', '__shots__', 'skip-animal-maniobra');
+const SHOT_DIR = path.join(process.cwd(), 'e2e', 'captures', '__shots__', 'skip-por-paso');
 
 let eidCounter = 0;
 function makeEid(): string {
@@ -62,7 +68,14 @@ async function bastonazo(page: Page, eid: string): Promise<void> {
   }, eid);
 }
 
-test('capturas saltear un animal (carga rápida) @ 412px', async ({ browser }) => {
+/** Teclea un peso entero en el keypad de PesajeStep (dígito por dígito). */
+async function typeWeight(page: Page, kg: string): Promise<void> {
+  for (const d of kg) {
+    await page.getByRole('button', { name: d, exact: true }).first().click();
+  }
+}
+
+test('capturas saltear POR-PASO + animal secundario (carga rápida) @ 412px', async ({ browser }) => {
   test.setTimeout(180_000);
   const ctx = await browser.newContext({
     hasTouch: true,
@@ -74,7 +87,7 @@ test('capturas saltear un animal (carga rápida) @ 412px', async ({ browser }) =
   await markBle(page);
 
   try {
-    const user = await createTestUser('cap-skip-animal');
+    const user = await createTestUser('cap-skip-paso');
     await setUserPhone(user.id, '1123456789');
     const { establishmentId, rodeoId } = await seedEstablishmentWithRodeo(user.id, 'Campo Saltear', {
       rodeoName: 'Cría hembras',
@@ -118,41 +131,43 @@ test('capturas saltear un animal (carga rápida) @ 412px', async ({ browser }) =
     // ── CARGA RÁPIDA: bastonazo → found → auto-avance al paso 1 (tacto_vaquillona, · 1 de 2). ──
     await bastonazo(page, eid);
     await expect(page.getByText('· 1 de 2', { exact: true })).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByTestId('skip-animal')).toBeVisible({ timeout: 15_000 });
-    // (01) Header con la afordancia "Saltear" en la esquina sup-der — todavía SIN datos cargados.
-    await page.screenshot({ path: path.join(SHOT_DIR, '01-carga-saltear-header.png') });
+    // (01) Header con la PRIMARIA "Saltear aptitud" (pill) + la SECUNDARIA "⋯" (overflow saltar animal).
+    await expect(page.getByTestId('skip-step')).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText('Saltear aptitud', { exact: true })).toBeVisible();
+    await expect(page.getByTestId('skip-animal')).toBeVisible();
+    await page.screenshot({ path: path.join(SHOT_DIR, '01-carga-skip-por-paso-header.png') });
 
-    // ── (02) Sheet de confirmación TONO LIVIANO (sin datos): abrir → capturar → cerrar. ──
-    await page.getByTestId('skip-animal').click();
-    await expect(page.getByTestId('skip-animal-sheet')).toBeVisible({ timeout: 10_000 });
-    await expect(page.getByText('¿Saltear este animal?', { exact: true })).toBeVisible();
-    await expect(page.getByText(/No cargaste ninguna maniobra/)).toBeVisible();
-    await page.screenshot({ path: path.join(SHOT_DIR, '02-sheet-sin-datos.png') });
-    // Cerrar: scopeamos el botón de cancelar AL sheet (el backdrop/scrim ya NO comparte accessible name → el
-    // único "Seguir en este animal" es el botón visible; el scope explícito lo deja inequívoco igual).
-    await page.getByTestId('skip-animal-sheet').getByRole('button', { name: 'Seguir en este animal', exact: true }).click();
-    await expect(page.getByTestId('skip-animal-sheet')).toHaveCount(0, { timeout: 10_000 });
-
-    // ── Cargar 1 maniobra (APTA) → datos PARCIALES → avanza al paso 2 (pesaje, · 2 de 2). ──
-    await expect(page.getByRole('button', { name: 'APTA', exact: true })).toBeVisible({ timeout: 15_000 });
-    await page.getByRole('button', { name: 'APTA', exact: true }).click();
+    // ── (02) Saltear ESE paso (aptitud) → el frame avanza al SIGUIENTE paso del MISMO animal (pesaje · 2 de 2).
+    //     El animal NO se abandonó — se saltó SOLO el paso. ──
+    await page.getByTestId('skip-step').click();
     await expect(page.getByText('· 2 de 2', { exact: true })).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByTestId('weight-display')).toBeVisible();
+    await page.screenshot({ path: path.join(SHOT_DIR, '02-siguiente-paso-mismo-animal.png') });
 
-    // ── (03) Sheet de confirmación TONO AVISO (con datos): terracota "Se descarta lo cargado". ──
+    // ── Cargar el pesaje (400) → resumen. ──
+    await typeWeight(page, '400');
+    await page.getByRole('button', { name: 'Confirmar peso' }).click();
+
+    // ── (03) Resumen: la maniobra salteada muestra "Salteado" (corregible); el pesaje su valor. ──
+    await expect(page.getByText('Revisá la carga', { exact: true })).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText('Salteado', { exact: true })).toBeVisible();
+    await expect(page.getByText('400 kg', { exact: true })).toBeVisible();
+    await page.screenshot({ path: path.join(SHOT_DIR, '03-resumen-salteado.png') });
+
+    // ── (04) SALTAR ANIMAL (SECUNDARIO): desde el "⋯" del resumen → SkipAnimalSheet con datos (terracota). ──
     await page.getByTestId('skip-animal').click();
     await expect(page.getByTestId('skip-animal-sheet')).toBeVisible({ timeout: 10_000 });
     await expect(page.getByText(/Se descarta lo cargado/)).toBeVisible();
-    await page.screenshot({ path: path.join(SHOT_DIR, '03-sheet-con-datos.png') });
+    await page.screenshot({ path: path.join(SHOT_DIR, '04-sheet-saltar-animal-secundario.png') });
 
-    // ── (04) Confirmar el salteo → descarta lo cargado + vuelve al identify-first del PRÓXIMO animal. ──
+    // ── (05) Confirmar el salteo del animal → descarta + vuelve al identify-first del PRÓXIMO animal. ──
     await page.getByTestId('skip-animal-confirm').click();
-    // Volvió a identificar (el paso de maniobra ya no está); el mock puede pedir reconectar → hero de escaneo/conexión.
     await connectMock(page);
     await expect(page.getByTestId('skip-animal-sheet')).toHaveCount(0, { timeout: 15_000 });
     await expect(page.getByText(/bastón/)).toBeVisible({ timeout: 20_000 });
-    // Saltear NO cuenta el animal: el progreso de la jornada sigue en "0 hoy".
+    // Saltar el animal NO lo cuenta: el progreso de la jornada sigue en "0 hoy".
     await expect(page.getByText('0 hoy', { exact: true })).toBeVisible({ timeout: 15_000 });
-    await page.screenshot({ path: path.join(SHOT_DIR, '04-vuelta-identify.png') });
+    await page.screenshot({ path: path.join(SHOT_DIR, '05-vuelta-identify.png') });
   } finally {
     await ctx.close();
   }

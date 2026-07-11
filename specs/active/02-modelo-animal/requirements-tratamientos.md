@@ -96,9 +96,14 @@ UI (solo iniciar → aplicar → finalizar; ver Decisión de criterio §2).
   color que lo señale.
 - **RTR.4.4** — Mientras un animal esté "en tratamiento", el sistema deberá mostrar la **misma marca** en su fila
   de lista.
-- **RTR.4.5** — El sistema deberá usar para la marca un **color distintivo propio** (sanitario, azul/turquesa),
+- **RTR.4.5** — El sistema deberá usar para la marca un **color distintivo propio** (sanitario, teal-cian),
   que **no deberá** reusar el terracota (alertas / aborto / futuro torito) ni el amarillo del CUT ni el verde de
-  identidad. *(D-1; el token exacto lo fija el leader en Gate 2.5.)*
+  identidad. *(D-1.)* **Token FIJADO (reconciliación as-built, definido por el leader con contraste MEDIDO):**
+  par `treatmentText: #106B7A` (teal-cian, texto/ícono/borde) + `treatmentBg: #DBEEF3` (cian pálido, fondo del
+  chip) en `tamagui.config.ts`. Contraste WCAG 2.1: `treatmentText` sobre `$bg` 5.87:1 / `$surface` 5.71:1 /
+  blanco 6.17:1; par `treatmentText` sobre `treatmentBg` = 5.15:1 (≥4.5, supera la ref verde 4.55). El chip es
+  FILLED (`treatmentBg` + `treatmentText`, no outline) — estado de vigilancia de alta señal, el animal ya está
+  pinneado arriba. Veto visual final en Gate 2.5.
 - **RTR.4.6** — Cuando un tratamiento se finaliza y el animal no tiene otro tratamiento en curso, el sistema
   deberá quitar la marca.
 

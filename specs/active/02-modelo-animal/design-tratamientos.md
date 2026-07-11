@@ -363,11 +363,22 @@ búsqueda, requirements § Decisión de criterio 6).
 
 ### 4.2 Marca en la fila de lista (RTR.4.4) — `AnimalRow`
 
-`AnimalRow` gana `inTreatment?: boolean`. Cuando es `true`, muestra una marca distintiva (chip/punto) con el
-**color sanitario** (azul/turquesa), en el lenguaje de los chips existentes (`NoTagChip`/`FutureBullBadge`:
-`$surface` + borde/ícono/texto del token nuevo), con `labelA11y` y `lineHeight` matcheado (memoria de recorte de
-descendentes). **El token exacto NO se define acá** (CLAUDE.md: confirmar antes de cambiar design tokens) — se
-fija en Gate 2.5 (D-1). Constraint: no reusar `$terracota`, `$amber`, `$cutBg/$cutText`, `$greenLight/$primary`.
+`AnimalRow` gana `inTreatment?: boolean`. Cuando es `true`, muestra una marca distintiva (chip) con el
+**color sanitario** (teal-cian), con `labelA11y` y `lineHeight` matcheado (memoria de recorte de descendentes).
+Constraint: no reusar `$terracota`, `$amber`, `$cutBg/$cutText`, `$greenLight/$primary`.
+
+**AS-BUILT (reconciliación):** el token quedó FIJADO por el leader — par `treatmentText: #106B7A` +
+`treatmentBg: #DBEEF3` en `tamagui.config.ts` (contraste medido, ver RTR.4.5). El chip es **FILLED**
+(`$treatmentBg` fondo + `$treatmentText` ícono/texto) con ícono `Syringe` (lucide) — NO el outline sobre
+`$surface` que se anticipó (un estado de vigilancia de alta señal, pinneado arriba, gana un chip lleno más
+prominente). `AnimalRow`: en la vista normal el chip va PRIMERO en la fila-2 (leftmost, `flexShrink 0`; el
+rodeo/chip-repro ceden antes; `overflow:hidden` clipea en el caso descomunal); en la vista compacta va inline
+tras el subtítulo "categoría · edad". Marca cableada en las 2 superficies de RTR.5: lista general
+(`animales.tsx`, RTR.5.1) + rodeo (`rodeo/[id].tsx`, RTR.5.2). Las otras superficies que comparten
+`buildAnimalsListQuery` (lote, selección masiva, asignar-caravanas) reciben el PIN cosmético del ORDER BY
+compartido pero **no** se cablea la marca (fuera del scope de RTR.5, y `lote/[id].tsx` es territorio de la
+feature A en curso → disjunción de archivos). La búsqueda NO la muestra (criterio 6). Veto visual final en
+Gate 2.5.
 
 ### 4.3 Marca en la ficha (RTR.4.3) — hero
 
@@ -517,3 +528,33 @@ computa del SQLite local sin depender de que un trigger server-side haya corrido
    `authenticated`.
 10. **Stream `ev_treatments`** — scope `establishment_id IN org_scope AND deleted_at IS NULL`, JOIN-free, paridad
     con `ev_sanitary_events`; `treatment_id` baja por el `SELECT *` de `ev_sanitary_events` sin ampliar su scope.
+
+## Reconciliación as-built (implementer, 2026-07-10)
+
+Ajustes tomados al construir, respecto de lo anticipado en este design (ninguno re-abre Gate 0/Gate 1; se
+documentan para que las specs no contradigan el código):
+
+- **Token de color sanitario FIJADO** — `treatmentText #106B7A` / `treatmentBg #DBEEF3` en `tamagui.config.ts`
+  (par CUT-style, contraste medido). Chip FILLED (no outline). Ver §4.2 + RTR.4.5. Veto final Gate 2.5.
+- **Marca del hero** — nuevo componente `TreatmentFlag` en `[id].tsx` (análogo a `AbortionFlag`), chip teal con
+  ícono `Syringe` en la fila de chips del hero (junto al `CategoryBadge`). `inTreatment` se deriva de
+  `treatments.some(t => t.inProgress)` (los tratamientos ya cargados) — sin tocar `buildAnimalDetailQuery`.
+- **Sección "Tratamientos"** — componente `TreatmentsSection.tsx` (presentacional), ubicada entre "Manejo" y
+  "Lote" (dentro del rango "entre Manejo y el historial"). CTA "Iniciar tratamiento" + por card en curso
+  "Registrar aplicación" + "Finalizar tratamiento" (confirmación INLINE en la card, sin overlay). Solo en
+  animal ACTIVO (RTR.1.8). Un archivado sin tratamientos → la sección no se renderiza.
+- **Sheets** — `TreatmentStartSheet.tsx` (iniciar: Select de `kind` 3-cerrado + producto + comentario + toggle
+  "Registrar la primera aplicación ahora" que revela fecha/dosis/vía/próxima) y `TreatmentApplicationSheet.tsx`
+  (aplicar: fecha default hoy + dosis/vía/próxima). Montados al ROOT de la ficha (scrim propio, como
+  `BreedPickerSheet`/`TagScanSheet`); el estado del sheet + los service-calls + el refresh silencioso viven en
+  `[id].tsx` (los sheets son presentacionales, `onSubmit` → `{ok,error}`). Anatomía header-fijo/body-scroll/
+  footer-fijo; validación inline.
+- **Vía (`route`)** — selector CERRADO `TREATMENT_ROUTE_OPTIONS` (intramuscular/subcutánea/oral/intravenosa/
+  tópica, es-AR) en `treatment-input.ts`; el value guardado en `sanitary_events.route`. Opcional.
+- **`validateNextDose`** (nuevo en `treatment-input.ts`) — la **próxima dosis** es naturalmente FUTURA → NO usa
+  `validateEventDate` (que rechaza futuro): valida solo el formato AAAA-MM-DD (permite futuro). La fecha de la
+  aplicación sí usa `validateEventDate` (no-futura).
+- **`FormField` multilínea** — se agregó una prop `multiline?` ADITIVA (default false → cero cambio para los
+  callers previos) para el comentario del tratamiento. Contrato público preservado.
+- **Suite RLS** — `supabase/tests/treatments/run.cjs` (autocontenida, patrón animal suite), registrada COMENTADA
+  en `scripts/run-tests.mjs` (se descomenta post-deploy de 0123, patrón spec 12/14/M6).

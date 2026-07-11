@@ -53,11 +53,26 @@ export type ExitJornadaSheetProps = {
   onExit: () => void;
   /** Cerrar el sheet sin hacer nada (seguir en la jornada / tap en el scrim). */
   onClose: () => void;
+  /**
+   * Delta lotes-venta (RLV.10/RLV.10.2): cantidad de VACÍAS de la sesión (tacto 'empty'). Si > 0, la fase
+   * 'terminated' ofrece agregarlas a un lote (sugerencia saltable) en vez de solo "Listo". Default 0 (sin
+   * sugerencia). El caller lo calcula con fetchSessionEmptyFemales solo si la jornada incluyó tacto (RLV.15).
+   */
+  emptyCount?: number;
+  /** Delta lotes-venta (RLV.10): el usuario acepta la sugerencia → abrir el picker de lote (SugerenciaVaciasSheet). */
+  onElegirLote?: () => void;
 };
 
 type Phase = 'actions' | 'terminated';
 
-export function ExitJornadaSheet({ animalCount, onTerminar, onExit, onClose }: ExitJornadaSheetProps) {
+export function ExitJornadaSheet({
+  animalCount,
+  onTerminar,
+  onExit,
+  onClose,
+  emptyCount = 0,
+  onElegirLote,
+}: ExitJornadaSheetProps) {
   const insets = useSafeAreaInsets();
   const bottomPad = Math.max(insets.bottom, getTokenValue('$navBottomMin', 'size'));
 
@@ -246,9 +261,50 @@ export function ExitJornadaSheet({ animalCount, onTerminar, onExit, onClose }: E
               </YStack>
             </YStack>
 
-            <Button variant="primary" fullWidth onPress={onExit}>
-              Listo
-            </Button>
+            {/* Delta lotes-venta (RLV.10/RLV.11): si la jornada dejó ≥1 vacía, sugerencia SALTABLE de agregarlas
+                a un lote. "Elegir lote" abre el picker (onElegirLote); "Ahora no" sale del flujo (onExit). Sin
+                vacías → solo "Listo". */}
+            {emptyCount > 0 && onElegirLote ? (
+              <YStack gap="$3" testID="sugerencia-vacias">
+                <YStack
+                  width="100%"
+                  backgroundColor="$surface"
+                  borderWidth={1}
+                  borderColor="$divider"
+                  borderRadius="$card"
+                  paddingHorizontal="$4"
+                  paddingVertical="$3"
+                  gap="$1"
+                >
+                  <Text fontFamily="$body" fontSize="$5" lineHeight="$5" fontWeight="700" color="$textPrimary" numberOfLines={2}>
+                    Encontramos <Text color="$primary">{emptyCount}</Text> {emptyCount === 1 ? 'vaca vacía' : 'vacías'}
+                  </Text>
+                  <Text fontFamily="$body" fontSize="$4" lineHeight="$4" fontWeight="500" color="$textMuted" numberOfLines={2}>
+                    ¿Las agregás a un lote para venderlas o descartarlas después?
+                  </Text>
+                </YStack>
+                <Button variant="primary" fullWidth onPress={onElegirLote}>
+                  Elegir lote
+                </Button>
+                <View
+                  testID="sugerencia-vacias-ahora-no"
+                  minHeight="$touchMin"
+                  alignItems="center"
+                  justifyContent="center"
+                  pressStyle={{ opacity: 0.6 }}
+                  onPress={onExit}
+                  {...buttonA11y(Platform.OS, { label: 'Ahora no' })}
+                >
+                  <Text fontFamily="$body" fontSize="$5" lineHeight="$5" fontWeight="600" color="$textMuted" numberOfLines={1}>
+                    Ahora no
+                  </Text>
+                </View>
+              </YStack>
+            ) : (
+              <Button variant="primary" fullWidth onPress={onExit}>
+                Listo
+              </Button>
+            )}
           </>
         )}
       </YStack>

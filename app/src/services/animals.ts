@@ -136,6 +136,13 @@ export type AnimalListItem = {
    * machos/terneras (sin badge, RAR.3.2). Lo pinta `AnimalRow` (ReproStatusChip) en la vista normal.
    */
   reproStatus: ReproStatus;
+  /**
+   * ¿El animal está EN TRATAMIENTO? (delta spec 02 tratamientos, RTR.4.4) — DERIVADO del EXISTS de un
+   * treatment ABIERTO (ended_at IS NULL AND deleted_at IS NULL) inyectado por buildAnimalsListQuery
+   * (`in_treatment`). `true` → AnimalRow muestra la marca sanitaria; el ORDER BY ya lo pinnea arriba
+   * (RTR.5). El overlay (alta optimista) siempre da `false`. Offline-correcto (EXISTS sobre la tabla synced).
+   */
+  inTreatment: boolean;
 };
 
 export type AnimalStatus = 'active' | 'sold' | 'dead' | 'transferred';
@@ -259,6 +266,10 @@ type LocalListRow = {
   // (CUT → "No apta"). Proyectado por LOCAL_LIST_SELECT (overlay = 0). No se expone en AnimalListItem; lo
   // lee SOLO computeReproStatuses.
   is_cut?: number | boolean | null;
+  // delta spec 02 (tratamientos RTR.4.4): in_treatment (0/1) — EXISTS de un treatment ABIERTO del perfil,
+  // inyectado por buildAnimalsListQuery en ambas ramas del UNION (synced = EXISTS; overlay = 0). Lo expone
+  // AnimalListItem.inTreatment (marca sanitaria en la fila). El ORDER BY ya lo pinnea arriba (RTR.5).
+  in_treatment?: number | boolean | null;
 };
 
 /**
@@ -301,6 +312,10 @@ function toLocalListItem(
     animalBirthDate: r.birth_date ?? null,
     futureBull: toBool(r.future_bull ?? 0),
     reproStatus: reproStatus ?? { kind: 'none' },
+    // delta tratamientos (RTR.4.4): marca "en tratamiento" derivada del in_treatment (0/1) inyectado por la
+    // query. El search NO proyecta in_treatment (la marca no va en la búsqueda, requirements § criterio 6) →
+    // ?? 0 lo deja en false ahí (toBool(0)), sin marca; la lista/rodeo sí lo traen.
+    inTreatment: toBool(r.in_treatment ?? 0),
   };
 }
 

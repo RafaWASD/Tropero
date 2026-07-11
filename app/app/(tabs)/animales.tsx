@@ -395,6 +395,7 @@ export default function AnimalesScreen() {
                 sex={animal.sex}
                 rodeo={animal.rodeoName}
                 reproStatus={animal.reproStatus}
+                inTreatment={animal.inTreatment}
                 onPress={() => onOpenAnimal(animal.profileId)}
               />
             ))}

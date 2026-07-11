@@ -69,6 +69,7 @@ import { stepKindFor } from '@/utils/maneuver-step-kind';
 import {
   buildSequence,
   sequenceItemKey,
+  skipStepButtonLabel,
   summaryRows,
   type CaptureMap,
   type CustomCaptureMap,
@@ -530,6 +531,31 @@ export default function ManiobraCarga() {
         // INSERT (1ra captura). Una captura previa `skipped` NO contó como persistida (placeholder M3).
         const prev = captured[maneuver];
         const isCorrection = prev != null && prev.kind !== 'skipped';
+        // 1.pre) SKIP POR-PASO (R5.15, delta v2): corrección de una captura REAL → SALTEADO. Un skip NO
+        //   reescribe la fila (persistManeuverEvent con `skipped` devuelve persisted:false), así que las
+        //   filas ya persistidas de ESTE paso quedarían huérfanas → soft-delete acotado al paso (reusa el
+        //   mecanismo del skip-animal, dientes queda fuera por construcción del target). Luego RESETEAMOS los
+        //   ids del paso: si el operario RE-CAPTURA este mismo paso, un nuevo INSERT con el MISMO id chocaría
+        //   con la PK del row soft-deleteado (PowerSync no upsertea bien) → ids frescos = INSERT limpio, el
+        //   row viejo sigue oculto. Sin captura previa (skip fresco) no hay nada que borrar ni resetear.
+        if (value.kind === 'skipped' && isCorrection && prev) {
+          const single: CaptureMap = { [maneuver]: prev };
+          const targets = collectManeuverDiscardTargets(single, {}, {
+            event: eventIdsRef.current,
+            extra: extraIdsRef.current,
+            custom: customIdsRef.current,
+          });
+          if (targets.length > 0) {
+            const del = await discardManeuverEvents(targets);
+            if (!del.ok) {
+              setCaptureError(buildCaptureError(del.error.message));
+              return;
+            }
+          }
+          delete eventIdsRef.current[maneuver];
+          delete extraIdsRef.current[maneuver];
+          lastWriteCountRef.current[maneuver] = 0;
+        }
         // 1.bis) DIENTES/CUT (R6.8): el orquestador necesita el `category_id` a fijar. Si el operario CONFIRMÓ
         //   CUT → el id de la categoría CUT del sistema; si REGISTRA SIN CUT / DESMARCA (corrección) → la
         //   categoría DERIVADA (para revertir consistentemente). Se resuelve del catálogo LOCAL (offline). Si
@@ -776,6 +802,20 @@ export default function ManiobraCarga() {
     router.replace({ pathname: '/maniobra/identificar', params: { sessionId } });
   }, [router, sessionId]);
 
+  // ─── Saltear el PASO ACTUAL (R5.15, delta v2, PRIMARIO) ───
+  //
+  // Pedido de Raf (Puerta 2): saltear ESE paso/maniobra para ESE animal y SEGUIR con el resto de las
+  // maniobras del MISMO animal (ej.: no aplica el tacto → sigo pesando, sin obligar a marcar vacía/preñada).
+  // Marca el paso `{kind:'skipped'}` deliberado y reusa `captureAndAdvance` (que ya sabe avanzar al siguiente
+  // paso / al resumen si es el último / volver al resumen si se corrige desde ahí, y soft-borrar la captura
+  // real si el paso YA tenía dato). Solo aplica a pasos de FÁBRICA: las maniobras CUSTOM no tienen marcador
+  // de skip en su modelo (CustomCaptureMap) → el header oculta la afordancia primaria en un paso custom.
+  const skipCurrentStep = useCallback(() => {
+    const step = sequence[currentIndex];
+    if (!step || step.source !== 'factory') return;
+    void captureAndAdvance(step.maneuver, { kind: 'skipped' });
+  }, [sequence, currentIndex, captureAndAdvance]);
+
   const bottomPad = Math.max(insets.bottom, getTokenValue('$navBottomMin', 'size'));
 
   // ─── Estados de carga / error ───
@@ -817,22 +857,33 @@ export default function ManiobraCarga() {
   const electronicMuted = mutedTag(animal);
   const progreso = `Animal ${(session.animalCount ?? 0) + 1}`;
 
-  // Saltear (R5.15): la afordancia va en el header. Se OCULTA en la secuencia vacía (esa pantalla ya trae su
-  // CTA "Siguiente animal", saltear ahí sería redundante); disponible en carga (paso) y resumen. capturedCount
-  // decide el TONO de la confirmación (liviano sin datos / aviso de descarte con datos).
+  // Saltear (R5.15, delta v2): dos afordancias en el header.
+  //  - PRIMARIA "Saltear <maniobra>" (skip POR-PASO): solo en modo PASO sobre una maniobra de FÁBRICA (las
+  //    custom no tienen marcador de skip). Saltea ese paso y sigue con el resto del MISMO animal.
+  //  - SECUNDARIA "⋯" (saltar animal entero → SkipAnimalSheet): en paso y resumen; se OCULTA en la secuencia
+  //    vacía (esa pantalla ya trae su CTA "Siguiente animal"). capturedCount decide el TONO de la confirmación.
   const isEmptySequence = mode !== 'summary' && sequence.length === 0;
   const capturedCount = countPersistedCaptures(captured, customCaptured);
+  const stepSkippable = mode === 'step' && currentStep?.source === 'factory';
+  // El narrowing de `currentStep` a la variante factory se hace en la condición (no en el booleano) para que
+  // TS acepte `currentStep.maneuver`.
+  const skipStepLabel =
+    mode === 'step' && currentStep?.source === 'factory'
+      ? skipStepButtonLabel(currentStep.maneuver)
+      : undefined;
 
   return (
     <YStack flex={1} backgroundColor="$bg" paddingTop={insets.top}>
-      {/* ── HEADER DE IDENTIDAD (sticky, SIEMPRE visible — R12.4) + afordancia "Saltear" (R5.15) ── */}
+      {/* ── HEADER DE IDENTIDAD (sticky, SIEMPRE visible — R12.4) + afordancias de SALTEAR (R5.15) ── */}
       <SpikeIdentityHeader
         idv={identity}
         tagElectronic={electronicMuted}
         rodeo={animal.rodeoName || '—'}
         categoria={animal.categoryName || '—'}
         progreso={progreso}
-        onSkip={isEmptySequence ? undefined : () => setSkipSheetOpen(true)}
+        onSkipStep={stepSkippable ? skipCurrentStep : undefined}
+        skipStepLabel={skipStepLabel}
+        onSkipAnimal={isEmptySequence ? undefined : () => setSkipSheetOpen(true)}
       />
 
       {mode === 'summary' ? (

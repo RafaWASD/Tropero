@@ -42,7 +42,21 @@ import { useEstablishment, useRodeo } from '@/contexts';
 import { useBleStickListener } from '@/services/ble/stick';
 import { useBleProviderApi } from '@/services/ble/BleStickListenerProvider';
 import { fetchAnimalDetail, lookupByTag, moveAnimalToRodeo, searchAnimals } from '@/services/animals';
-import { closeSession, getSessionById, setSessionRodeo, type Session } from '@/services/sessions';
+import {
+  closeSession,
+  getSessionById,
+  setSessionRodeo,
+  fetchSessionEmptyFemales,
+  type Session,
+  type SessionEmptyFemale,
+} from '@/services/sessions';
+import {
+  fetchManagementGroups,
+  createManagementGroup,
+  assignAnimalToGroup,
+  type ManagementGroup,
+} from '@/services/management-groups';
+import { canManageGroups } from '@/utils/management-group';
 import { extractManeuvers } from '@/utils/maneuver-config';
 import { maneuverLabel } from '@/utils/maneuver-wizard';
 import { formatEidReadable } from '@/utils/eid-format';
@@ -72,6 +86,7 @@ import { CandidatePicker } from './_components/CandidatePicker';
 import { OtherRodeoSheet } from './_components/OtherRodeoSheet';
 import { RodeoMismatchBanner } from './_components/RodeoMismatchBanner';
 import { ExitJornadaSheet } from './_components/ExitJornadaSheet';
+import { SugerenciaVaciasSheet } from './_components/SugerenciaVaciasSheet';
 
 // Tiempo del flash de confirmación antes de auto-avanzar a la carga rápida (decisión de Raf: ~0,8s).
 const AUTO_ADVANCE_MS = 800;
@@ -317,7 +332,6 @@ export default function ManiobraIdentificar() {
   //   - Salir sin terminar → navegar fuera SIN cerrar (la sesión queda activa + reanudable, R10.5/R10.6).
   //   - Seguir en la jornada → cierra el sheet.
   const [exitOpen, setExitOpen] = useState(false);
-  const openExitSheet = useCallback(() => setExitOpen(true), []);
   const closeExitSheet = useCallback(() => setExitOpen(false), []);
 
   // Navega FUERA del flujo de maniobra: el flujo es un STACK de modal (maniobra) + push (jornada) + replace
@@ -330,6 +344,72 @@ export default function ManiobraIdentificar() {
     if (router.canDismiss()) router.dismissAll();
     else router.replace('/(tabs)');
   }, [router]);
+
+  // ─── SUGERENCIA post-tacto de las VACÍAS (delta lotes-venta, RLV.10–RLV.14) ───
+  // Al abrir el sheet de salida, si la jornada incluyó tacto (RLV.15) calculamos las vacías de la sesión +
+  // los lotes del campo (para el picker). El conteo alimenta la sugerencia saltable del ExitJornadaSheet
+  // (fase 'terminated', RLV.10.2); "Elegir lote" abre el SugerenciaVaciasSheet (RLV.12/RLV.13).
+  const [emptyFemales, setEmptyFemales] = useState<SessionEmptyFemale[]>([]);
+  const [lotes, setLotes] = useState<ManagementGroup[]>([]);
+  const [sugerenciaOpen, setSugerenciaOpen] = useState(false);
+  const [assigning, setAssigning] = useState(false);
+  const role = est.status === 'active' ? est.role : null;
+  const canCreateLote = canManageGroups(role);
+
+  const openExitSheet = useCallback(() => {
+    setExitOpen(true);
+    // Solo si la jornada incluyó tacto de preñez (RLV.15): las vacías salen de esos tactos.
+    if (!sessionId || !session || !extractManeuvers(session.config).includes('tacto')) {
+      setEmptyFemales([]);
+      return;
+    }
+    void fetchSessionEmptyFemales(sessionId).then((r) => {
+      if (mountedRef.current && r.ok) setEmptyFemales(r.value);
+    });
+    if (establishmentId) {
+      void fetchManagementGroups(establishmentId).then((r) => {
+        if (mountedRef.current && r.ok) setLotes(r.value);
+      });
+    }
+  }, [sessionId, session, establishmentId]);
+
+  // Asigna TODAS las vacías al lote elegido (RLV.14) → sale del flujo. Offline (assignAnimalToGroup local).
+  const assignVaciasToGroup = useCallback(
+    async (groupId: string) => {
+      if (assigning) return;
+      setAssigning(true);
+      for (const v of emptyFemales) {
+        await assignAnimalToGroup(v.profileId, groupId);
+      }
+      if (!mountedRef.current) return;
+      setAssigning(false);
+      setSugerenciaOpen(false);
+      exitManiobraFlow();
+    },
+    [assigning, emptyFemales, exitManiobraFlow],
+  );
+
+  // Crea el lote nuevo (RLV.13, owner-only) y asigna las vacías (RLV.14) → sale del flujo. Offline.
+  const createLoteAndAssignVacias = useCallback(
+    async (name: string) => {
+      if (assigning || !establishmentId) return;
+      setAssigning(true);
+      const r = await createManagementGroup(establishmentId, name);
+      if (!mountedRef.current) return;
+      if (!r.ok) {
+        setAssigning(false);
+        return; // fail-closed: no se pudo crear el lote local → no asignamos (raro: error de SQLite).
+      }
+      for (const v of emptyFemales) {
+        await assignAnimalToGroup(v.profileId, r.value.id);
+      }
+      if (!mountedRef.current) return;
+      setAssigning(false);
+      setSugerenciaOpen(false);
+      exitManiobraFlow();
+    },
+    [assigning, establishmentId, emptyFemales, exitManiobraFlow],
+  );
 
   // Terminar la jornada (R10.7): cierra la sesión OFFLINE. Devuelve true al OK (el sheet pasa al paso de
   // confirmación), false al fallo (el sheet NO navega: superficia el error y deja reintentar — fail-closed,
@@ -563,6 +643,25 @@ export default function ManiobraIdentificar() {
           onTerminar={onTerminarJornada}
           onExit={exitManiobraFlow}
           onClose={closeExitSheet}
+          emptyCount={emptyFemales.length}
+          onElegirLote={() => {
+            setExitOpen(false);
+            setSugerenciaOpen(true);
+          }}
+        />
+      ) : null}
+
+      {/* ── SUGERENCIA de las VACÍAS (delta lotes-venta, RLV.12/RLV.13/RLV.14): elegir/crear lote → asignar. ── */}
+      {sugerenciaOpen ? (
+        <SugerenciaVaciasSheet
+          open={sugerenciaOpen}
+          count={emptyFemales.length}
+          groups={lotes}
+          canCreate={canCreateLote}
+          busy={assigning}
+          onClose={exitManiobraFlow}
+          onChooseExisting={(groupId) => void assignVaciasToGroup(groupId)}
+          onCreateNew={(name) => void createLoteAndAssignVacias(name)}
         />
       ) : null}
     </YStack>

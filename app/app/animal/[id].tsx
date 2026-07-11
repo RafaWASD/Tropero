@@ -36,13 +36,15 @@ import {
   Ruler,
   Scissors,
   Star,
+  Syringe,
   Tag,
   Trash2,
   Venus,
 } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
 
-import { Button, Card, CategoryBadge, ComboOptionRow, InfoNote, FormError, FormField, IdentifierAssignRow, TagScanCta, TagScanSheet, TimelineEvent } from '@/components';
+import { Button, Card, CategoryBadge, ComboOptionRow, InfoNote, FormError, FormField, IdentifierAssignRow, TagScanCta, TagScanSheet, TimelineEvent, TreatmentsSection, TreatmentStartSheet, TreatmentApplicationSheet } from '@/components';
+import type { TreatmentStartSubmit, TreatmentApplicationSubmit } from '@/components';
 import {
   assignTagToAnimal,
   fetchAnimalDetail,
@@ -89,6 +91,13 @@ import {
   type TimelineItem,
   type MotherLink,
 } from '@/services/events';
+import {
+  fetchTreatments,
+  startTreatment,
+  registerApplication,
+  finalizeTreatment,
+  type Treatment,
+} from '@/services/treatments';
 import { shouldShowFutureBullBadge } from '@/components/AnimalRow';
 import {
   deriveCurrentState,
@@ -159,6 +168,13 @@ export default function AnimalDetailScreen() {
   // Sheet de BASTONEO de la caravana electrónica (delta caravana-ficha bastoneo, RCF.6): lee el EID del bastón
   // y lo asigna a ESTE animal. Solo se ofrece con `tag_electronic` vacío + animal activo (canAssignTag).
   const [scanOpen, setScanOpen] = useState(false);
+  // Tratamientos del animal (delta spec 02 tratamientos, RTR.9): header + aplicaciones, en curso primero.
+  // Lectura BLANDA (si falla, la sección queda vacía, no rompe la ficha). El derivado "en tratamiento" (marca
+  // del hero + gating de las acciones) sale de acá. Los sheets de iniciar/aplicar se montan al ROOT (overlay).
+  const [treatments, setTreatments] = useState<Treatment[]>([]);
+  const [startSheetOpen, setStartSheetOpen] = useState(false);
+  // El tratamiento EN CURSO al que se le está por registrar una aplicación (null = sheet cerrado).
+  const [appSheetTreatment, setAppSheetTreatment] = useState<Treatment | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -241,6 +257,13 @@ export default function AnimalDetailScreen() {
     // Madre (R14.7): blando — un fallo (red) deja la card sin mostrar, no rompe la ficha. value puede
     // ser null (el animal no es un ternero con parto registrado) → tampoco se muestra la card.
     setMother(motherR.ok ? motherR.value : null);
+    // Tratamientos (delta spec 02, RTR.9): lectura BLANDA — alimenta la sección + el derivado "en tratamiento"
+    // (marca del hero + gating de las acciones). En SILENT, si falla, conservamos los que ya estaban montados
+    // (no blanqueamos la sección). El refresh silencioso tras iniciar/aplicar/finalizar reconcilia acá.
+    void fetchTreatments(profileId).then((tr) => {
+      if (tr.ok) setTreatments(tr.value);
+      else if (!silent) setTreatments([]);
+    });
   }, [profileId]);
 
   // Recargar al enfocar. La PRIMERA carga (mount / cambio de profileId) puede blanquear (no hay nada que
@@ -707,6 +730,86 @@ export default function AnimalDetailScreen() {
     [timeline, load],
   );
 
+  // ── Tratamientos (delta spec 02, RTR.1/2/3). ──
+  // "En tratamiento" = DERIVADO de los tratamientos cargados (RTR.4.1/4.2, sin flag en animal_profiles): ≥1
+  // header en curso. Alimenta la marca del hero (RTR.4.3) — se quita sola al finalizar el último (RTR.4.6),
+  // porque el refresh silencioso re-lee treatments. Las acciones (iniciar/aplicar/finalizar) solo en ACTIVO
+  // (RTR.1.8). Los 3 writes son CRUD-plano offline (RTR.8): éxito local inmediato; el refresh silencioso
+  // reconcilia la sección/marca/pin sin blanquear.
+  const inTreatment = useMemo(() => treatments.some((t) => t.inProgress), [treatments]);
+  const canManageTreatments = detail != null && detail.status === 'active';
+
+  const onStartTreatment = useCallback(
+    async (submit: TreatmentStartSubmit): Promise<{ ok: boolean; error?: string }> => {
+      if (!detail) return { ok: false };
+      const r = await startTreatment({
+        profileId: detail.profileId,
+        kind: submit.kind,
+        productName: submit.productName,
+        notes: submit.notes,
+        firstApplication: submit.firstApplication,
+      });
+      if (!r.ok) {
+        return {
+          ok: false,
+          error:
+            r.error.kind === 'network'
+              ? 'Sin conexión: no pudimos iniciar el tratamiento. Conectate y volvé a intentar.'
+              : r.error.message,
+        };
+      }
+      void load({ silent: true }); // reconcilia la sección + la marca "en tratamiento" del hero
+      return { ok: true };
+    },
+    [detail, load],
+  );
+
+  const onRegisterApplication = useCallback(
+    async (submit: TreatmentApplicationSubmit): Promise<{ ok: boolean; error?: string }> => {
+      if (!detail || !appSheetTreatment) return { ok: false };
+      const r = await registerApplication({
+        profileId: detail.profileId,
+        treatmentId: appSheetTreatment.id,
+        kind: appSheetTreatment.kind,
+        productName: appSheetTreatment.productName,
+        eventDate: submit.eventDate,
+        doseMl: submit.doseMl,
+        route: submit.route,
+        nextDoseDate: submit.nextDoseDate,
+      });
+      if (!r.ok) {
+        return {
+          ok: false,
+          error:
+            r.error.kind === 'network'
+              ? 'Sin conexión: no pudimos registrar la aplicación. Conectate y volvé a intentar.'
+              : r.error.message,
+        };
+      }
+      void load({ silent: true }); // la aplicación aparece en la card + en el timeline (es un sanitary_event)
+      return { ok: true };
+    },
+    [detail, appSheetTreatment, load],
+  );
+
+  const onFinalizeTreatment = useCallback(
+    async (treatmentId: string): Promise<{ ok: boolean; error?: string }> => {
+      const r = await finalizeTreatment(treatmentId);
+      if (!r.ok) {
+        return {
+          ok: false,
+          error:
+            r.error.kind === 'network'
+              ? 'Sin conexión: no pudimos finalizar el tratamiento. Conectate y volvé a intentar.'
+              : r.error.message,
+        };
+      }
+      void load({ silent: true }); // al finalizar el último en curso, la marca/pin se quitan (RTR.4.6/5.4)
+      return { ok: true };
+    },
+    [load],
+  );
+
   const onAssignLote = useCallback(
     async (groupId: string | null): Promise<{ ok: boolean; error?: string }> => {
       if (!detail) return { ok: false };
@@ -822,7 +925,7 @@ export default function AnimalDetailScreen() {
           <FormError message={error} />
         ) : detail ? (
           <>
-            <AnimalHero detail={detail} hadAbortion={hasAbortion(timeline)} />
+            <AnimalHero detail={detail} hadAbortion={hasAbortion(timeline)} inTreatment={inTreatment} />
 
             {/* Modo archivada (C3.3, R14.9): si el animal está de baja (status ≠ active), badge bajo el
                 hero con el verbo + fecha de egreso ("Vendido el …"). Para un animal activo → null. */}
@@ -937,6 +1040,19 @@ export default function AnimalDetailScreen() {
               </DetailSection>
             ) : null}
 
+            {/* Tratamientos (delta spec 02, RTR.9): sección con los tratamientos del animal (en curso primero)
+                + sus aplicaciones (fecha/dosis/vía/próxima dosis). Ofrece iniciar/aplicar/finalizar SOLO en
+                animal activo (RTR.1.8, canManageTreatments). Los sheets de iniciar/aplicar se montan al ROOT
+                (overlay); "finalizar" es inline en la card. Un archivado sin tratamientos → la sección no se
+                renderiza (el componente lo decide). */}
+            <TreatmentsSection
+              treatments={treatments}
+              canManage={canManageTreatments}
+              onOpenStart={() => setStartSheetOpen(true)}
+              onOpenApplication={(t) => setAppSheetTreatment(t)}
+              onFinalize={onFinalizeTreatment}
+            />
+
             {/* Lote (ADR-020 / C4): control para asignar / cambiar / quitar el lote. Cualquier rol
                 operativo puede asignar (RLS); el quick-create de un lote nuevo es owner-only. Modo
                 archivada (status ≠ active) → solo lectura (un animal de baja no se reorganiza). */}
@@ -1017,6 +1133,21 @@ export default function AnimalDetailScreen() {
       {detail && scanOpen && canAssignTag(detail) ? (
         <TagScanSheet onClose={() => setScanOpen(false)} onSubmit={onAssignTag} />
       ) : null}
+
+      {/* Sheets de TRATAMIENTOS (delta spec 02, RTR.1/2). Montados al ROOT (scrim propio, cubren la pantalla).
+          Condicionales a su estado + animal activo (RTR.1.8): un archivado no inicia/aplica. El onSubmit ejecuta
+          el service + refresh silencioso (la sección/marca/pin se reconcilian); el sheet se cierra solo en ok. */}
+      {detail && startSheetOpen && canManageTreatments ? (
+        <TreatmentStartSheet onClose={() => setStartSheetOpen(false)} onSubmit={onStartTreatment} />
+      ) : null}
+
+      {detail && appSheetTreatment && canManageTreatments ? (
+        <TreatmentApplicationSheet
+          treatment={appSheetTreatment}
+          onClose={() => setAppSheetTreatment(null)}
+          onSubmit={onRegisterApplication}
+        />
+      ) : null}
     </YStack>
   );
 }
@@ -1028,7 +1159,15 @@ export default function AnimalDetailScreen() {
  * secundaria muted cuando el hero es el apodo + CategoryBadge (firma verde) + (si tuvo aborto) el flag "Tuvo
  * aborto" terracota + sexo con ícono en color + rodeo muted. Es la "cara" de la ficha.
  */
-function AnimalHero({ detail, hadAbortion }: { detail: AnimalDetail; hadAbortion: boolean }) {
+function AnimalHero({
+  detail,
+  hadAbortion,
+  inTreatment,
+}: {
+  detail: AnimalDetail;
+  hadAbortion: boolean;
+  inTreatment: boolean;
+}) {
   const primary = getTokenValue('$primary', 'color');
   const heroResult = pickHeroIdentifier({
     apodo: detail.apodo,
@@ -1081,6 +1220,7 @@ function AnimalHero({ detail, hadAbortion }: { detail: AnimalDetail; hadAbortion
         {/* code={detail.categoryCode}: ruta preferida de detección CUT (RCUT.6.2) → el badge del hero pasa a
             AMARILLO al toque cuando se marca CUT (el optimismo en sitio setea categoryCode='cut'). */}
         <CategoryBadge label={categoryLabel} code={detail.categoryCode} manual={detail.categoryOverride} size="md" />
+        {inTreatment ? <TreatmentFlag /> : null}
         {hadAbortion ? <AbortionFlag /> : null}
         <XStack alignItems="center" gap="$1" {...labelA11y(Platform.OS, `Sexo ${sexLabel}`)}>
           <SexIcon size={18} color={primary} strokeWidth={2.5} />
@@ -1136,6 +1276,34 @@ function AbortionFlag() {
         <HeartCrack size={14} color={terracota} strokeWidth={2.5} />
         <Text fontFamily="$body" fontSize="$4" fontWeight="600" color="$terracota" numberOfLines={1}>
           Tuvo aborto
+        </Text>
+      </XStack>
+    </View>
+  );
+}
+
+// ─── Marca "En tratamiento" del hero (delta spec 02 tratamientos, RTR.4.3) ────────────
+//
+// Marca SANITARIA en el hero cuando el animal está en tratamiento (derivado: ≥1 treatment en curso). Se
+// quita sola al finalizar el último (RTR.4.6). Color distintivo PROPIO (teal-cian, $treatmentBg + $treatmentText)
+// — NO reusa terracota (AbortionFlag/archivada), amber (CUT) ni verde (identidad). Chip FILLED (par medido
+// 5.15:1) con ícono Syringe. a11y por helper (View no mapea accessibilityLabel a aria-label en web). Cero
+// hardcode: tokens + getTokenValue para el ícono lucide.
+function TreatmentFlag() {
+  const teal = getTokenValue('$treatmentText', 'color');
+  return (
+    <View
+      backgroundColor="$treatmentBg"
+      borderRadius="$pill"
+      paddingHorizontal="$3"
+      paddingVertical="$1"
+      alignSelf="flex-start"
+      {...labelA11y(Platform.OS, 'En tratamiento')}
+    >
+      <XStack alignItems="center" gap="$1">
+        <Syringe size={14} color={teal} strokeWidth={2.5} />
+        <Text fontFamily="$body" fontSize="$4" lineHeight="$4" fontWeight="700" color="$treatmentText" numberOfLines={1}>
+          En tratamiento
         </Text>
       </XStack>
     </View>

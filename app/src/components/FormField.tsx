@@ -39,6 +39,13 @@ export type FormFieldProps = {
    * comportamiento es idéntico al as-built (todos los callers previos siguen sin testID).
    */
   testID?: string;
+  /**
+   * Campo multilínea (ADITIVO, opcional). Default false → single-line as-built (cero cambio para los callers
+   * previos). true → TextInput multiline con altura mínima mayor y alineación top (ej. comentario libre del
+   * tratamiento). `numberOfLines` sugiere el alto inicial en Android.
+   */
+  multiline?: boolean;
+  numberOfLines?: number;
 };
 
 export const FormField = forwardRef<TextInput, FormFieldProps>(function FormField(
@@ -58,6 +65,8 @@ export const FormField = forwardRef<TextInput, FormFieldProps>(function FormFiel
     onSubmitEditing,
     maxLength,
     testID,
+    multiline = false,
+    numberOfLines,
   },
   ref,
 ) {
@@ -103,13 +112,18 @@ export const FormField = forwardRef<TextInput, FormFieldProps>(function FormFiel
         onSubmitEditing={onSubmitEditing}
         maxLength={maxLength}
         testID={testID}
+        multiline={multiline}
+        numberOfLines={multiline ? numberOfLines : undefined}
         style={{
-          minHeight,
+          minHeight: multiline ? minHeight * 1.6 : minHeight,
           borderRadius: radius,
           borderWidth: 1,
           borderColor: hasError ? borderColorError : borderColorOk,
           backgroundColor: surfaceColor,
           paddingHorizontal: padH,
+          // Multilínea: padding vertical + texto alineado arriba (un comentario crece hacia abajo).
+          paddingVertical: multiline ? getTokenValue('$3', 'space') : undefined,
+          textAlignVertical: multiline ? 'top' : 'center',
           fontSize,
           fontFamily: 'Inter',
           color: textColor,

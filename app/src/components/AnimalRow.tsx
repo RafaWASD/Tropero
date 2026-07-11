@@ -21,7 +21,7 @@
 
 import { Platform, Pressable } from 'react-native';
 import { getTokenValue, Text, View, XStack, YStack } from 'tamagui';
-import { Check, ChevronRight, Star, Tag } from 'lucide-react-native';
+import { Check, ChevronRight, Star, Syringe, Tag } from 'lucide-react-native';
 
 import { CategoryBadge } from './CategoryBadge';
 import { labelA11y } from '../utils/a11y';
@@ -87,6 +87,12 @@ export type AnimalRowProps = {
    * (true) y la categoría NO es `toro`. false/undefined → sin badge. Display-only.
    */
   futureBull?: boolean;
+  /**
+   * ¿El animal está EN TRATAMIENTO? (delta spec 02 tratamientos, RTR.4.4) — DERIVADO (existe un treatment
+   * ABIERTO). true → chip sanitario teal-cian "En tratamiento" (marca distintiva propia, RTR.4.5; NO reusa
+   * terracota/amber/CUT/verde). El ORDER BY ya pinnea estos animales arriba (RTR.5). false/undefined → sin marca.
+   */
+  inTreatment?: boolean;
   /**
    * RESALTADO de advertencia (spec 10 R11.6, solo `compact`): cuando un ⭐ futuro torito queda TILDADO en
    * la selección de castración, su fila se RESALTA en terracota (acento de "ojo con este") SIN modal —
@@ -243,6 +249,36 @@ function FutureBullBadge() {
 }
 
 /**
+ * Chip "En tratamiento" (delta spec 02 tratamientos, RTR.4.4/4.5): marca distintiva PROPIA de color SANITARIO
+ * (teal-cian, $treatmentBg fill + $treatmentText ícono/texto). Distinto de terracota (alertas), amber (CUT/
+ * diferida) y verde (identidad) — semántica clínica inequívoca a pleno sol (contraste MEDIDO 5.15:1 del par).
+ * Es un chip FILLED (más prominente que outline) porque el animal en tratamiento está PINNEADO arriba y es un
+ * estado de vigilancia de alta señal. Ícono Syringe (concepto "aplicación") + texto (RTR.5.2 accesibilidad:
+ * no solo color). `labelA11y` (un View de Tamagui no mapea accessibilityLabel a aria-label en web) +
+ * `lineHeight` matcheado al `fontSize` (anti-recorte de descendentes, por convención). Cero hardcode.
+ */
+function TreatmentChip() {
+  const teal = getTokenValue('$treatmentText', 'color');
+  return (
+    <View
+      backgroundColor="$treatmentBg"
+      borderRadius="$pill"
+      paddingHorizontal="$2"
+      paddingVertical="$1"
+      flexShrink={0}
+      {...labelA11y(Platform.OS, 'En tratamiento')}
+    >
+      <XStack alignItems="center" gap="$1">
+        <Syringe size={12} color={teal} strokeWidth={2.5} />
+        <Text fontFamily="$body" fontSize="$2" lineHeight="$2" fontWeight="700" color="$treatmentText" numberOfLines={1}>
+          En tratamiento
+        </Text>
+      </XStack>
+    </View>
+  );
+}
+
+/**
  * Tier visual del chip de estado reproductivo (RAR.5.1, design §5) — 3 señales semánticas (Hick):
  *   - `good`    verde: Apta / Preñada → relleno $greenLight + texto $primary (firma RAFAQ, igual que CategoryBadge).
  *   - `attn`    ámbar: Diferida / Vacía → outline $amber sobre $surface (≈5:1 AA).
@@ -349,6 +385,7 @@ export function AnimalRow({
   age,
   categoryCode,
   futureBull,
+  inTreatment = false,
   highlight = false,
   checked,
   onToggle,
@@ -376,11 +413,11 @@ export function AnimalRow({
   const showStar = shouldShowFutureBullBadge(futureBull, categoryCode);
   const handlePress = hasCheckbox ? onToggle : onPress;
 
-  // a11y: categoría + identificador legible + rodeo/edad + (sin electrónica / futuro torito si aplica).
+  // a11y: categoría + identificador legible + rodeo/edad + (sin electrónica / futuro torito / en tratamiento).
   const a11ySuffix = compact
     ? `${age ? `, ${age}` : ''}${showStar ? ', futuro torito' : ''}`
     : `, ${rodeo}${hasTag ? '' : ', sin electrónica'}`;
-  const a11yLabel = `${category}, ${heroResult.value ?? 'sin identificador'}${a11ySuffix}`;
+  const a11yLabel = `${category}, ${heroResult.value ?? 'sin identificador'}${a11ySuffix}${inTreatment ? ', en tratamiento' : ''}`;
 
   const a11yProps = hasCheckbox
     ? { accessibilityRole: 'checkbox' as const, accessibilityState: { checked: checked ?? false } }
@@ -457,6 +494,7 @@ export function AnimalRow({
               >
                 {age ? `${category} · ${age}` : category}
               </Text>
+              {inTreatment ? <TreatmentChip /> : null}
               {showStar ? <FutureBullBadge /> : null}
             </XStack>
           ) : (
@@ -471,6 +509,10 @@ export function AnimalRow({
             //   4. overflow hidden: RED DE SEGURIDAD — si algo aún no puede encoger (categoría descomunal), se
             //      CLIPEA en el borde del centro en vez de superponerse (mejor un corte que un pisón).
             <XStack alignItems="center" gap="$2" minWidth={0} overflow="hidden">
+              {/* Marca "en tratamiento" PRIMERA (leftmost, flexShrink 0): estado de vigilancia de alta señal,
+                  el animal ya está pinneado arriba (RTR.5). El rodeo (flexShrink alto) + el chip repro
+                  (flexShrink 1) ceden antes; overflow:hidden clipea en el caso descomunal (red de seguridad). */}
+              {inTreatment ? <TreatmentChip /> : null}
               <View flexShrink={0}>
                 <CategoryBadge label={category} code={categoryCode} size="sm" />
               </View>
