@@ -716,3 +716,25 @@ Implementación end-to-end de la exportación SIGSA (genera el TXT `RFID-SEXO-RA
 - **Verificación + commit:** suite SIGSA **72/72** · animal suite **107/109** (las 2 rojas = SOLO el flake del huérfano de test `'9'×64`, ajeno) · typecheck + ~300 unit + e2e verdes. **Puerta 2 aprobada por Raf** → committeado **`9c372a8`** en `main` (87 archivos solo spec 08; sin push; sin hooks activos). Feature **sigue `in_progress`** (NO `done`).
 
 - **Pendiente del flip a `done`:** (1) **Facundo** sube el formato a SIGSA y confirma el TXT exacto (gate duro, decisión 4); (2) **limpiar el huérfano de test** (`! node scripts/cleanup-test-orphan.mjs 72735816-867f-472e-a742-b924c408ec95`, script con guardrail creado esta sesión) para `check.mjs` full-verde. Backlog: el test INPUT-1 del Animal suite usa un tag FIJO `'9'×64` → flake recurrente al interrumpir una corrida (fix: tag único por RUN_TAG, spec 02). **origin/main desactualizado** (push pendiente de Raf).
+
+## 2026-06-27 → 07-11 — 2 DEMOS EN VIVO (Facundo, luego + su padre) + ola de deltas post-demo → TODO cerrado
+
+Archivo de las sesiones acumuladas en `current.md` (~2 semanas; no se había reseteado). Detalle por delta: tablas "Deltas posteriores" de specs 02/03/07/09 + `progress/{impl,review,security_code}_*` + `docs/correcciones-*`.
+
+**Demo #1 (2026-06-27/29, Facundo, pre-campo)** → 16 correcciones (`docs/correcciones-prueba-en-vivo-2026-06-27.md`). Convención de delta-specs formalizada en **ADR-028**. Cerradas + Puerta 2: Fase 1 (#9 KPIs→Datos / #11 CE / #12 dientes, `2009104`), `aptitud-reproductiva` (#5/#6/#1b, `0d447cd`), `alta-form-refinamiento` (#3/#13/#14, `8926e16`), `caravana-ficha` (manual + bastoneo, `19f89bd`). E2E en vivo 176/186 → arreglados (incl. 1 bug real de PowerSync: UPDATE/INSERT decidido por `rowsAffected` sobre VIEW → SELECT determinista).
+
+**Ola de deltas post-demo #1 (2026-06-30 → 07-10)** — todos gateados (reviewer + Gate 2 + Gate 2.5) + Puerta 2 + foldeados:
+- Cluster ternero/parto: `cria-al-pie-alta` (#15, backend 0114/0115/0116, `70c2efd`/`c2fcebc`), `parto-rodeo-caravana` (#4/#1a), `parto-caravana-visual-por-ternero` (idv per-cría, `0121` deployada).
+- Bastoneo replicado en las 3 superficies (`bastoneo-captura-alta-parto`, `bastoneo-cria-al-pie`) + ficha → "el bastón en todos lados".
+- KPIs reproductivos: `%parición-fix` (#8, `0117`), `%destete` (#10, `0118`) — deployados, feature 07 done.
+- `nombre-apodo` (#2, `0119`) → luego SUBSUMIDO por `identificadores-unificados`.
+- `identificadores-unificados` (`0122`): modelo de 3 identificadores opcionales (electrónica/visual/apodo), eliminó `visual_id_alt`, búsqueda unificada, hero por apodo. Deployado + Puerta 2 (2026-07-09).
+- Menores Nivel A: `tap-wheel` (#16), reorder categorías macho (`0120`), fix superposición "Sin caravana", `override-imputacion-categoria`, fechas es-AR (`format-date-es-ar.ts`, `9f83a00`), `combo-eje-central`. Fix 2 rojos e2e latentes (614/777, `e70eea5`). Cierre en tanda del backlog de Puertas 2 (2026-07-10).
+
+**Demo #2 (2026-07-10/11, Facundo + su PADRE = productor real)** → triage 6 ítems (`docs/correcciones-demo-facundo-padre-2026-07-10.md`), cerrados en la última sesión (orquestada por el leader; implementers file-disjuntos en paralelo, 2 crashearon por API y se resumieron OK):
+- **A `lotes-venta`** (Puerta 2, `7b1fd45`): lotes operables → baja en tanda (loop client-side de `exit_animal_profile` + clear de membresía) + sugerencia post-tacto de vacías. Frontend puro, Gate 1 N/A.
+- **C `skip-por-paso-v2`** (Puerta 2, `7b1fd45`): el skip per-animal (C v1 `skip-animal-maniobra`) fue RECHAZADO por Raf → rediseño a skip **POR-PASO** ("Saltear \<maniobra\>" → avanza al siguiente paso del MISMO animal; "Salteado" en el resumen; animal-entero demovido a "⋮" secundario). + D2-chevron terracota en "Faltan vacunas".
+- **B/F/D1** (Puerta 2): gating tacto ternera + % KPI sin recorte + continuar sin vacunar (código en `5b08e24`/`a2354d9`). D2 = checklist vacunas APLICA/NO-APLICA.
+- **E `tratamientos`** (Puerta 2, `473f330`+`a7b1e7a`): tabla `treatments` (header) + aplicaciones `sanitary_events` linkeadas (`treatment_id`) + RLS/triggers (inmutabilidad SEC-TRT-01, tenant-check SEC-TRT-03, gating exención LOW-1) en **`0123` DEPLOYADA + verificada** (suite RLS 11/11 + regresión gating verde) + stream `ev_treatments` deployada (Raf) + ficha iniciar/aplicar/finalizar + marca teal (`#106B7A`/`#DBEEF3`) + pin en listas general/rodeo. 13 capturas veto PASS. Fix de vía `intravenous` (fuera del enum `sanitary_route`, cazado en Gate 2).
+
+**Backlog abierto**: automatizar deploy de sync rules PowerSync (Management API/CLI + token); cleanup de los 4 streams `SELECT <expr> AS id, *` (warnings benignos del validador nuevo de PowerSync — tablas sin columna `id` literal); peso de destete #7 (Facundo); gating server-side por atributos de tacto; reversión fiel de `dientes` al saltear; cosmético "Vaquillona" en seeds de capture (mirror vs seed). **Spec 08 SIGSA** sigue `blocked` (deploy YAML PowerSync [Raf] + upload formato SIGSA [Facundo]). **Commits en `main` NO pusheados** (Raf pushea cuando quiera).
