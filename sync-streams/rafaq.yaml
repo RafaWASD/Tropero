@@ -2,7 +2,9 @@
 #
 # ⚠️ El contenido de estas streams ES la frontera de autorización (lo audita Gate 1). NO hay RLS por
 #    encima del wire de sync: el WAL replica la tabla base ignorando views/RPCs/column-GRANTs (ADR-025).
-#    Por eso cada stream scopea explícitamente. NO se deploya desde acá: pegar en el dashboard → Validate → Deploy.
+#    Por eso cada stream scopea explícitamente. Este archivo ES la fuente canónica y se deploya con
+#    `bash scripts/powersync-deploy.sh` (CLI oficial: valida + deploya a la instancia Development;
+#    ver powersync/README.md). Ya NO se pega a mano en el dashboard.
 #
 # ──────────────────────────────────────────────────────────────────────────────────────────────────
 # ⚠️⚠️  HISTORIA (por qué este YAML es JOIN-FREE):

@@ -11,6 +11,9 @@ coverage/
 supabase/.branches/
 supabase/.temp/
 
+# PowerSync (sync-config.yaml es un artefacto: scripts/powersync-deploy.sh lo copia de sync-streams/rafaq.yaml)
+powersync/sync-config.yaml
+
 # Harness temp
 *.tmp
 
