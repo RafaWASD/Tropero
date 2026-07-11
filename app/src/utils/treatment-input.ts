@@ -44,15 +44,21 @@ export function treatmentEventType(kind: string): 'treatment' | 'deworming' | 'o
 }
 
 // ─── Vía de aplicación (route): selector cerrado opcional, es-AR ────────────────────────────────────
-export type TreatmentRoute = 'intramuscular' | 'subcutaneous' | 'oral' | 'intravenous' | 'topical';
+// ⚠️ Los `value` DEBEN ser valores VIGENTES del enum server-side `sanitary_route` (0027 + 0090):
+// {intramuscular, subcutaneous, oral, topical, other, intranasal}. Escribir un value fuera del enum haría que
+// Postgres RECHAZARA la aplicación al sincronizar (poison-pill de la cola de PowerSync). 'intravenous' NO
+// existe en el enum → NO se ofrece; la vía IV (u otra no listada) se cubre con `other` ("Otra"). `intranasal`
+// es del enum pero es vía de vacuna respiratoria (no de un tratamiento antibiótico/antiparasitario) → tampoco
+// se ofrece acá; "Otra" la cubre si hiciera falta.
+export type TreatmentRoute = 'intramuscular' | 'subcutaneous' | 'oral' | 'topical' | 'other';
 
-/** Opciones OPCIONALES de vía de aplicación (RTR.2.3). value = string guardado en sanitary_events.route. */
+/** Opciones OPCIONALES de vía de aplicación (RTR.2.3). value = valor del enum sanitary_route (0027/0090). */
 export const TREATMENT_ROUTE_OPTIONS: readonly { value: TreatmentRoute; label: string }[] = [
   { value: 'intramuscular', label: 'Intramuscular' },
   { value: 'subcutaneous', label: 'Subcutánea' },
   { value: 'oral', label: 'Oral' },
-  { value: 'intravenous', label: 'Intravenosa' },
   { value: 'topical', label: 'Tópica' },
+  { value: 'other', label: 'Otra' },
 ];
 
 /** Label es-AR de una `route` guardada (para la card de la aplicación). Fallback al propio valor. */

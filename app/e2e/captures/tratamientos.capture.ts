@@ -23,8 +23,7 @@
 
 import path from 'node:path';
 
-import { test, expect } from '../helpers/fixtures';
-import type { Page } from '@playwright/test';
+import { test, applyEnvShim, expect, type Page } from '../helpers/fixtures';
 import {
   createTestUser,
   seedEstablishmentWithRodeo,
@@ -47,15 +46,23 @@ async function shot(page: Page, name: string): Promise<void> {
   await page.screenshot({ path: path.join(SHOT_DIR, `${name}.png`) });
 }
 
-test('capturas: ciclo iniciar → aplicar → finalizar + marca/pin', async ({ page }) => {
+test('capturas: ciclo iniciar → aplicar → finalizar + marca/pin', async ({ browser }) => {
+  test.setTimeout(180_000);
+  // Contexto propio con hasTouch (el fixture `page` por defecto NO soporta .tap() → explota). Mismo patrón
+  // que lotes-venta.capture.ts / vacunas-checklist.capture.ts. El capture NO usa BLE → sin markBle.
+  const ctx = await browser.newContext({ hasTouch: true, isMobile: true, viewport: { width: 412, height: 915 } });
+  const page = await ctx.newPage();
+  await applyEnvShim(page);
+
+  try {
   const user = await createTestUser('trtcap');
   await setUserPhone(user.id, '1123456789');
   const { establishmentId, rodeoId } = await seedEstablishmentWithRodeo(user.id, 'Campo Tratamientos');
 
   const idvTreated = `TRT${RUN_TAG.slice(-6)}`;
-  await seedAnimal(establishmentId, rodeoId, { idv: idvTreated, sex: 'female', categoryCode: 'vaca', birthDate: '2020-03-01' });
+  await seedAnimal(establishmentId, rodeoId, { idv: idvTreated, sex: 'female', categoryCode: 'multipara', birthDate: '2020-03-01' });
   const idvOther = `OTR${RUN_TAG.slice(-6)}`;
-  await seedAnimal(establishmentId, rodeoId, { idv: idvOther, sex: 'female', categoryCode: 'vaca', birthDate: '2021-03-01' });
+  await seedAnimal(establishmentId, rodeoId, { idv: idvOther, sex: 'female', categoryCode: 'multipara', birthDate: '2021-03-01' });
 
   await page.goto('/');
   await signIn(page, user);
@@ -104,7 +111,11 @@ test('capturas: ciclo iniciar → aplicar → finalizar + marca/pin', async ({ p
   await shot(page, '07-ficha-en-tratamiento');
 
   // ── Lista general: el animal tratado PINNEA arriba con la marca ──
-  await gotoAnimales(page);
+  // Navegación DIRECTA (no gotoAnimales): estamos en la FICHA (pantalla de stack), sin bottom-nav → el helper
+  // que tapea el tab "Animales" no lo encontraría. Vamos por URL, mismo patrón que el goto del rodeo (línea
+  // 119). expo-router web sirve la tab (grupo `(tabs)`) en `/animales` (el grupo se stripea de la URL).
+  await page.goto('/animales');
+  await expect(page.getByRole('button', { name: new RegExp(idvTreated) }).first()).toBeVisible({ timeout: 30_000 });
   await expect(page.getByLabel('En tratamiento').first()).toBeVisible({ timeout: 20_000 });
   await shot(page, '08-lista-pin-y-marca');
 
@@ -135,4 +146,7 @@ test('capturas: ciclo iniciar → aplicar → finalizar + marca/pin', async ({ p
   await expect(page.getByLabel('En tratamiento', { exact: true })).toHaveCount(0, { timeout: 20_000 });
   await expect(page.getByLabel('Finalizado', { exact: true }).first()).toBeVisible();
   await shot(page, '13-ficha-finalizado');
+  } finally {
+    await ctx.close();
+  }
 });

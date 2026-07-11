@@ -120,9 +120,9 @@ if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
   // gating de maniobra (RTR.2.7/2.8, LOW-1). La suite cubre fail-closed / anti-spoof establishment_id+created_by
   // / anti-IDOR 23514/23503 (INSERT+UPDATE) / ciclo iniciar-aplicar-finalizar / peón finaliza / inmutabilidad /
   // CHECKs / exención de gating / perfil inexistente 23503.
-  // ⚠️ DESCOMENTAR cuando el LEADER aplique 0123 al remoto (deploy gateado a Raf; la suite corre contra la DB
-  // remota → falla antes del apply, la tabla treatments no existe). Patrón spec 12/14/M6.
-  // run('Treatments suite (spec 02 delta tratamientos)', `node --test supabase/tests/treatments/run.cjs`);
+  // Migración 0123 APLICADA + verificada en el remoto (2026-07-11: tabla + treatment_id + RLS + 3 triggers +
+  // gating short-circuit + revoke execute ✅) → hook DESCOMENTADO (la suite corre contra la DB remota).
+  run('Treatments suite (spec 02 delta tratamientos)', `node --test supabase/tests/treatments/run.cjs`);
 } else {
   console.log('\n>>> RLS + Edge + Animal + Maneuvers + Custom + Scrotal + user_private + Import + Sync-streams + Operaciones-rodeo suites — SKIPPED (falta SUPABASE_SERVICE_ROLE_KEY en env)');
 }

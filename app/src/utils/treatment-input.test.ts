@@ -54,9 +54,25 @@ test('treatmentEventType: antibiotico→treatment, antiparasitario→deworming, 
 });
 
 // ─── Route (RTR.2.3) ──────────────────────────────────────────────────────────────────────────
-test('TREATMENT_ROUTE_OPTIONS + treatmentRouteLabel', () => {
+// Valores VIGENTES del enum server-side `sanitary_route` (0027 + 0090). Un value fuera de este set haría que
+// Postgres rechazara la aplicación al sincronizar (poison-pill de la cola de PowerSync) — el guard de abajo lo
+// caza en unit (fix reliability del Gate 2: 'intravenous' NO estaba en el enum y se ofrecía).
+const SANITARY_ROUTE_ENUM = new Set(['intramuscular', 'subcutaneous', 'oral', 'topical', 'other', 'intranasal']);
+
+test('TREATMENT_ROUTE_OPTIONS: TODO value está en el enum sanitary_route (0027/0090) — no poison-pill', () => {
+  for (const o of TREATMENT_ROUTE_OPTIONS) {
+    assert.ok(
+      SANITARY_ROUTE_ENUM.has(o.value),
+      `route "${o.value}" NO está en el enum sanitary_route → Postgres la rechazaría al sincronizar`,
+    );
+  }
+  // 'intravenous' NO existe en el enum → NO debe ofrecerse (cubierto por 'other').
+  assert.equal(TREATMENT_ROUTE_OPTIONS.some((o) => (o.value as string) === 'intravenous'), false);
+  // Las vías comunes de tratamiento + el catch-all "Otra".
   assert.ok(TREATMENT_ROUTE_OPTIONS.some((o) => o.value === 'intramuscular'));
+  assert.ok(TREATMENT_ROUTE_OPTIONS.some((o) => o.value === 'other'));
   assert.equal(treatmentRouteLabel('subcutaneous'), 'Subcutánea');
+  assert.equal(treatmentRouteLabel('other'), 'Otra');
   assert.equal(treatmentRouteLabel('xxx'), 'xxx'); // fallback
 });
 

@@ -40,11 +40,11 @@ test('ficha: iniciar → marca en hero → pin en lista general y del rodeo → 
 
   // Animal a TRATAR (más VIEJO, se sembró primero → sin tratamiento quedaría ABAJO en el orden created_at DESC).
   const idvTreated = `TRT${RUN_TAG.slice(-6)}`;
-  await seedAnimal(establishmentId, rodeoId, { idv: idvTreated, sex: 'female', categoryCode: 'vaca', birthDate: '2020-03-01' });
+  await seedAnimal(establishmentId, rodeoId, { idv: idvTreated, sex: 'female', categoryCode: 'multipara', birthDate: '2020-03-01' });
   // Animal "más nuevo" (se siembra después → quedaría ARRIBA por created_at DESC). El pin del tratado debe
   // ganarle (RTR.5.1): el tratado sube por encima aunque sea más viejo.
   const idvOther = `OTR${RUN_TAG.slice(-6)}`;
-  await seedAnimal(establishmentId, rodeoId, { idv: idvOther, sex: 'female', categoryCode: 'vaca', birthDate: '2021-03-01' });
+  await seedAnimal(establishmentId, rodeoId, { idv: idvOther, sex: 'female', categoryCode: 'multipara', birthDate: '2021-03-01' });
 
   await page.goto('/');
   await signIn(page, user);
@@ -117,7 +117,7 @@ test('offline: iniciar tratamiento sin conexión → la marca aparece al instant
   await setUserPhone(user.id, '1123456789');
   const { establishmentId, rodeoId } = await seedEstablishmentWithRodeo(user.id, 'Campo Trt Offline');
   const idv = `TOF${RUN_TAG.slice(-6)}`;
-  await seedAnimal(establishmentId, rodeoId, { idv, sex: 'female', categoryCode: 'vaca', birthDate: '2020-03-01' });
+  await seedAnimal(establishmentId, rodeoId, { idv, sex: 'female', categoryCode: 'multipara', birthDate: '2020-03-01' });
 
   await page.goto('/');
   await signIn(page, user);

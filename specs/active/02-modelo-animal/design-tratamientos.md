@@ -549,8 +549,13 @@ documentan para que las specs no contradigan el código):
   `BreedPickerSheet`/`TagScanSheet`); el estado del sheet + los service-calls + el refresh silencioso viven en
   `[id].tsx` (los sheets son presentacionales, `onSubmit` → `{ok,error}`). Anatomía header-fijo/body-scroll/
   footer-fijo; validación inline.
-- **Vía (`route`)** — selector CERRADO `TREATMENT_ROUTE_OPTIONS` (intramuscular/subcutánea/oral/intravenosa/
-  tópica, es-AR) en `treatment-input.ts`; el value guardado en `sanitary_events.route`. Opcional.
+- **Vía (`route`)** — selector CERRADO `TREATMENT_ROUTE_OPTIONS` en `treatment-input.ts`; el value guardado en
+  `sanitary_events.route`. Opcional. **Los value DEBEN ser del enum VIGENTE `sanitary_route` (0027 + 0090):
+  {intramuscular, subcutaneous, oral, topical, other, intranasal}** — escribir un value fuera del enum haría
+  que Postgres rechazara la aplicación al sincronizar (poison-pill de la cola de PowerSync). Opciones as-built:
+  **Intramuscular / Subcutánea / Oral / Tópica / Otra** (`other`). `intravenous` NO existe en el enum → se
+  removió (fix reliability del Gate 2 code); la vía IV la cubre "Otra". `intranasal` (vacuna respiratoria) no
+  se ofrece para un tratamiento; "Otra" la cubre si hiciera falta.
 - **`validateNextDose`** (nuevo en `treatment-input.ts`) — la **próxima dosis** es naturalmente FUTURA → NO usa
   `validateEventDate` (que rechaza futuro): valida solo el formato AAAA-MM-DD (permite futuro). La fecha de la
   aplicación sí usa `validateEventDate` (no-futura).
