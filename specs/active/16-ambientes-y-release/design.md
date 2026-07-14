@@ -292,6 +292,21 @@ una función, ningún test asume su ausencia). El `REVOKE ... FROM PUBLIC` de `o
 
 ## 6. Edge Function `health` (R7)
 
+> **Reconciliación as-built (Run C, 2026-07-14).** Detalle en `progress/impl_16-runC.md`.
+> - La EF reusa los helpers `_shared/{cors,errors,supabase}.ts` (`handleOptions` / `jsonOk` /
+>   `serverError` / `createAdminClient`); **no** modifica `_shared/cors.ts` (shared por las 8 EFs). Es
+>   método-agnóstica (solo OPTIONS especial vía `handleOptions`) → UptimeRobot puede pinguear con GET/HEAD.
+> - `schema_version: data?.schema_version ?? 'unknown'` (hardening defensivo que espeja el `'unknown'` de
+>   la propia función DB — nunca romper el health por un shape inesperado). Contrato sin cambios.
+> - Config `verify_jwt=false` insertada en `config.toml` tras `[edge_runtime]`; el deploy remoto va además
+>   con `--no-verify-jwt` (el bloque de `config.toml` aplica a `supabase start` local; el flag lo hace
+>   explícito/redundante en el remoto).
+> - El **test** va en una suite dedicada **`supabase/tests/health/run.cjs`** (no folded en `edge/run.cjs`,
+>   que corre siempre y rompería pre-deploy). Su hook en `run-tests.mjs` queda **COMENTADO** hasta el
+>   deploy de C3 (patrón gateado de spec 12/14/M6/tratamientos/audit) → `check.mjs` verde sin el deploy.
+> - **C3 (deploy a DEV) NO lo ejecuta el implementer**: es gateado (leader + OK de Raf). El código + config
+>   + test quedan escritos y estáticamente verificados (typecheck + `node --check`).
+
 Nueva carpeta `supabase/functions/health/index.ts`. Sin auth de usuario (`verify_jwt=false`): la
 invoca UptimeRobot sin JWT. Usa `createAdminClient()` (service_role) → `rpc('health_status')`.
 
@@ -399,8 +414,8 @@ de Raf); el runbook documenta URLs + config.
 `scripts/apply-all-migrations.mjs` · `scripts/backup-db.mjs` · `scripts/lib/env-target.mjs`
 (+ `.test.mjs`) · `scripts/lib/ledger-plan.mjs` (+ `.test.mjs`) · `scripts/lib/backup-cmd.mjs`
 (+ `.test.mjs`) · `supabase/migrations/0125_health_status.sql` (as-built; era `0124`, ver §5) ·
-`supabase/functions/health/index.ts` · `.github/workflows/backup-prod.yml` · `docs/runbook.md` ·
-(Run F) `powersync/cli.prod.yaml`.
+`supabase/functions/health/index.ts` · `supabase/tests/health/run.cjs` (suite de la EF `health`, Run C) ·
+`.github/workflows/backup-prod.yml` · `docs/runbook.md` · (Run F) `powersync/cli.prod.yaml`.
 
 **Modificar**: `app/app.json` (→ borrar tras migrar a `app.config.ts`) · `app/eas.json` ·
 `app/src/utils/env.ts` · `app/src/utils/env-resolve.ts` (+ `.test.ts`, agregar `composeReader`) ·

@@ -380,6 +380,14 @@ deno_version = 2
 # [edge_runtime.secrets]
 # secret_key = "env(SECRET_VALUE)"
 
+# spec 16 Run C — Edge Function `health` (endpoint público para UptimeRobot). verify_jwt=false ⇒ el gateway
+# NO exige JWT (R7.4): UptimeRobot la pinguea sin auth. La función es input-free y solo devuelve
+# {ok, schema_version, env} (R7.5/R7.9). El deploy remoto DEBE ir con
+# `supabase functions deploy health --no-verify-jwt` (este bloque aplica en local/`supabase start`; el flag
+# lo hace explícito y redundante en el deploy remoto). Todas las demás EFs quedan con verify_jwt=true (default).
+[functions.health]
+verify_jwt = false
+
 [analytics]
 enabled = true
 port = 54327

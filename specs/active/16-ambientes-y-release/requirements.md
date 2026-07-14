@@ -149,6 +149,22 @@ Cada `R<n>` se cubre con ≥1 task en `tasks.md` y su verificación (test unitar
 
 ## Historial de refinamiento
 
+### 2026-07-14 — Reconciliación as-built de Run C (Edge Function `health`)
+
+Aditivo, sin cambiar el *qué* de ningún EARS. Detalle en `progress/impl_16-runC.md` + `design.md` §6.
+
+- **R7.1/R7.2/R7.3/R7.5/R7.9 — EF `health`**: implementada en `supabase/functions/health/index.ts`
+  reusando `_shared/{cors,errors,supabase}.ts`. Input-free (no lee body/params), método-agnóstica,
+  `serverError` genérico en fallo, respuesta = `{ok, schema_version, env}`. `schema_version` con
+  `?? 'unknown'` defensivo (espeja el fallback de la función DB). Comportamiento igual al EARS.
+- **R7.4 — `verify_jwt=false`**: bloque `[functions.health]` en `config.toml` (aplica a local) + flag
+  `--no-verify-jwt` en el deploy remoto (documentado en `progress/impl_16-runC.md`).
+- **R7.6 (DEV) — deploy**: sigue GATEADO (C3, leader + OK de Raf); el implementer entrega código+config+test
+  estáticamente verificados, no deploya.
+- **R7.7 — verificación de `anon` sin EXECUTE**: el test vive en la suite dedicada
+  `supabase/tests/health/run.cjs`, con hook **comentado** en `run-tests.mjs` hasta el deploy de C3
+  (patrón gateado de spec 12/14/M6/tratamientos/audit; mantiene `check.mjs` verde sin el deploy).
+
 ### 2026-07-14 — Reconciliación as-built de Run B (implementación de scripts)
 
 Aditivo, sin cambiar el *qué* de ningún EARS. Detalle en `progress/impl_16-runB.md` + `design.md` §4/§5.

@@ -133,23 +133,30 @@ escribe a un ambiente real vive en Run F, gateado.
 
 ## 🟢 Run C — Edge Function `health` (buildable; deploy a DEV en este run, a PROD en Run F)
 
-- [ ] **C1** — `supabase/functions/health/index.ts` (nuevo): `createAdminClient().rpc('health_status')`
+- [x] **C1** — `supabase/functions/health/index.ts` (nuevo): `createAdminClient().rpc('health_status')`
   → `{ ok, schema_version, env }` (schema_version = prefijo numérico, L1). Sin auth de usuario. **No lee
   body ni params** (input-free — Gate 1 M2/R7.9; corre con service_role). En fallo, `serverError` (copy
   genérico, sin driver msg). No expone datos de negocio/PII. Cubre: R7.1, R7.2, R7.3, R7.5, R7.9.
+  **As-built**: reusa `_shared/{cors,errors,supabase}.ts` (handleOptions / jsonOk / serverError /
+  createAdminClient); `data?.schema_version ?? 'unknown'` (hardening defensivo, espeja el `'unknown'` de
+  la función DB). NO modifica `_shared/cors.ts` (shared por las 8 EFs).
 
-- [ ] **C2** — `supabase/config.toml`: agregar `[functions.health]` con `verify_jwt = false`.
-  Cubre: R7.4.
+- [x] **C2** — `supabase/config.toml`: agregar `[functions.health]` con `verify_jwt = false`.
+  Cubre: R7.4. **As-built**: bloque insertado tras `[edge_runtime]`; el deploy remoto va además con
+  `--no-verify-jwt` (config.toml aplica a `supabase start` local; el flag lo hace explícito en el remoto).
 
-- [ ] **C3** — Aplicar `0125_health_status.sql` a **DEV** (`apply-migration-mgmt.mjs --env dev`; as-built 0125) +
-  deploy de `health` a **DEV** (`supabase functions deploy health --no-verify-jwt`). 🔒 Requiere OK de
-  deploy de Raf (DB/Functions compartidas) — coordina el leader. Cubre: R7.6 (DEV).
+- [ ] **C3** — 🔒 GATEADO (leader + OK de deploy de Raf, NO lo ejecuta el implementer): aplicar
+  `0125_health_status.sql` a **DEV** (`apply-migration-mgmt.mjs --env dev`; as-built 0125) + deploy de
+  `health` a **DEV** (`supabase functions deploy health --no-verify-jwt`) + smoke `curl`. Pasos exactos en
+  `progress/impl_16-runC.md` §"Qué queda para el deploy". Cubre: R7.6 (DEV).
 
-- [ ] **C4** — Test de la Edge suite para `health` (contra DEV), registrar hook en `run-tests.mjs`:
+- [x] **C4** — Test de la Edge suite para `health` (contra DEV), registrar hook en `run-tests.mjs`:
   (a) 200 con `ok:true` y `schema_version` `^\d{4}$|^unknown$`; (b) invocable **sin** header
   Authorization; (c) el body no trae claves fuera de `{ok,schema_version,env}` (no leak); (d) **`anon`
   NO puede ejecutar `POST /rest/v1/rpc/health_status` directo** (REVOKE FROM PUBLIC, Gate 1 M1). Cubre:
-  R7.1, R7.4, R7.5, R7.7.
+  R7.1, R7.4, R7.5, R7.7. **As-built**: suite dedicada `supabase/tests/health/run.cjs` (no folded en
+  `edge/run.cjs`); hook en `run-tests.mjs` **COMENTADO** (⚠️ DESCOMENTAR post-deploy C3) para que
+  `check.mjs` quede verde sin el deploy — patrón gateado de spec 12/14/M6/tratamientos/audit.
 
 ---
 

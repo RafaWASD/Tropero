@@ -141,6 +141,14 @@ if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
   //    change_member_role, remove_member, delete_account). Antes del apply, esta suite FALLA (el schema audit
   //    no existe) → mismo patrón que spec 12/14/M6/tratamientos.
   run('Audit suite (spec 18)', `node --test supabase/tests/audit/run.cjs`);
+  // spec 16 Run C (Edge Function `health`) — endpoint público (verify_jwt=false) que invoca la RPC
+  // public.health_status() (SECURITY DEFINER, 0125) y devuelve {ok, schema_version, env}. La suite cubre
+  // C4(a) 200+ok:true+schema_version prefijo 4 dígitos / C4(b) invocable sin JWT / C4(c) body ⊆
+  // {ok,schema_version,env} (no leak) / C4(d) anon NO puede rpc/health_status directo (REVOKE FROM PUBLIC, M1).
+  // ⚠️ DESCOMENTAR cuando el LEADER aplique 0125_health_status.sql a DEV + deploye la EF `health` a DEV
+  //    (`supabase functions deploy health --no-verify-jwt`). Antes del deploy, esta suite FALLA (la EF/RPC no
+  //    existen) → mismo patrón que spec 12/14/M6/tratamientos/audit. Detalle en progress/impl_16-runC.md.
+  run('Health EF suite (spec 16 Run C)', `node --test supabase/tests/health/run.cjs`);
 } else {
   console.log('\n>>> RLS + Edge + Animal + Maneuvers + Custom + Scrotal + user_private + Import + Sync-streams + Operaciones-rodeo suites — SKIPPED (falta SUPABASE_SERVICE_ROLE_KEY en env)');
 }
