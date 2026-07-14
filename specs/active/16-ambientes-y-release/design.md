@@ -116,6 +116,18 @@ export const getEnv = () => resolveEnv(read);   // resolveEnv INTACTO (R3.3, cop
   se agregan casos para `composeReader` (orden estático → dinámico → extra).
 - **`EXPO_PUBLIC_ENV`** (R3.4): nuevo módulo `app/src/utils/app-env.ts` (puro), con `getAppEnv(): 'development'|'preview'|'production'|'e2e'` (default `development`) e `isE2E()`.
 
+> **Reconciliación as-built (Run A, 2026-07-14).** El STATIC de `env.ts` NO incluye `EXPO_PUBLIC_ENV`:
+> `env.ts` compone el reader que consume **`resolveEnv`**, y `resolveEnv` no lee `EXPO_PUBLIC_ENV` (lo
+> lee `app-env.ts`). Ponerlo en el STATIC de `env.ts` sería un acceso literal inlineado pero nunca
+> consumido (código muerto). Por eso el acceso ESTÁTICO literal de `EXPO_PUBLIC_ENV` (R3.1) vive en
+> **`app-env.ts`** (su consumidor real), con el mismo fallback dinámico por key variable (R3.2) — sin
+> capa `extra`, porque el módulo es puro y no importa `expo-constants` (y `EXPO_PUBLIC_ENV` no viaja por
+> `extra`). El STATIC de `env.ts` queda con las 4 vars que sí lee `resolveEnv`:
+> `EXPO_PUBLIC_SUPABASE_URL`, `EXPO_PUBLIC_SUPABASE_ANON_KEY`, `EXPO_PUBLIC_POWERSYNC_URL` y
+> **`EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID`** (agregada por la reconciliación con feature 19: público, se
+> inlinea igual → el web build de la 19 obtiene el ID en vez de undefined). R3.1 se cumple: cada var
+> pública se lee por un acceso estático literal, en el módulo que la consume.
+
 ### `app/src/utils/app-env.ts` — `isE2E()` (R3.6/R3.7)
 
 Mismo patrón que `ble-e2e-flag.ts`: flag `window.__RAFAQ_E2E__` que **solo** Playwright pone con

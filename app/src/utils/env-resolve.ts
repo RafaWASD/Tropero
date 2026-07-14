@@ -20,6 +20,31 @@ export type RequiredEnv = {
 export type EnvReader = (name: string) => string | undefined;
 
 /**
+ * Compone un EnvReader con precedencia (spec 16, R3.1/R3.2). PURA (testeable bajo node:test):
+ *   1. `staticMap[name]` — accesos ESTÁTICOS literales (`process.env.EXPO_PUBLIC_X`) que
+ *      `babel-preset-expo` inlinea en el build web de producción (R3.1). Sin esto, en el bundle web
+ *      las vars quedan undefined (el acceso dinámico por key variable NO se inlinea).
+ *   2. `dynamicRead(name)` — `process.env[name]` con key VARIABLE (dev server + shim E2E de
+ *      fixtures.ts, que setea globalThis.process.env antes del boot; R3.2).
+ *   3. `extraRead(name)` — `Constants.expoConfig.extra[name]` (último fallback; R3.2).
+ * Devuelve el primer valor no vacío; si ninguno resuelve, undefined (resolveEnv decide el
+ * fail-closed, R3.3). El orden garantiza: build web inlineado > runtime (dev/E2E) > extra.
+ */
+export function composeReader(
+  staticMap: Record<string, string | undefined>,
+  dynamicRead: EnvReader,
+  extraRead: EnvReader,
+): EnvReader {
+  return (name) => {
+    const s = staticMap[name];
+    if (s && s.length > 0) return s;
+    const d = dynamicRead(name);
+    if (d && d.length > 0) return d;
+    return extraRead(name);
+  };
+}
+
+/**
  * Ensambla y valida el set de env requerido a partir de un reader. PURA (testeable): si falta
  * cualquiera de las tres, tira un Error con copy accionable en español (nunca un crash opaco, R1.3).
  * El mensaje nombra las tres vars y apunta a `.env.local`, igual que el error histórico de Supabase.

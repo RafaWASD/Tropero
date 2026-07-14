@@ -26,12 +26,20 @@ export const test = base.extend({
   page: async ({ page }, use) => {
     await page.addInitScript(
       ([url, key, psUrl]) => {
-        const g = globalThis as unknown as { process?: { env?: Record<string, string> } };
+        const g = globalThis as unknown as {
+          process?: { env?: Record<string, string> };
+          __RAFAQ_E2E__?: boolean;
+        };
         g.process = g.process || {};
         g.process.env = g.process.env || {};
         g.process.env.EXPO_PUBLIC_SUPABASE_URL = url;
         g.process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY = key;
         g.process.env.EXPO_PUBLIC_POWERSYNC_URL = psUrl;
+        // spec 16 (R3.5/R3.6): marcar el ambiente E2E para el bundle (getAppEnv/isE2E), mismo patrón
+        // que window.__RAFAQ_BLE_E2E__. Se inyecta acá → los ~70 specs no se tocan (heredan el shim
+        // vía el `test` exportado).
+        g.process.env.EXPO_PUBLIC_ENV = 'e2e';
+        g.__RAFAQ_E2E__ = true;
       },
       [supabaseUrl, anonKey, powersyncUrl],
     );
@@ -48,12 +56,18 @@ export { expect };
 export async function applyEnvShim(page: import('@playwright/test').Page): Promise<void> {
   await page.addInitScript(
     ([url, key, psUrl]) => {
-      const g = globalThis as unknown as { process?: { env?: Record<string, string> } };
+      const g = globalThis as unknown as {
+        process?: { env?: Record<string, string> };
+        __RAFAQ_E2E__?: boolean;
+      };
       g.process = g.process || {};
       g.process.env = g.process.env || {};
       g.process.env.EXPO_PUBLIC_SUPABASE_URL = url;
       g.process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY = key;
       g.process.env.EXPO_PUBLIC_POWERSYNC_URL = psUrl;
+      // spec 16 (R3.5/R3.6): mismo shim de ambiente E2E que la fixture `page`.
+      g.process.env.EXPO_PUBLIC_ENV = 'e2e';
+      g.__RAFAQ_E2E__ = true;
     },
     [supabaseUrl, anonKey, powersyncUrl],
   );

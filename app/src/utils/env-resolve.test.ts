@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { resolveEnv, type EnvReader } from './env-resolve.ts';
+import { composeReader, resolveEnv, type EnvReader } from './env-resolve.ts';
 
 /** Crea un reader desde un mapa de env. */
 function readerFrom(map: Record<string, string | undefined>): EnvReader {
@@ -79,4 +79,45 @@ test('R7.4: falta el web client ID PERO falta también una requerida → sigue a
   // El web client ID opcional NO relaja el fail-closed de las 3 requeridas.
   const reader = readerFrom({ ...FULL, EXPO_PUBLIC_SUPABASE_URL: undefined });
   assert.throws(() => resolveEnv(reader), /EXPO_PUBLIC_SUPABASE_URL/);
+});
+
+// ── spec 16 (ambientes) — composeReader: precedencia estático → dinámico → extra (R3.1/R3.2) ────────
+
+test('R3.1: el mapa ESTÁTICO gana sobre el dinámico y el extra', () => {
+  const read = composeReader(
+    { X: 'static' },
+    () => 'dynamic',
+    () => 'extra',
+  );
+  assert.equal(read('X'), 'static');
+});
+
+test('R3.2: si el estático está vacío/ausente, cae al reader DINÁMICO', () => {
+  const readEmpty = composeReader({ X: '' }, () => 'dynamic', () => 'extra');
+  assert.equal(readEmpty('X'), 'dynamic');
+  const readMissing = composeReader({}, () => 'dynamic', () => 'extra');
+  assert.equal(readMissing('X'), 'dynamic');
+});
+
+test('R3.2: si estático y dinámico están vacíos, cae a EXTRA', () => {
+  const read = composeReader({ X: undefined }, () => undefined, () => 'extra');
+  assert.equal(read('X'), 'extra');
+});
+
+test('R3.2: si ninguno resuelve → undefined (resolveEnv decide el fail-closed)', () => {
+  const read = composeReader({}, () => undefined, () => undefined);
+  assert.equal(read('X'), undefined);
+});
+
+test('R3.1/R3.2: composeReader + resolveEnv → resuelve las 3 requeridas desde capas distintas', () => {
+  // URL por estático, ANON por dinámico, POWERSYNC por extra → resolveEnv arma el set completo.
+  const read = composeReader(
+    { EXPO_PUBLIC_SUPABASE_URL: FULL.EXPO_PUBLIC_SUPABASE_URL },
+    (n) => (n === 'EXPO_PUBLIC_SUPABASE_ANON_KEY' ? FULL.EXPO_PUBLIC_SUPABASE_ANON_KEY : undefined),
+    (n) => (n === 'EXPO_PUBLIC_POWERSYNC_URL' ? FULL.EXPO_PUBLIC_POWERSYNC_URL : undefined),
+  );
+  const env = resolveEnv(read);
+  assert.equal(env.supabaseUrl, FULL.EXPO_PUBLIC_SUPABASE_URL);
+  assert.equal(env.supabaseAnonKey, FULL.EXPO_PUBLIC_SUPABASE_ANON_KEY);
+  assert.equal(env.powersyncUrl, FULL.EXPO_PUBLIC_POWERSYNC_URL);
 });

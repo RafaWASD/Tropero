@@ -32,28 +32,28 @@ escribe a un ambiente real vive en Run F, gateado.
 
 > Es el run que "desbloquea" al implementer. No toca PROD. `check.mjs` y E2E deben quedar verdes.
 
-- [ ] **A1** — Migrar `app/app.json` → `app/app.config.ts` (TS) con `APP_VARIANT`: `development` →
+- [x] **A1** — Migrar `app/app.json` → `app/app.config.ts` (TS) con `APP_VARIANT`: `development` →
   name "RAFAQ (Dev)" + `package`/`bundleIdentifier` `ar.rafq.app.dev`; caso contrario "RAFAQ" +
   `ar.rafq.app`. Preservar slug/scheme/version/icon/plugins/permissions/`eas.projectId`/`owner`.
   Cubre: R2.1, R2.2, R2.3, R2.4.
   **Verif**: assert de que `APP_VARIANT=development` produce name/ids `.dev` y el default produce
   `ar.rafq.app` (evaluar `app.config.ts` en node); typecheck verde.
 
-- [ ] **A2** — `Grep` de consumidores de `Constants.expoConfig.extra.supabaseUrl` (clave literal
+- [x] **A2** — `Grep` de consumidores de `Constants.expoConfig.extra.supabaseUrl` (clave literal
   `supabaseUrl`) en `app/src`. Si no hay ninguno, eliminar `extra.supabaseUrl`; si hay, conservarlo y
   documentar el consumidor. Registrar el resultado del grep en `impl_16`. Cubre: R2.5.
 
-- [ ] **A3** — `app/src/utils/env-resolve.ts`: agregar `composeReader(staticMap, dynamicRead,
+- [x] **A3** — `app/src/utils/env-resolve.ts`: agregar `composeReader(staticMap, dynamicRead,
   extraRead)` puro (orden estático → dinámico → extra). **No tocar** `resolveEnv` ni su copy
   fail-closed. Cubre: R3.1, R3.2, R3.3.
   **Verif** (`env-resolve.test.ts`, ya en `run-tests.mjs`): (a) estático gana sobre dinámico y extra;
   (b) cae al dinámico si el estático está vacío; (c) cae a extra si ambos vacíos; (d) `resolveEnv`
   sigue tirando el mismo error en español si falta cualquiera de las 3.
 
-- [ ] **A4** — `app/src/utils/env.ts`: cablear el mapa STATIC (4 accesos literales
+- [x] **A4** — `app/src/utils/env.ts`: cablear el mapa STATIC (4 accesos literales
   `process.env.EXPO_PUBLIC_*`, incluida `EXPO_PUBLIC_ENV`) + `composeReader`. Cubre: R3.1, R3.2.
 
-- [ ] **A5** — `app/src/utils/app-env.ts` (nuevo, puro): `getAppEnv(): 'development'|'preview'|
+- [x] **A5** — `app/src/utils/app-env.ts` (nuevo, puro): `getAppEnv(): 'development'|'preview'|
   'production'|'e2e'` (default `development`) + `isE2E()` (flag `window.__RAFAQ_E2E__` **o**
   `EXPO_PUBLIC_ENV==='e2e'`) + export de `APP_E2E_GLOBAL_KEY`. Patrón de `ble-e2e-flag.ts`.
   Cubre: R3.4, R3.6, R3.7.
@@ -61,11 +61,11 @@ escribe a un ambiente real vive en Run F, gateado.
   false y `getAppEnv()` `development`; (b) `EXPO_PUBLIC_ENV='e2e'` → `isE2E()` true; (c)
   `globalThis.__RAFAQ_E2E__=true` → `isE2E()` true; (d) valor fuera de dominio → default `development`.
 
-- [ ] **A6** — Extender `app/e2e/helpers/fixtures.ts` (fixture `page` **y** `applyEnvShim`): en el
+- [x] **A6** — Extender `app/e2e/helpers/fixtures.ts` (fixture `page` **y** `applyEnvShim`): en el
   `addInitScript` setear además `process.env.EXPO_PUBLIC_ENV='e2e'` y `window.__RAFAQ_E2E__=true`. **No
   tocar** los ~70 specs. Cubre: R3.5.
 
-- [ ] **A7** — Registrar `app-env.test.ts` (y el resto de units nuevas) en `scripts/run-tests.mjs`.
+- [x] **A7** — Registrar `app-env.test.ts` (y el resto de units nuevas) en `scripts/run-tests.mjs`.
   Correr `node scripts/check.mjs` (verde SIN cambios, DEV por diseño) + suite E2E completa verde.
   Cubre: R1.3, R3.5. **Nota**: `check.mjs`/E2E los corre el **reviewer/Explore** (read-only), no el
   implementer (memoria: verify = read-only).
