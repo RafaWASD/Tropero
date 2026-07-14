@@ -55,7 +55,7 @@ export function isNetworkOrRateLimit(error: AuthErrorLike | null | undefined): b
  */
 export function authErrorMessage(
   error: AuthErrorLike | null | undefined,
-  context: 'signin' | 'signup' | 'reset' | 'resend' | 'generic' = 'generic',
+  context: 'signin' | 'signup' | 'reset' | 'resend' | 'social' | 'generic' = 'generic',
 ): string {
   if (!error) return GENERIC;
 
@@ -72,6 +72,18 @@ export function authErrorMessage(
     (error.name ?? '').toLowerCase().includes('retryable')
   ) {
     return NETWORK;
+  }
+
+  // Login social (spec 19, D7/R6.3–R6.4). Los servicios `*-auth.native.ts` normalizan el code opaco de
+  // la lib a un code canónico estable ANTES de llegar acá (la cancelación NO llega: el servicio devuelve
+  // { ok:false } sin error → silencio, R6.1). Nunca se filtra config ni el mensaje crudo del proveedor.
+  if (code === 'developer_error') {
+    // Misconfig de client ID / SHA-1 (Google). NO exponer detalle (R6.3).
+    return 'No pudimos iniciar con Google. Probá con tu email y contraseña.';
+  }
+  if (code === 'play_services_not_available') {
+    // Dispositivo sin Google Play (ej. Huawei) → degradar a email/password (R6.4).
+    return 'Necesitás Google Play para iniciar con Google. Usá tu email y contraseña.';
   }
 
   // Rate limit (incluye el lockout nativo de Supabase Auth, R1.7 server-side).
@@ -115,6 +127,9 @@ export function authErrorMessage(
       return 'No pudimos enviar el email de recuperación. Intentá de nuevo.';
     case 'resend':
       return 'No pudimos reenviar el email. Intentá de nuevo en un momento.';
+    case 'social':
+      // Fallback social genérico (R6.5): invita al fallback email/password sin filtrar el motivo crudo.
+      return 'No pudimos iniciar sesión con ese método. Probá con tu email y contraseña.';
     default:
       return GENERIC;
   }

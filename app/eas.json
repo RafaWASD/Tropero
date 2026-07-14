@@ -11,7 +11,8 @@
       "env": {
         "EXPO_PUBLIC_SUPABASE_URL": "https://xrhlxxdnfzvdnztacofj.supabase.co",
         "EXPO_PUBLIC_SUPABASE_ANON_KEY": "sb_publishable_iCiWUjiUycJJlHT0XSKs4w_HJ6bdktb",
-        "EXPO_PUBLIC_POWERSYNC_URL": "https://6a260fd035ca576ca0dad778.powersync.journeyapps.com"
+        "EXPO_PUBLIC_POWERSYNC_URL": "https://6a260fd035ca576ca0dad778.powersync.journeyapps.com",
+        "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "PLACEHOLDER-WEB-CLIENT-ID.apps.googleusercontent.com"
       }
     },
     "development": {
@@ -23,7 +24,8 @@
       "env": {
         "EXPO_PUBLIC_SUPABASE_URL": "https://xrhlxxdnfzvdnztacofj.supabase.co",
         "EXPO_PUBLIC_SUPABASE_ANON_KEY": "sb_publishable_iCiWUjiUycJJlHT0XSKs4w_HJ6bdktb",
-        "EXPO_PUBLIC_POWERSYNC_URL": "https://6a260fd035ca576ca0dad778.powersync.journeyapps.com"
+        "EXPO_PUBLIC_POWERSYNC_URL": "https://6a260fd035ca576ca0dad778.powersync.journeyapps.com",
+        "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "PLACEHOLDER-WEB-CLIENT-ID.apps.googleusercontent.com"
       }
     },
     "production": {
@@ -31,7 +33,8 @@
       "env": {
         "EXPO_PUBLIC_SUPABASE_URL": "https://xrhlxxdnfzvdnztacofj.supabase.co",
         "EXPO_PUBLIC_SUPABASE_ANON_KEY": "sb_publishable_iCiWUjiUycJJlHT0XSKs4w_HJ6bdktb",
-        "EXPO_PUBLIC_POWERSYNC_URL": "https://6a260fd035ca576ca0dad778.powersync.journeyapps.com"
+        "EXPO_PUBLIC_POWERSYNC_URL": "https://6a260fd035ca576ca0dad778.powersync.journeyapps.com",
+        "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "PLACEHOLDER-WEB-CLIENT-ID.apps.googleusercontent.com"
       }
     }
   }

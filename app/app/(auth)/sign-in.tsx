@@ -8,10 +8,20 @@
 // Cero hardcode (ADR-023 §4): tokens + componentes de la librería.
 
 import { useEffect, useState } from 'react';
+import { Platform } from 'react-native';
 import { useRouter } from 'expo-router';
 import { YStack } from 'tamagui';
 
-import { AuthScreenShell, Button, FormError, FormField, LinkButton } from '@/components';
+import {
+  AppleSignInButton,
+  AuthDivider,
+  AuthScreenShell,
+  Button,
+  FormError,
+  FormField,
+  GoogleSignInButton,
+  LinkButton,
+} from '@/components';
 import { useAuth } from '@/contexts';
 import { authErrorMessage } from '@/utils/auth-errors';
 import { validateSignIn, type FieldError } from '@/utils/validation';
@@ -29,7 +39,7 @@ import { loadLockout, saveLockout } from '@/services/lockout-store';
 
 export default function SignInScreen() {
   const router = useRouter();
-  const { signIn } = useAuth();
+  const { signIn, signInWithGoogle, signInWithApple } = useAuth();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -37,6 +47,8 @@ export default function SignInScreen() {
   const [passwordError, setPasswordError] = useState<FieldError>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [googleBusy, setGoogleBusy] = useState(false);
+  const [appleBusy, setAppleBusy] = useState(false);
   const [lockout, setLockout] = useState<LockoutState>(EMPTY_LOCKOUT);
 
   // Al cambiar el email, rehidratamos el lockout persistido de ESE email (normalizado
@@ -100,6 +112,28 @@ export default function SignInScreen() {
     }
   }
 
+  // Login social (spec 19, R8.5): NO se gatea por `locked` ni toca el estado de lockout del password
+  // (el OAuth no es brute-forceable). Cancelar el picker → { ok:false } sin error → silencio (R6.1).
+  async function onGoogle() {
+    setFormError(null);
+    setGoogleBusy(true);
+    const result = await signInWithGoogle();
+    setGoogleBusy(false);
+    if (result.ok) return; // el RootGate re-rutea al cambiar el AuthState (sin navegación manual)
+    if (result.error) setFormError(authErrorMessage(result.error, 'social'));
+  }
+
+  async function onApple() {
+    setFormError(null);
+    setAppleBusy(true);
+    const result = await signInWithApple();
+    setAppleBusy(false);
+    if (result.ok) return;
+    if (result.error) setFormError(authErrorMessage(result.error, 'social'));
+  }
+
+  const anyBusy = submitting || googleBusy || appleBusy;
+
   return (
     <AuthScreenShell title="Iniciar sesión" subtitle="Ingresá con tu email y contraseña.">
       <YStack gap="$4" marginTop="$2">
@@ -130,9 +164,15 @@ export default function SignInScreen() {
 
         <FormError message={formError} />
 
-        <Button variant="primary" fullWidth disabled={submitting || locked} onPress={onSubmit}>
+        <Button variant="primary" fullWidth disabled={anyBusy || locked} onPress={onSubmit}>
           {submitting ? 'Ingresando…' : 'Iniciar sesión'}
         </Button>
+
+        <AuthDivider />
+        <GoogleSignInButton onPress={onGoogle} disabled={anyBusy} loading={googleBusy} />
+        {(Platform.OS === 'ios' || Platform.OS === 'web') && (
+          <AppleSignInButton onPress={onApple} disabled={anyBusy} loading={appleBusy} />
+        )}
 
         <YStack gap="$3" alignItems="center" marginTop="$2">
           <LinkButton

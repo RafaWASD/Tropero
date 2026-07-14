@@ -9,6 +9,11 @@ export type RequiredEnv = {
   supabaseUrl: string;
   supabaseAnonKey: string;
   powersyncUrl: string;
+  // OPCIONAL (spec 19, R7.4): el Web Client ID de Google (NO es secreto). Vive FUERA del check
+  // fail-closed: su ausencia NO aborta el arranque (la app es buildable-now sin el ID de Raf; si
+  // falta en runtime, el sign-in nativo de Google falla con DEVELOPER_ERROR → copy R6.3, degradado
+  // aceptable). Se lee después del throw, así el resto de la app arranca igual.
+  googleWebClientId?: string;
 };
 
 /** Lee el valor de una var pública por nombre. Devuelve undefined si no está o está vacía. */
@@ -31,5 +36,8 @@ export function resolveEnv(read: EnvReader): RequiredEnv {
     );
   }
 
-  return { supabaseUrl, supabaseAnonKey, powersyncUrl };
+  // OPCIONAL, fuera del fail-closed (R7.4): si falta, queda undefined y la app arranca igual.
+  const googleWebClientId = read('EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID');
+
+  return { supabaseUrl, supabaseAnonKey, powersyncUrl, googleWebClientId };
 }

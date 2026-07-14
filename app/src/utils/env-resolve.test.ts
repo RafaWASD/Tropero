@@ -57,3 +57,26 @@ test('R1.3: faltan las de Supabase también se reportan (mensaje único con las 
     },
   );
 });
+
+// ── spec 19 (login social) — googleWebClientId OPCIONAL, fuera del fail-closed (R7.4) ──────────────
+
+test('R7.4: SIN EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID → NO aborta; googleWebClientId queda undefined', () => {
+  // Las 3 requeridas están; falta solo el web client ID → no debe tirar (buildable-now sin el ID de Raf).
+  const env = resolveEnv(readerFrom(FULL));
+  assert.equal(env.googleWebClientId, undefined);
+  // Las requeridas siguen resolviendo normal.
+  assert.equal(env.supabaseUrl, FULL.EXPO_PUBLIC_SUPABASE_URL);
+});
+
+test('R7.4: CON EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID → se expone en el env resuelto', () => {
+  const env = resolveEnv(
+    readerFrom({ ...FULL, EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID: 'abc123.apps.googleusercontent.com' }),
+  );
+  assert.equal(env.googleWebClientId, 'abc123.apps.googleusercontent.com');
+});
+
+test('R7.4: falta el web client ID PERO falta también una requerida → sigue abortando (fail-closed intacto)', () => {
+  // El web client ID opcional NO relaja el fail-closed de las 3 requeridas.
+  const reader = readerFrom({ ...FULL, EXPO_PUBLIC_SUPABASE_URL: undefined });
+  assert.throws(() => resolveEnv(reader), /EXPO_PUBLIC_SUPABASE_URL/);
+});

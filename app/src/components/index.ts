@@ -10,7 +10,12 @@ export { ConditionScoreStepper } from './ConditionScoreStepper';
 export type { ConditionScoreStepperProps } from './ConditionScoreStepper';
 export { AuthScreenShell } from './AuthScreenShell';
 export type { AuthScreenShellProps } from './AuthScreenShell';
-export { FormError, InfoNote, LinkButton } from './AuthBits';
+export { FormError, InfoNote, LinkButton, AuthDivider } from './AuthBits';
+// Login social (spec 19). GoogleSignInButton = 1 archivo; AppleSignInButton = base (web) + .native (HIG/null).
+export { GoogleSignInButton } from './GoogleSignInButton';
+export type { GoogleSignInButtonProps } from './GoogleSignInButton';
+export { AppleSignInButton } from './AppleSignInButton';
+export type { AppleSignInButtonProps } from './AppleSignInButton';
 export { Stepper } from './Stepper';
 export type { StepperProps, StepperStep } from './Stepper';
 export { EstablishmentCard } from './EstablishmentCard';

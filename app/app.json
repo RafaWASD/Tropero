@@ -10,6 +10,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "ar.rafq.app",
+      "usesAppleSignIn": true,
       "infoPlist": {
         "UIBackgroundModes": [
           "remote-notification"
@@ -42,7 +43,14 @@
       ],
       "expo-router",
       "expo-splash-screen",
-      "expo-sharing"
+      "expo-sharing",
+      [
+        "@react-native-google-signin/google-signin",
+        {
+          "iosUrlScheme": "com.googleusercontent.apps.PLACEHOLDER-REVERSED-IOS-CLIENT-ID"
+        }
+      ],
+      "expo-apple-authentication"
     ],
     "extra": {
       "supabaseUrl": "https://xrhlxxdnfzvdnztacofj.supabase.co",

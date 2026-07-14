@@ -27,6 +27,9 @@ import type { Session, User } from '@supabase/supabase-js';
 
 import { supabase } from '../services/supabase';
 import { registerPushTokenBestEffort } from '../services/push-notifications';
+import { signInWithGoogle as signInWithGoogleService } from '../services/google-auth';
+import { signInWithApple as signInWithAppleService } from '../services/apple-auth';
+import type { AuthErrorLike } from '../utils/auth-errors';
 
 export type AuthUser = {
   id: string;
@@ -45,9 +48,14 @@ export type SignInInput = { email: string; password: string };
 // Result interno de las acciones: el copy de error legible lo arma la pantalla con
 // authErrorMessage(error). Acá devolvemos el AuthError crudo para que la pantalla
 // elija el contexto del mensaje (signin/signup/...).
+//
+// spec 19 (R6.1): `error` es OPCIONAL en la variante `false` — la cancelación silenciosa del
+// picker social devuelve `{ ok:false }` SIN error (la pantalla no muestra nada). Los flujos de
+// password SIEMPRE traen `error`, así que su comportamiento no cambia (cambio aditivo, ratificado
+// en Puerta 1). La pantalla social hace `if (result.error) setFormError(...)`.
 export type AuthActionResult =
   | { ok: true }
-  | { ok: false; error: { code?: string | null; status?: number | null; message?: string | null; name?: string | null } };
+  | { ok: false; error?: AuthErrorLike };
 
 export type AuthContextValue = {
   state: AuthState;
@@ -56,6 +64,10 @@ export type AuthContextValue = {
   signOut: () => Promise<void>;
   requestPasswordReset: (email: string) => Promise<AuthActionResult>;
   resendVerification: () => Promise<AuthActionResult>;
+  /** Login social con Google (spec 19). Platform-split: nativo en iOS/Android, OAuth redirect en web. */
+  signInWithGoogle: () => Promise<AuthActionResult>;
+  /** Login social con Apple (spec 19). Nativo en iOS (nonce), OAuth redirect en web, no-op en Android. */
+  signInWithApple: () => Promise<AuthActionResult>;
   /** Fuerza una relectura de la sesión desde el server (para el auto-refresh del gate). */
   refreshSession: () => Promise<void>;
 };
@@ -161,6 +173,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { ok: true };
   }, [state]);
 
+  // Login social (spec 19, R1.1/R2.1). Wrappers finos de los servicios platform-split (Metro resuelve
+  // .native/.web). NO tocan onAuthStateChange/getSession: el SIGNED_IN que emite la sesión OAuth ya
+  // dispara stateFromSession → el RootGate re-rutea (R5.1). NO leen ni tocan el estado de lockout del
+  // password (R8.5): el OAuth no es brute-forceable, no incrementa ni limpia el lockout.
+  const signInWithGoogle = useCallback(async (): Promise<AuthActionResult> => {
+    return signInWithGoogleService();
+  }, []);
+
+  const signInWithApple = useCallback(async (): Promise<AuthActionResult> => {
+    return signInWithAppleService();
+  }, []);
+
   const refreshSession = useCallback(async () => {
     // getUser() pega al server (no usa el cache local) → refleja el email recién
     // verificado. Si la sesión es válida, refrescamos el estado con el user fresco.
@@ -180,7 +204,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ state, signUp, signIn, signOut, requestPasswordReset, resendVerification, refreshSession }}
+      value={{
+        state,
+        signUp,
+        signIn,
+        signOut,
+        requestPasswordReset,
+        resendVerification,
+        signInWithGoogle,
+        signInWithApple,
+        refreshSession,
+      }}
     >
       {children}
     </AuthContext.Provider>

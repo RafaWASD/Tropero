@@ -52,6 +52,21 @@ export function InfoNote({ children }: { children: string }) {
   );
 }
 
+// AuthDivider — separador "o" entre el CTA de email/password y los botones sociales (spec 19, R4.1).
+// Dos líneas con la conjunción "o" centrada. Cero hardcode: tokens ($divider, $textMuted). El testID
+// da un ancla estable a la suite E2E (la letra "o" suelta no es scopeble por texto).
+export function AuthDivider() {
+  return (
+    <XStack testID="auth-divider" alignItems="center" gap="$3" width="100%" marginVertical="$2">
+      <View flex={1} height={1} backgroundColor="$divider" />
+      <Text fontFamily="$body" fontSize="$4" fontWeight="500" color="$textMuted">
+        o
+      </Text>
+      <View flex={1} height={1} backgroundColor="$divider" />
+    </XStack>
+  );
+}
+
 export function LinkButton({ label, onPress }: { label: string; onPress: () => void }) {
   const a11y =
     Platform.OS === 'web'

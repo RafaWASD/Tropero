@@ -53,6 +53,45 @@ test('T3.2 error nulo no rompe', () => {
   assert.equal(typeof authErrorMessage(undefined), 'string');
 });
 
+// ── spec 19 (login social) — contexto 'social' (R6.1–R6.6) ────────────────────────────────────────
+
+test('R6.3 social DEVELOPER_ERROR → copy que invita a email/password, SIN filtrar config', () => {
+  const copy = authErrorMessage({ code: 'developer_error' }, 'social');
+  assert.match(copy, /Google/);
+  assert.match(copy, /email|contrase[ñn]a/i);
+  // No filtra detalle de config (client ID / SHA-1 / "developer").
+  assert.doesNotMatch(copy, /client|sha|developer|config/i);
+});
+
+test('R6.4 social Play Services ausente → copy que degrada a email/password', () => {
+  const copy = authErrorMessage({ code: 'play_services_not_available' }, 'social');
+  assert.match(copy, /Google Play/i);
+  assert.match(copy, /email|contrase[ñn]a/i);
+});
+
+test('R6.2 social sin conexión → reusa el copy NETWORK existente', () => {
+  assert.match(authErrorMessage({ message: 'Network request failed' }, 'social'), /conexi[óo]n/i);
+  assert.match(authErrorMessage({ name: 'AuthRetryableFetchError' }, 'social'), /conexi[óo]n/i);
+});
+
+test('R6.5/R6.6 social fallback genérico → invita a email/password sin exponer el mensaje crudo', () => {
+  // Un code desconocido de la lib (ej. Apple ERR_* raro) cae al fallback social, NO al copy crudo.
+  const copy = authErrorMessage(
+    { code: 'err_invalid_response', message: 'The operation could not be completed. (com.apple.AuthenticationServices.AuthorizationError 1000)' },
+    'social',
+  );
+  assert.match(copy, /email|contrase[ñn]a/i);
+  // Nunca se filtra el mensaje crudo del proveedor (R6.6).
+  assert.doesNotMatch(copy, /AuthorizationError|com\.apple|operation/i);
+});
+
+test('R6.1 cancelación no llega a authErrorMessage: el servicio devuelve { ok:false } sin error → silencio', () => {
+  // Contrato: la cancelación se resuelve en el servicio (sin objeto error). Si por las dudas se llamara
+  // con un error nulo/undefined en contexto social, devuelve un string (no rompe), nunca vacío.
+  assert.equal(typeof authErrorMessage(undefined, 'social'), 'string');
+  assert.ok(authErrorMessage(undefined, 'social').length > 0);
+});
+
 // OBS-2 (fix loop sesión 21): el control de flujo de forgot-password decide la rama
 // "mostrar error real vs. mensaje neutro anti-enumeración" mirando el error CRUDO,
 // no el copy traducido. Estos tests fijan ese contrato.

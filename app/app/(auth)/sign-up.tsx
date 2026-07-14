@@ -9,17 +9,28 @@
 // Cero hardcode (ADR-023 §4): tokens + componentes de la librería.
 
 import { useState } from 'react';
+import { Platform } from 'react-native';
 import { useRouter } from 'expo-router';
 import { YStack } from 'tamagui';
 
-import { AuthScreenShell, Button, FormError, FormField, InfoNote, LinkButton } from '@/components';
+import {
+  AppleSignInButton,
+  AuthDivider,
+  AuthScreenShell,
+  Button,
+  FormError,
+  FormField,
+  GoogleSignInButton,
+  InfoNote,
+  LinkButton,
+} from '@/components';
 import { useAuth } from '@/contexts';
 import { authErrorMessage } from '@/utils/auth-errors';
 import { validateSignUp, type FieldError } from '@/utils/validation';
 
 export default function SignUpScreen() {
   const router = useRouter();
-  const { signUp } = useAuth();
+  const { signUp, signInWithGoogle, signInWithApple } = useAuth();
 
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -29,6 +40,8 @@ export default function SignUpScreen() {
   const [passwordError, setPasswordError] = useState<FieldError>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [googleBusy, setGoogleBusy] = useState(false);
+  const [appleBusy, setAppleBusy] = useState(false);
   const [signedUpEmail, setSignedUpEmail] = useState<string | null>(null);
 
   async function onSubmit() {
@@ -49,6 +62,28 @@ export default function SignUpScreen() {
     }
     setFormError(authErrorMessage(result.error, 'signup'));
   }
+
+  // Login social (spec 19). Mismo patrón que sign-in (mismo layout, R4.7). Cancelar → silencio (R6.1);
+  // el RootGate re-rutea al cambiar el AuthState (sin navegación manual). OAuth nace verificado (R5.3).
+  async function onGoogle() {
+    setFormError(null);
+    setGoogleBusy(true);
+    const result = await signInWithGoogle();
+    setGoogleBusy(false);
+    if (result.ok) return;
+    if (result.error) setFormError(authErrorMessage(result.error, 'social'));
+  }
+
+  async function onApple() {
+    setFormError(null);
+    setAppleBusy(true);
+    const result = await signInWithApple();
+    setAppleBusy(false);
+    if (result.ok) return;
+    if (result.error) setFormError(authErrorMessage(result.error, 'social'));
+  }
+
+  const anyBusy = submitting || googleBusy || appleBusy;
 
   // Estado post-signup: "Verificá tu email". Si la confirmación de email está
   // habilitada en el proyecto, no hay sesión todavía; el usuario verifica desde el
@@ -113,9 +148,15 @@ export default function SignUpScreen() {
 
         <FormError message={formError} />
 
-        <Button variant="primary" fullWidth disabled={submitting} onPress={onSubmit}>
+        <Button variant="primary" fullWidth disabled={anyBusy} onPress={onSubmit}>
           {submitting ? 'Creando cuenta…' : 'Crear cuenta'}
         </Button>
+
+        <AuthDivider />
+        <GoogleSignInButton onPress={onGoogle} disabled={anyBusy} loading={googleBusy} />
+        {(Platform.OS === 'ios' || Platform.OS === 'web') && (
+          <AppleSignInButton onPress={onApple} disabled={anyBusy} loading={appleBusy} />
+        )}
 
         <YStack alignItems="center" marginTop="$2">
           <LinkButton label="Ya tengo cuenta · Iniciar sesión" onPress={() => router.push('/(auth)/sign-in')} />
