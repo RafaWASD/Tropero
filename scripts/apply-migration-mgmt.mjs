@@ -1,16 +1,19 @@
 #!/usr/bin/env node
 // scripts/apply-migration-mgmt.mjs — aplica un archivo .sql al proyecto Supabase REMOTO vía la
-// Management API (database/query), usando SUPABASE_PROJECT_REF + SUPABASE_ACCESS_TOKEN del
+// Management API (database/query), usando el ref/token del ambiente resuelto (dev por default) del
 // .env.local de la RAÍZ. Fallback para cuando el MCP de Supabase tiene el token cacheado/viejo
 // (ver memoria reference_check_red_rate_limit). Mismo endpoint que el adminQuery de las suites.
 //
-// Uso: node scripts/apply-migration-mgmt.mjs supabase/migrations/0106_xxx.sql
+// Uso: node scripts/apply-migration-mgmt.mjs [--env dev|prod] supabase/migrations/0106_xxx.sql
+//   - sin --env → DEV (comportamiento IDÉNTICO al histórico, spec 16 R5.1/R5.3).
+//   - --env prod → exige RAFAQ_CONFIRM_PROD=1 (guarda destino-aware, R5.2/R5.12).
 //
 // ⚠️ Escribe a la DB compartida (beta). Solo correr con OK de deploy de Raf.
 
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { resolveTarget, positionalArgs, ProdGuardError } from './lib/env-target.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, '..');
@@ -25,25 +28,33 @@ if (existsSync(envLocalPath)) {
   }
 }
 
-const PROJECT_REF = process.env.SUPABASE_PROJECT_REF;
-const ACCESS_TOKEN = process.env.SUPABASE_ACCESS_TOKEN;
-const file = process.argv[2];
+const argv = process.argv.slice(2);
+const [file] = positionalArgs(argv);
 
-if (!PROJECT_REF || !ACCESS_TOKEN) {
-  console.error('Falta SUPABASE_PROJECT_REF / SUPABASE_ACCESS_TOKEN en .env.local');
+if (!file) {
+  console.error('Uso: node scripts/apply-migration-mgmt.mjs [--env dev|prod] <ruta-al-.sql>');
   process.exit(2);
 }
-if (!file) {
-  console.error('Uso: node scripts/apply-migration-mgmt.mjs <ruta-al-.sql>');
+
+let target;
+try {
+  target = resolveTarget(argv, process.env); // dev por default; guarda de prod destino-aware (R5.2/R5.12)
+} catch (err) {
+  // NUNCA loguea el token (R5.13): resolveTarget/ProdGuardError solo exponen el ref (no secreto).
+  if (err instanceof ProdGuardError) {
+    console.error(`ABORTADO: ${err.message}\n  Exportá RAFAQ_CONFIRM_PROD=1 para confirmar el destino PROD.`);
+  } else {
+    console.error(err.message);
+  }
   process.exit(2);
 }
 
 const sql = readFileSync(resolve(repoRoot, file), 'utf8');
-console.log(`Aplicando ${file} (${sql.length} chars) a project ${PROJECT_REF} vía Management API...`);
+console.log(`Aplicando ${file} (${sql.length} chars) a project ${target.ref} [${target.env}] vía Management API...`);
 
-const res = await fetch(`https://api.supabase.com/v1/projects/${PROJECT_REF}/database/query`, {
+const res = await fetch(`${target.host}/database/query`, {
   method: 'POST',
-  headers: { Authorization: `Bearer ${ACCESS_TOKEN}`, 'Content-Type': 'application/json; charset=utf-8' },
+  headers: { Authorization: `Bearer ${target.token}`, 'Content-Type': 'application/json; charset=utf-8' },
   body: Buffer.from(JSON.stringify({ query: sql }), 'utf8'),
 });
 const body = await res.text();

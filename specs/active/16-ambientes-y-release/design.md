@@ -189,6 +189,23 @@ de modo que **tanto el build como `eas update --environment <env>`** las reciban
 
 ## 4. Scripts parametrizados (R5)
 
+> **Reconciliación as-built (Run B, 2026-07-14).** La lógica pura se extrajo a **tres** módulos
+> `scripts/lib/*.mjs` (no solo `env-target`), cada uno unit-testeado bajo `node:test` y registrado en
+> `run-tests.mjs` (corren siempre, sin keys de Supabase):
+> - `scripts/lib/env-target.mjs` — `resolveTarget(argv, env)` + `ProdGuardError` + `parseEnvFlag`/
+>   `positionalArgs`/`knownProdRefs` (guarda destino-aware M5/R5.12).
+> - `scripts/lib/ledger-plan.mjs` — `sortMigrations`/`planMigrations` (orden por prefijo numérico +
+>   diff-contra-ledger + modo `--backfill`; R5.4–R5.6), consumido por `apply-all-migrations.mjs`.
+> - `scripts/lib/backup-cmd.mjs` — `buildBackupPlan`/`parseConnString`/`safeSummary` (conn por libpq
+>   env vars, output fuera del tree, log seguro; R5.7/R5.8/R5.10/R5.11/R5.13), consumido por `backup-db.mjs`.
+>
+> **Hardening de `backup-db.mjs` (más estricto que R5.2).** `backup-db` SIEMPRE apunta a PROD (lee
+> `SUPABASE_DB_URL_PROD` y exfiltra PII) → exige `RAFAQ_CONFIRM_PROD=1` **siempre** (con o sin `--env`),
+> no solo con `--env prod`. Fail-closed alineado a M5 (destino-aware). La Action lo setea; un run local
+> exige exportarlo a mano. `apply-all-migrations.mjs` aplica cada migración y registra en el ledger en
+> **dos** llamadas Management API separadas (no atómicas): si el apply commitea pero el INSERT falla, el
+> re-run re-intenta esa migración (tool de ops supervisado, gateado — aceptado).
+
 Extraer la lógica pura de selección de ambiente + guarda a `scripts/lib/env-target.mjs` (testeable con
 `node:test`), consumida por todos los scripts:
 
@@ -215,7 +232,7 @@ PowerSync por env.
 | `apply-migration-mgmt.mjs` | `--env {dev,prod}` → elige ref/token; guarda de prod. Default dev = idéntico a hoy. (El plan lo llama `apply-migration.mjs`; se mantiene el nombre real para no romper las ~13 referencias.) | R5.1–R5.3 |
 | `apply-all-migrations.mjs` **(nuevo)** | bootstrap del ledger → lista `supabase/migrations/*.sql` ordenada → aplica las **ausentes** del ledger vía Management API (`database/query`) → inserta en `ops.applied_migrations`. Flags: `--env`, `--backfill` (registra sin ejecutar). | R5.4–R5.6, R6.1 |
 | `backup-db.mjs` **(nuevo)** | `pg_dump` contra el **pooler** de PROD. **Output por default FUERA del working tree** (H1/R5.10): `os.homedir()/.rafaq-backups/rafaq-prod-<ISO>.sql.gz` (override con `--out-dir`; la Action apunta a un dir del runner). Conn string a `pg_dump` **por env** (`PGPASSWORD`/URI en env, no argv — L2/R5.11). Aborta sin conn string (R5.8). Nunca loguea la conn string. | R5.7, R5.8, R5.10, R5.11 |
-| `powersync-deploy.sh` | `--env {dev,prod}` → elige `powersync/cli.yaml` (dev) vs config de PROD; token por env. Default dev. | R5.9 |
+| `powersync-deploy.sh` | `--env {dev,prod}` → dev usa `powersync/cli.yaml` (idéntico a hoy); prod exige `RAFAQ_CONFIRM_PROD=1`, swappea el link de instancia por **`powersync/cli.prod.yaml`** (creado en Run F/F5, con `trap EXIT` que restaura + backup a `*.tmp` gitignoreado) y usa `PS_ADMIN_TOKEN_PROD` si está (si no, `PS_ADMIN_TOKEN`, account-level). Default dev. | R5.9 |
 
 ### Ledger `ops.applied_migrations` (tool-owned, **no** numerada)
 
@@ -236,7 +253,12 @@ del loop) → no consume número de migración y existe en ambos ambientes. `ops
 PostgREST. En DEV se puebla con `apply-all-migrations.mjs --backfill` (registra 0001–0124 sin
 ejecutar, porque DEV ya está al día).
 
-## 5. Migración `0124_health_status.sql` — primer delta `0124+` (R7.2, R6.4)
+## 5. Migración `0125_health_status.sql` — primer delta `0125+` (R7.2, R6.4)
+
+> **Reconciliación as-built (Run B, 2026-07-14).** El número es **0125**, no 0124: `0124_audit_log.sql`
+> (spec 18, DONE) ya ocupaba 0124 al momento de Run B (el "0124+" del spec era un off-by-one — 0124 lo
+> tomó spec 18 en el mismo commit que speceó el bloque de ambientes). Se usa el siguiente libre, 0125.
+> El contenido SQL es idéntico al de acá abajo.
 
 Único objeto de schema numerado del feature. `SECURITY DEFINER`, defensiva (si el ledger no existe,
 devuelve `schema_version:'unknown'` sin romper `ok:true`), `REVOKE` a anon/authenticated.
@@ -262,7 +284,8 @@ REVOKE ALL ON FUNCTION public.health_status() FROM anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.health_status() TO service_role;
 ```
 
-Se aplica a DEV vía `apply-migration-mgmt.mjs --env dev` (normal) y a PROD dentro del replay. No expone
+Se aplica a DEV vía `apply-migration-mgmt.mjs --env dev` (normal) — es decir
+`apply-migration-mgmt.mjs --env dev supabase/migrations/0125_health_status.sql` — y a PROD dentro del replay. No expone
 datos de negocio (R7.5) ni el filename completo de la migración (R7.2/L1). No rompe `check.mjs` (agrega
 una función, ningún test asume su ausencia). El `REVOKE ... FROM PUBLIC` de `ops.applied_migrations`
 (design §4) es defensa en profundidad (las tablas no traen grant default a PUBLIC).
@@ -374,8 +397,10 @@ de Raf); el runbook documenta URLs + config.
 
 **Crear**: `app/app.config.ts` · `app/src/utils/app-env.ts` (+ `.test.ts`) ·
 `scripts/apply-all-migrations.mjs` · `scripts/backup-db.mjs` · `scripts/lib/env-target.mjs`
-(+ `.test.ts`) · `supabase/migrations/0124_health_status.sql` · `supabase/functions/health/index.ts` ·
-`.github/workflows/backup-prod.yml` · `docs/runbook.md`.
+(+ `.test.mjs`) · `scripts/lib/ledger-plan.mjs` (+ `.test.mjs`) · `scripts/lib/backup-cmd.mjs`
+(+ `.test.mjs`) · `supabase/migrations/0125_health_status.sql` (as-built; era `0124`, ver §5) ·
+`supabase/functions/health/index.ts` · `.github/workflows/backup-prod.yml` · `docs/runbook.md` ·
+(Run F) `powersync/cli.prod.yaml`.
 
 **Modificar**: `app/app.json` (→ borrar tras migrar a `app.config.ts`) · `app/eas.json` ·
 `app/src/utils/env.ts` · `app/src/utils/env-resolve.ts` (+ `.test.ts`, agregar `composeReader`) ·

@@ -149,6 +149,23 @@ Cada `R<n>` se cubre con ≥1 task en `tasks.md` y su verificación (test unitar
 
 ## Historial de refinamiento
 
+### 2026-07-14 — Reconciliación as-built de Run B (implementación de scripts)
+
+Aditivo, sin cambiar el *qué* de ningún EARS. Detalle en `progress/impl_16-runB.md` + `design.md` §4/§5.
+
+- **R7.2 / R6.4 — numeración de la migración `health_status`**: el as-built es
+  **`0125_health_status.sql`**, no `0124`: `0124_audit_log.sql` (spec 18, DONE) ya ocupaba 0124. El
+  ejemplo `"0124"` de R7.2 y el símbolo `0124+` de R6.4 son ilustrativos del **formato** (prefijo de 4
+  dígitos) / de la **convención** (todo delta futuro = migración numerada nueva); el comportamiento no
+  cambia — solo el número concreto del primer delta pasa a 0125.
+- **R5.2 / R5.12 — hardening de `backup-db.mjs`**: como `backup-db` SIEMPRE apunta a PROD (lee
+  `SUPABASE_DB_URL_PROD` y exfiltra PII), exige `RAFAQ_CONFIRM_PROD=1` **siempre** (con o sin `--env`),
+  más estricto que el mínimo de R5.2 y alineado a la lógica destino-aware de R5.12 (fail-closed).
+- **R5.9 — `powersync-deploy.sh` prod**: selecciona la instancia PROD swappeando el link
+  `powersync/cli.prod.yaml` (creado en Run F/F5) con restauración por `trap EXIT`; falla fail-closed si
+  ese archivo no existe (no puede deployar prod a la instancia dev por error). Token
+  `PS_ADMIN_TOKEN_PROD`→`PS_ADMIN_TOKEN` (account-level).
+
 ### 2026-07-13 — Reconciliación Gate 1 (FAIL → cierre de findings, aditivo, sin rediseño)
 
 Cambios foldeados desde `progress/security_spec_16-ambientes-y-release.md`. Todos aditivos (nuevos `R<n>` o ajuste de wording de un `R<n>` existente); IDs previos preservados.

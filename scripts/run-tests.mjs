@@ -43,6 +43,14 @@ const pnpmCmd = platform === 'win32' ? 'pnpm.cmd' : 'pnpm';
 
 run('typecheck client', `cd app && ${pnpmCmd} typecheck`);
 
+// Unit tests PUROS de los scripts de ops (spec 16 Run B): resolución de target por ambiente + guarda
+// destino-aware (env-target), plan del replay/ledger (ledger-plan), armado del comando de backup
+// (backup-cmd). Son .mjs puros (sin red, sin RN, sin ts-ext-resolver) → corren siempre, sin keys.
+run(
+  'scripts unit tests (spec 16 Run B)',
+  `node --test scripts/lib/env-target.test.mjs scripts/lib/ledger-plan.test.mjs scripts/lib/backup-cmd.test.mjs`,
+);
+
 // Tests unitarios del CLIENTE (lógica pura: validación, mapeo de errores de auth,
 // lockout). node:test con type-stripping nativo de Node 24 (sin Jest; mismo patrón
 // que las suites backend). No tocan red ni RN: corren siempre, sin keys de Supabase.

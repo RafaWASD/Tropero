@@ -76,7 +76,7 @@ escribe a un ambiente real vive en Run F, gateado.
 
 > Los scripts quedan escritos y unit-testeados con default DEV. Ninguna ejecución contra PROD acá.
 
-- [ ] **B1** — `scripts/lib/env-target.mjs` (nuevo, puro): `resolveTarget(argv, env)` → sin `--env`
+- [x] **B1** — `scripts/lib/env-target.mjs` (nuevo, puro): `resolveTarget(argv, env)` → sin `--env`
   devuelve `dev`; con `--env prod` exige `RAFAQ_CONFIRM_PROD=1` (si no, imprime el ref y sale con
   código ≠0). **Destino-aware (Gate 1 M5)**: si el ref resuelto para `dev` coincide con
   `SUPABASE_PROJECT_REF_PROD` (o ∈ lista de refs de PROD conocidos), tratar como PROD y exigir
@@ -86,11 +86,11 @@ escribe a un ambiente real vive en Run F, gateado.
   ref correcto; (d) `--env` inválido → error; (e) **`--env dev` (default) pero el ref de dev == ref de
   PROD → exige confirmación igual** (M5, destino-aware).
 
-- [ ] **B2** — `scripts/apply-migration-mgmt.mjs`: aceptar `--env {dev,prod}` vía `env-target.mjs`
+- [x] **B2** — `scripts/apply-migration-mgmt.mjs`: aceptar `--env {dev,prod}` vía `env-target.mjs`
   (selecciona `SUPABASE_PROJECT_REF`/`_PROD` + token). Default dev = comportamiento **idéntico** a hoy.
   Cubre: R5.1, R5.2, R5.3.
 
-- [ ] **B3** — `scripts/apply-all-migrations.mjs` (nuevo): bootstrap `ops.applied_migrations` (CREATE
+- [x] **B3** — `scripts/apply-all-migrations.mjs` (nuevo): bootstrap `ops.applied_migrations` (CREATE
   SCHEMA/TABLE IF NOT EXISTS + `REVOKE ... FROM PUBLIC, anon, authenticated`) → listar
   `supabase/migrations/*.sql` ordenado por filename → aplicar solo las **ausentes** del ledger
   (Management API `database/query`) → insertar en el ledger. Flags: `--env`, `--backfill` (registra sin
@@ -99,7 +99,7 @@ escribe a un ambiente real vive en Run F, gateado.
   **Verif** (unit puro de la lógica de orden + diff-contra-ledger, sin red): (a) orden por filename
   numérico; (b) una migración ya en el ledger se saltea; (c) `--backfill` no ejecuta SQL, solo inserta.
 
-- [ ] **B4** — `scripts/backup-db.mjs` (nuevo): `pg_dump` contra el pooler de PROD. **Output por default
+- [x] **B4** — `scripts/backup-db.mjs` (nuevo): `pg_dump` contra el pooler de PROD. **Output por default
   FUERA del working tree** (Gate 1 H1): `~/.rafaq-backups/rafaq-prod-<ISO>.sql.gz` (override con
   `--out-dir`). Conn string a `pg_dump` **por env** (`PGPASSWORD`/URI en env, no argv — L2). Aborta con
   error si falta la conn string, **sin** crear archivo parcial. Nunca loguea la conn string. Cubre: R5.7,
@@ -108,20 +108,24 @@ escribe a un ambiente real vive en Run F, gateado.
   en stdout/stderr (assert sobre el output); (c) la conn string **no** aparece en la línea de comando de
   `pg_dump` (se pasa por env, L2); (d) el output default resuelve a una ruta fuera del repo.
 
-- [ ] **B5** — `scripts/powersync-deploy.sh`: aceptar `--env {dev,prod}` (default dev = idéntico a
+- [x] **B5** — `scripts/powersync-deploy.sh`: aceptar `--env {dev,prod}` (default dev = idéntico a
   hoy; prod elige la config/instancia de PROD y exige la guarda). Cubre: R5.9.
+  **As-built**: prod swappea el link de instancia por `powersync/cli.prod.yaml` (creado en Run F/F5) con
+  `trap EXIT` que restaura; token `PS_ADMIN_TOKEN_PROD`→`PS_ADMIN_TOKEN`. Falla fail-closed si falta
+  `cli.prod.yaml` (no puede deployar prod a la instancia dev por error).
 
-- [ ] **B6** — `supabase/migrations/0124_health_status.sql` (nuevo): `public.health_status()`
+- [x] **B6** — `supabase/migrations/0125_health_status.sql` (nuevo; **as-built 0125, no 0124** — 0124 lo
+  tomó `0124_audit_log.sql` de spec 18, ver design §5): `public.health_status()`
   SECURITY DEFINER defensiva → `schema_version` = **prefijo numérico de 4 dígitos**
   (`substring(max(filename) from '^\d{4}')`, no el filename completo — Gate 1 L1), `unknown` si el
   ledger no existe. `REVOKE ALL ON FUNCTION public.health_status() FROM PUBLIC` **+** `FROM anon,
   authenticated` (Gate 1 M1 — sin `FROM PUBLIC` la función queda ejecutable como RPC público) **+**
   `GRANT EXECUTE ... TO service_role` (tras revocar PUBLIC, el caller real —la EF `health`— necesita
   EXECUTE explícito o el health rompe; anon/authenticated NO). Cubre: R7.2, R7.7, R6.4 (primer delta
-  `0124+`).
+  `0125` — as-built).
   **Nota**: aplicar a DEV es task de Run C (junto con la Edge suite); no rompe `check.mjs`.
 
-- [ ] **B7** — `.gitignore`: agregar `backups/` (Gate 1 H1 — red de contención aunque el output default
+- [x] **B7** — `.gitignore`: agregar `backups/` (Gate 1 H1 — red de contención aunque el output default
   vaya fuera del working tree). Cubre: R5.10.
   **Verif**: `git check-ignore backups/rafaq-prod-x.sql.gz` matchea (exit 0).
 
@@ -137,7 +141,7 @@ escribe a un ambiente real vive en Run F, gateado.
 - [ ] **C2** — `supabase/config.toml`: agregar `[functions.health]` con `verify_jwt = false`.
   Cubre: R7.4.
 
-- [ ] **C3** — Aplicar `0124_health_status.sql` a **DEV** (`apply-migration-mgmt.mjs --env dev`) +
+- [ ] **C3** — Aplicar `0125_health_status.sql` a **DEV** (`apply-migration-mgmt.mjs --env dev`; as-built 0125) +
   deploy de `health` a **DEV** (`supabase functions deploy health --no-verify-jwt`). 🔒 Requiere OK de
   deploy de Raf (DB/Functions compartidas) — coordina el leader. Cubre: R7.6 (DEV).
 

@@ -28,6 +28,10 @@ Thumbs.db
 .env.local
 .env.*.local
 
+# Backups de DB (spec 16 H1/R5.10 — dump de PROD con PII). El output default de scripts/backup-db.mjs
+# vive FUERA del working tree (~/.rafaq-backups); esto es red de contención por si un --out-dir cae acá.
+backups/
+
 # Claude Code local settings (per-user permissions cache, NO compartir)
 .claude/settings.local.json
 
