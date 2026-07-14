@@ -3,6 +3,17 @@
 > Estos pasos son **solo tuyos** (cuentas/paneles fuera del repo). **NO bloquean que yo construya el código** (decisión "código en paralelo"), pero **SÍ bloquean la prueba en device real**. Arrancá por lo de **mayor latencia** (Apple Developer puede tardar en aprobarse).
 > Datos del proyecto que vas a necesitar: bundle/package = **`ar.rafq.app`** (iOS = Android) · scheme = **`rafq`** · Supabase project ref = **`xrhlxxdnfzvdnztacofj`** · callback Supabase = **`https://xrhlxxdnfzvdnztacofj.supabase.co/auth/v1/callback`**.
 
+## Progreso (2026-07-14)
+
+- ✅ **Google Cloud**: 3 OAuth clients creados (Web `...01d8h3qd`, iOS `...8ihanu72`, Android `...ep4siuo1` con SHA-1 `03:07:5E:59:...`).
+- ✅ **Código cableado**: Web client ID en `eas.json`, reversed iOS en `app.json` (commit `1189ae5`).
+- ✅ **Supabase Dashboard (Google)**: provider habilitado (Web ID+secret + los 3 client IDs), redirect `localhost:8099`, **Confirm email = ON**.
+- ✅ **Validado end-to-end (web)**: login con Google emite sesión + linkea por email + PII en `user_private`. (Vía el endpoint de authorize; la app web estática local no bootea por el gotcha de env = feature 16, aparte.)
+- ⏳ **Apple**: inscripción Apple Developer (individual) en curso — esperando aprobación (24-48h). Al aprobar: App ID capability + Services ID + Key → provider Apple en Supabase.
+- ⏳ **Native (device)**: dev build EAS nuevo para probar Google/Apple nativo (F6).
+
+---
+
 ## 🔴 P1 long-lead — arrancá YA (latencia externa)
 
 ### Apple Developer (para Sign in with Apple)

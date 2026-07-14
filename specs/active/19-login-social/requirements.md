@@ -339,6 +339,23 @@ el mensaje crudo del proveedor). **[inspección + Gate 2]**
   (no reabre la feature):** F6/T21–T24.1 (QA device + config del Dashboard) gated por la config externa de
   Raf; full `check.mjs` deferido (frontend-only; subset frontend verde) hasta que se destrabe la
   coordinación con el Bloque E; entrada #19 en `feature_list.json` en hold por lo mismo.
+- **2026-07-14** — **Config externa de Google COMPLETA + validación web end-to-end (Raf + leader).**
+  Google Cloud: 3 OAuth clients creados (Web/iOS/Android + SHA-1). Web + reversed-iOS cableados en
+  `eas.json`/`app.json` (commit `1189ae5`). Supabase Dashboard: provider Google habilitado (Web ID+secret,
+  3 client IDs en "Client IDs"), redirect `localhost:8099`, **Confirm email = ON** (satisface R8.4.1/M2).
+  **VALIDADO CON EVIDENCIA VIVA** (vía el endpoint `/auth/v1/authorize?provider=google` + inspección del
+  JWT y de la DB por MCP): sesión OAuth emitida (R3.1/R3.4); **account linking por email verificado**
+  (`app_metadata.providers = ["email","google"]`) sin duplicar la cuenta (R5.4/D4); `email_verified=true`
+  → saltea verify-email (R5.3); **PII correcta** — email en `public.user_private`, `public.users` sin
+  columna email (R8.6, feature 14); `on conflict do nothing` no pisa el name preexistente (R5.4). Nota
+  operativa: la cuenta de test estaba baneada por un `delete_account` viejo → desbaneada por MCP (autz de
+  Raf); la sesión de prueba se revocó después (tokens vivos habían quedado en el chat). **El boot de la app
+  web estática local NO carga** por el gotcha de env de `expo export` (reader dinámico no inlineado; fallback
+  a `extra` no expone en web) — **es infra de feature 16, NO login-social**; por eso la validación se hizo
+  por el endpoint de authorize, no por la app servida.
+- **Pendiente** — **Apple**: espera aprobación de la membresía Apple Developer (inscripción individual en
+  curso, 24-48h) → después provider Apple en Supabase + test nativo. **Native (iOS/Android)**: F6/T21–T22
+  necesita un dev build en device (el happy-path nativo no es automatizable).
 - **Nota de coordinación** — la entrada #19 de `feature_list.json` queda **EN ESPERA** (Bloque E / spec 18
   en Puerta 2; otra terminal con trabajo sin commitear). El estado `spec_ready` se registra en la spec; NO
   se refleja aún en `feature_list.json` (`context.md` §"Resolución de la Puerta 0", punto 3).
