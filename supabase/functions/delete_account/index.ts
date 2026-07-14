@@ -49,10 +49,15 @@ Deno.serve(async (req: Request) => {
 
   try {
     const userClient = createUserClient(req);
-    const adminClient = createAdminClient();
 
     // Paso 1: identidad SOLO del JWT (sin user_id en el body → sin IDOR, D5).
     const user = await requireUser(userClient);
+
+    // spec 18 (Opción A): admin client con el ACTOR real = user.id del JWT validado (el auto-borrado),
+    // NUNCA del body. El write de user_roles va dentro de la RPC delete_account_tx (SECURITY DEFINER, 1
+    // request .rpc()) → el header X-Rafaq-Actor viaja en esa request → el trigger de audit lo ve en la
+    // transacción de la RPC. delete_account_tx NO se toca. Se crea DESPUÉS de requireUser (necesita user.id).
+    const adminClient = createAdminClient(user.id);
 
     // Paso 2: idempotencia. Si ya está soft-deleteado → 200 already_deleted, sin tocar nada.
     const { data: userRow, error: userErr } = await adminClient

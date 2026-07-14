@@ -260,6 +260,58 @@ Objetivo: tener la app funcional con identidad + modelo de datos + bastón + BUS
 
 ---
 
+## Bloque E — Ambientes y Observabilidad (pre-beta con testers reales)
+
+> Origen: plan aprobado por Raf `C:/Users/RAR20313/.claude/plans/quiero-planificar-la-implementacion-noble-journal.md` (ejecución vía HANDOFF, 2026-07-12). **Prioridad: este bloque va YA, antes que 05/06** — Sentry + prod separado deben estar antes de que el peón use el APK. Detalle técnico completo (tabla de tecnologías, mapeo banco→RAFAQ, prácticas pro, qué NO hacer) vive en el plan; acá el orden + IDs + estado + dependencias.
+>
+> **Dos features nuevas** (ambas `sdd: true`): **16-ambientes-y-release** (Fases 0/1/5) + **17-observabilidad** (Fases 2/3/4). Esta terminal es dueña de los archivos de coordinación (feature_list.json, progress/*) para este bloque.
+>
+> **Decisiones de Raf ya tomadas (no re-preguntar)**: re-import limpio en prod (se pierde el historial de las 2 demos; rescate a mano solo si Raf lo pide) · prod nace vacío, usuarios re-creados · 2 backends (dev=actual, prod=nuevo) + 3 targets EAS, sin 3er backend "homo".
+
+### E.0 — Desbloqueo del release (chore, PRE-SDD) — feature 16
+- **Estado**: `blocked` (dep. externa: log del build EAS).
+- **Dueño**: leader (diagnóstico read-only) → implementer (fix, es código).
+- **Qué**: diagnosticar+arreglar el fallo de Gradle del primer APK (build `68cc88d7`, ver `docs/build-android.md:26`) con el árbol actual, ANTES de sumar el config plugin de Sentry. Re-aplicar la config OTA de expo-updates (canales preview/development/production) sobre `main`.
+- **Hallazgo (2026-07-12)**: la rama `apk-prep` quedó **STALE** (= `main`-de-2026-07-07 + 1 commit OTA `5426d99`; `main` absorbió todo el batch de la 2da demo desde entonces) → **NO se mergea la rama divergente; se re-aplica la config OTA fresca sobre `main`** (app.json runtimeVersion/updates.url + eas.json channels + `expo-updates ~56.0.21`).
+- **Bloqueante externo**: bajar el log del build EAS `68cc88d7` (cuenta Expo `rafaqsorg` de Raf) — sin el log no se diagnostica el Gradle. NO armar CI de tests todavía (ticket aparte).
+- **Bloqueante para**: E.2 (Sentry sobre build verde).
+
+### E.1 — Separación de ambientes (Fase 1) — feature 16
+- **Estado**: `pending` (Gate 0 en curso).
+- **Dueño**: leader (Gate 0) → spec_author → implementer → reviewer.
+- **Qué**: proyecto Supabase PROD nuevo (replay ordenado de las ~123 migraciones + ledger `ops.applied_migrations`; deltas de diff → migración 0124+) + PowerSync "Production" provisionada + `app.json`→`app.config.ts` con `APP_VARIANT` (bundle `.dev` junto a prod) + lecturas ESTÁTICAS en `env.ts` + `EXPO_PUBLIC_ENV` + EAS: `preview`/`production`→PROD, `development`→DEV (vars a EAS Environment Variables) + scripts parametrizados (`apply-migration --env`, `apply-all-migrations`, `backup-db`, `powersync-deploy --env`) + Edge Function `health` en ambos + backup diario (GitHub Action + pg_dump).
+- **Dependencias externas (Raf)**: crear proyecto Supabase PROD + provisionar PowerSync "Production" `6a260fd10ef84ed6719fd6bf` + GitHub secret con connection string de prod. **El proyecto actual queda como DEV → los tests siguen verdes sin cambios.**
+- **Gate 1**: aplica (env/secrets/scripts de migración/Edge Functions/PowerSync auth).
+- **Bloqueante para**: E.5, y el smoke real de prod.
+
+### E.2 — Sentry + ErrorBoundary (Fase 2) — feature 17
+- **Estado**: `pending`.
+- **Dueño**: leader (Gate 0) → spec_author → implementer → reviewer → Gate 2.5 (ErrorBoundary/gesto de crash = UI).
+- **Qué**: `@sentry/react-native` + config plugin + `Sentry.init` (environment=`EXPO_PUBLIC_ENV`, doble guarda `!!dsn && !isE2E()`), ErrorBoundary raíz es-AR, screen breadcrumbs (helper único reusado por Fase 3), `captureConsole({levels:['error']})`, shake-to-report, source maps por EAS, alerta new-issue→email.
+- **Dependencia externa (Raf)**: cuenta Sentry + DSN. Código no-op sin DSN → construible antes de tener la cuenta.
+- **Dependencia de orden**: NO arranca antes del build verde de E.0.
+
+### E.3 — PostHog analytics (Fase 3) — feature 17
+- **Estado**: `pending`.
+- **Dueño**: leader (Gate 0) → spec_author → implementer → reviewer.
+- **Qué**: `posthog-react-native` + peers, `PostHogProvider` siempre montado (`disabled` sin key/E2E), screen tracking manual, `identify(user.id)`/`group('establishment',id)`/`register({role,env})`, 3-5 eventos de dominio. Deps nativas instaladas ANTES del build del peón.
+- **Dependencia externa (Raf)**: cuenta PostHog + project key.
+
+### E.4 — Audit log server-side (Fase 4) — feature 18 (cortado de 17, ratificado en Puerta 0 el 2026-07-12)
+- **Estado**: `pending`. **La parte MÁS autónoma del bloque** (100% server-side, testeable contra dev, sin cuenta externa, sin interacción con el build).
+- **Dueño**: leader (Gate 0) → spec_author → Gate 1 → implementer → reviewer → Gate 2.
+- **Qué**: migración 0124 schema `audit` estilo `supa_audit` **vendoreado** (`audit.record_version` append-only, `auth.uid()` real vía JWT de PowerSync, REVOKE a anon/authenticated, no expuesto por PostgREST, retención pg_cron 90d). Orden de tablas por valor (user_roles → animals → treatments → eventos → rodeos/establishments). Pre-requisito: confirmar que la publication de PowerSync es `FOR TABLE` explícita.
+- **Gate 1**: OBLIGATORIO (schema/RLS/auth.uid()/triggers). Aplicar a dev primero + correr las 14 suites.
+
+### E.5 — Ops livianas (Fase 5) — feature 16
+- **Estado**: `pending`.
+- **Dueño**: leader → implementer (scripts/docs).
+- **Qué**: UptimeRobot (health prod/dev + PowerSync prod), `docs/runbook.md` (1 página: refs de ambos ambientes, comandos exactos de release OTA/migración/deploy/restore-drill/triage de incidente, tabla de rotación de secretos), rotación de secretos (service_role dev YA), log de incidentes de 5 líneas + release notes semver.
+- **Dependencia externa (Raf)**: cuenta UptimeRobot.
+- **Cierra**: feature 16.
+
+---
+
 ## Decisiones cerradas en charla pero todavía no formalizadas
 
 Esto es red de seguridad. Si una sesión se corta antes de hacer los ADRs, estas decisiones siguen acá hasta que se materializan.
@@ -277,6 +329,7 @@ Esto es red de seguridad. Si una sesión se corta antes de hacer los ADRs, estas
 
 ## Changelog del plan
 
+- **2026-07-12 (arranque Bloque E — ambientes + observabilidad, HANDOFF del plan aprobado)** — Raf aprobó en sesión de planning (otra terminal) el plan de **2 backends + 3 targets EAS + observabilidad** (Sentry/PostHog/audit) y lo bajó como HANDOFF a esta terminal. Agregado **Bloque E** (E.0–E.5) + **2 features nuevas** en `feature_list.json`: **16-ambientes-y-release** (`pending`, Fases 0/1/5) + **17-observabilidad** (`pending`, Fases 2/3/4), ambas `sdd: true`. Baseline verificado verde (`check.mjs` exit 0, 14 suites). Assumptions del plan verificadas contra el `main` actual (eas.json embebe el mismo backend dev en los 3 profiles y NO tiene channels; app.json hardcodea `extra.supabaseUrl`; `env.ts` usa el reader dinámico → gotcha babel confirmado). **Hallazgo material**: la rama `apk-prep` quedó STALE (main-de-07-07 + 1 commit OTA; main avanzó con todo el batch de la 2da demo) → se re-aplica la config OTA fresca sobre main, NO se mergea. Bloqueantes externos identificados (cuenta de Raf): log del build EAS `68cc88d7` [E.0], crear Supabase PROD + provisionar PowerSync "Production" [E.1], cuentas Sentry/PostHog/UptimeRobot [E.2/E.3/E.5]. Próximo: Gate 0 de feature 16 (context.md) → Puerta 0.
 - **2026-06-19 (cierre de spec 03 MODO MANIOBRAS — feature CORE `done`)** — Cerrada la feature 03 (C.2) tras la **Puerta 2 (código) aprobada por Raf** (`fd36a4f`). El cliente de MODO MANIOBRAS se construyó JIT a lo largo de la sesión 26 → 2026-06-19, chunk por chunk gateado (veto design-review del leader + reviewer + Gate 2): **M1** wizard de config de jornada + preconfig sheet · **M2** identify-first (BLE/manual/find-or-create) + carga rápida (Tacto binario + Pesaje numérico, botones gigantes) · **M3** las 10 maniobras MVP · **M4** offline/reanudación + surfacing de rechazos de sync (R10.8) + verificación offline (M4.3, R10.1/R10.2/R10.3/R10.7) · **M5** datos/maniobras CUSTOM por campo (schema+RLS+gating data-driven, M5-BACKEND 0093-0097) · **M6** circunferencia escrotal (rueda inercial + M6-BACKEND 0098-0100 + tarjeta de tendencia en ficha). Cierre final (`3186215`→`7f5181c`): R8.4 (preview de transición offline en el resumen) + R9.x (lote opcional/manual desde el wizard) + reconciliación del ledger de tasks.md + cierre de Gate 2 + T2.12 + 2 MEDIUM de maxLength UX. `feature_list.json` feature 03 `in_progress`→`done`; ningún feature queda `in_progress` (08 SIGSA sigue `spec_ready`, lo lleva la otra terminal en paralelo). **Pendiente no-bloqueante** (no reabre la feature): sync NATIVO de las tablas de maniobra (spec 15-nativo) + bastón spp-android real (spec 04), ambos gateados por el dev build Android de Raf — son el cuello de botella para validar el core on-device en el beta de Chascomús. **Balanza (spec 05) confirmada FUERA del MVP** (peso manual; Gate 0 del cliente, sesión 26).
 - **2026-06-10/11 (cierre feature 15 scope web + spec 10 v2 + chunk C6)** — Tres frentes cerrados (detalle en `history.md` entrada 2026-06-10/11): (1) **Feature 15 PowerSync → `deferred` con scope web COMPLETO** (`11999e6`): suite no-bypass de las 25 sync streams V3 (25 subtests, enganchada al check) + E2E del write-path offline completo (parto/baja/rollback in-vivo del overlay); queda T8 native (dev build Android de Raf) + triage de 8 e2e rojos pre-existentes (backlog). (2) **Spec 10 RECONCILIADA v2** (`2cbd1ca`, `spec_ready` ON-DECK con todo verde): re-Gate-0 con Raf+Facundo — Castrar/Destetar = selección explícita por checkbox, flag `future_bull`, castrado = estado editable REVERSIBLE (sin evento); staleness vs Tier 2 corregida; delta backend ≥0084 (future_bull + denorm is_castrated con write-through + recompute simétrico) con Gate 1 PASS; Puerta 1 re-aprobada (LIM-1 observación automática / LIM-2 tolerar-y-saltear). (3) **Chunk C6 de spec 02 DONE** (`969dadc`): espejo client-side de compute_category (display-only offline) + CategoryOverrideCard — cierra el gap de campo de las transiciones offline y pone verdes 2 e2e rojos. **Próximo: implementar spec 10** (sesión nueva); paralelo colisión-safe: spec 11. Regla operativa nueva: implementer/reviewer corren con Opus.
 - **2026-06-06 (cierre de spec 04 + sesión de hardening de seguridad)** — Tras la sesión de hardening (features **13** y **14** done+desplegadas+committeadas, ver `history.md` entrada 2026-06-04/05: catálogo A–I del security_analyzer + B3-1 PII→`user_private` + 5 fixes de spec 13), se **cerró la spec 04 (bastón RFID)** que quedaba de la sesión 22 sin commitear: **ADR-024** (`Accepted`) = transporte de EID **transport-agnóstico** (el Allflex RS420 es Bluetooth Classic SPP+MFi, **NO BLE** — refuta el supuesto de ADR-002, confirmado en el día de campo s20 + deep-research s22; el camino abierto cross-platform es BLE-HID keyboard-wedge) con contrato de ingesta + 5 adaptadores. **Spec 04 v2** (context/requirements/design/tasks reconciliados a ADR-024; 15 reqs R1-R15; madurez por capa: contrato/feedback/mock/interfaz/offline firmes, web-serial+manual buildables-hoy, spp-android requiere dev build, hid-wedge GATED por validación física). **Gate 1 (security modo spec) PASS + Puerta 1 aprobada por Raf (2026-06-03)**. `feature_list`: 04 `context_ready`→`spec_ready` + descripción/acceptance reconciliadas (ya no dicen "BLE nativo"). Commit `f3e30a4`. **B.3 pasa de `blocked` a `spec_ready`** (pendiente IMPLEMENTAR — no arrancado). Coordinación multi-terminal: la **spec 02 "alta guiada" A+B** se cerró en paralelo (otra terminal, commit `06d2273`); `current.md` se limpió (de 187 a 32 líneas).

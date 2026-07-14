@@ -123,6 +123,16 @@ if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
   // Migración 0123 APLICADA + verificada en el remoto (2026-07-11: tabla + treatment_id + RLS + 3 triggers +
   // gating short-circuit + revoke execute ✅) → hook DESCOMENTADO (la suite corre contra la DB remota).
   run('Treatments suite (spec 02 delta tratamientos)', `node --test supabase/tests/treatments/run.cjs`);
+  // spec 18 (audit-log) — capa DB: schema `audit` vendoreado (supa_audit) con record_version append-only
+  // (sin FK/CHECK) + resolve_actor total (actor real por header X-Rafaq-Actor guardado por rol service_role /
+  // auth.uid()) + trigger SECURITY DEFINER best-effort/estricto + REVOKEs fail-closed + smoke-check doble
+  // (EXECUTE + muro de lectura) + retención pg_cron mensual >90d. Tracking incremento 1: user_roles (estricto);
+  // animals GATEADA por el gate de volumen (T12/R5.4). La suite cubre TA.1–TA.16 (actor JWT/header/spoof,
+  // fail-closed, append-only, frontera WAL por sync-streams, retención, modo de falla).
+  // ⚠️ DESCOMENTAR cuando el LEADER aplique 0124 al remoto + redeploye las 4 EFs (accept_invitation,
+  //    change_member_role, remove_member, delete_account). Antes del apply, esta suite FALLA (el schema audit
+  //    no existe) → mismo patrón que spec 12/14/M6/tratamientos.
+  run('Audit suite (spec 18)', `node --test supabase/tests/audit/run.cjs`);
 } else {
   console.log('\n>>> RLS + Edge + Animal + Maneuvers + Custom + Scrotal + user_private + Import + Sync-streams + Operaciones-rodeo suites — SKIPPED (falta SUPABASE_SERVICE_ROLE_KEY en env)');
 }

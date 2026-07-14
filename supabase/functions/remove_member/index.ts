@@ -26,8 +26,10 @@ Deno.serve(async (req: Request) => {
 
   try {
     const userClient = createUserClient(req);
-    const adminClient = createAdminClient();
     const user = await requireUser(userClient);
+    // spec 18 (Opción A): admin client con el ACTOR real = user.id del JWT validado (el OWNER que remueve),
+    // NUNCA del body. El header X-Rafaq-Actor viaja en el UPDATE deactivate de user_roles.
+    const adminClient = createAdminClient(user.id);
 
     const body = (await req.json().catch(() => ({}))) as Body;
     const targetUserId = typeof body.user_id === 'string' ? body.user_id : '';

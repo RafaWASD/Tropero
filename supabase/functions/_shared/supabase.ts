@@ -7,7 +7,13 @@
 
 import { createClient, SupabaseClient } from 'jsr:@supabase/supabase-js@2';
 
-export function createAdminClient(): SupabaseClient {
+// `actorId` (spec 18, Opción A / H1): cuando se pasa, propaga el ACTOR real de la mutación al trigger de
+// auditoría por el header `X-Rafaq-Actor` en TODAS las requests del admin client. PostgREST expone el
+// header como GUC `request.headers` (transaction-local, misma transacción del DML → el trigger lo ve), y
+// el trigger lo confía SOLO en contexto service_role (anti-spoof). Cambio ADITIVO: sin `actorId` el
+// comportamiento es idéntico al anterior. El actor DEBE ser el `user.id` del JWT validado del llamante
+// (`requireUser`), NUNCA del body (spoofeable). Ver 0124_audit_log.sql § actor.
+export function createAdminClient(actorId?: string): SupabaseClient {
   const url = Deno.env.get('SUPABASE_URL');
   const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
   if (!url || !serviceRoleKey) {
@@ -15,6 +21,9 @@ export function createAdminClient(): SupabaseClient {
   }
   return createClient(url, serviceRoleKey, {
     auth: { autoRefreshToken: false, persistSession: false },
+    ...(actorId
+      ? { global: { headers: { 'X-Rafaq-Actor': actorId } } }
+      : {}),
   });
 }
 
