@@ -75,6 +75,22 @@ export default (): ExpoConfig => {
         },
       ],
       'expo-apple-authentication', // feature 19 — PRESERVADO
+      [
+        'expo-build-properties',
+        {
+          ios: {
+            // Fix pod install iOS: GoogleSignIn 9.x -> AppCheckCore (Swift) depende de GoogleUtilities y
+            // RecaptchaInterop, que no definen módulos → no integrables como static libs. Les habilitamos
+            // modular headers (lo que pide el propio error de CocoaPods). El plugin de google-signin solo
+            // cubría GoogleSignIn, no estas transitivas de AppCheck.
+            extraPods: [
+              { name: 'GoogleUtilities', modular_headers: true },
+              { name: 'RecaptchaInterop', modular_headers: true },
+              { name: 'AppCheckCore', modular_headers: true },
+            ],
+          },
+        },
+      ],
     ],
     extra: {
       // supabaseUrl ELIMINADO (spec 16 A2/R2.5): grep de `expoConfig.extra.supabaseUrl` en app/src
