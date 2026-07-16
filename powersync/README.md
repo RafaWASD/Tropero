@@ -43,10 +43,24 @@ El token es de management de TODA la cuenta — no committearlo nunca; se revoca
   línea con `sed`.
 - El CLI está en **beta** con breaking changes recientes (0.8 → 0.9) → versión pinneada en el script.
 
-## Estado de las instancias (2026-07-11)
+## Estado de las instancias (2026-07-16)
 
-- **Development** (`6a260fd035ca576ca0dad778`): provisionada, es la que usa la app. Linkeada acá.
-- **Production** (`6a260fd10ef84ed6719fd6bf`): existe pero sin provisionar — fuera de alcance por ahora.
+- **Development** (`6a260fd035ca576ca0dad778`): provisionada, es la que usa la app en dev. Linkeada por
+  `cli.yaml`. Conexión → `db.xrhlxxdnfzvdnztacofj.supabase.co`.
+- **Production** (`6a260fd10ef84ed6719fd6bf`): **provisionada y replicando** (Run F, 2026-07-16).
+  Conexión → `db.bcrsgekkfcdpwvkebsqe.supabase.co` (`Status: connected`, initial replication done,
+  lag 0). Sync streams canónicas (`rafaq.yaml`) deployadas. Linkeada por `cli.prod.yaml`; deploy con
+  `bash scripts/powersync-deploy.sh --env prod` (exige `RAFAQ_CONFIRM_PROD=1`).
+
+### `--env prod` saltea el connection-test de `validate` (a propósito)
+
+`powersync validate` prueba la conexión descrita en `service.yaml` **local**, que apunta a la DB de
+**dev** (`db.xrhlxxdnfzvdnztacofj`). Con `--env prod` el CLI resuelve el secret `default_password` de la
+instancia prod pero lo probaría contra ese host de dev → falso "password authentication failed for user
+powersync_role". Por eso el deploy script corre `validate --skip-validations=connections` en prod (sigue
+validando schema + sync-config). **La conexión de prod se gestiona en el dashboard de PowerSync** (este
+script solo deploya sync-config, nunca service-config) y se valida aparte con
+`pnpm dlx powersync@0.10.0 status --instance-id 6a260fd10ef84ed6719fd6bf` → `Status: connected`.
 
 Las 4 warnings de `validate` (`AS id, *` puede pisar el alias si la fila trae columna `id`) son las
 mismas que muestra el dashboard (`docs/powersync-warnings.png`) — pre-existentes, no bloquean.

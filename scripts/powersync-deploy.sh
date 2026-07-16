@@ -75,7 +75,17 @@ fi
 
 cp sync-streams/rafaq.yaml powersync/sync-config.yaml
 
-pnpm dlx "$POWERSYNC_CLI" validate
+# El `validate` corre un connection-test contra la conexión descrita en powersync/service.yaml LOCAL,
+# que apunta a la DB de DEV. La conexión de PROD NO vive acá: se gestiona (managed) en el dashboard de
+# PowerSync y no se deploya por CLI (este script SOLO empuja sync-config, nunca service-config). Por eso
+# contra prod el connection-test daría un FALSO NEGATIVO (probaría el password de prod contra el host de
+# dev → "password authentication failed"). La conexión real de prod se valida aparte con `powersync
+# status` (Status: connected). => en prod salteamos SOLO el connection-test; schema + sync-config siguen.
+if [ "$ENV_ARG" = "prod" ]; then
+  pnpm dlx "$POWERSYNC_CLI" validate --skip-validations=connections
+else
+  pnpm dlx "$POWERSYNC_CLI" validate
+fi
 
 if [ "$VALIDATE_ONLY" = "1" ]; then
   echo "OK: validación pasó ($ENV_ARG, no se deployó)."

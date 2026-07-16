@@ -232,7 +232,16 @@ PowerSync por env.
 | `apply-migration-mgmt.mjs` | `--env {dev,prod}` → elige ref/token; guarda de prod. Default dev = idéntico a hoy. (El plan lo llama `apply-migration.mjs`; se mantiene el nombre real para no romper las ~13 referencias.) | R5.1–R5.3 |
 | `apply-all-migrations.mjs` **(nuevo)** | bootstrap del ledger → lista `supabase/migrations/*.sql` ordenada → aplica las **ausentes** del ledger vía Management API (`database/query`) → inserta en `ops.applied_migrations`. Flags: `--env`, `--backfill` (registra sin ejecutar). | R5.4–R5.6, R6.1 |
 | `backup-db.mjs` **(nuevo)** | `pg_dump` contra el **pooler** de PROD. **Output por default FUERA del working tree** (H1/R5.10): `os.homedir()/.rafaq-backups/rafaq-prod-<ISO>.sql.gz` (override con `--out-dir`; la Action apunta a un dir del runner). Conn string a `pg_dump` **por env** (`PGPASSWORD`/URI en env, no argv — L2/R5.11). Aborta sin conn string (R5.8). Nunca loguea la conn string. | R5.7, R5.8, R5.10, R5.11 |
-| `powersync-deploy.sh` | `--env {dev,prod}` → dev usa `powersync/cli.yaml` (idéntico a hoy); prod exige `RAFAQ_CONFIRM_PROD=1`, swappea el link de instancia por **`powersync/cli.prod.yaml`** (creado en Run F/F5, con `trap EXIT` que restaura + backup a `*.tmp` gitignoreado) y usa `PS_ADMIN_TOKEN_PROD` si está (si no, `PS_ADMIN_TOKEN`, account-level). Default dev. | R5.9 |
+| `powersync-deploy.sh` | `--env {dev,prod}` → dev usa `powersync/cli.yaml` (idéntico a hoy); prod exige `RAFAQ_CONFIRM_PROD=1`, swappea el link de instancia por **`powersync/cli.prod.yaml`** (creado en Run F/F5, con `trap EXIT` que restaura + backup a `*.tmp` gitignoreado) y usa `PS_ADMIN_TOKEN_PROD` si está (si no, `PS_ADMIN_TOKEN`, account-level). Default dev. **En prod, `validate` corre con `--skip-validations=connections`** (ver nota abajo). | R5.9 |
+
+> **`--env prod` saltea el connection-test de `validate` (2026-07-16, Run F).** `powersync validate`
+> prueba la conexión del `service.yaml` **local**, que describe la DB de **dev**
+> (`db.xrhlxxdnfzvdnztacofj`). Con `--env prod` el CLI resuelve el secret `default_password` de la
+> instancia prod pero lo probaría contra ese host de dev → falso `password authentication failed for
+> user powersync_role`. La conexión de PROD se gestiona en el **dashboard de PowerSync** (este script
+> solo deploya `sync-config`, nunca `service-config`) y se valida aparte con `powersync status`
+> (`Status: connected`). Por eso prod corre `validate --skip-validations=connections` (schema +
+> sync-config siguen validando); dev queda idéntico (valida las 3, incluida `connections`).
 
 ### Ledger `ops.applied_migrations` (tool-owned, **no** numerada)
 
