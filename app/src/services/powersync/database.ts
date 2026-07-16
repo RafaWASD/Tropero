@@ -2,12 +2,12 @@
 //
 // Factory por plataforma (D2 del context):
 //   - Platform.OS === 'web'  → @powersync/web (wa-sqlite / WASM). Es el BANCO DE PRUEBAS de hoy.
-//   - resto (device)         → @powersync/react-native (RNQS / adapter por defecto). Diferido al
-//                              dev build Android (no hay device hoy; ver disclaimer R2.5/T8).
+//   - resto (device)         → @powersync/react-native + adapter op-sqlite (@powersync/op-sqlite sobre
+//                              @op-engineering/op-sqlite). Se materializa en el dev build Android/EAS.
 //
 // La selección es por `require()` GUARDADO por Platform.OS (mismo patrón que services/ble/feedback.ts):
-// así el bundle de WEB solo pulla @powersync/web y el de NATIVE solo @powersync/react-native — sin
-// arrastrar el peer nativo (@journeyapps/react-native-quick-sqlite) al bundle web ni el WASM al nativo.
+// así el bundle de WEB solo pulla @powersync/web y el de NATIVE solo @powersync/react-native + op-sqlite
+// — sin arrastrar el peer nativo (@op-engineering/op-sqlite) al bundle web ni el WASM al nativo.
 // Un `import` estático de ambos paquetes rompería el bundle de la plataforma contraria.
 //
 // La lógica de sync (connector, provider, hooks watchables) es AGNÓSTICA de plataforma: solo el
@@ -56,12 +56,22 @@ function createDatabase(): AbstractPowerSyncDatabase {
       flags: { useWebWorker: true, enableMultiTabs: false },
     });
   }
+  // Rama NATIVE (device): @powersync/react-native con el adapter op-sqlite (open-factory EXPLÍCITO).
+  // Antes usaba el adapter por defecto (`database: { dbFilename }` → @journeyapps/react-native-quick-sqlite,
+  // RNQS). RNQS 2.5.2 (última versión publicada, sin fix) NO instala sus JSI bindings bajo la New
+  // Architecture / bridgeless de RN 0.85 y falla al arranque ("The native QuickSQLite Module could not
+  // be installed! ... JSI bindings: false"). El camino soportado por PowerSync para New Arch es op-sqlite:
+  // se pasa un OPSqliteOpenFactory (de @powersync/op-sqlite, sobre @op-engineering/op-sqlite) como
+  // `database` en vez de la forma "settings". API confirmada contra los tipos instalados
+  // (@powersync/op-sqlite@0.9.9): export `OPSqliteOpenFactory`, opción requerida `dbFilename`.
+  // `require` GUARDADO por Platform (igual que web): op-sqlite es un peer NATIVO — un import estático lo
+  // arrastraría al bundle web y lo rompería.
   const { PowerSyncDatabase } =
     require('@powersync/react-native') as typeof import('@powersync/react-native');
-  return new PowerSyncDatabase({
-    schema: AppSchema,
-    database: { dbFilename: DB_FILENAME },
-  });
+  const { OPSqliteOpenFactory } =
+    require('@powersync/op-sqlite') as typeof import('@powersync/op-sqlite');
+  const factory = new OPSqliteOpenFactory({ dbFilename: DB_FILENAME });
+  return new PowerSyncDatabase({ schema: AppSchema, database: factory });
 }
 
 let instance: AbstractPowerSyncDatabase | null = null;

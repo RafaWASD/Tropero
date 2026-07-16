@@ -14,12 +14,15 @@ importers:
       '@expo-google-fonts/inter':
         specifier: ^0.4.2
         version: 0.4.2
-      '@journeyapps/react-native-quick-sqlite':
-        specifier: ^2.5.2
-        version: 2.5.2(react-native@0.85.3(@babel/core@7.29.0)(@react-native/metro-config@0.85.3(@babel/core@7.29.0))(@types/react@19.2.15)(react@19.2.3))(react@19.2.3)
       '@journeyapps/wa-sqlite':
         specifier: 1.7.0
         version: 1.7.0
+      '@op-engineering/op-sqlite':
+        specifier: 15.2.14
+        version: 15.2.14(react-native@0.85.3(@babel/core@7.29.0)(@react-native/metro-config@0.85.3(@babel/core@7.29.0))(@types/react@19.2.15)(react@19.2.3))(react@19.2.3)
+      '@powersync/op-sqlite':
+        specifier: 0.9.9
+        version: 0.9.9(@op-engineering/op-sqlite@15.2.14(react-native@0.85.3(@babel/core@7.29.0)(@react-native/metro-config@0.85.3(@babel/core@7.29.0))(@types/react@19.2.15)(react@19.2.3))(react@19.2.3))(@powersync/common@1.53.2)(react-native@0.85.3(@babel/core@7.29.0)(@react-native/metro-config@0.85.3(@babel/core@7.29.0))(@types/react@19.2.15)(react@19.2.3))(react@19.2.3)
       '@powersync/react':
         specifier: 1.10.0
         version: 1.10.0(@powersync/common@1.53.2)(react@19.2.3)
@@ -982,6 +985,16 @@ packages:
     resolution: {integrity: sha512-oGB+UxlgWcgQkgwo8GcEGwemoTFt3FIO9ababBmaGwXIoBKZ+GTy0pP185beGg7Llih/NSHSV2XAs1lnznocSg==}
     engines: {node: '>= 8'}
 
+  '@op-engineering/op-sqlite@15.2.14':
+    resolution: {integrity: sha512-b6ZtLBL/wIosshJnP+6xsthPdNxEBSxDHbeSEApJyzeXWRfQpRWxm5e5wkFH6OUfdzDNgx3p6VnqWObFIq8xoQ==}
+    peerDependencies:
+      '@sqlite.org/sqlite-wasm': '*'
+      react: '*'
+      react-native: '*'
+    peerDependenciesMeta:
+      '@sqlite.org/sqlite-wasm':
+        optional: true
+
   '@pkgr/core@0.1.2':
     resolution: {integrity: sha512-fdDH1LSGfZdTH2sxdpVMw31BanV28K/Gry0cVFxaNP77neJSkd82mM8ErPNYs9e+0O7SdHBLTDzDgwUuy18RnQ==}
     engines: {node: ^12.20.0 || ^14.18.0 || >=16.0.0}
@@ -993,6 +1006,14 @@ packages:
 
   '@powersync/common@1.53.2':
     resolution: {integrity: sha512-y+GtaLL4imFIWOatErIAEozNZPcIkAcA24c2Mso124ZFStOEeP8LJTSMDxPhyK14mzSnBk2dSjrOAjNz7m2B8g==}
+
+  '@powersync/op-sqlite@0.9.9':
+    resolution: {integrity: sha512-qib+2umF228vbyOwkTShOUBl8AB2IylOryf/DNrGsQpmt9nevE4AsRqTHndQ39hlIccf52sPN+lvG5jO7SXbBA==}
+    peerDependencies:
+      '@op-engineering/op-sqlite': ^13.0.0 || ^14.0.0 || ^15.0.0
+      '@powersync/common': ^1.53.2
+      react: '*'
+      react-native: '*'
 
   '@powersync/react-native@1.35.3':
     resolution: {integrity: sha512-n5AXMfuyg66xHwDOBRN92vR6hukoHMYE47aDpQchTeiN1es2n/Qv4YbT0U6K8rfYtBIfUGVrcUWGwhUpQ+E0HA==}
@@ -5354,6 +5375,7 @@ snapshots:
     dependencies:
       react: 19.2.3
       react-native: 0.85.3(@babel/core@7.29.0)(@react-native/metro-config@0.85.3(@babel/core@7.29.0))(@types/react@19.2.15)(react@19.2.3)
+    optional: true
 
   '@journeyapps/wa-sqlite@1.7.0': {}
 
@@ -5393,6 +5415,11 @@ snapshots:
       '@nodelib/fs.scandir': 2.1.5
       fastq: 1.20.1
 
+  '@op-engineering/op-sqlite@15.2.14(react-native@0.85.3(@babel/core@7.29.0)(@react-native/metro-config@0.85.3(@babel/core@7.29.0))(@types/react@19.2.15)(react@19.2.3))(react@19.2.3)':
+    dependencies:
+      react: 19.2.3
+      react-native: 0.85.3(@babel/core@7.29.0)(@react-native/metro-config@0.85.3(@babel/core@7.29.0))(@types/react@19.2.15)(react@19.2.3)
+
   '@pkgr/core@0.1.2': {}
 
   '@playwright/test@1.60.0':
@@ -5403,6 +5430,13 @@ snapshots:
     dependencies:
       event-iterator: 2.0.0
       js-logger: 1.6.1
+
+  '@powersync/op-sqlite@0.9.9(@op-engineering/op-sqlite@15.2.14(react-native@0.85.3(@babel/core@7.29.0)(@react-native/metro-config@0.85.3(@babel/core@7.29.0))(@types/react@19.2.15)(react@19.2.3))(react@19.2.3))(@powersync/common@1.53.2)(react-native@0.85.3(@babel/core@7.29.0)(@react-native/metro-config@0.85.3(@babel/core@7.29.0))(@types/react@19.2.15)(react@19.2.3))(react@19.2.3)':
+    dependencies:
+      '@op-engineering/op-sqlite': 15.2.14(react-native@0.85.3(@babel/core@7.29.0)(@react-native/metro-config@0.85.3(@babel/core@7.29.0))(@types/react@19.2.15)(react@19.2.3))(react@19.2.3)
+      '@powersync/common': 1.53.2
+      react: 19.2.3
+      react-native: 0.85.3(@babel/core@7.29.0)(@react-native/metro-config@0.85.3(@babel/core@7.29.0))(@types/react@19.2.15)(react@19.2.3)
 
   '@powersync/react-native@1.35.3(@journeyapps/react-native-quick-sqlite@2.5.2(react-native@0.85.3(@babel/core@7.29.0)(@react-native/metro-config@0.85.3(@babel/core@7.29.0))(@types/react@19.2.15)(react@19.2.3))(react@19.2.3))(@powersync/common@1.53.2)(react-native@0.85.3(@babel/core@7.29.0)(@react-native/metro-config@0.85.3(@babel/core@7.29.0))(@types/react@19.2.15)(react@19.2.3))(react@19.2.3)':
     dependencies:

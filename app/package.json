@@ -17,8 +17,9 @@
   },
   "dependencies": {
     "@expo-google-fonts/inter": "^0.4.2",
-    "@journeyapps/react-native-quick-sqlite": "^2.5.2",
     "@journeyapps/wa-sqlite": "1.7.0",
+    "@op-engineering/op-sqlite": "15.2.14",
+    "@powersync/op-sqlite": "0.9.9",
     "@powersync/react": "1.10.0",
     "@powersync/react-native": "1.35.3",
     "@powersync/web": "1.38.2",
