@@ -68,6 +68,8 @@ import { BleStickListenerProvider } from '@/services/ble/BleStickListenerProvide
 import { FindOrCreateOverlay } from './_components/FindOrCreateOverlay';
 import { BleE2EBridge } from './_components/BleE2EBridge';
 import { isBleE2E, isBleE2EManual } from './_components/ble-e2e-flag';
+// DIAGNÓSTICO TEMPORAL (bring-up nativo) — QUITAR cuando se resuelva.
+import { DiagnosticErrorBoundary } from './_components/DiagnosticErrorBoundary';
 
 // Fallback que destapa el splash si NADA resuelve (getSession/memberships colgados). DEBE ser MAYOR
 // que FIRST_SYNC_TIMEOUT_MS (la espera del primer sync en EstablishmentContext, ~4500ms): así, cuando
@@ -575,6 +577,11 @@ export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
+        {/* DIAGNÓSTICO TEMPORAL (bring-up nativo) — QUITAR cuando se resuelva.
+            Envuelve TODO el árbol de providers (TamaguiProvider incluido) DENTRO de SafeAreaProvider,
+            así un throw en fase de render de CUALQUIER provider (incl. PowerSyncProvider) se captura y se
+            muestra en pantalla con insets seguros. En web es inerte (nunca hay error → renderiza igual). */}
+        <DiagnosticErrorBoundary>
         <TamaguiProvider config={config} defaultTheme="light">
           <StatusBar style="dark" />
           <AuthProvider>
@@ -618,6 +625,7 @@ export default function RootLayout() {
             </PowerSyncProvider>
           </AuthProvider>
         </TamaguiProvider>
+        </DiagnosticErrorBoundary>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );
