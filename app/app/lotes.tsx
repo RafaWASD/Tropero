@@ -397,44 +397,46 @@ function LoteCard({
       ) : (
         <>
           {/* Cabecera tappable: nombre + chevron → expande/colapsa los miembros (D3). */}
-          <Pressable
+          <XStack
+            alignItems="center"
+            gap="$2"
+            minHeight="$chipMin"
+            pressStyle={{ opacity: 0.6 }}
             onPress={onToggleExpand}
             {...buttonA11y(Platform.OS, {
               label: `Ver los animales del lote ${group.name}`,
               selected: expanded,
             })}
           >
-            <XStack alignItems="center" gap="$2" minHeight="$chipMin" pressStyle={{ opacity: 0.6 }}>
-              <View
-                width={28}
-                height={28}
-                borderRadius="$pill"
-                backgroundColor="$greenLight"
-                alignItems="center"
-                justifyContent="center"
-                flexShrink={0}
-              >
-                <LoteIcon size={16} color={primary} strokeWidth={2.5} />
-              </View>
-              <Text
-                flex={1}
-                minWidth={0}
-                numberOfLines={1}
-                fontFamily="$body"
-                fontSize="$6" lineHeight="$6"
-                fontWeight="600"
-                color="$textPrimary"
-              >
-                {group.name}
-              </Text>
-              <ChevronRight
-                size={20}
-                color={muted}
-                strokeWidth={2}
-                style={{ transform: [{ rotate: expanded ? '90deg' : '0deg' }] }}
-              />
-            </XStack>
-          </Pressable>
+            <View
+              width={28}
+              height={28}
+              borderRadius="$pill"
+              backgroundColor="$greenLight"
+              alignItems="center"
+              justifyContent="center"
+              flexShrink={0}
+            >
+              <LoteIcon size={16} color={primary} strokeWidth={2.5} />
+            </View>
+            <Text
+              flex={1}
+              minWidth={0}
+              numberOfLines={1}
+              fontFamily="$body"
+              fontSize="$6" lineHeight="$6"
+              fontWeight="600"
+              color="$textPrimary"
+            >
+              {group.name}
+            </Text>
+            <ChevronRight
+              size={20}
+              color={muted}
+              strokeWidth={2}
+              style={{ transform: [{ rotate: expanded ? '90deg' : '0deg' }] }}
+            />
+          </XStack>
 
           {/* Miembros del lote (acordeón inline, D3). */}
           {expanded ? (
@@ -445,39 +447,37 @@ function LoteCard({
           {isOwner ? (
             <YStack gap="$2">
               <View height={1} backgroundColor="$divider" />
-              <Pressable
+              <XStack
+                alignItems="center"
+                gap="$3"
+                minHeight="$chipMin"
+                pressStyle={{ opacity: 0.6 }}
                 onPress={onStartRename}
                 {...buttonA11y(Platform.OS, { label: `Renombrar el lote ${group.name}` })}
               >
-                <XStack alignItems="center" gap="$3" minHeight="$chipMin" pressStyle={{ opacity: 0.6 }}>
-                  <Pencil size={20} color={primary} strokeWidth={2} />
-                  <Text flex={1} minWidth={0} fontFamily="$body" fontSize="$4" fontWeight="500" color="$textPrimary">
-                    Renombrar
-                  </Text>
-                </XStack>
-              </Pressable>
+                <Pencil size={20} color={primary} strokeWidth={2} />
+                <Text flex={1} minWidth={0} fontFamily="$body" fontSize="$4" fontWeight="500" color="$textPrimary">
+                  Renombrar
+                </Text>
+              </XStack>
               <View height={1} backgroundColor="$divider" />
-              <Pressable
-                disabled={deleting}
-                onPress={onDelete}
+              <XStack
+                alignItems="center"
+                gap="$3"
+                minHeight="$chipMin"
+                opacity={deleting ? 0.5 : 1}
+                pressStyle={{ opacity: 0.6 }}
+                onPress={deleting ? undefined : onDelete}
                 {...buttonA11y(Platform.OS, {
                   label: `Eliminar el lote ${group.name} (acción destructiva)`,
                   disabled: deleting,
                 })}
               >
-                <XStack
-                  alignItems="center"
-                  gap="$3"
-                  minHeight="$chipMin"
-                  opacity={deleting ? 0.5 : 1}
-                  pressStyle={{ opacity: 0.6 }}
-                >
-                  <Trash2 size={20} color={terracota} strokeWidth={2} />
-                  <Text fontFamily="$body" fontSize="$4" fontWeight="500" color="$terracota">
-                    {deleting ? 'Eliminando…' : 'Eliminar lote'}
-                  </Text>
-                </XStack>
-              </Pressable>
+                <Trash2 size={20} color={terracota} strokeWidth={2} />
+                <Text fontFamily="$body" fontSize="$4" fontWeight="500" color="$terracota">
+                  {deleting ? 'Eliminando…' : 'Eliminar lote'}
+                </Text>
+              </XStack>
             </YStack>
           ) : null}
         </>

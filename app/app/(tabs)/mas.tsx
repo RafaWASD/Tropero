@@ -27,7 +27,7 @@
 // ≥56px ($touchMin); tokens-only (ADR-023 §4); voseo argentino.
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { Alert, Platform, Pressable } from 'react-native';
+import { Alert, Platform } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
@@ -53,6 +53,7 @@ import {
   sanitizePhoneInput,
   validateProfile,
 } from '@/utils/validation';
+import { buttonA11y } from '@/utils/a11y';
 
 const OFFLINE_COPY = 'Necesitás conexión para esto. Conectate a internet y volvé a intentar.';
 
@@ -140,38 +141,34 @@ function RenspaBanner({ establishmentId, onComplete }: { establishmentId: string
   if (phase !== 'missing') return null;
 
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel="Completá el RENSPA del campo para la exportación a SIGSA"
+    <XStack
+      width="100%"
+      alignItems="center"
+      gap="$3"
+      minHeight="$touchMin"
+      borderRadius="$card"
+      borderWidth={1}
+      borderColor="$greenLight"
+      backgroundColor="$surface"
+      paddingHorizontal="$4"
+      paddingVertical="$3"
+      pressStyle={{ backgroundColor: '$bg' }}
       onPress={onComplete}
+      {...buttonA11y(Platform.OS, { label: 'Completá el RENSPA del campo para la exportación a SIGSA' })}
     >
-      <XStack
-        width="100%"
-        alignItems="center"
-        gap="$3"
-        minHeight="$touchMin"
-        borderRadius="$card"
-        borderWidth={1}
-        borderColor="$greenLight"
-        backgroundColor="$surface"
-        paddingHorizontal="$4"
-        paddingVertical="$3"
-        pressStyle={{ backgroundColor: '$bg' }}
-      >
-        <View flexShrink={0}>
-          <Info size={20} color={primary} strokeWidth={2} />
-        </View>
-        <YStack flex={1} minWidth={0} gap="$1">
-          <Text fontFamily="$body" fontSize="$4" lineHeight="$4" fontWeight="600" color="$textPrimary">
-            Completá tu RENSPA
-          </Text>
-          <Text fontFamily="$body" fontSize="$3" lineHeight="$3" fontWeight="400" color="$textMuted" numberOfLines={2}>
-            Lo vas a necesitar para declarar tus caravanas en SIGSA web.
-          </Text>
-        </YStack>
-        <ChevronRight size={20} color={getTokenValue('$textMuted', 'color')} strokeWidth={2} />
-      </XStack>
-    </Pressable>
+      <View flexShrink={0}>
+        <Info size={20} color={primary} strokeWidth={2} />
+      </View>
+      <YStack flex={1} minWidth={0} gap="$1">
+        <Text fontFamily="$body" fontSize="$4" lineHeight="$4" fontWeight="600" color="$textPrimary">
+          Completá tu RENSPA
+        </Text>
+        <Text fontFamily="$body" fontSize="$3" lineHeight="$3" fontWeight="400" color="$textMuted" numberOfLines={2}>
+          Lo vas a necesitar para declarar tus caravanas en SIGSA web.
+        </Text>
+      </YStack>
+      <ChevronRight size={20} color={getTokenValue('$textMuted', 'color')} strokeWidth={2} />
+    </XStack>
   );
 }
 
@@ -194,42 +191,38 @@ function ActionRow({
 }) {
   const labelColor = destructive ? '$terracota' : '$textPrimary';
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={accessibilityLabel ?? label}
+    <XStack
+      width="100%"
+      alignItems="center"
+      gap="$3"
+      minHeight="$touchMin"
+      paddingHorizontal="$4"
+      paddingVertical="$2"
+      pressStyle={{ backgroundColor: '$bg' }}
       onPress={onPress}
+      {...buttonA11y(Platform.OS, { label: accessibilityLabel ?? label })}
     >
-      <XStack
-        width="100%"
-        alignItems="center"
-        gap="$3"
-        minHeight="$touchMin"
-        paddingHorizontal="$4"
-        paddingVertical="$2"
-        pressStyle={{ backgroundColor: '$bg' }}
+      <View width="$icon" alignItems="center" flexShrink={0}>
+        {icon}
+      </View>
+      <Text
+        flex={1}
+        minWidth={0}
+        textAlign="left"
+        numberOfLines={1}
+        fontFamily="$body"
+        fontSize="$5"
+        fontWeight="500"
+        color={labelColor}
       >
-        <View width="$icon" alignItems="center" flexShrink={0}>
-          {icon}
+        {label}
+      </Text>
+      {trailing ? (
+        <View flexShrink={0} alignItems="flex-end">
+          {trailing}
         </View>
-        <Text
-          flex={1}
-          minWidth={0}
-          textAlign="left"
-          numberOfLines={1}
-          fontFamily="$body"
-          fontSize="$5"
-          fontWeight="500"
-          color={labelColor}
-        >
-          {label}
-        </Text>
-        {trailing ? (
-          <View flexShrink={0} alignItems="flex-end">
-            {trailing}
-          </View>
-        ) : null}
-      </XStack>
-    </Pressable>
+      ) : null}
+    </XStack>
   );
 }
 
@@ -390,25 +383,21 @@ function EmailRow({
           {email || '—'}
         </Text>
       </YStack>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="Cambiar email"
+      <XStack
+        flexShrink={0}
+        alignItems="center"
+        justifyContent="center"
+        minHeight="$chipMin"
+        paddingHorizontal="$2"
         hitSlop={8}
+        pressStyle={{ opacity: 0.6 }}
         onPress={onChange}
+        {...buttonA11y(Platform.OS, { label: 'Cambiar email' })}
       >
-        <XStack
-          flexShrink={0}
-          alignItems="center"
-          justifyContent="center"
-          minHeight="$chipMin"
-          paddingHorizontal="$2"
-          pressStyle={{ opacity: 0.6 }}
-        >
-          <Text fontFamily="$body" fontSize="$4" fontWeight="600" color="$primary">
-            Cambiar
-          </Text>
-        </XStack>
-      </Pressable>
+        <Text fontFamily="$body" fontSize="$4" fontWeight="600" color="$primary">
+          Cambiar
+        </Text>
+      </XStack>
     </XStack>
   );
 }
@@ -674,25 +663,21 @@ function DeleteAccountSection({
                   >
                     {est.name || 'Campo sin nombre'}
                   </Text>
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel={`Eliminar el campo ${est.name || 'sin nombre'} (acción destructiva)`}
+                  <XStack
+                    alignItems="center"
+                    gap="$1"
+                    minHeight="$chipMin"
+                    paddingHorizontal="$2"
                     hitSlop={8}
+                    pressStyle={{ opacity: 0.6 }}
                     onPress={() => void onSoftDeleteBlocking(est)}
+                    {...buttonA11y(Platform.OS, { label: `Eliminar el campo ${est.name || 'sin nombre'} (acción destructiva)` })}
                   >
-                    <XStack
-                      alignItems="center"
-                      gap="$1"
-                      minHeight="$chipMin"
-                      paddingHorizontal="$2"
-                      pressStyle={{ opacity: 0.6 }}
-                    >
-                      <Trash2 size={18} color={terracota} strokeWidth={2} />
-                      <Text fontFamily="$body" fontSize="$3" fontWeight="600" color="$terracota">
-                        Eliminar
-                      </Text>
-                    </XStack>
-                  </Pressable>
+                    <Trash2 size={18} color={terracota} strokeWidth={2} />
+                    <Text fontFamily="$body" fontSize="$3" fontWeight="600" color="$terracota">
+                      Eliminar
+                    </Text>
+                  </XStack>
                 </XStack>
               ))}
             </YStack>
@@ -731,28 +716,23 @@ function DeleteAccountSection({
           Vas a perder el acceso a tus campos y a todos tus datos. Esta acción no se puede deshacer.
         </Text>
         {step.kind === 'error' ? <FormError message={step.message} /> : null}
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Sí, eliminar mi cuenta (acción destructiva)"
-          disabled={deleting}
-          onPress={() => void callDelete()}
+        <XStack
+          width="100%"
+          alignItems="center"
+          justifyContent="center"
+          minHeight="$touchMin"
+          borderRadius="$pill"
+          backgroundColor="$terracota"
+          paddingHorizontal="$5"
+          opacity={deleting ? 0.5 : 1}
+          pressStyle={{ opacity: 0.85 }}
+          onPress={deleting ? undefined : () => void callDelete()}
+          {...buttonA11y(Platform.OS, { label: 'Sí, eliminar mi cuenta (acción destructiva)', disabled: deleting })}
         >
-          <XStack
-            width="100%"
-            alignItems="center"
-            justifyContent="center"
-            minHeight="$touchMin"
-            borderRadius="$pill"
-            backgroundColor="$terracota"
-            paddingHorizontal="$5"
-            opacity={deleting ? 0.5 : 1}
-            pressStyle={{ opacity: 0.85 }}
-          >
-            <Text fontFamily="$body" fontSize="$5" fontWeight="600" color="$white">
-              {deleting ? 'Eliminando…' : 'Sí, eliminar mi cuenta'}
-            </Text>
-          </XStack>
-        </Pressable>
+          <Text fontFamily="$body" fontSize="$5" fontWeight="600" color="$white">
+            {deleting ? 'Eliminando…' : 'Sí, eliminar mi cuenta'}
+          </Text>
+        </XStack>
         <Button
           variant="secondary"
           fullWidth
@@ -767,29 +747,25 @@ function DeleteAccountSection({
 
   // idle
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel="Eliminar cuenta (acción destructiva)"
+    <XStack
+      width="100%"
+      alignItems="center"
+      justifyContent="center"
+      gap="$2"
+      minHeight="$touchMin"
+      borderWidth={2}
+      borderColor="$terracota"
+      borderRadius="$pill"
+      paddingHorizontal="$5"
+      pressStyle={{ backgroundColor: '$surface' }}
       onPress={() => setStep({ kind: 'confirm' })}
+      {...buttonA11y(Platform.OS, { label: 'Eliminar cuenta (acción destructiva)' })}
     >
-      <XStack
-        width="100%"
-        alignItems="center"
-        justifyContent="center"
-        gap="$2"
-        minHeight="$touchMin"
-        borderWidth={2}
-        borderColor="$terracota"
-        borderRadius="$pill"
-        paddingHorizontal="$5"
-        pressStyle={{ backgroundColor: '$surface' }}
-      >
-        <Trash2 size={20} color={terracota} strokeWidth={2.5} />
-        <Text fontFamily="$body" fontSize="$5" fontWeight="600" color="$terracota">
-          Eliminar cuenta
-        </Text>
-      </XStack>
-    </Pressable>
+      <Trash2 size={20} color={terracota} strokeWidth={2.5} />
+      <Text fontFamily="$body" fontSize="$5" fontWeight="600" color="$terracota">
+        Eliminar cuenta
+      </Text>
+    </XStack>
   );
 }
 
@@ -1029,29 +1005,25 @@ export default function MasScreen() {
 
         {/* ── Cerrar sesión (T6.2 / R1.6) — destructiva, thumb-zone (abajo) ── */}
         <YStack marginTop="$8" width="100%">
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Cerrar sesión"
+          <XStack
+            width="100%"
+            alignItems="center"
+            justifyContent="center"
+            gap="$2"
+            minHeight="$touchMin"
+            borderWidth={2}
+            borderColor="$terracota"
+            borderRadius="$pill"
+            paddingHorizontal="$5"
+            pressStyle={{ backgroundColor: '$surface' }}
             onPress={() => void onLogout()}
+            {...buttonA11y(Platform.OS, { label: 'Cerrar sesión' })}
           >
-            <XStack
-              width="100%"
-              alignItems="center"
-              justifyContent="center"
-              gap="$2"
-              minHeight="$touchMin"
-              borderWidth={2}
-              borderColor="$terracota"
-              borderRadius="$pill"
-              paddingHorizontal="$5"
-              pressStyle={{ backgroundColor: '$surface' }}
-            >
-              <LogOut size={20} color={terracota} strokeWidth={2.5} />
-              <Text fontFamily="$body" fontSize="$5" fontWeight="600" color="$terracota">
-                Cerrar sesión
-              </Text>
-            </XStack>
-          </Pressable>
+            <LogOut size={20} color={terracota} strokeWidth={2.5} />
+            <Text fontFamily="$body" fontSize="$5" fontWeight="600" color="$terracota">
+              Cerrar sesión
+            </Text>
+          </XStack>
         </YStack>
 
         {/* ── Zona de peligro (Fase 6, R2.4/R2.5/R2.5.1) — al FONDO, separada visualmente ── */}

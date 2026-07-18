@@ -5,7 +5,7 @@
 // Cero hardcode (ADR-023 §4): tokens. Sin fetch (architecture.md). Cada fila es tappable (onPress) para
 // navegar a la ficha del animal (la pantalla provee el handler).
 
-import { Platform, Pressable } from 'react-native';
+import { Platform } from 'react-native';
 import { Text, View, XStack, YStack, getTokenValue } from 'tamagui';
 import { ChevronRight, AlertTriangle, Scale } from 'lucide-react-native';
 
@@ -62,6 +62,10 @@ function AlertRow({ item, icon }: { item: AlertItem; icon: 'dose' | 'weight' }) 
       paddingHorizontal="$4"
       minHeight="$animalRow"
       pressStyle={tappable ? { backgroundColor: '$bg' } : undefined}
+      onPress={item.onPress}
+      {...(tappable
+        ? buttonA11y(Platform.OS, { label: `${item.animal}: ${item.primary}, ${item.secondary}` })
+        : {})}
     >
       <View
         width={40}
@@ -114,13 +118,5 @@ function AlertRow({ item, icon }: { item: AlertItem; icon: 'dose' | 'weight' }) 
     </XStack>
   );
 
-  if (!item.onPress) return row;
-  return (
-    <Pressable
-      onPress={item.onPress}
-      {...buttonA11y(Platform.OS, { label: `${item.animal}: ${item.primary}, ${item.secondary}` })}
-    >
-      {row}
-    </Pressable>
-  );
+  return row;
 }

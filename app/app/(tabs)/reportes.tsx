@@ -18,7 +18,7 @@
 // Cero hardcode (ADR-023 §4): tokens + componentes. El % / formato es-AR vienen de reports-format.ts.
 
 import { useCallback, useMemo, useState } from 'react';
-import { Platform, Pressable } from 'react-native';
+import { Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { ScrollView, Text, View, XStack, YStack, getTokenValue } from 'tamagui';
@@ -268,23 +268,20 @@ function YearStepper({ year, onChange }: { year: number; onChange: (y: number) =
         </Text>
       </XStack>
       <XStack alignItems="center" gap="$3">
-        <Pressable
+        <View
+          width={36}
+          height={36}
+          borderRadius="$pill"
+          borderWidth={2}
+          borderColor="$primary"
+          alignItems="center"
+          justifyContent="center"
+          pressStyle={{ backgroundColor: '$surface' }}
           onPress={() => onChange(year - 1)}
           {...buttonA11y(Platform.OS, { label: 'Campaña anterior' })}
         >
-          <View
-            width={36}
-            height={36}
-            borderRadius="$pill"
-            borderWidth={2}
-            borderColor="$primary"
-            alignItems="center"
-            justifyContent="center"
-            pressStyle={{ backgroundColor: '$surface' }}
-          >
-            <ChevronLeft size={20} color={primary} strokeWidth={2.5} />
-          </View>
-        </Pressable>
+          <ChevronLeft size={20} color={primary} strokeWidth={2.5} />
+        </View>
         <Text
           fontFamily="$body"
           fontSize="$6"
@@ -296,25 +293,21 @@ function YearStepper({ year, onChange }: { year: number; onChange: (y: number) =
         >
           {year}
         </Text>
-        <Pressable
-          disabled={year >= nextYearCap}
-          onPress={() => onChange(year + 1)}
+        <View
+          width={36}
+          height={36}
+          borderRadius="$pill"
+          borderWidth={2}
+          borderColor="$primary"
+          opacity={year >= nextYearCap ? 0.4 : 1}
+          alignItems="center"
+          justifyContent="center"
+          pressStyle={{ backgroundColor: '$surface' }}
+          onPress={year >= nextYearCap ? undefined : () => onChange(year + 1)}
           {...buttonA11y(Platform.OS, { label: 'Campaña siguiente', disabled: year >= nextYearCap })}
         >
-          <View
-            width={36}
-            height={36}
-            borderRadius="$pill"
-            borderWidth={2}
-            borderColor="$primary"
-            opacity={year >= nextYearCap ? 0.4 : 1}
-            alignItems="center"
-            justifyContent="center"
-            pressStyle={{ backgroundColor: '$surface' }}
-          >
-            <ChevronRight size={20} color={primary} strokeWidth={2.5} />
-          </View>
-        </Pressable>
+          <ChevronRight size={20} color={primary} strokeWidth={2.5} />
+        </View>
       </XStack>
     </XStack>
   );
@@ -692,25 +685,27 @@ function NavRow({
   onPress: () => void;
 }) {
   return (
-    <Pressable
-      disabled={disabled}
-      onPress={onPress}
+    <XStack
+      alignItems="center"
+      gap="$3"
+      minHeight="$chipMin"
+      opacity={disabled ? 0.4 : 1}
+      pressStyle={{ opacity: 0.6 }}
+      onPress={disabled ? undefined : onPress}
       {...buttonA11y(Platform.OS, { label, disabled })}
     >
-      <XStack alignItems="center" gap="$3" minHeight="$chipMin" opacity={disabled ? 0.4 : 1} pressStyle={{ opacity: 0.6 }}>
-        {icon}
-        <YStack flex={1} minWidth={0}>
-          <Text numberOfLines={1} fontFamily="$body" fontSize="$4" fontWeight="500" color="$textPrimary">
-            {label}
+      {icon}
+      <YStack flex={1} minWidth={0}>
+        <Text numberOfLines={1} fontFamily="$body" fontSize="$4" fontWeight="500" color="$textPrimary">
+          {label}
+        </Text>
+        {hint ? (
+          <Text numberOfLines={1} fontFamily="$body" fontSize="$2" color="$textMuted">
+            {hint}
           </Text>
-          {hint ? (
-            <Text numberOfLines={1} fontFamily="$body" fontSize="$2" color="$textMuted">
-              {hint}
-            </Text>
-          ) : null}
-        </YStack>
-        <ChevronRight size={20} color={muted} strokeWidth={2} />
-      </XStack>
-    </Pressable>
+        ) : null}
+      </YStack>
+      <ChevronRight size={20} color={muted} strokeWidth={2} />
+    </XStack>
   );
 }

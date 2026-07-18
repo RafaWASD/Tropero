@@ -1464,29 +1464,25 @@ function CategoryOverrideCard({
             </XStack>
           </YStack>
         ) : (
-          <Pressable
-            style={{ width: '100%' }}
+          <XStack
+            width="100%"
+            minHeight="$touchMin"
+            alignItems="center"
+            justifyContent="center"
+            gap="$2"
+            borderRadius="$pill"
+            backgroundColor="transparent"
+            borderWidth={2}
+            borderColor="$primary"
+            paddingHorizontal="$5"
+            pressStyle={{ backgroundColor: '$greenLight' }}
             onPress={startConfirm}
             {...buttonA11y(Platform.OS, { label: 'Quitar fijación' })}
           >
-            <XStack
-              width="100%"
-              minHeight="$touchMin"
-              alignItems="center"
-              justifyContent="center"
-              gap="$2"
-              borderRadius="$pill"
-              backgroundColor="transparent"
-              borderWidth={2}
-              borderColor="$primary"
-              paddingHorizontal="$5"
-              pressStyle={{ backgroundColor: '$greenLight' }}
-            >
-              <Text fontFamily="$body" fontSize="$5" fontWeight="600" color="$primary">
-                Quitar fijación
-              </Text>
-            </XStack>
-          </Pressable>
+            <Text fontFamily="$body" fontSize="$5" fontWeight="600" color="$primary">
+              Quitar fijación
+            </Text>
+          </XStack>
         )
       ) : null}
     </View>
@@ -1549,37 +1545,33 @@ function CutRow({
       {/* Afordancia colapsada: el botón de acción (amber-outline, marca de descarte). Al tocar expande la
           confirmación inline. Mientras confirma, se oculta (los botones Confirmar/Cancelar lo reemplazan). */}
       {!confirming ? (
-        <Pressable
-          style={{ width: '100%' }}
+        <XStack
+          width="100%"
+          minHeight="$touchMin"
+          alignItems="center"
+          justifyContent="center"
+          gap="$2"
+          borderRadius="$pill"
+          backgroundColor="transparent"
+          borderWidth={2}
+          borderColor="$cutText"
+          paddingHorizontal="$5"
+          pressStyle={{ backgroundColor: '$cutBg' }}
           onPress={startConfirm}
           {...buttonA11y(Platform.OS, { label: actionLabel })}
         >
-          <XStack
-            width="100%"
-            minHeight="$touchMin"
-            alignItems="center"
-            justifyContent="center"
-            gap="$2"
-            borderRadius="$pill"
-            backgroundColor="transparent"
-            borderWidth={2}
-            borderColor="$cutText"
-            paddingHorizontal="$5"
-            pressStyle={{ backgroundColor: '$cutBg' }}
+          <Ban size={18} color={cutText} strokeWidth={2.5} />
+          <Text
+            fontFamily="$body"
+            fontSize="$5"
+            lineHeight="$5"
+            fontWeight="600"
+            color="$cutText"
+            numberOfLines={1}
           >
-            <Ban size={18} color={cutText} strokeWidth={2.5} />
-            <Text
-              fontFamily="$body"
-              fontSize="$5"
-              lineHeight="$5"
-              fontWeight="600"
-              color="$cutText"
-              numberOfLines={1}
-            >
-              {actionLabel}
-            </Text>
-          </XStack>
-        </Pressable>
+            {actionLabel}
+          </Text>
+        </XStack>
       ) : null}
 
       {error ? <FormError message={error} /> : null}
@@ -1913,45 +1905,45 @@ function MotherCard({ mother, onPress }: { mother: MotherLink; onPress: () => vo
   const subtitle = subtitleParts.length > 0 ? subtitleParts.join(' · ') : 'Madre';
 
   return (
-    <Pressable onPress={onPress} {...buttonA11y(Platform.OS, { label: `Ver la ficha de la madre: ${mother.label}` })}>
-      <XStack
-        width="100%"
+    <XStack
+      width="100%"
+      alignItems="center"
+      gap="$3"
+      minHeight="$touchMin"
+      borderRadius="$card"
+      borderWidth={2}
+      borderColor="$divider"
+      backgroundColor="$white"
+      paddingHorizontal="$4"
+      paddingVertical="$3"
+      pressStyle={{ backgroundColor: '$surface' }}
+      onPress={onPress}
+      {...buttonA11y(Platform.OS, { label: `Ver la ficha de la madre: ${mother.label}` })}
+    >
+      <View
+        width="$icon"
+        height="$icon"
+        borderRadius="$pill"
+        backgroundColor="$greenLight"
         alignItems="center"
-        gap="$3"
-        minHeight="$touchMin"
-        borderRadius="$card"
-        borderWidth={2}
-        borderColor="$divider"
-        backgroundColor="$white"
-        paddingHorizontal="$4"
-        paddingVertical="$3"
-        pressStyle={{ backgroundColor: '$surface' }}
+        justifyContent="center"
+        flexShrink={0}
       >
-        <View
-          width="$icon"
-          height="$icon"
-          borderRadius="$pill"
-          backgroundColor="$greenLight"
-          alignItems="center"
-          justifyContent="center"
-          flexShrink={0}
-        >
-          <Milk size={22} color={primary} strokeWidth={2.5} />
-        </View>
-        <YStack flex={1} minWidth={0} gap="$1">
-          <Text fontFamily="$body" fontSize="$3" fontWeight="500" color="$textMuted">
-            Madre
-          </Text>
-          <Text fontFamily="$body" fontSize="$5" fontWeight="600" color="$textPrimary" numberOfLines={1}>
-            {mother.label}
-          </Text>
-          <Text fontFamily="$body" fontSize="$3" fontWeight="400" color="$textMuted" numberOfLines={1}>
-            {subtitle}
-          </Text>
-        </YStack>
-        <ChevronRight size={22} color={faint} strokeWidth={2} />
-      </XStack>
-    </Pressable>
+        <Milk size={22} color={primary} strokeWidth={2.5} />
+      </View>
+      <YStack flex={1} minWidth={0} gap="$1">
+        <Text fontFamily="$body" fontSize="$3" fontWeight="500" color="$textMuted">
+          Madre
+        </Text>
+        <Text fontFamily="$body" fontSize="$5" fontWeight="600" color="$textPrimary" numberOfLines={1}>
+          {mother.label}
+        </Text>
+        <Text fontFamily="$body" fontSize="$3" fontWeight="400" color="$textMuted" numberOfLines={1}>
+          {subtitle}
+        </Text>
+      </YStack>
+      <ChevronRight size={22} color={faint} strokeWidth={2} />
+    </XStack>
   );
 }
 
@@ -2207,7 +2199,18 @@ function LoteControl({
         {editable ? (
           <>
             {/* Trigger del selector (cambiar lote). */}
-            <Pressable
+            <XStack
+              width="100%"
+              minHeight="$touchMin"
+              alignItems="center"
+              justifyContent="center"
+              gap="$2"
+              borderRadius="$pill"
+              backgroundColor="transparent"
+              borderWidth={2}
+              borderColor="$primary"
+              paddingHorizontal="$5"
+              pressStyle={{ backgroundColor: '$surface' }}
               onPress={() => {
                 setOpen((v) => !v);
                 setCreatingNew(false);
@@ -2215,25 +2218,11 @@ function LoteControl({
               }}
               {...buttonA11y(Platform.OS, { label: triggerLabel, selected: open })}
             >
-              <XStack
-                width="100%"
-                minHeight="$touchMin"
-                alignItems="center"
-                justifyContent="center"
-                gap="$2"
-                borderRadius="$pill"
-                backgroundColor="transparent"
-                borderWidth={2}
-                borderColor="$primary"
-                paddingHorizontal="$5"
-                pressStyle={{ backgroundColor: '$surface' }}
-              >
-                <Layers size={18} color={primary} strokeWidth={2.5} />
-                <Text fontFamily="$body" fontSize="$5" fontWeight="600" color="$primary">
-                  {triggerLabel}
-                </Text>
-              </XStack>
-            </Pressable>
+              <Layers size={18} color={primary} strokeWidth={2.5} />
+              <Text fontFamily="$body" fontSize="$5" fontWeight="600" color="$primary">
+                {triggerLabel}
+              </Text>
+            </XStack>
 
             {open ? (
               creatingNew ? (
@@ -2295,27 +2284,24 @@ function LoteControl({
                   {canQuickCreate ? (
                     <>
                       <View height={1} backgroundColor="$divider" />
-                      <Pressable
+                      <XStack
+                        alignItems="center"
+                        gap="$2"
+                        minHeight="$chipMin"
+                        paddingHorizontal="$2"
+                        pressStyle={{ opacity: 0.6 }}
                         onPress={() => {
                           setCreatingNew(true);
                           setError(null);
                         }}
                         {...buttonA11y(Platform.OS, { label: 'Crear lote nuevo' })}
                       >
-                        <XStack
-                          alignItems="center"
-                          gap="$2"
-                          minHeight="$chipMin"
-                          paddingHorizontal="$2"
-                          pressStyle={{ opacity: 0.6 }}
-                        >
-                          <Plus size={20} color={primary} strokeWidth={2.5} />
-                          <Text flex={1} textAlign="center" minWidth={0} fontFamily="$body" fontSize="$4" fontWeight="600" color="$primary">
-                            Crear lote nuevo
-                          </Text>
-                          <View width={20} flexShrink={0} />
-                        </XStack>
-                      </Pressable>
+                        <Plus size={20} color={primary} strokeWidth={2.5} />
+                        <Text flex={1} textAlign="center" minWidth={0} fontFamily="$body" fontSize="$4" fontWeight="600" color="$primary">
+                          Crear lote nuevo
+                        </Text>
+                        <View width={20} flexShrink={0} />
+                      </XStack>
                     </>
                   ) : groups.length === 0 ? (
                     <InfoNote>Todavía no hay lotes en este campo. Pedíle al dueño que cree uno.</InfoNote>
@@ -2802,32 +2788,27 @@ function DeletableTimelineEvent({
             <YStack flex={1}>
               {/* "Sí, borrar" terracota (acción destructiva-suave; el Button canónico no tiene variante
                   destructiva → Pressable a mano con el lenguaje terracota, igual que ExitButton). */}
-              <Pressable
-                style={{ width: '100%' }}
-                disabled={busy}
-                onPress={() => void onConfirm()}
-                {...buttonA11y(Platform.OS, { label: 'Sí, borrar' })}
+              <XStack
+                width="100%"
+                minHeight="$touchMin"
+                alignItems="center"
+                justifyContent="center"
+                gap="$2"
+                borderRadius="$pill"
+                backgroundColor="transparent"
+                borderWidth={2}
+                borderColor="$terracota"
+                paddingHorizontal="$5"
+                opacity={busy ? 0.6 : 1}
+                pressStyle={{ backgroundColor: '$surface' }}
+                onPress={busy ? undefined : () => void onConfirm()}
+                {...buttonA11y(Platform.OS, { label: 'Sí, borrar', disabled: busy })}
               >
-                <XStack
-                  width="100%"
-                  minHeight="$touchMin"
-                  alignItems="center"
-                  justifyContent="center"
-                  gap="$2"
-                  borderRadius="$pill"
-                  backgroundColor="transparent"
-                  borderWidth={2}
-                  borderColor="$terracota"
-                  paddingHorizontal="$5"
-                  opacity={busy ? 0.6 : 1}
-                  pressStyle={{ backgroundColor: '$surface' }}
-                >
-                  <Trash2 size={18} color={terracota} strokeWidth={2.5} />
-                  <Text fontFamily="$body" fontSize="$5" fontWeight="600" color="$terracota">
-                    {busy ? 'Borrando…' : 'Sí, borrar'}
-                  </Text>
-                </XStack>
-              </Pressable>
+                <Trash2 size={18} color={terracota} strokeWidth={2.5} />
+                <Text fontFamily="$body" fontSize="$5" fontWeight="600" color="$terracota">
+                  {busy ? 'Borrando…' : 'Sí, borrar'}
+                </Text>
+              </XStack>
             </YStack>
           </XStack>
         </YStack>
@@ -2843,28 +2824,24 @@ function DeletableTimelineEvent({
 function AddEventButton({ onPress }: { onPress: () => void }) {
   const white = getTokenValue('$white', 'color');
   return (
-    <Pressable
-      style={{ width: '100%' }}
+    <XStack
+      width="100%"
+      minHeight="$touchMin"
+      alignItems="center"
+      justifyContent="center"
+      gap="$2"
+      borderRadius="$pill"
+      backgroundColor="$primary"
+      paddingHorizontal="$5"
+      pressStyle={{ backgroundColor: '$primaryPress' }}
       onPress={onPress}
       {...buttonA11y(Platform.OS, { label: 'Agregar evento' })}
     >
-      <XStack
-        width="100%"
-        minHeight="$touchMin"
-        alignItems="center"
-        justifyContent="center"
-        gap="$2"
-        borderRadius="$pill"
-        backgroundColor="$primary"
-        paddingHorizontal="$5"
-        pressStyle={{ backgroundColor: '$primaryPress' }}
-      >
-        <Plus size={20} color={white} strokeWidth={2.5} />
-        <Text fontFamily="$body" fontSize="$5" fontWeight="600" color="$white">
-          Agregar evento
-        </Text>
-      </XStack>
-    </Pressable>
+      <Plus size={20} color={white} strokeWidth={2.5} />
+      <Text fontFamily="$body" fontSize="$5" fontWeight="600" color="$white">
+        Agregar evento
+      </Text>
+    </XStack>
   );
 }
 
@@ -2876,29 +2853,25 @@ function AddEventButton({ onPress }: { onPress: () => void }) {
 function ExitButton({ onPress }: { onPress: () => void }) {
   const terracota = getTokenValue('$terracota', 'color');
   return (
-    <Pressable
-      style={{ width: '100%' }}
+    <XStack
+      width="100%"
+      minHeight="$touchMin"
+      alignItems="center"
+      justifyContent="center"
+      gap="$2"
+      borderRadius="$pill"
+      backgroundColor="transparent"
+      borderWidth={2}
+      borderColor="$terracota"
+      paddingHorizontal="$5"
+      pressStyle={{ backgroundColor: '$surface' }}
       onPress={onPress}
       {...buttonA11y(Platform.OS, { label: 'Dar de baja' })}
     >
-      <XStack
-        width="100%"
-        minHeight="$touchMin"
-        alignItems="center"
-        justifyContent="center"
-        gap="$2"
-        borderRadius="$pill"
-        backgroundColor="transparent"
-        borderWidth={2}
-        borderColor="$terracota"
-        paddingHorizontal="$5"
-        pressStyle={{ backgroundColor: '$surface' }}
-      >
-        <Archive size={18} color={terracota} strokeWidth={2.5} />
-        <Text fontFamily="$body" fontSize="$5" fontWeight="600" color="$terracota">
-          Dar de baja
-        </Text>
-      </XStack>
-    </Pressable>
+      <Archive size={18} color={terracota} strokeWidth={2.5} />
+      <Text fontFamily="$body" fontSize="$5" fontWeight="600" color="$terracota">
+        Dar de baja
+      </Text>
+    </XStack>
   );
 }

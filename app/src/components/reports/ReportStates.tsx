@@ -4,7 +4,7 @@
 //
 // Cero hardcode (ADR-023 §4): tokens. Sin fetch (architecture.md: los componentes no tocan I/O).
 
-import { ActivityIndicator, Platform, Pressable } from 'react-native';
+import { ActivityIndicator, Platform } from 'react-native';
 import { Text, View, XStack, YStack, getTokenValue } from 'tamagui';
 import { CloudOff, RefreshCw, Inbox } from 'lucide-react-native';
 
@@ -142,23 +142,23 @@ function ReportStateCard({
         ) : null}
       </YStack>
       {actionLabel && onAction ? (
-        <Pressable onPress={onAction} {...buttonA11y(Platform.OS, { label: actionLabel })}>
-          <XStack
-            alignItems="center"
-            gap="$2"
-            minHeight="$chipMin"
-            paddingHorizontal="$4"
-            borderRadius="$pill"
-            borderWidth={2}
-            borderColor="$primary"
-            pressStyle={{ backgroundColor: '$bg' }}
-          >
-            <RefreshCw size={18} color={primary} strokeWidth={2} />
-            <Text fontFamily="$body" fontSize="$4" fontWeight="600" color="$primary">
-              {actionLabel}
-            </Text>
-          </XStack>
-        </Pressable>
+        <XStack
+          alignItems="center"
+          gap="$2"
+          minHeight="$chipMin"
+          paddingHorizontal="$4"
+          borderRadius="$pill"
+          borderWidth={2}
+          borderColor="$primary"
+          pressStyle={{ backgroundColor: '$bg' }}
+          onPress={onAction}
+          {...buttonA11y(Platform.OS, { label: actionLabel })}
+        >
+          <RefreshCw size={18} color={primary} strokeWidth={2} />
+          <Text fontFamily="$body" fontSize="$4" fontWeight="600" color="$primary">
+            {actionLabel}
+          </Text>
+        </XStack>
       ) : null}
     </YStack>
   );

@@ -187,26 +187,23 @@ export default function RodeosScreen() {
             de las acciones de RodeoCard — manga-friendly, $touchMin). */}
         {canImport && hasRodeos ? (
           <YStack marginTop="$3">
-            <Pressable
+            <XStack
+              alignItems="center"
+              gap="$3"
+              minHeight="$touchMin"
+              paddingHorizontal="$4"
+              borderRadius="$pill"
+              borderWidth={2}
+              borderColor="$primary"
+              pressStyle={{ backgroundColor: '$surface' }}
               onPress={() => router.push('/import-rodeo')}
               {...buttonA11y(Platform.OS, { label: 'Importar rodeo desde un archivo' })}
             >
-              <XStack
-                alignItems="center"
-                gap="$3"
-                minHeight="$touchMin"
-                paddingHorizontal="$4"
-                borderRadius="$pill"
-                borderWidth={2}
-                borderColor="$primary"
-                pressStyle={{ backgroundColor: '$surface' }}
-              >
-                <Upload size={20} color={primary} strokeWidth={2} />
-                <Text fontFamily="$body" fontSize="$5" fontWeight="600" color="$primary">
-                  Importar rodeo
-                </Text>
-              </XStack>
-            </Pressable>
+              <Upload size={20} color={primary} strokeWidth={2} />
+              <Text fontFamily="$body" fontSize="$5" fontWeight="600" color="$primary">
+                Importar rodeo
+              </Text>
+            </XStack>
           </YStack>
         ) : null}
 
@@ -218,27 +215,24 @@ export default function RodeosScreen() {
         <Text fontFamily="$body" fontSize="$3" fontWeight="500" color="$textMuted" marginBottom="$2">
           Otros grupos del campo
         </Text>
-        <Pressable
+        <XStack
+          alignItems="center"
+          gap="$3"
+          minHeight="$touchMin"
+          paddingHorizontal="$4"
+          borderRadius="$pill"
+          borderWidth={2}
+          borderColor="$primary"
+          pressStyle={{ backgroundColor: '$surface' }}
           onPress={() => router.push('/lotes')}
           {...buttonA11y(Platform.OS, { label: 'Ver y gestionar los lotes del campo' })}
         >
-          <XStack
-            alignItems="center"
-            gap="$3"
-            minHeight="$touchMin"
-            paddingHorizontal="$4"
-            borderRadius="$pill"
-            borderWidth={2}
-            borderColor="$primary"
-            pressStyle={{ backgroundColor: '$surface' }}
-          >
-            <Layers size={20} color={primary} strokeWidth={2} />
-            <Text flex={1} minWidth={0} fontFamily="$body" fontSize="$5" fontWeight="600" color="$primary">
-              Lotes
-            </Text>
-            <ChevronRight size={20} color={muted} strokeWidth={2} />
-          </XStack>
-        </Pressable>
+          <Layers size={20} color={primary} strokeWidth={2} />
+          <Text flex={1} minWidth={0} fontFamily="$body" fontSize="$5" fontWeight="600" color="$primary">
+            Lotes
+          </Text>
+          <ChevronRight size={20} color={muted} strokeWidth={2} />
+        </XStack>
       </ScrollView>
     </YStack>
   );
@@ -290,70 +284,65 @@ function RodeoCard({
 
       {isOwner ? (
         <YStack gap="$2">
-          <Pressable
+          <XStack
+            alignItems="center"
+            gap="$3"
+            minHeight="$chipMin"
+            pressStyle={{ opacity: 0.6 }}
             onPress={onEditTemplate}
             {...buttonA11y(Platform.OS, {
               label: `Editar la plantilla de datos de ${rodeo.name}`,
             })}
           >
-            <XStack
-              alignItems="center"
-              gap="$3"
-              minHeight="$chipMin"
-              pressStyle={{ opacity: 0.6 }}
-            >
-              <SlidersHorizontal size={20} color={primary} strokeWidth={2} />
-              <Text flex={1} minWidth={0} fontFamily="$body" fontSize="$4" fontWeight="500" color="$textPrimary">
-                Editar plantilla de datos
-              </Text>
-              <ChevronRight size={20} color={muted} strokeWidth={2} />
-            </XStack>
-          </Pressable>
+            <SlidersHorizontal size={20} color={primary} strokeWidth={2} />
+            <Text flex={1} minWidth={0} fontFamily="$body" fontSize="$4" fontWeight="500" color="$textPrimary">
+              Editar plantilla de datos
+            </Text>
+            <ChevronRight size={20} color={muted} strokeWidth={2} />
+          </XStack>
           <View height={1} backgroundColor="$divider" />
           {/* Meses de servicio (spec 03 Stream B / B1, RPSC.3.1): ver/editar la campaña reproductiva del
               rodeo. El subtexto muestra el período actual ("Oct → Dic" / "Sin configurar" / "No hace servicio").
               Mostrarlo NO depende del rol (la edición sí es owner-only, dentro de este bloque owner). */}
-          <Pressable
+          <XStack
+            alignItems="center"
+            gap="$3"
+            minHeight="$chipMin"
+            pressStyle={{ opacity: 0.6 }}
             onPress={onEditService}
             {...buttonA11y(Platform.OS, {
               label: `Editar los meses de servicio de ${rodeo.name}. Actualmente: ${servicePeriod.text}`,
             })}
           >
-            <XStack alignItems="center" gap="$3" minHeight="$chipMin" pressStyle={{ opacity: 0.6 }}>
-              <CalendarRange size={20} color={primary} strokeWidth={2} />
-              <YStack flex={1} minWidth={0}>
-                <Text numberOfLines={1} fontFamily="$body" fontSize="$4" fontWeight="500" color="$textPrimary">
-                  Meses de servicio
-                </Text>
-                <Text numberOfLines={1} fontFamily="$body" fontSize="$2" fontWeight="500" color="$textMuted">
-                  {servicePeriod.text}
-                </Text>
-              </YStack>
-              <ChevronRight size={20} color={muted} strokeWidth={2} />
-            </XStack>
-          </Pressable>
+            <CalendarRange size={20} color={primary} strokeWidth={2} />
+            <YStack flex={1} minWidth={0}>
+              <Text numberOfLines={1} fontFamily="$body" fontSize="$4" fontWeight="500" color="$textPrimary">
+                Meses de servicio
+              </Text>
+              <Text numberOfLines={1} fontFamily="$body" fontSize="$2" fontWeight="500" color="$textMuted">
+                {servicePeriod.text}
+              </Text>
+            </YStack>
+            <ChevronRight size={20} color={muted} strokeWidth={2} />
+          </XStack>
           <View height={1} backgroundColor="$divider" />
-          <Pressable
-            disabled={deleting}
-            onPress={onDelete}
+          <XStack
+            alignItems="center"
+            gap="$3"
+            minHeight="$chipMin"
+            opacity={deleting ? 0.5 : 1}
+            pressStyle={{ opacity: 0.6 }}
+            onPress={deleting ? undefined : onDelete}
             {...buttonA11y(Platform.OS, {
               label: `Eliminar el rodeo ${rodeo.name} (acción destructiva)`,
               disabled: deleting,
             })}
           >
-            <XStack
-              alignItems="center"
-              gap="$3"
-              minHeight="$chipMin"
-              opacity={deleting ? 0.5 : 1}
-              pressStyle={{ opacity: 0.6 }}
-            >
-              <Trash2 size={20} color={terracota} strokeWidth={2} />
-              <Text fontFamily="$body" fontSize="$4" fontWeight="500" color="$terracota">
-                {deleting ? 'Eliminando…' : 'Eliminar rodeo'}
-              </Text>
-            </XStack>
-          </Pressable>
+            <Trash2 size={20} color={terracota} strokeWidth={2} />
+            <Text fontFamily="$body" fontSize="$4" fontWeight="500" color="$terracota">
+              {deleting ? 'Eliminando…' : 'Eliminar rodeo'}
+            </Text>
+          </XStack>
         </YStack>
       ) : null}
     </Card>

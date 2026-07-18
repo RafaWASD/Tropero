@@ -50,6 +50,7 @@ import {
 import { inviteErrorCopy } from '@/utils/invite';
 import { roleLabel } from '@/utils/establishment';
 import { formatDateCompactEsAr } from '@/utils/format-date-es-ar';
+import { buttonA11y } from '@/utils/a11y';
 import type { UserRole } from '@/types';
 
 const OFFLINE_COPY = 'Necesitás conexión para esto. Conectate a internet y volvé a intentar.';
@@ -172,26 +173,22 @@ export default function MiembrosScreen() {
             Equipo
           </Text>
           {isOwner ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Invitar miembro"
+            <XStack
+              alignItems="center"
+              gap="$1"
+              backgroundColor="$primary"
+              borderRadius="$pill"
+              paddingHorizontal="$3"
+              minHeight="$chipMin"
+              pressStyle={{ backgroundColor: '$primaryPress' }}
               onPress={() => router.push('/invitar')}
+              {...buttonA11y(Platform.OS, { label: 'Invitar miembro' })}
             >
-              <XStack
-                alignItems="center"
-                gap="$1"
-                backgroundColor="$primary"
-                borderRadius="$pill"
-                paddingHorizontal="$3"
-                minHeight="$chipMin"
-                pressStyle={{ backgroundColor: '$primaryPress' }}
-              >
-                <UserPlus size={18} color={getTokenValue('$white', 'color')} strokeWidth={2.5} />
-                <Text fontFamily="$body" fontSize="$3" fontWeight="600" color="$white">
-                  Invitar
-                </Text>
-              </XStack>
-            </Pressable>
+              <UserPlus size={18} color={getTokenValue('$white', 'color')} strokeWidth={2.5} />
+              <Text fontFamily="$body" fontSize="$3" fontWeight="600" color="$white">
+                Invitar
+              </Text>
+            </XStack>
           ) : null}
         </XStack>
       </YStack>
@@ -463,22 +460,22 @@ function MemberRow({
 function RemoveButton({ onPress }: { onPress: () => void }) {
   const terracota = getTokenValue('$terracota', 'color');
   return (
-    <Pressable accessibilityRole="button" accessibilityLabel="Remover del equipo" onPress={onPress}>
-      <XStack
-        alignItems="center"
-        justifyContent="center"
-        minHeight="$touchMin"
-        borderWidth={2}
-        borderColor="$terracota"
-        borderRadius="$pill"
-        paddingHorizontal="$5"
-        pressStyle={{ backgroundColor: '$surface' }}
-      >
-        <Text fontFamily="$body" fontSize="$5" fontWeight="600" color="$terracota">
-          Remover
-        </Text>
-      </XStack>
-    </Pressable>
+    <XStack
+      alignItems="center"
+      justifyContent="center"
+      minHeight="$touchMin"
+      borderWidth={2}
+      borderColor="$terracota"
+      borderRadius="$pill"
+      paddingHorizontal="$5"
+      pressStyle={{ backgroundColor: '$surface' }}
+      onPress={onPress}
+      {...buttonA11y(Platform.OS, { label: 'Remover del equipo' })}
+    >
+      <Text fontFamily="$body" fontSize="$5" fontWeight="600" color="$terracota">
+        Remover
+      </Text>
+    </XStack>
   );
 }
 
@@ -681,30 +678,24 @@ function ActionPill({
   const color = tone === 'destructive' ? '$terracota' : tone === 'muted' ? '$textMuted' : '$primary';
   const borderColor = tone === 'destructive' ? '$terracota' : tone === 'muted' ? '$divider' : '$primary';
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      accessibilityState={{ disabled }}
-      disabled={disabled}
-      onPress={onPress}
+    <XStack
+      alignItems="center"
+      gap="$1"
+      minHeight="$chipMin"
+      backgroundColor="$surface"
+      borderWidth={1}
+      borderColor={borderColor}
+      borderRadius="$pill"
+      paddingHorizontal="$3"
+      opacity={disabled ? 0.5 : 1}
+      pressStyle={{ backgroundColor: '$bg' }}
+      onPress={disabled ? undefined : onPress}
+      {...buttonA11y(Platform.OS, { label, disabled: disabled ?? false })}
     >
-      <XStack
-        alignItems="center"
-        gap="$1"
-        minHeight="$chipMin"
-        backgroundColor="$surface"
-        borderWidth={1}
-        borderColor={borderColor}
-        borderRadius="$pill"
-        paddingHorizontal="$3"
-        opacity={disabled ? 0.5 : 1}
-        pressStyle={{ backgroundColor: '$bg' }}
-      >
-        {icon}
-        <Text fontFamily="$body" fontSize="$3" fontWeight="600" color={color}>
-          {label}
-        </Text>
-      </XStack>
-    </Pressable>
+      {icon}
+      <Text fontFamily="$body" fontSize="$3" fontWeight="600" color={color}>
+        {label}
+      </Text>
+    </XStack>
   );
 }

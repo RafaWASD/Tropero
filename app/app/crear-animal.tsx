@@ -1051,44 +1051,44 @@ function SexCard({
   const primary = getTokenValue('$primary', 'color');
   const white = getTokenValue('$white', 'color');
   return (
-    <Pressable onPress={onPress} {...buttonA11y(Platform.OS, { label: `Sexo ${label}`, selected })}>
-      <XStack
-        width="100%"
+    <XStack
+      width="100%"
+      alignItems="center"
+      gap="$3"
+      minHeight="$touchMin"
+      borderRadius="$card"
+      borderWidth={2}
+      borderColor={selected ? '$primary' : '$divider'}
+      backgroundColor={selected ? '$primary' : '$white'}
+      paddingHorizontal="$4"
+      paddingVertical="$4"
+      pressStyle={{ opacity: 0.85 }}
+      onPress={onPress}
+      {...buttonA11y(Platform.OS, { label: `Sexo ${label}`, selected })}
+    >
+      <View
+        width="$icon"
+        height="$icon"
+        borderRadius="$pill"
+        backgroundColor={selected ? '$white' : '$greenLight'}
         alignItems="center"
-        gap="$3"
-        minHeight="$touchMin"
-        borderRadius="$card"
-        borderWidth={2}
-        borderColor={selected ? '$primary' : '$divider'}
-        backgroundColor={selected ? '$primary' : '$white'}
-        paddingHorizontal="$4"
-        paddingVertical="$4"
-        pressStyle={{ opacity: 0.85 }}
+        justifyContent="center"
+        flexShrink={0}
       >
-        <View
-          width="$icon"
-          height="$icon"
-          borderRadius="$pill"
-          backgroundColor={selected ? '$white' : '$greenLight'}
-          alignItems="center"
-          justifyContent="center"
-          flexShrink={0}
-        >
-          <Icon size={22} color={primary} strokeWidth={2.5} />
-        </View>
-        <Text
-          flex={1}
-          minWidth={0}
-          fontFamily="$body"
-          fontSize="$7" lineHeight="$7"
-          fontWeight="600"
-          color={selected ? '$white' : '$textPrimary'}
-        >
-          {label}
-        </Text>
-        {selected ? <Check size={22} color={white} strokeWidth={2.5} /> : null}
-      </XStack>
-    </Pressable>
+        <Icon size={22} color={primary} strokeWidth={2.5} />
+      </View>
+      <Text
+        flex={1}
+        minWidth={0}
+        fontFamily="$body"
+        fontSize="$7" lineHeight="$7"
+        fontWeight="600"
+        color={selected ? '$white' : '$textPrimary'}
+      >
+        {label}
+      </Text>
+      {selected ? <Check size={22} color={white} strokeWidth={2.5} /> : null}
+    </XStack>
   );
 }
 
@@ -1507,14 +1507,20 @@ function ClearOptionalControl({
   onPress: () => void;
 }) {
   return (
-    <Pressable onPress={onPress} {...buttonA11y(Platform.OS, { label: a11yLabel })}>
-      <XStack alignItems="center" gap="$1" minHeight="$chipMin" paddingHorizontal="$1" pressStyle={{ opacity: 0.6 }}>
-        <X size={16} color={getTokenValue('$textMuted', 'color')} strokeWidth={2.5} />
-        <Text fontFamily="$body" fontSize="$3" lineHeight="$3" fontWeight="600" color="$textMuted">
-          {label}
-        </Text>
-      </XStack>
-    </Pressable>
+    <XStack
+      alignItems="center"
+      gap="$1"
+      minHeight="$chipMin"
+      paddingHorizontal="$1"
+      pressStyle={{ opacity: 0.6 }}
+      onPress={onPress}
+      {...buttonA11y(Platform.OS, { label: a11yLabel })}
+    >
+      <X size={16} color={getTokenValue('$textMuted', 'color')} strokeWidth={2.5} />
+      <Text fontFamily="$body" fontSize="$3" lineHeight="$3" fontWeight="600" color="$textMuted">
+        {label}
+      </Text>
+    </XStack>
   );
 }
 
@@ -1546,37 +1552,34 @@ function OptionRows({
       {options.map((opt) => {
         const selected = value === opt.value;
         return (
-          <Pressable
+          <XStack
             key={opt.value}
+            width="100%"
+            alignItems="center"
+            gap="$2"
+            minHeight="$touchMin"
+            borderRadius="$card"
+            borderWidth={2}
+            borderColor={selected ? '$primary' : '$divider'}
+            backgroundColor={selected ? '$primary' : '$white'}
+            paddingHorizontal="$4"
+            paddingVertical="$3"
+            pressStyle={{ opacity: 0.85 }}
             onPress={() => onChange(allowDeselect && selected ? null : opt.value)}
             {...buttonA11y(Platform.OS, { label: `${a11yPrefix} ${opt.label}`, selected })}
           >
-            <XStack
-              width="100%"
-              alignItems="center"
-              gap="$2"
-              minHeight="$touchMin"
-              borderRadius="$card"
-              borderWidth={2}
-              borderColor={selected ? '$primary' : '$divider'}
-              backgroundColor={selected ? '$primary' : '$white'}
-              paddingHorizontal="$4"
-              paddingVertical="$3"
-              pressStyle={{ opacity: 0.85 }}
+            <Text
+              flex={1}
+              minWidth={0}
+              fontFamily="$body"
+              fontSize="$5"
+              fontWeight="600"
+              color={selected ? '$white' : '$textPrimary'}
             >
-              <Text
-                flex={1}
-                minWidth={0}
-                fontFamily="$body"
-                fontSize="$5"
-                fontWeight="600"
-                color={selected ? '$white' : '$textPrimary'}
-              >
-                {opt.label}
-              </Text>
-              {selected ? <Check size={20} color={white} strokeWidth={2.5} /> : null}
-            </XStack>
-          </Pressable>
+              {opt.label}
+            </Text>
+            {selected ? <Check size={20} color={white} strokeWidth={2.5} /> : null}
+          </XStack>
         );
       })}
     </YStack>
@@ -1611,37 +1614,34 @@ function FitnessOptionRows({
       {FITNESS_OPTIONS.map((opt) => {
         const selected = value === opt.value;
         return (
-          <Pressable
+          <XStack
             key={opt.value}
+            width="100%"
+            alignItems="center"
+            gap="$2"
+            minHeight="$touchMin"
+            borderRadius="$card"
+            borderWidth={2}
+            borderColor={selected ? opt.bg : '$divider'}
+            backgroundColor={selected ? opt.bg : '$white'}
+            paddingHorizontal="$4"
+            paddingVertical="$3"
+            pressStyle={{ opacity: 0.85 }}
             onPress={() => onChange(allowDeselect && selected ? null : opt.value)}
             {...buttonA11y(Platform.OS, { label: `Aptitud ${opt.label}`, selected })}
           >
-            <XStack
-              width="100%"
-              alignItems="center"
-              gap="$2"
-              minHeight="$touchMin"
-              borderRadius="$card"
-              borderWidth={2}
-              borderColor={selected ? opt.bg : '$divider'}
-              backgroundColor={selected ? opt.bg : '$white'}
-              paddingHorizontal="$4"
-              paddingVertical="$3"
-              pressStyle={{ opacity: 0.85 }}
+            <Text
+              flex={1}
+              minWidth={0}
+              fontFamily="$body"
+              fontSize="$5"
+              fontWeight="600"
+              color={selected ? '$white' : '$textPrimary'}
             >
-              <Text
-                flex={1}
-                minWidth={0}
-                fontFamily="$body"
-                fontSize="$5"
-                fontWeight="600"
-                color={selected ? '$white' : '$textPrimary'}
-              >
-                {opt.label}
-              </Text>
-              {selected ? <Check size={20} color={white} strokeWidth={2.5} /> : null}
-            </XStack>
-          </Pressable>
+              {opt.label}
+            </Text>
+            {selected ? <Check size={20} color={white} strokeWidth={2.5} /> : null}
+          </XStack>
         );
       })}
     </YStack>
@@ -1671,50 +1671,50 @@ function BreedPickerTrigger({
       <Text fontFamily="$body" fontSize="$3" fontWeight="500" color="$textMuted">
         Raza (opcional)
       </Text>
-      <Pressable onPress={onOpen} {...buttonA11y(Platform.OS, { label: 'Elegir raza' })}>
-        <XStack
-          width="100%"
-          minHeight="$touchMin"
-          alignItems="center"
-          gap="$3"
-          backgroundColor="$white"
-          borderRadius="$card"
-          borderWidth={1}
-          borderColor="$divider"
-          paddingHorizontal="$4"
-          pressStyle={{ backgroundColor: '$surface' }}
-        >
-          {/* Chip del código SENASA cuando hay raza elegida (slot que alinea el nombre). */}
-          {breedLabel ? (
-            <View
-              minWidth="$icon"
-              height="$chipMin"
-              paddingHorizontal="$2"
-              borderRadius="$pill"
-              backgroundColor="$greenLight"
-              alignItems="center"
-              justifyContent="center"
-              flexShrink={0}
-            >
-              <Text fontFamily="$body" fontSize="$3" lineHeight="$3" fontWeight="700" color="$textPrimary" numberOfLines={1}>
-                {breedLabel.senasaCode}
-              </Text>
-            </View>
-          ) : null}
-          <Text
-            flex={1}
-            minWidth={0}
-            numberOfLines={1}
-            fontFamily="$body"
-            fontSize="$5"
-            fontWeight={hasBreed ? '600' : '400'}
-            color={hasBreed ? '$textPrimary' : '$textMuted'}
+      <XStack
+        width="100%"
+        minHeight="$touchMin"
+        alignItems="center"
+        gap="$3"
+        backgroundColor="$white"
+        borderRadius="$card"
+        borderWidth={1}
+        borderColor="$divider"
+        paddingHorizontal="$4"
+        pressStyle={{ backgroundColor: '$surface' }}
+        onPress={onOpen}
+        {...buttonA11y(Platform.OS, { label: 'Elegir raza' })}
+      >
+        {/* Chip del código SENASA cuando hay raza elegida (slot que alinea el nombre). */}
+        {breedLabel ? (
+          <View
+            minWidth="$icon"
+            height="$chipMin"
+            paddingHorizontal="$2"
+            borderRadius="$pill"
+            backgroundColor="$greenLight"
+            alignItems="center"
+            justifyContent="center"
+            flexShrink={0}
           >
-            {breedLabel ? breedLabel.name : 'Elegí la raza'}
-          </Text>
-          <ChevronDown size={22} color={muted} strokeWidth={2} />
-        </XStack>
-      </Pressable>
+            <Text fontFamily="$body" fontSize="$3" lineHeight="$3" fontWeight="700" color="$textPrimary" numberOfLines={1}>
+              {breedLabel.senasaCode}
+            </Text>
+          </View>
+        ) : null}
+        <Text
+          flex={1}
+          minWidth={0}
+          numberOfLines={1}
+          fontFamily="$body"
+          fontSize="$5"
+          fontWeight={hasBreed ? '600' : '400'}
+          color={hasBreed ? '$textPrimary' : '$textMuted'}
+        >
+          {breedLabel ? breedLabel.name : 'Elegí la raza'}
+        </Text>
+        <ChevronDown size={22} color={muted} strokeWidth={2} />
+      </XStack>
       {/* Hint: sin raza del catálogo, el animal queda "a completar" para la exportación SIGSA (R1.4). */}
       {!hasBreed ? (
         <Text fontFamily="$body" fontSize="$2" lineHeight="$2" fontWeight="400" color="$textFaint">
@@ -1746,25 +1746,25 @@ function GroupCombo({
 }) {
   return (
     <YStack gap="$2">
-      <Pressable onPress={onToggle} {...buttonA11y(Platform.OS, { label: 'Elegir lote', selected: open })}>
-        <XStack
-          width="100%"
-          minHeight="$touchMin"
-          alignItems="center"
-          gap="$3"
-          backgroundColor="$white"
-          borderRadius="$card"
-          borderWidth={1}
-          borderColor="$divider"
-          paddingHorizontal="$4"
-          pressStyle={{ backgroundColor: '$surface' }}
-        >
-          <Text flex={1} minWidth={0} numberOfLines={1} fontFamily="$body" fontSize="$5" fontWeight="600" color="$textPrimary">
-            {selectedName}
-          </Text>
-          <ChevronDown size={22} color={muted} strokeWidth={2} />
-        </XStack>
-      </Pressable>
+      <XStack
+        width="100%"
+        minHeight="$touchMin"
+        alignItems="center"
+        gap="$3"
+        backgroundColor="$white"
+        borderRadius="$card"
+        borderWidth={1}
+        borderColor="$divider"
+        paddingHorizontal="$4"
+        pressStyle={{ backgroundColor: '$surface' }}
+        onPress={onToggle}
+        {...buttonA11y(Platform.OS, { label: 'Elegir lote', selected: open })}
+      >
+        <Text flex={1} minWidth={0} numberOfLines={1} fontFamily="$body" fontSize="$5" fontWeight="600" color="$textPrimary">
+          {selectedName}
+        </Text>
+        <ChevronDown size={22} color={muted} strokeWidth={2} />
+      </XStack>
       {open ? (
         <Card gap="$1" paddingVertical="$2">
           <ComboOptionRow a11yLabel="Lote Sin lote" label="Sin lote" selected={selectedId === null} onPress={() => onSelect(null)} />

@@ -789,25 +789,25 @@ function CreateCalfForm({
         <Text fontFamily="$body" fontSize="$3" fontWeight="500" color="$textMuted">
           Rodeo del ternero
         </Text>
-        <Pressable onPress={onTogglePicker} {...buttonA11y(Platform.OS, { label: 'Elegir rodeo del ternero', selected: pickerOpen })}>
-          <XStack
-            width="100%"
-            minHeight="$touchMin"
-            alignItems="center"
-            gap="$3"
-            backgroundColor="$white"
-            borderRadius="$card"
-            borderWidth={1}
-            borderColor="$divider"
-            paddingHorizontal="$4"
-            pressStyle={{ backgroundColor: '$surface' }}
-          >
-            <Text flex={1} minWidth={0} numberOfLines={1} fontFamily="$body" fontSize="$5" lineHeight="$5" fontWeight="600" color="$textPrimary">
-              {rodeoName}
-            </Text>
-            <ChevronDown size={22} color={muted} strokeWidth={2} />
-          </XStack>
-        </Pressable>
+        <XStack
+          width="100%"
+          minHeight="$touchMin"
+          alignItems="center"
+          gap="$3"
+          backgroundColor="$white"
+          borderRadius="$card"
+          borderWidth={1}
+          borderColor="$divider"
+          paddingHorizontal="$4"
+          pressStyle={{ backgroundColor: '$surface' }}
+          onPress={onTogglePicker}
+          {...buttonA11y(Platform.OS, { label: 'Elegir rodeo del ternero', selected: pickerOpen })}
+        >
+          <Text flex={1} minWidth={0} numberOfLines={1} fontFamily="$body" fontSize="$5" lineHeight="$5" fontWeight="600" color="$textPrimary">
+            {rodeoName}
+          </Text>
+          <ChevronDown size={22} color={muted} strokeWidth={2} />
+        </XStack>
         {/* Leyenda "(Mismo rodeo que la madre)" mientras la selección coincida (RCAP.5.2). */}
         {isSameRodeoAsMother ? (
           <Text fontFamily="$body" fontSize="$2" lineHeight="$2" fontWeight="500" color="$textFaint" numberOfLines={1}>
@@ -855,33 +855,33 @@ function SexOption({
   const primary = getTokenValue('$primary', 'color');
   const white = getTokenValue('$white', 'color');
   return (
-    <Pressable style={{ flex: 1 }} onPress={onPress} {...buttonA11y(Platform.OS, { label: `Sexo ${label}`, selected })}>
-      <XStack
-        width="100%"
-        alignItems="center"
-        justifyContent="center"
-        gap="$2"
-        minHeight="$touchMin"
-        borderRadius="$card"
-        borderWidth={2}
-        borderColor={selected ? '$primary' : '$divider'}
-        backgroundColor={selected ? '$primary' : '$white'}
-        paddingHorizontal="$3"
-        paddingVertical="$3"
-        pressStyle={{ opacity: 0.85 }}
+    <XStack
+      flex={1}
+      alignItems="center"
+      justifyContent="center"
+      gap="$2"
+      minHeight="$touchMin"
+      borderRadius="$card"
+      borderWidth={2}
+      borderColor={selected ? '$primary' : '$divider'}
+      backgroundColor={selected ? '$primary' : '$white'}
+      paddingHorizontal="$3"
+      paddingVertical="$3"
+      pressStyle={{ opacity: 0.85 }}
+      onPress={onPress}
+      {...buttonA11y(Platform.OS, { label: `Sexo ${label}`, selected })}
+    >
+      <Icon size={20} color={selected ? white : primary} strokeWidth={2.5} />
+      <Text
+        fontFamily="$body"
+        fontSize="$5"
+        lineHeight="$5"
+        fontWeight="600"
+        color={selected ? '$white' : '$textPrimary'}
+        numberOfLines={1}
       >
-        <Icon size={20} color={selected ? white : primary} strokeWidth={2.5} />
-        <Text
-          fontFamily="$body"
-          fontSize="$5"
-          lineHeight="$5"
-          fontWeight="600"
-          color={selected ? '$white' : '$textPrimary'}
-          numberOfLines={1}
-        >
-          {label}
-        </Text>
-      </XStack>
-    </Pressable>
+        {label}
+      </Text>
+    </XStack>
   );
 }

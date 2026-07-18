@@ -885,42 +885,42 @@ function TypeCard({
   const primary = getTokenValue('$primary', 'color');
   const faint = getTokenValue('$textFaint', 'color');
   return (
-    <Pressable onPress={onPress} {...buttonA11y(Platform.OS, { label: title })}>
-      <XStack
-        width="100%"
+    <XStack
+      width="100%"
+      alignItems="center"
+      gap="$3"
+      minHeight="$touchMin"
+      borderRadius="$card"
+      borderWidth={2}
+      borderColor="$divider"
+      backgroundColor="$white"
+      paddingHorizontal="$4"
+      paddingVertical="$3"
+      pressStyle={{ backgroundColor: '$surface' }}
+      onPress={onPress}
+      {...buttonA11y(Platform.OS, { label: title })}
+    >
+      <View
+        width="$icon"
+        height="$icon"
+        borderRadius="$pill"
+        backgroundColor="$greenLight"
         alignItems="center"
-        gap="$3"
-        minHeight="$touchMin"
-        borderRadius="$card"
-        borderWidth={2}
-        borderColor="$divider"
-        backgroundColor="$white"
-        paddingHorizontal="$4"
-        paddingVertical="$3"
-        pressStyle={{ backgroundColor: '$surface' }}
+        justifyContent="center"
+        flexShrink={0}
       >
-        <View
-          width="$icon"
-          height="$icon"
-          borderRadius="$pill"
-          backgroundColor="$greenLight"
-          alignItems="center"
-          justifyContent="center"
-          flexShrink={0}
-        >
-          <Icon size={22} color={primary} strokeWidth={2.5} />
-        </View>
-        <YStack flex={1} minWidth={0} gap="$1">
-          <Text fontFamily="$body" fontSize="$6" lineHeight="$6" fontWeight="600" color="$textPrimary" numberOfLines={1}>
-            {title}
-          </Text>
-          <Text fontFamily="$body" fontSize="$3" fontWeight="400" color="$textMuted" numberOfLines={1}>
-            {subtitle}
-          </Text>
-        </YStack>
-        <ChevronRight size={22} color={faint} strokeWidth={2} />
-      </XStack>
-    </Pressable>
+        <Icon size={22} color={primary} strokeWidth={2.5} />
+      </View>
+      <YStack flex={1} minWidth={0} gap="$1">
+        <Text fontFamily="$body" fontSize="$6" lineHeight="$6" fontWeight="600" color="$textPrimary" numberOfLines={1}>
+          {title}
+        </Text>
+        <Text fontFamily="$body" fontSize="$3" fontWeight="400" color="$textMuted" numberOfLines={1}>
+          {subtitle}
+        </Text>
+      </YStack>
+      <ChevronRight size={22} color={faint} strokeWidth={2} />
+    </XStack>
   );
 }
 
@@ -1022,33 +1022,30 @@ function ScoreSelector({
         const selected = value != null && Math.abs(value - s) < 1e-9;
         const label = formatConditionScore(s);
         return (
-          <Pressable
+          <View
             key={s}
+            minWidth="$chipMin"
+            minHeight="$chipMin"
+            alignItems="center"
+            justifyContent="center"
+            borderRadius="$pill"
+            borderWidth={2}
+            borderColor={selected ? '$primary' : '$divider'}
+            backgroundColor={selected ? '$primary' : '$white'}
+            paddingHorizontal="$3"
+            pressStyle={{ opacity: 0.85 }}
             onPress={() => onChange(s)}
             {...buttonA11y(Platform.OS, { label: `Condición ${label}`, selected })}
           >
-            <View
-              minWidth="$chipMin"
-              minHeight="$chipMin"
-              alignItems="center"
-              justifyContent="center"
-              borderRadius="$pill"
-              borderWidth={2}
-              borderColor={selected ? '$primary' : '$divider'}
-              backgroundColor={selected ? '$primary' : '$white'}
-              paddingHorizontal="$3"
-              pressStyle={{ opacity: 0.85 }}
+            <Text
+              fontFamily="$body"
+              fontSize="$5"
+              fontWeight="600"
+              color={selected ? '$white' : '$textPrimary'}
             >
-              <Text
-                fontFamily="$body"
-                fontSize="$5"
-                fontWeight="600"
-                color={selected ? '$white' : '$textPrimary'}
-              >
-                {label}
-              </Text>
-            </View>
-          </Pressable>
+              {label}
+            </Text>
+          </View>
         );
       })}
     </XStack>
@@ -1076,37 +1073,34 @@ function OptionSelector<T extends string>({
       {options.map((opt) => {
         const selected = value === opt.value;
         return (
-          <Pressable
+          <XStack
             key={opt.value}
+            width="100%"
+            alignItems="center"
+            gap="$2"
+            minHeight="$touchMin"
+            borderRadius="$card"
+            borderWidth={2}
+            borderColor={selected ? '$primary' : '$divider'}
+            backgroundColor={selected ? '$primary' : '$white'}
+            paddingHorizontal="$4"
+            paddingVertical="$3"
+            pressStyle={{ opacity: 0.85 }}
             onPress={() => onChange(opt.value)}
             {...buttonA11y(Platform.OS, { label: opt.label, selected })}
           >
-            <XStack
-              width="100%"
-              alignItems="center"
-              gap="$2"
-              minHeight="$touchMin"
-              borderRadius="$card"
-              borderWidth={2}
-              borderColor={selected ? '$primary' : '$divider'}
-              backgroundColor={selected ? '$primary' : '$white'}
-              paddingHorizontal="$4"
-              paddingVertical="$3"
-              pressStyle={{ opacity: 0.85 }}
+            <Text
+              flex={1}
+              minWidth={0}
+              fontFamily="$body"
+              fontSize="$5"
+              fontWeight="600"
+              color={selected ? '$white' : '$textPrimary'}
             >
-              <Text
-                flex={1}
-                minWidth={0}
-                fontFamily="$body"
-                fontSize="$5"
-                fontWeight="600"
-                color={selected ? '$white' : '$textPrimary'}
-              >
-                {opt.label}
-              </Text>
-              {selected ? <Check size={20} color={white} strokeWidth={2.5} /> : null}
-            </XStack>
-          </Pressable>
+              {opt.label}
+            </Text>
+            {selected ? <Check size={20} color={white} strokeWidth={2.5} /> : null}
+          </XStack>
         );
       })}
     </YStack>
@@ -1363,30 +1357,26 @@ function PartoForm({
       {/* Agregar otro ternero (mellizos, R9.5). Pressable estilado al lenguaje (borde discontinuo no
           existe en tokens → borde sólido $primary + bg $greenLight + texto $textPrimary / ícono $primary,
           regla B de design-system §2.1: legible al sol fuera de modo maniobra), a11y por helper. */}
-      <Pressable
-        style={{ width: '100%' }}
+      <XStack
+        width="100%"
+        minHeight="$touchMin"
+        alignItems="center"
+        justifyContent="center"
+        gap="$2"
+        borderRadius="$card"
+        borderWidth={2}
+        borderColor="$primary"
+        backgroundColor="$greenLight"
+        paddingHorizontal="$4"
+        pressStyle={{ opacity: 0.85 }}
         onPress={onAddCalf}
         {...buttonA11y(Platform.OS, { label: 'Agregar otro ternero' })}
       >
-        <XStack
-          width="100%"
-          minHeight="$touchMin"
-          alignItems="center"
-          justifyContent="center"
-          gap="$2"
-          borderRadius="$card"
-          borderWidth={2}
-          borderColor="$primary"
-          backgroundColor="$greenLight"
-          paddingHorizontal="$4"
-          pressStyle={{ opacity: 0.85 }}
-        >
-          <Plus size={20} color={primary} strokeWidth={2.5} />
-          <Text fontFamily="$body" fontSize="$5" fontWeight="600" color="$textPrimary">
-            Agregar otro ternero
-          </Text>
-        </XStack>
-      </Pressable>
+        <Plus size={20} color={primary} strokeWidth={2.5} />
+        <Text fontFamily="$body" fontSize="$5" fontWeight="600" color="$textPrimary">
+          Agregar otro ternero
+        </Text>
+      </XStack>
     </YStack>
   );
 }
@@ -1439,37 +1429,34 @@ function CalfRodeoPicker({
         Rodeo del parto
       </Text>
       {canEdit ? (
-        <Pressable
+        <XStack
+          width="100%"
+          minHeight="$touchMin"
+          alignItems="center"
+          gap="$3"
+          backgroundColor="$white"
+          borderRadius="$card"
+          borderWidth={1}
+          borderColor="$divider"
+          paddingHorizontal="$4"
+          pressStyle={{ backgroundColor: '$surface' }}
           onPress={onTogglePicker}
           {...buttonA11y(Platform.OS, { label: 'Elegir rodeo del parto', selected: pickerOpen })}
         >
-          <XStack
-            width="100%"
-            minHeight="$touchMin"
-            alignItems="center"
-            gap="$3"
-            backgroundColor="$white"
-            borderRadius="$card"
-            borderWidth={1}
-            borderColor="$divider"
-            paddingHorizontal="$4"
-            pressStyle={{ backgroundColor: '$surface' }}
+          <Text
+            flex={1}
+            minWidth={0}
+            numberOfLines={1}
+            fontFamily="$body"
+            fontSize="$5"
+            lineHeight="$5"
+            fontWeight="600"
+            color="$textPrimary"
           >
-            <Text
-              flex={1}
-              minWidth={0}
-              numberOfLines={1}
-              fontFamily="$body"
-              fontSize="$5"
-              lineHeight="$5"
-              fontWeight="600"
-              color="$textPrimary"
-            >
-              {rodeoName}
-            </Text>
-            <ChevronDown size={22} color={muted} strokeWidth={2} />
-          </XStack>
-        </Pressable>
+            {rodeoName}
+          </Text>
+          <ChevronDown size={22} color={muted} strokeWidth={2} />
+        </XStack>
       ) : (
         // Fallback no-editable (RPRC.1.8): trigger estático (sin chevron, sin lista), preseleccionado al de
         // la madre. Fondo $surface (no $white) para comunicar "no editable" sin un disabled agresivo.
