@@ -444,6 +444,63 @@ test('buildMembersQuery: member_name denormalizado en user_roles (c2), sin JOIN 
   assert.deepEqual(q.args, ['est-3']);
 });
 
+test('buildMembersQuery: ORDER BY determinístico — rol (owner→operario→vet), sin-nombre al final, luego nombre + user_id', () => {
+  // R4.8: sin ORDER BY el orden lo decidía SQLite y podía cambiar entre syncs. Este es el PISO
+  // de determinismo; la collation es-AR final la aplica utils/sort-members.ts en la capa de servicio.
+  const q = buildMembersQuery('est-3');
+  assert.match(q.sql, /ORDER BY CASE ur\.role WHEN 'owner' THEN 0/);
+  assert.match(q.sql, /WHEN 'field_operator' THEN 1/);
+  assert.match(q.sql, /WHEN 'veterinarian' THEN 2 ELSE 3 END/);
+  // sin-nombre (NULL o vacío) al final de su rol
+  assert.match(q.sql, /CASE WHEN COALESCE\(TRIM\(ur\.member_name\), ''\) = '' THEN 1 ELSE 0 END/);
+  // desempate total: dos homónimos nunca se permutan entre syncs
+  assert.match(q.sql, /ur\.member_name, ur\.user_id\s*$/);
+});
+
+test('buildMembersQuery: el ORDER BY EJECUTADO en SQLite devuelve el orden esperado', () => {
+  // Ejercita el SQL de verdad (no solo el string): filas desordenadas → orden canónico por rol,
+  // sin-nombre (NULL y '') al final de SU rol, y user_id como desempate de homónimos.
+  const db = new DatabaseSync(':memory:');
+  db.exec(
+    'CREATE TABLE user_roles (establishment_id TEXT, user_id TEXT, role TEXT, member_name TEXT, active INTEGER)',
+  );
+  const rows = [
+    ['est-3', 'u-vet-n', 'veterinarian', 'Nadia', 1],
+    ['est-3', 'u-op-sin', 'field_operator', '', 1],
+    ['est-3', 'u-own-z', 'owner', 'Zulema', 1],
+    ['est-3', 'u-op-b', 'field_operator', 'Benitez', 1],
+    ['est-3', 'u-op-nulo', 'field_operator', null, 1],
+    ['est-3', 'u-own-a', 'owner', 'Ana', 1],
+    ['est-3', 'u-op-a2', 'field_operator', 'Alvarez', 1],
+    ['est-3', 'u-op-a1', 'field_operator', 'Alvarez', 1],
+    ['est-3', 'u-otro-est', 'owner', 'Intruso', 1], // se filtra por establishment_id
+    ['est-3', 'u-inactivo', 'owner', 'Baja', 0], // se filtra por active = 1
+  ];
+  const ins = db.prepare(
+    'INSERT INTO user_roles (establishment_id, user_id, role, member_name, active) VALUES (?, ?, ?, ?, ?)',
+  );
+  for (const r of rows) ins.run(...(r as [string, string, string, string | null, number]));
+  // el "intruso" pertenece a otro campo
+  db.exec("UPDATE user_roles SET establishment_id = 'est-otro' WHERE user_id = 'u-otro-est'");
+
+  const q = buildMembersQuery('est-3');
+  const out = db.prepare(q.sql).all(...(q.args as string[])) as { user_id: string }[];
+  assert.deepEqual(
+    out.map((r) => r.user_id),
+    [
+      'u-own-a', // owner Ana
+      'u-own-z', // owner Zulema
+      'u-op-a1', // field_operator Alvarez (desempate por user_id)
+      'u-op-a2', // field_operator Alvarez
+      'u-op-b', // field_operator Benitez
+      'u-op-nulo', // field_operator sin nombre (NULL) → final de SU rol
+      'u-op-sin', // field_operator sin nombre ('')
+      'u-vet-n', // veterinarian Nadia
+    ],
+  );
+  db.close();
+});
+
 test('buildCountOtherMembersQuery: COUNT activos ≠ self', () => {
   const q = buildCountOtherMembersQuery('est-4', 'self-1');
   assert.match(q.sql, /SELECT COUNT\(\*\) AS count FROM user_roles/);
@@ -463,6 +520,38 @@ test('buildPendingInvitationsQuery: filas pending con columnas as-built', () => 
   assert.match(q.sql, /id, role, email, created_at, expires_at, token FROM invitations/);
   assert.match(q.sql, /WHERE establishment_id = \? AND status = 'pending'/);
   assert.deepEqual(q.args, ['est-6']);
+});
+
+test('buildPendingInvitationsQuery: ORDER BY created_at DESC (la más reciente arriba) + id DESC de desempate', () => {
+  // R5.12.1: sin ORDER BY la invitación recién creada aparecía en cualquier posición de la lista.
+  const q = buildPendingInvitationsQuery('est-6');
+  assert.match(q.sql, /ORDER BY created_at DESC, id DESC\s*$/);
+});
+
+test('buildPendingInvitationsQuery: el ORDER BY EJECUTADO en SQLite pone la más reciente primero', () => {
+  const db = new DatabaseSync(':memory:');
+  db.exec(
+    'CREATE TABLE invitations (id TEXT, establishment_id TEXT, role TEXT, email TEXT, created_at TEXT, expires_at TEXT, token TEXT, status TEXT)',
+  );
+  const ins = db.prepare(
+    'INSERT INTO invitations (id, establishment_id, role, email, created_at, expires_at, token, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+  );
+  ins.run('i-vieja', 'est-6', 'veterinarian', null, '2026-07-01T10:00:00Z', '2026-07-08T10:00:00Z', 't1', 'pending');
+  ins.run('i-nueva', 'est-6', 'field_operator', null, '2026-07-17T09:00:00Z', '2026-07-24T09:00:00Z', 't2', 'pending');
+  ins.run('i-media', 'est-6', 'veterinarian', null, '2026-07-10T10:00:00Z', '2026-07-17T10:00:00Z', 't3', 'pending');
+  // empatada en created_at con i-media → desempata id DESC (determinismo, no orden arbitrario)
+  ins.run('i-zeta', 'est-6', 'veterinarian', null, '2026-07-10T10:00:00Z', '2026-07-17T10:00:00Z', 't4', 'pending');
+  // se filtran: otro campo y estado no-pending
+  ins.run('i-otro', 'est-9', 'veterinarian', null, '2026-07-18T10:00:00Z', '2026-07-25T10:00:00Z', 't5', 'pending');
+  ins.run('i-cancel', 'est-6', 'veterinarian', null, '2026-07-18T10:00:00Z', '2026-07-25T10:00:00Z', 't6', 'cancelled');
+
+  const q = buildPendingInvitationsQuery('est-6');
+  const rows = db.prepare(q.sql).all(...(q.args as string[])) as { id: string }[];
+  assert.deepEqual(
+    rows.map((r) => r.id),
+    ['i-nueva', 'i-zeta', 'i-media', 'i-vieja'],
+  );
+  db.close();
 });
 
 // ─── Animales: lista / búsqueda / detalle (T4.1) ────────────────────────────────────

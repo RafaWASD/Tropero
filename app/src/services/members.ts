@@ -5,9 +5,12 @@
 //      sync stream al sincronizar (est_members: owner ve la matriz de roles; no-owner solo la propia
 //      vía self_user_roles; est_invitations es owner-only) → acá NO se re-scopea, solo filtros de
 //      dominio. SQL builders puros en powersync/local-reads.ts.
-//        - loadMembers: user_roles activos del campo + LEFT JOIN users por id+name (hallazgo RLS #2:
-//          NO traer phone/email de otros — esas columnas ni existen en la tabla users local).
-//        - loadPendingInvitations: invitations status=pending del campo (owner-only por la stream).
+//        - loadMembers: user_roles activos del campo, con el nombre DENORMALIZADO en member_name
+//          (0080 / ADR-026 — ya no se JOINea `users`, esa tabla global no se sincroniza). Hallazgo
+//          RLS #2: NO traer phone/email de otros — esas columnas ni existen en la tabla local. La
+//          proyección + el ORDEN canónico (R4.8) son puros y viven en utils/sort-members.
+//        - loadPendingInvitations: invitations status=pending del campo (owner-only por la stream),
+//          ordenadas por created_at DESC (R5.12.1).
 //        - countTeam: conteos livianos (otros miembros + invitaciones pendientes).
 //   2. WRAPPERS de las Edge Functions de Fase 2 (operaciones que requieren admin/validación
 //      cruzada: invitar, cancelar, regenerar, remover, cambiar rol, aceptar) — siguen ONLINE (R7.1).
@@ -32,6 +35,7 @@ import {
 import { runLocalQuery } from './powersync/local-query';
 import { offlineError } from './powersync/online-guard';
 import { getPowerSync } from './powersync/database';
+import { mapMemberRows, type MemberListItem, type MemberRow } from '../utils/sort-members';
 
 // Base URL para reconstruir el accept_url de invitaciones PENDIENTES a partir del token. Las
 // invitaciones recién creadas/regeneradas ya traen `accept_url` del backend; para las que listamos
@@ -47,15 +51,15 @@ export function inviteUrlForToken(token: string): string {
 
 // ─── Tipos de dominio ───────────────────────────────────────────────────────────
 
-/** Un miembro del campo: rol + identidad mínima (id + name). NUNCA phone/email (RLS #2). */
-export type Member = {
-  userId: string;
-  /** Nombre del usuario (de users.name). Puede ser '' si no lo completó. */
-  name: string;
-  role: UserRole;
-  /** ¿Es el usuario actual? → marcador "vos". */
-  isCurrentUser: boolean;
-};
+/**
+ * Un miembro del campo: rol + identidad mínima (id + name). NUNCA phone/email (RLS #2).
+ *
+ * El shape se define UNA vez en `utils/sort-members` (`MemberListItem`), junto al mapeo+orden puros
+ * que lo producen; acá se re-exporta con el nombre de dominio que consumen la pantalla y el resto de
+ * la app. Import path y estructura NO cambian para los consumidores (`import type { Member } from
+ * '@/services/members'` sigue igual).
+ */
+export type Member = MemberListItem;
 
 /** Una invitación pendiente del campo (owner-only). */
 export type PendingInvitation = {
@@ -172,18 +176,12 @@ export type LoadMembersResult =
   | { ok: true; members: Member[] }
   | { ok: false; error: { kind: 'network' | 'unknown'; message: string } };
 
-// Forma PLANA de la fila local (LEFT JOIN user_roles + users). El join `user:users(id,name)` de
-// PostgREST se reescribe como LEFT JOIN SQLite (user_name puede ser null si falta la fila users).
-type MemberFlatRow = {
-  role: UserRole;
-  user_id: string;
-  user_name: string | null;
-};
-
 /**
- * Lista los miembros ACTIVOS del campo (R5.1/T5.1). Selecciona SOLO `id, name` del user embebido
- * (hallazgo RLS #2: la coworkers policy 0006 expone la fila completa de users, pero NO traemos
- * phone/email de otros). El email del miembro NO se muestra (no hace falta).
+ * Lista los miembros ACTIVOS del campo (T5.1). La forma PLANA de la fila local es `MemberRow`
+ * (utils/sort-members): user_roles con el nombre DENORMALIZADO en `member_name` (migración 0080 /
+ * ADR-026) — ya no hay JOIN a `users`, esa tabla global no se sincroniza. Solo id+name: NUNCA
+ * phone/email de otros (hallazgo RLS #2; la PII vive en user_private self-only, ADR-025). El email
+ * del miembro NO se muestra (no hace falta).
  *
  * RLS owner-céntrica (hallazgo #1): la policy user_roles_select (0008) deja al OWNER ver TODAS las
  * filas de su campo; un NO-OWNER solo ve su PROPIA fila. Así, esta query devuelve la lista completa
@@ -191,6 +189,13 @@ type MemberFlatRow = {
  * completa para no-owner; sería un delta backend fuera de scope).
  *
  * Marca `isCurrentUser` comparando contra `currentUserId` (para el marcador "vos").
+ *
+ * ORDEN (R4.8): devuelve la lista YA ordenada por `sortMembers` — rol (dueño → operario →
+ * veterinario) y alfabético es-AR dentro de cada rol, sin-nombre al final de su rol. Se ordena acá,
+ * en el BORDE de la capa de datos, y no en la pantalla: `loadMembers` es la única fuente de `Member[]`
+ * → todo consumidor (presente y futuro) recibe el mismo orden sin poder olvidarse de aplicarlo, y la
+ * pantalla queda tonta (solo renderiza). El `ORDER BY` de `buildMembersQuery` es el piso de
+ * determinismo; este helper aplica la collation castellana que SQLite no tiene.
  */
 export async function loadMembers(
   establishmentId: string,
@@ -198,17 +203,13 @@ export async function loadMembers(
 ): Promise<LoadMembersResult> {
   // Desde el SQLite local (T3.2): la stream est_members decide qué filas de user_roles ve el usuario
   // (owner: la matriz; no-owner: solo la propia vía self_user_roles) → acá NO se re-scopea, solo el
-  // filtro de dominio active=1. SOLO id+name del user (hallazgo RLS #2: nunca phone/email de otros —
-  // esas columnas ni existen en la tabla users local).
-  const r = await runLocalQuery<MemberFlatRow>(buildMembersQuery(establishmentId));
+  // filtro de dominio active=1 + el scope por campo de la query. SOLO id+name del miembro (hallazgo
+  // RLS #2: nunca phone/email de otros — esas columnas ni existen en la tabla local).
+  const r = await runLocalQuery<MemberRow>(buildMembersQuery(establishmentId));
   if (!r.ok) return { ok: false, error: r.error };
 
-  const members: Member[] = r.value.map((row) => ({
-    userId: row.user_id,
-    name: row.user_name ?? '',
-    role: row.role,
-    isCurrentUser: row.user_id === currentUserId,
-  }));
+  // Proyección + orden canónico (R4.8): puros y testeados en utils/sort-members.
+  const members: Member[] = mapMemberRows(r.value, currentUserId);
   return { ok: true, members };
 }
 

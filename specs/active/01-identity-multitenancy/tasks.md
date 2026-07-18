@@ -242,6 +242,20 @@ Plan de implementación paso a paso. Cada tarea tiene su criterio de aceptación
   Email del miembro NO se muestra (loadMembers solo trae id+name, hallazgo #2). Cableado el item
   "Equipo" de `mas.tsx` → `/miembros`.
 
+### [x] T5.1.1 Orden determinístico de la pantalla Equipo (delta sesión 27 — `R4.8` / `R4.8.1` / `R5.12.1`)
+- `ORDER BY` en `buildMembersQuery` (rol por `CASE` → sin-nombre al final → `member_name` → `user_id`)
+  y en `buildPendingInvitationsQuery` (`created_at DESC, id DESC`). (`services/powersync/local-reads.ts`)
+- Helper PURO `utils/sort-members.ts`: `sortMembers` (rol + `localeCompare('es-AR', { sensitivity:'base' })`,
+  sin-nombre al final de su rol) + `mapMemberRows` (proyección fila local → `Member`, ya ordenada).
+- Aplicado en `services/members.ts::loadMembers` (borde de la capa de datos, no en la pantalla); `Member`
+  pasa a ser alias de `MemberListItem` (mismo nombre/import path/estructura para los consumidores).
+- Tests: `utils/sort-members.test.ts` (26 casos: 3 roles, alfabético, acentos José/Jose/Juan, Ñ,
+  sin-nombre al final de su rol, logueado NO primero, vacío, un solo miembro, no-mutación, rol
+  desconocido) + `local-reads.test.ts` (assertions del SQL + ejecución real en `node:sqlite` de ambos
+  `ORDER BY`).
+- **Aceptación**: la lista no se reordena sola entre syncs; dueño → operario → veterinario, alfabético
+  es-AR dentro de cada rol, "Sin nombre" al final de su rol, el logueado en su posición con el badge "vos".
+
 ### [x] T5.2 Form de invitación (modelo link shareable) — `app/app/invitar.tsx`
 - Modal "Invitar miembro": **rol obligatorio** + email opcional como anotación.
 - Llamada a Edge Function `invite_user({ establishment_id, role, email? })`.

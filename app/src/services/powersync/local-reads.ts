@@ -299,13 +299,24 @@ export function buildCountActiveMembersQuery(
  * ADR-025). Filtro de DOMINIO: `ur.active = 1`. El scoping de qué filas de user_roles ve el usuario lo decidió
  * la stream (est_members_roles: owner ve la matriz; no-owner solo la propia vía self_user_roles). El shape del
  * resultado (role/user_id/user_name) NO cambia (R11.1); cambia solo la FUENTE del nombre.
+ *
+ * ORDEN (spec 01 R4.8): sin `ORDER BY` el orden lo decidía SQLite y podía cambiar entre syncs.
+ * Acá dejamos el PISO de determinismo — rol por `CASE` (dueño → operario → veterinario, el mismo
+ * mapa que `utils/sort-members.ts`), sin-nombre al final de su rol, después `member_name`, y
+ * `user_id` como desempate total (dos homónimos nunca se permutan). El orden FINAL lo manda igual
+ * `sortMembers` en la capa de servicio: la collation de SQLite es ASCII y no ordena acentos ni Ñ
+ * como el castellano; este SQL solo garantiza que el input del helper sea siempre el mismo.
  */
 export function buildMembersQuery(establishmentId: string): LocalQuery {
   return {
     sql:
       'SELECT ur.role AS role, ur.user_id AS user_id, ur.member_name AS user_name ' +
       'FROM user_roles ur ' +
-      'WHERE ur.establishment_id = ? AND ur.active = 1',
+      'WHERE ur.establishment_id = ? AND ur.active = 1 ' +
+      "ORDER BY CASE ur.role WHEN 'owner' THEN 0 WHEN 'field_operator' THEN 1 " +
+      "WHEN 'veterinarian' THEN 2 ELSE 3 END, " +
+      "CASE WHEN COALESCE(TRIM(ur.member_name), '') = '' THEN 1 ELSE 0 END, " +
+      'ur.member_name, ur.user_id',
     args: [establishmentId],
   };
 }
@@ -343,12 +354,17 @@ export function buildCountPendingInvitationsQuery(establishmentId: string): Loca
 /**
  * Invitaciones PENDIENTES del campo (espeja members.loadPendingInvitations). Filtro de DOMINIO:
  * `status = 'pending'`. Owner-only por la stream (no-owner: sin filas locales).
+ *
+ * ORDEN (spec 01 R5.12.1): `created_at DESC` — la invitación más reciente arriba. Es la que el owner
+ * acaba de crear y viene a copiar/compartir; sin `ORDER BY` aparecía en cualquier posición. `id` como
+ * desempate total para dos invitaciones creadas en el mismo instante (created_at empatado).
  */
 export function buildPendingInvitationsQuery(establishmentId: string): LocalQuery {
   return {
     sql:
       "SELECT id, role, email, created_at, expires_at, token FROM invitations " +
-      "WHERE establishment_id = ? AND status = 'pending'",
+      "WHERE establishment_id = ? AND status = 'pending' " +
+      'ORDER BY created_at DESC, id DESC',
     args: [establishmentId],
   };
 }

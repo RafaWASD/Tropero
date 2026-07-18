@@ -106,6 +106,10 @@ Antes de las requirements, dejo registradas las decisiones que ya están cerrada
 
 **R4.7** El sistema deberá permitir que un `owner` remueva el acceso de otro usuario al establecimiento, marcando el `user_roles` correspondiente como `active = false`.
 
+**R4.8** (nueva, sesión 27 — orden de la lista de miembros) El sistema deberá listar los miembros activos del establecimiento activo en un **orden estable y determinístico**, definido como: (a) por **rol**, en el orden `owner` → `field_operator` → `veterinarian`; y (b) dentro de cada rol, **alfabético por nombre** usando collation castellana (`es-AR`, insensible a mayúsculas y a diferencias de acento), con los miembros **sin nombre registrado al final de su rol**. El orden no deberá depender del orden físico de las filas en la base local.
+
+**R4.8.1** El sistema **no deberá** promover al usuario autenticado al principio de la lista de miembros: su fila deberá ocupar la posición que le corresponde por `R4.8` dentro de su rol, distinguida únicamente por el marcador visual "vos". (Fundamento: la pantalla existe para gestionar a **otros** — la fila propia es la única no accionable, `canManage = isOwner && !isCurrentUser` — así que encabezar la lista con ella desperdiciaría la posición de mayor valor.)
+
 ### R5. Invitaciones (modelo link shareable, ver `ADR-014`)
 
 **R5.1** El sistema deberá permitir que un `owner` cree una invitación a su establecimiento seleccionando solo el rol destino (`field_operator` o `veterinarian`). Opcionalmente, el owner podrá registrar un email destinatario como anotación, **sin que ese email se valide al aceptar** (es solo etiqueta para que el owner reconozca la invitación en su lista de pendientes).
@@ -141,6 +145,8 @@ Antes de las requirements, dejo registradas las decisiones que ya están cerrada
 **R5.11** Donde el owner tenga la app instalada y permisos de notificaciones otorgados (token registrado en `push_tokens`), el sistema deberá enviar también una push notification cuando una invitación que él creó sea aceptada. El envío es best-effort en paralelo al email (R5.10).
 
 **R5.12** El sistema deberá listar al owner las invitaciones de su establishment activo en estado `pending`, exponiendo para cada una: rol, fecha de creación, expiración, email opcional, y acciones (copiar link, compartir link, regenerar, cancelar).
+
+**R5.12.1** (nueva, sesión 27 — orden de las invitaciones pendientes) El sistema deberá ordenar la lista de invitaciones pendientes de `R5.12` por **fecha de creación descendente** (la más reciente primero), de forma determinística. La invitación recién generada es la que el owner viene a copiar o compartir, así que debe quedar arriba.
 
 **R5.13** (nueva, sesión 17 — persistencia del token a través del cold-start) Cuando un destinatario aún no logueado abre un link de invitación (`R5.4`) o lo pega manualmente en el wizard (`R6.5`), el sistema deberá persistir el token de invitación en **almacenamiento seguro** (`expo-secure-store`), no solo en el estado de navegación en memoria. El onboarding del invitado atraviesa signup + verificación de email + un posible cierre o kill de la app entre medio; el estado de navegación no sobrevive ese cold-start, así que persistirlo es requisito para no perder la invitación. Cuando el usuario pasa el gate de verificación de email (`R1.3`) y existe un token pendiente en almacenamiento seguro, el sistema deberá **re-rutear automáticamente** a la pantalla de aceptación de invitación (`R5.4`) en lugar de aterrizar en el wizard de onboarding (`R6.5`) o en el landing (`R6.7`). Tras consumir el token (aceptación exitosa de `R5.5`, o error terminal de `R5.6` como expirado/ya usado), el sistema deberá **borrar** el token persistido para no re-disparar el flujo en arranques futuros.
 

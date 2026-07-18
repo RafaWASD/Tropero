@@ -441,6 +441,23 @@ El estado `active_lost` (`R6.10`) se materializa como una pantalla/overlay `Esta
 
 El switch del header (`HeaderEstablishmentSwitch`) no navega directo a "Mis campos": despliega un **dropdown inline** con (en orden) el campo activo, los **últimos 2 visitados** (de `last_establishment_opened` / rastro de visitados, `R6.9`), **"Ver todos mis campos"** (→ `EstablishmentSelector` / `R6.6`) y **"Crear nuevo campo +"** (→ flujo de creación, `R3.1`). Tocar un campo visitado hace `switchEstablishment(id)` y navega a su home sin pasar por el selector. La pantalla "Mis campos" sigue siendo la vía para la lista completa, la búsqueda (`R6.6.1`, search bar cuando hay >~8 campos) y la gestión.
 
+### Orden de la pantalla "Equipo" / Miembros (`R4.8`, `R4.8.1`, `R5.12.1`) — as-built, sesión 27
+
+**Problema.** `buildMembersQuery` y `buildPendingInvitationsQuery` (`services/powersync/local-reads.ts`) no tenían `ORDER BY`. Sin cláusula de orden, SQLite devuelve las filas en el orden físico que le resulte conveniente — que cambia cuando PowerSync reescribe la tabla local en un sync. Resultado: la lista de `/miembros` se reordenaba sola entre entradas a la pantalla, sin que cambiara ningún dato.
+
+**Solución en dos capas** (defensa en profundidad del determinismo):
+
+1. **Piso de determinismo — `ORDER BY` en el SQL local.** `buildMembersQuery` ordena por `CASE ur.role` (`owner` 0 → `field_operator` 1 → `veterinarian` 2, `ELSE 3` para un rol futuro fuera del enum), luego los sin-nombre al final (`CASE WHEN COALESCE(TRIM(ur.member_name),'') = '' THEN 1 ELSE 0 END`), luego `member_name`, y `user_id` como **desempate total** (dos homónimos nunca se permutan entre syncs). `buildPendingInvitationsQuery` ordena por `created_at DESC, id DESC` (`R5.12.1`).
+2. **Orden canónico — helper puro `utils/sort-members.ts`.** La collation de SQLite es ASCII (`NOCASE` solo cubre A–Z): ordenaría `José` después de `Zulema` y `Ñandú` después de `Oscar`. El orden que ve el usuario lo fija `sortMembers`, que compara con `localeCompare('es-AR', { sensitivity: 'base' })` — misma collation castellana que ya usa `sortMyEstablishments` para "Mis campos". El SQL solo garantiza que la **entrada** del helper sea siempre la misma secuencia.
+
+**Dónde se aplica.** En `services/members.ts::loadMembers`, o sea en el **borde de la capa de datos**, no en la pantalla. `loadMembers` es la única fuente de `Member[]` → todo consumidor (presente y futuro) recibe la lista ordenada sin poder olvidarse de aplicar el orden, y `app/miembros.tsx` queda tonta (solo renderiza el array que recibe).
+
+**Estructura del módulo puro.** `utils/sort-members.ts` exporta `sortMembers` (el comparador) y `mapMemberRows(rows, currentUserId)` (proyección de la fila local a la lista de pantalla + orden). El mapeo vive ahí y no en `services/members.ts` porque ese módulo importa `./supabase` → `expo-secure-store` y **no carga bajo `node:test`**; con la lógica afuera, el path real de `loadMembers` queda cubierto por tests puros (mismo patrón que `tag-lookup.ts` ↔ `animals.ts::lookupByTag`, `exit-animal.ts` ↔ `animals.ts::exitAnimalProfile`). El tipo público `Member` de `services/members.ts` pasa a ser el alias de `MemberListItem` definido ahí — mismo nombre, mismo import path, misma estructura para los consumidores.
+
+**El usuario logueado NO va primero** (`R4.8.1`): conserva su posición alfabética dentro de su rol y se lo distingue con el badge "vos" que ya existía. La fila propia es la única **no accionable** de la pantalla (`canManage = isOwner && !m.isCurrentUser`); encabezar con ella gastaría la posición de mayor valor de una lista cuyo propósito es gestionar a **otros**.
+
+**Fail-soft**: un rol fuera de `ROLE_ORDER` (enum ampliado a futuro sin tocar el mapa) cae al final en vez de producir `NaN` en el comparador; el `ELSE 3` del SQL espeja esa decisión.
+
 ## PowerSync
 
 En este spec las tablas son chicas y de baja frecuencia de cambio. Configurar buckets:
@@ -479,6 +496,8 @@ Todas las decisiones de producto que afectan esta spec están cerradas y documen
 | Soft-delete de campo con miembros (sesión 17) | Warning con conteo de miembros activos + confirmación | `R3.6.1` |
 | `already_member` (sesión 17) | No auto-cambia rol vía invitación (evita escalada); copy accionable a "Miembros → Cambiar rol" | `R5.9` |
 | Aviso al miembro al perder un campo (sesión 17) | **NO en MVP**: silencioso vía `active_lost`. Push/email proactivo = post-MVP | `R6.10` |
+| Orden de la lista de miembros (sesión 27) | Por **rol** (dueño → operario → veterinario) y alfabético `es-AR` dentro de cada rol; sin-nombre al final de su rol. El usuario logueado **no** se promueve al principio (solo el badge "vos") | `R4.8`, `R4.8.1` |
+| Orden de las invitaciones pendientes (sesión 27) | `created_at DESC` — la recién generada arriba (es la que el owner viene a copiar/compartir) | `R5.12.1` |
 
 ## Riesgos y mitigaciones
 
