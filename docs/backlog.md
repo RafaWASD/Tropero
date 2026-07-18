@@ -17,6 +17,30 @@ No es un sustituto de `feature_list.json` ni de los ADRs — es la antesala dond
 
 ## Ítems pendientes
 
+## 2026-07-18 — Zona muerta de tap en el FAB de Maniobra (parcialmente mitigada; el fix real es un refactor de navegación)
+
+**Origen**: análisis del navbar (variante B4). El leader lo dedujo de la geometría; el implementer lo confirmó y explicó por qué el fix aplicado NO alcanza.
+**Qué**: el círculo del FAB se dibuja **fuera de su celda** del tab bar (26px con los tokens de B4; 34px antes) vía `marginTop` negativo. En React Native los toques fuera de los límites del ancestro **no se entregan**: en Android `ViewGroup.dispatchTouchEvent` solo desciende a hijos cuyos bounds contienen el punto, y en iOS `hitTest:` devuelve `nil` si `pointInside:` es false. El tabBar descarta el toque **antes** de llegar al FAB. → la porción que sobresale del CTA más importante de la app no responde al tap en nativo.
+**Por qué nunca se detectó**: en web el DOM no clipea los toques igual, y la app se validó SIEMPRE en web hasta el bring-up nativo del 2026-07-16 (ver memoria `project_frontend_web_only_native_bringup`).
+**Mitigación YA aplicada (parcial)**: `hitSlop` vertical en el Pressable. **NO recupera los 26px que sobresalen** — `hitSlop` agranda el target *dentro* del ancestro. Lo que sí gana: el target baja hasta el pie de la celda, el label "Maniobra" pasa a ser tocable (antes no lo era) y el área útil in-bounds crece de 64×38 a 64×58.
+**Descartado**: agrandar el tabBar (`height += fabRaise` + `tabBarBackground`). Dejaría una franja transparente de **412×26 a ancho completo** que en nativo igual captura toques (`BottomTabBar` monta con `pointerEvents="auto"`) → cambiaría una zona muerta de 64×26 por una que rompe botones y scroll en el borde inferior de TODAS las pantallas. Peor negocio.
+**Fix real (pendiente)**: sacar el FAB del tabBar y montarlo como **overlay absoluto en el layout raíz** con `pointerEvents="box-none"`. Es un refactor de navegación con su propia spec — toca ADR-018 y el shell de `(tabs)`.
+**Verificación pendiente en device**: tocar el FAB SOLO en su mitad superior (la que sobresale) en el iPhone. Si no abre MODO MANIOBRAS, confirma el diagnóstico.
+
+## 2026-07-18 — `delete_account` no borra `user_private` → la PII de contacto sobrevive al borrado de cuenta
+
+**Origen**: Gate 1 (spec) del delta de teléfono. Hallazgo **fuera del alcance del delta**, verificado por el gate al auditar retención/supresión.
+**Qué**: `supabase/functions/delete_account/index.ts` escribe solo `public.users` (soft-delete) y `user_roles`. **No toca `public.user_private`**, que es justamente la tabla donde vive la PII de contacto (email + teléfono) aislada por ADR-025 / spec 14. Tras "eliminar mi cuenta", el email y el teléfono del usuario siguen en la DB.
+**Por qué importa**: medio-alto. Es el propósito entero de ADR-025 (aislar PII para poder gestionarla) el que queda a medias, y choca con el derecho de supresión de la **Ley 25.326** de protección de datos personales. No es un hueco de seguridad explotable por terceros (la RLS sigue siendo self-only), es un problema de retención/compliance.
+**Próximo paso sugerido**: extender `delete_account` para borrar (o anonimizar) la fila de `user_private` del usuario. Toca Edge Function + PII → **Gate 1 puntual** + test en `supabase/tests/user_private`. Decidir borrado duro vs anonimización según si alguna feature necesita el histórico.
+
+## 2026-07-18 — `user_private.email` sin CHECK de formato (asimetría con `phone`)
+
+**Origen**: Gate 1 (spec) del delta de teléfono, anexo LOW.
+**Qué**: tras el delta de teléfono, `user_private.phone` va a tener CHECK de formato autoritativo (`user_private_phone_format_chk`) mientras que `user_private.email` sigue solo con cap de longitud (`users_email_len_chk` ≤320, `0070`). Queda una asimetría: una columna de contacto validada y la otra no.
+**Por qué importa**: bajo. El email viene de `auth.users` vía `handle_new_auth_user` / `propagate_confirmed_email`, o sea que Supabase Auth ya lo validó antes de llegar; el riesgo de un email malformado es acotado. Pero un write directo por PostgREST con `service_role` lo podría ensuciar, igual que pasaba con el teléfono.
+**Próximo paso sugerido**: evaluar un CHECK de formato para `email` cuando se toque `user_private` por otra razón. **Ojo con el mismo hazard de DP3 del delta de teléfono**: Postgres re-evalúa TODOS los CHECK de la fila en cualquier UPDATE, así que un CHECK nuevo sobre datos legacy sucios rompería `propagate_confirmed_email`. Mismo patrón: normalizar primero, residuo cero, después `VALIDATE`.
+
 ## 2026-07-10 — Defensa server-side del gating de eventos reproductivos por ATRIBUTOS del animal
 
 **Origen**: delta-fix B (gating tacto preñez vs aptitud, `docs/correcciones-demo-facundo-padre-2026-07-10.md`). El implementer + reviewer lo flaguearon.

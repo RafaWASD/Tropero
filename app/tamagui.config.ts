@@ -89,17 +89,22 @@ const palette = {
 // ─── Constantes derivadas (única fuente, no literales sueltos) ────────────────
 // El FAB central del bottom-nav (ADR-018) FLOTA sobre la barra. A 0.33 quedaba
 // "cortado a la mitad" (medio enterrado en la barra, el borde superior la cruzaba
-// casi por el centro). Subido a 0.55 → el FAB se ve FLOTANDO: la mayor parte del
-// círculo (~55%) queda POR ENCIMA de la línea superior del navbar y ~45% solapado
-// dentro, así el borde superior de la barra cruza el FAB a ~45% desde arriba.
-// Claramente flotante (NO bisecado ni enterrado), pero sin exagerar (no excesivamente
-// despegado). Beneficio lateral: el halo sube con el FAB y deja de tocar el label
-// "Maniobra" → ya no hace falta el knockout blanco detrás del texto. El offset
-// negativo se DERIVA del diámetro del FAB (no es un literal): fab * 0.55. Se expone
-// como token `size.fabRaise` para que la pantalla lo lea con getTokenValue en vez de
-// hardcodearlo.
+// casi por el centro); a 0.55 flotaba pero el conjunto FAB+halo TAPABA demasiado
+// contenido de la pantalla por encima del nav. Variante B4 (ronda de exploración
+// `nav-iter-2`, elegida por Raf): ratio 0.40 + halo +4 → el FAB sigue claramente
+// FLOTANDO (~40% del círculo POR ENCIMA de la línea superior del navbar, ~60%
+// solapado dentro, NO bisecado ni enterrado) pero la oclusión de contenido baja de
+// 2.484 px² a 1.510 px² (−39%). El label "Maniobra" queda donde estaba (decisión
+// deliberada: NO se alinea con los otros labels). El offset negativo se DERIVA del
+// diámetro del FAB (no es un literal): fab * 0.40. Se expone como token
+// `size.fabRaise` para que la pantalla lo lea con getTokenValue en vez de hardcodearlo.
 const FAB_SIZE = 64; // = size.fab (mismo valor, fuente única abajo)
-const FAB_RAISE_RATIO = 0.55; // fracción del FAB por encima de la barra (flotante, no cortado)
+const FAB_RAISE_RATIO = 0.4; // fracción del FAB por encima de la barra (B4: flotante, menos oclusión)
+// Cuánto CRECE el halo respecto al diámetro del FAB (sumado, repartido mitad por lado).
+// B4 bajó de 16 (anillo de 8px por lado, ⌀80) a 8 (anillo de 4px por lado, ⌀72): el halo
+// deja de ser un disco que compite con el FAB y pasa a ser un contorno fino. Fuente única
+// de la geometría del halo — `fabHalo` y `fabHaloInset` se derivan de acá, no se duplica el literal.
+const FAB_HALO_GROWTH = 8;
 
 // ─── Tokens ───────────────────────────────────────────────────────────────────
 // Spreadeamos las escalas probadas del default (space/size/zIndex/radius) y
@@ -150,18 +155,19 @@ const tokens = createTokens({
     fab: FAB_SIZE, // diámetro del FAB central (ADR-018)
     // Diámetro del HALO del FAB (ADR-018): anillo verde pálido DECORATIVO detrás del
     // FAB, estilo Mercado Pago (crea figura-fondo, integra el botón a la barra blanca).
-    // REFERENCIA de geometría: fab + 16 → el anillo se monta como hijo absoluto del
-    // FAB con inset -8px en los 4 lados (no ocupa layout, no empuja FAB ni label) →
-    // asoma ~8px de verde claro alrededor del círculo dark-green de 64 (diámetro ≈80).
+    // REFERENCIA de geometría: fab + FAB_HALO_GROWTH → el anillo se monta como hijo
+    // absoluto del FAB con inset -4px en los 4 lados (no ocupa layout, no empuja FAB ni
+    // label) → asoma ~4px de verde claro alrededor del círculo dark-green de 64 (⌀72).
+    // B4 lo bajó de ⌀80 (anillo de 8) a ⌀72 (anillo de 4) para reducir oclusión.
     // No se consume como tamaño de wrapper (eso causaba el bug del halo que tomaba el
-    // marginTop y tapaba el label); el inset -8 vive en _layout.tsx.
-    fabHalo: FAB_SIZE + 16, // = 80: diámetro efectivo del anillo (referencia del inset)
+    // marginTop y tapaba el label); el inset -4 vive en _layout.tsx.
+    fabHalo: FAB_SIZE + FAB_HALO_GROWTH, // = 72: diámetro efectivo del anillo (referencia del inset)
     // Inset (magnitud positiva) del anillo del halo respecto al círculo del FAB.
-    // DERIVADO de la geometría: (fabHalo - fab) / 2 = (80 - 64) / 2 = 8 → el anillo
-    // se monta como hijo absoluto con top/left/right/bottom = -fabHaloInset (asoma 8px
-    // de verde claro alrededor del círculo de 64). La pantalla lo lee con getTokenValue
-    // y aplica el signo negativo, así NO hardcodea el -8 (ADR-023 §4).
-    fabHaloInset: (FAB_SIZE + 16 - FAB_SIZE) / 2, // = 8
+    // DERIVADO de la geometría: (fabHalo - fab) / 2 = FAB_HALO_GROWTH / 2 = (72 - 64) / 2 = 4
+    // → el anillo se monta como hijo absoluto con top/left/right/bottom = -fabHaloInset
+    // (asoma 4px de verde claro alrededor del círculo de 64). La pantalla lo lee con
+    // getTokenValue y aplica el signo negativo, así NO hardcodea el -4 (ADR-023 §4).
+    fabHaloInset: FAB_HALO_GROWTH / 2, // = 4
     // Tamaño de los íconos del bottom-nav (lucide Home/PawPrint/BarChart3/Menu). Cruza
     // a una API no-Tamagui (prop `size` de lucide-react-native), se lee con getTokenValue.
     navIcon: 24,
@@ -175,10 +181,11 @@ const tokens = createTokens({
     // getTokenValue, no como literal en la pantalla.
     navLabel: 11,
     // Cuánto sube el FAB sobre la barra (offset negativo del marginTop). Derivado
-    // de fab * 0.55 → ~55% del botón por encima de la barra: el FAB FLOTA (la mayor
-    // parte del círculo arriba de la línea del navbar, ~45% solapado dentro). No
-    // cortado/enterrado (eso era el 0.33). Es un token escalar (no literal en la pantalla).
-    fabRaise: Math.round(FAB_SIZE * FAB_RAISE_RATIO), // = round(64*0.55) = 35
+    // de fab * 0.40 (B4) → ~40% del botón por encima de la barra: el FAB FLOTA (buena
+    // parte del círculo arriba de la línea del navbar, ~60% solapado dentro). No
+    // cortado/enterrado (eso era el 0.33) ni tan despegado como el 0.55 previo, que
+    // ocluía más contenido. Es un token escalar (no literal en la pantalla).
+    fabRaise: Math.round(FAB_SIZE * FAB_RAISE_RATIO), // = round(64*0.40) = 26
     // Avatares circulares. Derivado al construir la home (A.1): el avatar del
     // header. icon = contenedores de ícono cuadrados/circulares (ej. el check
     // del banner "establecimiento listo").

@@ -20,7 +20,7 @@ import { Tabs, useRouter } from 'expo-router';
 import { BarChart3, Home, type LucideIcon, Menu, PawPrint, Zap } from 'lucide-react-native';
 import { getTokenValue } from 'tamagui';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Pressable, type ColorValue } from 'react-native';
+import { Pressable, View, type ColorValue } from 'react-native';
 import { Text, YStack } from 'tamagui';
 
 import { shadows } from '../../tamagui.config';
@@ -40,13 +40,14 @@ function navColors() {
     textMuted: getTokenValue('$textMuted', 'color'),
     divider: getTokenValue('$divider', 'color'),
     fabSize: getTokenValue('$fab', 'size'),
-    // Cuánto sobresale el FAB sobre la barra: fab*0.55 → 35. El FAB FLOTA, la mayor
-    // parte del círculo sólido (~55%) asoma por encima del navbar (antes 0.33→21 lo
-    // dejaba cortado a la mitad / medio enterrado).
+    // Cuánto sobresale el FAB sobre la barra: fab*0.40 → 26 (iteración B4). El FAB FLOTA:
+    // ~40% del círculo sólido asoma por encima de la línea superior del navbar y ~60%
+    // queda solapado dentro. Antes 0.33→21 lo dejaba medio enterrado; 0.55→35 lo despegaba
+    // de más y ocluía más contenido de la pantalla.
     fabRaise: getTokenValue('$fabRaise', 'size'),
-    // Inset (magnitud) del anillo del halo respecto al círculo del FAB: 8px, DERIVADO
-    // en el config de (fabHalo - fab)/2. La pantalla aplica -fabHaloInset en los 4
-    // lados → no hardcodea el -8 (ADR-023 §4).
+    // Inset (magnitud) del anillo del halo respecto al círculo del FAB: 4px, DERIVADO
+    // en el config de (fabHalo - fab)/2 = (72-64)/2. La pantalla aplica -fabHaloInset en
+    // los 4 lados → no hardcodea el -4 (ADR-023 §4).
     fabHaloInset: getTokenValue('$fabHaloInset', 'size'),
     // Tamaño de los íconos de los 4 items planos del nav (lucide, API no-Tamagui).
     navIcon: getTokenValue('$navIcon', 'size'),
@@ -104,16 +105,75 @@ function ManiobraFab() {
   const router = useRouter();
   const COLOR = navColors();
   const FAB_SIZE = COLOR.fabSize;
-  // Elevación: el FAB FLOTA sobre la barra — ~55% del CÍRCULO SÓLIDO asoma por encima
-  // de la línea superior del navbar y ~45% queda solapado dentro (el borde superior de
-  // la barra cruza el FAB a ~45% desde arriba). A 0.33 (21px) quedaba "cortado a la
-  // mitad" / medio enterrado; a 0.55 (35px) flota claro, sin exagerar. El offset =
-  // -$fabRaise (token derivado de fab*0.55 = 35), no literal, y va sobre el CÍRCULO
-  // SÓLIDO del FAB — no sobre un wrapper-halo (eso era el bug anterior: el halo tomaba
-  // el offset y el círculo sólido asomaba mucho menos mientras el halo tapaba el label).
-  // Al subir el FAB, el halo sube con él y deja de tocar el label → ya no hace falta
-  // el knockout blanco detrás de "Maniobra".
+  // Elevación: el FAB FLOTA sobre la barra — ~40% del CÍRCULO SÓLIDO asoma por encima
+  // de la línea superior del navbar y ~60% queda solapado dentro (el borde superior de
+  // la barra cruza el FAB a ~60% desde arriba). A 0.33 (21px) quedaba "cortado a la
+  // mitad" / medio enterrado; a 0.55 (35px) flotaba de más y ocluía contenido; B4 lo
+  // dejó en 0.40 → 26px. El offset = -$fabRaise (token derivado de fab*0.40 = 26), no
+  // literal, y va sobre el CONTENEDOR TOCABLE del FAB (el Pressable), que mide lo mismo
+  // que el círculo sólido — no sobre un wrapper-halo (eso era el bug anterior: el halo
+  // tomaba el offset y el círculo sólido asomaba mucho menos mientras el halo tapaba el
+  // label). Al subir el FAB, el halo sube con él y deja de tocar el label → ya no hace
+  // falta el knockout blanco detrás de "Maniobra".
   const FAB_RAISE = COLOR.fabRaise;
+  // ── Zona tocable (FIX de la zona muerta de tap) ────────────────────────────────────
+  // El círculo se dibuja PARCIALMENTE FUERA de su celda (marginTop:-$fabRaise = -26). En
+  // NATIVO los toques que caen fuera de los límites de un ancestro NO se entregan a sus
+  // hijos (Android: ViewGroup.dispatchTouchEvent solo desciende a hijos cuyos bounds
+  // contienen el punto; iOS: hitTest: devuelve nil si pointInside: es false) → esos 26px
+  // que sobresalen NO responden al tap. En WEB no reproduce (el DOM no recorta el
+  // hit-testing igual), por eso nunca se detectó: la app se validó siempre en web hasta
+  // el bring-up nativo.
+  //
+  // ELECCIÓN: hitSlop sobre el Pressable, NO reestructurar. Justificación:
+  //  - hitSlop es la herramienta correcta para agrandar el target de ESTE botón y es
+  //    100% seguro: no cambia una sola coordenada del layout ni de la pintura.
+  //  - Reestructurar para que la parte que sobresale quede DENTRO de los bounds de un
+  //    ancestro obliga a agrandar el propio tabBar (height += fabRaise + paddingTop
+  //    compensatorio + tabBarBackground para no pintar la franja de más). Eso deja una
+  //    franja TRANSPARENTE de 26px de ANCHO COMPLETO por encima del nav que, en nativo,
+  //    igual captura los toques (una View transparente sigue recibiendo eventos y el
+  //    BottomTabBar de React Navigation se monta con pointerEvents="auto", no
+  //    "box-none") → los botones y el scroll del contenido en esos 26px dejarían de
+  //    funcionar EN TODAS las pantallas. Cambiar una zona muerta de 64×26 por una de
+  //    412×26 es peor.
+  //  - ⚠️ HONESTO: lo ÚNICO que este hitSlop gana efectivamente es el `bottom`. Extiende el
+  //    target hasta el pie de la celda → el label "Maniobra" pasa a ser tocable (antes NO lo
+  //    era) y el área útil in-bounds crece de 64×38 a 64×58. Esa es la mitad accionable del
+  //    problema, y por eso la mitigación se queda.
+  //  - El `top` NO recupera un solo píxel HOY, en NINGUNA de las dos plataformas. Verificado
+  //    (en node_modules), no asumido:
+  //      · WEB: `hitSlop` es NO-OP. react-native-web (0.21.2) NO lo implementa en `Pressable`
+  //        (ni en `usePressEvents`/`PressResponder`): la única aparición de `hitSlop` en el
+  //        paquete está en el módulo LEGACY `Touchable`, que este árbol no usa. La prop ni
+  //        siquiera figura en el `_excluded` de Pressable → cae en el spread al View y el
+  //        whitelist de props del DOM la descarta en silencio. (En web igual no hay nada que
+  //        recuperar: el DOM no recorta el hit-testing, la parte elevada ya es tocable.)
+  //      · NATIVO: el ancestro recorta ANTES de que el evento llegue al Pressable (Android
+  //        ViewGroup.dispatchTouchEvent, iOS hitTest:/pointInside:), así que el slop `top`
+  //        tampoco rescata los 26px que sobresalen.
+  //    Se deja igual a la elevación por CORRECCIÓN DECLARATIVA (describe el target real del
+  //    botón, y si el FAB sale del tabBar el valor ya es el correcto), a costo cero: es
+  //    documentación, no función.
+  //  - El FIX REAL de la parte elevada (sacar el FAB del tabBar y montarlo como overlay
+  //    absoluto en el layout raíz con pointerEvents="box-none" — refactor de navegación con su
+  //    propia spec, fuera del alcance de este fix) está anotado en `docs/backlog.md`, entrada
+  //    2026-07-18 "Zona muerta de tap en el FAB de Maniobra", con la verificación pendiente en
+  //    device.
+  //  - Sin slop horizontal a propósito: a 360px de ancho la celda mide 72 EXACTOS (360/5) y el
+  //    círculo 64 → 4px de aire por lado, que el anillo del halo (⌀72) ya ocupa ENTEROS. Medido
+  //    con Pillow sobre design/nav-iter-2/B4-360.png: el halo se pinta en x 144..215, o sea
+  //    justo los bordes de la celda, cero desborde. Cualquier slop lateral le robaría toques a
+  //    las tabs vecinas (Animales / Reportes).
+  // Los valores se DERIVAN de tokens (no literales): bottom = alto útil de la celda
+  // ($navBar - $navItemTop) menos lo que el círculo ya ocupa dentro de ella ($fab - $fabRaise).
+  // `left`/`right` se OMITEN (Insets es parcial) en vez de mandarlos en 0: además de dejar
+  // explícito que no hay slop horizontal, evita el falso positivo del lint anti-hardcode, que
+  // marca `left:`/`right:` con número crudo como spacing sin token.
+  const HIT_SLOP = {
+    top: FAB_RAISE,
+    bottom: Math.max(0, COLOR.navHeight - COLOR.navItemTop - (FAB_SIZE - FAB_RAISE)),
+  };
   // Offset vertical del label "Maniobra": el halo verde pálido del FAB asomaba sobre el
   // TOPE del texto (puntito de la "i", tildes, tope de la "M") con bottom=$2 (7px). Medido
   // con CDP a 412px: con $2 el borde inferior del halo (y=883) caía 7px POR DEBAJO del tope
@@ -132,40 +192,57 @@ function ManiobraFab() {
       // El FAB cabe en el ancho de la celda de la tab (no fuerza ancho intrínseco
       // que empuje el layout → evita overflow horizontal con los 5 items + FAB).
     >
-      {/* CÍRCULO SÓLIDO del FAB (diámetro $fab = 64). ESTE lleva el marginTop:-$fabRaise
-          → asoma ~33% por encima de la línea superior del navbar (idéntico a
-          home-fab33.png). El halo es un hijo ABSOLUTO detrás (no ocupa layout, no
-          empuja ni el FAB ni el label). overflow:'visible' para que el anillo asome
-          sin que el Pressable lo recorte. La sombra vive en el FAB (como en
-          home-fab33). */}
+      {/* CONTENEDOR TOCABLE del FAB. Mide exactamente lo que el círculo ($fab = 64) y lleva
+          el marginTop:-$fabRaise → el conjunto asoma ~40% por encima de la línea superior
+          del navbar. NO pinta nada: es solo el Pressable + el ancla de posicionamiento de
+          las dos capas visuales (halo y círculo). overflow:'visible' para que el anillo
+          del halo asome sin que el Pressable lo recorte.
+
+          ⚠️ EL HALO VA COMO HERMANO ANTERIOR DEL CÍRCULO, NO COMO HIJO (as-built, fix del
+          halo que pintaba ENCIMA). Antes el halo era hijo del Pressable con zIndex:-1
+          asumiendo que así "pintaba detrás del círculo dark-green" — FALSO en las dos
+          plataformas:
+            · WEB (react-native-web): el <button> del Pressable computa position:relative +
+              z-index:0 → CREA stacking context. Un hijo con z-index negativo se pinta por
+              encima del BACKGROUND de su padre (solo queda por debajo del contenido en
+              flujo, el ⚡). El halo translúcido quedaba de velo sobre el círculo.
+            · NATIVO: un hijo NUNCA se pinta detrás del background de su padre, haga lo que
+              haga el zIndex.
+          Medido con Pillow sobre la captura real: el relleno daba rgb(82,142,112) = $primary
+          velado por el halo, en vez del $primary puro rgb(30,90,62).
+          Ahora el fondo NO vive en el Pressable: son dos hermanos, halo primero y círculo
+          sólido después. Orden de pintura correcto en ambas plataformas — en web ambos son
+          Views de RNW (position:relative, z-index:0) → manda el orden del DOM, y el zIndex:1
+          explícito del círculo lo blinda; en nativo manda el orden de hijos (y en Android la
+          elevation de shadows.fab refuerza lo mismo). */}
       <Pressable
         accessibilityRole="button"
         accessibilityLabel="Abrir MODO MANIOBRAS"
         onPress={() => router.push('/maniobra')}
+        // Zona tocable: baja hasta el pie de la celda (el label "Maniobra" pasa a ser tocable)
+        // y declara el círculo completo hacia arriba. Ver el bloque HIT_SLOP arriba — incluido
+        // el LÍMITE verificado: el `bottom` es lo único que gana área; el `top` no rescata los
+        // 26px elevados (nativo: el ancestro recorta antes; web: RNW ni implementa hitSlop en
+        // Pressable).
+        hitSlop={HIT_SLOP}
         style={{
           width: FAB_SIZE,
           height: FAB_SIZE,
-          borderRadius: FAB_SIZE / 2,
-          backgroundColor: COLOR.primary,
           alignItems: 'center',
           justifyContent: 'center',
-          // El offset que eleva el botón vive en el CÍRCULO SÓLIDO (no en un wrapper).
+          // El offset que eleva el botón vive en el CONTENEDOR TOCABLE (no en un wrapper
+          // aparte): así el círculo, el halo y el área de tap suben juntos.
           marginTop: -FAB_RAISE,
-          // El anillo absoluto asoma fabHaloInset alrededor; sin esto el Pressable lo
-          // recortaría.
           overflow: 'visible',
-          // Sombra del FAB: objeto de estilo canónico del config (shadows.fab) — no se
-          // hardcodean los valores acá (ADR-023 §4 / docs/design-system.md §5).
-          ...shadows.fab,
         }}
       >
-        {/* Anillo verde pálido DECORATIVO detrás del FAB (estilo Mercado Pago):
+        {/* CAPA 1 — anillo verde pálido DECORATIVO, DETRÁS del círculo (estilo Mercado Pago):
             $fabHalo = $greenLight translúcido (rgb verde claro @ 45%, token de color del
-            config). position:'absolute' con inset -$fabHaloInset (8px, token derivado de
-            (fabHalo-fab)/2) en los 4 lados → NO ocupa lugar en el layout (no empuja FAB ni
-            label) y asoma 8px de verde claro alrededor del círculo de 64 (diámetro ≈80 =
-            fab+16). zIndex:-1 → pinta DETRÁS del círculo dark-green y del ⚡; solo asoma el
-            anillo. Color/inset por TOKEN, no literales (ADR-023 §4). */}
+            config). position:'absolute' con inset -$fabHaloInset (4px, token derivado de
+            (fabHalo-fab)/2) en los 4 lados → NO ocupa lugar en el layout (no empuja ni el
+            círculo ni el label) y asoma 4px de verde claro alrededor del círculo de 64
+            (diámetro efectivo 72 = fab+8, B4). Va PRIMERO en el orden de hermanos → se pinta
+            debajo. Color/inset por TOKEN, no literales (ADR-023 §4). */}
         <YStack
           position="absolute"
           top={-COLOR.fabHaloInset}
@@ -174,14 +251,41 @@ function ManiobraFab() {
           bottom={-COLOR.fabHaloInset}
           borderRadius="$pill"
           backgroundColor="$fabHalo"
-          zIndex={-1}
         />
-        <Zap size={COLOR.fabIcon} color={COLOR.white} fill={COLOR.white} />
+        {/* CAPA 2 — CÍRCULO SÓLIDO del FAB (diámetro $fab = 64), $primary OPACO: es el que
+            lleva el color de marca y el ⚡ blanco. Va DESPUÉS del halo → se pinta encima, así
+            que el verde botella queda puro (sin velo). zIndex:1 explícito: blinda el orden de
+            pintura aunque cambie el orden del JSX o la plataforma.
+
+            Es una View de RN con estilo CRUDO (no un YStack de Tamagui) A PROPÓSITO: el estilo
+            es EXACTAMENTE el que tenía el Pressable antes del fix (mismo backgroundColor,
+            borderRadius y shadows.fab), así el círculo se pinta idéntico y el fix queda acotado
+            al ORDEN de las capas. Spreadear shadows.fab como props de Tamagui NO es equivalente:
+            Tamagui trata `elevation` como shorthand propio y re-deriva la sombra, lo que ATENUÓ
+            la sombra del FAB (medido con Pillow: la franja bajo el círculo pasó de (178,213,194)
+            a (199,226,211), casi sin sombra). Con la View cruda, shadows.fab llega tal cual.
+            Los valores siguen viniendo del config (shadows.fab / getTokenValue), no se hardcodean
+            acá (ADR-023 §4 / docs/design-system.md §5). */}
+        <View
+          style={{
+            width: FAB_SIZE,
+            height: FAB_SIZE,
+            borderRadius: FAB_SIZE / 2,
+            backgroundColor: COLOR.primary,
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1,
+            ...shadows.fab,
+          }}
+        >
+          <Zap size={COLOR.fabIcon} color={COLOR.white} fill={COLOR.white} />
+        </View>
       </Pressable>
       {/* Label "Maniobra" anclado al FONDO de la celda. Posicionado absoluto contra el
-          fondo: el FAB sube (fabRaise 35) sin arrastrar el texto. bottom={LABEL_BOTTOM} =
+          fondo: el FAB sube (fabRaise 26) sin arrastrar el texto. bottom={LABEL_BOTTOM} =
           -$1 (-2px), bajado para que el tope del texto despeje el borde inferior del halo
-          (~2px de aire, medido con CDP — antes con $2 solapaban 7px).
+          (~2px de aire, medido con CDP — antes con $2 solapaban 7px). Su posición NO se
+          alinea con los otros 4 labels: es una decisión deliberada, no un bug de layout.
           A DIFERENCIA de los otros 4 labels (gris/regular/11px), "Maniobra" tiene
           DISTINCIÓN INTENCIONAL porque etiqueta el FAB, la acción más importante del nav
           (ADR-018): negro ($textPrimary), negrita (700) y un toque más grande ($2 = 12px
@@ -190,8 +294,8 @@ function ManiobraFab() {
         position="absolute"
         bottom={LABEL_BOTTOM}
         // zIndex alto (10): aunque el halo ya no toca el texto, se mantiene el stacking por
-        // encima del anillo (zIndex:-1 DENTRO del Pressable) por si en algún device el halo
-        // asomara un poco más. Sin costo visual.
+        // encima del anillo (que es un hermano ABSOLUTO dentro del Pressable) por si en algún
+        // device el halo asomara un poco más. Sin costo visual.
         zIndex={10}
         // Distinción intencional del label del FAB (vs los otros 4: gris/500/11px).
         fontSize="$2"

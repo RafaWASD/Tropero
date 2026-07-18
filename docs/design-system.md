@@ -97,8 +97,8 @@ Base **blanco neutro** (sin tinte frío ni cálido — se mató el `#f8f9ff` de 
 | `$navBar` | 60 | alto de contenido del bottom-nav (sin insets) |
 | `$navBottomMin` | 12 | margen inferior mínimo del nav cuando `insets.bottom = 0` |
 | `$fab` | 64 | diámetro del FAB central (ADR-018) |
-| `$fabHalo` | 80 | diámetro del halo del FAB (`fab + 16`, referencia del inset -8) |
-| `$fabRaise` | 35 | cuánto FLOTA el FAB sobre la barra (`fab × 0.55`) |
+| `$fabHalo` | 72 | diámetro del halo del FAB (`fab + 8`, referencia del inset -4) |
+| `$fabRaise` | 26 | cuánto FLOTA el FAB sobre la barra (`fab × 0.40`) |
 | `$avatar` | 40 | avatar de usuario en el header |
 | `$icon` | 48 | contenedores de ícono circulares (banner, etc.) |
 
