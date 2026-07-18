@@ -27,13 +27,14 @@
 import { useMemo, useState } from 'react';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Pressable, TextInput } from 'react-native';
+import { Platform, TextInput } from 'react-native';
 import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
 import { Link2, Plus, Search } from 'lucide-react-native';
 
 import { EstablishmentCard } from '@/components';
 import { useEstablishment } from '@/contexts';
 import { localityOf, sortMyEstablishments } from '@/utils/establishment';
+import { buttonA11y } from '@/utils/a11y';
 import type { MembershipEstablishment } from '@/services/establishments';
 
 // Umbral de campos a partir del cual aparece el searchbar (R6.6.1: ">~8 campos").
@@ -46,24 +47,26 @@ const SEARCH_THRESHOLD = 8;
 /** Botón "Crear campo" del header (CTA secundario, pill outline) → /crear-campo (R3.1). */
 function CreateFieldButton({ onPress }: { onPress: () => void }) {
   const primary = getTokenValue('$primary', 'color');
+  // onPress + a11y directo en el XStack (Tamagui), patrón login: un <Pressable> de RN envolviendo
+  // un Tamagui no dispara el tap en RN new-arch. a11y por buttonA11y (web=ARIA, native=accessibility*).
   return (
-    <Pressable accessibilityRole="button" accessibilityLabel="Crear campo" onPress={onPress}>
-      <XStack
-        alignItems="center"
-        gap="$1"
-        backgroundColor="$surface"
-        borderWidth={1}
-        borderColor="$primary"
-        borderRadius="$pill"
-        paddingHorizontal="$3"
-        paddingVertical="$2"
-      >
-        <Plus size={18} color={primary} strokeWidth={2.5} />
-        <Text fontFamily="$body" fontSize="$3" fontWeight="600" color="$primary">
-          Crear campo
-        </Text>
-      </XStack>
-    </Pressable>
+    <XStack
+      alignItems="center"
+      gap="$1"
+      backgroundColor="$surface"
+      borderWidth={1}
+      borderColor="$primary"
+      borderRadius="$pill"
+      paddingHorizontal="$3"
+      paddingVertical="$2"
+      onPress={onPress}
+      {...buttonA11y(Platform.OS, { label: 'Crear campo' })}
+    >
+      <Plus size={18} color={primary} strokeWidth={2.5} />
+      <Text fontFamily="$body" fontSize="$3" fontWeight="600" color="$primary">
+        Crear campo
+      </Text>
+    </XStack>
   );
 }
 
@@ -117,25 +120,23 @@ function SearchBar({
  */
 function PasteInviteLink({ onPress }: { onPress: () => void }) {
   const muted = getTokenValue('$textMuted', 'color');
+  // onPress + a11y directo en el XStack (Tamagui), patrón login: un <Pressable> de RN envolviendo
+  // un Tamagui no dispara el tap en RN new-arch.
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel="¿Te invitaron a un campo? Pegá el link de invitación"
+    <XStack
+      width="100%"
+      alignItems="center"
+      justifyContent="center"
+      gap="$2"
+      paddingVertical="$3"
       onPress={onPress}
+      {...buttonA11y(Platform.OS, { label: '¿Te invitaron a un campo? Pegá el link de invitación' })}
     >
-      <XStack
-        width="100%"
-        alignItems="center"
-        justifyContent="center"
-        gap="$2"
-        paddingVertical="$3"
-      >
-        <Link2 size={16} color={muted} strokeWidth={2} />
-        <Text fontFamily="$body" fontSize="$3" fontWeight="500" color="$textMuted">
-          ¿Te invitaron a un campo? Pegá el link
-        </Text>
-      </XStack>
-    </Pressable>
+      <Link2 size={16} color={muted} strokeWidth={2} />
+      <Text fontFamily="$body" fontSize="$3" fontWeight="500" color="$textMuted">
+        ¿Te invitaron a un campo? Pegá el link
+      </Text>
+    </XStack>
   );
 }
 

@@ -19,12 +19,12 @@
 // es la MISMA fila con props nuevas (la tab Animales y la lista de lote siguen con la fila grande por
 // default). La edad la calcula el caller (formatAnimalAge desde animal_birth_date).
 
-import { Platform, Pressable } from 'react-native';
+import { Platform } from 'react-native';
 import { getTokenValue, Text, View, XStack, YStack } from 'tamagui';
 import { Check, ChevronRight, Star, Syringe, Tag } from 'lucide-react-native';
 
 import { CategoryBadge } from './CategoryBadge';
-import { labelA11y } from '../utils/a11y';
+import { buttonA11y, labelA11y } from '../utils/a11y';
 import { reproStatusLabel, type ReproStatus } from '../utils/repro-status';
 import { pickHeroIdentifier } from '../utils/animal-identifier';
 
@@ -345,8 +345,8 @@ function ReproStatusChip({ status }: { status: ReproStatus }) {
 /**
  * Checkbox cuadrado de la selección masiva (R11.9): $navIcon (24px) de caja, redondeo $4, borde
  * $divider; tildado → relleno $primary + check blanco. Decorativo (el toque lo maneja la fila entera);
- * el estado a11y (selected) lo emite el Pressable de la fila. Cero hardcode (tokens + getTokenValue
- * para el ícono lucide).
+ * el estado a11y (checked) lo emite la fila (XStack con role="checkbox"). Cero hardcode (tokens +
+ * getTokenValue para el ícono lucide).
  */
 function RowCheckbox({ checked }: { checked: boolean }) {
   const size = getTokenValue('$navIcon', 'size'); // 24
@@ -419,30 +419,49 @@ export function AnimalRow({
     : `, ${rodeo}${hasTag ? '' : ', sin electrónica'}`;
   const a11yLabel = `${category}, ${heroResult.value ?? 'sin identificador'}${a11ySuffix}${inTreatment ? ', en tratamiento' : ''}`;
 
-  const a11yProps = hasCheckbox
-    ? { accessibilityRole: 'checkbox' as const, accessibilityState: { checked: checked ?? false } }
-    : { accessibilityRole: 'button' as const };
+  // a11y de la fila, ramificada por plataforma (web=ARIA, native=accessibility*). NUNCA props
+  // `accessibility*` crudas sobre un componente Tamagui: en web las filtra al DOM → warning de
+  // React ("does not recognize the accessibility* prop") que en DEV monta el overlay que intercepta
+  // el tap (ver Button.tsx / a11y.ts). En el caso CHECKBOX (selección masiva) el rol accesible es
+  // `checkbox` (los e2e la seleccionan por role="checkbox" + aria-label); en el caso navegación,
+  // `button` vía buttonA11y — el MISMO mecanismo del login (GoogleSignInButton), que SÍ dispara el
+  // tap en RN new-arch.
+  const a11y = hasCheckbox
+    ? Platform.OS === 'web'
+      ? { role: 'checkbox' as const, 'aria-label': a11yLabel, 'aria-checked': checked ?? false }
+      : {
+          accessibilityRole: 'checkbox' as const,
+          accessibilityState: { checked: checked ?? false },
+          accessibilityLabel: a11yLabel,
+        }
+    : buttonA11y(Platform.OS, { label: a11yLabel });
 
   return (
-    <Pressable accessibilityLabel={a11yLabel} onPress={handlePress} {...a11yProps}>
-      <XStack
-        width="100%"
-        // Target manga-friendly (Fitts): ≥72px ($animalRow) normal / ≥56px ($touchMin) compacto —
-        // ambos operables con guante (R11.9 exige ≥56px en la fila compacta de selección).
-        minHeight={compact ? '$touchMin' : '$animalRow'}
-        alignItems="center"
-        gap="$3"
-        paddingHorizontal="$4"
-        paddingVertical="$2"
-        // Resaltado de advertencia (R11.6, ⭐ tildado): fondo $surface + acento terracota a la izquierda.
-        backgroundColor={highlight ? '$surface' : '$white'}
-        borderLeftWidth={highlight ? 4 : 0}
-        borderLeftColor={highlight ? '$terracota' : 'transparent'}
-        // Divider entre filas (borde inferior) — da la separación de la lista sin gap.
-        borderBottomWidth={1}
-        borderBottomColor="$divider"
-        pressStyle={{ backgroundColor: '$surface' }}
-      >
+    // onPress + a11y van DIRECTO en el XStack (el mismo componente Tamagui que tiene `pressStyle`).
+    // En RN new-arch, envolver un Tamagui-con-pressStyle en un <Pressable> de RN hace que el Tamagui
+    // reclame el responder de touch para su visual de press → el Pressable externo nunca recibe el
+    // release → onPress NO dispara (bug nativo). El patrón que SÍ anda (login/GoogleSignInButton):
+    // onPress en la MISMA pieza que el pressStyle.
+    <XStack
+      width="100%"
+      // Target manga-friendly (Fitts): ≥72px ($animalRow) normal / ≥56px ($touchMin) compacto —
+      // ambos operables con guante (R11.9 exige ≥56px en la fila compacta de selección).
+      minHeight={compact ? '$touchMin' : '$animalRow'}
+      alignItems="center"
+      gap="$3"
+      paddingHorizontal="$4"
+      paddingVertical="$2"
+      // Resaltado de advertencia (R11.6, ⭐ tildado): fondo $surface + acento terracota a la izquierda.
+      backgroundColor={highlight ? '$surface' : '$white'}
+      borderLeftWidth={highlight ? 4 : 0}
+      borderLeftColor={highlight ? '$terracota' : 'transparent'}
+      // Divider entre filas (borde inferior) — da la separación de la lista sin gap.
+      borderBottomWidth={1}
+      borderBottomColor="$divider"
+      pressStyle={{ backgroundColor: '$surface' }}
+      onPress={handlePress}
+      {...a11y}
+    >
         {/* Checkbox de selección (solo cuando la fila lo lleva). Va primero (zona pulgar izquierda). */}
         {hasCheckbox ? <RowCheckbox checked={checked ?? false} /> : null}
 
@@ -550,7 +569,6 @@ export function AnimalRow({
             )}
           </View>
         )}
-      </XStack>
-    </Pressable>
+    </XStack>
   );
 }

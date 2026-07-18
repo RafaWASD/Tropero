@@ -16,11 +16,12 @@
 // Cero hardcode de color/spacing (ADR-023 §4): todo via tokens; lo que cruza a una API
 // no-Tamagui (colors del LinearGradient) se lee con getTokenValue.
 
-import { Pressable } from 'react-native';
+import { Platform } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { getTokenValue, Text, View, XStack, YStack } from 'tamagui';
 import { shadows } from '../../tamagui.config';
 import { roleLabel } from '../utils/establishment';
+import { buttonA11y } from '../utils/a11y';
 import { RoleBadge } from './RoleBadge';
 
 // ─── Tipos públicos ───────────────────────────────────────────────────────────
@@ -161,9 +162,9 @@ function ActiveIndicator() {
  */
 function HeroMetric({ metric }: { metric: EstablishmentHeroMetric }) {
   // Campo vacío → CTA visual (no un número). Engancha con el wizard de la home (R6.6.2).
-  // NO es un Pressable propio: toda la card ya es tappable (Pressable externo) y dispara
-  // el mismo onPress; anidar un <button> dentro del <button> de la card es HTML inválido
-  // en web (RN-web mapea accessibilityRole="button" → <button>). Es un chip-CTA visual.
+  // NO es un control propio: toda la card ya es tappable (el YStack lleva onPress + role="button")
+  // y dispara el mismo onPress; anidar un <button> dentro del role="button" de la card sería HTML
+  // inválido en web (buttonA11y emite role="button"). Es un chip-CTA visual (XStack sin onPress).
   if (metric.kind === 'empty') {
     return (
       <XStack
@@ -244,16 +245,24 @@ export function EstablishmentCard({
     // Card tappable. overflow hidden → el banner-strip respeta el radio $card de la card
     // por arriba. La sombra se aplica al wrapper externo (un View clipeado no proyecta
     // sombra), así el clip no se come la elevación.
+    //
+    // onPress + a11y van DIRECTO en el YStack (Tamagui): envolver un componente Tamagui en un
+    // <Pressable> de RN NO dispara el tap en RN new-arch (el Tamagui reclama el responder de touch).
+    // El patrón que SÍ anda es el del login (GoogleSignInButton): onPress en la propia pieza Tamagui.
+    // a11y por buttonA11y (web=ARIA role=button + aria-label, native=accessibility*) — no props crudas
+    // sobre Tamagui (filtran al DOM en web, ver Button.tsx). role="button" no anida <button> porque el
+    // chip-CTA de campo vacío es un XStack visual, no un control.
     <View borderRadius="$card" {...shadows.card}>
-      <Pressable accessibilityRole="button" accessibilityLabel={a11yLabel} onPress={onPress}>
-        <YStack
-          width="100%"
-          backgroundColor="$surface"
-          borderRadius="$card"
-          overflow="hidden"
-        >
-          {/* 1. Banner-strip. */}
-          <BannerStrip name={name} imageUrl={imageUrl} />
+      <YStack
+        width="100%"
+        backgroundColor="$surface"
+        borderRadius="$card"
+        overflow="hidden"
+        onPress={onPress}
+        {...buttonA11y(Platform.OS, { label: a11yLabel })}
+      >
+        {/* 1. Banner-strip. */}
+        <BannerStrip name={name} imageUrl={imageUrl} />
 
           {/* Cuerpo de la card. */}
           <YStack padding="$4" gap="$2">
@@ -323,8 +332,7 @@ export function EstablishmentCard({
               </XStack>
             ) : null}
           </YStack>
-        </YStack>
-      </Pressable>
+      </YStack>
     </View>
   );
 }

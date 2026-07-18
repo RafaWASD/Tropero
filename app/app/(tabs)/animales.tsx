@@ -20,7 +20,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Platform, Pressable, TextInput } from 'react-native';
+import { Platform, TextInput } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
 import { Check, Plus, Search } from 'lucide-react-native';
@@ -464,23 +464,25 @@ function FilterChip({
   // a11y por helper (web=ARIA, native=accessibility*) — NO accessibilityLabel crudo en Pressable
   // de RN-web (BUG del overlay que tapa la pantalla, lección C1).
   const a11y = buttonA11y(Platform.OS, { label: accessibilityLabel ?? label, selected });
+  // onPress + a11y directo en el XStack (Tamagui): un <Pressable> de RN envolviendo un Tamagui
+  // no dispara el tap en RN new-arch. Patrón login (GoogleSignInButton).
   return (
-    <Pressable onPress={onPress} {...a11y}>
-      <XStack
-        alignItems="center"
-        justifyContent="center"
-        minHeight="$chipMin"
-        paddingHorizontal="$4"
-        borderRadius="$pill"
-        backgroundColor={selected ? '$primary' : '$surface'}
-        borderWidth={1}
-        borderColor={selected ? '$primary' : '$divider'}
-      >
-        <Text fontFamily="$body" fontSize="$3" fontWeight="500" color={selected ? '$white' : '$textMuted'}>
-          {label}
-        </Text>
-      </XStack>
-    </Pressable>
+    <XStack
+      alignItems="center"
+      justifyContent="center"
+      minHeight="$chipMin"
+      paddingHorizontal="$4"
+      borderRadius="$pill"
+      backgroundColor={selected ? '$primary' : '$surface'}
+      borderWidth={1}
+      borderColor={selected ? '$primary' : '$divider'}
+      onPress={onPress}
+      {...a11y}
+    >
+      <Text fontFamily="$body" fontSize="$3" fontWeight="500" color={selected ? '$white' : '$textMuted'}>
+        {label}
+      </Text>
+    </XStack>
   );
 }
 
@@ -503,15 +505,21 @@ function FilterPopover({
         {items.map((item) => {
           const isSelected = item.id === selectedId;
           return (
-          <Pressable
-            key={item.id ?? '__all__'}
-            onPress={() => onSelect(item.id)}
-            {...buttonA11y(Platform.OS, { label: item.label, selected: isSelected })}
-          >
-            {/* Fila balanceada: label a la izquierda + slot de ancho FIJO para el ✓ a la derecha
-                (visible solo si está seleccionado). El slot reservado en TODAS las filas garantiza
-                que el ✓ no descentre el texto (FIX 3: el item seleccionado quedaba corrido). */}
-            <XStack alignItems="center" gap="$2" minHeight="$chipMin" paddingHorizontal="$2" pressStyle={{ opacity: 0.6 }}>
+            // Fila balanceada: label a la izquierda + slot de ancho FIJO para el ✓ a la derecha
+            // (visible solo si está seleccionado). El slot reservado en TODAS las filas garantiza
+            // que el ✓ no descentre el texto (FIX 3: el item seleccionado quedaba corrido).
+            // onPress + a11y directo en el XStack que tiene el pressStyle (patrón login): envolverlo
+            // en un <Pressable> de RN no dispara el tap en RN new-arch (el Tamagui reclama el responder).
+            <XStack
+              key={item.id ?? '__all__'}
+              alignItems="center"
+              gap="$2"
+              minHeight="$chipMin"
+              paddingHorizontal="$2"
+              pressStyle={{ opacity: 0.6 }}
+              onPress={() => onSelect(item.id)}
+              {...buttonA11y(Platform.OS, { label: item.label, selected: isSelected })}
+            >
               <Text
                 flex={1}
                 minWidth={0}
@@ -527,7 +535,6 @@ function FilterPopover({
                 {isSelected ? <Check size={20} color={primary} strokeWidth={2.5} /> : null}
               </View>
             </XStack>
-          </Pressable>
           );
         })}
       </Card>
@@ -539,25 +546,27 @@ function FilterPopover({
 
 function PrimaryCta({ label, onPress }: { label: string; onPress: () => void }) {
   const white = getTokenValue('$white', 'color');
+  // onPress + a11y directo en el XStack que tiene el pressStyle (patrón login): un <Pressable>
+  // de RN envolviéndolo no dispara el tap en RN new-arch (el Tamagui reclama el responder).
   return (
-    <Pressable onPress={onPress} {...buttonA11y(Platform.OS, { label })}>
-      <XStack
-        width="100%"
-        minHeight="$touchMin"
-        alignItems="center"
-        justifyContent="center"
-        gap="$2"
-        backgroundColor="$primary"
-        borderRadius="$pill"
-        paddingHorizontal="$4"
-        pressStyle={{ backgroundColor: '$primaryPress' }}
-      >
-        <Plus size={20} color={white} strokeWidth={2.5} />
-        <Text fontFamily="$body" fontSize="$5" fontWeight="600" color="$white">
-          {label}
-        </Text>
-      </XStack>
-    </Pressable>
+    <XStack
+      width="100%"
+      minHeight="$touchMin"
+      alignItems="center"
+      justifyContent="center"
+      gap="$2"
+      backgroundColor="$primary"
+      borderRadius="$pill"
+      paddingHorizontal="$4"
+      pressStyle={{ backgroundColor: '$primaryPress' }}
+      onPress={onPress}
+      {...buttonA11y(Platform.OS, { label })}
+    >
+      <Plus size={20} color={white} strokeWidth={2.5} />
+      <Text fontFamily="$body" fontSize="$5" fontWeight="600" color="$white">
+        {label}
+      </Text>
+    </XStack>
   );
 }
 
@@ -604,23 +613,24 @@ function FilteredEmptyState({ label, onClear }: { label: string; onClear: () => 
 
 // CTA secundario (outline verde) — para acciones no-primarias como "Limpiar filtro".
 function SecondaryCta({ label, onPress }: { label: string; onPress: () => void }) {
+  // onPress + a11y directo en el XStack (patrón login): consistente con el resto de la pantalla.
   return (
-    <Pressable onPress={onPress} {...buttonA11y(Platform.OS, { label })}>
-      <XStack
-        minHeight="$touchMin"
-        alignItems="center"
-        justifyContent="center"
-        backgroundColor="$surface"
-        borderColor="$primary"
-        borderWidth={1}
-        borderRadius="$pill"
-        paddingHorizontal="$6"
-      >
-        <Text fontFamily="$body" fontSize="$5" fontWeight="600" color="$primary">
-          {label}
-        </Text>
-      </XStack>
-    </Pressable>
+    <XStack
+      minHeight="$touchMin"
+      alignItems="center"
+      justifyContent="center"
+      backgroundColor="$surface"
+      borderColor="$primary"
+      borderWidth={1}
+      borderRadius="$pill"
+      paddingHorizontal="$6"
+      onPress={onPress}
+      {...buttonA11y(Platform.OS, { label })}
+    >
+      <Text fontFamily="$body" fontSize="$5" fontWeight="600" color="$primary">
+        {label}
+      </Text>
+    </XStack>
   );
 }
 
