@@ -127,9 +127,14 @@ export function authErrorMessage(
       return 'No pudimos enviar el email de recuperación. Intentá de nuevo.';
     case 'resend':
       return 'No pudimos reenviar el email. Intentá de nuevo en un momento.';
-    case 'social':
+    case 'social': {
       // Fallback social genérico (R6.5): invita al fallback email/password sin filtrar el motivo crudo.
-      return 'No pudimos iniciar sesión con ese método. Probá con tu email y contraseña.';
+      const socialBase = 'No pudimos iniciar sesión con ese método. Probá con tu email y contraseña.';
+      // DIAGNÓSTICO TEMPORAL (google ios) — QUITAR: apendamos SOLO el `code` crudo (nunca idToken ni el
+      // message del proveedor) para ver en el banner qué falla si Google sigue roto en iOS tras wirear
+      // el iosClientId. Cuando el login de Google funcione en nativo, revertir a solo `socialBase`.
+      return socialBase + (error.code ? ` [debug: ${error.code}]` : '');
+    }
     default:
       return GENERIC;
   }

@@ -14,6 +14,11 @@ export type RequiredEnv = {
   // falta en runtime, el sign-in nativo de Google falla con DEVELOPER_ERROR → copy R6.3, degradado
   // aceptable). Se lee después del throw, así el resto de la app arranca igual.
   googleWebClientId?: string;
+  // OPCIONAL (bring-up nativo): el iOS Client ID de Google (NO es secreto; ya público en el reversed
+  // URL scheme del app.config.ts). Mismo régimen que googleWebClientId: fuera del fail-closed. El SDK
+  // nativo de Google en iOS lo necesita en configure() — el config plugin solo setea el URL scheme
+  // (CFBundleURLSchemes), NO el GIDClientID; sin este ID el signIn() nativo iOS falla.
+  googleIosClientId?: string;
 };
 
 /** Lee el valor de una var pública por nombre. Devuelve undefined si no está o está vacía. */
@@ -61,8 +66,9 @@ export function resolveEnv(read: EnvReader): RequiredEnv {
     );
   }
 
-  // OPCIONAL, fuera del fail-closed (R7.4): si falta, queda undefined y la app arranca igual.
+  // OPCIONALES, fuera del fail-closed (R7.4): si faltan, quedan undefined y la app arranca igual.
   const googleWebClientId = read('EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID');
+  const googleIosClientId = read('EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID');
 
-  return { supabaseUrl, supabaseAnonKey, powersyncUrl, googleWebClientId };
+  return { supabaseUrl, supabaseAnonKey, powersyncUrl, googleWebClientId, googleIosClientId };
 }

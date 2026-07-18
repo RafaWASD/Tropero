@@ -81,6 +81,22 @@ test('R7.4: falta el web client ID PERO falta también una requerida → sigue a
   assert.throws(() => resolveEnv(reader), /EXPO_PUBLIC_SUPABASE_URL/);
 });
 
+// ── bring-up nativo — googleIosClientId OPCIONAL, mismo régimen que el web client ID ────────────────
+
+test('iOS: SIN EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID → NO aborta; googleIosClientId queda undefined', () => {
+  // Igual que el web client ID: su ausencia NO frena el arranque (fuera del fail-closed).
+  const env = resolveEnv(readerFrom(FULL));
+  assert.equal(env.googleIosClientId, undefined);
+  assert.equal(env.supabaseUrl, FULL.EXPO_PUBLIC_SUPABASE_URL);
+});
+
+test('iOS: CON EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID → se expone en el env resuelto', () => {
+  const env = resolveEnv(
+    readerFrom({ ...FULL, EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID: 'ios123.apps.googleusercontent.com' }),
+  );
+  assert.equal(env.googleIosClientId, 'ios123.apps.googleusercontent.com');
+});
+
 // ── spec 16 (ambientes) — composeReader: precedencia estático → dinámico → extra (R3.1/R3.2) ────────
 
 test('R3.1: el mapa ESTÁTICO gana sobre el dinámico y el extra', () => {

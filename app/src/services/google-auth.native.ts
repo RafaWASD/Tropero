@@ -2,7 +2,9 @@
 //
 // Único punto del código donde se importa `@react-native-google-signin/google-signin` (R1.7): así el
 // import nativo vive SOLO en el grafo native y NO se filtra al bundle web (R7.5). Flujo:
-//   configure({ webClientId }) → hasPlayServices() → signIn() → signInWithIdToken({ provider:'google', token })
+//   configure({ webClientId, iosClientId }) → hasPlayServices() → signIn() → signInWithIdToken({ provider:'google', token })
+// En iOS el SDK nativo NECESITA el iosClientId en configure(): el config plugin solo setea el URL scheme
+// (CFBundleURLSchemes) en el Info.plist, NO el GIDClientID → sin iosClientId, signIn() falla en iOS.
 // El picker nativo devuelve un idToken firmado por Google; Supabase lo acepta solo si su `aud` ∈
 // Authorized Client IDs del proyecto (R8.2) — el cliente no valida el token por su cuenta (R8.3).
 //
@@ -23,9 +25,11 @@ import type { AuthActionResult } from '../contexts/AuthContext';
 
 export async function signInWithGoogle(): Promise<AuthActionResult> {
   try {
-    // El webClientId es opcional (R7.4): si falta (config de Raf pendiente), configure recibe
-    // undefined y el sign-in falla con DEVELOPER_ERROR → copy R6.3 (degradado aceptable).
-    GoogleSignin.configure({ webClientId: getEnv().googleWebClientId });
+    // webClientId + iosClientId son opcionales (R7.4): si falta alguno (config de Raf pendiente),
+    // configure recibe undefined y el sign-in falla con DEVELOPER_ERROR → copy R6.3 (degradado
+    // aceptable). En iOS el iosClientId es OBLIGATORIO para que el flujo nativo corra (ver cabecera).
+    const env = getEnv();
+    GoogleSignin.configure({ webClientId: env.googleWebClientId, iosClientId: env.googleIosClientId });
 
     // En Huawei / sin Google Play, hasPlayServices lanza PLAY_SERVICES_NOT_AVAILABLE (R6.4).
     await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
