@@ -171,23 +171,21 @@ function CandidateRow({
   const chevronColor = getTokenValue('$textMuted', 'color');
 
   return (
-    <Pressable
+    <XStack
+      minHeight="$searchBarLg"
+      alignItems="center"
+      gap="$3"
+      backgroundColor="$surface"
+      borderWidth={1}
+      borderColor="$divider"
+      borderRadius="$card"
+      paddingHorizontal="$4"
+      paddingVertical="$3"
+      pressStyle={{ backgroundColor: '$greenLight' }}
       onPress={onPress}
       {...buttonA11y(Platform.OS, { label: `Elegir ${heroText}${distinguisher ? `, ${distinguisher}` : ''}` })}
     >
-      <XStack
-        minHeight="$searchBarLg"
-        alignItems="center"
-        gap="$3"
-        backgroundColor="$surface"
-        borderWidth={1}
-        borderColor="$divider"
-        borderRadius="$card"
-        paddingHorizontal="$4"
-        paddingVertical="$3"
-        pressStyle={{ backgroundColor: '$greenLight' }}
-      >
-        <YStack flex={1} gap="$2" minWidth={0}>
+      <YStack flex={1} gap="$2" minWidth={0}>
           {/* Caravana visual dominante (grande, bold) + N° interno DESEMPATE a la derecha (R4.2: cuando el
               visual está duplicado, el idv es lo que distingue). lineHeight matching. */}
           <XStack alignItems="baseline" justifyContent="space-between" gap="$2">
@@ -216,10 +214,9 @@ function CandidateRow({
             </Text>
           ) : null}
         </YStack>
-        <View flexShrink={0} alignSelf="center">
-          <ChevronRight size={chevronSize} color={chevronColor} strokeWidth={2} />
-        </View>
-      </XStack>
-    </Pressable>
+      <View flexShrink={0} alignSelf="center">
+        <ChevronRight size={chevronSize} color={chevronColor} strokeWidth={2} />
+      </View>
+    </XStack>
   );
 }

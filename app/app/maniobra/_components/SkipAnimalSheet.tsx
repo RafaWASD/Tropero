@@ -195,25 +195,22 @@ export function SkipAnimalSheet({ capturedCount, onConfirm, onDone, onClose }: S
             hacer); con datos = terracota (aviso de descarte), sin datos = verde primario (nada que perder).
             "Seguir en este animal" = camino seguro (secundario outline). */}
         <YStack gap="$2">
-          <Pressable
+          <View
+            backgroundColor={hasData ? '$terracota' : '$primary'}
+            borderRadius="$pill"
+            minHeight="$touchMin"
+            alignItems="center"
+            justifyContent="center"
+            opacity={skipping ? 0.5 : 1}
+            pressStyle={{ opacity: 0.85 }}
             onPress={skipping ? undefined : () => void handleSkip()}
             testID="skip-animal-confirm"
             {...buttonA11y(Platform.OS, { label: 'Saltear animal', disabled: skipping })}
           >
-            <View
-              backgroundColor={hasData ? '$terracota' : '$primary'}
-              borderRadius="$pill"
-              minHeight="$touchMin"
-              alignItems="center"
-              justifyContent="center"
-              opacity={skipping ? 0.5 : 1}
-              pressStyle={{ opacity: 0.85 }}
-            >
-              <Text fontFamily="$body" fontSize="$6" lineHeight="$6" fontWeight="700" color="$white" numberOfLines={1}>
-                {skipping ? 'Salteando…' : 'Saltear animal'}
-              </Text>
-            </View>
-          </Pressable>
+            <Text fontFamily="$body" fontSize="$6" lineHeight="$6" fontWeight="700" color="$white" numberOfLines={1}>
+              {skipping ? 'Salteando…' : 'Saltear animal'}
+            </Text>
+          </View>
           <Button variant="secondary" fullWidth disabled={skipping} onPress={onClose}>
             Seguir en este animal
           </Button>

@@ -207,25 +207,22 @@ export function ConfirmDeleteSheet({
 
         {/* ACCIONES — una columna. Confirmar = terracota (aviso, no rojo de pánico); Cancelar = outline. */}
         <YStack gap="$2">
-          <Pressable
+          <View
+            backgroundColor="$terracota"
+            borderRadius="$pill"
+            minHeight="$touchMin"
+            alignItems="center"
+            justifyContent="center"
+            opacity={deleting ? 0.5 : 1}
+            pressStyle={{ opacity: 0.85 }}
             onPress={deleting ? undefined : () => void handleConfirm()}
             testID={`${testID}-confirm`}
             {...buttonA11y(Platform.OS, { label: confirmLabel, disabled: deleting })}
           >
-            <View
-              backgroundColor="$terracota"
-              borderRadius="$pill"
-              minHeight="$touchMin"
-              alignItems="center"
-              justifyContent="center"
-              opacity={deleting ? 0.5 : 1}
-              pressStyle={{ opacity: 0.85 }}
-            >
-              <Text fontFamily="$body" fontSize="$6" lineHeight="$6" fontWeight="700" color="$white" numberOfLines={1}>
-                {deleting ? 'Eliminando…' : confirmLabel}
-              </Text>
-            </View>
-          </Pressable>
+            <Text fontFamily="$body" fontSize="$6" lineHeight="$6" fontWeight="700" color="$white" numberOfLines={1}>
+              {deleting ? 'Eliminando…' : confirmLabel}
+            </Text>
+          </View>
           <Button variant="secondary" fullWidth disabled={deleting} onPress={onClose}>
             Cancelar
           </Button>

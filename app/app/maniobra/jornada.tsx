@@ -861,31 +861,28 @@ function CustomManeuverSection({
 
       {/* `+` crear maniobra personalizada (R13.7). Owner-only. */}
       {canCreateCustom ? (
-        <Pressable
+        <XStack
+          alignItems="center"
+          gap="$2"
+          minHeight="$touchMin"
+          paddingHorizontal="$3"
+          borderRadius="$card"
+          borderWidth={1}
+          borderColor="$primary"
+          borderStyle="dashed"
+          backgroundColor="$surface"
+          pressStyle={{ backgroundColor: '$greenLight' }}
           onPress={onCreateCustom}
           testID="maneuver-add-custom"
           {...buttonA11y(Platform.OS, { label: 'Crear maniobra personalizada' })}
         >
-          <XStack
-            alignItems="center"
-            gap="$2"
-            minHeight="$touchMin"
-            paddingHorizontal="$3"
-            borderRadius="$card"
-            borderWidth={1}
-            borderColor="$primary"
-            borderStyle="dashed"
-            backgroundColor="$surface"
-            pressStyle={{ backgroundColor: '$greenLight' }}
-          >
-            <View width={28} height={28} borderRadius="$pill" alignItems="center" justifyContent="center" backgroundColor="$primary">
-              <Plus size={18} color={WHITE} strokeWidth={3} />
-            </View>
-            <Text fontFamily="$body" fontSize="$4" lineHeight="$4" fontWeight="700" color="$primary" numberOfLines={1}>
-              Crear maniobra personalizada
-            </Text>
-          </XStack>
-        </Pressable>
+          <View width={28} height={28} borderRadius="$pill" alignItems="center" justifyContent="center" backgroundColor="$primary">
+            <Plus size={18} color={WHITE} strokeWidth={3} />
+          </View>
+          <Text fontFamily="$body" fontSize="$4" lineHeight="$4" fontWeight="700" color="$primary" numberOfLines={1}>
+            Crear maniobra personalizada
+          </Text>
+        </XStack>
       ) : null}
     </YStack>
   );
@@ -1030,28 +1027,24 @@ function ArrancarCTA({
   // En modo "guardar cambios" (edición de preset) el ícono ▶ de arrancar no aplica → ✓ Check; arrancar = ▶.
   const isSave = label === 'Guardar cambios';
   const busyLabel = isSave ? 'Guardando…' : 'Arrancando…';
-  const a11y =
-    Platform.OS === 'web'
-      ? { role: 'button' as const, 'aria-disabled': submitting }
-      : { accessibilityRole: 'button' as const, accessibilityState: { disabled: submitting } };
   return (
-    <Pressable onPress={submitting ? undefined : onPress} accessibilityLabel={label} {...a11y}>
-      <XStack
-        backgroundColor="$primary"
-        borderRadius="$pill"
-        height={64}
-        alignItems="center"
-        justifyContent="center"
-        gap="$2"
-        opacity={submitting ? 0.5 : 1}
-        pressStyle={{ backgroundColor: '$primaryPress' }}
-      >
-        {isSave ? <Check size={24} color={WHITE} strokeWidth={3} /> : <Play size={22} color={WHITE} fill={WHITE} />}
-        {/* lineHeight matching aunque las copys traen 'j'/'g' descendentes. */}
-        <Text fontFamily="$body" fontSize="$6" lineHeight="$6" fontWeight="700" color="$white" numberOfLines={1}>
-          {submitting ? busyLabel : label}
-        </Text>
-      </XStack>
-    </Pressable>
+    <XStack
+      backgroundColor="$primary"
+      borderRadius="$pill"
+      height={64}
+      alignItems="center"
+      justifyContent="center"
+      gap="$2"
+      opacity={submitting ? 0.5 : 1}
+      pressStyle={{ backgroundColor: '$primaryPress' }}
+      onPress={submitting ? undefined : onPress}
+      {...buttonA11y(Platform.OS, { label, disabled: submitting })}
+    >
+      {isSave ? <Check size={24} color={WHITE} strokeWidth={3} /> : <Play size={22} color={WHITE} fill={WHITE} />}
+      {/* lineHeight matching aunque las copys traen 'j'/'g' descendentes. */}
+      <Text fontFamily="$body" fontSize="$6" lineHeight="$6" fontWeight="700" color="$white" numberOfLines={1}>
+        {submitting ? busyLabel : label}
+      </Text>
+    </XStack>
   );
 }

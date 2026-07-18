@@ -523,23 +523,20 @@ function PresetRow({
 
         {/* ⋯ MENÚ DE ACCIONES (M7-A, R2.6): editar/eliminar la rutina. Affordance EXPLÍCITA (no swipe/long-press).
             Target XL (≥$touchMin) y zona de tap propia (no roba el tap del cuerpo que arranca la jornada). */}
-        <Pressable
+        <View
+          width="$touchMin"
+          height="$touchMin"
+          alignItems="center"
+          justifyContent="center"
+          borderRadius="$pill"
+          pressStyle={{ backgroundColor: '$greenLight' }}
           onPress={() => onMenu(preset)}
           hitSlop={8}
           testID={`preset-menu-${preset.id}`}
           {...buttonA11y(Platform.OS, { label: `Acciones de la rutina ${preset.name}` })}
         >
-          <View
-            width="$touchMin"
-            height="$touchMin"
-            alignItems="center"
-            justifyContent="center"
-            borderRadius="$pill"
-            pressStyle={{ backgroundColor: '$greenLight' }}
-          >
-            <MoreVertical size={getTokenValue('$navIcon', 'size')} color={MUTED} />
-          </View>
-        </Pressable>
+          <MoreVertical size={getTokenValue('$navIcon', 'size')} color={MUTED} />
+        </View>
       </XStack>
     </Card>
   );

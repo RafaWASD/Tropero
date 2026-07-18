@@ -164,18 +164,11 @@ export function SugerenciaVaciasSheet({
                 autoCapitalize="sentences"
                 testID="sugerencia-vacias-nombre"
               />
-              <Pressable
-                style={{ width: '100%' }}
-                onPress={busy ? undefined : submitCreate}
-                testID="sugerencia-vacias-crear"
-                {...buttonA11y(Platform.OS, { label: 'Crear lote y agregar', disabled: busy })}
-              >
-                <XStack width="100%" minHeight="$touchMin" alignItems="center" justifyContent="center" borderRadius="$pill" backgroundColor="$primary" opacity={busy ? 0.6 : 1} pressStyle={{ backgroundColor: '$primaryPress' }}>
-                  <Text fontFamily="$body" fontSize="$5" fontWeight="700" color="$white">
-                    {busy ? 'Agregando…' : 'Crear y agregar'}
-                  </Text>
-                </XStack>
-              </Pressable>
+              <XStack width="100%" minHeight="$touchMin" alignItems="center" justifyContent="center" borderRadius="$pill" backgroundColor="$primary" opacity={busy ? 0.6 : 1} pressStyle={{ backgroundColor: '$primaryPress' }} onPress={busy ? undefined : submitCreate} testID="sugerencia-vacias-crear" {...buttonA11y(Platform.OS, { label: 'Crear lote y agregar', disabled: busy })}>
+                <Text fontFamily="$body" fontSize="$5" fontWeight="700" color="$white">
+                  {busy ? 'Agregando…' : 'Crear y agregar'}
+                </Text>
+              </XStack>
               <View minHeight="$touchMin" alignItems="center" justifyContent="center" pressStyle={{ opacity: 0.6 }} onPress={() => setCreating(false)} {...buttonA11y(Platform.OS, { label: 'Volver a la lista' })}>
                 <Text fontFamily="$body" fontSize="$5" lineHeight="$5" fontWeight="600" color="$textMuted" numberOfLines={1}>
                   Volver
@@ -209,16 +202,14 @@ export function SugerenciaVaciasSheet({
 
               {/* Crear lote nuevo (RLV.13) — SOLO owner (RLS 0037). Fila de acción con "+". */}
               {canCreate ? (
-                <Pressable onPress={() => setCreating(true)} testID="sugerencia-vacias-crear-nuevo" {...buttonA11y(Platform.OS, { label: 'Crear lote nuevo' })}>
-                  <XStack alignItems="center" gap="$3" minHeight="$touchMin" borderRadius="$card" borderWidth={1} borderColor="$divider" backgroundColor="$white" paddingHorizontal="$4" pressStyle={{ backgroundColor: '$surface' }}>
-                    <View width="$icon" height="$icon" borderRadius="$pill" backgroundColor="$greenLight" alignItems="center" justifyContent="center" flexShrink={0}>
-                      <Plus size={getTokenValue('$navIcon', 'size')} color={getTokenValue('$primary', 'color')} strokeWidth={2.5} />
-                    </View>
-                    <Text fontFamily="$body" fontSize="$5" lineHeight="$5" fontWeight="700" color="$textPrimary" numberOfLines={1}>
-                      Crear lote nuevo
-                    </Text>
-                  </XStack>
-                </Pressable>
+                <XStack alignItems="center" gap="$3" minHeight="$touchMin" borderRadius="$card" borderWidth={1} borderColor="$divider" backgroundColor="$white" paddingHorizontal="$4" pressStyle={{ backgroundColor: '$surface' }} onPress={() => setCreating(true)} testID="sugerencia-vacias-crear-nuevo" {...buttonA11y(Platform.OS, { label: 'Crear lote nuevo' })}>
+                  <View width="$icon" height="$icon" borderRadius="$pill" backgroundColor="$greenLight" alignItems="center" justifyContent="center" flexShrink={0}>
+                    <Plus size={getTokenValue('$navIcon', 'size')} color={getTokenValue('$primary', 'color')} strokeWidth={2.5} />
+                  </View>
+                  <Text fontFamily="$body" fontSize="$5" lineHeight="$5" fontWeight="700" color="$textPrimary" numberOfLines={1}>
+                    Crear lote nuevo
+                  </Text>
+                </XStack>
               ) : null}
             </>
           )}
