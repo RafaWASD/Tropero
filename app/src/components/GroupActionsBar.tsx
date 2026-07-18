@@ -15,7 +15,7 @@
 // la rutina, Destetar le sigue): las gateadas arriba cuando están, y Castrar —la acción siempre-presente
 // (R1.5: no se gatea)— al final. Cero hardcode (ADR-023 §4): tokens.
 
-import { Platform, Pressable } from 'react-native';
+import { Platform } from 'react-native';
 import { getTokenValue, Text, XStack, YStack } from 'tamagui';
 import { Scissors, Syringe, Milk } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
@@ -63,25 +63,29 @@ function ActionButton({
 }) {
   const primary = getTokenValue('$primary', 'color');
   return (
-    <Pressable style={{ width: '100%' }} onPress={onPress} {...buttonA11y(Platform.OS, { label })}>
-      <XStack
-        width="100%"
-        minHeight="$touchMin"
-        alignItems="center"
-        justifyContent="center"
-        gap="$2"
-        borderRadius="$pill"
-        backgroundColor="transparent"
-        borderWidth={2}
-        borderColor="$primary"
-        paddingHorizontal="$5"
-        pressStyle={{ backgroundColor: '$surface' }}
-      >
-        <Icon size={20} color={primary} strokeWidth={2.5} />
-        <Text fontFamily="$body" fontSize="$5" fontWeight="600" color="$primary">
-          {label}
-        </Text>
-      </XStack>
-    </Pressable>
+    // onPress + a11y van DIRECTO en el XStack (misma pieza que el pressStyle): en RN new-arch, envolver
+    // un Tamagui-con-pressStyle en un <Pressable> de RN roba el responder de touch → onPress no dispara
+    // en nativo (patrón probado en AnimalRow / GoogleSignInButton). El width:100% del Pressable ya lo
+    // tiene el XStack (width="100%").
+    <XStack
+      width="100%"
+      minHeight="$touchMin"
+      alignItems="center"
+      justifyContent="center"
+      gap="$2"
+      borderRadius="$pill"
+      backgroundColor="transparent"
+      borderWidth={2}
+      borderColor="$primary"
+      paddingHorizontal="$5"
+      pressStyle={{ backgroundColor: '$surface' }}
+      onPress={onPress}
+      {...buttonA11y(Platform.OS, { label })}
+    >
+      <Icon size={20} color={primary} strokeWidth={2.5} />
+      <Text fontFamily="$body" fontSize="$5" fontWeight="600" color="$primary">
+        {label}
+      </Text>
+    </XStack>
   );
 }

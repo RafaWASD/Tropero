@@ -29,6 +29,7 @@ import { Platform, Pressable, StyleSheet } from 'react-native';
 import { getTokenValue, Text, View, XStack, YStack, type ColorTokens } from 'tamagui';
 import { Building2, Check, LayoutGrid, Plus } from 'lucide-react-native';
 import { shadows } from '../../tamagui.config';
+import { buttonA11y } from '../utils/a11y';
 import { roleLabel } from '../utils/establishment';
 import type { UserRole } from '../types';
 
@@ -146,21 +147,22 @@ function Row({
 }) {
   const hasSubtitle = subtitle != null && subtitle.trim().length > 0;
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={accessibilityLabel ?? label}
+    // onPress + a11y van DIRECTO en el XStack (misma pieza que el pressStyle): en RN new-arch, envolver
+    // un Tamagui-con-pressStyle en un <Pressable> de RN roba el responder de touch → onPress no dispara
+    // en nativo (patrón probado en AnimalRow / GoogleSignInButton). a11y por buttonA11y (NUNCA
+    // accessibility* crudo sobre Tamagui → leakea al DOM en web).
+    <XStack
+      width="100%"
+      alignItems="center"
+      gap="$3"
+      minHeight="$touchMin"
+      paddingHorizontal="$4"
+      paddingVertical="$2"
+      backgroundColor={tone === 'active' ? '$greenLight' : 'transparent'}
+      pressStyle={{ backgroundColor: '$surface' }}
       onPress={onPress}
+      {...buttonA11y(Platform.OS, { label: accessibilityLabel ?? label })}
     >
-      <XStack
-        width="100%"
-        alignItems="center"
-        gap="$3"
-        minHeight="$touchMin"
-        paddingHorizontal="$4"
-        paddingVertical="$2"
-        backgroundColor={tone === 'active' ? '$greenLight' : 'transparent'}
-        pressStyle={{ backgroundColor: '$surface' }}
-      >
         {/* Ícono guía (reconocer > recordar, Nielsen #6). Ancho fijo, no encoge. */}
         <View width="$icon" alignItems="center" flexShrink={0}>
           {icon}
@@ -200,8 +202,7 @@ function Row({
             {trailing}
           </View>
         ) : null}
-      </XStack>
-    </Pressable>
+    </XStack>
   );
 }
 

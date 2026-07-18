@@ -6,7 +6,7 @@
 // $greenLight, nombre hero + subtítulo de cabezas, chevron de afford. Target ≥$touchMin (manga-friendly,
 // Fitts). Cero hardcode (ADR-023 §4): tokens + getTokenValue para íconos lucide. a11y por helper.
 
-import { Platform, Pressable } from 'react-native';
+import { Platform } from 'react-native';
 import { getTokenValue, Text, View, XStack, YStack } from 'tamagui';
 import { ChevronRight } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
@@ -37,20 +37,24 @@ export function GroupSummaryCard({ icon: Icon, name, headCount, meta, onPress }:
   const subtitle = meta ? `${meta} · ${headLabel}` : headLabel;
 
   return (
-    <Pressable onPress={onPress} {...buttonA11y(Platform.OS, { label: `${name}, ${subtitle}` })}>
-      <XStack
-        width="100%"
-        alignItems="center"
-        gap="$3"
-        minHeight="$touchMin"
-        borderRadius="$card"
-        borderWidth={2}
-        borderColor="$divider"
-        backgroundColor="$white"
-        paddingHorizontal="$4"
-        paddingVertical="$3"
-        pressStyle={{ backgroundColor: '$surface' }}
-      >
+    // onPress + a11y van DIRECTO en el XStack (misma pieza que el pressStyle): en RN new-arch, envolver
+    // un Tamagui-con-pressStyle en un <Pressable> de RN roba el responder de touch → onPress no dispara
+    // en nativo (patrón probado en AnimalRow / GoogleSignInButton). En web anda igual.
+    <XStack
+      width="100%"
+      alignItems="center"
+      gap="$3"
+      minHeight="$touchMin"
+      borderRadius="$card"
+      borderWidth={2}
+      borderColor="$divider"
+      backgroundColor="$white"
+      paddingHorizontal="$4"
+      paddingVertical="$3"
+      pressStyle={{ backgroundColor: '$surface' }}
+      onPress={onPress}
+      {...buttonA11y(Platform.OS, { label: `${name}, ${subtitle}` })}
+    >
         <View
           width="$icon"
           height="$icon"
@@ -73,7 +77,6 @@ export function GroupSummaryCard({ icon: Icon, name, headCount, meta, onPress }:
         <View flexShrink={0}>
           <ChevronRight size={22} color={faint} strokeWidth={2} />
         </View>
-      </XStack>
-    </Pressable>
+    </XStack>
   );
 }
