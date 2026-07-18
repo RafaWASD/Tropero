@@ -243,40 +243,46 @@ function SessionPicker({
       <Text fontFamily="$body" fontSize="$3" fontWeight="600" color="$textMuted">
         {title}
       </Text>
-      <Pressable onPress={() => setOpen((v) => !v)} {...buttonA11y(Platform.OS, { label: title, selected: open })}>
-        <XStack
-          width="100%"
-          alignItems="center"
-          gap="$2"
-          minHeight="$chipMin"
-          paddingHorizontal="$3"
-          paddingVertical="$2"
-          borderRadius="$pill"
-          backgroundColor={selected ? '$greenLight' : '$surface'}
-          borderWidth={1}
-          borderColor={selected ? '$greenLight' : '$divider'}
-          pressStyle={{ opacity: 0.85 }}
+      <XStack
+        width="100%"
+        alignItems="center"
+        gap="$2"
+        minHeight="$chipMin"
+        paddingHorizontal="$3"
+        paddingVertical="$2"
+        borderRadius="$pill"
+        backgroundColor={selected ? '$greenLight' : '$surface'}
+        borderWidth={1}
+        borderColor={selected ? '$greenLight' : '$divider'}
+        pressStyle={{ opacity: 0.85 }}
+        onPress={() => setOpen((v) => !v)}
+        {...buttonA11y(Platform.OS, { label: title, selected: open })}
+      >
+        <Text
+          flex={1}
+          minWidth={0}
+          numberOfLines={1}
+          fontFamily="$body"
+          fontSize="$4"
+          fontWeight={selected ? '600' : '400'}
+          color={selected ? '$primary' : '$textMuted'}
         >
-          <Text
-            flex={1}
-            minWidth={0}
-            numberOfLines={1}
-            fontFamily="$body"
-            fontSize="$4"
-            fontWeight={selected ? '600' : '400'}
-            color={selected ? '$primary' : '$textMuted'}
-          >
-            {selected ? sessionRangeLabel(selected.startedAt, selected.endedAt) : 'Elegí una jornada'}
-          </Text>
-        </XStack>
-      </Pressable>
+          {selected ? sessionRangeLabel(selected.startedAt, selected.endedAt) : 'Elegí una jornada'}
+        </Text>
+      </XStack>
       {open ? (
         <Card gap="$1" paddingVertical="$2">
           {list.map((s) => {
             const isDisabled = s.id === disabledId;
             return (
-              <Pressable
+              <XStack
                 key={s.id}
+                alignItems="center"
+                gap="$2"
+                minHeight="$chipMin"
+                paddingHorizontal="$2"
+                opacity={isDisabled ? 0.4 : 1}
+                pressStyle={{ opacity: 0.6 }}
                 disabled={isDisabled}
                 onPress={() => {
                   onSelect(s.id);
@@ -288,29 +294,20 @@ function SessionPicker({
                   disabled: isDisabled,
                 })}
               >
-                <XStack
-                  alignItems="center"
-                  gap="$2"
-                  minHeight="$chipMin"
-                  paddingHorizontal="$2"
-                  opacity={isDisabled ? 0.4 : 1}
-                  pressStyle={{ opacity: 0.6 }}
+                <Text
+                  flex={1}
+                  minWidth={0}
+                  numberOfLines={1}
+                  fontFamily="$body"
+                  fontSize="$4"
+                  fontWeight="500"
+                  color="$textPrimary"
                 >
-                  <Text
-                    flex={1}
-                    minWidth={0}
-                    numberOfLines={1}
-                    fontFamily="$body"
-                    fontSize="$4"
-                    fontWeight="500"
-                    color="$textPrimary"
-                  >
-                    {sessionRangeLabel(s.startedAt, s.endedAt)}
-                    {isDisabled ? ' · ya elegida' : ''}
-                  </Text>
-                  {s.id === selectedId ? <Check size={20} color={primary} strokeWidth={2.5} /> : null}
-                </XStack>
-              </Pressable>
+                  {sessionRangeLabel(s.startedAt, s.endedAt)}
+                  {isDisabled ? ' · ya elegida' : ''}
+                </Text>
+                {s.id === selectedId ? <Check size={20} color={primary} strokeWidth={2.5} /> : null}
+              </XStack>
             );
           })}
         </Card>

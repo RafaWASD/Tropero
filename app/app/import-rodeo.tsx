@@ -378,42 +378,42 @@ function SourceCard({
   const primary = getTokenValue('$primary', 'color');
   const Icon = icon === 'spreadsheet' ? FileSpreadsheet : FileText;
   return (
-    <Pressable onPress={onPress} {...buttonA11y(Platform.OS, { label: title, selected })}>
-      <XStack
-        width="100%"
+    <XStack
+      width="100%"
+      alignItems="center"
+      gap="$3"
+      minHeight="$touchMin"
+      borderRadius="$card"
+      borderWidth={2}
+      borderColor={selected ? '$primary' : '$divider'}
+      backgroundColor={selected ? '$surface' : '$white'}
+      paddingHorizontal="$4"
+      paddingVertical="$3"
+      pressStyle={{ opacity: 0.85 }}
+      onPress={onPress}
+      {...buttonA11y(Platform.OS, { label: title, selected })}
+    >
+      <View
+        width="$icon"
+        height="$icon"
+        borderRadius="$pill"
+        backgroundColor="$greenLight"
         alignItems="center"
-        gap="$3"
-        minHeight="$touchMin"
-        borderRadius="$card"
-        borderWidth={2}
-        borderColor={selected ? '$primary' : '$divider'}
-        backgroundColor={selected ? '$surface' : '$white'}
-        paddingHorizontal="$4"
-        paddingVertical="$3"
-        pressStyle={{ opacity: 0.85 }}
+        justifyContent="center"
+        flexShrink={0}
       >
-        <View
-          width="$icon"
-          height="$icon"
-          borderRadius="$pill"
-          backgroundColor="$greenLight"
-          alignItems="center"
-          justifyContent="center"
-          flexShrink={0}
-        >
-          <Icon size={22} color={primary} strokeWidth={2.5} />
-        </View>
-        <YStack flex={1} minWidth={0} gap="$1">
-          <Text fontFamily="$body" fontSize="$6" lineHeight="$6" fontWeight="600" color="$textPrimary">
-            {title}
-          </Text>
-          <Text fontFamily="$body" fontSize="$3" fontWeight="400" color="$textMuted">
-            {subtitle}
-          </Text>
-        </YStack>
-        {selected ? <Check size={22} color={primary} strokeWidth={2.5} /> : null}
-      </XStack>
-    </Pressable>
+        <Icon size={22} color={primary} strokeWidth={2.5} />
+      </View>
+      <YStack flex={1} minWidth={0} gap="$1">
+        <Text fontFamily="$body" fontSize="$6" lineHeight="$6" fontWeight="600" color="$textPrimary">
+          {title}
+        </Text>
+        <Text fontFamily="$body" fontSize="$3" fontWeight="400" color="$textMuted">
+          {subtitle}
+        </Text>
+      </YStack>
+      {selected ? <Check size={22} color={primary} strokeWidth={2.5} /> : null}
+    </XStack>
   );
 }
 
@@ -432,38 +432,35 @@ function RodeoSelector({
       {rodeos.map((r) => {
         const selected = r.id === selectedId;
         return (
-          <Pressable
+          <XStack
             key={r.id}
+            width="100%"
+            alignItems="center"
+            gap="$2"
+            minHeight="$touchMin"
+            borderRadius="$card"
+            borderWidth={2}
+            borderColor={selected ? '$primary' : '$divider'}
+            backgroundColor={selected ? '$primary' : '$white'}
+            paddingHorizontal="$4"
+            paddingVertical="$3"
+            pressStyle={{ opacity: 0.85 }}
             onPress={() => onSelect(r.id)}
             {...buttonA11y(Platform.OS, { label: `Rodeo ${r.name}`, selected })}
           >
-            <XStack
-              width="100%"
-              alignItems="center"
-              gap="$2"
-              minHeight="$touchMin"
-              borderRadius="$card"
-              borderWidth={2}
-              borderColor={selected ? '$primary' : '$divider'}
-              backgroundColor={selected ? '$primary' : '$white'}
-              paddingHorizontal="$4"
-              paddingVertical="$3"
-              pressStyle={{ opacity: 0.85 }}
+            <Text
+              flex={1}
+              minWidth={0}
+              numberOfLines={1}
+              fontFamily="$body"
+              fontSize="$5"
+              fontWeight="600"
+              color={selected ? '$white' : '$textPrimary'}
             >
-              <Text
-                flex={1}
-                minWidth={0}
-                numberOfLines={1}
-                fontFamily="$body"
-                fontSize="$5"
-                fontWeight="600"
-                color={selected ? '$white' : '$textPrimary'}
-              >
-                {r.name}
-              </Text>
-              {selected ? <Check size={20} color={getTokenValue('$white', 'color')} strokeWidth={2.5} /> : null}
-            </XStack>
-          </Pressable>
+              {r.name}
+            </Text>
+            {selected ? <Check size={20} color={getTokenValue('$white', 'color')} strokeWidth={2.5} /> : null}
+          </XStack>
         );
       })}
     </YStack>

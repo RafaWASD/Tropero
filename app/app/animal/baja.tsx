@@ -316,44 +316,44 @@ function ReasonCard({
   const terracota = getTokenValue('$terracota', 'color');
   const faint = getTokenValue('$textFaint', 'color');
   return (
-    <Pressable onPress={onPress} {...buttonA11y(Platform.OS, { label: title })}>
-      <XStack
-        width="100%"
+    <XStack
+      width="100%"
+      alignItems="center"
+      gap="$3"
+      minHeight="$touchMin"
+      borderRadius="$card"
+      borderWidth={2}
+      borderColor="$divider"
+      backgroundColor="$white"
+      paddingHorizontal="$4"
+      paddingVertical="$3"
+      pressStyle={{ backgroundColor: '$surface' }}
+      onPress={onPress}
+      {...buttonA11y(Platform.OS, { label: title })}
+    >
+      <View
+        width="$icon"
+        height="$icon"
+        borderRadius="$pill"
+        backgroundColor="$surface"
+        borderWidth={1}
+        borderColor="$terracota"
         alignItems="center"
-        gap="$3"
-        minHeight="$touchMin"
-        borderRadius="$card"
-        borderWidth={2}
-        borderColor="$divider"
-        backgroundColor="$white"
-        paddingHorizontal="$4"
-        paddingVertical="$3"
-        pressStyle={{ backgroundColor: '$surface' }}
+        justifyContent="center"
+        flexShrink={0}
       >
-        <View
-          width="$icon"
-          height="$icon"
-          borderRadius="$pill"
-          backgroundColor="$surface"
-          borderWidth={1}
-          borderColor="$terracota"
-          alignItems="center"
-          justifyContent="center"
-          flexShrink={0}
-        >
-          <Icon size={22} color={terracota} strokeWidth={2.5} />
-        </View>
-        <YStack flex={1} minWidth={0} gap="$1">
-          <Text fontFamily="$body" fontSize="$6" lineHeight="$6" fontWeight="600" color="$textPrimary" numberOfLines={1}>
-            {title}
-          </Text>
-          <Text fontFamily="$body" fontSize="$3" fontWeight="400" color="$textMuted" numberOfLines={1}>
-            {subtitle}
-          </Text>
-        </YStack>
-        <ChevronRight size={22} color={faint} strokeWidth={2} />
-      </XStack>
-    </Pressable>
+        <Icon size={22} color={terracota} strokeWidth={2.5} />
+      </View>
+      <YStack flex={1} minWidth={0} gap="$1">
+        <Text fontFamily="$body" fontSize="$6" lineHeight="$6" fontWeight="600" color="$textPrimary" numberOfLines={1}>
+          {title}
+        </Text>
+        <Text fontFamily="$body" fontSize="$3" fontWeight="400" color="$textMuted" numberOfLines={1}>
+          {subtitle}
+        </Text>
+      </YStack>
+      <ChevronRight size={22} color={faint} strokeWidth={2} />
+    </XStack>
   );
 }
 
@@ -468,26 +468,22 @@ function DestructiveButton({
 }) {
   const white = getTokenValue('$white', 'color');
   return (
-    <Pressable
-      style={{ width: '100%' }}
+    <XStack
+      width="100%"
+      minHeight="$touchMin"
+      alignItems="center"
+      justifyContent="center"
+      borderRadius="$pill"
+      backgroundColor="$terracota"
+      paddingHorizontal="$5"
+      opacity={disabled ? 0.5 : 1}
+      pressStyle={{ opacity: 0.85 }}
       onPress={disabled ? undefined : onPress}
       {...buttonA11y(Platform.OS, { label: 'Dar de baja', disabled })}
     >
-      <XStack
-        width="100%"
-        minHeight="$touchMin"
-        alignItems="center"
-        justifyContent="center"
-        borderRadius="$pill"
-        backgroundColor="$terracota"
-        paddingHorizontal="$5"
-        opacity={disabled ? 0.5 : 1}
-        pressStyle={{ opacity: 0.85 }}
-      >
-        <Text fontFamily="$body" fontSize="$5" fontWeight="600" color="$white">
-          {label}
-        </Text>
-      </XStack>
-    </Pressable>
+      <Text fontFamily="$body" fontSize="$5" fontWeight="600" color="$white">
+        {label}
+      </Text>
+    </XStack>
   );
 }

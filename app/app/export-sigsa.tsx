@@ -475,20 +475,25 @@ function FiltersSection({
 
   return (
     <YStack gap="$2">
-      <Pressable onPress={onToggle} {...buttonA11y(Platform.OS, { label: 'Filtros', selected: open })}>
-        <XStack alignItems="center" gap="$2" minHeight="$chipMin" pressStyle={{ opacity: 0.6 }}>
-          <SlidersHorizontal size={18} color={muted} strokeWidth={2} />
-          <Text flex={1} minWidth={0} fontFamily="$body" fontSize="$3" fontWeight="600" color="$textMuted">
-            {hasActiveFilter ? 'Filtros · activos' : 'Filtros'}
-          </Text>
-          <ChevronRight
-            size={18}
-            color={muted}
-            strokeWidth={2}
-            style={{ transform: [{ rotate: open ? '90deg' : '0deg' }] }}
-          />
-        </XStack>
-      </Pressable>
+      <XStack
+        alignItems="center"
+        gap="$2"
+        minHeight="$chipMin"
+        pressStyle={{ opacity: 0.6 }}
+        onPress={onToggle}
+        {...buttonA11y(Platform.OS, { label: 'Filtros', selected: open })}
+      >
+        <SlidersHorizontal size={18} color={muted} strokeWidth={2} />
+        <Text flex={1} minWidth={0} fontFamily="$body" fontSize="$3" fontWeight="600" color="$textMuted">
+          {hasActiveFilter ? 'Filtros · activos' : 'Filtros'}
+        </Text>
+        <ChevronRight
+          size={18}
+          color={muted}
+          strokeWidth={2}
+          style={{ transform: [{ rotate: open ? '90deg' : '0deg' }] }}
+        />
+      </XStack>
 
       {open ? (
         <Card gap="$3">
@@ -546,13 +551,18 @@ function FiltersSection({
           </YStack>
 
           {hasActiveFilter ? (
-            <Pressable onPress={onClear} {...buttonA11y(Platform.OS, { label: 'Limpiar filtros' })}>
-              <XStack alignItems="center" justifyContent="center" minHeight="$chipMin" pressStyle={{ opacity: 0.6 }}>
-                <Text fontFamily="$body" fontSize="$4" fontWeight="600" color="$primary">
-                  Limpiar filtros
-                </Text>
-              </XStack>
-            </Pressable>
+            <XStack
+              alignItems="center"
+              justifyContent="center"
+              minHeight="$chipMin"
+              pressStyle={{ opacity: 0.6 }}
+              onPress={onClear}
+              {...buttonA11y(Platform.OS, { label: 'Limpiar filtros' })}
+            >
+              <Text fontFamily="$body" fontSize="$4" fontWeight="600" color="$primary">
+                Limpiar filtros
+              </Text>
+            </XStack>
           ) : null}
         </Card>
       ) : null}
@@ -594,29 +604,29 @@ function SegmentedTabs({
 
 function TabButton({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
   return (
-    <Pressable style={{ flex: 1 }} onPress={onPress} {...buttonA11y(Platform.OS, { label, selected: active })}>
-      <View
-        flex={1}
-        minHeight="$chipMin"
-        alignItems="center"
-        justifyContent="center"
-        borderRadius="$pill"
-        paddingHorizontal="$2"
-        backgroundColor={active ? '$primary' : 'transparent'}
-        pressStyle={{ opacity: 0.8 }}
+    <View
+      flex={1}
+      minHeight="$chipMin"
+      alignItems="center"
+      justifyContent="center"
+      borderRadius="$pill"
+      paddingHorizontal="$2"
+      backgroundColor={active ? '$primary' : 'transparent'}
+      pressStyle={{ opacity: 0.8 }}
+      onPress={onPress}
+      {...buttonA11y(Platform.OS, { label, selected: active })}
+    >
+      <Text
+        fontFamily="$body"
+        fontSize="$3"
+        lineHeight="$3"
+        fontWeight={active ? '700' : '500'}
+        color={active ? '$white' : '$textMuted'}
+        numberOfLines={1}
       >
-        <Text
-          fontFamily="$body"
-          fontSize="$3"
-          lineHeight="$3"
-          fontWeight={active ? '700' : '500'}
-          color={active ? '$white' : '$textMuted'}
-          numberOfLines={1}
-        >
-          {label}
-        </Text>
-      </View>
-    </Pressable>
+        {label}
+      </Text>
+    </View>
   );
 }
 
@@ -740,27 +750,24 @@ function HistoryList({
               {exportLogDateLabel(entry.generatedAt)}
             </Text>
           </YStack>
-          <Pressable
+          <XStack
+            flexShrink={0}
+            alignItems="center"
+            gap="$1"
+            minHeight="$chipMin"
+            paddingHorizontal="$2"
+            opacity={isGenerating ? 0.5 : 1}
+            pressStyle={{ opacity: 0.6 }}
             disabled={isGenerating}
             hitSlop={8}
             onPress={() => onRedownload(entry.id)}
             {...buttonA11y(Platform.OS, { label: `Re-descargar la exportación del ${exportLogDateLabel(entry.generatedAt)}`, disabled: isGenerating })}
           >
-            <XStack
-              flexShrink={0}
-              alignItems="center"
-              gap="$1"
-              minHeight="$chipMin"
-              paddingHorizontal="$2"
-              opacity={isGenerating ? 0.5 : 1}
-              pressStyle={{ opacity: 0.6 }}
-            >
-              <Download size={18} color={primary} strokeWidth={2} />
-              <Text fontFamily="$body" fontSize="$3" fontWeight="600" color="$primary">
-                Re-descargar
-              </Text>
-            </XStack>
-          </Pressable>
+            <Download size={18} color={primary} strokeWidth={2} />
+            <Text fontFamily="$body" fontSize="$3" fontWeight="600" color="$primary">
+              Re-descargar
+            </Text>
+          </XStack>
         </XStack>
       ))}
     </ListCard>

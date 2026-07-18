@@ -79,7 +79,11 @@ export default function SesionesScreen() {
             {(sessions.data ?? []).map((s, i) => (
               <YStack key={s.id}>
                 {i > 0 ? <View height={1} backgroundColor="$divider" /> : null}
-                <Pressable
+                <XStack
+                  alignItems="center"
+                  gap="$3"
+                  minHeight="$animalRow"
+                  pressStyle={{ opacity: 0.6 }}
                   onPress={() =>
                     router.push({
                       pathname: '/reportes/sesion/[id]',
@@ -90,27 +94,25 @@ export default function SesionesScreen() {
                     label: `Ver resumen de la jornada del ${sessionRangeLabel(s.startedAt, s.endedAt)}`,
                   })}
                 >
-                  <XStack alignItems="center" gap="$3" minHeight="$animalRow" pressStyle={{ opacity: 0.6 }}>
-                    <YStack flex={1} minWidth={0} gap="$1">
-                      <Text
-                        numberOfLines={1}
-                        fontFamily="$body"
-                        fontSize="$4"
-                        fontWeight="600"
-                        color="$textPrimary"
-                      >
-                        {sessionRangeLabel(s.startedAt, s.endedAt)}
-                      </Text>
-                      <Text numberOfLines={1} fontFamily="$body" fontSize="$2" color="$textMuted">
-                        {s.status === 'active' ? 'Abierta · ' : ''}
-                        {s.animalCount === 1 ? '1 animal' : `${s.animalCount} animales`} ·{' '}
-                        {s.eventCount === 1 ? '1 evento' : `${s.eventCount} eventos`}
-                        {s.workLotLabel ? ` · ${s.workLotLabel}` : ''}
-                      </Text>
-                    </YStack>
-                    <ChevronRight size={20} color={muted} strokeWidth={2} />
-                  </XStack>
-                </Pressable>
+                  <YStack flex={1} minWidth={0} gap="$1">
+                    <Text
+                      numberOfLines={1}
+                      fontFamily="$body"
+                      fontSize="$4"
+                      fontWeight="600"
+                      color="$textPrimary"
+                    >
+                      {sessionRangeLabel(s.startedAt, s.endedAt)}
+                    </Text>
+                    <Text numberOfLines={1} fontFamily="$body" fontSize="$2" color="$textMuted">
+                      {s.status === 'active' ? 'Abierta · ' : ''}
+                      {s.animalCount === 1 ? '1 animal' : `${s.animalCount} animales`} ·{' '}
+                      {s.eventCount === 1 ? '1 evento' : `${s.eventCount} eventos`}
+                      {s.workLotLabel ? ` · ${s.workLotLabel}` : ''}
+                    </Text>
+                  </YStack>
+                  <ChevronRight size={20} color={muted} strokeWidth={2} />
+                </XStack>
               </YStack>
             ))}
           </Card>

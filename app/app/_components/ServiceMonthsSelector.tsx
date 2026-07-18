@@ -33,7 +33,7 @@
 // Cero hardcode (ADR-023 §4): tokens. a11y split web/native (a11y.ts). Light-only (MVP). Voseo.
 
 import { useState } from 'react';
-import { Platform, Pressable } from 'react-native';
+import { Platform } from 'react-native';
 import { Text, View, XStack, YStack } from 'tamagui';
 
 import { buttonA11y, labelA11y } from '@/utils/a11y';
@@ -97,35 +97,32 @@ function MonthChip({
   const textColor = state === 'in' ? '$white' : state === 'anchor' ? '$primary' : '$textPrimary';
 
   return (
-    <Pressable
+    <View
       testID={`month-chip-${month}`}
+      flexBasis="31%"
+      flexGrow={1}
+      minHeight="$touchMin"
+      borderRadius="$card"
+      borderWidth={borderWidth}
+      borderColor={borderColor}
+      backgroundColor={backgroundColor}
+      alignItems="center"
+      justifyContent="center"
+      pressStyle={{ opacity: 0.7 }}
       onPress={onPress}
-      style={{ flexBasis: '31%', flexGrow: 1 }}
       {...a11y}
     >
-      <View
-        width="100%"
-        minHeight="$touchMin"
-        borderRadius="$card"
-        borderWidth={borderWidth}
-        borderColor={borderColor}
-        backgroundColor={backgroundColor}
-        alignItems="center"
-        justifyContent="center"
-        pressStyle={{ opacity: 0.7 }}
+      <Text
+        fontFamily="$body"
+        fontSize="$6"
+        lineHeight="$6"
+        fontWeight="600"
+        color={textColor}
+        numberOfLines={1}
       >
-        <Text
-          fontFamily="$body"
-          fontSize="$6"
-          lineHeight="$6"
-          fontWeight="600"
-          color={textColor}
-          numberOfLines={1}
-        >
-          {label}
-        </Text>
-      </View>
-    </Pressable>
+        {label}
+      </Text>
+    </View>
   );
 }
 
@@ -142,30 +139,31 @@ function ShortcutChip({
 }) {
   const a11y = buttonA11y(Platform.OS, { label: `Atajo ${shortcut.label}`, selected: active });
   return (
-    <Pressable testID={`shortcut-${shortcut.id}`} onPress={onPress} {...a11y}>
-      <View
-        minHeight="$chipMin"
-        borderRadius="$pill"
-        borderWidth={1}
-        borderColor={active ? '$primary' : '$divider'}
-        backgroundColor={active ? '$surface' : '$white'}
-        paddingHorizontal="$3"
-        alignItems="center"
-        justifyContent="center"
-        pressStyle={{ opacity: 0.7 }}
+    <View
+      testID={`shortcut-${shortcut.id}`}
+      minHeight="$chipMin"
+      borderRadius="$pill"
+      borderWidth={1}
+      borderColor={active ? '$primary' : '$divider'}
+      backgroundColor={active ? '$surface' : '$white'}
+      paddingHorizontal="$3"
+      alignItems="center"
+      justifyContent="center"
+      pressStyle={{ opacity: 0.7 }}
+      onPress={onPress}
+      {...a11y}
+    >
+      <Text
+        fontFamily="$body"
+        fontSize="$4"
+        lineHeight="$4"
+        fontWeight="600"
+        color={active ? '$primary' : '$textMuted'}
+        numberOfLines={1}
       >
-        <Text
-          fontFamily="$body"
-          fontSize="$4"
-          lineHeight="$4"
-          fontWeight="600"
-          color={active ? '$primary' : '$textMuted'}
-          numberOfLines={1}
-        >
-          {shortcut.label}
-        </Text>
-      </View>
-    </Pressable>
+        {shortcut.label}
+      </Text>
+    </View>
   );
 }
 

@@ -188,28 +188,24 @@ export default function LoteGroupScreen() {
 
         {/* CTA fijo abajo: habilitado con ≥1 seleccionado (RLV.3.1). */}
         <YStack width="100%" paddingHorizontal="$4" paddingTop="$3" paddingBottom={insets.bottom + 12} borderTopWidth={1} borderTopColor="$divider" backgroundColor="$bg">
-          <Pressable
-            style={{ width: '100%' }}
+          <XStack
+            width="100%"
+            minHeight="$touchMin"
+            alignItems="center"
+            justifyContent="center"
+            borderRadius="$pill"
+            backgroundColor="$terracota"
+            paddingHorizontal="$5"
+            opacity={count === 0 ? 0.5 : 1}
+            pressStyle={{ opacity: 0.85 }}
             onPress={count > 0 ? goToVenta : undefined}
             testID="lote-registrar-salida"
             {...buttonA11y(Platform.OS, { label: 'Registrar salida', disabled: count === 0 })}
           >
-            <XStack
-              width="100%"
-              minHeight="$touchMin"
-              alignItems="center"
-              justifyContent="center"
-              borderRadius="$pill"
-              backgroundColor="$terracota"
-              paddingHorizontal="$5"
-              opacity={count === 0 ? 0.5 : 1}
-              pressStyle={{ opacity: 0.85 }}
-            >
-              <Text fontFamily="$body" fontSize="$5" fontWeight="600" color="$white">
-                {count > 0 ? `Registrar salida (${count})` : 'Registrar salida'}
-              </Text>
-            </XStack>
-          </Pressable>
+            <Text fontFamily="$body" fontSize="$5" fontWeight="600" color="$white">
+              {count > 0 ? `Registrar salida (${count})` : 'Registrar salida'}
+            </Text>
+          </XStack>
         </YStack>
       </YStack>
     );
@@ -248,31 +244,27 @@ export default function LoteGroupScreen() {
 
       {canSell ? (
         <YStack width="100%" paddingHorizontal="$4" paddingTop="$3" paddingBottom={insets.bottom + 12} borderTopWidth={1} borderTopColor="$divider" backgroundColor="$bg">
-          <Pressable
-            style={{ width: '100%' }}
+          <XStack
+            width="100%"
+            minHeight="$touchMin"
+            alignItems="center"
+            justifyContent="center"
+            gap="$2"
+            borderRadius="$pill"
+            borderWidth={2}
+            borderColor="$terracota"
+            backgroundColor="$white"
+            paddingHorizontal="$5"
+            pressStyle={{ backgroundColor: '$surface' }}
             onPress={enterSelection}
             testID="lote-vender-descartar"
             {...buttonA11y(Platform.OS, { label: 'Vender o descartar animales del lote' })}
           >
-            <XStack
-              width="100%"
-              minHeight="$touchMin"
-              alignItems="center"
-              justifyContent="center"
-              gap="$2"
-              borderRadius="$pill"
-              borderWidth={2}
-              borderColor="$terracota"
-              backgroundColor="$white"
-              paddingHorizontal="$5"
-              pressStyle={{ backgroundColor: '$surface' }}
-            >
-              <Tag size={getTokenValue('$navIcon', 'size')} color={getTokenValue('$terracota', 'color')} strokeWidth={2.5} />
-              <Text fontFamily="$body" fontSize="$5" fontWeight="700" color="$terracota">
-                Vender / Descartar
-              </Text>
-            </XStack>
-          </Pressable>
+            <Tag size={getTokenValue('$navIcon', 'size')} color={getTokenValue('$terracota', 'color')} strokeWidth={2.5} />
+            <Text fontFamily="$body" fontSize="$5" fontWeight="700" color="$terracota">
+              Vender / Descartar
+            </Text>
+          </XStack>
         </YStack>
       ) : null}
     </YStack>

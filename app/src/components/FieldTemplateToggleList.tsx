@@ -181,22 +181,19 @@ function ToggleRow({
   return (
     <XStack width="100%" alignItems="center" gap="$2">
       {row}
-      <Pressable
+      <View
+        width="$touchMin"
+        height="$touchMin"
+        alignItems="center"
+        justifyContent="center"
+        borderRadius="$pill"
+        pressStyle={{ backgroundColor: '$greenLight' }}
         onPress={onMenu}
         hitSlop={8}
         {...buttonA11y(Platform.OS, { label: `Acciones de ${label}` })}
       >
-        <View
-          width="$touchMin"
-          height="$touchMin"
-          alignItems="center"
-          justifyContent="center"
-          borderRadius="$pill"
-          pressStyle={{ backgroundColor: '$greenLight' }}
-        >
-          <MoreVertical size={getTokenValue('$navIcon', 'size')} color={getTokenValue('$textMuted', 'color')} />
-        </View>
-      </Pressable>
+        <MoreVertical size={getTokenValue('$navIcon', 'size')} color={getTokenValue('$textMuted', 'color')} />
+      </View>
     </XStack>
   );
 }

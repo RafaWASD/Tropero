@@ -166,28 +166,25 @@ export function MarkDeclaredSheet({
           </YStack>
         ) : (
           <YStack flexShrink={0} gap="$2">
-            <Pressable
+            <XStack
+              width="100%"
+              alignItems="center"
+              justifyContent="center"
+              minHeight="$touchMin"
+              borderRadius="$pill"
+              backgroundColor="$primary"
+              paddingHorizontal="$5"
+              opacity={busy ? 0.6 : 1}
+              pressStyle={{ opacity: 0.85 }}
               disabled={busy}
               testID="mark-declared-confirm"
               onPress={onConfirmMarkDeclared}
               {...buttonA11y(Platform.OS, { label: 'Confirmar: marcar como ya declarado por otro medio', disabled: busy })}
             >
-              <XStack
-                width="100%"
-                alignItems="center"
-                justifyContent="center"
-                minHeight="$touchMin"
-                borderRadius="$pill"
-                backgroundColor="$primary"
-                paddingHorizontal="$5"
-                opacity={busy ? 0.6 : 1}
-                pressStyle={{ opacity: 0.85 }}
-              >
-                <Text fontFamily="$body" fontSize="$5" lineHeight="$5" fontWeight="600" color="$white" numberOfLines={1}>
-                  {busy ? 'Marcando…' : 'Sí, marcar como declarado'}
-                </Text>
-              </XStack>
-            </Pressable>
+              <Text fontFamily="$body" fontSize="$5" lineHeight="$5" fontWeight="600" color="$white" numberOfLines={1}>
+                {busy ? 'Marcando…' : 'Sí, marcar como declarado'}
+              </Text>
+            </XStack>
             {/* Volver al menú (no cancela todo el sheet, solo deshace la elección de marcar). */}
             <View
               testID="mark-declared-back"

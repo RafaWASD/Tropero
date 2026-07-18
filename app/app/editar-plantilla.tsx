@@ -316,38 +316,35 @@ export default function EditarPlantillaScreen() {
             />
             {/* `+` crear dato personalizado (R13.5/R13.6): pregunta propiedad/maniobra y arma el dato.
                 El dato nuevo aparece en su categoría "Personalizado" para tildarlo y Guardar. Owner-only. */}
-            <Pressable
+            <XStack
+              alignItems="center"
+              gap="$2"
+              minHeight="$touchMin"
+              paddingHorizontal="$3"
+              borderRadius="$card"
+              borderWidth={1}
+              borderColor="$primary"
+              borderStyle="dashed"
+              backgroundColor="$surface"
+              pressStyle={{ backgroundColor: '$greenLight' }}
               onPress={() => setCustomSheetOpen(true)}
               testID="config-add-custom-field"
               {...buttonA11y(Platform.OS, { label: 'Crear dato personalizado' })}
             >
-              <XStack
+              <View
+                width={28}
+                height={28}
+                borderRadius="$pill"
                 alignItems="center"
-                gap="$2"
-                minHeight="$touchMin"
-                paddingHorizontal="$3"
-                borderRadius="$card"
-                borderWidth={1}
-                borderColor="$primary"
-                borderStyle="dashed"
-                backgroundColor="$surface"
-                pressStyle={{ backgroundColor: '$greenLight' }}
+                justifyContent="center"
+                backgroundColor="$primary"
               >
-                <View
-                  width={28}
-                  height={28}
-                  borderRadius="$pill"
-                  alignItems="center"
-                  justifyContent="center"
-                  backgroundColor="$primary"
-                >
-                  <Plus size={18} color={getTokenValue('$white', 'color')} strokeWidth={3} />
-                </View>
-                <Text fontFamily="$body" fontSize="$4" lineHeight="$4" fontWeight="700" color="$primary" numberOfLines={1}>
-                  Crear dato personalizado
-                </Text>
-              </XStack>
-            </Pressable>
+                <Plus size={18} color={getTokenValue('$white', 'color')} strokeWidth={3} />
+              </View>
+              <Text fontFamily="$body" fontSize="$4" lineHeight="$4" fontWeight="700" color="$primary" numberOfLines={1}>
+                Crear dato personalizado
+              </Text>
+            </XStack>
           </YStack>
         ) : null}
       </ScrollView>
