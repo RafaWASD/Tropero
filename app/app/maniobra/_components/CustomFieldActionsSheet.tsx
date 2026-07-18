@@ -150,40 +150,41 @@ function ActionRow({
   testID: string;
 }) {
   return (
-    <Pressable onPress={onPress} testID={testID} {...buttonA11y(Platform.OS, { label })}>
-      <XStack
-        alignItems="center"
-        gap="$3"
-        minHeight="$touchMin"
-        paddingHorizontal="$3"
-        paddingVertical="$2"
-        borderRadius="$card"
-        borderWidth={1}
-        borderColor={tone === 'danger' ? '$terracota' : '$divider'}
-        backgroundColor="$surface"
-        pressStyle={{ backgroundColor: '$greenLight' }}
-      >
-        <View width={28} alignItems="center" justifyContent="center">
-          {icon}
-        </View>
-        <YStack flex={1} minWidth={0} gap="$1">
-          <Text
-            fontFamily="$body"
-            fontSize="$5"
-            lineHeight="$5"
-            fontWeight="700"
-            color={tone === 'danger' ? '$terracota' : '$textPrimary'}
-            numberOfLines={1}
-          >
-            {label}
+    <XStack
+      onPress={onPress}
+      testID={testID}
+      alignItems="center"
+      gap="$3"
+      minHeight="$touchMin"
+      paddingHorizontal="$3"
+      paddingVertical="$2"
+      borderRadius="$card"
+      borderWidth={1}
+      borderColor={tone === 'danger' ? '$terracota' : '$divider'}
+      backgroundColor="$surface"
+      pressStyle={{ backgroundColor: '$greenLight' }}
+      {...buttonA11y(Platform.OS, { label })}
+    >
+      <View width={28} alignItems="center" justifyContent="center">
+        {icon}
+      </View>
+      <YStack flex={1} minWidth={0} gap="$1">
+        <Text
+          fontFamily="$body"
+          fontSize="$5"
+          lineHeight="$5"
+          fontWeight="700"
+          color={tone === 'danger' ? '$terracota' : '$textPrimary'}
+          numberOfLines={1}
+        >
+          {label}
+        </Text>
+        {hint ? (
+          <Text fontFamily="$body" fontSize="$3" lineHeight="$3" color="$textMuted" numberOfLines={1}>
+            {hint}
           </Text>
-          {hint ? (
-            <Text fontFamily="$body" fontSize="$3" lineHeight="$3" color="$textMuted" numberOfLines={1}>
-              {hint}
-            </Text>
-          ) : null}
-        </YStack>
-      </XStack>
-    </Pressable>
+        ) : null}
+      </YStack>
+    </XStack>
   );
 }

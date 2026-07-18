@@ -534,13 +534,11 @@ export function CustomFieldSheet({ mode, onCreate, editInitial, onUpdate, onClos
                     {UI_COMPONENT_OPTIONS.map((opt) => {
                       const selected = opt.uiComponent === uiComponent;
                       return (
-                        <Pressable
-                          key={opt.uiComponent}
-                          onPress={() => pickType(opt.uiComponent)}
-                          testID={`type-${opt.uiComponent}`}
-                          {...buttonA11y(Platform.OS, { label: opt.label, selected })}
-                        >
                           <XStack
+                            key={opt.uiComponent}
+                            onPress={() => pickType(opt.uiComponent)}
+                            testID={`type-${opt.uiComponent}`}
+                            {...buttonA11y(Platform.OS, { label: opt.label, selected })}
                             alignItems="center"
                             gap="$3"
                             minHeight="$touchMin"
@@ -581,7 +579,6 @@ export function CustomFieldSheet({ mode, onCreate, editInitial, onUpdate, onClos
                             </YStack>
                             {selected ? <Check size={iconSize} color={WHITE} strokeWidth={2.5} /> : null}
                           </XStack>
-                        </Pressable>
                       );
                     })}
                   </YStack>
@@ -765,26 +762,27 @@ function ClassificationOption({
   testID: string;
 }) {
   return (
-    <Pressable onPress={onPress} testID={testID} {...buttonA11y(Platform.OS, { label })}>
-      <YStack
-        gap="$1"
-        paddingVertical="$3"
-        paddingHorizontal="$4"
-        borderRadius="$card"
-        borderWidth={1}
-        borderColor="$divider"
-        backgroundColor="$surface"
-        minHeight="$touchMin"
-        justifyContent="center"
-        pressStyle={{ backgroundColor: '$greenLight', borderColor: '$primary' }}
-      >
-        <Text fontFamily="$body" fontSize="$5" lineHeight="$5" fontWeight="700" color="$textPrimary" numberOfLines={1}>
-          {label}
-        </Text>
-        <Text fontFamily="$body" fontSize="$3" lineHeight="$4" color="$textMuted" numberOfLines={2}>
-          {hint}
-        </Text>
-      </YStack>
-    </Pressable>
+    <YStack
+      onPress={onPress}
+      testID={testID}
+      gap="$1"
+      paddingVertical="$3"
+      paddingHorizontal="$4"
+      borderRadius="$card"
+      borderWidth={1}
+      borderColor="$divider"
+      backgroundColor="$surface"
+      minHeight="$touchMin"
+      justifyContent="center"
+      pressStyle={{ backgroundColor: '$greenLight', borderColor: '$primary' }}
+      {...buttonA11y(Platform.OS, { label })}
+    >
+      <Text fontFamily="$body" fontSize="$5" lineHeight="$5" fontWeight="700" color="$textPrimary" numberOfLines={1}>
+        {label}
+      </Text>
+      <Text fontFamily="$body" fontSize="$3" lineHeight="$4" color="$textMuted" numberOfLines={2}>
+        {hint}
+      </Text>
+    </YStack>
   );
 }

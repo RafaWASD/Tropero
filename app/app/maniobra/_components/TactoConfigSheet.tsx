@@ -74,37 +74,34 @@ function SegmentButton({
   testID: string;
 }) {
   return (
-    <Pressable
+    <View
       testID={testID}
       onPress={onPress}
-      style={{ flex: 1 }}
+      flex={1}
+      minHeight="$touchMin"
+      borderRadius="$card"
+      borderWidth={2}
+      borderColor={active ? '$primary' : '$divider'}
+      backgroundColor={active ? '$primary' : '$white'}
+      flexDirection="row"
+      alignItems="center"
+      justifyContent="center"
+      gap="$2"
+      pressStyle={{ opacity: 0.7 }}
       {...buttonA11y(Platform.OS, { label, selected: active })}
     >
-      <View
-        minHeight="$touchMin"
-        borderRadius="$card"
-        borderWidth={2}
-        borderColor={active ? '$primary' : '$divider'}
-        backgroundColor={active ? '$primary' : '$white'}
-        flexDirection="row"
-        alignItems="center"
-        justifyContent="center"
-        gap="$2"
-        pressStyle={{ opacity: 0.7 }}
+      {icon}
+      <Text
+        fontFamily="$body"
+        fontSize="$6"
+        lineHeight="$6"
+        fontWeight="700"
+        color={active ? '$white' : '$textPrimary'}
+        numberOfLines={1}
       >
-        {icon}
-        <Text
-          fontFamily="$body"
-          fontSize="$6"
-          lineHeight="$6"
-          fontWeight="700"
-          color={active ? '$white' : '$textPrimary'}
-          numberOfLines={1}
-        >
-          {label}
-        </Text>
-      </View>
-    </Pressable>
+        {label}
+      </Text>
+    </View>
   );
 }
 

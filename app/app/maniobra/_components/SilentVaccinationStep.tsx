@@ -25,7 +25,7 @@
 // internamente si entran muchas vacunas. El CTA gigante queda abajo en la zona del pulgar.
 
 import { useState } from 'react';
-import { Platform, Pressable } from 'react-native';
+import { Platform } from 'react-native';
 import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
 import { ArrowRight, Check } from 'lucide-react-native';
 
@@ -106,27 +106,25 @@ export function SilentVaccinationStep({
             {items.map((it) => {
               const applies = it.applies;
               return (
-                <Pressable
+                <XStack
                   key={it.name}
                   onPress={() => toggle(it.name)}
                   testID={`vaccine-check-${it.name}`}
+                  backgroundColor={applies ? '$greenLight' : '$white'}
+                  borderRadius="$card"
+                  borderWidth={applies ? 2 : 1}
+                  borderColor={applies ? '$primary' : '$divider'}
+                  paddingHorizontal="$3"
+                  paddingVertical="$3"
+                  minHeight="$touchMin"
+                  alignItems="center"
+                  gap="$3"
+                  pressStyle={{ opacity: 0.85 }}
                   {...switchA11y(Platform.OS, { label: it.name, checked: applies, disabled: false })}
                 >
                   {/* Figura-fondo por estado (3 señales, una mirada): APLICA = fila $greenLight + borde $primary +
                       casilla verde llena; NO APLICA = fila $white (recede sobre el card $surface) + borde $divider +
                       casilla vacía + rótulo "No aplica" terracota. Alto contraste manga. */}
-                  <XStack
-                    backgroundColor={applies ? '$greenLight' : '$white'}
-                    borderRadius="$card"
-                    borderWidth={applies ? 2 : 1}
-                    borderColor={applies ? '$primary' : '$divider'}
-                    paddingHorizontal="$3"
-                    paddingVertical="$3"
-                    minHeight="$touchMin"
-                    alignItems="center"
-                    gap="$3"
-                    pressStyle={{ opacity: 0.85 }}
-                  >
                     {/* CASILLA: APLICA = cuadro verde lleno + ✓ blanco; NO APLICA = cuadro vacío (outline). */}
                     <View
                       width={30}
@@ -174,7 +172,6 @@ export function SilentVaccinationStep({
                       </Text>
                     )}
                   </XStack>
-                </Pressable>
               );
             })}
           </ScrollView>
