@@ -16,7 +16,7 @@
 // (color/size del ícono) se lee con getTokenValue. El TAG legible + los labels de motivos los arma la
 // capa pura (sigsa-display.ts) — la fila NO formatea ni valida, solo presenta. es-AR voseo.
 
-import { Platform, Pressable } from 'react-native';
+import { Platform } from 'react-native';
 import { getTokenValue, Text, View, XStack, YStack } from 'tamagui';
 import { AlertTriangle, ChevronRight } from 'lucide-react-native';
 
@@ -81,63 +81,66 @@ export function ExportAnimalRow({ rfid, sex = null, reasons, onPress }: ExportAn
     : `${hero}, listo para declarar`;
 
   return (
-    <Pressable onPress={onPress} {...buttonA11y(Platform.OS, { label: a11yLabel })}>
-      <XStack
-        width="100%"
-        minHeight="$touchMin"
-        alignItems="center"
-        gap="$3"
-        paddingHorizontal="$4"
-        paddingVertical="$2"
-        backgroundColor="$white"
-        borderBottomWidth={1}
-        borderBottomColor="$divider"
-        pressStyle={{ backgroundColor: '$surface' }}
-      >
-        <SexAvatar sex={sex} />
+    // onPress + a11y van DIRECTO en el XStack (misma pieza que el pressStyle): envolverlo en un
+    // <Pressable> de RN roba el responder de touch en new-arch → onPress no dispara en nativo (patrón
+    // probado en AnimalRow / GoogleSignInButton).
+    <XStack
+      width="100%"
+      minHeight="$touchMin"
+      alignItems="center"
+      gap="$3"
+      paddingHorizontal="$4"
+      paddingVertical="$2"
+      backgroundColor="$white"
+      borderBottomWidth={1}
+      borderBottomColor="$divider"
+      pressStyle={{ backgroundColor: '$surface' }}
+      onPress={onPress}
+      {...buttonA11y(Platform.OS, { label: a11yLabel })}
+    >
+      <SexAvatar sex={sex} />
 
-        {/* Centro (flex): TAG hero + (a completar) los motivos faltantes. minWidth=0 → trunca sin empujar. */}
-        <YStack flex={1} minWidth={0} gap="$1">
-          <Text
-            fontFamily="$body"
-            fontSize="$6"
-            lineHeight="$6"
-            fontWeight="700"
-            color="$textPrimary"
-            numberOfLines={1}
-          >
-            {hero}
-          </Text>
+      {/* Centro (flex): TAG hero + (a completar) los motivos faltantes. minWidth=0 → trunca sin empujar. */}
+      <YStack flex={1} minWidth={0} gap="$1">
+        <Text
+          fontFamily="$body"
+          fontSize="$6"
+          lineHeight="$6"
+          fontWeight="700"
+          color="$textPrimary"
+          numberOfLines={1}
+        >
+          {hero}
+        </Text>
 
-          {isIncomplete ? (
-            <XStack alignItems="flex-start" gap="$1" minWidth={0}>
-              <View flexShrink={0} paddingTop="$1">
-                <AlertTriangle size={14} color={terracota} strokeWidth={2.5} />
-              </View>
-              <Text
-                flex={1}
-                minWidth={0}
-                fontFamily="$body"
-                fontSize="$3"
-                lineHeight="$3"
-                fontWeight="500"
-                color="$terracota"
-                numberOfLines={2}
-              >
-                {motivos.join(' · ')}
-              </Text>
-            </XStack>
-          ) : (
-            <Text fontFamily="$body" fontSize="$3" lineHeight="$3" fontWeight="500" color="$textMuted" numberOfLines={1}>
-              Listo para declarar
+        {isIncomplete ? (
+          <XStack alignItems="flex-start" gap="$1" minWidth={0}>
+            <View flexShrink={0} paddingTop="$1">
+              <AlertTriangle size={14} color={terracota} strokeWidth={2.5} />
+            </View>
+            <Text
+              flex={1}
+              minWidth={0}
+              fontFamily="$body"
+              fontSize="$3"
+              lineHeight="$3"
+              fontWeight="500"
+              color="$terracota"
+              numberOfLines={2}
+            >
+              {motivos.join(' · ')}
             </Text>
-          )}
-        </YStack>
+          </XStack>
+        ) : (
+          <Text fontFamily="$body" fontSize="$3" lineHeight="$3" fontWeight="500" color="$textMuted" numberOfLines={1}>
+            Listo para declarar
+          </Text>
+        )}
+      </YStack>
 
-        <View flexShrink={0} alignItems="flex-end" justifyContent="center">
-          <ChevronRight size={chevronSize} color={chevronColor} strokeWidth={2} />
-        </View>
-      </XStack>
-    </Pressable>
+      <View flexShrink={0} alignItems="flex-end" justifyContent="center">
+        <ChevronRight size={chevronSize} color={chevronColor} strokeWidth={2} />
+      </View>
+    </XStack>
   );
 }

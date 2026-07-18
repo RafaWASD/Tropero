@@ -19,7 +19,7 @@
 // Cero hardcode de color/spacing (ADR-023 §4): todo via tokens; el size/color de los íconos lucide
 // (API no-Tamagui) se lee con getTokenValue.
 
-import { Platform, Pressable } from 'react-native';
+import { Platform } from 'react-native';
 import { getTokenValue, Text, View, XStack, YStack } from 'tamagui';
 import { Check, ChevronDown, ChevronUp } from 'lucide-react-native';
 
@@ -83,35 +83,38 @@ export function Select({
 
   return (
     <YStack width="100%" gap="$2">
-      {/* TRIGGER pill — afordancia de combo. Asignado = verde claro + $primary; muted = surface + borde. */}
-      <Pressable onPress={onToggle} {...buttonA11y(Platform.OS, { label: a11yLabel, selected: open })}>
-        <XStack
-          width="100%"
-          alignItems="center"
-          gap="$2"
-          minHeight="$chipMin"
-          paddingHorizontal="$3"
-          paddingVertical="$2"
-          borderRadius="$pill"
-          backgroundColor={assigned ? '$greenLight' : '$surface'}
-          borderWidth={1}
-          borderColor={assigned ? '$greenLight' : '$divider'}
-          pressStyle={{ opacity: 0.85 }}
+      {/* TRIGGER pill — afordancia de combo. Asignado = verde claro + $primary; muted = surface + borde.
+          onPress + a11y van DIRECTO en el XStack (misma pieza que el pressStyle): envolverlo en un
+          <Pressable> de RN roba el responder de touch en new-arch → onPress no dispara en nativo (patrón
+          probado en AnimalRow / GoogleSignInButton). */}
+      <XStack
+        width="100%"
+        alignItems="center"
+        gap="$2"
+        minHeight="$chipMin"
+        paddingHorizontal="$3"
+        paddingVertical="$2"
+        borderRadius="$pill"
+        backgroundColor={assigned ? '$greenLight' : '$surface'}
+        borderWidth={1}
+        borderColor={assigned ? '$greenLight' : '$divider'}
+        pressStyle={{ opacity: 0.85 }}
+        onPress={onToggle}
+        {...buttonA11y(Platform.OS, { label: a11yLabel, selected: open })}
+      >
+        <Text
+          flex={1}
+          minWidth={0}
+          numberOfLines={1}
+          fontFamily="$body"
+          fontSize="$4"
+          fontWeight={assigned ? '600' : '400'}
+          color={assigned ? '$textPrimary' : '$textMuted'}
         >
-          <Text
-            flex={1}
-            minWidth={0}
-            numberOfLines={1}
-            fontFamily="$body"
-            fontSize="$4"
-            fontWeight={assigned ? '600' : '400'}
-            color={assigned ? '$textPrimary' : '$textMuted'}
-          >
-            {label}
-          </Text>
-          <Chevron size={iconSize} color={chevronColor} strokeWidth={2} />
-        </XStack>
-      </Pressable>
+          {label}
+        </Text>
+        <Chevron size={iconSize} color={chevronColor} strokeWidth={2} />
+      </XStack>
 
       {/* LISTA desplegada (acordeón inline, debajo del trigger). Card con las opciones. */}
       {open ? (
@@ -158,40 +161,40 @@ function Option({
   onPress: () => void;
 }) {
   return (
-    <Pressable onPress={onPress} {...buttonA11y(Platform.OS, { label, selected })}>
-      <XStack
-        alignItems="center"
-        gap="$2"
-        minHeight="$chipMin"
-        paddingHorizontal="$2"
-        pressStyle={{ opacity: 0.6 }}
-      >
-        <XStack flex={1} minWidth={0} alignItems="baseline" gap="$2">
+    <XStack
+      alignItems="center"
+      gap="$2"
+      minHeight="$chipMin"
+      paddingHorizontal="$2"
+      pressStyle={{ opacity: 0.6 }}
+      onPress={onPress}
+      {...buttonA11y(Platform.OS, { label, selected })}
+    >
+      <XStack flex={1} minWidth={0} alignItems="baseline" gap="$2">
+        <Text
+          flexShrink={1}
+          numberOfLines={1}
+          fontFamily="$body"
+          fontSize="$4"
+          fontWeight="500"
+          color="$textPrimary"
+        >
+          {label}
+        </Text>
+        {hint != null && hint.trim().length > 0 ? (
           <Text
-            flexShrink={1}
+            flexShrink={0}
             numberOfLines={1}
             fontFamily="$body"
-            fontSize="$4"
-            fontWeight="500"
-            color="$textPrimary"
+            fontSize="$3"
+            fontWeight="400"
+            color="$textFaint"
           >
-            {label}
+            {hint}
           </Text>
-          {hint != null && hint.trim().length > 0 ? (
-            <Text
-              flexShrink={0}
-              numberOfLines={1}
-              fontFamily="$body"
-              fontSize="$3"
-              fontWeight="400"
-              color="$textFaint"
-            >
-              {hint}
-            </Text>
-          ) : null}
-        </XStack>
-        {selected ? <Check size={iconSize} color={primary} strokeWidth={2.5} /> : null}
+        ) : null}
       </XStack>
-    </Pressable>
+      {selected ? <Check size={iconSize} color={primary} strokeWidth={2.5} /> : null}
+    </XStack>
   );
 }

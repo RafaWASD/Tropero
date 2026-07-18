@@ -698,32 +698,33 @@ function CandidateRow({
     label: `Asignar caravana a ${hero}, ${candidate.categoryName}, ${sexLabel}, ${candidate.rodeoName}`,
   });
   return (
-    <Pressable onPress={onPress} {...a11y}>
-      <Card>
-        <XStack alignItems="center" gap="$3">
-          <YStack flex={1} gap="$2">
-            <XStack alignItems="center" justifyContent="space-between" gap="$2">
-              <Text fontFamily="$body" fontSize="$6" lineHeight="$6" fontWeight="700" color="$textPrimary" numberOfLines={1}>
-                {hero}
+    // onPress + a11y van DIRECTO en el Card (Tamagui styled(View), con pressStyle propio): envolverlo en
+    // un <Pressable> de RN roba el responder de touch en new-arch → onPress no dispara en nativo (patrón
+    // probado en AnimalRow / GoogleSignInButton / EstablishmentCard). pressStyle sutil = feedback de tap.
+    <Card onPress={onPress} pressStyle={{ backgroundColor: '$surface' }} {...a11y}>
+      <XStack alignItems="center" gap="$3">
+        <YStack flex={1} gap="$2">
+          <XStack alignItems="center" justifyContent="space-between" gap="$2">
+            <Text fontFamily="$body" fontSize="$6" lineHeight="$6" fontWeight="700" color="$textPrimary" numberOfLines={1}>
+              {hero}
+            </Text>
+            {heroResult.secondary ? (
+              <Text fontFamily="$body" fontSize="$3" fontWeight="500" color="$textMuted" numberOfLines={1}>
+                {`#${heroResult.secondary.value}`}
               </Text>
-              {heroResult.secondary ? (
-                <Text fontFamily="$body" fontSize="$3" fontWeight="500" color="$textMuted" numberOfLines={1}>
-                  {`#${heroResult.secondary.value}`}
-                </Text>
-              ) : null}
-            </XStack>
-            <CategoryBadge label={candidate.categoryName} size="sm" />
-            <XStack flexWrap="wrap" gap="$2">
-              <MetaPill text={sexLabel} />
-              <MetaPill text={candidate.rodeoName} />
-            </XStack>
-          </YStack>
-          <View flexShrink={0} alignSelf="center">
-            <ChevronRight size={chevronSize} color={chevronColor} strokeWidth={2} />
-          </View>
-        </XStack>
-      </Card>
-    </Pressable>
+            ) : null}
+          </XStack>
+          <CategoryBadge label={candidate.categoryName} size="sm" />
+          <XStack flexWrap="wrap" gap="$2">
+            <MetaPill text={sexLabel} />
+            <MetaPill text={candidate.rodeoName} />
+          </XStack>
+        </YStack>
+        <View flexShrink={0} alignSelf="center">
+          <ChevronRight size={chevronSize} color={chevronColor} strokeWidth={2} />
+        </View>
+      </XStack>
+    </Card>
   );
 }
 

@@ -19,10 +19,12 @@
 // Cero hardcode (ADR-023 §4): tokens; los colores que cruzan a lucide se leen con getTokenValue.
 
 import { useCallback, useRef, useState } from 'react';
-import { Platform, Pressable, Share } from 'react-native';
+import { Platform, Share } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { getTokenValue, Text, View, XStack, YStack } from 'tamagui';
 import { Check, Copy, Share2 } from 'lucide-react-native';
+
+import { buttonA11y } from '../utils/a11y';
 
 export type ShareLinkProps = {
   /** El accept_url shareable a copiar/compartir. */
@@ -88,61 +90,56 @@ export function ShareLink({ url, shareMessage }: ShareLinkProps) {
         </Text>
       </View>
 
-      {/* Acciones grandes (≥ $touchMin). Copiar = primario relleno; Compartir = outline. */}
+      {/* Acciones grandes (≥ $touchMin). Copiar = primario relleno; Compartir = outline.
+          onPress + a11y van DIRECTO en cada XStack (misma pieza que el pressStyle): envolverlas en un
+          <Pressable> de RN roba el responder de touch en new-arch → onPress no dispara en nativo (patrón
+          probado en AnimalRow / GoogleSignInButton). El flex:1 del Pressable lo toma el propio XStack. */}
       <XStack width="100%" gap="$3">
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={copied ? 'Link copiado' : 'Copiar link'}
+        <XStack
+          flex={1}
+          width="100%"
+          minHeight="$touchMin"
+          alignItems="center"
+          justifyContent="center"
+          gap="$2"
+          backgroundColor="$primary"
+          borderRadius="$pill"
+          paddingHorizontal="$4"
+          pressStyle={{ backgroundColor: '$primaryPress' }}
           onPress={() => void onCopy()}
-          style={{ flex: 1 }}
+          {...buttonA11y(Platform.OS, { label: copied ? 'Link copiado' : 'Copiar link' })}
         >
-          <XStack
-            width="100%"
-            minHeight="$touchMin"
-            alignItems="center"
-            justifyContent="center"
-            gap="$2"
-            backgroundColor="$primary"
-            borderRadius="$pill"
-            paddingHorizontal="$4"
-            pressStyle={{ backgroundColor: '$primaryPress' }}
-          >
-            {copied ? (
-              <Check size={20} color={white} strokeWidth={2.5} />
-            ) : (
-              <Copy size={20} color={white} strokeWidth={2.5} />
-            )}
-            <Text fontFamily="$body" fontSize="$5" fontWeight="600" color="$white">
-              {copied ? 'Copiado' : 'Copiar'}
-            </Text>
-          </XStack>
-        </Pressable>
+          {copied ? (
+            <Check size={20} color={white} strokeWidth={2.5} />
+          ) : (
+            <Copy size={20} color={white} strokeWidth={2.5} />
+          )}
+          <Text fontFamily="$body" fontSize="$5" fontWeight="600" color="$white">
+            {copied ? 'Copiado' : 'Copiar'}
+          </Text>
+        </XStack>
 
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Compartir link"
+        <XStack
+          flex={1}
+          width="100%"
+          minHeight="$touchMin"
+          alignItems="center"
+          justifyContent="center"
+          gap="$2"
+          backgroundColor="transparent"
+          borderWidth={2}
+          borderColor="$primary"
+          borderRadius="$pill"
+          paddingHorizontal="$4"
+          pressStyle={{ backgroundColor: '$surface' }}
           onPress={() => void onShare()}
-          style={{ flex: 1 }}
+          {...buttonA11y(Platform.OS, { label: 'Compartir link' })}
         >
-          <XStack
-            width="100%"
-            minHeight="$touchMin"
-            alignItems="center"
-            justifyContent="center"
-            gap="$2"
-            backgroundColor="transparent"
-            borderWidth={2}
-            borderColor="$primary"
-            borderRadius="$pill"
-            paddingHorizontal="$4"
-            pressStyle={{ backgroundColor: '$surface' }}
-          >
-            <Share2 size={20} color={primary} strokeWidth={2.5} />
-            <Text fontFamily="$body" fontSize="$5" fontWeight="600" color="$primary">
-              Compartir
-            </Text>
-          </XStack>
-        </Pressable>
+          <Share2 size={20} color={primary} strokeWidth={2.5} />
+          <Text fontFamily="$body" fontSize="$5" fontWeight="600" color="$primary">
+            Compartir
+          </Text>
+        </XStack>
       </XStack>
     </YStack>
   );

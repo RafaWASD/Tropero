@@ -22,7 +22,7 @@
 // getTokenValue. a11y por helper (utils/a11y). numberOfLines={1} CON lineHeight matcheado (regla dura
 // de recorte de descendentes: nombres con g/j/p/y no se deben recortar).
 
-import { Platform, Pressable } from 'react-native';
+import { Platform } from 'react-native';
 import { getTokenValue, Text, View, XStack } from 'tamagui';
 import { Check } from 'lucide-react-native';
 
@@ -65,35 +65,39 @@ export function ComboOptionRow({
 }: ComboOptionRowProps) {
   const comfortable = size === 'comfortable';
   return (
-    <Pressable testID={testID} onPress={onPress} {...buttonA11y(Platform.OS, { label: a11yLabel, selected })}>
-      <XStack
-        alignItems="center"
-        minHeight={comfortable ? '$touchMin' : '$chipMin'}
-        paddingHorizontal={comfortable ? '$4' : '$2'}
-        paddingVertical={comfortable ? '$3' : '$2'}
-        pressStyle={{ opacity: 0.6 }}
+    // onPress + testID + a11y van DIRECTO en el XStack (misma pieza que el pressStyle): envolverlo en un
+    // <Pressable> de RN roba el responder de touch en new-arch → onPress no dispara en nativo (patrón
+    // probado en AnimalRow / GoogleSignInButton).
+    <XStack
+      testID={testID}
+      alignItems="center"
+      minHeight={comfortable ? '$touchMin' : '$chipMin'}
+      paddingHorizontal={comfortable ? '$4' : '$2'}
+      paddingVertical={comfortable ? '$3' : '$2'}
+      pressStyle={{ opacity: 0.6 }}
+      onPress={onPress}
+      {...buttonA11y(Platform.OS, { label: a11yLabel, selected })}
+    >
+      {/* Spacer izquierdo = MISMO ancho que el slot del tilde → el label centrado cae en el eje real. */}
+      <View width={SLOT} flexShrink={0} />
+      <Text
+        flex={1}
+        minWidth={0}
+        numberOfLines={1}
+        fontFamily="$body"
+        fontSize={comfortable ? '$5' : '$4'}
+        lineHeight={comfortable ? '$5' : '$4'}
+        fontWeight="500"
+        color="$textPrimary"
       >
-        {/* Spacer izquierdo = MISMO ancho que el slot del tilde → el label centrado cae en el eje real. */}
-        <View width={SLOT} flexShrink={0} />
-        <Text
-          flex={1}
-          minWidth={0}
-          numberOfLines={1}
-          fontFamily="$body"
-          fontSize={comfortable ? '$5' : '$4'}
-          lineHeight={comfortable ? '$5' : '$4'}
-          fontWeight="500"
-          color="$textPrimary"
-        >
-          {label}
-        </Text>
-        {/* Slot derecho: tilde cuando selected, vacío si no. Ancho fijo = spacer izquierdo. */}
-        <View width={SLOT} alignItems="center" justifyContent="center" flexShrink={0}>
-          {selected ? (
-            <Check size={CHECK} color={getTokenValue('$primary', 'color')} strokeWidth={2.5} />
-          ) : null}
-        </View>
-      </XStack>
-    </Pressable>
+        {label}
+      </Text>
+      {/* Slot derecho: tilde cuando selected, vacío si no. Ancho fijo = spacer izquierdo. */}
+      <View width={SLOT} alignItems="center" justifyContent="center" flexShrink={0}>
+        {selected ? (
+          <Check size={CHECK} color={getTokenValue('$primary', 'color')} strokeWidth={2.5} />
+        ) : null}
+      </View>
+    </XStack>
   );
 }
