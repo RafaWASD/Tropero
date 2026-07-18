@@ -667,3 +667,8 @@ arreglada.
 - `app/app.config.ts` deriva la variante ".dev" (`name: "RAFAQ (Dev)"`, id `ar.rafq.app.dev`, R2.4) de `process.env.APP_VARIANT === 'development'`. Pero `app/eas.json` → `build.development.env` **no** setea `APP_VARIANT`, así que un `eas build --profile development` produciría la app con id/nombre de **prod** (`ar.rafq.app` / "RAFAQ"), no la `.dev` coinstalable.
 - **No bloquea el beta**: el APK del peón sale del perfil `preview` (correctamente sin `APP_VARIANT` → id prod). Esto solo afecta al build `development` (dev-client), que hoy se usa vía `pnpm web`/local, no por EAS.
 - **Fix (pendiente)**: agregar `"APP_VARIANT": "development"` al `build.development.env` de `eas.json` (o confirmar que el dev-client se buildea siempre local con la var seteada a mano y documentarlo). Verificar antes de depender del build `development` de EAS.
+
+## UX: scroll affordance / scroll cue en pantallas con contenido que cae bajo el fold
+- **Origen**: Raf probando el build nativo en iPhone (2026-07-16). En la pantalla de login/registro, contenido queda "muy debajo" y no se ve bien que hay que scrollear (ej. el link/acción de registro queda fuera de vista sin señal de scroll).
+- **Qué evaluar (Raf decide alcance)**: agregar una señal de scroll (fade/gradient en el borde, indicador, o rediseño de layout para que el CTA clave entre en viewport). Definir si es SOLO en auth (login/registro) o un patrón a aplicar en TODO el proyecto (pantallas largas / sheets).
+- **Estado**: anotado a pedido de Raf; NO tocar ahora. Él evalúa después qué, cómo y dónde. Relacionado con los básicos de UX de sheets/forms ya codificados en la skill design-review.
