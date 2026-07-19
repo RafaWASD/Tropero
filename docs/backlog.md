@@ -17,6 +17,20 @@ No es un sustituto de `feature_list.json` ni de los ADRs — es la antesala dond
 
 ## Ítems pendientes
 
+## 2026-07-19 — Pelaje: pasar de texto libre a lista de opciones (BLOQUEADO por validación de dominio)
+
+**Origen**: sesión de planificación de mejoras UX (2026-07-18), ítem 1 de los 5 que levantó Raf. Ver `docs/plan-mejoras-ux-2026-07-18.md`.
+**Qué**: hoy el pelaje se carga en un campo de **texto libre**. El mismo pelaje entra de N formas (`colorado` / `Colorado` / `col.` / `rojo`) → el dato no es contable ni comparable, y rompe cualquier reporte o benchmarking por pelaje. Se propone una **lista cerrada + "Otro (especificar)"** como salida de emergencia para no trabar al operario en la manga.
+**Estado**: la lista candidata (12 pelajes) ya está redactada y sale de cruzar la clasificación de **Bavera** ("El pelaje del bovino y su importancia en la producción", 2009) con las razas que la app ya maneja → `docs/pelajes-consulta-facundo-2026-07-18.txt`. Va corta a propósito: se usa con guante y cada opción de más cuesta tiempo (Hick).
+**⛔ BLOQUEADO POR**: validación de **Facundo** (vet socio). No se implementa nada hasta que apruebe la lista y conteste las 4 preguntas del documento, porque las respuestas **cambian el diseño**, no solo el contenido:
+  1. **¿un campo o dos?** Bavera trata "pampa" como particularidad de la CABEZA, no color de cuerpo (un Hereford es colorado + cabeza pampa). Un campo = 1 toque y lista mezclada; dos campos = más preciso y 2 toques. Propuesta: **un campo** (manga).
+  2. **¿el pelaje IDENTIFICA o DESCRIBE?** Si sirve para reconocer un animal sin leer la caravana, la lista tiene que discriminar mejor y probablemente necesite más opciones.
+  3. **¿obligatorio u opcional?** En la charla de dominio de junio quedó anotado que pasa a dato base NO opcional; hoy la app lo tiene opcional.
+  4. **¿falta o sobra algo?** términos de uso corriente en la zona.
+**Por qué importa**: medio-alto. Es dato base de todas las categorías y habilita analytics/benchmarking (uno de los 3 pilares del producto). Pero implementar sobre una taxonomía no validada es peor que no implementar: migrar datos de pelaje ya cargados sale caro.
+**Nota de trazabilidad**: en la sesión advertí que `moro`/`cebruno`/`rosillo` eran términos equinos — **estaba equivocado**, Bavera los documenta como nomenclatura bovina argentina válida y quedaron en la lista. Lo que sí es equino es el "Código de Pelajes" de la SRA (no usar como fuente).
+**Próximo paso sugerido**: cuando Facundo responda → Gate 0 (refinamiento de contexto) + spec del delta sobre feature de alta de animal. Toca modelo de datos (enum/catálogo vs texto) + migración de los pelajes ya cargados en texto libre.
+
 ## 2026-07-18 — PowerSync no reconecta / no re-evalúa buckets nuevos sin reiniciar la app (offline-first)
 
 **Origen**: sesión de bring-up nativo + test de sync en el Android A07 (seed de 5000 animales). Raf lo reprodujo: creé un campo nuevo server-side y, con la app VIVA y online (incluso togglendo modo avión), el device NO lo bajó; el campo solo apareció tras **cerrar y reabrir** la app.
@@ -39,7 +53,7 @@ No es un sustituto de `feature_list.json` ni de los ADRs — es la antesala dond
 **Por qué importa**: bajo-medio. Es self-scoped (no cruza usuarios ni tenants) y un email de contacto desalineado no otorga privilegios — la identidad la sigue gobernando `auth.users.email`, y el trigger `propagate_confirmed_email` (`0068:169-194`) la re-propaga al confirmar. Pero ensucia el dato de contacto y contradice el propósito de aislamiento de PII de ADR-025.
 **Próximo paso sugerido**: evaluar `grant update (phone) on public.user_private` (column-level), para que el cliente pueda escribir el teléfono y NO el email. Toca grants → **Gate 1 puntual** + verificar que no rompa `saveProfile` ni el trigger de propagación. Foldear cuando se toque `user_private` por otra razón.
 
-## 2026-07-18 — Zona muerta de tap en el FAB de Maniobra (parcialmente mitigada; el fix real es un refactor de navegación)
+## 2026-07-18 — Zona muerta de tap en el FAB de Maniobra (~~fix real = refactor de navegación~~ → NO SE REPRODUCE en device, ver verificación del 2026-07-19)
 
 **Origen**: análisis del navbar (variante B4). El leader lo dedujo de la geometría; el implementer lo confirmó y explicó por qué el fix aplicado NO alcanza.
 **Qué**: el círculo del FAB se dibuja **fuera de su celda** del tab bar (26px con los tokens de B4; 34px antes) vía `marginTop` negativo. En React Native los toques fuera de los límites del ancestro **no se entregan**: en Android `ViewGroup.dispatchTouchEvent` solo desciende a hijos cuyos bounds contienen el punto, y en iOS `hitTest:` devuelve `nil` si `pointInside:` es false. El tabBar descarta el toque **antes** de llegar al FAB. → la porción que sobresale del CTA más importante de la app no responde al tap en nativo.
@@ -47,7 +61,9 @@ No es un sustituto de `feature_list.json` ni de los ADRs — es la antesala dond
 **Mitigación YA aplicada (parcial)**: `hitSlop` vertical en el Pressable. **NO recupera los 26px que sobresalen** — `hitSlop` agranda el target *dentro* del ancestro. Lo que sí gana: el target baja hasta el pie de la celda, el label "Maniobra" pasa a ser tocable (antes no lo era) y el área útil in-bounds crece de 64×38 a 64×58.
 **Descartado**: agrandar el tabBar (`height += fabRaise` + `tabBarBackground`). Dejaría una franja transparente de **412×26 a ancho completo** que en nativo igual captura toques (`BottomTabBar` monta con `pointerEvents="auto"`) → cambiaría una zona muerta de 64×26 por una que rompe botones y scroll en el borde inferior de TODAS las pantallas. Peor negocio.
 **Fix real (pendiente)**: sacar el FAB del tabBar y montarlo como **overlay absoluto en el layout raíz** con `pointerEvents="box-none"`. Es un refactor de navegación con su propia spec — toca ADR-018 y el shell de `(tabs)`.
-**Verificación pendiente en device**: tocar el FAB SOLO en su mitad superior (la que sobresale) en el iPhone. Si no abre MODO MANIOBRAS, confirma el diagnóstico.
+**⚠️ VERIFICADO EN DEVICE — el diagnóstico NO se confirmó (2026-07-19)**: Raf probó el tap en el iPhone y reportó **OK**. O sea que la zona muerta predicha por la geometría **no se manifiesta** en el uso real, al menos con los tokens de B4 (26px de protrusión) + el `hitSlop` ya aplicado. Posibles explicaciones, ninguna verificada: (a) el modelo de `hitTest:`/`pointInside:` no aplica igual acá porque el `hitSlop` del Pressable sí extiende el área efectiva más de lo que asumimos; (b) con solo 26px sobresaliendo, el pulgar naturalmente cae en la parte in-bounds y la zona muerta es real pero inalcanzable en la práctica; (c) el diagnóstico geométrico estaba directamente mal.
+**Estado**: BAJA prioridad. El refactor de navegación (overlay absoluto) **ya no está justificado por esto** — era un cambio caro (ADR-018 + shell de `(tabs)`) para un problema que no se reproduce. NO hacerlo salvo que aparezca evidencia nueva.
+**Si reaparece**: el síntoma sería "toco el FAB y no pasa nada" tocando cerca del borde superior. Ahí sí, retomar el fix real de acá abajo. Se mantiene la entrada por trazabilidad del análisis.
 
 ## 2026-07-18 — `delete_account` no borra `user_private` → la PII de contacto sobrevive al borrado de cuenta
 

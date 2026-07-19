@@ -1,0 +1,115 @@
+PELAJES — lista para que valides (RAFAQ)
+
+Hoy la app deja escribir el pelaje a mano, en un campo de texto libre. Así el
+mismo pelaje entra de diez formas distintas (colorado / Colorado / col. / rojo)
+y después no se puede contar ni comparar nada. Queremos pasarlo a una lista de
+opciones, pero solo sirve si están las que se usan de verdad en el campo.
+
+Marcá cada uno con VA / NO VA / DUDOSO, y contestá las 4 preguntas del final.
+
+La lista la armamos cruzando la clasificación de Bavera ("El pelaje del bovino y
+su importancia en la producción", 2009) con las razas que la app ya maneja. Va
+corta a propósito: se usa en la manga, con guante, y cuantas más opciones tenga,
+más tarda el operario en elegir.
+
+
+--- COLORES BASE (un solo color en todo el cuerpo) ---
+
+1) NEGRO
+   Pelos negros sobre piel y mucosas del mismo color.
+   Angus, Brangus, Galloway
+   ->
+
+2) COLORADO (rojo)
+   Del claro al oscuro o cereza, hasta requemado / sangre de toro.
+   Angus colorado, Hereford, Shorthorn, Santa Gertrudis
+   ->
+
+3) BLANCO
+   Plateado, porcelano o rosado según la piel que transparenta.
+   Charolais, Shorthorn blanco, Brahman
+   ->
+
+4) BAYO
+   La variante más clara del colorado, amarillenta.
+   Limousin, Criolla
+   ->
+
+
+--- COMPUESTOS (dos colores, mezclados o en manchas) ---
+
+5) OVERO NEGRO
+   Manchas negras y blancas bien delimitadas.
+   Holando Argentino
+   ->
+
+6) OVERO COLORADO
+   Ídem pero con manchas coloradas.
+   Hereford, Simmental, Flamenca
+   ->
+
+7) ROSILLO (ruano, roano)
+   Pelos colorados y blancos entremezclados, no en manchas.
+   Shorthorn, Criolla
+   ->
+
+8) BARCINO (atigrado)
+   Rayas verticales oscuras sobre el fondo, como piel de tigre.
+   Cruzas cebuinas: Angus x Brahman, Hereford x Brahman
+   ->
+
+9) MORO
+   Negro mate con pocos pelos blancos, da un matiz azulado.
+   Criolla, cruzas Shorthorn blanco x Angus
+   ->
+
+
+--- POR LA CABEZA (en el campo el animal se nombra así) ---
+
+10) PAMPA
+    Cabeza blanca. Es el albinismo típico del Hereford.
+    Hereford, Polled Hereford, Braford
+    ->
+
+11) CARETA
+    Cuerpo negro con cabeza pampa. El clásico de la cruza Hereford x Angus.
+    Cruza Hereford x Aberdeen Angus
+    ->
+
+
+--- SALIDA DE EMERGENCIA ---
+
+12) OTRO (especificar)
+    Abre un campo de texto libre. Está para que nadie quede trabado en la manga
+    si le toca un pelaje que no está en la lista.
+    ¿Te parece bien dejarlo, o preferís lista cerrada?
+    ->
+
+
+=== LAS 4 PREGUNTAS ===
+
+1) ¿UN SOLO CAMPO O DOS?   <-- la más importante
+   Bavera trata "pampa" como una particularidad de la CABEZA, no como un color
+   de cuerpo: un Hereford es en realidad colorado + cabeza pampa.
+     Opción A: un solo campo, con la lista de arriba mezclada (un toque).
+     Opción B: dos campos, color + particularidad (más preciso, dos toques).
+   Proponemos la A, porque en la manga cada toque de más se paga caro.
+   ¿Te parece que así se pierde información importante?
+   ->
+
+2) ¿EL PELAJE IDENTIFICA O DESCRIBE?
+   ¿Sirve para reconocer a un animal cuando no se le puede leer la caravana, o
+   es un dato descriptivo nada más? Cambia el diseño: si identifica, la lista
+   tiene que discriminar mejor y quizás necesite más opciones.
+   ->
+
+3) ¿OBLIGATORIO U OPCIONAL?
+   En la charla de dominio de junio quedó anotado que el pelaje pasa a ser dato
+   base de todas las categorías y NO opcional. Hoy la app lo tiene como
+   opcional. ¿Lo dejamos obligatorio en el alta?
+   ->
+
+4) ¿FALTA O SOBRA ALGO?
+   ¿Hay términos de uso corriente en la zona que no estén en la lista? ¿Y alguno
+   de los que pusimos que no se use nunca en un rodeo de cría y solo la ensucie?
+   ->
