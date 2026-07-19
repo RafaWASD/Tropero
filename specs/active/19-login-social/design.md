@@ -189,6 +189,15 @@ insert into public.user_private (user_id, email) values (new.id, new.email) on c
 > puebla `name` (Google) y que Apple efectivamente cae al fallback local-part. Peor caso = nombre =
 > local-part del email (aceptable). No requiere código; queda como watch-item del gate manual.
 
+> **Gotcha de config Supabase (flujo web Apple) — verificado 2026-07-16:** en "Client IDs" del provider
+> Apple, Supabase usa el **primer** elemento como `client_id` del redirect web. Debe ser el **Services ID**
+> (`ar.rafq.app.web`), no un bundle, para matchear el `sub` del client-secret JWT (firmado con la Key `.p8`).
+> Orden: `ar.rafq.app.web,ar.rafq.app,ar.rafq.app.dev`. Los bundles (`aud` de idToken nativos) van después;
+> el orden solo afecta al flujo web. Config de dashboard, no de código.
+>
+> **Validación (2026-07-16 web / 2026-07-18 native):** login real Google + Apple → sesión, `public.users.name`
+> poblado, email en `user_private` (PII OK). Native probado en iPhone (build `preview`). Caso relay observado.
+
 ### Anti-takeover (R8.4 — Gate 1)
 
 El auto-linking de Supabase solo une identidades cuando el email está **verificado**. RAFAQ exige
