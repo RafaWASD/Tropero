@@ -13,8 +13,8 @@
 
 import type { GroupProfile } from '../utils/bulk-candidates';
 import type { AnimalSex } from '../utils/animal-category';
-import { fetchAnimals, type AnimalListItem, type ServiceResult } from './animals';
-import { fetchGroupMembers } from './management-groups';
+import type { AnimalListItem, ServiceResult } from './animals';
+import { fetchGroupMembers, fetchAllGroupMembers } from './management-groups';
 import { buildGroupCandidateFlagsQuery, toBool } from './powersync/local-reads';
 import { runLocalQuery } from './powersync/local-query';
 
@@ -46,11 +46,12 @@ export type GroupSelectionProfile = GroupProfile & {
 };
 
 /**
- * Trae los perfiles del grupo en la forma de selección (candidatura + display), del SQLite local. Para un
- * RODEO: fetchAnimals(establishmentId, { rodeoId, status:'active' }). Para un LOTE: fetchGroupMembers
- * (mismo SELECT, filtrado por management_group_id). Ambos ya aplican el espejo C6 → categoryCode/Name son
- * los offline-correct. Luego mergea los 3 flags de candidatura (is_castrated/has_weaning/category_override)
- * batched. Si el grupo no tiene animales activos → lista vacía (no es error).
+ * Trae los perfiles del grupo en la forma de selección (candidatura + display), del SQLite local. Las masivas
+ * operan sobre el GRUPO ENTERO (design §5.1/§5.3, RG5.1/RG5.3): para un RODEO usa `fetchAllGroupMembers` (query
+ * scopeada por rodeo_id, SIN el tope de 200 que tenía `fetchAnimals({rodeoId})` → antes "castrar todo el rodeo"
+ * sobre >200 solo tocaba 200 EN SILENCIO); para un LOTE usa `fetchGroupMembers` (ya corregido a scope por
+ * management_group_id, RG5.4). Ambos aplican el espejo C6 → categoryCode/Name son los offline-correct. Luego mergea
+ * los 3 flags de candidatura (is_castrated/has_weaning/category_override) batched. Grupo sin activos → lista vacía.
  */
 export async function fetchGroupSelectionProfiles(
   establishmentId: string,
@@ -58,7 +59,7 @@ export async function fetchGroupSelectionProfiles(
 ): Promise<ServiceResult<GroupSelectionProfile[]>> {
   const listRes =
     group.groupType === 'rodeo'
-      ? await fetchAnimals(establishmentId, { rodeoId: group.groupId, status: 'active' })
+      ? await fetchAllGroupMembers(establishmentId, { type: 'rodeo', id: group.groupId })
       : await fetchGroupMembers(establishmentId, group.groupId);
   if (!listRes.ok) return { ok: false, error: listRes.error };
 

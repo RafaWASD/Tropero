@@ -841,24 +841,306 @@ export function buildGroupHeadCountsQuery(establishmentId: string): LocalQuery {
   return { sql, args: [establishmentId, establishmentId] };
 }
 
-/** UNION genérico synced+overlay para las búsquedas (TAG/IDV/LIKE): mismo filtro extra en ambas ramas. */
+// ─── DELTA rodeo-grande (spec 10): vista de grupo scopeada + paginada + count/candidatos por grupo ──────
+//
+// Builders NUEVOS para la vista "dentro del rodeo/lote" (GroupViewScreen). Reemplazan el reuso de
+// `buildAnimalsListQuery` (LIMIT 200 del CAMPO) por una query SCOPEADA al grupo (rodeo_id / management_group_id),
+// PAGINADA por keyset y overlay-aware. La tab Animales (`buildAnimalsListQuery`) NO se toca (RG7.1).
+//
+// Multi-tenant (CLAUDE.md ppio 6 / RG6.5): TODAS conservan `ap.establishment_id = ?` (del param, nunca
+// hardcodeado) + los filtros de dominio (status='active', deleted_at IS NULL, HIDE_EXITED) + overlay `pending_*`.
+// El scope de grupo (`rodeo_id`/`management_group_id`) es un filtro de DOMINIO ADICIONAL sobre un set que la RLS +
+// las sync streams ya recortaron por tenant. Offline (RG6.4): todo corre sobre el SQLite local (runLocalQuery).
+
+/** Identidad del grupo sobre el que se scopean las lecturas de la vista de grupo (rodeo o lote). */
+export type GroupScope = { type: 'rodeo' | 'lote'; id: string };
+
+/** Cursor keyset (seek) de la lista paginada del grupo (RG1.4): la clave de orden de la ÚLTIMA fila cargada. */
+export type GroupPageCursor = { inTreatment: 0 | 1; createdAt: string; id: string };
+
+/** Columna de scope del grupo: rodeo → `rodeo_id`; lote → `management_group_id`. */
+function groupScopeCol(type: 'rodeo' | 'lote'): 'rodeo_id' | 'management_group_id' {
+  return type === 'rodeo' ? 'rodeo_id' : 'management_group_id';
+}
+
+// `in_treatment` computado (RTR.5): EXISTS de un treatment ABIERTO del perfil. Es EXACTAMENTE el mismo predicado
+// que `buildAnimalsListQuery` inyecta (aquel builder NO se toca, RG7.1) — se REPLICA acá para no editarlo. Un
+// drift entre ambos lo caza el test `T-RG.1: in_treatment idéntico a buildAnimalsListQuery`.
+const IN_TREATMENT_SYNCED_EXPR =
+  'EXISTS (SELECT 1 FROM treatments t WHERE t.animal_profile_id = ap.id ' +
+  'AND t.ended_at IS NULL AND t.deleted_at IS NULL) AS in_treatment';
+
+/**
+ * UNION synced+overlay SCOPEADO al grupo, con `in_treatment` inyectado (RTR.5) y filtros OPCIONALES de
+ * categoría (`c.code = ?`, categoría ALMACENADA — design §4.2) y sexo (`animal_sex = ?`). Base COMPARTIDA por la
+ * lista paginada (keyset+LIMIT, `buildGroupAnimalsPageQuery`) y el set completo (sin tope, `buildAllGroupMembersQuery`).
+ * NO lleva ORDER BY / LIMIT / keyset (los pone cada caller). Devuelve el SQL del compound + sus args (synced ++ overlay).
+ */
+function buildGroupScopedUnion(
+  establishmentId: string,
+  group: GroupScope,
+  filter: { categoryCode?: string | null; sex?: string | null },
+): { sql: string; args: unknown[] } {
+  const col = groupScopeCol(group.type);
+  // in_treatment inyectado en la lista de proyección (antes del FROM principal), igual que buildAnimalsListQuery.
+  const syncedSelect = injectProjection(LOCAL_LIST_SELECT, IN_TREATMENT_SYNCED_EXPR);
+  const overlaySelect = injectProjection(LOCAL_LIST_SELECT_OVERLAY, '0 AS in_treatment');
+  const dom = listDomainFilters(establishmentId, 'active');
+  const domO = listDomainFiltersOverlay(establishmentId, 'active');
+
+  let synced = `${syncedSelect} WHERE ${dom.where} AND ${HIDE_EXITED_PROFILE} AND ap.${col} = ?`;
+  const syncedArgs: unknown[] = [...dom.args, group.id];
+  let overlay =
+    `${overlaySelect} WHERE ${domO.where} AND ` +
+    notHiddenByOverride('animal_profiles', 'pap.id', ['exited', 'soft_deleted']) +
+    ` AND pap.${col} = ?`;
+  const overlayArgs: unknown[] = [...domO.args, group.id];
+
+  // Filtros de chips (RG3.5): categoría (c.code, almacenada) y sexo (animal_sex). Se aplican DENTRO de cada rama
+  // (el keyset del caller sigue funcionando sobre el subconjunto filtrado). null/undefined → sin filtro.
+  if (filter.categoryCode != null) {
+    synced += ' AND c.code = ?';
+    syncedArgs.push(filter.categoryCode);
+    overlay += ' AND c.code = ?';
+    overlayArgs.push(filter.categoryCode);
+  }
+  if (filter.sex != null) {
+    synced += ' AND ap.animal_sex = ?';
+    syncedArgs.push(filter.sex);
+    overlay += ' AND pap.animal_sex = ?';
+    overlayArgs.push(filter.sex);
+  }
+  return { sql: `${synced} UNION ALL ${overlay}`, args: [...syncedArgs, ...overlayArgs] };
+}
+
+/**
+ * Página de animales de la vista de grupo (RG1.1–RG1.8, RG3.5): query SCOPEADA al grupo (sin el tope de 200 de
+ * la tab), PAGINADA por KEYSET (seek) sobre la clave de orden total `(in_treatment DESC, created_at DESC, id DESC)`
+ * y overlay-aware. `filter` = chips categoría/sexo opcionales. `cursor` = clave de la última fila cargada (null en
+ * la 1ª página → sin predicado keyset). `pageSize` = LIMIT.
+ *
+ * El KEYSET va en el SELECT EXTERNO que envuelve el UNION (referencia las columnas PROYECTADAS `in_treatment`/
+ * `created_at`/`id` — patrón `buildTimelineQuery`). Predicado "filas DESPUÉS del cursor" (orden DESC → menores):
+ * `(in_treatment < :it) OR (in_treatment = :it AND created_at < :ca) OR (in_treatment = :it AND created_at = :ca
+ * AND id < :id)`. El `id DESC` es el DESEMPATE que vuelve el orden TOTAL (sin él, dos filas con el mismo
+ * `created_at` harían que el keyset saltee/duplique) — NO altera la semántica del baseline (RG1.7). `buildAnimalsListQuery`
+ * NO se toca (RG7.1).
+ */
+export function buildGroupAnimalsPageQuery(
+  establishmentId: string,
+  group: GroupScope,
+  filter: { categoryCode?: string | null; sex?: string | null },
+  cursor: GroupPageCursor | null,
+  pageSize: number,
+): LocalQuery {
+  const inner = buildGroupScopedUnion(establishmentId, group, filter);
+  let sql = `SELECT * FROM (${inner.sql})`;
+  const keysetArgs: unknown[] = [];
+  if (cursor) {
+    // Cada disyunto va parentizado → `P1 OR P2 OR P3` sin ambigüedad de precedencia AND/OR.
+    sql +=
+      ' WHERE (in_treatment < ?) OR (in_treatment = ? AND created_at < ?) ' +
+      'OR (in_treatment = ? AND created_at = ? AND id < ?)';
+    keysetArgs.push(
+      cursor.inTreatment,
+      cursor.inTreatment,
+      cursor.createdAt,
+      cursor.inTreatment,
+      cursor.createdAt,
+      cursor.id,
+    );
+  }
+  sql += ' ORDER BY in_treatment DESC, created_at DESC, id DESC LIMIT ?';
+  // Orden de args: synced ++ overlay (dentro del subquery) ++ keyset (WHERE externo) ++ pageSize (LIMIT).
+  return { sql, args: [...inner.args, ...keysetArgs, pageSize] };
+}
+
+/**
+ * Set COMPLETO de miembros ACTIVOS de un grupo (RG5.3/RG5.4): misma query scopeada que `buildGroupAnimalsPageQuery`
+ * pero SIN keyset ni LIMIT → todos los miembros. Overlay-aware. Lo usan las masivas (fetchAllGroupMembers) y la
+ * vista de LOTE (fix del bug de `fetchGroupMembers`, RG5.4). ORDER BY determinístico (mismo que la página).
+ */
+export function buildAllGroupMembersQuery(establishmentId: string, group: GroupScope): LocalQuery {
+  const inner = buildGroupScopedUnion(establishmentId, group, {});
+  const sql = `SELECT * FROM (${inner.sql}) ORDER BY in_treatment DESC, created_at DESC, id DESC`;
+  return { sql, args: inner.args };
+}
+
+/** UNION genérico synced+overlay para las búsquedas (TAG/IDV/LIKE): mismo filtro extra en ambas ramas.
+ *
+ * DELTA rodeo-grande (RG3.1/RG3.2): `groupScope` OPCIONAL → agrega `AND ap.<col> = ?` (synced) y `AND pap.<col> = ?`
+ * (overlay) para scopear la búsqueda al rodeo/lote. AUSENTE → SQL + args IDÉNTICOS al as-built (la tab Animales lo
+ * llama sin scope → cero regresión, RG7.1). */
 function buildSearchUnion(
   establishmentId: string,
   syncedExtra: string,
   overlayExtra: string,
   extraArg: unknown,
+  groupScope?: GroupScope,
 ): LocalQuery {
   const dom = listDomainFilters(establishmentId, 'active');
-  const synced = `${LOCAL_LIST_SELECT} WHERE ${dom.where} AND ${HIDE_EXITED_PROFILE} AND ${syncedExtra}`;
   const domO = listDomainFiltersOverlay(establishmentId, 'active');
+  const syncedScope = groupScope ? ` AND ap.${groupScopeCol(groupScope.type)} = ?` : '';
+  const overlayScope = groupScope ? ` AND pap.${groupScopeCol(groupScope.type)} = ?` : '';
+  const synced = `${LOCAL_LIST_SELECT} WHERE ${dom.where} AND ${HIDE_EXITED_PROFILE} AND ${syncedExtra}${syncedScope}`;
   const overlay =
     `${LOCAL_LIST_SELECT_OVERLAY} WHERE ${domO.where} AND ` +
     notHiddenByOverride('animal_profiles', 'pap.id', ['exited', 'soft_deleted']) +
-    ` AND ${overlayExtra}`;
+    ` AND ${overlayExtra}${overlayScope}`;
+  // Orden de args por rama (en el orden de aparición de los `?`): dom ++ extraArg ++ [scopeId]. Con groupScope
+  // ausente, el `...(groupScope ? [id] : [])` no agrega nada → args idénticos al as-built.
+  const syncedArgs = [...dom.args, extraArg, ...(groupScope ? [groupScope.id] : [])];
+  const overlayArgs = [...domO.args, extraArg, ...(groupScope ? [groupScope.id] : [])];
   // LIMIT 20 sobre el UNION completo (mismo tope que el T4; el dedup por profileId lo hace el service).
   return {
     sql: `${synced} UNION ALL ${overlay} LIMIT 20`,
-    args: [...dom.args, extraArg, ...domO.args, extraArg],
+    args: [...syncedArgs, ...overlayArgs],
+  };
+}
+
+/**
+ * Conteo de CANDIDATOS del grupo entero para el gating de masivas (RG5.2, design §5.2), overlay-aware. Devuelve
+ * una fila `{ castrate, wean }`:
+ *  - **Castrar** (EXACTO): machos ENTEROS (`animal_sex='male' AND is_castrated=0`). Ambas columnas almacenadas →
+ *    SQL puro, cero espejo. En el overlay un alta optimista macho nace entero (is_castrated=0 constante) → cuenta.
+ *  - **Destetar** (APROX stored-category, design §5.2 nota): `c.code IN ('ternero','ternera') AND` sin `weaning`
+ *    vivo (synced NI overlay), restringido a los rodeos con destete habilitado (`weaningEnabledRodeoIds`). Set
+ *    provisto y VACÍO → 0 (ningún rodeo con destete). undefined → sin restricción por rodeo.
+ *
+ * Multi-tenant (RG6.5): conserva `establishment_id = ?` (del param) además del scope de grupo. `establishmentId`
+ * se agregó a la firma respecto del boceto del design (que lo omitía) por la regla dura de tenant — ver
+ * reconciliación en design §5.2.
+ */
+export function buildGroupCandidateCountsQuery(
+  establishmentId: string,
+  group: GroupScope,
+  opts: { weaningEnabledRodeoIds?: readonly string[] } = {},
+): LocalQuery {
+  const col = groupScopeCol(group.type);
+  const overlayNotHidden = notHiddenByOverride('animal_profiles', 'pap.id', ['exited', 'soft_deleted']);
+
+  const castrateSynced =
+    `SELECT COUNT(*) FROM animal_profiles ap ` +
+    `WHERE ap.establishment_id = ? AND ap.status = 'active' AND ap.deleted_at IS NULL ` +
+    `AND ${HIDE_EXITED_PROFILE} AND ap.${col} = ? AND ap.animal_sex = 'male' AND ap.is_castrated = 0`;
+  const castrateSyncedArgs = [establishmentId, group.id];
+  const castrateOverlay =
+    `SELECT COUNT(*) FROM pending_animal_profiles pap ` +
+    `WHERE pap.establishment_id = ? AND pap.status = 'active' AND ${overlayNotHidden} ` +
+    `AND pap.${col} = ? AND pap.animal_sex = 'male'`;
+  const castrateOverlayArgs = [establishmentId, group.id];
+
+  const wean = buildWeanCountExpr(establishmentId, group.id, col, overlayNotHidden, opts.weaningEnabledRodeoIds);
+
+  const sql =
+    `SELECT (( ${castrateSynced} ) + ( ${castrateOverlay} )) AS castrate, ${wean.sql} AS wean`;
+  return { sql, args: [...castrateSyncedArgs, ...castrateOverlayArgs, ...wean.args] };
+}
+
+/** Expresión escalar del conteo de candidatos de DESTETE (synced + overlay) para buildGroupCandidateCountsQuery. */
+function buildWeanCountExpr(
+  establishmentId: string,
+  groupId: string,
+  col: 'rodeo_id' | 'management_group_id',
+  overlayNotHidden: string,
+  weaningEnabledRodeoIds: readonly string[] | undefined,
+): { sql: string; args: unknown[] } {
+  // Set provisto y VACÍO → 0 candidatos (ningún rodeo con destete); evita el `IN ()` inválido en SQLite.
+  if (weaningEnabledRodeoIds && weaningEnabledRodeoIds.length === 0) {
+    return { sql: '0', args: [] };
+  }
+  const hasRodeoRestriction = weaningEnabledRodeoIds != null && weaningEnabledRodeoIds.length > 0;
+  const placeholders = hasRodeoRestriction ? weaningEnabledRodeoIds!.map(() => '?').join(', ') : '';
+  const rodeoInSynced = hasRodeoRestriction ? ` AND ap.rodeo_id IN (${placeholders})` : '';
+  const rodeoInOverlay = hasRodeoRestriction ? ` AND pap.rodeo_id IN (${placeholders})` : '';
+  const rodeoArgs = hasRodeoRestriction ? [...weaningEnabledRodeoIds!] : [];
+
+  const notWeaned = (alias: string): string =>
+    `NOT EXISTS (SELECT 1 FROM reproductive_events re WHERE re.animal_profile_id = ${alias}.id ` +
+    `AND re.event_type = 'weaning' AND re.deleted_at IS NULL) ` +
+    `AND NOT EXISTS (SELECT 1 FROM pending_reproductive_events pre WHERE pre.animal_profile_id = ${alias}.id ` +
+    `AND pre.event_type = 'weaning')`;
+
+  const weanSynced =
+    `SELECT COUNT(*) FROM animal_profiles ap JOIN categories_by_system c ON c.id = ap.category_id ` +
+    `WHERE ap.establishment_id = ? AND ap.status = 'active' AND ap.deleted_at IS NULL AND ${HIDE_EXITED_PROFILE} ` +
+    `AND ap.${col} = ? AND c.code IN ('ternero', 'ternera') AND ${notWeaned('ap')}${rodeoInSynced}`;
+  const weanOverlay =
+    `SELECT COUNT(*) FROM pending_animal_profiles pap JOIN categories_by_system c ON c.id = pap.category_id ` +
+    `WHERE pap.establishment_id = ? AND pap.status = 'active' AND ${overlayNotHidden} ` +
+    `AND pap.${col} = ? AND c.code IN ('ternero', 'ternera') AND ${notWeaned('pap')}${rodeoInOverlay}`;
+
+  return {
+    sql: `(( ${weanSynced} ) + ( ${weanOverlay} ))`,
+    args: [establishmentId, groupId, ...rodeoArgs, establishmentId, groupId, ...rodeoArgs],
+  };
+}
+
+/**
+ * Rodeos REALES representados entre los miembros ACTIVOS de un grupo (RG5.2, lote cross-rodeo R7.2): DISTINCT de
+ * `rodeo_id`, scopeado + overlay-aware. Lo usa `group-data.ts` para resolver la config de destete/vacunación por
+ * rodeo del lote SIN cargar todos los miembros (query barata, no paga el compute del espejo — design §2 corolario).
+ * Para un RODEO devuelve su propio id (o vacío si no tiene miembros).
+ */
+export function buildGroupRodeoIdsQuery(establishmentId: string, group: GroupScope): LocalQuery {
+  const col = groupScopeCol(group.type);
+  const synced =
+    `SELECT DISTINCT ap.rodeo_id AS rodeo_id FROM animal_profiles ap ` +
+    `WHERE ap.establishment_id = ? AND ap.status = 'active' AND ap.deleted_at IS NULL AND ${HIDE_EXITED_PROFILE} ` +
+    `AND ap.${col} = ?`;
+  const overlay =
+    `SELECT DISTINCT pap.rodeo_id AS rodeo_id FROM pending_animal_profiles pap ` +
+    `WHERE pap.establishment_id = ? AND pap.status = 'active' AND ` +
+    notHiddenByOverride('animal_profiles', 'pap.id', ['exited', 'soft_deleted']) +
+    ` AND pap.${col} = ?`;
+  return { sql: `${synced} UNION ${overlay}`, args: [establishmentId, group.id, establishmentId, group.id] };
+}
+
+/**
+ * Opciones del chip de CATEGORÍA de la vista de grupo (RG3.9): DISTINCT `{ code, name }` de las categorías
+ * ALMACENADAS presentes entre los miembros activos del grupo (scopeado + overlay-aware). `UNION` (no ALL) dedup-ea
+ * entre synced y overlay. Orden por nombre (presentación estable es-AR). Usa la categoría almacenada (design §4.2).
+ */
+export function buildGroupCategoryOptionsQuery(establishmentId: string, group: GroupScope): LocalQuery {
+  const col = groupScopeCol(group.type);
+  const synced =
+    `SELECT DISTINCT c.code AS code, c.name AS name FROM animal_profiles ap ` +
+    `JOIN categories_by_system c ON c.id = ap.category_id ` +
+    `WHERE ap.establishment_id = ? AND ap.status = 'active' AND ap.deleted_at IS NULL AND ${HIDE_EXITED_PROFILE} ` +
+    `AND ap.${col} = ?`;
+  const overlay =
+    `SELECT DISTINCT c.code AS code, c.name AS name FROM pending_animal_profiles pap ` +
+    `JOIN categories_by_system c ON c.id = pap.category_id ` +
+    `WHERE pap.establishment_id = ? AND pap.status = 'active' AND ` +
+    notHiddenByOverride('animal_profiles', 'pap.id', ['exited', 'soft_deleted']) +
+    ` AND pap.${col} = ?`;
+  return {
+    sql: `${synced} UNION ${overlay} ORDER BY name ASC`,
+    args: [establishmentId, group.id, establishmentId, group.id],
+  };
+}
+
+/**
+ * Opciones del chip de SEXO de la vista de grupo (RG3.9): los sexos (`animal_sex`) DISTINTOS presentes entre
+ * los miembros activos del grupo, scopeado + overlay-aware. El chip de sexo se ofrece SOLO si hay AMBOS (lo
+ * decide el hook con `sexFilterAvailable`). Es una query PROPIA (no se deriva de la categoría) → robusta ante
+ * categorías sex-neutras (`cut`): `animal_sex` es la columna denormalizada, siempre presente por animal. NULL
+ * defensivo excluido. Mismo patrón que `buildGroupCategoryOptionsQuery`.
+ */
+export function buildGroupSexOptionsQuery(establishmentId: string, group: GroupScope): LocalQuery {
+  const col = groupScopeCol(group.type);
+  const synced =
+    `SELECT DISTINCT ap.animal_sex AS animal_sex FROM animal_profiles ap ` +
+    `WHERE ap.establishment_id = ? AND ap.status = 'active' AND ap.deleted_at IS NULL AND ${HIDE_EXITED_PROFILE} ` +
+    `AND ap.${col} = ? AND ap.animal_sex IS NOT NULL`;
+  const overlay =
+    `SELECT DISTINCT pap.animal_sex AS animal_sex FROM pending_animal_profiles pap ` +
+    `WHERE pap.establishment_id = ? AND pap.status = 'active' AND ` +
+    notHiddenByOverride('animal_profiles', 'pap.id', ['exited', 'soft_deleted']) +
+    ` AND pap.${col} = ? AND pap.animal_sex IS NOT NULL`;
+  return {
+    sql: `${synced} UNION ${overlay}`,
+    args: [establishmentId, group.id, establishmentId, group.id],
   };
 }
 
@@ -866,12 +1148,17 @@ function buildSearchUnion(
  * Búsqueda EXACTA por TAG electrónico (b1: `animal_profiles.animal_tag_electronic`). status active +
  * deleted_at IS NULL + LIMIT 20. UNION synced + overlay (T6); oculta exits pendientes.
  */
-export function buildSearchByTagQuery(establishmentId: string, tag: string): LocalQuery {
+export function buildSearchByTagQuery(
+  establishmentId: string,
+  tag: string,
+  groupScope?: GroupScope,
+): LocalQuery {
   return buildSearchUnion(
     establishmentId,
     'ap.animal_tag_electronic = ?',
     'pap.animal_tag_electronic = ?',
     tag,
+    groupScope,
   );
 }
 
@@ -912,8 +1199,12 @@ export function buildLookupTagAcrossFieldsQuery(tag: string): LocalQuery {
  * Búsqueda EXACTA por IDV (`animal_profiles.idv`). status active + deleted_at IS NULL + LIMIT 20.
  * UNION synced + overlay (T6).
  */
-export function buildSearchByIdvQuery(establishmentId: string, idv: string): LocalQuery {
-  return buildSearchUnion(establishmentId, 'ap.idv = ?', 'pap.idv = ?', idv);
+export function buildSearchByIdvQuery(
+  establishmentId: string,
+  idv: string,
+  groupScope?: GroupScope,
+): LocalQuery {
+  return buildSearchUnion(establishmentId, 'ap.idv = ?', 'pap.idv = ?', idv, groupScope);
 }
 
 /**
@@ -932,6 +1223,7 @@ export function buildSearchLikeQuery(
   establishmentId: string,
   column: 'animal_tag_electronic' | 'idv',
   term: string,
+  groupScope?: GroupScope,
 ): LocalQuery {
   const pattern = `%${escapeLike(term)}%`;
   return buildSearchUnion(
@@ -939,6 +1231,7 @@ export function buildSearchLikeQuery(
     `ap.${column} LIKE ? ESCAPE '\\'`,
     `pap.${column} LIKE ? ESCAPE '\\'`,
     pattern,
+    groupScope,
   );
 }
 
@@ -962,14 +1255,18 @@ export function escapeLike(term: string): string {
  * `data_key='apodo'` es constante literal, no input. El scope de tenant lo cierra buildSearchUnion
  * (ap.establishment_id = ?) + la stream. Mismo LIMIT 20 del UNION que las otras ramas (acota el heno).
  */
-export function buildApodoSearchQuery(establishmentId: string, term: string): LocalQuery {
+export function buildApodoSearchQuery(
+  establishmentId: string,
+  term: string,
+  groupScope?: GroupScope,
+): LocalQuery {
   const pattern = `%${escapeLike(term)}%`;
   const existsFor = (alias: string): string =>
     `EXISTS (SELECT 1 FROM custom_attributes ca ` +
     `JOIN field_definitions fd ON fd.id = ca.field_definition_id ` +
     `WHERE ca.animal_profile_id = ${alias}.id AND fd.data_key = 'apodo' AND fd.establishment_id IS NOT NULL ` +
     `AND ca.value LIKE ? ESCAPE '\\')`;
-  return buildSearchUnion(establishmentId, existsFor('ap'), existsFor('pap'), pattern);
+  return buildSearchUnion(establishmentId, existsFor('ap'), existsFor('pap'), pattern, groupScope);
 }
 
 /**

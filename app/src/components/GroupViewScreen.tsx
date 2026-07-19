@@ -1,52 +1,59 @@
 // GroupViewScreen — scaffold PRESENTACIONAL compartido de la vista de grupo (rodeo/[id] + lote/[id])
-// (spec 10, T-UI.1 / R1.1–R1.6, R7.1). Sin fetch (architecture.md): la pantalla (ruta) orquesta los datos
-// con useGroupView + su loader, y pasa el estado + un `onAction` + un `renderRow`. Este componente arma:
-//   - header con back,
-//   - GroupMetaHeader (tipo + nombre + cabezas),
-//   - card de acciones masivas (GroupActionsBar),
-//   - lista de animales activos (GroupAnimalsList) con el renderRow de la pantalla.
+// (spec 10, T-UI.1 + delta «rodeo grande» T-RG.22/23). Sin fetch (architecture.md): la pantalla (ruta)
+// orquesta los datos con `useGroupView` (contrato paginado) y pasa el estado + `onAction` + `renderRow`.
 //
-// (Sin card de "Datos que se cargan acá": era redundante con las 3 acciones del grupo de abajo —Nielsen
-//  #8—; el gating de las acciones se sigue resolviendo en group-data.ts, solo se quitó el chip visual.)
+// Reestructurado a **FlatList VIRTUALIZADA** (RG4.1/RG4.2 — FlatList, NO FlashList) para no colgar en un
+// grupo de miles: `ScrollView`+`.map()` → `FlatList` con scroll infinito (`onEndReached` → `loadMore`,
+// RG1.3). Layout:
+//   - header con back (fijo),
+//   - GroupSearchBar (buscador + chips categoría/sexo) FIJO arriba, FUERA de la FlatList (RG4.4 — siempre
+//     alcanzable sin scrollear),
+//   - FlatList: `ListHeaderComponent` = GroupMetaHeader (totalCount real) + card de acciones masivas
+//     (scrollean, RG4.3); `renderItem` = el `renderRow` de la pantalla (AnimalRow compacto); `keyExtractor`
+//     = `profileId` (keys estables, RG4.5); `ListFooterComponent` = spinner "cargando más" (RG4.6);
+//     `ListEmptyComponent` = loading/empty/no-match.
 //
 // Cero hardcode (ADR-023 §4): tokens + getTokenValue para íconos lucide. Voseo es-AR.
 
-import { Platform, Pressable } from 'react-native';
+import { useState } from 'react';
+import { ActivityIndicator, FlatList, Platform, Pressable } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { getTokenValue, ScrollView, Text, XStack, YStack } from 'tamagui';
+import { getTokenValue, Text, XStack, YStack } from 'tamagui';
 import { ChevronLeft } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
 
 import { Card } from './Card';
-import { FormError } from './AuthBits';
+import { FormError, InfoNote } from './AuthBits';
 import { GroupActionsBar } from './GroupActionsBar';
-import { GroupMetaHeader, GroupAnimalsList } from './GroupViewBits';
+import { GroupMetaHeader } from './GroupViewBits';
+import { GroupSearchBar } from './GroupSearchBar';
 import { backOr } from '../utils/nav';
 import { buttonA11y } from '../utils/a11y';
+import type { AnimalListItem } from '../services/animals';
 import type { GroupAction } from '../utils/group-actions';
 import type { GroupViewState } from '../hooks/useGroupView';
 
-export type GroupViewScreenProps<T> = {
+export type GroupViewScreenProps = {
   /** Ícono del tipo de grupo (Boxes para rodeo, Layers para lote). */
   icon: LucideIcon;
   /** Tipo de grupo ("Rodeo" / "Lote"). */
   kindLabel: string;
   /** Nombre del grupo. */
   name: string;
-  /** Estado de carga del grupo (useGroupView). */
-  view: GroupViewState & { animals: T[] };
-  /** Copy del empty-state de la lista. */
+  /** Estado paginado del grupo (useGroupView). */
+  view: GroupViewState;
+  /** Copy del empty-state de la lista (grupo sin animales activos). */
   emptyCopy: string;
   /** Dispara una acción masiva (la pantalla navega). */
   onAction: (action: GroupAction) => void;
   /** La pantalla arma cada fila (AnimalRow compacto). */
-  renderRow: (animal: T) => React.ReactNode;
+  renderRow: (animal: AnimalListItem) => React.ReactNode;
   /** Ruta de fallback del back si el stack está vacío (default: Inicio). */
   backFallback?: '/(tabs)' | '/lotes' | '/rodeos';
 };
 
-export function GroupViewScreen<T>({
+export function GroupViewScreen({
   icon,
   kindLabel,
   name,
@@ -55,14 +62,54 @@ export function GroupViewScreen<T>({
   onAction,
   renderRow,
   backFallback = '/(tabs)',
-}: GroupViewScreenProps<T>) {
+}: GroupViewScreenProps) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const muted = getTokenValue('$textMuted', 'color');
-  const { animals, actions, loading, error } = view;
+  const [openPicker, setOpenPicker] = useState<'category' | 'sex' | null>(null);
+
+  const { animals, actions, totalCount, loading, loadingMore, error } = view;
+  const hasActions = actions && (actions.vaccinate || actions.wean || actions.castrate);
+
+  // Header de la lista (scrollea con ella, RG4.3): meta con el total REAL + card de acciones masivas.
+  const listHeader = (
+    <YStack width="100%" gap="$4" paddingBottom="$4">
+      <GroupMetaHeader icon={icon} kindLabel={kindLabel} name={name} totalCount={totalCount} />
+      {/* La card de acciones se muestra solo si hay AL MENOS UNA acción ofrecible (grupo sin candidatos ni
+          config habilitada NO muestra una card vacía). */}
+      {hasActions ? (
+        <Card gap="$3">
+          <Text fontFamily="$body" fontSize="$6" fontWeight="600" color="$textPrimary">
+            Acciones del grupo
+          </Text>
+          <GroupActionsBar availability={actions} onAction={onAction} />
+        </Card>
+      ) : null}
+    </YStack>
+  );
+
+  // Empty-state de la lista (RG3.8 / búsqueda sin match / grupo vacío). Se muestra cuando `animals` está vacío.
+  const emptyElement = (
+    <YStack width="100%" paddingTop="$2">
+      {loading ? (
+        <InfoNote>Cargando animales…</InfoNote>
+      ) : view.isSearching ? (
+        view.searchPending ? (
+          <InfoNote>Buscando…</InfoNote>
+        ) : (
+          <InfoNote>{`No encontramos «${view.query.trim()}» en este grupo.`}</InfoNote>
+        )
+      ) : view.categoryCode !== null || view.sex !== null ? (
+        <InfoNote>Ningún animal coincide con el filtro.</InfoNote>
+      ) : (
+        <InfoNote>{emptyCopy}</InfoNote>
+      )}
+    </YStack>
+  );
 
   return (
     <YStack flex={1} width="100%" maxWidth="100%" overflow="hidden" backgroundColor="$bg">
+      {/* Header fijo con back. */}
       <YStack width="100%" paddingTop={insets.top} paddingHorizontal="$4">
         <XStack width="100%" alignItems="center" gap="$2" paddingVertical="$3">
           <Pressable hitSlop={8} onPress={() => backOr(router, backFallback)} {...buttonA11y(Platform.OS, { label: 'Volver' })}>
@@ -71,40 +118,53 @@ export function GroupViewScreen<T>({
         </XStack>
       </YStack>
 
-      <ScrollView
-        flex={1}
-        width="100%"
-        maxWidth="100%"
-        contentContainerStyle={{
-          paddingHorizontal: getTokenValue('$4', 'space'),
-          paddingBottom: insets.bottom + getTokenValue('$6', 'space'),
-          width: '100%',
-          maxWidth: '100%',
-          gap: getTokenValue('$4', 'space'),
-        }}
-        showsHorizontalScrollIndicator={false}
-      >
-        {error ? (
+      {/* Buscador + chips FIJOS arriba (fuera de la FlatList, RG4.4). */}
+      <GroupSearchBar
+        query={view.query}
+        onChangeQuery={view.setQuery}
+        categoryCode={view.categoryCode}
+        onSelectCategory={view.setCategoryCode}
+        categoryOptions={view.categoryOptions}
+        sex={view.sex}
+        onSelectSex={view.setSex}
+        sexFilterAvailable={view.sexFilterAvailable}
+        openPicker={openPicker}
+        onOpenPicker={setOpenPicker}
+      />
+
+      {error && animals.length === 0 ? (
+        <YStack paddingHorizontal="$4" paddingTop="$4">
           <FormError message={error} />
-        ) : (
-          <>
-            <GroupMetaHeader icon={icon} kindLabel={kindLabel} name={name} headCount={animals.length} loading={loading} />
-
-            {/* La card de acciones se muestra solo si hay AL MENOS UNA acción ofrecible (fix Raf 2026-06-12:
-                un grupo sin candidatos ni config habilitada NO muestra una card vacía). */}
-            {actions && (actions.vaccinate || actions.wean || actions.castrate) ? (
-              <Card gap="$3">
-                <Text fontFamily="$body" fontSize="$6" fontWeight="600" color="$textPrimary">
-                  Acciones del grupo
+        </YStack>
+      ) : (
+        <FlatList
+          data={animals}
+          keyExtractor={(a) => a.profileId}
+          renderItem={({ item }) => <>{renderRow(item)}</>}
+          ListHeaderComponent={listHeader}
+          ListEmptyComponent={emptyElement}
+          ListFooterComponent={
+            loadingMore ? (
+              <XStack width="100%" alignItems="center" justifyContent="center" gap="$2" paddingVertical="$4">
+                <ActivityIndicator color={muted} />
+                <Text fontFamily="$body" fontSize="$3" lineHeight="$3" fontWeight="500" color="$textMuted">
+                  Cargando más…
                 </Text>
-                <GroupActionsBar availability={actions} onAction={onAction} />
-              </Card>
-            ) : null}
-
-            <GroupAnimalsList animals={animals} loading={loading} emptyCopy={emptyCopy} renderRow={renderRow} />
-          </>
-        )}
-      </ScrollView>
+              </XStack>
+            ) : null
+          }
+          onEndReached={view.loadMore}
+          onEndReachedThreshold={0.5}
+          keyboardShouldPersistTaps="handled"
+          showsHorizontalScrollIndicator={false}
+          showsVerticalScrollIndicator={false}
+          style={{ flex: 1, width: '100%' }}
+          contentContainerStyle={{
+            paddingHorizontal: getTokenValue('$4', 'space'),
+            paddingBottom: insets.bottom + getTokenValue('$6', 'space'),
+          }}
+        />
+      )}
     </YStack>
   );
 }

@@ -1,27 +1,31 @@
-// GroupViewBits — piezas presentacionales COMPARTIDAS por la vista de grupo (rodeo/[id] + lote/[id])
-// (spec 10, T-UI.1 / R1.1, R1.2, R1.3). Componentes sin fetch (architecture.md): la pantalla orquesta
-// los datos y pasa props.
+// GroupViewBits — pieza presentacional COMPARTIDA por la vista de grupo (rodeo/[id] + lote/[id])
+// (spec 10, T-UI.1 + delta «rodeo grande» T-RG.24).
 //
-//   - GroupMetaHeader: el "hero" del grupo — ícono + tipo (Rodeo/Lote) + nombre + cabezas activas.
-//   - GroupAnimalsList: la lista de animales activos (R1.3), con su header de conteo + empty/loading.
-//     Recibe `renderRow` para que cada pantalla arme su AnimalRow compacto con sus datos.
+//   - GroupMetaHeader: el "hero" del grupo — ícono + tipo (Rodeo/Lote) + nombre + cabezas activas. El conteo
+//     ahora es el TOTAL REAL del grupo (COUNT scopeado overlay-aware, RG2.1), NO el largo de la lista cargada:
+//     muestra "…" mientras no cargó (RG2.3, nunca "0 animales" prematuro) y formato es-AR (RG2.4).
 //
-// Cero hardcode (ADR-023 §4): tokens + getTokenValue para íconos lucide. Voseo es-AR.
+// (La lista de animales se ABSORBIÓ en la FlatList de `GroupViewScreen` — RG4.1 — así que `GroupAnimalsList`
+//  dejó de existir como componente `Card`+`.map`.)
+//
+// Cero hardcode (ADR-023 §4): tokens + getTokenValue para íconos lucide. Voseo es-AR. Recorte de descendentes:
+// lineHeight matching en el heading del nombre (RG7.3).
 
 import { getTokenValue, Text, View, XStack, YStack } from 'tamagui';
 import type { LucideIcon } from 'lucide-react-native';
 
-import { Card } from './Card';
-import { InfoNote } from './AuthBits';
+// ─── Header de metadatos del grupo (R1.1 / RG2.1) ────────────────────────────────────────
 
-// ─── Header de metadatos del grupo (R1.1) ────────────────────────────────────────────────
+/** Formatea el conteo en es-AR (separador de miles con punto, ej. 1.050) — RG2.4. */
+function formatCount(n: number): string {
+  return n.toLocaleString('es-AR');
+}
 
 export function GroupMetaHeader({
   icon: Icon,
   kindLabel,
   name,
-  headCount,
-  loading,
+  totalCount,
 }: {
   /** Ícono lucide del tipo de grupo (Boxes para rodeo, Layers para lote). */
   icon: LucideIcon;
@@ -29,12 +33,17 @@ export function GroupMetaHeader({
   kindLabel: string;
   /** Nombre del grupo. */
   name: string;
-  /** Cabezas activas (= largo de la lista de animales activos, R1.3). */
-  headCount: number;
-  /** Mientras carga, el conteo muestra "…" en vez de 0 (no mentir "0 cabezas"). */
-  loading: boolean;
+  /**
+   * Total REAL de animales activos del grupo (COUNT scopeado overlay-aware, RG2.1). `null` = todavía no
+   * cargó → muestra "…" (RG2.3, no mentir "0 animales"). Formato es-AR (RG2.4).
+   */
+  totalCount: number | null;
 }) {
   const primary = getTokenValue('$primary', 'color');
+  const countLabel =
+    totalCount === null
+      ? '…'
+      : `${formatCount(totalCount)} ${totalCount === 1 ? 'animal activo' : 'animales activos'}`;
   return (
     <YStack width="100%" gap="$3" paddingTop="$1">
       <XStack alignItems="center" gap="$3">
@@ -66,44 +75,9 @@ export function GroupMetaHeader({
           </Text>
         </YStack>
       </XStack>
-      <Text fontFamily="$body" fontSize="$4" fontWeight="500" color="$textMuted">
-        {loading ? 'Cargando…' : `${headCount} ${headCount === 1 ? 'animal activo' : 'animales activos'}`}
+      <Text fontFamily="$body" fontSize="$4" lineHeight="$4" fontWeight="500" color="$textMuted">
+        {countLabel}
       </Text>
-    </YStack>
-  );
-}
-
-// ─── Lista de animales del grupo (R1.2, R1.3) ────────────────────────────────────────────
-
-export function GroupAnimalsList<T>({
-  animals,
-  loading,
-  emptyCopy,
-  renderRow,
-}: {
-  animals: readonly T[];
-  loading: boolean;
-  /** Copy del empty-state cuando el grupo no tiene animales activos. */
-  emptyCopy: string;
-  /** La pantalla arma cada fila (AnimalRow compacto con sus datos — incl. la `key`). */
-  renderRow: (animal: T) => React.ReactNode;
-}) {
-  return (
-    <YStack width="100%" gap="$3">
-      <Text fontFamily="$body" fontSize="$6" fontWeight="600" color="$textPrimary">
-        Animales
-      </Text>
-      {loading ? (
-        <InfoNote>Cargando animales…</InfoNote>
-      ) : animals.length === 0 ? (
-        <InfoNote>{emptyCopy}</InfoNote>
-      ) : (
-        // Card sin padding interno para que las filas (con su propio padding + divider) lleguen al
-        // borde; overflow:hidden para que el borde inferior de la última fila respete el radio.
-        <Card padding="$0" overflow="hidden">
-          {animals.map((a) => renderRow(a))}
-        </Card>
-      )}
     </YStack>
   );
 }

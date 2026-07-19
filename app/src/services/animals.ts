@@ -234,7 +234,7 @@ export type AnimalDetail = {
 // `rodeos!inner`, …) como JOINs SQLite que devuelven filas PLANAS (aliaseadas en local-reads). La
 // identidad (tag/sex) viene de las columnas denormalizadas de animal_profiles (b1), NO de `animals`.
 
-type LocalListRow = {
+export type LocalListRow = {
   id: string;
   animal_id: string;
   idv: string | null;
@@ -512,6 +512,20 @@ async function computeReproStatuses(
     );
   }
   return out;
+}
+
+/**
+ * Enriquece filas crudas del SQLite local (LocalListRow) a AnimalListItem[], aplicando el espejo de categoría C6
+ * (display-only, RC6.3) + el espejo del badge de estado reproductivo (RAR.3.1) en UNA sola pasada batched, y
+ * mapeando con toLocalListItem. Es EXACTAMENTE el post-procesamiento que fetchAnimals/searchAnimals hacen sobre
+ * sus filas — extraído como export para que la vista de grupo (spec 10 delta rodeo-grande, group-page.ts) lo reuse
+ * sobre su PÁGINA/set scopeado (design §2: espejo + repro SOLO a la página, acotando el compute O(N)). NO cambia
+ * fetchAnimals/searchAnimals/buildAnimalsListQuery (RG7.1). Cero writes (RC6.3.5/RAR.8.1); todo del SQLite local.
+ */
+export async function enrichLocalRows(rows: readonly LocalListRow[]): Promise<AnimalListItem[]> {
+  const overrides = await computeMirrorOverrides(rows);
+  const reproStatuses = await computeReproStatuses(rows, overrides);
+  return rows.map((row) => toLocalListItem(row, overrides.get(row.id), reproStatuses.get(row.id)));
 }
 
 // ─── Lista (R1.1, R1.5) ────────────────────────────────────────────────────────────

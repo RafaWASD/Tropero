@@ -23,10 +23,12 @@
 // is null`) → se ELIMINARON el diff before/after de create y el `count:'exact'` de assign/rename. El
 // id de cliente (R6.4) deja devolver el lote recién creado sin re-leer.
 
-import type { AnimalListItem, ServiceResult } from './animals';
-import { fetchAnimals } from './animals';
+import type { AnimalListItem, LocalListRow, ServiceResult } from './animals';
+import { enrichLocalRows } from './animals';
 import {
+  type GroupScope,
   buildManagementGroupsQuery,
+  buildAllGroupMembersQuery,
   buildCreateManagementGroupInsert,
   buildRenameManagementGroupUpdate,
   buildAssignAnimalToGroupUpdate,
@@ -192,25 +194,37 @@ export async function assignAnimalToGroup(
 // ─── Miembros de un lote (ver-miembros, D3) ───────────────────────────────────────────
 
 /**
- * Lista los animales ACTIVOS de un lote (D3): `management_group_id = <lote>` AND `status = 'active'`
- * AND `deleted_at IS NULL`, reusando fetchAnimals (mismo SELECT/scoping que la tab Animales, que ya
- * filtra por establishment + active + deleted_at vía RLS). El `establishmentId` viene del contexto
- * activo (NUNCA hardcodeado); RLS lo re-scopea igual. Devuelve AnimalListItem[] para reusar AnimalRow.
+ * Lista TODOS los animales ACTIVOS de un lote (D3 / RG5.4 — **fix del bug**): query SCOPEADA por
+ * `management_group_id = <lote>` (`buildAllGroupMembersQuery`), SIN tope, overlay-aware, del SQLite local.
  *
- * Implementado en términos de fetchAnimals (no una query nueva) para no duplicar el SELECT/joins ni el
- * mapeo, y para que el swap a PowerSync sea localizado. Como fetchAnimals YA lee del SQLite local
- * (T4.1), fetchGroupMembers lee local automáticamente (sin tocar acá). fetchAnimals no expone un filtro
- * por management_group_id, así que pedimos los activos del establishment y filtramos client-side por el
- * lote. Aceptable para rodeos de cientos (la tab ya trae hasta 200); un filtro server-side por
- * management_group_id es refinamiento posterior si hiciera falta.
+ * ⚠️ Antes traía los 200 más recientes del CAMPO ENTERO (`fetchAnimals({status:'active'})`, LIMIT 200) y recién
+ * filtraba client-side por el lote → en un campo grande devolvía un subconjunto INCOMPLETO Y ARBITRARIO del lote
+ * (ni siquiera "los primeros 200 del lote"). Ahora la query filtra por `management_group_id` directamente → TODOS
+ * los miembros (RG5.4). El `establishmentId` viene del contexto activo (NUNCA hardcodeado); el scope de grupo es un
+ * filtro de dominio adicional sobre el set que la stream ya recortó por tenant. Aplica el espejo C6 + repro
+ * (enrichLocalRows) igual que la lista. Devuelve AnimalListItem[] para reusar AnimalRow.
  */
 export async function fetchGroupMembers(
   establishmentId: string,
   groupId: string,
 ): Promise<ServiceResult<AnimalListItem[]>> {
-  const r = await fetchAnimals(establishmentId, { status: 'active' });
-  if (!r.ok) return r;
-  return { ok: true, value: r.value.filter((a) => a.managementGroupId === groupId) };
+  return fetchAllGroupMembers(establishmentId, { type: 'lote', id: groupId });
+}
+
+/**
+ * Set COMPLETO de miembros ACTIVOS de un grupo (rodeo o lote), sin tope, overlay-aware (RG5.3): lo usan las
+ * acciones masivas (que operan sobre el GRUPO ENTERO, no la página cargada — design §5.1/§5.3) y la vista de lote
+ * (vía `fetchGroupMembers`). Query scopeada del SQLite local (`buildAllGroupMembersQuery`) + espejo C6 + repro en
+ * UNA pasada (el compute O(N) del §2 corolario, pagado una vez ante la acción explícita). NUNCA hardcodea
+ * establishment_id (ppio 6).
+ */
+export async function fetchAllGroupMembers(
+  establishmentId: string,
+  group: GroupScope,
+): Promise<ServiceResult<AnimalListItem[]>> {
+  const r = await runLocalQuery<LocalListRow>(buildAllGroupMembersQuery(establishmentId, group));
+  if (!r.ok) return { ok: false, error: { kind: r.error.kind, message: r.error.message } };
+  return { ok: true, value: await enrichLocalRows(r.value) };
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────────

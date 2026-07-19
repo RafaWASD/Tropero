@@ -94,6 +94,15 @@ import {
   buildProfileEstablishmentQuery,
   buildProfileEstablishmentsQuery,
   buildGroupCandidateFlagsQuery,
+  // DELTA rodeo-grande (spec 10): builders de la vista de grupo scopeada + paginada
+  buildGroupAnimalsPageQuery,
+  buildAllGroupMembersQuery,
+  buildGroupCandidateCountsQuery,
+  buildGroupCategoryOptionsQuery,
+  buildGroupSexOptionsQuery,
+  buildGroupRodeoIdsQuery,
+  type GroupScope,
+  type GroupPageCursor,
   buildCreateManagementGroupInsert,
   buildRenameManagementGroupUpdate,
   buildAssignAnimalToGroupUpdate,
@@ -117,6 +126,9 @@ import {
   PENDING_OVERLAY_TABLES,
   type PendingProfileFields,
 } from './local-reads.ts';
+// DELTA rodeo-grande (T-RG.17): el gating es PURO (applyCandidateGating/resolveGroupActions) sobre los conteos
+// que devuelve buildGroupCandidateCountsQuery — se testea la COMPOSICIÓN (COUNT SQL → gating) sin el SDK.
+import { applyCandidateGating, resolveGroupActions } from '../../utils/group-actions.ts';
 
 // ─── toBool: SQLite no tiene boolean (guarda 0/1) ──────────────────────────────────
 
@@ -2376,4 +2388,439 @@ test('M3.1 (node:sqlite): corrección de score = INSERT luego UPDATE del MISMO i
   assert.equal(rows.length, 1, 'la corrección NO crea una 2da fila (R5.9)');
   assert.equal(rows[0].score, 4.5, 'la fila quedó con el score corregido');
   assert.equal(rows[0].session_id, 'sess-1', 'el session_id del INSERT se conserva (la corrección no lo toca)');
+});
+
+// ════════════════════════════════════════════════════════════════════════════════════════════
+// DELTA rodeo-grande (spec 10) — vista de grupo scopeada + paginada (Fase 1 builders + Fase 2 composición)
+// ════════════════════════════════════════════════════════════════════════════════════════════
+//
+// Ejecución REAL contra SQLite in-memory (DatabaseSync, node:sqlite): los builders son PUROS, pero acá se ejercita
+// su SEMÁNTICA (keyset sin saltos/dup, scope de grupo, overlay, count del grupo entero) — lo que un assert de string
+// no captura. Mismo patrón que los tests de comportamiento de buildAnimalsListQuery.
+
+// Esquema mínimo con TODAS las tablas que tocan los builders de grupo (LOCAL_LIST_SELECT + subconsultas apodo +
+// in_treatment + candidatos). Las que no se siembran quedan vacías → apodo NULL / in_treatment 0 / has_weaning 0.
+const GROUP_SCHEMA =
+  'CREATE TABLE animal_profiles (id TEXT, animal_id TEXT, idv TEXT, category_id TEXT, rodeo_id TEXT, status TEXT, ' +
+  'management_group_id TEXT, animal_tag_electronic TEXT, animal_sex TEXT, category_override INTEGER, ' +
+  'animal_birth_date TEXT, is_castrated INTEGER, future_bull INTEGER, is_cut INTEGER, establishment_id TEXT, ' +
+  'deleted_at TEXT, created_at TEXT);' +
+  'CREATE TABLE pending_animal_profiles (id TEXT, animal_id TEXT, idv TEXT, category_id TEXT, rodeo_id TEXT, ' +
+  'status TEXT, management_group_id TEXT, animal_tag_electronic TEXT, animal_sex TEXT, category_override INTEGER, ' +
+  'animal_birth_date TEXT, establishment_id TEXT, created_at TEXT);' +
+  'CREATE TABLE rodeos (id TEXT, system_id TEXT, name TEXT);' +
+  'CREATE TABLE categories_by_system (id TEXT, code TEXT, name TEXT);' +
+  'CREATE TABLE pending_status_overrides (target_table TEXT, target_id TEXT, effect TEXT);' +
+  'CREATE TABLE custom_attributes (animal_profile_id TEXT, field_definition_id TEXT, value TEXT);' +
+  'CREATE TABLE field_definitions (id TEXT, data_key TEXT, establishment_id TEXT);' +
+  'CREATE TABLE rodeo_data_config (rodeo_id TEXT, field_definition_id TEXT, enabled INTEGER);' +
+  'CREATE TABLE pending_rodeo_data_config (rodeo_id TEXT, field_definition_id TEXT, enabled INTEGER);' +
+  'CREATE TABLE treatments (id TEXT, animal_profile_id TEXT, ended_at TEXT, deleted_at TEXT);' +
+  'CREATE TABLE reproductive_events (id TEXT, animal_profile_id TEXT, event_type TEXT, deleted_at TEXT);' +
+  'CREATE TABLE pending_reproductive_events (id TEXT, animal_profile_id TEXT, event_type TEXT);';
+
+function freshGroupDb(): DatabaseSync {
+  const db = new DatabaseSync(':memory:');
+  db.exec(GROUP_SCHEMA);
+  db.exec(
+    "INSERT INTO rodeos (id, system_id, name) VALUES ('rod-A','sys-1','Rodeo A'),('rod-B','sys-1','Rodeo B');" +
+      'INSERT INTO categories_by_system (id, code, name) VALUES ' +
+      "('cat-ternero','ternero','Ternero'),('cat-ternera','ternera','Ternera')," +
+      "('cat-toro','toro','Toro'),('cat-novillito','novillito','Novillito'),('cat-multipara','multipara','Multípara');",
+  );
+  return db;
+}
+
+type GroupSeed = {
+  id: string;
+  rodeo?: string;
+  lote?: string | null;
+  category?: string;
+  sex?: string;
+  tag?: string | null;
+  idv?: string | null;
+  status?: string;
+  est?: string;
+  deleted?: string | null;
+  castrated?: 0 | 1;
+  created?: string;
+};
+
+function insAnimal(db: DatabaseSync, p: GroupSeed): void {
+  db.prepare(
+    'INSERT INTO animal_profiles (id, animal_id, idv, category_id, rodeo_id, status, management_group_id, ' +
+      'animal_tag_electronic, animal_sex, category_override, animal_birth_date, is_castrated, future_bull, ' +
+      'is_cut, establishment_id, deleted_at, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+  ).run(
+    p.id,
+    `an-${p.id}`,
+    p.idv ?? null,
+    p.category ?? 'cat-ternero',
+    p.rodeo ?? 'rod-A',
+    p.status ?? 'active',
+    p.lote ?? null,
+    p.tag ?? null,
+    p.sex ?? 'female',
+    0,
+    null,
+    p.castrated ?? 0,
+    0,
+    0,
+    p.est ?? 'est-1',
+    p.deleted ?? null,
+    p.created ?? '2024-01-01T00:00:00Z',
+  );
+}
+
+function insPendingAnimal(db: DatabaseSync, p: GroupSeed): void {
+  db.prepare(
+    'INSERT INTO pending_animal_profiles (id, animal_id, idv, category_id, rodeo_id, status, management_group_id, ' +
+      'animal_tag_electronic, animal_sex, category_override, animal_birth_date, establishment_id, created_at) ' +
+      'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
+  ).run(
+    p.id,
+    `an-${p.id}`,
+    p.idv ?? null,
+    p.category ?? 'cat-ternero',
+    p.rodeo ?? 'rod-A',
+    p.status ?? 'active',
+    p.lote ?? null,
+    p.tag ?? null,
+    p.sex ?? 'female',
+    0,
+    null,
+    p.est ?? 'est-1',
+    p.created ?? '2024-06-01T00:00:00Z',
+  );
+}
+
+function idsOf(db: DatabaseSync, q: { sql: string; args: unknown[] }): string[] {
+  return (db.prepare(q.sql).all(...(q.args as never[])) as { id: string }[]).map((r) => r.id);
+}
+
+// ─── T-RG.2 — buildGroupAnimalsPageQuery: keyset paginado sin saltos/dup + orden + overlay + scope (RG1.4/1.7/1.8) ──
+
+test('T-RG.2: buildGroupAnimalsPageQuery — keyset pagina el grupo sin saltos ni duplicados (desempate id, overlay, scope)', () => {
+  const db = freshGroupDb();
+  // rod-A: 5 synced con created_at conocidos (p2/p3 EMPATAN en created_at → desempate por id DESC) + 1 overlay.
+  insAnimal(db, { id: 'p1', rodeo: 'rod-A', created: '2024-01-05T00:00:00Z' });
+  insAnimal(db, { id: 'p2', rodeo: 'rod-A', created: '2024-01-04T00:00:00Z' });
+  insAnimal(db, { id: 'p3', rodeo: 'rod-A', created: '2024-01-04T00:00:00Z' }); // empata con p2 → id DESC: p3 antes que p2
+  insAnimal(db, { id: 'p4', rodeo: 'rod-A', created: '2024-01-03T00:00:00Z' });
+  insAnimal(db, { id: 'p5', rodeo: 'rod-A', created: '2024-01-02T00:00:00Z' });
+  insPendingAnimal(db, { id: 'p-opt', rodeo: 'rod-A', created: '2024-01-03T12:00:00Z' }); // overlay, intercalado
+  // Ruido que el scope de RODEO debe EXCLUIR: un animal en rod-B (más NUEVO → sería el 1ro si no scopeara).
+  insAnimal(db, { id: 'pB', rodeo: 'rod-B', created: '2024-01-10T00:00:00Z' });
+
+  const group: GroupScope = { type: 'rodeo', id: 'rod-A' };
+  // Orden total esperado (in_treatment DESC=0, created_at DESC, id DESC): p1, p3, p2, p-opt, p4, p5.
+  const expectedOrder = ['p1', 'p3', 'p2', 'p-opt', 'p4', 'p5'];
+
+  // Threading por keyset con pageSize=2 (extrae el cursor de la última fila de cada página, como el service).
+  const collected: string[] = [];
+  let cursor: GroupPageCursor | null = null;
+  for (let i = 0; i < 20; i++) {
+    const q = buildGroupAnimalsPageQuery('est-1', group, {}, cursor, 2);
+    const rows = db.prepare(q.sql).all(...(q.args as never[])) as {
+      id: string; created_at: string; in_treatment: number;
+    }[];
+    if (rows.length === 0) break;
+    collected.push(...rows.map((r) => r.id));
+    const last = rows[rows.length - 1];
+    cursor = { inTreatment: last.in_treatment === 1 ? 1 : 0, createdAt: last.created_at, id: last.id };
+    if (rows.length < 2) break;
+  }
+  db.close();
+
+  assert.deepEqual(collected, expectedOrder, 'la paginación keyset recorre TODO el grupo en orden, sin saltos');
+  assert.equal(new Set(collected).size, collected.length, 'ninguna fila se repite entre páginas (keyset ancla en la última)');
+  assert.ok(!collected.includes('pB'), 'el scope de rodeo EXCLUYE animales de otro rodeo (aunque sean más nuevos)');
+});
+
+test('T-RG.2: buildGroupAnimalsPageQuery — 1ª página (cursor null) trae las primeras pageSize sin predicado keyset', () => {
+  const db = freshGroupDb();
+  insAnimal(db, { id: 'p1', created: '2024-01-05T00:00:00Z' });
+  insAnimal(db, { id: 'p2', created: '2024-01-04T00:00:00Z' });
+  insAnimal(db, { id: 'p3', created: '2024-01-03T00:00:00Z' });
+  const q = buildGroupAnimalsPageQuery('est-1', { type: 'rodeo', id: 'rod-A' }, {}, null, 2);
+  assert.doesNotMatch(q.sql, /in_treatment < \?/); // 1ª página SIN keyset
+  assert.match(q.sql, /ORDER BY in_treatment DESC, created_at DESC, id DESC LIMIT \?/);
+  assert.deepEqual(idsOf(db, q), ['p1', 'p2']);
+  db.close();
+});
+
+test('T-RG.2: buildGroupAnimalsPageQuery — pin de EN TRATAMIENTO arriba (in_treatment DESC) aunque sea más viejo (RG1.7)', () => {
+  const db = freshGroupDb();
+  insAnimal(db, { id: 'pNuevo', created: '2024-01-05T00:00:00Z' }); // más nuevo, sin tratamiento
+  insAnimal(db, { id: 'pTrat', created: '2024-01-01T00:00:00Z' }); // más viejo, EN tratamiento → pinned arriba
+  db.prepare('INSERT INTO treatments (id, animal_profile_id, ended_at, deleted_at) VALUES (?,?,?,?)')
+    .run('t1', 'pTrat', null, null); // tratamiento ABIERTO (ended_at NULL, deleted_at NULL)
+  const q = buildGroupAnimalsPageQuery('est-1', { type: 'rodeo', id: 'rod-A' }, {}, null, 60);
+  assert.deepEqual(idsOf(db, q), ['pTrat', 'pNuevo'], 'el en-tratamiento se pinnea arriba pese a ser más viejo');
+  db.close();
+});
+
+test('T-RG.1: buildGroupAnimalsPageQuery — in_treatment idéntico a buildAnimalsListQuery (drift-guard, NO se toca la tab)', () => {
+  const exists =
+    'EXISTS (SELECT 1 FROM treatments t WHERE t.animal_profile_id = ap.id ' +
+    'AND t.ended_at IS NULL AND t.deleted_at IS NULL) AS in_treatment';
+  const gq = buildGroupAnimalsPageQuery('est-1', { type: 'rodeo', id: 'rod-A' }, {}, null, 60);
+  const aq = buildAnimalsListQuery('est-1');
+  assert.ok(gq.sql.includes(exists), 'el page query inyecta el mismo EXISTS de tratamiento');
+  assert.ok(aq.sql.includes(exists), 'buildAnimalsListQuery conserva el mismo EXISTS (no se tocó)');
+});
+
+test('T-RG.2: buildGroupAnimalsPageQuery — scope de LOTE (management_group_id) + filtros de chips categoría/sexo (RG3.5)', () => {
+  const db = freshGroupDb();
+  insAnimal(db, { id: 'lTernero', lote: 'lote-1', category: 'cat-ternero', sex: 'male', created: '2024-01-05T00:00:00Z' });
+  insAnimal(db, { id: 'lToroH', lote: 'lote-1', category: 'cat-multipara', sex: 'female', created: '2024-01-04T00:00:00Z' });
+  insAnimal(db, { id: 'lToroM', lote: 'lote-1', category: 'cat-toro', sex: 'male', created: '2024-01-03T00:00:00Z' });
+  insAnimal(db, { id: 'otroLote', lote: 'lote-2', category: 'cat-ternero', sex: 'male', created: '2024-01-06T00:00:00Z' }); // otro lote
+
+  const lote: GroupScope = { type: 'lote', id: 'lote-1' };
+  // Sin filtro → los 3 del lote-1, excluye lote-2.
+  assert.deepEqual(
+    idsOf(db, buildGroupAnimalsPageQuery('est-1', lote, {}, null, 60)).sort(),
+    ['lTernero', 'lToroH', 'lToroM'],
+  );
+  // Filtro categoría 'ternero' → solo lTernero.
+  assert.deepEqual(idsOf(db, buildGroupAnimalsPageQuery('est-1', lote, { categoryCode: 'ternero' }, null, 60)), ['lTernero']);
+  // Filtro sexo 'male' → lTernero + lToroM (excluye la hembra).
+  assert.deepEqual(idsOf(db, buildGroupAnimalsPageQuery('est-1', lote, { sex: 'male' }, null, 60)).sort(), ['lTernero', 'lToroM']);
+  // Combinado categoría 'toro' + sexo 'male' → solo lToroM.
+  assert.deepEqual(idsOf(db, buildGroupAnimalsPageQuery('est-1', lote, { categoryCode: 'toro', sex: 'male' }, null, 60)), ['lToroM']);
+  db.close();
+});
+
+test('T-RG.2: buildGroupAnimalsPageQuery — filtros de dominio: excluye no-activo/borrado/exit pendiente/otro campo (RG1.8/RG6.5)', () => {
+  const db = freshGroupDb();
+  insAnimal(db, { id: 'ok', rodeo: 'rod-A', created: '2024-01-05T00:00:00Z' });
+  insAnimal(db, { id: 'sold', rodeo: 'rod-A', status: 'sold', created: '2024-01-04T00:00:00Z' });
+  insAnimal(db, { id: 'del', rodeo: 'rod-A', deleted: '2026-01-01T00:00:00Z', created: '2024-01-04T00:00:00Z' });
+  insAnimal(db, { id: 'exit', rodeo: 'rod-A', created: '2024-01-04T00:00:00Z' });
+  db.prepare('INSERT INTO pending_status_overrides (target_table, target_id, effect) VALUES (?,?,?)')
+    .run('animal_profiles', 'exit', 'exited'); // baja optimista pendiente → oculto
+  insAnimal(db, { id: 'otroEst', rodeo: 'rod-A', est: 'est-2', created: '2024-01-04T00:00:00Z' }); // otro tenant
+  const q = buildGroupAnimalsPageQuery('est-1', { type: 'rodeo', id: 'rod-A' }, {}, null, 60);
+  assert.deepEqual(idsOf(db, q), ['ok'], 'solo el activo del campo activo del rodeo; sold/deleted/exit/otro-campo fuera');
+  // Multi-tenant: el establishment_id va por arg (no hardcode); el scope de grupo es filtro de dominio adicional.
+  assert.match(q.sql, /ap\.establishment_id = \?/);
+  assert.match(q.sql, /ap\.rodeo_id = \?/);
+  db.close();
+});
+
+// ─── T-RG.4 — buildAllGroupMembersQuery: set completo scopeado, sin tope (RG5.3/RG5.4) ──────────────────────
+
+test('T-RG.4: buildAllGroupMembersQuery — TODOS los miembros del grupo (rodeo/lote), overlay, sin LIMIT; excluye no-activos', () => {
+  const db = freshGroupDb();
+  // Lote cross-rodeo: 3 en rod-A + 2 en rod-B, todos del lote-1.
+  insAnimal(db, { id: 'L1', lote: 'lote-1', rodeo: 'rod-A', created: '2024-01-05T00:00:00Z' });
+  insAnimal(db, { id: 'L2', lote: 'lote-1', rodeo: 'rod-A', created: '2024-01-04T00:00:00Z' });
+  insAnimal(db, { id: 'L3', lote: 'lote-1', rodeo: 'rod-B', created: '2024-01-03T00:00:00Z' });
+  insPendingAnimal(db, { id: 'Lopt', lote: 'lote-1', rodeo: 'rod-A', created: '2024-06-01T00:00:00Z' }); // overlay
+  // Excluidos: no-lote, otro lote, sold, deleted, exit pendiente, otro campo.
+  insAnimal(db, { id: 'noLote', lote: null, rodeo: 'rod-A', created: '2024-01-06T00:00:00Z' });
+  insAnimal(db, { id: 'Lsold', lote: 'lote-1', status: 'sold', created: '2024-01-02T00:00:00Z' });
+  insAnimal(db, { id: 'Ldel', lote: 'lote-1', deleted: '2026-01-01T00:00:00Z', created: '2024-01-02T00:00:00Z' });
+  insAnimal(db, { id: 'Lexit', lote: 'lote-1', created: '2024-01-02T00:00:00Z' });
+  db.prepare('INSERT INTO pending_status_overrides (target_table, target_id, effect) VALUES (?,?,?)')
+    .run('animal_profiles', 'Lexit', 'exited');
+  insAnimal(db, { id: 'LotherEst', lote: 'lote-1', est: 'est-2', created: '2024-01-02T00:00:00Z' });
+
+  const q = buildAllGroupMembersQuery('est-1', { type: 'lote', id: 'lote-1' });
+  // Sin LIMIT de TOPE: la query externa termina en el ORDER BY (el `LIMIT 1` que aparece es de la subconsulta
+  // correlada del apodo, no un tope del result set). El corte real de "sin tope" lo prueba T-RG.15 (>200 en campo).
+  assert.match(q.sql, /ORDER BY in_treatment DESC, created_at DESC, id DESC$/, 'el set completo NO lleva LIMIT de tope (RG5.3)');
+  assert.deepEqual(idsOf(db, q).sort(), ['L1', 'L2', 'L3', 'Lopt'], 'todos los miembros activos del lote + overlay; el resto fuera');
+
+  // Variante RODEO: todos los activos de rod-A (L1, L2, Lopt, noLote, Lexit? no — exit oculto; Lsold/Ldel fuera).
+  const rq = buildAllGroupMembersQuery('est-1', { type: 'rodeo', id: 'rod-A' });
+  assert.deepEqual(idsOf(db, rq).sort(), ['L1', 'L2', 'Lopt', 'noLote']);
+  db.close();
+});
+
+// ─── T-RG.15 — regresión del bug del lote: >200 en el campo NO trunca los miembros (RG5.4) ──────────────────
+
+test('T-RG.15: buildAllGroupMembersQuery — el lote muestra TODOS sus miembros aun con >200 animales MÁS NUEVOS en el campo', () => {
+  const db = freshGroupDb();
+  // 5 miembros del lote, VIEJOS (2024). Bajo el viejo "200 más recientes del CAMPO" quedarían FUERA.
+  for (let i = 0; i < 5; i++) {
+    insAnimal(db, { id: `mem-${i}`, lote: 'lote-1', rodeo: 'rod-A', created: `2024-01-0${i + 1}T00:00:00Z` });
+  }
+  // 210 animales del campo SIN lote, MÁS NUEVOS (2025) → llenarían de sobra un LIMIT 200 del campo.
+  for (let i = 0; i < 210; i++) {
+    const n = String(i).padStart(3, '0');
+    insAnimal(db, { id: `field-${n}`, lote: null, rodeo: 'rod-A', created: `2025-01-01T00:00:${n.slice(-2)}Z` });
+  }
+  const q = buildAllGroupMembersQuery('est-1', { type: 'lote', id: 'lote-1' });
+  const ids = idsOf(db, q);
+  assert.equal(ids.length, 5, 'los 5 miembros del lote aparecen (la query scopea por management_group_id, no "200 del campo")');
+  assert.deepEqual(ids.sort(), ['mem-0', 'mem-1', 'mem-2', 'mem-3', 'mem-4']);
+  db.close();
+});
+
+// ─── T-RG.6 — buildGroupCandidateCountsQuery: candidatos del GRUPO ENTERO (RG5.2) ───────────────────────────
+
+test('T-RG.6: buildGroupCandidateCountsQuery — castrar EXACTO (macho entero) + destetar APROX (ternero/a sin weaning), overlay', () => {
+  const db = freshGroupDb();
+  // rod-A. Castrar = animal_sex='male' AND is_castrated=0.
+  insAnimal(db, { id: 'mEntero1', rodeo: 'rod-A', sex: 'male', category: 'cat-ternero', castrated: 0 }); // castrate ✓ + wean ✓
+  insAnimal(db, { id: 'mEntero2', rodeo: 'rod-A', sex: 'male', category: 'cat-toro', castrated: 0 }); // castrate ✓ (no wean: no ternero)
+  insAnimal(db, { id: 'mCastrado', rodeo: 'rod-A', sex: 'male', category: 'cat-novillito', castrated: 1 }); // NO castrate
+  insAnimal(db, { id: 'hembra', rodeo: 'rod-A', sex: 'female', category: 'cat-multipara' }); // NO castrate
+  insAnimal(db, { id: 'terneraSinDest', rodeo: 'rod-A', sex: 'female', category: 'cat-ternera' }); // wean ✓
+  insAnimal(db, { id: 'terneroDestetado', rodeo: 'rod-A', sex: 'male', category: 'cat-ternero', castrated: 0 }); // castrate ✓, wean ✗ (ya destetado)
+  db.prepare('INSERT INTO reproductive_events (id, animal_profile_id, event_type, deleted_at) VALUES (?,?,?,?)')
+    .run('w1', 'terneroDestetado', 'weaning', null); // weaning vivo → excluye de wean
+  // Overlay: un alta optimista macho ternero → castrate ✓ + wean ✓.
+  insPendingAnimal(db, { id: 'optMacho', rodeo: 'rod-A', sex: 'male', category: 'cat-ternero' });
+
+  // Sin restricción de rodeo (undefined) → cuenta todos los terneros/as del grupo para wean.
+  const q = buildGroupCandidateCountsQuery('est-1', { type: 'rodeo', id: 'rod-A' }, {});
+  const row = db.prepare(q.sql).get(...(q.args as never[])) as { castrate: number; wean: number };
+  // Castrar: mEntero1, mEntero2, terneroDestetado, optMacho = 4.
+  assert.equal(row.castrate, 4, 'castrar = machos enteros (incluye overlay), excluye castrado/hembra');
+  // Destetar: mEntero1, terneraSinDest, optMacho = 3 (terneroDestetado excluido por weaning vivo).
+  assert.equal(row.wean, 3, 'destetar = terneros/as sin weaning vivo (incluye overlay), excluye ya-destetado');
+  db.close();
+});
+
+test('T-RG.6: buildGroupCandidateCountsQuery — lote cross-rodeo: destete SOLO cuenta terneros de rodeo con destete (RG5.2/R7.2)', () => {
+  const db = freshGroupDb();
+  insAnimal(db, { id: 'tA', lote: 'lote-9', rodeo: 'rod-A', sex: 'female', category: 'cat-ternera' }); // rod-A (con destete)
+  insAnimal(db, { id: 'tB', lote: 'lote-9', rodeo: 'rod-B', sex: 'male', category: 'cat-ternero', castrated: 0 }); // rod-B (sin destete)
+  const group: GroupScope = { type: 'lote', id: 'lote-9' };
+
+  // Solo rod-A habilita destete → wean cuenta solo tA (1); tB (rod-B) excluido. Castrar es exacto (tB entero) = 1.
+  const q1 = buildGroupCandidateCountsQuery('est-1', group, { weaningEnabledRodeoIds: ['rod-A'] });
+  const r1 = db.prepare(q1.sql).get(...(q1.args as never[])) as { castrate: number; wean: number };
+  assert.equal(r1.wean, 1, 'solo el ternero del rodeo con destete cuenta');
+  assert.equal(r1.castrate, 1, 'castrar es exacto e independiente del destete (el ternero macho entero de rod-B)');
+
+  // Set VACÍO → ningún rodeo con destete → wean = 0 (sin `IN ()` inválido).
+  const q2 = buildGroupCandidateCountsQuery('est-1', group, { weaningEnabledRodeoIds: [] });
+  const r2 = db.prepare(q2.sql).get(...(q2.args as never[])) as { castrate: number; wean: number };
+  assert.equal(r2.wean, 0, 'ningún rodeo con destete → 0 candidatos de destete');
+  assert.equal(r2.castrate, 1, 'castrar no depende del destete');
+  db.close();
+});
+
+// ─── T-RG.17 — gating por candidatos del GRUPO ENTERO: COUNT SQL → applyCandidateGating (composición) ────────
+
+test('T-RG.17: gating ofrece/oculta Castrar/Destetar según los candidatos del GRUPO ENTERO (no una página parcial)', () => {
+  const db = freshGroupDb();
+  // Grupo con 1 candidato a castración y 1 a destete, "escondidos" al final del orden (created_at viejos) — el COUNT
+  // los ve igual porque NO tiene LIMIT (a diferencia de contar sobre una página cargada).
+  insAnimal(db, { id: 'macho', rodeo: 'rod-A', sex: 'male', category: 'cat-ternero', castrated: 0, created: '2020-01-01T00:00:00Z' });
+  insAnimal(db, { id: 'ternera', rodeo: 'rod-A', sex: 'female', category: 'cat-ternera', created: '2020-01-01T00:00:00Z' });
+  const counts = db.prepare(
+    buildGroupCandidateCountsQuery('est-1', { type: 'rodeo', id: 'rod-A' }, { weaningEnabledRodeoIds: ['rod-A'] }).sql,
+  ).get(
+    ...(buildGroupCandidateCountsQuery('est-1', { type: 'rodeo', id: 'rod-A' }, { weaningEnabledRodeoIds: ['rod-A'] }).args as never[]),
+  ) as { castrate: number; wean: number };
+
+  const config = resolveGroupActions([{ vaccinationEnabled: true, weaningEnabled: true }]);
+  const gating = applyCandidateGating(config, counts);
+  assert.equal(gating.castrate, true, 'hay ≥1 macho entero → ofrece Castrar');
+  assert.equal(gating.wean, true, 'config destete ON + ≥1 candidato → ofrece Destetar');
+
+  // Grupo sin candidatos → no ofrece Castrar ni Destetar (aunque la config los tenga habilitados).
+  const db2 = freshGroupDb();
+  insAnimal(db2, { id: 'vaca', rodeo: 'rod-A', sex: 'female', category: 'cat-multipara' });
+  const empty = db2.prepare(
+    buildGroupCandidateCountsQuery('est-1', { type: 'rodeo', id: 'rod-A' }, { weaningEnabledRodeoIds: ['rod-A'] }).sql,
+  ).get(
+    ...(buildGroupCandidateCountsQuery('est-1', { type: 'rodeo', id: 'rod-A' }, { weaningEnabledRodeoIds: ['rod-A'] }).args as never[]),
+  ) as { castrate: number; wean: number };
+  const gating2 = applyCandidateGating(resolveGroupActions([{ vaccinationEnabled: true, weaningEnabled: true }]), empty);
+  assert.equal(gating2.castrate, false, 'sin machos enteros → NO ofrece Castrar');
+  assert.equal(gating2.wean, false, 'sin candidatos a destete → NO ofrece Destetar');
+  db.close();
+  db2.close();
+});
+
+// ─── T-RG.7 — buildGroupCategoryOptionsQuery: DISTINCT categorías presentes en el grupo (RG3.9) ──────────────
+
+test('T-RG.7: buildGroupCategoryOptionsQuery — DISTINCT categorías del grupo (scopeado + overlay), ordenadas por nombre', () => {
+  const db = freshGroupDb();
+  insAnimal(db, { id: 'a', rodeo: 'rod-A', category: 'cat-ternero' });
+  insAnimal(db, { id: 'b', rodeo: 'rod-A', category: 'cat-ternero' }); // duplicado de categoría → DISTINCT colapsa
+  insAnimal(db, { id: 'c', rodeo: 'rod-A', category: 'cat-toro' });
+  insPendingAnimal(db, { id: 'd', rodeo: 'rod-A', category: 'cat-multipara' }); // overlay
+  insAnimal(db, { id: 'other', rodeo: 'rod-B', category: 'cat-novillito' }); // otro rodeo → excluido del scope
+  const rows = db
+    .prepare(buildGroupCategoryOptionsQuery('est-1', { type: 'rodeo', id: 'rod-A' }).sql)
+    .all(...(buildGroupCategoryOptionsQuery('est-1', { type: 'rodeo', id: 'rod-A' }).args as never[])) as {
+    code: string; name: string;
+  }[];
+  // Presentes en rod-A: ternero, toro, multipara (overlay). Orden por nombre: Multípara, Ternero, Toro.
+  assert.deepEqual(rows.map((r) => r.code), ['multipara', 'ternero', 'toro']);
+  assert.ok(!rows.some((r) => r.code === 'novillito'), 'la categoría de otro rodeo NO aparece (scope)');
+  db.close();
+});
+
+// ─── buildGroupSexOptionsQuery: sexos DISTINTOS presentes en el grupo (RG3.9, soporte del chip de sexo) ──────
+
+test('buildGroupSexOptionsQuery — DISTINCT animal_sex del grupo (scopeado + overlay); un solo sexo NO ofrece ambos', () => {
+  const db = freshGroupDb();
+  // Grupo mixto (rod-A): ambos sexos → el hook mostrará el chip. Duplicados colapsan por DISTINCT.
+  insAnimal(db, { id: 'a', rodeo: 'rod-A', sex: 'male' });
+  insAnimal(db, { id: 'b', rodeo: 'rod-A', sex: 'male' });
+  insAnimal(db, { id: 'c', rodeo: 'rod-A', sex: 'female' });
+  insPendingAnimal(db, { id: 'd', rodeo: 'rod-A', sex: 'female' }); // overlay
+  insAnimal(db, { id: 'other', rodeo: 'rod-B', sex: 'male' }); // otro rodeo → excluido del scope
+  const mixed = buildGroupSexOptionsQuery('est-1', { type: 'rodeo', id: 'rod-A' });
+  const sexes = (db.prepare(mixed.sql).all(...(mixed.args as never[])) as { animal_sex: string }[])
+    .map((r) => r.animal_sex)
+    .sort();
+  assert.deepEqual(sexes, ['female', 'male'], 'ambos sexos presentes en rod-A (synced + overlay)');
+
+  // Lote homogéneo (solo machos) → un solo sexo (el hook NO ofrece el chip).
+  insAnimal(db, { id: 'm1', lote: 'lote-1', sex: 'male' });
+  insAnimal(db, { id: 'm2', lote: 'lote-1', sex: 'male' });
+  const single = buildGroupSexOptionsQuery('est-1', { type: 'lote', id: 'lote-1' });
+  const one = (db.prepare(single.sql).all(...(single.args as never[])) as { animal_sex: string }[]).map((r) => r.animal_sex);
+  assert.deepEqual(one, ['male'], 'lote homogéneo → un solo sexo');
+  db.close();
+});
+
+// ─── T-RG.9 — buildSearchUnion groupScope: búsqueda scopeada al grupo (RG3.2) + no-regresión sin scope (RG7.1) ─
+
+test('T-RG.9: buildSearch*Query con groupScope — matchea SOLO el grupo; sin scope → set completo (no-regresión tab)', () => {
+  const db = freshGroupDb();
+  // Mismo TAG en dos rodeos (permitido en el fixture): scopear debe distinguirlos.
+  insAnimal(db, { id: 'inA', rodeo: 'rod-A', tag: '999000000000001', created: '2024-01-02T00:00:00Z' });
+  insAnimal(db, { id: 'inB', rodeo: 'rod-B', tag: '999000000000001', created: '2024-01-01T00:00:00Z' });
+
+  // Con scope de rod-A → solo inA.
+  assert.deepEqual(idsOf(db, buildSearchByTagQuery('est-1', '999000000000001', { type: 'rodeo', id: 'rod-A' })), ['inA']);
+  // Sin scope → ambos (comportamiento de la tab Animales, RG7.1).
+  assert.deepEqual(idsOf(db, buildSearchByTagQuery('est-1', '999000000000001')).sort(), ['inA', 'inB']);
+  db.close();
+});
+
+test('T-RG.9: buildSearchByTagQuery — sin groupScope el SQL+args son los del as-built (cero regresión, RG7.1)', () => {
+  const noScope = buildSearchByTagQuery('est-1', 'TAG');
+  assert.doesNotMatch(noScope.sql, /ap\.rodeo_id = \?|pap\.rodeo_id = \?/, 'sin scope NO agrega el filtro de grupo');
+  assert.deepEqual(noScope.args, ['est-1', 'active', 'TAG', 'est-1', 'active', 'TAG'], 'args idénticos al as-built (6, sin scope)');
+
+  const withScope = buildSearchByTagQuery('est-1', 'TAG', { type: 'lote', id: 'lote-1' });
+  assert.match(withScope.sql, /AND ap\.management_group_id = \?/);
+  assert.match(withScope.sql, /AND pap\.management_group_id = \?/);
+  assert.deepEqual(withScope.args, ['est-1', 'active', 'TAG', 'lote-1', 'est-1', 'active', 'TAG', 'lote-1'], 'scope agrega group.id a cada rama');
+});
+
+// ─── buildGroupRodeoIdsQuery: rodeos representados en el grupo (soporte del gating de lote, RG5.2) ───────────
+
+test('T-RG.16-support: buildGroupRodeoIdsQuery — DISTINCT rodeos de los miembros del lote (scopeado, overlay-aware)', () => {
+  const db = freshGroupDb();
+  insAnimal(db, { id: 'm1', lote: 'lote-1', rodeo: 'rod-A' });
+  insAnimal(db, { id: 'm2', lote: 'lote-1', rodeo: 'rod-A' }); // mismo rodeo → DISTINCT colapsa
+  insAnimal(db, { id: 'm3', lote: 'lote-1', rodeo: 'rod-B' });
+  insPendingAnimal(db, { id: 'm4', lote: 'lote-1', rodeo: 'rod-B' }); // overlay, mismo rod-B
+  insAnimal(db, { id: 'otro', lote: 'lote-2', rodeo: 'rod-B' }); // otro lote → excluido
+  const q = buildGroupRodeoIdsQuery('est-1', { type: 'lote', id: 'lote-1' });
+  const rodeos = (db.prepare(q.sql).all(...(q.args as never[])) as { rodeo_id: string }[]).map((r) => r.rodeo_id).sort();
+  assert.deepEqual(rodeos, ['rod-A', 'rod-B'], 'los rodeos representados en el lote (DISTINCT), sin el de otro lote');
+  db.close();
 });

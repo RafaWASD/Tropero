@@ -18,18 +18,17 @@ import {
   type GroupCandidateCounts,
   type RodeoGating,
 } from '../utils/group-actions';
-import { buildBulkCandidates, type GroupProfile } from '../utils/bulk-candidates';
 import { fetchFieldCatalog } from './rodeo-config';
 import { fetchRodeoConfig } from './rodeo-config';
 import type { ServiceResult } from './rodeo-config';
-import type { AnimalListItem } from './animals';
 import {
+  type GroupScope,
   buildRodeoHeadCountsQuery,
   buildGroupHeadCountsQuery,
-  buildGroupCandidateFlagsQuery,
-  toBool,
+  buildGroupCandidateCountsQuery,
+  buildGroupRodeoIdsQuery,
 } from './powersync/local-reads';
-import { runLocalQuery } from './powersync/local-query';
+import { runLocalQuery, runLocalQuerySingle } from './powersync/local-query';
 
 export type { ServiceResult } from './rodeo-config';
 
@@ -72,117 +71,79 @@ export async function fetchRodeoConfigGating(rodeoId: string): Promise<ServiceRe
 }
 
 /**
- * Trae los flags de candidatura (is_castrated / has_weaning) de los animales del grupo, del SQLite local
- * (offline), y los mergea con la forma `GroupProfile` que `buildBulkCandidates` necesita. El categoryCode
- * / sex / futureBull / rodeoId / status ya vienen del `AnimalListItem` (la lista del grupo, espejo C6
- * aplicado); is_castrated / has_weaning / category_override NO los expone la lista → query batched.
- * category_override no afecta la candidatura (solo el aviso R5.6), pero lo traemos por completitud del
- * GroupProfile. Animales sin flag (no debería pasar — son del grupo) caen a `false` (fail-closed: un
- * castrado-desconocido NO suma como candidato de castración recién si is_castrated=false; conservador).
+ * Conteos de candidatos (castración / destete) del GRUPO ENTERO (RG5.2, design §5.2) — vía COUNT/EXISTS SQL
+ * scopeado + overlay-aware (`buildGroupCandidateCountsQuery`), NO sobre la lista/página cargada (antes se contaba
+ * sobre `animals`, que con paginación sería solo la 1ª página → gating incorrecto, E1). `weaningEnabledRodeoIds`
+ * restringe el conteo de destete a los rodeos con `destete` habilitado (rodeo único: `[rodeoId]` o `[]`; lote
+ * cross-rodeo: el subconjunto habilitado, R7.2). Lee del SQLite local (offline). NUNCA hardcodea establishment_id.
  */
-async function fetchGroupProfilesForCounts(
-  animals: readonly AnimalListItem[],
-): Promise<ServiceResult<GroupProfile[]>> {
-  if (animals.length === 0) return { ok: true, value: [] };
-  const flagsRes = await runLocalQuery<{
-    id: string;
-    is_castrated: number | boolean | null;
-    category_override: number | boolean | null;
-    has_weaning: number | boolean | null;
-  }>(buildGroupCandidateFlagsQuery(animals.map((a) => a.profileId)), { emptyIsSyncing: false });
-  if (!flagsRes.ok) return { ok: false, error: flagsRes.error };
-
-  const flagsById = new Map<string, { isCastrated: boolean; hasWeaning: boolean; categoryOverride: boolean }>();
-  for (const row of flagsRes.value) {
-    flagsById.set(row.id, {
-      isCastrated: toBool(row.is_castrated),
-      hasWeaning: toBool(row.has_weaning),
-      categoryOverride: toBool(row.category_override),
-    });
-  }
-
-  const profiles = animals.map((a): GroupProfile => {
-    const f = flagsById.get(a.profileId);
-    return {
-      profileId: a.profileId,
-      rodeoId: a.rodeoId,
-      sex: a.sex,
-      categoryCode: a.categoryCode,
-      isCastrated: f?.isCastrated ?? false,
-      futureBull: a.futureBull,
-      hasWeaning: f?.hasWeaning ?? false,
-      status: a.status,
-      deletedAt: null, // la lista ya filtró deleted_at IS NULL (R1.3); el armado lo re-chequea igual
-      categoryOverride: f?.categoryOverride ?? false,
-    };
-  });
-  return { ok: true, value: profiles };
+async function fetchGroupCandidateCounts(
+  establishmentId: string,
+  group: GroupScope,
+  weaningEnabledRodeoIds: readonly string[],
+): Promise<ServiceResult<GroupCandidateCounts>> {
+  const r = await runLocalQuerySingle<{ castrate: number; wean: number }>(
+    buildGroupCandidateCountsQuery(establishmentId, group, { weaningEnabledRodeoIds }),
+    { emptyIsSyncing: false },
+  );
+  if (!r.ok) return { ok: false, error: r.error };
+  return { ok: true, value: { castrate: r.value?.castrate ?? 0, wean: r.value?.wean ?? 0 } };
 }
 
 /**
- * Conteos de candidatos del grupo (castración / destete) para el gating por presencia (fix Raf 2026-06-12).
- * `rodeoWeaningEnabled` excluye del conteo de destete a los terneros cuyo rodeo no tiene `destete` (lote
- * cross-rodeo, R7.2) — para un rodeo único el predicado es uniforme. PURO sobre los perfiles ya cargados.
- */
-function countCandidates(
-  profiles: readonly GroupProfile[],
-  rodeoWeaningEnabled?: (rodeoId: string) => boolean,
-): GroupCandidateCounts {
-  return {
-    castrate: buildBulkCandidates('castrate', profiles).candidates.length,
-    wean: buildBulkCandidates('wean', profiles, { rodeoWeaningEnabled }).candidates.length,
-  };
-}
-
-/**
- * Acciones masivas disponibles para la vista de UN RODEO (R1.5 + gating por candidatos, fix Raf 2026-06-12):
- * Vacunar/Destetar según el `rodeo_data_config` de ese rodeo; Castrar/Destetar además requieren ≥1 candidato.
- * `animals` = los activos del rodeo (ya cargados por el loader). Lee del SQLite local (offline). La config es
- * FAIL-SOFT (si no se lee → config-off, pero Castrar se gatea igual por candidatos); solo falla duro si la
- * query de flags de candidatura no se pudo leer (entonces el loader cae a su fallback fail-closed).
+ * Acciones masivas disponibles para la vista de UN RODEO (R1.5 + gating por candidatos): Vacunar/Destetar según el
+ * `rodeo_data_config` de ese rodeo; Castrar/Destetar además requieren ≥1 candidato. El gating por candidatos ahora
+ * resuelve el conteo sobre el GRUPO ENTERO (COUNT SQL scopeado, RG5.2) — ya NO recibe la lista mostrada (con
+ * paginación esa sería solo la 1ª página). Lee del SQLite local (offline). La config es FAIL-SOFT (si no se lee →
+ * config-off, pero Castrar se gatea igual por candidatos); solo falla duro si el COUNT de candidatos no se pudo leer
+ * (entonces el loader cae a su fallback fail-closed). NUNCA hardcodea establishment_id (ppio 6).
  */
 export async function fetchRodeoGroupActions(
+  establishmentId: string,
   rodeoId: string,
-  animals: readonly AnimalListItem[],
 ): Promise<ServiceResult<GroupActionsAvailability>> {
-  // Config FAIL-SOFT: si no se pudo leer el catálogo/config (SQLite local), degradamos a config-off
-  // (vaccinate/wean apagadas, fail-closed) PERO seguimos al gating por candidatos — así Castrar (que NO
-  // depende de config, R1.5) sigue ofreciéndose si hay candidatos. El conteo es el camino que sí puede
-  // fallar duro (lo necesitamos para gatear). weaningEnabled de fallback = false (config desconocida).
   const catalog = await fetchDataKeyToFieldId();
   const gating = catalog.ok ? await fetchRodeoGating(rodeoId, catalog.value) : null;
   const rodeoGating: RodeoGating = gating?.ok ? gating.value : { vaccinationEnabled: false, weaningEnabled: false };
   const config = resolveGroupActions([rodeoGating]);
 
-  const profilesRes = await fetchGroupProfilesForCounts(animals);
-  if (!profilesRes.ok) return { ok: false, error: profilesRes.error };
-  // Rodeo único: el destete de TODOS los terneros se gatea por la config de ESTE rodeo (predicado uniforme).
-  const counts = countCandidates(profilesRes.value, () => rodeoGating.weaningEnabled);
-  return { ok: true, value: applyCandidateGating(config, counts) };
+  // Rodeo único: el destete se gatea por la config de ESTE rodeo (habilitado → [rodeoId]; no → [] = 0 candidatos).
+  const weaningEnabledRodeoIds = rodeoGating.weaningEnabled ? [rodeoId] : [];
+  const countsRes = await fetchGroupCandidateCounts(establishmentId, { type: 'rodeo', id: rodeoId }, weaningEnabledRodeoIds);
+  if (!countsRes.ok) return { ok: false, error: countsRes.error };
+  return { ok: true, value: applyCandidateGating(config, countsRes.value) };
 }
 
 /**
- * Acciones masivas disponibles para la vista de un LOTE cross-rodeo (R7.1 + gating por candidatos, fix Raf
- * 2026-06-12): Vacunar/Destetar si ALGÚN rodeo representado entre los miembros tiene el data_key habilitado;
- * Castrar/Destetar además requieren ≥1 candidato. `animals` = los activos del lote (ya cargados por el
- * loader); de ahí salen los rodeos reales (R7.1) Y los perfiles para el conteo de candidatos. El destete
- * cuenta SOLO terneros cuyo rodeo real tiene `destete` (R7.2). Lee la config de cada rodeo del SQLite local
- * (offline). Si el lote no tiene miembros → todas las acciones quedan apagadas (sin candidatos ni rodeos).
+ * Acciones masivas disponibles para la vista de un LOTE cross-rodeo (R7.1 + gating por candidatos): Vacunar/Destetar
+ * si ALGÚN rodeo representado entre los miembros tiene el data_key habilitado; Castrar/Destetar además requieren ≥1
+ * candidato del GRUPO ENTERO (RG5.2). Los rodeos representados se resuelven con una query barata
+ * (`buildGroupRodeoIdsQuery`, DISTINCT scopeado) — ya NO desde la lista cargada (que con paginación sería parcial) y
+ * SIN cargar todos los miembros (no paga el compute del espejo, design §2 corolario). El destete cuenta SOLO
+ * terneros cuyo rodeo real tiene `destete` (R7.2). Lee del SQLite local (offline). Si el lote no tiene miembros →
+ * todas las acciones apagadas. NUNCA hardcodea establishment_id (ppio 6).
  */
 export async function fetchLoteGroupActions(
-  animals: readonly AnimalListItem[],
+  establishmentId: string,
+  groupId: string,
 ): Promise<ServiceResult<GroupActionsAvailability>> {
-  const distinct = [...new Set(animals.map((a) => a.rodeoId))];
+  const group: GroupScope = { type: 'lote', id: groupId };
+
+  // Rodeos REALES representados entre los miembros del lote (R7.1): query barata DISTINCT scopeada (no la lista).
+  const rodeosRes = await runLocalQuery<{ rodeo_id: string }>(
+    buildGroupRodeoIdsQuery(establishmentId, group),
+    { emptyIsSyncing: false },
+  );
+  if (!rodeosRes.ok) return { ok: false, error: rodeosRes.error };
+  const distinct = rodeosRes.value.map((r) => r.rodeo_id);
   if (distinct.length === 0) {
     // Lote sin miembros: sin rodeos (config off) y sin candidatos → todas apagadas.
     return { ok: true, value: applyCandidateGating(resolveGroupActions([]), { castrate: 0, wean: 0 }) };
   }
+
   // Config FAIL-SOFT (igual que el rodeo): si no se puede leer el catálogo/config, degradamos a config-off
   // y dejamos que el gating por candidatos rija Castrar. weaningEnabled de fallback = false por rodeo.
   const catalog = await fetchDataKeyToFieldId();
-
-  // Gating por rodeo: lo necesitamos para la config (R7.1, "algún rodeo") Y para el predicado de destete
-  // por rodeo del conteo de candidatos (R7.2, "solo terneros de rodeo con destete").
   const gatingByRodeo = new Map<string, RodeoGating>();
   for (const rodeoId of distinct) {
     const g = catalog.ok ? await fetchRodeoGating(rodeoId, catalog.value) : null;
@@ -190,14 +151,11 @@ export async function fetchLoteGroupActions(
   }
   const config = resolveGroupActions([...gatingByRodeo.values()]);
 
-  const profilesRes = await fetchGroupProfilesForCounts(animals);
-  if (!profilesRes.ok) return { ok: false, error: profilesRes.error };
-  // Destete por rodeo (R7.2): un ternero solo cuenta como candidato si SU rodeo real tiene `destete`.
-  const counts = countCandidates(
-    profilesRes.value,
-    (rodeoId) => gatingByRodeo.get(rodeoId)?.weaningEnabled ?? false,
-  );
-  return { ok: true, value: applyCandidateGating(config, counts) };
+  // Destete por rodeo (R7.2): solo cuentan terneros cuyo rodeo real tiene `destete` habilitado.
+  const weaningEnabledRodeoIds = distinct.filter((rid) => gatingByRodeo.get(rid)?.weaningEnabled);
+  const countsRes = await fetchGroupCandidateCounts(establishmentId, group, weaningEnabledRodeoIds);
+  if (!countsRes.ok) return { ok: false, error: countsRes.error };
+  return { ok: true, value: applyCandidateGating(config, countsRes.value) };
 }
 
 // ─── Conteos de cabezas por grupo (Inicio rodeo-céntrico, T-UI.2 / R2.1) ───────────────────

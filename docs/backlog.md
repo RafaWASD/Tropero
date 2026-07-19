@@ -17,6 +17,20 @@ No es un sustituto de `feature_list.json` ni de los ADRs — es la antesala dond
 
 ## Ítems pendientes
 
+## 2026-07-18 — PowerSync no reconecta / no re-evalúa buckets nuevos sin reiniciar la app (offline-first)
+
+**Origen**: sesión de bring-up nativo + test de sync en el Android A07 (seed de 5000 animales). Raf lo reprodujo: creé un campo nuevo server-side y, con la app VIVA y online (incluso togglendo modo avión), el device NO lo bajó; el campo solo apareció tras **cerrar y reabrir** la app.
+**Qué**: `app/src/services/powersync/provider.tsx` llama `db.connect(connector)` UNA sola vez cuando `hasValidSession` pasa a true (login/mount). NO hay listener de red (NetInfo) ni de foreground (AppState) que reconecte o re-evalúe las parameter queries (`org_scope`) al volver la conexión. Depende 100% del retry interno del SDK de PowerSync, que en nativo no reenganchó limpio (o no propagó el bucket nuevo) tras el toggle de red.
+**Por qué importa**: ALTO para offline-first (principio 3 de CLAUDE.md). El peón en la manga pierde y recupera señal constantemente; si el sync no resume solo (subir writes encolados + bajar deltas + buckets nuevos) sin reiniciar la app, es showstopper de campo. También afecta ver invitaciones / campos nuevos en caliente.
+**Próximo paso sugerido**: diagnóstico primero (reproducir con logs de PowerSync) — (a) confirmar si el retry del SDK reconecta tras drop de red en nativo, (b) wirear reconexión explícita en `provider.tsx` con NetInfo (online→`connect`) + AppState (foreground→revalidar), (c) verificar propagación de bucket/parameter-query nuevo sin restart. Después spec/ADR; toca el core de sync → probable Gate 1 si cambia la frontera.
+
+## 2026-07-18 — Lista de Animales no virtualizada + tope LIMIT 200 (rodeos grandes solo alcanzables por búsqueda)
+
+**Origen**: sesión de test de performance con rodeo de 5000 en el A07 (gama baja). El leader lo dedujo del código antes de medir.
+**Qué**: la tab Animales (`app/app/(tabs)/animales.tsx`, ~l.361-401) renderiza con `ScrollView` + `visible.map(...)` — **no virtualizada** (no FlashList/FlatList). Y `fetchAnimals` (`app/src/services/animals.ts`) trae **LIMIT 200** (`buildAnimalsListQuery`, `local-reads.ts` l.749). Efecto: en un campo de >200 cabezas el operario **solo alcanza los 200 más recientes** por scroll; al resto llega únicamente por el buscador. El header cuenta `list.length` (topeado en 200), no el total real del rodeo.
+**Por qué importa**: medio-alto. Rodeos reales de cría son de cientos a miles; el tope silencioso da falsa sensación de "faltan animales" y rompe la exploración por scroll. La no-virtualización además impide subir el tope sin antes cambiar la lista (200 filas no-virtualizadas ya es borderline en el A07; miles la funden).
+**Próximo paso sugerido**: (1) virtualizar con FlashList/FlatList — obra de performance real y prerequisito de (2). (2) reemplazar el LIMIT 200 por paginación / scroll infinito y un contador de total real desacoplado de la lista renderizada. (3) el buscador ya cubre el acceso puntual. Feature nueva (spec/ADR de la lista) — dimensionar según lo que mida el test del A07.
+
 ## 2026-07-18 — `user_private.email` es auto-escribible por el cliente (grant a nivel tabla, no de columna)
 
 **Origen**: Gate 2 (code) del delta de teléfono. **Pre-existente de spec 14 (`0068`), fuera del alcance del delta** — el delta solo agrega restricción, no afloja nada.

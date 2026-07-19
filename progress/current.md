@@ -3,6 +3,18 @@
 > Este archivo se vacía al cerrar cada sesión y su resumen se mueve a `history.md`.
 > Mientras trabajás, **mantenelo actualizado en tiempo real**, no al final.
 
+## 2026-07-19 — spec 10 DELTA «rodeo grande» — COMPLETO + Puerta 2 APROBADA
+
+Delta-spec `rodeo-grande` (vista DENTRO del rodeo/lote: query scopeada + paginada por keyset/scroll infinito + FlatList virtualizada + count real + buscador/chips por categoría/sexo + masivas sobre el grupo entero + fix bug lote). **Fases 1-5 hechas, reviewer APPROVED, Gate 2 seguridad PASS, Gate 2.5 (E2E 6/6 + 10 capturas + veto visual PASS, ADR-029).** Race de `useGroupView.refreshWindow` al ensanchar filtro (destapado por el E2E) → **arreglado** (guard puro `shouldYieldWindowRefresh`; el refresh cede ante una carga de foreground) + regresión E2E que cae sin el fix. **Raf aprobó la Puerta 2** (capturas a la vista) → commiteado a `main`. Backlog: PowerSync reconnect (ALTO) + Animales tab no virtualizada (LIMIT 200). Polish pendiente (no bloqueante): botón "limpiar filtros" de un toque. Detalle en `progress/impl_10-rodeo-grande-*.md` + `review_10-rodeo-grande.md`.
+
+## 2026-07-18 — spec 10 DELTA «rodeo grande» — Fases 3+4 (implementer, en curso)
+
+Delta-spec `rodeo-grande` — **Fases 3 (hooks `useGroupView` paginado + buscador/chips, T-RG.19..21) + 4 (UI: FlatList en `GroupViewScreen` + `GroupSearchBar` + wiring rodeo/lote + baja en tanda, T-RG.22..27)**. Construye la UI sobre la capa de datos de Fases 1+2 (verde, sin commitear). NO E2E (Fase 5). Aditivo a la capa de datos: `buildGroupSexOptionsQuery`/`fetchGroupSexOptions`/`fetchGroupWindow` + `utils/group-view-model.ts` (puro). NO se tocan los archivos de la otra terminal (feature 19/teléfono). Plan + baseline + trazabilidad en `progress/impl_10-rodeo-grande-fase3-4.md`.
+
+## 2026-07-18 — spec 10 DELTA «rodeo grande» — Fases 1+2 (implementer, en curso)
+
+Delta-spec `rodeo-grande` (vista de grupo scopeada + paginada + count/buscador/chips + masivas sobre grupo entero + fix bug lote). Este run = **Fases 1 (builders `local-reads.ts` T-RG.1..9) + 2 (services `group-page.ts`/`management-groups`/`group-data`/`bulk-selection-data` T-RG.10..18)**. NO se toca UI/hooks/E2E. Plan + baseline + trazabilidad en `progress/impl_10-rodeo-grande-fase1-2.md`. Verificación network-free: unit tests in-memory afectados + tsc (NO check.mjs/E2E).
+
 ## 2026-07-12 — Bloque E: Ambientes + Observabilidad (ejecución del plan aprobado)
 
 **Origen**: HANDOFF del plan `C:/Users/RAR20313/.claude/plans/quiero-planificar-la-implementacion-noble-journal.md` (aprobado por Raf en otra terminal, que solo planificó). Esta terminal ejecuta y es **dueña de los archivos de coordinación** (feature_list.json, progress/*) para este bloque. Subagentes con `model: "opus"`.

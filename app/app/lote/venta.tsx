@@ -1,7 +1,9 @@
 // app/lote/venta.tsx — BAJA EN TANDA (venta/descarte) de un subconjunto de un lote (delta lotes-venta).
 //
-// Se llega desde el modo selección del lote (`app/lote/[id].tsx`) con `groupId` + `profileIds` (los animales
-// tildados). Es un LOOP CLIENT-SIDE de la baja per-animal existente (`exit_animal_profile`, 0044, vía la
+// Se llega desde el modo selección del lote (`app/lote/[id].tsx`) con `groupId` + `mode` ('all'|'subset') + `ids`
+// (delta rodeo-grande RG5.6: 'all' = todos MENOS `ids` excluidos; 'subset' = solo `ids` seleccionados — el csv
+// evita enumerar miles de UUIDs en la URL). Es un LOOP CLIENT-SIDE de la baja per-animal existente
+// (`exit_animal_profile`, 0044, vía la
 // outbox) — NO una RPC nueva (RLV.7.1). Dos pasos (mismo modelo que `app/animal/baja.tsx`):
 //   PASO 1 — Motivo de la tanda: Venta / Muerte (RLV.4, "Venta simple" — sin culling).
 //   PASO 2 — Fecha común (default hoy, a TODOS RLV.5.1) + (solo Venta) precio/peso comunes opcionales
@@ -10,8 +12,9 @@
 //            disabled en vuelo — RLV.18/RLV.19). Al OK → exitAnimalsBatch → router.back() al lote.
 //
 // ANTI-IDOR (RLV.21.1): la lista operable se arma SOLO de `fetchGroupMembers` (RLS-scopeado al campo activo)
-// intersecada con los profileIds recibidos → un profileId ajeno/tampereado que NO sea miembro del lote se
-// DESCARTA (no se le da de baja). El cliente solo manda `p_profile_id`; el tenant lo deriva el RPC server-side
+// resuelta contra `mode`/`ids` → un id ajeno/tampereado que NO sea miembro del lote se DESCARTA (no se le da de
+// baja); en 'all', operar-sobre-el-complemento nunca alcanza a un no-miembro. El cliente solo manda `p_profile_id`;
+// el tenant lo deriva el RPC server-side
 // por-llamada. NUNCA se hardcodea establishment_id (del contexto, RLV.20). Offline-first (RLV.22/RLV.23): todo
 // local + outbox, efecto optimista al instante.
 //
@@ -69,12 +72,17 @@ const EMPTY_OVERRIDE: OverrideState = { priceRaw: '', weightRaw: '', priceErr: n
 export default function LoteVentaScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const params = useLocalSearchParams<{ groupId?: string; profileIds?: string }>();
+  // Handoff desde el modo selección del lote (delta rodeo-grande RG5.6 / design §6.4): en vez de enumerar cada
+  // UUID en el param (un lote de miles reventaría la URL), llega `mode` + el csv MÁS CHICO entre seleccionados y
+  // excluidos. mode='all' → operar sobre TODOS los miembros MENOS `ids` (excluidos); mode='subset' → operar sobre
+  // `ids` (seleccionados). El set se resuelve ACÁ contra `fetchGroupMembers` (RLS-scopeado, anti-IDOR RLV.21.1).
+  const params = useLocalSearchParams<{ groupId?: string; mode?: string; ids?: string }>();
   const groupId = typeof params.groupId === 'string' ? params.groupId : null;
-  const requestedIds = useMemo(() => {
-    const raw = typeof params.profileIds === 'string' ? params.profileIds : '';
+  const selectionMode: 'all' | 'subset' = params.mode === 'all' ? 'all' : 'subset';
+  const paramIds = useMemo(() => {
+    const raw = typeof params.ids === 'string' ? params.ids : '';
     return raw.split(',').map((s) => s.trim()).filter((s) => s.length > 0);
-  }, [params.profileIds]);
+  }, [params.ids]);
 
   const { state: estState } = useEstablishment();
   const establishmentId = estState.status === 'active' ? estState.current.id : null;
@@ -85,7 +93,8 @@ export default function LoteVentaScreen() {
   const [targets, setTargets] = useState<Target[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   useEffect(() => {
-    if (!establishmentId || !groupId || requestedIds.length === 0) {
+    // mode='subset' sin ids = nada seleccionado → sin targets. mode='all' con ids vacío = TODO el lote (válido).
+    if (!establishmentId || !groupId || (selectionMode === 'subset' && paramIds.length === 0)) {
       setTargets([]);
       return;
     }
@@ -101,16 +110,18 @@ export default function LoteVentaScreen() {
         setTargets([]);
         return;
       }
-      const requested = new Set(requestedIds);
+      // ANTI-IDOR (RLV.21.1): la lista operable sale SIEMPRE de `fetchGroupMembers` (RLS-scopeado). En 'all'
+      // operamos sobre todos los miembros EXCEPTO los excluidos; en 'subset', sobre los seleccionados presentes.
+      const paramSet = new Set(paramIds);
       const list: Target[] = r.value
-        .filter((a) => requested.has(a.profileId))
+        .filter((a) => (selectionMode === 'all' ? !paramSet.has(a.profileId) : paramSet.has(a.profileId)))
         .map((a) => ({ profileId: a.profileId, hero: heroOf(a) }));
       setTargets(list);
     });
     return () => {
       active = false;
     };
-  }, [establishmentId, groupId, requestedIds]);
+  }, [establishmentId, groupId, selectionMode, paramIds]);
 
   const [step, setStep] = useState<1 | 2>(1);
   const [choice, setChoice] = useState<BatchExitChoice | null>(null);
@@ -243,7 +254,7 @@ export default function LoteVentaScreen() {
     backOr(router, backFallback);
   }, [mapping, targets, exitDate, commonPrice, commonWeight, overrides, router, backFallback]);
 
-  const missing = !groupId || requestedIds.length === 0;
+  const missing = !groupId || (selectionMode === 'subset' && paramIds.length === 0);
   const noTargets = targets !== null && targets.length === 0;
   const title = step === 1 ? 'Vender / Descartar' : (mapping?.label ?? 'Registrar salida');
   const count = targets?.length ?? 0;
