@@ -239,6 +239,11 @@ test('spec 14 — user_private (PII self-only, B3-1)', async (t) => {
   });
 
   await t.test('T18 R2.4: A intenta actualizar la fila de B → 0 filas afectadas', async () => {
+    // ⚠️ EL VALOR TIENE QUE SEGUIR SIENDO CANÓNICO (anexo LOW del Gate 1 del delta TELÉFONO). Desde la
+    // migración 0126 la columna tiene el CHECK `user_private_phone_format_chk`. Si alguien cambiara
+    // '+540000000000' por un valor NO canónico (ej. '11 2345 6789'), el UPDATE fallaría por el CHECK y
+    // este test pasaría POR LA RAZÓN EQUIVOCADA: dejaría de verificar la RLS (que es lo que asserta) y
+    // pasaría a verificar el formato. '+540000000000' es canónico-válido ('+' + '5' + 12 dígitos).
     const { data, error } = await clientA
       .from('user_private')
       .update({ phone: '+540000000000' })
@@ -442,6 +447,247 @@ test('spec 14 — user_private (PII self-only, B3-1)', async (t) => {
         .update({ email: canonicalEmail })
         .eq('user_id', userB.id);
     }
+  });
+
+  await t.test('cleanup', async () => {
+    await cleanup();
+  });
+});
+
+// =====================================================================
+// spec 01 — delta TELÉFONO: CHECK de formato `user_private_phone_format_chk` (migración 0126)
+// =====================================================================
+// Cubre RTEL.14.4 (rechaza no canónico / acepta canónico), RTEL.14.5 (un UPDATE de email sobre una fila
+// con phone canónico NO se rompe), RTEL.14.6 / RTEL.11.2 (vectores de inyección, incluido el newline
+// FINAL) y RTEL.14.11 / RTEL.2.9.1 (la tabla compartida de vectores, mitad backend).
+//
+// Se escribe con el JWT del PROPIO usuario, no con service_role, porque ese es el modelo de amenaza
+// real (RTEL.5.6): el bundle de RN es modificable y PostgREST es alcanzable con el token del usuario.
+// El service_role bypassa la RLS pero NO un CHECK; usar el cliente autenticado prueba las dos cosas a
+// la vez — que la RLS lo deja escribir SU fila y que el CHECK igual lo frena.
+//
+// ⚠️ HASTA QUE EL LEADER APLIQUE 0126 al remoto, este bloque se AUTO-SALTEA (el probe de abajo detecta
+//    que el constraint no existe). Se saltea en vez de fallar para no poner en rojo el resto de la
+//    suite spec 14, que no depende de esta migración. La tarea T23 del delta exige verlo en VERDE
+//    (no salteado) después del apply: si sigue diciendo SKIP post-deploy, la migración no entró.
+
+const PHONE_VECTORS = JSON.parse(
+  fs.readFileSync(path.join(REPO_ROOT, 'app', 'src', 'utils', 'phone-vectors.json'), 'utf8'),
+);
+
+/** Código Postgres de violación de CHECK constraint. */
+const CHECK_VIOLATION = '23514';
+
+/** ¿El error es el rechazo del CHECK de FORMATO del teléfono (y no otra cosa)? */
+function isPhoneFormatRejection(error) {
+  return Boolean(
+    error &&
+      error.code === CHECK_VIOLATION &&
+      /user_private_phone_format_chk/.test(`${error.message} ${error.details || ''}`),
+  );
+}
+
+test('spec 01 delta TELÉFONO — user_private_phone_format_chk (migración 0126)', async (t) => {
+  let user, client, applied;
+
+  await t.test('setup + probe de la migración 0126', async () => {
+    user = await createTestUser('phone');
+    client = await getUserClient(user.email);
+
+    // Probe: intentar escribir un valor NO canónico en la fila propia. Con 0126 aplicada → 23514.
+    const { error } = await client
+      .from('user_private')
+      .update({ phone: '11 2345 6789' })
+      .eq('user_id', user.id);
+    applied = isPhoneFormatRejection(error);
+    if (!applied) {
+      console.log(
+        '\n>>> SKIP: `user_private_phone_format_chk` no existe todavía en el remoto. Los tests del ' +
+          'delta TELÉFONO se saltean hasta que el leader aplique supabase/migrations/' +
+          '0126_user_private_phone_format.sql (T22). Post-apply deben quedar en VERDE (T23).\n',
+      );
+      // Dejamos la fila en un estado canónico igual, para no ensuciar el fixture.
+      await client.from('user_private').update({ phone: '+541123456789' }).eq('user_id', user.id);
+    }
+  });
+
+  // -------------------------------------------------------------------
+  // RTEL.14.4 / RTEL.7.1 — el CHECK rechaza lo no canónico y acepta lo canónico.
+  // -------------------------------------------------------------------
+  await t.test('RTEL.14.4: el CHECK rechaza formatos no canónicos', async (st) => {
+    if (!applied) return st.skip('0126 no aplicada');
+    const rejected = [
+      ['11 2345 6789', 'con separadores (lo que escribía el cliente viejo)'],
+      ['abc', 'letras'],
+      ['1123456789', 'los 10 dígitos SIN el +54: no es el canónico'],
+      ['+549112345678901234', '18 dígitos: pasa el cap de largo (32) pero no el de formato'],
+      // RTEL.5.6 — LA PRUEBA DE QUE EL CLIENTE NO ES LA FRONTERA: `+0123456789` es exactamente el
+      // valor que un cliente MODIFICADO podría mandar salteándose la validación de UX. El CHECK lo
+      // frena igual (^\+[1-9]…). Es además el borde que MEDIUM-1 alineó entre cliente y server.
+      ['+0123456789', 'código de país que empieza con 0'],
+    ];
+    for (const [value, why] of rejected) {
+      const { error } = await client
+        .from('user_private')
+        .update({ phone: value })
+        .eq('user_id', user.id);
+      assert.ok(isPhoneFormatRejection(error), `"${value}" debería ser rechazado (${why})`);
+    }
+  });
+
+  await t.test('RTEL.14.4: el CHECK acepta el canónico y el NULL', async (st) => {
+    if (!applied) return st.skip('0126 no aplicada');
+    for (const value of ['+541123456789', '+542241430000', '+34600123456']) {
+      const { data, error } = await client
+        .from('user_private')
+        .update({ phone: value })
+        .eq('user_id', user.id)
+        .select('phone');
+      assert.equal(error, null, error && error.message);
+      assert.equal(data.length, 1);
+      assert.equal(data[0].phone, value);
+    }
+    // NULL = "sin teléfono" (el perfil lo permite; la fila nace así desde handle_new_auth_user).
+    const { data, error } = await client
+      .from('user_private')
+      .update({ phone: null })
+      .eq('user_id', user.id)
+      .select('phone');
+    assert.equal(error, null, error && error.message);
+    assert.equal(data[0].phone, null);
+  });
+
+  // -------------------------------------------------------------------
+  // RTEL.14.11 / RTEL.2.9.1 — la tabla COMPARTIDA de vectores, mitad backend.
+  // -------------------------------------------------------------------
+  // Si el encoding TypeScript (app/src/utils/phone.ts, ejercitado por phone.test.ts) y el del CHECK
+  // divergen en CUALQUIER borde, una de las dos suites se pone roja. No es prolijidad: es la pata
+  // declarada de la aceptación del riesgo R-7 (el rechazo del CHECK deja PII en el log del servidor;
+  // se acepta porque, con las dos definiciones alineadas, es prácticamente inalcanzable).
+  await t.test('RTEL.14.11: el CHECK acepta TODOS los canónicos de phone-vectors.json', async (st) => {
+    if (!applied) return st.skip('0126 no aplicada');
+    assert.ok(PHONE_VECTORS.normalizable.length >= 20, 'la tabla de vectores no debería encogerse');
+    for (const v of PHONE_VECTORS.normalizable) {
+      const { error } = await client
+        .from('user_private')
+        .update({ phone: v.expected })
+        .eq('user_id', user.id);
+      assert.equal(
+        error,
+        null,
+        `el canónico de "${v.input}" (${v.expected}, regla ${v.rule}) debería ser aceptado por el ` +
+          `CHECK — si esto falla, el cliente está produciendo algo que el server rechaza (23514) y ` +
+          `R-7 deja de ser inalcanzable: ${error && error.message}`,
+      );
+    }
+  });
+
+  await t.test('RTEL.14.11: el CHECK rechaza TODOS los no normalizables de phone-vectors.json', async (st) => {
+    if (!applied) return st.skip('0126 no aplicada');
+    // Los de razón `empty` no son valores a persistir (el perfil guarda NULL), así que no aplican.
+    const unrecognized = PHONE_VECTORS.rejected.filter((v) => v.reason === 'unrecognized');
+    assert.ok(unrecognized.length >= 10, 'deberían quedar vectores de rechazo para ejercitar');
+    for (const v of unrecognized) {
+      const { error } = await client
+        .from('user_private')
+        .update({ phone: v.input })
+        .eq('user_id', user.id);
+      assert.ok(
+        isPhoneFormatRejection(error),
+        `"${v.input}" debería ser rechazado por el CHECK (${v.why})`,
+      );
+    }
+  });
+
+  // -------------------------------------------------------------------
+  // RTEL.14.6 / RTEL.11.2 / RTEL.11.2.1 — saneamiento: nada de inyección puede quedar persistido.
+  // -------------------------------------------------------------------
+  await t.test('RTEL.14.6: el CHECK rechaza los vectores de inyección', async (st) => {
+    if (!applied) return st.skip('0126 no aplicada');
+    const CANON = '+541123456789';
+    const vectors = [
+      // ⚠️ EL CASO CRÍTICO, primero y explícito: newline AL FINAL. En PCRE (Perl, JavaScript) `$`
+      // matchea ANTES de un \n final, con lo cual un CHECK escrito igual en un motor tipo PCRE
+      // ACEPTARÍA '+541123456789\n'. Postgres usa POSIX ARE y, sin newline-sensitive matching
+      // (apagado por default), `$` ancla solo al fin de string. La garantía de RTEL.11.2 DEPENDE de
+      // esa diferencia, así que queda fijada como test y no como supuesto de la spec.
+      [`${CANON}\n`, 'newline AL FINAL (semántica POSIX vs PCRE)'],
+      [`\n${CANON}`, 'newline al inicio'],
+      [`+5411\n23456789`, 'newline en el medio'],
+      [`${CANON}\r`, 'carriage return'],
+      [`${CANON}\t`, 'tab'],
+      ['+54 1123456789', 'espacio'],
+      [`${CANON}'`, 'comilla simple'],
+      ['+54112345678<script>', 'marcado HTML'],
+      ['+54١٢٣٤٥٦٧٨٩٠', 'dígitos arábigo-índicos ([0-9] es ASCII-only)'],
+      ['+0411234567', 'código de país que empieza con 0'],
+      ['541123456789', 'sin el + inicial'],
+    ];
+    for (const [value, why] of vectors) {
+      const { error } = await client
+        .from('user_private')
+        .update({ phone: value })
+        .eq('user_id', user.id);
+      assert.ok(isPhoneFormatRejection(error), `debería rechazar: ${why}`);
+    }
+    // Nota: chr(0) (NUL) no llega siquiera a evaluarse — Postgres lo rechaza a nivel de TIPO
+    // (54000: null character not permitted). Ese vector lo cierra `text`, no el constraint.
+
+    // Verificación adversarial: tras todos los rechazos, la fila NO quedó con basura.
+    const { data } = await admin
+      .from('user_private')
+      .select('phone')
+      .eq('user_id', user.id)
+      .maybeSingle();
+    assert.ok(
+      data.phone === null || /^\+[1-9][0-9]{7,14}$/.test(data.phone),
+      'la fila debería haber quedado con un valor canónico o NULL',
+    );
+  });
+
+  // -------------------------------------------------------------------
+  // RTEL.14.5 / RTEL.11.4 — el CHECK no rompe `propagate_confirmed_email`.
+  // -------------------------------------------------------------------
+  await t.test('RTEL.14.5: un UPDATE de email sobre una fila con phone canónico NO es rechazado', async (st) => {
+    if (!applied) return st.skip('0126 no aplicada');
+    // Postgres evalúa TODOS los CHECK de la fila en CUALQUIER update, cambie o no la columna
+    // restringida. Ese es el hazard que DP3 previene (residuo cero antes del VALIDATE): con un phone
+    // legacy sucio, el `update user_private set email = ...` del trigger propagate_confirmed_email
+    // (0068:169-194) fallaría y ABORTARÍA la confirmación de cambio de email del usuario.
+    {
+      const { error } = await client
+        .from('user_private')
+        .update({ phone: '+541123456789' })
+        .eq('user_id', user.id);
+      assert.equal(error, null, error && error.message);
+    }
+    // El UPDATE de email lo hace el trigger con permisos de definer; acá lo simulamos con
+    // service_role (el cliente no tiene grant para escribir su email) sobre la MISMA fila.
+    const newEmail = `${RUN_TAG}_phone_changed@rafaq-test.local`;
+    const { error: emailErr } = await admin
+      .from('user_private')
+      .update({ email: newEmail })
+      .eq('user_id', user.id);
+    assert.equal(
+      emailErr,
+      null,
+      `el UPDATE de email no debería tropezar con el CHECK de teléfono: ${emailErr && emailErr.message}`,
+    );
+
+    // Y el camino REAL del trigger: confirmar un email nuevo en auth.users propaga a user_private.
+    const confirmedEmail = `${RUN_TAG}_phone_confirmed@rafaq-test.local`;
+    const { error: authErr } = await admin.auth.admin.updateUserById(user.id, {
+      email: confirmedEmail,
+      email_confirm: true,
+    });
+    assert.equal(authErr, null, authErr && authErr.message);
+    const { data } = await admin
+      .from('user_private')
+      .select('email, phone')
+      .eq('user_id', user.id)
+      .maybeSingle();
+    assert.equal(data.email, confirmedEmail.toLowerCase(), 'la propagación de email debe seguir andando');
+    assert.equal(data.phone, '+541123456789', 'el teléfono canónico no se toca');
   });
 
   await t.test('cleanup', async () => {

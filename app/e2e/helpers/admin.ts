@@ -20,6 +20,11 @@ import WS from 'ws';
 import { randomUUID } from 'node:crypto';
 
 import { getE2EEnv } from './env';
+// ⚠️ IMPORTAR, NO REIMPLEMENTAR (RTEL.2.9.3). Es el único import de `app/src` de este archivo, y es a
+// propósito: la normalización del teléfono tiene UN SOLO ORIGEN (`app/src/utils/phone.ts`). Escribir
+// las reglas acá "porque es un fixture" sería una cuarta copia, en el lugar más silencioso posible —
+// y RTEL.2.9 no es prolijidad: es la pata de la aceptación del riesgo R-7 (cliente y CHECK alineados).
+import { normalizePhone } from '../../src/utils/phone';
 
 const { supabaseUrl, anonKey, serviceRoleKey } = getE2EEnv();
 
@@ -81,9 +86,29 @@ export async function createTestUser(
  * Spec 14: el `phone` se separó de `public.users` a `public.user_private` (PII de contacto
  * self-only). El service_role bypassa RLS; escribimos directo en user_private (la fila la creó el
  * trigger de signup junto con users, así que un update por user_id basta).
+ *
+ * ⚠️ NORMALIZA ANTES DE ESCRIBIR (delta TELÉFONO, RTEL.9.1). Desde la migración 0126 la columna tiene
+ * un CHECK de formato (`user_private_phone_format_chk`): un seed crudo como '1123456789' —lo que pasan
+ * los ~30 call sites de la suite— sería rechazado con 23514 y pondría TODA la suite E2E en rojo sin que
+ * exista una regresión real. Normalizando ACÁ, esos call sites no se tocan: siguen escribiendo el
+ * número como lo tipearía una persona y la columna recibe el canónico. El service_role bypassa la RLS,
+ * NO el CHECK (un constraint no es una policy).
+ *
+ * Si el valor no normaliza, se lanza con un mensaje explícito: un fixture con un teléfono imposible es
+ * un error del test, y fallar acá señala la causa mucho mejor que un 23514 de Postgres.
  */
 export async function setUserPhone(userId: string, phone: string): Promise<void> {
-  const { error } = await admin.from('user_private').update({ phone }).eq('user_id', userId);
+  const normalized = normalizePhone(phone);
+  if (!normalized.ok) {
+    throw new Error(
+      `setUserPhone(${userId}): "${phone}" no es un teléfono normalizable (${normalized.reason}). ` +
+        `El fixture debe pasar un número real (ej. '1123456789'); el canónico lo arma el helper.`,
+    );
+  }
+  const { error } = await admin
+    .from('user_private')
+    .update({ phone: normalized.canonical })
+    .eq('user_id', userId);
   if (error) throw new Error(`setUserPhone(${userId}): ${error.message}`);
 }
 

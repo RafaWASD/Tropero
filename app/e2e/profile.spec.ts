@@ -76,17 +76,19 @@ test('el campo teléfono no acepta letras (sanitizado en vivo) y valida al guard
 
   const phone = page.getByLabel('Teléfono', { exact: true });
 
-  // 1. Sanitizado en vivo: tipear letras → NO quedan en el campo (sanitizePhoneInput descarta lo no
-  //    numérico/separador). Limpiamos primero y escribimos basura mixta.
+  // 1. Sanitizado en vivo: tipear letras → NO quedan en el campo (el estado del PhoneField son los
+  //    DÍGITOS; el texto visible es derivado). Limpiamos primero y escribimos basura mixta.
   await phone.fill('');
   await phone.pressSequentially('abc12de34');
   await expect(phone).toHaveValue('1234');
 
-  // 2. Guardar con teléfono inválido (muy corto: < 8 dígitos) → error de validación, NO guarda.
+  // 2. Guardar con teléfono inválido (muy corto) → error de validación, NO guarda.
+  //    ⚠️ Copy actualizado por el delta TELÉFONO: el modo AR ahora exige los 10 dígitos nacionales
+  //    (antes bastaban 8 dígitos cualesquiera) y el mensaje ENSEÑA el formato en vez de solo rechazar.
   await phone.fill('');
   await phone.pressSequentially('123');
   await page.getByRole('button', { name: 'Guardar' }).click();
-  await expect(page.getByText('Ingresá un teléfono válido (8 a 15 dígitos).')).toBeVisible({
+  await expect(page.getByText('Ingresá los 10 dígitos, sin el 0 ni el 15.')).toBeVisible({
     timeout: 10_000,
   });
   // Sigue en modo edición (no guardó): el botón "Guardar" persiste.

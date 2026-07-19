@@ -10,9 +10,24 @@
 // tamaños de fuente se leen con getTokenValue('$token', grupo) → siguen
 // referenciando el design system, no son literales.
 
-import { forwardRef } from 'react';
+import { forwardRef, type ReactNode } from 'react';
 import { Platform, TextInput, type TextInputProps } from 'react-native';
 import { getTokenValue, Text, YStack } from 'tamagui';
+
+/**
+ * Label de un campo de formulario. Se exporta para que un contenedor que envuelve al `FormField` con
+ * una decoración lateral (hoy `PhoneField` con su chip `+54`) pueda dibujar el label a NIVEL DE GRUPO
+ * —alineado con los labels hermanos del form— usando EXACTAMENTE el mismo estilo. Es el mismo criterio
+ * que el resto del delta: una sola definición, no dos que puedan divergir. Si el estilo del label
+ * cambia, cambia acá y los dos usos lo siguen.
+ */
+export function FieldLabel({ children }: { children: ReactNode }) {
+  return (
+    <Text fontFamily="$body" fontSize="$3" fontWeight="500" color="$textMuted">
+      {children}
+    </Text>
+  );
+}
 
 export type FormFieldProps = {
   /** Label visible sobre el input. */
@@ -46,6 +61,20 @@ export type FormFieldProps = {
    */
   multiline?: boolean;
   numberOfLines?: number;
+  /**
+   * Oculta VISUALMENTE el label (ADITIVO, opcional). Default false → as-built (cero cambio para los
+   * callers previos). El `label` sigue siendo OBLIGATORIO y sigue siendo el nombre accesible del input
+   * (`aria-label` en web / `accessibilityLabel` en native), así que ocultarlo no degrada a11y ni rompe
+   * `getByLabel`.
+   *
+   * Para qué: cuando el input convive con una decoración lateral en la misma fila (el chip `+54` de
+   * `PhoneField`), el label dibujado ADENTRO de la columna del input queda sangrado el ancho de la
+   * decoración y se DESALINEA de los labels hermanos del formulario — y encima SALTA cuando la
+   * decoración aparece/desaparece. Es la clase de bug de ADR-027 (una decoración lateral corriendo el
+   * layout de algo que debería estar anclado). El contenedor dibuja el label con `FieldLabel` a nivel
+   * de GRUPO y apaga el interno con esta prop.
+   */
+  hideLabel?: boolean;
 };
 
 export const FormField = forwardRef<TextInput, FormFieldProps>(function FormField(
@@ -67,13 +96,31 @@ export const FormField = forwardRef<TextInput, FormFieldProps>(function FormFiel
     testID,
     multiline = false,
     numberOfLines,
+    hideLabel = false,
   },
   ref,
 ) {
   // Valores que cruzan a la API no-Tamagui de <TextInput> (style/props), leídos del
   // design system con getTokenValue — no literales (ADR-023 §4).
   const textColor = getTokenValue('$textPrimary', 'color');
-  const placeholderColor = getTokenValue('$textMuted', 'color');
+  // ⚠️ El placeholder va en $textFaint, NO en $textMuted (que es el color de los LABELS).
+  //
+  // Por qué: con $textMuted (#5C655F) el placeholder queda en 6.03:1 contra el blanco del input —
+  // anormalmente oscuro para un placeholder— y contra el valor real ($textPrimary, 19.35:1) deja apenas
+  // 3.2× de separación. Como además ocupa la MISMA posición que un valor, un campo vacío se lee como
+  // "ya cargado": el usuario toca Continuar y se come un error de campo requerido. A pleno sol (manga)
+  // es peor. Con $textFaint (#807A74, 4.24:1 contra blanco) la separación sube a 4.6× y el campo vacío
+  // se distingue de un vistazo. La otra mitad del fix es semántica y vive en el copy: los placeholders
+  // de ejemplo se escriben con el prefijo "Ej. " (ver PhoneField).
+  //
+  // Nota de accesibilidad (medida, no estimada): 4.24:1 queda apenas por debajo del 4.5:1 de WCAG AA
+  // para texto normal. Se acepta a conciencia porque el placeholder es un EJEMPLO —no información: el
+  // nombre accesible del campo lo da el `label`, que está SIEMPRE visible y en 6.03:1— y porque el
+  // riesgo que cierra (confundir vacío con lleno y perder el dato) es operativamente peor. No hay en el
+  // design system un token de placeholder dedicado; $textFaint es el más claro con legibilidad
+  // razonable (ya se usaba con este mismo rol en `baston-test.tsx`). Si algún día se agrega
+  // `$textPlaceholder`, este es el consumidor a migrar.
+  const placeholderColor = getTokenValue('$textFaint', 'color');
   const borderColorOk = getTokenValue('$divider', 'color');
   const borderColorError = getTokenValue('$terracota', 'color');
   const surfaceColor = getTokenValue('$white', 'color');
@@ -93,9 +140,7 @@ export const FormField = forwardRef<TextInput, FormFieldProps>(function FormFiel
 
   return (
     <YStack width="100%" gap="$2">
-      <Text fontFamily="$body" fontSize="$3" fontWeight="500" color="$textMuted">
-        {label}
-      </Text>
+      {hideLabel ? null : <FieldLabel>{label}</FieldLabel>}
       <TextInput
         ref={ref}
         value={value}

@@ -12,8 +12,10 @@
 // del usuario se deriva de auth.uid() vía la stream; el campo activo lo decide el contexto.
 
 import { supabase } from './supabase';
+import { classifyError, type ClassifiedError } from './classify-error';
 import { mapMembershipRows, type RoleRow } from '../utils/establishment';
 import type { MembershipEstablishment } from '../utils/establishment';
+import { PHONE_FORMAT_REJECTED_COPY, normalizePhone } from '../utils/phone';
 import {
   buildMembershipsQuery,
   buildOwnPhoneQuery,
@@ -32,7 +34,7 @@ export type { MembershipEstablishment } from '../utils/establishment';
 
 export type LoadMembershipsResult =
   | { ok: true; establishments: MembershipEstablishment[] }
-  | { ok: false; error: { kind: 'network' | 'unknown'; message: string } };
+  | { ok: false; error: ClassifiedError };
 
 // Forma PLANA de la fila local (JOIN user_roles + establishments). Se re-arma a RoleRow para
 // reusar mapMembershipRows (dedup + filtro soft-delete).
@@ -45,17 +47,10 @@ type MembershipFlatRow = {
   deleted_at: string | null;
 };
 
-function classifyError(error: { message?: string; code?: string } | null): {
-  kind: 'network' | 'unknown';
-  message: string;
-} {
-  const msg = error?.message ?? '';
-  // Errores de red de fetch (sin status HTTP): "Failed to fetch" / "Network request failed".
-  if (/network|failed to fetch|fetch failed/i.test(msg)) {
-    return { kind: 'network', message: msg };
-  }
-  return { kind: 'unknown', message: msg || 'Error desconocido' };
-}
+// `classifyError` vive en `./classify-error` (módulo PURO) desde el delta TELÉFONO: solo así es
+// testeable sin arrastrar el cliente de Supabase ni PowerSync a la suite unitaria (RTEL.14.9.1). Su
+// restricción de seguridad (no propagar `details`/`hint`/mensaje crudo ante un 23514 — RTEL.8.5/8.6)
+// está documentada y testeada allá.
 
 /**
  * Trae los establecimientos donde el usuario actual tiene user_roles.active = true, con su
@@ -102,7 +97,7 @@ export type CreateEstablishmentInput = {
 
 export type CreateEstablishmentResult =
   | { ok: true; establishment: MembershipEstablishment }
-  | { ok: false; error: { kind: 'network' | 'unknown'; message: string } };
+  | { ok: false; error: ClassifiedError };
 
 /** UUID v4 de cliente. crypto.randomUUID está en RN (Hermes), web y Node — sin dep extra. */
 function randomUuid(): string {
@@ -167,7 +162,7 @@ export type UserProfile = { phone: string | null };
 
 export type LoadProfileResult =
   | { ok: true; profile: UserProfile }
-  | { ok: false; error: { kind: 'network' | 'unknown'; message: string } };
+  | { ok: false; error: ClassifiedError };
 
 /**
  * Lee el perfil del usuario actual (para el gate de teléfono, R3.8). El `phone` se separó a
@@ -184,20 +179,29 @@ export async function loadOwnProfile(userId: string): Promise<LoadProfileResult>
 
 export type SaveResult =
   | { ok: true }
-  | { ok: false; error: { kind: 'network' | 'unknown'; message: string } };
+  | { ok: false; error: ClassifiedError };
 
 /**
  * Guarda el teléfono en el perfil (R3.8). El `phone` vive en `public.user_private` (spec 14, R6.4).
  * RLS `user_private_update_self` (0068) exige user_id = auth.uid() (un user solo edita su fila).
+ *
+ * Persiste el CANÓNICO (RTEL.8.1), nunca el texto tal como se tipeó. La re-normalización acá es la
+ * SEGUNDA de las tres capas (tipo `PhoneValue` → esto → CHECK server): defiende aunque un call site
+ * futuro construyera el valor a mano, sin depender de que la UI se haya portado bien.
  */
 export async function saveOwnPhone(userId: string, phone: string): Promise<SaveResult> {
   // ONLINE-only (R9.2): el `user_private` no está en el sync set de escritura offline → fast-fail.
   const off = assertOnline('Necesitás conexión para guardar tu teléfono.');
   if (off) return off;
 
+  const normalized = normalizePhone(phone);
+  if (!normalized.ok) {
+    return { ok: false, error: { kind: 'phone_format', message: PHONE_FORMAT_REJECTED_COPY } };
+  }
+
   const { error } = await supabase
     .from('user_private')
-    .update({ phone: phone.trim() })
+    .update({ phone: normalized.canonical })
     .eq('user_id', userId);
 
   if (error) {
@@ -212,7 +216,7 @@ export type FullProfile = { name: string; email: string; phone: string | null };
 
 export type LoadFullProfileResult =
   | { ok: true; profile: FullProfile }
-  | { ok: false; error: { kind: 'network' | 'unknown'; message: string } };
+  | { ok: false; error: ClassifiedError };
 
 /**
  * Lee el perfil completo del usuario actual (name + email + phone) para la sección Perfil de
@@ -285,9 +289,20 @@ export async function saveProfile(
 
   const name = input.name.trim();
 
+  // Teléfono CANÓNICO o null si el campo quedó vacío (RTEL.8.2). El vacío es legítimo en el perfil
+  // ("sin teléfono", RTEL.5.4); lo que NO se persiste nunca es un texto sin normalizar.
+  let phone: string | null = null;
+  if (input.phone !== null && input.phone.trim().length > 0) {
+    const normalized = normalizePhone(input.phone);
+    if (!normalized.ok) {
+      return { ok: false, error: { kind: 'phone_format', message: PHONE_FORMAT_REJECTED_COPY } };
+    }
+    phone = normalized.canonical;
+  }
+
   const { error: phoneError } = await supabase
     .from('user_private')
-    .update({ phone: input.phone?.trim() || null })
+    .update({ phone })
     .eq('user_id', userId);
 
   if (phoneError) {
@@ -317,7 +332,7 @@ export type EstablishmentDetail = {
 
 export type LoadEstablishmentDetailResult =
   | { ok: true; establishment: EstablishmentDetail }
-  | { ok: false; error: { kind: 'network' | 'unknown'; message: string } };
+  | { ok: false; error: ClassifiedError };
 
 /**
  * Lee los datos editables de un establecimiento (name/province/city/total_hectares) para
@@ -500,7 +515,7 @@ export async function softDeleteEstablishment(establishmentId: string): Promise<
 
 export type CountMembersResult =
   | { ok: true; count: number }
-  | { ok: false; error: { kind: 'network' | 'unknown'; message: string } };
+  | { ok: false; error: ClassifiedError };
 
 /**
  * Cuenta los miembros ACTIVOS de un establecimiento DISTINTOS del owner que ejecuta la acción

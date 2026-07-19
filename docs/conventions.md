@@ -37,6 +37,18 @@ decimal por diseño.
     Postgres `date`) se formatea por **manipulación de STRING** (split del prefijo → reordenar), **NUNCA**
     `new Date(iso)` (parsea como UTC-medianoche y en huso AR (UTC-3) corre −1 día). Un **instante real**
     (timestamptz con hora) sí usa `new Date` + getters LOCALES (el día calendario que ve el operario).
+- **Teléfonos — CARVE-OUT explícito**: la regla de coma decimal + punto de miles **NO aplica**. Un
+  teléfono no es una cantidad (`1.123.456.789` sería absurdo). Tiene formato propio, centralizado en
+  **`app/src/utils/phone.ts`** (origen único: normalización, máscara y copy).
+  - **Display / tipeo**: prefijo `+54` como adorno fijo + los 10 dígitos nacionales agrupados según el
+    largo del **código de área** — `11 2345-6789` (2 díg.), `341 456-7890` (3 díg.), `2241 43-0000`
+    (4 díg., ej. Chascomús). Nunca punto de miles, nunca coma. El único input de teléfono de la app es
+    el componente `PhoneField` (un guard automatizado impide que aparezca una segunda copia).
+  - **Almacenamiento / máquina**: canónico `+54` + los 10 dígitos, sin separadores (`+541123456789`), o
+    `+` + 8–15 dígitos para el escape internacional. **Sin** el `9` de celular: no es derivable de los
+    10 dígitos y un `9` inventado corrompe los fijos de forma irrecuperable. Lo hace cumplir el CHECK
+    `user_private_phone_format_chk` (migración `0126`), que es la validación **autoritativa** — la del
+    cliente es asistencia de UX. Detalle en `specs/active/01-identity-multitenancy/*-telefono.md`.
 
 ## Nombres
 

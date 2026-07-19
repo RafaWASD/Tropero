@@ -22,14 +22,22 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'expo-router';
 import { YStack } from 'tamagui';
 
-import { AuthScreenShell, Button, FormField, FormError, InfoNote } from '@/components';
+import {
+  AuthScreenShell,
+  Button,
+  FormField,
+  FormError,
+  InfoNote,
+  PhoneField,
+  type PhoneValue,
+} from '@/components';
 import { useAuth, useEstablishment } from '@/contexts';
 import {
   createEstablishment,
   loadOwnProfile,
   saveOwnPhone,
 } from '@/services/establishments';
-import { isValidPhone, validateCreateEstablishment } from '@/utils/validation';
+import { validateCreateEstablishment } from '@/utils/validation';
 import {
   hasDuplicateName,
   parseHectares,
@@ -121,27 +129,45 @@ function CompletePhoneScreen({
   onSaved: () => void;
   onCancel: () => void;
 }) {
-  const [phone, setPhone] = useState('');
-  const [error, setError] = useState<string | null>(null);
+  const [phone, setPhone] = useState<PhoneValue>({ kind: 'empty' });
+  // Error de VALIDACIÓN DE CAMPO (va sobre el input) vs. error de GUARDADO/red (va al FormError debajo
+  // de los campos). Antes los dos se mezclaban en el mismo prop del campo: un fallo de red pintaba de
+  // rojo el teléfono como si el número estuviera mal (RTEL.6.5).
+  const [showPhoneError, setShowPhoneError] = useState(false);
+  // Rechazo del FORMATO por el servidor (23514 sobre user_private_phone_format_chk). Es un error DEL
+  // CAMPO —el número no sirve—, no de guardado, así que va sobre el input y no al FormError de abajo.
+  // No se deriva del contenido tipeado (el cliente lo dio por válido), por eso viaja como error externo.
+  const [phoneServerError, setPhoneServerError] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   async function onSubmit() {
-    setError(null);
-    if (!isValidPhone(phone)) {
-      setError('Ingresá un teléfono válido (8 a 15 dígitos).');
+    setFormError(null);
+    setPhoneServerError(null);
+    // RTEL.5.3: el teléfono es OBLIGATORIO acá — ni vacío ni incompleto pasan. El mensaje puntual
+    // (faltan dígitos / sacá el 15 + la sugerencia) lo muestra PhoneField sobre el propio campo.
+    if (phone.kind !== 'valid') {
+      setShowPhoneError(true);
       return;
     }
+    setShowPhoneError(false);
     if (!userId) {
-      setError('No pudimos identificar tu cuenta. Cerrá sesión y volvé a entrar.');
+      setFormError('No pudimos identificar tu cuenta. Cerrá sesión y volvé a entrar.');
       return;
     }
     setSaving(true);
-    const result = await saveOwnPhone(userId, phone);
+    const result = await saveOwnPhone(userId, phone.canonical);
     setSaving(false);
     if (result.ok) {
       onSaved();
+    } else if (result.error.kind === 'phone_format') {
+      setPhoneServerError(result.error.message);
     } else {
-      setError(result.error.kind === 'network' ? OFFLINE_COPY : 'No pudimos guardar el teléfono. Probá de nuevo.');
+      setFormError(
+        result.error.kind === 'network'
+          ? OFFLINE_COPY
+          : 'No pudimos guardar el teléfono. Probá de nuevo.',
+      );
     }
   }
 
@@ -151,16 +177,20 @@ function CompletePhoneScreen({
       subtitle="Para crear un campo necesitamos un teléfono de contacto. Lo guardamos en tu perfil."
     >
       <YStack gap="$4" marginTop="$2">
-        <FormField
-          label="Teléfono"
+        <PhoneField
           value={phone}
-          onChangeText={setPhone}
-          placeholder="Ej. 11 2345 6789"
-          keyboardType="phone-pad"
-          autoComplete="tel"
-          textContentType="telephoneNumber"
-          error={error}
+          onChangeValue={(next) => {
+            setPhone(next);
+            setPhoneServerError(null);
+            // Al corregir, el error deja de gritar hasta el próximo intento de guardado.
+            if (next.kind === 'valid') setShowPhoneError(false);
+          }}
+          showError={showPhoneError}
+          error={phoneServerError}
+          required
+          testID="gate-phone"
         />
+        <FormError message={formError} />
         <Button variant="primary" fullWidth disabled={saving} onPress={onSubmit}>
           {saving ? 'Guardando…' : 'Continuar'}
         </Button>

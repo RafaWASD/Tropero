@@ -17,6 +17,14 @@ No es un sustituto de `feature_list.json` ni de los ADRs — es la antesala dond
 
 ## Ítems pendientes
 
+## 2026-07-18 — `user_private.email` es auto-escribible por el cliente (grant a nivel tabla, no de columna)
+
+**Origen**: Gate 2 (code) del delta de teléfono. **Pre-existente de spec 14 (`0068`), fuera del alcance del delta** — el delta solo agrega restricción, no afloja nada.
+**Qué**: `0068_user_private_pii.sql:200` otorga `grant select, update on public.user_private` a nivel de **tabla**, no de columna. Con la RLS `user_private_update_self`, eso permite que un usuario autenticado **se auto-escriba el `email`** vía PostgREST (solo su propia fila) y lo **desalinee de `auth.users`**, que es la fuente de verdad de la identidad.
+**Ojo con el comentario engañoso**: el bloque `RTEL.14.5` de `supabase/tests/user_private/run.cjs` afirma que "el cliente no tiene grant para escribir su email". **Es inexacto** y puede inducir a error a quien lo lea. Corregirlo cuando se toque ese archivo.
+**Por qué importa**: bajo-medio. Es self-scoped (no cruza usuarios ni tenants) y un email de contacto desalineado no otorga privilegios — la identidad la sigue gobernando `auth.users.email`, y el trigger `propagate_confirmed_email` (`0068:169-194`) la re-propaga al confirmar. Pero ensucia el dato de contacto y contradice el propósito de aislamiento de PII de ADR-025.
+**Próximo paso sugerido**: evaluar `grant update (phone) on public.user_private` (column-level), para que el cliente pueda escribir el teléfono y NO el email. Toca grants → **Gate 1 puntual** + verificar que no rompa `saveProfile` ni el trigger de propagación. Foldear cuando se toque `user_private` por otra razón.
+
 ## 2026-07-18 — Zona muerta de tap en el FAB de Maniobra (parcialmente mitigada; el fix real es un refactor de navegación)
 
 **Origen**: análisis del navbar (variante B4). El leader lo dedujo de la geometría; el implementer lo confirmó y explicó por qué el fix aplicado NO alcanza.

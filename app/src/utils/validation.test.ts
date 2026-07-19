@@ -21,6 +21,7 @@ import {
   PHONE_MAX_LENGTH,
   NAME_MAX_LENGTH,
 } from './validation.ts';
+import type { PhoneValue } from './phone.ts';
 
 test('R1.1 isValidEmail acepta emails válidos', () => {
   assert.equal(isValidEmail('raf@rafq.ar'), true);
@@ -80,15 +81,21 @@ test('T3.2 validateSignIn solo valida formato (no longitud de password)', () => 
   assert.equal(badEmail.valid, false);
 });
 
-test('R3.8/R2.1 isValidPhone exige 8 a 15 dígitos (ignora separadores)', () => {
+test('RTEL.5.1/RTEL.5.2 isValidPhone: AR = 10 dígitos exactos; con "+" = 8 a 15 (ignora separadores)', () => {
+  // ⚠️ CAMBIO DE CRITERIO del delta TELÉFONO (D2), intencional: antes cualquier cosa de 8 a 15 dígitos
+  // daba true, con lo que un número argentino incompleto pasaba la validación. Ahora el modo AR exige
+  // los 10 dígitos nacionales y el rango 8–15 queda para el escape internacional (que empieza con '+').
   assert.equal(isValidPhone(''), false);
-  assert.equal(isValidPhone('123'), false); // < 8 dígitos
-  assert.equal(isValidPhone('1234567'), false); // 7 dígitos: borde inferior
-  assert.equal(isValidPhone('12345678'), true); // 8 dígitos: mínimo
+  assert.equal(isValidPhone('123'), false);
+  assert.equal(isValidPhone('12345678'), false); // 8 dígitos SIN '+': ya no alcanza (era true)
+  assert.equal(isValidPhone('123456789'), false); // 9 dígitos: falta uno
   assert.equal(isValidPhone('11 2345 6789'), true); // 10 dígitos con espacios
-  assert.equal(isValidPhone('+54 9 11 2345-6789'), true); // formato AR completo
-  assert.equal(isValidPhone('123456789012345'), true); // 15 dígitos: máximo
-  assert.equal(isValidPhone('1234567890123456'), false); // 16 dígitos: pasado el tope
+  assert.equal(isValidPhone('+54 9 11 2345-6789'), true); // E.164 AR completo (el 9 se remueve)
+  assert.equal(isValidPhone('01123456789'), true); // 0 troncal
+  assert.equal(isValidPhone('+12345678'), true); // internacional: 8 dígitos (mínimo)
+  assert.equal(isValidPhone('+123456789012345'), true); // internacional: 15 dígitos (máximo)
+  assert.equal(isValidPhone('+1234567890123456'), false); // 16 dígitos: pasado el tope
+  assert.equal(isValidPhone('+0123456789'), false); // MEDIUM-1: código de país con 0
   assert.equal(isValidPhone('abcd'), false); // letras → 0 dígitos
 });
 
@@ -142,40 +149,41 @@ test('R3.3 validateCreateEstablishment exige nombre y provincia', () => {
   assert.equal(good.valid, true);
 });
 
-test('R2.1 validateProfile exige nombre; teléfono opcional pero válido si se ingresa', () => {
+test('R2.1/RTEL.5.4/RTEL.5.5 validateProfile: nombre obligatorio; teléfono opcional pero completo', () => {
+  // El teléfono llega como PhoneValue (los tres estados de PhoneField), NO como texto crudo: el
+  // componente es el único que ve lo tipeado (RTEL.3.1.1).
+  const VALID: PhoneValue = { kind: 'valid', canonical: '+541123456789' };
+
   // Nombre vacío → error de nombre.
-  const noName = validateProfile({ name: '  ', phone: '11 2345 6789' });
+  const noName = validateProfile({ name: '  ', phone: VALID });
   assert.ok(noName.name);
-  assert.equal(noName.phone, null);
+  assert.equal(noName.phoneInvalid, false);
   assert.equal(noName.valid, false);
 
   // Nombre demasiado largo → error de nombre.
-  const longName = validateProfile({ name: 'a'.repeat(NAME_MAX_LENGTH + 1), phone: '' });
+  const longName = validateProfile({
+    name: 'a'.repeat(NAME_MAX_LENGTH + 1),
+    phone: { kind: 'empty' },
+  });
   assert.ok(longName.name);
   assert.equal(longName.valid, false);
 
-  // Teléfono vacío = OK (opcional): no se fuerza a tenerlo en el form de edición.
-  const emptyPhone = validateProfile({ name: 'Raf', phone: '' });
+  // RTEL.5.4 — teléfono vacío = OK (opcional): el perfil persiste null.
+  const emptyPhone = validateProfile({ name: 'Raf', phone: { kind: 'empty' } });
   assert.equal(emptyPhone.name, null);
-  assert.equal(emptyPhone.phone, null);
+  assert.equal(emptyPhone.phoneInvalid, false);
   assert.equal(emptyPhone.valid, true);
 
-  // Teléfono con pocos dígitos (no vacío e inválido) → error de teléfono.
-  const shortPhone = validateProfile({ name: 'Raf', phone: '123' });
-  assert.equal(shortPhone.name, null);
-  assert.ok(shortPhone.phone);
-  assert.equal(shortPhone.valid, false);
+  // RTEL.5.5 — teléfono a medio cargar (o no normalizable) → bloquea el guardado.
+  const incomplete = validateProfile({ name: 'Raf', phone: { kind: 'incomplete' } });
+  assert.equal(incomplete.name, null);
+  assert.equal(incomplete.phoneInvalid, true);
+  assert.equal(incomplete.valid, false);
 
-  // Teléfono con demasiados dígitos → error de teléfono.
-  const longPhone = validateProfile({ name: 'Raf', phone: '1234567890123456' });
-  assert.equal(longPhone.name, null);
-  assert.ok(longPhone.phone);
-  assert.equal(longPhone.valid, false);
-
-  // Formato AR válido.
-  const good = validateProfile({ name: 'Raf', phone: '+54 9 11 2345-6789' });
+  // Teléfono válido → guarda.
+  const good = validateProfile({ name: 'Raf', phone: VALID });
   assert.equal(good.name, null);
-  assert.equal(good.phone, null);
+  assert.equal(good.phoneInvalid, false);
   assert.equal(good.valid, true);
 });
 

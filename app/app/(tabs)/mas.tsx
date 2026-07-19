@@ -27,13 +27,13 @@
 // ≥56px ($touchMin); tokens-only (ADR-023 §4); voseo argentino.
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { Alert, Platform } from 'react-native';
+import { Alert, Platform, type ScrollView as RNScrollView } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
 import { AlertTriangle, CheckCircle2, ChevronRight, FileUp, Info, LogOut, Pencil, Radio, Trash2 } from 'lucide-react-native';
 
-import { Button, Card, FormField, FormError, InfoNote } from '@/components';
+import { Button, Card, FormField, FormError, InfoNote, PhoneField, type PhoneValue } from '@/components';
 import { CampoIcon, LoteIcon, MiembroIcon, RodeoIcon } from '@/theme/icons';
 import { useAuth, useEstablishment, useProfile } from '@/contexts';
 import {
@@ -47,12 +47,8 @@ import {
   deleteAccount,
   type BlockingEstablishment,
 } from '@/services/account';
-import {
-  NAME_MAX_LENGTH,
-  PHONE_MAX_LENGTH,
-  sanitizePhoneInput,
-  validateProfile,
-} from '@/utils/validation';
+import { NAME_MAX_LENGTH, validateProfile } from '@/utils/validation';
+import { formatPhoneDisplay, phoneValueFromStored } from '@/utils/phone';
 import { buttonA11y } from '@/utils/a11y';
 
 const OFFLINE_COPY = 'Necesitás conexión para esto. Conectate a internet y volvé a intentar.';
@@ -241,7 +237,7 @@ function ActionRow({
 // volver. useFocusEffect resetea editing=false en el cleanup (blur) → al volver estás en lectura,
 // descartando la edición sin guardar. (La pantalla de email es ruta aparte → se descarta sola.)
 
-function ProfileSection({ userId }: { userId: string }) {
+function ProfileSection({ userId, onScrollTo }: { userId: string; onScrollTo: (y: number) => void }) {
   const router = useRouter();
   const { profile, loading, error, refresh, applyOwnProfile } = useProfile();
   const { state: authState } = useAuth();
@@ -281,6 +277,7 @@ function ProfileSection({ userId }: { userId: string }) {
         initialName={profile.name}
         initialPhone={profile.phone}
         offline={offline}
+        onScrollTo={onScrollTo}
         onDone={(saved) => {
           // Aterrizaje OPTIMISTA: el saludo de la home se actualiza AL INSTANTE con lo recién guardado
           // (no esperamos el round-trip de sync-down del SQLite local, que dejaba el saludo viejo —
@@ -305,7 +302,9 @@ function ProfileSection({ userId }: { userId: string }) {
         verified={emailVerified}
         onChange={() => router.push('/cambiar-email')}
       />
-      <ProfileField label="Teléfono" value={profile.phone || 'Sin teléfono'} />
+      {/* Display es-AR del teléfono (RTEL.10.1): el canónico +541123456789 se muestra agrupado por
+          código de área (+54 11 2345-6789), nunca crudo. Sin teléfono → "Sin teléfono" (RTEL.10.2). */}
+      <ProfileField label="Teléfono" value={formatPhoneDisplay(profile.phone) || 'Sin teléfono'} />
       {/* Aviso proactivo offline (R9.2): el perfil se VE (lectura local) pero NO se edita sin red.
           Deshabilitamos "Editar perfil" para no dejar tipear y fallar al guardar. */}
       {offline ? (
@@ -407,6 +406,7 @@ function ProfileEditForm({
   initialName,
   initialPhone,
   offline,
+  onScrollTo,
   onDone,
   onCancel,
 }: {
@@ -414,34 +414,65 @@ function ProfileEditForm({
   initialName: string;
   initialPhone: string | null;
   offline: boolean;
+  /** Lleva la vista a una `y` del scroll de la pantalla (scroll-al-campo del error, RTEL.6.2). */
+  onScrollTo: (y: number) => void;
   /** Recibe los valores RECIÉN GUARDADOS (trimeados) para el aterrizaje optimista del saludo. */
   onDone: (saved: { name: string; phone: string | null }) => void;
   onCancel: () => void;
 }) {
   const [name, setName] = useState(initialName);
-  const [phone, setPhone] = useState(initialPhone ?? '');
+  const [phone, setPhone] = useState<PhoneValue>(() => phoneValueFromStored(initialPhone));
   const [nameError, setNameError] = useState<string | null>(null);
-  const [phoneError, setPhoneError] = useState<string | null>(null);
+  const [showPhoneError, setShowPhoneError] = useState(false);
+  // Rechazo del FORMATO por el servidor (23514 sobre user_private_phone_format_chk): error DEL CAMPO,
+  // no de guardado. No se deriva de lo tipeado (el cliente lo dio por válido) → viaja como error externo.
+  const [phoneServerError, setPhoneServerError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
+  // Scroll-al-campo ante error de teléfono (RTEL.6.2), con el patrón de GEOMETRÍA de crear-animal.tsx:
+  // `y` de la card relativo al contentContainer + `y` del campo relativo a la card. Robusto en web y
+  // native, sin measureLayout. Si todavía no hay geometría, el borde rojo + el error inline igual se
+  // muestran (no rompe nada).
+  const cardYRef = useRef(0);
+  const phoneYRef = useRef(0);
+  const scrollToPhone = useCallback(() => {
+    const pad = getTokenValue('$4', 'space');
+    const y = Math.max(0, cardYRef.current + phoneYRef.current - pad);
+    // Diferimos un frame: el error inline recién se monta (cambia el layout) y el scroll corre después.
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(() => onScrollTo(y));
+    } else {
+      onScrollTo(y);
+    }
+  }, [onScrollTo]);
+
   async function onSubmit() {
     setFormError(null);
+    setPhoneServerError(null);
     const v = validateProfile({ name, phone });
     setNameError(v.name);
-    setPhoneError(v.phone);
-    if (!v.valid) return;
+    setShowPhoneError(v.phoneInvalid);
+    if (!v.valid) {
+      if (v.phoneInvalid) scrollToPhone();
+      return;
+    }
 
     setSaving(true);
-    const nextPhone = phone.trim() || null;
+    // Se persiste el CANÓNICO, o null si el campo quedó vacío (el teléfono es opcional en el perfil).
+    const nextPhone = phone.kind === 'valid' ? phone.canonical : null;
     // El nombre se guarda trimeado (el saludo no debe arrastrar espacios sobrantes).
     const nextName = name.trim();
     const result = await saveProfile(userId, { name: nextName, phone: nextPhone });
     setSaving(false);
 
     if (result.ok) {
-      // Pasamos los valores recién guardados (EXACTOS, trimeados) → aterrizaje optimista del saludo.
+      // Pasamos los valores recién guardados (EXACTOS) → aterrizaje optimista del saludo.
       onDone({ name: nextName, phone: nextPhone });
+    } else if (result.error.kind === 'phone_format') {
+      // Rechazo de FORMATO del teléfono: es un error de campo, no de guardado → va sobre el input.
+      setPhoneServerError(result.error.message);
+      scrollToPhone();
     } else {
       setFormError(
         result.error.kind === 'network' ? OFFLINE_COPY : 'No pudimos guardar los cambios.',
@@ -450,7 +481,7 @@ function ProfileEditForm({
   }
 
   return (
-    <Card gap="$3">
+    <Card gap="$3" onLayout={(e) => (cardYRef.current = e.nativeEvent.layout.y)}>
       <FormField
         label="Nombre"
         value={name}
@@ -461,19 +492,19 @@ function ProfileEditForm({
         maxLength={NAME_MAX_LENGTH}
         error={nameError}
       />
-      <FormField
-        label="Teléfono"
-        value={phone}
-        // Fix 2: sanitizamos en vivo → las letras no pueden tipearse; solo dígitos y separadores
-        // (+ - ( ) y espacio). maxLength acota el largo total.
-        onChangeText={(text) => setPhone(sanitizePhoneInput(text))}
-        placeholder="Ej. 11 2345 6789"
-        keyboardType="phone-pad"
-        autoComplete="tel"
-        textContentType="telephoneNumber"
-        maxLength={PHONE_MAX_LENGTH}
-        error={phoneError}
-      />
+      <YStack onLayout={(e) => (phoneYRef.current = e.nativeEvent.layout.y)}>
+        <PhoneField
+          value={phone}
+          onChangeValue={(next) => {
+            setPhone(next);
+            setPhoneServerError(null);
+            if (next.kind !== 'incomplete') setShowPhoneError(false);
+          }}
+          showError={showPhoneError}
+          error={phoneServerError}
+          testID="profile-phone"
+        />
+      </YStack>
       {/* Si la conexión se cae mientras se edita: aviso + Guardar deshabilitado (belt-and-suspenders
           del fast-fail del service). El usuario puede Cancelar y volver al modo lectura local. */}
       {offline ? (
@@ -798,6 +829,13 @@ export default function MasScreen() {
   const busyRef = useRef(false);
   const [deleting, setDeleting] = useState(false);
 
+  // Scroll-al-campo del error de validación (RTEL.6.2): la pantalla es dueña del ScrollView, así que
+  // expone el desplazamiento y la sección que valida decide la `y` (misma división que crear-animal).
+  const scrollRef = useRef<RNScrollView | null>(null);
+  const scrollToY = useCallback((y: number) => {
+    scrollRef.current?.scrollTo({ y, animated: true });
+  }, []);
+
   // Colores que cruzan a la API no-Tamagui de lucide (prop `color`), leídos del token.
   const muted = getTokenValue('$textMuted', 'color');
   const primary = getTokenValue('$primary', 'color');
@@ -876,6 +914,7 @@ export default function MasScreen() {
       </YStack>
 
       <ScrollView
+        ref={scrollRef}
         flex={1}
         width="100%"
         maxWidth="100%"
@@ -892,7 +931,7 @@ export default function MasScreen() {
         {/* ── Perfil (R2.1) ── */}
         <SectionTitle>Perfil</SectionTitle>
         {userId ? (
-          <ProfileSection userId={userId} />
+          <ProfileSection userId={userId} onScrollTo={scrollToY} />
         ) : (
           <InfoNote>No pudimos identificar tu cuenta. Cerrá sesión y volvé a entrar.</InfoNote>
         )}

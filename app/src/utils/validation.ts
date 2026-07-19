@@ -7,6 +7,8 @@
 //   - password: mínimo 8 caracteres (R1.1 implícito vía T3.2 "password mínimo 8").
 //   - name: no vacío (R1.1, dato obligatorio en signup).
 
+import { type PhoneValue } from './phone';
+
 export const PASSWORD_MIN_LENGTH = 8;
 
 // Patrón pragmático: <algo sin espacios ni @>@<algo sin espacios>.<tld de 2+>.
@@ -45,51 +47,19 @@ export function validateSignUp(input: {
 }
 
 // ─── Teléfono (R3.8 alta de campo / R2.1 perfil) ─────────────────────────────────
+//
+// La lógica del teléfono se centralizó en `utils/phone.ts` (delta TELÉFONO, RTEL.2.9): un solo origen
+// para la normalización, la máscara, los techos y el copy. Acá SOLO se re-exporta para no romper a los
+// importadores históricos — nada se reimplementa. Cualquier regla nueva del teléfono va en phone.ts.
 
-// Rango de dígitos de un teléfono válido (E.164: hasta 15 dígitos incluyendo el código de
-// país; mínimo razonable de 8 para un fijo/celular sin código). Vacío se trata aparte (opcional).
-export const PHONE_MIN_DIGITS = 8;
-export const PHONE_MAX_DIGITS = 15;
-
-// Máximo de caracteres TIPEABLES en un campo de teléfono (dígitos + separadores). Holgado sobre
-// los 15 dígitos para permitir "+54 9 11 2345-6789" y similares con espacios/guiones/paréntesis.
-export const PHONE_MAX_LENGTH = 20;
-
-// Caracteres permitidos en el input de teléfono: dígitos + los separadores de formato comunes
-// (`+`, `-`, `(`, `)` y espacio). Se usa para SANITIZAR lo que se tipea (las letras no entran).
-const PHONE_ALLOWED_CHAR = /[\d+\-() ]/;
-
-/**
- * Extrae solo los dígitos de un teléfono (descarta `+`, espacios, guiones, paréntesis y cualquier
- * otro caracter). Base de la validación por largo.
- */
-export function phoneDigits(phone: string): string {
-  return phone.replace(/\D/g, '');
-}
-
-/**
- * Sanitiza en vivo lo que se tipea en un campo de teléfono: descarta cualquier caracter que no sea
- * dígito o separador permitido (`+ - ( ) ` y espacio) y recorta a PHONE_MAX_LENGTH. Las LETRAS no
- * pueden quedar en el campo (R2.1: el teléfono no acepta texto). Pura: la usa el onChangeText.
- */
-export function sanitizePhoneInput(raw: string): string {
-  let out = '';
-  for (const ch of raw) {
-    if (PHONE_ALLOWED_CHAR.test(ch)) out += ch;
-    if (out.length >= PHONE_MAX_LENGTH) break;
-  }
-  return out;
-}
-
-/**
- * Teléfono válido (R3.8 alta de campo / R2.1 perfil): 8 a 15 dígitos (rango E.164), ignorando
- * separadores. NO acepta vacío (para el campo OBLIGATORIO del alta de campo); el perfil trata el
- * vacío como "sin teléfono" aparte (validateProfile).
- */
-export function isValidPhone(phone: string): boolean {
-  const digits = phoneDigits(phone);
-  return digits.length >= PHONE_MIN_DIGITS && digits.length <= PHONE_MAX_DIGITS;
-}
+export {
+  PHONE_MIN_DIGITS,
+  PHONE_MAX_DIGITS,
+  PHONE_MAX_LENGTH,
+  phoneDigits,
+  sanitizePhoneInput,
+  isValidPhone,
+} from './phone';
 
 // Largo máximo de un nombre de persona (R2.1). El saludo lo necesita no-vacío; el tope evita
 // guardar basura / desbordar la UI.
@@ -116,21 +86,25 @@ export function validateCreateEstablishment(input: {
 
 /**
  * Valida el form de editar perfil (R2.1): nombre obligatorio (name not null, lo necesita el saludo)
- * y de a lo sumo NAME_MAX_LENGTH chars; teléfono OPCIONAL pero, si se ingresa, de 8 a 15 dígitos
- * (rango E.164). El email se cambia por un flujo aparte (pantalla dedicada, R2.2) → no se valida acá.
- * Copy en voseo.
+ * y de a lo sumo NAME_MAX_LENGTH chars; teléfono OPCIONAL. El email se cambia por un flujo aparte
+ * (pantalla dedicada, R2.2) → no se valida acá. Copy en voseo.
+ *
+ * El teléfono llega como `PhoneValue` (los tres estados de `PhoneField`) y NO como texto crudo: el
+ * componente es el único que ve lo tipeado (RTEL.3.1.1). `empty` es OK y persiste null (RTEL.5.4);
+ * `incomplete` bloquea el guardado (RTEL.5.5).
+ *
+ * Devuelve `phoneInvalid` (bandera) y NO un mensaje: el copy puntual —"faltan dígitos", "sacá el 15" +
+ * la sugerencia de un tap— lo deriva y lo muestra `PhoneField` sobre el propio campo, porque es el
+ * único que ve el contenido tipeado (RTEL.6.4/RTEL.6.6/RTEL.6.7). Devolver acá un segundo mensaje
+ * genérico lo pisaría con uno peor, que es exactamente la divergencia que este delta cierra.
  */
 export function validateProfile(input: {
   name: string;
-  phone: string;
-}): { name: FieldError; phone: FieldError; valid: boolean } {
+  phone: PhoneValue;
+}): { name: FieldError; phoneInvalid: boolean; valid: boolean } {
   const name: FieldError = isValidPersonName(input.name) ? null : 'Ingresá tu nombre.';
-  // Teléfono opcional: vacío = OK (queda null, "sin teléfono"); si tiene algo, debe ser válido.
-  const phone: FieldError =
-    input.phone.trim().length === 0 || isValidPhone(input.phone)
-      ? null
-      : 'Ingresá un teléfono válido (8 a 15 dígitos).';
-  return { name, phone, valid: !name && !phone };
+  const phoneInvalid = input.phone.kind === 'incomplete';
+  return { name, phoneInvalid, valid: !name && !phoneInvalid };
 }
 
 // ─── Cambiar email (R2.1/R2.2) ───────────────────────────────────────────────────
