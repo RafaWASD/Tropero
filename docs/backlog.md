@@ -17,6 +17,21 @@ No es un sustituto de `feature_list.json` ni de los ADRs — es la antesala dond
 
 ## Ítems pendientes
 
+## 2026-07-19 — 🔴 Pérdida SILENCIOSA de writes del operario cuando le revocan el acceso al campo
+
+**Origen**: Gate 0 de la feature 20 (reactividad de lecturas sync). Hallazgo **fuera del alcance** de esa feature, sacado aparte por decisión de Raf (D3) porque es pérdida de datos y merece spec + Gate 1 propios.
+**Qué**: cuando a un usuario se le revoca el rol (o se borra el campo), `org_scope` deja de incluir ese `establishment_id` → **PowerSync borra el bucket** → las filas locales desaparecen del SQLite del device. Hasta ahí es correcto. El problema es lo que pasa con lo que el operario ya cargó y todavía no subió:
+  1. Los `op_intents` / CrudEntries encolados en el outbox **se suben igual** cuando hay red.
+  2. Server-side rebotan por RLS → `42501` → `classifyIntentUploadError` lo clasifica **permanente** → `rollbackOverlay(clientOpId)` + `transaction.complete()` (ver `app/src/services/powersync/connector.ts:175-181`).
+  3. Resultado: **el trabajo se descarta**. El overlay optimista se revierte y la fila real nunca existió server-side.
+**Por qué importa**: 🔴 ALTO pese a ser raro. El escenario exige que la revocación caiga justo mientras hay trabajo sin sincronizar, pero el modo de falla es el peor posible para este producto: el peón cargó 20 animales en la manga, se los revocan, y desaparecen **sin que nadie le avise**. Viola el principio 3 de CLAUDE.md (offline-first) en su punto más sensible: el dato cargado en el campo no se pierde nunca.
+**Matices a resolver en la spec**:
+  - ¿Se puede distinguir "42501 por revocación de acceso" de "42501 por RLS legítima" (intento de escribir algo que nunca le correspondió)? El primero merece preservación; el segundo es un rechazo correcto.
+  - ¿Dónde se preserva lo rechazado? (¿export local? ¿cola en cuarentena? ¿re-asignable si le devuelven el acceso?)
+  - Hoy `recordUploadRejection` (R10.8) ya materializa el rechazo en un store observable que la UI de manga consume — **puede ser el gancho**, pero hay que verificar que sobreviva al borrado del bucket.
+  - Interacción con D1 de la feature 20: se decidió no patear al usuario en medio de una maniobra, pero eso es solo navegación — los datos se van igual por abajo hasta que ESTA entrada se resuelva.
+**Próximo paso sugerido**: feature propia con Gate 0 + Gate 1 (toca frontera de autorización + retención de datos del operario). Levantarla apenas cierre la feature 20, que es su vecina natural. Evidencia completa en `specs/active/20-reactividad-sync/context.md` §6 E2.
+
 ## 2026-07-19 — Pelaje: pasar de texto libre a lista de opciones (BLOQUEADO por validación de dominio)
 
 **Origen**: sesión de planificación de mejoras UX (2026-07-18), ítem 1 de los 5 que levantó Raf. Ver `docs/plan-mejoras-ux-2026-07-18.md`.
