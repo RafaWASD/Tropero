@@ -6,6 +6,10 @@ export { Card } from './Card';
 export type { CardProps } from './Card';
 export { FormField } from './FormField';
 export type { FormFieldProps } from './FormField';
+// Teléfono (spec 01, delta TELÉFONO): el ÚNICO input de teléfono de la app. Ninguna pantalla arma
+// uno a mano con FormField — la paridad es por construcción y la hace cumplir phone-field-guard.test.ts.
+export { PhoneField } from './PhoneField';
+export type { PhoneFieldProps, PhoneValue } from './PhoneField';
 export { ConditionScoreStepper } from './ConditionScoreStepper';
 export type { ConditionScoreStepperProps } from './ConditionScoreStepper';
 export { AuthScreenShell } from './AuthScreenShell';
@@ -87,5 +91,3 @@ export { LinkCalfPrompt } from './LinkCalfPrompt';
 export type { LinkCalfPromptProps } from './LinkCalfPrompt';
 export { ComboOptionRow } from './ComboOptionRow';
 export type { ComboOptionRowProps } from './ComboOptionRow';
-export { PhoneField } from './PhoneField';
-export type { PhoneFieldProps, PhoneValue } from './PhoneField';
