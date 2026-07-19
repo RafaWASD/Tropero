@@ -181,40 +181,40 @@ export class DiagnosticErrorBoundary extends React.Component<
 const styles = {
   screen: {
     flex: 1,
-    backgroundColor: '#3b0d0d',
+    backgroundColor: '#3b0d0d', // design-lint-disable-line -- pantalla de crash: no puede leer $background, el theme puede ser justamente lo que falló
   },
   scroll: {
     flex: 1,
   },
   scrollContent: {
-    padding: 16,
-    paddingBottom: 48,
+    padding: 16, // design-lint-disable-line -- pantalla de crash: sin Tamagui montado no hay tokens de spacing, solo primitivas RN
+    paddingBottom: 48, // design-lint-disable-line -- pantalla de crash: sin tokens de spacing; holgura para que el stack no quede pegado al borde
   },
   title: {
-    color: '#ffd7d7',
-    fontSize: 18,
+    color: '#ffd7d7', // design-lint-disable-line -- pantalla de crash: color literal, el theme provider puede ser lo que falló
+    fontSize: 18, // design-lint-disable-line -- pantalla de crash: sin tokens tipográficos, solo primitivas RN
     fontWeight: '700' as const,
-    marginBottom: 16,
+    marginBottom: 16, // design-lint-disable-line -- pantalla de crash: sin tokens de spacing, solo primitivas RN
   },
   label: {
-    color: '#ff9a9a',
-    fontSize: 12,
+    color: '#ff9a9a', // design-lint-disable-line -- pantalla de crash: color literal, no puede depender del design system
+    fontSize: 12, // design-lint-disable-line -- pantalla de crash: sin tokens tipográficos, solo primitivas RN
     fontWeight: '700' as const,
-    marginTop: 12,
-    marginBottom: 4,
+    marginTop: 12, // design-lint-disable-line -- pantalla de crash: sin tokens de spacing, solo primitivas RN
+    marginBottom: 4, // design-lint-disable-line -- pantalla de crash: sin tokens de spacing, solo primitivas RN
     fontFamily: MONOSPACE,
   },
   message: {
-    color: '#ffffff',
-    fontSize: 13,
+    color: '#ffffff', // design-lint-disable-line -- pantalla de crash: color literal, no puede depender del design system
+    fontSize: 13, // design-lint-disable-line -- pantalla de crash: sin tokens tipográficos, solo primitivas RN
     fontFamily: MONOSPACE,
-    lineHeight: 18,
+    lineHeight: 18, // design-lint-disable-line -- pantalla de crash: interlineado literal para que el mensaje sea legible sin tokens
   },
   mono: {
-    color: '#ffe6e6',
-    fontSize: 12,
+    color: '#ffe6e6', // design-lint-disable-line -- pantalla de crash: color literal, no puede depender del design system
+    fontSize: 12, // design-lint-disable-line -- pantalla de crash: sin tokens tipográficos, solo primitivas RN
     fontFamily: MONOSPACE,
-    lineHeight: 17,
+    lineHeight: 17, // design-lint-disable-line -- pantalla de crash: interlineado literal para el stack, sin tokens
   },
   footerSpacer: {
     height: 24,
