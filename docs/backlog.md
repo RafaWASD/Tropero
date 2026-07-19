@@ -53,7 +53,11 @@ No es un sustituto de `feature_list.json` ni de los ADRs — es la antesala dond
 **Por qué importa**: bajo-medio. Es self-scoped (no cruza usuarios ni tenants) y un email de contacto desalineado no otorga privilegios — la identidad la sigue gobernando `auth.users.email`, y el trigger `propagate_confirmed_email` (`0068:169-194`) la re-propaga al confirmar. Pero ensucia el dato de contacto y contradice el propósito de aislamiento de PII de ADR-025.
 **Próximo paso sugerido**: evaluar `grant update (phone) on public.user_private` (column-level), para que el cliente pueda escribir el teléfono y NO el email. Toca grants → **Gate 1 puntual** + verificar que no rompa `saveProfile` ni el trigger de propagación. Foldear cuando se toque `user_private` por otra razón.
 
-## 2026-07-18 — Zona muerta de tap en el FAB de Maniobra (~~fix real = refactor de navegación~~ → NO SE REPRODUCE en device, ver verificación del 2026-07-19)
+## 2026-07-18 — ✅ CERRADO (no se reproduce) — Zona muerta de tap en el FAB de Maniobra
+
+> **Nada pendiente acá.** El diseño del FAB (variante B4) está cerrado y commiteado en `6570029`.
+> Esta entrada queda solo como **traza del análisis**: la zona muerta que se predijo por geometría
+> NO se manifestó en device. Ver la verificación del 2026-07-19 más abajo.
 
 **Origen**: análisis del navbar (variante B4). El leader lo dedujo de la geometría; el implementer lo confirmó y explicó por qué el fix aplicado NO alcanza.
 **Qué**: el círculo del FAB se dibuja **fuera de su celda** del tab bar (26px con los tokens de B4; 34px antes) vía `marginTop` negativo. En React Native los toques fuera de los límites del ancestro **no se entregan**: en Android `ViewGroup.dispatchTouchEvent` solo desciende a hijos cuyos bounds contienen el punto, y en iOS `hitTest:` devuelve `nil` si `pointInside:` es false. El tabBar descarta el toque **antes** de llegar al FAB. → la porción que sobresale del CTA más importante de la app no responde al tap en nativo.
