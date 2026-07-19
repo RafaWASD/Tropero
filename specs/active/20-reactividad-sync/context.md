@@ -61,6 +61,18 @@ No hay que inventar nada ni migrar a `useQuery`. El patrón canónico —`useSta
 
 > **D1.1 — ACOTADO A NAVEGACIÓN (ratificado 2026-07-19, tras conocer E2).** D1 gobierna **la navegación y el aviso**, NO la preservación de los datos: no se saca al usuario de la pantalla y el aviso se difiere al cierre de la maniobra. Que las filas locales desaparezcan cuando PowerSync borra el bucket (E2) **queda fuera de esta feature**. Se acota así a propósito: prometer que la maniobra sobrevive entera sería mentir mientras E2 esté abierto.
 
+> **D1.2 — ACOTADO A LA VIGENCIA DE LA SESIÓN (decisión de Raf, 2026-07-19, tras Gate 1 HIGH-1).**
+> D1 tal como estaba redactado ("**nunca** se lo patea en medio de una maniobra") **no se puede cumplir entero**, y el motivo se verificó en código: `remove_member` no solo desactiva el rol — también llama a `revoke_user_sessions` (`supabase/functions/remove_member/index.ts:107`), que hace `delete from auth.sessions where user_id = target_uid` (`0072:46`). El access token vigente sigue sirviendo hasta `jwt_expiry = 3600` (`supabase/config.toml:160`), pero al vencer el refresh falla → `onAuthStateChange` emite `session = null` (`AuthContext.tsx:114-115`) → el `RootGate` rutea a login **con la maniobra abierta**. `EstablishmentContext` no puede evitarlo: auth vive por encima suyo.
+>
+> **`revoke_user_sessions` se queda como está** — matar la sesión al remover a alguien es correcto y fue una decisión deliberada (H1-1, tras revisión empírica). Lo que cambia es **la promesa**, que pasa a ser una garantía acotada:
+>
+> | Causa | Sesión | Ventana real del diferimiento |
+> |---|---|---|
+> | **Remoción de miembro** (`remove_member`) | revocada (`0072`) | ≤ `jwt_expiry` (3600 s, no lo controlamos nosotros). Termina en **login**, no en `/campo-perdido`. |
+> | **Campo borrado** (trigger `0076`) | intacta | ilimitada: el diferimiento se cumple entero hasta que el usuario salga de la maniobra. |
+>
+> Consecuencias que la spec **debe** sostener: (a) nada puede prometer que la maniobra sobrevive a una remoción de miembro; (b) la pérdida de lo cargado y no subido cuando cae la sesión es **E2**, fuera de alcance por D3; (c) las dos causas de E5 siguen siendo indistinguibles **en la firma local**, pero **no** en la duración de la ventana — son cosas distintas y la spec las trata por separado.
+
 **D2 — Alcance**: membresías (`EstablishmentContext`) **+ barrido del patrón**. El barrido ya se hizo; resultados en §5.
 
 **D3 — E2 sale como feature aparte** (2026-07-19). Es pérdida de datos silenciosa: merece spec propia, Gate 1 propio y su propio diseño de recuperación. Meterla acá infla la feature y retrasa el fix del bug reportado. Queda en el backlog con toda la evidencia.
