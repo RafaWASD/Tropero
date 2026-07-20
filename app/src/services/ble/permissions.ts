@@ -20,6 +20,9 @@ export function permissionModelFor(kind: StickAdapter['kind']): PermissionModel 
   switch (kind) {
     case 'manual':
     case 'mock':
+    // Delta multivendor: el simulador (demo) no requiere permisos — es un StickAdapter puro en
+    // memoria, sin transporte físico (RMV4.1). Aditivo al switch exhaustivo.
+    case 'simulator':
       return { kind: 'none' };
     case 'web-serial':
       return { kind: 'browser' };

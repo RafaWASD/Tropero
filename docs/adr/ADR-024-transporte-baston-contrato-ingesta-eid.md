@@ -110,3 +110,19 @@ Perseguir autorización MFi de Allflex (SDK 2.0 + protocol string, precedentes C
 - **spec 04** (`specs/active/04-bluetooth-baston/`): este ADR desbloquea su redacción. El `context.md` se folda con esta decisión (contrato + adaptadores del MVP) antes de pasar a `spec_author`. Insumos: `field-findings.md`, `android-spp-impl-plan.md`, `web-serial-dev-harness-plan.md`, `razas`/parser.
 - **spec 09** (`buscar-animal`): define la interfaz (`BleStickEvent`/`useBleStickListener`/`BleStickListenerProvider`/`useBusyMode`/mock) que los adaptadores implementan. El "contrato de ingesta" de este ADR es la generalización de esa interfaz a N transportes.
 - **spec 03** (MODO MANIOBRAS): consumidor del listener; `enable/disable` + busy-mode aplican igual a todos los adaptadores.
+
+## Enmienda 2026-07-20 — Registro de drivers por fabricante + selección por capacidad
+
+**Status**: Accepted (Puerta 1 del delta `04-bluetooth-baston/*-multivendor` aprobada por Raf, 2026-07-20). Extiende §1–§2 de este ADR; **no cambia** la decisión de transporte ya aceptada.
+
+**Disparador**: objetivo de **compatibilidad máxima** + outreach continuo a fabricantes de bastones (Raf consigue las "claves" de cada empresa). La decisión original fijó los transportes (SPP / BLE-HID / web-serial / manual / mock) pero el parseo era RS420-only y la selección era solo por plataforma/modo.
+
+### Decisión (dos piezas)
+
+1. **Los adaptadores son por transporte; los fabricantes son datos (`ReaderDriver`).** Un `ReaderDriver` (alias `ReaderProfile`) declara `{ vendorId, displayName, transports: TransportCapability[], frameParser, deviceMatch, streaming }`, donde `TransportCapability` está discriminada por `kind ∈ {spp, serial, ble-hid, ble-gatt, mfi}` con sus `connectionParams` (SPP → `{sppUuid, pin}`; serial → `{baud}`; ble-gatt → `{serviceUuid, notifyCharUuid}`; ble-hid → sin params; mfi → `{protocolString}`). El RS420 es el **primer driver** (reusa `parser-rs420.ts`). **Sumar una marca = agregar una fila al `DRIVER_REGISTRY`**, sin tocar el contrato de ingesta, la interfaz `StickAdapter` ni los adaptadores. Es la generalización natural de §1 ("un EID es texto") a N fabricantes: §1 fijó los transportes; esto fija cómo se parametriza cada transporte por marca. (Alternativa descartada: un adapter por fabricante → duplica la I/O de transporte por marca; el transporte es el eje estable, la marca es la variación.)
+
+2. **Selección por capacidad con prioridad de transporte por plataforma, determinística.** `platformTransportPriority(os)`: iOS `['ble-hid','ble-gatt','mfi']` (HID es el camino iOS-abierto; iOS es el cuello de botella); Android `['spp','ble-gatt','ble-hid']` (stream nativo > HID); web `['serial']`. `selectReaderBinding(env)` elige el transporte de mayor prioridad que el driver soporte y que tenga un `AdapterKind` construible, devolviendo `{adapterKind, transportKind, driver, available}`; resuelve la ambigüedad (device alcanzable por >1 vía) sin depender del orden de descubrimiento. Es **lógica pura** (testeable sin device). Consecuencia importante: **el RS420 en iOS → binding `null`** (solo declara `spp`+`serial`; su vía iOS real es MFi cuando llegue el `protocolString` de Facundo) → carga manual como piso. Un lector **HID** en iOS → `hid-wedge` (gated por validación física, §4 original).
+
+**Por qué se formaliza (regla "¿se referencia en 6 meses?")**: se referencia cada vez que se suma un fabricante o un transporte (GATT/MFi); fija una decisión de integridad (qué transporte usa producción por plataforma). No es un detalle de una feature.
+
+**Reversibilidad / relación**: mantiene la reversibilidad de §Consecuencias (agregar/sacar un driver o un adapter no toca el contrato). Insumos: `specs/active/04-bluetooth-baston/{context,requirements,design,tasks}-multivendor.md`. El adapter External Accessory/MFi (iOS Classic) sigue **diferido a Facundo** (§5); la arquitectura solo lo deja declarable (`transportKind:'mfi'` + `protocolString`).

@@ -37,6 +37,8 @@ import { selectTransportAdapter, type ProviderMode } from './adapter-selection';
 import { ManualAdapter } from './adapter-manual';
 import { MockAdapter } from './adapter-mock';
 import { WebSerialAdapter } from './adapter-web-serial';
+import { SimulatorAdapter } from './adapter-simulator';
+import { isDemoMode } from './demo-gate';
 import { playFeedback } from './feedback';
 import { readBeepEnabled } from './feedback-pref';
 import { logTransportEvent } from './logging';
@@ -82,6 +84,13 @@ function instantiateTransport(kind: ReturnType<typeof selectTransportAdapter>): 
       return new WebSerialAdapter();
     case 'mock':
       return new MockAdapter();
+    case 'simulator':
+      // Delta multivendor (RMV4.5, triple-guard 3): re-chequeo del gate demo AL INSTANCIAR. Aun
+      // si `selectTransportAdapter` devolviera 'simulator' (solo bajo mode='demo'), si el build no
+      // está en modo demo (`isDemoMode()` false) devolvemos null → sin camino a instanciar el
+      // simulador en producción. El simulador entra por `handleReading(value, isRawStream=false)`
+      // (kind !== 'web-serial'/'spp-android'), igual que el mock: EID limpio, no línea cruda.
+      return isDemoMode() ? new SimulatorAdapter() : null;
     case 'manual':
       // En native sin transporte buildable (spp-android es Fase 4), no hay transporte extra:
       // el manual (piso) es el único. Devolvemos null → solo corre el manual.

@@ -40,8 +40,12 @@ export type Unsubscribe = () => void;
  * ingerir cada uno (ver contract.ingestFromAdapter).
  */
 export interface StickAdapter {
-  /** Identificador del transporte, para logging/diagnóstico (R15) y selección en el provider. */
-  readonly kind: 'manual' | 'mock' | 'web-serial' | 'spp-android' | 'hid-wedge';
+  /**
+   * Identificador del transporte, para logging/diagnóstico (R15) y selección en el provider.
+   * `'simulator'` (delta multivendor, RMV4.1) se agrega de forma ADITIVA: es el adapter del
+   * camino de demo (dev/demo-gated). No cambia ningún método de la interfaz.
+   */
+  readonly kind: 'manual' | 'mock' | 'web-serial' | 'spp-android' | 'hid-wedge' | 'simulator';
 
   /** Conecta (opcionalmente a un device recordado). No bloquea la carga manual si falla (R7.4). */
   connect(deviceId?: string): Promise<void>;

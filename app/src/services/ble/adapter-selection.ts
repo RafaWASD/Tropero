@@ -12,12 +12,16 @@
 // Este run monta SOLO los buildables hoy (web-serial / mock / manual). spp-android e
 // hid-wedge se enchufan en Fases 4/5 sin cambiar esta lógica más que agregar su rama.
 
-export type AdapterKind = 'manual' | 'mock' | 'web-serial' | 'spp-android' | 'hid-wedge';
+// Delta multivendor (RMV2.7, RMV4.1): `'simulator'` se agrega de forma ADITIVA al union del core.
+// Es el adapter del camino de demo (dev/demo-gated, triple-guard) — no cambia ninguno de los otros.
+export type AdapterKind = 'manual' | 'mock' | 'web-serial' | 'spp-android' | 'hid-wedge' | 'simulator';
 
 // 'auto' = elige por plataforma (web-serial en web). 'mock' = adapter-mock (CI/dev toggle, R10.2).
 // 'manual' = SIN transporte buildable, solo el piso manual (native manual-first / captura del sub-estado
 // "manual promovido" del hero adaptativo de la manga, spec 03 M2.1) → instantiateTransport devuelve null.
-export type ProviderMode = 'auto' | 'mock' | 'manual';
+// 'demo' = camino de demo por simulador (delta multivendor, RMV2.7/RMV4.3): SOLO bajo el gate demo
+// (dev/demo-build); en producción `mode='auto'` NUNCA elige el simulador (triple-guard 1).
+export type ProviderMode = 'auto' | 'mock' | 'manual' | 'demo';
 
 export interface SelectionEnv {
   /** Platform.OS del runtime ('web' | 'ios' | 'android' | ...). */
@@ -34,6 +38,11 @@ export interface SelectionEnv {
  */
 export function selectTransportAdapter(env: SelectionEnv): AdapterKind {
   if (env.mode === 'mock') return 'mock';
+  // Delta multivendor (RMV2.7/RMV4.3, triple-guard 1): la rama demo va ANTES de la lógica de
+  // plataforma y NUNCA la alcanza `mode='auto'` (el default de producción). Solo `mode='demo'`
+  // (que el host pone bajo el gate demo) devuelve el simulador. Los modos auto/mock/manual
+  // devuelven EXACTAMENTE lo mismo que antes del delta (regresión cubierta por wiring/selection tests).
+  if (env.mode === 'demo') return 'simulator';
   // 'manual' fuerza el piso manual SIN transporte buildable (instantiateTransport('manual') → null). Lo usa
   // el provider bajo el flag de E2E para reproducir el sub-estado "manual promovido" del hero (transport==null).
   if (env.mode === 'manual') return 'manual';

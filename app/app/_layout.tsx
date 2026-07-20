@@ -65,6 +65,8 @@ import { getPendingInvitationToken } from '@/services/pending-invitation';
 import { PowerSyncProvider } from '@/services/powersync/provider';
 import { FIRST_SYNC_TIMEOUT_MS } from '@/services/powersync/first-sync';
 import { BleStickListenerProvider } from '@/services/ble/BleStickListenerProvider';
+import { isDemoMode } from '@/services/ble/demo-gate';
+import { StickStatusIndicator } from '@/features/ble-stick/components/StickStatusIndicator';
 import { FindOrCreateOverlay } from './_components/FindOrCreateOverlay';
 import { BleE2EBridge } from './_components/BleE2EBridge';
 import { isBleE2E, isBleE2EManual } from './_components/ble-e2e-flag';
@@ -498,6 +500,11 @@ function RootGate() {
           Destino navegable desde "Más" (owner/vet, gateado por rol adentro). Como editar-campo: NO está en
           strandedOnGatingRoute, así el gate no lo expulsa a (tabs) mientras se usa. */}
       <Stack.Screen name="export-sigsa" />
+      {/* Spec 04 delta multivendor (RMV3.1) — pantalla de CONEXIÓN del bastón. Vive en "Más" (ADR-018);
+          el listener es global (no es tab). Consume el BleStickListenerProvider raíz. Destino navegable
+          (deep-link /baston); la fila de "Más" que navega acá la agrega el dueño de mas.tsx (colisión-safe).
+          Como export-sigsa: NO está en strandedOnGatingRoute, así el gate no la expulsa a (tabs). */}
+      <Stack.Screen name="baston" />
       {/* Spec 02 C2 — animales: alta find-or-create (R4) y ficha del animal (R5). Destinos
           navegables desde la tab Animales con un rodeo existente (no se re-rutean al wizard). */}
       <Stack.Screen name="crear-animal" />
@@ -546,6 +553,10 @@ function BleHost() {
     <>
       <RootGate />
       <FindOrCreateOverlay />
+      {/* Indicador GLOBAL de conexión del bastón en el chrome (spec 04 delta, RMV3.5): hermano del stack,
+          alimentado por useBleConnectionStatus(). NO bloqueante (pointerEvents box-none) y auto-oculto en
+          'off' → invisible en las pantallas normales, visible durante la actividad del bastón / demo. */}
+      <StickStatusIndicator />
       {isBleE2E() ? <BleE2EBridge /> : null}
     </>
   );
@@ -615,8 +626,12 @@ export default function RootLayout() {
                       'auto' en cualquier build normal (web-serial/manual por plataforma). baston-test
                       queda intacto (su provider es self-contained). El flag SECUNDARIO isBleE2EManual()
                       (doble-gateado por isBleE2E) fuerza mode='manual' (sin transporte) para reproducir el
-                      sub-estado "manual promovido" del hero adaptativo (spec 03 M2.1) en la captura E2E. */}
-                  <BleStickListenerProvider mode={isBleE2E() ? (isBleE2EManual() ? 'manual' : 'mock') : 'auto'}>
+                      sub-estado "manual promovido" del hero adaptativo (spec 03 M2.1) en la captura E2E.
+                      Spec 04 delta multivendor (RMV4.3/4.4, triple-guard 1): PRECEDENCIA DEMO — isDemoMode()
+                      (marca __RAFAQ_BLE_DEMO__ + build permitido: dev/build-demo/E2E) → mode='demo' (simulador).
+                      Una corrida E2E normal (solo __RAFAQ_BLE_E2E__, SIN __RAFAQ_BLE_DEMO__) tiene isDemoMode()
+                      false → cae a 'mock'/'manual' como HOY (regresión intacta). Producción → 'auto'. */}
+                  <BleStickListenerProvider mode={isDemoMode() ? 'demo' : isBleE2E() ? (isBleE2EManual() ? 'manual' : 'mock') : 'auto'}>
                     <BleHost />
                   </BleStickListenerProvider>
                 </RodeoProvider>
