@@ -72,7 +72,9 @@ la card vs. qué muestra la ficha y cerrar la brecha, en vez de parchear campo p
 
 **U2 · CTA siempre visible (teclado + scroll)** — inversión de design system, alto valor.
 **U1 · Escala 1-9 de condición corporal** — ver el hallazgo de §Respuestas, cambia el diseño.
-**U6c · Límite de años en reportes** — decisión de producto pendiente (opción C propuesta).
+**U6c · Límite de años en reportes** — ✅ **DECIDIDO: opción B** (Raf, 2026-07-20). Rango limitado
+**más** carga manual de los 3 KPIs (preñez, parición, destete) para años anteriores, en una sola unidad.
+Se descartó la opción C (piso ahora / carga manual después): Raf prefiere entregarlo completo.
 **U6b · Skeleton loaders** — polish; Raf los quiere a futuro en toda la app (anotado en backlog).
 
 ---
@@ -131,7 +133,11 @@ token portador de todos modos; encriptarlo solo agrega una llave que también vi
 5. Entropía y generación (¿CSPRNG?).
 6. ¿Filtra por referrer, logs o historial?
 
-### U6c — tercera opción propuesta (pendiente de decisión de Raf)
+### U6c — ✅ DECIDIDO: opción B (Raf, 2026-07-20)
+
+> Se implementa la **opción B**: rango limitado **+** carga manual de preñez, parición y destete para
+> años anteriores, como una sola unidad. La opción C quedó descartada por preferencia de entregar
+> completo en vez de en dos tiempos. El análisis de las tres se conserva abajo por trazabilidad.
 
 - **Opción A de Raf** (no permitir años anteriores al alta en la app): simple, previene el absurdo, pero
   **mata el pilar de benchmarking justo en el año 1** — el productor abre reportes, no tiene con qué
@@ -148,6 +154,20 @@ Con ojo de diseñador: un selector que te deja llegar a 1847 no es libertad, es 
 Acotarlo **es** el fix, no una limitación.
 
 ---
+
+## ⛔ Fuera del alcance de esta terminal — BLE / bastón
+
+**Raf está desarrollando TODO lo relacionado a bastón y Bluetooth en otra terminal** (2026-07-20). Esta
+terminal **no toca** nada de eso, incluido el fix de UX del botón "conectar bastón" que no puede
+funcionar en nativo (no hay librería BLE instalada y `selectTransportAdapter` devuelve `'manual'` en
+todo nativo a propósito — feature `04-bluetooth-baston` en `deferred`). Archivos a evitar:
+`app/src/services/ble/**`, `app/src/components/BleConnectionChip.tsx`, `app/src/components/TagScan*`,
+`app/src/components/ble-connection-view.ts`.
+
+⚠️ **Riesgo de coordinación a vigilar**: si la terminal de BLE mueve la feature 04 a `in_progress`, van a
+quedar **tres** features activas (16, 20 y 04) y `check.mjs` ya marca la regla de una sola. Además esta
+terminal es hoy dueña de `feature_list.json` y `progress/`. Conviene definir quién escribe qué antes de
+que las dos toquen los mismos archivos de coordinación (ver memoria `feedback_parallel_terminals`).
 
 ## Notas de ejecución
 
