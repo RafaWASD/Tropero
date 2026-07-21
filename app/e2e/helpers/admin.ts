@@ -1910,6 +1910,116 @@ export function anonClient(): SupabaseClient {
   return makeClient(anonKey);
 }
 
+// ─── spec 20 — fixtures de REVOCACIÓN (feature 20, T16) ─────────────────────────
+
+/**
+ * 🔴 ESPEJA `remove_member` COMPLETO (Gate 1 HIGH-1 / design §8 riesgo 8). La Edge Function hace
+ * **DOS** cosas (`supabase/functions/remove_member/index.ts:87-113`), no una:
+ *
+ *   1. `update user_roles set active = false, deactivated_at = now()`  ← el rol
+ *   2. `rpc('revoke_user_sessions', { target_uid })`                    ← la sesión (migración 0072)
+ *
+ * Un fixture que solo hiciera (1) NO es el camino de producción, y un test del diferimiento montado
+ * sobre él daría VERDE sobre una garantía que producción no da — en la feature que nació de un
+ * comentario mentiroso, es el peor resultado posible.
+ *
+ * `revokeSession` default **`true`** = paridad con producción; el camino sin revocar la sesión hay
+ * que escribirlo A MANO. El flag existe para que un futuro test aísle a propósito el camino "campo
+ * borrado" (donde el trigger `0076` efectivamente NO revoca sesión — D1.2). Si algún test lo pone en
+ * `false`, su header DEBE declarar qué parte del camino real no cubre y por qué.
+ */
+export async function revokeMemberRole(
+  userId: string,
+  establishmentId: string,
+  opts: { revokeSession?: boolean } = {},
+): Promise<void> {
+  const revokeSession = opts.revokeSession ?? true;
+
+  const { error } = await admin
+    .from('user_roles')
+    .update({ active: false, deactivated_at: new Date().toISOString() })
+    .eq('user_id', userId)
+    .eq('establishment_id', establishmentId)
+    .eq('active', true);
+  if (error) throw new Error(`revokeMemberRole role(${userId}): ${error.message}`);
+
+  if (revokeSession) {
+    const { error: revokeErr } = await admin.rpc('revoke_user_sessions', { target_uid: userId });
+    // A diferencia de la EF (que es fail-SOFT para no revertir el cambio de rol ya consumado), acá
+    // TIRAMOS: si el fixture no pudo revocar la sesión, el test que lo usa dejaría de probar el
+    // camino real y se volvería un falso verde. Preferimos romper ruidosamente.
+    if (revokeErr) throw new Error(`revokeMemberRole revoke_user_sessions: ${revokeErr.message}`);
+  }
+}
+
+/** Pollea vía service_role hasta que el rol de (user, campo) esté INACTIVO server-side. */
+export async function waitForServerRoleInactive(
+  userId: string,
+  establishmentId: string,
+  opts: { tries?: number; delayMs?: number } = {},
+): Promise<void> {
+  const tries = opts.tries ?? 20;
+  const delayMs = opts.delayMs ?? 300;
+  for (let i = 0; i < tries; i++) {
+    const { data, error } = await admin
+      .from('user_roles')
+      .select('active')
+      .eq('user_id', userId)
+      .eq('establishment_id', establishmentId);
+    if (error) throw new Error(`waitForServerRoleInactive: ${error.message}`);
+    const anyActive = (data ?? []).some((r) => r.active === true);
+    if (!anyActive) return;
+    await new Promise((r) => setTimeout(r, delayMs));
+  }
+  throw new Error(`waitForServerRoleInactive(${userId}, ${establishmentId}): sigue activo`);
+}
+
+/**
+ * CONTROL previo del oráculo de sesión: loguea al usuario en Node (cliente aparte, sin persistencia)
+ * y devuelve un refresh token VIVO. Debe llamarse ANTES de la revocación — si no, no hay control que
+ * descarte el falso positivo ("el refresh falla porque el token nunca sirvió").
+ */
+export async function captureRefreshToken(user: TestUser): Promise<string> {
+  const client = makeClient(anonKey);
+  const { data, error } = await client.auth.signInWithPassword({
+    email: user.email,
+    password: user.password,
+  });
+  if (error) throw new Error(`captureRefreshToken(${user.email}): ${error.message}`);
+  const rt = data.session?.refresh_token;
+  if (!rt) throw new Error(`captureRefreshToken(${user.email}): sin refresh_token`);
+  return rt;
+}
+
+/**
+ * 🔴 ORÁCULO SERVER-SIDE de que el fixture ejecutó el camino de PRODUCCIÓN: tras `revokeMemberRole`,
+ * el refresh token previo del usuario ya NO produce sesión, porque `revoke_user_sessions` borró sus
+ * filas de `auth.sessions` (migración 0072). Es DETERMINISTA (el DELETE es persistente, no una
+ * ventana de ban) → no se espera ni se reintenta.
+ *
+ * ⚠️ Por qué NO se lee `auth.sessions` directo (desvío respecto de la letra de T16, ver
+ * `progress/impl_20-reactividad-sync.md`): el schema `auth` NO está expuesto a PostgREST
+ * (`supabase/config.toml` → `schemas = ["public","graphql_public"]`), así que un fixture no puede
+ * SELECTearlo con service_role, y agregar una RPC para verlo implicaría una migración (fuera del
+ * alcance de esta feature). Este oráculo prueba la CONSECUENCIA OBSERVABLE de la revocación, que es
+ * más fuerte que contar filas, y es el patrón ya canónico del repo para esto
+ * (`supabase/tests/edge/run.cjs`, H1-1 R10.1/R10.2).
+ *
+ * La propiedad que importa es la DIRECCIÓN DEL FALLO: si un refactor futuro deja `revokeMemberRole`
+ * haciendo solo el update del rol, esto se pone ROJO **antes** de que el test asserte nada del
+ * diferimiento. El falso verde queda tapado por construcción, no por disciplina.
+ */
+export async function assertServerSessionsRevoked(refreshTokenBefore: string): Promise<void> {
+  const client = makeClient(anonKey);
+  const { data, error } = await client.auth.refreshSession({ refresh_token: refreshTokenBefore });
+  if (!error && data?.session) {
+    throw new Error(
+      'assertServerSessionsRevoked: el refresh token previo TODAVÍA produce sesión → el fixture no ' +
+        'ejecutó revoke_user_sessions. El test no probaría el camino de producción (Gate 1 HIGH-1).',
+    );
+  }
+}
+
 /**
  * Siembra un LOTE (management_groups, ADR-020) ACTIVO en un establishment, vía service_role (spec 03 R9.2).
  * Necesario para el e2e del lote opcional del wizard: el sheet de lote del resumen lista los grupos activos

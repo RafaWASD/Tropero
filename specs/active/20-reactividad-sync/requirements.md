@@ -59,7 +59,20 @@ Los dos contextos raíz (`EstablishmentContext`, `RodeoContext`) y la pantalla `
 
 **R20.17** — El sistema deberá aplicar la misma regla de evidencia afirmativa cualquiera sea el disparador de la re-lectura (avance de sync o acción del usuario).
 
-**R20.18** — Cuando una re-lectura de rodeos devuelva un conjunto vacío, el sistema deberá concluir `no_rodeos` únicamente si la fila local de rol del usuario en el campo activo existe y tiene `active = 1`; en caso contrario no deberá cambiar de estado.
+**R20.18** — Cuando una re-lectura de rodeos devuelva un conjunto vacío **y exista un estado de rodeo ya resuelto para ese mismo campo activo**, el sistema deberá concluir `no_rodeos` únicamente si la fila local de rol del usuario en el campo activo existe y tiene `active = 1`; en caso contrario no deberá cambiar de estado.
+
+> **Nota de reconciliación as-built (implementer, 2026-07-20).** El requisito original no llevaba la
+> condición "**y exista un estado de rodeo ya resuelto para ese mismo campo**", y aplicarlo también en el
+> arranque rompía un camino real y testeado: al crear un campo, `applyCreatedEstablishment` lo deja activo
+> de forma OPTIMISTA y la fila de `user_roles` (que crea el trigger `0011` server-side) todavía no bajó al
+> SQLite local → la evidencia devolvería `absent_or_inactive` → no se concluiría `no_rodeos` → el `RootGate`
+> quedaría en **splash** en vez de mostrar el wizard "Creá tu primer rodeo" (spec 02 R2.6, cubierto por
+> `e2e/establishments.spec.ts`). La guarda existe para que un estado `active` **ya resuelto** no se tumbe a
+> `no_rodeos` durante una revocación (design §8 riesgo 7), y ese escenario **siempre** ocurre con un `active`
+> resuelto sobre el mismo campo (el operario está adentro de su maniobra) → queda íntegramente cubierto. En
+> un arranque, o justo después de cambiar de campo, no hay estado que proteger y se conserva el
+> comportamiento as-built (set vacío ⇒ `no_rodeos`). As-built: `RodeoContext.tsx` (`statusRef` +
+> `resolvedForEstRef`).
 
 **R20.19** — Cuando una re-lectura reactiva de rodeos devuelva un conjunto poblado que contenga el rodeo activo, el sistema no deberá cambiar el rodeo seleccionado.
 
@@ -98,6 +111,24 @@ Los dos contextos raíz (`EstablishmentContext`, `RodeoContext`) y la pantalla `
 **R20.33** — Mientras haya una revocación diferida pendiente, el sistema deberá conservar el campo revocado dentro del conjunto de campos disponibles que expone el contexto **y** dentro del set vigente que consumen sus acciones, sin divergencia entre ambos (invariante: el campo activo siempre pertenece al conjunto disponible).
 
 **R20.34** — Cuando el usuario cambie de campo activo durante el diferimiento, el sistema deberá descartar la revocación diferida sin emitir aviso.
+
+> **Nota de reconciliación as-built — cobertura de R20.33/R20.34 (implementer, 2026-07-20).** Ambos están
+> **implementados** (merge del campo revocado atado a `pendingRevocationRef`, en una sola fuente para
+> `availableRef.current` y `state.available`; descarte del pendiente en `switchEstablishment`), pero **no
+> son alcanzables por la UI**, así que su verificación es unitaria y por inspección, no E2E — a diferencia
+> de lo que anticipaba `tasks.md` T21 punto 4 y la fila de E2E de §6.
+>
+> El motivo es estructural: la señal de "hay maniobra en curso" **es la ruta** (D1, design §5.1), y el
+> switch de campo vive en el header de la home, fuera del flujo de maniobra. Salir de la maniobra para
+> llegar al switch es exactamente lo que dispara la emisión de la revocación diferida (R20.22), así que la
+> ventana en la que el switch sería observable con un pendiente vivo dura lo que una lectura local del
+> SQLite. No hay forma honesta de escribir un E2E de eso: cualquier intento probaría otra cosa.
+>
+> Lo que sí se verifica: (a) la lógica de decisión del descarte, con unitarios de
+> `shouldEmitDeferredRevocation` (`pendingId !== currentId` → no emite, R20.34); (b) la invariante de R20.33
+> por inspección — el merge está en el único punto por el que pasan todas las aplicaciones de set
+> (`applyMemberships`) y la rama async **no toca `availableRef`** hasta tener veredicto, de modo que ref y
+> estado no pueden divergir ni siquiera durante la lectura de evidencia.
 
 **R20.35** — Cuando corresponda aplicar una revocación diferida, el sistema deberá re-verificar que el campo pendiente siga siendo el campo activo y que su evidencia afirmativa siga indicando revocación; si alguna de las dos condiciones no se cumple, deberá descartar el pendiente sin emitir `active_lost`.
 
@@ -155,7 +186,8 @@ Cada `R20.<n>` tiene ≥1 test concreto asignado en `tasks.md`. Resumen del tipo
 - **Unitarios puros** (`node:test`, sin RN ni red): R20.11–R20.19, R20.27–R20.30, R20.32 → lógica de resolución de membresías/rodeos y del veredicto de desaparición (incluido el caso central: checkpoint sin la fila de `establishments` pero **con** el rol local `active = 1` → NO concluye).
 - **Unitarios del SQL builder** (`local-reads.test.ts`): R20.31 → la query de evidencia afirmativa es local, parametrizada por `(user_id, establishment_id)` y no toca red.
 - **Unitarios puros del predicado de maniobra**: R20.20, R20.24 (decisión "diferir vs. aplicar" a partir de la ruta y del pendiente).
-- **E2E (Playwright, `./helpers/fixtures`)**: R20.1, R20.2, R20.3, R20.9, R20.22, R20.23, R20.24, R20.28, R20.33, R20.34.
+- **E2E (Playwright, `./helpers/fixtures`)**: R20.1, R20.2, R20.3, R20.9, R20.22, R20.23, R20.24, R20.28. El caso 2 (T18) es **multi-cambio** (alta INSERT + rename UPDATE) y asserta el estado final combinado: R20.2 cubre que la re-lectura refleja tanto INSERTS como UPDATES (design §10-bis (g) reconciliado — ver abajo).
+- **Unit + inspección (NO alcanzables por E2E)**: R20.33 (invariante del merge `available` durante el diferimiento — inspección; el switch con pendiente vivo no es observable por UI, ver nota bajo R20.33/R20.34) y R20.34 (unit `shouldEmitDeferredRevocation` con `pendingId !== currentId` + inspección del descarte en `switchEstablishment`). **NO** los cubre el E2E: la señal de "hay maniobra" es la ruta, y salir para llegar al switch es lo que dispara la emisión.
 - **Unitarios puros del pendiente diferido**: R20.35 (el guard de re-verificación al emitir).
 - **No verificable por E2E, documentado como limitación**: R20.36 — el bounce a login ocurre al vencer el access token (`jwt_expiry = 3600`), fuera de cualquier ventana razonable de test; acortar `jwt_expiry` implicaría tocar config compartida, que está fuera de alcance. Se cubre por inspección + la nota de `design.md` §5.4.
 - **Inspección de código verificada por el reviewer** (invariantes estructurales, no comportamiento observable): R20.4, R20.5, R20.6, R20.7 — además cubiertas indirectamente por los E2E de R20.1/R20.2 (sin el fix, fallan).

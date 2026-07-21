@@ -8,16 +8,22 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  assessDisappearance,
   buildRecents,
   detectActiveLost,
   formatHectares,
   hasDuplicateName,
+  isManeuverRouteSegment,
   localityOf,
   parseHectares,
   resolveState,
   roleLabel,
+  sameEstablishmentList,
+  sameResolvedEstablishmentState,
+  shouldEmitDeferredRevocation,
   shouldShowReadyBanner,
   sortMyEstablishments,
+  type EstablishmentState,
   type MembershipEstablishment,
 } from './establishment.ts';
 
@@ -310,4 +316,274 @@ test('shouldShowReadyBanner: descartar campo A no afecta a campo B (per-campo)',
   // El bug de Raf: descartar en A no debe ocultar el banner de B.
   assert.equal(shouldShowReadyBanner('b', ['a']), true);
   assert.equal(shouldShowReadyBanner('a', ['a']), false);
+});
+
+// ─── spec 20 — E1: veredicto por EVIDENCIA AFIRMATIVA (R20.12-R20.15, R20.30) ───
+//
+// El latch de un solo disparo existía para "evitar falsos active_lost por downloads parciales".
+// Al re-leer en CADA avance de sync, la garantía la da esta función: la revocación se concluye a
+// partir de un hecho leído (la fila local de rol propia), NUNCA por inferencia de ausencia.
+// Sin timers, sin contadores, sin segunda lectura (design §9.2).
+
+test('R20.15 (TEST CENTRAL DE E1): activo ausente del set PERO rol local active=1 → inconclusive', () => {
+  // Un checkpoint que trajo el resto pero todavía no la fila de `establishments`, con el rol local
+  // todavía activo, NO concluye active_lost. Determinista, sin esperar nada.
+  assert.equal(
+    assessDisappearance({ hadValue: true, stillPresent: false, roleEvidence: 'active' }),
+    'inconclusive',
+  );
+});
+
+test('R20.14: rol local ausente/inactivo → confirmed CON SET VACÍO (la evidencia manda)', () => {
+  assert.equal(
+    assessDisappearance({ hadValue: true, stillPresent: false, roleEvidence: 'absent_or_inactive' }),
+    'confirmed',
+  );
+});
+
+test('R20.14: rol local ausente/inactivo → confirmed CON SET POBLADO (mismo veredicto)', () => {
+  // Mismo input de evidencia; lo que cambiaba afuera es que el set traía otros campos. El veredicto
+  // NO depende de la forma del set (R20.13 — la ausencia nunca es condición suficiente).
+  assert.equal(
+    assessDisappearance({ hadValue: true, stillPresent: false, roleEvidence: 'absent_or_inactive' }),
+    'confirmed',
+  );
+});
+
+test('R20.30: evidencia ilegible (unknown) → inconclusive (fail-safe, nunca contra el usuario)', () => {
+  assert.equal(
+    assessDisappearance({ hadValue: true, stillPresent: false, roleEvidence: 'unknown' }),
+    'inconclusive',
+  );
+});
+
+test('R20.32: el activo sigue en el set → present, cualquiera sea la evidencia (no se consulta)', () => {
+  for (const roleEvidence of ['active', 'absent_or_inactive', 'unknown'] as const) {
+    assert.equal(assessDisappearance({ hadValue: true, stillPresent: true, roleEvidence }), 'present');
+  }
+});
+
+test('R20.12/R20.16: sin activo previo (hadValue=false) → present aunque el set esté vacío', () => {
+  assert.equal(
+    assessDisappearance({ hadValue: false, stillPresent: false, roleEvidence: 'absent_or_inactive' }),
+    'present',
+  );
+});
+
+test('R20.13: NINGÚN confirmed sale de una evidencia distinta de absent_or_inactive', () => {
+  // Guard estructural: la única puerta a 'confirmed' es la evidencia afirmativa.
+  for (const hadValue of [true, false]) {
+    for (const stillPresent of [true, false]) {
+      for (const roleEvidence of ['active', 'unknown'] as const) {
+        assert.notEqual(assessDisappearance({ hadValue, stillPresent, roleEvidence }), 'confirmed');
+      }
+    }
+  }
+});
+
+// ─── spec 20 — R20.18: el veredicto COMPARTIDO que usa RodeoContext para concluir `no_rodeos` ───
+//
+// RodeoContext (prong F) rutea por el MISMO `assessDisappearance` que EstablishmentContext, en vez de
+// un `evidence !== 'active'` inline: para el contexto de rodeos, el establecimiento sigue "presente"
+// sii su rol local está afirmativamente activo → `stillPresent = evidence === 'active'`, y se concluye
+// `no_rodeos` SOLO con veredicto 'present'. Este test fija esa composición (behavior-idéntico al inline
+// previo) y prueba que respeta R20.18 (active → concluye) y R20.30 (unknown → conserva, fail-safe).
+
+const rodeoConcludesNoRodeos = (evidence: 'active' | 'absent_or_inactive' | 'unknown'): boolean =>
+  assessDisappearance({ hadValue: true, stillPresent: evidence === 'active', roleEvidence: evidence }) === 'present';
+
+test('R20.18: rol local active=1 + set de rodeos vacío → concluye no_rodeos', () => {
+  assert.equal(rodeoConcludesNoRodeos('active'), true);
+});
+
+test('R20.18: rol revocado (absent_or_inactive) + set vacío → NO concluye (protege D1, riesgo 7)', () => {
+  assert.equal(rodeoConcludesNoRodeos('absent_or_inactive'), false);
+});
+
+test('R20.30: evidencia ilegible (unknown) + set vacío → NO concluye no_rodeos (fail-safe)', () => {
+  assert.equal(rodeoConcludesNoRodeos('unknown'), false);
+});
+
+// ─── spec 20 — R20.35: guard de emisión de la revocación diferida (Gate 1 L2) ───
+
+test('R20.35: pendiente vigente + evidencia absent_or_inactive → emite', () => {
+  assert.equal(
+    shouldEmitDeferredRevocation({ pendingId: 'a', currentId: 'a', roleEvidence: 'absent_or_inactive' }),
+    true,
+  );
+});
+
+test('R20.34/R20.35: cambió el campo activo durante el diferimiento → NO emite', () => {
+  assert.equal(
+    shouldEmitDeferredRevocation({ pendingId: 'a', currentId: 'b', roleEvidence: 'absent_or_inactive' }),
+    false,
+  );
+});
+
+test('R20.35: le reactivaron el rol mientras estaba en la maniobra → NO emite', () => {
+  assert.equal(
+    shouldEmitDeferredRevocation({ pendingId: 'a', currentId: 'a', roleEvidence: 'active' }),
+    false,
+  );
+});
+
+test('R20.35/R20.30: evidencia unknown al emitir → NO emite (no se concluye sin evidencia)', () => {
+  assert.equal(
+    shouldEmitDeferredRevocation({ pendingId: 'a', currentId: 'a', roleEvidence: 'unknown' }),
+    false,
+  );
+});
+
+test('R20.35: sin pendiente (o sin activo vigente) → NO emite', () => {
+  assert.equal(
+    shouldEmitDeferredRevocation({ pendingId: null, currentId: 'a', roleEvidence: 'absent_or_inactive' }),
+    false,
+  );
+  assert.equal(
+    shouldEmitDeferredRevocation({ pendingId: 'a', currentId: null, roleEvidence: 'absent_or_inactive' }),
+    false,
+  );
+});
+
+// ─── spec 20 — R20.20/R20.24: predicado de "hay maniobra en curso" ──────────────
+
+test('R20.20: ruta de maniobra (sub-ruta) → true', () => {
+  assert.equal(isManeuverRouteSegment(['maniobra', 'carga']), true);
+  assert.equal(isManeuverRouteSegment(['maniobra', 'jornada']), true);
+  assert.equal(isManeuverRouteSegment(['maniobra', 'identificar']), true);
+});
+
+test('R20.20: modal `maniobra` pelado → true', () => {
+  assert.equal(isManeuverRouteSegment(['maniobra']), true);
+});
+
+test('R20.24: fuera del flujo de maniobra → false', () => {
+  assert.equal(isManeuverRouteSegment(['(tabs)']), false);
+  assert.equal(isManeuverRouteSegment(['(tabs)', 'index']), false);
+  assert.equal(isManeuverRouteSegment(['mis-campos']), false);
+  // `maniobra` que NO es top-segment no cuenta.
+  assert.equal(isManeuverRouteSegment(['(tabs)', 'maniobra']), false);
+});
+
+test('R20.24: sin segmentos / null-safe → false', () => {
+  assert.equal(isManeuverRouteSegment([]), false);
+  assert.equal(isManeuverRouteSegment(null), false);
+  assert.equal(isManeuverRouteSegment(undefined), false);
+});
+
+// ─── spec 20 — R20.11: guard de equivalencia (anti tormenta de re-render) ───────
+
+test('R20.11: estados equivalentes (objetos distintos, mismos datos) → true', () => {
+  const a1: EstablishmentState = {
+    status: 'active',
+    current: est('a', 'La Juanita'),
+    available: [est('a', 'La Juanita'), est('b', 'El Ombu', 'veterinarian')],
+    role: 'owner',
+  };
+  const a2: EstablishmentState = {
+    status: 'active',
+    current: est('a', 'La Juanita'),
+    available: [est('a', 'La Juanita'), est('b', 'El Ombu', 'veterinarian')],
+    role: 'owner',
+  };
+  assert.equal(sameResolvedEstablishmentState(a1, a2), true);
+});
+
+test('R20.11: cambia el NOMBRE de un campo del set → false (el rename de un coworker se ve)', () => {
+  const base: EstablishmentState = {
+    status: 'active',
+    current: est('a', 'La Juanita'),
+    available: [est('a', 'La Juanita'), est('b', 'El Ombu')],
+    role: 'owner',
+  };
+  const renamed: EstablishmentState = {
+    status: 'active',
+    current: est('a', 'La Juanita'),
+    available: [est('a', 'La Juanita'), est('b', 'El Ombu Viejo')],
+    role: 'owner',
+  };
+  assert.equal(sameResolvedEstablishmentState(base, renamed), false);
+});
+
+test('R20.11: cambia el ROL en el campo activo → false', () => {
+  const owner: EstablishmentState = {
+    status: 'active',
+    current: est('a', 'La Juanita'),
+    available: [est('a', 'La Juanita')],
+    role: 'owner',
+  };
+  const vet: EstablishmentState = {
+    status: 'active',
+    current: est('a', 'La Juanita', 'veterinarian'),
+    available: [est('a', 'La Juanita', 'veterinarian')],
+    role: 'veterinarian',
+  };
+  assert.equal(sameResolvedEstablishmentState(owner, vet), false);
+});
+
+test('R20.11: cambia el ORDEN del set → false (alimenta "Mis campos"/recientes)', () => {
+  const ab: EstablishmentState = { status: 'choosing', available: [est('a', 'A'), est('b', 'B')] };
+  const ba: EstablishmentState = { status: 'choosing', available: [est('b', 'B'), est('a', 'A')] };
+  assert.equal(sameResolvedEstablishmentState(ab, ba), false);
+});
+
+test('R20.11: cambia el STATUS → false', () => {
+  assert.equal(
+    sameResolvedEstablishmentState({ status: 'loading' }, { status: 'no_establishments' }),
+    false,
+  );
+  assert.equal(
+    sameResolvedEstablishmentState(
+      { status: 'choosing', available: [est('a', 'A'), est('b', 'B')] },
+      {
+        status: 'active',
+        current: est('a', 'A'),
+        available: [est('a', 'A'), est('b', 'B')],
+        role: 'owner',
+      },
+    ),
+    false,
+  );
+});
+
+test('R20.11: un campo NUEVO en el set → false (el campo en caliente SÍ re-renderiza)', () => {
+  // El guard no puede tragarse el caso que la feature vino a arreglar (criterio A1).
+  const one: EstablishmentState = {
+    status: 'active',
+    current: est('a', 'A'),
+    available: [est('a', 'A')],
+    role: 'owner',
+  };
+  const two: EstablishmentState = {
+    status: 'active',
+    current: est('a', 'A'),
+    available: [est('a', 'A'), est('b', 'B')],
+    role: 'owner',
+  };
+  assert.equal(sameResolvedEstablishmentState(one, two), false);
+});
+
+test('R20.11: active_lost con distinto campo perdido → false', () => {
+  assert.equal(
+    sameResolvedEstablishmentState(
+      { status: 'active_lost', reason: 'role_revoked', lostEstablishmentName: 'A', available: [] },
+      { status: 'active_lost', reason: 'role_revoked', lostEstablishmentName: 'B', available: [] },
+    ),
+    false,
+  );
+});
+
+test('R20.11: loading vs loading → true (no re-renderiza de gusto)', () => {
+  assert.equal(sameResolvedEstablishmentState({ status: 'loading' }, { status: 'loading' }), true);
+  assert.equal(
+    sameResolvedEstablishmentState({ status: 'no_establishments' }, { status: 'no_establishments' }),
+    true,
+  );
+});
+
+test('R20.11: sameEstablishmentList — largo distinto y contenido igual', () => {
+  assert.equal(sameEstablishmentList([], []), true);
+  assert.equal(sameEstablishmentList([est('a', 'A')], []), false);
+  assert.equal(sameEstablishmentList([est('a', 'A')], [est('a', 'A')]), true);
+  assert.equal(sameEstablishmentList([est('a', 'A')], [est('a', 'A2')]), false);
 });

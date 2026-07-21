@@ -17,6 +17,28 @@ No es un sustituto de `feature_list.json` ni de los ADRs — es la antesala dond
 
 ## Ítems pendientes
 
+## 2026-07-20 — `lastSyncedAt` es un proxy NO determinista del cambio de dato → migrar a `db.watch` (PowerSync) · **FLAGEADO para Raf**
+
+**Origen**: feature 20 (reactividad de lecturas sync). El diagnóstico ORIGINAL de este ítem ("un SEGUNDO cambio no se ve en 120 s") estaba **confundido** (lo objetó el reviewer): se apoyaba en que tras un `reload` el dato aparecía — pero el reload re-sincroniza y el SQLite local es persistente, así que trae la fila igual; no probaba que estuviera local ANTES. **Rehecho con un experimento A/B DETERMINISTA** (2/3 cambios server-side secuenciales, sondeo DIRECTO del SQLite vía `__RAFAQ_PS__.getAll` SIN reload) en la remediación de la 20.
+**Qué (corregido, con evidencia)**: la fila SIEMPRE llega al SQLite local en **~1,5 s** (6/6 cambios, INSERT y UPDATE) — la ENTREGA del dato NO es el problema. Pero `lastSyncedAt` avanza de forma **NO determinista por cambio**: corrida 1, los 3 cambios ticaron al instante; corrida 2, el **primer** cambio se estancó (fila en SQLite, señal congelada ~90 s) hasta que un cambio POSTERIOR forzó un checkpoint que barrió todo. O sea: NO es un "latch permanente" (el claim viejo "deja de avanzar tras el 1er cambio" es falso), es que `lastSyncedAt` significa "último sync FULL completado", no "cambió un dato" — el **primitivo equivocado** para reactividad, que puede lagear arbitrariamente detrás de la llegada del dato.
+**Por qué importa**: la 20 arregló la RE-LECTURA (re-leer en CADA avance de la señal, que antes no pasaba nunca) y es estrictamente mejor que el latch, pero **no puede** hacer que la UI reaccione a un cambio cuyo checkpoint no tica la señal. "Un coworker cambia una cosa" puede tardar en verse hasta el próximo checkpoint (otro cambio, un keepalive, un reconnect).
+**Fix real (EXPANSIÓN DE ALCANCE — decisión de Raf)**: migrar los 3 consumidores (`EstablishmentContext`, `RodeoContext`, `lotes.tsx`) —y a la larga toda la app— a **watched queries** (`useQuery`/`db.watch`) que reaccionen al cambio del SQLite local en vez de a la señal gruesa de status. Hoy la app tiene **cero** watched queries (deuda deliberada, `specs/active/15-powersync/design.md`, y la entrada 2026-06-09 de este backlog). Merece su propio ADR + spec.
+**Próximo paso sugerido**: ADR de migración a `db.watch` (arranca por los 3 consumidores de la 20, que ya están aislados). Evidencia cruda del A/B en `progress/impl_20-reactividad-sync.md`.
+
+## 2026-07-20 — El rodeo activo borrado por un coworker durante una maniobra
+
+**Origen**: feature 20, `design.md` §8 riesgo 6. Anotado al cerrar la feature.
+**Qué**: D1 (no patear al operario en medio de una maniobra) cubre la **revocación del campo**. No cubre que un coworker borre el **rodeo activo** mientras hay una jornada en curso sobre ese rodeo. `applyRodeos` preserva el preferido *mientras exista en el set*; si desaparece, cae al primero disponible — cambia el rodeo bajo los pies del operario.
+**Por qué importa**: es el mismo modo de falla que D1 evita para campos, una superficie más abajo. Raro (requiere que borren justo el rodeo en uso), pero desconcertante en la manga.
+**Próximo paso sugerido**: decidir con Raf/Facundo si merece el mismo tratamiento que D1 (diferir + avisar al cerrar) o si alcanza con un aviso. No inventar la decisión: la 20 lo dejó explícitamente afuera.
+
+## 2026-07-20 — Distinguir "campo borrado" de "rol revocado" requiere una señal server-side
+
+**Origen**: feature 20, `design.md` §6 (E5). Verificado columna por columna.
+**Qué**: desde el cliente las dos causas son **indistinguibles**: `remove_member` y el trigger `deactivate_roles_on_establishment_soft_delete` (0076) escriben el mismo par de columnas con los mismos valores (`active = false` + `deactivated_at = now()`), y en ambos casos la fila de `establishments` sale del SQLite local. Por eso el aviso usa un copy verdadero para ambas y la razón `establishment_deleted` quedó declarada en el tipo pero **no alcanzable**.
+**Por qué importa**: hoy no se puede decirle al usuario *por qué* perdió el campo. Un borrado es definitivo y una revocación puede revertirse; con un flujo de restore (que el MVP no tiene) la diferencia empezaría a habilitar acciones distintas.
+**Próximo paso sugerido**: si alguna vez se agrega restore/undelete de establecimientos, resolver server-side una razón fiel (columna o evento) y recién ahí prender la rama del copy. Costo sin beneficio hasta entonces.
+
 ## 2026-07-19 — 🔴 Pérdida SILENCIOSA de writes del operario cuando le revocan el acceso al campo
 
 **Origen**: Gate 0 de la feature 20 (reactividad de lecturas sync). Hallazgo **fuera del alcance** de esa feature, sacado aparte por decisión de Raf (D3) porque es pérdida de datos y merece spec + Gate 1 propios.

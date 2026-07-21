@@ -71,6 +71,18 @@ streams:
       # PK as-built = user_id → emitir `id` con alias (PowerSync exige `id` en cada fila — T1.3).
       - SELECT user_id AS id, * FROM user_private WHERE user_id = auth.user_id()
   self_user_roles:                           # membresías del propio usuario
+    # 🔒 CANDADO — NO AGREGAR `AND active = true` A ESTA QUERY (feature 20, Gate 1 RG-1).
+    # La AUSENCIA del filtro `active` (y de `org_scope`) es LOAD-BEARING: es lo único que hace que la
+    # fila de rol del PROPIO usuario SOBREVIVA a una revocación en el SQLite local, con `active = 0`.
+    # Toda la regla de "evidencia afirmativa" de la feature 20 cuelga de eso: al revocarse el acceso,
+    # el establishment sale de `org_scope` y PowerSync borra ese bucket, pero esta fila queda y dice
+    # explícitamente qué pasó → el cliente decide `active_lost` sobre un HECHO LEÍDO en vez de
+    # inferirlo de una ausencia (que es indistinguible de un sync a medio bajar).
+    # Filtrar por `active` acá parece una optimización prolija y ROMPE LA FEATURE EN SILENCIO: la fila
+    # desaparecería del local y el veredicto pasaría a decidirse por ausencia → vuelven los falsos
+    # `active_lost` por sync parcial que la feature 20 vino a eliminar. Falla CERRADA (no es fuga),
+    # pero es exactamente el modo de falla que se arregló.
+    # Ver `specs/active/20-reactividad-sync/design.md` §4.3 y `local-reads.ts::buildActiveRoleQuery`.
     auto_subscribe: true
     queries:
       - SELECT * FROM user_roles WHERE user_id = auth.user_id()

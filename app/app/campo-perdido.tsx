@@ -34,9 +34,22 @@ export default function CampoPerdidoScreen() {
 
   const { reason, lostEstablishmentName, available } = state;
 
-  // Copy legible según el caso (R6.10):
-  //   role_revoked        → "Ya no tenés acceso a <campo>"
-  //   establishment_deleted → "<campo> fue eliminado"
+  // Copy legible según el caso (R6.10).
+  //
+  // ⚠️ spec 20 / E5 (R20.27-R20.29) — LAS DOS CAUSAS SON INDISTINGUIBLES desde el cliente, y la rama
+  // `establishment_deleted` HOY NO ES ALCANZABLE. Verificado columna por columna (design §6.1):
+  // `remove_member` (Edge Function) y el trigger `deactivate_roles_on_establishment_soft_delete`
+  // (migración 0076) escriben EXACTAMENTE el mismo par de valores —`active = false` +
+  // `deactivated_at = now()`— y en ambos casos la fila de `establishments` sale del SQLite local.
+  // No queda ninguna otra columna local que las separe; la propia 0076 lo documenta como limitación
+  // conocida. Por eso el contexto siempre emite `reason: 'role_revoked'`: el valor sigue declarado en
+  // el tipo (contrato público intacto, listo para el día que exista una señal server-side), pero
+  // ningún camino lo produce.
+  //
+  // El copy de la rama viva DEBE ser verdadero para AMBAS causas: el anterior ("Te quitaron el acceso
+  // a este campo") afirmaba una causa única y era falso la mitad de las veces. Tampoco puede sugerir
+  // que los datos cargados durante una maniobra se conservaron o se subieron (R20.26): eso es E2 y
+  // está fuera de alcance — prometerlo sería mentir.
   const title =
     reason === 'establishment_deleted'
       ? `${lostEstablishmentName} fue eliminado`
@@ -45,7 +58,7 @@ export default function CampoPerdidoScreen() {
   const subtitle =
     reason === 'establishment_deleted'
       ? 'El dueño eliminó este campo. Tu cuenta sigue activa.'
-      : 'Te quitaron el acceso a este campo. Tu cuenta sigue activa.';
+      : 'Ya no tenés acceso a este campo. Puede que te lo hayan quitado o que el campo se haya eliminado. Tu cuenta sigue activa.';
 
   // El destino tras reconocer depende de cuántos campos quedan (R6.7), pero el re-ruteo lo
   // hace el gating; acá solo mostramos un copy honesto del próximo paso.

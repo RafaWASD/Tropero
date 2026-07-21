@@ -16,6 +16,7 @@ import {
   buildSystemsBySpeciesQuery,
   buildSystemByCodeQuery,
   buildRodeosQuery,
+  buildActiveRoleQuery,
   buildMembershipsQuery,
   buildOwnPhoneQuery,
   buildOwnNameQuery,
@@ -383,6 +384,30 @@ test('buildMembershipsQuery: JOIN user_roles+establishments, filtro user_id + ac
   assert.match(q.sql, /e\.id AS id/);
   assert.match(q.sql, /ur\.role AS role/);
   assert.deepEqual(q.args, ['user-42']);
+});
+
+// ─── spec 20 — evidencia afirmativa de E1 (R20.31) ──────────────────────────────
+
+test('R20.31: buildActiveRoleQuery es LOCAL, parametrizada por (user_id, establishment_id), LIMIT 1', () => {
+  const q = buildActiveRoleQuery('user-42', 'est-7');
+  // Filtra por AMBAS columnas, y por nada más.
+  assert.match(q.sql, /WHERE user_id = \? AND establishment_id = \?/);
+  assert.match(q.sql, /FROM user_roles/);
+  assert.match(q.sql, /LIMIT 1/);
+  // Orden de args EXACTO (el orden de los `?` es el contrato).
+  assert.deepEqual(q.args, ['user-42', 'est-7']);
+  // Cero interpolación: exactamente dos placeholders y ningún valor embebido en el SQL.
+  assert.equal(q.sql.match(/\?/g)?.length, 2);
+  assert.doesNotMatch(q.sql, /user-42|est-7/);
+});
+
+test('R20.12/R20.31: buildActiveRoleQuery LEE `active`, NO filtra por él', () => {
+  const q = buildActiveRoleQuery('u', 'e');
+  // Proyecta la columna: el veredicto necesita el VALOR (0 vs 1), no un "hay fila / no hay fila".
+  assert.match(q.sql, /SELECT active FROM user_roles/);
+  // Si el WHERE filtrara por active, "sin fila" mezclaría "rol inactivo" con "rol inexistente" y
+  // se perdería justo la evidencia afirmativa que sostiene toda E1 (design §4.3).
+  assert.doesNotMatch(q.sql, /WHERE[\s\S]*active\s*=/);
 });
 
 test('buildOwnPhoneQuery / buildOwnNameQuery / buildOwnEmailPhoneQuery: self por id, LIMIT 1', () => {

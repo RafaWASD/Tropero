@@ -221,6 +221,39 @@ export function buildMembershipsQuery(userId: string): LocalQuery {
 }
 
 /**
+ * EVIDENCIA AFIRMATIVA de E1 (spec 20, R20.31 / design §4.3-§4.4): la fila LOCAL de rol del
+ * PROPIO usuario en un establecimiento, leyendo el VALOR de `active` (no filtrando por él).
+ *
+ * ⚠️ WHY — de qué cuelga esto: la stream `self_user_roles` (`sync-streams/rafaq.yaml`) es
+ * `SELECT * FROM user_roles WHERE user_id = auth.user_id()`, **sin `org_scope` y sin filtro
+ * `active`**. Consecuencia dura: cuando revocan el acceso, el establishment sale de `org_scope`
+ * y PowerSync borra ese bucket (la fila de `establishments` desaparece del SQLite local), pero
+ * ESTA fila **sobrevive**, con `active = 0`. Es decir: en el instante exacto en que el campo
+ * desaparece del set, queda una fila local que dice explícitamente qué pasó. Eso convierte la
+ * decisión "¿te revocaron o el sync no terminó?" de una conjetura por AUSENCIA en un hecho leído
+ * (y por eso la spec pudo borrar el timer/heurística temporal — design §9.2).
+ *
+ * Si alguien le agregara `AND active = true` a esa stream, la fila desaparecería del local y esta
+ * evidencia pasaría a decir "ausente" siempre que el bucket se demore → volverían los falsos
+ * `active_lost` por sync parcial que la feature 20 vino a eliminar (Gate 1 RE-GATE, RG-1). El
+ * candado vive en el YAML, pegado a la stream.
+ *
+ * NO es un control de acceso: es dato local en un device que el usuario controla y decide una
+ * transición de UI, nunca un permiso (el enforcement es `has_role_in`, `0005_rls_helpers.sql`,
+ * server-side en cada lectura y cada escritura). Ver design §4.3.
+ *
+ * `active` es `column.integer` en el schema del cliente → el consumidor compara contra `1`, no
+ * contra `true`. Sin `active` en el WHERE: queremos LEER el valor, no filtrar por él (si filtrara,
+ * "sin fila" mezclaría "rol inactivo" con "rol inexistente" y perderíamos justo la señal).
+ */
+export function buildActiveRoleQuery(userId: string, establishmentId: string): LocalQuery {
+  return {
+    sql: 'SELECT active FROM user_roles WHERE user_id = ? AND establishment_id = ? LIMIT 1',
+    args: [userId, establishmentId],
+  };
+}
+
+/**
  * phone propio (espeja establishments.loadOwnProfile). user_private es self-only en la stream →
  * la única fila local es la del usuario; igual filtramos por user_id (defensivo + explícito).
  */

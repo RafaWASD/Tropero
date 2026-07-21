@@ -14,9 +14,10 @@
 import { supabase } from './supabase';
 import { classifyError, type ClassifiedError } from './classify-error';
 import { mapMembershipRows, type RoleRow } from '../utils/establishment';
-import type { MembershipEstablishment } from '../utils/establishment';
+import type { MembershipEstablishment, RoleEvidence } from '../utils/establishment';
 import { PHONE_FORMAT_REJECTED_COPY, normalizePhone } from '../utils/phone';
 import {
+  buildActiveRoleQuery,
   buildMembershipsQuery,
   buildOwnPhoneQuery,
   buildOwnNameQuery,
@@ -86,6 +87,46 @@ export async function loadMemberships(userId: string): Promise<LoadMembershipsRe
     },
   }));
   return { ok: true, establishments: mapMembershipRows(rows) };
+}
+
+/**
+ * EVIDENCIA AFIRMATIVA de E1 (spec 20, R20.30/R20.31 — design §4.4). Lee la fila LOCAL de rol del
+ * propio usuario en `establishmentId` y la traduce al veredicto que consumen los contextos:
+ *
+ * | Resultado local | `RoleEvidence` |
+ * |---|---|
+ * | `ok`, fila con `active = 1` | `'active'` |
+ * | `ok`, fila con `active = 0` | `'absent_or_inactive'` |
+ * | `ok`, sin fila (hard-delete / CASCADE) | `'absent_or_inactive'` |
+ * | `!ok` (la lectura local falló) | `'unknown'` (fail-safe: NUNCA concluye en contra del usuario) |
+ *
+ * `active` es `column.integer` en el schema del cliente (los booleans de Postgres llegan como
+ * INTEGER, convención de spec 15) → se compara contra `1`, NO contra `true`.
+ *
+ * `emptyIsSyncing: false` se explicita por LEGIBILIDAD, no porque corrija nada: ya es el default de
+ * `runLocalQuerySingle` (`local-query.ts:72`) — Gate 1 L3. El lector tiene que ver que acá "sin
+ * fila" es un RESULTADO DE NEGOCIO legítimo (el rol se borró), no una degradación a "sincronizando".
+ *
+ * CERO RED (R20.31): la fila ya está sincronizada localmente por la stream `self_user_roles`, que
+ * es justo el punto — sobrevive a la revocación con `active = 0`. Una sola query indexada por
+ * `(user_id, establishment_id)`, y el llamador la ejecuta SOLO cuando el activo no aparece en el
+ * set leído (R20.32): el camino feliz no gana ni una query.
+ *
+ * NO cambia la forma de `loadMemberships`: la evidencia es una lectura aparte, deliberadamente.
+ */
+export async function hasActiveLocalRole(
+  userId: string,
+  establishmentId: string,
+): Promise<RoleEvidence> {
+  const r = await runLocalQuerySingle<{ active: number | null }>(
+    buildActiveRoleQuery(userId, establishmentId),
+    { emptyIsSyncing: false },
+  );
+  // Fallo de lectura del SQLite local → 'unknown'. Con emptyIsSyncing:false la única causa posible
+  // es que `db.getAll` haya tirado (kind 'unknown'); "vacío" nunca degrada acá.
+  if (!r.ok) return 'unknown';
+  if (!r.value) return 'absent_or_inactive';
+  return r.value.active === 1 ? 'active' : 'absent_or_inactive';
 }
 
 export type CreateEstablishmentInput = {

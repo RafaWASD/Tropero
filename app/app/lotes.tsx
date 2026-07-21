@@ -20,6 +20,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Platform, Pressable } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { useStatus } from '@powersync/react';
 import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
 import {
   ChevronLeft,
@@ -48,10 +49,30 @@ import { backOr } from '@/utils/nav';
 
 const OFFLINE_COPY = 'Necesitás conexión para esto. Conectate a internet y volvé a intentar.';
 
+/**
+ * spec 20 / R20.11 — guard de equivalencia de la lista de lotes. Ahora que la re-lectura corre en CADA
+ * avance de sync (`load({ silent: true })`), sin este guard cada checkpoint haría `setGroups(fresh)` con
+ * un array NUEVO → re-render de toda la pantalla aunque los lotes no cambiaran. Devolver `prev` cuando la
+ * lista es equivalente (mismo largo + id/name en orden) hace que React descarte el update. Mismo patrón
+ * que `sameResolvedEstablishmentState`/`sameRodeoState` en los contextos raíz. Pura.
+ */
+function sameManagementGroups(a: ManagementGroup[] | null, b: ManagementGroup[]): boolean {
+  if (a === null) return false;
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i].id !== b[i].id || a[i].name !== b[i].name) return false;
+  }
+  return true;
+}
+
 export default function LotesScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { state: estState } = useEstablishment();
+  // spec 20 — señal de sync del patrón canónico; la dep del efecto reactivo es el PRIMITIVO en ms.
+  const syncStatus = useStatus();
+  const lastSyncedMs = syncStatus.lastSyncedAt?.getTime() ?? 0;
 
   const establishmentId = estState.status === 'active' ? estState.current.id : null;
   const role = estState.status === 'active' ? estState.role : null;
@@ -109,12 +130,28 @@ export default function LotesScreen() {
       }
       return;
     }
-    setGroups(r.value);
+    // R20.11 — guard de equivalencia: en la re-lectura reactiva (cada checkpoint) NO re-renderizamos si
+    // la lista no cambió. Devolver `prev` hace que React descarte el update (un checkpoint que no toca
+    // los lotes es un no-op observable). La carga inicial (prev === null) y todo cambio real sí emiten.
+    setGroups((prev) => (sameManagementGroups(prev, r.value) ? prev : r.value));
   }, [establishmentId]);
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  // spec 20 (R20.3/R20.9) — RE-LECTURA REACTIVA. Esta pantalla era el único MOUNT-ONLY del barrido:
+  // no se actualizaba ni al re-enfocar, así que un lote creado por otro usuario (u otro device) no
+  // aparecía nunca mientras la pantalla siguiera montada. Patrón canónico: `useStatus()` +
+  // `lastSyncedAt.getTime()` como dep PRIMITIVA, guardado en 0 (offline puro intacto, R20.7).
+  //
+  // `silent: true` es OBLIGATORIO: la ruta no-silenciosa setea `loading` → desmonta la lista →
+  // resetea el scroll al tope, y ante un fallo transitorio hace `setGroups([])` (blanquea la
+  // pantalla). Con `silent`, un fallo conserva la lista montada y la posición de scroll (R20.10).
+  useEffect(() => {
+    if (lastSyncedMs === 0) return;
+    void load({ silent: true });
+  }, [lastSyncedMs, load]);
 
   // ── Crear lote (owner) ──
   const dupWarning =

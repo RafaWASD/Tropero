@@ -432,6 +432,140 @@ Arquitectónicamente más limpia (el contexto de datos no sabría de rutas), per
 
 ---
 
+## 10-bis. As-built — lo que quedó distinto de este diseño (implementer, 2026-07-20)
+
+Reconciliación obligatoria (`docs/specs.md`). Nada de esto cambia el *qué* de la feature; son
+decisiones tomadas al construir, todas verificadas.
+
+### (a) `currentIdRef` + `currentNameRef` → **un solo `currentFieldRef`**
+
+§5.3 hablaba de guardar `pendingRevocation { id, name }`. El merge de R20.33 necesita el
+`MembershipEstablishment` **completo** (el set que consume la UI es de ese tipo: id, nombre,
+provincia, ciudad, rol), no solo id+nombre. Guardar el objeto entero y derivar de él el id y el
+nombre elimina la posibilidad de que tres refs paralelos se desincronicen. `pendingRevocationRef`
+guarda ese mismo objeto (superset de lo especificado).
+
+### (b) Los guards de carrera: **orden, no cancelación** (fix de la autorrevisión)
+
+`tasks.md` T8 pedía "el patrón `loadSeq` ya usado en RodeoContext/ProfileContext". Aplicado tal cual
+**introducía una regresión**, y el E2E la cazó: ese patrón CANCELA la carga anterior en cuanto entra
+una nueva, algo inocuo cuando `load` corría una vez, pero letal siendo reactivo — los checkpoints
+llegan cada ~1 s y, si una carga tarda más que ese intervalo, **ninguna llega a aplicarse jamás**
+(starvation). Síntoma: el rodeo creado por un coworker no aparecía nunca, con el efecto disparando
+correctamente. As-built:
+
+- `RodeoContext.load`: se separa **"cambió el objetivo"** (`targetRef` = `usuario|campo` → descartar,
+  que era el propósito original del guard) de **"hay otra carga del mismo objetivo"** (`lastAppliedSeq`
+  → solo ordena, para que una carga lenta no pise a una más nueva).
+- `EstablishmentContext.confirmDisappearance`: **sin** contador de secuencia. Las dos condiciones que
+  invalidan el veredicto ya se chequean explícitamente (cambió el usuario / cambió el campo activo), y
+  dos evaluaciones concurrentes del mismo campo leen la misma fila local y concluyen lo mismo (emitir
+  dos veces es idempotente por el guard de equivalencia).
+
+### (c) Guard de equivalencia **también en `RodeoContext`** (R20.11)
+
+§8 riesgo 4 lo pedía solo para `EstablishmentContext`, pero `RodeoProvider` está en la misma cadena
+raíz y su `value` también se recrea en cada render: sin guard, cada checkpoint re-renderizaría la home
+entera. R20.11 está redactado a nivel sistema ("el sistema no deberá emitir un estado nuevo"), así que
+se aplica en los dos. Comparador conservador (`sameRodeo` compara todos los campos del tipo, con
+`serviceMonths` elemento a elemento): ante la duda emite, para no tragarse el cambio que la feature
+vino a hacer visible.
+
+### (d) `availableRef` **no se toca** en la rama de desaparición
+
+Detectada en la autorrevisión: si `applyMemberships` dejara `availableRef` con el set fresco (sin el
+campo activo) mientras `state` todavía lo tiene, habría una ventana —del largo de la lectura de
+evidencia— con ref y estado **divergentes**, que es exactamente el bug de L1/R20.33. As-built: el ref
+lo actualiza el camino que resuelve (`finishResolve` o `emitActiveLost`), nunca la detección.
+
+### (e) R20.18 acotada a "proteger un estado ya resuelto para el mismo campo"
+
+Ver la nota de reconciliación bajo R20.18 en `requirements.md`: aplicarla en el arranque dejaba la app
+en splash en vez del wizard de rodeo del campo recién creado (aterrizaje optimista, la fila de
+`user_roles` todavía no bajó). El escenario del riesgo 7 queda cubierto igual.
+
+### (f) `assertServerSessionsRevoked` — oráculo por refresh token, no por `SELECT auth.sessions`
+
+`tasks.md` T16 lo describía leyendo `auth.sessions` vía service_role. **No es posible sin migración**:
+el schema `auth` no está expuesto a PostgREST (`supabase/config.toml` → `schemas = ["public",
+"graphql_public"]`), y agregar una RPC para verlo está fuera del alcance. As-built: se captura un
+refresh token vivo ANTES de revocar (control que descarta el falso positivo) y se asserta que después
+ya no produce sesión — la **consecuencia observable** de `revoke_user_sessions`, que es más fuerte que
+contar filas y es el patrón ya canónico del repo (`supabase/tests/edge/run.cjs`, H1-1 R10.1/R10.2).
+La propiedad que importa se conserva intacta: si alguien deja el fixture haciendo solo el update del
+rol, T21 se pone **rojo antes** de asertar nada del diferimiento.
+
+### (g) La señal de sync es un proxy NO determinista del cambio de dato — **db.watch flageado para Raf** (CORREGIDO 2026-07-20)
+
+> **Corrección del diagnóstico (remediación).** La versión anterior de esta nota afirmaba que "un
+> SEGUNDO cambio de una sesión no se ve en 120 s, y tras un `reload` aparece". Ese diagnóstico estaba
+> **confundido** (lo objetó bien el reviewer): un `reload` re-sincroniza y el SQLite local de PowerSync
+> es persistente, así que el reload trae la fila igual — no prueba que estuviera local ANTES. Se
+> rehízo con un **experimento A/B DETERMINISTA** (dos/tres cambios server-side secuenciales, sondeo
+> DIRECTO del SQLite local vía `__RAFAQ_PS__.getAll` SIN reload; evidencia cruda en
+> `progress/impl_20-reactividad-sync.md`).
+
+**Evidencia (2 corridas contrastantes):**
+
+- La fila SIEMPRE llega al SQLite local en **~1,5 s** (6/6 cambios observados, INSERT y UPDATE). La
+  ENTREGA del dato no es el problema.
+- Pero `lastSyncedAt` —la señal sobre la que TODA la reactividad de RAFAQ está emulada— avanza de
+  forma **NO determinista por cambio**: corrida 1, los 3 cambios ticaron al instante (~1,5 s);
+  corrida 2, el **primer** cambio se estancó (fila en SQLite, señal congelada ~90 s) hasta que el
+  **segundo** cambio forzó un checkpoint que barrió ambos de golpe.
+
+**Veredicto: es un SIGNAL problem, no un delivery problem, y NO un latch permanente.** El claim
+original "`lastSyncedAt` deja de avanzar después del primer cambio" es **falso** (corrida 1 muestra
+cada cambio ticando). Lo cierto: `lastSyncedAt` significa "último sync FULL completado", no "cambió un
+dato" — es el primitivo equivocado para reactividad, y puede lagear arbitrariamente detrás de la
+llegada real del dato. La feature 20 arregla la RE-LECTURA (re-leer en CADA avance de la señal, que
+antes no pasaba nunca) y es estrictamente mejor que el latch de un solo disparo, pero **no puede** hacer
+que la UI reaccione a un cambio cuyo checkpoint no tica la señal.
+
+**El fix real es una watched query (`db.watch`)** que reaccione al cambio del SQLite local en vez de a
+la señal gruesa de status. Es **EXPANSIÓN DE ALCANCE** (3 consumidores + la deuda de spec 15 "cero
+watched queries", §9.1) → **FLAGEADO para Raf** (decisión suya), NO se implementa acá. Anotado con la
+evidencia en `docs/backlog.md`. Consecuencia práctica para el E2E (T18): asertar el **estado final
+combinado** de un multi-cambio es robusto al estancamiento (un cambio posterior fuerza el barrido); los
+timeouts por-assert son generosos (120 s) y el archivo NO lleva retries (los previos tapaban este
+fenómeno mal diagnosticado).
+
+### (h) Remediación (2026-07-20) — 3 decisiones de código + limpieza de instrumentación
+
+Cerrando el rechazo del reviewer:
+
+- **`RodeoContext` rutea por `assessDisappearance`** (antes: `if (evidence !== 'active') return;` inline).
+  Ambos contextos comparten ahora UN solo camino de veredicto sobre la evidencia afirmativa. Para el
+  contexto de rodeos, el establecimiento sigue "presente" sii su rol local está activo
+  (`stillPresent = evidence === 'active'`), y se concluye `no_rodeos` SOLO con veredicto `'present'`;
+  `'confirmed'` (revocación → protege D1) y `'inconclusive'` (ilegible → fail-safe R20.30) conservan el
+  estado. Es **behavior-idéntico** al inline previo (active→present→concluye; absent→confirmed→conserva;
+  unknown→inconclusive→conserva) — verificado con unit tests (R20.18/R20.30) — y NO rompe el bootstrap
+  (la guarda sigue acotada a `protectingResolved`, §(e)).
+- **`lotes.tsx` suma el guard de equivalencia** (`sameManagementGroups`): la re-lectura reactiva corre
+  en cada checkpoint, así que sin el guard cada uno hacía `setGroups(fresh)` con un array nuevo →
+  re-render de toda la pantalla. Mismo patrón que `sameResolvedEstablishmentState`/`sameRodeoState`.
+- **`refreshEstablishments` — conteo de llamadores reconciliado**: los **5 llamadores PRE-EXISTENTES**
+  quedan intactos (editar-campo, invite, mas ×2, y el interno de `applyCreatedEstablishment`); feature
+  20 agrega **2 invocaciones internas** —sin tocar la firma—: el efecto reactivo de sync (R20.1) y el
+  refresh post-switch de `switchEstablishment` cuando se descarta un pendiente diferido (R20.34). El
+  comentario del contexto lo dice explícito (antes decía "sus 5 llamadores quedan intactos", que
+  omitía las 2 nuevas).
+- **Instrumentación temporal QUITADA**: el `__RAFAQ_PS__` de `database.ts` (exposición del DB local bajo
+  la marca E2E) y las sondas `[MED]/[MED2]` del spec E2E — eran para el diagnóstico A/B, ya cerrado.
+- **E2E de eventual-consistency: forzador + `retries: 2`** (andamio hasta `db.watch`). Como `lastSyncedAt`
+  no tica de forma determinista por cambio, hay DOS capas: (1) un forzador/timeout que BAJA la frecuencia
+  de freeze — **adiciones** con un blip de red (`syncUntil`: `setOffline` off→on → reconnect → checkpoint
+  fresco → la fila ya presente en el servidor baja), **revocaciones** con el tick NATURAL de la conexión
+  estable + timeout amplio (~120 s; un blip DISRUPTA la propagación de una remoción de bucket, y T20 usa
+  `revokeSession: false` porque revocar la sesión también la disrupta); (2) `retries: 2` que cubren el
+  freeze PATOLÓGICO residual re-corriendo con sesión fresca. Los retires son la herramienta estándar y
+  honesta acá (el reviewer los objetó bajo el diagnóstico VIEJO/errado; con el A/B corregido son
+  legítimos — NO tapan un bug). Todo sin reload (la app sigue montada). Detalle completo en el header de
+  `app/e2e/reactividad-sync.spec.ts` y en `tasks.md` §Fase E.
+
+---
+
 ## 11. Reconciliación de specs al cerrar (regla dura)
 
 0. `specs/active/20-reactividad-sync/context.md` — **ya reconciliado** (2026-07-19): se agregó **D1.2** (diferimiento acotado a la vigencia de la sesión) tras Gate 1 HIGH-1, con la decisión de Raf de no tocar `revoke_user_sessions` y cambiar la promesa. El bloque está marcado con su procedencia; el texto aprobado en Gate 0 no se reescribió.

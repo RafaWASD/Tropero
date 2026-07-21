@@ -198,6 +198,169 @@ export function detectActiveLost(args: {
   return stillThere ? { lost: false } : { lost: true };
 }
 
+// ─── E1 — veredicto de desaparición por EVIDENCIA AFIRMATIVA (spec 20) ──────────
+//
+// `detectActiveLost` (arriba) sigue siendo la detección CRUDA: "el id activo no está en el set".
+// Eso NO alcanza para concluir una revocación — es justamente el falso positivo que el latch de
+// un solo disparo intentaba evitar (spec 20, context §6/E1). El veredicto lo decide un HECHO
+// LEÍDO: la fila local de rol del propio usuario, que sobrevive a la revocación con `active = 0`
+// porque la stream `self_user_roles` no filtra por `active` ni por `org_scope`.
+//
+// ⚠️ Señal de UX, NO control de acceso (design §4.3, Gate 1 MED-1): es dato local en un device que
+// el usuario controla y solo decide QUÉ PANTALLA mostrar. El enforcement real es server-side
+// (`has_role_in`, 0005_rls_helpers.sql) y no depende de esto.
+
+/** Qué dice la fila local de rol del usuario para el establecimiento en cuestión. */
+export type RoleEvidence =
+  /** La fila existe con `active = 1`: el local afirma que el usuario SIGUE teniendo el rol. */
+  | 'active'
+  /** La fila no está, o está con `active = 0`: el local afirma que el usuario PERDIÓ el rol. */
+  | 'absent_or_inactive'
+  /** No se pudo leer la evidencia (fallo del SQLite local). Nunca decide en contra del usuario. */
+  | 'unknown';
+
+/** Veredicto sobre "el elemento activo no aparece en el set recién leído". */
+export type DisappearanceVerdict =
+  /** No hay nada que concluir (no había activo, o sigue en el set). */
+  | 'present'
+  /** Revocación REAL (o campo borrado — son indistinguibles en la firma local, design §6). */
+  | 'confirmed'
+  /** Inconsistencia transitoria o evidencia ilegible: NO cambiar de estado, re-evaluar al próximo sync. */
+  | 'inconclusive';
+
+/**
+ * Decide si la desaparición del elemento activo del set es una revocación REAL o un estado en
+ * tránsito (spec 20, R20.12-R20.15 / R20.18 / R20.30). Pura y DETERMINISTA: sin timers, sin
+ * contadores, sin reintentos — la confirmación temporal fue descartada a propósito (design §9.2)
+ * y volver a introducir una constante de tiempo acá sería reabrir ese agujero.
+ *
+ * | Situación | Veredicto | Por qué |
+ * |---|---|---|
+ * | `hadValue = false` | `present` | No hay nada que perder. |
+ * | `stillPresent = true` | `present` | Caso normal — el llamador ni siquiera consulta la evidencia (R20.32). |
+ * | rol local ausente o `active = 0` | `confirmed` | Hecho leído: perdiste el acceso. Vale con set VACÍO y con set POBLADO (R20.14). |
+ * | rol local `active = 1` | `inconclusive` | El local se contradice (el rol dice que sí, el campo no está) → hay sync en vuelo (R20.15). |
+ * | evidencia ilegible | `inconclusive` | Fail-safe (R20.30): la falta de evidencia nunca decide en contra del usuario. |
+ *
+ * La ausencia del elemento en el set NUNCA es condición suficiente por sí sola (R20.13).
+ */
+export function assessDisappearance(args: {
+  /** ¿Había un elemento activo del cual se pueda "perder" el acceso? */
+  hadValue: boolean;
+  /** ¿El elemento activo sigue en el set recién leído? */
+  stillPresent: boolean;
+  /** Qué dice la fila local de rol (solo se consulta cuando `stillPresent` es false — R20.32). */
+  roleEvidence: RoleEvidence;
+}): DisappearanceVerdict {
+  const { hadValue, stillPresent, roleEvidence } = args;
+  if (!hadValue) return 'present';
+  if (stillPresent) return 'present';
+  // Única puerta a 'confirmed': evidencia afirmativa. 'active' y 'unknown' caen en inconclusive.
+  return roleEvidence === 'absent_or_inactive' ? 'confirmed' : 'inconclusive';
+}
+
+/**
+ * Guard de emisión de una revocación DIFERIDA (spec 20, R20.35 / Gate 1 L2). Entre la detección
+ * (durante la maniobra) y la salida del flujo puede pasar cualquier cosa: el usuario se cambió de
+ * campo activo (R20.34), o el owner le devolvió el rol. Emitir a ciegas produciría un `active_lost`
+ * espurio nombrando un campo que el usuario SÍ tiene.
+ *
+ * Solo se emite si (a) el pendiente sigue siendo el campo activo y (b) la evidencia SIGUE diciendo
+ * que perdió el rol. Con `'unknown'` NO se emite: es coherente con R20.30 (nunca concluir sin
+ * evidencia) y se auto-cura — el próximo checkpoint vuelve a detectar la ausencia y re-evalúa.
+ */
+export function shouldEmitDeferredRevocation(args: {
+  pendingId: string | null;
+  currentId: string | null;
+  roleEvidence: RoleEvidence;
+}): boolean {
+  const { pendingId, currentId, roleEvidence } = args;
+  if (!pendingId) return false;
+  if (pendingId !== currentId) return false;
+  return roleEvidence === 'absent_or_inactive';
+}
+
+/**
+ * ¿La ruta activa está dentro del flujo de MANIOBRA? (spec 20, R20.20/R20.24 — señal de D1).
+ * Cubre todo lo que cuelga del top-segment `maniobra`: el modal `maniobra`, `maniobra/jornada`
+ * (wizard), `maniobra/identificar`, `maniobra/carga` (frame de carga rápida), `maniobra/paso`, etc.
+ *
+ * ⚠️ WHY client-side puro (design §5.2): la señal "natural" sería `sessions.status = 'active'`,
+ * pero `sessions` sincroniza por `est_sessions`, scopeada por `org_scope` → al revocarse el rol
+ * PowerSync BORRA ese bucket y la fila de la sesión activa desaparece del SQLite local justo en el
+ * instante en que habría que consultarla. La guarda concluiría "no hay maniobra" y patearía al
+ * operario — exactamente lo que D1 prohíbe. La ruta sobrevive al borrado del bucket.
+ *
+ * Null-safe: sin segmentos (array vacío) → false.
+ */
+export function isManeuverRouteSegment(segments: readonly string[] | null | undefined): boolean {
+  return segments?.[0] === 'maniobra';
+}
+
+// ─── Guard de equivalencia de estado (spec 20, R20.11) ──────────────────────────
+
+/**
+ * ¿Dos listas de campos son equivalentes para la UI? Compara largo + id/name/role de cada
+ * posición (el ORDEN importa: alimenta el orden de "Mis campos" y del dropdown de recientes).
+ * Sin `JSON.stringify` (no depende del orden de las claves del objeto). Pura.
+ */
+export function sameEstablishmentList(
+  a: readonly MembershipEstablishment[],
+  b: readonly MembershipEstablishment[],
+): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i];
+    const y = b[i];
+    if (x.id !== y.id || x.name !== y.name || x.role !== y.role) return false;
+  }
+  return true;
+}
+
+/**
+ * ¿El estado recién resuelto es equivalente al vigente? (spec 20, R20.11 / design §8 riesgo 4).
+ *
+ * ⚠️ WHY: `EstablishmentProvider` está en la RAÍZ del árbol y su `value` se recrea en cada render
+ * → sin este guard, CADA checkpoint de PowerSync (que ahora dispara una re-lectura, que es todo el
+ * punto de la feature) re-renderizaría la app entera. Con el guard, un checkpoint que no cambia
+ * nada es un no-op observable.
+ *
+ * Compara `status`, el id + rol del activo y la lista disponible (ids + nombres + roles, en orden).
+ * Pura.
+ */
+export function sameResolvedEstablishmentState(
+  a: EstablishmentState,
+  b: EstablishmentState,
+): boolean {
+  if (a === b) return true;
+  if (a.status !== b.status) return false;
+  switch (a.status) {
+    case 'loading':
+    case 'no_establishments':
+      return true;
+    case 'choosing':
+      return sameEstablishmentList(a.available, (b as { available: MembershipEstablishment[] }).available);
+    case 'active': {
+      const other = b as Extract<EstablishmentState, { status: 'active' }>;
+      return (
+        a.current.id === other.current.id &&
+        a.current.name === other.current.name &&
+        a.role === other.role &&
+        sameEstablishmentList(a.available, other.available)
+      );
+    }
+    case 'active_lost': {
+      const other = b as Extract<EstablishmentState, { status: 'active_lost' }>;
+      return (
+        a.reason === other.reason &&
+        a.lostEstablishmentName === other.lostEstablishmentName &&
+        sameEstablishmentList(a.available, other.available)
+      );
+    }
+  }
+}
+
 // ─── Orden de "Mis campos" (R6.6.1) ─────────────────────────────────────────────
 
 /**

@@ -211,6 +211,32 @@ Cuando una query al establecimiento activo falle por pérdida de rol (`R7.2`/`R7
 
 El sistema **no deberá** forzar logout en `active_lost` (consistente con `R7.4`): el usuario sigue autenticado; solo pierde el contexto del campo que ya no le pertenece. El aviso al miembro de que perdió acceso a un campo se da **solo dentro de la app** vía este re-ruteo; en MVP no se envía push ni email al miembro afectado (ver "Decisiones tomadas").
 
+> **Nota as-built — refinado por la feature 20 (2026-07-20).** `active_lost` sigue siendo el mismo estado
+> y el mismo re-ruteo, pero **cambian tres cosas** en cómo y cuándo se concluye. Detalle completo en
+> `specs/active/20-reactividad-sync/`.
+>
+> 1. **Ya no se concluye desde una ausencia.** Que el campo activo desaparezca del set leído **no alcanza**
+>    (ni con set vacío ni con set poblado): la revocación se concluye únicamente con **evidencia
+>    afirmativa** — la fila local de `user_roles` del propio usuario ausente o con `active = 0`, que
+>    sobrevive a la revocación porque la stream `self_user_roles` no filtra por `active`. Si esa fila
+>    todavía dice `active = 1`, el estado se trata como inconsistencia transitoria y **no se cambia de
+>    estado**. Si la evidencia no se puede leer, tampoco se concluye (fail-safe). Esto existe porque la
+>    lectura de membresías pasó a ser reactiva (re-lee en cada avance de sync) y un falso `active_lost`
+>    sacaría al operario de su campo por un checkpoint a medio aplicar.
+> 2. **El aviso puede DIFERIRSE.** Si hay una maniobra en curso (top-segment de ruta `maniobra`), la
+>    transición a `active_lost` **no se aplica**: se guarda como pendiente en memoria y se emite al salir
+>    del flujo, re-verificando antes que siga correspondiendo. Es una garantía **acotada a la vigencia de
+>    la sesión**: `remove_member` revoca la sesión del target, así que en ese camino el usuario termina en
+>    **login** al vencer el access token (≤ `jwt_expiry`), no en `/campo-perdido`. El diferimiento gobierna
+>    **navegación y aviso**, nunca la preservación de datos.
+> 3. **Los dos casos del copy no son distinguibles.** El contexto emite siempre `reason: 'role_revoked'`;
+>    la rama `establishment_deleted` quedó **no alcanzable** (se conserva en el tipo). Motivo verificado:
+>    `remove_member` y el trigger `deactivate_roles_on_establishment_soft_delete` (0076) escriben el mismo
+>    par de columnas con los mismos valores, y en ambos casos la fila de `establishments` sale del SQLite
+>    local. Por eso el copy del aviso pasó a ser verdadero para **ambas** causas —*"Ya no tenés acceso a
+>    este campo. Puede que te lo hayan quitado o que el campo se haya eliminado."*— en vez de afirmar la
+>    causa única que decía antes.
+
 ### R7. Aislamiento multi-tenant
 
 **R7.1** El sistema deberá hacer cumplir el aislamiento entre tenants mediante Row Level Security de Postgres.
