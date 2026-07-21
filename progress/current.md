@@ -3,6 +3,21 @@
 > Este archivo se vacía al cerrar cada sesión y su resumen se mueve a `history.md`.
 > Mientras trabajás, **mantenelo actualizado en tiempo real**, no al final.
 
+## 2026-07-20/21 — Reactividad (features 20+21) COMPLETAS + arranque de la tanda
+
+**Feature 20 (`20-reactividad-sync`) — DONE + commit `1d456b4`.** Re-lectura reactiva de campos/rodeos/lotes en caliente (latch de un disparo → patrón `useStatus`+`lastSyncedAt`). Fue rechazada por el reviewer → remediada → verificada (reviewer APPROVED, Gate 2 seguridad PASS, Gate 2.5 E2E verde independiente) → Puerta 2 aprobada por Raf. **Hallazgo A/B**: `lastSyncedAt` es un proxy NO determinista del cambio de dato (fila llega ~1,5s, señal lagea ~90s+).
+
+**Feature 21 (`21-watched-queries`) — DONE + commit `080100b`.** Migra los 3 consumidores de la 20 a watched queries reales (`db.onChange` en contextos + `useQuery` en lotes) → reactividad **determinista**, aviso de revocación **<350ms**. Cambio de disparador puro (resolución de la 20 con git diff 0). Gate 0→spec→Gate 1→Puerta 1→impl→reviewer APPROVED→Gate 2 PASS→Gate 2.5 (E2E determinista 18/18 confirmado por el leader, sin retries)→Puerta 2 aprobada. **ADR-030** (patrón + migración incremental; el resto de la app migra después). La E2E de la 20 quedó reconciliada (sin retries/forzador).
+
+**Tanda `docs/plan-mejoras-2026-07-20.md` — arrancada por Tier-1:**
+- **U3 (preñez duplicada en alta durante maniobra de tacto) — DONE + commit `9c51dd2`.** `sessionMeasuresPregnancy` gatea el campo de preñez del alta cuando la jornada tacta (suprime el `addTacto` post-create). reviewer APPROVED + Gate 2.5 capture. E2E oráculo server-side `countServerTactoEvents===1`.
+- **U5 (vacunas tap nativo 🔴) — ⏸ ACCIÓN DE RAF: rebuild nativo + device-test.** El offensor Pressable+Tamagui ya estaba fixeado (`47a4b5c`, 2026-07-18); el reporte es casi seguro build viejo. Si sigue roto en build fresco → NO es el tap (prime suspect: preconfig persistence, escalar). (`progress/impl_U5-*`).
+- **U6a (reportes por año) — ⏸ BLOQUEADO en Facundo + deploy.** No es bug de query: gap de MODELO (sin ancla temporal de campaña; limitación [TENTATIVO] 0105). Necesita definición de dominio de Facundo (opción A: anclar a evidencia fechada) + migración (Gate 1) + probable ADR. En `CONTEXT/07-pendientes.md`. Diagnóstico + plan E2E listos (`progress/impl_U6a-*`, commit `69c4e21`).
+
+**Coordinación**: la terminal de BLE commiteó feature 04 (`acec3cd`) en paralelo; sin conflicto (file-sets disjuntos, stage selectivo). `scripts/run-tests.mjs` + `.claude/agents.zip` quedan sin commitear (loose ends de esa terminal, no míos).
+
+**PRÓXIMO** (tanda, esperando a Raf): U8b (link WhatsApp duplicado, autónomo rápido) → Tier-2 (U7 navbar Android, U8a deep links, U9 seguridad token, U4 ficha) → Tier-3 (U2 CTA teclado, U1 escala 1-9, U6c años, U6b skeletons). Varias piden decisiones/device/Facundo. Acción inmediata de Raf: device-test U5 + llevar U6a a Facundo.
+
 ## 2026-07-19 — spec 10 DELTA «rodeo grande» — COMPLETO + Puerta 2 APROBADA
 
 Delta-spec `rodeo-grande` (vista DENTRO del rodeo/lote: query scopeada + paginada por keyset/scroll infinito + FlatList virtualizada + count real + buscador/chips por categoría/sexo + masivas sobre el grupo entero + fix bug lote). **Fases 1-5 hechas, reviewer APPROVED, Gate 2 seguridad PASS, Gate 2.5 (E2E 6/6 + 10 capturas + veto visual PASS, ADR-029).** Race de `useGroupView.refreshWindow` al ensanchar filtro (destapado por el E2E) → **arreglado** (guard puro `shouldYieldWindowRefresh`; el refresh cede ante una carga de foreground) + regresión E2E que cae sin el fix. **Raf aprobó la Puerta 2** (capturas a la vista) → commiteado a `main`. Backlog: PowerSync reconnect (ALTO) + Animales tab no virtualizada (LIMIT 200). Polish pendiente (no bloqueante): botón "limpiar filtros" de un toque. Detalle en `progress/impl_10-rodeo-grande-*.md` + `review_10-rodeo-grande.md`.
