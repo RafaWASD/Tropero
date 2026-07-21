@@ -2168,6 +2168,7 @@ MainTabs
   - `validateExitWeight` / `validateExitPrice` (OPCIONALES, vacío → `null`) + `sanitizePriceInput` (sin el cap de 4 díg de `sanitizeWeightInput` — un animal se vende por 6-7 cifras).
   - `archivedBadgeLabel(status, exitDate)` → texto del badge de modo archivada ("Vendido el {fecha}"); fecha `null` → solo el verbo (nunca "null").
 - **`fetchAnimalDetail`** (extendido): el SELECT + el type `AnimalDetail` agregan `created_by → createdBy`, `exit_date → exitDate`, `exit_reason → exitReason` (gating + badge de archivada).
+  - **Reconciliación as-built — bugfix U4 (2026-07-21)**: el SELECT + `AnimalDetail` agregan también `teeth_state → teethState` (columna enum `teeth_state_enum` de `animal_profiles`, 0020 — la sobreescribe la maniobra DIENTES; no es evento ni custom attribute). `buildAnimalDetailQuery` proyecta `ap.teeth_state` en la rama synced y `NULL` en el overlay (`pending_animal_profiles` no porta la columna → el alta optimista muestra los dientes recién al sincronizar, igual patrón que `is_cut=0`). La ficha lo muestra como fila **"Dientes"** en "Estado actual" (`teethLabel`), condicional a `teethState != null` (dientes es rodeo-gated → no meter "Sin registrar" en rodeos que no trackean boca). Cierra la brecha (a) del reporte de Raf. Detalle en `progress/impl_U4-ficha-paridad.md`.
 
 **Capa de UI** — `app/app/animal/`:
 

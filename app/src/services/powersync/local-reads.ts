@@ -1347,6 +1347,9 @@ export function buildAnimalDetailQuery(profileId: string): LocalQuery {
     `${apodoValueSubquery('ap')} AS apodo, ${apodoEnabledSubquery('ap')} AS apodo_enabled, ` +
     'ap.idv AS idv, ap.category_id AS category_id, ' +
     'ap.category_override AS category_override, ap.breed AS breed, ap.coat_color AS coat_color, ' +
+    // bugfix U4: teeth_state (enum 0020, sobreescrito por la maniobra DIENTES) → la ficha lo muestra en
+    // "Estado actual" (fila "Dientes"). NO es evento ni custom attribute; se lee de la columna del perfil.
+    'ap.teeth_state AS teeth_state, ' +
     'ap.entry_date AS entry_date, ap.entry_weight AS entry_weight, ' +
     'COALESCE(pso.status, ap.status) AS status, ' +
     'ap.created_by AS created_by, COALESCE(pso.exit_date, ap.exit_date) AS exit_date, ' +
@@ -1377,6 +1380,9 @@ export function buildAnimalDetailQuery(profileId: string): LocalQuery {
     `${apodoValueSubquery('pap')} AS apodo, ${apodoEnabledSubquery('pap')} AS apodo_enabled, ` +
     'pap.idv AS idv, pap.category_id AS category_id, ' +
     'pap.category_override AS category_override, pap.breed AS breed, pap.coat_color AS coat_color, ' +
+    // bugfix U4: pending_animal_profiles NO tiene teeth_state (el overlay optimista no la porta) → NULL
+    // constante para alinear las columnas del UNION ALL con la rama synced. El valor real baja al sincronizar.
+    'NULL AS teeth_state, ' +
     'pap.entry_date AS entry_date, pap.entry_weight AS entry_weight, pap.status AS status, ' +
     'pap.created_by AS created_by, pap.exit_date AS exit_date, pap.exit_reason AS exit_reason, ' +
     'pap.rodeo_id AS rodeo_id, pap.management_group_id AS management_group_id, ' +

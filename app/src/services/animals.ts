@@ -175,6 +175,13 @@ export type AnimalDetail = {
   categoryOverride: boolean;
   breed: string | null;
   coatColor: string | null;
+  /**
+   * Estado de dientes/boca (bugfix U4): `animal_profiles.teeth_state` (enum `teeth_state_enum`, 0020) que la
+   * maniobra DIENTES sobreescribe. NO es evento (no tiene historial en el timeline) ni custom attribute → la
+   * ficha lo muestra en "Estado actual" (fila "Dientes", `teethLabel`). null = sin registrar / rodeo que no
+   * trackea boca / overlay de alta optimista (pending_animal_profiles no porta la columna).
+   */
+  teethState: string | null;
   entryDate: string | null;
   entryWeight: number | null;
   status: AnimalStatus;
@@ -1081,6 +1088,9 @@ type LocalDetailRow = {
   category_override: number | boolean;
   breed: string | null;
   coat_color: string | null;
+  // bugfix U4: teeth_state (enum 0020) proyectado por buildAnimalDetailQuery (synced: ap.teeth_state; overlay:
+  // NULL — pending_animal_profiles no tiene la columna). La ficha lo expone como AnimalDetail.teethState.
+  teeth_state?: string | null;
   entry_date: string | null;
   entry_weight: number | null;
   status: AnimalStatus;
@@ -1162,6 +1172,9 @@ export async function fetchAnimalDetail(profileId: string): Promise<ServiceResul
       categoryOverride: toBool(row.category_override),
       breed: row.breed,
       coatColor: row.coat_color,
+      // bugfix U4: estado de dientes (teeth_state) para la fila "Dientes" de "Estado actual". null en el
+      // overlay (alta optimista sin la columna) → se muestra recién al sincronizar.
+      teethState: row.teeth_state ?? null,
       entryDate: row.entry_date,
       entryWeight: row.entry_weight,
       status: row.status,

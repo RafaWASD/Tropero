@@ -5,6 +5,22 @@
 
 > **Nota de delta (ADR-028)**: el baseline (`requirements.md`/`design.md`/`tasks.md` y los deltas previos) NO se reescribe. Al cerrar este delta (Puerta 2) se folda al `design.md` baseline un puntero en "Deltas posteriores" + nota as-built bajo el/los `R<n>` afectados (R10/R14 estado actual de la ficha; R4 alta).
 
+> **Reconciliación as-built — bugfix U4 (paridad card↔ficha, tanda `docs/plan-mejoras-2026-07-20.md` Tier-2, 2026-07-21).**
+> Raf reportó la ficha incompleta vs la card. Dos cambios en la ficha (`CurrentStateSection`, `app/app/animal/[id].tsx`):
+> 1. **Estado reproductivo anclado en `detail.reproStatus`** (misma fuente single-slot que el chip de la card),
+>    no ya recomputado aparte del timeline. La fila antes solo cubría preñez(timeline) + `served_untested` → los
+>    estados `cut` ("No apta") y `unknown` ("Sin evaluar", no-vaquillona) caían en "Sin registrar", y
+>    `empty`/`pregnant` podían **divergir** de la card (el timeline y `deriveReproStatus`/`toTimelineItems` usan
+>    tie-breaks distintos a igualdad de `(event_date, created_at)`). Ahora un helper PURO
+>    `reproStateRowDisplay(reproStatus, hasPregnancyEvent, aptitudeShown)` (en `repro-status.ts`) decide la fila:
+>    ENRIQUECE con término+fecha del timeline cuando hay evento determinante de preñez, cae al literal de la card
+>    (`reproStatusLabel`) para el resto, y no duplica el veredicto de la fila "Aptitud reproductiva" (fitness/unknown
+>    de una vaquillona). Paridad EXACTA con el chip. Aditivo: la ruta ya-verde (parto→"Vacía · fecha") se conserva.
+> 2. **Fila "Dientes"** nueva en "Estado actual" (ver reconciliación en `design-caravana-ficha`/`AnimalDetail` — no
+>    es evento ni custom attribute: es la columna `animal_profiles.teeth_state`).
+> Frontend puro (+ una columna extra en el SELECT del detalle, ya sincronizada). Tests: `repro-status.test.ts`
+> (`reproStateRowDisplay`) + E2E `app/e2e/ficha-paridad.spec.ts`. Detalle en `progress/impl_U4-ficha-paridad.md`.
+
 ---
 
 ## 1. Archivos a crear / modificar

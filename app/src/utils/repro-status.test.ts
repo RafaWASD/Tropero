@@ -11,6 +11,7 @@ import {
   deriveReproAptitude,
   deriveReproStatus,
   isReproApt,
+  reproStateRowDisplay,
   reproStatusLabel,
   PROVEN_FEMALE_CATEGORY_CODES,
   SERVICE_AGE_THRESHOLD_DAYS,
@@ -328,4 +329,54 @@ test('integración: vaquillona ≥365 d sin veredicto → isReproApt true vía a
   assert.equal(isReproApt({ sex: 'female', categoryCode: 'vaquillona', aptitude: null, ageDays }), true);
   const young = ageInDaysFromBirthDate('2025-06-30', NOW);
   assert.equal(isReproApt({ sex: 'female', categoryCode: 'vaquillona', aptitude: null, ageDays: young }), false);
+});
+
+// ════════════════════════════════════════════════════════════════════════════════════════════
+// reproStateRowDisplay — bugfix U4 (paridad card↔ficha de la fila "Estado reproductivo")
+// ════════════════════════════════════════════════════════════════════════════════════════════
+
+test('reproStateRowDisplay: preñez con evento determinante → pregnancy (el caller enriquece con término+fecha)', () => {
+  assert.deepEqual(reproStateRowDisplay({ kind: 'pregnant', status: 'large' }, true, false), { kind: 'pregnancy' });
+  assert.deepEqual(reproStateRowDisplay({ kind: 'empty' }, true, false), { kind: 'pregnancy' });
+  // Aún con la fila Aptitud visible (vaquillona), la preñez determinada se muestra (no la cubre Aptitud).
+  assert.deepEqual(reproStateRowDisplay({ kind: 'empty' }, true, true), { kind: 'pregnancy' });
+});
+
+test('reproStateRowDisplay: empty SIN evento en el timeline → label "Vacía" (fix del reporte de Raf, divergencia card↔timeline)', () => {
+  // La card decía "Vacía" (detail.reproStatus.empty) pero el timeline no derivaba la preñez → antes "Sin
+  // registrar". Ahora la fila cae al literal de la card: "Vacía".
+  assert.deepEqual(reproStateRowDisplay({ kind: 'empty' }, false, false), { kind: 'label', label: 'Vacía' });
+  assert.deepEqual(reproStateRowDisplay({ kind: 'pregnant', status: 'small' }, false, false), {
+    kind: 'label',
+    label: 'Preñada',
+  });
+});
+
+test('reproStateRowDisplay: served_untested y cut → literal exacto del chip de la card', () => {
+  assert.deepEqual(reproStateRowDisplay({ kind: 'served_untested' }, false, false), {
+    kind: 'label',
+    label: 'Servida sin tacto',
+  });
+  // cut → "No apta" (antes caía en "Sin registrar" en la ficha) — paridad con la card.
+  assert.deepEqual(reproStateRowDisplay({ kind: 'cut' }, false, false), { kind: 'label', label: 'No apta' });
+});
+
+test('reproStateRowDisplay: fitness/unknown NO se duplican cuando la fila Aptitud está visible (vaquillona)', () => {
+  assert.deepEqual(reproStateRowDisplay({ kind: 'fitness', fitness: 'apta' }, false, true), { kind: 'none' });
+  assert.deepEqual(reproStateRowDisplay({ kind: 'unknown' }, false, true), { kind: 'none' });
+});
+
+test('reproStateRowDisplay: unknown/fitness SIN fila Aptitud → se muestran (paridad con la card)', () => {
+  assert.deepEqual(reproStateRowDisplay({ kind: 'unknown' }, false, false), { kind: 'label', label: 'Sin evaluar' });
+  assert.deepEqual(reproStateRowDisplay({ kind: 'fitness', fitness: 'diferida' }, false, false), {
+    kind: 'label',
+    label: 'Diferida',
+  });
+});
+
+test('reproStateRowDisplay: none (macho/ternera) → none (sin fila de estado, como la card no muestra chip)', () => {
+  assert.deepEqual(reproStateRowDisplay({ kind: 'none' }, false, false), { kind: 'none' });
+  // Un CUT tiene precedencia sobre la preñez en deriveReproStatus, pero si llegara con hasPregnancyEvent
+  // igual gana el switch (no es pregnant/empty) → "No apta" (consistente con la precedencia de la card).
+  assert.deepEqual(reproStateRowDisplay({ kind: 'cut' }, true, false), { kind: 'label', label: 'No apta' });
 });

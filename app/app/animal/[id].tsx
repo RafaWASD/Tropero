@@ -111,7 +111,8 @@ import {
 } from '@/utils/event-timeline';
 import { formatConditionScore } from '@/utils/event-input';
 import { formatDateEsAr } from '@/utils/format-date-es-ar';
-import { reproStatusLabel, type ReproStatus } from '@/utils/repro-status';
+import { reproStateRowDisplay, type ReproStatus } from '@/utils/repro-status';
+import { teethLabel } from '@/utils/teeth-options';
 import type { HeiferFitness } from '@/utils/maneuver-sequence';
 import { isBullEntire } from '@/utils/maneuver-applicability';
 import { fetchScrotalHistory, type ScrotalMeasurementRow } from '@/services/scrotal';
@@ -1075,6 +1076,7 @@ export default function AnimalDetailScreen() {
               categoryCode={detail.categoryCode}
               reproStatus={detail.reproStatus}
               reproAptitude={detail.reproAptitude}
+              teethState={detail.teethState}
             />
 
             {/* Tarjeta de tendencia de CIRCUNFERENCIA ESCROTAL (spec 03 M6, R14.14): la serie de mediciones
@@ -2343,6 +2345,7 @@ function CurrentStateSection({
   categoryCode,
   reproStatus,
   reproAptitude,
+  teethState,
 }: {
   timeline: TimelineItem[] | null;
   sex: 'male' | 'female';
@@ -2350,6 +2353,8 @@ function CurrentStateSection({
   categoryCode: string;
   reproStatus: ReproStatus;
   reproAptitude: HeiferFitness | null;
+  // bugfix U4: estado de dientes/boca (teeth_state, enum 0020). null = sin registrar / rodeo sin boca.
+  teethState: string | null;
 }) {
   // `now` para el timestamp relativo de cada valor (un Date por render, determinístico acá).
   const now = new Date();
@@ -2362,25 +2367,35 @@ function CurrentStateSection({
     ? `${formatConditionScore(state.conditionScore.score)} / 5 · ${formatEventDate(state.conditionScore.date, now, { dateOnly: true })}`
     : null;
 
-  // Estado reproductivo (solo hembras): preñez del último evento determinante (humanizePregnancyState + fecha);
-  // si no hay preñez pero la hembra está servida/probada sin tacto → "Servida sin tacto" (RAR.4.2); si no →
-  // null → "Sin registrar". La preñez sigue saliendo del timeline (conserva "(cabeza) · fecha", RAR.4.4).
-  const pregnancyText = humanizePregnancyState(state.pregnancy);
-  const reproValue =
-    pregnancyText && state.pregnancy
-      ? `${pregnancyText} · ${formatEventDate(state.pregnancy.date, now, { dateOnly: true })}`
-      : reproStatus.kind === 'served_untested'
-        ? reproStatusLabel(reproStatus)
-        : null;
-
   // Aptitud reproductiva (RAR.4.1): SOLO hembra y SOLO en la fase de vaquillona (con o sin veredicto). Las
   // adultas probadas no tienen eje de aptitud → se omite la fila (su estado vive en "Estado reproductivo").
   const showAptitude = sex === 'female' && categoryCode === 'vaquillona';
+
+  // Estado reproductivo (solo hembras) — bugfix U4 (paridad card↔ficha): la fila se ancla en `reproStatus`
+  // (misma fuente single-slot que el chip de la card, `reproStatusLabel`) en vez de recomputar la preñez
+  // aparte. Cuando hay un evento determinante de preñez, se ENRIQUECE con el término + fecha del timeline
+  // ("Preñada (cabeza) · fecha" / "Vacía · fecha", RAR.4.4) — más detalle que el chip. `reproStateRowDisplay`
+  // evita duplicar el veredicto de la fila "Aptitud reproductiva" (vaquillona) y cubre cut/empty/unknown que
+  // antes caían en "Sin registrar" (la brecha que Raf reportó: la card decía "Vacía" y la ficha no).
+  const reproRow = reproStateRowDisplay(reproStatus, state.pregnancy != null, showAptitude);
+  const reproValue =
+    reproRow.kind === 'pregnancy' && state.pregnancy
+      ? `${humanizePregnancyState(state.pregnancy)} · ${formatEventDate(state.pregnancy.date, now, { dateOnly: true })}`
+      : reproRow.kind === 'label'
+        ? reproRow.label
+        : null;
 
   return (
     <DetailSection icon={Gauge} title="Estado actual">
       <CurrentStateRow label="Peso actual" value={weightValue} />
       <CurrentStateRow label="Condición corporal" value={scoreValue} />
+      {/* Dientes (bugfix U4): estado de boca vigente (teeth_state). Solo se muestra si hay valor — a
+          diferencia de Peso/Condición (siempre visibles): dientes es rodeo-gated (data_key `dientes`), así
+          que "Sin registrar" en todo animal de un rodeo que no trackea boca sería ruido. `teethLabel` da el
+          es-AR ("Boca llena" / "2 dientes" / "Sin dientes" / etc.). */}
+      {teethState != null ? (
+        <CurrentStateRow label="Dientes" value={teethLabel(teethState)} />
+      ) : null}
       {showAptitude ? (
         <CurrentStateRow label="Aptitud reproductiva" value={aptitudeRowLabel(reproAptitude)} />
       ) : null}

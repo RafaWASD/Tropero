@@ -870,6 +870,13 @@ export async function seedAnimal(
      * un ternero ⭐ que la castración masiva pre-tilda SIN marcar por default (spec 10 R11.3).
      */
     futureBull?: boolean;
+    /**
+     * Estado de dientes/boca inicial (`animal_profiles.teeth_state`, enum `teeth_state_enum` 0020). La
+     * maniobra DIENTES lo sobreescribe en producción; acá se siembra directo para el test de la fila
+     * "Dientes" de "Estado actual" (bugfix U4). undefined → columna NULL (sin registrar). Valores válidos:
+     * 'sin_dientes' | '1/4' | '1/2' | '3/4' | 'boca_llena' | '6d' | '4d' | '2d'.
+     */
+    teethState?: string;
   } = {},
 ): Promise<string> {
   const sex = opts.sex ?? 'female';
@@ -913,6 +920,9 @@ export async function seedAnimal(
   if (opts.categoryOverride) profilePayload.category_override = true;
   // future_bull (0085): solo machos no-castrados; el trigger de normalización lo fuerza a false si no aplica.
   if (opts.futureBull) profilePayload.future_bull = true;
+  // teeth_state (0020, bugfix U4): estado de boca. Se siembra directo en el perfil (la maniobra DIENTES lo
+  // hace en prod); NULL por default. La ficha lo muestra en "Estado actual" (fila "Dientes").
+  if (opts.teethState) profilePayload.teeth_state = opts.teethState;
   const { error: pErr } = await admin.from('animal_profiles').insert(profilePayload);
   if (pErr) throw new Error(`seedAnimal animal_profiles: ${pErr.message}`);
 
@@ -965,6 +975,31 @@ export async function seedReproductiveServiceEvent(
     notes: opts.notes ?? null,
   });
   if (error) throw new Error(`seedReproductiveServiceEvent: ${error.message}`);
+  return id;
+}
+
+/**
+ * Siembra un evento reproductivo de TACTO directamente vía service_role (bypassea RLS), para el bugfix U4
+ * (paridad card↔ficha del "Estado reproductivo"). `pregnancyStatus` = 'empty' (vacía) | 'small'|'medium'|
+ * 'large' (preñada). Con 'empty' la hembra queda VACÍA (deriveReproStatus → {kind:'empty'} tanto en la card
+ * como en la ficha). `establishment_id` lo DERIVA el trigger 0077 del perfil → no se pasa. Se borra en cascada
+ * al borrar el establishment.
+ */
+export async function seedReproductiveTactoEvent(
+  profileId: string,
+  opts: { pregnancyStatus: 'empty' | 'small' | 'medium' | 'large'; eventDate?: string } = {
+    pregnancyStatus: 'empty',
+  },
+): Promise<string> {
+  const id = randomUUID();
+  const { error } = await admin.from('reproductive_events').insert({
+    id,
+    animal_profile_id: profileId,
+    event_type: 'tacto',
+    pregnancy_status: opts.pregnancyStatus,
+    event_date: opts.eventDate ?? new Date().toISOString().slice(0, 10),
+  });
+  if (error) throw new Error(`seedReproductiveTactoEvent: ${error.message}`);
   return id;
 }
 

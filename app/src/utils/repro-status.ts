@@ -225,6 +225,62 @@ export function reproStatusLabel(s: ReproStatus): string | null {
   }
 }
 
+/**
+ * Decisión de render de la fila "Estado reproductivo" de la FICHA (bugfix U4, paridad card↔ficha).
+ *
+ * La CARD muestra un chip único = `reproStatusLabel(detail.reproStatus)` (single-slot). La ficha, en cambio,
+ * antes recomputaba la preñez desde el TIMELINE y solo caía a `reproStatus` para `served_untested` → los
+ * estados `cut`/`unknown` quedaban en "Sin registrar" y `empty`/`pregnant` podían DIVERGIR de la card (el
+ * timeline y `deriveReproStatus` usan tie-breaks distintos a igualdad de `(event_date, created_at)`). Esta
+ * función ancla la fila en `detail.reproStatus` (misma fuente que la card) para garantizar paridad, dejando
+ * que el caller ENRIQUEZCA con el detalle de preñez del timeline (término + fecha) cuando lo haya.
+ *
+ *   - `{ kind: 'pregnancy' }`: hay un evento determinante de preñez (`hasPregnancyEvent`) Y el estado es
+ *     pregnant/empty → el caller renderiza el humanizado del timeline ("Preñada (cola) · fecha" / "Vacía ·
+ *     fecha") — MÁS detalle que el chip de la card.
+ *   - `{ kind: 'label', label }`: el MISMO literal es-AR del chip de la card (`reproStatusLabel`), para los
+ *     estados que la ficha no enriquece: served_untested → "Servida sin tacto", cut → "No apta", y el
+ *     FALLBACK de pregnant/empty sin evento determinante en el timeline (divergencia → igual mostramos el
+ *     estado de la card, sin fecha).
+ *   - `{ kind: 'none' }`: no renderizar valor (la fila cae a "Sin registrar"). Para `none` (macho/ternera) y
+ *     para fitness/unknown CUANDO la fila "Aptitud reproductiva" ya se muestra (`aptitudeShown` = vaquillona):
+ *     el veredicto vive en esa fila, no se duplica. Para una NO-vaquillona `unknown` sí se muestra "Sin
+ *     evaluar" (paridad con la card).
+ */
+export type ReproStateRowDisplay =
+  | { kind: 'pregnancy' }
+  | { kind: 'label'; label: string }
+  | { kind: 'none' };
+
+export function reproStateRowDisplay(
+  reproStatus: ReproStatus,
+  hasPregnancyEvent: boolean,
+  aptitudeShown: boolean,
+): ReproStateRowDisplay {
+  // Preñez con evento determinante → el caller la enriquece (término + fecha).
+  if (hasPregnancyEvent && (reproStatus.kind === 'pregnant' || reproStatus.kind === 'empty')) {
+    return { kind: 'pregnancy' };
+  }
+  switch (reproStatus.kind) {
+    case 'none':
+      return { kind: 'none' }; // macho / ternera: sin fila de estado (paridad: la card tampoco muestra chip)
+    case 'pregnant':
+      return { kind: 'label', label: 'Preñada' }; // fallback sin fecha (timeline sin determinante)
+    case 'empty':
+      return { kind: 'label', label: 'Vacía' }; // fallback sin fecha (el reporte de Raf: la card decía Vacía)
+    case 'served_untested':
+    case 'cut':
+      // Literal exacto del chip de la card (served_untested → "Servida sin tacto"; cut → "No apta").
+      return { kind: 'label', label: reproStatusLabel(reproStatus) as string };
+    case 'fitness':
+      // fitness ⟹ vaquillona ⟹ la fila "Aptitud reproductiva" ya muestra el veredicto → no duplicar.
+      return aptitudeShown ? { kind: 'none' } : { kind: 'label', label: reproStatusLabel(reproStatus) as string };
+    case 'unknown':
+      // vaquillona sin veredicto → "Sin evaluar" vive en Aptitud; no-vaquillona → mostrarlo acá (paridad).
+      return aptitudeShown ? { kind: 'none' } : { kind: 'label', label: reproStatusLabel(reproStatus) as string };
+  }
+}
+
 /** Inputs de la elegibilidad de inseminación (RAR.6.1): aptitud vigente + edad en días (fallback de edad). */
 export type ReproAptInput = {
   sex: 'male' | 'female' | null;

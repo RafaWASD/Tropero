@@ -1073,6 +1073,10 @@ test('buildAnimalDetailQuery: b1 identidad+birth_date, LEFT JOIN lote, deleted_a
   // (un alta optimista nace no-CUT) → la ficha lo expone como AnimalDetail.isCut (afordancia + badge amarillo).
   assert.match(q.sql, /ap\.is_cut AS is_cut/);
   assert.match(q.sql, /0 AS is_cut/);
+  // bugfix U4: teeth_state REAL en la rama synced + NULL en el overlay (pending_animal_profiles no tiene la
+  // columna) → la ficha lo expone como AnimalDetail.teethState (fila "Dientes" de "Estado actual").
+  assert.match(q.sql, /ap\.teeth_state AS teeth_state/);
+  assert.match(q.sql, /NULL AS teeth_state/);
   assert.deepEqual(q.args, ['prof-7', 'prof-7']);
 });
 
