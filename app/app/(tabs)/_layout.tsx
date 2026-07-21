@@ -19,11 +19,12 @@
 import { Tabs, useRouter } from 'expo-router';
 import { BarChart3, Home, type LucideIcon, Menu, PawPrint, Zap } from 'lucide-react-native';
 import { getTokenValue } from 'tamagui';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { initialWindowMetrics, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Pressable, View, type ColorValue } from 'react-native';
 import { Text, YStack } from 'tamagui';
 
 import { shadows } from '../../tamagui.config';
+import { computeTabBarInsetLayout } from '@/utils/tab-bar-insets';
 
 // Valores del design system (tokens) leídos en runtime para pasarlos a APIs
 // no-Tamagui (React Navigation tabBarStyle, color de los íconos lucide). Se leen
@@ -312,11 +313,24 @@ export default function TabsLayout() {
   const insets = useSafeAreaInsets();
   const COLOR = navColors();
 
-  // Respeta la safe area (home indicator iOS ~34px / gesture bar Android) pero
-  // garantiza un margen MÍNIMO ($navBottomMin = 12) cuando insets.bottom=0 (Android
-  // viejo con botones físicos, o el preview web): así el nav nunca queda al ras del
-  // borde. iPhone: max(34,12)=34 (sin cambio). Web/Android-sin-inset: max(0,12)=12.
-  const navBottom = Math.max(insets.bottom, COLOR.navBottomMin);
+  // Safe area inferior del bottom-nav (bugfix U7 — navbar pegado a la barra del sistema en Android).
+  // Respeta el inset real (home indicator iOS ~34 / gesture bar o 3 botones Android) con un mínimo
+  // de respiro ($navBottomMin = 12) cuando no hay inset (web / Android viejo con botones físicos).
+  //
+  // Clave del fix: además del inset VIGENTE (useSafeAreaInsets, que en Android edge-to-edge puede
+  // reportar 0 en el frame-cero porque el SafeAreaProvider raíz no está sembrado con
+  // initialWindowMetrics y mide async), usamos como PISO el inset medido al ARRANQUE
+  // (initialWindowMetrics, sincrónico desde getConstants en nativo). Así el nav arranca con el
+  // respiro correcto y NO queda pegado a la gesture bar. En web initialWindowMetrics es null (→ 0)
+  // y en iOS coincide con el vigente → ninguno de los dos cambia respecto del comportamiento previo.
+  // El cálculo vive en @/utils/tab-bar-insets (función pura, testeada) — este archivo solo lee tokens
+  // e insets y los pasa. iPhone: max(34,34,12)=34 (idéntico). Web: max(0,0,12)=12 (idéntico).
+  const { height: navHeightTotal, paddingBottom: navBottom } = computeTabBarInsetLayout({
+    liveInsetBottom: insets.bottom,
+    initialInsetBottom: initialWindowMetrics?.insets.bottom ?? 0,
+    navHeight: COLOR.navHeight,
+    navBottomMin: COLOR.navBottomMin,
+  });
 
   return (
     <Tabs
@@ -327,7 +341,7 @@ export default function TabsLayout() {
         tabBarStyle: {
           backgroundColor: COLOR.white,
           borderTopColor: COLOR.divider,
-          height: COLOR.navHeight + navBottom,
+          height: navHeightTotal,
           paddingBottom: navBottom,
         },
         // fontSize del label = $navLabel (11px, token leído con getTokenValue → no
