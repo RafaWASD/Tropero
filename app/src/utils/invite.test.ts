@@ -4,7 +4,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { parseInviteToken, inviteErrorCopy, alreadyMemberCopy } from './invite.ts';
+import {
+  parseInviteToken,
+  inviteErrorCopy,
+  alreadyMemberCopy,
+  inviteShareMessage,
+} from './invite.ts';
 
 const TOKEN = '550e8400-e29b-41d4-a716-446655440000';
 
@@ -87,4 +92,26 @@ test('alreadyMemberCopy: nombra el rol actual en español', () => {
 
 test('alreadyMemberCopy: sin rol → cae al copy genérico de already_member', () => {
   assert.equal(alreadyMemberCopy(null), inviteErrorCopy('already_member'));
+});
+
+// ─── inviteShareMessage (bugfix U8b: el link sale UNA sola vez) ─────────────────────
+
+test('inviteShareMessage: la URL aparece EXACTAMENTE una vez en el mensaje', () => {
+  const url = 'https://app.rafq.ar/invite?token=' + TOKEN;
+  const msg = inviteShareMessage('La Escondida', url);
+  // Contar ocurrencias del link completo — el bug U8b lo repetía (una en el texto + una del `url`).
+  const occurrences = msg.split(url).length - 1;
+  assert.equal(occurrences, 1, `la URL debería aparecer 1 vez, apareció ${occurrences}: ${msg}`);
+});
+
+test('inviteShareMessage: incluye el nombre del campo y es es-AR (voseo, invitación)', () => {
+  const msg = inviteShareMessage('La Escondida', 'https://x/y?token=z');
+  assert.match(msg, /La Escondida/); // nombre del campo preservado
+  assert.match(msg, /Te invito/i); // voseo / es-AR
+  assert.match(msg, /link para aceptar/i);
+});
+
+test('inviteShareMessage: termina con la URL (sink limpio para la share sheet)', () => {
+  const url = 'https://app.rafq.ar/invite?token=' + TOKEN;
+  assert.ok(inviteShareMessage('Campo', url).endsWith(url));
 });

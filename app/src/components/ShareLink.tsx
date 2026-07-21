@@ -16,6 +16,11 @@
 // estar; lo envolvemos en try/catch y, si no hay share sheet, no rompemos (el botón Copiar es el
 // fallback universal). Feedback de "copiado" efímero a cargo del componente.
 //
+// Bugfix U8b — la URL sale UNA sola vez: el `shareMessage` YA incluye el link (o, si no vino,
+// el propio `url` es el mensaje). Compartimos SOLO `message`, nunca también el `url` suelto: en
+// iOS, Share.share con { url, message } hace que WhatsApp/Mail concatenen message + url y el link
+// aparecía DUPLICADO. Una sola fuente = el texto del mensaje.
+//
 // Cero hardcode (ADR-023 §4): tokens; los colores que cruzan a lucide se leen con getTokenValue.
 
 import { useCallback, useRef, useState } from 'react';
@@ -53,11 +58,9 @@ export function ShareLink({ url, shareMessage }: ShareLinkProps) {
 
   const onShare = useCallback(async () => {
     try {
-      await Share.share(
-        Platform.OS === 'ios'
-          ? { url, message: shareMessage ?? url }
-          : { message: shareMessage ?? url },
-      );
+      // Solo `message` (no `url`): el mensaje ya lleva el link → evita la duplicación en iOS
+      // (WhatsApp/Mail concatenan message + url). Ídem en Android/web. Bugfix U8b.
+      await Share.share({ message: shareMessage ?? url });
     } catch {
       // El usuario canceló o no hay share sheet (web). El botón Copiar es el fallback.
     }

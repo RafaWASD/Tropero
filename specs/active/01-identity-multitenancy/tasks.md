@@ -262,7 +262,7 @@ Plan de implementación paso a paso. Cada tarea tiene su criterio de aceptación
 - Al recibir respuesta exitosa, mostrar pantalla "Listo, compartí el link" con:
   - El `accept_url` destacado en grande.
   - Botón "Copiar al portapapeles" (`Clipboard.setStringAsync`).
-  - Botón "Compartir" (`Share.share({ message: accept_url, url: accept_url })`) que abre la share sheet nativa (WhatsApp, mail, SMS, etc.).
+  - Botón "Compartir" (`Share.share({ message })`, `message` = `inviteShareMessage(campo, accept_url)`) que abre la share sheet nativa (WhatsApp, mail, SMS, etc.). As-built (bugfix U8b): SOLO `message` (nunca también el `url` suelto) → el link sale una sola vez en iOS.
   - Nota de expiración: "Este link vence en 7 días. Podés cancelarlo o regenerarlo desde Miembros".
 - Toast de error si falla.
 - **Aceptación**: invitación creada, link visible con botones funcionales; el link compartido vía WhatsApp llega como mensaje preparado para enviar.

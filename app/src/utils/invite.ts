@@ -87,6 +87,20 @@ function safeDecode(s: string): string {
   }
 }
 
+// ─── inviteShareMessage (R5.3 / bugfix U8b) ─────────────────────────────────────
+//
+// FUENTE ÚNICA del texto que acompaña el link al compartir la invitación (WhatsApp/mail/etc.).
+// Antes se armaba inline y DUPLICADO en invitar.tsx y miembros.tsx; peor, se pasaba el `url`
+// además del `message` a Share.share en iOS → WhatsApp concatena message + url y el link salía
+// DOS veces. Regla dura del fix: la URL vive SOLO en el mensaje (una sola fuente); Share.share
+// comparte únicamente este `message` (nunca también el `url` suelto). Ver ShareLink.onShare.
+//
+// es-AR, voseo. La URL aparece EXACTAMENTE una vez (lo verifica el test).
+
+export function inviteShareMessage(establishmentName: string, url: string): string {
+  return `Te invito a sumarte a "${establishmentName}" en RAFAQ. Abrí este link para aceptar: ${url}`;
+}
+
 // ─── inviteErrorCopy (R5.6 / R5.9 / errores de las Edge Functions) ──────────────
 //
 // Las Edge Functions devuelven `{ error: { code, message } }` con status no-2xx. Mapeamos el

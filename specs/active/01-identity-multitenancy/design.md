@@ -307,7 +307,8 @@ Al abrir la app con sesión válida + email verificado, el router decide el land
        accept_url = `${APP_URL}/invite?token=${token}` (env del Edge Function, default `https://app.rafq.ar`).
 5. Cliente del owner muestra un modal con el link generado y dos acciones:
    - "Copiar al portapapeles" → Clipboard.setStringAsync(accept_url).
-   - "Compartir" → Share.share({ message: accept_url, url: accept_url }) — abre la share sheet nativa (WhatsApp, mail, SMS, Instagram, etc.).
+   - "Compartir" → Share.share({ message }) — abre la share sheet nativa (WhatsApp, mail, SMS, Instagram, etc.).
+     - **As-built (reconciliación bugfix U8b)**: el `message` es el texto de invitación humano armado por `inviteShareMessage(establishmentName, accept_url)` (`utils/invite.ts`, fuente única) — "Te invito a sumarte a "<campo>" en RAFAQ. Abrí este link para aceptar: <accept_url>". Se comparte SOLO `message` (que ya lleva el link UNA vez); NO se pasa además el `url` suelto, porque en iOS Share.share con `{ url, message }` hace que WhatsApp/Mail concatenen ambos y el link salía DUPLICADO. Copiar sigue copiando el `accept_url` crudo.
 6. Owner comparte el link por el canal que prefiera. El link queda visible en la sección "Invitaciones pendientes" del establishment con acciones (copiar, compartir de nuevo, regenerar, cancelar).
 ```
 

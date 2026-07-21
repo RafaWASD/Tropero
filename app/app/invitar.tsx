@@ -23,7 +23,7 @@ import {
   type CreatedInvitation,
   type InvitableRole,
 } from '@/services/members';
-import { inviteErrorCopy } from '@/utils/invite';
+import { inviteErrorCopy, inviteShareMessage } from '@/utils/invite';
 import { isValidEmail } from '@/utils/validation';
 
 const OFFLINE_COPY = 'Necesitás conexión para crear una invitación. Conectate a internet y volvé a intentar.';
@@ -74,7 +74,7 @@ export default function InvitarScreen() {
         <YStack gap="$5" marginTop="$2">
           <ShareLink
             url={created.acceptUrl}
-            shareMessage={`Te invito a sumarte a "${activeField.name}" en RAFAQ. Abrí este link para aceptar: ${created.acceptUrl}`}
+            shareMessage={inviteShareMessage(activeField.name, created.acceptUrl)}
           />
           <InfoNote>
             Este link vence en 7 días. Podés cancelarlo o regenerar uno nuevo desde Miembros cuando

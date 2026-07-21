@@ -47,7 +47,7 @@ import {
   type Member,
   type PendingInvitation,
 } from '@/services/members';
-import { inviteErrorCopy } from '@/utils/invite';
+import { inviteErrorCopy, inviteShareMessage } from '@/utils/invite';
 import { roleLabel } from '@/utils/establishment';
 import { formatDateCompactEsAr } from '@/utils/format-date-es-ar';
 import { buttonA11y } from '@/utils/a11y';
@@ -510,7 +510,7 @@ function PendingInvitationCard({
     setUrl(inviteUrlForToken(invitation.token));
   }, [invitation.token]);
 
-  const shareMessage = `Te invito a sumarte a "${establishmentName}" en RAFAQ. Abrí este link para aceptar: ${url}`;
+  const shareMessage = inviteShareMessage(establishmentName, url);
 
   const onCopy = useCallback(async () => {
     try {
@@ -525,13 +525,13 @@ function PendingInvitationCard({
 
   const onShare = useCallback(async () => {
     try {
-      await Share.share(
-        Platform.OS === 'ios' ? { url, message: shareMessage } : { message: shareMessage },
-      );
+      // Solo `message` (no `url` suelto): el mensaje ya lleva el link → evita la duplicación en
+      // iOS (WhatsApp/Mail concatenan message + url). Una sola fuente. Bugfix U8b.
+      await Share.share({ message: shareMessage });
     } catch {
       /* cancelado / sin share sheet */
     }
-  }, [url, shareMessage]);
+  }, [shareMessage]);
 
   const onRegenerate = useCallback(async () => {
     if (busyRef.current) return;
