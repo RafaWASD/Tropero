@@ -30,7 +30,7 @@ import {
   type ReactNode,
 } from 'react';
 
-import { useStatus } from '@powersync/react';
+import { usePowerSync } from '@powersync/react';
 import { useSegments } from 'expo-router';
 
 import { useAuth } from './AuthContext';
@@ -105,10 +105,11 @@ export function EstablishmentProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<EstablishmentState>({ status: 'loading' });
   const [recents, setRecents] = useState<MembershipEstablishment[]>([]);
 
-  // spec 20 — señal de sync del patrón canónico (ProfileContext.tsx / animales.tsx / index.tsx /
-  // useGroupView / useManeuverGating / mas.tsx). La dep del efecto es el PRIMITIVO en ms.
-  const syncStatus = useStatus();
-  const lastSyncedMs = syncStatus.lastSyncedAt?.getTime() ?? 0;
+  // spec 21 (R21.5) — instancia del DB de PowerSync para registrar la watched query imperativa
+  // (`db.onChange`). Es el MISMO singleton que `getPowerSync()`, provisto por el `PowerSyncProvider`
+  // que envuelve a este provider (`_layout.tsx`). Reemplaza el disparador por-sync `lastSyncedMs`
+  // (proxy NO determinista, feature 20) por la reacción al cambio real del SQLite local.
+  const db = usePowerSync();
 
   // spec 20 / D1 — ¿hay maniobra en curso? Señal CLIENT-SIDE (la ruta activa), no la tabla
   // `sessions`: ese bucket es justo el que PowerSync borra al revocar el acceso, así que la fila de
@@ -487,37 +488,42 @@ export function EstablishmentProvider({ children }: { children: ReactNode }) {
     };
   }, [userId, applyMembershipsResult]);
 
-  // spec 20 (R20.1/R20.4/R20.17) — RE-LECTURA REACTIVA en CADA avance de sync.
+  // spec 21 (R21.1/R21.4/R21.5/R21.7/R21.10) — WATCHED QUERY imperativa. Reemplaza el disparador
+  // por-sync de la feature 20 (`lastSyncedMs`, proxy NO determinista del cambio de dato — medido
+  // ~90 s+ de lag) por `db.onChange` sobre las tablas que respaldan las membresías. El onChange re-corre
+  // la resolución EXISTENTE de la 20 (`refreshEstablishments` → `applyMembershipsResult` → ...) SIN
+  // TOCAR su lógica de veredicto: solo cambia el disparador (ADR-030, migración incremental).
   //
-  // Lo que había acá era un `registerListener({ statusChanged })` con un latch de UN SOLO DISPARO
-  // (`lastHasSynced` nunca volvía a false): tras el primer sync, TODO statusChanged posterior era
-  // no-op. Por eso un campo creado server-side no aparecía con la app viva, online y conectada — la
-  // fila estaba en el SQLite local todo el tiempo, pero nadie la volvía a leer. El comentario que
-  // acompañaba al latch afirmaba que la reactividad ante cambios de coworker "la cubre el
-  // useFocusEffect / refresh manual existente de las pantallas": era FALSO —los 5 llamadores de
-  // `refreshEstablishments` son todos post-acción del propio usuario, ninguno es un useFocusEffect—
-  // y se borra junto con el código que describía.
+  // Por qué observar AMBAS tablas:
+  //   · `user_roles` — 🔴 es la watched query de REVOCACIÓN de D2 (R21.7). `self_user_roles` vive en
+  //     esta tabla local (candado RG-1: sin filtro `active`, sobrevive con active=0), así que una
+  //     transición del rol propio a `active = 0` dispara el onChange apenas la fila baja al SQLite —
+  //     el aviso de campo-perdido deja de esperar a que tique `lastSyncedAt` (~1,5 s determinista).
+  //   · `establishments` — cubre alta / rename / baja de campos (el bucket sale de `org_scope`).
+  // Una revocación puede aterrizar como baja del rol o como remoción del bucket de `establishments`,
+  // y ambas caras pueden caer en checkpoints distintos; observar las dos garantiza que la re-evaluación
+  // dispare por cualquiera. El VEREDICTO lo decide igual la evidencia afirmativa (`assessDisappearance`
+  // sobre `user_roles`), no la ausencia de `establishments`; el disparo más frecuente es estrictamente
+  // MEJOR (converge antes al veredicto correcto), nunca peor (design §4).
   //
-  // Patrón canónico del repo (ProfileContext.tsx, animales.tsx, (tabs)/index.tsx, useGroupView.ts,
-  // useManeuverGating.ts, mas.tsx): `useStatus()` + `lastSyncedAt.getTime()` como dep PRIMITIVA.
-  //   · Re-dispara en CADA avance (no una sola vez) → es todo el fix.
-  //   · Dep primitiva (number) estable entre statuses iguales → sin loop (E3).
-  //   · Guardado en 0 → offline puro y arranque intactos (E4/R20.7). El SDK documenta que
-  //     `lastSyncedAt` se resetea ante un reinicio del servicio: si vuelve a 0, este efecto
-  //     simplemente no corre y el estado ya resuelto no se toca (R20.8).
+  // `db.onChange` NO ejecuta ninguna query: solo NOTIFICA cuando cambia alguna de las `tables`; el
+  // callback corre la lectura + evidencia + veredicto de la 20. `triggerImmediate` es false (default)
+  // → NO dispara al registrarse: la CARGA INICIAL la sigue haciendo el efecto de bootstrap SEPARADO
+  // (arriba, `bootedForUser`), intacto (R21.35). Devuelve un `dispose` que el cleanup llama al
+  // desmontar o al cambiar `userId` (sin fuga de listeners ni doble suscripción).
   //
-  // No hace falta distinguir el origen de la re-lectura ('sync' vs 'user'): con evidencia
-  // afirmativa la regla es la misma para todos los disparadores (R20.17), así que
-  // `refreshEstablishments` NO cambia de firma. Sus 5 llamadores PRE-EXISTENTES quedan intactos
-  // (editar-campo.tsx, invite.tsx, mas.tsx ×2, y el interno de applyCreatedEstablishment). Feature 20
-  // agrega DOS invocaciones internas nuevas —ambas sin tocar la firma—: este efecto reactivo de sync
-  // (R20.1) y el refresh post-switch de switchEstablishment cuando se descarta un pendiente diferido
-  // (R20.34, unas líneas arriba); las dos consultan la misma evidencia afirmativa y aciertan igual.
+  // `refreshEstablishments` es un `useCallback` estable (dep `[userId, applyMembershipsResult]`) → el
+  // efecto se re-suscribe solo al cambiar de usuario; `db` es un singleton estable. Sus 5 llamadores
+  // PRE-EXISTENTES quedan intactos (editar-campo.tsx, invite.tsx, mas.tsx ×2, y el interno de
+  // applyCreatedEstablishment). El throttle trailing del SDK (30 ms) coalesce ráfagas (R21.21).
   useEffect(() => {
     if (!userId) return;
-    if (lastSyncedMs === 0) return;
-    void refreshEstablishments();
-  }, [lastSyncedMs, userId, refreshEstablishments]);
+    const dispose = db.onChange(
+      { onChange: () => { void refreshEstablishments(); } },
+      { tables: ['user_roles', 'establishments'] },
+    );
+    return () => dispose();
+  }, [userId, refreshEstablishments, db]);
 
   // spec 20 / D1 (R20.22/R20.35) — al SALIR del flujo de maniobra con una revocación diferida, se
   // aplica la transición a active_lost (el RootGate rutea a /campo-perdido al ver el estado).

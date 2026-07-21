@@ -151,6 +151,32 @@ test('crear/renombrar NO blanquea la lista (optimismo en sitio, sin "Cargando lo
   await expect(spinner).toHaveCount(0);
 });
 
+// spec 21 (R21.33) — VACÍO GENUINO vs. sincronizando (veto de design-review, `useQuery` como única
+// fuente). Un campo SINCRONIZADO sin lotes muestra "Este campo todavía no tiene lotes" (copy owner), NO
+// el placeholder "Sincronizando…" (ese es solo para el primer sync pendiente con lotes aún sin bajar,
+// R21.32 — un estado de primer-sync inherentemente racy que se cubre por inspección del orden de ramas).
+// Con `useQuery`, `data=[]` se desambigua con `hasSynced`: tras `waitForHome` el first-sync ya completó
+// (hasSynced=true) → vacío genuino, no falso-vacío. DETERMINISTA (sin catch de ventana de sync).
+test('campo sincronizado sin lotes → "sin lotes" (no "Sincronizando…"), R21.33', async ({ page }) => {
+  const user = await createTestUser('lotesempty');
+  await setUserPhone(user.id, '1123456789');
+  await seedEstablishmentWithRodeo(user.id, 'Campo SinLotes'); // rodeo pero CERO lotes
+
+  await page.goto('/');
+  await signIn(page, user);
+  await waitForHome(page); // first-sync completo → hasSynced=true
+
+  await gotoLotes(page);
+  // Vacío genuino (owner): el copy de "sin lotes", NO el de sincronizando ni el de carga inicial.
+  await expect(
+    page.getByText('Este campo todavía no tiene lotes. Creá el primero abajo.', { exact: true }),
+  ).toBeVisible({ timeout: 20_000 });
+  await expect(
+    page.getByText('Sincronizando datos del campo… Probá de nuevo en unos segundos.', { exact: true }),
+  ).toHaveCount(0);
+  await expect(page.getByText('Cargando lotes…', { exact: true })).toHaveCount(0);
+});
+
 // D1 end-to-end: crear lote → asignar 1 animal → borrar el lote → el animal queda SIN lote y el lote
 // desaparece de la lista. El soft-delete del lote pasa por el RPC `soft_delete_management_group`
 // (0041, owner-only); el clear-NULL del paso 1 va por UPDATE directo. No hay bug de backend: el RPC

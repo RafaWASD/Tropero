@@ -17,10 +17,25 @@
 //   3. (T19) Lote en caliente — /lotes montada refleja un lote creado por otro (R20.3/R20.9).
 //   4. (T20) Revocación FUERA de maniobra → /campo-perdido con copy honesto (R20.14/R20.23/R20.24/R20.26/R20.28).
 //   5. (T21) Revocación DURANTE la maniobra → diferimiento (D1) + riesgos 7 y 8.
-//   6. (T22) Offline puro intacto — sin ningún sync el efecto reactivo no dispara (R20.7/R20.8).
+//   6. (T22) Offline puro intacto — sin ningún cambio de tabla el `db.onChange` no dispara (R21.22/R21.23).
 //
-// Timeouts generosos a propósito: acá se espera un CHECKPOINT REAL de PowerSync (no un refresh
-// local), y eso depende de la replicación del servicio.
+// ── spec 21 (as-built): REACTIVIDAD DETERMINISTA vía WATCHED QUERY (D3, ADR-030) ──
+// La feature 20 usaba `lastSyncedMs` como disparador (un proxy NO determinista del cambio de dato: el
+// diagnóstico A/B midió que la fila SIEMPRE baja al SQLite local en ~1,5 s, pero la señal `lastSyncedAt`
+// se CONGELABA ~90 s+ antes de ticar). Ese spec compensaba con `test.describe.configure({ retries: 2 })`
+// + un FORZADOR de blip de red (`forceSyncTick`/`syncUntil`). La feature 21 migró el disparador a
+// watched queries reales de PowerSync (`db.onChange` en los 2 contextos, `useQuery` en /lotes): la UI
+// reacciona al CAMBIO DE TABLA del SQLite local (~1,5 s determinista), no a la señal gruesa. Por eso este
+// spec ahora asserta DIRECTO, SIN retries y SIN forzador — y sigue verde de forma determinista.
+//
+// La ENTREGA de la revocación sigue siendo async (E4/R21.24/R21.25): la watched query elimina el lag de
+// la SEÑAL, no la latencia de PROPAGACIÓN del servicio de sync (la remoción del bucket la gobierna el
+// servicio; la frontera real de acceso sigue siendo RLS server-side). Por eso los timeouts de las
+// REVOCACIONES son más amplios que los de las ADICIONES, pero acotados a la propagación real MEDIDA (no
+// al freeze de señal de ~90 s, que desapareció). Los oráculos siguen ESTRICTOS (incluido
+// `assertServerSessionsRevoked` como primer assert de T21, el candado anti-falso-verde). Nada acá hace
+// `page.reload()` ni re-login tras el seed server-side (regla de oro, abajo): eso re-correría el
+// bootstrap y "arreglaría" el bug → daría verde sin probar la reactividad.
 
 import { test, expect, type Page } from './helpers/fixtures';
 import {
@@ -40,38 +55,9 @@ import {
 } from './helpers/admin';
 import { signIn, waitForHome, waitForMisCampos, gotoTab } from './helpers/ui';
 
-// ⚠️ EVENTUAL-CONSISTENCY: `retries: 2` + forzador de sync — AMBOS honestos (no un mask). Leer esto.
-//
-// Cada caso espera un CHECKPOINT REAL de PowerSync (el punto: probar que la UI se entera sin reiniciar).
-// El diagnóstico A/B DETERMINISTA (dos/tres cambios secuenciales, sondeo directo del SQLite vía
-// `getAll` SIN reload; evidencia cruda en progress/impl_20-reactividad-sync.md) probó: la fila SIEMPRE
-// llega al SQLite local en ~1,5 s, pero `lastSyncedAt` —la señal sobre la que TODA la reactividad de
-// RAFAQ está emulada (spec 15, CERO watched queries)— avanza de forma NO DETERMINISTA por cambio: a
-// veces al instante, a veces un cambio se CONGELA (~90 s medidos, y MÁS bajo carga) hasta que un
-// checkpoint posterior lo barre. Es no-determinación INHERENTE de eventual-consistency, no un bug de la
-// feature (re-lee en CADA avance de la señal, su contrato) ni un flake del test.
-//
-// POR QUÉ los retries ACÁ son LEGÍTIMOS (y por qué el reviewer los rechazó antes): el reviewer objetó
-// los retries de la versión ANTERIOR porque enmascaraban un flake MAL DIAGNOSTICADO ("lastSyncedAt deja
-// de avanzar tras el 1er cambio" — un latch permanente que el A/B mostró FALSO). Con el diagnóstico
-// CORREGIDO —no-determinación de eventual-consistency, DOCUMENTADA, con `db.watch` como fix de fondo
-// flageado a Raf— los retries son la herramienta ESTÁNDAR y honesta para E2E de eventual-consistency: NO
-// tapan un bug, cubren el FREEZE PATOLÓGICO de la señal re-corriendo con una SESIÓN FRESCA (donde el sync
-// arranca activo y propaga rápido). Los oráculos siguen ESTRICTOS: un bug real falla las 3 veces.
-//
-// Para BAJAR la frecuencia de retry (no dependemos SOLO de ellos), cada caso además fuerza/espera la
-// señal según el tipo de cambio (medido):
-//   · ADICIONES (T17/T18/T19) → `syncUntil` (blip-poll: `context.setOffline` off→on → PowerSync
-//     reconecta y completa un checkpoint FRESCO → la fila ya presente en el servidor baja). Reduce el
-//     freeze de las altas/updates.
-//   · REVOCACIONES (T20/T21) → tick NATURAL con timeout AMPLIO (~120 s, cubre el freeze de ~90 s). Un
-//     blip DISRUPTA la propagación de una remoción de bucket (medido), así que NO se usa; T20 usa
-//     `revokeSession: false` (camino campo-borrado, E5) porque revocar la sesión también la disrupta —
-//     el camino con sesión revocada + su ventana D1.2 lo cubre T21 (`revokeSession: true`).
-//
-// El fix de fondo (que borraría forzador Y retries) es `db.watch` = EXPANSIÓN DE ALCANCE, decisión de
-// Raf (backlog + design §10-bis(g)). Nada acá es un reload (la app sigue montada) ni afloja un assert.
-test.describe.configure({ retries: 2 });
+// spec 21 (D3): SIN `test.describe.configure({ retries })` y SIN forzador de blip. La reactividad es
+// determinista (watched query sobre el cambio de tabla), así que cada caso asserta directo. Un bug real
+// falla el assert, no lo salva ningún retry. (Ver el header para el porqué de los timeouts.)
 
 test.afterAll(async () => {
   await cleanupAll();
@@ -88,57 +74,13 @@ function escapeRe(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-/**
- * Fuerza un avance DETERMINISTA de `lastSyncedAt` SIN reload: un blip de red (offline → online) hace
- * que PowerSync reconecte y complete un checkpoint FRESCO → la señal avanza → la re-lectura reactiva
- * (el efecto que arregla esta feature) dispara y lee lo que ya bajó al SQLite local.
- *
- * ⚠️ POR QUÉ existe (ver el header + el diagnóstico A/B en progress/impl_20-reactividad-sync.md): la
- * fila del cambio server-side llega al SQLite local en ~1,5 s, pero `lastSyncedAt` avanza de forma NO
- * determinista por cambio — un cambio SIN un forzador posterior puede estancarse más allá de cualquier
- * timeout. Un `context.setOffline` blip fuerza el checkpoint que hace tica la señal. Esto NO es un
- * reload (la app sigue MONTADA: el efecto reactivo, los refs en memoria y el estado sobreviven — sigue
- * siendo la re-lectura PASIVA lo que se prueba), y ES un escenario REAL de manga (la señal se corta y
- * vuelve todo el tiempo). El fix de fondo —que la señal tique sola por cada cambio— es `db.watch`
- * (deuda de spec 15), FLAGEADO para Raf; mientras tanto este blip vuelve DETERMINISTA lo que sin él es
- * un flake de señal (y por eso el archivo NO necesita retries).
- */
-async function forceSyncTick(page: Page): Promise<void> {
-  await page.context().setOffline(true);
-  await page.waitForTimeout(1500);
-  await page.context().setOffline(false);
-}
-
-/**
- * Blip-poll ACOTADO: fuerza avances de `lastSyncedAt` (blips de red) hasta que `check` se cumpla, o se
- * agota el presupuesto. DETERMINISTA frente a la señal no determinista, y frente al LAG del servicio de
- * sync (que procesa el WAL async → un blip puede reconectar y traer un checkpoint que TODAVÍA no
- * incluye el cambio; el siguiente blip lo trae). NO es un retry del test (no re-corre el setup ni el
- * login): re-fuerza SOLO la señal, que es exactamente lo que `db.watch` haría solo (deuda flageada). El
- * assert REAL corre después con su oráculo estricto — un bug real no lo salva ningún blip.
- */
-async function syncUntil(
-  page: Page,
-  check: () => Promise<boolean>,
-  opts: { blips?: number; settleMs?: number } = {},
-): Promise<void> {
-  const blips = opts.blips ?? 10;
-  const settleMs = opts.settleMs ?? 6000;
-  for (let i = 0; i <= blips; i++) {
-    if (await check().catch(() => false)) return;
-    if (i === blips) break;
-    await forceSyncTick(page);
-    await page.waitForTimeout(settleMs); // reconectar + resync + re-lectura reactiva + render
-  }
-}
-
 // ───────────────────────────────────────────────────────────────────────────────
 // Caso 1 (T17) — CAMPO EN CALIENTE. Es el criterio de aceptación A8 y la reproducción
 // exacta del bug de Raf. Sin el fix (latch de un solo disparo) este test FALLA: el campo B
 // baja al SQLite local pero nadie vuelve a leer las membresías.
 // ───────────────────────────────────────────────────────────────────────────────
 test('R20.1 — un campo al que te agregan server-side aparece SIN reiniciar la app', async ({ page }) => {
-  test.setTimeout(180_000);
+  test.setTimeout(120_000);
   const user = await createTestUser('r20-campo');
   await setUserPhone(user.id, '1123456789');
   const { establishmentId: estA } = await seedEstablishmentWithRodeo(user.id, 'Campo A Reactivo');
@@ -157,10 +99,10 @@ test('R20.1 — un campo al que te agregan server-side aparece SIN reiniciar la 
   const estB = await seedEstablishment(user.id, 'Campo B En Caliente');
   await seedRodeo(estB);
 
-  // Con el dropdown ABIERTO, el contexto re-lee al avanzar el sync y el campo B aparece solo (el blip
-  // de red fuerza el avance de la señal de forma determinista — sin reload, la app sigue montada).
+  // spec 21 — Con el dropdown ABIERTO, el `db.onChange` sobre `establishments`/`user_roles` dispara
+  // apenas la fila del campo B baja al SQLite local (~1,5 s) → `refreshEstablishments` re-resuelve y el
+  // campo aparece solo, SIN forzador de blip y SIN reload (la app sigue montada).
   const campoB = page.getByText(nameB, { exact: true }).first();
-  await syncUntil(page, () => campoB.isVisible());
   await expect(campoB).toBeVisible({ timeout: 30_000 });
 
   // Y el campo activo NO cambió por la aparición del nuevo (R20.11: el guard de equivalencia no
@@ -177,7 +119,7 @@ test('R20.1 — un campo al que te agregan server-side aparece SIN reiniciar la 
 test('R20.2/R20.5/R20.19 — un rodeo creado por un coworker aparece sin reiniciar', async ({
   page,
 }) => {
-  test.setTimeout(240_000);
+  test.setTimeout(150_000);
   const user = await createTestUser('r20-rodeo');
   await setUserPhone(user.id, '1123456789');
   const { establishmentId, rodeoId } = await seedEstablishmentWithRodeo(user.id, 'Campo Rodeo Caliente');
@@ -206,17 +148,11 @@ test('R20.2/R20.5/R20.19 — un rodeo creado por un coworker aparece sin reinici
   // ── DOS cambios server-side sobre el campo activo, SIN reload: un coworker CREA un rodeo (INSERT) y
   //    RENOMBRA otro (UPDATE). Se asserta el ESTADO FINAL combinado (ambos reflejados). ──
   //
-  // Por qué DOS cambios, y por qué asertar el estado final (MEDIDO, no supuesto — diagnóstico A/B
-  // determinista en progress/impl_20-reactividad-sync.md): la fila SIEMPRE llega al SQLite local en
-  // ~1,5 s, pero `lastSyncedAt` —la señal sobre la que TODA la reactividad de RAFAQ está emulada
-  // (spec 15, cero watched queries)— avanza de forma NO determinista por cambio: a veces tica al
-  // instante, a veces un cambio se estanca hasta que un checkpoint POSTERIOR lo barre. Un cambio que
-  // llega DESPUÉS fuerza un checkpoint que barre TODO lo pendiente, así que asertar el estado final
-  // (los dos cambios reflejados) es MÁS robusto que un solo cambio: si el alta se hubiera estancado, el
-  // rename posterior la empuja. Y el rename prueba que la re-lectura refleja UPDATES, no solo INSERTS
-  // (mismo camino: efecto reactivo → load → applyRodeos). El límite de fondo —que la señal pueda
-  // demorar— es la deuda de spec 15 (db.watch), FLAGEADA para Raf; no la arregla esta feature, que
-  // arregla la RE-LECTURA.
+  // spec 21 — Por qué DOS cambios: ejercitan las dos caras del disparador. El `db.onChange` sobre
+  // `rodeos` dispara `load` → `applyRodeos` apenas CUALQUIER fila de `rodeos` cambia en el SQLite local
+  // (~1,5 s determinista), sea un INSERT (rodeo nuevo) o un UPDATE (rename). Asertar que AMBOS quedan
+  // reflejados prueba que la watched query refleja updates, no solo altas — sin depender de que tique
+  // ninguna señal gruesa (ese era el freeze que la feature 20 sufría y la 21 elimina).
   const nuevoId = await seedRodeo(establishmentId, 'Rodeo Del Coworker');
   await admin.from('rodeos').update({ name: secundarioRenombrado }).eq('id', secundarioId);
 
@@ -225,15 +161,8 @@ test('R20.2/R20.5/R20.19 — un rodeo creado por un coworker aparece sin reinici
   // `isWaitingRef` impedía: con él, una vez resuelto, la re-lectura no volvía a correr nunca.
   const rodeoNuevoLoc = page.getByText(nuevoRodeo, { exact: true }).first();
   const rodeoRenombradoLoc = page.getByText(secundarioRenombrado, { exact: true }).first();
-  // Blip-poll hasta que AMBOS cambios propaguen (el forzador avanza la señal, sin reload). El estado
-  // final combinado es el oráculo robusto (design §10-bis (g)). Presupuesto amplio (el rename UPDATE
-  // puede congelarse más que el INSERT); si aun así se congela patológicamente, el retry del archivo lo
-  // cubre re-corriendo con sesión fresca.
-  await syncUntil(
-    page,
-    async () => (await rodeoNuevoLoc.isVisible()) && (await rodeoRenombradoLoc.isVisible()),
-    { blips: 16 },
-  );
+  // spec 21 — assert DIRECTO (sin forzador de blip): el `onChange` sobre `rodeos` dispara con cada
+  // cambio de tabla → ambos aparecen solos. Timeouts razonables de Playwright.
   await expect(rodeoNuevoLoc).toBeVisible({ timeout: 30_000 });
   await expect(rodeoRenombradoLoc).toBeVisible({ timeout: 30_000 });
   // El nombre VIEJO del rodeo renombrado ya no está: la re-lectura reflejó el UPDATE, no dejó el stale.
@@ -252,7 +181,7 @@ test('R20.2/R20.5/R20.19 — un rodeo creado por un coworker aparece sin reinici
 // impedía. `silent: true` en el efecto → la lista no se blanquea.
 // ───────────────────────────────────────────────────────────────────────────────
 test('R20.3/R20.9 — un lote creado por otro aparece en /lotes sin salir de la pantalla', async ({ page }) => {
-  test.setTimeout(180_000);
+  test.setTimeout(120_000);
   const user = await createTestUser('r20-lote');
   await setUserPhone(user.id, '1123456789');
   const { establishmentId } = await seedEstablishmentWithRodeo(user.id, 'Campo Lote Caliente');
@@ -278,16 +207,14 @@ test('R20.3/R20.9 — un lote creado por otro aparece en /lotes sin salir de la 
   // ── Server-side: otro usuario crea un lote. Sin salir de /lotes, sin reload. ──
   const nuevo = await seedManagementGroup(establishmentId, 'Lote En Caliente');
 
-  // R20.3 — el lote creado por otro aparece en /lotes montada, sin salir ni volver a entrar (esta
-  // pantalla era el único MOUNT-ONLY del barrido). El blip-poll fuerza el avance de la señal de forma
-  // determinista (sin reload); la re-lectura reactiva de /lotes corre `load({ silent: true })` → la
-  // lista NO se blanquea. El límite de fondo (la señal puede demorar sola) es la deuda de spec 15 /
-  // db.watch, FLAGEADA — ver el diagnóstico A/B en progress/impl_20-reactividad-sync.md.
+  // spec 21 (R21.3/R21.20) — el lote creado por otro aparece en /lotes montada, sin salir ni volver a
+  // entrar. `useQuery` sobre `management_groups` re-emite apenas la fila baja al SQLite local (~1,5 s),
+  // SIN forzador de blip. Como el hook NO re-pone `isLoading` en las re-emisiones, la lista NO se
+  // blanquea (el `rowComparator` preserva las filas sin cambio). Assert directo.
   const loteNuevo = loteVisible(nuevo.name).first();
-  await syncUntil(page, () => loteNuevo.isVisible());
   await expect(loteNuevo).toBeVisible({ timeout: 30_000 });
 
-  // R20.9 — la re-lectura fue SILENCIOSA: la lista nunca se blanqueó (el lote previo siguió
+  // R20.9 / R21.20 — la re-emisión fue SILENCIOSA: la lista nunca se blanqueó (el lote previo siguió
   // montado todo el tiempo) y el CTA sigue ahí (no volvimos al placeholder de carga).
   await expect(loteVisible(previo.name).first()).toBeVisible();
   await expect(page.getByRole('button', { name: 'Crear lote', exact: true })).toBeVisible();
@@ -303,7 +230,7 @@ test('R20.3/R20.9 — un lote creado por otro aparece en /lotes sin salir de la 
 test('R20.14/R20.23/R20.24/R20.26/R20.28 — revocación fuera de maniobra → aviso + re-ruteo', async ({
   page,
 }) => {
-  test.setTimeout(240_000);
+  test.setTimeout(150_000);
   const owner = await createTestUser('r20-rev-owner');
   const member = await createTestUser('r20-rev-member');
   await setUserPhone(member.id, '1123456789');
@@ -337,12 +264,15 @@ test('R20.14/R20.23/R20.24/R20.26/R20.28 — revocación fuera de maniobra → a
   await revokeMemberRole(member.id, estA, { revokeSession: false });
   await waitForServerRoleInactive(member.id, estA);
 
-  // Tick NATURAL con timeout AMPLIO (~120 s, cubre el freeze de ~90 s del A/B) — sin blip (igual que T21,
-  // la otra revocación). Medido: una revocación (remoción de bucket) propaga por la conexión ESTABLE; un
-  // blip (reconnect) la DISRUPTA en vez de ayudar. Sin reiniciar (la app sigue montada), la re-lectura
-  // PASIVA la detecta (evidencia afirmativa: rol local con active=0) y emite active_lost. Si el freeze
-  // supera el timeout (patológico, bajo carga), el retry del archivo lo cubre con sesión fresca.
-  await expect(page.getByText(`Ya no tenés acceso a ${nameA}`)).toBeVisible({ timeout: 120_000 });
+  // spec 21 — SIN blip y SIN retry. El `db.onChange` sobre `user_roles` dispara apenas la fila del rol
+  // (active=0) baja al SQLite local (candado RG-1: `self_user_roles` sobrevive con active=0) →
+  // `refreshEstablishments` → evidencia afirmativa `absent_or_inactive` → `active_lost`. La ENTREGA de la
+  // remoción la gobierna el servicio de sync (E4/R21.24), pero SIN el lag de la señal `lastSyncedAt`: la
+  // propagación real por la conexión estable es de sub-segundos (MEDIDO en la 21: aviso a <250 ms del
+  // disparo, 4 corridas), no el freeze de ~90 s de la 20. El timeout de 45 s da margen amplio para la
+  // variación de propagación del servicio (E4) sin reintroducir flakiness — muy por debajo del ~120 s
+  // que cubría el freeze de señal.
+  await expect(page.getByText(`Ya no tenés acceso a ${nameA}`)).toBeVisible({ timeout: 45_000 });
 
   // R20.28 — el copy NO afirma una causa única (las dos causas son indistinguibles en la firma
   // local: remove_member y el trigger 0076 escriben el mismo par de columnas).
@@ -385,7 +315,7 @@ test('R20.14/R20.23/R20.24/R20.26/R20.28 — revocación fuera de maniobra → a
 test('R20.20/R20.21/R20.22/R20.18 — revocación durante la maniobra: no patea, avisa al salir', async ({
   page,
 }) => {
-  test.setTimeout(240_000);
+  test.setTimeout(150_000);
   const owner = await createTestUser('r20-man-owner');
   const member = await createTestUser('r20-man-member');
   await setUserPhone(member.id, '1123456789');
@@ -450,30 +380,30 @@ test('R20.20/R20.21/R20.22/R20.18 — revocación durante la maniobra: no patea,
   await expect(page.getByTestId('exit-jornada-sheet')).toBeVisible({ timeout: 10_000 });
   await page.getByRole('button', { name: 'Salir sin terminar', exact: true }).click();
 
-  // El aviso nombra al campo perdido (el título; el subtítulo comparte prefijo → matcheamos el nombre).
-  // Timeout AMPLIO (~120 s) por el mismo freeze de propagación de revocación que T20; el retry del
-  // archivo cubre el freeze patológico. (Si la revocación se detectó durante la maniobra, el pendiente
-  // emite al salir por lectura LOCAL —instantáneo—; el timeout amplio cubre el caso en que aún no
-  // había propagado y la detección ocurre post-salida.)
+  // spec 21 — El aviso nombra al campo perdido. SIN retry. Si la revocación ya se detectó durante la
+  // maniobra (el `onChange` sobre `user_roles` disparó y se difirió el pendiente), al salir el pendiente
+  // emite por lectura LOCAL —instantáneo—. Si aún no había propagado, la detección ocurre post-salida
+  // dentro de la ventana de propagación real, sin el freeze de señal de la 20. MEDIDO en la 21: aviso a
+  // <350 ms de salir (4 corridas). El timeout de 45 s da margen amplio sin reintroducir flakiness.
   const nameA = `${RUN_TAG} Campo Maniobra A`;
-  await expect(page.getByText(`Ya no tenés acceso a ${nameA}`)).toBeVisible({ timeout: 120_000 });
+  await expect(page.getByText(`Ya no tenés acceso a ${nameA}`)).toBeVisible({ timeout: 45_000 });
   await expect(page.getByRole('button', { name: 'Entendido', exact: true })).toBeVisible();
 });
 
 // ───────────────────────────────────────────────────────────────────────────────
-// Caso 6 (T22) — OFFLINE PURO INTACTO. Con la red cortada, `lastSyncedMs` queda CONGELADO (no avanza)
-// → el efecto reactivo no vuelve a disparar y la app no cambia de estado por su culpa (nada de
-// campo-perdido, onboarding fantasma ni bloqueo de rodeo). Mismo patrón que animals-offline.
+// Caso 6 (T22) — OFFLINE PURO INTACTO (spec 21: R21.22/R21.23). Con la red cortada NO bajan cambios de
+// tabla del servidor → el `db.onChange` de los contextos NO dispara (solo dispara ante un cambio real de
+// una tabla observada) y `useQuery` refleja el estado local sin re-emitir → la app no cambia de estado
+// por su culpa (nada de campo-perdido, onboarding fantasma ni bloqueo de rodeo). Mismo patrón que
+// animals-offline.
 //
-// ⚠️ QUÉ NO cubre este test (honestidad, prong D): el login es ONLINE primero, así que para cuando
-// llegamos acá `lastSyncedMs` YA es > 0. Por eso este caso NO ejercita el guard de arranque-en-frío
-// `lastSyncedMs === 0` (R20.7 estricto): un first-sync OFFLINE es imposible (PowerSync necesita
-// conectarse para sincronizar, y una sesión persistida restaura el `lastSyncedAt` cacheado, > 0). El
-// guard `=== 0` se verifica por INSPECCIÓN (está en los 3 efectos). Lo que este test SÍ prueba es la
-// otra mitad de R20.7/R20.8: con la señal CONGELADA (sin nuevos avances) el efecto no re-lee de forma
-// espuria ni tumba el estado resuelto (R20.10/R20.30).
+// spec 21 — Esto REEMPLAZA el guard `lastSyncedMs === 0` de la feature 20 por una propiedad más fuerte:
+// no hay disparo espurio porque no hay EVENTO (sin cambio de tabla, no hay onChange). Si un write LOCAL
+// del propio usuario disparara el onChange estando offline, la re-lectura lee el SQLite local y, por la
+// evidencia afirmativa (R21.23), nunca concluye en contra del usuario. El oráculo (sin cambio de estado)
+// es el mismo que la 20; sigue válido con el disparador nuevo.
 // ───────────────────────────────────────────────────────────────────────────────
-test('R20.7/R20.8/R20.10/R20.30 — offline puro: señal congelada, sin re-lectura espuria ni cambio de estado', async ({
+test('R21.22/R21.23 — offline puro: sin cambios de tabla el onChange no dispara ni cambia el estado', async ({
   page,
   context,
 }) => {
@@ -489,10 +419,9 @@ test('R20.7/R20.8/R20.10/R20.30 — offline puro: señal congelada, sin re-lectu
 
   await context.setOffline(true);
   try {
-    // Un rato sin red: `lastSyncedMs` queda CONGELADO (no avanza) → el efecto reactivo no vuelve a
-    // correr y no toca el estado ya resuelto. (Si el servicio se reiniciara y `lastSyncedAt` volviera
-    // a 0, el guard `=== 0` lo trataría como "todavía no hubo sync" y tampoco tocaría el estado — R20.8,
-    // verificado por inspección: no es reproducible cortando la red desde el cliente.)
+    // Un rato sin red: NO bajan cambios de tabla → el `db.onChange` no dispara y no toca el estado ya
+    // resuelto (R21.22). `useQuery` de /lotes tampoco re-emite sin un cambio local. No hay evento, no
+    // hay re-lectura espuria.
     await page.waitForTimeout(10_000);
 
     // La app sigue en la home del campo activo: NO cayó a campo-perdido, ni a onboarding, ni al

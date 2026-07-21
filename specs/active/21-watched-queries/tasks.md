@@ -4,13 +4,13 @@
 > **Regla de oro**: el cambio es de DISPARADOR, no de lógica. NO se toca `utils/establishment.ts`, ni los
 > services (`establishments.ts`/`rodeos.ts`/`management-groups.ts`/`local-reads.ts`), ni ninguna migración/
 > RLS/stream, ni `campo-perdido.tsx`, ni nada de BLE. La resolución de la 20 se re-corre tal cual.
-> Baseline commit: (lo fija el implementer al arrancar).
+> Baseline commit: `6ff78cb4ffcd59f96d7cd0ba676a99eb809dcf6a` (fijado por el implementer al arrancar, 2026-07-21).
 
 ---
 
 ## Fase A — `EstablishmentContext.tsx` (contexto raíz)
 
-- [ ] **T1** — Reemplazar el efecto reactivo por-sync por `db.onChange`. Sacar `import { useStatus }` y las
+- [x] **T1** — Reemplazar el efecto reactivo por-sync por `db.onChange`. Sacar `import { useStatus }` y las
   líneas `const syncStatus = useStatus(); const lastSyncedMs = …`. Agregar `import { usePowerSync } from
   '@powersync/react'` + `const db = usePowerSync();`. Reemplazar el `useEffect([lastSyncedMs, userId,
   refreshEstablishments])` por el efecto `db.onChange({ onChange: () => void refreshEstablishments() },
@@ -20,7 +20,7 @@
   Cubre: R21.1, R21.4, R21.5, R21.7, R21.10, R21.15. Verificación: inspección del reviewer (disparador,
   tablas, dispose, sin `lastSyncedAt`, sin cambio de firma) + los E2E de A1/A2.
 
-- [ ] **T2** — Verificar que la revocación (D2) dispara por `user_roles`: el `onChange` sobre `user_roles`
+- [x] **T2** — Verificar que la revocación (D2) dispara por `user_roles`: el `onChange` sobre `user_roles`
   corre `refreshEstablishments` → `confirmDisappearance` → evidencia `absent_or_inactive` → `active_lost`.
   Cubre: R21.8. Verificación: E2E T20/T21 (aviso apenas baja la fila, sin esperar `lastSyncedAt`).
 
@@ -28,7 +28,7 @@
 
 ## Fase B — `RodeoContext.tsx`
 
-- [ ] **T3** — Reemplazar el efecto reactivo por-sync por `db.onChange`. Sacar `useStatus`/`lastSyncedMs`.
+- [x] **T3** — Reemplazar el efecto reactivo por-sync por `db.onChange`. Sacar `useStatus`/`lastSyncedMs`.
   Agregar `usePowerSync` + `const db = usePowerSync();`. Reemplazar el `useEffect([lastSyncedMs, userId,
   establishmentId, load])` por `db.onChange({ onChange: () => void load(userId, establishmentId) },
   { tables: ['rodeos','user_roles'] })` con `return () => dispose()`. Actualizar el comentario. **NO** tocar
@@ -41,18 +41,18 @@
 
 ## Fase C — `lotes.tsx` (pantalla, `useQuery`)
 
-- [ ] **T4** — Migrar la lista a `useQuery`. Agregar `import { useQuery, useStatus } from '@powersync/react'`
+- [x] **T4** — Migrar la lista a `useQuery`. Agregar `import { useQuery, useStatus } from '@powersync/react'`
   + `buildManagementGroupsQuery`. Derivar `const { sql, args } = buildManagementGroupsQuery(establishmentId ??
   '')` y `const { data: groups, isLoading, error } = useQuery<ManagementGroup>(sql, args, { rowComparator:
   { keyBy: (g) => g.id, compareBy: (g) => g.name } })` + `const { hasSynced } = useStatus()` (SOLO para el
   affordance del estado vacío, R21.34 — no como disparador). Cubre: R21.3, R21.6, R21.20, R21.34.
   Verificación: E2E T19 (lote en caliente, lista no se blanquea).
 
-- [ ] **T5** — Sacar lo que `useQuery` reemplaza: `useStatus`/`lastSyncedMs`, el `useEffect` mount-only, el
+- [x] **T5** — Sacar lo que `useQuery` reemplaza: `useStatus`/`lastSyncedMs`, el `useEffect` mount-only, el
   `useEffect` reactivo, la función `load`, el helper `sameManagementGroups`, los estados `groups`/`loading`.
   Cubre: R21.4, R21.20. Verificación: inspección (no queda `lastSyncedAt` ni `load`; `error`→`refresh()`).
 
-- [ ] **T6** — Sacar los parches optimistas manuales de la LISTA en crear/renombrar/borrar (`setGroups(prev
+- [x] **T6** — Sacar los parches optimistas manuales de la LISTA en crear/renombrar/borrar (`setGroups(prev
   => …)` + snapshots de revert): el write local reflejado por `useQuery` los hace innecesarios (el borrado
   rechazado no escribe overlay → la fila queda; no hay que revertir). Conservar el manejo de error de cada
   acción (`createError`, `Alert` del delete) y los estados de UI (`creating`, `newName`, `renamingId`,
@@ -60,7 +60,7 @@
   Cubre: R21.20. Verificación: E2E de lotes (crear/renombrar/borrar siguen funcionando; la lista refleja el
   cambio) + inspección.
 
-- [ ] **T7** — Derivar los estados de display de `{ groups, isLoading, error, hasSynced }` **con la
+- [x] **T7** — Derivar los estados de display de `{ groups, isLoading, error, hasSynced }` **con la
   desambiguación vacío/sincronizando (design §3.3, veto de design-review)**: error+"Reintentar" (`refresh()`)
   con `error`; "Cargando lotes…" con `isLoading` (carga inicial); **"Sincronizando datos del campo…" cuando
   `groups` vacío Y `!hasSynced`** (R21.32 — reusar `SYNCING_MESSAGE`); "Este campo todavía no tiene lotes…"
@@ -72,27 +72,27 @@
 
 ## Fase D — E1 / E2 / E3 (verificación de que la resolución preservada sigue valiendo)
 
-- [ ] **T8** — Confirmar por inspección que la resolución de la 20 quedó INTACTA: `assessDisappearance`,
+- [x] **T8** — Confirmar por inspección que la resolución de la 20 quedó INTACTA: `assessDisappearance`,
   `shouldEmitDeferredRevocation`, `sameResolvedEstablishmentState`, `sameRodeo`/`sameRodeoState`,
   `hasActiveLocalRole`, `buildActiveRoleQuery` — ningún archivo puro ni de servicio cambió. Correr la suite
   unitaria existente (`establishment.test.ts` + `local-reads.test.ts`) y confirmar verde SIN tests nuevos
   (la lógica no cambió). Cubre: R21.12, R21.13, R21.14, R21.16, R21.17, R21.19. Verificación: suite unit
   verde + inspección de que no hay diff en los puros.
 
-- [ ] **T9** — Verificar E2 (thrash): inspección de que los guards de equivalencia siguen antes de cada
+- [x] **T9** — Verificar E2 (thrash): inspección de que los guards de equivalencia siguen antes de cada
   `setState` en ambos contextos, y que `lotes.tsx` usa `rowComparator` (no `sameManagementGroups`). Cubre:
   R21.19, R21.20, R21.21. Verificación: inspección + E2E A1 (el campo activo no cambia al aparecer uno nuevo).
 
-- [ ] **T10** — Verificar E3 (offline): el caso E2E offline de la 20 (T22) sigue verde con el disparador
+- [x] **T10** — Verificar E3 (offline): el caso E2E offline de la 20 (T22) sigue verde con el disparador
   nuevo (app quieta, sin cambios de tabla → `onChange` no dispara → sin cambio de estado). Ajustar solo el
   comentario del caso (deja de hablar de "señal congelada / guard `=== 0`"; pasa a "sin cambios de tabla, el
   `onChange` no dispara"). Cubre: R21.22, R21.23. Verificación: E2E T22.
 
-- [ ] **T11** — Verificar R21.18 por inspección/argumento: `sync-streams/rafaq.yaml` no declara prioridades
+- [x] **T11** — Verificar R21.18 por inspección/argumento: `sync-streams/rafaq.yaml` no declara prioridades
   → cada checkpoint es una vista consistente → `onChange` no observa buckets a medio aplicar (feature 20
   design §4.2, evidencia 1-4). Cubre: R21.18. Verificación: inspección + referencia a la evidencia de la 20.
 
-- [ ] **T11b** — Verificar la CARGA INICIAL al montar (R21.35). Confirmar por inspección que el efecto que se
+- [x] **T11b** — Verificar la CARGA INICIAL al montar (R21.35). Confirmar por inspección que el efecto que se
   reemplazó en cada contexto es EL REACTIVO (el de `lastSyncedMs`), y que el efecto de bootstrap SEPARADO
   quedó intacto: `EstablishmentContext` (`bootedForUser` ref → `loadTrail`/`waitForUsableSync`/
   `loadMemberships`) y `RodeoContext` (`useEffect([userId, establishmentId, load])`). En `lotes.tsx` la carga
@@ -105,24 +105,24 @@
 
 ## Fase E — E2E determinista (D3, objetivo Gate 2.5: SIN retries)
 
-- [ ] **T12** — `reactividad-sync.spec.ts`: sacar `test.describe.configure({ retries: 2 })`. Cubre: R21.26.
+- [x] **T12** — `reactividad-sync.spec.ts`: sacar `test.describe.configure({ retries: 2 })`. Cubre: R21.26.
   Verificación: la línea ya no existe; el spec corre sin retries.
 
-- [ ] **T13** — Sacar el forzador de blip de las ADICIONES: eliminar `forceSyncTick`/`syncUntil` (y sus
+- [x] **T13** — Sacar el forzador de blip de las ADICIONES: eliminar `forceSyncTick`/`syncUntil` (y sus
   helpers si quedan sin uso) de T17 (campo), T18 (rodeo), T19 (lote). Asertar directo con timeouts razonables
   (Playwright estándar). Cubre: R21.27. Verificación: los casos pasan sin blips.
 
-- [ ] **T14** — Revocaciones (T20/T21): sacar retries; asertar directo. Conservar `assertServerSessionsRevoked`
+- [x] **T14** — Revocaciones (T20/T21): sacar retries; asertar directo. Conservar `assertServerSessionsRevoked`
   como PRIMER assert de T21 (candado anti-falso-verde) y todos los oráculos estrictos (copy de E5, no navegó a
   `/crear-rodeo`, diferimiento D1). Bajar los timeouts de ~120 s a un valor acorde a la propagación real (el
   lag de señal desaparece; el implementer lo mide). Cubre: R21.28, R21.29. Verificación: T20/T21 verdes,
   deterministas.
 
-- [ ] **T15** — Offline (T22): conservar el `context.setOffline`; no usa forzador. Actualizar el header del
+- [x] **T15** — Offline (T22): conservar el `context.setOffline`; no usa forzador. Actualizar el header del
   spec (reactividad determinista vía watched query; sin eventual-consistency/retries/forzador). Cubre:
   R21.29. Verificación: T22 verde; header reescrito.
 
-- [ ] **T16** — Correr la suite E2E completa del spec (los 6 casos), 2-3 corridas, SIN retries → verde
+- [x] **T16** — Correr la suite E2E completa del spec (los 6 casos), 2-3 corridas, SIN retries → verde
   determinista. **NO** correr `e2e:report`/build de capturas (churnea `design/**/*.png`; revertir `design/`
   si se tocó). Cubre: R21.1, R21.8, R21.13, R21.20, R21.22, R21.23 (verificación E2E) + A4. Verificación:
   ≥2 corridas limpias sin retry.
@@ -131,11 +131,11 @@
 
 ## Fase F — Migración incremental + ADR + reconciliación (D4)
 
-- [ ] **T17** — Confirmar que SOLO se tocaron los 3 consumidores (+ la E2E de la 20): las 5 pantallas
+- [x] **T17** — Confirmar que SOLO se tocaron los 3 consumidores (+ la E2E de la 20): las 5 pantallas
   focus-only y el resto de la app quedaron sin tocar. Cubre: R21.30. Verificación: `git diff --stat` acotado
   a `EstablishmentContext.tsx` + `RodeoContext.tsx` + `lotes.tsx` + `reactividad-sync.spec.ts` (+ docs).
 
-- [ ] **T18** — Reconciliación de specs (regla dura, ANTES de cerrar):
+- [x] **T18** — Reconciliación de specs (regla dura, ANTES de cerrar):
   - `specs/active/15-powersync/design.md` — nota de "cero watched queries" → "los 3 consumidores migrados;
     el resto pendiente" (R21.31).
   - `specs/active/20-reactividad-sync/design.md` §10-bis(g)/§9.1 + header del E2E — nota as-built: disparador
@@ -148,7 +148,7 @@
     hace falta.
   Cubre: R21.31. Verificación: leader exige specs reconciliadas como pre-condición de `done`.
 
-- [ ] **T19** — Autorrevisión adversarial del implementer (paso obligatorio): confirmar (a) el `dispose` se
+- [x] **T19** — Autorrevisión adversarial del implementer (paso obligatorio): confirmar (a) el `dispose` se
   llama en el cleanup de los 2 efectos (sin leak de listeners al re-suscribir por cambio de usuario/campo);
   (b) ninguna re-lectura concluye revocación sin evidencia afirmativa (la resolución no cambió); (c) el
   disparo frecuente no starvea `RodeoContext.load` (`lastAppliedSeq` ordena, no cancela — preservado); (d)
@@ -193,8 +193,8 @@
 | R21.29 | T14, T15 | E2E (casos preservados) |
 | R21.30 | T17 | `git diff --stat` acotado |
 | R21.31 | T18 | specs reconciliadas |
-| R21.32 | T4, T7 | E2E estado vacío (con lotes sin sync → "Sincronizando…") |
-| R21.33 | T7 | E2E estado vacío (sincronizado sin lotes → "sin lotes") |
+| R21.32 | T4, T7 | inspección del orden de ramas del display (`groups.length===0 && !hasSynced` → SYNCING antes del vacío genuino) — la ventana de primer-sync es racy para E2E (reconciliado, requirements §11) |
+| R21.33 | T7 | E2E DETERMINISTA `lotes.spec.ts` ("campo sincronizado sin lotes → 'sin lotes' (no 'Sincronizando…')") |
 | R21.34 | T4, T7 | inspección (`useStatus` solo affordance del vacío, no disparador) |
 | R21.35 | T1, T3, T11b | inspección (bootstrap separado) + E2E de arranque |
 

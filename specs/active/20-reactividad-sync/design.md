@@ -392,9 +392,11 @@ Sí, conceptualmente — pero la diferencia **no cambia ninguna acción del usua
 
 ## 9. Alternativas descartadas
 
-### 9.1 Migrar a watched queries (`useQuery` / `db.watch`) — DESCARTADA
+### 9.1 Migrar a watched queries (`useQuery` / `db.watch`) — DESCARTADA EN LA 20, HECHA EN LA 21
 
 Sería la solución de fondo: la UI se re-renderiza sola ante cualquier cambio del SQLite local y el re-fetch manual desaparece. Se descarta porque **es deuda de arquitectura explícita y deliberada** (`specs/active/15-powersync/design.md`, `docs/backlog.md:417`, desde 2026-06-09), la app tiene **cero** watched queries hoy, y migrarlas es una decisión de arquitectura que merece su propio ADR. Meterlo acá convertiría un fix de 3 archivos en una refactorización transversal — y el bug reportado por Raf seguiría abierto mientras tanto. El context lo excluye textualmente (§5).
+
+> **RECONCILIACIÓN (feature 21, 2026-07-21).** Esta alternativa se ADOPTÓ en la feature siguiente: la 21 migró los 3 consumidores a watched queries reales (ADR-030). Precisión de nomenclatura verificada en `node_modules`: los 2 CONTEXTOS usan **`db.onChange(handler, { tables })`** (una watched query imperativa que NOTIFICA el cambio de tabla y re-corre la resolución existente de la 20 — encaje exacto porque los contextos corren evidencia/veredicto, no consumen filas), NO `db.watch(sql, …)`; `lotes.tsx` usa **`useQuery`**. El disparador `lastSyncedMs` de la 20 fue reemplazado; la lógica de resolución de la 20 se preservó intacta. Ver `specs/active/21-watched-queries/design.md`.
 
 ### 9.2 Guarda de E1 por **confirmación temporal** (set vacío + re-verificación a los 4 s) — DESCARTADA
 
@@ -530,6 +532,15 @@ combinado** de un multi-cambio es robusto al estancamiento (un cambio posterior 
 timeouts por-assert son generosos (120 s) y el archivo NO lleva retries (los previos tapaban este
 fenómeno mal diagnosticado).
 
+> **RECONCILIACIÓN (feature 21, 2026-07-21).** El fix de fondo se implementó: la feature 21 migró los 3
+> consumidores a watched queries reales (ADR-030). Los 2 CONTEXTOS usan **`db.onChange(handler, { tables })`**
+> (nombre verificado en `node_modules`: la primitiva que NOTIFICA el cambio de tabla y re-corre la
+> resolución existente — NO `db.watch(sql,…)`, que entregaría filas que los contextos ignorarían);
+> `lotes.tsx` usa **`useQuery`**. Con eso el disparador ya NO es `lastSyncedMs` (el proxy no
+> determinista): la UI reacciona al cambio de tabla del SQLite local (~1,5 s medido en la 21). El E2E
+> pasó a determinista SIN retries ni forzador (medido en la 21: aviso de revocación a <300 ms del
+> disparo). Ver `specs/active/21-watched-queries/`.
+
 ### (h) Remediación (2026-07-20) — 3 decisiones de código + limpieza de instrumentación
 
 Cerrando el rechazo del reviewer:
@@ -563,6 +574,12 @@ Cerrando el rechazo del reviewer:
   honesta acá (el reviewer los objetó bajo el diagnóstico VIEJO/errado; con el A/B corregido son
   legítimos — NO tapan un bug). Todo sin reload (la app sigue montada). Detalle completo en el header de
   `app/e2e/reactividad-sync.spec.ts` y en `tasks.md` §Fase E.
+  > **RECONCILIACIÓN (feature 21, D3, 2026-07-21).** Ambas capas se RETIRARON al migrar el disparador a
+  > watched query: `app/e2e/reactividad-sync.spec.ts` ya NO tiene `test.describe.configure({ retries })`
+  > ni el forzador de blip (`forceSyncTick`/`syncUntil`) — asserta directo. El freeze de señal que los
+  > justificaba desapareció (el `onChange` dispara sobre el cambio de tabla, no sobre la señal FULL).
+  > Determinismo confirmado en la 21 con ≥3 corridas limpias + stress `--repeat-each`, sin un solo retry;
+  > los oráculos siguen estrictos (incluido `assertServerSessionsRevoked` como primer assert de T21).
 
 ---
 

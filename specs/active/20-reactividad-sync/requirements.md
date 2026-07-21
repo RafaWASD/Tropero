@@ -27,6 +27,16 @@ Los dos contextos raíz (`EstablishmentContext`, `RodeoContext`) y la pantalla `
 
 **R20.5** — El sistema no deberá condicionar la re-lectura de rodeos (R20.2) a que el contexto esté en estado `loading` (queda eliminado el segundo candado `isWaitingRef`).
 
+> **RECONCILIACIÓN (feature 21, 2026-07-21).** R20.6/R20.7/R20.8 describen el DISPARADOR intermedio de la
+> 20 (`lastSyncedMs` — el valor primitivo derivado de `lastSyncedAt` + su guard `=== 0`). La feature 21
+> **reemplazó ese disparador** en los 3 consumidores por watched queries reales de PowerSync
+> (`db.onChange` en los 2 contextos, `useQuery` en `lotes.tsx`; ADR-030, R21.4/R21.5/R21.6). Ya NO hay
+> dep `lastSyncedMs` ni guard `=== 0` en esos archivos. La **propiedad OFFLINE que R20.7/R20.8 garantizan
+> se PRESERVA, con una base más fuerte**: sin cambios de tabla del servidor el `onChange` no dispara (no
+> hay evento espurio) y `useQuery` no re-emite, así que el estado resuelto no se toca offline (R21.22/
+> R21.23). La lógica de RESOLUCIÓN (evidencia afirmativa, diferimiento D1, guards de equivalencia) que
+> estos EARS protegen NO cambió — solo el disparador. Los EARS no se reescriben (nota as-built).
+
 **R20.6** — La dependencia del efecto de re-lectura deberá ser un valor primitivo en milisegundos derivado de `lastSyncedAt`, no el objeto de estado de sync.
 
 **R20.7** — Mientras el valor primitivo de sync sea `0` (ningún sync completado), el sistema no deberá disparar la re-lectura reactiva.

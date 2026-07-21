@@ -1,4 +1,4 @@
-# ADR-030: Adopción de watched queries (`db.watch` / `useQuery`) para reactividad
+# ADR-030: Adopción de watched queries (`db.onChange` / `useQuery`) para reactividad
 
 - **Estado**: Aceptada
 - **Fecha**: 2026-07-21
@@ -29,11 +29,22 @@ Consecuencia: la reactividad emulada tiene **latencia no acotada** (hasta ~90 s+
 Adoptar **watched queries reales de PowerSync** como el patrón de reactividad, reaccionando al cambio del
 **SQLite local** (que llega en ~1,5 s) en vez de a la señal gruesa de status:
 
-- **`db.watch`** (imperativo) en los **contextos** que corren lógica de resolución sobre los datos
-  (`EstablishmentContext`, `RodeoContext`): el `onChange` re-corre la resolución que ya existe
-  (`assessDisappearance`, diferimiento D1, evidencia de revocación). Solo cambia el **disparador**.
-- **`useQuery`** (`@powersync/react`, hook) en pantallas/componentes que renderizan listas directo
-  (`lotes.tsx`, y a futuro las demás).
+- **Watched query imperativa** en los **contextos** que corren lógica de resolución sobre los datos
+  (`EstablishmentContext`, `RodeoContext`): re-corre la resolución que ya existe (`assessDisappearance`,
+  diferimiento D1, evidencia de revocación). Solo cambia el **disparador**.
+  > **PRECISIÓN DE NOMENCLATURA (as-built, feature 21, verificada en `node_modules`).** La primitiva
+  > correcta para los contextos es **`db.onChange(handler, { tables })`**, NO `db.watch(sql, params,
+  > handler)`. Son dos cosas distintas: `db.watch` RE-EJECUTA una query y entrega las FILAS (para cuando
+  > el consumidor consume esas filas directo); `db.onChange` **solo NOTIFICA** `{ changedTables }` cuando
+  > cambia alguna de las `tables` observadas, y devuelve una **función de disposición** (encaje natural
+  > del cleanup de `useEffect`). El propio SDK recomienda `onChange` *"when multiple queries need to be
+  > performed together when data is changed"* — que es exactamente el caso de los contextos (corren su
+  > propia lectura + evidencia + veredicto en el callback, e ignorarían las filas de un `db.watch`). Es
+  > una precisión de nombre, no un cambio de alcance: sigue siendo la watched query imperativa que
+  > re-corre la resolución existente. `triggerImmediate` es `false` (default) → NO dispara al montar (la
+  > carga inicial la hace el bootstrap separado). Ver `specs/active/21-watched-queries/design.md` §2.
+- **`useQuery`** (`@powersync/react`, hook, con `rowComparator` diferencial) en pantallas/componentes que
+  renderizan listas directo (`lotes.tsx`, y a futuro las demás).
 - **Migración INCREMENTAL, no big-bang**: la feature 21 migra los **3 consumidores de la 20**
   (`EstablishmentContext`, `RodeoContext`, `lotes.tsx`). El resto (los 5 focus-only del backlog:
   `miembros`, `use-reports`, `animal/[id]`, `export-sigsa`, `maniobra`; y demás) se migra después con
@@ -52,7 +63,8 @@ Adoptar **watched queries reales de PowerSync** como el patrón de reactividad, 
 - El patrón `useStatus() + lastSyncedAt` queda como **legado a reemplazar** — coexisten dos patrones hasta
   completar la migración incremental.
 - Cada consumidor migrado cambia su disparador; hay que preservar la lógica de resolución y los guards de
-  equivalencia (evitar thrash por el disparo más frecuente de `db.watch`).
+  equivalencia (evitar thrash por el disparo más frecuente de `db.onChange` — el SDK ayuda con su throttle
+  trailing de 30 ms que coalesce ráfagas de un checkpoint).
 
 ## Alternativas consideradas
 

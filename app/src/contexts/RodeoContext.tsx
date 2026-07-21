@@ -33,7 +33,7 @@ import {
   type ReactNode,
 } from 'react';
 
-import { useStatus } from '@powersync/react';
+import { usePowerSync } from '@powersync/react';
 
 import { useAuth } from './AuthContext';
 import { useEstablishment } from './EstablishmentContext';
@@ -108,9 +108,10 @@ export function RodeoProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<RodeoState>({ status: 'loading' });
   const [error, setError] = useState<string | null>(null);
 
-  // spec 20 — señal de sync del patrón canónico. Dep PRIMITIVA (ms), igual que ProfileContext.
-  const syncStatus = useStatus();
-  const lastSyncedMs = syncStatus.lastSyncedAt?.getTime() ?? 0;
+  // spec 21 (R21.5) — instancia del DB para la watched query imperativa (`db.onChange`). Mismo
+  // singleton que `getPowerSync()`, provisto por el `PowerSyncProvider` que envuelve este árbol.
+  // Reemplaza el disparador por-sync `lastSyncedMs` (proxy NO determinista, feature 20).
+  const db = usePowerSync();
 
   // Rodeo que querríamos activo: el persistido o el recién elegido por switch. En ref para que
   // refresh/switch lean el valor fresco sin re-suscribir efectos.
@@ -265,22 +266,33 @@ export function RodeoProvider({ children }: { children: ReactNode }) {
     void load(userId, establishmentId);
   }, [userId, establishmentId, load]);
 
-  // spec 20 (R20.2/R20.4/R20.5) — RE-LECTURA REACTIVA en CADA avance de sync.
+  // spec 21 (R21.2/R21.4/R21.5/R21.9/R21.11) — WATCHED QUERY imperativa. Reemplaza el disparador
+  // por-sync de la feature 20 (`lastSyncedMs`) por `db.onChange` sobre las tablas que respaldan los
+  // rodeos del campo activo. El onChange re-corre `load` EXISTENTE (fetchRodeos + guarda R20.18 +
+  // applyRodeos) SIN tocar su lógica de veredicto: solo cambia el disparador (ADR-030).
   //
-  // Lo que había acá era el gemelo PEOR del latch del EstablishmentContext: el mismo
-  // `registerListener({ statusChanged })` acotado a la transición first-sync false→true, MÁS un
-  // segundo candado (`isWaitingRef`) que lo hacía no-op garantizado en cuanto el contexto resolvía a
-  // `active`. Efecto: un rodeo creado / borrado / renombrado por un coworker no aparecía ni
-  // desaparecía del selector mientras la app viviera.
+  // Por qué observar AMBAS tablas:
+  //   · `rodeos` — cubre alta / borrado / rename de un rodeo por un coworker (INSERT/DELETE/UPDATE).
+  //   · `user_roles` — 🔴 sostiene la guarda que hace posible D1 (R20.18, design §8 riesgo 7): al
+  //     revocarse el acceso PowerSync borra el bucket de rodeos → `fetchRodeos = []` → sin la evidencia
+  //     afirmativa concluiríamos `no_rodeos` → `/crear-rodeo` SOBRE la maniobra, pateando al operario.
+  //     Observar `user_roles` re-evalúa apenas baje el rol, aunque la remoción del bucket de rodeos
+  //     llegue en OTRO checkpoint que la baja del rol.
   //
-  // Mismo patrón canónico: `useStatus()` + `lastSyncedAt.getTime()` como dep PRIMITIVA, sin acotar a
-  // la primera transición y SIN el candado de "solo si está esperando" (R20.5). Guardado en 0 →
-  // offline puro intacto (R20.7) y un reset de `lastSyncedAt` no toca el estado resuelto (R20.8).
+  // `triggerImmediate` es false (default) → NO dispara al registrarse: la CARGA INICIAL y la recarga al
+  // hacer switch de campo las sigue haciendo el efecto SEPARADO `useEffect([userId, establishmentId,
+  // load])` (arriba), intacto (R21.35). El `dispose` devuelto se llama en el cleanup al desmontar o al
+  // cambiar `userId`/`establishmentId` (sin fuga de listeners ni doble suscripción). `load` está
+  // endurecido para el disparo frecuente (`targetRef` descarta si cambió el objetivo; `lastAppliedSeq`
+  // ordena sin cancelar — el fix anti-starvation de la 20), así que dos disparos solapados no se pisan.
   useEffect(() => {
     if (!userId || !establishmentId) return;
-    if (lastSyncedMs === 0) return;
-    void load(userId, establishmentId);
-  }, [lastSyncedMs, userId, establishmentId, load]);
+    const dispose = db.onChange(
+      { onChange: () => { void load(userId, establishmentId); } },
+      { tables: ['rodeos', 'user_roles'] },
+    );
+    return () => dispose();
+  }, [userId, establishmentId, load, db]);
 
   const refreshRodeos = useCallback(async () => {
     await load(userId, establishmentId);

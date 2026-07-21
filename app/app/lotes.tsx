@@ -20,7 +20,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Platform, Pressable } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { useStatus } from '@powersync/react';
+import { useQuery, useStatus } from '@powersync/react';
 import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
 import {
   ChevronLeft,
@@ -36,11 +36,12 @@ import { useEstablishment } from '@/contexts';
 import {
   createManagementGroup,
   fetchGroupMembers,
-  fetchManagementGroups,
   renameManagementGroup,
   softDeleteManagementGroup,
   type ManagementGroup,
 } from '@/services/management-groups';
+import { buildManagementGroupsQuery } from '@/services/powersync/local-reads';
+import { SYNCING_MESSAGE } from '@/services/powersync/local-query';
 import type { AnimalListItem } from '@/services/animals';
 import { canManageGroups, validateGroupName } from '@/utils/management-group';
 import { hasDuplicateName } from '@/utils/establishment';
@@ -49,30 +50,10 @@ import { backOr } from '@/utils/nav';
 
 const OFFLINE_COPY = 'Necesitás conexión para esto. Conectate a internet y volvé a intentar.';
 
-/**
- * spec 20 / R20.11 — guard de equivalencia de la lista de lotes. Ahora que la re-lectura corre en CADA
- * avance de sync (`load({ silent: true })`), sin este guard cada checkpoint haría `setGroups(fresh)` con
- * un array NUEVO → re-render de toda la pantalla aunque los lotes no cambiaran. Devolver `prev` cuando la
- * lista es equivalente (mismo largo + id/name en orden) hace que React descarte el update. Mismo patrón
- * que `sameResolvedEstablishmentState`/`sameRodeoState` en los contextos raíz. Pura.
- */
-function sameManagementGroups(a: ManagementGroup[] | null, b: ManagementGroup[]): boolean {
-  if (a === null) return false;
-  if (a === b) return true;
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i++) {
-    if (a[i].id !== b[i].id || a[i].name !== b[i].name) return false;
-  }
-  return true;
-}
-
 export default function LotesScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { state: estState } = useEstablishment();
-  // spec 20 — señal de sync del patrón canónico; la dep del efecto reactivo es el PRIMITIVO en ms.
-  const syncStatus = useStatus();
-  const lastSyncedMs = syncStatus.lastSyncedAt?.getTime() ?? 0;
 
   const establishmentId = estState.status === 'active' ? estState.current.id : null;
   const role = estState.status === 'active' ? estState.role : null;
@@ -80,13 +61,42 @@ export default function LotesScreen() {
 
   const muted = getTokenValue('$textMuted', 'color');
 
-  // `groups === null` = todavía no cargó (carga inicial: el blank "Cargando lotes…" se permite). Una vez
-  // cargado, las acciones (crear/renombrar/borrar) mutan el array EN SITIO de forma optimista y reconcilian
-  // con un refresh SILENCIOSO — nunca volvemos a `null` ni toggleamos `loading` (que blanquearía + resetearía
-  // el scroll). Misma receta que `animal/[id].tsx` (load({silent}) + patch optimista + revert-si-falla).
-  const [groups, setGroups] = useState<ManagementGroup[] | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  // spec 21 (R21.3/R21.6/R21.20) — WATCHED QUERY. La lista de lotes se deriva de `useQuery` sobre
+  // `buildManagementGroupsQuery`, así refleja el estado del SQLite local de forma REACTIVA (reemplaza el
+  // efecto mount-only + el efecto por-sync `lastSyncedMs` de la feature 20). El SDK auto-detecta las
+  // tablas fuente (`management_groups` + el overlay `pending_status_overrides` del soft-delete) con
+  // EXPLAIN, así que un cambio de un coworker aparece en ~1,5 s determinista sin volver a montar.
+  //
+  // `rowComparator` (R21.20) → query incremental: solo re-emite cuando el set (id + name) cambió
+  // realmente, preservando las referencias de las filas sin cambio → reemplaza el guard manual
+  // `sameManagementGroups`. Un checkpoint que no toca los lotes es un no-op (sin re-render). Y `useQuery`
+  // NO vuelve a poner `isLoading = true` en las re-emisiones (solo `isFetching`), así que la lista no se
+  // blanquea ni resetea el scroll ante un cambio reactivo — lo que la 20 lograba con `load({ silent: true })`.
+  //
+  // OPTIMISMO GRATIS (R21.20): crear/renombrar/borrar son writes LOCALES (`management_groups` o el overlay
+  // `pending_status_overrides`); PowerSync los aplica al SQLite local al instante → `useQuery` re-emite con
+  // el cambio reflejado, sin `setGroups` manual. Un borrado rechazado no escribió overlay → la fila sigue.
+  //
+  // `establishmentId` nulo (defensivo — la pantalla solo es alcanzable con campo activo): `('')` no matchea
+  // nada → `data = []` → cae en la lógica de estado vacío de abajo.
+  const { sql, args } = buildManagementGroupsQuery(establishmentId ?? '');
+  const {
+    data: groups,
+    isLoading,
+    error,
+    refresh,
+  } = useQuery<ManagementGroup>(sql, args, {
+    rowComparator: { keyBy: (g) => g.id, compareBy: (g) => g.name },
+  });
+
+  // spec 21 (R21.34) — `useStatus` reintroducido SOLO como affordance del estado vacío: desambigua
+  // "Sincronizando…" (primer sync aún pendiente) de "sin lotes" (vacío genuino), R21.32/R21.33. NO es el
+  // disparador de la reactividad de la lista — eso lo hace `useQuery`.
+  const { hasSynced } = useStatus();
+
+  // Copia mutable para los props hijos + helpers tipados `ManagementGroup[]` (el `data` de `useQuery` es
+  // readonly). El ref-preserving del `rowComparator` evita que este render corra en un checkpoint no-op.
+  const groupList: ManagementGroup[] = [...groups];
 
   // Crear (form inline, owner-only).
   const [creating, setCreating] = useState(false);
@@ -104,58 +114,9 @@ export default function LotesScreen() {
   // Re-entrancy guard del borrado (un doble-tap no dispara dos).
   const busyRef = useRef(false);
 
-  // `load` distingue CARGA INICIAL (puede blanquear: setea `loading`, que desmonta la lista y resetea el
-  // scroll al tope) de REFRESH SILENCIOSO post-acción (`silent: true` — NO toca `loading`: la lista queda
-  // montada, el scroll se mantiene). Las acciones de la pantalla (crear/renombrar/borrar lote) aplican el
-  // cambio OPTIMISTA en sitio y luego reconcilian con `load({ silent: true })`, sin el parpadeo en blanco.
-  const load = useCallback(async (opts: { silent?: boolean } = {}) => {
-    const silent = opts.silent === true;
-    if (!establishmentId) {
-      setGroups([]);
-      setLoading(false);
-      return;
-    }
-    if (!silent) setLoading(true);
-    setError(null);
-    const r = await fetchManagementGroups(establishmentId);
-    if (!silent) setLoading(false);
-    if (!r.ok) {
-      // En un refresh SILENCIOSO un fallo transitorio NO debe volar la lista ya montada (el cambio optimista
-      // ya está reflejado); conservamos el estado actual y salimos. En la carga inicial sí mostramos el error.
-      if (!silent) {
-        setError(
-          r.error.kind === 'network' ? 'Sin conexión: no pudimos cargar los lotes.' : 'No pudimos cargar los lotes.',
-        );
-        setGroups([]);
-      }
-      return;
-    }
-    // R20.11 — guard de equivalencia: en la re-lectura reactiva (cada checkpoint) NO re-renderizamos si
-    // la lista no cambió. Devolver `prev` hace que React descarte el update (un checkpoint que no toca
-    // los lotes es un no-op observable). La carga inicial (prev === null) y todo cambio real sí emiten.
-    setGroups((prev) => (sameManagementGroups(prev, r.value) ? prev : r.value));
-  }, [establishmentId]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  // spec 20 (R20.3/R20.9) — RE-LECTURA REACTIVA. Esta pantalla era el único MOUNT-ONLY del barrido:
-  // no se actualizaba ni al re-enfocar, así que un lote creado por otro usuario (u otro device) no
-  // aparecía nunca mientras la pantalla siguiera montada. Patrón canónico: `useStatus()` +
-  // `lastSyncedAt.getTime()` como dep PRIMITIVA, guardado en 0 (offline puro intacto, R20.7).
-  //
-  // `silent: true` es OBLIGATORIO: la ruta no-silenciosa setea `loading` → desmonta la lista →
-  // resetea el scroll al tope, y ante un fallo transitorio hace `setGroups([])` (blanquea la
-  // pantalla). Con `silent`, un fallo conserva la lista montada y la posición de scroll (R20.10).
-  useEffect(() => {
-    if (lastSyncedMs === 0) return;
-    void load({ silent: true });
-  }, [lastSyncedMs, load]);
-
   // ── Crear lote (owner) ──
   const dupWarning =
-    newName.trim().length > 0 && hasDuplicateName(newName, groups ?? [])
+    newName.trim().length > 0 && hasDuplicateName(newName, groupList)
       ? `Ya tenés un lote llamado «${newName.trim()}». Podés crearlo igual.`
       : null;
 
@@ -174,10 +135,8 @@ export default function LotesScreen() {
       setCreateError(r.error.kind === 'network' ? OFFLINE_COPY : r.error.message);
       return;
     }
-    // OPTIMISMO EN SITIO: agregamos el lote nuevo al final SIN blanquear la pantalla ni resetear el scroll.
-    // createManagementGroup devuelve el id REAL (uuid de cliente, ya en SQLite local) + el nombre → no hace
-    // falta re-leer para reconciliar el id (el create no falla en este punto: el return ya fue ok).
-    setGroups((prev) => [...(prev ?? []), r.value]);
+    // spec 21 (R21.20) — el INSERT LOCAL a `management_groups` ya bajó al SQLite → `useQuery` re-emite con
+    // el lote nuevo al instante (optimismo gratis, sin `setGroups`). Solo limpiamos el form inline.
     setNewName('');
     setCreating(false);
   }, [establishmentId, newName, submittingCreate]);
@@ -209,24 +168,21 @@ export default function LotesScreen() {
         return;
       }
       setDeletingId(group.id);
-      // OPTIMISMO EN SITIO: sacamos el lote de la lista YA (sin blanquear ni resetear el scroll) + cerramos
-      // su acordeón si estaba abierto. Snapshot para revertir si el write falla (raro: el soft-delete encola
-      // offline, pero el clear-NULL de miembros es un write local que podría fallar).
-      const snapshot = groups;
-      setGroups((prev) => (prev == null ? prev : prev.filter((g) => g.id !== group.id)));
+      // Cerramos el acordeón del lote si estaba abierto (ya no lo vamos a listar). spec 21 (R21.20): el
+      // soft-delete escribe el overlay `pending_status_overrides` LOCAL → `buildManagementGroupsQuery`
+      // (que oculta los `soft_deleted` pendientes) deja de listar el lote al instante vía `useQuery`, sin
+      // patch manual ni snapshot de revert: un borrado RECHAZADO no escribe el overlay → la fila sigue
+      // (nada que revertir).
       if (expandedId === group.id) setExpandedId(null);
       const r = await softDeleteManagementGroup(group.id);
       setDeletingId(null);
       busyRef.current = false;
       if (!r.ok) {
-        setGroups(snapshot); // REVERT: el lote re-aparece si el borrado fue rechazado
         Alert.alert('No se pudo eliminar', r.error.kind === 'network' ? OFFLINE_COPY : r.error.message);
         return;
       }
-      // Refresh SILENCIOSO para reconciliar con el SQLite local (sin parpadeo ni salto al tope).
-      void load({ silent: true });
     },
-    [establishmentId, expandedId, groups, load],
+    [establishmentId, expandedId],
   );
 
   return (
@@ -268,18 +224,24 @@ export default function LotesScreen() {
           </Text>
         </YStack>
 
-        {/* Blank "Cargando lotes…" SOLO en la carga inicial (groups === null): una vez montada la lista,
-            las acciones la mutan en sitio + refrescan en silencio, sin volver nunca a este placeholder. */}
-        {error && groups === null ? (
+        {/* spec 21 (R21.32/R21.33/R21.34, veto de design-review): `useQuery` puede devolver `data = []` por
+            DOS motivos distintos — el campo genuinamente no tiene lotes, o los lotes todavía no
+            sincronizaron (primer sync / device nuevo). Mostrar "sin lotes" en el segundo caso es un FALSO
+            VACÍO. Se desambigua con `hasSynced`: error → "Cargando…" (carga inicial) → "Sincronizando…"
+            (aún sin primer sync) → "sin lotes" (vacío genuino) → la lista. `useQuery` no re-pone `isLoading`
+            en las re-emisiones, así que la lista nunca vuelve a este placeholder tras la carga inicial. */}
+        {error && groups.length === 0 ? (
           <YStack gap="$2" marginTop="$2">
-            <FormError message={error} />
-            <Button variant="secondary" fullWidth onPress={() => void load()}>
+            <FormError message="No pudimos cargar los lotes." />
+            <Button variant="secondary" fullWidth onPress={() => void refresh?.()}>
               Reintentar
             </Button>
           </YStack>
-        ) : loading && groups === null ? (
+        ) : isLoading && groups.length === 0 ? (
           <InfoNote>Cargando lotes…</InfoNote>
-        ) : (groups ?? []).length === 0 ? (
+        ) : groups.length === 0 && !hasSynced ? (
+          <InfoNote>{SYNCING_MESSAGE}</InfoNote>
+        ) : groups.length === 0 ? (
           <InfoNote>
             {isOwner
               ? 'Este campo todavía no tiene lotes. Creá el primero abajo.'
@@ -287,27 +249,22 @@ export default function LotesScreen() {
           </InfoNote>
         ) : (
           <YStack gap="$3" marginTop="$2">
-            {(groups ?? []).map((g) => (
+            {groupList.map((g) => (
               <LoteCard
                 key={g.id}
                 group={g}
                 isOwner={isOwner}
                 establishmentId={establishmentId}
-                groups={groups ?? []}
+                groups={groupList}
                 expanded={expandedId === g.id}
                 onToggleExpand={() => setExpandedId((id) => (id === g.id ? null : g.id))}
                 renaming={renamingId === g.id}
                 onStartRename={() => setRenamingId(g.id)}
                 onCancelRename={() => setRenamingId(null)}
-                onRenamed={(newName) => {
-                  // OPTIMISMO EN SITIO: el write ya tuvo éxito en RenameForm → actualizamos el name del item
-                  // en su lugar (sin blanquear ni resetear el scroll) y cerramos el form inline. Refresh
-                  // silencioso para reconciliar con el SQLite local.
-                  setGroups((prev) =>
-                    prev == null ? prev : prev.map((it) => (it.id === g.id ? { ...it, name: newName } : it)),
-                  );
+                onRenamed={() => {
+                  // spec 21 (R21.20): el UPDATE LOCAL ya bajó al SQLite → `useQuery` re-emite con el nombre
+                  // nuevo (optimismo gratis). Solo cerramos el form inline.
                   setRenamingId(null);
-                  void load({ silent: true });
                 }}
                 deleting={deletingId === g.id}
                 onDelete={() => void onDelete(g)}
@@ -412,8 +369,8 @@ function LoteCard({
   renaming: boolean;
   onStartRename: () => void;
   onCancelRename: () => void;
-  /** El write ya tuvo éxito; recibe el nombre nuevo para el patch optimista en sitio. */
-  onRenamed: (newName: string) => void;
+  /** El write ya tuvo éxito; cierra el form inline (la lista la refleja `useQuery`, R21.20). */
+  onRenamed: () => void;
   deleting: boolean;
   onDelete: () => void;
   onOpenAnimal: (profileId: string) => void;
@@ -534,8 +491,8 @@ function RenameForm({
   group: ManagementGroup;
   groups: ManagementGroup[];
   onCancel: () => void;
-  /** El write ya tuvo éxito; recibe el nombre nuevo (validado/trimeado) para el patch optimista del padre. */
-  onRenamed: (newName: string) => void;
+  /** El write ya tuvo éxito; cierra el form inline (la lista la refleja `useQuery`, R21.20). */
+  onRenamed: () => void;
 }) {
   const [name, setName] = useState(group.name);
   const [error, setError] = useState<string | null>(null);
@@ -562,8 +519,9 @@ function RenameForm({
       setError(r.error.kind === 'network' ? OFFLINE_COPY : r.error.message);
       return;
     }
-    // Pasamos el nombre VALIDADO/TRIMEADO (el mismo que persistió el service) para el patch optimista del padre.
-    onRenamed(valid.value);
+    // spec 21 (R21.20): el UPDATE local ya bajó al SQLite → `useQuery` re-emite el nombre nuevo; solo
+    // cerramos el form inline.
+    onRenamed();
   }, [group.id, name, submitting, onRenamed]);
 
   return (
