@@ -74,6 +74,12 @@ Surgió al cablear la carga rápida de MODO MANIOBRAS (Raf cazó que **pesaje** 
 - **Inseminación:** ¿a qué hembras exactamente? (¿vaquillonas aptas + vacas en edad reproductiva; nunca terneras ni machos?).
 - **Umbral CUT de dientes (R6.8, ya abierto):** ¿incluir `3/4` además de {`1/2`,`1/4`,`sin_dientes`} como "boca de descarte" que dispara el prompt CUT? Hoy son los 3.
 
+### 🟡 ABIERTO — Reportes por año: definir "servida/preñez por campaña" (U6a, 2026-07-21)
+Raf reportó que los reportes NO cambian con el selector de año. Diagnóstico (`progress/impl_U6a-reportes-por-anio.md`): el frontend pasa `p_year` bien; el bug es **server-side y de MODELO**, no de query. Las RPC no filtran por año porque **no hay ancla temporal de campaña** para "servida natural": una hembra es "servida" por membresía + ventana ACTUAL del rodeo, no por un evento de servicio fechado. Es la limitación **[TENTATIVO]** documentada en `0105:88-94` ("no se modela historial de membresía"), que el spec 07 consume as-built, y el "último tacto GLOBAL" es literal en R7.5.2.
+- **KPIs año-independientes hoy**: Servidas (denominador natural), %Preñez, distribución CCL. **Parcialmente mal**: %Parición y %Destete (numerador varía por campaña pero divide por el `serviced` año-independiente). OK: Peso por categoría, Alertas.
+- **Pregunta para Facundo**: ¿cómo definir "servida en la campaña Y" y "preñez/CCL de la campaña Y"? **Opción A** (recomendada por el impl): anclar a evidencia FECHADA (servida natural = elegible + membresía actual + con tacto/parto atribuible a la campaña; preñez/CCL por el último tacto DENTRO de la campaña). ⚠ Cambia números VIVOS (una servida aún-no-tactada deja de contar hasta tactarla) → necesita su sign-off. **Opción B**: registrar un evento de "servicio de campaña" a nivel rodeo (más data model).
+- **Consecuencias**: cross-spec 02+07, equity-relevant → probable **ADR**; requiere **deploy de migración** (Gate 1). **Bloquea el cierre de U6a** (tanda `docs/plan-mejoras-2026-07-20.md`). El frontend + el plan de E2E (`app/e2e/reportes-por-anio.spec.ts` sembrando 2 campañas) quedan listos para el follow-up post-decisión+deploy.
+
 ## A investigar técnicamente
 
 ### Formato de laboratorios
