@@ -3,6 +3,11 @@
 > Este archivo se vacía al cerrar cada sesión y su resumen se mueve a `history.md`.
 > Mientras trabajás, **mantenelo actualizado en tiempo real**, no al final.
 
+## 2026-07-21 — U2 commiteado + U9 DEPLOYADO (Raf aprobó ambos)
+
+- **U2 (CTA siempre visible) — commit `1e0bec7`.** Raf aprobó visual (capturas) + code-review APPROVED. Primitivo `FooterActionShell` en maniobra/carga + alta + agregar-evento. ⏸ **device-test del teclado (iOS+Android) pendiente de Raf.**
+- **U9 (binding email + verificado + TTL 72h + TOCTOU) — commit `fde904b` + DEPLOYADO.** Raf eligió "binding opcional + TTL más corto" y "hacelo vos". Deploy vía MCP (sin CLI) de las 3 EFs (accept_invitation v9 / invite_user v8 / resend_invitation v7, todas ACTIVE). **Verificado: `U9_DEPLOYED` edge suite 47/47 pass** (HIGH-1 server-side OK, TTL 72h, TOCTOU). ⏸ **Raf: confirmar `enable_confirmations=true` en dashboard PROD** (defensa en profundidad). El campo `emailVerified` de `_shared/auth.ts` es aditivo → los otros 5 EFs no se re-deployaron (no lo usan).
+
 ## 2026-07-21 — Tanda: batch autónomo (Raf: "seguí con lo que puedas")
 
 Cerrados + commiteados (bugfixes, flujo lite implementer→reviewer→commit):

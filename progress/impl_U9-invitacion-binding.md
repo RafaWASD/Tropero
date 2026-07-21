@@ -212,3 +212,19 @@ Ningún doc queda contradiciendo el código.
    código (opción 1) — este punto es capa extra, no bloqueante del enforcement.
 4. **MEDIUM-2 (token en URL/localStorage web)**: deferido — se endurece cuando exista la página web
    `app.rafq.ar/invite`.
+
+---
+
+## ✅ DEPLOYED + VERIFICADO (leader, 2026-07-21)
+
+Raf autorizó ("hacelo vos"). Sin CLI de Supabase → deploy vía MCP `deploy_edge_function` (estructura
+espejada: `<name>/index.ts` + `_shared/*.ts`), al proyecto linkeado `xrhlxxdnfzvdnztacofj` (app-ganado).
+- `accept_invitation` → **v9 ACTIVE** (binding + verified + TOCTOU); `invite_user` → **v8 ACTIVE** (TTL 72h);
+  `resend_invitation` → **v7 ACTIVE** (TTL 72h). Todas `verify_jwt:true`.
+- Los otros 5 EFs NO se re-deployaron: el campo `emailVerified` de `_shared/auth.ts` es aditivo y no lo
+  usan (su bundle deployado sigue con el auth.ts viejo, sin romperse).
+- **Verificación**: `U9_DEPLOYED=1 node --test supabase/tests/edge/run.cjs` → **47/47 pass, 0 fail**.
+  U9-specific verde: sin-email→bearer; email coincide+verificado→OK; coincide+NO verificado→rechazado
+  (no consume, HIGH-1 server-side); otro email→403 (no consume); TTL 72h; TOCTOU 1-gana-1-pierde.
+- **PENDIENTE (manual de Raf)**: confirmar en el dashboard Auth que PROD tiene `enable_confirmations=true`
+  (defensa en profundidad; el enforcement real ya es server-side vía `emailVerified`).
