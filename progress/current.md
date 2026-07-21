@@ -3,6 +3,18 @@
 > Este archivo se vacía al cerrar cada sesión y su resumen se mueve a `history.md`.
 > Mientras trabajás, **mantenelo actualizado en tiempo real**, no al final.
 
+## 2026-07-21 — Tanda: batch autónomo (Raf: "seguí con lo que puedas")
+
+Cerrados + commiteados (bugfixes, flujo lite implementer→reviewer→commit):
+- **U8b (link WhatsApp duplicado) — `df8b2de`.** `inviteShareMessage` fuente única; share `{message}` (sin la rama iOS que pasaba `url`); Copiar intacto. Unit asserta URL ×1.
+- **U9 (auditoría seguridad invitación) — `cf791e4`.** Veredicto ACEPTABLE con reservas. OK: expiry/single-use/revocable/entropía. **HIGH-1**: sin binding al email (bearer, ADR-014) → **decisión de Raf** (rec: binding opcional + TTL más corto). **MEDIUM-1**: single-use no atómico (TOCTOU) → fix + deploy. MEDIUM-2 (token en URL/localStorage web) diferido.
+- **U4 (ficha incompleta) — `cf3b3c4`.** Paridad card↔ficha: agrega "Dientes" + ancla "Estado reproductivo" en `detail.reproStatus`. E2E paridad + 220/220 unit + Gate 2.5 capture. reviewer APPROVED.
+- **U7 (navbar Android) — `6616449`.** Causa real: `initialWindowMetrics` no seedeado → inset 0 en frame-0 Android. Fix `max(live,startup,min)`. **⏸ device-test Android (Raf).** Follow-up: seedear el root `SafeAreaProvider` (canónico app-wide). `run-tests.mjs` commiteado acá (registra el test nuevo + los tests de feature 04 que la terminal BLE dejó sin registrar).
+
+**⏸ Acciones de Raf acumuladas**: (1) rebuild + device-test **U5** (vacunas, ya fixeado 47a4b5c) y **U7** (navbar Android); (2) decisión **U9 HIGH-1** (binding al email); (3) autorizar deploy para **U9 MEDIUM-1** (TOCTOU) y **U6a** (reportes/campaña, + Facundo); (4) **U1** escala 1-9 espera granularidad de Facundo.
+
+**Autónomo restante ~agotado**: U8a (deep links, necesita archivos de asociación en app.rafq.ar + config nativa), U2 (CTA teclado, inversión de design-system — disponible si Raf lo quiere), U6c (feature, área reportes en flujo con U6a), U6b (skeletons, backlog).
+
 ## 2026-07-20/21 — Reactividad (features 20+21) COMPLETAS + arranque de la tanda
 
 **Feature 20 (`20-reactividad-sync`) — DONE + commit `1d456b4`.** Re-lectura reactiva de campos/rodeos/lotes en caliente (latch de un disparo → patrón `useStatus`+`lastSyncedAt`). Fue rechazada por el reviewer → remediada → verificada (reviewer APPROVED, Gate 2 seguridad PASS, Gate 2.5 E2E verde independiente) → Puerta 2 aprobada por Raf. **Hallazgo A/B**: `lastSyncedAt` es un proxy NO determinista del cambio de dato (fila llega ~1,5s, señal lagea ~90s+).
