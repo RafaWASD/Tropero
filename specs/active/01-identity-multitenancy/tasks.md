@@ -114,14 +114,15 @@ Plan de implementación paso a paso. Cada tarea tiene su criterio de aceptación
 - **No** dispara email al destinatario.
 - **Aceptación**: invocada con owner válido crea invitación y retorna `accept_url` con el token embebido; con no-owner retorna 403; sin email funciona; con email duplicado o member activo, falla 409 según corresponda.
 - Cubre: R5.1, R5.2, R5.9 (precheck soft), `ADR-014`.
+- **[x] Delta U9 (2026-07-21)**: TTL de la invitación acortado de 7 días a **72h** (`INVITATION_TTL_HOURS = 72`). Ver `ADR-014` §"Revisión U9".
 
 ### [x] T2.2 Edge Function `accept_invitation` (refactor: modelo bearer)
 - Archivo: `accept_invitation/index.ts`.
 - Recibe `{ token }`, retorna `{ establishment_id, role }` o error.
 - Valida token (existe), status `pending`, no expirada.
-- **Ya no valida** que `user.email` matchee `inv.email` (modelo bearer, ver `ADR-014`).
+- **Ya no valida** que `user.email` matchee `inv.email` (modelo bearer, ver `ADR-014`). <br>**[x] Delta U9 (2026-07-21) — binding OPCIONAL**: si `inv.email` NO es null, ahora SÍ exige `user.email === inv.email` (case-insensitive) → 403 `email_mismatch` sin consumir la invitación; si `inv.email` es null, sigue bearer. <br>**[x] Delta U9 HIGH-1 (Gate 2) — email verificado**: cuando el binding aplica, exige ADEMÁS `user.emailVerified` (server-side, `requireUser` expone `email_confirmed_at != null`; campo aditivo en `AuthUser` — no rompe los otros 7 EFs) → 403 `email_unverified` si coincide pero no está verificado (tampoco consume). NO depende de `enable_confirmations`. Ver `ADR-014` §"Revisión U9".
 - R5.9 — valida que el caller no tiene ya `user_roles` activo en ese establishment; si lo tiene, retorna 409 `already_member`.
-- Inserta `user_roles`, marca invitación como `accepted`.
+- Inserta `user_roles`, marca invitación como `accepted`. <br>**[x] Delta U9 (2026-07-21) — single-use atómico (TOCTOU/MEDIUM-1)**: el orden se invirtió — primero **reclamo atómico** (`UPDATE ... SET status='accepted' WHERE id=? AND status='pending'`, 1 fila = ganador; 0 filas → `invalid_state`), y SOLO el ganador inserta `user_roles`. Revierte el claim si el insert falla (compensación best-effort).
 - **Después de aceptar exitosamente**, dispara notificaciones al owner que creó la invitación:
   - Email transaccional (Resend) con info del nuevo miembro. Cubre: `R5.10`.
   - Push notification a todos los `push_tokens` activos del owner vía Expo Push API. Cubre: `R5.11`.
@@ -141,6 +142,7 @@ Plan de implementación paso a paso. Cada tarea tiene su criterio de aceptación
 - Retorna `{ token, accept_url, expires_at }`.
 - **Aceptación**: el token viejo deja de funcionar, el nuevo sí; no se manda email; cualquier non-owner falla 403.
 - Cubre: R5.8, `ADR-014`.
+- **[x] Delta U9 (2026-07-21)**: al regenerar, `expires_at` se reinicia a **72h** (era 7 días), coherente con `invite_user`.
 
 ### [x] T2.5 Edge Function `remove_member`
 - Archivo: `remove_member/index.ts`.
@@ -263,7 +265,7 @@ Plan de implementación paso a paso. Cada tarea tiene su criterio de aceptación
   - El `accept_url` destacado en grande.
   - Botón "Copiar al portapapeles" (`Clipboard.setStringAsync`).
   - Botón "Compartir" (`Share.share({ message })`, `message` = `inviteShareMessage(campo, accept_url)`) que abre la share sheet nativa (WhatsApp, mail, SMS, etc.). As-built (bugfix U8b): SOLO `message` (nunca también el `url` suelto) → el link sale una sola vez en iOS.
-  - Nota de expiración: "Este link vence en 7 días. Podés cancelarlo o regenerarlo desde Miembros".
+  - Nota de expiración: "Este link vence en 72 horas. Podés cancelarlo o regenerarlo desde Miembros" (delta U9 — era "7 días").
 - Toast de error si falla.
 - **Aceptación**: invitación creada, link visible con botones funcionales; el link compartido vía WhatsApp llega como mensaje preparado para enviar.
 - Cubre: R5.1, R5.2, R5.3, `ADR-014`.

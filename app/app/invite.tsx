@@ -126,8 +126,11 @@ export default function InviteScreen() {
     }
     // R5.13: error TERMINAL (no recuperable con este token) → borramos el token persistido para no
     // re-disparar el flujo en cada arranque. Los códigos terminales: expired/not_found/invalid_state/
-    // already_member. La red NO es terminal (reintentar sirve), así que ahí lo conservamos.
-    if (result.error.kind === 'fn') {
+    // already_member/email_mismatch. La red NO es terminal (reintentar sirve), así que ahí lo
+    // conservamos. `email_unverified` (U9 HIGH-1) TAMPOCO es terminal: el user verifica su email y
+    // reintenta con el MISMO link → preservamos el token (integra con el re-ruteo de R5.13 al pasar
+    // el gate de verificación).
+    if (result.error.kind === 'fn' && result.error.code !== 'email_unverified') {
       void clearPendingInvitationToken();
     }
     setPhase({ kind: 'error', message, token });

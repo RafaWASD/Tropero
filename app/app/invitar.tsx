@@ -3,7 +3,7 @@
 // Form: rol OBLIGATORIO (Operario / Veterinario — NO se puede invitar como Dueño, R5.1) + email
 // OPCIONAL (anotación para que el owner reconozca la invitación, no se valida al aceptar). Al crear
 // OK (invite_user) → vista "Listo, compartí el link" con el accept_url destacado + Copiar/Compartir
-// (ShareLink) + nota de expiración (7 días, cancelable/regenerable desde Miembros).
+// (ShareLink) + nota de expiración (72h, cancelable/regenerable desde Miembros).
 //
 // Solo accesible al owner del campo activo (la entrada "Invitar" vive en Miembros, owner-only). Por
 // las dudas, si el contexto no es 'active' o el usuario no es owner, mostramos una nota y no el form.
@@ -77,7 +77,7 @@ export default function InvitarScreen() {
             shareMessage={inviteShareMessage(activeField.name, created.acceptUrl)}
           />
           <InfoNote>
-            Este link vence en 7 días. Podés cancelarlo o regenerar uno nuevo desde Miembros cuando
+            Este link vence en 72 horas. Podés cancelarlo o regenerar uno nuevo desde Miembros cuando
             quieras (regenerar deja inservible el anterior).
           </InfoNote>
           <Button variant="primary" fullWidth onPress={() => router.back()}>

@@ -302,7 +302,7 @@ Al abrir la app con sesión válida + email verificado, el router decide el land
    a. Valida que auth.uid() es owner del establishment.
    b. Si vino email: valida que ese email no tiene un user_roles activo en el campo (precheck soft, no bloqueante para R5.9 — el bloqueo duro está en accept).
    c. Si vino email: valida que no hay una invitación pending no expirada con ese email (evita duplicar invites visibles).
-   d. Inserta en invitations (email opcional, token = crypto.randomUUID(), expires_at = now() + 7 días, status = 'pending').
+   d. Inserta en invitations (email opcional, token = crypto.randomUUID(), expires_at = now() + **72h** (as-built delta U9; era 7 días — TTL acortado para reducir la ventana de leak del link bearer), status = 'pending').
    e. Retorna { invitation_id, token, accept_url, expires_at }.
        accept_url = `${APP_URL}/invite?token=${token}` (env del Edge Function, default `https://app.rafq.ar`).
 5. Cliente del owner muestra un modal con el link generado y dos acciones:
@@ -327,9 +327,10 @@ Al abrir la app con sesión válida + email verificado, el router decide el land
    a. Lookup invitation por token (admin client, bypassea RLS para evitar dependencias circulares).
    b. Valida que la invitación existe, status == 'pending', no expirada.
        Si expirada/cancelada/ya aceptada (link single-use, `R5.6`): best-effort mark status apropiado, retorna error. El cliente muestra copy accionable ("Este link ya fue usado. Pedile al dueño que te genere uno nuevo.").
+   b-bis. **Binding OPCIONAL al email (as-built delta U9, opción A)**: si `invitation.email` no es null, exige que coincida (case-insensitive) con el email del JWT del que acepta; si no coincide, retorna **403 `email_mismatch`** SIN consumir la invitación (el usuario correcto puede aceptar después). **Además** (HIGH-1, Gate 2): exige que ese email esté **verificado** (`email_confirmed_at != null`, expuesto por `requireUser` como `emailVerified`); si coincide pero no está verificado, retorna **403 `email_unverified`** (tampoco consume — el user verifica y reintenta con el mismo link). Enforcement server-side, no depende de `enable_confirmations`. Si `invitation.email` es null (link WhatsApp puro), sigue siendo bearer (no hay identidad que verificar). Ver "Diferencias clave" abajo.
    c. R5.9 — valida que el usuario actual no tiene ya un user_roles activo en ese establishment. Si lo tiene, retorna 409 'already_member' **sin tocar el rol existente** (no auto-cambia rol vía invitación — evita escalada). El cliente muestra copy que nombra el rol actual ("Esta persona ya es miembro como <rol>. Para cambiarle el rol, usá Miembros → Cambiar rol."). El cambio de rol vive en `change_member_role` (`R4.5`), no acá.
-   d. Inserta user_roles (user_id = auth.uid(), establishment_id, role, active = true).
-   e. Marca invitation.status = 'accepted', accepted_at = now().
+   d. **Reclamo atómico (as-built delta U9 MEDIUM-1 / TOCTOU)**: marca `invitation.status = 'accepted', accepted_at = now()` con un UPDATE condicional `WHERE id=? AND status='pending'`. Si afecta 0 filas (otro proceso ganó la carrera), retorna 409 `invalid_state`. El claim reemplaza el viejo "check pending + marca accepted" en dos pasos: es la sección crítica que garantiza el single-use bajo concurrencia (row-lock de Postgres, pooler-safe).
+   e. Inserta user_roles (user_id = auth.uid(), establishment_id, role, active = true) — **solo el ganador del claim**. Si el insert falla, revierte el claim a 'pending' (compensación best-effort, no hay transacción explícita entre EF y DB).
    f. Dispara notificaciones al owner (R5.10 + R5.11) con try/catch aislados:
       - Email transaccional vía Resend.
       - Push notification vía Expo Push si el owner tiene push tokens activos.
@@ -342,15 +343,15 @@ Al abrir la app con sesión válida + email verificado, el router decide el land
 
 ### Diferencias clave vs el modelo email magic link anterior
 
-- El token es **bearer**: cualquiera con el link válido puede aceptar. Antes había validación adicional de email-matching contra el JWT del que aceptaba.
+- El token es **bearer con binding OPCIONAL al email (as-built delta U9, opción A — revisión de ADR-014)**: si la invitación NO tiene email anotado, cualquiera con el link válido puede aceptar (bearer puro, flujo WhatsApp-first). Si SÍ tiene email anotado, solo ese email puede aceptar (403 `email_mismatch` para cualquier otro) **y debe estar verificado** (403 `email_unverified` si coincide pero no está verificado — HIGH-1/Gate 2). Antes (modelo bearer original de ADR-014) el email era pura anotación y nunca se validaba; U9 le devuelve al owner un control opt-in sin romper el flujo sin-email. El requisito de email verificado es **server-side** (`requireUser.emailVerified` ← `email_confirmed_at`), NO depende del toggle `enable_confirmations` del proyecto (que en local está en false); ese toggle queda como defensa en profundidad en PROD. Razón: el binding confía en el claim `email` del JWT, y eso solo es prueba de identidad si el email está verificado.
 - **No hay envío automático de email al destinatario** desde `invite_user`. El owner es responsable del canal.
-- El email en `invitations` queda como **anotación opcional** para que el owner reconozca la invitación en su lista (ej. "para el peón Juan: juan@gmail.com"), pero no se valida.
+- El email en `invitations` es **anotación opcional**; cuando está presente, además **restringe** quién puede aceptar (binding U9). Cuando es null, no restringe (bearer).
 - **`resend_invitation` se renombra conceptualmente a "regenerar link"** (el archivo conserva el nombre): genera nuevo token, invalida el anterior, reinicia expiración. Sirve como mecanismo de revocación.
 
 ## Edge Functions necesarias
 
 1. **`invite_user`** — input: `{ establishment_id, role, email? }`. Crea invitación. Retorna `{ invitation_id, token, accept_url, expires_at }`. **No** envía email al destinatario (modelo link shareable, ver `ADR-014`).
-2. **`accept_invitation`** — input: `{ token }`. Valida (status, expiración, no-doble-rol), crea `user_roles`, marca `accepted`, y dispara notificación al owner (email + push) en el mismo flujo. **No** valida email-matching del JWT (modelo bearer).
+2. **`accept_invitation`** — input: `{ token }`. Valida (status, expiración, binding-opcional-al-email, no-doble-rol), **reclama la invitación atómicamente** (UPDATE condicional a `status='pending'` — single-use bajo concurrencia, as-built delta U9), crea `user_roles` (solo el ganador del claim), y dispara notificación al owner (email + push) en el mismo flujo. Valida email-matching del JWT **solo si la invitación tiene email anotado** (binding opcional, as-built delta U9) — y en ese caso exige **email verificado** (`emailVerified`, HIGH-1/Gate 2); si es null, es bearer.
 3. **`cancel_invitation`** — input: `{ invitation_id }`. Solo owner.
 4. **`resend_invitation`** — input: `{ invitation_id }`. Regenera token (invalidando el anterior) y reinicia expiración. Retorna `{ token, accept_url, expires_at }`. Conceptualmente "regenerar link" — el archivo conserva el nombre histórico para no romper deploys.
 5. **`remove_member`** — input: `{ user_id, establishment_id }`. Marca `user_roles.active = false`.
@@ -482,12 +483,12 @@ Todas las decisiones de producto que afectan esta spec están cerradas y documen
 | Teléfono | Opcional en signup, obligatorio al crear establecimiento | `R1.1`, `R3.8` |
 | Identidad `user_type` | No existe en MVP. Solo `user_roles`. ADR-006 intacto | — |
 | Email al destinatario de invitación | No aplica (link shareable). Owner usa share sheet del SO | — |
-| Email en tabla invitations | Nullable, solo anotación opcional para el owner. No se valida al aceptar | `R5.1` |
+| Email en tabla invitations | Nullable. Anotación opcional para el owner. **As-built delta U9 (opción A)**: cuando está presente, además **restringe** quién puede aceptar (binding opcional al email → 403 `email_mismatch`); cuando es null, no restringe (bearer) | `R5.1` |
 | Notificación al owner cuando aceptan | Email transaccional + push notification (Expo Push) | `R5.10`, `R5.11` |
 | Transferencia de ownership | No hay flujo. El único owner debe soft-deletear el campo antes de darse de baja. **Owner único = punto único de falla** (limitación conocida, sin 2do owner en MVP) | `R2.5`, `R2.5.1` |
 | Hard delete | Diferido fuera de MVP, esperando requerimientos de retención de SENASA | — (nota en `CONTEXT/08-roadmap.md`) |
 | Vista vet/operario sin invitaciones | Cubierto por el CTA "pegar link" del wizard. No requiere lógica diferenciada por rol | `R6.5` |
-| Revocación de link | Acción "regenerar link" invalida el token anterior y emite uno nuevo. Link **single-use de facto** | `R5.8`, `R5.6` |
+| Revocación de link | Acción "regenerar link" invalida el token anterior y emite uno nuevo. Link **single-use** (as-built delta U9: garantía reforzada por reclamo atómico bajo concurrencia — antes "de facto") | `R5.8`, `R5.6` |
 | Switch del header (sesión 17) | **Dropdown rápido**: activo + últimos 2 visitados + "Ver todos" + "Crear campo +". No navega directo al selector | `R6.8`, `R6.8.1` |
 | `last_establishment_opened` (sesión 17) | Promovido a **requerido** (alimenta el dropdown). Orden de "Mis campos" + contexto por defecto + últimos visitados | `R6.9`, `R6.6.1` |
 | Pérdida del campo activo (sesión 17) | Estado **`active_lost`** + re-ruteo según `R6.7`; sin logout forzado | `R6.10` |
@@ -505,9 +506,10 @@ Todas las decisiones de producto que afectan esta spec están cerradas y documen
 | Riesgo | Mitigación |
 |---|---|
 | RLS mal configurada deja leak entre tenants | Tests de seguridad explícitos por policy. Ver `tasks.md`. |
-| Token de invitación predecible | `crypto.randomUUID()` (UUID v4) — 122 bits efectivos de entropía. Infeasible de adivinar por fuerza bruta dentro de la ventana de 7 días. |
-| Link shareable filtrado por error (owner lo manda a la persona equivocada o lo pega en un grupo público) | (a) acción "regenerar link" invalida el token actual y emite uno nuevo; (b) expiración corta 7 días; (c) lista de pendientes visible al owner; (d) el rol asignado es removible en un tap si la persona equivocada ya aceptó. |
-| Modelo bearer pierde el "doble factor implícito" del email-matching | Trade-off aceptado en `ADR-014`. Mitigado por entropía del token + revocación + alcance limitado del rol invitado (un solo establishment, role acotado). |
+| Token de invitación predecible | `crypto.randomUUID()` (UUID v4) — 122 bits efectivos de entropía. Infeasible de adivinar por fuerza bruta dentro de la ventana de **72h** (as-built delta U9; era 7 días). |
+| Link shareable filtrado por error (owner lo manda a la persona equivocada o lo pega en un grupo público) | (a) acción "regenerar link" invalida el token actual y emite uno nuevo; (b) expiración corta **72h** (as-built delta U9; era 7 días); (c) lista de pendientes visible al owner; (d) el rol asignado es removible en un tap si la persona equivocada ya aceptó; (e) **binding opcional al email** (as-built delta U9): si el owner anota el email destinatario, un reenvío a otra persona NO puede aceptar (403 `email_mismatch`). |
+| Modelo bearer pierde el "doble factor implícito" del email-matching | **As-built delta U9 (opción A)**: el owner puede recuperar ese factor opt-in anotando el email (binding opcional → solo ese email, **verificado**, acepta; un impersonador que no controla el inbox no puede — 403 `email_unverified`). Sin email anotado, sigue siendo el trade-off aceptado en `ADR-014`, mitigado por entropía del token + revocación + TTL 72h + alcance limitado del rol. |
+| Single-use bajo concurrencia (dos aceptaciones del mismo token en paralelo) | **As-built delta U9 MEDIUM-1 (TOCTOU)**: `accept_invitation` reclama la invitación con un UPDATE condicional a `status='pending'` ANTES de insertar el rol; solo el ganador (1 fila afectada) crea `user_roles`, el perdedor recibe `invalid_state`. Atómico a nivel statement (row-lock de Postgres), pooler-safe. |
 | Deep link no autoabre la app (restricción del SO, browser desktop, link compartido cross-device) | CTA secundario del wizard "pegar link de invitación" (`R6.5`) permite al usuario pegar el link manualmente y completar el flujo. |
 | Usuario pierde acceso a su único campo por bug | Soft-delete en todo + auditoría en `user_roles` (no se borran filas, se desactivan). |
 | PowerSync no sincroniza invitaciones a tiempo | Las invitaciones se aceptan via Edge Function (server-side), no via sync. Mitigado. |

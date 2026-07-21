@@ -3,6 +3,10 @@ import { SupabaseClient } from 'jsr:@supabase/supabase-js@2';
 export type AuthUser = {
   id: string;
   email: string;
+  // U9 HIGH-1 (Gate 2): ¿el email del JWT está verificado? Derivado de `email_confirmed_at`.
+  // Campo ADITIVO: los EFs que no lo usan lo ignoran (typing estructural de TS). Lo consume
+  // accept_invitation para el binding server-side (el binding solo es confiable con email verificado).
+  emailVerified: boolean;
 };
 
 // Extrae el user del JWT del request. Tira si no hay sesión o no hay email.
@@ -21,7 +25,12 @@ export async function requireUser(
       'Usuario sin email confirmado.',
     );
   }
-  return { id: data.user.id, email: email.toLowerCase() };
+  return {
+    id: data.user.id,
+    email: email.toLowerCase(),
+    // Supabase setea email_confirmed_at cuando el email se verifica. null/undefined = no verificado.
+    emailVerified: data.user.email_confirmed_at != null,
+  };
 }
 
 // Verifica que el user actual sea owner activo del establishment.

@@ -16,7 +16,9 @@ import { createAdminClient, createUserClient } from '../_shared/supabase.ts';
 import { HttpError, requireOwnerOf, requireUser } from '../_shared/auth.ts';
 
 type Body = { invitation_id?: unknown };
-const INVITATION_TTL_DAYS = 7;
+// U9 (opción A): TTL acortado de 7 días a 72h (coherente con invite_user). Al regenerar el link
+// se reinicia la expiración a 72h desde ahora.
+const INVITATION_TTL_HOURS = 72;
 
 Deno.serve(async (req: Request) => {
   const preflight = handleOptions(req);
@@ -62,7 +64,7 @@ Deno.serve(async (req: Request) => {
 
     const newToken = crypto.randomUUID();
     const newExpires = new Date(
-      Date.now() + INVITATION_TTL_DAYS * 24 * 3600 * 1000,
+      Date.now() + INVITATION_TTL_HOURS * 3600 * 1000,
     ).toISOString();
 
     const { error: updErr } = await adminClient

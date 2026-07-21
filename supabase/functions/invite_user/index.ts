@@ -20,7 +20,9 @@ type Body = {
 };
 
 const ALLOWED_ROLES = new Set(['field_operator', 'veterinarian']);
-const INVITATION_TTL_DAYS = 7;
+// U9 (opción A): TTL acortado de 7 días a 72h para reducir la ventana de leak del link bearer.
+// El owner regenera el link en un tap (resend_invitation) si necesita más tiempo.
+const INVITATION_TTL_HOURS = 72;
 
 Deno.serve(async (req: Request) => {
   const preflight = handleOptions(req);
@@ -131,7 +133,7 @@ Deno.serve(async (req: Request) => {
 
     const token = crypto.randomUUID();
     const expiresAt = new Date(
-      Date.now() + INVITATION_TTL_DAYS * 24 * 3600 * 1000,
+      Date.now() + INVITATION_TTL_HOURS * 3600 * 1000,
     ).toISOString();
 
     const { data: inserted, error: insErr } = await adminClient

@@ -71,6 +71,12 @@ test('inviteErrorCopy: mapea códigos conocidos a copy en español', () => {
   assert.match(inviteErrorCopy('pending_exists'), /pendiente/i);
   assert.match(inviteErrorCopy('no_change'), /ya tiene ese rol/i);
   assert.match(inviteErrorCopy('already_member'), /ya es miembro/i);
+  // U9 (opción A): binding al email → copy propio, NO el fallback genérico.
+  assert.match(inviteErrorCopy('email_mismatch'), /otra dirección de email/i);
+  assert.notEqual(inviteErrorCopy('email_mismatch'), inviteErrorCopy('algo_raro'));
+  // U9 HIGH-1: email coincidente pero no verificado → copy propio accionable (verificá tu email).
+  assert.match(inviteErrorCopy('email_unverified'), /verificá tu email/i);
+  assert.notEqual(inviteErrorCopy('email_unverified'), inviteErrorCopy('email_mismatch'));
 });
 
 test('inviteErrorCopy: código desconocido / null / undefined → fallback genérico', () => {

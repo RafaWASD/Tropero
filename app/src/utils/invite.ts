@@ -111,7 +111,8 @@ export function inviteShareMessage(establishmentName: string, url: string): stri
 //   - invite_user:        invalid_input(400), forbidden(403), already_member(409),
 //                         pending_exists(409), db_error(500), unexpected(500)
 //   - accept_invitation:  invalid_input(400), not_found(404), invalid_state(409),
-//                         expired(410), already_member(409), db_error/unexpected(500)
+//                         expired(410), email_mismatch(403, binding U9), email_unverified(403, U9),
+//                         already_member(409), db_error/unexpected(500)
 //   - cancel/resend:       invalid_input, forbidden(403), not_found(404), invalid_state(409)
 //   - remove_member:      forbidden(403), not_found(404), last_owner(409)
 //   - change_member_role: invalid_input, forbidden(403), not_found(404), no_change(409),
@@ -128,6 +129,14 @@ const COPY: Record<string, string> = {
   not_found: 'No encontramos esa invitación. Verificá el link o pedile al dueño que te genere uno nuevo.',
   // Expirada (410).
   expired: 'Este link de invitación venció. Pedile al dueño que te genere uno nuevo.',
+  // Invitación con binding al email (U9, opción A): el email de la invitación no coincide con
+  // el de la sesión (403). El link estaba dirigido a otra dirección.
+  email_mismatch:
+    'Esta invitación es para otra dirección de email. Iniciá sesión con la cuenta invitada o pedile al dueño que te genere una nueva.',
+  // Binding al email + email NO verificado (U9 HIGH-1, 403). El email de la sesión coincide con el
+  // de la invitación, pero falta verificarlo. NO es terminal: verificás y reintentás con el mismo link.
+  email_unverified:
+    'Verificá tu email antes de aceptar la invitación. Te mandamos un link de verificación al registrarte; revisá tu casilla y volvé a intentar.',
   // Sin permisos de owner (403).
   forbidden: 'No tenés permisos para hacer esto. Solo el dueño del campo puede.',
   // Último owner (409): no se puede remover/degradar al único dueño.

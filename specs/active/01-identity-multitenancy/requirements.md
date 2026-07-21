@@ -114,8 +114,12 @@ Antes de las requirements, dejo registradas las decisiones que ya están cerrada
 
 **R5.1** El sistema deberá permitir que un `owner` cree una invitación a su establecimiento seleccionando solo el rol destino (`field_operator` o `veterinarian`). Opcionalmente, el owner podrá registrar un email destinatario como anotación, **sin que ese email se valide al aceptar** (es solo etiqueta para que el owner reconozca la invitación en su lista de pendientes).
 
+> **Reconciliación U9 (delta seguridad, 2026-07-21 — opción A, revisión de `ADR-014`)**: el email anotado dejó de ser *solo* etiqueta. Cuando la invitación tiene email (no-null), `accept_invitation` **sí valida** que el email del que acepta coincida (case-insensitive) → 403 `email_mismatch` si no coincide, sin consumir la invitación. Cuando la invitación NO tiene email (link WhatsApp puro), sigue siendo bearer (cualquier user logueado acepta). Es un **binding OPCIONAL**: le da al owner un control opt-in ("esta invitación es solo para X") sin romper el flujo sin-email.
+>
+> **Enforcement de email verificado (HIGH-1, Gate 2)**: además del match, cuando el binding aplica se exige que el email del que acepta esté **verificado** (`email_confirmed_at != null`) → si coincide pero no está verificado, 403 `email_unverified` (sin consumir; verifica y reintenta con el mismo link). Es **server-side** (no depende de `enable_confirmations` del proyecto), porque el binding confía en el claim `email` del JWT y eso solo vale con email verificado (si no, un atacante se registra con el email bindeado sin verificarlo y entra). `enable_confirmations=true` en PROD queda como defensa en profundidad. Ver `design.md` §"Diferencias clave" y `ADR-014` §"Revisión U9".
+
 **R5.2** Cuando un owner crea una invitación, el sistema deberá:
-- Crear una fila en `invitations` con token único (UUID v4), expiración 7 días, estado `pending`, y `email` opcional.
+- Crear una fila en `invitations` con token único (UUID v4), expiración 7 días, estado `pending`, y `email` opcional. <br>> **Reconciliación U9 (2026-07-21)**: la expiración se acortó a **72h** (era 7 días) para reducir la ventana de leak del link bearer. Aplica también a la regeneración (`R5.8`). El owner regenera el link en un tap si necesita más tiempo.
 - Retornar al cliente `{ invitation_id, token, accept_url, expires_at }`, donde `accept_url` es un universal link (`https://app.rafq.ar/invite?token=XXX`) que también funciona como deep link nativo (`rafq://invite?token=XXX`).
 - **No** disparar email automático al destinatario.
 
@@ -133,6 +137,8 @@ Antes de las requirements, dejo registradas las decisiones que ya están cerrada
 - Marcar la invitación como `accepted` con `accepted_at = now()`.
 
 **R5.6** Si una invitación está expirada (`expires_at < now()`), cancelada, o ya aceptada, el sistema no deberá permitir su aceptación y deberá retornar un error claro al cliente para que muestre un mensaje legible. El link de invitación es **single-use de facto**: al aceptarse, la invitación pasa a `accepted` (`R5.5`) y su token deja de ser válido. (refina, sesión 17) Para el caso de quien llega tarde a un link ya usado, el cliente deberá mostrar copy accionable: **"Este link ya fue usado. Pedile al dueño que te genere uno nuevo."** La regeneración la cubre `R5.8`.
+
+> **Reconciliación U9 MEDIUM-1 (TOCTOU, 2026-07-21)**: el single-use pasó de "de facto" a **garantizado bajo concurrencia**. `accept_invitation` reclama la invitación con un UPDATE condicional `SET status='accepted' WHERE id=? AND status='pending'` ANTES de insertar el `user_roles`; solo el ganador (1 fila afectada) crea el rol, el perdedor recibe `invalid_state`. Antes el insert del rol ocurría ANTES de marcar `accepted` sin lock → dos aceptaciones concurrentes del mismo token (por dos users distintos) entraban ambas. Ahora el claim es la sección crítica (row-lock de Postgres, pooler-safe).
 
 **R5.7** El sistema deberá permitir que el owner cancele una invitación pendiente (estado pasa a `cancelled`, el token deja de ser válido).
 

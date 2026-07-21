@@ -62,6 +62,16 @@ const PASSWORD = 'TestPassword!Aa1';
 // Las 8 EFs ya están REDEPLOYADAS (serverError + invalidación de sesión vía revoke_user_sessions),
 // así que el gate `SPEC13_APPLIED` se removió: estos tests corren SIEMPRE.
 
+// U9 (binding opcional al email + TTL 72h + claim atómico TOCTOU): estos tests verifican
+// comportamiento de las EFs accept_invitation/invite_user QUE AÚN NO ESTÁ DEPLOYADO (deploy gateado,
+// lo coordina el leader). Contra las EFs viejas fallarían (bearer sin binding, TTL 7d, sin claim).
+// Se gatean con U9_DEPLOYED=1 (mismo patrón que el viejo SPEC13_APPLIED): en el check normal se
+// SKIPEAN; post-deploy se corre `U9_DEPLOYED=1 node --test supabase/tests/edge/run.cjs`.
+const U9_DEPLOYED = process.env.U9_DEPLOYED === '1';
+const SKIP_U9 = U9_DEPLOYED
+  ? false
+  : 'U9 (binding+TTL+TOCTOU) no deployado — correr con U9_DEPLOYED=1 post-deploy';
+
 const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
   auth: { autoRefreshToken: false, persistSession: false },
 });
@@ -495,68 +505,272 @@ test('Edge Functions — Fase 2', async (t) => {
   });
 
   await t.test(
-    'T2.2 ADR-014: token bearer funciona con email distinto al de la invitación',
+    'T2.2 U9: invitación SIN email (null) → bearer, cualquier user logueado acepta',
     async () => {
-      // Crear invitación pending anotada con un email X, pero el user que la
-      // acepta tiene un email Y distinto. En el modelo bearer (ADR-014) el
-      // token vale por sí solo y el flujo debe completarse.
-      const bearerToken = `bearer_${RUN_TAG}_${Math.random().toString(36).slice(2, 8)}`;
-      const annotationEmail = `${RUN_TAG}_annotation@rafaq-test.local`;
+      // El flujo WhatsApp-first (link sin email anotado) DEBE seguir siendo bearer aun con U9:
+      // el binding es opcional y solo aplica cuando la invitación tiene email. Esta garantía vale
+      // pre y post deploy (email null = bearer siempre) → test NO gateado (regresión permanente).
+      const nullEmailToken = `nullemail_${RUN_TAG}_${Math.random().toString(36).slice(2, 8)}`;
 
       const { data: invRow, error: invErr } = await admin
         .from('invitations')
         .insert({
           establishment_id: estA,
           invited_by: owner.id,
-          email: annotationEmail,
+          email: null,
           role: 'veterinarian',
-          token: bearerToken,
+          token: nullEmailToken,
           status: 'pending',
-          expires_at: new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString(),
+          expires_at: new Date(Date.now() + 72 * 3600 * 1000).toISOString(),
         })
         .select('id')
         .single();
       assert.equal(invErr, null, invErr && invErr.message);
 
-      // Creamos un user con email distinto al de la anotación.
-      const bearerEmail = `${RUN_TAG}_bearer@rafaq-test.local`;
-      const { data: u, error: uErr } = await admin.auth.admin.createUser({
-        email: bearerEmail,
-        password: PASSWORD,
-        email_confirm: true,
-        user_metadata: { name: 'Bearer User' },
-      });
-      assert.equal(uErr, null, uErr && uErr.message);
-      const bearerUserId = u.user.id;
-      createdUserIds.push(bearerUserId);
-      const bearerClient = await getUserClient(bearerEmail);
+      // User arbitrario (su email no tiene por qué relacionarse con la invitación).
+      const bearer = await createTestUser('u9bearer');
+      const bearerClient = await getUserClient(bearer.email);
 
       const { data: accepted, error: accErr } =
         await bearerClient.functions.invoke('accept_invitation', {
-          body: { token: bearerToken },
+          body: { token: nullEmailToken },
         });
       assert.equal(accErr, null, accErr && accErr.message);
       assert.equal(accepted.establishment_id, estA);
       assert.equal(accepted.role, 'veterinarian');
 
-      // Verifica user_roles activo para el bearer user (no para el email de
-      // anotación).
       const { data: ur } = await admin
         .from('user_roles')
         .select('role, active')
-        .eq('user_id', bearerUserId)
+        .eq('user_id', bearer.id)
         .eq('establishment_id', estA)
         .eq('active', true);
       assert.equal(ur.length, 1, 'debería haber un user_roles activo');
       assert.equal(ur[0].role, 'veterinarian');
 
-      // Verifica invitación marcada accepted.
       const { data: inv } = await admin
         .from('invitations')
         .select('status')
         .eq('id', invRow.id)
         .single();
       assert.equal(inv.status, 'accepted');
+    },
+  );
+
+  // ===================================================================
+  // U9 — binding opcional al email + TTL 72h + claim atómico (TOCTOU).
+  // GATED por U9_DEPLOYED: verifican comportamiento NO deployado todavía.
+  // ===================================================================
+
+  await t.test(
+    'U9 (opción A): invitación CON email → email que COINCIDE y VERIFICADO acepta (OK)',
+    { skip: SKIP_U9 },
+    async () => {
+      // createTestUser crea con email_confirm:true → emailVerified. Este es el caso feliz del binding:
+      // email coincidente + verificado → acepta.
+      const matchUser = await createTestUser('u9match'); // email lowercase (RUN_TAG lc)
+      const token = `u9match_${RUN_TAG}_${Math.random().toString(36).slice(2, 8)}`;
+      const { error: invErr } = await admin.from('invitations').insert({
+        establishment_id: estA,
+        invited_by: owner.id,
+        email: matchUser.email.toLowerCase(),
+        role: 'veterinarian',
+        token,
+        status: 'pending',
+        expires_at: new Date(Date.now() + 72 * 3600 * 1000).toISOString(),
+      });
+      assert.equal(invErr, null, invErr && invErr.message);
+
+      const client = await getUserClient(matchUser.email);
+      const { data, error } = await client.functions.invoke('accept_invitation', {
+        body: { token },
+      });
+      assert.equal(error, null, error && error.message);
+      assert.equal(data.establishment_id, estA);
+      assert.equal(data.role, 'veterinarian');
+    },
+  );
+
+  await t.test(
+    'U9 HIGH-1: invitación CON email → email COINCIDE pero NO verificado → rechazado (NO consume)',
+    { skip: SKIP_U9 },
+    async () => {
+      // El binding solo es confiable con email verificado (enforcement server-side, no depende de
+      // enable_confirmations). User NO confirmado (email_confirm:false) con el MISMO email de la
+      // invitación → no debe entrar.
+      const unverifiedEmail = `${RUN_TAG}_u9unverified@rafaq-test.local`;
+      const token = `u9unverified_${RUN_TAG}_${Math.random().toString(36).slice(2, 8)}`;
+      const { data: invRow, error: invErr } = await admin
+        .from('invitations')
+        .insert({
+          establishment_id: estA,
+          invited_by: owner.id,
+          email: unverifiedEmail,
+          role: 'veterinarian',
+          token,
+          status: 'pending',
+          expires_at: new Date(Date.now() + 72 * 3600 * 1000).toISOString(),
+        })
+        .select('id')
+        .single();
+      assert.equal(invErr, null, invErr && invErr.message);
+
+      const { data: u, error: uErr } = await admin.auth.admin.createUser({
+        email: unverifiedEmail,
+        password: PASSWORD,
+        email_confirm: false, // NO verificado
+        user_metadata: { name: 'Unverified' },
+      });
+      assert.equal(uErr, null, uErr && uErr.message);
+      createdUserIds.push(u.user.id);
+
+      // Robusto ante ambos settings del proyecto: si el proyecto exige confirmación, el sign-in del
+      // user no-verificado falla (no hay sesión → no puede aceptar) — la propiedad de seguridad se
+      // cumple igual. Si el proyecto permite login pre-verificación (R1.3), el sign-in anda y el
+      // enforcement server-side (email_unverified) es el que rechaza. En cualquiera de los dos casos:
+      // NO debe crear rol y la invitación NO debe consumirse.
+      const client = createClient(SUPABASE_URL, ANON_KEY, {
+        auth: { autoRefreshToken: false, persistSession: false },
+      });
+      const { error: signInErr } = await client.auth.signInWithPassword({
+        email: unverifiedEmail,
+        password: PASSWORD,
+      });
+
+      if (!signInErr) {
+        // Login pre-verificación permitido → el server debe rechazar (email_unverified).
+        const { data, error } = await client.functions.invoke('accept_invitation', {
+          body: { token },
+        });
+        assert.ok(error || data?.error, 'user no verificado no debe poder aceptar el binding');
+      }
+      // Sea cual sea el camino: sin rol y sin consumir.
+      const { data: ur } = await admin
+        .from('user_roles')
+        .select('id')
+        .eq('user_id', u.user.id)
+        .eq('establishment_id', estA);
+      assert.equal(ur.length, 0, 'user no verificado NO debe obtener rol');
+      const { data: inv } = await admin
+        .from('invitations')
+        .select('status')
+        .eq('id', invRow.id)
+        .single();
+      assert.equal(inv.status, 'pending', 'un rechazo por no-verificado NO debe consumir la invitación');
+    },
+  );
+
+  await t.test(
+    'U9 (opción A): invitación CON email → OTRO email → 403 email_mismatch (NO consume)',
+    { skip: SKIP_U9 },
+    async () => {
+      const token = `u9mismatch_${RUN_TAG}_${Math.random().toString(36).slice(2, 8)}`;
+      const annotatedEmail = `${RUN_TAG}_u9annotated@rafaq-test.local`;
+      const { data: invRow, error: invErr } = await admin
+        .from('invitations')
+        .insert({
+          establishment_id: estA,
+          invited_by: owner.id,
+          email: annotatedEmail,
+          role: 'veterinarian',
+          token,
+          status: 'pending',
+          expires_at: new Date(Date.now() + 72 * 3600 * 1000).toISOString(),
+        })
+        .select('id')
+        .single();
+      assert.equal(invErr, null, invErr && invErr.message);
+
+      // User con email DISTINTO al anotado.
+      const other = await createTestUser('u9other');
+      const client = await getUserClient(other.email);
+      const { data, error } = await client.functions.invoke('accept_invitation', {
+        body: { token },
+      });
+      assert.ok(error || data?.error, 'debería fallar (email_mismatch)');
+
+      // Oráculo clave del audit: el mismatch NO debe consumir la invitación (sigue pending) y
+      // NO debe crear rol para el usuario equivocado (así el user correcto puede aceptar después).
+      const { data: inv } = await admin
+        .from('invitations')
+        .select('status')
+        .eq('id', invRow.id)
+        .single();
+      assert.equal(inv.status, 'pending', 'un mismatch NO debe consumir la invitación');
+
+      const { data: ur } = await admin
+        .from('user_roles')
+        .select('id')
+        .eq('user_id', other.id)
+        .eq('establishment_id', estA);
+      assert.equal(ur.length, 0, 'no debe crear rol para el email equivocado');
+    },
+  );
+
+  await t.test(
+    'U9: invite_user setea expiración a 72h (no 7 días)',
+    { skip: SKIP_U9 },
+    async () => {
+      const { data, error } = await ownerClient.functions.invoke('invite_user', {
+        body: { establishment_id: estA, role: 'field_operator' },
+      });
+      assert.equal(error, null, error && error.message);
+      const H = 3600 * 1000;
+      const delta = new Date(data.expires_at).getTime() - Date.now();
+      assert.ok(
+        delta > 71 * H && delta < 73 * H,
+        `expires_at debería ser ~72h (fue ${(delta / H).toFixed(1)}h)`,
+      );
+      assert.ok(delta < 7 * 24 * H, 'no debería seguir siendo 7 días');
+      // Cleanup: la dejamos cancelada para no ensuciar la lista de pending.
+      await admin
+        .from('invitations')
+        .update({ status: 'cancelled', cancelled_at: new Date().toISOString() })
+        .eq('id', data.invitation_id);
+    },
+  );
+
+  await t.test(
+    'U9 MEDIUM-1 (TOCTOU): dos aceptaciones concurrentes del mismo token → 1 gana, 1 pierde',
+    { skip: SKIP_U9 },
+    async () => {
+      // Invitación null-email (bearer) en estB para no tocar la membresía de estA.
+      const token = `u9race_${RUN_TAG}_${Math.random().toString(36).slice(2, 8)}`;
+      const { error: invErr } = await admin.from('invitations').insert({
+        establishment_id: estB,
+        invited_by: otherOwner.id,
+        email: null,
+        role: 'field_operator',
+        token,
+        status: 'pending',
+        expires_at: new Date(Date.now() + 72 * 3600 * 1000).toISOString(),
+      });
+      assert.equal(invErr, null, invErr && invErr.message);
+
+      const raceA = await createTestUser('u9raceA');
+      const raceB = await createTestUser('u9raceB');
+      const clientA = await getUserClient(raceA.email);
+      const clientB = await getUserClient(raceB.email);
+
+      // Disparo concurrente del mismo token con dos users distintos.
+      const [resA, resB] = await Promise.all([
+        clientA.functions.invoke('accept_invitation', { body: { token } }),
+        clientB.functions.invoke('accept_invitation', { body: { token } }),
+      ]);
+
+      const successes = [resA, resB].filter(
+        (r) => !r.error && r.data && r.data.establishment_id === estB,
+      ).length;
+      assert.equal(successes, 1, 'exactamente UNO debería ganar la carrera');
+
+      // Doble oráculo: exactamente un user_roles creado entre los dos candidatos.
+      const { data: roles } = await admin
+        .from('user_roles')
+        .select('user_id')
+        .in('user_id', [raceA.id, raceB.id])
+        .eq('establishment_id', estB)
+        .eq('active', true);
+      assert.equal(roles.length, 1, 'solo el ganador debería tener rol (single-use atómico)');
     },
   );
 

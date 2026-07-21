@@ -83,3 +83,23 @@ La seguridad del modelo se apoya en:
 - Documentación a actualizar: `specs/active/01-identity-multitenancy/{requirements,design,tasks}.md` y `progress/current.md`.
 
 **Reversibilidad**: alta. Si en el futuro algún regulación o requerimiento nos obliga a volver a email-bound (no es probable), el código del helper y la columna `email` siguen ahí. Sería re-activar la validación en `accept_invitation` y volver a llamar `sendInvitationEmail` desde `invite_user`. Un par de horas en sentido inverso.
+
+---
+
+## Revisión U9 — binding opcional al email + TTL 72h + single-use atómico (2026-07-21)
+
+**Status**: Accepted (Raf, opción A). **Origen**: auditoría de seguridad `progress/security_audit_U9-invitacion.md` (finding HIGH-1 "sin binding al email" + MEDIUM-1 "single-use no atómico").
+
+La auditoría confirmó que el modelo bearer puro de esta ADR es una **decisión de producto** (no un bug), pero identificó que un reenvío/leak del link mete a un desconocido al establishment. Raf eligió la **opción A** (binding OPCIONAL), que endurece la seguridad sin sacrificar el flujo WhatsApp-first. Tres cambios, todos en las Edge Functions existentes (**sin migración**: el TTL vive en código, no en el schema; el claim atómico es un UPDATE condicional):
+
+1. **Binding OPCIONAL al email** (revisa la decisión #3 de esta ADR — "se elimina la validación de email-matching; el token vale por sí solo"). `accept_invitation` ahora valida email-matching **solo cuando la invitación tiene email anotado** (no-null): si `user.email !== inv.email` (case-insensitive) → **403 `email_mismatch`**, sin consumir la invitación. Cuando `inv.email` es null (link puro), sigue siendo bearer. El email dejó de ser "solo anotación" (consecuencia negativa #2 de esta ADR — "se pierde el doble factor implícito" — queda mitigada opt-in).
+
+   **Enforcement de email verificado (HIGH-1, Gate 2)**: el binding confía en el claim `email` del JWT como prueba de identidad, y eso solo es válido si el email está verificado. Sin ese requisito, un atacante que conoce el email bindeado podría registrarse con ese email (sesión no-verificada — `R1.3` permite login pre-verificación) y aceptar. Por eso el binding exige **además** que el email del que acepta esté verificado: cuando `inv.email` no es null y el email coincide pero **no está verificado** → **403 `email_unverified`** (sin consumir; el usuario verifica y reintenta con el mismo link, integra con `R5.13`). El enforcement es **server-side** (`requireUser` expone `emailVerified` derivado de `email_confirmed_at`, campo aditivo en `AuthUser`), **NO depende del toggle `enable_confirmations`** del proyecto. `enable_confirmations=true` en PROD queda como **defensa en profundidad** (que un no-verificado ni siquiera obtenga sesión), a confirmar en el dashboard al deployar, pero la garantía real vive en el código. Bearer (email null) no aplica este check (no hay identidad que verificar).
+
+2. **TTL 72h** (era 7 días — la "expiración corta" de la sección "La seguridad del modelo se apoya en"). Reduce la ventana de leak del link bearer. Aplica a `invite_user` y a la regeneración (`resend_invitation`). El owner regenera en un tap si necesita más tiempo.
+
+3. **Single-use atómico (MEDIUM-1 / TOCTOU)**. Antes `accept_invitation` insertaba el `user_roles` ANTES de marcar `accepted`, sin lock → dos aceptaciones concurrentes del mismo token (por dos users distintos) entraban ambas. Ahora se **reclama la invitación atómicamente PRIMERO** (`UPDATE ... SET status='accepted' WHERE id=? AND status='pending'`, verificando 1 fila afectada) y **solo el ganador inserta el rol**; el perdedor recibe `invalid_state`. Si el insert del rol falla, se revierte el claim a `pending` (compensación best-effort, sin transacción explícita EF↔DB). Atómico a nivel statement (row-lock de Postgres), pooler-safe.
+
+**Deferido (de la auditoría)**: MEDIUM-2 (token en query string + `localStorage` en web) — se endurece cuando exista la página web `app.rafq.ar/invite` (`Referrer-Policy: no-referrer`, limpiar el token de la URL/localStorage apenas se lee). No bloquea este delta.
+
+**Reversibilidad**: alta. El binding es un guard de ~6 líneas; el TTL es una constante; el claim es reordenar el flujo. Revertir cualquiera es trivial.
