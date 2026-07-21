@@ -42,6 +42,8 @@
 
 **Reconciliación as-built del delta `alta-form-refinamiento`** (bajo R4 — alta): el paso 4 del alta ahora captura la fecha de nacimiento como **Año** (midpoint `AAAA-07-01`, intacto) **+** un campo opcional **Día/Mes (DD/MM)** separado (día-primero es-AR) → `birth_date` **exacta** si se cargan ambos (`validateBirthDate`, `animal-birth-year.ts`), midpoint si solo el año; la **condición corporal** usa el **stepper +/−** compartido `ConditionScoreStepper` (mismo componente que la maniobra, sin regresión de R6.6); y los **opcionales** del paso 4 (dientes/preñez/cría/aptitud/condición) se pueden **destildar** (re-tap deselecciona en `OptionRows` con `allowDeselect`, o "Sin cargar" en el stepper), volviendo a NULL y sin enviarse a `createAnimal`. Frontend puro, sin migración. Detalle en `{context,requirements,design,tasks}-alta-form-refinamiento.md`.
 
+> **Reconciliación as-built (bugfix U3, 2026-07-21 — `docs/plan-mejoras-2026-07-20.md`)**: el campo de **preñez** del paso 4 se **suprime** cuando el alta se lanza DESDE una jornada de MODO MANIOBRAS que **mide preñez** (incluye la maniobra `tacto`). Razón: la maniobra va a tactar a ese mismo animal → capturar la preñez en el alta la duplicaba (dos `reproductive_events` `tacto`). `crear-animal.tsx` lee la sesión (`getSessionById`) y gatea `showPregnancy` con `sessionMeasuresPregnancy(config)` (helper puro en `maneuver-config.ts`). Fuera de una jornada de tacto (alta normal o jornada sin tacto) el campo aparece como siempre — sin regresión. La condición corporal / cría al pie / aptitud del paso 4 NO se tocan. El contrato del *find-or-create + alta→carga* vive en spec 03 R4.1 / `design.md` §6.bis.9-bis (dueño de la reconciliación); acá queda el cross-ref del campo del alta.
+
 ## Arquitectura general
 
 ```

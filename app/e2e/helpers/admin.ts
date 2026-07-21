@@ -1290,6 +1290,22 @@ export async function waitForServerTactoWithSession(
 }
 
 /**
+ * Cuenta los eventos `tacto` (event_type='tacto', no borrados) de un perfil (U3): oráculo de "NO hay
+ * preñez duplicada". Tras el alta (que ya NO captura preñez si la jornada tacta) + el TactoStep de la
+ * maniobra, debe quedar EXACTAMENTE 1 tacto para ese animal en esa jornada — con el bug eran 2.
+ */
+export async function countServerTactoEvents(profileId: string): Promise<number> {
+  const { count, error } = await admin
+    .from('reproductive_events')
+    .select('id', { count: 'exact', head: true })
+    .eq('animal_profile_id', profileId)
+    .eq('event_type', 'tacto')
+    .is('deleted_at', null);
+  if (error) throw new Error(`countServerTactoEvents: ${error.message}`);
+  return count ?? 0;
+}
+
+/**
  * ORÁCULO de persistencia server-side de un TACTO VAQUILLONA de MANIOBRA con `session_id` (spec 03 M3.2a,
  * R6.3/R5.13): pollea `reproductive_events` hasta encontrar el `tacto_vaquillona` de un perfil con
  * `session_id` NO nulo y el `heifer_fitness` esperado (apta|no_apta|diferida). Prueba que el resultado de

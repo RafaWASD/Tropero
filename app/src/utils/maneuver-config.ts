@@ -6,6 +6,14 @@
 
 import { ALL_MANEUVERS, type ManeuverKind } from './maneuver-gating';
 
+/**
+ * La maniobra que MIDE PREÑEZ: la única cuyo evento reproductivo es un `tacto` de preñez
+ * (MANEUVER_DATA_KEY_REQS.tacto = { prenez, tamano_prenez }). Se nombra acá para que el chequeo de abajo
+ * no dependa de un literal suelto y quede atado a la semántica del gating. `tacto_vaquillona` NO mide
+ * preñez (mide aptitud) → no cuenta.
+ */
+const PREGNANCY_MANEUVER: ManeuverKind = 'tacto';
+
 /** El snapshot de una jornada/preset. `maniobras` ordenadas; el resto es libre (pre-config de tanda). */
 export type ManeuverConfig = {
   maniobras?: ManeuverKind[];
@@ -72,6 +80,18 @@ export function extractManeuvers(config: ManeuverConfig): ManeuverKind[] {
     }
   }
   return out;
+}
+
+/**
+ * ¿La jornada MIDE PREÑEZ sobre los animales? = incluye la maniobra `tacto` (la única que registra un
+ * evento reproductivo de preñez — ver `PREGNANCY_MANEUVER`). Lo consume el ALTA guiada lanzada DESDE una
+ * maniobra (spec 03 R4.1 / spec 02 alta): si la jornada ya va a pedir el tacto sobre el animal recién
+ * creado, el alta NO captura preñez → se evita el registro DUPLICADO (U3, `docs/plan-mejoras-2026-07-20.md`).
+ * Fuera de una jornada de tacto (o en un alta normal, sin sesión), el alta pregunta preñez como siempre.
+ * TOLERANTE: se apoya en `extractManeuvers` (filtra el jsonb pass-through) → nunca tira.
+ */
+export function sessionMeasuresPregnancy(config: ManeuverConfig): boolean {
+  return extractManeuvers(config).includes(PREGNANCY_MANEUVER);
 }
 
 /**

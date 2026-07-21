@@ -13,6 +13,7 @@ import {
   preconfigHistory,
   pajuelasFor,
   tactoMeasureSizeFromConfig,
+  sessionMeasuresPregnancy,
 } from './maneuver-config';
 
 // ─── parseManeuverConfig: tolerante ───────────────────────────────────────────────────
@@ -95,6 +96,33 @@ test('extractManeuvers: deduplica preservando la primera aparición', () => {
 test('extractManeuvers: filtra no-strings (numbers/objects) sin tirar', () => {
   const cfg = { maniobras: ['tacto', 42, { x: 1 }, null, 'sangrado'] as unknown as never };
   assert.deepEqual(extractManeuvers(cfg), ['tacto', 'sangrado']);
+});
+
+// ─── sessionMeasuresPregnancy: ¿la jornada incluye la maniobra `tacto`? (U3) ───────────
+
+test('sessionMeasuresPregnancy: jornada CON tacto → true', () => {
+  assert.equal(sessionMeasuresPregnancy({ maniobras: ['pesaje', 'tacto', 'vacunacion'] }), true);
+  assert.equal(sessionMeasuresPregnancy({ maniobras: ['tacto'] }), true);
+});
+
+test('sessionMeasuresPregnancy: jornada SIN tacto → false (control del fix)', () => {
+  assert.equal(sessionMeasuresPregnancy({ maniobras: ['pesaje', 'vacunacion'] }), false);
+  assert.equal(sessionMeasuresPregnancy({ maniobras: [] }), false);
+  assert.equal(sessionMeasuresPregnancy({}), false);
+});
+
+test('sessionMeasuresPregnancy: tacto_vaquillona NO cuenta (mide aptitud, no preñez)', () => {
+  assert.equal(sessionMeasuresPregnancy({ maniobras: ['tacto_vaquillona', 'pesaje'] }), false);
+});
+
+test('sessionMeasuresPregnancy: config sincronizado (string doblemente serializado) → true', () => {
+  const cfg = parseManeuverConfig(JSON.stringify(JSON.stringify({ maniobras: ['tacto', 'pesaje'] })));
+  assert.equal(sessionMeasuresPregnancy(cfg), true);
+});
+
+test('sessionMeasuresPregnancy: jsonb pass-through hostil (basura + tacto) → true, no tira', () => {
+  const cfg = { maniobras: ['drop table', 'tacto', 42] as unknown as never };
+  assert.equal(sessionMeasuresPregnancy(cfg), true);
 });
 
 // ─── extractCustomManiobras: namespace PARALELO de maniobras custom (spec 03 M5-C.3, R13.8) ──

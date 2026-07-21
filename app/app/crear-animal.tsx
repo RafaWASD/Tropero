@@ -36,6 +36,8 @@ import { Button, Card, CapturedTagRow, ComboOptionRow, ConditionScoreStepper, Fo
 import { BreedPickerSheet } from '@/components/sigsa';
 import { useAuth, useEstablishment, useRodeo } from '@/contexts';
 import { createAnimal, fetchSystemCategories, type SystemCategory } from '@/services/animals';
+import { getSessionById } from '@/services/sessions';
+import { sessionMeasuresPregnancy } from '@/utils/maneuver-config';
 import { fetchBreedCatalog } from '@/services/sigsa/sigsa-export-service';
 import { selectedBreedLabel, type BreedCatalogEntry } from '@/utils/breed-picker';
 import { useBusyWhileMounted } from '@/services/ble/stick';
@@ -137,6 +139,26 @@ export default function CrearAnimalScreen() {
   // continuamos DIRECTO a la carga de la maniobra de ese animal nuevo (`/maniobra/carga`), sin
   // re-identificarlo. Vacío = alta normal (desde la lista de animales) → ficha, como hoy (sin regresión).
   const maneuverSessionId = typeof params.sessionId === 'string' ? params.sessionId : '';
+
+  // U3 (docs/plan-mejoras-2026-07-20.md): si el alta se lanzó DESDE una jornada que MIDE PREÑEZ (incluye
+  // la maniobra `tacto`), NO capturamos preñez en el alta — la maniobra la va a pedir sobre este MISMO
+  // animal (todas las categorías con campo de preñez son PROVEN → el TactoStep les aplica) y registrarla
+  // acá la DUPLICARÍA (dos eventos tacto+ el mismo día). Se lee la config de la jornada del SQLite local
+  // (offline, puntual). Default false (no suprimir) hasta resolver / si la lectura falla: preserva el
+  // comportamiento normal (preñez visible) y NUNCA pierde el dato — el peor caso es el de hoy, no una
+  // regresión. La carrera es invisible: la lectura arranca en el montaje (paso 1) y el campo de preñez
+  // vive en el paso 4 del wizard.
+  const [sessionMeasuresPreg, setSessionMeasuresPreg] = useState(false);
+  useEffect(() => {
+    if (!maneuverSessionId) return;
+    let active = true;
+    void getSessionById(maneuverSessionId).then((r) => {
+      if (active && r.ok && r.value) setSessionMeasuresPreg(sessionMeasuresPregnancy(r.value.config));
+    });
+    return () => {
+      active = false;
+    };
+  }, [maneuverSessionId]);
 
   // Identificadores: el precargado va read-only (no editable); los otros quedan EDITABLES en el paso 4
   // (recomendados, no obligatorios — R4.3). Por la rama BLE (RB6.3) el TAG bastoneado llega precargado
@@ -266,7 +288,10 @@ export default function CrearAnimalScreen() {
   const showWeight = categoryFields.includes('weight');
   const showTeeth = categoryFields.includes('teeth');
   const showCondition = categoryFields.includes('conditionScore');
-  const showPregnancy = categoryFields.includes('pregnancy');
+  // Preñez: la categoría la pide Y la jornada activa NO la mide (U3). Si el alta se lanzó desde una
+  // maniobra de tacto, la maniobra es la dueña de la preñez → se suprime acá (campo + addTacto post-create,
+  // vía pregnantCaptured). Fuera de una jornada de tacto, `sessionMeasuresPreg` es false → sin cambios.
+  const showPregnancy = categoryFields.includes('pregnancy') && !sessionMeasuresPreg;
   const showNursing = categoryFields.includes('nursing');
   // delta spec 02 aptitud (RAR.1.1/RAR.1.2): el prompt de aptitud aparece SOLO para la vaquillona (gateado por
   // categoría, igual que el resto de los campos extra del paso 4). Es la categoría con eje de aptitud pre-servicio.
