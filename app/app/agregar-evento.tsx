@@ -24,7 +24,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Platform, Pressable, TextInput, type TextStyle } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter, type Href } from 'expo-router';
-import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
+import { getTokenValue, Text, View, XStack, YStack } from 'tamagui';
 import {
   Activity,
   Baby,
@@ -42,7 +42,7 @@ import {
 } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
 
-import { Button, CapturedTagRow, Card, ComboOptionRow, FormField, FormError, InfoNote, TagScanCta, TagScanSheet } from '@/components';
+import { Button, CapturedTagRow, Card, ComboOptionRow, FooterActionShell, FormField, FormError, InfoNote, TagScanCta, TagScanSheet } from '@/components';
 import { useBusyWhileMounted } from '@/services/ble/stick';
 import { useRodeo } from '@/contexts';
 import type { Rodeo } from '@/services/rodeos';
@@ -585,35 +585,38 @@ export default function AgregarEventoScreen() {
                   ? 'Aborto'
                   : 'Observación';
 
-  return (
-    <YStack flex={1} width="100%" maxWidth="100%" overflow="hidden" backgroundColor="$bg">
-      {/* Header con back + título. */}
-      <YStack width="100%" paddingTop={insets.top} paddingHorizontal="$4">
-        <XStack width="100%" alignItems="center" gap="$2" paddingVertical="$3">
-          <Pressable hitSlop={8} onPress={goBack} {...buttonA11y(Platform.OS, { label: 'Volver' })}>
-            <ChevronLeft size={28} color={muted} strokeWidth={2} />
-          </Pressable>
-          <Text fontFamily="$body" fontSize="$8" lineHeight="$8" fontWeight="700" color="$textPrimary">
-            {title}
-          </Text>
-        </XStack>
-      </YStack>
+  // Header FIJO (arriba del footer keyboard-aware del FooterActionShell): back + título del evento.
+  const headerNode = (
+    <YStack width="100%" paddingTop={insets.top} paddingHorizontal="$4">
+      <XStack width="100%" alignItems="center" gap="$2" paddingVertical="$3">
+        <Pressable hitSlop={8} onPress={goBack} {...buttonA11y(Platform.OS, { label: 'Volver' })}>
+          <ChevronLeft size={28} color={muted} strokeWidth={2} />
+        </Pressable>
+        <Text fontFamily="$body" fontSize="$8" lineHeight="$8" fontWeight="700" color="$textPrimary">
+          {title}
+        </Text>
+      </XStack>
+    </YStack>
+  );
 
-      <ScrollView
-        flex={1}
-        width="100%"
-        maxWidth="100%"
-        contentContainerStyle={{
-          paddingHorizontal: getTokenValue('$4', 'space'),
-          paddingTop: getTokenValue('$2', 'space'),
-          paddingBottom: insets.bottom + getTokenValue('$6', 'space'),
-          width: '100%',
-          maxWidth: '100%',
-          gap: getTokenValue('$4', 'space'),
-        }}
-        keyboardShouldPersistTaps="handled"
-        showsHorizontalScrollIndicator={false}
-      >
+  // CTA FIJO (U2 "CTA siempre visible"): el footer del shell SUBE por encima del teclado (antes: YStack
+  // manual con paddingBottom insets.bottom+12 que el teclado tapaba en los forms de fecha/notas/peso) y
+  // respeta la safe-area inferior robusta. Solo en el paso 2 (el paso 1 es la elección de tipo, sin CTA).
+  const footerNode = !missingParams && step === 2 ? (
+    <>
+      <FormError message={formError} />
+      <Button variant="primary" fullWidth disabled={submitting} onPress={() => void onSubmit()}>
+        {submitting ? 'Guardando…' : 'Guardar evento'}
+      </Button>
+      <Button variant="secondary" fullWidth onPress={goBack}>
+        Cambiar de tipo
+      </Button>
+    </>
+  ) : null;
+
+  return (
+    <>
+      <FooterActionShell contentPaddingTop="$2" contentGap="$4" header={headerNode} footer={footerNode}>
         {missingParams ? (
           <InfoNote>
             No pudimos cargar el animal. Volvé a la ficha y abrí "Agregar evento" de nuevo.
@@ -738,29 +741,7 @@ export default function AgregarEventoScreen() {
             error={observationErr}
           />
         )}
-      </ScrollView>
-
-      {/* CTA fijo abajo (thumb-zone). Solo en el paso 2. */}
-      {!missingParams && step === 2 ? (
-        <YStack
-          width="100%"
-          paddingHorizontal="$4"
-          paddingTop="$3"
-          paddingBottom={insets.bottom + 12}
-          gap="$2"
-          borderTopWidth={1}
-          borderTopColor="$divider"
-          backgroundColor="$bg"
-        >
-          <FormError message={formError} />
-          <Button variant="primary" fullWidth disabled={submitting} onPress={() => void onSubmit()}>
-            {submitting ? 'Guardando…' : 'Guardar evento'}
-          </Button>
-          <Button variant="secondary" fullWidth onPress={goBack}>
-            Cambiar de tipo
-          </Button>
-        </YStack>
-      ) : null}
+      </FooterActionShell>
 
       {/* Sheet de BASTONEO de la caravana electrónica POR TERNERO (RCF.6 generalizado, modo CAPTURA). Montado
           al ROOT (cubre la pantalla con su scrim). Solo UNO a la vez (scanCalfLocalId). El scoped scanner del
@@ -779,7 +760,7 @@ export default function AgregarEventoScreen() {
           confirmSublabel="Usar esta caravana para este ternero."
         />
       ) : null}
-    </YStack>
+    </>
   );
 }
 

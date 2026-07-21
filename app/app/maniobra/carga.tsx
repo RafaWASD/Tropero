@@ -21,11 +21,13 @@
 // matching (el header lo trae; los pasos llevan sus propios headings con matching).
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Platform } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { KeyboardAvoidingView, Platform } from 'react-native';
+import { initialWindowMetrics, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { getTokenValue, Spinner, Text, View, XStack, YStack } from 'tamagui';
 
+import { useKeyboardVisible } from '@/hooks';
+import { computeSafeBottomInset, resolveFooterPaddingBottom } from '@/utils/footer-action';
 import { buttonA11y, labelA11y } from '@/utils/a11y';
 import {
   fetchAnimalDetail,
@@ -816,7 +818,21 @@ export default function ManiobraCarga() {
     void captureAndAdvance(step.maneuver, { kind: 'skipped' });
   }, [sequence, currentIndex, captureAndAdvance]);
 
-  const bottomPad = Math.max(insets.bottom, getTokenValue('$navBottomMin', 'size'));
+  // Reserva inferior del CTA de cada paso (U2 "CTA siempre visible"): robusta al frame-0 de Android
+  // (initialWindowMetrics, blindaje de U7) y KEYBOARD-AWARE — con el teclado abierto (pasos de texto:
+  // producto/tubo/pajuela/fecha/dato custom) el CTA sube (KeyboardAvoidingView, abajo) y su reserva de
+  // safe-area se encoge a un respiro (la safe-area la tapa el teclado → reservarla dejaría un hueco).
+  const keyboardVisible = useKeyboardVisible();
+  const safeBottomInset = computeSafeBottomInset({
+    liveInsetBottom: insets.bottom,
+    initialInsetBottom: initialWindowMetrics?.insets.bottom ?? 0,
+    minInset: getTokenValue('$navBottomMin', 'size'),
+  });
+  const bottomPad = resolveFooterPaddingBottom({
+    keyboardVisible,
+    safeInset: safeBottomInset,
+    keyboardOpenGap: getTokenValue('$2', 'space'),
+  });
 
   // ─── Estados de carga / error ───
   if (loadError) {
@@ -951,31 +967,42 @@ export default function ManiobraCarga() {
 
           {/* ── PASO ACTUAL (dispatcher por source). La key (item key + nonce de entrada) fuerza remount al
                 avanzar/corregir → el paso re-lee su valor inicial. Custom → renderer genérico por ui_component
-                (CustomManeuverStep, R13.8) → custom_measurements; fábrica → el dispatcher por StepKind. ── */}
-          {currentStep.source === 'custom' ? (
-            <CustomManeuverStep
-              key={`${sequenceItemKey(currentStep)}-${stepEntryNonce}`}
-              uiComponent={currentStep.custom.uiComponent}
-              options={currentStep.custom.options}
-              initialValue={customCaptured[currentStep.custom.fieldDefinitionId] ?? null}
-              bottomPad={bottomPad}
-              onConfirm={(value) =>
-                void captureCustomAndAdvance(currentStep.custom.fieldDefinitionId, value)
-              }
-            />
-          ) : (
-            <ManeuverStep
-              key={`${currentStep.maneuver}-${stepEntryNonce}`}
-              maneuver={currentStep.maneuver}
-              captured={captured[currentStep.maneuver]}
-              animal={animal}
-              config={session.config}
-              lastScrotalCm={lastScrotalCm ?? null}
-              tactoBuckets={tactoBuckets}
-              bottomPad={bottomPad}
-              onCapture={(value) => void captureAndAdvance(currentStep.maneuver, value)}
-            />
-          )}
+                (CustomManeuverStep, R13.8) → custom_measurements; fábrica → el dispatcher por StepKind.
+
+                U2 "CTA siempre visible": el paso va dentro de un KeyboardAvoidingView (flex:1) → en los pasos
+                de TEXTO (producto/tubo/pajuela/fecha/dato custom) el teclado NO tapa el CTA gigante de abajo
+                (en iOS lo sube el behavior 'padding'; en Android lo resuelve el adjustResize de la ventana).
+                Los pasos SIN teclado (tacto/pesaje-keypad/boolean/enum) no se ven afectados. El header de
+                identidad + la línea de maniobra + el banner de error quedan FUERA del KAV (arriba) → fijos. ── */}
+          <KeyboardAvoidingView
+            style={{ flex: 1 }}
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          >
+            {currentStep.source === 'custom' ? (
+              <CustomManeuverStep
+                key={`${sequenceItemKey(currentStep)}-${stepEntryNonce}`}
+                uiComponent={currentStep.custom.uiComponent}
+                options={currentStep.custom.options}
+                initialValue={customCaptured[currentStep.custom.fieldDefinitionId] ?? null}
+                bottomPad={bottomPad}
+                onConfirm={(value) =>
+                  void captureCustomAndAdvance(currentStep.custom.fieldDefinitionId, value)
+                }
+              />
+            ) : (
+              <ManeuverStep
+                key={`${currentStep.maneuver}-${stepEntryNonce}`}
+                maneuver={currentStep.maneuver}
+                captured={captured[currentStep.maneuver]}
+                animal={animal}
+                config={session.config}
+                lastScrotalCm={lastScrotalCm ?? null}
+                tactoBuckets={tactoBuckets}
+                bottomPad={bottomPad}
+                onCapture={(value) => void captureAndAdvance(currentStep.maneuver, value)}
+              />
+            )}
+          </KeyboardAvoidingView>
         </>
       ) : null}
 

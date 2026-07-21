@@ -28,11 +28,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Platform, Pressable, type ScrollView as RNScrollView } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
+import { getTokenValue, Text, View, XStack, YStack } from 'tamagui';
 import { Check, ChevronDown, ChevronLeft, Mars, Venus, X } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
 
-import { Button, Card, CapturedTagRow, ComboOptionRow, ConditionScoreStepper, FormField, FormError, InfoNote, LinkCalfPrompt, TagScanCta, TagScanSheet } from '@/components';
+import { Button, Card, CapturedTagRow, ComboOptionRow, ConditionScoreStepper, FooterActionShell, FormField, FormError, InfoNote, LinkCalfPrompt, TagScanCta, TagScanSheet } from '@/components';
 import { BreedPickerSheet } from '@/components/sigsa';
 import { useAuth, useEstablishment, useRodeo } from '@/contexts';
 import { createAnimal, fetchSystemCategories, type SystemCategory } from '@/services/animals';
@@ -727,45 +727,71 @@ export default function CrearAnimalScreen() {
     : step === 3 ? 'Categoría'
     : 'Datos del animal';
 
-  return (
-    <YStack flex={1} width="100%" maxWidth="100%" overflow="hidden" backgroundColor="$bg">
-      {/* Header: back paso a paso + título del paso + "Creando: [id]" + progreso "Paso N de N". */}
-      <YStack width="100%" paddingTop={insets.top} paddingHorizontal="$4" gap="$2">
-        <XStack width="100%" alignItems="center" gap="$2" paddingTop="$3">
-          <Pressable hitSlop={8} onPress={goBack} {...buttonA11y(Platform.OS, { label: 'Volver' })}>
-            <ChevronLeft size={28} color={muted} strokeWidth={2} />
-          </Pressable>
-          <YStack flex={1} minWidth={0}>
-            <Text fontFamily="$body" fontSize="$8" lineHeight="$8" fontWeight="700" color="$textPrimary" numberOfLines={1}>
-              {headerTitle}
+  // Header FIJO (arriba del footer keyboard-aware del FooterActionShell): back paso a paso + título +
+  // "Creando: [id]" + progreso. Trae su propio paddingTop (safe-area superior).
+  const headerNode = (
+    <YStack width="100%" paddingTop={insets.top} paddingHorizontal="$4" gap="$2">
+      <XStack width="100%" alignItems="center" gap="$2" paddingTop="$3">
+        <Pressable hitSlop={8} onPress={goBack} {...buttonA11y(Platform.OS, { label: 'Volver' })}>
+          <ChevronLeft size={28} color={muted} strokeWidth={2} />
+        </Pressable>
+        <YStack flex={1} minWidth={0}>
+          <Text fontFamily="$body" fontSize="$8" lineHeight="$8" fontWeight="700" color="$textPrimary" numberOfLines={1}>
+            {headerTitle}
+          </Text>
+          {prefilledId ? (
+            <Text fontFamily="$body" fontSize="$3" fontWeight="500" color="$textMuted" numberOfLines={1}>
+              {`Creando: ${prefilledId}`}
             </Text>
-            {prefilledId ? (
-              <Text fontFamily="$body" fontSize="$3" fontWeight="500" color="$textMuted" numberOfLines={1}>
-                {`Creando: ${prefilledId}`}
-              </Text>
-            ) : null}
-          </YStack>
-        </XStack>
-        {/* Indicador de progreso: "Paso N de 4" + barra de puntos. */}
-        <StepIndicator current={step} total={TOTAL_STEPS} />
-      </YStack>
+          ) : null}
+        </YStack>
+      </XStack>
+      {/* Indicador de progreso: "Paso N de 4" + barra de puntos. */}
+      <StepIndicator current={step} total={TOTAL_STEPS} />
+    </YStack>
+  );
 
-      <ScrollView
-        ref={scrollRef}
-        flex={1}
-        width="100%"
-        maxWidth="100%"
-        contentContainerStyle={{
-          paddingHorizontal: getTokenValue('$4', 'space'),
-          paddingTop: getTokenValue('$3', 'space'),
-          paddingBottom: insets.bottom + getTokenValue('$6', 'space'),
-          width: '100%',
-          maxWidth: '100%',
-          gap: getTokenValue('$4', 'space'),
-        }}
-        keyboardShouldPersistTaps="handled"
-        showsHorizontalScrollIndicator={false}
-      >
+  // CTA FIJO (U2 "CTA siempre visible"): el FooterActionShell lo pone en un footer fijo que SUBE por
+  // encima del teclado (antes: YStack manual con paddingBottom insets.bottom+12 que el teclado tapaba en
+  // el paso 4 de datos) y respeta la safe-area inferior robusta (frame-0 Android). En los pasos 1–3 =
+  // "Continuar"; en el 4 = "Crear animal"/"Ver la ficha…"/"Continuar con la maniobra". Oculto sin rodeo.
+  const footerNode = !noRodeo ? (
+    <>
+      <FormError message={formError} />
+      {step === 1 ? (
+        <Button variant="primary" fullWidth disabled={!canContinueStep1} onPress={goNext}>
+          Continuar
+        </Button>
+      ) : step === 2 ? (
+        <Button variant="primary" fullWidth disabled={!canContinueStep2} onPress={goNext}>
+          Continuar
+        </Button>
+      ) : step === 3 ? (
+        <Button variant="primary" fullWidth disabled={!canContinueStep3} onPress={goNext}>
+          Continuar
+        </Button>
+      ) : (
+        <Button
+          variant="primary"
+          fullWidth
+          disabled={submitting || !selectedRodeo}
+          onPress={() => void onSubmit()}
+        >
+          {createdProfileId
+            ? maneuverSessionId
+              ? 'Continuar con la maniobra'
+              : 'Ver la ficha del animal'
+            : submitting
+              ? 'Creando…'
+              : 'Crear animal'}
+        </Button>
+      )}
+    </>
+  ) : null;
+
+  return (
+    <>
+      <FooterActionShell scrollViewRef={scrollRef} contentGap="$4" header={headerNode} footer={footerNode}>
         {noRodeo ? (
           <InfoNote>
             Creá un rodeo antes de cargar animales. Sin rodeo no hay dónde darlos de alta.
@@ -859,51 +885,7 @@ export default function CrearAnimalScreen() {
             }
           />
         )}
-      </ScrollView>
-
-      {/* CTA fijo abajo (thumb-zone). En los pasos 1–3 = "Continuar"; en el 4 = "Crear animal". */}
-      {!noRodeo ? (
-        <YStack
-          width="100%"
-          paddingHorizontal="$4"
-          paddingTop="$3"
-          paddingBottom={insets.bottom + 12}
-          gap="$2"
-          borderTopWidth={1}
-          borderTopColor="$divider"
-          backgroundColor="$bg"
-        >
-          <FormError message={formError} />
-          {step === 1 ? (
-            <Button variant="primary" fullWidth disabled={!canContinueStep1} onPress={goNext}>
-              Continuar
-            </Button>
-          ) : step === 2 ? (
-            <Button variant="primary" fullWidth disabled={!canContinueStep2} onPress={goNext}>
-              Continuar
-            </Button>
-          ) : step === 3 ? (
-            <Button variant="primary" fullWidth disabled={!canContinueStep3} onPress={goNext}>
-              Continuar
-            </Button>
-          ) : (
-            <Button
-              variant="primary"
-              fullWidth
-              disabled={submitting || !selectedRodeo}
-              onPress={() => void onSubmit()}
-            >
-              {createdProfileId
-                ? maneuverSessionId
-                  ? 'Continuar con la maniobra'
-                  : 'Ver la ficha del animal'
-                : submitting
-                  ? 'Creando…'
-                  : 'Crear animal'}
-            </Button>
-          )}
-        </YStack>
-      ) : null}
+      </FooterActionShell>
 
       {/* BreedPicker (spec 08, T13/T18): sheet de raza del catálogo SENASA. Montado al ROOT (cubre la pantalla
           con su scrim). Setea `breed` (texto) con el nombre elegido. */}
@@ -947,7 +929,7 @@ export default function CrearAnimalScreen() {
         onSkip={finishLinkPrompt}
         onLinked={finishLinkPrompt}
       />
-    </YStack>
+    </>
   );
 }
 

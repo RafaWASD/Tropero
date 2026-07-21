@@ -14,6 +14,8 @@ export { ConditionScoreStepper } from './ConditionScoreStepper';
 export type { ConditionScoreStepperProps } from './ConditionScoreStepper';
 export { AuthScreenShell } from './AuthScreenShell';
 export type { AuthScreenShellProps } from './AuthScreenShell';
+export { FooterActionShell } from './FooterActionShell';
+export type { FooterActionShellProps } from './FooterActionShell';
 export { FormError, InfoNote, LinkButton, AuthDivider } from './AuthBits';
 // Login social (spec 19). GoogleSignInButton = 1 archivo; AppleSignInButton = base (web) + .native
 // (iOS botón custom armonizado / Android null); markup compartido en AppleSignInButtonView.
