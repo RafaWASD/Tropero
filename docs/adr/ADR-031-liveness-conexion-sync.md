@@ -1,6 +1,6 @@
 # ADR-031: Liveness de la conexión de sync (reconexión NetInfo+AppState + teardown de socket zombie)
 
-- **Estado**: Aceptada (código commiteado; **veredicto de RC-1 en device pendiente** — ADR-029)
+- **Estado**: Aceptada — **DEVICE-VERIFIED en iOS** (Raf, 2026-07-22: habilitar dato en config → maniobra lo refleja sin reiniciar; RC-1 confirmado). El caveat V1 (muerte mid-foreground) NO mordió en iOS (backgroundea agresivo → AppState reconecta). Android no device-verificado aún (mismo código cliente-puro).
 - **Fecha**: 2026-07-22
 - **Decisor**: Raf (Gate 0 + Puerta 1 + Puerta 2 de la feature 22, `22-sync-liveness-nativo`)
 - **Relacionado**: feature 22, **ADR-030** (contrapunto: aquélla cubrió la reactividad de LECTURA local; ésta, la conexión que ALIMENTA esa lectura), `specs/active/15-powersync/design.md` (deuda de conexión), `docs/backlog.md` (2026-07-18), ADR-029 (veredicto device)
