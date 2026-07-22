@@ -70,12 +70,9 @@ No es un sustituto de `feature_list.json` ni de los ADRs — es la antesala dond
 **Nota de trazabilidad**: en la sesión advertí que `moro`/`cebruno`/`rosillo` eran términos equinos — **estaba equivocado**, Bavera los documenta como nomenclatura bovina argentina válida y quedaron en la lista. Lo que sí es equino es el "Código de Pelajes" de la SRA (no usar como fuente).
 **Próximo paso sugerido**: cuando Facundo responda → Gate 0 (refinamiento de contexto) + spec del delta sobre feature de alta de animal. Toca modelo de datos (enum/catálogo vs texto) + migración de los pelajes ya cargados en texto libre.
 
-## 2026-07-22 — Skeleton loaders: 2do incremento (ficha animal / rodeos / miembros)
+## 2026-07-22 — ✅ CERRADO — Skeleton loaders (U6b, 2 incrementos)
 
-**Origen**: U6b del `docs/plan-mejoras-2026-07-20.md`. El 1er incremento (commit `54c13ea`) hizo el primitivo `app/src/components/Skeleton.tsx` (+ `SkeletonCircle`/`SkeletonText`/`useSkeletonPulse` + presets) y lo aplicó a **4 pantallas** (animales, home "Mis rodeos", lotes, reportes-KPIs).
-**Qué falta**: aplicar el primitivo YA LISTO a las 3 pantallas restantes del mapeo del Explore — **ficha de animal** (`app/app/animal/[id].tsx`: hero `$9` + fila de chips + cards de sección label/valor; hoy `InfoNote "Cargando ficha…"`), **rodeos** (`app/app/rodeos.tsx`: `RodeoCard` local, título `$6` + filas de acción; hoy `InfoNote`), **miembros** (`app/app/miembros.tsx`: `MemberRow` 56px, nombre + RoleBadge, SIN avatar; hoy `InfoNote "Cargando el equipo…"`). Guard de 1ra-carga (`loading && data===null`), espejar dimensiones con tokens, mismo pulse.
-**Por qué importa**: bajo (polish de UX percibida; Raf los quiere en toda la app). El primitivo ya existe → cada pantalla es barata.
-**Próximo paso sugerido**: implementer directo + veto visual del leader (como el 1er incremento). No urgente.
+**✅ DONE (2026-07-22)**: 1er incremento `54c13ea` (primitivo `Skeleton.tsx` + animales/home-rodeos/lotes/reportes) + 2do incremento `745c0c2` (ficha/rodeos/miembros — presets `AnimalFichaSkeleton`/`RodeoCardSkeleton`/`MemberRowSkeleton`). Skeletons de 1ra-carga en TODAS las pantallas de carga de la app, guard anti-parpadeo (`data===null`), pulse de opacidad (Reanimated, reduce-motion), cero deps/cero tokens nuevos. Gates: reviewer APPROVED ×2 + veto visual del leader PASS (7 capturas) + typecheck + anti-hardcode 0 + frontend-puro. Home "Lotes" queda SIN skeleton a propósito (cantidad fetcheada → evita flash de cards fantasma). **Nada pendiente.**
 
 ## 2026-07-21 — Nombre de establecimiento largo se trunca/recorta en toda la UI (auditoría de truncado)
 
