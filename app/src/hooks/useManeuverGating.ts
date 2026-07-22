@@ -6,8 +6,9 @@
 // hook NO renderiza: expone el estado del gating del rodeo + un resolver síncrono sobre el mapa cargado.
 //
 // Offline-first (R10.3): fetchRodeoGating lee del SQLite local (rodeo_data_config + field_definitions +
-// system_default_fields, todo cacheado). Se re-carga al ENFOCAR y al avanzar el SYNC (mismo patrón que
-// useGroupView), por si el owner cambió la plantilla del rodeo mientras tanto.
+// system_default_fields, todo cacheado). Se re-carga al ENFOCAR (carga inicial) y ante un CAMBIO de las
+// tablas de config del rodeo (spec 22, watched query `db.onChange` sobre rodeo_data_config +
+// pending_rodeo_data_config), por si el owner (o un coworker) cambió la plantilla del rodeo mientras tanto.
 //
 // USO:
 //   - Wizard (etapa 2, R1.4/R1.5): pasar el rodeo de la SESIÓN → `filter(maniobrasOfrecidas)` deja solo
@@ -17,7 +18,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useFocusEffect } from 'expo-router';
-import { useStatus } from '@powersync/react';
+import { usePowerSync } from '@powersync/react';
 
 import { fetchRodeoGating } from '../services/rodeo-config';
 import {
@@ -60,8 +61,10 @@ export function useManeuverGating(rodeoId: string | null): UseManeuverGating {
   const [loading, setLoading] = useState(() => initialLoadingFor(rodeoId));
   const [error, setError] = useState<string | null>(null);
 
-  const syncStatus = useStatus();
-  const lastSyncedMs = syncStatus.lastSyncedAt?.getTime() ?? 0;
+  // spec 22 (R22.10) — instancia del DB para la watched query imperativa (`db.onChange`). Mismo singleton
+  // que `getPowerSync()`, provisto por el `PowerSyncProvider` que envuelve el árbol (igual que los contextos
+  // de la feature 21). Reemplaza el disparador por-sync `lastSyncedMs` (proxy NO determinista, ADR-030).
+  const db = usePowerSync();
 
   // El último request gana (evita que una carga vieja pise la nueva si el rodeo cambia rápido).
   const reqIdRef = useRef(0);
@@ -101,21 +104,39 @@ export function useManeuverGating(rodeoId: string | null): UseManeuverGating {
     setLoading(false);
   }, [rodeoId]);
 
-  // La carga inicial la dispara useFocusEffect (focus se emite también al montar). La re-carga por SYNC va
-  // aparte, guardada en `lastSyncedMs === 0` para no duplicar el load del mount antes del primer sync (mismo
-  // patrón que useGroupView). Si el rodeo cambia, `load` cambia → useFocusEffect lo re-dispara.
+  // La carga inicial la dispara useFocusEffect (focus se emite también al montar). Si el rodeo cambia, `load`
+  // cambia → useFocusEffect lo re-dispara. `db.onChange` NO dispara al registrarse (triggerImmediate=false por
+  // default), así que la carga inicial la sigue dando ESTE efecto (R22.15) — no se duplica.
   useFocusEffect(
     useCallback(() => {
       void load();
     }, [load]),
   );
 
-  // Re-leer cuando AVANZA el sync (la plantilla del rodeo pudo cambiar mientras tanto). Dep primitiva (ms),
-  // estable entre syncs → no loopea. Guardado en 0 para no pisar el load del mount.
+  // spec 22 (R22.10/R22.11/R22.13/R22.15/R22.17) — WATCHED QUERY imperativa. Reemplaza el disparador por-sync
+  // (`lastSyncedMs`, proxy NO determinista, ADR-030) por `db.onChange` sobre las tablas que respaldan la config
+  // del rodeo. El onChange re-corre `load()` EXISTENTE (→ fetchRodeoGating → buildRodeoConfigQuery overlay-aware
+  // → resolución del gating) SIN tocar su lógica de veredicto: solo cambia QUIÉN lo dispara (mismo patrón que
+  // los contextos de la feature 21).
+  //
+  // OVERLAY-AWARE (R22.13) — se observan AMBAS tablas: `pending_rodeo_data_config` (overlay optimista del
+  // toggle offline del owner, que dispara el feedback inmediato incluso sin red, R22.22) y `rodeo_data_config`
+  // (la fila synced confirmada que baja tras el ACK cuando la descarga reengancha por (a)). Observar solo una
+  // perdería uno de los dos disparos (design §4.3).
+  //
+  // Dep PRIMITIVA (`rodeoId` + el singleton estable `db`), NO un objeto de status (R22.17): no reintroduce el
+  // loop de re-render que la feature 20 evitó. El throttle (~30 ms) del SDK coalesce la ráfaga de un checkpoint
+  // (R22.18); `load` conserva stale-while-revalidate (loadedRodeoRef/reqIdRef) → un disparo del MISMO rodeo no
+  // re-flipea `loading` (R22.19). `load` es useCallback([rodeoId]) estable → el efecto se re-suscribe solo si
+  // cambia el rodeo (R22.15), liberando la suscripción anterior (dispose).
   useEffect(() => {
-    if (lastSyncedMs === 0) return;
-    void load();
-  }, [lastSyncedMs, load]);
+    if (!rodeoId) return;
+    const dispose = db.onChange(
+      { onChange: () => { void load(); } },
+      { tables: ['rodeo_data_config', 'pending_rodeo_data_config'] },
+    );
+    return () => dispose();
+  }, [rodeoId, load, db]);
 
   const resolve = useCallback(
     (maneuver: ManeuverKind) => resolveManeuverGating(maneuver, config ?? EMPTY_CONFIG),

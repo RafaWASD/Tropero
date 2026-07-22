@@ -18,10 +18,11 @@
 //
 // Cero hardcode (ADR-023 §4): tokens + componentes de la librería. Voseo argentino.
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Platform, Pressable } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { usePowerSync } from '@powersync/react';
 import { ScrollView, Text, View, XStack, YStack } from 'tamagui';
 import { getTokenValue } from 'tamagui';
 import { ChevronLeft, Plus } from 'lucide-react-native';
@@ -77,6 +78,10 @@ export default function EditarPlantillaScreen() {
   const isOwner = estState.status === 'active' && estState.role === 'owner';
   const muted = getTokenValue('$textMuted', 'color');
 
+  // spec 22 (R22.14) — instancia del DB para la watched query imperativa (`db.onChange`) del read reactivo
+  // de config. Mismo singleton que getPowerSync(), provisto por el PowerSyncProvider (feature 21/22).
+  const db = usePowerSync();
+
   // Sistema del rodeo (lo sabemos del RodeoContext; los defaults se piden por systemId).
   const systemId = useMemo(() => {
     if (rodeoState.status !== 'active') return null;
@@ -87,6 +92,10 @@ export default function EditarPlantillaScreen() {
   const [toggles, setToggles] = useState<TemplateToggle[] | null>(null);
   // Estado EFECTIVO de partida (para diffear al guardar). Se refresca tras guardar OK.
   const [baseConfig, setBaseConfig] = useState<RodeoFieldConfig[]>([]);
+  // Espejo sincrónico del baseConfig VIGENTE (pre-refresh) para que el refresh reactivo (spec 22) pueda
+  // comparar los `toggles` actuales contra la base previa sin leer el closure stale de `baseConfig`.
+  const baseConfigRef = useRef<RodeoFieldConfig[]>([]);
+  baseConfigRef.current = baseConfig;
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -137,6 +146,42 @@ export default function EditarPlantillaScreen() {
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rodeoId, systemId]);
+
+  // spec 22 (R22.14/R22.22) — READ REACTIVO overlay-aware. Un cambio local de la config del rodeo (el eco
+  // synced que baja tras el ACK, o el cambio de un coworker) refresca el estado EFECTIVO de partida
+  // (`baseConfig`, la base del diff) y la vista read-only, SIN pisar los `toggles` que el owner cambió y
+  // todavía no guardó. Regla (design §4.5): si el owner tiene ediciones sin guardar (los `toggles` divergen
+  // del `baseConfig` previo → `computeEditDiff` no vacío), solo se actualiza `baseConfig` (para que el diff
+  // al guardar sea contra el estado real vigente); si NO hay ediciones en curso, se re-derivan los toggles.
+  // Refresh SILENCIOSO: no toca `loading` (no blanquea) y no surface errores transitorios (mantiene lo
+  // mostrado). `db.onChange` no dispara al registrarse (triggerImmediate=false) → la carga inicial la sigue
+  // dando el efecto de arriba; este solo reacciona a cambios reales. Es lectura 100% local (offline-safe).
+  const refreshFromLocal = useCallback(async () => {
+    if (!rodeoId || !systemId) return;
+    const [catalogR, defaultsR, configR] = await Promise.all([
+      fetchFieldCatalog(),
+      fetchSystemDefaults(systemId),
+      fetchRodeoConfig(rodeoId),
+    ]);
+    if (!catalogR.ok || !defaultsR.ok || !configR.ok) return; // refresh silencioso: no pisamos con error
+    const prevBase = baseConfigRef.current;
+    setBaseConfig(configR.value);
+    setToggles((prev) => {
+      if (prev === null) return buildEditToggles(catalogR.value, defaultsR.value, configR.value);
+      const hasUnsavedEdits = computeEditDiff(prev, prevBase).length > 0;
+      // Con ediciones sin guardar → NO pisamos los toggles del owner (solo `baseConfig` se actualizó arriba).
+      return hasUnsavedEdits ? prev : buildEditToggles(catalogR.value, defaultsR.value, configR.value);
+    });
+  }, [rodeoId, systemId]);
+
+  useEffect(() => {
+    if (!rodeoId || !systemId) return;
+    const dispose = db.onChange(
+      { onChange: () => { void refreshFromLocal(); } },
+      { tables: ['rodeo_data_config', 'pending_rodeo_data_config'] },
+    );
+    return () => dispose();
+  }, [rodeoId, systemId, db, refreshFromLocal]);
 
   const sections = useMemo(() => (toggles ? groupTogglesByCategory(toggles) : []), [toggles]);
 

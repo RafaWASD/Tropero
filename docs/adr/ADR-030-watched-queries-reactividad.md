@@ -49,6 +49,11 @@ Adoptar **watched queries reales de PowerSync** como el patrón de reactividad, 
   (`EstablishmentContext`, `RodeoContext`, `lotes.tsx`). El resto (los 5 focus-only del backlog:
   `miembros`, `use-reports`, `animal/[id]`, `export-sigsa`, `maniobra`; y demás) se migra después con
   este patrón ya establecido.
+  > **AVANCE (feature 22, 2026-07-22)**: `useManeuverGating` (config/maniobra) **migrado** a `db.onChange`
+  > (sobre `rodeo_data_config` + `pending_rodeo_data_config`, overlay-aware) — uno de los 5 focus-only
+  > (`maniobra`). **Quedan 4**: `miembros`, `use-reports`, `animal/[id]`, `export-sigsa`. La feature 22
+  > además cerró la deuda de CONEXIÓN que esta ADR asumía resuelta (la descarga no reenganchaba en nativo);
+  > ver **ADR-031** (liveness de conexión), su contrapunto.
 
 ## Consecuencias
 

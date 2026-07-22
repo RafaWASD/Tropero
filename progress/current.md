@@ -3,6 +3,17 @@
 > Este archivo se vacía al cerrar cada sesión y su resumen se mueve a `history.md`.
 > Mientras trabajás, **mantenelo actualizado en tiempo real**, no al final.
 
+## 2026-07-22 — Bug "vacunas no guarda" → feature 22 (sync-liveness nativo), Gate 0 aprobado
+
+Raf reportó (device): habilitar vacunación en "Editar plantilla" de un rodeo "no guarda" (revierte al re-entrar; tampoco se puede usar en maniobra). **Diagnóstico (yo + Plan agent, evidencia en DB dev + código):**
+- **NO es bug de guardado.** El save PERSISTE server-side (verificado: rodeo "Cria hembras" de Raf, `rodeo_data_config.enabled=true`, `updated_at`=momento del save, `establishment_id` OK, in-scope del stream `est_rodeo_data_config` auto_subscribe). `vacunacion` es default de cría (`default_enabled=true`).
+- **El bug es sync-DOWN muerto en nativo en sesión viva.** El upload va por `supabase.rpc()` HTTP (canal aparte del stream WS de descarga) → sube aunque la descarga esté muerta. **RC-1**: `db.connect()` una sola vez (`provider.tsx:73`), sin NetInfo/AppState → nadie reengancha el socket colgado. **RC-2**: el overlay se limpia en el ACK HTTP (`connector.ts:157`) antes del eco → cae a la fila synced stale. **RC-3**: config/maniobra son lecturas one-shot, no watched queries (no migradas por la 21). Confirmado por Raf: tras cold restart aparece ON; ~5 datos quedaron off hasta reiniciar.
+- Es el bug del backlog 2026-07-18, ahora **confirmado crítico** sobre el bucle config→maniobra (frecuente).
+
+**Feature 22 (`22-sync-liveness-nativo`) — CÓDIGO COMMITEADO + Puerta 2 aprobada; `in_progress` hasta veredicto device.** Pipeline SDD completo en una sesión: Gate 0 (context.md) → spec_author (Opus) → veto del leader (V1 hueco de triggers + V2 gate de instrumentación por const de módulo, no `__DEV__`) → Puerta 1 → implementer (Opus) → reviewer APPROVED (verificación independiente: typecheck + 206 unit + 8 E2E sin retries + git diff supabase/ sync-streams/ vacío + wiring línea por línea) → Gate 2 PASS 0 HIGH → Gate 2.5 (3 capturas, veto visual PASS) → **Puerta 2 aprobada por Raf**. Alcance **(a) reconexión NetInfo+AppState + (d) `useManeuverGating`→watched query + instrumentación**; CLIENTE PURO (sin Gate 1). **ADR-031** creado (liveness de conexión, contrapunto de ADR-030). Dep nueva `@react-native-community/netinfo@12.0.1`. **PENDIENTE (T11, ADR-029): veredicto en DEVICE** — Raf rebuildeaba `preview-dev` → probar bucle config→maniobra sin reiniciar + leer logs `[powersync][diag]`. Si la muerte del socket es mid-foreground → contingencia **(a′) watchdog** (mismo ciclo). Diferido **(c)** RC-2 (candidato Gate 1, backlog); contingente **(b)** HTTP streaming. Recordatorio de release: flipear `SYNC_DIAGNOSTICS_ENABLED=false` antes de cerrar prod.
+
+**Otros de este arranque**: U6b (skeletons) PAUSADO (Explore mapeó las 7 pantallas — informe listo para retomar). U9 sigue **solo en dev** (Raf: prod todavía no). Nombre de campo largo se trunca en toda la UI → decidido (ellipsis + nombre completo en Mis campos/editar-campo + descender-safe) y **backlogueado** (2026-07-21). Builds iOS+Android entregados (preview-dev). BLE en otra terminal (file-sets disjuntos; sync vive acá).
+
 ## 2026-07-21 — U2 commiteado + U9 DEPLOYADO (Raf aprobó ambos)
 
 - **U2 (CTA siempre visible) — commit `1e0bec7`.** Raf aprobó visual (capturas) + code-review APPROVED. Primitivo `FooterActionShell` en maniobra/carga + alta + agregar-evento. ⏸ **device-test del teclado (iOS+Android) pendiente de Raf.**
