@@ -30,7 +30,7 @@ import {
   Upload,
 } from 'lucide-react-native';
 
-import { Button, Card, InfoNote } from '@/components';
+import { Button, Card, InfoNote, RodeoCardSkeleton } from '@/components';
 import { useEstablishment, useRodeo } from '@/contexts';
 import { softDeleteRodeo, type Rodeo } from '@/services/rodeos';
 import { describeServicePeriod } from '@/utils/service-months';
@@ -139,7 +139,11 @@ export default function RodeosScreen() {
         showsHorizontalScrollIndicator={false}
       >
         {rodeoState.status === 'loading' ? (
-          <InfoNote>Cargando rodeos…</InfoNote>
+          <YStack gap="$3" marginTop="$2">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <RodeoCardSkeleton key={i} actions={isOwner ? 3 : 0} />
+            ))}
+          </YStack>
         ) : rodeos.length === 0 ? (
           <InfoNote>Este campo todavía no tiene rodeos.</InfoNote>
         ) : (

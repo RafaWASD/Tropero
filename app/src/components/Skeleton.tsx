@@ -15,7 +15,7 @@
 // CERO tokens nuevos (ADR-023 §4): el bloque usa `backgroundColor="$divider"` (ya existe) y anima SOLO la
 // opacity → no toca el design system. Radios/spacing por token; width/height son geometría libre.
 
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { AccessibilityInfo, type DimensionValue } from 'react-native';
 import { View, XStack, YStack, getTokenValue } from 'tamagui';
 import Animated, {
@@ -226,5 +226,112 @@ export function LoteCardSkeleton() {
         <Skeleton width={20} height={20} radius="$2" />
       </XStack>
     </Card>
+  );
+}
+
+/**
+ * Espeja el HERO de la ficha de animal (`AnimalHero`, app/animal/[id].tsx): identificador grande (fontSize
+ * $9=30, ancho) + fila de "chips" pill de identidad (categoría / sexo / rodeo). Evoca las dimensiones — NO
+ * reimplementa el hero real (no hay ícono de sexo ni CategoryBadge, solo bloques pill del mismo alto).
+ */
+export function AnimalHeroSkeleton() {
+  return (
+    <YStack width="100%" gap="$3" paddingTop="$1">
+      <Skeleton width="60%" height={30} radius="$2" />
+      <XStack width="100%" alignItems="center" gap="$2" flexWrap="wrap">
+        <Skeleton width={96} height={26} radius="$pill" />
+        <Skeleton width={72} height={26} radius="$pill" />
+        <Skeleton width={80} height={26} radius="$pill" />
+      </XStack>
+    </YStack>
+  );
+}
+
+/**
+ * Espeja una card de sección de la ficha (`DetailSection`, app/animal/[id].tsx): `Card` ($surface, radio
+ * $card, padding $4, gap $3) → header (círculo 28 + título fontSize $6=18) + N filas label/valor
+ * (`AttributeRow`: label fontSize $3=13 arriba + valor fontSize $5=16 abajo).
+ */
+export function DetailSectionSkeleton({ rows = 3 }: { rows?: number }) {
+  return (
+    <Card gap="$3">
+      <XStack alignItems="center" gap="$2">
+        <SkeletonCircle size={28} />
+        <Skeleton width="45%" height={18} radius="$2" />
+      </XStack>
+      <YStack gap="$3">
+        {Array.from({ length: rows }).map((_, i) => (
+          <YStack key={i} gap="$1">
+            <Skeleton width="35%" height={13} radius="$2" />
+            <Skeleton width="60%" height={16} radius="$2" />
+          </YStack>
+        ))}
+      </YStack>
+    </Card>
+  );
+}
+
+/**
+ * Espeja la ficha de animal en su PRIMERA carga (app/animal/[id].tsx, guard `loading`): hero + 2 cards de
+ * sección. Devuelve un FRAGMENTO → hereda el `gap: $4` del ScrollView contenedor entre bloques (igual que
+ * el contenido real, que también son hijos directos del ScrollView). NO evoca el timeline.
+ */
+export function AnimalFichaSkeleton() {
+  return (
+    <>
+      <AnimalHeroSkeleton />
+      <DetailSectionSkeleton rows={3} />
+      <DetailSectionSkeleton rows={2} />
+    </>
+  );
+}
+
+/**
+ * Espeja `RodeoCard` (app/rodeos.tsx): `Card` ($surface, radio $card, padding $4, gap $3) → título (fontSize
+ * $6=18) + `actions` filas de acción (minHeight $chipMin=40: ícono 20 + texto), separadas por divider
+ * $divider. El owner ve 3 acciones (plantilla / servicio / eliminar); el no-owner, ninguna (`actions={0}`).
+ */
+export function RodeoCardSkeleton({ actions = 3 }: { actions?: number }) {
+  return (
+    <Card gap="$3">
+      <XStack alignItems="center" gap="$2">
+        <Skeleton width="55%" height={18} radius="$2" />
+      </XStack>
+      {actions > 0 ? (
+        <YStack gap="$2">
+          {Array.from({ length: actions }).map((_, i) => (
+            <Fragment key={i}>
+              {i > 0 ? <View height={1} backgroundColor="$divider" /> : null}
+              <XStack alignItems="center" gap="$3" minHeight="$chipMin">
+                <Skeleton width={20} height={20} radius="$2" />
+                <Skeleton width="50%" height={14} radius="$2" />
+              </XStack>
+            </Fragment>
+          ))}
+        </YStack>
+      ) : null}
+    </Card>
+  );
+}
+
+/**
+ * Espeja `MemberRow` (app/miembros.tsx) SIN avatar: fila de alto $touchMin (56) + paddingHorizontal $4 →
+ * nombre (fontSize $5=16) a la izquierda + bloque "RoleBadge" (pill) a la derecha. Va DENTRO de un `Card`
+ * (padding 0, overflow hidden) con dividers $divider (marginHorizontal $4) entre filas — igual que la lista real.
+ */
+export function MemberRowSkeleton() {
+  return (
+    <XStack
+      width="100%"
+      alignItems="center"
+      gap="$3"
+      minHeight="$touchMin"
+      paddingHorizontal="$4"
+      paddingVertical="$2"
+    >
+      <Skeleton width="45%" height={16} radius="$2" />
+      <View flex={1} />
+      <Skeleton width={76} height={24} radius="$pill" />
+    </XStack>
   );
 }

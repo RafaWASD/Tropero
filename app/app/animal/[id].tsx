@@ -43,7 +43,7 @@ import {
 } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
 
-import { Button, Card, CategoryBadge, ComboOptionRow, InfoNote, FormError, FormField, IdentifierAssignRow, TagScanCta, TagScanSheet, TimelineEvent, TreatmentsSection, TreatmentStartSheet, TreatmentApplicationSheet } from '@/components';
+import { AnimalFichaSkeleton, Button, Card, CategoryBadge, ComboOptionRow, InfoNote, FormError, FormField, IdentifierAssignRow, TagScanCta, TagScanSheet, TimelineEvent, TreatmentsSection, TreatmentStartSheet, TreatmentApplicationSheet } from '@/components';
 import type { TreatmentStartSubmit, TreatmentApplicationSubmit } from '@/components';
 import {
   assignTagToAnimal,
@@ -921,7 +921,7 @@ export default function AnimalDetailScreen() {
         showsHorizontalScrollIndicator={false}
       >
         {loading ? (
-          <InfoNote>Cargando ficha…</InfoNote>
+          <AnimalFichaSkeleton />
         ) : error ? (
           <FormError message={error} />
         ) : detail ? (

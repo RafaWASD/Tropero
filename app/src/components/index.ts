@@ -4,8 +4,9 @@ export { Button } from './Button';
 export type { ButtonProps } from './Button';
 export { Card } from './Card';
 export type { CardProps } from './Card';
-// Skeleton loaders (polish U6b): primitivo pulsante + presets que espejan AnimalRow/GroupSummaryCard/LoteCard.
-// Se usan SOLO en la primera carga sin datos (loading && data===null), nunca en refresh.
+// Skeleton loaders (polish U6b): primitivo pulsante + presets que espejan los componentes reales
+// (AnimalRow / GroupSummaryCard / LoteCard / ficha de animal / RodeoCard / MemberRow). Se usan SOLO en la
+// primera carga sin datos (loading && data===null), nunca en refresh.
 export {
   Skeleton,
   SkeletonCircle,
@@ -14,6 +15,11 @@ export {
   AnimalRowSkeleton,
   GroupSummaryCardSkeleton,
   LoteCardSkeleton,
+  AnimalHeroSkeleton,
+  DetailSectionSkeleton,
+  AnimalFichaSkeleton,
+  RodeoCardSkeleton,
+  MemberRowSkeleton,
 } from './Skeleton';
 export type { SkeletonProps, SkeletonTextProps } from './Skeleton';
 export { FormField } from './FormField';

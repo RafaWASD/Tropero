@@ -33,7 +33,7 @@ import {
   X,
 } from 'lucide-react-native';
 
-import { Button, Card, FormError, InfoNote, RoleBadge } from '@/components';
+import { Button, Card, FormError, InfoNote, MemberRowSkeleton, RoleBadge } from '@/components';
 import { useAuth, useEstablishment } from '@/contexts';
 import {
   cancelInvitation,
@@ -210,7 +210,16 @@ export default function MiembrosScreen() {
         {!hasActiveField ? (
           <InfoNote>Elegí un campo activo para gestionar su equipo.</InfoNote>
         ) : loading && members === null ? (
-          <InfoNote>Cargando el equipo…</InfoNote>
+          <Card padding="$0" gap="$0" overflow="hidden" marginTop="$2">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <View key={i}>
+                {i > 0 ? (
+                  <View height={1} backgroundColor="$divider" marginHorizontal="$4" />
+                ) : null}
+                <MemberRowSkeleton />
+              </View>
+            ))}
+          </Card>
         ) : loadError ? (
           <YStack gap="$2">
             <FormError message={loadError} />

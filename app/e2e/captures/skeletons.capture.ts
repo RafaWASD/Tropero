@@ -35,8 +35,10 @@ async function gotoVariant(page: Page, variant: string, title: string): Promise<
   await expect(page.getByText(title, { exact: true })).toBeVisible({ timeout: 30_000 });
 }
 
-test('captura U6b skeletons: las 4 pantallas en su estado de primera carga', async ({ page }) => {
-  test.setTimeout(180_000);
+test('captura U6b skeletons: las 7 pantallas en su estado de primera carga', async ({ page }) => {
+  test.setTimeout(240_000);
+
+  // ── 1er incremento (commit 54c13ea) ──────────────────────────────────────────────────────────
 
   // ── 01 — ANIMALES: ~8 filas skeleton (espejo de AnimalRow, alto $animalRow + avatar $icon). ──
   await gotoVariant(page, 'animales', 'Animales');
@@ -55,4 +57,20 @@ test('captura U6b skeletons: las 4 pantallas en su estado de primera carga', asy
   await gotoVariant(page, 'reportes', 'Reportes');
   await expect(page.getByText('Reproductivo', { exact: true })).toBeVisible();
   await shot(page, '04-reportes-kpis');
+
+  // ── 2do incremento (U6b) ─────────────────────────────────────────────────────────────────────
+
+  // ── 05 — FICHA: hero (identificador $9 + chips) + 2 cards de sección (espejo de AnimalHero/DetailSection). ──
+  //   La ficha real NO tiene título (el hero lo es); solo la barra de back → sin `expect` de título.
+  await page.goto('/skeletons-spike?variant=ficha');
+  await page.waitForTimeout(1_000);
+  await shot(page, '05-ficha');
+
+  // ── 06 — RODEOS: 3 cards skeleton (owner) — título $6 + filas de acción $chipMin (espejo de RodeoCard). ──
+  await gotoVariant(page, 'rodeos', 'Rodeos');
+  await shot(page, '06-rodeos');
+
+  // ── 07 — MIEMBROS: Card única con 4 filas SIN avatar — nombre + RoleBadge (espejo de MemberRow). ──
+  await gotoVariant(page, 'miembros', 'Equipo');
+  await shot(page, '07-miembros');
 });
