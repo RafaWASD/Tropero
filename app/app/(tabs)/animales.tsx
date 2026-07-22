@@ -26,7 +26,7 @@ import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
 import { Check, Plus, Search } from 'lucide-react-native';
 import { useStatus } from '@powersync/react';
 
-import { AnimalRow, BleConnectionChip, Button, Card, InfoNote, FormError } from '@/components';
+import { AnimalRow, AnimalRowSkeleton, BleConnectionChip, Button, Card, InfoNote, FormError } from '@/components';
 import { useEstablishment, useRodeo } from '@/contexts';
 import {
   fetchAnimals,
@@ -213,6 +213,11 @@ export default function AnimalesScreen() {
   // Distingue el empty-state "no hay resultados PARA ESTE FILTRO" del "el campo no tiene animales".
   const hasActiveFilter = statusFilter !== 'active' || rodeoFilter !== null || onlyNoTag;
 
+  // Skeleton de PRIMERA carga (polish U6b): solo mientras carga la lista SIN datos previos y sin búsqueda
+  // activa (loading && list vacía). NUNCA en refresh (un re-foco/sync con la lista ya montada no blanquea:
+  // `loading` no vuelve a true con datos presentes) ni durante una búsqueda (esa tiene su propio no-match).
+  const showListSkeleton = loading && list.length === 0 && !isSearching && !error;
+
   const listEmpty = !isSearching && !loading && list.length === 0 && !error;
   // Empty contextual del filtro: hay filtro activo y 0 resultados (el campo SÍ puede tener animales).
   const showFilteredEmpty = listEmpty && hasActiveFilter;
@@ -381,6 +386,13 @@ export default function AnimalesScreen() {
           <EmptyEstablishmentState onPress={onCreateBlank} />
         ) : showNoMatch ? (
           <NoMatchState query={debouncedQuery.trim()} onPress={onCreateFromNoMatch} />
+        ) : showListSkeleton ? (
+          // Espeja ~8 AnimalRow mientras baja la primera carga (mismas dimensiones $animalRow/$icon).
+          <YStack width="100%" accessibilityLabel="Cargando animales">
+            {Array.from({ length: 8 }).map((_, i) => (
+              <AnimalRowSkeleton key={i} />
+            ))}
+          </YStack>
         ) : (
           <YStack width="100%">
             {visible.map((animal) => (

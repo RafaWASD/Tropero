@@ -200,6 +200,7 @@ const DEV_WEB_ROUTES = new Set([
   'maniobra/service-months-spike',
   'maniobra/tacto-spike',
   'reportes-spike',
+  'skeletons-spike',
 ]);
 
 /**
@@ -537,6 +538,11 @@ function RootGate() {
           alcanzable directo en web sin auth (DEV_WEB_ROUTES) para la captura e2e a 360/412. Referencia
           visual para el veto del leader (reusa los componentes reales de la tab Reportes). NO es producción. */}
       <Stack.Screen name="reportes-spike" />
+      {/* Polish U6b — DESIGN SPIKE de los SKELETON LOADERS (`skeletons-spike`): pantalla VISUAL, alcanzable
+          directo en web sin auth (DEV_WEB_ROUTES) para el capture del Gate 2.5. Renderiza los skeletons de
+          primera carga de las 4 pantallas (variantes animales/home/lotes/reportes) con los MISMOS
+          componentes que producción. NO es producción. */}
+      <Stack.Screen name="skeletons-spike" />
     </Stack>
   );
 }

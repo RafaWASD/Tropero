@@ -33,6 +33,7 @@ import {
   CclBars,
   AlertList,
   ReportLoading,
+  ReportSkeleton,
   ReportOffline,
   ReportError,
   ReportEmpty,
@@ -333,7 +334,8 @@ function ReproSection({
   // Estado del bloque: usamos %preñez como reporte "líder" (los 4 comparten guard/cota). Si está cargando
   // por primera vez / offline / error → un solo estado para todo el bloque (no 4 spinners).
   const pv = reportView(pregnancy);
-  if (pv.showSpinner) return <ReportLoading label="Calculando los datos…" />;
+  // Primera carga sin datos (design §4) → skeleton que espeja los KPIs (polish U6b), en vez del spinner.
+  if (pv.showSpinner) return <ReportSkeleton />;
   if (pv.showOffline) return <ReportOffline onRetry={() => reloadRepro(kpis)} />;
   if (pv.showError) return <ReportError message={pregnancy.error?.message} onRetry={() => reloadRepro(kpis)} />;
 

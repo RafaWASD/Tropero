@@ -9,6 +9,7 @@ import { Text, View, XStack, YStack, getTokenValue } from 'tamagui';
 import { CloudOff, RefreshCw, Inbox } from 'lucide-react-native';
 
 import { buttonA11y } from '../../utils/a11y';
+import { Skeleton } from '../Skeleton';
 
 // ─── Loading (spinner centrado, sólo en primera carga sin datos — design §4) ─────────────────────────
 
@@ -20,6 +21,52 @@ export function ReportLoading({ label = 'Cargando…' }: { label?: string }) {
       <Text fontFamily="$body" fontSize="$3" color="$textMuted">
         {label}
       </Text>
+    </YStack>
+  );
+}
+
+// ─── Skeleton de la sección REPRODUCTIVO (polish U6b) ────────────────────────────────────────────────
+
+/**
+ * Drop-in del `ReportLoading` de la primera carga de los KPIs (reportes.tsx, ReproSection): espeja el
+ * layout real de los KPIs — un `KpiRow` (Preñez | Parición) lado a lado + un tercer KpiCard full-width
+ * (Destete) — con las mismas dimensiones de `KpiCard` (surface, radio $card, borde $divider, padding $4).
+ * Solo se muestra en la primera carga sin datos (loading && data===null), no en refresh.
+ */
+export function ReportSkeleton() {
+  return (
+    <YStack gap="$3">
+      <XStack gap="$3" alignItems="stretch">
+        <KpiCardSkeleton />
+        <KpiCardSkeleton />
+      </XStack>
+      <XStack gap="$3">
+        <KpiCardSkeleton />
+      </XStack>
+    </YStack>
+  );
+}
+
+/** Espeja el frame de `KpiCard`: label chico + número hero grande + línea de detalle. */
+function KpiCardSkeleton() {
+  return (
+    <YStack
+      flex={1}
+      minWidth={0}
+      backgroundColor="$surface"
+      borderRadius="$card"
+      borderWidth={1}
+      borderColor="$divider"
+      paddingHorizontal="$4"
+      paddingVertical="$4"
+      gap="$2"
+    >
+      {/* Label (fontSize $3=13). */}
+      <Skeleton width="45%" height={13} radius="$2" />
+      {/* Número hero (fontSize $9/$10 ≈ 30-38). */}
+      <Skeleton width="65%" height={34} radius="$3" />
+      {/* Detalle (fontSize $3=13). */}
+      <Skeleton width="90%" height={13} radius="$2" />
     </YStack>
   );
 }

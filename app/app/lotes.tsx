@@ -30,7 +30,7 @@ import {
   Trash2,
 } from 'lucide-react-native';
 
-import { AnimalRow, Button, Card, FormError, FormField, InfoNote } from '@/components';
+import { AnimalRow, Button, Card, FormError, FormField, InfoNote, LoteCardSkeleton } from '@/components';
 import { LoteIcon } from '@/theme/icons';
 import { useEstablishment } from '@/contexts';
 import {
@@ -238,7 +238,14 @@ export default function LotesScreen() {
             </Button>
           </YStack>
         ) : isLoading && groups.length === 0 ? (
-          <InfoNote>Cargando lotes…</InfoNote>
+          // Skeleton de PRIMERA carga (polish U6b): espeja 3 LoteCard mientras baja la carga inicial.
+          // `useQuery` no re-pone isLoading en las re-emisiones → nunca vuelve a este placeholder tras
+          // la primera carga (no parpadea). Los estados syncing/vacío/error quedan intactos abajo.
+          <YStack gap="$3" marginTop="$2" accessibilityLabel="Cargando lotes">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <LoteCardSkeleton key={i} />
+            ))}
+          </YStack>
         ) : groups.length === 0 && !hasSynced ? (
           <InfoNote>{SYNCING_MESSAGE}</InfoNote>
         ) : groups.length === 0 ? (

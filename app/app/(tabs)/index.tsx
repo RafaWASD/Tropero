@@ -35,6 +35,7 @@ import {
   Card,
   EstablishmentSwitcherDropdown,
   GroupSummaryCard,
+  GroupSummaryCardSkeleton,
   Stepper,
   pickVisited,
   type StepperStep,
@@ -422,15 +423,28 @@ export default function InicioScreen() {
   // sistema único — ADR-020). Si el catálogo aún no sincronizó, queda vacío y la card cae a solo cabezas.
   const [systemNames, setSystemNames] = useState<Map<string, string>>(new Map());
   const groupsSeq = useRef(0);
+  // Skeleton de primera carga de las cards de rodeo (polish U6b): `groupsReady` es false hasta que bajan los
+  // head-counts del campo activo. Se resetea SOLO al cambiar de campo (ref del estId contado) → un re-foco/
+  // sync del MISMO campo conserva "listo" y no parpadea las cards con datos ya montados (convención UI).
+  const [groupsReady, setGroupsReady] = useState(false);
+  const groupsReadyEstIdRef = useRef<string | null>(null);
 
   const loadGroups = useCallback((estId: string | null) => {
     if (!estId) {
       setRodeoHeadCounts(new Map());
       setGroupHeadCounts(new Map());
       setLotes([]);
+      groupsReadyEstIdRef.current = null;
+      setGroupsReady(false);
       // El catálogo de sistemas es global (no per-campo) → NO lo reseteamos al perder el campo activo:
       // una vez resuelto, sirve para cualquier campo y no hace falta re-leerlo.
       return;
+    }
+    // Campo nuevo: marcamos "no listo" (mostramos skeleton hasta el primer conteo). Mismo campo (re-foco/
+    // sync): conservamos "listo" → sin parpadeo de las cards ya montadas.
+    if (groupsReadyEstIdRef.current !== estId) {
+      groupsReadyEstIdRef.current = estId;
+      setGroupsReady(false);
     }
     const seq = ++groupsSeq.current;
     void Promise.all([
@@ -443,6 +457,9 @@ export default function InicioScreen() {
       if (seq !== groupsSeq.current) return; // cambió el campo mientras cargaba.
       if (rodeoCounts.ok) setRodeoHeadCounts(rodeoCounts.value);
       if (groupCounts.ok) setGroupHeadCounts(groupCounts.value);
+      // Primer conteo del campo bajó → ocultamos el skeleton de las cards (aunque algún fetch parcial
+      // haya fallado: no dejamos el skeleton colgado indefinidamente, la card cae a "0 cabezas").
+      setGroupsReady(true);
       // fetchManagementGroups degrada a "sincronizando" si un campo nuevo aún no bajó sus lotes →
       // en ese caso dejamos la lista vacía (la sección de lotes simplemente no aparece, sin error).
       if (groups.ok) setLotes(groups.value);
@@ -659,18 +676,24 @@ export default function InicioScreen() {
             <Text fontFamily="$body" fontSize="$6" lineHeight="$6" fontWeight="600" color="$textPrimary">
               Mis rodeos
             </Text>
-            {rodeos.map((r) => (
-              <GroupSummaryCard
-                key={r.id}
-                icon={RodeoIcon}
-                name={r.name}
-                headCount={rodeoHeadCounts.get(r.id) ?? 0}
-                // Sistema productivo del rodeo (ej. "Cría") → "Cría · N cabezas" (R2.1). undefined si el
-                // catálogo aún no resolvió → la card cae a solo cabezas (sin parpadeo de un · vacío).
-                meta={systemNames.get(r.systemId)}
-                onPress={() => openRodeo(r.id)}
-              />
-            ))}
+            {/* Skeleton de PRIMERA carga (polish U6b): mientras bajan los head-counts del campo. Espeja una
+                card por rodeo (los rodeos ya vienen del contexto → sabemos cuántas cards van, sin phantom
+                flash). Una vez listos los conteos, se reemplaza por las cards reales — sin parpadeo en
+                re-foco/sync del mismo campo (groupsReady se conserva). */}
+            {groupsReady
+              ? rodeos.map((r) => (
+                  <GroupSummaryCard
+                    key={r.id}
+                    icon={RodeoIcon}
+                    name={r.name}
+                    headCount={rodeoHeadCounts.get(r.id) ?? 0}
+                    // Sistema productivo del rodeo (ej. "Cría") → "Cría · N cabezas" (R2.1). undefined si el
+                    // catálogo aún no resolvió → la card cae a solo cabezas (sin parpadeo de un · vacío).
+                    meta={systemNames.get(r.systemId)}
+                    onPress={() => openRodeo(r.id)}
+                  />
+                ))
+              : rodeos.map((r) => <GroupSummaryCardSkeleton key={r.id} />)}
           </YStack>
         ) : null}
 

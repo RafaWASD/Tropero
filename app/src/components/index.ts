@@ -4,6 +4,18 @@ export { Button } from './Button';
 export type { ButtonProps } from './Button';
 export { Card } from './Card';
 export type { CardProps } from './Card';
+// Skeleton loaders (polish U6b): primitivo pulsante + presets que espejan AnimalRow/GroupSummaryCard/LoteCard.
+// Se usan SOLO en la primera carga sin datos (loading && data===null), nunca en refresh.
+export {
+  Skeleton,
+  SkeletonCircle,
+  SkeletonText,
+  useSkeletonPulse,
+  AnimalRowSkeleton,
+  GroupSummaryCardSkeleton,
+  LoteCardSkeleton,
+} from './Skeleton';
+export type { SkeletonProps, SkeletonTextProps } from './Skeleton';
 export { FormField } from './FormField';
 export type { FormFieldProps } from './FormField';
 // Teléfono (spec 01, delta TELÉFONO): el ÚNICO input de teléfono de la app. Ninguna pantalla arma
