@@ -29,7 +29,8 @@ import { YStack } from 'tamagui';
 import { AuthScreenShell, Button, FormField, FormError, InfoNote } from '@/components';
 import { useAuth, useEstablishment } from '@/contexts';
 import { acceptInvitation } from '@/services/members';
-import { parseInviteToken, inviteErrorCopy, alreadyMemberCopy } from '@/utils/invite';
+import { parseInviteToken, inviteErrorCopy, alreadyMemberCopy, invitePhaseForAuth } from '@/utils/invite';
+import { backOr } from '@/utils/nav';
 import {
   clearPendingInvitationToken,
   setPendingInvitationToken,
@@ -37,6 +38,7 @@ import {
 
 type Phase =
   | { kind: 'paste' } // sin token: pedir que peguen el link
+  | { kind: 'resolving'; token: string } // token + auth cargando: esperar a que resuelva (NO persiste — fix del loop)
   | { kind: 'confirm'; token: string } // logueado: confirmar
   | { kind: 'auth_required'; token: string } // no logueado: registrarse / iniciar sesión
   | { kind: 'accepting'; token: string } // aceptando (transitorio; al ok → router.replace a la home)
@@ -55,13 +57,14 @@ export default function InviteScreen() {
   // un link completo pasado como param).
   const initialToken = typeof params.token === 'string' ? parseInviteToken(params.token) : null;
 
-  const [phase, setPhase] = useState<Phase>(() =>
-    initialToken
-      ? isAuthed
-        ? { kind: 'confirm', token: initialToken }
-        : { kind: 'auth_required', token: initialToken }
-      : { kind: 'paste' },
-  );
+  // Fase inicial (núcleo puro invitePhaseForAuth): con token + auth 'loading' arrancamos en
+  // 'resolving' (NO 'auth_required') para NO persistir el token mientras auth carga — ese era el
+  // origen del loop en una carga fresca de /invite?token= con sesión activa (ver invite.ts).
+  const [phase, setPhase] = useState<Phase>(() => {
+    const kind = invitePhaseForAuth(initialToken !== null, authState.status);
+    if (kind === 'paste' || initialToken === null) return { kind: 'paste' };
+    return { kind, token: initialToken };
+  });
   const [pasteInput, setPasteInput] = useState('');
   const [pasteError, setPasteError] = useState<string | null>(null);
 
@@ -69,12 +72,28 @@ export default function InviteScreen() {
   // seguro. Cubre ambas entradas a esa fase: el paste logueado-fuera (onSubmitPaste ya lo hace) y
   // el deep-link con ?token= estando logueado-fuera (fase inicial, donde onSubmitPaste no corrió).
   // Así el token sobrevive signup + verificación + kill de la app, y verify-email/onboarding lo
-  // recuperan para re-rutear acá. Idempotente (sobrescribe con el mismo valor).
+  // recuperan para re-rutear acá. Idempotente (sobrescribe con el mismo valor). CLAVE (fix del loop):
+  // NO se persiste en 'resolving' — solo tras que auth RESUELVA a no-autenticado (auth_required).
   useEffect(() => {
     if (phase.kind === 'auth_required') {
       void setPendingInvitationToken(phase.token);
     }
   }, [phase]);
+
+  // Fix del loop: cuando auth deja de estar 'loading', resolvemos la fase 'resolving' al destino
+  // real (confirm si quedó autenticado; auth_required —y recién ahí persistimos— si no). La misma
+  // función pura decide el destino. Si no estábamos en 'resolving' (ej. entrada por paste o auth ya
+  // resuelto al montar), es un no-op.
+  useEffect(() => {
+    if (authState.status === 'loading') return;
+    setPhase((p) =>
+      p.kind === 'resolving'
+        ? invitePhaseForAuth(true, authState.status) === 'confirm'
+          ? { kind: 'confirm', token: p.token }
+          : { kind: 'auth_required', token: p.token }
+        : p,
+    );
+  }, [authState.status]);
 
   // Re-evalúa el gate de auth: si el usuario se loguea/verifica con un token pendiente, pasamos a
   // confirmar. Evita quedar trabado en auth_required tras volver del flujo de signup.
@@ -137,6 +156,18 @@ export default function InviteScreen() {
   }
 
   // ── Render por fase ───────────────────────────────────────────────────────────
+  if (phase.kind === 'resolving') {
+    // Auth todavía cargando (carga fresca con ?token=): esperamos a que resuelva antes de decidir
+    // confirmar / pedir login. NO persistimos el token acá (fix del loop). Loading breve.
+    return (
+      <AuthScreenShell title="Un momento…" subtitle="Estamos abriendo tu invitación.">
+        <YStack gap="$4" marginTop="$2">
+          <InfoNote>Cargando tu sesión…</InfoNote>
+        </YStack>
+      </AuthScreenShell>
+    );
+  }
+
   if (phase.kind === 'accepting') {
     return (
       <AuthScreenShell title="Aceptando…" subtitle="Un momento, te estamos sumando al campo.">
@@ -231,7 +262,7 @@ export default function InviteScreen() {
         <Button variant="primary" fullWidth onPress={onSubmitPaste}>
           Continuar
         </Button>
-        <Button variant="secondary" fullWidth onPress={() => router.back()}>
+        <Button variant="secondary" fullWidth onPress={() => backOr(router, '/(tabs)')}>
           Cancelar
         </Button>
       </YStack>

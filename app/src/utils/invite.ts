@@ -87,6 +87,39 @@ function safeDecode(s: string): string {
   }
 }
 
+// ─── invitePhaseForAuth (fix del LOOP de /invite?token= con sesión activa) ──────
+//
+// Decide la fase inicial de InviteScreen a partir de si hay token + el estado de auth. Pura, sin
+// I/O — la usa tanto el inicializador de `useState` como el efecto que RESUELVE la fase cuando auth
+// deja de estar 'loading'.
+//
+// EL BUG QUE ARREGLA: en una carga FRESCA de `/invite?token=` con sesión activa, `AuthContext`
+// arranca en 'loading'. Si en ese momento decidiéramos `auth_required` (porque `isAuthed=false`
+// mientras carga), PERSISTIRÍAMOS el token (R5.13) — y tras aceptar, el RootGate re-rutearía de
+// vuelta a `/invite` por ese token persistido (su `pendingInviteToken` en state queda stale hasta
+// que cambie `isAuthedVerified`) → loop confirm→accept→confirm. La cura: mientras auth carga NO
+// decidimos `auth_required` (→ no persistimos); devolvemos 'resolving' y esperamos a que auth
+// RESUELVA. Recién ahí:
+//   - authenticated  → 'confirm'
+//   - unauthenticated → 'auth_required'  (acá SÍ se persiste: el deslogueado necesita el token para
+//                       sobrevivir signup + verificación, y el guard one-shot del RootGate protege
+//                       ese re-ruteo legítimo de R5.13).
+// Sin token → 'paste' (pedir el link). La MISMA función sirve para el estado inicial y para la
+// transición 'resolving'→confirm/auth_required (al resolver, `authStatus` ya no es 'loading').
+
+export type InviteAuthStatus = 'loading' | 'unauthenticated' | 'authenticated';
+
+export type InvitePhaseKind = 'paste' | 'resolving' | 'confirm' | 'auth_required';
+
+export function invitePhaseForAuth(
+  hasToken: boolean,
+  authStatus: InviteAuthStatus,
+): InvitePhaseKind {
+  if (!hasToken) return 'paste';
+  if (authStatus === 'loading') return 'resolving';
+  return authStatus === 'authenticated' ? 'confirm' : 'auth_required';
+}
+
 // ─── inviteShareMessage (R5.3 / bugfix U8b) ─────────────────────────────────────
 //
 // FUENTE ÚNICA del texto que acompaña el link al compartir la invitación (WhatsApp/mail/etc.).

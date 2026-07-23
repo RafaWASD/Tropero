@@ -285,6 +285,19 @@ Plan de implementación paso a paso. Cada tarea tiene su criterio de aceptación
   re-rutean a `/invite?token=`. Errores 404/409/410 → copy legible. `scheme: 'rafq'` ya en app.json.
   **DIFERIDO** (device-blocked, sin dominio): asociación universal-link (apple-app-site-association /
   assetlinks) + verificación on-device del deep-link nativo. El loop se prueba en web pegando el link.
+- **Reconciliación (2026-07-22, bugfixes invite — `progress/impl_invite-fixes.md`)**: el re-ruteo de
+  R5.13 vive en el **RootGate** (`app/app/_layout.tsx`, FUENTE ÚNICA / Opción A), **no** en un seam de
+  verify-email (ese seam se eliminó): al quedar `authenticated && emailVerified`, el RootGate lee el
+  token persistido y re-rutea a `/invite?token=` ANTES del gating de establecimiento, con guard
+  one-shot `reroutedForInvite`. Dos fixes rebrand-safe (prereq de deep-links/U8a):
+  - **Loop al abrir `/invite?token=` con sesión activa (carga fresca)**: `invite.tsx` NO persiste el
+    token mientras `AuthState` está en `loading` (nueva fase `resolving` decidida por el núcleo puro
+    `invitePhaseForAuth` en `utils/invite.ts`); espera a que auth RESUELVA antes de decidir
+    `confirm`/`auth_required`. Antes, persistía en `loading` → tras aceptar, el RootGate re-ruteaba de
+    vuelta a `/invite` por el token persistido (loop). E2E: `invitations.spec.ts` test "bug 1"
+    (goto authed → aceptar → home, NO loopea) + regresión del path deslogueado.
+  - **`router.back()` pelado → `backOr(router, '/(tabs)')`** en el "Cancelar" de la fase `paste`
+    (stack vacío en cold-start/deep-link → back fallaba silenciosamente).
 - Configurar `expo-linking` con esquema `rafq://` y universal link `https://app.rafq.ar/invite`.
 - `AcceptInvitationScreen` accesible vía:
   - Deep link / universal link con `?token=XXX`.

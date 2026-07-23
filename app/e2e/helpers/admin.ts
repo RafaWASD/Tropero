@@ -1021,6 +1021,41 @@ export async function addMember(
 }
 
 /**
+ * Siembra una invitación PENDIENTE directamente en `public.invitations` vía service_role (bypassea
+ * RLS) — sin pasar por la UI ni el edge `invite_user`. Devuelve el TOKEN (uuid) para navegar a
+ * `/invite?token=<token>`. Es el estado de partida del fix del loop (bug 1) y del path deslogueado.
+ *
+ * `email: null` por default → invitación bearer (link puro, modelo ADR-014): CUALQUIER usuario
+ * logueado con el link la acepta (accept_invitation NO exige email/verificación cuando el email es
+ * null; el binding U9 solo aplica con email anotado). Es exactamente lo que crea "Generar link de
+ * invitación" en la UI, pero sin el round-trip. `invited_by` = el owner (FK a public.users, que el
+ * trigger de signup ya creó). Se borra por CASCADE del establishment (FK on delete cascade, 0004).
+ */
+export async function seedInvitation(
+  establishmentId: string,
+  invitedBy: string,
+  opts: {
+    role?: 'field_operator' | 'veterinarian';
+    email?: string | null;
+    expiresInHours?: number;
+  } = {},
+): Promise<string> {
+  const token = randomUUID();
+  const expiresAt = new Date(Date.now() + (opts.expiresInHours ?? 72) * 3_600_000).toISOString();
+  const { error } = await admin.from('invitations').insert({
+    establishment_id: establishmentId,
+    invited_by: invitedBy,
+    email: opts.email ?? null,
+    role: opts.role ?? 'veterinarian',
+    token,
+    status: 'pending',
+    expires_at: expiresAt,
+  });
+  if (error) throw new Error(`seedInvitation(${establishmentId}): ${error.message}`);
+  return token;
+}
+
+/**
  * Lee el token de la invitación PENDIENTE más reciente de un establishment, vía service_role
  * (las invitations son owner-only por RLS desde el browser, pero el admin las ve todas). Es MÁS
  * ESTABLE que scrapear el ShareLink del DOM (el accept_url se trunca con ellipsis en la UI). El

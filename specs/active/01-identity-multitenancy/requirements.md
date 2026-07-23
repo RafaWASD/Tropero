@@ -156,6 +156,13 @@ Antes de las requirements, dejo registradas las decisiones que ya están cerrada
 
 **R5.13** (nueva, sesión 17 — persistencia del token a través del cold-start) Cuando un destinatario aún no logueado abre un link de invitación (`R5.4`) o lo pega manualmente en el wizard (`R6.5`), el sistema deberá persistir el token de invitación en **almacenamiento seguro** (`expo-secure-store`), no solo en el estado de navegación en memoria. El onboarding del invitado atraviesa signup + verificación de email + un posible cierre o kill de la app entre medio; el estado de navegación no sobrevive ese cold-start, así que persistirlo es requisito para no perder la invitación. Cuando el usuario pasa el gate de verificación de email (`R1.3`) y existe un token pendiente en almacenamiento seguro, el sistema deberá **re-rutear automáticamente** a la pantalla de aceptación de invitación (`R5.4`) en lugar de aterrizar en el wizard de onboarding (`R6.5`) o en el landing (`R6.7`). Tras consumir el token (aceptación exitosa de `R5.5`, o error terminal de `R5.6` como expirado/ya usado), el sistema deberá **borrar** el token persistido para no re-disparar el flujo en arranques futuros.
 
+> **Reconciliación (2026-07-22, bugfixes invite)**: el "aún no logueado" que dispara la persistencia se
+> resuelve una vez que el estado de auth **RESUELVE** — mientras `AuthState` está en `loading` (carga
+> fresca) NO se persiste el token. Sin este matiz, abrir `/invite?token=` con una sesión activa persistía
+> el token durante el `loading` inicial y, tras aceptar, el re-ruteo de R5.13 volvía a `/invite` (loop). El
+> re-ruteo de R5.13 vive en el **RootGate** (Opción A, FUENTE ÚNICA), no en el gate de verify-email (que se
+> eliminó). Detalle en `tasks.md` T5.4 (Reconciliación) + `progress/impl_invite-fixes.md`.
+
 ### R6. Contexto activo de establecimiento
 
 **R6.1** Cuando un usuario tiene `user_roles` activos en más de un establecimiento, el sistema deberá pedirle elegir uno como "establecimiento activo" al iniciar sesión.

@@ -9,6 +9,7 @@ import {
   inviteErrorCopy,
   alreadyMemberCopy,
   inviteShareMessage,
+  invitePhaseForAuth,
 } from './invite.ts';
 
 const TOKEN = '550e8400-e29b-41d4-a716-446655440000';
@@ -120,4 +121,33 @@ test('inviteShareMessage: incluye el nombre del campo y es es-AR (voseo, invitac
 test('inviteShareMessage: termina con la URL (sink limpio para la share sheet)', () => {
   const url = 'https://app.rafq.ar/invite?token=' + TOKEN;
   assert.ok(inviteShareMessage('Campo', url).endsWith(url));
+});
+
+// ─── invitePhaseForAuth (fix del LOOP de /invite?token= con sesión activa) ──────────
+
+test('invitePhaseForAuth: sin token → paste (cualquier estado de auth)', () => {
+  assert.equal(invitePhaseForAuth(false, 'loading'), 'paste');
+  assert.equal(invitePhaseForAuth(false, 'unauthenticated'), 'paste');
+  assert.equal(invitePhaseForAuth(false, 'authenticated'), 'paste');
+});
+
+test('invitePhaseForAuth: con token + auth LOADING → resolving (NO auth_required → NO persiste)', () => {
+  // Núcleo del fix del loop: mientras auth carga NO decidimos auth_required (que dispararía la
+  // persistencia del token) — esperamos a que resuelva. 'resolving' nunca persiste.
+  assert.equal(invitePhaseForAuth(true, 'loading'), 'resolving');
+});
+
+test('invitePhaseForAuth: con token + authenticated → confirm', () => {
+  assert.equal(invitePhaseForAuth(true, 'authenticated'), 'confirm');
+});
+
+test('invitePhaseForAuth: con token + unauthenticated → auth_required (deslogueado: acá SÍ persiste)', () => {
+  assert.equal(invitePhaseForAuth(true, 'unauthenticated'), 'auth_required');
+});
+
+test('invitePhaseForAuth: la MISMA función resuelve la transición resolving→destino al dejar loading', () => {
+  // El efecto de InviteScreen re-invoca la función cuando authStatus deja de ser 'loading'. Debe dar
+  // el destino correcto según el resultado de auth (confirm si authed, auth_required si no).
+  assert.equal(invitePhaseForAuth(true, 'authenticated'), 'confirm');
+  assert.equal(invitePhaseForAuth(true, 'unauthenticated'), 'auth_required');
 });
