@@ -24,7 +24,7 @@ import { Platform, TextInput } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
 import { Check, Plus, Search } from 'lucide-react-native';
-import { useStatus } from '@powersync/react';
+import { usePowerSync } from '@powersync/react';
 
 import { AnimalRow, AnimalRowSkeleton, BleConnectionChip, Button, Card, InfoNote, FormError } from '@/components';
 import { useEstablishment, useRodeo } from '@/contexts';
@@ -83,11 +83,12 @@ export default function AnimalesScreen() {
   const router = useRouter();
   const { state: estState } = useEstablishment();
   const { state: rodeoState } = useRodeo();
-  // Estado de sync de PowerSync (el árbol está bajo PowerSyncContext): lo usamos para re-cargar la
-  // lista cuando baja un sync (R5.4 / fix showstopper — la lista se rellena al llegar el first-sync
-  // sin salir/volver a la tab). Lo derivamos a un primitivo (ms) para que la dep del efecto sea estable.
-  const syncStatus = useStatus();
-  const lastSyncedMs = syncStatus.lastSyncedAt?.getTime() ?? 0;
+  // ADR-030 (migración incremental) — instancia del DB para la WATCHED QUERY imperativa (`db.onChange`).
+  // Mismo singleton que `getPowerSync()`, provisto por el `PowerSyncProvider` que envuelve el árbol.
+  // Reemplaza el disparador por-sync `lastSyncedMs` (proxy NO determinista del cambio de dato: la fila baja
+  // al SQLite local en ~1,5 s, pero `lastSyncedAt` podía lagear ~90 s+; ver ADR-030). Mismo patrón que la
+  // feature 21 (contextos) y la 22 (useManeuverGating).
+  const db = usePowerSync();
 
   const establishmentId = estState.status === 'active' ? estState.current.id : null;
   const rodeos: Rodeo[] = rodeoState.status === 'active' ? rodeoState.available : [];
@@ -189,17 +190,49 @@ export default function AnimalesScreen() {
     }, [loadList, runSearch]),
   );
 
-  // FIX showstopper: re-cargar la lista cuando AVANZA el sync (lastSyncedAt). Al bajar el first-sync
-  // (o un download posterior), el SQLite local se puebla → re-corremos loadList sin que el operario
-  // tenga que salir/volver a la tab. La dep es un primitivo (ms): `lastSyncedAt` es estable entre
-  // syncs en el SDK → no loopea (solo avanza cuando hay un sync nuevo). El useFocusEffect queda de
-  // red de seguridad; el efecto inicial (`[loadList]`) cubre la primera carga. La búsqueda activa
-  // también se refresca (mismo motivo: un download puede traer/ocultar resultados).
+  // ADR-030 — WATCHED QUERY imperativa. Reemplaza el disparador por-sync `lastSyncedMs` (proxy NO
+  // determinista) por `db.onChange` sobre las tablas que respaldan la lista/búsqueda. Al cambiar cualquiera
+  // (el first-sync que puebla el SQLite local, o un coworker que agrega/cambia/borra un animal), el onChange
+  // re-corre loadList + runSearch EXISTENTES (misma resolución: fetchAnimals/searchAnimals + guards de
+  // secuencia) SIN reimplementar su lógica — solo cambia QUIÉN dispara. Reemplaza el fix showstopper de la
+  // feature 20 (la lista se rellena al llegar el first-sync sin salir/volver a la tab) con reactividad
+  // determinista (~1,5 s).
+  //
+  // Tablas observadas: `animal_profiles` + `pending_animal_profiles` (las filas + el overlay optimista),
+  // `pending_status_overrides` (overlay de baja/exit que oculta filas), `treatments` (pin "en tratamiento"
+  // + reorden, RTR.5), y `rodeos` + `categories_by_system` — INNER JOINs de la lista: en un device nuevo el
+  // catálogo puede sincronizar en OTRO checkpoint que `animal_profiles`, y sin sus filas el JOIN no emite la
+  // fila del animal; observarlas hace converger la lista. (El apodo — custom_attributes/rodeo_data_config —
+  // es enriquecimiento secundario que resuelve el re-foco; no se observa para no re-correr toda la lista ante
+  // cada toggle de config.)
+  //
+  // `triggerImmediate` es false (default) → NO dispara al registrarse: la carga inicial la siguen dando el
+  // efecto `[loadList]` + `useFocusEffect`. Dep PRIMITIVA (`establishmentId` + callbacks estables + singleton
+  // `db`) → sin el loop de la feature 20. loadList/runSearch conservan sus guards de secuencia (descartan
+  // respuestas viejas) y NO re-flipean `loading` con datos presentes (stale-while-revalidate). `dispose()` en
+  // el cleanup al cambiar de campo / desmontar.
   useEffect(() => {
-    if (lastSyncedMs === 0) return; // todavía no hubo ningún sync: el efecto inicial ya cargó (o vacío).
-    void loadList();
-    void runSearch();
-  }, [lastSyncedMs, loadList, runSearch]);
+    if (!establishmentId) return;
+    const dispose = db.onChange(
+      {
+        onChange: () => {
+          void loadList();
+          void runSearch();
+        },
+      },
+      {
+        tables: [
+          'animal_profiles',
+          'pending_animal_profiles',
+          'pending_status_overrides',
+          'treatments',
+          'rodeos',
+          'categories_by_system',
+        ],
+      },
+    );
+    return () => dispose();
+  }, [establishmentId, loadList, runSearch, db]);
 
   // Conteo del header (R1.1): sale de la lista cargada (no del mock).
   const totalCount = list.length;

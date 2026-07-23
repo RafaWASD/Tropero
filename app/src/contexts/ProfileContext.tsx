@@ -28,7 +28,7 @@ import {
   type ReactNode,
 } from 'react';
 
-import { useStatus } from '@powersync/react';
+import { usePowerSync } from '@powersync/react';
 
 import { useAuth } from './AuthContext';
 import { loadProfileNamePhone } from '../services/profile';
@@ -57,8 +57,9 @@ export type ProfileContextValue = {
    * perfil viene del SQLite local de PowerSync — que todavía tiene el valor viejo hasta que el
    * server-write SINCRONIZA de vuelta. Sin esto, el saludo de la home no se actualizaba hasta el
    * round-trip de sync-down (latencia visible / e2e flaky). Como `saveProfile` ya devolvió ok (el
-   * server tiene el valor nuevo), reflejamos los valores recién escritos AL INSTANTE; el `lastSyncedAt`
-   * advance posterior re-lee y reconcilia al MISMO valor (idempotente). Limpia cualquier error espurio.
+   * server tiene el valor nuevo), reflejamos los valores recién escritos AL INSTANTE; el `db.onChange`
+   * posterior (cuando el row baja al SQLite local) re-lee y reconcilia al MISMO valor (idempotente).
+   * Limpia cualquier error espurio.
    */
   applyOwnProfile: (saved: { name: string; phone: string | null }) => void;
 };
@@ -71,12 +72,12 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
   const userId = authState.status === 'authenticated' ? authState.user.id : null;
   const email = authState.status === 'authenticated' ? authState.user.email : null;
 
-  // Reactividad de la lectura local (spec 15): name/phone se leen del SQLite local de PowerSync
-  // (loadProfileNamePhone, T3.2), pero la lectura es one-shot. `lastSyncedAt` AVANZA cada vez que el
-  // sync baja datos del server al SQLite local → lo usamos como señal para re-leer (mismo patrón que
-  // animales.tsx:192 / index.tsx:415). Primitivo (ms) → estable entre statuses iguales, sin loop.
-  const syncStatus = useStatus();
-  const lastSyncedMs = syncStatus.lastSyncedAt?.getTime() ?? 0;
+  // ADR-030 (migración incremental) — instancia del DB para la WATCHED QUERY imperativa (`db.onChange`).
+  // Monta DENTRO de <PowerSyncProvider> (ver _layout.tsx: AuthProvider → PowerSyncProvider → ProfileProvider)
+  // → `usePowerSync()` resuelve el mismo singleton que los contextos de la feature 21. Reemplaza el
+  // disparador por-sync `lastSyncedMs` (proxy NO determinista) por reactividad al cambio de tabla del SQLite
+  // local (~1,5 s determinista).
+  const db = usePowerSync();
 
   // name/phone vienen de public.users (la única fuente que pega a red).
   const [namePhone, setNamePhone] = useState<{ name: string; phone: string | null } | null>(null);
@@ -88,11 +89,11 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
   const loadSeq = useRef(0);
 
   // Reconciliación del aterrizaje OPTIMISTA (post-edición): el name recién guardado server-side que el
-  // SQLite local AÚN no refleja. Mientras esté seteado, un `loadFor` reactivo (lastSyncedAt) que devuelva
-  // un name DISTINTO se considera STALE (la lectura local todavía no recibió el sync-down del row editado)
-  // → NO pisamos el valor optimista. Se limpia cuando el local read confirma el name nuevo (mismo ciclo de
-  // vida que pendingCreatedRef en EstablishmentContext). Sin esto, un sync-down de OTRAS tablas avanzaría
-  // lastSyncedAt y re-leería el name viejo, revirtiendo el saludo (flake del e2e profile:62).
+  // SQLite local AÚN no refleja. Mientras esté seteado, un `loadFor` reactivo (disparado por `db.onChange`)
+  // que devuelva un name DISTINTO se considera STALE (la lectura local todavía no recibió el sync-down del
+  // row editado) → NO pisamos el valor optimista. Se limpia cuando el local read confirma el name nuevo
+  // (mismo ciclo de vida que pendingCreatedRef en EstablishmentContext). Sin esto, un onChange gatillado por
+  // OTRO cambio de `user_roles` re-leería el name viejo, revirtiendo el saludo (flake del e2e profile:62).
   const pendingOptimisticNameRef = useRef<string | null>(null);
 
   const loadFor = useCallback(async (uid: string | null) => {
@@ -113,7 +114,7 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
     if (result.ok) {
       // Reconciliación del optimista: si esperamos confirmar un name recién guardado y el local todavía
       // devuelve OTRO (sync-down del row aún no llegó), NO revertimos el saludo — mantenemos el optimista
-      // y dejamos el marcador para el próximo lastSyncedAt. Cuando el local ya trae el name esperado, se
+      // y dejamos el marcador para el próximo onChange. Cuando el local ya trae el name esperado, se
       // confirma y se limpia el marcador (de ahí en más las lecturas mandan normalmente).
       const pending = pendingOptimisticNameRef.current;
       if (pending !== null && result.profile.name !== pending) {
@@ -141,32 +142,35 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
     void loadFor(userId);
   }, [userId, loadFor]);
 
-  // FIX (triage 2026-06-11): re-leer el perfil cuando AVANZA el sync (lastSyncedAt). Cierra DOS
-  // síntomas del mismo gap de reactividad de la lectura local (spec 15, backlog 2026-06-09):
+  // ADR-030 — WATCHED QUERY imperativa. Reemplaza el disparador por-sync `lastSyncedMs` (proxy NO
+  // determinista) por `db.onChange` sobre las tablas que respaldan el perfil. Re-corre `loadFor` EXISTENTE
+  // (misma resolución + reconciliación del optimista) — solo cambia el disparador. Cierra los DOS síntomas
+  // del gap de reactividad de la lectura local (spec 15):
   //
-  //   (a) ARRANQUE — la carga inicial (efecto de arriba) corre al resolver userId, típicamente ANTES
-  //       del first-sync: la fila del usuario todavía no bajó al SQLite local → `runLocalQuerySingle`
-  //       degrada "vacío + !hasSynced" a `kind:'network'` → ProfileContext queda con
-  //       error="Sin conexión: no pudimos actualizar tu perfil." y profile=null, y NO se re-evaluaba
-  //       solo. "Más" renderizaba el alert "Reintentar" en vez de "Editar perfil"/"Cambiar email"
-  //       hasta un retry manual (4 e2e rojos: account:151, profile:54/75/110). Al completar el
-  //       first-sync, lastSyncedAt pasa de 0 a un valor → re-leemos → el perfil carga y limpia el error.
+  //   (a) ARRANQUE — la carga inicial (efecto de arriba) corre al resolver userId, típicamente ANTES del
+  //       first-sync: la fila del usuario todavía no bajó al SQLite local → error transitorio + profile=null,
+  //       y NO se re-evaluaba solo (4 e2e rojos históricos: account:151, profile:54/75/110). Cuando la fila
+  //       de `user_roles` baja, el onChange dispara → re-leemos → el perfil carga y limpia el error.
   //
-  //   (b) POST-EDICIÓN — `saveProfile` es ONLINE-direct a `public.users`/`user_private` (no pasa por el
-  //       overlay/outbox); el `refresh()` inmediato re-lee el SQLite LOCAL, que todavía tiene el name
-  //       viejo hasta que el server-write sincroniza de vuelta → el saludo de la home no se actualizaba
-  //       (e2e profile.spec.ts:62). Cuando el row editado baja, lastSyncedAt avanza → re-leemos → saludo
-  //       al día.
+  //   (b) POST-EDICIÓN — `saveProfile` es ONLINE-direct (no pasa por overlay/outbox); el `refresh()`
+  //       inmediato lee el SQLite LOCAL, aún con el name viejo hasta que el server-write sincroniza de vuelta
+  //       (e2e profile.spec.ts:62). Cuando el `member_name` editado baja a `user_roles`, el onChange dispara
+  //       → re-leemos → saludo al día. El guard `pendingOptimisticNameRef` de `loadFor` se conserva: un
+  //       onChange que llega antes del sync-down del row (name aún viejo) NO revierte el saludo optimista.
   //
-  // Mismo patrón canónico que animales.tsx:192 / index.tsx:415 (re-load on lastSyncedAt advance). La dep
-  // es un PRIMITIVO (ms): estable entre statuses iguales → sin loop. Se omite mientras lastSyncedMs===0
-  // (aún no hubo ningún sync; la carga inicial ya corrió). Caso offline-puro intacto: sin sync nunca,
-  // lastSyncedMs queda en 0 y este efecto no dispara (el fallback de saludo sigue, sin loop).
+  // Tablas observadas: `user_roles` (el name sale de `user_roles.member_name` denormalizado, ADR-026 — NO de
+  // `users`, que el paso 2 no sincroniza) + `user_private` (el phone). `triggerImmediate` false (default) →
+  // NO dispara al registrarse: la carga inicial la da el efecto `[userId, loadFor]` de arriba. Dep PRIMITIVA
+  // (`userId` string + `loadFor` estable + `db`) → sin loop. Offline puro intacto: sin cambio de tabla el
+  // onChange no dispara (el fallback de saludo sigue). `dispose()` en el cleanup al cambiar de usuario/desmontar.
   useEffect(() => {
     if (!userId) return;
-    if (lastSyncedMs === 0) return;
-    void loadFor(userId);
-  }, [lastSyncedMs, userId, loadFor]);
+    const dispose = db.onChange(
+      { onChange: () => { void loadFor(userId); } },
+      { tables: ['user_roles', 'user_private'] },
+    );
+    return () => dispose();
+  }, [userId, loadFor, db]);
 
   const refresh = useCallback(async () => {
     await loadFor(userId);

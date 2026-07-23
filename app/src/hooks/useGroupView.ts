@@ -18,7 +18,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFocusEffect } from 'expo-router';
-import { useStatus } from '@powersync/react';
+import { usePowerSync } from '@powersync/react';
 
 import type { AnimalListItem, AppError } from '../services/animals';
 import type { AnimalSex } from '../utils/animal-category';
@@ -133,8 +133,11 @@ export function useGroupView(params: GroupViewParams | null): GroupViewState {
   const didFocusOnceRef = useRef(false); // ¿ya se enfocó una vez? (el 1er foco NO refresca: la carga ya corre)
   const hasLoadedOnceRef = useRef(false); // ¿la 1ª carga de contenido terminó? (los refresh silenciosos esperan)
 
-  const syncStatus = useStatus();
-  const lastSyncedMs = syncStatus.lastSyncedAt?.getTime() ?? 0;
+  // ADR-030 (migración incremental) — instancia del DB para la WATCHED QUERY imperativa (`db.onChange`),
+  // provista por el `PowerSyncProvider`. Reemplaza el disparador por-sync `lastSyncedMs` (proxy NO
+  // determinista) por reactividad al cambio de tabla del SQLite local (~1,5 s determinista). Mismo patrón
+  // que la tab Animales / los contextos de la feature 21.
+  const db = usePowerSync();
 
   const isSearching = isSearchActive(debouncedQuery);
 
@@ -337,14 +340,47 @@ export function useGroupView(params: GroupViewParams | null): GroupViewState {
     }, [group, debouncedQuery, loadMeta, runSearch, refreshWindow]),
   );
 
-  // ── Refresh SILENCIOSO al AVANZAR el sync (first-sync / download posterior): el SQLite local cambió. Dep
-  //    primitiva (ms), estable entre syncs → no loopea. Espera a la 1ª carga (hasLoadedOnceRef) para no competir. ──
+  // ── ADR-030 — WATCHED QUERY imperativa. Reemplaza el disparador por-sync `lastSyncedMs` (proxy NO
+  //    determinista) por `db.onChange` sobre las tablas que respaldan la ventana/meta del grupo. Al cambiar
+  //    cualquiera (first-sync que puebla el SQLite local; un coworker que agrega/mueve/borra un animal del
+  //    grupo), el onChange re-corre el MISMO refresh SILENCIOSO que hacía el efecto de sync: `loadMeta` +
+  //    `refreshWindow` (o re-búsqueda), sin blanquear la lista ni reimplementar su lógica.
+  //
+  //    Tablas observadas: `animal_profiles` + `pending_animal_profiles` + `pending_status_overrides` +
+  //    `treatments` + `rodeos` + `categories_by_system` (misma familia que la lista de animales: drivea
+  //    window + count + opciones de chips). La gating de acciones masivas (rodeo_data_config /
+  //    reproductive_events) NO se observa acá (secundaria + fail-closed; converge por foco).
+  //
+  //    El guard `!group || !hasLoadedOnceRef.current` va DENTRO del callback (no bloquea la suscripción): un
+  //    onChange antes de que termine la 1ª carga NO compite con ella. `triggerImmediate` false (default) → NO
+  //    dispara al registrarse: la carga inicial la dan los efectos de meta/lista de arriba. Deps: `group`
+  //    (memoizado por primitivas groupType/groupId → estable, no loopea), `debouncedQuery` (re-suscribe con el
+  //    texto fresco, igual que el useFocusEffect), callbacks estables, y `db`. `dispose()` al cambiar el
+  //    grupo/criterio o desmontar. ──
   useEffect(() => {
-    if (lastSyncedMs === 0 || !group || !hasLoadedOnceRef.current) return;
-    void loadMeta();
-    if (isSearchActive(debouncedQuery)) void runSearch(true);
-    else void refreshWindow();
-  }, [lastSyncedMs, group, debouncedQuery, loadMeta, runSearch, refreshWindow]);
+    if (!group) return;
+    const dispose = db.onChange(
+      {
+        onChange: () => {
+          if (!group || !hasLoadedOnceRef.current) return;
+          void loadMeta();
+          if (isSearchActive(debouncedQuery)) void runSearch(true);
+          else void refreshWindow();
+        },
+      },
+      {
+        tables: [
+          'animal_profiles',
+          'pending_animal_profiles',
+          'pending_status_overrides',
+          'treatments',
+          'rodeos',
+          'categories_by_system',
+        ],
+      },
+    );
+    return () => dispose();
+  }, [group, debouncedQuery, loadMeta, runSearch, refreshWindow, db]);
 
   // Filas visibles: en modo búsqueda, los resultados ∩ chips (RG3.6); en modo lista, las páginas acumuladas.
   const animals = useMemo(

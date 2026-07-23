@@ -32,6 +32,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
 import { AlertTriangle, CheckCircle2, ChevronRight, FileUp, Info, LogOut, Pencil, Radio, Trash2 } from 'lucide-react-native';
+import { usePowerSync } from '@powersync/react';
 
 import { Button, Card, FormField, FormError, InfoNote, PhoneField, type PhoneValue } from '@/components';
 import { CampoIcon, LoteIcon, MiembroIcon, RodeoIcon } from '@/theme/icons';
@@ -99,13 +100,19 @@ function SectionTitle({ children }: { children: string }) {
 // Postgres; el valor nuevo BAJA por la stream est_establishments al SQLite local de forma ASÍNCRONA. Una
 // lectura SOLO-en-focus quedaba STALE: al guardar el RENSPA y volver a "Más", el sync-down todavía no había
 // aterrizado → el banner seguía mostrándose ("Completá tu RENSPA") aunque el usuario lo acababa de cargar.
-// Nos suscribimos a subscribeSyncUiState (statusChanged de PowerSync) y RE-LEEMOS el renspa local cada vez
-// que avanza el sync → el banner desaparece cuando el valor recién guardado aterriza (mismo patrón reactivo
-// que ProfileContext::loadFor sobre lastSyncedAt). Sin re-leer en loading en cada tick (no flashea).
+//
+// ADR-030 (migración incremental) — WATCHED QUERY. Antes se re-leía en cada `statusChanged` de PowerSync
+// (vía `subscribeSyncUiState`) — el MISMO proxy NO determinista que ADR-030 elimina: fira ante cualquier
+// blip de status, no ante el cambio del dato. Ahora observamos la tabla `establishments` con `db.onChange`:
+// cuando el `renspa` recién guardado baja al SQLite local (~1,5 s determinista), el onChange re-corre el
+// `reload()` EXISTENTE y el banner desaparece. Sin re-leer en `loading` en cada tick (no flashea).
 
 function RenspaBanner({ establishmentId, onComplete }: { establishmentId: string; onComplete: () => void }) {
   const primary = getTokenValue('$primary', 'color');
   const [phase, setPhase] = useState<'loading' | 'has' | 'missing'>('loading');
+  // ADR-030 — singleton del DB para la watched query imperativa (`db.onChange`), provisto por el
+  // PowerSyncProvider que envuelve el árbol de tabs.
+  const db = usePowerSync();
 
   useFocusEffect(
     useCallback(() => {
@@ -121,17 +128,20 @@ function RenspaBanner({ establishmentId, onComplete }: { establishmentId: string
         const renspa = r.establishment.renspa;
         setPhase(renspa != null && renspa.trim().length > 0 ? 'has' : 'missing');
       };
+      // Carga inicial (al enfocar). `db.onChange` NO dispara al registrarse (triggerImmediate default false)
+      // → esta llamada explícita cubre la primera lectura.
       void reload();
-      // Re-lee al avanzar el sync (el sync-down del RENSPA recién guardado por la RPC). emit() corre una
-      // vez al suscribir (redundante con el reload de arriba, inocuo) y luego en cada statusChanged.
-      const dispose = subscribeSyncUiState(() => {
-        void reload();
-      });
+      // Re-lee cuando cambia la tabla `establishments` en el SQLite local (el sync-down del RENSPA recién
+      // guardado por la RPC). Reemplaza el disparador por `statusChanged` (proxy NO determinista, ADR-030).
+      const dispose = db.onChange(
+        { onChange: () => { void reload(); } },
+        { tables: ['establishments'] },
+      );
       return () => {
         active = false;
         dispose();
       };
-    }, [establishmentId]),
+    }, [establishmentId, db]),
   );
 
   if (phase !== 'missing') return null;
@@ -281,8 +291,9 @@ function ProfileSection({ userId, onScrollTo }: { userId: string; onScrollTo: (y
         onDone={(saved) => {
           // Aterrizaje OPTIMISTA: el saludo de la home se actualiza AL INSTANTE con lo recién guardado
           // (no esperamos el round-trip de sync-down del SQLite local, que dejaba el saludo viejo —
-          // spec 15 / Fase 6). El sync-down posterior (efecto de lastSyncedAt en ProfileContext) re-lee
-          // y reconcilia al mismo valor server-side. NO llamamos refresh() acá a propósito: un loadFor
+          // spec 15 / Fase 6). El sync-down posterior (watched query `db.onChange` sobre user_roles +
+          // user_private en ProfileContext, ADR-030) re-lee y reconcilia al mismo valor server-side. NO
+          // llamamos refresh() acá a propósito: un loadFor
           // inmediato leería el SQLite local AÚN STALE y pisaría el valor optimista (la lectura tardía
           // ganaría la carrera de loadSeq). El refresh manual queda disponible vía "Reintentar".
           applyOwnProfile(saved);

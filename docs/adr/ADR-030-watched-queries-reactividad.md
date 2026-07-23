@@ -51,9 +51,32 @@ Adoptar **watched queries reales de PowerSync** como el patrón de reactividad, 
   este patrón ya establecido.
   > **AVANCE (feature 22, 2026-07-22)**: `useManeuverGating` (config/maniobra) **migrado** a `db.onChange`
   > (sobre `rodeo_data_config` + `pending_rodeo_data_config`, overlay-aware) — uno de los 5 focus-only
-  > (`maniobra`). **Quedan 4**: `miembros`, `use-reports`, `animal/[id]`, `export-sigsa`. La feature 22
-  > además cerró la deuda de CONEXIÓN que esta ADR asumía resuelta (la descarga no reenganchaba en nativo);
-  > ver **ADR-031** (liveness de conexión), su contrapunto.
+  > (`maniobra`). La feature 22 además cerró la deuda de CONEXIÓN que esta ADR asumía resuelta (la descarga
+  > no reenganchaba en nativo); ver **ADR-031** (liveness de conexión), su contrapunto.
+  >
+  > **CIERRE del proxy `lastSyncedAt` en la UI de usuario (2026-07-23, `impl_adr030-watched-queries-resto`).**
+  > Un inventario AUTORITATIVO por grep (`useStatus(` + `lastSyncedAt|lastSyncedMs`, no la lista de memoria)
+  > reveló que los consumidores que TODAVÍA usaban el proxy NO determinista NO eran los "4 focus-only"
+  > nombrados arriba, sino **otros 4**: `app/app/(tabs)/animales.tsx` (lista + búsqueda),
+  > `app/app/(tabs)/index.tsx` (home: conteos + cards de rodeo/lote), `src/contexts/ProfileContext.tsx`
+  > (saludo) y `src/hooks/useGroupView.ts` (vista de grupo grande). **Los 4 migrados a `db.onChange`
+  > imperativo** (re-corren su resolución EXISTENTE; solo cambia el disparador), observando las tablas que
+  > cada uno realmente lee (ver la tabla de trazabilidad en el impl). Además se migró un **5º consumidor
+  > hallado en la autorrevisión**: `mas.tsx` `RenspaBanner`, que usaba `statusChanged` (vía
+  > `subscribeSyncUiState`) — el MISMO anti-patrón por otra API → ahora `db.onChange` sobre `establishments`.
+  >
+  > **Aclaración sobre los "4 focus-only" del backlog** (`miembros`, `use-reports`, `animal/[id]`,
+  > `export-sigsa`): el grep confirma que **NINGUNO usa el proxy `lastSyncedAt`** — `miembros`/`animal[id]`/
+  > `export-sigsa` son **focus-only** (recargan por `useFocusEffect`, sin señal de sync) y `use-reports` es
+  > **online-only** (los KPIs se calculan server-side por RPC/edge → NO hay tabla local que observar, así que
+  > NO se le mete `db.onChange`). Darles reactividad VIVA a los focus-only sería una feature NUEVA (no un swap
+  > de disparador) y queda como follow-up opcional, NO parte de "matar el proxy".
+  >
+  > **Estado**: el proxy `lastSyncedAt`/`lastSyncedMs`/`statusChanged`-como-data-trigger queda **eliminado de
+  > toda la UI de usuario**. Usos legítimos de `useStatus`/`subscribeSyncUiState` que PERMANECEN (no son
+  > data-proxy): `connected` (online/offline: `FindOrCreateOverlay`, `mas.useIsOffline`) y `hasSynced`
+  > (desambiguar vacío-vs-sincronizando en `lotes.tsx`, R21.34). Falta el **veredicto en DEVICE** (nativo,
+  > ADR-029) de que el `db.onChange` dispara al bajar el cambio al SQLite local en sesión viva.
 
 ## Consecuencias
 

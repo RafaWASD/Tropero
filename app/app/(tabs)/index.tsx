@@ -28,7 +28,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
 import { Check, ChevronDown, User, X } from 'lucide-react-native';
-import { useStatus } from '@powersync/react';
+import { usePowerSync } from '@powersync/react';
 
 import {
   Button,
@@ -250,11 +250,11 @@ export default function InicioScreen() {
   // loader (deps primitivas, sin loops).
   const isOwner = activeField?.role === 'owner';
 
-  // Estado de sync de PowerSync (el árbol está bajo PowerSyncContext): lo usamos para re-leer los
-  // conteos del Stepper (animales/equipo) cuando AVANZA un sync, sin depender solo del re-foco (fix
-  // showstopper, mismo patrón que la tab Animales). Primitivo (ms) → dep estable, no loopea.
-  const syncStatus = useStatus();
-  const lastSyncedMs = syncStatus.lastSyncedAt?.getTime() ?? 0;
+  // ADR-030 (migración incremental) — instancia del DB para la WATCHED QUERY imperativa (`db.onChange`),
+  // provista por el `PowerSyncProvider`. Reemplaza el disparador por-sync `lastSyncedMs` (proxy NO
+  // determinista) por reactividad determinista sobre el cambio de tabla del SQLite local (~1,5 s). Mismo
+  // patrón que la tab Animales / los contextos de la feature 21.
+  const db = usePowerSync();
 
   // ── Banner "establecimiento listo" per-campo + dismiss persistido (Run 2 c) ──
   // El banner se controlaba con un useState(true) local → NO era per-campo (se mantenía
@@ -481,17 +481,47 @@ export default function InicioScreen() {
     }, [activeId, userId, isOwner, loadAnimalCount, loadTeamCount, loadGroups]),
   );
 
-  // FIX showstopper: re-leer los conteos cuando AVANZA el sync (lastSyncedAt). Al bajar el first-sync
-  // —o cuando una alta optimista pasa de overlay a fila sincronizada— los conteos locales cambian; sin
-  // este re-read el Stepper quedaría mostrando "Cargá tu primer animal" hasta el próximo re-foco. La
-  // dep es un primitivo (ms), estable entre syncs → no loopea. El useFocusEffect queda de red de
-  // seguridad. Se omite mientras lastSyncedMs===0 (aún no hubo sync; el efecto de foco ya cargó).
+  // ADR-030 — WATCHED QUERY imperativa. Reemplaza el disparador por-sync `lastSyncedMs` (proxy NO
+  // determinista) por `db.onChange` sobre las tablas que respaldan los conteos + grupos. Al cambiar
+  // cualquiera (el first-sync que puebla el SQLite local; una alta optimista que pasa de overlay a fila
+  // sincronizada; un coworker que agrega/quita un miembro o una invitación), el onChange re-corre los tres
+  // loaders EXISTENTES sin reimplementar su lógica — solo cambia el disparador. Sin este re-read el Stepper
+  // quedaría en "Cargá tu primer animal" hasta el próximo re-foco (fix showstopper de la 20), ahora
+  // determinista (~1,5 s).
+  //
+  // Tablas observadas: `animal_profiles` + `pending_animal_profiles` + `pending_status_overrides` (counts de
+  // animales + head-counts por rodeo/lote), `user_roles` + `invitations` (countTeam del owner),
+  // `management_groups` (cards de lote). NO se observan `species`/`systems_by_species` (catálogo global
+  // estático del subtítulo de sistema = cosmético; loadGroups lo re-lee cuando dispara por `animal_profiles`,
+  // y el re-foco lo cubre).
+  //
+  // `triggerImmediate` false (default) → NO dispara al registrarse: la carga inicial la da el `useFocusEffect`
+  // de arriba. Dep PRIMITIVA (`activeId`/`userId`/`isOwner` strings/bool + loaders estables + `db`) → sin loop
+  // (lección de la 20). Los loaders conservan sus guards (seq + estId-ref) → no parpadean ni heredan valores
+  // de un campo viejo. `dispose()` en el cleanup al cambiar de campo/usuario o desmontar.
   useEffect(() => {
-    if (lastSyncedMs === 0) return;
-    loadAnimalCount(activeId);
-    loadTeamCount(activeId, userId, isOwner);
-    loadGroups(activeId);
-  }, [lastSyncedMs, activeId, userId, isOwner, loadAnimalCount, loadTeamCount, loadGroups]);
+    if (!activeId) return;
+    const dispose = db.onChange(
+      {
+        onChange: () => {
+          loadAnimalCount(activeId);
+          loadTeamCount(activeId, userId, isOwner);
+          loadGroups(activeId);
+        },
+      },
+      {
+        tables: [
+          'animal_profiles',
+          'pending_animal_profiles',
+          'pending_status_overrides',
+          'user_roles',
+          'invitations',
+          'management_groups',
+        ],
+      },
+    );
+    return () => dispose();
+  }, [activeId, userId, isOwner, loadAnimalCount, loadTeamCount, loadGroups, db]);
 
   // ── Pasos de "primeros pasos" DRIVEADOS POR ESTADO REAL (bug 1 de Raf). ──────────────
   // El Stepper era ESTÁTICO: el paso "Crear rodeo" estaba hardcodeado 'active' con un CTA que solo
