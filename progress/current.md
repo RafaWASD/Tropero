@@ -3,6 +3,14 @@
 > Este archivo se vacía al cerrar cada sesión y su resumen se mueve a `history.md`.
 > Mientras trabajás, **mantenelo actualizado en tiempo real**, no al final.
 
+## 2026-07-23 — U8a (deep links) DIFERIDO por rebrand + fixes rebrand-safe del invite
+
+**Rebrand destapado (Raf, Gate 0 de U8a):** nombre NUEVO sin decidir ("RAFAQ no es final, cambia todo"), **sin dominio ni nada (0)**. → **U8a (deep links de invitación / multi-usuario) DIFERIDO**: toda la lógica de aceptación ya existe+testeada; solo falta la config de dominio (associatedDomains/.well-known/URLs) que depende del dominio+bundle FINAL, que el rebrand cambia. Backlogueado con el delta exacto. **El rebrand es el camino crítico del beta** (bloquea U8a + submit a stores; nombre/bundle/deep-links son dolorosos post-launch) y está bloqueado en la decisión de nombre de Raf. Backlogueado como effort propio grande.
+
+**Fixes rebrand-safe del invite — DONE + commit `3185dc2`** (parte de U8a que NO depende del dominio): Bug 1 (loop confirm→accept→confirm al abrir /invite?token= ya logueado → fase `resolving` + core puro `invitePhaseForAuth`, no persiste token en `loading`; RootGate NO tocado) + Bug 2 (`backOr` en cold-start). reviewer APPROVED (auth-flow seguro) + 19 unit + E2E 3/3 no-falso-verde + specs 01 reconciliadas. Zona de auth, gateado con cuidado.
+
+**Feature 22** ✅ device-verified iOS. **U6b** ✅. **U5** (fix sheet vacunas nativo, `8752592`) ⏸ device-test de Raf (build iOS `543975e9`). **Flake infra**: `check.mjs` rojo TODA la sesión por `createUser: JWT kid <nil> ES256` (firma JWT/service_role del proyecto DEV a reconciliar — NO regresión de ningún cambio).
+
 ## 2026-07-22 — Bug "vacunas no guarda" → feature 22 (sync-liveness nativo), Gate 0 aprobado
 
 Raf reportó (device): habilitar vacunación en "Editar plantilla" de un rodeo "no guarda" (revierte al re-entrar; tampoco se puede usar en maniobra). **Diagnóstico (yo + Plan agent, evidencia en DB dev + código):**
