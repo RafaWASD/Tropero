@@ -225,8 +225,21 @@ export function ManeuverConfigSheet({
           </YStack>
         </YStack>
 
-        {/* ── CUERPO scrolleable (flex:1 + minHeight:0 web) → absorbe el alto, scrollea INTERNO. ── */}
-        <ScrollView flex={1} style={{ minHeight: 0 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: getTokenValue('$3', 'space') }}>
+        {/* ── CUERPO scrolleable. flexShrink:1 (grow:0, shrink:1, basis:auto) — NO flex:1 (grow:1, basis:0%). ──
+            BUG 🔴 MANGA (U5, nativo/iOS): con flex:1 el body quedaba INVISIBLE (input no se veía → no se
+            podían cargar vacunas). El padre (YStack maxHeight:85% SIN altura fija) se dimensiona por
+            contenido; cuando el contenido es CORTO (vacunación: input + pocos chips) y NO llega al cap del
+            85%, no hay "espacio libre" que un flexGrow:1 pueda absorber → en Yoga el ScrollView colapsa a su
+            basis:0% → altura 0. En web no pasaba (por eso la E2E no lo cazó). Con flexShrink:1/basis:auto:
+              · contenido CORTO → se dimensiona al contenido (el input SE VE). ✅
+              · contenido ALTO (muchos chips + sugerencias + teclado) → el padre clampea al maxHeight:85% y,
+                como header/footer son flexShrink:0, ESTE ScrollView (shrink:1) absorbe todo el faltante,
+                se achica y SCROLLEA internamente, con el footer siempre abajo. ✅
+            minHeight:0 se conserva (necesario en web para que el flex item pueda achicarse por debajo de su
+            contenido). Contraste as-built: BulkConfirmSheet usa ScrollView SIN flex (content-sized, capado
+            por el maxHeight del padre) y anda; CustomFieldSheet usa flex:1 pero su contenido es SIEMPRE alto
+            → clampea el padre al maxHeight y no colapsa (mismo patrón latente, scope aparte). ── */}
+        <ScrollView flexShrink={1} style={{ minHeight: 0 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: getTokenValue('$3', 'space') }}>
           {/* Chips de vacunas YA agregadas (solo multi). Tocar la × quita la vacuna. */}
           {kind === 'multi' && items.length > 0 ? (
             <XStack flexWrap="wrap" gap="$2">
