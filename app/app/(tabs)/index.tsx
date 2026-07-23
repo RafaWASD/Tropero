@@ -107,9 +107,14 @@ function HomeHeader({
           backgroundColor={highlight ? '$greenLight' : 'transparent'}
         >
           <CampoIcon size={20} color={iconColor} />
+          {/* Nombre del campo activo: APRETADO (comparte fila con wordmark + avatar) → trunca con
+              ellipsis (numberOfLines={1} + flexShrink/minWidth:0). `lineHeight="$5"` matching el
+              fontSize $5: Tamagui NO aplica el lineHeight del token con `fontSize` suelto → sin él,
+              un nombre con descendente (g/p/j/q) recorta la cola (bug recurrente, feedback_descender_clipping). */}
           <Text
             fontFamily="$body"
             fontSize="$5"
+            lineHeight="$5"
             fontWeight="600"
             color="$primary"
             flexShrink={1}

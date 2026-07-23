@@ -176,6 +176,10 @@ function Row({
             numberOfLines={1}
             fontFamily="$body"
             fontSize="$5"
+            /* lineHeight="$5" matching el fontSize $5: con numberOfLines + `fontSize` suelto,
+               Tamagui no aplica el lineHeight del token → un nombre con descendente (g/p/j/q)
+               recortaría la cola (feedback_descender_clipping). El ellipsis lo da numberOfLines. */
+            lineHeight="$5"
             fontWeight={fontWeight}
             color={labelColor}
           >

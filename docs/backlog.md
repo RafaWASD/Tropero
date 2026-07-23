@@ -120,6 +120,12 @@ No es un sustituto de `feature_list.json` ni de los ADRs — es la antesala dond
 **Por qué importa**: bajo-medio. El caso extremo hoy es un nombre de prueba; pero un nombre real largo ("Establecimiento La Esperanza del Sur S.A.") es plausible. Robustez de layout + no perder la identidad del campo.
 **A verificar cuando se toque**: (a) truncado = ellipsis real con `numberOfLines={1}` (no corte a lo bruto); (b) **descender-safe** (`lineHeight="$N"` matching — bug recurrente g/p/j/q, ver memoria `feedback_descender_clipping`); (c) el nombre completo aparece entero en "Mis campos"/editar-campo. **Vetear con un nombre largo QUE TENGA descendentes.**
 **Próximo paso sugerido**: pulido de UI (foldear con U6b o la tanda de polish). No urgente. NO arrancar hasta cerrar el bug de sync-down.
+**RESUELTO 2026-07-23** (polish frontend, sin backend): se aplicó la decisión por lugar.
+- APRETADOS (ellipsis, `numberOfLines={1}` + `lineHeight` matching, descender-safe): switch del header (`app/(tabs)/index.tsx` HomeHeader, `lineHeight="$5"`); filas del dropdown del switch (`EstablishmentSwitcherDropdown.tsx` Row, `lineHeight="$5"`); lista de campos bloqueantes de eliminar-cuenta (`app/(tabs)/mas.tsx`, `lineHeight="$4"`). El ellipsis ya funcionaba (contenedores con `flexShrink`/`minWidth:0`); faltaba el `lineHeight` (recorte de descendentes).
+- ROOMY (nombre completo): card de "Mis campos" (`EstablishmentCard.tsx`) → `numberOfLines={1}`→`{2}` (wrap 2 líneas) + `lineHeight="$7"`; editar-campo ya muestra el nombre entero en el input (sin cambios).
+- Spot documentado sin tocar: `mas.tsx` `SectionTitle` "Campo activo · <nombre>" wrappea libre (fontSize $3, sin numberOfLines) → muestra el nombre entero, no recorta; la captura 04 confirma que a $3 entra en 1 línea. Se dejó como está (cambiar el SectionTitle compartido afectaría 5 títulos por poco valor).
+- Fuera de alcance: `FindOrCreateOverlay.tsx` (transferencia BLE, territorio de la otra terminal) — el nombre va inline en prosa que wrappea, no se recorta.
+- Verificado con capturas @412px + nombre "nombre de campo de prueba" (descendentes 'p' en campo/prueba): `app/e2e/captures/nombre-establecimiento-largo.capture.ts`. typecheck + anti-hardcode verdes; `git diff supabase/ sync-streams/` vacío.
 
 ## 2026-07-18 — PowerSync no reconecta / no re-evalúa buckets nuevos sin reiniciar la app (offline-first) · 🔧 **EN FIX — feature 22 (a) commiteada, veredicto device pendiente**
 

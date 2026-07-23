@@ -694,12 +694,16 @@ function DeleteAccountSection({
                   paddingHorizontal="$3"
                 >
                   <CampoIcon size={20} color={terracota} strokeWidth={2} />
+                  {/* Nombre del campo bloqueante: APRETADO (fila con ícono + acción "Eliminar") →
+                      trunca con ellipsis (numberOfLines={1} + flex/minWidth:0). `lineHeight="$4"`
+                      matching el fontSize $4 → descender-safe (feedback_descender_clipping). */}
                   <Text
                     flex={1}
                     minWidth={0}
                     numberOfLines={1}
                     fontFamily="$body"
                     fontSize="$4"
+                    lineHeight="$4"
                     fontWeight="500"
                     color="$textPrimary"
                   >

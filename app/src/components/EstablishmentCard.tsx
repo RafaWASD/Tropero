@@ -270,16 +270,25 @@ export function EstablishmentCard({
                 alignItems="baseline" (re-vet iter-4): el chip de rol y el "● activo"
                 se sientan sobre la MISMA línea base del nombre — se leen como PAR del
                 nombre, no flotando arriba-derecha. El chip queda anclado prolijo al
-                tope-derecha del bloque, alineado a la línea del nombre. */}
+                tope-derecha del bloque, alineado a la PRIMERA línea del nombre.
+                "Mis campos" es el lugar ROOMY (decisión de diseño 2026-07-21): acá el nombre
+                se muestra COMPLETO → numberOfLines={2} (wrap a 2 líneas, no truncado a 1 como
+                en el switch/dropdown apretados). Con baseline, el chip/indicador se alinean a
+                la 1ra línea aunque el nombre wrappee. Un nombre extremo que exceda 2 líneas cae
+                a ellipsis en la 2da (borde aceptable — es el spot más generoso pero no infinito).
+                lineHeight="$7" matching el fontSize $7: obligatorio con fontSize ≥ $6 / numberOfLines
+                (Tamagui no aplica el lineHeight del token con `fontSize` suelto → recorta g/p/j/q,
+                feedback_descender_clipping). */}
             <XStack width="100%" alignItems="baseline" gap="$2">
               <Text
                 fontFamily="$body"
                 fontSize="$7"
+                lineHeight="$7"
                 fontWeight="700"
                 color="$textPrimary"
                 flexShrink={1}
                 minWidth={0}
-                numberOfLines={1}
+                numberOfLines={2}
               >
                 {name}
               </Text>
