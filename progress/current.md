@@ -3,6 +3,17 @@
 > Este archivo se vacía al cerrar cada sesión y su resumen se mueve a `history.md`.
 > Mientras trabajás, **mantenelo actualizado en tiempo real**, no al final.
 
+## 2026-07-23 — Batch autónomo (Raf: "hacé todo lo que puedas, testeo todo junto")
+
+3 items del backlog rebrand-safe, todos commiteados a `main` (implementer → reviewer/veto → commit):
+1. **Watched-query migration** — `14b23e9`. Grep autoritativo (la lista del backlog estaba MAL): los que aún usaban el proxy `lastSyncedAt`/`statusChanged` eran animales/home/ProfileContext/useGroupView/mas-RenspaBanner → 5 migrados a `db.onChange`. use-reports (online-only) + focus-only NO migrados (correcto). Proxy eliminado de toda la UI. reviewer APPROVED (1 comentario stale corregido).
+2. **backOr sweep** — `f3d26ba`. 15 pantallas con `router.back()` robusto (cold-start/deep-link → fallback). Casos especiales (modal maniobra, condicional crear-rodeo, jornada) verificados. **StickConnectionScreen (BLE) EXCLUIDO** (territorio de la otra terminal) → queda como único back pelado pendiente, lo hace esa terminal.
+3. **Truncado de nombre largo** — `567fb0f`. Ellipsis en apretados + nombre completo en Mis campos/editar-campo, descender-safe. Veto visual PASS (5 capturas con 'p').
+
+**NO incluido en el batch (decisión de scope):** a11y sweep (`accessibilityLabel` DOM leak, backlog:667-672) — es broad (~12 archivos) + regresiones de a11y difíciles de cazar por device-test → conviene effort aparte con reviewer, no batch ciego. Impacto mayormente DEV-overlay + ruido de consola, no prod-user-facing.
+
+**Build iOS fresco con TODO**: `6d147d9a` (feature 22 + U6b + U5 + invite fixes + este batch) para que Raf testee todo junto. El veredicto de disparo-en-vivo de las watched queries es device (ADR-029).
+
 ## 2026-07-23 — U8a (deep links) DIFERIDO por rebrand + fixes rebrand-safe del invite
 
 **Rebrand destapado (Raf, Gate 0 de U8a):** nombre NUEVO sin decidir ("RAFAQ no es final, cambia todo"), **sin dominio ni nada (0)**. → **U8a (deep links de invitación / multi-usuario) DIFERIDO**: toda la lógica de aceptación ya existe+testeada; solo falta la config de dominio (associatedDomains/.well-known/URLs) que depende del dominio+bundle FINAL, que el rebrand cambia. Backlogueado con el delta exacto. **El rebrand es el camino crítico del beta** (bloquea U8a + submit a stores; nombre/bundle/deep-links son dolorosos post-launch) y está bloqueado en la decisión de nombre de Raf. Backlogueado como effort propio grande.
