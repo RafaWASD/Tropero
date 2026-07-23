@@ -51,6 +51,7 @@ import { inviteErrorCopy, inviteShareMessage } from '@/utils/invite';
 import { roleLabel } from '@/utils/establishment';
 import { formatDateCompactEsAr } from '@/utils/format-date-es-ar';
 import { buttonA11y } from '@/utils/a11y';
+import { backOr } from '@/utils/nav';
 import type { UserRole } from '@/types';
 
 const OFFLINE_COPY = 'Necesitás conexión para esto. Conectate a internet y volvé a intentar.';
@@ -154,7 +155,7 @@ export default function MiembrosScreen() {
             accessibilityRole="button"
             accessibilityLabel="Volver"
             hitSlop={8}
-            onPress={() => router.back()}
+            onPress={() => backOr(router, '/(tabs)/mas')}
           >
             <View width="$icon" height="$icon" alignItems="center" justifyContent="center">
               <ArrowLeft size={24} color={primary} strokeWidth={2.5} />

@@ -41,6 +41,7 @@ import { animalCountLabel, exportLogDateLabel } from '@/utils/sigsa-display';
 import { isValidBirthDateRange, normalizeFilterDate } from '@/utils/sigsa-filters';
 import { maskDateInput } from '@/utils/animal-input';
 import { buttonA11y } from '@/utils/a11y';
+import { backOr } from '@/utils/nav';
 
 type TabKey = 'ready' | 'incomplete' | 'history';
 
@@ -148,7 +149,7 @@ export default function ExportSigsaScreen() {
   // ── Estado de pantalla completa: sin campo activo ──
   if (estState.status !== 'active') {
     return (
-      <Shell insets={insets} onBack={() => router.back()}>
+      <Shell insets={insets} onBack={() => backOr(router, '/(tabs)/mas')}>
         <InfoNote>Elegí un campo para exportar a SENASA.</InfoNote>
       </Shell>
     );
@@ -157,7 +158,7 @@ export default function ExportSigsaScreen() {
   // ── Gate de rol: field_operator no exporta (R7.1/R7.3) ──
   if (!canExport) {
     return (
-      <Shell insets={insets} onBack={() => router.back()}>
+      <Shell insets={insets} onBack={() => backOr(router, '/(tabs)/mas')}>
         <InfoNote>
           Solo el dueño o el veterinario del campo pueden generar la exportación a SENASA. Vos sos
           miembro de este campo.
@@ -172,7 +173,7 @@ export default function ExportSigsaScreen() {
   return (
     <Shell
       insets={insets}
-      onBack={() => router.back()}
+      onBack={() => backOr(router, '/(tabs)/mas')}
       footer={
         <ExportStickyBar
           exportableCount={exportableCount}

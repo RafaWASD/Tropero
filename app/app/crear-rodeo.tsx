@@ -50,6 +50,7 @@ import {
 } from '@/utils/rodeo-template';
 import { SPRING_DEFAULT } from '@/utils/service-months';
 import { buttonA11y } from '@/utils/a11y';
+import { backOr } from '@/utils/nav';
 import { ServiceMonthsSelector } from './_components/ServiceMonthsSelector';
 
 const OFFLINE_COPY =
@@ -191,7 +192,10 @@ export default function CrearRodeoScreen() {
     setFormError(null);
     if (step === 1) {
       // En bloqueo total no hay "atrás" (lo oculta la UI); por robustez, no navegamos fuera.
-      if (!isBlockingEmptyState) router.back();
+      // Fuera del bloqueo total: back robusto (backOr) a /rodeos (origen navegable del wizard). Si el
+      // stack está vacío (web-refresh / deep-link / cold-start directo en el paso 1) el back pelado
+      // fallaría silencioso → replace a /rodeos.
+      if (!isBlockingEmptyState) backOr(router, '/rodeos');
       return;
     }
     setStep((s) => (s === 4 ? 3 : s === 3 ? 2 : 1) as 1 | 2 | 3 | 4);

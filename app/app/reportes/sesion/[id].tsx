@@ -28,6 +28,7 @@ import { useSessionSummary, reportView } from '@/hooks/use-reports';
 import { getSessionById, type Session } from '@/services/sessions';
 import { eventKindLabel, sessionRangeLabel } from '@/utils/reports-format';
 import { buttonA11y } from '@/utils/a11y';
+import { backOr } from '@/utils/nav';
 
 export default function SesionDetalleScreen() {
   const insets = useSafeAreaInsets();
@@ -59,7 +60,7 @@ export default function SesionDetalleScreen() {
   const totalEvents = rows.reduce((acc, r) => acc + r.eventCount, 0);
   const nonZero = rows.filter((r) => r.eventCount > 0);
 
-  const onBack = useCallback(() => router.back(), [router]);
+  const onBack = useCallback(() => backOr(router, '/(tabs)/reportes'), [router]);
 
   return (
     <YStack flex={1} width="100%" maxWidth="100%" overflow="hidden" backgroundColor="$bg">

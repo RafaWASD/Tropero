@@ -25,6 +25,7 @@ import {
 } from '@/services/members';
 import { inviteErrorCopy, inviteShareMessage } from '@/utils/invite';
 import { isValidEmail } from '@/utils/validation';
+import { backOr } from '@/utils/nav';
 
 const OFFLINE_COPY = 'Necesitás conexión para crear una invitación. Conectate a internet y volvé a intentar.';
 
@@ -56,7 +57,7 @@ export default function InvitarScreen() {
       <AuthScreenShell title="Invitar" subtitle="Sumá a tu vet o capataz a este campo.">
         <YStack gap="$4" marginTop="$2">
           <InfoNote>Solo el dueño del campo activo puede invitar miembros.</InfoNote>
-          <Button variant="secondary" fullWidth onPress={() => router.back()}>
+          <Button variant="secondary" fullWidth onPress={() => backOr(router, '/miembros')}>
             Volver
           </Button>
         </YStack>
@@ -80,7 +81,7 @@ export default function InvitarScreen() {
             Este link vence en 72 horas. Podés cancelarlo o regenerar uno nuevo desde Miembros cuando
             quieras (regenerar deja inservible el anterior).
           </InfoNote>
-          <Button variant="primary" fullWidth onPress={() => router.back()}>
+          <Button variant="primary" fullWidth onPress={() => backOr(router, '/miembros')}>
             Listo
           </Button>
         </YStack>
@@ -160,7 +161,7 @@ export default function InvitarScreen() {
         <Button variant="primary" fullWidth disabled={creating} onPress={onSubmit}>
           {creating ? 'Generando link…' : 'Generar link de invitación'}
         </Button>
-        <Button variant="secondary" fullWidth onPress={() => router.back()}>
+        <Button variant="secondary" fullWidth onPress={() => backOr(router, '/miembros')}>
           Cancelar
         </Button>
       </YStack>

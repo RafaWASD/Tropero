@@ -43,6 +43,7 @@ import {
   parseHectares,
   type MembershipEstablishment,
 } from '@/utils/establishment';
+import { backOr } from '@/utils/nav';
 
 // Copy accionable ante falta de conexión (R9.2): crear campo es operación online.
 const OFFLINE_COPY =
@@ -95,7 +96,7 @@ export default function CrearCampoScreen() {
       <CompletePhoneScreen
         userId={userId}
         onSaved={() => setPhase('form')}
-        onCancel={() => router.back()}
+        onCancel={() => backOr(router, '/(tabs)')}
       />
     );
   }
@@ -309,7 +310,7 @@ function CreateForm({
         <Button variant="primary" fullWidth disabled={creating} onPress={onSubmit}>
           {creating ? 'Creando…' : 'Crear campo'}
         </Button>
-        <Button variant="secondary" fullWidth onPress={() => router.back()}>
+        <Button variant="secondary" fullWidth onPress={() => backOr(router, '/(tabs)')}>
           Cancelar
         </Button>
       </YStack>

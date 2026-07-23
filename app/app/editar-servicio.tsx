@@ -31,6 +31,7 @@ import { useEstablishment, useRodeo } from '@/contexts';
 import { setRodeoServiceMonths } from '@/services/rodeos';
 import { toServiceMonthsArray } from '@/utils/service-months';
 import { buttonA11y } from '@/utils/a11y';
+import { backOr } from '@/utils/nav';
 import { ServiceMonthsSelector } from './_components/ServiceMonthsSelector';
 
 const SAVE_ERROR_COPY = 'No se pudieron guardar los meses de servicio. Reintentá.';
@@ -83,14 +84,15 @@ export default function EditarServicioScreen() {
     }
     // Encolado OK (acción terminal): volvemos a Rodeos. El overlay optimista ya pisa service_months del rodeo,
     // así que el cambio se ve reflejado al volver (RPSC.3.4). Patrón consistente con editar-plantilla.tsx.
-    router.back();
+    // backOr: stack vacío (web-refresh / deep-link / cold-start) → volvemos a /rodeos (origen).
+    backOr(router, '/rodeos');
   }
 
   return (
     <YStack flex={1} width="100%" maxWidth="100%" overflow="hidden" backgroundColor="$bg">
       <YStack width="100%" paddingTop={insets.top} paddingHorizontal="$4">
         <XStack width="100%" alignItems="center" gap="$2" paddingVertical="$3">
-          <Pressable hitSlop={8} onPress={() => router.back()} {...buttonA11y(Platform.OS, { label: 'Volver' })}>
+          <Pressable hitSlop={8} onPress={() => backOr(router, '/rodeos')} {...buttonA11y(Platform.OS, { label: 'Volver' })}>
             <ChevronLeft size={28} color={muted} strokeWidth={2} />
           </Pressable>
           <YStack flex={1} minWidth={0}>

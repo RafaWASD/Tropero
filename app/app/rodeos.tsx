@@ -35,6 +35,7 @@ import { useEstablishment, useRodeo } from '@/contexts';
 import { softDeleteRodeo, type Rodeo } from '@/services/rodeos';
 import { describeServicePeriod } from '@/utils/service-months';
 import { buttonA11y } from '@/utils/a11y';
+import { backOr } from '@/utils/nav';
 
 const OFFLINE_COPY = 'Necesitás conexión para esto. Conectate a internet y volvé a intentar.';
 
@@ -115,7 +116,7 @@ export default function RodeosScreen() {
         <XStack width="100%" alignItems="center" gap="$2" paddingVertical="$3">
           <Pressable
             hitSlop={8}
-            onPress={() => router.back()}
+            onPress={() => backOr(router, '/(tabs)/mas')}
             {...buttonA11y(Platform.OS, { label: 'Volver' })}
           >
             <ChevronLeft size={28} color={muted} strokeWidth={2} />

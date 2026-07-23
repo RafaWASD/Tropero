@@ -31,6 +31,7 @@ import {
 import { formatHectares, hasDuplicateName, parseHectares } from '@/utils/establishment';
 import { validateCreateEstablishment } from '@/utils/validation';
 import { validateRenspa, RENSPA_MAX_LENGTH } from '@/utils/renspa-validate';
+import { backOr } from '@/utils/nav';
 
 // Copy accionable ante falta de conexión (editar es operación online, igual que crear).
 const OFFLINE_COPY =
@@ -103,7 +104,7 @@ export default function EditarCampoScreen() {
           <InfoNote>
             No tenés permiso para editar este campo. Pedile al dueño que haga los cambios.
           </InfoNote>
-          <Button variant="secondary" fullWidth onPress={() => router.back()}>
+          <Button variant="secondary" fullWidth onPress={() => backOr(router, '/(tabs)/mas')}>
             Volver
           </Button>
         </YStack>
@@ -116,7 +117,7 @@ export default function EditarCampoScreen() {
       <AuthScreenShell title="Editar campo" subtitle="No pudimos abrir la edición.">
         <YStack gap="$4" marginTop="$2">
           <FormError message={phase.message} />
-          <Button variant="secondary" fullWidth onPress={() => router.back()}>
+          <Button variant="secondary" fullWidth onPress={() => backOr(router, '/(tabs)/mas')}>
             Volver
           </Button>
         </YStack>
@@ -132,9 +133,9 @@ export default function EditarCampoScreen() {
         // activo: refreshEstablishments() re-lee el set; como el id sigue siendo el preferido,
         // resuelve `active` sobre el MISMO campo con los datos nuevos. Después volvemos a "Más".
         await refreshEstablishments();
-        router.back();
+        backOr(router, '/(tabs)/mas');
       }}
-      onCancel={() => router.back()}
+      onCancel={() => backOr(router, '/(tabs)/mas')}
     />
   );
 }

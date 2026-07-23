@@ -57,6 +57,7 @@ import {
   type CustomUiComponent,
 } from '@/utils/custom-field';
 import { buttonA11y } from '@/utils/a11y';
+import { backOr } from '@/utils/nav';
 import { CustomFieldSheet } from './maniobra/_components/CustomFieldSheet';
 import { CustomFieldActionsSheet } from './maniobra/_components/CustomFieldActionsSheet';
 import { ConfirmDeleteSheet } from './maniobra/_components/ConfirmDeleteSheet';
@@ -199,7 +200,7 @@ export default function EditarPlantillaScreen() {
     if (ops.length === 0) {
       setSaving(false);
       saveBusy.current = false;
-      router.back();
+      backOr(router, '/rodeos');
       return;
     }
 
@@ -229,7 +230,8 @@ export default function EditarPlantillaScreen() {
     // refrescar el baseConfig acá (nos vamos de la pantalla). Patrón consistente con editar-campo.tsx
     // (onSaved async → router.back()). Confirmación: no hay primitiva de toast/snackbar reusable en
     // @/components, así que back inmediato (mismo back silencioso que el equipo ya acepta en editar-campo).
-    router.back();
+    // backOr: si el stack está vacío (web-refresh / deep-link / cold-start) volvemos a /rodeos (origen).
+    backOr(router, '/rodeos');
   }
 
   // Crear un dato custom (R13.5/R13.6) desde el `+`: createCustomField (CRUD-plano offline; el server fuerza
@@ -303,7 +305,7 @@ export default function EditarPlantillaScreen() {
     <YStack flex={1} width="100%" maxWidth="100%" overflow="hidden" backgroundColor="$bg">
       <YStack width="100%" paddingTop={insets.top} paddingHorizontal="$4">
         <XStack width="100%" alignItems="center" gap="$2" paddingVertical="$3">
-          <Pressable hitSlop={8} onPress={() => router.back()} {...buttonA11y(Platform.OS, { label: 'Volver' })}>
+          <Pressable hitSlop={8} onPress={() => backOr(router, '/rodeos')} {...buttonA11y(Platform.OS, { label: 'Volver' })}>
             <ChevronLeft size={28} color={muted} strokeWidth={2} />
           </Pressable>
           <YStack flex={1} minWidth={0}>

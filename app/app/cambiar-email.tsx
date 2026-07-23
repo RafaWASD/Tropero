@@ -21,6 +21,7 @@ import { AuthScreenShell, Button, FormField, FormError, InfoNote } from '@/compo
 import { useProfile } from '@/contexts';
 import { changeEmail } from '@/services/account';
 import { validateNewEmail } from '@/utils/validation';
+import { backOr } from '@/utils/nav';
 
 // Copy accionable ante falta de conexión (cambiar email es operación online, R9.2).
 const OFFLINE_COPY = 'Necesitás conexión para esto. Conectate a internet y volvé a intentar.';
@@ -79,7 +80,7 @@ export default function CambiarEmailScreen() {
             {`Te mandamos un mail a ${pendingEmail}. Confirmá desde ahí para completar el cambio. ` +
               `Hasta entonces tu email sigue siendo ${currentEmail ?? 'el actual'}.`}
           </InfoNote>
-          <Button variant="primary" fullWidth onPress={() => router.back()}>
+          <Button variant="primary" fullWidth onPress={() => backOr(router, '/(tabs)/mas')}>
             Volver
           </Button>
         </YStack>
@@ -113,7 +114,7 @@ export default function CambiarEmailScreen() {
         >
           {submitting ? 'Enviando…' : 'Cambiar email'}
         </Button>
-        <Button variant="secondary" fullWidth onPress={() => router.back()}>
+        <Button variant="secondary" fullWidth onPress={() => backOr(router, '/(tabs)/mas')}>
           Cancelar
         </Button>
       </YStack>

@@ -48,6 +48,7 @@ import {
   rejectionBannerTitle,
 } from '@/services/powersync/upload-rejections';
 import { buttonA11y } from '@/utils/a11y';
+import { backOr } from '@/utils/nav';
 import { extractManeuvers } from '@/utils/maneuver-config';
 import { maneuverLabel } from '@/utils/maneuver-wizard';
 import {
@@ -262,7 +263,11 @@ export default function ManiobraInicioScreen() {
             Modo maniobras
           </Text>
         </XStack>
-        <Pressable onPress={() => router.back()} accessibilityRole="button" accessibilityLabel="Cerrar" hitSlop={12}>
+        {/* Cerrar el modal. backOr NO cambia el caso normal (abierto vía FAB → canGoBack true → back
+            cierra el modal, misma semántica de siempre); solo BLINDA el cold-start/deep-link/web-refresh
+            directo en /maniobra (stack vacío → canGoBack false → el back pelado fallaría silencioso y
+            dejaría al usuario trabado en el modal) reemplazando por /(tabs) (home). No rompe el cierre. */}
+        <Pressable onPress={() => backOr(router, '/(tabs)')} accessibilityRole="button" accessibilityLabel="Cerrar" hitSlop={12}>
           <X size={26} color={MUTED} />
         </Pressable>
       </XStack>

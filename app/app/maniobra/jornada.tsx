@@ -32,6 +32,7 @@ import { Check, ChevronLeft, Play, Plus } from 'lucide-react-native';
 
 import { Button, Card, FormError, InfoNote } from '@/components';
 import { buttonA11y, labelA11y } from '@/utils/a11y';
+import { backOr } from '@/utils/nav';
 import { RodeoIcon } from '@/theme/icons';
 import { useEstablishment, useRodeo } from '@/contexts';
 import type { Rodeo } from '@/services/rodeos';
@@ -310,7 +311,10 @@ export default function JornadaWizardScreen() {
   const onBack = useCallback(() => {
     setError(null);
     if (stage === 1) {
-      router.back();
+      // Etapa 1: salir del wizard al landing del que vino (PUSHEADO sobre /maniobra). backOr: si el stack
+      // está vacío (web-refresh / deep-link / cold-start directo en la etapa 1) el back pelado fallaría
+      // silencioso → replace a /maniobra (el landing de MODO MANIOBRAS, origen del wizard).
+      backOr(router, '/maniobra');
       return;
     }
     setStage((s) => (s - 1) as Stage);
@@ -379,8 +383,10 @@ export default function JornadaWizardScreen() {
       return;
     }
     // OK: volvemos al landing del que vinimos (el wizard se abrió PUSHEADO sobre él). El preset actualizado
-    // se ve al re-enfocar (fetchPresets en focus). router.back() (no replace) → no apila un landing nuevo.
-    router.back();
+    // se ve al re-enfocar (fetchPresets en focus). backOr: back robusto (no apila un landing nuevo en el caso
+    // normal — canGoBack true → back); si el stack está vacío (web-refresh / deep-link / cold-start) replace
+    // a /maniobra (el landing de MODO MANIOBRAS, origen del wizard) en vez de fallar silencioso.
+    backOr(router, '/maniobra');
   }, [editPresetId, editPresetName, chosen, chosenCustom, buildCurrentConfig, router]);
 
   // Guardar como rutina (R2.1): crea un maneuver_preset con la config ACTUAL de la jornada (mismo

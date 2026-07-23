@@ -38,6 +38,7 @@ import {
   type WeightCompareRow,
 } from '@/utils/reports-format';
 import { buttonA11y } from '@/utils/a11y';
+import { backOr } from '@/utils/nav';
 
 type PairData = {
   loading: boolean;
@@ -134,7 +135,7 @@ export default function CompararScreen() {
     <YStack flex={1} width="100%" maxWidth="100%" overflow="hidden" backgroundColor="$bg">
       <YStack width="100%" paddingTop={insets.top} paddingHorizontal="$4">
         <XStack width="100%" alignItems="center" gap="$2" paddingVertical="$3">
-          <Pressable hitSlop={8} onPress={() => router.back()} {...buttonA11y(Platform.OS, { label: 'Volver' })}>
+          <Pressable hitSlop={8} onPress={() => backOr(router, '/(tabs)/reportes')} {...buttonA11y(Platform.OS, { label: 'Volver' })}>
             <ChevronLeft size={28} color={muted} strokeWidth={2} />
           </Pressable>
           <YStack flex={1} minWidth={0}>
