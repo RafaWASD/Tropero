@@ -321,6 +321,26 @@ export function BottomSheetShell({
   // queda local a cada gesto y no depende de que nadie vuelva a anidarlos.
   const headerInert = useSharedValue(false);
   const bodyInert = useSharedValue(false);
+
+  // ⚠️ NUNCA le pases a `runOnJS` un MÉTODO DE MÓDULO pelado (`runOnJS(Keyboard.dismiss)`, `runOnJS(
+  // Clipboard.setString)`…): **crashea DURO la app en device** (Raf, iOS, build 76f0837c — "si toco el
+  // grabber con el teclado abierto la app crashea por completo"). Mecanismo, verificado leyendo la salida
+  // REAL de babel de este archivo + el serializador de `react-native-worklets` 0.8.3:
+  //   1. El plugin captura en el `__closure` del worklet el IDENTIFICADOR RAÍZ de la expresión → capturaba
+  //      el objeto `Keyboard` ENTERO (una instancia de la clase `KeyboardImpl` de RN), no la función.
+  //   2. `createSerializable` (memory/serializable.native.js) solo sabe clonar objetos con prototipo
+  //      `Object.prototype`, host objects y TurboModules; una instancia de clase cae en
+  //      `inaccessibleObject()` → en el runtime de UI queda un **Proxy que TIRA ante CUALQUIER acceso**.
+  //   3. Por eso no explota al abrir el sheet (el proxy se crea callado) sino recién cuando se LEE
+  //      `Keyboard.dismiss` — es decir, SOLO en la rama del teclado abierto. Y un throw dentro de un
+  //      callback de gesto en el hilo de UI, en release, no burbujea como error de JS: revienta nativo.
+  // (No era el `this`: el `dismiss()` de RN 0.85 no usa `this`, llama al helper `dismissKeyboard`.)
+  // El camino correcto es SIEMPRE un callback JS propio y estable, como este: el closure captura una
+  // función común → worklets la convierte en `remoteFunction` y `runOnJS` la agenda sin tocar módulos.
+  // Lockeado por `src/components/worklet-callbacks-guard.test.ts` (escanea el árbol y falla ante el patrón).
+  const dismissKeyboard = useCallback(() => {
+    Keyboard.dismiss();
+  }, []);
   // El teclado se lee del hook (JS) y se espeja a un shared value: el worklet del gesto necesita el valor
   // VIVO al momento del toque, no el capturado cuando se creó el gesto.
   const keyboardUp = useSharedValue(keyboardVisible);
@@ -403,55 +423,98 @@ export function BottomSheetShell({
         // y FALLA ante movimiento hacia arriba → el scroll del body se va limpio, sin competencia.
         .activeOffsetY(SHEET_DRAG_ACTIVATE_Y)
         .failOffsetY(-SHEET_DRAG_ACTIVATE_Y)
+        // ⚠️ CADA CALLBACK VA ENVUELTO EN try/catch. NO es paranoia decorativa: una excepción NO ATRAPADA
+        // dentro de un worklet **mata la app entera** (SIGABRT), sin redbox y sin log de JS — así crasheó
+        // este mismo shell en device (ver el bloque de `dismissKeyboard`; el `.ips` de Raf muestra
+        // `runSyncOnRuntime → HermesRuntimeImpl::call → throwPendingError → std::terminate → abort`). El
+        // guard de worklets (`callGuardDEV`) **solo existe en builds de DEBUG** (lo dice su propio archivo:
+        // "Used only with debug builds"): en release nadie atrapa nada. Así que degradamos a "el gesto no
+        // hace nada" (misma política fail-closed que ya usa la geometría no finita) en vez de cerrar la app
+        // en medio de una jornada. En DEV **re-lanzamos** para no tapar el error: ahí sí hay callGuard y
+        // sale por el canal normal (`__DEV__` se lee dentro de worklets — el propio `withTiming` de
+        // reanimated lo hace). La recuperación de cada `catch` solo escribe shared values, así que EN LA
+        // PRÁCTICA no puede re-tirar (son `useSharedValue` legítimos = host objects serializables). No es
+        // una garantía absoluta: si lo que tiró adentro del `try` fuese el acceso a `inert`/`translateY`,
+        // el `catch` tiraría igual y volveríamos al abort — por eso importa que en este shell esos shared
+        // values se creen acá y nunca vengan de props.
         .onBegin(() => {
           'worklet';
-          // Gate por ZONA (regla pura): el header arrastra siempre; el cuerpo, solo con el scroll en el
-          // tope. El detector del cuerpo además viene `.enabled(atTop)` — eso es lo que evita que el Pan
-          // le ROBE el toque al ScrollView; esto deja el invariante también dentro del gesto.
-          inert.value = !sheetDragAllowedFrom({ zone, bodyAtTop: atTop });
+          try {
+            // Gate por ZONA (regla pura): el header arrastra siempre; el cuerpo, solo con el scroll en el
+            // tope. El detector del cuerpo además viene `.enabled(atTop)` — eso es lo que evita que el Pan
+            // le ROBE el toque al ScrollView; esto deja el invariante también dentro del gesto.
+            inert.value = !sheetDragAllowedFrom({ zone, bodyAtTop: atTop });
+          } catch (e) {
+            inert.value = true; // gesto inerte: no mueve ni cierra nada
+            if (__DEV__) throw e;
+          }
         })
         .onStart(() => {
           'worklet';
-          if (inert.value) return;
-          // TECLADO ARRIBA → este arrastre BAJA EL TECLADO y no toca el sheet (decisión única, ver
-          // `sheetDragIntent`): lo que se está tipeando no se pierde por un gesto.
-          if (sheetDragIntent({ keyboardVisible: keyboardUp.value }) === 'dismiss-keyboard') {
+          try {
+            if (inert.value) return;
+            // TECLADO ARRIBA → este arrastre BAJA EL TECLADO y no toca el sheet (decisión única, ver
+            // `sheetDragIntent`): lo que se está tipeando no se pierde por un gesto.
+            if (sheetDragIntent({ keyboardVisible: keyboardUp.value }) === 'dismiss-keyboard') {
+              inert.value = true;
+              // Callback JS propio (NUNCA `Keyboard.dismiss` pelado — ver el bloque de `dismissKeyboard`).
+              runOnJS(dismissKeyboard)();
+            }
+          } catch (e) {
             inert.value = true;
-            runOnJS(Keyboard.dismiss)();
+            if (__DEV__) throw e;
           }
         })
         .onUpdate((e) => {
           'worklet';
-          if (inert.value) return;
-          translateY.value = sheetDragOffset(e.translationY);
+          try {
+            if (inert.value) return;
+            translateY.value = sheetDragOffset(e.translationY);
+          } catch (err) {
+            inert.value = true; // deja de seguir al dedo; el sheet queda donde está y vuelve en onFinalize
+            if (__DEV__) throw err;
+          }
         })
         .onEnd((e) => {
           'worklet';
-          if (inert.value) return;
-          const travelled = sheetDragOffset(e.translationY);
-          const dismiss = shouldDismissSheet({
-            translationY: travelled,
-            velocityY: e.velocityY,
-            sheetHeight: sheetHeight.value,
-            ratio: SHEET_DISMISS_RATIO,
-            minDistance: SHEET_DISMISS_MIN_DISTANCE,
-            flingVelocity: SHEET_DISMISS_FLING_VELOCITY,
-            flingMinTravel: SHEET_DISMISS_FLING_MIN_TRAVEL,
-            cancelVelocity: SHEET_DISMISS_CANCEL_VELOCITY,
-          });
-          if (dismiss) runOnJS(onClose)();
+          try {
+            if (inert.value) return;
+            const travelled = sheetDragOffset(e.translationY);
+            const dismiss = shouldDismissSheet({
+              translationY: travelled,
+              velocityY: e.velocityY,
+              sheetHeight: sheetHeight.value,
+              ratio: SHEET_DISMISS_RATIO,
+              minDistance: SHEET_DISMISS_MIN_DISTANCE,
+              flingVelocity: SHEET_DISMISS_FLING_VELOCITY,
+              flingMinTravel: SHEET_DISMISS_FLING_MIN_TRAVEL,
+              cancelVelocity: SHEET_DISMISS_CANCEL_VELOCITY,
+            });
+            if (dismiss) runOnJS(onClose)();
+          } catch (err) {
+            // Fail-closed: ante la duda NO cerramos (perder lo cargado es peor que un gesto que no responde).
+            inert.value = true;
+            if (__DEV__) throw err;
+          }
         })
         .onFinalize(() => {
           'worklet';
-          // SIEMPRE (cerró, no alcanzó, o el gesto se canceló): el sheet vuelve a su lugar. Ver cabecera:
-          // los consumidores desmontan al cerrar, así que esto es invisible en el caso normal y fail-safe
-          // en el hipotético consumidor que no desmonte. El `!== 0` evita disparar un spring inútil en cada
-          // TAP (onFinalize corre también cuando el gesto nunca activó: tocar la X pasa por acá). Toca SOLO
-          // su propio `inert` — nunca el del otro detector (ese fue el bug del flag compartido).
-          inert.value = false;
-          if (translateY.value !== 0) translateY.value = withSpring(0, RETURN_SPRING);
+          try {
+            // SIEMPRE (cerró, no alcanzó, o el gesto se canceló): el sheet vuelve a su lugar. Ver cabecera:
+            // los consumidores desmontan al cerrar, así que esto es invisible en el caso normal y fail-safe
+            // en el hipotético consumidor que no desmonte. El `!== 0` evita disparar un spring inútil en cada
+            // TAP (onFinalize corre también cuando el gesto nunca activó: tocar la X pasa por acá). Toca SOLO
+            // su propio `inert` — nunca el del otro detector (ese fue el bug del flag compartido).
+            inert.value = false;
+            if (translateY.value !== 0) translateY.value = withSpring(0, RETURN_SPRING);
+          } catch (e) {
+            // Reset DURO (sin animación): el sheet no puede quedar trabado fuera de su lugar.
+            inert.value = false;
+            translateY.value = 0;
+            if (__DEV__) throw e;
+          }
         }),
-    [keyboardUp, onClose, sheetHeight, translateY],
+    [dismissKeyboard, keyboardUp, onClose, sheetHeight, translateY],
   );
 
   // Un detector POR ZONA, montados en vistas DISJUNTAS (header ↔ ScrollView del cuerpo): ningún toque lo ven
@@ -467,6 +530,11 @@ export function BottomSheetShell({
     [buildDragGesture, bodyInert, bodyAtTop],
   );
 
+  // SIN `try/catch`, a diferencia de los callbacks del gesto (y no por falta de un fallback: el estado de
+  // reposo `{ translateY: 0 }` es exactamente lo que ya escribe el `catch` de `onFinalize`). El motivo es
+  // que acá un catch solo TAPARÍA el síntoma: lo único que este worklet hace es leer `translateY.value`, y
+  // si esa lectura tirara, `onUpdate` y `onFinalize` —que escriben ese mismo shared value— ya estarían
+  // tirando también: el shell estaría roto de raíz y esos catch harían su trabajo.
   const dragStyle = useAnimatedStyle(() => ({ transform: [{ translateY: translateY.value }] }));
 
   return (

@@ -912,3 +912,29 @@ arreglada.
 - **Causa raíz**: `appliesToAnimal('tacto', …)` (`app/src/utils/maneuver-applicability.ts:167-177`, commit `a2354d9` del 2026-07-10, gating de tacto) limita el tacto de preñez a hembras **servidas**, pero el spec siembra una `vaquillona` pelada (`maniobra-carga.spec.ts:154-158`, último toque `5c658ff` del 09/07) con un comentario ya obsoleto: *"Hembra (el tacto aplica a hembras)"*. El gating cambió y el fixture no.
 - **Por qué pasó desapercibido**: `maniobra-carga.spec.ts` no está en la lista de e2e que corre `check.mjs`, así que el verde de RC=0 nunca lo tocó. Vale revisar qué otros specs quedaron fuera de esa lista.
 - **Fix candidato**: sembrar el fixture con `reproStatus` servida (o categoría probada) y actualizar el comentario. Barato; se dejó afuera por disciplina de alcance — es de spec 03 M2, no de estos bugfixes.
+
+## El guard de worklets cubre la FIRMA que crasheó, no la CLASE del bug
+- **Origen**: reviewer del fix del crash de worklet (2026-07-25), N1 — no bloqueante, el guard cumple su objetivo declarado.
+- `app/src/components/worklet-callbacks-guard.test.ts` escanea **texto, línea por línea**, con una regex sobre `runOnJS(X.y)` / `scheduleOnRN(X.y)`. El reviewer probó bypasses reales contra la regex: `runOnJS(\n Keyboard.dismiss,\n)` multilínea, `import { runOnJS as ruj }`, `const f = Keyboard.dismiss; runOnJS(f)`, `runOnJS(obj["method"])`, y las dos que más importan: **`Keyboard.dismiss()` llamado directo adentro de un worklet** y **`Dimensions.get('window')` adentro de un worklet**.
+- **Por qué importa**: la clase real del bug no es "`runOnJS` con un método de módulo", es **"leer cualquier propiedad de un objeto no-plano capturado en un worklet"** — el serializador lo reemplaza por un Proxy que tira ante cualquier acceso, y en release eso es un abort sin log.
+- **Fix candidato** (del reviewer): escanear sobre el AST del archivo **compilado**, donde `__closure` ya está resuelto, en vez de sobre el texto fuente. Ahí se ve exactamente qué objetos captura cada worklet y se puede prohibir la clase entera. Hoy no urge: no hay alias de `runOnJS` en el árbol y la cobertura de raíces (`app/app` + `app/src`) es correcta.
+
+## La contención de errores en worklets es local a `BottomSheetShell`
+- **Origen**: reviewer del fix del crash (2026-07-25), N4.
+- El `try/catch` que evita que una excepción en un worklet mate la app entera está solo en los 5 callbacks del gesto del shell. Siguen SIN contención los **9 worklets** de `ManeuverReorderList.tsx` (incluido el que llama `measure()` y `scrollTo()`) y los **2** de `WheelPicker.tsx` — superficie 🔴 manga del mismo wizard.
+- `docs/design-system.md` dice "replicá ese patrón en cualquier gesto **nuevo**", así que no hay contradicción con el as-built, pero el riesgo residual existe y es de la misma familia que el crash que Raf cazó en device.
+
+## Los `catch` de worklets degradan en SILENCIO en release
+- **Origen**: reviewer del fix del crash (2026-07-25), N5.
+- En release, si un worklet del gesto tira, el `catch` lo degrada a "el gesto no responde" y no queda ningún rastro: ni log, ni métrica, ni aviso. En campo eso es un operario diciendo "el grabber dejó de andar" sin nada que correlacionar.
+- **Candidato a enganchar con spec 17 (observabilidad)** cuando exista un canal barato desde el hilo de UI. Antes de eso, cualquier intento de loguear desde el worklet agrega justamente el tipo de llamada que causó el crash original.
+
+## Los gestos del sheet se reconstruyen en cada render (pre-existente)
+- **Origen**: reviewer del fix del crash (2026-07-25), N8 — verificado pre-existente, ya estaba en el commit anterior.
+- `buildDragGesture` depende de `onClose` (`BottomSheetShell.tsx:513`) y 3 de los 4 call-sites pasan una arrow NUEVA por render (`animal/[id].tsx:1123`, `crear-animal.tsx:894`, `editar-plantilla.tsx:423`) → los dos `Gesture.Pan()` se reconstruyen y los 5 worklets se re-serializan en cada render.
+- No es bug de correctitud (RNGH actualiza in-place) y el costo no está medido. Se cierra estabilizando los `onClose` de los consumidores con `useCallback`, no tocando el shell.
+
+## Acoplamiento `__DEV__` (JS) ↔ `NDEBUG` (C++) en el re-throw de los worklets
+- **Origen**: reviewer del fix del crash (2026-07-25), N6 — escenario angosto, de tooling.
+- El `catch` de los worklets re-lanza cuando `__DEV__`, apoyándose en que ahí existe el `callGuardDEV` de Reanimated que lo convierte en LogBox. Eso vale para los perfiles normales (EAS development = Debug + `__DEV__`; preview/production = Release + `!__DEV__`).
+- **Rompe** en un binario compilado en Release sirviendo un bundle de dev (`expo run:ios --configuration Release` contra Metro): ahí `__DEV__===true` pero **no hay** `callGuard` (`WorkletRuntime.h:54-64`, `#ifndef NDEBUG`) → el re-throw abortaría igual que el crash original. Tenerlo presente si alguna vez se depura en esa combinación.

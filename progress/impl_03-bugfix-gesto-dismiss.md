@@ -295,11 +295,80 @@ ahora lleva el `paddingBottom` del peek) y el comentario dice la verdad; (c) `sh
   apareciendo, además, el flake ya anotado del test del guard anti click-huérfano en la PRIMERA corrida tras
   un `e2e:build`.
 
+## TERCER fix-loop — CRASH 🔴 EN DEVICE (iOS build 76f0837c): diagnóstico y fix
+
+**Cuál de los tres candidatos era: (a) el `runOnJS` de la rama del teclado.** Probado así:
+
+1. **Salida REAL de babel del componente** (compilado con el `babel.config.js` del repo, plugin de worklets
+   incluido): el `__closure` del worklet de `onStart` era
+   `{inert, sheetDragIntent, keyboardUp, runOnJS, Keyboard}` con `Keyboard: _reactNative.Keyboard`. O sea:
+   el plugin captura el **identificador raíz** de `Keyboard.dismiss` → se llevaba **el objeto módulo entero**
+   (una instancia de la clase `KeyboardImpl`), no la función.
+2. **Serializador de `react-native-worklets` 0.8.3** (`memory/serializable.native.js`): `isPlainJSObject` es
+   `Object.getPrototypeOf(o) === Object.prototype`; una instancia de clase no lo es, no es host object ni
+   TurboModule → cae en `inaccessibleObject()`, que el propio archivo documenta como *"a Proxy object that
+   throws on any attempt of accessing its fields"*.
+3. → En el runtime de UI, **leer `Keyboard.dismiss` TIRA**. Eso es SINCRÓNICO y DENTRO del worklet, que es
+   exactamente lo que muestra el `.ips`: `UIEventHandler::process → runSyncOnRuntime → WorkletRuntime::runSync
+   → HermesRuntimeImpl::call → throwPendingError → __cxa_throw → std::terminate → abort`.
+4. → Y explica la condición exacta del repro: el proxy se crea callado al serializar, así que **no explota al
+   abrir el sheet**, sino recién cuando se ejecuta la ÚNICA rama que lee esa propiedad — la del teclado
+   arriba.
+5. **La hipótesis del `this` queda REFUTADA con fuente**: `Keyboard.dismiss()` de RN 0.85 es
+   `dismiss() { dismissKeyboard(); }` (`Libraries/Components/Keyboard/Keyboard.js:169`) — no usa `this`. Y,
+   como bien decía el brief, un fallo en el hilo de JS habría dado redbox, no `SIGABRT`.
+
+**Candidato (b) —función sin `'worklet'` llamada desde el hilo de UI— REFUTADO ejecutando**: compilé
+`sheet-gestures.ts` con el babel del repo y las **4** funciones que los callbacks llaman
+(`sheetDragAllowedFrom`, `sheetDragOffset`, `shouldDismissSheet`, `sheetDragIntent`) salen workletizadas
+(`__workletHash` + `__initData`); las 2 que NO lo están (`sheetBackPress`, `sheetBackHandlerApplies`) solo
+corren en el hilo de JS (las llama el `BackHandler`). Además (b) habría crasheado en TODO arrastre.
+
+**Candidato (c) —shared value / `measure()`— REFUTADO por inspección**: los worklets solo leen/escriben
+shared values creados con `useSharedValue` en el propio componente (`inert`, `keyboardUp`, `sheetHeight`,
+`translateY`); no hay `measure()` ni refs animados en el shell. (c) tampoco sería keyboard-condicional.
+
+**Fix**: callback JS propio y estable — `const dismissKeyboard = useCallback(() => { Keyboard.dismiss(); }, [])`
+y `runOnJS(dismissKeyboard)()`. **Verificado recompilando**: el closure pasó de `{…, Keyboard}` a
+`{…, dismissKeyboard}` (una función común → `cloneRemoteFunction`, que es justo lo que `scheduleOnRN` espera).
+
+**Auditoría completa de la tanda** (sobre la salida de babel, no a ojo): los 6 worklets del shell capturan
+shared values, funciones workletizadas, números, `runOnJS`/`withSpring` de reanimated, el literal
+`RETURN_SPRING` y `onClose`. `Keyboard` era el ÚNICO módulo capturado. Revisé los 4 consumidores: todos pasan
+`onClose` como arrow function o `useCallback` local — ninguno un método pelado. En todo el repo, `runOnJS` se
+usa con identificadores simples salvo la línea que rompió (grep de `app/` + `src/`).
+
+**Guard permanente + falsificado**: `app/src/components/worklet-callbacks-guard.test.ts` escanea `app/app` +
+`app/src` y falla si a `runOnJS`/`scheduleOnRN` se le pasa un `X.y`, con válvula de escape justificada.
+Falsificación ejecutada: reintroduje `runOnJS(Keyboard.dismiss)()` → el test **cae** señalando
+`src/components/BottomSheetShell.tsx:441`; restauré → verde. Registrado en `scripts/run-tests.mjs`.
+
+**El problema más grande, atendido en el mismo pase**: *cualquier* excepción no atrapada dentro de un worklet
+mata la app, sin redbox ni log — porque el guard de worklets (`callGuardDEV`) **solo existe en builds de
+debug** (lo dice su propio archivo). Los 5 callbacks del gesto quedaron con **`try/catch`**: el `catch`
+degrada a "el gesto no hace nada" (fail-closed: `inert = true`, y en `onFinalize` reset duro a 0 para que el
+sheet no quede trabado) y **re-lanza en DEV** (`__DEV__`, que reanimated lee dentro de sus propios worklets)
+para no tapar errores durante el desarrollo. Verifiqué en la salida de babel que los 5 `try` llegan
+compilados al worklet y que `__DEV__` se captura como **booleano** (serializable, sin riesgo). La
+recuperación de cada `catch` solo escribe shared values → **en la práctica** no puede re-tirar (son
+`useSharedValue` creados en el propio shell = host objects serializables); no es garantía absoluta: si lo
+que tiró dentro del `try` fuese el acceso a `inert`/`translateY`, el `catch` tiraría igual. No envolví
+`useAnimatedStyle`, y **no porque falte un fallback** (el reposo `{ translateY: 0 }` es justo lo que escribe
+el `catch` de `onFinalize`): un catch ahí solo taparía el síntoma — ese worklet únicamente LEE
+`translateY.value`, y si esa lectura tirara, `onUpdate`/`onFinalize` ya estarían tirando y el shell estaría
+roto de raíz.
+
+**Lo que este pase NO puede probar**: que el crash desapareció. `runOnJS` es prácticamente un no-op en
+react-native-web y el unit no monta worklets → **es veredicto de DEVICE** (ADR-029): Raf tiene que arrastrar
+el grabber de Vacunación con el teclado abierto en el build nuevo.
+
 ## Pendiente / riesgos (honesto)
 
 - **VEREDICTO DE DEVICE (ADR-029), iOS y Android** — nada de esto es verificable en react-native-web
-  (se agrega, del fix-loop: el **back físico de Android** cerrando el sheet de más arriba y su precedencia
-  sobre la guarda de pantalla; `BackHandler` no emite en web):
+  (se agregan: el **back físico de Android** cerrando el sheet de más arriba y su precedencia sobre la guarda
+  de pantalla —`BackHandler` no emite en web—; y **que el crash del arrastre-con-teclado desapareció**:
+  `runOnJS` es casi un no-op en web y el unit no monta worklets, así que el único oráculo es Raf arrastrando
+  el grabber de Vacunación con el teclado abierto en el build nuevo):
   1. que el arrastre hacia abajo **ya no descarte** jornada/identificar/carga (y que la única salida siga
      siendo el ‹ → `ExitJornadaSheet`);
   2. que el paso a `fullScreenModal` no traiga efecto colateral visual (la transición pasa a ser full-screen
