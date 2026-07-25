@@ -3,6 +3,51 @@
 > Este archivo se vacía al cerrar cada sesión y su resumen se mueve a `history.md`.
 > Mientras trabajás, **mantenelo actualizado en tiempo real**, no al final.
 
+## 2026-07-25 — CIERRE del leader de los 2 bugfixes (reviews + fix-loop + specs) — EN PUERTA 2
+
+Los dos bugfixes de abajo pasaron por **reviewer** (uno cada uno, `model: opus`):
+- **auto-scroll del drag**: APPROVED en mérito, sin cambios de código. El reviewer verificó ejecutando (17/17 unit, anti-hardcode 0, babel real → el worklet se compila y captura `measure`/`regionRef`), revisó las capturas y trazó R1.12-a ↔ test.
+- **teclado en sheets**: CHANGES_REQUESTED por 3 findings → los 3 cerrados. (1) `check.mjs` rojo, (2) specs sin reconciliar + colisión de "As-built v7", (3) **inconsistencia**: el fix había dejado input-arriba-de-chips en Vacunación pero chips-arriba en el custom field.
+
+**Fix-loop** (implementer): unificado en **input arriba de los chips** en los dos sheets — decisión del leader (con el teclado abierto el área visible del sheet es ~150-250px y lo único que NO puede moverse es el input, donde está el caret; los ítems agregados crecen hacia abajo en el body scrolleable; misma interacción → misma forma, ley de Jakob). Eso obligó a **cambiar la geometría del scroll-al-campo** del `CustomFieldSheet` (los chips pasaron a ser la cola de la sección → se descuenta su alto medido, `chipsHRef`; con 0 chips el cálculo es idéntico al anterior, que es el caso del e2e). Re-revisión acotada: geometría **APROBADA** (sin caminos de staleness; sesgo residual ~18px en dirección segura), oráculos de los 3 tests nuevos aprobados. Verificación del fix-loop: typecheck + 2405/2405 unit + 16/16 e2e + `design/` intacto.
+
+**Specs reconciliadas por el leader** (regla del repo, antes de commitear): `tasks.md` M1.4 con entrada **As-built v8** (teclado) + `Archivos:` actualizado + colisión de numeración resuelta (cada entrada cita su linaje en `design.md`); `design.md` corregido en 4 lugares que habían quedado mintiendo (NaN→`null` del `collapsable`; "cambios propios del sheet de preconfig" → aplican a los DOS sheets; "error inline y scroll-al-campo se conservan tal cual" → el contrato se conserva, la geometría NO; el cálculo del scroll-al-campo ahora descuenta la cola de chips).
+
+**Veto visual del leader (Gate 2.5)**: PASS. Miré las capturas nuevas — el editor de opciones quedó idéntico en forma al de vacunación, y el error de duplicado cae pegado al input con los chips debajo.
+
+**BLOQUEANTE ABIERTO**: `SUPABASE_ACCESS_TOKEN` de `.env.local` **revocado** — 401 contra `api.supabase.com/v1/projects`, verificado por el leader y por los dos reviewers de forma independiente. Deja `check.mjs` en rojo con CUALQUIER código (la suite `operaciones_rodeo` pega a la Management API) y bloquea también `scripts/apply-migration.mjs`. **Acción de Raf: rotarlo.** Todo lo demás del check está verde.
+
+**Límite honesto del Gate 2.5 (declarado)**: en react-native-web NO hay teclado nativo — `KeyboardAvoidingView` es un `<View>` inerte y `Keyboard` nunca emite → la E2E prueba el clamp de alto, el orden input/chips, el Enter que conserva foco y la X, pero **NO** que el sheet suba ni la condensación. Eso es veredicto en DEVICE (ADR-029), iOS **y Android** (edge-to-edge de SDK 56: misma apuesta que U2).
+
+## 2026-07-25 — BUGFIX 🔴 auto-scroll del drag de reorder (spec 03, etapa 2) — implementer LISTO para review
+
+Raf (device iOS, screen recording): sostener el grip de una maniobra cerca del borde inferior scrolleaba la
+página **hasta el fondo de TODO el contenido** → la lista que estás ordenando desaparece. **Fix aplicado**: el
+auto-scroll queda **acotado a la REGIÓN de seleccionadas**, medida en pantalla cada frame (`measure()` en el UI
+thread sobre un `Animated.View` con `useAnimatedRef` + `collapsable={false}`) y computada por la función PURA
+`autoScrollDelta` (`app/src/utils/reorder-autoscroll.ts`, 17 unit): baja solo mientras quede región por revelar,
+sube solo mientras el tope esté fuera, aire de 24px, piso duro en 0, **fail-closed** si no hay medida.
+Descartados a propósito (documentados en código): gate por bounds del ítem + hardcode de "más de 5 maniobras".
+**Verificado**: typecheck + 2400/2400 unit + anti-hardcode 0 + E2E nueva `maniobra-reorder-autoscroll.spec.ts`
+2/2 **falsificada** (con el código viejo caen: 249 vs <24 y 403 vs <343) + `maniobra-elegir` 2/2 y
+`maniobra-config-reactiva` 2/2 sin regresión + capture Gate 2.5 (5 estados, con el grip sostenido). Los 2 rojos
+de `maniobra-carga.spec.ts:133/:277` son los **pre-existentes** (tacto adaptativo) — confirmado revirtiendo al
+baseline y reproduciéndolos. Specs reconciliadas (R1.12-a + design v3-bis + tasks as-built v7). **Pendiente:
+veredicto en DEVICE de Raf (iOS + Android; en Android el `collapsable={false}` es lo que sostiene el fix).**
+Detalle: `progress/impl_03-bugfix-autoscroll-reorder.md`. NADA commiteado (lo hace el leader).
+
+## 2026-07-25 — BUGFIX 🔴 MANGA: el teclado tapaba TODO el bottom sheet (implementer)
+
+Bug de **CLASE** (ningún sheet del repo tenía keyboard-avoidance). Fix = primitivo **`BottomSheetShell`**
+(hermano de `FooterActionShell`: backdrop con guard anti click-huérfano + header fijo/body scroll/footer fijo
++ `KeyboardAvoidingView` + condensación con el teclado arriba + X de cierre siempre) + migración de los **4
+sheets con input**: `ManeuverConfigSheet`, `CustomFieldSheet`, `SavePresetSheet`, `BreedPickerSheet`. Extras
+del mismo bug: input ARRIBA de los chips y Enter que **no baja el teclado** en vacunación (multi).
+Verificación: typecheck + anti-hardcode 0 + 123 unit del área + E2E 3/3 nuevos + 27 de regresión + 9 capturas
+(Gate 2.5). **Lift real y condensación = veredicto DEVICE (ADR-029)**: web no monta teclado virtual.
+Detalle, riesgos (Android edge-to-edge) y reconciliación de specs en `progress/impl_bugfix-sheet-teclado.md`.
+Sin commitear. (Terminal paralela trabajando en `reorder-autoscroll` — file-sets disjuntos.)
+
 ## 2026-07-23 — Batch autónomo (Raf: "hacé todo lo que puedas, testeo todo junto")
 
 3 items del backlog rebrand-safe, todos commiteados a `main` (implementer → reviewer/veto → commit):

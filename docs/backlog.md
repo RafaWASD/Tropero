@@ -850,3 +850,22 @@ arreglada.
 - **Origen**: Raf probando el build nativo en iPhone (2026-07-16). En la pantalla de login/registro, contenido queda "muy debajo" y no se ve bien que hay que scrollear (ej. el link/acción de registro queda fuera de vista sin señal de scroll).
 - **Qué evaluar (Raf decide alcance)**: agregar una señal de scroll (fade/gradient en el borde, indicador, o rediseño de layout para que el CTA clave entre en viewport). Definir si es SOLO en auth (login/registro) o un patrón a aplicar en TODO el proyecto (pantallas largas / sheets).
 - **Estado**: anotado a pedido de Raf; NO tocar ahora. Él evalúa después qué, cómo y dónde. Relacionado con los básicos de UX de sheets/forms ya codificados en la skill design-review.
+
+## Teclado tapa el sheet: `TagScanSheet` queda fuera del fix de clase (dueño: terminal BLE)
+- **Origen**: bug 🔴 manga reportado por Raf en device iOS (2026-07-25): al enfocar el input del sheet "Vacunación" el teclado tapa input + chips + sugerencias + los dos CTAs (solo sobrevive el título). Causa de CLASE: ningún bottom sheet del repo tenía keyboard-avoidance (patrón as-built copiado a mano: scrim absoluto + `YStack maxHeight 85%` anclado a `bottom:0`; en iOS el teclado se dibuja encima y no empuja nada).
+- **Qué se arregló** (sesión 2026-07-25): primitivo de bottom-sheet keyboard-aware (KAV + header fijo / body `ScrollView flexShrink:1` / footer fijo + condensación con teclado arriba) aplicado a `ManeuverConfigSheet`, `CustomFieldSheet`, `SavePresetSheet`, `BreedPickerSheet`.
+- **Qué queda**: `app/src/components/TagScanSheet.tsx` tiene TextInput y el MISMO bug latente, pero es de la **terminal BLE** (`TagScan*` está en su lista de ownership) → **excluido a propósito** para no colisionar. Migrarlo al primitivo cuando la feature 04 esté cerrada o coordinando con esa terminal.
+
+## UX nit: los números de orden no se renumeran DURANTE el drag de reorder
+- **Origen**: veto visual del leader sobre las capturas del bugfix del auto-scroll (2026-07-25, `design/`-equivalente en `app/e2e/captures/__shots__/reorder-autoscroll/04-*.png`).
+- `ManeuverReorderList.tsx` → `SelectedRow` pinta el badge con `{index + 1}`, donde `index` es la posición **commiteada** (prop del padre). Mientras arrastrás, los hermanos SÍ se recolocan visualmente (shared value `positions`), pero sus badges siguen mostrando el número viejo → se ve "9" arriba de "8" en pleno drag hasta que soltás.
+- **Pre-existente**, no lo introdujo el clamp del auto-scroll. Impacto: feedback confuso de dónde va a caer el ítem (Nielsen #1), pero el orden final es correcto.
+- **Costo del fix**: el badge tendría que leer el shared value `positions` en el hilo de UI → texto animado (no hay `Animated.Text` con contenido reactivo barato en RN; habría que renderizar 10 dígitos superpuestos y togglear opacidad, o bajar el número al JS thread por frame). No vale hoy. Revisar si Raf lo reporta como molesto en device.
+
+## `autoScrollDelta` no acota por el `maxScroll` del ScrollView (latente, no muerde hoy)
+- **Origen**: reviewer del bugfix del auto-scroll del drag (2026-07-25), nit 3.
+- `app/src/utils/reorder-autoscroll.ts` acota el paso por la VISIBILIDAD de la región (baja mientras el fondo de la región + margen no entre en el viewport), pero no conoce el `contentSize` del ScrollView. Hoy es inocuo: bajo la región siempre hay más contenido (pool + sección de custom + paddingBottom) y `scrollTo` clampea igual (RN acota a `maxRect`; en web `scrollTop` clampea). **Importa si el helper se reusa en una pantalla donde la región reordenable SEA el último contenido** → habría que pasarle `maxScroll` (contentSize − viewportHeight).
+
+## Grip de reorder por debajo del target manga (pre-existente)
+- **Origen**: reviewer del bugfix del auto-scroll (2026-07-25), nit 6 — verificado, NO introducido por ese delta.
+- `ManeuverReorderList.tsx` → el grip mide ~32px de ancho (`paddingHorizontal="$1"` + icono 24) × 72 de alto: cumple en el eje vertical pero queda por debajo de 60dp en el horizontal. Los labels de fila son `$5` (16px < 18pt del estándar manga). Es la pantalla de configuración del wizard (🟡 mixta), no la manga 🔴, por eso no bloqueó. Endurecer al pasar de nuevo por el wizard.
