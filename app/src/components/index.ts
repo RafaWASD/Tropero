@@ -34,6 +34,11 @@ export { AuthScreenShell } from './AuthScreenShell';
 export type { AuthScreenShellProps } from './AuthScreenShell';
 export { FooterActionShell } from './FooterActionShell';
 export type { FooterActionShellProps } from './FooterActionShell';
+// Shell canónico de BOTTOM SHEET del repo (hermano de FooterActionShell, para sheets en vez de pantallas):
+// backdrop $scrim con guard anti click-huérfano + header fijo / body scroll / footer fijo + KEYBOARD-AWARE
+// (sube sobre el teclado y condensa lo prescindible). Todo sheet con input de texto usa este shell.
+export { BottomSheetShell } from './BottomSheetShell';
+export type { BottomSheetShellProps } from './BottomSheetShell';
 export { FormError, InfoNote, LinkButton, AuthDivider } from './AuthBits';
 // Login social (spec 19). GoogleSignInButton = 1 archivo; AppleSignInButton = base (web) + .native
 // (iOS botón custom armonizado / Android null); markup compartido en AppleSignInButtonView.

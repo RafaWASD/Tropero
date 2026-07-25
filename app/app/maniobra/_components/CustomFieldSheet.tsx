@@ -13,11 +13,28 @@
 // client-side son UX; el server (0093) re-valida TODO. 1 dato = 1 campo (R13.9; no hay multi-campo en la UI).
 //
 // ── LAYOUT ROBUSTO (fix M5-CUSTOMFIELDSHEET-FIX, Raf lo cazó EN VIVO) ──────────────────────────────────
-// El sheet es HEADER FIJO (grip + título, flexShrink:0) + CUERPO scrolleable (ScrollView flex:1, minHeight:0)
-// + FOOTER FIJO (Crear/Cancelar, flexShrink:0). Antes el ScrollView NO tenía flex:1 y el error era un banner
-// entre el scroll y los botones → al crecer el contenido o aparecer el error, el sheet superaba maxHeight:90%
-// y el clip caía sobre el TOPE (el título se recortaba contra el borde). Con header/footer fijos + cuerpo que
-// absorbe el alto y scrollea INTERNO, el título queda SIEMPRE completo por más que crezca el contenido.
+// El sheet es HEADER FIJO (grip + título) + CUERPO scrolleable + FOOTER FIJO (Crear/Cancelar). Antes el
+// ScrollView no absorbía el alto y el error era un banner entre el scroll y los botones → al crecer el
+// contenido o aparecer el error, el sheet superaba el maxHeight y el clip caía sobre el TOPE (el título se
+// recortaba contra el borde). Con header/footer fijos + cuerpo que absorbe el alto y scrollea INTERNO, el
+// título queda SIEMPRE completo por más que crezca el contenido.
+//
+// ── SHELL: `BottomSheetShell` (primitivo del repo) ────────────────────────────────────────────────────
+// Ese esqueleto (backdrop $scrim con guard anti click-huérfano, header fijo / body scroll / footer fijo,
+// maxHeight, safe-area) ya NO se copia a mano acá: vive en el primitivo, que además es KEYBOARD-AWARE (el
+// sheet SUBE por encima del teclado y condensa descripción + CTA secundario; la X del header es la salida).
+// El body del primitivo va `flexShrink:1` + `minHeight:0` — NO `flex:1`: con contenido corto, un flexGrow:1
+// colapsa el ScrollView a altura 0 en NATIVO (bug U5). El scroll-al-campo de la validación sigue acá
+// (scrollViewRef + onBodyLayout + onBodyContentSizeChange del shell).
+//
+// ── ORDEN DEL EDITOR DE OPCIONES: input PRIMERO, chips DEBAJO (consistencia con ManeuverConfigSheet) ──
+// Misma interacción que el sheet de vacunas (escribir → agregar → chip) ⇒ mismo layout (ley de Jakob: dos
+// sheets que hacen lo mismo tienen que verse igual). Con el teclado arriba el área visible del sheet queda
+// en ~150-250px y lo que NO se puede mover de ahí es el INPUT (es donde está el caret y la atención): con
+// los chips ARRIBA, cada opción agregada crecía el contenido por encima del input y lo empujaba fuera de
+// vista a la 3ra/4ta. Con el input primero queda CLAVADO arriba del bloque y los ítems agregados crecen
+// hacia ABAJO, dentro del body scrolleable. El mensaje de error inline va PEGADO al input (antes de los
+// chips) por la misma razón: es lo que hay que leer para corregir, no puede quedar detrás de 50 chips.
 //
 // ── ERROR A NIVEL DE CAMPO (no banner al fondo) ───────────────────────────────────────────────────────
 // Al tocar "Crear" inválido (`validateCustomFieldDraft` da el mensaje; `customFieldErrorTarget` da el campo):
@@ -25,19 +42,16 @@
 // (c) el mensaje va INLINE justo en ese campo. Se limpia al editar el campo. El usuario sabe EXACTAMENTE qué
 // completar sin que un banner le tape el título.
 //
-// Modelado sobre BulkConfirmSheet/ManeuverConfigSheet: backdrop $scrim tappable que cierra (con guard
-// anti tap-through doble-rAF, BUG web) + YStack anclado abajo con grip + safe-area inferior. Targets
-// manga ≥$touchMin. Cero hardcode (ADR-023 §4): tokens; lucide vía getTokenValue. Voseo argentino.
+// Targets manga ≥$touchMin. Cero hardcode (ADR-023 §4): tokens; lucide vía getTokenValue. Voseo argentino.
 //
 // RECORTE DE DESCENDENTES (regla dura): títulos y Text con numberOfLines llevan lineHeight matching.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { Platform, Pressable, type ScrollView as RNScrollView, TextInput } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
+import { getTokenValue, Text, View, XStack, YStack } from 'tamagui';
 import { Plus, X, Check } from 'lucide-react-native';
 
-import { Button, InfoNote } from '@/components';
+import { BottomSheetShell, Button, InfoNote } from '@/components';
 import { buttonA11y, labelA11y } from '@/utils/a11y';
 import {
   UI_COMPONENT_OPTIONS,
@@ -84,42 +98,11 @@ export type CustomFieldSheetProps = {
 type Step = 'classify' | 'form';
 
 export function CustomFieldSheet({ mode, onCreate, editInitial, onUpdate, onClose }: CustomFieldSheetProps) {
-  const insets = useSafeAreaInsets();
   // Modo edición (M7, R13.32): el tipo de dato es INMUTABLE; las opciones son append-only.
   const isEdit = mode === 'edit';
   // Las opciones EXISTENTES (modo edit) que NO se pueden quitar (append-only, R13.33). Las nuevas agregadas en
   // esta sesión SÍ se pueden quitar (todavía no persistidas). Se compara case-insensitive por valor.
   const lockedOptions = isEdit ? (editInitial?.options ?? []) : [];
-
-  // ── GUARD del backdrop contra el "click huérfano" del tap que abrió el sheet (BUG web) ──
-  // Idéntico a ManeuverConfigSheet: el scrim ignora presses hasta el 2do frame (doble rAF). Así el click
-  // DOM nativo que dejó el tap del `+` no cierra el sheet recién montado, pero un tap deliberado sí.
-  const readyToDismissRef = useRef(false);
-  useEffect(() => {
-    let raf1 = 0;
-    let raf2 = 0;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const arm = () => {
-      readyToDismissRef.current = true;
-    };
-    if (typeof requestAnimationFrame === 'function') {
-      raf1 = requestAnimationFrame(() => {
-        raf2 = requestAnimationFrame(arm);
-      });
-    } else {
-      timer = setTimeout(arm, 0);
-    }
-    return () => {
-      if (raf1) cancelAnimationFrame(raf1);
-      if (raf2) cancelAnimationFrame(raf2);
-      if (timer) clearTimeout(timer);
-    };
-  }, []);
-
-  const onBackdropPress = () => {
-    if (!readyToDismissRef.current) return;
-    onClose();
-  };
 
   // mode 'maniobra'/'edit' → arranca en el form (sin pregunta de clasificación). mode 'classify' → pregunta
   // primero (R13.6); el data_type se setea al elegir. En 'edit' el data_type NO importa para el payload (no
@@ -166,6 +149,11 @@ export function CustomFieldSheet({ mode, onCreate, editInitial, onUpdate, onClos
   // Alto del viewport scrolleable (la propia ScrollView), capturado por su onLayout. Lo necesitamos para alinear
   // el FONDO de la sección culpable contra el fondo del viewport (traer input + borde + mensaje a la vista).
   const viewportHRef = useRef(0);
+  // Alto medido del bloque de CHIPS de opciones (0 cuando no hay ninguna). Con el input ARRIBA, los chips son
+  // la COLA de la sección de Opciones y NO son lo que hay que traer a la vista: lo restamos del alto de la
+  // sección para que el scroll alinee el bloque CRÍTICO (título + nota + input + mensaje) y no la última fila
+  // de chips (con 50 opciones, alinear el fondo de la sección dejaría el input a completar fuera de pantalla).
+  const chipsHRef = useRef(0);
   // Pedido de scroll PENDIENTE: lo setea handleCreate al detectar el error; lo CONSUME el onLayout de la sección
   // culpable (que se re-dispara tras crecer con el mensaje), de modo que el scroll corre con la geometría YA
   // medida y completa — no en un frame adivinado.
@@ -175,9 +163,11 @@ export function CustomFieldSheet({ mode, onCreate, editInitial, onUpdate, onClos
   // que el scroll al campo: encadenado al crecimiento real del contenido, no a un frame adivinado.
   const pendingBottomScrollRef = useRef(false);
 
-  // Scroll determinista a la sección `target` con su geometría YA medida (post-mensaje). Trae la sección COMPLETA
-  // (input + borde + mensaje) a la vista: alinea su FONDO contra el fondo del viewport si no entra entera, o su
-  // TOPE si entra. PURO respecto del timing — el caller decide CUÁNDO llamarlo (post-layout).
+  // Scroll determinista a la sección `target` con su geometría YA medida (post-mensaje). Trae el BLOQUE CRÍTICO
+  // de la sección (lo que hay que ver para corregir: título + input + borde + mensaje) a la vista: alinea su
+  // FONDO contra el fondo del viewport si no entra entero, o su TOPE si entra. En Opciones el bloque crítico
+  // EXCLUYE los chips (van DEBAJO del input desde el cambio de orden): son cola, no destino del scroll.
+  // PURO respecto del timing — el caller decide CUÁNDO llamarlo (post-layout).
   const runScrollToField = useCallback((target: CustomFieldErrorTarget) => {
     const rect = fieldRectRef.current[target];
     const viewportH = viewportHRef.current;
@@ -189,14 +179,18 @@ export function CustomFieldSheet({ mode, onCreate, editInitial, onUpdate, onClos
       sv.scrollTo({ y: Math.max(0, rect.y - pad), animated: true });
       return;
     }
-    const sectionBottom = rect.y + rect.height;
-    const fitsWhole = rect.height + pad <= viewportH;
+    // Alto del bloque crítico = la sección MENOS su cola de chips (0 si no hay chips → idéntico al alto de la
+    // sección, que es el caso del error "Agregá al menos una opción": todavía no hay ninguna).
+    const criticalH = target === 'options' ? Math.max(0, rect.height - chipsHRef.current) : rect.height;
+    const criticalBottom = rect.y + criticalH;
+    const fitsWhole = criticalH + pad <= viewportH;
     // fitsWhole → alineamos el TOPE de la sección (con holgura) para verla entera desde arriba.
-    // !fitsWhole (sección más alta que el viewport, p.ej. muchas opciones) → alineamos el FONDO (input+mensaje
-    // son lo último) contra el fondo del viewport, así el campo a completar + su mensaje quedan SIEMPRE visibles.
+    // !fitsWhole (bloque crítico más alto que el viewport, p.ej. teclado arriba a 360) → alineamos su FONDO
+    // (input + mensaje son lo último del bloque) contra el fondo del viewport, así el campo a completar + su
+    // mensaje quedan SIEMPRE visibles.
     const y = fitsWhole
       ? Math.max(0, rect.y - pad)
-      : Math.max(0, sectionBottom + pad - viewportH);
+      : Math.max(0, criticalBottom + pad - viewportH);
     sv.scrollTo({ y, animated: true });
   }, []);
 
@@ -292,7 +286,11 @@ export function CustomFieldSheet({ mode, onCreate, editInitial, onUpdate, onClos
   const isLockedOption = (o: string) => lockedOptions.some((l) => l.toLowerCase() === o.toLowerCase());
   const removeOption = (target: string) => {
     if (isLockedOption(target)) return; // existente: no se quita (append-only).
-    setOptions((prev) => prev.filter((o) => o !== target));
+    const next = options.filter((o) => o !== target);
+    // Al quedar sin chips el bloque deja de renderizarse → su onLayout no vuelve a disparar: reseteamos el
+    // alto medido a mano para no arrastrar el valor viejo al cálculo del scroll-al-campo.
+    if (next.length === 0) chipsHRef.current = 0;
+    setOptions(next);
   };
 
   // Al cambiar de tipo de input, si deja de ser enum limpiamos las opciones (no ensuciar el payload).
@@ -302,6 +300,7 @@ export function CustomFieldSheet({ mode, onCreate, editInitial, onUpdate, onClos
     if (!uiComponentNeedsOptions(c)) {
       setOptions([]);
       setOptionDraft('');
+      chipsHRef.current = 0; // el bloque de chips se desmonta: su alto medido vuelve a 0 (ver removeOption).
     }
   };
 
@@ -345,11 +344,9 @@ export function CustomFieldSheet({ mode, onCreate, editInitial, onUpdate, onClos
   const inputMinHeight = getTokenValue('$searchBarLg', 'size');
   const radius = getTokenValue('$card', 'radius');
   const padH = getTokenValue('$4', 'space');
-  const PRIMARY = getTokenValue('$primary', 'color');
   const WHITE = getTokenValue('$white', 'color');
   const FAINT = getTokenValue('$textFaint', 'color');
   const iconSize = getTokenValue('$navIcon', 'size');
-  const bottomPad = Math.max(insets.bottom, getTokenValue('$4', 'space'));
 
   const labelInvalid = error?.target === 'label';
   const optionsInvalid = error?.target === 'options';
@@ -366,364 +363,333 @@ export function CustomFieldSheet({ mode, onCreate, editInitial, onUpdate, onClos
           : 'Nuevo dato';
 
   return (
-    <View
-      position="absolute"
-      top="$0"
-      left="$0"
-      right="$0"
-      bottom="$0"
-      backgroundColor="$scrim"
-      justifyContent="flex-end"
+    <BottomSheetShell
+      title={title}
+      onClose={onClose}
+      testID="custom-field-sheet"
+      scrimTestID="custom-field-scrim"
+      // testID en el viewport scrolleable para el ORÁCULO de geometría del e2e: afirma que el bounding box
+      // del input inválido cae DENTRO de este viewport visible (no solo "visible en algún lado").
+      bodyTestID="custom-field-scroll"
+      maxHeight="90%"
+      scrollViewRef={scrollRef}
+      contentGap={step === 'classify' ? '$3' : '$4'}
+      // Alto del viewport scrolleable: lo usa el scroll determinista para alinear el FONDO de la sección
+      // culpable contra el fondo visible (traer input + borde + mensaje a la vista) a cualquier ancho.
+      onBodyLayout={(e) => {
+        viewportHRef.current = e.nativeEvent.layout.height;
+      }}
+      // Consume el scroll-al-fondo pendiente (error general) cuando el contenido crece de verdad.
+      onBodyContentSizeChange={onContentSizeChange}
+      footer={
+        step === 'classify' ? undefined : (
+          <Button variant="primary" fullWidth disabled={submitting} onPress={() => void handleCreate()}>
+            {submitting ? (isEdit ? 'Guardando…' : 'Creando…') : isEdit ? 'Guardar cambios' : 'Crear'}
+          </Button>
+        )
+      }
+      secondaryFooter={
+        <Button variant="secondary" fullWidth disabled={step !== 'classify' && submitting} onPress={onClose}>
+          Cancelar
+        </Button>
+      }
     >
-      <Pressable
-        style={{ flex: 1, width: '100%' }}
-        onPress={onBackdropPress}
-        testID="custom-field-scrim"
-        {...buttonA11y(Platform.OS, { label: 'Cerrar' })}
-      />
-
-      <YStack
-        width="100%"
-        maxHeight="90%"
-        backgroundColor="$bg"
-        borderTopLeftRadius="$card"
-        borderTopRightRadius="$card"
-        paddingHorizontal="$4"
-        paddingTop="$4"
-        paddingBottom={bottomPad}
-        gap="$4"
-        testID="custom-field-sheet"
-      >
-        {/* ── HEADER FIJO (grip + título). flexShrink:0 → NUNCA se comprime ni se recorta. ── */}
-        <YStack flexShrink={0} gap="$4">
-          {/* Grip visual del sheet. */}
-          <View
-            alignSelf="center"
-            width={getTokenValue('$icon', 'size')}
-            height={getTokenValue('$progressTrack', 'size')}
-            borderRadius="$pill"
-            backgroundColor="$divider"
-          />
-
-          <Text fontFamily="$heading" fontSize="$7" lineHeight="$7" fontWeight="700" color="$textPrimary" numberOfLines={1}>
-            {title}
+      {step === 'classify' ? (
+        // ── PASO 1: clasificación (R13.6). Dos bloques grandes; no se infiere el data_type. ──
+        <>
+          <Text fontFamily="$body" fontSize="$4" lineHeight="$5" color="$textMuted">
+            ¿Es un dato fijo del animal (se carga una vez, tipo un apodo o un score) o algo que medís y
+            seguís en el tiempo (tipo ángulo de pezuñas)?
           </Text>
-        </YStack>
-
-        {step === 'classify' ? (
-          // ── PASO 1: clasificación (R13.6). Dos bloques grandes; no se infiere el data_type. ──
-          // Cuerpo scrolleable (flex:1) por si el contenido no entra en pantallas chicas; el header de arriba
-          // ya es fijo, así el título no se recorta.
-          <ScrollView flex={1} style={{ minHeight: 0 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: getTokenValue('$3', 'space') }}>
-            <Text fontFamily="$body" fontSize="$4" lineHeight="$5" color="$textMuted">
-              ¿Es un dato fijo del animal (se carga una vez, tipo un apodo o un score) o algo que medís y
-              seguís en el tiempo (tipo ángulo de pezuñas)?
+          <ClassificationOption
+            label="Un dato fijo"
+            hint="Se carga una vez. Ej.: apodo, score de un solo registro."
+            onPress={() => pickClassification('propiedad')}
+            testID="classify-propiedad"
+          />
+          <ClassificationOption
+            label="Algo que medís y seguís"
+            hint="Se registra cada vez. Ej.: ángulo de pezuñas, una medición repetida."
+            onPress={() => pickClassification('maniobra')}
+            testID="classify-maniobra"
+          />
+        </>
+      ) : (
+        // ── PASO 2: form (label + tipo de input + opciones si enum) → Crear. ──
+        <>
+          {/* NOMBRE (label) */}
+          <YStack
+            gap="$2"
+            onLayout={(e) => {
+              onFieldLayout('label', e.nativeEvent.layout.y, e.nativeEvent.layout.height);
+            }}
+          >
+            <Text fontFamily="$body" fontSize="$4" lineHeight="$4" fontWeight="600" color="$textPrimary" numberOfLines={1}>
+              Nombre
             </Text>
-            <ClassificationOption
-              label="Un dato fijo"
-              hint="Se carga una vez. Ej.: apodo, score de un solo registro."
-              onPress={() => pickClassification('propiedad')}
-              testID="classify-propiedad"
-            />
-            <ClassificationOption
-              label="Algo que medís y seguís"
-              hint="Se registra cada vez. Ej.: ángulo de pezuñas, una medición repetida."
-              onPress={() => pickClassification('maniobra')}
-              testID="classify-maniobra"
-            />
-            <Button variant="secondary" fullWidth onPress={onClose}>
-              Cancelar
-            </Button>
-          </ScrollView>
-        ) : (
-          // ── PASO 2: form (label + tipo de input + opciones si enum) → Crear. ──
-          <>
-            {/* ── CUERPO scrolleable (flex:1 + minHeight:0 web) → absorbe el alto y scrollea INTERNO. ── */}
-            <ScrollView
-              ref={scrollRef}
-              flex={1}
-              style={{ minHeight: 0 }}
-              showsVerticalScrollIndicator={false}
-              keyboardShouldPersistTaps="handled"
-              contentContainerStyle={{ gap: getTokenValue('$4', 'space') }}
-              // testID en el viewport scrolleable para el ORÁCULO de geometría del e2e: afirma que el bounding box
-              // del input inválido cae DENTRO de este viewport visible (no solo "visible en algún lado").
-              testID="custom-field-scroll"
-              // Alto del viewport scrolleable: lo usa el scroll determinista para alinear el FONDO de la sección
-              // culpable contra el fondo visible (traer input + borde + mensaje a la vista) a cualquier ancho.
-              onLayout={(e) => {
-                viewportHRef.current = e.nativeEvent.layout.height;
+            <TextInput
+              value={label}
+              onChangeText={(t) => {
+                setLabel(t.slice(0, LABEL_MAX));
+                // Limpiamos el error si era de este campo (o general) cuando el usuario lo edita.
+                if (labelInvalid || generalError) setError(null);
               }}
-              // Consume el scroll-al-fondo pendiente (error general) cuando el contenido crece de verdad.
-              onContentSizeChange={onContentSizeChange}
+              placeholder={mode === 'maniobra' ? 'Ej.: Ángulo de pezuñas' : 'Ej.: Apodo'}
+              placeholderTextColor={placeholderColor}
+              autoCapitalize="sentences"
+              maxLength={LABEL_MAX}
+              testID="custom-field-label"
+              style={{
+                minHeight: inputMinHeight,
+                borderRadius: radius,
+                borderWidth: labelInvalid ? 2 : 1,
+                borderColor: labelInvalid ? alertColor : borderColor,
+                backgroundColor: surfaceColor,
+                paddingHorizontal: padH,
+                fontSize: inputFontSize,
+                fontFamily: 'Inter',
+                color: textColor,
+              }}
+              {...labelA11y(Platform.OS, 'Nombre del dato')}
+            />
+            {/* Error INLINE del campo Nombre. */}
+            {labelInvalid ? <FieldError message={error!.message} testID="custom-field-label-error" /> : null}
+          </YStack>
+
+          {/* TIPO DE INPUT (los 7 ui_component, R13.8). En modo EDIT (M7, R13.26) el tipo es INMUTABLE → se
+              muestra SOLO el tipo actual, deshabilitado, con una nota: re-tipar = borrar + recrear. */}
+          {isEdit ? (
+            <YStack gap="$2">
+              <Text fontFamily="$body" fontSize="$4" lineHeight="$4" fontWeight="600" color="$textPrimary" numberOfLines={1}>
+                Tipo de dato
+              </Text>
+              <XStack
+                alignItems="center"
+                gap="$3"
+                minHeight="$touchMin"
+                paddingHorizontal="$3"
+                borderRadius="$card"
+                borderWidth={1}
+                backgroundColor="$surface"
+                borderColor="$divider"
+                opacity={0.7}
+                testID="custom-field-type-locked"
+              >
+                <YStack flex={1} minWidth={0}>
+                  <Text fontFamily="$body" fontSize="$4" lineHeight="$4" fontWeight="700" color="$textPrimary" numberOfLines={1}>
+                    {UI_COMPONENT_OPTIONS.find((o) => o.uiComponent === uiComponent)?.label ?? uiComponent}
+                  </Text>
+                </YStack>
+              </XStack>
+              <Text fontFamily="$body" fontSize="$3" lineHeight="$4" color="$textMuted" numberOfLines={2}>
+                El tipo no se puede cambiar. Si te equivocaste de tipo, eliminá el dato y creá uno nuevo.
+              </Text>
+            </YStack>
+          ) : (
+            <YStack gap="$2">
+              <Text fontFamily="$body" fontSize="$4" lineHeight="$4" fontWeight="600" color="$textPrimary" numberOfLines={1}>
+                Tipo de dato
+              </Text>
+              <YStack gap="$2">
+                {UI_COMPONENT_OPTIONS.map((opt) => {
+                  const selected = opt.uiComponent === uiComponent;
+                  return (
+                      <XStack
+                        key={opt.uiComponent}
+                        onPress={() => pickType(opt.uiComponent)}
+                        testID={`type-${opt.uiComponent}`}
+                        {...buttonA11y(Platform.OS, { label: opt.label, selected })}
+                        alignItems="center"
+                        gap="$3"
+                        minHeight="$touchMin"
+                        paddingHorizontal="$3"
+                        borderRadius="$card"
+                        borderWidth={1}
+                        // Regla A (sólido, modo maniobra — design-system §2.1): la opción SELECCIONADA va
+                        // fondo $primary + texto/Check $white (8:1). El borde $primary sobre fill $primary
+                        // no deja costura visible (el sólido ya distingue) — se conserva sin efecto. La rama
+                        // NO seleccionada ($surface + $textPrimary + borde $divider) queda igual.
+                        backgroundColor={selected ? '$primary' : '$surface'}
+                        borderColor={selected ? '$primary' : '$divider'}
+                        pressStyle={{ opacity: 0.85 }}
+                      >
+                        <YStack flex={1} minWidth={0}>
+                          <Text
+                            fontFamily="$body"
+                            fontSize="$4"
+                            lineHeight="$4"
+                            fontWeight={selected ? '700' : '500'}
+                            color={selected ? '$white' : '$textPrimary'}
+                            numberOfLines={1}
+                          >
+                            {opt.label}
+                          </Text>
+                          {/* El hint sigue al fondo: sobre $primary (selected) $textMuted queda ~1.38:1
+                              (ilegible) → va $white como el label (regla A); la jerarquía la da el
+                              peso/tamaño ($3 vs $4/700). Fuera de selected mantiene $textMuted sobre $surface. */}
+                          <Text
+                            fontFamily="$body"
+                            fontSize="$3"
+                            lineHeight="$3"
+                            color={selected ? '$white' : '$textMuted'}
+                            numberOfLines={1}
+                          >
+                            {opt.hint}
+                          </Text>
+                        </YStack>
+                        {selected ? <Check size={iconSize} color={WHITE} strokeWidth={2.5} /> : null}
+                      </XStack>
+                  );
+                })}
+              </YStack>
+            </YStack>
+          )}
+
+          {/* EDITOR DE OPCIONES (solo enum_single / enum_multi, R13.8) */}
+          {needsOptions ? (
+            <YStack
+              gap="$2"
+              // Medimos toda la sección de Opciones (título + nota + editor + mensaje inline + cola de chips).
+              // Su onLayout se RE-dispara cuando el mensaje inline crece el alto → ahí consumimos el scroll
+              // pendiente con la geometría DEFINITIVA (input + borde terracota + mensaje completos a la vista,
+              // a 360 y 412). La cola de chips se descuenta aparte (`chipsHRef`, ver `runScrollToField`).
+              onLayout={(e) => {
+                onFieldLayout('options', e.nativeEvent.layout.y, e.nativeEvent.layout.height);
+              }}
             >
-              {/* NOMBRE (label) */}
+              <Text fontFamily="$body" fontSize="$4" lineHeight="$4" fontWeight="600" color="$textPrimary" numberOfLines={1}>
+                {`Opciones (${options.length})`}
+              </Text>
+              <InfoNote>Agregá las opciones que se van a poder elegir. Ej.: adentro, afuera, normal.</InfoNote>
+
+              {/* Editor de opciones: si está inválido, lo envolvemos en un marco terracota para que el operario
+                  vea EXACTAMENTE qué completar (borde de alerta a nivel de editor, no a nivel de un input suelto). */}
               <YStack
                 gap="$2"
-                onLayout={(e) => {
-                  onFieldLayout('label', e.nativeEvent.layout.y, e.nativeEvent.layout.height);
-                }}
+                borderRadius="$card"
+                borderWidth={optionsInvalid ? 2 : 0}
+                borderColor={optionsInvalid ? '$terracota' : 'transparent'}
+                padding={optionsInvalid ? '$2' : '$0'}
+                testID="custom-field-options-editor"
               >
-                <Text fontFamily="$body" fontSize="$4" lineHeight="$4" fontWeight="600" color="$textPrimary" numberOfLines={1}>
-                  Nombre
-                </Text>
-                <TextInput
-                  value={label}
-                  onChangeText={(t) => {
-                    setLabel(t.slice(0, LABEL_MAX));
-                    // Limpiamos el error si era de este campo (o general) cuando el usuario lo edita.
-                    if (labelInvalid || generalError) setError(null);
-                  }}
-                  placeholder={mode === 'maniobra' ? 'Ej.: Ángulo de pezuñas' : 'Ej.: Apodo'}
-                  placeholderTextColor={placeholderColor}
-                  autoCapitalize="sentences"
-                  maxLength={LABEL_MAX}
-                  testID="custom-field-label"
-                  style={{
-                    minHeight: inputMinHeight,
-                    borderRadius: radius,
-                    borderWidth: labelInvalid ? 2 : 1,
-                    borderColor: labelInvalid ? alertColor : borderColor,
-                    backgroundColor: surfaceColor,
-                    paddingHorizontal: padH,
-                    fontSize: inputFontSize,
-                    fontFamily: 'Inter',
-                    color: textColor,
-                  }}
-                  {...labelA11y(Platform.OS, 'Nombre del dato')}
-                />
-                {/* Error INLINE del campo Nombre. */}
-                {labelInvalid ? <FieldError message={error!.message} testID="custom-field-label-error" /> : null}
-              </YStack>
-
-              {/* TIPO DE INPUT (los 7 ui_component, R13.8). En modo EDIT (M7, R13.26) el tipo es INMUTABLE → se
-                  muestra SOLO el tipo actual, deshabilitado, con una nota: re-tipar = borrar + recrear. */}
-              {isEdit ? (
-                <YStack gap="$2">
-                  <Text fontFamily="$body" fontSize="$4" lineHeight="$4" fontWeight="600" color="$textPrimary" numberOfLines={1}>
-                    Tipo de dato
-                  </Text>
-                  <XStack
-                    alignItems="center"
-                    gap="$3"
-                    minHeight="$touchMin"
-                    paddingHorizontal="$3"
-                    borderRadius="$card"
-                    borderWidth={1}
-                    backgroundColor="$surface"
-                    borderColor="$divider"
-                    opacity={0.7}
-                    testID="custom-field-type-locked"
+                {/* Input + "Agregar". Va PRIMERO (ver cabecera, consistencia con ManeuverConfigSheet): con el
+                    teclado arriba queda clavado en el tope del bloque y las opciones agregadas NO lo empujan. */}
+                <XStack gap="$2" alignItems="center">
+                  <View flex={1}>
+                    <TextInput
+                      value={optionDraft}
+                      onChangeText={(t) => {
+                        setOptionDraft(t.slice(0, OPTION_LABEL_MAX));
+                        // Editar opciones limpia el error de opciones (o el general).
+                        if (optionsInvalid || generalError) setError(null);
+                      }}
+                      placeholder="Nueva opción"
+                      placeholderTextColor={placeholderColor}
+                      autoCapitalize="sentences"
+                      // Enter AGREGA la opción y MANTIENE el teclado abierto (cargar 4 opciones seguidas
+                      // no puede obligar a reabrirlo 4 veces). `submitBehavior='submit'` es la API de RN
+                      // 0.77+ (RN 0.85.3 acá); `blurOnSubmit={false}` es el par para react-native-web, que
+                      // todavía no lee submitBehavior. Mismo criterio que el input multi de vacunas.
+                      returnKeyType="next"
+                      submitBehavior="submit"
+                      blurOnSubmit={false}
+                      maxLength={OPTION_LABEL_MAX}
+                      onSubmitEditing={addOption}
+                      testID="custom-field-option-input"
+                      style={{
+                        minHeight: inputMinHeight,
+                        borderRadius: radius,
+                        borderWidth: 1,
+                        borderColor,
+                        backgroundColor: surfaceColor,
+                        paddingHorizontal: padH,
+                        fontSize: inputFontSize,
+                        fontFamily: 'Inter',
+                        color: textColor,
+                      }}
+                      {...labelA11y(Platform.OS, 'Nueva opción')}
+                    />
+                  </View>
+                  <Pressable
+                    onPress={addOption}
+                    disabled={optTrimmed.length === 0}
+                    testID="custom-field-add-option"
+                    {...buttonA11y(Platform.OS, { label: 'Agregar opción', disabled: optTrimmed.length === 0 })}
                   >
-                    <YStack flex={1} minWidth={0}>
-                      <Text fontFamily="$body" fontSize="$4" lineHeight="$4" fontWeight="700" color="$textPrimary" numberOfLines={1}>
-                        {UI_COMPONENT_OPTIONS.find((o) => o.uiComponent === uiComponent)?.label ?? uiComponent}
-                      </Text>
-                    </YStack>
-                  </XStack>
-                  <Text fontFamily="$body" fontSize="$3" lineHeight="$4" color="$textMuted" numberOfLines={2}>
-                    El tipo no se puede cambiar. Si te equivocaste de tipo, eliminá el dato y creá uno nuevo.
-                  </Text>
-                </YStack>
-              ) : (
-                <YStack gap="$2">
-                  <Text fontFamily="$body" fontSize="$4" lineHeight="$4" fontWeight="600" color="$textPrimary" numberOfLines={1}>
-                    Tipo de dato
-                  </Text>
-                  <YStack gap="$2">
-                    {UI_COMPONENT_OPTIONS.map((opt) => {
-                      const selected = opt.uiComponent === uiComponent;
+                    <View
+                      width={inputMinHeight}
+                      height={inputMinHeight}
+                      borderRadius="$card"
+                      alignItems="center"
+                      justifyContent="center"
+                      backgroundColor={optTrimmed.length === 0 ? '$surface' : '$primary'}
+                      borderWidth={1}
+                      borderColor={optTrimmed.length === 0 ? '$divider' : '$primary'}
+                    >
+                      <Plus size={24} color={optTrimmed.length === 0 ? FAINT : surfaceColor} strokeWidth={3} />
+                    </View>
+                  </Pressable>
+                </XStack>
+
+                {/* Error INLINE del editor de Opciones: PEGADO al input (arriba de los chips) — es lo que hay
+                    que leer para corregir; detrás de N chips quedaría below-the-fold. */}
+                {optionsInvalid ? <FieldError message={error!.message} testID="custom-field-options-error" /> : null}
+
+                {/* Chips de las opciones YA agregadas, JUSTO DEBAJO del input: el chip nuevo aparece donde está
+                    el ojo (proximidad Gestalt) y crecen hacia abajo sin mover el input. La × quita. Una opción
+                    EXISTENTE (modo edit) NO tiene × (append-only, R13.33): se muestra fija (no se puede quitar
+                    para no orfanar capturas). Las agregadas en esta sesión sí se pueden quitar. */}
+                {options.length > 0 ? (
+                  <XStack
+                    flexWrap="wrap"
+                    gap="$2"
+                    // Alto medido de la COLA de chips: lo resta el scroll-al-campo para alinear el bloque
+                    // crítico (input + mensaje) y no la última fila de chips.
+                    onLayout={(e) => {
+                      chipsHRef.current = e.nativeEvent.layout.height;
+                    }}
+                  >
+                    {options.map((it) => {
+                      const locked = isLockedOption(it);
                       return (
-                          <XStack
-                            key={opt.uiComponent}
-                            onPress={() => pickType(opt.uiComponent)}
-                            testID={`type-${opt.uiComponent}`}
-                            {...buttonA11y(Platform.OS, { label: opt.label, selected })}
-                            alignItems="center"
-                            gap="$3"
-                            minHeight="$touchMin"
-                            paddingHorizontal="$3"
-                            borderRadius="$card"
-                            borderWidth={1}
-                            // Regla A (sólido, modo maniobra — design-system §2.1): la opción SELECCIONADA va
-                            // fondo $primary + texto/Check $white (8:1). El borde $primary sobre fill $primary
-                            // no deja costura visible (el sólido ya distingue) — se conserva sin efecto. La rama
-                            // NO seleccionada ($surface + $textPrimary + borde $divider) queda igual.
-                            backgroundColor={selected ? '$primary' : '$surface'}
-                            borderColor={selected ? '$primary' : '$divider'}
-                            pressStyle={{ opacity: 0.85 }}
-                          >
-                            <YStack flex={1} minWidth={0}>
-                              <Text
-                                fontFamily="$body"
-                                fontSize="$4"
-                                lineHeight="$4"
-                                fontWeight={selected ? '700' : '500'}
-                                color={selected ? '$white' : '$textPrimary'}
-                                numberOfLines={1}
-                              >
-                                {opt.label}
-                              </Text>
-                              {/* El hint sigue al fondo: sobre $primary (selected) $textMuted queda ~1.38:1
-                                  (ilegible) → va $white como el label (regla A); la jerarquía la da el
-                                  peso/tamaño ($3 vs $4/700). Fuera de selected mantiene $textMuted sobre $surface. */}
-                              <Text
-                                fontFamily="$body"
-                                fontSize="$3"
-                                lineHeight="$3"
-                                color={selected ? '$white' : '$textMuted'}
-                                numberOfLines={1}
-                              >
-                                {opt.hint}
-                              </Text>
-                            </YStack>
-                            {selected ? <Check size={iconSize} color={WHITE} strokeWidth={2.5} /> : null}
-                          </XStack>
+                        <XStack
+                          key={it}
+                          backgroundColor="$primary"
+                          borderRadius="$pill"
+                          paddingLeft="$3"
+                          paddingRight={locked ? '$3' : '$2'}
+                          paddingVertical="$2"
+                          alignItems="center"
+                          gap="$2"
+                          testID={`option-chip-${it}`}
+                        >
+                          <Text fontFamily="$body" fontSize="$4" lineHeight="$4" fontWeight="600" color="$white" numberOfLines={1}>
+                            {it}
+                          </Text>
+                          {locked ? null : (
+                            <Pressable
+                              onPress={() => removeOption(it)}
+                              hitSlop={8}
+                              {...buttonA11y(Platform.OS, { label: `Quitar ${it}` })}
+                            >
+                              <X size={18} color={WHITE} strokeWidth={3} />
+                            </Pressable>
+                          )}
+                        </XStack>
                       );
                     })}
-                  </YStack>
-                </YStack>
-              )}
-
-              {/* EDITOR DE OPCIONES (solo enum_single / enum_multi, R13.8) */}
-              {needsOptions ? (
-                <YStack
-                  gap="$2"
-                  // Medimos toda la sección de Opciones (título + nota + editor + mensaje inline). Su onLayout
-                  // se RE-dispara cuando el mensaje inline crece el alto → ahí consumimos el scroll pendiente con
-                  // la geometría DEFINITIVA (input + borde terracota + mensaje completos a la vista, a 360 y 412).
-                  onLayout={(e) => {
-                    onFieldLayout('options', e.nativeEvent.layout.y, e.nativeEvent.layout.height);
-                  }}
-                >
-                  <Text fontFamily="$body" fontSize="$4" lineHeight="$4" fontWeight="600" color="$textPrimary" numberOfLines={1}>
-                    {`Opciones (${options.length})`}
-                  </Text>
-                  <InfoNote>Agregá las opciones que se van a poder elegir. Ej.: adentro, afuera, normal.</InfoNote>
-
-                  {/* Editor de opciones: si está inválido, lo envolvemos en un marco terracota para que el operario
-                      vea EXACTAMENTE qué completar (borde de alerta a nivel de editor, no a nivel de un input suelto). */}
-                  <YStack
-                    gap="$2"
-                    borderRadius="$card"
-                    borderWidth={optionsInvalid ? 2 : 0}
-                    borderColor={optionsInvalid ? '$terracota' : 'transparent'}
-                    padding={optionsInvalid ? '$2' : '$0'}
-                    testID="custom-field-options-editor"
-                  >
-                    {/* Chips de opciones; la × quita. Una opción EXISTENTE (modo edit) NO tiene × (append-only,
-                        R13.33): se muestra fija (no se puede quitar para no orfanar capturas). Las agregadas en
-                        esta sesión sí se pueden quitar. */}
-                    {options.length > 0 ? (
-                      <XStack flexWrap="wrap" gap="$2">
-                        {options.map((it) => {
-                          const locked = isLockedOption(it);
-                          return (
-                            <XStack
-                              key={it}
-                              backgroundColor="$primary"
-                              borderRadius="$pill"
-                              paddingLeft="$3"
-                              paddingRight={locked ? '$3' : '$2'}
-                              paddingVertical="$2"
-                              alignItems="center"
-                              gap="$2"
-                              testID={`option-chip-${it}`}
-                            >
-                              <Text fontFamily="$body" fontSize="$4" lineHeight="$4" fontWeight="600" color="$white" numberOfLines={1}>
-                                {it}
-                              </Text>
-                              {locked ? null : (
-                                <Pressable
-                                  onPress={() => removeOption(it)}
-                                  hitSlop={8}
-                                  {...buttonA11y(Platform.OS, { label: `Quitar ${it}` })}
-                                >
-                                  <X size={18} color={WHITE} strokeWidth={3} />
-                                </Pressable>
-                              )}
-                            </XStack>
-                          );
-                        })}
-                      </XStack>
-                    ) : null}
-
-                    {/* Input + "Agregar". */}
-                    <XStack gap="$2" alignItems="center">
-                      <View flex={1}>
-                        <TextInput
-                          value={optionDraft}
-                          onChangeText={(t) => {
-                            setOptionDraft(t.slice(0, OPTION_LABEL_MAX));
-                            // Editar opciones limpia el error de opciones (o el general).
-                            if (optionsInvalid || generalError) setError(null);
-                          }}
-                          placeholder="Nueva opción"
-                          placeholderTextColor={placeholderColor}
-                          autoCapitalize="sentences"
-                          returnKeyType="done"
-                          maxLength={OPTION_LABEL_MAX}
-                          onSubmitEditing={addOption}
-                          testID="custom-field-option-input"
-                          style={{
-                            minHeight: inputMinHeight,
-                            borderRadius: radius,
-                            borderWidth: 1,
-                            borderColor,
-                            backgroundColor: surfaceColor,
-                            paddingHorizontal: padH,
-                            fontSize: inputFontSize,
-                            fontFamily: 'Inter',
-                            color: textColor,
-                          }}
-                          {...labelA11y(Platform.OS, 'Nueva opción')}
-                        />
-                      </View>
-                      <Pressable
-                        onPress={addOption}
-                        disabled={optTrimmed.length === 0}
-                        testID="custom-field-add-option"
-                        {...buttonA11y(Platform.OS, { label: 'Agregar opción', disabled: optTrimmed.length === 0 })}
-                      >
-                        <View
-                          width={inputMinHeight}
-                          height={inputMinHeight}
-                          borderRadius="$card"
-                          alignItems="center"
-                          justifyContent="center"
-                          backgroundColor={optTrimmed.length === 0 ? '$surface' : '$primary'}
-                          borderWidth={1}
-                          borderColor={optTrimmed.length === 0 ? '$divider' : '$primary'}
-                        >
-                          <Plus size={24} color={optTrimmed.length === 0 ? FAINT : surfaceColor} strokeWidth={3} />
-                        </View>
-                      </Pressable>
-                    </XStack>
-
-                    {/* Error INLINE del editor de Opciones. */}
-                    {optionsInvalid ? <FieldError message={error!.message} testID="custom-field-options-error" /> : null}
-                  </YStack>
-                </YStack>
-              ) : null}
-
-              {/* Error GENERAL (residual del server al crear; no mapea a un campo) — al final del cuerpo,
-                  NUNCA tapa el título. */}
-              {generalError ? <FieldError message={generalError} testID="custom-field-general-error" /> : null}
-            </ScrollView>
-
-            {/* ── FOOTER FIJO (Crear/Guardar cambios + Cancelar). flexShrink:0 → siempre abajo, nunca fuera. ── */}
-            <YStack flexShrink={0} gap="$2">
-              <Button variant="primary" fullWidth disabled={submitting} onPress={() => void handleCreate()}>
-                {submitting ? (isEdit ? 'Guardando…' : 'Creando…') : isEdit ? 'Guardar cambios' : 'Crear'}
-              </Button>
-              <Button variant="secondary" fullWidth disabled={submitting} onPress={onClose}>
-                Cancelar
-              </Button>
+                  </XStack>
+                ) : null}
+              </YStack>
             </YStack>
-          </>
-        )}
-      </YStack>
-    </View>
+          ) : null}
+
+          {/* Error GENERAL (residual del server al crear; no mapea a un campo) — al final del cuerpo,
+              NUNCA tapa el título. */}
+          {generalError ? <FieldError message={generalError} testID="custom-field-general-error" /> : null}
+        </>
+      )}
+    </BottomSheetShell>
   );
 }
 

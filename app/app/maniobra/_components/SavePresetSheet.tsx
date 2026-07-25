@@ -19,25 +19,23 @@
 // FAIL-CLOSED: si createPreset devuelve ok:false, NO se cierra el sheet ni se pierde lo tipeado — se
 // superficia un error accionable es-AR y se deja reintentar (mismo espíritu que ExitJornadaSheet).
 //
-// PATRÓN del sheet (idiom LOCKEADO de ManeuverConfigSheet / ExitJornadaSheet): backdrop $scrim tappable que
-// descarta + sheet anclado abajo con grip + safe-area inferior.
+// ── SHELL: `BottomSheetShell` (primitivo del repo) ────────────────────────────────────────────────────
+// El esqueleto (backdrop $scrim tappable con el GUARD anti tap-through de web táctil —doble rAF, regla
+// `reference_rn_web_pitfalls`—, header fijo / body scroll / footer fijo, safe-area) vive en el primitivo.
+// Este sheet es el caso más expuesto al BUG 🔴 del teclado: `autoFocus` abre el teclado AL MONTAR, así que
+// sin keyboard-avoidance el input y el CTA nacían tapados. El primitivo lo sube por encima del teclado y
+// condensa (suelta la descripción y el "Cancelar"; la X del header queda como salida).
 //
-// ⚠️ GUARD ANTI TAP-THROUGH (web táctil, regla del repo `reference_rn_web_pitfalls`): el scrim lleva el
-// guard `readyToDismissRef` armado en el próximo frame (doble requestAnimationFrame + fallback
-// setTimeout(0)), igual que ManeuverConfigSheet/ExitJornadaSheet — el `click` huérfano del open (touch→mouse
-// emulado del tap que abrió el sheet) NO debe auto-cerrarlo (~1ms). Un tap DELIBERADO posterior SÍ cierra.
-//
-// RECORTE DE DESCENDENTES (regla dura): el título ("Guardar como rutina" trae g/p/j) y todo Text con
-// numberOfLines llevan lineHeight matching. Cero hardcode (ADR-023 §4): tokens; lucide vía getTokenValue.
-// es-AR voseo. Targets manga ≥$touchMin.
+// RECORTE DE DESCENDENTES (regla dura): el título ("Guardar como rutina" trae g/p/j) lo maneja el shell con
+// lineHeight matching; todo Text con numberOfLines de acá también. Cero hardcode (ADR-023 §4): tokens;
+// lo que cruza a APIs no-Tamagui vía getTokenValue. es-AR voseo. Targets manga ≥$touchMin.
 
-import { useEffect, useRef, useState } from 'react';
-import { Platform, Pressable, TextInput } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { getTokenValue, Text, View, YStack } from 'tamagui';
+import { useState } from 'react';
+import { Platform, TextInput } from 'react-native';
+import { getTokenValue, Text, View } from 'tamagui';
 
-import { Button } from '@/components';
-import { buttonA11y, labelA11y } from '@/utils/a11y';
+import { BottomSheetShell, Button } from '@/components';
+import { labelA11y } from '@/utils/a11y';
 
 /** Tope de longitud del nombre de la rutina (cliente/UX; el DB solo exige no-vacío). */
 export const MAX_PRESET_NAME_LEN = 60;
@@ -70,42 +68,6 @@ export function SavePresetSheet({
   description = 'Guardás esta combinación de maniobras para reusarla en otra jornada.',
   ctaLabel = 'Guardar',
 }: SavePresetSheetProps) {
-  const insets = useSafeAreaInsets();
-
-  // ── GUARD del backdrop contra el "click huérfano" del tap que abrió el sheet (BUG web táctil) ──
-  // Idéntico a ManeuverConfigSheet/ExitJornadaSheet: el botón "Guardar como rutina" abre el sheet con un
-  // onPress; en web táctil el browser emula touch→mouse→click ~20ms después y ese click cae sobre el scrim
-  // recién montado (un Pressable con onPress=onClose que cubre la pantalla) → lo cerraría a ~1ms. El scrim
-  // ignora presses hasta estar "listo para descartar" (armado en el PRÓXIMO frame vía doble rAF). Para
-  // entonces el click huérfano del open ya pasó, pero un tap DELIBERADO posterior del usuario SÍ cierra.
-  // Ref (no estado): el scrim lo lee en el onPress sin re-render. Fallback setTimeout(0) sin DOM.
-  const readyToDismissRef = useRef(false);
-  useEffect(() => {
-    let raf1 = 0;
-    let raf2 = 0;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const arm = () => {
-      readyToDismissRef.current = true;
-    };
-    if (typeof requestAnimationFrame === 'function') {
-      raf1 = requestAnimationFrame(() => {
-        raf2 = requestAnimationFrame(arm);
-      });
-    } else {
-      timer = setTimeout(arm, 0);
-    }
-    return () => {
-      if (raf1) cancelAnimationFrame(raf1);
-      if (raf2) cancelAnimationFrame(raf2);
-      if (timer) clearTimeout(timer);
-    };
-  }, []);
-
-  const onBackdropPress = () => {
-    if (!readyToDismissRef.current) return;
-    onClose();
-  };
-
   const [name, setName] = useState(initialName);
   // ¿Guardar en vuelo? Deshabilita el botón para no disparar dos createPreset.
   const [saving, setSaving] = useState(false);
@@ -140,111 +102,72 @@ export function SavePresetSheet({
   const inputMinHeight = getTokenValue('$searchBarLg', 'size');
   const radius = getTokenValue('$card', 'radius');
   const padH = getTokenValue('$4', 'space');
-  const bottomPad = Math.max(insets.bottom, getTokenValue('$navBottomMin', 'size'));
 
   return (
-    // Backdrop $scrim que cubre la pantalla + sheet anclado abajo. El backdrop cierra (= cancelar).
-    <View
-      position="absolute"
-      top="$0"
-      left="$0"
-      right="$0"
-      bottom="$0"
-      backgroundColor="$scrim"
-      justifyContent="flex-end"
+    <BottomSheetShell
+      title={title}
+      description={description}
+      onClose={onClose}
+      testID="save-preset-sheet"
+      scrimTestID="save-preset-scrim"
+      scrimA11yLabel="Cancelar"
+      footer={
+        <Button variant="primary" fullWidth disabled={!canSave} onPress={() => void handleSave()}>
+          {saving ? 'Guardando…' : ctaLabel}
+        </Button>
+      }
+      secondaryFooter={
+        <Button variant="secondary" fullWidth onPress={onClose}>
+          Cancelar
+        </Button>
+      }
     >
-      <Pressable
-        style={{ flex: 1, width: '100%' }}
-        onPress={onBackdropPress}
-        testID="save-preset-scrim"
-        {...buttonA11y(Platform.OS, { label: 'Cancelar' })}
-      />
-
-      <YStack
-        width="100%"
-        backgroundColor="$bg"
-        borderTopLeftRadius="$card"
-        borderTopRightRadius="$card"
-        paddingHorizontal="$4"
-        paddingTop="$4"
-        paddingBottom={bottomPad}
-        gap="$4"
-        testID="save-preset-sheet"
-      >
-        {/* Grip visual del sheet. */}
+      {/* ERROR (fail-closed): createPreset falló → NO se cerró. Accionable es-AR + reintentar, sin perder
+          lo tipeado. Terracota (color de aviso del DS). Recorte de descendentes: lineHeight. */}
+      {error ? (
         <View
-          alignSelf="center"
-          width={getTokenValue('$icon', 'size')}
-          height={getTokenValue('$progressTrack', 'size')}
-          borderRadius="$pill"
-          backgroundColor="$divider"
-        />
-
-        {/* Título + ayuda. lineHeight matching (los títulos traen g/p). */}
-        <YStack gap="$1">
-          <Text fontFamily="$heading" fontSize="$7" lineHeight="$7" fontWeight="700" color="$textPrimary" numberOfLines={1}>
-            {title}
+          testID="save-preset-error"
+          backgroundColor="$surface"
+          borderWidth={1}
+          borderColor="$terracota"
+          borderRadius="$card"
+          paddingHorizontal="$4"
+          paddingVertical="$3"
+          {...labelA11y(Platform.OS, error)}
+        >
+          <Text fontFamily="$body" fontSize="$4" lineHeight="$4" fontWeight="700" color="$terracota" numberOfLines={3}>
+            {error}
           </Text>
-          <Text fontFamily="$body" fontSize="$3" lineHeight="$3" color="$textMuted" numberOfLines={2}>
-            {description}
-          </Text>
-        </YStack>
+        </View>
+      ) : null}
 
-        {/* ERROR (fail-closed): createPreset falló → NO se cerró. Accionable es-AR + reintentar, sin perder
-            lo tipeado. Terracota (color de aviso del DS). Recorte de descendentes: lineHeight. */}
-        {error ? (
-          <View
-            testID="save-preset-error"
-            backgroundColor="$surface"
-            borderWidth={1}
-            borderColor="$terracota"
-            borderRadius="$card"
-            paddingHorizontal="$4"
-            paddingVertical="$3"
-            {...labelA11y(Platform.OS, error)}
-          >
-            <Text fontFamily="$body" fontSize="$4" lineHeight="$4" fontWeight="700" color="$terracota" numberOfLines={3}>
-              {error}
-            </Text>
-          </View>
-        ) : null}
-
-        {/* INPUT GRANDE del nombre. */}
-        <TextInput
-          value={name}
-          onChangeText={setName}
-          placeholder="Ej.: Tacto de otoño"
-          placeholderTextColor={placeholderColor}
-          autoCapitalize="sentences"
-          autoFocus
-          maxLength={MAX_PRESET_NAME_LEN}
-          returnKeyType="done"
-          onSubmitEditing={() => void handleSave()}
-          testID="save-preset-input"
-          style={{
-            minHeight: inputMinHeight,
-            borderRadius: radius,
-            borderWidth: 1,
-            borderColor,
-            backgroundColor: surfaceColor,
-            paddingHorizontal: padH,
-            fontSize: inputFontSize,
-            fontFamily: 'Inter',
-            color: textColor,
-          }}
-          {...labelA11y(Platform.OS, 'Nombre de la rutina')}
-        />
-
-        {/* Acciones: Guardar (primary, deshabilitado si vacío/whitespace) / Cancelar (secondary). */}
-        <YStack gap="$2">
-          <Button variant="primary" fullWidth disabled={!canSave} onPress={() => void handleSave()}>
-            {saving ? 'Guardando…' : ctaLabel}
-          </Button>
-          <Button variant="secondary" fullWidth onPress={onClose}>
-            Cancelar
-          </Button>
-        </YStack>
-      </YStack>
-    </View>
+      {/* INPUT GRANDE del nombre. */}
+      <TextInput
+        value={name}
+        onChangeText={setName}
+        placeholder="Ej.: Tacto de otoño"
+        placeholderTextColor={placeholderColor}
+        autoCapitalize="sentences"
+        autoFocus
+        maxLength={MAX_PRESET_NAME_LEN}
+        // UN solo valor a cargar → Enter GUARDA y baja el teclado (blurAndSubmit, default de un input de
+        // una línea). No es el caso multi-carga del sheet de vacunas.
+        returnKeyType="done"
+        onSubmitEditing={() => void handleSave()}
+        testID="save-preset-input"
+        style={{
+          minHeight: inputMinHeight,
+          borderRadius: radius,
+          borderWidth: 1,
+          borderColor,
+          backgroundColor: surfaceColor,
+          paddingHorizontal: padH,
+          fontSize: inputFontSize,
+          fontFamily: 'Inter',
+          color: textColor,
+        }}
+        {...labelA11y(Platform.OS, 'Nombre de la rutina')}
+      />
+    </BottomSheetShell>
   );
 }

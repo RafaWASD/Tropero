@@ -17,20 +17,32 @@
 // DM1-UI-1) que matchean el prefijo tipeado, vía el helper PURO `filterAutocomplete`. Para vacunación
 // se excluyen las que ya están agregadas (no re-sugerir lo puesto).
 //
-// Modelado sobre el patrón as-built de bottom-sheet (BulkConfirmSheet): backdrop $scrim tappable que
-// cierra + YStack anclado abajo con grip + safe-area inferior respetada. Cero hardcode (ADR-023 §4):
-// tokens; lo que cruza a APIs no-Tamagui (lucide) vía getTokenValue. Targets manga ≥$touchMin.
+// ── SHELL: `BottomSheetShell` (primitivo del repo) ────────────────────────────────────────────────────
+// El esqueleto (backdrop $scrim con el guard anti click-huérfano de web, header fijo / body scroll /
+// footer fijo, maxHeight, safe-area) vive en el primitivo. Este archivo solo aporta el CONTENIDO. El
+// primitivo además resuelve el BUG 🔴 MANGA que Raf cazó en iOS: con el teclado abierto el sheet quedaba
+// TAPADO (solo se veía el título) → ahora SUBE por encima del teclado y CONDENSA (suelta la descripción y
+// el "Cancelar"; quedan chips + input + "Guardar", y la X del header como salida).
 //
-// RECORTE DE DESCENDENTES (memoria, regla dura): los títulos ("Vacunación"/"Inseminación" traen g/j) y
-// todo Text con numberOfLines llevan lineHeight matching.
+// ── ORDEN DEL CUERPO: input PRIMERO, chips DEBAJO ────────────────────────────────────────────────────
+// Con el teclado arriba el alto útil del body se parte al medio. Con los chips ARRIBA del input, cada
+// vacuna agregada CRECÍA el contenido por encima del input y lo EMPUJABA hacia abajo (fuera del área
+// visible tras 3-4 vacunas). Con el input primero: el input queda CLAVADO arriba del body (no se mueve al
+// agregar), y el chip nuevo aparece JUSTO DEBAJO — el feedback cae donde ya está el ojo (proximidad
+// Gestalt), sin scroll automático que pelee con el usuario. Las sugerencias ("Usadas antes") van al final.
+//
+// Cero hardcode (ADR-023 §4): tokens; lo que cruza a APIs no-Tamagui (lucide, TextInput) vía getTokenValue.
+// Targets manga ≥$touchMin.
+//
+// RECORTE DE DESCENDENTES (memoria, regla dura): el título ("Vacunación"/"Inseminación" traen g/j) lo
+// maneja el shell con lineHeight matching; todo Text con numberOfLines de acá también lo lleva.
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Platform, Pressable, TextInput } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
+import { getTokenValue, Text, View, XStack, YStack } from 'tamagui';
 import { Plus, X } from 'lucide-react-native';
 
-import { Button } from '@/components';
+import { BottomSheetShell, Button } from '@/components';
 import { buttonA11y, labelA11y } from '@/utils/a11y';
 import { filterAutocomplete, joinMultiPreconfig, splitMultiPreconfig } from '@/utils/maneuver-wizard';
 
@@ -65,48 +77,6 @@ export function ManeuverConfigSheet({
   onSave,
   onClose,
 }: ManeuverConfigSheetProps) {
-  const insets = useSafeAreaInsets();
-
-  // ── GUARD del backdrop contra el "click huérfano" del tap que abrió el sheet (BUG web, Raf) ──
-  // El sheet se monta porque el cuerpo de la fila se tocó vía un `Gesture.Tap()` de gesture-handler
-  // (ManeuverReorderList: bodyTap → runOnJS(onOpenConfig) → setConfigManeuver → este sheet monta un
-  // tick después). En WEB, ese tap deja un `click` DOM nativo que se dispara DESPUÉS del pointerup y
-  // cae sobre el scrim RECIÉN montado (un Pressable con onPress=onClose que cubre la pantalla) → lo
-  // cierra al instante (~1ms). En NATIVE el gesto consume el touch y no hay click suelto → por eso solo
-  // se ve en web. Fix: el scrim ignora presses hasta estar "listo para descartar". Arranca false al
-  // montar y se activa en el PRÓXIMO frame (doble requestAnimationFrame): para entonces el click
-  // huérfano del open ya pasó, pero un tap DELIBERADO posterior del usuario SÍ cierra (no rompe la
-  // salida por backdrop, R3/UX). El guard es SOLO para el scrim; Cancelar/Guardar/chips/sugerencias
-  // andan desde el 1er tick (no pasan por acá). Usamos un ref (no estado): el scrim lo lee en el onPress,
-  // sin re-render. Fallback setTimeout(0) por si rAF no está disponible (entornos sin DOM).
-  const readyToDismissRef = useRef(false);
-  useEffect(() => {
-    let raf1 = 0;
-    let raf2 = 0;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const arm = () => {
-      readyToDismissRef.current = true;
-    };
-    if (typeof requestAnimationFrame === 'function') {
-      raf1 = requestAnimationFrame(() => {
-        raf2 = requestAnimationFrame(arm);
-      });
-    } else {
-      timer = setTimeout(arm, 0);
-    }
-    return () => {
-      if (raf1) cancelAnimationFrame(raf1);
-      if (raf2) cancelAnimationFrame(raf2);
-      if (timer) clearTimeout(timer);
-    };
-  }, []);
-
-  // Cierre por backdrop gateado: ignora el press si el guard todavía no se armó (click huérfano del open).
-  const onBackdropPress = () => {
-    if (!readyToDismissRef.current) return;
-    onClose();
-  };
-
   // Estado del input grande (lo que se está tipeando).
   const [typed, setTyped] = useState(kind === 'single' ? value : '');
   // Vacunas YA agregadas (solo multi). Arranca de lo persistido (split del string coma-separado).
@@ -155,7 +125,6 @@ export function ManeuverConfigSheet({
     }
   };
 
-  const PRIMARY = getTokenValue('$primary', 'color');
   const WHITE = getTokenValue('$white', 'color');
   const FAINT = getTokenValue('$textFaint', 'color');
   const placeholderColor = getTokenValue('$textMuted', 'color');
@@ -168,200 +137,150 @@ export function ManeuverConfigSheet({
   const inputMinHeight = getTokenValue('$searchBarLg', 'size');
   const radius = getTokenValue('$card', 'radius');
   const padH = getTokenValue('$4', 'space');
-  // Respeta la safe-area inferior (el sheet llega al borde de la pantalla).
-  const bottomPad = Math.max(insets.bottom, getTokenValue('$4', 'space'));
 
   return (
-    // Backdrop $scrim que cubre la pantalla + sheet anclado abajo. El backdrop cierra (Pressable).
-    <View
-      position="absolute"
-      top="$0"
-      left="$0"
-      right="$0"
-      bottom="$0"
-      backgroundColor="$scrim"
-      justifyContent="flex-end"
+    <BottomSheetShell
+      title={title}
+      description={
+        kind === 'multi'
+          ? 'Cargá una o varias vacunas para toda la tanda.'
+          : 'Elegí la pajuela por defecto de la tanda.'
+      }
+      onClose={onClose}
+      testID="maneuver-config-sheet"
+      scrimTestID="maneuver-config-scrim"
+      footer={
+        <Button variant="primary" fullWidth onPress={handleSave}>
+          Guardar
+        </Button>
+      }
+      secondaryFooter={
+        <Button variant="secondary" fullWidth onPress={onClose}>
+          Cancelar
+        </Button>
+      }
     >
-      <Pressable
-        style={{ flex: 1, width: '100%' }}
-        onPress={onBackdropPress}
-        testID="maneuver-config-scrim"
-        {...buttonA11y(Platform.OS, { label: 'Cerrar' })}
-      />
-
-      <YStack
-        width="100%"
-        maxHeight="85%"
-        backgroundColor="$bg"
-        borderTopLeftRadius="$card"
-        borderTopRightRadius="$card"
-        paddingHorizontal="$4"
-        paddingTop="$4"
-        paddingBottom={bottomPad}
-        gap="$4"
-        testID="maneuver-config-sheet"
-      >
-        {/* ── HEADER FIJO (grip + título). flexShrink:0 → el título nunca se recorta al crecer el cuerpo. ── */}
-        <YStack flexShrink={0} gap="$4">
-          {/* Grip visual del sheet. */}
-          <View
-            alignSelf="center"
-            width={getTokenValue('$icon', 'size')}
-            height={getTokenValue('$progressTrack', 'size')}
-            borderRadius="$pill"
-            backgroundColor="$divider"
+      {/* INPUT GRANDE (manga-friendly) + en multi, un botón "Agregar" al lado. Va PRIMERO: con el teclado
+          arriba queda clavado en el tope del body y no lo empujan los chips que se van agregando. */}
+      <XStack gap="$2" alignItems="center">
+        <View flex={1}>
+          <TextInput
+            value={typed}
+            onChangeText={setTyped}
+            placeholder={placeholder}
+            placeholderTextColor={placeholderColor}
+            autoCapitalize="sentences"
+            // MULTI: Enter AGREGA y MANTIENE el teclado abierto (cargar 3 vacunas seguidas no puede
+            // obligar a reabrir el teclado 3 veces — 🔴 manga). `submitBehavior='submit'` es la API de
+            // RN 0.77+ (verificada en RN 0.85.3: TextInput.d.ts SubmitBehavior); `blurOnSubmit={false}`
+            // queda como par para react-native-web, que todavía NO lee submitBehavior (su TextInput solo
+            // conoce blurOnSubmit) — con blurOnSubmit=false rn-web igual dispara onSubmitEditing en un
+            // input de una línea, pero no blurea. SINGLE (inseminación): Enter cierra el teclado (el
+            // input ES el valor, no hay nada más que agregar) → comportamiento actual intacto.
+            returnKeyType={kind === 'multi' ? 'next' : 'done'}
+            submitBehavior={kind === 'multi' ? 'submit' : 'blurAndSubmit'}
+            blurOnSubmit={kind !== 'multi'}
+            onSubmitEditing={kind === 'multi' ? () => addItem(typed) : undefined}
+            testID="maneuver-config-input"
+            style={{
+              minHeight: inputMinHeight,
+              borderRadius: radius,
+              borderWidth: 1,
+              borderColor,
+              backgroundColor: surfaceColor,
+              paddingHorizontal: padH,
+              fontSize: inputFontSize,
+              fontFamily: 'Inter',
+              color: textColor,
+            }}
+            {...labelA11y(Platform.OS, title)}
           />
-
-          {/* Título = nombre de la maniobra. lineHeight matching (Vacunación/Inseminación: g/j). */}
-          <YStack gap="$1">
-            <Text fontFamily="$heading" fontSize="$7" lineHeight="$7" fontWeight="700" color="$textPrimary" numberOfLines={1}>
-              {title}
-            </Text>
-            <Text fontFamily="$body" fontSize="$3" lineHeight="$3" color="$textMuted" numberOfLines={2}>
-              {kind === 'multi'
-                ? 'Cargá una o varias vacunas para toda la tanda.'
-                : 'Elegí la pajuela por defecto de la tanda.'}
-            </Text>
-          </YStack>
-        </YStack>
-
-        {/* ── CUERPO scrolleable. flexShrink:1 (grow:0, shrink:1, basis:auto) — NO flex:1 (grow:1, basis:0%). ──
-            BUG 🔴 MANGA (U5, nativo/iOS): con flex:1 el body quedaba INVISIBLE (input no se veía → no se
-            podían cargar vacunas). El padre (YStack maxHeight:85% SIN altura fija) se dimensiona por
-            contenido; cuando el contenido es CORTO (vacunación: input + pocos chips) y NO llega al cap del
-            85%, no hay "espacio libre" que un flexGrow:1 pueda absorber → en Yoga el ScrollView colapsa a su
-            basis:0% → altura 0. En web no pasaba (por eso la E2E no lo cazó). Con flexShrink:1/basis:auto:
-              · contenido CORTO → se dimensiona al contenido (el input SE VE). ✅
-              · contenido ALTO (muchos chips + sugerencias + teclado) → el padre clampea al maxHeight:85% y,
-                como header/footer son flexShrink:0, ESTE ScrollView (shrink:1) absorbe todo el faltante,
-                se achica y SCROLLEA internamente, con el footer siempre abajo. ✅
-            minHeight:0 se conserva (necesario en web para que el flex item pueda achicarse por debajo de su
-            contenido). Contraste as-built: BulkConfirmSheet usa ScrollView SIN flex (content-sized, capado
-            por el maxHeight del padre) y anda; CustomFieldSheet usa flex:1 pero su contenido es SIEMPRE alto
-            → clampea el padre al maxHeight y no colapsa (mismo patrón latente, scope aparte). ── */}
-        <ScrollView flexShrink={1} style={{ minHeight: 0 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: getTokenValue('$3', 'space') }}>
-          {/* Chips de vacunas YA agregadas (solo multi). Tocar la × quita la vacuna. */}
-          {kind === 'multi' && items.length > 0 ? (
-            <XStack flexWrap="wrap" gap="$2">
-              {items.map((it) => (
-                <XStack
-                  key={it}
-                  backgroundColor="$primary"
-                  borderRadius="$pill"
-                  paddingLeft="$3"
-                  paddingRight="$2"
-                  paddingVertical="$2"
-                  alignItems="center"
-                  gap="$2"
-                  testID={`config-chip-${it}`}
-                >
-                  <Text fontFamily="$body" fontSize="$4" lineHeight="$4" fontWeight="600" color="$white" numberOfLines={1}>
-                    {it}
-                  </Text>
-                  <Pressable
-                    onPress={() => removeItem(it)}
-                    hitSlop={8}
-                    {...buttonA11y(Platform.OS, { label: `Quitar ${it}` })}
-                  >
-                    <X size={18} color={WHITE} strokeWidth={3} />
-                  </Pressable>
-                </XStack>
-              ))}
-            </XStack>
-          ) : null}
-
-          {/* INPUT GRANDE (manga-friendly) + en multi, un botón "Agregar" al lado. */}
-          <XStack gap="$2" alignItems="center">
-            <View flex={1}>
-              <TextInput
-                value={typed}
-                onChangeText={setTyped}
-                placeholder={placeholder}
-                placeholderTextColor={placeholderColor}
-                autoCapitalize="sentences"
-                returnKeyType="done"
-                // En multi, Enter agrega la vacuna tipeada como chip (sin cerrar el sheet).
-                onSubmitEditing={kind === 'multi' ? () => addItem(typed) : undefined}
-                testID="maneuver-config-input"
-                style={{
-                  minHeight: inputMinHeight,
-                  borderRadius: radius,
-                  borderWidth: 1,
-                  borderColor,
-                  backgroundColor: surfaceColor,
-                  paddingHorizontal: padH,
-                  fontSize: inputFontSize,
-                  fontFamily: 'Inter',
-                  color: textColor,
-                }}
-                {...labelA11y(Platform.OS, title)}
-              />
+        </View>
+        {kind === 'multi' ? (
+          <Pressable
+            onPress={() => addItem(typed)}
+            disabled={trimmed.length === 0}
+            {...buttonA11y(Platform.OS, { label: 'Agregar vacuna', disabled: trimmed.length === 0 })}
+          >
+            <View
+              width={inputMinHeight}
+              height={inputMinHeight}
+              borderRadius="$card"
+              alignItems="center"
+              justifyContent="center"
+              backgroundColor={trimmed.length === 0 ? '$surface' : '$primary'}
+              borderWidth={1}
+              borderColor={trimmed.length === 0 ? '$divider' : '$primary'}
+            >
+              <Plus size={24} color={trimmed.length === 0 ? FAINT : surfaceColor} strokeWidth={3} />
             </View>
-            {kind === 'multi' ? (
+          </Pressable>
+        ) : null}
+      </XStack>
+
+      {/* Chips de vacunas YA agregadas (solo multi), JUSTO DEBAJO del input: el chip nuevo aparece donde
+          está el ojo. Tocar la × quita la vacuna. */}
+      {kind === 'multi' && items.length > 0 ? (
+        <XStack flexWrap="wrap" gap="$2">
+          {items.map((it) => (
+            <XStack
+              key={it}
+              backgroundColor="$primary"
+              borderRadius="$pill"
+              paddingLeft="$3"
+              paddingRight="$2"
+              paddingVertical="$2"
+              alignItems="center"
+              gap="$2"
+              testID={`config-chip-${it}`}
+            >
+              <Text fontFamily="$body" fontSize="$4" lineHeight="$4" fontWeight="600" color="$white" numberOfLines={1}>
+                {it}
+              </Text>
               <Pressable
-                onPress={() => addItem(typed)}
-                disabled={trimmed.length === 0}
-                {...buttonA11y(Platform.OS, { label: 'Agregar vacuna', disabled: trimmed.length === 0 })}
+                onPress={() => removeItem(it)}
+                hitSlop={8}
+                {...buttonA11y(Platform.OS, { label: `Quitar ${it}` })}
+              >
+                <X size={18} color={WHITE} strokeWidth={3} />
+              </Pressable>
+            </XStack>
+          ))}
+        </XStack>
+      ) : null}
+
+      {/* AUTOCOMPLETAR (R1.8): chips de valores usados antes que matchean lo tipeado. El shell pone
+          keyboardShouldPersistTaps='handled' → con el teclado arriba se agregan al PRIMER toque. */}
+      {suggestions.length > 0 ? (
+        <YStack gap="$2">
+          <Text fontFamily="$body" fontSize="$3" lineHeight="$3" color="$textMuted" numberOfLines={1}>
+            Usadas antes
+          </Text>
+          <XStack flexWrap="wrap" gap="$2">
+            {suggestions.map((s) => (
+              <Pressable
+                key={s}
+                onPress={() => pickSuggestion(s)}
+                {...buttonA11y(Platform.OS, { label: `Usar ${s}` })}
               >
                 <View
-                  width={inputMinHeight}
-                  height={inputMinHeight}
-                  borderRadius="$card"
-                  alignItems="center"
-                  justifyContent="center"
-                  backgroundColor={trimmed.length === 0 ? '$surface' : '$primary'}
+                  backgroundColor="$surface"
+                  borderRadius="$pill"
                   borderWidth={1}
-                  borderColor={trimmed.length === 0 ? '$divider' : '$primary'}
+                  borderColor="$divider"
+                  paddingHorizontal="$3"
+                  paddingVertical="$2"
+                  testID={`config-suggestion-${s}`}
                 >
-                  <Plus size={24} color={trimmed.length === 0 ? FAINT : surfaceColor} strokeWidth={3} />
+                  <Text fontFamily="$body" fontSize="$4" lineHeight="$4" color="$textPrimary" numberOfLines={1}>
+                    {s}
+                  </Text>
                 </View>
               </Pressable>
-            ) : null}
+            ))}
           </XStack>
-
-          {/* AUTOCOMPLETAR (R1.8): chips de valores usados antes que matchean lo tipeado. */}
-          {suggestions.length > 0 ? (
-            <YStack gap="$2">
-              <Text fontFamily="$body" fontSize="$3" lineHeight="$3" color="$textMuted" numberOfLines={1}>
-                Usadas antes
-              </Text>
-              <XStack flexWrap="wrap" gap="$2">
-                {suggestions.map((s) => (
-                  <Pressable
-                    key={s}
-                    onPress={() => pickSuggestion(s)}
-                    {...buttonA11y(Platform.OS, { label: `Usar ${s}` })}
-                  >
-                    <View
-                      backgroundColor="$surface"
-                      borderRadius="$pill"
-                      borderWidth={1}
-                      borderColor="$divider"
-                      paddingHorizontal="$3"
-                      paddingVertical="$2"
-                      testID={`config-suggestion-${s}`}
-                    >
-                      <Text fontFamily="$body" fontSize="$4" lineHeight="$4" color="$textPrimary" numberOfLines={1}>
-                        {s}
-                      </Text>
-                    </View>
-                  </Pressable>
-                ))}
-              </XStack>
-            </YStack>
-          ) : null}
-        </ScrollView>
-
-        {/* ── FOOTER FIJO (Guardar/Cancelar). flexShrink:0 → siempre abajo, nunca empujado fuera. ── */}
-        <YStack flexShrink={0} gap="$2">
-          <Button variant="primary" fullWidth onPress={handleSave}>
-            Guardar
-          </Button>
-          <Button variant="secondary" fullWidth onPress={onClose}>
-            Cancelar
-          </Button>
         </YStack>
-      </YStack>
-    </View>
+      ) : null}
+    </BottomSheetShell>
   );
 }

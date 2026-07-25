@@ -13,22 +13,27 @@
 // filterBreedOptions) — bajo el header fijo, sobre el body scrolleable. "Sin raza" sobrevive siempre al
 // filtro (es la salida para "no sé la raza").
 //
-// PATRÓN canónico de sheet (regla de la skill design-review, idéntico a LotePickerSheet): backdrop $scrim
-// tappable (con GUARD anti tap-through web — doble-rAF, reference_rn_web_pitfalls) + sheet anclado abajo con
-// grip + maxHeight → HEADER FIJO (flexShrink:0, título "Elegir raza" + el campo de búsqueda que NUNCA se
-// recortan al crecer la lista) + BODY SCROLLEABLE (ScrollView flex:1, la lista de razas scrollea adentro, no
-// tapa el título ni la búsqueda) + FOOTER FIJO (Cancelar).
+// ── SHELL: `BottomSheetShell` (primitivo del repo) ────────────────────────────────────────────────────
+// El patrón canónico de sheet (backdrop $scrim tappable con GUARD anti tap-through web —doble-rAF,
+// reference_rn_web_pitfalls—, sheet anclado abajo con grip + maxHeight, HEADER FIJO que no se recorta al
+// crecer la lista, BODY scrolleable, FOOTER FIJO) ya NO se copia a mano acá: vive en el primitivo, que
+// además es KEYBOARD-AWARE. Este sheet lo necesita: al tipear en el buscador, el teclado tapaba la lista de
+// resultados y el "Cancelar" (BUG 🔴 de clase, Raf en iOS) → ahora el sheet SUBE por encima del teclado.
+// El campo de BÚSQUEDA va como primer hijo del BODY (no en el header fijo): con el teclado arriba el alto
+// útil se parte al medio, y un header con 3 bloques fijos (título + descripción + buscador) se comía casi
+// todo lo que queda para los resultados. Al ir en el body, el buscador scrollea con la lista pero arranca
+// SIEMPRE a la vista (es el primer elemento) y la lista conserva alto útil para ~3-4 razas.
 //
 // RECORTE DE DESCENDENTES (memoria): los nombres de raza no tienen descendentes problemáticos hoy, pero todo
 // Text con numberOfLines lleva lineHeight matching por regla dura. Cero hardcode (ADR-023 §4): tokens; lo que
 // cruza a APIs no-Tamagui (lucide, TextInput) vía getTokenValue. es-AR voseo.
 
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { Platform, Pressable, TextInput } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
+import { useEffect, useMemo, useState } from 'react';
+import { Platform, TextInput } from 'react-native';
+import { getTokenValue, Text, View, XStack } from 'tamagui';
 import { Check, Search } from 'lucide-react-native';
 
+import { BottomSheetShell } from '../BottomSheetShell';
 import { buttonA11y } from '../../utils/a11y';
 import {
   breedPickerOptions,
@@ -54,44 +59,18 @@ export type BreedPickerSheetProps = {
 };
 
 export function BreedPickerSheet({ open, onClose, breeds, selectedCode, onSelect }: BreedPickerSheetProps) {
-  const insets = useSafeAreaInsets();
-  const bottomPad = Math.max(insets.bottom, getTokenValue('$navBottomMin', 'size'));
   const muted = getTokenValue('$textMuted', 'color');
   const placeholderColor = getTokenValue('$textMuted', 'color');
 
   const [query, setQuery] = useState('');
 
-  // ── GUARD del backdrop contra el "click huérfano" del tap que abrió el sheet (BUG web táctil) ──
-  // Idéntico a LotePickerSheet: el tap que abre este sheet (la afordancia "Elegir raza" del form) deja, en
-  // web táctil, un `click` emulado (touch→mouse) ~20ms después que caería sobre el scrim recién montado → lo
-  // cerraría a ~1ms. El scrim ignora presses hasta estar "listo para descartar" (armado en el PRÓXIMO frame
-  // vía doble rAF). Se RE-ARMA cada vez que se abre (open en deps). Ref (no estado): el scrim lo lee sin re-render.
-  const readyToDismissRef = useRef(false);
+  // El GUARD anti "click huérfano" del backdrop (doble rAF) vive en el primitivo y se ARMA al montar: acá
+  // el shell monta/desmonta con `open` (early return abajo), así que se re-arma en cada apertura — mismo
+  // comportamiento que el guard a mano que tenía este archivo.
+  // Cada vez que se ABRE limpiamos la búsqueda previa (el form reabre el picker "fresco").
   useEffect(() => {
-    if (!open) {
-      readyToDismissRef.current = false;
-      return;
-    }
-    // Cada vez que se ABRE, limpiamos la búsqueda previa (el form reabre el picker "fresco").
+    if (!open) return;
     setQuery('');
-    let raf1 = 0;
-    let raf2 = 0;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const arm = () => {
-      readyToDismissRef.current = true;
-    };
-    if (typeof requestAnimationFrame === 'function') {
-      raf1 = requestAnimationFrame(() => {
-        raf2 = requestAnimationFrame(arm);
-      });
-    } else {
-      timer = setTimeout(arm, 0);
-    }
-    return () => {
-      if (raf1) cancelAnimationFrame(raf1);
-      if (raf2) cancelAnimationFrame(raf2);
-      if (timer) clearTimeout(timer);
-    };
   }, [open]);
 
   // Opciones (helper PURO): "Sin raza" + bovinas activas ordenadas; luego el filtro de búsqueda. Memo por
@@ -103,154 +82,96 @@ export function BreedPickerSheet({ open, onClose, breeds, selectedCode, onSelect
 
   if (!open) return null;
 
-  const onBackdropPress = () => {
-    if (!readyToDismissRef.current) return;
-    onClose();
-  };
-
   return (
-    // Backdrop $scrim que cubre la pantalla + sheet anclado abajo. El backdrop cierra (= cancelar).
-    <View
-      position="absolute"
-      top="$0"
-      left="$0"
-      right="$0"
-      bottom="$0"
-      backgroundColor="$scrim"
-      justifyContent="flex-end"
-    >
-      <Pressable
-        style={{ flex: 1, width: '100%' }}
-        onPress={onBackdropPress}
-        testID="breed-sheet-scrim"
-        {...buttonA11y(Platform.OS, { label: 'Cerrar' })}
-      />
-
-      <YStack
-        width="100%"
-        maxHeight="85%"
-        backgroundColor="$bg"
-        borderTopLeftRadius="$card"
-        borderTopRightRadius="$card"
-        paddingHorizontal="$4"
-        paddingTop="$4"
-        paddingBottom={bottomPad}
-        gap="$4"
-        testID="breed-sheet"
-      >
-        {/* ── HEADER FIJO (grip + título + búsqueda). flexShrink:0 → no se recorta al crecer la lista. ── */}
-        <YStack flexShrink={0} gap="$3">
-          {/* Grip visual del sheet. */}
-          <View
-            alignSelf="center"
-            width={getTokenValue('$icon', 'size')}
-            height={getTokenValue('$progressTrack', 'size')}
-            borderRadius="$pill"
-            backgroundColor="$divider"
-          />
-          <YStack gap="$1">
-            {/* Título $7 con lineHeight matcheado (regla de recorte). */}
-            <Text fontFamily="$heading" fontSize="$7" lineHeight="$7" fontWeight="700" color="$textPrimary" numberOfLines={1}>
-              Elegir raza
-            </Text>
-            <Text fontFamily="$body" fontSize="$3" lineHeight="$3" fontWeight="500" color="$textMuted" numberOfLines={2}>
-              La raza se usa para declarar el animal en SIGSA. Buscá por nombre o código.
-            </Text>
-          </YStack>
-
-          {/* Campo de BÚSQUEDA — input pill con ícono (filtra nombre/código). En el header fijo → siempre
-              visible mientras se scrollea la lista. */}
-          {hasBreeds ? (
-            <XStack
-              width="100%"
-              alignItems="center"
-              gap="$2"
-              minHeight="$chipMin"
-              paddingHorizontal="$3"
-              borderRadius="$pill"
-              backgroundColor="$surface"
-              borderWidth={1}
-              borderColor="$divider"
-            >
-              <Search size={18} color={muted} strokeWidth={2} />
-              <TextInput
-                value={query}
-                onChangeText={setQuery}
-                placeholder="Buscar raza…"
-                placeholderTextColor={placeholderColor}
-                autoCapitalize="none"
-                autoCorrect={false}
-                testID="breed-sheet-search"
-                style={{
-                  flex: 1,
-                  minWidth: 0,
-                  paddingVertical: getTokenValue('$2', 'space'),
-                  fontFamily: 'Inter',
-                  // ⚠ El font-size del TextInput va en PX, leído del token de fuente de INPUT (mismo que
-                  // FormField: $inputText=16). `getTokenValue('$4','size')` leería el token de TAMAÑO global
-                  // (no el de fuente) → fuente gigante (bug detectado en el veto run 2). $inputText es 16px.
-                  fontSize: getTokenValue('$inputText', 'size'),
-                  color: getTokenValue('$textPrimary', 'color'),
-                }}
-                {...(Platform.OS === 'web'
-                  ? { 'aria-label': 'Buscar raza por nombre o código' }
-                  : { accessibilityLabel: 'Buscar raza por nombre o código' })}
-              />
-            </XStack>
-          ) : null}
-        </YStack>
-
-        {/* ── CUERPO scrolleable (flex:1 + minHeight:0 web) → la lista crece adentro, no tapa el header. ── */}
-        <ScrollView
-          flex={1}
-          style={{ minHeight: 0 }}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-          contentContainerStyle={{ gap: getTokenValue('$2', 'space') }}
+    <BottomSheetShell
+      title="Elegir raza"
+      description="La raza se usa para declarar el animal en SIGSA. Buscá por nombre o código."
+      onClose={onClose}
+      testID="breed-sheet"
+      scrimTestID="breed-sheet-scrim"
+      contentGap="$2"
+      // Tap en una opción ya cierra; el secundario es la salida sin elegir (espejo del scrim, accesible sin
+      // apuntar al borde). Con el teclado del buscador ARRIBA se condensa y lo reemplaza la X del header.
+      secondaryFooter={
+        <View
+          testID="breed-sheet-cancelar"
+          minHeight="$touchMin"
+          alignItems="center"
+          justifyContent="center"
+          pressStyle={{ opacity: 0.6 }}
+          onPress={onClose}
+          {...buttonA11y(Platform.OS, { label: 'Cancelar' })}
         >
-          {filtered.map((opt) => (
-            <BreedOption
-              key={opt.id ?? 'none'}
-              testID={opt.id === null ? 'breed-option-none' : `breed-option-${opt.senasaCode}`}
-              option={opt}
-              onPress={() => onSelect(opt.id, opt.id === null ? null : opt.senasaCode)}
-            />
-          ))}
+          <Text fontFamily="$body" fontSize="$5" lineHeight="$5" fontWeight="600" color="$textMuted" numberOfLines={1}>
+            Cancelar
+          </Text>
+        </View>
+      }
+    >
+      {/* Campo de BÚSQUEDA — input pill con ícono (filtra nombre/código). Primer elemento del cuerpo: se ve
+          siempre al abrir y NO consume alto fijo con el teclado arriba (ver cabecera). */}
+      {hasBreeds ? (
+        <XStack
+          width="100%"
+          alignItems="center"
+          gap="$2"
+          minHeight="$chipMin"
+          paddingHorizontal="$3"
+          borderRadius="$pill"
+          backgroundColor="$surface"
+          borderWidth={1}
+          borderColor="$divider"
+        >
+          <Search size={18} color={muted} strokeWidth={2} />
+          <TextInput
+            value={query}
+            onChangeText={setQuery}
+            placeholder="Buscar raza…"
+            placeholderTextColor={placeholderColor}
+            autoCapitalize="none"
+            autoCorrect={false}
+            testID="breed-sheet-search"
+            style={{
+              flex: 1,
+              minWidth: 0,
+              paddingVertical: getTokenValue('$2', 'space'),
+              fontFamily: 'Inter',
+              // ⚠ El font-size del TextInput va en PX, leído del token de fuente de INPUT (mismo que
+              // FormField: $inputText=16). `getTokenValue('$4','size')` leería el token de TAMAÑO global
+              // (no el de fuente) → fuente gigante (bug detectado en el veto run 2). $inputText es 16px.
+              fontSize: getTokenValue('$inputText', 'size'),
+              color: getTokenValue('$textPrimary', 'color'),
+            }}
+            {...(Platform.OS === 'web'
+              ? { 'aria-label': 'Buscar raza por nombre o código' }
+              : { accessibilityLabel: 'Buscar raza por nombre o código' })}
+          />
+        </XStack>
+      ) : null}
 
-          {/* Empty-state del FILTRO: la búsqueda no matcheó ninguna raza (pero "Sin raza" sigue arriba). */}
-          {hasBreeds && filtered.filter((o) => o.id !== null).length === 0 ? (
-            <Text fontFamily="$body" fontSize="$3" lineHeight="$3" fontWeight="500" color="$textFaint" numberOfLines={2} paddingHorizontal="$2" paddingTop="$1">
-              No encontramos esa raza. Probá con otro nombre o código, o elegí "Sin raza".
-            </Text>
-          ) : null}
+      {filtered.map((opt) => (
+        <BreedOption
+          key={opt.id ?? 'none'}
+          testID={opt.id === null ? 'breed-option-none' : `breed-option-${opt.senasaCode}`}
+          option={opt}
+          onPress={() => onSelect(opt.id, opt.id === null ? null : opt.senasaCode)}
+        />
+      ))}
 
-          {/* Empty-state del CATÁLOGO: aún no sincronizó (no debería: la stream lo baja al primer login). */}
-          {!hasBreeds ? (
-            <Text fontFamily="$body" fontSize="$3" lineHeight="$3" fontWeight="500" color="$textFaint" numberOfLines={3} paddingHorizontal="$2" paddingTop="$1">
-              El catálogo de razas todavía no se descargó. Conectate un momento y volvé a intentar.
-            </Text>
-          ) : null}
-        </ScrollView>
+      {/* Empty-state del FILTRO: la búsqueda no matcheó ninguna raza (pero "Sin raza" sigue arriba). */}
+      {hasBreeds && filtered.filter((o) => o.id !== null).length === 0 ? (
+        <Text fontFamily="$body" fontSize="$3" lineHeight="$3" fontWeight="500" color="$textFaint" numberOfLines={2} paddingHorizontal="$2" paddingTop="$1">
+          No encontramos esa raza. Probá con otro nombre o código, o elegí "Sin raza".
+        </Text>
+      ) : null}
 
-        {/* ── FOOTER FIJO (Cancelar). flexShrink:0 → siempre abajo. Tap en una opción ya cierra; este es la
-              salida sin elegir (espejo del scrim, accesible sin apuntar al borde). ── */}
-        <YStack flexShrink={0}>
-          <View
-            testID="breed-sheet-cancelar"
-            minHeight="$touchMin"
-            alignItems="center"
-            justifyContent="center"
-            pressStyle={{ opacity: 0.6 }}
-            onPress={onClose}
-            {...buttonA11y(Platform.OS, { label: 'Cancelar' })}
-          >
-            <Text fontFamily="$body" fontSize="$5" lineHeight="$5" fontWeight="600" color="$textMuted" numberOfLines={1}>
-              Cancelar
-            </Text>
-          </View>
-        </YStack>
-      </YStack>
-    </View>
+      {/* Empty-state del CATÁLOGO: aún no sincronizó (no debería: la stream lo baja al primer login). */}
+      {!hasBreeds ? (
+        <Text fontFamily="$body" fontSize="$3" lineHeight="$3" fontWeight="500" color="$textFaint" numberOfLines={3} paddingHorizontal="$2" paddingTop="$1">
+          El catálogo de razas todavía no se descargó. Conectate un momento y volvé a intentar.
+        </Text>
+      ) : null}
+    </BottomSheetShell>
   );
 }
 
