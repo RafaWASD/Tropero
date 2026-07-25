@@ -3,6 +3,28 @@
 > Este archivo se vacía al cerrar cada sesión y su resumen se mueve a `history.md`.
 > Mientras trabajás, **mantenelo actualizado en tiempo real**, no al final.
 
+## 2026-07-25 — TANDA de 4 bugfixes 🔴 (gesto de descarte + arrastre + auto-guardado + back de Android) — CÓDIGO CERRADO, veredicto de device pendiente
+
+Raf reportó dos cosas sobre el sheet de Vacunación: que deslizar hacia abajo cerraba **el wizard entero** en vez del sheet, y que el grabber del sheet no hacía nada (arrastraba el de atrás). Propuso convertir "elegir maniobras" en screen y "vacunación" en sheet. **Diferí con fundamento**: ya son exactamente eso. `maniobra/jornada` es una ruta real y `ManeuverConfigSheet` es un sheet; el problema estaba en la presentación heredada y en que **ningún sheet del repo era dueño de su propio gesto**.
+
+**Corrección de mi diagnóstico** (asentada porque se la di a Raf mal primero): yo dije que las pantallas vivían DENTRO del contenedor modal del landing. El implementer fue al código instalado y el mecanismo real es otro — expo-router 56 **propaga `modal` hacia adelante** (`getModalRoutesKeys.js`), así que `jornada`, `identificar` y `carga` eran **cada una su propio page-sheet** con su propio swipe-to-destroy. Mismo efecto, misma corrección, explicación distinta.
+
+**Los 4 fixes** (2 implementers en paralelo con propiedad de archivos disjunta, 4 rondas de review + 5 fix-loops, todo `model: opus`):
+1. **Presentación** — `fullScreenModal` + `gestureEnabled:false` en `maniobra/{jornada,identificar,carga}`. El landing `maniobra` queda `modal` a propósito (ahí el swipe-down es correcto: una pantalla sin estado que perder).
+2. **Arrastre propio del `BottomSheetShell`** — detectores DISJUNTOS (header ↔ contenido del body), umbral 25% con piso 64px o flick ≥900px/s, con el teclado arriba baja el teclado y no cierra. El grabber dejó de mentir.
+3. **Auto-guardado del `ManeuverConfigSheet`** — se van "Guardar" y "Cancelar". Mataba un **descarte silencioso**: de las cuatro salidas, tres llamaban `onClose` sin persistir (cargabas 4 vacunas, rozabas el scrim y se perdían sin aviso).
+4. **Back de hardware de Android** (lo encontré yo, no estaba reportado) — **no había un solo `BackHandler` en toda la app**. El back destruía el wizard y salteaba el `ExitJornadaSheet` durante una jornada activa; en `carga` además dejaba filas de evento huérfanas. Es el gemelo Android del bug que Raf vio en iOS, en la plataforma donde el gesto no es un descubrimiento accidental sino el botón de siempre.
+
+**Lo que cazaron las reviews y vale registrar** (dos hallazgos de la misma familia): delta A shippeó un **aserto que no podía fallar** (leía `touch-action` del scroller cuando RNGH-web lo escribe en la vista del detector → pasaba siempre, y si alguien borraba el `touchAction` moría el scroll táctil de los 4 sheets sin que nadie se enterara), y **citó como evidencia permanente** un archivo de test que no contenía el contrafáctico citado. Ambos cerrados: el oráculo se falsificó ejecutando (sacar el `touchAction` lo hace caer, reponerlo lo devuelve a verde) y las citas se bajaron a "medición ad-hoc". Delta B, en el mismo árbol, se había negado por su cuenta a shippear un aserto vacuo — el contraste quedó documentado.
+
+**Veto visual del leader (Gate 2.5)**: reprobó dos veces antes de pasar. (a) El body del shell se cortaba **al ras del footer**, sin aire ni señal de scroll — defecto del primitivo, lo heredaban los 4 consumidores; resuelto con peek + fade + chevron ▾ vía la misma `shouldShowScrollPeek` que ya usan `FooterActionShell` y las listas. (b) Los chips inflados a `$touchMin`=56 competían en peso con el CTA; bajados a `$4`=44 conservando 44×44 de área tocable. Este segundo caso es de manual: el aserto medía `boundingBox`, `hitSlop` no aparece ahí, **así que la forma de medir terminó dictando el diseño**.
+
+**Verificado ejecutando**: `check.mjs` **RC=0**, 2452 unit, e2e verde sobre build fresco, y las atribuciones de flake de los implementers re-verificadas por un reviewer en terminal limpia (no reprodujeron).
+
+**Veredicto de DEVICE pendiente (ADR-029, iOS + Android)**: que el arrastre ya no descarte la jornada, el arrastre real con el dedo, la conducta con el teclado, el `maxHeight` de la envoltura en Yoga nativo, y el back de Android con su precedencia sheet↔pantalla (`BackHandler` no emite en web: la precedencia es lectura de la fuente de RN, no ejecución).
+
+**Hallazgo aparte, NO de esta tanda**: `app/e2e/maniobra-carga.spec.ts` está **2/3 en rojo en HEAD desde el 10/07**, reproducible. Fixture desfasado de su gating (el tacto pasó a exigir hembras servidas, el spec siembra una vaquillona pelada). Pasó quince días desapercibido porque **ese spec no está en la lista de e2e de `check.mjs`** → el RC=0 que usamos de semáforo cubre menos de lo que parece. En backlog, con la recomendación de auditar qué otros specs quedaron fuera.
+
 ## 2026-07-25 — CIERRE del leader de los 2 bugfixes (reviews + fix-loop + specs) — EN PUERTA 2
 
 Los dos bugfixes de abajo pasaron por **reviewer** (uno cada uno, `model: opus`):
@@ -15,7 +37,7 @@ Los dos bugfixes de abajo pasaron por **reviewer** (uno cada uno, `model: opus`)
 
 **Veto visual del leader (Gate 2.5)**: PASS. Miré las capturas nuevas — el editor de opciones quedó idéntico en forma al de vacunación, y el error de duplicado cae pegado al input con los chips debajo.
 
-**BLOQUEANTE ABIERTO**: `SUPABASE_ACCESS_TOKEN` de `.env.local` **revocado** — 401 contra `api.supabase.com/v1/projects`, verificado por el leader y por los dos reviewers de forma independiente. Deja `check.mjs` en rojo con CUALQUIER código (la suite `operaciones_rodeo` pega a la Management API) y bloquea también `scripts/apply-migration.mjs`. **Acción de Raf: rotarlo.** Todo lo demás del check está verde.
+**BLOQUEANTE — RESUELTO el 2026-07-25**: Raf rotó el token; verificado con un chequeo que imprime solo el código HTTP (200, 44 chars, prefijo `sbp_`) y `check.mjs` volvió a RC=0. Se deja el registro porque explica los rojos de esa jornada. Texto original: `SUPABASE_ACCESS_TOKEN` de `.env.local` **revocado** — 401 contra `api.supabase.com/v1/projects`, verificado por el leader y por los dos reviewers de forma independiente. Deja `check.mjs` en rojo con CUALQUIER código (la suite `operaciones_rodeo` pega a la Management API) y bloquea también `scripts/apply-migration.mjs`. **Acción de Raf: rotarlo.** Todo lo demás del check está verde.
 
 **Límite honesto del Gate 2.5 (declarado)**: en react-native-web NO hay teclado nativo — `KeyboardAvoidingView` es un `<View>` inerte y `Keyboard` nunca emite → la E2E prueba el clamp de alto, el orden input/chips, el Enter que conserva foco y la X, pero **NO** que el sheet suba ni la condensación. Eso es veredicto en DEVICE (ADR-029), iOS **y Android** (edge-to-edge de SDK 56: misma apuesta que U2).
 

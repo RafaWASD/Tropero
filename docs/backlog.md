@@ -869,3 +869,46 @@ arreglada.
 ## Grip de reorder por debajo del target manga (pre-existente)
 - **Origen**: reviewer del bugfix del auto-scroll (2026-07-25), nit 6 — verificado, NO introducido por ese delta.
 - `ManeuverReorderList.tsx` → el grip mide ~32px de ancho (`paddingHorizontal="$1"` + icono 24) × 72 de alto: cumple en el eje vertical pero queda por debajo de 60dp en el horizontal. Los labels de fila son `$5` (16px < 18pt del estándar manga). Es la pantalla de configuración del wizard (🟡 mixta), no la manga 🔴, por eso no bloqueó. Endurecer al pasar de nuevo por el wizard.
+
+## `/crear-animal` hereda la presentación modal del flujo de maniobra → sigue descartable por gesto
+- **Origen**: bugfix 🔴 manga "el gesto de descarte destruía la jornada" (2026-07-25). Al arreglar `maniobra/jornada`, `maniobra/identificar` y `maniobra/carga` (`presentation:'fullScreenModal'` + `gestureEnabled:false` en `app/app/_layout.tsx`) quedó a la vista el resto del mecanismo.
+- **Qué pasa**: expo-router 56 hereda modal hacia adelante (`getModalRoutesKeys.js`: toda ruta posterior a un modal SIN `presentation` explícita se presenta como modal). `/crear-animal` se empuja desde la identificación (find-or-create, R4.1) → en iOS se presenta como page-sheet con dismiss interactivo: un arrastre hacia abajo cancela el alta en curso sin confirmación.
+- **Por qué no se arregló acá**: `/crear-animal` se usa desde varios flujos ajenos a maniobra (tab Animales, bastoneo, lista) y cambiarle la `presentation` global toca territorio de spec 02/09; el daño además es acotado (se pierde el alta a medio cargar, no la jornada).
+- **Fix candidato**: `presentation:'fullScreenModal'` + `gestureEnabled:false` en `crear-animal` (y barrer las otras rutas empujadas desde un flujo modal: `agregar-evento`, `animal/[id]`, `lote/venta`…), verificando en device que ninguna de esas pantallas dependa hoy del swipe-down para salir.
+
+## La etapa 2 del wizard se re-renderiza entera en cada tecla del preconfig `single`
+- **Origen**: reviewer del auto-guardado del `ManeuverConfigSheet` (2026-07-25), F1 — el comentario del código afirmaba lo contrario y se corrigió.
+- `jornada.tsx` → `onConfigCommit` tiene un guard de no-op que devuelve el MISMO objeto de estado cuando el valor trimmeado no cambió. Cubre ediciones de solo whitespace y el re-commit idempotente del flush de cierre, pero **no** el modo `single` (inseminación): cada tecla produce un valor distinto → objeto nuevo → re-render de `JornadaWizardScreen`, y con él `StageManeuvers` + `ManeuverReorderList`, que es un function component pelado sin memoizar. Tipear "Toro 456" = 8 re-renders de la etapa 2 completa.
+- **Por qué no se arregló**: el costo real en device no está medido, la lista está tapada por el scrim mientras el sheet está abierto, y un `React.memo` con props de callback no memoizados no aportaría nada. Medir primero en device de gama baja; si molesta, memoizar la lista Y estabilizar sus callbacks en el mismo movimiento.
+
+## Chips de "Usadas antes" por debajo del target manga (pre-existente)
+- **Origen**: reviewer del auto-guardado (2026-07-25), observación 2.
+- Los chips de autocompletar (`ManeuverConfigSheet`) miden ~36px de alto (`fontSize $4` + `paddingVertical $2`), por debajo de los 44 del mínimo iOS. Son el **gemelo constructivo** de la × del chip de vacuna, que en esta misma tanda se subió a 44×44 por estar bajo target — se agrandó una y no la otra.
+- No bloqueó porque el wizard es pantalla 🟡 mixta y porque tocar el alto del chip de sugerencia afecta el wrap de la fila. Endurecer al pasar de nuevo por el sheet.
+
+## Una coma dentro del nombre de una vacuna se parte en dos
+- **Origen**: reviewer del auto-guardado (2026-07-25), observación 3.
+- El preconfig multi persiste como string separado por comas (`joinMultiPreconfig`/`splitMultiPreconfig`), así que un valor con coma adentro ("Man,cha") se guarda como dos vacunas. Con el commit diferido la divergencia era invisible; con auto-guardado el chip muestra uno solo mientras la fila de atrás **ya muestra dos**, en vivo.
+- **Pre-existente** (limitación del formato, no del auto-guardado). Cosmético hoy. Fix real = cambiar el formato de persistencia a un array JSON, lo que toca el round-trip con `maneuverDetail` y los presets ya guardados → migración. No vale hasta que alguien cargue una vacuna con coma.
+
+## `TactoConfigSheet` quedó como el único sheet de la lista con Guardar/Cancelar
+- **Origen**: reviewer del auto-guardado (2026-07-25), observación 4.
+- El argumento que justificó auto-guardar los DOS modos de texto libre fue consistencia (Nielsen #4: dos sheets abiertos desde la misma lista no pueden comportarse distinto). Ese mismo argumento ahora apunta a `TactoConfigSheet`, que se abre desde la MISMA lista con el MISMO gesto y conserva commit diferido con Guardar/Cancelar.
+- **No es equivalente**: el tacto configura un booleano ("¿medir tamaño?"), no texto libre acumulable — no hay "agregar" que ya sea el commit, y el descarte silencioso por scrim pierde un toggle, no cuatro vacunas cargadas a mano. Por eso quedó fuera del alcance que aprobó Raf. Decidir si se unifica la próxima vez que se toque el wizard.
+
+## El peek del `BottomSheetShell` sobre chips puede leerse como "deshabilitado"
+- **Origen**: veto visual del leader sobre `app/e2e/captures/__shots__/sheet-arrastre/06b-vacunacion-alto-recortado-peek.png` (2026-07-25).
+- El affordance de scroll del shell (peek + degradado + chevron ▾, vía `shouldShowScrollPeek`) funciona bien sobre texto, pero al caer sobre **chips de color sólido** el degradado baja su opacidad, y opacidad reducida es la convención universal de "deshabilitado". Un operario podría leer las últimas vacunas como inactivas en vez de "hay más abajo".
+- **No se cambió a propósito**: el chevron desambigua, y el affordance sale de la misma función pura que usan `FooterActionShell` y las listas de maniobra — inventar uno distinto solo para este sheet rompería la consistencia, que es peor que la ambigüedad. Revisar si Raf lo reporta como confuso en device.
+
+## `tasks.md` de spec 03 tiene dos entradas "As-built v3" (pre-existente)
+- **Origen**: chequeo de colisión de numeración del leader (2026-07-25) al reconciliar dos deltas en paralelo.
+- `specs/active/03-modo-maniobras/tasks.md:184` (guardar-rutina, 2026-06-16) y `:185` (iteración UX 2, 2026-06-14) están ambas rotuladas "As-built v3". En `design.md` la primera figura como **v3-bis**, que es el rótulo correcto por fecha.
+- No lo introdujo esta tanda y no confunde a nadie hoy (cada entrada cita su fecha y su sección de design). Alinear el rótulo de `:184` a v3-bis la próxima vez que se toque el archivo, sin cascada de renumeración.
+
+## `maniobra-carga.spec.ts` 2/3 en rojo en HEAD desde el 10/07 (pre-existente, nadie lo reportó)
+- **Origen**: revisión final de los bugfixes de gesto/auto-guardado (2026-07-25). El reviewer lo reprodujo **dos corridas consecutivas** — no es flake, y **no está en el diff** de esa tanda.
+- **Síntoma**: los tests `:133` y `:277` mueren esperando `'· 1 de 2'`; el snapshot muestra `Pesaje · 1 de 1`.
+- **Causa raíz**: `appliesToAnimal('tacto', …)` (`app/src/utils/maneuver-applicability.ts:167-177`, commit `a2354d9` del 2026-07-10, gating de tacto) limita el tacto de preñez a hembras **servidas**, pero el spec siembra una `vaquillona` pelada (`maniobra-carga.spec.ts:154-158`, último toque `5c658ff` del 09/07) con un comentario ya obsoleto: *"Hembra (el tacto aplica a hembras)"*. El gating cambió y el fixture no.
+- **Por qué pasó desapercibido**: `maniobra-carga.spec.ts` no está en la lista de e2e que corre `check.mjs`, así que el verde de RC=0 nunca lo tocó. Vale revisar qué otros specs quedaron fuera de esa lista.
+- **Fix candidato**: sembrar el fixture con `reproStatus` servida (o categoría probada) y actualizar el comentario. Barato; se dejó afuera por disciplina de alcance — es de spec 03 M2, no de estos bugfixes.
