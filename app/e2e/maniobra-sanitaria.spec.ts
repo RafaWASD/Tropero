@@ -90,7 +90,11 @@ async function startSession(page: Page, maniobras: readonly string[]): Promise<v
       await page.getByTestId('maneuver-config-input').fill(v);
       await page.getByRole('button', { name: 'Agregar vacuna', exact: true }).click();
     }
-    await page.getByRole('button', { name: 'Guardar', exact: true }).click();
+    // Auto-guardado (UX 4): agregar ya persistió cada vacuna; el CTA "Listo" sólo cierra el sheet.
+    await page
+      .getByTestId('maneuver-config-sheet')
+      .getByRole('button', { name: 'Listo', exact: true })
+      .click();
     await expect(page.getByTestId('maneuver-config-sheet')).toHaveCount(0, { timeout: 10_000 });
   }
 
@@ -314,10 +318,14 @@ async function startInseminacionSession(page: Page, pajuela: string): Promise<vo
   await page.getByTestId('pool-row-inseminacion').click();
   await expect(page.getByTestId('selected-row-0')).toBeVisible();
   // Abrir el sheet de preconfig (tocar el cuerpo de la fila seleccionada) → setear la pajuela de la tanda.
+  // Auto-guardado (UX 4) en modo SINGLE: el input ES el valor y commitea en cada cambio; "Listo" cierra.
   await page.getByTestId('selected-body-0').click();
   await expect(page.getByTestId('maneuver-config-sheet')).toBeVisible({ timeout: 10_000 });
   await page.getByTestId('maneuver-config-input').fill(pajuela);
-  await page.getByRole('button', { name: 'Guardar', exact: true }).click();
+  await page
+    .getByTestId('maneuver-config-sheet')
+    .getByRole('button', { name: 'Listo', exact: true })
+    .click();
   await expect(page.getByTestId('maneuver-config-sheet')).toHaveCount(0);
   await page.getByRole('button', { name: /^Continuar/ }).click();
   await expect(page.getByRole('button', { name: 'Arrancar jornada', exact: true })).toBeVisible({ timeout: 20_000 });

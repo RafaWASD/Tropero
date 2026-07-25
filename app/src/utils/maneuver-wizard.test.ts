@@ -19,6 +19,8 @@ import {
   filterAutocomplete,
   splitMultiPreconfig,
   joinMultiPreconfig,
+  addMultiPreconfigItem,
+  pendingCloseCommit,
   definedVaccines,
   vaccinationMissingProducts,
 } from './maneuver-wizard';
@@ -288,4 +290,50 @@ test('multi preconfig round-trip: split(join(x)) === dedup/trim de x', () => {
   assert.deepEqual(splitMultiPreconfig(joined), ['Brucelosis', 'Aftosa', 'Mancha']);
   // y maneuverDetail muestra el string tal cual inline + en el resumen (R1.9).
   assert.equal(maneuverDetail({ vacunacion: joined }, 'vacunacion'), 'Brucelosis, Aftosa, Mancha');
+});
+
+// ─── AUTO-GUARDADO del sheet de preconfig (UX 4, R1.7) ───────────────────────────────────────
+
+test('addMultiPreconfigItem: agrega la vacuna tipeada al final, con trim', () => {
+  assert.deepEqual(addMultiPreconfigItem(['Aftosa'], 'Mancha'), ['Aftosa', 'Mancha']);
+  assert.deepEqual(addMultiPreconfigItem(['Aftosa'], '  Mancha  '), ['Aftosa', 'Mancha']);
+  assert.deepEqual(addMultiPreconfigItem([], 'Brucelosis'), ['Brucelosis']);
+});
+
+test('addMultiPreconfigItem: null cuando NO hay nada que commitear (vacío o duplicado)', () => {
+  // Vacío / whitespace → nada que agregar.
+  assert.equal(addMultiPreconfigItem(['Aftosa'], ''), null);
+  assert.equal(addMultiPreconfigItem(['Aftosa'], '   '), null);
+  // Duplicado case-insensitive (misma regla que splitMultiPreconfig) → no se commitea un no-cambio.
+  assert.equal(addMultiPreconfigItem(['Aftosa'], 'aftosa'), null);
+  assert.equal(addMultiPreconfigItem(['Aftosa'], ' AFTOSA '), null);
+  assert.equal(addMultiPreconfigItem([' Aftosa '], 'aftosa'), null);
+});
+
+test('addMultiPreconfigItem: no muta la lista de entrada', () => {
+  const items = ['Aftosa'];
+  const next = addMultiPreconfigItem(items, 'Mancha');
+  assert.deepEqual(items, ['Aftosa']);
+  assert.deepEqual(next, ['Aftosa', 'Mancha']);
+});
+
+test('pendingCloseCommit (multi): el texto tipeado SIN "Agregar" entra al cerrar', () => {
+  // El caso que antes se perdía en silencio al cerrar por scrim / X / arrastre.
+  assert.equal(pendingCloseCommit('multi', ['Aftosa'], 'Mancha'), 'Aftosa, Mancha');
+  assert.equal(pendingCloseCommit('multi', [], 'Brucelosis'), 'Brucelosis');
+  assert.equal(pendingCloseCommit('multi', [], '  Brucelosis  '), 'Brucelosis');
+});
+
+test('pendingCloseCommit (multi): null si no quedó nada pendiente', () => {
+  assert.equal(pendingCloseCommit('multi', ['Aftosa'], ''), null);
+  assert.equal(pendingCloseCommit('multi', ['Aftosa'], '   '), null);
+  // Lo tipeado ya está como chip → cerrar no debe re-commitear.
+  assert.equal(pendingCloseCommit('multi', ['Aftosa'], 'aftosa'), null);
+  // Sin chips y sin texto: null (NO '' — cerrar un sheet vacío no debe pisar nada).
+  assert.equal(pendingCloseCommit('multi', [], ''), null);
+});
+
+test('pendingCloseCommit (single): siempre null — ese modo commitea en cada cambio del input', () => {
+  assert.equal(pendingCloseCommit('single', [], 'Pajuela 123'), null);
+  assert.equal(pendingCloseCommit('single', [], ''), null);
 });

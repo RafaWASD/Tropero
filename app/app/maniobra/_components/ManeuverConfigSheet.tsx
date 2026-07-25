@@ -7,11 +7,30 @@
 // inseminación) se abre este sheet: una decisión por pantalla, input GRANDE (manga-friendly) +
 // autocompletar de valores usados antes.
 //
+// ── AUTO-GUARDADO (UX 4, Raf 2026-07-25): NO hay "Guardar" ni "Cancelar" ─────────────────────────────
+// El sheet tiene CUATRO salidas (el CTA, la X del header, el tap en el scrim y el arrastre del shell).
+// Con commit diferido, tres de ellas DESCARTABAN en silencio lo cargado: cuatro vacunas tipeadas se
+// perdían de un roce del guante en el scrim, sin aviso (violación de Nielsen #5). Y "Guardar" pedía
+// CONFIRMAR lo ya confirmado: "Agregar" (o Enter) ya ES el gesto de commit y el chip que aparece ya ES
+// el feedback — un tap de más que en 🔴 manga se paga. Ahora:
+//   · MULTI (vacunación): cada `addItem`/`removeItem` COMMITEA en el acto (`onCommit`). Quitar el último
+//     chip commitea '' = borrar el preconfig (el caller borra la clave y la fila vuelve al hint) — el
+//     borrado ya no necesita un "Guardar" habilitado con la lista vacía para ser expresable.
+//   · SINGLE (inseminación): el input ES el valor → commitea en cada cambio (trim).
+//   · TEXTO TIPEADO SIN AGREGAR: si al cerrar quedó algo en el input que no se agregó, se AGREGA
+//     (regla `pendingCloseCommit`, pura). Vale para TODAS las vías de cierre porque el flush vive en el
+//     `onClose` que se le pasa al shell — el shell rutea la X, el scrim y el arrastre por ahí.
+//   · FOOTER: un único CTA primario full-width "Listo" que sólo CIERRA (mismo camino que la X).
+// Auto-guardar acá es barato: el preconfig NO se escribe en la DB, sólo actualiza el estado del wizard;
+// la persistencia real es la etapa 3 (`createSession`/`createPreset`), que ya es confirmación explícita.
+// Aplica a los DOS modos a propósito: dos sheets abiertos desde la misma lista que se comportaran
+// distinto sería peor (Nielsen #4, consistencia).
+//
 // MULTI vs ÚNICO:
 //   - VACUNACIÓN: se pueden cargar VARIAS vacunas (texto libre). Cada una se agrega como un chip; el
 //     valor persiste como las vacunas separadas por coma (round-trip con maneuverDetail, que ya muestra
 //     un string tal cual). El input + "Agregar" suma una vacuna; tocar la × de un chip la quita.
-//   - INSEMINACIÓN: UNA pajuela (texto libre). El input ES el valor; "Guardar" lo persiste.
+//   - INSEMINACIÓN: UNA pajuela (texto libre). El input ES el valor.
 //
 // AUTOCOMPLETAR (R1.8): chips de sugerencias = valores históricos del campo (sembrados de los presets,
 // DM1-UI-1) que matchean el prefijo tipeado, vía el helper PURO `filterAutocomplete`. Para vacunación
@@ -21,8 +40,9 @@
 // El esqueleto (backdrop $scrim con el guard anti click-huérfano de web, header fijo / body scroll /
 // footer fijo, maxHeight, safe-area) vive en el primitivo. Este archivo solo aporta el CONTENIDO. El
 // primitivo además resuelve el BUG 🔴 MANGA que Raf cazó en iOS: con el teclado abierto el sheet quedaba
-// TAPADO (solo se veía el título) → ahora SUBE por encima del teclado y CONDENSA (suelta la descripción y
-// el "Cancelar"; quedan chips + input + "Guardar", y la X del header como salida).
+// TAPADO (solo se veía el título) → ahora SUBE por encima del teclado y CONDENSA (suelta la descripción;
+// quedan chips + input + "Listo", y la X del header como salida). Este sheet ya NO le pasa
+// `secondaryFooter` (no tiene CTA secundario) — los otros sheets del repo lo siguen usando.
 //
 // ── ORDEN DEL CUERPO: input PRIMERO, chips DEBAJO ────────────────────────────────────────────────────
 // Con el teclado arriba el alto útil del body se parte al medio. Con los chips ARRIBA del input, cada
@@ -37,14 +57,20 @@
 // RECORTE DE DESCENDENTES (memoria, regla dura): el título ("Vacunación"/"Inseminación" traen g/j) lo
 // maneja el shell con lineHeight matching; todo Text con numberOfLines de acá también lo lleva.
 
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Platform, Pressable, TextInput } from 'react-native';
 import { getTokenValue, Text, View, XStack, YStack } from 'tamagui';
 import { Plus, X } from 'lucide-react-native';
 
 import { BottomSheetShell, Button } from '@/components';
 import { buttonA11y, labelA11y } from '@/utils/a11y';
-import { filterAutocomplete, joinMultiPreconfig, splitMultiPreconfig } from '@/utils/maneuver-wizard';
+import {
+  addMultiPreconfigItem,
+  filterAutocomplete,
+  joinMultiPreconfig,
+  pendingCloseCommit,
+  splitMultiPreconfig,
+} from '@/utils/maneuver-wizard';
 
 // Forma del preconfig de UNA maniobra configurable. `multi` = vacunación (varias vacunas, persiste
 // como coma-separado); `single` = inseminación (una pajuela). El título/placeholder/hint los provee
@@ -62,9 +88,13 @@ export type ManeuverConfigSheetProps = {
   value: string;
   /** Valores históricos del campo para el autocompletar (R1.8). */
   history: string[];
-  /** Guardar: el caller persiste en config.preconfig[<maniobra>] el valor normalizado. */
-  onSave: (value: string) => void;
-  /** Cerrar sin guardar. */
+  /**
+   * COMMIT del preconfig (AUTO-GUARDADO): el caller persiste en config.preconfig[<maniobra>] el valor
+   * normalizado. Se dispara N veces mientras el sheet está abierto (una por cada agregar/quitar/tipear)
+   * y **NO cierra el sheet** — el cierre es `onClose`, una sola vez. `''` = borrar el preconfig.
+   */
+  onCommit: (value: string) => void;
+  /** Cerrar el sheet. Lo dispara el CTA "Listo", la X del header, el scrim y el arrastre del shell. */
   onClose: () => void;
 };
 
@@ -74,13 +104,22 @@ export function ManeuverConfigSheet({
   placeholder,
   value,
   history,
-  onSave,
+  onCommit,
   onClose,
 }: ManeuverConfigSheetProps) {
   // Estado del input grande (lo que se está tipeando).
   const [typed, setTyped] = useState(kind === 'single' ? value : '');
   // Vacunas YA agregadas (solo multi). Arranca de lo persistido (split del string coma-separado).
   const [items, setItems] = useState<string[]>(kind === 'multi' ? splitMultiPreconfig(value) : []);
+  // Espejo síncrono de `items` para el auto-guardado: dos taps en el MISMO frame (React batchea) leerían
+  // el mismo `items` de render y el segundo pisaría al primero. El ref se actualiza en el acto y es
+  // también la lista que lee el flush del cierre.
+  const itemsRef = useRef(items);
+  // Espejo de lo TIPEADO, para que `handleClose` pueda ser estable (ver su comentario).
+  const typedRef = useRef(typed);
+  useEffect(() => {
+    typedRef.current = typed;
+  });
 
   // Sugerencias del autocompletar (R1.8): históricas que matchean el prefijo tipeado. En multi,
   // excluimos las ya agregadas (no re-sugerir lo puesto).
@@ -92,38 +131,50 @@ export function ManeuverConfigSheet({
 
   const trimmed = typed.trim();
 
+  // MULTI: escribe la lista nueva y la COMMITEA en el acto. Lista vacía → '' = borrar el preconfig.
+  const commitItems = (next: string[]) => {
+    itemsRef.current = next;
+    setItems(next);
+    onCommit(joinMultiPreconfig(next));
+  };
+
   // MULTI: agrega la vacuna tipeada al set de chips (sin duplicar) y limpia el input.
   const addItem = (raw: string) => {
-    const v = raw.trim();
-    if (v.length === 0) return;
-    setItems((prev) => (prev.some((p) => p.toLowerCase() === v.toLowerCase()) ? prev : [...prev, v]));
+    if (raw.trim().length === 0) return;
     setTyped('');
+    const next = addMultiPreconfigItem(itemsRef.current, raw);
+    if (next === null) return; // duplicado: el input se limpia, la lista no cambia (nada que commitear).
+    commitItems(next);
   };
 
   const removeItem = (target: string) => {
-    setItems((prev) => prev.filter((p) => p !== target));
+    commitItems(itemsRef.current.filter((p) => p !== target));
+  };
+
+  // SINGLE: el input ES el valor → cada cambio commitea (trim). Vacío → '' = borrar el preconfig.
+  const setSingleValue = (raw: string) => {
+    setTyped(raw);
+    onCommit(raw.trim());
   };
 
   // SINGLE: tocar una sugerencia llena el input directamente (es el valor).
   const pickSuggestion = (s: string) => {
     if (kind === 'multi') addItem(s);
-    else setTyped(s);
+    else setSingleValue(s);
   };
 
-  // Guardar: multi = chips unidos por coma (incluye lo tipeado sin agregar, si quedó algo); single =
-  // el input tal cual (trim). Guardar SIN nada (multi sin chips ni texto / single con input vacío)
-  // persiste '' = limpiar el preconfig: el caller borra la clave (la fila vuelve al hint). Por eso
-  // "Guardar" está SIEMPRE habilitado en ambos modos — sin él no habría forma de BORRAR una vacuna ya
-  // configurada en multi (quitar el último chip dejaría items=[] sin poder confirmar el vacío).
-  const handleSave = () => {
-    if (kind === 'multi') {
-      const pending = trimmed.length > 0 && !items.some((p) => p.toLowerCase() === trimmed.toLowerCase());
-      const all = pending ? [...items, trimmed] : items;
-      onSave(joinMultiPreconfig(all));
-    } else {
-      onSave(trimmed);
-    }
-  };
+  // CIERRE (única vía: la usan el CTA "Listo", la X del header, el scrim y el arrastre del shell). Antes
+  // de cerrar, FLUSHEA el texto tipeado que el operario no llegó a "Agregar" — si no, cerrar sería una
+  // trampa nueva justo donde sacamos el "Guardar". La regla vive en `pendingCloseCommit` (pura).
+  //
+  // MEMOIZADO a propósito: el shell lo recibe como `onClose` y lo mete en los `useMemo` de sus gestos; sin
+  // memoizar, esos gestos se reconstruían en CADA render — o sea por tecla en modo `single`. Por eso lo
+  // tipeado se lee de un REF (si `typed` fuera dep, la identidad cambiaría igual en cada tecla).
+  const handleClose = useCallback(() => {
+    const pending = pendingCloseCommit(kind, itemsRef.current, typedRef.current);
+    if (pending !== null) onCommit(pending);
+    onClose();
+  }, [kind, onCommit, onClose]);
 
   const WHITE = getTokenValue('$white', 'color');
   const FAINT = getTokenValue('$textFaint', 'color');
@@ -135,6 +186,7 @@ export function ManeuverConfigSheet({
   // Input GRANDE (manga-friendly): pill XL ≥56px del patrón de buscador de manga ($searchBarLg) para
   // tipear con una mano a pleno sol (mismo token que el buscador de Animales, R1.2 de spec 09).
   const inputMinHeight = getTokenValue('$searchBarLg', 'size');
+  const removeIcon = getTokenValue('$navIcon', 'size');
   const radius = getTokenValue('$card', 'radius');
   const padH = getTokenValue('$4', 'space');
 
@@ -146,17 +198,12 @@ export function ManeuverConfigSheet({
           ? 'Cargá una o varias vacunas para toda la tanda.'
           : 'Elegí la pajuela por defecto de la tanda.'
       }
-      onClose={onClose}
+      onClose={handleClose}
       testID="maneuver-config-sheet"
       scrimTestID="maneuver-config-scrim"
       footer={
-        <Button variant="primary" fullWidth onPress={handleSave}>
-          Guardar
-        </Button>
-      }
-      secondaryFooter={
-        <Button variant="secondary" fullWidth onPress={onClose}>
-          Cancelar
+        <Button variant="primary" fullWidth onPress={handleClose}>
+          Listo
         </Button>
       }
     >
@@ -166,7 +213,7 @@ export function ManeuverConfigSheet({
         <View flex={1}>
           <TextInput
             value={typed}
-            onChangeText={setTyped}
+            onChangeText={kind === 'multi' ? setTyped : setSingleValue}
             placeholder={placeholder}
             placeholderTextColor={placeholderColor}
             autoCapitalize="sentences"
@@ -219,7 +266,18 @@ export function ManeuverConfigSheet({
       </XStack>
 
       {/* Chips de vacunas YA agregadas (solo multi), JUSTO DEBAJO del input: el chip nuevo aparece donde
-          está el ojo. Tocar la × quita la vacuna. */}
+          está el ojo. Tocar la × quita la vacuna EN EL ACTO (auto-guardado).
+
+          ALTO = `$4` (44) — JERARQUÍA, no capricho (veto visual del leader). Con el auto-guardado la × pasó
+          a ser la ÚNICA acción destructiva y su efecto es INMEDIATO, así que su área tocable tiene que
+          llegar a ≥44 (antes: ícono de 18 + hitSlop ≈ 34). Un primer pase la subió a `$touchMin` (56), pero
+          eso infló el CHIP ENTERO al alto del botón primario y con el mismo relleno `$primary`: con 3-4
+          vacunas quedaban cuatro bloques verdes pesados apilados justo arriba del "Listo" (también verde) y
+          el ojo dejaba de distinguir cuál era la acción — jerarquía aplanada (Nielsen #8). Fitts pide ÁREA
+          TÁCTIL ≥44, no un pill visual de 56. Ahora el pill mide 44 y la × ocupa TODO su alto con
+          `minWidth` 44 → los 44×44 de área se conservan sin que el chip compita con el CTA. El verde se
+          queda: verde = "elegido" es el lenguaje ya establecido (la fila de maniobra seleccionada es
+          verde). */}
       {kind === 'multi' && items.length > 0 ? (
         <XStack flexWrap="wrap" gap="$2">
           {items.map((it) => (
@@ -227,23 +285,40 @@ export function ManeuverConfigSheet({
               key={it}
               backgroundColor="$primary"
               borderRadius="$pill"
+              height="$4"
               paddingLeft="$3"
-              paddingRight="$2"
-              paddingVertical="$2"
               alignItems="center"
-              gap="$2"
+              maxWidth="100%"
               testID={`config-chip-${it}`}
             >
-              <Text fontFamily="$body" fontSize="$4" lineHeight="$4" fontWeight="600" color="$white" numberOfLines={1}>
+              <Text
+                fontFamily="$body"
+                fontSize="$4"
+                lineHeight="$4"
+                fontWeight="600"
+                color="$white"
+                flexShrink={1}
+                numberOfLines={1}
+              >
                 {it}
               </Text>
-              <Pressable
+              {/* La × va como pieza Tamagui con onPress (NO un Pressable de RN envolviendo un Tamagui con
+                  pressStyle: en nativo new-arch eso roba el responder y el onPress no dispara). Llena el
+                  alto del pill (`height="100%"`) y reserva `minWidth` 44 → 44×44 de área tocable. */}
+              <View
+                height="100%"
+                minWidth="$4"
+                borderRadius="$pill"
+                alignItems="center"
+                justifyContent="center"
+                flexShrink={0}
+                pressStyle={{ backgroundColor: '$primaryPress' }}
                 onPress={() => removeItem(it)}
-                hitSlop={8}
+                testID={`config-chip-remove-${it}`}
                 {...buttonA11y(Platform.OS, { label: `Quitar ${it}` })}
               >
-                <X size={18} color={WHITE} strokeWidth={3} />
-              </Pressable>
+                <X size={removeIcon} color={WHITE} strokeWidth={3} />
+              </View>
             </XStack>
           ))}
         </XStack>

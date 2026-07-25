@@ -427,17 +427,61 @@ function RootGate() {
       <Stack.Screen name="verify-email" />
       <Stack.Screen name="update-password" />
       <Stack.Screen name="(tabs)" />
+      {/* ── LANDING de MODO MANIOBRAS: modal SÍ (y su swipe-down TAMBIÉN) ──────────────────────────
+          Destino del FAB. Es UNA pantalla sin estado que perder (lista de rutinas + CTA): descartarla
+          con un arrastre hacia abajo es correcto y esperable — el modal es la presentación adecuada.
+          Lo que NO puede heredar ese gesto es lo que viene DESPUÉS (ver el bloque de abajo). */}
       <Stack.Screen name="maniobra" options={{ presentation: 'modal' }} />
+      {/* ══ BUG 🔴 MANGA (Raf, device iOS, build f9b943f7): el arrastre hacia abajo DESTRUÍA la jornada ══
+          SÍNTOMA: desde cualquier etapa del wizard / la identificación / la carga, un arrastre hacia abajo
+          descartaba la pantalla SIN CONFIRMACIÓN — mientras que el ‹ del header es un back POR ETAPA
+          (3→2→1→salir) y, durante una jornada ACTIVA, abre el `ExitJornadaSheet` (cierre guardado, R10.7).
+          Dos "atrás" con poder destructivo distinto, y el gesto SALTEABA la guarda de salida. De yapa, el
+          arrastre del grabber de un bottom sheet propio caía a ese gesto nativo y cerraba la pantalla de
+          abajo en vez del sheet de arriba.
+          CAUSA (verificada en el código instalado, no deducida): expo-router 56 presenta cada ruta con
+          `presentation` propia y HEREDA modal hacia adelante — en
+          `expo-router/build/react-navigation/native-stack/utils/getModalRoutesKeys.js` toda ruta posterior
+          a un modal SIN `presentation` explícita entra a `modalRouteKeys`, y `NativeStackView.native.js`
+          resuelve `presentation = isPresentationModal ? 'modal' : 'card'`. `modal` → en iOS
+          `UIModalPresentationAutomatic` = pageSheet (`react-native-screens/ios/RNSScreen.mm`) → dismiss
+          interactivo, gobernado por `presentationControllerShouldDismiss` de ESA pantalla. O sea: estas
+          tres pantallas eran page-sheets apilados, cada una con su propio swipe-to-destroy.
+          FIX: `presentation: 'fullScreenModal'` explícita en las tres.
+            · iOS → `UIModalPresentationFullScreen` (RNSScreen.mm): UIKit NO instala gesto de descarte para
+              full-screen → el arrastre deja de existir, que es lo que queremos. Además la presentación pasa
+              a COINCIDIR con lo que el código ya afirmaba ("pantalla completa"): se recupera el alto que
+              comían los sheets apilados y desaparece el pan de UIKit que le competía al del BottomSheetShell.
+              Las tres ya paddean con `insets.top`, así que el notch queda cubierto (no hay regresión de
+              safe-area por pasar de pageSheet a full-screen).
+            · Android → `ScreenViewManager.kt` mapea "modal" y "fullScreenModal" al MISMO
+              `StackPresentation.MODAL`, y expo-router fuerza `gestureEnabled=false` en Android → CERO cambio.
+            · Web → `NativeStackView.js` solo mira `presentation` para las presentaciones TRANSPARENTES →
+              CERO cambio (la suite E2E corre igual).
+            · Navegación INTACTA: `router.back()` / `backOr(router,'/maniobra')` / `router.replace` /
+              `canDismiss()+dismissAll()` son operaciones del stack de JS (`POP`, `POP_TO_TOP`), ajenas a la
+              presentación (`expo-router/build/global-state/router.js`).
+          `gestureEnabled: false` va ADEMÁS, como segundo cerrojo declarativo: en iOS setea
+          `modalInPresentation` (RNSScreen.mm) → `presentationControllerShouldDismiss` devuelve NO aunque
+          alguien vuelva a tocar la presentación; en Android es inerte (ya lo fuerza el router). Es el
+          fallback que el brief pedía, puesto en cinturón-y-tiradores en vez de como plan B.
+          NO se toca `maniobra` (el landing): ahí el modal y su swipe son correctos.
+          Pendiente honesto (ADR-029): el veredicto de que el arrastre ya no descarta es de DEVICE — en
+          react-native-web no existe el gesto modal de iOS.
+          Fuera de alcance (mismo mecanismo, otra pantalla): `/crear-animal`, empujada desde la
+          identificación (find-or-create), también hereda modal y es descartable por gesto; ahí el gesto
+          pierde el alta en curso, no la jornada. Anotado en el reporte, no lo cambio de prepo porque esa
+          pantalla se usa desde varios flujos ajenos a maniobra. ══════════════════════════════════════ */}
       {/* Spec 03 M1.4 — WIZARD de config de jornada (inicio + 3 etapas). Pantalla autenticada real
           (consume sessions/maneuver-presets/gating + el establishment/rodeo del contexto), gateada
-          como cualquier otra. Pantalla completa (no modal): es un flujo de varias etapas. */}
-      <Stack.Screen name="maniobra/jornada" />
+          como cualquier otra. Pantalla completa, NO descartable por gesto (ver bloque de arriba). */}
+      <Stack.Screen name="maniobra/jornada" options={{ presentation: 'fullScreenModal', gestureEnabled: false }} />
       {/* Spec 03 M2.2 — FRAME REAL de carga rápida (`maniobra/carga`): autenticado, consume la sesión +
           el animal (fetchAnimalDetail) + el gating por rodeo real; recorre las maniobras de la jornada
           (dispatcher genérico tacto/pesaje/placeholder), persiste con session_id, resumen corregible +
           progreso. Se llega por el auto-avance de `identificar` (sessionId+profileId). Gateada como
-          cualquier otra — NO está en DEV_WEB_ROUTES. Pantalla completa (no modal). */}
-      <Stack.Screen name="maniobra/carga" />
+          cualquier otra — NO está en DEV_WEB_ROUTES. Pantalla completa, NO descartable por gesto. */}
+      <Stack.Screen name="maniobra/carga" options={{ presentation: 'fullScreenModal', gestureEnabled: false }} />
       {/* Spec 03 M2.0 — DESIGN SPIKE de PESAJE (`maniobra/paso`): pantalla VISUAL 100% MOCK, alcanzable
           directo en web sin auth (DEV_WEB_ROUTES) para la captura e2e a 412×915. Referencia visual del
           keypad hasta que M3 cablee el paso completo. Pantalla completa (no modal). */}
@@ -463,8 +507,10 @@ function RootGate() {
           + auto-avance). Pantalla AUTENTICADA real (consume la sesión + establishment/rodeo + el listener
           del bastón), gateada como cualquier otra — NO está en DEV_WEB_ROUTES. Se llega desde el wizard de
           jornada (createSession → /maniobra/identificar?sessionId=…). El listener BLE global (spec 09) se
-          suspende por ruta `maniobra` (R3.2). Pantalla completa. */}
-      <Stack.Screen name="maniobra/identificar" />
+          suspende por ruta `maniobra` (R3.2). Pantalla completa, NO descartable por gesto: es la que tenía
+          el PEOR caso del bug (con jornada ACTIVA, el ‹ abre el `ExitJornadaSheet` de cierre guardado,
+          R10.7, y el arrastre lo salteaba). Ver el bloque del bug arriba. */}
+      <Stack.Screen name="maniobra/identificar" options={{ presentation: 'fullScreenModal', gestureEnabled: false }} />
       {/* "Mis campos" (R6.6): pantalla standalone, header propio. */}
       <Stack.Screen name="mis-campos" />
       {/* Onboarding wizard (R6.5) — sin campos. */}

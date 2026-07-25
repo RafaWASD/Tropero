@@ -12,7 +12,9 @@
 // sheet) era `View absolute inset0 $scrim justifyContent:flex-end` + backdrop + `YStack maxHeight 85%`
 // anclado abajo, y en iOS el teclado se dibuja ENCIMA de eso sin empujar nada.
 //
-// ── LAS 5 RESPONSABILIDADES QUE ENCAPSULA ────────────────────────────────────────────────────────────
+// ── LAS RESPONSABILIDADES QUE ENCAPSULA (las 2 últimas —arrastre y back— tienen bloque propio abajo) ──
+// El contrato normativo para consumidores (incl. las DOS precondiciones de adopción) vive en
+// `docs/design-system.md` §6 → `BottomSheetShell`.
 //  1. BACKDROP $scrim tappable que cierra, CON el guard anti "click huérfano" de web (doble rAF) — ver el
 //     comentario largo del guard más abajo (conocimiento caro, no se pierde).
 //  2. LIFT sobre el teclado: `KeyboardAvoidingView` ('padding' en iOS; en Android lo resuelve el
@@ -27,11 +29,52 @@
 //     del header existe SIEMPRE (Nielsen #3: con el teclado abierto es la única salida visible).
 //  5. SAFE-AREA robusta con blindaje frame-0 de Android edge-to-edge (`computeSafeBottomInset` con
 //     initialWindowMetrics — mismo enfoque que U7 / FooterActionShell).
+//  5-bis. AFFORDANCE DE SCROLL del body (peek + fade + chevron ▾) con la MISMA decisión pura que
+//     `FooterActionShell` y las listas de maniobra (`shouldShowScrollPeek`): aire al final del contenido
+//     para que el último elemento nunca quede rebanado al ras del CTA, y señal de "hay más abajo" cuando
+//     el body desborda (el indicador nativo está apagado y en iOS solo se ve mientras scrolleás).
+//
+// ── 6ta RESPONSABILIDAD: ARRASTRE-PARA-CERRAR (bug 🔴 manga, Raf device iOS) ─────────────────────────
+// El shell DIBUJABA un grabber (`showGrip`, default true, ningún consumidor lo pisa) pero NO tenía ningún
+// gesture handler: un significante sin la acción que promete (Norman). Y hacía lo CONTRARIO de lo prometido:
+// el arrastre caía al gesto de descarte del modal de iOS y cerraba la PANTALLA DE ABAJO (la jornada entera)
+// en vez del sheet de arriba — cuando la convención de iOS (ley de Jakob) es que el sheet FRONTAL es el que
+// se cierra primero. Ahora el shell es dueño de su gesto (y el fix hermano de `app/app/_layout.tsx` le sacó
+// el gesto de descarte a las pantallas de la jornada, así ya no hay dos dueños para el mismo arrastre).
+// Reglas (las decisiones PURAS viven en `utils/sheet-gestures.ts`, testeadas):
+//   · DOS detectores en vistas DISJUNTAS: uno sobre el HEADER (grabber + título) y otro sobre el ScrollView
+//     del BODY. Ningún toque lo ven los dos (ver el porqué en el comentario de `headerInert`/`bodyInert`) y
+//     el FOOTER no es ancla de arrastre: ahí viven los CTAs.
+//   · ANCLA = el HEADER: arrastra SIEMPRE. Desde el BODY, solo con el ScrollView en el TOPE — si hay
+//     contenido scrolleado, ese arrastre es del operario, no del sheet.
+//   · Solo hacia ABAJO (no hay snap points): hacia arriba se clampea en 0.
+//   · Al soltar: cierra por DISTANCIA (25% del alto del sheet, con piso absoluto) o por FLICK rápido; un
+//     flick hacia arriba cancela; si no alcanza, vuelve con spring. Fail-closed ante medidas rotas.
+//   · Con el TECLADO ARRIBA el arrastre BAJA EL TECLADO y NO cierra (una sola conducta, ver `sheetDragIntent`).
+//   · Al cerrar llamamos `onClose()` y ADEMÁS devolvemos el sheet a su lugar con spring: los 4 consumidores
+//     DESMONTAN el shell al cerrar (el reset es invisible), y si alguno alguna vez no lo desmontara, el sheet
+//     queda en su lugar en vez de trabado fuera de pantalla (fail-safe, no "sheet fantasma").
+// WEB (`touchAction`): el detector del cuerpo va con `touch-action: pan-y` para NO romper el scroll táctil
+// del body en react-native-web (el default de RNGH es `none`, que se lo comería). El del header queda en
+// `none` (ahí no hay nada que scrollear) → el arrastre del grabber también anda en web táctil.
+//
+// ── 7ma RESPONSABILIDAD: el BACK FÍSICO de Android cierra EL SHEET, no la ruta ───────────────────────
+// Mismo bug de clase que el arrastre, en la plataforma donde el gesto NO es un descubrimiento accidental
+// sino el botón que el operario usa todo el tiempo: sin handler, el back con un sheet abierto no cierra el
+// sheet — hace **pop de la RUTA** (en el wizard, chau configuración de la jornada). El shell registra un
+// `BackHandler` mientras está montado que cierra por el MISMO `onClose` (ahí vive el flush de lo tipeado
+// sin agregar) y CONSUME el evento. Sheets superpuestos: RN corre los handlers en orden inverso al de
+// registro y el shell se suscribe UNA sola vez al montar → atiende el de más arriba (la guarda de PANTALLA
+// —`useHardwareBack` de las 3 pantallas del flujo— se registra ANTES y difiere al sheet, por diseño). Solo
+// Android: es la única plataforma con back físico. (El stub de `BackHandler` de react-native-web loguea un
+// `console.error` al suscribirse, aunque en el export web de este repo se midió que no resuelve a ese stub;
+// igual no registramos: en iOS/web el evento nunca puede disparar.)
 //
 // ── ⚠️ NUNCA `flex={1}` EN EL BODY (bug U5, ya arreglado una vez) ────────────────────────────────────
 // El body va `flexShrink={1}` (grow:0, shrink:1, basis:auto), NO `flex:1` (grow:1, basis:0%). Con flex:1 el
-// body COLAPSABA A ALTURA 0 en NATIVO cuando el contenido es corto: el padre (YStack maxHeight:85% SIN alto
-// fijo) se dimensiona por CONTENIDO; si el contenido no llega al cap del 85% no hay "espacio libre" que un
+// body COLAPSABA A ALTURA 0 en NATIVO cuando el contenido es corto: la caja del sheet (cap `maxHeight:85%`,
+// SIN alto fijo — desde el fix del arrastre ese cap vive en la envoltura animada, misma geometría)
+// se dimensiona por CONTENIDO; si el contenido no llega al cap del 85% no hay "espacio libre" que un
 // flexGrow:1 pueda absorber → en Yoga el ScrollView cae a su basis:0% → altura 0 (en web no pasaba, por eso
 // la E2E no lo cazó: era el bug 🔴 "no se ve el input para cargar vacunas"). Con flexShrink:1/basis:auto:
 //   · contenido CORTO → se dimensiona al contenido (el input SE VE). ✅
@@ -43,21 +86,53 @@
 // se parte al medio y la columna tiene que poder achicarse (si no, se desborda hacia ARRIBA y el título se
 // va de pantalla) sin colapsar cuando el contenido es corto.
 
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
+  BackHandler,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   Pressable,
   type LayoutChangeEvent,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
   type ScrollView as RNScrollView,
 } from 'react-native';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import Animated, {
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+  type SharedValue,
+} from 'react-native-reanimated';
 import { initialWindowMetrics, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
-import { X } from 'lucide-react-native';
+import { ChevronDown, X } from 'lucide-react-native';
 
 import { useKeyboardVisible } from '../hooks/useKeyboardVisible';
 import { buttonA11y } from '../utils/a11y';
-import { computeSafeBottomInset, resolveFooterPaddingBottom } from '../utils/footer-action';
+import {
+  computeSafeBottomInset,
+  resolveFooterPaddingBottom,
+  shouldShowScrollPeek,
+} from '../utils/footer-action';
+import {
+  SHEET_DISMISS_CANCEL_VELOCITY,
+  SHEET_DISMISS_FLING_MIN_TRAVEL,
+  SHEET_DISMISS_FLING_VELOCITY,
+  SHEET_DISMISS_MIN_DISTANCE,
+  SHEET_DISMISS_RATIO,
+  SHEET_DRAG_ACTIVATE_Y,
+  sheetBackHandlerApplies,
+  sheetBackPress,
+  sheetDragAllowedFrom,
+  sheetDragIntent,
+  sheetDragOffset,
+  shouldDismissSheet,
+  type SheetDragZone,
+} from '../utils/sheet-gestures';
 import { sheetCondensation } from '../utils/sheet-shell';
 
 /** El tipo EXACTO del 1er arg de getTokenValue (token de la escala) — evita el `string` genérico. */
@@ -68,6 +143,12 @@ type TamaguiToken = Parameters<typeof getTokenValue>[0];
 const avoidStyle = { flex: 1, width: '100%', justifyContent: 'flex-end' } as const;
 const backdropStyle = { flex: 1, width: '100%' } as const;
 const bodyStyle = { minHeight: 0 } as const;
+// El LinearGradient (API no-Tamagui) llena su contenedor, que sí está posicionado por tokens.
+const fadeFillStyle = { flex: 1, width: '100%' } as const;
+
+// Spring de VUELTA del arrastre cuando no alcanzó el umbral: rápido, con un toque de rebote (misma familia
+// que el spring de reflow del reorder). Es geometría de gesto, no spacing themeable → const nombrada.
+const RETURN_SPRING = { damping: 22, stiffness: 220, mass: 0.6 } as const;
 
 export type BottomSheetShellProps = {
   /** Título del sheet (heading $7 con lineHeight matching — nunca se condensa). */
@@ -199,6 +280,195 @@ export function BottomSheetShell({
 
   const hasFooter = footer != null || (secondaryFooter != null && showSecondaryAction);
 
+  // ── BACK FÍSICO de Android (ver cabecera §7ma responsabilidad) ──────────────────────────────────
+  // Con el sheet abierto, el back CIERRA EL SHEET y consume el evento; sin esto hace pop de la RUTA (en el
+  // wizard se lleva puesta la jornada entera). Cierra por el MISMO `onClose` (ahí vive el flush de lo
+  // tipeado-sin-agregar del ManeuverConfigSheet), vía la regla pura `sheetBackPress`.
+  // SUSCRIPCIÓN ÚNICA AL MONTAR (deps `[]` + ref al callback): RN corre los handlers en orden INVERSO al de
+  // registro → el último sheet MONTADO (el de más arriba) atiende primero y consume, y los de abajo no se
+  // enteran. Si re-suscribiéramos en cada cambio de identidad de `onClose`, un sheet de abajo podría pasar a
+  // ser "el último registrado" y robarle el back al de arriba.
+  // ⚠️ PRECONDICIÓN DE ADOPCIÓN: el handler se registra al MONTAR, no al "abrir" (el shell no tiene noción de
+  // abierto/cerrado). Los 4 consumidores DESMONTAN el shell al cerrar, así que el back solo se intercepta
+  // mientras hay sheet a la vista. Un consumidor que lo dejara montado detrás de un toggle de visibilidad se
+  // comería TODOS los back de Android de la app, en silencio (ese patrón existe en el repo: `carga.tsx`
+  // renderiza `LotePickerSheet` siempre montado con prop `open`). Está declarado en el contrato del shell
+  // (`docs/design-system.md` §6, responsabilidad 9).
+  // Plataforma: predicado PURO y testeado (`sheetBackHandlerApplies`) — solo Android tiene back de hardware.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+  useEffect(() => {
+    if (!sheetBackHandlerApplies(Platform.OS)) return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => sheetBackPress(() => onCloseRef.current()));
+    return () => sub.remove();
+  }, []);
+
+  // ── ARRASTRE-PARA-CERRAR (ver cabecera §6ta responsabilidad) ────────────────────────────────────
+  // Estado del gesto en el UI thread: traslación actual, alto medido del sheet (para el umbral por
+  // fracción) y un flag de "gesto inerte" POR DETECTOR.
+  const translateY = useSharedValue(0);
+  const sheetHeight = useSharedValue(0);
+  // El gesto en curso NO mueve el sheet. Dos motivos, un flag: (a) el toque arrancó en una zona que no
+  // habilita el arrastre (cuerpo con scroll), (b) el arrastre se consumió BAJANDO EL TECLADO. Se limpia en
+  // el `onFinalize` de su propio gesto.
+  // UNO POR DETECTOR, no compartido: `onFinalize` corre también en FAILED/CANCELLED, así que un flag común
+  // entre dos Pan permite que el gesto perdedor lo resetee a `false` DESPUÉS de que el ganador lo puso en
+  // `true` (en iOS el orden entre el Failed del perdedor y el Began del ganador lo decide UIKit, no RNGH) →
+  // con el teclado arriba el sheet podría cerrarse igual y descartar lo tipeado. Los detectores además son
+  // espacialmente DISJUNTOS (ningún toque lo ven los dos), así que esto es el segundo cerrojo: el invariante
+  // queda local a cada gesto y no depende de que nadie vuelva a anidarlos.
+  const headerInert = useSharedValue(false);
+  const bodyInert = useSharedValue(false);
+  // El teclado se lee del hook (JS) y se espeja a un shared value: el worklet del gesto necesita el valor
+  // VIVO al momento del toque, no el capturado cuando se creó el gesto.
+  const keyboardUp = useSharedValue(keyboardVisible);
+  useEffect(() => {
+    keyboardUp.value = keyboardVisible;
+  }, [keyboardVisible, keyboardUp]);
+
+  // ── GEOMETRÍA DEL BODY: gate del arrastre + affordance de scroll ────────────────────────────────
+  // Dos consumidores de la MISMA geometría, actualizados en el mismo handler:
+  //  · `bodyAtTop` (¿el ScrollView está en el tope?) gatea el arrastre iniciado DENTRO del body: con
+  //    contenido scrolleado ese arrastre es scroll del operario y NO se lo robamos. Es estado de React
+  //    (no shared value) porque alimenta `.enabled()` del gesto; solo cambia al CRUZAR el tope.
+  //  · `showPeek` (¿queda contenido oculto ABAJO?) prende el fade + chevron del borde inferior del body.
+  //    Decisión PURA compartida con `FooterActionShell` y con las listas de maniobra
+  //    (`shouldShowScrollPeek` de `utils/footer-action.ts`) → una sola fuente de verdad del affordance.
+  const [bodyAtTop, setBodyAtTop] = useState(true);
+  const [showPeek, setShowPeek] = useState(false);
+  const bodyAtTopRef = useRef(true);
+  const showPeekRef = useRef(false);
+  const bodyGeom = useRef({ scrollY: 0, viewport: 0, content: 0 });
+  const recomputeBody = useCallback(() => {
+    const { scrollY, viewport, content } = bodyGeom.current;
+    const atTop = scrollY <= 0.5;
+    if (atTop !== bodyAtTopRef.current) {
+      bodyAtTopRef.current = atTop;
+      setBodyAtTop(atTop);
+    }
+    const peek = shouldShowScrollPeek({ scrollY, viewportHeight: viewport, contentHeight: content });
+    if (peek !== showPeekRef.current) {
+      showPeekRef.current = peek;
+      setShowPeek(peek);
+    }
+  }, []);
+  const onBodyScroll = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      bodyGeom.current = {
+        scrollY: e.nativeEvent.contentOffset.y,
+        viewport: e.nativeEvent.layoutMeasurement.height,
+        content: e.nativeEvent.contentSize.height,
+      };
+      recomputeBody();
+    },
+    [recomputeBody],
+  );
+  // El alto del viewport y el del contenido también llegan por layout/content-size (antes del primer scroll:
+  // es lo que hace aparecer el fade en un sheet que ya nace desbordado). Se ENCADENAN con los callbacks del
+  // consumidor — que los usa para su scroll-al-campo — en vez de pisarlos.
+  const onBodyLayoutChained = useCallback(
+    (e: LayoutChangeEvent) => {
+      bodyGeom.current.viewport = e.nativeEvent.layout.height;
+      recomputeBody();
+      onBodyLayout?.(e);
+    },
+    [onBodyLayout, recomputeBody],
+  );
+  const onBodyContentSizeChained = useCallback(
+    (w: number, h: number) => {
+      bodyGeom.current.content = h;
+      recomputeBody();
+      onBodyContentSizeChange?.(w, h);
+    },
+    [onBodyContentSizeChange, recomputeBody],
+  );
+
+  const onSheetLayout = useCallback(
+    (e: LayoutChangeEvent) => {
+      sheetHeight.value = e.nativeEvent.layout.height;
+    },
+    [sheetHeight],
+  );
+
+  // El gesto de arrastre, UNO POR ZONA. Los dos comparten TODA la lógica (mismo umbral, mismo fail-closed,
+  // misma conducta con el teclado) y se diferencian solo en el gate de zona y en su flag `inert` propio.
+  // `zone` y `bodyAtTop` entran POR PARÁMETRO (no por closure) para que el builder NO dependa de `bodyAtTop`:
+  // así cruzar el tope del scroll no reconstruye el gesto del header (que no lo lee).
+  const buildDragGesture = useCallback(
+    ({ zone, inert, bodyAtTop: atTop }: { zone: SheetDragZone; inert: SharedValue<boolean>; bodyAtTop: boolean }) =>
+      Gesture.Pan()
+        // Se activa SOLO tras cruzar el umbral HACIA ABAJO (un tap sobre la X / un chip nunca lo dispara)
+        // y FALLA ante movimiento hacia arriba → el scroll del body se va limpio, sin competencia.
+        .activeOffsetY(SHEET_DRAG_ACTIVATE_Y)
+        .failOffsetY(-SHEET_DRAG_ACTIVATE_Y)
+        .onBegin(() => {
+          'worklet';
+          // Gate por ZONA (regla pura): el header arrastra siempre; el cuerpo, solo con el scroll en el
+          // tope. El detector del cuerpo además viene `.enabled(atTop)` — eso es lo que evita que el Pan
+          // le ROBE el toque al ScrollView; esto deja el invariante también dentro del gesto.
+          inert.value = !sheetDragAllowedFrom({ zone, bodyAtTop: atTop });
+        })
+        .onStart(() => {
+          'worklet';
+          if (inert.value) return;
+          // TECLADO ARRIBA → este arrastre BAJA EL TECLADO y no toca el sheet (decisión única, ver
+          // `sheetDragIntent`): lo que se está tipeando no se pierde por un gesto.
+          if (sheetDragIntent({ keyboardVisible: keyboardUp.value }) === 'dismiss-keyboard') {
+            inert.value = true;
+            runOnJS(Keyboard.dismiss)();
+          }
+        })
+        .onUpdate((e) => {
+          'worklet';
+          if (inert.value) return;
+          translateY.value = sheetDragOffset(e.translationY);
+        })
+        .onEnd((e) => {
+          'worklet';
+          if (inert.value) return;
+          const travelled = sheetDragOffset(e.translationY);
+          const dismiss = shouldDismissSheet({
+            translationY: travelled,
+            velocityY: e.velocityY,
+            sheetHeight: sheetHeight.value,
+            ratio: SHEET_DISMISS_RATIO,
+            minDistance: SHEET_DISMISS_MIN_DISTANCE,
+            flingVelocity: SHEET_DISMISS_FLING_VELOCITY,
+            flingMinTravel: SHEET_DISMISS_FLING_MIN_TRAVEL,
+            cancelVelocity: SHEET_DISMISS_CANCEL_VELOCITY,
+          });
+          if (dismiss) runOnJS(onClose)();
+        })
+        .onFinalize(() => {
+          'worklet';
+          // SIEMPRE (cerró, no alcanzó, o el gesto se canceló): el sheet vuelve a su lugar. Ver cabecera:
+          // los consumidores desmontan al cerrar, así que esto es invisible en el caso normal y fail-safe
+          // en el hipotético consumidor que no desmonte. El `!== 0` evita disparar un spring inútil en cada
+          // TAP (onFinalize corre también cuando el gesto nunca activó: tocar la X pasa por acá). Toca SOLO
+          // su propio `inert` — nunca el del otro detector (ese fue el bug del flag compartido).
+          inert.value = false;
+          if (translateY.value !== 0) translateY.value = withSpring(0, RETURN_SPRING);
+        }),
+    [keyboardUp, onClose, sheetHeight, translateY],
+  );
+
+  // Un detector POR ZONA, montados en vistas DISJUNTAS (header ↔ ScrollView del cuerpo): ningún toque lo ven
+  // los dos. El del header siempre activo; el del cuerpo, `.enabled` solo con el scroll en el tope (que es lo
+  // que evita robarle el scroll al ScrollView). Instancias distintas — RNGH no permite reusar el mismo objeto
+  // Gesture en dos detectores. El FOOTER queda fuera de las dos: ahí viven los CTAs.
+  const headerDrag = useMemo(
+    () => buildDragGesture({ zone: 'header', inert: headerInert, bodyAtTop: true }),
+    [buildDragGesture, headerInert],
+  );
+  const bodyDrag = useMemo(
+    () => buildDragGesture({ zone: 'body', inert: bodyInert, bodyAtTop }).enabled(bodyAtTop),
+    [buildDragGesture, bodyInert, bodyAtTop],
+  );
+
+  const dragStyle = useAnimatedStyle(() => ({ transform: [{ translateY: translateY.value }] }));
+
   return (
     // Backdrop $scrim que cubre la pantalla + sheet anclado abajo.
     <View
@@ -220,104 +490,182 @@ export function BottomSheetShell({
           {...buttonA11y(Platform.OS, { label: scrimA11yLabel })}
         />
 
-        <YStack
-          width="100%"
-          // flexShrink:1 (NO flex:1) — ver la cabecera: se achica con el teclado arriba sin colapsar
-          // cuando el contenido es corto.
-          flexShrink={1}
-          maxHeight={maxHeight}
-          backgroundColor="$bg"
-          borderTopLeftRadius="$card"
-          borderTopRightRadius="$card"
-          paddingHorizontal="$4"
-          paddingTop="$4"
-          paddingBottom={paddingBottom}
-          gap="$4"
-          testID={testID}
-        >
-          {/* ── HEADER FIJO (grip + título/descripción + X). flexShrink:0 → nunca se comprime ni se recorta. ── */}
-          <YStack flexShrink={0} gap="$3">
-            {showGrip ? (
-              <View
-                alignSelf="center"
-                width={getTokenValue('$icon', 'size')}
-                height={getTokenValue('$progressTrack', 'size')}
-                borderRadius="$pill"
-                backgroundColor="$divider"
-              />
-            ) : null}
+        {/* ENVOLTURA ANIMADA del arrastre (SIN gesto propio: los detectores van en el header y en el body,
+            disjuntos). LLEVA LAS RESTRICCIONES DE CAJA del sheet (flexShrink:1 + maxHeight, que antes vivían
+            en el YStack de abajo): un `maxHeight` en % necesita un padre con alto DEFINIDO, y el padre del
+            YStack pasó a ser esta envoltura de alto AUTO → dejarlo adentro lo volvería indeterminado (o peor,
+            85% de 85%). Con el cap acá, el YStack (flexShrink:1, basis auto) se comporta EXACTO igual que
+            antes: se dimensiona al contenido cuando es corto y se achica —cediendo el faltante al body
+            scrolleable— cuando el contenido o el teclado no lo dejan entrar. */}
+        <Animated.View style={[{ width: '100%', flexShrink: 1, maxHeight }, dragStyle]}>
+            <YStack
+              width="100%"
+              // flexShrink:1 (NO flex:1) — ver la cabecera: se achica con el teclado arriba sin colapsar
+              // cuando el contenido es corto.
+              flexShrink={1}
+              backgroundColor="$bg"
+              borderTopLeftRadius="$card"
+              borderTopRightRadius="$card"
+              paddingHorizontal="$4"
+              paddingTop="$4"
+              paddingBottom={paddingBottom}
+              gap="$4"
+              testID={testID}
+              onLayout={onSheetLayout}
+            >
+              {/* ── HEADER FIJO (grip + título/descripción + X). flexShrink:0 → nunca se comprime ni se
+                  recorta. Es también el ANCLA del arrastre (grabber + título): su detector NO se gatea por
+                  scroll — el header arrastra SIEMPRE, como cualquier sheet de iOS. Un TAP sobre la X no lo
+                  dispara: el pan exige `SHEET_DRAG_ACTIVATE_Y` px de recorrido para activarse. ── */}
+              <GestureDetector gesture={headerDrag}>
+                <YStack flexShrink={0} gap="$3">
+                  {showGrip ? (
+                    <View
+                      alignSelf="center"
+                      width={getTokenValue('$icon', 'size')}
+                      height={getTokenValue('$progressTrack', 'size')}
+                      borderRadius="$pill"
+                      backgroundColor="$divider"
+                      testID={`${testID}-grip`}
+                    />
+                  ) : null}
 
-            <XStack alignItems="center" gap="$2">
-              <YStack flex={1} minWidth={0} gap="$1">
-                {/* lineHeight matching (regla dura: los títulos traen descendentes — "Vacunación" g/j). */}
-                <Text
-                  fontFamily="$heading"
-                  fontSize="$7"
-                  lineHeight="$7"
-                  fontWeight="700"
-                  color="$textPrimary"
-                  numberOfLines={1}
+                  <XStack alignItems="center" gap="$2">
+                    <YStack flex={1} minWidth={0} gap="$1">
+                      {/* lineHeight matching (regla dura: los títulos traen descendentes — "Vacunación" g/j). */}
+                      <Text
+                        fontFamily="$heading"
+                        fontSize="$7"
+                        lineHeight="$7"
+                        fontWeight="700"
+                        color="$textPrimary"
+                        numberOfLines={1}
+                      >
+                        {title}
+                      </Text>
+                      {description != null && showDescription ? (
+                        <Text fontFamily="$body" fontSize="$3" lineHeight="$3" color="$textMuted" numberOfLines={2}>
+                          {description}
+                        </Text>
+                      ) : null}
+                    </YStack>
+
+                    {/* X de cierre: SIEMPRE presente (Nielsen #3). Target $icon=48 (≥44) + hitSlop. Va como
+                        pieza Tamagui con onPress (NO un Pressable de RN envolviendo un Tamagui con
+                        pressStyle: en nativo new-arch eso roba el responder y el onPress no dispara). */}
+                    {showCloseButton ? (
+                      <View
+                        testID={closeTestID ?? `${testID}-close`}
+                        width={getTokenValue('$icon', 'size')}
+                        height={getTokenValue('$icon', 'size')}
+                        borderRadius="$pill"
+                        alignItems="center"
+                        justifyContent="center"
+                        backgroundColor="$surface"
+                        flexShrink={0}
+                        hitSlop={8}
+                        pressStyle={{ backgroundColor: '$greenLight' }}
+                        onPress={onClose}
+                        {...buttonA11y(Platform.OS, { label: closeA11yLabel })}
+                      >
+                        <X
+                          size={getTokenValue('$navIcon', 'size')}
+                          color={getTokenValue('$textMuted', 'color')}
+                          strokeWidth={2.5}
+                        />
+                      </View>
+                    ) : null}
+                  </XStack>
+                </YStack>
+              </GestureDetector>
+
+              {/* ── BODY scrolleable + AFFORDANCE de scroll. ────────────────────────────────────────────
+                  La envoltura `flexShrink:1 + minHeight:0` sostiene el fade ABSOLUTO al borde inferior del
+                  body (necesita un ancestro posicionado que termine donde termina el viewport del scroll).
+                  Lleva la MISMA geometría flex que tenía el ScrollView (grow:0 / shrink:1 / basis auto) y el
+                  ScrollView adentro la conserva → NO es el patrón del bug U5, que era `flex:1` (basis 0%)
+                  colapsando a altura 0 con contenido corto. NUNCA poner `flex:1` acá.
+                  `onScroll`/`onLayout`/`onContentSizeChange` son del shell y ENCADENAN los del consumidor
+                  (que los usa para su scroll-al-campo): alimentan el gate del arrastre (`bodyAtTop`) y el
+                  affordance (`showPeek`).
+                  El detector del CUERPO se monta sobre el CONTENIDO del scroll (no sobre la envoltura del
+                  sheet ni sobre el ScrollView): así su región no se solapa con la del header y el footer no
+                  queda cubierto por ninguno. Sobre el `ScrollView` de Tamagui NO va porque
+                  gesture-handler-web termina aplicando su estilo a un nodo que no es el scroller y el pan
+                  del cuerpo queda MUERTO en web (medido ad-hoc durante el desarrollo con un dump del DOM;
+                  no es un caso vivo de la suite: la alternativa ya no está en el árbol). `touch-action:
+                  pan-y` (web-only) para que el navegador conserve el scroll táctil del body; ese sí está
+                  lockeado por `e2e/sheet-arrastre.spec.ts` leyendo el testID de abajo. */}
+              <View flexShrink={1} style={bodyStyle} width="100%" position="relative">
+                <ScrollView
+                  ref={scrollViewRef}
+                  flexShrink={1}
+                  style={bodyStyle}
+                  showsVerticalScrollIndicator={false}
+                  keyboardShouldPersistTaps={keyboardShouldPersistTaps}
+                  // PEEK: aire al final del contenido → el último elemento NUNCA queda rebanado al ras del
+                  // CTA (se leía como layout roto en vez de "seguí scrolleando"). Mismo token que el peek de
+                  // `FooterActionShell`. El `gap` vive en el View de abajo (único hijo del contentContainer).
+                  contentContainerStyle={{ paddingBottom: getTokenValue('$6', 'space') }}
+                  testID={bodyTestID}
+                  onLayout={onBodyLayoutChained}
+                  onContentSizeChange={onBodyContentSizeChained}
+                  onScroll={onBodyScroll}
+                  scrollEventThrottle={16}
                 >
-                  {title}
-                </Text>
-                {description != null && showDescription ? (
-                  <Text fontFamily="$body" fontSize="$3" lineHeight="$3" color="$textMuted" numberOfLines={2}>
-                    {description}
-                  </Text>
+                  <GestureDetector gesture={bodyDrag} touchAction="pan-y">
+                    <YStack
+                      width="100%"
+                      gap={getTokenValue(contentGap, 'space')}
+                      testID={`${testID}-body-drag`}
+                    >
+                      {children}
+                    </YStack>
+                  </GestureDetector>
+                </ScrollView>
+
+                {/* FADE + chevron ▾ cuando queda contenido oculto ABAJO: la señal de "hay más" que el sheet
+                    no tenía (el indicador nativo está apagado y en iOS solo aparece mientras scrolleás).
+                    `pointerEvents="none"` → no intercepta ni el scroll ni el arrastre ni los taps. */}
+                {showPeek ? (
+                  <View
+                    position="absolute"
+                    bottom="$0"
+                    left="$0"
+                    right="$0"
+                    height={getTokenValue('$searchBarLg', 'size')}
+                    pointerEvents="none"
+                    alignItems="center"
+                    justifyContent="flex-end"
+                    testID={`${testID}-scroll-peek`}
+                  >
+                    <View position="absolute" top="$0" left="$0" right="$0" bottom="$0" pointerEvents="none">
+                      <LinearGradient
+                        colors={['transparent', getTokenValue('$bg', 'color')]}
+                        pointerEvents="none"
+                        style={fadeFillStyle}
+                      />
+                    </View>
+                    <View paddingBottom="$1">
+                      <ChevronDown
+                        size={getTokenValue('$navIcon', 'size')}
+                        color={getTokenValue('$textMuted', 'color')}
+                        strokeWidth={2.5}
+                      />
+                    </View>
+                  </View>
                 ) : null}
-              </YStack>
+              </View>
 
-              {/* X de cierre: SIEMPRE presente (Nielsen #3). Target $icon=48 (≥44) + hitSlop. Va como pieza
-                  Tamagui con onPress (NO un Pressable de RN envolviendo un Tamagui con pressStyle: en
-                  nativo new-arch eso roba el responder y el onPress no dispara — memoria del repo). */}
-              {showCloseButton ? (
-                <View
-                  testID={closeTestID ?? `${testID}-close`}
-                  width={getTokenValue('$icon', 'size')}
-                  height={getTokenValue('$icon', 'size')}
-                  borderRadius="$pill"
-                  alignItems="center"
-                  justifyContent="center"
-                  backgroundColor="$surface"
-                  flexShrink={0}
-                  hitSlop={8}
-                  pressStyle={{ backgroundColor: '$greenLight' }}
-                  onPress={onClose}
-                  {...buttonA11y(Platform.OS, { label: closeA11yLabel })}
-                >
-                  <X
-                    size={getTokenValue('$navIcon', 'size')}
-                    color={getTokenValue('$textMuted', 'color')}
-                    strokeWidth={2.5}
-                  />
-                </View>
+              {/* ── FOOTER FIJO. flexShrink:0 → el CTA primario queda SIEMPRE abajo, nunca empujado fuera. ── */}
+              {hasFooter ? (
+                <YStack flexShrink={0} gap="$2">
+                  {footer}
+                  {secondaryFooter != null && showSecondaryAction ? secondaryFooter : null}
+                </YStack>
               ) : null}
-            </XStack>
-          </YStack>
-
-          {/* ── BODY scrolleable. flexShrink:1 + minHeight:0 — NUNCA flex:1 (bug U5, ver cabecera). ── */}
-          <ScrollView
-            ref={scrollViewRef}
-            flexShrink={1}
-            style={bodyStyle}
-            showsVerticalScrollIndicator={false}
-            keyboardShouldPersistTaps={keyboardShouldPersistTaps}
-            contentContainerStyle={{ gap: getTokenValue(contentGap, 'space') }}
-            testID={bodyTestID}
-            onLayout={onBodyLayout}
-            onContentSizeChange={onBodyContentSizeChange}
-          >
-            {children}
-          </ScrollView>
-
-          {/* ── FOOTER FIJO. flexShrink:0 → el CTA primario queda SIEMPRE abajo, nunca empujado fuera. ── */}
-          {hasFooter ? (
-            <YStack flexShrink={0} gap="$2">
-              {footer}
-              {secondaryFooter != null && showSecondaryAction ? secondaryFooter : null}
             </YStack>
-          ) : null}
-        </YStack>
+        </Animated.View>
       </KeyboardAvoidingView>
     </View>
   );

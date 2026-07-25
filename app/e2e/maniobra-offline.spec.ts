@@ -82,7 +82,11 @@ async function configureSessionVacPesaje(page: Page, vaccine: string): Promise<v
   await expect(page.getByTestId('maneuver-config-sheet')).toBeVisible({ timeout: 10_000 });
   await page.getByTestId('maneuver-config-input').fill(vaccine);
   await page.getByRole('button', { name: 'Agregar vacuna', exact: true }).click();
-  await page.getByRole('button', { name: 'Guardar', exact: true }).click();
+  // Auto-guardado (UX 4): agregar ya persistió; "Listo" sólo cierra.
+  await page
+    .getByTestId('maneuver-config-sheet')
+    .getByRole('button', { name: 'Listo', exact: true })
+    .click();
   await expect(page.getByTestId('maneuver-config-sheet')).toHaveCount(0, { timeout: 10_000 });
 
   await page.getByRole('button', { name: /^Continuar/ }).click();

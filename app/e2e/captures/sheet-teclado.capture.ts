@@ -16,9 +16,9 @@
 //     alcanzable. Es la mitad "geométrica" del caso teclado que web sí puede ejercitar.
 //
 // Estados capturados:
-//   01 — vacunación VACÍO (input arriba, "Usadas antes", Guardar/Cancelar, X en el header)
+//   01 — vacunación VACÍO (input arriba, "Usadas antes", único CTA "Listo", X en el header)
 //   02 — vacunación con 3 VACUNAS cargadas (chips DEBAJO del input; el input no se movió)
-//   03 — vacunación con ALTO RECORTADO (412×420 ≈ teclado arriba): título + input + Guardar visibles
+//   03 — vacunación con ALTO RECORTADO (412×420 ≈ teclado arriba): título + input + "Listo" visibles
 //   04 — maniobra CUSTOM (form) normal
 //   05 — maniobra CUSTOM con alto recortado
 //   05b — maniobra CUSTOM enum con 3 OPCIONES cargadas (input arriba, chips DEBAJO — mismo layout que el
@@ -119,7 +119,8 @@ test('capturas sheets keyboard-aware: vacunación / custom / rutina @ 412 + alto
     await page.getByTestId('selected-body-0').click();
     await expect(page.getByTestId('maneuver-config-sheet')).toBeVisible({ timeout: 10_000 });
 
-    // 01) VACÍO — input GRANDE arriba, "Usadas antes" debajo, footer con Guardar/Cancelar, X en el header.
+    // 01) VACÍO — input GRANDE arriba, "Usadas antes" debajo, footer con el único CTA "Listo" (UX 4:
+    //     auto-guardado, sin Guardar/Cancelar), X en el header.
     await expect(page.getByTestId('maneuver-config-input')).toBeVisible();
     await expect(page.getByText('Usadas antes', { exact: true })).toBeVisible({ timeout: 15_000 });
     await expect(page.getByTestId('maneuver-config-sheet-close')).toBeVisible();
@@ -134,11 +135,14 @@ test('capturas sheets keyboard-aware: vacunación / custom / rutina @ 412 + alto
     }
     await shot(page, '02-vacunacion-tres-chips');
 
-    // 03) ALTO RECORTADO (≈ teclado arriba): título + input + "Guardar" tienen que seguir a la vista.
+    // 03) ALTO RECORTADO (≈ teclado arriba): título + input + "Listo" tienen que seguir a la vista.
     await shotKeyboardUp(page, '03-vacunacion-alto-recortado');
 
-    // Guardamos (D2 exige ≥1 vacuna para continuar a la etapa 3).
-    await page.getByRole('button', { name: 'Guardar', exact: true }).click();
+    // Cerramos (D2 exige ≥1 vacuna para continuar a la etapa 3; ya quedaron persistidas al agregarlas).
+    await page
+      .getByTestId('maneuver-config-sheet')
+      .getByRole('button', { name: 'Listo', exact: true })
+      .click();
     await expect(page.getByTestId('maneuver-config-sheet')).toHaveCount(0, { timeout: 10_000 });
 
     // ── 04/05) SHEET DE MANIOBRA CUSTOM (form directo, sin clasificación) ──

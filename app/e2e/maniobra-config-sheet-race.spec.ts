@@ -78,7 +78,11 @@ async function gotoStage3(page: Page): Promise<void> {
   await expect(page.getByTestId('maneuver-config-sheet')).toBeVisible({ timeout: 10_000 });
   await page.getByTestId('maneuver-config-input').fill('Brucelosis');
   await page.getByRole('button', { name: 'Agregar vacuna', exact: true }).click();
-  await page.getByRole('button', { name: 'Guardar', exact: true }).click();
+  // Auto-guardado (UX 4): agregar YA persistió; "Listo" sólo cierra.
+  await page
+    .getByTestId('maneuver-config-sheet')
+    .getByRole('button', { name: 'Listo', exact: true })
+    .click();
   await expect(page.getByTestId('maneuver-config-sheet')).toHaveCount(0, { timeout: 10_000 });
   await touchTapButton(page, 'Continuar (1)');
   await expect(page.getByText('Revisá la jornada', { exact: true })).toBeVisible({ timeout: 20_000 });
@@ -127,9 +131,92 @@ test('el sheet de preconfig NO se auto-cierra al abrirlo con un tap táctil (cli
     if (!box) throw new Error('sin boundingBox para el scrim');
     await page.touchscreen.tap(box.x + box.width / 2, box.y + 12); // bien arriba, sobre el scrim libre
     await expect(page.getByTestId('maneuver-config-sheet')).toHaveCount(0, { timeout: 10_000 });
-    // Cerramos por backdrop (no Guardar) → el preconfig NO se cargó → la fila sigue con la marca "Faltan
-    // vacunas" (D2: sin vacuna definida; antes era el hint "Tocá para elegir vacuna").
+    // ── UX 4 (auto-guardado): cerrar por SCRIM ya NO DESCARTA ──────────────────────────────────
+    // Antes esto perdía en silencio lo cargado (el escenario que Raf mandó a arreglar): tres de las
+    // cuatro salidas del sheet llamaban a onClose sin persistir. Ahora, además, el texto que quedó
+    // TIPEADO sin tocar "Agregar" se agrega AL CERRAR (`pendingCloseCommit`) → "Brucelosis" entra igual
+    // por la vía más hostil (roce del guante en el scrim) y la marca "Faltan vacunas" se va.
+    await expect(page.getByTestId('selected-config-0')).toHaveText('Brucelosis');
+    await expect(page.getByText('Faltan vacunas', { exact: true })).toHaveCount(0);
+    await expect(page.getByTestId('selected-config-warn-0')).toHaveCount(0);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test('UX 4 auto-guardado: las vacunas AGREGADAS sobreviven al cierre por SCRIM, y sacar el último chip limpia el preconfig', async ({
+  browser,
+}) => {
+  // El defecto grave que este delta cierra (Nielsen #5 — prevención de errores): con commit diferido,
+  // cargabas cuatro vacunas, rozabas el scrim con el guante y se perdían las cuatro SIN AVISO. Se
+  // ejercita con el mismo context táctil del race (es el gesto real del dedo, no un click sintético).
+  const ctx = await browser.newContext({
+    hasTouch: true,
+    isMobile: true,
+    viewport: { width: 412, height: 915 },
+  });
+  const page = await ctx.newPage();
+  await applyEnvShim(page);
+
+  try {
+    const user = await createTestUser('config-autosave');
+    await setUserPhone(user.id, '1123456789');
+    await seedEstablishmentWithRodeo(user.id, 'Campo Config Autosave');
+
+    await page.goto('/');
+    await signIn(page, user);
+    await waitForHome(page);
+
+    await gotoStage2WithVacunacion(page);
+
+    // ── (A) Tres vacunas AGREGADAS + cierre por SCRIM → los tres valores quedaron persistidos ──
+    await page.getByTestId('selected-body-0').click();
+    await expect(page.getByTestId('maneuver-config-sheet')).toBeVisible({ timeout: 10_000 });
+    for (const vacuna of ['Aftosa', 'Mancha', 'Carbunclo']) {
+      await page.getByTestId('maneuver-config-input').fill(vacuna);
+      await page.getByRole('button', { name: 'Agregar vacuna', exact: true }).click();
+      await expect(page.getByTestId(`config-chip-${vacuna}`)).toBeVisible({ timeout: 5_000 });
+    }
+    const scrim = await page.getByTestId('maneuver-config-scrim').boundingBox();
+    if (!scrim) throw new Error('sin boundingBox para el scrim');
+    await page.touchscreen.tap(scrim.x + scrim.width / 2, scrim.y + 12);
+    await expect(page.getByTestId('maneuver-config-sheet')).toHaveCount(0, { timeout: 10_000 });
+    // Con el bug (commit diferido) acá se perdían las tres y la fila seguía en "Faltan vacunas".
+    await expect(page.getByTestId('selected-config-0')).toHaveText('Aftosa, Mancha, Carbunclo');
+    await expect(page.getByText('Faltan vacunas', { exact: true })).toHaveCount(0);
+
+    // ── (B) Sacar los chips uno por uno: el ÚLTIMO deja el preconfig LIMPIO (la fila vuelve al reclamo) ──
+    // Cada × commitea en el acto → con el sheet TODAVÍA abierto, la fila de atrás ya refleja el estado.
+    await page.getByTestId('selected-body-0').click();
+    await expect(page.getByTestId('maneuver-config-sheet')).toBeVisible({ timeout: 10_000 });
+    await page.getByRole('button', { name: 'Quitar Carbunclo', exact: true }).click();
+    await expect(page.getByTestId('config-chip-Carbunclo')).toHaveCount(0);
+    await expect(page.getByTestId('selected-config-0')).toHaveText('Aftosa, Mancha');
+    await page.getByRole('button', { name: 'Quitar Mancha', exact: true }).click();
+    await page.getByRole('button', { name: 'Quitar Aftosa', exact: true }).click();
+    await expect(page.getByTestId('config-chip-Aftosa')).toHaveCount(0);
+    // items=[] → commit '' → el caller BORRA la clave del preconfig → la fila vuelve a reclamar la vacuna.
+    await expect(page.getByTestId('selected-config-0')).toHaveCount(0);
+    await expect(page.getByTestId('selected-config-warn-0')).toBeVisible();
+    // Cerrar con el sheet vacío NO revive nada (no hay texto pendiente que flushear).
+    await page
+      .getByTestId('maneuver-config-sheet')
+      .getByRole('button', { name: 'Listo', exact: true })
+      .click();
+    await expect(page.getByTestId('maneuver-config-sheet')).toHaveCount(0, { timeout: 10_000 });
     await expect(page.getByText('Faltan vacunas', { exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Completá las vacunas', exact: true })).toBeVisible();
+
+    // ── (C) La × del chip es un target MANGA (≥44px): con el auto-guardado es la única acción
+    // destructiva y su efecto es inmediato, así que errarle no puede ser fácil. ──
+    await page.getByTestId('selected-body-0').click();
+    await expect(page.getByTestId('maneuver-config-sheet')).toBeVisible({ timeout: 10_000 });
+    await page.getByTestId('maneuver-config-input').fill('Aftosa');
+    await page.getByRole('button', { name: 'Agregar vacuna', exact: true }).click();
+    const removeBox = await page.getByTestId('config-chip-remove-Aftosa').boundingBox();
+    if (!removeBox) throw new Error('sin boundingBox para la × del chip');
+    expect(removeBox.width, 'la × del chip es un target chico (<44px)').toBeGreaterThanOrEqual(44);
+    expect(removeBox.height, 'la × del chip es un target chico (<44px)').toBeGreaterThanOrEqual(44);
   } finally {
     await ctx.close();
   }

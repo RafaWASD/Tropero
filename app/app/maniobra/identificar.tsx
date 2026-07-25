@@ -37,6 +37,8 @@ import { ArrowRightLeft, Bluetooth, Check, Keyboard, PlusCircle } from 'lucide-r
 
 import { StickIcon } from '@/theme/icons';
 import { Button } from '@/components';
+import { useHardwareBack } from '@/hooks';
+import { identifyBackAction } from '@/utils/maniobra-back';
 import { BleConnectionChip } from '@/components/BleConnectionChip';
 import { useEstablishment, useRodeo } from '@/contexts';
 import { useBleStickListener } from '@/services/ble/stick';
@@ -372,6 +374,42 @@ export default function ManiobraIdentificar() {
       });
     }
   }, [sessionId, session, establishmentId]);
+
+  // BACK DE HARDWARE (Android): hace EXACTAMENTE lo mismo que el chevron ‹ del header — abre el
+  // `ExitJornadaSheet` (cierre guardado de la jornada, R10.7). Sin esto, el back popeaba la ruta y SALTEABA
+  // esa guarda con la jornada ACTIVA. Con un sheet arriba, primero lo cierra por SU camino ya existente (el
+  // mismo del scrim / "Seguir en la jornada"), nunca corre la salida por debajo del modal. Decisión pura +
+  // precedencia en `utils/maniobra-back.ts`. Inerte en web (ADR-029: veredicto de device Android).
+  const onHardwareBack = useCallback(() => {
+    switch (identifyBackAction({
+      sugerenciaOpen,
+      exitOpen,
+      otherRodeoOpen: otherRodeo !== null,
+      ambiguousOpen: outcome?.kind === 'ambiguous',
+    })) {
+      case 'close-sugerencia':
+        exitManiobraFlow(); // el mismo onClose del SugerenciaVaciasSheet (saltear la sugerencia y salir)
+        return;
+      case 'close-exit':
+        closeExitSheet();
+        return;
+      case 'back-to-listening':
+        backToListening();
+        return;
+      case 'open-exit':
+        openExitSheet();
+    }
+  }, [
+    sugerenciaOpen,
+    exitOpen,
+    otherRodeo,
+    outcome,
+    exitManiobraFlow,
+    closeExitSheet,
+    backToListening,
+    openExitSheet,
+  ]);
+  useHardwareBack(onHardwareBack);
 
   // Asigna TODAS las vacías al lote elegido (RLV.14) → sale del flujo. Offline (assignAnimalToGroup local).
   const assignVaciasToGroup = useCallback(

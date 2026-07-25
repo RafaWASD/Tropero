@@ -21,6 +21,13 @@
 //   4. La X del header cierra cada sheet (afordancia nueva; con el teclado arriba es la única salida).
 // El guard anti click-huérfano del scrim (movido al primitivo) sigue cubierto por
 // e2e/maniobra-config-sheet-race.spec.ts, que corre tal cual.
+//
+// ── NOTA (UX 4, auto-guardado del preconfig, 2026-07-25) ──────────────────────────────────────────────
+// El sheet de VACUNACIÓN ya no tiene CTA secundario: su footer es un único "Listo" (auto-guardado — ver
+// ManeuverConfigSheet). El oráculo de alto recortado apunta ahora a ese CTA. La CONDENSACIÓN del
+// secundario, que igual no es observable en web, sigue siendo un contrato del shell y la ejercitan los
+// sheets que SÍ conservan secundario (`CustomFieldSheet`/`SavePresetSheet`/`BreedPickerSheet`), cubiertos
+// por `src/utils/sheet-shell.test.ts` + el 2º/3º test de este archivo.
 
 import { test, expect, type Page } from './helpers/fixtures';
 import {
@@ -124,19 +131,28 @@ test('sheet de vacunas: Enter agrega SIN perder el teclado, el input queda arrib
   expect(sheetBox!.y, 'el sheet se desbordó por arriba de la pantalla').toBeGreaterThanOrEqual(-1);
   expect(titleBox!.y).toBeGreaterThanOrEqual(sheetBox!.y - 1);
   await expectInsideViewport(page, 'maneuver-config-input', 'input de vacuna');
-  const guardar = page.getByRole('button', { name: 'Guardar', exact: true });
-  await expect(guardar).toBeVisible();
-  const guardarBox = await guardar.boundingBox();
-  expect(guardarBox).not.toBeNull();
-  expect(guardarBox!.y + guardarBox!.height, 'el CTA "Guardar" quedó fuera del viewport').toBeLessThanOrEqual(
+  const listo = page
+    .getByTestId('maneuver-config-sheet')
+    .getByRole('button', { name: 'Listo', exact: true });
+  await expect(listo).toBeVisible();
+  const listoBox = await listo.boundingBox();
+  expect(listoBox).not.toBeNull();
+  expect(listoBox!.y + listoBox!.height, 'el CTA "Listo" quedó fuera del viewport').toBeLessThanOrEqual(
     KEYBOARD_UP_VIEWPORT.height + 1,
   );
   await page.setViewportSize(FULL_VIEWPORT);
 
-  // ── (4) La X del header CIERRA el sheet (sin guardar: la fila sigue reclamando la vacuna) ──
+  // ── (4) La X del header CIERRA el sheet. Con AUTO-GUARDADO (UX 4) cerrar ya NO descarta: las tres
+  //        vacunas cargadas arriba quedaron persistidas → la fila muestra el valor, no "Faltan vacunas".
+  //        Además dejamos texto TIPEADO SIN "Agregar": el flush del cierre (`pendingCloseCommit`) tiene que
+  //        agregarlo también por ESTA vía (el CTA "Listo" y el scrim ya están cubiertos en
+  //        maniobra-config-sheet-race.spec.ts; la X es la salida que faltaba asertar). ──
+  await input.click();
+  await input.fill('Mancha');
   await page.getByTestId('maneuver-config-sheet-close').click();
   await expect(page.getByTestId('maneuver-config-sheet')).toHaveCount(0, { timeout: 10_000 });
-  await expect(page.getByText('Faltan vacunas', { exact: true })).toBeVisible();
+  await expect(page.getByTestId('selected-config-0')).toHaveText('Brucelosis, Aftosa, Carbunclo, Mancha');
+  await expect(page.getByText('Faltan vacunas', { exact: true })).toHaveCount(0);
 });
 
 test('la X del header cierra el sheet de maniobra custom y el de "Guardar como rutina"', async ({ page }) => {
@@ -150,11 +166,15 @@ test('la X del header cierra el sheet de maniobra custom y el de "Guardar como r
   await waitForHome(page);
 
   await openVacunacionSheet(page);
-  // Definimos la vacuna (D2 exige ≥1 para poder continuar a la etapa 3) y guardamos.
+  // Definimos la vacuna (D2 exige ≥1 para poder continuar a la etapa 3). Enter la AGREGA y el
+  // auto-guardado (UX 4) ya la persiste; "Listo" sólo cierra.
   await page.getByTestId('maneuver-config-input').fill('Brucelosis');
   await page.getByTestId('maneuver-config-input').press('Enter');
   await expect(page.getByTestId('config-chip-Brucelosis')).toBeVisible();
-  await page.getByRole('button', { name: 'Guardar', exact: true }).click();
+  await page
+    .getByTestId('maneuver-config-sheet')
+    .getByRole('button', { name: 'Listo', exact: true })
+    .click();
   await expect(page.getByTestId('maneuver-config-sheet')).toHaveCount(0, { timeout: 10_000 });
 
   // ── SHEET DE MANIOBRA CUSTOM (el `+` de la lista): la X lo cierra sin crear nada ──

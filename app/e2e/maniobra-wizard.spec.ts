@@ -35,6 +35,14 @@ import { signIn, waitForHome } from './helpers/ui';
 
 const OUT_DIR = path.join(__dirname, '..', '..', 'design', 'maniobra-wizard');
 
+/**
+ * CTA único del sheet de preconfig (UX 4, auto-guardado): "Listo" SÓLO cierra — ya no hay "Guardar" ni
+ * "Cancelar". Se scopea al sheet: "Listo" es un copy que otras pantallas del flujo también usan.
+ */
+function configSheetDone(page: Page) {
+  return page.getByTestId('maneuver-config-sheet').getByRole('button', { name: 'Listo', exact: true });
+}
+
 test.afterAll(async () => {
   await cleanupAll();
 });
@@ -57,7 +65,7 @@ test('captura wizard de jornada: inicio → rodeo → maniobras (reorder) → re
   // Dos presets previos con preconfig de vacunación → el wizard SIEMBRA el autocompletar (R1.8/DM1-UI-1)
   // de los valores usados antes: "Brucelosis" y "Aftosa" aparecerán como sugerencias en el sheet. Dos
   // valores distintos: así, agregando "Brucelosis" como chip, "Aftosa" sigue como "Usadas antes" en la
-  // captura hero (chip + sugerencia distinta + Guardar habilitado a la vez).
+  // captura hero (chip + sugerencia distinta + el CTA "Listo" a la vez).
   await seedManeuverPreset(establishmentId, 'Sanitario otoño', {
     maniobras: ['vacunacion'],
     preconfig: { vacunacion: 'Brucelosis' },
@@ -133,6 +141,12 @@ test('captura wizard de jornada: inicio → rodeo → maniobras (reorder) → re
   await page.getByTestId('selected-body-2').click();
   await expect(page.getByTestId('maneuver-config-sheet')).toBeVisible({ timeout: 10_000 });
   await expect(page.getByTestId('maneuver-config-input')).toBeVisible();
+  // UX 4 (auto-guardado): el footer tiene UN solo CTA, "Listo". Ni "Guardar" (confirmaba lo ya
+  // confirmado) ni "Cancelar" (era una de las cuatro salidas que descartaban en silencio).
+  const sheet = page.getByTestId('maneuver-config-sheet');
+  await expect(configSheetDone(page)).toBeVisible();
+  await expect(sheet.getByRole('button', { name: 'Guardar', exact: true })).toHaveCount(0);
+  await expect(sheet.getByRole('button', { name: 'Cancelar', exact: true })).toHaveCount(0);
   // AUTOCOMPLETAR (R1.8): los presets sembrados dejan "Brucelosis" y "Aftosa" como valores usados antes →
   // aparecen como sugerencias bajo "Usadas antes" (sin tipear nada, prefijo vacío = lista completa).
   await expect(page.getByText('Usadas antes', { exact: true })).toBeVisible();
@@ -140,31 +154,33 @@ test('captura wizard de jornada: inicio → rodeo → maniobras (reorder) → re
   await expect(page.getByTestId('config-suggestion-Aftosa')).toBeVisible();
   // Tocar la sugerencia la agrega como chip (multi) → demuestra el autocompletar real. "Aftosa" se EXCLUYE
   // de las sugerencias sólo si fuera la agregada; como agregamos "Brucelosis", "Aftosa" sigue en "Usadas
-  // antes" → la captura hero muestra a la vez: el chip, una sugerencia distinta y Guardar verde habilitado.
+  // antes" → la captura hero muestra a la vez: el chip, una sugerencia distinta y el CTA "Listo".
   await page.getByTestId('config-suggestion-Brucelosis').click();
   await expect(page.getByTestId('config-chip-Brucelosis')).toBeVisible();
   await expect(page.getByTestId('config-suggestion-Aftosa')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Guardar', exact: true })).toBeEnabled();
-  // Captura HERO del sheet: chip "Brucelosis" agregado (con su ×) + input grande + "Usadas antes" (Aftosa)
-  // + "Guardar" en botella verde a full (habilitado), arriba de "Cancelar".
+  await expect(configSheetDone(page)).toBeEnabled();
+  // Captura HERO del sheet: chip "Brucelosis" agregado (con su × ≥$touchMin) + input grande + "Usadas
+  // antes" (Aftosa) + el ÚNICO CTA "Listo" en botella verde a full (ya no hay Guardar/Cancelar: UX 4).
   await page.screenshot({ path: path.join(OUT_DIR, 'etapa2-sheet.png') });
-  // Guardar → persiste en config.preconfig.vacunacion y se ve INLINE en la fila (round-trip).
-  await page.getByRole('button', { name: 'Guardar', exact: true }).click();
+  // AUTO-GUARDADO (UX 4): el chip YA quedó persistido al agregarlo — "Listo" sólo CIERRA. Se ve INLINE
+  // en la fila (round-trip).
+  await configSheetDone(page).click();
   await expect(page.getByTestId('maneuver-config-sheet')).toHaveCount(0, { timeout: 10_000 });
   // El valor cargado aparece INLINE en la fila (segunda línea) = "Brucelosis".
   await expect(page.getByTestId('selected-config-2')).toHaveText('Brucelosis');
   await page.screenshot({ path: path.join(OUT_DIR, 'etapa2.png') });
 
-  // LIMPIAR en MULTI (fix de canSave): reabrir el sheet con la vacuna ya cargada → quitar el chip con su
-  // × → items=[] → "Guardar" SIGUE habilitado (antes quedaba deshabilitado y no había forma de borrar la
-  // vacuna). Guardar con todo vacío persiste '' → el caller borra la clave → la fila vuelve al hint.
+  // LIMPIAR en MULTI (auto-guardado, UX 4): reabrir el sheet con la vacuna ya cargada → quitar el chip
+  // con su × → items=[] → eso YA commitea '' → el caller borra la clave y la fila vuelve al hint. La ×
+  // es la única acción destructiva y su efecto es inmediato (ya no hay un "Guardar" que lo confirme).
   await page.getByTestId('selected-body-2').click();
   await expect(page.getByTestId('maneuver-config-sheet')).toBeVisible({ timeout: 10_000 });
   await expect(page.getByTestId('config-chip-Brucelosis')).toBeVisible();
   await page.getByRole('button', { name: 'Quitar Brucelosis', exact: true }).click();
   await expect(page.getByTestId('config-chip-Brucelosis')).toHaveCount(0);
-  // Guardar habilitado con el sheet vacío → limpia el preconfig (round-trip de borrado).
-  await page.getByRole('button', { name: 'Guardar', exact: true }).click();
+  // El borrado ya está commiteado CON EL SHEET ABIERTO: la fila de atrás ya reclama la vacuna.
+  await expect(page.getByTestId('selected-config-warn-2')).toBeVisible();
+  await configSheetDone(page).click();
   await expect(page.getByTestId('maneuver-config-sheet')).toHaveCount(0, { timeout: 10_000 });
   // La fila vuelve a la marca "Faltan vacunas" (no el valor viejo) → config.preconfig.vacunacion quedó vacío.
   // D2: sin vacuna, la 2da línea es la MARCA de alto contraste (testID `selected-config-warn-2`), y el testID
@@ -181,7 +197,7 @@ test('captura wizard de jornada: inicio → rodeo → maniobras (reorder) → re
   await expect(page.getByTestId('maneuver-config-sheet')).toBeVisible({ timeout: 10_000 });
   await page.getByTestId('config-suggestion-Brucelosis').click();
   await expect(page.getByTestId('config-chip-Brucelosis')).toBeVisible();
-  await page.getByRole('button', { name: 'Guardar', exact: true }).click();
+  await configSheetDone(page).click();
   await expect(page.getByTestId('maneuver-config-sheet')).toHaveCount(0, { timeout: 10_000 });
   await expect(page.getByTestId('selected-config-2')).toHaveText('Brucelosis');
 
@@ -219,7 +235,7 @@ test('captura wizard de jornada: inicio → rodeo → maniobras (reorder) → re
   await expect(page.getByTestId('maneuver-config-sheet')).toBeVisible({ timeout: 10_000 });
   await page.getByTestId('maneuver-config-input').fill('Brucelosis');
   await page.getByRole('button', { name: 'Agregar vacuna', exact: true }).click();
-  await page.getByRole('button', { name: 'Guardar', exact: true }).click();
+  await configSheetDone(page).click();
   await expect(page.getByTestId('maneuver-config-sheet')).toHaveCount(0, { timeout: 10_000 });
   // Scrolleamos la lista hasta abajo: el pool + el CTA "Continuar (8)" deben quedar a la vista (eran
   // inalcanzables antes del fix). scrollIntoViewIfNeeded ejercita el scroll real del Animated.ScrollView.
@@ -254,11 +270,12 @@ test('captura wizard de jornada: inicio → rodeo → maniobras (reorder) → re
   await expect(page.getByTestId('selected-row-2')).toBeVisible();
 
   // Cargamos el DETALLE de tanda de la vacunación (R1.7) DESDE EL SHEET (tocar el cuerpo de la fila #3 →
-  // input + Guardar) → el resumen lo muestra como "Brucelosis" bajo "Vacunación" (R1.9, maneuverDetail).
+  // tipear + cerrar) → el resumen lo muestra como "Brucelosis" bajo "Vacunación" (R1.9, maneuverDetail).
+  // Acá NO tocamos "Agregar": el texto tipeado se agrega SOLO al cerrar (regla `pendingCloseCommit`).
   await page.getByTestId('selected-body-2').click();
   await expect(page.getByTestId('maneuver-config-sheet')).toBeVisible({ timeout: 10_000 });
   await page.getByTestId('maneuver-config-input').fill('Brucelosis');
-  await page.getByRole('button', { name: 'Guardar', exact: true }).click();
+  await configSheetDone(page).click();
   await expect(page.getByTestId('maneuver-config-sheet')).toHaveCount(0, { timeout: 10_000 });
   await expect(page.getByTestId('selected-config-2')).toHaveText('Brucelosis');
 

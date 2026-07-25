@@ -236,6 +236,40 @@ export function joinMultiPreconfig(items: readonly string[]): string {
   return splitMultiPreconfig(items.join(', ')).join(', ');
 }
 
+/**
+ * Ítems resultantes de AGREGAR `raw` a un preconfig MULTI (una vacuna más, R1.7), o `null` si NO hay
+ * nada que agregar: texto vacío/whitespace, o ya presente (dedup case-insensitive, misma regla que
+ * `splitMultiPreconfig`).
+ *
+ * El `null` es el que hace barato el AUTO-GUARDADO del sheet: sin él, cada intento de agregar un
+ * duplicado dispararía un commit idéntico al estado actual (ruido de re-render en el caller).
+ */
+export function addMultiPreconfigItem(items: readonly string[], raw: string): string[] | null {
+  const v = raw.trim();
+  if (v.length === 0) return null;
+  const key = v.toLowerCase();
+  if (items.some((p) => p.trim().toLowerCase() === key)) return null;
+  return [...items, v];
+}
+
+/**
+ * Valor a COMMITEAR al CERRAR el sheet de preconfig cuando quedó texto TIPEADO que el operario nunca
+ * llegó a "Agregar" — vale para TODAS las vías de cierre (botón "Listo", X del header, tap en el
+ * scrim, arrastre del sheet). `null` = no hay nada pendiente y el caller no debe commitear.
+ *
+ * En `single` (inseminación) siempre es `null`: ese modo commitea en cada cambio del input (el input
+ * ES el valor), así que al cerrar ya está todo persistido y re-commitear sería un no-op.
+ */
+export function pendingCloseCommit(
+  kind: 'multi' | 'single',
+  items: readonly string[],
+  typed: string,
+): string | null {
+  if (kind !== 'multi') return null;
+  const next = addMultiPreconfigItem(items, typed);
+  return next === null ? null : joinMultiPreconfig(next);
+}
+
 // ─── Autocompletar de valores usados antes (R1.8) — dedup + filtro puro ────────────────────────
 
 /**

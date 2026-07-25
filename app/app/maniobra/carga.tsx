@@ -26,9 +26,10 @@ import { initialWindowMetrics, useSafeAreaInsets } from 'react-native-safe-area-
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { getTokenValue, Spinner, Text, View, XStack, YStack } from 'tamagui';
 
-import { useKeyboardVisible } from '@/hooks';
+import { useHardwareBack, useKeyboardVisible } from '@/hooks';
 import { computeSafeBottomInset, resolveFooterPaddingBottom } from '@/utils/footer-action';
 import { buttonA11y, labelA11y } from '@/utils/a11y';
+import { cargaBackAction } from '@/utils/maniobra-back';
 import {
   fetchAnimalDetail,
   fetchRodeoCategoryCatalog,
@@ -803,6 +804,26 @@ export default function ManiobraCarga() {
     // A diferencia de onConfirmAnimal (R5.10), saltear NO llama setSessionCounts: el animal NO se procesó.
     router.replace({ pathname: '/maniobra/identificar', params: { sessionId } });
   }, [router, sessionId]);
+
+  // BACK DE HARDWARE (Android). Este frame NO tiene chevron ‹ a propósito, así que el back va a su SALIDA
+  // GUARDADA: el `SkipAnimalSheet` (R5.15), que confirma antes de abandonar el animal y DESCARTA las filas de
+  // evento que ya se persistieron (R5.8 persiste por paso). Sin esto, el back popeaba la ruta hasta el landing
+  // y dejaba esas filas huérfanas, sin aviso. NO se inventa un "volver al paso anterior": esa afordancia no
+  // existe en la UI (la corrección se hace desde el resumen) y duplicarla sería un segundo camino. Con un
+  // sheet arriba, primero lo cierra por SU camino ya existente. Inerte en web (ADR-029: veredicto device).
+  const onHardwareBack = useCallback(() => {
+    switch (cargaBackAction({ skipSheetOpen, loteSheetOpen })) {
+      case 'close-skip-sheet':
+        setSkipSheetOpen(false);
+        return;
+      case 'close-lote-sheet':
+        setLoteSheetOpen(false);
+        return;
+      case 'open-skip-sheet':
+        setSkipSheetOpen(true);
+    }
+  }, [skipSheetOpen, loteSheetOpen]);
+  useHardwareBack(onHardwareBack);
 
   // ─── Saltear el PASO ACTUAL (R5.15, delta v2, PRIMARIO) ───
   //

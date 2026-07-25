@@ -15,9 +15,9 @@
 //
 // Estados clave capturados:
 //   01 — sheet ABIERTO VACÍO: título + subtítulo + INPUT grande visible + "Usadas antes" (Brucelosis/Aftosa)
-//        + Guardar/Cancelar. Es el estado que estaba ROTO en nativo (cuerpo invisible).
+//        + el CTA "Listo". Es el estado que estaba ROTO en nativo (cuerpo invisible).
 //   02 — VACUNA CARGADA: chip "Brucelosis" agregado (con su ×), el input sigue visible, "Aftosa" sigue en
-//        "Usadas antes", Guardar habilitado. Prueba que el flujo de carga funciona con el cuerpo visible.
+//        "Usadas antes". Prueba que el flujo de carga funciona con el cuerpo visible.
 //
 // NO corras esto en `pnpm e2e` (es un `.capture.ts`); lo dispara el leader:
 //   pnpm exec playwright test e2e/captures/config-sheet-body.capture.ts --config playwright.capture.config.ts
@@ -98,13 +98,12 @@ test('capturas config sheet body (U5): sheet abierto con el input visible + vacu
     await expect(page.getByTestId('config-suggestion-Aftosa')).toBeVisible();
     await page.screenshot({ path: path.join(SHOT_DIR, '01-sheet-abierto-vacio.png') });
 
-    // ── 02) VACUNA CARGADA — chip agregado, el input SIGUE visible, Guardar habilitado. ──
+    // ── 02) VACUNA CARGADA — chip agregado, el input SIGUE visible. ──
     // Tocar la sugerencia "Brucelosis" la agrega como chip (multi); "Aftosa" sigue en "Usadas antes".
     await page.getByTestId('config-suggestion-Brucelosis').click();
     await expect(page.getByTestId('config-chip-Brucelosis')).toBeVisible();
     await expect(page.getByTestId('maneuver-config-input')).toBeVisible();
     await expect(page.getByTestId('config-suggestion-Aftosa')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Guardar', exact: true })).toBeEnabled();
     await page.screenshot({ path: path.join(SHOT_DIR, '02-vacuna-cargada.png') });
   } finally {
     await page.context().close();

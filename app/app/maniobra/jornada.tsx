@@ -31,7 +31,9 @@ import Animated, { useAnimatedRef, useScrollOffset, useSharedValue } from 'react
 import { Check, ChevronLeft, Play, Plus } from 'lucide-react-native';
 
 import { Button, Card, FormError, InfoNote } from '@/components';
+import { useHardwareBack } from '@/hooks';
 import { buttonA11y, labelA11y } from '@/utils/a11y';
+import { jornadaBackAction } from '@/utils/maniobra-back';
 import { backOr } from '@/utils/nav';
 import { RodeoIcon } from '@/theme/icons';
 import { useEstablishment, useRodeo } from '@/contexts';
@@ -289,15 +291,26 @@ export default function JornadaWizardScreen() {
     else if (FREE_TEXT_PRECONFIG[m]) setConfigManeuver(m);
   }, []);
 
-  // Guardar el preconfig desde el sheet → persiste en config.preconfig[<maniobra>] (R1.7); vacío = limpia.
-  const onConfigSave = useCallback((m: ManeuverKind, value: string) => {
+  // COMMIT del preconfig desde el sheet de texto libre (AUTO-GUARDADO, UX 4): persiste en
+  // config.preconfig[<maniobra>] (R1.7); vacío = limpia la clave (la fila vuelve al hint). Se dispara N
+  // veces mientras el sheet está ABIERTO (una por cada vacuna agregada/quitada, o por cada cambio del
+  // input en single) → acá NO se cierra el sheet: commit y cierre son dos cosas separadas (el cierre es
+  // `setConfigManeuver(null)`, una sola vez). El guard de no-op devuelve el MISMO objeto de estado cuando
+  // el valor trimmeado no cambió: cubre las ediciones que sólo tocan whitespace y el re-commit idempotente
+  // del flush de cierre. NO evita el re-render por tecla del modo single (cada tecla da un valor distinto).
+  const onConfigCommit = useCallback((m: ManeuverKind, value: string) => {
     setPreconfig((prev) => {
-      const next = { ...prev };
-      if (value.trim().length === 0) delete next[m];
-      else next[m] = value.trim();
-      return next;
+      const clean = value.trim();
+      const current = prev[m];
+      if (clean.length === 0) {
+        if (current === undefined) return prev;
+        const next = { ...prev };
+        delete next[m];
+        return next;
+      }
+      if (current === clean) return prev;
+      return { ...prev, [m]: clean };
     });
-    setConfigManeuver(null);
   }, []);
 
   // Guardar "¿medir tamaño?" del TACTO desde el TactoConfigSheet (B2, RPSC.4.1/4.3) → persiste el OBJETO
@@ -319,6 +332,50 @@ export default function JornadaWizardScreen() {
     }
     setStage((s) => (s - 1) as Stage);
   }, [stage, router]);
+
+  // FUENTE ÚNICA de "¿este sheet está MONTADO?" — la misma expresión alimenta la decisión del back y la
+  // guarda de render de más abajo. Si se calcularan por separado podrían divergir (p. ej. la bandera
+  // `customSheetOpen` en true con `isOwner` en false) y el back deferiría a un sheet que no está en
+  // pantalla: botón muerto.
+  const preconfigSheet = configManeuver ? FREE_TEXT_PRECONFIG[configManeuver] : undefined;
+  const preconfigSheetMounted = configManeuver !== null && preconfigSheet !== undefined;
+  const customSheetMounted = isOwner && customSheetOpen;
+
+  // BACK DE HARDWARE (Android): hace EXACTAMENTE lo mismo que el chevron ‹ — retrocede de etapa (o sale del
+  // wizard en la etapa 1). Sin esto, el back popeaba la ruta y DESTRUÍA la configuración entera desde la
+  // etapa 2/3. Reusa `onBack` (no hay un segundo camino que se pueda desincronizar del primero). Decisión
+  // pura + precedencia con los sheets en `utils/maniobra-back.ts`. Inerte en web (ADR-029: veredicto device).
+  const onHardwareBack = useCallback(() => {
+    switch (jornadaBackAction({
+      preconfigSheetOpen: preconfigSheetMounted,
+      otherShellSheetOpen: savePresetOpen || customSheetMounted,
+      tactoConfigOpen,
+    })) {
+      case 'defer-to-preconfig-sheet':
+        // Sólo se llega acá si la precedencia FALLÓ (el sheet debía haber consumido el evento antes). No lo
+        // cerramos desde la pantalla: su cierre arrastra el flush del texto tipeado y saltearlo perdería
+        // datos. Pero tampoco nos quedamos mudos — un back muerto es invisible para web, E2E y unit.
+        if (typeof __DEV__ !== 'undefined' && __DEV__) {
+          console.warn(
+            '[maniobra] back de hardware con el sheet de preconfig montado: el sheet debía haberlo ' +
+              'consumido. Revisá la precedencia de BackHandler (¿la pantalla se re-enfocó con el sheet abierto?).',
+          );
+        }
+        return;
+      case 'close-shell-sheet':
+        // ÚLTIMO RECURSO (no se ejecuta en el camino feliz): cerrar es un reset de estado sin nada que
+        // perder. Setear una bandera ya en false es un no-op, así que no hace falta saber cuál está abierto.
+        setSavePresetOpen(false);
+        setCustomSheetOpen(false);
+        return;
+      case 'close-tacto-config':
+        setTactoConfigOpen(false);
+        return;
+      case 'screen-back':
+        onBack();
+    }
+  }, [preconfigSheetMounted, savePresetOpen, customSheetMounted, tactoConfigOpen, onBack]);
+  useHardwareBack(onHardwareBack);
 
   // Config snapshot ACTUAL de la jornada (R1.13, shape §2.1.1): maniobras EN SU ORDEN + preconfig (solo de
   // las maniobras que siguen elegidas, no ensuciamos el jsonb). Es la MISMA config que se persiste al
@@ -609,15 +666,19 @@ export default function JornadaWizardScreen() {
       ) : null}
 
       {/* BOTTOM SHEET de preconfig de tanda (R1.7/R1.8): abierto al tocar el cuerpo de una maniobra
-          configurable (vacunación/inseminación). Input grande + autocompletar de usadas antes. */}
-      {configManeuver && FREE_TEXT_PRECONFIG[configManeuver] ? (
+          configurable (vacunación/inseminación). Input grande + autocompletar de usadas antes.
+          AUTO-GUARDADO (UX 4): `onCommit` persiste en el acto y NO cierra; el cierre (CTA "Listo", X,
+          scrim, arrastre) es `onClose`. El `key` por maniobra garantiza estado fresco si alguna vez se
+          pasara de una maniobra configurable a otra sin desmontar. */}
+      {preconfigSheetMounted && configManeuver && preconfigSheet ? (
         <ManeuverConfigSheet
-          title={FREE_TEXT_PRECONFIG[configManeuver]!.title}
-          kind={FREE_TEXT_PRECONFIG[configManeuver]!.kind}
-          placeholder={FREE_TEXT_PRECONFIG[configManeuver]!.placeholder}
+          key={configManeuver}
+          title={preconfigSheet.title}
+          kind={preconfigSheet.kind}
+          placeholder={preconfigSheet.placeholder}
           value={typeof preconfig[configManeuver] === 'string' ? (preconfig[configManeuver] as string) : ''}
           history={history[configManeuver] ?? []}
-          onSave={(value) => onConfigSave(configManeuver, value)}
+          onCommit={(value) => onConfigCommit(configManeuver, value)}
           onClose={() => setConfigManeuver(null)}
         />
       ) : null}
@@ -643,7 +704,7 @@ export default function JornadaWizardScreen() {
 
       {/* SHEET de creación de MANIOBRA custom (R13.7): modo 'maniobra' (data_type fijo, SIN pregunta de
           clasificación). Owner-only (el `+` ya está gateado a isOwner en StageManeuvers). */}
-      {isOwner && customSheetOpen ? (
+      {customSheetMounted ? (
         <CustomFieldSheet
           mode="maniobra"
           onCreate={onCreateCustomManeuver}

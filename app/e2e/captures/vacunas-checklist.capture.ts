@@ -129,7 +129,11 @@ test('capturas vacunas APLICA/NO-APLICA (checklist + pre-maniobra) @ 412px', asy
     await expect(page.getByTestId('config-chip-Mancha')).toBeVisible();
     // (02) Sheet con las 2 vacunas de la tanda.
     await page.screenshot({ path: path.join(SHOT_DIR, '02-sheet-preconfig-2-vacunas.png') });
-    await page.getByRole('button', { name: 'Guardar', exact: true }).click();
+    // Auto-guardado (UX 4): agregar ya persistió cada vacuna; "Listo" sólo cierra.
+    await page
+      .getByTestId('maneuver-config-sheet')
+      .getByRole('button', { name: 'Listo', exact: true })
+      .click();
     await expect(page.getByTestId('maneuver-config-sheet')).toHaveCount(0, { timeout: 10_000 });
 
     // (03) Etapa 2 con la vacuna definida → fila muestra "Aftosa, Mancha" + continue habilitado.
