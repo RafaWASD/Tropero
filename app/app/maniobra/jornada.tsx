@@ -485,6 +485,8 @@ export default function JornadaWizardScreen() {
             paddingBottom: getTokenValue('$6', 'space'),
           }}
           showsVerticalScrollIndicator={false}
+          // Ancla del e2e que mide el scroll real (regresión del auto-scroll acotado del drag, R1.12).
+          testID="jornada-scroll"
         >
           {error ? <View marginBottom="$3"><FormError message={error} /></View> : null}
 

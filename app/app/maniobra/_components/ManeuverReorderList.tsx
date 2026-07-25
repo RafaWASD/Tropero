@@ -17,6 +17,16 @@
 // el ítem siga al dedo. BOUNDS: el ítem arrastrado se CLAMPEA a la región de las seleccionadas — no sube
 // arriba del título "En la jornada" ni baja al pool.
 //
+// AUTO-SCROLL ACOTADO A LA REGIÓN (fix bug device iOS, Raf 2026-07-25): antes el auto-scroll solo tenía
+// tope hacia arriba (offset ≥ 0) y hacia abajo corría hasta el FINAL de todo el contenido del ScrollView →
+// agarrar el grip de una maniobra cerca del borde inferior scrolleaba la página hasta el fondo (pool +
+// custom + "Detalle de la tanda" + CTA) y la lista que estabas ordenando DESAPARECÍA de pantalla. Ahora el
+// frame callback mide la REGIÓN reordenable en coordenadas de pantalla (`measure()` en el UI thread, ref
+// animado sobre el contenedor) y solo scrollea mientras quede región por revelar (fondo/tope + un margen de
+// aire fuera del viewport) — el cómputo vive en `autoScrollDelta` (PURO, testeado). Ver ahí el porqué de
+// las dos alternativas descartadas (gate por "el ítem ya está en el extremo de sus bounds" y hardcodear
+// "más de N maniobras").
+//
 // DRAG "BURBUJA": la fila levantada ESCALA ~1.04 + sombra/elevación fuerte + esquinas más redondas +
 // sigue el dedo 1:1; los hermanos se CORREN animados (spring) para hacer lugar; spring al soltar; háptica
 // al agarrar y al soltar. Gesto + animación en el HILO DE UI (reanimated worklets, gesture-handler) — el
@@ -43,8 +53,10 @@ import { getTokenValue, Text, View, XStack, YStack } from 'tamagui';
 import { AlertTriangle, Check, ChevronRight, GripVertical, Plus } from 'lucide-react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
+  measure,
   runOnJS,
   scrollTo,
+  useAnimatedRef,
   useAnimatedStyle,
   useFrameCallback,
   useSharedValue,
@@ -57,6 +69,7 @@ import Animated, {
 import { shadows } from '../../../tamagui.config';
 import type { ManeuverKind } from '@/utils/maneuver-gating';
 import { maneuverLabel } from '@/utils/maneuver-wizard';
+import { autoScrollDelta } from '@/utils/reorder-autoscroll';
 import { hapticPickUp, hapticDrop } from '@/utils/haptics';
 
 // Alto fijo de cada fila SELECCIONADA (incl. el gap visual) — el cómputo del índice destino del drag
@@ -75,6 +88,14 @@ const DRAG_ACTIVATE_Y = 8;
 const EDGE_ZONE = 72;
 // Velocidad del auto-scroll (px por frame, ~60fps).
 const AUTO_SCROLL_SPEED = 9;
+// Aire (px) que queda entre el borde del viewport y el borde de la REGIÓN de seleccionadas cuando el
+// auto-scroll termina de revelarla (es el tope del auto-scroll, ver `autoScrollDelta`). GEOMETRÍA DE GESTO,
+// no spacing themeable (misma naturaleza que EDGE_ZONE/AUTO_SCROLL_SPEED) → const nombrada, no token.
+// 24 porque: (a) es < EDGE_ZONE (72) → cuando el scroll corta, el dedo (que está dentro de la banda de
+// borde) sigue estando sobre las últimas filas, no sobre el vacío; (b) es ~30% de ROW_HEIGHT (80) → la
+// última fila queda claramente despegada del borde sin gastar una fila entera de recorrido; (c) es bien
+// mayor al gap visual entre filas (8) → se lee como "aire", no como otro gap.
+const AUTO_SCROLL_REVEAL_MARGIN = 24;
 
 /** Contexto de scroll que el padre (`jornada.tsx`) inyecta para el auto-scroll durante el drag. */
 export type ReorderScrollContext = {
@@ -536,14 +557,34 @@ export function ManeuverReorderList({
   const activeKey = useSharedValue('');
   // Dirección de auto-scroll en curso (-1/0/+1), seteada por el drag y leída por el frame callback.
   const autoScrollDir = useSharedValue(0);
+  // Ref animado del contenedor de la REGIÓN reordenable: el frame callback lo mide (UI thread) para acotar
+  // el auto-scroll a lo que falta revelar de la región (ver cabecera + `autoScrollDelta`).
+  const regionRef = useAnimatedRef<Animated.View>();
 
-  // AUTO-SCROLL continuo: mientras `autoScrollDir` ≠ 0 (dedo en una zona de borde), desplazamos el
-  // ScrollView cada frame. Sin scrollContext (test/sin padre scrolleable) no hace nada.
+  // AUTO-SCROLL continuo, ACOTADO A LA REGIÓN: mientras `autoScrollDir` ≠ 0 (dedo en una zona de borde),
+  // desplazamos el ScrollView cada frame, pero SOLO mientras quede región de seleccionadas por revelar.
+  // `measure()` corre acá (UI thread) y únicamente cuando hay auto-scroll pedido → no mide en cada frame de
+  // la app, solo durante los frames de drag-cerca-del-borde. Sin scrollContext (test/sin padre scrolleable)
+  // no hace nada; si `measure()` devuelve null (vista no layouteada / plataforma sin soporte) NO
+  // auto-scrolleamos — mismo criterio defensivo que el guard de `viewportHeight <= 0`, nunca caemos al
+  // comportamiento sin tope.
   useFrameCallback(() => {
     'worklet';
     if (!scrollContext || autoScrollDir.value === 0) return;
-    const next = scrollContext.scrollOffset.value + autoScrollDir.value * AUTO_SCROLL_SPEED;
-    scrollTo(scrollContext.scrollRef, 0, Math.max(0, next), false);
+    const region = measure(regionRef);
+    if (region === null) return;
+    const delta = autoScrollDelta({
+      dir: autoScrollDir.value,
+      speed: AUTO_SCROLL_SPEED,
+      regionTop: region.pageY,
+      regionHeight: region.height,
+      viewportTop: scrollContext.viewportTop.value,
+      viewportHeight: scrollContext.viewportHeight.value,
+      currentOffset: scrollContext.scrollOffset.value,
+      margin: AUTO_SCROLL_REVEAL_MARGIN,
+    });
+    if (delta === 0) return;
+    scrollTo(scrollContext.scrollRef, 0, Math.max(0, scrollContext.scrollOffset.value + delta), false);
   });
 
   // Sincronizamos el mapa con el `chosen` actual (orden de verdad = props del padre). Solo cuando cambia
@@ -568,8 +609,17 @@ export function ManeuverReorderList({
           <Text fontFamily="$body" fontSize="$4" lineHeight="$4" fontWeight="600" color="$textMuted" numberOfLines={1}>
             En la jornada (arrastrá para ordenar)
           </Text>
-          {/* Contenedor de alto fijo: las filas absolutas se posicionan por su translateY. */}
-          <View height={chosen.length * ROW_HEIGHT} position="relative">
+          {/* Contenedor de alto fijo: las filas absolutas se posicionan por su translateY. Es la REGIÓN que
+              el auto-scroll no debe pasarse de largo → `Animated.View` + ref animado para poder medirla en
+              el UI thread. `collapsable={false}`: en Android una View sin props visuales la aplana el
+              renderer (view flattening) y `measure()` sobre ella devuelve `null` (reanimated detecta las
+              medidas NaN de la vista aplanada, avisa por consola y devuelve null) → nuestro guard de
+              `region === null` cortaría el auto-scroll SIEMPRE. */}
+          <Animated.View
+            ref={regionRef}
+            collapsable={false}
+            style={{ height: chosen.length * ROW_HEIGHT, position: 'relative' }}
+          >
             {chosen.map((m, i) => (
               <SelectedRow
                 key={m}
@@ -587,7 +637,7 @@ export function ManeuverReorderList({
                 frozen={i === frozenDragIndex}
               />
             ))}
-          </View>
+          </Animated.View>
         </YStack>
       ) : null}
 
