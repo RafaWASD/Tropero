@@ -112,6 +112,21 @@ está respetando el inset inferior. El patrón correcto ya está escrito en nues
 (`.claude/skills/design-review`): `paddingBottom = max(insets.bottom, mínimo)`. Está documentado y no
 aplicado al tab bar.
 
+> ⚠️ **CORREGIDO (unidad «aire», 2026-07-26): ese patrón estaba MAL y era la causa de un segundo bug 🔴.**
+> `max(insets.bottom, mínimo)` reserva la barra del sistema **y nada más** en cualquier device con barra
+> real (`max(48, 12) = 48`): el mínimo solo puede ganar cuando el inset es 0, o sea en web. Medido en el
+> device de Raf (Samsung, 3 botones): el CTA quedaba a **1dp** de la barra.
+> La fórmula correcta tiene **tres** términos, no dos:
+> `paddingBottom = max(insetVigente, insetArranque, $navBottomMin=12) + (Android ? $navBarGap=16 : 0)`.
+> El **aire** se suma **solo en Android**, donde el inset inferior ES la barra de navegación que el SO
+> dibuja sobre el contenido; en **iOS** el inset de 34pt ya es espacio pintado con el fondo de la app (el
+> home indicator es una pildorita fina adentro), así que sumarle aire solo engorda la tab bar (94 → 110pt)
+> y come zona de pulgar. El **piso** `$navBottomMin` sigue existiendo para web (inset 0).
+> Se pide con `useSafeBottomInset()`. Resultado: **web 12 · iOS 34 · Android 3 botones 64** — o sea, esto
+> **no cambia nada en iOS ni en web**; solo arregla Android. Detalle en `docs/design-system.md` §4.
+> Lo que U7 sí arregló y se conserva: el piso por `initialWindowMetrics` (frame-0 de Android edge-to-edge)
+> — y su follow-up flageado, sembrar el `SafeAreaProvider` raíz con `initialMetrics`, quedó hecho acá.
+
 ### U8a — sí se puede antes de las tiendas
 
 Universal Links (iOS) y App Links (Android) funcionan con builds `preview`. Requieren publicar los

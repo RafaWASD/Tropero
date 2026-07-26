@@ -13,10 +13,10 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Platform, Pressable } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getTokenValue, Text, View, XStack, YStack } from 'tamagui';
 import { Pencil, SlidersHorizontal, Trash2, Type } from 'lucide-react-native';
 
+import { useSafeBottomInset } from '@/hooks/useSafeBottomInset';
 import { Button } from '@/components';
 import { buttonA11y } from '@/utils/a11y';
 
@@ -42,8 +42,7 @@ export function PresetActionsSheet({
   onDelete,
   onClose,
 }: PresetActionsSheetProps) {
-  const insets = useSafeAreaInsets();
-  const bottomPad = Math.max(insets.bottom, getTokenValue('$navBottomMin', 'size'));
+  const bottomPad = useSafeBottomInset();
 
   // ── GUARD del backdrop contra el "click huérfano" del tap que abrió el sheet (BUG web táctil) ──
   const readyToDismissRef = useRef(false);

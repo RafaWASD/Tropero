@@ -28,10 +28,10 @@
 
 import { useEffect, useRef } from 'react';
 import { Platform, Pressable } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
 import { AlertTriangle } from 'lucide-react-native';
 
+import { useSafeBottomInset } from '@/hooks/useSafeBottomInset';
 import { Button } from '@/components';
 import { buttonA11y, labelA11y } from '@/utils/a11y';
 import {
@@ -51,8 +51,7 @@ export type SyncRechazoSheetProps = {
 };
 
 export function SyncRechazoSheet({ rejections, onAcknowledge, onClose }: SyncRechazoSheetProps) {
-  const insets = useSafeAreaInsets();
-  const bottomPad = Math.max(insets.bottom, getTokenValue('$navBottomMin', 'size'));
+  const bottomPad = useSafeBottomInset();
 
   // ── GUARD del backdrop contra el "click huérfano" del tap que abrió el sheet (BUG web táctil) ──
   // Idéntico a ExitJornadaSheet/SavePresetSheet: el banner abre el sheet con un onPress; en web táctil el

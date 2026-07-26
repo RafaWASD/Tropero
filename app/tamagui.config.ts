@@ -148,10 +148,30 @@ const tokens = createTokens({
     // un nav "intermedio" (más compacto que el 64 previo, pero con targets más
     // grandes que Mercado Pago por uso en campo con guante: Fitts + manga-friendly).
     navBar: 60, // alto de contenido del bottom-nav
-    // Margen inferior mínimo del nav cuando NO hay safe-area inset (insets.bottom=0:
-    // Android viejo con botones físicos, o el preview web). Sin esto el nav queda al
-    // ras del borde inferior, sin respiro. Se aplica como max(insets.bottom, navBottomMin).
+    // ── Los DOS tokens del borde inferior. La reserva es
+    //      paddingBottom = max(insetVigente, insetArranque, navBottomMin) + (¿aplica aire? navBarGap : 0)
+    //    y se calcula en UN solo lugar: `useSafeBottomInset()` (src/hooks). Nunca a mano — lo hace
+    //    cumplir `src/utils/safe-bottom-inset-guard.test.ts`.
+    //
+    // PISO: respiro mínimo cuando NO hay inset del sistema (web, Android viejo con botones físicos).
+    // Es un `max`, no una suma: si el SO ya obliga a reservar 34 o 48, este 12 no aporta nada. Solo
+    // evita que el contenido quede al ras del borde físico de la pantalla cuando el inset es 0.
     navBottomMin: 12,
+    // AIRE: separación entre el contenido y la BARRA DE NAVEGACIÓN del SO, que se SUMA al inset.
+    // Se aplica SOLO donde el inset inferior está íntegramente ocupado por una barra de navegación
+    // que el SO dibuja sobre el contenido, o sea **Android** (3 botones o gestos):
+    //   · Android: el inset inferior vale EXACTAMENTE el alto de la barra de navegación → reservar
+    //     el inset y nada más deja el contenido apoyado sobre su borde. Medido en device (Samsung,
+    //     3 botones, inset 48, build 7402575a): el CTA "Nueva jornada" terminaba a 1dp de la barra.
+    //     No es solo estética — un toque bajo con guante cae en "atrás"/"home" y saca al operario de
+    //     la jornada (prevención de errores, Nielsen #5, en pantallas 🔴 manga).
+    //   · iOS: el inset de 34pt es espacio PINTADO CON EL FONDO DE LA APP con una pildorita fina
+    //     (el home indicator) adentro. El inset YA *es* el aire; sumarle 16 más solo come zona de
+    //     pulgar y hace la tab bar un 33% más alta que la nativa de iOS. → NO se aplica.
+    //   · Web: no hay barra del sistema; manda el piso. → NO se aplica.
+    // 16 = separación estándar de Material entre el contenido y la barra del sistema.
+    // Resultado: web 12 · iOS 34 · Android gestos 24+16=40 · Android 3 botones 48+16=64.
+    navBarGap: 16,
     fab: FAB_SIZE, // diámetro del FAB central (ADR-018)
     // Diámetro del HALO del FAB (ADR-018): anillo verde pálido DECORATIVO detrás del
     // FAB, estilo Mercado Pago (crea figura-fondo, integra el botón a la barra blanca).

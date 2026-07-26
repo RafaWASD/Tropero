@@ -4,7 +4,15 @@
 //   - GestureHandlerRootView: requerido por react-native-gesture-handler en la
 //     raíz para que los gestos (swipes, long-press en manga) funcionen en todo
 //     el árbol.
-//   - SafeAreaProvider: insets seguros (notch / home indicator).
+//   - SafeAreaProvider: insets seguros (notch / home indicator / barra del sistema Android).
+//     Va SEMBRADO con `initialMetrics={initialWindowMetrics}`: sin eso el provider mide los insets de
+//     forma ASÍNCRONA y `useSafeAreaInsets()` devuelve 0 en los primeros frames (Android edge-to-edge),
+//     así que todo lo anclado al fondo arranca pegado a la barra del sistema y salta después. Con la
+//     semilla, el valor real (sincrónico, de getConstants en nativo) está disponible desde el frame 0.
+//     Es el fix canónico app-wide que U7 dejó flageado; el piso por `initialWindowMetrics` que llevan
+//     `computeSafeBottomInset`/`computeTabBarInsetLayout` se conserva como defensa en profundidad
+//     (cubre cualquier subárbol que se monte bajo otro provider). En web `initialWindowMetrics` es
+//     null → `initialMetrics` queda undefined y el comportamiento es idéntico al de antes.
 //   - TamaguiProvider: inyecta el design system (tamagui.config.ts).
 //   - AuthProvider (spec 01, T3.1): sesión Supabase Auth. El gating de navegación
 //     raíz se hace según el AuthState (ver AuthGate abajo).
@@ -38,7 +46,7 @@ import 'react-native-gesture-handler';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Platform } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { initialWindowMetrics, SafeAreaProvider } from 'react-native-safe-area-context';
 import { TamaguiProvider } from 'tamagui';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -639,7 +647,10 @@ export default function RootLayout() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <SafeAreaProvider>
+      {/* initialMetrics: insets REALES desde el primer frame (ver cabecera). En web `initialWindowMetrics`
+          es `null` — valor que la prop acepta (`Metrics | null`) y trata como "medí vos", o sea el
+          comportamiento de antes. */}
+      <SafeAreaProvider initialMetrics={initialWindowMetrics}>
         {/* DIAGNÓSTICO TEMPORAL (bring-up nativo) — QUITAR cuando se resuelva.
             Envuelve TODO el árbol de providers (TamaguiProvider incluido) DENTRO de SafeAreaProvider,
             así un throw en fase de render de CUALQUIER provider (incl. PowerSyncProvider) se captura y se

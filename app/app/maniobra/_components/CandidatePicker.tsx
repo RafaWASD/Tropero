@@ -25,10 +25,10 @@
 // lineHeight matching.
 
 import { Platform, Pressable } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
 import { ChevronRight } from 'lucide-react-native';
 
+import { useSafeBottomInset } from '@/hooks/useSafeBottomInset';
 import { Button, CategoryBadge } from '@/components';
 import { formatEidReadable } from '@/utils/eid-format';
 import {
@@ -52,8 +52,7 @@ export type CandidatePickerProps = {
 };
 
 export function CandidatePicker({ query, candidates, onPick, onCreateNew, onClose }: CandidatePickerProps) {
-  const insets = useSafeAreaInsets();
-  const bottomPad = Math.max(insets.bottom, getTokenValue('$navBottomMin', 'size'));
+  const bottomPad = useSafeBottomInset();
 
   return (
     // Backdrop $scrim que cubre la pantalla + sheet anclado abajo. El backdrop cierra (Pressable).

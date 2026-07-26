@@ -19,8 +19,9 @@
 
 import { Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { getTokenValue, Text, XStack, YStack } from 'tamagui';
+import { Text, XStack, YStack } from 'tamagui';
 
+import { useSafeBottomInset } from '@/hooks/useSafeBottomInset';
 import { CircunferenciaEscrotalStep } from './_components/CircunferenciaEscrotalStep';
 import { SpikeIdentityHeader } from './_components/SpikeIdentityHeader';
 
@@ -43,7 +44,7 @@ const MOCK_AGE_MONTHS = 24;
 
 export default function RuedaCeSpike() {
   const insets = useSafeAreaInsets();
-  const bottomPad = Math.max(insets.bottom, getTokenValue('$navBottomMin', 'size'));
+  const bottomPad = useSafeBottomInset();
 
   return (
     <YStack flex={1} backgroundColor="$bg" paddingTop={insets.top}>

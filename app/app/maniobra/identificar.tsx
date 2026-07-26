@@ -35,6 +35,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { getTokenValue, Text, View, XStack, YStack } from 'tamagui';
 import { ArrowRightLeft, Bluetooth, Check, Keyboard, PlusCircle } from 'lucide-react-native';
 
+import { useSafeBottomInset } from '@/hooks/useSafeBottomInset';
 import { StickIcon } from '@/theme/icons';
 import { Button } from '@/components';
 import { useHardwareBack } from '@/hooks';
@@ -555,7 +556,7 @@ export default function ManiobraIdentificar() {
     : '';
   const progreso = session ? `${session.animalCount} hoy` : '0 hoy';
 
-  const bottomPad = Math.max(insets.bottom, getTokenValue('$navBottomMin', 'size'));
+  const bottomPad = useSafeBottomInset();
 
   // R4.7: el banner de "rodeo de jornada mal elegido" se muestra cuando la heurística dispara Y no hay un
   // sheet modal de R4.2/R4.4 arriba (no apilamos un aviso no-bloqueante bajo un modal). No-bloqueante.

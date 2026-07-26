@@ -35,6 +35,7 @@ import { ReportEmpty, ReportError } from '@/components/reports';
 import { ExportAnimalRow, MarkDeclaredSheet, SigsaChecklistReminder } from '@/components/sigsa';
 import { useEstablishment, useRodeo } from '@/contexts';
 import { useExportSigsa } from '@/hooks/useExportSigsa';
+import { useSafeBottomInset } from '@/hooks/useSafeBottomInset';
 import { loadEstablishmentDetail } from '@/services/establishments';
 import type { PendingAnimalInfo } from '@/services/sigsa/types';
 import { animalCountLabel, exportLogDateLabel } from '@/utils/sigsa-display';
@@ -178,7 +179,6 @@ export default function ExportSigsaScreen() {
         <ExportStickyBar
           exportableCount={exportableCount}
           isGenerating={isGenerating}
-          bottomInset={insets.bottom}
           onExport={onExport}
         />
       }
@@ -379,20 +379,19 @@ function SummaryCard({
 }
 
 // Barra STICKY-BOTTOM con el CTA de export (refinación A2). Full-width, ≥$touchMin, fondo $white con divider/
-// sombra superior, paddingBottom respetando el inset. Es pantalla stack-pushed (sin bottom-nav) → no colisiona.
+// sombra superior, paddingBottom = la reserva inferior canónica del repo (hook compartido; ya no recibe el
+// inset por prop: la reserva la resuelve un solo lugar). Es pantalla stack-pushed (sin bottom-nav) → no colisiona.
 function ExportStickyBar({
   exportableCount,
   isGenerating,
-  bottomInset,
   onExport,
 }: {
   exportableCount: number;
   isGenerating: boolean;
-  bottomInset: number;
   onExport: () => void;
 }) {
   const disabled = exportableCount === 0 || isGenerating;
-  const bottomPad = Math.max(bottomInset, getTokenValue('$navBottomMin', 'size'));
+  const bottomPad = useSafeBottomInset();
   return (
     <YStack
       width="100%"

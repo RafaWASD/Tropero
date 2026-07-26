@@ -22,12 +22,12 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Platform, Pressable, TextInput } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
 import { useRouter, useSegments } from 'expo-router';
 import { useStatus } from '@powersync/react';
 import { ArrowRightLeft, ChevronRight, PlusCircle, Radio, Search, Tag, X } from 'lucide-react-native';
 
+import { useSafeBottomInset } from '@/hooks/useSafeBottomInset';
 import { Button, Card, CategoryBadge } from '@/components';
 import { useAuth, useEstablishment, useRodeo } from '@/contexts';
 import { useBleStickListener } from '@/services/ble/stick';
@@ -96,7 +96,9 @@ const BLE_OWNED_ROUTES = new Set(['asignar-caravanas', 'maniobra']);
 
 export function FindOrCreateOverlay() {
   const router = useRouter();
-  const insets = useSafeAreaInsets();
+  // Reserva inferior del sheet 🔴 de la manga: la canónica del hook compartido MÁS el aire propio ($6)
+  // que este overlay siempre tuvo (RB3.3). Web 32 · iOS 66 (idénticos al baseline) · Android 3 botones 96.
+  const bottomPad = useSafeBottomInset({ extra: getTokenValue('$6', 'space') });
   const { state: auth } = useAuth();
   const { state: est } = useEstablishment();
   const { state: rodeo } = useRodeo();
@@ -235,10 +237,9 @@ export function FindOrCreateOverlay() {
         borderTopRightRadius="$card"
         paddingHorizontal="$4"
         paddingTop="$4"
-        // Safe-area inferior (RB3.3): el CTA primario de la manga NO debe quedar bajo el home
-        // indicator iOS / barra de gestos Android. Mismo idiom que crear-animal/agregar-evento:
-        // inset + baseline $6 → SIEMPRE >= insets.bottom (nunca menor al inset del sistema).
-        paddingBottom={insets.bottom + getTokenValue('$6', 'space')}
+        // Safe-area inferior (RB3.3): el CTA primario de la manga NO debe quedar bajo —ni PEGADO a— el
+        // home indicator iOS / la barra de navegación Android. Reserva del hook compartido + el $6 propio.
+        paddingBottom={bottomPad}
         gap="$4"
       >
         {/* Grip visual del sheet. */}

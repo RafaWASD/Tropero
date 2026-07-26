@@ -27,8 +27,9 @@
 //  4. CONDENSACIÓN con el teclado ARRIBA (decisión pura `sheetCondensation`): se suelta la descripción y
 //     el CTA secundario; quedan SIEMPRE el título, el contenido cargado, el input y el CTA primario. La X
 //     del header existe SIEMPRE (Nielsen #3: con el teclado abierto es la única salida visible).
-//  5. SAFE-AREA robusta con blindaje frame-0 de Android edge-to-edge (`computeSafeBottomInset` con
-//     initialWindowMetrics — mismo enfoque que U7 / FooterActionShell).
+//  5. SAFE-AREA robusta = inset del sistema (con blindaje frame-0 de Android edge-to-edge) + el piso de
+//     web + el aire contra la barra de navegación en Android: hook compartido `useSafeBottomInset`,
+//     misma fórmula que el bottom-nav y los footers.
 //  5-bis. AFFORDANCE DE SCROLL del body (peek + fade + chevron ▾) con la MISMA decisión pura que
 //     `FooterActionShell` y las listas de maniobra (`shouldShowScrollPeek`): aire al final del contenido
 //     para que el último elemento nunca quede rebanado al ras del CTA, y señal de "hay más abajo" cuando
@@ -106,18 +107,14 @@ import Animated, {
   withSpring,
   type SharedValue,
 } from 'react-native-reanimated';
-import { initialWindowMetrics, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
 import { ChevronDown, X } from 'lucide-react-native';
 
 import { useKeyboardVisible } from '../hooks/useKeyboardVisible';
+import { useSafeBottomInset } from '../hooks/useSafeBottomInset';
 import { buttonA11y } from '../utils/a11y';
-import {
-  computeSafeBottomInset,
-  resolveFooterPaddingBottom,
-  shouldShowScrollPeek,
-} from '../utils/footer-action';
+import { resolveFooterPaddingBottom, shouldShowScrollPeek } from '../utils/footer-action';
 import {
   SHEET_DISMISS_CANCEL_VELOCITY,
   SHEET_DISMISS_FLING_MIN_TRAVEL,
@@ -221,8 +218,9 @@ export function BottomSheetShell({
   keyboardShouldPersistTaps = 'handled',
   showGrip = true,
 }: BottomSheetShellProps) {
-  const insets = useSafeAreaInsets();
   const keyboardVisible = useKeyboardVisible();
+  // Reserva inferior canónica con el teclado CERRADO — hook compartido de la app.
+  const safeBottomInset = useSafeBottomInset();
   const { showDescription, showSecondaryAction, showCloseButton } = sheetCondensation({ keyboardVisible });
 
   // ── GUARD del backdrop contra el "click huérfano" del tap que abrió el sheet (BUG web, Raf) ──
@@ -265,16 +263,12 @@ export function BottomSheetShell({
     onClose();
   };
 
-  // Reserva inferior: safe-area plena con el teclado cerrado; respiro chico con el teclado abierto (la
-  // safe-area la tapa el teclado → reservarla dejaría un hueco feo SOBRE el teclado). Blindaje frame-0 de
-  // Android edge-to-edge vía initialWindowMetrics. Ambas decisiones son las PURAS de footer-action.ts.
+  // Reserva inferior: con el teclado cerrado, la canónica del repo (`useSafeBottomInset`, con el
+  // blindaje frame-0 de Android edge-to-edge adentro); con el teclado abierto, un respiro chico (la
+  // safe-area la tapa el teclado → reservarla dejaría un hueco feo SOBRE el teclado).
   const paddingBottom = resolveFooterPaddingBottom({
     keyboardVisible,
-    safeInset: computeSafeBottomInset({
-      liveInsetBottom: insets.bottom,
-      initialInsetBottom: initialWindowMetrics?.insets.bottom ?? 0,
-      minInset: getTokenValue('$navBottomMin', 'size'),
-    }),
+    safeInset: safeBottomInset,
     keyboardOpenGap: getTokenValue('$2', 'space'),
   });
 

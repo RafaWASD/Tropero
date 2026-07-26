@@ -17,11 +17,11 @@
 //
 // Cero hardcode (ADR-023 §4): tokens + getTokenValue para el ícono lucide y la geometría. es-AR.
 
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { usePathname } from 'expo-router';
 import { getTokenValue, Text, View, XStack } from 'tamagui';
 import { Bluetooth, BluetoothConnected, BluetoothSearching, TriangleAlert } from 'lucide-react-native';
 
+import { useSafeBottomInset } from '@/hooks/useSafeBottomInset';
 import { useBleConnectionStatus } from '@/services/ble/connection-status';
 import type { ConnectionStatus } from '@/services/ble/stick-adapter';
 import { isDemoMode } from '@/services/ble/demo-gate';
@@ -75,7 +75,11 @@ function toneColorToken(tone: ViewTone): '$primary' | '$terracota' | '$textMuted
 
 export function StickStatusIndicator() {
   const status = useBleConnectionStatus();
-  const insets = useSafeAreaInsets();
+  // MISMA reserva inferior que el bottom-nav: este pill se posiciona RELATIVO a la tab bar, así que
+  // tiene que leerla por el mismo hook o se desincroniza. Antes usaba el inset PELADO, que en web (inset
+  // 0) lo dejaba 12px por debajo del paddingBottom real del nav y en Android quedaría 16px abajo al
+  // sumarse el aire → el pico del FAB (que sube $fabRaise sobre el nav) se lo comía.
+  const safeBottom = useSafeBottomInset();
   // Ruta actual del árbol de expo-router. BleHost (donde vive este componente) está DENTRO del contexto de
   // navegación — mismo tramo del árbol que RootGate, que usa useSegments — así que usePathname() resuelve
   // (para la ruta `app/baston.tsx` → '/baston').
@@ -103,12 +107,13 @@ export function StickStatusIndicator() {
       position="absolute"
       // Anclado al FONDO (estilo "toast"), centrado, POR ENCIMA de la bottom tab bar Y del pico del FAB
       // central elevado → nunca pisa el título de un header (en ninguna pantalla). Geometría 100% con tokens
-      // (cero hardcode, ADR-023 §4): insets.bottom + alto de contenido de la nav bar ($navBar=60) + cuánto
-      // sube el FAB sobre la barra ($fabRaise=26) + un gap ($2=8) → el pill queda ~8px por encima del pico
-      // del FAB. En pantallas SIN tab bar (Stack) flota ~navBar+fabRaise px sobre el fondo: aceptable (no hay
-      // header abajo que pisar).
+      // (cero hardcode, ADR-023 §4): reserva inferior del nav (`useSafeBottomInset()`, EXACTAMENTE el
+      // paddingBottom de la tab bar) + alto de contenido de la nav bar ($navBar=60) + cuánto sube el FAB
+      // sobre la barra ($fabRaise=26) + un gap ($2) → el pill queda ese
+      // gap por encima del pico del FAB. En pantallas SIN tab bar (Stack) flota ~navBar+fabRaise px sobre el
+      // fondo: aceptable (no hay header abajo que pisar).
       bottom={
-        insets.bottom +
+        safeBottom +
         getTokenValue('$navBar', 'size') +
         getTokenValue('$fabRaise', 'size') +
         getTokenValue('$2', 'space')

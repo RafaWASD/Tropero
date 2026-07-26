@@ -32,6 +32,7 @@ import {
 } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
 
+import { useSafeBottomInset } from '@/hooks/useSafeBottomInset';
 import { Card, FormField, FormError, InfoNote } from '@/components';
 import { exitAnimalProfile } from '@/services/animals';
 import {
@@ -75,6 +76,14 @@ function todayIso(): string {
 export default function BajaAnimalScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  // Reserva inferior de la barra fija de abajo: la CANÓNICA del repo, sin knobs (hook compartido:
+  // inset del sistema con blindaje frame-0 + piso de web + aire de Android).
+  // El `+ 12` hardcodeado que este footer tenía antes de la unidad «aire» NO era aire de diseño: el
+  // propio repo ya lo había clasificado como deuda ("las 14 pantallas con footer fijo hardcodean `+12`
+  // en vez de usar `$navBottomMin`", docs/plan-mejoras-ux-2026-07-18.md), o sea una GRAFÍA accidental
+  // de la reserva canónica → se pliega dentro de ella en vez de conservarse como excepción.
+  // Ver docs/design-system.md §4, "Los 8 outliers del `+12`".
+  const bottomPad = useSafeBottomInset();
   const params = useLocalSearchParams<{ profileId?: string; hero?: string }>();
   const profileId = typeof params.profileId === 'string' ? params.profileId : null;
   // El identificador hero del animal (idv → visual → caravana → "Animal"), para el resumen del paso 2.
@@ -245,7 +254,7 @@ export default function BajaAnimalScreen() {
           width="100%"
           paddingHorizontal="$4"
           paddingTop="$3"
-          paddingBottom={insets.bottom + 12}
+          paddingBottom={bottomPad}
           gap="$2"
           borderTopWidth={1}
           borderTopColor="$divider"

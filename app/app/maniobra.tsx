@@ -31,6 +31,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
 import { AlertTriangle, ChevronRight, History, MoreVertical, Sparkles, X, Zap } from 'lucide-react-native';
 
+import { useSafeBottomInset } from '@/hooks/useSafeBottomInset';
 import { Button, Card, InfoNote } from '@/components';
 import { useEstablishment, useRodeo } from '@/contexts';
 import {
@@ -250,7 +251,7 @@ export default function ManiobraInicioScreen() {
 
   const PRIMARY = getTokenValue('$primary', 'color');
   const MUTED = getTokenValue('$textMuted', 'color');
-  const bottomPad = Math.max(insets.bottom, getTokenValue('$navBottomMin', 'size'));
+  const bottomPad = useSafeBottomInset();
 
   return (
     <YStack flex={1} backgroundColor="$bg" paddingTop={insets.top}>

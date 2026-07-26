@@ -25,10 +25,10 @@
 // numberOfLines → lineHeight matching.
 
 import { Platform, Pressable } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getTokenValue, Text, View, XStack, YStack } from 'tamagui';
 import { Boxes } from 'lucide-react-native';
 
+import { useSafeBottomInset } from '@/hooks/useSafeBottomInset';
 import { Button } from '@/components';
 import { buttonA11y } from '@/utils/a11y';
 
@@ -55,8 +55,7 @@ export function OtherRodeoSheet({
   onMoveAnimal,
   onSkip,
 }: OtherRodeoSheetProps) {
-  const insets = useSafeAreaInsets();
-  const bottomPad = Math.max(insets.bottom, getTokenValue('$navBottomMin', 'size'));
+  const bottomPad = useSafeBottomInset();
   const iconColor = getTokenValue('$primary', 'color');
   const heroIcon = getTokenValue('$heroIcon', 'size');
 

@@ -22,10 +22,10 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Platform, Pressable } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getTokenValue, Text, View, XStack, YStack } from 'tamagui';
 import { Check, X } from 'lucide-react-native';
 
+import { useSafeBottomInset } from '@/hooks/useSafeBottomInset';
 import { Button } from '@/components';
 import { buttonA11y, labelA11y } from '@/utils/a11y';
 
@@ -112,8 +112,6 @@ export function TactoConfigSheet({
   onSave,
   onClose,
 }: TactoConfigSheetProps) {
-  const insets = useSafeAreaInsets();
-
   // Scrim-guard contra el "click huérfano" del tap que abrió el sheet (BUG web, idéntico a
   // ManeuverConfigSheet): arranca false al montar y se arma en el próximo frame (doble rAF). El scrim
   // ignora presses hasta entonces; un tap DELIBERADO posterior sí cierra. Fallback setTimeout(0).
@@ -151,7 +149,10 @@ export function TactoConfigSheet({
   const TEXT_PRIMARY = getTokenValue('$textPrimary', 'color');
   const WHITE = getTokenValue('$white', 'color');
   const ICON = getTokenValue('$navIcon', 'size');
-  const bottomPad = Math.max(insets.bottom, getTokenValue('$4', 'space'));
+  // Reserva inferior: la canónica del hook compartido, con el PISO propio ($4) que este sheet ya tenía
+  // (era `max(inset, $4)`). El piso solo puede ganar cuando no hay inset (web 18, = baseline); en device
+  // manda el inset del sistema (iOS 34, Android 3 botones 64). Esta unidad agrega aire, nunca lo saca.
+  const bottomPad = useSafeBottomInset({ floor: getTokenValue('$4', 'space') });
 
   const a11ySuggested = labelA11y(Platform.OS, suggestedCopy(suggested, serviceMonthsCount));
 

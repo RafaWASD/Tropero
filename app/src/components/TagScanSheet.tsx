@@ -46,10 +46,10 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Platform, Pressable } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getTokenValue, Text, View, XStack, YStack } from 'tamagui';
 import { Bluetooth, Keyboard, Radio, Tag, X } from 'lucide-react-native';
 
+import { useSafeBottomInset } from '@/hooks/useSafeBottomInset';
 import { StickIcon } from '@/theme/icons';
 import { useBleStickListener, useScopedScannerControls } from '@/services/ble/stick';
 import { useBleProviderApi } from '@/services/ble/BleStickListenerProvider';
@@ -97,7 +97,6 @@ export function TagScanSheet({
   confirmSublabel = 'Asignar esta caravana a este animal.',
   hideManualEntry = false,
 }: TagScanSheetProps) {
-  const insets = useSafeAreaInsets();
 
   // ── Propiedad EXCLUSIVA del listener mientras el sheet está montado (RCF.6). Acquire al montar, release en
   //    el cleanup (garantiza limpieza incluso si el sheet se cierra por back-gesture o la ficha se desmonta). ──
@@ -170,7 +169,11 @@ export function TagScanSheet({
     setAssignError(null);
   }, []);
 
-  const bottomPad = insets.bottom + getTokenValue('$6', 'space');
+  // Reserva inferior del sheet: la canónica del hook compartido (inset con blindaje frame-0 + piso +
+  // aire de Android) MÁS el aire propio ($6) que este sheet siempre tuvo. Es un sheet 🔴 de manga con
+  // el CTA de confirmar caravana: se queda con su aire extra, esta unidad nunca resta.
+  // Web 32 · iOS 66 (idénticos al baseline) · Android 3 botones 96.
+  const bottomPad = useSafeBottomInset({ extra: getTokenValue('$6', 'space') });
 
   return (
     <View

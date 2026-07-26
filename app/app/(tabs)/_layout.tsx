@@ -19,11 +19,11 @@
 import { Tabs, useRouter } from 'expo-router';
 import { BarChart3, Home, type LucideIcon, Menu, PawPrint, Zap } from 'lucide-react-native';
 import { getTokenValue } from 'tamagui';
-import { initialWindowMetrics, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Pressable, View, type ColorValue } from 'react-native';
 import { Text, YStack } from 'tamagui';
 
 import { shadows } from '../../tamagui.config';
+import { useSafeBottomInset } from '@/hooks/useSafeBottomInset';
 import { computeTabBarInsetLayout } from '@/utils/tab-bar-insets';
 
 // Valores del design system (tokens) leídos en runtime para pasarlos a APIs
@@ -61,9 +61,6 @@ function navColors() {
     // Alto de contenido del bottom-nav (insets.bottom se suma aparte). Intermedio:
     // $navBar (60), targets más grandes que MP por uso con guante (manga-friendly).
     navHeight: getTokenValue('$navBar', 'size'),
-    // Margen inferior MÍNIMO del nav cuando insets.bottom=0 (Android viejo con botones
-    // físicos, o el preview web): garantiza un respiro contra el borde inferior.
-    navBottomMin: getTokenValue('$navBottomMin', 'size'),
   };
 }
 
@@ -182,7 +179,7 @@ function ManiobraFab() {
   // POR DEBAJO del borde inferior del halo (aire de ~2px, sin solape). El valor negativo se
   // arma con -getTokenValue('$1','space') → sigue referenciando el design token, NO es un px
   // literal (ADR-023 §4). Seguro: a -2px el texto queda ~10px del borde de pantalla, dentro
-  // del paddingBottom del nav (max(insets,12) en web / inset ~34px en device) → no se corta
+  // del paddingBottom del nav (12 en web / 34 en iOS / 64 en Android 3 botones) → no se corta
   // ni invade el home indicator.
   const LABEL_BOTTOM = -getTokenValue('$1', 'space');
   return (
@@ -310,26 +307,18 @@ function ManiobraFab() {
 }
 
 export default function TabsLayout() {
-  const insets = useSafeAreaInsets();
   const COLOR = navColors();
 
-  // Safe area inferior del bottom-nav (bugfix U7 — navbar pegado a la barra del sistema en Android).
-  // Respeta el inset real (home indicator iOS ~34 / gesture bar o 3 botones Android) con un mínimo
-  // de respiro ($navBottomMin = 12) cuando no hay inset (web / Android viejo con botones físicos).
-  //
-  // Clave del fix: además del inset VIGENTE (useSafeAreaInsets, que en Android edge-to-edge puede
-  // reportar 0 en el frame-cero porque el SafeAreaProvider raíz no está sembrado con
-  // initialWindowMetrics y mide async), usamos como PISO el inset medido al ARRANQUE
-  // (initialWindowMetrics, sincrónico desde getConstants en nativo). Así el nav arranca con el
-  // respiro correcto y NO queda pegado a la gesture bar. En web initialWindowMetrics es null (→ 0)
-  // y en iOS coincide con el vigente → ninguno de los dos cambia respecto del comportamiento previo.
-  // El cálculo vive en @/utils/tab-bar-insets (función pura, testeada) — este archivo solo lee tokens
-  // e insets y los pasa. iPhone: max(34,34,12)=34 (idéntico). Web: max(0,0,12)=12 (idéntico).
-  const { height: navHeightTotal, paddingBottom: navBottom } = computeTabBarInsetLayout({
-    liveInsetBottom: insets.bottom,
-    initialInsetBottom: initialWindowMetrics?.insets.bottom ?? 0,
+  // Reserva inferior del bottom-nav: la MISMA que footers, sheets y el pill del bastón — el hook
+  // compartido `useSafeBottomInset()`. Ahí adentro viven el inset del sistema con el blindaje del
+  // frame-0 de Android (U7), el piso de web ($navBottomMin) y el aire contra la barra de navegación
+  // del SO ($navBarGap, solo Android). Este archivo solo compone el ALTO del nav.
+  // Web: 12. iPhone: 34 (el inset de 34pt ya es aire pintado con el fondo de la app). Android 3
+  // botones: 48+16=64 — el bug 🔴 que U7 no podía arreglar (`max(48, 12) = 48` dejaba el nav soldado).
+  const navBottom = useSafeBottomInset();
+  const { height: navHeightTotal } = computeTabBarInsetLayout({
     navHeight: COLOR.navHeight,
-    navBottomMin: COLOR.navBottomMin,
+    safeBottomInset: navBottom,
   });
 
   return (

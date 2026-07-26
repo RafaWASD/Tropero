@@ -949,3 +949,36 @@ arreglada.
 - **Verificado ejecutando**: Gradle 9.3.1 corre sobre Corretto 17, el proyecto resuelve dependencias y llega hasta `outputs/sdk-dependencies/release`. La configuración está sana. El release firma con la keystore de debug (default de la plantilla, sirve para distribución interna) y `app/.env.local` apunta al MISMO proyecto DEV que el perfil `preview-dev` de EAS.
 - **Por qué se abandonó por ahora**: ningún intento llegó al APK. El antivirus corporativo escanea cada archivo (un `du` sobre el caché de Gradle no terminó en 2 minutos) y los procesos largos en segundo plano se cortaron **tres veces**. Cada corte dejó un demonio de Gradle huérfano; llegaron a ser 3 compitiendo por RAM (`./gradlew --stop` los limpió).
 - **Si se retoma**: compilar solo `arm64-v8a` (`-PreactNativeArchitectures=arm64-v8a`, saca 3/4 del trabajo de C++), usar `--no-daemon` para no dejar huérfanos, y correrlo cuando nadie espere el resultado. Gradle es incremental, así que lo ya compilado en `app/android/app/build` se reaprovecha.
+
+## 2026-07-26 — `check.mjs` verde NO cubre la suite E2E (y 22 rojos pre-existentes, 6 con un bug de oráculo común)
+
+**Origen**: unidad «aire» (safe-area del borde inferior). Se dio por sentado que el semáforo `node scripts/check.mjs` incluía la suite E2E; no la incluye.
+
+**Qué** (verificado, no supuesto):
+- `scripts/check.mjs` y `scripts/run-tests.mjs` tienen **CERO** referencias a `e2e` / `playwright`. El RC=0 cubre: lint anti-hardcode, typecheck del cliente, unit de scripts, unit del cliente, y las ~17 suites de backend contra Supabase. **Nada de Playwright.**
+- Corrida completa de `pnpm e2e` (269 tests, build fresco, ~38 min) en esa unidad: **247 passed / 22 failed**. Los 22 se atribuyeron **empíricamente** contra un worktree en el baseline (mismo build, mismos specs) → **todos pre-existentes**, ninguno de la unidad.
+- De esos 22: **14 son la deuda ya conocida** del fixture desfasado del gating del tacto (`maniobra-carga` ×2, `preview-transicion` ×2, `tacto-adaptativo` ×4, `tacto-bugfix` ×3, `vacias-lote` ×3 — ver el ítem "el fixture del tacto quedó desfasado" más arriba).
+- Los **6 restantes** (`animals-offline:73`, `animals:397`, `cut-ficha:54`, `events:703`, `lotes:61`, `treatments:36`) son un patrón **distinto y nuevo para el registro**: `getByText(...).first()` matchea un elemento **oculto de la pantalla de fondo** —react-navigation web deja la pantalla anterior montada con `display:none`— en vez del visible de la pantalla de arriba. Es un **bug de ORÁCULO del test**, no de la app; misma familia que la memoria `reference_e2e_sheet_no_nav_oracle`. Fix candidato: `.first()` → filtrar por visibilidad (`locator(':visible')` / `getByRole` con el scope de la pantalla activa).
+
+**Por qué importa**: dos cosas distintas. (1) Cualquiera que lea "check verde" cree que la regresión E2E está cubierta y no lo está — hay que correr `pnpm e2e` aparte y atribuir los rojos a mano. (2) Con 22 rojos crónicos la suite dejó de ser un semáforo: no se distingue una regresión nueva del ruido de fondo sin re-correr el baseline (40 min por vuelta).
+
+**Próximo paso sugerido**: nada acá (registro). Cuando se procese: decidir si la E2E entra a `check.mjs` (con un presupuesto de tiempo aparte, no en el camino del RC=0 de cada sesión) y limpiar las dos familias de rojos — el fixture del tacto y los 6 `.first()`.
+
+## 2026-07-26 — comentario mentiroso en `export-sigsa`: la lista NO scrollea por detrás del sticky CTA
+
+**Origen**: revisión de la unidad «aire» (hallazgo D3 del reviewer). **Ya era falso en el baseline** — no lo
+introdujo esa unidad y no se arregló ahí (scope).
+
+`app/app/export-sigsa.tsx:335-336` dice *"La lista scrollea **POR DETRÁS** del sticky CTA → padding inferior
+generoso para que la última fila no quede tapada por la barra"*, y por eso el `contentContainerStyle` reserva
+`insets.bottom + $10` cuando hay footer. Pero la barra **no** está superpuesta: es un **hermano flex** que se
+renderiza DESPUÉS del `ScrollView` (`{footer ?? null}`, `:344-345`) dentro del mismo `YStack`, así que ocupa su
+propio alto y el scroll termina arriba de ella. El padding extra no compensa una oclusión — es aire de más
+(≈60px con footer) al final de la lista.
+
+**Por qué importa**: es la clase de comentario que hace nacer bugs por copia (igual que el `max(inset, mínimo)`
+que se copió 25 veces). El próximo que arme una pantalla con footer va a replicar el `+ $10` "porque la barra
+tapa", y no tapa.
+
+**Próximo paso sugerido**: corregir el comentario y decidir si el `$10` se justifica como slack de lectura
+(probablemente sí, pero por otra razón) o baja a `$6` como el resto. Cambio cosmético, verificar en captura.

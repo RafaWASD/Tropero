@@ -173,10 +173,22 @@ todo" ni "improvisar por pantalla"):
 
 **Deuda menor a foldear**: las 14 pantallas con footer fijo hardcodean `+ 12` en vez de usar
 `$navBottomMin`, contra lo que prescribe `docs/design-system.md:105`.
+> ✅ **CERRADA en la unidad «aire» (2026-07-26)**: todos esos footers pasaron al hook compartido
+> `useSafeBottomInset()` = `max(insetVigente, insetArranque, $navBottomMin=12) + (Android ? $navBarGap=16 : 0)`.
+> **El `+ 12` NO se conservó como aire propio: se plegó DENTRO de la reserva canónica**, que es
+> exactamente lo que este párrafo pedía. La lectura de acá fue el fundamento de la decisión (2º
+> fix-loop): si el `+ 12` era una grafía accidental del token del piso, conservarlo habría dejado la app
+> con **dos** reservas de footer (Android 3 botones: 64 canónica vs 76 en 8 outliers) sin razón escrita.
+> Efecto en esos 8 call sites: **web 12 (sin cambio) · iOS 46 → 34 · Android 3 botones 60 → 64**.
+> Ojo: el patrón `max(inset, mínimo)` que se cita en el `design-system.md:105` de ese momento era
+> **el bug** — hoy la fórmula tiene tres términos, ver `docs/design-system.md` §4 "Safe areas".
 
 ## 5. Bottom navbar
 
 **Medidas (fuente: código, no estimadas)**: barra 60px + `max(insets.bottom, 12)` → **94px en iPhone**.
+(La unidad «aire» del 2026-07-26 **no cambia esta medida**: el aire de 16 se suma solo en Android, donde
+el inset es la barra de navegación. iPhone sigue en 60 + 34 = **94px**; Android 3 botones pasa a 60 + 64
+= 124px, y web queda en 60 + 12 = 72px.)
 FAB ⌀64 elevado 35px = **54.7% del círculo sobre la barra**, más halo ⌀80 → la masa visual invade
 **43px** de contenido. Footprint total con halo: **137px en iPhone**.
 

@@ -34,6 +34,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getTokenValue, Text, View, XStack, YStack } from 'tamagui';
 import { Check, Delete } from 'lucide-react-native';
 
+import { useSafeBottomInset } from '@/hooks/useSafeBottomInset';
 import { SpikeIdentityHeader } from './_components/SpikeIdentityHeader';
 
 // ─── MOCK (hardcodeado — se reemplaza por datos reales en M2.2/M3.2) ────────────────────────────
@@ -77,6 +78,8 @@ function formatPesoAR(raw: string): string {
 
 export default function ManiobraPasoSpike() {
   const insets = useSafeAreaInsets();
+  // Reserva inferior canónica del CTA (inset + piso + aire de Android), vía el hook compartido.
+  const bottomPad = useSafeBottomInset();
   // Estado EFÍMERO del peso tecleado (no se persiste — es spike). Empieza con un valor mock realista
   // para que la captura muestre el display "lleno".
   const [peso, setPeso] = useState<string>('385');
@@ -184,7 +187,7 @@ export default function ManiobraPasoSpike() {
         testID="action-zone"
         paddingHorizontal="$4"
         paddingTop="$3"
-        paddingBottom={Math.max(insets.bottom, getTokenValue('$navBottomMin', 'size'))}
+        paddingBottom={bottomPad}
       >
         <View
           backgroundColor="$primary"

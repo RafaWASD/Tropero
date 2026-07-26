@@ -23,8 +23,9 @@ import { useState } from 'react';
 import { Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams } from 'expo-router';
-import { getTokenValue, Text, XStack, YStack } from 'tamagui';
+import { Text, XStack, YStack } from 'tamagui';
 
+import { useSafeBottomInset } from '@/hooks/useSafeBottomInset';
 import { SpikeIdentityHeader } from './_components/SpikeIdentityHeader';
 import { TactoStep } from './_components/TactoStep';
 import { TactoConfigSheet } from './_components/TactoConfigSheet';
@@ -83,7 +84,7 @@ export default function TactoSpike() {
     raw === 'three' || raw === 'none' || raw === 'config-yes' || raw === 'config-no' ? raw : 'two';
 
   const count = serviceMonthsCountFor(variant);
-  const bottomPad = Math.max(insets.bottom, getTokenValue('$navBottomMin', 'size'));
+  const bottomPad = useSafeBottomInset();
 
   // El config sheet vive como overlay sobre un fondo de contexto; lo mantenemos abierto en el spike.
   const [configOpen, setConfigOpen] = useState(true);

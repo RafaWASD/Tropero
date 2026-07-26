@@ -27,6 +27,7 @@ import { ScrollView, Text, View, XStack, YStack } from 'tamagui';
 import { getTokenValue } from 'tamagui';
 import { ChevronLeft, Plus } from 'lucide-react-native';
 
+import { useSafeBottomInset } from '@/hooks/useSafeBottomInset';
 import { Button, FieldTemplateToggleList, FormError, InfoNote } from '@/components';
 import { useEstablishment, useRodeo } from '@/contexts';
 import {
@@ -69,6 +70,14 @@ const EDIT_HEADER =
 
 export default function EditarPlantillaScreen() {
   const insets = useSafeAreaInsets();
+  // Reserva inferior de la barra fija de abajo: la CANÓNICA del repo, sin knobs (hook compartido:
+  // inset del sistema con blindaje frame-0 + piso de web + aire de Android).
+  // El `+ 12` hardcodeado que este footer tenía antes de la unidad «aire» NO era aire de diseño: el
+  // propio repo ya lo había clasificado como deuda ("las 14 pantallas con footer fijo hardcodean `+12`
+  // en vez de usar `$navBottomMin`", docs/plan-mejoras-ux-2026-07-18.md), o sea una GRAFÍA accidental
+  // de la reserva canónica → se pliega dentro de ella en vez de conservarse como excepción.
+  // Ver docs/design-system.md §4, "Los 8 outliers del `+12`".
+  const bottomPad = useSafeBottomInset();
   const router = useRouter();
   const params = useLocalSearchParams<{ rodeoId?: string; name?: string }>();
   const rodeoId = typeof params.rodeoId === 'string' ? params.rodeoId : null;
@@ -401,7 +410,7 @@ export default function EditarPlantillaScreen() {
           width="100%"
           paddingHorizontal="$4"
           paddingTop="$3"
-          paddingBottom={insets.bottom + 12}
+          paddingBottom={bottomPad}
           gap="$2"
           borderTopWidth={1}
           borderTopColor="$divider"

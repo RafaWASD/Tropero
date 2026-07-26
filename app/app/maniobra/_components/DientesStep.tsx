@@ -22,10 +22,10 @@
 
 import { useState } from 'react';
 import { Platform, Pressable } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getTokenValue, ScrollView, Text, View, YStack } from 'tamagui';
 import { AlertTriangle } from 'lucide-react-native';
 
+import { useSafeBottomInset } from '@/hooks/useSafeBottomInset';
 import { buttonA11y } from '@/utils/a11y';
 import { TEETH_OPTIONS } from '@/utils/teeth-options';
 import { shouldOfferCutPrompt, type AnimalApplicabilityInfo } from '@/utils/maneuver-applicability';
@@ -124,9 +124,11 @@ function CutPromptSheet({
   onJustTeeth: () => void;
   onDismiss: () => void;
 }) {
-  const insets = useSafeAreaInsets();
   const TERRACOTA = getTokenValue('$terracota', 'color');
-  const bottomPad = Math.max(insets.bottom, getTokenValue('$4', 'space'));
+  // Reserva inferior: la canónica del hook compartido, con el PISO propio ($4) que este sheet ya tenía
+  // (era `max(inset, $4)`). El piso solo puede ganar cuando no hay inset (web 18, = baseline); en device
+  // manda el inset del sistema (iOS 34, Android 3 botones 64). Esta unidad agrega aire, nunca lo saca.
+  const bottomPad = useSafeBottomInset({ floor: getTokenValue('$4', 'space') });
 
   // NOTA (bugfix-config-sheet, 2026-06-15): este sheet NO necesita el guard del "click huérfano" que sí
   // lleva ManeuverConfigSheet. Razón verificada con repro táctil (touchscreen.tap + logging): el bloque de

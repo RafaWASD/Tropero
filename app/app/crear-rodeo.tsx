@@ -31,6 +31,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
 
+import { useSafeBottomInset } from '@/hooks/useSafeBottomInset';
 import { Button, FieldTemplateToggleList, FormField, FormError, InfoNote } from '@/components';
 import { useEstablishment, useRodeo } from '@/contexts';
 import {
@@ -66,6 +67,14 @@ const TOTAL_STEPS = 4;
 export default function CrearRodeoScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  // Reserva inferior de la barra fija de abajo: la CANÓNICA del repo, sin knobs (hook compartido:
+  // inset del sistema con blindaje frame-0 + piso de web + aire de Android).
+  // El `+ 12` hardcodeado que este footer tenía antes de la unidad «aire» NO era aire de diseño: el
+  // propio repo ya lo había clasificado como deuda ("las 14 pantallas con footer fijo hardcodean `+12`
+  // en vez de usar `$navBottomMin`", docs/plan-mejoras-ux-2026-07-18.md), o sea una GRAFÍA accidental
+  // de la reserva canónica → se pliega dentro de ella en vez de conservarse como excepción.
+  // Ver docs/design-system.md §4, "Los 8 outliers del `+12`".
+  const bottomPad = useSafeBottomInset();
   const { state: estState } = useEstablishment();
   const { state: rodeoState, refreshRodeos } = useRodeo();
 
@@ -350,7 +359,7 @@ export default function CrearRodeoScreen() {
         width="100%"
         paddingHorizontal="$4"
         paddingTop="$3"
-        paddingBottom={insets.bottom + 12}
+        paddingBottom={bottomPad}
         gap="$2"
         borderTopWidth={1}
         borderTopColor="$divider"
@@ -406,6 +415,12 @@ function OnboardingImportOffer({
   onImport: () => void;
   onSkip: () => void;
 }) {
+  // Reserva inferior del footer fijo: la canónica del hook compartido, sin knobs (idéntica al footer del
+  // wizard, arriba — su `+12` hardcodeado era deuda ya clasificada como tal, no aire de diseño; ver el
+  // comentario de allá y docs/design-system.md §4). El `insets` que llega por prop se sigue usando arriba
+  // (paddingTop) y como slack del scroll — ahí NO va la reserva del borde: es contenido que scrollea por
+  // encima del footer, no algo apoyado en el borde de la pantalla.
+  const bottomPad = useSafeBottomInset();
   return (
     <YStack flex={1} width="100%" maxWidth="100%" overflow="hidden" backgroundColor="$bg">
       <ScrollView
@@ -436,7 +451,7 @@ function OnboardingImportOffer({
         width="100%"
         paddingHorizontal="$4"
         paddingTop="$3"
-        paddingBottom={insets.bottom + 12}
+        paddingBottom={bottomPad}
         gap="$2"
         borderTopWidth={1}
         borderTopColor="$divider"

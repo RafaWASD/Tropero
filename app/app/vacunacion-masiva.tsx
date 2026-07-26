@@ -37,6 +37,7 @@ import {
   type BulkProgressPhase,
   type BulkProgressRejection,
 } from '@/components';
+import { useSafeBottomInset } from '@/hooks/useSafeBottomInset';
 import { useEstablishment } from '@/contexts';
 import {
   fetchGroupSelectionProfiles,
@@ -65,6 +66,10 @@ const PRODUCT_NAME_MAX = 80;
 export default function VacunacionMasivaScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  // Reserva inferior de la barra de acción de selección masiva: la canónica del hook compartido + el
+  // respiro propio ($3) que esta barra ya sumaba sobre el inset. Web 13 · iOS 47 (= baseline) · Android
+  // 3 botones 77. Esta unidad agrega aire, nunca lo saca.
+  const bottomPad = useSafeBottomInset({ extra: getTokenValue('$3', 'space') });
   const params = useLocalSearchParams<{ groupType?: string; groupId?: string }>();
   const groupType = params.groupType === 'lote' ? 'lote' : 'rodeo';
   const groupId = typeof params.groupId === 'string' ? params.groupId : null;
@@ -370,7 +375,7 @@ export default function VacunacionMasivaScreen() {
             width="100%"
             paddingHorizontal="$4"
             paddingTop="$3"
-            paddingBottom={insets.bottom + getTokenValue('$3', 'space')}
+            paddingBottom={bottomPad}
             backgroundColor="$bg"
             borderTopWidth={1}
             borderTopColor="$divider"

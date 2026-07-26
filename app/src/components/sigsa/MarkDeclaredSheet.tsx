@@ -19,10 +19,10 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Platform, Pressable } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getTokenValue, Text, View, XStack, YStack } from 'tamagui';
 import { CheckCircle2, FileText } from 'lucide-react-native';
 
+import { useSafeBottomInset } from '../../hooks/useSafeBottomInset';
 import { buttonA11y } from '../../utils/a11y';
 import { formatRfidMasked } from '../../utils/sigsa-display';
 
@@ -49,8 +49,7 @@ export function MarkDeclaredSheet({
   onViewAnimal,
   busy = false,
 }: MarkDeclaredSheetProps) {
-  const insets = useSafeAreaInsets();
-  const bottomPad = Math.max(insets.bottom, getTokenValue('$navBottomMin', 'size'));
+  const bottomPad = useSafeBottomInset();
   const primary = getTokenValue('$primary', 'color');
   const muted = getTokenValue('$textMuted', 'color');
 

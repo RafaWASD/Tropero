@@ -12,10 +12,10 @@
 // lineHeight matching. Cero hardcode (ADR-023 §4): tokens.
 
 import { Platform } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
 import { ArrowRight, Check, ChevronRight, Tags } from 'lucide-react-native';
 
+import { useSafeBottomInset } from '@/hooks/useSafeBottomInset';
 import { buttonA11y, labelA11y } from '@/utils/a11y';
 import type { SummaryRow } from '@/utils/maneuver-sequence';
 import type { CategoryTransitionPreview } from '@/utils/maneuver-category-preview';
@@ -40,8 +40,7 @@ export type AnimalSummaryProps = {
 };
 
 export function AnimalSummary({ rows, onEdit, onConfirm, preview, loteName, onOpenLote }: AnimalSummaryProps) {
-  const insets = useSafeAreaInsets();
-  const bottomPad = Math.max(insets.bottom, getTokenValue('$navBottomMin', 'size'));
+  const bottomPad = useSafeBottomInset();
   const chevron = getTokenValue('$navIcon', 'size');
   const muted = getTokenValue('$textMuted', 'color');
 

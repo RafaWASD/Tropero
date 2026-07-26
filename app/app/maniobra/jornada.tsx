@@ -30,6 +30,7 @@ import { getTokenValue, Text, View, XStack, YStack } from 'tamagui';
 import Animated, { useAnimatedRef, useScrollOffset, useSharedValue } from 'react-native-reanimated';
 import { Check, ChevronLeft, Play, Plus } from 'lucide-react-native';
 
+import { useSafeBottomInset } from '@/hooks/useSafeBottomInset';
 import { Button, Card, FormError, InfoNote } from '@/components';
 import { useHardwareBack } from '@/hooks';
 import { buttonA11y, labelA11y } from '@/utils/a11y';
@@ -500,7 +501,7 @@ export default function JornadaWizardScreen() {
   }, [presetSaved]);
 
   const PRIMARY = getTokenValue('$primary', 'color');
-  const bottomPad = Math.max(insets.bottom, getTokenValue('$navBottomMin', 'size'));
+  const bottomPad = useSafeBottomInset();
 
   return (
     <YStack flex={1} backgroundColor="$bg" paddingTop={insets.top}>

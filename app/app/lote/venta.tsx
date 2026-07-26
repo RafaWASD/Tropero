@@ -29,6 +29,7 @@ import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
 import { Banknote, ChevronLeft, ChevronRight, Skull } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
 
+import { useSafeBottomInset } from '@/hooks/useSafeBottomInset';
 import { Card, FormField, FormError, InfoNote } from '@/components';
 import { useEstablishment } from '@/contexts';
 import { fetchGroupMembers } from '@/services/management-groups';
@@ -72,6 +73,14 @@ const EMPTY_OVERRIDE: OverrideState = { priceRaw: '', weightRaw: '', priceErr: n
 export default function LoteVentaScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  // Reserva inferior de la barra fija de abajo: la CANÓNICA del repo, sin knobs (hook compartido:
+  // inset del sistema con blindaje frame-0 + piso de web + aire de Android).
+  // El `+ 12` hardcodeado que este footer tenía antes de la unidad «aire» NO era aire de diseño: el
+  // propio repo ya lo había clasificado como deuda ("las 14 pantallas con footer fijo hardcodean `+12`
+  // en vez de usar `$navBottomMin`", docs/plan-mejoras-ux-2026-07-18.md), o sea una GRAFÍA accidental
+  // de la reserva canónica → se pliega dentro de ella en vez de conservarse como excepción.
+  // Ver docs/design-system.md §4, "Los 8 outliers del `+12`".
+  const bottomPad = useSafeBottomInset();
   // Handoff desde el modo selección del lote (delta rodeo-grande RG5.6 / design §6.4): en vez de enumerar cada
   // UUID en el param (un lote de miles reventaría la URL), llega `mode` + el csv MÁS CHICO entre seleccionados y
   // excluidos. mode='all' → operar sobre TODOS los miembros MENOS `ids` (excluidos); mode='subset' → operar sobre
@@ -413,7 +422,7 @@ export default function LoteVentaScreen() {
           width="100%"
           paddingHorizontal="$4"
           paddingTop="$3"
-          paddingBottom={insets.bottom + 12}
+          paddingBottom={bottomPad}
           gap="$2"
           borderTopWidth={1}
           borderTopColor="$divider"

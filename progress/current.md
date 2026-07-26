@@ -3,6 +3,62 @@
 > Este archivo se vacía al cerrar cada sesión y su resumen se mueve a `history.md`.
 > Mientras trabajás, **mantenelo actualizado en tiempo real**, no al final.
 
+## 2026-07-26 — UNIDAD «aire» (separación con la barra del sistema) — FIX-LOOP 2 APLICADO, LISTO para review
+
+Bug 🔴 de Raf (device Android, Samsung 3 botones, build `7402575a`): el CTA "Nueva jornada" —y el "Listo"
+de los sheets— quedaban a **1dp** de la barra del sistema. Causa raíz (medida por el leader, no
+re-investigada): la fórmula `max(insets.bottom, $navBottomMin=12)`, copiada a mano en ~25 archivos, con
+un inset real de 48 devuelve 48 → reserva la barra **y nada más**. El mínimo solo podía ganar con inset 0
+(web), por eso el preview nunca lo mostró. U7 (`initialWindowMetrics`) arregló otra cosa y se conserva.
+
+**Fórmula final** (el primer intento, aditivo en TODAS las plataformas, se **descartó** en review: engordaba
+iOS de 94 a 110pt y borraba el piso de web):
+
+```
+paddingBottom = max(insetVigente, insetArranque, $navBottomMin=12) + (Android ? $navBarGap=16 : 0)
+```
+
+Tres conceptos: **inset** (obligación del SO) · **piso** (respiro cuando no hay inset → web) · **aire**
+(separación contra la barra de navegación, **solo Android**, donde el inset ES esa barra; en iOS los 34pt
+ya son aire pintado con el fondo de la app). Resultado: **web 12 · iOS 34 → sin cambio · Android gestos 40
+· Android 3 botones 64**.
+
+**Hecho**: los dos tokens conviven en `tamagui.config.ts`; `computeSafeBottomInset` recibe `applyGap` por
+parámetro (sigue pura, `node:test`) y el `Platform.OS === 'android'` vive en **un** solo archivo
+(`useSafeBottomInset`); `computeTabBarInsetLayout` pasó a componer solo el alto; barrido de **41 call
+sites** al hook, con `{ extra }` / `{ floor }` para las 5 superficies que ya tenían más aire deliberado;
+**root `SafeAreaProvider` sembrado con `initialMetrics`** (el follow-up que U7 dejó flageado); **guard
+estático** de 8 reglas. Hallazgo de la autorrevisión: `StickStatusIndicator` se posiciona RELATIVO a la
+tab bar → si no migraba, el pico del FAB se lo comía.
+
+**Fix-loop 2 (review del leader, 3 bloqueantes + 1 promovido)**:
+1. **Los 8 outliers del `+12` se ARMONIZAN a la reserva canónica** (`animal/baja`, `crear-rodeo` ×2,
+   `editar-plantilla`, `editar-servicio`, `import-rodeo`, `lote/[id]`, `lote/venta`). Fundamento
+   documental, no estético: el propio repo ya había clasificado ese `+12` como deuda ("hardcodean `+ 12`
+   **en vez de usar `$navBottomMin`**", `plan-mejoras-ux-2026-07-18.md`), o sea una grafía accidental de
+   la reserva canónica. Conservarla dejaba la app con **dos** reservas de footer (Android 3 botones: 64
+   vs 76). Efecto: **web 12 (sin cambio) · iOS 46 → 34 · Android 3 botones 60 → 64**.
+2. **Guard endurecido**: `$navBottomMin` ya no puede aparecer fuera del hook ni como argumento.
+3. **Guard nuevo (regla 8)**: los tokens tienen que **RESOLVER** — existir en el grupo `size` de
+   `tamagui.config.ts` con número finito > 0, que el hook los pida de ese grupo, y que las constantes
+   hardcodeadas de los tests puros coincidan. Cierra el agujero más serio de la unidad: `$navBarGap` mal
+   escrito → `getTokenValue` = `undefined` → 0 → **el fix es un no-op en Android con toda la suite
+   verde** (en web `applyGap` es false y el token ni se lee).
+4. **Dos notas de reconciliación corregidas**: la de `specs/active/03` afirmaba un as-built falso
+   (`floor: $4` en `ManeuverConfigSheet`, que en realidad delega en `BottomSheetShell` sin `floor`), y la
+   de `specs/active/04` §7 no registraba el cambio del pill del bastón.
+
+**Paridad recalculada** (verificador mecánico contra el baseline, 41 call sites): **web idéntico en
+40/41** (la excepción intencional es el pill del bastón, 93 → 105, que antes tapaba el FAB) y **8
+reducciones, todas en iOS, todas de 46 → 34** = la armonización deliberada del punto 1. Ninguna pérdida
+en web ni en Android. La propiedad "0 pérdidas" del fix-loop 1 ya **no** aplica y está reportada como tal.
+
+Verificación y estado en `progress/impl_aire-safe-area.md`. Capture file de Gate 2.5:
+`app/e2e/captures/aire-safe-area.capture.ts` (con el límite declarado: en web `insets.bottom = 0` y la
+reserva es el piso de 12, igual que antes → **el aire se veta en DEVICE**, ADR-029; la captura sí asserta
+que el nav mida 72px/12px **y que el footer de `crear-rodeo` mida 12px**, o sea que nada se movió en web).
+Nada commiteado (lo hace el leader).
+
 ## 2026-07-25 — TANDA de 4 bugfixes 🔴 (gesto de descarte + arrastre + auto-guardado + back de Android) — CÓDIGO CERRADO, veredicto de device pendiente
 
 Raf reportó dos cosas sobre el sheet de Vacunación: que deslizar hacia abajo cerraba **el wizard entero** en vez del sheet, y que el grabber del sheet no hacía nada (arrastraba el de atrás). Propuso convertir "elegir maniobras" en screen y "vacunación" en sheet. **Diferí con fundamento**: ya son exactamente eso. `maniobra/jornada` es una ruta real y `ManeuverConfigSheet` es un sheet; el problema estaba en la presentación heredada y en que **ningún sheet del repo era dueño de su propio gesto**.

@@ -33,9 +33,9 @@
 
 import { useEffect, useRef } from 'react';
 import { Platform, Pressable } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getTokenValue, Text, View, YStack } from 'tamagui';
 
+import { useSafeBottomInset } from '@/hooks/useSafeBottomInset';
 import { Button } from '@/components';
 import { buttonA11y } from '@/utils/a11y';
 
@@ -62,8 +62,7 @@ export function NuevaJornadaConfirmSheet({
   onResume,
   onClose,
 }: NuevaJornadaConfirmSheetProps) {
-  const insets = useSafeAreaInsets();
-  const bottomPad = Math.max(insets.bottom, getTokenValue('$navBottomMin', 'size'));
+  const bottomPad = useSafeBottomInset();
 
   // ── GUARD del backdrop contra el "click huérfano" del tap que abrió el sheet (BUG web táctil) ──
   // Idéntico a ManeuverConfigSheet/ExitJornadaSheet/SavePresetSheet: el botón "Nueva jornada" abre el sheet

@@ -10,8 +10,10 @@
 //      (resolveFooterPaddingBottom → no deja hueco sobre el teclado).
 //   3. SCROLL AFFORDANCE (fade + chevron + peek) cuando el body tiene más contenido bajo el fold
 //      (decisión pura shouldShowScrollPeek/scrollFades → una sola fuente de verdad con la lista de maniobra).
-//   4. RESERVA de safe-area inferior robusta con blindaje frame-0 de Android edge-to-edge
-//      (computeSafeBottomInset con initialWindowMetrics, mismo enfoque que U7 / tab-bar-insets).
+//   4. RESERVA de safe-area inferior robusta (hook compartido `useSafeBottomInset`, misma fórmula que
+//      el bottom-nav): inset del sistema con blindaje frame-0 de Android edge-to-edge, piso de web, y
+//      el AIRE contra la barra de navegación de Android. En Android reservar solo el inset deja el CTA
+//      soldado al borde de la barra (bug 🔴 de la unidad «aire»); en iOS el inset ya *es* el aire.
 
 import { useMemo, useState, type ReactNode } from 'react';
 import {
@@ -22,17 +24,13 @@ import {
   type NativeSyntheticEvent,
   type ScrollView as RNScrollView,
 } from 'react-native';
-import { initialWindowMetrics, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { getTokenValue, ScrollView, View, YStack, type ColorTokens } from 'tamagui';
 import { ChevronDown } from 'lucide-react-native';
 
 import { useKeyboardVisible } from '../hooks/useKeyboardVisible';
-import {
-  computeSafeBottomInset,
-  resolveFooterPaddingBottom,
-  shouldShowScrollPeek,
-} from '../utils/footer-action';
+import { useSafeBottomInset } from '../hooks/useSafeBottomInset';
+import { resolveFooterPaddingBottom, shouldShowScrollPeek } from '../utils/footer-action';
 
 /** El tipo EXACTO del 1er arg de getTokenValue (token de la escala) — evita el `string` genérico. */
 type TamaguiToken = Parameters<typeof getTokenValue>[0];
@@ -136,13 +134,10 @@ function FooterBar({
   bordered: boolean;
   testID?: string;
 }) {
-  const insets = useSafeAreaInsets();
   const keyboardVisible = useKeyboardVisible();
-  const safeInset = computeSafeBottomInset({
-    liveInsetBottom: insets.bottom,
-    initialInsetBottom: initialWindowMetrics?.insets.bottom ?? 0,
-    minInset: getTokenValue('$navBottomMin', 'size'),
-  });
+  // Reserva inferior canónica con el teclado CERRADO, vía el hook compartido de la app (una sola
+  // fórmula, ver hooks/useSafeBottomInset).
+  const safeInset = useSafeBottomInset();
   const paddingBottom = resolveFooterPaddingBottom({
     keyboardVisible,
     safeInset,

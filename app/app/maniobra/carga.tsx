@@ -22,12 +22,12 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { KeyboardAvoidingView, Platform } from 'react-native';
-import { initialWindowMetrics, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { getTokenValue, Spinner, Text, View, XStack, YStack } from 'tamagui';
 
-import { useHardwareBack, useKeyboardVisible } from '@/hooks';
-import { computeSafeBottomInset, resolveFooterPaddingBottom } from '@/utils/footer-action';
+import { useHardwareBack, useKeyboardVisible, useSafeBottomInset } from '@/hooks';
+import { resolveFooterPaddingBottom } from '@/utils/footer-action';
 import { buttonA11y, labelA11y } from '@/utils/a11y';
 import { cargaBackAction } from '@/utils/maniobra-back';
 import {
@@ -839,16 +839,13 @@ export default function ManiobraCarga() {
     void captureAndAdvance(step.maneuver, { kind: 'skipped' });
   }, [sequence, currentIndex, captureAndAdvance]);
 
-  // Reserva inferior del CTA de cada paso (U2 "CTA siempre visible"): robusta al frame-0 de Android
-  // (initialWindowMetrics, blindaje de U7) y KEYBOARD-AWARE — con el teclado abierto (pasos de texto:
-  // producto/tubo/pajuela/fecha/dato custom) el CTA sube (KeyboardAvoidingView, abajo) y su reserva de
-  // safe-area se encoge a un respiro (la safe-area la tapa el teclado → reservarla dejaría un hueco).
+  // Reserva inferior del CTA de cada paso (U2 "CTA siempre visible"): la canónica del repo, robusta
+  // al frame-0 de Android (hook compartido `useSafeBottomInset`, con el blindaje de U7 adentro) y
+  // KEYBOARD-AWARE — con el teclado abierto (pasos de texto: producto/tubo/pajuela/fecha/dato custom) el
+  // CTA sube (KeyboardAvoidingView, abajo) y su reserva se encoge a un respiro (la safe-area la tapa el
+  // teclado → reservarla dejaría un hueco).
   const keyboardVisible = useKeyboardVisible();
-  const safeBottomInset = computeSafeBottomInset({
-    liveInsetBottom: insets.bottom,
-    initialInsetBottom: initialWindowMetrics?.insets.bottom ?? 0,
-    minInset: getTokenValue('$navBottomMin', 'size'),
-  });
+  const safeBottomInset = useSafeBottomInset();
   const bottomPad = resolveFooterPaddingBottom({
     keyboardVisible,
     safeInset: safeBottomInset,

@@ -43,6 +43,7 @@ import { useRouter } from 'expo-router';
 import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
 import { ChevronLeft, ChevronRight, Radio, Search, Tag } from 'lucide-react-native';
 
+import { useSafeBottomInset } from '@/hooks/useSafeBottomInset';
 import { Button, Card, CategoryBadge } from '@/components';
 import { useEstablishment, useRodeo } from '@/contexts';
 import { useBleStickListener } from '@/services/ble/stick';
@@ -262,7 +263,6 @@ export default function BulkTagAssignmentScreen() {
           eid={currentEid}
           establishmentId={establishmentId}
           excludedProfileIds={session.assignedProfileIds}
-          safeBottom={insets.bottom + getTokenValue('$3', 'space')}
           onAssigned={onAssigned}
           onCreateNew={onCreateNew}
           onSkip={onSkip}
@@ -378,7 +378,6 @@ function BulkEidBody({
   eid,
   establishmentId,
   excludedProfileIds,
-  safeBottom,
   onAssigned,
   onCreateNew,
   onSkip,
@@ -386,12 +385,15 @@ function BulkEidBody({
   eid: string;
   establishmentId: string | null;
   excludedProfileIds: ReadonlySet<string>;
-  safeBottom: number;
   onAssigned: (profileId: string) => void;
   onCreateNew: (eid: string) => void;
   onSkip: () => void;
 }) {
   const eidReadable = formatEidReadable(eid);
+  // Reserva inferior: la resuelve el hook compartido acá adentro, ya no viaja como prop desde la
+  // pantalla (una sola fórmula, un solo lugar donde leerla). Conserva el respiro propio ($3) que la
+  // pantalla ya sumaba sobre el inset → web 13 e iOS 47 idénticos al baseline; Android suma el aire.
+  const safeBottom = useSafeBottomInset({ extra: getTokenValue('$3', 'space') });
 
   const [query, setQuery] = useState('');
   const [debounced, setDebounced] = useState('');

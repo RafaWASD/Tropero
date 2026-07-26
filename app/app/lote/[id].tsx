@@ -25,6 +25,7 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { getTokenValue, Text, XStack, YStack } from 'tamagui';
 import { Layers, Tag, X } from 'lucide-react-native';
 
+import { useSafeBottomInset } from '@/hooks/useSafeBottomInset';
 import { AnimalRow, GroupViewScreen, InfoNote } from '@/components';
 import { useEstablishment } from '@/contexts';
 import { useGroupView, type GroupViewParams } from '@/hooks';
@@ -47,6 +48,15 @@ import { buttonA11y } from '@/utils/a11y';
 export default function LoteGroupScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  // Reserva inferior de la barra fija de abajo: la CANÓNICA del repo, sin knobs (hook compartido:
+  // inset del sistema con blindaje frame-0 + piso de web + aire de Android). Un solo hook alimenta a
+  // los DOS consumidores JSX de esta pantalla (footer de acciones + barra de selección).
+  // El `+ 12` hardcodeado que este footer tenía antes de la unidad «aire» NO era aire de diseño: el
+  // propio repo ya lo había clasificado como deuda ("las 14 pantallas con footer fijo hardcodean `+12`
+  // en vez de usar `$navBottomMin`", docs/plan-mejoras-ux-2026-07-18.md), o sea una GRAFÍA accidental
+  // de la reserva canónica → se pliega dentro de ella en vez de conservarse como excepción.
+  // Ver docs/design-system.md §4, "Los 8 outliers del `+12`".
+  const bottomPad = useSafeBottomInset();
   const params = useLocalSearchParams<{ id?: string }>();
   const groupId = typeof params.id === 'string' ? params.id : null;
 
@@ -222,7 +232,7 @@ export default function LoteGroupScreen() {
         )}
 
         {/* CTA fijo abajo: habilitado con ≥1 seleccionado (RLV.3.1). */}
-        <YStack width="100%" paddingHorizontal="$4" paddingTop="$3" paddingBottom={insets.bottom + 12} borderTopWidth={1} borderTopColor="$divider" backgroundColor="$bg">
+        <YStack width="100%" paddingHorizontal="$4" paddingTop="$3" paddingBottom={bottomPad} borderTopWidth={1} borderTopColor="$divider" backgroundColor="$bg">
           <XStack
             width="100%"
             minHeight="$touchMin"
@@ -278,7 +288,7 @@ export default function LoteGroupScreen() {
       />
 
       {canSell ? (
-        <YStack width="100%" paddingHorizontal="$4" paddingTop="$3" paddingBottom={insets.bottom + 12} borderTopWidth={1} borderTopColor="$divider" backgroundColor="$bg">
+        <YStack width="100%" paddingHorizontal="$4" paddingTop="$3" paddingBottom={bottomPad} borderTopWidth={1} borderTopColor="$divider" backgroundColor="$bg">
           <XStack
             width="100%"
             minHeight="$touchMin"

@@ -17,10 +17,10 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Platform, Pressable } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
 import { Plus } from 'lucide-react-native';
 
+import { useSafeBottomInset } from '@/hooks/useSafeBottomInset';
 import { ComboOptionRow, FormField } from '@/components';
 import { buttonA11y } from '@/utils/a11y';
 import { validateGroupName, MANAGEMENT_GROUP_NAME_MAX } from '@/utils/management-group';
@@ -55,8 +55,7 @@ export function SugerenciaVaciasSheet({
   onChooseExisting,
   onCreateNew,
 }: SugerenciaVaciasSheetProps) {
-  const insets = useSafeAreaInsets();
-  const bottomPad = Math.max(insets.bottom, getTokenValue('$navBottomMin', 'size'));
+  const bottomPad = useSafeBottomInset();
 
   // Sub-modo "crear lote nuevo" + su nombre (default "Descarte", RLV.13).
   const [creating, setCreating] = useState(false);

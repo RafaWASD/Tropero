@@ -39,11 +39,11 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Platform, Pressable } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
 import { ChevronDown, Mars, Venus } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
 
+import { useSafeBottomInset } from '../hooks/useSafeBottomInset';
 import { Button } from './Button';
 import { ComboOptionRow } from './ComboOptionRow';
 import { FormField } from './FormField';
@@ -107,8 +107,7 @@ export function LinkCalfPrompt({
   onSkip,
   onLinked,
 }: LinkCalfPromptProps) {
-  const insets = useSafeAreaInsets();
-  const bottomPad = Math.max(insets.bottom, getTokenValue('$navBottomMin', 'size'));
+  const bottomPad = useSafeBottomInset();
   const muted = getTokenValue('$textMuted', 'color');
 
   // ── Estado del prompt ──
