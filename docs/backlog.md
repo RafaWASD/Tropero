@@ -938,3 +938,14 @@ arreglada.
 - **Origen**: reviewer del fix del crash (2026-07-25), N6 — escenario angosto, de tooling.
 - El `catch` de los worklets re-lanza cuando `__DEV__`, apoyándose en que ahí existe el `callGuardDEV` de Reanimated que lo convierte en LogBox. Eso vale para los perfiles normales (EAS development = Debug + `__DEV__`; preview/production = Release + `!__DEV__`).
 - **Rompe** en un binario compilado en Release sirviendo un bundle de dev (`expo run:ios --configuration Release` contra Metro): ahí `__DEV__===true` pero **no hay** `callGuard` (`WorkletRuntime.h:54-64`, `#ifndef NDEBUG`) → el re-throw abortaría igual que el crash original. Tenerlo presente si alguna vez se depura en esa combinación.
+
+## Build local de Android: cadena armada y funcionando, pero impracticable en esta máquina
+- **Origen**: sesión 2026-07-25. Raf preguntó por qué dependemos de EAS; se armó la cadena local para sacarle a Android la dependencia de la cuota (iOS es imposible localmente: necesita Xcode, que solo corre en macOS).
+- **Lo que YA quedó hecho en la máquina de Raf** (no hay que rehacerlo):
+  - SDK en `%LOCALAPPDATA%\Android\Sdk` — cmdline-tools `15859902` (descarga verificada contra el SHA-256 publicado), `platforms;android-36`, `build-tools;36.0.0`, `platform-tools` r37, licencias aceptadas.
+  - JDK 17 (Amazon Corretto, `C:\Program Files\Amazon Corretto\jdk17.0.15_6`) ya estaba instalado y en el PATH.
+  - **`JAVA_HOME` global apunta a JDK 1.8 y NO se tocó a propósito** (Raf lo necesita para el trabajo del banco). El build debe setear `JAVA_HOME` por invocación.
+  - `app/android` e `app/ios` están gitignored (generación nativa continua) → hay que correr `expo prebuild --platform android` antes de compilar. **OJO**: `prebuild` reescribe los scripts `android`/`ios` de `package.json` de `expo start --X` a `expo run:X`; hay que revertirlo o el cambio se cuela al commit.
+- **Verificado ejecutando**: Gradle 9.3.1 corre sobre Corretto 17, el proyecto resuelve dependencias y llega hasta `outputs/sdk-dependencies/release`. La configuración está sana. El release firma con la keystore de debug (default de la plantilla, sirve para distribución interna) y `app/.env.local` apunta al MISMO proyecto DEV que el perfil `preview-dev` de EAS.
+- **Por qué se abandonó por ahora**: ningún intento llegó al APK. El antivirus corporativo escanea cada archivo (un `du` sobre el caché de Gradle no terminó en 2 minutos) y los procesos largos en segundo plano se cortaron **tres veces**. Cada corte dejó un demonio de Gradle huérfano; llegaron a ser 3 compitiendo por RAM (`./gradlew --stop` los limpió).
+- **Si se retoma**: compilar solo `arm64-v8a` (`-PreactNativeArchitectures=arm64-v8a`, saca 3/4 del trabajo de C++), usar `--no-daemon` para no dejar huérfanos, y correrlo cuando nadie espere el resultado. Gradle es incremental, así que lo ya compilado en `app/android/app/build` se reaprovecha.
