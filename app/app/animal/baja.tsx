@@ -32,7 +32,8 @@ import {
 } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
 
-import { useSafeBottomInset } from '@/hooks/useSafeBottomInset';
+import { useKeyboardAwareBottomInset } from '@/hooks/useSafeBottomInset';
+import { KeyboardAvoidingShell } from '@/components/KeyboardAvoidingShell';
 import { Card, FormField, FormError, InfoNote } from '@/components';
 import { exitAnimalProfile } from '@/services/animals';
 import {
@@ -47,6 +48,10 @@ import { sanitizeWeightInput, maskDateInput } from '@/utils/animal-input';
 import { validateEventDate } from '@/utils/event-input';
 import { buttonA11y } from '@/utils/a11y';
 import { backOr } from '@/utils/nav';
+
+// Estilo del `KeyboardAvoidingShell` (API no-Tamagui). `flex` no es spacing/color → no aplica el lint
+// anti-hardcode (ADR-023 §4).
+const fillStyle = { flex: 1 } as const;
 
 const OFFLINE_COPY =
   'Sin conexión: no pudimos dar de baja el animal. Conectate a internet y volvé a intentar.';
@@ -83,7 +88,10 @@ export default function BajaAnimalScreen() {
   // en vez de usar `$navBottomMin`", docs/plan-mejoras-ux-2026-07-18.md), o sea una GRAFÍA accidental
   // de la reserva canónica → se pliega dentro de ella en vez de conservarse como excepción.
   // Ver docs/design-system.md §4, "Los 8 outliers del `+12`".
-  const bottomPad = useSafeBottomInset();
+  // KEYBOARD-AWARE (unidad «barrida de teclado»): el paso 2 pide precio/comprador/observaciones; el footer
+  // vive dentro del `KeyboardAvoidingShell`, que ya descuenta el teclado entero → con el teclado arriba la
+  // reserva se encoge al respiro de `$2`.
+  const bottomPad = useKeyboardAwareBottomInset();
   const params = useLocalSearchParams<{ profileId?: string; hero?: string }>();
   const profileId = typeof params.profileId === 'string' ? params.profileId : null;
   // El identificador hero del animal (idv → visual → caravana → "Animal"), para el resumen del paso 2.
@@ -190,84 +198,90 @@ export default function BajaAnimalScreen() {
 
   return (
     <YStack flex={1} width="100%" maxWidth="100%" overflow="hidden" backgroundColor="$bg">
-      {/* Header con back + título. */}
-      <YStack width="100%" paddingTop={insets.top} paddingHorizontal="$4">
-        <XStack width="100%" alignItems="center" gap="$2" paddingVertical="$3">
-          <Pressable hitSlop={8} onPress={goBack} {...buttonA11y(Platform.OS, { label: 'Volver' })}>
-            <ChevronLeft size={28} color={muted} strokeWidth={2} />
-          </Pressable>
-          <Text fontFamily="$body" fontSize="$8" lineHeight="$8" fontWeight="700" color="$textPrimary">
-            {title}
-          </Text>
-        </XStack>
-      </YStack>
-
-      <ScrollView
-        flex={1}
-        width="100%"
-        maxWidth="100%"
-        contentContainerStyle={{
-          paddingHorizontal: getTokenValue('$4', 'space'),
-          paddingTop: getTokenValue('$2', 'space'),
-          paddingBottom: insets.bottom + getTokenValue('$6', 'space'),
-          width: '100%',
-          maxWidth: '100%',
-          gap: getTokenValue('$4', 'space'),
-        }}
-        keyboardShouldPersistTaps="handled"
-        showsHorizontalScrollIndicator={false}
-      >
-        {missingParams ? (
-          <InfoNote>No pudimos cargar el animal. Volvé a la ficha y abrí "Dar de baja" de nuevo.</InfoNote>
-        ) : step === 1 ? (
-          <Step1ChooseReason hero={hero} onChoose={onChooseReason} />
-        ) : (
-          <Step2Confirm
-            hero={hero}
-            reasonLabel={mapping?.label ?? ''}
-            showSaleData={showSaleData}
-            date={exitDate}
-            onDate={(t) => {
-              setExitDate(maskDateInput(t));
-              if (exitDateErr) setExitDateErr(null);
-            }}
-            dateErr={exitDateErr}
-            weight={weightRaw}
-            onWeight={(t) => {
-              setWeightRaw(sanitizeWeightInput(t));
-              if (weightErr) setWeightErr(null);
-            }}
-            weightErr={weightErr}
-            price={priceRaw}
-            onPrice={(t) => {
-              setPriceRaw(sanitizePriceInput(t));
-              if (priceErr) setPriceErr(null);
-            }}
-            priceErr={priceErr}
-          />
-        )}
-      </ScrollView>
-
-      {/* CTA destructivo fijo abajo (thumb-zone), solo en el paso 2. */}
-      {!missingParams && step === 2 ? (
-        <YStack
-          width="100%"
-          paddingHorizontal="$4"
-          paddingTop="$3"
-          paddingBottom={bottomPad}
-          gap="$2"
-          borderTopWidth={1}
-          borderTopColor="$divider"
-          backgroundColor="$bg"
-        >
-          <FormError message={formError} />
-          <DestructiveButton
-            label={submitting ? 'Dando de baja…' : 'Dar de baja'}
-            disabled={submitting}
-            onPress={() => void onConfirm()}
-          />
+      {/* TECLADO (unidad «barrida de teclado»): esta pantalla tiene campos de texto y NO montaba ningún
+          mecanismo — al enfocarlos el teclado los tapaba (mismo bug 🔴 de clase que el sheet de Vacunación,
+          acá por AUSENCIA de mecanismo). Con la columna adentro del primitivo, el contenedor se achica desde
+          abajo y el campo enfocado queda por encima del teclado. */}
+      <KeyboardAvoidingShell style={fillStyle}>
+        {/* Header con back + título. */}
+        <YStack width="100%" paddingTop={insets.top} paddingHorizontal="$4">
+          <XStack width="100%" alignItems="center" gap="$2" paddingVertical="$3">
+            <Pressable hitSlop={8} onPress={goBack} {...buttonA11y(Platform.OS, { label: 'Volver' })}>
+              <ChevronLeft size={28} color={muted} strokeWidth={2} />
+            </Pressable>
+            <Text fontFamily="$body" fontSize="$8" lineHeight="$8" fontWeight="700" color="$textPrimary">
+              {title}
+            </Text>
+          </XStack>
         </YStack>
-      ) : null}
+
+        <ScrollView
+          flex={1}
+          width="100%"
+          maxWidth="100%"
+          contentContainerStyle={{
+            paddingHorizontal: getTokenValue('$4', 'space'),
+            paddingTop: getTokenValue('$2', 'space'),
+            paddingBottom: insets.bottom + getTokenValue('$6', 'space'),
+            width: '100%',
+            maxWidth: '100%',
+            gap: getTokenValue('$4', 'space'),
+          }}
+          keyboardShouldPersistTaps="handled"
+          showsHorizontalScrollIndicator={false}
+        >
+          {missingParams ? (
+            <InfoNote>No pudimos cargar el animal. Volvé a la ficha y abrí "Dar de baja" de nuevo.</InfoNote>
+          ) : step === 1 ? (
+            <Step1ChooseReason hero={hero} onChoose={onChooseReason} />
+          ) : (
+            <Step2Confirm
+              hero={hero}
+              reasonLabel={mapping?.label ?? ''}
+              showSaleData={showSaleData}
+              date={exitDate}
+              onDate={(t) => {
+                setExitDate(maskDateInput(t));
+                if (exitDateErr) setExitDateErr(null);
+              }}
+              dateErr={exitDateErr}
+              weight={weightRaw}
+              onWeight={(t) => {
+                setWeightRaw(sanitizeWeightInput(t));
+                if (weightErr) setWeightErr(null);
+              }}
+              weightErr={weightErr}
+              price={priceRaw}
+              onPrice={(t) => {
+                setPriceRaw(sanitizePriceInput(t));
+                if (priceErr) setPriceErr(null);
+              }}
+              priceErr={priceErr}
+            />
+          )}
+        </ScrollView>
+
+        {/* CTA destructivo fijo abajo (thumb-zone), solo en el paso 2. */}
+        {!missingParams && step === 2 ? (
+          <YStack
+            width="100%"
+            paddingHorizontal="$4"
+            paddingTop="$3"
+            paddingBottom={bottomPad}
+            gap="$2"
+            borderTopWidth={1}
+            borderTopColor="$divider"
+            backgroundColor="$bg"
+          >
+            <FormError message={formError} />
+            <DestructiveButton
+              label={submitting ? 'Dando de baja…' : 'Dar de baja'}
+              disabled={submitting}
+              onPress={() => void onConfirm()}
+            />
+          </YStack>
+        ) : null}
+      </KeyboardAvoidingShell>
     </YStack>
   );
 }

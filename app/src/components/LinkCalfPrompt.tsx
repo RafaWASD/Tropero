@@ -43,7 +43,8 @@ import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
 import { ChevronDown, Mars, Venus } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
 
-import { useSafeBottomInset } from '../hooks/useSafeBottomInset';
+import { useKeyboardAwareBottomInset } from '../hooks/useSafeBottomInset';
+import { KeyboardAvoidingShell } from './KeyboardAvoidingShell';
 import { Button } from './Button';
 import { ComboOptionRow } from './ComboOptionRow';
 import { FormField } from './FormField';
@@ -62,6 +63,10 @@ import {
   sanitizeDayMonthInput,
   validateBirthDate,
 } from '../utils/animal-birth-year';
+
+// Estilo del `KeyboardAvoidingShell` (API no-Tamagui) — el MISMO que usa `BottomSheetShell` para este
+// esqueleto. `flex`/`width` no son spacing/color → no aplica el lint anti-hardcode (ADR-023 §4).
+const avoidStyle = { flex: 1, width: '100%', justifyContent: 'flex-end' } as const;
 
 const OFFLINE_LOOKUP_COPY =
   'No pudimos buscar el ternero. Probá de nuevo en un momento.';
@@ -107,7 +112,11 @@ export function LinkCalfPrompt({
   onSkip,
   onLinked,
 }: LinkCalfPromptProps) {
-  const bottomPad = useSafeBottomInset();
+  // Reserva inferior KEYBOARD-AWARE (unidad «barrida de teclado»): este prompt se monta desde
+  // `crear-animal.tsx` FUERA de su `</FooterActionShell>`, o sea que NO heredaba ningún keyboard-avoidance;
+  // el buscador del ternero al pie quedaba tapado por el teclado. Ahora la hoja sube con su propio shell y
+  // la reserva se encoge al respiro de `$2` (la safe-area la tapa el teclado).
+  const bottomPad = useKeyboardAwareBottomInset();
   const muted = getTokenValue('$textMuted', 'color');
 
   // ── Estado del prompt ──
@@ -422,194 +431,226 @@ export function LinkCalfPrompt({
       backgroundColor="$scrim"
       justifyContent="flex-end"
     >
-      <Pressable
-        style={{ flex: 1, width: '100%' }}
-        onPress={onBackdropPress}
-        testID="link-calf-scrim"
-        {...buttonA11y(Platform.OS, { label: 'Cerrar' })}
-      />
+      {/* El shell del teclado envuelve la COLUMNA (backdrop libre + hoja): con el teclado arriba encoge
+          el alto útil desde abajo → el backdrop (flex:1) absorbe y la hoja SUBE por encima del teclado.
+          El scrim de AFUERA sigue cubriendo la pantalla ENTERA (también detrás del teclado). Mismo
+          esqueleto y mismo estilo que `BottomSheetShell`: este sheet está hecho a mano y su migración
+          al primitivo queda anotada en `docs/backlog.md`. */}
+      <KeyboardAvoidingShell style={avoidStyle}>
+        <Pressable
+          style={{ flex: 1, width: '100%' }}
+          onPress={onBackdropPress}
+          testID="link-calf-scrim"
+          {...buttonA11y(Platform.OS, { label: 'Cerrar' })}
+        />
 
-      <YStack
-        width="100%"
-        maxHeight="88%"
-        backgroundColor="$bg"
-        borderTopLeftRadius="$card"
-        borderTopRightRadius="$card"
-        paddingHorizontal="$4"
-        paddingTop="$4"
-        paddingBottom={bottomPad}
-        gap="$4"
-        testID="link-calf-sheet"
-      >
-        {/* ── HEADER FIJO (grip + título). flexShrink:0 → el título NUNCA se recorta al crecer el body. ── */}
-        <YStack flexShrink={0} gap="$3">
-          <View
-            alignSelf="center"
-            width={getTokenValue('$icon', 'size')}
-            height={getTokenValue('$progressTrack', 'size')}
-            borderRadius="$pill"
-            backgroundColor="$divider"
-          />
-          <YStack gap="$1">
-            {/* Título $7 con lineHeight matcheado (anti-recorte: "pie" tiene descendente). */}
-            <Text
-              fontFamily="$heading"
-              fontSize="$7"
-              lineHeight="$7"
-              fontWeight="700"
-              color="$textPrimary"
-              numberOfLines={1}
-            >
-              ¿Vincular su cría al pie?
-            </Text>
-            <Text
-              fontFamily="$body"
-              fontSize="$3"
-              lineHeight="$3"
-              fontWeight="500"
-              color="$textMuted"
-              numberOfLines={2}
-            >
-              {phase.kind === 'create'
-                ? 'No encontramos ese ternero. Cargá sus datos para crearlo y vincularlo.'
-                : phase.kind === 'found'
-                  ? 'Encontramos el ternero. Confirmá para vincularlo como cría al pie.'
-                  : 'Ingresá la caravana del ternero al pie para vincularlo a esta vaca.'}
-            </Text>
-          </YStack>
-        </YStack>
-
-        {/* ── BODY SCROLLEABLE (flex:1 + minHeight:0 web) → crece adentro, no tapa el header. ── */}
-        <ScrollView
-          flex={1}
-          style={{ minHeight: 0 }}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-          contentContainerStyle={{ gap: getTokenValue('$4', 'space') }}
+        <YStack
+          width="100%"
+          maxHeight="88%"
+          backgroundColor="$bg"
+          borderTopLeftRadius="$card"
+          borderTopRightRadius="$card"
+          paddingHorizontal="$4"
+          paddingTop="$4"
+          paddingBottom={bottomPad}
+          gap="$4"
+          testID="link-calf-sheet"
         >
-          {phase.kind === 'ask' ? (
-            <YStack gap="$3">
-              {/* BASTONEO (scan-para-llenar): el bastón es el 95% del flujo en manga. El CTA llena el campo de
-                  abajo con el EID leído y avanza el find-or-create. El campo de texto QUEDA como fallback y como
-                  el camino para tipear un IDV (que el bastón no lee). */}
-              <TagScanCta
-                onPress={openScan}
-                label="Bastonear la caravana del ternero"
-                testID="link-calf-scan-open"
-              />
-              <FormField
-                label="Caravana del ternero"
-                value={query}
-                onChangeText={(t) => {
-                  setQuery(sanitizeIdvInput(t));
-                  if (fieldError) setFieldError(null);
-                  if (info) setInfo(null);
-                }}
-                error={fieldError}
-                placeholder="Caravana electrónica o visual"
-                keyboardType="default"
-                autoCapitalize="none"
-                returnKeyType="search"
-                onSubmitEditing={() => void onSearch()}
-              />
-              {/* Aviso accionable (ya tiene madre / otro campo / varios). InfoNote NO tapa el título (header fijo). */}
-              {info ? <InfoNote>{info}</InfoNote> : null}
-            </YStack>
-          ) : phase.kind === 'found' ? (
-            <FoundCalfCard calf={phase.calf} />
-          ) : (
-            <CreateCalfForm
-              sex={sex}
-              sexError={sexError}
-              onSex={(s) => {
-                setSex(s);
-                if (sexError) setSexError(null);
-              }}
-              birthYear={birthYear}
-              birthYearError={birthYearError}
-              onBirthYear={(t) => {
-                setBirthYear(sanitizeBirthYearInput(t));
-                if (birthYearError) setBirthYearError(null);
-              }}
-              birthDayMonth={birthDayMonth}
-              dayMonthError={dayMonthError}
-              onBirthDayMonth={(t) => {
-                setBirthDayMonth(sanitizeDayMonthInput(t));
-                if (dayMonthError) setDayMonthError(null);
-              }}
-              rodeoName={selectedCalfRodeoName}
-              isSameRodeoAsMother={isSameRodeoAsMother}
-              rodeoOptions={calfRodeoOptions}
-              selectedRodeoId={effectiveCalfRodeoId}
-              pickerOpen={rodeoPickerOpen}
-              onTogglePicker={() => setRodeoPickerOpen((v) => !v)}
-              onSelectRodeo={(id) => {
-                setSelectedCalfRodeoId(id);
-                setRodeoPickerOpen(false);
-              }}
-              muted={muted}
-            />
-          )}
-        </ScrollView>
-
-        {/* ── FOOTER FIJO (acción del fase + "Ahora no"). flexShrink:0 → siempre abajo. ── */}
-        <YStack flexShrink={0} gap="$2">
-          {actionError ? (
-            <Text
-              fontFamily="$body"
-              fontSize="$3"
-              lineHeight="$3"
-              fontWeight="500"
-              color="$terracota"
-              numberOfLines={3}
-            >
-              {actionError}
-            </Text>
-          ) : null}
-
-          {phase.kind === 'ask' ? (
-            <Button
-              testID="link-calf-search"
-              variant="primary"
-              fullWidth
-              disabled={busy}
-              onPress={() => void onSearch()}
-            >
-              {busy ? 'Buscando…' : 'Buscar ternero'}
-            </Button>
-          ) : phase.kind === 'found' ? (
-            <Button
-              testID="link-calf-confirm"
-              variant="primary"
-              fullWidth
-              disabled={busy}
-              onPress={() => void onConfirmLink(phase.calf)}
-            >
-              {busy ? 'Vinculando…' : 'Vincular como cría al pie'}
-            </Button>
-          ) : (
-            <Button
-              testID="link-calf-create"
-              variant="primary"
-              fullWidth
-              disabled={busy}
-              onPress={() => void onConfirmCreate(phase.identifier)}
-            >
-              {busy ? 'Creando…' : 'Crear y vincular'}
-            </Button>
-          )}
-
-          {/* "← Cambiar caravana": desde 'found'/'create', volver a la captura conservando lo tipeado. Arriba
-              de "Ahora no" (no compite con el CTA primario). Mismo patrón visual que "Ahora no" (muted, $5). */}
-          {phase.kind !== 'ask' ? (
+          {/* ── HEADER FIJO (grip + título). flexShrink:0 → el título NUNCA se recorta al crecer el body. ── */}
+          <YStack flexShrink={0} gap="$3">
             <View
-              testID="link-calf-back"
+              alignSelf="center"
+              width={getTokenValue('$icon', 'size')}
+              height={getTokenValue('$progressTrack', 'size')}
+              borderRadius="$pill"
+              backgroundColor="$divider"
+            />
+            <YStack gap="$1">
+              {/* Título $7 con lineHeight matcheado (anti-recorte: "pie" tiene descendente). */}
+              <Text
+                fontFamily="$heading"
+                fontSize="$7"
+                lineHeight="$7"
+                fontWeight="700"
+                color="$textPrimary"
+                numberOfLines={1}
+              >
+                ¿Vincular su cría al pie?
+              </Text>
+              <Text
+                fontFamily="$body"
+                fontSize="$3"
+                lineHeight="$3"
+                fontWeight="500"
+                color="$textMuted"
+                numberOfLines={2}
+              >
+                {phase.kind === 'create'
+                  ? 'No encontramos ese ternero. Cargá sus datos para crearlo y vincularlo.'
+                  : phase.kind === 'found'
+                    ? 'Encontramos el ternero. Confirmá para vincularlo como cría al pie.'
+                    : 'Ingresá la caravana del ternero al pie para vincularlo a esta vaca.'}
+              </Text>
+            </YStack>
+          </YStack>
+
+          {/* ── BODY SCROLLEABLE (flex:1 + minHeight:0 web) → crece adentro, no tapa el header. ── */}
+          <ScrollView
+            flex={1}
+            style={{ minHeight: 0 }}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={{ gap: getTokenValue('$4', 'space') }}
+          >
+            {phase.kind === 'ask' ? (
+              <YStack gap="$3">
+                {/* BASTONEO (scan-para-llenar): el bastón es el 95% del flujo en manga. El CTA llena el campo de
+                    abajo con el EID leído y avanza el find-or-create. El campo de texto QUEDA como fallback y como
+                    el camino para tipear un IDV (que el bastón no lee). */}
+                <TagScanCta
+                  onPress={openScan}
+                  label="Bastonear la caravana del ternero"
+                  testID="link-calf-scan-open"
+                />
+                <FormField
+                  label="Caravana del ternero"
+                  value={query}
+                  onChangeText={(t) => {
+                    setQuery(sanitizeIdvInput(t));
+                    if (fieldError) setFieldError(null);
+                    if (info) setInfo(null);
+                  }}
+                  error={fieldError}
+                  placeholder="Caravana electrónica o visual"
+                  keyboardType="default"
+                  autoCapitalize="none"
+                  returnKeyType="search"
+                  onSubmitEditing={() => void onSearch()}
+                />
+                {/* Aviso accionable (ya tiene madre / otro campo / varios). InfoNote NO tapa el título (header fijo). */}
+                {info ? <InfoNote>{info}</InfoNote> : null}
+              </YStack>
+            ) : phase.kind === 'found' ? (
+              <FoundCalfCard calf={phase.calf} />
+            ) : (
+              <CreateCalfForm
+                sex={sex}
+                sexError={sexError}
+                onSex={(s) => {
+                  setSex(s);
+                  if (sexError) setSexError(null);
+                }}
+                birthYear={birthYear}
+                birthYearError={birthYearError}
+                onBirthYear={(t) => {
+                  setBirthYear(sanitizeBirthYearInput(t));
+                  if (birthYearError) setBirthYearError(null);
+                }}
+                birthDayMonth={birthDayMonth}
+                dayMonthError={dayMonthError}
+                onBirthDayMonth={(t) => {
+                  setBirthDayMonth(sanitizeDayMonthInput(t));
+                  if (dayMonthError) setDayMonthError(null);
+                }}
+                rodeoName={selectedCalfRodeoName}
+                isSameRodeoAsMother={isSameRodeoAsMother}
+                rodeoOptions={calfRodeoOptions}
+                selectedRodeoId={effectiveCalfRodeoId}
+                pickerOpen={rodeoPickerOpen}
+                onTogglePicker={() => setRodeoPickerOpen((v) => !v)}
+                onSelectRodeo={(id) => {
+                  setSelectedCalfRodeoId(id);
+                  setRodeoPickerOpen(false);
+                }}
+                muted={muted}
+              />
+            )}
+          </ScrollView>
+
+          {/* ── FOOTER FIJO (acción del fase + "Ahora no"). flexShrink:0 → siempre abajo. ── */}
+          <YStack flexShrink={0} gap="$2">
+            {actionError ? (
+              <Text
+                fontFamily="$body"
+                fontSize="$3"
+                lineHeight="$3"
+                fontWeight="500"
+                color="$terracota"
+                numberOfLines={3}
+              >
+                {actionError}
+              </Text>
+            ) : null}
+
+            {phase.kind === 'ask' ? (
+              <Button
+                testID="link-calf-search"
+                variant="primary"
+                fullWidth
+                disabled={busy}
+                onPress={() => void onSearch()}
+              >
+                {busy ? 'Buscando…' : 'Buscar ternero'}
+              </Button>
+            ) : phase.kind === 'found' ? (
+              <Button
+                testID="link-calf-confirm"
+                variant="primary"
+                fullWidth
+                disabled={busy}
+                onPress={() => void onConfirmLink(phase.calf)}
+              >
+                {busy ? 'Vinculando…' : 'Vincular como cría al pie'}
+              </Button>
+            ) : (
+              <Button
+                testID="link-calf-create"
+                variant="primary"
+                fullWidth
+                disabled={busy}
+                onPress={() => void onConfirmCreate(phase.identifier)}
+              >
+                {busy ? 'Creando…' : 'Crear y vincular'}
+              </Button>
+            )}
+
+            {/* "← Cambiar caravana": desde 'found'/'create', volver a la captura conservando lo tipeado. Arriba
+                de "Ahora no" (no compite con el CTA primario). Mismo patrón visual que "Ahora no" (muted, $5). */}
+            {phase.kind !== 'ask' ? (
+              <View
+                testID="link-calf-back"
+                minHeight="$touchMin"
+                alignItems="center"
+                justifyContent="center"
+                pressStyle={{ opacity: 0.6 }}
+                onPress={backToAsk}
+                {...buttonA11y(Platform.OS, { label: 'Cambiar caravana' })}
+              >
+                <Text
+                  fontFamily="$body"
+                  fontSize="$5"
+                  lineHeight="$5"
+                  fontWeight="600"
+                  color="$textMuted"
+                  numberOfLines={1}
+                >
+                  ← Cambiar caravana
+                </Text>
+              </View>
+            ) : null}
+
+            {/* "Ahora no" (RCAP.1.3): cierra sin vincular y navega (la vaca queda nursing=true). */}
+            <View
+              testID="link-calf-skip"
               minHeight="$touchMin"
               alignItems="center"
               justifyContent="center"
               pressStyle={{ opacity: 0.6 }}
-              onPress={backToAsk}
-              {...buttonA11y(Platform.OS, { label: 'Cambiar caravana' })}
+              onPress={() => {
+                if (busyRef.current) return;
+                onSkip();
+              }}
+              {...buttonA11y(Platform.OS, { label: 'Ahora no' })}
             >
               <Text
                 fontFamily="$body"
@@ -619,37 +660,12 @@ export function LinkCalfPrompt({
                 color="$textMuted"
                 numberOfLines={1}
               >
-                ← Cambiar caravana
+                Ahora no
               </Text>
             </View>
-          ) : null}
-
-          {/* "Ahora no" (RCAP.1.3): cierra sin vincular y navega (la vaca queda nursing=true). */}
-          <View
-            testID="link-calf-skip"
-            minHeight="$touchMin"
-            alignItems="center"
-            justifyContent="center"
-            pressStyle={{ opacity: 0.6 }}
-            onPress={() => {
-              if (busyRef.current) return;
-              onSkip();
-            }}
-            {...buttonA11y(Platform.OS, { label: 'Ahora no' })}
-          >
-            <Text
-              fontFamily="$body"
-              fontSize="$5"
-              lineHeight="$5"
-              fontWeight="600"
-              color="$textMuted"
-              numberOfLines={1}
-            >
-              Ahora no
-            </Text>
-          </View>
+          </YStack>
         </YStack>
-      </YStack>
+      </KeyboardAvoidingShell>
 
       {/* Sheet de BASTONEO (scan-para-llenar), ÚLTIMO hijo → su scrim se pinta SOBRE el prompt. hideManualEntry:
           este buscador ya tiene su campo (EID **o** IDV) → el sheet ofrece "Cerrá y escribí la caravana" en vez

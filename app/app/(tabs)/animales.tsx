@@ -27,6 +27,7 @@ import { Check, Plus, Search } from 'lucide-react-native';
 import { usePowerSync } from '@powersync/react';
 
 import { AnimalRow, AnimalRowSkeleton, BleConnectionChip, Button, Card, InfoNote, FormError } from '@/components';
+import { KeyboardAvoidingShell } from '@/components/KeyboardAvoidingShell';
 import { useEstablishment, useRodeo } from '@/contexts';
 import {
   fetchAnimals,
@@ -37,6 +38,10 @@ import {
 import type { Rodeo } from '@/services/rodeos';
 import { SEARCH_TERM_MAX_LENGTH } from '@/utils/animal-identifier';
 import { buttonA11y } from '@/utils/a11y';
+
+// Estilo del `KeyboardAvoidingShell` (API no-Tamagui). `flex` no es spacing/color → no aplica el lint
+// anti-hardcode (ADR-023 §4).
+const fillStyle = { flex: 1 } as const;
 
 const SEARCH_DEBOUNCE_MS = 250; // R1.2
 
@@ -301,152 +306,160 @@ export default function AnimalesScreen() {
 
   return (
     <YStack flex={1} width="100%" maxWidth="100%" overflow="hidden" backgroundColor="$bg">
-      {/* Header fijo: título + buscador permanente + chips de filtro. */}
-      <YStack width="100%" paddingTop={insets.top} paddingHorizontal="$4">
-        <YStack width="100%" gap="$1" paddingVertical="$3">
-          <XStack width="100%" alignItems="center" justifyContent="space-between" gap="$2">
-            <Text fontFamily="$body" fontSize="$8" lineHeight="$8" fontWeight="700" color="$textPrimary">
-              Animales
+      {/* TECLADO (unidad «barrida de teclado»): el buscador está ARRIBA y nunca se tapa — lo que el
+          teclado tapaba eran los RESULTADOS. Con la columna adentro del primitivo, el contenedor se
+          achica desde abajo y la lista termina JUSTO por encima del teclado (en vez de seguir detrás).
+          El bottom-nav es hermano de esta pantalla (lo dibuja el Navigator, FUERA del shell) y por eso
+          `(tabs)/_layout.tsx` lo esconde con `tabBarHideOnKeyboard`: si no, la barra quedaría entre el
+          contenido y el teclado y el lift dejaría su alto de hueco muerto. */}
+      <KeyboardAvoidingShell style={fillStyle}>
+        {/* Header fijo: título + buscador permanente + chips de filtro. */}
+        <YStack width="100%" paddingTop={insets.top} paddingHorizontal="$4">
+          <YStack width="100%" gap="$1" paddingVertical="$3">
+            <XStack width="100%" alignItems="center" justifyContent="space-between" gap="$2">
+              <Text fontFamily="$body" fontSize="$8" lineHeight="$8" fontWeight="700" color="$textPrimary">
+                Animales
+              </Text>
+              {/* Chip de estado del bastón (spec 09 chunk BLE global, RB8.1): refleja la conexión + atajo
+                  para conectar por web-serial. NUNCA bloquea la puerta manual (RB8.2, manual-first). */}
+              <BleConnectionChip />
+            </XStack>
+            <Text fontFamily="$body" fontSize="$3" fontWeight="400" color="$textMuted">
+              {loading
+                ? 'Cargando…'
+                : `${formatThousands(totalCount)} ${selectedStatusLabel.toLowerCase()} · ${rodeoCount} ${rodeoCount === 1 ? 'rodeo' : 'rodeos'}`}
             </Text>
-            {/* Chip de estado del bastón (spec 09 chunk BLE global, RB8.1): refleja la conexión + atajo
-                para conectar por web-serial. NUNCA bloquea la puerta manual (RB8.2, manual-first). */}
-            <BleConnectionChip />
-          </XStack>
-          <Text fontFamily="$body" fontSize="$3" fontWeight="400" color="$textMuted">
-            {loading
-              ? 'Cargando…'
-              : `${formatThousands(totalCount)} ${selectedStatusLabel.toLowerCase()} · ${rodeoCount} ${rodeoCount === 1 ? 'rodeo' : 'rodeos'}`}
-          </Text>
-        </YStack>
+          </YStack>
 
-        {/* Buscador permanente (R1.2): XL por ser 🔴 manga-crítico. */}
-        <YStack width="100%" paddingBottom="$3">
-          <AnimalSearchBar value={query} onChangeText={setQuery} />
-        </YStack>
+          {/* Buscador permanente (R1.2): XL por ser 🔴 manga-crítico. */}
+          <YStack width="100%" paddingBottom="$3">
+            <AnimalSearchBar value={query} onChangeText={setQuery} />
+          </YStack>
 
-        {/* Chips de filtro (R1.5): rodeo / estado / sin electrónica. */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={{
-            gap: getTokenValue('$2', 'space'),
-            paddingBottom: getTokenValue('$3', 'space'),
-          }}
-        >
-          {rodeos.length >= 2 ? (
+          {/* Chips de filtro (R1.5): rodeo / estado / sin electrónica. */}
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{
+              gap: getTokenValue('$2', 'space'),
+              paddingBottom: getTokenValue('$3', 'space'),
+            }}
+          >
+            {rodeos.length >= 2 ? (
+              <FilterChip
+                label={selectedRodeoName ? `Rodeo: ${selectedRodeoName}` : 'Rodeo ▾'}
+                selected={rodeoFilter !== null}
+                accessibilityLabel="Filtrar por rodeo"
+                onPress={() => {
+                  setStatusPickerOpen(false);
+                  setRodeoPickerOpen((v) => !v);
+                }}
+              />
+            ) : null}
             <FilterChip
-              label={selectedRodeoName ? `Rodeo: ${selectedRodeoName}` : 'Rodeo ▾'}
-              selected={rodeoFilter !== null}
-              accessibilityLabel="Filtrar por rodeo"
+              label={statusFilter === 'active' ? 'Estado ▾' : `Estado: ${selectedStatusLabel}`}
+              selected={statusFilter !== 'active'}
+              accessibilityLabel="Filtrar por estado"
               onPress={() => {
-                setStatusPickerOpen(false);
-                setRodeoPickerOpen((v) => !v);
+                setRodeoPickerOpen(false);
+                setStatusPickerOpen((v) => !v);
+              }}
+            />
+            <FilterChip
+              label="Sin electrónica"
+              selected={onlyNoTag}
+              accessibilityLabel="Filtrar animales sin electrónica"
+              onPress={() => setOnlyNoTag((v) => !v)}
+            />
+          </ScrollView>
+
+          {/* Popovers de filtro (rodeo / estado). */}
+          {rodeoPickerOpen ? (
+            <FilterPopover
+              items={[{ id: null, label: 'Todos los rodeos' }, ...rodeos.map((r) => ({ id: r.id, label: r.name }))]}
+              selectedId={rodeoFilter}
+              onSelect={(id) => {
+                setRodeoFilter(id);
+                setRodeoPickerOpen(false);
               }}
             />
           ) : null}
-          <FilterChip
-            label={statusFilter === 'active' ? 'Estado ▾' : `Estado: ${selectedStatusLabel}`}
-            selected={statusFilter !== 'active'}
-            accessibilityLabel="Filtrar por estado"
-            onPress={() => {
-              setRodeoPickerOpen(false);
-              setStatusPickerOpen((v) => !v);
-            }}
-          />
-          <FilterChip
-            label="Sin electrónica"
-            selected={onlyNoTag}
-            accessibilityLabel="Filtrar animales sin electrónica"
-            onPress={() => setOnlyNoTag((v) => !v)}
-          />
+          {statusPickerOpen ? (
+            <FilterPopover
+              items={STATUS_OPTIONS.map((s) => ({ id: s.value, label: s.label }))}
+              selectedId={statusFilter}
+              onSelect={(id) => {
+                setStatusFilter((id as AnimalStatus) ?? 'active');
+                setStatusPickerOpen(false);
+              }}
+            />
+          ) : null}
+
+          {/* CTA a la asignación MASIVA (spec 09 chunk dedup opción B, RD5.1): visible con el filtro "Sin
+              electrónica" activo. El operario que filtró sus animales sin caravana electrónica es quien va a
+              caravanearlos en serie con el bastón. */}
+          {onlyNoTag ? (
+            <YStack width="100%" paddingBottom="$3">
+              <Button variant="primary" fullWidth onPress={onBulkAssign}>
+                Asignar caravanas en masa
+              </Button>
+            </YStack>
+          ) : null}
+        </YStack>
+
+        {/* Lista / estados. */}
+        <ScrollView
+          flex={1}
+          width="100%"
+          maxWidth="100%"
+          contentContainerStyle={{
+            paddingBottom: getTokenValue('$8', 'space'),
+            width: '100%',
+            maxWidth: '100%',
+          }}
+          keyboardShouldPersistTaps="handled"
+          showsHorizontalScrollIndicator={false}
+          showsVerticalScrollIndicator={false}
+        >
+          {error ? (
+            <YStack paddingHorizontal="$4" paddingTop="$4">
+              <FormError message={error} />
+            </YStack>
+          ) : showFilteredEmpty ? (
+            <FilteredEmptyState label={filteredEmptyCopy(statusFilter, selectedStatusLabel, onlyNoTag, selectedRodeoName)} onClear={onClearFilters} />
+          ) : showEmptyEstablishment ? (
+            <EmptyEstablishmentState onPress={onCreateBlank} />
+          ) : showNoMatch ? (
+            <NoMatchState query={debouncedQuery.trim()} onPress={onCreateFromNoMatch} />
+          ) : showListSkeleton ? (
+            // Espeja ~8 AnimalRow mientras baja la primera carga (mismas dimensiones $animalRow/$icon).
+            <YStack width="100%" accessibilityLabel="Cargando animales">
+              {Array.from({ length: 8 }).map((_, i) => (
+                <AnimalRowSkeleton key={i} />
+              ))}
+            </YStack>
+          ) : (
+            <YStack width="100%">
+              {visible.map((animal) => (
+                <AnimalRow
+                  key={animal.profileId}
+                  idv={animal.idv ?? undefined}
+                  apodo={animal.apodo}
+                  rodeoUsesApodo={animal.rodeoUsesApodo}
+                  tagElectronic={animal.tagElectronic}
+                  category={animal.categoryName || animal.categoryCode}
+                  categoryCode={animal.categoryCode}
+                  sex={animal.sex}
+                  rodeo={animal.rodeoName}
+                  reproStatus={animal.reproStatus}
+                  inTreatment={animal.inTreatment}
+                  onPress={() => onOpenAnimal(animal.profileId)}
+                />
+              ))}
+            </YStack>
+          )}
         </ScrollView>
-
-        {/* Popovers de filtro (rodeo / estado). */}
-        {rodeoPickerOpen ? (
-          <FilterPopover
-            items={[{ id: null, label: 'Todos los rodeos' }, ...rodeos.map((r) => ({ id: r.id, label: r.name }))]}
-            selectedId={rodeoFilter}
-            onSelect={(id) => {
-              setRodeoFilter(id);
-              setRodeoPickerOpen(false);
-            }}
-          />
-        ) : null}
-        {statusPickerOpen ? (
-          <FilterPopover
-            items={STATUS_OPTIONS.map((s) => ({ id: s.value, label: s.label }))}
-            selectedId={statusFilter}
-            onSelect={(id) => {
-              setStatusFilter((id as AnimalStatus) ?? 'active');
-              setStatusPickerOpen(false);
-            }}
-          />
-        ) : null}
-
-        {/* CTA a la asignación MASIVA (spec 09 chunk dedup opción B, RD5.1): visible con el filtro "Sin
-            electrónica" activo. El operario que filtró sus animales sin caravana electrónica es quien va a
-            caravanearlos en serie con el bastón. */}
-        {onlyNoTag ? (
-          <YStack width="100%" paddingBottom="$3">
-            <Button variant="primary" fullWidth onPress={onBulkAssign}>
-              Asignar caravanas en masa
-            </Button>
-          </YStack>
-        ) : null}
-      </YStack>
-
-      {/* Lista / estados. */}
-      <ScrollView
-        flex={1}
-        width="100%"
-        maxWidth="100%"
-        contentContainerStyle={{
-          paddingBottom: getTokenValue('$8', 'space'),
-          width: '100%',
-          maxWidth: '100%',
-        }}
-        keyboardShouldPersistTaps="handled"
-        showsHorizontalScrollIndicator={false}
-        showsVerticalScrollIndicator={false}
-      >
-        {error ? (
-          <YStack paddingHorizontal="$4" paddingTop="$4">
-            <FormError message={error} />
-          </YStack>
-        ) : showFilteredEmpty ? (
-          <FilteredEmptyState label={filteredEmptyCopy(statusFilter, selectedStatusLabel, onlyNoTag, selectedRodeoName)} onClear={onClearFilters} />
-        ) : showEmptyEstablishment ? (
-          <EmptyEstablishmentState onPress={onCreateBlank} />
-        ) : showNoMatch ? (
-          <NoMatchState query={debouncedQuery.trim()} onPress={onCreateFromNoMatch} />
-        ) : showListSkeleton ? (
-          // Espeja ~8 AnimalRow mientras baja la primera carga (mismas dimensiones $animalRow/$icon).
-          <YStack width="100%" accessibilityLabel="Cargando animales">
-            {Array.from({ length: 8 }).map((_, i) => (
-              <AnimalRowSkeleton key={i} />
-            ))}
-          </YStack>
-        ) : (
-          <YStack width="100%">
-            {visible.map((animal) => (
-              <AnimalRow
-                key={animal.profileId}
-                idv={animal.idv ?? undefined}
-                apodo={animal.apodo}
-                rodeoUsesApodo={animal.rodeoUsesApodo}
-                tagElectronic={animal.tagElectronic}
-                category={animal.categoryName || animal.categoryCode}
-                categoryCode={animal.categoryCode}
-                sex={animal.sex}
-                rodeo={animal.rodeoName}
-                reproStatus={animal.reproStatus}
-                inTreatment={animal.inTreatment}
-                onPress={() => onOpenAnimal(animal.profileId)}
-              />
-            ))}
-          </YStack>
-        )}
-      </ScrollView>
+      </KeyboardAvoidingShell>
     </YStack>
   );
 }

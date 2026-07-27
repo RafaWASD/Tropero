@@ -29,9 +29,18 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { stripSourceComments } from '../utils/strip-comments';
+import { assertScanCoverage } from '../utils/scan-coverage';
+
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const APP_ROOT = resolve(HERE, '..', '..'); // app/
 const ROOTS = [join(APP_ROOT, 'app'), join(APP_ROOT, 'src')];
+
+/**
+ * Piso de archivos escaneados (`app/app` + `app/src`, sin `.test.*`). Hoy son **364**. Ver
+ * `utils/scan-coverage.ts`: si el glob deja de matchear, este guard se pone ROJO en vez de pasar vacío.
+ */
+const SCANNED_FILES_FLOOR = 300;
 
 /**
  * Primer argumento de `runOnJS`/`scheduleOnRN` que es un ACCESO A PROPIEDAD (`X.y`, `X?.y`): eso captura
@@ -68,12 +77,16 @@ function listFiles(dir: string): string[] {
  * Blanquea comentarios (de línea y de bloque) preservando los saltos de línea, para que una MENCIÓN en
  * un comentario —como la del propio `BottomSheetShell`, que documenta el crash citando la línea mala—
  * no dispare un falso positivo.
+ *
+ * Delega en el escáner CON ESTADO compartido del repo. NO se hace con un par de regexes: ese blanqueo
+ * abría un bloque FALSO ante un slash-asterisco escrito dentro de un comentario de LÍNEA y se comía todo
+ * hasta el próximo cierre de bloque del archivo. Medido sobre el árbol de `fc4d164`, con la métrica
+ * "líneas de CÓDIGO que el escáner viejo dejaba invisibles": **556 líneas en 6 archivos** de
+ * `app/app`+`app/src` (341 en `maniobra/identificar.tsx`, 113 en `asignar-caravanas.tsx`, 84 en
+ * `FindOrCreateOverlay.tsx`, 10 en `app/_layout.tsx`, 6+2 en los dos de SIGSA). Un guard que no ve un
+ * pedazo del archivo da falsa confianza: es peor que no tenerlo.
  */
-function stripComments(src: string): string {
-  return src
-    .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '))
-    .replace(/\/\/[^\n]*/g, (m) => ' '.repeat(m.length));
-}
+const stripComments = stripSourceComments;
 
 test('ningún worklet le pasa a runOnJS/scheduleOnRN un método de módulo (crashea nativo en device)', () => {
   const violations: string[] = [];
@@ -131,9 +144,22 @@ test('el guard DETECTA la firma (no pasa verde por no estar mirando nada)', () =
   assert.ok(!DISABLE_NEXT_LINE.test('// worklet-callback-disable-next-line --'));
 });
 
+test('AUTO-VERIFICACIÓN: el guard escaneó todo el árbol, y los archivos ENTEROS', () => {
+  // Un verificador roto y un verificador que no encuentra nada se ven igual: verde. Acá el guard audita
+  // su propia entrada — cuántos archivos vio y si los vio completos. Detalle en `utils/scan-coverage.ts`.
+  assertScanCoverage({
+    guard: 'worklet-callbacks',
+    files: ROOTS.flatMap(listFiles),
+    minFiles: SCANNED_FILES_FLOOR,
+    label: (f) => relative(APP_ROOT, f).split(sep).join('/'),
+    read: (f) => readFileSync(f, 'utf8'),
+    strip: stripComments,
+  });
+});
+
 test('el guard recorre el árbol real (y ve los archivos que tienen worklets)', () => {
   const scanned = ROOTS.flatMap(listFiles);
-  assert.ok(scanned.length > 50, `el guard debería escanear el árbol real (vio ${scanned.length})`);
+  assert.ok(scanned.length >= SCANNED_FILES_FLOOR, `el guard debería escanear el árbol real (vio ${scanned.length})`);
   assert.ok(
     scanned.some((f) => f.endsWith(join('src', 'components', 'BottomSheetShell.tsx'))),
     'BottomSheetShell.tsx (el del crash) debería estar dentro del árbol escaneado',

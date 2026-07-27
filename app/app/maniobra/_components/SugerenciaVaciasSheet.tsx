@@ -20,11 +20,16 @@ import { Platform, Pressable } from 'react-native';
 import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
 import { Plus } from 'lucide-react-native';
 
-import { useSafeBottomInset } from '@/hooks/useSafeBottomInset';
+import { useKeyboardAwareBottomInset } from '@/hooks/useSafeBottomInset';
+import { KeyboardAvoidingShell } from '@/components/KeyboardAvoidingShell';
 import { ComboOptionRow, FormField } from '@/components';
 import { buttonA11y } from '@/utils/a11y';
 import { validateGroupName, MANAGEMENT_GROUP_NAME_MAX } from '@/utils/management-group';
 import type { ManagementGroup } from '@/services/management-groups';
+
+// Estilo del `KeyboardAvoidingShell` (API no-Tamagui) — el MISMO que usa `BottomSheetShell` para este
+// esqueleto. `flex`/`width` no son spacing/color → no aplica el lint anti-hardcode (ADR-023 §4).
+const avoidStyle = { flex: 1, width: '100%', justifyContent: 'flex-end' } as const;
 
 export type SugerenciaVaciasSheetProps = {
   /** ¿El sheet está abierto? */
@@ -55,7 +60,9 @@ export function SugerenciaVaciasSheet({
   onChooseExisting,
   onCreateNew,
 }: SugerenciaVaciasSheetProps) {
-  const bottomPad = useSafeBottomInset();
+  // Reserva inferior KEYBOARD-AWARE: el `KeyboardAvoidingShell` de abajo ya sube la hoja el alto entero
+  // del teclado → con el teclado arriba la safe-area está tapada y reservarla dejaría un hueco muerto.
+  const bottomPad = useKeyboardAwareBottomInset();
 
   // Sub-modo "crear lote nuevo" + su nombre (default "Descarte", RLV.13).
   const [creating, setCreating] = useState(false);
@@ -114,115 +121,122 @@ export function SugerenciaVaciasSheet({
 
   return (
     <View position="absolute" top="$0" left="$0" right="$0" bottom="$0" backgroundColor="$scrim" justifyContent="flex-end">
-      <Pressable
-        style={{ flex: 1, width: '100%' }}
-        onPress={onBackdropPress}
-        testID="sugerencia-vacias-scrim"
-        {...buttonA11y(Platform.OS, { label: 'Cerrar' })}
-      />
+      {/* El shell del teclado envuelve la COLUMNA (backdrop libre + hoja): con el teclado arriba encoge
+          el alto útil desde abajo → el backdrop (flex:1) absorbe y la hoja SUBE por encima del teclado.
+          El scrim de AFUERA sigue cubriendo la pantalla ENTERA (también detrás del teclado). Mismo
+          esqueleto y mismo estilo que `BottomSheetShell`: este sheet está hecho a mano y su migración
+          al primitivo queda anotada en `docs/backlog.md`. */}
+      <KeyboardAvoidingShell style={avoidStyle}>
+        <Pressable
+          style={{ flex: 1, width: '100%' }}
+          onPress={onBackdropPress}
+          testID="sugerencia-vacias-scrim"
+          {...buttonA11y(Platform.OS, { label: 'Cerrar' })}
+        />
 
-      <YStack
-        width="100%"
-        maxHeight="85%"
-        backgroundColor="$bg"
-        borderTopLeftRadius="$card"
-        borderTopRightRadius="$card"
-        paddingHorizontal="$4"
-        paddingTop="$4"
-        paddingBottom={bottomPad}
-        gap="$4"
-        testID="sugerencia-vacias-sheet"
-      >
-        {/* HEADER FIJO (grip + título). flexShrink:0 → el título nunca se recorta al crecer la lista. */}
-        <YStack flexShrink={0} gap="$3">
-          <View alignSelf="center" width={getTokenValue('$icon', 'size')} height={getTokenValue('$progressTrack', 'size')} borderRadius="$pill" backgroundColor="$divider" />
-          <YStack gap="$1">
-            <Text fontFamily="$heading" fontSize="$7" lineHeight="$7" fontWeight="700" color="$textPrimary" numberOfLines={2}>
-              Agregar {count} {countWord} a un lote
-            </Text>
-            <Text fontFamily="$body" fontSize="$3" lineHeight="$3" fontWeight="500" color="$textMuted" numberOfLines={2}>
-              {creating ? 'Nombrá el lote nuevo.' : 'Elegí un lote existente o creá uno.'}
-            </Text>
-          </YStack>
-        </YStack>
-
-        {/* CUERPO scrolleable. */}
-        <ScrollView flex={1} style={{ minHeight: 0 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: getTokenValue('$2', 'space') }} keyboardShouldPersistTaps="handled">
-          {creating ? (
-            <YStack gap="$3">
-              <FormField
-                label="Nombre del lote"
-                value={name}
-                onChangeText={(t) => {
-                  setName(t);
-                  if (nameErr) setNameErr(null);
-                }}
-                placeholder="Descarte"
-                error={nameErr}
-                maxLength={MANAGEMENT_GROUP_NAME_MAX}
-                autoCapitalize="sentences"
-                testID="sugerencia-vacias-nombre"
-              />
-              <XStack width="100%" minHeight="$touchMin" alignItems="center" justifyContent="center" borderRadius="$pill" backgroundColor="$primary" opacity={busy ? 0.6 : 1} pressStyle={{ backgroundColor: '$primaryPress' }} onPress={busy ? undefined : submitCreate} testID="sugerencia-vacias-crear" {...buttonA11y(Platform.OS, { label: 'Crear lote y agregar', disabled: busy })}>
-                <Text fontFamily="$body" fontSize="$5" fontWeight="700" color="$white">
-                  {busy ? 'Agregando…' : 'Crear y agregar'}
-                </Text>
-              </XStack>
-              <View minHeight="$touchMin" alignItems="center" justifyContent="center" pressStyle={{ opacity: 0.6 }} onPress={() => setCreating(false)} {...buttonA11y(Platform.OS, { label: 'Volver a la lista' })}>
-                <Text fontFamily="$body" fontSize="$5" lineHeight="$5" fontWeight="600" color="$textMuted" numberOfLines={1}>
-                  Volver
-                </Text>
-              </View>
+        <YStack
+          width="100%"
+          maxHeight="85%"
+          backgroundColor="$bg"
+          borderTopLeftRadius="$card"
+          borderTopRightRadius="$card"
+          paddingHorizontal="$4"
+          paddingTop="$4"
+          paddingBottom={bottomPad}
+          gap="$4"
+          testID="sugerencia-vacias-sheet"
+        >
+          {/* HEADER FIJO (grip + título). flexShrink:0 → el título nunca se recorta al crecer la lista. */}
+          <YStack flexShrink={0} gap="$3">
+            <View alignSelf="center" width={getTokenValue('$icon', 'size')} height={getTokenValue('$progressTrack', 'size')} borderRadius="$pill" backgroundColor="$divider" />
+            <YStack gap="$1">
+              <Text fontFamily="$heading" fontSize="$7" lineHeight="$7" fontWeight="700" color="$textPrimary" numberOfLines={2}>
+                Agregar {count} {countWord} a un lote
+              </Text>
+              <Text fontFamily="$body" fontSize="$3" lineHeight="$3" fontWeight="500" color="$textMuted" numberOfLines={2}>
+                {creating ? 'Nombrá el lote nuevo.' : 'Elegí un lote existente o creá uno.'}
+              </Text>
             </YStack>
-          ) : (
-            <>
-              {/* Lista de lotes existentes (RLV.12) — filas planas dentro de un contenedor bordeado. */}
-              {hasGroups ? (
-                <YStack gap="$1" borderRadius="$card" borderWidth={1} borderColor="$divider" backgroundColor="$surface" paddingVertical="$2" paddingHorizontal="$2">
-                  {groups.map((g) => (
-                    <ComboOptionRow
-                      key={g.id}
-                      size="comfortable"
-                      testID={`sugerencia-lote-${g.id}`}
-                      a11yLabel={`Lote ${g.name}`}
-                      label={g.name}
-                      selected={false}
-                      onPress={busy ? () => undefined : () => onChooseExisting(g.id)}
-                    />
-                  ))}
-                </YStack>
-              ) : (
-                <Text fontFamily="$body" fontSize="$3" lineHeight="$3" fontWeight="500" color="$textFaint" numberOfLines={3} paddingHorizontal="$2" paddingTop="$1">
-                  {canCreate
-                    ? 'Este campo todavía no tiene lotes. Creá uno abajo.'
-                    : 'Este campo todavía no tiene lotes. Pedile al dueño que cree uno.'}
-                </Text>
-              )}
+          </YStack>
 
-              {/* Crear lote nuevo (RLV.13) — SOLO owner (RLS 0037). Fila de acción con "+". */}
-              {canCreate ? (
-                <XStack alignItems="center" gap="$3" minHeight="$touchMin" borderRadius="$card" borderWidth={1} borderColor="$divider" backgroundColor="$white" paddingHorizontal="$4" pressStyle={{ backgroundColor: '$surface' }} onPress={() => setCreating(true)} testID="sugerencia-vacias-crear-nuevo" {...buttonA11y(Platform.OS, { label: 'Crear lote nuevo' })}>
-                  <View width="$icon" height="$icon" borderRadius="$pill" backgroundColor="$greenLight" alignItems="center" justifyContent="center" flexShrink={0}>
-                    <Plus size={getTokenValue('$navIcon', 'size')} color={getTokenValue('$primary', 'color')} strokeWidth={2.5} />
-                  </View>
-                  <Text fontFamily="$body" fontSize="$5" lineHeight="$5" fontWeight="700" color="$textPrimary" numberOfLines={1}>
-                    Crear lote nuevo
+          {/* CUERPO scrolleable. */}
+          <ScrollView flex={1} style={{ minHeight: 0 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: getTokenValue('$2', 'space') }} keyboardShouldPersistTaps="handled">
+            {creating ? (
+              <YStack gap="$3">
+                <FormField
+                  label="Nombre del lote"
+                  value={name}
+                  onChangeText={(t) => {
+                    setName(t);
+                    if (nameErr) setNameErr(null);
+                  }}
+                  placeholder="Descarte"
+                  error={nameErr}
+                  maxLength={MANAGEMENT_GROUP_NAME_MAX}
+                  autoCapitalize="sentences"
+                  testID="sugerencia-vacias-nombre"
+                />
+                <XStack width="100%" minHeight="$touchMin" alignItems="center" justifyContent="center" borderRadius="$pill" backgroundColor="$primary" opacity={busy ? 0.6 : 1} pressStyle={{ backgroundColor: '$primaryPress' }} onPress={busy ? undefined : submitCreate} testID="sugerencia-vacias-crear" {...buttonA11y(Platform.OS, { label: 'Crear lote y agregar', disabled: busy })}>
+                  <Text fontFamily="$body" fontSize="$5" fontWeight="700" color="$white">
+                    {busy ? 'Agregando…' : 'Crear y agregar'}
                   </Text>
                 </XStack>
-              ) : null}
-            </>
-          )}
-        </ScrollView>
+                <View minHeight="$touchMin" alignItems="center" justifyContent="center" pressStyle={{ opacity: 0.6 }} onPress={() => setCreating(false)} {...buttonA11y(Platform.OS, { label: 'Volver a la lista' })}>
+                  <Text fontFamily="$body" fontSize="$5" lineHeight="$5" fontWeight="600" color="$textMuted" numberOfLines={1}>
+                    Volver
+                  </Text>
+                </View>
+              </YStack>
+            ) : (
+              <>
+                {/* Lista de lotes existentes (RLV.12) — filas planas dentro de un contenedor bordeado. */}
+                {hasGroups ? (
+                  <YStack gap="$1" borderRadius="$card" borderWidth={1} borderColor="$divider" backgroundColor="$surface" paddingVertical="$2" paddingHorizontal="$2">
+                    {groups.map((g) => (
+                      <ComboOptionRow
+                        key={g.id}
+                        size="comfortable"
+                        testID={`sugerencia-lote-${g.id}`}
+                        a11yLabel={`Lote ${g.name}`}
+                        label={g.name}
+                        selected={false}
+                        onPress={busy ? () => undefined : () => onChooseExisting(g.id)}
+                      />
+                    ))}
+                  </YStack>
+                ) : (
+                  <Text fontFamily="$body" fontSize="$3" lineHeight="$3" fontWeight="500" color="$textFaint" numberOfLines={3} paddingHorizontal="$2" paddingTop="$1">
+                    {canCreate
+                      ? 'Este campo todavía no tiene lotes. Creá uno abajo.'
+                      : 'Este campo todavía no tiene lotes. Pedile al dueño que cree uno.'}
+                  </Text>
+                )}
 
-        {/* FOOTER FIJO: "Ahora no" (saltar, RLV.11 — igual que el scrim, accesible sin apuntar al borde). */}
-        <YStack flexShrink={0}>
-          <View testID="sugerencia-vacias-sheet-ahora-no" minHeight="$touchMin" alignItems="center" justifyContent="center" pressStyle={{ opacity: 0.6 }} onPress={onClose} {...buttonA11y(Platform.OS, { label: 'Ahora no' })}>
-            <Text fontFamily="$body" fontSize="$5" lineHeight="$5" fontWeight="600" color="$textMuted" numberOfLines={1}>
-              Ahora no
-            </Text>
-          </View>
+                {/* Crear lote nuevo (RLV.13) — SOLO owner (RLS 0037). Fila de acción con "+". */}
+                {canCreate ? (
+                  <XStack alignItems="center" gap="$3" minHeight="$touchMin" borderRadius="$card" borderWidth={1} borderColor="$divider" backgroundColor="$white" paddingHorizontal="$4" pressStyle={{ backgroundColor: '$surface' }} onPress={() => setCreating(true)} testID="sugerencia-vacias-crear-nuevo" {...buttonA11y(Platform.OS, { label: 'Crear lote nuevo' })}>
+                    <View width="$icon" height="$icon" borderRadius="$pill" backgroundColor="$greenLight" alignItems="center" justifyContent="center" flexShrink={0}>
+                      <Plus size={getTokenValue('$navIcon', 'size')} color={getTokenValue('$primary', 'color')} strokeWidth={2.5} />
+                    </View>
+                    <Text fontFamily="$body" fontSize="$5" lineHeight="$5" fontWeight="700" color="$textPrimary" numberOfLines={1}>
+                      Crear lote nuevo
+                    </Text>
+                  </XStack>
+                ) : null}
+              </>
+            )}
+          </ScrollView>
+
+          {/* FOOTER FIJO: "Ahora no" (saltar, RLV.11 — igual que el scrim, accesible sin apuntar al borde). */}
+          <YStack flexShrink={0}>
+            <View testID="sugerencia-vacias-sheet-ahora-no" minHeight="$touchMin" alignItems="center" justifyContent="center" pressStyle={{ opacity: 0.6 }} onPress={onClose} {...buttonA11y(Platform.OS, { label: 'Ahora no' })}>
+              <Text fontFamily="$body" fontSize="$5" lineHeight="$5" fontWeight="600" color="$textMuted" numberOfLines={1}>
+                Ahora no
+              </Text>
+            </View>
+          </YStack>
         </YStack>
-      </YStack>
+      </KeyboardAvoidingShell>
     </View>
   );
 }

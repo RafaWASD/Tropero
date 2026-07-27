@@ -30,9 +30,18 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { stripSourceComments } from './strip-comments';
+import { assertScanCoverage } from './scan-coverage';
+
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const APP_ROOT = resolve(HERE, '..', '..'); // app/
 const ROOTS = [join(APP_ROOT, 'app'), join(APP_ROOT, 'src')];
+
+/**
+ * Piso de archivos escaneados (`app/app` + `app/src`, sin `.test.*`). Hoy son **364**. Ver
+ * `utils/scan-coverage.ts`: si el glob deja de matchear, este guard se pone ROJO en vez de pasar vacío.
+ */
+const SCANNED_FILES_FLOOR = 300;
 
 /** El ÚNICO archivo que puede leer los tokens del borde inferior junto a un inset y decidir plataforma. */
 const HOOK = 'src/hooks/useSafeBottomInset.ts';
@@ -142,12 +151,18 @@ function listFiles(dir: string): string[] {
   return found;
 }
 
-/** Blanquea comentarios preservando saltos de línea: una MENCIÓN documental no es una violación. */
-function stripComments(src: string): string {
-  return src
-    .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '))
-    .replace(/\/\/[^\n]*/g, (m) => ' '.repeat(m.length));
-}
+/**
+ * Blanquea comentarios preservando saltos de línea: una MENCIÓN documental no es una violación.
+ * Delega en el escáner CON ESTADO compartido del repo. NO se hace con un par de regexes: ese blanqueo
+ * abría un bloque FALSO ante un slash-asterisco escrito dentro de un comentario de LÍNEA y se comía todo
+ * hasta el próximo cierre de bloque del archivo. Medido sobre el árbol de `fc4d164`, con la métrica
+ * "líneas de CÓDIGO que el escáner viejo dejaba invisibles" (una línea cuenta si el blanqueo correcto le
+ * deja código y el viejo la deja entera en blanco): **556 líneas en 6 archivos** de `app/app`+`app/src`
+ * — 341 en `maniobra/identificar.tsx`, 113 en `asignar-caravanas.tsx`, 84 en `FindOrCreateOverlay.tsx`,
+ * 10 en `app/_layout.tsx`, 6 en `sigsa-validator.ts`, 2 en `sigsa-txt-generator.ts`. Un guard que no ve
+ * un pedazo del archivo da falsa confianza: es peor que no tenerlo.
+ */
+const stripComments = stripSourceComments;
 
 function scan(predicate: (line: string, rel: string) => boolean): string[] {
   const violations: string[] = [];
@@ -367,9 +382,22 @@ test('el guard DETECTA las firmas (no pasa verde por no estar mirando nada)', ()
   assert.ok(!DISABLE_NEXT_LINE.test('// safe-bottom-disable-next-line --'));
 });
 
+test('AUTO-VERIFICACIÓN: el guard escaneó todo el árbol, y los archivos ENTEROS', () => {
+  // Un verificador roto y un verificador que no encuentra nada se ven igual: verde. Acá el guard audita
+  // su propia entrada — cuántos archivos vio y si los vio completos. Detalle en `utils/scan-coverage.ts`.
+  assertScanCoverage({
+    guard: 'safe-bottom-inset',
+    files: ROOTS.flatMap(listFiles),
+    minFiles: SCANNED_FILES_FLOOR,
+    label: (f) => relative(APP_ROOT, f).split(sep).join('/'),
+    read: (f) => readFileSync(f, 'utf8'),
+    strip: stripComments,
+  });
+});
+
 test('el guard recorre el árbol real (y ve los archivos que tenían la fórmula copiada)', () => {
   const scanned = ROOTS.flatMap(listFiles);
-  assert.ok(scanned.length > 50, `el guard debería escanear el árbol real (vio ${scanned.length})`);
+  assert.ok(scanned.length >= SCANNED_FILES_FLOOR, `el guard debería escanear el árbol real (vio ${scanned.length})`);
   for (const expected of [
     join('app', 'maniobra', '_components', 'ExitJornadaSheet.tsx'), // uno de los ~20 sheets migrados
     join('src', 'components', 'FooterActionShell.tsx'), // el primitivo del CTA

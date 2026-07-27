@@ -112,10 +112,10 @@ import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
 import { ChevronDown, X } from 'lucide-react-native';
 
 import { useKeyboardVisible } from '../hooks/useKeyboardVisible';
-import { useSafeBottomInset } from '../hooks/useSafeBottomInset';
+import { useKeyboardAwareBottomInset } from '../hooks/useSafeBottomInset';
 import { KeyboardAvoidingShell } from './KeyboardAvoidingShell';
 import { buttonA11y } from '../utils/a11y';
-import { resolveFooterPaddingBottom, shouldShowScrollPeek } from '../utils/footer-action';
+import { shouldShowScrollPeek } from '../utils/footer-action';
 import {
   SHEET_DISMISS_CANCEL_VELOCITY,
   SHEET_DISMISS_FLING_MIN_TRAVEL,
@@ -219,9 +219,9 @@ export function BottomSheetShell({
   keyboardShouldPersistTaps = 'handled',
   showGrip = true,
 }: BottomSheetShellProps) {
+  // El FLAG se usa acá para tres cosas distintas: la condensación del sheet, el gesto de arrastre
+  // (bajar el teclado en vez de cerrar) y la reserva inferior. La RESERVA sale del hook compartido.
   const keyboardVisible = useKeyboardVisible();
-  // Reserva inferior canónica con el teclado CERRADO — hook compartido de la app.
-  const safeBottomInset = useSafeBottomInset();
   const { showDescription, showSecondaryAction, showCloseButton } = sheetCondensation({ keyboardVisible });
 
   // ── GUARD del backdrop contra el "click huérfano" del tap que abrió el sheet (BUG web, Raf) ──
@@ -264,14 +264,10 @@ export function BottomSheetShell({
     onClose();
   };
 
-  // Reserva inferior: con el teclado cerrado, la canónica del repo (`useSafeBottomInset`, con el
-  // blindaje frame-0 de Android edge-to-edge adentro); con el teclado abierto, un respiro chico (la
-  // safe-area la tapa el teclado → reservarla dejaría un hueco feo SOBRE el teclado).
-  const paddingBottom = resolveFooterPaddingBottom({
-    keyboardVisible,
-    safeInset: safeBottomInset,
-    keyboardOpenGap: getTokenValue('$2', 'space'),
-  });
+  // Reserva inferior: con el teclado cerrado, la canónica del repo (adentro del hook vive
+  // `useSafeBottomInset`, con el blindaje frame-0 de Android edge-to-edge); con el teclado abierto, un
+  // respiro chico (la safe-area la tapa el teclado → reservarla dejaría un hueco feo SOBRE el teclado).
+  const paddingBottom = useKeyboardAwareBottomInset();
 
   const hasFooter = footer != null || (secondaryFooter != null && showSecondaryAction);
 

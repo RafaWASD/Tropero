@@ -45,6 +45,7 @@ import type { LucideIcon } from 'lucide-react-native';
 
 import { AnimalFichaSkeleton, Button, Card, CategoryBadge, ComboOptionRow, InfoNote, FormError, FormField, IdentifierAssignRow, TagScanCta, TagScanSheet, TimelineEvent, TreatmentsSection, TreatmentStartSheet, TreatmentApplicationSheet } from '@/components';
 import type { TreatmentStartSubmit, TreatmentApplicationSubmit } from '@/components';
+import { KeyboardAvoidingShell } from '@/components/KeyboardAvoidingShell';
 import {
   assignTagToAnimal,
   fetchAnimalDetail,
@@ -120,6 +121,10 @@ import { formatCmWithUnitAR } from '@/utils/wheel-picker';
 import { scrollFades, type ScrollFades } from '@/utils/scroll-affordance';
 import { buttonA11y, labelA11y } from '@/utils/a11y';
 import { backOr } from '@/utils/nav';
+
+// Estilo del `KeyboardAvoidingShell` (API no-Tamagui). `flex` no es spacing/color → no aplica el lint
+// anti-hardcode (ADR-023 §4).
+const fillStyle = { flex: 1 } as const;
 
 export default function AnimalDetailScreen() {
   const router = useRouter();
@@ -890,229 +895,236 @@ export default function AnimalDetailScreen() {
 
   return (
     <YStack flex={1} width="100%" maxWidth="100%" overflow="hidden" backgroundColor="$bg">
-      {/* Barra superior compacta: solo el back (el título es el HERO, abajo). */}
-      <YStack width="100%" paddingTop={insets.top} paddingHorizontal="$4">
-        <XStack width="100%" alignItems="center" paddingVertical="$3">
-          {/* "Volver" ROBUSTO (backOr): si el stack está vacío (web-refresh / hot-reload / deep-link
-              / cold-start directo en la ficha) router.back() fallaría y dejaría al usuario trabado →
-              caemos a la lista de animales (de donde se llega a la ficha por tap, R1.3). */}
-          <Pressable
-            hitSlop={8}
-            onPress={() => backOr(router, '/(tabs)/animales')}
-            {...buttonA11y(Platform.OS, { label: 'Volver' })}
-          >
-            <ChevronLeft size={28} color={muted} strokeWidth={2} />
-          </Pressable>
-        </XStack>
-      </YStack>
+      {/* TECLADO (unidad «barrida de teclado»): la ficha tiene campos de texto —la carga manual de la caravana
+          (`IdentifierAssignRow`) y los datos personalizados (`CustomFieldInput` vía `CustomPropertiesFicha`)— y
+          no montaba ningún mecanismo: al enfocarlos el teclado los tapaba. El shell envuelve la barra superior
+          y el cuerpo; los 4 SHEETS de abajo quedan AFUERA, como hermanos (cada uno trae su propio shell —
+          anidarlos descontaría el teclado dos veces). */}
+      <KeyboardAvoidingShell style={fillStyle}>
+        {/* Barra superior compacta: solo el back (el título es el HERO, abajo). */}
+        <YStack width="100%" paddingTop={insets.top} paddingHorizontal="$4">
+          <XStack width="100%" alignItems="center" paddingVertical="$3">
+            {/* "Volver" ROBUSTO (backOr): si el stack está vacío (web-refresh / hot-reload / deep-link
+                / cold-start directo en la ficha) router.back() fallaría y dejaría al usuario trabado →
+                caemos a la lista de animales (de donde se llega a la ficha por tap, R1.3). */}
+            <Pressable
+              hitSlop={8}
+              onPress={() => backOr(router, '/(tabs)/animales')}
+              {...buttonA11y(Platform.OS, { label: 'Volver' })}
+            >
+              <ChevronLeft size={28} color={muted} strokeWidth={2} />
+            </Pressable>
+          </XStack>
+        </YStack>
 
-      <ScrollView
-        flex={1}
-        width="100%"
-        maxWidth="100%"
-        contentContainerStyle={{
-          paddingHorizontal: getTokenValue('$4', 'space'),
-          paddingTop: getTokenValue('$1', 'space'),
-          paddingBottom: insets.bottom + getTokenValue('$6', 'space'),
-          width: '100%',
-          maxWidth: '100%',
-          gap: getTokenValue('$4', 'space'),
-        }}
-        showsHorizontalScrollIndicator={false}
-      >
-        {loading ? (
-          <AnimalFichaSkeleton />
-        ) : error ? (
-          <FormError message={error} />
-        ) : detail ? (
-          <>
-            <AnimalHero detail={detail} hadAbortion={hasAbortion(timeline)} inTreatment={inTreatment} />
+        <ScrollView
+          flex={1}
+          width="100%"
+          maxWidth="100%"
+          contentContainerStyle={{
+            paddingHorizontal: getTokenValue('$4', 'space'),
+            paddingTop: getTokenValue('$1', 'space'),
+            paddingBottom: insets.bottom + getTokenValue('$6', 'space'),
+            width: '100%',
+            maxWidth: '100%',
+            gap: getTokenValue('$4', 'space'),
+          }}
+          showsHorizontalScrollIndicator={false}
+        >
+          {loading ? (
+            <AnimalFichaSkeleton />
+          ) : error ? (
+            <FormError message={error} />
+          ) : detail ? (
+            <>
+              <AnimalHero detail={detail} hadAbortion={hasAbortion(timeline)} inTreatment={inTreatment} />
 
-            {/* Modo archivada (C3.3, R14.9): si el animal está de baja (status ≠ active), badge bajo el
-                hero con el verbo + fecha de egreso ("Vendido el …"). Para un animal activo → null. */}
-            <ArchivedBadge status={detail.status} exitDate={detail.exitDate} />
+              {/* Modo archivada (C3.3, R14.9): si el animal está de baja (status ≠ active), badge bajo el
+                  hero con el verbo + fecha de egreso ("Vendido el …"). Para un animal activo → null. */}
+              <ArchivedBadge status={detail.status} exitDate={detail.exitDate} />
 
-            {/* Categoría fijada manualmente (C6 / RC6.4.1): si el override está activo, un indicador
-                explícito bajo el hero + (si el animal está activo) la acción "Quitar fijación" con
-                confirmación inline. Para override=false → null (el espejo ya gobierna el display).
-                Delta spec 02 (RCUT.5.7): un CUT (override=true + isCut=true) NO ofrece esta card genérica
-                ("Quitar fijación" usa revertCategoryOverride, que NO resetea is_cut → estado inconsistente);
-                su único desmarcado es "Quitar CUT" (en la sección Manejo). La card SÍ se sigue mostrando para
-                un override NO-CUT (ej. "vaca comprada" fijada a multípara manual). */}
-            {detail.categoryOverride && !detail.isCut ? (
-              <CategoryOverrideCard
-                canRevert={canRevertOverride}
-                onRevert={onRevertOverride}
-                onPreviewRevert={onPreviewRevert}
-              />
-            ) : null}
-
-            {/* Link a la MADRE (R14.7): solo si el animal es un ternero con parto registrado. Tappable
-                → ficha de la madre. Tolera madre archivada (status ≠ active): indicador + navega igual. */}
-            {mother ? <MotherCard mother={mother} onPress={goToMother} /> : null}
-
-            {/* Identificación (delta caravana-ficha, RCF.1/RCF.6): por cada identificador (electrónica / visual),
-                render condicional — valor solo-lectura si está SETEADO (inmutable, R4.13), o la afordancia de
-                asignación si está VACÍO en un animal ACTIVO (canAssignTag/canAssignIdv). Si está vacío pero el
-                animal NO está activo, "—" (no se ofrece, RCF.1.5). Para la caravana ELECTRÓNICA vacía la
-                afordancia ofrece BASTONEAR (scan del EID, RCF.6) ADEMÁS de la carga manual (piso siempre
-                presente). delta IDU: el 4to campo visual_id_alt se eliminó; el Nombre/Apodo vive en "Datos
-                personalizados", no acá. */}
-            <DetailSection icon={Tag} title="Identificación">
-              {/* Caravana electrónica → BASTONEAR (RCF.6): única afordancia de la electrónica vacía. Abre el
-                  sheet de scan acotado → lee el EID y lo asigna a ESTE animal. La carga MANUAL por teclado vive
-                  DENTRO del sheet (detrás de "¿Sin bastón? Cargá la caravana a mano") — NO hay carga manual
-                  directa de la electrónica desde la ficha (decisión de UX de Raf, 2026-07-06). */}
-              {detail.tagElectronic != null ? (
-                <AttributeRow label="Caravana electrónica" value={detail.tagElectronic} />
-              ) : canAssignTag(detail) ? (
-                <YStack gap="$2">
-                  <Text fontFamily="$body" fontSize="$3" fontWeight="500" color="$textMuted">
-                    Caravana electrónica
-                  </Text>
-                  <TagScanCta onPress={() => setScanOpen(true)} />
-                </YStack>
-              ) : (
-                <AttributeRow label="Caravana electrónica" value="—" />
-              )}
-
-              {/* Caravana visual (idv) → UPDATE local sobre animal_profiles (offline-first, patrón CUT).
-                  Corrección #2 (testeo en vivo): label "Caravana visual" (antes "Caravana / IDV"). La
-                  afordancia de asignar idv vacío NO cambia (IdentifierAssignRow kind="idv", CTA "Agregar
-                  caravana visual"); solo cambia el LABEL de la fila. */}
-              {detail.idv != null ? (
-                <AttributeRow label="Caravana visual" value={detail.idv} />
-              ) : canAssignIdv(detail) ? (
-                <IdentifierAssignRow
-                  kind="idv"
-                  label="Caravana visual"
-                  placeholder="Ej. AB123A0001"
-                  keyboardType="default"
-                  sanitize={sanitizeIdvInput}
-                  maxLength={IDV_MAX_LENGTH}
-                  validate={(v) => (v.trim().length > 0 ? null : 'Ingresá el número de caravana.')}
-                  onConfirm={onAssignIdv}
+              {/* Categoría fijada manualmente (C6 / RC6.4.1): si el override está activo, un indicador
+                  explícito bajo el hero + (si el animal está activo) la acción "Quitar fijación" con
+                  confirmación inline. Para override=false → null (el espejo ya gobierna el display).
+                  Delta spec 02 (RCUT.5.7): un CUT (override=true + isCut=true) NO ofrece esta card genérica
+                  ("Quitar fijación" usa revertCategoryOverride, que NO resetea is_cut → estado inconsistente);
+                  su único desmarcado es "Quitar CUT" (en la sección Manejo). La card SÍ se sigue mostrando para
+                  un override NO-CUT (ej. "vaca comprada" fijada a multípara manual). */}
+              {detail.categoryOverride && !detail.isCut ? (
+                <CategoryOverrideCard
+                  canRevert={canRevertOverride}
+                  onRevert={onRevertOverride}
+                  onPreviewRevert={onPreviewRevert}
                 />
-              ) : (
-                <AttributeRow label="Caravana visual" value="—" />
-              )}
+              ) : null}
 
-              {/* delta IDU (IDU.3.6): la fila "Nombre / seña" (visual_id_alt) se ELIMINÓ del todo. El
-                  Nombre/Apodo es ahora un dato custom opt-in por rodeo → se ve/edita en "Datos personalizados"
-                  (CustomPropertiesFicha) con su warning-soft de duplicado, no acá. */}
-            </DetailSection>
+              {/* Link a la MADRE (R14.7): solo si el animal es un ternero con parto registrado. Tappable
+                  → ficha de la madre. Tolera madre archivada (status ≠ active): indicador + navega igual. */}
+              {mother ? <MotherCard mother={mother} onPress={goToMother} /> : null}
 
-            {/* Datos del animal. */}
-            <DetailSection icon={ClipboardList} title="Datos del animal">
-              <AttributeRow label="Sexo" value={detail.sex === 'male' ? 'Macho' : 'Hembra'} />
-              <AttributeRow label="Nacimiento" value={formatDateEsAr(detail.birthDate)} />
-              <AttributeRow label="Rodeo" value={detail.rodeoName || '—'} />
-              {/* Raza (spec 08, T18): muestra la raza actual + afordancia para editarla (abre el BreedPickerSheet).
-                  Sin raza → CTA "Completar raza para SIGSA". El trigger 0113 deriva breed_id del nombre al subir. */}
-              <BreedRow
-                breed={detail.breed}
-                editable={canEditBreed}
-                onEdit={() => setBreedPickerOpen(true)}
-              />
-              {detail.coatColor ? <AttributeRow label="Pelaje" value={detail.coatColor} /> : null}
-            </DetailSection>
+              {/* Identificación (delta caravana-ficha, RCF.1/RCF.6): por cada identificador (electrónica / visual),
+                  render condicional — valor solo-lectura si está SETEADO (inmutable, R4.13), o la afordancia de
+                  asignación si está VACÍO en un animal ACTIVO (canAssignTag/canAssignIdv). Si está vacío pero el
+                  animal NO está activo, "—" (no se ofrece, RCF.1.5). Para la caravana ELECTRÓNICA vacía la
+                  afordancia ofrece BASTONEAR (scan del EID, RCF.6) ADEMÁS de la carga manual (piso siempre
+                  presente). delta IDU: el 4to campo visual_id_alt se eliminó; el Nombre/Apodo vive en "Datos
+                  personalizados", no acá. */}
+              <DetailSection icon={Tag} title="Identificación">
+                {/* Caravana electrónica → BASTONEAR (RCF.6): única afordancia de la electrónica vacía. Abre el
+                    sheet de scan acotado → lee el EID y lo asigna a ESTE animal. La carga MANUAL por teclado vive
+                    DENTRO del sheet (detrás de "¿Sin bastón? Cargá la caravana a mano") — NO hay carga manual
+                    directa de la electrónica desde la ficha (decisión de UX de Raf, 2026-07-06). */}
+                {detail.tagElectronic != null ? (
+                  <AttributeRow label="Caravana electrónica" value={detail.tagElectronic} />
+                ) : canAssignTag(detail) ? (
+                  <YStack gap="$2">
+                    <Text fontFamily="$body" fontSize="$3" fontWeight="500" color="$textMuted">
+                      Caravana electrónica
+                    </Text>
+                    <TagScanCta onPress={() => setScanOpen(true)} />
+                  </YStack>
+                ) : (
+                  <AttributeRow label="Caravana electrónica" value="—" />
+                )}
 
-            {/* Manejo (spec 10 T-UI.7): Castrado Sí/No + ⭐ Futuro torito — SOLO machos (la castración no
-                aplica a hembras; future_bull es solo-machos). Para hembras esta sección no se renderiza. */}
-            {detail.sex === 'male' ? (
-              <ManagementSection
-                isCastrated={detail.isCastrated}
-                futureBull={detail.futureBull}
-                categoryCode={detail.categoryCode}
-                canEditCastrated={canEditCastrated}
-                canEditFutureBull={canEditFutureBull}
-                onPreviewCastration={onPreviewCastration}
-                onSetCastrated={onSetCastrated}
-                onSetFutureBull={onSetFutureBull}
-              />
-            ) : null}
+                {/* Caravana visual (idv) → UPDATE local sobre animal_profiles (offline-first, patrón CUT).
+                    Corrección #2 (testeo en vivo): label "Caravana visual" (antes "Caravana / IDV"). La
+                    afordancia de asignar idv vacío NO cambia (IdentifierAssignRow kind="idv", CTA "Agregar
+                    caravana visual"); solo cambia el LABEL de la fila. */}
+                {detail.idv != null ? (
+                  <AttributeRow label="Caravana visual" value={detail.idv} />
+                ) : canAssignIdv(detail) ? (
+                  <IdentifierAssignRow
+                    kind="idv"
+                    label="Caravana visual"
+                    placeholder="Ej. AB123A0001"
+                    keyboardType="default"
+                    sanitize={sanitizeIdvInput}
+                    maxLength={IDV_MAX_LENGTH}
+                    validate={(v) => (v.trim().length > 0 ? null : 'Ingresá el número de caravana.')}
+                    onConfirm={onAssignIdv}
+                  />
+                ) : (
+                  <AttributeRow label="Caravana visual" value="—" />
+                )}
 
-            {/* Manejo de HEMBRAS (delta spec 02, RCUT.5): afordancia CUT (descarte). Se ofrece "Marcar como
-                CUT" si la hembra es activa ≠ ternera, no-CUT Y el rodeo habilita `dientes` (canMark); "Quitar
-                CUT" si ya es CUT (canUnmark). Si ninguna aplica, la sección no se renderiza para esa hembra. */}
-            {detail.sex === 'female' && (canMark || canUnmark) ? (
-              <DetailSection icon={Ban} title="Manejo">
-                <CutRow mode={canUnmark ? 'unmark' : 'mark'} onConfirm={canUnmark ? onUnsetCut : onSetCut} />
+                {/* delta IDU (IDU.3.6): la fila "Nombre / seña" (visual_id_alt) se ELIMINÓ del todo. El
+                    Nombre/Apodo es ahora un dato custom opt-in por rodeo → se ve/edita en "Datos personalizados"
+                    (CustomPropertiesFicha) con su warning-soft de duplicado, no acá. */}
               </DetailSection>
-            ) : null}
 
-            {/* Tratamientos (delta spec 02, RTR.9): sección con los tratamientos del animal (en curso primero)
-                + sus aplicaciones (fecha/dosis/vía/próxima dosis). Ofrece iniciar/aplicar/finalizar SOLO en
-                animal activo (RTR.1.8, canManageTreatments). Los sheets de iniciar/aplicar se montan al ROOT
-                (overlay); "finalizar" es inline en la card. Un archivado sin tratamientos → la sección no se
-                renderiza (el componente lo decide). */}
-            <TreatmentsSection
-              treatments={treatments}
-              canManage={canManageTreatments}
-              onOpenStart={() => setStartSheetOpen(true)}
-              onOpenApplication={(t) => setAppSheetTreatment(t)}
-              onFinalize={onFinalizeTreatment}
-            />
+              {/* Datos del animal. */}
+              <DetailSection icon={ClipboardList} title="Datos del animal">
+                <AttributeRow label="Sexo" value={detail.sex === 'male' ? 'Macho' : 'Hembra'} />
+                <AttributeRow label="Nacimiento" value={formatDateEsAr(detail.birthDate)} />
+                <AttributeRow label="Rodeo" value={detail.rodeoName || '—'} />
+                {/* Raza (spec 08, T18): muestra la raza actual + afordancia para editarla (abre el BreedPickerSheet).
+                    Sin raza → CTA "Completar raza para SIGSA". El trigger 0113 deriva breed_id del nombre al subir. */}
+                <BreedRow
+                  breed={detail.breed}
+                  editable={canEditBreed}
+                  onEdit={() => setBreedPickerOpen(true)}
+                />
+                {detail.coatColor ? <AttributeRow label="Pelaje" value={detail.coatColor} /> : null}
+              </DetailSection>
 
-            {/* Lote (ADR-020 / C4): control para asignar / cambiar / quitar el lote. Cualquier rol
-                operativo puede asignar (RLS); el quick-create de un lote nuevo es owner-only. Modo
-                archivada (status ≠ active) → solo lectura (un animal de baja no se reorganiza). */}
-            <LoteControl
-              currentGroupId={detail.managementGroupId}
-              currentGroupName={detail.managementGroupName}
-              groups={groups}
-              editable={canEditLote}
-              canQuickCreate={canQuickCreateLote}
-              onAssign={onAssignLote}
-              onQuickCreate={onQuickCreateLote}
-            />
+              {/* Manejo (spec 10 T-UI.7): Castrado Sí/No + ⭐ Futuro torito — SOLO machos (la castración no
+                  aplica a hembras; future_bull es solo-machos). Para hembras esta sección no se renderiza. */}
+              {detail.sex === 'male' ? (
+                <ManagementSection
+                  isCastrated={detail.isCastrated}
+                  futureBull={detail.futureBull}
+                  categoryCode={detail.categoryCode}
+                  canEditCastrated={canEditCastrated}
+                  canEditFutureBull={canEditFutureBull}
+                  onPreviewCastration={onPreviewCastration}
+                  onSetCastrated={onSetCastrated}
+                  onSetFutureBull={onSetFutureBull}
+                />
+              ) : null}
 
-            {/* Estado actual (fix-loop 2 FIX C): el VALOR VIGENTE de cada medición tipada (peso /
-                condición corporal) = el del último evento de ese tipo. Es un ATRIBUTO del animal,
-                no solo historia. El timeline de abajo sigue siendo la auditoría completa. */}
-            <CurrentStateSection
-              timeline={timeline}
-              sex={detail.sex}
-              categoryCode={detail.categoryCode}
-              reproStatus={detail.reproStatus}
-              reproAptitude={detail.reproAptitude}
-              teethState={detail.teethState}
-            />
+              {/* Manejo de HEMBRAS (delta spec 02, RCUT.5): afordancia CUT (descarte). Se ofrece "Marcar como
+                  CUT" si la hembra es activa ≠ ternera, no-CUT Y el rodeo habilita `dientes` (canMark); "Quitar
+                  CUT" si ya es CUT (canUnmark). Si ninguna aplica, la sección no se renderiza para esa hembra. */}
+              {detail.sex === 'female' && (canMark || canUnmark) ? (
+                <DetailSection icon={Ban} title="Manejo">
+                  <CutRow mode={canUnmark ? 'unmark' : 'mark'} onConfirm={canUnmark ? onUnsetCut : onSetCut} />
+                </DetailSection>
+              ) : null}
 
-            {/* Tarjeta de tendencia de CIRCUNFERENCIA ESCROTAL (spec 03 M6, R14.14): la serie de mediciones
-                (cm + edad + fecha es-AR) + una mini-tendencia. Se muestra SOLO a machos ENTEROS (isBullEntire
-                — paridad con la fila "Estado reproductivo" solo-hembras). `scrotalHistory` queda null para el
-                resto (no se renderiza). Para un macho entero SIN mediciones aún ([]) se muestra un empty cálido. */}
-            {scrotalHistory != null ? <ScrotalTrendSection history={scrotalHistory} /> : null}
+              {/* Tratamientos (delta spec 02, RTR.9): sección con los tratamientos del animal (en curso primero)
+                  + sus aplicaciones (fecha/dosis/vía/próxima dosis). Ofrece iniciar/aplicar/finalizar SOLO en
+                  animal activo (RTR.1.8, canManageTreatments). Los sheets de iniciar/aplicar se montan al ROOT
+                  (overlay); "finalizar" es inline en la card. Un archivado sin tratamientos → la sección no se
+                  renderiza (el componente lo decide). */}
+              <TreatmentsSection
+                treatments={treatments}
+                canManage={canManageTreatments}
+                onOpenStart={() => setStartSheetOpen(true)}
+                onOpenApplication={(t) => setAppSheetTreatment(t)}
+                onFinalize={onFinalizeTreatment}
+              />
 
-            {/* Datos PERSONALIZADOS (R13.10/R13.12): propiedades custom enabled del rodeo + sus current-values
-                (custom_attributes). Editable in-place por cualquier rol (R13.13), salvo modo archivado (solo
-                lectura). Si el rodeo no tiene propiedades custom (ni el animal valores), no renderiza nada. */}
-            <CustomPropertiesFicha
-              profileId={detail.profileId}
-              rodeoId={detail.rodeoId}
-              editable={detail.status === 'active'}
-            />
+              {/* Lote (ADR-020 / C4): control para asignar / cambiar / quitar el lote. Cualquier rol
+                  operativo puede asignar (RLS); el quick-create de un lote nuevo es owner-only. Modo
+                  archivada (status ≠ active) → solo lectura (un animal de baja no se reorganiza). */}
+              <LoteControl
+                currentGroupId={detail.managementGroupId}
+                currentGroupName={detail.managementGroupName}
+                groups={groups}
+                editable={canEditLote}
+                canQuickCreate={canQuickCreateLote}
+                onAssign={onAssignLote}
+                onQuickCreate={onQuickCreateLote}
+              />
 
-            {/* Historial real (C3.1): riel de eventos + CTA "Agregar evento". El CTA se OCULTA en modo
-                archivada (C3.3): un animal dado de baja no recibe eventos nuevos en MVP. Usa el timeline
-                COMPUESTO (server + CE mergeada en cliente, R14.14) → la CE aparece en el riel. */}
-            <HistorySection
-              timeline={composedTimeline}
-              error={timelineError}
-              onAddEvent={goToAddEvent}
-              onRetry={() => void load()}
-              archived={detail.status !== 'active'}
-              canDeleteEvent={canDeleteEvent}
-              onDeleteEvent={onDeleteEvent}
-            />
+              {/* Estado actual (fix-loop 2 FIX C): el VALOR VIGENTE de cada medición tipada (peso /
+                  condición corporal) = el del último evento de ese tipo. Es un ATRIBUTO del animal,
+                  no solo historia. El timeline de abajo sigue siendo la auditoría completa. */}
+              <CurrentStateSection
+                timeline={timeline}
+                sex={detail.sex}
+                categoryCode={detail.categoryCode}
+                reproStatus={detail.reproStatus}
+                reproAptitude={detail.reproAptitude}
+                teethState={detail.teethState}
+              />
 
-            {/* "Dar de baja" (C3.3, R4.14): al FONDO de la ficha, discreto (terracota/outline), gated:
-                solo activo + (owner del campo o autor del alta). El RPC es la barrera real (42501). */}
-            {canExit ? <ExitButton onPress={goToBaja} /> : null}
-          </>
-        ) : null}
-      </ScrollView>
+              {/* Tarjeta de tendencia de CIRCUNFERENCIA ESCROTAL (spec 03 M6, R14.14): la serie de mediciones
+                  (cm + edad + fecha es-AR) + una mini-tendencia. Se muestra SOLO a machos ENTEROS (isBullEntire
+                  — paridad con la fila "Estado reproductivo" solo-hembras). `scrotalHistory` queda null para el
+                  resto (no se renderiza). Para un macho entero SIN mediciones aún ([]) se muestra un empty cálido. */}
+              {scrotalHistory != null ? <ScrotalTrendSection history={scrotalHistory} /> : null}
+
+              {/* Datos PERSONALIZADOS (R13.10/R13.12): propiedades custom enabled del rodeo + sus current-values
+                  (custom_attributes). Editable in-place por cualquier rol (R13.13), salvo modo archivado (solo
+                  lectura). Si el rodeo no tiene propiedades custom (ni el animal valores), no renderiza nada. */}
+              <CustomPropertiesFicha
+                profileId={detail.profileId}
+                rodeoId={detail.rodeoId}
+                editable={detail.status === 'active'}
+              />
+
+              {/* Historial real (C3.1): riel de eventos + CTA "Agregar evento". El CTA se OCULTA en modo
+                  archivada (C3.3): un animal dado de baja no recibe eventos nuevos en MVP. Usa el timeline
+                  COMPUESTO (server + CE mergeada en cliente, R14.14) → la CE aparece en el riel. */}
+              <HistorySection
+                timeline={composedTimeline}
+                error={timelineError}
+                onAddEvent={goToAddEvent}
+                onRetry={() => void load()}
+                archived={detail.status !== 'active'}
+                canDeleteEvent={canDeleteEvent}
+                onDeleteEvent={onDeleteEvent}
+              />
+
+              {/* "Dar de baja" (C3.3, R4.14): al FONDO de la ficha, discreto (terracota/outline), gated:
+                  solo activo + (owner del campo o autor del alta). El RPC es la barrera real (42501). */}
+              {canExit ? <ExitButton onPress={goToBaja} /> : null}
+            </>
+          ) : null}
+        </ScrollView>
+      </KeyboardAvoidingShell>
 
       {/* BreedPickerSheet (spec 08, T18): overlay para editar la raza (completar breed_id → exportable a SIGSA).
           Montado al ROOT (cubre toda la pantalla con su scrim). Solo si el animal cargó y es editable. Setea

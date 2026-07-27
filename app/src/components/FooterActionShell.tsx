@@ -27,10 +27,9 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { getTokenValue, ScrollView, View, YStack, type ColorTokens } from 'tamagui';
 import { ChevronDown } from 'lucide-react-native';
 
-import { useKeyboardVisible } from '../hooks/useKeyboardVisible';
-import { useSafeBottomInset } from '../hooks/useSafeBottomInset';
+import { useKeyboardAwareBottomInset } from '../hooks/useSafeBottomInset';
 import { KeyboardAvoidingShell } from './KeyboardAvoidingShell';
-import { resolveFooterPaddingBottom, shouldShowScrollPeek } from '../utils/footer-action';
+import { shouldShowScrollPeek } from '../utils/footer-action';
 
 /** El tipo EXACTO del 1er arg de getTokenValue (token de la escala) — evita el `string` genérico. */
 type TamaguiToken = Parameters<typeof getTokenValue>[0];
@@ -134,15 +133,10 @@ function FooterBar({
   bordered: boolean;
   testID?: string;
 }) {
-  const keyboardVisible = useKeyboardVisible();
-  // Reserva inferior canónica con el teclado CERRADO, vía el hook compartido de la app (una sola
-  // fórmula, ver hooks/useSafeBottomInset).
-  const safeInset = useSafeBottomInset();
-  const paddingBottom = resolveFooterPaddingBottom({
-    keyboardVisible,
-    safeInset,
-    keyboardOpenGap: getTokenValue('$2', 'space'),
-  });
+  // Reserva inferior keyboard-aware, vía el hook compartido de la app (una sola fórmula, ver
+  // hooks/useSafeBottomInset): teclado cerrado → la canónica; teclado abierto → solo el respiro de `$2`
+  // (la safe-area la tapa el teclado, y el lift entero ya lo puso el `KeyboardAvoidingShell` de arriba).
+  const paddingBottom = useKeyboardAwareBottomInset();
   return (
     <YStack
       testID={testID ? `${testID}-footer` : 'footer-action'}

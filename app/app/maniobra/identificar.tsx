@@ -35,7 +35,8 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { getTokenValue, Text, View, XStack, YStack } from 'tamagui';
 import { ArrowRightLeft, Bluetooth, Check, Keyboard, PlusCircle } from 'lucide-react-native';
 
-import { useSafeBottomInset } from '@/hooks/useSafeBottomInset';
+import { useKeyboardAwareBottomInset } from '@/hooks/useSafeBottomInset';
+import { KeyboardAvoidingShell } from '@/components/KeyboardAvoidingShell';
 import { StickIcon } from '@/theme/icons';
 import { Button } from '@/components';
 import { useHardwareBack } from '@/hooks';
@@ -93,6 +94,10 @@ import { SugerenciaVaciasSheet } from './_components/SugerenciaVaciasSheet';
 
 // Tiempo del flash de confirmación antes de auto-avanzar a la carga rápida (decisión de Raf: ~0,8s).
 const AUTO_ADVANCE_MS = 800;
+
+// Estilo del contenedor del `KeyboardAvoidingShell` (API no-Tamagui). `flex` no es spacing/color → no
+// aplica el lint anti-hardcode. Mismo idiom que `FooterActionShell` / `maniobra/carga`.
+const fillStyle = { flex: 1 } as const;
 
 type ManualState = 'collapsed' | 'expanded';
 
@@ -556,7 +561,10 @@ export default function ManiobraIdentificar() {
     : '';
   const progreso = session ? `${session.animalCount} hoy` : '0 hoy';
 
-  const bottomPad = useSafeBottomInset();
+  // Reserva inferior de la banda de entrada manual (y de los CTAs de los heroes de outcome), KEYBOARD-AWARE:
+  // con el teclado abierto el `KeyboardAvoidingShell` de abajo ya subió la columna el alto ENTERO del
+  // teclado, así que la safe-area del SO queda tapada y reservarla otra vez dejaría ~64dp de hueco muerto.
+  const bottomPad = useKeyboardAwareBottomInset();
 
   // R4.7: el banner de "rodeo de jornada mal elegido" se muestra cuando la heurística dispara Y no hay un
   // sheet modal de R4.2/R4.4 arriba (no apilamos un aviso no-bloqueante bajo un modal). No-bloqueante.
@@ -565,90 +573,100 @@ export default function ManiobraIdentificar() {
 
   return (
     <YStack flex={1} backgroundColor="$bg" paddingTop={insets.top}>
-      {/* ── 1) HEADER DE SESIÓN SLIM (estado de la jornada, Nielsen #1) + chip de conexión (R3.6/R3.7) ──
+      {/* ── TECLADO (unidad «barrida de teclado») ────────────────────────────────────────────────────
+            La COLUMNA de la pantalla (header + hero + banda inferior) va dentro del primitivo: al enfocar
+            el input de la entrada manual, el hero `flex:1` absorbe el alto del teclado y la banda queda
+            justo por encima. Sin esto el teclado tapaba la banda entera — el mismo bug 🔴 que Raf ya vio
+            en el sheet de Vacunación, acá por AUSENCIA de mecanismo (esta pantalla nunca montó ninguno).
+            ⚠️ Los sheets de abajo quedan FUERA del shell, como HERMANOS: son overlays `inset:0` y cada uno
+            trae su propio shell → anidarlos descontaría el teclado dos veces (precondición de adopción
+            declarada en el header de `KeyboardAvoidingShell`). ── */}
+      <KeyboardAvoidingShell style={fillStyle}>
+        {/* ── 1) HEADER DE SESIÓN SLIM (estado de la jornada, Nielsen #1) + chip de conexión (R3.6/R3.7) ──
             El botón ‹ NO navega atrás directo: abre el ExitJornadaSheet (cierre de jornada, R10.7). ── */}
-      <SpikeSessionHeader
-        rodeo={rodeoName}
-        maniobrasLabel={maniobrasLabel}
-        progreso={progreso}
-        onBack={openExitSheet}
-        right={<BleConnectionChip />}
-      />
+        <SpikeSessionHeader
+          rodeo={rodeoName}
+          maniobrasLabel={maniobrasLabel}
+          progreso={progreso}
+          onBack={openExitSheet}
+          right={<BleConnectionChip />}
+        />
 
-      {/* ── R4.7) AVISO NO-BLOQUEANTE de rodeo de jornada mal elegido (banner anclado, dismissable). ── */}
-      {showRodeoWarning && streak.streakRodeoName ? (
-        <RodeoMismatchBanner
-          rodeoName={streak.streakRodeoName}
-          count={streak.streakCount}
-          onChangeRodeo={() => void onConfirmStreakRodeo()}
-          onDismiss={() => setStreak((prev) => dismissStreak(prev))}
-        />
-      ) : null}
+        {/* ── R4.7) AVISO NO-BLOQUEANTE de rodeo de jornada mal elegido (banner anclado, dismissable). ── */}
+        {showRodeoWarning && streak.streakRodeoName ? (
+          <RodeoMismatchBanner
+            rodeoName={streak.streakRodeoName}
+            count={streak.streakCount}
+            onChangeRodeo={() => void onConfirmStreakRodeo()}
+            onDismiss={() => setStreak((prev) => dismissStreak(prev))}
+          />
+        ) : null}
 
-      {/* ── 2) HERO (dominante) — cambia por outcome: escuchando / encontrado / desconocido / otro campo /
-            ambiguo. El estado "escuchando" (outcome===null) es ADAPTATIVO por conexión (R3.6/R3.7):
-              - CONECTADO → ScanHero ("Acercá el bastón"): el escaneo es la tarea, el manual es banda 2ª.
-              - DESCONECTADO + CONECTABLE → ConnectHero: el disco es un BOTÓN que conecta (web/bastón caído).
-              - DESCONECTADO + NO CONECTABLE → manual PROMOVIDO: sin disco, el input es la tarea primaria.
-            Con el manual EXPANDIDO el hero de escaneo/conexión se ATENÚA (compact): el bastón sigue
-            escuchando (R3.6) pero el input es la tarea activa → no compiten dos heroes de igual peso.
-            Las ramas de outcome (found/unknown/other/ambiguous) quedan IGUAL. ── */}
-      {outcome?.kind === 'found' ? (
-        <FoundHero identifier={outcome.identifier} />
-      ) : outcome?.kind === 'unknown' ? (
-        <UnknownHero
-          identifier={outcome.identifier}
-          source={outcome.source}
-          rodeoName={rodeoName}
-          bottomPad={bottomPad}
-          onDarDeAlta={onDarDeAlta}
-          onCancel={backToListening}
-        />
-      ) : outcome?.kind === 'other_establishment' ? (
-        <OtherFieldHero
-          otherFieldName={outcome.otherFieldName}
-          bottomPad={bottomPad}
-          onSkip={backToListening}
-        />
-      ) : outcome?.kind === 'ambiguous' ? (
-        // R4.2: la pantalla sigue "escuchando" de fondo; el picker de candidatos se monta como sheet encima.
-        // El fondo refleja el sub-estado de conexión real (conectado=scan / conectable=connect / manual).
-        listenConn === 'connected' ? (
-          <ScanHero compact connected />
+        {/* ── 2) HERO (dominante) — cambia por outcome: escuchando / encontrado / desconocido / otro campo /
+              ambiguo. El estado "escuchando" (outcome===null) es ADAPTATIVO por conexión (R3.6/R3.7):
+                - CONECTADO → ScanHero ("Acercá el bastón"): el escaneo es la tarea, el manual es banda 2ª.
+                - DESCONECTADO + CONECTABLE → ConnectHero: el disco es un BOTÓN que conecta (web/bastón caído).
+                - DESCONECTADO + NO CONECTABLE → manual PROMOVIDO: sin disco, el input es la tarea primaria.
+              Con el manual EXPANDIDO el hero de escaneo/conexión se ATENÚA (compact): el bastón sigue
+              escuchando (R3.6) pero el input es la tarea activa → no compiten dos heroes de igual peso.
+              Las ramas de outcome (found/unknown/other/ambiguous) quedan IGUAL. ── */}
+        {outcome?.kind === 'found' ? (
+          <FoundHero identifier={outcome.identifier} />
+        ) : outcome?.kind === 'unknown' ? (
+          <UnknownHero
+            identifier={outcome.identifier}
+            source={outcome.source}
+            rodeoName={rodeoName}
+            bottomPad={bottomPad}
+            onDarDeAlta={onDarDeAlta}
+            onCancel={backToListening}
+          />
+        ) : outcome?.kind === 'other_establishment' ? (
+          <OtherFieldHero
+            otherFieldName={outcome.otherFieldName}
+            bottomPad={bottomPad}
+            onSkip={backToListening}
+          />
+        ) : outcome?.kind === 'ambiguous' ? (
+          // R4.2: la pantalla sigue "escuchando" de fondo; el picker de candidatos se monta como sheet encima.
+          // El fondo refleja el sub-estado de conexión real (conectado=scan / conectable=connect / manual).
+          listenConn === 'connected' ? (
+            <ScanHero compact connected />
+          ) : listenConn === 'connectable' ? (
+            <ConnectHero compact onConnect={connectStick} />
+          ) : (
+            <ManualPromptHero compact />
+          )
+        ) : listenConn === 'connected' ? (
+          // CONECTADO → ScanHero (sin cambios). Se atenúa con el manual expandido.
+          <ScanHero compact={manual === 'expanded'} connected />
         ) : listenConn === 'connectable' ? (
-          <ConnectHero compact onConnect={connectStick} />
+          // DESCONECTADO pero CONECTABLE (web antes de elegir puerto / bastón caído) → ConnectHero: el disco
+          // es un botón que dispara connect() con el gesto del tap (web-serial lo exige). Mismo tamaño/posición
+          // que ScanHero (Jakob, sin salto de layout). Se atenúa con el manual expandido.
+          <ConnectHero compact={manual === 'expanded'} onConnect={connectStick} />
         ) : (
-          <ManualPromptHero compact />
-        )
-      ) : listenConn === 'connected' ? (
-        // CONECTADO → ScanHero (sin cambios). Se atenúa con el manual expandido.
-        <ScanHero compact={manual === 'expanded'} connected />
-      ) : listenConn === 'connectable' ? (
-        // DESCONECTADO pero CONECTABLE (web antes de elegir puerto / bastón caído) → ConnectHero: el disco
-        // es un botón que dispara connect() con el gesto del tap (web-serial lo exige). Mismo tamaño/posición
-        // que ScanHero (Jakob, sin salto de layout). Se atenúa con el manual expandido.
-        <ConnectHero compact={manual === 'expanded'} onConnect={connectStick} />
-      ) : (
-        // DESCONECTADO y NO CONECTABLE (native manual-first hoy) → MANUAL PROMOVIDO: sin disco, el input es
-        // la tarea primaria. Tono NEUTRO (es lo normal en ese dispositivo, no un error).
-        <ManualPromptHero compact={manual === 'expanded'} />
-      )}
+          // DESCONECTADO y NO CONECTABLE (native manual-first hoy) → MANUAL PROMOVIDO: sin disco, el input es
+          // la tarea primaria. Tono NEUTRO (es lo normal en ese dispositivo, no un error).
+          <ManualPromptHero compact={manual === 'expanded'} />
+        )}
 
-      {/* ── 3) BANDA INFERIOR — entrada manual (thumb zone, R3.5). Solo en escucha (sin outcome): cuando
-            hay un outcome, el hero trae su propia acción (Dar de alta / Saltar / Volver). Cuando NO hay
-            transporte conectable (manual-first), el manual va PROMOVIDO = expandido por default (la entrada
-            manual es la tarea primaria) y sin el "Cancelar→volver al escaneo" (no hay nada que escanear). ── */}
-      {outcome === null ? (
-        <ManualEntry
-          expanded={manualPromoted || manual === 'expanded'}
-          promoted={manualPromoted}
-          searching={searching}
-          bottomPad={bottomPad}
-          onExpand={() => setManual('expanded')}
-          onCollapse={() => setManual('collapsed')}
-          onSearch={onManualSearch}
-        />
-      ) : null}
+        {/* ── 3) BANDA INFERIOR — entrada manual (thumb zone, R3.5). Solo en escucha (sin outcome): cuando
+              hay un outcome, el hero trae su propia acción (Dar de alta / Saltar / Volver). Cuando NO hay
+              transporte conectable (manual-first), el manual va PROMOVIDO = expandido por default (la entrada
+              manual es la tarea primaria) y sin el "Cancelar→volver al escaneo" (no hay nada que escanear). ── */}
+        {outcome === null ? (
+          <ManualEntry
+            expanded={manualPromoted || manual === 'expanded'}
+            promoted={manualPromoted}
+            searching={searching}
+            bottomPad={bottomPad}
+            onExpand={() => setManual('expanded')}
+            onCollapse={() => setManual('collapsed')}
+            onSearch={onManualSearch}
+          />
+        ) : null}
+      </KeyboardAvoidingShell>
 
       {/* ── R4.2) PICKER de candidatos (sheet encima): manual con >1 candidato (caravana visual duplicada).
             Elegir uno → cargar; ninguno → dar de alta. NO se auto-elige el equivocado. ── */}

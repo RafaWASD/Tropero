@@ -37,7 +37,8 @@ import {
   type BulkProgressPhase,
   type BulkProgressRejection,
 } from '@/components';
-import { useSafeBottomInset } from '@/hooks/useSafeBottomInset';
+import { useKeyboardAwareBottomInset } from '@/hooks/useSafeBottomInset';
+import { KeyboardAvoidingShell } from '@/components/KeyboardAvoidingShell';
 import { useEstablishment } from '@/contexts';
 import {
   fetchGroupSelectionProfiles,
@@ -63,13 +64,19 @@ function todayISO(): string {
 /** Tope de caracteres del nombre del producto (defensivo; product_name es text en DB). */
 const PRODUCT_NAME_MAX = 80;
 
+// Estilo del `KeyboardAvoidingShell` (API no-Tamagui). `flex` no es spacing/color → no aplica el lint
+// anti-hardcode (ADR-023 §4).
+const fillStyle = { flex: 1 } as const;
+
 export default function VacunacionMasivaScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   // Reserva inferior de la barra de acción de selección masiva: la canónica del hook compartido + el
   // respiro propio ($3) que esta barra ya sumaba sobre el inset. Web 13 · iOS 47 (= baseline) · Android
   // 3 botones 77. Esta unidad agrega aire, nunca lo saca.
-  const bottomPad = useSafeBottomInset({ extra: getTokenValue('$3', 'space') });
+  // KEYBOARD-AWARE: el footer del CTA vive dentro del `KeyboardAvoidingShell`, que ya descuenta el alto
+  // entero del teclado → con el teclado arriba la reserva se encoge al respiro de `$2` (sin hueco muerto).
+  const bottomPad = useKeyboardAwareBottomInset({ extra: getTokenValue('$3', 'space') });
   const params = useLocalSearchParams<{ groupType?: string; groupId?: string }>();
   const groupType = params.groupType === 'lote' ? 'lote' : 'rodeo';
   const groupId = typeof params.groupId === 'string' ? params.groupId : null;
@@ -272,120 +279,125 @@ export default function VacunacionMasivaScreen() {
 
   return (
     <YStack flex={1} width="100%" backgroundColor="$bg">
-      {/* Header: back + título. */}
-      <YStack width="100%" paddingTop={insets.top} paddingHorizontal="$4">
-        <XStack width="100%" alignItems="center" gap="$2" paddingVertical="$3">
-          <Pressable
-            hitSlop={8}
-            onPress={() => backOr(router, groupBackPath(groupType))}
-            {...buttonA11y(Platform.OS, { label: 'Volver' })}
-          >
-            <ChevronLeft size={28} color={muted} strokeWidth={2} />
-          </Pressable>
-          <Text fontFamily="$body" fontSize="$8" lineHeight="$8" fontWeight="700" color="$textPrimary">
-            Vacunar
-          </Text>
-        </XStack>
-      </YStack>
-
-      {loadError ? (
-        <YStack flex={1} paddingHorizontal="$4">
-          <FormError message={loadError} />
+      {/* TECLADO (unidad «barrida de teclado»): al enfocar "Producto"/"Fecha", el teclado tapaba el
+          preview y el CTA "Vacunar N animales" del footer. Dentro del primitivo la columna se achica
+          desde abajo y el footer queda por encima del teclado. */}
+      <KeyboardAvoidingShell style={fillStyle}>
+        {/* Header: back + título. */}
+        <YStack width="100%" paddingTop={insets.top} paddingHorizontal="$4">
+          <XStack width="100%" alignItems="center" gap="$2" paddingVertical="$3">
+            <Pressable
+              hitSlop={8}
+              onPress={() => backOr(router, groupBackPath(groupType))}
+              {...buttonA11y(Platform.OS, { label: 'Volver' })}
+            >
+              <ChevronLeft size={28} color={muted} strokeWidth={2} />
+            </Pressable>
+            <Text fontFamily="$body" fontSize="$8" lineHeight="$8" fontWeight="700" color="$textPrimary">
+              Vacunar
+            </Text>
+          </XStack>
         </YStack>
-      ) : loading ? (
-        <YStack flex={1} paddingHorizontal="$4">
-          <InfoNote>Cargando animales…</InfoNote>
-        </YStack>
-      ) : profiles.length === 0 ? (
-        <YStack flex={1} paddingHorizontal="$4" paddingTop="$4">
-          <InfoNote>Este grupo todavía no tiene animales activos para vacunar.</InfoNote>
-        </YStack>
-      ) : (
-        <>
-          <ScrollView
-            flex={1}
-            width="100%"
-            contentContainerStyle={{
-              paddingHorizontal: getTokenValue('$4', 'space'),
-              paddingBottom: getTokenValue('$10', 'space'),
-              gap: getTokenValue('$4', 'space'),
-            }}
-            keyboardShouldPersistTaps="handled"
-          >
-            {/* Pre-config: SOLO producto (obligatorio). La vía se eliminó (el producto la implica). */}
-            <Card gap="$3">
-              <FormField
-                label="Producto"
-                value={productName}
-                onChangeText={(t) => {
-                  setProductName(t);
-                  if (!productTouched) setProductTouched(true);
-                }}
-                placeholder="Ej. Mancha-gangrena"
-                autoCapitalize="sentences"
-                error={productError}
-                maxLength={PRODUCT_NAME_MAX}
-              />
-            </Card>
 
-            {/* Filtro OPCIONAL por categoría y/o sexo (R4.1). Default = todos (sin filtro). */}
-            <YStack width="100%" gap="$2">
-              <Text fontFamily="$body" fontSize="$5" fontWeight="600" color="$textPrimary">
-                Filtrar (opcional)
-              </Text>
-              <Text fontFamily="$body" fontSize="$3" fontWeight="400" color="$textMuted">
-                Sin filtro se vacuna a todo el grupo. Tocá una categoría o sexo para acotar.
-              </Text>
-
-              {categoryOptions.length > 1 ? (
-                <FilterChipRow>
-                  {categoryOptions.map((opt) => (
-                    <FilterChip
-                      key={opt.code}
-                      label={`${opt.name} (${opt.count})`}
-                      selected={categoryFilter.has(opt.code)}
-                      onPress={() => toggleCategory(opt.code)}
-                    />
-                  ))}
-                </FilterChipRow>
-              ) : null}
-
-              {showSexFilter ? (
-                <FilterChipRow>
-                  <FilterChip
-                    label="Machos"
-                    selected={sexFilter === 'male'}
-                    onPress={() => toggleSex('male')}
-                  />
-                  <FilterChip
-                    label="Hembras"
-                    selected={sexFilter === 'female'}
-                    onPress={() => toggleSex('female')}
-                  />
-                </FilterChipRow>
-              ) : null}
-            </YStack>
-
-            {/* Preview obligatorio (R4.2) + skip-and-report (R4.3). */}
-            <PreviewCard preview={preview} previewing={previewing} />
-          </ScrollView>
-
-          {/* CTA fijo abajo (thumb-zone): confirmación EXPLÍCITA. Disabled sin producto o sin animales. */}
-          <YStack
-            width="100%"
-            paddingHorizontal="$4"
-            paddingTop="$3"
-            paddingBottom={bottomPad}
-            backgroundColor="$bg"
-            borderTopWidth={1}
-            borderTopColor="$divider"
-          >
-            <Button variant="primary" fullWidth disabled={!canApply} onPress={() => void onConfirm()}>
-              {ctaLabel(preview)}
-            </Button>
+        {loadError ? (
+          <YStack flex={1} paddingHorizontal="$4">
+            <FormError message={loadError} />
           </YStack>
-        </>
-      )}
+        ) : loading ? (
+          <YStack flex={1} paddingHorizontal="$4">
+            <InfoNote>Cargando animales…</InfoNote>
+          </YStack>
+        ) : profiles.length === 0 ? (
+          <YStack flex={1} paddingHorizontal="$4" paddingTop="$4">
+            <InfoNote>Este grupo todavía no tiene animales activos para vacunar.</InfoNote>
+          </YStack>
+        ) : (
+          <>
+            <ScrollView
+              flex={1}
+              width="100%"
+              contentContainerStyle={{
+                paddingHorizontal: getTokenValue('$4', 'space'),
+                paddingBottom: getTokenValue('$10', 'space'),
+                gap: getTokenValue('$4', 'space'),
+              }}
+              keyboardShouldPersistTaps="handled"
+            >
+              {/* Pre-config: SOLO producto (obligatorio). La vía se eliminó (el producto la implica). */}
+              <Card gap="$3">
+                <FormField
+                  label="Producto"
+                  value={productName}
+                  onChangeText={(t) => {
+                    setProductName(t);
+                    if (!productTouched) setProductTouched(true);
+                  }}
+                  placeholder="Ej. Mancha-gangrena"
+                  autoCapitalize="sentences"
+                  error={productError}
+                  maxLength={PRODUCT_NAME_MAX}
+                />
+              </Card>
+
+              {/* Filtro OPCIONAL por categoría y/o sexo (R4.1). Default = todos (sin filtro). */}
+              <YStack width="100%" gap="$2">
+                <Text fontFamily="$body" fontSize="$5" fontWeight="600" color="$textPrimary">
+                  Filtrar (opcional)
+                </Text>
+                <Text fontFamily="$body" fontSize="$3" fontWeight="400" color="$textMuted">
+                  Sin filtro se vacuna a todo el grupo. Tocá una categoría o sexo para acotar.
+                </Text>
+
+                {categoryOptions.length > 1 ? (
+                  <FilterChipRow>
+                    {categoryOptions.map((opt) => (
+                      <FilterChip
+                        key={opt.code}
+                        label={`${opt.name} (${opt.count})`}
+                        selected={categoryFilter.has(opt.code)}
+                        onPress={() => toggleCategory(opt.code)}
+                      />
+                    ))}
+                  </FilterChipRow>
+                ) : null}
+
+                {showSexFilter ? (
+                  <FilterChipRow>
+                    <FilterChip
+                      label="Machos"
+                      selected={sexFilter === 'male'}
+                      onPress={() => toggleSex('male')}
+                    />
+                    <FilterChip
+                      label="Hembras"
+                      selected={sexFilter === 'female'}
+                      onPress={() => toggleSex('female')}
+                    />
+                  </FilterChipRow>
+                ) : null}
+              </YStack>
+
+              {/* Preview obligatorio (R4.2) + skip-and-report (R4.3). */}
+              <PreviewCard preview={preview} previewing={previewing} />
+            </ScrollView>
+
+            {/* CTA fijo abajo (thumb-zone): confirmación EXPLÍCITA. Disabled sin producto o sin animales. */}
+            <YStack
+              width="100%"
+              paddingHorizontal="$4"
+              paddingTop="$3"
+              paddingBottom={bottomPad}
+              backgroundColor="$bg"
+              borderTopWidth={1}
+              borderTopColor="$divider"
+            >
+              <Button variant="primary" fullWidth disabled={!canApply} onPress={() => void onConfirm()}>
+                {ctaLabel(preview)}
+              </Button>
+            </YStack>
+          </>
+        )}
+      </KeyboardAvoidingShell>
     </YStack>
   );
 }

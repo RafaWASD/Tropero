@@ -32,6 +32,7 @@ import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
 import { Link2, Plus, Search } from 'lucide-react-native';
 
 import { EstablishmentCard } from '@/components';
+import { KeyboardAvoidingShell } from '@/components/KeyboardAvoidingShell';
 import { useEstablishment } from '@/contexts';
 import { localityOf, sortMyEstablishments } from '@/utils/establishment';
 import { buttonA11y } from '@/utils/a11y';
@@ -40,6 +41,10 @@ import type { MembershipEstablishment } from '@/services/establishments';
 // Umbral de campos a partir del cual aparece el searchbar (R6.6.1: ">~8 campos").
 // Heurística para el caso del veterinario (canal de adquisición), que puede acumular
 // del orden de 20 campos; el dueño de pocos campos no ve el search bar.
+// Estilo del `KeyboardAvoidingShell` (API no-Tamagui). `flex` no es spacing/color → no aplica el lint
+// anti-hardcode (ADR-023 §4).
+const fillStyle = { flex: 1 } as const;
+
 const SEARCH_THRESHOLD = 8;
 
 // ─── Sub-componentes ──────────────────────────────────────────────────────────
@@ -188,84 +193,89 @@ export default function MisCamposScreen() {
 
   return (
     <YStack flex={1} width="100%" maxWidth="100%" overflow="hidden" backgroundColor="$bg">
-      {/* Header: safe-area arriba + título "Mis campos" + CTA "Crear campo". */}
-      <YStack width="100%" paddingTop={insets.top} paddingHorizontal="$4">
-        <XStack
-          width="100%"
-          alignItems="center"
-          justifyContent="space-between"
-          paddingVertical="$3"
-        >
-          <Text fontFamily="$body" fontSize="$8" lineHeight="$8" fontWeight="700" color="$textPrimary">
-            Mis campos
-          </Text>
-          <CreateFieldButton onPress={() => router.push('/crear-campo')} />
-        </XStack>
-
-        {/* Searchbar STICKY (R6.6.1): fuera del ScrollView, queda arriba al scrollear. */}
-        {showSearch ? (
-          <YStack width="100%" paddingBottom="$3">
-            <SearchBar value={query} onChangeText={setQuery} />
-          </YStack>
-        ) : null}
-      </YStack>
-
-      <ScrollView
-        flex={1}
-        width="100%"
-        maxWidth="100%"
-        contentContainerStyle={{
-          paddingHorizontal: getTokenValue('$4', 'space'),
-          paddingBottom: getTokenValue('$8', 'space'),
-          width: '100%',
-          maxWidth: '100%',
-        }}
-        keyboardShouldPersistTaps="handled"
-        showsHorizontalScrollIndicator={false}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* Lista de cards. */}
-        <YStack width="100%" gap="$4" marginTop="$2">
-          {visible.map((est) => (
-            <EstablishmentCard
-              key={est.id}
-              name={est.name}
-              role={est.role}
-              locality={localityOf(est)}
-              isActive={est.id === activeId}
-              // STATS = BACKLOG (sin rollup): contadores en 0 + métrica hero 'empty' (CTA
-              // "Configurá tu rodeo"). No inventamos números. Ver design.md §rollup.
-              animalCount={0}
-              rodeoCount={0}
-              heroMetric={{ kind: 'empty' }}
-              onPress={() => void onSelect(est.id)}
-            />
-          ))}
-
-          {/* Sin campos (defensa): no debería pasar acá (0 campos → onboarding), pero si
-              el filtro de búsqueda no matchea, mostramos un mensaje legible. */}
-          {showSearch && visible.length === 0 ? (
-            <Text
-              fontFamily="$body"
-              fontSize="$4"
-              fontWeight="400"
-              color="$textMuted"
-              textAlign="center"
-              marginTop="$4"
-            >
-              No hay campos que coincidan con “{query.trim()}”.
+      {/* TECLADO (unidad «barrida de teclado»): el buscador está ARRIBA y nunca se tapa — lo que el teclado
+          tapaba eran los RESULTADOS. Con la columna adentro del primitivo, el contenedor se achica desde abajo
+          y la lista termina justo por encima del teclado (en vez de seguir detrás). */}
+      <KeyboardAvoidingShell style={fillStyle}>
+        {/* Header: safe-area arriba + título "Mis campos" + CTA "Crear campo". */}
+        <YStack width="100%" paddingTop={insets.top} paddingHorizontal="$4">
+          <XStack
+            width="100%"
+            alignItems="center"
+            justifyContent="space-between"
+            paddingVertical="$3"
+          >
+            <Text fontFamily="$body" fontSize="$8" lineHeight="$8" fontWeight="700" color="$textPrimary">
+              Mis campos
             </Text>
+            <CreateFieldButton onPress={() => router.push('/crear-campo')} />
+          </XStack>
+
+          {/* Searchbar STICKY (R6.6.1): fuera del ScrollView, queda arriba al scrollear. */}
+          {showSearch ? (
+            <YStack width="100%" paddingBottom="$3">
+              <SearchBar value={query} onChangeText={setQuery} />
+            </YStack>
           ) : null}
         </YStack>
 
-        {/* CTA secundario "pegar link de invitación" (R6.5/R6.6) → /invite (Fase 5, T5.4). Se
-            oculta mientras se busca (no aporta al triage de búsqueda). */}
-        {query.trim().length === 0 ? (
-          <YStack width="100%" marginTop="$4" gap="$2">
-            <PasteInviteLink onPress={() => router.push('/invite')} />
+        <ScrollView
+          flex={1}
+          width="100%"
+          maxWidth="100%"
+          contentContainerStyle={{
+            paddingHorizontal: getTokenValue('$4', 'space'),
+            paddingBottom: getTokenValue('$8', 'space'),
+            width: '100%',
+            maxWidth: '100%',
+          }}
+          keyboardShouldPersistTaps="handled"
+          showsHorizontalScrollIndicator={false}
+          showsVerticalScrollIndicator={false}
+        >
+          {/* Lista de cards. */}
+          <YStack width="100%" gap="$4" marginTop="$2">
+            {visible.map((est) => (
+              <EstablishmentCard
+                key={est.id}
+                name={est.name}
+                role={est.role}
+                locality={localityOf(est)}
+                isActive={est.id === activeId}
+                // STATS = BACKLOG (sin rollup): contadores en 0 + métrica hero 'empty' (CTA
+                // "Configurá tu rodeo"). No inventamos números. Ver design.md §rollup.
+                animalCount={0}
+                rodeoCount={0}
+                heroMetric={{ kind: 'empty' }}
+                onPress={() => void onSelect(est.id)}
+              />
+            ))}
+
+            {/* Sin campos (defensa): no debería pasar acá (0 campos → onboarding), pero si
+                el filtro de búsqueda no matchea, mostramos un mensaje legible. */}
+            {showSearch && visible.length === 0 ? (
+              <Text
+                fontFamily="$body"
+                fontSize="$4"
+                fontWeight="400"
+                color="$textMuted"
+                textAlign="center"
+                marginTop="$4"
+              >
+                No hay campos que coincidan con “{query.trim()}”.
+              </Text>
+            ) : null}
           </YStack>
-        ) : null}
-      </ScrollView>
+
+          {/* CTA secundario "pegar link de invitación" (R6.5/R6.6) → /invite (Fase 5, T5.4). Se
+              oculta mientras se busca (no aporta al triage de búsqueda). */}
+          {query.trim().length === 0 ? (
+            <YStack width="100%" marginTop="$4" gap="$2">
+              <PasteInviteLink onPress={() => router.push('/invite')} />
+            </YStack>
+          ) : null}
+        </ScrollView>
+      </KeyboardAvoidingShell>
     </YStack>
   );
 }

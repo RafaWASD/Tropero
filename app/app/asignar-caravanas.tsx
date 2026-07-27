@@ -43,7 +43,8 @@ import { useRouter } from 'expo-router';
 import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
 import { ChevronLeft, ChevronRight, Radio, Search, Tag } from 'lucide-react-native';
 
-import { useSafeBottomInset } from '@/hooks/useSafeBottomInset';
+import { useKeyboardAwareBottomInset } from '@/hooks/useSafeBottomInset';
+import { KeyboardAvoidingShell } from '@/components/KeyboardAvoidingShell';
 import { Button, Card, CategoryBadge } from '@/components';
 import { useEstablishment, useRodeo } from '@/contexts';
 import { useBleStickListener } from '@/services/ble/stick';
@@ -58,6 +59,10 @@ import { formatEidReadable } from '@/utils/eid-format';
 import { pickHeroIdentifier } from '@/utils/animal-identifier';
 import { buttonA11y, labelA11y } from '@/utils/a11y';
 import { backOr } from '@/utils/nav';
+
+// Estilo del `KeyboardAvoidingShell` (API no-Tamagui). `flex` no es spacing/color → no aplica el lint
+// anti-hardcode (ADR-023 §4).
+const fillStyle = { flex: 1 } as const;
 
 const SEARCH_DEBOUNCE_MS = 250;
 
@@ -217,57 +222,62 @@ export default function BulkTagAssignmentScreen() {
 
   return (
     <YStack flex={1} width="100%" maxWidth="100%" overflow="hidden" backgroundColor="$bg">
-      {/* Header con back + título + contador de sesión (RD5.5: contador SIEMPRE visible). */}
-      <YStack width="100%" paddingTop={insets.top} paddingHorizontal="$4">
-        <XStack width="100%" alignItems="center" gap="$2" paddingVertical="$3">
-          <Pressable
-            hitSlop={8}
-            onPress={() => backOr(router, '/(tabs)/animales')}
-            {...buttonA11y(Platform.OS, { label: 'Volver' })}
-          >
-            <ChevronLeft size={28} color={muted} strokeWidth={2} />
-          </Pressable>
-          <YStack flex={1} minWidth={0}>
-            <Text fontFamily="$body" fontSize="$8" lineHeight="$8" fontWeight="700" color="$textPrimary" numberOfLines={1}>
-              Asignar caravanas
-            </Text>
+      {/* TECLADO (unidad «barrida de teclado»): con el buscador de candidatos enfocado, lo que el teclado
+          tapaba eran los RESULTADOS y los dos CTAs de abajo. Dentro del primitivo, la columna se achica
+          desde abajo → la lista y los CTAs quedan por encima del teclado. */}
+      <KeyboardAvoidingShell style={fillStyle}>
+        {/* Header con back + título + contador de sesión (RD5.5: contador SIEMPRE visible). */}
+        <YStack width="100%" paddingTop={insets.top} paddingHorizontal="$4">
+          <XStack width="100%" alignItems="center" gap="$2" paddingVertical="$3">
+            <Pressable
+              hitSlop={8}
+              onPress={() => backOr(router, '/(tabs)/animales')}
+              {...buttonA11y(Platform.OS, { label: 'Volver' })}
+            >
+              <ChevronLeft size={28} color={muted} strokeWidth={2} />
+            </Pressable>
+            <YStack flex={1} minWidth={0}>
+              <Text fontFamily="$body" fontSize="$8" lineHeight="$8" fontWeight="700" color="$textPrimary" numberOfLines={1}>
+                Asignar caravanas
+              </Text>
+            </YStack>
+            <SessionCounter count={session.assignedCount} />
+          </XStack>
+        </YStack>
+
+        {/* Aviso de cambio de campo (RD7.3): la sesión se reinició al nuevo campo activo. */}
+        {fieldChangedNotice ? (
+          <YStack paddingHorizontal="$4" paddingBottom="$2">
+            <FieldChangedNotice onDismiss={() => setFieldChangedNotice(false)} />
           </YStack>
-          <SessionCounter count={session.assignedCount} />
-        </XStack>
-      </YStack>
+        ) : null}
 
-      {/* Aviso de cambio de campo (RD7.3): la sesión se reinició al nuevo campo activo. */}
-      {fieldChangedNotice ? (
-        <YStack paddingHorizontal="$4" paddingBottom="$2">
-          <FieldChangedNotice onDismiss={() => setFieldChangedNotice(false)} />
-        </YStack>
-      ) : null}
+        {/* Aviso de dup al bastonear (RD6.1): el EID ya tiene caravana → no se encoló. La sesión sigue. */}
+        {dupNotice ? (
+          <YStack paddingHorizontal="$4" paddingBottom="$2">
+            <DupNoticeBanner notice={dupNotice} onDismiss={() => setDupNotice(null)} />
+          </YStack>
+        ) : null}
 
-      {/* Aviso de dup al bastonear (RD6.1): el EID ya tiene caravana → no se encoló. La sesión sigue. */}
-      {dupNotice ? (
-        <YStack paddingHorizontal="$4" paddingBottom="$2">
-          <DupNoticeBanner notice={dupNotice} onDismiss={() => setDupNotice(null)} />
-        </YStack>
-      ) : null}
-
-      {/* Cuerpo: EID actual + sus candidatos, o el estado vacío "bastoneá para empezar". */}
-      {currentEid === null ? (
-        <EmptyQueueState />
-      ) : (
-        <BulkEidBody
-          // key={currentEid}: cada EID nuevo en cabeza REMONTA el cuerpo (resetea búsqueda + candidato a
-          // confirmar). Sin el key, el sub-estado `confirming` del EID viejo sobreviviría al avanzar la
-          // cola y se asignaría el EID nuevo al candidato del flujo viejo (mismo bug que el AssignOrCreateBody
-          // del Run 2 cerró con key={eid}).
-          key={currentEid}
-          eid={currentEid}
-          establishmentId={establishmentId}
-          excludedProfileIds={session.assignedProfileIds}
-          onAssigned={onAssigned}
-          onCreateNew={onCreateNew}
-          onSkip={onSkip}
-        />
-      )}
+        {/* Cuerpo: EID actual + sus candidatos, o el estado vacío "bastoneá para empezar". */}
+        {currentEid === null ? (
+          <EmptyQueueState />
+        ) : (
+          <BulkEidBody
+            // key={currentEid}: cada EID nuevo en cabeza REMONTA el cuerpo (resetea búsqueda + candidato a
+            // confirmar). Sin el key, el sub-estado `confirming` del EID viejo sobreviviría al avanzar la
+            // cola y se asignaría el EID nuevo al candidato del flujo viejo (mismo bug que el AssignOrCreateBody
+            // del Run 2 cerró con key={eid}).
+            key={currentEid}
+            eid={currentEid}
+            establishmentId={establishmentId}
+            excludedProfileIds={session.assignedProfileIds}
+            onAssigned={onAssigned}
+            onCreateNew={onCreateNew}
+            onSkip={onSkip}
+          />
+        )}
+      </KeyboardAvoidingShell>
     </YStack>
   );
 }
@@ -393,7 +403,9 @@ function BulkEidBody({
   // Reserva inferior: la resuelve el hook compartido acá adentro, ya no viaja como prop desde la
   // pantalla (una sola fórmula, un solo lugar donde leerla). Conserva el respiro propio ($3) que la
   // pantalla ya sumaba sobre el inset → web 13 e iOS 47 idénticos al baseline; Android suma el aire.
-  const safeBottom = useSafeBottomInset({ extra: getTokenValue('$3', 'space') });
+  // KEYBOARD-AWARE: con el buscador enfocado el shell de la pantalla ya subió la columna el alto entero
+  // del teclado → la safe-area queda tapada y reservarla otra vez dejaría hueco muerto sobre el teclado.
+  const safeBottom = useKeyboardAwareBottomInset({ extra: getTokenValue('$3', 'space') });
 
   const [query, setQuery] = useState('');
   const [debounced, setDebounced] = useState('');

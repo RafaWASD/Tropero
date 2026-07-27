@@ -35,7 +35,8 @@ import { ReportEmpty, ReportError } from '@/components/reports';
 import { ExportAnimalRow, MarkDeclaredSheet, SigsaChecklistReminder } from '@/components/sigsa';
 import { useEstablishment, useRodeo } from '@/contexts';
 import { useExportSigsa } from '@/hooks/useExportSigsa';
-import { useSafeBottomInset } from '@/hooks/useSafeBottomInset';
+import { useKeyboardAwareBottomInset } from '@/hooks/useSafeBottomInset';
+import { KeyboardAvoidingShell } from '@/components/KeyboardAvoidingShell';
 import { loadEstablishmentDetail } from '@/services/establishments';
 import type { PendingAnimalInfo } from '@/services/sigsa/types';
 import { animalCountLabel, exportLogDateLabel } from '@/utils/sigsa-display';
@@ -43,6 +44,10 @@ import { isValidBirthDateRange, normalizeFilterDate } from '@/utils/sigsa-filter
 import { maskDateInput } from '@/utils/animal-input';
 import { buttonA11y } from '@/utils/a11y';
 import { backOr } from '@/utils/nav';
+
+// Estilo del `KeyboardAvoidingShell` (API no-Tamagui). `flex` no es spacing/color → no aplica el lint
+// anti-hardcode (ADR-023 §4).
+const fillStyle = { flex: 1 } as const;
 
 type TabKey = 'ready' | 'incomplete' | 'history';
 
@@ -314,35 +319,41 @@ function Shell({
   const muted = getTokenValue('$textMuted', 'color');
   return (
     <YStack flex={1} width="100%" maxWidth="100%" overflow="hidden" backgroundColor="$bg">
-      <YStack width="100%" paddingTop={insets.top} paddingHorizontal="$4">
-        <XStack width="100%" alignItems="center" gap="$2" paddingVertical="$3">
-          <Pressable hitSlop={8} onPress={onBack} {...buttonA11y(Platform.OS, { label: 'Volver' })}>
-            <ChevronLeft size={28} color={muted} strokeWidth={2} />
-          </Pressable>
-          {/* Título $8 con lineHeight matcheado (ojo descendentes: "Exportar"). */}
-          <Text fontFamily="$body" fontSize="$8" lineHeight="$8" fontWeight="700" color="$textPrimary">
-            Exportar a SENASA
-          </Text>
-        </XStack>
-      </YStack>
-      <ScrollView
-        flex={1}
-        width="100%"
-        maxWidth="100%"
-        contentContainerStyle={{
-          paddingHorizontal: getTokenValue('$4', 'space'),
-          // La lista scrollea POR DETRÁS del sticky CTA → padding inferior generoso para que la última fila no
-          // quede tapada por la barra (cuando hay footer). Sin footer (estados de aviso), el padding base alcanza.
-          paddingBottom: insets.bottom + getTokenValue(footer ? '$10' : '$6', 'space'),
-          width: '100%',
-          maxWidth: '100%',
-          gap: getTokenValue('$3', 'space'),
-        }}
-        showsHorizontalScrollIndicator={false}
-      >
-        {children}
-      </ScrollView>
-      {footer ?? null}
+      {/* TECLADO (unidad «barrida de teclado»): los filtros traen dos campos de fecha (AAAA-MM-DD) y esta
+          pantalla no montaba ningún mecanismo — al enfocar "Hasta" el teclado tapaba el campo, su error inline
+          y el CTA sticky de exportar. El shell envuelve header + cuerpo + footer; el `overlay` queda AFUERA
+          (es un sheet con scrim propio: anidar dos shells descontaría el teclado dos veces). */}
+      <KeyboardAvoidingShell style={fillStyle}>
+        <YStack width="100%" paddingTop={insets.top} paddingHorizontal="$4">
+          <XStack width="100%" alignItems="center" gap="$2" paddingVertical="$3">
+            <Pressable hitSlop={8} onPress={onBack} {...buttonA11y(Platform.OS, { label: 'Volver' })}>
+              <ChevronLeft size={28} color={muted} strokeWidth={2} />
+            </Pressable>
+            {/* Título $8 con lineHeight matcheado (ojo descendentes: "Exportar"). */}
+            <Text fontFamily="$body" fontSize="$8" lineHeight="$8" fontWeight="700" color="$textPrimary">
+              Exportar a SENASA
+            </Text>
+          </XStack>
+        </YStack>
+        <ScrollView
+          flex={1}
+          width="100%"
+          maxWidth="100%"
+          contentContainerStyle={{
+            paddingHorizontal: getTokenValue('$4', 'space'),
+            // La lista scrollea POR DETRÁS del sticky CTA → padding inferior generoso para que la última fila no
+            // quede tapada por la barra (cuando hay footer). Sin footer (estados de aviso), el padding base alcanza.
+            paddingBottom: insets.bottom + getTokenValue(footer ? '$10' : '$6', 'space'),
+            width: '100%',
+            maxWidth: '100%',
+            gap: getTokenValue('$3', 'space'),
+          }}
+          showsHorizontalScrollIndicator={false}
+        >
+          {children}
+        </ScrollView>
+        {footer ?? null}
+      </KeyboardAvoidingShell>
       {overlay ?? null}
     </YStack>
   );
@@ -391,7 +402,9 @@ function ExportStickyBar({
   onExport: () => void;
 }) {
   const disabled = exportableCount === 0 || isGenerating;
-  const bottomPad = useSafeBottomInset();
+  // KEYBOARD-AWARE: este footer sticky vive DENTRO del `KeyboardAvoidingShell` del ScreenShell, que ya
+  // descuenta el teclado entero → con el teclado arriba la reserva se encoge al respiro de `$2`.
+  const bottomPad = useKeyboardAwareBottomInset();
   return (
     <YStack
       width="100%"

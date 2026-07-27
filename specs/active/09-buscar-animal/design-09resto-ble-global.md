@@ -249,3 +249,40 @@ Archivo: extender `app/e2e/` con un `baston.spec.ts` nuevo (patrón de `animals.
 > 2. **Param `tag` en `crear-animal.tsx`** (Run 1): implementado read-only (prioridad tag>idv>visual); comentarios stale actualizados. La nota de spec 02 (el alta acepta TAG precargado por BLE) se reconcilia al cerrar el chunk con `requirements.md`/`design.md` base.
 > 3. **`targetCategoryId`/`targetRodeoId` del transfer** (Run 2): NO fue bloqueante — se resolvió por CÓDIGO sobre el sistema DESTINO (que viene del `Rodeo.systemId` del rodeo destino), leyendo el `categoryCode` del perfil de origen (`fetchAnimalDetail`, sincronizado local). No hizo falta exponer el `system_id` de origen. Si la categoría no resuelve en el sistema destino → error accionable, NO se inventa default (regla del leader respetada). Ver §3.4 reconciliado. E2E (d) verde.
 > 4. **Wiring E2E del `MockAdapter`** (Run 2): creado con la marca DELIBERADA `window.__RAFAQ_BLE_E2E__` (`isBleE2E()`) → `mode='mock'` + `BleE2EBridge` que publica `window.__rafaqBle`. FUERA de prod (sin la marca, ni mock ni handle; doble guard en el bridge; vive en `_components/`, no en `services/ble/`). Gate 2 revisará la superficie. E2E (a)/(b)/(c)/(d) verdes.
+
+
+---
+
+## RECONCILIACIÓN as-built — unidad «barrida de teclado» (2026-07-27)
+
+El **`FindOrCreateOverlay`** (host global del bastoneo, este chunk) **no tenía keyboard-avoidance**: es un
+bottom-sheet armado a mano (`View absolute inset0 $scrim` + backdrop `Pressable` + `YStack maxHeight 85%`)
+y con el buscador de candidatos enfocado el teclado le tapaba **los resultados y el CTA "Es un animal nuevo
+→ dar de alta"**. Es el MISMO bug de clase que Raf reportó en el sheet de Vacunación, en la superficie que
+viene JUSTO DESPUÉS de `maniobra/identificar` en el flujo del bastón.
+
+**As-built**: el `KeyboardAvoidingShell` del repo envuelve la **columna** (backdrop libre + hoja) **dentro**
+del scrim, que sigue cubriendo la pantalla entera (también detrás del teclado) — mismo esqueleto y mismo
+estilo (`{ flex: 1, width: '100%', justifyContent: 'flex-end' }`) que usa `BottomSheetShell`. La reserva
+inferior pasó de `useSafeBottomInset({ extra: $6 })` a **`useKeyboardAwareBottomInset({ extra: $6 })`**: con
+el teclado abierto el shell ya subió la hoja el alto ENTERO del teclado, así que reservar además la
+safe-area + el `$6` propio dejaría ~96dp de hueco muerto sobre el borde del teclado. Con el teclado cerrado
+el valor es **idéntico** al de antes (web 32 · iOS 66 · Android 3 botones 96).
+
+**Sin migrar al `BottomSheetShell`** a propósito (decisión del leader, anotada en `docs/backlog.md`):
+migrar los 6 sheets hechos a mano cambia estructura, headers, footers y testIDs, y nada de eso se puede
+verificar en web. La barrida cierra la CLASE (que ninguna superficie con input quede sin mecanismo); la
+adopción del primitivo es una unidad aparte.
+
+**Otras dos superficies de este chunk, mismo fix**: `app/app/asignar-caravanas.tsx` (cola de bastoneos: el
+teclado del buscador tapaba la lista de candidatos y los dos CTAs) y `app/app/(tabs)/animales.tsx` (la
+puerta MANUAL, R1.2: el buscador está arriba y nunca se tapaba — **lo que el teclado tapaba eran los
+RESULTADOS**; con la columna adentro del shell la lista termina por encima del teclado). En `animales`
+además hizo falta `tabBarHideOnKeyboard: true` en `(tabs)/_layout.tsx`: el bottom-nav lo dibuja el
+Navigator FUERA de la pantalla, así que ningún shell puede subirlo y quedaba entre el contenido y el
+teclado.
+
+**Guard**: `app/src/components/keyboard-avoiding-guard.test.ts` REGLA B enumera estáticamente todo archivo
+con entrada de texto y exige que esté clasificado (cubierto / parte reusable / excepción con motivo).
+**Límite (ADR-029)**: web no monta teclado virtual → el lift es invisible desde la E2E; el veredicto es
+DEVICE, Android **e iOS** (estas superficies estaban rotas en las dos plataformas).

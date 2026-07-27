@@ -37,7 +37,8 @@ import {
   type BulkProgressPhase,
   type BulkProgressRejection,
 } from '@/components';
-import { useSafeBottomInset } from '@/hooks/useSafeBottomInset';
+import { useKeyboardAwareBottomInset } from '@/hooks/useSafeBottomInset';
+import { KeyboardAvoidingShell } from '@/components/KeyboardAvoidingShell';
 import { useEstablishment } from '@/contexts';
 import {
   fetchGroupSelectionProfiles,
@@ -81,13 +82,18 @@ function parseOperation(raw: string | undefined): BulkOperation {
   return raw === 'wean' ? 'wean' : 'castrate';
 }
 
+// Estilo del `KeyboardAvoidingShell` (API no-Tamagui). `flex` no es spacing/color → no aplica el lint
+// anti-hardcode (ADR-023 §4).
+const fillStyle = { flex: 1 } as const;
+
 export default function SeleccionMasivaScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   // Reserva inferior de la barra de acción de selección masiva: la canónica del hook compartido + el
   // respiro propio ($3) que esta barra ya sumaba sobre el inset. Web 13 · iOS 47 (= baseline) · Android
   // 3 botones 77. Esta unidad agrega aire, nunca lo saca.
-  const bottomPad = useSafeBottomInset({ extra: getTokenValue('$3', 'space') });
+  // KEYBOARD-AWARE: el CTA fijo vive dentro del `KeyboardAvoidingShell`, que ya descuenta el teclado entero.
+  const bottomPad = useKeyboardAwareBottomInset({ extra: getTokenValue('$3', 'space') });
   const params = useLocalSearchParams<{ groupType?: string; groupId?: string; op?: string }>();
   const operation = parseOperation(params.op);
   const groupType = params.groupType === 'lote' ? 'lote' : 'rodeo';
@@ -301,92 +307,97 @@ export default function SeleccionMasivaScreen() {
 
   return (
     <YStack flex={1} width="100%" backgroundColor="$bg">
-      {/* Header: back + título + contador VIVO (R11.5). */}
-      <YStack width="100%" paddingTop={insets.top} paddingHorizontal="$4">
-        <XStack width="100%" alignItems="center" gap="$2" paddingVertical="$3">
-          <Pressable hitSlop={8} onPress={() => backOr(router, groupType === 'lote' ? '/lotes' : '/(tabs)')} {...buttonA11y(Platform.OS, { label: 'Volver' })}>
-            <ChevronLeft size={28} color={muted} strokeWidth={2} />
-          </Pressable>
-          <YStack flex={1} minWidth={0}>
-            <Text fontFamily="$body" fontSize="$8" lineHeight="$8" fontWeight="700" color="$textPrimary" numberOfLines={1}>
-              {operation === 'castrate' ? 'Castrar' : 'Destetar'}
-            </Text>
-            <Text fontFamily="$body" fontSize="$3" fontWeight="500" color="$textMuted">
-              {count} {count === 1 ? 'seleccionado' : 'seleccionados'}
-            </Text>
+      {/* TECLADO (unidad «barrida de teclado»): con el buscador de la selección enfocado, el teclado
+          tapaba la lista y el CTA fijo de abajo. El sheet de confirmación queda FUERA del shell (es un
+          overlay hermano, y anidar dos shells descontaría el teclado dos veces). */}
+      <KeyboardAvoidingShell style={fillStyle}>
+        {/* Header: back + título + contador VIVO (R11.5). */}
+        <YStack width="100%" paddingTop={insets.top} paddingHorizontal="$4">
+          <XStack width="100%" alignItems="center" gap="$2" paddingVertical="$3">
+            <Pressable hitSlop={8} onPress={() => backOr(router, groupType === 'lote' ? '/lotes' : '/(tabs)')} {...buttonA11y(Platform.OS, { label: 'Volver' })}>
+              <ChevronLeft size={28} color={muted} strokeWidth={2} />
+            </Pressable>
+            <YStack flex={1} minWidth={0}>
+              <Text fontFamily="$body" fontSize="$8" lineHeight="$8" fontWeight="700" color="$textPrimary" numberOfLines={1}>
+                {operation === 'castrate' ? 'Castrar' : 'Destetar'}
+              </Text>
+              <Text fontFamily="$body" fontSize="$3" fontWeight="500" color="$textMuted">
+                {count} {count === 1 ? 'seleccionado' : 'seleccionados'}
+              </Text>
+            </YStack>
+          </XStack>
+        </YStack>
+
+        {error ? (
+          <YStack flex={1} paddingHorizontal="$4">
+            <FormError message={error} />
           </YStack>
-        </XStack>
-      </YStack>
-
-      {error ? (
-        <YStack flex={1} paddingHorizontal="$4">
-          <FormError message={error} />
-        </YStack>
-      ) : loading ? (
-        <YStack flex={1} paddingHorizontal="$4">
-          <InfoNote>Cargando animales…</InfoNote>
-        </YStack>
-      ) : candidates.length === 0 ? (
-        <YStack flex={1} paddingHorizontal="$4" paddingTop="$4">
-          <InfoNote>
-            {operation === 'castrate'
-              ? 'No hay animales para castrar en este grupo.'
-              : 'No hay terneros para destetar en este grupo.'}
-          </InfoNote>
-        </YStack>
-      ) : (
-        <>
-          <ScrollView
-            flex={1}
-            width="100%"
-            contentContainerStyle={{
-              paddingHorizontal: getTokenValue('$4', 'space'),
-              paddingBottom: getTokenValue('$10', 'space'),
-              gap: getTokenValue('$3', 'space'),
-            }}
-            keyboardShouldPersistTaps="handled"
-          >
-            {/* Buscador (R11.9): solo si la lista supera ~20. */}
-            {showSearch ? <SelectionSearchBar value={query} onChangeText={setQuery} /> : null}
-
-            {/* Destete cross-rodeo (R7.2): cuántos terneros quedaron fuera por config de su rodeo. */}
-            {excludedByRodeoConfig > 0 ? (
-              <InfoNote>
-                {excludedByRodeoConfig === 1
-                  ? '1 ternero quedó excluido porque su rodeo no tiene el destete habilitado.'
-                  : `${excludedByRodeoConfig} terneros quedaron excluidos porque su rodeo no tiene el destete habilitado.`}
-              </InfoNote>
-            ) : null}
-
-            {(selectionState?.sections ?? []).map((section) => (
-              <SelectionSectionBlock
-                key={section.key}
-                section={section}
-                query={query}
-                operation={operation}
-                selected={selected}
-                onToggleAnimal={onToggleAnimal}
-                onToggleSectionAll={onToggleSectionAll}
-              />
-            ))}
-          </ScrollView>
-
-          {/* CTA fijo abajo (thumb-zone) con el número VIVO (R11.7), disabled en 0. */}
-          <YStack
-            width="100%"
-            paddingHorizontal="$4"
-            paddingTop="$3"
-            paddingBottom={bottomPad}
-            backgroundColor="$bg"
-            borderTopWidth={1}
-            borderTopColor="$divider"
-          >
-            <Button variant="primary" fullWidth disabled={count === 0} onPress={() => setSheetOpen(true)}>
-              {`${verb} ${count} ${count === 1 ? 'animal' : 'animales'}`}
-            </Button>
+        ) : loading ? (
+          <YStack flex={1} paddingHorizontal="$4">
+            <InfoNote>Cargando animales…</InfoNote>
           </YStack>
-        </>
-      )}
+        ) : candidates.length === 0 ? (
+          <YStack flex={1} paddingHorizontal="$4" paddingTop="$4">
+            <InfoNote>
+              {operation === 'castrate'
+                ? 'No hay animales para castrar en este grupo.'
+                : 'No hay terneros para destetar en este grupo.'}
+            </InfoNote>
+          </YStack>
+        ) : (
+          <>
+            <ScrollView
+              flex={1}
+              width="100%"
+              contentContainerStyle={{
+                paddingHorizontal: getTokenValue('$4', 'space'),
+                paddingBottom: getTokenValue('$10', 'space'),
+                gap: getTokenValue('$3', 'space'),
+              }}
+              keyboardShouldPersistTaps="handled"
+            >
+              {/* Buscador (R11.9): solo si la lista supera ~20. */}
+              {showSearch ? <SelectionSearchBar value={query} onChangeText={setQuery} /> : null}
+
+              {/* Destete cross-rodeo (R7.2): cuántos terneros quedaron fuera por config de su rodeo. */}
+              {excludedByRodeoConfig > 0 ? (
+                <InfoNote>
+                  {excludedByRodeoConfig === 1
+                    ? '1 ternero quedó excluido porque su rodeo no tiene el destete habilitado.'
+                    : `${excludedByRodeoConfig} terneros quedaron excluidos porque su rodeo no tiene el destete habilitado.`}
+                </InfoNote>
+              ) : null}
+
+              {(selectionState?.sections ?? []).map((section) => (
+                <SelectionSectionBlock
+                  key={section.key}
+                  section={section}
+                  query={query}
+                  operation={operation}
+                  selected={selected}
+                  onToggleAnimal={onToggleAnimal}
+                  onToggleSectionAll={onToggleSectionAll}
+                />
+              ))}
+            </ScrollView>
+
+            {/* CTA fijo abajo (thumb-zone) con el número VIVO (R11.7), disabled en 0. */}
+            <YStack
+              width="100%"
+              paddingHorizontal="$4"
+              paddingTop="$3"
+              paddingBottom={bottomPad}
+              backgroundColor="$bg"
+              borderTopWidth={1}
+              borderTopColor="$divider"
+            >
+              <Button variant="primary" fullWidth disabled={count === 0} onPress={() => setSheetOpen(true)}>
+                {`${verb} ${count} ${count === 1 ? 'animal' : 'animales'}`}
+              </Button>
+            </YStack>
+          </>
+        )}
+      </KeyboardAvoidingShell>
 
       {/* Bottom-sheet de confirmación (T-UI.5). */}
       {sheetOpen && summary ? (

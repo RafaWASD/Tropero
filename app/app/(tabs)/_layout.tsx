@@ -325,6 +325,17 @@ export default function TabsLayout() {
     <Tabs
       screenOptions={{
         headerShown: false,
+        // ── TECLADO (unidad «barrida de teclado») ────────────────────────────────────────────────
+        // El bottom-nav lo dibuja el Navigator, FUERA de las pantallas → ningún `KeyboardAvoidingShell`
+        // de una tab puede subirlo. Sin esconderlo, con el teclado abierto la barra queda ENTRE el
+        // contenido y el teclado: la pantalla se achica el alto entero del teclado pero su borde
+        // inferior está `navHeightTotal` más arriba → ese alto queda de hueco muerto. Escondiéndola,
+        // la barra pasa a `position:absolute` (sale del flujo) y la pantalla ocupa la ventana entera,
+        // que es la geometría para la que el shell está calculado.
+        // Vale para las 5 tabs: las que no abren teclado nunca lo disparan (el hook interno de
+        // react-navigation escucha `keyboardDidShow`, igual que nuestro `useKeyboardVisible`). Hoy las
+        // que tienen input son `animales` (buscador 🔴 manga) y `mas` (nombre/teléfono del perfil).
+        tabBarHideOnKeyboard: true,
         tabBarActiveTintColor: COLOR.primary,
         tabBarInactiveTintColor: COLOR.textMuted,
         tabBarStyle: {

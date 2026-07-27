@@ -29,15 +29,16 @@
 // desde getConstants en nativo; `null` en web → 0). Desde esta unidad el `SafeAreaProvider` raíz
 // además se siembra con `initialMetrics` (app/app/_layout.tsx), que es el fix canónico app-wide.
 //
-// TECLADO: esta es la reserva con el teclado CERRADO. Un footer keyboard-aware la combina con
-// `resolveFooterPaddingBottom` (con el teclado abierto la safe-area la tapa el teclado y reservarla
-// dejaría un hueco) — ver `FooterActionShell` / `BottomSheetShell` / `maniobra/carga`.
+// TECLADO: `useSafeBottomInset` es la reserva con el teclado CERRADO. La versión keyboard-aware es
+// `useKeyboardAwareBottomInset` (abajo, en este mismo archivo): la usa TODA superficie cuyo borde
+// inferior queda por encima del teclado gracias a un `KeyboardAvoidingShell`.
 
 import { Platform } from 'react-native';
 import { initialWindowMetrics, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getTokenValue } from 'tamagui';
 
-import { computeSafeBottomInset } from '../utils/footer-action';
+import { computeSafeBottomInset, resolveFooterPaddingBottom } from '../utils/footer-action';
+import { useKeyboardVisible } from './useKeyboardVisible';
 
 /**
  * ¿Esta plataforma dibuja una BARRA DE NAVEGACIÓN opaca ocupando todo el inset inferior?
@@ -76,5 +77,40 @@ export function useSafeBottomInset({ extra = 0, floor = 0 }: SafeBottomOwnSpacin
     applyGap: OS_DRAWS_NAV_BAR,
     extra,
     floor,
+  });
+}
+
+/**
+ * Reserva inferior de una superficie que vive DENTRO de un `KeyboardAvoidingShell` (o de uno de los
+ * shells que lo montan: `FooterActionShell`, `BottomSheetShell`, `AuthScreenShell`):
+ *
+ *   - teclado CERRADO → la reserva canónica de `useSafeBottomInset(opts)`, idéntica a hoy;
+ *   - teclado ABIERTO → SOLO un respiro chico (`$2`).
+ *
+ * ── POR QUÉ NO ALCANZA CON `useSafeBottomInset()` ────────────────────────────────────────────────────
+ * Con el teclado abierto se apilan DOS reservas: el shell ya subió el contenedor el alto ENTERO del
+ * teclado (que en Android, bajo edge-to-edge, incluye la franja de la barra de navegación), así que la
+ * safe-area del SO queda TAPADA por el teclado. Si la superficie sigue reservándola, quedan ~64dp de
+ * **hueco muerto** entre el contenido y el borde del teclado. Este hook es esa resta, y es exactamente
+ * la composición que los 4 sitios de la unidad anterior ya tienen verificada en device por Raf:
+ * `resolveFooterPaddingBottom({ keyboardVisible, safeInset, keyboardOpenGap: $2 })`.
+ *
+ * ── POR QUÉ ACÁ Y NO ADENTRO DE `useSafeBottomInset` ─────────────────────────────────────────────────
+ * Porque la reserva keyboard-aware SOLO es correcta para lo que efectivamente sube con el teclado. El
+ * bottom-nav de `(tabs)/_layout` NO sube (lo dibuja el Navigator, fuera de todo shell) y las ~40 llamadas
+ * restantes del hook base son de superficies sin input. Encoger la reserva ahí sería mentir sobre una
+ * barra que sigue estando, en un cambio que **web no puede ver** (`Keyboard` de RNW nunca emite → el flag
+ * queda en `false` y todo es idéntico) y que por lo tanto solo se detectaría en device. Dos hooks
+ * distintos = el call site declara si su borde inferior sube con el teclado o no.
+ */
+export function useKeyboardAwareBottomInset(own: SafeBottomOwnSpacing = {}): number {
+  const keyboardVisible = useKeyboardVisible();
+  const safeInset = useSafeBottomInset(own);
+  return resolveFooterPaddingBottom({
+    keyboardVisible,
+    safeInset,
+    // Respiro entre el contenido y el borde del teclado. `$2` = el MISMO que usan los 4 sitios
+    // verificados en device (FooterActionShell / BottomSheetShell / maniobra-carga / auth).
+    keyboardOpenGap: getTokenValue('$2', 'space'),
   });
 }

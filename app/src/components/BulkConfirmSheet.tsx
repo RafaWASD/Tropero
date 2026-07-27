@@ -18,6 +18,7 @@ import { AlertTriangle, Pin } from 'lucide-react-native';
 
 import { Button } from './Button';
 import { Card } from './Card';
+import { useSafeBottomInset } from '../hooks/useSafeBottomInset';
 import { buttonA11y, labelA11y } from '../utils/a11y';
 import type { SelectionSummary } from '../utils/bulk-selection';
 import type { BulkOperation } from '../utils/bulk-candidates';
@@ -62,6 +63,17 @@ export function BulkConfirmSheet({
   revertingOverride = false,
   confirming = false,
 }: BulkConfirmSheetProps) {
+  // Reserva del borde INFERIOR de la hoja. Antes era un `paddingBottom="$6"` FIJO: un token suelto que
+  // nunca pasó por la reserva canónica, así que en Android con barra de 3 botones (inset 48) los dos CTAs
+  // full-width del final quedaban a 32dp del borde de PANTALLA, o sea DEBAJO de la barra del sistema. Es
+  // el MISMO defecto que tenían los 2 sheets de tratamientos (la unidad «aire» no los vio porque su guard
+  // prohíbe re-implementar la fórmula, no OMITIRLA). `floor: $6` conserva el aire propio que este sheet ya
+  // tenía (`$6` = 32 en la escala `space`): **web 32 (idéntico) · iOS 32 → 34 · Android gestos 32 → 48 ·
+  // Android 3 botones 32 → 64**. Los cuatro están fijados por test en `utils/footer-action.test.ts`.
+  // ⚠️ `useSafeBottomInset` y NO la variante keyboard-aware: este sheet no tiene ningún campo de texto y
+  // se monta como HERMANO del `KeyboardAvoidingShell` de `seleccion-masiva` (no adentro), así que su borde
+  // inferior NO sube con el teclado — encogerle la reserva sería mentir sobre una barra que sigue estando.
+  const bottomPad = useSafeBottomInset({ floor: getTokenValue('$6', 'space') });
   const insetMuted = getTokenValue('$textMuted', 'color');
   const terracota = getTokenValue('$terracota', 'color');
   const primary = getTokenValue('$primary', 'color');
@@ -92,7 +104,7 @@ export function BulkConfirmSheet({
         borderTopRightRadius="$card"
         paddingHorizontal="$4"
         paddingTop="$4"
-        paddingBottom="$6"
+        paddingBottom={bottomPad}
         gap="$4"
       >
         {/* Grip visual del sheet. */}

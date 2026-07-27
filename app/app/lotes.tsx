@@ -31,6 +31,7 @@ import {
 } from 'lucide-react-native';
 
 import { AnimalRow, Button, Card, FormError, FormField, InfoNote, LoteCardSkeleton } from '@/components';
+import { KeyboardAvoidingShell } from '@/components/KeyboardAvoidingShell';
 import { LoteIcon } from '@/theme/icons';
 import { useEstablishment } from '@/contexts';
 import {
@@ -49,6 +50,10 @@ import { buttonA11y } from '@/utils/a11y';
 import { backOr } from '@/utils/nav';
 
 const OFFLINE_COPY = 'Necesitás conexión para esto. Conectate a internet y volvé a intentar.';
+
+// Estilo del `KeyboardAvoidingShell` (API no-Tamagui). `flex` no es spacing/color → no aplica el lint
+// anti-hardcode (ADR-023 §4).
+const fillStyle = { flex: 1 } as const;
 
 export default function LotesScreen() {
   const insets = useSafeAreaInsets();
@@ -187,164 +192,170 @@ export default function LotesScreen() {
 
   return (
     <YStack flex={1} width="100%" maxWidth="100%" overflow="hidden" backgroundColor="$bg">
-      {/* Header con back (pantalla pusheable desde "Más" / Rodeos). */}
-      <YStack width="100%" paddingTop={insets.top} paddingHorizontal="$4">
-        <XStack width="100%" alignItems="center" gap="$2" paddingVertical="$3">
-          <Pressable
-            hitSlop={8}
-            onPress={() => backOr(router, '/rodeos')}
-            {...buttonA11y(Platform.OS, { label: 'Volver' })}
-          >
-            <ChevronLeft size={28} color={muted} strokeWidth={2} />
-          </Pressable>
-          <Text fontFamily="$body" fontSize="$8" lineHeight="$8" fontWeight="700" color="$textPrimary">
-            Lotes
-          </Text>
-        </XStack>
-      </YStack>
-
-      <ScrollView
-        flex={1}
-        width="100%"
-        maxWidth="100%"
-        contentContainerStyle={{
-          paddingHorizontal: getTokenValue('$4', 'space'),
-          paddingBottom: insets.bottom + getTokenValue('$6', 'space'),
-          width: '100%',
-          maxWidth: '100%',
-        }}
-        showsHorizontalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
-      >
-        {/* Explicación corta del lote (ADR-020): por qué existe, ortogonal a rodeo/categoría. */}
-        <YStack marginTop="$1" marginBottom="$2">
-          <Text fontFamily="$body" fontSize="$3" fontWeight="400" color="$textMuted">
-            Un lote agrupa animales por manejo (ej. «Otoño 2026», «Entore 1»), cruzando rodeos. Un
-            animal sin lote se agrupa por su categoría.
-          </Text>
+      {/* TECLADO (unidad «barrida de teclado»): esta pantalla tiene campos de texto y NO montaba ningún
+          mecanismo — al enfocarlos el teclado los tapaba (mismo bug 🔴 de clase que el sheet de Vacunación,
+          acá por AUSENCIA de mecanismo). Con la columna adentro del primitivo, el contenedor se achica desde
+          abajo y el campo enfocado queda por encima del teclado. */}
+      <KeyboardAvoidingShell style={fillStyle}>
+        {/* Header con back (pantalla pusheable desde "Más" / Rodeos). */}
+        <YStack width="100%" paddingTop={insets.top} paddingHorizontal="$4">
+          <XStack width="100%" alignItems="center" gap="$2" paddingVertical="$3">
+            <Pressable
+              hitSlop={8}
+              onPress={() => backOr(router, '/rodeos')}
+              {...buttonA11y(Platform.OS, { label: 'Volver' })}
+            >
+              <ChevronLeft size={28} color={muted} strokeWidth={2} />
+            </Pressable>
+            <Text fontFamily="$body" fontSize="$8" lineHeight="$8" fontWeight="700" color="$textPrimary">
+              Lotes
+            </Text>
+          </XStack>
         </YStack>
 
-        {/* spec 21 (R21.32/R21.33/R21.34, veto de design-review): `useQuery` puede devolver `data = []` por
-            DOS motivos distintos — el campo genuinamente no tiene lotes, o los lotes todavía no
-            sincronizaron (primer sync / device nuevo). Mostrar "sin lotes" en el segundo caso es un FALSO
-            VACÍO. Se desambigua con `hasSynced`: error → "Cargando…" (carga inicial) → "Sincronizando…"
-            (aún sin primer sync) → "sin lotes" (vacío genuino) → la lista. `useQuery` no re-pone `isLoading`
-            en las re-emisiones, así que la lista nunca vuelve a este placeholder tras la carga inicial. */}
-        {error && groups.length === 0 ? (
-          <YStack gap="$2" marginTop="$2">
-            <FormError message="No pudimos cargar los lotes." />
-            <Button variant="secondary" fullWidth onPress={() => void refresh?.()}>
-              Reintentar
-            </Button>
+        <ScrollView
+          flex={1}
+          width="100%"
+          maxWidth="100%"
+          contentContainerStyle={{
+            paddingHorizontal: getTokenValue('$4', 'space'),
+            paddingBottom: insets.bottom + getTokenValue('$6', 'space'),
+            width: '100%',
+            maxWidth: '100%',
+          }}
+          showsHorizontalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
+          {/* Explicación corta del lote (ADR-020): por qué existe, ortogonal a rodeo/categoría. */}
+          <YStack marginTop="$1" marginBottom="$2">
+            <Text fontFamily="$body" fontSize="$3" fontWeight="400" color="$textMuted">
+              Un lote agrupa animales por manejo (ej. «Otoño 2026», «Entore 1»), cruzando rodeos. Un
+              animal sin lote se agrupa por su categoría.
+            </Text>
           </YStack>
-        ) : isLoading && groups.length === 0 ? (
-          // Skeleton de PRIMERA carga (polish U6b): espeja 3 LoteCard mientras baja la carga inicial.
-          // `useQuery` no re-pone isLoading en las re-emisiones → nunca vuelve a este placeholder tras
-          // la primera carga (no parpadea). Los estados syncing/vacío/error quedan intactos abajo.
-          <YStack gap="$3" marginTop="$2" accessibilityLabel="Cargando lotes">
-            {Array.from({ length: 3 }).map((_, i) => (
-              <LoteCardSkeleton key={i} />
-            ))}
-          </YStack>
-        ) : groups.length === 0 && !hasSynced ? (
-          <InfoNote>{SYNCING_MESSAGE}</InfoNote>
-        ) : groups.length === 0 ? (
-          <InfoNote>
-            {isOwner
-              ? 'Este campo todavía no tiene lotes. Creá el primero abajo.'
-              : 'Este campo todavía no tiene lotes. Pedíle al dueño que cree uno.'}
-          </InfoNote>
-        ) : (
-          <YStack gap="$3" marginTop="$2">
-            {groupList.map((g) => (
-              <LoteCard
-                key={g.id}
-                group={g}
-                isOwner={isOwner}
-                establishmentId={establishmentId}
-                groups={groupList}
-                expanded={expandedId === g.id}
-                onToggleExpand={() => setExpandedId((id) => (id === g.id ? null : g.id))}
-                renaming={renamingId === g.id}
-                onStartRename={() => setRenamingId(g.id)}
-                onCancelRename={() => setRenamingId(null)}
-                onRenamed={() => {
-                  // spec 21 (R21.20): el UPDATE LOCAL ya bajó al SQLite → `useQuery` re-emite con el nombre
-                  // nuevo (optimismo gratis). Solo cerramos el form inline.
-                  setRenamingId(null);
-                }}
-                deleting={deletingId === g.id}
-                onDelete={() => void onDelete(g)}
-                onOpenAnimal={(profileId) =>
-                  router.push({ pathname: '/animal/[id]', params: { id: profileId } })
-                }
-                muted={muted}
-              />
-            ))}
-          </YStack>
-        )}
 
-        {/* CTA crear (owner-only, RLS lo fuerza igual). Form inline al expandir. */}
-        {isOwner ? (
-          <YStack marginTop="$5" gap="$3">
-            {creating ? (
-              <Card gap="$3">
-                <Text fontFamily="$body" fontSize="$5" fontWeight="600" color="$textPrimary">
-                  Nuevo lote
-                </Text>
-                <FormField
-                  label="Nombre del lote"
-                  value={newName}
-                  onChangeText={(t) => {
-                    setNewName(t);
-                    if (createError) setCreateError(null);
-                  }}
-                  placeholder="Ej. Otoño 2026"
-                  autoCapitalize="sentences"
-                />
-                {dupWarning ? <InfoNote>{dupWarning}</InfoNote> : null}
-                {createError ? <FormError message={createError} /> : null}
-                <XStack gap="$2">
-                  <YStack flex={1}>
-                    <Button
-                      variant="secondary"
-                      fullWidth
-                      onPress={() => {
-                        setCreating(false);
-                        setNewName('');
-                        setCreateError(null);
-                      }}
-                    >
-                      Cancelar
-                    </Button>
-                  </YStack>
-                  <YStack flex={1}>
-                    <Button
-                      variant="primary"
-                      fullWidth
-                      disabled={submittingCreate}
-                      onPress={() => void onSubmitCreate()}
-                    >
-                      {submittingCreate ? 'Creando…' : 'Crear lote'}
-                    </Button>
-                  </YStack>
-                </XStack>
-              </Card>
-            ) : (
-              <Button variant="primary" fullWidth onPress={() => setCreating(true)}>
-                Crear lote
+          {/* spec 21 (R21.32/R21.33/R21.34, veto de design-review): `useQuery` puede devolver `data = []` por
+              DOS motivos distintos — el campo genuinamente no tiene lotes, o los lotes todavía no
+              sincronizaron (primer sync / device nuevo). Mostrar "sin lotes" en el segundo caso es un FALSO
+              VACÍO. Se desambigua con `hasSynced`: error → "Cargando…" (carga inicial) → "Sincronizando…"
+              (aún sin primer sync) → "sin lotes" (vacío genuino) → la lista. `useQuery` no re-pone `isLoading`
+              en las re-emisiones, así que la lista nunca vuelve a este placeholder tras la carga inicial. */}
+          {error && groups.length === 0 ? (
+            <YStack gap="$2" marginTop="$2">
+              <FormError message="No pudimos cargar los lotes." />
+              <Button variant="secondary" fullWidth onPress={() => void refresh?.()}>
+                Reintentar
               </Button>
-            )}
-          </YStack>
-        ) : (
-          <YStack marginTop="$5">
+            </YStack>
+          ) : isLoading && groups.length === 0 ? (
+            // Skeleton de PRIMERA carga (polish U6b): espeja 3 LoteCard mientras baja la carga inicial.
+            // `useQuery` no re-pone isLoading en las re-emisiones → nunca vuelve a este placeholder tras
+            // la primera carga (no parpadea). Los estados syncing/vacío/error quedan intactos abajo.
+            <YStack gap="$3" marginTop="$2" accessibilityLabel="Cargando lotes">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <LoteCardSkeleton key={i} />
+              ))}
+            </YStack>
+          ) : groups.length === 0 && !hasSynced ? (
+            <InfoNote>{SYNCING_MESSAGE}</InfoNote>
+          ) : groups.length === 0 ? (
             <InfoNote>
-              Solo el dueño del campo puede crear, renombrar o borrar lotes. Vos sí podés asignar
-              animales a un lote desde la ficha de cada animal.
+              {isOwner
+                ? 'Este campo todavía no tiene lotes. Creá el primero abajo.'
+                : 'Este campo todavía no tiene lotes. Pedíle al dueño que cree uno.'}
             </InfoNote>
-          </YStack>
-        )}
-      </ScrollView>
+          ) : (
+            <YStack gap="$3" marginTop="$2">
+              {groupList.map((g) => (
+                <LoteCard
+                  key={g.id}
+                  group={g}
+                  isOwner={isOwner}
+                  establishmentId={establishmentId}
+                  groups={groupList}
+                  expanded={expandedId === g.id}
+                  onToggleExpand={() => setExpandedId((id) => (id === g.id ? null : g.id))}
+                  renaming={renamingId === g.id}
+                  onStartRename={() => setRenamingId(g.id)}
+                  onCancelRename={() => setRenamingId(null)}
+                  onRenamed={() => {
+                    // spec 21 (R21.20): el UPDATE LOCAL ya bajó al SQLite → `useQuery` re-emite con el nombre
+                    // nuevo (optimismo gratis). Solo cerramos el form inline.
+                    setRenamingId(null);
+                  }}
+                  deleting={deletingId === g.id}
+                  onDelete={() => void onDelete(g)}
+                  onOpenAnimal={(profileId) =>
+                    router.push({ pathname: '/animal/[id]', params: { id: profileId } })
+                  }
+                  muted={muted}
+                />
+              ))}
+            </YStack>
+          )}
+
+          {/* CTA crear (owner-only, RLS lo fuerza igual). Form inline al expandir. */}
+          {isOwner ? (
+            <YStack marginTop="$5" gap="$3">
+              {creating ? (
+                <Card gap="$3">
+                  <Text fontFamily="$body" fontSize="$5" fontWeight="600" color="$textPrimary">
+                    Nuevo lote
+                  </Text>
+                  <FormField
+                    label="Nombre del lote"
+                    value={newName}
+                    onChangeText={(t) => {
+                      setNewName(t);
+                      if (createError) setCreateError(null);
+                    }}
+                    placeholder="Ej. Otoño 2026"
+                    autoCapitalize="sentences"
+                  />
+                  {dupWarning ? <InfoNote>{dupWarning}</InfoNote> : null}
+                  {createError ? <FormError message={createError} /> : null}
+                  <XStack gap="$2">
+                    <YStack flex={1}>
+                      <Button
+                        variant="secondary"
+                        fullWidth
+                        onPress={() => {
+                          setCreating(false);
+                          setNewName('');
+                          setCreateError(null);
+                        }}
+                      >
+                        Cancelar
+                      </Button>
+                    </YStack>
+                    <YStack flex={1}>
+                      <Button
+                        variant="primary"
+                        fullWidth
+                        disabled={submittingCreate}
+                        onPress={() => void onSubmitCreate()}
+                      >
+                        {submittingCreate ? 'Creando…' : 'Crear lote'}
+                      </Button>
+                    </YStack>
+                  </XStack>
+                </Card>
+              ) : (
+                <Button variant="primary" fullWidth onPress={() => setCreating(true)}>
+                  Crear lote
+                </Button>
+              )}
+            </YStack>
+          ) : (
+            <YStack marginTop="$5">
+              <InfoNote>
+                Solo el dueño del campo puede crear, renombrar o borrar lotes. Vos sí podés asignar
+                animales a un lote desde la ficha de cada animal.
+              </InfoNote>
+            </YStack>
+          )}
+        </ScrollView>
+      </KeyboardAvoidingShell>
     </YStack>
   );
 }

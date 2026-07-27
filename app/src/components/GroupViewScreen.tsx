@@ -23,6 +23,7 @@ import { getTokenValue, Text, XStack, YStack } from 'tamagui';
 import { ChevronLeft } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
 
+import { KeyboardAvoidingShell } from './KeyboardAvoidingShell';
 import { Card } from './Card';
 import { FormError, InfoNote } from './AuthBits';
 import { GroupActionsBar } from './GroupActionsBar';
@@ -33,6 +34,10 @@ import { buttonA11y } from '../utils/a11y';
 import type { AnimalListItem } from '../services/animals';
 import type { GroupAction } from '../utils/group-actions';
 import type { GroupViewState } from '../hooks/useGroupView';
+
+// Estilo del `KeyboardAvoidingShell` (API no-Tamagui). `flex` no es spacing/color → no aplica el lint
+// anti-hardcode (ADR-023 §4).
+const fillStyle = { flex: 1 } as const;
 
 export type GroupViewScreenProps = {
   /** Ícono del tipo de grupo (Boxes para rodeo, Layers para lote). */
@@ -109,62 +114,68 @@ export function GroupViewScreen({
 
   return (
     <YStack flex={1} width="100%" maxWidth="100%" overflow="hidden" backgroundColor="$bg">
-      {/* Header fijo con back. */}
-      <YStack width="100%" paddingTop={insets.top} paddingHorizontal="$4">
-        <XStack width="100%" alignItems="center" gap="$2" paddingVertical="$3">
-          <Pressable hitSlop={8} onPress={() => backOr(router, backFallback)} {...buttonA11y(Platform.OS, { label: 'Volver' })}>
-            <ChevronLeft size={28} color={muted} strokeWidth={2} />
-          </Pressable>
-        </XStack>
-      </YStack>
-
-      {/* Buscador + chips FIJOS arriba (fuera de la FlatList, RG4.4). */}
-      <GroupSearchBar
-        query={view.query}
-        onChangeQuery={view.setQuery}
-        categoryCode={view.categoryCode}
-        onSelectCategory={view.setCategoryCode}
-        categoryOptions={view.categoryOptions}
-        sex={view.sex}
-        onSelectSex={view.setSex}
-        sexFilterAvailable={view.sexFilterAvailable}
-        openPicker={openPicker}
-        onOpenPicker={setOpenPicker}
-      />
-
-      {error && animals.length === 0 ? (
-        <YStack paddingHorizontal="$4" paddingTop="$4">
-          <FormError message={error} />
+      {/* TECLADO (unidad «barrida de teclado»): el input vive en `GroupSearchBar`, que es una PARTE, no una
+          superficie — la cobertura la pone ACÁ, la pantalla que la monta (la usan `lote/[id]` y `rodeo/[id]`).
+          El buscador está arriba y no se tapa; lo que el teclado tapaba era la LISTA de resultados. Con la
+          columna adentro del primitivo, la lista termina justo por encima del teclado. */}
+      <KeyboardAvoidingShell style={fillStyle}>
+        {/* Header fijo con back. */}
+        <YStack width="100%" paddingTop={insets.top} paddingHorizontal="$4">
+          <XStack width="100%" alignItems="center" gap="$2" paddingVertical="$3">
+            <Pressable hitSlop={8} onPress={() => backOr(router, backFallback)} {...buttonA11y(Platform.OS, { label: 'Volver' })}>
+              <ChevronLeft size={28} color={muted} strokeWidth={2} />
+            </Pressable>
+          </XStack>
         </YStack>
-      ) : (
-        <FlatList
-          data={animals}
-          keyExtractor={(a) => a.profileId}
-          renderItem={({ item }) => <>{renderRow(item)}</>}
-          ListHeaderComponent={listHeader}
-          ListEmptyComponent={emptyElement}
-          ListFooterComponent={
-            loadingMore ? (
-              <XStack width="100%" alignItems="center" justifyContent="center" gap="$2" paddingVertical="$4">
-                <ActivityIndicator color={muted} />
-                <Text fontFamily="$body" fontSize="$3" lineHeight="$3" fontWeight="500" color="$textMuted">
-                  Cargando más…
-                </Text>
-              </XStack>
-            ) : null
-          }
-          onEndReached={view.loadMore}
-          onEndReachedThreshold={0.5}
-          keyboardShouldPersistTaps="handled"
-          showsHorizontalScrollIndicator={false}
-          showsVerticalScrollIndicator={false}
-          style={{ flex: 1, width: '100%' }}
-          contentContainerStyle={{
-            paddingHorizontal: getTokenValue('$4', 'space'),
-            paddingBottom: insets.bottom + getTokenValue('$6', 'space'),
-          }}
+
+        {/* Buscador + chips FIJOS arriba (fuera de la FlatList, RG4.4). */}
+        <GroupSearchBar
+          query={view.query}
+          onChangeQuery={view.setQuery}
+          categoryCode={view.categoryCode}
+          onSelectCategory={view.setCategoryCode}
+          categoryOptions={view.categoryOptions}
+          sex={view.sex}
+          onSelectSex={view.setSex}
+          sexFilterAvailable={view.sexFilterAvailable}
+          openPicker={openPicker}
+          onOpenPicker={setOpenPicker}
         />
-      )}
+
+        {error && animals.length === 0 ? (
+          <YStack paddingHorizontal="$4" paddingTop="$4">
+            <FormError message={error} />
+          </YStack>
+        ) : (
+          <FlatList
+            data={animals}
+            keyExtractor={(a) => a.profileId}
+            renderItem={({ item }) => <>{renderRow(item)}</>}
+            ListHeaderComponent={listHeader}
+            ListEmptyComponent={emptyElement}
+            ListFooterComponent={
+              loadingMore ? (
+                <XStack width="100%" alignItems="center" justifyContent="center" gap="$2" paddingVertical="$4">
+                  <ActivityIndicator color={muted} />
+                  <Text fontFamily="$body" fontSize="$3" lineHeight="$3" fontWeight="500" color="$textMuted">
+                    Cargando más…
+                  </Text>
+                </XStack>
+              ) : null
+            }
+            onEndReached={view.loadMore}
+            onEndReachedThreshold={0.5}
+            keyboardShouldPersistTaps="handled"
+            showsHorizontalScrollIndicator={false}
+            showsVerticalScrollIndicator={false}
+            style={{ flex: 1, width: '100%' }}
+            contentContainerStyle={{
+              paddingHorizontal: getTokenValue('$4', 'space'),
+              paddingBottom: insets.bottom + getTokenValue('$6', 'space'),
+            }}
+          />
+        )}
+      </KeyboardAvoidingShell>
     </YStack>
   );
 }

@@ -49,7 +49,8 @@ import { Platform, Pressable } from 'react-native';
 import { getTokenValue, Text, View, XStack, YStack } from 'tamagui';
 import { Bluetooth, Keyboard, Radio, Tag, X } from 'lucide-react-native';
 
-import { useSafeBottomInset } from '@/hooks/useSafeBottomInset';
+import { useKeyboardAwareBottomInset } from '@/hooks/useSafeBottomInset';
+import { KeyboardAvoidingShell } from '@/components/KeyboardAvoidingShell';
 import { StickIcon } from '@/theme/icons';
 import { useBleStickListener, useScopedScannerControls } from '@/services/ble/stick';
 import { useBleProviderApi } from '@/services/ble/BleStickListenerProvider';
@@ -60,6 +61,10 @@ import { buttonA11y, labelA11y } from '@/utils/a11y';
 
 import { Button } from './Button';
 import { FormField } from './FormField';
+
+// Estilo del `KeyboardAvoidingShell` (API no-Tamagui) — el MISMO que usa `BottomSheetShell` para este
+// esqueleto. `flex`/`width` no son spacing/color → no aplica el lint anti-hardcode (ADR-023 §4).
+const avoidStyle = { flex: 1, width: '100%', justifyContent: 'flex-end' } as const;
 
 export type TagScanSheetProps = {
   /** Cierra el sheet (X, backdrop, o tras un submit exitoso). El host lo desmonta al cerrar. */
@@ -173,7 +178,10 @@ export function TagScanSheet({
   // aire de Android) MÁS el aire propio ($6) que este sheet siempre tuvo. Es un sheet 🔴 de manga con
   // el CTA de confirmar caravana: se queda con su aire extra, esta unidad nunca resta.
   // Web 32 · iOS 66 (idénticos al baseline) · Android 3 botones 96.
-  const bottomPad = useSafeBottomInset({ extra: getTokenValue('$6', 'space') });
+  // KEYBOARD-AWARE: el sheet trae un input (carga manual de la caravana) y el shell de abajo ya sube la
+  // hoja el alto ENTERO del teclado → reservar además la safe-area + el $6 propio dejaría ~96dp de hueco
+  // muerto entre el CTA y el borde del teclado.
+  const bottomPad = useKeyboardAwareBottomInset({ extra: getTokenValue('$6', 'space') });
 
   return (
     <View
@@ -186,71 +194,78 @@ export function TagScanSheet({
       backgroundColor="$scrim"
       justifyContent="flex-end"
     >
-      {/* Backdrop tappable: cierra el sheet. Cubre el área por encima del panel. */}
-      <Pressable style={{ flex: 1, width: '100%' }} onPress={onClose} {...buttonA11y(Platform.OS, { label: 'Cerrar' })} />
+      {/* El shell del teclado envuelve la COLUMNA (backdrop libre + hoja): con el teclado arriba encoge
+          el alto útil desde abajo → el backdrop (flex:1) absorbe y la hoja SUBE por encima del teclado.
+          El scrim de AFUERA sigue cubriendo la pantalla ENTERA (también detrás del teclado). Mismo
+          esqueleto y mismo estilo que `BottomSheetShell`: este sheet está hecho a mano y su migración
+          al primitivo queda anotada en `docs/backlog.md`. */}
+      <KeyboardAvoidingShell style={avoidStyle}>
+        {/* Backdrop tappable: cierra el sheet. Cubre el área por encima del panel. */}
+        <Pressable style={{ flex: 1, width: '100%' }} onPress={onClose} {...buttonA11y(Platform.OS, { label: 'Cerrar' })} />
 
-      <YStack
-        testID="tag-scan-sheet"
-        width="100%"
-        maxHeight="85%"
-        backgroundColor="$bg"
-        borderTopLeftRadius="$card"
-        borderTopRightRadius="$card"
-        paddingHorizontal="$4"
-        paddingTop="$4"
-        paddingBottom={bottomPad}
-        gap="$4"
-      >
-        {/* Grip visual del sheet. */}
-        <View
-          alignSelf="center"
-          width={getTokenValue('$icon', 'size')}
-          height={getTokenValue('$progressTrack', 'size')}
-          borderRadius="$pill"
-          backgroundColor="$divider"
-        />
-
-        {/* Header: título + cerrar. */}
-        <XStack alignItems="center" gap="$3">
-          <Tag size={getTokenValue('$navIcon', 'size')} color={getTokenValue('$primary', 'color')} strokeWidth={2.25} />
-          <Text
-            flex={1}
-            fontFamily="$body"
-            fontSize="$6"
-            lineHeight="$6"
-            fontWeight="700"
-            color="$textPrimary"
-            numberOfLines={1}
-          >
-            {title}
-          </Text>
-          <Pressable testID="tag-scan-close" onPress={onClose} {...buttonA11y(Platform.OS, { label: 'Cerrar' })}>
-            <X size={getTokenValue('$navIcon', 'size')} color={getTokenValue('$textMuted', 'color')} strokeWidth={2.25} />
-          </Pressable>
-        </XStack>
-
-        {/* manualMode nunca es true con hideManualEntry (onManualAction=onClose no lo prende) → ManualTagEntry
-            NUNCA se muestra en ese modo; el guard `&& !hideManualEntry` lo blinda de forma defensiva. */}
-        {manualMode && !hideManualEntry ? (
-          <ManualTagEntry onSubmit={onSubmit} confirmLabel={confirmLabel} onClose={onClose} onBack={exitManual} />
-        ) : readEid !== null ? (
-          <ReadConfirmation
-            eid={readEid}
-            assigning={assigning}
-            error={assignError}
-            confirmLabel={confirmLabel}
-            confirmSublabel={confirmSublabel}
-            onAssign={() => void onAssign()}
-            onBack={backToScanning}
+        <YStack
+          testID="tag-scan-sheet"
+          width="100%"
+          maxHeight="85%"
+          backgroundColor="$bg"
+          borderTopLeftRadius="$card"
+          borderTopRightRadius="$card"
+          paddingHorizontal="$4"
+          paddingTop="$4"
+          paddingBottom={bottomPad}
+          gap="$4"
+        >
+          {/* Grip visual del sheet. */}
+          <View
+            alignSelf="center"
+            width={getTokenValue('$icon', 'size')}
+            height={getTokenValue('$progressTrack', 'size')}
+            borderRadius="$pill"
+            backgroundColor="$divider"
           />
-        ) : listenConn === 'connected' ? (
-          <ScanHero onManual={onManualAction} hideManualEntry={hideManualEntry} />
-        ) : listenConn === 'connectable' ? (
-          <ConnectHero onConnect={connectStick} onManual={onManualAction} hideManualEntry={hideManualEntry} />
-        ) : (
-          <ManualPromptHero onManual={onManualAction} hideManualEntry={hideManualEntry} />
-        )}
-      </YStack>
+
+          {/* Header: título + cerrar. */}
+          <XStack alignItems="center" gap="$3">
+            <Tag size={getTokenValue('$navIcon', 'size')} color={getTokenValue('$primary', 'color')} strokeWidth={2.25} />
+            <Text
+              flex={1}
+              fontFamily="$body"
+              fontSize="$6"
+              lineHeight="$6"
+              fontWeight="700"
+              color="$textPrimary"
+              numberOfLines={1}
+            >
+              {title}
+            </Text>
+            <Pressable testID="tag-scan-close" onPress={onClose} {...buttonA11y(Platform.OS, { label: 'Cerrar' })}>
+              <X size={getTokenValue('$navIcon', 'size')} color={getTokenValue('$textMuted', 'color')} strokeWidth={2.25} />
+            </Pressable>
+          </XStack>
+
+          {/* manualMode nunca es true con hideManualEntry (onManualAction=onClose no lo prende) → ManualTagEntry
+              NUNCA se muestra en ese modo; el guard `&& !hideManualEntry` lo blinda de forma defensiva. */}
+          {manualMode && !hideManualEntry ? (
+            <ManualTagEntry onSubmit={onSubmit} confirmLabel={confirmLabel} onClose={onClose} onBack={exitManual} />
+          ) : readEid !== null ? (
+            <ReadConfirmation
+              eid={readEid}
+              assigning={assigning}
+              error={assignError}
+              confirmLabel={confirmLabel}
+              confirmSublabel={confirmSublabel}
+              onAssign={() => void onAssign()}
+              onBack={backToScanning}
+            />
+          ) : listenConn === 'connected' ? (
+            <ScanHero onManual={onManualAction} hideManualEntry={hideManualEntry} />
+          ) : listenConn === 'connectable' ? (
+            <ConnectHero onConnect={connectStick} onManual={onManualAction} hideManualEntry={hideManualEntry} />
+          ) : (
+            <ManualPromptHero onManual={onManualAction} hideManualEntry={hideManualEntry} />
+          )}
+        </YStack>
+      </KeyboardAvoidingShell>
     </View>
   );
 }

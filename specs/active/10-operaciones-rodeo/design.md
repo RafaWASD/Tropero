@@ -510,3 +510,30 @@ El PASS del 2026-06-01 auditó el delta viejo (data_key + rama de gating) que ya
 - **2026-06-11 — RECONCILIACIÓN COMPLETA**: (a) **Gate 0 v2**: castración → estado editable sin evento (se eliminan data_key/gating/marcador — H1/M1/L1 sin objeto); pantalla de selección explícita (§3.2); `future_bull` (§4.1); denorm `is_castrated` + write-through (§4.2, cierra F1 de C6); recompute simétrico (§4.3); alternativas C–F nuevas. (b) **Staleness**: destete transiciona as-built (0062/0063); efecto de castración cerrado as-built (0059/0064); límite real del gating DB (0054 no gatea weaning); archivos/rutas reconciliados al as-built Expo Router + `AnimalRow`; C1–C4 DONE; offline reconciliado a spec 15 (CRUD plano, sync streams, canal de error de upload); numeración de migraciones ≥0084 TBD. Gate 1 y Puerta 1 reseteados.
 - **2026-06-11 — Fix-loop Gate 1 v2 (PASS 0H/2M/3L — folds documentales)**: **M1** — corregida la afirmación falsa "sin interacción con triggers as-built" en §6.1 y §4.2 (los checks de 0021 son BEFORE sin lista de columnas, disparan en cada UPDATE; `rodeo_check` puede abortar fail-closed la propagación hacia un perfil con rodeo inactivo/soft-deleted); **M2** — §3.3 ya no afirma que el timeline muestra el cambio en `ternero` (sin transición no hay registro; limitación en requirements §Limitaciones); **L1** — aserción del orden de triggers contra `pg_trigger` agregada a T-DB.4(f). Sin cambios de diseño.
 - **2026-06-11 — Fix-loop #2 (Puerta 1 APROBADA por Raf — LIM-1/LIM-2 foldeadas)**: **LIM-1 → observación automática** (nueva §3.5: reuso `addObservation` as-built, copy "Castrado" / "Corrección: marcado como no castrado", 2 CrudEntries/animal en la masiva, 1+1 en ficha, independencia sin atomicidad como residual; §1.1/§3.2/§3.3 actualizados; cero superficie de seguridad nueva). **LIM-2 → tolerar-y-saltear**: la propagación de §4.2(4) gana un **pre-filtro** que espeja el predicado exacto de `rodeo_check` (0021) — elegido sobre manejo de excepción por ser set-based, determinístico y no enmascarar otros 23514 legítimos; `RAISE LOG` server-side como visibilidad mínima (sin skip-report UI — cross-tenant); párrafo M1 de §4.2 y §6.1 reescritos a la semántica de skip; ⚠ banner de **re-chequeo puntual de Gate 1** agregado en §6 (lo lanza el leader). §9: D8/D9 validadas tal cual; D12/D13 nuevas (decisiones de Puerta 1).
+
+
+---
+
+## RECONCILIACIÓN as-built — unidad «barrida de teclado» (2026-07-27)
+
+Superficies de esta spec que **no tenían keyboard-avoidance** y ahora van dentro del primitivo
+`KeyboardAvoidingShell` (el detalle completo de la unidad, con el porqué y los límites, vive en
+`specs/active/03-modo-maniobras/design.md` §"As-built v13" y `tasks.md` §"As-built v14"):
+
+- **`src/components/GroupViewScreen.tsx`** (vista de grupo de `rodeo/[id]` y `lote/[id]`): el input vive en `GroupSearchBar`, que es una PARTE (no una superficie) → la cobertura la pone la pantalla que la monta. El buscador está arriba y nunca se tapaba: **lo que el teclado tapaba era la LISTA** de resultados.
+- **`app/app/seleccion-masiva.tsx`**: buscador de la selección + CTA fijo. El `BulkConfirmSheet` queda AFUERA del shell (como HERMANO: no se anidan dos shells).
+- **`src/components/BulkConfirmSheet.tsx`** *(fix-loop del reviewer, 2026-07-27)*: **no tiene** campo de texto, así que no entra por el guard del teclado — entra por la **reserva del borde inferior**. Tenía `paddingBottom="$6"` **fijo** (un token suelto que nunca pasó por el hook compartido, igual que los 2 sheets de tratamientos), y termina en dos botones full-width dentro de un `YStack maxHeight="85%"` anclado a `bottom:"$0"` → en Android con barra de 3 botones los CTAs quedaban a 32dp del borde de PANTALLA, o sea **debajo de la barra del sistema**. Pasa a **`useSafeBottomInset({ floor: $6 })`** — la variante NO keyboard-aware, porque al montarse como hermano del shell su borde inferior **no sube** con el teclado. Delta con el teclado cerrado: **web 32 (idéntico) · iOS 32→34 · Android gestos 32→48 · Android 3 botones 32→64** (fijado por test en `app/src/utils/footer-action.test.ts`). La CLASE que esto destapa —contenido anclado al borde inferior que reserva con un token fijo, que el guard de la reserva **no puede ver porque es una omisión, no una firma**— queda registrada como **abierta** en `docs/backlog.md`.
+- **`app/app/vacunacion-masiva.tsx`**: producto/fecha + preview + CTA "Vacunar N animales" en footer fijo.
+- **`app/app/lotes.tsx`**: crear/renombrar lote (form inline dentro del scroll).
+- **`app/app/lote/venta.tsx`**: precio/peso por animal (`BatchSaleAnimalRow`, que es una PARTE) + footer fijo.
+
+Lo común a todas: (a) el shell envuelve la COLUMNA de la superficie — en los sheets hechos a mano va
+**dentro** del scrim, que sigue cubriendo la pantalla entera; (b) la reserva inferior de lo anclado abajo
+pasa a **`useKeyboardAwareBottomInset(...)`** (canónica con el teclado cerrado → **valores idénticos a
+hoy**; solo `$2` con el teclado abierto, porque el shell ya subió el contenedor el alto entero del teclado
+y reservar la safe-area otra vez deja ~64dp de hueco muerto); (c) los sheets-overlay quedan como HERMANOS
+del shell de la pantalla, nunca adentro (dos shells anidados descuentan el teclado dos veces).
+Lo hace cumplir la **REGLA B** de `app/src/components/keyboard-avoiding-guard.test.ts`: todo archivo con
+entrada de texto tiene que estar clasificado (cubierto / parte reusable / excepción con motivo).
+**Límite (ADR-029)**: web no monta teclado virtual → el lift es invisible desde la E2E; veredicto DEVICE,
+Android **e iOS**.

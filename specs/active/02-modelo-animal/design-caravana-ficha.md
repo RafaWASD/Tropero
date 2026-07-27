@@ -405,3 +405,29 @@ campo externo). Se agregó el prop **`hideManualEntry?: boolean`** (default **fa
 Archivos as-built: `TagScanSheet.tsx` (`hideManualEntry` + copy alternativa en `ManualFallbackLink`/
 `ManualPromptHero`), `LinkCalfPrompt.tsx` (mount del sheet + wiring scan-para-llenar), `e2e/cria-al-pie-bastoneo.spec.ts`
 + `e2e/captures/cria-al-pie-bastoneo.capture.ts`. Frontend puro → Gate 1 N/A.
+
+
+---
+
+## RECONCILIACIÓN as-built — unidad «barrida de teclado» (2026-07-27)
+
+Superficies de esta spec que **no tenían keyboard-avoidance** y ahora van dentro del primitivo
+`KeyboardAvoidingShell` (el detalle completo de la unidad, con el porqué y los límites, vive en
+`specs/active/03-modo-maniobras/design.md` §"As-built v13" y `tasks.md` §"As-built v14"):
+
+- **`src/components/TagScanSheet.tsx`** (sheet de bastoneo, 🔴): sheet hecho a mano con carga manual del EID por teclado. Reserva: `useKeyboardAwareBottomInset({ extra: $6 })` (antes `useSafeBottomInset({ extra: $6 })`).
+- **`app/app/animal/[id].tsx`** (la ficha): tiene la carga manual de la caravana (`IdentifierAssignRow`) y los datos personalizados (`CustomFieldInput` vía `CustomPropertiesFicha`). El shell envuelve la barra superior + el cuerpo; los **4 sheets** del final (`BreedPickerSheet`, `TagScanSheet`, `TreatmentStartSheet`, `TreatmentApplicationSheet`) quedan AFUERA, como hermanos.
+- **`src/components/LinkCalfPrompt.tsx`** (cría al pie): se monta desde `crear-animal.tsx` **FUERA** de su `</FooterActionShell>` → no heredaba nada y el buscador del ternero quedaba tapado. Ahora tiene shell propio; el `TagScanSheet` que monta queda afuera del suyo.
+- **`src/components/TreatmentStartSheet.tsx` / `TreatmentApplicationSheet.tsx`** (tratamientos): sheets a mano con fecha/dosis/producto. Además —hallazgo aparte, de la unidad «aire»— tenían `paddingBottom="$6"` **fijo**: nunca pasaron por el hook compartido (el guard de la reserva prohíbe re-implementar la fórmula, no omitirla) y en Android su CTA quedaba a 32dp del borde, o sea **debajo** de una barra de 48. Pasan a `useKeyboardAwareBottomInset({ floor: $6 })`. Delta con el teclado CERRADO (`$6` de la escala `space` = **32**, no 24 — corregido en el fix-loop; los cuatro números están fijados por test en `app/src/utils/footer-action.test.ts`): **web 32 (idéntico) · iOS 32→34 · Android gestos 32→48 · Android 3 botones 32→64**.
+- **`app/app/animal/baja.tsx`**: el paso 2 pide precio/comprador/observaciones sobre un `ScrollView` con footer fijo.
+
+Lo común a todas: (a) el shell envuelve la COLUMNA de la superficie — en los sheets hechos a mano va
+**dentro** del scrim, que sigue cubriendo la pantalla entera; (b) la reserva inferior de lo anclado abajo
+pasa a **`useKeyboardAwareBottomInset(...)`** (canónica con el teclado cerrado → **valores idénticos a
+hoy**; solo `$2` con el teclado abierto, porque el shell ya subió el contenedor el alto entero del teclado
+y reservar la safe-area otra vez deja ~64dp de hueco muerto); (c) los sheets-overlay quedan como HERMANOS
+del shell de la pantalla, nunca adentro (dos shells anidados descuentan el teclado dos veces).
+Lo hace cumplir la **REGLA B** de `app/src/components/keyboard-avoiding-guard.test.ts`: todo archivo con
+entrada de texto tiene que estar clasificado (cubierto / parte reusable / excepción con motivo).
+**Límite (ADR-029)**: web no monta teclado virtual → el lift es invisible desde la E2E; veredicto DEVICE,
+Android **e iOS**.

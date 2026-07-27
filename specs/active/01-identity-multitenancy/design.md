@@ -561,3 +561,27 @@ Ver `tasks.md` para el plan de implementación paso a paso.
   - **Tabla "Decisiones de producto resueltas"** — agregadas las decisiones de sesión 17 (switch=dropdown, `last_establishment_opened` requerido, `active_lost`, crear vs cambiar campo, token persistido, baja del owner único, soft-delete con miembros, `already_member`, aviso al miembro = NO MVP, owner único = punto único de falla).
   - **Dependencias externas** — agregado `expo-secure-store`.
   - **Nota de implementación pendiente**: el rastro de "últimos visitados" (para el dropdown) y `last_establishment_opened` requieren almacenamiento local por usuario que sobreviva cold-start; la spec no fija el mecanismo concreto (AsyncStorage / secure-store / fila propia) — decisión técnica menor del implementer, a confirmar al construir el cliente.
+
+
+---
+
+## RECONCILIACIÓN as-built — unidad «barrida de teclado» (2026-07-27)
+
+Superficies de esta spec que **no tenían keyboard-avoidance** y ahora van dentro del primitivo
+`KeyboardAvoidingShell` (el detalle completo de la unidad, con el porqué y los límites, vive en
+`specs/active/03-modo-maniobras/design.md` §"As-built v13" y `tasks.md` §"As-built v14"):
+
+- **`app/app/mis-campos.tsx`**: buscador sticky + lista de campos. Igual que en la tab Animales, lo que el teclado tapaba eran los RESULTADOS, no el input.
+- **`app/app/(tabs)/mas.tsx`**: nombre y teléfono del perfil (`FormField` + `PhoneField`) sobre un `ScrollView` largo. Al ser una pantalla de TAB necesitó además `tabBarHideOnKeyboard: true` en `(tabs)/_layout.tsx`: el bottom-nav lo dibuja el Navigator FUERA de la pantalla, así que ningún shell puede subirlo y quedaba entre el contenido y el teclado.
+- **`app/app/crear-rodeo.tsx`**: el paso del nombre del rodeo, con footer fijo de "Continuar".
+
+Lo común a todas: (a) el shell envuelve la COLUMNA de la superficie — en los sheets hechos a mano va
+**dentro** del scrim, que sigue cubriendo la pantalla entera; (b) la reserva inferior de lo anclado abajo
+pasa a **`useKeyboardAwareBottomInset(...)`** (canónica con el teclado cerrado → **valores idénticos a
+hoy**; solo `$2` con el teclado abierto, porque el shell ya subió el contenedor el alto entero del teclado
+y reservar la safe-area otra vez deja ~64dp de hueco muerto); (c) los sheets-overlay quedan como HERMANOS
+del shell de la pantalla, nunca adentro (dos shells anidados descuentan el teclado dos veces).
+Lo hace cumplir la **REGLA B** de `app/src/components/keyboard-avoiding-guard.test.ts`: todo archivo con
+entrada de texto tiene que estar clasificado (cubierto / parte reusable / excepción con motivo).
+**Límite (ADR-029)**: web no monta teclado virtual → el lift es invisible desde la E2E; veredicto DEVICE,
+Android **e iOS**.

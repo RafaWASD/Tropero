@@ -29,7 +29,8 @@ import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
 import { Banknote, ChevronLeft, ChevronRight, Skull } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
 
-import { useSafeBottomInset } from '@/hooks/useSafeBottomInset';
+import { useKeyboardAwareBottomInset } from '@/hooks/useSafeBottomInset';
+import { KeyboardAvoidingShell } from '@/components/KeyboardAvoidingShell';
 import { Card, FormField, FormError, InfoNote } from '@/components';
 import { useEstablishment } from '@/contexts';
 import { fetchGroupMembers } from '@/services/management-groups';
@@ -51,6 +52,10 @@ import { buttonA11y } from '@/utils/a11y';
 import { backOr } from '@/utils/nav';
 
 import { BatchSaleAnimalRow } from './_components/BatchSaleAnimalRow';
+
+// Estilo del `KeyboardAvoidingShell` (API no-Tamagui). `flex` no es spacing/color → no aplica el lint
+// anti-hardcode (ADR-023 §4).
+const fillStyle = { flex: 1 } as const;
 
 const REASON_ICON: Record<BatchExitChoice, LucideIcon> = { sale: Banknote, death: Skull };
 const REASON_SUBTITLE: Record<BatchExitChoice, string> = {
@@ -80,7 +85,10 @@ export default function LoteVentaScreen() {
   // en vez de usar `$navBottomMin`", docs/plan-mejoras-ux-2026-07-18.md), o sea una GRAFÍA accidental
   // de la reserva canónica → se pliega dentro de ella en vez de conservarse como excepción.
   // Ver docs/design-system.md §4, "Los 8 outliers del `+12`".
-  const bottomPad = useSafeBottomInset();
+  // KEYBOARD-AWARE (unidad «barrida de teclado»): el paso 2 pide precio/peso por animal (BatchSaleAnimalRow);
+  // el footer vive dentro del `KeyboardAvoidingShell`, que ya descuenta el teclado entero → con el teclado
+  // arriba la reserva se encoge al respiro de `$2`.
+  const bottomPad = useKeyboardAwareBottomInset();
   // Handoff desde el modo selección del lote (delta rodeo-grande RG5.6 / design §6.4): en vez de enumerar cada
   // UUID en el param (un lote de miles reventaría la URL), llega `mode` + el csv MÁS CHICO entre seleccionados y
   // excluidos. mode='all' → operar sobre TODOS los miembros MENOS `ids` (excluidos); mode='subset' → operar sobre
@@ -271,172 +279,178 @@ export default function LoteVentaScreen() {
 
   return (
     <YStack flex={1} width="100%" maxWidth="100%" overflow="hidden" backgroundColor="$bg">
-      {/* Header con back + título. */}
-      <YStack width="100%" paddingTop={insets.top} paddingHorizontal="$4">
-        <XStack width="100%" alignItems="center" gap="$2" paddingVertical="$3">
-          <Pressable hitSlop={8} onPress={goBack} {...buttonA11y(Platform.OS, { label: 'Volver' })}>
-            <ChevronLeft size={28} color={muted} strokeWidth={2} />
-          </Pressable>
-          <Text fontFamily="$body" fontSize="$8" lineHeight="$8" fontWeight="700" color="$textPrimary">
-            {title}
-          </Text>
-        </XStack>
-      </YStack>
+      {/* TECLADO (unidad «barrida de teclado»): esta pantalla tiene campos de texto y NO montaba ningún
+          mecanismo — al enfocarlos el teclado los tapaba (mismo bug 🔴 de clase que el sheet de Vacunación,
+          acá por AUSENCIA de mecanismo). Con la columna adentro del primitivo, el contenedor se achica desde
+          abajo y el campo enfocado queda por encima del teclado. */}
+      <KeyboardAvoidingShell style={fillStyle}>
+        {/* Header con back + título. */}
+        <YStack width="100%" paddingTop={insets.top} paddingHorizontal="$4">
+          <XStack width="100%" alignItems="center" gap="$2" paddingVertical="$3">
+            <Pressable hitSlop={8} onPress={goBack} {...buttonA11y(Platform.OS, { label: 'Volver' })}>
+              <ChevronLeft size={28} color={muted} strokeWidth={2} />
+            </Pressable>
+            <Text fontFamily="$body" fontSize="$8" lineHeight="$8" fontWeight="700" color="$textPrimary">
+              {title}
+            </Text>
+          </XStack>
+        </YStack>
 
-      <ScrollView
-        flex={1}
-        width="100%"
-        maxWidth="100%"
-        contentContainerStyle={{
-          paddingHorizontal: getTokenValue('$4', 'space'),
-          paddingTop: getTokenValue('$2', 'space'),
-          paddingBottom: insets.bottom + getTokenValue('$6', 'space'),
-          width: '100%',
-          maxWidth: '100%',
-          gap: getTokenValue('$4', 'space'),
-        }}
-        keyboardShouldPersistTaps="handled"
-        showsHorizontalScrollIndicator={false}
-      >
-        {missing || loadError || noTargets ? (
-          <InfoNote>
-            {loadError ??
-              (missing
-                ? 'No pudimos cargar la selección. Volvé al lote y elegí los animales de nuevo.'
-                : 'Estos animales ya no están activos en el lote.')}
-          </InfoNote>
-        ) : targets === null ? (
-          <InfoNote>Cargando animales…</InfoNote>
-        ) : step === 1 ? (
-          <Step1ChooseReason count={count} onChoose={onChooseReason} />
-        ) : (
-          <YStack gap="$4">
-            {/* Resumen: N animales + motivo (confirmación clara, RLV.17). */}
-            <Card gap="$2">
-              <Text fontFamily="$body" fontSize="$3" fontWeight="500" color="$textMuted">
-                Vas a dar de baja
-              </Text>
-              <Text fontFamily="$body" fontSize="$7" lineHeight="$7" fontWeight="700" color="$textPrimary" numberOfLines={1}>
-                {count} {animalsWord}
-              </Text>
-              <Text fontFamily="$body" fontSize="$4" fontWeight="500" color="$terracota">
-                Motivo: {mapping?.label ?? ''}
-              </Text>
-            </Card>
+        <ScrollView
+          flex={1}
+          width="100%"
+          maxWidth="100%"
+          contentContainerStyle={{
+            paddingHorizontal: getTokenValue('$4', 'space'),
+            paddingTop: getTokenValue('$2', 'space'),
+            paddingBottom: insets.bottom + getTokenValue('$6', 'space'),
+            width: '100%',
+            maxWidth: '100%',
+            gap: getTokenValue('$4', 'space'),
+          }}
+          keyboardShouldPersistTaps="handled"
+          showsHorizontalScrollIndicator={false}
+        >
+          {missing || loadError || noTargets ? (
+            <InfoNote>
+              {loadError ??
+                (missing
+                  ? 'No pudimos cargar la selección. Volvé al lote y elegí los animales de nuevo.'
+                  : 'Estos animales ya no están activos en el lote.')}
+            </InfoNote>
+          ) : targets === null ? (
+            <InfoNote>Cargando animales…</InfoNote>
+          ) : step === 1 ? (
+            <Step1ChooseReason count={count} onChoose={onChooseReason} />
+          ) : (
+            <YStack gap="$4">
+              {/* Resumen: N animales + motivo (confirmación clara, RLV.17). */}
+              <Card gap="$2">
+                <Text fontFamily="$body" fontSize="$3" fontWeight="500" color="$textMuted">
+                  Vas a dar de baja
+                </Text>
+                <Text fontFamily="$body" fontSize="$7" lineHeight="$7" fontWeight="700" color="$textPrimary" numberOfLines={1}>
+                  {count} {animalsWord}
+                </Text>
+                <Text fontFamily="$body" fontSize="$4" fontWeight="500" color="$terracota">
+                  Motivo: {mapping?.label ?? ''}
+                </Text>
+              </Card>
 
-            <FormField
-              label="Fecha de la salida (AAAA-MM-DD)"
-              value={exitDate}
-              onChangeText={(t) => {
-                setExitDate(maskDateInput(t));
-                if (exitDateErr) setExitDateErr(null);
-              }}
-              keyboardType="number-pad"
-              placeholder="AAAA-MM-DD"
-              error={exitDateErr}
-            />
+              <FormField
+                label="Fecha de la salida (AAAA-MM-DD)"
+                value={exitDate}
+                onChangeText={(t) => {
+                  setExitDate(maskDateInput(t));
+                  if (exitDateErr) setExitDateErr(null);
+                }}
+                keyboardType="number-pad"
+                placeholder="AAAA-MM-DD"
+                error={exitDateErr}
+              />
 
-            {/* Precio + peso COMUNES (solo Venta, RLV.5): se aplican a todos; ajustables por animal abajo. */}
-            {showSaleData ? (
-              <YStack gap="$3">
-                <FormField
-                  label="Precio por animal en $ (opcional)"
-                  value={commonPrice}
-                  onChangeText={(t) => {
-                    setCommonPrice(sanitizePriceInput(t));
-                    if (commonPriceErr) setCommonPriceErr(null);
-                  }}
-                  keyboardType="decimal-pad"
-                  placeholder="Ej. 250000"
-                  error={commonPriceErr}
-                />
-                <FormField
-                  label="Peso por animal en kg (opcional)"
-                  value={commonWeight}
-                  onChangeText={(t) => {
-                    setCommonWeight(sanitizeWeightInput(t));
-                    if (commonWeightErr) setCommonWeightErr(null);
-                  }}
-                  keyboardType="decimal-pad"
-                  placeholder="Ej. 380"
-                  error={commonWeightErr}
-                />
-                <Text fontFamily="$body" fontSize="$3" lineHeight="$3" fontWeight="400" color="$textMuted">
-                  Se aplican a todos. Podés ajustar un animal puntual abajo.
+              {/* Precio + peso COMUNES (solo Venta, RLV.5): se aplican a todos; ajustables por animal abajo. */}
+              {showSaleData ? (
+                <YStack gap="$3">
+                  <FormField
+                    label="Precio por animal en $ (opcional)"
+                    value={commonPrice}
+                    onChangeText={(t) => {
+                      setCommonPrice(sanitizePriceInput(t));
+                      if (commonPriceErr) setCommonPriceErr(null);
+                    }}
+                    keyboardType="decimal-pad"
+                    placeholder="Ej. 250000"
+                    error={commonPriceErr}
+                  />
+                  <FormField
+                    label="Peso por animal en kg (opcional)"
+                    value={commonWeight}
+                    onChangeText={(t) => {
+                      setCommonWeight(sanitizeWeightInput(t));
+                      if (commonWeightErr) setCommonWeightErr(null);
+                    }}
+                    keyboardType="decimal-pad"
+                    placeholder="Ej. 380"
+                    error={commonWeightErr}
+                  />
+                  <Text fontFamily="$body" fontSize="$3" lineHeight="$3" fontWeight="400" color="$textMuted">
+                    Se aplican a todos. Podés ajustar un animal puntual abajo.
+                  </Text>
+                </YStack>
+              ) : null}
+
+              {/* Lista de animales: con override (Venta) o solo lectura (Muerte). */}
+              <YStack gap="$2">
+                <Text fontFamily="$body" fontSize="$5" lineHeight="$5" fontWeight="600" color="$textPrimary">
+                  Animales ({count})
+                </Text>
+                {showSaleData
+                  ? targets.map((t) => {
+                      const o = overrides[t.profileId] ?? EMPTY_OVERRIDE;
+                      return (
+                        <BatchSaleAnimalRow
+                          key={t.profileId}
+                          testID={`batch-row-${t.profileId}`}
+                          hero={t.hero}
+                          expanded={expanded.has(t.profileId)}
+                          onToggleExpand={() => toggleExpanded(t.profileId)}
+                          priceRaw={o.priceRaw}
+                          onPrice={(text) => setOverride(t.profileId, { priceRaw: sanitizePriceInput(text), priceErr: null })}
+                          priceErr={o.priceErr}
+                          weightRaw={o.weightRaw}
+                          onWeight={(text) => setOverride(t.profileId, { weightRaw: sanitizeWeightInput(text), weightErr: null })}
+                          weightErr={o.weightErr}
+                          commonPriceHint={commonPrice.trim().length > 0 ? `$${commonPrice}` : null}
+                          commonWeightHint={commonWeight.trim().length > 0 ? `${commonWeight} kg` : null}
+                        />
+                      );
+                    })
+                  : targets.map((t) => (
+                      <View key={t.profileId} borderWidth={1} borderColor="$divider" borderRadius="$card" backgroundColor="$white" paddingHorizontal="$4" paddingVertical="$3">
+                        <Text fontFamily="$body" fontSize="$5" lineHeight="$5" fontWeight="700" color="$textPrimary" numberOfLines={1}>
+                          {t.hero}
+                        </Text>
+                      </View>
+                    ))}
+              </YStack>
+
+              {/* Aviso de irreversibilidad (RLV.17). */}
+              <YStack width="100%" backgroundColor="$surface" borderRadius="$card" borderWidth={1} borderColor="$terracota" padding="$4" gap="$1">
+                <Text fontFamily="$body" fontSize="$4" fontWeight="600" color="$terracota">
+                  Esta acción no se puede deshacer
+                </Text>
+                <Text fontFamily="$body" fontSize="$3" fontWeight="400" color="$textMuted">
+                  Los animales salen del rodeo activo y quedan archivados. Su historial se conserva, pero no vas a
+                  poder reactivarlos desde la app.
                 </Text>
               </YStack>
-            ) : null}
-
-            {/* Lista de animales: con override (Venta) o solo lectura (Muerte). */}
-            <YStack gap="$2">
-              <Text fontFamily="$body" fontSize="$5" lineHeight="$5" fontWeight="600" color="$textPrimary">
-                Animales ({count})
-              </Text>
-              {showSaleData
-                ? targets.map((t) => {
-                    const o = overrides[t.profileId] ?? EMPTY_OVERRIDE;
-                    return (
-                      <BatchSaleAnimalRow
-                        key={t.profileId}
-                        testID={`batch-row-${t.profileId}`}
-                        hero={t.hero}
-                        expanded={expanded.has(t.profileId)}
-                        onToggleExpand={() => toggleExpanded(t.profileId)}
-                        priceRaw={o.priceRaw}
-                        onPrice={(text) => setOverride(t.profileId, { priceRaw: sanitizePriceInput(text), priceErr: null })}
-                        priceErr={o.priceErr}
-                        weightRaw={o.weightRaw}
-                        onWeight={(text) => setOverride(t.profileId, { weightRaw: sanitizeWeightInput(text), weightErr: null })}
-                        weightErr={o.weightErr}
-                        commonPriceHint={commonPrice.trim().length > 0 ? `$${commonPrice}` : null}
-                        commonWeightHint={commonWeight.trim().length > 0 ? `${commonWeight} kg` : null}
-                      />
-                    );
-                  })
-                : targets.map((t) => (
-                    <View key={t.profileId} borderWidth={1} borderColor="$divider" borderRadius="$card" backgroundColor="$white" paddingHorizontal="$4" paddingVertical="$3">
-                      <Text fontFamily="$body" fontSize="$5" lineHeight="$5" fontWeight="700" color="$textPrimary" numberOfLines={1}>
-                        {t.hero}
-                      </Text>
-                    </View>
-                  ))}
             </YStack>
+          )}
+        </ScrollView>
 
-            {/* Aviso de irreversibilidad (RLV.17). */}
-            <YStack width="100%" backgroundColor="$surface" borderRadius="$card" borderWidth={1} borderColor="$terracota" padding="$4" gap="$1">
-              <Text fontFamily="$body" fontSize="$4" fontWeight="600" color="$terracota">
-                Esta acción no se puede deshacer
-              </Text>
-              <Text fontFamily="$body" fontSize="$3" fontWeight="400" color="$textMuted">
-                Los animales salen del rodeo activo y quedan archivados. Su historial se conserva, pero no vas a
-                poder reactivarlos desde la app.
-              </Text>
-            </YStack>
+        {/* CTA destructivo fijo abajo (thumb-zone), solo en el paso 2 con animales. */}
+        {step === 2 && targets && targets.length > 0 ? (
+          <YStack
+            width="100%"
+            paddingHorizontal="$4"
+            paddingTop="$3"
+            paddingBottom={bottomPad}
+            gap="$2"
+            borderTopWidth={1}
+            borderTopColor="$divider"
+            backgroundColor="$bg"
+          >
+            <FormError message={formError} />
+            <DestructiveButton
+              label={submitting ? 'Registrando…' : `Registrar salida (${count})`}
+              disabled={submitting}
+              onPress={() => void onConfirm()}
+              testID="venta-registrar-salida"
+            />
           </YStack>
-        )}
-      </ScrollView>
-
-      {/* CTA destructivo fijo abajo (thumb-zone), solo en el paso 2 con animales. */}
-      {step === 2 && targets && targets.length > 0 ? (
-        <YStack
-          width="100%"
-          paddingHorizontal="$4"
-          paddingTop="$3"
-          paddingBottom={bottomPad}
-          gap="$2"
-          borderTopWidth={1}
-          borderTopColor="$divider"
-          backgroundColor="$bg"
-        >
-          <FormError message={formError} />
-          <DestructiveButton
-            label={submitting ? 'Registrando…' : `Registrar salida (${count})`}
-            disabled={submitting}
-            onPress={() => void onConfirm()}
-            testID="venta-registrar-salida"
-          />
-        </YStack>
-      ) : null}
+        ) : null}
+      </KeyboardAvoidingShell>
     </YStack>
   );
 }

@@ -26,9 +26,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { getTokenValue, Spinner, Text, View, XStack, YStack } from 'tamagui';
 
-import { useHardwareBack, useKeyboardVisible, useSafeBottomInset } from '@/hooks';
+import { useHardwareBack, useKeyboardAwareBottomInset } from '@/hooks';
 import { KeyboardAvoidingShell } from '@/components/KeyboardAvoidingShell';
-import { resolveFooterPaddingBottom } from '@/utils/footer-action';
 import { buttonA11y, labelA11y } from '@/utils/a11y';
 import { cargaBackAction } from '@/utils/maniobra-back';
 import {
@@ -846,18 +845,12 @@ export default function ManiobraCarga() {
   }, [sequence, currentIndex, captureAndAdvance]);
 
   // Reserva inferior del CTA de cada paso (U2 "CTA siempre visible"): la canónica del repo, robusta
-  // al frame-0 de Android (hook compartido `useSafeBottomInset`, con el blindaje de U7 adentro) y
+  // al frame-0 de Android (adentro del hook vive `useSafeBottomInset`, con el blindaje de U7) y
   // KEYBOARD-AWARE — con el teclado abierto (pasos de texto: producto/tubo/pajuela/fecha/dato custom) el
   // CTA sube (`KeyboardAvoidingShell`, abajo) y su reserva se encoge a un respiro (la safe-area la tapa el
   // teclado → reservarla dejaría un hueco). El shell descuenta el teclado COMPLETO y esta reserva aporta
   // solo el `$2` de respiro: el CTA queda a $2 del borde del teclado, sin doble conteo.
-  const keyboardVisible = useKeyboardVisible();
-  const safeBottomInset = useSafeBottomInset();
-  const bottomPad = resolveFooterPaddingBottom({
-    keyboardVisible,
-    safeInset: safeBottomInset,
-    keyboardOpenGap: getTokenValue('$2', 'space'),
-  });
+  const bottomPad = useKeyboardAwareBottomInset();
 
   // ─── Estados de carga / error ───
   if (loadError) {

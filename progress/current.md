@@ -3,6 +3,65 @@
 > Este archivo se vacía al cerrar cada sesión y su resumen se mueve a `history.md`.
 > Mientras trabajás, **mantenelo actualizado en tiempo real**, no al final.
 
+## 2026-07-27 — UNIDAD «barrida de teclado» (implementer) — LISTA para review
+
+Pedido de Raf tras verificar el fix anterior en device: *"falta replicar comportamiento al resto de todos
+los campos de texto con una barrida, porque próximo paso con teclado ya volví a encontrar el error"*.
+El commit `eabfd00` cerró los **4 archivos que montaban un `KeyboardAvoidingView` mal configurado**;
+existía una **segunda población** —**23 superficies con AUSENCIA total de mecanismo**, 7 de ellas 🔴
+manga— que el guard de aquella unidad **no podía ver por construcción** (busca el uso incorrecto de un
+componente, no la falta de él). Base `fc4d164`.
+
+**Hecho**: **20 superficies envueltas** con `KeyboardAvoidingShell` (+ las partes reusables cubiertas por
+sus consumidores) · **hook nuevo `useKeyboardAwareBottomInset`** que resuelve la doble reserva de
+safe-area en UN lugar (canónica con teclado cerrado, `$2` con teclado abierto) y al que migraron los 3
+sitios de la unidad anterior → una sola grafía de la reserva · **`tabBarHideOnKeyboard: true`** en las
+tabs (el bottom-nav vive fuera de la pantalla: ningún shell puede subirlo).
+
+**El entregable que más importa: el guard DADO VUELTA.** A la REGLA A ("nadie monta el componente de RN
+fuera del primitivo") se le suma la **REGLA B**: enumera estáticamente **todo** archivo con entrada de
+texto y exige que esté clasificado — cubierto (**calculado por punto fijo desde el primitivo**, no por
+lista escrita a mano), PARTE reusable con motivo, o EXCEPCIÓN con motivo **y marcador en la cabecera del
+propio archivo**. **Un archivo nuevo con un input sin clasificar deja el guard en ROJO.** Falsificado con
+3 mutaciones sobre el árbol real (archivo nuevo sin clasificar → rojo · sacarle el wrap a `identificar` →
+rojo · que `AuthScreenShell` deje de montar el primitivo → **9 pantallas de auth** en rojo), las tres
+revertidas y verde de nuevo.
+
+**Dos hallazgos que no estaban en el pedido**:
+1. **El blanqueo de comentarios de los guards dejaba líneas de código INVISIBLES**: un `/*` escrito dentro
+   de un comentario de línea abría un bloque falso que se comía el archivo hasta el próximo cierre de
+   bloque. **Medición, con la métrica declarada** — líneas de CÓDIGO que el escáner viejo dejaba
+   invisibles (el blanqueo correcto les deja código, el viejo las deja enteras en blanco), sobre los
+   `.ts`/`.tsx` de `app/app`+`app/src` sin `.test.*`, contra el árbol de `fc4d164`: **556 líneas en 6
+   archivos** (341 `maniobra/identificar.tsx` · 113 `asignar-caravanas.tsx` · 84 `FindOrCreateOverlay.tsx`
+   · 10 `_layout.tsx` · 6+2 los dos de SIGSA). *(La primera entrega reportó "1008 en 57 archivos": no
+   reproduce con ninguna métrica y quedó corregido en los 3 guards, en la spec 03 y acá.)* Reemplazado por
+   un escáner con estado (`utils/strip-comments.ts` + tests con contrafáctico) y los 3 guards existentes
+   migrados — **no había violaciones escondidas**.
+2. **`TreatmentStartSheet`/`TreatmentApplicationSheet` nunca pasaron por el hook de la reserva** (tenían
+   `paddingBottom="$6"` fijo): la unidad «aire» no los tocó porque su guard prohíbe **re-implementar** la
+   fórmula, no **omitirla**. En el fix-loop el reviewer encontró una **tercera** instancia,
+   `BulkConfirmSheet` (montado desde `seleccion-masiva`), también arreglada. Los 3 plegados con
+   `floor: $6` → **web 32 (idéntico) · iOS 32→34 · Android gestos 32→48 · Android 3 botones 32→64**
+   (fijado por test en `utils/footer-action.test.ts`).
+
+**El backlog mentía dos veces**: (a) decía *"qué queda: `TagScanSheet`"* — eran **SEIS** sheets a mano con
+input; (b) la entrada que documentaba esa lección **cometía el mismo error**, titulada por las 2 instancias
+vistas ese día en vez de por el criterio. Retitulada por CRITERIO ("todo contenido anclado al borde
+inferior con reserva de token fijo en vez del hook"), declarada **CLASE ABIERTA sin guard que la vea** y
+con la enumeración exhaustiva pendiente. Se sumó además una entrada 🔴 propia para el **back de Android con
+un sheet a mano abierto** (hace pop de la ruta; el peor caso es `FindOrCreateOverlay`, overlay global).
+
+**Verificado**: `check.mjs` **RC=0** (alcance declarado: **no corre E2E**) · guards del teclado 12/12 ·
+E2E de las superficies tocadas **comparada contra el BASELINE corrido** (stash→build→run→pop): 17 specs,
+**2 failed**, las 2 fallan igual en `fc4d164` · capture del Gate 2.5 3/3 con 7 estados y assertions de
+no-regresión en web · `design/` intacto · **nada commiteado**.
+
+**⏸ Veredicto en DEVICE (ADR-029), Android *e* iOS**: el bug es estructuralmente invisible en web y estas
+23 superficies estaban rotas en las dos plataformas (**iOS también cambia, y está bien**: es
+roto→arreglado). Detalle, tabla de las 23, razonamiento de la safe-area, diseño del guard y dudas
+abiertas en `progress/impl_barrida-teclado.md`.
+
 ## 2026-07-27 — CIERRE del leader: las 2 unidades COMMITEADAS + APK en vuelo — ⏸ PUERTA 2 (device Raf)
 
 Las dos unidades de abajo están **cerradas y commiteadas**; los bloques que siguen quedan como acta del

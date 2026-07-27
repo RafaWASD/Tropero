@@ -35,6 +35,7 @@ import { AlertTriangle, CheckCircle2, ChevronRight, FileUp, Info, LogOut, Pencil
 import { usePowerSync } from '@powersync/react';
 
 import { Button, Card, FormField, FormError, InfoNote, PhoneField, type PhoneValue } from '@/components';
+import { KeyboardAvoidingShell } from '@/components/KeyboardAvoidingShell';
 import { CampoIcon, LoteIcon, MiembroIcon, RodeoIcon } from '@/theme/icons';
 import { useAuth, useEstablishment, useProfile } from '@/contexts';
 import {
@@ -53,6 +54,10 @@ import { formatPhoneDisplay, phoneValueFromStored } from '@/utils/phone';
 import { buttonA11y } from '@/utils/a11y';
 
 const OFFLINE_COPY = 'Necesitás conexión para esto. Conectate a internet y volvé a intentar.';
+
+// Estilo del `KeyboardAvoidingShell` (API no-Tamagui). `flex` no es spacing/color → no aplica el lint
+// anti-hardcode (ADR-023 §4).
+const fillStyle = { flex: 1 } as const;
 
 // ─── Hook de conexión (reusa subscribeSyncUiState de PowerSync, spec 15) ──────────
 //
@@ -919,179 +924,185 @@ export default function MasScreen() {
 
   return (
     <YStack flex={1} width="100%" maxWidth="100%" overflow="hidden" backgroundColor="$bg">
-      {/* Header propio (el tab no muestra header nativo, ADR-018). */}
-      <YStack width="100%" paddingTop={insets.top} paddingHorizontal="$4">
-        <XStack width="100%" alignItems="center" paddingVertical="$3">
-          <Text fontFamily="$body" fontSize="$8" lineHeight="$8" fontWeight="700" color="$textPrimary">
-            Más
-          </Text>
-        </XStack>
-      </YStack>
-
-      <ScrollView
-        ref={scrollRef}
-        flex={1}
-        width="100%"
-        maxWidth="100%"
-        contentContainerStyle={{
-          paddingHorizontal: getTokenValue('$4', 'space'),
-          paddingBottom: getTokenValue('$8', 'space'),
-          width: '100%',
-          maxWidth: '100%',
-        }}
-        keyboardShouldPersistTaps="handled"
-        showsHorizontalScrollIndicator={false}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* ── Perfil (R2.1) ── */}
-        <SectionTitle>Perfil</SectionTitle>
-        {userId ? (
-          <ProfileSection userId={userId} onScrollTo={scrollToY} />
-        ) : (
-          <InfoNote>No pudimos identificar tu cuenta. Cerrá sesión y volvé a entrar.</InfoNote>
-        )}
-
-        {/* ── Campo activo (R3.4 / R3.6) — acciones OWNER-ONLY + Rodeos (todos los roles) ── */}
-        {activeField ? (
-          <>
-            <SectionTitle>{`Campo activo · ${activeField.name}`}</SectionTitle>
-            <Card padding="$0" gap="$0" overflow="hidden">
-              {/* Rodeos (spec 02 C1): la lista es visible a todos los roles; la gestión (crear /
-                  editar plantilla / eliminar) es owner-only dentro de la pantalla (R2.3). */}
-              <ActionRow
-                icon={<RodeoIcon size={20} color={primary} strokeWidth={2} />}
-                label="Rodeos"
-                accessibilityLabel="Ver y gestionar los rodeos del campo"
-                trailing={<ChevronRight size={20} color={muted} strokeWidth={2} />}
-                onPress={() => router.push('/rodeos')}
-              />
-              <View height={1} backgroundColor="$divider" marginHorizontal="$4" />
-              {/* Lotes (spec 02 C4, ADR-020): la lista es visible a todos los roles; la gestión
-                  (crear / renombrar / borrar) es owner-only dentro de la pantalla. Asignar animales
-                  a un lote (cualquier rol) pasa por la ficha del animal. */}
-              <ActionRow
-                icon={<LoteIcon size={20} color={primary} strokeWidth={2} />}
-                label="Lotes"
-                accessibilityLabel="Ver y gestionar los lotes del campo"
-                trailing={<ChevronRight size={20} color={muted} strokeWidth={2} />}
-                onPress={() => router.push('/lotes')}
-              />
-              <View height={1} backgroundColor="$divider" marginHorizontal="$4" />
-              {/* Asignación masiva de caravanas (spec 09 chunk dedup opción B, RD5.1 / D-c): cualquier
-                  rol activo puede caravanear (trabajo de manga) → visible a todos, no owner-only. */}
-              <ActionRow
-                icon={<Radio size={20} color={primary} strokeWidth={2} />}
-                label="Asignar caravanas en masa"
-                accessibilityLabel="Asignar caravanas electrónicas en masa con el bastón"
-                trailing={<ChevronRight size={20} color={muted} strokeWidth={2} />}
-                onPress={() => router.push('/asignar-caravanas')}
-              />
-              {isOwner ? (
-                <>
-                  <View height={1} backgroundColor="$divider" marginHorizontal="$4" />
-                  <ActionRow
-                    icon={<Pencil size={20} color={primary} strokeWidth={2} />}
-                    label="Editar campo"
-                    trailing={<ChevronRight size={20} color={muted} strokeWidth={2} />}
-                    onPress={() => router.push('/editar-campo')}
-                  />
-                  <View height={1} backgroundColor="$divider" marginHorizontal="$4" />
-                  <ActionRow
-                    icon={<Trash2 size={20} color={terracota} strokeWidth={2} />}
-                    label={deleting ? 'Eliminando…' : 'Eliminar campo'}
-                    destructive
-                    accessibilityLabel="Eliminar campo (acción destructiva)"
-                    onPress={() => void onDeleteField()}
-                  />
-                </>
-              ) : null}
-            </Card>
-            {!isOwner ? (
-              <InfoNote>
-                Solo el dueño del campo puede editar o eliminar sus datos. Vos sos miembro de este
-                campo.
-              </InfoNote>
-            ) : null}
-          </>
-        ) : null}
-
-        {/* ── SENASA (spec 08): exportar caravanas electrónicas a SIGSA. owner/vet only (R7.2). ── */}
-        {activeField && canExportSigsa ? (
-          <>
-            <SectionTitle>SENASA</SectionTitle>
-            {/* Banner RENSPA (R13.3): solo OWNER (es quien edita el RENSPA, R2.3) y solo si falta. Linkea a
-                "Editar campo" donde está el campo de RENSPA. */}
-            {isOwner ? (
-              <YStack marginBottom="$2">
-                <RenspaBanner
-                  establishmentId={activeField.id}
-                  onComplete={() => router.push('/editar-campo')}
-                />
-              </YStack>
-            ) : null}
-            <Card padding="$0" gap="$0" overflow="hidden">
-              <ActionRow
-                icon={<FileUp size={20} color={primary} strokeWidth={2} />}
-                label="Exportar a SENASA"
-                accessibilityLabel="Exportar las caravanas electrónicas para declarar en SIGSA"
-                trailing={<ChevronRight size={20} color={muted} strokeWidth={2} />}
-                onPress={() => router.push('/export-sigsa')}
-              />
-            </Card>
-          </>
-        ) : null}
-
-        {/* ── Equipo (miembros/invitaciones) — Fase 5 / B.1.3 ── */}
-        {activeField ? (
-          <>
-            <SectionTitle>Equipo</SectionTitle>
-            <Card padding="$0" gap="$0" overflow="hidden">
-              <ActionRow
-                icon={<MiembroIcon size={20} color={primary} strokeWidth={2} />}
-                label="Miembros e invitaciones"
-                accessibilityLabel="Ver miembros e invitaciones del equipo"
-                trailing={<ChevronRight size={20} color={muted} strokeWidth={2} />}
-                onPress={() => router.push('/miembros')}
-              />
-            </Card>
-          </>
-        ) : null}
-
-        {/* ── Cerrar sesión (T6.2 / R1.6) — destructiva, thumb-zone (abajo) ── */}
-        <YStack marginTop="$8" width="100%">
-          <XStack
-            width="100%"
-            alignItems="center"
-            justifyContent="center"
-            gap="$2"
-            minHeight="$touchMin"
-            borderWidth={2}
-            borderColor="$terracota"
-            borderRadius="$pill"
-            paddingHorizontal="$5"
-            pressStyle={{ backgroundColor: '$surface' }}
-            onPress={() => void onLogout()}
-            {...buttonA11y(Platform.OS, { label: 'Cerrar sesión' })}
-          >
-            <LogOut size={20} color={terracota} strokeWidth={2.5} />
-            <Text fontFamily="$body" fontSize="$5" fontWeight="600" color="$terracota">
-              Cerrar sesión
+      {/* TECLADO (unidad «barrida de teclado»): esta pantalla tiene campos de texto y NO montaba ningún
+          mecanismo — al enfocarlos el teclado los tapaba (mismo bug 🔴 de clase que el sheet de Vacunación,
+          acá por AUSENCIA de mecanismo). Con la columna adentro del primitivo, el contenedor se achica desde
+          abajo y el campo enfocado queda por encima del teclado. */}
+      <KeyboardAvoidingShell style={fillStyle}>
+        {/* Header propio (el tab no muestra header nativo, ADR-018). */}
+        <YStack width="100%" paddingTop={insets.top} paddingHorizontal="$4">
+          <XStack width="100%" alignItems="center" paddingVertical="$3">
+            <Text fontFamily="$body" fontSize="$8" lineHeight="$8" fontWeight="700" color="$textPrimary">
+              Más
             </Text>
           </XStack>
         </YStack>
 
-        {/* ── Zona de peligro (Fase 6, R2.4/R2.5/R2.5.1) — al FONDO, separada visualmente ── */}
-        {userId ? (
+        <ScrollView
+          ref={scrollRef}
+          flex={1}
+          width="100%"
+          maxWidth="100%"
+          contentContainerStyle={{
+            paddingHorizontal: getTokenValue('$4', 'space'),
+            paddingBottom: getTokenValue('$8', 'space'),
+            width: '100%',
+            maxWidth: '100%',
+          }}
+          keyboardShouldPersistTaps="handled"
+          showsHorizontalScrollIndicator={false}
+          showsVerticalScrollIndicator={false}
+        >
+          {/* ── Perfil (R2.1) ── */}
+          <SectionTitle>Perfil</SectionTitle>
+          {userId ? (
+            <ProfileSection userId={userId} onScrollTo={scrollToY} />
+          ) : (
+            <InfoNote>No pudimos identificar tu cuenta. Cerrá sesión y volvé a entrar.</InfoNote>
+          )}
+
+          {/* ── Campo activo (R3.4 / R3.6) — acciones OWNER-ONLY + Rodeos (todos los roles) ── */}
+          {activeField ? (
+            <>
+              <SectionTitle>{`Campo activo · ${activeField.name}`}</SectionTitle>
+              <Card padding="$0" gap="$0" overflow="hidden">
+                {/* Rodeos (spec 02 C1): la lista es visible a todos los roles; la gestión (crear /
+                    editar plantilla / eliminar) es owner-only dentro de la pantalla (R2.3). */}
+                <ActionRow
+                  icon={<RodeoIcon size={20} color={primary} strokeWidth={2} />}
+                  label="Rodeos"
+                  accessibilityLabel="Ver y gestionar los rodeos del campo"
+                  trailing={<ChevronRight size={20} color={muted} strokeWidth={2} />}
+                  onPress={() => router.push('/rodeos')}
+                />
+                <View height={1} backgroundColor="$divider" marginHorizontal="$4" />
+                {/* Lotes (spec 02 C4, ADR-020): la lista es visible a todos los roles; la gestión
+                    (crear / renombrar / borrar) es owner-only dentro de la pantalla. Asignar animales
+                    a un lote (cualquier rol) pasa por la ficha del animal. */}
+                <ActionRow
+                  icon={<LoteIcon size={20} color={primary} strokeWidth={2} />}
+                  label="Lotes"
+                  accessibilityLabel="Ver y gestionar los lotes del campo"
+                  trailing={<ChevronRight size={20} color={muted} strokeWidth={2} />}
+                  onPress={() => router.push('/lotes')}
+                />
+                <View height={1} backgroundColor="$divider" marginHorizontal="$4" />
+                {/* Asignación masiva de caravanas (spec 09 chunk dedup opción B, RD5.1 / D-c): cualquier
+                    rol activo puede caravanear (trabajo de manga) → visible a todos, no owner-only. */}
+                <ActionRow
+                  icon={<Radio size={20} color={primary} strokeWidth={2} />}
+                  label="Asignar caravanas en masa"
+                  accessibilityLabel="Asignar caravanas electrónicas en masa con el bastón"
+                  trailing={<ChevronRight size={20} color={muted} strokeWidth={2} />}
+                  onPress={() => router.push('/asignar-caravanas')}
+                />
+                {isOwner ? (
+                  <>
+                    <View height={1} backgroundColor="$divider" marginHorizontal="$4" />
+                    <ActionRow
+                      icon={<Pencil size={20} color={primary} strokeWidth={2} />}
+                      label="Editar campo"
+                      trailing={<ChevronRight size={20} color={muted} strokeWidth={2} />}
+                      onPress={() => router.push('/editar-campo')}
+                    />
+                    <View height={1} backgroundColor="$divider" marginHorizontal="$4" />
+                    <ActionRow
+                      icon={<Trash2 size={20} color={terracota} strokeWidth={2} />}
+                      label={deleting ? 'Eliminando…' : 'Eliminar campo'}
+                      destructive
+                      accessibilityLabel="Eliminar campo (acción destructiva)"
+                      onPress={() => void onDeleteField()}
+                    />
+                  </>
+                ) : null}
+              </Card>
+              {!isOwner ? (
+                <InfoNote>
+                  Solo el dueño del campo puede editar o eliminar sus datos. Vos sos miembro de este
+                  campo.
+                </InfoNote>
+              ) : null}
+            </>
+          ) : null}
+
+          {/* ── SENASA (spec 08): exportar caravanas electrónicas a SIGSA. owner/vet only (R7.2). ── */}
+          {activeField && canExportSigsa ? (
+            <>
+              <SectionTitle>SENASA</SectionTitle>
+              {/* Banner RENSPA (R13.3): solo OWNER (es quien edita el RENSPA, R2.3) y solo si falta. Linkea a
+                  "Editar campo" donde está el campo de RENSPA. */}
+              {isOwner ? (
+                <YStack marginBottom="$2">
+                  <RenspaBanner
+                    establishmentId={activeField.id}
+                    onComplete={() => router.push('/editar-campo')}
+                  />
+                </YStack>
+              ) : null}
+              <Card padding="$0" gap="$0" overflow="hidden">
+                <ActionRow
+                  icon={<FileUp size={20} color={primary} strokeWidth={2} />}
+                  label="Exportar a SENASA"
+                  accessibilityLabel="Exportar las caravanas electrónicas para declarar en SIGSA"
+                  trailing={<ChevronRight size={20} color={muted} strokeWidth={2} />}
+                  onPress={() => router.push('/export-sigsa')}
+                />
+              </Card>
+            </>
+          ) : null}
+
+          {/* ── Equipo (miembros/invitaciones) — Fase 5 / B.1.3 ── */}
+          {activeField ? (
+            <>
+              <SectionTitle>Equipo</SectionTitle>
+              <Card padding="$0" gap="$0" overflow="hidden">
+                <ActionRow
+                  icon={<MiembroIcon size={20} color={primary} strokeWidth={2} />}
+                  label="Miembros e invitaciones"
+                  accessibilityLabel="Ver miembros e invitaciones del equipo"
+                  trailing={<ChevronRight size={20} color={muted} strokeWidth={2} />}
+                  onPress={() => router.push('/miembros')}
+                />
+              </Card>
+            </>
+          ) : null}
+
+          {/* ── Cerrar sesión (T6.2 / R1.6) — destructiva, thumb-zone (abajo) ── */}
           <YStack marginTop="$8" width="100%">
-            <SectionTitle>Zona de peligro</SectionTitle>
-            <DeleteAccountSection
-              userId={userId}
-              signOut={signOut}
-              refreshEstablishments={refreshEstablishments}
-            />
+            <XStack
+              width="100%"
+              alignItems="center"
+              justifyContent="center"
+              gap="$2"
+              minHeight="$touchMin"
+              borderWidth={2}
+              borderColor="$terracota"
+              borderRadius="$pill"
+              paddingHorizontal="$5"
+              pressStyle={{ backgroundColor: '$surface' }}
+              onPress={() => void onLogout()}
+              {...buttonA11y(Platform.OS, { label: 'Cerrar sesión' })}
+            >
+              <LogOut size={20} color={terracota} strokeWidth={2.5} />
+              <Text fontFamily="$body" fontSize="$5" fontWeight="600" color="$terracota">
+                Cerrar sesión
+              </Text>
+            </XStack>
           </YStack>
-        ) : null}
-      </ScrollView>
+
+          {/* ── Zona de peligro (Fase 6, R2.4/R2.5/R2.5.1) — al FONDO, separada visualmente ── */}
+          {userId ? (
+            <YStack marginTop="$8" width="100%">
+              <SectionTitle>Zona de peligro</SectionTitle>
+              <DeleteAccountSection
+                userId={userId}
+                signOut={signOut}
+                refreshEstablishments={refreshEstablishments}
+              />
+            </YStack>
+          ) : null}
+        </ScrollView>
+      </KeyboardAvoidingShell>
     </YStack>
   );
 }

@@ -128,6 +128,26 @@ test('`floor` (piso propio) compite en el max, no se suma (los sheets que usaban
   assert.equal(noBar(0, 0, { floor: 4 }), 12);
 });
 
+test('los 3 sheets que tenían `paddingBottom="$6"` FIJO: qué cambia por plataforma al plegarlos al hook', () => {
+  // ── QUÉ FIJA ESTE TEST ────────────────────────────────────────────────────────────────────────────
+  // `TreatmentStartSheet`, `TreatmentApplicationSheet` y `BulkConfirmSheet` tenían la reserva escrita como
+  // un TOKEN SUELTO (`paddingBottom="$6"` = 32 en la escala `space`), sin pasar nunca por la reserva
+  // canónica: en Android con barra de 3 botones (inset 48) sus CTAs quedaban a 32dp del borde de PANTALLA,
+  // o sea DEBAJO de una barra de 48. La unidad «aire» no los vio porque su guard prohíbe RE-IMPLEMENTAR la
+  // fórmula, no OMITIRLA. Se plegaron con `floor: $6` (el knob que conserva el aire propio que ya tenían).
+  // El delta se fija acá con números, no en prosa: es un cambio de geometría con el teclado CERRADO y no
+  // puede viajar de contrabando dentro de una barrida de teclado.
+  const SEIS = 32; // $6 de la escala `space` (default de @tamagui/config/v4)
+  const own = { floor: SEIS };
+  assert.equal(noBar(0, 0, own), SEIS, 'web: 32 → 32, IDÉNTICO a lo que había (cero cambio observable)');
+  assert.equal(noBar(34, 34, own), 34, 'iOS: 32 → 34 (el inset del home indicator manda)');
+  assert.equal(android(24, 24, own), 48, 'Android gestos (inset 24): 32 → 48');
+  assert.equal(android(48, 48, own), 64, 'Android 3 botones (inset 48): 32 → 64 — el CTA sale de la barra');
+  // Y la propiedad que hace que el fix sea un fix: en Android la reserva es ESTRICTAMENTE mayor que el
+  // inset, o sea que el contenido nunca queda apoyado sobre la barra.
+  for (const inset of [24, 48]) assert.ok(android(inset, inset, own) > inset);
+});
+
 test('sin `extra`/`floor` el resultado es exactamente el canónico (defaults inocuos)', () => {
   for (const inset of [0, 12, 24, 34, 48]) {
     assert.equal(noBar(inset, inset, { extra: 0, floor: 0 }), noBar(inset));

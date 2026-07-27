@@ -12,6 +12,8 @@ import { useState } from 'react';
 import { Platform, Pressable } from 'react-native';
 import { getTokenValue, ScrollView, Text, View, YStack } from 'tamagui';
 
+import { useKeyboardAwareBottomInset } from '../hooks/useSafeBottomInset';
+import { KeyboardAvoidingShell } from './KeyboardAvoidingShell';
 import { Button } from './Button';
 import { FormField } from './FormField';
 import { Select } from './Select';
@@ -25,6 +27,10 @@ import {
   validateNextDose,
 } from '../utils/treatment-input';
 import type { Treatment } from '../services/treatments';
+
+// Estilo del `KeyboardAvoidingShell` (API no-Tamagui) — el MISMO que usa `BottomSheetShell` para este
+// esqueleto. `flex`/`width` no son spacing/color → no aplica el lint anti-hardcode (ADR-023 §4).
+const avoidStyle = { flex: 1, width: '100%', justifyContent: 'flex-end' } as const;
 
 /** Lo que el sheet devuelve al confirmar (ya validado). El product_name lo pone la ficha (= el del header). */
 export type TreatmentApplicationSubmit = {
@@ -49,6 +55,12 @@ function todayIso(): string {
 }
 
 export function TreatmentApplicationSheet({ treatment, onClose, onSubmit }: TreatmentApplicationSheetProps) {
+  // Reserva inferior KEYBOARD-AWARE, con el MISMO criterio (y el mismo arrastre de la unidad «aire») que
+  // `TreatmentStartSheet`: `floor: $6` (= 32 en la escala `space`) conserva el valor que estaba escrito a
+  // mano y el hook le agrega el inset del sistema + el aire de Android, que a este sheet le faltaban.
+  // Delta con el teclado CERRADO: **web 32 (idéntico) · iOS 32 → 34 · Android gestos 32 → 48 · Android 3
+  // botones 32 → 64**, fijado por test en `utils/footer-action.test.ts`.
+  const bottomPad = useKeyboardAwareBottomInset({ floor: getTokenValue('$6', 'space') });
   const [appDate, setAppDate] = useState(todayIso());
   const [dose, setDose] = useState('');
   const [route, setRoute] = useState<string | null>(null);
@@ -102,104 +114,111 @@ export function TreatmentApplicationSheet({ treatment, onClose, onSubmit }: Trea
 
   return (
     <View position="absolute" top="$0" left="$0" right="$0" bottom="$0" backgroundColor="$scrim" justifyContent="flex-end">
-      <Pressable style={{ flex: 1, width: '100%' }} onPress={onClose} {...buttonA11y(Platform.OS, { label: 'Cerrar' })} />
+      {/* El shell del teclado envuelve la COLUMNA (backdrop libre + hoja): con el teclado arriba encoge
+          el alto útil desde abajo → el backdrop (flex:1) absorbe y la hoja SUBE por encima del teclado.
+          El scrim de AFUERA sigue cubriendo la pantalla ENTERA (también detrás del teclado). Mismo
+          esqueleto y mismo estilo que `BottomSheetShell`: este sheet está hecho a mano y su migración
+          al primitivo queda anotada en `docs/backlog.md`. */}
+      <KeyboardAvoidingShell style={avoidStyle}>
+        <Pressable style={{ flex: 1, width: '100%' }} onPress={onClose} {...buttonA11y(Platform.OS, { label: 'Cerrar' })} />
 
-      <YStack
-        width="100%"
-        maxHeight="90%"
-        backgroundColor="$bg"
-        borderTopLeftRadius="$card"
-        borderTopRightRadius="$card"
-        paddingHorizontal="$4"
-        paddingTop="$4"
-        paddingBottom="$6"
-        gap="$3"
-      >
-        <View
-          alignSelf="center"
-          width={getTokenValue('$icon', 'size')}
-          height={getTokenValue('$progressTrack', 'size')}
-          borderRadius="$pill"
-          backgroundColor="$divider"
-        />
-        <YStack gap="$1">
-          <Text fontFamily="$body" fontSize="$8" lineHeight="$8" fontWeight="700" color="$textPrimary">
-            Registrar aplicación
-          </Text>
-          {/* Contexto: producto + tipo del tratamiento (el product_name de la aplicación es el del header). */}
-          <Text fontFamily="$body" fontSize="$3" fontWeight="500" color="$textMuted" numberOfLines={1}>
-            {treatment.productName} · {treatmentKindLabel(treatment.kind)}
-          </Text>
-        </YStack>
-
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: getTokenValue('$3', 'space') }}>
-          <FormField
-            label="Fecha (AAAA-MM-DD)"
-            value={appDate}
-            onChangeText={(t) => {
-              setAppDate(maskDateInput(t));
-              if (appDateErr) setAppDateErr(null);
-            }}
-            keyboardType="number-pad"
-            placeholder="AAAA-MM-DD"
-            error={appDateErr}
+        <YStack
+          width="100%"
+          maxHeight="90%"
+          backgroundColor="$bg"
+          borderTopLeftRadius="$card"
+          borderTopRightRadius="$card"
+          paddingHorizontal="$4"
+          paddingTop="$4"
+          paddingBottom={bottomPad}
+          gap="$3"
+        >
+          <View
+            alignSelf="center"
+            width={getTokenValue('$icon', 'size')}
+            height={getTokenValue('$progressTrack', 'size')}
+            borderRadius="$pill"
+            backgroundColor="$divider"
           />
-          <FormField
-            label="Dosis en ml (opcional)"
-            value={dose}
-            onChangeText={(t) => {
-              setDose(t);
-              if (doseErr) setDoseErr(null);
-            }}
-            keyboardType="decimal-pad"
-            placeholder="Ej. 5"
-            error={doseErr}
-          />
-          <YStack gap="$2">
-            <Text fontFamily="$body" fontSize="$3" fontWeight="500" color="$textMuted">
-              Vía (opcional)
+          <YStack gap="$1">
+            <Text fontFamily="$body" fontSize="$8" lineHeight="$8" fontWeight="700" color="$textPrimary">
+              Registrar aplicación
             </Text>
-            <Select
-              value={route}
-              options={TREATMENT_ROUTE_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
-              placeholder="Elegí la vía"
-              open={routeOpen}
-              onToggle={() => setRouteOpen((v) => !v)}
-              onChange={(v) => {
-                setRoute(v);
-                setRouteOpen(false);
-              }}
-              a11yLabel="Vía de aplicación"
-            />
+            {/* Contexto: producto + tipo del tratamiento (el product_name de la aplicación es el del header). */}
+            <Text fontFamily="$body" fontSize="$3" fontWeight="500" color="$textMuted" numberOfLines={1}>
+              {treatment.productName} · {treatmentKindLabel(treatment.kind)}
+            </Text>
           </YStack>
-          <FormField
-            label="Próxima dosis (opcional)"
-            value={nextDose}
-            onChangeText={(t) => {
-              setNextDose(maskDateInput(t));
-              if (nextDoseErr) setNextDoseErr(null);
-            }}
-            keyboardType="number-pad"
-            placeholder="AAAA-MM-DD"
-            error={nextDoseErr}
-          />
 
-          {formError ? (
-            <Text fontFamily="$body" fontSize="$3" fontWeight="400" color="$terracota">
-              {formError}
-            </Text>
-          ) : null}
-        </ScrollView>
+          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: getTokenValue('$3', 'space') }}>
+            <FormField
+              label="Fecha (AAAA-MM-DD)"
+              value={appDate}
+              onChangeText={(t) => {
+                setAppDate(maskDateInput(t));
+                if (appDateErr) setAppDateErr(null);
+              }}
+              keyboardType="number-pad"
+              placeholder="AAAA-MM-DD"
+              error={appDateErr}
+            />
+            <FormField
+              label="Dosis en ml (opcional)"
+              value={dose}
+              onChangeText={(t) => {
+                setDose(t);
+                if (doseErr) setDoseErr(null);
+              }}
+              keyboardType="decimal-pad"
+              placeholder="Ej. 5"
+              error={doseErr}
+            />
+            <YStack gap="$2">
+              <Text fontFamily="$body" fontSize="$3" fontWeight="500" color="$textMuted">
+                Vía (opcional)
+              </Text>
+              <Select
+                value={route}
+                options={TREATMENT_ROUTE_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
+                placeholder="Elegí la vía"
+                open={routeOpen}
+                onToggle={() => setRouteOpen((v) => !v)}
+                onChange={(v) => {
+                  setRoute(v);
+                  setRouteOpen(false);
+                }}
+                a11yLabel="Vía de aplicación"
+              />
+            </YStack>
+            <FormField
+              label="Próxima dosis (opcional)"
+              value={nextDose}
+              onChangeText={(t) => {
+                setNextDose(maskDateInput(t));
+                if (nextDoseErr) setNextDoseErr(null);
+              }}
+              keyboardType="number-pad"
+              placeholder="AAAA-MM-DD"
+              error={nextDoseErr}
+            />
 
-        <YStack gap="$2">
-          <Button variant="primary" fullWidth disabled={saving} onPress={() => void onConfirm()}>
-            {saving ? 'Guardando…' : 'Registrar aplicación'}
-          </Button>
-          <Button variant="secondary" fullWidth disabled={saving} onPress={onClose}>
-            Cancelar
-          </Button>
+            {formError ? (
+              <Text fontFamily="$body" fontSize="$3" fontWeight="400" color="$terracota">
+                {formError}
+              </Text>
+            ) : null}
+          </ScrollView>
+
+          <YStack gap="$2">
+            <Button variant="primary" fullWidth disabled={saving} onPress={() => void onConfirm()}>
+              {saving ? 'Guardando…' : 'Registrar aplicación'}
+            </Button>
+            <Button variant="secondary" fullWidth disabled={saving} onPress={onClose}>
+              Cancelar
+            </Button>
+          </YStack>
         </YStack>
-      </YStack>
+      </KeyboardAvoidingShell>
     </View>
   );
 }

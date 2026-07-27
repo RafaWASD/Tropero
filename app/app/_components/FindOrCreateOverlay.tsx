@@ -27,7 +27,8 @@ import { useRouter, useSegments } from 'expo-router';
 import { useStatus } from '@powersync/react';
 import { ArrowRightLeft, ChevronRight, PlusCircle, Radio, Search, Tag, X } from 'lucide-react-native';
 
-import { useSafeBottomInset } from '@/hooks/useSafeBottomInset';
+import { useKeyboardAwareBottomInset } from '@/hooks/useSafeBottomInset';
+import { KeyboardAvoidingShell } from '@/components/KeyboardAvoidingShell';
 import { Button, Card, CategoryBadge } from '@/components';
 import { useAuth, useEstablishment, useRodeo } from '@/contexts';
 import { useBleStickListener } from '@/services/ble/stick';
@@ -94,11 +95,19 @@ async function waitForProfileLocally(profileId: string, tries = 20, delayMs = 40
 //     DENTRO del modo (la pantalla `maniobra/identificar` tiene su propio useBleStickListener).
 const BLE_OWNED_ROUTES = new Set(['asignar-caravanas', 'maniobra']);
 
+// Estilo del `KeyboardAvoidingShell` (API no-Tamagui) — el MISMO que usa `BottomSheetShell` para el mismo
+// esqueleto (backdrop flex:1 + hoja anclada abajo). `flex`/`width` no son spacing/color → no aplica el
+// lint anti-hardcode (ADR-023 §4).
+const avoidStyle = { flex: 1, width: '100%', justifyContent: 'flex-end' } as const;
+
 export function FindOrCreateOverlay() {
   const router = useRouter();
   // Reserva inferior del sheet 🔴 de la manga: la canónica del hook compartido MÁS el aire propio ($6)
   // que este overlay siempre tuvo (RB3.3). Web 32 · iOS 66 (idénticos al baseline) · Android 3 botones 96.
-  const bottomPad = useSafeBottomInset({ extra: getTokenValue('$6', 'space') });
+  // KEYBOARD-AWARE (unidad «barrida de teclado»): con el teclado abierto el shell de abajo ya subió la
+  // columna el alto entero del teclado → la safe-area (y el $6 propio) quedan tapados y se reservan solo
+  // como `$2`; si no, quedarían ~96dp de hueco muerto entre el CTA y el borde del teclado.
+  const bottomPad = useKeyboardAwareBottomInset({ extra: getTokenValue('$6', 'space') });
   const { state: auth } = useAuth();
   const { state: est } = useEstablishment();
   const { state: rodeo } = useRodeo();
@@ -226,70 +235,77 @@ export function FindOrCreateOverlay() {
       backgroundColor="$scrim"
       justifyContent="flex-end"
     >
-      {/* Backdrop tappable: cierra (RB3.4). Cubre el área por encima del sheet. */}
-      <Pressable style={{ flex: 1, width: '100%' }} onPress={close} {...buttonA11y(Platform.OS, { label: 'Cerrar' })} />
+      {/* El shell del teclado envuelve la COLUMNA (backdrop libre + hoja): con el teclado arriba encoge
+          el alto útil desde abajo → el backdrop (flex:1) absorbe y la hoja SUBE por encima del teclado. El
+          scrim de AFUERA sigue cubriendo la pantalla ENTERA (incluido lo que queda detrás del teclado).
+          Mismo esqueleto y mismo estilo que `BottomSheetShell`: este sheet está hecho a mano y su
+          migración al primitivo queda anotada en `docs/backlog.md`. */}
+      <KeyboardAvoidingShell style={avoidStyle}>
+        {/* Backdrop tappable: cierra (RB3.4). Cubre el área por encima del sheet. */}
+        <Pressable style={{ flex: 1, width: '100%' }} onPress={close} {...buttonA11y(Platform.OS, { label: 'Cerrar' })} />
 
-      <YStack
-        width="100%"
-        maxHeight="85%"
-        backgroundColor="$bg"
-        borderTopLeftRadius="$card"
-        borderTopRightRadius="$card"
-        paddingHorizontal="$4"
-        paddingTop="$4"
-        // Safe-area inferior (RB3.3): el CTA primario de la manga NO debe quedar bajo —ni PEGADO a— el
-        // home indicator iOS / la barra de navegación Android. Reserva del hook compartido + el $6 propio.
-        paddingBottom={bottomPad}
-        gap="$4"
-      >
-        {/* Grip visual del sheet. */}
-        <View
-          alignSelf="center"
-          width={getTokenValue('$icon', 'size')}
-          height={getTokenValue('$progressTrack', 'size')}
-          borderRadius="$pill"
-          backgroundColor="$divider"
-        />
-
-        {/* Encabezado SIEMPRE = el EID leído, formateado legible (RB3.2: confirmación visual SENASA). */}
-        <XStack alignItems="center" gap="$3">
-          <Radio size={getTokenValue('$navIcon', 'size')} color={getTokenValue('$primary', 'color')} strokeWidth={2.25} />
-          <YStack flex={1} gap="$1">
-            <Text fontFamily="$body" fontSize="$2" fontWeight="500" color="$textMuted">
-              Caravana leída
-            </Text>
-            <Text
-              fontFamily="$body"
-              fontSize="$8" lineHeight="$8"
-              fontWeight="700"
-              color="$textPrimary"
-              letterSpacing={1}
-              {...labelA11y(Platform.OS, `Caravana ${eidReadable}`)}
-            >
-              {eidReadable}
-            </Text>
-          </YStack>
-          <Pressable onPress={close} {...buttonA11y(Platform.OS, { label: 'Cerrar' })}>
-            <X size={getTokenValue('$navIcon', 'size')} color={getTokenValue('$textMuted', 'color')} strokeWidth={2.25} />
-          </Pressable>
-        </XStack>
-
-        {state.status === 'loading' ? (
-          <OverlayLoading />
-        ) : state.status === 'error' ? (
-          <OverlayError message={state.message} onClose={close} />
-        ) : (
-          <OverlayBody
-            eid={state.eid}
-            result={state.result}
-            activeFieldName={activeFieldName}
-            establishmentId={establishmentId}
-            userId={userId}
-            isOnline={isOnline}
-            onClose={close}
+        <YStack
+          width="100%"
+          maxHeight="85%"
+          backgroundColor="$bg"
+          borderTopLeftRadius="$card"
+          borderTopRightRadius="$card"
+          paddingHorizontal="$4"
+          paddingTop="$4"
+          // Safe-area inferior (RB3.3): el CTA primario de la manga NO debe quedar bajo —ni PEGADO a— el
+          // home indicator iOS / la barra de navegación Android. Reserva del hook compartido + el $6 propio.
+          paddingBottom={bottomPad}
+          gap="$4"
+        >
+          {/* Grip visual del sheet. */}
+          <View
+            alignSelf="center"
+            width={getTokenValue('$icon', 'size')}
+            height={getTokenValue('$progressTrack', 'size')}
+            borderRadius="$pill"
+            backgroundColor="$divider"
           />
-        )}
-      </YStack>
+
+          {/* Encabezado SIEMPRE = el EID leído, formateado legible (RB3.2: confirmación visual SENASA). */}
+          <XStack alignItems="center" gap="$3">
+            <Radio size={getTokenValue('$navIcon', 'size')} color={getTokenValue('$primary', 'color')} strokeWidth={2.25} />
+            <YStack flex={1} gap="$1">
+              <Text fontFamily="$body" fontSize="$2" fontWeight="500" color="$textMuted">
+                Caravana leída
+              </Text>
+              <Text
+                fontFamily="$body"
+                fontSize="$8" lineHeight="$8"
+                fontWeight="700"
+                color="$textPrimary"
+                letterSpacing={1}
+                {...labelA11y(Platform.OS, `Caravana ${eidReadable}`)}
+              >
+                {eidReadable}
+              </Text>
+            </YStack>
+            <Pressable onPress={close} {...buttonA11y(Platform.OS, { label: 'Cerrar' })}>
+              <X size={getTokenValue('$navIcon', 'size')} color={getTokenValue('$textMuted', 'color')} strokeWidth={2.25} />
+            </Pressable>
+          </XStack>
+
+          {state.status === 'loading' ? (
+            <OverlayLoading />
+          ) : state.status === 'error' ? (
+            <OverlayError message={state.message} onClose={close} />
+          ) : (
+            <OverlayBody
+              eid={state.eid}
+              result={state.result}
+              activeFieldName={activeFieldName}
+              establishmentId={establishmentId}
+              userId={userId}
+              isOnline={isOnline}
+              onClose={close}
+            />
+          )}
+        </YStack>
+      </KeyboardAvoidingShell>
     </View>
   );
 }

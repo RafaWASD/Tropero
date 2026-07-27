@@ -31,7 +31,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
 
-import { useSafeBottomInset } from '@/hooks/useSafeBottomInset';
+import { useKeyboardAwareBottomInset, useSafeBottomInset } from '@/hooks/useSafeBottomInset';
+import { KeyboardAvoidingShell } from '@/components/KeyboardAvoidingShell';
 import { Button, FieldTemplateToggleList, FormField, FormError, InfoNote } from '@/components';
 import { useEstablishment, useRodeo } from '@/contexts';
 import {
@@ -64,6 +65,10 @@ const NAME_MAX = 60;
 // 4 pasos: sistema → nombre → plantilla → meses de servicio (B1, RPSC.2). El paso 4 es de cría (único MVP).
 const TOTAL_STEPS = 4;
 
+// Estilo del `KeyboardAvoidingShell` (API no-Tamagui). `flex` no es spacing/color → no aplica el lint
+// anti-hardcode (ADR-023 §4).
+const fillStyle = { flex: 1 } as const;
+
 export default function CrearRodeoScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -74,7 +79,10 @@ export default function CrearRodeoScreen() {
   // en vez de usar `$navBottomMin`", docs/plan-mejoras-ux-2026-07-18.md), o sea una GRAFÍA accidental
   // de la reserva canónica → se pliega dentro de ella en vez de conservarse como excepción.
   // Ver docs/design-system.md §4, "Los 8 outliers del `+12`".
-  const bottomPad = useSafeBottomInset();
+  // KEYBOARD-AWARE (unidad «barrida de teclado»): el paso 2 del wizard tiene el nombre del rodeo; el footer
+  // vive dentro del `KeyboardAvoidingShell`, que ya descuenta el teclado entero → con el teclado arriba la
+  // reserva se encoge al respiro de `$2` (si no, quedarían 64dp de hueco muerto sobre el teclado).
+  const bottomPad = useKeyboardAwareBottomInset();
   const { state: estState } = useEstablishment();
   const { state: rodeoState, refreshRodeos } = useRodeo();
 
@@ -263,139 +271,145 @@ export default function CrearRodeoScreen() {
 
   return (
     <YStack flex={1} width="100%" maxWidth="100%" overflow="hidden" backgroundColor="$bg">
-      {/* Header con barra de progreso (3 pasos). */}
-      <YStack width="100%" paddingTop={insets.top} paddingHorizontal="$4" gap="$3">
-        <ProgressBar step={step} total={TOTAL_STEPS} />
-        <YStack gap="$1">
-          <Text fontFamily="$body" fontSize="$8" lineHeight="$8" fontWeight="700" color="$textPrimary">
-            {title}
-          </Text>
-          <Text fontFamily="$body" fontSize="$4" fontWeight="400" color="$textMuted">
-            {subtitle}
-          </Text>
-        </YStack>
-      </YStack>
-
-      <ScrollView
-        flex={1}
-        width="100%"
-        maxWidth="100%"
-        contentContainerStyle={{
-          paddingHorizontal: getTokenValue('$4', 'space'),
-          paddingTop: getTokenValue('$3', 'space'),
-          paddingBottom: insets.bottom + getTokenValue('$6', 'space'),
-          width: '100%',
-          maxWidth: '100%',
-        }}
-        keyboardShouldPersistTaps="handled"
-        showsHorizontalScrollIndicator={false}
-      >
-        {step === 1 ? (
-          <Step1System
-            systems={systems}
-            error={systemsError}
-            selected={selectedSystem}
-            onSelect={setSelectedSystem}
-          />
-        ) : null}
-
-        {step === 2 ? (
-          <YStack gap="$3">
-            <Text fontFamily="$body" fontSize="$6" lineHeight="$6" fontWeight="600" color="$textPrimary">
-              ¿Cómo se llama el rodeo?
+      {/* TECLADO (unidad «barrida de teclado»): esta pantalla tiene campos de texto y NO montaba ningún
+          mecanismo — al enfocarlos el teclado los tapaba (mismo bug 🔴 de clase que el sheet de Vacunación,
+          acá por AUSENCIA de mecanismo). Con la columna adentro del primitivo, el contenedor se achica desde
+          abajo y el campo enfocado queda por encima del teclado. */}
+      <KeyboardAvoidingShell style={fillStyle}>
+        {/* Header con barra de progreso (3 pasos). */}
+        <YStack width="100%" paddingTop={insets.top} paddingHorizontal="$4" gap="$3">
+          <ProgressBar step={step} total={TOTAL_STEPS} />
+          <YStack gap="$1">
+            <Text fontFamily="$body" fontSize="$8" lineHeight="$8" fontWeight="700" color="$textPrimary">
+              {title}
             </Text>
-            <FormField
-              label="Nombre del rodeo"
-              value={name}
-              onChangeText={setName}
-              placeholder="Ej. Rodeo general"
-              autoCapitalize="sentences"
-              maxLength={NAME_MAX}
-              error={nameError}
+            <Text fontFamily="$body" fontSize="$4" fontWeight="400" color="$textMuted">
+              {subtitle}
+            </Text>
+          </YStack>
+        </YStack>
+
+        <ScrollView
+          flex={1}
+          width="100%"
+          maxWidth="100%"
+          contentContainerStyle={{
+            paddingHorizontal: getTokenValue('$4', 'space'),
+            paddingTop: getTokenValue('$3', 'space'),
+            paddingBottom: insets.bottom + getTokenValue('$6', 'space'),
+            width: '100%',
+            maxWidth: '100%',
+          }}
+          keyboardShouldPersistTaps="handled"
+          showsHorizontalScrollIndicator={false}
+        >
+          {step === 1 ? (
+            <Step1System
+              systems={systems}
+              error={systemsError}
+              selected={selectedSystem}
+              onSelect={setSelectedSystem}
             />
-          </YStack>
-        ) : null}
+          ) : null}
 
-        {step === 3 ? (
-          <YStack gap="$2">
-            {loadingTemplate ? (
-              <InfoNote>Cargando la plantilla de datos…</InfoNote>
-            ) : templateError ? (
-              <YStack gap="$2">
-                <FormError message={templateError} />
-                <Button
-                  variant="secondary"
-                  fullWidth
-                  onPress={() => selectedSystem && void loadTemplateFor(selectedSystem)}
-                >
-                  Reintentar
-                </Button>
-              </YStack>
-            ) : toggles ? (
-              <FieldTemplateToggleList
-                sections={sections}
-                header={TEMPLATE_HEADER}
-                onToggle={(id, enabled) =>
-                  setToggles((prev) => (prev ? setToggle(prev, id, enabled) : prev))
-                }
+          {step === 2 ? (
+            <YStack gap="$3">
+              <Text fontFamily="$body" fontSize="$6" lineHeight="$6" fontWeight="600" color="$textPrimary">
+                ¿Cómo se llama el rodeo?
+              </Text>
+              <FormField
+                label="Nombre del rodeo"
+                value={name}
+                onChangeText={setName}
+                placeholder="Ej. Rodeo general"
+                autoCapitalize="sentences"
+                maxLength={NAME_MAX}
+                error={nameError}
               />
-            ) : null}
-          </YStack>
-        ) : null}
+            </YStack>
+          ) : null}
 
-        {/* Paso 4 — meses de servicio (B1, RPSC.2): ServiceMonthsSelector mode='alta' (primavera
-            pre-tildada). El componente es controlado; el estado arranca en primavera (RPSC.2.2/RPSC.2.5). */}
-        {step === 4 ? (
-          <ServiceMonthsSelector
-            mode="alta"
-            value={serviceMonths}
-            onChange={setServiceMonths}
-          />
-        ) : null}
-      </ScrollView>
+          {step === 3 ? (
+            <YStack gap="$2">
+              {loadingTemplate ? (
+                <InfoNote>Cargando la plantilla de datos…</InfoNote>
+              ) : templateError ? (
+                <YStack gap="$2">
+                  <FormError message={templateError} />
+                  <Button
+                    variant="secondary"
+                    fullWidth
+                    onPress={() => selectedSystem && void loadTemplateFor(selectedSystem)}
+                  >
+                    Reintentar
+                  </Button>
+                </YStack>
+              ) : toggles ? (
+                <FieldTemplateToggleList
+                  sections={sections}
+                  header={TEMPLATE_HEADER}
+                  onToggle={(id, enabled) =>
+                    setToggles((prev) => (prev ? setToggle(prev, id, enabled) : prev))
+                  }
+                />
+              ) : null}
+            </YStack>
+          ) : null}
 
-      {/* CTAs fijos abajo (thumb-zone). */}
-      <YStack
-        width="100%"
-        paddingHorizontal="$4"
-        paddingTop="$3"
-        paddingBottom={bottomPad}
-        gap="$2"
-        borderTopWidth={1}
-        borderTopColor="$divider"
-        backgroundColor="$bg"
-      >
-        <FormError message={formError} />
-        {step === 1 ? (
-          <Button variant="primary" fullWidth disabled={!selectedSystem} onPress={goToStep2}>
-            Continuar
-          </Button>
-        ) : step === 2 ? (
-          <Button variant="primary" fullWidth onPress={goToStep3}>
-            Continuar
-          </Button>
-        ) : step === 3 ? (
-          <Button variant="primary" fullWidth disabled={!toggles} onPress={goToStep4}>
-            Continuar
-          </Button>
-        ) : (
-          <Button
-            variant="primary"
-            fullWidth
-            disabled={creating || !toggles}
-            onPress={() => void onCreate()}
-          >
-            {creating ? 'Creando…' : 'Crear rodeo'}
-          </Button>
-        )}
+          {/* Paso 4 — meses de servicio (B1, RPSC.2): ServiceMonthsSelector mode='alta' (primavera
+              pre-tildada). El componente es controlado; el estado arranca en primavera (RPSC.2.2/RPSC.2.5). */}
+          {step === 4 ? (
+            <ServiceMonthsSelector
+              mode="alta"
+              value={serviceMonths}
+              onChange={setServiceMonths}
+            />
+          ) : null}
+        </ScrollView>
 
-        {/* "Atrás" salvo en el paso 1 del bloqueo total (no hay a dónde volver). */}
-        {step === 1 && isBlockingEmptyState ? null : (
-          <Button variant="secondary" fullWidth onPress={goBack}>
-            {step === 1 ? 'Cancelar' : 'Atrás'}
-          </Button>
-        )}
-      </YStack>
+        {/* CTAs fijos abajo (thumb-zone). */}
+        <YStack
+          width="100%"
+          paddingHorizontal="$4"
+          paddingTop="$3"
+          paddingBottom={bottomPad}
+          gap="$2"
+          borderTopWidth={1}
+          borderTopColor="$divider"
+          backgroundColor="$bg"
+        >
+          <FormError message={formError} />
+          {step === 1 ? (
+            <Button variant="primary" fullWidth disabled={!selectedSystem} onPress={goToStep2}>
+              Continuar
+            </Button>
+          ) : step === 2 ? (
+            <Button variant="primary" fullWidth onPress={goToStep3}>
+              Continuar
+            </Button>
+          ) : step === 3 ? (
+            <Button variant="primary" fullWidth disabled={!toggles} onPress={goToStep4}>
+              Continuar
+            </Button>
+          ) : (
+            <Button
+              variant="primary"
+              fullWidth
+              disabled={creating || !toggles}
+              onPress={() => void onCreate()}
+            >
+              {creating ? 'Creando…' : 'Crear rodeo'}
+            </Button>
+          )}
+
+          {/* "Atrás" salvo en el paso 1 del bloqueo total (no hay a dónde volver). */}
+          {step === 1 && isBlockingEmptyState ? null : (
+            <Button variant="secondary" fullWidth onPress={goBack}>
+              {step === 1 ? 'Cancelar' : 'Atrás'}
+            </Button>
+          )}
+        </YStack>
+      </KeyboardAvoidingShell>
     </YStack>
   );
 }

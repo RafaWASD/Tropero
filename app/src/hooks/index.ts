@@ -5,4 +5,4 @@ export { useManeuverGating } from './useManeuverGating';
 export type { ManeuverGatingState, UseManeuverGating } from './useManeuverGating';
 export { useKeyboardVisible } from './useKeyboardVisible';
 export { useHardwareBack } from './useHardwareBack';
-export { useSafeBottomInset } from './useSafeBottomInset';
+export { useSafeBottomInset, useKeyboardAwareBottomInset } from './useSafeBottomInset';
