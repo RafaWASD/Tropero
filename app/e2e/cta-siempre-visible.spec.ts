@@ -8,7 +8,7 @@
 // ⚠️ El caso "el teclado tapa el CTA" NO se reproduce fielmente en WEB (Playwright/rn-web no monta el
 // teclado virtual que en device SÍ solapa el contenido — memoria reference_rn_web_pitfalls). Lo que ESTA
 // suite verifica en web es lo verificable: el footer es FIJO (no se va con el scroll), el CTA es tappable
-// y el peek aparece con contenido largo. El lift real sobre el teclado (KeyboardAvoidingView) + el encoje
+// y el peek aparece con contenido largo. El lift real sobre el teclado (primitivo `KeyboardAvoidingShell`) + el encoje
 // de la safe-area con el teclado abierto se validan en device (Raf) + en las capturas del Gate 2.5.
 //
 // hasTouch:true + tap() (no click): en Desktop Chrome el touch está enmascarado; para asertar que el CTA

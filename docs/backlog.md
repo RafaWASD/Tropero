@@ -982,3 +982,30 @@ tapa", y no tapa.
 
 **Próximo paso sugerido**: corregir el comentario y decidir si el `$10` se justifica como slack de lectura
 (probablemente sí, pero por otra razón) o baja a `$6` como el resto. Cambio cosmético, verificar en captura.
+
+
+## 2026-07-26 — migrar el teclado de `useAnimatedKeyboard` a `react-native-keyboard-controller`
+
+**Origen**: unidad «teclado Android» (el teclado tapaba el sheet entero en Android). El fix usa
+`useAnimatedKeyboard` de Reanimated 4.3.1 para obtener el alto real del IME, y **ese hook está marcado
+`@deprecated`** en la propia librería, que apunta a `react-native-keyboard-controller`.
+
+**Por qué se eligió igual (decisión tomada, no omisión)**: deprecated ≠ roto — el hook funciona en la 4.3.1
+que ya está instalada y su nativo hace exactamente la corrección que RN no hace bajo edge-to-edge
+(`isNavigationBarTranslucent` → no le resta la barra de navegación al inset del IME). La alternativa es
+meter un **módulo nativo nuevo** a validar contra RN 0.85 + new arch + Expo 56, justo en la ventana en la
+que iOS no se puede re-testear en device (hasta el 1/8). Costo/riesgo desbalanceado para un bugfix 🔴.
+Además el fix es **cero dependencias nuevas**.
+
+**Qué mirar cuando se procese**:
+- `react-native-keyboard-controller` reemplaza el hook por `useKeyboardHandler` / `KeyboardAvoidingView`
+  propio y trae el mismo dato con soporte declarado a largo plazo.
+- El cambio queda **acotado a UN archivo**: `app/src/components/KeyboardAvoidingShell.android.tsx`. Eso es
+  precisamente lo que compra el primitivo — el guard `keyboard-avoiding-guard.test.ts` impide que el
+  patrón se vuelva a repartir por la app.
+- Disparadores para hacerlo antes: que Reanimated ELIMINE el hook en una major, o que aparezca un caso que
+  el hook no cubra (p. ej. montar con el teclado ya abierto — hoy arranca en 0 hasta el próximo evento de
+  insets, que es **paridad con el `KeyboardAvoidingView` de iOS**, no una regresión).
+
+**Próximo paso sugerido**: nada urgente. Re-evaluar al próximo bump de Reanimated o si el veredicto de
+device destapa un caso no cubierto.

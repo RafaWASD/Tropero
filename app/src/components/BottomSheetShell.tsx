@@ -17,9 +17,10 @@
 // `docs/design-system.md` §6 → `BottomSheetShell`.
 //  1. BACKDROP $scrim tappable que cierra, CON el guard anti "click huérfano" de web (doble rAF) — ver el
 //     comentario largo del guard más abajo (conocimiento caro, no se pierde).
-//  2. LIFT sobre el teclado: `KeyboardAvoidingView` ('padding' en iOS; en Android lo resuelve el
-//     adjustResize de la ventana — Expo default `softwareKeyboardLayoutMode`, verificado sin override en
-//     `app.config.ts`) + reserva de safe-area que ENCOGE con el teclado abierto (sin doble espacio:
+//  2. LIFT sobre el teclado: primitivo `KeyboardAvoidingShell` (iOS `behavior='padding'`; **Android**
+//     `paddingBottom` = alto del teclado vía `useAnimatedKeyboard` — el `adjustResize` de la ventana NO
+//     alcanza: el build fuerza edge-to-edge y con eso la ventana deja de encogerse. Ver el header del
+//     shell) + reserva de safe-area que ENCOGE con el teclado abierto (sin doble espacio:
 //     `resolveFooterPaddingBottom` de `utils/footer-action.ts`, la misma de FooterActionShell).
 //  3. ESQUELETO CANÓNICO: header FIJO (flexShrink:0) / body ScrollView (flexShrink:1 + minHeight:0) /
 //     footer FIJO (flexShrink:0) → el título nunca se recorta al crecer el contenido y el CTA nunca se va
@@ -91,7 +92,6 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import {
   BackHandler,
   Keyboard,
-  KeyboardAvoidingView,
   Platform,
   Pressable,
   type LayoutChangeEvent,
@@ -113,6 +113,7 @@ import { ChevronDown, X } from 'lucide-react-native';
 
 import { useKeyboardVisible } from '../hooks/useKeyboardVisible';
 import { useSafeBottomInset } from '../hooks/useSafeBottomInset';
+import { KeyboardAvoidingShell } from './KeyboardAvoidingShell';
 import { buttonA11y } from '../utils/a11y';
 import { resolveFooterPaddingBottom, shouldShowScrollPeek } from '../utils/footer-action';
 import {
@@ -135,7 +136,7 @@ import { sheetCondensation } from '../utils/sheet-shell';
 /** El tipo EXACTO del 1er arg de getTokenValue (token de la escala) — evita el `string` genérico. */
 type TamaguiToken = Parameters<typeof getTokenValue>[0];
 
-// Estilos de APIs no-Tamagui (KeyboardAvoidingView / Pressable del backdrop). `flex`/`width` no son
+// Estilos de APIs no-Tamagui (KeyboardAvoidingShell / Pressable del backdrop). `flex`/`width` no son
 // color ni spacing con token semántico → no aplica el lint anti-hardcode (ADR-023 §4).
 const avoidStyle = { flex: 1, width: '100%', justifyContent: 'flex-end' } as const;
 const backdropStyle = { flex: 1, width: '100%' } as const;
@@ -542,9 +543,13 @@ export function BottomSheetShell({
       backgroundColor="$scrim"
       justifyContent="flex-end"
     >
-      {/* El KAV envuelve la COLUMNA (scrim libre + sheet): con el teclado arriba encoge el alto útil desde
-          abajo → el scrim (flex:1) absorbe y el sheet SUBE por encima del teclado. */}
-      <KeyboardAvoidingView style={avoidStyle} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      {/* El shell del teclado envuelve la COLUMNA (scrim libre + sheet): con el teclado arriba encoge el
+          alto útil desde abajo → el scrim (flex:1) absorbe y el sheet SUBE por encima del teclado.
+          Sobre el `maxHeight:'85%'` de la envoltura de abajo: Yoga resuelve los porcentajes contra el
+          alto INTERNO del padre (o sea el ya descontado del teclado). Y aunque esa lectura fuese
+          incorrecta, el `flexShrink:1` de la envoltura lo clampea igual — el cap es un techo, no un piso:
+          la columna se achica hasta entrar. Vale para las 3 plataformas por igual. */}
+      <KeyboardAvoidingShell style={avoidStyle}>
         <Pressable
           style={backdropStyle}
           onPress={onBackdropPress}
@@ -728,7 +733,7 @@ export function BottomSheetShell({
               ) : null}
             </YStack>
         </Animated.View>
-      </KeyboardAvoidingView>
+      </KeyboardAvoidingShell>
     </View>
   );
 }

@@ -3,6 +3,40 @@
 > Este archivo se vacía al cerrar cada sesión y su resumen se mueve a `history.md`.
 > Mientras trabajás, **mantenelo actualizado en tiempo real**, no al final.
 
+## 2026-07-26 — UNIDAD «teclado Android» (el teclado tapa el sheet entero) — implementer LISTO para review
+
+Bug 🔴 de Raf (device Samsung, 3 botones, APK release `7402575a`), sobre la base `4f1f86b`: al enfocar el
+input del sheet de Vacunación **el teclado tapa el sheet entero**; en iOS el mismo sheet sube bien.
+Diagnóstico ya cerrado por el leader (no re-investigado): (1) `KeyboardAvoidingView` con
+`behavior=undefined` en Android es un `<View>` pelado — "no hagas nada"; (2) el fallback `adjustResize`
+está desactivado porque el build tiene **edge-to-edge forzado** (`setDecorFitsSystemWindows(false)`) y en
+`ReactAndroid` nadie compensa el layout ante el inset del IME; (3) la altura que RN emite le **resta la
+barra de navegación** (`ReactRootView:978`), así que tampoco alcanza con cambiarle el `behavior`.
+
+**Fix**: primitivo `KeyboardAvoidingShell` con separación por extensión de plataforma — base (iOS/web)
+byte-idéntica a hoy, `.android.tsx` con `useAnimatedKeyboard` de Reanimated 4.3.1 (ya instalado; bajo
+edge-to-edge devuelve el inset COMPLETO del IME) aplicando `paddingBottom` al contenedor. Migrados los **4
+call sites** (`BottomSheetShell`, `FooterActionShell`, `maniobra/carga`, `AuthScreenShell` = el login).
+**Sin doble conteo**: el shell descuenta el teclado entero (que en Android ya incluye la barra de
+navegación) y el footer aporta solo su `$2` → el CTA queda a **$2 del borde del teclado**.
+
+**Guard de clase nuevo** (`app/src/components/keyboard-avoiding-guard.test.ts`, en `run-tests.mjs`, 7
+tests): prohíbe el `KeyboardAvoidingView` de RN fuera del primitivo, exige que la base conserve el
+`behavior='padding'` de iOS, que el `.android.tsx` aplique de verdad `paddingBottom: height.value`, y que
+los 4 call sites sigan usando el shell. **Falsificado** rompiéndolo a propósito (3/7 en rojo con el
+diagnóstico correcto) y revertido. Corregidos además los **9 comentarios** del repo que afirmaban que en
+Android lo resolvía el `adjustResize`.
+
+**Verificado**: `check.mjs` **RC=0** (con el alcance declarado: **no corre E2E**) + E2E acotada a las 4
+specs de las superficies tocadas **11/11** + capture del Gate 2.5 (6 estados) con 3 assertions de
+no-regresión en web. **`design/` intacto. Nada commiteado** (lo hace el leader).
+
+**⚠️ Veredicto en DEVICE (ADR-029, Android)**: este bug es **estructuralmente invisible en web** (RNW no
+monta teclado virtual) — ninguna captura puede mostrar el lift y no se inventó un test que finja cubrirlo.
+Specs reconciliadas (03 design v11 / tasks v12, 08, `docs/design-system.md` §6) + backlog (migración a
+`react-native-keyboard-controller`). Detalle, trazabilidad y dudas abiertas en
+`progress/impl_teclado-android.md`.
+
 ## 2026-07-26 — UNIDAD «aire» (separación con la barra del sistema) — FIX-LOOP 2 APLICADO, LISTO para review
 
 Bug 🔴 de Raf (device Android, Samsung 3 botones, build `7402575a`): el CTA "Nueva jornada" —y el "Listo"

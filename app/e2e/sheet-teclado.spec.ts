@@ -3,7 +3,7 @@
 // el TÍTULO — input, chips, "+", sugerencias y los DOS CTAs caían debajo del teclado.
 //
 // Fix: primitivo `BottomSheetShell` (src/components/BottomSheetShell.tsx) — backdrop con guard anti
-// click-huérfano + header fijo / body scroll / footer fijo + KeyboardAvoidingView + condensación con el
+// click-huérfano + header fijo / body scroll / footer fijo + lift sobre el teclado (`KeyboardAvoidingShell`) + condensación con el
 // teclado arriba + X de cierre SIEMPRE en el header. Migró los 4 sheets con input de texto.
 //
 // ── QUÉ SE PUEDE VERIFICAR EN WEB Y QUÉ NO (honestidad de cobertura, ADR-029) ─────────────────────────

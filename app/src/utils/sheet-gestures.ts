@@ -165,8 +165,11 @@ export type SheetDragIntent = 'dismiss-keyboard' | 'drag-sheet';
  *     a matar. Bajar el teclado es reversible; cerrar el sheet, no.
  *   - "Arrastrar hacia abajo baja el teclado" ya es el idiom del sistema (`keyboardDismissMode: 'on-drag'`),
  *     así que no inventamos una interacción nueva (ley de Jakob).
- *   - Técnico: con el teclado arriba el sheet está LEVANTADO por el KeyboardAvoidingView; trasladarlo al
- *     mismo tiempo que el KAV re-layoutea es pelearse con dos animaciones por el mismo píxel.
+ *   - Técnico: con el teclado arriba el sheet está LEVANTADO por el `KeyboardAvoidingShell` (en iOS por el
+ *     `behavior='padding'`; en Android por el `paddingBottom` animado que sigue al IME frame a frame);
+ *     trasladarlo al mismo tiempo que ese contenedor re-layoutea es pelearse con dos animaciones por el
+ *     mismo píxel. Ojo que en Android eso es literal desde la unidad «teclado Android»: el padding es un
+ *     `useAnimatedStyle` corriendo en el MISMO hilo de UI que este gesto.
  *   - La salida sigue disponible sin ambigüedad: la X del header no se condensa nunca (Nielsen #3).
  */
 export function sheetDragIntent({ keyboardVisible }: { keyboardVisible: boolean }): SheetDragIntent {

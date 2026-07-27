@@ -3,7 +3,7 @@
 // el TÍTULO — input, chips, "+", sugerencias y los DOS CTAs quedaban debajo del teclado.
 //
 // Fix = primitivo `BottomSheetShell` (backdrop con guard + header fijo / body scroll / footer fijo +
-// KeyboardAvoidingView + condensación con el teclado arriba + X de cierre SIEMPRE) aplicado a los 4 sheets
+// lift sobre el teclado (`KeyboardAvoidingShell`) + condensación con el teclado arriba + X de cierre SIEMPRE) aplicado a los 4 sheets
 // con input de texto: preconfig de maniobra, dato/maniobra custom, guardar rutina, picker de razas.
 //
 // ── QUÉ MUESTRAN ESTAS CAPTURAS Y QUÉ NO ─────────────────────────────────────────────────────────────

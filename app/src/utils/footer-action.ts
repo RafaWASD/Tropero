@@ -22,8 +22,9 @@
 //   3. DECISIÓN DEL PEEK (`shouldShowScrollPeek`): reusa la geometría pura de scroll-affordance.ts → el
 //      fade+peek de "hay más abajo" se muestra ⟺ hay contenido oculto por debajo del fold.
 //
-// El LIFT sobre el teclado en sí (subir el footer) lo hace KeyboardAvoidingView en el componente
-// (behavior 'padding' en iOS; en Android lo resuelve el adjustResize de la ventana) — no es lógica pura.
+// El LIFT sobre el teclado en sí (subir el footer) lo hace el primitivo `components/KeyboardAvoidingShell`
+// (iOS: `behavior='padding'`; Android: `paddingBottom` = alto del teclado vía `useAnimatedKeyboard`, porque
+// bajo edge-to-edge la ventana ya NO se encoge sola) — no es lógica pura.
 
 import { scrollFades, type ScrollGeometry } from './scroll-affordance';
 
@@ -130,7 +131,9 @@ export interface FooterPaddingInput {
  * Padding inferior del footer fijo, keyboard-aware:
  *   - Teclado CERRADO → la reserva de safe-area plena (nada tocable bajo el home indicator / gesture bar).
  *   - Teclado ABIERTO → un respiro chico: la safe-area la tapa el teclado, reservarla dejaría un hueco.
- * El LIFT del footer por encima del teclado lo hace KeyboardAvoidingView; esto solo evita el doble espacio.
+ * El LIFT del footer por encima del teclado lo hace el `KeyboardAvoidingShell` (que descuenta el teclado
+ * COMPLETO, barra de navegación de Android incluida); esto solo evita el doble espacio: el resultado es que
+ * el footer queda a `keyboardOpenGap` del borde del teclado, ni más ni menos.
  */
 export function resolveFooterPaddingBottom({
   keyboardVisible,

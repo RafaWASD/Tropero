@@ -21,12 +21,13 @@
 // matching (el header lo trae; los pasos llevan sus propios headings con matching).
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { KeyboardAvoidingView, Platform } from 'react-native';
+import { Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { getTokenValue, Spinner, Text, View, XStack, YStack } from 'tamagui';
 
 import { useHardwareBack, useKeyboardVisible, useSafeBottomInset } from '@/hooks';
+import { KeyboardAvoidingShell } from '@/components/KeyboardAvoidingShell';
 import { resolveFooterPaddingBottom } from '@/utils/footer-action';
 import { buttonA11y, labelA11y } from '@/utils/a11y';
 import { cargaBackAction } from '@/utils/maniobra-back';
@@ -105,6 +106,11 @@ import { SkipAnimalSheet } from './_components/SkipAnimalSheet';
 
 /** ¿Qué muestra el frame? El paso actual de la secuencia, o el resumen del animal. */
 type FrameMode = 'step' | 'summary';
+
+// Estilo del contenedor del paso (API no-Tamagui: el `KeyboardAvoidingShell`). Es el MISMO `{ flex: 1 }`
+// que tenía el KeyboardAvoidingView que reemplazó — la geometría del paso no cambió. `flex` no es color ni
+// spacing con token semántico → no aplica el lint anti-hardcode (ADR-023 §4).
+const stepFillStyle = { flex: 1 } as const;
 
 /**
  * Identidad DOMINANTE del header (R5.1/R12.4): la caravana VISUAL (idv) que el operario LEE en la oreja, NO
@@ -842,8 +848,9 @@ export default function ManiobraCarga() {
   // Reserva inferior del CTA de cada paso (U2 "CTA siempre visible"): la canónica del repo, robusta
   // al frame-0 de Android (hook compartido `useSafeBottomInset`, con el blindaje de U7 adentro) y
   // KEYBOARD-AWARE — con el teclado abierto (pasos de texto: producto/tubo/pajuela/fecha/dato custom) el
-  // CTA sube (KeyboardAvoidingView, abajo) y su reserva se encoge a un respiro (la safe-area la tapa el
-  // teclado → reservarla dejaría un hueco).
+  // CTA sube (`KeyboardAvoidingShell`, abajo) y su reserva se encoge a un respiro (la safe-area la tapa el
+  // teclado → reservarla dejaría un hueco). El shell descuenta el teclado COMPLETO y esta reserva aporta
+  // solo el `$2` de respiro: el CTA queda a $2 del borde del teclado, sin doble conteo.
   const keyboardVisible = useKeyboardVisible();
   const safeBottomInset = useSafeBottomInset();
   const bottomPad = resolveFooterPaddingBottom({
@@ -987,15 +994,14 @@ export default function ManiobraCarga() {
                 avanzar/corregir → el paso re-lee su valor inicial. Custom → renderer genérico por ui_component
                 (CustomManeuverStep, R13.8) → custom_measurements; fábrica → el dispatcher por StepKind.
 
-                U2 "CTA siempre visible": el paso va dentro de un KeyboardAvoidingView (flex:1) → en los pasos
+                U2 "CTA siempre visible": el paso va dentro del `KeyboardAvoidingShell` (flex:1) → en los pasos
                 de TEXTO (producto/tubo/pajuela/fecha/dato custom) el teclado NO tapa el CTA gigante de abajo
-                (en iOS lo sube el behavior 'padding'; en Android lo resuelve el adjustResize de la ventana).
-                Los pasos SIN teclado (tacto/pesaje-keypad/boolean/enum) no se ven afectados. El header de
-                identidad + la línea de maniobra + el banner de error quedan FUERA del KAV (arriba) → fijos. ── */}
-          <KeyboardAvoidingView
-            style={{ flex: 1 }}
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          >
+                (en iOS por el behavior 'padding'; en Android por `paddingBottom` = alto del teclado, vía
+                `useAnimatedKeyboard` — el adjustResize de la ventana NO alcanza con edge-to-edge, ver el
+                header del shell). Los pasos SIN teclado (tacto/pesaje-keypad/boolean/enum) no se ven
+                afectados. El header de identidad + la línea de maniobra + el banner de error quedan FUERA
+                del shell (arriba) → fijos. ── */}
+          <KeyboardAvoidingShell style={stepFillStyle}>
             {currentStep.source === 'custom' ? (
               <CustomManeuverStep
                 key={`${sequenceItemKey(currentStep)}-${stepEntryNonce}`}
@@ -1020,7 +1026,7 @@ export default function ManiobraCarga() {
                 onCapture={(value) => void captureAndAdvance(currentStep.maneuver, value)}
               />
             )}
-          </KeyboardAvoidingView>
+          </KeyboardAvoidingShell>
         </>
       ) : null}
 

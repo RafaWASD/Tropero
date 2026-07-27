@@ -11,7 +11,8 @@
 //
 // ⚠️ El teclado virtual del SO NO se monta en WEB (Playwright/rn-web — memoria reference_rn_web_pitfalls),
 // así que estas capturas muestran el CTA en su footer FIJO y el affordance de scroll (lo verificable en web).
-// El lift real sobre el teclado (KeyboardAvoidingView) se ve en device (Raf).
+// El lift real sobre el teclado (primitivo `KeyboardAvoidingShell`: `padding` en iOS, `paddingBottom` = alto
+// del teclado en Android) se ve en device (Raf).
 //
 // Para correrlo:
 //   cd app && pnpm e2e:build && pnpm exec playwright test e2e/captures/cta-siempre-visible.capture.ts \
@@ -135,7 +136,7 @@ test('captura U2: maniobra — CTA fijo en el paso de texto (antiparasitario) + 
   await bastonazo(page, eid);
 
   // ── 01 — paso de ANTIPARASITARIO en modo edición: input de texto arriba + CTA gigante "Aplicar y seguir"
-  //         FIJO abajo (thumb-zone). En device el KeyboardAvoidingView lo sube por encima del teclado. ──
+  //         FIJO abajo (thumb-zone). En device el `KeyboardAvoidingShell` lo sube por encima del teclado. ──
   await expect(page.getByTestId('silent-product-input')).toBeVisible({ timeout: 30_000 });
   await expect(page.getByRole('button', { name: 'Aplicar y seguir' })).toBeVisible();
   await shot(page, '01-maniobra-antiparasitario-cta-fijo');

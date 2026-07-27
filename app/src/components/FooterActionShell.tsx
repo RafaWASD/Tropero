@@ -5,9 +5,10 @@
 // Resuelve 4 problemas que el CTA primario tenía repartidos por la app (a veces bajo el fold, a veces
 // tapado por el teclado — en las pantallas 🔴 de maniobra es NO NEGOCIABLE):
 //   1. CTA SIEMPRE VISIBLE en un footer FIJO (fuera del scroll del body → no scrollea nunca).
-//   2. SUBE por encima del teclado al enfocar un campo (KeyboardAvoidingView: 'padding' en iOS; en Android
-//      lo resuelve el adjustResize de la ventana) + encoge la reserva de safe-area con el teclado abierto
-//      (resolveFooterPaddingBottom → no deja hueco sobre el teclado).
+//   2. SUBE por encima del teclado al enfocar un campo (primitivo `KeyboardAvoidingShell`: 'padding' en
+//      iOS; en Android `paddingBottom` = alto del teclado vía `useAnimatedKeyboard` — el `adjustResize` de
+//      la ventana NO alcanza bajo edge-to-edge, ver el header del shell) + encoge la reserva de safe-area
+//      con el teclado abierto (resolveFooterPaddingBottom → no deja hueco sobre el teclado).
 //   3. SCROLL AFFORDANCE (fade + chevron + peek) cuando el body tiene más contenido bajo el fold
 //      (decisión pura shouldShowScrollPeek/scrollFades → una sola fuente de verdad con la lista de maniobra).
 //   4. RESERVA de safe-area inferior robusta (hook compartido `useSafeBottomInset`, misma fórmula que
@@ -16,13 +17,11 @@
 //      soldado al borde de la barra (bug 🔴 de la unidad «aire»); en iOS el inset ya *es* el aire.
 
 import { useMemo, useState, type ReactNode } from 'react';
-import {
-  KeyboardAvoidingView,
-  Platform,
-  type LayoutChangeEvent,
-  type NativeScrollEvent,
-  type NativeSyntheticEvent,
-  type ScrollView as RNScrollView,
+import type {
+  LayoutChangeEvent,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
+  ScrollView as RNScrollView,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { getTokenValue, ScrollView, View, YStack, type ColorTokens } from 'tamagui';
@@ -30,6 +29,7 @@ import { ChevronDown } from 'lucide-react-native';
 
 import { useKeyboardVisible } from '../hooks/useKeyboardVisible';
 import { useSafeBottomInset } from '../hooks/useSafeBottomInset';
+import { KeyboardAvoidingShell } from './KeyboardAvoidingShell';
 import { resolveFooterPaddingBottom, shouldShowScrollPeek } from '../utils/footer-action';
 
 /** El tipo EXACTO del 1er arg de getTokenValue (token de la escala) — evita el `string` genérico. */
@@ -44,7 +44,7 @@ export type FooterActionShellProps = {
   footer: ReactNode;
   /** Contenido del body (scrolleable por default). */
   children: ReactNode;
-  /** Header FIJO opcional (arriba del KeyboardAvoidingView → nunca se comprime). Trae su propio paddingTop. */
+  /** Header FIJO opcional (arriba del shell del teclado → nunca se comprime). Trae su propio paddingTop. */
   header?: ReactNode;
   /** ¿El body scrollea (con affordance)? Default true. `false` → body plano flex:1 (keypads, bloques). */
   scrollable?: boolean;
@@ -93,7 +93,7 @@ export function FooterActionShell(props: FooterActionShellProps) {
   return (
     <YStack flex={1} width="100%" maxWidth="100%" overflow="hidden" backgroundColor={bg} testID={testID}>
       {header}
-      <KeyboardAvoidingView style={fillStyle} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardAvoidingShell style={fillStyle}>
         {scrollable ? (
           <AffordanceBody
             scrollViewRef={scrollViewRef}
@@ -116,7 +116,7 @@ export function FooterActionShell(props: FooterActionShellProps) {
             {footer}
           </FooterBar>
         ) : null}
-      </KeyboardAvoidingView>
+      </KeyboardAvoidingShell>
     </YStack>
   );
 }

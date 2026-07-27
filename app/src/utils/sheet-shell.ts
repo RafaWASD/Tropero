@@ -7,9 +7,11 @@
 // ningún sheet del repo tenía keyboard-avoidance (el patrón copiado a mano era `View absolute inset0
 // $scrim` + backdrop + `YStack maxHeight 85%` anclado abajo, y en iOS el teclado se dibuja ENCIMA).
 //
-// El LIFT sobre el teclado (subir el sheet) lo hace KeyboardAvoidingView en el componente y la reserva de
-// safe-area la resuelve `footer-action.ts` (`computeSafeBottomInset` + `resolveFooterPaddingBottom`, se
-// REUSAN — no se reimplementan). Lo único propio del sheet es la DECISIÓN DE CONDENSACIÓN de acá abajo.
+// El LIFT sobre el teclado (subir el sheet) lo hace el primitivo `components/KeyboardAvoidingShell` (iOS
+// `behavior='padding'`; Android `paddingBottom` = alto del teclado, porque con edge-to-edge la ventana ya
+// no se encoge sola) y la reserva de safe-area la resuelve `footer-action.ts` (`computeSafeBottomInset` +
+// `resolveFooterPaddingBottom`, se REUSAN — no se reimplementan). Lo único propio del sheet es la DECISIÓN
+// DE CONDENSACIÓN de acá abajo.
 
 export interface SheetCondensationInput {
   /** ¿El teclado del SO está visible? (hook useKeyboardVisible). */

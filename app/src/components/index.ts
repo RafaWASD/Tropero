@@ -32,6 +32,12 @@ export { ConditionScoreStepper } from './ConditionScoreStepper';
 export type { ConditionScoreStepperProps } from './ConditionScoreStepper';
 export { AuthScreenShell } from './AuthScreenShell';
 export type { AuthScreenShellProps } from './AuthScreenShell';
+// EL primitivo de "no me tapes con el teclado" (unidad «teclado Android»): base iOS/web
+// (KeyboardAvoidingView 'padding') + `.android.tsx` (paddingBottom = alto del teclado vía
+// useAnimatedKeyboard, porque con edge-to-edge la ventana ya no se encoge y el KAV es un no-op).
+// NINGUNA pantalla monta un KeyboardAvoidingView a mano — lo hace cumplir keyboard-avoiding-guard.test.ts.
+export { KeyboardAvoidingShell } from './KeyboardAvoidingShell';
+export type { KeyboardAvoidingShellProps } from './KeyboardAvoidingShell';
 export { FooterActionShell } from './FooterActionShell';
 export type { FooterActionShellProps } from './FooterActionShell';
 // Shell canónico de BOTTOM SHEET del repo (hermano de FooterActionShell, para sheets en vez de pantallas):
