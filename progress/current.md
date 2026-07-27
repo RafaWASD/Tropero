@@ -62,6 +62,46 @@ no-regresión en web · `design/` intacto · **nada commiteado**.
 roto→arreglado). Detalle, tabla de las 23, razonamiento de la safe-area, diseño del guard y dudas
 abiertas en `progress/impl_barrida-teclado.md`.
 
+## 2026-07-27 — UNIDAD «barrida de teclado» — commiteada en `56beff3`, APK `a3b8d804` — ⏸ PUERTA 2
+
+**Cómo apareció**: Raf verificó `eabfd00` en device (teclado en Vacunación ✅, aire ✅, navbar ✅, crash
+del worklet NO reapareció — eso cierra también el veredicto pendiente de la tanda del 25) y **a los
+minutos encontró el mismo bug en `identificar.tsx`**.
+
+**Mi error de razonamiento**: di la clase por cerrada arreglando los 4 sitios que montaban un
+`KeyboardAvoidingView` MAL CONFIGURADO. Había una segunda población —**23 superficies sin ningún
+mecanismo**— estructuralmente invisible para un guard que pregunta por el mal uso. El mismo error
+apareció una tercera vez adentro de esta unidad: la unidad «aire» **también** tiene población por
+ausencia (`BulkConfirmSheet`, reserva hardcodeada `$6`=32 → CTA bajo la barra en Android).
+
+**Lo que se hizo**: 20 superficies envueltas (7 🔴 primero) + 7 declaradas como parte cubierta por su
+consumidor + 2 excepciones. `useKeyboardAwareBottomInset` compone la reserva con la lógica de teclado
+en un lugar. `tabBarHideOnKeyboard` porque en las tabs el bottom-nav vive fuera de la pantalla (~120dp
+de hueco). Con teclado cerrado, valores idénticos a `fc4d164`.
+
+**El entregable que importa — el guard invertido**: la pregunta pasa de *"¿alguien usa mal el
+componente?"* a *"¿hay algún campo de texto que no esté adentro del primitivo?"*. Cobertura por punto
+fijo desde el primitivo (42 proveedores, 4 nombres de cobertura). **Un archivo nuevo con input sin
+clasificar nace en ROJO.** Falsificado de a una mutación; el reviewer agregó una propia (`<FormField>`).
+
+**Y los guards ahora verifican su propia cobertura.** Lo motivó un bug real: un `/*` dentro de un
+comentario de línea abría un bloque falso y dejaba **556 líneas invisibles en 6 archivos** (medido; el
+informe decía "1008 en 57" y no reproducía con ninguna métrica → corregido, era bloqueante). Verificado
+que **no tapaba violaciones** en lo ya commiteado: guards arreglados contra un worktree en `fc4d164` →
+16/16. Van dos veces que un guard falla en silencio, por dos causas distintas — **un verificador roto y
+uno que no encuentra nada se ven igual**.
+
+**Correcciones del leader sobre la entrega**: (a) el implementer convirtió **LF→CRLF en 6 documentos**,
+inflando el diff a 7500 líneas (4022 de churn solo en la spec 03) por 27 de contenido — revertido, el
+cambio real es 1305; (b) tres cifras del informe no resistían verificación (el 1008/57, el conteo de
+E2E y los `maxHeight` de los sheets). Regla nueva asentada: **las afirmaciones cuantitativas de un
+subagente son reclamos a verificar, no datos** — se pide la métrica y el método.
+
+**Backlog abierto que dejó esta unidad**: la clase de la reserva inferior por ausencia (sin guard que la
+vea); los 6 sheets a mano sin `BackHandler` propio (el más filoso: `FindOrCreateOverlay` es overlay
+global de manga 🔴 y el back hace pop de la ruta); y que `run-tests.mjs` usa **lista explícita sin glob**
+→ un test no registrado nunca corre (hoy limpio, 135/135 medido, pero sin red).
+
 ## 2026-07-27 — CIERRE del leader: las 2 unidades COMMITEADAS + APK en vuelo — ⏸ PUERTA 2 (device Raf)
 
 Las dos unidades de abajo están **cerradas y commiteadas**; los bloques que siguen quedan como acta del
