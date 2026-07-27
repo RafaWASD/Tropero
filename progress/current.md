@@ -3,7 +3,50 @@
 > Este archivo se vacía al cerrar cada sesión y su resumen se mueve a `history.md`.
 > Mientras trabajás, **mantenelo actualizado en tiempo real**, no al final.
 
-## 2026-07-26 — UNIDAD «teclado Android» (el teclado tapa el sheet entero) — implementer LISTO para review
+## 2026-07-27 — CIERRE del leader: las 2 unidades COMMITEADAS + APK en vuelo — ⏸ PUERTA 2 (device Raf)
+
+Las dos unidades de abajo están **cerradas y commiteadas**; los bloques que siguen quedan como acta del
+trabajo, no como pendientes.
+
+| commit | unidad | reviewer |
+|---|---|---|
+| `4f1f86b` | «aire» — 60 archivos | CHANGES REQUESTED → 3 bloqueantes resueltos |
+| `eabfd00` | «teclado Android» — 25 archivos | APPROVED + 3 pedidos de docs aplicados |
+
+**APK** `cdf838a6-8df0-486b-a210-679d0c8c055d` sobre `eabfd00` (perfil `preview-dev` → Release, **sin
+`callGuard`** → sirve también para re-verificar el crash del worklet de la tanda anterior).
+
+**Decisiones del leader en esta tanda** (las tres corrigen algo que yo mismo había dado por bueno):
+
+1. **La fórmula aditiva que especifiqué era incoherente conmigo mismo.** Escribí en el diagnóstico que en
+   iOS el inset *es* el aire y en Android es una losa opaca, y acto seguido pedí una fórmula aditiva en
+   todas las plataformas. Resultado: tab bar de iOS 94 → 110pt. Corregido a
+   `max(inset, piso) + (Android ? aire : 0)` → **iOS y web no se mueven**. Lo destapó la duda #1 del
+   implementer, no yo.
+2. **Los 8 footers con `+12` NO eran aire deliberado.** El reviewer encontró que el propio repo ya los
+   había clasificado (`plan-mejoras-ux-2026-07-18.md:175`: *"hardcodean `+12` en vez de usar
+   `$navBottomMin`"*) — grafía accidental de la reserva, deuda a plegar adentro. Se armonizan a la
+   canónica (iOS 46 → 34). Releva mi instrucción "nadie pierde aire", que existía contra regresiones
+   **silenciosas**, no contra armonizaciones con evidencia.
+3. **Promoví a bloqueante que nada probaba que `$navBarGap` resolviera.** Los tests puros hardcodean
+   `GAP = 16` y la única captura mide web, donde el token **nunca se lee**. Token mal escrito → término 0
+   → **fix muerto en Android con la suite entera en verde**. Es literalmente cómo nos quemó U7. El guard
+   ahora verifica el valor resuelto, no la cadena escrita.
+
+**Hallazgo transversal que cambia cómo reportamos**: `check.mjs` y `run-tests.mjs` tienen **cero**
+referencias a e2e/playwright. La suite E2E **nunca** estuvo adentro; venía diciendo "verde" apoyado solo
+en el check. La suite completa da hoy **247 passed / 22 failed**, todos pre-existentes (verificado contra
+un worktree en el baseline); 6 comparten un bug de oráculo `.first()`. De acá en más se reportan los dos
+números por separado.
+
+**⏸ Bloqueado en la Puerta 2**: los dos bugs son **estructuralmente invisibles en web** (RNW no monta
+teclado virtual y `insets.bottom = 0`). No se inventaron tests que finjan cubrirlos. Raf es el único
+oráculo. A mirar en device: (a) el sheet sube y el CTA queda a `$2` del teclado; (b) fluidez de la
+animación; (c) el blip inicial de ~57px, que es **Android-only** (en iOS el `LayoutAnimation` del KAV
+acopla los dos cambios en el mismo commit); (d) el aire de 16dp en CTAs y tab bar; (e) no-regresión del
+crash del grabber y de los 4 casos del back; (f) el login, que no estaba reportado y también estaba roto.
+
+## 2026-07-26 — UNIDAD «teclado Android» (el teclado tapa el sheet entero) — APPROVED, commiteada en `eabfd00`
 
 Bug 🔴 de Raf (device Samsung, 3 botones, APK release `7402575a`), sobre la base `4f1f86b`: al enfocar el
 input del sheet de Vacunación **el teclado tapa el sheet entero**; en iOS el mismo sheet sube bien.
@@ -37,7 +80,7 @@ Specs reconciliadas (03 design v11 / tasks v12, 08, `docs/design-system.md` §6)
 `react-native-keyboard-controller`). Detalle, trazabilidad y dudas abiertas en
 `progress/impl_teclado-android.md`.
 
-## 2026-07-26 — UNIDAD «aire» (separación con la barra del sistema) — FIX-LOOP 2 APLICADO, LISTO para review
+## 2026-07-26 — UNIDAD «aire» (separación con la barra del sistema) — APPROVED tras fix-loop 2, commiteada en `4f1f86b`
 
 Bug 🔴 de Raf (device Android, Samsung 3 botones, build `7402575a`): el CTA "Nueva jornada" —y el "Listo"
 de los sheets— quedaban a **1dp** de la barra del sistema. Causa raíz (medida por el leader, no
