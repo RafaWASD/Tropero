@@ -17,6 +17,21 @@ No es un sustituto de `feature_list.json` ni de los ADRs — es la antesala dond
 
 ## Ítems pendientes
 
+## 2026-07-28 — `KeyboardAvoidingShell` que MONTA con el teclado ya abierto arranca en altura 0 (límite declarado, NO cerrado)
+
+**Origen**: bugfix 🔴 «abrir un sheet baja el teclado» (Raf, device Android, APK `a3b8d804`). El leader pidió evaluar una **capa 2**: sembrar la altura del teclado al montar.
+**Qué**: cuando el shell se suscribe con el IME YA visible, `height` arranca en **0** hasta el próximo evento de insets (`KeyboardAnimationManager` no le reproduce el estado actual a un listener nuevo; `KeyboardAvoidingView` en iOS hace lo mismo con `keyboardWillChangeFrame`). El contenido no sube hasta que el teclado se mueva.
+**Estado**: la **capa 1** (abrir un overlay modal descarta el teclado — `hooks/useDismissKeyboardOnOpen` en los 22 archivos con `$scrim`, con guard) saca de la ecuación a **todos los overlays**, que eran el caso reportado y el único con consecuencia grave (un diálogo de decisión inoperable en la manga). Lo que queda expuesto es **una superficie que monte con el teclado arriba sin ser un overlay**: en la práctica, navegar a otra pantalla mientras se tipea. Se auto-corrige al primer evento del IME y no bloquea ninguna decisión.
+**Por qué NO se sembró la altura (decisión, con fundamento)**: la única fuente disponible al montar es `Keyboard.metrics()`, y su `height` es **la de RN, o sea la que está mal bajo edge-to-edge** (`ReactRootView.java:978` = `imeInsets.bottom - barInsets.bottom`). Usarla exige sumarle de vuelta el inset inferior de `systemBars`, y ese término de corrección **no es verificable desde web ni desde el unit** (el bug entero es invisible en RNW) y **no está garantizado que sea el mismo** que RN resta (gestos vs 3 botones, cutouts, y el frame-0 en 0 contra el que este repo ya tuvo que blindarse en `useSafeBottomInset`). Un término equivocado da un lift equivocado, que es **peor que no levantar nada**: el contenido salta a un lugar mal y recién se acomoda con el próximo evento del IME. Sumado a que habría que escribir sobre un shared value cuyo dueño es el `KeyboardAnimationManager` (contrato de Reanimated) y a que `useAnimatedKeyboard` ya está `@deprecated` (la migración a `react-native-keyboard-controller` está en este mismo backlog), el costo/riesgo no se paga hoy.
+**Próximo paso sugerido**: revisarlo **junto con** la migración a `react-native-keyboard-controller` (que expone el estado del teclado sin la resta de la barra), no antes. Si aparece un caso 🔴 de "navegué con el teclado arriba y la pantalla nueva quedó tapada", la alternativa BARATA y sin aritmética es descartar el teclado también en el cambio de ruta (mismo criterio de producto que la capa 1: navegar es salir del contexto de escritura).
+
+## 2026-07-28 — Los 21 sheets a mano ahora arrastran DOS invariantes copiados a mano (no uno)
+
+**Origen**: mismo bugfix. Al adoptar `useDismissKeyboardOnOpen` en los 21 overlays hechos a mano quedó a la vista que cada uno repite, copiado: el `View absolute inset0 $scrim`, el guard anti click-huérfano (doble rAF), la reserva inferior, y ahora el descarte del teclado.
+**Qué**: cada invariante nuevo del patrón sheet cuesta 21 ediciones + un guard estático que lo sostenga. Ya hay **dos** guards de este tipo (`keyboard-avoiding`, `sheet-keyboard-dismiss`) y la entrada de backlog de migrar los 6 sheets con input a `BottomSheetShell` sigue abierta.
+**Por qué importa**: el guard evita la regresión silenciosa, pero no baja el costo. La migración de los sheets a mano al primitivo convierte los dos guards en un chequeo de una línea sobre un solo archivo.
+**Próximo paso sugerido**: ampliar la entrada existente de migración a `BottomSheetShell` para incluir **todos** los overlays con scrim (no solo los 6 con input), con el criterio ordenado por riesgo: primero los alcanzables desde la manga 🔴.
+
 ## 2026-07-22 — 🎯 REBRANDING (nombre nuevo) — camino crítico del beta; bloquea U8a/deep-links + submit a stores
 
 **Origen**: al arrancar el Gate 0 de U8a (deep links), Raf avisó: **rebranding PENDIENTE, nombre NUEVO (RAFAQ no es final), "cambia todo"**, y **no tiene dominio ni nada (0)**.
@@ -675,7 +690,8 @@ arreglada.
 
 **Origen**: sesión 22, activación de `invitations.spec.ts` (E2E). Al hacer `page.goto('/invite?token=…')` (carga fresca) con un usuario ya logueado, el harness reprodujo un loop confirm→accept→confirm.
 **Qué**: en una carga fresca, `AuthContext` arranca en `loading` → `invite.tsx` ve `isAuthed=false` → entra en `auth_required` y **persiste el token** (R5.13). Cuando auth resuelve, pasa a `confirm`; pero tras aceptar, el `RootGate` (re-ruteo centralizado R5.13) parece volver a `/invite` por el token persistido (timing del clear vs el guard) → loop. NO se reproduce por el flujo in-app (pegar link desde el wizard / "Pegar link de invitación") porque la sesión nunca cae a `loading` → va directo a `confirm`, sin persistir token. El E2E usa el flujo in-app (también un camino real) y queda verde.
-**Por qué importa**: es un bug LATENTE del camino deep-link/universal-link con sesión activa — hoy DIFERIDO (sin dominio `app.rafq.ar`, device-blocked, scheme no asociado). No es MVP-blocker (el camino usable hoy es pegar el link, que anda). Pero hay que arreglarlo ANTES de habilitar deep-links de Fase 5.
+**Por qué importa**: es un bug LATENTE del camino deep-link/universal-link con sesión activa — hoy DIFERIDO (sin dominio `app.rafq.ar`, device-blocked, scheme no asociado). Pero hay que arreglarlo ANTES de habilitar deep-links de Fase 5.
+⚠️ **CORRECCIÓN (2026-07-27)**: este párrafo decía *"No es MVP-blocker (el camino usable hoy es pegar el link, que anda)"*. **Es falso y hay que verlo escrito**: nadie *pega* un link que acaba de recibir por WhatsApp — lo **toca**. Y al tocarlo cae en `app.rafq.ar`, que no existe. Raf lo descubrió usándolo desde un iPhone real (2026-07-27) después de que esto llevara semanas registrado como "diferido". Ver la entrada «Las invitaciones NO funcionan» más abajo.
 **Próximo paso sugerido**: cuando se aborde el deep-link nativo/universal-link, revisar `invite.tsx` + el re-ruteo R5.13 del `RootGate`: no persistir el token si el estado es `loading` (esperar a que auth resuelva antes de decidir `auth_required`), o limpiar/guardar de forma que el accept no vuelva a disparar el re-ruteo. Reproducir con `goto('/invite?token=')` + sesión activa.
 
 ## 2026-06-01 — Cambio/verificación de email depende del envío de mails de Supabase (rate-limited) → SMTP propio para escala
@@ -1044,3 +1060,15 @@ device destapa un caso no cubierto.
 - **Por qué importa**: es la misma clase que los tres bugs de esta serie — **un test que no se ejecuta se ve idéntico a un test que pasa**. Y pega justo donde más duele: los 5 guards estáticos son la ÚNICA cobertura de bugs que la E2E no puede ver desde web (teclado, safe-area, worklets). Un guard que no corre da falsa confianza, que es peor que no tenerlo.
 - **Fix**: un test que enumere `app/**/*.test.ts(x)` y asserte que cada uno aparece en la lista de `run-tests.mjs`. Barato. Falsificarlo agregando un test suelto → rojo.
 - **Emparentado** con la auto-verificación de cobertura que esta unidad agregó a los guards (que asserten cuántos archivos escanearon y que el blanqueo no se coma el archivo).
+
+## 🔴 Las invitaciones NO funcionan: el link apunta a un dominio que no existe
+- **Origen**: Raf, device iPhone real, 2026-07-27. Invitó desde el Android y el link abrió Safari en `app.rafq.ar` → *"Safari can't open the page because the server can't be found"*.
+- **Estado verificado ese día**: `nslookup app.rafq.ar` → **Non-existent domain**. El dominio nunca se compró. `INVITE_BASE_URL = 'https://app.rafq.ar'` (`app/src/services/members.ts:45`) y el mismo default en el `APP_URL` de `invite_user` / `resend_invitation`.
+- **No se manda mail** (modelo ADR-014: `sendInvitationEmail` se eliminó, el owner reparte el link por WhatsApp) → el único artefacto es el mensaje que arma `ShareLink`, y contiene una URL muerta.
+- **Agujero mayor al dominio**: la app **no está en tiendas**. Aunque el dominio existiera, el invitado no tiene de dónde instalarla. Cualquier flujo por link necesita una landing que hoy no existe.
+- **Lo que SÍ funciona**: la mitad receptora. `parseInviteToken` acepta el token crudo (UUID suelto) además de la URL, y está testeado.
+- **DECISIÓN DE RAF (2026-07-27): no se arregla ahora.** Es sub-tarea del rebrand y se resuelve entera cuando desbloquee el nombre (dominio + deep links + submit a tiendas de una). Se descartaron el arreglo interino (compartir código + instrucciones en vez de link) y comprar el dominio bajo el nombre viejo.
+- **LA LECCIÓN, que es lo que hay que no repetir**: esto estaba registrado desde el 2026-07-22 como *"U8a (deep links) DIFERIDO"* y sobrevivió semanas sin que nadie lo mirara. Las dos frases describen el mismo hecho, pero **solo una te hace mirarlo**:
+  - "U8a (deep links) diferido" → suena a mejora pendiente.
+  - "las invitaciones son inusables" → suena a lo que es.
+  **Un diferimiento se nombra por su CONSECUENCIA para el usuario, no por la tarea técnica que queda pendiente.** El encuadre viejo incluso llevó a escribir en este mismo archivo que "no es MVP-blocker porque el camino usable hoy es pegar el link, que anda" — asumiendo que el destinatario pegaría en vez de tocar. Corregido in-place más arriba.
