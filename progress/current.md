@@ -62,6 +62,34 @@ no-regresión en web · `design/` intacto · **nada commiteado**.
 roto→arreglado). Detalle, tabla de las 23, razonamiento de la safe-area, diseño del guard y dudas
 abiertas en `progress/impl_barrida-teclado.md`.
 
+## 2026-07-28 — BUGFIX «abrir un sheet baja el teclado» — commiteado en `615328d`, APK `ca1ab604` — ⏸ PUERTA 2
+
+Raf sobre el APK `a3b8d804`: `identificar` ✅ (el input sube y se ve — el reporte original quedó
+cerrado). **Pero** con el teclado abierto, tocar la flecha de atrás abre el `ExitJornadaSheet` y el
+teclado NO baja: del sheet asomaban ~25px y los dos botones ("terminar maniobra" / "salir sin
+terminar") quedaban tapados. Un diálogo de decisión destructiva invisible, en flujo 🔴.
+
+**Mi diagnóstico fue FALSO y lo corrigió el implementer.** Lo atribuí al "límite conocido" de
+`KeyboardAvoidingShell.android.tsx` (montar con el teclado abierto arranca en 0). El `ExitJornadaSheet`
+**no monta ese shell** — no tiene inputs, así que la REGLA B del guard nunca se lo exigió: el lift ahí
+nunca existió. Sonaba correcto y era otra cosa. Las dos afirmaciones falsas que quedaban en ese archivo
+("paridad con iOS, no regresión" / "el flujo del bug reportado no lo toca") quedaron corregidas.
+
+**Fix**: `useDismissKeyboardOnOpen` en `BottomSheetShell` + los 21 sheets a mano = 22 overlays. Es la
+conducta correcta, no solo la más simple: tocar "atrás para terminar la jornada" es SALIR del contexto
+de escritura. Capa 2 (sembrar la altura al montar) **rechazada con fundamento**: la única fuente es
+`Keyboard.metrics()`, cuyo `height` es el que está mal bajo edge-to-edge, y el término de corrección no
+es verificable — un lift equivocado es peor que ninguno.
+
+**Lo que hizo el implementer sin que se lo pidieran** (vale registrarlo, es el estándar que quiero):
+se cazó una regresión propia (el descarte mataba el `autoFocus` de `SavePresetSheet`) y **detectó que su
+propio E2E era un falso verde** falsificándolo — el oráculo "el input pierde el foco" pasaba igual sin
+el fix. Lo reescribió sobre el bastonazo, único disparador que no toca el foco por su cuenta.
+
+**Lo que agregó el review**: el guard cubría **una sola dirección** de la excepción `claimsKeyboard` —
+marcarla de más pasaba 9/9 en verde dejando el bug vivo en silencio. Y su semilla `$scrim` afirmaba algo
+falso (existe un overlay sin `$scrim`). Ahora enumera por GEOMETRÍA y cubre las dos direcciones.
+
 ## 2026-07-27 — UNIDAD «barrida de teclado» — commiteada en `56beff3`, APK `a3b8d804` — ⏸ PUERTA 2
 
 **Cómo apareció**: Raf verificó `eabfd00` en device (teclado en Vacunación ✅, aire ✅, navbar ✅, crash
