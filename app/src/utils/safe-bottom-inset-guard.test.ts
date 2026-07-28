@@ -38,7 +38,7 @@ const APP_ROOT = resolve(HERE, '..', '..'); // app/
 const ROOTS = [join(APP_ROOT, 'app'), join(APP_ROOT, 'src')];
 
 /**
- * Piso de archivos escaneados (`app/app` + `app/src`, sin `.test.*`). Hoy son **364**. Ver
+ * Piso de archivos escaneados (`app/app` + `app/src`, sin `.test.*`). Hoy son **366**. Ver
  * `utils/scan-coverage.ts`: si el glob deja de matchear, este guard se pone ROJO en vez de pasar vacío.
  */
 const SCANNED_FILES_FLOOR = 300;

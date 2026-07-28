@@ -25,6 +25,7 @@ import { Platform, Pressable } from 'react-native';
 import { getTokenValue, Text, View, YStack } from 'tamagui';
 import { SkipForward } from 'lucide-react-native';
 
+import { useDismissKeyboardOnOpen } from '@/hooks/useDismissKeyboardOnOpen';
 import { useSafeBottomInset } from '@/hooks/useSafeBottomInset';
 import { Button } from '@/components';
 import { buttonA11y, labelA11y } from '@/utils/a11y';
@@ -45,6 +46,10 @@ export type SkipAnimalSheetProps = {
 };
 
 export function SkipAnimalSheet({ capturedCount, onConfirm, onDone, onClose }: SkipAnimalSheetProps) {
+  // ABRIR EL SHEET BAJA EL TECLADO (bug 🔴 device Android): saltear un animal se decide DESDE la carga, con
+  // un campo de dato recién tipeado y el teclado arriba — sin esto el sheet quedaba debajo del teclado.
+  useDismissKeyboardOnOpen();
+
   const bottomPad = useSafeBottomInset();
   const hasData = capturedCount > 0;
 

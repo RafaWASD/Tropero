@@ -111,6 +111,12 @@ export function SavePresetSheet({
       testID="save-preset-sheet"
       scrimTestID="save-preset-scrim"
       scrimA11yLabel="Cancelar"
+      // ESTE sheet SE QUEDA con el teclado (ver el docblock de la prop en `BottomSheetShell`): su input va
+      // con `autoFocus`, o sea que no está SALIENDO del contexto de escritura sino ENTRANDO a uno. Sin esta
+      // declaración, el descarte del teclado que el shell hace al abrirse le MATA el foco (falsificado
+      // ejecutando: `e2e/sheet-baja-teclado.spec.ts` test 3). Es la única excepción del repo, y el guard
+      // `sheet-keyboard-dismiss-guard.test.ts` la exige a todo sheet con `autoFocus`.
+      claimsKeyboard
       footer={
         <Button variant="primary" fullWidth disabled={!canSave} onPress={() => void handleSave()}>
           {saving ? 'Guardando…' : ctaLabel}

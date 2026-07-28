@@ -25,6 +25,7 @@ import { Platform, Pressable } from 'react-native';
 import { getTokenValue, Text, View, XStack, YStack } from 'tamagui';
 import { Check, X } from 'lucide-react-native';
 
+import { useDismissKeyboardOnOpen } from '@/hooks/useDismissKeyboardOnOpen';
 import { useSafeBottomInset } from '@/hooks/useSafeBottomInset';
 import { Button } from '@/components';
 import { buttonA11y, labelA11y } from '@/utils/a11y';
@@ -152,6 +153,10 @@ export function TactoConfigSheet({
   // Reserva inferior: la canónica del hook compartido, con el PISO propio ($4) que este sheet ya tenía
   // (era `max(inset, $4)`). El piso solo puede ganar cuando no hay inset (web 18, = baseline); en device
   // manda el inset del sistema (iOS 34, Android 3 botones 64). Esta unidad agrega aire, nunca lo saca.
+  // ABRIR EL SHEET BAJA EL TECLADO (bug 🔴 device Android): se abre desde la configuración de la jornada,
+  // que tiene campos de texto — el teclado no puede taparle las opciones ni el CTA.
+  useDismissKeyboardOnOpen();
+
   const bottomPad = useSafeBottomInset({ floor: getTokenValue('$4', 'space') });
 
   const a11ySuggested = labelA11y(Platform.OS, suggestedCopy(suggested, serviceMonthsCount));

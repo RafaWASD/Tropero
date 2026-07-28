@@ -12,6 +12,7 @@ import { useState } from 'react';
 import { Platform, Pressable } from 'react-native';
 import { getTokenValue, ScrollView, Text, View, YStack } from 'tamagui';
 
+import { useDismissKeyboardOnOpen } from '../hooks/useDismissKeyboardOnOpen';
 import { useKeyboardAwareBottomInset } from '../hooks/useSafeBottomInset';
 import { KeyboardAvoidingShell } from './KeyboardAvoidingShell';
 import { Button } from './Button';
@@ -55,6 +56,12 @@ function todayIso(): string {
 }
 
 export function TreatmentApplicationSheet({ treatment, onClose, onSubmit }: TreatmentApplicationSheetProps) {
+  // ABRIR EL SHEET BAJA EL TECLADO (bug 🔴 device Android): se abre desde la ficha del animal, que tiene
+  // campos de texto. Además del lift, esto tapa el LÍMITE del montaje del `KeyboardAvoidingShell` de abajo
+  // (monta con el teclado ya abierto → arranca en altura 0 hasta el próximo evento de insets).
+  // Sus propios inputs no se ven afectados: el hook dispara SOLO en el flanco de apertura.
+  useDismissKeyboardOnOpen();
+
   // Reserva inferior KEYBOARD-AWARE, con el MISMO criterio (y el mismo arrastre de la unidad «aire») que
   // `TreatmentStartSheet`: `floor: $6` (= 32 en la escala `space`) conserva el valor que estaba escrito a
   // mano y el hook le agrega el inset del sistema + el aire de Android, que a este sheet le faltaban.

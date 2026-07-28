@@ -29,6 +29,7 @@ import { Platform, Pressable } from 'react-native';
 import { getTokenValue, Text, View, YStack } from 'tamagui';
 import { AlertTriangle } from 'lucide-react-native';
 
+import { useDismissKeyboardOnOpen } from '@/hooks/useDismissKeyboardOnOpen';
 import { useSafeBottomInset } from '@/hooks/useSafeBottomInset';
 import { Button } from '@/components';
 import { buttonA11y, labelA11y } from '@/utils/a11y';
@@ -64,6 +65,10 @@ export function ConfirmDeleteSheet({
   onClose,
   testID,
 }: ConfirmDeleteSheetProps) {
+  // ABRIR EL SHEET BAJA EL TECLADO (bug 🔴 device Android): confirmar un borrado es SALIR del contexto de
+  // escritura, y este sheet se abre desde la configuración de la jornada, que tiene campos de texto.
+  useDismissKeyboardOnOpen();
+
   const bottomPad = useSafeBottomInset();
 
   // ── GUARD del backdrop contra el "click huérfano" del tap que abrió el sheet (BUG web táctil) ──

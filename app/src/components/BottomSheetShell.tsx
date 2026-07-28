@@ -72,6 +72,20 @@
 // `console.error` al suscribirse, aunque en el export web de este repo se midió que no resuelve a ese stub;
 // igual no registramos: en iOS/web el evento nunca puede disparar.)
 //
+// ── 8va RESPONSABILIDAD: ABRIR EL SHEET BAJA EL TECLADO (bug 🔴 manga, Raf device Android) ──────────
+// Con el input de caravana enfocado en `maniobra/identificar`, abrir un sheet dejaba el teclado ARRIBA y
+// el sheet debajo de él (del `ExitJornadaSheet` solo asomaba una franja de ~25px: sus dos botones,
+// inalcanzables). Abrir un sheet es SALIR del contexto de escritura —el input queda detrás del scrim—, así
+// que el shell baja el teclado al montar (`hooks/useDismissKeyboardOnOpen`, decisión pura
+// `shouldDismissKeyboardOnOpen`). Con eso, además, el LÍMITE del montaje de `KeyboardAvoidingShell`
+// (monta con el teclado ya abierto → altura 0 hasta el próximo evento de insets) deja de ser alcanzable
+// por esta vía. El invariante lo sostiene el guard `sheet-keyboard-dismiss-guard.test.ts`, que lo exige a
+// TODO archivo con scrim (los ~21 sheets a mano no pasan por este shell).
+// ÚNICA EXCEPCIÓN, y es semántica: el sheet que `autoFocus`ea su propio input NO está saliendo del
+// contexto de escritura sino ENTRANDO a uno → lo declara con `claimsKeyboard` y el shell no descarta nada
+// (si descartara, le mataría el foco: verificado ejecutando con `SavePresetSheet`, el único `autoFocus`
+// del repo). El guard exige esa declaración a todo sheet con `autoFocus`.
+//
 // ── ⚠️ NUNCA `flex={1}` EN EL BODY (bug U5, ya arreglado una vez) ────────────────────────────────────
 // El body va `flexShrink={1}` (grow:0, shrink:1, basis:auto), NO `flex:1` (grow:1, basis:0%). Con flex:1 el
 // body COLAPSABA A ALTURA 0 en NATIVO cuando el contenido es corto: la caja del sheet (cap `maxHeight:85%`,
@@ -111,6 +125,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
 import { ChevronDown, X } from 'lucide-react-native';
 
+import { useDismissKeyboardOnOpen } from '../hooks/useDismissKeyboardOnOpen';
 import { useKeyboardVisible } from '../hooks/useKeyboardVisible';
 import { useKeyboardAwareBottomInset } from '../hooks/useSafeBottomInset';
 import { KeyboardAvoidingShell } from './KeyboardAvoidingShell';
@@ -196,6 +211,23 @@ export type BottomSheetShellProps = {
   keyboardShouldPersistTaps?: 'always' | 'never' | 'handled';
   /** ¿Grip visual arriba? Default true. */
   showGrip?: boolean;
+  /**
+   * ESTE SHEET SE QUEDA CON EL TECLADO: no lo descartes al abrirse. Default `false`.
+   *
+   * La regla general es la contraria (abrir un sheet BAJA el teclado — ver la 8va responsabilidad): abrir
+   * un overlay es SALIR del contexto de escritura. La excepción es el sheet que **entra** a uno: el que
+   * `autoFocus`ea su propio input está reclamando el teclado para sí, y descartarlo le mata el foco.
+   *
+   * ⚠️ NO es una hipótesis: se falsificó ejecutando. `SavePresetSheet` (el único `autoFocus` del repo)
+   * perdía el foco de su input con el descarte puesto — en web el `commitMount` de React enfoca al hijo
+   * DENTRO del mismo commit, o sea ANTES del efecto del padre, así que el `Keyboard.dismiss()` del shell
+   * llegaba después y lo blureaba. El resultado neto de la excepción es el correcto igual: si venías
+   * tipeando, el teclado no baja pero el foco pasa al input del sheet (que es adonde tenés que escribir).
+   *
+   * Lo hace cumplir el guard `sheet-keyboard-dismiss-guard.test.ts`: un sheet que renderice `autoFocus`
+   * tiene que declarar `claimsKeyboard`.
+   */
+  claimsKeyboard?: boolean;
 };
 
 export function BottomSheetShell({
@@ -218,7 +250,16 @@ export function BottomSheetShell({
   onBodyContentSizeChange,
   keyboardShouldPersistTaps = 'handled',
   showGrip = true,
+  claimsKeyboard = false,
 }: BottomSheetShellProps) {
+  // ── 8va RESPONSABILIDAD: ABRIR EL SHEET BAJA EL TECLADO (ver cabecera) ──────────────────────────
+  // El shell se monta cuando el sheet se abre (los 4 consumidores lo renderizan condicionalmente y
+  // desmontan al cerrar), así que el flanco del hook es el montaje: baja el teclado ahí y NUNCA después
+  // (si no, un sheet con input propio cerraría su propio teclado en cada tecla).
+  // EXCEPCIÓN `claimsKeyboard`: el sheet que auto-enfoca su input está ENTRANDO al contexto de escritura,
+  // no saliendo → no se le descarta el teclado (ver el docblock de la prop; falsificado con `SavePresetSheet`).
+  useDismissKeyboardOnOpen(!claimsKeyboard);
+
   // El FLAG se usa acá para tres cosas distintas: la condensación del sheet, el gesto de arrastre
   // (bajar el teclado en vez de cerrar) y la reserva inferior. La RESERVA sale del hook compartido.
   const keyboardVisible = useKeyboardVisible();

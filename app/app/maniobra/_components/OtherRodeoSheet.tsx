@@ -28,6 +28,7 @@ import { Platform, Pressable } from 'react-native';
 import { getTokenValue, Text, View, XStack, YStack } from 'tamagui';
 import { Boxes } from 'lucide-react-native';
 
+import { useDismissKeyboardOnOpen } from '@/hooks/useDismissKeyboardOnOpen';
 import { useSafeBottomInset } from '@/hooks/useSafeBottomInset';
 import { Button } from '@/components';
 import { buttonA11y } from '@/utils/a11y';
@@ -55,6 +56,10 @@ export function OtherRodeoSheet({
   onMoveAnimal,
   onSkip,
 }: OtherRodeoSheetProps) {
+  // ABRIR EL SHEET BAJA EL TECLADO: igual que el CandidatePicker, este aviso puede dispararse a partir de
+  // una búsqueda MANUAL (input enfocado, teclado arriba) → sin esto quedaba debajo del teclado.
+  useDismissKeyboardOnOpen();
+
   const bottomPad = useSafeBottomInset();
   const iconColor = getTokenValue('$primary', 'color');
   const heroIcon = getTokenValue('$heroIcon', 'size');

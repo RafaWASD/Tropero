@@ -31,6 +31,7 @@ import { Platform, Pressable } from 'react-native';
 import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
 import { AlertTriangle } from 'lucide-react-native';
 
+import { useDismissKeyboardOnOpen } from '@/hooks/useDismissKeyboardOnOpen';
 import { useSafeBottomInset } from '@/hooks/useSafeBottomInset';
 import { Button } from '@/components';
 import { buttonA11y, labelA11y } from '@/utils/a11y';
@@ -51,6 +52,10 @@ export type SyncRechazoSheetProps = {
 };
 
 export function SyncRechazoSheet({ rejections, onAcknowledge, onClose }: SyncRechazoSheetProps) {
+  // ABRIR EL SHEET BAJA EL TECLADO (bug 🔴 device Android): este sheet aparece SOLO (lo dispara la llegada de
+  // rechazos de sync), o sea que puede montarse en cualquier momento — incluido mientras se tipea.
+  useDismissKeyboardOnOpen();
+
   const bottomPad = useSafeBottomInset();
 
   // ── GUARD del backdrop contra el "click huérfano" del tap que abrió el sheet (BUG web táctil) ──

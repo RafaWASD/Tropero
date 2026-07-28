@@ -22,6 +22,7 @@ import { Platform, Pressable } from 'react-native';
 import { getTokenValue, Text, View, XStack, YStack } from 'tamagui';
 import { CheckCircle2, FileText } from 'lucide-react-native';
 
+import { useDismissKeyboardOnOpen } from '../../hooks/useDismissKeyboardOnOpen';
 import { useSafeBottomInset } from '../../hooks/useSafeBottomInset';
 import { buttonA11y } from '../../utils/a11y';
 import { formatRfidMasked } from '../../utils/sigsa-display';
@@ -49,6 +50,11 @@ export function MarkDeclaredSheet({
   onViewAnimal,
   busy = false,
 }: MarkDeclaredSheetProps) {
+  // ABRIR EL SHEET BAJA EL TECLADO (bug 🔴 device Android). Se pasa `open` porque este sheet vive SIEMPRE
+  // montado detrás de la prop: con el default (`true`) el flanco sería el del montaje de `export-sigsa` —
+  // una pantalla con campos de fecha— y nunca dispararía al abrirse de verdad.
+  useDismissKeyboardOnOpen(open);
+
   const bottomPad = useSafeBottomInset();
   const primary = getTokenValue('$primary', 'color');
   const muted = getTokenValue('$textMuted', 'color');

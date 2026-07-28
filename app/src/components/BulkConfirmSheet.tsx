@@ -18,6 +18,7 @@ import { AlertTriangle, Pin } from 'lucide-react-native';
 
 import { Button } from './Button';
 import { Card } from './Card';
+import { useDismissKeyboardOnOpen } from '../hooks/useDismissKeyboardOnOpen';
 import { useSafeBottomInset } from '../hooks/useSafeBottomInset';
 import { buttonA11y, labelA11y } from '../utils/a11y';
 import type { SelectionSummary } from '../utils/bulk-selection';
@@ -63,6 +64,11 @@ export function BulkConfirmSheet({
   revertingOverride = false,
   confirming = false,
 }: BulkConfirmSheetProps) {
+  // ABRIR EL SHEET BAJA EL TECLADO (bug 🔴 device Android): `seleccion-masiva` tiene un buscador arriba, así
+  // que este sheet de confirmación se puede abrir con el teclado ARRIBA — y como NO monta ningún
+  // `KeyboardAvoidingShell` (no tiene input), sin esto quedaba directamente debajo del teclado.
+  useDismissKeyboardOnOpen();
+
   // Reserva del borde INFERIOR de la hoja. Antes era un `paddingBottom="$6"` FIJO: un token suelto que
   // nunca pasó por la reserva canónica, así que en Android con barra de 3 botones (inset 48) los dos CTAs
   // full-width del final quedaban a 32dp del borde de PANTALLA, o sea DEBAJO de la barra del sistema. Es

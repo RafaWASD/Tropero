@@ -37,6 +37,7 @@ import { Platform, Pressable } from 'react-native';
 import { getTokenValue, Text, View, YStack } from 'tamagui';
 import { Check } from 'lucide-react-native';
 
+import { useDismissKeyboardOnOpen } from '@/hooks/useDismissKeyboardOnOpen';
 import { useSafeBottomInset } from '@/hooks/useSafeBottomInset';
 import { Button } from '@/components';
 import { buttonA11y, labelA11y } from '@/utils/a11y';
@@ -73,6 +74,13 @@ export function ExitJornadaSheet({
   emptyCount = 0,
   onElegirLote,
 }: ExitJornadaSheetProps) {
+  // ── ABRIR EL SHEET BAJA EL TECLADO (bug 🔴 device Android, APK a3b8d804 — ESTE sheet es el del reporte) ──
+  // Con el input de caravana enfocado, tocar la ‹ abría este sheet DEBAJO del teclado: solo asomaba una
+  // franja de ~25px y los dos botones ("Terminar jornada" / "Salir sin terminar") quedaban tapados. Tocar
+  // "atrás para terminar la jornada" es salir del contexto de escritura → el teclado se va con él.
+  // El caller monta/desmonta este sheet (`{exitOpen ? <ExitJornadaSheet …/> : null}`) → default `open=true`.
+  useDismissKeyboardOnOpen();
+
   const bottomPad = useSafeBottomInset();
 
   // ── GUARD del backdrop contra el "click huérfano" del tap que abrió el sheet (BUG web táctil) ──

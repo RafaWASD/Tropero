@@ -28,6 +28,7 @@ import { Platform, Pressable } from 'react-native';
 import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
 import { ChevronRight } from 'lucide-react-native';
 
+import { useDismissKeyboardOnOpen } from '@/hooks/useDismissKeyboardOnOpen';
 import { useSafeBottomInset } from '@/hooks/useSafeBottomInset';
 import { Button, CategoryBadge } from '@/components';
 import { formatEidReadable } from '@/utils/eid-format';
@@ -52,6 +53,11 @@ export type CandidatePickerProps = {
 };
 
 export function CandidatePicker({ query, candidates, onPick, onCreateNew, onClose }: CandidatePickerProps) {
+  // ABRIR EL SHEET BAJA EL TECLADO: este picker se abre JUSTO DESPUÉS de una búsqueda manual, o sea con el
+  // input de la banda inferior enfocado y el teclado arriba — sin esto quedaba tapado (mismo bug 🔴 que el
+  // ExitJornadaSheet, y acá el disparador es todavía más directo). El caller lo monta/desmonta.
+  useDismissKeyboardOnOpen();
+
   const bottomPad = useSafeBottomInset();
 
   return (

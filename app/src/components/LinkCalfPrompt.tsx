@@ -43,6 +43,7 @@ import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
 import { ChevronDown, Mars, Venus } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
 
+import { useDismissKeyboardOnOpen } from '../hooks/useDismissKeyboardOnOpen';
 import { useKeyboardAwareBottomInset } from '../hooks/useSafeBottomInset';
 import { KeyboardAvoidingShell } from './KeyboardAvoidingShell';
 import { Button } from './Button';
@@ -112,6 +113,12 @@ export function LinkCalfPrompt({
   onSkip,
   onLinked,
 }: LinkCalfPromptProps) {
+  // ABRIR EL PROMPT BAJA EL TECLADO (bug 🔴 device Android). Se pasa `open` (este prompt declara la prop):
+  // el flanco tiene que ser el de la APERTURA — se abre justo después de guardar un alta desde
+  // `crear-animal`, una pantalla llena de campos de texto. Sin esto, además del lift, se comía el LÍMITE
+  // del montaje del `KeyboardAvoidingShell` (monta con el teclado ya abierto → altura 0).
+  useDismissKeyboardOnOpen(open);
+
   // Reserva inferior KEYBOARD-AWARE (unidad «barrida de teclado»): este prompt se monta desde
   // `crear-animal.tsx` FUERA de su `</FooterActionShell>`, o sea que NO heredaba ningún keyboard-avoidance;
   // el buscador del ternero al pie quedaba tapado por el teclado. Ahora la hoja sube con su propio shell y

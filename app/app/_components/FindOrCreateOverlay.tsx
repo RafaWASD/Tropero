@@ -27,6 +27,7 @@ import { useRouter, useSegments } from 'expo-router';
 import { useStatus } from '@powersync/react';
 import { ArrowRightLeft, ChevronRight, PlusCircle, Radio, Search, Tag, X } from 'lucide-react-native';
 
+import { useDismissKeyboardOnOpen } from '@/hooks/useDismissKeyboardOnOpen';
 import { useKeyboardAwareBottomInset } from '@/hooks/useSafeBottomInset';
 import { KeyboardAvoidingShell } from '@/components/KeyboardAvoidingShell';
 import { Button, Card, CategoryBadge } from '@/components';
@@ -219,6 +220,14 @@ export function FindOrCreateOverlay() {
   useEffect(() => {
     if (scopedScannerActive && state !== null) close();
   }, [scopedScannerActive, state, close]);
+
+  // ─── ABRIR EL OVERLAY BAJA EL TECLADO (bug 🔴 device Android, APK a3b8d804) ──────────────────────────
+  // Este es el caso MÁS filoso de todos: el overlay es GLOBAL (`app/_layout.tsx` lo monta sobre CUALQUIER
+  // pantalla) y no lo abre un tap del usuario sino un BASTONAZO — puede aparecer literalmente mientras se
+  // está tipeando, en cualquier formulario de la app. Se pasa `state !== null` (no el default) porque el
+  // componente vive SIEMPRE montado: el flanco es el de la aparición del sheet, no el del montaje. Va
+  // ANTES del `return null` para no llamar un hook condicionalmente.
+  useDismissKeyboardOnOpen(state !== null);
 
   if (state === null) return null;
 

@@ -38,6 +38,7 @@ import { Platform, Pressable, Text as RNText, TextInput, type LayoutChangeEvent 
 import { getTokenValue, Text, View, XStack, YStack } from 'tamagui';
 import { Check, Keyboard as KeyboardIcon, Pencil } from 'lucide-react-native';
 
+import { useDismissKeyboardOnOpen } from '@/hooks/useDismissKeyboardOnOpen';
 import { buttonA11y, labelA11y } from '@/utils/a11y';
 import {
   AGE_WHEEL,
@@ -392,6 +393,13 @@ function AgeAdjustSheet({
   onClearAge: () => void;
   bottomPad: number;
 }) {
+  // ABRIR EL SHEET BAJA EL TECLADO (bug 🔴 device Android). CASO VIVO Y DIRECTO: el paso de CE tiene un
+  // TextInput hero (los cm) que el operario está tipeando con el teclado ARRIBA; tocar la edad abría ESTA
+  // rueda debajo del teclado. Va en el SUB-COMPONENTE del sheet (no en el paso), que es el que se monta al
+  // abrirse. El `onBlur={commit}` del input se dispara con el descarte y GUARDA lo tipeado — que es lo
+  // correcto: salir del contexto de escritura confirma el valor en vez de perderlo.
+  useDismissKeyboardOnOpen();
+
   // La rueda arranca en la edad prellenada/ajustada o en el default (24) si era desconocida.
   const [months, setMonths] = useState<number>(() => indexToValue(initialAgeIndex(initialMonths), AGE_WHEEL));
 

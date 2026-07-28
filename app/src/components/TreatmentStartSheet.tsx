@@ -14,6 +14,7 @@ import { Platform, Pressable } from 'react-native';
 import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
 import { Check } from 'lucide-react-native';
 
+import { useDismissKeyboardOnOpen } from '../hooks/useDismissKeyboardOnOpen';
 import { useKeyboardAwareBottomInset } from '../hooks/useSafeBottomInset';
 import { KeyboardAvoidingShell } from './KeyboardAvoidingShell';
 import { Button } from './Button';
@@ -67,6 +68,11 @@ function todayIso(): string {
 }
 
 export function TreatmentStartSheet({ onClose, onSubmit }: TreatmentStartSheetProps) {
+  // ABRIR EL SHEET BAJA EL TECLADO (bug 🔴 device Android): se abre desde la ficha del animal, que tiene
+  // campos de texto. Además del lift, tapa el LÍMITE del montaje del `KeyboardAvoidingShell` de abajo
+  // (monta con el teclado ya abierto → arranca en altura 0 hasta el próximo evento de insets).
+  useDismissKeyboardOnOpen();
+
   // Reserva inferior de la hoja. KEYBOARD-AWARE: con el teclado arriba el `KeyboardAvoidingShell` ya subió
   // la hoja el alto entero del teclado → la reserva se encoge al respiro de `$2`.
   // ⚠️ `floor: $6` = el valor FIJO que este sheet tenía escrito (`paddingBottom="$6"` = **32** en la escala

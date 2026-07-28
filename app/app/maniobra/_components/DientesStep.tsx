@@ -25,6 +25,7 @@ import { Platform, Pressable } from 'react-native';
 import { getTokenValue, ScrollView, Text, View, YStack } from 'tamagui';
 import { AlertTriangle } from 'lucide-react-native';
 
+import { useDismissKeyboardOnOpen } from '@/hooks/useDismissKeyboardOnOpen';
 import { useSafeBottomInset } from '@/hooks/useSafeBottomInset';
 import { buttonA11y } from '@/utils/a11y';
 import { TEETH_OPTIONS } from '@/utils/teeth-options';
@@ -124,6 +125,11 @@ function CutPromptSheet({
   onJustTeeth: () => void;
   onDismiss: () => void;
 }) {
+  // ABRIR EL SHEET BAJA EL TECLADO (bug 🔴 device Android): este prompt vive DENTRO del wizard de carga,
+  // donde el paso anterior puede haber dejado un campo enfocado. Va en el SUB-COMPONENTE del sheet (no en
+  // `DientesStep`), que es el que se monta al abrirse.
+  useDismissKeyboardOnOpen();
+
   const TERRACOTA = getTokenValue('$terracota', 'color');
   // Reserva inferior: la canónica del hook compartido, con el PISO propio ($4) que este sheet ya tenía
   // (era `max(inset, $4)`). El piso solo puede ganar cuando no hay inset (web 18, = baseline); en device

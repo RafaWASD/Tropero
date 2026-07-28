@@ -26,6 +26,7 @@ import { useEffect, useRef } from 'react';
 import { Platform, Pressable } from 'react-native';
 import { getTokenValue, ScrollView, Text, View, YStack } from 'tamagui';
 
+import { useDismissKeyboardOnOpen } from '@/hooks/useDismissKeyboardOnOpen';
 import { useSafeBottomInset } from '@/hooks/useSafeBottomInset';
 import { ComboOptionRow } from '@/components';
 import { buttonA11y } from '@/utils/a11y';
@@ -46,6 +47,11 @@ export type LotePickerSheetProps = {
 };
 
 export function LotePickerSheet({ open, onClose, groups, selectedId, onSelect }: LotePickerSheetProps) {
+  // ABRIR EL SHEET BAJA EL TECLADO (bug 🔴 device Android). Se pasa `open` —y no el default— porque
+  // `maniobra/carga` lo deja SIEMPRE MONTADO detrás de esta prop: con el default el flanco sería el del
+  // montaje de la pantalla (teclado abajo) y el sheet nunca bajaría el teclado al abrirse de verdad.
+  useDismissKeyboardOnOpen(open);
+
   const bottomPad = useSafeBottomInset();
 
   // ── GUARD del backdrop contra el "click huérfano" del tap que abrió el sheet (BUG web táctil) ──

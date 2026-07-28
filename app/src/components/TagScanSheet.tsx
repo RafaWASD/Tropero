@@ -49,6 +49,7 @@ import { Platform, Pressable } from 'react-native';
 import { getTokenValue, Text, View, XStack, YStack } from 'tamagui';
 import { Bluetooth, Keyboard, Radio, Tag, X } from 'lucide-react-native';
 
+import { useDismissKeyboardOnOpen } from '@/hooks/useDismissKeyboardOnOpen';
 import { useKeyboardAwareBottomInset } from '@/hooks/useSafeBottomInset';
 import { KeyboardAvoidingShell } from '@/components/KeyboardAvoidingShell';
 import { StickIcon } from '@/theme/icons';
@@ -102,6 +103,11 @@ export function TagScanSheet({
   confirmSublabel = 'Asignar esta caravana a este animal.',
   hideManualEntry = false,
 }: TagScanSheetProps) {
+  // ── ABRIR EL SHEET BAJA EL TECLADO (bug 🔴 device Android) ──────────────────────────────────────────
+  // Este sheet se abre desde la ficha del animal y desde `LinkCalfPrompt` (que tiene un buscador con el
+  // teclado arriba): sin esto quedaba debajo del teclado. Su modo MANUAL (tipear el EID) no se ve afectado
+  // —el hook dispara SOLO en el flanco de apertura, y ese modo se activa después, con un tap.
+  useDismissKeyboardOnOpen();
 
   // ── Propiedad EXCLUSIVA del listener mientras el sheet está montado (RCF.6). Acquire al montar, release en
   //    el cleanup (garantiza limpieza incluso si el sheet se cierra por back-gesture o la ficha se desmonta). ──

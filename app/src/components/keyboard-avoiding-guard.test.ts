@@ -73,7 +73,7 @@ const APP_ROOT = resolve(HERE, '..', '..'); // app/
 const ROOTS = [join(APP_ROOT, 'app'), join(APP_ROOT, 'src')];
 
 /**
- * Piso de archivos escaneados (`app/app` + `app/src`, sin `.test.*`). Hoy son **364**. El piso está ~17%
+ * Piso de archivos escaneados (`app/app` + `app/src`, sin `.test.*`). Hoy son **366**. El piso está ~18%
  * abajo: tolera que se borre un puñado de archivos, pero se pone ROJO si el listado se rompe o si una
  * carpeta entera deja de matchear. Ver `utils/scan-coverage.ts` para el porqué.
  */

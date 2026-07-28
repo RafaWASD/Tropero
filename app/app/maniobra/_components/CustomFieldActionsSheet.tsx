@@ -15,6 +15,7 @@ import { Platform, Pressable } from 'react-native';
 import { getTokenValue, Text, View, XStack, YStack } from 'tamagui';
 import { Pencil, Trash2 } from 'lucide-react-native';
 
+import { useDismissKeyboardOnOpen } from '@/hooks/useDismissKeyboardOnOpen';
 import { useSafeBottomInset } from '@/hooks/useSafeBottomInset';
 import { Button } from '@/components';
 import { buttonA11y } from '@/utils/a11y';
@@ -36,6 +37,10 @@ export function CustomFieldActionsSheet({
   onDelete,
   onClose,
 }: CustomFieldActionsSheetProps) {
+  // ABRIR EL SHEET BAJA EL TECLADO (bug 🔴 device Android): el menú de acciones de un dato personalizado se
+  // abre desde la configuración de la jornada, donde se está tipeando el nombre del dato.
+  useDismissKeyboardOnOpen();
+
   const bottomPad = useSafeBottomInset();
 
   // ── GUARD del backdrop contra el "click huérfano" del tap que abrió el sheet (BUG web táctil) ──

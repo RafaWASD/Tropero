@@ -52,13 +52,39 @@
 // catch solo taparía el síntoma (no hay estado de recuperación mejor que `paddingBottom: 0`, que es
 // exactamente el valor inicial).
 //
-// ── LÍMITE CONOCIDO (paridad con iOS, no regresión) ──────────────────────────────────────────────────
-// Si el shell MONTA con el teclado YA abierto (p. ej. un sheet que se abre mientras se tipeaba en la
-// pantalla de atrás), arranca en 0 hasta el próximo evento de insets: `KeyboardAnimationManager` no le
-// reproduce el estado actual al listener nuevo. `KeyboardAvoidingView` en iOS tiene exactamente el mismo
-// comportamiento (se suscribe a `keyboardWillChangeFrame` y iOS no re-emite por un montaje), así que esto
-// es paridad, no una degradación de Android. El flujo del bug reportado (sheet montado → tocar el input →
-// teclado) no lo toca.
+// ── LÍMITE CONOCIDO: MONTAR CON EL TECLADO YA ABIERTO ────────────────────────────────────────────────
+// Si el shell MONTA con el teclado YA abierto, arranca en 0 hasta el próximo evento de insets:
+// `KeyboardAnimationManager` no le reproduce el estado actual al listener nuevo. `KeyboardAvoidingView` en
+// iOS hace lo mismo (se suscribe a `keyboardWillChangeFrame` y iOS no re-emite por un montaje).
+//
+// ⚠️ CORRECCIÓN (2026-07-28). La primera versión de este bloque despachaba el límite como "paridad con
+// iOS, no regresión" y afirmaba que "el flujo del bug reportado no lo toca". **Las dos cosas estaban mal**,
+// y las falsificó Raf en device (APK a3b8d804): con el input de caravana enfocado, la ‹ de
+// `maniobra/identificar` abría el `ExitJornadaSheet` DEBAJO del teclado — solo asomaba una franja de ~25px
+// y sus dos botones ("Terminar jornada" / "Salir sin terminar") quedaban tapados. Que iOS esté igual de
+// roto NO vuelve aceptable un diálogo de decisión inoperable en un flujo 🔴 de manga: la paridad describe
+// el alcance del defecto, no lo justifica.
+//
+// ── CÓMO QUEDÓ CERRADO (y por qué no sembrando la altura acá) ────────────────────────────────────────
+// El fix NO vive en este archivo: **abrir un overlay modal baja el teclado**
+// (`hooks/useDismissKeyboardOnOpen`, adoptado por los 22 archivos que dibujan un `$scrim`, con el guard
+// `components/sheet-keyboard-dismiss-guard.test.ts`). Si al abrirse el sheet no hay teclado, no hay nada
+// que compensar. Es además la conducta correcta de producto —abrir un sheet es salir del contexto de
+// escritura— y era la única salida posible para el sheet del reporte, que **ni siquiera monta este shell**
+// (no tiene campos de texto, así que el guard del teclado no se lo exige).
+//
+// Se EVALUÓ y se DESCARTÓ sembrar `height` en el montaje con `Keyboard.metrics()`. Motivo: su `height` es
+// la de RN, o sea la MISMA que está mal bajo edge-to-edge (`ReactRootView.java:978` hace
+// `imeInsets.bottom - barInsets.bottom`), así que habría que sumarle de vuelta el inset inferior de
+// `systemBars` — una aritmética que (a) no es verificable desde web ni desde el unit, (b) depende de que
+// el inset de `react-native-safe-area-context` sea EXACTAMENTE el mismo término que RN resta (no está
+// garantizado: gestos vs 3 botones, cutouts, y el frame-0 en 0 contra el que este repo ya tuvo que
+// blindarse en `useSafeBottomInset`), y (c) escribe sobre un shared value cuyo dueño es el
+// `KeyboardAnimationManager`. Un término de corrección equivocado da un lift EQUIVOCADO, que es peor que
+// no levantar nada: el contenido salta a un lugar mal y recién se acomoda con el próximo evento del IME.
+// Con la capa de arriba puesta, lo único que queda expuesto al límite es una superficie que monte con el
+// teclado arriba SIN ser un overlay (navegar a otra pantalla mientras se tipea), que se auto-corrige al
+// primer evento de insets. Queda anotado en `docs/backlog.md` con este razonamiento.
 //
 // ── DEPRECACIÓN, A CONCIENCIA ────────────────────────────────────────────────────────────────────────
 // `useAnimatedKeyboard` está marcado `@deprecated` (apunta a `react-native-keyboard-controller`).

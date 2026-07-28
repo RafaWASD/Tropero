@@ -20,6 +20,7 @@ import { Platform, Pressable } from 'react-native';
 import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
 import { Plus } from 'lucide-react-native';
 
+import { useDismissKeyboardOnOpen } from '@/hooks/useDismissKeyboardOnOpen';
 import { useKeyboardAwareBottomInset } from '@/hooks/useSafeBottomInset';
 import { KeyboardAvoidingShell } from '@/components/KeyboardAvoidingShell';
 import { ComboOptionRow, FormField } from '@/components';
@@ -60,6 +61,12 @@ export function SugerenciaVaciasSheet({
   onChooseExisting,
   onCreateNew,
 }: SugerenciaVaciasSheetProps) {
+  // ABRIR EL SHEET BAJA EL TECLADO (bug 🔴 device Android). Se pasa `open` —y no el default— porque este
+  // sheet declara la prop: si alguna vez lo montan siempre (patrón de `LotePickerSheet`), el flanco tiene
+  // que seguir siendo el de la APERTURA y no el del montaje de la pantalla.
+  // Su input propio (nombre del lote nuevo) no se ve afectado: el hook dispara SOLO en el flanco.
+  useDismissKeyboardOnOpen(open);
+
   // Reserva inferior KEYBOARD-AWARE: el `KeyboardAvoidingShell` de abajo ya sube la hoja el alto entero
   // del teclado → con el teclado arriba la safe-area está tapada y reservarla dejaría un hueco muerto.
   const bottomPad = useKeyboardAwareBottomInset();

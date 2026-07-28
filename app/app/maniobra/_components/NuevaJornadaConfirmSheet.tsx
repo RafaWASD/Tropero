@@ -35,6 +35,7 @@ import { useEffect, useRef } from 'react';
 import { Platform, Pressable } from 'react-native';
 import { getTokenValue, Text, View, YStack } from 'tamagui';
 
+import { useDismissKeyboardOnOpen } from '@/hooks/useDismissKeyboardOnOpen';
 import { useSafeBottomInset } from '@/hooks/useSafeBottomInset';
 import { Button } from '@/components';
 import { buttonA11y } from '@/utils/a11y';
@@ -62,6 +63,10 @@ export function NuevaJornadaConfirmSheet({
   onResume,
   onClose,
 }: NuevaJornadaConfirmSheetProps) {
+  // ABRIR EL SHEET BAJA EL TECLADO (bug 🔴 device Android): es un diálogo de decisión sobre la jornada, el
+  // mismo lugar del bug del `ExitJornadaSheet` — el teclado no puede taparle los botones.
+  useDismissKeyboardOnOpen();
+
   const bottomPad = useSafeBottomInset();
 
   // ── GUARD del backdrop contra el "click huérfano" del tap que abrió el sheet (BUG web táctil) ──

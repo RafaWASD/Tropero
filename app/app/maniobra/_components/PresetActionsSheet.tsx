@@ -16,6 +16,7 @@ import { Platform, Pressable } from 'react-native';
 import { getTokenValue, Text, View, XStack, YStack } from 'tamagui';
 import { Pencil, SlidersHorizontal, Trash2, Type } from 'lucide-react-native';
 
+import { useDismissKeyboardOnOpen } from '@/hooks/useDismissKeyboardOnOpen';
 import { useSafeBottomInset } from '@/hooks/useSafeBottomInset';
 import { Button } from '@/components';
 import { buttonA11y } from '@/utils/a11y';
@@ -42,6 +43,10 @@ export function PresetActionsSheet({
   onDelete,
   onClose,
 }: PresetActionsSheetProps) {
+  // ABRIR EL SHEET BAJA EL TECLADO (bug 🔴 device Android): el menú de acciones de una rutina se abre desde
+  // la configuración de la jornada, que tiene campos de texto.
+  useDismissKeyboardOnOpen();
+
   const bottomPad = useSafeBottomInset();
 
   // ── GUARD del backdrop contra el "click huérfano" del tap que abrió el sheet (BUG web táctil) ──

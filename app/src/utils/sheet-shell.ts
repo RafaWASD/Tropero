@@ -49,3 +49,57 @@ export function sheetCondensation({ keyboardVisible }: SheetCondensationInput): 
     showCloseButton: true,
   };
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
+// ABRIR UN SHEET BAJA EL TECLADO — la decisión del hook `hooks/useDismissKeyboardOnOpen`
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// ── EL BUG 🔴 QUE CIERRA (Raf, device Android, APK a3b8d804 / commit 56beff3) ────────────────────────
+// En `maniobra/identificar`, con el input de caravana ENFOCADO y el teclado ABIERTO, tocar la ‹ del
+// header (que abre el `ExitJornadaSheet` para terminar/abandonar la jornada) dejaba **el teclado
+// arriba** y del sheet solo asomaba una franja de ~25px: los dos botones ("terminar maniobra" / "salir
+// sin terminar") quedaban TAPADOS. Un diálogo de decisión, en un flujo 🔴 de manga, inoperable.
+//
+// ── POR QUÉ LA CONDUCTA CORRECTA ES BAJAR EL TECLADO (razón de producto, no parche técnico) ──────────
+// Tocar "atrás para terminar la jornada" es SALIR DEL CONTEXTO DE ESCRITURA. El input que sostenía ese
+// teclado queda detrás de un scrim: es inalcanzable, no se puede seguir tipeando en él y no hay ningún
+// motivo para que su teclado sobreviva a la transición. Es además la convención de las dos plataformas
+// (ley de Jakob) y lo que Raf esperaba textualmente ("el teclado no se cierra").
+//
+// ── Y ADEMÁS TAPA UN LÍMITE ESTRUCTURAL DEL LIFT ─────────────────────────────────────────────────────
+// `KeyboardAvoidingShell` (el primitivo que sube las superficies por encima del teclado) tiene un
+// límite DECLARADO en su header: si MONTA con el teclado ya abierto arranca en altura 0 hasta el
+// próximo evento de insets (ni `KeyboardAnimationManager` en Android ni `keyboardWillChangeFrame` en
+// iOS le reproducen el estado actual a un listener nuevo). Un sheet que se abre mientras se tipeaba es
+// EXACTAMENTE ese caso. Si al abrirse el sheet no hay teclado, no hay nada que compensar y el límite
+// deja de ser alcanzable por esta vía. (El `ExitJornadaSheet` del reporte ni siquiera monta el shell
+// —no tiene input, así que el guard del teclado no se lo exige—, o sea que para él el lift no existía
+// en absoluto: bajar el teclado es lo único que lo arregla sin agregarle un mecanismo que no necesita.)
+//
+// ── EL CONTRATO, Y POR QUÉ ES UNA TRANSICIÓN Y NO UN "cada render" ───────────────────────────────────
+// Se baja el teclado en el flanco CERRADO→ABIERTO (incluido el montaje con `open=true`, que es como se
+// usan los sheets que se montan/desmontan). NUNCA mientras el sheet ya está abierto: si el efecto
+// volviera a disparar en cada render, el sheet no podría tener input PROPIO — cada tecla re-renderiza y
+// el teclado se cerraría solo (`ManeuverConfigSheet`, `CustomFieldSheet`, `SavePresetSheet`,
+// `BreedPickerSheet`, `TagScanSheet`… quedarían inutilizables). Ese es el modo de falla que este
+// predicado existe para lockear.
+
+export interface DismissKeyboardOnOpenInput {
+  /** ¿El sheet ya estaba abierto en el render anterior? (en el montaje, `false`). */
+  wasOpen: boolean;
+  /** ¿El sheet está abierto AHORA? */
+  isOpen: boolean;
+}
+
+/**
+ * ¿Hay que bajar el teclado? SOLO en el flanco cerrado→abierto.
+ *
+ *   montaje con open=true   (false → true)  → SÍ   (el caso de los sheets que se montan al abrirse)
+ *   apertura de un sheet    (false → true)  → SÍ   (el caso de los sheets con prop `open` siempre montados)
+ *   sigue abierto           (true  → true)  → NO   (si no, el input PROPIO del sheet sería inusable)
+ *   se cierra               (true  → false) → NO   (al cerrar no tocamos el foco de nadie)
+ *   sigue cerrado           (false → false) → NO
+ */
+export function shouldDismissKeyboardOnOpen({ wasOpen, isOpen }: DismissKeyboardOnOpenInput): boolean {
+  return isOpen && !wasOpen;
+}
