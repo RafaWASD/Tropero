@@ -586,3 +586,38 @@ pudo mirar. Es la deuda de verificación más grande abierta.
 en 19 archivos están **sanos** → no hay barrido pendiente, y el stash `pressable-sweep-wip` que dejó la
 terminal de BLE al morir queda **descartado** (premisa falsada + su contenido de feature 19 ya estaba
 superado por HEAD).
+
+## 2026-07-29 — BUGFIX «sin transporte, la UI deja de prometer el bastón» — `69ce945`, APK `b25064ab` — ⏸ PUERTA 2
+
+**Cómo apareció**: Raf, device Android — *"el botón de conectar bastón no me está funcionando"*.
+
+**No estaba roto: en Android nativo NO HAY TRANSPORTE, por diseño.** `react-native-ble-plx` no está
+instalado; `adapter-selection.ts` devuelve `'manual'` en nativo e `instantiateTransport('manual')`
+devuelve `null` (`spp-android` = Fase 4, gateada). El único transporte real es Web Serial. El defecto
+era que el chip ofreciera "Conectar bastón" **sin mirar si hay transporte**, contradiciendo al hero de
+su propia pantalla. Mismo Norman que el grabber que no arrastraba.
+
+**Titularidad**: Raf pasó BLE a esta terminal (*"la terminal BLE murió, continuemos su trabajo acá"*).
+Las exclusiones de `docs/backlog.md` del tipo "lo hace la terminal de BLE" quedaron obsoletas.
+
+**Lo que aportó cada actor** (ninguno de los tres pasos fue redundante):
+- El **implementer** encontró 3 cosas fuera del encargo — la **trampa de la Fase 4** (la fila del device
+  decide si es tocable por capacidad de BUILD y al tocarla llama al transporte REAL: coinciden por
+  casualidad), un copy suelto en JSX que ofrecía bastonear y que halló **mirando una captura, no el
+  código**, y una regresión de layout que su propio fix causaba. Además se vetó a sí mismo `$textFaint`
+  (4,03:1 sobre 14px = bajo AA en pantalla de manga).
+- El **reviewer** encontró la superficie que la barrida **no vio, y era la peor**: `asignar-caravanas`,
+  sin ninguna entrada manual, congelada en *"Bastoneá para empezar"*, a **2 taps del tab "Más"** —
+  mientras que `/baston`, que sí se barrió, es deep-link-only.
+- El **leader** midió la captura (título 18,36:1 · apoyos 5,74:1, sobre AA) y bajó a 🟡 la trampa de la
+  Fase 4: es endurecimiento preventivo (hoy no-op en las 3 plataformas), no un defecto vivo. Si todo
+  es 🔴, nada es 🔴.
+
+**Decisión de diseño, con dos criterios distintos a propósito**: el **chip se oculta** (es un indicador
+cuyo estado no puede cambiar sin transporte → etiqueta fija, ruido), pero la fila de
+**`asignar-caravanas` NO se oculta y dice la verdad** (es entrada a una función real; ocultarla la
+volvería indescubrible). El copy reusa la frase ya existente y ofrece una salida **verificada** (cargar
+de a una desde la ficha, con E2E verde), no una supuesta.
+
+**Deuda que dejó**: la salida del vacío es descriptiva, no accionable (falta CTA) · `$textFaint` tiene
+60 usos, varios en 12/13/14px → clase de contraste a barrer · la Fase 4 sigue gateada (sin RS420).
