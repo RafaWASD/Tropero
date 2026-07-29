@@ -111,7 +111,12 @@ export type {
 } from './BulkProgressPanel';
 export { BleConnectionChip } from './BleConnectionChip';
 export { bleConnectionView } from './ble-connection-view';
-export type { BleConnectionView, BleStatusColorToken } from './ble-connection-view';
+export type {
+  BleConnectionView,
+  BleConnectionEnv,
+  BleStatusColorToken,
+  BleStatusIcon,
+} from './ble-connection-view';
 export { IdentifierAssignRow } from './IdentifierAssignRow';
 export type { IdentifierAssignRowProps } from './IdentifierAssignRow';
 export { TagScanSheet } from './TagScanSheet';

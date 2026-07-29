@@ -258,6 +258,24 @@ Reconciliación del sketch §4.1-§4.4 con el código realizado (`app/app/asigna
 - **Re-escopeo (§4.x / RD7.3 — F5.5)**: `prevEstablishmentRef` + `useEffect([establishmentId])` → al cambiar el campo: `reset` + banner "Cambiaste de campo". Default acordado en DA-3 (reiniciar + avisar). Invariante DURA: al resetear, `currentEid → null → EmptyQueueState` → nunca candidatos del campo ajeno.
 - **Prevención de dup/race (§5 / RD6 — F5.4, Run 4 done)**: **prevención CLIENT-SIDE al bastonear** (RD6 reconciliada por el leader, post-Run-3). `onTagRead` corre `lookupByTag(eid, establishmentId)` (lectura local) ANTES de encolar: solo `mode:'create'` (EID nuevo) entra a la cola; `mode:'edit'`/`'transfer'` (ya tiene caravana) muestran el banner `DupNoticeBanner` ("Esa caravana ya está asignada") SIN encolar, sin perder la sesión/contador. El residual (un assign que igual rebote al sync) lo maneja la maquinaria existente (`permanent_reject` → descarte + log), sin canal nuevo (LIM doc, RD6.3). Ver §5 AS-BUILT.
 
+### 4.6 AS-BUILT (bugfix 2026-07-29) — el estado vacío cuando NO hay bastón en el dispositivo
+
+Disparador: Raf reportó en device Android que el chip de conectar el bastón no hacía nada (spec 09 RB8.1). La causa —**no hay transporte instanciado en native**: `react-native-ble-plx` no está instalado, `selectTransportAdapter` devuelve `'manual'` y `instantiateTransport` devuelve `null`— alcanza a ESTA pantalla, y en su peor forma: su **única** entrada de datos es `useBleStickListener` y **no tiene ninguna entrada manual**, así que sin transporte no puede llegar jamás un tag, la cola nunca se llena y la pantalla queda congelada para siempre en el `EmptyQueueState`, que decía *"Bastoneá para empezar / Pasá el bastón por la caravana del animal"*. Está a **2 taps del tab "Más"** (RD5.1 / D-c).
+
+**Decisión: el vacío DICE LA VERDAD; la fila de "Más" NO se oculta.** Es deliberadamente distinta de la que se tomó con el chip (que sí se oculta), porque son cosas distintas:
+
+- el **chip** es un *indicador de estado* cuyo estado no puede cambiar sin transporte (el provider ni siquiera suscribe `onStatus`, así que el único `ConnectionStatus` alcanzable es `'off'`): una etiqueta fija en el chrome de una tab. Ocultarlo no pierde nada.
+- la **fila → pantalla** es un *punto de entrada a una funcionalidad real* que existe y funciona con el bastón (hoy en web, en Android cuando aterrice la Fase 4). Ocultarla la volvería indescubrible y haría que la app se vea distinta según el dispositivo ("a mi compañero le aparece y a mí no"), que además es más caro de soportar.
+
+Es también lo que ya se hizo con `/baston` en este mismo bugfix: una pantalla que sin bastón no sirve **no se borró, se hizo honesta**. Ocultar la fila fue evaluado y descartado; si se hubiera elegido, la condición habría tenido que ser "no hay transporte" y no "es Android" (y habría obligado a meter una dependencia del provider BLE en `mas.tsx`, que hoy no tiene ninguna — otra razón para no hacerlo: el fix as-built NO toca `mas.tsx`).
+
+As-built:
+- `hasTransport = useBleProviderApi()?.transport != null` en `BulkTagAssignmentScreen` (misma entrada que el chip, `maniobra/identificar` y `TagScanSheet`; la condición es "no hay transporte", NO "es Android" → con la Fase 4 vuelve solo).
+- El copy lo decide la función PURA `app/src/utils/bulk-assign-empty.ts::bulkAssignEmptyView(hasTransport)` (parámetro obligatorio), **no** un ternario suelto en el JSX: en este mismo bugfix un copy inline en el JSX ya se había escapado de la barrida (el vacío de "Lecturas" de `/baston`), así que toda respuesta a "¿esto promete el bastón?" se decide y se testea en un archivo.
+- Sin transporte: *"Necesitás el bastón" / "El bastón no está disponible en este dispositivo" / "Podés cargar las caravanas de a una desde la ficha de cada animal."* La frase del medio es **literalmente** la que ya usan el hero de `maniobra/identificar` y el `ManualPromptHero` del `TagScanSheet` (una sola redacción para el mismo hecho; hay un guard estático que verifica las 3 superficies). La salida que se ofrece es real y verificada: el `TagScanSheet` de la ficha carga el EID a mano sin transporte.
+- Con transporte, el vacío queda **carácter por carácter** como antes (fijado en un test de regresión).
+- Verificación: unit `app/src/utils/bulk-assign-empty.test.ts` (5) + E2E `app/e2e/asignar-caravanas-sin-transporte.spec.ts` (2, que recorren la ruta real tab "Más" → fila → pantalla, así que también fallan si alguien esconde la fila). Falsificado en los dos sentidos (unit: 4/5 rojo sin el corte, 2/5 rojo con la rama forzada; E2E: `hasTransport = true` literal deja (a) en rojo sobre build fresco). Capture Gate 2.5: shots 11 vs 12.
+
 ---
 
 ## 5. Manejo de race y dup (RD6) — PREVENCIÓN CLIENT-SIDE al bastonear

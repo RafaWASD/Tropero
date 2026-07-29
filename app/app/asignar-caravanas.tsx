@@ -48,6 +48,8 @@ import { KeyboardAvoidingShell } from '@/components/KeyboardAvoidingShell';
 import { Button, Card, CategoryBadge } from '@/components';
 import { useEstablishment, useRodeo } from '@/contexts';
 import { useBleStickListener } from '@/services/ble/stick';
+import { useBleProviderApi } from '@/services/ble/BleStickListenerProvider';
+import { bulkAssignEmptyView } from '@/utils/bulk-assign-empty';
 import {
   assignTagToAnimal,
   fetchAnimals,
@@ -133,6 +135,14 @@ export default function BulkTagAssignmentScreen() {
   // el comentario de cabecera): consumimos el listener con busy=false; el overlay global se suprime por
   // ruta.
   const enabled = est.status === 'active' && rodeo.status === 'active';
+
+  // ¿Hay un transporte INSTANCIADO? (bugfix 2026-07-29). Esta pantalla tiene UNA sola entrada de datos
+  // —el listener BLE— y NINGUNA entrada manual: sin transporte no puede llegar jamás un tag y la cola se
+  // queda vacía para siempre. El estado vacío tiene que decirlo (ver `utils/bulk-assign-empty.ts`); la
+  // fila de la tab "Más" NO se oculta a propósito (la funcionalidad existe y funciona con el bastón —
+  // ocultarla la volvería indescubrible). Misma entrada (`transport != null`) que el chip del header,
+  // `maniobra/identificar` y `TagScanSheet`: la condición es "no hay transporte", NO "es Android".
+  const hasTransport = useBleProviderApi()?.transport != null;
 
   const [session, dispatch] = useReducer(sessionReducer, INITIAL_SESSION);
   // Aviso de re-escopeo al cambiar de campo (RD7.3 / DA-3): banner transitorio "reiniciamos la sesión".
@@ -259,9 +269,9 @@ export default function BulkTagAssignmentScreen() {
           </YStack>
         ) : null}
 
-        {/* Cuerpo: EID actual + sus candidatos, o el estado vacío "bastoneá para empezar". */}
+        {/* Cuerpo: EID actual + sus candidatos, o el estado vacío (que dice la verdad sobre el bastón). */}
         {currentEid === null ? (
-          <EmptyQueueState />
+          <EmptyQueueState hasTransport={hasTransport} />
         ) : (
           <BulkEidBody
             // key={currentEid}: cada EID nuevo en cabeza REMONTA el cuerpo (resetea búsqueda + candidato a
@@ -361,18 +371,36 @@ function DupNoticeBanner({ notice, onDismiss }: { notice: DupNotice; onDismiss: 
   );
 }
 
-// ─── Estado vacío: cola vacía → "bastoneá para empezar" (RD5.2) ───
-function EmptyQueueState() {
+// ─── Estado vacío: cola vacía (RD5.2) ───
+//
+// CON bastón: "Bastoneá para empezar" (la espera normal del próximo EID). SIN transporte instanciado el
+// copy DICE LA VERDAD ("El bastón no está disponible en este dispositivo" + la salida real), porque acá no
+// puede llegar jamás un tag: es el ÚNICO estado alcanzable en ese dispositivo (la cola solo se llena desde
+// `onTagRead`, y esta pantalla no tiene entrada manual). El texto lo decide la función PURA
+// `bulkAssignEmptyView` —no un ternario suelto en el JSX— por la misma razón que el resto del bugfix: el
+// copy que promete el bastón se me escapó una vez por estar inline; toda respuesta a "¿esto promete
+// bastonear?" se decide y se testea en un archivo.
+function EmptyQueueState({ hasTransport }: { hasTransport: boolean }) {
+  const view = bulkAssignEmptyView(hasTransport);
   return (
     <YStack flex={1} width="100%" alignItems="center" justifyContent="center" gap="$4" paddingHorizontal="$6">
       <Radio size={getTokenValue('$icon', 'size')} color={getTokenValue('$textMuted', 'color')} strokeWidth={1.75} />
       <YStack alignItems="center" gap="$2">
         <Text fontFamily="$body" fontSize="$7" lineHeight="$7" fontWeight="700" color="$textPrimary" textAlign="center">
-          Bastoneá para empezar
+          {view.title}
         </Text>
+        {/* El aviso usa EXACTAMENTE el tratamiento del subtítulo del `ManualPromptHero` del TagScanSheet
+            ($4/500/$textMuted, ya vetado) y el cuerpo conserva el suyo ($4/400/$textMuted). NO uso
+            `$textFaint` para diferenciarlos aunque `identificar` lo haga en su hero: a `$4` = 14px regular,
+            4.03:1 es AA-LARGE (pide ≥18px) → quedaría por debajo de AA en una pantalla que se lee a pleno
+            sol. La jerarquía la da el peso, no el contraste. */}
+        {view.notice ? (
+          <Text fontFamily="$body" fontSize="$4" lineHeight="$4" fontWeight="500" color="$textMuted" textAlign="center">
+            {view.notice}
+          </Text>
+        ) : null}
         <Text fontFamily="$body" fontSize="$4" fontWeight="400" color="$textMuted" textAlign="center">
-          Pasá el bastón por la caravana del animal. Acá vas a elegir a cuál de tus animales sin caravana
-          se la asignás.
+          {view.body}
         </Text>
       </YStack>
     </YStack>

@@ -9,24 +9,33 @@ import {
   connectionStatusView,
   deviceRowView,
   readingBadge,
+  readsEmptyHint,
 } from './connection-view.ts';
 import { RS420_DRIVER } from '../../services/ble/driver-rs420.ts';
 import type { ReaderBinding } from '../../services/ble/selection-priority.ts';
 import type { ConnectionStatus } from '../../services/ble/stick-adapter.ts';
 
+// Los 6 estados del core (union completa de ConnectionStatus). Compartidos por las dos ramas de
+// transporte (con y sin) para que ninguna quede probada sobre un subconjunto.
+const ALL_STATES: ConnectionStatus[] = [
+  'off',
+  'permission_denied',
+  'scanning',
+  'connecting',
+  'connected',
+  'disconnected',
+];
+
+/** Entorno CON transporte instanciado (web-serial en web, mock en E2E, spp-android en Fase 4). */
+const WITH_TRANSPORT = { hasTransport: true } as const;
+/** Entorno SIN transporte (native manual-first hoy: instantiateTransport('manual') → null). */
+const NO_TRANSPORT = { hasTransport: false } as const;
+
 // ─── RMV3.4: cada ConnectionStatus tiene label/hint/cta es-AR, no bloqueante ────────────────
 
 test('RMV3.4: connectionStatusView cubre los 6 estados con label + hint no vacíos', () => {
-  const states: ConnectionStatus[] = [
-    'off',
-    'permission_denied',
-    'scanning',
-    'connecting',
-    'connected',
-    'disconnected',
-  ];
-  for (const s of states) {
-    const v = connectionStatusView(s);
+  for (const s of ALL_STATES) {
+    const v = connectionStatusView(s, WITH_TRANSPORT);
     assert.ok(v.label.length > 0, `label vacío en ${s}`);
     assert.ok(v.hint.length > 0, `hint vacío en ${s}`);
     // El CTA es coherente con su label: 'none' ⇔ sin ctaLabel; los demás ⇔ con ctaLabel.
@@ -36,37 +45,107 @@ test('RMV3.4: connectionStatusView cubre los 6 estados con label + hint no vací
 });
 
 test('RMV3.4: connected → cta disconnect + connected true; off/disconnected → cta connect', () => {
-  const connected = connectionStatusView('connected');
+  const connected = connectionStatusView('connected', WITH_TRANSPORT);
   assert.equal(connected.connected, true);
   assert.equal(connected.cta, 'disconnect');
   assert.equal(connected.tone, 'success');
 
-  const off = connectionStatusView('off');
+  const off = connectionStatusView('off', WITH_TRANSPORT);
   assert.equal(off.connected, false);
   assert.equal(off.cta, 'connect');
+  assert.equal(off.ctaLabel, 'Conectar bastón');
 
-  const disconnected = connectionStatusView('disconnected');
+  const disconnected = connectionStatusView('disconnected', WITH_TRANSPORT);
   assert.equal(disconnected.connected, false);
   assert.equal(disconnected.cta, 'connect');
 });
 
 test('RMV3.4: permission_denied → retry; en progreso (connecting/scanning) → sin CTA', () => {
-  assert.equal(connectionStatusView('permission_denied').cta, 'retry');
-  assert.equal(connectionStatusView('connecting').cta, 'none');
-  assert.equal(connectionStatusView('connecting').ctaLabel, null);
-  assert.equal(connectionStatusView('scanning').cta, 'none');
+  assert.equal(connectionStatusView('permission_denied', WITH_TRANSPORT).cta, 'retry');
+  assert.equal(connectionStatusView('connecting', WITH_TRANSPORT).cta, 'none');
+  assert.equal(connectionStatusView('connecting', WITH_TRANSPORT).ctaLabel, null);
+  assert.equal(connectionStatusView('scanning', WITH_TRANSPORT).cta, 'none');
+});
+
+// ─── BUGFIX 2026-07-29 (device Android de Raf): SIN TRANSPORTE, NUNCA se ofrece conectar ─────
+// El botón "Conectar bastón" en native disparaba `transport.connect()` sobre un transporte null
+// (no-op silencioso). La decisión vive en la función PURA: sin transporte, `cta: 'none'`.
+
+test('sin transporte: NINGÚN estado ofrece un CTA (cta none + ctaLabel null en los 6)', () => {
+  for (const s of ALL_STATES) {
+    const v = connectionStatusView(s, NO_TRANSPORT);
+    assert.equal(v.cta, 'none', `sin transporte, ${s} ofrece un CTA accionable`);
+    assert.equal(v.ctaLabel, null, `sin transporte, ${s} trae ctaLabel`);
+    assert.equal(v.connected, false, `sin transporte, ${s} se declara conectado`);
+  }
+});
+
+test('sin transporte: el copy es honesto (no promete conectar) y ofrece la salida manual (RMV3.6)', () => {
+  const v = connectionStatusView('off', NO_TRANSPORT);
+  assert.ok(v.label.length > 0);
+  assert.ok(v.hint.length > 0);
+  // No promete conectar: ni el label ni el hint usan el imperativo "conectá"/"conectar".
+  assert.doesNotMatch(v.label, /conect(á|ar)\b/i, `label promete conectar: "${v.label}"`);
+  assert.doesNotMatch(v.hint, /conect(á|ar)\b/i, `hint promete conectar: "${v.hint}"`);
+  // NO bloquea (RMV3.6): apunta a la carga manual.
+  assert.match(v.hint, /mano/i);
+  assert.equal(v.tone, 'idle');
+});
+
+test('sin transporte gana sobre el status: el "connected" transitorio tampoco ofrece desconectar', () => {
+  // Caso de borde real: el transporte se desmonta en caliente (cambio de `mode` del provider) y el
+  // status previo queda pegado un render. El corte va ANTES del switch, así que no hay CTA muerto.
+  const v = connectionStatusView('connected', NO_TRANSPORT);
+  assert.equal(v.cta, 'none');
+  assert.equal(v.connected, false);
+});
+
+test('regresión web: CON transporte, los 6 estados quedan EXACTAMENTE como antes del bugfix', () => {
+  // El fix no puede tocar web (ahí el transporte SIEMPRE existe: web-serial). Fijamos el mapeo.
+  // El `icon` va acá porque el mapeo estado→ícono ES el que tenía el `statusIcon()` del componente
+  // antes de mudarse a la vista pura: fijarlo es lo que garantiza que la mudanza no cambió nada.
+  const expected: Record<
+    ConnectionStatus,
+    { label: string; cta: string; ctaLabel: string | null; icon: string }
+  > = {
+    connected: { label: 'Bastón conectado', cta: 'disconnect', ctaLabel: 'Desconectar', icon: 'bluetooth-connected' },
+    connecting: { label: 'Conectando…', cta: 'none', ctaLabel: null, icon: 'bluetooth-searching' },
+    scanning: { label: 'Reintentando…', cta: 'none', ctaLabel: null, icon: 'bluetooth-searching' },
+    disconnected: { label: 'Bastón desconectado', cta: 'connect', ctaLabel: 'Volver a conectar', icon: 'bluetooth' },
+    permission_denied: { label: 'Sin permiso', cta: 'retry', ctaLabel: 'Reintentar', icon: 'alert' },
+    off: { label: 'Bastón sin conectar', cta: 'connect', ctaLabel: 'Conectar bastón', icon: 'bluetooth' },
+  };
+  for (const s of ALL_STATES) {
+    const v = connectionStatusView(s, WITH_TRANSPORT);
+    assert.equal(v.label, expected[s].label, `label cambió en ${s}`);
+    assert.equal(v.cta, expected[s].cta, `cta cambió en ${s}`);
+    assert.equal(v.ctaLabel, expected[s].ctaLabel, `ctaLabel cambió en ${s}`);
+    assert.equal(v.icon, expected[s].icon, `ícono cambió en ${s}`);
+  }
+});
+
+// El ícono era el ÚNICO elemento de la card que NO pasaba por la vista pura (el componente lo derivaba
+// del status crudo con su propio `statusIcon()`), así que podía contradecir al label. Ahora sale de acá.
+test('sin transporte: el ícono no puede contradecir al label ("Bastón no disponible")', () => {
+  for (const s of ALL_STATES) {
+    const v = connectionStatusView(s, NO_TRANSPORT);
+    assert.equal(v.icon, 'bluetooth', `sin transporte, ${s} muestra un ícono que contradice el label`);
+    assert.notEqual(v.icon, 'bluetooth-connected');
+  }
 });
 
 // ─── RMV3.7: binding available true/false → fila conectable / no-disponible ──────────────────
 
-test('RMV3.7: binding available:true → fila conectable (actionable), con la marca del driver', () => {
-  const binding: ReaderBinding = {
-    adapterKind: 'web-serial',
-    transportKind: 'serial',
-    driver: RS420_DRIVER,
-    available: true,
-  };
-  const row = deviceRowView({ driver: RS420_DRIVER, binding });
+/** Binding CONECTABLE del RS420 en web (web-serial construido). */
+const AVAILABLE_BINDING: ReaderBinding = {
+  adapterKind: 'web-serial',
+  transportKind: 'serial',
+  driver: RS420_DRIVER,
+  available: true,
+};
+
+test('RMV3.7: binding available:true (+ transporte) → fila conectable (actionable), con la marca del driver', () => {
+  const row = deviceRowView({ driver: RS420_DRIVER, binding: AVAILABLE_BINDING, hasTransport: true });
   assert.equal(row.state, 'recognized-available');
   assert.equal(row.actionable, true);
   assert.equal(row.title, RS420_DRIVER.displayName);
@@ -79,17 +158,28 @@ test('RMV3.7: binding available:false → reconocido, NO disponible, NO accionab
     driver: RS420_DRIVER,
     available: false,
   };
-  const row = deviceRowView({ driver: RS420_DRIVER, binding });
+  const row = deviceRowView({ driver: RS420_DRIVER, binding, hasTransport: true });
   assert.equal(row.state, 'recognized-unavailable');
   assert.equal(row.actionable, false);
   // Ofrece la salida manual (no bloquea, RMV3.6).
   assert.match(row.subtitle, /mano/i);
 });
 
+// BUGFIX 2026-07-29: el binding es capacidad de BUILD, el transporte es "hay un adapter instanciado".
+// Sin transporte, tocar la fila llamaría `transport?.connect()` sobre null → afordancia muerta.
+test('sin transporte: un binding available:true NO deja la fila accionable (afordancia muerta)', () => {
+  const row = deviceRowView({ driver: RS420_DRIVER, binding: AVAILABLE_BINDING, hasTransport: false });
+  assert.equal(row.actionable, false, 'la fila ofrece conectar sin transporte instanciado');
+  assert.equal(row.state, 'recognized-unavailable');
+  // El subtitle NO invita a tocar para conectar; apunta a la salida manual (RMV3.6).
+  assert.doesNotMatch(row.subtitle, /tocá para conectar/i);
+  assert.match(row.subtitle, /mano/i);
+});
+
 // ─── RMV2.5: reconocido pero sin transporte alcanzable en la plataforma (RS420 en iOS) ───────
 
 test('RMV2.5: driver reconocido pero binding null → recognized-unreachable + manual (no bloquea)', () => {
-  const row = deviceRowView({ driver: RS420_DRIVER, binding: null });
+  const row = deviceRowView({ driver: RS420_DRIVER, binding: null, hasTransport: true });
   assert.equal(row.state, 'recognized-unreachable');
   assert.equal(row.actionable, false);
   assert.match(row.subtitle, /mano/i);
@@ -98,7 +188,7 @@ test('RMV2.5: driver reconocido pero binding null → recognized-unreachable + m
 // ─── RMV3.8: device sin driver → "no reconocido" + manual ────────────────────────────────────
 
 test('RMV3.8: sin driver ni binding → unrecognized, usa el nombre del device y ofrece manual', () => {
-  const row = deviceRowView({ driver: null, binding: null, deviceName: 'Speaker XZ' });
+  const row = deviceRowView({ driver: null, binding: null, deviceName: 'Speaker XZ', hasTransport: true });
   assert.equal(row.state, 'unrecognized');
   assert.equal(row.actionable, false);
   assert.equal(row.title, 'Speaker XZ');
@@ -107,9 +197,25 @@ test('RMV3.8: sin driver ni binding → unrecognized, usa el nombre del device y
 });
 
 test('RMV3.8: unrecognized sin nombre → título de fallback (no vacío)', () => {
-  const row = deviceRowView({ driver: null, binding: null });
+  const row = deviceRowView({ driver: null, binding: null, hasTransport: true });
   assert.equal(row.state, 'unrecognized');
   assert.ok(row.title.length > 0);
+});
+
+test('NINGÚN estado de fila es accionable sin transporte (invariante, las 4 combinaciones)', () => {
+  const rows = [
+    deviceRowView({ driver: RS420_DRIVER, binding: AVAILABLE_BINDING, hasTransport: false }),
+    deviceRowView({
+      driver: RS420_DRIVER,
+      binding: { ...AVAILABLE_BINDING, available: false },
+      hasTransport: false,
+    }),
+    deviceRowView({ driver: RS420_DRIVER, binding: null, hasTransport: false }),
+    deviceRowView({ driver: null, binding: null, deviceName: 'Speaker XZ', hasTransport: false }),
+  ];
+  for (const row of rows) {
+    assert.equal(row.actionable, false, `fila accionable sin transporte: ${row.state}`);
+  }
 });
 
 // ─── RMV4.6: lectura del simulador → marca "DEMO"; lectura real → sin marca ───────────────────
@@ -117,4 +223,17 @@ test('RMV3.8: unrecognized sin nombre → título de fallback (no vacío)', () =
 test('RMV4.6: readingBadge marca "DEMO" solo las lecturas del simulador', () => {
   assert.equal(readingBadge(true), 'DEMO');
   assert.equal(readingBadge(false), null);
+});
+
+// ─── Estado VACÍO de la lista de lecturas: tampoco promete conectar sin transporte ───────────
+
+test('readsEmptyHint: sin transporte NO dice "conectá el bastón" y apunta a la carga manual', () => {
+  const sin = readsEmptyHint(false);
+  assert.doesNotMatch(sin, /conect(á|ar)\b/i, `el vacío promete conectar: "${sin}"`);
+  assert.match(sin, /mano/i);
+
+  // Con transporte, el copy original: conectar SÍ es la acción correcta.
+  const con = readsEmptyHint(true);
+  assert.match(con, /Conectá el bastón/);
+  assert.notEqual(con, sin);
 });

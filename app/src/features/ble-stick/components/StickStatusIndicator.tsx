@@ -22,6 +22,7 @@ import { getTokenValue, Text, View, XStack } from 'tamagui';
 import { Bluetooth, BluetoothConnected, BluetoothSearching, TriangleAlert } from 'lucide-react-native';
 
 import { useSafeBottomInset } from '@/hooks/useSafeBottomInset';
+import { useBleProviderApi } from '@/services/ble/BleStickListenerProvider';
 import { useBleConnectionStatus } from '@/services/ble/connection-status';
 import type { ConnectionStatus } from '@/services/ble/stick-adapter';
 import { isDemoMode } from '@/services/ble/demo-gate';
@@ -75,6 +76,12 @@ function toneColorToken(tone: ViewTone): '$primary' | '$terracota' | '$textMuted
 
 export function StickStatusIndicator() {
   const status = useBleConnectionStatus();
+  // ¿Hay transporte instanciado? Sin transporte no hay NADA que reportar (el único estado alcanzable es
+  // 'off', y el provider ni siquiera suscribe un onStatus) → el pill no existe. Hoy es equivalente al
+  // auto-oculto en 'off' de más abajo; se hace explícito para (a) alimentar la vista pura, que exige el
+  // dato, y (b) cubrir el transitorio en que el transporte se desmonta en caliente con un status previo
+  // pegado (cambio de `mode` del provider). Hook arriba de todo: antes de cualquier return temprano.
+  const hasTransport = useBleProviderApi()?.transport != null;
   // MISMA reserva inferior que el bottom-nav: este pill se posiciona RELATIVO a la tab bar, así que
   // tiene que leerla por el mismo hook o se desincroniza. Antes usaba el inset PELADO, que en web (inset
   // 0) lo dejaba 12px por debajo del paddingBottom real del nav y en Android quedaría 16px abajo al
@@ -93,10 +100,13 @@ export function StickStatusIndicator() {
   // El indicador GLOBAL (RMV3.5) se demuestra en las pantallas SIN card de estado propia (home, tabs, flujos).
   if (pathname === '/baston') return null;
 
+  // Sin transporte instanciado (native manual-first hoy): nada que indicar → sin pill.
+  if (!hasTransport) return null;
+
   // Auto-oculto en 'off' (sin actividad del bastón): no ensucia el chrome de las pantallas normales.
   if (status === 'off') return null;
 
-  const view = connectionStatusView(status);
+  const view = connectionStatusView(status, { hasTransport });
   const colorToken = toneColorToken(view.tone);
   const iconColor = getTokenValue(colorToken, 'color');
   const Icon = iconFor(status);

@@ -589,7 +589,14 @@ export default function ManiobraIdentificar() {
           maniobrasLabel={maniobrasLabel}
           progreso={progreso}
           onBack={openExitSheet}
-          right={<BleConnectionChip />}
+          // El chip decide solo si existe (sin transporte devuelve null, bugfix 2026-07-29). Pero el
+          // SLOT `right` del header envuelve al hijo en un `<View>` propio y el XStack aplica `gap="$2"`
+          // entre TODOS sus items → pasar un chip que no pinta nada dejaría un 4º flex item vacío MÁS
+          // un gap de sobra ($2 = 7px en la escala v4, no 8 — `sizeToSpace(28)`), robándole ancho al
+          // nombre del rodeo (que trunca). No es una segunda decisión: `conectable`
+          // es LITERALMENTE la misma entrada (`transport != null`) que el chip lee adentro, la que ya
+          // alimenta el hero adaptativo acá al lado. Cuando la Fase 4 aterrice, vuelven los dos juntos.
+          right={conectable ? <BleConnectionChip /> : undefined}
         />
 
         {/* ── R4.7) AVISO NO-BLOQUEANTE de rodeo de jornada mal elegido (banner anclado, dismissable). ── */}

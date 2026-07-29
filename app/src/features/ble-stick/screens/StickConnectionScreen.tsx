@@ -27,11 +27,16 @@ import { useBleProviderApi } from '@/services/ble/BleStickListenerProvider';
 import { useBleConnectionStatus } from '@/services/ble/connection-status';
 import { selectReaderBinding, type ReaderBinding } from '@/services/ble/selection-priority';
 import type { AdapterKind } from '@/services/ble/adapter-selection';
-import type { ConnectionStatus } from '@/services/ble/stick-adapter';
 import { RS420_DRIVER } from '@/services/ble/driver-rs420';
 import { writeRememberedDevice } from '@/services/ble/remembered-device';
 import { buttonA11y, labelA11y } from '@/utils/a11y';
-import { connectionStatusView, deviceRowView, readingBadge } from '../connection-view';
+import {
+  connectionStatusView,
+  deviceRowView,
+  readingBadge,
+  readsEmptyHint,
+  type StatusIconKey,
+} from '../connection-view';
 import { StickDeviceRow } from '../components/StickDeviceRow';
 import { DemoControls } from '../components/DemoControls';
 
@@ -53,19 +58,17 @@ interface ReadRow {
   isDemo: boolean;
 }
 
-function statusIcon(status: ConnectionStatus): typeof Bluetooth {
-  switch (status) {
-    case 'connected':
-      return BluetoothConnected;
-    case 'connecting':
-    case 'scanning':
-      return BluetoothSearching;
-    case 'permission_denied':
-      return TriangleAlert;
-    default:
-      return Bluetooth;
-  }
-}
+// Mapa CLAVE→ícono lucide. La CLAVE la elige la vista pura (`connectionStatusView().icon`), no esta
+// pantalla: antes había acá un `statusIcon(status)` que derivaba el ícono del status CRUDO, el único
+// elemento de la card que no pasaba por la vista pura — o sea el único que podía contradecir al label
+// (bugfix 2026-07-29, nit del reviewer). Acá solo queda la traducción clave→componente, que es lo que
+// NO puede vivir en el módulo puro (importar lucide en runtime rompe el loader de node:test).
+const STATUS_ICONS: Record<StatusIconKey, typeof Bluetooth> = {
+  bluetooth: Bluetooth,
+  'bluetooth-connected': BluetoothConnected,
+  'bluetooth-searching': BluetoothSearching,
+  alert: TriangleAlert,
+};
 
 function toneColorToken(tone: 'idle' | 'progress' | 'success' | 'warning'): '$primary' | '$terracota' | '$textMuted' {
   if (tone === 'success' || tone === 'progress') return '$primary';
@@ -100,13 +103,20 @@ export default function StickConnectionScreen() {
     () => selectReaderBinding({ platformOS: Platform.OS, driver: PRIMARY_DRIVER, builtAdapters: BUILT_ADAPTERS }),
     [],
   );
+  // `hasTransport` va ADEMÁS del binding (bugfix 2026-07-29): el binding es capacidad de BUILD, el
+  // transporte es "hay un adapter instanciado ahora". Tocar la fila llama `transport?.connect()` → sin
+  // transporte sería una afordancia muerta (el mismo defecto que el chip del header).
   const rowView = useMemo(
-    () => deviceRowView({ driver: PRIMARY_DRIVER, binding }),
-    [binding],
+    () => deviceRowView({ driver: PRIMARY_DRIVER, binding, hasTransport }),
+    [binding, hasTransport],
   );
 
-  const view = connectionStatusView(status);
-  const StatusIcon = statusIcon(status);
+  // Sin transporte instanciado, la vista pura ya devuelve `cta: 'none'` + copy honesto ("Bastón no
+  // disponible / Todavía no se conecta en este dispositivo"). Antes el gate vivía acá (`&& hasTransport`
+  // en `showStatusCta`): el CTA se ocultaba pero el copy seguía diciendo "Conectá el bastón para leer
+  // caravanas…" — una promesa que en native no se podía cumplir. La decisión es una sola y es pura.
+  const view = connectionStatusView(status, { hasTransport });
+  const StatusIcon = STATUS_ICONS[view.icon];
   const statusColorToken = toneColorToken(view.tone);
   const statusIconColor = getTokenValue(statusColorToken, 'color');
 
@@ -153,7 +163,9 @@ export default function StickConnectionScreen() {
 
   const onClearReads = useCallback(() => setReads([]), []);
 
-  const showStatusCta = view.cta !== 'none' && hasTransport;
+  // `cta: 'none'` ya cubre el caso sin transporte (lo garantiza `connectionStatusView`) además de los
+  // estados en progreso (connecting/scanning). No se re-chequea `hasTransport` acá: una sola fuente.
+  const showStatusCta = view.cta !== 'none';
   const muted = getTokenValue('$textMuted', 'color');
 
   return (
@@ -219,7 +231,7 @@ export default function StickConnectionScreen() {
             Dispositivos
           </Text>
           <StickDeviceRow view={rowView} onPress={rowView.actionable ? onChooseDevice : undefined} />
-          <TransportInstructions binding={binding} />
+          <TransportInstructions binding={binding} hasTransport={hasTransport} />
         </YStack>
 
         {/* ── Lecturas en vivo (confirmación pre-commit, RMV4.8; marca DEMO, RMV4.6) ── */}
@@ -238,7 +250,7 @@ export default function StickConnectionScreen() {
             <XStack alignItems="center" gap="$2" paddingVertical="$2">
               <Radio size={18} color={muted} strokeWidth={2} />
               <Text flex={1} minWidth={0} fontFamily="$body" fontSize="$3" lineHeight="$3" fontWeight="400" color="$textMuted">
-                Todavía no leíste ninguna caravana. Conectá el bastón y bastoneá un animal.
+                {readsEmptyHint(hasTransport)}
               </Text>
             </XStack>
           ) : (
@@ -261,9 +273,16 @@ export default function StickConnectionScreen() {
 
 // ─── Instrucciones específicas por adaptador del binding (RMV3.2/3.7) ────────────────────────────────
 // web-serial (serial) → elegir el puerto COM en el diálogo del navegador; spp → emparejar por Bluetooth;
-// ble-hid → emparejar como teclado del SO + campo de scan (GATED); available:false → no disponible +
-// manual; sin binding → no alcanzable en este dispositivo + manual. Todas NO bloqueantes.
-function TransportInstructions({ binding }: { binding: ReaderBinding | null }) {
+// ble-hid → emparejar como teclado del SO + campo de scan (GATED); available:false (o SIN transporte
+// instanciado) → no disponible + manual; sin binding → no alcanzable en este dispositivo + manual.
+// Todas NO bloqueantes.
+function TransportInstructions({
+  binding,
+  hasTransport,
+}: {
+  binding: ReaderBinding | null;
+  hasTransport: boolean;
+}) {
   // Sin binding: reconocido pero sin transporte alcanzable en esta plataforma (o piso manual). La fila
   // ya lo dice; agregamos la salida manual explícita.
   if (!binding) {
@@ -274,8 +293,9 @@ function TransportInstructions({ binding }: { binding: ReaderBinding | null }) {
     );
   }
 
-  // Reconocido pero el adapter no está construido en este build (RMV3.7): NO se intenta conectar.
-  if (!binding.available) {
+  // Reconocido pero el adapter no está construido en este build (RMV3.7) o no hay transporte instanciado
+  // (bugfix 2026-07-29): NO se intenta conectar, y NO se dan instrucciones de un pairing imposible.
+  if (!binding.available || !hasTransport) {
     return (
       <InfoNote>
         Este bastón todavía no se conecta en esta versión de la app. Mientras tanto, cargá las
