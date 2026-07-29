@@ -28,23 +28,33 @@ import { useBleConnectionStatus } from '@/services/ble/connection-status';
 import { selectReaderBinding, type ReaderBinding } from '@/services/ble/selection-priority';
 import type { AdapterKind } from '@/services/ble/adapter-selection';
 import { RS420_DRIVER } from '@/services/ble/driver-rs420';
+import { findDriverForDevice } from '@/services/ble/driver-registry';
+import { listPairedSppDevices } from '@/services/ble/adapter-spp-android';
+import type { PairedDevice } from '@/services/ble/spp-protocol';
 import { writeRememberedDevice } from '@/services/ble/remembered-device';
 import { buttonA11y, labelA11y } from '@/utils/a11y';
 import {
   connectionStatusView,
   deviceRowView,
+  pairedDevicesView,
   readingBadge,
   readsEmptyHint,
+  type PairedListState,
   type StatusIconKey,
 } from '../connection-view';
 import { StickDeviceRow } from '../components/StickDeviceRow';
 import { DemoControls } from '../components/DemoControls';
 
-// Adaptadores EFECTIVAMENTE construidos en este build (buildable-hoy): web-serial (web), mock (E2E),
-// manual (piso), simulator (demo-gated). spp-android e hid-wedge NO están montados en este run
-// (Fase 4 / GATED) → un binding a esos kinds sale `available:false` (RMV2.4/3.7). Entrada inyectable
-// del motor de selección puro (RMV2.6): centralizamos la verdad del build acá.
-const BUILT_ADAPTERS: AdapterKind[] = ['web-serial', 'mock', 'manual', 'simulator'];
+// Adaptadores EFECTIVAMENTE construidos en este build: web-serial (web), mock (E2E), manual (piso),
+// simulator (demo-gated) y —desde 2026-07-29— spp-android (Bluetooth Classic nativo, dep
+// `react-native-bluetooth-classic` instalada y autolinkeada). hid-wedge sigue GATED → un binding a
+// ese kind sale `available:false` (RMV2.4/3.7). Entrada inyectable del motor de selección puro
+// (RMV2.6): centralizamos la verdad del build acá.
+//
+// ⚠️ `available` (capacidad de BUILD) NO alcanza para habilitar el tap: la fila cruza además
+// `hasTransport` (¿hay un adapter INSTANCIADO ahora?), que en Android es false si el APK no trae el
+// módulo nativo (dev build viejo). Son dos fuentes distintas — ver `deviceRowView`.
+const BUILT_ADAPTERS: AdapterKind[] = ['web-serial', 'mock', 'manual', 'simulator', 'spp-android'];
 
 // El driver primario mostrado en la pantalla (el registry hoy tiene uno: el RS420, RMV1.3). Con más
 // fabricantes, esta pantalla listaría un binding por driver reconocido; el patrón es idéntico.
@@ -94,6 +104,11 @@ export default function StickConnectionScreen() {
   const transport = api?.transport ?? null;
   const hasTransport = transport != null;
   const isSimulator = transport?.kind === 'simulator';
+  // ¿El transporte activo es el SPP nativo? Entonces la pantalla lista los devices REALES
+  // emparejados del teléfono en vez de la fila única de "capacidad de build" (que es lo correcto en
+  // web/iOS, donde no hay nada que enumerar). Se decide por el `kind` del transporte instanciado, NO
+  // por `Platform.OS`: es la misma fuente que decide si el CTA existe.
+  const isSpp = transport?.kind === 'spp-android';
 
   // Binding del driver primario en ESTA plataforma (RMV2.3/2.4): elige adapter+transporte por la tabla
   // de prioridad + marca `available` según los adaptadores construidos. Puro, sin device real: refleja
@@ -141,16 +156,6 @@ export default function StickConnectionScreen() {
     return unsub;
   }, [api]);
 
-  // CTA de estado: conectar / reintentar / desconectar (gesto de usuario; web-serial exige requestPort).
-  const onStatusCta = useCallback(() => {
-    if (!transport) return;
-    if (view.cta === 'disconnect') {
-      void transport.disconnect().catch(() => undefined);
-    } else {
-      void transport.connect().catch(() => undefined);
-    }
-  }, [transport, view.cta]);
-
   // Elegir el device reconocido-conectable (RMV3.3): lo persistimos como el bastón recordado + conectamos.
   // `available:false` / no reconocido NO llega acá (la fila no es accionable) → nunca intentamos conectar
   // algo que fallaría (RMV3.7/3.8). El id recordado es el vendorId del driver (marcador de reconexión;
@@ -161,7 +166,61 @@ export default function StickConnectionScreen() {
     void transport?.connect().catch(() => undefined);
   }, [binding, transport]);
 
+  // ── Lista de devices EMPAREJADOS del teléfono (camino SPP-Android, RMV3.2) ──────────────────
+  // No se carga sola al entrar: la primera llamada dispara el diálogo de permiso del SO, y un
+  // permiso pedido sin que el operario haya pedido nada es exactamente cómo se gana un "denegar
+  // para siempre". Se carga con gesto explícito.
+  const [pairedState, setPairedState] = useState<PairedListState>('idle');
+  const [pairedDevices, setPairedDevices] = useState<PairedDevice[]>([]);
+  const pairedView = pairedDevicesView(pairedState);
+
+  const loadPaired = useCallback(async () => {
+    setPairedState('loading');
+    const result = await listPairedSppDevices();
+    if (!result.ok) {
+      setPairedDevices([]);
+      setPairedState(result.reason);
+      return;
+    }
+    setPairedDevices(result.devices);
+    setPairedState(result.devices.length > 0 ? 'ok' : 'empty');
+  }, []);
+
+  const onLoadPaired = useCallback(() => {
+    void loadPaired();
+  }, [loadPaired]);
+
+  // Elegir un device REAL de la lista: se recuerda su MAC y se conecta a ESA MAC (no al vendorId,
+  // que era un marcador mientras no había adapter real).
+  const onChoosePaired = useCallback(
+    (device: PairedDevice) => {
+      void writeRememberedDevice(device.id);
+      void transport?.connect(device.id).catch(() => undefined);
+    },
+    [transport],
+  );
+
   const onClearReads = useCallback(() => setReads([]), []);
+
+  // CTA de estado: conectar / reintentar / desconectar (gesto de usuario; web-serial exige requestPort).
+  // En el camino SPP, "conectar" primero **carga la lista de emparejados** y recién después intenta el
+  // device recordado, en ese orden y SECUENCIAL. Dos motivos: (a) sin bastón recordado —la primera
+  // vez— un `connect()` pelado no tiene a qué conectarse y el CTA quedaría muerto, así que además de
+  // intentarlo le deja al operario la lista para elegir; (b) secuencial y no en paralelo porque
+  // `PermissionsAndroid` rechaza dos pedidos simultáneos (la segunda llamada ya encuentra el permiso
+  // concedido y no vuelve a preguntar).
+  const onStatusCta = useCallback(() => {
+    if (!transport) return;
+    if (view.cta === 'disconnect') {
+      void transport.disconnect().catch(() => undefined);
+      return;
+    }
+    if (isSpp) {
+      void loadPaired().then(() => transport.connect().catch(() => undefined));
+      return;
+    }
+    void transport.connect().catch(() => undefined);
+  }, [transport, view.cta, isSpp, loadPaired]);
 
   // `cta: 'none'` ya cubre el caso sin transporte (lo garantiza `connectionStatusView`) además de los
   // estados en progreso (connecting/scanning). No se re-chequea `hasTransport` acá: una sola fuente.
@@ -225,13 +284,51 @@ export default function StickConnectionScreen() {
         {/* ── Controles de simulación (RMV4.5/4.6): SOLO bajo isDemoMode() (el componente se auto-guarda) ── */}
         <DemoControls />
 
-        {/* ── Dispositivos: el driver reconocido en esta plataforma (descubrir → listar → elegir, RMV3.2) ── */}
+        {/* ── Dispositivos (RMV3.2). En SPP-Android: la lista REAL de emparejados del teléfono.
+              En web/iOS: la fila única de capacidad de build, como hasta ahora. ── */}
         <YStack gap="$2">
           <Text fontFamily="$body" fontSize="$3" fontWeight="600" color="$textMuted">
             Dispositivos
           </Text>
-          <StickDeviceRow view={rowView} onPress={rowView.actionable ? onChooseDevice : undefined} />
-          <TransportInstructions binding={binding} hasTransport={hasTransport} />
+
+          {isSpp ? (
+            <>
+              {pairedDevices.map((d) => {
+                // El binding es del DRIVER, no del device: solo se pasa si ESTE device matcheó un
+                // driver. Pasarlo siempre haría que toda fila —auriculares incluidos— se titulara
+                // "Allflex RS420" (la primera rama de `deviceRowView` usa `binding.driver`).
+                const deviceDriver = findDriverForDevice({ id: d.id, name: d.name, channel: 'classic-paired' });
+                return (
+                  <StickDeviceRow
+                    key={d.id}
+                    view={deviceRowView({
+                      driver: deviceDriver,
+                      binding: deviceDriver ? binding : null,
+                      deviceName: d.name,
+                      hasTransport,
+                      // El nombre Bluetooth real del RS420 no está verificado: dejamos PROBAR
+                      // cualquier emparejado en vez de esconder el bastón detrás de una regex nuestra.
+                      allowUnrecognized: true,
+                    })}
+                    onPress={() => onChoosePaired(d)}
+                  />
+                );
+              })}
+              <Text fontFamily="$body" fontSize="$3" lineHeight="$3" fontWeight="400" color="$textMuted">
+                {pairedView.hint}
+              </Text>
+              {pairedView.ctaLabel ? (
+                <Button testID="stick-paired-cta" variant="secondary" fullWidth onPress={onLoadPaired}>
+                  {pairedView.ctaLabel}
+                </Button>
+              ) : null}
+            </>
+          ) : (
+            <>
+              <StickDeviceRow view={rowView} onPress={rowView.actionable ? onChooseDevice : undefined} />
+              <TransportInstructions binding={binding} hasTransport={hasTransport} />
+            </>
+          )}
         </YStack>
 
         {/* ── Lecturas en vivo (confirmación pre-commit, RMV4.8; marca DEMO, RMV4.6) ── */}

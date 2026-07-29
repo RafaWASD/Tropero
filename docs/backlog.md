@@ -17,6 +17,14 @@ No es un sustituto de `feature_list.json` ni de los ADRs — es la antesala dond
 
 ## Ítems pendientes
 
+## 2026-07-29 — El UUID RFCOMM del SPP en Android NO es parametrizable con la lib que usamos
+
+**Origen**: unidad «bastón Android SPP» (2026-07-29), al leer el código nativo de `react-native-bluetooth-classic` para escribir el adapter de verdad.
+**Qué**: `RfcommConnectorThreadImpl.java` llama `device.createRfcommSocketToServiceRecord(BluetoothUUID.SPP.uuid)` con `00001101-0000-1000-8000-00805F9B34FB` **hardcodeado**, e **ignora** la opción `uuid` que se le pase a `connectToDevice`. O sea: la promesa de RMV5.2 ("otro lector SPP se soporta agregando su driver") vale para el `frameParser` y el `pin`, pero **no** para el `sppUuid`.
+**Cómo quedó mitigado**: el adapter **contrasta** el `sppUuid` del driver contra el UUID fijo (`sppUuidIsSupported`) y, si no coincide, **no abre el socket** (emite `disconnected` + log) en vez de conectarse al SPP estándar fingiendo que es el del driver. Falla ruidosa y testeada, no silenciosa.
+**Por qué importa**: el día que aparezca un lector SPP publicado en otro UUID de servicio (no es raro en lectores industriales), el registro de drivers **no** alcanza: hay que cambiar de librería o escribir un módulo nativo propio (son ~30 líneas de Kotlin: `createRfcommSocketToServiceRecord(UUID.fromString(...))`). Hoy no bloquea nada — el RS420 usa el SPP estándar.
+**Próximo paso sugerido**: nada ahora. Revisar cuando entre el segundo fabricante SPP al registro (RMV1.6). Si además hiciera falta discovery de no-emparejados, conviene evaluar las dos cosas juntas.
+
 ## 2026-07-29 — Stash `pressable-sweep-wip`: 67 archivos a medio barrer del bug de taps, en CONFLICTO con HEAD
 
 **Origen**: bugfix del chip del bastón (2026-07-29). Raf pasó la titularidad de BLE desde otra terminal de Claude que murió a mitad de trabajo; el stash es lo que dejó tirado.
@@ -47,6 +55,7 @@ No es un sustituto de `feature_list.json` ni de los ADRs — es la antesala dond
 **Por qué NO se arregló acá**: (a) **no es una afordancia de conectar** — el criterio del bugfix era "ofrece conectar sin mirar el transporte", y este CTA no llama `connect()`; (b) su destino **entrega función real sin transporte**: el `ManualTagEntry` de adentro del sheet es el **único** camino para cargar la caravana electrónica en la ficha (la ficha ya NO ofrece carga manual directa, UX Raf 2026-07-06) → ocultar el CTA **quitaría funcionalidad**; (c) arreglarlo bien implica **dos** decisiones de diseño, no una: cambiar el label por transporte ("Cargar la caravana") *y* abrir el sheet directo en modo manual para no cobrar un tap de más — con blast radius sobre los 4 call sites, el testID `tag-scan-open` y **10 archivos E2E** (6 specs + 4 captures) que asertan ese texto/testID.
 **Por qué importa igual**: el label miente en el device de Raf. Es la misma clase que el chip (un significante que promete lo que no puede cumplir), un escalón más abajo: no ofrece una acción imposible, ofrece un *nombre* imposible para una acción posible.
 **Próximo paso sugerido**: unidad chica de UX cuando se decida el copy. La condición ya está disponible y es la misma de siempre (`useBleProviderApi()?.transport != null`, o `resolveListenConnState`); la decisión iría en `TagScanCta` (label por prop derivada) + un `initialManual` en `TagScanSheet`. Requiere decisión de producto sobre el copy, no es mecánico.
+**ACTUALIZACIÓN 2026-07-29 (unidad «bastón Android SPP») — la urgencia BAJA, el ítem NO se cierra**: Android ya **tiene** transporte (`spp-android` montado), así que en el teléfono de Raf el label "Bastonear la caravana" **dejó de mentir**. Lo que queda vivo es el caso **iOS** (sigue sin transporte alcanzable hasta el MFi) y el de un **dev build viejo sin el módulo nativo** (`isSppNativeAvailable()` false → transporte null). O sea: el defecto es el mismo, la población de devices afectados se achicó. Sigue pendiente la decisión de copy.
 
 ## 2026-07-28 — `KeyboardAvoidingShell` que MONTA con el teclado ya abierto arranca en altura 0 (límite declarado, NO cerrado)
 

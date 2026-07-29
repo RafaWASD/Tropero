@@ -64,7 +64,7 @@ export function StickDeviceRow({ view, onPress }: StickDeviceRowProps) {
       {...interaction}
     >
       <View flexShrink={0} alignItems="center" justifyContent="center">
-        {view.state === 'unrecognized' ? (
+        {view.state === 'unrecognized' || view.state === 'unrecognized-connectable' ? (
           <TriangleAlert size={getTokenValue('$navIcon', 'size')} color={iconColor} strokeWidth={2.25} />
         ) : (
           <StickIcon size={getTokenValue('$navIcon', 'size')} color={iconColor} strokeWidth={2.25} />

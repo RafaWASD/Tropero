@@ -23,10 +23,15 @@ test('R10.3/R5.1: en web (auto) se monta web-serial', () => {
   assert.equal(selectTransportAdapter({ platformOS: 'web', mode: 'auto' }), 'web-serial');
 });
 
-test('R7: en native sin transporte buildable (auto), el piso es manual (spp-android es Fase 4)', () => {
-  // En este run NO se elige spp-android (placeholder que tira); el manual es el único piso.
+test('R6/RMV5.1: en Android (auto) se monta el SPP nativo (Bluetooth Classic)', () => {
+  assert.equal(selectTransportAdapter({ platformOS: 'android', mode: 'auto' }), 'spp-android');
+});
+
+test('R7: en iOS (auto) sigue sin haber transporte alcanzable → piso manual', () => {
+  // El RS420 declara spp+serial; en iOS su vía real es MFi (protocol string del fabricante,
+  // gate externo). Hasta entonces la app es manual-first en iOS y el chip/CTA se ocultan solos.
   assert.equal(selectTransportAdapter({ platformOS: 'ios', mode: 'auto' }), 'manual');
-  assert.equal(selectTransportAdapter({ platformOS: 'android', mode: 'auto' }), 'manual');
+  assert.equal(selectTransportAdapter({ platformOS: 'macos', mode: 'auto' }), 'manual');
 });
 
 test('R8.7: nunca se elige hid-wedge (GATED)', () => {

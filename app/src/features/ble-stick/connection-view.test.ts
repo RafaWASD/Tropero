@@ -8,8 +8,10 @@ import assert from 'node:assert/strict';
 import {
   connectionStatusView,
   deviceRowView,
+  pairedDevicesView,
   readingBadge,
   readsEmptyHint,
+  type PairedListState,
 } from './connection-view.ts';
 import { RS420_DRIVER } from '../../services/ble/driver-rs420.ts';
 import type { ReaderBinding } from '../../services/ble/selection-priority.ts';
@@ -216,6 +218,95 @@ test('NINGÚN estado de fila es accionable sin transporte (invariante, las 4 com
   for (const row of rows) {
     assert.equal(row.actionable, false, `fila accionable sin transporte: ${row.state}`);
   }
+});
+
+// ─── unrecognized-connectable: la lista de EMPAREJADOS reales deja probar un device desconocido ──
+
+test('allowUnrecognized: un emparejado sin driver se puede PROBAR (el nombre BT del RS420 es hipótesis)', () => {
+  const row = deviceRowView({
+    driver: null,
+    binding: null,
+    deviceName: 'SPP-CA',
+    hasTransport: true,
+    allowUnrecognized: true,
+  });
+  assert.equal(row.state, 'unrecognized-connectable');
+  assert.equal(row.actionable, true);
+  assert.equal(row.title, 'SPP-CA');
+  assert.match(row.subtitle, /probar/i);
+});
+
+test('allowUnrecognized es OPT-IN: sin el flag, RMV3.8 sigue igual (no accionable)', () => {
+  const row = deviceRowView({ driver: null, binding: null, deviceName: 'Speaker XZ', hasTransport: true });
+  assert.equal(row.state, 'unrecognized');
+  assert.equal(row.actionable, false);
+});
+
+test('allowUnrecognized NO puede saltear el invariante de "sin transporte no hay tap"', () => {
+  const row = deviceRowView({
+    driver: null,
+    binding: null,
+    deviceName: 'Speaker XZ',
+    hasTransport: false,
+    allowUnrecognized: true,
+  });
+  assert.equal(row.state, 'unrecognized');
+  assert.equal(row.actionable, false);
+});
+
+test('allowUnrecognized sin nombre → título de fallback no vacío', () => {
+  const row = deviceRowView({ driver: null, binding: null, hasTransport: true, allowUnrecognized: true });
+  assert.ok(row.title.length > 0);
+  assert.equal(row.actionable, true);
+});
+
+// ─── pairedDevicesView: copy de la lista de emparejados (camino SPP-Android) ──────────────────
+
+const ALL_PAIRED_STATES: PairedListState[] = [
+  'idle',
+  'loading',
+  'ok',
+  'empty',
+  'permission_denied',
+  'bluetooth_off',
+  'unavailable',
+  'error',
+];
+
+test('pairedDevicesView: los 8 estados tienen hint no vacío', () => {
+  for (const s of ALL_PAIRED_STATES) {
+    assert.ok(pairedDevicesView(s).hint.length > 0, `hint vacío en ${s}`);
+  }
+});
+
+test('pairedDevicesView: mientras carga no hay botón; los estados accionables sí lo tienen', () => {
+  assert.equal(pairedDevicesView('loading').ctaLabel, null);
+  assert.equal(pairedDevicesView('unavailable').ctaLabel, null); // no hay nada que reintentar
+  for (const s of ['idle', 'ok', 'empty', 'permission_denied', 'bluetooth_off', 'error'] as const) {
+    assert.ok((pairedDevicesView(s).ctaLabel ?? '').length > 0, `sin CTA en ${s}`);
+  }
+});
+
+test('pairedDevicesView: el copy habla de EMPAREJAR, no de escanear (este camino no hace discovery)', () => {
+  for (const s of ['idle', 'ok', 'empty'] as const) {
+    const hint = pairedDevicesView(s).hint;
+    // `/emparej/` y no `/empareja/`: el voseo escribe "Emparejá" con tilde.
+    assert.match(hint, /emparej/i, `el copy de ${s} no menciona emparejar: "${hint}"`);
+    assert.doesNotMatch(hint, /escane/i, `el copy de ${s} promete un escaneo que no existe: "${hint}"`);
+  }
+});
+
+test('pairedDevicesView: el estado sin bastón alcanzable ofrece la salida manual', () => {
+  assert.match(pairedDevicesView('unavailable').hint, /mano/i);
+  assert.match(pairedDevicesView('permission_denied').hint, /mano/i);
+  assert.match(pairedDevicesView('error').hint, /manual/i);
+});
+
+test('pairedDevicesView: el PIN de emparejamiento del RS420 aparece en el copy (1234)', () => {
+  // Es el dato que el operario necesita para emparejarlo en los ajustes de Android; si no está en
+  // la pantalla, no está en ningún lado (no hay manual dentro de la app).
+  assert.match(pairedDevicesView('idle').hint, /1234/);
+  assert.match(pairedDevicesView('empty').hint, /1234/);
 });
 
 // ─── RMV4.6: lectura del simulador → marca "DEMO"; lectura real → sin marca ───────────────────

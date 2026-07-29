@@ -38,6 +38,7 @@ import { ManualAdapter } from './adapter-manual';
 import { MockAdapter } from './adapter-mock';
 import { WebSerialAdapter } from './adapter-web-serial';
 import { SimulatorAdapter } from './adapter-simulator';
+import { SppAndroidAdapter, isSppNativeAvailable } from './adapter-spp-android';
 import { isDemoMode } from './demo-gate';
 import { playFeedback } from './feedback';
 import { readBeepEnabled } from './feedback-pref';
@@ -91,13 +92,17 @@ function instantiateTransport(kind: ReturnType<typeof selectTransportAdapter>): 
       // simulador en producción. El simulador entra por `handleReading(value, isRawStream=false)`
       // (kind !== 'web-serial'/'spp-android'), igual que el mock: EID limpio, no línea cruda.
       return isDemoMode() ? new SimulatorAdapter() : null;
-    case 'manual':
-      // En native sin transporte buildable (spp-android es Fase 4), no hay transporte extra:
-      // el manual (piso) es el único. Devolvemos null → solo corre el manual.
-      return null;
     case 'spp-android':
+      // Android (Fase 4, construida 2026-07-29). El guard NO es cosmético: sin el módulo nativo
+      // en el APK (dev build anterior a la dep / Expo Go) devolvemos null → la app queda
+      // manual-first y el chip + el CTA de la pantalla se ocultan solos por `hasTransport`. Montar
+      // el adapter igual sería volver a prometer una conexión imposible.
+      return isSppNativeAvailable() ? new SppAndroidAdapter() : null;
+    case 'manual':
+      // Piso manual sin transporte extra (iOS, y el flag de E2E que reproduce ese sub-estado).
+      return null;
     case 'hid-wedge':
-      // Fuera de este run (Fase 4 / GATED). No se montan.
+      // GATED (R8.7): no se monta.
       return null;
   }
 }

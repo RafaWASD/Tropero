@@ -26,6 +26,7 @@ Traducción a la arquitectura existente: lo que pide **ya es** el patrón `Stick
 3. **Pantalla de conexión + selección de bastón** (`StickConnectionScreen` + indicador de estado global, R9 de spec 04, hoy diferido): descubrir → listar → elegir → conectar → estados → recordar. Es también **la cara de la demo** para fabricantes.
 4. **Camino de demo por mock/simulador**: un modo que **simula un bastón leyendo tags en vivo** (para mostrar el pipeline completo — conexión, lectura, dedup, confirmación, find-or-create — sin bastón físico). Gateado para dev/demo; **nunca** un EID simulado se declara como real (ver edge cases).
 5. **`adapter-spp-android` escrito** (Bluetooth Classic SPP, `react-native-bluetooth-classic`): código + unit de lo puro; **device-test gated** por hardware. Incluye vetar el config plugin contra Expo SDK 56 + permisos Android (sin comprometer el dev build hasta tener con qué probar).
+   **[as-built 2026-07-29 — el gate se levantó por pedido de Raf.** El veto dio COMPATIBLE (evidencia + build Gradle real), la dep está instalada, el adapter está **montado** en Android, hay permisos de runtime, lista de emparejados reales y config plugin propio. **Queda gated SOLO el stream de un RS420 físico** (T-MV.5.6): nadie tiene uno. Detalle en `progress/impl_baston-android-spp.md`.**]**
 
 ## Compatibilidad por plataforma (la matriz que guía la selección)
 

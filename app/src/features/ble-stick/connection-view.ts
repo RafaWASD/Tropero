@@ -161,6 +161,7 @@ export type DeviceRowState =
   | 'recognized-available' // driver reconocido + adapter construido en este build → conectable
   | 'recognized-unavailable' // driver reconocido pero el adapter NO está construido todavía (RMV3.7)
   | 'recognized-unreachable' // driver reconocido pero sin transporte alcanzable en esta plataforma (RMV2.5)
+  | 'unrecognized-connectable' // ningún driver matchea, pero es un device REAL emparejado y se puede probar
   | 'unrecognized'; // ningún driver matchea el device (RMV3.8)
 
 export interface DeviceRowView {
@@ -201,8 +202,19 @@ export function deviceRowView(input: {
   deviceName?: string;
   /** ¿Hay un transporte INSTANCIADO? (`provider.transport != null`). Obligatorio: ver el doc de arriba. */
   hasTransport: boolean;
+  /**
+   * OPT-IN (default false): permitir PROBAR la conexión con un device que NINGÚN driver reconoce
+   * (`unrecognized-connectable`). Solo lo pide la lista de EMPAREJADOS REALES del teléfono, y por un
+   * motivo concreto: `deviceMatch.namePattern` del RS420 (`/RS\s?420|allflex/i`) es una HIPÓTESIS —
+   * el nombre Bluetooth real del lector no está verificado en `field-findings.md`. Si el bastón se
+   * anuncia con otro nombre, una lista que solo deja tocar lo "reconocido" vuelve la feature
+   * inservible en el campo y encima sin síntoma. Con el opt-in, el operario puede intentar y el
+   * error de conexión sale del transporte real, no de una regex nuestra. Todo el resto de los call
+   * sites (capacidad de build, web, iOS) NO lo pasa y conserva RMV3.8 tal cual.
+   */
+  allowUnrecognized?: boolean;
 }): DeviceRowView {
-  const { driver, binding, deviceName, hasTransport } = input;
+  const { driver, binding, deviceName, hasTransport, allowUnrecognized = false } = input;
 
   if (binding !== null) {
     if (binding.available && hasTransport) {
@@ -234,9 +246,21 @@ export function deviceRowView(input: {
   }
 
   const trimmed = deviceName?.trim();
+  const title = trimmed && trimmed.length > 0 ? trimmed : 'Dispositivo desconocido';
+
+  if (allowUnrecognized && hasTransport) {
+    return {
+      state: 'unrecognized-connectable',
+      title,
+      subtitle: 'No lo reconocemos como bastón. Podés probar a conectarlo igual.',
+      actionable: true,
+      tone: 'idle',
+    };
+  }
+
   return {
     state: 'unrecognized',
-    title: trimmed && trimmed.length > 0 ? trimmed : 'Dispositivo desconocido',
+    title,
     subtitle: 'No reconocido. Podés cargar la caravana a mano.',
     actionable: false,
     tone: 'warning',
@@ -253,6 +277,88 @@ export function readsEmptyHint(hasTransport: boolean): string {
   return hasTransport
     ? 'Todavía no leíste ninguna caravana. Conectá el bastón y bastoneá un animal.'
     : 'Todavía no leíste ninguna caravana. En este dispositivo se cargan a mano.';
+}
+
+/**
+ * Estado de la LISTA DE EMPAREJADOS del teléfono (camino SPP-Android). Es el resultado de
+ * `listPairedSppDevices()` más los dos estados de UI (todavía no se buscó / buscando).
+ */
+export type PairedListState =
+  | 'idle' // todavía no se buscó (el operario tiene que tocar el botón: dispara el permiso del SO)
+  | 'loading'
+  | 'ok' // hay ≥1 device emparejado
+  | 'empty' // el teléfono no tiene NINGÚN device Bluetooth emparejado
+  | 'permission_denied'
+  | 'bluetooth_off'
+  | 'unavailable' // este build no puede hablar Bluetooth Classic (web / iOS / dev build viejo)
+  | 'error';
+
+export interface PairedListView {
+  /** Copy del estado (es-AR, voseo). Vacío = no se muestra texto (la lista habla sola). */
+  hint: string;
+  /** Texto del botón de (re)búsqueda. `null` = sin botón (mientras carga, o si no aplica). */
+  ctaLabel: string | null;
+  tone: ViewTone;
+}
+
+/**
+ * Copy de cada estado de la lista de emparejados (es-AR, voseo, sin jerga). NINGUNO bloquea la
+ * carga manual (RMV3.6). Vive acá —y no inline en el JSX— por la misma razón que el resto del
+ * módulo: es una decisión de presentación y se testea.
+ *
+ * "Emparejados", no "encontrados": este camino NO hace discovery (no pide permiso de ubicación ni
+ * de escaneo). El RS420 se empareja UNA vez desde los ajustes de Android (es slave, PIN 1234) y
+ * después aparece acá — el copy tiene que decir eso, o el operario busca un botón de "escanear"
+ * que no existe.
+ */
+export function pairedDevicesView(state: PairedListState): PairedListView {
+  switch (state) {
+    case 'loading':
+      return { hint: 'Buscando dispositivos emparejados…', ctaLabel: null, tone: 'progress' };
+    case 'ok':
+      return {
+        hint: 'Elegí el bastón de la lista. Si no está, emparejalo primero desde los ajustes de Bluetooth del teléfono (PIN 1234).',
+        ctaLabel: 'Actualizar lista',
+        tone: 'idle',
+      };
+    case 'empty':
+      return {
+        hint: 'Este teléfono no tiene ningún dispositivo Bluetooth emparejado. Emparejá el bastón desde los ajustes de Bluetooth (PIN 1234) y volvé.',
+        ctaLabel: 'Actualizar lista',
+        tone: 'warning',
+      };
+    case 'permission_denied':
+      return {
+        hint: 'Falta el permiso de Bluetooth para ver los dispositivos emparejados. Dáselo y reintentá; mientras tanto podés cargar a mano.',
+        ctaLabel: 'Reintentar',
+        tone: 'warning',
+      };
+    case 'bluetooth_off':
+      return {
+        hint: 'El Bluetooth del teléfono está apagado. Prendelo y reintentá.',
+        ctaLabel: 'Reintentar',
+        tone: 'warning',
+      };
+    case 'unavailable':
+      return {
+        hint: 'En este dispositivo no se puede conectar el bastón. Cargá las caravanas a mano.',
+        ctaLabel: null,
+        tone: 'idle',
+      };
+    case 'error':
+      return {
+        hint: 'No pudimos leer los dispositivos emparejados. Reintentá; la carga manual sigue disponible.',
+        ctaLabel: 'Reintentar',
+        tone: 'warning',
+      };
+    case 'idle':
+    default:
+      return {
+        hint: 'Emparejá el bastón desde los ajustes de Bluetooth del teléfono (PIN 1234) y después buscalo acá.',
+        ctaLabel: 'Buscar bastón emparejado',
+        tone: 'idle',
+      };
+  }
 }
 
 /**

@@ -3,6 +3,47 @@
 > Este archivo se vacía al cerrar cada sesión y su resumen se mueve a `history.md`.
 > Mientras trabajás, **mantenelo actualizado en tiempo real**, no al final.
 
+## 2026-07-29 — UNIDAD «el bastón funciona de verdad en Android» (implementer) — LISTA para review
+
+Base `6d1fd74`. Pedido de Raf tras el fix cosmético anterior: *"Te pedí que lo desarrolles no que lo
+escondas. Quería desarrollo completo de Bluetooth y conectar bastón para android"*. Cierra **T-MV.5.1**
+(el veto de compatibilidad, que estaba `[ ]` con "RIESGO ALTO NO RESUELTO") y **T-MV.5.5** (montar el
+adapter), y acota el gate de hardware a una task nueva, **T-MV.5.6** (stream de un RS420 físico).
+
+**GATE 0 — COMPATIBLE, con evidencia contra el código instalado y un build real.** El riesgo del veto
+liviano (2026-07-20: *"es la MISMA clase de fallo que quick-sqlite bajo bridgeless"*) **no se
+materializó y la analogía era incorrecta**: quick-sqlite fallaba por **bindings JSI** puestos a mano
+(para eso no hay interop); `react-native-bluetooth-classic` es un NativeModule legacy **sin una línea
+de JSI ni de C++**, y RN 0.85.3 lo corre por el interop de módulos legacy, que está **ON justamente
+cuando `newArchEnabled=true`** (`ReactNativeNewArchitectureFeatureFlagsDefaults.kt:35`:
+`useTurboModuleInterop() = newArchitectureEnabled`). Confirmado además compilando:
+`:react-native-bluetooth-classic:assembleDebug` → **BUILD SUCCESSFUL** (Gradle 9.3.1 + AGP 8.12.0 +
+compileSdk 36 + JDK 17), autolinking OK, y `:app:assembleDebug` verde con la dep adentro.
+**Hallazgo del veto: la lib NO trae config plugin** → se escribió uno propio.
+
+**Tres bugs 🔴/🟠 en el código que ya estaba "escrito y testeado"** (los tres habrían aparecido recién
+con el bastón en la mano): (1) el **framing estaba invertido** —se pasaba por `LineFramer` un payload
+que el nativo entrega **ya delimitado y sin `\n`**, así que el adapter no habría emitido **una sola
+lectura**; (2) `pairDevice()` en cada connect **cuelga para siempre** sobre un device ya emparejado
+(el `createBond()` del nativo no dispara broadcast) → estado clavado en `'connecting'`; (3) la cadena
+de reintentos **moría después del primer fallo** (el objetivo se anotaba solo al conectar bien).
+Más: reconexión muerta si la app estaba en background, y un connect nuevo que no cancelaba el timer
+pendiente y dejaba el guard trabado. Todos con test de regresión.
+
+**Lo que baja el gate de hardware**: la I/O del adapter entra por `SppEnv` (inyección), así que la
+máquina de estados completa se ejercita con dobles — permiso denegado, BT apagado con y sin
+aceptación, device recordado vs explícito, stream, corte del SO, backoff creciente y su reset,
+background/foreground, doble connect, teardown. `adapter-spp-android.test.ts` pasó de 8 a 36 tests.
+
+**En el teléfono, SIN RS420, se puede verificar**: que la app arranca con la dep nativa; el diálogo de
+permiso de Android 12+; que la pantalla **enumera los dispositivos emparejados reales** (auriculares,
+auto); el error al conectar contra algo que no habla SPP; y que **el chip vuelve solo** (no se tocó el
+guard: la condición sigue siendo `transport != null`, y ahora en Android hay transporte).
+Queda gated **solo** el stream del RS420.
+
+Detalle, tabla de evidencia del Gate 0, autorrevisión y dudas abiertas en
+`progress/impl_baston-android-spp.md`.
+
 ## 2026-07-29 — BUGFIX 🔴 «el botón de conectar bastón en Android no funciona» (implementer) — LISTA para review
 
 Base `d9a3eb0`. Raf en device. Diagnóstico ya cerrado por el leader: `react-native-ble-plx` no está

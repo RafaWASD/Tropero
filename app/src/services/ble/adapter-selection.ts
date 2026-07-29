@@ -5,12 +5,15 @@
 // Reglas (design §"Decisión de orden de build" + R10.3):
 //   - mock: si se fuerza por toggle de dev/CI (mode='mock').
 //   - web-serial: en web (Platform.OS === 'web').
-//   - spp-android: en Android device (Fase 4, fuera de este run → no se elige acá todavía).
+//   - spp-android: en Android (Bluetooth Classic SPP nativo — Fase 4, CONSTRUIDA 2026-07-29).
 //   - hid-wedge: GATED (R8.7) → nunca se elige hasta pasar el gate.
 //   - manual: PISO siempre disponible (R7) — no es "el activo" exclusivo, corre en paralelo.
 //
-// Este run monta SOLO los buildables hoy (web-serial / mock / manual). spp-android e
-// hid-wedge se enchufan en Fases 4/5 sin cambiar esta lógica más que agregar su rama.
+// Esta función elige el KIND; que ese kind se pueda INSTANCIAR en este build es otra decisión y
+// vive en `instantiateTransport` (que para 'spp-android' chequea que el módulo nativo esté
+// realmente presente). Separadas a propósito: un dev build viejo, sin el binario de
+// `react-native-bluetooth-classic`, sigue eligiendo 'spp-android' pero NO monta transporte → la
+// app queda manual-first y el chip/CTA se ocultan solos (guard de `hasTransport`).
 
 // Delta multivendor (RMV2.7, RMV4.1): `'simulator'` se agrega de forma ADITIVA al union del core.
 // Es el adapter del camino de demo (dev/demo-gated, triple-guard) — no cambia ninguno de los otros.
@@ -32,9 +35,10 @@ export interface SelectionEnv {
 
 /**
  * Elige el adaptador de TRANSPORTE activo (además del manual, que es piso permanente).
- * Devuelve el `kind` del transporte a montar. En este run: 'mock' si se fuerza, 'web-serial'
- * en web; en native sin mock, todavía no hay transporte buildable (spp-android es Fase 4) →
- * 'manual' como único piso. NUNCA elige 'hid-wedge' (GATED, R8.7).
+ * Devuelve el `kind` del transporte a montar: 'mock' si se fuerza, 'web-serial' en web,
+ * 'spp-android' en Android (RS420 por Classic SPP). En iOS sigue sin haber transporte alcanzable
+ * (el RS420 declara spp+serial y su vía iOS real es MFi, gated por el protocol string del
+ * fabricante) → 'manual' como único piso. NUNCA elige 'hid-wedge' (GATED, R8.7).
  */
 export function selectTransportAdapter(env: SelectionEnv): AdapterKind {
   if (env.mode === 'mock') return 'mock';
@@ -47,8 +51,10 @@ export function selectTransportAdapter(env: SelectionEnv): AdapterKind {
   // el provider bajo el flag de E2E para reproducir el sub-estado "manual promovido" del hero (transport==null).
   if (env.mode === 'manual') return 'manual';
   if (env.platformOS === 'web') return 'web-serial';
-  // Android device → 'spp-android' cuando la Fase 4 esté construida; hasta entonces el piso
-  // manual es el único transporte disponible en native (la app funciona, manual-first).
-  // (No se elige spp-android en este run para no montar el placeholder que tira.)
+  // Android → SPP nativo (Bluetooth Classic). Es el único transporte con el que el RS420 habla en
+  // Android, y desde 2026-07-29 el adapter + la dep nativa están en el build.
+  if (env.platformOS === 'android') return 'spp-android';
+  // iOS y cualquier otra plataforma: sin transporte alcanzable todavía → piso manual (la app
+  // funciona igual, manual-first). iOS va aparte (External Accessory + protocol string MFi).
   return 'manual';
 }

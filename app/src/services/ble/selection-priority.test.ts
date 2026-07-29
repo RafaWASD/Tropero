@@ -190,9 +190,10 @@ test('RMV2.7 regresión: selectTransportAdapter(auto/mock/manual) devuelve EXACT
   // manual
   assert.equal(selectTransportAdapter({ platformOS: 'ios', mode: 'manual' }), 'manual');
   assert.equal(selectTransportAdapter({ platformOS: 'web', mode: 'manual' }), 'manual');
-  // auto en native → manual (spp-android sigue sin montarse en este run)
+  // auto en iOS → manual (sin transporte alcanzable: la vía del RS420 en iOS es MFi, gate externo)
   assert.equal(selectTransportAdapter({ platformOS: 'ios', mode: 'auto' }), 'manual');
-  assert.equal(selectTransportAdapter({ platformOS: 'android', mode: 'auto' }), 'manual');
+  // auto en Android → spp-android (Fase 4 construida 2026-07-29; ANTES devolvía 'manual').
+  assert.equal(selectTransportAdapter({ platformOS: 'android', mode: 'auto' }), 'spp-android');
 });
 
 test('RMV4.3 (triple-guard 1): selectTransportAdapter NUNCA devuelve simulator salvo mode=demo', () => {

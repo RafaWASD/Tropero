@@ -75,6 +75,12 @@ export default (): ExpoConfig => {
         },
       ],
       'expo-apple-authentication', // feature 19 — PRESERVADO
+      // Bastón Bluetooth Classic (spec 04 / RMV5.8). `react-native-bluetooth-classic` NO trae
+      // config plugin propio, así que la política de permisos Android del bastón vive acá:
+      // BLUETOOTH_CONNECT (Android 12+, el único de runtime), BLUETOOTH/BLUETOOTH_ADMIN topeados a
+      // API 30, BLUETOOTH_SCAN con `neverForLocation`, y ACCESS_FINE_LOCATION —que la lib mete sin
+      // tope— acotado a API 30: este camino NO hace discovery, solo lista los emparejados.
+      './plugins/with-bluetooth-classic',
       [
         'expo-build-properties',
         {

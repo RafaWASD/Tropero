@@ -237,30 +237,64 @@ Consecuencia (RMV4.7): en un **bundle de producción** los tres guards fallan (m
 
 **Distinción con el mock y el bridge E2E:** el `MockAdapter` (kind `'mock'`) + `BleE2EBridge` existen para **Playwright** (inyección programática, no visible). El `SimulatorAdapter` (kind `'simulator'`) es para **demos humanas en vivo** (controles visibles, marcado "DEMO", auto-play). Se elige un `kind` distinto — en vez de reusar `'mock'` — para poder marcar honestamente las lecturas como demo, con su **propia marca requerida** (`__RAFAQ_BLE_DEMO__`), distinta del `mock`. El gate de demo trata el flag de E2E como un **contexto no-prod válido** para ejercitar la demo en captura/Playwright (`isE2eDemoAllowed()`), pero el modo demo sigue **exigiendo** su marca propia → siguen siendo modos distintos (`mock` invisible vs `simulator` con controles + DEMO). (Ver Alternativa descartada B.)
 
-## 6. `adapter-spp-android` escrito (RMV5)
+## 6. `adapter-spp-android` (RMV5) — **AS-BUILT 2026-07-29**
 
-**Diseño (parametrizado por el driver, import perezoso):**
+> Esta seccion se reescribio al as-built. El diseno original (pseudocodigo con `LineFramer` sobre los
+> chunks, `pairDevice()` dentro del connect, dep nativa sin instalar) describia un adapter que **no
+> funcionaba**: ver las notas de reconciliacion bajo RMV5.2/5.3/5.4 en `requirements-multivendor.md`.
+> La forma que quedo salio de leer el **codigo nativo** de `react-native-bluetooth-classic`, no su README.
+
+**Flujo real de `connect(deviceId?)`** (cada paso es un estado observable; ninguno bloquea el manual):
 
 ```
-connect(deviceId?):
-  perms = permissionModelFor('spp-android')            # 'android-bluetooth' (RMV5, core R12.1)
-  const RNBC = require('react-native-bluetooth-classic')  # PEREZOSO — no top-level (RMV5.6)
-  driver = RS420_DRIVER                                  # sppUuid/pin/frameParser del registro (RMV5.2)
-  device = deviceId ?? await readRememberedDevice()      # remembered-device.ts (RMV5.4)
-  onStatus('connecting')
-  conn = await RNBC.connectToDevice(device, { uuid: driver.transports.spp.sppUuid, pin })  # PIN 1234
-  framer = new LineFramer()                              # reuso (RMV5.3)
-  conn.onDataReceived(chunk => for line of framer.push(chunk): onTagRead(line))  # línea CRUDA → contrato
-  onStatus('connected')
-
-disconnect(): cierra la conexión SPP; onStatus('disconnected').
-reconnect (foreground): backoffDelayMs(attempt++) → connect(remembered) (RMV5.5). Foreground-only.
+0. cancelReconnect()                       # un intento nuevo invalida el reintento pendiente
+1. params = resolveSppParams(driver)       # sppUuid/pin del driver (RMV5.2)
+   if !sppUuidIsSupported(params.sppUuid): => 'disconnected'   # la lib hardcodea el UUID RFCOMM
+2. native = loadRNBC()                     # require PEREZOSO (RMV5.6) + chequeo de NativeModules
+   if !native: => 'disconnected'           # sin binario en el APK: NO se reintenta
+3. perm = await ensureAndroidBluetoothPermissions()   # BLUETOOTH_CONNECT si API>=31
+   'denied'      => 'permission_denied'    # estado CON CTA; sin backoff (lo reintenta el operario)
+   'unavailable' => 'disconnected'
+4. target = deviceId ?? await readRememberedDevice()  # RMV5.4
+   if !target: => 'disconnected'
+   currentDeviceId = target                # ANTES de intentar: el reintento va a ESTE device
+5. => 'connecting'
+6. if !(await native.isBluetoothEnabled()): await native.requestBluetoothEnabled()
+   si el operario dice que no => 'disconnected' SIN backoff
+7. device = await native.connectToDevice(target, sppConnectOptions())
+      # connectorType:'rfcomm', connectionType:'delimited', delimiter:LF, charset:'ascii', secure:true
+      # NO se pasa baud (RMV5.7) ni uuid (la lib lo ignora); NO se llama pairDevice() (cuelga)
+8. device.onDataReceived(e => for line of splitSppPayload(e.data): onTagRead(line))
+      # el nativo YA entrega la linea completa sin LF => se entrega CRUDA al contrato (RMV5.3)
+9. native.onDeviceDisconnected(...) => 'disconnected' + scheduleReconnect()
+10. => 'connected'
 ```
 
-- **Import perezoso (RMV5.6):** `react-native-bluetooth-classic` se `require` dentro de `connect()` (patrón `feedback.ts::vibrateNative`), envuelto en try/catch → en web/CI el módulo no existe pero **importar** `adapter-spp-android.ts` no tira; solo `connect()` fallaría en un entorno sin la lib. Esto mantiene el bundle actual verde **sin instalar la dependencia nativa** (RMV5.8).
-- **Partes puras testeadas en CI:** resolución driver→sppUuid/pin/frameParser (RMV5.2), framing por línea (`LineFramer`, ya testeado), backoff (`backoffDelayMs`, ya testeado), y que `import('./adapter-spp-android')` no tira en node:test (RMV5.6). La I/O RFCOMM real es **device-gated** (RMV5.9).
-- **Veto del config plugin (RMV5.8):** tarea de spike previa a comprometer el dev build — probar que el config plugin de `react-native-bluetooth-classic` es compatible con Expo SDK 56 + los permisos Android 12+; si no, **parar y reportar**. NO se instala la dep ni se prebuildea en este delta.
-- **Montaje en el provider:** cuando el dev build exista, `instantiateTransport('spp-android')` devolverá `new SppAndroidAdapter(RS420_DRIVER)` (hoy devuelve `null`); `selectTransportAdapter({platformOS:'android', mode:'auto'})` pasará de `'manual'` a `'spp-android'`. Esos dos cambios son de la fase gated (no en la pasada buildable-hoy), y **no** tocan el contrato ni los otros adaptadores (core R11.3).
+- **Framing = nativo, no `LineFramer`.** `DelimitedStringDeviceConnectionImpl` buffera en Java y entrega
+  un mensaje por delimitador, ya sin el LF. `LineFramer` sobre eso devuelve `[]` para siempre.
+- **`pairDevice()` no se llama nunca.** Sobre un device ya emparejado, el `createBond()` del nativo no
+  dispara broadcast y la promesa no resuelve: el connect quedaba clavado en `'connecting'`. El
+  emparejamiento es de sistema (ajustes de Android, PIN `1234` del driver).
+- **Reconexion (RMV5.5):** `backoffDelayMs` (reuso), foreground-only, pero con **re-armado** por
+  `AppState` cuando el intento cae con la app en background. Estados que a proposito **no** reintentan:
+  permiso denegado, Bluetooth apagado tras un "no", y ausencia del modulo nativo.
+- **Sesion de conexion:** un contador invalida los callbacks de una conexion ya cerrada, para que una
+  lectura en vuelo no aparezca como caravana despues de un `disconnect()`.
+- **Inyeccion de entorno (`SppEnv`):** `loadNative` / `ensurePermissions` / `readRemembered` /
+  `writeRemembered` / `isForeground` / `schedule` / `onForeground` entran por constructor con defaults
+  reales. Es lo que baja el gate de hardware de "toda la conexion" a "solo el stream del RS420": la
+  maquina de estados entera se ejercita en `node:test` con dobles.
+- **Enumeracion de emparejados (`listPairedSppDevices`, RMV3.2):** `getBondedDevices()` normalizado a
+  `{id: MAC, name}`. **No hay discovery** => no se pide `BLUETOOTH_SCAN` ni ubicacion. Devuelve
+  `{ok:false, reason}` con `unavailable | permission_denied | bluetooth_off | error`, para que la
+  pantalla de un mensaje distinto por causa.
+- **Config plugin (RMV5.8):** la lib **no trae uno** => `app/plugins/with-bluetooth-classic.js`. Ademas
+  de declarar los permisos, **topea el `ACCESS_FINE_LOCATION` que la lib inyecta sin tope**.
+- **Montaje (as-built):** `selectTransportAdapter({android, auto})` => `'spp-android'`;
+  `instantiateTransport('spp-android')` => `isSppNativeAvailable() ? new SppAndroidAdapter() : null`.
+  El guard es deliberado: sin el modulo nativo en el APK (dev build viejo) montar el adapter seria un
+  transporte fantasma => chip y CTA que prometen y no cumplen. Sin tocar el contrato ni los otros
+  adaptadores (core R11.3).
 
 ## 7. `StickConnectionScreen` + indicador (RMV3) — dónde la monta la nav
 
@@ -385,7 +419,7 @@ Sin cambios. El delta es 100% cliente (drivers, selección, UI, simulador, adapt
 - **ADR-024** (transporte): fuente de verdad, respetada. El delta agrega la capa driver-registry + selección; **recomienda enmienda** (§12, la decide el leader).
 - **spec 09** (`buscar-animal`): interfaz reusada, no redefinida ni tocada (`BleStickEvent`, `useBleStickListener`, `useBleConnectionStatus`, `useBusyMode`, `BleStickListenerProvider`). Ningún screen de find-or-create se modifica.
 - **ADR-018** (navegación): `StickConnectionScreen` en "Más"; listener global (no es tab).
-- **`react-native-bluetooth-classic`**: dependencia de `adapter-spp-android` — **NO se instala** en este delta (RMV5.8, import perezoso). El veto del config plugin es prerrequisito de la fase gated.
+- **`react-native-bluetooth-classic`**: dependencia de `adapter-spp-android`. **[as-built 2026-07-29: INSTALADA y pineada en `1.73.0-rc.17`.** El veto (T-MV.5.1) dio COMPATIBLE con evidencia contra el codigo instalado + un build Gradle real; la lib **no trae config plugin**, asi que se escribio uno propio (`app/plugins/with-bluetooth-classic.js`). El import sigue siendo perezoso: importar el modulo no tira en web/CI.**]**
 - **`ble-e2e-flag.ts` / `BleE2EBridge.tsx`** (spec 09 chunk, host-level): patrón replicado (endurecido) por `demo-gate.ts` / `DemoControls.tsx`. No se tocan.
 
 ## 15. Notas para el implementer

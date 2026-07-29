@@ -75,6 +75,16 @@ test('R2.1: preserva plugins OAuth de la feature 19 + expo-sharing (Fase 0) + no
   assert.ok(names.includes('expo-splash-screen'));
 });
 
+test('spec 04 / RMV5.8: el config plugin del bastón Bluetooth está enganchado', () => {
+  // `react-native-bluetooth-classic` no trae config plugin propio: sin esta entrada no hay dónde
+  // declarar la política de permisos Android del bastón (y ACCESS_FINE_LOCATION de la lib entra
+  // sin tope). Es una línea fácil de perder en un merge, por eso se asertá.
+  const names = pluginNames(build(undefined));
+  assert.ok(names.includes('./plugins/with-bluetooth-classic'), 'falta el plugin del bastón (spec 04)');
+  // Y en la variante dev también (es el build que Raf instala en el teléfono).
+  assert.ok(pluginNames(build('development')).includes('./plugins/with-bluetooth-classic'));
+});
+
 test('R2.5: extra.supabaseUrl eliminado (grep sin consumidores); extra.router/eas conservados', () => {
   const extra = build(undefined).extra as Record<string, unknown> | undefined;
   assert.equal(extra?.supabaseUrl, undefined);

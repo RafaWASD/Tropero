@@ -77,6 +77,8 @@
 
 **RMV3.8** Cuando un dispositivo descubierto no matchea ningún driver (RMV1.7), el sistema deberá mostrarlo como "no reconocido" y ofrecer la carga manual, sin bloquear.
 
+> **Reconciliación 2026-07-29.** RMV3.8 queda **igual por defecto** (`deviceRowView` sin flags: "no reconocido", no accionable). Se agregó un **opt-in explícito** (`allowUnrecognized`) que solo usa la lista de **emparejados reales del teléfono** en el camino SPP-Android, y que lleva la fila a `unrecognized-connectable` ("No lo reconocemos como bastón. Podés probar a conectarlo igual."). Motivo: el `deviceMatch.namePattern` del RS420 (`/RS\s?420|allflex/i`) es una **hipótesis** — el nombre Bluetooth real del lector **no está verificado** en `field-findings.md`. Si el bastón se anuncia con otro nombre, una lista que solo deja tocar lo "reconocido" vuelve la feature inservible en el campo **y sin síntoma**. Con el opt-in, el error sale del transporte real y no de una regex nuestra. El invariante duro se mantiene: **sin transporte instanciado ninguna fila es accionable**, ni con el flag.
+
 ## RMV4. Camino de demo / simulador (gated a dev/demo)
 
 > **Buildable-hoy, dev/demo-only.** Simula un bastón leyendo tags "en vivo" para mostrar el pipeline completo (conexión → lectura → dedup → confirmación → find-or-create) **sin bastón físico**. Gateado con **triple-guard** al estilo del bridge E2E `__RAFAQ_BLE_E2E__`. **Requisito duro de integridad SENASA**: un EID simulado **nunca** se declara como real.
@@ -100,16 +102,26 @@
 ## RMV5. `adapter-spp-android` escrito (RS420 Bluetooth Classic SPP)
 
 > **Código + tests puros = buildable-hoy; conexión SPP real = GATED por hardware.** Reemplaza el placeholder as-built por código completo (context-multivendor §5). Bluetooth Classic SPP nativo vía `react-native-bluetooth-classic`; parametrizado por el driver RS420 del registro (RMV1.3). El protocolo está caracterizado (`field-findings.md`, `android-spp-impl-plan.md`).
+>
+> **RECONCILIACIÓN 2026-07-29 (unidad «bastón Android SPP»).** El gate de RMV5.8 ("no instalar la dep") **se levantó por pedido explícito de Raf**: la dependencia nativa está instalada, el adapter está montado en Android y el camino se ejercita en el teléfono. Lo único que queda gated es el **stream de un RS420 físico** (RMV5.9, ver T-MV.5.6). Las notas por-requisito de abajo registran las diferencias entre lo que decía el EARS y cómo quedó construido; el detalle está en `progress/impl_baston-android-spp.md`.
 
 **RMV5.1** El sistema deberá implementar `adapter-spp-android.ts` como un `StickAdapter` real (`kind: 'spp-android'`) que abra el RFCOMM SPP del RS420 (UUID del driver, `SPP_UUID`) vía `react-native-bluetooth-classic`, reemplazando el placeholder actual.
 
 **RMV5.2** El sistema deberá parametrizar el adaptador por el `ReaderDriver` del registro (sppUuid, pin, frameParser), de modo que otro lector SPP se soporte agregando su driver **sin reescribir** el adaptador.
 
+> **Reconciliación 2026-07-29.** El `frameParser` y el `pin` **sí** salen del driver. El `sppUuid` **no se puede aplicar**: `RfcommConnectorThreadImpl` (código nativo de la lib) llama `createRfcommSocketToServiceRecord(BluetoothUUID.SPP.uuid)` con `00001101-…` **hardcodeado** y **ignora** la opción `uuid` que se le pase. As-built: el adapter **contrasta** el `sppUuid` del driver contra ese UUID fijo (`sppUuidIsSupported`) y, si no coincide, **NO abre el socket** (emite `disconnected` + log). Se eligió cortar antes que abrir el SPP estándar y hacer pasar por "parametrizado" algo que no lo está. Un lector SPP en otro UUID exigiría otra lib o un módulo nativo propio — queda dicho, no escondido.
+
 **RMV5.3** Cuando el stream SPP entrega líneas ASCII, el sistema deberá framearlas por línea (`LineFramer`, reuso) y entregar cada línea cruda al contrato vía `ingestRawLine` / el `frameParser` del driver, sin reimplementar el parseo.
+
+> **Reconciliación 2026-07-29 (corrección de un bug, no un cambio de gusto).** El framing por línea lo hace el **nativo**, no `LineFramer`: la lib entrega mensajes ya delimitados por `\n` y **sin** el terminador (`DelimitedStringDeviceConnectionImpl`, `StandardOption.DELIMITER="\n"`). Pasar ese payload por `LineFramer` (que corta por `\n`) devolvía `[]` **siempre** → el adapter no habría emitido **una sola lectura** ni con el bastón enchufado. As-built: se le piden al nativo `connectionType:'delimited'` + `delimiter:'\n'` y cada payload se entrega CRUDO al contrato (`splitSppPayload`, que además separa si vinieran varias tramas pegadas). El `frameParser` del driver sigue siendo el único que parsea (sin reimplementar nada). `LineFramer` sigue en uso en `adapter-web-serial` (ahí el stream sí llega en chunks crudos).
 
 **RMV5.4** Cuando el operario empareja el RS420 por primera vez, el sistema deberá soportar el pairing SPP (slave, PIN del driver = `1234`) y persistir el device elegido (`remembered-device.ts`).
 
+> **Reconciliación 2026-07-29.** La persistencia del device elegido está como pide el EARS. El **pairing programático NO se ejecuta**: el `pairDevice()` de la lib hace `createBond()` y espera un broadcast de bond-state, y sobre un device **ya emparejado** —el caso normal— `createBond()` devuelve false, el broadcast nunca llega y la promesa **no resuelve nunca** (dejaba el estado clavado en `'connecting'`). As-built: el emparejamiento se hace **una vez desde los ajustes de Bluetooth de Android** con el PIN `1234` (que la pantalla dice explícitamente, `pairedDevicesView`), y si el device no estuviera emparejado, el propio `createRfcommSocketToServiceRecord` seguro dispara el diálogo del SO. El PIN sigue viniendo del driver.
+
 **RMV5.5** Cuando la app vuelve a foreground o el device recordado vuelve a rango, el sistema deberá reconectar con **backoff incremental** (`backoffDelayMs`, reuso), únicamente en foreground (sin BLE/SPP en background en MVP).
+
+> **Reconciliación 2026-07-29.** As-built cumple el EARS y le agrega lo que le faltaba para ser cierto: (a) si el intento cae con la app en background, queda un listener de `AppState` que **re-arma** el reintento al volver a 'active' (antes se hacía `return` sin re-armar → la reconexión moría para siempre); (b) el objetivo del reintento es el device que se pidió conectar, no "el recordado" (que en el primer emparejamiento es `null`); (c) un `connect()` nuevo cancela el reintento pendiente. Además hay estados que **no** disparan backoff a propósito: permiso denegado, Bluetooth apagado tras un "no" del operario, y ausencia del módulo nativo — reintentar ahí es o un loop inútil o volver a tirarle el diálogo del sistema en la cara.
 
 **RMV5.6** El sistema deberá importar `react-native-bluetooth-classic` de forma **perezosa** (require dentro de las funciones de I/O, patrón `feedback.ts`), de modo que `adapter-spp-android.ts` sea importable en web/CI **sin** el módulo nativo instalado y sin romper el bundle actual.
 
@@ -117,7 +129,11 @@
 
 **RMV5.8** El sistema deberá **vetar** la compatibilidad del config plugin de `react-native-bluetooth-classic` con Expo SDK 56 y los permisos Android 12+ (`BLUETOOTH_SCAN` / `BLUETOOTH_CONNECT`, `neverForLocation`) **antes** de comprometer el dev build; si es incompatible, el sistema deberá **parar y reportar al leader**. El delta **no deberá** instalar la dependencia nativa ni prebuildear el dev build en esta pasada.
 
+> **Reconciliación 2026-07-29.** El veto se hizo (T-MV.5.1) y dio **COMPATIBLE**, con evidencia contra el código instalado y un build Gradle real. La cláusula "no deberá instalar la dependencia" era del alcance de *aquella* pasada y **quedó levantada por pedido explícito de Raf**: la dep está instalada y pineada, el `expo prebuild -p android` corre, y `:app:assembleDebug` compila. Hallazgo del veto: **la lib no trae config plugin** → se escribió `app/plugins/with-bluetooth-classic.js`, que declara la política de permisos y **topea el `ACCESS_FINE_LOCATION` sin tope que la lib inyecta por su manifiesto** (este camino no hace discovery: lista los emparejados). Los permisos de runtime pedidos son solo `BLUETOOTH_CONNECT` (API ≥31); `BLUETOOTH_SCAN` queda **declarado** con `neverForLocation` pero **no se pide** hoy.
+
 **RMV5.9** El sistema **no deberá** considerar validada la conexión SPP real hasta probarla contra el RS420 físico en un dev build Android; la validación de conexión real queda **GATED** por hardware (el entregable buildable-hoy es el código + los tests puros).
+
+> **Reconciliación 2026-07-29 — el gate se ACOTA, no se levanta.** Sigue vigente: sin un RS420 físico no está validado que el bastón emita la trama por el socket y que la app la ingiera. Lo que cambia es el **tamaño** del gate: metiendo la I/O detrás de `SppEnv` (inyección de entorno), la máquina de estados completa —permiso concedido/denegado, Bluetooth apagado con y sin aceptación, device recordado vs. explícito, apertura del socket, stream, corte del SO, backoff creciente, reset del backoff, background/foreground, doble connect, teardown— se ejercita en `node:test` **sin device**. Y en el teléfono de Raf, **sin RS420**, se puede verificar: que la app arranca con la dep nativa, el diálogo de permiso, la enumeración de los emparejados reales, el error al conectar contra algo que no habla SPP, y que el chip vuelve. Queda **solo** el stream real (T-MV.5.6).
 
 ## RMV6. Arquitectura preparada para MFi/EA e GATT (fuera de este delta)
 
@@ -167,7 +183,7 @@
 | RMV2 — Selección por capacidad | ✅ (puro) | matching device→driver por **canal real** (RMV1.5 se testea con devices sintéticos; validación real gated) | — |
 | RMV3 — Pantalla + indicador | ✅ UI + mock/web-serial/simulador | conexión **real** SPP/HID | — |
 | RMV4 — Simulador (demo) | ✅ (dev/demo-gated por triple-guard) | — | — |
-| RMV5 — `adapter-spp-android` escrito | ✅ **código + tests puros** (RMV5.1–5.3, 5.6, 5.7) | conexión SPP **real** (RMV5.9) + config plugin / dev build (RMV5.8) | — |
+| RMV5 — `adapter-spp-android` | ✅ **código + tests + dep nativa instalada + montado en Android** (RMV5.1–5.8, 2026-07-29) | stream de un RS420 **físico** (RMV5.9, T-MV.5.6) | — |
 | RMV6 — MFi/EA + GATT | arquitectura declarable (RMV6.1/6.3) | — | ✅ adapter EA/MFi (RMV6.2) |
 
 ## Criterios de aceptación del delta
@@ -178,7 +194,7 @@ Este delta se considera implementado (en su alcance buildable-hoy) cuando:
 - El motor de selección elige `{ adapterKind, transportKind, driver, available }` por plataforma con la tabla de prioridad determinística, resuelve ambigüedad sin depender del orden de descubrimiento, y es 100% testeable sin device; `selectTransportAdapter` sigue devolviendo lo mismo que hoy para `auto`/`mock`/`manual` (RMV2).
 - La `StickConnectionScreen` (en "Más") + el `StickStatusIndicator` muestran descubrir/listar/elegir/conectar/estados/recordar, específicos por adaptador, no bloqueantes, y funcionan contra mock/web-serial/simulador; la conexión real de SPP/HID queda documentada como gated (RMV3).
 - El simulador lee tags "en vivo" por el mismo contrato de ingesta (dedup + confirmación pre-commit), está gateado por triple-guard a dev/demo, marca las lecturas como DEMO, y un build de producción no tiene camino para instanciarlo (RMV4).
-- `adapter-spp-android.ts` está **escrito** (código completo, parametrizado por el driver, import perezoso de la lib nativa, framing + backoff reusados, tests puros verdes); el config plugin fue **vetado** contra Expo SDK 56 (o el bloqueo reportado); la conexión SPP real queda GATED por hardware (RMV5).
+- `adapter-spp-android.ts` está **escrito y montado** (código completo, parametrizado por el driver, import perezoso de la lib nativa, backoff reusado, tests de la máquina de estados verdes); el veto de compatibilidad dio COMPATIBLE y la dep nativa está instalada, con config plugin propio (la lib no trae); la conexión con un RS420 **físico** sigue GATED por hardware (RMV5.9). **[as-built 2026-07-29 — ver las notas de reconciliación bajo RMV5.2/5.3/5.4/5.5/5.8/5.9.]**
 - La arquitectura declara `transportKind:'mfi'` + `protocolString` para el RS420 en iOS sin implementar el adapter EA (gated por negocio, Facundo), y admite un `adapter-ble-gatt` futuro sin tocar el contrato (RMV6).
 - Todo el delta hereda del core: **offline-first** (core R14 — nada del registro/selección/simulador toca la red), **manual-first** (core R7/R9.6 — nada bloquea la carga manual), **integridad SENASA** (core R2 confirmación pre-commit, más RMV4.7 para el simulador), y **no se redefine** ningún tipo de spec 09 ni se toca ningún screen de find-or-create.
 
