@@ -3,6 +3,55 @@
 > Este archivo se vacía al cerrar cada sesión y su resumen se mueve a `history.md`.
 > Mientras trabajás, **mantenelo actualizado en tiempo real**, no al final.
 
+## 2026-07-29 — BUGFIX 🔴 «el botón de conectar bastón en Android no funciona» (implementer) — LISTA para review
+
+Base `d9a3eb0`. Raf en device. Diagnóstico ya cerrado por el leader: `react-native-ble-plx` no está
+instalado → `selectTransportAdapter` devuelve `'manual'` en native → `instantiateTransport` devuelve `null`
+→ `transport?.connect()` es un no-op. **El botón no está roto: no debería existir.** Titularidad de BLE
+recién pasada desde la terminal que murió.
+
+**Decisión (coincido con el leader): sin transporte, el chip NO se muestra.** Sin transporte el único estado
+alcanzable es `'off'` —invariante para toda la vida del proceso—, así que un "indicador" que no puede
+cambiar de estado no informa nada; ocupa el ángulo superior derecho de una tab para anunciar algo inusable, y
+**contradecía** al hero de `identificar` dos elementos más abajo ("El bastón no está disponible en este
+dispositivo"). Precedente propio: `StickStatusIndicator` ya se auto-oculta en `'off'` con ese mismo criterio.
+
+**La condición es `hasTransport === false`, NO "es Android"** — no hay un solo `Platform.OS` en el fix; cuando
+la Fase 4 aterrice el adapter SPP, todo vuelve solo. Vive en las funciones **puras**
+(`bleConnectionView` → `null`; `connectionStatusView`/`deviceRowView`/`readsEmptyHint` → sin CTA), con el
+corte **antes** del switch (cubre el transitorio del transporte desmontado en caliente) y `hasTransport`
+como parámetro **obligatorio** (un default optimista es cómo se reintroduce un CTA muerto).
+
+**Tres hallazgos que no estaban en el pedido**:
+1. 🔴 **La fila del device de `/baston` es una trampa armada para la Fase 4**: decidía `actionable` por
+   `binding.available` (capacidad de BUILD) y tocarla llama `transport.connect()` (instancia real) — **dos
+   fuentes que hoy coinciden por casualidad**. El día que la Fase 4 agregue `'spp-android'` a
+   `BUILT_ADAPTERS` sin tocar `selectTransportAdapter`, la fila diría "Tocá para conectar", no pasaría nada,
+   **y la suite entera quedaría en verde**. Es la clase de bug que quemó a U7.
+2. 🟡 **Lo encontré mirando la captura, no el código**: el vacío de "Lecturas" también decía "Conectá el
+   bastón" (copy suelto en el JSX, invisible para una grep de `connect()`).
+3. 🟡 **El fix se causaba a sí mismo una regresión de layout**: el slot `right` de `SpikeSessionHeader`
+   envuelve al hijo en un `<View>` y el `XStack` da `gap="$2"` a todos sus items → un chip nulo dejaba 8dp
+   de hueco muerto robándole ancho al nombre del rodeo (que trunca) en la pantalla 🔴 de manga.
+
+**Y el módulo del chip no era testeable**: importaba `lucide-react-native` en runtime → no carga bajo
+`node:test` (verificado ejecutándolo). Pasado a type-only (ícono como clave), el patrón que el repo ya usa.
+
+**Verificado**: `check.mjs` **RC=0** (2526/2526 unit; alcance declarado: **no corre E2E**) · E2E BLE 6 specs
+**32/32** · `animals.spec.ts` 35/2, los 2 **verdean en aislamiento sobre el mismo build** (flake, no
+regresión, no tocan BLE) · capture Gate 2.5 **10 shots en 2 pasadas** (las 3 superficies × con/sin
+transporte — el bug es "hay algo de más", una captura sola no probaría nada) · **falsificado en las dos
+direcciones con rebuild**: quitar el guard → (a) rojo; ocultar siempre → (b) rojo · `design/` revertido ·
+**nada commiteado**.
+
+**Deuda heredada al backlog** (registrada, no arreglada): el stash `pressable-sweep-wip` (67 archivos, con la
+premisa **en disputa** — 24 casos en el árbol, ninguno con `pressStyle`) y `StickConnectionScreen` como
+**último `router.back()` pelado** (la entrada vieja que lo excluía "por territorio ajeno" quedó corregida).
+Overflow encontrado y NO arreglado con argumento: `TagScanCta`.
+
+**⏸ Veredicto en DEVICE**: en web el transporte SIEMPRE existe, así que el bug de Raf solo se ve en el
+Android real. Detalle, trazabilidad y 5 dudas abiertas en `progress/impl_baston-chip-sin-transporte.md`.
+
 ## 2026-07-27 — UNIDAD «barrida de teclado» (implementer) — LISTA para review
 
 Pedido de Raf tras verificar el fix anterior en device: *"falta replicar comportamiento al resto de todos
@@ -62,7 +111,7 @@ no-regresión en web · `design/` intacto · **nada commiteado**.
 roto→arreglado). Detalle, tabla de las 23, razonamiento de la safe-area, diseño del guard y dudas
 abiertas en `progress/impl_barrida-teclado.md`.
 
-## 2026-07-28 — BUGFIX «abrir un sheet baja el teclado» — commiteado en `615328d`, APK `ca1ab604` — ⏸ PUERTA 2
+## 2026-07-28 — BUGFIX «abrir un sheet baja el teclado» — `615328d` — ✅ VERIFICADO EN DEVICE (Raf, 2026-07-29)
 
 Raf sobre el APK `a3b8d804`: `identificar` ✅ (el input sube y se ve — el reporte original quedó
 cerrado). **Pero** con el teclado abierto, tocar la flecha de atrás abre el `ExitJornadaSheet` y el
@@ -90,7 +139,7 @@ el fix. Lo reescribió sobre el bastonazo, único disparador que no toca el foco
 marcarla de más pasaba 9/9 en verde dejando el bug vivo en silencio. Y su semilla `$scrim` afirmaba algo
 falso (existe un overlay sin `$scrim`). Ahora enumera por GEOMETRÍA y cubre las dos direcciones.
 
-## 2026-07-27 — UNIDAD «barrida de teclado» — commiteada en `56beff3`, APK `a3b8d804` — ⏸ PUERTA 2
+## 2026-07-27 — UNIDAD «barrida de teclado» — `56beff3` — ✅ VERIFICADO EN DEVICE (Raf, 2026-07-27/29)
 
 **Cómo apareció**: Raf verificó `eabfd00` en device (teclado en Vacunación ✅, aire ✅, navbar ✅, crash
 del worklet NO reapareció — eso cierra también el veredicto pendiente de la tanda del 25) y **a los
@@ -130,7 +179,7 @@ vea); los 6 sheets a mano sin `BackHandler` propio (el más filoso: `FindOrCreat
 global de manga 🔴 y el back hace pop de la ruta); y que `run-tests.mjs` usa **lista explícita sin glob**
 → un test no registrado nunca corre (hoy limpio, 135/135 medido, pero sin red).
 
-## 2026-07-27 — CIERRE del leader: las 2 unidades COMMITEADAS + APK en vuelo — ⏸ PUERTA 2 (device Raf)
+## 2026-07-27 — CIERRE del leader: «aire» + «teclado» — ✅ VERIFICADAS EN DEVICE (Raf, 2026-07-27)
 
 Las dos unidades de abajo están **cerradas y commiteadas**; los bloques que siguen quedan como acta del
 trabajo, no como pendientes.
@@ -510,3 +559,30 @@ E.0 (chore, desbloquea build) → E.1 (ambientes, SDD) → E.4 (audit log, la pa
 
 ### Gates pendientes de Raf (SDD)
 Puerta 0 (contexto) de 16 → luego Puerta 1 (spec) → Puerta 2 (código). Feature 17 va detrás (buffer de refinamiento 2-3, ADR-022).
+
+## 2026-07-29 — ✅ PUERTA 2 CERRADA: toda la serie «teclado + aire» verificada en device Android (Raf)
+
+Veredictos de Raf en device (Samsung, barra de 3 botones), sobre los APK `a3b8d804` y `ca1ab604`:
+
+| reporte original | commit | veredicto |
+|---|---|---|
+| el teclado tapa el sheet de Vacunación | `eabfd00` | ✅ |
+| CTA "Nueva jornada" y navbar pegados a la barra | `4f1f86b` | ✅ |
+| el teclado tapa `identificar` (el input y "Buscar") | `56beff3` | ✅ |
+| la flecha de atrás con el teclado abierto no lo bajaba y tapaba el diálogo de salir | `615328d` | ✅ |
+| crash del worklet al arrastrar el grabber con el teclado abierto | `8cc37f3` | ✅ no reapareció (build Release, sin `callGuard` → prueba válida) |
+
+**Lo que cierra esto**: los 5 reportes de Raf de esta serie eran bugs **de CLASE**, no de instancia, y
+**ninguno era observable desde la suite** (web no monta teclado virtual y `insets.bottom` es 0). La
+cobertura durable que quedó son los guards estáticos, y su pregunta se dio vuelta: de *"¿alguien usa mal
+el mecanismo?"* a *"¿hay alguna superficie sin él?"* — así una superficie nueva nace en ROJO.
+
+**⏸ Sigue pendiente**: nada de esta serie está verificado en **iOS** (cuota de EAS agotada hasta el
+**2026-08-01**). Las 23 superficies de la barrida estaban rotas ahí también, así que iOS cambió y no se
+pudo mirar. Es la deuda de verificación más grande abierta.
+
+**Falsado en device (Raf, 2026-07-29)**: el patrón `<Pressable>` envolviendo un Tamagui **SIN
+`pressStyle`** NO mata el tap (probado con la flecha de atrás de `miembros.tsx:154`). Los 24 casos vivos
+en 19 archivos están **sanos** → no hay barrido pendiente, y el stash `pressable-sweep-wip` que dejó la
+terminal de BLE al morir queda **descartado** (premisa falsada + su contenido de feature 19 ya estaba
+superado por HEAD).
