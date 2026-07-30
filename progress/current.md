@@ -50,7 +50,134 @@ acotado → cada lectura se consume **dos veces** (lista de la pantalla + sheet 
 invariante de "un solo consumidor efectivo" justo en la pantalla que `context-multivendor.md` define como
 **la cara de la demo a los fabricantes**.
 
-**Estado**: `implementer` corriendo sobre los 3 🔴 + 5 🟠 + el guard de `isRawStream`.
+**Estado — TRES PASADAS + FIX-LOOP + PASADA FINAL, listas para el reviewer** (`progress/impl_baston-spp-bloqueantes.md`).
+Pasada 1: los 3 🔴 + 4 🟠 del pliego + el guard de `isRawStream` + el dwell. Pasada 2: **R6.4** (reconexión
+al abrir). Pasada 3: el **tope de la cadena sin gesto** (que la pasada 2 volvió necesario). **Fix-loop**: el
+reviewer y el Gate 2 encontraron —por separado, cada uno con su probe— el **mismo 🔴** que introdujo la
+pasada 3, más 3 🟠 y los 🟡. **Pasada final**: el invariante del techo fuera del adapter + LOW-5.
+
+`node scripts/check.mjs` **RC=0** (no incluye Playwright) · camino BLE **324 pass / 0 fail**
+(`adapter-spp-android` 39 → **102**) · E2E afectada **4/4** y las capturas corridas contra el build final ·
+**15 mutantes** en total para probar que los guards y los fixes saben fallar, incluido el **M7 del
+reviewer** —el que demostraba que mis 8 tests del tope no distinguían el bug del arreglo: ahora **falla 3**.
+
+⚠️ **Un rojo que NO es regresión, verificado en vez de supuesto**: una corrida del check dio RC=1 con 2
+fallos en la suite de Edge Functions (`delete_account`). Mi diff no toca `supabase/` y ese test llama a la
+edge por `supabase-js` sin importar código del cliente; corrida sola da **47 tests / 0 fail**, y el test que
+había tardado 39,6 s tardó 1,1 s → contención contra la DB remota compartida. La corrida siguiente: RC=0.
+
+⚠️ **Un daño que hizo el implementer, ya revisado**: al editar este archivo con un script mal escrito lo
+**truncó a 0 bytes** y lo restauró con `git checkout`, que se llevó puestas las secciones del leader sin
+commitear de esta sesión (la de la tercera pasada, la de los dos `529`, y la de las dos puertas en rojo).
+Las reconstruyó desde lo que había leído y las marcó. **El leader verificó las cuatro reconstrucciones
+contra el texto original y ninguna cambió de sentido** (se contrastaron los números y los veredictos: el
+tope de ~2 min, los dos 529, la convergencia de las dos puertas en el mismo bloqueante, el mutante en
+104 pass / 0 fail, y las dos escenas del banco ciegas al 🔴); por eso se quitaron las marcas
+`[RECONSTRUIDO]`. Se deja el aviso porque el hecho importa: **código y specs no se tocaron** — el truncado
+fue solo de este `.md`.
+
+Tres cosas que conviene saber antes de mirar el diff:
+- **La causa raíz de BENCH-1 quedó leída en el Java**, no supuesta: el único evento que llega a nuestro
+  listener lo emite `sendEvent`, que **descarta el evento** si no hay Catalyst instance activa; y el otro
+  emisor publica en `DEVICE_DISCONNECTED@<address>`, al que ese listener **no está suscrito**. O sea: no
+  había un segundo aviso. El fix es una **segunda fuente de verdad** (`isDeviceConnected`, que del lado
+  Java lo limpian dos caminos independientes de JS), con dos disparadores: foreground **y un poll de
+  15 s** — el poll es lo que acota el techo del "conectado" mentiroso sin depender de ningún evento.
+- **Dos artefactos de test asertaban el bug** y se corrigieron: la spec E2E y la capture del Gate 2.5
+  esperaban que un bastonazo en `/baston` **abriera** el sheet global. De paso se cayó la captura
+  `07-indicador-global-chrome`: su navegación existía **solo** gracias al bug (era el "Dar de alta" de
+  ese sheet). Vuelve cuando "Más" tenga la fila a `/baston` → `docs/backlog.md`.
+- **Se corrigió una reconciliación vieja que era falsa** (🟡-4): RMV5.2 afirmaba que el `frameParser` y
+  el `pin` salían del driver. Ninguno de los dos los consume el transporte, y `contract.ts` llama
+  `parseRs420Line` hardcodeado → **RMV1.6 no se cumple** con un segundo driver SPP. Queda como deuda
+  declarada, no como logro.
+
+**R6.4 (segunda pasada)**: `autoConnect()` en el adapter + la llamada del provider al montar, con la regla
+**"el arranque no pide nada"** — sin device recordado no toca la radio, el permiso se CONSULTA
+(`PermissionsAndroid.check`) y no se pide, con el BT apagado no muestra el diálogo de activar, y un gate
+que no pasa deja el estado en `'off'` (nunca se intentó) con el motivo en el log. Ampliación gratis del
+mismo principio: **los reintentos tampoco piden el permiso** (`requestMultiple` re-muestra el diálogo
+sobre un permiso denegado una vez, así que el "ningún diálogo desde un timer" estaba cerrado a medias).
+La autorrevisión encontró que mi primera versión **mataba R6.4 en silencio** al gatear por `closed`, que
+significa dos cosas opuestas según quién llame a `disconnect()` — corregido en los tres puntos, con el
+test que lo caza.
+
+**Tercera pasada — el tope (DECIDIDA POR EL LEADER, no fue a Raf).** El implementer escaló
+que R6.4 introducía esto: un bastón recordado que ya no existe hacía que la app arrancara en
+`Reintentando…` **para siempre, en cada apertura, sin que nadie toque nada**, y `scanning` no tiene CTA
+para frenarlo. **No es una preferencia de UX: es un defecto que introduce R6.4** — antes ese reintento
+infinito exigía un gesto deliberado. Un bastón vendido o roto deja la app con cara de rota martillando la
+radio. Se topeó **solo la cadena que arranca sin gesto** (~2 min); la que nace de un tap conserva el
+reintento indefinido, porque ahí el operario está activamente tratando de conectar. El trigger quedó como
+`'operator' | 'autoconnect' | 'retry'` y no como booleano, así que un camino nuevo **tiene que declarar**
+quién lo disparó y un trigger nuevo no compila sin declarar sus dos políticas.
+
+**El implementer murió DOS VECES por `529 Overloaded`** durante esa pasada, así que el código quedó pero su
+autorrevisión no. Es la misma trampa que nos costó los 2 🔴 de anoche
+(`impl_baston-android-spp.md` commiteado con 6 placeholders vacíos, pareciendo completo) — y esos 6
+placeholders quedaron cerrados en esta pasada.
+
+**LAS DOS PUERTAS DIERON ROJO, Y POR EL MISMO MOTIVO.** Corrieron en paralelo (los dos son
+read-only) y **convergieron independientemente en el mismo bloqueante**: `reviewer` → CHANGES_REQUESTED
+🔴-A (`progress/review_baston-spp-bloqueantes.md`) · Gate 2 → **FAIL** 1 HIGH
+(`progress/security_code_04-spp-bloqueantes.md`). Cayó justo en la tercera pasada, la que llegó sin
+autorrevisión — o sea que la advertencia sirvió para algo. **Y la suite era ciega**: el reviewer corrió el
+fix candidato como mutante y quedó **104 pass / 0 fail**. Las dos puertas **cerraron después del fix-loop**:
+`reviewer` → **APPROVED**, Gate 2 → **PASS**, los dos verificando rompiendo (el M7 dado vuelta pasa de
+104/104 a **99 pass / 3 fail**).
+
+**Y dos cosas sobre el banco, que también se equivocaba**: **CAP y CAP-RESET pasan igual con
+el 🔴 puesto** (dos escenas ciegas al bug), y ninguna de las 25 cubría el caso — E13/E14 arrancan desde una
+conexión por gesto, así que su cadena es `operator` y no tiene presupuesto. Se agregó **COLD-CUT** (arranque
+en frío auto-conectado + ~140 s sanos + `drop` → tiene que reconectar). Banco: **26 escenarios**.
+
+**FIX-LOOP CERRADO** (implementer, 2026-07-30). Los cinco:
+
+- 🔴 **el presupuesto muere cuando el bastón contesta**. El invariante que faltaba, ahora escrito en el
+  código y en la spec: *el presupuesto pertenece a la CADENA, y una cadena que llegó a `'connected'`
+  terminó* — el tope existe por "ese bastón lo vendí", y cuando el bastón contesta ese motivo dejó de
+  aplicar. **Y la suite dejó de ser ciega**: re-corrí el mutante M7 del reviewer y ahora **falla 3 tests**
+  (los 5 nuevos están escritos desde el REQUISITO —R6.4 "vuelve a estar en rango"— y no desde el mecanismo,
+  que es la causa por la que los 8 originales no lo veían). Efecto lateral: el log dejó de poder mentir (un
+  `autoconnect_exhausted` solo puede venir ahora de una cadena que nunca conectó, así que `attempts` > 0).
+- 🟠 **el tap del chip destopa y deja log** (`connect_reasserted`). Mi justificación escrita de la pasada 1
+  ("un connect sin target no encola nada porque el intento en curso ya es eso") era cierta entonces y la
+  pasada 3 la volvió falsa.
+- 🟠 **el cleanup del connect vencido ya no puede cerrar el socket ajeno**: `canCloseOrphanSocket(gen)`
+  separa las dos razones por las que la generación avanzó (`closed` → cerrar; otro intento vigente → no
+  tocar). Me obligó a corregir un test propio que daba por bueno cerrar la dirección de otro.
+- 🟠 **el device recordado**: no se persiste antes de conectar · **R6.6 CABLEADA** (tenía cero call sites) ·
+  se limpia en `signOut` y en la baja · los tres call sites con guard sobre la ausencia.
+- 🟠 **Gate 2.5**: el estado agotado y el CTA nuevo quedan **N/A del E2E web con el motivo estructural**
+  (los dos salen de `spp-android`, que en web no existe) y con el precedente de T-MV.7.2. El encabezado del
+  capture, que afirmaba que el único cambio visible era BENCH-3, corregido.
+- 🟡 los cuatro: los 6 placeholders de `impl_baston-android-spp.md` (3 reconstruidos con evidencia, 3
+  marcados IMPOSIBLE con el motivo — incluida la autorrevisión que **nunca se hizo**) · los números de
+  T-MV.5.17 con el método escrito · T-MV.5.7 cerrada · §6-ter del design ya no documenta el gate que el
+  código deliberadamente no tiene · backlog reconciliado + MEDIUM-3 anotado.
+
+**PASADA FINAL CERRADA** (implementer). Dos cosas, y las dos son "el guard cubre la instancia y no el
+invariante":
+
+- 🟠 **el techo del puente, FUERA del adapter.** Los dos awaits que agregó el fix-loop
+  (`forgetRememberedDevice()` en el logout y en la baja) caían justo afuera del archivo donde el guard
+  enumeraba: un `.catch()` cubre el rechazo y **no el colgado**, así que un SecureStore que no contesta
+  dejaba al operario **sin poder cerrar sesión**. El techo quedó **en el borde** (las tres funciones de
+  `remembered-device.ts`, 2 s — no los 10 s de una llamada genérica), así que todo caller queda protegido y
+  el próximo **nace protegido**. Y el guard pasó a vigilar el invariante: primitivas nativas
+  (`SecureStore`/`PermissionsAndroid`/`AsyncStorage`/`NativeModules`) en todo el territorio de la unidad,
+  con los bordes acotados verificados en las dos direcciones y las excepciones pre-existentes **nombradas
+  con su motivo**. 4 → **8** casos, con 2 mutantes.
+- 🟠 **LOW-5 + el comentario falso.** La limpieza ahora está también en el branch `SIGNED_OUT` (fin de
+  sesión involuntario; `delete_account` revoca global, así que en los otros teléfonos la sesión muere por
+  ahí y el `forget` de la baja no corre). Y los dos comentarios se corrigieron: afirmaban *"la vida de la
+  clave es la de la sesión"* con solo el logout explícito puesto — era la vida del **gesto**. Un comentario
+  que afirma más de lo que el código hace es peor que el hueco.
+
+**Al backlog con el mecanismo escrito** (no se arreglaron, a pedido): ⚪-K con el predicado que lo cierra
+(`!sameAddress(...)`), el `onChooseDevice` que escribe el **vendorId** y no una MAC en la clave que R6.4
+ahora lee, y el inventario de los 6 `await SecureStore` pre-existentes de fuera de spec 04. **⚪-M
+corregido**: T-MV.5.7 estaba en `[x]` con el cuerpo y la tabla de fases diciendo "pendiente de flasheo".
 
 **Dos decisiones de Raf, 2026-07-30 de madrugada:**
 1. **R6.4 (🟠-3) → IMPLEMENTAR**: *"que se reconecte sola al abrir, sí"*. Cierra la discrepancia
@@ -61,9 +188,9 @@ invariante de "un solo consumidor efectivo" justo en la pantalla que `context-mu
    borra la sesión y la DB local (no se puede re-loguear sin Raf). Con EAS es la misma keystore →
    `adb install -r` directo.
 
-Secuencia hasta la ⏸ Puerta 2: bloqueantes → R6.4 → reviewer → Gate 2 → build EAS → instalar →
-**re-correr el banco entero en device** contra el baseline de `dad711f` (el rig quedó montado con `adb` y
-el runner automatizado en `firmware/baston-emulator/bench/`).
+Secuencia hasta la ⏸ Puerta 2: ~~bloqueantes~~ → ~~R6.4~~ → ~~tope~~ → ~~reviewer + Gate 2~~ →
+~~fix-loop~~ → ~~pasada final~~ → **commit** → build EAS → instalar → **las 26 escenas en device** contra
+el baseline de `dad711f` (el rig quedó montado con `adb` y el runner en `firmware/baston-emulator/bench/`).
 
 ## 2026-07-29 — UNIDAD «emulador de bastones sobre ESP32» (implementer) — LISTA para review
 

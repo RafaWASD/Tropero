@@ -34,6 +34,7 @@ import {
   type DeleteAccountResult,
 } from '../utils/account-result';
 import { getPowerSync } from './powersync/database';
+import { forgetRememberedDevice } from './ble/remembered-device';
 
 export type { ChangeEmailResult, DeleteAccountResult, BlockingEstablishment } from '../utils/account-result';
 
@@ -145,5 +146,18 @@ export async function deleteAccount(): Promise<DeleteAccountResult> {
     };
   }
   const body = (data ?? {}) as { already_deleted?: unknown };
+  // El bastón RECORDADO muere con la cuenta (spec 04, MEDIUM-2 del Gate 2 del 2026-07-30). Desde R6.4 la
+  // app abre un RFCOMM contra esa MAC **sin gesto** en cada apertura: dejarla después de una baja
+  // significa que el teléfono sigue intentando conectarse al bastón del dueño anterior.
+  //
+  // Esto limpia **este** teléfono. Los demás de la cuenta los cubre el branch `SIGNED_OUT` de
+  // `onAuthStateChange` (`AuthContext`), porque `delete_account` **revoca global**: allá la sesión muere
+  // por el listener y esta línea no corre nunca. Los dos call sites juntos son lo que hace cierto que la
+  // vida de la clave sea la de la sesión.
+  //
+  // Best-effort y **acotado en el borde** (`remembered-device.ts` tiene techo propio): la baja ya ocurrió
+  // server-side, así que ni un storage que falla ni uno que no contesta pueden convertir un éxito en un
+  // error — ni colgar el `return`.
+  await forgetRememberedDevice().catch(() => undefined);
   return { ok: true, alreadyDeleted: body.already_deleted === true };
 }

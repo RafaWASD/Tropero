@@ -328,3 +328,52 @@ test('readsEmptyHint: sin transporte NO dice "conectá el bastón" y apunta a la
   assert.match(con, /Conectá el bastón/);
   assert.notEqual(con, sin);
 });
+
+// ─── R6.4: el arranque intentó y se le agotó el tope (copy honesto, sin gritarle a nadie) ────
+
+test('R6.4: con el auto-connect AGOTADO el copy no puede sonar a "nunca se intentó"', () => {
+  const virgen = connectionStatusView('off', { hasTransport: true });
+  const agotado = connectionStatusView('off', { hasTransport: true, autoConnectExhausted: true });
+
+  // El estado es el MISMO ('off': no conectado y sin estar intentando) — lo que cambia es lo que se
+  // dice. Sin esto, el operario que va a la pantalla a ver por qué el bastón no está lee "Conectá el
+  // bastón", que sugiere que la app no hizo nada, cuando estuvo dos minutos buscándolo.
+  assert.notEqual(agotado.label, virgen.label);
+  assert.notEqual(agotado.hint, virgen.hint);
+  assert.match(agotado.label, /No encontramos/i);
+  assert.match(agotado.hint, /apagado|fuera de rango/i);
+});
+
+test('R6.4: el estado agotado SIEMPRE ofrece un CTA (era la trampa de `scanning`)', () => {
+  // `scanning` devuelve `cta:'none'`: la app quedaba reintentando para siempre y sin botón. El estado
+  // final del tope tiene que ser accionable, y su tap arranca una cadena SIN tope (eso lo garantiza el
+  // adapter: `connect()` = trigger 'operator').
+  const agotado = connectionStatusView('off', { hasTransport: true, autoConnectExhausted: true });
+  assert.equal(agotado.cta, 'connect');
+  assert.ok(agotado.ctaLabel != null && agotado.ctaLabel.length > 0);
+  assert.equal(connectionStatusView('scanning', { hasTransport: true }).cta, 'none');
+});
+
+test('R6.4: el estado agotado NO dramatiza (tone idle) y sigue ofreciendo la carga manual', () => {
+  // No se le grita a alguien que no pidió nada: el bastón apagado es el caso más probable, no una falla.
+  const agotado = connectionStatusView('off', { hasTransport: true, autoConnectExhausted: true });
+  assert.equal(agotado.tone, 'idle');
+  assert.equal(agotado.connected, false);
+  assert.match(agotado.hint, /mano/i, 'manual-first: la salida manual siempre a la vista (RMV3.6)');
+});
+
+test('R6.4: el flag NO puede resucitar un CTA donde no hay transporte, ni tocar otros estados', () => {
+  // El corte por `hasTransport` va antes de todo: sin transporte no se ofrece conectar nada, agotado o
+  // no. Y el flag solo aplica al estado 'off' (los demás describen otra cosa).
+  const sinTransporte = connectionStatusView('off', { hasTransport: false, autoConnectExhausted: true });
+  assert.equal(sinTransporte.cta, 'none');
+  assert.match(sinTransporte.label, /no disponible/i);
+
+  for (const s of ['connected', 'connecting', 'scanning', 'disconnected', 'permission_denied'] as const) {
+    assert.deepEqual(
+      connectionStatusView(s, { hasTransport: true, autoConnectExhausted: true }),
+      connectionStatusView(s, { hasTransport: true }),
+      `el flag no debería cambiar el estado '${s}'`,
+    );
+  }
+});

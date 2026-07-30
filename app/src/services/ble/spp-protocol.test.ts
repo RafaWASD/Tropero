@@ -13,6 +13,7 @@ import {
   SPP_DELIMITER,
   normalizePairedDevices,
   sppConnectOptions,
+  sppDelimiterIsSupported,
   sppUuidIsSupported,
   splitSppPayload,
 } from './spp-protocol.ts';
@@ -92,6 +93,39 @@ test('RMV5.7: ningún valor de las opciones es number (el nativo descarta los Do
   for (const [key, value] of Object.entries(sppConnectOptions())) {
     assert.notEqual(typeof value, 'number', `la opción ${key} no puede ser numérica`);
   }
+});
+
+// ─── 🟠-5 · El terminador es del LECTOR, no del transporte (review + banco §4.4) ─────────────
+
+test('🟠-5: el delimitador de las opciones es el que se le pasa (sale del driver, no hardcodeado)', () => {
+  // Con `term cr` en el emulador la app quedó CONECTADA Y MUDA en device: 0 ingestas, 0 errores,
+  // 0 logs — indistinguible de "el operario no está bastoneando". La causa era este valor fijo.
+  assert.equal(sppConnectOptions('\r').delimiter, '\r');
+  assert.equal(sppConnectOptions('\r\n').delimiter, '\r\n');
+  assert.equal(sppConnectOptions().delimiter, SPP_DELIMITER, 'sin argumento cae al del RS420');
+});
+
+test('🟠-5: sppDelimiterIsSupported rechaza el vacío (que para el nativo significa OTRA COSA)', () => {
+  // `DelimitedStringDeviceConnectionImpl.read()` con delimitador vacío devuelve TODO el buffer como
+  // un mensaje: modo crudo por chunks, que exigiría framear de este lado (el bug de "cero lecturas").
+  // Y un `split('')` en `splitSppPayload` explotaría el payload en caracteres sueltos.
+  assert.equal(sppDelimiterIsSupported('\n'), true);
+  assert.equal(sppDelimiterIsSupported('\r\n'), true);
+  assert.equal(sppDelimiterIsSupported(''), false);
+  assert.equal(sppDelimiterIsSupported(undefined), false);
+  assert.equal(sppDelimiterIsSupported(null), false);
+  assert.equal(sppDelimiterIsSupported(7), false);
+});
+
+test('🟠-5: splitSppPayload separa por el delimitador del DRIVER, no por un `\\n` inventado', () => {
+  assert.deepEqual(splitSppPayload('AAA\rBBB', '\r'), ['AAA', 'BBB']);
+  // Con el delimitador equivocado no se parte: la trama entra entera (y el parser dirá que no
+  // parsea, que es un síntoma VISIBLE — no el silencio de antes).
+  assert.deepEqual(splitSppPayload('AAA\rBBB', '\n'), ['AAA\rBBB']);
+});
+
+test('🟠-5: un delimitador inválido NO parte el payload en caracteres (defensa del split)', () => {
+  assert.deepEqual(splitSppPayload('ABC', ''), ['ABC']);
 });
 
 // ─── RMV3.2: normalización de la lista de emparejados ───────────────────────────────────────

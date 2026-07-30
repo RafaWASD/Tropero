@@ -25,14 +25,22 @@ export interface FrameParser {
 /**
  * Capacidad de transporte de un driver, DISCRIMINADA por `kind` (RMV1.2). Cada `kind` trae sus
  * `params` de conexión propios:
- *   - spp      → { sppUuid, pin? }              (RFCOMM del RS420, PIN de pairing)
+ *   - spp      → { sppUuid, pin?, delimiter? }  (RFCOMM del RS420, PIN de pairing, fin de trama)
  *   - serial   → { baud }                       (Web Serial exige un baud; el SPP virtual lo ignora)
  *   - ble-gatt → { serviceUuid, notifyCharUuid } (futuro; sin adapter concreto todavía)
  *   - ble-hid  → sin params                     (teclado del SO, keyboard-wedge)
  *   - mfi      → { protocolString }             (arch-ready para iOS Classic vía Facundo, RMV6.1)
+ *
+ * `delimiter` (2026-07-30, 🟠-5 del review + BENCH-2): el fin de trama es una propiedad del LECTOR,
+ * no del transporte. Estaba hardcodeado en `\n` dentro de `sppConnectOptions()`, y un lector que
+ * terminara con CR solo dejaba la app **conectada, muda, sin un error ni un log** — indistinguible de
+ * "el operario no está bastoneando" (verificado en device: `term cr` → 0 ingestas, 0 errores). Peor:
+ * el `StringBuffer` del nativo acumula sin cota, así que al corregir el terminador la PRIMERA trama
+ * válida también se pierde, arrastrada por las anteriores (banco §4.4). Ahora el terminador sale del
+ * driver; ausente = `\n` (el supuesto del RS420, documentado en `driver-rs420.ts`, no del transporte).
  */
 export type TransportCapability =
-  | { kind: 'spp'; params: { sppUuid: string; pin?: string } }
+  | { kind: 'spp'; params: { sppUuid: string; pin?: string; delimiter?: string } }
   | { kind: 'serial'; params: { baud: number } }
   | { kind: 'ble-gatt'; params: { serviceUuid: string; notifyCharUuid: string } }
   | { kind: 'ble-hid'; params: Record<string, never> }

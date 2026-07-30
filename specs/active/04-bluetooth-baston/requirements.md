@@ -104,6 +104,48 @@
 
 **R6.4** Cuando la app abre o el bastón recordado vuelve a estar en rango, el sistema deberá **reconectar automáticamente** al bastón guardado con backoff incremental, sin requerir que el operario vuelva a la pantalla de conexión.
 
+> **Reconciliación 2026-07-30 — IMPLEMENTADO, con una regla que el EARS no decía.** El review de `dad711f` (🟠-3) encontró que este requisito **no estaba implementado y no tenía ningún test** (no podía tenerlo: el camino no existía). Los únicos llamadores de `connect()` eran gestos, así que `readRememberedDevice()` solo se alcanzaba tocando algo y **cada arranque exigía Más → Bastón → tocar** — media razón de ser de `remembered-device.ts`. Decisión de Raf, 2026-07-30: *"que se reconecte sola al abrir, sí"* (la alternativa era reconciliar el requisito diciendo que el arranque es por gesto; quedó descartada).
+>
+> As-built: `SppAndroidAdapter.autoConnect()`, que el provider llama **una vez** al montar el transporte. La parte de "vuelve a estar en rango" ya la cubría la cadena de reintentos (RMV5.5).
+>
+> **La regla que gobierna el arranque, y que el EARS no decía: el arranque NO PIDE NADA.** Esto corre en el primer frame sin que nadie haya pedido nada, así que no puede mostrar diálogos del sistema ni tocar la radio de un teléfono cuyo dueño nunca eligió un bastón. Cuatro gates, en orden del más barato al que toca el hardware:
+> 1. **¿Hay device recordado?** Lectura local, va primero: un arranque en frío no consulta permisos ni pregunta por el Bluetooth. Solo se auto-conecta a un bastón que el operario **ya eligió antes** (R6.3).
+> 2. **¿El permiso ya está concedido?** Se **consulta** (`checkAndroidBluetoothPermissions`, sobre `PermissionsAndroid.check`), **no se pide**. Un prompt de permisos en el primer frame es hostil y sin contexto. Detalle que lo hace necesario: `requestMultiple` sobre un permiso denegado UNA vez (sin "no volver a preguntar") **vuelve a mostrar el diálogo** — la misma trampa aplicaba a la cadena de reintentos, y también se cerró ahí.
+> 3. **¿El Bluetooth ya está prendido?** Se lee, sin diálogo. Si está apagado, **no arranca**: el diálogo de activar lo pide un gesto, nunca el arranque (coherente con RMV5.5 nota 5).
+> 4. **¿Foreground?** R6.9.
+>
+> Cuando un gate no pasa **no se emite ningún estado**: queda en `'off'`, que es el estado honesto de "nunca se intentó" (*"Bastón sin conectar"* + CTA *"Conectar bastón"*, y el indicador global se auto-oculta en `'off'`). Emitir `'disconnected'` sería mentir —*"se apagó, quedó fuera de rango o cancelaste"*— sobre algo que no pasó, y le pondría un pill en el chrome a alguien que no pidió nada. El motivo del skip queda en el log (`autoconnect_skipped`, seis motivos), porque desde la UI los seis se ven idénticos: nada. Si los cuatro gates pasan, es un `connect()` normal con trigger `autoconnect`: mismo backoff, mismo gate de foreground, y si falla cae en el mismo estado que un connect por gesto fallido — nunca bloquea la carga manual (R7).
+>
+> **Ampliación 2026-07-30 (tercera pasada) — la cadena que NADIE pidió tiene TOPE.** R6.4 introdujo un defecto que no existía antes: la cadena de reintentos no tiene tope (con el bastón apagado, reintento cada 8 s **para siempre**), y `scanning` no ofrece CTA. Mientras eso exigía un gesto deliberado era discutible; con el arranque auto-conectando, un bastón **vendido, roto o que quedó en otro campo** deja la app permanentemente con cara de rota, martillando la radio en cada apertura, sin que nadie haya tocado nada. Eso no se entrega. Decisión del leader (no es preferencia de UX: es un defecto que introduce este requisito).
+>
+> As-built: la política se declara por **ORIGEN de la cadena**, no por estado, en una tabla exhaustiva (`connect-trigger.ts`, `satisfies Record<ConnectTrigger, TriggerPolicy>`):
+> - `operator` (un tap) → cadena **sin tope**. Ahí el operario está activamente tratando de conectar y abandonarlo es peor que insistir. Es el único trigger que además puede mostrar diálogos del SO.
+> - `autoconnect` (el arranque) → cadena **con tope de tiempo**: `UNPROMPTED_RETRY_BUDGET_MS` = **120 s**.
+> - `retry` (el timer) → **hereda** la cadena vigente. Si arrancara una cadena nueva, re-armaría el presupuesto en cada vuelta y el tope no se alcanzaría nunca — la cadena infinita disfrazada.
+>
+> **Por qué 120 s, contra la escalera de backoff** (`backoffDelayMs`: 500·1000·2000·4000·8000 y de ahí 8 s fijos, o sea 15,5 s de rampa y después un poll de 8 s): tiene que cubrir *"abrí la app al llegar, caminé hasta la manga y prendí el bastón un minuto después"* y no cubrir *"ese bastón lo vendí"*. 120 s es el **doble** del escenario a cubrir; 60 s sería igual al escenario, sin margen para el boot del lector ni para un primer connect que falla. En intentos son ~18 si el nativo resolviera al instante y ~6-7 con el bastón ausente (cada `connectToDevice` bloquea ~10 s antes de rendirse) — y por eso el tope se mide en **tiempo** y no en intentos.
+>
+> **Al agotarse**: se deja de reintentar, se emite `'off'` (que **sí** tiene CTA, a diferencia de `scanning`) y **no se olvida el device recordado** — que hoy no aparezca no significa que no sea su bastón, lo más probable es que esté apagado; olvidarlo le rompería el arranque de mañana. El contador de backoff vuelve al piso, así que el tap del operario reintenta a los 500 ms y no a los 8 s. Ese tap entra con trigger `operator` → cadena **sin** tope. Y el chequeo del presupuesto va **antes** del gate de foreground (en los dos lugares donde se evalúa): si fuera después, un timer que dispara con la app en background se parquearía esperando el retorno a primer plano **sin pasar por el tope**, y el tope sería evitable guardando el teléfono en el bolsillo.
+>
+>
+> **CORRECCIÓN 2026-07-30 (fix-loop) — el presupuesto MUERE cuando el bastón contesta.** La política de arriba definía el tope solo por **origen** de la cadena, y era ambigua justo donde estaba el defecto: `retryBudgetUntil` se fijaba al arrancar la cadena `autoconnect` y **no se limpiaba al conectar**, así que no acotaba "la cadena que nadie pidió" sino **los primeros 120 s de vida de la app**. Consecuencia medida (el reviewer y el Gate 2 lo reprodujeron por separado, cada uno con su probe): el operario abre la app, R6.4 conecta sola, trabaja 10 minutos, el bastón se va de rango un segundo → **cero reintentos por el resto de la sesión**, estado `'off'` (el único que el indicador global se auto-oculta) y la pantalla de conexión diciendo *"no encontramos el bastón"* sobre un bastón que estaba conectado tres segundos antes. Eso **incumplía la segunda cláusula de este mismo EARS** (*"o el bastón recordado vuelve a estar en rango"*), que después de R6.4 es el caso normal de toda sesión.
+>
+> **El invariante, explícito**: el presupuesto pertenece a la cadena, y una cadena que llegó a `'connected'` **terminó**. El tope existe por un motivo único —"ese bastón lo vendí, lo rompí, quedó en otro campo"— y en el instante en que el bastón **contesta** ese motivo dejó de aplicar. Lo que viene después de una conexión establecida es la segunda cláusula de R6.4 y **no tiene tope**, venga de un tap o del arranque. As-built: `retryBudgetUntil = null` en el punto donde el link se establece. Efecto lateral bueno: un `autoconnect_exhausted` solo puede venir ahora de una cadena que **nunca** conectó, así que su `ms` mide tiempo realmente reintentando y su `attempts` es > 0 — antes salía `{"ms":600000,"attempts":0}`, que era la confesión del bug.
+>
+> **PRECISIÓN 2026-07-30 (pasada final) — hasta dónde vive el bastón recordado.** R6.3 dice que el device
+> elegido sobrevive a reinicios de la app, y desde R6.4 la app **abre un RFCOMM contra esa MAC sin gesto en
+> cada apertura**, así que hace falta decir también hasta cuándo. As-built: **la vida de la clave es la de
+> la SESIÓN**, y eso es cierto porque la limpieza está en los **tres** momentos en que el dato deja de ser
+> válido — el logout explícito, el fin de sesión **involuntario** (refresh token revocado o expirado,
+> contraseña cambiada en otro dispositivo, y `delete_account`, que **revoca global**: en los otros
+> teléfonos de la cuenta la sesión muere por `onAuthStateChange` y el limpiado de la baja no corre ahí), y
+> la acción explícita de **olvidar** (R6.6). Con solo el primero puesto la afirmación era falsa: era la
+> vida del gesto de logout. Además, las tres funciones de `remembered-device.ts` tienen **techo propio**
+> (2 s): un storage que no contesta no puede dejar al operario sin poder cerrar sesión.
+>
+> Y un `connect()` **del operario** (un tap) siempre destopa, incluso si llega con un intento en vuelo y no hay otro bastón que encolar — el caso del chip del header, que llama `connect()` sin target. Antes ese tap era un no-op mudo y la app se rendía igual a los 120 s habiendo el operario pedido lo contrario.
+> El estado sigue siendo `'off'` para no tomarle el chrome a alguien que no pidió nada (el `StickStatusIndicator` se auto-oculta ahí), pero el que **fue a la pantalla de conexión a mirar** recibe el copy honesto — *"No encontramos el bastón"* / *"Buscamos el bastón guardado y no apareció: puede estar apagado o fuera de rango…"* — vía el flag `autoConnectExhausted`, en vez de un *"Conectá el bastón"* que suena a que nunca se intentó.
+
 **R6.5** El sistema deberá leer las líneas ASCII del stream SPP y entregarlas al contrato (R1.2) vía `parseRs420Line`, que descarta el byte de control, la cabecera fija y el timestamp del lector.
 
 **R6.6** El sistema deberá ofrecer en la pantalla de conexión (R9) una acción para **cambiar** (elegir otro) y otra para **olvidar** el bastón guardado, limpiando el identificador persistido.

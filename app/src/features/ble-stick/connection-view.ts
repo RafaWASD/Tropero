@@ -63,6 +63,17 @@ export interface ConnectionEnv {
    * default optimista que vuelva a ofrecer un CTA muerto.
    */
   hasTransport: boolean;
+  /**
+   * ¿La reconexión automática del arranque (R6.4) se agotó sin encontrar el bastón recordado?
+   *
+   * El estado que queda es `'off'` —no conectado y **sin** estar intentando— y eso es lo correcto para el
+   * chrome: el `StickStatusIndicator` se auto-oculta en `'off'`, así que a alguien que no pidió nada no
+   * se le toma la pantalla para avisarle que algo falló. Pero el que FUE a buscarlo a la pantalla de
+   * conexión merece la verdad: "probamos y no lo encontramos", no "conectá el bastón" (que suena a que
+   * nunca se intentó). Este flag es la diferencia entre esos dos copys, y por eso es OPCIONAL: los call
+   * sites que no lo saben (el indicador global) siguen viendo el copy genérico, que para ellos es cierto.
+   */
+  autoConnectExhausted?: boolean;
 }
 
 /**
@@ -144,6 +155,21 @@ export function connectionStatusView(status: ConnectionStatus, env: ConnectionEn
       };
     case 'off':
     default:
+      // El arranque intentó y se le agotó el tope (R6.4): el estado es el mismo ('off': no conectado y
+      // sin estar intentando), pero el copy no puede ser el de "nunca se intentó". Con CTA, para que el
+      // operario pueda arrancar una cadena SIN tope con un tap, y sin dramatizar (tone 'idle'): el
+      // bastón apagado es el caso más probable, no una falla.
+      if (env.autoConnectExhausted) {
+        return {
+          label: 'No encontramos el bastón',
+          icon: 'bluetooth',
+          hint: 'Buscamos el bastón guardado y no apareció: puede estar apagado o fuera de rango. Probá de nuevo cuando lo prendas. Mientras tanto podés cargar a mano.',
+          cta: 'connect',
+          ctaLabel: 'Volver a conectar',
+          connected: false,
+          tone: 'idle',
+        };
+      }
       return {
         label: 'Bastón sin conectar',
         icon: 'bluetooth',

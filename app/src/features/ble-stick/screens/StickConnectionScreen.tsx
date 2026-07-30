@@ -18,12 +18,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
 import { Bluetooth, BluetoothConnected, BluetoothSearching, ChevronLeft, Keyboard, Radio, TriangleAlert } from 'lucide-react-native';
 
 import { Button, Card, InfoNote } from '@/components';
 import { useBleProviderApi } from '@/services/ble/BleStickListenerProvider';
+import { useScopedScannerControls } from '@/services/ble/stick';
 import { useBleConnectionStatus } from '@/services/ble/connection-status';
 import { selectReaderBinding, type ReaderBinding } from '@/services/ble/selection-priority';
 import type { AdapterKind } from '@/services/ble/adapter-selection';
@@ -31,7 +32,11 @@ import { RS420_DRIVER } from '@/services/ble/driver-rs420';
 import { findDriverForDevice } from '@/services/ble/driver-registry';
 import { listPairedSppDevices } from '@/services/ble/adapter-spp-android';
 import type { PairedDevice } from '@/services/ble/spp-protocol';
-import { writeRememberedDevice } from '@/services/ble/remembered-device';
+import {
+  forgetRememberedDevice,
+  readRememberedDevice,
+  writeRememberedDevice,
+} from '@/services/ble/remembered-device';
 import { buttonA11y, labelA11y } from '@/utils/a11y';
 import {
   connectionStatusView,
@@ -130,7 +135,16 @@ export default function StickConnectionScreen() {
   // disponible / Todavía no se conecta en este dispositivo"). Antes el gate vivía acá (`&& hasTransport`
   // en `showStatusCta`): el CTA se ocultaba pero el copy seguía diciendo "Conectá el bastón para leer
   // caravanas…" — una promesa que en native no se podía cumplir. La decisión es una sola y es pura.
-  const view = connectionStatusView(status, { hasTransport });
+  // `autoConnectExhausted` (R6.4): el arranque intentó reconectar al bastón guardado y se le agotó el
+  // tope. El estado quedó en 'off' —que es lo correcto para el chrome global, que se auto-oculta ahí—
+  // pero acá, donde el operario vino A PROPÓSITO a ver qué pasa con el bastón, el copy tiene que decir
+  // la verdad ("no lo encontramos") en vez de "conectá el bastón", que suena a que nunca se intentó. Se
+  // lee en el render y no por suscripción porque el adapter lo setea ANTES de emitir el cambio de estado
+  // que dispara este re-render.
+  const view = connectionStatusView(status, {
+    hasTransport,
+    autoConnectExhausted: transport?.autoConnectExhausted ?? false,
+  });
   const StatusIcon = STATUS_ICONS[view.icon];
   const statusColorToken = toneColorToken(view.tone);
   const statusIconColor = getTokenValue(statusColorToken, 'color');
@@ -139,6 +153,31 @@ export default function StickConnectionScreen() {
   const seqRef = useRef(0);
   const isSimulatorRef = useRef(isSimulator);
   isSimulatorRef.current = isSimulator;
+
+  // ── PROPIEDAD EXCLUSIVA del bastón mientras esta pantalla está ENFOCADA (BENCH-3, banco §4.5) ──
+  // Medido en device: cada bastonazo en /baston se consumía DOS VECES — entraba en la lista de
+  // Lecturas de acá Y abría el `FindOrCreateOverlay` global ("¿Es uno de tus animales sin
+  // caravana?") tapando la pantalla. Rompe la invariante de "un solo consumidor efectivo", y pega
+  // justo en la pantalla que `context-multivendor.md` §3 define como la cara de la demo a los
+  // fabricantes: tocás conectar, bastoneás, y un modal te tapa lo que estabas mostrando.
+  //
+  // Se cierra con el SCANNER ACOTADO (RCF.6) y no agregando 'baston' a `BLE_OWNED_ROUTES`. Los dos
+  // mecanismos suprimen el overlay igual (y los dos cierran uno que estuviera abierto al entrar); la
+  // diferencia que decide son dos cosas: (1) la propiedad la declara el DUEÑO y no una lista de
+  // literales de rutas que vive en otro archivo —mover o renombrar la ruta rompería esa lista EN
+  // SILENCIO, que es exactamente la clase de bug que este mismo pase vino a cerrar en `isRawStream`—;
+  // y (2) el scanner acotado además FUERZA la escucha aunque algún ancestro haya prendido `busyMode`,
+  // que es lo que necesita una pantalla cuyo único trabajo es mostrar lecturas en vivo.
+  // `BLE_OWNED_ROUTES` sigue siendo lo correcto para rutas con su propio flujo completo (maniobra,
+  // asignar-caravanas): ahí lo que se suprime es el overlay, no el listener de la pantalla dueña.
+  //
+  // `useFocusEffect` y NO `useEffect` (mismo motivo que `useHardwareBack`): las pantallas del stack
+  // quedan MONTADAS al navegar encima. Con `useEffect`, entrar acá y que algo empuje otra pantalla
+  // dejaría el overlay global suprimido en TODA la app hasta volver — un bastonazo en la pantalla de
+  // arriba no abriría nada, en silencio. Acotado al foco, la propiedad dura exactamente lo que dura
+  // la pantalla en primer plano.
+  const acquireScopedScanner = useScopedScannerControls();
+  useFocusEffect(useCallback(() => acquireScopedScanner(), [acquireScopedScanner]));
 
   // Lista EN VIVO de lecturas confirmadas (confirmación pre-commit del contrato, RMV4.8): el provider
   // entrega el EID YA validado + des-duplicado por `subscribeTagRead`. Marcamos "DEMO" las que vienen
@@ -174,31 +213,91 @@ export default function StickConnectionScreen() {
   const [pairedDevices, setPairedDevices] = useState<PairedDevice[]>([]);
   const pairedView = pairedDevicesView(pairedState);
 
+  // ¿Hay un bastón guardado? Se lee para decidir si el CTA "Olvidar" existe (R6.6). Sin esto el botón
+  // sería una afordancia MUERTA en la primera instalación —tocar y que no pase nada— que es exactamente
+  // la clase de defecto que esta feature viene arreglando desde el chip. Se re-lee cuando cambia el
+  // estado de conexión porque el adapter persiste la MAC al llegar a `'connected'`: sin esa dependencia,
+  // el operario conectaría por primera vez y el botón no aparecería hasta volver a entrar.
+  const [hasRemembered, setHasRemembered] = useState(false);
+  useEffect(() => {
+    let active = true;
+    void readRememberedDevice().then((id) => {
+      if (active) setHasRemembered(id != null && id.length > 0);
+    });
+    return () => {
+      active = false;
+    };
+  }, [status]);
+
+  // GUARD DE RE-ENTRADA (🟠-4 del review). Sin él, `loadPaired` se podía disparar dos veces (el CTA
+  // de la lista y el CTA de estado, que también la carga) y dejar dos cargas pisándose. Va ADEMÁS
+  // del coalesce de `listPairedSppDevices` —que es el que impide de verdad que dos pedidos solapados
+  // dejen huérfana la promesa del diálogo de Bluetooth (🔴-1)—: acá lo que se protege es la máquina
+  // de estados de la pantalla. El otro medio del 🟠-4 (que la promesa SIEMPRE se asiente) vive en el
+  // service: todos sus awaits del puente tienen presupuesto y caen a `{ ok:false }`, así que
+  // `pairedState` no puede quedar clavado en 'loading' sin CTA de salida.
+  const loadingPairedRef = useRef(false);
+
   const loadPaired = useCallback(async () => {
+    if (loadingPairedRef.current) return;
+    loadingPairedRef.current = true;
     setPairedState('loading');
-    const result = await listPairedSppDevices();
-    if (!result.ok) {
+    try {
+      const result = await listPairedSppDevices();
+      if (!result.ok) {
+        setPairedDevices([]);
+        setPairedState(result.reason);
+        return;
+      }
+      setPairedDevices(result.devices);
+      setPairedState(result.devices.length > 0 ? 'ok' : 'empty');
+    } catch {
+      // El service no tira (todo await acotado + try/catch), pero si algún día lo hiciera, la
+      // pantalla NO puede quedarse en 'loading' sin CTA: 'error' sí ofrece "Reintentar".
       setPairedDevices([]);
-      setPairedState(result.reason);
-      return;
+      setPairedState('error');
+    } finally {
+      loadingPairedRef.current = false;
     }
-    setPairedDevices(result.devices);
-    setPairedState(result.devices.length > 0 ? 'ok' : 'empty');
   }, []);
 
   const onLoadPaired = useCallback(() => {
     void loadPaired();
   }, [loadPaired]);
 
-  // Elegir un device REAL de la lista: se recuerda su MAC y se conecta a ESA MAC (no al vendorId,
-  // que era un marcador mientras no había adapter real).
+  // Elegir un device REAL de la lista: se conecta a ESA MAC (no al vendorId, que era un marcador
+  // mientras no había adapter real).
+  //
+  // ── NO se persiste acá (MEDIUM-2 del Gate 2, 2026-07-30) ─────────────────────────────────────
+  // Antes esta función hacía `writeRememberedDevice(device.id)` ANTES de saber si conectaba, y el
+  // adapter lo persiste otra vez al conectar (`:852`): la escritura de acá era redundante **y** peor,
+  // porque recordaba lo que nunca funcionó. La fila deja tocar CUALQUIER emparejado a propósito
+  // (`allowUnrecognized: true`, porque el nombre real del RS420 es una hipótesis), así que tocar unos
+  // auriculares por error los dejaba guardados como "el bastón" — y desde R6.4 eso significa que la app
+  // abre un RFCOMM contra ellos, **sin gesto**, en cada apertura. Ahora solo se recuerda lo que llegó a
+  // `'connected'`: el que decide es el adapter, en el punto donde el bastón contestó.
   const onChoosePaired = useCallback(
     (device: PairedDevice) => {
-      void writeRememberedDevice(device.id);
       void transport?.connect(device.id).catch(() => undefined);
     },
     [transport],
   );
+
+  // R6.6 — OLVIDAR el bastón guardado. El requisito existía desde el core ("una acción para cambiar y
+  // otra para olvidar el bastón guardado, limpiando el identificador persistido") y no estaba cableado:
+  // `forgetRememberedDevice` no tenía UN SOLO call site. Mientras la MAC era un dato inerte era una
+  // ausencia dormida; desde R6.4 la app se conecta sola contra ella en cada apertura, así que "no quiero
+  // más ese bastón" tiene que ser accionable. Desconecta primero (si no, el link vivo lo volvería a
+  // persistir al reconectar) y después limpia.
+  const onForgetRemembered = useCallback(() => {
+    void (async () => {
+      await transport?.disconnect().catch(() => undefined);
+      await forgetRememberedDevice();
+      setHasRemembered(false);
+      setPairedState('idle');
+      setPairedDevices([]);
+    })();
+  }, [transport]);
 
   const onClearReads = useCallback(() => setReads([]), []);
 
@@ -320,6 +419,17 @@ export default function StickConnectionScreen() {
               {pairedView.ctaLabel ? (
                 <Button testID="stick-paired-cta" variant="secondary" fullWidth onPress={onLoadPaired}>
                   {pairedView.ctaLabel}
+                </Button>
+              ) : null}
+              {/* R6.6 — OLVIDAR el bastón guardado. Cableado el 2026-07-30 (MEDIUM-2 del Gate 2): el
+                  requisito existía y `forgetRememberedDevice` no tenía un solo call site. Desde R6.4 la
+                  app se conecta sola contra esa MAC en cada apertura, así que "no quiero más ese bastón"
+                  —lo vendí, era de otro, toqué los auriculares por error— tiene que ser accionable, y no
+                  solo por prolijidad: mientras la MAC esté guardada, cada arranque abre un RFCOMM contra
+                  ella sin que nadie lo pida. */}
+              {hasRemembered ? (
+                <Button testID="stick-forget-cta" variant="secondary" fullWidth onPress={onForgetRemembered}>
+                  Olvidar el bastón guardado
                 </Button>
               ) : null}
             </>

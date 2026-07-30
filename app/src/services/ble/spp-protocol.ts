@@ -26,8 +26,28 @@
  */
 export const RNBC_FIXED_SPP_UUID = '00001101-0000-1000-8000-00805F9B34FB';
 
-/** Delimitador de mensaje que le pedimos al `DeviceConnection` nativo (= el del RS420). */
+/**
+ * Delimitador de mensaje POR DEFECTO. Es el del RS420 (`field-findings.md`), NO una propiedad del
+ * transporte: el que manda es el `delimiter` del `TransportCapability` del driver, y este valor es
+ * solo la caída para un driver que no lo declare. Ver `sppDelimiterIsSupported`.
+ */
 export const SPP_DELIMITER = '\n';
+
+/**
+ * ¿Este fin de trama es alcanzable con el framing nativo? (🟠-5, honestamente — mismo criterio que
+ * `sppUuidIsSupported`: cortar antes que fingir).
+ *
+ * Un string VACÍO es legal para el nativo pero significa OTRA COSA:
+ * `DelimitedStringDeviceConnectionImpl.read()` con delimitador vacío devuelve **todo el buffer** como
+ * un mensaje (modo crudo por chunks), y entonces el framing tendría que hacerlo `LineFramer` de este
+ * lado — que es exactamente el bug de framing invertido que ya nos costó "cero lecturas" una vez.
+ * Además, un `split('')` en `splitSppPayload` explotaría el payload en caracteres sueltos. Un driver
+ * que necesite ese modo necesita otro adapter, no este; acá se corta con log y estado `disconnected`.
+ * Multi-carácter (`\r\n`) SÍ funciona: el nativo avanza `index + mDelimiter.length()`.
+ */
+export function sppDelimiterIsSupported(delimiter: unknown): delimiter is string {
+  return typeof delimiter === 'string' && delimiter.length > 0;
+}
 
 /**
  * ¿El transporte SPP de este driver es alcanzable con la lib instalada? (RMV5.2, honestamente)
@@ -64,11 +84,11 @@ export interface SppConnectOptions {
   secure: boolean;
 }
 
-export function sppConnectOptions(): SppConnectOptions {
+export function sppConnectOptions(delimiter: string = SPP_DELIMITER): SppConnectOptions {
   return {
     connectorType: 'rfcomm',
     connectionType: 'delimited',
-    delimiter: SPP_DELIMITER,
+    delimiter,
     charset: 'ascii',
     secure: true,
   };
@@ -77,14 +97,17 @@ export function sppConnectOptions(): SppConnectOptions {
 /**
  * Convierte un payload de `onDataReceived` en las LÍNEAS CRUDAS a entregar al contrato (RMV5.3).
  *
- * Camino normal (framing nativo delimitado): el payload ES una línea completa sin `\n` → devuelve
- * `[payload]`. Camino defensivo: si por lo que sea el payload trajera varios mensajes pegados,
- * se separan por `\n`. Se descartan los tramos vacíos/solo-whitespace para no ingerir líneas nulas
- * (mismo criterio que `LineFramer`). Nunca tira: un payload no-string devuelve `[]`.
+ * Camino normal (framing nativo delimitado): el payload ES una línea completa sin el terminador →
+ * devuelve `[payload]`. Camino defensivo: si por lo que sea el payload trajera varios mensajes
+ * pegados, se separan por el MISMO delimitador que se le pidió al nativo (el del driver — separar
+ * por otro sería inventar tramas). Se descartan los tramos vacíos/solo-whitespace para no ingerir
+ * líneas nulas (mismo criterio que `LineFramer`). Nunca tira: un payload no-string devuelve `[]`,
+ * y un delimitador inválido (vacío) NO se usa para partir — se devuelve el payload entero.
  */
-export function splitSppPayload(payload: unknown): string[] {
+export function splitSppPayload(payload: unknown, delimiter: string = SPP_DELIMITER): string[] {
   if (typeof payload !== 'string' || payload.length === 0) return [];
-  return payload.split(SPP_DELIMITER).filter((line) => line.replace(/[\r\s]/g, '').length > 0);
+  const parts = sppDelimiterIsSupported(delimiter) ? payload.split(delimiter) : [payload];
+  return parts.filter((line) => line.replace(/[\r\s]/g, '').length > 0);
 }
 
 /**

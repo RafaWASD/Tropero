@@ -33,7 +33,7 @@ import type { StickAdapter, ConnectionStatus } from './stick-adapter';
 import { ConnectionStatusContext, isConnectedStatus } from './connection-status';
 import { EidIngestEngine } from './contract';
 import { resolveListening } from './listener-gate';
-import { selectTransportAdapter, type ProviderMode } from './adapter-selection';
+import { selectTransportAdapter, ingestModeFor, type ProviderMode } from './adapter-selection';
 import { ManualAdapter } from './adapter-manual';
 import { MockAdapter } from './adapter-mock';
 import { WebSerialAdapter } from './adapter-web-serial';
@@ -202,7 +202,13 @@ export function BleStickListenerProvider({
 
     // Transporte (web-serial/mock): si hay, suscribimos sus lecturas + status.
     if (transport) {
-      const isRawStream = transport.kind === 'web-serial' || transport.kind === 'spp-android';
+      // Modo de ingesta DECLARADO por adaptador (`adapter-selection.ts`), no una comparación de
+      // literales acá (🟡-1 del review, 2026-07-30). Era una lista de dos kinds sin un solo test:
+      // si le faltara 'spp-android', cada trama del RS420 iría por `processEid` → `normalizeTag` le
+      // saca el STX → 34 dígitos → `isValidTag` false → CERO lecturas, con la suite entera en verde
+      // (ni el unit ni el E2E —que corre web con mock/manual/simulator— tocan este camino). La
+      // tabla es exhaustiva por tipo: un adapter nuevo no compila hasta declarar su modo.
+      const isRawStream = ingestModeFor(transport.kind) === 'raw-line';
       unsubs.push(transport.onTagRead((value) => handleReading(value, isRawStream)));
       unsubs.push(
         transport.onStatus((s) => {
@@ -211,8 +217,22 @@ export function BleStickListenerProvider({
         }),
       );
       transport.enable();
-      // NO auto-conectamos el transporte: la conexión la dispara la pantalla de conexión (R9)
-      // con gesto de usuario (web-serial: requestPort). El mock se conecta por su API en tests.
+      // R6.4 — RECONEXIÓN AUTOMÁTICA AL ABRIR LA APP. Hasta el 2026-07-30 acá había un comentario que
+      // decía "NO auto-conectamos", y era una discrepancia con el requisito: R6.4 pide reconectar al
+      // bastón guardado "sin requerir que el operario vuelva a la pantalla de conexión", y as-built
+      // CADA arranque exigía Más → Bastón → tocar (los únicos llamadores de connect() eran gestos, así
+      // que `readRememberedDevice()` solo se alcanzaba tocando algo). Decisión de Raf, 2026-07-30.
+      //
+      // El adapter decide si arranca, y su regla es "el arranque no pide nada": sin device recordado no
+      // toca la radio; el permiso se CONSULTA y no se pide; con el Bluetooth apagado no muestra el
+      // diálogo de activar. Cualquier gate que no pase deja el estado en 'off' (nunca se intentó) y
+      // loguea el motivo — ver `SppAndroidAdapter.autoConnect()`.
+      //
+      // `autoConnect` es OPCIONAL en `StickAdapter`: hoy la implementa solo spp-android. No es olvido —
+      // web-serial NO PUEDE (la Web Serial API exige un gesto para `requestPort()`), manual no tiene
+      // transporte, y mock/simulator los conecta su propio disparador (bridge de E2E / botón de demo).
+      // O sea: cero riesgo para las ~70 specs E2E, que corren en mock.
+      void transport.autoConnect?.().catch(() => undefined);
     }
 
     return () => {

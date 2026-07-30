@@ -29,6 +29,7 @@ import { supabase } from '../services/supabase';
 import { registerPushTokenBestEffort } from '../services/push-notifications';
 import { signInWithGoogle as signInWithGoogleService } from '../services/google-auth';
 import { signInWithApple as signInWithAppleService } from '../services/apple-auth';
+import { forgetRememberedDevice } from '../services/ble/remembered-device';
 import type { AuthErrorLike } from '../utils/auth-errors';
 
 export type AuthUser = {
@@ -111,8 +112,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (active) setState(stateFromSession(data.session));
     });
 
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
       if (active) setState(stateFromSession(session));
+      // El bastón RECORDADO muere con la sesión, TAMBIÉN cuando la sesión se muere sola (spec 04,
+      // LOW-5 del Gate 2 del 2026-07-30). Antes esto vivía solo en el `signOut()` de abajo, o sea que
+      // cubría el **gesto explícito** de cerrar sesión y no los fines de sesión involuntarios: refresh
+      // token revocado o expirado, contraseña cambiada desde otro dispositivo, y —el caso concreto que
+      // lo hace no-teórico— `delete_account`, que **revoca global**: en el segundo teléfono de la cuenta
+      // la sesión muere por acá y el `forget` de `services/account.ts` no corre nunca.
+      // Sin esto, el teléfono seguiría abriendo un RFCOMM sin gesto contra la MAC del dueño anterior
+      // en cada apertura (R6.4). No se bloquea nada: es best-effort y la función tiene techo propio.
+      if (event === 'SIGNED_OUT') void forgetRememberedDevice().catch(() => undefined);
     });
 
     return () => {
@@ -156,6 +166,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signOut = useCallback(async () => {
     pushRegisteredForUser.current = null;
+    // El bastón RECORDADO muere con la sesión (spec 04, MEDIUM-2 del Gate 2 del 2026-07-30). Antes era
+    // una MAC inerte en SecureStore; desde R6.4 la app abre un RFCOMM contra ella **sin gesto** en cada
+    // apertura, así que dejarla sobrevivir significa que en un teléfono compartido —el cambio de turno
+    // del peón— el usuario B arranca auto-conectando al bastón de A.
+    //
+    // ── PRECISIÓN (LOW-5 del Gate 2): "la vida de la clave es la de la SESIÓN" ─────────────────────
+    // Eso vale porque la limpieza está en los DOS finales de sesión, no solo en este. Este es el gesto
+    // EXPLÍCITO; el involuntario (refresh token revocado o expirado, contraseña cambiada en otro
+    // dispositivo, y `delete_account`, que **revoca global**) entra por el branch `SIGNED_OUT` de
+    // `onAuthStateChange`, arriba. Una versión anterior de este comentario afirmaba "la vida de la
+    // sesión" con solo este call site puesto, y era falso: era la vida del gesto de logout. Queda dicho
+    // porque un comentario que afirma más de lo que el código hace es peor que el hueco.
+    //
+    // Best-effort, y **acotado en el borde**: `forgetRememberedDevice` tiene techo propio
+    // (`remembered-device.ts`), así que el peor caso es que el logout espere 2 s — no que no se pueda
+    // hacer. Un `.catch()` acá cubriría el rechazo pero NO el colgado (⚪-L del review), y el logout no
+    // puede depender de que el storage conteste.
+    await forgetRememberedDevice().catch(() => undefined);
     await supabase.auth.signOut();
   }, []);
 

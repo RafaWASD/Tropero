@@ -69,9 +69,34 @@ app/src/services/ble/
     └── adapter-spp-android.test.ts  # partes PURAS: driver-param, framing, backoff, import perezoso no tira (RMV5)
 ```
 
+**As-built 2026-07-30 (unidad de bloqueantes)** — dos módulos y tres suites más, todos en el mismo lugar:
+
+```
+app/src/services/ble/
+├── bridge-timeout.ts               # withTimeout / withTimeoutOr / BridgeTimings (🔴-1). PURO.
+├── connect-trigger.ts              # ConnectTrigger + CONNECT_TRIGGER_POLICY (tabla exhaustiva) +
+│                                   #   UNPROMPTED_RETRY_BUDGET_MS: el TOPE de la cadena sin gesto. PURO.
+├── connection-view.ts (features/)  # + `autoConnectExhausted` en ConnectionEnv (copy honesto del tope).
+├── permissions-android.ts          # + classifyPermissionChecks (PURA) + checkAndroidBluetoothPermissions
+│                                   #   (CONSULTA sin pedir, para el arranque y los reintentos — R6.4).
+├── stick-adapter.ts                # + `autoConnect?()` OPCIONAL en la interfaz (R6.4; solo spp-android).
+├── spp-protocol.ts                 # + sppDelimiterIsSupported; sppConnectOptions(delimiter);
+│                                   #   splitSppPayload(payload, delimiter) (🟠-5). PURO.
+├── adapter-selection.ts            # + IngestMode, ADAPTER_INGEST_MODE, ingestModeFor, ADAPTER_KINDS (🟡-1). PURO.
+├── driver-types.ts                 # + `delimiter?` en los params del TransportCapability de kind 'spp'.
+├── logging.ts                      # + bridge_timeout / connect_superseded / liveness_lost / connected_silent.
+├── bridge-timeout.test.ts          # vencimiento, rechazo tardío sin unhandledRejection, onTimeout, presupuestos
+├── adapter-ingest-mode.test.ts     # tabla exhaustiva + guard de que el provider delegue en ingestModeFor
+└── spp-bridge-timeout-guard.test.ts # falla si aparece un await del puente sin presupuesto
+```
+
+> Los dos guards estáticos se verificaron **mutando el código** (sacándole el `withTimeout` a
+> `getBondedDevices` y re-metiendo la comparación de literales en el provider): los dos fallan. Un guard
+> que no se probó rompiendo lo que vigila no prueba nada.
+
 ### 2.2 Reescritura de un placeholder del core (04-owned)
 
-- `adapter-spp-android.ts` — **placeholder → código completo** (RMV5). Implementa `StickAdapter` (`kind:'spp-android'`) sobre `react-native-bluetooth-classic` con **import perezoso** (patrón `feedback.ts`: `require` dentro de la función de I/O, no top-level), parametrizado por `RS420_DRIVER` (sppUuid, pin, frameParser), reusando `LineFramer` + `backoffDelayMs` + `remembered-device.ts`. Las partes puras se testean en CI; la conexión RFCOMM real queda **GATED** (RMV5.9).
+- `adapter-spp-android.ts` — **placeholder → código completo** (RMV5). Implementa `StickAdapter` (`kind:'spp-android'`) sobre `react-native-bluetooth-classic` con **import perezoso** (patrón `feedback.ts`: `require` dentro de la función de I/O, no top-level), parametrizado por `RS420_DRIVER` (sppUuid, pin, frameParser), reusando `LineFramer` + `backoffDelayMs` + `remembered-device.ts`. Las partes puras se testean en CI; la conexión RFCOMM real queda **GATED** (RMV5.9). **[As-built: `LineFramer` NO se usa acá (el framing lo hace el nativo — ver §6); `pin` y `frameParser` no los consume el transporte (nota de RMV5.2); el gate de RMV5.9 se corrió contra el emulador ESP32 y el stream está verificado en device.]**
 
 ### 2.3 Extensiones aditivas a archivos del core (04-owned, sin romper firmas)
 
@@ -237,38 +262,74 @@ Consecuencia (RMV4.7): en un **bundle de producción** los tres guards fallan (m
 
 **Distinción con el mock y el bridge E2E:** el `MockAdapter` (kind `'mock'`) + `BleE2EBridge` existen para **Playwright** (inyección programática, no visible). El `SimulatorAdapter` (kind `'simulator'`) es para **demos humanas en vivo** (controles visibles, marcado "DEMO", auto-play). Se elige un `kind` distinto — en vez de reusar `'mock'` — para poder marcar honestamente las lecturas como demo, con su **propia marca requerida** (`__RAFAQ_BLE_DEMO__`), distinta del `mock`. El gate de demo trata el flag de E2E como un **contexto no-prod válido** para ejercitar la demo en captura/Playwright (`isE2eDemoAllowed()`), pero el modo demo sigue **exigiendo** su marca propia → siguen siendo modos distintos (`mock` invisible vs `simulator` con controles + DEMO). (Ver Alternativa descartada B.)
 
-## 6. `adapter-spp-android` (RMV5) — **AS-BUILT 2026-07-29**
+## 6. `adapter-spp-android` (RMV5) — **AS-BUILT 2026-07-30**
 
 > Esta seccion se reescribio al as-built. El diseno original (pseudocodigo con `LineFramer` sobre los
 > chunks, `pairDevice()` dentro del connect, dep nativa sin instalar) describia un adapter que **no
 > funcionaba**: ver las notas de reconciliacion bajo RMV5.2/5.3/5.4 en `requirements-multivendor.md`.
 > La forma que quedo salio de leer el **codigo nativo** de `react-native-bluetooth-classic`, no su README.
+>
+> **Segunda reescritura, 2026-07-30**: la review adversarial de `dad711f` + el banco contra el ESP32
+> encontraron **cinco defectos mas en los bordes de la maquina de estados**, tres de ellos reproducidos en
+> el A07 real. El flujo de abajo ya los incluye; el detalle de cada uno esta en las notas de RMV5.5 y en
+> `progress/impl_baston-spp-bloqueantes.md`.
 
-**Flujo real de `connect(deviceId?)`** (cada paso es un estado observable; ninguno bloquea el manual):
+**Flujo real de `connect(deviceId?)`** (cada paso es un estado observable; ninguno bloquea el manual).
+`gen` es la GENERACION del intento: un `disconnect()` o un connect nuevo la incrementan, y el intento
+viejo —que puede estar suspendido en un await del puente— aborta al despertar, cierra lo que abrio y no
+toca el estado. Todo await marcado con `⏱` tiene presupuesto (`bridge-timeout.ts`): sin eso, una promesa
+nativa que no resolvia dejaba el latch tomado **para siempre**.
 
 ```
-0. cancelReconnect()                       # un intento nuevo invalida el reintento pendiente
-1. params = resolveSppParams(driver)       # sppUuid/pin del driver (RMV5.2)
-   if !sppUuidIsSupported(params.sppUuid): => 'disconnected'   # la lib hardcodea el UUID RFCOMM
+   if latch tomado: encolar el target si es OTRO (log connect_superseded) y salir   # 🟠-2
+   gen = ++connectGeneration ; latch = gen ; closed = false     # closed DESPUES del guard (P7)
+0. cancelReconnect() ; await teardownStreams()     # un intento nuevo invalida el reintento pendiente
+1. params = resolveSppParams(driver)       # sppUuid / pin / delimiter del driver (RMV5.2)
+   if !sppUuidIsSupported(params.sppUuid):   => 'disconnected'   # la lib hardcodea el UUID RFCOMM
+   if !sppDelimiterIsSupported(params.delimiter): => 'disconnected'  # 🟠-5: cortar antes que quedar mudo
 2. native = loadRNBC()                     # require PEREZOSO (RMV5.6) + chequeo de NativeModules
    if !native: => 'disconnected'           # sin binario en el APK: NO se reintenta
-3. perm = await ensureAndroidBluetoothPermissions()   # BLUETOOTH_CONNECT si API>=31
+3. ⏱ perm = await (auto ? checkAndroid… : ensureAndroid…)BluetoothPermissions()   # CONNECT si API>=31
+   # el GESTO pide (y espera al dialogo); un camino AUTOMATICO solo consulta: `requestMultiple` sobre
+   # un permiso denegado una vez VUELVE a mostrar el dialogo, y un timer no puede hacer eso (R6.4)
    'denied'      => 'permission_denied'    # estado CON CTA; sin backoff (lo reintenta el operario)
-   'unavailable' => 'disconnected'
-4. target = deviceId ?? await readRememberedDevice()  # RMV5.4
+   'unavailable' => 'disconnected'         # tambien si el dialogo del SO nunca contesta (vence)
+4. ⏱ target = deviceId ?? await readRememberedDevice()  # RMV5.4
    if !target: => 'disconnected'
    currentDeviceId = target                # ANTES de intentar: el reintento va a ESTE device
 5. => 'connecting'
-6. if !(await native.isBluetoothEnabled()): await native.requestBluetoothEnabled()
-   si el operario dice que no => 'disconnected' SIN backoff
-7. device = await native.connectToDevice(target, sppConnectOptions())
-      # connectorType:'rfcomm', connectionType:'delimited', delimiter:LF, charset:'ascii', secure:true
+6. ⏱ if !(await native.isBluetoothEnabled()):
+      if auto: log bluetooth_off_auto => 'disconnected' + scheduleReconnect()   # NUNCA un dialogo
+      else:    ⏱ await requestBluetoothEnabledOnce(native)   # coalescido: no pisar mEnabledPromise
+               si el operario dice que no (o vence) => 'disconnected' SIN backoff
+7. ⏱ device = await native.connectToDevice(target, sppConnectOptions(params.delimiter))
+      # connectorType:'rfcomm', connectionType:'delimited', delimiter del DRIVER, charset:'ascii', secure
       # NO se pasa baud (RMV5.7) ni uuid (la lib lo ignora); NO se llama pairDevice() (cuelga)
-8. device.onDataReceived(e => for line of splitSppPayload(e.data): onTagRead(line))
-      # el nativo YA entrega la linea completa sin LF => se entrega CRUDA al contrato (RMV5.3)
-9. native.onDeviceDisconnected(...) => 'disconnected' + scheduleReconnect()
-10. => 'connected'
+      # si vence y el nativo resuelve DESPUES: se le cierra el socket (onTimeout) o queda fantasma
+   if closed || gen viejo: cerrar el device que llego tarde y salir sin tocar el estado
+8. ⏱ await writeRememberedDevice(target) ; if closed || gen viejo || sesion vieja: salir
+9. device.onDataReceived(e => { lastDataAt = now
+                                for line of splitSppPayload(e.data, params.delimiter): onTagRead(line) })
+      # el nativo YA entrega la linea completa sin el terminador => CRUDA al contrato (RMV5.3)
+10. native.onDeviceDisconnected(e => {
+        if direccion(e) != la nuestra: IGNORAR      # 🔴-2: el evento es GLOBAL (todos los devices)
+        teardown + 'disconnected' + scheduleReconnect() })
+11. armLivenessProbe(target)   # sonda al volver a foreground        ┐ 🔴 BENCH-1: segunda fuente
+    armWatchdog(session, target)  # + poll cada 15 s + log de mudez  ┘ de verdad, no un evento
+12. => 'connected'
 ```
+
+**`scheduleReconnect()`** (RMV5.5): (1) si la cadena vigente tiene TOPE y ya se le paso, la **mata**
+(`exhaustUnpromptedChain()`, ver §6-quater); (2) si no hay foreground, espera el retorno a `'active'`;
+(3) resetea el contador **solo si el link duro** `LINK_DWELL_MS` (30 s), programa
+`backoffDelayMs(attempt)` y —al DISPARAR, no solo al programar— **vuelve a chequear el tope y el
+foreground**, en ese orden; si ya no esta en foreground, no conecta y se queda esperando el retorno.
+
+> **El orden (1) antes de (2) no es un detalle**: si el tope se chequeara despues del gate de foreground,
+> un timer que dispara con la app en background se parquearia en `waitForForeground()` **sin pasar por el
+> tope**, y una cadena vencida quedaria de zombi esperando el retorno a primer plano para volver a
+> martillar. O sea: el tope seria evitable guardando el telefono en el bolsillo. Lo encontro la
+> autorrevision, con un test que lo caza.
 
 - **Framing = nativo, no `LineFramer`.** `DelimitedStringDeviceConnectionImpl` buffera en Java y entrega
   un mensaje por delimitador, ya sin el LF. `LineFramer` sobre eso devuelve `[]` para siempre.
@@ -277,17 +338,83 @@ Consecuencia (RMV4.7): en un **bundle de producción** los tres guards fallan (m
   emparejamiento es de sistema (ajustes de Android, PIN `1234` del driver).
 - **Reconexion (RMV5.5):** `backoffDelayMs` (reuso), foreground-only, pero con **re-armado** por
   `AppState` cuando el intento cae con la app en background. Estados que a proposito **no** reintentan:
-  permiso denegado, Bluetooth apagado tras un "no", y ausencia del modulo nativo.
+  permiso denegado, Bluetooth apagado tras un "no" del operario, y ausencia del modulo nativo.
 - **Sesion de conexion:** un contador invalida los callbacks de una conexion ya cerrada, para que una
   lectura en vuelo no aparezca como caravana despues de un `disconnect()`.
 - **Inyeccion de entorno (`SppEnv`):** `loadNative` / `ensurePermissions` / `readRemembered` /
-  `writeRemembered` / `isForeground` / `schedule` / `onForeground` entran por constructor con defaults
-  reales. Es lo que baja el gate de hardware de "toda la conexion" a "solo el stream del RS420": la
-  maquina de estados entera se ejercita en `node:test` con dobles.
+  `writeRemembered` / `isForeground` / `schedule` / `onForeground` (+ `now` y `timeouts` desde el
+  2026-07-30) entran por constructor con defaults reales. Es lo que baja el gate de hardware de "toda la
+  conexion" a "solo el stream del RS420": la maquina de estados entera se ejercita en `node:test` con
+  dobles — incluidas las promesas que **no resuelven nunca**, el reloj (dwell y mudez) y la desconexion
+  de OTRO device.
 - **Enumeracion de emparejados (`listPairedSppDevices`, RMV3.2):** `getBondedDevices()` normalizado a
   `{id: MAC, name}`. **No hay discovery** => no se pide `BLUETOOTH_SCAN` ni ubicacion. Devuelve
   `{ok:false, reason}` con `unavailable | permission_denied | bluetooth_off | error`, para que la
-  pantalla de un mensaje distinto por causa.
+  pantalla de un mensaje distinto por causa. **Coalescido** (2026-07-30): dos pedidos concurrentes son
+  una sola llamada al nativo — no por eficiencia, sino porque dos `requestBluetoothEnabled` solapados
+  **pisan** el unico slot de promesa del nativo y dejan la primera huerfana para siempre.
+
+### 6-bis. Las cuatro piezas que agrego la unidad de bloqueantes (2026-07-30)
+
+- **`bridge-timeout.ts` (nuevo, puro).** `withTimeout` / `withTimeoutOr` + `BridgeTimings`. Al vencer:
+  (a) le adosa un handler vacio a la promesa abandonada (un rechazo tardio del nativo no puede explotar
+  como `unhandledRejection`), y (b) llama a `onTimeout`, que es donde el caller cierra lo que la llamada
+  abandonada haya abierto igual. `spp-bridge-timeout-guard.test.ts` **enumera todos** los awaits del
+  adapter que arrancan en `native.` / `device.` / `env.` y exige el mecanismo en cada uno: el guard se
+  escribe sobre la AUSENCIA, asi que una llamada nueva al puente nace en rojo.
+- **Liveness (`verifyLiveness`).** Segunda fuente de verdad del link: `isDeviceConnected(address)`, que
+  del lado Java es `mConnections.containsKey` — y ese mapa lo limpian el `ActionACLReceiver` y el error
+  del hilo de lectura, dos caminos que corren en Java **aunque el evento nunca llegue a JS** (el nativo
+  lo emite con `sendEvent`, que descarta el evento si no hay Catalyst instance activa). Se sondea con el
+  string EXACTO con el que se abrio, porque esa es la clave del mapa. Dos disparadores: retorno a
+  foreground (instantaneo para el caso del bolsillo) y poll de 15 s (independiente de todo evento y de
+  `AppState`, que es lo que acota el techo del "conectado" mentiroso).
+- **Modo de ingesta por adapter (`ADAPTER_INGEST_MODE`).** La decision de por que puerta del contrato
+  entra una lectura sale de una tabla exhaustiva por `AdapterKind` (`satisfies Record<…>`) y no de una
+  comparacion de literales en el provider. Un adapter nuevo no compila hasta declarar su modo.
+- **Propiedad exclusiva de `/baston`.** La pantalla llama `acquireScopedScanner()` (RCF.6) dentro de un
+  `useFocusEffect` => el `FindOrCreateOverlay` global se auto-suprime mientras esta enfocada. Antes cada
+  lectura se consumia dos veces (lista de la pantalla + sheet global tapandola). Por que el scanner
+  acotado y no `BLE_OWNED_ROUTES`, y por que `useFocusEffect` y no `useEffect`: nota de RMV3.1.
+
+### 6-ter. R6.4 — el arranque (segunda pasada, 2026-07-30)
+
+`autoConnect()` es el UNICO camino que corre sin que nadie haya pedido nada, asi que es el unico con
+una regla propia: **el arranque no pide nada**. Cuatro gates, ordenados del mas barato al que toca el
+hardware — y el orden es parte del diseno, no una casualidad:
+
+```
+autoConnect()                                  # el provider la llama 1 vez al montar el transporte
+  0. ya hay link / hay intento en curso                            => skip('busy')
+     # OJO: acá NO se mira `closed` ("el operario desconecto"), y es deliberado. `disconnect()`
+     # significa dos cosas opuestas segun quien lo llame —el gesto del operario, o el cleanup del
+     # efecto del provider— y el unico que puede re-invocar `autoConnect()` es el segundo, asi que
+     # ese gate MATABA R6.4 en silencio (hallazgo 14 de la autorrevision, con test que lo caza).
+  1. !isForeground()                                             => skip('background')       # R6.9
+  2. ⏱ remembered = await readRememberedDevice()                                 # LECTURA LOCAL
+     if (!remembered) => skip('no_remembered')   # arranque en frio: NO se toca la radio, y NO se
+                                                 # consulta el permiso (por eso este gate va PRIMERO)
+  3. native = loadRNBC() ; if (!native) => skip('unavailable')
+  4. ⏱ perm = await checkAndroidBluetoothPermissions()      # CONSULTA, no pide (PermissionsAndroid.check)
+     if (perm !== 'granted') => skip('permission')           # el prompt lo dispara un GESTO
+  5. ⏱ enabled = await native.isBluetoothEnabled()           # lectura, sin dialogo
+     if (!enabled) => skip('bluetooth_off')                  # el dialogo de activar lo pide un GESTO
+  6. runConnect(remembered, auto=true)           # de aca en adelante es el connect() normal
+```
+
+- **`skip()` NO emite ningun estado.** Se queda en `'off'`, que es el estado honesto de "nunca se
+  intento" (`"Bastón sin conectar"` + CTA `"Conectar bastón"`, y el `StickStatusIndicator` se
+  auto-oculta en `'off'`). Emitir `'disconnected'` seria mentir ("se apago, quedo fuera de rango o
+  cancelaste") sobre algo que no paso, y le pondria un pill en el chrome a alguien que no pidio nada.
+  El motivo queda en el log (`autoconnect_skipped`, 6 motivos) porque desde la UI los 6 se ven igual.
+- **El fallback de `isBluetoothEnabled` es `false` aca y `true` en `doConnect`**, a proposito: en el
+  arranque la duda NO habilita a tocar la radio (nadie pidio nada); en el gesto el operario SI pidio
+  conectar, y el error real lo da el `connectToDevice`.
+- **`autoConnect` es opcional en `StickAdapter`** y hoy la implementa solo `spp-android`. No es olvido
+  de los otros cuatro: `web-serial` **no puede** (la Web Serial API exige un gesto para
+  `requestPort()`), `manual` no tiene transporte fisico, y `mock`/`simulator` los conecta su propio
+  disparador. `wiring.test.ts` lo fija como decision escrita (y de paso deja las ~70 specs E2E —que
+  corren en `mock`— sin ningun riesgo).
 - **Config plugin (RMV5.8):** la lib **no trae uno** => `app/plugins/with-bluetooth-classic.js`. Ademas
   de declarar los permisos, **topea el `ACCESS_FINE_LOCATION` que la lib inyecta sin tope**.
 - **Montaje (as-built):** `selectTransportAdapter({android, auto})` => `'spp-android'`;
@@ -295,6 +422,54 @@ Consecuencia (RMV4.7): en un **bundle de producción** los tres guards fallan (m
   El guard es deliberado: sin el modulo nativo en el APK (dev build viejo) montar el adapter seria un
   transporte fantasma => chip y CTA que prometen y no cumplen. Sin tocar el contrato ni los otros
   adaptadores (core R11.3).
+
+### 6-quater. El TOPE de la cadena que nadie pidio (tercera pasada, 2026-07-30)
+
+R6.4 introdujo un defecto: el reintento infinito, que antes exigia un gesto deliberado, ahora arranca
+solo en cada apertura. Un baston vendido / roto / que quedo en otro campo deja la app permanentemente
+con cara de rota, martillando la radio, y `scanning` no tiene CTA para frenarla.
+
+La politica se declara por **ORIGEN de la cadena** —no por estado— en una tabla exhaustiva
+(`connect-trigger.ts`, `satisfies Record<ConnectTrigger, TriggerPolicy>`), que reemplazo al booleano
+`auto` de `doConnect`:
+
+| trigger | ¿dialogos del SO? | efecto en la cadena |
+|---|---|---|
+| `operator` (un tap) | ✅ el unico | `start-unbounded` — el operario esta tratando de conectar |
+| `autoconnect` (el arranque, R6.4) | ❌ | `start-capped` — nadie la pidio: 120 s |
+| `retry` (el timer) | ❌ | `inherit` — continua la cadena vigente |
+
+- **`retry` DEBE heredar.** Si arrancara cadena, re-armaria el presupuesto en cada vuelta y el tope no se
+  alcanzaria nunca: la cadena infinita disfrazada. Un test lo fija (y el mutante que lo prueba rompe 6).
+- **120 s, contra la escalera de backoff.** `backoffDelayMs` da 500·1000·2000·4000·8000 y de ahi 8 s
+  fijos → 15,5 s de rampa y despues un poll de 8 s. Tiene que cubrir "abri la app al llegar, camine hasta
+  la manga y prendi el baston un minuto despues" y NO cubrir "ese baston lo vendi". 120 s es el doble del
+  escenario a cubrir; 60 s seria igual al escenario, sin margen para el boot del lector. En intentos son
+  ~18 si el nativo resolviera al instante y ~6-7 con el baston ausente (cada `connectToDevice` bloquea
+  ~10 s antes de rendirse) — por eso el tope se mide en TIEMPO, no en intentos.
+- **`exhaustUnpromptedChain()`**: deja de reintentar · **no olvida** el device recordado (que hoy no
+  aparezca no significa que no sea su baston; olvidarlo le rompe el arranque de manana) · emite `'off'`,
+  que **si** tiene CTA (a diferencia de `scanning`, que era la trampa) y que es el unico estado que el
+  `StickStatusIndicator` se auto-oculta → no se le toma el chrome a alguien que no pidio nada · el
+  contador de backoff vuelve al piso, asi que el tap del operario reintenta a los 500 ms.
+- **EL PRESUPUESTO MUERE AL CONECTAR** (fix-loop del 2026-07-30, 🔴-A del review / HIGH-1 del Gate 2).
+  `retryBudgetUntil = null` en el punto donde el link se establece. Sin eso el tope no acotaba la cadena
+  sino **los primeros 120 s de vida de la app**: el primer corte posterior mataba la reconexion automatica
+  de toda la sesion, con 0 reintentos, el pill oculto y un diagnostico inventado en la pantalla. El
+  invariante: el presupuesto pertenece a la CADENA, y una cadena que llego a `'connected'` TERMINO — el
+  motivo del tope ("ese baston lo vendi") deja de aplicar en el instante en que el baston contesta.
+  Cubierto por 5 tests que **distinguen el bug del arreglo** (el reviewer habia probado que los 8 casos
+  originales del bloque `TOPE:` no lo hacian: su mutante M7 pasaba 104/104).
+- **Un tap del operario SIEMPRE destopa**, incluso con el latch tomado y sin nada que encolar (el camino
+  del chip del header, `connect()` sin target). Antes era un no-op mudo que se comia el destope.
+- **La honestidad sin cambiar el estado**: `connectionStatusView` gana `autoConnectExhausted` (OPCIONAL en
+  su `ConnectionEnv`) → en la pantalla de conexion el copy es "No encontramos el baston / puede estar
+  apagado o fuera de rango" en vez de "Conecta el baston", que sonaria a que nunca se intento. El
+  indicador global NO pasa el flag y sigue con el copy generico, que para el es cierto.
+- **Guard sobre la ausencia** (`connect-trigger.test.ts`): se escanean **todos** los `runConnect(` del
+  adapter y se exige que pasen un trigger LITERAL conocido → un camino nuevo que arranque reintentos sin
+  declarar su origen nace en rojo. Mas el guard de coherencia en `wiring.test.ts`: el adapter tiene que
+  DERIVAR la politica con `policyFor()` y el booleano `auto` no puede volver.
 
 ## 7. `StickConnectionScreen` + indicador (RMV3) — dónde la monta la nav
 

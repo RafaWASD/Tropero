@@ -50,6 +50,36 @@ export interface StickAdapter {
   /** Conecta (opcionalmente a un device recordado). No bloquea la carga manual si falla (R7.4). */
   connect(deviceId?: string): Promise<void>;
 
+  /**
+   * OPCIONAL — reconexión automática al ABRIR la app (R6.4). El provider la llama UNA vez al montar el
+   * transporte; un adapter que no la implemente simplemente no auto-conecta (no-op).
+   *
+   * Es opcional y no `connect()` porque son dos cosas distintas: `connect()` lo dispara un GESTO y
+   * puede pedirle cosas al operario (permiso, prender el Bluetooth); `autoConnect()` corre en el primer
+   * frame, **sin** que nadie haya pedido nada, así que no puede tocar la radio ni mostrar un diálogo:
+   * si falta el device recordado, el permiso o el Bluetooth, NO arranca y deja el estado como estaba.
+   *
+   * Hoy la implementa SOLO `spp-android`, y no por olvido de los otros cuatro:
+   *   · `web-serial` NO PUEDE — la Web Serial API exige un gesto de usuario para `requestPort()`;
+   *     "recordar" ahí lo provee `navigator.serial.getPorts()` (R5.4), que es otro mecanismo.
+   *   · `manual` no tiene transporte físico que conectar (es el piso, R7).
+   *   · `mock` lo conecta el bridge de E2E; `simulator`, el botón de la demo.
+   *   · `hid-wedge` (GATED) no conecta nada: el teclado lo empareja el SO.
+   */
+  autoConnect?(): Promise<void>;
+
+  /**
+   * OPCIONAL — ¿el `autoConnect()` de este adapter agotó su tope sin encontrar el bastón recordado?
+   *
+   * La cadena de reintentos que arranca sin gesto tiene tope (a diferencia de la que arranca con un tap),
+   * y al agotarse el estado queda en `'off'`: no conectado y **sin** estar intentando. Eso deja el chrome
+   * de la app en paz (el indicador global se auto-oculta en `'off'`), pero le esconde al operario que SÍ
+   * fue a mirar la pantalla de conexión que hubo un intento. Este flag es lo que le da el copy honesto
+   * ("no encontramos el bastón guardado" en vez de "conectá el bastón"). Se pone en `true` ANTES del
+   * cambio de estado que provoca el re-render, así que la UI siempre lo lee fresco.
+   */
+  readonly autoConnectExhausted?: boolean;
+
   /** Desconecta el transporte físico (no afecta el listener lógico: ver enable/disable). */
   disconnect(): Promise<void>;
 

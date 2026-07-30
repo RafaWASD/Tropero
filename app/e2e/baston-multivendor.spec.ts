@@ -12,10 +12,19 @@
 // Los casos:
 //   (a) La StickConnectionScreen MONTA en /baston bajo demo: el RS420 sale RECONOCIDO en web + control de
 //       simulación visible + carga MANUAL siempre disponible (no bloqueante). (RMV3.1/3.2/3.4/3.6/4.5)
-//   (b) LECTURA SIMULADA: tocar "Simular lectura" → dispara el find-or-create global (confirmación pre-commit
-//       del EID, R2 del core) Y marca la lectura "DEMO" en la lista de la pantalla. (RMV4.2/4.6/4.8)
+//   (b) LECTURA SIMULADA: tocar "Simular lectura" → la lectura entra UNA sola vez, en la lista en vivo de la
+//       pantalla y marcada "DEMO" (confirmación pre-commit de esta pantalla), y el find-or-create global NO
+//       se abre encima. (RMV4.2/4.6/4.8)
 //   (c) ESTADOS de conexión con CTA: off → conectado → desconectado, con la carga manual disponible en cada
 //       estado (no bloqueante). (RMV3.4/3.6)
+//
+// ── CAMBIO DE EXPECTATIVA 2026-07-30 (BENCH-3, `progress/bench_baston-spp-emulador.md` §4.5) ────────────
+// (b) y (c) esperaban que un bastonazo en /baston abriera el `FindOrCreateOverlay` GLOBAL. Eso era el BUG:
+// medido en device, cada lectura se consumía DOS VECES —entraba en la lista de Lecturas de la pantalla Y
+// abría el sheet global tapándola—, rompiendo la invariante de "un solo consumidor efectivo" justo en la
+// pantalla que `context-multivendor.md` §3 define como la cara de la demo a los fabricantes. Ahora la
+// pantalla toma la PROPIEDAD EXCLUSIVA del bastón mientras está enfocada (scanner acotado, RCF.6) y el
+// overlay se auto-suprime. Estos tests pasan a asertar la invariante NUEVA: la lectura entra una sola vez.
 //   (d) REGRESIÓN: una corrida E2E NO-demo (solo __RAFAQ_BLE_E2E__ → mock) NO monta ni los DemoControls ni el
 //       indicador global (isNonDemoE2E lo suprime) y el bridge mock sigue abriendo el overlay como HOY. Es la
 //       prueba de que el elemento NUEVO del chrome (StickStatusIndicator) no perturba las ~70 specs E2E.
@@ -102,21 +111,22 @@ async function closeOverlay(page: Page): Promise<void> {
   await expect(page.getByTestId('find-or-create-overlay')).toHaveCount(0, { timeout: 10_000 });
 }
 
+/** Fila de una lectura confirmada en la lista en vivo de /baston (aria-label del read-row). */
+const DEMO_READ_ROW = /^Caravana \d{15} DEMO$/;
+
 /**
- * Dispara una lectura simulada hasta que el find-or-create abre. Tras el RELOAD a /baston (deep-link), el
- * listener GLOBAL queda momentáneamente suspendido: el `useBleStickListener` del FindOrCreateOverlay lo
- * re-habilita recién cuando el rodeo activo re-resuelve (warm-up de PowerSync/contextos post-reload). Una
- * sola emisión puede caer en esa ventana y el gate de escucha la descarta (status "conectado" pero sin
- * lectura). Reintentamos el tap — cada emisión del simulador es un EID sintético FRESCO (seq++), así que
- * reintentar NO choca con la dedup — hasta que el overlay aparece. `toPass` re-tapea SOLO mientras no haya
- * overlay (al abrir, el bloque pasa y no vuelve a tapear → el scrim nunca intercepta un re-tap).
+ * Dispara una lectura simulada hasta que aparece en la LISTA EN VIVO de la pantalla (que es la
+ * confirmación de esta pantalla desde BENCH-3: el overlay global ya no se abre acá).
+ *
+ * Se reintenta el tap porque tras el RELOAD a /baston (deep-link) los contextos están en warm-up
+ * (PowerSync/rodeo) y una sola emisión puede caer en esa ventana. Cada emisión del simulador es un EID
+ * sintético FRESCO (seq++), así que reintentar NO choca con la dedup.
  */
 async function triggerDemoRead(page: Page): Promise<void> {
-  const overlay = page.getByTestId('find-or-create-overlay');
   await expect(page.getByTestId('demo-simulate')).toBeVisible();
   await expect(async () => {
     await page.getByTestId('demo-simulate').click();
-    await expect(overlay).toBeVisible({ timeout: 4_000 });
+    await expect(page.getByLabel(DEMO_READ_ROW).first()).toBeVisible({ timeout: 4_000 });
   }).toPass({ timeout: 60_000 });
 }
 
@@ -149,8 +159,8 @@ test('(a) StickConnectionScreen monta en /baston bajo demo: RS420 reconocido + "
   await expect(page.getByText(/Sin bast[oó]n/).first()).toBeVisible();
 });
 
-// ─── (b) Lectura simulada → find-or-create + marca DEMO en la confirmación pre-commit ──────────────────────
-test('(b) "Simular lectura" dispara el find-or-create (confirmación pre-commit) y marca la lectura DEMO', async ({
+// ─── (b) Lectura simulada → UN SOLO consumidor: la lista de la pantalla, marcada DEMO ──────────────────────
+test('(b) "Simular lectura" entra UNA sola vez: lista en vivo marcada DEMO, sin el sheet global encima', async ({
   page,
 }) => {
   test.setTimeout(120_000);
@@ -161,21 +171,23 @@ test('(b) "Simular lectura" dispara el find-or-create (confirmación pre-commit)
   await openBastonDemo(page, user);
 
   // El simulador emite un EID sintético VÁLIDO (isValidTag) por el MISMO contrato de ingesta (validate +
-  // dedup + confirmación pre-commit) que un bastón real (RMV4.2). El EID cae SIN match en ningún campo →
-  // find-or-create modo CREATE (0 candidatos sin caravana → "Animal nuevo").
+  // dedup + confirmación pre-commit) que un bastón real (RMV4.2).
   await triggerDemoRead(page);
 
-  // Find-or-create DISPARADO (RMV4.8): el overlay GLOBAL de spec 09 muestra el EID leído (confirmación
-  // visual pre-commit, R2 del core) ANTES de commitear. No tocamos "Dar de alta" → no se escribe nada.
-  await expect(page.getByText('Caravana leída', { exact: true })).toBeVisible();
-  await expect(page.getByText('Animal nuevo', { exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Dar de alta', exact: true })).toBeVisible();
+  // CONFIRMACIÓN de esta pantalla (RMV4.8): la lista de lecturas en vivo muestra el EID leído, marcado
+  // "DEMO" (RMV4.6, integridad SENASA) — el read-row tiene aria-label "Caravana <15 díg> DEMO" (el badge
+  // visible + el EID). Nada se commitea desde acá.
+  await expect(page.getByLabel(DEMO_READ_ROW).first()).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText(/^Lecturas \(\d+\)$/)).toBeVisible();
 
-  // Cerramos el overlay → la CONFIRMACIÓN de la pantalla (lista de lecturas en vivo) queda a la vista con la
-  // lectura marcada "DEMO" (RMV4.6, integridad SENASA): el read-row tiene aria-label "Caravana <15 díg> DEMO"
-  // (el badge visible + el EID). Es la marca honesta de que la lectura vino del simulador, no de un bastón real.
-  await closeOverlay(page);
-  await expect(page.getByLabel(/^Caravana \d{15} DEMO$/)).toBeVisible({ timeout: 10_000 });
+  // INVARIANTE (BENCH-3): un solo consumidor efectivo. El sheet global NO se abre encima de la pantalla
+  // que es la cara de la demo. Se asserta por la AUSENCIA del testID EXCLUSIVO del overlay (no por la
+  // ausencia de un texto: la pantalla de fondo sigue montada detrás de cualquier scrim).
+  await expect(page.getByTestId('find-or-create-overlay')).toHaveCount(0);
+
+  // Y sigue sin abrirse un rato después (no es una carrera ganada por poco: el overlay está SUPRIMIDO).
+  await page.waitForTimeout(1_500);
+  await expect(page.getByTestId('find-or-create-overlay')).toHaveCount(0);
 });
 
 // ─── (c) Estados de conexión con CTA (off → conectado → desconectado), manual disponible en cada uno ───────
@@ -193,10 +205,9 @@ test('(c) estados de conexión con CTA: off → conectado → desconectado; manu
   await expect(page.getByText('Bastón sin conectar', { exact: true })).toBeVisible();
   await expect(page.getByText(/Sin bast[oó]n/).first()).toBeVisible();
 
-  // Simular una lectura → el simulador conecta (status 'connected') + emite. Cerramos el overlay para leer
-  // el estado de la pantalla de fondo.
+  // Simular una lectura → el simulador conecta (status 'connected') + emite. Desde BENCH-3 la lectura queda
+  // en la lista de ESTA pantalla y no hay ningún sheet que cerrar antes de leer el estado.
   await triggerDemoRead(page);
-  await closeOverlay(page);
 
   // Estado 'connected' (RMV3.4): "Bastón conectado" + CTA "Desconectar". El indicador GLOBAL del chrome
   // (RMV3.5) se SUPRIME en la PROPIA /baston (redundante con esta card + evita pisar el título del header,

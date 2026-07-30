@@ -58,3 +58,65 @@ export function selectTransportAdapter(env: SelectionEnv): AdapterKind {
   // funciona igual, manual-first). iOS va aparte (External Accessory + protocol string MFi).
   return 'manual';
 }
+
+// ─── Modo de INGESTA por adaptador (🟡-1 del review, 2026-07-30) ─────────────────────────────────
+//
+// Cómo entra al contrato lo que emite un adapter. Son dos puertas distintas del MISMO motor
+// (`EidIngestEngine`) y elegir la equivocada deja el bastón MUDO con la suite entera en verde:
+//   · 'raw-line' → línea CRUDA del lector → `processRawLine` → `parseRs420Line` (descarta STX,
+//                  cabecera fija y timestamp) → `isValidTag`.
+//   · 'eid'      → el adapter ya entrega el EID limpio (manual, mock, simulador, y el wedge HID
+//                  cuando destrabe R8.7) → `processEid`, sin desframear nada.
+//
+// ── POR QUÉ ES UNA TABLA Y NO UN `kind === 'x' || kind === 'y'` INLINE ──────────────────────────
+// Hasta hoy la decisión vivía como una comparación de DOS LITERALES dentro de
+// `BleStickListenerProvider.tsx`, sin un solo test. Si a esa lista le faltara `spp-android`, cada
+// trama del RS420 iría por `processEid` → `normalizeTag` le saca el STX → quedan 34 dígitos →
+// `isValidTag` false → `invalid_eid`, CERO lecturas, y ni la suite unit ni la E2E (que corre en web
+// con mock/manual/simulator) lo verían. Es la TERCERA repetición de la misma clase de bug de este
+// camino (framing invertido, `isRawStream`, `BLE_OWNED_ROUTES`).
+//
+// El guard se escribe sobre LA AUSENCIA: `satisfies Record<AdapterKind, IngestMode>` hace que un
+// `AdapterKind` nuevo **no compile** hasta declarar su modo — un adapter nuevo nace en rojo. El
+// complemento en runtime (una lista independiente de kinds + el chequeo de que el provider llame a
+// `ingestModeFor`) vive en `adapter-ingest-mode.test.ts`.
+export type IngestMode = 'raw-line' | 'eid';
+
+export const ADAPTER_INGEST_MODE = {
+  manual: 'eid',
+  mock: 'eid',
+  simulator: 'eid',
+  'web-serial': 'raw-line',
+  'spp-android': 'raw-line',
+  // GATED (R8.7). Un keyboard-wedge tipea los dígitos del EID (y un Enter), no la trama del lector:
+  // no hay STX ni cabecera que desframear. Si algún wedge tipeara la trama completa (el `hidraw on`
+  // del emulador), ese lector necesita su propio adapter, no cambiar esta fila.
+  'hid-wedge': 'eid',
+} as const satisfies Record<AdapterKind, IngestMode>;
+
+/** Modo de ingesta de un adaptador. Total sobre `AdapterKind` por construcción (ver arriba). */
+export function ingestModeFor(kind: AdapterKind): IngestMode {
+  return ADAPTER_INGEST_MODE[kind];
+}
+
+/**
+ * Todos los kinds, ENUMERADOS A MANO, para que algo pueda recorrerlos en runtime.
+ *
+ * Vive acá y no en el test por un motivo concreto: `app/tsconfig.json` EXCLUYE `**​/*.test.ts`, así que
+ * una aserción de tipos escrita en un test **no la chequea nadie** (node:test solo borra los tipos). El
+ * ancla de exhaustividad tiene que estar en un archivo que el typecheck sí mire.
+ */
+export const ADAPTER_KINDS = [
+  'manual',
+  'mock',
+  'web-serial',
+  'spp-android',
+  'hid-wedge',
+  'simulator',
+] as const satisfies readonly AdapterKind[];
+
+// EXHAUSTIVIDAD en tiempo de compilación: si `AdapterKind` gana un miembro que no está en
+// `ADAPTER_KINDS`, `Exclude<…>` deja de ser `never` y esta asignación NO COMPILA.
+type KindMissingFromList = Exclude<AdapterKind, (typeof ADAPTER_KINDS)[number]>;
+const _adapterKindsAreExhaustive: KindMissingFromList extends never ? true : never = true;
+void _adapterKindsAreExhaustive;

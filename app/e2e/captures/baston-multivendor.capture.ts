@@ -7,14 +7,26 @@
 //        salida manual (no bloqueante).
 //   02 — DemoControls visible ("Modo demo" + "Simular lectura"), montado SOLO bajo isDemoMode() (triple-guard).
 //   03 — lectura DEMO en la confirmación de la pantalla: el read-row con el EID + el badge "DEMO" (RMV4.6).
-//   04 — find-or-create disparado por la lectura demo: el overlay global con el EID leído (confirmación
-//        pre-commit, R2 del core) + "Animal nuevo" / "Dar de alta".
+//   04 — la pantalla DESPUÉS de la lectura, SIN ningún sheet encima (invariante de BENCH-3).
 //   05 — estado DESCONECTADO de la CARD de la pantalla con CTA "Volver a conectar" (LIMPIA, sin pill encima).
 //   06 — estado CONECTADO de la CARD de la pantalla ("Bastón conectado" + CTA "Desconectar"). En /baston el
 //        indicador GLOBAL del chrome se SUPRIME (redundante con la card + evita pisar el título del header).
-//   07 — DEMOSTRACIÓN de RMV3.5: el indicador GLOBAL del chrome en una pantalla CON HEADER (el alta de
-//        animal, alcanzada con conexión VIVA vía "Dar de alta"), flotando en su posición nueva (anclado
-//        ABAJO) SIN pisar el título del header. Ver nota de navegación en el paso (07) más abajo.
+//
+// ── DOS CAMBIOS 2026-07-30 (BENCH-3, `progress/bench_baston-spp-emulador.md` §4.5) ──────────────────────
+// El shot 04 mostraba el `FindOrCreateOverlay` global abriéndose por un bastonazo EN /baston. Eso era el
+// BUG, no la feature: la lectura se consumía DOS VECES (lista de la pantalla + sheet global tapándola),
+// rompiendo "un solo consumidor efectivo" justo en la pantalla que `context-multivendor.md` §3 define como
+// la cara de la demo a los fabricantes. Ahora la pantalla toma la propiedad exclusiva del bastón mientras
+// está enfocada (scanner acotado, RCF.6) y el overlay se auto-suprime → el shot 04 pasa a documentar la
+// invariante NUEVA. La prueba dedicada del arreglo (con su "y sigue sin abrirse") vive en
+// `baston-spp-bloqueantes.capture.ts`.
+//
+// Y el shot 07 (indicador GLOBAL del chrome en una pantalla CON header, RMV3.5) se CAE de esta captura: la
+// única navegación client-side que salía de /baston con la conexión viva era el "Dar de alta" de ese
+// overlay — o sea, existía solo gracias al bug. /baston se alcanza por deep-link (la fila de "Más" no está
+// cableada), así que no tiene back-stack in-app y cualquier `goto` remonta el provider y apaga la conexión.
+// RMV3.5 sigue cubierto por sus tests (`connection-view.test.ts` + la spec E2E), pero su evidencia VISUAL
+// vuelve cuando "Más" tenga la fila a /baston. Anotado en `docs/backlog.md`.
 //
 // N/A (RMV3.7/3.8) — device 'available:false' / 'no reconocido': en web el RS420 resuelve a
 // 'recognized-available' (binding {web-serial, serial, available:true}); no hay camino de UI para montar esos
@@ -79,17 +91,20 @@ async function markBleDemo(page: Page): Promise<void> {
   });
 }
 
+/** Fila de una lectura confirmada en la lista en vivo de /baston (aria-label del read-row). */
+const DEMO_READ_ROW = /^Caravana \d{15} DEMO$/;
+
 /**
- * Dispara la lectura simulada hasta que el find-or-create abre. Tras el reload a /baston el listener global
- * queda momentáneamente suspendido hasta que el rodeo activo re-resuelve (warm-up post-reload); reintentamos
- * el tap (cada emisión = EID fresco, sin colisión de dedup) hasta que el overlay aparece.
+ * Dispara la lectura simulada hasta que aparece en la LISTA EN VIVO de la pantalla (desde BENCH-3, esa es
+ * la confirmación de /baston: el overlay global ya no se abre acá). Tras el reload a /baston los contextos
+ * están en warm-up hasta que el rodeo activo re-resuelve; reintentamos el tap (cada emisión = EID fresco,
+ * sin colisión de dedup).
  */
 async function triggerDemoRead(page: Page): Promise<void> {
-  const overlay = page.getByTestId('find-or-create-overlay');
   await expect(page.getByTestId('demo-simulate')).toBeVisible();
   await expect(async () => {
     await page.getByTestId('demo-simulate').click();
-    await expect(overlay).toBeVisible({ timeout: 4_000 });
+    await expect(page.getByLabel(DEMO_READ_ROW).first()).toBeVisible({ timeout: 4_000 });
   }).toPass({ timeout: 60_000 });
 }
 
@@ -128,14 +143,11 @@ test('capturas pantalla de conexión + demo del bastón @ 412px', async ({ brows
     // Disparar la lectura simulada → conecta + emite un EID sintético por el contrato de ingesta.
     await triggerDemoRead(page);
 
-    // (04) find-or-create disparado: overlay global con el EID leído (confirmación pre-commit) + "Dar de alta".
-    await expect(page.getByText('Caravana leída', { exact: true })).toBeVisible();
-    await expect(page.getByText('Animal nuevo', { exact: true })).toBeVisible();
-    await shot(page, '04-find-or-create');
-
-    // Cerrar el overlay (X del header) para ver el estado de la pantalla de fondo.
-    await page.getByRole('button', { name: 'Cerrar', exact: true }).last().click();
-    await expect(page.getByTestId('find-or-create-overlay')).toHaveCount(0, { timeout: 10_000 });
+    // (04) La lectura entra UNA sola vez: la pantalla queda a la vista, sin ningún sheet encima (BENCH-3).
+    // La aserción va ANTES del shot para que un regreso del bug rompa el test en vez de dejar una captura
+    // mentirosa.
+    await expect(page.getByTestId('find-or-create-overlay')).toHaveCount(0);
+    await shot(page, '04-lectura-sin-sheet-encima');
 
     // (06) Estado CONECTADO de la CARD de la pantalla: "Bastón conectado" + CTA "Desconectar". En /baston el
     // indicador GLOBAL del chrome se SUPRIME (redundante con esta card + evitar pisar el título) → ahora
@@ -159,25 +171,17 @@ test('capturas pantalla de conexión + demo del bastón @ 412px', async ({ brows
     await expect(page.getByRole('button', { name: 'Volver a conectar', exact: true })).toBeVisible();
     await shot(page, '05-estado-desconectado');
 
-    // (07) DEMOSTRACIÓN de RMV3.5 — el indicador GLOBAL del chrome donde SÍ cumple su rol: una pantalla CON
-    // header, con el pill anclado ABAJO (sobre la nav bar + el pico del FAB) SIN pisar el título de arriba.
+    // (07) — CAÍDO desde el 2026-07-30 (BENCH-3). Mostraba el indicador GLOBAL del chrome (RMV3.5) en una
+    // pantalla CON header: se llegaba al alta de animal con la conexión VIVA tocando "Dar de alta" en el
+    // find-or-create que un bastonazo abría ACÁ. Esa era la única navegación client-side que salía de
+    // /baston con la conexión en pie, y existía SOLO porque el overlay se abría encima de esta pantalla —
+    // que es justo el bug que esta unidad cerró. /baston se alcanza por deep-link (la fila de "Más" no está
+    // cableada), así que no tiene back-stack in-app: `router.back()` es no-op y cualquier `goto` remonta el
+    // provider raíz → status 'off' → el indicador se auto-oculta.
     //
-    // NAVEGACIÓN (por qué NO la home): con conexión VIVA la home es inalcanzable en E2E. La fila de "Más" a
-    // /baston no está cableada, así que /baston se abre por DEEP-LINK (goto) → sin back-stack in-app →
-    // `router.back()` del header es no-op; y una nav "cruda" por la History API REMONTA el provider raíz →
-    // el status vuelve a 'off' y el indicador se auto-oculta (verificado). En cambio "Dar de alta" del
-    // find-or-create hace un `router.push('/crear-animal')` REAL (client-side): el BleStickListenerProvider
-    // NO se desmonta → la conexión 'connected' PERSISTE → el indicador se ve en el alta (pantalla con header).
-    // Re-disparamos una lectura (demo-simulate reconecta + emite → status 'connected') y abrimos el alta.
-    await triggerDemoRead(page);
-    await expect(page.getByText('Animal nuevo', { exact: true })).toBeVisible();
-    await page.getByRole('button', { name: 'Dar de alta', exact: true }).click();
-    // Alta prefilleada (crear-animal): header con título + subtítulo "Creando: <EID>". El indicador global se
-    // monta (pathname !== '/baston') con status 'connected' (!= 'off') → visible, anclado ABAJO, lejos del
-    // título del header (arriba) → prueba visual de que ya no lo pisa.
-    await expect(page.getByText(/^Creando:/).first()).toBeVisible({ timeout: 20_000 });
-    await expect(page.getByTestId('stick-status-indicator')).toBeVisible({ timeout: 15_000 });
-    await shot(page, '07-indicador-global-chrome');
+    // No se reemplaza por una captura peor: RMV3.5 sigue cubierto por `connection-view.test.ts` y por la
+    // spec E2E, y su evidencia VISUAL vuelve el día que "Más" tenga la fila a /baston (una navegación
+    // client-side real). Anotado en `docs/backlog.md`.
   } finally {
     await ctx.close();
   }

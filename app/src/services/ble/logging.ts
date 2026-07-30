@@ -11,7 +11,46 @@ export type TransportLogEvent =
   | { kind: 'reconnect_attempt'; attempt: number }
   | { kind: 'eid_rejected'; reason: 'parse_failed' | 'invalid_eid' | 'empty' }
   | { kind: 'read_loop_error'; message: string }
-  | { kind: 'connect_error'; message: string };
+  | { kind: 'connect_error'; message: string }
+  // ── Diagnóstico de los bloqueantes cerrados el 2026-07-30 (review + banco del ESP32) ──────────
+  // Los cuatro existen para que el MISMO síntoma en logcat distinga causas que hoy son idénticas
+  // desde afuera (§4 del banco: "conectado y mudo" da igual con el terminador equivocado, con el
+  // bastón mudo, y con el socket muerto que la app todavía cree vivo).
+  /** Un await del puente nativo venció (🔴-1). `label` dice cuál. */
+  | { kind: 'bridge_timeout'; label: string; ms: number }
+  /** Un `connect()` a OTRO bastón llegó con un intento en curso: se encola, no se descarta (🟠-2). */
+  | { kind: 'connect_superseded'; deviceId: string }
+  /** La sonda de liveness encontró el socket muerto creyéndolo vivo (🔴 BENCH-1). */
+  | { kind: 'liveness_lost'; reason: 'foreground' | 'poll'; message: string }
+  /** Conectado y sin recibir un byte hace `ms` (🟠-5): deja rastro, no dispara ninguna acción. */
+  | { kind: 'connected_silent'; ms: number }
+  /**
+   * La reconexión automática al abrir la app (R6.4) decidió NO arrancar, y por qué. Es un SKIP, no un
+   * error: el arranque en frío no toca la radio ni pide nada. Existe para que "no se conectó solo" sea
+   * diagnosticable sin adivinar — hoy los cinco motivos se ven exactamente igual desde la UI (nada).
+   */
+  | {
+      kind: 'autoconnect_skipped';
+      reason: 'no_remembered' | 'permission' | 'bluetooth_off' | 'background' | 'unavailable' | 'busy';
+    }
+  /**
+   * Se agotó el tope de la cadena de reintentos que NADIE pidió (R6.4): se deja de reintentar. `ms` es
+   * cuánto duró la cadena y `attempts` cuántos intentos entraron — juntos dicen si el tope se consumió
+   * reintentando de verdad o esperando (p. ej. un connect nativo que bloqueó 10 s por intento).
+   */
+  | { kind: 'autoconnect_exhausted'; ms: number; attempts: number }
+  /**
+   * Llegó un `connect()` con un intento ya en vuelo y NO había otro bastón que encolar (mismo target, o
+   * sin target — el camino del chip del header). Antes era un no-op mudo; ahora deja rastro, porque si
+   * el trigger es `operator` **destopa la cadena** y eso es un cambio de política que hay que poder ver.
+   */
+  | { kind: 'connect_reasserted'; trigger: 'operator' | 'autoconnect' | 'retry' }
+  /**
+   * Un intento vencido resolvió tarde con el socket abierto y NO se lo cerró, porque la dirección ya es
+   * de un intento más nuevo: `device.disconnect()` cierra el socket de esa DIRECCIÓN, no el del intento,
+   * así que cerrarlo le mataría la conexión al que sí está conectado (MEDIUM-1 del Gate 2).
+   */
+  | { kind: 'orphan_socket_kept'; reason: 'address_owned_by_newer' };
 
 /**
  * Registra un evento de transporte sin bloquear (R15.1). Best-effort: si el logger falla, se

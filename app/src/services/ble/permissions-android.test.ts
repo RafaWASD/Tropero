@@ -9,7 +9,9 @@ import {
   ANDROID_API_BLUETOOTH_RUNTIME,
   PERMISSION_BLUETOOTH_CONNECT,
   androidBluetoothPermissionsFor,
+  classifyPermissionChecks,
   classifyPermissionResults,
+  checkAndroidBluetoothPermissions,
   ensureAndroidBluetoothPermissions,
 } from './permissions-android.ts';
 
@@ -76,4 +78,38 @@ test('RMV5.6: ensureAndroidBluetoothPermissions no tira sin RN → "unavailable"
   // de permisos no puede romper la app (manual-first, R7.2).
   const outcome = await ensureAndroidBluetoothPermissions();
   assert.equal(outcome, 'unavailable');
+});
+
+// ─── R6.4: CONSULTAR el permiso sin pedirlo (el camino que no pidió el operario) ──────────────
+
+test('R6.4: classifyPermissionChecks es fail-closed — un permiso ausente NO se asume concedido', () => {
+  // Es la misma regla que `classifyPermissionResults` y por el mismo motivo: un resultado que no
+  // entendemos no puede interpretarse como "sí". Acá el mapa viene de `PermissionsAndroid.check`,
+  // que devuelve booleanos.
+  assert.equal(classifyPermissionChecks([PERMISSION_BLUETOOTH_CONNECT], { [PERMISSION_BLUETOOTH_CONNECT]: true }), 'granted');
+  assert.equal(classifyPermissionChecks([PERMISSION_BLUETOOTH_CONNECT], { [PERMISSION_BLUETOOTH_CONNECT]: false }), 'denied');
+  assert.equal(classifyPermissionChecks([PERMISSION_BLUETOOTH_CONNECT], {}), 'denied', 'ausente = denegado');
+  assert.equal(classifyPermissionChecks([PERMISSION_BLUETOOTH_CONNECT], null), 'denied');
+  assert.equal(classifyPermissionChecks([PERMISSION_BLUETOOTH_CONNECT], undefined), 'denied');
+  // Un valor que no es `true` estricto tampoco alcanza (el nativo podría devolver 'granted' string).
+  assert.equal(
+    classifyPermissionChecks([PERMISSION_BLUETOOTH_CONNECT], { [PERMISSION_BLUETOOTH_CONNECT]: 'granted' } as unknown as Record<string, boolean>),
+    'denied',
+  );
+});
+
+test('R6.4: sin permisos requeridos (API ≤ 30) el check dice granted', () => {
+  assert.equal(classifyPermissionChecks([], {}), 'granted');
+  assert.equal(classifyPermissionChecks([], null), 'granted');
+});
+
+test('R6.4: con VARIOS requeridos, uno solo sin conceder alcanza para denied', () => {
+  assert.equal(classifyPermissionChecks(['a', 'b'], { a: true, b: false }), 'denied');
+  assert.equal(classifyPermissionChecks(['a', 'b'], { a: true, b: true }), 'granted');
+});
+
+test('R6.4/RMV5.6: checkAndroidBluetoothPermissions no tira sin RN → "unavailable"', async () => {
+  // Mismo borde que `ensure…`: en node no resuelve `react-native`. 'unavailable' hace que el arranque
+  // automático NO arranque, que es lo correcto: si no podemos saber si hay permiso, no tocamos nada.
+  assert.equal(await checkAndroidBluetoothPermissions(), 'unavailable');
 });
