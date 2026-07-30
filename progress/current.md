@@ -3,6 +3,58 @@
 > Este archivo se vacía al cerrar cada sesión y su resumen se mueve a `history.md`.
 > Mientras trabajás, **mantenelo actualizado en tiempo real**, no al final.
 
+## 2026-07-30 — EL BASTÓN LEE (banco en device) + review adversarial — 🔴 3 bloqueantes, fix EN CURSO
+
+Sesión nocturna autónoma del leader. Raf autorizó el flasheo (*"mandale automático, ya está respaldado"*),
+cerrando la decisión §7.1 del handoff, y pidió trabajo toda la noche.
+
+**El hito**: el ESP32 quedó flasheado en `MODO_SPP`, emparejado con el A07, y **la app ingirió su primera
+trama real** (`982000364696050`, la de la captura de campo, byte por byte). La cadena completa —RFCOMM →
+`splitSppPayload` → `parser-rs420` → `isValidTag` → `dedup` → commit → UI— **funciona en device**, y el
+driver reconoció el device como "Allflex RS420". Hasta hoy el camino SPP nunca había pasado un byte.
+
+**Banco: 16 escenarios corridos, 14 pasan limpio.** Dedup 1/2/8 exacto, 20 animales sin perder ninguno, las
+9 malformadas descartadas con **9** `eid_rejected` (ni una de más ni una de menos), trama partida
+reensamblada, dos pegadas separadas, reconexión sola tras `drop` y tras `off 8000`. Detalle, método y
+trazas en **`progress/bench_baston-spp-emulador.md`**.
+
+**Tres 🔴 bloqueantes** (la review adversarial que faltaba, `progress/review_baston-android-spp.md`, dio
+2 🔴 · 5 🟠 · 5 🟡 · 5 ⚪; el banco agregó el tercero y el peor):
+
+1. 🔴 **"Bastón conectado" MENTIROSO** (hallazgo del banco, **3/3 repro**): si el link se cae con la app
+   minimizada, el evento de desconexión **se pierde** y al volver a primer plano la pantalla dice
+   *"conectado, la lectura entra sola"* con el socket muerto — para siempre. Cada bastonazo se pierde sin
+   un solo indicio. Es el escenario normal de manga (teléfono al bolsillo) y es la clase de "verde
+   mentiroso" que ya nos quemó dos veces. Minimizar **solo** no rompe nada: el defecto es corte + background.
+2. 🔴 **`connectInFlight` es un latch sin timeout**. Confirmado en device con un gesto que el operario hace
+   siempre: BT apagado → la app pide activarlo → el operario lo prende **desde el panel rápido** en vez de
+   contestar el diálogo → **2 min 40 s sin un solo evento**, con el bastón disponible y sin CTA de salida.
+   Se recuperó exacto al cancelar el diálogo. Es la clase del bug 2 de `dad711f`: aquel fix sacó la llamada
+   pero **no escribió el guard sobre la ausencia** — no hay un `withTimeout` en todo el archivo.
+3. 🔴 **El evento de desconexión del SO es GLOBAL**. Verificado por lectura propia del paquete, no solo por
+   el reviewer: `onDeviceDisconnected` se suscribe a `DEVICE_DISCONNECTED` pelado (comparar con
+   `onDeviceRead`, que sí es `DEVICE_READ@<address>`) y lo alimenta `ActionACLReceiver`, un
+   `BroadcastReceiver` de `ACTION_ACL_DISCONNECTED` **de todos los devices**. Apagar unos auriculares
+   cierra el socket del bastón. **No se pudo reproducir en device**: el A07 no tenía un segundo device
+   Classic emparejado — es una prueba de 1 minuto para Raf.
+
+**Dos afirmaciones del proyecto que el banco falsificó:**
+- El README del emulador decía que `flap 4 3000` da *"backoff creciente"*. Medido: **`attempt:0` en los 4
+  ciclos** — el contador se resetea con cualquier connect exitoso sin exigir que el link dure (el 🟡-3 del
+  reviewer, y su predicción #5). **Corregido en el README.**
+- Con el terminador equivocado la app no solo queda muda: al corregirlo, **la primera trama válida también
+  se pierde** (el `StringBuffer` sin cota del nativo la arrastra). Refina el 🟠-5 con evidencia.
+
+**Y un 🟠 de arquitectura**: `baston` no está en `BLE_OWNED_ROUTES` y la pantalla no toma el scanner
+acotado → cada lectura se consume **dos veces** (lista de la pantalla + sheet global tapándola). Rompe la
+invariante de "un solo consumidor efectivo" justo en la pantalla que `context-multivendor.md` define como
+**la cara de la demo a los fabricantes**.
+
+**Estado**: `implementer` corriendo sobre los 3 🔴 + 5 🟠 + el guard de `isRawStream`. **Fuera de alcance por
+ser decisión de Raf**: R6.4 (auto-conectar al ABRIR la app) — el fix de liveness reconcilia una conexión
+existente, no conecta en frío. Al terminar: reviewer → Gate 2 → **rebuild local + re-correr el banco entero
+en device** (el rig quedó montado y con `adb`) → ⏸ Puerta 2 con Raf.
+
 ## 2026-07-29 — UNIDAD «emulador de bastones sobre ESP32» (implementer) — LISTA para review
 
 Base `16cf880`. Firmware + docs; **NO toca `app/`**. Autorización de Raf: usar el ESP32 (ya respaldado en

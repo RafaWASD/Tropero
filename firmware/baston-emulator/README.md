@@ -226,7 +226,7 @@ otra cosa, es un hallazgo:
 | muchos animales | `seq on` + `read 20 500` | 20 EIDs distintos, todos válidos |
 | corte del link | `drop` | estado `disconnected` + reintento con backoff; la carga manual sigue viva |
 | bastón apagado y prendido | `off 8000` | la cadena de reintentos **sobrevive** al primer fallo y reconecta sola |
-| corte repetido | `flap 4 3000` | backoff creciente, sin quedarse trabado ni duplicar suscripciones |
+| corte repetido | `flap 4 3000` | reconecta en los 4 ciclos, sin quedarse trabado ni duplicar suscripciones. **OJO: el as-built da `attempt:0` en cada ciclo — el backoff NO crece** (medido 2026-07-30, `progress/bench_baston-spp-emulador.md` §4.3). Esta fila decía "backoff creciente" y era falso: el contador se resetea con cualquier connect exitoso sin exigir que el link dure |
 | conectado pero mudo | `mute 30` | sigue `connected`, cero ingestas, sin falsos "leí algo" |
 | tramas malformadas | `bad header` … `bad garbage` | **descartadas en silencio**, nada de crash ni de tag inválido en la UI |
 | trama sin terminador | `bad noterm` | la línea **no se entrega**; y si después llega otra, se come esa también (verificalo: es el defecto real) |
