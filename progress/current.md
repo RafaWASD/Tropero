@@ -50,10 +50,20 @@ acotado → cada lectura se consume **dos veces** (lista de la pantalla + sheet 
 invariante de "un solo consumidor efectivo" justo en la pantalla que `context-multivendor.md` define como
 **la cara de la demo a los fabricantes**.
 
-**Estado**: `implementer` corriendo sobre los 3 🔴 + 5 🟠 + el guard de `isRawStream`. **Fuera de alcance por
-ser decisión de Raf**: R6.4 (auto-conectar al ABRIR la app) — el fix de liveness reconcilia una conexión
-existente, no conecta en frío. Al terminar: reviewer → Gate 2 → **rebuild local + re-correr el banco entero
-en device** (el rig quedó montado y con `adb`) → ⏸ Puerta 2 con Raf.
+**Estado**: `implementer` corriendo sobre los 3 🔴 + 5 🟠 + el guard de `isRawStream`.
+
+**Dos decisiones de Raf, 2026-07-30 de madrugada:**
+1. **R6.4 (🟠-3) → IMPLEMENTAR**: *"que se reconecte sola al abrir, sí"*. Cierra la discrepancia
+   spec-vs-código (hoy cada arranque exige Más → Bastón → tocar, y `remembered-device.ts` está medio
+   muerto). Va en una segunda pasada del mismo implementer, después de los bloqueantes.
+2. **Build de EAS `preview-dev` autorizado** para meter el fix en el A07. Motivo: el build local se firma
+   con la debug keystore y el APK instalado con la de EAS → reinstalar exigiría **desinstalar**, y eso
+   borra la sesión y la DB local (no se puede re-loguear sin Raf). Con EAS es la misma keystore →
+   `adb install -r` directo.
+
+Secuencia hasta la ⏸ Puerta 2: bloqueantes → R6.4 → reviewer → Gate 2 → build EAS → instalar →
+**re-correr el banco entero en device** contra el baseline de `dad711f` (el rig quedó montado con `adb` y
+el runner automatizado en `firmware/baston-emulator/bench/`).
 
 ## 2026-07-29 — UNIDAD «emulador de bastones sobre ESP32» (implementer) — LISTA para review
 
