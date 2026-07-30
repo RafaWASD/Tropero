@@ -270,8 +270,9 @@ corregida, 3/3; las tres nuevas se midieron sueltas):
 
 | escena | baseline en `dad711f` |
 |---|---|
-| E1, E3…E16b (14) + E13/E14/E15 | ✅ |
+| E1, E3…E16b (14) + E13/E14 | ✅ |
 | E2 (variante corregida) | ✅ 3/3 |
+| **E15** (flap, con el oráculo de backoff creciente) | ❌ `intentos=[0,0,0,0] → NO crece` — el banco reproduce solo el hallazgo de §4.3 |
 | **BENCH1** | ❌ `app dice 'Bastón conectado' · emulador link=libre · lee=False` |
 | **LATCH** | ❌ `NO reconectó` |
 | **COLD** (arranque en frío conecta sin gesto, R6.4) | ❌ `link=libre` — R6.4 no existe en este build |

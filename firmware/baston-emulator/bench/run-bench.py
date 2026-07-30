@@ -310,8 +310,18 @@ def run_counting(emu, sid, title, cmds, wait, expected, out):
     return ok
 
 
+ATTEMPT = re.compile(r'"attempt":(\d+)')
+
+
 def run_drop(emu, out):
-    """E13/E14/E15: cortes y reconexion. Oraculo = el link del emulador + que vuelva a leer."""
+    """E13/E14/E15: cortes y reconexion. Oraculo = el link del emulador + que vuelva a leer.
+
+    E15 lleva un oraculo EXTRA: que el backoff CREZCA entre ciclos. Historia de esa expectativa:
+    el README la afirmaba sin medirla; el 2026-07-30 se midio y daba `attempt:0` las cuatro veces
+    (el contador se reseteaba con cualquier connect exitoso, sin exigir que el link durara); el fix
+    de los bloqueantes agrego un dwell de 30 s. Con ciclos de 3 s abajo / 4 s arriba el link nunca
+    llega al dwell, asi que los intentos NO se tienen que resetear: 0,1,2,3. Esto cierra T-MV.5.18.
+    """
     ok_all = True
     for sid, title, cmd, wait in [
         ("E13", "corte del link (drop)", "drop", 30),
@@ -320,8 +330,14 @@ def run_drop(emu, out):
     ]:
         close_overlay()
         clear_reads()
+        if sid == "E15":
+            adb("logcat", "-c")
         emu.send(cmd)
         time.sleep(wait)
+        attempts = []
+        if sid == "E15":
+            attempts = [int(m) for l in ble_log() if "reconnect_attempt" in l
+                        for m in ATTEMPT.findall(l)]
         close_overlay()
         clear_reads()
         emu.send("read")
@@ -329,10 +345,27 @@ def run_drop(emu, out):
         close_overlay()
         st = screen()
         ok = st["count"] == 1
+        extra = ""
+        if sid == "E15":
+            # crece si llego a >=1 y nunca bajo (un reset entre ciclos se ve como un 0 despues de un >0)
+            crece = len(attempts) >= 2 and max(attempts) >= 1 and attempts == sorted(attempts)
+            extra = " · intentos=%s → %s" % (
+                attempts or "(ninguno)",
+                "CRECE" if crece else "NO crece (se resetea entre ciclos)",
+            )
+            ok = ok and crece
         ok_all = ok_all and ok
         out.append(
-            "| %s | %s | `%s` | reconecta y vuelve a leer | **%s** | %s |"
-            % (sid, title, cmd, "lee" if ok else "NO lee", "✅" if ok else "❌")
+            "| %s | %s | `%s` | reconecta y vuelve a leer%s | **%s**%s | %s |"
+            % (
+                sid,
+                title,
+                cmd,
+                " + backoff creciente" if sid == "E15" else "",
+                "lee" if st["count"] == 1 else "NO lee",
+                extra,
+                "✅" if ok else "❌",
+            )
         )
     return ok_all
 
