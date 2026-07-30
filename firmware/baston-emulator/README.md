@@ -240,7 +240,7 @@ otra cosa, es un hallazgo:
 | escenario | comando | resultado esperado |
 |---|---|---|
 | repetidas del mismo EID, dentro de la ventana | `same 5 300` | **1 sola** ingesta (5 en el log del emulador, t = 0…1200 ms) |
-| repetidas del mismo EID, cruzando la ventana | `same 5` (gap 800) | **2** ingestas: la de t=0 y la de t=3200. No es un bug: prueba que la ventana se mide desde la última emisión confirmada (si diera 1, el bastón que repite la línea 9 veces la estaría extendiendo para siempre) |
+| repetidas del mismo EID, cruzando la ventana | `gap 2000` + `same 3` | **2** ingestas: la de t=0 y la de t=4000; la de t=2000 cae adentro. Prueba que la ventana se mide desde la última emisión confirmada (si diera 1, el bastón que repite la línea 9 veces la estaría extendiendo para siempre). **Este caso decía `same 5` con gap 800 y era un oráculo tramposo**: ponía la 5ª emisión a 3200 ms de una ventana de 3000, o sea 200 ms de margen — menos que el jitter de RFCOMM + JS. Medido: 1, 2, 2 en tres corridas seguidas (2026-07-30). Con 2000/3 hay 1000 ms de margen y da 2 siempre (3/3) |
 | ráfaga del mismo animal | `seq off` + `burst 8` | **1** ingesta; ninguna lectura perdida, la UI no se traba |
 | ráfaga de animales distintos | `seq on` + `burst 8` | **8** ingestas (un EID distinto nunca espera por otro) |
 | lecturas espaciadas | `same 5 3500` | **5** ingestas del mismo EID (cada una fuera de la ventana) |

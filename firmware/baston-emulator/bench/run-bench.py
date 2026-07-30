@@ -263,7 +263,12 @@ def ensure_connected(emu, tries=2):
 # (id, titulo, [comandos], espera_seg, esperado_o_None, nota)
 COUNTING = [
     ("E1", "repetidas dentro de la ventana de dedup", ["seq off", "same 5 300"], 6, 1),
-    ("E2", "repetidas CRUZANDO la ventana", ["gap 800", "same 5"], 8, 2),
+    # OJO con este: la ventana de dedup es de 3000 ms. El caso del README (`gap 800` + `same 5`)
+    # pone la 5a emision a 3200 ms, o sea 200 ms de margen — MENOS que el jitter de RFCOMM + JS.
+    # Medido: 1,2,2 en tres corridas seguidas (2026-07-30). Un oraculo que da rojo la mitad de las
+    # veces entrena a ignorar el rojo, asi que se usa un cruce inequivoco: emisiones a 0/2000/4000
+    # -> la de 2000 cae adentro y la de 4000 afuera, con 1000 ms de margen de los dos lados.
+    ("E2", "repetidas CRUZANDO la ventana", ["gap 2000", "same 3"], 9, 2),
     ("E3", "ráfaga del mismo animal", ["seq off", "burst 8"], 6, 1),
     ("E4", "ráfaga de animales distintos", ["seq on", "burst 8"], 8, 8),
     ("E5", "lecturas espaciadas", ["seq off", "same 5 3500"], 20, 5),

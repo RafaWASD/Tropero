@@ -48,7 +48,7 @@ Todos contra el APK de `dad711f`, sin tocar código. `N` = filas en la lista de 
 | # | escenario | comando | esperado | **medido** | |
 |---|---|---|---|---|---|
 | E1 | repetidas dentro de la ventana | `same 5 300` | 1 | **1** | ✅ |
-| E2 | repetidas cruzando la ventana | `gap 800` + `same 5` | 2 | **2** (00:55:01 y 00:55:04) | ✅ |
+| E2 | repetidas cruzando la ventana | `gap 800` + `same 5` | 2 | **2** (00:55:01 y 00:55:04) — pero el caso es **marginal**, ver §4.8 | ⚠️ |
 | E3 | ráfaga del mismo animal | `seq off`+`burst 8` | 1 | **1** | ✅ |
 | E4 | ráfaga de animales distintos | `seq on`+`burst 8` | 8 | **8** | ✅ |
 | E5 | lecturas espaciadas | `same 5 3500` | 5 | **5** | ✅ |
@@ -193,7 +193,21 @@ plano se ejecuta en background — viola R6.9 / RMV5.5. Lo que sí funciona: **d
 desconexión ocurrió mientras la app todavía estaba en primer plano y sí se detectó. Confirma que BENCH-1
 necesita que el corte ocurra **enteramente** con la app en background.
 
-### 4.7 ⚪ Latencia de detección del corte: ~2 a 6 s
+### 4.8 ⚠️ El escenario E2 del README era un oráculo tramposo (segunda afirmación frágil)
+
+`same 5` con `gap 800` pone la 5ª emisión a **3200 ms** de una ventana de dedup de **3000 ms**: 200 ms de
+margen, **menos que el jitter** de RFCOMM + procesamiento en JS. Medido corriéndolo cuatro veces:
+**1, 2, 2** en tres corridas seguidas del runner, más el **2** de la corrida manual.
+
+No es un defecto del producto — el dedup hace exactamente lo que dice `dedup.ts`. Es un **defecto del
+banco**: un oráculo que da rojo la mitad de las veces entrena a ignorar el rojo. Reemplazado por
+`gap 2000` + `same 3` (emisiones a 0 / 2000 / 4000 → la del medio adentro, la última afuera, 1000 ms de
+margen de los dos lados): **3/3 estable**. Corregido en el README del emulador y en el runner.
+
+Van **dos** afirmaciones del README falsificadas por medición en la misma noche (esta y el backoff de
+§4.3). Las dos estaban escritas como expectativas deterministas.
+
+### 4.9 ⚪ Latencia de detección del corte: ~2 a 6 s
 
 `drop` → la app tarda **~6 s** en pasar a desconectada; con `off` (radio abajo) **~2 s**. No es un defecto
 declarado en ninguna spec, pero es el tiempo durante el cual la UI promete un bastón que ya no está.
@@ -230,3 +244,20 @@ marcó Allflex, iAP/MFi, y qué tipea exactamente un lector BLE-HID comercial. *
 
 Se agrega uno nuevo: **🔴-2 necesita un segundo device Classic** (unos auriculares alcanzan). Es una prueba
 de 1 minuto para Raf.
+
+---
+
+## 7. Baseline automatizado contra `dad711f` — 18/21
+
+Todo lo de arriba se corrió después a mano por segunda vez, ya automatizado
+(`firmware/baston-emulator/bench/run-bench.py`), para dejar un **baseline comparable** contra el build
+arreglado. Resultado sobre el APK de `dad711f`:
+
+- **18 escenarios en verde**, los mismos que a mano.
+- **E2 en rojo** por el oráculo tramposo de §4.8 (defecto del banco, ya corregido — no del producto).
+- **BENCH1 en rojo**: `app dice 'Bastón conectado' · emulador link=libre · lee=False`.
+- **LATCH en rojo**: `NO reconectó`, app en `'Bastón conectado'`.
+
+Lo importante no es el 18: es que **BENCH1 y LATCH salen rojos solos**. Un banco que no puede fallar ante
+un bug conocido no prueba nada; este falla exactamente en los dos 🔴 que se encontraron a mano, sin que
+nadie lo mire. Ese es el oráculo con el que se va a verificar el fix.
