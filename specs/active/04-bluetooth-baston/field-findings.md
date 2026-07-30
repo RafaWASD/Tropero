@@ -186,6 +186,39 @@ El test decisivo ya NO es vago ("¿hace GATT?"). Es físico y nítido: **comprar
 - Control negativo: SEIKO SRA02 (handheld Android), animal-microchip.com (genérico "Bluetooth" sin perfil), Agrident AWR250 (Android/Windows, sin iOS).
 - Reporte completo del harness: task `w2cmuc5m0` (output en `tasks/`).
 
+## Sesión 2026-07-29 — el banco de regresión: emulador de bastones sobre ESP32
+
+Después de commitear el camino SPP de Android (`dad711f`) quedó claro que la parte caraque de esta
+feature no es escribir el adapter sino **ejercitarlo**: los tres bugs 🔴 de esa unidad eran de máquina
+de estados, estaban en código dado por "escrito y testeado", y se cazaron **leyendo el código nativo de
+la librería**. El peor hacía que no se emitiera ni una lectura.
+
+Por eso el ESP32 que estaba de bridge de la balanza (ADR-003) se reprogramó como **emulador de
+bastones**: `firmware/baston-emulator/`, un solo fuente con tres modos por flag de compilación.
+
+| modo | qué emula | qué destraba |
+|---|---|---|
+| `MODO_SPP` | Bluetooth Classic SPP, se anuncia `RS420-EMU` (matchea el `deviceMatch` del driver RS420), pairing legacy con PIN `1234` | stream, dedup real, ráfagas, corte, backoff, reconexión → **T-MV.5.7** (antes dentro de T-MV.5.6, que decía "necesita un RS420 físico") |
+| `MODO_HID` | teclado BLE HID que **tipea** el EID + Enter | el **gate físico T5.0 / R8.7** del `adapter-hid-wedge`, que estaba bloqueado por "conseguir un lector HID-capable" (AgriEID USD 595+, sin canal AR) |
+| `MODO_GATT` | BLE Nordic UART, notifica la trama **partida en trozos de 20 bytes** | el reensamblado del `LineFramer` y el futuro `adapter-ble-gatt` (T-MV.6.3) |
+
+Emite la trama **capturada acá arriba** (`\x02` + `1000000` + EID + `YYMMDDHHMMSS` + terminador), con el
+EID y el reloj arrancando en los valores de esta captura, y provoca los estados que rompen: lecturas
+repetidas del mismo EID, ráfagas, EIDs incrementales, corte del link, radio abajo, `flap` de cortes,
+10 variantes de trama malformada, trama partida en dos escrituras, dos tramas pegadas en una, y
+**mudez** (conectado y sin emitir). Protocolo de control por el puerto serie; detalle en
+`firmware/baston-emulator/README.md`.
+
+**Lo que NO reemplaza** (y por lo tanto sigue siendo el gate de T-MV.5.6): el emparejamiento del RS420
+real, su semántica de desconexión, sus tiempos, su buffer interno / "sessions", su versión de firmware,
+iAP/MFi, y qué tipea exactamente un lector BLE-HID comercial.
+
+**Sobre el TODO de protocolo de más arriba**: el emulador manda `0x02` como byte de control y `\r\n`
+como terminador porque es la hipótesis documentada, **no una medición**. El hex dump del lector real
+sigue pendiente. No afecta al parseo (`normalizeTag` recorta cualquier control char de los bordes), y
+el emulador permite mover las dos cosas (`stx on|off`, `term crlf|lf|cr|none`) justamente para no
+depender de esa hipótesis.
+
 ## Fuentes
 - Manual RS420 Rev. 2.5 (allflex.global)
 - Serialio — "Connect Allflex Stick Reader To iOS" (serialio.com)

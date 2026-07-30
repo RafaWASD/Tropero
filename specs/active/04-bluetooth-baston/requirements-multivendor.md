@@ -13,6 +13,7 @@
 > **Madurez por capa (buildable-hoy vs. gated).** Marcada explícitamente en cada bloque:
 > - **Buildable-hoy sin hardware** (unit puro / mock / simulador): `RMV1` (registro), `RMV2` (selección), `RMV3` (pantalla + indicador, contra mock/web-serial/simulador), `RMV4` (simulador, dev/demo-gated), **el código + los tests puros** de `RMV5` (`adapter-spp-android` escrito).
 > - **Gated por hardware**: la validación de conexión real de cualquier transporte (`RMV5` SPP real, `RMV3` conexión real SPP/HID, `RMV2` matching device→driver por canal real), el `hid-wedge` (ya GATED en el core R8.7), el config plugin + dev build Android (`RMV5.8`).
+> **[Reconciliación 2026-07-29: el `emulador de bastones` sobre ESP32 (`firmware/baston-emulator/`) destraba la mayor parte de este bloque — SPP real, conexión real, matching por nombre anunciado y el gate físico del `hid-wedge` (R8.7) se pueden correr sin comprar hardware. Queda gated lo que un emulador no puede imitar: las mañas de los lectores comerciales.]**
 > - **Gated por negocio (MFi)**: el adaptador External Accessory / MFi de iOS (`RMV6`). Arquitectura preparada (`transportKind:'mfi'` + `protocolString` declarable), sin implementar el adapter.
 
 > **Manual-first sigue siendo ley** (core R7, R9.6): ningún estado de la selección, la conexión, el driver desconocido ni el simulador deberá **nunca** bloquear la app ni la carga manual. El delta hereda ese piso.
@@ -135,6 +136,8 @@
 
 > **Reconciliación 2026-07-29 — el gate se ACOTA, no se levanta.** Sigue vigente: sin un RS420 físico no está validado que el bastón emita la trama por el socket y que la app la ingiera. Lo que cambia es el **tamaño** del gate: metiendo la I/O detrás de `SppEnv` (inyección de entorno), la máquina de estados completa —permiso concedido/denegado, Bluetooth apagado con y sin aceptación, device recordado vs. explícito, apertura del socket, stream, corte del SO, backoff creciente, reset del backoff, background/foreground, doble connect, teardown— se ejercita en `node:test` **sin device**. Y en el teléfono de Raf, **sin RS420**, se puede verificar: que la app arranca con la dep nativa, el diálogo de permiso, la enumeración de los emparejados reales, el error al conectar contra algo que no habla SPP, y que el chip vuelve. Queda **solo** el stream real (T-MV.5.6).
 
+> **Reconciliación 2026-07-29 (bis) — el gate se ACOTA otra vez, y ahora sí se puede correr.** El ESP32 del bridge de la balanza se reprogramó como **emulador de bastones** (`firmware/baston-emulator/`, `MODO_SPP`): emite la trama capturada en campo con fidelidad de byte y provoca los escenarios que rompen (repetidos, ráfagas, corte del link, radio abajo, flap, 10 malformadas, trama partida, dos pegadas, mudez). Con eso **stream, dedup sobre lecturas reales, ráfagas, corte, backoff y reconexión pasan a ser verificables SIN un RS420** (T-MV.5.7, pendiente de flasheo). De este requisito queda gated solo la parte irreductible: **las idiosincrasias del lector físico** — su emparejamiento, su semántica de desconexión, sus tiempos, su buffer interno / "sessions", y si la trama cambió con la actualización de firmware pendiente (T-MV.5.6). Lista completa de lo que el emulador NO valida en `firmware/baston-emulator/README.md` §"Qué NO valida".
+
 ## RMV6. Arquitectura preparada para MFi/EA e GATT (fuera de este delta)
 
 > **Gated por negocio / futuro.** El delta deja la arquitectura preparada pero **no** implementa el adapter External Accessory (MFi iOS) ni un `adapter-ble-gatt`. MFi/certificaciones = track paralelo diferido (canal Facundo, ADR-024 §5).
@@ -183,7 +186,7 @@
 | RMV2 — Selección por capacidad | ✅ (puro) | matching device→driver por **canal real** (RMV1.5 se testea con devices sintéticos; validación real gated) | — |
 | RMV3 — Pantalla + indicador | ✅ UI + mock/web-serial/simulador | conexión **real** SPP/HID | — |
 | RMV4 — Simulador (demo) | ✅ (dev/demo-gated por triple-guard) | — | — |
-| RMV5 — `adapter-spp-android` | ✅ **código + tests + dep nativa instalada + montado en Android** (RMV5.1–5.8, 2026-07-29) | stream de un RS420 **físico** (RMV5.9, T-MV.5.6) | — |
+| RMV5 — `adapter-spp-android` | ✅ **código + tests + dep nativa instalada + montado en Android** (RMV5.1–5.8, 2026-07-29) + **stream/dedup/reconexión contra el emulador ESP32** (T-MV.5.7) | solo las **idiosincrasias** del RS420 físico (RMV5.9, T-MV.5.6) | — |
 | RMV6 — MFi/EA + GATT | arquitectura declarable (RMV6.1/6.3) | — | ✅ adapter EA/MFi (RMV6.2) |
 
 ## Criterios de aceptación del delta

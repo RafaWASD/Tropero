@@ -3,6 +3,44 @@
 > Este archivo se vacía al cerrar cada sesión y su resumen se mueve a `history.md`.
 > Mientras trabajás, **mantenelo actualizado en tiempo real**, no al final.
 
+## 2026-07-29 — UNIDAD «emulador de bastones sobre ESP32» (implementer) — LISTA para review
+
+Base `16cf880`. Firmware + docs; **NO toca `app/`**. Autorización de Raf: usar el ESP32 (ya respaldado en
+`firmware/backup/`) para cubrir todas las pruebas que se pueda. Motivo: los tres bugs 🔴 de `dad711f`
+eran de máquina de estados, estaban en código dado por "escrito y testeado", y se cazaron **leyendo el
+código nativo** — el peor no emitía ni una lectura. Esto es el **banco de regresión** del bastón.
+
+**Entregable**: `firmware/baston-emulator/baston-emulator.ino` (un solo fuente, 3 modos por flag:
+`MODO_SPP` Classic SPP / `MODO_HID` teclado BLE HID / `MODO_GATT` Nordic UART) + `README.md`. El
+generador de tramas y de EIDs está en **una** sección compartida por los tres.
+
+**Veredicto medido del binario único: los tres modos SÍ entran juntos, y en la partición por defecto**
+(sonda con los 3 stacks linkeados = 1.113.523 B, 84 %, apenas 3 kB más que GATT solo — Bluedroid viene
+precompilado en modo dual). El supuesto de que no entraban era falso. Igual se entregan tres builds por
+otras razones: RAM sin verificar, cambio de modo en runtime = `deinit`/`init` de Bluedroid, y un device
+que se anuncia a la vez como SPP + teclado + NUS **contaminaría** el matching device→driver.
+
+**Verificado ejecutando**: los 3 modos compilan sin warnings propios (único warning: `BluetoothSerial`
+deprecada en el core); el flag realmente selecciona el modo (cada `.bin` contiene **solo** su cadena de
+modo); las 22 tramas del emulador pasadas por el parser REAL (`parser-rs420.ts`) → **22 ok / 0 fail**;
+`node scripts/check.mjs` → **RC=0**. **NO se flasheó** (lo corre Raf).
+
+**Hallazgo del propio check de tramas**: `bad noterm` **no es un caso de parser** — su contenido es una
+trama válida y el defecto es de transporte. El texto del `selftest` decía lo contrario; corregido.
+
+**Autorrevisión** (7 fixes propios, entre ellos): la mudez no se aplicaba a todo (movida al único punto
+por el que sale un byte); el log mentía el motivo de "no salió"; el `flap` no dejaba aire arriba, así que
+**nunca probaba la reconexión** (que es el bug 3 de `dad711f`); los comandos por aire se ejecutaban
+DENTRO del callback del stack BLE; y el nombre BLE se truncaba en silencio a los 18 caracteres.
+
+**Reconciliación de specs (5 archivos)**: `T-MV.5.6` **se acotó** a las idiosincrasias del lector real y
+lo demás pasó a la nueva `T-MV.5.7` (contra el emulador, sin gate de hardware); en `context-multivendor.md`
+quedó tachado *"no se puede device-validar ningún transporte real"*; y el gate físico del HID (`T5.0`),
+que estaba bloqueado por *"conseguir un lector HID-capable"* (AgriEID USD 595+), **ya se puede correr**.
+
+Detalle, tabla de tamaños, protocolo de control y dudas abiertas en
+`progress/impl_baston-emulator-esp32.md`.
+
 ## 2026-07-29 — UNIDAD «el bastón funciona de verdad en Android» (implementer) — LISTA para review
 
 Base `6d1fd74`. Pedido de Raf tras el fix cosmético anterior: *"Te pedí que lo desarrolles no que lo
