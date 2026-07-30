@@ -529,6 +529,74 @@ def run_cap(emu, out):
     return ok
 
 
+def run_cold_cut(emu, out):
+    """Un corte DESPUES de que la app conecto SOLA, pasados los 120 s del tope, tiene que reintentar.
+
+    Es el hueco que encontro Gate 2 (HIGH-1) y que NINGUNA otra escena de este banco cubre: E13/E14
+    arrancan desde una conexion por GESTO, asi que su cadena es `operator` y no tiene presupuesto.
+    El modo de falla es el peor posible en la manga: el estado no miente, **falta** — el pill del
+    chrome se auto-oculta en 'off', el operario sigue bastoneando y no entra nada.
+    """
+    if not ensure_connected(emu):  # deja el device recordado
+        out.append("| COLD-CUT | corte tras conectar sola, pasado el tope | — | — | **no se pudo preparar** | ⚠️ |")
+        return False
+    emu.send("drop")
+    time.sleep(4)
+    cold_start()
+    time.sleep(25)
+    if not emu.linked():
+        out.append(
+            "| COLD-CUT | corte tras conectar sola, pasado el tope | `drop` + frío | — | "
+            "**⚠️ no conectó sola: sin R6.4 esta escena no prueba nada (ver COLD)** | ⚠️ |"
+        )
+        return False
+    time.sleep(115)  # el link sano cruza los 120 s del presupuesto
+    emu.send("drop")  # AHORA se cae
+    time.sleep(35)
+    reconecto = emu.linked()
+    st = screen()
+    out.append(
+        "| COLD-CUT | corte tras conectar SOLA, pasado el tope (Gate 2 HIGH-1) | frío + 120 s sanos + `drop` | "
+        "reintenta y reconecta | **link=%s · app: %r** | %s |"
+        % ("CONECTADO" if reconecto else "libre", st["status"], "✅" if reconecto else "❌")
+    )
+    return reconecto
+
+
+def run_cap_reset(emu, out):
+    """El estado "agotado" tiene que DESTRABARSE cuando el operario prende el baston y toca el CTA.
+
+    Si `autoConnectExhausted` queda pegado, la app dice "no encontramos el baston" para siempre —
+    incluso conectada. Oraculo de comportamiento (no del copy, que puede cambiar): despues del tap,
+    el emulador tiene que ver el link CONECTADO **y** la pantalla tiene que decir que esta conectada.
+    Si el estado agotado enmascara al conectado, el texto no va a decirlo y esto cae en rojo.
+    """
+    if not ensure_connected(emu):
+        out.append("| CAP-RESET | el estado agotado se destraba | — | — | **no se pudo preparar** | ⚠️ |")
+        return False
+    emu.send("off 150000")  # abajo 150 s: el tope (120 s) vence ANTES de que vuelva la radio
+    time.sleep(3)
+    cold_start()
+    time.sleep(8)
+    adb("shell", "am", "start", "-a", "android.intent.action.VIEW", "-d", "rafq://baston")
+    time.sleep(135)  # pasado el tope
+    agotado = screen()
+    time.sleep(25)  # que vuelva la radio del emulador
+    radio_ok = any("radio=arriba" in l for l in emu.ask("status"))
+    ui_tap("stick-status-cta")  # el operario prende el baston y toca
+    time.sleep(12)
+    close_overlay()
+    st = screen()
+    conectado = "conectado" in st["status"].lower() and "desconectado" not in st["status"].lower()
+    ok = radio_ok and emu.linked() and conectado
+    out.append(
+        "| CAP-RESET | el estado agotado se DESTRABA con un tap | `off 150000` + frío + tap al CTA | "
+        "conecta y deja de decir que no lo encuentra | **agotado: %r → tras el tap: %r · link=%s** | %s |"
+        % (agotado["status"], st["status"], "CONECTADO" if emu.linked() else "libre", "✅" if ok else "❌")
+    )
+    return ok
+
+
 ALL_IDS = [s[0] for s in COUNTING] + [
     "E13",
     "E14",
@@ -538,6 +606,7 @@ ALL_IDS = [s[0] for s in COUNTING] + [
     "COLD",
     "COLD-BTOFF",
     "CAP",
+    "CAP-RESET",
 ]
 
 
@@ -609,6 +678,12 @@ def main():
     if not only or "CAP" in only:
         if not run_cap(emu, out):
             failures.append("CAP")
+    if not only or "CAP-RESET" in only:
+        if not run_cap_reset(emu, out):
+            failures.append("CAP-RESET")
+    if not only or "COLD-CUT" in only:
+        if not run_cold_cut(emu, out):
+            failures.append("COLD-CUT")
 
     out.append("")
     out.append("**%d escenario(s) en rojo**: %s" % (len(failures), ", ".join(failures) or "ninguno"))
