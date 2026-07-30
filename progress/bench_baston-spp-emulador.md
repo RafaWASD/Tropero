@@ -171,7 +171,29 @@ de bastones**. Demo real = tocás conectar, bastoneás, y un modal te tapa lo qu
 *(No contamina las mediciones de esta corrida: el overlay no suspende la escucha — verificado leyendo
 `useBleStickListener({enabled, onTagRead})` sin `busyMode`— y los conteos se leen de la lista de la pantalla.)*
 
-### 4.6 ⚪ Latencia de detección del corte: ~2 a 6 s
+### 4.6 🟠-1 del reviewer — CONFIRMADO en device: el timer dispara un connect en background
+
+El orden importa y por eso el primer intento no lo mostró. La secuencia que lo reproduce es la del
+reviewer: **cortar con la app en primer plano** (para que la desconexión se detecte y el timer se programe
+en foreground) **y minimizar antes de que el timer dispare**.
+
+```
+00:31:30.614  connection_changed false + reconnect_attempt attempt:0   ← app en FOREGROUND, timer programado
+00:31:32      (minimizo la app)
+00:31:46.627  connect_error "java.io.IOException: read failed, socket might closed or timeout, read ret: -1"
+              ↑ un connect nativo que se EJECUTÓ con la app minimizada
+```
+
+El gate de foreground se evalúa **al programar** y no **al disparar**, así que un timer nacido en primer
+plano se ejecuta en background — viola R6.9 / RMV5.5. Lo que sí funciona: **después** de ese fallo, el
+`scheduleReconnect` siguiente vio `isForeground()` falso y se quedó esperando; al volver al frente disparó
+`attempt:1` y reconectó (00:32:25).
+
+**Detalle que acota BENCH-1**: en esta corrida **no** apareció el "conectado mentiroso", porque la
+desconexión ocurrió mientras la app todavía estaba en primer plano y sí se detectó. Confirma que BENCH-1
+necesita que el corte ocurra **enteramente** con la app en background.
+
+### 4.7 ⚪ Latencia de detección del corte: ~2 a 6 s
 
 `drop` → la app tarda **~6 s** en pasar a desconectada; con `off` (radio abajo) **~2 s**. No es un defecto
 declarado en ninguna spec, pero es el tiempo durante el cual la UI promete un bastón que ya no está.
@@ -182,7 +204,7 @@ declarado en ninguna spec, pero es el tiempo durante el cual la UI promete un ba
 
 | # | predicción | veredicto |
 |---|---|---|
-| 1 | connect disparado desde background (viola R6.9) | **no reproducida en el orden que probé** (minimizar y *después* cortar): no hubo ni un intento. El caso exacto del reviewer —cortar en foreground y minimizar antes de que dispare el timer— **no se probó**; queda abierto |
+| 1 | connect disparado desde background (viola R6.9) | ✅ **confirmada** en el orden correcto — ver §4.6 |
 | 2 | BT apagado → Conectando… sin salida | ✅ **confirmada** (§4.2), con un camino más realista todavía |
 | 3 | auriculares BT apagados matan el bastón (🔴-2) | **no probada — falta un 2º device Classic.** El A07 no tenía ningún otro emparejado. Sigue en pie por lectura del Java |
 | 4 | tocar otra fila mientras conecta = nada | **no probada** (hay un solo device en la lista) |

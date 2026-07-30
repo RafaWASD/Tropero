@@ -210,6 +210,27 @@ UART (`6E400002-…`) desde nRF Connect o desde la app — el emulador lo **enco
 `loop()`, nunca dentro del callback del stack. En `MODO_HID` no hay canal de entrada (un teclado no
 recibe) y en `MODO_SPP` lo que llegue se descarta, porque ese canal es el protocolo del lector.
 
+### Correrlos todos de una: `bench/run-bench.py`
+
+Los escenarios de abajo están automatizados. El runner maneja el puerto serie, la UI del teléfono por
+`adb`+`uiautomator` y los oráculos, y sale con código ≠ 0 si alguno no da lo esperado:
+
+```bash
+cd firmware/baston-emulator/bench
+python run-bench.py                    # todo
+python run-bench.py --only E1,E4,BENCH1
+python run-bench.py --list
+```
+
+Verifica las precondiciones antes de arrancar (app instalada, `RS420-EMU` emparejado, ESP32 en
+`MODO_SPP`) y falla con el motivo en vez de dar un verde vacío. **Un solo proceso puede tener el puerto**:
+cerrá el Monitor Serie del Arduino IDE antes.
+
+Suma tres escenarios que no están en la tabla porque no son del emulador sino del teléfono: **BENCH1**
+(corte con la app minimizada → ¿queda un "conectado" mentiroso?), **LATCH** (Bluetooth prendido desde el
+panel rápido sin contestarle al diálogo de la app) y la verificación de que después de cada corte
+**vuelve a leer**, que es lo único que prueba que la reconexión sirvió para algo.
+
 ### Los casos, y qué tiene que hacer nuestro lado
 
 La ventana de dedup es **3000 ms por-TAG** y se mide **desde la última emisión CONFIRMADA, no desde el
