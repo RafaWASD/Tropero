@@ -261,3 +261,26 @@ arreglado. Resultado sobre el APK de `dad711f`:
 Lo importante no es el 18: es que **BENCH1 y LATCH salen rojos solos**. Un banco que no puede fallar ante
 un bug conocido no prueba nada; este falla exactamente en los dos 🔴 que se encontraron a mano, sin que
 nadie lo mire. Ese es el oráculo con el que se va a verificar el fix.
+
+### Baseline completo de las 24 escenas contra `dad711f`
+
+Después se le sumaron al banco tres escenas para R6.4 y para el tope de la cadena sin gesto. **Este
+baseline está ARMADO de mediciones separadas, no es una sola corrida** (E2 se midió con la variante
+corregida, 3/3; las tres nuevas se midieron sueltas):
+
+| escena | baseline en `dad711f` |
+|---|---|
+| E1, E3…E16b (14) + E13/E14/E15 | ✅ |
+| E2 (variante corregida) | ✅ 3/3 |
+| **BENCH1** | ❌ `app dice 'Bastón conectado' · emulador link=libre · lee=False` |
+| **LATCH** | ❌ `NO reconectó` |
+| **COLD** (arranque en frío conecta sin gesto, R6.4) | ❌ `link=libre` — R6.4 no existe en este build |
+| COLD-BTOFF (el arranque no pide nada con BT apagado) | ✅ trivial: sin auto-connect no hay nada que pida |
+| **CAP** (tope de la cadena sin gesto) | ⚠️ `arrancó=False` — el oráculo **se declara inútil**: sin cadena que topear, "topeó bien" y "nunca arrancó" dejan la app idéntica (en `off`, con CTA) |
+
+Las dos últimas filas son la parte que importa del diseño del banco. COLD-BTOFF y CAP **pasarían
+trivialmente** sobre el build viejo, y CAP en particular es el caso donde un oráculo ingenuo daría verde
+por el motivo equivocado — el mismo modo de falla que el implementer se cazó a sí mismo (su gate por
+`closed` mataba R6.4 en silencio, dejando la app exactamente igual que si hubiera topeado bien). Por eso
+CAP ahora **exige primero probar que la cadena arrancó** (muestrea el estado durante la espera) y recién
+después que frenó con salida; si no arrancó, no dice ✅ ni ❌: dice que no probó nada.

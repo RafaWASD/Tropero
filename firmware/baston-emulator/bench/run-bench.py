@@ -394,7 +394,118 @@ def run_latch(emu, out):
     return recovered
 
 
-ALL_IDS = [s[0] for s in COUNTING] + ["E13", "E14", "E15", "BENCH1", "LATCH"]
+def cold_start():
+    """Arranque en FRIO de verdad: mata el proceso y lo lanza sin deep-link."""
+    adb("shell", "am", "force-stop", PKG)
+    time.sleep(2)
+    adb("logcat", "-c")
+    adb("shell", "am", "start", "-n", "%s/.MainActivity" % PKG)
+
+
+def ble_log():
+    return [l for l in adb("logcat", "-d", "-s", "ReactNativeJS").splitlines() if "[ble]" in l]
+
+
+def run_cold(emu, out):
+    """R6.4: con device recordado y BT prendido, el arranque conecta SIN NINGUN GESTO.
+
+    Oraculo de comportamiento, no de log: el link del emulador pasa a CONECTADO despues de un
+    arranque en frio en el que no se tapea nada. Si esto pasa, R6.4 esta implementado; si no, no.
+    """
+    if not ensure_connected(emu):  # deja el device recordado (la conexion por gesto lo persiste)
+        out.append("| COLD | arranque en frío conecta solo | — | — | **no se pudo preparar** | ⚠️ |")
+        return False
+    emu.send("drop")  # cortamos el link pero el device queda recordado y la radio arriba
+    time.sleep(4)
+    cold_start()
+    time.sleep(20)  # sin un solo tap
+    linked = emu.linked()
+    out.append(
+        "| COLD | arranque en frío conecta SIN gesto (R6.4) | `drop` + force-stop + relaunch | link=CONECTADO | "
+        "**link=%s** | %s |" % ("CONECTADO" if linked else "libre", "✅" if linked else "❌")
+    )
+    return linked
+
+
+def run_cold_btoff(emu, out):
+    """R6.4 sin ser hostil: con el BT apagado, el arranque NO puede tirar el dialogo del sistema.
+
+    Oraculo de comportamiento: ausencia del dialogo en pantalla. Deja el BT prendido, como estaba.
+    """
+    adb_shell("cmd bluetooth_manager disable")
+    time.sleep(10)
+    cold_start()
+    time.sleep(18)
+    dialog = bool(ui_find(r"solicitando que active Bluetooth"))
+    skipped = [l for l in ble_log() if "autoconnect_skipped" in l]
+    adb_shell("cmd bluetooth_manager enable")
+    time.sleep(10)
+    if ui_find(r"solicitando que active Bluetooth"):  # limpieza
+        adb("shell", "input", "keyevent", "KEYCODE_BACK")
+        time.sleep(5)
+    out.append(
+        "| COLD-BTOFF | arranque en frío con BT apagado no pide nada | force-stop + relaunch sin BT | "
+        "cero diálogos del sistema | **diálogo=%s · autoconnect_skipped=%d** | %s |"
+        % ("SÍ" if dialog else "no", len(skipped), "❌" if dialog else "✅")
+    )
+    return not dialog
+
+
+def run_cap(emu, out):
+    """El tope de la cadena SIN GESTO: un baston recordado que no aparece no puede dejar la app
+    reintentando para siempre en cada apertura.
+
+    Oraculo de comportamiento: a los ~2,5 min de un arranque en frio contra un baston ausente, la
+    pantalla NO sigue en 'Reintentando...' y ofrece un CTA. `off 200000` saca al emulador del aire
+    todo el escenario.
+    """
+    if not ensure_connected(emu):
+        out.append("| CAP | tope de la cadena sin gesto | — | — | **no se pudo preparar** | ⚠️ |")
+        return False
+    emu.send("off 200000")  # el baston desaparece del aire durante todo el escenario
+    time.sleep(3)
+    cold_start()
+    # OJO — sin esto el oraculo es un sello de goma: "topeo bien" y "el auto-connect nunca
+    # disparo" dejan la app EXACTAMENTE igual (en 'off', con CTA). Es el bug que el implementer se
+    # cazo a si mismo (el gate por `closed` mataba R6.4 en silencio). Asi que primero hay que
+    # PROBAR que la cadena sin gesto arranco, muestreando el estado durante la espera.
+    time.sleep(8)
+    adb("shell", "am", "start", "-a", "android.intent.action.VIEW", "-d", "rafq://baston")
+    arranco = False
+    for _ in range(16):  # ~160 s muestreando
+        s = screen()["status"].lower()
+        if "reintent" in s or "conectando" in s:
+            arranco = True
+        time.sleep(10)
+    st = screen()
+    reintentando = "reintent" in st["status"].lower()
+    tiene_cta = bool([n for n in st["nodes"] if n["clickable"] and "stick-status-cta" in n["rid"]])
+    freno_con_salida = (not reintentando) and tiene_cta
+    ok = arranco and freno_con_salida
+    if not arranco:
+        veredicto = "⚠️ la cadena nunca arrancó — el oráculo NO prueba nada acá"
+    elif freno_con_salida:
+        veredicto = "✅"
+    else:
+        veredicto = "❌"
+    out.append(
+        "| CAP | tope de la cadena SIN gesto (~2 min) | `off 200000` + arranque en frío | "
+        "arranca sola, y frena con CTA | **arrancó=%s · final: %r · CTA=%s** | %s |"
+        % (arranco, st["status"], tiene_cta, veredicto)
+    )
+    return ok
+
+
+ALL_IDS = [s[0] for s in COUNTING] + [
+    "E13",
+    "E14",
+    "E15",
+    "BENCH1",
+    "LATCH",
+    "COLD",
+    "COLD-BTOFF",
+    "CAP",
+]
 
 
 def main():
@@ -455,6 +566,16 @@ def main():
     if not only or "LATCH" in only:
         if not run_latch(emu, out):
             failures.append("LATCH")
+    # R6.4 y el tope: van al final porque matan el proceso de la app
+    if not only or "COLD" in only:
+        if not run_cold(emu, out):
+            failures.append("COLD")
+    if not only or "COLD-BTOFF" in only:
+        if not run_cold_btoff(emu, out):
+            failures.append("COLD-BTOFF")
+    if not only or "CAP" in only:
+        if not run_cap(emu, out):
+            failures.append("CAP")
 
     out.append("")
     out.append("**%d escenario(s) en rojo**: %s" % (len(failures), ", ".join(failures) or "ninguno"))
