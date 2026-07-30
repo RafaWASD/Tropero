@@ -17,6 +17,15 @@ No es un sustituto de `feature_list.json` ni de los ADRs — es la antesala dond
 
 ## Ítems pendientes
 
+## 2026-07-30 — El adapter de iOS va a nacer sin fuente de verdad del link, y nada lo va a obligar
+
+**Origen**: pregunta de Raf al cierre de la sesión del bastón — *"lo que corregiste, lo corregiste para ambos?"*. La respuesta destapó esto.
+**Qué**: el peor 🔴 de esa noche (el *"Bastón conectado"* mentiroso) se arregló con una **segunda fuente de verdad** del link: `isDeviceConnected` del lado Java, consultado al volver a foreground y por un poll de 15 s, en vez de confiar en el evento de desconexión del SO — que se puede perder (`sendEvent` lo descarta si no hay Catalyst instance activa, y el otro emisor publica en `DEVICE_DISCONNECTED@<address>`, al que el listener no estaba suscrito). **Ese mecanismo vive entero dentro de `adapter-spp-android.ts`.**
+Cuando aterrice el camino de iOS (BLE-HID wedge, `adapter-hid-wedge.ts`, hoy 22 líneas de placeholder gateadas por T5.0/R8.7) va a tener su propio modelo de eventos y su propia forma de perderlos — y **no hay ningún guard que le exija tener una fuente de verdad propia**. La lección quedó codificada como *implementación* en un adapter, no como *invariante* del contrato.
+**Por qué importa**: es la clase que este proyecto se comió tres veces en una semana — el guard cubre la instancia arreglada y no el invariante, así que lo nuevo nace roto y en silencio. Y el modo de falla acá es el peor de todos para la manga: el estado dice "conectado", el operario bastonea 40 animales y no entra ninguno. No hay verde que lo delate.
+**Lo que SÍ hereda iOS ya hoy** (para no re-litigarlo): el techo de los awaits del puente (`bridge-timeout.ts` + el guard, que escanea `services/ble/**`, así que un `adapter-hid-wedge` implementado cae adentro) · la MAC recordada con techo en el borde, R6.6 cableada y limpieza en `signOut`/`SIGNED_OUT`/baja · el fin del doble consumo en `/baston` · y el guard del modo de ingesta, que **recorre todos los `AdapterKind` incluido `hid-wedge`** → ese sí nace en rojo si no declara.
+**Próximo paso sugerido**: al escribir la spec del adapter HID, subir "fuente de verdad del estado de conexión independiente del stream de eventos" del nivel de implementación al nivel de **contrato** (`StickAdapter` / ADR-024), con un guard que recorra los adapters y falle si alguno no la declara — el mismo patrón que ya funcionó con `ADAPTER_INGEST_MODE`.
+
 ## 2026-07-30 — 🔴 de clase: NINGUNA aserción de tipos escrita en un test la chequea nadie
 
 **Origen**: autorrevisión del implementer en el fix de los bloqueantes del SPP (2026-07-30). Se lo encontró a sí mismo: había puesto un guard de tipos en un test y no guardaba nada.
