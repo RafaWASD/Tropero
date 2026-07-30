@@ -1,8 +1,31 @@
-# ADR-003 — BLE Nordic UART Service (NO Bluetooth Classic SPP)
+# ADR-003 — BLE Nordic UART Service para el bridge que construimos nosotros (no SPP en hardware propio)
 
 **Status**: Accepted
 **Fecha**: 2026-05
 **Decisores**: Raf
+
+> ⚠️ **ACLARACIÓN DE ALCANCE (2026-07-29).** El título original decía *"(NO Bluetooth Classic SPP)"*, a
+> secas, y eso se lee como una prohibición general de SPP en el proyecto. **No lo es, y la decisión de
+> abajo no cambia.** Este ADR gobierna **el hardware que diseñamos nosotros** —el bridge de la balanza
+> Vesta— donde SÍ elegimos el protocolo y por lo tanto elegimos el que no necesita MFi en iOS.
+>
+> **No aplica a hardware de terceros.** El bastón Allflex RS420 habla Bluetooth Classic SPP y nosotros
+> no elegimos nada: o hablamos SPP o no lo leemos. Por eso `app/src/services/ble/adapter-spp-android.ts`
+> (spec 04) usa SPP en Android **sin contradecir este ADR**, y por eso el ADR-024 fija un contrato de
+> ingesta transport-agnóstico con varios adaptadores en vez de un solo transporte. La restricción de iOS
+> que motiva este ADR sigue siendo cierta y es exactamente la razón por la que el camino iOS del bastón
+> **no** es SPP sino **BLE-HID** (ver `context-multivendor.md`).
+>
+> **Segundo rol del mismo ESP32 (2026-07-29).** El ESP32 pasa a usarse también como **emulador de
+> bastones** para poder probar los transportes sin tener un lector físico (`firmware/`). En ese rol imita
+> hardware de TERCEROS —incluido SPP— y por lo tanto tampoco cae bajo este ADR: no es nuestro producto,
+> es un banco de pruebas. Cuando emula un bastón **no debe advertir como `VESTA_BRIDGE`**, para no
+> confundirse con el rol de bridge que este ADR define.
+>
+> Por qué se escribe esto: el título prometía más de lo que la decisión abarca, y en esta misma sesión
+> dos encuadres así nos costaron caro (un adapter "escrito y testeado" que no leía nada, e
+> invitaciones "diferidas" que estaban rotas). Un documento que se skimea por el título tiene que
+> decir la verdad en el título.
 
 ## Contexto
 

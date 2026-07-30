@@ -1,0 +1,2811 @@
+Mar 31 2026 12:02:59
+Hl`dhTX\480<LPptx|
+is not bootable
+flash_parts
+end1 > start1
+end2 > start2
+overlaps bootloader stack
+overlaps bootloader data
+overlaps loader IRAM
+bad load address range
+load_end > load_addr
+Calculated hash
+Expected hash
+handle != NULL
+data_len % 4 == 0
+words_hashed % BLOCK_WORDS == 60 / 4
+words_hashed % BLOCK_WORDS == 0
+&_bss_start <= &_bss_end
+&_data_start <= &_data_end
+sp < &_bss_start
+sp < &_data_start
+boot.esp32
+boot_comm
+buffer != NULL
+bootloader_flash
+mosi_len <= 32
+miso_len <= 32
+miso_byte_num <= 4
+slowclk_cycles < 32767
+slowclk_cycles
+bootloader_util_regions_overlap
+verify_load_addresses
+bootloader_sha256_finish
+bootloader_sha256_data
+bootloader_init
+bootloader_fill_random
+bootloader_flash_read_sfdp
+bootloader_flash_execute_command_common
+bootloader_flash_read_allow_decrypt
+pp`ptc
+w0pptw
+otadata
+spiffs
+coredump
+:|6!phy
+}cal_data
+~~NHB<84
+cal_data
+$MGcal_mac
+cal_mac
+tcal_version
+bt_cfg_key0
+8wbt_cfg_key0
+[Adapter]
+LE_LOCAL_KEY_IRK = d0d4185ed8d24da5b63b0214c604a6a7
+[[Adapter]
+LE_LOCAL_KEY_IR = 86cacf55cfb9867dff72133c68712a83
+LE_LOCAL_KEY_DHK = 82542a039ace0a524d90094c2ad6b8af
+tbt_cfg_key0
+7[Adapter]
+LE_LOCAL_KEY_ER = 6269900b90d2933f3a4ac839c7e2e9b2
+||NHB<84
+Zcal_data
+trcal_data
+?ble_cccd
+cabf5_002a
+sca531_002a
+ycal_data
+Mar 31 2026
+ucCDI[
+Cliente BLE desconectado
+Cliente BLE conectado
+[BLE>]
+[sin cliente]
+UART2 listo: RX=GPIO
+TX=GPIO
+VESTA_BRIDGE
+6E400001-B5A3-F393-E0A9-E50E24DCCA9E
+6E400003-B5A3-F393-E0A9-E50E24DCCA9E
+BLE listo. Conect
+VESTA_BRIDGE desde el iPhone.
+[VESTA<]
+ble_cccd
+vector::_M_realloc_append
+cannot create std::vector larger than max_size()
+executeCreate
+<Unknown>
+ConfEvt
+SetValue
+CreateEvt
+getService() != nullptr
+getService()->getServer() != nullptr
+indicate
+basic_string: construction from null is not valid
+http://www.
+https://www.
+http://
+https://
+.info/
+ReadDescrEvt
+WriteDescrEvt
+GetCharEvt
+ScanEnd
+basic_string::_M_create
+AuthComplete
+startSecurity-reset
+RegisterAppEvt
+OpenEvt
+createService
+registerApp
+StartEvt
+DeleteEvt
+StopEvt
+<NULL>
+UART_RX
+UART_TX
+UART_CTS
+UART_RTS
+SIGMADELTA
+ADC_ONESHOT
+ADC_CONT
+DAC_ONESHOT
+DAC_CONT
+DAC_COSINE
+RMT_TX
+RMT_RX
+I2S_STD_MCLK
+I2S_STD_BCLK
+I2S_STD_WS
+I2S_STD_DOUT
+I2S_STD_DIN
+I2S_TDM_MCLK
+I2S_TDM_BCLK
+I2S_TDM_WS
+I2S_TDM_DOUT
+I2S_TDM_DIN
+I2S_PDM_TX_CLK
+I2S_PDM_TX_DOUT0
+I2S_PDM_TX_DOUT1
+I2S_PDM_RX_CLK
+I2S_PDM_RX_DIN0
+I2S_PDM_RX_DIN1
+I2S_PDM_RX_DIN2
+I2S_PDM_RX_DIN3
+I2C_MASTER_SDA
+I2C_MASTER_SCL
+I2C_SLAVE_SDA
+I2C_SLAVE_SCL
+SPI_MASTER_SCK
+SPI_MASTER_MISO
+SPI_MASTER_MOSI
+SPI_MASTER_SS
+SDMMC_CLK
+SDMMC_CMD
+SDMMC_D0
+SDMMC_D1
+SDMMC_D2
+SDMMC_D3
+ETHERNET_SPI
+ETHERNET_RMII
+ETHERNET_CLK
+ETHERNET_MCD
+ETHERNET_MDIO
+ETHERNET_PWR
+PPP_MODEM_TX
+PPP_MODEM_RX
+PPP_MODEM_RTS
+PPP_MODEM_CTS
+loopTask
+Total Size        : %8lu B (%6.1f KB)
+Free Bytes        : %8lu B (%6.1f KB)
+Allocated Bytes   : %8lu B (%6.1f KB)
+Minimum Free Bytes: %8lu B (%6.1f KB)
+Largest Free Block: %8lu B (%6.1f KB)
+=========== Before Setup Start ===========
+Chip Info:
+Model             :
+ESP32-S2
+ESP32-S3
+ESP32-C2
+ESP32-C3
+ESP32-C6
+ESP32-H2
+ESP32-P4
+ESP32-C5
+ESP32-C61
+ESP32-H21
+Package           :
+PICO-D4
+PICO-V3-02
+Revision          : %.2f
+Cores             : %u
+Features Bitfield : %#010lx
+SPIRAM
+Bus Mode          :
+Flash Info:
+Chip Size         : %8luB (%.0f MB)
+Block Size        : %8luB (%6.1f KB)
+Sector Size       : %8luB (%6.1f KB)
+Page Size         : %8luB (%6.1f KB)
+Partitions Info:
+, type:  APP
+, subtype: FACTORY
+, subtype: OTA_%u
+, subtype: TEST
+, type: DATA
+, subtype:
+COREDUMP
+NVS_KEYS
+EFUSE_EM
+UNDEFINED
+ESPHTTPD
+SPIFFS
+LITTLEFS
+Software Info:
+May 16 2026
+windows
+Board Info:
+ESP32_DEV
+doitESP32devkitV1
+esp32:esp32:esp32doit-devkit-v1:UploadSpeed=921600,FlashFreq=80,DebugLevel=none,EraseFlash=none
+============ Before Setup End ============
+=========== After Setup Start ============
+GPIO Info:
+GPIO : BUS_TYPE[bus/unit][chan]
+============ After Setup End =============
+divider>=2
+GPIO number error
+GPIO number error (input-only pad has no internal PU)
+GPIO number error (input-only pad has no internal PD)
+GPIO interrupt type error
+GPIO output gpio_num error
+phys_offs != SPI_FLASH_CACHE2PHYS_FAIL
+it != NULL
+ota_app_count < 16 && "must erase the partition before writing to it"
+partition
+SLIST_EMPTY(&s_partition_list)
+iterator != NULL
+partition != NULL
+blk >= 0 && blk < EFUSE_BLK_MAX
+num_reg <= (range_read_addr_blocks[blk].end - range_read_addr_blocks[blk].start) / sizeof(uint32_t)
+bits_counter <= req_size
+bootloader_mmap
+ret == 0
+new_array_id < block_nums
+0 && "invalid handle, or handle already unmapped"
+s_flash_op_mutex != NULL
+s_flash_op_cpu == -1
+other_cpuid == 1
+cpuid == s_flash_op_cpu
+!(xTaskGetSchedulerState() == taskSCHEDULER_NOT_STARTED && cpuid != 0)
+cache_id <= CACHE_LL_ID_ALL
+io <= ESP_MSPI_IO_WP
+cpuid == xPortGetCoreID()
+res == pdTRUE
+Panic handler entered multiple times. Abort panic handling. Rebooting ...
+Guru Meditation Error: Core
+panic'ed (
+and returning...
+ELF file SHA256:
+Re-entered core dump! Exception happened during core dump!
+Rebooting...
+flash_ret == ESP_OK
+task_wdt
+ret == pdTRUE
+idle_task_handle
+(CPU 0)
+(CPU 1)
+(CPU 0/1)
+Task watchdog got triggered. The following tasks/users did not reset the watchdog in time:
+cpus_fail != 0
+cpu_start
+Unknown
+Cache disabled but cached memory region accessed
+Debug exception reason:
+SingleStep
+HwBreakpoint
+Stack canary watchpoint triggered (
+Watchpoint 0 triggered
+BREAK instr
+BREAKN instr
+DebugIntr
+register dump:
+was running in ISR context:
+EXCCAUSE
+EXCVADDR
+LCOUNT
+Exception was unhandled.
+Unknown reason
+Unhandled debug exception
+Double exception
+Unhandled kernel exception
+Coprocessor exception
+Interrupt wdt timeout on CPU0
+Interrupt wdt timeout on CPU1
+Cache error
+IllegalInstruction
+Syscall
+InstructionFetchError
+LoadStoreError
+Level1Interrupt
+Alloca
+IntegerDivideByZero
+PCValue
+Privileged
+LoadStoreAlignment
+InstrPDAddrError
+LoadStorePIFDataError
+InstrPIFAddrError
+LoadStorePIFAddrError
+InstTLBMiss
+InstTLBMultiHit
+InstFetchPrivilege
+InstrFetchProhibited
+LoadStoreTLBMiss
+LoadStoreTLBMultihit
+LoadStorePrivilege
+LoadProhibited
+StoreProhibited
+Cp0Dis
+Cp1Dis
+Cp2Dis
+Cp3Dis
+Cp4Dis
+Cp5Dis
+Cp6Dis
+Cp7Dis
+Backtrace:
+|<-CORRUPTED
+|<-CONTINUES
+No Name
+DBG HLPR
+core_id < CONFIG_FREERTOS_NUMBER_OF_CORES
+ESP_FAIL
+ESP_ERR_NO_MEM
+ESP_ERR_INVALID_ARG
+ESP_ERR_INVALID_STATE
+ESP_ERR_INVALID_SIZE
+ESP_ERR_NOT_FOUND
+ESP_ERR_NOT_SUPPORTED
+ESP_ERR_TIMEOUT
+ESP_ERR_INVALID_RESPONSE
+ESP_ERR_INVALID_CRC
+ESP_ERR_INVALID_VERSION
+ESP_ERR_INVALID_MAC
+ESP_ERR_NOT_FINISHED
+ESP_ERR_NOT_ALLOWED
+ESP_ERR_NVS_BASE
+ESP_ERR_NVS_NOT_INITIALIZED
+ESP_ERR_NVS_NOT_FOUND
+ESP_ERR_NVS_TYPE_MISMATCH
+ESP_ERR_NVS_READ_ONLY
+ESP_ERR_NVS_NOT_ENOUGH_SPACE
+ESP_ERR_NVS_INVALID_NAME
+ESP_ERR_NVS_INVALID_HANDLE
+ESP_ERR_NVS_REMOVE_FAILED
+ESP_ERR_NVS_KEY_TOO_LONG
+ESP_ERR_NVS_PAGE_FULL
+ESP_ERR_NVS_INVALID_STATE
+ESP_ERR_NVS_INVALID_LENGTH
+ESP_ERR_NVS_NO_FREE_PAGES
+ESP_ERR_NVS_VALUE_TOO_LONG
+ESP_ERR_NVS_PART_NOT_FOUND
+ESP_ERR_NVS_NEW_VERSION_FOUND
+ESP_ERR_NVS_XTS_ENCR_FAILED
+ESP_ERR_NVS_XTS_DECR_FAILED
+ESP_ERR_NVS_XTS_CFG_FAILED
+ESP_ERR_NVS_XTS_CFG_NOT_FOUND
+ESP_ERR_NVS_ENCR_NOT_SUPPORTED
+ESP_ERR_NVS_KEYS_NOT_INITIALIZED
+ESP_ERR_NVS_CORRUPT_KEY_PART
+ESP_ERR_NVS_CONTENT_DIFFERS
+ESP_ERR_NVS_WRONG_ENCRYPTION
+ESP_ERR_ULP_BASE
+ESP_ERR_ULP_SIZE_TOO_BIG
+ESP_ERR_ULP_INVALID_LOAD_ADDR
+ESP_ERR_ULP_DUPLICATE_LABEL
+ESP_ERR_ULP_UNDEFINED_LABEL
+ESP_ERR_ULP_BRANCH_OUT_OF_RANGE
+ESP_ERR_OTA_BASE
+ESP_ERR_OTA_PARTITION_CONFLICT
+ESP_ERR_OTA_SELECT_INFO_INVALID
+ESP_ERR_OTA_VALIDATE_FAILED
+ESP_ERR_OTA_SMALL_SEC_VER
+ESP_ERR_OTA_ROLLBACK_FAILED
+ESP_ERR_OTA_ROLLBACK_INVALID_STATE
+ESP_ERR_EFUSE
+ESP_OK_EFUSE_CNT
+ESP_ERR_EFUSE_CNT_IS_FULL
+ESP_ERR_EFUSE_REPEATED_PROG
+ESP_ERR_CODING
+ESP_ERR_NOT_ENOUGH_UNUSED_KEY_BLOCKS
+ESP_ERR_DAMAGED_READING
+ESP_ERR_IMAGE_BASE
+ESP_ERR_IMAGE_FLASH_FAIL
+ESP_ERR_IMAGE_INVALID
+ESP_ERR_WIFI_BASE
+ESP_ERR_WIFI_NOT_INIT
+ESP_ERR_WIFI_NOT_STARTED
+ESP_ERR_WIFI_NOT_STOPPED
+ESP_ERR_WIFI_IF
+ESP_ERR_WIFI_MODE
+ESP_ERR_WIFI_STATE
+ESP_ERR_WIFI_CONN
+ESP_ERR_WIFI_NVS
+ESP_ERR_WIFI_MAC
+ESP_ERR_WIFI_SSID
+ESP_ERR_WIFI_PASSWORD
+ESP_ERR_WIFI_TIMEOUT
+ESP_ERR_WIFI_WAKE_FAIL
+ESP_ERR_WIFI_WOULD_BLOCK
+ESP_ERR_WIFI_NOT_CONNECT
+ESP_ERR_WIFI_POST
+ESP_ERR_WIFI_INIT_STATE
+ESP_ERR_WIFI_STOP_STATE
+ESP_ERR_WIFI_NOT_ASSOC
+ESP_ERR_WIFI_TX_DISALLOW
+ESP_ERR_WIFI_TWT_FULL
+ESP_ERR_WIFI_TWT_SETUP_TIMEOUT
+ESP_ERR_WIFI_TWT_SETUP_TXFAIL
+ESP_ERR_WIFI_TWT_SETUP_REJECT
+ESP_ERR_WIFI_DISCARD
+ESP_ERR_WIFI_ROC_IN_PROGRESS
+ESP_ERR_WIFI_REGISTRAR
+ESP_ERR_WIFI_WPS_TYPE
+ESP_ERR_WIFI_WPS_SM
+ESP_ERR_ESPNOW_BASE
+ESP_ERR_ESPNOW_NOT_INIT
+ESP_ERR_ESPNOW_ARG
+ESP_ERR_ESPNOW_NO_MEM
+ESP_ERR_ESPNOW_FULL
+ESP_ERR_ESPNOW_NOT_FOUND
+ESP_ERR_ESPNOW_INTERNAL
+ESP_ERR_ESPNOW_EXIST
+ESP_ERR_ESPNOW_IF
+ESP_ERR_ESPNOW_CHAN
+ESP_ERR_DPP_FAILURE
+ESP_ERR_DPP_TX_FAILURE
+ESP_ERR_DPP_INVALID_ATTR
+ESP_ERR_DPP_AUTH_TIMEOUT
+ESP_ERR_DPP_INVALID_LIST
+ESP_ERR_DPP_CONF_TIMEOUT
+ESP_ERR_MESH_BASE
+ESP_ERR_MESH_WIFI_NOT_START
+ESP_ERR_MESH_NOT_INIT
+ESP_ERR_MESH_NOT_CONFIG
+ESP_ERR_MESH_NOT_START
+ESP_ERR_MESH_NOT_SUPPORT
+ESP_ERR_MESH_NOT_ALLOWED
+ESP_ERR_MESH_NO_MEMORY
+ESP_ERR_MESH_ARGUMENT
+ESP_ERR_MESH_EXCEED_MTU
+ESP_ERR_MESH_TIMEOUT
+ESP_ERR_MESH_DISCONNECTED
+ESP_ERR_MESH_QUEUE_FAIL
+ESP_ERR_MESH_QUEUE_FULL
+ESP_ERR_MESH_NO_PARENT_FOUND
+ESP_ERR_MESH_NO_ROUTE_FOUND
+ESP_ERR_MESH_OPTION_NULL
+ESP_ERR_MESH_OPTION_UNKNOWN
+ESP_ERR_MESH_XON_NO_WINDOW
+ESP_ERR_MESH_INTERFACE
+ESP_ERR_MESH_DISCARD_DUPLICATE
+ESP_ERR_MESH_DISCARD
+ESP_ERR_MESH_VOTING
+ESP_ERR_MESH_XMIT
+ESP_ERR_MESH_QUEUE_READ
+ESP_ERR_MESH_PS
+ESP_ERR_MESH_RECV_RELEASE
+ESP_ERR_ESP_NETIF_BASE
+ESP_ERR_ESP_NETIF_INVALID_PARAMS
+ESP_ERR_ESP_NETIF_IF_NOT_READY
+ESP_ERR_ESP_NETIF_DHCPC_START_FAILED
+ESP_ERR_ESP_NETIF_DHCP_ALREADY_STARTED
+ESP_ERR_ESP_NETIF_DHCP_ALREADY_STOPPED
+ESP_ERR_ESP_NETIF_NO_MEM
+ESP_ERR_ESP_NETIF_DHCP_NOT_STOPPED
+ESP_ERR_ESP_NETIF_DRIVER_ATTACH_FAILED
+ESP_ERR_ESP_NETIF_INIT_FAILED
+ESP_ERR_ESP_NETIF_DNS_NOT_CONFIGURED
+ESP_ERR_ESP_NETIF_MLD6_FAILED
+ESP_ERR_ESP_NETIF_IP6_ADDR_FAILED
+ESP_ERR_ESP_NETIF_DHCPS_START_FAILED
+ESP_ERR_ESP_NETIF_TX_FAILED
+ESP_ERR_FLASH_BASE
+ESP_ERR_FLASH_OP_FAIL
+ESP_ERR_FLASH_OP_TIMEOUT
+ESP_ERR_FLASH_NOT_INITIALISED
+ESP_ERR_FLASH_UNSUPPORTED_HOST
+ESP_ERR_FLASH_UNSUPPORTED_CHIP
+ESP_ERR_FLASH_PROTECTED
+ESP_ERR_HTTP_BASE
+ESP_ERR_HTTP_MAX_REDIRECT
+ESP_ERR_HTTP_CONNECT
+ESP_ERR_HTTP_WRITE_DATA
+ESP_ERR_HTTP_FETCH_HEADER
+ESP_ERR_HTTP_INVALID_TRANSPORT
+ESP_ERR_HTTP_CONNECTING
+ESP_ERR_HTTP_EAGAIN
+ESP_ERR_HTTP_CONNECTION_CLOSED
+ESP_ERR_HTTP_NOT_MODIFIED
+ESP_ERR_HTTP_RANGE_NOT_SATISFIABLE
+ESP_ERR_HTTP_READ_TIMEOUT
+ESP_ERR_HTTP_INCOMPLETE_DATA
+ESP_ERR_ESP_TLS_BASE
+ESP_ERR_ESP_TLS_CANNOT_RESOLVE_HOSTNAME
+ESP_ERR_ESP_TLS_CANNOT_CREATE_SOCKET
+ESP_ERR_ESP_TLS_UNSUPPORTED_PROTOCOL_FAMILY
+ESP_ERR_ESP_TLS_FAILED_CONNECT_TO_HOST
+ESP_ERR_ESP_TLS_SOCKET_SETOPT_FAILED
+ESP_ERR_ESP_TLS_CONNECTION_TIMEOUT
+ESP_ERR_ESP_TLS_SE_FAILED
+ESP_ERR_ESP_TLS_TCP_CLOSED_FIN
+ESP_ERR_ESP_TLS_SERVER_HANDSHAKE_TIMEOUT
+ESP_ERR_MBEDTLS_CERT_PARTLY_OK
+ESP_ERR_MBEDTLS_CTR_DRBG_SEED_FAILED
+ESP_ERR_MBEDTLS_SSL_SET_HOSTNAME_FAILED
+ESP_ERR_MBEDTLS_SSL_CONFIG_DEFAULTS_FAILED
+ESP_ERR_MBEDTLS_SSL_CONF_ALPN_PROTOCOLS_FAILED
+ESP_ERR_MBEDTLS_X509_CRT_PARSE_FAILED
+ESP_ERR_MBEDTLS_SSL_CONF_OWN_CERT_FAILED
+ESP_ERR_MBEDTLS_SSL_SETUP_FAILED
+ESP_ERR_MBEDTLS_SSL_WRITE_FAILED
+ESP_ERR_MBEDTLS_PK_PARSE_KEY_FAILED
+ESP_ERR_MBEDTLS_SSL_HANDSHAKE_FAILED
+ESP_ERR_MBEDTLS_SSL_CONF_PSK_FAILED
+ESP_ERR_MBEDTLS_SSL_TICKET_SETUP_FAILED
+ESP_ERR_MBEDTLS_SSL_READ_FAILED
+ESP_ERR_WOLFSSL_SSL_SET_HOSTNAME_FAILED
+ESP_ERR_WOLFSSL_SSL_CONF_ALPN_PROTOCOLS_FAILED
+ESP_ERR_WOLFSSL_CERT_VERIFY_SETUP_FAILED
+ESP_ERR_WOLFSSL_KEY_VERIFY_SETUP_FAILED
+ESP_ERR_WOLFSSL_SSL_HANDSHAKE_FAILED
+ESP_ERR_WOLFSSL_CTX_SETUP_FAILED
+ESP_ERR_WOLFSSL_SSL_SETUP_FAILED
+ESP_ERR_WOLFSSL_SSL_WRITE_FAILED
+ESP_ERR_HTTPS_OTA_BASE
+ESP_ERR_HTTPS_OTA_IN_PROGRESS
+ESP_ERR_PING_BASE
+ESP_ERR_PING_INVALID_PARAMS
+ESP_ERR_PING_NO_MEM
+ESP_ERR_HTTPD_BASE
+ESP_ERR_HTTPD_HANDLERS_FULL
+ESP_ERR_HTTPD_HANDLER_EXISTS
+ESP_ERR_HTTPD_INVALID_REQ
+ESP_ERR_HTTPD_RESULT_TRUNC
+ESP_ERR_HTTPD_RESP_HDR
+ESP_ERR_HTTPD_RESP_SEND
+ESP_ERR_HTTPD_ALLOC_MEM
+ESP_ERR_HTTPD_TASK
+ESP_ERR_HW_CRYPTO_BASE
+ESP_ERR_HW_CRYPTO_DS_HMAC_FAIL
+ESP_ERR_HW_CRYPTO_DS_INVALID_KEY
+ESP_ERR_HW_CRYPTO_DS_INVALID_DIGEST
+ESP_ERR_HW_CRYPTO_DS_INVALID_PADDING
+ESP_ERR_MEMPROT_BASE
+ESP_ERR_MEMPROT_MEMORY_TYPE_INVALID
+ESP_ERR_MEMPROT_SPLIT_ADDR_INVALID
+ESP_ERR_MEMPROT_SPLIT_ADDR_OUT_OF_RANGE
+ESP_ERR_MEMPROT_SPLIT_ADDR_UNALIGNED
+ESP_ERR_MEMPROT_UNIMGMT_BLOCK_INVALID
+ESP_ERR_MEMPROT_WORLD_INVALID
+ESP_ERR_MEMPROT_AREA_INVALID
+ESP_ERR_MEMPROT_CPUID_INVALID
+flash_hal
+i == 0 || s_log_cache[(i - 1) / 2].generation < s_log_cache[i].generation
+heap_size <= HEAP_SIZE_MAX
+heap_idx <= num_heaps
+heap_idx == num_heaps
+SLIST_EMPTY(&registered_heaps)
+heaps_array != NULL
+start_ptr
+!block_is_last(block)
+tlsf_add_pool: Memory must be aligned by %u bytes.
+tlsf_add_pool: Memory size must be between %u and %u bytes.
+current && "free list cannot have a null entry"
+block_to_ptr(block) == align_ptr(block_to_ptr(block), ALIGN_SIZE) && "block not aligned properly"
+block_is_free(block) && "block should be free"
+!block_is_free(block_next(block)) && "next block should not be free"
+block_size(block_next(block)) == 0 && "next block size should be zero"
+prev && "prev_free field can not be null"
+next && "next_free field can not be null"
+tlsf_create: Memory must be aligned to %u bytes.
+ALIGN_SIZE == control->small_block_size / control->sl_index_count
+reserved[i].start <= reserved[i].end
+reserved[i + 1].start > reserved[i].start
+memory_layout
+D/IRAM
+RTCRAM
+heap != NULL && "free() target pointer is outside heap areas"
+(dstart & 3) == 0
+(dend & 3) == 0
+heap != NULL && "realloc() pointer is outside heap areas"
+old_size > 0
+!((vd->flags & VECDESC_FL_SHARED) && (vd->flags & VECDESC_FL_NONSHARED))
+svd != NULL
+intr_alloc
+intr_num >= 0 && intr_num < SOC_CPU_INTR_NUM
+system_api
+(size_bits % 8) == 0
+periph < PERIPH_MODULE_MAX
+s_cache_suspend_cnt >= 0 && DRAM_STR("cache resume doesn't match suspend ops")
+ESP_SLEEP_RTC_USE_RC_FAST_MODE
+ESP_SLEEP_DIG_USE_RC_FAST_MODE
+ESP_SLEEP_USE_ADC_TSEN_MONITOR_MODE
+ESP_SLEEP_ULTRA_LOW_MODE
+ESP_SLEEP_RTC_FAST_USE_XTAL_MODE
+ESP_SLEEP_DIG_USE_XTAL_MODE
+ESP_SLEEP_LP_USE_XTAL_MODE
+ESP_SLEEP_VBAT_POWER_DEEPSLEEP_MODE
+ENABLED
+DISABLED
+32KHz xtal has been stopped
+sar_periph_ctrl
+core_id >= 0 && core_id < SOC_CPU_CORES_NUM && intr_desc_ret != NULL
+pxQueueSetContainer
+pxQueueSetContainer->uxMessagesWaiting < pxQueueSetContainer->uxLength
+pxQueue
+xReturn != ( ( ( BaseType_t ) 0 ) )
+xSize == sizeof( Queue_t )
+pxNewQueue
+ppxStaticQueue
+xSemaphore
+xHandle
+!( ( pvItemToQueue == ((void *)0) ) && ( pxQueue->uxItemSize != ( UBaseType_t ) 0U ) )
+!( ( xCopyPosition == ( ( BaseType_t ) 2 ) ) && ( pxQueue->uxLength != 1 ) )
+!( ( xTaskGetSchedulerState() == ( ( BaseType_t ) 0 ) ) && ( xTicksToWait != 0 ) )
+pxMutex
+pxQueue->uxItemSize == 0
+!( ( pxQueue->pcHead == ((void *)0) ) && ( pxQueue->u.xSemaphore.xMutexHolder != ((void *)0) ) )
+( pxQueue )
+!( ( ( pvBuffer ) == ((void *)0) ) && ( ( pxQueue )->uxItemSize != ( UBaseType_t ) 0U ) )
+!( ( pvBuffer == ((void *)0) ) && ( pxQueue->uxItemSize != ( UBaseType_t ) 0U ) )
+uxTaskPriority < ( 25 )
+pxTCB->ucStaticallyAllocated == ( ( uint8_t ) 2 )
+uxPriority < ( 25 )
+xPortGetCoreID() == 0
+( ( ( ( pxDelayedTaskList )->uxNumberOfItems == ( UBaseType_t ) 0 ) ? ( ( BaseType_t ) 1 ) : ( ( BaseType_t ) 0 ) ) )
+xTaskScheduled == ( ( BaseType_t ) 1 )
+pxEventList
+pxUnblockedTCB
+uxSchedulerSuspended[ uxPendCore ] != ( UBaseType_t ) 0U
+uxSchedulerSuspended[ xPendingListCore ] != ( UBaseType_t ) 0U
+pxTimeOut
+pxTicksToWait
+uxNewPriority < ( 25 )
+( ( xTaskGetSchedulerState() == ( ( BaseType_t ) 0 ) ) ? ( ( BaseType_t ) 1 ) : ( ( BaseType_t ) 0 ) ) == ( ( BaseType_t ) 0 )
+( ( xTaskGetSchedulerState() == ( ( BaseType_t ) 0 ) ) ? ( ( BaseType_t ) 1 ) : ( ( BaseType_t ) 0 ) ) == ( ( BaseType_t ) 1 )
+pxTCB == pxCurrentTCBs[ xPortGetCoreID() ]
+pxTCB->uxMutexesHeld
+pxTCB != pxCurrentTCBs[ xPortGetCoreID() ]
+uxIndexToWait < 1
+uxIndexToNotify < 1
+xTaskToNotify
+xTickCount == ( TickType_t ) 0
+( ( &( pxTCB->xEventListItem ) )->pvContainer ) == ((void *)0)
+xCoreID != 0
+xPortcheckValidStackMem(puxStackBuffer)
+xPortCheckValidTCBMem(pxTaskBuffer)
+xSize == sizeof( TCB_t )
+xReturn != ( -1 )
+( ( ( ( BaseType_t ) xCoreID ) >= 0 && ( ( BaseType_t ) xCoreID ) < 2 ) ? ( ( BaseType_t ) 1 ) : ( ( BaseType_t ) 0 ) ) == ( ( BaseType_t ) 1 )
+( xIdleTaskHandle[ xCoreID ] != ((void *)0) )
+***ERROR*** A stack overflow in task
+has been detected.
+eRunning != eTaskGetState( xTaskToDelete )
+xResult == ( ( BaseType_t ) 1 )
+puxStackBuffer != ((void *)0)
+pxTaskBuffer != ((void *)0)
+pxTCBBufferTemp != NULL
+pxStackBufferTemp != NULL
+/dev/console
+lock != NULL && "Uninitialized lock used"
+h != ((void *)0)
+xQueueGetMutexHolder( ( h ) ) == ((void *)0)
+handle == (SemaphoreHandle_t) &s_common_mutex
+handle == (SemaphoreHandle_t) &s_common_recursive_mutex
+pthread
+false && "Failed to find pthread for current task!"
+false && "Failed to release mutex!"
+false && "Failed to unlock mutex!"
+tls != NULL
+alarm_id < sizeof(timestamp_id) / sizeof(timestamp_id[0])
+(pxRingbuffer->xItemsWaiting > 0) && ((pxRingbuffer->pucRead != pxRingbuffer->pucWrite) || (pxRingbuffer->uxRingbufferFlags & ( ( UBaseType_t ) 4 )))
+pxRingbuffer->pucRead >= pxRingbuffer->pucHead && pxRingbuffer->pucRead < pxRingbuffer->pucTail
+pxRingbuffer->pucRead == pxRingbuffer->pucFree
+pxRingbuffer->pucAcquire >= pxRingbuffer->pucHead && pxRingbuffer->pucAcquire < pxRingbuffer->pucTail
+pucItem <= pxRingbuffer->pucTail
+pxCurHeader->xItemLen <= pxRingbuffer->xMaxItemSize
+(pxCurHeader->uxItemFlags & ( ( UBaseType_t ) 2 )) == 0
+(pxCurHeader->uxItemFlags & ( ( UBaseType_t ) 1 )) == 0
+pxRingbuffer->pucFree <= pxRingbuffer->pucHead + pxRingbuffer->xSize
+pxIsSplit != ((void *)0)
+(pxHeader->xItemLen <= pxRingbuffer->xMaxItemSize) || (pxHeader->uxItemFlags & ( ( UBaseType_t ) 2 ))
+pxHeader->xItemLen <= pxRingbuffer->xMaxItemSize
+pcReturn >= pxRingbuffer->pucHead && pcReturn <= pxRingbuffer->pucTail
+pcReturn >= pxRingbuffer->pucHead && pcReturn < pxRingbuffer->pucTail
+xRemLen >= sizeof(ItemHeader_t)
+(pxCurHeader->uxItemFlags & ( ( UBaseType_t ) 8 )) == 0
+pxRingbuffer->pucWrite <= pxRingbuffer->pucHead + pxRingbuffer->xSize
+*pvItem2 < *pvItem1
+xIsSplit == ( ( BaseType_t ) 0 )
+(uint8_t *)pucItem >= pxRingbuffer->pucHead
+(uint8_t *)pucItem < pxRingbuffer->pucTail
+xBufferSize > 0
+xBufferType < RINGBUF_TYPE_MAX
+pucRingbufferStorage != ((void *)0) && pxStaticRingbuffer != ((void *)0)
+pxRingbuffer
+ppvItem != ((void *)0)
+(pxRingbuffer->uxRingbufferFlags & (( ( UBaseType_t ) 2 ) | ( ( UBaseType_t ) 1 ))) == 0
+pvItem != ((void *)0) || xItemSize == 0
+pxRingbuffer && pxItemSize
+(pxRingbuffer->uxRingbufferFlags & ( ( UBaseType_t ) 1 )) == 0
+pxRingbuffer->uxRingbufferFlags & ( ( UBaseType_t ) 2 )
+pxRingbuffer && ppucRingbufferStorage && ppxStaticRingbuffer
+s_ctx[fd]->peek_char == NONE
+c != NONE
+/dev/uart
+/dev/uart/0
+strncmp(src_path, vfs->path_prefix, vfs->path_prefix_len) == 0
+/dev/null
+xPortGetCoreID() == CONFIG_BTDM_CTRL_PINNED_TO_CORE
+hli_cb.nested > 0
+hli_cb.nested != UCHAR_MAX
+semphr
+s_semaphore
+queue->handle
+queue_item->handle
+try_heap_caps_add_region(mem_start, mem_end)
+BTDM_INIT
+BT Controller BSS
+BT Controller Data
+BT BSS
+BT Data
+select_src_ret && set_div_ret
+DevType
+AddrType
+LinkKey
+LE_KEY_PENC
+LE_KEY_PID
+LE_KEY_PCSRK
+LE_KEY_LENC
+LE_KEY_LCSRK
+AuthMode
+LE_KEY_LID
+LE_LOCAL_KEY_IR
+LE_LOCAL_KEY_IRK
+LE_LOCAL_KEY_DHK
+LE_LOCAL_KEY_ER
+Adapter
+key_value != NULL
+0123456789abcdef
+config != NULL
+section != NULL
+key != NULL
+length != NULL
+p_env->adv_rpt_queue != NULL
+p_env->adv_rpt_ready != NULL
+addr != NULL
+string != NULL
+page_number == 0
+controller_param.readable
+controller_param.ble_supported
+index < MAX_FEATURES_CLASSIC_PAGE_COUNT
+controller_param_ptr
+cmd_rsp_to
+command->layer_specific == HCI_CMD_BUF_TYPE_METADATA
+event_code == HCI_COMMAND_COMPLETE_EVT
+parameter_length >= (parameter_bytes_we_read_here + minimum_bytes_after)
+opcode == expected_opcode
+*page_number_ptr < feature_pages_count
+stream != NULL
+acl_length == packet->len - HCI_ACL_PREAMBLE_SIZE
+linked_pkt != NULL
+p_cb->adv_rpt_queue != NULL
+p_cb->adv_rpt_ready != NULL
+RFC_MUX
+metadata->opcode == opcode
+p_buf->layer_specific == HCI_CMD_BUF_TYPE_METADATA
+vsc_callback == NULL
+BTU_TASK
+p_tle != NULL
+btu_gen
+btu_l2cap
+btu_oneshot
+BT_GATT
+Unknown Attribute
+================= GATTS DATABASE DUMP START =================
+================= GATTS DATABASE DUMP END =================
+characteristic extended properties
+characteristic user description
+client characteristic configuration
+server characteristic configuration
+characteristic presentation format
+characteristic aggregate format
+primary service
+secondary service
+included service
+characteristic
+metadata->command_free_cb != NULL
+p_ccb != NULL
+p_buf != NULL
+p_cfg != NULL
+tmp_cid != MAX_L2CAP_CHANNELS + L2CAP_BASE_APPL_CID
+Service Discovery
+local OOB randomizer
+peer OOB randomizer
+calculated peer commitment
+received peer commitment
+s_stack_config_env
+BTC_TASK
+alarm_mutex != NULL
+alarm != NULL
+filename != NULL
+bt_cfg_key
+Global
+*filename != '\0'
+removed
+ready_cb != NULL
+ret == true
+future != NULL
+future->ready_can_be_called
+hash_fn != NULL
+num_bucket > 0
+hash_map != NULL
+rc == true
+callback != NULL
+list != NULL
+!list_is_empty(list)
+prev_node != NULL
+wq != NULL
+wq->queue != 0
+func != NULL
+event != NULL && event->thread != NULL
+event->queue_idx >= 0 && event->queue_idx < event->thread->work_queue_num
+HCI_API
+p_timer->in_use && (p_timer->active > 0)
+bta_sys
+dst_dm_sec
+src_dm_sec->ble_key.p_key_value
+dst_dm_sec->ble_key.p_key_value
+ret == BT_STATUS_SUCCESS && "storing link key failed"
+connect_queue != NULL
+list_length(connect_queue) < MAX_REASONABLE_REQUESTS
+p_node != NULL
+LinkKeyType
+PinLength
+SCSupport
+DevClass
+poll_data != NULL
+a2dp_source_local_param.btc_aa_src_cb.media_alarm == NULL
+av_dest->meta_msg.p_data
+av_dest->meta_msg.p_msg
+av_dest->meta_msg.p_msg->vendor.p_vendor_data
+Advanced Audio
+AVconn
+btc_av_is_connected() && "No active a2dp connection\n"
+btc_av_cb.sm_handle != NULL
+status == BT_STATUS_SUCCESS && "context transfer failed"
+Headset Gateway
+Handsfree Gateway
+Handsfree
+dst != NULL
+status == BT_STATUS_SUCCESS
+length > 0
+hci_hal_env.adv_credits <= BLE_ADV_REPORT_FLOW_CONTROL_NUM
+hci_hal_env.adv_credits >= num
+hci_hal_env.adv_credits >=0
+hci_hal_env.adv_credits_to_release <= BLE_ADV_REPORT_FLOW_CONTROL_NUM
+upper_callbacks != NULL
+task_thread != NULL
+hci_hal_env.adv_fc_cmd_buf != NULL
+adv_fc_mon
+hci_hal_env.adv_flow_monitor != NULL
+hci_hal_env.rx_q != NULL
+hci_hal_env.adv_rpt_q != NULL
+packet
+host_recv_adv_packet(stream) == true
+credits_released == 0
+p_ccb->allocated != 0
+p_ccb == NULL
+BLE_MESH
+deinit_comp_semaphore
+mutex->mutex
+bm_alarm_hash_map
+bt_mesh
+BLE_MESH(lib)
+Advanced Audio Sink
+AV Remote Control Target
+AV Remote Control Controller
+p_clcb->p_cmd_list
+p_buf_last->len < out_pkt_len
+data_event != NULL
+i != AVDT_NUM_TC_TBL
+((psrc < pdst && (psrc + length) <= pdst) || (psrc > pdst && (pdst + length) <= psrc))
+s32DCTY
+adv_types[BLE_MESH_ADV(buf)->type].adv_q
+adv_types[BLE_MESH_ADV(buf)->type].adv_q->send
+mesh_adv_task
+adv_buf_pool
+p_data != NULL
+x-bt/img-properties
+x-bt/img-img
+x-bt/img-thm
+JV PORT
+("call",(0,1)),("callsetup",(0-3)),("service",(0-1)),("signal",(0-5)),("roam",(0,1)),("battchg",(0-5)),("callheld",(0-2))
++CCWA:
++CHLD:
++CIND:
++CLIP:
++CIEV:
++BINP:
++BVRA:
++BRSF:
++BSIR:
++CNUM:
++BTRH:
++CLCC:
++COPS:
++CME ERROR:
+BLACKLISTED
+NO ANSWER
+NO CARRIER
+DELAYED
+%hhi,0,"%16[^"]"%n
+AT+BRSF=%u
+AT+BAC=1,2
+AT+BAC=1
+AT+BCS=%u
+AT+CIND?
+AT+CIND=?
+AT+CMER=3,0,0,1
+AT+CMER=3,0,0,0
+AT+CHLD=%c%u
+AT+CHLD=%c
+AT+CLIP=1
+AT+CLIP=0
+AT+CCWA=1
+AT+CCWA=0
+AT+CMEE=1
+AT+CMEE=0
+AT+COPS?
+AT+COPS=3,0
+AT+CLCC
+AT+IPHONEACCEV=2,1,%u,2,%u
+AT+BVRA=1
+AT+BVRA=0
+AT+VGS=%u
+AT+VGM=%u
+ATD>%u;
+AT+BLDN
+AT+CHUP
+AT+BTRH?
+AT+BTRH=%u
+AT+VTS=%c
+AT+BCC
+AT+CNUM
+AT+NREC=0
+AT+BINP=%u
+AT+BIA=
+callsetup
+signal
+battchg
+callheld
+p_msg != NULL
+Copyright 2002-2007 Open Interface North America, Inc. All rights reserved
+queue && queue_size && item_size
+start != ((void *)0)
+checksum_size <= 32
+Calculated checksum
+Image checksum
+ESP_CORE_DUMP_INFO
+ESP_EXTRA_INFO
+ESP_PANIC_DETAILS
+checksum != ((void *)0)
+stk_paddr != ((void *)0) && stk_vaddr != ((void *)0)
+task != ((void *)0) && reg_dump != ((void *)0)
+vaddr_end < SOC_DRAM1_CACHE_ADDRESS_HIGH
+vaddr_end < SOC_DROM0_CACHE_ADDRESS_HIGH
+__builtin_popcount(hw_mem_regions[i].bus_id) == 1
+hw_mem_regions[i].region_size % CONFIG_MMU_PAGE_SIZE == 0
+(mmu_ll_vaddr_to_laddr((uint32_t)&_instruction_reserved_end) - mmu_ll_vaddr_to_laddr((uint32_t)&_instruction_reserved_start)) == irom_len_to_reserve
+(mmu_ll_vaddr_to_laddr((uint32_t)&_rodata_reserved_end) - mmu_ll_vaddr_to_laddr((uint32_t)&_rodata_reserved_start)) == drom_len_to_reserve
+available_region_idx == region_num
+clk_hal
+WIFI_NMI
+WIFI_BB
+BT_MAC
+BT_BB_NMI
+RWBT_NMI
+RWBLE_NMI
+TG0_T0_LEVEL
+TG0_T1_LEVEL
+TG0_WDT_LEVEL
+TG0_LACT_LEVEL
+TG1_T0_LEVEL
+TG1_T1_LEVEL
+TG1_WDT_LEVEL
+TG1_LACT_LEVEL
+GPIO_NMI
+FROM_CPU0
+FROM_CPU1
+FROM_CPU2
+FROM_CPU3
+SDIO_HOST
+ETH_MAC
+RESERVED
+RTC_CORE
+I2C_EXT0
+I2C_EXT1
+SPI1_DMA
+SPI2_DMA
+SPI3_DMA
+TIMER1
+TIMER2
+TG0_T0_EDGE
+TG0_T1_EDGE
+TG0_WDT_EDGE
+TG0_LACT_EDGE
+TG1_T0_EDGE
+TG1_T1_EDGE
+TG1_WDT_EDGE
+TG1_LACT_EDGE
+MMU_IA
+MPU_IA
+CACHE_IA
+pxEventGroupBuffer
+xSize == sizeof( EventGroup_t )
+xEventGroup
+uxBitsToWaitFor != 0
+pxEventBits
+pxTasksWaitingForBits->xListEnd.pxNext != ( const ListItem_t * ) &( pxTasksWaitingForBits->xListEnd )
+( xTimerPeriodInTicks > 0 )
+( pxTimer->xTimerPeriodInTicks > 0 )
+Tmr Svc
+xReturn
+ETSTimer
+timer_initialized(ptimer)
+cal_version
+smartconfig
+ESPNOW
+new_engine != NULL
+engines_in_use <= 3
+uxSemaphoreGetCount(engine_state) == 0 && "SHA engine should be locked"
+fcd4bec
+093e3d2-remote
+bad_function_call
+std::bad_alloc
+std::bad_array_new_length
+__gnu_cxx::__concurrence_lock_error
+__gnu_cxx::__concurrence_unlock_error
+basic_string_view::substr
+GLIBCXX_TUNABLES
+glibcxx.eh_pool
+obj_size
+obj_count
+basic_string::_S_create
+basic_string::_S_construct null not valid
+BTDM ROM VERSION %04x
+BD_ADDR: %02X:%02X:%02X:%02X:%02X:%02X
+BTDM CONTROLLER VERSION: %06x
+Jan 13 2026
+Enable Classic BT
+Enable Low Energy
+Coex register bt cb faild
+Coex register schm btdm cb faild
+Coex register Wi-Fi channel change btdm cb faild
+Disable Classic BT
+Disable Low Energy
+Heap MSG [%p], Heap ENV [%p], Heap NORET [%p]
+Uart ENV [%p], VHCI ENV [%p], PLF FUNCS [%p]
+btController
+BT_MUX=%08x
+SCHM PROC %02x %02x, %p
+Wi-Fi is not started.
+bufptr != NULL
+size != 0
+LC_TASK: reset hci_set_con_slv_bcst_data_cmd_handler
+LC_TASK: reset hci_set_con_slv_bcst_cmd_handler
+LC_TASK: reset hci_rec_sync_train_cmd_handler
+lc_env_ptr->enc.EncSize <= KEY_LEN
+elt->param
+lc_sco_env[sync_linkid].p_nego_params == NULL
+sco_par->data_path == AUDIO_DATA_PATH_HCI
+acl_buf_elt != NULL
+acl_par->next_buf_elt == NULL
+acl_par->role == MASTER_ROLE
+acl_par->role == SLAVE_ROLE
+link_id < MAX_NB_ACTIVE_ACL
+co_list_is_empty(&ld_fm_env.fifo) || (timestamp != ((struct ld_fm_frm_elt*)ld_fm_env.fifo.last)->timestamp)
+acl_par->nb_prog > 0
+scan_par->window != 0
+new_wait_elt
+CO First, elt %p
+txnode->idx < BLE_TX_DESC_CNTL
+llm_le_env.scanning_params
+co_list_extract(&llm_le_env.adv_list, element, 0)
+co_list_extract(&le_scan_duplicate_option.mesh_adv_list, element, 0)
+param->pk_payload_type < PAYL_END
+llm_le_env.advertising_params
+UNNAMED_BLUETOOTH_DEVICE
+lm_env.local_name
+!memcmp(&param->bd_addr.addr[0], &lm_env.trunc_page_cmd->bd_addr.addr[0], BD_ADDR_LEN)
+NVDS MAGIC FAILED
+MAGIC %08x VERSION %08x
+BT BB INTR enabled!
+lpcycles < 1000000
+Send Queue Failed
+VHCI: Controller is not run
+osi_ints_on != NULL
+osi_set_interrupt_handler != NULL
+Balloc succeeded
+REENT malloc succeeded
+0123456789ABCDEF
+Infinity
+uartFlushTxOnly
+timer_ll_set_lact_clock_prescale
+gpio_func_sel
+gpio_iomux_output
+gpio_iomux_input
+gpio_input_disable
+gpio_set_level
+gpio_od_enable
+gpio_od_disable
+gpio_ll_matrix_out_default
+gpio_output_enable
+gpio_output_disable
+gpio_input_enable
+gpio_intr_disable
+gpio_intr_enable
+gpio_set_intr_type
+gpio_pulldown_dis
+gpio_ll_pulldown_en
+gpio_pulldown_en
+gpio_pullup_dis
+gpio_ll_pullup_en
+gpio_pullup_en
+rtcio_ll_pulldown_disable
+rtcio_ll_pulldown_enable
+rtcio_ll_pullup_disable
+rtcio_ll_pullup_enable
+rtcio_ll_function_select
+?bootloader_flash_execute_command_common
+len_remain < len
+len_remain < length
+cache_ll_l1_get_enabled_bus
+ipc_task
+add_entry
+subscribe_idle
+task_wdt_isr
+task_wdt_timeout_abort
+@ERROR
+heap_caps_calloc
+heap_caps_realloc
+heap_caps_realloc_default
+heap_caps_malloc_default
+heap_caps_malloc
+heap_caps_init
+register_heap
+s_prepare_reserved_regions
+heap_caps_realloc_base
+dram_alloc_to_iram_addr
+heap_caps_free
+intr_free_for_current_cpu
+is_vect_desc_usable
+find_desc_for_source
+get_efuse_factory_mac
+periph_module_reset
+periph_module_disable
+periph_module_enable
+W@?(W@?DW@?_W@?rtcio_ll_force_hold_disable
+s_sar_power_release
+main_task
+vQueueDelete
+uxQueueMessagesWaiting
+xQueueReceiveFromISR
+xQueueSemaphoreTake
+xQueueReceive
+xQueueGiveFromISR
+xQueueGenericSendFromISR
+prvNotifyQueueSetContainer
+xQueueGenericSend
+xQueueCreateCountingSemaphore
+xQueueCreateCountingSemaphoreStatic
+xQueueTakeMutexRecursive
+xQueueGiveMutexRecursive
+xQueueGetMutexHolder
+xQueueGenericCreate
+xQueueGenericGetStaticBuffers
+xQueueGenericCreateStatic
+xQueueGenericReset
+xTaskGetCurrentTaskHandleForCore
+xTaskGetIdleTaskHandleForCore
+xTaskCreateStaticPinnedToCore
+prvInitialiseNewTask
+xTaskCreatePinnedToCore
+xTaskIncrementTickOtherCores
+vTaskGenericNotifyGiveFromISR
+xTaskGenericNotify
+ulTaskGenericNotifyTake
+vTaskPriorityDisinheritAfterTimeout
+xTaskPriorityDisinherit
+xTaskCheckForTimeOut
+vTaskRemoveFromUnorderedEventList
+xTaskRemoveFromEventList
+vTaskPlaceOnEventListRestricted
+vTaskPlaceOnUnorderedEventList
+vTaskPlaceOnEventList
+prvSelectHighestPriorityTaskSMP
+xTaskIncrementTick
+pcTaskGetName
+xTaskResumeAll
+vTaskStartScheduler
+prvIsYieldRequiredSMP
+vTaskPrioritySet
+vTaskDelay
+prvDeleteTCB
+vTaskDelete
+lock->owner == core_owner_id
+lock->count == 0
+lock->owner == SPINLOCK_FREE || lock->owner == other_core_owner_id
+core_owner_id == lock->owner
+nesting > 0
+Mesh ext info check failed, %u %u %u %u
+meshlib:d48251ab82
+Composition Data 1 not registered
+Composition Data 1 not enabled
+Composition Data 128 not registered
+Composition Data 128 not enabled!
+spinlock_release
+vPortExitCritical
+spinlock_acquire
+pxPortInitialiseStack
+vSemaphoreDeleteWithCaps
+vQueueDeleteWithCaps
+vApplicationGetTimerTaskMemory
+vApplicationGetIdleTaskMemory
+check_lock_nonzero
+lock_release_generic
+lock_acquire_generic
+_lock_close
+pthread_mutex_unlock
+pthread_mutex_destroy
+pthread_cancel
+pthread_cleanup_thread_specific_data_callback
+vRingbufferDeleteWithCaps
+xRingbufferGetStaticBuffer
+vRingbufferGetInfo
+xRingbufferGetCurFreeSize
+xRingbufferGetMaxItemSize
+vRingbufferDelete
+vRingbufferReturnItemFromISR
+vRingbufferReturnItem
+xRingbufferReceiveUpTo
+prvReceiveGenericFromISR
+xRingbufferReceiveFromISR
+prvReceiveGeneric
+xRingbufferReceive
+xRingbufferSendFromISR
+xRingbufferSend
+xRingbufferCreateStatic
+prvCheckItemFitsDefault
+prvSendItemDoneNoSplit
+prvAcquireItemNoSplit
+prvGetItemDefault
+prvReturnItemDefault
+prvCopyItemAllowSplit
+prvCheckItemFitsByteBuffer
+prvCopyItemByteBuf
+prvGetItemByteBuf
+prvReturnItemByteBuf
+xRingbufferCreate
+translate_path
+z@?btdm_low_power_mode_init
+semphr_create_wrapper
+interrupt_hlevel_disable
+interrupt_hlevel_restore
+semphr_take_from_isr_wrapper
+semphr_give_from_isr_wrapper
+queue_create_hlevel_wrapper
+queue_send_from_isr_hlevel_wrapper
+queue_recv_from_isr_hlevel_wrapper
+queue_create_wrapper
+customer_queue_create_hlevel_wrapper
+hli_queue_setup
+btc_config_flush
+btc_config_update_newest_section
+btc_config_remove_section
+btc_config_remove
+btc_config_section_name
+btc_config_section_next
+btc_config_section_end
+btc_config_section_begin
+btc_config_set_bin
+btc_config_get_bin
+btc_config_set_int
+btc_config_get_int
+btc_config_exist
+btc_config_has_section
+@btc_gap_ble_init
+string_to_bdaddr
+string_is_bdaddr
+bdaddr_to_string
+start_up
+get_address
+get_bt_version
+get_features_classic
+get_last_features_classic_index
+get_features_ble
+get_ble_supported_states
+supports_simple_pairing
+supports_secure_connections
+supports_simultaneous_le_bredr
+supports_reading_remote_extended_features
+supports_interlaced_inquiry_scan
+supports_rssi_with_inquiry_results
+supports_extended_inquiry_response
+supports_master_slave_role_switch
+supports_ble
+supports_ble_packet_extension
+supports_ble_connection_parameters_request
+supports_ble_privacy
+get_acl_data_size_classic
+get_acl_data_size_ble
+get_acl_packet_size_classic
+get_acl_packet_size_ble
+get_ble_suggested_default_data_length
+get_ble_suggested_default_data_txtime
+get_acl_buffer_count_classic
+get_acl_buffer_count_ble
+get_ble_white_list_size
+get_ble_resolving_list_max_size
+set_ble_resolving_list_max_size
+get_sco_data_size
+get_sco_buffer_count
+controller_get_interface
+transmit_command
+transmit_command_futured
+transmit_downward
+hci_layer_init_env
+@parse_read_buffer_size_response
+parse_read_local_version_info_response
+parse_read_bd_addr_response
+parse_read_local_supported_commands_response
+parse_read_local_extended_features_response
+parse_ble_read_white_list_size_response
+parse_ble_read_buffer_size_response
+parse_ble_read_supported_states_response
+parse_ble_read_local_supported_features_response
+read_command_complete_header
+@reassemble_and_dispatch
+hci_free_cmd_buf
+btu_hcif_command_status_evt_on_task
+btu_hcif_send_cmd
+btu_stop_timer_oneshot
+btu_start_timer_oneshot
+btu_oneshot_alarm_cb
+btu_free_quick_timer
+btu_stop_quick_timer
+btu_l2cap_alarm_cb
+btu_start_quick_timer
+btu_free_timer
+btu_stop_timer
+btu_start_timer
+btu_general_alarm_cb
+btu_general_alarm_process
+btu_l2cap_alarm_process
+btsnd_hcic_ble_update_adv_report_flow_control
+l2c_fcr_process_peer_cfg_req
+l2c_fcr_renegotiate_chan
+l2c_fcr_adj_our_rsp_options
+l2c_fcr_adj_monitor_retran_timeout
+l2c_fcr_adj_our_req_options
+l2c_fcr_chk_chan_modes
+prepare_I_frame
+l2c_fcr_get_next_xmit_sdu_seg
+l2c_fcr_proc_ack_tout
+l2c_fcr_proc_tout
+process_i_frame
+retransmit_i_frames
+do_sar_reassembly
+l2c_fcr_proc_pdu
+l2c_fcr_send_S_frame
+l2c_fcr_is_flow_controlled
+l2c_fcr_clone_buf
+l2c_fcr_cleanup
+l2c_fcr_free_timer
+l2c_fcr_stop_timer
+l2c_fcr_start_timer
+@@l2cu_allocate_ccb
+bluedroid_config_get
+get_ssp_enabled
+get_sc_enabled
+osi_alarm_is_active
+osi_alarm_get_remaining_ms
+alarm_set
+osi_alarm_free
+osi_alarm_new
+osi_alarm_deinit
+osi_alarm_init
+config_save
+config_section_name
+config_section_next
+config_section_end
+config_section_begin
+config_remove_key
+config_update_newest_section
+config_remove_section
+config_set_int
+config_get_string
+config_get_int
+config_has_key
+config_has_section
+config_parse
+config_new
+fixed_queue_process
+fixed_queue_unregister_dequeue
+fixed_queue_register_dequeue
+fixed_queue_get_list
+fixed_queue_try_remove_from_queue
+fixed_queue_dequeue
+fixed_queue_enqueue
+fixed_pkt_queue_process
+fixed_pkt_queue_unregister_dequeue
+fixed_pkt_queue_register_dequeue
+fixed_pkt_queue_dequeue
+fixed_pkt_queue_enqueue
+future_await
+future_ready
+hash_map_foreach
+hash_map_clear
+hash_map_get
+hash_map_erase
+bucket_free_
+hash_map_set
+hash_map_has_key
+hash_map_new_internal
+list_delete_node
+list_free_node
+list_node
+list_next
+list_end
+list_begin
+list_foreach
+list_clear
+list_delete
+list_remove
+list_append
+list_prepend
+list_insert_after
+list_back
+list_front
+list_length
+list_get_node
+list_contains
+list_is_empty
+osi_thread_post_event
+osi_thead_work_queue_put
+osi_thread_post
+osi_thead_work_queue_get
+hci_host_register_callback
+@nIA?PIA?2IA?
+bta_dm_pm_stop_timer_by_index
+OA?|OA?ROA?(OA?
+bta_sys_free_timer
+bta_sys_stop_timer
+bta_sys_timer_is_active
+bta_sys_start_timer
+bta_alarm_cb
+btc_dm_auth_cmpl_evt
+btc_dm_sec_arg_deep_copy
+queue_int_add
+btc_a2dp_source_aa_start_tx
+btc_a2dp_source_thread_init
+btc_a2d_src_connect
+btc_a2d_sink_connect
+btc_a2dp_call_handler
+btc_av_is_peer_edr
+btc_av_event_deep_copy
+@?bte_hf_evt
+btc_gap_bt_acl_link_handle_remove
+btc_gap_bt_acl_link_handle_store
+bta_co_rfc_data_incoming
+spp_vfs_write
+spp_vfs_read
+btc_spp_stop_srv
+btc_spp_uninit
+btc_spp_dm_inter_cb
+interop_match
+hci_hal_h4_hdl_rx_adv_rpt
+hci_hal_env_init
+hci_adv_credits_consumed
+host_recv_pkt_cb
+transmit_data
+hci_adv_credits_release_rollback
+hci_adv_credits_release
+hci_adv_credits_try_release
+hci_adv_credits_prep_to_release
+host_recv_adv_packet
+UA?xUA?`UA?
+VA?hVA?
+[A?vZA?
+YA?PYA?4>
+obex_server_to_tl_server
+obex_tl_evt_handler
+obex_free_ccb
+obex_tl_l2cap_init
+rfcomm_server_mgmt_callback
+rfcomm_client_mgmt_callback
+obex_tl_rfcomm_init
+PORT_FlowControl_GiveCredit
+btc_ble_mesh_config_server_cb_handler
+bt_mesh_config_server_cb_evt_to_btc
+btc_ble_mesh_health_server_cb_handler
+btc_ble_mesh_health_server_copy_req_data
+btc_ble_mesh_health_server_free_req_data
+btc_ble_mesh_health_server_call_handler
+btc_ble_mesh_model_cb_handler
+btc_ble_mesh_model_call_handler
+btc_ble_mesh_prov_cb_to_app_reprocess
+btc_ble_mesh_prov_cb_handler
+btc_ble_mesh_prov_copy_req_data
+btc_ble_mesh_prov_free_req_data
+btc_ble_mesh_model_op_set
+btc_ble_mesh_prov_call_handler
+btc_ble_mesh_model_copy_req_data
+btc_ble_mesh_model_free_req_data
+btc_ble_mesh_model_arg_deep_free
+btc_ble_mesh_prov_arg_deep_free
+@bt_mesh_alloc_buf
+bt_mesh_r_mutex_create
+bt_mesh_mutex_create
+k_delayed_work_remaining_get
+k_delayed_work_free
+k_delayed_work_cancel
+k_delayed_work_submit
+k_delayed_work_init
+bt_mesh_timer_init
+comp_data_get
+health_send_fault_status
+bt_mesh_deinit
+bt_mesh_init
+bt_mesh_client_send_msg
+bt_mesh_ext_mbt_server_cb_evt_to_btc
+bt_mesh_ext_mbt_client_cb_evt_to_btc
+bt_mesh_ext_srpl_client_cb_evt_to_btc
+bt_mesh_ext_sar_client_cb_evt_to_btc
+bt_mesh_ext_rpr_server_cb_evt_to_btc
+bt_mesh_ext_rpr_client_cb_evt_to_btc
+btc_ble_mesh_ext_rpr_client_prov_comp_cb
+btc_ble_mesh_ext_rpr_client_link_close_cb
+bt_mesh_ext_prb_client_cb_evt_to_btc
+bt_mesh_ext_odp_client_cb_evt_to_btc
+bt_mesh_ext_lcd_client_cb_evt_to_btc
+bt_mesh_ext_df_server_cb_evt_to_btc
+bt_mesh_ext_df_client_cb_evt_to_btc
+bt_mesh_ext_brc_server_cb_evt_to_btc
+bt_mesh_ext_brc_client_cb_evt_to_btc
+bt_mesh_ext_agg_server_cb_evt_to_btc
+bt_mesh_ext_agg_client_cb_evt_to_btc
+bt_mesh_ext_brc_srv_get_bridge_rpl
+bt_mesh_ext_brc_srv_get_bridge_table_entry
+bt_mesh_ext_sub_set_multicast_echo_interval
+bt_mesh_ext_sub_get_multicast_echo_interval
+bt_mesh_ext_sub_set_unicast_echo_interval
+bt_mesh_ext_sub_get_unicast_echo_interval
+bt_mesh_ext_sub_set_wanted_lanes
+bt_mesh_ext_sub_get_wanted_lanes
+bt_mesh_ext_sub_get_fwd_table_entries
+bt_mesh_ext_sub_get_fwd_table_mutex
+bt_mesh_ext_sub_inc_fwd_table_update_id
+bt_mesh_ext_sub_set_fwd_table_update_id
+bt_mesh_ext_sub_get_fwd_table_update_id
+bt_mesh_ext_sub_set_fwd_table_max_deps_nodes
+bt_mesh_ext_sub_get_fwd_table_max_deps_nodes
+bt_mesh_ext_sub_set_fwd_table_max_ford_entries
+bt_mesh_ext_sub_get_fwd_table_max_ford_entries
+bt_mesh_ext_sub_get_disc_table_entries
+bt_mesh_ext_sub_get_disc_table_mutex
+bt_mesh_ext_sub_dec_disc_table_concurr_init
+bt_mesh_ext_sub_inc_disc_table_concurr_init
+bt_mesh_ext_sub_set_disc_table_concurr_init
+bt_mesh_ext_sub_get_disc_table_concurr_init
+bt_mesh_ext_sub_set_disc_table_max_concurr_init
+bt_mesh_ext_sub_get_disc_table_max_concurr_init
+bt_mesh_ext_sub_set_disc_table_max_disc_entries
+bt_mesh_ext_sub_get_disc_table_max_disc_entries
+bt_mesh_ext_sub_set_forward_number
+bt_mesh_ext_sub_get_forward_number
+bt_mesh_ext_sub_set_two_way_path
+bt_mesh_ext_sub_get_two_way_path
+bt_mesh_ext_sub_set_path_lifetime_type
+bt_mesh_ext_sub_get_path_lifetime_type
+bt_mesh_ext_sub_set_path_metric_type
+bt_mesh_ext_sub_get_path_metric_type
+bt_mesh_ext_sub_set_proxy_client_uar_range_length
+bt_mesh_ext_sub_get_proxy_client_uar_range_length
+bt_mesh_ext_sub_set_proxy_client_uar_range_start
+bt_mesh_ext_sub_get_proxy_client_uar_range_start
+bt_mesh_ext_sub_set_proxy_client_uar_len_present
+bt_mesh_ext_sub_get_proxy_client_uar_len_present
+bt_mesh_ext_sub_get_proxy_client_uar
+bt_mesh_ext_sub_set_use_directed
+bt_mesh_ext_sub_get_use_directed
+bt_mesh_ext_sub_set_directed_friend
+bt_mesh_ext_sub_get_directed_friend
+bt_mesh_ext_sub_set_directed_proxy_use_default
+bt_mesh_ext_sub_get_directed_proxy_use_default
+bt_mesh_ext_sub_set_directed_proxy
+bt_mesh_ext_sub_get_directed_proxy
+bt_mesh_ext_sub_set_directed_relay
+bt_mesh_ext_sub_get_directed_relay
+bt_mesh_ext_sub_set_directed_forwarding
+bt_mesh_ext_sub_get_directed_forwarding
+bt_mesh_ext_sub_get_keys_direct_privacy
+bt_mesh_ext_sub_get_keys_direct_enc
+bt_mesh_ext_sub_get_keys_direct_nid
+bt_mesh_ext_sub_get_keys_private_beacon
+bt_mesh_ext_sub_set_sbr_net_idx
+bt_mesh_ext_sub_get_sbr_net_idx
+bt_mesh_ext_sub_get_private_node_id
+bt_mesh_ext_sub_get_mpb_random
+bt_mesh_ext_sub_set_mpb_ivi_last
+bt_mesh_ext_sub_get_mpb_ivi_last
+bt_mesh_ext_sub_set_mpb_flags_last
+bt_mesh_ext_sub_get_mpb_flags_last
+bt_mesh_ext_sub_inc_mpb_cur
+bt_mesh_ext_sub_set_mpb_cur
+bt_mesh_ext_sub_get_mpb_cur
+bt_mesh_ext_sub_set_mpb_last
+bt_mesh_ext_sub_get_mpb_last
+bt_mesh_ext_sub_set_mpb_sent
+bt_mesh_ext_sub_get_mpb_sent
+bt_mesh_ext_erase_core_settings
+bt_mesh_ext_save_core_settings
+bt_mesh_ext_remove_core_settings_item
+bt_mesh_ext_add_core_settings_item
+bt_mesh_ext_is_settings_item_exist
+bt_mesh_ext_get_core_settings_item
+bt_mesh_ext_store_seq
+bt_mesh_ext_store_net
+bt_mesh_ext_clear_rpl_single
+bt_mesh_ext_clear_dkca
+bt_mesh_ext_store_dkca
+bt_mesh_ext_unprov_dev_info_query
+bt_mesh_ext_get_device_name
+bt_mesh_ext_lpn_frnd
+bt_mesh_ext_lpn_match
+bt_mesh_ext_friend_clear_net_idx
+bt_mesh_ext_friend_find
+bt_mesh_ext_friend_unicast_match
+bt_mesh_ext_friend_match
+bt_mesh_ext_net_get_frnd
+bt_mesh_ext_net_get_frnd_count
+bt_mesh_ext_frnd_get_sub_addr
+bt_mesh_ext_frnd_get_sub_list_size
+bt_mesh_ext_frnd_get_sub_list_count
+bt_mesh_ext_frnd_get_net_idx
+bt_mesh_ext_frnd_is_established
+bt_mesh_ext_frnd_is_valid
+bt_mesh_ext_frnd_get_num_elem
+bt_mesh_ext_frnd_get_lpn
+bt_mesh_ext_rpr_srv_set_waiting_prov_link
+bt_mesh_ext_rpr_srv_nppi_pdu_recv
+bt_mesh_ext_rpr_srv_reset_prov_link
+bt_mesh_ext_rpr_cli_get_rpr_link
+bt_mesh_ext_bt_mesh_is_unprov_dev_being_prov
+bt_mesh_ext_rpr_cli_pdu_recv
+bt_mesh_ext_rpr_cli_recv_pub_key_outbound_report
+bt_mesh_ext_rpr_cli_pdu_send
+bt_mesh_ext_proxy_client_get_client_uar
+bt_mesh_ext_proxy_client_get_use_directed
+bt_mesh_ext_proxy_client_get_opcode
+bt_mesh_ext_proxy_client_beacon_send
+bt_mesh_ext_proxy_server_set_msg_recv
+bt_mesh_ext_proxy_server_set_client_type
+bt_mesh_ext_proxy_server_get_conn
+bt_mesh_ext_proxy_server_is_proxy_msg_recv
+bt_mesh_ext_proxy_server_get_client_type
+bt_mesh_ext_proxy_server_filter_is_client
+bt_mesh_ext_proxy_server_get_filter_addr
+bt_mesh_ext_proxy_server_get_filter_size
+bt_mesh_ext_proxy_server_get_filter_count
+bt_mesh_ext_proxy_server_get_filter_type
+bt_mesh_ext_proxy_server_private_identity_stop
+bt_mesh_ext_proxy_server_private_identity_start
+bt_mesh_ext_proxy_server_is_node_id_enable
+bt_mesh_ext_proxy_server_update_net_id_rand
+bt_mesh_ext_proxy_server_get_client_count
+bt_mesh_ext_proxy_server_get_client
+bt_mesh_ext_proxy_server_update_net_id_rand_stop
+bt_mesh_ext_proxy_server_find_client_by_addr
+bt_mesh_ext_proxy_server_segment_send
+bt_mesh_ext_proxy_server_get_all_client_type
+bt_mesh_ext_prov_link_alloc_record
+bt_mesh_ext_prov_link_get_record
+bt_mesh_ext_prov_link_get_conn
+bt_mesh_ext_prov_link_set_max_size
+bt_mesh_ext_prov_link_get_max_size
+bt_mesh_ext_prov_link_set_offset_expect
+bt_mesh_ext_prov_link_get_offset_expect
+bt_mesh_ext_prov_link_set_record_id_expect
+bt_mesh_ext_prov_link_get_record_id_expect
+bt_mesh_ext_prov_link_get_unicast_addr
+bt_mesh_ext_prov_link_get_elem_num
+bt_mesh_ext_prov_link_get_uuid
+bt_mesh_ext_pvnr_get_node_uuid
+bt_mesh_ext_pvnr_records_recv_comp_cb
+bt_mesh_ext_pvnr_records_list_get_cb
+bt_mesh_ext_pvnr_get_node_with_addr
+bt_mesh_ext_prov_pvnr_close_link
+bt_mesh_ext_prov_pvnr_send_invite
+bt_mesh_ext_prov_pvnr_get_link_count
+bt_mesh_ext_prov_pvnr_get_link
+bt_mesh_ext_prov_node_get_uri
+bt_mesh_ext_prov_node_get_oob_info
+bt_mesh_ext_prov_node_get_uuid
+bt_mesh_ext_prov_node_close_link
+bt_mesh_ext_prov_node_get_link
+bt_mesh_ext_prov_node_next_xact_id
+bt_mesh_ext_net_get_sub_mpb_rand
+bt_mesh_ext_model_set_pub_directed_pub_policy
+bt_mesh_ext_model_get_pub_directed_pub_policy
+seg_tx_done
+@adv_send
+adv_thread
+bt_mesh_adv_init
+bta_hf_client_sco_data_send_cvsd
+btc_a2dp_sink_thread_init
+avdt_ad_tc_tbl_alloc
+avdt_ad_tc_tbl_by_type
+sys_memcpy_swap
+bt_mesh_update_exceptional_list
+bt_le_scan_stop
+bt_le_adv_stop
+set_adv_data
+bt_le_adv_start
+:'tiNS
+@SbcAnalysisInit
+lbt_mesh_adv_task_init
+bt_mesh_generic_adv_send
+bt_mesh_unref_buf_from_pool
+bt_mesh_adv_create_from_pool
+bt_mesh_adv_type_deinit
+bt_mesh_adv_type_init
+bt_mesh_adv_queue_deinit
+bt_mesh_adv_queue_init
+bt_mesh_adv_buf_ref_debug
+close_goepc_and_disconnect
+bta_av_ca_api_get
+bta_av_ca_api_open
+bta_av_ca_goep_event_handler
+AVRC_PassRsp
+avrc_pass_msg
+AVRC_PassCmd
+bt_mesh_queue_deinit
+bt_mesh_queue_init
+elf_add_wdt_panic_details
+elf_write_core_dump_info
+elf_write_core_dump_user_data
+elf_process_task_tcb
+elf_save_task
+elf_add_segment
+elf_save_interrupted_stack
+elf_process_task_data
+elf_write_segment_header
+elf_process_note_segment
+elf_write_note_header
+elf_write_note
+elf_add_note
+elf_process_tasks_regs
+elf_write_tasks_data
+elf_write_file_header
+core_dump_crc_print
+fetch_comp_data
+fetch_comp_data_1
+s_reserve_drom_region
+cache_ll_l1_get_bus
+s_reserve_irom_region
+clk_hal_lp_slow_get_freq_hz
+clk_hal_soc_root_get_freq_mhz
+vEventGroupDelete
+xEventGroupSetBits
+xEventGroupClearBits
+xEventGroupWaitBits
+prvProcessReceivedCommands
+xTimerCreateTimerTask
+ets_timer_arm_us
+ets_timer_setfn
+store_cal_data_to_nvs_handle
+load_cal_data_from_nvs_handle
+NHB<84
+sha_get_engine_state
+St9bad_alloc
+A?St9exception
+A?St20bad_array_new_length
+@St11logic_error
+A?St12length_error
+A?St12out_of_range
+A?St17bad_function_call
+@N9__gnu_cxx24__concurrence_lock_errorE
+A?N9__gnu_cxx26__concurrence_unlock_errorE
+@ram_lld_pdu_tx_flush
+lld_pdu_get_tx_flush_nb
+r_rwip_init
+multi_heap_realloc_impl
+multi_heap_register_impl
+multi_heap_get_allocated_size
+multi_heap_realloc
+multi_heap_free
+tlsf_realloc
+block_merge_next
+block_absorb
+block_merge_prev
+tlsf_free
+tlsf_memalign_offs
+block_split
+block_trim_free
+block_prepare_used
+search_suitable_block
+block_locate_free
+control_construct
+remove_free_block
+align_ptr
+insert_free_block
+align_up
+block_next
+048@DPT\
+048@DHPTX\
+Stack smashing protect failure!
+Tasks currently running:
+Fatal error in queue_signal: s_meta_queue full
+[%u] CO: create fwn mutex error!
+[%u] CO: create bb reset mutex error!
+[%u] CO: create semaphore error!
+[%u] CO: create schm semaphore error!
+[%u] Coex arbit init: no memory!
+[%u] CO: create arbit mux error!
+[%u] CO: create arbit mem mux error!
+#Need Fix sco_par->nb_prog in ld_sco_frm_cbk
+E:double push
+E: No elt when frame end
+chm_upd: %u %u %u
+con_upd: %u %u %u
+llcp check: %u %u %u %u %u
+llcp prog: %u %u %u %u %u
+ELx200
+ELx400
+ELx20000
+ELx2000
+ELx18000
+ELx10000
+ELx8000
+clk_ll_cpu_set_divider
+cache_hal_get_cache_line_size
+mmu_ll_get_entry_target
+mmu_ll_check_entry_valid
+mmu_hal_vaddr_to_paddr
+mmu_hal_unmap_region
+mmu_ll_write_entry
+mmu_ll_get_entry_id
+mmu_hal_map_region
+mmu_ll_set_entry_invalid
+mwdt_ll_config_stage
+Oct 28 2025
+TX_POWER_BACKOFF,
+TX_PWRCTRL_ATTEN,
+BT_PA_GAIN,
+BT_DIG_ATTEN,
+total_power=%lld, sig_power=%lld, dc_power=%lld, noise_power=%lld
+TXCAP_TMX2G_CCT_LOAD,
+TXCAP_PA2G_CCT_STG1,
+TXCAP_PA2G_CCT_STG2,
+delta_bt_atten,
+BT_TXIQ,
+BT_TXDC,
+RXDC_RFRX_BT,
+RXDC_RFRX_WIFI,
+RXDC_RXBB_WIFI,
+i=%02d  acc=%03d  tgt=%03d  err=%03d  ser=%03d att=%03d
+debug mode FAIL
+error: pll_cal exceeds 2ms!!!
+o_zZiuUtTD`@
+memspi
+@generic
+chip_generic
+@winbond
+chip_wb
+chip_status == 0
+out_write_protect!=NULL
+ESP_ERROR_CHECK
+false && "unsupported WDT stage"
+entry_id < SOC_MMU_ENTRY_NUM
+mmu_ll_check_valid_paddr_region(mmu_id, paddr, 1)
+vaddr % page_size_in_bytes == 0
+paddr % page_size_in_bytes == 0
+mmu_ll_check_valid_paddr_region(mmu_id, paddr, len)
+mmu_hal_check_valid_ext_vaddr_region(mmu_id, vaddr, len, MMU_VADDR_DATA | MMU_VADDR_INSTRUCTION)
+mmu_hal_check_valid_ext_vaddr_region(mmu_id, vaddr, 1, MMU_VADDR_DATA | MMU_VADDR_INSTRUCTION)
+mmu_ll_check_entry_valid(mmu_id, entry_id)
+cache_level <= CACHE_LL_LEVEL_NUMS
+heap != NULL
+0 == (align & (align - 1)) && "must align to a power of two"
+sl_map && "internal error - second level bitmap is null"
+block_size(block) >= *size
+size && "size must be non-zero"
+block_is_free(block) && "block must be free"
+block_to_ptr(remaining) == align_ptr(block_to_ptr(remaining), ALIGN_SIZE) && "remaining block not aligned properly"
+block_size(block) == remain_size + size + block_header_overhead
+block_size(remaining) >= block_size_min && "block split with invalid size"
+gap >= gap_minimum && "gap size too small"
+!block_is_free(block) && "block already marked as free"
+prev && "prev physical block can't be null"
+block_is_free(prev) && "prev block is not free though marked as such"
+!block_is_last(prev) && "previous block can't be last"
+next && "next physical block can't be null"
+head != NULL
+core_id >= 0 && core_id < SOC_CPU_CORES_NUM
+divider > 0
+on core
+<cached disabled>
+assert failed:
+(hint & (~RST_REASON_MASK)) == 0
+0123456789abcdefghijklmnopqrstuvwxyz
+I@@IPPI``IppI
+)Q9aIqba
+w``tpp
+UUUU!&A?
+1fJrVB
+@h7PUA
+I"i2iBIR(R #
+n782&CIfs
+yRIbyr
+BR rBB
+PPt``tIA
+t,xPPt``t'
+100tPPt``t
+#00t@@tPPt"
+t ptPPt``t
+dyA pt
+9HIXRH
+@@`PDC
+@puA R b
+iJiZijizi
+tPY Y8
+@@tPPt
+@ %Afj$
+rJ$pxA
+00tPPt
+PPt``tB)
+AXm r P% R
+0PPtppt
+w pptrC!
+"X[2X\BIh
+'rbgqeQ%bgr
+LyAY1r
+Y+i;yKv
+t@@tPP
+nZjw`w
+U00t@@tPPtx
+)1@@tYaiQ
+U&"JfBO
+YDYTYd2
+aSFX9y
+wpptrE
+wpptw5
+00t@@tPPt
+4PPt``tra
+PPt``t
+`hABK @H!RK"PX!
+00t@@tPP
+@?oDA?
+@yDA?TDA?
+|@?xEA?
+@fEA?l
+@?AEA?$EA?
+@?HFA?
+FA?pFA?;
+@?RGA?
+@?lGA?_GA?
+@?CGA?6GA?'GA?
+@?sHA?0
+@?eHA?v
+@?WHA?KHA?@HA?7
+?XPA?pPA?
+@?mQA?)
+@?XQA?
+@?vRA?]
+@?cRA?
+@MRA?$RA?
+@?MSA?
+@Fa@?zSA?L
+@kSA?ZSA?dE
+@?kTA?
+TA?Fa@?LTA?
+@?PUA?
+@?dWA?
+XA?|XA?:XA?HXA?-XA?8YA?
+@?UaA?;
+aA?vaA?
+@?sbA?
+@?IbA?
+zA?ezA?6zA?
+yA?gyA?>yA?
+xA?}xA?YxA?/xA?
+wA?owA?NwA?*wA?
+vA?mvA?PvA?,vA?
+uA?yuA?auA?@uA?*uA?
+tA?ntA?QtA?;tA?%tA?
+sA?wsA?WsA?:sA?
+rA?lrA?IrA?(rA?
+pA?ypA?VpA?3pA?
+oA?joA?IoA?(oA?
+nA?pnA??nA?
+mA?jmA?CmA?"mA?
+kA?wkA?KkA?&kA?
+jA?tjA?GjA?
+iA?diA?CiA?
+hA?lhA?IhA?$hA?
+gA?mgA?HgA?#gA?
+fA?afA?<fA?
+@@tPPt-
+bbEbbFbbD
+rBLrEd
+$&h:&xTfX.
+@00tPPt
+iQiAi1
+1yaYqe
+9:IJYZV&
+@@tPPte
+9GIWRG
+00tPPt}
+tPPt``tppt
+@@tPPt``t
+erp' r
+@  t@@tPPt
+@@tppt
+@05APUA
+t@@tPPt
+RA8PXA
+BAH@HABAI
+t00t@@tPPtpp
+BJJRJK2JL
+00t@@tPPtpp
+IQYaB!
+XBhRxbe6
+,Jra+e
+iZijizi
+PPt``t"
+uK&EXfU
+8&)RVy
+b"kjgzu
+"frbe%
+PPt``t}
+PPt``t%
+c &3zfC
+``tppt
+Y1 Ptr
+j00t@@tPP
+t00t@@tPPte;
+j@BjDBjEe'Ne
+H<YGRG!
+2jC2jDbjF2jG
+9&YFfT
+9*IJYZ
+zYJIZ%!
+fpqA01A
+++CCUNG
+00tKa}
+G91&DJf
+`bGaRGb
+f``tbG`
+00t r @@tPPtV
+d2xBVw
+00t@@tPPt}
+zH@DAq7
+pp`Pwc
+HDbHEbHFbHG
+HLbHMbHNbHO
+HTbHUbHVbHW
+HdbHebHfbHg
+<9QIaYq
+`hAH'`
+*2:fZTG
+*DJCP;0
+8&H':DZD
+8FHG:D
+8VHW:D
+8fHg:D
+`c0@3A0f0jwyA
+w0zvh!b&
+jwhAjwz
+ZY(1*UZT
+D0ZDJV
+```jDf
+UPPtRD
+?gfff4J
+3#PPt"a
+PR PPtY
+D@@tKw'
+KDI1&5
+3#p"SPPtaG
+u#+wpr!
+X#+UPR!P3
+wppt&w
+PPt``t=
+"  tBa
+H@@tBa
+8b&*PPt
+@F RBYI
+US@@tPPt
+G2#IBBKbBIRBJ
+[U@0thQPPtg
+DIQ0@D`D
+XQPe 0S @1A7
+MI!Y1iAyQ
+fi4yTX
+;UPRA;U
+XT;UPRA;U
+IAPE pW
+RPPtRT
+f#pfSRB
+U#pUSbB
+zfj300
+(AjU"C
+)/JCzs
+t@@tPPt (t
+"  tAD
+UVS)2"
+t00tPPtx
+KbSL<Fbc
+@@TpD @@
+P" |UPU
+Wo2WmbWq
+PtZD00t
+2FRBV&
+HBV'BV(
+%PD BFS
+"   tVB
+PPt``t'
+r&/ytr&1b&0y
+r"/ysr"1""0)
+0U PPtV
+!@UA@@DBA1
+@@t`Dca'
+@?[ZZZ=<<<
+Rb!rb"rbPrbQ
+9QIaYqba
+YAiQra
+9QYaba
+spg @3
+YHPPtF
+YIPPtF
+2HFBX"
+00t@@tPPt``t
+2#!5BJBa5B`
+?wwww@P
+PPt00t@@tY
+UPPtaP
+JZD*$R
+#  $)Ahq
+6;@hABE
+EPD BBr
+IHYX)h9x
+yByRyb2R
+yByRyb
+t00t@@tPPt``t
+t00t@@tPPt
+)Q9aIqY
+Proc-Type: 4,ENCRYPTED
+DEK-Info: AES-
+DEK-Info: AES-128-CBC,
+DEK-Info: AES-192-CBC,
+DEK-Info: AES-256-CBC,
+eckey.Q
+RSA-alt
+h^j@GPm|_}
+pbeWithSHAAnd3-KeyTripleDES-CBC
+PBE with SHA1 and 3-Key 3DES
+pbeWithSHAAnd2-KeyTripleDES-CBC
+PBE with SHA1 and 2-Key 3DES
+id-sha1
+id-sha224
+SHA-224
+id-sha256
+SHA-256
+id-sha384
+SHA-384
+id-sha512
+SHA-512
+desCBC
+des-ede3-cbc
+DES-EDE3-CBC
+secp192r1
+secp224r1
+secp256r1
+secp384r1
+secp521r1
+secp192k1
+secp224k1
+secp256k1
+brainpoolP256r1
+brainpool256r1
+brainpoolP384r1
+brainpool384r1
+brainpoolP512r1
+brainpool512r1
+rsaEncryption
+id-ecPublicKey
+Generic EC key
+id-ecDH
+EC key for ECDH
+md5WithRSAEncryption
+RSA with MD5
+sha-1WithRSAEncryption
+RSA with SHA1
+sha224WithRSAEncryption
+RSA with SHA-224
+sha256WithRSAEncryption
+RSA with SHA-256
+sha384WithRSAEncryption
+RSA with SHA-384
+sha512WithRSAEncryption
+RSA with SHA-512
+ecdsa-with-SHA1
+ECDSA with SHA1
+ecdsa-with-SHA224
+ECDSA with SHA224
+ecdsa-with-SHA256
+ECDSA with SHA256
+ecdsa-with-SHA384
+ECDSA with SHA384
+ecdsa-with-SHA512
+ECDSA with SHA512
+RSASSA-PSS
+id-kp-serverAuth
+TLS Web Server Authentication
+id-kp-clientAuth
+TLS Web Client Authentication
+id-kp-codeSigning
+Code Signing
+id-kp-emailProtection
+E-mail Protection
+id-kp-timeStamping
+Time Stamping
+id-kp-OCSPSigning
+OCSP Signing
+id-ce-basicConstraints
+Basic Constraints
+id-ce-keyUsage
+Key Usage
+id-ce-extKeyUsage
+Extended Key Usage
+id-ce-subjectAltName
+Subject Alt Name
+id-netscape-certtype
+Netscape Certificate Type
+id-at-commonName
+Common Name
+id-at-countryName
+Country
+id-at-locality
+Locality
+id-at-state
+id-at-organizationName
+Organization
+id-at-organizationalUnitName
+Org Unit
+emailAddress
+E-mail address
+id-at-serialNumber
+Serial number
+serialNumber
+id-at-postalAddress
+Postal address
+postalAddress
+id-at-postalCode
+Postal code
+postalCode
+id-at-surName
+Surname
+id-at-givenName
+Given name
+id-at-initials
+Initials
+initials
+id-at-generationQualifier
+Generation qualifier
+generationQualifier
+id-at-title
+id-at-dnQualifier
+Distinguished Name qualifier
+dnQualifier
+id-at-pseudonym
+Pseudonym
+pseudonym
+id-domainComponent
+Domain component
+id-at-uniqueIdentifier
+Unique Identifier
+uniqueIdentifier
+A?PNA?
+ECP test #1 (constant op_count, base point G):
+failed (%u)
+passed
+ECP test #2 (constant op_count, other point):
+Unexpected error, return code = %08X
+FFFFFFFFFFFFFFFFFFFFFFFF99DEF836146BC9B1B4D22830
+5EA6F389A38B8BC81E767753B15AA5569E1782E30ABE7D25
+7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
+X.509 certificate load:
+X.509 signature verify:
+@SHA512
+SHA224
+AES-256-CCM
+AES-192-CCM
+AES-128-CCM
+AES-256-GCM
+AES-192-GCM
+AES-128-GCM
+AES-256-CTR
+AES-192-CTR
+AES-128-CTR
+AES-256-CFB128
+AES-192-CFB128
+AES-128-CFB128
+AES-256-CBC
+AES-192-CBC
+AES-128-CBC
+AES-256-ECB
+AES-192-ECB
+AES-128-ECB
+@local
+_services
+_dns-sd
+in-addr
+BLE_AT
+CPU 0/1
+Register dump:
+Watchpoint 1 triggered
+. Setting bp and returning..
+. Exception was unhandled.
+?error: pll_cal exceeds 2ms!!!
+May  9 2018
+false && "unsupported frequency"
+!is_first_block(heap, block)
+!is_last_block(block)
+next > (intptr_t)block
+CORRUPT HEAP: Block %p points to itself
+CORRUPT HEAP: Block %p is before prev block %p
+CORRUPT HEAP: Block %p is outside heap (last valid block %p)
+CORRUPT HEAP: Two adjacent free blocks found, %p and %p
+CORRUPT HEAP: Prev free block %p pointed to next free %p but this free block is %p
+CORRUPT HEAP: Last block %p not %p
+CORRUPT HEAP: Expected prev block %p to be free
+CORRUPT HEAP: Expected %u free bytes counted %u
+Heap start %p end %p
+First free block %p
+FREE. Next free %p
+merge_adjacent
+get_prev_free_block
+split_if_necessary
+get_next_block
+yQIAY19!)
+)Q9aIq
+rvA?zvA?
+BVvRf9"f:
+AxA?KxA?
+vA?XxA?
+?bzA?L
+82ZSY2Hb8":4PS
+82JCI2Xb8":57
+bx"zxp
+H2:492XbH"JE04
+8HJCIH
+Y(i8yHX
+DBe~iS
+yQiAY1I
+DBgmFQ
+DBgnF\
+D"!!Bgm
+D"!!Bgo
+B'pZD"!!BgpFF
+D"!!BgqFA
+D"!!Bgr
+BgWfUM
+iXicys%M
+"   tws
+@@t04CAJ
+PXAHARD
+PXA(ARB
+J XXPg
+`0thHV
+&Y_&yDFb
++WPPt2H
+9(Y8)HIX
+)jgRFT
+PPt  t@@
+JGJHJNJMJLJKJI@@
++wzDIA=
+uPV aq
+VUUU6a
+$@E BCF
+@H @@tBEF
+5)ABA;
+RHLbHM9xI
+I8YXihyH%
+@@tZD1
+/+UPPt
+RGjBGn
+9QiAY1
+t  t``tpptR
+`t00t@@tPPt
+Hr"HM2HP"HpBHq2Ht
+BcNBcM
+BcNBcM"S
+00tiA=
+BgjR:=2
+PPt00t@@t
+g``tbC
+zL@Atr
+JF@B!@PtRB
+PtJE@A!BB
+cpp04fC
+_1P]%Zxpp$PW
+hbRg2V6
+t`g bDt
+&YriB=
+wyBRbXY
+PV RDt
+viBrbXy
+U`i bDt
+tPV RDt
+R">yBi
+t`w rDt
+R"]iRi
+" "ItIc
+'rcef&
+"$SRdT
+i.i>iNi^ini~i
+00t"hSfC
+g;BgARgB
+PXtP[ P
+beubev
+e]BcgF1
+Fbc(+d=
+3#PPt)
+pPt ptRa
+t00t``tYA
+cXqRBz
+/@@tRA1|
+agERAA
++XPR!P
+w pptG
+w pptf#D
+@H RCYBc
+@@tPPtBa
+*wppt"
+R%IbTH
+PPtYA``tiQ
+UUUU3333
+PPt``tba
+F"PXuRF#X4RF$P
+F&PXuRF'XA
+Pe ZWR%
+PPt``tppt
++UPc!PP$
+ERC JG
+JIYt!V
+XeY"JH
+Z]HuI2
+7&"PPtPE
+i%i5iEbE
+I!iAY1
+D@@tBC
+('dqAZ
+2b,BBE
+300t2BDB
+dBR4BR3|
+BBF2BDA
+`U RRDb
+\fdBR#
+WbB"#(
+PXAPX (
+e#iAQE
+XAZ400
+9q9aHaVd
+91IAYQ!
+#0U PPt=
+#0U PPt
+08A@XAW
+300tVR
+!IaYqi
+QRa#ba$ra%
+KRY$W*
+c/XQHARa
+lAI~P04@3
+`U0YaX
+1Axp@I
+@@tPT Y3(#
+*8bjc8B
+38bjc8
+PPtPX V
+:D*DJL
+Zw*wzz
+jd*fji
+ZS*UZX
+JC*DJL
+Zf*fji
+Z^*UZX
+ZV*UZw
+ZV*ejo
+UYb@]%hbZVYbJX<
+aqSPs0
+RPs0gC
+aZQgC&0D
+:(5JBI5-
+vxbJepf
+UPPtJe1
+iqYaIQ
+1JHH#1EHI
+px ppt
+9'igfb
+(&#HVS
+A.0jdb
+\DBA4L4BA5\
+\TBA4LDBA5\
+BA5\tBA6Q
+)A9QIaYqi
+*(2BhBBiRBj
+%RAAQ7&
+*%XQRB
+BAkB#AI!
+bMbbNb
+@@tPPt@
+BA?PBA?
+dCA?xCA?
+@|0A?hDA?
+TDA?@DA?H
+?hEA?dy
+?XHA?Py
+GA?dGA?TGA?0GA?
+?xFA?\FA?DFA?My
+EA?xEA?
+IA? JA?lJA?#
+JA?TKA?
+JA?LLA?
+? MA?xMA?$MA?
+NA?hNA?
+OA?xNA?
+@|OA?PPA?
+OA?TNA?hPA?
+QA?xPA?
+0A?tQA?
+PA?PQA?8QA?
+.A?DRA?@
+RA?PSA?
+RA?hNA?tRA?`RA?TRA?
+SA?pSA?
+@pTA?xTA?
+TA?pTA?
+UA?$UA?8UA?HUA?PUA?
+VA?LVA?
+@ ZA?dZA?
+bA?pjA?d
+lA?4lA?HlA?\lA?tlA?
+rA?prA?$rA?
+00tPPt``t
+00tBQ0
+00tBQ(
+%Rdfj.
+t@@tPPt``t
+Y!i1yAH
+00t@@tPPt2
+`t00tPPt
+@@tI1PPtYAp@tIQr
+@@tPPt``
+t00tPPt
+RTnRThRTg
+TjbTobTi
+RTnRThRTgrTprTjbTobTi
+00tPPt``
+2RgBRhRRibRj2
+sBZnRZobZpB
+RRgBRhbRi2RjB
+fDA2ZD8
+dBZ`fB
+"UFYuRe
+BSPBS*
+RS{RS|RSyRSzR
+2V{2V|2Vy2Vzr
+KSWT&0
+;ZZRT;F
+YQYaYqY
+UPPtP`
+bCxbCy
+bCTbCURD<
+X UcRQ
+iAyQ"!
+X fcbQ
+tPPtRa
+``tpptR
+@@tPPt``ti
+B$\@HuBE
+PPt@U RR
+!g8ghA
+IqIaIQ
+R>Rb#Rb$Rb%Rb&Rb'bRFQg
+f``tbD
+9*I:)ZYJ1
+9ZyjV&
+fi"hbh
+i!i1iAiQiaiq
+R!(B!)ppt
+@@tPPt%
+I1IAIQIaIqBa
+tBBr2Bs
++2HUBB
++2HuBB
+TJ32GTb
+y4jB2DTb
+PPtPV V%
+tPPt``t
+9JYZij
+XaYA00
+d"HdVr
+BCSBG9
+@H BBe
+'  DfR
+"BCaf"
+'@@DfT
+ePY RHeB
+@@tPPtRa
+Gpx rF
+BCdBCe
+FbE\"E]"
+)!)1)ARA
+t00t@@teC
+0U PPtP
+@H BUl2
+tPPt``tp
+00tPPt&E
+D @@tgh
+PX RTl
+PV RTl
+E@@tVe
+@@tPPtppt
+Y!Y1YAYQ
+9JIZ![`"Z
+"!%@@tBa
+I!I1IAB
+zDBQ*+
+PPtppt
+T0D BBTB
+``tjn``ti
+PPth"jdi"
+PPtx2z}y2
+``tzUYBF
+hCjUYBxC
+``tXBZ_YB
+tjwyRF
+hSjwyRhS
+thRjiiR
+@ptjUYbF
+HcJUYbhc
+@pthbjiib
+pptZDIrF
+XsZDIrXs
+HrJfirH
+ZwJfirH
+ZwJfirX
+!yDJB(t
+!fDJB(t
+?CuA?x
+?GvA? b
+TvA?6A
+\vA?bvA?6
+(tjU"C
+HBW'BW(|
+$@E BGS
+SRVH"F
+?XzA?@
+XtPPtRa
+fsC8q7
+zD@A!PDc
+A?VUUU
+BSbrShrS
+PX PTA
+PW PTAxbpp
+@F @DAhb``
+(#zry#
+e7%hEi
+)JYZ2"!
+Y1YQYA<
+V: hQxA
+@E IAB!)
+Jr'MVg
+9QIaYA
+U0r!Apn
+PR Z$:fbaF*CBaB
+aEz#"aA
+30PZAPS0"
+%00SAP20:7"
+P" *#R!CZW*'
+090pzAp30r
+Ph0jZKn
+""aGZZRaC
+<2aFjhbaB
+S*DBaDZRRa@
+eG x%psAy
+ThEi4x
+fbabhD
+B"*jdbb*
+X5ZTRb*
+RA)BA*B"*@XtRA+BA,
+HTR"*JEBb*
+rAYBAZ`HtBA[bA\
+I!I1IAIQIaIqI
+y!y1yAyQyara
+@BAI"92
+B`bAiRYb
+PPtPW V
+x0p| py0zfj
+h0`k `l0jUZ
+X0PZ P[0ZDJ
+H0@K @L0XaJEJ
+H0@I @J0XAJEJ
+H0@K @L0X1JEJ
+H0@I @J0X!JEJ
+jjjh!/
+jojk*f
+JKJ3*3
+_0HAPT0
+H1hq`T0HQPT0h
+@\0haPV0HAPT0
+YAZD*DJw
+PT0hQPV0
+YQZd*fjo
+aP_0(APR0
+* VzBb
+ZSpAA@D
+ppt@@tBa R!!
+PPtRa!r!!
+raR2aNbaQ
+{UPSA8
+@f PWApJ
+f8!xyx7
+fXdxyxG
+PS0PPt
+P^ PPt
+9QIaYAB!
+[ZPXtRC
+;rzuK"
++RPXtRC
+Pt+ebC
+kfg5X(
+P t+bbC
+UYa+wX
+fia+wb!
+zxZW:v
+C2#oVC
+8A:DkDBb*
+b!rb@bbA
+qApu @AA
+bPbbQF&
+jDjUV#
+iAr"Rb"Sp
+hA`XuRA
+PV KUW
+;U8AZS
+VJ*hAjuF
+#XARaDZf]
+BaEB!EV
+B!B@HtBG
++fB!BJfF
+{5HRf4bH
+f``tbH
+raD2aEBaF2"
+{f`cAjj
+zfzUpD
+W'3`xAR
+$JH@@tfdNA&
+@t JEJFH
+:4:fRV
+JHJFH$
+JJJFH$@H
+IAIQIaBA
+W'l`xuR
+hAZ&p8A2B
+#  tVS
+!=taFt
+sAjpQ"sF
+AbpQ2s
+)!9aYq
+!Bg1DgVW
+fhA,%Y
+Bay"alA
+baqrar
+"ax"asM
+,B"arB!p"!r
+Kbbarg$
+,B"arB!p"!r*$"
+$"arB!p"!r*$"
+,DBm2B"0""2*$"
+pEtBAC
+agcgC*0D
+AtbJIH
+AXbJIH
+JH@@tJA
+2BFBR"
+f@uAw6
