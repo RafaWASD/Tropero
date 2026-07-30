@@ -247,6 +247,46 @@ de 1 minuto para Raf.
 
 ---
 
+## 0. Resultado final — **26/26 en device contra el build arreglado**
+
+> Se lee esto primero. El resto del documento es cómo se llegó.
+
+APK de EAS `a31e2e2f-7e9e-4e13-970c-9bb5920d8029` (perfil `preview-dev`, buildeado desde **`d738dbe`**),
+instalado con `adb install -r` sobre el existente — misma keystore (`71a60de5…`, verificada con
+`apksigner` **antes** de instalar), así que no hubo que desinstalar y sobrevivieron la sesión, la DB local
+y el emparejamiento del `RS420-EMU`.
+
+**Las seis escenas que estaban rojas contra `dad711f`, ahora verdes:**
+
+| escena | contra `dad711f` | contra `d738dbe` |
+|---|---|---|
+| **E15** flap / backoff | ❌ `intentos=[0,0,0,0]` — no crecía | ✅ `intentos=[0,1,2,3] → CRECE` (**cierra T-MV.5.18 con medición en device**, no con unit) |
+| **BENCH1** corte con la app minimizada | ❌ `app dice 'Bastón conectado' · lee=False` | ✅ link durante el background=libre → al volver **reconcilia** y `lee=True` |
+| **LATCH** BT prendido por afuera | ❌ `NO reconectó` (2 min 40 s de parálisis) | ✅ `reconectó` |
+| **COLD** arranque en frío conecta sin gesto | ❌ `link=libre` (R6.4 no existía) | ✅ `link=CONECTADO` — **primera verificación de R6.4 en device** |
+| **CAP** tope de la cadena sin gesto | ⚠️ el oráculo se declaraba inútil (no había cadena) | ✅ `arrancó=True · final: 'No encontramos el bastón' · CTA=True` |
+| **COLD-CUT** corte pasado el tope | ⚠️ no se podía ni armar | ✅ `link=CONECTADO` — **es el 🔴 que encontraron las dos puertas** |
+
+Y las 20 de siempre (dedup, ráfagas, malformadas, framing, terminadores, reconexión) siguen verdes: el
+fix no rompió nada de lo que ya andaba.
+
+**Honestidad del método**: el 26/26 sale de **tres corridas**, no de una sola limpia — la primera dejó
+CAP/CAP-RESET/COLD-CUT en "no se pudo preparar" y la segunda dejó CAP en ⚠️. **Los dos fallos fueron del
+harness, no del producto**, y los dos son de la misma clase que veníamos persiguiendo toda la noche:
+
+1. `ensure_connected` daba por sentado que la fila del device estaba en pantalla. Pero la lista de
+   emparejados **no se carga sola al entrar** (a propósito: la primera llamada dispara el diálogo de
+   permiso del SO), así que después de los arranques en frío de COLD/COLD-BTOFF no había a qué tapearle.
+2. El detector de estado estaba anclado en textos que empiezan con `"Bast"`, y el estado del tope agotado
+   se llama **"No encontramos el bastón"** → lo leía como estado vacío, y con el estado vacío el oráculo
+   de CAP concluía "la cadena nunca arrancó".
+
+Lo que sí funcionó por diseño: **en los dos casos el banco se declaró poco confiable en vez de dar un
+verde falso** ("no se pudo preparar", "el oráculo NO prueba nada acá"). Un oráculo que no puede decir "no
+sé" es el que te certifica un bug como arreglado.
+
+---
+
 ## 7. Baseline automatizado contra `dad711f` — 18/21
 
 Todo lo de arriba se corrió después a mano por segunda vez, ya automatizado

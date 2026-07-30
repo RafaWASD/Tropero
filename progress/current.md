@@ -3,7 +3,15 @@
 > Este archivo se vacía al cerrar cada sesión y su resumen se mueve a `history.md`.
 > Mientras trabajás, **mantenelo actualizado en tiempo real**, no al final.
 
-## 2026-07-30 — EL BASTÓN LEE (banco en device) + review adversarial — 🔴 3 bloqueantes, fix EN CURSO
+## 2026-07-30 — EL BASTÓN LEE (banco en device) + review adversarial — 🔴 3 bloqueantes, fix COMMITEADO
+
+> **Estado al cierre de la noche**: fix commiteado en **`d738dbe`** (41 archivos), reviewer **APPROVED**,
+> Gate 2 **PASS**, Gate 1 **N/A** (`git diff supabase/` vacío). APK de EAS
+> **`a31e2e2f-7e9e-4e13-970c-9bb5920d8029`** (perfil `preview-dev`, buildeado desde `d738dbe`) instalado en
+> el A07 con `adb install -r` — **misma keystore** (`71a60de5…`, verificada con `apksigner` contra el APK
+> que ya estaba), así que **no hubo que desinstalar**: la sesión de Raf, la DB local y el emparejamiento del
+> `RS420-EMU` sobrevivieron. **⏸ Falta solo la Puerta 2 de Raf**, con las 26 escenas del banco corridas en
+> device a la vista.
 
 Sesión nocturna autónoma del leader. Raf autorizó el flasheo (*"mandale automático, ya está respaldado"*),
 cerrando la decisión §7.1 del handoff, y pidió trabajo toda la noche.

@@ -218,9 +218,14 @@ def screen():
     else:
         if any(n["text"] == "Lecturas" for n in ns):
             count = 0
-    status = next(
-        (n["text"] for n in ns if n["text"].startswith("Bast") and n["text"] != "Bastón"), ""
+    # OJO: NO alcanza con buscar textos que empiecen con "Bast". El estado del tope agotado se llama
+    # "No encontramos el bastón", asi que un matcher anclado en "Bast" lo lee como cadena vacia — y con
+    # el estado vacio el oraculo de CAP concluia "la cadena nunca arranco". Paso el 2026-07-30: el
+    # harness reportaba ⚠️ sobre un producto que estaba bien. Se enumeran los estados POSIBLES.
+    STATUS_RX = re.compile(
+        r"^(Bast[oó]n |No encontramos|Reintentando|Conectando|Buscando|Sin permiso|Apagado)", re.I
     )
+    status = next((n["text"] for n in ns if STATUS_RX.match(n["text"]) and n["text"] != "Bastón"), "")
     return {
         "count": count,
         "status": status,
@@ -244,18 +249,32 @@ def background():
     time.sleep(3)
 
 
-def ensure_connected(emu, tries=2):
-    """Deja la app y el emulador conectados de verdad (no solo segun la app)."""
+def ensure_connected(emu, tries=3):
+    """Deja la app y el emulador conectados de verdad (no solo segun la app).
+
+    OJO con la lista de emparejados: la pantalla NO la carga sola al entrar (a proposito — la primera
+    llamada dispara el dialogo de permiso del SO). Asi que despues de un arranque en FRIO no hay
+    ninguna fila de device hasta que alguien toca "Actualizar lista", y sin eso este helper no tenia
+    a que tapearle. Se cayo justo asi en la corrida del 2026-07-30: los tres escenarios que corren
+    DESPUES de los arranques en frio dieron "no se pudo preparar" — harness, no producto.
+    """
     for _ in range(tries):
         foreground()
         close_overlay()
-        if emu.linked() and "conectado" in screen()["status"].lower():
+        st = screen()
+        if emu.linked() and "conectado" in st["status"].lower() and "desconectado" not in st["status"].lower():
             return True
-        # desconectar y reconectar por gesto
-        if ui_tap("stick-status-cta"):
-            time.sleep(3)
+        # si no hay fila de device, hay que cargar la lista de emparejados primero
+        if not ui_find("stick-device-row", st["nodes"]):
+            if ui_tap("stick-paired-cta"):
+                time.sleep(6)
+        else:
+            # hay fila: si la app se cree conectada pero el emulador no, cortar y reconectar por gesto
+            if "conectado" in st["status"].lower() and not emu.linked():
+                if ui_tap("stick-status-cta"):
+                    time.sleep(3)
         ui_tap("stick-device-row")
-        time.sleep(7)
+        time.sleep(8)
     return emu.linked()
 
 
@@ -396,8 +415,8 @@ def run_bench1(emu, out):
     miente = dice_conectado and not lee
     out.append(
         "| BENCH1 | corte con la app MINIMIZADA | `off 8000` en background | no mentir | "
-        "**app dice %r · emulador link=%s · lee=%s** | %s |"
-        % (st["status"], "CONECTADO" if linked else "libre", lee, "❌ MIENTE" if miente else "✅")
+        "**link durante el background=%s → al volver la app dice %r y lee=%s** | %s |"
+        % ("CONECTADO" if linked else "libre", st["status"], lee, "❌ MIENTE" if miente else "✅")
     )
     return not miente
 
@@ -507,8 +526,8 @@ def run_cap(emu, out):
     arranco = False
     for _ in range(16):  # ~160 s muestreando
         s = screen()["status"].lower()
-        if "reintent" in s or "conectando" in s:
-            arranco = True
+        if "reintent" in s or "conectando" in s or "no encontramos" in s:
+            arranco = True  # "no encontramos" ya es el tope agotado: arrancó Y frenó
         time.sleep(10)
     st = screen()
     reintentando = "reintent" in st["status"].lower()
