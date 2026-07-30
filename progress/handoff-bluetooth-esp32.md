@@ -1,10 +1,56 @@
 # Handoff — Bluetooth del bastón + ESP32 como banco de pruebas
 
 **Escrito**: 2026-07-29, al cierre de la sesión que puso el bastón a funcionar en Android.
+**ACTUALIZADO**: 2026-07-30 al cierre de la sesión nocturna que corrió el banco en device.
 **Para**: una terminal Claude Code limpia que continúe las pruebas de Bluetooth.
 **No es** un `HANDOFF-*.md` en el sentido de `CLAUDE.md` (esos son bajadas de claude.ai y se borran).
 Este vive en `progress/` y es material de referencia: se actualiza o se borra cuando el bastón esté
 cerrado en las dos plataformas.
+
+---
+
+## ⚡ LO QUE CAMBIÓ EN LA NOCHE DEL 29 AL 30 — leé esto antes que el resto
+
+**El bastón LEE.** La premisa central de la versión anterior de este documento (*"funciona en Android por
+SPP Classic pero NUNCA leyó una trama real: no hay lector físico"*) **ya no vale**. El ESP32 está flasheado
+en `MODO_SPP`, emparejado con el A07 (`B0:CB:D8:03:50:CA`, PIN no hizo falta: Android 15 lo resolvió con un
+"¿Vincular?" simple), y la app ingirió la trama de la captura de campo byte por byte.
+
+**Lo que se cerró:**
+
+| pendiente de la versión vieja | estado |
+|---|---|
+| §3 La review adversarial del SPP, sin correr | ✅ **corrida** → 2 🔴 · 5 🟠 · 5 🟡 · 5 ⚪ (`progress/review_baston-android-spp.md`), **APPROVED** tras el fix |
+| §8.1 Review adversarial | ✅ hecha |
+| §8.2 Flashear `MODO_SPP` + correr el banco | ✅ hecho — **26/26 en device** (`progress/bench_baston-spp-emulador.md` §0) |
+| §7.1 ¿Flashear sin Raf presente? | ✅ **RESUELTO: sí** — *"mandale automático, ya está respaldado"* |
+| 🟠-3 / R6.4 reconexión al abrir la app | ✅ **implementada y verificada en device** (escena COLD) — decisión de Raf: *"que se reconecte sola al abrir, sí"* |
+| R6.6 "olvidar el bastón guardado" | ✅ **cableada** (tenía cero call sites; el requisito ya existía) |
+
+**Tres 🔴 arreglados, todos de la misma familia — el estado miente y el operario no se entera**: el
+"conectado" mentiroso tras un corte con la app minimizada (hallado por el banco, 3/3 repro); el latch de
+conexión sin timeout (2 min 40 s de parálisis con el bastón disponible); y el evento de desconexión del SO,
+que es **global** (apagar unos auriculares cerraba el socket del bastón). Detalle en
+`progress/impl_baston-spp-bloqueantes.md`. Commit del fix: **`d738dbe`**. Reviewer APPROVED · Gate 2 PASS ·
+Gate 1 N/A.
+
+**El banco ahora se corre con un comando**: `firmware/baston-emulator/bench/run-bench.py` (26 escenarios,
+`--list` para ver los IDs, `--only` para elegir). Verifica sus precondiciones antes de arrancar y **sabe
+decir "no sé"** en vez de dar un verde falso — eso salvó dos veces esta noche, cuando los que estaban
+roscados eran el harness y no el producto.
+
+**Dos afirmaciones del propio proyecto que se falsificaron midiendo**, las dos escritas como expectativas
+deterministas: el backoff **no crecía** (`attempt:0` en los 4 ciclos de `flap`; con el dwell de 30 s ahora
+da `[0,1,2,3]`) y el caso "cruzando la ventana" del README del emulador era un oráculo con **200 ms de
+margen** que daba 1 o 2 según el jitter. Las dos corregidas.
+
+**Lo único que sigue abierto de los 🔴**: el del evento global de desconexión está arreglado y testeado,
+pero **no se pudo reproducir en device** porque el A07 no tenía un segundo device Classic emparejado. Es
+una prueba de 1 minuto: conectar unos auriculares BT con el bastón andando y apagarlos.
+
+⏸ **Falta la Puerta 2 de Raf.** El APK con el fix (EAS `a31e2e2f-7e9e-4e13-970c-9bb5920d8029`, buildeado
+desde `d738dbe`) **ya está instalado** en el A07, y el ESP32 quedó en `MODO_SPP` a propósito, por si quiere
+probarlo a mano antes de aprobar.
 
 ---
 
@@ -20,14 +66,22 @@ Seguís el trabajo de Bluetooth del bastón. Antes de tocar nada:
 3. Leé specs/active/04-bluetooth-baston/context-multivendor.md (matriz de transportes) y
    firmware/baston-emulator/README.md (el banco de pruebas).
 
-El bastón funciona en Android por SPP Classic (commit dad711f) pero NUNCA leyó una trama real: no hay
-lector físico. El ESP32 está listo para emular uno y el firmware está commiteado (89e8d2d), pero NO
-está flasheado — flashearlo requiere que Raf esté presente y su OK (§7).
+El bastón LEE en Android por SPP Classic, verificado en device: el ESP32 está flasheado en MODO_SPP y
+emparejado con el A07, y el banco da 26/26 contra el build arreglado (`d738dbe`, ya instalado en el
+teléfono). La review adversarial se corrió y sus 3 bloqueantes están cerrados y gateados (reviewer
+APPROVED, Gate 2 PASS). R6.4 (reconectar al abrir) y R6.6 (olvidar) están implementadas.
+
+El banco se corre con un comando: firmware/baston-emulator/bench/run-bench.py (--list para ver las 26
+escenas). Requiere el ESP32 en COM7 y el teléfono por adb; verifica sus precondiciones y falla con el
+motivo en vez de dar un verde vacío. Un solo proceso puede tener el puerto serie.
 
 Primera tarea sugerida, en este orden:
-  a) La review adversarial del camino SPP, que quedó sin correr (§3). Es read-only: reviewer, no
-     implementer.
-  b) Con Raf presente: flashear MODO_SPP y correr el banco contra el APK que ya está instalado (§4).
+  a) Si Raf todavía no aprobó la Puerta 2 de `d738dbe`, ESO es el bloqueante — no arranques nada nuevo
+     encima; el rig quedó en MODO_SPP a propósito para que él pueda probarlo a mano.
+  b) La prueba de 1 minuto que falta (§8.2): apagar unos auriculares BT con el bastón conectado, para
+     reproducir en device el 🔴 del evento global de desconexión.
+  c) BLE-HID (§8.3), que destraba el camino de iOS sin MFi. OJO: flashear MODO_HID destruye el rig de
+     SPP; no lo hagas antes de la Puerta 2.
 
 Actuás como `leader` (CLAUDE.md): descomponés y coordinás, no editás código de app ni tests.
 ```
@@ -252,11 +306,16 @@ verificado en device, ni siquiera lo que ya funciona en Android.
 
 ## 8. Lo que queda, priorizado
 
-1. **Review adversarial del camino SPP** (§3) — read-only, `reviewer`. La deuda más cara.
-2. **Flashear `MODO_SPP` + correr el banco** contra el APK ya instalado (§4, con Raf). Es lo que
-   convierte "el bastón está cableado" en "el bastón lee".
+> **Reordenado el 2026-07-30.** Los dos primeros ítems de la lista vieja están hechos (ver el bloque ⚡ de
+> arriba). Los que siguen son los que quedan de verdad.
+
+1. ⏸ **La Puerta 2 de Raf** sobre el fix (`d738dbe`), con el APK ya instalado y el banco 26/26 a la vista.
+   Es lo único que bloquea cerrar esta línea en Android.
+2. **La prueba de 1 minuto que falta**: apagar unos auriculares BT con el bastón conectado, para
+   reproducir en device el 🔴 del evento global de desconexión (arreglado y testeado, no reproducido).
 3. **BLE-HID**: smoke test del wedge con cualquier teclado Bluetooth (no hace falta el ESP32) →
-   destrabar R8.7 → implementar el adapter.
+   destrabar R8.7 → implementar el adapter. **Ojo**: flashear el ESP32 en `MODO_HID` **destruye el rig de
+   SPP** (~6 min reflashear), así que conviene hacerlo después de la Puerta 2, no antes.
 4. **Verificación iOS de todo** (desde 2026-08-01).
 5. **6 sheets hechos a mano sin `BackHandler`** — `FindOrCreateOverlay` es un overlay 🔴 manga global.
 6. **La clase "reserva por ausencia"**: el guard hay que escribirlo sobre las superficies que **no**
