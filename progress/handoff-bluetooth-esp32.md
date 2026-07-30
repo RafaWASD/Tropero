@@ -168,6 +168,10 @@ emulando bastones. Si alguien cita ADR-003 para bloquear SPP, está leyendo el t
 
 ## 3. El agujero de la review del SPP (empezá por acá)
 
+> ✅ **CERRADO el 2026-07-30.** Esta sección queda como acta de por qué existía el agujero, no como
+> pendiente. La review se corrió (`progress/review_baston-android-spp.md`), encontró 2 🔴 · 5 🟠 · 5 🟡 ·
+> 5 ⚪, el banco en device agregó un 🔴 más, y todo quedó arreglado y gateado en `d738dbe`.
+
 `dad711f` **no pasó review adversarial**. Se commiteó con typecheck + unit verde + verificación en
 device del wiring, pero sin un reviewer mirando el camino completo. Es la deuda más cara que queda.
 
