@@ -17,6 +17,18 @@ No es un sustituto de `feature_list.json` ni de los ADRs — es la antesala dond
 
 ## Ítems pendientes
 
+## 2026-07-30 — Cinco notas del review del SPP que quedaron fuera del fix de los bloqueantes
+
+**Origen**: review adversarial de `dad711f` + banco en device (`progress/review_baston-android-spp.md`, `progress/bench_baston-spp-emulador.md`). El fix de esa noche cerró los 🔴 y los 🟠; esto es lo que se dejó afuera a propósito.
+**Qué**:
+1. **Ningún framer tiene cota** (⚪-3). Ni el `StringBuffer` del nativo ni `LineFramer.push` (`line-framer.ts:19-20`, vivo en web-serial). Un lector que escupa basura sin terminador los hace crecer sin límite. **Medido en device**: con `term cr`, además de quedar mudo, al corregir el terminador se pierde también la primera trama válida (la arrastra el buffer acumulado).
+2. **`splitSppPayload` es defensa muerta en Android** (⚪-2): con dos tramas pegadas las separa el nativo, no nuestra función. Sin consecuencia, pero el README del emulador se lo atribuía a `splitSppPayload`.
+3. **Dos escrituras del device recordado** (⚪-4): la pantalla persiste la MAC *antes* de saber si conecta y el adapter la persiste otra vez al conectar → tocar unos auriculares por error los deja recordados como bastón.
+4. **El plugin declara `BLUETOOTH_SCAN` sin usarlo** (⚪-5, `with-bluetooth-classic.js:40`) — mismo argumento con el que se topeó `ACCESS_FINE_LOCATION` a `maxSdkVersion=30`. Declaración de más en la ficha de Play.
+5. **`instantiateTransport` / `isSppNativeAvailable()` sin cobertura en el camino positivo** (🟡-2): el require de `react-native` es directo, sin inyección, así que el único test posible es el negativo, que pasa trivialmente. La única evidencia de que la rama verdadera anda es la corrida en device de esta noche.
+**Por qué importa**: (1) y (5) son la misma clase que ya nos quemó tres veces — el camino que importa no tiene guard y un verificador que no encuentra nada se ve igual que uno roto. (3) y (4) son chicos y baratos.
+**Próximo paso sugerido**: (1) cota + descarte con log en los dos framers, con test; (4) sacar el permiso; (3) forget en el fallo. (2) y (5) son nota informativa.
+
 ## 2026-07-29 — El UUID RFCOMM del SPP en Android NO es parametrizable con la lib que usamos
 
 **Origen**: unidad «bastón Android SPP» (2026-07-29), al leer el código nativo de `react-native-bluetooth-classic` para escribir el adapter de verdad.
