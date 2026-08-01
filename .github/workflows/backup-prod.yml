@@ -1,0 +1,57 @@
+name: Backup PROD database
+
+# Backup diario del Postgres de PROD (rafaq-prod) — spec 16 R8.
+# - pg_dump contra el POOLER de PROD (conn string en el secret SUPABASE_DB_URL_PROD).
+# - El dump se cifra con gpg (AES256) ANTES de subirlo → el artifact es inútil sin BACKUP_GPG_PASSPHRASE.
+# - Artifacts retenidos 90 días (R8.3). Fail-fast: si pg_dump falla, la Action queda ROJA (R8.5).
+# El repo DEBE ser privado: acceso a Actions/artifacts = acceso efectivo a la PII de PROD (R8.7).
+
+on:
+  schedule:
+    - cron: '0 6 * * *'   # 06:00 UTC ≈ 03:00 AR
+  workflow_dispatch: {}
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # El server de Supabase es Postgres 17 → pg_dump del runner debe ser >= 17
+      # (pg_dump 16 aborta por "server version mismatch"). Instalamos el cliente 17 del repo PGDG.
+      - name: Install postgresql-client 17
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            | sudo gpg --dearmor -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client-17
+          pg_dump --version
+
+      # Dump → gzip → $RUNNER_TEMP (H1/R5.10: fuera del working tree). La conn string llega por env,
+      # nunca por argv (L2/R5.11). RAFAQ_CONFIRM_PROD=1 SOLO en este job read-only (L6).
+      - name: Dump PROD
+        run: node scripts/backup-db.mjs --env prod --out-dir "$RUNNER_TEMP"
+        env:
+          RAFAQ_CONFIRM_PROD: '1'
+          SUPABASE_DB_URL_PROD: ${{ secrets.SUPABASE_DB_URL_PROD }}
+
+      # Cifrado en reposo (M3/R8.6): el .sql.gz → .sql.gz.gpg antes de subirlo.
+      - name: Encrypt dump
+        run: |
+          gpg --batch --yes --symmetric --cipher-algo AES256 \
+            --passphrase "$BK" "$RUNNER_TEMP"/rafaq-prod-*.sql.gz
+        env:
+          BK: ${{ secrets.BACKUP_GPG_PASSPHRASE }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rafaq-prod-backup
+          path: ${{ runner.temp }}/*.sql.gz.gpg
+          retention-days: 90
