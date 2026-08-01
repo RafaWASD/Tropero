@@ -124,9 +124,9 @@ Art. 8° (cita): *"El productor debe asociar cada número de dispositivo oficial
 - [x] ~~**Leer el articulado completo de la Res. 841/2025**~~ ✅ **HECHO (sesión 16)**: accedido el texto Arts. 1°–30° en el BO. Plazo (10 días hábiles, Art. 8°), cronograma (sin julio 2026, Art. 3°), campos (Art. 8°), vías (Art. 8°) y responsable (Art. 5°) confirmados con cita textual en §3. Pendiente menor: el Anexo (planilla, Art. 7°) para campos adicionales.
 - [x] ~~**Extraer la tabla completa de códigos de raza** (págs. 7-8 del manual SIGSA)~~ ✅ **HECHO (sesión 22, 2026-06-01)**: tabla completa (32 códigos, 28 bovinas) extraída con `pdftotext -layout` (el PDF SÍ tiene capa de texto — el caveat "imágenes no extraíble" era falso; `WebFetch` falla por el stream comprimido). Verificada a mano; cross-check 100% con las 8 confirmadas en s16. Ver **`razas-senasa-codigos.md`** (este directorio). Falta solo definir el mapeo raza-RAFAQ→código (es trabajo de la spec de 08) y validar el subset relevante con Facundo.
 - [ ] **Verificar contra spec 02**: ¿el modelo captura raza, sexo, fecha de nacimiento por animal? ¿`establishments` tiene RENSPA?
-- [ ] **Validaciones server-side de SIGSA no documentadas** (rango de fechas, `;` final, espacios, longitud RFID): conviene **probar un upload real** contra SIGSA antes de cerrar la feature.
+- [ ] **Validaciones server-side de SIGSA no documentadas** (rango de fechas, `;` final, espacios): conviene **probar un upload real** contra SIGSA antes de cerrar la feature. **Actualizado 1/8/2026**: la longitud de RFID sale de la lista (15 dígitos confirmado, §5 del manual); el resto sigue abierto y ahora hay un plan de prueba de una sola pasada en `context.md`. Ver §8.2.
 - [ ] **Especie/categoría**: confirmar si el TXT distingue solo bovina o si el flujo cambia con bubalina/cérvida (MVP es bovino, así que probablemente no aplica).
-- [ ] **Scope**: ¿08 cubre solo alta de dispositivos, o también reidentificación (§2) y declaración al cierre de DT-e? (Sugerencia: MVP solo alta.)
+- [ ] **Scope**: ¿08 cubre solo alta de dispositivos, o también reidentificación (§2) y declaración al cierre de DT-e? (Sugerencia original: MVP solo alta.) ⚠️ **La sugerencia dejó de ser obvia el 1/8/2026**: desde el **3/8** el cierre de DT-e es el punto donde SENASA bloquea el CUIG. Decisión de Raf, ver §8.5.
 
 ---
 
@@ -146,3 +146,59 @@ Art. 8° (cita): *"El productor debe asociar cada número de dispositivo oficial
 - CVPBA — puntos clave Res. 841/2025: https://cvpba.org/identificacion-electronica-obligatoria-puntos-clave-de-la-resolucion-841-20255/
 - Infocampo — cronograma desde 1/1/2026: https://www.infocampo.com.ar/trazabilidad-electronica-bovina-punto-por-punto-como-es-el-sistema-que-se-aplicara-desde-el-1-de-enero/
 - Bichos de Campo — Res. 841: https://bichosdecampo.com/desde-el-campo-de-cria-al-frigorifico-salio-la-norma-que-explica-como-se-deberan-aplicar-los-dispositivos-de-identificacion-individual-electronica/
+
+---
+
+## 8. Re-verificación regulatoria — 1/8/2026 (sesión de modelo de negocio)
+
+> **Motivo**: durante una revisión de modelo de negocio surgió la alarma de que la Res. 117/2026 (sistema "TRAZA") podía haber invalidado el formato de 08. **La alarma era falsa.** Se deja documentado para que nadie lo redescubra en pánico.
+
+### 8.1 TRAZA no toca a 08
+
+- La **Res. 117/2026** (BO 23/7/2026) **no es de SENASA**: la dictó la **Secretaría de Agricultura, Ganadería y Pesca** (Ministerio de Economía). Firmada 21/7/2026.
+- Art. 1: TRAZA es "una herramienta informática de carácter **orientativo, de consulta y de aplicación optativa**". **No reemplaza a SIGSA ni a SIGBIOTRAZA, y no deroga nada.** SIGSA aparece una sola vez en la resolución, como sistema de emisión de DT-e.
+- 3 módulos, en desarrollo y con habilitación gradual (Art. 4, "conforme al avance del desarrollo informático"): (i) info general de establecimientos (RENSPA, stock, caravanas); (ii) ingresos/egresos + resultados de faena + "Visor TRAZA"; (iii) autocontrol de stock afectado a garantías (prendas, warrants). **No hay cronograma de migración porque no hay migración.**
+- **Impacto en 08: ninguno.** SIGSA sigue siendo el destino y el portal sigue vivo (`https://aps2.senasa.gov.ar/sigsa` → 200 + redirect al SSO JOSSO, verificado 1/8/2026).
+
+### 8.2 Formato confirmado contra el manual oficial
+
+- Manual **v2.42.80**, misma URL, `Last-Modified: 7/1/2026` → **sin cambios en 7 meses**. Bajado y extraído con `pdftotext -layout`.
+- §6, cita literal: *"El formato del archivo debe ser: DISPOSITIVO-SEXO-RAZA-FECHA NACIMIENTO;DISPOSITIVO-SEXO-RAZA-FECHA NACIMIENTO. Los datos asociados a un dispositivo RIFD deben estar separados entre ellos con un GUIÓN DEL MEDIO y la separación entre dispositivos RFID es con PUNTO Y COMA."*
+- §5 confirma **RFID = 15 dígitos numéricos**.
+- Tabla de razas: coincide **1:1** con R1.2 (28 bovinas + `S/E` + 3 bubalinas). Sin cambios respecto de `razas-senasa-codigos.md`.
+- Reidentificación (`ORIGINAL-NUEVO;…`): sin cambios.
+- **Anomalías en el ejemplo del propio manual** (copiado literal): `032010000000000-M-H-08/2025; 032010000000001-H-AA8/2025;032010000000002-M-B-08/2025;032010000000003-M-B-08/2025` — hay un **espacio después del primer `;`** y un registro **`AA8/2025`** al que le falta el `-0`. Sin `;` final. No se sabe si son typos del PDF o tolerancia real del parser → **es exactamente por esto que el gate del upload real sigue abierto**.
+
+### 8.3 Sin API (confirmado de nuevo)
+
+Ni TRAZA ni SIGSA exponen API/webservice para declaración de dispositivos. La única API REST documentada de SENASA es la de trazabilidad de **fitosanitarios** (Res. 369/2021), otro dominio. La decisión de "archivo + upload manual" sigue siendo la correcta.
+
+### 8.4 SIGBIOTRAZA: vigente y ampliado
+
+TRAZA no lo absorbió. Ahora también en **iOS** (App Store `id6756583501`), además de Android. Tres funciones: declarar dispositivos, iniciar TRI, cerrar DT-e. **Sigue sin exportar archivo** → sigue siendo competidor no integrable, y el diferencial de 08 se mantiene.
+
+### 8.5 El corte del 3/8/2026 — lo más relevante de esta re-verificación
+
+**No es una resolución nueva.** Es el **Memorándum SENASA ME-2026-66264109-APN-DESYCG#SENASA**, que activa **dos controles automáticos en SIGSA** sobre movimientos de terneros alcanzados por la Res. 841/2025:
+
+1. Al **emitir** el DT-e: el origen debe tener dispositivos declarados **y TRI (Tarjeta de Registro Individual) electrónica**.
+2. Al **cerrar** el DT-e: el destino debe declarar el **100%** de los dispositivos recibidos.
+
+Se termina el cierre manual de DT-e de terneros. **Sanción: bloqueo preventivo del CUIG** → el productor no puede emitir DT-e de ninguna categoría.
+
+La obligación del Art. 8° (declarar en **10 días hábiles**) **no cambia**; la Res. 841/2025 sigue vigente sin modificatorias encontradas.
+
+**Consecuencia para 08 y para el pitch comercial:**
+- 08 cubre el **alta de dispositivos**. **NO cubre TRI ni cierre de DT-e**, que es donde desde el 3/8 se aplica la sanción.
+- Por lo tanto **no se puede vender "cumplí la 841 con RAFAQ"**: se vende *"te generamos el archivo de declaración de dispositivos para SIGSA"*. Un productor que compre entendiendo lo primero y se coma un bloqueo de CUIG en su primer movimiento se lo va a atribuir a RAFAQ.
+- Queda como **decisión de scope abierta para Raf** (ver `context.md`, sección Alcance): si el cierre de DT-e entra al roadmap y con qué prioridad.
+
+### 8.6 Fuentes de esta sección
+
+- Res. SAGyP 117/2026 (BO): https://www.boletinoficial.gob.ar/detalleAviso/primera/344825/20260723
+- Ficha biblioteca SENASA 117/2026: https://biblioteca.senasa.gob.ar/items/show/8394
+- Infobae/Revista Chacra — TRAZA: https://www.infobae.com/revista-chacra/2026/07/23/crean-el-sistema-traza-para-mejorar-el-acceso-a-la-informacion-del-ganado-y-fortalecer-la-gestion-productiva/
+- Corte 3/8/2026 y controles DT-e: https://www.decamponoticias.com/identificacion-electronica-en-terneros/
+- Fin del cierre manual de DT-e: https://www.noti-rio.com.ar/2026/07/revolucion-digital-en-los-corrales-el-senasa-le-pone-fin-al-cierre-manual-de-transito-de-terneros/
+- Vías de declaración vigentes: https://www.decamponoticias.com/caravanas-electronicas-declaracion/
+- SIGBIOTRAZA en iOS: https://apps.apple.com/ar/app/sigbiotraza/id6756583501

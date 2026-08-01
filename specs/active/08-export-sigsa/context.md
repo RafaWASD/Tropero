@@ -11,9 +11,13 @@
 
 08 genera un archivo **`.txt`** que el productor sube manualmente a **SIGSA web** para declarar ante SENASA los dispositivos de identificación electrónica (obligación vigente desde 1/1/2026, Res. 841/2025; plazo **10 días hábiles** por novedad). NO es una API: RAFAQ produce el archivo, el productor lo sube. Es el **diferencial competitivo** frente a SIGBIOTRAZA (app oficial Bluetooth→SIGSA que NO genera archivo): RAFAQ sirve a quien ya carga en RAFAQ y quiere cumplir sin re-cargar en otra app.
 
-**Capacidad de importar archivo CORROBORADA** (verificación s18): la documentación de SENASA confirma que en SIGSA web se puede declarar **por importación de archivo** —incluyendo un archivo "generado por un lector de dispositivos RFID" con un formato específico— como una de las 3 vías (presencial / autogestión SIGSA web / app SIGBIOTRAZA). 2 fuentes independientes (research s16 + búsqueda s18). **Caveat**: el manual oficial (v2.42.80) es un PDF de **imágenes** no extraíble automáticamente, así que el **formato exacto** y las validaciones server-side NO los pude re-verificar yo directamente — vienen del research s16. **GATE DURO antes de cerrar la spec**: validar el formato exacto con un **upload real** o login a SIGSA con clave fiscal (Raf/Facundo).
+**Capacidad de importar archivo CORROBORADA** (verificación s18): la documentación de SENASA confirma que en SIGSA web se puede declarar **por importación de archivo** —incluyendo un archivo "generado por un lector de dispositivos RFID" con un formato específico— como una de las 3 vías (presencial / autogestión SIGSA web / app SIGBIOTRAZA). 2 fuentes independientes (research s16 + búsqueda s18).
 
-**Formato (del research s16, a confirmar con upload real)**: un registro por dispositivo `RFID-SEXO-RAZA-MM/AAAA`, registros separados por `;`.
+**Formato CONFIRMADO contra fuente oficial (re-verificación 1/8/2026)** — el caveat previo (“PDF de imágenes no extraíble”) queda levantado: el manual v2.42.80 se bajó y se extrajo con `pdftotext -layout`. §6 del manual confirma literalmente el layout `DISPOSITIVO-SEXO-RAZA-FECHA NACIMIENTO` con guion medio entre campos y `;` entre dispositivos; §5 confirma RFID de **15 dígitos numéricos**; la tabla de razas coincide **1:1** con R1.2 (28 bovinas + `S/E` + 3 bubalinas). El manual **no se modificó desde el 7/1/2026** (`Last-Modified` del PDF). Ver `research-findings.md` §8.
+
+**Lo que sigue sin confirmarse** son solo las **validaciones server-side** (trailing `;`, espacios, rango de fechas). El **GATE DURO del upload real sigue vigente** y ahora tiene evidencia de por qué: el ejemplo del propio manual trae dos anomalías (un espacio después del primer `;`, y un registro `AA8/2025` al que le falta el `-0`), sin `;` final. No se sabe si son typos del PDF o tolerancia real del parser.
+
+**Formato**: un registro por dispositivo `RFID-SEXO-RAZA-MM/AAAA`, registros separados por `;`.
 - `RFID` = 15 dígitos numéricos.
 - `SEXO` = `M`/`H`.
 - `RAZA` = código 1-3 letras (`H`/`AA`/`HA`/`B`/`BG`/`BF`/`OR`/`S-E`…; tabla completa págs. 7-8 del manual, **a extraer**).
@@ -33,7 +37,7 @@
 
 **Fuera (post-MVP / backlog)**:
 - **Reidentificación** (reemplazo de dispositivo perdido) — usa otro formato TXT (`ORIGINAL-NUEVO;…`, §2 del research).
-- **Declaración al cierre de DT-e** — flujo distinto.
+- **Declaración al cierre de DT-e** — flujo distinto. ⚠️ **DECISIÓN DE SCOPE A REVISAR (1/8/2026)**: desde el **3/8/2026** SIGSA activa dos controles automáticos sobre movimientos de terneros alcanzados por la 841/2025 — al **emitir** el DT-e exige dispositivos declarados + TRI electrónica en el origen, y al **cerrar** exige declarar el **100%** de los dispositivos recibidos en el destino. La sanción es **bloqueo preventivo del CUIG** (no puede emitir DT-e de ninguna categoría). O sea: el cierre de DT-e dejó de ser un nice-to-have post-MVP y pasó a ser el punto de dolor con sanción. **08 cubre el alta de dispositivos, NO cubre TRI ni cierre de DT-e.** Esto no lo re-decide el leader: queda para Raf. Ver `research-findings.md` §8.
 - Especies no bovinas (bubalina/cérvida) — MVP solo bovino.
 - Submit programático a SIGSA (no hay API).
 - Integración con SIGBIOTRAZA (competidor, no integrable).
@@ -88,7 +92,7 @@
 
 ## Pendientes (CONTEXT/07)
 - **Extraer la tabla completa de códigos de raza** (manual SIGSA págs. 7-8) para sembrar el catálogo → sub-tarea pre-spec. Listado de razas relevantes a validar con Facundo (TENTATIVO, ajustable por migration).
-- **Validaciones server-side de SIGSA no documentadas** (trailing `;`, espacios, rango de fechas, longitud exacta de RFID): **probar un upload real** contra SIGSA con un archivo generado antes de cerrar la spec. Incógnita abierta — no bloquea el `context.md`, sí conviene resolverla antes de dar 08 por `done`.
+- **Validaciones server-side de SIGSA no documentadas** (trailing `;`, espacios, rango de fechas): **probar un upload real** contra SIGSA con un archivo generado antes de cerrar la spec. Longitud de RFID ya no es incógnita (15 dígitos, confirmado §5 del manual). **Riesgo agravado (1/8/2026)**: el upload es declaración firme, no dry-run — y desde el 3/8 hay bloqueo de CUIG en juego, así que la prueba hay que hacerla con **caravanas reales que Facundo efectivamente quiera declarar**, no con datos de prueba. Plan de prueba de una sola pasada, 3 registros variando: (a) con y sin `;` final, (b) con un espacio después de un `;` (el manual lo tiene en su propio ejemplo), (c) un `birth_date` de 2-3 años atrás para detectar tope de rango. Cierra las 5 incógnitas de R6.3/R8.6 juntas.
 - **Anexo de la Res. 841/2025** (planilla, Art. 7°): no transcripto; posible fuente de campos adicionales. Bajo riesgo (el formato TXT ya está confirmado).
 - **RENSPA como validación anti-fraude**: post-MVP (CONTEXT/07); en MVP es solo recordatorio.
 

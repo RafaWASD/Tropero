@@ -28,11 +28,27 @@ El veterinario **no es un cliente más: es el canal**. Un vet rural atiende entr
 
 ## Posicionamiento del pitch
 
-**No vendemos gestión ganadera. Vendemos cumplimiento de la Res. 841/2025 con lectura BLE.**
+**No vendemos gestión ganadera. Vendemos la declaración de dispositivos a SIGSA sin trámite manual, con lectura BLE.**
 
 Es la diferencia entre competir contra Control Ganadero (USD 129,99/año, instalado hace años, con la confianza del rubro) y competir contra el trámite manual y la multa. Contra software somos caros; contra el trámite somos baratos.
 
 El valor de gestión (KPIs, historia individual, comparativas) es lo que retiene, no lo que vende.
+
+### Límite del claim — no decir "cumplí la 841 con RAFAQ"
+
+Verificado el 1/8/2026: la Res. 841/2025 tiene **tres** obligaciones operativas, y RAFAQ cubre una.
+
+| Obligación | ¿La cubre RAFAQ? |
+|---|---|
+| Declarar dispositivos en 10 días hábiles (Art. 8°) | **Sí** — es la feature 08 |
+| TRI (Tarjeta de Registro Individual) electrónica al **emitir** DT-e | **No** |
+| Declarar el 100% de dispositivos al **cerrar** DT-e | **No** |
+
+Desde el **3/8/2026** SIGSA valida las tres automáticamente y la sanción es **bloqueo preventivo del CUIG** (el productor no puede emitir DT-e de ninguna categoría). Un cliente que compre entendiendo "con esto cumplo" y se coma un bloqueo en su primer movimiento se lo va a atribuir a RAFAQ.
+
+**Frase vendible:** *"te generamos el archivo de declaración de dispositivos para SIGSA"*. **Frase prohibida:** *"cumplí la 841 con RAFAQ"*.
+
+Cerrar esa brecha (TRI + cierre de DT-e) es una decisión de scope abierta — ver `specs/active/08-export-sigsa/` §8.5.
 
 ## Capa 1 — SaaS al productor (mes 0-18)
 
@@ -118,9 +134,11 @@ Warrant ganadero, crédito, seguro ganadero, créditos de carbono, marketplace d
 
 ## Gobierno: estándar, nunca cliente
 
-SENASA no es cliente. Ciclo de licitación de ~18 meses, sin equipo comercial, y con un organismo que además está reescribiendo su propio sistema (Res. 117/2026 oficializó TRAZA el 23/7/2026).
+SENASA no es cliente. Ciclo de licitación de ~18 meses y sin equipo comercial para sostenerlo.
 
-El rol del gobierno en el modelo es **definir el formato al que nos integramos**. El export a SIGSA/TRAZA no es un moat — es una brecha que el Estado tiene mandato de cerrar. Lo defendible es la **capa de captura en la manga** (BLE, offline, wizard de una decisión por pantalla), que SENASA no va a construir nunca.
+El rol del gobierno en el modelo es **definir el formato al que nos integramos**. El export a SIGSA no es un moat — es una brecha que el Estado puede cerrar cuando quiera (SIGBIOTRAZA, la app oficial, ya declara dispositivos; lo único que no hace es generar el archivo). Lo defendible es la **capa de captura en la manga** (BLE, offline, wizard de una decisión por pantalla), que SENASA no va a construir nunca.
+
+**Nota sobre TRAZA** (verificado 1/8/2026, contra una alarma falsa): la Res. 117/2026 es de la **Secretaría de Agricultura**, no de SENASA, y crea una herramienta **optativa y de consulta** que **no reemplaza a SIGSA ni deroga nada**. No hay migración ni riesgo de que el formato del export caduque. El manual de SIGSA no se modificó desde enero de 2026.
 
 ## Canal y expansión
 

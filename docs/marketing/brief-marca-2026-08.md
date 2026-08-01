@@ -12,15 +12,28 @@
 |---|---|---|---|
 | **Precio** | USD 20/mes por campo, plano | USD 300/año + USD 0,80/cabeza, tope USD 3.500. Gratis ≤50 cabezas | El precio plano regalaba la cola: el 70% de los campos tiene <500 cabezas pero solo el 36% del rodeo |
 | **Publicidad** | "USD 200-300/mes cuando esté la landing" | **No hay pauta.** Presupuesto de ads: cero | El que firma tiene 55+ y decide por el veterinario y el consignatario. No se llega por impresiones |
-| **Qué vendemos** | Gestión de rodeo + cumplimiento SENASA | **Cumplimiento SENASA**, y la gestión es lo que retiene | Contra software somos caros. Contra el trámite manual somos baratos |
+| **Qué vendemos** | Gestión de rodeo + cumplimiento SENASA | **La declaración de caravanas a SENASA**, y la gestión es lo que retiene | Contra software somos caros. Contra el trámite manual somos baratos |
 
 ---
 
 ## El posicionamiento, en una línea
 
-> **No es una app de gestión ganadera. Es la forma de cumplir con SENASA sin entrar a hacer el trámite.**
+> **No es una app de gestión ganadera. Es la forma de declararle las caravanas a SENASA sin hacer el trámite a mano.**
 
 El resto (historia por animal, indicadores, comparativas) es lo que hace que no se den de baja. No es lo que hace que entren.
+
+### ⚠️ Un límite del mensaje que no se puede cruzar
+
+Esta es la corrección más importante del documento y la verificamos el 1/8.
+
+La resolución de SENASA tiene **tres** obligaciones. **RAFAQ cubre una**: declarar las caravanas dentro de los 10 días. Las otras dos (la TRI al emitir el remito electrónico, y declarar el 100% de las caravanas al cerrarlo) **no las cubre**, y desde el **3/8** SENASA las valida solas. La sanción es que **le bloquean el CUIG al productor** — no puede mover un animal.
+
+| Se puede decir | No se puede decir |
+|---|---|
+| "Te generamos el archivo para declarar las caravanas en SIGSA" | "Con RAFAQ cumplís con SENASA" |
+| "Declarás en 10 días sin cargar una por una" | "RAFAQ te resuelve la 841" |
+
+Si el mensaje promete cumplimiento completo, el primer cliente que se coma un bloqueo de CUIG nos lo va a atribuir a nosotros. **Esto no es prudencia legal: es el riesgo de reputación más grande del lanzamiento**, y con un solo canal (un veterinario y su cartera) no hay margen para quemarlo.
 
 **Contra qué se compara el comprador** — esto es nuevo, en el cuestionario figuraba como "no lo sé":
 
@@ -97,4 +110,5 @@ La urgencia del mensaje es real y tiene fecha. No hay que fabricarla.
 - **Cero usuarios productores.** La usan dos personas: Raf y Facundo. No hay caso de éxito, no hay testimonio, no hay video de campo.
 - **Nunca facturó un peso.** Todo el pricing de este documento es una hipótesis calibrada contra el mercado, no una validación.
 - **La app nunca cargó una jornada real de manga.** Es el próximo hito y es donde estos productos se mueren.
-- **El diferencial (export a SENASA) está en verificación.** SENASA oficializó un sistema nuevo (TRAZA) el 23/7/2026 y el formato del archivo nunca se validó contra un upload real. Si eso se cae, el pitch de cumplimiento cambia — se los aviso apenas haya respuesta.
+- **El diferencial (export a SENASA) quedó verificado el 1/8.** El formato del archivo coincide con el manual oficial de SENASA, que no se modificó desde enero. El sistema nuevo que se anunció el 23/7 (TRAZA) es optativo, de consulta, y no reemplaza nada — falsa alarma. **Lo que sigue sin probarse es un upload real**: el archivo nunca se subió de verdad a SIGSA, así que no sabemos si el portal lo acepta al primer intento. Se prueba con la clave fiscal de Facundo.
+- **El alcance del claim, sí, es un riesgo real.** Ver la sección del límite del mensaje. Es lo único de este documento que puede hacernos perder el canal.
