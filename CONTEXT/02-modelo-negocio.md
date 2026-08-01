@@ -36,19 +36,25 @@ El valor de gestión (KPIs, historia individual, comparativas) es lo que retiene
 
 ### Límite del claim — no decir "cumplí la 841 con RAFAQ"
 
-Verificado el 1/8/2026: la Res. 841/2025 tiene **tres** obligaciones operativas, y RAFAQ cubre una.
+Verificado el 1/8/2026: la Res. 841/2025 tiene **tres** obligaciones operativas. RAFAQ cubre una — pero **no las tres caen sobre nuestro cliente**, y eso cambia la severidad:
 
-| Obligación | ¿La cubre RAFAQ? |
-|---|---|
-| Declarar dispositivos en 10 días hábiles (Art. 8°) | **Sí** — es la feature 08 |
-| TRI (Tarjeta de Registro Individual) electrónica al **emitir** DT-e | **No** |
-| Declarar el 100% de dispositivos al **cerrar** DT-e | **No** |
+| Obligación | Quién la carga | ¿RAFAQ? |
+|---|---|---|
+| Declarar dispositivos en 10 días hábiles (Art. 8°) | El que aplica la caravana — **nuestro ICP** | **Sí** (feature 08) |
+| **TRI** al emitir el DT-e | El RENSPA de origen — **nuestro ICP** | **No** — es la pata que falta |
+| Declarar el 100% de dispositivos al **cerrar** el DT-e | El **destino**: comprador, invernador, feedlot, feria | **No** — y no es nuestro cliente |
 
-Desde el **3/8/2026** SIGSA valida las tres automáticamente y la sanción es **bloqueo preventivo del CUIG** (el productor no puede emitir DT-e de ninguna categoría). Un cliente que compre entendiendo "con esto cumplo" y se coma un bloqueo en su primer movimiento se lo va a atribuir a RAFAQ.
+El riesgo propio del criador es que *"el movimiento de terneros sin identificación electrónica podrá generar restricciones para el RENSPA remisor"*, y eso **se previene declarando los dispositivos** — o sea con lo que 08 ya hace. El bloqueo de CUIG por cierre de DT-e lo sufre el comprador.
+
+Aun así el claim completo no se sostiene, por la TRI. Y hay una discrepancia sin resolver: el manual oficial de SENASA (dic-2025) dice que la TRI *"no es obligatoria"*; la prensa del memorándum de julio dice que el sistema la exige. El texto del memorándum no está publicado.
 
 **Frase vendible:** *"te generamos el archivo de declaración de dispositivos para SIGSA"*. **Frase prohibida:** *"cumplí la 841 con RAFAQ"*.
 
-Cerrar esa brecha (TRI + cierre de DT-e) es una decisión de scope abierta — ver `specs/active/08-export-sigsa/` §8.5.
+La TRI es un delta barato (un TXT de RFIDs separados por espacio) y cerraría la pata de emisión. Decisión de scope abierta — ver `specs/active/08-export-sigsa/research-findings.md` §9.
+
+### Pista a perseguir: puede haber API
+
+El manual de token de SENASA dice que el mecanismo permite que *"otras aplicaciones externas"* interactúen con el sistema oficial, con permisos de *"gestionar microchips de identificación y consulta de movimientos"*. Si esa API existe y es accesible, la feature deja de ser "generar archivo + upload manual" y pasa a ser **declarar desde la app** — un producto bastante mejor y un moat más profundo. La especificación no es pública. Preguntar a `hacelafacil@senasa.gob.ar`. Ver §9.7.
 
 ## Capa 1 — SaaS al productor (mes 0-18)
 

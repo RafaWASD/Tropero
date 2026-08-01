@@ -26,14 +26,18 @@ El resto (historia por animal, indicadores, comparativas) es lo que hace que no 
 
 Esta es la corrección más importante del documento y la verificamos el 1/8.
 
-La resolución de SENASA tiene **tres** obligaciones. **RAFAQ cubre una**: declarar las caravanas dentro de los 10 días. Las otras dos (la TRI al emitir el remito electrónico, y declarar el 100% de las caravanas al cerrarlo) **no las cubre**, y desde el **3/8** SENASA las valida solas. La sanción es que **le bloquean el CUIG al productor** — no puede mover un animal.
+La resolución de SENASA tiene **tres** obligaciones. **RAFAQ cubre una**: declarar las caravanas dentro de los 10 días.
+
+De las otras dos, una (declarar el 100% de las caravanas al cerrar el remito electrónico) **la carga el que compra el ganado, no el que lo cría** — o sea, no es nuestro cliente. La otra (la TRI, una tarjeta que acompaña al remito) **sí es del criador y no la cubrimos**. Es un agregado chico y probablemente lo hagamos, pero hoy no está.
 
 | Se puede decir | No se puede decir |
 |---|---|
 | "Te generamos el archivo para declarar las caravanas en SIGSA" | "Con RAFAQ cumplís con SENASA" |
 | "Declarás en 10 días sin cargar una por una" | "RAFAQ te resuelve la 841" |
 
-Si el mensaje promete cumplimiento completo, el primer cliente que se coma un bloqueo de CUIG nos lo va a atribuir a nosotros. **Esto no es prudencia legal: es el riesgo de reputación más grande del lanzamiento**, y con un solo canal (un veterinario y su cartera) no hay margen para quemarlo.
+Si el mensaje promete cumplimiento completo, el primer cliente al que le falte algo nos lo va a atribuir a nosotros. Con un solo canal —un veterinario y su cartera— no hay margen para quemarlo.
+
+*(Actualizado el 1/8 a la tarde: una versión anterior de este documento decía que el bloqueo de CUIG le caía al productor de cría. Es del comprador. La regla del mensaje no cambia; la urgencia sí baja.)*
 
 **Contra qué se compara el comprador** — esto es nuevo, en el cuestionario figuraba como "no lo sé":
 

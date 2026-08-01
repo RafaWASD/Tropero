@@ -202,3 +202,87 @@ La obligación del Art. 8° (declarar en **10 días hábiles**) **no cambia**; l
 - Fin del cierre manual de DT-e: https://www.noti-rio.com.ar/2026/07/revolucion-digital-en-los-corrales-el-senasa-le-pone-fin-al-cierre-manual-de-transito-de-terneros/
 - Vías de declaración vigentes: https://www.decamponoticias.com/caravanas-electronicas-declaracion/
 - SIGBIOTRAZA en iOS: https://apps.apple.com/ar/app/sigbiotraza/id6756583501
+
+---
+
+## 9. TRI y cierre de DT-e — dimensionamiento (1/8/2026)
+
+> **Motivo**: §8.5 detectó que 08 cubre una de tres obligaciones. Este research mide las otras dos antes de decidir scope. Todos los PDFs bajados con `curl` + `pdftotext -layout`; los tres tienen `Last-Modified: 7/1/2026` — **ninguno se actualizó tras el memorándum del 3/8**.
+
+### 9.1 Corrección al framing de §8.5 — quién carga cada obligación
+
+§8.5 dio a entender que las tres obligaciones caen sobre nuestro cliente. **No es así**, y esto cambia la severidad:
+
+| Obligación | Quién la carga | ¿Es nuestro ICP (criador de cría)? |
+|---|---|---|
+| Declarar dispositivos (10 días hábiles) | El productor que aplica la caravana | **Sí** — y es lo que hace 08 |
+| **TRI** al emitir el DT-e | El **RENSPA de origen** | **Sí** — es la pata que falta |
+| Declarar 100% de dispositivos al **cerrar** el DT-e | El **destino** (comprador / invernador / feedlot / feria) | **No** |
+
+El riesgo propio del criador es el **caso C** del manual: *"El movimiento de terneros sin identificación electrónica podrá generar restricciones para el RENSPA remisor"* — y eso **se previene declarando los dispositivos**, o sea con lo que 08 ya hace. El bloqueo por cierre de DT-e es problema del comprador.
+
+### 9.2 Qué es la TRI
+
+**Tarjeta de Registro Individual (de Tropa)**. Vive en **SIGSA web**: `[MOVIMIENTOS][TRI+][Nueva TRI]`. No es de SIGBIOTRAZA.
+
+- Contiene **RENSPA de origen** + **listado de RFID** de los terneros a movilizar. Produce un **Número TRI** con estado (`pendiente` = sin DT-e asociado). Se asocia al DT-e en la 3ª pantalla ("DATOS ESPECÍFICOS"). **Se imprime y acompaña físicamente al DT-e.** Anulable y rehacible.
+- **⚠️ Discrepancia sin resolver**: el manual (dic-2025, pág. 8) dice literal *"El RENSPA de origen **puede optar (no es obligatorio)** por confeccionar la TRI…"*. La prensa del memorándum (jul-2026) dice que *"el sistema exige generar una TRI"*. **El texto del memorándum no está publicado.** La obligatoriedad se apoya solo en prensa.
+- Consecuencia de NO usarla (manual, pág. 10): *"en el destino no aparecerán los dispositivos… y el productor/remate feria deberá proceder leerlos y declararlos al cierre"*. O sea: no es una sanción al criador, es fricción que se traslada al comprador.
+- "TRI electrónica vs anterior": **NO ENCONTRADO** — ninguna fuente describe una TRI previa no-electrónica.
+
+### 9.3 La TRI SÍ acepta archivo — layout distinto al del alta
+
+Cita literal (manual de cierre de DT-e / gestión de TRI, pág. 9, punto 3):
+
+> *"Si no desea tipear las caravanas puede subir un archivo formato TXT con el listado de dispositivo de identificación desde el botón celeste **[Subir Archivo]**. Los dispositivos del archivo TXT deben encontrarse separados entre ellos con un **ESPACIO**. Ej.: `032010000000000 032010000000001 032010000000002`"*
+
+**Solo RFID separados por espacio.** Sin sexo, sin raza, sin fecha, sin `;`, sin guiones. **No** reusa el layout `RFID-SEXO-RAZA-MM/AAAA;` del alta. Único dato de pantalla: el RENSPA.
+
+### 9.4 El cierre de DT-e NO acepta archivo
+
+- **Quién**: el destino. *"el productor comprador/receptor del ganado en el RENSPA/FERIA de destino debe leer y registrar los dispositivos… y asociar sus números al cierre del DT-e"* (pág. 2).
+- **Dónde**: `[MOVIMIENTOS][CONSULTAR MOVIMIENTOS][LISTADO DE MOVIMIENTOS BOVINOS]` → Acciones → `[Cerrar]`.
+- **No hay importación.** Cita (pág. 4): *"En el recuadro de [Caravanas] se debe **pegar** los números de dispositivos…"*. El separador del pegado **NO ENCONTRADO**. La única carga masiva es `[Lote Microchips]`, y solo aparece si se gestionó el lote previamente **por SIGBIOTRAZA**.
+- Validación server-side: *"Los dispositivos a informar al cierre del DT-e por el destinatario, deben haber sido declarados como aplicados en los animales en el RENSPA de origen. Caso contrario no dejara cerrar el DT-e."*
+- Con TRI asociada, los dispositivos vienen pre-tildados en destino.
+
+### 9.5 Emisión del DT-e
+
+SIGSA web, autogestión (clave fiscal + CBU + RENSPA). El manual del autogestor **no menciona archivo, TXT, importar ni subir en ninguna línea** — todo por pantalla. La única importación de archivo en todo el flujo de movimiento es la de la TRI.
+
+### 9.6 SIGBIOTRAZA — dónde nos gana y dónde le ganamos
+
+Tres módulos; **todos terminan en un segundo paso obligatorio en SIGSA web**.
+
+| Módulo | Qué pide en la manga | ¿RAFAQ agrega valor? |
+|---|---|---|
+| Declaración de dispositivos | **Raza, mes/año de nacimiento y sexo, a mano, dispositivo por dispositivo** | **Sí, por goleada** — RAFAQ ya tiene esos datos |
+| Inicio de TRI | Nada (solo lee RFID) | Poco |
+| Cierre de DT-e | Nada (escanea el código de barras del DT-e con la cámara) | Poco |
+
+Fricción de SIGBIOTRAZA: requiere lector RFID Bluetooth externo (no lee sola); **token QR generado en SIGSA desde una computadora** con clave fiscal; CUIT propio y representado deben coincidir exacto; recomienda internet para validar y enviar; nunca cierra el trámite solo.
+
+**Conclusión**: el diferencial de 08 sigue intacto **en el alta** (es donde SIGBIOTRAZA obliga a tipear), y **no se extiende naturalmente al cierre**.
+
+### 9.7 Pista de API — el token no es exclusivo de SIGBIOTRAZA
+
+El manual de gestión de token dice literal que el mecanismo *"permite crear una 'llave de acceso' segura y temporal para que **otras aplicaciones externas** puedan interactuar con la información registrada en el sistema oficial del Senasa"*, con permisos delegables de *"Gestionar microchips de identificación y consulta de movimientos"*.
+
+**Eso implica que hay una API detrás.** Si existe y es accesible, cambia la feature de "generar archivo + upload manual" a "declarar desde la app", que es un producto distinto y bastante mejor.
+
+**Especificación pública: NO ENCONTRADA.** No es una ruta transitable hoy — es una pregunta para `hacelafacil@senasa.gob.ar`. **Contradice el supuesto "no hay API" que atraviesa toda la spec 08**, así que conviene preguntarlo antes de dar la feature por cerrada.
+
+### 9.8 Dimensionamiento
+
+- **TRI → BARATO.** Layout más simple que el del alta, mismo patrón (generar TXT + share sheet). Lo único nuevo es modelar **qué animales salen en este movimiento** (lote/tropa de venta). No requiere modelar tránsitos, guías ni destino.
+- **Cierre de DT-e → CARO y ajeno.** Sin importación de archivo, lo barato (una lista pegable) tiene valor marginal y separador no confirmado. Lo valioso exige entidades nuevas (DT-e recibido, origen/destino, conciliación enviado-vs-recibido) y **lo hace el comprador**, que no es nuestro ICP.
+- **Recomendación**: sumar **solo el TXT de TRI**, dejar cierre de DT-e y modelado de tránsitos fuera.
+- **Riesgo abierto**: la obligatoriedad de la TRI se apoya solo en prensa y el manual oficial dice lo contrario. **Pedir el texto del memorándum a `hacelafacil@senasa.gob.ar` antes de comprometer scope** — mismo mail donde conviene preguntar por la API del token (§9.7).
+
+### 9.9 Fuentes de esta sección
+
+- Declaración de dispositivos al cierre del DT-e y/o gestión de TRI: https://www.argentina.gob.ar/sites/default/files/2026/01/declaracion_de_dispositivos_de_identificacion_electronicos_al_cierre_del_dt-e.pdf
+- Manual de uso SIGBIOTRAZA: https://www.argentina.gob.ar/sites/default/files/2026/01/manual_de_uso_-_sigbiotraza.pdf
+- Gestión de token: https://www.argentina.gob.ar/sites/default/files/2026/01/gestion_de_token_para_vincular_la_app_sigbiotraza_con_sigsa.pdf
+- Manual DT-e autogestor SIGSA (mismo directorio de SENASA)
+- Prensa del memorándum: https://www.noti-rio.com.ar/2026/07/revolucion-digital-en-los-corrales-el-senasa-le-pone-fin-al-cierre-manual-de-transito-de-terneros/
