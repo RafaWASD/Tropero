@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="es-AR">
+<head>
+<meta charset="utf-8">
+<title>Identidad visual actual — app de gestión ganadera</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 48px 56px 64px;
+    width: 1240px;
+    font-family: "Segoe UI", Inter, system-ui, sans-serif;
+    color: #0F0E0C; background: #faf9f9;
+    -webkit-font-smoothing: antialiased;
+  }
+  h1 { font-size: 30px; line-height: 38px; margin: 0 0 6px; letter-spacing: -0.5px; }
+  .sub { color: #5C655F; font-size: 14px; line-height: 20px; margin: 0 0 40px; max-width: 780px; }
+  h2 {
+    font-size: 13px; letter-spacing: 1.4px; text-transform: uppercase;
+    color: #5C655F; margin: 44px 0 4px; font-weight: 600;
+  }
+  h2:first-of-type { margin-top: 32px; }
+  .rule { height: 1px; background: #E5E5E3; margin: 0 0 20px; }
+  .note { font-size: 13px; line-height: 19px; color: #5C655F; margin: 0 0 18px; max-width: 860px; }
+  .note b { color: #0F0E0C; font-weight: 600; }
+
+  .swatches { display: flex; flex-wrap: wrap; gap: 14px; }
+  .sw { width: 176px; border-radius: 12px; overflow: hidden; background: #fff; border: 1px solid #E5E5E3; }
+  .chip { height: 88px; display: flex; align-items: flex-end; padding: 8px 10px; }
+  .chip span { font-size: 12px; font-weight: 600; }
+  .meta { padding: 9px 11px 11px; }
+  .name { font-size: 13px; font-weight: 600; line-height: 17px; }
+  .hex { font-family: Consolas, monospace; font-size: 12px; color: #5C655F; margin-top: 1px; }
+  .role { font-size: 11px; line-height: 15px; color: #807A74; margin-top: 5px; }
+
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th { text-align: left; font-size: 11px; letter-spacing: .8px; text-transform: uppercase; color: #807A74; padding: 0 10px 7px 0; font-weight: 600; }
+  td { padding: 7px 10px 7px 0; border-top: 1px solid #E5E5E3; vertical-align: middle; }
+  .mono { font-family: Consolas, monospace; font-size: 12px; }
+  .ok { color: #1e5a3e; font-weight: 600; }
+  .warn { color: #C0451F; font-weight: 600; }
+  .dot { display: inline-block; width: 34px; height: 18px; border-radius: 4px; vertical-align: -4px; margin-right: 7px; border: 1px solid rgba(15,14,12,.10); }
+
+  .cbgrid { display: flex; gap: 10px; }
+  .cbcol { flex: 1; }
+  .cbhead { font-size: 11px; text-transform: uppercase; letter-spacing: .8px; color: #807A74; margin-bottom: 7px; font-weight: 600; }
+  .cbrow { display: flex; gap: 8px; }
+  .cbblock { flex: 1; height: 74px; border-radius: 10px; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 13px; font-weight: 700; letter-spacing: .4px; }
+
+  .type { display: flex; align-items: baseline; gap: 16px; border-top: 1px solid #E5E5E3; padding: 9px 0; }
+  .type .tk { font-family: Consolas, monospace; font-size: 12px; color: #807A74; width: 118px; flex: none; }
+  .type .use { font-size: 12px; color: #5C655F; margin-left: auto; flex: none; }
+
+  .two { display: flex; gap: 32px; }
+  .two > div { flex: 1; }
+  ul { margin: 0; padding-left: 18px; font-size: 13px; line-height: 21px; color: #0F0E0C; }
+  li { margin-bottom: 5px; }
+  .foot { margin-top: 44px; font-size: 12px; color: #807A74; line-height: 18px; border-top: 1px solid #E5E5E3; padding-top: 14px; }
+</style>
+</head>
+<body>
+
+<h1>Identidad visual actual</h1>
+<p class="sub">
+  App de gestión ganadera (nombre en revisión). Esta es la paleta que está hoy <b>en el código</b>, no una propuesta:
+  sale de <span class="mono">app/tamagui.config.ts</span>, que es la única fuente de valores de color del frontend
+  y está protegida por un lint que rompe el build si una pantalla escribe un color a mano. Los contrastes son medidos
+  (WCAG 2.1), no estimados.
+</p>
+
+<h2>Marca</h2><div class="rule"></div>
+<div class="swatches">
+  <div class="sw"><div class="chip" style="background:#1e5a3e"><span style="color:#fff">Aa</span></div>
+    <div class="meta"><div class="name">Verde botella</div><div class="hex">#1E5A3E</div>
+    <div class="role">Primario de marca. Botones, FAB, ítem activo, estado positivo.</div></div></div>
+  <div class="sw"><div class="chip" style="background:#2e8259"><span style="color:#fff">Aa</span></div>
+    <div class="meta"><div class="name">Verde claro brand</div><div class="hex">#2E8259</div>
+    <div class="role">Tono superior de degradés. Mismo hue, más luminoso.</div></div></div>
+  <div class="sw"><div class="chip" style="background:#93cfac"><span style="color:#1e5a3e">Aa</span></div>
+    <div class="meta"><div class="name">Verde contenedor</div><div class="hex">#93CFAC</div>
+    <div class="role">Fondo de badges e íconos, halo del FAB.</div></div></div>
+  <div class="sw"><div class="chip" style="background:#184a33"><span style="color:#fff">Aa</span></div>
+    <div class="meta"><div class="name">Verde presionado</div><div class="hex">#184A33</div>
+    <div class="role">Estado pressed del primario.</div></div></div>
+</div>
+
+<h2>Superficies y texto</h2><div class="rule"></div>
+<div class="swatches">
+  <div class="sw"><div class="chip" style="background:#faf9f9;border-bottom:1px solid #E5E5E3"><span style="color:#0F0E0C">Aa</span></div>
+    <div class="meta"><div class="name">Fondo de app</div><div class="hex">#FAF9F9</div>
+    <div class="role">Blanco neutro, sin tinte frío ni cálido.</div></div></div>
+  <div class="sw"><div class="chip" style="background:#F8F6F1;border-bottom:1px solid #E5E5E3"><span style="color:#0F0E0C">Aa</span></div>
+    <div class="meta"><div class="name">Bone (cards)</div><div class="hex">#F8F6F1</div>
+    <div class="role">Cálido. Solo para tarjetas, nunca de fondo general.</div></div></div>
+  <div class="sw"><div class="chip" style="background:#0F0E0C"><span style="color:#fff">Aa</span></div>
+    <div class="meta"><div class="name">Negro de marca</div><div class="hex">#0F0E0C</div>
+    <div class="role">Texto principal. No es negro puro.</div></div></div>
+  <div class="sw"><div class="chip" style="background:#5C655F"><span style="color:#fff">Aa</span></div>
+    <div class="meta"><div class="name">Gris texto</div><div class="hex">#5C655F</div>
+    <div class="role">Labels secundarios, nav inactivo.</div></div></div>
+  <div class="sw"><div class="chip" style="background:#807A74"><span style="color:#fff">Aa</span></div>
+    <div class="meta"><div class="name">Gris terciario</div><div class="hex">#807A74</div>
+    <div class="role">Solo en tamaño grande (contraste 4.03).</div></div></div>
+  <div class="sw"><div class="chip" style="background:#E5E5E3"><span style="color:#5C655F">Aa</span></div>
+    <div class="meta"><div class="name">Divisor</div><div class="hex">#E5E5E3</div>
+    <div class="role">Líneas y separadores.</div></div></div>
+</div>
+
+<h2>Colores con significado operativo</h2><div class="rule"></div>
+<p class="note">
+  No son decorativos: cada uno codifica un estado del animal que el operario lee con guante, a pleno sol y de un vistazo.
+  Un rebranding puede mover el verde de marca, pero <b>estos cuatro significados tienen que seguir siendo inconfundibles entre sí</b>.
+</p>
+<div class="swatches">
+  <div class="sw"><div class="chip" style="background:#C0451F"><span style="color:#fff">NO APTA</span></div>
+    <div class="meta"><div class="name">Terracota</div><div class="hex">#C0451F</div>
+    <div class="role">Alertas y resultado negativo.</div></div></div>
+  <div class="sw"><div class="chip" style="background:#9A6206"><span style="color:#fff">DIFERIDA</span></div>
+    <div class="meta"><div class="name">Ámbar</div><div class="hex">#9A6206</div>
+    <div class="role">Pausa / posponer decisión.</div></div></div>
+  <div class="sw"><div class="chip" style="background:#FBE6AE"><span style="color:#855300">CUT</span></div>
+    <div class="meta"><div class="name">Ámbar par (descarte)</div><div class="hex">#FBE6AE / #855300</div>
+    <div class="role">Badge de animal marcado para descarte.</div></div></div>
+  <div class="sw"><div class="chip" style="background:#DBEEF3"><span style="color:#106B7A">EN TRATAMIENTO</span></div>
+    <div class="meta"><div class="name">Teal sanitario</div><div class="hex">#DBEEF3 / #106B7A</div>
+    <div class="role">Marca clínica, distinta de alerta y de marca.</div></div></div>
+</div>
+
+<h2>Contraste medido (WCAG 2.1)</h2><div class="rule"></div>
+<table>
+  <tr><th style="width:330px">Par</th><th style="width:80px">Ratio</th><th style="width:70px">AA</th><th>Dónde se usa</th></tr>
+  <tr><td><span class="dot" style="background:#0F0E0C"></span>Negro sobre fondo de app</td><td class="mono">18.36</td><td class="ok">✓</td><td>Texto principal</td></tr>
+  <tr><td><span class="dot" style="background:#fff"></span>Blanco sobre verde botella</td><td class="mono">8.12</td><td class="ok">✓</td><td>Botón primario y FAB</td></tr>
+  <tr><td><span class="dot" style="background:#1e5a3e"></span>Verde botella sobre fondo</td><td class="mono">7.72</td><td class="ok">✓</td><td>Íconos y texto de marca</td></tr>
+  <tr><td><span class="dot" style="background:#106B7A"></span>Teal sobre fondo</td><td class="mono">5.87</td><td class="ok">✓</td><td>Ícono de tratamiento</td></tr>
+  <tr><td><span class="dot" style="background:#5C655F"></span>Gris texto sobre fondo</td><td class="mono">5.74</td><td class="ok">✓</td><td>Labels secundarios</td></tr>
+  <tr><td><span class="dot" style="background:#855300"></span>Par del badge CUT</td><td class="mono">5.27</td><td class="ok">✓</td><td>Descarte</td></tr>
+  <tr><td><span class="dot" style="background:#fff"></span>Blanco sobre terracota</td><td class="mono">5.11</td><td class="ok">✓</td><td>Bloque NO APTA</td></tr>
+  <tr><td><span class="dot" style="background:#fff"></span>Blanco sobre ámbar</td><td class="mono">5.09</td><td class="ok">✓</td><td>Bloque DIFERIDA</td></tr>
+  <tr><td><span class="dot" style="background:#C0451F"></span>Terracota sobre fondo</td><td class="mono">4.86</td><td class="ok">✓</td><td>Alertas como texto</td></tr>
+  <tr><td><span class="dot" style="background:#1e5a3e"></span>Verde sobre verde contenedor</td><td class="mono">4.55</td><td class="ok">✓</td><td>Badge de estado</td></tr>
+  <tr><td><span class="dot" style="background:#807A74"></span>Gris terciario sobre fondo</td><td class="mono">4.03</td><td class="warn">solo grande</td><td>Texto de apoyo</td></tr>
+</table>
+
+<h2>El agujero que el rebranding tiene que cerrar</h2><div class="rule"></div>
+<p class="note">
+  Los tres bloques del tacto de vaquillona se diferencian <b>solo por tono</b>. Terracota y ámbar tienen luminancia prácticamente
+  idéntica (ratio 1.00 entre sí), así que para un operario con daltonismo rojo-verde —cerca de <b>1 de cada 12 varones</b>, y el
+  usuario de manga es casi siempre varón— <b>NO APTA y DIFERIDA son el mismo color</b>. Hoy lo salva el texto del botón, no el color.
+  La paleta nueva debería separarlos también por <b>luminosidad</b>, no solo por tono.
+</p>
+<div class="cbgrid">
+  <div class="cbcol"><div class="cbhead">Visión normal</div>
+    <div class="cbrow">
+      <div class="cbblock" style="background:#1e5a3e">APTA</div>
+      <div class="cbblock" style="background:#C0451F">NO APTA</div>
+      <div class="cbblock" style="background:#9A6206">DIFERIDA</div>
+    </div>
+  </div>
+  <div class="cbcol"><div class="cbhead">Deuteranopía (simulada)</div>
+    <div class="cbrow">
+      <div class="cbblock" style="background:#514D40">APTA</div>
+      <div class="cbblock" style="background:#877819">NO APTA</div>
+      <div class="cbblock" style="background:#82730B">DIFERIDA</div>
+    </div>
+  </div>
+  <div class="cbcol"><div class="cbhead">Protanopía (simulada)</div>
+    <div class="cbrow">
+      <div class="cbblock" style="background:#59533C">APTA</div>
+      <div class="cbblock" style="background:#695D19">NO APTA</div>
+      <div class="cbblock" style="background:#756600">DIFERIDA</div>
+    </div>
+  </div>
+</div>
+
+<h2>Tipografía</h2><div class="rule"></div>
+<p class="note"><b>Inter</b> exclusivo, cuatro pesos: 700 display · 600 subtítulos y títulos de tarjeta · 500 labels · 400 texto. Sin segunda familia.</p>
+<div class="type"><div class="tk">64 / 72 · 700</div><div style="font-size:44px;font-weight:700;line-height:50px">385 kg</div><div class="use">Número héroe: el valor que se carga en la manga</div></div>
+<div class="type"><div class="tk">38 / 46 · 700</div><div style="font-size:34px;font-weight:700;line-height:40px">Rodeo Las Marías</div><div class="use">Títulos de pantalla</div></div>
+<div class="type"><div class="tk">20 / 28 · 600</div><div style="font-size:20px;font-weight:600">Vaquillona · 3 años</div><div class="use">Títulos de tarjeta</div></div>
+<div class="type"><div class="tk">16 / 22 · 400</div><div style="font-size:16px">Preñada, tacto del 12/05/2026</div><div class="use">Texto e inputs</div></div>
+<div class="type"><div class="tk">14 / 20 · 400</div><div style="font-size:14px">Sincronizado hace 2 minutos</div><div class="use">Texto base</div></div>
+<div class="type"><div class="tk">11 / 16 · 500</div><div style="font-size:11px;font-weight:500;letter-spacing:.3px">MANIOBRA</div><div class="use">Micro-labels del menú inferior</div></div>
+
+<h2>Reglas de forma</h2><div class="rule"></div>
+<div class="two">
+  <div>
+    <ul>
+      <li><b>Bordes:</b> 16px en tarjetas, pill completo en botones primarios.</li>
+      <li><b>Área táctil mínima:</b> 56px de alto. Los botones de manga van a 80-88px.</li>
+      <li><b>Íconos:</b> Lucide, trazo lineal. Nunca emoji como sustituto de ícono.</li>
+      <li><b>Sombra:</b> apenas dos niveles. La del FAB va teñida de verde, no de negro.</li>
+    </ul>
+  </div>
+  <div>
+    <ul>
+      <li><b>Tono de voz:</b> voseo argentino, microcopy explicativo.</li>
+      <li><b>Una decisión por pantalla</b> durante la carga en la manga.</li>
+      <li><b>Alto contraste siempre:</b> se lee a pleno sol, con barro y con guante.</li>
+      <li><b>Sin azul frío</b> (#F8F9FF y familia): se probó y ensucia el verde.</li>
+    </ul>
+  </div>
+</div>
+
+<p class="foot">
+  Valores tomados de <span class="mono">app/tamagui.config.ts</span>. Contrastes calculados con la fórmula de luminancia relativa de WCAG 2.1;
+  simulación de daltonismo con las matrices de Machado et al. (2009), severidad máxima — es una aproximación de referencia, no un diagnóstico clínico.
+</p>
+
+</body>
+</html>
