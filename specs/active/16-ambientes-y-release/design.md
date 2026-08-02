@@ -187,6 +187,34 @@ de modo que **tanto el build como `eas update --environment <env>`** las reciban
 - **`channel`** depende de la config OTA de Fase 0; si `expo-updates` aún no está, los `channel` son
   inertes hasta que Fase 0 los active (no rompe el build).
 
+> **Reconciliación as-built (2026-08-02).** `eas.json` tiene **5** profiles, no 3, y las
+> `EXPO_PUBLIC_*` siguen **inline en el repo** (la migración a EAS Environment Variables del bloque de
+> arriba no se ejecutó). Los dos profiles que la spec no contemplaba existen porque el discriminador
+> `APP_VARIANT` acopla *identidad de la app* con *backend*, y hacen falta builds que apunten a DEV
+> **sin** el id `.dev`:
+>
+> | profile | backend | distribución | id / nombre | para qué |
+> |---|---|---|---|---|
+> | `development` | DEV | internal (ad-hoc) | `ar.rafq.app.dev` · "RAFAQ (Dev)" | dev client, coexiste con el de prod (R2.4) |
+> | `preview-dev` | **DEV** | internal (ad-hoc) | `ar.rafq.app` · "RAFAQ" | APK/IPA de prueba en device contra datos de DEV |
+> | `preview` | PROD | internal (ad-hoc) | `ar.rafq.app` · "RAFAQ" | R4.2 |
+> | `testflight-dev` | **DEV** | **store** (App Store Connect) | `ar.rafq.app` · "RAFAQ" | TestFlight — testers iOS **sin registrar UDID** |
+> | `production` | PROD | store | `ar.rafq.app` · "RAFAQ" | R4.2 |
+>
+> **`testflight-dev` (agregado 2026-08-02)** es el primer profile de distribución `store` que se usa.
+> Consecuencias que la spec original no cubría:
+> - Requiere credenciales iOS **distintas** de las ad-hoc (Distribution Certificate + App Store
+>   provisioning profile). EAS **rechaza generarlas en `--non-interactive`** → el primer build de este
+>   profile lo tiene que lanzar un humano logueado a Apple (2FA).
+> - `ios.infoPlist.ITSAppUsesNonExemptEncryption: false` en `app.config.ts` (declaración de export
+>   compliance: la app solo usa HTTPS + keychain del SO, ambos exentos). Sin la clave, App Store
+>   Connect frena **cada** build subido pidiendo la declaración a mano antes de liberarlo a testers.
+> - Ocupa el bundle `ar.rafq.app` en App Store Connect con un binario que apunta a **DEV**. Es
+>   deliberado (evita registrar un App ID nuevo y romper los OAuth clients de Google/Apple, que están
+>   atados al bundle), pero implica que la app de App Store Connect es *compartida* entre este profile
+>   y `production`: se separan por buildNumber, no por identidad. Si en algún momento conviven testers
+>   de DEV y de PROD, hay que partirlos en dos App IDs y duplicar los OAuth clients.
+
 ## 4. Scripts parametrizados (R5)
 
 > **Reconciliación as-built (Run B, 2026-07-14).** La lógica pura se extrajo a **tres** módulos

@@ -40,6 +40,10 @@ export default (): ExpoConfig => {
       usesAppleSignIn: true, // feature 19 — PRESERVADO
       infoPlist: {
         UIBackgroundModes: ['remote-notification'],
+        // Export compliance (TestFlight/App Store): la app NO usa criptografía propia — solo HTTPS y
+        // el keychain/SecureStore del SO, ambos exentos. Sin esta clave, App Store Connect frena
+        // CADA build subido con la pregunta manual de encriptación antes de habilitarlo a testers.
+        ITSAppUsesNonExemptEncryption: false,
       },
     },
     android: {
