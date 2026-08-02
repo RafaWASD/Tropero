@@ -1197,11 +1197,24 @@ device destapa un caso no cubierto.
 
 **Riesgo de no preguntar**: bajo en lo inmediato, alto en lo estructural. Se puede lanzar sin las respuestas, pero la #1 puede volver obsoleta una parte del diseño de 08 y conviene saberlo antes de tratarla como `done`.
 
-## 2026-08-02 — Cada build de EAS sube 1.1 GB y nadie sabe de qué
+## 2026-08-02 — El build de EAS empaqueta basura del disco local y por eso NO devuelve un APK instalable
 
-**Origen**: builds para las diseñadoras (sesión 2026-08-02). El propio EAS CLI lo avisa: *"Your project archive is 1.1 GB. You can reduce its size... in a .easignore file"*. Costo medido: **2m 02s de upload por build**, antes de que la cola siquiera empiece.
+**Origen**: builds para las diseñadoras (sesión 2026-08-02). Arrancó como "el archive pesa 1.1 GB y el upload tarda 2m02s" (lo avisa el propio CLI) y terminó siendo un defecto con consecuencia visible.
 
-**Lo que ya está descartado** (medido, no supuesto): `app/android/` pesa 4.0 GB en disco (3.4 GB son `app/android/app/build`) pero **está gitignoreado y tiene 0 archivos trackeados**, así que en teoría no viaja. `.git` son 103 MB, `design/` 20 MB, `docs/` 12 MB, `dist/` 28 MB (ignorado), `public/` 13 MB. **Nada de eso suma 1.1 GB** — o sea que la hipótesis obvia ("se sube el prebuild de Android") no cierra con los números, y el que lo agarre tiene que empezar por *medir qué entra al archive*, no por escribir un `.easignore` a ciegas.
+**El síntoma que importa**: el build `3fb6b079` NO produjo un `.apk`, produjo un **`.tar.gz` con DOS APKs adentro** — y un `.tar.gz` no se instala desde un teléfono, así que **el link de EAS deja de servir para repartir el build**:
 
-**Por qué no se tocó hoy**: un `.easignore` mal puesto excluye algo que el build necesita y lo rompe. Con un build de TestFlight pendiente de correr a mano, meter esa variable no pagaba. No es urgente: cuesta 2 minutos por build, no falla.
+```
+release/app-release.apk   121.036.467 B   2026-08-02 20:45   <- el de hoy, correcto (ar.rafq.app 0.1.0)
+debug/app-debug.apk       264.777.703 B   2026-07-29 09:37   <- del 29/7, del disco de Raf
+```
+
+**La causa, verificada byte a byte**: `app/android/app/build/outputs/apk/debug/app-debug.apk` existe local con **exactamente** ese tamaño y ese timestamp. O sea **`app/android/` viaja a EAS aunque esté gitignoreado y tenga 0 archivos trackeados** — el `.gitignore` no gobierna el archive de EAS. EAS compiló su release, encontró el debug viejo ya presente en `outputs/`, y al haber dos APKs los empaquetó en un tar en vez de devolver el APK pelado.
+
+⚠️ **Corrige una afirmación anterior de esta misma entrada**, que decía que `app/android/` "en teoría no viaja" y mandaba a medir de nuevo. Viaja. La hipótesis obvia era la correcta.
+
+**Dos consecuencias, no una**:
+1. **Reparto roto** (la que se siente): sin APK pelado no hay link instalable; hay que bajar el tar, extraerlo y subir el APK a otro lado.
+2. **Riesgo de build sucio** (la peor): si `android/` viaja, EAS **usa el prebuild local en vez de regenerarlo**. Cualquier resto en el árbol de Raf entra al build, y cualquier cosa que él haya tocado a mano ahí es un input invisible que no está en git. Es la clase de "el verde no es del código que creés" que este proyecto ya comió varias veces.
+
+**Cómo se cierra**: lo barato es borrar los `outputs/` viejos antes de buildear (1 APK → artifact `.apk` → link funciona). Lo correcto es un **`.easignore` que excluya `android/` e `ios/`** para forzar prebuild limpio en la nube. Ojo con el segundo: `.easignore` **reemplaza** al `.gitignore` para el archive, así que hay que re-listar `node_modules/`, `.git/`, `dist/`, `.expo/` y demás o el archive crece en vez de achicarse. Verificar después que el artifact vuelva a ser `.apk` y que los permisos del bastón sigan en el manifiesto (`aapt2 dump permissions`).
 
