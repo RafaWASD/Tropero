@@ -206,63 +206,107 @@ function SelectedRow({
   // falla ante movimiento horizontal. Mientras arrastra: el ítem sigue al dedo (compensando el scroll),
   // clampeado a la región; recoloca hermanos al cruzar medio-row; auto-scroll cerca de los bordes; al
   // soltar computa el destino y delega el reorder PURO al padre (runOnJS). Todo en el UI thread.
+  // ⚠️ CADA CALLBACK VA ENVUELTO EN try/catch — MISMO blindaje que `BottomSheetShell` (ver ahí el porqué
+  // largo). Una excepción NO ATRAPADA dentro de un worklet de gesto **mata la app entera** (SIGABRT, sin
+  // redbox ni log de JS): así crasheó Raf en device (iOS release, stack `UIGestureRecognizer → dispatchEvent
+  // → UIEventHandler::process → runSync → throwPendingError → std::terminate → abort`). El `callGuard` de
+  // worklets SOLO existe en builds de DEBUG → en release nadie atrapa. Degradamos a "gesto inerte" —
+  // reseteamos los shared values del drag (`dragY`/`activeKey`/`autoScrollDir`) para no dejarlo colgado y
+  // que la fila vuelva a su lugar por el spring de `positions` (mismo fail-closed que la geometría no
+  // finita) — en vez de cerrar la app en medio de una jornada. En DEV **re-lanzamos** para no tapar el bug
+  // (`__DEV__` se lee dentro de worklets). El happy-path (sin throw) queda byte-idéntico; el `catch` solo
+  // escribe shared values, así que EN LA PRÁCTICA no puede re-tirar (son `useSharedValue` legítimos).
   const pan = Gesture.Pan()
     .activeOffsetY([-DRAG_ACTIVATE_Y, DRAG_ACTIVATE_Y])
     .failOffsetX([-DRAG_ACTIVATE_Y, DRAG_ACTIVATE_Y])
     .onStart(() => {
-      activeKey.value = maneuver;
-      myPos.value = positions.value[maneuver] ?? index;
-      scrollAtStart.value = scrollContext ? scrollContext.scrollOffset.value : 0;
-      runOnJS(grab)();
+      'worklet';
+      try {
+        activeKey.value = maneuver;
+        myPos.value = positions.value[maneuver] ?? index;
+        scrollAtStart.value = scrollContext ? scrollContext.scrollOffset.value : 0;
+        runOnJS(grab)();
+      } catch (err) {
+        dragY.value = 0;
+        activeKey.value = '';
+        autoScrollDir.value = 0;
+        if (__DEV__) throw err;
+      }
     })
     .onUpdate((e) => {
-      // Desplazamiento efectivo = lo que se movió el dedo + lo que se auto-scrolleó el contenido.
-      const scrollDelta = scrollContext ? scrollContext.scrollOffset.value - scrollAtStart.value : 0;
-      const effY = e.translationY + scrollDelta;
-      // El ítem sigue al dedo (visual), CLAMPEADO a los bounds de la región de seleccionadas.
-      dragY.value = Math.max(minDragY, Math.min(maxDragY, effY));
-      // Posición visual destino del ítem arrastrado = su fila base + filas cruzadas (clamp [0, total-1]).
-      const newPos = Math.max(0, Math.min(total - 1, index + Math.round(effY / ROW_HEIGHT)));
-      const oldPos = myPos.value;
-      if (newPos !== oldPos) {
-        // Recolocamos los hermanos: el rango entre oldPos y newPos se corre una posición.
-        const next: Record<string, number> = { ...positions.value };
-        for (const key of Object.keys(next)) {
-          if (key === maneuver) continue;
-          const p = next[key];
-          if (oldPos < newPos && p > oldPos && p <= newPos) next[key] = p - 1;
-          else if (oldPos > newPos && p >= newPos && p < oldPos) next[key] = p + 1;
+      'worklet';
+      try {
+        // Desplazamiento efectivo = lo que se movió el dedo + lo que se auto-scrolleó el contenido.
+        const scrollDelta = scrollContext ? scrollContext.scrollOffset.value - scrollAtStart.value : 0;
+        const effY = e.translationY + scrollDelta;
+        // El ítem sigue al dedo (visual), CLAMPEADO a los bounds de la región de seleccionadas.
+        dragY.value = Math.max(minDragY, Math.min(maxDragY, effY));
+        // Posición visual destino del ítem arrastrado = su fila base + filas cruzadas (clamp [0, total-1]).
+        const newPos = Math.max(0, Math.min(total - 1, index + Math.round(effY / ROW_HEIGHT)));
+        const oldPos = myPos.value;
+        if (newPos !== oldPos) {
+          // Recolocamos los hermanos: el rango entre oldPos y newPos se corre una posición.
+          const next: Record<string, number> = { ...positions.value };
+          for (const key of Object.keys(next)) {
+            if (key === maneuver) continue;
+            const p = next[key];
+            if (oldPos < newPos && p > oldPos && p <= newPos) next[key] = p - 1;
+            else if (oldPos > newPos && p >= newPos && p < oldPos) next[key] = p + 1;
+          }
+          next[maneuver] = newPos;
+          positions.value = next;
+          myPos.value = newPos;
         }
-        next[maneuver] = newPos;
-        positions.value = next;
-        myPos.value = newPos;
-      }
-      // AUTO-SCROLL: si el dedo entró en la zona de borde del viewport, marcamos la dirección (el frame
-      // callback hace el desplazamiento continuo). Fuera de las zonas, sin auto-scroll.
-      if (scrollContext) {
-        const height = scrollContext.viewportHeight.value;
-        // Sin un viewport medido (measureInWindow aún no corrió / no disponible) NO auto-scrolleamos:
-        // de lo contrario `bottom - EDGE_ZONE` sería negativo y dispararía scroll-abajo espurio siempre.
-        if (height <= 0) {
-          autoScrollDir.value = 0;
-        } else {
-          const top = scrollContext.viewportTop.value;
-          const bottom = top + height;
-          if (e.absoluteY < top + EDGE_ZONE) autoScrollDir.value = -1;
-          else if (e.absoluteY > bottom - EDGE_ZONE) autoScrollDir.value = 1;
-          else autoScrollDir.value = 0;
+        // AUTO-SCROLL: si el dedo entró en la zona de borde del viewport, marcamos la dirección (el frame
+        // callback hace el desplazamiento continuo). Fuera de las zonas, sin auto-scroll.
+        if (scrollContext) {
+          const height = scrollContext.viewportHeight.value;
+          // Sin un viewport medido (measureInWindow aún no corrió / no disponible) NO auto-scrolleamos:
+          // de lo contrario `bottom - EDGE_ZONE` sería negativo y dispararía scroll-abajo espurio siempre.
+          if (height <= 0) {
+            autoScrollDir.value = 0;
+          } else {
+            const top = scrollContext.viewportTop.value;
+            const bottom = top + height;
+            if (e.absoluteY < top + EDGE_ZONE) autoScrollDir.value = -1;
+            else if (e.absoluteY > bottom - EDGE_ZONE) autoScrollDir.value = 1;
+            else autoScrollDir.value = 0;
+          }
         }
+      } catch (err) {
+        // Deja de seguir al dedo y apaga el auto-scroll; la fila vuelve a su slot por el spring de positions.
+        dragY.value = 0;
+        activeKey.value = '';
+        autoScrollDir.value = 0;
+        if (__DEV__) throw err;
       }
     })
     .onEnd(() => {
-      runOnJS(commit)(index, myPos.value);
-      dragY.value = 0;
-      activeKey.value = '';
-      autoScrollDir.value = 0;
+      'worklet';
+      try {
+        runOnJS(commit)(index, myPos.value);
+        dragY.value = 0;
+        activeKey.value = '';
+        autoScrollDir.value = 0;
+      } catch (err) {
+        // Fail-closed: ante la duda NO commiteamos el reorder (un reorder fantasma es peor que un no-op).
+        dragY.value = 0;
+        activeKey.value = '';
+        autoScrollDir.value = 0;
+        if (__DEV__) throw err;
+      }
     })
     .onFinalize(() => {
-      // Por si el gesto se cancela sin onEnd (p. ej. interrumpido): apagamos el auto-scroll.
-      autoScrollDir.value = 0;
+      'worklet';
+      try {
+        // Por si el gesto se cancela sin onEnd (p. ej. interrumpido): apagamos el auto-scroll.
+        autoScrollDir.value = 0;
+      } catch (err) {
+        dragY.value = 0;
+        activeKey.value = '';
+        autoScrollDir.value = 0;
+        if (__DEV__) throw err;
+      }
     });
 
   // El ítem se posiciona por su `positions[maneuver]` (springeado). Si lo arrastra, sigue al dedo 1:1
@@ -299,15 +343,28 @@ function SelectedRow({
   //  - CUERPO (label + 2da línea)  = abrir el sheet de preconfig SI es configurable; si no, inerte.
   //  - GRIP (derecha)              = drag (R1.12). Traga el tap para no quitar al tocarlo.
   // Cada Tap falla ante movimiento → no roba el scroll del padre.
+  // Los Tap también son worklets de gesto (corren en el UI runtime) → mismo blindaje que el Pan: un throw
+  // sin catch acá también aborta la app. No hay estado de drag que resetear, así que el `catch` solo
+  // re-lanza en DEV y en release deja el tap inerte (fail-closed: no dispara la acción).
   const badgeTap = Gesture.Tap()
     .maxDuration(250)
     .onEnd((_e, success) => {
-      if (success) runOnJS(onToggle)(maneuver);
+      'worklet';
+      try {
+        if (success) runOnJS(onToggle)(maneuver);
+      } catch (err) {
+        if (__DEV__) throw err;
+      }
     });
   const bodyTap = Gesture.Tap()
     .maxDuration(250)
     .onEnd((_e, success) => {
-      if (success && configurable && onOpenConfig) runOnJS(onOpenConfig)(maneuver);
+      'worklet';
+      try {
+        if (success && configurable && onOpenConfig) runOnJS(onOpenConfig)(maneuver);
+      } catch (err) {
+        if (__DEV__) throw err;
+      }
     });
   // En el grip, un tap suelto NO debe hacer nada (el grip es solo-reordenar): un Tap que lo "traga"
   // gana al de la fila por estar más adentro. Así tocar el grip sin arrastrar no dispara otra acción.
@@ -486,8 +543,15 @@ function SelectedRow({
 
 function PoolRow({ maneuver, onToggle }: { maneuver: ManeuverKind; onToggle: (m: ManeuverKind) => void }) {
   const FAINT = getTokenValue('$textFaint', 'color');
+  // Tap del pool = worklet de gesto → mismo blindaje (un throw sin catch aborta la app). Sin estado que
+  // resetear: en release deja el tap inerte, en DEV re-lanza.
   const tap = Gesture.Tap().onEnd((_e, success) => {
-    if (success) runOnJS(onToggle)(maneuver);
+    'worklet';
+    try {
+      if (success) runOnJS(onToggle)(maneuver);
+    } catch (err) {
+      if (__DEV__) throw err;
+    }
   });
   return (
     <GestureDetector gesture={tap}>

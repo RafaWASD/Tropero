@@ -282,20 +282,29 @@ export function WheelPicker({
   // rango [0, count-1] para no notificar fuera de las celdas reales (el padding de centrado no cuenta).
   // Además agenda el SETTLE web (debounce en JS) → al detenerse el scroll, lockea (en native no molesta:
   // los handlers nativos cancelan el timer y lockean primero).
+  // ⚠️ EL HANDLER VA ENVUELTO EN try/catch — mismo blindaje que los gestos RNGH (ver `BottomSheetShell`):
+  // un `useAnimatedScrollHandler` corre su worklet en el UI runtime al procesar CADA scroll event
+  // (`UIEventHandler::process`, el mismo path que crasheó en device); una excepción sin catch ahí aborta
+  // la app entera (SIGABRT, sin redbox). Fail-closed: si tira, dejamos la rueda quieta (no movemos los
+  // shared values a un estado raro) — el SETTLE/lock nativo asienta el valor al soltar. En DEV re-lanzamos.
   const onScroll = useAnimatedScrollHandler({
     onScroll: (e) => {
       'worklet';
-      offsetY.value = e.contentOffset.y;
-      const raw = e.contentOffset.y / cell;
-      scrollIndex.value = raw;
-      let idx = Math.round(raw);
-      if (idx < 0) idx = 0;
-      if (idx > count - 1) idx = count - 1;
-      if (idx !== lastNotified.value) {
-        lastNotified.value = idx;
-        runOnJS(notifyIndex)(idx);
+      try {
+        offsetY.value = e.contentOffset.y;
+        const raw = e.contentOffset.y / cell;
+        scrollIndex.value = raw;
+        let idx = Math.round(raw);
+        if (idx < 0) idx = 0;
+        if (idx > count - 1) idx = count - 1;
+        if (idx !== lastNotified.value) {
+          lastNotified.value = idx;
+          runOnJS(notifyIndex)(idx);
+        }
+        runOnJS(scheduleSettle)();
+      } catch (err) {
+        if (__DEV__) throw err;
       }
-      runOnJS(scheduleSettle)();
     },
   });
 

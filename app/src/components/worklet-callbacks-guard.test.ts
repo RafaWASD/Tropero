@@ -29,7 +29,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { stripSourceComments } from '../utils/strip-comments';
+import { stripSourceComments, stripSourceCommentsAndStrings } from '../utils/strip-comments';
 import { assertScanCoverage } from '../utils/scan-coverage';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
@@ -51,6 +51,171 @@ const CALLBACK_SIGNATURE = /\b(?:runOnJS|scheduleOnRN)\s*\(\s*[A-Za-z_$][\w$]*\s
 /** Válvula de escape por línea, con justificación (mismo patrón que check-hardcode.mjs / phone-field). */
 const DISABLE_NEXT_LINE = /worklet-callback-disable-next-line\s*--\s*\S/;
 const DISABLE_LINE = /worklet-callback-disable-line\s*--\s*\S/;
+
+// ── REGLA 2: BLINDAJE de TODO worklet de gesto / animated-scroll-handler ─────────────────────────────
+//
+// ── EL BUG QUE CIERRA (crash 🔴 nativo en device, Raf, iPhone 15 Pro, build release, 2026-08-01) ──────
+// `EXC_CRASH / SIGABRT` armando una maniobra. Stack del main thread:
+//   UIGestureRecognizer → -[REANodesManager dispatchEvent:] → ReanimatedModuleProxy::handleEvent →
+//   UIEventHandlerRegistry::processEvent → reanimated::UIEventHandler::process → WorkletRuntime::runSync →
+//   HermesRuntimeImpl::throwPendingError → __cxa_throw  (→ std::terminate → abort).
+// Un worklet atado a un ANIMATED-EVENT HANDLER (callback de un `Gesture.*` de RNGH o un
+// `useAnimatedScrollHandler`) tiró una excepción de JS SIN CATCH en el UI runtime → `std::terminate` →
+// la app entera muere, sin redbox y sin log de JS. `UIEventHandler::process` es EXCLUSIVO de esos
+// handlers: NO pasa por él `useAnimatedStyle`/`useDerivedValue`/`useFrameCallback` (registries distintos).
+//
+// ── POR QUÉ UN GUARD DE COBERTURA (no una lista a mano) ──────────────────────────────────────────────
+// El `callGuard` de worklets SOLO existe en builds de DEBUG; en release nadie atrapa. La única defensa es
+// que CADA callback de evento envuelva su cuerpo en `try/catch` y en el `catch` haga `if (__DEV__) throw`
+// (re-lanza en dev para no tapar el bug; en release degrada a gesto inerte). `BottomSheetShell` ya lo hace
+// (ver ahí el porqué largo). Esto NO se puede verificar en E2E: el crash es del UI runtime NATIVO y en
+// react-native-web estos handlers no ejercitan ese path. Lo barato y determinista es la FIRMA en el código.
+// Igual que la REGLA B del guard de KeyboardAvoiding, se CALCULA la cobertura (no se enumera a mano): se
+// enumeran estáticamente TODOS los callbacks de gesto/scroll del árbol y se exige el blindaje en cada uno,
+// de modo que un gesto/scroll worklet NUEVO sin `try/catch` deje este test en ROJO (barrer la AUSENCIA).
+
+/** Métodos de callback de un `Gesture.*` de RNGH que corren un worklet en el UI runtime al procesar un
+ *  evento. Se detectan SOLO dentro de una cadena `Gesture.…` (ver `gestureChainRegions`) → `db.onChange`
+ *  (PowerSync), `onChange`/`onEnd` de props JSX, etc. NO colisionan. */
+const GESTURE_CALLBACK_METHODS = [
+  'onBegin',
+  'onStart',
+  'onUpdate',
+  'onChange',
+  'onEnd',
+  'onFinalize',
+  'onTouchesDown',
+  'onTouchesMove',
+  'onTouchesUp',
+  'onTouchesCancelled',
+];
+
+/** Keys de handler de un `useAnimatedScrollHandler({...})`: cada uno es un worklet de evento de scroll
+ *  (mismo `UIEventHandler::process`). */
+const SCROLL_HANDLER_KEYS = ['onScroll', 'onBeginDrag', 'onEndDrag', 'onMomentumBegin', 'onMomentumEnd'];
+
+/** El BLINDAJE exigido en el cuerpo del callback: `try` + `catch` + `if (__DEV__) throw`. */
+const HAS_TRY = /\btry\b/;
+const HAS_CATCH = /\bcatch\b/;
+const HAS_DEV_THROW = /if\s*\(\s*__DEV__\s*\)\s*throw\b/;
+
+/** Válvula de escape del blindaje, con justificación (un callback legítimamente NO-worklet, p. ej.). */
+const BLINDAJE_DISABLE_NEXT_LINE = /worklet-blindaje-disable-next-line\s*--\s*\S/;
+const BLINDAJE_DISABLE_LINE = /worklet-blindaje-disable-line\s*--\s*\S/;
+
+const IDENT_CHAR = /[A-Za-z0-9_$]/;
+
+/** Índice del delimitador que cierra el que abre en `openIdx` (sobre código sin comentarios NI strings, así
+ *  ningún `(`/`{` dentro de un literal desbalancea). Devuelve `code.length` si no cierra (fuente roto). */
+function matchDelim(code: string, openIdx: number, open: string, close: string): number {
+  let depth = 0;
+  for (let i = openIdx; i < code.length; i++) {
+    if (code[i] === open) depth++;
+    else if (code[i] === close) {
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+  return code.length;
+}
+
+/** Consume la EXPRESIÓN DE CADENA que arranca en un `Gesture.…` (índice `startIdx`, sobre código
+ *  estructural) y devuelve el índice donde termina. Recorre `.ident` y `(...)` balanceados mientras la
+ *  cadena siga; corta al primer token que no sea `.` ni `(` (un `;`, `,`, `)`, salto a otra sentencia). Así
+ *  el scan de callbacks queda ACOTADO a lo que es un gesto de verdad. */
+function consumeGestureChain(code: string, startIdx: number): number {
+  let i = startIdx;
+  const skipSpace = () => {
+    while (i < code.length && /\s/.test(code[i])) i++;
+  };
+  while (i < code.length && IDENT_CHAR.test(code[i])) i++; // 'Gesture'
+  for (;;) {
+    skipSpace();
+    if (code[i] === '.') {
+      i++;
+      skipSpace();
+      while (i < code.length && IDENT_CHAR.test(code[i])) i++; // .Type / .method
+      continue;
+    }
+    if (code[i] === '(') {
+      i = matchDelim(code, i, '(', ')') + 1;
+      continue;
+    }
+    break;
+  }
+  return i;
+}
+
+/** Regiones `[start, end)` de cada cadena `Gesture.…` del código estructural. */
+function gestureChainRegions(code: string): Array<{ start: number; end: number }> {
+  const regions: Array<{ start: number; end: number }> = [];
+  const re = /\bGesture\s*\.\s*[A-Za-z]/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(code)) !== null) {
+    const start = m.index;
+    const end = consumeGestureChain(code, start);
+    regions.push({ start, end });
+    if (end > re.lastIndex) re.lastIndex = end; // no re-scanear adentro de una cadena ya consumida
+  }
+  return regions;
+}
+
+/** Un sitio de callback de evento de worklet: dónde está (para el número de línea) y su cuerpo (para el
+ *  blindaje). `code` es estructural (comentarios y strings blanqueados). */
+type WorkletCallbackSite = { openParen: number; body: string; kind: string };
+
+/** Enumera TODOS los callbacks de gesto RNGH + handlers de `useAnimatedScrollHandler` del código
+ *  estructural. El cuerpo devuelto es el ARGUMENTO completo del callback (incluye la arrow function): si no
+ *  hay `try/catch` adentro, no está blindado. */
+function findWorkletEventCallbacks(code: string): WorkletCallbackSite[] {
+  const sites: WorkletCallbackSite[] = [];
+  const regions = gestureChainRegions(code);
+  const inRegion = (idx: number) => regions.some((r) => idx >= r.start && idx < r.end);
+
+  // (a) Callbacks de gesto RNGH: SOLO los que caen dentro de una cadena `Gesture.…`.
+  const cbRe = new RegExp(`\\.\\s*(${GESTURE_CALLBACK_METHODS.join('|')})\\s*\\(`, 'g');
+  let m: RegExpExecArray | null;
+  while ((m = cbRe.exec(code)) !== null) {
+    if (!inRegion(m.index)) continue;
+    const openParen = m.index + m[0].length - 1; // el '(' que abre el argumento
+    const close = matchDelim(code, openParen, '(', ')');
+    sites.push({ openParen, body: code.slice(openParen, close + 1), kind: `Gesture.${m[1]}` });
+  }
+
+  // (b) Handlers de useAnimatedScrollHandler: cada key (onScroll/onBeginDrag/…) dentro del objeto argumento.
+  const scrollRe = /\buseAnimatedScrollHandler\s*\(/g;
+  while ((m = scrollRe.exec(code)) !== null) {
+    const argOpen = m.index + m[0].length - 1;
+    const argClose = matchDelim(code, argOpen, '(', ')');
+    const arg = code.slice(argOpen, argClose + 1);
+    const keyRe = new RegExp(`\\b(${SCROLL_HANDLER_KEYS.join('|')})\\s*:`, 'g');
+    let k: RegExpExecArray | null;
+    while ((k = keyRe.exec(arg)) !== null) {
+      const arrow = arg.indexOf('=>', k.index + k[0].length);
+      if (arrow === -1) continue;
+      const brace = arg.indexOf('{', arrow);
+      if (brace === -1) continue;
+      const bodyClose = matchDelim(arg, brace, '{', '}');
+      const absOpen = argOpen + k.index; // posición del key en `code` (para el número de línea)
+      sites.push({ openParen: absOpen, body: arg.slice(brace, bodyClose + 1), kind: `scrollHandler.${k[1]}` });
+    }
+    if (argClose > scrollRe.lastIndex) scrollRe.lastIndex = argClose;
+  }
+
+  return sites;
+}
+
+/** ¿El cuerpo del callback tiene el blindaje completo? */
+function isBlindado(body: string): boolean {
+  return HAS_TRY.test(body) && HAS_CATCH.test(body) && HAS_DEV_THROW.test(body);
+}
+
+/** Número de línea (1-based) de un índice de carácter. */
+function lineOf(code: string, idx: number): number {
+  let line = 1;
+  for (let i = 0; i < idx && i < code.length; i++) if (code[i] === '\n') line++;
+  return line;
+}
 
 function listFiles(dir: string): string[] {
   const found: string[] = [];
@@ -168,4 +333,136 @@ test('el guard recorre el árbol real (y ve los archivos que tienen worklets)', 
     scanned.some((f) => f.endsWith(join('_components', 'ManeuverReorderList.tsx'))),
     'ManeuverReorderList.tsx (el otro archivo con worklets + runOnJS) debería estar dentro del árbol',
   );
+});
+
+// ── REGLA 2: cada worklet de gesto/scroll está BLINDADO (try/catch + if(__DEV__)throw) ────────────────
+//
+// Piso de callbacks de evento enumerados en el árbol real. HOY: 13 —
+//   · BottomSheetShell buildDragGesture: onBegin/onStart/onUpdate/onEnd/onFinalize (5)
+//   · ManeuverReorderList pan: onStart/onUpdate/onEnd/onFinalize (4) + badgeTap/bodyTap/PoolRow onEnd (3)
+//   · WheelPicker: useAnimatedScrollHandler.onScroll (1)
+// Si baja de esto, el enumerador dejó de VER callbacks (regex/scoping roto) → rojo en vez de verde-vacío.
+const WORKLET_CALLBACK_FLOOR = 10;
+
+test('cada callback de gesto RNGH / animated-scroll-handler está BLINDADO (try/catch + if(__DEV__) throw)', () => {
+  const violations: string[] = [];
+  let totalSites = 0;
+  const byFile = new Map<string, number>();
+
+  for (const root of ROOTS) {
+    for (const file of listFiles(root)) {
+      const raw = readFileSync(file, 'utf8');
+      const rawLines = raw.split(/\r?\n/);
+      // Estructural: comentarios Y strings blanqueados → el matcheo de delimitadores/keywords no se confunde
+      // con un `{`/`try` escrito dentro de un literal, y una MENCIÓN documental no cuenta como callback.
+      const structural = stripSourceCommentsAndStrings(raw);
+      const rel = relative(APP_ROOT, file).split(sep).join('/');
+
+      const sites = findWorkletEventCallbacks(structural);
+      totalSites += sites.length;
+      if (sites.length > 0) byFile.set(rel, sites.length);
+
+      for (const site of sites) {
+        if (isBlindado(site.body)) continue;
+        const lineNo = lineOf(structural, site.openParen); // 1-based
+        const here = rawLines[lineNo - 1] ?? '';
+        const previous = rawLines[lineNo - 2] ?? '';
+        if (BLINDAJE_DISABLE_LINE.test(here) || BLINDAJE_DISABLE_NEXT_LINE.test(previous)) continue;
+        violations.push(`${rel}:${lineNo}  ${site.kind}`);
+      }
+    }
+  }
+
+  // El enumerador tiene que estar VIENDO callbacks (un guard que no encuentra nada pasa verde por vacío).
+  assert.ok(
+    totalSites >= WORKLET_CALLBACK_FLOOR,
+    `el guard enumeró ${totalSites} callbacks de gesto/scroll y el piso es ${WORKLET_CALLBACK_FLOOR}: el ` +
+      'enumerador dejó de ver worklets (¿regex/scoping roto, se movió un archivo?). Si el árbol encogió a ' +
+      'propósito, bajá el piso en el mismo commit y decí por qué.',
+  );
+  // Y tiene que ver los archivos-testigo (los tres que hoy montan estos worklets).
+  for (const witness of ['src/components/BottomSheetShell.tsx', 'app/maniobra/_components/ManeuverReorderList.tsx', 'app/maniobra/_components/WheelPicker.tsx']) {
+    assert.ok(byFile.has(witness), `el guard debería enumerar callbacks de gesto/scroll en ${witness} (vio 0)`);
+  }
+
+  assert.deepEqual(
+    violations,
+    [],
+    'Hay callbacks de gesto RNGH / animated-scroll-handler SIN BLINDAJE. Una excepción NO ATRAPADA dentro ' +
+      'de uno de estos worklets **mata la app entera** (SIGABRT nativo, sin redbox) — así crasheó en device ' +
+      '(stack `UIEventHandler::process → runSync → throwPendingError → abort`). Envolvé el cuerpo del ' +
+      'callback en `try { … } catch (err) { /* resetear shared values a estado inerte */ if (__DEV__) throw err; }` ' +
+      '(mismo patrón que `BottomSheetShell`). Si el callback es legítimamente inofensivo, justificalo con ' +
+      '`// worklet-blindaje-disable-next-line -- <razón>`.\n' +
+      violations.join('\n'),
+  );
+});
+
+test('el guard de BLINDAJE sabe FALLAR (detecta un callback sin try/catch, y no se confunde con db.onChange)', () => {
+  // Un gesto SIN blindaje → detectado como violación.
+  const unguarded = `
+    const pan = Gesture.Pan()
+      .onUpdate((e) => {
+        dragY.value = e.translationY;
+      })
+      .onEnd(() => {
+        runOnJS(commit)();
+      });
+  `;
+  const sitesU = findWorkletEventCallbacks(stripSourceCommentsAndStrings(unguarded));
+  assert.equal(sitesU.length, 2, 'debería enumerar los 2 callbacks del gesto');
+  assert.ok(sitesU.every((s) => !isBlindado(s.body)), 'ninguno está blindado → violación');
+
+  // El MISMO gesto CON blindaje → sin violación.
+  const guarded = `
+    const pan = Gesture.Pan()
+      .onUpdate((e) => {
+        'worklet';
+        try {
+          dragY.value = e.translationY;
+        } catch (err) {
+          dragY.value = 0;
+          if (__DEV__) throw err;
+        }
+      })
+      .onEnd(() => {
+        'worklet';
+        try {
+          runOnJS(commit)();
+        } catch (err) {
+          if (__DEV__) throw err;
+        }
+      });
+  `;
+  const sitesG = findWorkletEventCallbacks(stripSourceCommentsAndStrings(guarded));
+  assert.equal(sitesG.length, 2);
+  assert.ok(sitesG.every((s) => isBlindado(s.body)), 'ambos blindados → sin violación');
+
+  // Un `useAnimatedScrollHandler` sin blindaje → detectado.
+  const scroll = `
+    const onScroll = useAnimatedScrollHandler({
+      onScroll: (e) => {
+        offsetY.value = e.contentOffset.y;
+      },
+    });
+  `;
+  const sitesS = findWorkletEventCallbacks(stripSourceCommentsAndStrings(scroll));
+  assert.equal(sitesS.length, 1, 'debería enumerar el handler onScroll');
+  assert.ok(!isBlindado(sitesS[0].body), 'sin try/catch → violación');
+
+  // `db.onChange(...)` de PowerSync NO es un gesto (no cuelga de `Gesture.…`) → NO se enumera.
+  const dbWatch = `
+    const dispose = db.onChange((event) => {
+      refetch();
+    }, { tables: ['animals'] });
+  `;
+  assert.equal(findWorkletEventCallbacks(stripSourceCommentsAndStrings(dbWatch)).length, 0, 'db.onChange no es gesto');
+
+  // Una prop JSX `onEnd={fn}` tampoco (no es `.onEnd(` de una cadena Gesture).
+  const jsxProp = `<Foo onEnd={handleEnd} onChange={x} />`;
+  assert.equal(findWorkletEventCallbacks(stripSourceCommentsAndStrings(jsxProp)).length, 0, 'prop JSX no es gesto');
+
+  // La válvula de escape exige razón escrita.
+  assert.ok(BLINDAJE_DISABLE_NEXT_LINE.test('// worklet-blindaje-disable-next-line -- corre en JS thread, no worklet'));
+  assert.ok(!BLINDAJE_DISABLE_NEXT_LINE.test('// worklet-blindaje-disable-next-line'));
 });

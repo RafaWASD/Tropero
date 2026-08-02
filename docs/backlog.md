@@ -17,6 +17,14 @@ No es un sustituto de `feature_list.json` ni de los ADRs — es la antesala dond
 
 ## Ítems pendientes
 
+## 2026-08-01 — 🔴 Crash nativo (SIGABRT) por worklet de gesto sin guard — clase ya conocida, superficie sin cubrir
+
+**Origen**: crash real de Raf en device (iPhone 15 Pro, iOS 27 beta, build `ar.rafq.app` = preview/production) el 2026-08-01 21:14, "armando una maniobra / dato personalizado". `.ips` compartido; leído + localizado con un Explore read-only (no se simbolizó: no había dSYM).
+**Qué**: `EXC_CRASH/SIGABRT` (`abort()`), main thread. Stack: `__cxa_throw` ← `HermesRuntimeImpl::throwPendingError` ← `WorkletRuntime::runSync` ← `reanimated::UIEventHandler::process` ← `ReanimatedModuleProxy::handleEvent` ← `-[REANodesManager dispatchEvent:]` ← `UIGestureRecognizer`. O sea: **un worklet atado a un animated-event handler de gesto/scroll tiró una excepción de JS sin catch → `std::terminate` → abort** (muere toda la app, sin red box). Ese stack (`UIEventHandler::process`) es exclusivo de scroll handlers / callbacks de gesto RNGH → descarta `useAnimatedStyle`/`useDerivedValue`/`useFrameCallback`.
+**Sospechoso #1**: `app/app/maniobra/_components/ManeuverReorderList.tsx:209-266` — el `Gesture.Pan()` del drag-reorder de maniobras (onStart/onUpdate/onEnd). Único gesto del flujo del wizard SIN try/catch; casa con contexto + stack. #2 `app/app/maniobra/_components/WheelPicker.tsx:285-300` (`useAnimatedScrollHandler`; encaja con el stack pero vive en CARGA, no en el armado de jornada). #3 `app/src/components/BottomSheetShell.tsx:451-548` (Pan del `CustomFieldSheet` = "dato personalizado"; blindado con try/catch fail-closed en release → improbable en un build no-`.dev`). NO se encontró una línea con throw garantizado — el árbol es defensivo.
+**Por qué importa**: crash duro en un flujo core (armar jornada), en device, en build de release. Es la MISMA clase que ya mordió al repo (`runOnJS(Keyboard.dismiss)` en un sheet → `worklet-callbacks-guard.test.ts` guarda `runOnJS(X.y)`): el guard cubre una forma del bug, pero la AUSENCIA de try/catch en los callbacks de gesto quedó sin barrer. `BottomSheetShell` está blindado; `ManeuverReorderList` no.
+**Próximo paso sugerido**: bug-fix por SDD que (a) envuelva todos los gesto-worklets sin guard con el patrón probado de `BottomSheetShell` (try/catch por callback + `if(__DEV__) throw` + nunca `runOnJS(X.y)`), empezando por `ManeuverReorderList`; (b) extienda `worklet-callbacks-guard.test.ts` para enumerar los callbacks de gesto y exigir el blindaje → un gesto nuevo sin guard nace en rojo (barrer la ausencia, no la instancia). Refuerza el caso de feature 17 (Sentry), que simbolizaría la línea exacta.
+
 ## 2026-07-30 — El adapter de iOS va a nacer sin fuente de verdad del link, y nada lo va a obligar
 
 **Origen**: pregunta de Raf al cierre de la sesión del bastón — *"lo que corregiste, lo corregiste para ambos?"*. La respuesta destapó esto.
