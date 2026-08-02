@@ -1196,3 +1196,12 @@ device destapa un caso no cubierto.
 **Por qué importa**: de la respuesta depende si el delta de TRI (un TXT de RFIDs separados por espacio, barato) entra al scope de 08 o queda afuera. Comprometer scope sobre una nota de prensa es exactamente el error que ya nos costó el falso "deadline julio 2026" (§6 del mismo research).
 
 **Riesgo de no preguntar**: bajo en lo inmediato, alto en lo estructural. Se puede lanzar sin las respuestas, pero la #1 puede volver obsoleta una parte del diseño de 08 y conviene saberlo antes de tratarla como `done`.
+
+## 2026-08-02 — Cada build de EAS sube 1.1 GB y nadie sabe de qué
+
+**Origen**: builds para las diseñadoras (sesión 2026-08-02). El propio EAS CLI lo avisa: *"Your project archive is 1.1 GB. You can reduce its size... in a .easignore file"*. Costo medido: **2m 02s de upload por build**, antes de que la cola siquiera empiece.
+
+**Lo que ya está descartado** (medido, no supuesto): `app/android/` pesa 4.0 GB en disco (3.4 GB son `app/android/app/build`) pero **está gitignoreado y tiene 0 archivos trackeados**, así que en teoría no viaja. `.git` son 103 MB, `design/` 20 MB, `docs/` 12 MB, `dist/` 28 MB (ignorado), `public/` 13 MB. **Nada de eso suma 1.1 GB** — o sea que la hipótesis obvia ("se sube el prebuild de Android") no cierra con los números, y el que lo agarre tiene que empezar por *medir qué entra al archive*, no por escribir un `.easignore` a ciegas.
+
+**Por qué no se tocó hoy**: un `.easignore` mal puesto excluye algo que el build necesita y lo rompe. Con un build de TestFlight pendiente de correr a mano, meter esa variable no pagaba. No es urgente: cuesta 2 minutos por build, no falla.
+
