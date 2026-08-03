@@ -1218,3 +1218,14 @@ debug/app-debug.apk       264.777.703 B   2026-07-29 09:37   <- del 29/7, del di
 
 **Cómo se cierra**: lo barato es borrar los `outputs/` viejos antes de buildear (1 APK → artifact `.apk` → link funciona). Lo correcto es un **`.easignore` que excluya `android/` e `ios/`** para forzar prebuild limpio en la nube. Ojo con el segundo: `.easignore` **reemplaza** al `.gitignore` para el archive, así que hay que re-listar `node_modules/`, `.git/`, `dist/`, `.expo/` y demás o el archive crece en vez de achicarse. Verificar después que el artifact vuelva a ser `.apk` y que los permisos del bastón sigan en el manifiesto (`aapt2 dump permissions`).
 
+
+> **CERRADO 2026-08-02** con `.easignore` en la raíz del repo (commit abajo). Medido con
+> `eas build:inspect --stage archive`, que copia el archive sin gastar un build:
+> **3.9 GB → 72 MB**, upload **1m42s → 5s**, `app/android/` queda como directorio vacío → prebuild
+> limpio en la nube. Build de verificación `f2f1eb16`: artifact `.apk` (no `.tar.gz`), permisos del
+> bastón intactos (`BLUETOOTH_CONNECT`, `BLUETOOTH_SCAN`+`neverForLocation`, los tres topeados a
+> SDK 30), backend DEV. **El APK pesa 121.036.491 bytes, idéntico al del build anterior hecho con el
+> prebuild local**: compilar sin `android/` da el mismo binario, así que el prebuild local nunca
+> aportó nada al resultado — solo upload y riesgo.
+> Ojo al editar el `.easignore`: **reemplaza** al `.gitignore`, así que sacar una línea no la ignora,
+> la SUBE. `.git/` sobrevive parcialmente (35 MB) porque EAS lo usa para resolver el commit del build.

@@ -1,0 +1,81 @@
+# .easignore — gobierna QUÉ se sube a EAS Build.
+#
+# ⚠️ REEMPLAZA al .gitignore para el archive: en cuanto este archivo existe, EAS deja de mirar los
+# .gitignore. Todo lo que NO esté listado acá VIAJA, aunque git lo ignore. Por eso el archivo repite
+# entradas obvias (node_modules/, dist/): sacarlas de acá no las ignora, las sube.
+#
+# Por qué existe (2026-08-02): sin él el archive era de 3.9 GB —3.8 GB de `app/android/`— y el
+# .gitignore de app/ ya tenía `/android` sin que sirviera de nada. Dos consecuencias medidas:
+#   1. Un `app-debug.apk` viejo que quedó en `app/android/app/build/outputs/` se coló en el artifact,
+#      que salió como .tar.gz con dos APKs en vez de un .apk instalable.
+#   2. Al viajar `android/`, EAS compilaba con el prebuild LOCAL en vez de regenerarlo: el árbol de
+#      trabajo de la máquina de Raf era un input invisible de todos los builds de Android.
+# Excluir las carpetas nativas fuerza `expo prebuild` limpio en la nube, que es la única forma de que
+# el build dependa solo de lo que está versionado. `app/ios/` no existe local, así que iOS ya era así.
+
+# ---- Carpetas nativas: el builder las regenera con prebuild ----
+android/
+ios/
+
+# ---- Dependencias y cachés (el builder instala desde el lockfile) ----
+node_modules/
+.expo/
+.expo-shared/
+.tamagui/
+.metro-health-check*
+*.tsbuildinfo
+coverage/
+
+# ---- Historia de git: 103 MB que el builder no usa ----
+.git/
+
+# ---- Artefactos de build web ----
+dist/
+dist-check/
+dist_tmp/
+web-build/
+# Assets de runtime de PowerSync web (worker UMD + wa-sqlite WASM). Solo los usa el target web.
+public/@powersync/
+
+# ---- Playwright / E2E: no participan del bundle nativo ----
+test-results/
+playwright-report/
+blob-report/
+.playwright/
+e2e/captures/__shots__/
+.cdp-profile*/
+
+# ---- Secretos y material de firma: NUNCA al archive ----
+.env
+.env.local
+.env.*.local
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.pem
+
+# ---- Documentación y material que no participa del build ----
+docs/
+design/
+progress/
+specs/
+CONTEXT/
+firmware/
+ads-n-marketing/
+backups/
+tests/
+supabase/.branches/
+supabase/.temp/
+
+# ---- Logs / OS / editores ----
+*.log
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+.claude/worktrees/
