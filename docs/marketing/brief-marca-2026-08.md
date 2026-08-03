@@ -10,7 +10,7 @@
 
 | Tema | Decía el cuestionario | Dice ahora | Por qué |
 |---|---|---|---|
-| **Precio** | USD 20/mes por campo, plano | USD 300/año + USD 0,80/cabeza, tope USD 3.500. Gratis ≤50 cabezas | El precio plano regalaba la cola: el 70% de los campos tiene <500 cabezas pero solo el 36% del rodeo |
+| **Precio** | USD 20/mes por campo, plano | USD 300/año + USD 0,80/cabeza, tope USD 3.500. Gratis ≤50 cabezas | El precio plano regalaba la cola: el 90,6% de los campos tiene ≤500 cabezas pero entre todos juntan solo el 36% del rodeo |
 | **Publicidad** | "USD 200-300/mes cuando esté la landing" | **No hay pauta.** Presupuesto de ads: cero | El que firma tiene 55+ y decide por el veterinario y el consignatario. No se llega por impresiones |
 | **Qué vendemos** | Gestión de rodeo + cumplimiento SENASA | **La declaración de caravanas a SENASA**, y la gestión es lo que retiene | Contra software somos caros. Contra el trámite manual somos baratos |
 

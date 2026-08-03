@@ -82,8 +82,38 @@ Condiciones de cobro:
 
 - El mercado de gestión ganadera converge en **USD 130-240/año** en 8 productos y 8 países independientes (Control Ganadero 130, CattleMax 144-660, Herdwatch 240, Gallagher 300, Breedr ~£354, Performance Beef 2.340). Ese es el precio de equilibrio de una categoría donde el que paga es el mismo que usa.
 - Cobrar 6x el incumbente solo se sostiene si el pitch **no es gestión**. Ver posicionamiento.
-- El componente por cabeza captura la cola: el 70% de las unidades tiene <500 cabezas pero solo el 36% del rodeo. El valor está concentrado y el pricing plano lo regalaba.
-- El tope existe para no volverse impagable en campos de 5.000+ y para no invitar a la fragmentación de establecimientos (ver anti-fraude).
+- El componente por cabeza captura la cola. **El valor está mucho más concentrado de lo que creíamos** y el pricing plano lo regalaba entero — ver la distribución real abajo.
+- El tope existe para no volverse impagable en campos de 5.000+ y para no invitar a la fragmentación de establecimientos (ver anti-fraude). **Está en revisión**: con la distribución a la vista, deja ~44% sin cobrar en el estrato de más de 4.000 cabezas.
+
+### La distribución real del rodeo (corrige un dato que veníamos usando mal)
+
+Fuente: MAGyP / Dirección Nacional de Producción Animal, *Caracterización de la producción de carne bovina por provincia*, año 2023, Anexo II — datos SIGSA/SENASA al 31/12/2023. **Unidad de conteo: CUIT (productor), no RENSPA.**
+
+> ⚠️ **Corrección**: veníamos citando *"el 70% de las unidades tiene <500 cabezas y agrupa el 36% del rodeo"*. El 36% da exacto; **el 70% está mal — es 90,6%**.
+
+| Estrato | Productores | % | Cabezas | % | Peso de cría (vacas/total) |
+|---|---:|---:|---:|---:|---:|
+| hasta 20 | 65.283 | 27,0% | 697.533 | 1,3% | 49,4% |
+| 21–100 | 93.663 | 38,7% | 4.623.394 | 8,8% | 49,9% |
+| 101–250 | 39.666 | 16,4% | 6.351.525 | 12,0% | 48,0% |
+| 251–500 | 20.772 | 8,6% | 7.325.946 | 13,9% | 45,5% |
+| 501–750 | 8.238 | 3,4% | 5.034.790 | 9,5% | 43,6% |
+| 751–1.000 | 4.333 | 1,8% | 3.752.347 | 7,1% | 42,1% |
+| 1.001–2.000 | 6.259 | 2,6% | 8.614.669 | 16,3% | 40,2% |
+| 2.001–4.000 | 2.568 | 1,1% | 6.988.784 | 13,2% | 38,5% |
+| más de 4.000 | 1.264 | 0,5% | 9.394.904 | 17,8% | 36,6% |
+| **Total** | **242.046** | 100% | **52.783.892** | 100% | 42,4% |
+
+**Lo que se lee de acá:**
+
+- **El mercado direccionable son ~79.000 campos, no 242.046.** La banda **101–2.000 cabezas** es el 32,8% de los productores, el **58,9% de la hacienda** y el **82% del techo de facturación** (USD 48,6 M de 59,4 M totales con la tarifa actual). Ese es el ICP, y es un universo que un canal de veterinarios puede recorrer de verdad.
+- **El tier gratuito hasta 50 cabezas sale barato**: los dos estratos de abajo son el **65,7% de los productores** y solo el **10,1% de la hacienda**. Regalamos dos tercios del padrón como superficie de adquisición a cambio de una décima parte del mercado real.
+- **La cría tira hacia abajo en la banda**: el peso de vacas cae parejo con el tamaño (49% en los chicos, 37% arriba de 4.000). Los campos grandes son más de ciclo completo e invernada. Con el MVP limitado a cría entramos mejor en la mitad baja de la banda, así que **el ARPU real va a estar por debajo de la tabla de precios**.
+- **Limitar el MVP a cría casi no achica el mercado**: por sistema de producción (esta vista sí va por RENSPA — 291.687 UP), cría es el **64% de las unidades y el 55% del stock**.
+
+**Caveat de unidad**: la estratificación cuenta por CUIT, y nosotros cobramos **por campo**. Hay 291.687 UP contra 242.046 productores (1,21 RENSPA por productor), y esa vista no está estratificada por tamaño en ninguna fuente pública. O sea que el techo está **subestimado**, no inflado.
+
+Gráfico y método completo: `docs/marketing/` → artifact "El rodeo argentino por tamaño de campo".
 
 ### Planes de veterinario
 
@@ -148,7 +178,7 @@ El rol del gobierno en el modelo es **definir el formato al que nos integramos**
 
 ## Canal y expansión
 
-**No hay publicidad en redes como canal de adquisición.** El TAM son ~130.000 entidades, el que firma tiene 55+ y decide por el consignatario y por el veterinario. Un distribuidor de caravanas firmado vale más que todo un presupuesto de pauta. La pauta se reevalúa recién si aparece un producto self-serve con alta autoservicio y las tiendas publicadas.
+**No hay publicidad en redes como canal de adquisición.** El universo direccionable son **~79.000 campos** (la banda 101–2.000 cabezas), no 242.046 productores ni las "130.000 explotaciones" del censo 2018 que citábamos antes. El que firma tiene 55+ y decide por el consignatario y por el veterinario. Un distribuidor de caravanas firmado vale más que todo un presupuesto de pauta. La pauta se reevalúa recién si aparece un producto self-serve con alta autoservicio y las tiendas publicadas.
 
 Orden de expansión:
 1. **Cuenca del Salado** vía la red de Facundo, hasta agotar el canal.
