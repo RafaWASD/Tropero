@@ -2,6 +2,14 @@
   "cli": {
     "appVersionSource": "remote"
   },
+  "submit": {
+    "testflight-dev": {
+      "ios": {
+        "appleId": "apple.recital725@passmail.net",
+        "appleTeamId": "5C9KYFJCU5"
+      }
+    }
+  },
   "build": {
     "preview": {
       "distribution": "internal",
