@@ -897,3 +897,48 @@ de a una desde la ficha, con E2E verde), no una supuesta.
 
 **Deuda que dejó**: la salida del vacío es descriptiva, no accionable (falta CTA) · `$textFaint` tiene
 60 usos, varios en 12/13/14px → clase de contraste a barrer · la Fase 4 sigue gateada (sin RS420).
+
+---
+
+## 2026-08-02 — Builds para las dos diseñadoras (Pilar / Ana) + TestFlight montado
+
+**Pedido**: un build de Android y uno de iOS para dos diseñadoras nuevas que van a evaluar diseño,
+colorimetría y logo. Decisión de Raf: que ellas **no hagan nada** más que instalar — sin registrarse,
+sin aceptar invitaciones.
+
+**Cuentas** (creadas con service-role sobre DEV, `email_confirm: true` → no pasan por `/verify-email`):
+
+| nombre | mail | password | rol en La Facundina |
+|---|---|---|---|
+| Pilar | nievespilarcatalina@gmail.com | `pilar-rafaq-4821` | `veterinarian` |
+| Ana | anaroblesadm@gmail.com | `ana-rafaq-7395` | `veterinarian` |
+
+Metidas a `user_roles` por INSERT directo (no por invitación: el link de ADR-014 obliga a un paso de
+ellas). Empezaron como `field_operator` y Raf las subió a `veterinarian` al ver que operario esconde
+Equipo, editar campo/RENSPA y la exportación a SENASA. **Owner se descartó a propósito**: sobre La
+Facundina habilitaría borrar el campo que Facundo usa para demos a inversores.
+Verificado por API con el token de cada una: login OK → ven La Facundina → **353 animales**.
+
+**Android — `2e8b3fca-3a89-4cac-a7cf-b62d186db49a`** (perfil `preview-dev`):
+https://expo.dev/artifacts/eas/zCcbrT2vMxKeDrLNBjh7NWgGQaYJIijPQVgEMPjAeIk.apk
+Verificado sobre el binario, no sobre la config: HTTP 200 sin auth (el link se abre desde el celular),
+`aapt2 dump badging` → `ar.rafq.app` 0.1.0, y el bundle JS descomprimido tiene **1** ocurrencia de la
+URL de Supabase DEV y **0** de PROD (idem PowerSync `6a260fd035ca…`).
+
+**El primer intento de Android (`3fb6b079`) salió mal y vale como hallazgo** — ver `docs/backlog.md`
+2026-08-02: devolvió un `.tar.gz` con DOS APKs (el release de hoy + un `app-debug.apk` del 29/7 con el
+byte-count y el timestamp exactos del que estaba en el disco de Raf). O sea **`app/android/` viaja a
+EAS aunque git lo ignore**, y EAS compila con el prebuild local en vez de regenerarlo. Se destrabó
+borrando el APK viejo de `outputs/`; el fondo (`.easignore` para forzar prebuild limpio) quedó anotado.
+
+**iOS — TestFlight, EN CURSO del lado de Raf.** Elegido sobre ad-hoc para no pedirle el UDID a la
+diseñadora. Commiteado en `4e9fa1b`: perfil `testflight-dev` (backend DEV, distribución store) +
+`ITSAppUsesNonExemptEncryption: false`. **EAS no genera el Distribution Certificate ni el App Store
+provisioning profile sin un humano logueado a Apple** (el 2FA va al iPhone de Raf) — probado con y sin
+`--non-interactive`, mismo corte. Raf está corriendo el comando a mano. Falta después: crear la app en
+App Store Connect (la ofrece el `--auto-submit`) y sumar a Pilar como external tester (Beta App Review
+del primer build).
+
+**Ojo para cuando iOS entre**: la app de App Store Connect queda con el bundle `ar.rafq.app` apuntando
+a **DEV**, compartida con `production` y separada solo por buildNumber (decisión deliberada: un bundle
+nuevo rompía los OAuth clients de Google/Apple). Documentado en `specs/active/16-ambientes-y-release/design.md` §3.
