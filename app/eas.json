@@ -6,7 +6,8 @@
     "testflight-dev": {
       "ios": {
         "appleId": "apple.recital725@passmail.net",
-        "appleTeamId": "5C9KYFJCU5"
+        "appleTeamId": "5C9KYFJCU5",
+        "ascAppId": "6797347994"
       }
     }
   },
