@@ -25,10 +25,12 @@ jobs:
       # (pg_dump 16 aborta por "server version mismatch"). Instalamos el cliente 17 del repo PGDG.
       - name: Install postgresql-client 17
         run: |
+          # Key ARMADA a archivo (no `gpg --dearmor`: bajo sudo sin tty falla con "cannot open /dev/tty");
+          # apt acepta `.asc` armada en `signed-by` (Ubuntu 22.04+). curl -o a archivo, no por pipe.
           sudo install -d /usr/share/postgresql-common/pgdg
-          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
-            | sudo gpg --dearmor -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg
-          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+          sudo curl --fail -sS -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
             | sudo tee /etc/apt/sources.list.d/pgdg.list
           sudo apt-get update
           sudo apt-get install -y postgresql-client-17
