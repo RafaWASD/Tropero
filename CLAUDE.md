@@ -103,6 +103,26 @@ Complementan los principios. Operan sobre cómo manejás contexto y cambios, no 
 - **Scope discipline**: overflow durante la sesión → anotar en `docs/backlog.md`, no improvisar. Si lo encontrado es bloqueante para la tarea original, parar y consultar.
 - **Defaults menores**: decisión técnica menor no documentada → proponer default + commit. Decisión con consecuencias arquitectónicas (afecta varias features, define patrón) → ADR. Regla práctica: ¿se va a referenciar en 6 meses? Sí → ADR.
 
+### Builds de EAS: OK explícito de Raf, uno por plataforma
+
+Un build de EAS es un **recurso agotable**, no un comando más. El plan es **Free: 30 builds por mes
+calendario** (verificable con la query de `planMetrics` de la API de EAS, no de memoria). Ya pasó que se
+agotaran a mitad de mes y el proyecto quedara **dos semanas sin poder buildear**.
+
+- **Nunca lances `eas build` sin el OK explícito de Raf en la sesión.** Esto es una excepción declarada a
+  la regla general de "no pedir permiso para comandos": el resto de los comandos son gratis y
+  reversibles, un build no.
+- **El OK es por plataforma y no se contagia.** "Dale con Android" no autoriza iOS, y viceversa. Si hacen
+  falta las dos, se piden las dos.
+- **Un OK vale para UN build.** Si ese build sale mal y hay que relanzarlo, se vuelve a pedir, explicando
+  qué se rompió y qué cambió para que el próximo no repita el error.
+- **Antes de pedir el OK, agotá lo que se puede verificar gratis**: `eas build:inspect --stage archive`
+  (copia el archive sin consumir build), typecheck, tests, `app.config.test.ts`, y revisar el perfil de
+  `eas.json` que vas a usar (backend correcto, distribución correcta). Buildear "a ver si anda" es
+  exactamente lo que hay que evitar.
+- `eas submit`, los grupos y testers de TestFlight, y las invitaciones **no consumen builds** — esos no
+  necesitan este gate (sí el de acciones externas: mandan mails en nombre de Raf).
+
 ### Handoffs desde chats externos
 
 Cuando aparezca un archivo `HANDOFF-*.md` en la raíz del repo (típicamente bajado de claude.ai):
