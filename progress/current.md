@@ -973,3 +973,10 @@ cuenta de TestFlight de Raf **es** `apple.recital725@passmail.net`, verificado p
 con **App Store Connect → grupo → Testers → tildar el tester → "Volver a invitar"**, que manda un mail
 nuevo con link y código frescos. Raf instaló con ese. Detalle en la memoria
 `reference-testflight-invitacion-quemada`; anotado porque va a reaparecer al sumar testers.
+
+**Quién tiene la app iOS (2026-08-04, cierre)**: grupo externo "Diseño" con **2 testers** —
+`nievespilarcatalina@gmail.com` (Pilar) y `iamfadolf@gmail.com` (Facundo, sumado para que actualice
+desde una versión vieja); Raf en el grupo interno "Team (Expo)", ya instalado. **Pilar ya instaló**:
+App Store Connect le muestra dispositivo **iPhone 14 Plus (iOS 18.0.1)**. Ana en Android por APK.
+Sumar un tester a un grupo cuyo build ya está aprobado **no dispara Beta App Review de nuevo** ni
+consume builds de EAS.
