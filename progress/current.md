@@ -942,3 +942,27 @@ del primer build).
 **Ojo para cuando iOS entre**: la app de App Store Connect queda con el bundle `ar.rafq.app` apuntando
 a **DEV**, compartida con `production` y separada solo por buildNumber (decisión deliberada: un bundle
 nuevo rompía los OAuth clients de Google/Apple). Documentado en `specs/active/16-ambientes-y-release/design.md` §3.
+
+### 2026-08-04 — iOS CERRADO: Pilar invitada, build aprobado por Apple
+
+Retomado dos días después. La sesión de App Store Connect había expirado (Raf volvió a entrar a mano;
+el 2FA de Apple no es automatizable). Estado encontrado, ya resuelto:
+
+- **Compilación `0.1.0 (4)` → "Aprobada"**: el Beta App Review pasó solo en el ínterin. El formulario de
+  *Información para las pruebas* había quedado guardado (Raf completó la contraseña del usuario de
+  prueba, el único campo que el leader no puede tipear).
+- **Grupo externo "Diseño" → 1 tester • 1 compilación**: `nievespilarcatalina@gmail.com` invitada por
+  **correo** (no por enlace público, que sería una invitación abierta a cualquiera). Confirmación en
+  pantalla: *"Se ha añadido 1 tester a este grupo"*.
+
+Todo el flujo de App Store Connect lo hizo el leader por **Claude for Chrome sobre Brave** (no Chrome —
+memoria `reference-claude-for-chrome-en-brave`). Aprendizajes del navegador: `form_input` no escribe en
+los formularios React de Apple (setea `""` y dispara las validaciones); hay que clickear + tipear, y
+**con `ref` en vez de coordenadas**, porque la página scrollea al enfocar un campo y los clicks
+posteriores caen desplazados (así se duplicó un mail y hubo que reescribirlo).
+
+**Cuota de EAS, consultada por GraphQL (no estimada)**: plan **Free**, período **1/8 → 1/9**,
+**4 de 30 builds** usados (`planMetrics.BUILDS = {value: 4, limit: 30}`), costo 0. Quedan **26**.
+Los 4 fueron 3 Android + 1 iOS, y **2 de los Android se los comió el defecto del archive** (el `.tar.gz`
+y la verificación del `.easignore`) — con el `.easignore` commiteado eso no se repite.
+TestFlight, los grupos, los testers y los `eas submit` **no consumen builds de EAS**.
