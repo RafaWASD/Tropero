@@ -966,3 +966,10 @@ posteriores caen desplazados (así se duplicó un mail y hubo que reescribirlo).
 Los 4 fueron 3 Android + 1 iOS, y **2 de los Android se los comió el defecto del archive** (el `.tar.gz`
 y la verificación del `.easignore`) — con el `.easignore` commiteado eso no se repite.
 TestFlight, los grupos, los testers y los `eas submit` **no consumen builds de EAS**.
+
+**Gotcha al instalar (2026-08-04)**: el link de la invitación interna que EAS generó durante el submit
+llegó **quemado** — TestFlight devolvía *"invitation is revoked or is invalid"*. No era el Apple ID (la
+cuenta de TestFlight de Raf **es** `apple.recital725@passmail.net`, verificado por captura). Se destrabó
+con **App Store Connect → grupo → Testers → tildar el tester → "Volver a invitar"**, que manda un mail
+nuevo con link y código frescos. Raf instaló con ese. Detalle en la memoria
+`reference-testflight-invitacion-quemada`; anotado porque va a reaparecer al sumar testers.
