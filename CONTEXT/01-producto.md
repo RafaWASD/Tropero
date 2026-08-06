@@ -56,7 +56,7 @@ Padre del vet socio — primer cliente beta. Campo en Chascomús.
 
 **Albor**: el más grande de Argentina (4.000+ usuarios, 2,2M cabezas). Carga manual, cobro por usuario, enfoque económico. Su diferencial es la conexión con entes reguladores — si baja al dato individual, tiene la base instalada para hacerlo.
 
-**AgriWebb** (Australia): el producto más parecido al nuestro en el mundo — cría extensiva, offline, BLE agnóstico, export a trazabilidad oficial. **Adquirida por URUS Group en 2026**, ya presente en Brasil vía Cargill. Sin señal de entrada a Argentina.
+**AgriWebb** (Australia): el producto más parecido al nuestro en el mundo — cría extensiva, offline, BLE agnóstico, export a trazabilidad oficial. **Adquirida por URUS Group en 2026**, ya presente en Brasil vía Cargill. **Ya está prospectando Argentina** (verificado 5/8/2026): landing en español rioplatense, gerenta de éxito del cliente para LatAm, WhatsApp y prueba gratuita. Es una cabecera de leads, no una operación instalada — sin precios locales, sin casos argentinos y **sin ninguna mención a SENASA ni SIGSA**. Cobra por cabeza vía DSE sobre el promedio de 12 meses.
 
 **Software propietario de marcas de hardware** (Tru-Test/Datamars, Allflex, Gallagher): silos cerrados, atados a comprar hardware específico.
 

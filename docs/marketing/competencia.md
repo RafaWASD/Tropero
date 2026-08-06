@@ -15,7 +15,38 @@ Cumple 8 de los 9 rasgos que definen a RAFAQ. Lo único que no comparte es el me
 
 Cría extensiva a pasto · app nativa con offline real · identificación individual por EID · **Bluetooth genuinamente agnóstico de marca** (Gallagher, Tru-Test, Allflex RS420, Agrident, Shearwell, Te Pari, Pharmweigh, PTS) · módulo reproductivo con KPIs · **exporta a NLIS**, el sistema oficial de trazabilidad australiano · multi-establecimiento con acceso de asesores · **no vende hardware**.
 
-Es, punto por punto, la misma tesis de producto que la nuestra, ejecutada en el país cuya ganadería más se parece a la argentina. Difiere en dos cosas: cobra **por cabeza vía DSE** (1 bovino = 8 unidades, sobre el promedio de 12 meses) en vez de por campo, y suma ovinos y finanzas.
+Es, punto por punto, la misma tesis de producto que la nuestra, ejecutada en el país cuya ganadería más se parece a la argentina. Difiere en dos cosas: cobra **por cabeza** en vez de por campo, y suma ovinos y finanzas.
+
+#### ⚠️ AgriWebb ya está prospectando Argentina (verificado 5/8/2026)
+
+Entrar a `agriwebb.com` desde una IP argentina **redirige a `info.agriwebb.com/es-ar/`: "Software de Gestión Ganadera para Productores de Argentina"**, escrita en español rioplatense con voseo y vocabulario rural correcto (*"Tomá mejores decisiones"*, potrero, destete, carga animal, lote, caravana electrónica).
+
+Lo que **sí** hay: landing dedicada, **Gerente de Éxito del Cliente para Latinoamérica con nombre y cara** (Heloisa Dominguez), canal de **WhatsApp** ("Hablá con nosotros"), CTA de prueba gratuita, login, y agendamiento de demo por HubSpot.
+
+Lo que **no** hay: ni un precio en pesos ni en dólares, ni un solo testimonio o caso de un campo argentino, ni oficina ni teléfono local, ni cifras de clientes en Argentina, ni cobertura de prensa de un lanzamiento. Y —lo más importante— **ninguna mención a SENASA, SIGSA, trazabilidad argentina ni caravanas oficiales.** La página incluso se contradice sola: dice "más de 20.000 productores" en un lugar y "18.000" en otro.
+
+**Lectura**: es una **cabecera de playa de generación de leads, no una operación instalada.** Están testeando el mercado. Pero es el producto más parecido al nuestro, con ~USD 64,6M levantados, recién comprado por URUS Group y ya operando en Brasil vía Cargill — y está tocando la puerta de nuestro mercado. **La ventana es más corta de lo que pensábamos.**
+
+**Nuestro margen sigue estando en el mismo lugar**: no tienen integración con SENASA, no tienen el archivo SIGSA, y no tienen el trámite de la 841/2025 resuelto. Es literalmente lo único que su landing argentina no nombra.
+
+#### Cómo cobra AgriWebb, en detalle
+
+| | |
+|---|---|
+| **Unidad** | Por cabeza, normalizada en **DSE** (*Dry Sheep Equivalent*): **1 bovino = 8 DSE · 1 ovino = 1,5 DSE** |
+| **Base** | *"Subscription fees start with a baseline fee for an active subscription, and then this will increase according to the number of livestock you run"* |
+| **Cómo cuentan los animales** | **Promedio de los últimos 12 meses**, no una foto: *"to handle any fluctuations depending on your operation type"*. Se recalcula en la renovación |
+| **Si el rodeo cambia** | Hay que avisar a soporte antes de renovar (destetes forzados por sequía o inundación, saltos de stock) |
+| **Ciclo** | Mensual o anual, **con descuento por pago anual**. **Sin contrato de permanencia.** Sin reembolso de lo pagado por adelantado |
+| **Planes** | Essentials → Compliance → Performance (solo 2 en Reino Unido). Cada nivel se elige además como **Mob management** (por lote) o **Individual management** (por animal) |
+| **Qué separa los planes** | Essentials: mapa del campo + registros. Compliance: + auditoría, bioseguridad, tratamientos, pesos, alimentación. Performance: + proyecciones de peso, pastoreo, reportes financieros |
+| **Add-ons con precio** | Movement Planning **AU$300/año** · Grazing Planning **AU$300/año** (en EEUU: US$100 y US$150) · Cibo Labs PastureKey **desde US$1.000/año**. En Reino Unido y Europa van incluidos |
+| **Canal de asesores** | Programa de referidos: **30% de descuento el primer año + voucher de US$100 para el asesor** |
+| **Tarifa por DSE** | **No es pública.** La página de precios es una calculadora en JavaScript: hay que cargar la cantidad de cabezas. Titular: *"only pay for the animals you manage"*. Fuentes terciarias ubican los planes australianos en ~AU$34 / 48 / 61 por mes, sin verificar |
+
+**Lo que hay que copiarles**: el **promedio de 12 meses**. Nuestro pricing cobra por cabeza sobre una foto del padrón, y un campo de cría oscila fuerte — 500 madres son ~700 cabezas en invierno y ~1.200 con los terneros al pie. Cobrar sobre la foto invita a que el productor descargue animales antes de la fecha de corte y garantiza discusiones de facturación. El promedio móvil lo resuelve y ya está probado en producción por alguien más.
+
+**Lo que no necesitamos**: el DSE. Es su solución para mezclar bovinos con ovinos. Con el MVP bovino puro no aplica — pero es el patrón a seguir si alguna vez entran ovinos.
 
 ### El más parecido que te importa: **Vacuno** (Argentina) — y no lo teníamos en el radar
 
@@ -149,7 +180,7 @@ Lo que sí compra es **gestión productiva que dialogue con el sistema oficial**
 | Breedr | 12 meses gratis de Pro (valor **£354**) si comercializás 20+ animales · comisión **2%** al vendedor | freemium + marketplace |
 | Sygma Sistemas | R$ 270/mes + R$ 45/mes por propiedad adicional | por establecimiento |
 | Herdwatch | Promo 6 meses €79/£79/USD 49 · lista a cotización | por granja |
-| AgriWebb | ~AU$34 / 48 / 61 por mes según plan (fuente terciaria) | por cabeza vía DSE |
+| AgriWebb | Tarifa por DSE **no pública** (calculadora JS). Add-ons: AU$300/año pastoreo, AU$300/año movimientos, PastureKey desde US$1.000/año. Terciarias: ~AU$34/48/61 por mes | por cabeza vía DSE (1 bovino = 8), **promedio de 12 meses**, sin permanencia |
 | **RAFAQ (propuesto)** | USD 300 + USD 0,80/cabeza, tope 3.500, gratis ≤50 | por campo |
 
 **Recalibración del ancla**: seguimos siendo caros contra Control Ganadero (USD 130/año), pero el rango de la categoría es más ancho de lo que creíamos — iLivestock cobra £300/año por campo y Performance Beef USD 2.340/año. Nuestro USD 860 en un campo de 500 madres queda en el medio del rango internacional, no en el techo.
