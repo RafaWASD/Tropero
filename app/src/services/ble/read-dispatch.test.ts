@@ -244,8 +244,36 @@ test('GUARD: el provider decide si hay consumidor ANTES de vibrar y ANTES del mo
  * la lista de las formas de hacerle sentir algo al operario. `haptic` está incluido a propósito aunque el
  * repo no lo use hoy en este camino — `src/utils/haptics.ts` existe (lo usan el reorder y la rueda) y su
  * cabecera declara que ES el lugar donde se va a enchufar el canal háptico rico cuando exista.
+ *
+ * ── AMPLIADO EL 2026-08-06 (unidad «el bastón tiene que sonar y vibrar de verdad») ────────────────────
+ * Al enchufar `expo-haptics` + `expo-audio`, la versión anterior de este patrón se volvía burlable en un
+ * renglón: nombraba `playFeedback` LITERAL, así que una función nueva llamada `playRejectFeedback()` —o
+ * un `Haptics.notificationAsync(...)`, o un `createAudioPlayer(...)`— antes del gate NO matcheaba nada y
+ * dejaba la suite en verde con el 🔴-2 restaurado para el camino nuevo. Ahora:
+ *   · `play[A-Z]\w*` en vez de `playFeedback` → cubre CUALQUIER `playAlgo()` (playSound, playBeep,
+ *     playRejectFeedback, playTone…), que es la forma en que se escribe un emisor nuevo;
+ *   · las APIs concretas de los dos módulos nuevos (`notificationAsync`, `impactAsync`, `selectionAsync`,
+ *     `createAudioPlayer`, `AudioPlayer`, `setAudioModeAsync`).
+ * Lo que este patrón NO puede ver, dicho explícitamente: un emisor con un nombre que no empiece con
+ * `play` y que use un módulo que no esté enumerado. Esa mitad la cierra `feedback-guard.test.ts`, que
+ * vigila los MÓDULOS importados (no se puede hacer sonar un teléfono sin importar algo).
  */
-const SENSORY_EMIT = /\b(?:Vibration|vibrate|haptic\w*|Haptics|createOscillator|AudioContext|playFeedback)\b/;
+const SENSORY_EMIT =
+  /\b(?:Vibration|vibrate|\w*[Hh]aptics?\w*|notificationAsync|impactAsync|selectionAsync|createOscillator|AudioContext|createAudioPlayer|AudioPlayer|setAudioModeAsync|play[A-Z]\w*|primeFeedback|emitCueSound)\b/;
+
+/**
+ * Los ÚNICOS nombres sensoriales que el provider puede pronunciar, con su razón:
+ *   · `playFeedback`  → EL punto único de emisión. Se invoca exactamente una vez, y después del gate.
+ *   · `primeFeedback` → warm-up de los canales (carga el asset del sonido) al MONTAR. No emite nada, y
+ *                       el test de abajo verifica que no aparezca dentro de `handleReading`.
+ * Cualquier otro token sensorial en este archivo es un canal al costado del punto único.
+ */
+const PROVIDER_SENSORY_ALLOWED = new Set(['playFeedback', 'primeFeedback']);
+
+/** Todos los tokens sensoriales de una línea (no "¿matchea?": CUÁLES, para poder allowlistear por nombre). */
+function sensoryTokens(line: string): string[] {
+  return [...line.matchAll(new RegExp(SENSORY_EMIT.source, 'g'))].map((m) => m[0]);
+}
 
 test('GUARD: el feedback SENSORIAL de una lectura se emite en UN SOLO punto (escrito sobre el invariante)', () => {
   // ── 🟠-E del review: el guard era más angosto que el invariante que declaraba ─────────────────────
@@ -277,13 +305,14 @@ test('GUARD: el feedback SENSORIAL de una lectura se emite en UN SOLO punto (esc
       `que hay un consumidor. Enchufá el canal nuevo dentro de \`${PUNTO_UNICO}\`, que es el único lugar ` +
       'aguas abajo del gate.',
   );
-  // Y en el provider, lo ÚNICO sensorial que puede nombrarse es el punto único: ni un canal al costado,
-  // ni un alias. (El import cuenta como mención legítima; lo que se acota es que no aparezca NADA MÁS.)
+  // Y en el provider, lo ÚNICO sensorial que puede nombrarse está en la allowlist: ni un canal al
+  // costado, ni un alias. Se mira TOKEN POR TOKEN y no "¿la línea menciona playFeedback?": el chequeo
+  // viejo se pasaba escribiendo `playFeedback; Vibration.vibrate(50);` en el MISMO renglón.
   const providerSrc = stripSourceComments(readFileSync(PROVIDER, 'utf8'));
   const otrosCanales = providerSrc
     .split(/\r?\n/)
     .map((line, i) => ({ line, n: i + 1 }))
-    .filter(({ line }) => SENSORY_EMIT.test(line) && !/\bplayFeedback\b/.test(line))
+    .filter(({ line }) => sensoryTokens(line).some((t) => !PROVIDER_SENSORY_ALLOWED.has(t)))
     .map(({ line, n }) => `${n}: ${line.trim()}`);
   assert.deepEqual(
     otrosCanales,
@@ -295,7 +324,17 @@ test('GUARD: el feedback SENSORIAL de una lectura se emite en UN SOLO punto (esc
   const invocaciones = (providerSrc.match(/\bplayFeedback\s*\(/g) ?? []).length;
   assert.equal(invocaciones, 1, `el provider invoca \`playFeedback\` ${invocaciones} veces; debería ser exactamente 1`);
 
+  // El warm-up es warm-up: si `primeFeedback` apareciera DENTRO de `handleReading`, la carga del asset
+  // volvería al camino caliente (🟡-11 con otra cara) y encima habría dos nombres sensoriales ahí adentro,
+  // donde el test de orden solo razona sobre uno.
+  assert.doesNotMatch(
+    handleReadingBody(),
+    /\bprimeFeedback\b/,
+    '`primeFeedback` (warm-up) se coló en el camino de la lectura: tiene que correr al MONTAR el provider.',
+  );
+
   // El punto único, además, sigue siendo alcanzable SOLO desde el provider (nadie más lo invoca).
+  // (el guard de R4.9 —camino caliente síncrono y sin I/O— vive en su propio test, más abajo)
   const callers = scanTree((line, rel) => !PUNTO_UNICO.includes(rel) && /\bplayFeedback\s*\(/.test(line));
   assert.deepEqual(
     callers.map((c) => c.split(':')[0]),
@@ -331,6 +370,224 @@ test('el guard del feedback DETECTA los canales que lo burlaron (M2 y M3 del rev
   assert.ok(!SENSORY_EMIT.test('  void readBeepEnabled().then(setBeep);'));
   // …ni con una mención documental (se blanquea antes de escanear).
   assert.ok(!SENSORY_EMIT.test(stripSourceComments('// acá se dispara Vibration.vibrate(50)')));
+});
+
+/** Nombres de I/O de preferencia/storage que NO pueden aparecer en el camino caliente (R4.9). */
+const HOT_PATH_IO =
+  /\b(?:readBeepEnabled|writeBeepEnabled|SecureStore|getItemAsync|setItemAsync|localStorage|AsyncStorage)\b/;
+
+test('GUARD (R4.9): el camino de la lectura es SÍNCRONO y sin I/O — cero storage por bastonazo', () => {
+  // ── EL BUG QUE CIERRA (🟡-11; y 🟠-3 del review: era el único requisito nuevo sin red) ──────────────
+  // El as-built anterior llamaba `readBeepEnabled()` EN CADA LECTURA: un cruce del puente nativo a
+  // `expo-secure-store` (el KeyStore de Android) POR BASTONAZO, para alimentar un booleano que no cambia
+  // salvo que alguien toque un switch. Y encima colgaba la emisión del feedback de una promesa, así que
+  // en una ráfaga el orden de los microtasks no quedaba atado al orden de las lecturas.
+  // El reviewer lo revirtió y la suite entera quedó VERDE (la E2E tampoco lo ve: sigue sonando, solo que
+  // async). O sea: sin este guard, el 🟡-11 vuelve solo y nadie se entera.
+  //
+  // ── LO QUE ESTA REGLA NO VE, Y POR ESO NO ES LA PRINCIPAL (🟠-A de la re-review) ───────────────────
+  // La primera versión decía que "sin `await`/`.then(` un helper nuevo con otro nombre tampoco pasa".
+  // **Era falso**, y el reviewer lo demostró con una indirección de una línea:
+  //     export function refreshBeepPrefNow(): void { void readBeepEnabled(); }   // firma SÍNCRONA
+  //     refreshBeepPrefNow();                                                    // en handleReading
+  // → unit COMPLETA 2852/2852 en verde con el cruce a SecureStore POR BASTONAZO restaurado entero. Las
+  // tres reglas de abajo miran la FORMA de la llamada; la asincronía vive ADENTRO del helper, invisible
+  // desde el call site. Mismo error que tuve en el respaldo táctil: razonar sobre cómo se manifiesta el
+  // problema en vez de observar el resultado.
+  //
+  // Por eso el invariante se sostiene en TRES capas y esta es la más barata, no la que decide:
+  //   1. OBSERVACIÓN del resultado (la que vale): la E2E `baston-feedback-sensorial.spec.ts` **cuenta
+  //      los accesos reales al storage** durante N bastonazos y exige CERO. No infiere: mide. Mata
+  //      cualquier indirección, tenga el nombre que tenga.
+  //   2. ALLOWLIST de lo invocable en el camino caliente (test de abajo): un nombre NUEVO ahí adentro
+  //      nace en rojo, aunque no nombre nada sospechoso. Es la versión "escrita sobre la ausencia".
+  //   3. Las tres reglas de forma de acá: baratas, corren en `check.mjs`, y matan el mutante literal.
+  //
+  // Tres reglas sobre el CUERPO de `handleReading`, que es el camino caliente literal:
+  //   (a) los nombres de la I/O de la preferencia y del storage no pueden aparecer;
+  //   (b) el cuerpo no puede tener NINGÚN `await` ni `.then(` — cubre la asincronía ESCRITA acá, no la
+  //       escondida en un helper (eso lo cubren las capas 1 y 2);
+  //   (c) el lado POSITIVO: tiene que leer el caché. Sin (c), borrar la consulta entera —y beepear
+  //       siempre— pasaría (a) y (b).
+  const body = handleReadingBody();
+
+  const ioHit = HOT_PATH_IO.exec(body);
+  assert.equal(
+    ioHit,
+    null,
+    `el camino de la lectura volvió a hacer I/O de la preferencia (\`${ioHit?.[0]}\`): eso es un cruce del ` +
+      'puente nativo POR BASTONAZO (🟡-11). El valor sale de `cachedBeepEnabled()`, que es síncrono.',
+  );
+  assert.doesNotMatch(
+    body,
+    /\bawait\b/,
+    'apareció un `await` en `handleReading`: el camino de la lectura tiene que ser SÍNCRONO (R4.9). Lo ' +
+      'asíncrono va al warm-up del provider, o fire-and-forget aguas abajo del punto único.',
+  );
+  assert.doesNotMatch(
+    body,
+    /\.\s*then\s*\(/,
+    'apareció un `.then(` en `handleReading`: colgar el feedback de una promesa desordena las ' +
+      'confirmaciones en una ráfaga, además de reintroducir el I/O por bastonazo (🟡-11).',
+  );
+  assert.match(
+    body,
+    /\bcachedBeepEnabled\s*\(\s*\)/,
+    'el camino de la lectura ya no consulta la preferencia cacheada: o beepea siempre, o nunca.',
+  );
+});
+
+/**
+ * TODO lo que se puede INVOCAR dentro de `handleReading`, con su razón. Es la tabla del camino caliente:
+ * un nombre nuevo ahí adentro nace en ROJO hasta que alguien venga a escribir por qué corresponde.
+ *
+ * ── POR QUÉ ESTA TABLA Y NO OTRA REGLA MÁS (🟠-A de la re-review) ────────────────────────────────────
+ * Prohibir `await`/`.then(` mira la FORMA de la llamada, y un helper de firma síncrona que adentro hace
+ * la I/O la esconde en una línea (`refreshBeepPrefNow()` → 2852/2852 verde con el 🟡-11 restaurado). No
+ * hay patrón de texto que distinga un helper barato de uno que cruza el puente nativo: lo único que
+ * escala es **forzar la decisión explícita**, igual que `CONSUMERS` para las superficies del bastón y
+ * `PROVIDER_SENSORY_ALLOWED` para los canales. El costo de agregar algo legítimo es una línea acá con su
+ * motivo; el costo del falso negativo es un cruce a SecureStore por bastonazo que nadie ve.
+ *
+ * El oráculo que MIDE (y no infiere) es la E2E: cuenta los accesos reales al storage durante N
+ * bastonazos y exige cero. Esta tabla es la red barata que corre en cada `check.mjs`.
+ */
+const HOT_PATH_CALLABLE: Record<string, string> = {
+  acceptingTargets: 'filtra los suscriptores que van a ACTUAR (puro, sin I/O) — 🔴-2',
+  resolveReadHandling: 'la decisión del gate (pura) — 🔴-2',
+  logTransportEvent: 'logging no bloqueante (console.*) — R15.1',
+  now: '`Date.now()`: el reloj del teléfono para la ventana de dedup — R1.5',
+  processRawLine: 'motor de ingesta, camino de stream crudo — R1.2',
+  processEid: 'motor de ingesta, camino de EID limpio — R7.1',
+  classifyReadOutcome: 'clasifica el desenlace para el feedback (pura) — R4.8',
+  cachedBeepEnabled: 'LA preferencia, desde el caché en memoria: SÍNCRONA y sin I/O — R4.9',
+  playFeedback: 'el punto único del feedback sensorial, aguas abajo del gate — R4.7',
+  cb: 'la entrega al consumidor que aceptó (su trabajo asíncrono corre del otro lado) — R1.6',
+};
+
+/** Palabras del lenguaje que van seguidas de `(` y no son llamadas. */
+const NOT_A_CALL = new Set([
+  'if', 'for', 'while', 'switch', 'catch', 'return', 'typeof', 'function', 'new', 'await', 'in', 'of',
+]);
+
+/** Los nombres INVOCADOS en un cuerpo (`foo(` y `x.foo(` → `foo`), sin las palabras del lenguaje. */
+function calleeNames(body: string): string[] {
+  const found = new Set<string>();
+  for (const m of body.matchAll(/([A-Za-z_$][\w$]*)\s*\(/g)) {
+    if (!NOT_A_CALL.has(m[1])) found.add(m[1]);
+  }
+  return [...found].sort();
+}
+
+test('GUARD (R4.9): TODO lo invocable en el camino caliente está declarado (uno nuevo nace en rojo)', () => {
+  // El repro exacto del reviewer que esto mata: `refreshBeepPrefNow()` — un helper `void` de firma
+  // síncrona que adentro hace `void readBeepEnabled()`. No nombra ningún token de I/O, no tiene `await`
+  // ni `.then(`, y sigue llamando `cachedBeepEnabled()`: pasaba las tres reglas de forma. Acá cae por lo
+  // único que no puede esconder — que es un nombre que nadie declaró en el camino caliente.
+  const invocados = calleeNames(handleReadingBody());
+  const declarados = Object.keys(HOT_PATH_CALLABLE).sort();
+
+  const sinDeclarar = invocados.filter((n) => !(n in HOT_PATH_CALLABLE));
+  assert.deepEqual(
+    sinDeclarar,
+    [],
+    `Hay algo NUEVO invocado dentro de \`handleReading\` (${sinDeclarar.join(', ')}). El camino caliente ` +
+      'corre UNA VEZ POR BASTONAZO: cualquier cosa que se llame ahí tiene que ser síncrona y sin I/O ' +
+      '(R4.9). Declaralo en `HOT_PATH_CALLABLE` con su motivo, o —si hace I/O— movelo al warm-up del ' +
+      'provider. Un helper de firma síncrona que adentro cruza el puente nativo se ve exactamente igual ' +
+      'que uno barato desde acá: por eso la decisión hay que escribirla, no adivinarla.',
+  );
+
+  const fantasmas = declarados.filter((n) => !invocados.includes(n));
+  assert.deepEqual(
+    fantasmas,
+    [],
+    `\`HOT_PATH_CALLABLE\` declara cosas que el camino caliente ya no invoca: ${fantasmas.join(', ')}. ` +
+      'Una tabla que describe un código que no existe deja de ser un oráculo.',
+  );
+});
+
+test('el extractor de invocaciones ve las formas reales (y no confunde palabras del lenguaje)', () => {
+  // Un extractor ciego dejaría la tabla en verde sin mirar nada.
+  // De `bar.baz(1)` sale `baz` (el CALLEE) y no `bar`: es el nombre de lo que se ejecuta, que es lo que
+  // hay que declarar. Lo verifiqué al revés — mi primera expectativa incluía `bar` y este test la corrigió.
+  assert.deepEqual(calleeNames('foo(); bar.baz(1); if (x) { qux() }'), ['baz', 'foo', 'qux']);
+  assert.deepEqual(calleeNames('for (const a of b) { }'), []);
+  assert.deepEqual(calleeNames('try { x() } catch { }'), ['x']);
+  assert.deepEqual(calleeNames('return new Map();'), ['Map']);
+  // El repro del reviewer, visto por el extractor.
+  assert.ok(calleeNames('refreshBeepPrefNow();').includes('refreshBeepPrefNow'));
+  assert.ok(!('refreshBeepPrefNow' in HOT_PATH_CALLABLE), 'el helper del repro no puede estar declarado');
+  // Y las otras formas de esconder lo mismo.
+  assert.ok(calleeNames('prefs.refreshNow();').includes('refreshNow'));
+  assert.ok(calleeNames('void warmPref();').includes('warmPref'));
+});
+
+test('el guard de R4.9 DETECTA sus mutantes (no pasa verde por mirar un patrón muerto)', () => {
+  const ve = (linea: string): boolean =>
+    HOT_PATH_IO.test(linea) || /\bawait\b/.test(linea) || /\.\s*then\s*\(/.test(linea);
+  // El mutante EXACTO del reviewer, más las evoluciones naturales del bug.
+  assert.ok(ve('void readBeepEnabled().then((b) => playFeedback(classifyReadOutcome(candidate), b));'));
+  assert.ok(ve('const beep = await readBeepEnabled();'));
+  assert.ok(ve('const raw = await SecureStore.getItemAsync(KEY);'));
+  assert.ok(ve('const raw = window.localStorage.getItem(KEY);'));
+  assert.ok(ve('void loadPref().then(setBeep);'), 'un helper NUEVO con otro nombre: lo caza la regla del .then');
+  // Falso positivo: la línea que SÍ corresponde en el camino caliente no puede disparar.
+  assert.ok(!ve('playFeedback(classifyReadOutcome(candidate), cachedBeepEnabled());'));
+  assert.ok(!ve('const candidate = isRawStream ? engine.processRawLine(rawOrEid, now) : engine.processEid(rawOrEid, now);'));
+});
+
+test('MUTANTES 2026-08-06: los canales NUEVOS (expo-haptics / expo-audio) también caen', () => {
+  // ── El agujero real que tenía este guard hasta hoy ─────────────────────────────────────────────────
+  // El patrón viejo nombraba `playFeedback` LITERAL. Lo probé: una función `playRejectFeedback()` (que es
+  // exactamente el nombre que pide el hallazgo 🟡-12) NO matcheaba, así que se podía emitir el aviso
+  // negativo ANTES del gate —o desde otro archivo de `services/ble/`— con la suite entera en verde. Cada
+  // línea de acá es un mutante que probé contra el patrón VIEJO y pasaba.
+  const MUTANTES = [
+    ['playRejectFeedback();', 'el emisor del aviso negativo con nombre propio'],
+    ['playSound("read-error");', 'un emisor genérico de sonido'],
+    ['playBeep();', 'un emisor genérico de beep'],
+    ["const H = require('expo-haptics'); H.notificationAsync(H.NotificationFeedbackType.Success);", 'expo-haptics directo'],
+    ['void Haptics.notificationAsync(type);', 'la API concreta de la háptica nueva'],
+    ['void Haptics.selectionAsync();', 'la tercera API de expo-haptics'],
+    ["const p = createAudioPlayer(require('../../assets/sounds/read-ok.wav'));", 'crear un player de audio'],
+    ['const player: AudioPlayer = players[cue];', 'nombrar el tipo del player'],
+    ['await setAudioModeAsync({ playsInSilentMode: true });', 'tocar el modo de audio del SO'],
+    ['primeFeedback();', 'el warm-up (permitido SOLO en el provider y fuera de handleReading)'],
+    // ── Agregados en el fix-loop: los dos orquestadores que `feedback.ts` ahora EXPORTA para poder
+    //    testearlos por comportamiento. Exportarlos los vuelve importables desde otro archivo de
+    //    `services/ble/`, así que el patrón tiene que verlos o abrimos una puerta nueva.
+    ['void emitHaptic(pattern);', 'el orquestador del canal táctil, importado desde otro lado'],
+    ['void emitCueSound(cue);', 'el orquestador del canal sonoro, importado desde otro lado'],
+    ["import { emitHaptic } from './feedback';", 'importar el orquestador táctil'],
+  ];
+  for (const [linea, porque] of MUTANTES) {
+    assert.ok(SENSORY_EMIT.test(linea), `el guard NO ve: ${porque} → ${linea}`);
+  }
+
+  // Controles de FALSO POSITIVO: si el patrón se pusiera tan ancho que marca cualquier cosa, el guard se
+  // vuelve inservible y alguien lo va a aflojar. Estas líneas TIENEN que seguir en verde.
+  const NO_SON_CANALES = [
+    "import { cachedBeepEnabled } from './feedback-pref';",
+    'const outcome = classifyReadOutcome(candidate);',
+    'const plan = decideFeedback(platform, beepEnabled, outcome);',
+    'if (!beepEnabled) return null;',
+    'const displayLabel = playerName;',
+  ];
+  for (const linea of NO_SON_CANALES) {
+    assert.ok(!SENSORY_EMIT.test(linea), `falso positivo del guard: ${linea}`);
+  }
+
+  // Y la allowlist del provider es EXACTAMENTE la que se documentó: si alguien agrega un nombre acá sin
+  // explicarlo, este test le recuerda que la allowlist ES la superficie del invariante.
+  assert.deepEqual([...PROVIDER_SENSORY_ALLOWED].sort(), ['playFeedback', 'primeFeedback']);
+  // El chequeo del provider mira TOKEN por token (M2-bis): dos canales en el MISMO renglón, uno
+  // permitido y otro no, tiene que caer. Con el filtro viejo (`!/\bplayFeedback\b/.test(line)`) pasaba.
+  const renglonMixto = 'playFeedback(outcome, beep); Vibration.vibrate(50);';
+  assert.ok(
+    sensoryTokens(renglonMixto).some((t) => !PROVIDER_SENSORY_ALLOWED.has(t)),
+    'un renglón con `playFeedback` + otro canal se cuela: el chequeo volvió a mirar la línea entera',
+  );
 });
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────────────

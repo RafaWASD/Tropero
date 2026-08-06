@@ -85,6 +85,44 @@ test('spec 04 / RMV5.8: el config plugin del bastón Bluetooth está enganchado'
   assert.ok(pluginNames(build('development')).includes('./plugins/with-bluetooth-classic'));
 });
 
+test('spec 04 / R4.2: `expo-audio` NO se engancha como config plugin (sería pedir el micrófono)', () => {
+  // ── DECISIÓN, no olvido (2026-08-06, unidad «el bastón tiene que sonar y vibrar de verdad») ────────
+  // `npx expo install expo-audio` imprime «Add the following to your Expo config: plugins:
+  // ["expo-audio"]». NO se hizo, y no hacerlo es lo correcto para nuestro uso.
+  //
+  // El plugin de expo-audio existe para GRABAR y para reproducir en background. Con sus defaults agrega:
+  // `RECORD_AUDIO` (permiso PELIGROSO de Android, con diálogo al usuario), `NSMicrophoneUsageDescription`
+  // en iOS, `UIBackgroundModes: ['audio']`, `FOREGROUND_SERVICE` + `FOREGROUND_SERVICE_MEDIA_PLAYBACK` y
+  // un `MediaSessionService` en el manifiesto. Todo eso para un pip de 110 ms de un asset empaquetado —
+  // que no necesita NINGÚN permiso.
+  //
+  // Y agregarlo "con todo apagado" tampoco aportaría nada: el único permiso que quedaría
+  // (`MODIFY_AUDIO_SETTINGS`) YA lo mergea el manifiesto propio de la librería
+  // (`node_modules/expo-audio/android/src/main/AndroidManifest.xml`), con plugin o sin él. O sea que la
+  // opción sin plugin es estrictamente la de menor superficie y exactamente equivalente para nosotros.
+  //
+  // Este test es el que impide que alguien "arregle el warning de expo-doctor" pegando la línea sin leer
+  // lo de arriba: un pedido de micrófono que aparece en una app de ganadería es un problema de confianza
+  // (y de revisión de tienda), no un detalle de config.
+  for (const variant of [undefined, 'development', 'production']) {
+    const names = pluginNames(build(variant));
+    assert.ok(!names.includes('expo-audio'), `expo-audio quedó enganchado como plugin en variant=${variant}`);
+  }
+  // Ni RECORD_AUDIO ni el micrófono por la otra puerta (declararlos a mano en la config).
+  const c = build(undefined);
+  assert.deepEqual(c.android?.permissions, ['NOTIFICATIONS'], 'entró un permiso Android nuevo');
+  assert.equal(
+    (c.ios?.infoPlist as Record<string, unknown> | undefined)?.NSMicrophoneUsageDescription,
+    undefined,
+    'apareció un uso de micrófono en el Info.plist',
+  );
+  assert.deepEqual(
+    (c.ios?.infoPlist as { UIBackgroundModes?: string[] } | undefined)?.UIBackgroundModes,
+    ['remote-notification'],
+    'apareció un background mode nuevo (el de audio lo agrega el plugin de expo-audio)',
+  );
+});
+
 test('R2.5: extra.supabaseUrl eliminado (grep sin consumidores); extra.router/eas conservados', () => {
   const extra = build(undefined).extra as Record<string, unknown> | undefined;
   assert.equal(extra?.supabaseUrl, undefined);

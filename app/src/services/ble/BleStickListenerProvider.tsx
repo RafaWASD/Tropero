@@ -41,8 +41,8 @@ import { WebSerialAdapter } from './adapter-web-serial';
 import { SimulatorAdapter } from './adapter-simulator';
 import { SppAndroidAdapter, isSppNativeAvailable } from './adapter-spp-android';
 import { isDemoMode } from './demo-gate';
-import { playFeedback } from './feedback';
-import { readBeepEnabled } from './feedback-pref';
+import { classifyReadOutcome, playFeedback, primeFeedback } from './feedback';
+import { cachedBeepEnabled, readBeepEnabled } from './feedback-pref';
 import { logTransportEvent } from './logging';
 
 interface ProviderApi {
@@ -212,6 +212,23 @@ export function BleStickListenerProvider({
     const engine = engineRef.current;
     const candidate = isRawStream ? engine.processRawLine(rawOrEid, now) : engine.processEid(rawOrEid, now);
 
+    // ── FEEDBACK SENSORIAL (R4), UNA SOLA LLAMADA, PARA LOS TRES DESENLACES ────────────────────────
+    // Se invoca SIEMPRE, con el desenlace clasificado, y es el punto único (R4.7). Lo que suena —o no—
+    // lo decide `decideFeedback` (puro, testeado por comportamiento), NO un `if` escrito acá:
+    //   · aceptada  → háptica 'success' + pip agudo. "Entró."
+    //   · rechazada → háptica 'error' + doble pip grave descendente (🟡-12): es el ÚNICO caso en que
+    //                 sabemos que llegó algo y no servía; sin esta señal, "trama corrupta" era el mismo
+    //                 silencio que "bastón mudo" y el peón no podía aprender del producto.
+    //   · duplicada → silencio (R3.1; el fundamento está en feedback-logic.ts).
+    // La preferencia de sonido se lee del CACHÉ EN MEMORIA (🟡-11): antes era un `await` a SecureStore
+    // POR BASTONAZO, y encima colgaba el pip de una promesa. Ahora es síncrono, en orden, y sin I/O.
+    // Envuelto: el feedback es un enhancement y su falla NUNCA puede romper la ingesta (R15.2 / R4.5).
+    try {
+      playFeedback(classifyReadOutcome(candidate), cachedBeepEnabled());
+    } catch {
+      logTransportEvent({ kind: 'read_loop_error', message: 'feedback_threw' });
+    }
+
     if (candidate === null) {
       // Re-escaneo dentro de la ventana de dedup (R3.1) → ignorar en silencio.
       return;
@@ -221,11 +238,6 @@ export function BleStickListenerProvider({
       logTransportEvent({ kind: 'eid_rejected', reason: candidate.rejected });
       return;
     }
-
-    // Candidato válido + des-duplicado. Feedback sensorial (R4) — best-effort, no bloquea.
-    void readBeepEnabled().then((beepEnabled) => playFeedback(beepEnabled)).catch(() => {
-      // Feedback es enhancement; su falla nunca rompe la ingesta (R15.2).
-    });
 
     // Entrega el EID al consumidor de spec 09 (R1.6). La CONFIRMACIÓN VISUAL pre-commit (R2)
     // la hace el overlay de spec 09 mostrando este EID antes del find-or-create. El "commit"
@@ -247,6 +259,17 @@ export function BleStickListenerProvider({
         logTransportEvent({ kind: 'read_loop_error', message: 'tag_subscriber_threw' });
       }
     }
+  }, []);
+
+  // ─── Warm-up de los canales de feedback (R4), FUERA del camino caliente ─────────────────
+  // Dos cosas que no pueden pasar por bastonazo: (a) leer la preferencia de sonido del storage — era un
+  // cruce a SecureStore POR LECTURA (🟡-11) y ahora se trae una vez al caché en memoria; (b) cargar el
+  // asset del sonido — sin esto, la primera lectura de la jornada pagaría la carga, justo el bastonazo
+  // que le forma al peón la expectativa de cuánto tarda. Best-effort: si algo falla, no rompe nada y el
+  // camino de lectura sigue con el default.
+  useEffect(() => {
+    void readBeepEnabled();
+    primeFeedback();
   }, []);
 
   // ─── Wiring de los adaptadores (transporte + manual) al contrato ────────────────────────

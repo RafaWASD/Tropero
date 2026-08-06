@@ -17,6 +17,62 @@ No es un sustituto de `feature_list.json` ni de los ADRs — es la antesala dond
 
 ## Ítems pendientes
 
+## 2026-08-06 — `WEB_TONES` y los .wav nativos se espejan por comentario, no por guard
+
+**Origen**: verificación del leader de la unidad de feedback sensorial, mirando si los assets viajaban en el
+bundle (sí viajan: `require()` estáticos en `feedback.ts:257,259`, Metro los resuelve aunque estén dentro de
+una función).
+
+**Qué**: el canal sonoro de WEB se **sintetiza** con un oscilador (`WEB_TONES` en `feedback.ts:183-189`:
+`read-ok` = 3150 Hz/110 ms, `read-error` = 1300 Hz/95 ms + gap 45 ms + 850 Hz/110 ms) y el comentario dice que
+"espeja los assets nativos". En NATIVO suenan los `.wav` (`assets/sounds/*.wav`, generados por
+`scripts/gen-baston-sounds.mjs`). **Son dos representaciones de la misma verdad y nada las ata**: el guard de
+assets (`feedback-guard.test.ts:360`) solo verifica que los dos WAV no sean byte-idénticos entre sí y que no
+sean silencio — no los compara contra `WEB_TONES`.
+
+**Por qué importa**: el oscilador de web **es el oráculo de la E2E** — el propio archivo lo dice: *"es el
+único canal observable por la E2E, así que además de cumplir R4.5 es EL ORÁCULO de «qué le dijo el producto
+al peón»"*. Si alguien regenera los WAV con otras frecuencias, `WEB_TONES` no lo sigue, y la E2E queda
+verificando en verde un tono que el device **nunca reproduce**. El síntoma sería el peor: la suite afirmando
+que el producto avisa bien, mientras en la manga suena otra cosa (o nada distinguible).
+
+**Por qué NO se arregló ahora**: el leader había declarado cerrada la última vuelta de guards de esa unidad y
+lo sostuvo — abrir otra por un 🟡 después de 30 mutantes es rendimiento decreciente. Queda anotado en vez de
+improvisado.
+
+**Próximo paso sugerido**: decodificar los `.wav` en el propio guard (ya hay precedente: el reviewer los
+decodificó a mano para verificar frecuencia y duración) y asertar que coinciden con `WEB_TONES` — misma
+frecuencia, misma duración, misma cantidad de pips y mismo gap. Es la clase de guard que esta sesión
+demostró que hay que escribir: **resolver el valor de las dos fuentes y compararlas**, no confiar en un
+comentario que dice que se espejan.
+
+## 2026-08-06 — Flake de `upload-rejections.test.ts` R10.8 bajo carga del lote (NO es regresión)
+
+**Origen**: verificación de la unidad de feedback sensorial del bastón. `check.mjs` dio rojo con **un solo**
+test caído y casi lo atribuyo mal.
+
+**Firma exacta**:
+```
+✖ R10.8: recordUploadRejection guarda { id, table, op, code, at } SIN opData
+  AssertionError: true !== false
+  app/src/services/powersync/upload-rejections.test.ts:127
+```
+
+**Qué es**: un **flake bajo carga**, no una regresión. Medido:
+- El archivo solo: **18/18, tres veces**.
+- El lote completo (151 suites): **2857/2857, dos veces** después del rojo.
+- `node --test` corre **cada archivo en su propio proceso**, así que no puede ser contaminación de estado
+  entre suites — lo que varía es el paralelismo y la contención de CPU.
+
+**El error de método que casi cometo, y que es lo valioso de esta entrada**: corrí una vez el lote **sin** las
+dos suites nuevas de la unidad, dio verde, y estuve a un paso de concluir que ellas lo causaban. Comparar
+**una corrida contra una corrida** es exactamente como se fabrica una atribución falsa. Un flake solo se
+descarta —o se confirma— repitiendo; y la repetición tiene que ser del caso que falló, no del que pasó.
+
+**Si reaparece**: re-correr el archivo solo y el lote completo 2-3 veces antes de tocar nada. Si el test
+resulta ser genuinamente sensible al tiempo, el arreglo es de ese test (esperar la condición en vez de
+asumir el orden), no del lote.
+
 ## 2026-08-06 — 🔴 E2E en rojo en `main`: `lotes.spec.ts` «crear lote → asignar desde la ficha → ver miembros»
 
 **Origen**: unidad «el FAB le roba los taps a la banda de arriba del nav», corriendo la regresión de las specs que pisan el tab "Más".

@@ -11,6 +11,7 @@ import {
   connectionRowStatus,
   connectionStatusView,
   deviceRowView,
+  feedbackPrefView,
   pairedDevicesView,
   readingBadge,
   readsEmptyHint,
@@ -555,6 +556,47 @@ test('a11y: el nombre de la fila sale del MISMO view que la fila pinta (no de un
       const text = connectionRowStatus(s, env).text;
       const sep = /[.…!?]$/.test(text) ? ' ' : '. ';
       assert.equal(connectionRowA11yLabel(s, env), `Bastón: ${text}${sep}${STICK_ROW_ACTION}`);
+    }
+  }
+});
+
+// ─── R4.3 · Preferencia de sonido de lectura (la UI que le faltaba a `writeBeepEnabled`) ────────────
+
+test('R4.3: el copy dice qué pasa AHORA y cambia con el estado (no describe el switch)', () => {
+  const on = feedbackPrefView(true);
+  const off = feedbackPrefView(false);
+  assert.notEqual(on.hint, off.hint, 'el sub-copy no cambia con el estado: no informa nada');
+  // Nunca "activado/desactivado": eso ya lo dice el switch. El copy tiene que decir la CONSECUENCIA.
+  for (const view of [on, off]) {
+    assert.doesNotMatch(view.hint, /activad|desactivad|habilitad/i, `copy de sistema: "${view.hint}"`);
+  }
+});
+
+test('R4.1/R4.3: el copy deja claro que apagar el sonido NO apaga la vibración', () => {
+  // Es el malentendido caro: si el peón cree que apagó "el aviso", va a pensar que el bastón dejó de
+  // andar y va a re-bastonear (y el segundo bastonazo se lo come la dedup, así que ahí sí no pasa nada).
+  assert.match(feedbackPrefView(true).hint, /vibra/i, 'con el sonido ON no se dice que también vibra');
+  assert.match(
+    feedbackPrefView(false).hint,
+    /vibra/i,
+    'con el sonido OFF el copy no dice que la vibración sigue: el operario va a creer que apagó todo',
+  );
+});
+
+test('🟡-12: la tarjeta ENSEÑA que el aviso negativo es distinto (si no, nadie lo entiende en la manga)', () => {
+  // El aviso nuevo no sirve de nada si el peón no sabe qué significa. Este es el único lugar donde lo
+  // va a leer, y tiene que nombrar la diferencia perceptible, no la causa técnica.
+  const note = feedbackPrefView(true).note;
+  assert.equal(note, feedbackPrefView(false).note, 'la explicación del vocabulario no depende del switch');
+  assert.match(note, /distinto/i);
+  assert.doesNotMatch(note, /EID|trama|parse|inválid/i, `jerga técnica en la nota: "${note}"`);
+});
+
+test('es-AR voseo en todo el copy de la preferencia (nada de tuteo)', () => {
+  for (const view of [feedbackPrefView(true), feedbackPrefView(false)]) {
+    for (const text of [view.title, view.label, view.hint, view.note]) {
+      assert.ok(text.length > 0, 'copy vacío');
+      assert.doesNotMatch(text, /\b(apágalo|enciéndelo|puedes|tienes|siéntes|actívalo)\b/i, `tuteo: "${text}"`);
     }
   }
 });

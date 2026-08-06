@@ -87,9 +87,98 @@ animal mientras cargaba el peso del anterior, el teléfono le confirmaba, y el d
 único**, aguas abajo de la decisión de R4.6. Ningún otro módulo del camino de la lectura
 (`src/services/ble/**`) puede emitirlo por su cuenta, por ninguna API (vibración, háptica o sonido).
 
+> **Reconciliación as-built (2026-08-06, 🟡-11 del barrido — canal TÁCTIL).** "Vibración" se implementa
+> con **`expo-haptics`** (`notificationAsync`) y no con `Vibration.vibrate(50)`. Motivo: lo que hace falta
+> en la manga no es "más fuerte" sino **distinguible** — los `NotificationFeedbackType` son patrones que
+> el SO ya usa para "salió bien"/"salió mal" en todo el teléfono, así que el peón los reconoce sin que
+> nadie se los enseñe y no los confunde con un mensaje entrante; y en iOS manejan el Taptic Engine, que
+> `Vibration.vibrate(ms)` ni siquiera alcanza (en iOS ignora la duración y hace un zumbido crudo fijo).
+> **Se conserva un respaldo a `Vibration`** si el canal rico no emite (APK anterior a la dep, Expo Go):
+> degradar a silencio ahí sería un retroceso, no una degradación.
+>
+> **Corrección del fix-loop (🔴 del review)**: la primera implementación de ese respaldo era **código
+> muerto**. Asumía que `require('expo-haptics')` TIRA cuando falta el módulo nativo, y no es así:
+> `expo-haptics` resuelve con `requireOptionalNativeModule` (devuelve **`null`**, no tira) y
+> `notificationAsync` es `async`, así que el fallo sale como **promesa rechazada** — el `.catch` se la
+> comía y el bloque de `Vibration` quedaba inalcanzable. O sea que en el APK instalado **no vibraba
+> nada**, cuando antes vibraba 50 ms. Asimetría que lo causó: `expo-audio` usa `requireNativeModule`
+> (sí tira), y se trató a los dos módulos igual. As-built corregido: el respaldo se decide por **lo que
+> pasó** (`await` del canal rico) y no por dónde saltó la excepción, y se verifica **ejecutándolo**
+> (`emitHaptic` con cargadores inyectables).
+>
+> **Corrección de un motivo FALSO que estaba escrito en el código**: `utils/haptics.ts` y `feedback.ts`
+> afirmaban que `expo-haptics` se había descartado porque "abriría superficie de postinstall
+> (`onlyBuiltDependencies`, ADR-011)". Es falso y se verificó ejecutando `npm view expo-haptics scripts
+> dependencies` (ídem `expo-audio`): `dependencies: {}` y **ningún** script de postinstall/install/prepare.
+> Además **ADR-013 §Capa 4 ya listaba `expo-haptics` en el stack elegido**, así que el código contradecía
+> al ADR. El costo real de sumarlos es otro y está dicho abajo: **cambian el fingerprint del build**.
+
 **R4.2** Cuando el contrato confirma un EID válido y el beep está habilitado, el sistema deberá emitir un **beep** sonoro corto.
 
+> **Reconciliación as-built (2026-08-06, 🟡-11 — canal SONORO en device).** Hasta esta fecha el beep en
+> native era un **no-op declarado** (`playFeedback` exigía `beepChannel === 'web-audio'`), así que R4.2
+> **no estaba cumplido en device**: el único feedback real eran 50 ms de vibración, que con guante, ruido
+> de manga y el teléfono en el bolsillo se pierden. As-built: **`expo-audio`** (`createAudioPlayer`,
+> reproductores creados una sola vez y calentados al montar el provider) sobre **assets propios**
+> generados por `scripts/gen-baston-sounds.mjs` (WAV PCM 16-bit mono, en el repo). Se generan y no se
+> bajan de un banco: la licencia es nuestra, los parámetros de síntesis SON la documentación del porqué,
+> y ajustar el tono es cambiar un número.
+>
+> **Por qué esos tonos**: el parlante de un teléfono casi no emite bajo ~700 Hz y rinde mejor en 2–4 kHz,
+> justo donde el oído es más sensible y donde el ruido de la manga (vacas, motor, portones) tiene menos
+> energía. Confirmación = **un pip de 3150 Hz, 110 ms** (la banda del beep de un lector de código de
+> barras: se lee como "el aparato leyó").
+>
+> **Decisión de permisos (Gate 2)**: el **config plugin de `expo-audio` NO se engancha**. Con sus
+> defaults agrega `RECORD_AUDIO` (permiso peligroso, con diálogo), `NSMicrophoneUsageDescription`,
+> `UIBackgroundModes:['audio']`, `FOREGROUND_SERVICE(+_MEDIA_PLAYBACK)` y un `MediaSessionService` — todo
+> para un pip de un asset empaquetado, que no necesita ningún permiso. Engancharlo "con todo apagado"
+> tampoco aportaría: el único permiso que quedaría (`MODIFY_AUDIO_SETTINGS`, normal, sin diálogo) ya lo
+> mergea el manifiesto propio de la librería. Lo fija `app/app.config.test.ts`.
+
 **R4.3** El sistema deberá exponer una preferencia de usuario para **apagar el beep** de lectura (útil/molesto según el sol o el ruido), persistida localmente entre sesiones; con el beep apagado, la vibración (R4.1) deberá seguir activa.
+
+> **Reconciliación as-built (2026-08-06, 🟡-11 — la UI que faltaba).** R4.3 estaba incumplido **por
+> ausencia de UI**: la preferencia se persistía, se leía en cada lectura… y `writeBeepEnabled` **no tenía
+> un solo call site** en toda la app. As-built: tarjeta **«Aviso de lectura»** dentro de **`/baston`**
+> (T6.4), después de "Lecturas". Ubicación elegida ahí y no en "Más" porque es la casa del bastón (se
+> llega por la fila "Dispositivos"), es donde el operario ya está cuando el aviso le molesta o no le
+> alcanza, y es **la única pantalla donde puede probarlo en el acto**: bastonea, escucha, y la lista de
+> Lecturas le confirma que la lectura entró igual con el sonido apagado.
+>
+> **Alcance de la preferencia**: apaga **TODO el canal sonoro** (la confirmación y el aviso negativo de
+> R4.8), nunca el canal táctil. El motivo por el que alguien lo apaga —ruido, molestia, una reunión— no
+> distingue desenlaces, y la distinción entre "entró" y "no sirvió" sobrevive igual por la háptica, que
+> no es apagable (R4.1).
+
+**R4.8** *(nuevo, 2026-08-06 — 🟡-12)* Cuando llega una trama del bastón y el contrato **no puede sacarle
+un EID válido** (`eid_rejected`: trama corrupta, EID inválido, vacío), el sistema deberá emitir un
+feedback sensorial **distinguible del de una lectura confirmada**, en el canal táctil y en el sonoro.
+
+**Por qué es un requisito y no un lujo**: hoy "trama corrupta", "re-lectura dentro de los 3 s", "bastón
+mudo" y "no apretaste bien el gatillo" producen **exactamente el mismo silencio**, así que el peón no
+puede aprender del producto: no tiene forma de distinguir *"te escuché y no servía"* de *"no me enteré"*.
+`eid_rejected` es el **único** caso en que sabemos que llegó algo y no sirvió, y por eso es el único que
+recibe señal propia.
+
+**Los otros casos siguen en silencio, y no por olvido**:
+- **Re-lectura dentro de la ventana de dedup (R3.1)**: ese animal YA entró hace <3 s y el producto ya lo
+  confirmó. El aviso negativo mentiría sobre un animal que sí está; un segundo positivo confirmaría dos
+  veces una sola captura (el modo de falla de R4.6). El contexto visual ya lo desambigua.
+- **Bastón mudo / gatillo mal apretado**: no hay evento — al teléfono no le llega nada. Señalar una
+  ausencia obligaría a un temporizador que alarme cada N segundos al peón que camina o abre un portón, y
+  un aviso que suena cuando no pasa nada se aprende a ignorar. Ese hueco es del **indicador de conexión**
+  (el pill / el hero de cada pantalla), no del feedback de lectura.
+- **`drop_no_consumer` (R4.6)**: el silencio ES el fix, y no se toca.
+
+**R4.9** *(nuevo, 2026-08-06 — 🟡-11)* El camino de una lectura **no** deberá hacer I/O de storage para
+resolver la preferencia de sonido: el valor deberá venir de un **caché en memoria** poblado fuera del
+camino caliente (al montar el provider) e **invalidado al escribir** la preferencia.
+
+**Por qué**: as-built anterior, `readBeepEnabled()` se llamaba en **cada lectura** — un cruce del puente
+nativo a `expo-secure-store` (el KeyStore de Android) **por bastonazo** para alimentar un booleano que no
+cambia salvo que alguien toque un switch, y encima colgaba la emisión del feedback de una promesa (en una
+ráfaga, el orden de los microtasks no está atado al orden de las lecturas).
 
 **R4.4** Cuando el contrato confirma un EID válido, el sistema deberá mostrar la **confirmación visual** de R2.1 con objetivo de latencia **< 1 segundo** desde la lectura (R2.2).
 

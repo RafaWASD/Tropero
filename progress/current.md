@@ -3,6 +3,83 @@
 > Este archivo se vacía al cerrar cada sesión y su resumen se mueve a `history.md`.
 > Mientras trabajás, **mantenelo actualizado en tiempo real**, no al final.
 
+## 2026-08-06 — UNIDAD «el bastón tiene que sonar y vibrar de verdad en la manga» — FIX-LOOP CERRADO, sin commitear
+
+> **FIX-LOOP del review (`progress/review_baston-feedback-sensorial.md`) + veto de diseño del leader.**
+> **🔴 — el respaldo táctil era CÓDIGO MUERTO.** Yo asumí que `require('expo-haptics')` tira cuando falta
+> el módulo nativo. No tira: resuelve con `requireOptionalNativeModule` (devuelve **null**) y
+> `notificationAsync` es `async`, así que el fallo sale como **promesa rechazada** → el `.catch` se la
+> comía, venía un `return`, y el bloque de `Vibration` quedaba inalcanzable. En el APK instalado **no
+> vibraba nada**, cuando antes vibraba 50 ms: degradé para PEOR. La asimetría que se me pasó es que
+> `expo-audio` usa `requireNativeModule` (sí tira) y traté a los dos módulos igual. **Y mi guard pasaba
+> igual, porque miraba el TEXTO y no la ALCANZABILIDAD** — la misma clase de bug que la sesión viene
+> cerrando, esta vez cometida por mí.
+> **Cómo quedó**: la orquestación de los dos canales (`emitHaptic` / `emitCueSound`) es ahora **exportada
+> y con los cargadores inyectables**, y se EJECUTA en `feedback.test.ts` con dobles. El respaldo se decide
+> por lo que PASÓ (se espera el resultado) y no por dónde saltó la excepción → cubre las cuatro formas de
+> fallar. **🟠 ×3** cerrados con red propia: el orden `seekTo`→`play` (player espía que registra la
+> secuencia), R4.9 (guard del camino caliente: sin I/O, sin `await`, sin `.then`), y el guard de módulos
+> ahora es **APP-WIDE con tabla de dueños** (el reviewer lo esquivaba con `src/utils/manga-buzz.ts`, un
+> directorio afuera).
+> **🎨 Veto de diseño**: la nota que enseña el vocabulario pasó de `$textFaint` (3,92:1 a 13 px → bajo AA)
+> a `$textMuted` (**5,58:1**, medido); la jerarquía la da ahora una hairline `$divider` + zona propia.
+> **Mutantes: 25 lanzados, 25 muertos** — los 18 míos + los **7 que el reviewer dejó VIVOS**.
+>
+> **2.ª vuelta (re-review, `review_baston-feedback-sensorial-2.md`)**: cerró los 🔴/🟠 anteriores y encontró
+> **dos guards que no cubrían el invariante que declaraban**. (a) El de R4.9 se burlaba con un helper de
+> firma SÍNCRONA que adentro hace la I/O (`refreshBeepPrefNow()` → 2852/2852 verde con el 🟡-11 entero).
+> Ahora el invariante se **OBSERVA**: la E2E **cuenta los accesos reales al storage** en 10 bastonazos y
+> exige cero (con contrafactual: el warm-up SÍ lee), + allowlist de lo invocable en `handleReading`, +
+> las reglas de forma. (b) El respaldo táctil podía **colapsar los dos patrones de R4.8** y nada se ponía
+> rojo — pega justo en el APK sin módulo nativo, donde el respaldo es el ÚNICO canal táctil: el patrón se
+> movió a `fallbackVibrationPattern` (puro, verificado ejecutándolo) + guard de que el efecto real lo use.
+> **5 mutantes nuevos, 5 muertos** (uno sobrevivió a la primera y lo cerré: re-inlinear el patrón dejaba
+> la función pura decorativa). `design.md` reconciliado con el barrido **app-wide**; `playsInSilentMode`
+> documentado con su costo REAL (revertirlo **activa** una supresión: `AudioModule.kt:472`).
+> Correcciones de conteo: **25** mutantes (no 18/14) y **6 capturas = 4 frames + 2 pares intencionales**
+> (no 8). Fundamento del modo de audio ahora citado también para **Android** (`AudioModule.kt:143-155`),
+> que es donde está el device de prueba.
+
+## 2026-08-06 — la unidad, en detalle
+
+Base `a40e69b`. Feature 04. Cierra 🟡-11 y 🟡-12 de `progress/sweep_bluetooth-edge-cases.md` (R4.2 y R4.3
+**no estaban cumplidos en device**: el beep nativo era un no-op declarado, `writeBeepEnabled` no tenía un
+solo call site, y `readBeepEnabled()` cruzaba a SecureStore por bastonazo).
+
+**Plan ejecutado (T1..T6)**: T1 deps (`expo-haptics` + `expo-audio` vía `expo install`) + corrección del
+motivo FALSO que el código daba para no tenerlas · T2 canal táctil real (`notificationAsync` Success/Error
+con respaldo a `Vibration` — **el respaldo estuvo muerto hasta el fix-loop**, ver arriba) · T3 **feedback negativo propio** para `eid_rejected` (háptica `Error` + doble
+pip grave descendente) con el silencio de los otros desenlaces fundamentado · T4 UI de la preferencia
+(tarjeta «Aviso de lectura» dentro de `/baston`, cierra T6.4) · T5 caché en memoria de la preferencia
+(fuera del camino caliente) · T6 guards + mutantes + E2E + capturas + reconciliación de specs.
+
+**Assets**: 2 WAV **generados** por `scripts/gen-baston-sounds.mjs`
+(3150 Hz / 1300→850 Hz; la banda 2–4 kHz es donde el parlante del teléfono rinde, el oído es más sensible
+y el ruido de manga tiene menos energía). Licencia propia, parámetros = documentación.
+
+**Dos defectos de campo salieron de la autorrevisión y se cerraron acá**: (1) el beep habría quedado
+**mudo del segundo bastonazo en adelante** (`play` es una `Function` síncrona y `seekTo` una
+`AsyncFunction` en expo-audio → el play corría primero, sobre un player parado en el final); (2) cada
+bastonazo le habría **cortado la radio al peón** (sin fijar el modo de audio, iOS deja la sesión en
+`soloAmbient`, que interrumpe otras apps). Más la carrera que hacía que el switch se "des-tocara" solo.
+
+**Verificado (post fix-loop)**: `check.mjs` **RC=0** · typecheck verde · unit de la unidad **127/127** ·
+**30 mutantes, 30 muertos** · E2E nueva **3/3** + regresión del bastón **24/24** + lecturas **19/19** ·
+capture **1/1**, 6 PNG (4 frames + 2 pares intencionales) · `design/` limpio · `git diff supabase/
+sync-streams/` vacío → **Gate 1 N/A** · **nada commiteado** · **ningún build de EAS lanzado**.
+
+⚠️ **Las dos deps traen módulo nativo → CAMBIA EL FINGERPRINT**: hace falta un build de EAS (lo gatea Raf)
+para verlo en el A07. Hasta entonces el APK instalado cae al respaldo de `Vibration` (que **ahora sí se ejecuta**), sin crashear.
+⚠️ **Queda para el device**: que el pip de 3150 Hz se oiga sobre el ruido real y que los dos patrones
+hápticos se distingan con guante. Es lo único que decide si la unidad cumplió su objetivo (→ T7.4).
+⚠️ Decisión de producto abierta: `playsInSilentMode: true` (el aviso suena con el teléfono en silencio).
+Revertirlo NO es "volver al default": en Android el default del módulo ya es `true` y con `false` el
+`play()` se **suprime** con el timbre en silencio o vibración (`AudioModule.kt:472`). El fundamento está
+en `feedback-logic.ts` y hay un test que obliga a cambiarlo a conciencia.
+
+Detalle, trazabilidad `R<n>→test`, tabla de mutantes y autorrevisión (9 ítems) en
+`progress/impl_baston-feedback-sensorial.md`.
+
 ## 2026-08-06 — UNIDAD «el FAB le roba los taps a la banda de arriba del nav» — FIX-LOOP CERRADO
 
 Base `1f1c002`. Bugfix 🔴 de Raf en device. Feature 04, delta multivendor. **El reviewer dio

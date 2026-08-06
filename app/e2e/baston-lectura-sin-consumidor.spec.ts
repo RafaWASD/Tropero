@@ -8,12 +8,15 @@
 // bastonea, el teléfono le CONFIRMA, y el dato no llega a ningún lado. La vibración es *la* señal que
 // este producto le enseñó a leer como "entró": una confirmación falsa sobre un dato perdido.
 //
-// EL ORÁCULO (y por qué existe en web). En device el feedback es una vibración, que Playwright no ve.
-// Pero en web el MISMO `playFeedback` toca el canal `web-audio` (`decideFeedback('web', beep=ON)` →
-// `beepChannel:'web-audio'` → `new AudioContext()`), y el beep viene habilitado por default
-// (`BEEP_DEFAULT_ENABLED`). Así que stubeamos `AudioContext` con un CONTADOR: cada confirmación del
-// bastón incrementa `window.__rafaqBeeps`. Eso convierte "¿el producto le confirmó al peón?" en un
+// EL ORÁCULO (y por qué existe en web). En device el feedback es háptica + un .wav, que Playwright no
+// ve. Pero en web el MISMO `playFeedback` toca el canal `web-audio` (`decideFeedback('web', beep=ON,
+// 'accepted')` → `sound.channel:'web-audio'` → `new AudioContext()`), y el sonido viene habilitado por
+// default (`BEEP_DEFAULT_ENABLED`). Así que stubeamos `AudioContext` con un CONTADOR: cada confirmación
+// del bastón incrementa `window.__rafaqBeeps`. Eso convierte "¿el producto le confirmó al peón?" en un
 // número observable, que es exactamente la pregunta del bug.
+//
+// Este test cuenta CUÁNTAS veces habló el producto; el que verifica QUÉ dijo (pip agudo de "entró" vs.
+// doble pip grave de "no servía") es `baston-feedback-sensorial.spec.ts`, de la unidad del 🟡-12.
 //
 // LOS DOS LADOS (para que no pase por la razón equivocada):
 //   (a) CONTRAFACTUAL — en `maniobra/identificar` (que SÍ consume) el bastonazo confirma: el contador
@@ -162,8 +165,10 @@ test('🔴-2: en `maniobra/carga` el bastonazo NO confirma (nadie lo recibe); en
   //        overlay global está suprimido en todo `maniobra/*`). El bastonazo del "siguiente animal" NO
   //        puede confirmar: sería una mentira sobre un dato que se pierde. ──
   await bastonazo(page, eidB);
-  // Dwell generoso: el feedback pasa por `readBeepEnabled()` (promesa), así que si fuera a sonar, sonaría
-  // dentro de esta ventana. Antes del fix, acá el contador valía 2.
+  // Dwell generoso: el feedback ya es SÍNCRONO (desde 🟡-11 la preferencia sale de un caché en memoria,
+  // no de un `await` a SecureStore por bastonazo), así que si fuera a sonar ya habría sonado. La ventana
+  // se mantiene igual de holgada a propósito: el test tiene que fallar por el bug, no por ir apurado.
+  // Antes del fix del 🔴-2, acá el contador valía 2.
   await page.waitForTimeout(2500);
   expect(
     await beeps(page),

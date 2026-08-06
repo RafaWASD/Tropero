@@ -92,8 +92,10 @@ app/src/services/ble/
 ├── parser-rs420.test.ts            # YA EXISTE — tests del parser
 ├── contract.ts                     # Contrato de ingesta: normalize+validate+confirm+dedup → tag_read (R1,R2,R3)
 ├── dedup.ts                        # Ventana por-TAG ~3s, keyed por EID (R3)
-├── feedback.ts                     # Vibración (siempre) + beep (configurable) + señal visual (R4)
-├── feedback-pref.ts                # Persistencia local del toggle de beep (R4.3, R4.4)
+├── feedback.ts                     # PUNTO ÚNICO del efecto: háptica (siempre) + sonido (configurable) (R4)
+├── feedback-logic.ts               # PURO: desenlace de la lectura → plan de canales (R4.1/4.2/4.5/4.8)
+├── beep-pref-cache.ts              # PURO: caché en memoria de la preferencia, fuera del camino caliente (R4.9)
+├── feedback-pref.ts                # Persistencia local del toggle de sonido (R4.3, R4.4)
 ├── config.ts                       # Constantes: DEDUP_WINDOW_MS=3000, SPP_UUID, baud default (R3.4)
 ├── stick-adapter.ts                # interfaz StickAdapter (R11.1)
 ├── adapter-manual.ts               # puerta cero → contrato (R7)
@@ -110,7 +112,9 @@ app/src/services/ble/
     ├── dedup.test.ts               # mismo TAG <3s ignora; TAGs distintos pasan al instante (R3)
     ├── adapter-web-serial.test.ts  # framing por línea + reuso parser (R5)
     ├── adapter-mock.test.ts        # inyección + enable/disable (R10)
-    └── feedback.test.ts            # vibración siempre / beep apagable (R4)
+    ├── feedback.test.ts            # háptica siempre / sonido apagable / negativo distinto (R4)
+    ├── feedback-guard.test.ts      # guards de MÓDULOS sensoriales + de los assets de sonido (R4.7/4.8)
+    └── beep-pref-cache.test.ts     # invalidación del caché + carrera lectura-en-vuelo vs. toque (R4.9)
 ```
 
 > El `parser-rs420.ts` **es puro** (no react-native, no I/O) y corre bajo `node:test` igual que `src/utils/*`. El contrato + dedup + feedback-pref se diseñan para ser **mayormente puros** (testables sin device): la lógica de ventana, validación y selección de feedback no necesita hardware; solo la capa de transporte (adaptadores) y el efecto físico (haptic/beep nativo) lo necesitan.
@@ -185,6 +189,101 @@ El **parser `parser-rs420.ts` es compartido** por los dos adaptadores de stream 
 - **Dedup (R3)** — `dedup.ts`: un `Map<eid, lastEmittedAtMs>`. `shouldEmit(eid, now)` retorna `false` si `now - lastEmittedAt[eid] < DEDUP_WINDOW_MS` (default 3000, `config.ts`, ajustable R3.4); `true` y actualiza el timestamp en cualquier otro caso. **Keyed por EID** → un EID distinto nunca espera (R3.2, habilita asignación masiva spec 09 R8). No es un cooldown global. Puro y testeable.
 - **Confirmación visual (R2)** — la UI muestra el EID legible antes del commit. Es el **mismo gate** que el feedback visual de R4 (R2.4). Para asignación masiva (spec 09 R8) la confirmación es ligera y encadenable (R2.5): no bloquea el siguiente EID distinto. **Interpretación de frontera** (Preguntas abiertas #3 de requirements): la confirmación se realiza dentro del `FindOrCreateOverlay`/flujo de spec 09 mostrando el EID antes de ejecutar el commit; si requiere cambio de contrato en spec 09, parar y reportar.
 - **Feedback (R4)** — `feedback.ts`: al confirmar un EID válido dispara `Haptics` (vibración, **siempre**, R4.1) + beep si `feedbackPref.beepEnabled` (R4.2, persistido en `feedback-pref.ts`, R4.3/R4.4) + señal visual <1s (R4.4). En web (`adapter-web-serial`): beep por Web Audio, vibración degradada en silencio (R4.5).
+
+### AS-BUILT del feedback sensorial (2026-08-06 — 🟡-11 / 🟡-12, reemplaza el bullet de arriba en lo que difiera)
+
+```
+services/ble/
+├── feedback-logic.ts     # PURO: classifyReadOutcome(candidate) → 'accepted'|'rejected'|'duplicate'
+│                         #       decideFeedback(platform, beepEnabled, outcome) → { haptic, sound }
+├── feedback.ts           # EL PUNTO ÚNICO del efecto (R4.7): expo-haptics + expo-audio + Web Audio
+├── beep-pref-cache.ts    # PURO: caché en memoria de la preferencia + árbitro de la carrera lectura/toque
+└── feedback-pref.ts      # I/O de plataforma (localStorage / SecureStore) + cola de escrituras
+assets/sounds/
+├── read-ok.wav           # 3150 Hz, 110 ms          — generados por scripts/gen-baston-sounds.mjs
+└── read-error.wav        # 1300→850 Hz, 250 ms
+```
+
+- **El vocabulario tiene DOS palabras** (R4.8). `accepted` → háptica `Success` + un pip agudo y corto.
+  `rejected` → háptica `Error` + **dos pips graves descendentes**, más del doble de largo. La distinción
+  vive en las tres dimensiones que se perciben con ruido y con guante (altura, cantidad, duración), y
+  sobrevive sola en cada canal: en web (sin háptica) por el sonido, con el sonido apagado por la háptica.
+  `duplicate` → **silencio** decidido por `decideFeedback`, no por un `if` del call site.
+- **Una sola invocación, para los tres desenlaces.** El provider hace
+  `playFeedback(classifyReadOutcome(candidate), cachedBeepEnabled())` **una vez**, aguas abajo del gate de
+  `read-dispatch` (R4.6/R4.7) y antes de las salidas tempranas por duplicado/rechazo. Que el silencio sea
+  una decisión de la función pura —y no la ausencia de una llamada— es lo que lo vuelve testeable.
+- **Canal táctil**: `emitHaptic(pattern, loadRich?, loadFallback?)` — intenta `Haptics.notificationAsync`
+  y, **si no emitió de verdad**, cae a `Vibration`. "No emitió" se decide **esperando el resultado**, no
+  suponiendo por dónde salta la excepción: cubre las cuatro formas de fallar (el paquete no resuelve, el
+  cargador tira, el módulo nativo no está → **promesa rechazada**, el nativo tira). Sin ninguno de los
+  dos → silencio, nunca excepción.
+  **Por qué así y no con un `try/catch` alrededor del `require`** (🔴 del review, 2026-08-06): esa era la
+  primera versión y el respaldo quedaba **INALCANZABLE**, porque `expo-haptics` resuelve con
+  `requireOptionalNativeModule` (devuelve `null`, **no tira**) y `notificationAsync` es `async`. Resultado:
+  en el APK sin el módulo **no vibraba nada** — un retroceso contra los 50 ms previos. `expo-audio` sí usa
+  `requireNativeModule` (tira al importar); esa asimetría entre los dos paquetes es la trampa.
+  Los cargadores son **parámetros inyectables** a propósito: es lo que permite que `feedback.test.ts`
+  EJECUTE el camino de la ausencia sin un teléfono. El guard anterior miraba el TEXTO del `Vibration` y
+  pasaba en verde con el respaldo muerto.
+- **Canal sonoro nativo**: un `AudioPlayer` por cue, creado una vez y **calentado** por `primeFeedback()`
+  al montar el provider (si no, el primer bastonazo de la jornada paga la carga del asset). Al reproducir
+  se hace **`seekTo(0)` ENCADENADO con `play()`**, no en paralelo: en `expo-audio` `play` es una `Function`
+  síncrona y `seekTo` una `AsyncFunction`, así que un `void seekTo(0); play()` ejecuta el play primero
+  sobre un player parado en el final (`actionAtItemEnd = .pause`) → **mudo del segundo bastonazo en
+  adelante**. Verificado en el código nativo de las DOS plataformas (`ios/AudioModule.swift:212,280`, `ios/AudioPlayer.swift:38,103`; en Android `Function("play")` es síncrona y `seekTo` es `AsyncFunction(...).runOnQueue(Queues.MAIN)`). **Y tiene red**: el orden se verifica EJECUTÁNDOLO (`emitCueSound` con un player espía que registra la secuencia), no con un regex — 🟠-2 del review, donde los dos mutantes que rompían el orden sobrevivían.
+- **MODO DE AUDIO — el aviso NO puede cortarle la radio al peón.** `FEEDBACK_AUDIO_MODE` (valor en el
+  módulo puro, aplicado una vez desde `primeFeedback`) fija `interruptionMode: 'mixWithOthers'` → **no se
+  pide foco de audio**. El problema es real en **las dos plataformas** y por vías distintas: en iOS, sin
+  fijarlo la sesión queda en el default del SO (`soloAmbient`), que interrumpe el audio de otras apps; en
+  **Android** —que es donde está el device de prueba (A07)— `Function("play")` llama a
+  `requestAudioFocus()`, y con `interruptionMode == null` (el default si nadie llama `setAudioModeAsync`)
+  pide `AUDIOFOCUS_GAIN_TRANSIENT` (`android/.../AudioModule.kt:143-155`; con `MIX_WITH_OTHERS` retorna
+  temprano en la **línea 144** y no pide foco). Bonus del mismo llamado en Android: sin
+  `playsInSilentMode: true`, `shouldPlayInSilentMode()` **suprime el `play()`** con el timbre en
+  silencio/vibración. O sea que **cada bastonazo interrumpiría la música o la radio de fondo** y encima el
+  aviso no sonaría con el teléfono en silencio; en la manga se trabaja con la radio prendida,
+  así que el peón apagaría el aviso el primer día y 🟡-11 volvería por la puerta de atrás. Se acompaña de
+  `playsInSilentMode: true` (**decisión de producto, pero NO gratis de revertir** — ver abajo: el peón silencia el teléfono por
+  WhatsApp, no para desactivar su lector, y si le sobra tiene el switch), `allowsRecording:false`,
+  `shouldPlayInBackground:false`, `shouldRouteThroughEarpiece:false`. Fijado por `feedback-guard.test.ts`
+  sobre el VALOR, no sobre el texto.
+- **Degradación / OTA-safe**: todo el acceso a los módulos nativos es por `require()` perezoso dentro de
+  un `try`. Un JS pusheado por OTA a un APK sin los módulos no crashea: `requireNativeModule` tira al
+  importar, se atrapa, y el canal queda apagado para la sesión (`nativeAudioUnavailable`) sin reintentar
+  por bastonazo.
+- **Preferencia fuera del camino caliente** (R4.9). `cachedBeepEnabled()` es síncrono y sin I/O. El caché
+  se puebla en el warm-up del provider y se **invalida al escribir, antes de persistir** (lo que el
+  operario acaba de pedir vale para el próximo bastonazo aunque el storage no conteste nunca). Dos
+  cuidados que salieron de la autorrevisión: las escrituras al disco van **encoladas** (dos toques rápidos
+  no pueden asentarse fuera de orden) y una lectura del storage **en vuelo pierde** contra un toque del
+  operario (`settleReadBeepEnabled`, arbitrado por un contador de escrituras) — si no, el switch se
+  "des-tocaba" solo.
+- **UI de la preferencia** (R4.3): tarjeta «Aviso de lectura» en `StickConnectionScreen` (`/baston`),
+  después de "Lecturas". Copy puro en `connection-view.ts` (`feedbackPrefView(enabled)`): dice qué pasa
+  AHORA, que apagar el sonido **no** apaga la vibración, y **enseña el vocabulario nuevo** ("cuando lee
+  algo que no sirve, el aviso es distinto"). Toggle con la anatomía canónica del repo (pista
+  `$toggleTrack` / knob `$toggleKnob`, igual que `FieldTemplateToggleList`), fila entera tappable
+  ≥ `$touchMin`, `switchA11y`.
+- **Guards** (además de los de `read-dispatch.test.ts`, cuyo patrón `SENSORY_EMIT` se amplió a
+  `play[A-Z]\w*` + las APIs de los módulos nuevos): `feedback-guard.test.ts` vigila **los MÓDULOS** y
+  **los ASSETS**.
+
+  **Los MÓDULOS se barren APP-WIDE, con tabla de dueños** (`SENSORY_OWNERS`), y no solo en
+  `services/ble/**`. El alcance acotado **se probó insuficiente** (🟠-4 del review): un
+  `src/utils/manga-buzz.ts` importando `expo-haptics` y llamado desde `handleReading` **antes del gate**
+  dejaba la suite entera (2837 tests) en verde con el 🔴-2 restaurado para el canal táctil — el guard de
+  nombres tampoco lo veía, porque `buzzManga()` no matchea ningún patrón. Ahora los cuatro módulos
+  (`expo-haptics|expo-audio|expo-av|expo-speech`) **y el símbolo `Vibration`** (que no se puede cercar por
+  módulo, porque medio repo importa `react-native` por `Platform`) se barren en todo el árbol contra una
+  tabla que declara quién puede usar cada canal y por qué, con **chequeo de fantasmas** en las dos
+  direcciones. No prohíbe la háptica en el producto: obliga a que un canal sensorial nuevo tenga **dueño
+  escrito**. Hoy: `expo-haptics`/`expo-audio` → solo `feedback.ts`; `Vibration` → `feedback.ts` (respaldo)
+  + `utils/haptics.ts` (ticks de UI, fuera del camino de la lectura); `expo-av`/`expo-speech` → nadie.
+
+  Y **los ASSETS** (que existan, que sean WAV PCM
+  mono decodificables, que **no sean silencio**, que duren lo que dicen y que **el negativo no sea una
+  copia del positivo**, que es como se anula 🟡-12 sin tocar una línea de lógica).
 
 ## Conexión, estado e indicador global (R9)
 

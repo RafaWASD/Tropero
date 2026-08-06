@@ -1,13 +1,29 @@
 // Haptic feedback helper (drag del wizard de jornada, spec 03 M1.4 — y reutilizable).
 //
-// El proyecto NO tiene expo-haptics en deps; el patrón establecido para feedback táctil es el módulo
-// `Vibration` de react-native (ver services/ble/feedback.ts). Centralizamos acá un par de "pulsos"
-// hápticos cortos (agarrar / soltar una fila al reordenar) con el MISMO idioma: import perezoso de RN
-// (web-safe → degrada en silencio, la vibración de desktop es pobre/nula) y best-effort (nunca rompe el
-// flujo si la API no está). Patrón idéntico a feedback.ts (R4.5 generaliza: el feedback nunca crashea).
+// Centralizamos acá un par de "pulsos" hápticos cortos (agarrar / soltar una fila al reordenar, tick de
+// la rueda) con import perezoso de RN (web-safe → degrada en silencio, la vibración de desktop es
+// pobre/nula) y best-effort (nunca rompe el flujo si la API no está).
 //
-// Por qué no expo-haptics: sumarlo abriría superficie de postinstall (onlyBuiltDependencies, ADR-011) por
-// un beneficio marginal sobre Vibration; cuando el dev build sume un canal háptico más rico, se enchufa acá.
+// ── CORRECCIÓN DE UN MOTIVO FALSO (2026-08-06) ───────────────────────────────────────────────────────
+// Hasta hoy este encabezado decía «el proyecto NO tiene expo-haptics en deps» y justificaba: «sumarlo
+// abriría superficie de postinstall (onlyBuiltDependencies, ADR-011)». Las dos afirmaciones son falsas y
+// se verificaron ejecutando `npm view expo-haptics scripts dependencies`:
+//   · `dependencies: {}` y los ÚNICOS scripts son lint/test/build/clean de `expo-module-scripts` — NO
+//     hay `postinstall`, `install` ni `prepare`, así que el allowlist de pnpm ni se consulta. Instalarlo
+//     no agregó una sola entrada a `onlyBuiltDependencies` (verificable en el diff de `package.json`).
+//   · `ADR-013 §Capa 4 — Manga-friendly` ya lo listaba en el stack elegido («expo-haptics — feedback
+//     táctil. El operario con guantes/barro siente la vibración aunque no vea la pantalla»). O sea que
+//     esta nota contradecía al ADR, que está más arriba en la jerarquía de verdad.
+// Lo que sumarlo SÍ cuesta es real y es otra cosa: cambia el FINGERPRINT del build nativo (trae módulo
+// nativo → hace falta un build de EAS nuevo). Ese es el costo que hay que sopesar, no un postinstall que
+// no existe.
+//
+// `expo-haptics` YA ESTÁ en deps desde esa fecha, y lo usa `services/ble/feedback.ts` (el canal táctil de
+// la lectura del bastón, con patrones `notificationAsync` distintos para "entró" y "no sirvió"). Este
+// módulo sigue con `Vibration` a propósito: sus dos consumidores (el reorder y la rueda inercial) piden
+// ticks de 8–18 ms sin semántica de éxito/error, que es justo lo que `Vibration` hace bien y lo que
+// `NotificationFeedbackType` NO expresa. Migrarlos a `impactAsync` es una decisión de UX de esas
+// pantallas, no un arrastre de esta unidad.
 
 /** Acceso perezoso a Vibration (no arrastra RN a node:test; degrada en silencio en web/sin módulo). */
 function vibrate(pattern: number | number[]): void {

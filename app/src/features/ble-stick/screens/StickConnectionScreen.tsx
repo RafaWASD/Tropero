@@ -20,7 +20,7 @@ import { Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
-import { Bluetooth, BluetoothConnected, BluetoothSearching, ChevronLeft, Keyboard, Radio, TriangleAlert } from 'lucide-react-native';
+import { Bluetooth, BluetoothConnected, BluetoothSearching, ChevronLeft, Keyboard, Radio, TriangleAlert, Volume2, VolumeX } from 'lucide-react-native';
 
 import { Button, Card, InfoNote } from '@/components';
 import { useBleProviderApi } from '@/services/ble/BleStickListenerProvider';
@@ -37,11 +37,13 @@ import {
   readRememberedDevice,
   writeRememberedDevice,
 } from '@/services/ble/remembered-device';
-import { buttonA11y, labelA11y } from '@/utils/a11y';
+import { readBeepEnabled, writeBeepEnabled, cachedBeepEnabled } from '@/services/ble/feedback-pref';
+import { buttonA11y, labelA11y, switchA11y } from '@/utils/a11y';
 import { backOr } from '@/utils/nav';
 import {
   connectionStatusView,
   deviceRowView,
+  feedbackPrefView,
   pairedDevicesView,
   readingBadge,
   readsEmptyHint,
@@ -302,6 +304,39 @@ export default function StickConnectionScreen() {
 
   const onClearReads = useCallback(() => setReads([]), []);
 
+  // ── Preferencia de SONIDO de lectura (R4.3) ────────────────────────────────────────────────
+  // Hasta el 2026-08-06 `writeBeepEnabled` no tenía UN SOLO call site: la preferencia existía en el
+  // código, se persistía, se leía en cada lectura… y no había forma de tocarla. R4.3 quedaba incumplido
+  // por ausencia de UI (🟡-11 del barrido de edge cases).
+  //
+  // Vive ACÁ, en `/baston`, y no en "Más": es la casa del bastón (se llega por la fila "Dispositivos"),
+  // es donde el operario ya está mirando cuando le molesta o no le alcanza el aviso, y es la única
+  // pantalla donde puede PROBARLO en el acto — bastonea, escucha, y la lista de Lecturas de abajo le
+  // confirma que la lectura entró aunque el sonido esté apagado. En "Más" sería un ajuste huérfano al
+  // lado de "Eliminar cuenta".
+  //
+  // El valor inicial sale del CACHÉ (síncrono, ya calentado por el provider al montar) y se re-lee del
+  // storage por si esta pantalla fue lo primero que se abrió. El write es OPTIMISTA en el lugar
+  // (docs/conventions §UI): el switch se mueve YA y la persistencia va detrás best-effort.
+  const [beepEnabled, setBeepEnabled] = useState(cachedBeepEnabled);
+  useEffect(() => {
+    let active = true;
+    void readBeepEnabled().then((value) => {
+      if (active) setBeepEnabled(value);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+  const onToggleBeep = useCallback(() => {
+    setBeepEnabled((prev) => {
+      const next = !prev;
+      void writeBeepEnabled(next);
+      return next;
+    });
+  }, []);
+  const beepView = feedbackPrefView(beepEnabled);
+
   // CTA de estado: conectar / reintentar / desconectar (gesto de usuario; web-serial exige requestPort).
   // En el camino SPP, "conectar" primero **carga la lista de emparejados** y recién después intenta el
   // device recordado, en ese orden y SECUENCIAL. Dos motivos: (a) sin bastón recordado —la primera
@@ -475,6 +510,89 @@ export default function StickConnectionScreen() {
               ))}
             </YStack>
           )}
+        </Card>
+
+        {/* ── Aviso de lectura: la preferencia de SONIDO (R4.3). Va después de "Lecturas" a propósito:
+              es un ajuste, no un paso del flujo de conexión, y el operario lo toca DESPUÉS de escuchar
+              cómo suena (la lista de arriba es la prueba de que la lectura entra igual con el sonido
+              apagado). ── */}
+        <Card gap="$3">
+          <Text fontFamily="$body" fontSize="$5" lineHeight="$5" fontWeight="700" color="$textPrimary">
+            {beepView.title}
+          </Text>
+          {/* Fila entera tappable (target ≥ $touchMin, Fitts): con guante nadie acierta la pista de 48 dp.
+              Toggle tokenizado con la MISMA anatomía que FieldTemplateToggleList (pista $toggleTrack /
+              knob $toggleKnob) — el repo no tiene un primitivo Switch en la base de Tamagui. */}
+          <XStack
+            testID="stick-beep-toggle"
+            width="100%"
+            alignItems="center"
+            gap="$3"
+            minHeight="$touchMin"
+            paddingVertical="$2"
+            pressStyle={{ opacity: 0.6 }}
+            onPress={onToggleBeep}
+            {...switchA11y(Platform.OS, { label: beepView.label, checked: beepEnabled, disabled: false })}
+          >
+            {/* El ícono va PEGADO al título y no al costado de todo el bloque: por proximidad (Gestalt)
+                es lo que hace que se lea como "esto es el sonido" y no como una viñeta del sub-copy.
+                Centrado sobre el bloque entero quedaba a la altura del renglón 2 del hint, colgado de la
+                frase equivocada. Además el par Volume2/VolumeX es el estado LEGIBLE SIN LEER — el switch
+                dice on/off, el ícono dice de QUÉ. */}
+            <YStack flex={1} minWidth={0} gap="$1">
+              <XStack alignItems="center" gap="$2">
+                {beepEnabled ? (
+                  <Volume2 size={getTokenValue('$navIcon', 'size')} color={getTokenValue('$primary', 'color')} strokeWidth={2.25} />
+                ) : (
+                  <VolumeX size={getTokenValue('$navIcon', 'size')} color={muted} strokeWidth={2.25} />
+                )}
+                <Text
+                  flexShrink={1}
+                  minWidth={0}
+                  fontFamily="$body"
+                  fontSize="$4"
+                  lineHeight="$4"
+                  fontWeight="600"
+                  color="$textPrimary"
+                >
+                  {beepView.label}
+                </Text>
+              </XStack>
+              <Text fontFamily="$body" fontSize="$3" lineHeight="$4" fontWeight="400" color="$textMuted">
+                {beepView.hint}
+              </Text>
+            </YStack>
+            <View
+              width="$toggleTrack"
+              height="$toggleThumb"
+              borderRadius="$pill"
+              backgroundColor={beepEnabled ? '$primary' : '$divider'}
+              justifyContent="center"
+              paddingHorizontal="$1"
+              flexShrink={0}
+            >
+              <View
+                width="$toggleKnob"
+                height="$toggleKnob"
+                borderRadius="$pill"
+                backgroundColor="$white"
+                alignSelf={beepEnabled ? 'flex-end' : 'flex-start'}
+              />
+            </View>
+          </XStack>
+          {/* `$textMuted` y NO `$textFaint` (veto de diseño, 2026-08-06). `$textFaint` está declarado en
+              el config como **AA-large 4,03**: válido solo para ≥18 px regular o ≥14 px bold, y esto es
+              $3 = 13 px regular, donde WCAG AA pide 4,5:1. La entrada del backlog del 29/07 lo anticipó
+              ("varios de esos usos son texto secundario prescindible, pero otros llevan información"):
+              ESTE lleva información — es el ÚNICO lugar donde el peón aprende qué significa el aviso
+              distinto, en un producto que se usa a pleno sol. Mismo criterio que `asignar-caravanas`.
+              La jerarquía contra el sub-copy la da la SEPARACIÓN (hairline + zona propia, Gestalt) y no
+              el contraste: bajarle el contraste a la única explicación del vocabulario sería susurrar
+              justo lo que hay que enseñar. */}
+          <View height={1} backgroundColor="$divider" />
+          <Text fontFamily="$body" fontSize="$3" lineHeight="$4" fontWeight="400" color="$textMuted">
+            {beepView.note}
+          </Text>
         </Card>
 
         {/* ── Manual-first: SIEMPRE disponible, no bloqueante (RMV3.6) ── */}

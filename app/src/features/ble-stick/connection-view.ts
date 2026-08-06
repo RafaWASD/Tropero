@@ -507,3 +507,40 @@ export function pairedDevicesView(state: PairedListState): PairedListView {
 export function readingBadge(isFromSimulator: boolean): 'DEMO' | null {
   return isFromSimulator ? 'DEMO' : null;
 }
+
+// ─── Aviso de lectura: la preferencia de sonido (R4.3) ───────────────────────────────────────────────
+
+export interface FeedbackPrefView {
+  /** Título de la tarjeta. */
+  title: string;
+  /** Label de la fila del switch. */
+  label: string;
+  /**
+   * Sub-copy que dice qué pasa AHORA y qué gana/pierde el operario si lo cambia. Nunca "activado /
+   * desactivado": eso describe el switch, que ya se ve.
+   */
+  hint: string;
+  /**
+   * Enseña el VOCABULARIO sensorial (🟡-12): que el aviso de "no sirvió" es distinto del de "entró". Sin
+   * decirlo en algún lado, el peón se encuentra un sonido raro en la manga y no sabe qué significa — y el
+   * único momento en que va a leer esto es acá, que es donde vino a tocar el bastón.
+   */
+  note: string;
+}
+
+/**
+ * Presentación de la preferencia de sonido del bastón (R4.3). PURA.
+ *
+ * El sonido es apagable y la HÁPTICA NO (R4.1), así que el copy tiene que dejar clarísimo qué queda
+ * cuando se apaga: si el operario cree que apagó "el aviso", va a pensar que el bastón dejó de andar.
+ */
+export function feedbackPrefView(beepEnabled: boolean): FeedbackPrefView {
+  return {
+    title: 'Aviso de lectura',
+    label: 'Sonido al leer',
+    hint: beepEnabled
+      ? 'Suena y vibra en cada bastonazo. Apagalo si el ruido molesta: la vibración sigue.'
+      : 'Solo vibra en cada bastonazo. Prendelo si con guante o en el bolsillo no la sentís.',
+    note: 'Cuando el bastón lee algo que no sirve, el aviso es distinto: más grave y doble.',
+  };
+}
