@@ -44,11 +44,23 @@ Padre del vet socio — primer cliente beta. Campo en Chascomús.
 
 ## Competencia identificada
 
-**Control Ganadero**: dominante, monopolio actual. Genera informes estáticos sin individualización. Vulnerable a una solución que ofrezca trazabilidad real e inteligencia continua.
+> ⚠️ **Revisado el 5/8/2026** contra una auditoría de 30+ productos. La versión anterior de esta sección era falsa en dos puntos: decía que Control Ganadero opera "como monopolio" y que genera "informes estáticos sin individualización". Ver `docs/marketing/competencia.md` — ese documento es la fuente de verdad de competencia.
 
-**Identigan**: app similar conceptualmente, presente en otros países. No es claro su alcance en Argentina.
+**El mercado argentino NO es un monopolio.** Hay al menos una docena de jugadores: Vacuno, Digirodeo, Huella, Ñandú, Albor, Agrodeo, Cattler, Wincampo, Kelpie, SYNAgro, Calipso, más los regionales.
 
-**Software propietario de marcas de hardware** (Tru-Test, Datamars, Allflex): silos cerrados, atados a comprar hardware específico.
+**Vacuno** (`vacuno.app`, Argentina): **el competidor más parecido a RAFAQ.** Cría, offline-first, RFID HDX/FDX-B, bastón Bluetooth propio, módulo reproductivo completo, rol de prestador de servicios. Cobra por cantidad de animales en pesos. Sus dos debilidades frente a nosotros: vende su propio bastón (no es agnóstico) y no exporta el archivo SIGSA.
+
+**Control Ganadero**: el más instalado (autorreporta 22.712 ganaderos y 583.925 animales, en iOS desde 2013). **Hace más de lo que asumíamos**: funciona offline, identifica por RFID, lee lectores Bluetooth y balanzas, tiene módulo reproductivo y rol de veterinario. Sus huecos reales: **ninguna integración con SENASA/SIGSA** y sesgo lechero en el módulo reproductivo.
+
+**Identigan**: **es colombiano, no argentino** (800+ usuarios, 50.000+ animales). No es una amenaza en nuestro mercado.
+
+**Albor**: el más grande de Argentina (4.000+ usuarios, 2,2M cabezas). Carga manual, cobro por usuario, enfoque económico. Su diferencial es la conexión con entes reguladores — si baja al dato individual, tiene la base instalada para hacerlo.
+
+**AgriWebb** (Australia): el producto más parecido al nuestro en el mundo — cría extensiva, offline, BLE agnóstico, export a trazabilidad oficial. **Adquirida por URUS Group en 2026**, ya presente en Brasil vía Cargill. Sin señal de entrada a Argentina.
+
+**Software propietario de marcas de hardware** (Tru-Test/Datamars, Allflex, Gallagher): silos cerrados, atados a comprar hardware específico.
+
+**SIGBIOTRAZA** (app oficial de SENASA, gratis): cubre las tres obligaciones de la 841/2025. Le ganamos solo en el alta, donde obliga a tipear raza, sexo y fecha animal por animal en la manga.
 
 ## Posicionamiento
 

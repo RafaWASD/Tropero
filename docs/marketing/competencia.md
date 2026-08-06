@@ -1,126 +1,167 @@
-# Competencia — panorama consolidado
+# Auditoría de competencia
 
-> **Qué es esto**: todo lo que sabemos hoy sobre competidores, con precio y fuente cuando existe. Consolida lo que estaba disperso en `CONTEXT/01-producto.md`, `CONTEXT/02-modelo-negocio.md`, el cuestionario de intake de marketing y el research de mercado de julio 2026.
-> **Corte**: 5/8/2026. Los precios son los publicados por cada empresa a julio 2026.
-> **Estado**: los precios con URL son verificados. Lo que dice "sin precio público" es que no lo publican, no que no lo tengan.
-
----
-
-## El número que ordena todo
-
-**Nadie en el mundo cobra miles de dólares por gestión ganadera de un campo individual.** El precio de la categoría convergió en **USD 130–300 por año**, en ocho productos independientes de ocho países distintos.
-
-Esa convergencia no es que estén todos regalando valor: es el precio de equilibrio de una categoría donde **el que paga es el mismo que usa y el único beneficiario es su propia productividad**. Ninguna feature mueve ese ancla. Se mueve cambiando de pagador, no de funcionalidad (ver `CONTEXT/02`, capa 2).
-
-| Producto | País | Precio publicado | Equivalente anual (USD) |
-|---|---|---|---:|
-| **Control Ganadero** | LatAm / Argentina | USD 129,99/año · USD 69,99/semestre · USD 14,99/mes. Gratis hasta 30 animales y 1 finca | **130** |
-| CattleMax (≤50 cab.) | EE.UU. | USD 144/año | **144** |
-| Herdwatch PRO | Irlanda / UK / EE.UU. | USD 49 los primeros 6 meses, después USD 20/mes | **240** |
-| Gallagher Animal Performance Plus | Nueva Zelanda / global | USD 25/mes | **300** |
-| Breedr | Reino Unido | £29,50/mes + IVA — **gratis** si comercializás ≥20 animales/año por su marketplace | **~470** o 0 |
-| CattleMax (≤1.000 cab.) | EE.UU. | USD 660/año | **660** |
-| AgriWebb | Australia | Por cabeza (unidad DSE, bovino = 8) + tarifa base. Sitio oficial sin montos; terceros citan Hobby ~USD 45/mes y Advanced ~USD 125/mes | **~540 – 1.500** |
-| Performance Beef (feedlot) | EE.UU. | USD 195/mes | **2.340** |
-| **RAFAQ (propuesto)** | Argentina | USD 300 base + USD 0,80/cabeza, tope USD 3.500. Gratis ≤50 cabezas | **460 – 3.500** |
-
-**Dónde nos deja**: en un campo de 500 madres (~700 cabezas) pedimos **USD 860/año**, que es **6,6x Control Ganadero**. Eso solo se sostiene si el pitch no es "software de gestión" sino "declaración de caravanas a SENASA sin trámite manual" — o sea, comparando contra la multa y contra las horas de carga, no contra otro software. Ver `CONTEXT/02` → Posicionamiento.
+> **Corte**: 5/8/2026. Relevamiento de 30+ productos en tres clusters (hispano, brasileño, anglosajón), perfilados contra la misma grilla.
+> **Reemplaza** la versión anterior de este documento, que estaba construida sobre supuestos que este relevamiento desmintió.
 
 ---
 
-## 1. Argentina — el competidor real
+## Veredicto: cuál se parece más
 
-### Control Ganadero
-**El dominante. Opera prácticamente como monopolio en Argentina.**
+La pregunta tiene **dos respuestas distintas** y conviene no mezclarlas.
 
-- **Precio**: USD 129,99/año, USD 69,99/semestre, USD 14,99/mes. Freemium hasta 30 animales y 1 finca. Fuente: `controlganadero.app`, 2026.
-- **Qué hace**: informes en PDF, sin identificación individual del animal, sin comparación histórica, sin análisis cruzado. El productor recibe papeles que mira y archiva.
-- **Su fortaleza, y no es el producto**: años instalado, clientes que lo conocen, soporte, gente en la calle, y —lo decisivo— **funciona hoy en campos reales**, cosa que lo nuestro todavía no. Tiene la confianza del rubro y un nombre que el productor ya escuchó.
-- **Nuestra ventaja**: trazabilidad individual real, offline-first de verdad, agnóstico de hardware, y el archivo de SENASA.
-- **⚠️ Es nuestro fast-follower más probable — no SENASA.** Tiene base instalada y distribución armada: puede agregar un botón de export a SIGSA en semanas. Lo que no puede copiar rápido es la captura BLE offline y el modelo de datos individual.
+### El más parecido por producto: **AgriWebb** (Australia)
 
-### Identigan
-- **Precio**: app gratis hasta 50 animales. Hardware + software **a cotización, sin precio público**. Fuente: `identigan.com`, 2026.
-- Conceptualmente parecida a lo nuestro, con presencia en otros países. **Su alcance real en Argentina no lo tenemos claro** — es un hueco de información.
+Cumple 8 de los 9 rasgos que definen a RAFAQ. Lo único que no comparte es el mercado.
 
----
+Cría extensiva a pasto · app nativa con offline real · identificación individual por EID · **Bluetooth genuinamente agnóstico de marca** (Gallagher, Tru-Test, Allflex RS420, Agrident, Shearwell, Te Pari, Pharmweigh, PTS) · módulo reproductivo con KPIs · **exporta a NLIS**, el sistema oficial de trazabilidad australiano · multi-establecimiento con acceso de asesores · **no vende hardware**.
 
-## 2. El Estado como competidor gratuito: SIGBIOTRAZA
+Es, punto por punto, la misma tesis de producto que la nuestra, ejecutada en el país cuya ganadería más se parece a la argentina. Difiere en dos cosas: cobra **por cabeza vía DSE** (1 bovino = 8 unidades, sobre el promedio de 12 meses) en vez de por campo, y suma ovinos y finanzas.
 
-**La app oficial de SENASA. Es gratis y hace las tres cosas que exige la Res. 841/2025.** Es el competidor que más se subestima.
+### El más parecido que te importa: **Vacuno** (Argentina) — y no lo teníamos en el radar
 
-- **Plataformas**: Android e iOS (App Store `id6756583501`).
-- **Tres módulos**: declarar dispositivos · iniciar TRI · cerrar DT-e.
-- **Dónde nos gana**: es gratis, es oficial, y cubre TRI y cierre de DT-e — que nosotros **no** cubrimos.
-- **Dónde le ganamos, y es todo lo que importa**: en la **declaración de dispositivos** obliga a tipear **raza, mes/año de nacimiento y sexo, a mano, dispositivo por dispositivo, en la manga**. RAFAQ ya tiene esos datos cargados. Ahí la diferencia es abismal.
-- **Su fricción estructural**: requiere un lector RFID Bluetooth externo (no lee sola); exige un **token QR generado en SIGSA desde una computadora** con clave fiscal; el CUIT propio y el representado tienen que coincidir exacto; recomienda internet para validar y enviar; y **nunca cierra el trámite** — siempre hay un segundo paso en SIGSA web.
-- **No es integrable**: no exporta archivo. Es competidor, no plataforma.
-- **Pista abierta**: el manual del token dice que el mecanismo es para que *"otras aplicaciones externas"* interactúen con el sistema oficial, con permisos de *"gestionar microchips de identificación y consulta de movimientos"*. Si esa API existe, cambia el juego. Ver `docs/backlog.md`.
+`vacuno.app`. Argentino. **Es casi el mismo producto, en el mismo mercado, ya funcionando.**
 
----
+| | Vacuno | RAFAQ |
+|---|---|---|
+| Sistema | Cría, foco reproductivo | Cría |
+| Offline-first | Sí | Sí |
+| RFID individual | Sí, HDX y FDX-B | Sí |
+| Bluetooth | Sí, **bastón propio** | Sí, **agnóstico de marca** |
+| Reproductivo | Servicios, tactos, partos, IA, destete | Igual |
+| Rol veterinario | Sí, plan "prestadores de servicios" | Sí |
+| Trazabilidad oficial | Parcial — planillas SENASA | **Export SIGSA de caravanas** |
+| Cobro | Por cantidad de animales, en pesos | Por campo |
+| Precios | Gratis ≤50 · $19.999/mes ≤500 · $49.999/mes ilimitado · $9.999/mes prestadores | USD 300 + 0,80/cabeza |
 
-## 3. Internacionales — no sabemos si están en Argentina
+**Las dos diferencias reales**: ellos **venden su propio bastón** (nosotros somos agnósticos, que es un argumento de venta directo: *"no cambies nada de lo que tenés"*), y **cobran por cabeza en pesos**, no por campo en dólares.
 
-Ninguno tiene presencia confirmada en el mercado argentino. Sirven como **referencia de pricing y de modelo**, no como amenaza inmediata.
-
-### Herdwatch (Irlanda / UK / EE.UU.)
-USD 20/mes tras un promo de USD 49 por 6 meses. Freemium. El comparable más cercano en posicionamiento: cumplimiento regulatorio + gestión de rodeo, en un mercado (Irlanda) donde la trazabilidad individual es obligatoria hace años.
-
-### AgriWebb (Australia)
-**El que más se parece a lo que queremos ser, y el que más plata levantó.** Precio **por cabeza** con tarifa base, usando la unidad DSE (bovino = 8 DSE). El sitio oficial no publica montos — venden con contacto comercial. Es la validación de que el modelo por cabeza funciona en un mercado ganadero extensivo comparable al nuestro.
-
-### CattleMax (EE.UU.)
-Precio **por escalones de cabezas**: USD 144/año hasta 50, USD 660/año hasta 1.000. Plan "registrado" (cabañas con pedigree) USD 192–636. Fuente: `cattlemax.com/pricing`, 2026. Es la referencia más limpia de escalonamiento por tamaño.
-
-### Breedr (Reino Unido)
-**El modelo de negocio más interesante del lote**: el software es **gratis si comercializás ≥20 animales por año a través de su marketplace**; si no, £29,50/mes + IVA. O sea: el SaaS es el costo de adquisición y el negocio real es el take rate de la comercialización. Es exactamente la "capa 2" de nuestro `CONTEXT/02`, ejecutada por otro.
-
-### Performance Beef (EE.UU.)
-USD 195/mes. Enfocado en **feedlot**, no en cría. El precio más alto del lote, y no es casualidad: el feedlot tiene más plata por cabeza y decisiones diarias de alimentación.
-
-### iLivestock
-Mencionado en el intake como competidor internacional. **Sin datos de precio ni de alcance** — hueco abierto.
+Que exista Vacuno no invalida el proyecto — valida que la tesis tiene mercado. Pero cambia el discurso: ya no somos los primeros en hacer esto en Argentina, y hay que saber por qué somos mejores antes de que lo pregunte un productor.
 
 ---
 
-## 4. Jardines cerrados de las marcas de hardware
+## Tres correcciones a nuestros propios documentos
 
-**Tru-Test / Datamars (Data Link) · Allflex · Gallagher (Animal Performance)**
+Esto es lo más importante de la auditoría. Veníamos operando sobre premisas falsas.
 
-- Su software viene con el equipo: cómodo si comprás todo de una marca, inútil si tenés balanza de una marca y bastón de otra — que es lo que pasa en la realidad de los campos.
-- Gallagher publica **USD 25/mes** para Animal Performance Plus. Datamars/Tru-Test **no publican precio de software**.
-- **La estrategia con ellos es no pelearlos.** No competimos en hardware: nos colgamos de lo que el campo ya tiene. Es un argumento de venta directo — *"no cambies nada de lo que tenés"*.
-- Nuestra arquitectura multivendor de bastones (registro de drivers, selección por capacidad) existe para eso.
+### 1. "Control Ganadero opera como monopolio" — **es falso**
 
----
+`CONTEXT/01-producto.md` dice que Control Ganadero es el dominante y opera prácticamente como monopolio. El mercado argentino tiene, como mínimo: **Vacuno, Digirodeo, Huella, Ñandú, Albor, Agrodeo, Cattler, Wincampo, Kelpie, SYNAgro, Calipso**, más los regionales (Control Ganadero, Software Ganadero SG). No es un monopolio: es un mercado fragmentado con una docena de jugadores.
 
-## 5. Adyacentes que NO son competencia
+### 2. "Control Ganadero produce informes PDF estáticos sin individualización" — **también es falso, o está muy desactualizado**
 
-Se listan para que no se los confunda:
+Es la premisa de la que cuelga todo nuestro posicionamiento. La realidad relevada:
 
-- **Agrotoken** — tokenización de commodities. Otro negocio.
-- **Ruuts** — programa de carbono en ganadería regenerativa (2 tCO₂/ha/año, mercado voluntario LatAm USD 3–25/t). Es un **socio potencial de la capa 2**, no un competidor. Campos de menos de 100 ha no le son rentables.
-- **CREA** — grupos de asesoramiento, no software. Pero sus miembros son el segmento grande de nuestro ICP y **ya tienen asesor y planillas**, lo que los hace más difíciles de ganar, no más fáciles.
+- **Funciona offline** ("registre información sin internet", guarda local y sincroniza).
+- **Identificación individual con RFID**: chips subcutáneos, caravanas electrónicas y stickers NFC.
+- **Lee lectores RFID por Bluetooth y balanzas electrónicas** con registro automático.
+- **Tiene módulo reproductivo**: inseminación, alertas de parto, días abiertos, secado.
+- **Tiene rol de veterinario** y soporta múltiples fincas por cuenta.
+- Autorreporta **22.712 ganaderos activos y 583.925 animales**. En iOS desde 2013 — trece años.
 
----
+O sea: **hace casi todo lo que hacemos nosotros.** El diferencial "nosotros individualizamos y ellos no" no se sostiene. Lo que sí le falta, y es nuestro hueco real: **ninguna integración con SENASA/SIGSA**, sesgo lechero en el módulo reproductivo, y profundidad no verificada en KPIs de cría extensiva.
 
-## Lo que no sabemos y habría que averiguar
+**Hay que reescribir el pitch competitivo antes del material de marca.**
 
-Ordenado por cuánto cambiaría una decisión:
+### 3. Identigan es **colombiano**, no argentino
 
-1. **Cuántos clientes tiene Control Ganadero en Argentina y cuánto le facturan.** Sabemos el precio de lista, no el volumen. Facundo lo puede estimar preguntando a sus propios clientes.
-2. **Si Identigan tiene tracción real en Argentina** o es una marca con web y poco más.
-3. **Qué descuento real hace Control Ganadero cuando lo aprietan.** El precio de lista es el techo, no el piso.
-4. **Si AgriWebb, Herdwatch o CattleMax tienen algún plan de entrar a LatAm.** Un AgriWebb con capital entrando a Argentina cierra nuestra ventana.
-5. **Precio de software de Datamars/Tru-Test** — no publicado.
-6. **Alcance y precio de iLivestock.**
+`CONTEXT/01` lo lista como competidor argentino. Opera en Colombia. 800+ usuarios, 50.000+ animales — chico. Y **0 anuncios activos** en Meta. No es una amenaza en nuestro mercado.
 
 ---
 
-## Cómo usar esto
+## La grilla completa
 
-- Para el **pitch**: no comparar contra software. Ver `CONTEXT/02` → Posicionamiento y el límite del claim.
-- Para el **pricing**: la tabla de arriba es el ancla que tiene en la cabeza el comprador. Cualquier número nuestro se lee contra esos USD 130.
-- Para el **producto**: lo único que ninguno de estos tiene es **data agregada de muchos campos**. El benchmarking anónimo entre campos del plan Vet Pro no es copiable sin la base instalada.
+Rasgos de RAFAQ: ① cría bovina extensiva · ② móvil offline-first · ③ RFID individual · ④ BLE agnóstico de marca · ⑤ reproductivo con KPIs · ⑥ export a trazabilidad oficial · ⑦ rol vet multi-campo · ⑧ no vende hardware · ⑨ mercado hispano.
 
-**Fuentes**: sitios oficiales de cada producto (julio 2026), `CONTEXT/01-producto.md`, `docs/marketing/cuestionario-intake-respuestas.md` §42-46, y el research de mercado de la sesión de modelo de negocio (1/8/2026).
+| Producto | País | ① | ② | ③ | ④ | ⑤ | ⑥ | ⑦ | ⑧ | ⑨ | Cobro |
+|---|---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|---|
+| **AgriWebb** | AU | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | por cabeza (DSE) |
+| **Vacuno** | **AR** | ✅ | ✅ | ✅ | ❌ | ✅ | 🟡 | ✅ | ❌ | ✅ | por cabeza (ARS) |
+| **Control Ganadero** | LatAm | 🟡 | ✅ | ✅ | ✅ | 🟡 | ❌ | ✅ | ✅ | ✅ | por cuenta, freemium |
+| iRancho | BR | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ❓ | ✅ | ❌ | por cabeza |
+| iLivestock | UK | 🟡 | ✅ | ✅ | ✅ | 🟡 | ✅ | ❌ | ❌ | ❌ | **£300/año por campo** |
+| Herdwatch | IE/UK | 🟡 | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ | ❌ | por granja |
+| CattleMax | US | ✅ | 🟡 | ✅ | ✅ | ✅ | ❌ | 🟡 | ✅ | ❌ | por cabeza, tiers |
+| Fertili | BR | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | 🟡 | ✅ | ❌ | suscripción |
+| Digirodeo | **AR** | ✅ | ✅ | ✅ | ❌ | ❓ | 🟡 | ❓ | ❌ | ✅ | suscripción, 3 niveles |
+| Breedr | UK | ✅ | ✅ | ✅ | ❓ | ✅ | ❌ | 🟡 | ✅ | ❌ | freemium + 2% marketplace |
+| Identigan | **CO** | 🟡 | ✅ | ✅ | ❌ | 🟡 | ❌ | 🟡 | ❌ | ✅ | freemium |
+| Huella | **AR** | ✅ | ❓ | ✅ | ❓ | 🟡 | 🟡 | ❓ | ✅ | ✅ | licencia + anual |
+| Agrodeo | UY/AR | ✅ | ✅ | ❌ | ❌ | ✅ | ❌ | ✅ | ✅ | ✅ | USD 0–89,99/mes |
+| Albor | **AR** | 🟡 | 🟡 | ❌ | ❌ | ❌ | ✅ | 🟡 | ✅ | ✅ | por usuario |
+| Datamars/Tru-Test | CH/NZ | ✅ | ✅ | ✅ | ❌ | ✅ | ✅ | ✅ | ❌ | ❌ | gratis con hardware |
+| Gallagher | NZ | ✅ | ❓ | ✅ | ❌ | 🟡 | ✅ | ✅ | ❌ | ❌ | gratis / USD 25 mes |
+| Mobble | AU | ✅ | ✅ | ❌ | ❌ | 🟡 | ❌ | ✅ | ✅ | ❌ | USD 30–210/mes |
+| Sistema Mais Leite | BR | ❌ | ✅ | ❌ | ❌ | ✅ | ❌ | ❓ | ✅ | ❌ | por vacas adultas |
+| Performance Beef | US | ❌ | ✅ | ✅ | ❓ | ❌ | ❌ | ✅ | ✅ | ❌ | **USD 195/mes** |
+| Nedap Livestock | NL | ❌ | 🟡 | ✅ | ❌ | ✅ | ❌ | ✅ | ❌ | ❌ | a cotización |
+| Rúmina | BR | ❌ | ❓ | ❌ | ❌ | ✅ | ❌ | ❓ | ❌ | ❌ | a cotización |
+
+✅ sí · 🟡 parcial · ❌ no · ❓ no encontrado
+
+**No son competencia** y estaban ensuciando la lista: **Pecuaria Digital** (escuela online de engorde, Paraguay — vende un curso de USD 297), **AGROS** (agencia de marketing digital agro que compite por el keyword, no por el producto), **Sygma Sistemas** (ERP fiscal brasileño), **Primaza** (fabricante de caravanas y bastones — es socio potencial, no rival), **Probeef** (marca de nutrición de **Cargill**; su software *es* AgriWebb, del que Cargill es distribuidor exclusivo en Brasil).
+
+---
+
+## Lo que no hace casi nadie — y es donde queda nuestro espacio
+
+De los 21 productos con perfil completo:
+
+1. **Integración con el sistema oficial de trazabilidad**: solo la tienen los de mercados donde es obligatoria hace años — AgriWebb (NLIS), Herdwatch (ICBF/BCMS/ScotEID), iLivestock (BCMS), Datamars y Gallagher (NAIT/NLIS), y Albor en Argentina. **Ningún producto brasileño la publica. Control Ganadero no la tiene. Vacuno solo tiene planillas, no el archivo SIGSA.**
+2. **Rol de veterinario con cuenta propia multi-establecimiento**: casi nadie lo tiene como figura de primera clase. Lo más cercano son "asesores con permisos". Es un diferencial real y es nuestro canal de venta.
+3. **Bluetooth agnóstico de marca**: lo tienen AgriWebb, Herdwatch, CattleMax, iLivestock, iRancho. **En Argentina no lo tiene nadie** — Vacuno, Digirodeo e Identigan venden su propio lector.
+
+**Ese es el hueco**: en Argentina, ser el único que combina *export SIGSA + agnóstico de hardware + rol de veterinario*.
+
+---
+
+## Riesgos competitivos
+
+**AgriWebb fue adquirida por URUS Group** (anunciado mayo 2026, cierre esperado Q3 2026), una empresa estadounidense de genética bovina. Sigue con marca y management propios. Levantó ~USD 64,6M en 11 rondas, opera en 18 países, ~23-25M animales, y **ya está en Brasil vía Cargill**. No hay señal de entrada a Argentina ni producto en español, pero un dueño norteamericano con foco en genética bovina cambia el cálculo para 2027.
+
+**Vacuno ya está en el mercado** con un producto casi idéntico y precios en pesos. Es el competidor a estudiar de cerca, no Control Ganadero.
+
+**Albor es el más grande de Argentina**: 4.000+ usuarios, 5,6M ha, 2,2M cabezas. Su diferencial declarado es justamente conectar con entes reguladores nacionales y provinciales de Argentina, Paraguay, Uruguay y Bolivia. Es carga manual y economía-first, así que no compite en la manga — pero si decide bajar al dato individual, tiene la base instalada para hacerlo.
+
+---
+
+## Uruguay: el espejo de lo que viene, y una advertencia
+
+En Uruguay la trazabilidad individual es obligatoria desde 2006. **El software de declaración no lo hace el mercado: lo hace el Estado.** El SNIG cubre los 12 millones de bovinos, tiene portal del productor renovado en diciembre de 2025, **app móvil oficial desde noviembre de 2016** y guías digitales de propiedad y tránsito. El productor uruguayo no compra una app para declarar — declara en el sistema oficial.
+
+Lo que sí compra es **gestión productiva que dialogue con el sistema oficial**. Y ahí aparece la feature más interesante de todo este relevamiento: **Gecos** (Montevideo) *"compara el archivo bajado del SNIG contra la base del establecimiento y reporta las diferencias"*.
+
+**La advertencia**: SENASA ya publicó SIGBIOTRAZA para declarar caravanas. Si Argentina sigue el camino uruguayo, **exportar el archivo SIGSA es un puente, no un foso** — el Estado lo va a cerrar solo. El foso durable es lo que hace Gecos: **reconciliar el rodeo real contra el oficial y mostrar la diferencia**. Eso el Estado no lo va a construir nunca, porque solo ve su propio lado.
+
+---
+
+## Precios verificados
+
+| Producto | Precio | Modelo |
+|---|---|---|
+| Control Ganadero | USD 14,99/mes · 79,99 semestral · 149,99/año · internacional USD 99,99/año · MX $299/mes | freemium ≤20-30 animales |
+| **Vacuno (AR)** | Gratis ≤50 · **$19.999/mes** ≤500 · **$49.999/mes** ilimitado · $9.999/mes prestadores | por cantidad de animales |
+| CattleMax | 50 cab. USD 144/año · 100 → 216 · 250 → 288 · 500 → 336 · 750 → 420 · 1.000 → **660/año** | por cabeza en tramos |
+| iLivestock | **£27,50/mes o £300/año** por granja | por granja |
+| Mobble | USD 30 / 50 / 95 / 210 por mes según tope de 120 / 600 / 3.000 / 9.000 cabezas | por tope de stock |
+| Agrodeo | USD 0 / 19,99 / 34,99 / 49,99 / 89,99 por mes | escalonado |
+| Performance Beef | **USD 195/mes** o 2.106/año | plano por operación |
+| Gallagher | Gratis con hardware · Plus **USD 25/mes** | freemium atado a hardware |
+| Breedr | 12 meses gratis de Pro (valor **£354**) si comercializás 20+ animales · comisión **2%** al vendedor | freemium + marketplace |
+| Sygma Sistemas | R$ 270/mes + R$ 45/mes por propiedad adicional | por establecimiento |
+| Herdwatch | Promo 6 meses €79/£79/USD 49 · lista a cotización | por granja |
+| AgriWebb | ~AU$34 / 48 / 61 por mes según plan (fuente terciaria) | por cabeza vía DSE |
+| **RAFAQ (propuesto)** | USD 300 + USD 0,80/cabeza, tope 3.500, gratis ≤50 | por campo |
+
+**Recalibración del ancla**: seguimos siendo caros contra Control Ganadero (USD 130/año), pero el rango de la categoría es más ancho de lo que creíamos — iLivestock cobra £300/año por campo y Performance Beef USD 2.340/año. Nuestro USD 860 en un campo de 500 madres queda en el medio del rango internacional, no en el techo.
+
+---
+
+## Qué falta averiguar
+
+1. **Vacuno**: cuántos clientes tiene, hace cuánto opera, si levantó inversión. Es la incógnita más importante del documento.
+2. **Digirodeo**: precio exacto de sus tres niveles.
+3. **Control Ganadero en Argentina**: precio local y cuántos de esos 22.712 ganaderos son argentinos.
+4. **Comitiva Gestão** (Brasil): anuncia en Meta pero no tiene huella pública verificable. Se resuelve entrando al anuncio y viendo el dominio de destino.
+5. **Herdwatch y AgriWebb**: precio de lista real, que ninguno publica.
+
+**Método**: perfilado por tres relevamientos paralelos contra la misma grilla, sobre sitios oficiales, tiendas de aplicaciones, prensa sectorial y la guía de apps ganaderas de CREA. Todo lo que no se pudo verificar quedó marcado como no encontrado en vez de completarse por inferencia.
