@@ -6,7 +6,9 @@
 // manual. Sin transporte instanciado (el Android de hoy: el adapter SPP es Fase 4) no puede llegar jamás
 // un tag, así que la pantalla queda congelada para siempre en su estado vacío… que decía "Bastoneá para
 // empezar / Pasá el bastón por la caravana del animal": le pedía al operario lo único que su dispositivo
-// no puede hacer. Y está a DOS TAPS del tab "Más" (más accesible que `/baston`, que es deep-link-only).
+// no puede hacer. Y está a DOS TAPS del tab "Más". (Cuando se escribió esto, `/baston` era deep-link-only
+// y esta pantalla era por lejos la más accesible de las dos; desde el 2026-08-05 "Más" también tiene una
+// fila a `/baston`, así que ahora están a la par — lo que no cambia es que este vacío mentía.)
 //
 // EL FIX: el vacío DICE LA VERDAD. La fila de "Más" NO se oculta (a diferencia del chip): el chip es un
 // indicador de estado que sin transporte no informa nada; esto es una funcionalidad REAL que existe y

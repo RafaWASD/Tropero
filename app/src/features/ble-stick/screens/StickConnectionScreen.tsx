@@ -38,6 +38,7 @@ import {
   writeRememberedDevice,
 } from '@/services/ble/remembered-device';
 import { buttonA11y, labelA11y } from '@/utils/a11y';
+import { backOr } from '@/utils/nav';
 import {
   connectionStatusView,
   deviceRowView,
@@ -331,9 +332,13 @@ export default function StickConnectionScreen() {
       {/* Header con back (patrón export-sigsa). Título $8 con lineHeight matcheado (descendentes). */}
       <YStack width="100%" paddingTop={insets.top} paddingHorizontal="$4">
         <XStack width="100%" alignItems="center" gap="$2" paddingVertical="$3">
+          {/* `backOr` y no `router.back()` pelado: con el stack vacío (deep-link a /baston, cold-start,
+              web-refresh, hot-reload) el back es un no-op silencioso y el usuario queda trabado. El
+              fallback es "Más", que desde esta unidad es el origen REAL de la pantalla (ADR-018). Era
+              el último back() pelado de la app. */}
           <View
             hitSlop={8}
-            onPress={() => router.back()}
+            onPress={() => backOr(router, '/(tabs)/mas')}
             pressStyle={{ opacity: 0.6 }}
             {...buttonA11y(Platform.OS, { label: 'Volver' })}
           >

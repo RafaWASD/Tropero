@@ -182,6 +182,87 @@ export function connectionStatusView(status: ConnectionStatus, env: ConnectionEn
   }
 }
 
+/**
+ * Traducción `ViewTone` → token de color del DS (ADR-023 §4). Vive acá —y no en cada componente— por
+ * la misma razón que el resto del módulo: es una decisión de presentación, se decide una vez y se
+ * testea. Es puro (devuelve el NOMBRE del token, un string; no importa Tamagui) → node:test lo carga.
+ *
+ * ⚠ ESTA ES LA CANÓNICA, PERO NO ES LA ÚNICA — Y LAS OTRAS NO SON TODAS IGUALES. Hoy conviven tres
+ * copias privadas: `screens/StickConnectionScreen` y `components/StickStatusIndicator` coinciden con
+ * esta, y **`components/StickDeviceRow` DIVERGE**: manda `'progress'` a la rama del `default` junto con
+ * `'idle'`, o sea `$textMuted` donde las otras tres dan `$primary`. Hoy no hay bug vivo porque
+ * `deviceRowView` **nunca** devuelve `tone: 'progress'` (sus cinco estados son success/idle/warning), así
+ * que esa rama es inalcanzable; pero el día que emita uno, el color de esa fila va a diferir del resto.
+ *
+ * Consecuencia para el que venga a unificar: **el barrido NO es un no-op.** Reemplazar la copia de
+ * `StickDeviceRow` por esta función CAMBIA un color (en un camino hoy muerto, y hacia el valor que usan
+ * las otras tres — probablemente el correcto, pero es una decisión, no un refactor mecánico). No se
+ * unificó en la unidad del acceso desde "Más" porque es un barrido cross-file que la excede y porque una
+ * de las copias vive en el chip global, congelado por otra unidad en curso.
+ */
+export function toneColorToken(tone: ViewTone): '$primary' | '$terracota' | '$textMuted' {
+  switch (tone) {
+    case 'success':
+    case 'progress':
+      return '$primary';
+    case 'warning':
+      return '$terracota';
+    case 'idle':
+    default:
+      return '$textMuted';
+  }
+}
+
+/** Estado de conexión CONDENSADO para el trailing de una fila de lista (`{ text, tone }`). */
+export interface ConnectionRowStatus {
+  /**
+   * Copy CORTÍSIMO del estado (es-AR), pensado para el trailing de una fila junto a un chevron. NO
+   * repite la palabra "Bastón": la fila ya la tiene como label, y repetirla la haría desbordar.
+   */
+  text: string;
+  tone: ViewTone;
+}
+
+/**
+ * Estado de conexión para la **fila de acceso al bastón del tab "Más"** (RMV3.1). Es la versión corta
+ * de `connectionStatusView`: la fila necesita responder "¿está conectado?" de un vistazo, sin entrar.
+ *
+ * POR QUÉ VIVE ACÁ y no inline en `mas.tsx`: es exactamente la clase de bug que este archivo cerró el
+ * 2026-07-29 (ver el doc de `StatusIconKey`) — una decisión de presentación del bastón viviendo fuera
+ * del archivo donde se decide y se testea puede terminar contradiciendo a la pantalla (la fila diciendo
+ * "Conectado" mientras la card dice "Bastón no disponible"). El test fija que el `tone` de la fila
+ * COINCIDE con el de `connectionStatusView` para toda combinación de entrada.
+ *
+ * Mismo corte que `connectionStatusView`: **sin transporte** se responde ANTES del switch. La fila NO se
+ * oculta en ese caso (a diferencia del chip global, que se auto-oculta): es el único acceso in-app a la
+ * pantalla, y esa pantalla explica la salida manual. Lo que cambia es que no miente sobre el estado.
+ */
+export function connectionRowStatus(status: ConnectionStatus, env: ConnectionEnv): ConnectionRowStatus {
+  if (!env.hasTransport) {
+    return { text: 'No disponible', tone: 'idle' };
+  }
+
+  switch (status) {
+    case 'connected':
+      return { text: 'Conectado', tone: 'success' };
+    case 'connecting':
+      return { text: 'Conectando…', tone: 'progress' };
+    case 'scanning':
+      return { text: 'Reintentando…', tone: 'warning' };
+    case 'disconnected':
+      return { text: 'Desconectado', tone: 'warning' };
+    case 'permission_denied':
+      return { text: 'Sin permiso', tone: 'warning' };
+    case 'off':
+    default:
+      // Mismo criterio de honestidad que el copy largo (R6.4): si el arranque ya buscó el bastón
+      // recordado y se le agotó el tope, "Sin conectar" sonaría a que nunca se intentó.
+      return env.autoConnectExhausted
+        ? { text: 'No encontrado', tone: 'idle' }
+        : { text: 'Sin conectar', tone: 'idle' };
+  }
+}
+
 /** Estado de la fila de un device descubierto en la pantalla (RMV3.7/3.8). */
 export type DeviceRowState =
   | 'recognized-available' // driver reconocido + adapter construido en este build → conectable

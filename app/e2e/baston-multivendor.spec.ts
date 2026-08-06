@@ -49,11 +49,18 @@ import {
   cleanupAll,
   type TestUser,
 } from './helpers/admin';
-import { signIn, waitForHome } from './helpers/ui';
+import { signIn, waitForHome, gotoTab } from './helpers/ui';
 
 test.afterAll(async () => {
   await cleanupAll();
 });
+
+/**
+ * a11y label de la fila "Bastón" del tab "Más" (`mas.tsx`, sección "Bastón"). El estado va DENTRO del
+ * nombre accesible (`Bastón: <estado>. Abrí…`), así que el matcher es una regex: la navegación no
+ * depende del estado de conexión, que se asserta aparte con su texto exacto.
+ */
+const STICK_ROW_NAME = /^Bastón: .+\. Abrí la pantalla de conexión del bastón$/;
 
 // ─── EIDs FDX-B válidos (15 díg) para el bridge MOCK del test (d). Únicos por corrida (contador). ───
 let eidCounter = 0;
@@ -257,4 +264,84 @@ test('(d) regresión: corrida E2E no-demo (mock) no monta DemoControls ni el ind
   await expect(page.getByTestId('stick-device-row')).toBeVisible({ timeout: 40_000 });
   await expect(page.getByTestId('demo-simulate')).toHaveCount(0);
   await expect(page.getByTestId('stick-status-indicator')).toHaveCount(0);
+});
+
+// ─── (e) RMV3.1: la pantalla es ALCANZABLE in-app desde "Más" (y el chevron vuelve) ────────────────────
+// El bug que originó esta unidad: `/baston` estaba registrada pero SIN entrada in-app (solo deep-link).
+// Raf abrió la app con el chip global ciclando "Conectando…" y no tuvo ninguna forma de llegar a la
+// pantalla para cortarlo. Este test recorre la ruta REAL del operario, no un `page.goto('/baston')`.
+test('(e) RMV3.1: la fila "Bastón" del tab "Más" navega a /baston, y el chevron vuelve a "Más"', async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  const user = await createTestUser('mv-fila-mas');
+  await setUserPhone(user.id, '1123456789');
+  await seedEstablishmentWithRodeo(user.id, 'Campo Baston Fila');
+
+  // Corrida E2E normal (mock): el transporte EXISTE, que es el caso del build de web/Android real.
+  await markBleE2EOnly(page);
+  await page.goto('/');
+  await signIn(page, user);
+  await waitForHome(page);
+
+  const row = page.getByRole('button', { name: STICK_ROW_NAME });
+  await gotoTab(page, 'Más', row);
+  await expect(row).toHaveCount(1);
+
+  // El TRAILING informa el estado EN VIVO sin entrar (el valor de la fila). Con el mock montado y sin
+  // conectar: "Sin conectar" — NO "No disponible" (que es el contrafáctico sin transporte, test (f)).
+  await expect(page.getByText('Sin conectar', { exact: true })).toBeVisible();
+  await expect(page.getByText('No disponible', { exact: true })).toHaveCount(0);
+
+  await row.click();
+
+  // ORÁCULO DEL DESTINO: anclas EXCLUSIVAS de /baston. NO se usa el título "Bastón" del header: el tab
+  // "Más" queda MONTADO detrás del Stack y su fila también dice "Bastón" → strict-mode violation.
+  await expect(page.getByTestId('stick-device-row')).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText('Dispositivos', { exact: true })).toBeVisible();
+  await expect(page).toHaveURL(/\/baston$/);
+
+  // Y la vuelta: el chevron del header usa `backOr(router, '/(tabs)/mas')`. Acá el stack SÍ tiene origen
+  // (llegamos por push), así que se ejercita la rama `router.back()`; la rama del fallback la cubre
+  // `nav.test.ts`. Sin esto, cablear la entrada dejaría al operario sin salida verificada.
+  await page.getByRole('button', { name: 'Volver', exact: true }).click();
+  await expect(row).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId('stick-device-row')).toHaveCount(0);
+});
+
+// ─── (f) contrafáctico: SIN transporte la fila SIGUE (no se oculta) y dice la verdad ──────────────────
+// Sin este lado, un trailing hardcodeado en "Sin conectar" pasaría (e). Y fija la decisión de diseño:
+// la fila NO se gatea por transporte (a diferencia del chip global, que se auto-oculta) porque es el
+// único camino in-app a la pantalla — que es justo la que explica la salida manual.
+test('(f) RMV3.1: sin transporte la fila sigue en "Más", dice "No disponible" y navega igual', async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  const user = await createTestUser('mv-fila-nt');
+  await setUserPhone(user.id, '1123456789');
+  await seedEstablishmentWithRodeo(user.id, 'Campo Baston FilaNT');
+
+  // `__RAFAQ_BLE_E2E_MANUAL__` → provider en mode='manual' → `instantiateTransport` devuelve null:
+  // EXACTAMENTE el estado de un iOS / dev build sin el módulo nativo (mismo shim que usa
+  // `asignar-caravanas-sin-transporte.spec.ts`).
+  await page.addInitScript(() => {
+    const w = window as unknown as Record<string, unknown>;
+    w.__RAFAQ_BLE_E2E__ = true;
+    w.__RAFAQ_BLE_E2E_MANUAL__ = true;
+  });
+  await page.goto('/');
+  await signIn(page, user);
+  await waitForHome(page);
+
+  const row = page.getByRole('button', { name: STICK_ROW_NAME });
+  await gotoTab(page, 'Más', row);
+  await expect(row).toHaveCount(1);
+
+  await expect(page.getByText('No disponible', { exact: true })).toBeVisible();
+  await expect(page.getByText('Sin conectar', { exact: true })).toHaveCount(0);
+
+  // Y sigue llevando a la pantalla: sin transporte, esa pantalla es la que dice qué hacer en su lugar.
+  await row.click();
+  await expect(page.getByTestId('stick-device-row')).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText('Bastón no disponible', { exact: true })).toBeVisible();
 });

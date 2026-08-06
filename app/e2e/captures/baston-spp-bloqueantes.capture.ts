@@ -123,7 +123,10 @@ test('capturas: un bastonazo en /baston entra UNA sola vez (sin sheet global enc
     await signIn(page, user);
     await waitForHome(page);
 
-    // Deep-link a la pantalla de conexión (la fila de "Más" no está cableada todavía).
+    // Deep-link a la pantalla de conexión. Desde el 2026-08-05 "Más" TIENE una fila a `/baston`, así que
+    // el deep-link ya no es el único camino — se conserva acá A PROPÓSITO: esta captura documenta el
+    // arreglo de la doble ingesta (BENCH-3), no el punto de entrada, y el `goto` la deja independiente de
+    // la nav. La ruta por la fila la cubre `baston-multivendor.capture.ts`.
     await page.goto('/baston');
     await expect(page.getByText('Dispositivos', { exact: true })).toBeVisible({ timeout: 40_000 });
     await expect(page.getByTestId('stick-device-row')).toBeVisible({ timeout: 20_000 });

@@ -6,12 +6,15 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  connectionRowStatus,
   connectionStatusView,
   deviceRowView,
   pairedDevicesView,
   readingBadge,
   readsEmptyHint,
+  toneColorToken,
   type PairedListState,
+  type ViewTone,
 } from './connection-view.ts';
 import { RS420_DRIVER } from '../../services/ble/driver-rs420.ts';
 import type { ReaderBinding } from '../../services/ble/selection-priority.ts';
@@ -134,6 +137,109 @@ test('sin transporte: el ícono no puede contradecir al label ("Bastón no dispo
     assert.equal(v.icon, 'bluetooth', `sin transporte, ${s} muestra un ícono que contradice el label`);
     assert.notEqual(v.icon, 'bluetooth-connected');
   }
+});
+
+// ─── RMV3.1: estado CORTO para la fila de acceso al bastón del tab "Más" ─────────────────────
+// La fila existe para que el operario sepa si el bastón está conectado SIN entrar a la pantalla. El
+// copy es de este archivo (no inline en `mas.tsx`) para que no pueda contradecir a la card.
+
+/** Todas las combinaciones de entrada de la fila: 6 estados × {con, sin} transporte × {agotado, no}. */
+const ROW_ENVS = [
+  { hasTransport: true },
+  { hasTransport: false },
+  { hasTransport: true, autoConnectExhausted: true },
+  { hasTransport: false, autoConnectExhausted: true },
+] as const;
+
+test('RMV3.1 fila: los 6 estados (× transporte) tienen texto no vacío y CORTO (cabe en un trailing)', () => {
+  for (const env of ROW_ENVS) {
+    for (const s of ALL_STATES) {
+      const row = connectionRowStatus(s, env);
+      assert.ok(row.text.length > 0, `texto vacío en ${s} / ${JSON.stringify(env)}`);
+      // Techo duro: el trailing convive con el label "Bastón" + el chevron en un ancho de teléfono.
+      // "Reintentando…" (13) es el más largo hoy; 16 deja aire sin permitir una frase.
+      assert.ok(row.text.length <= 16, `texto demasiado largo para un trailing: "${row.text}" (${s})`);
+    }
+  }
+});
+
+test('RMV3.1 fila: el texto NO repite "Bastón" (la fila ya lo dice como label)', () => {
+  for (const env of ROW_ENVS) {
+    for (const s of ALL_STATES) {
+      const { text } = connectionRowStatus(s, env);
+      assert.doesNotMatch(text, /bast[oó]n/i, `el trailing repite el label de la fila: "${text}" (${s})`);
+    }
+  }
+});
+
+test('RMV3.1 fila: el TONO nunca contradice a la card de la pantalla (misma entrada → mismo tono)', () => {
+  // El invariante que justifica que esta función viva en este archivo: si la fila derivara su tono por
+  // su cuenta, podría pintarse de "conectado" (verde) mientras la pantalla dice "no disponible".
+  for (const env of ROW_ENVS) {
+    for (const s of ALL_STATES) {
+      assert.equal(
+        connectionRowStatus(s, env).tone,
+        connectionStatusView(s, env).tone,
+        `la fila y la card discrepan de tono en ${s} / ${JSON.stringify(env)}`,
+      );
+    }
+  }
+});
+
+test('RMV3.1 fila: sin transporte, TODOS los estados dicen lo mismo (ni "Conectado" transitorio)', () => {
+  for (const s of ALL_STATES) {
+    const row = connectionRowStatus(s, NO_TRANSPORT);
+    assert.equal(row.text, 'No disponible', `sin transporte, ${s} muestra otro estado`);
+    assert.equal(row.tone, 'idle');
+  }
+});
+
+test('RMV3.1 fila: con transporte, cada estado dice algo DISTINTO (la fila informa de verdad)', () => {
+  const expected: Record<ConnectionStatus, string> = {
+    connected: 'Conectado',
+    connecting: 'Conectando…',
+    scanning: 'Reintentando…',
+    disconnected: 'Desconectado',
+    permission_denied: 'Sin permiso',
+    off: 'Sin conectar',
+  };
+  const seen = new Set<string>();
+  for (const s of ALL_STATES) {
+    const { text } = connectionRowStatus(s, WITH_TRANSPORT);
+    assert.equal(text, expected[s], `texto inesperado en ${s}`);
+    assert.equal(seen.has(text), false, `dos estados comparten el mismo texto: "${text}"`);
+    seen.add(text);
+  }
+  assert.equal(connectionRowStatus('connected', WITH_TRANSPORT).tone, 'success');
+});
+
+test('R6.4 fila: el auto-connect agotado no dice "Sin conectar" (y solo afecta al estado off)', () => {
+  const agotado = connectionRowStatus('off', { hasTransport: true, autoConnectExhausted: true });
+  assert.equal(agotado.text, 'No encontrado');
+  assert.notEqual(agotado.text, connectionRowStatus('off', WITH_TRANSPORT).text);
+  // El flag NO puede resucitar nada sin transporte, ni tocar los otros estados.
+  assert.equal(connectionRowStatus('off', { hasTransport: false, autoConnectExhausted: true }).text, 'No disponible');
+  for (const s of ['connected', 'connecting', 'scanning', 'disconnected', 'permission_denied'] as const) {
+    assert.deepEqual(
+      connectionRowStatus(s, { hasTransport: true, autoConnectExhausted: true }),
+      connectionRowStatus(s, WITH_TRANSPORT),
+      `el flag no debería cambiar el estado '${s}'`,
+    );
+  }
+});
+
+// ─── toneColorToken: la traducción tono → token del DS, canónica y exhaustiva ─────────────────
+
+test('toneColorToken: los 4 tonos mapean a un token del DS (nunca un color hardcodeado)', () => {
+  const tones: ViewTone[] = ['idle', 'progress', 'success', 'warning'];
+  for (const tone of tones) {
+    const token = toneColorToken(tone);
+    assert.match(token, /^\$[a-zA-Z]+$/, `"${token}" no es un token del DS (ADR-023 §4)`);
+  }
+  assert.equal(toneColorToken('success'), '$primary');
+  assert.equal(toneColorToken('progress'), '$primary');
+  assert.equal(toneColorToken('warning'), '$terracota');
+  assert.equal(toneColorToken('idle'), '$textMuted');
 });
 
 // ─── RMV3.7: binding available true/false → fila conectable / no-disponible ──────────────────

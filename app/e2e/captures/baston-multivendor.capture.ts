@@ -11,6 +11,14 @@
 //   05 — estado DESCONECTADO de la CARD de la pantalla con CTA "Volver a conectar" (LIMPIA, sin pill encima).
 //   06 — estado CONECTADO de la CARD de la pantalla ("Bastón conectado" + CTA "Desconectar"). En /baston el
 //        indicador GLOBAL del chrome se SUPRIME (redundante con la card + evita pisar el título del header).
+//   07 — indicador GLOBAL del chrome (RMV3.5) sobre el tab "Más" (pantalla CON header y CON bottom-nav),
+//        con la conexión VIVA: el pill anclado abajo, por encima del nav y del pico del FAB, sin pisar nada.
+//   08 — la NUEVA fila de acceso "Bastón" en el tab "Más" (RMV3.1), en reposo ("Sin conectar"): pantalla
+//        completa, para vetar la UBICACIÓN de la sección (después de Perfil, antes de "Campo activo").
+//   09 — la misma fila con el estado EN VIVO ("Conectado"): el trailing informa sin entrar a la pantalla.
+//   10 — la misma fila SIN TRANSPORTE ("No disponible"): la decisión de NO ocultarla + el único estado del
+//        trailing con descendente ('p') que se puede montar a voluntad (veto del recorte g/q/p/j/y).
+//        Va en un test aparte de este archivo: necesita otra marca global, y las marcas van pre-bundle.
 //
 // ── DOS CAMBIOS 2026-07-30 (BENCH-3, `progress/bench_baston-spp-emulador.md` §4.5) ──────────────────────
 // El shot 04 mostraba el `FindOrCreateOverlay` global abriéndose por un bastonazo EN /baston. Eso era el
@@ -21,12 +29,13 @@
 // invariante NUEVA. La prueba dedicada del arreglo (con su "y sigue sin abrirse") vive en
 // `baston-spp-bloqueantes.capture.ts`.
 //
-// Y el shot 07 (indicador GLOBAL del chrome en una pantalla CON header, RMV3.5) se CAE de esta captura: la
-// única navegación client-side que salía de /baston con la conexión viva era el "Dar de alta" de ese
-// overlay — o sea, existía solo gracias al bug. /baston se alcanza por deep-link (la fila de "Más" no está
-// cableada), así que no tiene back-stack in-app y cualquier `goto` remonta el provider y apaga la conexión.
-// RMV3.5 sigue cubierto por sus tests (`connection-view.test.ts` + la spec E2E), pero su evidencia VISUAL
-// vuelve cuando "Más" tenga la fila a /baston. Anotado en `docs/backlog.md`.
+// ── EL SHOT 07 VOLVIÓ (2026-08-05, unidad «acceso in-app a la pantalla del bastón») ─────────────────────
+// Se había caído porque la única navegación client-side que salía de /baston con la conexión viva era el
+// "Dar de alta" del overlay — o sea, existía solo gracias al bug que BENCH-3 cerró; y /baston se alcanzaba
+// SOLO por deep-link (la fila de "Más" nunca se había cableado), así que no tenía back-stack in-app y
+// cualquier `goto` remontaba el provider y apagaba la conexión. Ahora "Más" TIENE la fila: esta captura
+// entra por ahí (navegación client-side real) y vuelve por el chevron del header (`backOr`), con la
+// conexión en pie → el pill del chrome se puede fotografiar sobre una pantalla que sí lo muestra.
 //
 // N/A (RMV3.7/3.8) — device 'available:false' / 'no reconocido': en web el RS420 resuelve a
 // 'recognized-available' (binding {web-serial, serial, available:true}); no hay camino de UI para montar esos
@@ -49,11 +58,14 @@ import {
   setUserPhone,
   cleanupAll,
 } from '../helpers/admin';
-import { signIn, waitForHome } from '../helpers/ui';
+import { signIn, waitForHome, gotoTab } from '../helpers/ui';
 
 test.afterAll(async () => {
   await cleanupAll();
 });
+
+/** a11y label de la fila "Bastón" del tab "Más" (el estado en vivo va dentro del nombre accesible). */
+const STICK_ROW_NAME = /^Bastón: .+\. Abrí la pantalla de conexión del bastón$/;
 
 const SHOT_DIR = path.join('e2e', 'captures', '__shots__', 'baston-multivendor');
 
@@ -124,9 +136,17 @@ test('capturas pantalla de conexión + demo del bastón @ 412px', async ({ brows
     await signIn(page, user);
     await waitForHome(page);
 
-    // Aterrizar en la pantalla de conexión (deep-link; la fila de "Más" no está cableada). El reload restaura
-    // la sesión (persistSession en localStorage) → el gate no expulsa /baston (no es ruta de gating).
-    await page.goto('/baston');
+    // (08) La NUEVA fila de acceso del tab "Más" (RMV3.1) en reposo. Pantalla COMPLETA a propósito: lo que
+    // hay que vetar acá es la UBICACIÓN de la sección "Bastón" (después de la card de Perfil, antes del
+    // bloque "Campo activo" — el bastón es del teléfono, no del campo) además de la fila en sí.
+    const stickRow = page.getByRole('button', { name: STICK_ROW_NAME });
+    await gotoTab(page, 'Más', stickRow);
+    await expect(page.getByText('Sin conectar', { exact: true })).toBeVisible();
+    await shot(page, '08-mas-fila-baston');
+
+    // Aterrizar en la pantalla de conexión POR LA FILA (navegación client-side real, no deep-link): es el
+    // camino del operario y el que preserva el provider raíz (y con él la conexión) al volver.
+    await stickRow.click();
     await expect(page.getByText('Dispositivos', { exact: true })).toBeVisible({ timeout: 40_000 });
     await expect(page.getByTestId('stick-device-row')).toBeVisible({ timeout: 20_000 });
 
@@ -163,6 +183,26 @@ test('capturas pantalla de conexión + demo del bastón @ 412px', async ({ brows
     await expect(demoRow).toBeVisible({ timeout: 10_000 });
     await shotBand(page, '03-lectura-demo-confirmacion', page.getByText(/Lecturas/).first(), demoRow);
 
+    // ── Volver a "Más" CON LA CONEXIÓN VIVA (chevron del header = `backOr`; llegamos por push, así que
+    // ejercita `router.back()`). El provider vive en la raíz → la conexión sobrevive a la navegación
+    // client-side. Esto es lo que devuelve el shot 07 después de que la fila existe.
+    await page.getByRole('button', { name: 'Volver', exact: true }).click();
+    await expect(stickRow).toBeVisible({ timeout: 20_000 });
+
+    // (07) Indicador GLOBAL del chrome (RMV3.5) sobre una pantalla CON header y CON bottom-nav: el pill
+    // anclado abajo, por encima del nav y del pico del FAB central, sin pisar el título "Más".
+    await expect(page.getByTestId('stick-status-indicator')).toBeVisible({ timeout: 10_000 });
+    await shot(page, '07-indicador-global-chrome');
+
+    // (09) La fila con el estado EN VIVO: "Conectado" en el trailing (el valor de la fila es enterarse sin
+    // entrar). Banda del componente, para el veto de la fila en sí.
+    await expect(page.getByText('Conectado', { exact: true })).toBeVisible();
+    await shotBand(page, '09-fila-mas-baston-conectado', page.getByText('Bastón', { exact: true }).first(), stickRow);
+
+    // Volver a la pantalla por la fila (la conexión sigue viva) para el estado desconectado.
+    await stickRow.click();
+    await expect(page.getByTestId('stick-device-row')).toBeVisible({ timeout: 20_000 });
+
     // (05) Estado DESCONECTADO de la CARD: tras "Desconectar" → "Bastón desconectado" + CTA "Volver a conectar"
     // (la pantalla queda LIMPIA, sin el pill del indicador global encima — suprimido en /baston).
     await page.getByTestId('stick-status-cta').scrollIntoViewIfNeeded();
@@ -171,17 +211,46 @@ test('capturas pantalla de conexión + demo del bastón @ 412px', async ({ brows
     await expect(page.getByRole('button', { name: 'Volver a conectar', exact: true })).toBeVisible();
     await shot(page, '05-estado-desconectado');
 
-    // (07) — CAÍDO desde el 2026-07-30 (BENCH-3). Mostraba el indicador GLOBAL del chrome (RMV3.5) en una
-    // pantalla CON header: se llegaba al alta de animal con la conexión VIVA tocando "Dar de alta" en el
-    // find-or-create que un bastonazo abría ACÁ. Esa era la única navegación client-side que salía de
-    // /baston con la conexión en pie, y existía SOLO porque el overlay se abría encima de esta pantalla —
-    // que es justo el bug que esta unidad cerró. /baston se alcanza por deep-link (la fila de "Más" no está
-    // cableada), así que no tiene back-stack in-app: `router.back()` es no-op y cualquier `goto` remonta el
-    // provider raíz → status 'off' → el indicador se auto-oculta.
-    //
-    // No se reemplaza por una captura peor: RMV3.5 sigue cubierto por `connection-view.test.ts` y por la
-    // spec E2E, y su evidencia VISUAL vuelve el día que "Más" tenga la fila a /baston (una navegación
-    // client-side real). Anotado en `docs/backlog.md`.
+  } finally {
+    await ctx.close();
+  }
+});
+
+// ── (10) La fila SIN TRANSPORTE — contexto aparte (necesita otra marca global, pre-bundle) ─────────────
+// Dos motivos para que este shot exista:
+//   1. Es una DECISIÓN de diseño que el leader tiene que poder vetar: sin transporte la fila NO se oculta
+//      (a diferencia del chip global, que sí). Es el único camino in-app a la pantalla, y esa pantalla es
+//      la que explica la salida manual — ocultarla la volvería indescubrible justo donde más se necesita.
+//   2. Es el único estado del trailing con DESCENDENTE ("No disponible", la 'p') que se puede montar a
+//      voluntad. El bug de clase recurrente de este repo es el recorte de g/q/p/j/y en un `Text` con
+//      `numberOfLines` cuyo `lineHeight` no matchea el `fontSize`; sin este shot, el veto visual se haría
+//      contra "Sin conectar"/"Conectado", que no tienen ninguno y no probarían nada.
+test('captura de la fila del bastón SIN transporte (decisión: no se oculta) @ 412px', async ({ browser }) => {
+  test.setTimeout(120_000);
+  const ctx = await browser.newContext({ hasTouch: true, isMobile: true, viewport: { width: 412, height: 915 } });
+  const page = await ctx.newPage();
+  await applyEnvShim(page);
+  // `__RAFAQ_BLE_E2E_MANUAL__` → provider en mode='manual' → `instantiateTransport` devuelve null:
+  // exactamente el estado de un iOS / dev build sin el módulo nativo.
+  await page.addInitScript(() => {
+    const w = window as unknown as Record<string, unknown>;
+    w.__RAFAQ_BLE_E2E__ = true;
+    w.__RAFAQ_BLE_E2E_MANUAL__ = true;
+  });
+
+  try {
+    const user = await createTestUser('cap-baston-nt');
+    await setUserPhone(user.id, '1123456789');
+    await seedEstablishmentWithRodeo(user.id, 'Campo Baston NT');
+
+    await page.goto('/');
+    await signIn(page, user);
+    await waitForHome(page);
+
+    const stickRow = page.getByRole('button', { name: STICK_ROW_NAME });
+    await gotoTab(page, 'Más', stickRow);
+    await expect(page.getByText('No disponible', { exact: true })).toBeVisible();
+    await shotBand(page, '10-fila-mas-baston-sin-transporte', page.getByText('Bastón', { exact: true }).first(), stickRow);
   } finally {
     await ctx.close();
   }

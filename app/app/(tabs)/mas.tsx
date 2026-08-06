@@ -36,8 +36,11 @@ import { usePowerSync } from '@powersync/react';
 
 import { Button, Card, FormField, FormError, InfoNote, PhoneField, type PhoneValue } from '@/components';
 import { KeyboardAvoidingShell } from '@/components/KeyboardAvoidingShell';
-import { CampoIcon, LoteIcon, MiembroIcon, RodeoIcon } from '@/theme/icons';
+import { CampoIcon, LoteIcon, MiembroIcon, RodeoIcon, StickIcon } from '@/theme/icons';
 import { useAuth, useEstablishment, useProfile } from '@/contexts';
+import { useBleProviderApi } from '@/services/ble/BleStickListenerProvider';
+import { useBleConnectionStatus } from '@/services/ble/connection-status';
+import { connectionRowStatus, toneColorToken } from '@/features/ble-stick/connection-view';
 import {
   countActiveMembers,
   loadEstablishmentDetail,
@@ -234,6 +237,74 @@ function ActionRow({
         </View>
       ) : null}
     </XStack>
+  );
+}
+
+// ─── Fila del BASTÓN (spec 04, RMV3.1) — el único acceso in-app a /baston ─────────
+//
+// POR QUÉ VIVE FUERA del bloque "Campo activo": el bastón se empareja con el TELÉFONO, no con el
+// campo. Meterlo ahí adentro sería semánticamente falso y —peor— ese bloque entero está gateado por
+// `activeField != null`, así que la fila desaparecería justo cuando el usuario no tiene campo
+// resuelto. Tampoco se gatea por ROL: conectar el bastón no es una acción administrativa, es trabajo
+// de manga; cualquier rol la necesita.
+//
+// El TRAILING muestra el estado de conexión EN VIVO. Es lo que le da valor a la fila: el reporte que
+// la originó (Raf, device) fue abrir la app con el chip global ciclando "Conectando…" sin ninguna
+// forma de llegar a la pantalla ni de saber qué pasaba. El copy sale de `connectionRowStatus` —pura y
+// testeada, en `features/ble-stick/connection-view.ts`— y NO de un derivado inline: una decisión de
+// presentación del bastón viviendo fuera de ese archivo es exactamente el bug que se cerró ahí el
+// 2026-07-29 (la fila podría terminar contradiciendo a la card de la pantalla).
+//
+// SIN transporte instanciado (iOS hoy / dev build sin el módulo nativo) la fila NO se oculta —a
+// diferencia del chip global, que sí—: es el ÚNICO camino in-app a la pantalla, y esa pantalla es la
+// que explica la salida manual. Lo que cambia es que el trailing dice "No disponible" en vez de
+// mentir. Mismo criterio que la fila de "Asignar caravanas en masa" (bugfix 2026-07-29).
+//
+// Componente propio (y no hooks en `MasScreen`) para que el re-render por cada `connection_changed`
+// quede acotado a la fila y no repinte la pantalla entera de ajustes.
+
+function StickRow({ onPress }: { onPress: () => void }) {
+  const status = useBleConnectionStatus();
+  // Sin provider montado el hook devuelve null (y el de status, 'off') → la fila degrada a
+  // "No disponible" en vez de romper. Hoy `(tabs)` cuelga de `BleHost`, que está DENTRO del
+  // `BleStickListenerProvider` (app/_layout.tsx), así que el caso null no se da en la app.
+  const transport = useBleProviderApi()?.transport ?? null;
+  const row = connectionRowStatus(status, {
+    hasTransport: transport != null,
+    autoConnectExhausted: transport?.autoConnectExhausted ?? false,
+  });
+  const primary = getTokenValue('$primary', 'color');
+  const muted = getTokenValue('$textMuted', 'color');
+
+  return (
+    <ActionRow
+      icon={<StickIcon size={20} color={primary} strokeWidth={2} />}
+      label="Bastón"
+      accessibilityLabel={`Bastón: ${row.text}. Abrí la pantalla de conexión del bastón`}
+      trailing={
+        <XStack alignItems="center" gap="$2">
+          {/* `$4` y no `$3` (🟡-5 del review): este trailing ES el argumento de la fila —"enterarse sin
+              entrar"— y en `$3` (13px) quedaba como el texto MÁS CHICO de su propia fila, en contra de la
+              jerarquía que la fila quiere comunicar. Medido a 360px (el ancho más angosto que soportamos)
+              con el estado más largo: no desborda ni trunca. Sigue por debajo del label ($5) porque el
+              label es el nombre del destino y esto es su estado.
+              `lineHeight` matcheado al `fontSize` (bug de clase del repo: sin él, Tamagui recorta los
+              descendentes de un Text con numberOfLines — acá "Conectando…" y "Sin permiso"). */}
+          <Text
+            numberOfLines={1}
+            fontFamily="$body"
+            fontSize="$4"
+            lineHeight="$4"
+            fontWeight="600"
+            color={toneColorToken(row.tone)}
+          >
+            {row.text}
+          </Text>
+          <ChevronRight size={20} color={muted} strokeWidth={2} />
+        </XStack>
+      }
+      onPress={onPress}
+    />
   );
 }
 
@@ -960,6 +1031,14 @@ export default function MasScreen() {
           ) : (
             <InfoNote>No pudimos identificar tu cuenta. Cerrá sesión y volvé a entrar.</InfoNote>
           )}
+
+          {/* ── Bastón (spec 04, RMV3.1) — el acceso in-app a /baston. Va ACÁ, entre Perfil y
+              "Campo activo": el bastón es del TELÉFONO, no del campo (ver el doc de StickRow). Sin
+              gate de campo ni de rol. ── */}
+          <SectionTitle>Bastón</SectionTitle>
+          <Card padding="$0" gap="$0" overflow="hidden">
+            <StickRow onPress={() => router.push('/baston')} />
+          </Card>
 
           {/* ── Campo activo (R3.4 / R3.6) — acciones OWNER-ONLY + Rodeos (todos los roles) ── */}
           {activeField ? (
