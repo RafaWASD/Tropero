@@ -259,3 +259,35 @@ confirmación en la manga? Hoy no hay beep en device y no hay UI para configurar
 | 🟠-8 (b) doble consumo `asignar-caravanas` + `TagScanSheet` | bastonear dentro de `crear-animal` y ver si el EID quedó en la cola masiva |
 | ~~Lecturas con la pantalla apagada~~ | **CERRADO — anda. Ver abajo.** |
 | Todo lo de iOS | no hay adapter todavía (placeholder gateado) |
+
+---
+
+## 7. Cómo verificar el feedback sensorial EN DEVICE sin oír ni sentir nada
+
+Descubierto el 2026-08-06 preparando la verificación de la unidad de sonido. Tres de las cuatro preguntas
+que parecían "solo las contesta un humano" son **medibles por adb**, porque Android registra lo que
+efectivamente reprodujo:
+
+**Vibración** — `adb shell dumpsys vibrator_manager` guarda historial **por app** con el patrón real:
+
+```
+07-30 06:10:11.924 | effect | finished | duration: 57ms | usage: TOUCH
+  | ar.rafq.app (uid=10276) | played: Step=50ms(amplitude=-1.00)
+```
+
+Ese `played:` es el oráculo. Baseline registrado del APK previo al sonido: `Step=50ms`, que es el
+`Vibration.vibrate(50)` de siempre.
+
+**Audio** — `adb shell dumpsys audio` tiene `Events log: playback activity as reported through PlayerBase`
+con entradas `player piid:N event:started`, más las listas `ducked players` y `faded out players`.
+
+| pregunta | oráculo |
+|---|---|
+| ¿el beep suena en **cada** bastonazo? (el bug del 2.º en adelante) | contar `event:started` de nuestro piid contra N lecturas emitidas por el ESP32 |
+| ¿los dos patrones hápticos **difieren**? (R4.8 / 🟡-12) | comparar el campo `played:` de la lectura aceptada vs. la rechazada |
+| ¿el audio **interrumpe** otras apps? (la radio del peón) | `ducked players` + estado de otros players mientras suena |
+| ¿se **oye** con ruido real y se **distingue** con guante? | **irreducible: humano.** Es de Raf o del peón. |
+
+Vale la pena porque convierte "el reviewer encontró que los dos patrones podrían colapsar" en un hecho
+verificable: si en el log salen idénticos, el defecto está vivo en hardware y no hay nada que discutir
+sobre guantes.
