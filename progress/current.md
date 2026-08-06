@@ -1105,3 +1105,26 @@ descuido: en el bastón la respuesta a *"¿quién manda sobre esta lectura / est
 muchos archivos, y cada arreglo **copia** la respuesta en vez de centralizarla. Los fixes de esta noche
 centralizan tres (`connectionRowStatus`, `acceptsRead`, la banda del nav). Vale nombrarlo como clase en vez de
 seguir cazando instancias.
+
+### 2026-08-06 — el fix del `hitSlop` quedó VERIFICADO EN DEVICE
+
+Build EAS `46503ea5` (Android, `preview-dev`, APK 116 MB) instalado sobre el A07 con `-r`. Firma verificada
+**antes** de instalar: `71a60de5…`, el mismo certificado del APK anterior → se instaló encima sin desinstalar
+y **la sesión de Raf quedó intacta**.
+
+| tap (x=360) | anoche | con el fix |
+|---|---|---|
+| y=1300 — el tap exacto que abría maniobra | → maniobra | **no navega** |
+| y=1254 — centro del pill | → maniobra | no navega |
+| y=1290 — aire libre bajo el pill | → maniobra | no navega |
+| **y=1380 — centro del círculo (CONTROL)** | → maniobra | **→ maniobra** |
+
+Techo táctil del FAB: **1276 → 1317**. Y 1317 es exactamente donde arranca el **halo pintado** (fila 1316 =
+fondo, fila 1317 = `(203,230,215)`). El área tocable pasó a coincidir con la extensión visible del botón.
+El pill subió a 1223–1285 por el gap `$2`→`$4`, así que quedan **32 px (17 dp)** de aire.
+
+**Dos errores de medición propios, corregidos antes de concluir** (quedan anotados porque el método
+importa): (1) la primera corrida sacó la captura en *"Modo maniobras"*, que es un modal **sin FAB**; (2) el
+detector buscaba cualquier píxel `$primary` en la columna central y agarraba **el texto del pill**, no el
+círculo. Se corrigió midiendo la **corrida más larga** de color (el círculo son 120 px partidos por el ⚡).
+Sin esa corrección el veredicto habría sido "resultado inesperado" sobre un fix que estaba bien.
