@@ -1205,3 +1205,28 @@ importa): (1) la primera corrida sacó la captura en *"Modo maniobras"*, que es 
 detector buscaba cualquier píxel `$primary` en la columna central y agarraba **el texto del pill**, no el
 círculo. Se corrigió midiendo la **corrida más larga** de color (el círculo son 120 px partidos por el ⚡).
 Sin esa corrección el veredicto habría sido "resultado inesperado" sobre un fix que estaba bien.
+
+### 2026-08-06 — sonido del bastón: COMMITEADO, ⏸ SIN VERIFICAR EN DEVICE (decisión de Raf)
+
+`08eab75`. La unidad está cerrada, `check.mjs` RC=0, E2E `baston*` 24/24, unit 127/127, 30 mutantes muertos,
+6 capturas del Gate 2.5 vetadas por el leader. **Raf decidió NO gastar el build todavía** (van 2 de 30 del
+mes). Consecuencia: el código está en `main` y **nadie lo escuchó ni lo sintió**.
+
+**Lo que falta y por qué no se puede cerrar sin APK**: `expo-haptics` y `expo-audio` son módulos nativos, así
+que en el APK actual (`46503ea5`, anterior a esta unidad) el camino cae al respaldo y no ejercita nada de lo
+nuevo. Las preguntas abiertas son dos y **solo las contesta una persona**: si el pip de 3150 Hz se oye sobre
+el ruido real de la manga, y si `Success` vs `Error` se distinguen con guante.
+
+**Cuando se haga el build, tres de las cuatro verificaciones NO necesitan oído** — la técnica está en
+`progress/sweep_bluetooth-edge-cases.md` §7:
+1. ¿el beep suena en CADA bastonazo? (el bug del 2.º en adelante) → contar `event:started` en
+   `dumpsys audio` contra N lecturas del ESP32.
+2. ¿los dos patrones hápticos difieren de verdad? → comparar el campo `played:` de
+   `dumpsys vibrator_manager` entre una lectura aceptada y una rechazada.
+3. ¿el audio interrumpe otras apps? (la radio del peón) → `ducked players`.
+
+**Riesgo de dejarlo así**: el APK instalado en el A07 **no tiene** esta unidad, así que si Raf prueba el
+bastón hoy va a sentir la vibración vieja de 50 ms y ningún sonido. Eso es lo esperado, no una regresión.
+
+**Permiso nuevo cuando se buildee**: `MODIFY_AUDIO_SETTINGS` (del manifiesto de `expo-audio`, no de nuestra
+config).
