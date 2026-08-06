@@ -60,7 +60,7 @@ test.afterAll(async () => {
  * nombre accesible (`Bastón: <estado>. Abrí…`), así que el matcher es una regex: la navegación no
  * depende del estado de conexión, que se asserta aparte con su texto exacto.
  */
-const STICK_ROW_NAME = /^Bastón: .+\. Abrí la pantalla de conexión del bastón$/;
+const STICK_ROW_NAME = /^Bastón: .+ Abrí la pantalla de conexión del bastón$/;
 
 // ─── EIDs FDX-B válidos (15 díg) para el bridge MOCK del test (d). Únicos por corrida (contador). ───
 let eidCounter = 0;
@@ -108,7 +108,7 @@ async function openBastonDemo(page: Page, user: TestUser): Promise<void> {
   await signIn(page, user);
   await waitForHome(page);
   await page.goto('/baston');
-  await expect(page.getByText('Dispositivos', { exact: true })).toBeVisible({ timeout: 40_000 });
+  await expect(page.getByTestId('stick-devices-section')).toBeVisible({ timeout: 40_000 });
   await expect(page.getByTestId('stick-device-row')).toBeVisible({ timeout: 20_000 });
 }
 
@@ -298,7 +298,7 @@ test('(e) RMV3.1: la fila "Bastón" del tab "Más" navega a /baston, y el chevro
   // ORÁCULO DEL DESTINO: anclas EXCLUSIVAS de /baston. NO se usa el título "Bastón" del header: el tab
   // "Más" queda MONTADO detrás del Stack y su fila también dice "Bastón" → strict-mode violation.
   await expect(page.getByTestId('stick-device-row')).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByText('Dispositivos', { exact: true })).toBeVisible();
+  await expect(page.getByTestId('stick-devices-section')).toBeVisible();
   await expect(page).toHaveURL(/\/baston$/);
 
   // Y la vuelta: el chevron del header usa `backOr(router, '/(tabs)/mas')`. Acá el stack SÍ tiene origen

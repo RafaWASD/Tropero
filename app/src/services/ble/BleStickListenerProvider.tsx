@@ -33,6 +33,7 @@ import type { StickAdapter, ConnectionStatus } from './stick-adapter';
 import { ConnectionStatusContext, isConnectedStatus } from './connection-status';
 import { EidIngestEngine } from './contract';
 import { resolveListening } from './listener-gate';
+import { acceptingTargets, resolveReadHandling, type ReadSubscriber } from './read-dispatch';
 import { selectTransportAdapter, ingestModeFor, type ProviderMode } from './adapter-selection';
 import { ManualAdapter } from './adapter-manual';
 import { MockAdapter } from './adapter-mock';
@@ -69,8 +70,16 @@ interface ProviderApi {
   isListening: boolean;
   /** ¿El transporte está conectado? */
   isConnected: boolean;
-  /** Registra el callback de tag_read del consumidor (spec 09). Devuelve unsubscribe. */
-  subscribeTagRead: (cb: (tag: string) => void) => () => void;
+  /**
+   * Registra el callback de tag_read del consumidor (spec 09). Devuelve unsubscribe.
+   *
+   * `accepts` (🔴-2) declara si ESTE consumidor va a ACTUAR sobre una lectura AHORA. Se evalúa en cada
+   * lectura, antes de decidir el feedback: un suscriptor que se auto-censura (el overlay global en las
+   * rutas dueñas del bastón, el `TagScanSheet` mientras se tipea el EID a mano) NO cuenta como
+   * consumidor, y si no queda ninguno la lectura se descarta en silencio en vez de vibrar sobre un dato
+   * perdido. Omitirlo = "acepto siempre" (el caso de la pantalla `/baston`, que solo lista lecturas).
+   */
+  subscribeTagRead: (cb: (tag: string) => void, accepts?: () => boolean) => () => void;
   /** El adaptador de transporte activo (para la pantalla de conexión, R9). */
   transport: StickAdapter | null;
   /** El adaptador manual (piso, siempre disponible, R7). */
@@ -78,6 +87,17 @@ interface ProviderApi {
 }
 
 const ProviderContext = createContext<ProviderApi | null>(null);
+
+/**
+ * Un suscriptor de tag_read + su declaración de si va a ACTUAR sobre la lectura ahora (🔴-2). El par se
+ * guarda junto porque el provider necesita saber, ANTES de vibrar, cuántos consumidores hay DE VERDAD —
+ * no cuántos están suscriptos (el overlay global siempre lo está). El filtrado lo hace `acceptingTargets`
+ * (puro, en `read-dispatch.ts`, testeado por comportamiento).
+ */
+type TagSubscriber = ReadSubscriber<(tag: string) => void>;
+
+/** Default de `accepts`: el consumidor toma todas las lecturas mientras esté suscripto. */
+const ALWAYS_ACCEPTS = (): boolean => true;
 
 function instantiateTransport(kind: ReturnType<typeof selectTransportAdapter>): StickAdapter | null {
   switch (kind) {
@@ -128,8 +148,9 @@ export function BleStickListenerProvider({
   const engineRef = useRef<EidIngestEngine>(new EidIngestEngine());
   // El adaptador manual (piso) es estable durante toda la vida del provider (R7).
   const manualRef = useRef<ManualAdapter>(new ManualAdapter());
-  // Callbacks de tag_read del consumidor (spec 09). Set para soportar múltiples suscriptores.
-  const tagSubscribersRef = useRef(new Set<(tag: string) => void>());
+  // Callbacks de tag_read del consumidor (spec 09) + su predicado `accepts` (🔴-2). Set para soportar
+  // múltiples suscriptores.
+  const tagSubscribersRef = useRef(new Set<TagSubscriber>());
 
   // El transporte activo (web-serial/mock/null) se elige una vez por (plataforma, modo).
   const transport = useMemo(
@@ -161,9 +182,31 @@ export function BleStickListenerProvider({
 
   // ─── Ingesta de una lectura (cruda de stream o EID limpio) → confirmación → tag_read ────
   const handleReading = useCallback((rawOrEid: string, isRawStream: boolean) => {
-    // Gate de escucha (R10.5/R10.6): si el listener está suspendido (MANIOBRAS o form activo),
-    // no procesamos (el wizard/form lo maneja por su cuenta).
-    if (!listeningRef.current) return;
+    // ── GATE ÚNICO: ¿esta lectura se procesa, y si no, por qué? (`read-dispatch.ts`, decisión pura) ──
+    // Cubre los DOS motivos por los que una lectura no va a ningún lado, y los dos cortan ANTES del
+    // feedback sensorial (R4) y ANTES del motor de dedup (R3):
+    //   (1) la escucha está suspendida (MANIOBRAS o form activo, R10.5/R10.6) — lo de siempre;
+    //   (2) 🔴-2: se escucha, pero NINGÚN suscriptor va a actuar sobre la lectura. Contar suscriptores
+    //       NO alcanza (el overlay global está SIEMPRE suscripto y se censura por ruta adentro de su
+    //       callback): cada suscriptor declara su `accepts()` y contamos los que aceptan AHORA.
+    const listening = listeningRef.current;
+    const subscribers = tagSubscribersRef.current;
+    // Los predicados solo se evalúan si hay escucha (si no, la lectura se descarta igual y evaluarlos
+    // sería trabajo por bastonazo para nada).
+    const targets = listening
+      ? acceptingTargets(subscribers, () =>
+          logTransportEvent({ kind: 'read_loop_error', message: 'accepts_predicate_threw' }),
+        )
+      : [];
+    const handling = resolveReadHandling({ listening, acceptingConsumers: targets.length });
+    if (handling !== 'process') {
+      if (handling === 'drop_no_consumer') {
+        // Silencio HONESTO en vez de una vibración que confirma un dato perdido. Se loguea porque el
+        // síntoma correcto (no pasa nada) es indistinguible de "el bastón no leyó" desde afuera.
+        logTransportEvent({ kind: 'read_dropped_no_consumer', subscribers: subscribers.size });
+      }
+      return;
+    }
 
     const now = Date.now();
     const engine = engineRef.current;
@@ -188,7 +231,22 @@ export function BleStickListenerProvider({
     // la hace el overlay de spec 09 mostrando este EID antes del find-or-create. El "commit"
     // del contrato (engine.commit → tag_read) lo materializa el consumidor al confirmar; acá
     // entregamos el tag (string) como declara la firma de spec 09: onTagRead(tag).
-    for (const cb of tagSubscribersRef.current) cb(candidate.eid);
+    //
+    // Se despacha a los `targets` (los que ACEPTARON), no al Set entero: la lista se fijó en el mismo
+    // instante en que se decidió que había consumidor, así que "a quién se le confirmó" y "quién la
+    // recibió" no pueden divergir.
+    //
+    // Cada entrega va en su PROPIO try/catch (🟠-D del review): un consumidor que tira no puede llevarse
+    // ni a los otros consumidores ni al read-loop del transporte (`SppAndroidAdapter.emitTag` tampoco
+    // atrapa, así que sin esto una excepción acá mataba la ingesta del bastón hasta reconectar). Es
+    // también lo que hace defendible el fail-open de `acceptingTargets`: el intento extra está acotado.
+    for (const cb of targets) {
+      try {
+        cb(candidate.eid);
+      } catch {
+        logTransportEvent({ kind: 'read_loop_error', message: 'tag_subscriber_threw' });
+      }
+    }
   }, []);
 
   // ─── Wiring de los adaptadores (transporte + manual) al contrato ────────────────────────
@@ -251,10 +309,13 @@ export function BleStickListenerProvider({
   const disableListener = useCallback(() => setEnabled(false), []);
   const enableListener = useCallback(() => setEnabled(true), []);
 
-  const subscribeTagRead = useCallback((cb: (tag: string) => void) => {
-    tagSubscribersRef.current.add(cb);
+  const subscribeTagRead = useCallback((cb: (tag: string) => void, accepts: () => boolean = ALWAYS_ACCEPTS) => {
+    // La ENTRADA (no el cb pelado) es la identidad en el Set: dos consumidores podrían compartir la
+    // misma referencia de callback y su unsubscribe no debe llevarse al otro.
+    const entry: TagSubscriber = { cb, accepts };
+    tagSubscribersRef.current.add(entry);
     return () => {
-      tagSubscribersRef.current.delete(cb);
+      tagSubscribersRef.current.delete(entry);
     };
   }, []);
 

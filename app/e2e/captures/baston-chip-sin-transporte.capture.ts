@@ -131,7 +131,7 @@ test('captura A: SIN transporte — ninguna superficie ofrece ni pide el bastón
   //         Antes decía "Bastón sin conectar / Conectá el bastón para leer caravanas…" (el CTA ya
   //         estaba oculto por el componente, pero el copy seguía prometiendo lo que no podía cumplir). ──
   await page.goto('/baston');
-  await expect(page.getByText('Dispositivos', { exact: true })).toBeVisible({ timeout: 40_000 });
+  await expect(page.getByTestId('stick-devices-section')).toBeVisible({ timeout: 40_000 });
   await expect(page.getByText('Bastón no disponible', { exact: true })).toBeVisible();
   await expect(page.getByTestId('stick-status-cta')).toHaveCount(0);
   await shot(page, '03-baston-sin-transporte-sin-cta');
@@ -185,7 +185,11 @@ test('captura B: CON transporte — todo sigue igual (web no se toca)', async ({
 
   // ── 12 — ASIGNAR CARAVANAS EN MASA con transporte: el vacío queda EXACTAMENTE como antes ("Bastoneá
   //         para empezar"). Es el contrafáctico del shot 11: sin este par, "decir siempre que no hay
-  //         bastón" se vería idéntico y no habría cómo vetar la regresión. ──
+  //         bastón" se vería idéntico y no habría cómo vetar la regresión.
+  //         (🔴-3, 2026-08-06: desde el barrido de edge cases el vacío ya no mira SOLO `hasTransport` —
+  //         con transporte pero DESCONECTADO dice "El bastón no está conectado" + CTA. El mock quedó
+  //         conectado en el shot 08, que es la precondición real de este copy; antes este shot lo
+  //         aseveraba sobre un mock desconectado, o sea sobre el propio bug.) ──
   await gotoAsignarCaravanasDesdeMas(page);
   await expect(page.getByText(ESPERANDO, { exact: true })).toBeVisible();
   await shot(page, '12-masiva-con-transporte-vacio-original');
@@ -194,7 +198,7 @@ test('captura B: CON transporte — todo sigue igual (web no se toca)', async ({
   //         del RS420 accionable ("Tocá para conectar"). Idéntico al baseline. (El goto recarga la SPA →
   //         el mock arranca desconectado, por eso el estado es 'off' y no 'connected'.) ──
   await page.goto('/baston');
-  await expect(page.getByText('Dispositivos', { exact: true })).toBeVisible({ timeout: 40_000 });
+  await expect(page.getByTestId('stick-devices-section')).toBeVisible({ timeout: 40_000 });
   await expect(page.getByText('Bastón sin conectar', { exact: true })).toBeVisible();
   await expect(page.getByTestId('stick-status-cta')).toBeVisible();
   await shot(page, '09-baston-con-transporte-con-cta');

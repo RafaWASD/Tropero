@@ -50,7 +50,19 @@ export type TransportLogEvent =
    * de un intento más nuevo: `device.disconnect()` cierra el socket de esa DIRECCIÓN, no el del intento,
    * así que cerrarlo le mataría la conexión al que sí está conectado (MEDIUM-1 del Gate 2).
    */
-  | { kind: 'orphan_socket_kept'; reason: 'address_owned_by_newer' };
+  | { kind: 'orphan_socket_kept'; reason: 'address_owned_by_newer' }
+  /**
+   * Entró una lectura con la escucha ACTIVA y NINGÚN consumidor que fuera a actuar sobre ella (🔴-2 del
+   * barrido de edge cases del 2026-08-06): se descarta ANTES del feedback sensorial y ANTES de la ventana
+   * de dedup (ver `read-dispatch.ts`). No es un estado esperado: es un agujero de producto —una pantalla
+   * que recibe bastonazos y no los usa— y este evento es la única forma de verlo desde afuera, porque el
+   * síntoma correcto (silencio total) es indistinguible de "el bastón no leyó".
+   *
+   * `subscribers` = cuántos había REGISTRADOS cuando todos declinaron. 0 = ninguna superficie suscripta;
+   * ≥1 = suscriptas pero todas censurando (el caso de `maniobra/carga`: el overlay global está montado y
+   * suprimido por ruta, y la pantalla no tiene listener propio).
+   */
+  | { kind: 'read_dropped_no_consumer'; subscribers: number };
 
 /**
  * Registra un evento de transporte sin bloquear (R15.1). Best-effort: si el logger falla, se

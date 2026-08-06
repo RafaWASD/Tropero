@@ -40,7 +40,11 @@ import { CampoIcon, LoteIcon, MiembroIcon, RodeoIcon, StickIcon } from '@/theme/
 import { useAuth, useEstablishment, useProfile } from '@/contexts';
 import { useBleProviderApi } from '@/services/ble/BleStickListenerProvider';
 import { useBleConnectionStatus } from '@/services/ble/connection-status';
-import { connectionRowStatus, toneColorToken } from '@/features/ble-stick/connection-view';
+import {
+  connectionRowA11yLabel,
+  connectionRowStatus,
+  toneColorToken,
+} from '@/features/ble-stick/connection-view';
 import {
   countActiveMembers,
   loadEstablishmentDetail,
@@ -269,10 +273,11 @@ function StickRow({ onPress }: { onPress: () => void }) {
   // "No disponible" en vez de romper. Hoy `(tabs)` cuelga de `BleHost`, que está DENTRO del
   // `BleStickListenerProvider` (app/_layout.tsx), así que el caso null no se da en la app.
   const transport = useBleProviderApi()?.transport ?? null;
-  const row = connectionRowStatus(status, {
+  const env = {
     hasTransport: transport != null,
     autoConnectExhausted: transport?.autoConnectExhausted ?? false,
-  });
+  };
+  const row = connectionRowStatus(status, env);
   const primary = getTokenValue('$primary', 'color');
   const muted = getTokenValue('$textMuted', 'color');
 
@@ -280,7 +285,14 @@ function StickRow({ onPress }: { onPress: () => void }) {
     <ActionRow
       icon={<StickIcon size={20} color={primary} strokeWidth={2} />}
       label="Bastón"
-      accessibilityLabel={`Bastón: ${row.text}. Abrí la pantalla de conexión del bastón`}
+      // El nombre accesible se arma en `connection-view.ts` JUNTO al del pill del chrome, que muestra
+      // el MISMO estado y se monta ENCIMA de esta pantalla: dos nombres que se parezcan rompen
+      // strict-mode en la E2E y suenan como el mismo control en un lector de pantalla.
+      // ⚠️ Corregido el 2026-08-06: acá decía que el pill era "el otro botón que lleva a `/baston`". No
+      // lo es. Se intentó hacerlo tocable y se revirtió el mismo día (se comía los toques de los CTA de
+      // manga): hoy es informativo, `pointerEvents="none"`, y ESTA fila es el único acceso a `/baston`
+      // desde el tab "Más". Lo congela el caso `(E)` de `tap-target-collision-guard.test.ts`.
+      accessibilityLabel={connectionRowA11yLabel(status, env)}
       trailing={
         <XStack alignItems="center" gap="$2">
           {/* `$4` y no `$3` (🟡-5 del review): este trailing ES el argumento de la fila —"enterarse sin
@@ -1032,10 +1044,17 @@ export default function MasScreen() {
             <InfoNote>No pudimos identificar tu cuenta. Cerrá sesión y volvé a entrar.</InfoNote>
           )}
 
-          {/* ── Bastón (spec 04, RMV3.1) — el acceso in-app a /baston. Va ACÁ, entre Perfil y
+          {/* ── Dispositivos (spec 04, RMV3.1) — el acceso in-app a /baston. Va ACÁ, entre Perfil y
               "Campo activo": el bastón es del TELÉFONO, no del campo (ver el doc de StickRow). Sin
-              gate de campo ni de rol. ── */}
-          <SectionTitle>Bastón</SectionTitle>
+              gate de campo ni de rol.
+
+              El título dice "Dispositivos" y no "Bastón" (2026-08-06): con una sola fila que también
+              se llama "Bastón", el título era una tautología —no agrupaba nada— y encima duplicaba la
+              palabra dos veces en la misma pantalla. "Dispositivos" (a) escala a lo que ya está en el
+              roadmap de hardware (balanza, impresora de caravanas) sin re-titular la sección, y (b)
+              espeja la sección "Dispositivos" que la propia `/baston` tiene adentro, así que el
+              operario aterriza en un rótulo que ya vio. ── */}
+          <SectionTitle>Dispositivos</SectionTitle>
           <Card padding="$0" gap="$0" overflow="hidden">
             <StickRow onPress={() => router.push('/baston')} />
           </Card>

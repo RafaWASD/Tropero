@@ -142,7 +142,18 @@ export default function BulkTagAssignmentScreen() {
   // fila de la tab "Más" NO se oculta a propósito (la funcionalidad existe y funciona con el bastón —
   // ocultarla la volvería indescubrible). Misma entrada (`transport != null`) que el chip del header,
   // `maniobra/identificar` y `TagScanSheet`: la condición es "no hay transporte", NO "es Android".
-  const hasTransport = useBleProviderApi()?.transport != null;
+  //
+  // 🔴-3 (barrido 2026-08-06): `hasTransport` SOLO no alcanza. Con el adapter SPP de la Fase 4 es `true`
+  // en todo Android, aunque el bastón esté apagado — y ahí el vacío volvía a decir "Bastoneá para
+  // empezar" en un teléfono donde bastonear no hace nada. El estado de conexión (`isConnected`, más
+  // abajo) es la otra mitad de la pregunta.
+  const bleApi = useBleProviderApi();
+  const hasTransport = bleApi?.transport != null;
+
+  // ¿Hay un scanner ACOTADO activo? (`/baston` lo toma al enfocarse). En ref para poder consultarlo desde
+  // `acceptsRead`, que corre dentro del provider y fuera del render. Ver el comentario de `acceptsRead`.
+  const scopedScannerActiveRef = useRef(bleApi?.scopedScannerActive ?? false);
+  scopedScannerActiveRef.current = bleApi?.scopedScannerActive ?? false;
 
   const [session, dispatch] = useReducer(sessionReducer, INITIAL_SESSION);
   // Aviso de re-escopeo al cambiar de campo (RD7.3 / DA-3): banner transitorio "reiniciamos la sesión".
@@ -167,9 +178,26 @@ export default function BulkTagAssignmentScreen() {
   // caravana) muestran un aviso accionable sin encolar (no se pierde la sesión). Un fallo de la lectura local
   // (casi nunca ocurre) → fail-CLOSED: avisamos "no pudimos verificar" y NO encolamos (mejor pedir un
   // re-bastoneo que encolar un EID sin verificar y arriesgar un dup que rebote al sync).
+  // ¿Esta pantalla va a ACTUAR sobre un bastonazo AHORA? (🔴-2 del barrido del 2026-08-06). UNA sola
+  // respuesta, consumida por el provider (feedback + ventana de dedup) y por el propio callback. Esta ruta
+  // es DUEÑA del bastón (el overlay global se suprime por `BLE_OWNED_ROUTES`), así que si esta pantalla no
+  // puede actuar no queda NINGÚN consumidor y confirmarle la lectura al peón sería mentirle.
+  //
+  // `!scopedScannerActive` (🟠-C del review) NO es defensivo, lo trajo el CTA nuevo de este mismo fix: el
+  // vacío desconectado ahora empuja `/baston`, y en un Stack ESTA pantalla queda MONTADA y suscripta
+  // detrás. `StickConnectionScreen` toma el scanner acotado al enfocarse; sin este término, el primer
+  // bastonazo de prueba que el peón haga en `/baston` —lo más natural del mundo— lo consumirían DOS: la
+  // lista de `/baston` y esta cola masiva, en silencio. Vuelve y tiene un EID encolado que no pidió.
+  // Es el mismo criterio que ya aplica el `FindOrCreateOverlay`, no una tercera respuesta.
+  const acceptsRead = useCallback(
+    () => establishmentIdRef.current !== null && !scopedScannerActiveRef.current,
+    [],
+  );
+
   const onTagRead = useCallback((eid: string) => {
+    if (!acceptsRead()) return;
     const estId = establishmentIdRef.current;
-    if (!estId) return; // defensa: enabled ya lo gatea (campo activo), pero no procesamos sin campo.
+    if (!estId) return; // estrechamiento de tipo (acceptsRead ya cubrió la condición)
     void (async () => {
       const res = await lookupByTag(eid, estId);
       // Re-chequeo del campo tras el await: si cambió mientras la lectura estaba en vuelo, descartamos (el
@@ -190,8 +218,11 @@ export default function BulkTagAssignmentScreen() {
       // asignado → NO se puede reasignar. Avisamos sin encolar; la sesión sigue intacta (RD6.1).
       setDupNotice({ eid, kind: 'already_tagged' });
     })();
-  }, []);
-  useBleStickListener({ enabled, onTagRead });
+  }, [acceptsRead]);
+  // `accepts` = EXACTAMENTE la misma función que gatea `onTagRead` (`acceptsRead`), no una copia del
+  // predicado: si divergieran, el provider confirmaría lecturas que este callback tira.
+  // `isConnected` (🔴-3) alimenta el estado vacío: en Android hay transporte aunque el bastón esté apagado.
+  const { isConnected } = useBleStickListener({ enabled, onTagRead, accepts: acceptsRead });
 
   // ─── Re-escopeo de sesión al cambiar de establishment (RD7.3 / DA-3): reiniciar + avisar ───
   // Invariante DURA: nunca mostrar candidatos de un campo que no es el activo. Al cambiar el campo activo,
@@ -271,7 +302,7 @@ export default function BulkTagAssignmentScreen() {
 
         {/* Cuerpo: EID actual + sus candidatos, o el estado vacío (que dice la verdad sobre el bastón). */}
         {currentEid === null ? (
-          <EmptyQueueState hasTransport={hasTransport} />
+          <EmptyQueueState hasTransport={hasTransport} isConnected={isConnected} />
         ) : (
           <BulkEidBody
             // key={currentEid}: cada EID nuevo en cabeza REMONTA el cuerpo (resetea búsqueda + candidato a
@@ -371,17 +402,20 @@ function DupNoticeBanner({ notice, onDismiss }: { notice: DupNotice; onDismiss: 
   );
 }
 
-// ─── Estado vacío: cola vacía (RD5.2) ───
+// ─── Estado vacío: cola vacía (RD5.2 + 🔴-3) ───
 //
-// CON bastón: "Bastoneá para empezar" (la espera normal del próximo EID). SIN transporte instanciado el
-// copy DICE LA VERDAD ("El bastón no está disponible en este dispositivo" + la salida real), porque acá no
-// puede llegar jamás un tag: es el ÚNICO estado alcanzable en ese dispositivo (la cola solo se llena desde
-// `onTagRead`, y esta pantalla no tiene entrada manual). El texto lo decide la función PURA
-// `bulkAssignEmptyView` —no un ternario suelto en el JSX— por la misma razón que el resto del bugfix: el
-// copy que promete el bastón se me escapó una vez por estar inline; toda respuesta a "¿esto promete
-// bastonear?" se decide y se testea en un archivo.
-function EmptyQueueState({ hasTransport }: { hasTransport: boolean }) {
-  const view = bulkAssignEmptyView(hasTransport);
+// Tres estados, decididos por la función PURA `bulkAssignEmptyView` —no por un ternario suelto en el JSX—
+// por la misma razón que el resto del bugfix: el copy que promete el bastón se me escapó una vez por estar
+// inline; toda respuesta a "¿esto promete bastonear?" se decide y se testea en un archivo.
+//   - bastón CONECTADO → "Bastoneá para empezar" (la espera normal del próximo EID).
+//   - transporte pero DESCONECTADO (🔴-3: el Android con el bastón apagado / la cadena de reconexión
+//     agotada) → decir que no está conectado + CTA a `/baston`. Sin el CTA esto es un pozo mudo: la
+//     pantalla no tiene entrada manual, el header no tiene chip y el pill global se auto-oculta en 'off'.
+//   - SIN transporte → la frase canónica + la salida por la ficha (no hay nada que conectar acá).
+function EmptyQueueState({ hasTransport, isConnected }: { hasTransport: boolean; isConnected: boolean }) {
+  const router = useRouter();
+  const view = bulkAssignEmptyView({ hasTransport, isConnected });
+  const action = view.action; // en una const para que TS lo estreche dentro del JSX (sin `!`)
   return (
     <YStack flex={1} width="100%" alignItems="center" justifyContent="center" gap="$4" paddingHorizontal="$6">
       <Radio size={getTokenValue('$icon', 'size')} color={getTokenValue('$textMuted', 'color')} strokeWidth={1.75} />
@@ -399,10 +433,22 @@ function EmptyQueueState({ hasTransport }: { hasTransport: boolean }) {
             {view.notice}
           </Text>
         ) : null}
-        <Text fontFamily="$body" fontSize="$4" fontWeight="400" color="$textMuted" textAlign="center">
+        {/* `lineHeight` explícito (⚪-K del review): el cuerpo del estado 'connectable' es el más largo de
+            los tres y el que más envuelve, y Tamagui NO aplica el lineHeight del token con un `fontSize`
+            suelto → la segunda línea recorta los descendentes (g/q/p/j/y de "Prendé"/"podés"/"tocá"). */}
+        <Text fontFamily="$body" fontSize="$4" lineHeight="$4" fontWeight="400" color="$textMuted" textAlign="center">
           {view.body}
         </Text>
       </YStack>
+      {/* La SALIDA (🔴-3): un estado técnicamente correcto que deja al peón sin próximo paso es un bug.
+          `fullWidth` dentro del padding $6 del vacío → target XL, alcanzable con una mano. */}
+      {action ? (
+        <YStack width="100%">
+          <Button variant="primary" fullWidth onPress={() => router.push({ pathname: action.href })}>
+            {action.label}
+          </Button>
+        </YStack>
+      ) : null}
     </YStack>
   );
 }

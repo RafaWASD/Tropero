@@ -134,15 +134,26 @@ export function TagScanSheet({
   // ── Lectura del bastón (RCF.6): el EID llega YA validado+dedupeado del contrato. Live-rescan: un EID nuevo
   //    reemplaza al que estaba a confirmar (escanear-escanear es el ritmo del bastón), salvo assign en vuelo
   //    o carga manual activa (el usuario está tipeando → ignoramos el bastón). ──
-  const onTagRead = useCallback((eid: string) => {
-    if (assigningRef.current || manualModeRef.current) return;
-    setAssignError(null);
-    setReadEid(eid);
-  }, []);
+  // ¿Este sheet va a ACTUAR sobre un bastonazo AHORA? (🔴-2 del barrido del 2026-08-06). Es la MISMA
+  // condición que ya tenía el callback, leída de las MISMAS refs, hoisteada para que el provider la
+  // consulte ANTES de vibrar: mientras el sheet tiene un assign en vuelo o el operario está tipeando el
+  // EID a mano, este sheet ignora las lecturas Y el overlay global está suprimido (el sheet tiene la
+  // propiedad exclusiva del listener, RCF.6) → no hay NINGÚN consumidor, y una vibración ahí sería una
+  // confirmación falsa sobre un bastonazo perdido.
+  const acceptsRead = useCallback(() => !assigningRef.current && !manualModeRef.current, []);
+
+  const onTagRead = useCallback(
+    (eid: string) => {
+      if (!acceptsRead()) return; // defensa en profundidad (el provider ya no despacha si no acepta)
+      setAssignError(null);
+      setReadEid(eid);
+    },
+    [acceptsRead],
+  );
 
   // Suscripción al listener (enabled=true; el scoped scanner ya fuerza la escucha aunque busyMode esté
   // prendido). Nos da isConnected para el hero adaptativo (paridad con maniobra/identificar).
-  const { isConnected } = useBleStickListener({ enabled: true, onTagRead });
+  const { isConnected } = useBleStickListener({ enabled: true, onTagRead, accepts: acceptsRead });
 
   // transport != null → hay algo CONECTABLE (web-serial antes de elegir puerto / bastón caído). null → no hay
   // transporte (native manual-first hoy) → el hero cae a "manual promovido". connect() con gesto del tap.

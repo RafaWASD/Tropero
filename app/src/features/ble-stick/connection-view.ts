@@ -182,6 +182,37 @@ export function connectionStatusView(status: ConnectionStatus, env: ConnectionEn
   }
 }
 
+// ─── Nombre ACCESIBLE de la fila de acceso al bastón ─────────────────────────────────────────────────
+//
+// Vive acá y no inline en `mas.tsx` por la misma regla que el resto del módulo: es una decisión de
+// presentación del bastón, se decide una vez y se testea. La forma es estado PRIMERO, acción después, y
+// el nombre contiene el texto VISIBLE **verbatim** (WCAG 2.5.3 «Label in Name»: quien maneja la app por
+// voz dice lo que ve). Por eso el separador depende de cómo termina el estado: sin eso, `Conectando…`
+// producía `Conectando….`, dos frases cortadas para un lector de pantalla.
+//
+// ⚠️ El pill del chrome (`StickStatusIndicator`) NO tiene entrada acá **a propósito**: no es un botón,
+// es un elemento informativo con `pointerEvents="none"` (ver el bloque ⛔ de ese archivo — se intentó
+// hacerlo tocable el 2026-08-06 y se revirtió con evidencia medida). Su nombre accesible es el label del
+// estado, sin acción, vía `labelA11y`. Si algún día vuelve a ser un botón, su nombre se decide ACÁ y
+// junto a este: los dos se montan a la vez y dos nombres parecidos rompen strict-mode en la E2E y suenan
+// como el mismo control repetido en un lector de pantalla.
+
+/** Acción de la FILA del tab "Más" (el destino es una pantalla a la que se navega). */
+export const STICK_ROW_ACTION = 'Abrí la pantalla de conexión del bastón';
+
+/** Une `<estado>` + `<acción>` sin duplicar puntuación y sin alterar el estado (WCAG 2.5.3). */
+function joinStateAndAction(state: string, action: string): string {
+  return /[.…!?]$/.test(state) ? `${state} ${action}` : `${state}. ${action}`;
+}
+
+/**
+ * Nombre accesible de la **fila "Bastón" del tab "Más"**. El estado va DENTRO del nombre: la fila
+ * informa sin entrar, y un lector de pantalla tiene que poder decir lo mismo que el trailing.
+ */
+export function connectionRowA11yLabel(status: ConnectionStatus, env: ConnectionEnv): string {
+  return joinStateAndAction(`Bastón: ${connectionRowStatus(status, env).text}`, STICK_ROW_ACTION);
+}
+
 /**
  * Traducción `ViewTone` → token de color del DS (ADR-023 §4). Vive acá —y no en cada componente— por
  * la misma razón que el resto del módulo: es una decisión de presentación, se decide una vez y se

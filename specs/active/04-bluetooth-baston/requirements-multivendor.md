@@ -88,6 +88,22 @@
 
 **RMV3.6** Mientras el estado de conexión sea cualquiera (apagado / permiso denegado / buscando / conectado / desconectado), el sistema deberá mantener la carga manual disponible y **no deberá** bloquear la pantalla de conexión ni el resto de la app.
 
+> **Nota 2026-08-06 — se intentó hacer el indicador TOCABLE y se REVIRTIÓ el mismo día. RMV3.6 queda como está.** Se deja escrito con los números para que el próximo que lo proponga se encuentre con la medición y no con el silencio.
+>
+> **Qué se intentó y por qué**: que tocar el pill del chrome abriera `/baston`. Lo pidió el reporte de Raf que originó el bugfix del `hitSlop`: la app arrancaba con el pill ciclando *"Conectando…"* y el gesto natural —tocar lo que te está informando el problema— no hacía nada.
+>
+> **Por qué se cayó**: el pill flota sobre la banda inferior, y esa banda **está disputada por diseño** — todo CTA a ancho completo la cruza. Medido:
+> - **A07, build real** (720×1600): el CTA primario del asistente de jornada, `'Arrancar jornada'`, ocupa `[34,1242]-[686,1362]`; el pill ocupa `[220,1244]-[500,1306]`, o sea **entero adentro del botón**. Hoy un tap en el centro del pill (360, 1275) atraviesa y arranca la jornada. Con el pill tocable, ese mismo tap se lo lleva `/baston`: el botón más importante del flujo de manga deja de responder donde el operario apoya el dedo.
+> - **Barrido en web @412×915** (pill `y=[759,799] x=[133,279]`, pill como elemento *topmost* en su centro): se quedaba con los toques de `"Ir a Animales"` (tab Inicio), `"Eliminar campo (acción destructiva)"` (tab Más) y **tres maniobras tocables de `/maniobra/jornada` etapa 2** (`"Antibiótico"`, `"Circunferencia escrotal"`, `"Antiparasitario"`) — 🔴 manga.
+>
+> **La conclusión no es "elegimos mal el lugar en el eje x": es que ese lugar no existe.** Un elemento flotante que reclama toques ajenos es exactamente la clase de defecto que el bugfix del `hitSlop` vino a cerrar, reintroducida en la otra dirección. **Gatear por ruta se descartó aparte** (Raf): una afordancia que aparece y desaparece según dónde estés es peor que una constante.
+>
+> **Qué queda, entonces**: el indicador sigue **puramente informativo** — contenedor `pointerEvents="box-none"`, pill `pointerEvents="none"`, sin `onPress`, sin rol de botón, nombre accesible por `labelA11y`. Lo hace cumplir `src/utils/tap-target-collision-guard.test.ts` → `(E)`, y lo verifica por comportamiento `e2e/fab-target-geometry.spec.ts` (el pill nunca es el elemento *topmost* en su centro). **El acceso a `/baston` ya está resuelto sin esto**: la fila de la sección "Dispositivos" del tab "Más" (RMV3.1, 2026-08-05) y el `ConnectHero` que cada pantalla relevante monta.
+>
+> **Lo único que SÍ quedó de ese intento** es geometría, y por un motivo independiente: el aire del pill al pico del FAB pasó de `$2` (7) a `$4` (18) → **20 dp** de separación efectiva. No es para separar dos *targets* (el pill no lo es): con 9-10 dp el pill y el círculo se leían como una sola pieza pegada, y —lo que importa— **cualquier slop futuro del FAB se los volvía a comer**. Es margen de seguridad además de aire visual. El `minHeight="$chipMin"` que también venía de ese intento **se sacó**: 40 dp es el bar de un target compacto y esto no es un target.
+>
+> **Y el defecto 🔴 que disparó todo esto no era del pill sino del FAB**: `hitSlop={{ top: $fabRaise }}` en `app/(tabs)/_layout.tsx` extendía el target del FAB 26 dp sobre su círculo pintado y se comía el **48 % inferior** del pill (medido en web y en el A07). Ojo con el razonamiento fácil: que el pill sea `pointerEvents="none"` **no evitaba** ese bug — el toque atravesaba el pill y caía justo en el target inflado del FAB, que era lo que estaba abajo. Detalle, mediciones y los tres guards que lo cierran en la reconciliación homónima de `design-multivendor.md` §7.
+
 **RMV3.7** Cuando el dispositivo elegido corresponde a un `ReaderBinding` con `available:false` (transporte reconocido pero adaptador no construido en el build — ej. iOS-HID GATED o SPP sin dev build), el sistema deberá informar el estado "reconocido, no disponible en este build todavía" con CTA a la carga manual, **sin** intentar una conexión que fallaría.
 
 **RMV3.8** Cuando un dispositivo descubierto no matchea ningún driver (RMV1.7), el sistema deberá mostrarlo como "no reconocido" y ofrecer la carga manual, sin bloquear.

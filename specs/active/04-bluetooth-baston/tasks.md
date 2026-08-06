@@ -146,8 +146,8 @@ Fase 0 (setup) → Fase 1 (contrato + feedback) → Fase 2 (manual/web-serial/mo
 | R1.5, R1.6 | T1.2 | OK |
 | R2.1, R2.3, R2.4, R2.5 | T1.6 | OK (frontera spec 09 — Preguntas abiertas #3) |
 | R2.2 | T1.5, T6.* (UI <1s) | OK lógica / UI tentativa |
-| R3.1..R3.5 | T1.3, T2.5 | OK |
-| R4.1, R4.2, R4.5 | T1.5 | OK |
+| R3.1..R3.5 | T1.3, T2.5, **T7.1** | OK |
+| R4.1, R4.2, R4.5 | T1.5, **T7.1** | OK |
 | R4.3, R4.4 | T1.4, T6.4 | OK lógica / UI tentativa |
 | R5.1..R5.4 | T2.3 | OK (buildable hoy) |
 | R5.5, R5.6 | T2.4 | OK |
@@ -165,7 +165,8 @@ Fase 0 (setup) → Fase 1 (contrato + feedback) → Fase 2 (manual/web-serial/mo
 | R9.3, R9.4 | T3.1, T6.3 | OK lógica / UI tentativa |
 | R10.1, R10.8 | T2.2, T7.2 | OK |
 | R10.2, R10.3 | T3.4, T4.6, T5.3 | OK (mock/web) / Android / GATED |
-| R10.4 | T3.2, T3.3 | OK |
+| R10.4 | T3.2, T3.3, **T7.1** | OK (firma extendida con `accepts?`) |
+| **R4.6, R4.7** (nuevos) | **T7.1** | OK |
 | R10.5, R10.7 | T3.5, T7.3 | OK |
 | R10.6 | T3.6 | OK |
 | R11.1 | T0.3 | OK |
@@ -177,6 +178,17 @@ Fase 0 (setup) → Fase 1 (contrato + feedback) → Fase 2 (manual/web-serial/mo
 | R13.1, R13.2 | T3.10 | OK |
 | R14.1, R14.2 | T3.8 | OK |
 | R15.1, R15.2 | T3.9 | OK |
+
+## Fase 7 — Edge cases del barrido de Bluetooth (2026-08-06)
+
+- [x] **T7.1 (🔴-2)** — Ninguna lectura emite feedback sensorial ni consume la ventana de dedup si **nadie** va a recibirla. Cubre: **R4.1 (reconciliado), R4.6, R4.7, R10.4 (extendido), R3.1, R15.1**.
+  - **EL BUG**: el provider disparaba `playFeedback` apenas el candidato era válido, **antes** del bucle de despacho y sin mirar si había alguien. En `maniobra/carga` no hay `useBleStickListener` propio y el overlay global se auto-suprime en TODO el árbol `maniobra/*` (`BLE_OWNED_ROUTES`), así que el peón —cargando el peso en el cepo, con el siguiente animal ya entrando, que es el ritmo real de la manga— bastonea, **el teléfono le confirma**, y el dato no llega a ningún lado. Encima el EID quedaba quemado 3 s, así que re-bastonear enseguida tampoco entraba. La vibración es *la* señal que este producto le enseñó a leer como "entró": es una **confirmación falsa sobre un dato perdido**, el peor modo de falla del barrido.
+  - **POR QUÉ NO ALCANZABA CON CONTAR SUSCRIPTORES** (el fix que se había encargado): habría sido un **no-op**. El `FindOrCreateOverlay` es GLOBAL, está SIEMPRE suscripto, y su supresión por ruta ocurre **adentro** de su callback, donde el provider no la ve. La pregunta correcta no es *"¿hay alguien suscripto?"* sino *"¿hay alguien que va a ACTUAR?"*.
+  - **AS-BUILT**: módulo puro nuevo `app/src/services/ble/read-dispatch.ts` — `resolveReadHandling({listening, acceptingConsumers})` → `process` / `drop_listener_suspended` / `drop_no_consumer`; `acceptingTargets()` (filtra por predicado, fail-OPEN acotado ante un predicado que tira); `resolveAccepts(ref)` (compone el predicado del hook **fuera de React**, para poder verificarlo ejecutándolo). Cada suscriptor declara `accepts()` (`subscribeTagRead(cb, accepts?)`, `useBleStickListener({..., accepts?})`); el default es "acepto siempre". El gate corta **antes** del feedback y **antes** del motor de ingesta.
+  - **DECISIÓN — la ventana de dedup NO se consume** en un descarte sin consumidor. `TagDedup.shouldEmit` documenta (y el banco del ESP32 verificó) que la ventana se mide *"desde la última emisión CONFIRMADA"* (R3.1: *"desde la última ingesta confirmada"*). Una lectura que nadie recibió **no es** una emisión: registrarla quemaba el EID 3 s por algo que nunca salió, y el peón que volvía a `identificar` y re-bastoneaba ese animal se comía un segundo silencio sin causa visible. Descartar antes del motor **restaura** la semántica en vez de debilitarla. No afecta al banco: sus escenarios corren sobre `maniobra/identificar`, que **sí** tiene consumidor.
+  - **DECISIÓN — la cola de bastonazos en `carga.tsx` NO se implementa**: es decisión de producto de Raf. El alcance de esta task es que el producto **deje de mentir**, no tapar el agujero.
+  - _Verificación_: `app/src/services/ble/read-dispatch.test.ts` (decisión pura exhaustiva + filtrado por comportamiento + `resolveAccepts` ejecutado + guards estáticos de orden, canal único de feedback, y tabla de consumidores) + `wiring.test.ts` (payload de los eventos nuevos) + E2E `app/e2e/baston-lectura-sin-consumidor.spec.ts`, que convierte *"¿el producto le confirmó al peón?"* en un **número observable** en web (contador de `AudioContext`, porque el beep sí existe en web) con su contrafáctico. **Falsificado con 20 mutantes, 20 muertos** — incluidos los 7 que sobrevivieron a la primera versión de los guards: `?? true`→`|| true` en la composición del predicado, alias de `playFeedback`, otro canal de vibración (`hapticTick`), predicado que deja de mirar un término, corte extra divergente en el callback, y consumidor nuevo por destructuring o alias de import.
+  - **Gates que quedan afuera, por su consecuencia**: `/baston` declara `always` pero solo es dueña **con foco** (montada-sin-foco cuenta como consumidor → una lectura puede aterrizar en una lista que nadie mira; sin dato perdido ni confirmación falsa). Y la **puerta MANUAL** (R7.1) va a caer en este gate el día que se cablee: advertencia en la cabecera de `read-dispatch.ts`.
 
 ## Notas de ejecución
 

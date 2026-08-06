@@ -68,6 +68,25 @@
 
 **R4.1** Cuando el contrato confirma un EID válido, el sistema deberá emitir **vibración táctil** en el dispositivo, **siempre** (no apagable), porque el operario la percibe con guantes o con barro.
 
+> **Reconciliación as-built (2026-08-06, 🔴-2 del barrido de edge cases del Bluetooth).** "Confirma" se lee
+> literal: si **ningún consumidor va a recibir** la lectura, el contrato **no la confirma** —se descarta
+> antes del feedback y antes de la ventana de dedup (ver **R4.6**)—, así que R4.1 no aplica a ese caso y no
+> se viola. El as-built anterior sí lo violaba en espíritu: vibraba antes de saber si alguien la recibía.
+
+**R4.6** *(nuevo, 2026-08-06 — 🔴-2)* Cuando entra una lectura y **ningún** consumidor suscripto va a actuar
+sobre ella, el sistema **no** deberá emitir feedback sensorial **ni** consumir la ventana de dedup del EID,
+y deberá registrar el descarte (`read_dropped_no_consumer`) para que el agujero sea diagnosticable.
+
+**Por qué es un requisito y no un detalle**: la vibración es la señal que este producto le enseñó al peón a
+leer como *"entró"*. Emitirla sobre una lectura que se pierde es una **confirmación falsa sobre un dato
+perdido** — el peor modo de falla del informe. Medido en `maniobra/carga`: la pantalla no tiene listener
+propio y el overlay global se suprime en todo el árbol `maniobra/*`, así que el peón bastoneaba el siguiente
+animal mientras cargaba el peso del anterior, el teléfono le confirmaba, y el dato no llegaba a ningún lado.
+
+**R4.7** *(nuevo, 2026-08-06 — 🔴-2)* El feedback sensorial de una lectura deberá emitirse desde un **punto
+único**, aguas abajo de la decisión de R4.6. Ningún otro módulo del camino de la lectura
+(`src/services/ble/**`) puede emitirlo por su cuenta, por ninguna API (vibración, háptica o sonido).
+
 **R4.2** Cuando el contrato confirma un EID válido y el beep está habilitado, el sistema deberá emitir un **beep** sonoro corto.
 
 **R4.3** El sistema deberá exponer una preferencia de usuario para **apagar el beep** de lectura (útil/molesto según el sol o el ruido), persistida localmente entre sesiones; con el beep apagado, la vibración (R4.1) deberá seguir activa.
@@ -213,6 +232,20 @@
 **R10.3** El sistema deberá implementar el `BleStickListenerProvider` (interfaz de spec 09) montando el adaptador correcto según plataforma/entorno: `adapter-spp-android` en Android device, `adapter-web-serial` en web, `adapter-hid-wedge` cuando esté destrabado (R8.7), `adapter-mock` en CI/dev, y `adapter-manual` siempre como piso (R7).
 
 **R10.4** El sistema deberá implementar `useBleStickListener(opts: { enabled, onTagRead })` con la firma exacta que spec 09 declaró, retornando `{ isConnected, isListening }`, reemplazando el stub que spec 09 montó (spec 09 T1.5).
+
+> **Reconciliación as-built (2026-08-06, 🔴-2).** La firma se **extendió** con un campo OPCIONAL:
+> `useBleStickListener({ enabled, onTagRead, accepts? })`. Es retrocompatible (todo consumidor que no lo
+> pase se comporta igual que antes) y no cambia el retorno. **Por qué hizo falta**: R4.6 exige saber si
+> *alguien va a actuar* sobre la lectura, y "está suscripto" no responde eso — el `FindOrCreateOverlay` es
+> global, está SIEMPRE suscripto, y se auto-censura **adentro** de su callback, donde el provider no lo ve.
+> Contar suscriptores habría sido un no-op. `accepts()` mueve la pregunta de *"¿hay alguien suscripto?"* a
+> *"¿hay alguien que va a actuar?"*, que es la que R4.6 necesita.
+>
+> ⚠️ **Advertencia para la puerta MANUAL (R7.1)**: `accepts` gatea `handleReading`, que es la entrada de los
+> DOS caminos del contrato (transporte y `ManualAdapter`). Hoy no hay conflicto porque `ManualAdapter.submit()`
+> no tiene call sites. Quien cablee la manual tiene que **separar las puertas**: el `accepts` del
+> `TagScanSheet` es falso exactamente cuando el operario está tipeando, así que tal como está se tragaría el
+> EID cargado a mano.
 
 **R10.5** Cuando `enabled` es `false` (lo setea spec 09 al entrar a MODO MANIOBRAS, spec 03), el sistema deberá **desactivar** la escucha del listener global (sin desconectar físicamente el bastón) para que el wizard de spec 03 procese los TAGs por su cuenta sin interferencia, y deberá reactivarla al volver a `enabled = true`.
 

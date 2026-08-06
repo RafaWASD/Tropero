@@ -63,6 +63,19 @@ async function bastonazo(page: Page, eid: string): Promise<void> {
   }, eid);
 }
 
+/**
+ * Marca el bastón como CONECTADO sin inyectar ninguna lectura. Precondición del vacío "Bastoneá para
+ * empezar" desde el 🔴-3 (2026-08-06): ese estado ahora distingue el bastón conectado del desconectado
+ * ("El bastón no está conectado" + CTA a /baston), y el MockAdapter arranca DESCONECTADO.
+ */
+async function conectarBaston(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const h = (window as unknown as { __rafaqBle?: { connectMock: () => void } }).__rafaqBle;
+    if (!h) throw new Error('window.__rafaqBle no está disponible (¿se montó el BleE2EBridge bajo el flag?)');
+    h.connectMock();
+  });
+}
+
 test('captura: modo assign_or_create del bottom-sheet (≥3 candidatos + buscador) para el veto del leader', async ({ page }) => {
   const user = await createTestUser('dedup-shot');
   await setUserPhone(user.id, '1123456789');
@@ -129,6 +142,9 @@ test('captura: BulkTagAssignmentScreen (opción B, asignación masiva) — vací
   await signIn(page, user);
   await waitForHome(page);
 
+  // El bastón CONECTADO es la precondición del vacío "Bastoneá para empezar" (🔴-3).
+  await conectarBaston(page);
+
   // Esperamos a que los candidatos bajen por la stream (visibles en la lista = sincronizado al local).
   await gotoAnimales(page);
   await expect(page.getByText('0512', { exact: true }).first()).toBeVisible({ timeout: 30_000 });
@@ -171,6 +187,9 @@ test('opción B: bastonear un EID ya asignado NO encola y avisa (prevención cli
   await gotoWithBle(page);
   await signIn(page, user);
   await waitForHome(page);
+
+  // El bastón CONECTADO es la precondición del vacío "Bastoneá para empezar" (🔴-3).
+  await conectarBaston(page);
 
   // Esperamos a que el animal CON caravana baje al SQLite local (visible en la lista = ya sincronizó, así
   // lookupByTag lo encuentra localmente). El candidato sin caravana también baja.

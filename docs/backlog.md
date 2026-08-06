@@ -17,6 +17,22 @@ No es un sustituto de `feature_list.json` ni de los ADRs — es la antesala dond
 
 ## Ítems pendientes
 
+## 2026-08-06 — 🔴 E2E en rojo en `main`: `lotes.spec.ts` «crear lote → asignar desde la ficha → ver miembros»
+
+**Origen**: unidad «el FAB le roba los taps a la banda de arriba del nav», corriendo la regresión de las specs que pisan el tab "Más".
+**Qué**: `app/e2e/lotes.spec.ts:61` falla en `lotes.spec.ts:103` — `getByText(<nombre del lote>, { exact: true }).first()` resuelve a un `<span>` con caja de área CERO → `toBeVisible()` recibe `hidden`. **La funcionalidad NO está rota**: el snapshot del error muestra la ficha ya con *"Lote actual «<nombre>»"* y el botón *"Cambiar lote"* renderizados, o sea la asignación funcionó. Lo que falla es el LOCATOR: `.first()` agarra una copia oculta del nombre (con toda probabilidad la del selector que se está cerrando) en vez de la de la ficha.
+**Verificado que es PRE-EXISTENTE, no una regresión** (ejecutado, no deducido): con los 5 archivos de producción de esa unidad stasheados y el `dist` rebuildeado desde **`1f1c002`**, la spec **falla igual**. Los otros 4 casos del archivo pasan. No reproduce por contención (falla también corriendo sola).
+**Por qué importa**: medio. Es un rojo permanente en la suite, y un rojo permanente es peor que un test que no existe: entrena a leer "1 failed" como ruido. Además tapa una regresión real de lotes el día que ocurra.
+**Próximo paso sugerido**: cambiar el ancla por una EXCLUSIVA de la ficha en vez de `.first()` sobre un texto que aparece dos veces — el patrón que el repo ya usa (`testID` / `getByRole` con el nombre accesible de la sección "Lote actual"). Ojo con el reflejo de agregarle `.last()`: eso lo pinta de verde sin saber por qué había dos. Antes de tocar el test, confirmar con el trace si el segundo nodo es el del selector cerrándose o si la ficha está pintando el nombre dos veces (en cuyo caso el bug es de la app).
+
+## 2026-08-06 — La última card del tab "Más" puede quedar DEBAJO del bottom-nav (medido, no diagnosticado)
+
+**Origen**: unidad «el FAB le roba los taps a la banda de arriba del nav». Lo encontró el primer intento del guard geométrico (`e2e/fab-target-geometry.spec.ts`), que reportó como colisión un control que en realidad estaba **tapado** por la barra.
+**Qué** (medido @412×915, tab "Más" con el pill del bastón vivo): la card **"Completá el RENSPA del campo para la exportación a SIGSA"** (`role="button"`) tiene su caja en `x=[18,394] y=[848,934]`. El **techo del bottom-nav está en y=843** y el viewport termina en **915** → esa card se pinta **entera por debajo de la barra**, y además su borde inferior cae 19 px fuera de la pantalla. No es un problema de z-order del pill ni del FAB: es contenido de la pantalla que, en ese scroll, queda inalcanzable.
+**Lo que NO se verificó** (y por eso esto es una observación, no un bug confirmado): si el `ScrollView` de `mas.tsx` puede scrollear lo suficiente como para subir esa card por encima del nav. Si el `contentContainer` reserva `useSafeBottomInset() + $navBar`, no hay problema y esto es solo la foto de un scroll intermedio; si no lo reserva, la última fila de la pantalla de ajustes es **permanentemente intocable** — que es exactamente el tipo de defecto que solo se ve en un device.
+**Por qué importa**: medio. La card del RENSPA es un CTA de onboarding de SIGSA (driver regulatorio). Y si la reserva falta, no falla solo esa card: falla el último elemento de la pantalla, sea cual sea.
+**Próximo paso sugerido**: medir el scroll máximo de `mas.tsx` (`scrollHeight - clientHeight` vs. el alto del nav) y, si falta, sumar la reserva canónica al `contentContainerStyle` con `useSafeBottomInset()` — **nunca a mano** (`src/utils/safe-bottom-inset-guard.test.ts`). Barrer después las otras tabs con el mismo criterio: es un bug de CLASE candidato, no un spot.
+
 ## 2026-08-05 — Se cerró el último `router.back()` pelado y NO se dejó el guard que lo mantenga cerrado
 
 **Origen**: 🟡-4 del review de la unidad «acceso in-app a la pantalla del bastón» (`progress/review_baston-acceso-mas.md`). Se anota acá como **decisión, no como olvido** — que es lo que el reviewer pidió explícitamente si no se hacía en esa unidad.
@@ -271,11 +287,65 @@ Cuando aterrice el camino de iOS (BLE-HID wedge, `adapter-hid-wedge.ts`, hoy 22 
 **Por qué importa**: bajo-medio. Es self-scoped (no cruza usuarios ni tenants) y un email de contacto desalineado no otorga privilegios — la identidad la sigue gobernando `auth.users.email`, y el trigger `propagate_confirmed_email` (`0068:169-194`) la re-propaga al confirmar. Pero ensucia el dato de contacto y contradice el propósito de aislamiento de PII de ADR-025.
 **Próximo paso sugerido**: evaluar `grant update (phone) on public.user_private` (column-level), para que el cliente pueda escribir el teléfono y NO el email. Toca grants → **Gate 1 puntual** + verificar que no rompa `saveProfile` ni el trigger de propagación. Foldear cuando se toque `user_private` por otra razón.
 
-## 2026-07-18 — ✅ CERRADO (no se reproduce) — Zona muerta de tap en el FAB de Maniobra
+## 2026-07-18 — ✅ CERRADO MAL, REABIERTO Y RESUELTO (2026-08-06) — Zona muerta de tap en el FAB de Maniobra
 
-> **Nada pendiente acá.** El diseño del FAB (variante B4) está cerrado y commiteado en `6570029`.
-> Esta entrada queda solo como **traza del análisis**: la zona muerta que se predijo por geometría
-> NO se manifestó en device. Ver la verificación del 2026-07-19 más abajo.
+> **⛔ LA HIPÓTESIS (a) DE ESTA ENTRADA ERA LA CORRECTA, Y SE CERRÓ IGUAL.** El 19/7 se dio por
+> "no se reproduce" porque Raf tocó el FAB en el iPhone y anduvo. El defecto existía —y era el
+> **opuesto** al que la entrada preveía: no una zona muerta (target *de menos*), sino un target
+> **de más** que invadía territorio ajeno. Se manifestó recién el 2026-08-05 como otro síntoma
+> (*"el pill de «Conectando…» que se ve arriba del rayo de modo maniobra, si lo clickeo me lleva al
+> modo maniobra"*). Resuelto en la unidad «el FAB le roba los taps a la banda de arriba del nav»
+> (2026-08-06, `progress/impl_fab-hitslop-pill.md`).
+>
+> **EL ERROR DE MÉTODO, que es lo que hay que aprender de acá.** La entrada escribió: *"Si reaparece:
+> el síntoma sería «toco el FAB y no pasa nada»"*. Previó **un solo** modo de falla —el de menos— y
+> declaró el diagnóstico refutado al no verlo. Un target y su vecino son un sistema con **dos** modos
+> de falla simétricos (el botón no llega / el botón se pasa), y una prueba que solo mira uno no puede
+> cerrar el otro. Peor: el test que se corrió ("¿el FAB responde donde debería?") **pasa igual** con el
+> bug puesto, porque el bug hace que el FAB responda **de más**. Un experimento que da el mismo
+> resultado con y sin el defecto no es evidencia — y así se archivó como "no se reproduce" algo que sí
+> pasaba. Regla que queda: cuando se sospecha de la **geometría de un target**, se mide contra **qué
+> choca**, no solo si el propio botón anda.
+>
+> **LA HIPÓTESIS (a) ERA CIERTA — medido, no deducido (2026-08-05/06, el leader).** Dos métodos
+> independientes:
+> - **Web** (viewport 412×915, cajas reales del DOM): pill `top=777 bottom=810` (alto 33) · FAB
+>   `top=820 bottom=884` · aire pill↔círculo **10 dp** · techo del target con `hitSlop` en `y=794` →
+>   **solape de 16 dp = 48 % inferior del pill**.
+> - **Device A07** (720×1600, densidad 300 → 1 dp = 1,875 px): pill `[241,1244]-[479,1306]` (62 px =
+>   33 dp) · techo **PINTADO** del círculo (`$primary` #1E5A3E, medido con Pillow sobre `screencap`)
+>   en `y=1324` · techo **TÁCTIL** del FAB en `y=1276` (barrido de `input tap`: 1272 no dispara, 1276
+>   sí) → **48 px = 25,6 dp ≈ `$fabRaise`** por encima de la pintura, y **30 px = 16 dp** de solape con
+>   el pill. Los dos métodos coinciden en el 48 %.
+>
+> Tres hechos que quedan probados y no hay que re-verificar:
+> 1. **El `hitSlop.top` SÍ funciona en Android.** La afirmación contraria que vivía en el comentario de
+>    `_layout.tsx` era falsa (se verificó el paquete de **web** y se generalizó a nativo sin medirlo).
+> 2. **El ancestro NO recorta los toques**: el target dispara en `y=1276`, **86 px por encima** del
+>    techo de la barra (`y=1362`). Corolario directo: **sacar el `top` no puede crear una zona
+>    muerta** — el círculo entero (1324→1444) es alcanzable por sus propios bounds. O sea que la
+>    premisa geométrica de esta entrada (*"los toques fuera de los límites del ancestro no se
+>    entregan"*) **tampoco se sostiene acá**.
+> 3. **La franja robada le pertenece al FAB haya o no haya pill**: cuando se corrió el barrido fino el
+>    pill ya estaba oculto (tope de 120 s de R6.4 → estado `'off'`) y el FAB seguía disparando desde
+>    1276.
+>
+> **Por qué en web nunca se vio**: `hitSlop` es **no-op** en react-native-web 0.21.2 (`Pressable` no lo
+> implementa; la única aparición en el paquete está en el módulo legacy `Touchable`). **Ningún test de
+> comportamiento en web puede cazar este bug** → el guard de la unidad es **geométrico y aritmético**,
+> no de comportamiento (`app/src/utils/nav-target-bands.test.ts` +
+> `app/src/utils/tap-target-collision-guard.test.ts` + `app/e2e/fab-target-geometry.spec.ts`).
+>
+> **Lo que se hizo**: se sacó el `top` del `hitSlop` (el `bottom` se queda: es el que gana área real y
+> hace tocable el label "Maniobra") y el pill subió a **~20 dp** de aire.
+> ⚠️ Corregido el 2026-08-06: este párrafo decía que el pill "pasó a ser tocable → `/baston`". **Se
+> intentó y se REVIRTIÓ el mismo día**, con evidencia medida: el pill se superpone a CTAs a ancho
+> completo de las pantallas de manga (en el A07 queda ENTERO adentro de 'Arrancar jornada') y les roba
+> el toque. Hoy es informativo: sin `onPress`, con `pointerEvents="none"`, y lo congela el caso `(E)` de
+> `tap-target-collision-guard.test.ts`. El acceso a `/baston` va por la fila "Bastón" del tab "Más".
+> **El "fix real" que esta entrada dejaba pendiente (sacar el FAB del tabBar y montarlo como overlay
+> absoluto) sigue SIN estar justificado, y ahora por un motivo distinto y verificado**: no hay zona
+> muerta que arreglar (hecho 2).
 
 **Origen**: análisis del navbar (variante B4). El leader lo dedujo de la geometría; el implementer lo confirmó y explicó por qué el fix aplicado NO alcanza.
 **Qué**: el círculo del FAB se dibuja **fuera de su celda** del tab bar (26px con los tokens de B4; 34px antes) vía `marginTop` negativo. En React Native los toques fuera de los límites del ancestro **no se entregan**: en Android `ViewGroup.dispatchTouchEvent` solo desciende a hijos cuyos bounds contienen el punto, y en iOS `hitTest:` devuelve `nil` si `pointInside:` es false. El tabBar descarta el toque **antes** de llegar al FAB. → la porción que sobresale del CTA más importante de la app no responde al tap en nativo.
@@ -284,8 +354,9 @@ Cuando aterrice el camino de iOS (BLE-HID wedge, `adapter-hid-wedge.ts`, hoy 22 
 **Descartado**: agrandar el tabBar (`height += fabRaise` + `tabBarBackground`). Dejaría una franja transparente de **412×26 a ancho completo** que en nativo igual captura toques (`BottomTabBar` monta con `pointerEvents="auto"`) → cambiaría una zona muerta de 64×26 por una que rompe botones y scroll en el borde inferior de TODAS las pantallas. Peor negocio.
 **Fix real (pendiente)**: sacar el FAB del tabBar y montarlo como **overlay absoluto en el layout raíz** con `pointerEvents="box-none"`. Es un refactor de navegación con su propia spec — toca ADR-018 y el shell de `(tabs)`.
 **⚠️ VERIFICADO EN DEVICE — el diagnóstico NO se confirmó (2026-07-19)**: Raf probó el tap en el iPhone y reportó **OK**. O sea que la zona muerta predicha por la geometría **no se manifiesta** en el uso real, al menos con los tokens de B4 (26px de protrusión) + el `hitSlop` ya aplicado. Posibles explicaciones, ninguna verificada: (a) el modelo de `hitTest:`/`pointInside:` no aplica igual acá porque el `hitSlop` del Pressable sí extiende el área efectiva más de lo que asumimos; (b) con solo 26px sobresaliendo, el pulgar naturalmente cae en la parte in-bounds y la zona muerta es real pero inalcanzable en la práctica; (c) el diagnóstico geométrico estaba directamente mal.
-**Estado**: BAJA prioridad. El refactor de navegación (overlay absoluto) **ya no está justificado por esto** — era un cambio caro (ADR-018 + shell de `(tabs)`) para un problema que no se reproduce. NO hacerlo salvo que aparezca evidencia nueva.
-**Si reaparece**: el síntoma sería "toco el FAB y no pasa nada" tocando cerca del borde superior. Ahí sí, retomar el fix real de acá abajo. Se mantiene la entrada por trazabilidad del análisis.
+  **→ [2026-08-06] Era la (a), y estaba escrita acá desde el primer día.** El `hitSlop` del Pressable extiende el área efectiva 26 dp sobre el círculo, en Android, medido. La (b) y la (c) quedan descartadas: la premisa de recorte por el ancestro tampoco aplica (hecho 2 del bloque de arriba). Lo que faltaba no era una hipótesis mejor: era **medir el techo táctil**, que se hace con un barrido de `input tap` en 3 minutos.
+**Estado**: ~~BAJA prioridad. El refactor de navegación (overlay absoluto) **ya no está justificado por esto** — era un cambio caro (ADR-018 + shell de `(tabs)`) para un problema que no se reproduce. NO hacerlo salvo que aparezca evidencia nueva.~~ **[2026-08-06] RESUELTO** por la unidad «el FAB le roba los taps a la banda de arriba del nav». El refactor de navegación sigue sin justificarse (no hay zona muerta), pero ahora está **verificado** en vez de supuesto.
+**Si reaparece**: ~~el síntoma sería "toco el FAB y no pasa nada" tocando cerca del borde superior.~~ **[2026-08-06] Esta línea era el error de método.** Los dos síntomas posibles son *"toco el FAB y no pasa nada"* (target de menos) **y** *"toco otra cosa y me lleva a Maniobra"* (target de más) — el que se dio fue el segundo, que esta línea no nombraba y por eso nadie fue a buscarlo. Hoy los dos los cubre un guard determinista (bandas aritméticas + medición geométrica en E2E), así que no hace falta acordarse del síntoma.
 
 ## 2026-07-18 — `delete_account` no borra `user_private` → la PII de contacto sobrevive al borrado de cuenta
 
@@ -1241,3 +1312,26 @@ debug/app-debug.apk       264.777.703 B   2026-07-29 09:37   <- del 29/7, del di
 > aportó nada al resultado — solo upload y riesgo.
 > Ojo al editar el `.easignore`: **reemplaza** al `.gitignore`, así que sacar una línea no la ignora,
 > la SUBE. `.git/` sobrevive parcialmente (35 MB) porque EAS lo usa para resolver el commit del build.
+
+
+---
+
+## `/baston` cuenta como consumidor del bastón aunque no tenga el foco
+
+**Abierto 2026-08-06** — 🟡-H del review de la unidad «dos 🔴 del barrido de edge cases del bastón».
+**Diferido por alcance**, no por prioridad: el archivo (`app/src/features/ble-stick/screens/StickConnectionScreen.tsx`)
+lo estaba editando la unidad hermana sin commitear.
+
+`StickConnectionScreen` toma la propiedad exclusiva del listener con `useFocusEffect` —o sea, **al
+enfocarse**— pero se **suscribe** a las lecturas con `useEffect([api])`, o sea **al montarse**. Las dos cosas
+no son lo mismo en un Stack: la pantalla queda montada cuando le empujan otra encima.
+
+**La consecuencia** (que es cómo hay que nombrarlo): mientras `/baston` esté en el stack, aunque el peón
+esté dos pantallas más adelante, **cuenta como consumidor**. Por lo tanto `read_dropped_no_consumer` no
+puede dispararse, y una lectura puede aterrizar en una lista que nadie está mirando. **No hay dato perdido
+ni confirmación falsa** —la pantalla sí la muestra, y si volvés está ahí—, así que no es el 🔴-2 de vuelta;
+es la misma clase de divergencia (montado ≠ dueño) del otro lado de la tabla.
+
+**Cómo se cierra**: que `/baston` declare un `accepts` atado a su foco (el mismo `useFocusEffect` que ya
+usa para el scanner acotado), y pase de `'always'` a `'declares-accepts'` en la tabla `CONSUMERS` de
+`app/src/services/ble/read-dispatch.test.ts`.

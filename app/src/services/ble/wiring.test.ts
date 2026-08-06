@@ -114,6 +114,14 @@ test('R15.1/R15.2: logTransportEvent nunca tira (best-effort), aun con console r
   for (const reason of ['no_remembered', 'permission', 'bluetooth_off', 'background', 'unavailable', 'busy'] as const) {
     assert.doesNotThrow(() => logTransportEvent({ kind: 'autoconnect_skipped', reason }));
   }
+  // 🔴-2 (barrido 2026-08-06): el descarte de una lectura que no iba a recibir NADIE. El silencio correcto
+  // es indistinguible de "el bastón no leyó" desde afuera, así que este evento es la única forma de ver el
+  // agujero — y hasta el review (⚪-J) su payload no lo ejecutaba nada: solo se verificaba que el literal
+  // apareciera en el provider.
+  assert.doesNotThrow(() => logTransportEvent({ kind: 'read_dropped_no_consumer', subscribers: 0 }));
+  assert.doesNotThrow(() => logTransportEvent({ kind: 'read_dropped_no_consumer', subscribers: 3 }));
+  // Y el subscriber que TIRA dentro del despacho (🟠-D): el provider lo acota y lo loguea por este canal.
+  assert.doesNotThrow(() => logTransportEvent({ kind: 'read_loop_error', message: 'tag_subscriber_threw' }));
 
   // Aun si console.info tira, el logger se lo traga (R15.2).
   const original = console.info;

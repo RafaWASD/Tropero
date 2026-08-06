@@ -3,6 +3,55 @@
 > Este archivo se vacía al cerrar cada sesión y su resumen se mueve a `history.md`.
 > Mientras trabajás, **mantenelo actualizado en tiempo real**, no al final.
 
+## 2026-08-06 — UNIDAD «el FAB le roba los taps a la banda de arriba del nav» — FIX-LOOP CERRADO
+
+Base `1f1c002`. Bugfix 🔴 de Raf en device. Feature 04, delta multivendor. **El reviewer dio
+CHANGES_REQUESTED (2 🔴) y el fix-loop está cerrado.**
+
+**EL FIX (lo que no se discute)**: fuera el `hitSlop.top` del FAB. Extendía el target 26 dp sobre el
+círculo pintado y se comía el **48 % inferior** del pill del bastón. Medido dos veces (web: solape 16 dp;
+A07: techo pintado y=1324 vs. techo táctil y=1276 por barrido de `adb shell input tap`). El comentario que
+lo justificaba **afirmaba lo contrario y era falso** —verificaba el paquete de web, donde `hitSlop` es
+no-op, y generalizaba a nativo—, y su premisa también cae: el target dispara 86 px por encima del techo de
+la barra, o sea el tabBar no recorta → sacar el `top` no crea zona muerta. `docs/backlog.md` 2026-07-18,
+cerrada como "no se reproduce", corregida: la hipótesis (a) era la correcta.
+
+**🔴 A — SE CAYÓ EL DELTA DE UX: el pill NO queda tocable.** Raf midió en el A07 y el reviewer barrió las
+pantallas. El pill cae **entero adentro** del CTA `'Arrancar jornada'` (`[34,1242]-[686,1362]` vs.
+`[220,1244]-[500,1306]`), y en web era el elemento topmost sobre `"Ir a Animales"` (Inicio), `"Eliminar
+campo"` (Más) y **tres maniobras de `/maniobra/jornada` etapa 2** (🔴 manga). **La banda de abajo está
+disputada por diseño** —todo CTA a ancho completo la cruza—, así que no hay posición en x donde un pill
+flotante y tocable sea seguro. Revertido; **RMV3.6 queda como estaba**, con una nota que conserva los
+números para el próximo que lo proponga. Quedó solo el aire de `$4` (20 dp), que se sostiene solo.
+*Mi error de método*: me hice la pregunta correcta ("¿a quién le roba el pill?") y la cerré con **una**
+pantalla — el mismo defecto de la entrada de backlog que esta unidad vino a corregir.
+
+**🔴 B — EL GUARD SE BURLABA EN UNA LÍNEA.** `hitSlop={{ ...HIT_SLOP, top: FAB_RAISE }}` daba **30/30 en
+verde** con el bug entero de vuelta; y un overlay anclado con `$navBar + $6` (= pico del FAB) también
+pasaba. Los dos agujeros son el mismo error: **el guard estaba escrito sobre la forma en que hoy se
+escribe el bug, no sobre el invariante.** Reescrito: **(A)** el VALOR de todo `hitSlop` tiene que ser
+legible de UN solo lugar (spread/ternario/llamada/inline → rojo) · **(A-fix)** resuelve el JSX REAL y
+exige que los lados sean exactamente `{bottom}` · **(B1)** vigila el DESTINO (`bottom` que suma sobre la
+reserva, con un nivel de const local resuelto) y no el token · **(B2)** tokens del nav · **(E)** el pill no
+puede volver a ser tocable. **11 mutantes nuevos** atacando la FORMA (los 2 del reviewer + ternario +
+llamada + anclaje sin token + anclaje lavado + los 2 de (E)) y **2 controles de falso positivo en verde**.
+El guard **declara lo que NO ve** (≥2 niveles de indirección: pide un AST).
+
+**🟠 C/D + ⚪**: las specs describían un oráculo de E2E descartado ("intersección 2D") en 3 sitios →
+corregidos; la nota de RMV3.6 reescrita; conteos corregidos; los 3 captures migrados los corrió el
+reviewer (5/5). **No se tocó `feature_list.json`** ni ninguno de los 9 archivos de la otra unidad en curso.
+
+**Verificado**: `check.mjs` **RC=0** · typecheck verde · anti-hardcode 0 · guards **33/33** ·
+`connection-view` **42/42** · E2E de la unidad **2/2** · BLE **11/11** · **5 capturas** regeneradas ·
+`git diff supabase/ sync-streams/` vacío · **nada commiteado**.
+⚠️ `design/maniobra-identify/*.png` quedaron modificados por una corrida E2E — **no los revertí** (hay otra
+unidad tocando `identificar.tsx` en el mismo árbol).
+
+**⏸ Sigue pendiente: el fix del `hitSlop` en DEVICE** (`hitSlop` es no-op en web → hace falta un APK, o sea
+un build de EAS).
+
+Detalle, la tabla de mutantes y la autorrevisión (21 ítems) en `progress/impl_fab-hitslop-pill.md` §0.
+
 ## 2026-07-30 — EL BASTÓN LEE (banco en device) + review adversarial — 🔴 3 bloqueantes, fix COMMITEADO
 
 > **Estado al cierre de la noche**: fix commiteado en **`d738dbe`** (41 archivos), reviewer **APPROVED**,
@@ -980,3 +1029,79 @@ desde una versión vieja); Raf en el grupo interno "Team (Expo)", ya instalado. 
 App Store Connect le muestra dispositivo **iPhone 14 Plus (iOS 18.0.1)**. Ana en Android por APK.
 Sumar un tester a un grupo cuyo build ya está aprobado **no dispara Beta App Review de nuevo** ni
 consume builds de EAS.
+
+---
+
+## Sesión 2026-08-05/06 (madrugada) — Bluetooth: acceso, robo de taps, y barrido de edge cases
+
+**Commiteado**: `1f1c002` — *"la pantalla de conexión del bastón deja de ser inalcanzable"*. Reporte de Raf:
+la app arrancó con el chip ciclando "Conectando…" y **no había ninguna manera in-app de llegar a `/baston`**
+(era deep-link-only; la fila de "Más" nunca se cableó). Se agregó la fila con estado en vivo, `backOr` en el
+chevron, la captura 07 restaurada y las specs reconciliadas. El review encontró que la nota *"tres copias
+idénticas de `toneColorToken`"* era **falsa** (`StickDeviceRow` diverge) y que le prometía al próximo que
+unificar era gratis.
+
+### DOS UNIDADES SIN COMMITEAR — estado verificado por el leader
+
+Ninguna está lista. El árbol tiene **typecheck limpio** y las suites propias de cada una en verde, pero
+falta cerrar lo de abajo. **Siete errores 529 del API** mataron a los agentes durante la madrugada; por eso
+quedaron a mitad.
+
+**(A) FAB + pill** — `(tabs)/_layout.tsx`, `mas.tsx`, `StickStatusIndicator.tsx`, `connection-view*`,
+`nav-target-bands*`, `tap-target-collision-guard*`, `e2e/fab-target-geometry.spec.ts`, specs, backlog.
+- El bug: `hitSlop={{top: $fabRaise}}` extendía el target del FAB **26 dp sobre su círculo pintado** y se
+  comía el 48 % inferior del pill. Medido por dos métodos que coinciden al píxel: techo pintado y=1324
+  (Pillow sobre screencap), techo táctil y=1276 (barrido de `input tap`). El comentario del código afirmaba
+  que ese `top` *"no recupera un solo píxel en ninguna plataforma"* — falso, recupera 48.
+- **El pill tocable se revirtió** (RMV3.6 queda como estaba): medí que el pill queda **contenido adentro** de
+  `'Arrancar jornada'` `[34,1242]-[686,1362]` y de `'Dar de alta'`; el reviewer sumó 3 pantallas más. La
+  banda inferior está disputada por diseño — no es que se eligió mal el lugar, es que no existe.
+- **FALTA**: cerrar **dos evasiones conocidas** del guard — (1) `hitSlop={{...HIT_SLOP, top: FAB_RAISE}}` en
+  el call site deja 30/30 en verde; (2) un overlay anclado con `$navBar + $6` (= el pico del FAB) también,
+  porque el guard vigila el token y no la banda. Guards actuales: **35/35**.
+
+**(B) Edge cases del Bluetooth** — `read-dispatch.ts` (nuevo) + test, `BleStickListenerProvider.tsx`,
+`stick.ts`, `logging.ts`, `FindOrCreateOverlay.tsx`, `identificar.tsx`, `TagScanSheet.tsx`,
+`bulk-assign-empty*`, `asignar-caravanas.tsx`.
+- Arregla 🔴-2 (en `maniobra/carga` el bastonazo **vibraba** y no lo recibía nadie → confirmación falsa sobre
+  dato perdido) y 🔴-3 (`asignar-caravanas`, única pantalla sin carga manual, decía "Bastoneá para empezar"
+  con el bastón desconectado y sin salida).
+- El fix salió **mejor que el encargado**: `subscribers.size === 0` habría sido un no-op porque el
+  `FindOrCreateOverlay` está siempre suscripto. Ahora cada suscriptor declara `accepts()` y la pregunta pasa
+  de *"¿hay alguien suscripto?"* a *"¿hay alguien que vaya a ACTUAR?"*.
+- **FALTA**: mutantes contra los guards nuevos, `check.mjs` completo, y **review** (murió por 529). Suites
+  propias: **52/52**. Informe: `progress/impl_ble-edge-fixes-1.md` — ⚠️ **lo escribió el leader**, no el
+  implementer (murió 5 veces sin escribirlo).
+
+### El barrido de edge cases
+
+`progress/sweep_bluetooth-edge-cases.md` — 4 🔴, 6 🟠, 6 🟡, con evidencia separada entre **[MEDIDO]** en el
+A07 con el ESP32 y **[LEÍDO]** en el código, más una sección de **lo que ya está bien** para no gastar
+esfuerzo ahí, y el plan de ataque priorizado.
+
+Lo más importante, medido: **cuando la reconexión automática se agota (~132 s, no 120), la app queda muda y
+solo revive cerrándola y abriéndola.** Ni bastonear, ni el bolsillo (background→foreground), ni cambiar de
+tab la rescatan. Nada en pantalla se lo dice al peón.
+
+Dos sospechas propias **falsificadas**, que también vale: la ráfaga de bastonazos se descarta **sin vibrar**
+(correcto), y una lectura nueva **no** cambia el EID debajo de "Dar de alta".
+
+### Pendiente de Raf
+
+1. **Desbloquear el A07** — se bloqueó con PIN al apagar la pantalla para un test (error del leader, anotado
+   en la memoria `reference_a07_device_rig`). Sin eso no hay más verificación en hardware.
+2. **Decisión de producto 🟡-11**: en device el único feedback es una vibración de 50 ms; el beep es un no-op
+   declarado y `writeBeepEnabled` no tiene ni un call site. R4.2/R4.3 **no están cumplidos en device**.
+   ¿El bastón se queda sin sonido de confirmación en la manga?
+3. **OK para un build de EAS de Android**: el fix del `hitSlop` **no se puede verificar en web** (`hitSlop` es
+   no-op en react-native-web). Es la única forma de cerrarlo.
+
+### La observación de fondo
+
+La misma clase apareció **cinco veces** en esta feature en una noche: el comentario del `hitSlop` que
+afirmaba lo contrario de lo que hacía · las tres copias de `toneColorToken` que no eran idénticas · el
+`accepts()` que podía duplicar una guarda · y los dos guards nuevos que resultaron evadibles. El patrón no es
+descuido: en el bastón la respuesta a *"¿quién manda sobre esta lectura / este toque?"* vive repartida en
+muchos archivos, y cada arreglo **copia** la respuesta en vez de centralizarla. Los fixes de esta noche
+centralizan tres (`connectionRowStatus`, `acceptsRead`, la banda del nav). Vale nombrarlo como clase en vez de
+seguir cazando instancias.

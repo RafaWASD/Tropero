@@ -250,7 +250,24 @@ Toda la pantalla opera local: la cola, las listas, el buscador y el encolado son
 
 Reconciliación del sketch §4.1-§4.4 con el código realizado (`app/app/asignar-caravanas.tsx` + ruta en `_layout.tsx` + entry points + supresión por ruta del overlay). El sketch es "sin píxeles"; nada de lo de abajo CONTRADICE RD5/RD7 — solo aterriza decisiones dentro de la latitud concedida, MENOS un punto que CORRIGE el sketch (el mecanismo de anti-stacking):
 
-- **Anti-stacking (§4.2) — CORRECCIÓN del sketch**: el sketch sugería `useBusyWhileMounted()` para suspender el overlay global. **Es inviable**: el `BleStickListenerProvider` (spec 04) gatea `listening = enabled && !busy` en `handleReading` ANTES de entregar a CUALQUIER suscriptor — `busy=true` suspende a TODOS los suscriptores, incluido el propio listener de la `BulkTagAssignmentScreen` (que entonces NO recibiría tags). No hay gating per-suscriptor en el provider, y tocar `ble/*` está gateado. **Mecanismo as-built**: el `FindOrCreateOverlay` global se hizo ROUTE-AWARE — lee `useSegments()`; si el top-segment es `asignar-caravanas`, su `onTagRead` retorna sin abrir nada (+ un `useEffect` cierra cualquier overlay stale al entrar a la ruta). La pantalla masiva consume su PROPIO `useBleStickListener({ enabled, onTagRead })` con `busy=false` → recibe los tags; el overlay los ignora en esa ruta. Net (verificado E2E mock): un bastoneo en la masiva NO apila el overlay y NO se procesa dos veces. *(El BLOQUEANTE §9.4 queda RESUELTO por esta vía, sin tocar `ble/*`.)*
+- **Anti-stacking (§4.2) — CORRECCIÓN del sketch**: el sketch sugería `useBusyWhileMounted()` para suspender el overlay global. **Es inviable**: el `BleStickListenerProvider` (spec 04) gatea `listening = enabled && !busy` en `handleReading` ANTES de entregar a CUALQUIER suscriptor — `busy=true` suspende a TODOS los suscriptores, incluido el propio listener de la `BulkTagAssignmentScreen` (que entonces NO recibiría tags). No había gating per-suscriptor en el provider (**ver la nota de reconciliación de abajo: desde el 2026-08-06 SÍ lo hay**), y tocar `ble/*` estaba gateado. **Mecanismo as-built**: el `FindOrCreateOverlay` global se hizo ROUTE-AWARE — lee `useSegments()`; si el top-segment es `asignar-caravanas`, su `onTagRead` retorna sin abrir nada (+ un `useEffect` cierra cualquier overlay stale al entrar a la ruta). La pantalla masiva consume su PROPIO `useBleStickListener({ enabled, onTagRead })` con `busy=false` → recibe los tags; el overlay los ignora en esa ruta. Net (verificado E2E mock): un bastoneo en la masiva NO apila el overlay y NO se procesa dos veces. *(El BLOQUEANTE §9.4 queda RESUELTO por esta vía, sin tocar `ble/*`.)*
+> **RECONCILIACIÓN as-built (2026-08-06 — 🔴-2 del barrido de edge cases del Bluetooth).** El párrafo de
+> arriba afirmaba *"No hay gating per-suscriptor en el provider"*. **Dejó de ser cierto**, y quien lea esto
+> tiene que saberlo antes de volver a inventar el mecanismo: el provider ahora acepta un predicado
+> `accepts()` **por suscriptor** (spec 04 **R4.6 / R10.4**), que evalúa en cada lectura para saber si hay
+> algún consumidor que va a **actuar** —no solo estar suscripto— antes de emitir feedback y antes de
+> consumir la ventana de dedup.
+>
+> **La supresión por ruta del overlay NO se reemplazó**: sigue siendo el mecanismo de anti-stacking, y la
+> masiva sigue consumiendo su propio listener. Lo que cambió es que ahora esa supresión se **declara** al
+> provider (`accepts`) además de aplicarse adentro del callback; si no, el provider creía que el overlay
+> era consumidor en rutas donde se auto-censuraba.
+>
+> **Consecuencia nueva para esta pantalla** (🟠-C del review): su `accepts` incluye `!scopedScannerActive`.
+> El CTA del vacío desconectado (ver §4.6) empuja `/baston`, y en un Stack esta pantalla queda **montada y
+> suscripta** detrás — sin ese término, un bastonazo de prueba en `/baston` lo consumían dos y encolaba un
+> EID que el operario no pidió.
+
 - **Cola de sesión (§4.2)**: `useReducer` con `{ queue: string[], assignedCount: number, assignedProfileIds: ReadonlySet<string> }`. La cabeza `queue[0]` es el EID actual; cada `onTagRead` hace `enqueue` (dedup defensivo: no apila un EID ya en cola). Al asignar: `assigned` (avanza la cola + suma contador + marca el perfil). "Es nuevo" / "saltar": `skipHead` (saca la cabeza sin asignar). Cambio de campo: `reset`.
 - **Cuerpo del EID (§4.2)**: `BulkEidBody` con `key={currentEid}` (remonta limpio con cada EID nuevo, resetea búsqueda + `confirming` — mismo patrón que el `AssignOrCreateBody` de opción A). Reusa el MISMO estilo de card de candidato (con chevron de tap), buscador (debounce 250ms + guard `searchSeq`), y paso de confirmación que la opción A, por consistencia visual. Sin término → `fetchAnimals({ noTag:true, orderBy:'updated_at' })`; con término → `searchAnimals` + filtro client-side a `tagElectronic == null`.
 - **Contador (§4.3)**: `SessionCounter` en el header del screen (NO en el body) → no se desmonta al avanzar la cola; visible siempre (RD5.5). Cerrar la pantalla unmonta el estado de sesión pero los `op_intent` quedan en la outbox (independientes) → no rollbackea.
@@ -275,6 +292,35 @@ As-built:
 - Sin transporte: *"Necesitás el bastón" / "El bastón no está disponible en este dispositivo" / "Podés cargar las caravanas de a una desde la ficha de cada animal."* La frase del medio es **literalmente** la que ya usan el hero de `maniobra/identificar` y el `ManualPromptHero` del `TagScanSheet` (una sola redacción para el mismo hecho; hay un guard estático que verifica las 3 superficies). La salida que se ofrece es real y verificada: el `TagScanSheet` de la ficha carga el EID a mano sin transporte.
 - Con transporte, el vacío queda **carácter por carácter** como antes (fijado en un test de regresión).
 - Verificación: unit `app/src/utils/bulk-assign-empty.test.ts` (5) + E2E `app/e2e/asignar-caravanas-sin-transporte.spec.ts` (2, que recorren la ruta real tab "Más" → fila → pantalla, así que también fallan si alguien esconde la fila). Falsificado en los dos sentidos (unit: 4/5 rojo sin el corte, 2/5 rojo con la rama forzada; E2E: `hasTransport = true` literal deja (a) en rojo sobre build fresco). Capture Gate 2.5: shots 11 vs 12.
+
+> **RECONCILIACIÓN as-built (2026-08-06 — 🔴-3 del barrido).** Todo lo de arriba describe el bugfix de
+> julio y quedó **incompleto** cuando aterrizó la Fase 4 (adapter SPP Android). El corte era solo
+> `hasTransport`, que **en Android es `true` siempre** aunque el bastón esté apagado, sin emparejar o nunca
+> conectado → el vacío volvía a decir *"Bastoneá para empezar"* en un teléfono donde bastonear no hace nada.
+> El bug original estaba cerrado **contra la dimensión equivocada**: preguntaba *"¿hay transporte?"* cuando
+> la pregunta del peón es *"¿está conectado?"*. Medido en device (A07 + ESP32): tras agotarse la cadena de
+> reconexión de R6.4 (~132 s) el peón bastonea 20 animales sin una sola señal, en la ÚNICA pantalla BLE-only
+> sin entrada manual, sin chip en el header y con el pill global auto-oculto justo en `'off'`.
+>
+> **As-built vigente:**
+> - Firma: **`bulkAssignEmptyView({ hasTransport, isConnected })`** — un objeto con los dos campos
+>   obligatorios (dos booleanos posicionales no se pueden leer en el call site). `isConnected` sale de
+>   `useBleStickListener(...).isConnected`.
+> - **TRES** estados, decididos reusando `resolveListenConnState` (el MISMO criterio del hero adaptativo de
+>   `maniobra/identificar` y del `TagScanSheet` — no una cuarta forma de responder lo mismo):
+>   · **conectado** → *"Bastoneá para empezar"*, carácter por carácter como antes;
+>   · **con transporte y DESCONECTADO** → *"El bastón no está conectado"* + *"Fijate que el bastón esté
+>     prendido y cerca, y tocá «Conectar el bastón». Si no, podés cargar las caravanas de a una desde la
+>     ficha de cada animal."* + **CTA a `/baston`** (la salida: un estado que describe el problema y no
+>     lleva a ningún lado sigue siendo un pozo);
+>   · **sin transporte** → intacto (frase canónica + salida por la ficha, sin CTA: no hay nada que conectar).
+> - Verificación: unit (9 casos, con falsificación por mutantes propia + 4 guards de call site, incluido uno
+>   que exige que el CTA se **renderice**) + E2E **(3)**: (a) sin transporte, (b) desconectado con el CTA
+>   navegando de verdad a `/baston`, (c) conectado. Capture Gate 2.5:
+>   `e2e/captures/baston-edge-fixes-1.capture.ts`.
+> - **Tests que asertaban el bug**: (b) verificaba *"Bastoneá para empezar"* sobre un mock **desconectado**.
+>   Lo mismo en `baston-dedup.spec.ts` (c)(d) y en `dedup-screenshot.spec.ts`; los cuatro ahora conectan el
+>   mock antes de aseverar ese copy, que es su precondición real.
 
 ---
 

@@ -173,9 +173,19 @@ export default function ManiobraIdentificar() {
   // ─── Identificación por BLE (R3.3 / R4.3 / R4.5) ───
   // El EID llega YA validado+dedupeado del provider (parser-rs420 + dedup); el feedback visual+vibración
   // (R3.4/R12.3) lo dispara el provider al entrar la lectura. Acá solo resolvemos y enrutamos.
+  // ¿Esta pantalla va a ACTUAR sobre un bastonazo AHORA? (🔴-2 del barrido del 2026-08-06). UNA sola
+  // respuesta, consumida por el provider (que decide feedback + ventana de dedup ANTES de entregar) y por
+  // el propio callback. En `maniobra/*` el overlay global está suprimido por ruta, así que si esta
+  // pantalla no puede actuar NO queda ningún consumidor: el provider tiene que saberlo para no confirmarle
+  // al peón una lectura que se pierde.
+  const establishmentIdRef = useRef(establishmentId);
+  establishmentIdRef.current = establishmentId;
+  const acceptsRead = useCallback(() => establishmentIdRef.current !== null, []);
+
   const onTagRead = useCallback(
     (eid: string) => {
-      if (!establishmentId) return;
+      if (!acceptsRead()) return;
+      if (!establishmentId) return; // estrechamiento de tipo (acceptsRead ya cubrió la condición)
       const ticket = ++seqRef.current;
       void (async () => {
         const res = await lookupByTag(eid, establishmentId);
@@ -188,13 +198,17 @@ export default function ManiobraIdentificar() {
         setOutcome(resolveBleIdentify(res.value, eid));
       })();
     },
-    [establishmentId],
+    [establishmentId, acceptsRead],
   );
 
   // Listener del bastón MANGA-OWNED (R3.2): el FindOrCreateOverlay global se suprime por ruta mientras
   // estamos en `maniobra/*` → ESTE es el único consumidor del bastón. enabled=true mantiene el transporte
   // escuchando (no lo apagamos: queremos las lecturas acá). isConnected refleja el estado físico (R3.6/R3.7).
-  const { isConnected } = useBleStickListener({ enabled: true, onTagRead });
+  //
+  // `accepts` = EXACTAMENTE la misma función que gatea `onTagRead` (ver `acceptsRead` arriba). Que sea la
+  // misma referencia y no una copia del predicado es el punto: si divergieran, el provider confirmaría
+  // lecturas que este callback tira.
+  const { isConnected } = useBleStickListener({ enabled: true, onTagRead, accepts: acceptsRead });
 
   // API del provider del bastón (R3.6/R3.7): `transport != null` = hay un transporte CONECTABLE (web-serial
   // antes de elegir puerto, o un bastón que se cayó); `transport == null` = no hay nada que conectar (native

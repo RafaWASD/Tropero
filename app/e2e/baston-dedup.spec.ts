@@ -55,6 +55,23 @@ async function gotoWithBle(page: Page): Promise<void> {
   await page.goto('/');
 }
 
+/**
+ * Marca el bastón como CONECTADO, sin inyectar ninguna lectura.
+ *
+ * Hace falta antes de aseverar el estado vacío de la asignación masiva: desde el 🔴-3 (barrido de edge
+ * cases del Bluetooth, 2026-08-06) ese vacío distingue "bastón conectado" ("Bastoneá para empezar") de
+ * "hay transporte pero está desconectado" ("El bastón no está conectado" + CTA a /baston). El MockAdapter
+ * arranca DESCONECTADO, así que sin esto los tests estaban aseverando el copy de "conectado" sobre un
+ * bastón caído — o sea, sobre el propio bug que el 🔴-3 cerró.
+ */
+async function conectarBaston(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const h = (window as unknown as { __rafaqBle?: { connectMock: () => void } }).__rafaqBle;
+    if (!h) throw new Error('window.__rafaqBle no está disponible (¿se montó el BleE2EBridge bajo el flag?)');
+    h.connectMock();
+  });
+}
+
 /** Conecta el mock + inyecta un bastonazo del EID dado (el handle lo publica BleE2EBridge bajo el flag). */
 async function bastonazo(page: Page, eid: string): Promise<void> {
   await page.evaluate((e) => {
@@ -201,6 +218,9 @@ test('(c) opción B: masiva — 2 bastoneos → asignar a 2 candidatos → conta
   await signIn(page, user);
   await waitForHome(page);
 
+  // El bastón CONECTADO es la precondición del vacío "Bastoneá para empezar" (🔴-3).
+  await conectarBaston(page);
+
   // Esperamos a que AMBOS candidatos bajen al SQLite local (visibles = sincronizado).
   await gotoAnimales(page);
   await expect(page.getByText('5001', { exact: true }).first()).toBeVisible({ timeout: 30_000 });
@@ -271,6 +291,9 @@ test('(d) opción B: bastonear un EID ya asignado NO encola y avisa (prevención
   await gotoWithBle(page);
   await signIn(page, user);
   await waitForHome(page);
+
+  // El bastón CONECTADO es la precondición del vacío "Bastoneá para empezar" (🔴-3).
+  await conectarBaston(page);
 
   // El animal CON caravana debe estar local (visible = sincronizado) para que lookupByTag lo encuentre.
   await gotoAnimales(page);

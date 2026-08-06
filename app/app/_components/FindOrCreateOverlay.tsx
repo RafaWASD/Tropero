@@ -134,6 +134,10 @@ export function FindOrCreateOverlay() {
   scopedScannerActiveRef.current = scopedScannerActive;
 
   const establishmentId = est.status === 'active' ? est.current.id : null;
+  // En ref para poder responder "¿voy a actuar sobre un bastonazo?" desde `acceptsRead` (que se llama
+  // dentro del provider, fuera del render).
+  const establishmentIdRef = useRef(establishmentId);
+  establishmentIdRef.current = establishmentId;
   const activeFieldName = est.status === 'active' ? est.current.name : '';
   const userId = auth.status === 'authenticated' ? auth.user.id : null;
   // RB2.1: el host solo dispara con campo activo fijado Y rodeo existente (hay sobre qué crear/transferir).
@@ -152,17 +156,34 @@ export function FindOrCreateOverlay() {
     setState(null);
   }, []);
 
+  // ─── ¿ESTE overlay va a ACTUAR sobre un bastonazo AHORA? (🔴-2 del barrido del 2026-08-06) ───────────
+  // UNA sola respuesta a la pregunta, consumida por dos lados:
+  //   (a) el PROVIDER, antes de disparar la vibración y de consumir la ventana de dedup — este overlay es
+  //       GLOBAL y está SIEMPRE suscripto, así que sin esta declaración el provider cree que hay
+  //       consumidor en todas las pantallas de la app. En `maniobra/carga` (ruta dueña, sin listener
+  //       propio) eso hacía vibrar el teléfono sobre una lectura que no recibía nadie;
+  //   (b) el propio `onTagRead`, como defensa en profundidad.
+  // Las tres condiciones son las que ya tenía el callback y se leen de las MISMAS refs → no pueden
+  // divergir. Estable (deps vacías): las refs son las que cambian.
+  const acceptsRead = useCallback(
+    () =>
+      establishmentIdRef.current !== null &&
+      !onBleOwnedRouteRef.current &&
+      !scopedScannerActiveRef.current,
+    [],
+  );
+
   // ─── Disparo del overlay (RB3.1): EID validado+dedupeado del provider → lookup local ───
   const onTagRead = useCallback(
     (eid: string) => {
       if (!establishmentId) return; // defensa: enabled ya lo gatea, pero no disparamos sin campo
       // Anti-stacking (design §4.2 / RD5.2 / R3.2): si una ruta dueña del bastón está activa (asignación
       // masiva o MODO MANIOBRAS), ELLA maneja el bastoneo con su propio listener → el overlay global NO
-      // abre nada (sería doble proceso del EID — dos consumidores compitiendo por la lectura).
-      if (onBleOwnedRouteRef.current) return;
-      // Idem para un scanner ACOTADO (RCF.6): el sheet de bastoneo de la ficha tomó la propiedad exclusiva del
-      // bastón para asignar a ESE animal → el overlay global ignora la lectura (la consume el sheet acotado).
-      if (scopedScannerActiveRef.current) return;
+      // abre nada (sería doble proceso del EID — dos consumidores compitiendo por la lectura). Idem para
+      // un scanner ACOTADO (RCF.6): el sheet de bastoneo de la ficha tomó la propiedad exclusiva del
+      // bastón. Las dos supresiones (más la del campo activo) viven en `acceptsRead`, que es también lo
+      // que el provider consulta para NO vibrar cuando esta lectura no la recibe nadie.
+      if (!acceptsRead()) return;
       const ticket = ++seqRef.current;
       lookupEstablishmentRef.current = establishmentId;
       setState({ eid, status: 'loading' });
@@ -194,10 +215,10 @@ export function FindOrCreateOverlay() {
         setState({ eid, status: 'ready', result: res.value });
       })();
     },
-    [establishmentId],
+    [establishmentId, acceptsRead],
   );
 
-  useBleStickListener({ enabled, onTagRead });
+  useBleStickListener({ enabled, onTagRead, accepts: acceptsRead });
 
   // ─── RB2.4: cambio de establishment activo con el overlay abierto → cerrar (no mostrar stale) ───
   useEffect(() => {

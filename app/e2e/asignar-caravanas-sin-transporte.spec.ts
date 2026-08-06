@@ -18,11 +18,21 @@
 // `mode='manual'` → `instantiateTransport('manual')` devuelve null, EXACTAMENTE el estado del Android de
 // hoy. Con solo `__RAFAQ_BLE_E2E__` monta el MockAdapter → transporte presente (paridad con web real).
 //
-// ORÁCULOS (los dos lados, para que el test no pueda pasar por la razón equivocada):
+// ── 🔴-3 (barrido de edge cases del Bluetooth, 2026-08-06): LA DIMENSIÓN QUE FALTABA ─────────────────
+// El corte original miraba SOLO `hasTransport`. Con el adapter SPP de la Fase 4 eso es `true` en TODO
+// Android, aunque el bastón esté apagado, sin emparejar o nunca conectado — y ahí la pantalla volvía a
+// decir "Bastoneá para empezar" en un teléfono donde bastonear no hace nada. Medido en device (A07 +
+// ESP32): tras agotarse la cadena de reconexión (~132 s) el peón bastonea 20 animales y no pasa NADA, en
+// la ÚNICA pantalla BLE-only SIN entrada manual, sin chip en el header y con el pill global auto-oculto
+// justo en 'off'. Ahora el vacío distingue TRES estados y el desconectado TRAE UNA SALIDA (CTA a /baston).
+//
+// ORÁCULOS (los tres lados, para que el test no pueda pasar por la razón equivocada):
 //   - SIN transporte → la fila SIGUE en "Más" (que ocultarla era la alternativa descartada), la pantalla
 //     abre, dice la frase canónica y NO dice "Bastoneá para empezar".
-//   - CON transporte → el vacío queda EXACTAMENTE como antes ("Bastoneá para empezar") y NO aparece el
-//     aviso de "no disponible". Sin este lado, "decir siempre que no hay bastón" pasaría el primero.
+//   - CON transporte y DESCONECTADO → dice que el bastón no está conectado, NO pide bastonear, NO usa la
+//     frase de "no disponible" (el bastón existe), y ofrece el CTA que LLEVA a `/baston`.
+//   - CON transporte y CONECTADO → el vacío queda EXACTAMENTE como antes ("Bastoneá para empezar") y no
+//     aparece ningún aviso. Sin este lado, "decir siempre que hay un problema" pasaría los dos primeros.
 
 import { test, expect } from './helpers/fixtures';
 import type { Page } from '@playwright/test';
@@ -40,8 +50,12 @@ test.afterAll(async () => {
 
 /** La frase canónica de "sin bastón" — la MISMA que usan `identificar` y el `TagScanSheet`. */
 const SIN_BASTON = 'El bastón no está disponible en este dispositivo';
-/** El copy de la espera normal de un bastoneo (el que NO debe aparecer sin transporte). */
+/** El copy de la espera normal de un bastoneo (el que solo vale con el bastón CONECTADO). */
 const ESPERANDO = 'Bastoneá para empezar';
+/** El título del estado 🔴-3: hay bastón en este dispositivo, pero no está conectado. */
+const DESCONECTADO = 'El bastón no está conectado';
+/** El CTA de salida del estado desconectado (lleva a `/baston`). */
+const CTA_CONECTAR = 'Conectar el bastón';
 /** a11y label de la fila de entrada en el tab "Más" (`mas.tsx`, sección "Campo activo"). */
 const ROW_NAME = 'Asignar caravanas electrónicas en masa con el bastón';
 
@@ -85,12 +99,54 @@ test('(a) RD5.2: SIN transporte, el vacío de la masiva dice la verdad (y la fil
   await expect(page.getByText(SIN_BASTON, { exact: true })).toBeVisible();
   // ORÁCULO 3 (la salida real): apunta a la ficha del animal, que SÍ carga el EID a mano sin transporte.
   await expect(page.getByText(/desde la ficha de cada animal/)).toBeVisible();
+  // ORÁCULO 4 (🔴-3): sin transporte NO se ofrece "conectar" — no hay nada que conectar en este
+  // dispositivo, y un CTA ahí sería otra promesa vacía (el mismo error que el chip que se ocultó).
+  await expect(page.getByRole('button', { name: CTA_CONECTAR })).toHaveCount(0);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────────────
-// (b) CON TRANSPORTE → el vacío queda como antes (web / Fase 4). Contrafáctico de (a).
+// (b) 🔴-3 · CON TRANSPORTE PERO DESCONECTADO → el pozo mudo pasa a decir la verdad y traer una salida.
+//     Reproducción en web sin device: con `__RAFAQ_BLE_E2E__` el provider monta el MockAdapter, que
+//     arranca DESCONECTADO — exactamente el Android con el bastón apagado (hay transporte, no hay link).
 // ─────────────────────────────────────────────────────────────────────────────────────────────────────
-test('(b) RD5.2: CON transporte, el vacío sigue siendo "Bastoneá para empezar" (web no se toca)', async ({
+test('(b) 🔴-3: con transporte pero DESCONECTADO, el vacío lo dice y el CTA lleva a /baston', async ({
+  page,
+}) => {
+  const user = await createTestUser('bulkdc');
+  await setUserPhone(user.id, '1123456789');
+  await seedEstablishmentWithRodeo(user.id, 'Campo BulkDC');
+
+  await page.addInitScript(() => {
+    (window as unknown as Record<string, unknown>).__RAFAQ_BLE_E2E__ = true;
+  });
+  await page.goto('/');
+  await signIn(page, user);
+  await waitForHome(page);
+
+  await gotoAsignarCaravanasDesdeMas(page);
+
+  // ORÁCULO 1 (el bug): NO le pide bastonear a un peón cuyo bastón no está conectado.
+  await expect(page.getByText(ESPERANDO, { exact: true })).toHaveCount(0);
+  await expect(page.getByText(/Pasá el bastón por la caravana/)).toHaveCount(0);
+  // ORÁCULO 2 (qué pasa): lo dice sin jerga… y NO lo confunde con "no existe en este dispositivo".
+  await expect(page.getByText(DESCONECTADO, { exact: true })).toBeVisible();
+  await expect(page.getByText(SIN_BASTON, { exact: true })).toHaveCount(0);
+  // ORÁCULO 3 (qué tocar): el CTA existe Y NAVEGA de verdad a la pantalla del bastón. Un estado que
+  // describe el problema sin llevar a ningún lado sigue siendo un pozo.
+  const cta = page.getByRole('button', { name: CTA_CONECTAR });
+  await expect(cta).toBeVisible();
+  await cta.click();
+  // Ancla por testID y no por el texto "Bastón": la pantalla de origen queda MONTADA detrás (Stack) y el
+  // tab "Más" también nombra el bastón → un getByText matchearía de más.
+  // (No se asevera la AUSENCIA del copy de origen: en el Stack la pantalla anterior queda montada detrás,
+  // así que su texto sigue en el DOM. El oráculo de "navegó" es la presencia de algo EXCLUSIVO del destino.)
+  await expect(page.getByTestId('stick-devices-section')).toBeVisible({ timeout: 20_000 });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────
+// (c) CON TRANSPORTE Y CONECTADO → el vacío queda como siempre. Contrafáctico de (a) y (b).
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────
+test('(c) RD5.2: con el bastón CONECTADO, el vacío sigue siendo "Bastoneá para empezar"', async ({
   page,
 }) => {
   const user = await createTestUser('bulkct');
@@ -104,10 +160,20 @@ test('(b) RD5.2: CON transporte, el vacío sigue siendo "Bastoneá para empezar"
   await signIn(page, user);
   await waitForHome(page);
 
+  // El bastón conectado ES la precondición de este estado (antes del 🔴-3 el test no lo pedía y estaba
+  // asertando "Bastoneá para empezar" sobre un mock desconectado — o sea, sobre el propio bug).
+  await page.evaluate(() => {
+    const h = (window as unknown as { __rafaqBle?: { connectMock: () => void } }).__rafaqBle;
+    if (!h) throw new Error('window.__rafaqBle no está disponible (¿se montó el BleE2EBridge bajo el flag?)');
+    h.connectMock();
+  });
+
   await gotoAsignarCaravanasDesdeMas(page);
 
   await expect(page.getByText(ESPERANDO, { exact: true })).toBeVisible();
   await expect(page.getByText(/Pasá el bastón por la caravana/)).toBeVisible();
-  // Y NO aparece el aviso de "no disponible": con bastón sería mentira.
+  // Y NO aparece ningún aviso de problema: con el bastón conectado sería mentira.
   await expect(page.getByText(SIN_BASTON, { exact: true })).toHaveCount(0);
+  await expect(page.getByText(DESCONECTADO, { exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: CTA_CONECTAR })).toHaveCount(0);
 });

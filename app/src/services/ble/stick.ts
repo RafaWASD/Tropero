@@ -17,6 +17,7 @@
 import { useEffect, useRef } from 'react';
 
 import { useBleProviderApi } from './BleStickListenerProvider';
+import { resolveAccepts } from './read-dispatch';
 
 export interface UseBleStickListenerResult {
   isConnected: boolean;
@@ -24,19 +25,39 @@ export interface UseBleStickListenerResult {
 }
 
 /**
- * Hook consumidor del listener global (firma EXACTA de spec 09, R10.4). El `enabled` controla
- * la escucha; `onTagRead` recibe cada EID validado+des-duplicado. Sin provider montado retorna
- * { isConnected:false, isListening:false } (no rompe; manual-first sigue por la UI de spec 09).
+ * Hook consumidor del listener global (firma EXACTA de spec 09, R10.4, + `accepts` opcional). El
+ * `enabled` controla la escucha; `onTagRead` recibe cada EID validado+des-duplicado. Sin provider
+ * montado retorna { isConnected:false, isListening:false } (no rompe; manual-first sigue por la UI
+ * de spec 09).
+ *
+ * `accepts` (🔴-2 del barrido del 2026-08-06) — OPCIONAL, default "acepto siempre". Declara si esta
+ * superficie va a ACTUAR sobre una lectura AHORA. Lo tiene que pasar todo consumidor que se
+ * auto-censure adentro de su `onTagRead` (el overlay global en las rutas dueñas del bastón; el
+ * `TagScanSheet` mientras se tipea el EID a mano): sin eso, el provider cree que hay consumidor,
+ * VIBRA, y el dato se pierde igual — una confirmación falsa sobre una lectura perdida. `accepts` NO
+ * reemplaza a la guarda de adentro del callback: las dos leen las MISMAS refs (una sola respuesta a
+ * la misma pregunta) y la de adentro queda como defensa en profundidad.
+ *
+ * ⚠️ Un consumidor NUEVO que se auto-censure y no declare `accepts` reintroduce el 🔴-2. El guard
+ * `services/ble/read-dispatch.test.ts` enumera TODOS los call sites de este hook contra una tabla
+ * explícita: un call site nuevo deja la suite en rojo hasta que alguien decida (y escriba) de qué
+ * lado está.
  */
 export function useBleStickListener(opts: {
   enabled: boolean;
   onTagRead: (tag: string) => void;
+  accepts?: () => boolean;
 }): UseBleStickListenerResult {
   const api = useBleProviderApi();
 
   // onTagRead en ref: cambiarlo (closure nueva cada render) NO debe re-suscribir/disparar.
   const onTagReadRef = useRef(opts.onTagRead);
   onTagReadRef.current = opts.onTagRead;
+
+  // `accepts` en ref por el mismo motivo: se lee en cada lectura, así que un consumidor puede pasar una
+  // arrow inline (siempre fresca) sin re-suscribir el listener en cada render.
+  const acceptsRef = useRef(opts.accepts);
+  acceptsRef.current = opts.accepts;
 
   // Refleja `enabled` del consumidor en el enable/disable del listener global (R10.5).
   useEffect(() => {
@@ -45,10 +66,16 @@ export function useBleStickListener(opts: {
     else api.disableListener();
   }, [api, opts.enabled]);
 
-  // Suscribe el callback de tag_read mientras el hook está montado.
+  // Suscribe el callback de tag_read mientras el hook está montado, junto con el predicado de
+  // aceptación. La COMPOSICIÓN del predicado (leer el `accepts` vigente de la ref; sin `accepts`
+  // declarado, aceptar) NO se escribe acá inline: vive en `resolveAccepts` (puro, en `read-dispatch.ts`)
+  // y se verifica EJECUTÁNDOLA. Escrita inline era `acceptsRef.current?.() ?? true`, y el review la burló
+  // cambiando el `??` por un `||`: todo consumidor pasaba a aceptar siempre —el fix entero, un no-op—
+  // con `tsc` limpio y la suite verde, porque el único oráculo posible sobre una línea de React es un
+  // regex, y `??` y `||` se ven casi iguales.
   useEffect(() => {
     if (!api) return;
-    const unsub = api.subscribeTagRead((tag) => onTagReadRef.current(tag));
+    const unsub = api.subscribeTagRead((tag) => onTagReadRef.current(tag), resolveAccepts(acceptsRef));
     return unsub;
   }, [api]);
 

@@ -6,6 +6,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  STICK_ROW_ACTION,
+  connectionRowA11yLabel,
   connectionRowStatus,
   connectionStatusView,
   deviceRowView,
@@ -481,5 +483,78 @@ test('R6.4: el flag NO puede resucitar un CTA donde no hay transporte, ni tocar 
       connectionStatusView(s, { hasTransport: true }),
       `el flag no debería cambiar el estado '${s}'`,
     );
+  }
+});
+
+// ─── Nombre ACCESIBLE de la fila de acceso al bastón ─────────────────────────────────────────
+//
+// ⚠️ Acá NO hay tests del pill del chrome, y es deliberado: el pill **no es un botón** (se intentó el
+// 2026-08-06 y se revirtió — se superponía a CTAs de manga y les robaba el toque; ver el bloque ⛔ de
+// `components/StickStatusIndicator.tsx`). Su nombre accesible es el label del estado a secas, vía
+// `labelA11y`, y quien lo vigila es `utils/tap-target-collision-guard.test.ts` → `(E)`.
+
+/** Todas las combinaciones de entrada que la fila puede recibir. */
+const A11Y_ENVS = [
+  { hasTransport: true },
+  { hasTransport: true, autoConnectExhausted: true },
+  { hasTransport: false },
+  { hasTransport: false, autoConnectExhausted: true },
+] as const;
+
+test('a11y: el nombre de la fila lleva el ESTADO adentro y termina en su ACCIÓN', () => {
+  for (const env of A11Y_ENVS) {
+    for (const s of ALL_STATES) {
+      const row = connectionRowA11yLabel(s, env);
+      assert.ok(row.startsWith('Bastón: '), `la fila tiene que nombrarse por su destino: "${row}"`);
+      assert.ok(row.endsWith(STICK_ROW_ACTION), `la fila tiene que terminar en su acción: "${row}"`);
+    }
+  }
+});
+
+test('a11y: el nombre CONTIENE el texto VISIBLE verbatim (WCAG 2.5.3 «Label in Name»)', () => {
+  // Quien maneja la app por voz dice lo que VE. Si el nombre accesible recorta el "…" de "Conectando…"
+  // o reescribe el copy, el comando por voz deja de matchear el control.
+  for (const env of A11Y_ENVS) {
+    for (const s of ALL_STATES) {
+      const visible = connectionRowStatus(s, env).text; // lo que muestra el trailing de la fila
+      assert.ok(
+        connectionRowA11yLabel(s, env).includes(visible),
+        `el nombre de la fila no contiene su texto visible "${visible}"`,
+      );
+    }
+  }
+});
+
+test('a11y: nunca se duplica la puntuación (`Conectando…` + `.` sonaba a dos frases cortadas)', () => {
+  for (const env of A11Y_ENVS) {
+    for (const s of ALL_STATES) {
+      const name = connectionRowA11yLabel(s, env);
+      assert.doesNotMatch(name, /\.\.|…\.|\.…/, `puntuación duplicada en "${name}"`);
+      assert.doesNotMatch(name, /\s{2,}/, `espacios de más en "${name}"`);
+    }
+  }
+});
+
+test('a11y: el matcher que usa la E2E encuentra la fila en TODOS los estados', () => {
+  // Espejo EXACTO del locator de `e2e/baston-multivendor.spec.ts` y `e2e/fab-target-geometry.spec.ts`.
+  // Sin esto, el día que cambie un copy la E2E se rompe en un timeout de 20 s en vez de acá en 1 ms.
+  const ROW_MATCHER = /^Bastón: .+ Abrí la pantalla de conexión del bastón$/;
+  for (const env of A11Y_ENVS) {
+    for (const s of ALL_STATES) {
+      assert.match(connectionRowA11yLabel(s, env), ROW_MATCHER, 'la E2E no encontraría la fila');
+    }
+  }
+});
+
+test('a11y: el nombre de la fila sale del MISMO view que la fila pinta (no de un copy paralelo)', () => {
+  // El defecto que este módulo cerró el 2026-07-29 fue una decisión de presentación viviendo fuera de
+  // acá y terminando contradiciendo a la pantalla. Un nombre accesible inventado aparte sería lo mismo,
+  // pero invisible: solo lo notaría alguien usando TalkBack.
+  for (const env of A11Y_ENVS) {
+    for (const s of ALL_STATES) {
+      const text = connectionRowStatus(s, env).text;
+      const sep = /[.…!?]$/.test(text) ? ' ' : '. ';
+      assert.equal(connectionRowA11yLabel(s, env), `Bastón: ${text}${sep}${STICK_ROW_ACTION}`);
+    }
   }
 });

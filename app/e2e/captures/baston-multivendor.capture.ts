@@ -65,7 +65,7 @@ test.afterAll(async () => {
 });
 
 /** a11y label de la fila "Bastón" del tab "Más" (el estado en vivo va dentro del nombre accesible). */
-const STICK_ROW_NAME = /^Bastón: .+\. Abrí la pantalla de conexión del bastón$/;
+const STICK_ROW_NAME = /^Bastón: .+ Abrí la pantalla de conexión del bastón$/;
 
 const SHOT_DIR = path.join('e2e', 'captures', '__shots__', 'baston-multivendor');
 
@@ -137,8 +137,10 @@ test('capturas pantalla de conexión + demo del bastón @ 412px', async ({ brows
     await waitForHome(page);
 
     // (08) La NUEVA fila de acceso del tab "Más" (RMV3.1) en reposo. Pantalla COMPLETA a propósito: lo que
-    // hay que vetar acá es la UBICACIÓN de la sección "Bastón" (después de la card de Perfil, antes del
-    // bloque "Campo activo" — el bastón es del teléfono, no del campo) además de la fila en sí.
+    // hay que vetar acá es la UBICACIÓN de la sección "Dispositivos" (después de la card de Perfil, antes
+    // del bloque "Campo activo" — el bastón es del teléfono, no del campo) además de la fila en sí. El
+    // título dice "Dispositivos" desde el 2026-08-06 (antes "Bastón", que con una sola fila homónima era
+    // una tautología y no agrupaba nada).
     const stickRow = page.getByRole('button', { name: STICK_ROW_NAME });
     await gotoTab(page, 'Más', stickRow);
     await expect(page.getByText('Sin conectar', { exact: true })).toBeVisible();
@@ -147,7 +149,7 @@ test('capturas pantalla de conexión + demo del bastón @ 412px', async ({ brows
     // Aterrizar en la pantalla de conexión POR LA FILA (navegación client-side real, no deep-link): es el
     // camino del operario y el que preserva el provider raíz (y con él la conexión) al volver.
     await stickRow.click();
-    await expect(page.getByText('Dispositivos', { exact: true })).toBeVisible({ timeout: 40_000 });
+    await expect(page.getByTestId('stick-devices-section')).toBeVisible({ timeout: 40_000 });
     await expect(page.getByTestId('stick-device-row')).toBeVisible({ timeout: 20_000 });
 
     // (01) Pantalla de conexión cargada: estado 'off' + RS420 reconocido + salida manual.
@@ -197,7 +199,7 @@ test('capturas pantalla de conexión + demo del bastón @ 412px', async ({ brows
     // (09) La fila con el estado EN VIVO: "Conectado" en el trailing (el valor de la fila es enterarse sin
     // entrar). Banda del componente, para el veto de la fila en sí.
     await expect(page.getByText('Conectado', { exact: true })).toBeVisible();
-    await shotBand(page, '09-fila-mas-baston-conectado', page.getByText('Bastón', { exact: true }).first(), stickRow);
+    await shotBand(page, '09-fila-mas-baston-conectado', page.getByText('Dispositivos', { exact: true }), stickRow);
 
     // Volver a la pantalla por la fila (la conexión sigue viva) para el estado desconectado.
     await stickRow.click();
@@ -250,7 +252,7 @@ test('captura de la fila del bastón SIN transporte (decisión: no se oculta) @ 
     const stickRow = page.getByRole('button', { name: STICK_ROW_NAME });
     await gotoTab(page, 'Más', stickRow);
     await expect(page.getByText('No disponible', { exact: true })).toBeVisible();
-    await shotBand(page, '10-fila-mas-baston-sin-transporte', page.getByText('Bastón', { exact: true }).first(), stickRow);
+    await shotBand(page, '10-fila-mas-baston-sin-transporte', page.getByText('Dispositivos', { exact: true }), stickRow);
   } finally {
     await ctx.close();
   }

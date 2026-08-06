@@ -128,7 +128,7 @@ test('capturas: un bastonazo en /baston entra UNA sola vez (sin sheet global enc
     // arreglo de la doble ingesta (BENCH-3), no el punto de entrada, y el `goto` la deja independiente de
     // la nav. La ruta por la fila la cubre `baston-multivendor.capture.ts`.
     await page.goto('/baston');
-    await expect(page.getByText('Dispositivos', { exact: true })).toBeVisible({ timeout: 40_000 });
+    await expect(page.getByTestId('stick-devices-section')).toBeVisible({ timeout: 40_000 });
     await expect(page.getByTestId('stick-device-row')).toBeVisible({ timeout: 20_000 });
 
     // (01) Referencia: la pantalla antes de bastonear.

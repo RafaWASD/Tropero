@@ -391,7 +391,10 @@ export default function StickConnectionScreen() {
         {/* ── Dispositivos (RMV3.2). En SPP-Android: la lista REAL de emparejados del teléfono.
               En web/iOS: la fila única de capacidad de build, como hasta ahora. ── */}
         <YStack gap="$2">
-          <Text fontFamily="$body" fontSize="$3" fontWeight="600" color="$textMuted">
+          {/* `testID` y no el texto como ancla en la E2E: desde el 2026-08-06 el tab "Más" también tiene
+              una sección "Dispositivos", y ese tab queda MONTADO detrás de esta pantalla (Stack) → un
+              `getByText('Dispositivos')` matchea DOS y rompe en strict-mode. */}
+          <Text testID="stick-devices-section" fontFamily="$body" fontSize="$3" fontWeight="600" color="$textMuted">
             Dispositivos
           </Text>
 

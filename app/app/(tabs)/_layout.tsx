@@ -114,62 +114,43 @@ function ManiobraFab() {
   // label). Al subir el FAB, el halo sube con él y deja de tocar el label → ya no hace
   // falta el knockout blanco detrás de "Maniobra".
   const FAB_RAISE = COLOR.fabRaise;
-  // ── Zona tocable (FIX de la zona muerta de tap) ────────────────────────────────────
-  // El círculo se dibuja PARCIALMENTE FUERA de su celda (marginTop:-$fabRaise = -26). En
-  // NATIVO los toques que caen fuera de los límites de un ancestro NO se entregan a sus
-  // hijos (Android: ViewGroup.dispatchTouchEvent solo desciende a hijos cuyos bounds
-  // contienen el punto; iOS: hitTest: devuelve nil si pointInside: es false) → esos 26px
-  // que sobresalen NO responden al tap. En WEB no reproduce (el DOM no recorta el
-  // hit-testing igual), por eso nunca se detectó: la app se validó siempre en web hasta
-  // el bring-up nativo.
+  // ── Zona tocable: SOLO hacia ABAJO (bugfix 🔴 2026-08-06) ──────────────────────────
+  // `top` NO VA. Tenerlo era el bug: extendía el target del FAB $fabRaise (26 dp) por encima
+  // del círculo PINTADO e invadía la banda donde el chrome ancla el pill del bastón, así que un
+  // toque al pill abría MODO MANIOBRAS. Reporte de Raf en device; medido con dos métodos:
+  //   · WEB (cajas del DOM @412×915): pill bottom=810 · círculo top=820 → 10 dp de aire; techo
+  //     del target con el slop en y=794 → SOLAPE de 16 dp = 48 % inferior del pill.
+  //   · DEVICE A07 (720×1600, densidad 300 → 1 dp = 1,875 px): techo PINTADO del círculo en
+  //     y=1324 (Pillow sobre `screencap`, color $primary); techo TÁCTIL en y=1276 (barrido de
+  //     `adb shell input tap`: 1272 no dispara, 1276 sí) → 48 px = 25,6 dp ≈ $fabRaise. Mismo
+  //     48 % de solape que en web.
   //
-  // ELECCIÓN: hitSlop sobre el Pressable, NO reestructurar. Justificación:
-  //  - hitSlop es la herramienta correcta para agrandar el target de ESTE botón y es
-  //    100% seguro: no cambia una sola coordenada del layout ni de la pintura.
-  //  - Reestructurar para que la parte que sobresale quede DENTRO de los bounds de un
-  //    ancestro obliga a agrandar el propio tabBar (height += fabRaise + paddingTop
-  //    compensatorio + tabBarBackground para no pintar la franja de más). Eso deja una
-  //    franja TRANSPARENTE de 26px de ANCHO COMPLETO por encima del nav que, en nativo,
-  //    igual captura los toques (una View transparente sigue recibiendo eventos y el
-  //    BottomTabBar de React Navigation se monta con pointerEvents="auto", no
-  //    "box-none") → los botones y el scroll del contenido en esos 26px dejarían de
-  //    funcionar EN TODAS las pantallas. Cambiar una zona muerta de 64×26 por una de
-  //    412×26 es peor.
-  //  - ⚠️ HONESTO: lo ÚNICO que este hitSlop gana efectivamente es el `bottom`. Extiende el
-  //    target hasta el pie de la celda → el label "Maniobra" pasa a ser tocable (antes NO lo
-  //    era) y el área útil in-bounds crece de 64×38 a 64×58. Esa es la mitad accionable del
-  //    problema, y por eso la mitigación se queda.
-  //  - El `top` NO recupera un solo píxel HOY, en NINGUNA de las dos plataformas. Verificado
-  //    (en node_modules), no asumido:
-  //      · WEB: `hitSlop` es NO-OP. react-native-web (0.21.2) NO lo implementa en `Pressable`
-  //        (ni en `usePressEvents`/`PressResponder`): la única aparición de `hitSlop` en el
-  //        paquete está en el módulo LEGACY `Touchable`, que este árbol no usa. La prop ni
-  //        siquiera figura en el `_excluded` de Pressable → cae en el spread al View y el
-  //        whitelist de props del DOM la descarta en silencio. (En web igual no hay nada que
-  //        recuperar: el DOM no recorta el hit-testing, la parte elevada ya es tocable.)
-  //      · NATIVO: el ancestro recorta ANTES de que el evento llegue al Pressable (Android
-  //        ViewGroup.dispatchTouchEvent, iOS hitTest:/pointInside:), así que el slop `top`
-  //        tampoco rescata los 26px que sobresalen.
-  //    Se deja igual a la elevación por CORRECCIÓN DECLARATIVA (describe el target real del
-  //    botón, y si el FAB sale del tabBar el valor ya es el correcto), a costo cero: es
-  //    documentación, no función.
-  //  - El FIX REAL de la parte elevada (sacar el FAB del tabBar y montarlo como overlay
-  //    absoluto en el layout raíz con pointerEvents="box-none" — refactor de navegación con su
-  //    propia spec, fuera del alcance de este fix) está anotado en `docs/backlog.md`, entrada
-  //    2026-07-18 "Zona muerta de tap en el FAB de Maniobra", con la verificación pendiente en
-  //    device.
-  //  - Sin slop horizontal a propósito: a 360px de ancho la celda mide 72 EXACTOS (360/5) y el
-  //    círculo 64 → 4px de aire por lado, que el anillo del halo (⌀72) ya ocupa ENTEROS. Medido
-  //    con Pillow sobre design/nav-iter-2/B4-360.png: el halo se pinta en x 144..215, o sea
-  //    justo los bordes de la celda, cero desborde. Cualquier slop lateral le robaría toques a
-  //    las tabs vecinas (Animales / Reportes).
-  // Los valores se DERIVAN de tokens (no literales): bottom = alto útil de la celda
-  // ($navBar - $navItemTop) menos lo que el círculo ya ocupa dentro de ella ($fab - $fabRaise).
-  // `left`/`right` se OMITEN (Insets es parcial) en vez de mandarlos en 0: además de dejar
-  // explícito que no hay slop horizontal, evita el falso positivo del lint anti-hardcode, que
-  // marca `left:`/`right:` con número crudo como spacing sin token.
+  // Y la premisa por la que el `top` se había puesto TAMPOCO ERA CIERTA. Decía que el ancestro
+  // recorta los toques que caen fuera de sus bounds, así que la parte elevada del círculo sería
+  // una zona muerta. Medido: el target dispara en y=1276, **86 px por encima** del techo de la
+  // barra (y=1362) → el tabBar NO está recortando nada. Corolario: sacar el `top` no puede crear
+  // una zona muerta, el círculo entero (1324→1444) es alcanzable por sus propios bounds.
+  //
+  // ⚠️ Un test de COMPORTAMIENTO en web no puede cazar esto: `hitSlop` es NO-OP en
+  // react-native-web 0.21.2 (`Pressable` no lo implementa; la única aparición en el paquete está
+  // en el módulo legacy `Touchable`, que este árbol no usa). Por eso el guard es GEOMÉTRICO:
+  // `src/utils/nav-target-bands.test.ts` (bandas aritméticas desde los tokens) +
+  // `src/utils/tap-target-collision-guard.test.ts` (inventario de clase) +
+  // `e2e/fab-target-geometry.spec.ts` (cajas reales). Re-agregar el `top` los pone en rojo.
+  //
+  // El `bottom` SE QUEDA: es el único que gana área útil (baja el target hasta el pie de la
+  // celda → el label "Maniobra" pasa a ser tocable) y crece hacia DENTRO del tabBar, donde no
+  // hay ningún vecino: por debajo del círculo solo está su propio label. Se deriva de tokens
+  // (no literal): alto útil de la celda ($navBar - $navItemTop) menos lo que el círculo ya ocupa
+  // dentro de ella ($fab - $fabRaise) = 60 - 2 - (64 - 26) = 20.
+  //
+  // Sin slop horizontal a propósito: a 360px la celda mide 72 EXACTOS (360/5) y el círculo 64 →
+  // 4px de aire por lado que el anillo del halo (⌀72) ya ocupa ENTEROS (medido con Pillow sobre
+  // design/nav-iter-2/B4-360.png: el halo se pinta en x 144..215). Cualquier slop lateral le
+  // robaría toques a las tabs vecinas (Animales / Reportes). `left`/`right`/`top` se OMITEN
+  // (Insets es parcial) en vez de mandarlos en 0: deja explícito que no hay slop ahí y evita el
+  // falso positivo del lint anti-hardcode con números crudos.
   const HIT_SLOP = {
-    top: FAB_RAISE,
     bottom: Math.max(0, COLOR.navHeight - COLOR.navItemTop - (FAB_SIZE - FAB_RAISE)),
   };
   // Offset vertical del label "Maniobra": el halo verde pálido del FAB asomaba sobre el
@@ -217,11 +198,9 @@ function ManiobraFab() {
         accessibilityRole="button"
         accessibilityLabel="Abrir MODO MANIOBRAS"
         onPress={() => router.push('/maniobra')}
-        // Zona tocable: baja hasta el pie de la celda (el label "Maniobra" pasa a ser tocable)
-        // y declara el círculo completo hacia arriba. Ver el bloque HIT_SLOP arriba — incluido
-        // el LÍMITE verificado: el `bottom` es lo único que gana área; el `top` no rescata los
-        // 26px elevados (nativo: el ancestro recorta antes; web: RNW ni implementa hitSlop en
-        // Pressable).
+        // Zona tocable: SOLO hacia abajo, hasta el pie de la celda (el label "Maniobra" pasa a
+        // ser tocable). Hacia arriba NO se extiende: ahí vive el chrome de la app. Ver el bloque
+        // HIT_SLOP de arriba (bugfix 🔴 2026-08-06, con las mediciones).
         hitSlop={HIT_SLOP}
         style={{
           width: FAB_SIZE,
