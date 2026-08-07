@@ -101,25 +101,38 @@ sin justificación documentada.
   CHECK de `campaign_year`. Cubre: RCC.4.1, RCC.4.2, RCC.4.3, RCC.4.11.
 
 - [ ] **T16 — Índice único parcial** `(rodeo_id, campaign_year) where reopened_at is null` + índice
-  `(establishment_id, campaign_year desc)`. Cubre: RCC.4.10.
+  `(establishment_id, campaign_year desc)` + **`unique (id, establishment_id)`** (destino de la FK compuesta del
+  detalle). Cubre: RCC.4.10, RCC.4.8.b.
 
 - [ ] **T17 — Enum `campaign_bucket`** `('serviced','pregnant','empty','calved','weaned')` + tabla
   `rodeo_campaign_snapshot_animals` de `design` §2.3, con `animal_profile_id … on delete set null` (**nunca
-  cascade**), `idv` congelado, `source`, `pregnancy_status`, `mother_profile_id`/`mother_idv`.
-  Cubre: RCC.4.4, RCC.4.6.
+  cascade**), `idv` congelado, `source`, `pregnancy_status`, `mother_profile_id`/`mother_idv`, **y la FK
+  compuesta `(snapshot_id, establishment_id) → rodeo_campaign_snapshots (id, establishment_id) on delete
+  cascade`** — el tenant del detalle no puede divergir del de su cabecera ni con una escritura privilegiada.
+  Cubre: RCC.4.4, RCC.4.6, RCC.4.8.b.
 
 - [ ] **T18 — Índices del detalle**: único `(snapshot_id, bucket, animal_profile_id)` (permite el mismo animal en
   varios buckets) + `(snapshot_id, bucket)`. Cubre: RCC.4.5.
 
-- [ ] **T19 — RLS + grants de las 2 tablas de snapshot**: `for select using (has_role_in(establishment_id))`;
-  `grant select … to authenticated` (**sin** insert/update/delete); `grant all … to service_role`. Comentario que
-  explique **por qué acá sí** se usa la columna denormalizada como frontera (no hay camino de escritura del
-  cliente — `design` §2.3). Cubre: RCC.4.8, RCC.9.9, DP-19.
+- [ ] **T19 — RLS + grants de las 2 tablas de snapshot**: policies **exclusivamente** `for select using
+  (has_role_in(establishment_id))`; `grant select … to authenticated` (**sin** insert/update/delete);
+  `grant all … to service_role`. Comentario que declare el **desvío de ADR-026** con su invariante ("mientras no
+  exista grant de escritura ni policy distinta de SELECT") y apunte a TR.14e como su guard (`design` §2.3).
+  Cubre: RCC.4.8, RCC.9.9, DP-19.
 
-- [ ] **T20 — Smoke-check fail-closed + `notify pgrst` + `commit`** para los 5 helpers (`is_owner_or_vet_of`
-  ejecutable por `authenticated`; `campaign_tacto_bounds`, `animal_category_at`, `campaign_cycle_complete` y
-  `campaign_missing_summary` **no** ejecutables por `public`/`anon`/`authenticated`). **No** agregar nada a
-  `sync-streams/rafaq.yaml`. Cubre: RCC.4.9, RCC.9.5, RCC.9.6.
+- [ ] **T20 — Smoke-check fail-closed por LISTA BLANCA + BARRIDO** (`design` §6-bis), **no** por enumeración de
+  lo prohibido: una única `text[]` con las funciones **públicas** del delta, de la que salen los `grant` y el
+  check; el check barre `public` por prefijo (`rodeo_campaign_%`, `campaign_%`, `animal_category_at`) y aborta si
+  algo fuera de la lista blanca es ejecutable por `public`/`anon`/`authenticated`. + `notify pgrst` + `commit`.
+  **No** agregar nada a `sync-streams/rafaq.yaml`. Cubre: RCC.4.9, RCC.9.5, RCC.9.6.
+
+- [ ] **T20-bis — Comentarios de los bordes declarados** (anexo LOW de Gate 1): `comment on function
+  animal_category_at` ("sin guard a propósito: no es alcanzable; si se le da grant, agregar el guard PRIMERO") y
+  `comment on column rodeo_membership_history.establishment_id` ("no es frontera de autorización — la RLS usa
+  `establishment_of_profile()`; puede quedar stale; si alguien optimiza la policy, primero agregar la columna a
+  la lista del trigger"). Unificar la política de borrado del actor en **`on delete set null`** para
+  `closed_by`, `reopened_by` y `changed_by` (se aparta del molde `0030` a propósito — `design` §13-bis L-2).
+  Cubre: `design` §13-bis.
 
 ## Bloque D — Migración `0129_reports_historical_compute.sql` (F1 / F2 / F3 / F3-bis / F4 / F5 / DL3)
 
@@ -177,18 +190,28 @@ sin justificación documentada.
 
 - [ ] **T34 — `close_campaign(p_rodeo_id uuid, p_year int, p_acknowledge_incomplete boolean default false)
   returns uuid`** — `security definer` **VOLATILE** (comentario explicando por qué **no** es `STABLE`)
-  `set search_path = public`, molde de escritura `0044`/`0116`. Secuencia de `design` §4.2 pasos 1-3: derivar
-  tenant (`P0002`), **guard `is_owner_or_vet_of` como primera sentencia ejecutable** (`42501`), cota de `p_year`
-  (`22023`). Cubre: RCC.5.1, RCC.5.2, RCC.5.8, RCC.9.2, RCC.9.3, RCC.9.4.
+  **`set search_path = public, pg_temp`** (con el comentario de `design` §4.2 sobre por qué `pg_temp` va último y
+  explícito, y por qué NO se "uniformiza" con las funciones de lectura), molde de escritura `0044`/`0116`.
+  Secuencia de `design` §4.2 pasos 1-3: derivar tenant (`P0002`), **guard `is_owner_or_vet_of` como primera
+  sentencia ejecutable** (`42501`), cota de `p_year` (`22023`).
+  Cubre: RCC.5.1, RCC.5.2, RCC.5.8, RCC.9.2, RCC.9.3, RCC.9.4.
 
 - [ ] **T35 — Guard duro (no reconocible) + idempotencia**: `23514` si `v_state_as_of > current_date`, con un
   mensaje que lo distinga del gate de T36-bis y un comentario explicando por qué `p_acknowledge_incomplete`
   **no** lo sortea (la fecha de corte no ocurrió: no es una foto incompleta, es el presente proyectado al
   futuro). Si ya hay snapshot vigente → devolver su `id` **sin escribir**. Cubre: RCC.5.6, RCC.5.7.
 
-- [ ] **T36 — Computar TODO antes de escribir** (4 temp tables `on commit drop` + 5 `select … into` de las RPC de
-  KPI), **después** la cabecera, **después** el detalle. Comentario explicando el orden (si la cabecera se
-  insertara primero, las RPC devolverían la foto a medio hacer). Cubre: RCC.5.4, RCC.5.5.
+- [ ] **T36 — Computar TODO antes de escribir** (4 temporales + 5 `select … into` de las RPC de KPI), **después**
+  la cabecera, **después** el detalle. Comentario explicando el orden (si la cabecera se insertara primero, las
+  RPC devolverían la foto a medio hacer). Las temporales van con el patrón **crear-o-truncar** de `design` §4.2
+  (`if to_regclass('pg_temp._snap_x') is null then create … else truncate + insert`), con el nombre calificado
+  `pg_temp.*` y **sin SQL dinámico**: sin eso, dos cierres en la misma transacción mueren con `42P07` y el
+  runbook del §9 se rompe en su primer uso real. Cubre: RCC.5.4, RCC.5.5, RCC.11.10.
+
+- [ ] **T36-α — Gate de campaña inexistente (RCC.5.7.e)**: `if v_denom.serviced = 0 then raise … '23514'`, con el
+  comentario de `design` §4.2 paso 7-bis-α (un año sin hembras servidas no es una campaña incompleta sino
+  inexistente; y es el piso que impide materializar ~126 snapshots por rodeo iterando `p_year`). **No** lo sortea
+  `p_acknowledge_incomplete`. Cubre: RCC.5.7.e, RCC.9.11.
 
 - [ ] **T36-bis — Gate del ciclo incompleto (F8)**, con los KPI ya computados y **antes** de escribir nada:
   `v_complete := campaign_cycle_complete(v_wean.status, v_wean.pending_weaning, v_state_as_of)` y
@@ -197,17 +220,22 @@ sin justificación documentada.
   cantidades). **No** reimplementar el predicado: usar el helper de T14-bis.
   Cubre: RCC.5.7.a, RCC.5.7.b, RCC.5.7.c.
 
-- [ ] **T37 — Insert de la cabecera** con los 21 campos de KPI + `service_months`/`n_months`/`is_configured`
-  congelados + `state_as_of`/`tacto_from`/`tacto_to`/`formula_version` + `closed_by = auth.uid()` +
-  **`closed_incomplete = not v_complete` y `missing_at_close = case when v_complete then null else v_missing
-  end`**, con manejo de `unique_violation` que devuelve el snapshot existente (carrera).
-  Cubre: RCC.4.1, RCC.4.2, RCC.4.3, RCC.4.11, RCC.5.7.d, RCC.9.8.
+- [ ] **T37 — Insert de la cabecera** con **`establishment_id = v_est`** (el mismo valor que derivó el guard de la
+  fila de `rodeos` — **nunca** del cliente, RCC.4.8.a) + los 21 campos de KPI +
+  `service_months`/`n_months`/`is_configured` congelados + `state_as_of`/`tacto_from`/`tacto_to`/`formula_version`
+  + `closed_by = auth.uid()` + **`closed_incomplete = not v_complete` y `missing_at_close = case when v_complete
+  then null else v_missing end`**, con manejo de `unique_violation` que devuelve el snapshot existente (carrera).
+  Cubre: RCC.4.1, RCC.4.2, RCC.4.3, RCC.4.8.a, RCC.4.11, RCC.5.7.d, RCC.9.8.
 
-- [ ] **T38 — Cinco `insert … select` del detalle**, uno por bucket, desde las temp tables, con `idv` tomado de
-  `animal_profiles` en ese momento (`source` en `serviced`; `pregnancy_status` en `pregnant`;
-  `mother_profile_id`/`mother_idv` en `weaned`). Cubre: RCC.4.4, RCC.4.5, RCC.4.6, RCC.4.7.
+- [ ] **T38 — Cinco `insert … select` del detalle**, uno por bucket, desde las temporales, con
+  **`establishment_id` tomado de la fila de snapshot padre** (`v_est`, NO de `animal_profiles.establishment_id`
+  de cada animal — `design` §2.3: si un día un camino moviera un perfil de establecimiento in-place, tomarlo del
+  animal desalinearía la RLS del detalle respecto de su cabecera) y con `idv` tomado de `animal_profiles` en ese
+  momento (`source` en `serviced`; `pregnancy_status` en `pregnant`; `mother_profile_id`/`mother_idv` en
+  `weaned`). Cubre: RCC.4.4, RCC.4.5, RCC.4.6, RCC.4.7, RCC.4.8.a.
 
-- [ ] **T39 — `reopen_campaign(p_rodeo_id uuid, p_year int) returns uuid`**: mismo guard y cotas; `null` si ya
+- [ ] **T39 — `reopen_campaign(p_rodeo_id uuid, p_year int) returns uuid`** (`set search_path = public, pg_temp`
+  por uniformidad de las 2 de escritura): mismo guard y cotas; `null` si ya
   está abierta; `23514` si `(p_rodeo_id, p_year+1)` tiene snapshot vigente; si no,
   `update … set reopened_at = now(), reopened_by = auth.uid()` **sin borrar** la fila ni el detalle.
   Cubre: RCC.6.1, RCC.6.2, RCC.6.3, RCC.6.4, RCC.6.5.
@@ -217,7 +245,9 @@ sin justificación documentada.
   de `design` §4.4, incluidos `can_close`/`can_reopen` (derivados de `is_owner_or_vet_of` + las precondiciones),
   `closed_incomplete`, `missing_at_close`, `pending_pregnant`, `pending_weaning`, `missing_summary`,
   `cycle_complete` y `has_new_data`. **`cycle_complete` sale de `campaign_cycle_complete` (T14-bis), no de una
-  copia del predicado.** Cubre: RCC.7.3, RCC.7.6, RCC.7.7, RCC.8.3, RCC.10.5, RCC.10.8.
+  copia del predicado.** **`closed_by_name` sale de `user_roles.member_name`** (`where user_id = closed_by and
+  establishment_id = v_est`, `coalesce` a null) — **NO** de la tabla global `users` (ADR-026 c2 / `0080`).
+  Cubre: RCC.7.3, RCC.7.6, RCC.7.7, RCC.8.3, RCC.9.12, RCC.10.5, RCC.10.8.
 
 - [ ] **T41 — No agregar ningún trigger que rechace escrituras de una campaña cerrada** (DL10: el dato se acepta).
   Cubre: RCC.8.1, RCC.8.2.
@@ -265,6 +295,46 @@ sin justificación documentada.
   reapertura bloqueada; `close` dos veces → mismo id y una sola fila. Cubre: RCC.5.2, RCC.5.6, RCC.5.7, RCC.5.8,
   RCC.6.2, RCC.7.3, RCC.9.4, RCC.13.5, RCC.13.9.
 
+- [ ] **T48-α — TR.21 tenant del camino CERRADO (Gate 1 H-1, BLOQUEANTE)** — `design` §8.1-bis. Dos oráculos
+  **conductuales**, ninguno textual:
+  - **(a) guard antes del cortocircuito**: cerrar la campaña de A; el owner de **B** invoca cada función de
+    campaña sobre el rodeo de **A** con ese año → `42501` **y `data` vacío**. La lista de funciones **NO se
+    escribe a mano**: se **descubre** del catálogo (`pg_proc`, `nspname='public'`, `proname like 'rodeo\_%'`,
+    `pg_get_function_identity_arguments = 'uuid, integer'`, `has_function_privilege('authenticated', …)`) y se
+    asserta un **piso de 9** funciones descubiertas, para que sacar una del namespace tampoco esquive el test.
+  - **(b) cota antes del cortocircuito**: sembrar por `service_role` un snapshot con `campaign_year = 2400`
+    (dentro del `CHECK` de la tabla, fuera de la cota de las RPC) y pedir `rodeo_pregnancy_kpi(rodeo, 2400)` como
+    owner de A → **`22023`**, no la foto sembrada. Pedir `p_year = 9999999` **no sirve** como oráculo (no habría
+    snapshot y hasta una función mal ordenada caería igual en la cota) — dejar el comentario explicándolo.
+  - Comentario obligatorio en el test: *los IDOR preexistentes corren todos con campañas abiertas, así que este
+    bloque es el único que ejercita las 7 salidas tempranas nuevas.* Y el borde declarado: el descubrimiento no
+    ve funciones futuras con otra firma o fuera del prefijo `rodeo_`; `close_campaign`/`reopen_campaign` se
+    cubren explícitamente en T48.
+  Cubre: RCC.13.5.a, RCC.13.5.b, RCC.13.5.e.
+
+- [ ] **T48-β — TR.14e grants de TABLA (Gate 1 H-2b, BLOQUEANTE)**: un `authenticated` con rol activo intenta
+  `insert`/`update`/`delete` sobre `rodeo_membership_history`, `rodeo_campaign_snapshots` y
+  `rodeo_campaign_snapshot_animals` → las **9** combinaciones rechazadas, **incluido** un `insert` en
+  `rodeo_campaign_snapshots` con el `establishment_id` de **otro** tenant. Además: consultar `pg_policies` para
+  las 3 tablas y assertar que **todas** las policies tienen `cmd = 'SELECT'`. Es el guard del invariante que
+  sostiene DP-19. Cubre: RCC.13.6.a, RCC.4.8, RCC.1.11.
+
+- [ ] **T48-γ — TR.14h procedencia estructural del tenant**: insertar por `service_role` una fila de detalle con
+  un `establishment_id` distinto al de su cabecera → rechazado por la FK compuesta (`23503`).
+  Cubre: RCC.4.8.b.
+
+- [ ] **T48-δ — TR.14f helper de authz (Gate 1 H-3, BLOQUEANTE)**: `close_campaign` y `reopen_campaign` con
+  (a) un owner cuyo `user_roles.active` se puso en `false`, y (b) un owner de un establecimiento con `deleted_at`
+  no nulo → **`42501`** en los cuatro casos; `rodeo_campaign_status` los rechaza igual por `has_role_in`.
+  Comentario: *se testeaba que el rol equivocado no pase; faltaba testear que el rol correcto **caducado**
+  tampoco.* Cubre: RCC.13.5.c.
+
+- [ ] **T48-ε — TR.14g guard de catálogo (no textual)**: leyendo `pg_proc`, assertar `prosecdef = true` +
+  `proconfig` con `search_path` en **todas** las funciones del delta; `provolatile = 's'` en `is_owner_or_vet_of`,
+  en las 7 de lectura y en `rodeo_campaign_status`; y `provolatile <> 's'` + `search_path` con `pg_temp` en
+  `close_campaign`/`reopen_campaign`. Resuelve el valor del catálogo, no el texto del cuerpo.
+  Cubre: RCC.13.5.d, RCC.9.2.
+
 - [ ] **T48-bis — TR.14d ciclo incompleto (F8)**: (a) campaña con el servicio terminado pero sin partos →
   `close_campaign` sin ack falla con `23514` **y el mensaje nombra lo que falta** (regex sobre "preñadas sin
   parir" / "crías sin destetar"), y **no se creó ninguna fila** en `rodeo_campaign_snapshots`; (b) la misma
@@ -287,7 +357,10 @@ sin justificación documentada.
 - [ ] **T51 — TR.15 membresía**: apertura al insertar (con y sin `entry_date`); mover el rodeo cierra la vigente y
   abre una nueva con `from_date = current_date`; la baja cierra con `to_date = exit_date`; intentar dos filas
   abiertas → `23505`; el backfill corrido dos veces no duplica; owner de B no ve filas de A (RLS);
-  `transfer_animal` deja la historia de origen en el campo de origen. Cubre: RCC.1.*, RCC.13.7.
+  `transfer_animal` deja la historia de origen en el campo de origen; **apuntar el `rodeo_id` de un perfil de A a
+  un rodeo de B → `23514`** (`tg_animal_profiles_rodeo_check`, `0021:25-43`) → el par cruzado entre
+  establecimientos nunca llega a la tabla de membresía, que es lo que hace que `mh.rodeo_id` no pueda ser una vía
+  de fuga aunque el CTE `member` no filtre tenant. Cubre: RCC.1.*, RCC.13.7, RCC.13.13.
 
 - [ ] **T52 — TR.16 DL10**: tras cerrar, insertar un `tacto` de la campaña → **no falla**; los 5 KPI no se mueven;
   `rodeo_campaign_status.has_new_data === true`; `reopen` + `close` → el KPI **sí** lo incorpora, hay un snapshot
@@ -300,9 +373,11 @@ sin justificación documentada.
 - [ ] **T54 — TR.18 denominador**: `entoradas === serviced` y `retired === 0` en todos los escenarios de la suite.
   Cubre: RCC.2.12.
 
-- [ ] **T55 — TR.19 guard de ausencia en PowerSync**: leer `sync-streams/rafaq.yaml` y fallar si menciona
-  `rodeo_membership_history`, `rodeo_campaign_snapshots` o `rodeo_campaign_snapshot_animals`.
-  Cubre: RCC.1.10, RCC.4.9, RCC.13.10.
+- [ ] **T55 — TR.19 guard de ausencia en PowerSync**: leer `sync-streams/rafaq.yaml` y fallar —
+  **case-insensitive** — si menciona `rodeo_membership_history`, `rodeo_campaign_snapshots` o
+  `rodeo_campaign_snapshot_animals`. Comentario con el borde: no ve una edición manual en el dashboard de
+  PowerSync (los deploys van por `scripts/powersync-deploy.sh`, y el header del YAML ya declara eso fuera de
+  proceso). Cubre: RCC.1.10, RCC.4.9, RCC.13.10.
 
 - [ ] **T56 — TR.20 consistencia detalle↔cabecera**: por bucket, `count(*)` del detalle == el número congelado;
   con la campaña cerrada, `rodeo_serviced_females` devuelve exactamente `serviced` filas (incluidas las de
@@ -406,21 +481,42 @@ sin justificación documentada.
 - [ ] **T72 — [LEADER] Gate 1**: `security_analyzer` modo `spec` sobre `design` §5, auditado contra la cabecera
   §5.1–§5.10 de `0106` + los W1–W12 de escritura. Output en
   `progress/security_spec_07-campanas-congeladas.md`. **Bloqueante.** Cubre: RCC.9.*.
+  **[1ª pasada: FAIL — 3 HIGH + 6 MEDIUM, 2026-08-07. Arreglos aplicados en los 3 documentos; pendiente
+  re-auditoría.]** Oráculos que cierran los HIGH: **H-1 → T48-α**; **H-2 → T48-β + T48-γ + T17/T16 (FK
+  compuesta)**; **H-3 → T48-δ + T48-ε**. MEDIUM: T34/T36 (`pg_temp` + crear-o-truncar), T20 (lista blanca +
+  barrido), T36-α (piso de años), T40 (`member_name`), T74 (runbook blindado + medición), T55
+  (case-insensitive), T51 (guard del `rodeo_id` cruzado). **Una afirmación del informe (M-1: "`rodeo_id` sin
+  CHECK ni trigger de mismo-establecimiento") es FALSA** — `tg_animal_profiles_rodeo_check` (`0021:25-43`)
+  existe y rechaza con `23514`; verificado contra el remoto por el leader. No se escribió ningún requisito
+  defensivo apoyado en esa premisa.
 
 - [ ] **T73 — [LEADER] Deploy**: pedir el OK de Raf y aplicar `0127` → `0128` → `0129` → `0130` **en ese orden**
   por Supabase MCP; correr `supabase/tests/reports/run.cjs` verde post-apply (TR.1–TR.20) y `node
   scripts/check.mjs` verde. Si algo falla entre migraciones, **no** seguir con la siguiente. Cubre: §6.
 
 - [ ] **T74 — [LEADER] Re-seed de "La Facundina" (D2)** — solo después de T73 y con el punto DP-22 confirmado por
-  Raf: backup (`node scripts/backup-db.mjs`) → borrado acotado a
-  `establishment_id = 'fac00000-face-4000-a000-000000000010'` (sin tocar "Santo Domingo") → re-seed con
+  Raf. Runbook blindado de `design` §9.2 (Gate 1 M-6), **en una sola transacción**:
+  1. backup (`node scripts/backup-db.mjs`) **y verificarlo**: el archivo existe, pesa > 0 y **contiene filas del
+     `establishment_id` que se va a borrar** (RCC.11.9). Un backup que no se abrió no es un backup.
+  2. `begin;` → **`set local role authenticated`** *junto con* `set local request.jwt.claims` (RCC.11.7). Sin el
+     `set local role`, la sesión sigue siendo `service_role`/`postgres`: RLS bypasseada **y** con identidad
+     spoofeada, y todo el re-seed escribe sin red de contención de tenant.
+  3. **Asserts de aborto ANTES del primer `delete`** (RCC.11.8): cardinalidad 1 del conjunto de
+     `establishment_id` alcanzados + conteos dentro de la magnitud esperada (~350 perfiles / ~2.045 eventos). Si
+     algo se desvía, `raise` y `rollback` — no se borra nada.
+  4. borrado acotado a `establishment_id = 'fac00000-face-4000-a000-000000000010'`, cada `delete` con su `where`
+     explícito (sin tocar "Santo Domingo") → re-seed con
   `entry_date` explícito y `animal_category_history.changed_at` retrodatado → `close_campaign` de la campaña
   completa **con la identidad del owner** (`set local request.jwt.claims`) → verificación de que los KPI
   congelados coinciden con los de la lectura en vivo previa y de que la campaña posterior queda en curso.
   **El cierre del re-seed debe salir con `p_acknowledge_incomplete = false` y el snapshot quedar con
   `closed_incomplete = false`**: si el cierre pide reconocimiento, el seed está mal (la campaña elegida no tiene
   el ciclo completo) y hay que corregir las fechas, **no** reconocer. Es el oráculo más barato de que DP-22 está
-  bien resuelto. Cubre: RCC.11.*, RCC.5.7.b.
+  bien resuelto. Los **dos** cierres van en la misma transacción (posible gracias a T36; sin el crear-o-truncar
+  el segundo moría con `42P07`). **Medir el wall-time de cada `close_campaign`** (350 cabezas) y foldear el
+  número en `design` §5.B W8 — es gratis, el leader ya está ahí, y es lo que decide si hace falta el rediseño de
+  un único cómputo interno. `commit` recién al final; ante cualquier desvío, `rollback`.
+  Cubre: RCC.11.*, RCC.5.7.b, RCC.9.10, RCC.11.10.
 
 - [ ] **T75 — [LEADER] Fold al baseline (ADR-028)**, al aprobar la Puerta 2: entrada nueva en la tabla "Deltas
   posteriores" de `specs/active/07-reportes-basicos/design.md` + nota as-built bajo `R7.5`/`R7.6`/`R7.7`/`R7.8`
