@@ -1,8 +1,27 @@
 # Design (delta spec 02) — Fijar la categoría a mano + tacto reproductivo, desde la ficha
 
-**Status**: `spec_ready` (delta de spec 02 — **frontend puro**). Implementa
+**Status**: `in_progress` — **as-built** (delta de spec 02 — **frontend puro**). Implementa
 `requirements-ficha-categoria-tacto.md` (`RCM.n` + `RTF.n`).
-**Fecha**: 2026-08-06 · **Autor**: spec_author
+**Fecha**: 2026-08-06 · **Autor**: spec_author · **Reconciliado al as-built**: 2026-08-07 (implementer)
+
+> **Reconciliación al as-built (2026-08-07)** — lo que cambió respecto de este design tal cual se escribió:
+>
+> 1. **P3+P4 (decisión de Raf en la Puerta 1) — el link "Fue otro día".** `animal/tacto.tsx` suma un link
+>    secundario que despliega un campo de fecha (`FormField` + `maskDateInput` + `validateEventDate`, el
+>    mismo trío del resto de los eventos). Sin desplegarlo, el tacto se fecha HOY (`todayIsoLocal()`). Es la
+>    contrapartida de retirar la card "Tacto" de "Agregar evento": si no, se perdía la capacidad de cargar un
+>    tacto atrasado. Consecuencia de layout: la pantalla se envuelve en `KeyboardAvoidingShell` (el guard de
+>    teclado exige que todo archivo con `FormField` sea proveedor) y los pasos reciben `bottomPad = 0` (el
+>    aire inferior lo pone la zona de la fecha, que usa `useKeyboardAwareBottomInset`).
+> 2. **Segunda cerradura de RCM.2.4 en el borde de escritura** (`isPinnableCategoryCode`, en
+>    `utils/category-pin.ts`): `setCategoryManual` rechaza `cut` **sin escribir**. Ver §2.5-bis.
+> 3. **`resolveRevertCategory` usa el `is_castrated` REAL** (era `false` hardcodeado). Ver §2.5-ter — es una
+>    corrección NECESARIA para que RCM.5.2 (P2) funcione en un macho castrado.
+> 4. **`resolveCategoryPinEffect`** (puro, en `category-pin.ts`) — no estaba en el design: resuelve el
+>    EFECTO (`noop | pin | unpin`) para el COPY de la confirmación (RCM.5.3) y para el no-op de RCM.3.4, con
+>    la MISMA regla que el núcleo del write, atada por un test de coherencia. Ver §2.6.
+> 5. **`fichaTactoCtaLabel`** (puro, en `ficha-tacto-offer.ts`): el copy del CTA (RTF.3.2) es una función,
+>    no un literal en la ficha — así el título de la pantalla de captura y el CTA no pueden divergir.
 
 > **Gate 1 (security_analyzer modo `spec`): N/A.** Evidencia, no supuesto — ver §9. Cero migraciones, cero
 > RPC nuevas, cero Edge Functions, cero policies. Los dos writes viajan por caminos server-side que **ya
@@ -33,7 +52,7 @@ El grueso del trabajo es **lógica pura + composición**, no plumbing.
 
 | Archivo | Qué |
 |---|---|
-| `app/src/utils/category-pin.ts` | PURO. `categoryAgeMismatch(...)`, `canPinCategory(...)`, ventanas etarias de coherencia. |
+| `app/src/utils/category-pin.ts` | PURO. `categoryAgeMismatch(...)`, `canPinCategory(...)`, ventanas etarias de coherencia + (as-built) `resolveCategoryPinEffect(...)` y `isPinnableCategoryCode(...)`. |
 | `app/src/utils/category-pin.test.ts` | `node:test` del módulo anterior. |
 | `app/src/services/category-pin-core.ts` | PURO. `decideCategoryPin(...)` con deps inyectadas (patrón `cut-service-core.ts`). |
 | `app/src/services/category-pin-core.test.ts` | `node:test` con fakes del resolve y del write. |
@@ -42,7 +61,8 @@ El grueso del trabajo es **lógica pura + composición**, no plumbing.
 | `app/src/utils/ficha-tacto-offer.test.ts` | `node:test`, incluye el barrido de disyunción (RTF.2.1). |
 | `app/app/animal/tacto.tsx` | Ruta de captura del tacto individual (monta los pasos de la manga). |
 | `app/e2e/ficha-categoria.spec.ts` | E2E de la funcionalidad 1. |
-| `app/e2e/ficha-tacto.spec.ts` | E2E de la funcionalidad 2. |
+| `app/e2e/ficha-tacto.spec.ts` | E2E de la funcionalidad 2 (+ as-built: el caso OFFLINE de las DOS). |
+| `app/e2e/captures/ficha-categoria-tacto.capture.ts` | (as-built) capture file del Gate 2.5 — 15 capturas nombradas. |
 
 ### Modificar
 
@@ -51,7 +71,7 @@ El grueso del trabajo es **lógica pura + composición**, no plumbing.
 | `app/src/utils/animal-category.ts` | **Exportar** `ONE_YEAR_DAYS` / `TWO_YEAR_DAYS` (hoy privados). Aditivo, sin tocar lógica. | nulo |
 | `app/src/utils/animal-category-picker.ts` | `+ pickableCategories(catalog, sex, isCastrated)` reusando `MALE_/FEMALE_CATEGORY_CODES`. Aditivo. | nulo |
 | `app/src/services/powersync/local-reads.ts` | `+ buildSetCategoryOverrideUpdate(profileId, categoryId)`. Aditivo. | bajo |
-| `app/src/services/animals.ts` | `+ setCategoryManual(profileId, chosenCode)`. Aditivo. | bajo |
+| `app/src/services/animals.ts` | `+ setCategoryManual(profileId, chosenCode)`. Aditivo. **+ (as-built) `resolveRevertCategory` pasa el `is_castrated` REAL en vez de `false` hardcodeado** — corrección compartida con "Quitar fijación", ver §2.5-ter. | bajo |
 | `app/app/animal/[id].tsx` | Fila "Categoría" + montaje del sheet + CTA de tacto + `rodeoGating` completo (hoy solo se guarda el booleano de `dientes`). | medio (archivo grande) |
 | `app/app/agregar-evento.tsx` | **Quitar** la card "Tacto" + `TactoForm` + su estado + su rama de submit (RTF.9). | medio |
 | `app/app/_layout.tsx` | `+ <Stack.Screen name="animal/tacto" />`. | nulo |
@@ -177,6 +197,40 @@ El núcleo puro existe por la misma razón que `cut-service-core.ts` (TCUT.7): l
 SDK de Supabase/PowerSync y **no son importables bajo `node:test`**; la decisión se testea con fakes del
 resolve y del write.
 
+### 2.5-bis — La SEGUNDA cerradura de RCM.2.4 (as-built, no estaba en el design)
+
+`setCategoryManual` no resuelve el `category_id` si el code no es fijable
+(`isPinnableCategoryCode`, `utils/category-pin.ts`) ⇒ `chosen` queda `null` ⇒ el núcleo devuelve el error
+accionable **sin escribir**. Hoy la lista prohibida tiene un solo code y no es una preferencia estética:
+
+- **`cut` ACOPLA la columna `is_cut`** (`buildSetCutUpdate` escribe los tres campos juntos). Fijarlo por esta
+  vía dejaría `is_cut = 0` con la categoría CUT colgada — el estado inconsistente que RCUT.2.3 prohíbe, y que
+  además rompe el desmarcado (`unsetCut` es el ÚNICO camino que resetea `is_cut`).
+- **`vaca_cabana` NO está en la lista**: queda fuera del selector por ALCANCE (cabaña no es MVP de cría), no
+  por consistencia. Si mañana entra al MVP, entra sin tocar esta lista.
+
+El selector ya no ofrece `cut` (`pickableCategories` filtra por `MALE_/FEMALE_CATEGORY_CODES`); esto es la
+cerradura del **borde donde se escribe**, para que un caller nuevo del servicio nazca protegido en vez de
+nacer roto. Hay un test que ata las dos listas (todo lo que el selector OFRECE tiene que ser fijable).
+
+### 2.5-ter — `resolveRevertCategory` con el `is_castrated` REAL (corrección necesaria, as-built)
+
+RCM.6.1 exige reusar `resolveRevertCategory` para que el selector y "Quitar fijación" **no diverjan**. Al
+hacerlo apareció un defecto pre-existente en esa función: derivaba con `isCastrated: false` HARDCODEADO,
+justificándolo con "hoy ningún write-path setea `is_castrated = true`" — afirmación que dejó de ser cierta
+con spec 10 (R13.1: el toggle "Castrado" de la ficha y la castración masiva escriben la columna, denormalizada
+por `0084` y ya proyectada por `buildAnimalDetailQuery`).
+
+- Para **"Quitar fijación"** (RC6.4) el daño era TRANSITORIO: se escribía `torito`/`toro` en un castrado con
+  `override = false` y el server lo recomputaba a `novillito`/`novillo` al subir.
+- Para el **SELECTOR** (RCM.5.2 / P2) sería PERSISTENTE: elegir la categoría automática de un castrado
+  (`Novillito`) no coincidiría con la derivada (`torito`) ⇒ se FIJARÍA con `override = true`, congelando
+  exactamente lo que P2 quiere evitar.
+
+Se corrigió en la fuente compartida (una línea: el valor real de la fila) → los dos caminos siguen sin
+divergir y ahora los dos espejan a `compute_category`. Sin regresión medida: `check.mjs` RC=0 con las suites
+de animal/reportes/RLS completas.
+
 ### 2.6 UI
 
 - **Fila "Categoría"** en `DetailSection "Datos del animal"`, después de "Nacimiento". Molde exacto de
@@ -193,6 +247,33 @@ resolve y del write.
   `setDetail(d => ({...d, categoryCode, categoryName, categoryOverride}))` **antes** de esperar el write, sin
   tocar `loading`; si el write falla se revierte al snapshot y se muestra el error inline. Después, refresh
   silencioso (`load({ silent: true })`). Es el mismo patrón de `onSetCastrated` / `onSetCut`.
+  **As-built**: el `override` que se adelanta sale de `resolveCategoryPinEffect` (la MISMA regla que el
+  write); cuando el servicio contesta, se RECONCILIA con su `{ override, categoryCode }` real (RCM.6.5) —
+  normalmente coinciden, pero pueden diferir si la derivada que el sheet tenía en mano quedó vieja (un evento
+  sincronizó entre la carga de la ficha y el tap). **El servicio manda**: es el que resolvió contra el SQLite
+  en el momento del write.
+
+### 2.6 — `resolveCategoryPinEffect`: la regla del `override`, escrita DOS veces a propósito (as-built)
+
+El COPY de la confirmación (RCM.5.3: "deja de actualizarse sola" vs "vuelve a actualizarse sola") y el no-op
+de RCM.3.4 necesitan saber, ANTES de escribir, qué va a producir la elección. Eso vive en una función pura de
+`utils/category-pin.ts`:
+
+```
+nextOverride = !(derivedCode != null && derivedCode === chosen)
+chosen === currentCode && nextOverride === currentOverride  → 'noop'   (el sheet cierra, no escribe)
+nextOverride                                                → 'pin'
+si no                                                       → 'unpin'
+```
+
+Es la MISMA regla que `decideCategoryPin` (§2.5), escrita en dos capas distintas (UI vs datos). La duplicación
+es deliberada —la UI no puede importar el service, y el service no debe conocer el copy— y está **atada por un
+test** que barre el producto cartesiano y exige que el efecto que la confirmación PROMETE sea el `override`
+que el núcleo ESCRIBE. Un cambio en una sin la otra pone rojo ese test.
+
+⚠️ El caso que parece no-op y NO lo es: un animal con `override = true` cuya categoría fijada COINCIDE con la
+derivada — tocar esa misma categoría QUITA la fijación (cambia `override`), así que hay algo que confirmar y
+algo que escribir. Tiene test propio.
 
 ---
 
@@ -262,6 +343,13 @@ configurar") → `const nMonths = r.ok && r.value ? r.value.length : null`. El `
 **sin jornada no hay override de "¿medir tamaño?"** (ese override vive en `sessions.config`), así que rige el
 default del rodeo. Rodeo sin `service_months` → `[]` → PREÑADA persiste `'large'` directo (DD-PSC-2, ya
 vigente), sin sub-paso.
+
+**FECHA (as-built, P3)**: debajo del paso, un link secundario **"Fue otro día"** (ícono `CalendarDays`,
+`$textMuted`, ≥ `$touchMin`) que despliega un `FormField` de fecha (`maskDateInput` + `validateEventDate`, el
+mismo trío del resto de los eventos: formato `AAAA-MM-DD` y **no futura**, con error inline). Sin desplegarlo
+el evento se fecha HOY con `todayIsoLocal()`. Por eso la pantalla se envuelve en `KeyboardAvoidingShell` (el
+guard de teclado exige que todo archivo con un `FormField` sea proveedor) y los pasos reciben `bottomPad = 0`
+(el aire inferior lo pone la zona de la fecha, con `useKeyboardAwareBottomInset`).
 
 ### 3.3 El write ya existe
 

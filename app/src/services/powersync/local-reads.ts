@@ -3090,6 +3090,36 @@ export function buildRevertCategoryOverrideUpdate(profileId: string, categoryId:
 }
 
 /**
+ * UPDATE local que FIJA A MANO la categoría del animal desde la ficha (delta `ficha-categoria-tacto`,
+ * RCM.5.1): UN ÚNICO statement que setea `category_id = ?` (la elegida, resuelta a id por el caller contra el
+ * catálogo del sistema del rodeo) Y `category_override = 1`. Es el hermano SIMÉTRICO de
+ * `buildRevertCategoryOverrideUpdate` (el caso RCM.5.2, cuando la elegida COINCIDE con la derivada).
+ *
+ * POR QUÉ UN SOLO STATEMENT (design §2.4): una sola CrudEntry ⇒ un solo PATCH al subir. El trigger `0040`
+ * distingue el revert del override manual MIRANDO EL MISMO UPDATE, y `0030` escribe por esa vía el `reason`
+ * correcto (`manual_override` vs `revert_to_auto`). Partirlo en dos UPDATEs rompería esa distinción.
+ *
+ * POR QUÉ EL CLIENTE ESCRIBE `category_override = 1` EXPLÍCITO aunque el trigger `0021`
+ * (`tg_animal_profiles_set_override_on_manual`) lo pondría igual server-side: sin escribirlo, el espejo C6
+ * LOCAL seguiría con `override = false` y recalcularía la categoría DERIVADA por encima de la elegida → la
+ * categoría "volvería sola" en pantalla hasta el próximo sync. El valor explícito es lo que hace que la
+ * fijación se vea AL INSTANTE y OFFLINE (RCM.8.1).
+ *
+ * NO toca `is_castrated`, `is_cut` ni `teeth_state` (RCM.5.4): el write es exactamente
+ * `(category_id, category_override)`. Filtra `deleted_at IS NULL`. Garantías server-side al SUBIR (no se
+ * replican acá): `0021` re-valida que la categoría pertenezca al sistema del rodeo (23514 si no cuadra) y la
+ * RLS `animal_profiles_update` (`has_role_in`) gobierna la autorización.
+ */
+export function buildSetCategoryOverrideUpdate(profileId: string, categoryId: string): LocalQuery {
+  return {
+    sql:
+      'UPDATE animal_profiles SET category_id = ?, category_override = 1 ' +
+      'WHERE id = ? AND deleted_at IS NULL',
+    args: [categoryId, profileId],
+  };
+}
+
+/**
  * UPDATE local del `rodeo_id` del PERFIL ACTIVO de un animal (spec 03 R4.4 — "pasar el animal a este
  * rodeo"). Espeja `buildAssignAnimalToGroupUpdate`: CRUD-plano sobre la tabla SINCRONIZADA → su propia
  * CrudEntry → uploadData lo sube como UPDATE de `rodeo_id`. Filtra `deleted_at IS NULL` (no se mueve un

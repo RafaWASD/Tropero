@@ -29,9 +29,11 @@ import {
 } from '../utils/repro-status';
 import type { HeiferFitness } from '../utils/maneuver-sequence';
 import { classifySearchQuery } from '../utils/animal-identifier';
+import { isPinnableCategoryCode } from '../utils/category-pin';
 import { parseCustomValueJson } from '../utils/custom-render';
 import { castrationObservationText } from '../utils/castration-copy';
 import { decideSetCut, decideUnsetCut } from './cut-service-core';
+import { decideCategoryPin, type PinOutcome } from './category-pin-core';
 import {
   type ExitReasonChoice,
   type ExitStatus,
@@ -52,6 +54,7 @@ import {
   buildCategoryMirrorEventsQuery,
   buildReproBadgeEventsQuery,
   buildRevertCategoryOverrideUpdate,
+  buildSetCategoryOverrideUpdate,
   buildRodeoSpeciesQuery,
   buildRodeoSystemQuery,
   buildSetCastratedUpdate,
@@ -1297,12 +1300,26 @@ type ResolvedRevertCategory = { derivedCode: string; categoryId: string; derived
  * revert aterriza (no pueden divergir). 100% SELECT (sin write): el caller del revert hace el UPDATE.
  *
  * Pasos (todo LOCAL):
- *   1) detalle local (sex, birth_date, system_id). Sin animal o sin system_id → error es-AR (RC6.4.5);
- *   2) eventos reproductivos batched (synced + overlay) → `derivedCode = computeCategoryCode(...)` con
- *      is_castrated=FALSE (con override=true el code guardado es MANUAL → la inferencia no es confiable;
- *      HOY ningún write-path setea is_castrated=true → false espeja al server; header animal-category.ts);
+ *   1) detalle local (sex, birth_date, system_id, is_castrated). Sin animal o sin system_id → error es-AR
+ *      (RC6.4.5);
+ *   2) eventos reproductivos batched (synced + overlay) → `derivedCode = computeCategoryCode(...)` con el
+ *      `is_castrated` REAL del perfil (ver la nota de abajo);
  *   3) resuelve id+name por (system_id, derivedCode) en el catálogo local. Irresoluble → error es-AR
  *      accionable, SIN write (RC6.4.5: no escribir un category_id inválido — 0021 lo rechazaría con 23514).
+ *
+ * ⚠️ `is_castrated` REAL, no `false` (corrección del delta `ficha-categoria-tacto`). Este paso pasaba
+ * `isCastrated: false` HARDCODEADO, justificándolo con "hoy ningún write-path setea is_castrated=true". Eso
+ * dejó de ser cierto con spec 10 (R13.1: el toggle "Castrado" de la ficha y la castración masiva escriben
+ * `animal_profiles.is_castrated`, denormalizado por 0084 y ya proyectado por `buildAnimalDetailQuery`). Con
+ * el `false` fijo, la derivada de un macho CASTRADO daba `torito`/`toro` en vez de `novillito`/`novillo` —
+ * o sea, distinta de la que `compute_category` computa server-side con el mismo dato.
+ *   · Para "Quitar fijación" (RC6.4) el daño era transitorio: se escribía la categoría equivocada con
+ *     `override = false` y el server la recomputaba al subir.
+ *   · Para el SELECTOR de categoría (RCM.5.2 / P2) es PERSISTENTE: elegir la categoría automática de un
+ *     castrado (`Novillito`) no coincidiría con la derivada (`torito`) ⇒ se fijaría con `override = true`,
+ *     congelando exactamente lo que P2 quiere evitar.
+ * El valor real es el que `fetchAnimalDetail` ya expone como `AnimalDetail.isCastrated`, y es el mismo que el
+ * espejo C6 usa en el resto de la ficha (RC6.2.1 / R13.6): esto ALINEA las tres derivaciones.
  */
 async function resolveRevertCategory(
   profileId: string,
@@ -1342,12 +1359,13 @@ async function resolveRevertCategory(
     pregnancyStatus: e.pregnancy_status,
   }));
 
-  // is_castrated=false al revertir (con override=true el code guardado es manual → la inferencia no es
-  // confiable; hoy nada setea is_castrated=true → false espeja al server; documentado en el header).
+  // `is_castrated` REAL del perfil (0084, ya proyectado por buildAnimalDetailQuery) — NO `false` fijo: es la
+  // misma fuente que alimenta el espejo C6 en el resto de la ficha, y la que `compute_category` usa
+  // server-side. Ver la nota del docblock (corrección del delta ficha-categoria-tacto).
   const derivedCode = computeCategoryCode({
     sex: row.sex ?? 'female',
     birthDate: row.birth_date ?? null,
-    isCastrated: false,
+    isCastrated: toBool(row.is_castrated ?? 0),
     events,
   });
 
@@ -1476,6 +1494,81 @@ export async function revertCategoryOverride(
   if (!writeRes.ok) return { ok: false, error: { kind: writeRes.error.kind, message: writeRes.error.message } };
 
   return { ok: true, value: { derivedCode: resolved.value.derivedCode } };
+}
+
+// ─── Fijar la categoría A MANO desde la ficha (delta ficha-categoria-tacto, RCM.5/RCM.6) ─────────
+//
+// Es el camino GENERAL de "esta categoría es otra": el usuario elige del catálogo del sistema del rodeo y el
+// servicio decide, con la regla `override = (elegida ≠ derivada)`, si FIJA o si VUELVE A AUTOMÁTICO (P2).
+// `revertCategoryOverride` (RC6.4, la card "Quitar fijación") queda intacto: es el ATAJO del segundo caso.
+//
+// TODO el resolve es del SQLite LOCAL (offline-safe, RCM.6.4) y el write es UNA sola escritura local plana
+// (una CrudEntry PATCH) → éxito local inmediato. La RLS `animal_profiles_update` es la barrera REAL al SUBIR;
+// el cliente NO replica autorización. Multi-tenant: el `system_id` sale del PERFIL (`buildAnimalDetailQuery`),
+// nunca del establishment activo del contexto (RCM.9.3).
+//
+// La DECISIÓN (qué builder, con qué id, o error sin escribir) vive en el núcleo PURO `decideCategoryPin`
+// (`category-pin-core.ts`, testeable con fakes — TCT.7); acá solo se inyectan los deps reales.
+
+/**
+ * Fija (o des-fija) la categoría de un animal desde la ficha (RCM.6.1–RCM.6.5).
+ *
+ * Resuelve LOCALMENTE, en este orden:
+ *   (a) el `system_id` del rodeo del perfil (`buildAnimalDetailQuery`);
+ *   (b) el `category_id` de `chosenCode` ACTIVO en ese sistema (`buildCategoryByCodeQuery`) — sin fila,
+ *       `{ ok:false }` es-AR SIN escribir (RCM.6.2: nunca fijamos una categoría que `0021` rechazaría 23514);
+ *   (c) la categoría DERIVADA por el espejo (`resolveRevertCategory` — la MISMA resolución que
+ *       "Quitar fijación", así los dos caminos no divergen). Irresoluble → se trata como "distinta de la
+ *       elegida" y se FIJA igual (RCM.6.3): fijar no necesita la derivada.
+ *
+ * Devuelve `{ override, categoryCode }` (RCM.6.5) = lo que quedó GUARDADO, para que el caller aplique el
+ * optimismo EN SITIO sin re-derivar nada.
+ */
+export async function setCategoryManual(
+  profileId: string,
+  chosenCode: string,
+): Promise<ServiceResult<PinOutcome>> {
+  const code = chosenCode.trim();
+
+  // (a) system_id del PERFIL (multi-tenant: del animal real, no del contexto activo).
+  const detailRes = await runLocalQuerySingle<LocalDetailRow>(buildAnimalDetailQuery(profileId), {
+    emptyIsSyncing: false,
+  });
+  if (!detailRes.ok) return { ok: false, error: detailRes.error };
+  if (!detailRes.value) {
+    return { ok: false, error: { kind: 'unknown', message: 'No se encontró el animal.' } };
+  }
+  const systemId = detailRes.value.system_id ?? null;
+
+  // (b) id de la categoría ELEGIDA en ESE sistema. Sin system_id no se puede resolver → chosen queda null y
+  //     el núcleo devuelve el error accionable sin escribir (mismo camino que "el code no existe").
+  //     `isPinnableCategoryCode` es la SEGUNDA cerradura de RCM.2.4, en el borde donde se escribe: `cut`
+  //     acopla `is_cut` y fijarlo por acá dejaría el estado inconsistente que RCUT.2.3 prohíbe. El selector
+  //     ya no lo ofrece; esto protege a cualquier caller futuro de este servicio.
+  let chosen: { code: string; categoryId: string } | null = null;
+  if (systemId && isPinnableCategoryCode(code)) {
+    const catRes = await runLocalQuerySingle<{ id: string; name: string }>(
+      buildCategoryByCodeQuery(systemId, code),
+      { emptyIsSyncing: false },
+    );
+    if (!catRes.ok) return { ok: false, error: catRes.error };
+    if (catRes.value) chosen = { code, categoryId: catRes.value.id };
+  }
+
+  // (c) categoría DERIVADA por el espejo completo. Un fallo del resolve NO aborta: `null` = irresoluble y el
+  //     núcleo cae en "fijar" (RCM.6.3). El único caso que la exige es volver a automático, y sin derivada
+  //     ese caso es inalcanzable por construcción.
+  const derivedRes = await resolveRevertCategory(profileId);
+  const derived = derivedRes.ok
+    ? { code: derivedRes.value.derivedCode, categoryId: derivedRes.value.categoryId }
+    : null;
+
+  return decideCategoryPin<AppError>({
+    chosen,
+    derived,
+    writePin: (categoryId) => runLocalWrite(buildSetCategoryOverrideUpdate(profileId, categoryId)),
+    writeRevert: (categoryId) => runLocalWrite(buildRevertCategoryOverrideUpdate(profileId, categoryId)),
+  });
 }
 
 // ─── Marcar / quitar CUT (descarte) desde la ficha (delta spec 02, RCUT.1/RCUT.2) ────────

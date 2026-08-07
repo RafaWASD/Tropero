@@ -36,6 +36,7 @@ import {
   Ruler,
   Scissors,
   Star,
+  Stethoscope,
   Syringe,
   Tag,
   Trash2,
@@ -43,24 +44,27 @@ import {
 } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
 
-import { AnimalFichaSkeleton, Button, Card, CategoryBadge, ComboOptionRow, InfoNote, FormError, FormField, IdentifierAssignRow, TagScanCta, TagScanSheet, TimelineEvent, TreatmentsSection, TreatmentStartSheet, TreatmentApplicationSheet } from '@/components';
+import { AnimalFichaSkeleton, Button, Card, CategoryBadge, CategoryPickerSheet, ComboOptionRow, InfoNote, FormError, FormField, IdentifierAssignRow, TagScanCta, TagScanSheet, TimelineEvent, TreatmentsSection, TreatmentStartSheet, TreatmentApplicationSheet } from '@/components';
 import type { TreatmentStartSubmit, TreatmentApplicationSubmit } from '@/components';
 import { KeyboardAvoidingShell } from '@/components/KeyboardAvoidingShell';
 import {
   assignTagToAnimal,
   fetchAnimalDetail,
+  fetchRodeoCategoryCatalog,
   lookupByTag,
   previewCastrationCategory,
   previewRevertCategory,
   revertCategoryOverride,
   setBreed,
   setCastrated,
+  setCategoryManual,
   setCut,
   setFutureBull,
   setIdv,
   unsetCut,
   type AnimalDetail,
   type AnimalStatus,
+  type SystemCategory,
 } from '@/services/animals';
 import { canAssignIdv, canAssignTag } from '@/utils/identifier-assign';
 import { IDV_MAX_LENGTH, sanitizeIdvInput } from '@/utils/animal-input';
@@ -73,7 +77,11 @@ import {
   type BreedCatalogEntry,
 } from '@/utils/breed-picker';
 import { fetchRodeoGating } from '@/services/rodeo-config';
+import type { RodeoDataKeyMap } from '@/utils/maneuver-gating';
 import { canMarkCut, canUnmarkCut } from '@/utils/cut-eligibility';
+import { pickableCategories } from '@/utils/animal-category-picker';
+import { canPinCategory, resolveCategoryPinEffect } from '@/utils/category-pin';
+import { fichaTactoCtaLabel, resolveFichaTactoOffer, type FichaTactoKind } from '@/utils/ficha-tacto-offer';
 import { archivedBadgeLabel } from '@/services/exit-animal';
 import { useBusyWhileMounted } from '@/services/ble/stick';
 import { CustomPropertiesFicha } from '../maniobra/_components/CustomPropertiesSection';
@@ -154,13 +162,25 @@ export default function AnimalDetailScreen() {
   // Link a la madre (R14.7). null = no es ternero con parto registrado (o falló el fetch blando) → la
   // ficha NO muestra la card "Madre". El fetch es blando: si falla, la cabecera/timeline siguen vivos.
   const [mother, setMother] = useState<MotherLink | null>(null);
-  // Gate de cliente de "Marcar como CUT" (delta spec 02, RCUT.7): true SOLO si el rodeo del animal habilita
-  // el data_key `dientes` (best-effort, leído del rodeo_data_config local). `buildSetCutUpdate` es un cambio
-  // ADITIVO (is_cut false→true) que el trigger 0054 rechaza al subir (23514) si `dientes` está off → no
-  // ofrecemos algo que el server rechazaría. FAIL-SAFE conservador (RCUT.7.3): estado inicial `false` (no se
-  // ofrece marcar a ciegas) y queda false si la lectura no resuelve / falla / no hay fila. NO gatea "Quitar
-  // CUT" (sustractivo, RCUT.7.2). Solo se resuelve para hembras (el gate no aplica a machos).
-  const [dientesEnabled, setDientesEnabled] = useState(false);
+  // `rodeo_data_config` COMPLETO del rodeo REAL del animal (un solo read, DOS consumidores):
+  //   1. el gate de "Marcar como CUT" (delta spec 02, RCUT.7): exige el data_key `dientes` enabled —
+  //      `buildSetCutUpdate` es un cambio ADITIVO (is_cut false→true) que el trigger 0054 rechaza al subir
+  //      (23514) si `dientes` está off → no ofrecemos algo que el server rechazaría. NO gatea "Quitar CUT"
+  //      (sustractivo, RCUT.7.2).
+  //   2. la capa RODEO del ofrecimiento de TACTO desde la ficha (delta ficha-categoria-tacto, RTF.1.1/1.4).
+  // FAIL-SAFE conservador (RCUT.7.3 / RTF.1.4): arranca VACÍO y queda vacío si la lectura no resuelve / falla
+  // / no hay rodeo → con el mapa vacío ningún data_key está enabled ⇒ ni CUT ni tacto se ofrecen. Solo se
+  // resuelve para HEMBRAS (CUT y los dos tactos son female-only).
+  const [rodeoGating, setRodeoGating] = useState<RodeoDataKeyMap>({});
+  // Catálogo de categorías del sistema del rodeo del animal (delta ficha-categoria-tacto, RCM.2.1) para el
+  // selector de la fila "Categoría". Lectura LOCAL blanda: si falla → [] → la fila queda solo lectura
+  // (RCM.2.6), la ficha no se rompe.
+  const [categoryCatalog, setCategoryCatalog] = useState<SystemCategory[]>([]);
+  // `code` de la categoría DERIVADA por el espejo (la que el sistema calcularía solo). Alimenta el COPY de la
+  // confirmación (fijar vs volver a automático, RCM.5.3) y el no-op de RCM.3.4. `null` = no resoluble
+  // localmente → el sheet trata toda elección como "fijar" (RCM.6.3), igual que el servicio.
+  const [derivedCategoryCode, setDerivedCategoryCode] = useState<string | null>(null);
+  const [categoryPickerOpen, setCategoryPickerOpen] = useState(false);
   // Histórico de CE del animal (spec 03 M6, R14.14). Solo se lee para MACHOS ENTEROS (la tarjeta de
   // tendencia se muestra solo a ellos — paridad con la fila repro solo-hembras). null = aún no cargado /
   // no aplica (no es macho entero); [] = macho entero sin mediciones (la 1ra medición es un caso legítimo,
@@ -227,17 +247,28 @@ export default function AnimalDetailScreen() {
     void fetchManagementGroups(detailR.value.establishmentId).then((gr) => {
       setGroups(gr.ok ? gr.value : []);
     });
-    // Gate de "Marcar como CUT" (RCUT.7): resolver si el rodeo habilita `dientes` (best-effort, local).
-    // Solo para HEMBRAS (el gate no aplica a machos; CUT es female-only). FAIL-SAFE conservador (RCUT.7.3):
-    // arrancamos en false y solo lo prendemos si la lectura resuelve con `dientes` enabled === true. Cualquier
-    // fallo / sin fila / sin rodeo → queda false (no ofrecer una acción que el server podría rechazar).
+    // Gating del rodeo (best-effort, LOCAL): alimenta el gate de "Marcar como CUT" (RCUT.7) y la capa RODEO
+    // del ofrecimiento de tacto (RTF.1.1). Solo para HEMBRAS (los tres son female-only). FAIL-SAFE
+    // conservador (RCUT.7.3 / RTF.1.4): cualquier fallo / sin fila / sin rodeo → mapa VACÍO ⇒ no se ofrece
+    // ninguna acción que el server pudiera rechazar con 23514.
     if (detailR.value.sex === 'female') {
       void fetchRodeoGating(detailR.value.rodeoId).then((g) => {
-        setDientesEnabled(g.ok ? g.value['dientes']?.enabled === true : false);
+        setRodeoGating(g.ok ? g.value : {});
       });
     } else {
-      setDientesEnabled(false);
+      setRodeoGating({});
     }
+    // Catálogo de categorías del sistema del rodeo (RCM.2.1) — para el selector de la fila "Categoría".
+    // Blando: si falla, [] → la fila queda solo lectura (RCM.2.6). El rodeo sale del PERFIL (multi-tenant).
+    void fetchRodeoCategoryCatalog(detailR.value.rodeoId).then((cc) => {
+      setCategoryCatalog(cc.ok ? cc.value : []);
+    });
+    // Categoría DERIVADA por el espejo (RCM.5.2/RCM.5.3): la MISMA resolución que "Quitar fijación"
+    // (`previewRevertCategory` → `resolveRevertCategory`) ⇒ el copy de la confirmación y el write no divergen.
+    // Blando: irresoluble → null (el sheet trata toda elección como "fijar", igual que el servicio).
+    void previewRevertCategory(detailR.value.profileId).then((pr) => {
+      setDerivedCategoryCode(pr.ok && pr.value ? pr.value.derivedCode : null);
+    });
     // Histórico de CE (R14.14): solo para MACHOS ENTEROS (isBullEntire — mismo criterio que la aplicabilidad
     // de la maniobra, R14.2/R14.3). Lectura LOCAL blanda: si falla → [] (la tarjeta omite la lista, no rompe
     // la ficha). A hembra/ternero/castrado NO se lee (queda null → la tarjeta no se renderiza). El gate de
@@ -457,6 +488,80 @@ export default function AnimalDetailScreen() {
     return r.ok && r.value ? r.value.derivedName : null;
   }, [detail]);
 
+  // ── Fijar la categoría A MANO desde la ficha (delta ficha-categoria-tacto, RCM.1/RCM.2/RCM.5/RCM.7). ──
+  // El selector es el camino GENERAL ("esta categoría es otra"); la CategoryOverrideCard (RC6.4) sigue siendo
+  // el ATAJO de "volver a automático" y NO se toca (RCM.7.3).
+  //
+  // Las opciones salen del catálogo del sistema del rodeo REAL del animal, filtradas por su SEXO y su
+  // CASTRACIÓN reales (RCM.2.2/RCM.2.3): del PERFIL, nunca del contexto activo (RCM.9.3).
+  const categoryOptions = useMemo(
+    () =>
+      detail ? pickableCategories(categoryCatalog, detail.sex, detail.isCastrated) : [],
+    [categoryCatalog, detail],
+  );
+  // "Cambiar" SSI activo + no-CUT + hay ≥1 opción (RCM.7.1/RCM.7.2/RCM.2.6). Un CUT muestra la fila solo
+  // lectura con el hint que apunta a la acción correcta.
+  const canPinCat =
+    detail != null &&
+    canPinCategory({ status: detail.status, isCut: detail.isCut, optionCount: categoryOptions.length });
+
+  const onPickCategory = useCallback(
+    async (code: string): Promise<{ ok: boolean; error?: string }> => {
+      if (!detail) return { ok: false };
+      const snapshot = detail; // para revertir el optimismo si la escritura falla
+      const chosenName = categoryOptions.find((c) => c.code === code)?.name ?? detail.categoryName;
+      // OPTIMISMO EN SITIO **antes** del await (convención dura de docs/conventions.md, patrón
+      // onSetCastrated/onSetCut): el badge del hero y la CategoryOverrideCard cambian YA, sin blanquear la
+      // ficha ni resetear el scroll (RCM.7.4/RCM.9.2). El `override` predicho sale de la MISMA regla que el
+      // write (`resolveCategoryPinEffect`, atada al núcleo por un test). El `code` que queda guardado es el
+      // elegido en los dos casos: `unpin` solo ocurre cuando la elegida ES la derivada.
+      const predicted = resolveCategoryPinEffect({
+        chosen: code,
+        currentCode: detail.categoryCode,
+        currentOverride: detail.categoryOverride,
+        derivedCode: derivedCategoryCode,
+      });
+      setDetail((d) =>
+        d == null
+          ? d
+          : { ...d, categoryCode: code, categoryName: chosenName, categoryOverride: predicted === 'pin' },
+      );
+      const r = await setCategoryManual(detail.profileId, code);
+      if (!r.ok) {
+        setDetail(snapshot); // REVERT: no dejamos un estado mentido si el write fue rechazado
+        return {
+          ok: false,
+          error:
+            r.error.kind === 'network'
+              ? 'Sin conexión: no pudimos cambiar la categoría. Conectate y volvé a intentar.'
+              : r.error.message,
+        };
+      }
+      // RECONCILIACIÓN con lo que el servicio REALMENTE escribió (RCM.6.5). Normalmente coincide con lo
+      // predicho; puede diferir si la derivada que el sheet tenía en mano quedó vieja (p. ej. un evento
+      // sincronizó entre la carga de la ficha y el tap). El servicio manda: es el que resolvió contra el
+      // SQLite en el momento del write.
+      const landedName =
+        categoryOptions.find((c) => c.code === r.value.categoryCode)?.name ??
+        (r.value.categoryCode === code ? chosenName : snapshot.categoryName);
+      setDetail((d) =>
+        d == null
+          ? d
+          : {
+              ...d,
+              categoryCode: r.value.categoryCode,
+              categoryName: landedName,
+              categoryOverride: r.value.override,
+            },
+      );
+      // Refresh SILENCIOSO: reconcilia con el estado local ya escrito (y recalcula la derivada) sin parpadeo.
+      // El write local ya pegó; la RLS `animal_profiles_update` es la barrera real al SUBIR.
+      void load({ silent: true });
+      return { ok: true };
+    },
+    [detail, categoryOptions, derivedCategoryCode, load],
+  );
+
   // ── Castrado Sí/No (spec 10 T-UI.7 / R13.1). ──
   // Solo machos activos. Anticipa la consecuencia (el NAME de la categoría destino con el is_castrated NUEVO,
   // espejo C6) en la confirmación; al confirmar, setCastrated encola el UPDATE + la observación automática
@@ -558,9 +663,40 @@ export default function AnimalDetailScreen() {
     ? { sex: detail.sex, status: detail.status, categoryCode: detail.categoryCode, isCut: detail.isCut }
     : null;
   // "Marcar como CUT": hembra activa ≠ ternera, no-CUT (canMarkCut) Y el rodeo habilita `dientes` (RCUT.7.1).
+  // El booleano se DERIVA del mapa completo — mismo valor, misma fuente, un solo read (cero cambio del gate).
+  const dientesEnabled = rodeoGating['dientes']?.enabled === true;
   const canMark = cutInfo != null && canMarkCut(cutInfo) && dientesEnabled;
   // "Quitar CUT": hembra activa que YA es CUT (canUnmarkCut) — SIN gate de `dientes` (RCUT.7.2).
   const canUnmark = cutInfo != null && canUnmarkCut(cutInfo);
+
+  // ── TACTO desde la ficha, animal por animal (delta ficha-categoria-tacto, RTF.1/RTF.2/RTF.3). ──
+  // Qué tacto corresponde lo decide la MISMA composición que usa la manga (capa rodeo AND capa animal), sin
+  // criterio nuevo (C2.2). `null` → no hay CTA (RTF.2.3: ni botón deshabilitado ni mensaje). Todo lo que
+  // entra sale del PERFIL (`detail.*`), nunca del contexto activo (RTF.10.3).
+  const tactoOffer: FichaTactoKind | null = useMemo(
+    () =>
+      detail
+        ? resolveFichaTactoOffer({
+            status: detail.status,
+            sex: detail.sex,
+            categoryCode: detail.categoryCode,
+            isCastrated: detail.isCastrated,
+            reproStatus: detail.reproStatus,
+            rodeoConfig: rodeoGating,
+          })
+        : null,
+    [detail, rodeoGating],
+  );
+
+  const goToTacto = useCallback(() => {
+    if (!detail || tactoOffer == null) return;
+    // La pantalla RE-VALIDA el ofrecimiento al montar (RTF.4.4): el `kind` es una sugerencia, no una
+    // autorización. Le pasamos también el hero para que el header de identidad no parpadee.
+    router.push({
+      pathname: '/animal/tacto',
+      params: { profileId: detail.profileId, kind: tactoOffer },
+    });
+  }, [detail, tactoOffer, router]);
 
   const onSetCut = useCallback(async (): Promise<{ ok: boolean; error?: string }> => {
     if (!detail) return { ok: false };
@@ -1017,6 +1153,16 @@ export default function AnimalDetailScreen() {
               <DetailSection icon={ClipboardList} title="Datos del animal">
                 <AttributeRow label="Sexo" value={detail.sex === 'male' ? 'Macho' : 'Hembra'} />
                 <AttributeRow label="Nacimiento" value={formatDateEsAr(detail.birthDate)} />
+                {/* Categoría (delta ficha-categoria-tacto, RCM.1): la VIGENTE que ya resuelve el espejo C6
+                    (la misma del CategoryBadge del hero — una sola fuente, no se recomputa) + la afordancia
+                    "Cambiar" cuando el animal es elegible. Vecina de "Nacimiento" a propósito: es el dato del
+                    que se deriva. NO reemplaza ni duplica el badge ni la CategoryOverrideCard (RCM.1.4). */}
+                <CategoryRow
+                  categoryName={detail.categoryName}
+                  editable={canPinCat}
+                  isCut={detail.isCut}
+                  onEdit={() => setCategoryPickerOpen(true)}
+                />
                 <AttributeRow label="Rodeo" value={detail.rodeoName || '—'} />
                 {/* Raza (spec 08, T18): muestra la raza actual + afordancia para editarla (abre el BreedPickerSheet).
                     Sin raza → CTA "Completar raza para SIGSA". El trigger 0113 deriva breed_id del nombre al subir. */}
@@ -1088,6 +1234,8 @@ export default function AnimalDetailScreen() {
                 reproStatus={detail.reproStatus}
                 reproAptitude={detail.reproAptitude}
                 teethState={detail.teethState}
+                tactoOffer={tactoOffer}
+                onTacto={goToTacto}
               />
 
               {/* Tarjeta de tendencia de CIRCUNFERENCIA ESCROTAL (spec 03 M6, R14.14): la serie de mediciones
@@ -1136,6 +1284,29 @@ export default function AnimalDetailScreen() {
           breeds={breedCatalog}
           selectedCode={selectedBreedCode}
           onSelect={onSelectBreed}
+        />
+      ) : null}
+
+      {/* CategoryPickerSheet (delta ficha-categoria-tacto, RCM.3): overlay para FIJAR la categoría a mano.
+          Montado al ROOT y CONDICIONAL al estado de apertura (precondición 1 del BottomSheetShell: el
+          BackHandler se registra al montar). Solo si el animal cargó y es elegible (canPinCat) — tras marcar
+          CUT optimistamente deja de serlo y el sheet se desmonta solo. */}
+      {detail && categoryPickerOpen && canPinCat ? (
+        <CategoryPickerSheet
+          open
+          onClose={() => setCategoryPickerOpen(false)}
+          options={categoryOptions}
+          currentCode={detail.categoryCode}
+          currentOverride={detail.categoryOverride}
+          derivedCode={derivedCategoryCode}
+          sex={detail.sex}
+          birthDate={detail.birthDate}
+          isCastrated={detail.isCastrated}
+          onConfirm={async (code) => {
+            const r = await onPickCategory(code);
+            if (r.ok) setCategoryPickerOpen(false);
+            return r;
+          }}
         />
       ) : null}
 
@@ -2022,6 +2193,88 @@ function AttributeRow({ label, value }: { label: string; value: string }) {
   );
 }
 
+// ─── Fila de CATEGORÍA editable (delta ficha-categoria-tacto, RCM.1) ──────────────────
+//
+// Molde EXACTO de `BreedRow` (la otra fila editable de "Datos del animal"): label muted + valor $5/600, con
+// un link discreto "Cambiar" a la derecha cuando el animal es elegible. Tres estados:
+//   - editable            → valor + link "Cambiar" (abre el CategoryPickerSheet).
+//   - CUT                 → SOLO LECTURA + hint es-AR que apunta a la acción correcta (RCM.7.2): cambiar
+//                           `category_id` con `is_cut = 1` dejaría el estado inconsistente que RCUT.2.3
+//                           prohíbe, y el desmarcado del CUT vive en la sección "Manejo".
+//   - resto (archivado /  → SOLO LECTURA, sin hint (no hay una acción alternativa que ofrecer). La categoría
+//     sin catálogo)         NUNCA se oculta (RCM.1.3).
+//
+// El `value` es `detail.categoryName` — la categoría VIGENTE que ya resolvió el espejo C6, la MISMA que
+// muestra el badge del hero (RCM.1.1: una sola fuente, no se recomputa acá).
+//
+// `lineHeight` matcheado en los tres Text: "Categoría" trae `g` y los names traen descendentes
+// ("Vaquillona preñada" → q/p/ñ) — regla dura de recorte.
+function CategoryRow({
+  categoryName,
+  editable,
+  isCut,
+  onEdit,
+}: {
+  categoryName: string;
+  editable: boolean;
+  isCut: boolean;
+  onEdit: () => void;
+}) {
+  return (
+    <YStack gap="$1">
+      <XStack alignItems="center" justifyContent="space-between" gap="$2" minHeight={editable ? '$touchMin' : undefined}>
+        <Text fontFamily="$body" fontSize="$3" lineHeight="$3" fontWeight="500" color="$textMuted">
+          Categoría
+        </Text>
+        {editable ? (
+          // Target ≥ $touchMin: el link vive dentro de una caja de alto mínimo táctil (Fitts) en vez de ser
+          // un `Text` de 13 px suelto — el `hitSlop` no existe en web, así que la caja es lo que garantiza
+          // el área real en los dos entornos.
+          <View
+            testID="ficha-categoria-cambiar"
+            minHeight="$touchMin"
+            paddingLeft="$3"
+            alignItems="flex-end"
+            justifyContent="center"
+            pressStyle={{ opacity: 0.6 }}
+            onPress={onEdit}
+            {...buttonA11y(Platform.OS, { label: 'Cambiar la categoría' })}
+          >
+            <Text fontFamily="$body" fontSize="$3" lineHeight="$3" fontWeight="700" color="$primary" numberOfLines={1}>
+              Cambiar
+            </Text>
+          </View>
+        ) : null}
+      </XStack>
+      <Text
+        testID="ficha-categoria-valor"
+        fontFamily="$body"
+        fontSize="$5"
+        lineHeight="$5"
+        fontWeight="600"
+        color="$textPrimary"
+        numberOfLines={1}
+        minWidth={0}
+      >
+        {categoryName || '—'}
+      </Text>
+      {!editable && isCut ? (
+        <Text
+          testID="ficha-categoria-hint-cut"
+          fontFamily="$body"
+          fontSize="$3"
+          lineHeight="$3"
+          fontWeight="500"
+          color="$textMuted"
+          numberOfLines={2}
+        >
+          Quitá la marca CUT para cambiar la categoría.
+        </Text>
+      ) : null}
+    </YStack>
+  );
+}
+
 // ─── Fila de RAZA editable (spec 08, T18) ─────────────────────────────────────────────
 //
 // Muestra la raza actual del animal + una afordancia para editarla (abre el BreedPickerSheet). Tres estados:
@@ -2358,6 +2611,8 @@ function CurrentStateSection({
   reproStatus,
   reproAptitude,
   teethState,
+  tactoOffer,
+  onTacto,
 }: {
   timeline: TimelineItem[] | null;
   sex: 'male' | 'female';
@@ -2367,6 +2622,10 @@ function CurrentStateSection({
   reproAptitude: HeiferFitness | null;
   // bugfix U4: estado de dientes/boca (teeth_state, enum 0020). null = sin registrar / rodeo sin boca.
   teethState: string | null;
+  // delta ficha-categoria-tacto (RTF.3): qué tacto ofrecer, o null (sin CTA). Lo resuelve el padre con la
+  // MISMA composición de gating que la manga.
+  tactoOffer: FichaTactoKind | null;
+  onTacto: () => void;
 }) {
   // `now` para el timestamp relativo de cada valor (un Date por render, determinístico acá).
   const now = new Date();
@@ -2414,7 +2673,47 @@ function CurrentStateSection({
       {sex === 'female' ? (
         <CurrentStateRow label="Estado reproductivo" value={reproValue} />
       ) : null}
+      {/* CTA de TACTO (delta ficha-categoria-tacto, RTF.3.1): debajo de las filas reproductivas — la acción
+          pegada al estado que modifica (Gestalt proximidad). Solo aparece cuando corresponde (RTF.2.3): si
+          `tactoOffer` es null NO hay botón deshabilitado ni cartel, simplemente no está. */}
+      {tactoOffer ? <TactoCta kind={tactoOffer} onPress={onTacto} /> : null}
     </DetailSection>
+  );
+}
+
+/**
+ * CTA "Tacto de preñez" / "Tacto de aptitud" de la sección "Estado actual" (RTF.3.1/RTF.3.2). Outline
+ * `$primary` (firma RAFAQ, acción constructiva — no compite con el CTA principal "Agregar evento" del
+ * historial, que es sólido), ícono `Stethoscope`, alto ≥ `$touchMin`. El copy NOMBRA el tacto que se va a
+ * hacer: el operario tiene que saber qué le va a pedir la pantalla siguiente antes de tocar.
+ *
+ * Pieza Tamagui con `onPress` + a11y por helper — NUNCA un `<Pressable>` de RN envolviendo un Tamagui con
+ * `pressStyle` (en nativo new-arch eso roba el responder y el onPress no dispara).
+ */
+function TactoCta({ kind, onPress }: { kind: FichaTactoKind; onPress: () => void }) {
+  const label = fichaTactoCtaLabel(kind);
+  return (
+    <XStack
+      testID="ficha-tacto-cta"
+      width="100%"
+      minHeight="$touchMin"
+      alignItems="center"
+      justifyContent="center"
+      gap="$2"
+      borderRadius="$pill"
+      backgroundColor="transparent"
+      borderWidth={2}
+      borderColor="$primary"
+      paddingHorizontal="$5"
+      pressStyle={{ backgroundColor: '$greenLight' }}
+      onPress={onPress}
+      {...buttonA11y(Platform.OS, { label })}
+    >
+      <Stethoscope size={getTokenValue('$navIcon', 'size')} color={getTokenValue('$primary', 'color')} strokeWidth={2.5} />
+      <Text fontFamily="$body" fontSize="$5" lineHeight="$5" fontWeight="700" color="$primary" numberOfLines={1}>
+        {label}
+      </Text>
+    </XStack>
   );
 }
 

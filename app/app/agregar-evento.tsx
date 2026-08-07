@@ -36,7 +36,6 @@ import {
   HeartHandshake,
   Plus,
   StickyNote,
-  Stethoscope,
   Trash2,
   Weight,
 } from 'lucide-react-native';
@@ -50,7 +49,6 @@ import {
   addWeight,
   addConditionScore,
   addObservation,
-  addTacto,
   addService,
   addAbortion,
   registerBirth,
@@ -78,12 +76,10 @@ import {
   validateCalves,
   reproductiveWarning,
   OBSERVATION_MAX_LENGTH,
-  PREGNANCY_OPTIONS,
   SERVICE_TYPE_INPUT_OPTIONS,
   SEX_OPTIONS,
   type CalfDraft,
 } from '@/utils/event-input';
-import type { PregnancyStatus } from '@/utils/event-timeline';
 
 // Tipo de servicio OFERTABLE para la carga manual NUEVA (B3 / RPSC.6.1): IA o TE. La monta natural
 // (`natural`) se deprecó de esta vía (servicio natural = nivel-rodeo). El enum DB `ServiceType` conserva
@@ -101,7 +97,6 @@ type EventType =
   | 'weight'
   | 'condition_score'
   | 'observation'
-  | 'tacto'
   | 'service'
   | 'birth'
   | 'abortion';
@@ -153,9 +148,12 @@ export default function AgregarEventoScreen() {
   const paramRodeoId = typeof params.rodeoId === 'string' && params.rodeoId ? params.rodeoId : null;
   const paramRodeoName =
     typeof params.rodeoName === 'string' && params.rodeoName ? params.rodeoName : null;
-  // Los eventos REPRODUCTIVOS (tacto/servicio/parto) son SOLO de hembras. Gateamos la sección
+  // Los eventos REPRODUCTIVOS (servicio/parto/aborto) son SOLO de hembras. Gateamos la sección
   // "Reproductivo" del paso 1 por el sexo del animal (viene de la ficha). Conservador: solo `'female'`
   // exacto habilita reproductivo; macho o sexo ausente/desconocido → NO se ofrecen esos eventos.
+  // El TACTO ya NO vive acá (delta ficha-categoria-tacto, RTF.9): esta card lo ofrecía a CUALQUIER hembra,
+  // sin capa rodeo y sin capa animal — o sea, tactar una ternera o una vaquillona nunca servida, el mismo
+  // bug que la manga ya había corregido. Su única entrada es ahora el CTA de la ficha (RTF.3/RTF.9.3).
   const isFemale = params.sex === 'female';
   // ¿La hembra FIGURA preñada en nuestros registros? Lo computa la ficha (deriveCurrentState) y lo pasa
   // como '1'/'0'. Solo '1' cuenta como preñada; cualquier otra cosa (ausente/'0'/desconocido) → NO
@@ -180,12 +178,6 @@ export default function AgregarEventoScreen() {
   // Campos de observación.
   const [observation, setObservation] = useState('');
   const [observationErr, setObservationErr] = useState<string | null>(null);
-
-  // Campos de tacto (reproductivo).
-  const [pregnancyStatus, setPregnancyStatus] = useState<PregnancyStatus | null>(null);
-  const [tactoDate, setTactoDate] = useState(todayIsoLocal());
-  const [tactoStatusErr, setTactoStatusErr] = useState<string | null>(null);
-  const [tactoDateErr, setTactoDateErr] = useState<string | null>(null);
 
   // Campos de servicio (reproductivo). Notas OPCIONALES. Tipo restringido a IA/TE (B3: monta natural
   // deprecada de la carga manual). addService acepta el enum completo → el subset es válido.
@@ -400,25 +392,6 @@ export default function AgregarEventoScreen() {
       return;
     }
 
-    if (eventType === 'tacto') {
-      const d = validateEventDate(tactoDate);
-      setTactoDateErr(d.ok ? null : d.error);
-      if (pregnancyStatus == null) {
-        setTactoStatusErr('Elegí el resultado del tacto.');
-      } else {
-        setTactoStatusErr(null);
-      }
-      if (pregnancyStatus == null || !d.ok) return;
-      // Guard ANTES de cualquier await (anti doble-tap). tacto NO dispara aviso (reproductiveWarning(
-      // 'tacto', …) === null) → confirmReproIfNeeded es un no-op acá, pero pasamos por el gate uniforme.
-      busyRef.current = true;
-      if (!(await confirmReproIfNeeded())) return;
-      setSubmitting(true);
-      const r = await addTacto({ profileId, pregnancyStatus, eventDate: d.value });
-      finishSubmit(r);
-      return;
-    }
-
     if (eventType === 'service') {
       const d = validateEventDate(serviceDate);
       setServiceDateErr(d.ok ? null : d.error);
@@ -546,8 +519,6 @@ export default function AgregarEventoScreen() {
     score,
     scoreDate,
     observation,
-    pregnancyStatus,
-    tactoDate,
     serviceType,
     serviceDate,
     serviceNotes,
@@ -567,15 +538,13 @@ export default function AgregarEventoScreen() {
         ? 'Pesaje'
         : eventType === 'condition_score'
           ? 'Condición corporal'
-          : eventType === 'tacto'
-            ? 'Tacto'
-            : eventType === 'service'
-              ? 'Servicio'
-              : eventType === 'birth'
-                ? 'Parto'
-                : eventType === 'abortion'
-                  ? 'Aborto'
-                  : 'Observación';
+          : eventType === 'service'
+          ? 'Servicio'
+          : eventType === 'birth'
+            ? 'Parto'
+            : eventType === 'abortion'
+              ? 'Aborto'
+              : 'Observación';
 
   // Header FIJO (arriba del footer keyboard-aware del FooterActionShell): back + título del evento.
   const headerNode = (
@@ -644,21 +613,6 @@ export default function AgregarEventoScreen() {
               if (scoreDateErr) setScoreDateErr(null);
             }}
             dateErr={scoreDateErr}
-          />
-        ) : eventType === 'tacto' ? (
-          <TactoForm
-            status={pregnancyStatus}
-            onStatus={(s) => {
-              setPregnancyStatus(s);
-              if (tactoStatusErr) setTactoStatusErr(null);
-            }}
-            statusErr={tactoStatusErr}
-            date={tactoDate}
-            onDate={(t) => {
-              setTactoDate(maskDateInput(t));
-              if (tactoDateErr) setTactoDateErr(null);
-            }}
-            dateErr={tactoDateErr}
           />
         ) : eventType === 'service' ? (
           <ServiceForm
@@ -766,9 +720,11 @@ function Step1ChooseType({
   isFemale: boolean;
 }) {
   // Agrupado en secciones (Gestalt proximidad/similitud; escala a C3.3 sin re-acomodar): "General"
-  // (peso/condición/observación) y "Reproductivo" (tacto/servicio/parto). Subtítulo de grupo
-  // $textMuted/600. La sección "Reproductivo" se muestra SOLO para hembras (isFemale): tacto, servicio
-  // y parto no aplican a machos — para un macho el operario solo ve "General".
+  // (peso/condición/observación) y "Reproductivo" (servicio/parto/aborto). Subtítulo de grupo
+  // $textMuted/600. La sección "Reproductivo" se muestra SOLO para hembras (isFemale): servicio, parto y
+  // aborto no aplican a machos — para un macho el operario solo ve "General".
+  // El TACTO no está en esta lista (RTF.9.1): se carga desde el CTA de la ficha, que sí lo gatea por rodeo
+  // y por estado reproductivo del animal.
   return (
     <YStack gap="$4">
       <Text fontFamily="$body" fontSize="$6" lineHeight="$6" fontWeight="600" color="$textPrimary">
@@ -799,17 +755,12 @@ function Step1ChooseType({
         </YStack>
       </YStack>
 
-      {/* Reproductivo SOLO para hembras: tacto/servicio/parto no aplican a machos. */}
+      {/* Reproductivo SOLO para hembras: servicio/parto/aborto no aplican a machos. El TACTO se retiró de
+          acá (RTF.9.1) — su entrada única es el CTA de la ficha. */}
       {isFemale ? (
         <YStack gap="$2">
           <SectionLabel>Reproductivo</SectionLabel>
           <YStack gap="$3">
-            <TypeCard
-              icon={Stethoscope}
-              title="Tacto"
-              subtitle="Diagnóstico de preñez"
-              onPress={() => onChoose('tacto')}
-            />
             <TypeCard
               icon={HeartHandshake}
               title="Servicio"
@@ -1080,47 +1031,6 @@ function OptionSelector<T extends string>({
   );
 }
 
-// ─── Form: Tacto (selector cerrado de pregnancy_status + fecha) ────────────────────────────
-
-function TactoForm({
-  status,
-  onStatus,
-  statusErr,
-  date,
-  onDate,
-  dateErr,
-}: {
-  status: PregnancyStatus | null;
-  onStatus: (s: PregnancyStatus) => void;
-  statusErr: string | null;
-  date: string;
-  onDate: (t: string) => void;
-  dateErr: string | null;
-}) {
-  return (
-    <YStack gap="$3">
-      <YStack gap="$2">
-        <Text fontFamily="$body" fontSize="$3" fontWeight="500" color="$textMuted">
-          Resultado del tacto
-        </Text>
-        <OptionSelector options={PREGNANCY_OPTIONS} value={status} onChange={onStatus} />
-        {statusErr ? (
-          <Text fontFamily="$body" fontSize="$3" fontWeight="400" color="$terracota">
-            {statusErr}
-          </Text>
-        ) : null}
-      </YStack>
-      <FormField
-        label="Fecha (AAAA-MM-DD)"
-        value={date}
-        onChangeText={onDate}
-        keyboardType="number-pad"
-        placeholder="AAAA-MM-DD"
-        error={dateErr}
-      />
-    </YStack>
-  );
-}
 
 // ─── Form: Servicio (selector cerrado IA/TE + fecha + notas OPCIONALES) ────────────────────
 // B3 (RPSC.6.1): el selector ofrece SOLO IA y TE (SERVICE_TYPE_INPUT_OPTIONS). La monta natural se

@@ -566,6 +566,10 @@ function RootGate() {
       <Stack.Screen name="animal/[id]" />
       {/* Spec 02 C3.3 — baja / egreso de animal desde la ficha (motivo + fecha + datos de venta). */}
       <Stack.Screen name="animal/baja" />
+      {/* Spec 02 delta ficha-categoria-tacto (RTF.4) — TACTO reproductivo de a UN animal desde la ficha
+          (preñez o aptitud, resuelto con el mismo gating que la manga). Ruta full-screen porque monta los
+          pasos `flex:1` de la manga sin rediseñarlos. */}
+      <Stack.Screen name="animal/tacto" />
       {/* Spec 02 C3.1 — wizard "Agregar evento" desde la ficha (peso / condición / observación). */}
       <Stack.Screen name="agregar-evento" />
       {/* Spec 09 chunk dedup (opción B, RD5.1) — asignación MASIVA de caravanas: cola de bastoneos +

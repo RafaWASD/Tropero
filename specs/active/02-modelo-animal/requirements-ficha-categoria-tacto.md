@@ -315,13 +315,20 @@ imputación a período / compatibilidad "sin jornada ↔ reportes" (RTF.8, **ver
 
 ## RTF.6 — Fecha del evento
 
-- **RTF.6.1** — El sistema DEBE fechar el tacto **HOY** (fecha local del dispositivo), sin campo de fecha:
-  espeja la manga (el evento se carga en el momento en que se tacta) y el alta (`RAR.1.3` — el
-  `tacto_vaquillona` del alta se fecha hoy), y mantiene la pantalla en "una decisión por pantalla, cero
-  teclado" (manga: una mano, guante).
-- **RTF.6.2** — El sistema NO DEBE permitir fechar un tacto en el pasado desde la ficha en este delta (ver
-  "Preguntas abiertas para Raf", P3: es una capacidad que hoy existe en el `TactoForm` de "Agregar evento" y
-  que RTF.9 retira).
+- **RTF.6.1** — El sistema DEBE fechar el tacto **HOY** (fecha local del dispositivo) **por default**, sin
+  campo de fecha a la vista: espeja la manga (el evento se carga en el momento en que se tacta) y el alta
+  (`RAR.1.3` — el `tacto_vaquillona` del alta se fecha hoy), y mantiene la pantalla en "una decisión por
+  pantalla, cero teclado" (manga: una mano, guante). El "hoy" sale de la FUENTE ÚNICA `todayIsoLocal()`
+  (día calendario LOCAL): derivarlo en UTC fecharía MAÑANA toda la carga posterior a las 21:00.
+- **RTF.6.2** — ~~El sistema NO DEBE permitir fechar un tacto en el pasado desde la ficha en este delta.~~
+  **RECONCILIADO (Puerta 1, decisión de Raf sobre P3+P4, 2026-08-07)**: el sistema **DEBE ofrecer un link
+  secundario "Fue otro día"** que despliegue un campo de fecha para cargar un tacto ATRASADO. Se resolvió
+  junto con P4 y las dos van atadas: retirar la card "Tacto" de "Agregar evento" (RTF.9) SIN este link
+  eliminaría una capacidad que hoy existe (fechar un tacto en el pasado). El campo:
+  - está OCULTO por default (el 99% de los tactos se cargan en el momento; la manga no quiere teclado);
+  - usa la MISMA validación que el resto de los eventos (`validateEventDate`: formato `AAAA-MM-DD` +
+    **no futura**), con el error inline del `FormField`;
+  - si el operario no lo despliega, el evento se fecha HOY (RTF.6.1) sin que tenga que tocar nada.
 
 ## RTF.7 — Efecto en la ficha al volver
 
@@ -391,7 +398,18 @@ imputación a período / compatibilidad "sin jornada ↔ reportes" (RTF.8, **ver
 
 ---
 
-## Preguntas abiertas para Raf (decisiones que NO estaban en el Gate 0)
+## Preguntas abiertas para Raf — **CERRADAS en la Puerta 1 (2026-08-07)**
+
+| | resolución | quién |
+|---|---|---|
+| **P1** | **Se filtra por `is_castrated`** (3 opciones, no 5). Como estaba escrito en RCM.2.3. | leader |
+| **P2** | **Elegir la automática QUITA la fijación** (`override = false`). Como estaba escrito en RCM.5.2. | leader |
+| **P3 + P4** | **Las dos juntas**: se retira la card "Tacto" de "Agregar evento" (RTF.9) **Y** el flujo nuevo suma el link secundario **"Fue otro día"** (RTF.6.2 reconciliado arriba). Retirar la card sin el link dejaría sin forma de cargar un tacto atrasado. | **Raf** |
+| **P5** | **Sin mínimos etarios inventados**: el único piso es el corte de 365 d que el modelo ya asserta. Como estaba escrito en RCM.4.3. | leader |
+
+El texto original de las cinco preguntas se conserva abajo como registro de la deliberación.
+
+---
 
 Estas cinco son decisiones que el `spec_author` tomó por default para poder cerrar la spec. Cada una tiene
 una alternativa barata; ninguna bloquea la implementación, pero conviene confirmarlas en la Puerta 1.
@@ -498,5 +516,22 @@ desde la ficha, ficha post-tacto.
   arriba). IDs nuevos `RCM.n` / `RTF.n`; no se tocan los IDs estables de spec 02 ni el `tasks.md` base. Se
   agregan 5 decisiones derivadas (P1–P5) marcadas explícitamente como "para confirmar en Puerta 1" en vez de
   presentarlas como cerradas.
+- **2026-08-07** — **Puerta 1 aprobada**: P1/P2/P5 confirmadas tal cual; **P3+P4 resueltas por Raf** en
+  conjunto → **RTF.6.2 cambia de sentido** (nota de reconciliación in-place, arriba: el link "Fue otro día"
+  pasa a ser REQUERIDO).
+- **2026-08-07 (implementación)** — Dos reconciliaciones al as-built, ninguna cambia el *qué* declarado:
+  1. **RCM.2.4 gana una SEGUNDA cerradura, en el servicio.** El requirement prohibía OFRECER `cut` en el
+     selector; el as-built además lo rechaza en `setCategoryManual` (`isPinnableCategoryCode`, puro y
+     testeado) **sin escribir**. Motivo: `cut` acopla la columna `is_cut`, y un caller futuro del servicio
+     que se salteara `pickableCategories` produciría `category_id = cut` con `is_cut = 0` — el estado
+     inconsistente que RCUT.2.3 prohíbe. El guard se escribe sobre la AUSENCIA para que lo nuevo nazca
+     protegido.
+  2. **RCM.6.1 — la derivada se resuelve con el `is_castrated` REAL.** `resolveRevertCategory` (la
+     resolución COMPARTIDA con "Quitar fijación") pasaba `isCastrated: false` hardcodeado, con la
+     justificación —hoy falsa— de que ningún write-path lo seteaba (spec 10 R13.1 sí lo hace). Para el
+     revert el daño era transitorio; para RCM.5.2 sería PERSISTENTE (elegir `Novillito` en un castrado no
+     coincidiría con la derivada `torito` ⇒ se fijaría con `override = true`, justo lo que P2 evita). Se
+     corrigió en la fuente compartida, así los dos caminos siguen sin divergir (RCM.6.1) y ahora los dos
+     son correctos.
 </content>
 </invoke>

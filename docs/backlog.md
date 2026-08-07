@@ -17,6 +17,78 @@ No es un sustituto de `feature_list.json` ni de los ADRs — es la antesala dond
 
 ## Ítems pendientes
 
+## 2026-08-07 — 🟠 Las 35 tablas de `public` son TRUNCATE-ables por `authenticated`
+
+**Origen**: Gate 2 del delta `campanas-congeladas` (spec 07). Lo encontró auditando si las 3 tablas nuevas
+nacían con permisos de más; el leader lo verificó y resultó ser **de todo el schema**, no del delta.
+
+**Qué**: el `pg_default_acl` de `public` para tablas es
+`{postgres=arwdDxtm/postgres, anon=Dxtm/postgres, authenticated=Dxtm/postgres, service_role=Dxtm/postgres, powersync_role=r/postgres}`.
+La `D` es **TRUNCATE**. Toda tabla creada en `public` nace con TRUNCATE para `anon` y `authenticated`, y
+**ninguna migración lo revoca**. Medido: **35 de 35** tablas de `public` lo tienen para `authenticated`; cero
+excepciones.
+
+**Por qué importa**: la RLS **no puede taparlo**. Un TRUNCATE no es un DELETE con `USING`: no existe policy
+de TRUNCATE en Postgres (`pg_policies.cmd` solo toma `DELETE, INSERT, SELECT, UPDATE`). Un solo TRUNCATE
+vacía la tabla **de todos los tenants** sin pasar por una sola policy.
+
+**Por qué NO es una emergencia**: no hay camino de ejecución. PostgREST no tiene verbo TRUNCATE y no hay SQL
+dinámico corriendo bajo `SECURITY INVOKER` con rol de cliente. Es defensa en profundidad ausente, no una
+puerta abierta — pero deja de ser teórico el día que exista cualquier superficie que ejecute SQL con el rol
+del usuario.
+
+**Precedente en el repo**: `0068:208` ya hizo un `revoke` explícito sobre `user_private`, así que el patrón
+existe y está entendido; simplemente no se generalizó.
+
+**Próximo paso**: no se resuelve dentro del delta de reportes (ahí solo se cubren sus 3 tablas nuevas, con un
+assert que resuelva el **ACL real** y no `pg_policies`, que es ciego a esto). Lo que corresponde es una
+migración de barrido + un guard escrito **sobre la ausencia**: que toda tabla nueva de `public` nazca en rojo
+si no revoca. Evaluar de paso `anon` y si el `service_role=Dxtm` tiene sentido.
+
+## 2026-08-07 — el `tacto_vaquillona` se lee "Reproducción" en el timeline (no tiene label propio)
+
+**Origen**: delta spec 02 `ficha-categoria-tacto`, mientras se implementaba el tacto de APTITUD desde la ficha.
+
+**Qué**: `REPRO_LABELS` (`app/src/utils/event-timeline.ts`) mapea `service/tacto/birth/abortion/weaning/
+drying/rejection`, pero **no** `tacto_vaquillona` → `humanizeReproEventType` cae al default y el nodo del
+timeline dice **"Reproducción"** en vez de algo como "Aptitud reproductiva (Apta)". No es un defecto que
+introduzca este delta —el evento ya existía desde el alta (`RAR.1.3`) y desde la manga (M3.2a)—, pero el
+delta lo vuelve MUCHO más alcanzable: ahora se carga de a un animal desde la ficha, y el operario que lo
+acaba de cargar ve un nodo genérico.
+
+**Por qué importa**: el historial es la auditoría del animal; un veredicto de aptitud que se lee
+"Reproducción" no se puede leer de un vistazo, y el `heifer_fitness` (apta/no apta/diferida) no se muestra en
+ningún lado del riel. Afecta la lectura del vet, que es el canal de adquisición.
+
+**Próximo paso sugerido**: nota informativa → cambio Nivel A sobre spec 02 (agregar el code a
+`ReproEventType` + su label + el detalle del veredicto en `TimelineEvent`, con su test). No se hizo acá
+porque el design del delta declara explícitamente que el timeline no se toca.
+
+## 2026-08-07 — 11 tests E2E en ROJO PRE-EXISTENTE (manga tacto + cut-ficha + treatments + alta guiada)
+
+**Origen**: delta spec 02 `ficha-categoria-tacto`, corriendo la red de regresión E2E. **Verificado con el
+baseline**: se stashearon los cambios de la unidad, se rebuildeó y se volvieron a correr → **fallan igual**.
+
+**Qué**, en tres familias:
+1. **9 tests de la manga** (`maniobra-carga.spec.ts` ×2, `maniobra-tacto-adaptativo.spec.ts` ×4,
+   `maniobra-tacto-bugfix.spec.ts` ×3) esperan que la maniobra TACTO DE PREÑEZ aplique a una **vaquillona sin
+   servicio** (`· 1 de 2`, botón `PREÑADA`). Desde el **bug-B** (`a2354d9`, 2026-07-10) el tacto de preñez
+   aplica SOLO a hembras SERVIDAS — y ese commit **no actualizó estos e2e** (su último cambio es del
+   2026-07-09). O sea: las specs quedaron viejas respecto del fix, no el fix roto.
+2. **`cut-ficha.spec.ts` ×1** y **`treatments.spec.ts` ×1**: aserciones de badge/marca por `.first()` que
+   resuelven a un nodo **oculto** (la pantalla de la LISTA queda montada aria-hidden detrás con su propio
+   badge). Fix conocido: `filter({ visible: true })` + anclar por `aria-label` (es el patrón que ya usa el
+   test "C6 espejo" y el que este delta aplicó en `events.spec.ts`).
+3. **`animals.spec.ts` / `animals-offline.spec.ts`**: cluster FLAKY alrededor de "alta guiada → ficha → badge
+   de categoría". Medido: **6 rojos en baseline** vs **3–5 con la unidad puesta**, y el conjunto de tests que
+   falla varía entre corridas.
+
+**Por qué importa**: son 11 rojos que enmascaran regresiones reales — la próxima unidad no puede distinguir
+"lo rompí yo" de "ya estaba" sin repetir este experimento de baseline (≈15 min por vuelta).
+
+**Próximo paso sugerido**: unidad chica de saneamiento de la red E2E (reconciliar los 9 de la manga al gating
+post bug-B + aplicar `filter({visible:true})` en los 2 de badge + estabilizar el cluster de alta guiada).
+
 ## 2026-08-07 — 🟠 «Entoradas = servidas − retiradas» nunca resta nada en cría por servicio natural
 
 **Origen**: sesión de reproducción del defecto de campañas congeladas (ADR-032). Salió de costado y **es un

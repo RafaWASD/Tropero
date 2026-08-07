@@ -135,8 +135,15 @@ export type MirrorCategoryCode =
 
 export type AnimalSex = 'male' | 'female';
 
-const ONE_YEAR_DAYS = 365;
-const TWO_YEAR_DAYS = 730;
+/**
+ * Cortes de edad de `compute_category` (0062), en DÍAS. EXPORTADOS porque son la FUENTE ÚNICA de los cortes
+ * y hay un segundo consumidor: `category-pin.ts` (`COHERENCE_WINDOWS`, delta ficha-categoria-tacto RCM.4.3)
+ * construye con ellos sus ventanas de COHERENCIA — así no hay números mágicos ni drift numérico entre el
+ * espejo, `AGE_WINDOWS` y las ventanas de coherencia. Ver el banner ANTI-DRIFT del header: una migración que
+ * mueva estos cortes actualiza las TRES cosas en el mismo commit.
+ */
+export const ONE_YEAR_DAYS = 365;
+export const TWO_YEAR_DAYS = 730;
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════
 // Ventanas etarias INVERSAS de los cortes de `compute_category` (alta = animal ENTERO, is_castrated=false;

@@ -45,6 +45,7 @@ import {
   buildReproBadgeEventsQuery,
   buildSessionEmptyFemalesQuery,
   buildRevertCategoryOverrideUpdate,
+  buildSetCategoryOverrideUpdate,
   buildManagementGroupsQuery,
   buildTimelineQuery,
   buildReproServiceTypesQuery,
@@ -1502,6 +1503,40 @@ test('buildRevertCategoryOverrideUpdate: UN solo statement setea override=0 Y ca
   );
   // ambas columnas en el MISMO UPDATE → una sola CrudEntry → un solo UPDATE PostgREST (0040 respeta revert)
   assert.deepEqual(q.args, ['cat-derived', 'prof-9']);
+});
+
+// ─── delta ficha-categoria-tacto: buildSetCategoryOverrideUpdate (RCM.5.1 / RCM.5.4) ───────────
+
+test('buildSetCategoryOverrideUpdate: UN solo statement setea category_id Y override=1, deleted_at IS NULL', () => {
+  const q = buildSetCategoryOverrideUpdate('prof-11', 'cat-elegida');
+  assert.match(
+    q.sql,
+    /^UPDATE animal_profiles SET category_id = \?, category_override = 1 WHERE id = \? AND deleted_at IS NULL$/,
+  );
+  // Las dos columnas en el MISMO UPDATE → una sola CrudEntry → un solo PATCH (0040 lo lee como override manual).
+  assert.deepEqual(q.args, ['cat-elegida', 'prof-11']);
+});
+
+test('RCM.5.4 — el pin de categoría NO escribe is_castrated / is_cut / teeth_state ni ninguna otra columna', () => {
+  const q = buildSetCategoryOverrideUpdate('prof-11', 'cat-elegida');
+  // Aserción sobre el VALOR del SQL (no sobre "cómo está escrito"): el SET tiene EXACTAMENTE dos asignaciones
+  // y ninguna es de las columnas prohibidas. Un builder que sumara `is_cut = 1` cae acá.
+  const setClause = /SET (.+?) WHERE/.exec(q.sql)?.[1] ?? '';
+  const assignments = setClause.split(',').map((s) => s.trim().split('=')[0].trim());
+  assert.deepEqual(assignments, ['category_id', 'category_override']);
+  for (const forbidden of ['is_castrated', 'is_cut', 'teeth_state', 'idv', 'rodeo_id', 'status']) {
+    assert.doesNotMatch(q.sql, new RegExp(`\\b${forbidden}\\b`), `el pin no debe tocar ${forbidden}`);
+  }
+  // Y el WHERE es por el id del PERFIL (no por establishment_id hardcodeado — multi-tenant, RCM.9.3).
+  assert.doesNotMatch(q.sql, /establishment_id/);
+});
+
+test('el pin y el revert son SIMÉTRICOS: mismas dos columnas, override 1 vs 0, mismos args', () => {
+  const pin = buildSetCategoryOverrideUpdate('p', 'c');
+  const revert = buildRevertCategoryOverrideUpdate('p', 'c');
+  assert.deepEqual(pin.args, revert.args, 'mismo orden de args (categoryId, profileId)');
+  assert.match(pin.sql, /category_override = 1/);
+  assert.match(revert.sql, /category_override = 0/);
 });
 
 test('C6 RC6.3.5 (display-only): los builders del PATH de display son SELECT puros (cero INSERT/UPDATE/DELETE)', () => {

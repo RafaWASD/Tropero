@@ -127,3 +127,7 @@ export { LinkCalfPrompt } from './LinkCalfPrompt';
 export type { LinkCalfPromptProps } from './LinkCalfPrompt';
 export { ComboOptionRow } from './ComboOptionRow';
 export type { ComboOptionRowProps } from './ComboOptionRow';
+// Selector de CATEGORÍA de la ficha (delta spec 02 ficha-categoria-tacto, RCM.3): lista de las categorías
+// del mismo sexo + confirmación en dos fases dentro del mismo sheet.
+export { CategoryPickerSheet } from './CategoryPickerSheet';
+export type { CategoryPickerSheetProps } from './CategoryPickerSheet';
