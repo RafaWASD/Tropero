@@ -348,6 +348,16 @@ de FK canónica (§5.5 de `0106`).
 > día un camino moviera un perfil de establecimiento in-place, tomarlo del animal haría que una fila del detalle
 > de A pasara a ser legible por B e ilegible por A. Tomándolo del padre, la RLS de cabecera y detalle **no puede**
 > discrepar — y la FK compuesta lo vuelve estructural.
+>
+> **La garantía NO es simétrica, y hay que decirlo.** La FK compuesta ata **detalle ↔ cabecera**. Pero el
+> eslabón de arriba —que `rodeo_campaign_snapshots.establishment_id` sea el del `rodeos` al que apunta
+> `rodeo_id`— se sostiene solo en que `close_campaign` escribe `v_est`, que sale del mismo `select` sobre
+> `rodeos` que el guard. No es explotable (los dos valores tienen la misma fuente en la misma sentencia), pero es
+> **el nivel donde la RLS decide quién lee**. Cerrarlo con el mismo mecanismo exigiría `unique (id,
+> establishment_id)` en `rodeos` + una FK compuesta desde la cabecera: tocar una tabla core por un invariante que
+> hoy no tiene camino de violación es más blast radius del que este delta quiere. **Se cierra por test**
+> (RCC.13.6.b): un assert de invariante sobre **toda** fila de `rodeo_campaign_snapshots`. Queda escrito acá para
+> que nadie asuma una simetría que no existe: **abajo por constraint, arriba por test.**
 
 ### §2.4 — Decisión: **enum multi-fila**, no booleanos
 
@@ -793,7 +803,7 @@ por uniformidad de las dos RPC de escritura. Reglas:
 | `closed_incomplete`, `missing_at_close` | del snapshot vigente (F8) |
 | `service_months`, `n_months`, `state_as_of` | del snapshot si está cerrada; de `rodeo_service_campaign` si no (F5) |
 | `pending_pregnant`, `pending_weaning`, `missing_summary` | del snapshot si está cerrada; de `rodeo_calving_kpi`/`rodeo_weaning_kpi` + `campaign_missing_summary` si no → la UI enumera qué falta sin llamar a los KPI (RCC.7.7) |
-| `can_close` | `is_owner_or_vet_of(v_est) and not is_closed and state_as_of <= current_date` |
+| `can_close` | `is_owner_or_vet_of(v_est) and not is_closed and state_as_of <= current_date` **`and serviced > 0`** — los **tres** gates duros de §4.2-bis, no dos. `serviced` ya viene en el `returns` de `rodeo_weaning_kpi`, que esta función ya invoca en el camino abierto: costo cero. Sin esta cláusula, un rodeo sin servicio ofrecía "Cerrar campaña", fallaba con `23514`, y la UI —que distingue reconocible de no reconocible **por `can_close`** (§5.C)— mostraba la segunda acción "Cerrar igual con estos datos incompletos", que también falla. Eso **entrena al usuario a clickear el reconocimiento**, que es exactamente el control que DP-10 existe para proteger. |
 | `can_reopen` | `is_owner_or_vet_of(v_est) and is_closed and not exists(snapshot vigente de p_year+1)` |
 | `cycle_complete` | **`campaign_cycle_complete(weaning_status, pending_weaning, state_as_of)`** — la misma función que usa el gate de `close_campaign` (§4.1-bis), no una copia |
 | `has_new_data` | ver abajo (DL10) |
@@ -882,9 +892,11 @@ No se agrega ningún trigger de rechazo (rompería el offline-first). Se testea 
 | `22023` | `p_year` fuera de `1900..current+1` | `validation` |
 | `23514` | (a) cerrar una campaña cuyo servicio no terminó **[no reconocible]**; (b) cerrar con el ciclo incompleto sin `p_acknowledge_incomplete` **[reconocible]**; (c) reabrir con la campaña siguiente cerrada | **`conflict`** (nuevo `kind`, con mensaje accionable) |
 
-El cliente distingue (a) de (b) por `rodeo_campaign_status`: si `can_close` es falso, es (a) y no hay
-reintento posible; si `can_close` es verdadero y `cycle_complete` es falso, es (b) y el reintento con
-reconocimiento es la salida. No se inventa un código nuevo ni se parsea el texto del mensaje.
+El cliente distingue **lo reconocible de lo no reconocible por `can_close`**, no por el texto del mensaje ni por
+un código nuevo: si `can_close` es falso, el `23514` viene de G1 o G2 y **no hay reintento posible** (la UI no
+ofrece ni el cierre ni el reconocimiento); si `can_close` es verdadero y `cycle_complete` es falso, es G3 y el
+reintento con reconocimiento es la salida. Por eso `can_close` tiene que reflejar **los tres** gates duros
+(§4.4): si le falta uno, la UI ofrece un reconocimiento que no puede funcionar.
 
 ---
 
@@ -918,41 +930,62 @@ Gate 1 M-2 encontró que la lista normativa de funciones a revocar tenía 5 entr
 problema no son las dos que faltaban: es **la forma de la lista**. Enumerar lo que hay que revocar es el patrón
 que este repo ya se comió cuatro veces — se escribe sobre las que hoy existen y no falla cuando aparece una nueva.
 
-Se invierte: la migración declara **una sola** enumeración, la de lo **público**, y el smoke-check **barre** el
-resto por prefijo:
+Se invierte: la migración declara **una sola** enumeración, la de lo **público**, y de ella salen **dos** loops —
+uno por cada mitad del invariante de §5.8. La primera versión de este bloque tenía un solo loop y por eso perdía
+la mitad que `0105:237-252` ya exigía: **el barrido excluye la lista blanca por construcción, así que nadie
+verificaba que las públicas estén revocadas de `anon`/`public`** — y el default de Postgres para una función
+nueva es `EXECUTE` a `PUBLIC`, o sea que `close_campaign` nacía abierta. Una fuente, dos invariantes:
 
 ```sql
 do $$
 declare
-  -- ÚNICA enumeración de la migración. De acá salen los grants Y el smoke-check.
+  -- ÚNICA enumeración de la migración. De acá salen los grants Y los DOS checks.
   v_public constant text[] := array[
     'close_campaign','reopen_campaign','rodeo_campaign_status',
     'rodeo_service_campaign','rodeo_serviced_females','rodeo_repro_denominator',
     'rodeo_pregnancy_kpi','rodeo_calving_kpi','rodeo_ccl_distribution',
     'rodeo_calving_by_stage','rodeo_weaning_kpi'
   ];
+  v_ns constant text[] := array['rodeo\_campaign\_%','campaign\_%','rodeo\_%'];
   v_bad record;
 begin
+  -- (1) INTERNAS: todo lo del namespace del delta que NO está en la lista blanca no puede ser
+  --     ejecutable por public/anon/authenticated.
   for v_bad in
     select p.oid::regprocedure::text as fn, r.rolname
     from pg_proc p
     join pg_namespace n on n.oid = p.pronamespace
     cross join (select unnest(array['anon','public','authenticated']) as rolname) r
     where n.nspname = 'public'
-      and (p.proname like 'rodeo\_campaign\_%' or p.proname like 'campaign\_%'
-           or p.proname in ('animal_category_at'))
+      and (p.proname like any (v_ns) or p.proname = 'animal_category_at')
       and not (p.proname = any (v_public))
       and has_function_privilege(r.rolname, p.oid, 'EXECUTE')
   loop
-    raise exception 'grant check FAILED: % is EXECUTE-able by % (internal → must be revoked)', v_bad.fn, v_bad.rolname;
+    raise exception 'grant check FAILED: % is EXECUTE-able by % (internal → must be revoked)',
+      v_bad.fn, v_bad.rolname;
+  end loop;
+
+  -- (2) PÚBLICAS: la otra mitad de §5.8 / 0105:237-252. Las de la lista blanca SÍ van a authenticated,
+  --     pero NUNCA a anon/public (default de Postgres = EXECUTE a PUBLIC → el revoke es obligatorio).
+  for v_bad in
+    select p.oid::regprocedure::text as fn, r.rolname
+    from pg_proc p
+    join pg_namespace n on n.oid = p.pronamespace
+    cross join (select unnest(array['anon','public']) as rolname) r
+    where n.nspname = 'public'
+      and p.proname = any (v_public)
+      and has_function_privilege(r.rolname, p.oid, 'EXECUTE')
+  loop
+    raise exception 'grant check FAILED: % is EXECUTE-able by % (public RPC → must be revoked from anon/public)',
+      v_bad.fn, v_bad.rolname;
   end loop;
 end$$;
 ```
 
-**Qué gana**: una función interna nueva bajo el namespace del delta nace revocada o **la migración muere**. No hay
-lista de prohibidos que mantener. **Qué no cubre, dicho explícitamente**: una interna futura con un nombre fuera
-de los prefijos (`campaign_%` / `rodeo_campaign_%`). Eso es una convención de nombres, no un guard; queda
-declarado acá en vez de fingir cobertura total.
+**Qué gana**: una función interna nueva bajo el namespace del delta nace revocada o **la migración muere**; y una
+pública nueva a la que se le olvide el `revoke` también la mata. No hay lista de prohibidos que mantener.
+**Qué no cubre, dicho explícitamente**: una interna futura con un nombre fuera de los prefijos. Eso es una
+convención de nombres, no un guard; queda declarado acá en vez de fingir cobertura total.
 
 ---
 
@@ -1008,7 +1041,7 @@ Tabla de estados:
 |---|---|---|---|---|---|---|---|---|
 | false | — | — | false | can_close | Campaña en curso | Los números se actualizan con cada dato nuevo | — | Cerrar campaña |
 | false | — | — | **true** | can_close | Campaña en curso | ídem | **El ciclo de esta campaña está completo. ¿La cerrás?** | Cerrar campaña |
-| false | — | — | — | sin permiso | Campaña en curso | ídem | — | ninguna |
+| false | — | — | — | `canClose` false | Campaña en curso | ídem | — | **ninguna** — cubre tanto "no tiene el rol" como "todavía está en servicio" (G1) y "no hay hembras servidas" (G2). La UI no ofrece un cierre que el server va a rechazar, ni el reconocimiento que vendría después. |
 | **true** | false | false | — | can_reopen | **Campaña cerrada** | **Foto del 14/03/2026** | — | Reabrir campaña |
 | **true** | **true** | false | — | can_reopen | **Campaña cerrada a medias** | Foto del 14/03/2026 | **Se cerró con 2 preñadas sin parir · 5 crías sin destetar. Los números no incluyen eso.** | Reabrir campaña |
 | **true** | — | **true** | — | can_reopen | Campaña cerrada | Foto del 14/03/2026 | **Hay datos nuevos sin reflejar en la foto. Reabrí la campaña para incorporarlos.** | Reabrir campaña |
@@ -1137,7 +1170,10 @@ congelados **y el detalle por animal completo** de un campo ajeno, con la suite 
    cota rechaza pero el `CHECK` de la tabla admite**: `service_role` inserta una fila con `campaign_year = 2400`
    (el `CHECK` es `1900..2400`; la cota de las RPC es `1900..current+1`), y entonces el owner de A pide
    `rodeo_pregnancy_kpi(rodeo, 2400)` → **tiene que dar `22023`**. Si el cortocircuito está antes de la cota,
-   devuelve la foto sembrada.
+   devuelve la foto sembrada. **Este oráculo corre sobre el MISMO conjunto descubierto que (1)**, no sobre una
+   función de ejemplo: el conjunto ya está calculado ahí al lado, y si el orden sale bien en una y mal en otra el
+   caso único quedaría verde. (Impacto real bajo —`close_campaign` no puede crear un snapshot fuera de cota, así
+   que en producción el estado es inalcanzable— pero cuesta una línea y es disciplina de la misma clase que (1).)
 
 **El guard se escribe sobre la ausencia (RCC.13.5.e).** La lista de funciones a machacar **no se escribe a mano**:
 el test la **descubre** del catálogo, y le aplica (1) a cada una:
@@ -1173,7 +1209,18 @@ cubrir el invariante por comportamiento sobre un conjunto descubierto, y se decl
 | **TR.14d** ciclo incompleto (F8) | ciclo incompleto sin ack → `23514` **y el mensaje nombra lo que falta** (regex sobre "preñadas sin parir"/"crías sin destetar"); **no se creó ninguna fila** de snapshot; con ack → cierra y `closed_incomplete = true` con `missing_at_close` no nulo, expuesto por `rodeo_campaign_status`; ciclo **completo** → cierra **sin** ack y `closed_incomplete = false`; `campaign_cycle_complete` da lo mismo desde `close_campaign` y desde `rodeo_campaign_status` en el mismo escenario; y el guard **no reconocible**: con `state_as_of > current_date`, `ack = true` **igual** falla con `23514`. | RCC.5.7, RCC.5.7.a–d, RCC.4.11, RCC.7.7, RCC.13.9.a–c |
 | **TR.14b** grants de **función** | `anon`/`public` no ejecutan `close_campaign`, `reopen_campaign`, `rodeo_campaign_status`; **`authenticated` no ejecuta** las **7** internas (incluidas `campaign_cycle_complete` y `campaign_missing_summary`). En vez de un array a mano, se reusa el barrido de §6-bis desde el test. Extender el array de TR.10. | RCC.9.5, RCC.13.6 |
 | **TR.14e** grants de **TABLA** (Gate 1 H-2b) | Un `authenticated` con rol activo intenta `insert`, `update` y `delete` sobre las **3** tablas nuevas → rechazado en las 9 combinaciones, incluido un `insert` en `rodeo_campaign_snapshots` con el `establishment_id` de **otro** tenant. Y `pg_policies` para las 3 tablas devuelve **solo** filas con `cmd = 'SELECT'`. Es el guard del invariante que sostiene DP-19: si mañana alguien agrega un `grant insert` "para el import", esto se pone rojo antes de que la frontera se caiga. | RCC.4.8, RCC.1.11, RCC.13.6.a |
-| **TR.14f** helper de authz (Gate 1 H-3) | `close_campaign`/`reopen_campaign` con (a) un owner cuyo `user_roles.active = false` y (b) un owner de un establecimiento con `deleted_at` no nulo → **`42501`** en ambos; `rodeo_campaign_status` los rechaza igual. Es la asimetría clásica que faltaba: se testeaba que el rol equivocado no pase, no que el rol **correcto caducado** tampoco. | RCC.13.5.c |
+| **TR.14f** helper de authz (Gate 1 H-3) | `close_campaign`/`reopen_campaign` con (a) un owner cuyo `user_roles.active = false` y (b) un owner de un establecimiento con `deleted_at` no nulo → **`42501`** en ambos; `rodeo_campaign_status` los rechaza igual. Es la asimetría clásica que faltaba: se testeaba que el rol equivocado no pase, no que el rol **correcto caducado** tampoco. **(a) es un oráculo genuino**: sin `ur.active = true` en el helper, se pone rojo. **(b) NO puede fallar hoy y va rotulado** — ver abajo. | RCC.13.5.c |
+| **TR.14h-bis** tenant de la cabecera (Gate 1 N-6) | Assert de invariante sobre **toda** fila de `rodeo_campaign_snapshots`: `establishment_id` == el `establishment_id` del `rodeos` de su `rodeo_id`. Es el eslabón cabecera↔rodeo, que la FK compuesta (detalle↔cabecera) no cubre. | RCC.13.6.b |
+
+> **TR.14f(b) es un test que hoy no puede fallar, y va rotulado como tal.** El estado que quiere probar —un owner
+> **activo** de un establecimiento **borrado**— es **inalcanzable**: `0076` desactiva los roles al soft-deletear
+> un campo y prohíbe reactivar un rol sobre un campo borrado (es el invariante que sostiene el modelo JOIN-free
+> de PowerSync, ADR-026). O sea que el caso pasa por `ur.active = false`, no por el join a `establishments`, y
+> pasaría igual si el helper no tuviera ese join. **No se borra ni se disfraza**: se deja con un comentario que
+> diga (i) que hoy es inalcanzable por `0076`, (ii) que por eso el join a `establishments … deleted_at is null`
+> es redundante **hoy**, y (iii) que se vuelve load-bearing el día que exista el flujo de restore de campo que
+> `0076` difiere. Un verde que no puede ponerse rojo es un verde mentiroso **salvo que esté rotulado**; rotulado,
+> es documentación de un invariante que vive en otra migración.
 | **TR.14g** guard de catálogo | Leyendo `pg_proc` (no el texto): `is_owner_or_vet_of` es `prosecdef`, `provolatile = 's'` y tiene `search_path` en `proconfig`; las 7 de lectura + `rodeo_campaign_status` son `stable`; `close_campaign` y `reopen_campaign` **no** son `stable` y tienen `search_path` con `pg_temp`. Resuelve el valor, no el texto. | RCC.13.5.d, RCC.9.2 |
 | **TR.14h** procedencia del tenant | Insertar por `service_role` una fila de detalle con un `establishment_id` distinto al de su cabecera → **rechazado por la FK compuesta** (`23503`). El invariante de RCC.4.8.b es estructural, y esto lo confirma. | RCC.4.8.b |
 | **TR.15** membresía | apertura al insertar (con `entry_date` y sin él); cierre + apertura al mover; cierre al dar de baja con `exit_date`; invariante de una sola fila vigente (intento de romperlo → `23505`); backfill idempotente (segunda corrida no duplica); RLS (owner de B no ve filas de A); `transfer_animal` deja la historia en el origen; **apuntar el `rodeo_id` de un perfil de A a un rodeo de B → `23514` de `tg_animal_profiles_rodeo_check`** (`0021`), o sea que el par cruzado nunca llega a la tabla de membresía. | RCC.1.*, RCC.13.13 |
@@ -1228,11 +1275,10 @@ de dominio: es la consecuencia aritmética del calendario. **Va a la Puerta 1 pa
 1. **Backup verificado, no solo tomado** (RCC.11.9): `node scripts/backup-db.mjs` y después **comprobar** que el
    archivo existe, pesa > 0 y **contiene filas del `establishment_id` que se va a borrar**. Un backup que no se
    abrió no es un backup.
-2. **Asserts de magnitud ANTES del primer `delete`** (RCC.11.8), dentro de la misma transacción:
+2. **Asserts de magnitud ANTES del primer `delete`** (RCC.11.8), dentro de la misma transacción y **como
+   `service_role`** (sin impersonar todavía):
    ```sql
    begin;
-   set local role authenticated;                                  -- ⬅ RCC.11.7
-   set local request.jwt.claims = '{"sub":"<owner>","role":"authenticated"}';
    -- (a) cardinalidad 1: el conjunto de establecimientos alcanzados es EXACTAMENTE uno
    -- (b) magnitud esperada: ~350 perfiles / ~2.045 eventos; si se desvía, abort
    do $$ begin
@@ -1243,27 +1289,48 @@ de dominio: es la consecuencia aritmética del calendario. **Va a la Puerta 1 pa
      then raise exception 'ABORT re-seed: magnitud inesperada, no se borra nada'; end if;
    end $$;
    ```
-   **`set local role authenticated` junto con los claims** (RCC.11.7) es la línea que más importa de todo el
-   procedimiento: sin ella la sesión sigue siendo `service_role`/`postgres` — RLS bypasseada **y** con identidad
-   spoofeada, la combinación más privilegiada posible, y **todo** el re-seed escribe sin red de contención de
-   tenant. Con ella, la impersonación es fiel, la RLS vuelve a aplicar y un bug del seed **no puede** escribir
-   fuera del campo demo.
-3. **Borrado acotado** al `establishment_id` de La Facundina, en orden de dependencia (molde: el `cleanup()` de
+
+> ### ⚠ El alcance de la impersonación: **solo el paso 5**, no toda la transacción
+>
+> La versión anterior de este runbook abría la transacción con `set local role authenticated` + claims y dejaba
+> la impersonación puesta para **todo** el procedimiento. **Está mal y muere en el primer `delete`**, verificado
+> contra el remoto: `authenticated` tiene `select, insert, update` sobre `animal_profiles` / `animals` /
+> `reproductive_events` —**sin `DELETE`**— y solo `select` sobre `animal_category_history`. Con la impersonación
+> activa desde el arranque, el borrado aborta con `42501` y, por la transacción única, hace rollback entero: el
+> runbook no llegaba a correr nunca.
+>
+> **Regla**: el borrado (paso 3) y el sembrado (paso 4) corren como **`service_role`** — son operaciones de
+> mantenimiento que necesitan `DELETE` y escritura sobre tablas que el cliente no borra. La impersonación se
+> acota al **paso 5**, que es el único que la necesita: `close_campaign` deriva `closed_by` de `auth.uid()` y su
+> guard es `is_owner_or_vet_of`, así que sin identidad fiel devolvería `42501` y el cierre no se ejercitaría por
+> el camino real. **Que nadie lo "uniformice" moviendo el `set local` al arranque**: el alcance es corto a
+> propósito, y la contención del borrado la dan los asserts del paso 2 y los `where` explícitos del paso 3, no
+> la RLS.
+3. **Borrado acotado** (como `service_role`) al `establishment_id` de La Facundina, en orden de dependencia (molde: el `cleanup()` de
    `supabase/tests/reports/run.cjs`): eventos (7 tablas tipadas + `animal_events`) → `birth_calves` →
    `rodeo_membership_history` / `animal_category_history` → `animal_profiles` → `animals` huérfanos →
    `sessions`, `management_groups`, `rodeo_data_config`, `semen_registry` → `rodeos` → `user_roles` →
    `establishments`. Cada `delete` con su `where establishment_id = …` explícito. **No se toca "Santo Domingo"**
    ni ningún otro campo de la cuenta.
-4. **Re-seed** con el mismo namespace de UUID fijos (`fac00000-face-4000-a000-…`), 2 rodeos con los mismos
-   `service_months`, ~350 cabezas, ~2.000 eventos. Diferencias obligatorias respecto del seed original:
+4. **Re-seed** (como `service_role`) con el mismo namespace de UUID fijos (`fac00000-face-4000-a000-…`), 2 rodeos
+   con los mismos `service_months`, ~350 cabezas, ~2.000 eventos. Diferencias obligatorias respecto del seed
+   original:
    - **`entry_date` explícito** en cada perfil, anterior al inicio del servicio 2024 (RCC.11.2). Sin esto el
      trigger abre la membresía en `created_at` = hoy y la campaña 2024 devuelve `serviced = 0`.
    - **Retrodatar `animal_category_history.changed_at`** de las filas `initial` al `entry_date` (RCC.11.3), por
      `service_role`, después de crear los perfiles. Sin esto la categoría histórica cae en la degradación de
      RCC.2.7 y la demo dependería de un fallback.
    - Tactos dentro de la ventana de cada campaña; partos a −9 meses de concepción; destetes ~7 meses post-parto.
-5. **Cierre de 2024** en **ambos** rodeos llamando `close_campaign` con la identidad del owner ya fijada en el
-   paso 2 (rol + claims). Como la cuenta de Facundo es login por Google (sin password para
+5. **Cierre de 2024** en **ambos** rodeos llamando `close_campaign`, y **recién acá** la impersonación, acotada a
+   este paso:
+   ```sql
+   set local role authenticated;                                  -- ⬅ RCC.11.7, alcance = este paso
+   set local request.jwt.claims = '{"sub":"<owner resuelto en el momento>","role":"authenticated"}';
+   select public.close_campaign('<rodeo invierno>', 2024);
+   select public.close_campaign('<rodeo primavera>', 2024);
+   reset role;                                                    -- vuelve a service_role para el paso 6
+   ```
+   Como la cuenta de Facundo es login por Google (sin password para
    `signInWithPassword`), la impersonación por SQL es el único camino que ejercita la RPC real. **No** se
    insertan filas de snapshot a mano. Los **dos** cierres van en la misma transacción, lo cual es posible
    gracias al arreglo de las temporales de §4.2 paso 7 (RCC.11.10): sin él, el segundo moría con `42P07` y el
@@ -1375,6 +1442,11 @@ Puerta 2. Tras correr el capture: revertir `design/**` si el build re-renderizó
 | **DP-26** *(Gate 1 M-4)* | Tercer guard duro no reconocible: `serviced = 0` → `23514`. | Un año sin hembras servidas no es una campaña incompleta sino inexistente; y era el multiplicador que permitía materializar ~126 snapshots por rodeo iterando `p_year`. §4.2 paso 7-bis-α, §4.2-bis. | RCC.5.7.e, RCC.9.11 |
 | **DP-27** *(Gate 1 M-3)* | `set search_path = public, pg_temp` en las 2 RPC de escritura + temporales **crear-o-truncar** con nombre calificado. | Es el primer delta del repo que crea y lee temporales dentro de un `DEFINER`; y sin el crear-o-truncar el runbook del §9 moría con `42P07` en su primer uso. | RCC.9.2, RCC.11.10 |
 | **DP-28** *(Gate 1 M-5)* | `closed_by_name` sale de `user_roles.member_name`, no de `users.name`. | ADR-026 (c2) ya lo decidió (`0080`); leer la global desde un `DEFINER` abre una lectura cross-tenant innecesaria y muestra el nombre global de hoy en vez del que esa membresía conoce. | RCC.9.12 |
+| **DP-29** *(Gate 1 N-1)* | La impersonación del runbook se acota **al paso de los dos `close_campaign`**; el borrado y el sembrado corren como `service_role`. | `authenticated` no tiene `DELETE` sobre las tablas que el re-seed borra (verificado en el remoto) → con la impersonación desde el arranque, el runbook moría con `42501` en su primer `delete` y hacía rollback entero. La contención del borrado la dan los asserts de magnitud y los `where`, no la RLS. | RCC.11.7 |
+| **DP-30** *(Gate 1 N-2)* | El smoke-check de grants tiene **dos** loops sobre la misma enumeración: internas no ejecutables por `public`/`anon`/`authenticated`, y públicas no ejecutables por `anon`/`public`. | El barrido excluye la lista blanca por construcción, así que con un solo loop nadie verificaba la mitad de §5.8 que `0105:237-252` ya exigía — y el default de Postgres dejaba `close_campaign` abierta a `PUBLIC` al aplicar. | RCC.9.6, RCC.9.6.a |
+| **DP-31** *(Gate 1 N-3)* | `can_close` refleja **los tres** guards duros, incluido `serviced > 0`. | §5.C hace que el cliente distinga lo reconocible de lo no reconocible **por `can_close`**; con G2 afuera, un rodeo sin servicio ofrecía "cerrar igual con estos datos incompletos" y fallaba igual → entrenaba al usuario a clickear el control que DP-10 existe para proteger. Costo cero: `serviced` ya viene de `rodeo_weaning_kpi`. | RCC.7.6.a |
+| **DP-32** *(Gate 1 N-4)* | TR.14f(b) se **conserva y se rotula** como inalcanzable hoy, en vez de borrarse o de contarse como cobertura. | `0076` hace imposible el estado "owner activo de campo borrado", así que el caso pasa por `ur.active = false` y pasaría igual sin el join a `establishments`. Un verde que no puede ponerse rojo es un verde mentiroso **salvo que esté rotulado**; rotulado, documenta un invariante que vive en otra migración y que se vuelve load-bearing con el flujo de restore que `0076` difiere. | RCC.13.5.c.i |
+| **DP-33** *(Gate 1 N-6)* | La garantía del tenant es **asimétrica y se declara**: detalle↔cabecera por constraint (FK compuesta), cabecera↔rodeo por test (RCC.13.6.b). | Cerrar el eslabón de arriba con el mismo mecanismo exigiría `unique (id, establishment_id)` + FK compuesta sobre `rodeos`, una tabla core, por un invariante que hoy no tiene camino de violación (los dos valores salen del mismo `select`). Más blast radius del que el delta quiere. Se declara para que nadie asuma una simetría que no hay. | RCC.13.6.b |
 | **DP-20** | `transfer_animal` **no** re-apunta la membresía (a diferencia de lo que hace con `animal_category_history`). | Re-apuntarla movería la historia de rodeo al campo destino: F4 a escala de establecimiento. | RCC.1.13 |
 | **DP-21** | Migraciones `0127`–`0130` en cuatro archivos, en el orden de §6. | La tabla de historia y su backfill tienen que existir antes del cómputo; el cómputo histórico antes del cierre. | §6 |
 | **DP-22** | Re-seed: campaña **2024** cerrada y **2025** en curso, no 2025 cerrada. **[VALIDAR CON RAF]** | §9.1: una campaña 2025 no puede tener su destete cargado antes de ~oct-2026. | RCC.11.4 |

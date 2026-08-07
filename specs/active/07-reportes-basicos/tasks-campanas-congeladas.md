@@ -120,11 +120,15 @@ sin justificación documentada.
   exista grant de escritura ni policy distinta de SELECT") y apunte a TR.14e como su guard (`design` §2.3).
   Cubre: RCC.4.8, RCC.9.9, DP-19.
 
-- [ ] **T20 — Smoke-check fail-closed por LISTA BLANCA + BARRIDO** (`design` §6-bis), **no** por enumeración de
-  lo prohibido: una única `text[]` con las funciones **públicas** del delta, de la que salen los `grant` y el
-  check; el check barre `public` por prefijo (`rodeo_campaign_%`, `campaign_%`, `animal_category_at`) y aborta si
-  algo fuera de la lista blanca es ejecutable por `public`/`anon`/`authenticated`. + `notify pgrst` + `commit`.
-  **No** agregar nada a `sync-streams/rafaq.yaml`. Cubre: RCC.4.9, RCC.9.5, RCC.9.6.
+- [ ] **T20 — Smoke-check fail-closed por LISTA BLANCA + BARRIDO, con LOS DOS loops** (`design` §6-bis), **no**
+  por enumeración de lo prohibido: una única `text[]` con las funciones **públicas** del delta, de la que salen
+  los `grant` y **ambos** checks. **Loop (1)**: todo lo del namespace (`rodeo_campaign_%`, `campaign_%`,
+  `rodeo_%`, `animal_category_at`) que **no** esté en la lista blanca y sea ejecutable por
+  `public`/`anon`/`authenticated` → aborta. **Loop (2) — el que faltaba**: toda función **de la lista blanca**
+  ejecutable por `anon`/`public` → aborta. Sin el loop (2) nadie verifica esa mitad de §5.8 (`0105:237-252`)
+  porque el barrido excluye la lista blanca por construcción, y el default de Postgres para una función nueva es
+  `EXECUTE` a `PUBLIC` → **`close_campaign` se aplicaría abierta**. + `notify pgrst` + `commit`. **No** agregar
+  nada a `sync-streams/rafaq.yaml`. Cubre: RCC.4.9, RCC.9.5, RCC.9.6, RCC.9.6.a.
 
 - [ ] **T20-bis — Comentarios de los bordes declarados** (anexo LOW de Gate 1): `comment on function
   animal_category_at` ("sin guard a propósito: no es alcanzable; si se le da grant, agregar el guard PRIMERO") y
@@ -245,7 +249,10 @@ sin justificación documentada.
   de `design` §4.4, incluidos `can_close`/`can_reopen` (derivados de `is_owner_or_vet_of` + las precondiciones),
   `closed_incomplete`, `missing_at_close`, `pending_pregnant`, `pending_weaning`, `missing_summary`,
   `cycle_complete` y `has_new_data`. **`cycle_complete` sale de `campaign_cycle_complete` (T14-bis), no de una
-  copia del predicado.** **`closed_by_name` sale de `user_roles.member_name`** (`where user_id = closed_by and
+  copia del predicado.** **`can_close` refleja los TRES guards duros** (rol · `state_as_of <= current_date` ·
+  **`serviced > 0`**): `serviced` ya viene en el `returns` de `rodeo_weaning_kpi` que esta función invoca, así
+  que es costo cero, y sin él un rodeo sin servicio ofrece el reconocimiento de un cierre que igual va a fallar
+  (entrena al usuario a clickear el control de DP-10). **`closed_by_name` sale de `user_roles.member_name`** (`where user_id = closed_by and
   establishment_id = v_est`, `coalesce` a null) — **NO** de la tabla global `users` (ADR-026 c2 / `0080`).
   Cubre: RCC.7.3, RCC.7.6, RCC.7.7, RCC.8.3, RCC.9.12, RCC.10.5, RCC.10.8.
 
@@ -303,9 +310,11 @@ sin justificación documentada.
     `pg_get_function_identity_arguments = 'uuid, integer'`, `has_function_privilege('authenticated', …)`) y se
     asserta un **piso de 9** funciones descubiertas, para que sacar una del namespace tampoco esquive el test.
   - **(b) cota antes del cortocircuito**: sembrar por `service_role` un snapshot con `campaign_year = 2400`
-    (dentro del `CHECK` de la tabla, fuera de la cota de las RPC) y pedir `rodeo_pregnancy_kpi(rodeo, 2400)` como
-    owner de A → **`22023`**, no la foto sembrada. Pedir `p_year = 9999999` **no sirve** como oráculo (no habría
-    snapshot y hasta una función mal ordenada caería igual en la cota) — dejar el comentario explicándolo.
+    (dentro del `CHECK` de la tabla, fuera de la cota de las RPC) y pedir `<fn>(rodeo, 2400)` como owner de A →
+    **`22023`**, no la foto sembrada, **sobre el MISMO conjunto descubierto de (a)** (no sobre una función de
+    ejemplo: ya está calculado ahí al lado, y si el orden sale bien en una y mal en otra el caso único quedaría
+    verde). Pedir `p_year = 9999999` **no sirve** como oráculo (no habría snapshot y hasta una función mal
+    ordenada caería igual en la cota) — dejar el comentario explicándolo.
   - Comentario obligatorio en el test: *los IDOR preexistentes corren todos con campañas abiertas, así que este
     bloque es el único que ejercita las 7 salidas tempranas nuevas.* Y el borde declarado: el descubrimiento no
     ve funciones futuras con otra firma o fuera del prefijo `rodeo_`; `close_campaign`/`reopen_campaign` se
@@ -320,14 +329,21 @@ sin justificación documentada.
   sostiene DP-19. Cubre: RCC.13.6.a, RCC.4.8, RCC.1.11.
 
 - [ ] **T48-γ — TR.14h procedencia estructural del tenant**: insertar por `service_role` una fila de detalle con
-  un `establishment_id` distinto al de su cabecera → rechazado por la FK compuesta (`23503`).
-  Cubre: RCC.4.8.b.
+  un `establishment_id` distinto al de su cabecera → rechazado por la FK compuesta (`23503`). **Verificar que las
+  dos columnas de la FK son `not null`**: con `MATCH SIMPLE` (el default), un NULL en cualquiera desactiva el
+  chequeo en silencio. **+ TR.14h-bis (N-6)**: assert de invariante sobre **toda** fila de
+  `rodeo_campaign_snapshots` — su `establishment_id` == el del `rodeos` de su `rodeo_id`. Es el eslabón
+  cabecera↔rodeo, que la FK (detalle↔cabecera) no cubre. Cubre: RCC.4.8.b, RCC.13.6.b.
 
 - [ ] **T48-δ — TR.14f helper de authz (Gate 1 H-3, BLOQUEANTE)**: `close_campaign` y `reopen_campaign` con
   (a) un owner cuyo `user_roles.active` se puso en `false`, y (b) un owner de un establecimiento con `deleted_at`
   no nulo → **`42501`** en los cuatro casos; `rodeo_campaign_status` los rechaza igual por `has_role_in`.
   Comentario: *se testeaba que el rol equivocado no pase; faltaba testear que el rol correcto **caducado**
-  tampoco.* Cubre: RCC.13.5.c.
+  tampoco.* **Rotular el caso (b) (N-4)**: hoy **no puede fallar** — `0076` desactiva los roles al soft-deletear
+  un campo y prohíbe reactivarlos, así que el estado "owner activo de campo borrado" es inalcanzable y el caso
+  pasa por `ur.active = false`, no por el join a `establishments`. **No borrarlo ni fingir que cubre algo**: el
+  comentario tiene que decir que es inalcanzable por `0076`, que por eso el join es redundante **hoy**, y que se
+  vuelve load-bearing cuando exista el flujo de restore que `0076` difiere. Cubre: RCC.13.5.c, RCC.13.5.c.i.
 
 - [ ] **T48-ε — TR.14g guard de catálogo (no textual)**: leyendo `pg_proc`, assertar `prosecdef = true` +
   `proconfig` con `search_path` en **todas** las funciones del delta; `provolatile = 's'` en `is_owner_or_vet_of`,
@@ -402,8 +418,10 @@ sin justificación documentada.
 
 - [ ] **T60 — `app/src/utils/reports-format.test.ts`**: casos de `campaignStateView` — en curso sin/con sugerencia,
   cerrada, **cerrada a medias (badge + aviso de qué faltaba)**, cerrada con datos nuevos, **sin permiso pero
-  cerrada a medias (el aviso SÍ se muestra, la acción no)**, `missing` con una y con dos entradas,
-  `status = null`. Cubre: RCC.10.3, RCC.10.11.
+  cerrada a medias (el aviso SÍ se muestra, la acción no)**, **`canClose = false` con `cycleComplete = false`
+  (rodeo sin servicio o todavía en servicio) → NO ofrece cerrar ni reconocer** (N-3: la UI no puede entrenar al
+  usuario a clickear el reconocimiento de DP-10 en un cierre que igual va a fallar), `missing` con una y con dos
+  entradas, `status = null`. Cubre: RCC.10.3, RCC.10.8, RCC.10.11, RCC.7.6.a.
 
 - [ ] **T61 — `app/src/hooks/use-reports.ts`**: `useCampaignStatus(rodeoId, year)` sobre el `useReport` genérico +
   `closeAction(acknowledge)` / `reopenAction` que al terminar OK recargan el status **y** los 6 KPI +
@@ -481,8 +499,11 @@ sin justificación documentada.
 - [ ] **T72 — [LEADER] Gate 1**: `security_analyzer` modo `spec` sobre `design` §5, auditado contra la cabecera
   §5.1–§5.10 de `0106` + los W1–W12 de escritura. Output en
   `progress/security_spec_07-campanas-congeladas.md`. **Bloqueante.** Cubre: RCC.9.*.
-  **[1ª pasada: FAIL — 3 HIGH + 6 MEDIUM, 2026-08-07. Arreglos aplicados en los 3 documentos; pendiente
-  re-auditoría.]** Oráculos que cierran los HIGH: **H-1 → T48-α**; **H-2 → T48-β + T48-γ + T17/T16 (FK
+  **[1ª pasada: FAIL — 3 HIGH + 6 MEDIUM. 2ª pasada: **PASS**, con M-1 retirado por el propio informe y 6
+  findings nuevos introducidos por los arreglos (N-1…N-6), todos aplicados. 2026-08-07.]**
+  N-1 → T74 paso 2/4/5 (impersonación acotada al cierre) · N-2 → T20 (los dos loops) · N-3 → T40 + T60
+  (`can_close` con los 3 gates) · N-4 → T48-δ (rótulo de inalcanzable) · N-5 → T48-α(b) sobre las 9 ·
+  N-6 → T48-γ (TR.14h-bis). Oráculos que cierran los HIGH: **H-1 → T48-α**; **H-2 → T48-β + T48-γ + T17/T16 (FK
   compuesta)**; **H-3 → T48-δ + T48-ε**. MEDIUM: T34/T36 (`pg_temp` + crear-o-truncar), T20 (lista blanca +
   barrido), T36-α (piso de años), T40 (`member_name`), T74 (runbook blindado + medición), T55
   (case-insensitive), T51 (guard del `rodeo_id` cruzado). **Una afirmación del informe (M-1: "`rodeo_id` sin
@@ -498,16 +519,21 @@ sin justificación documentada.
   Raf. Runbook blindado de `design` §9.2 (Gate 1 M-6), **en una sola transacción**:
   1. backup (`node scripts/backup-db.mjs`) **y verificarlo**: el archivo existe, pesa > 0 y **contiene filas del
      `establishment_id` que se va a borrar** (RCC.11.9). Un backup que no se abrió no es un backup.
-  2. `begin;` → **`set local role authenticated`** *junto con* `set local request.jwt.claims` (RCC.11.7). Sin el
-     `set local role`, la sesión sigue siendo `service_role`/`postgres`: RLS bypasseada **y** con identidad
-     spoofeada, y todo el re-seed escribe sin red de contención de tenant.
+  2. `begin;` **como `service_role`, SIN impersonar todavía**. ⚠ La impersonación **no** va acá: `authenticated`
+     tiene `select, insert, update` sobre `animal_profiles`/`animals`/`reproductive_events` —**sin `DELETE`**— y
+     solo `select` sobre `animal_category_history`, así que con el `set local role` puesto desde el arranque el
+     primer `delete` aborta con `42501` y la transacción única hace rollback entero. **El alcance corto es a
+     propósito; que nadie lo "uniformice" moviéndolo al inicio.**
   3. **Asserts de aborto ANTES del primer `delete`** (RCC.11.8): cardinalidad 1 del conjunto de
      `establishment_id` alcanzados + conteos dentro de la magnitud esperada (~350 perfiles / ~2.045 eventos). Si
-     algo se desvía, `raise` y `rollback` — no se borra nada.
-  4. borrado acotado a `establishment_id = 'fac00000-face-4000-a000-000000000010'`, cada `delete` con su `where`
+     algo se desvía, `raise` y `rollback` — no se borra nada. **La contención del borrado la dan estos asserts y
+     los `where` explícitos, no la RLS.**
+  4. borrado y sembrado **como `service_role`**, acotados a
+     `establishment_id = 'fac00000-face-4000-a000-000000000010'`, cada `delete` con su `where`
      explícito (sin tocar "Santo Domingo") → re-seed con
-  `entry_date` explícito y `animal_category_history.changed_at` retrodatado → `close_campaign` de la campaña
-  completa **con la identidad del owner** (`set local request.jwt.claims`) → verificación de que los KPI
+  `entry_date` explícito y `animal_category_history.changed_at` retrodatado → **recién acá** `set local role
+  authenticated` + `set local request.jwt.claims` (RCC.11.7, alcance = solo este paso), los dos
+  `close_campaign` de la campaña completa, y `reset role` → verificación de que los KPI
   congelados coinciden con los de la lectura en vivo previa y de que la campaña posterior queda en curso.
   **El cierre del re-seed debe salir con `p_acknowledge_incomplete = false` y el snapshot quedar con
   `closed_incomplete = false`**: si el cierre pide reconocimiento, el seed está mal (la campaña elegida no tiene

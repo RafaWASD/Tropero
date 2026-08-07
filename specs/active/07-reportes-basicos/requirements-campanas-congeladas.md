@@ -246,6 +246,9 @@ detalle y fundamento en `design-campanas-congeladas.md` §0.3):
 - **RCC.7.6** — El sistema deberá proveer una RPC de lectura `rodeo_campaign_status(p_rodeo_id uuid, p_year int)`
   que devuelva si la campaña está cerrada, cuándo y por quién, los `service_months` congelados, si el ciclo de la
   campaña está completo, si hay datos nuevos sin reflejar, y si el invocador puede cerrar y reabrir.
+- **RCC.7.6.a** — El sistema deberá derivar `can_close` de **los tres** guards duros del cierre (rol, fecha de
+  corte ya ocurrida y campaña con al menos una hembra servida), de modo que la pantalla nunca ofrezca cerrar —ni
+  reconocer un cierre incompleto— cuando el cierre va a ser rechazado de todas formas.
 - **RCC.7.7** — El sistema deberá exponer en `rodeo_campaign_status`, además, si la campaña se cerró a medias, el
   descriptor de lo que faltaba al cerrar, y las cantidades vigentes de preñadas sin parir y de crías sin destetar,
   para que la UI pueda enumerar qué falta sin llamar a los KPI.
@@ -285,6 +288,9 @@ detalle y fundamento en `design-campanas-congeladas.md` §0.3):
   abortando la migración si alguna función fuera de la lista blanca quedó ejecutable por `public`, `anon` o
   `authenticated`. La enumeración de la lista blanca deberá ser la **única** en la migración: los `revoke` y el
   smoke-check deberán derivarse de ella.
+- **RCC.9.6.a** — El sistema deberá verificar, con la **misma** enumeración y en el mismo smoke-check, la otra
+  mitad del contrato §5.8: que ninguna de las funciones **públicas** del delta quedó ejecutable por `anon` o
+  `public`. Una función nueva a la que se le olvide el `revoke` deberá abortar la migración.
 - **RCC.9.7** — El sistema deberá declarar el trigger de membresía como `SECURITY DEFINER` con
   `set search_path = public`, siguiendo el molde de `tg_animal_profiles_record_category_change` (`0030`).
 - **RCC.9.8** — El sistema deberá resolver una carrera entre dos cierres concurrentes de la misma campaña sin crear
@@ -347,9 +353,10 @@ detalle y fundamento en `design-campanas-congeladas.md` §0.3):
   campo, y no insertando filas de snapshot a mano.
 - **RCC.11.6** — El re-seed deberá verificarse leyendo `rodeo_campaign_status` de ambas campañas y comprobando que
   los KPI congelados coinciden con los que devolvía la lectura en vivo inmediatamente antes del cierre.
-- **RCC.11.7** — El re-seed deberá impersonar al owner fijando **el rol y los claims juntos** (`set local role
-  authenticated` además de `set local request.jwt.claims`), de modo que la RLS vuelva a aplicar y un error del
-  procedimiento no pueda escribir fuera del campo demo.
+- **RCC.11.7** — El re-seed deberá impersonar al owner fijando el rol y los claims juntos (`set local role
+  authenticated` además de `set local request.jwt.claims`) **únicamente durante el paso de cierre de campañas**,
+  y deberá ejecutar el borrado y el sembrado como `service_role`, porque `authenticated` no tiene privilegio de
+  `delete` sobre las tablas que el re-seed borra.
 - **RCC.11.8** — El re-seed deberá ejecutarse dentro de **una** transacción y deberá abortar antes del primer
   borrado si (a) el conjunto de `establishment_id` alcanzados por los `where` no tiene cardinalidad 1, o (b) los
   conteos de perfiles y eventos se desvían de la magnitud esperada del campo demo.
@@ -395,10 +402,15 @@ detalle y fundamento en `design-campanas-congeladas.md` §0.3):
   snapshot vigente deberá recibir `42501`, y en ningún caso filas del snapshot ni de su detalle.
 - **RCC.13.5.b** — El sistema deberá incluir un test de que la cota de `p_year` sigue devolviendo `22023` **aunque
   exista un snapshot vigente** para ese `(rodeo, año)`, sembrando por `service_role` un snapshot en un año que la
-  cota de las RPC rechaza pero el `CHECK` de la tabla admite.
+  cota de las RPC rechaza pero el `CHECK` de la tabla admite, y deberá ejecutarlo sobre **el mismo conjunto de
+  funciones descubierto** que usa RCC.13.5.a, no sobre una función de ejemplo.
 - **RCC.13.5.c** — El sistema deberá incluir tests de que `close_campaign` y `reopen_campaign` devuelven `42501`
   (a) para un owner cuyo `user_roles.active` es falso, y (b) para un owner de un establecimiento con `deleted_at`
   no nulo; y de que `rodeo_campaign_status` los rechaza igual.
+- **RCC.13.5.c.i** — El sistema deberá documentar, en el propio test, que el caso (b) de RCC.13.5.c **no puede
+  fallar hoy** porque el estado que describe es inalcanzable (los roles se desactivan al borrar el
+  establecimiento y no se pueden reactivar), y que el caso se conserva porque pasa a ser verificador real cuando
+  exista el flujo de restablecimiento de un establecimiento borrado.
 - **RCC.13.5.d** — El sistema deberá incluir un guard de catálogo (no textual) que verifique, leyendo `pg_proc`,
   que `is_owner_or_vet_of` es `security definer`, `stable` y tiene `search_path` fijado; y que las funciones del
   delta tienen la volatilidad que les corresponde (las de lectura `stable`, `close_campaign` y `reopen_campaign`
@@ -414,6 +426,10 @@ detalle y fundamento en `design-campanas-congeladas.md` §0.3):
   `rodeo_campaign_snapshot_animals` —ni siquiera sobre filas de su propio establecimiento—, incluyendo un intento
   de `insert` con el `establishment_id` de otro tenant, y de que las policies de las tres tablas son
   exclusivamente de `select`.
+- **RCC.13.6.b** — El sistema deberá incluir un assert de invariante sobre **toda** fila de
+  `rodeo_campaign_snapshots`: su `establishment_id` deberá ser igual al `establishment_id` del `rodeos` al que
+  apunta su `rodeo_id`. Es el eslabón que la clave foránea compuesta no cubre (esa ata detalle↔cabecera; este
+  ata cabecera↔rodeo).
 - **RCC.13.7** — El sistema deberá incluir tests de la historia de membresía: apertura al insertar, cierre y
   apertura al mover, cierre al dar de baja, invariante de una sola fila vigente, e idempotencia del backfill.
 - **RCC.13.8** — El sistema deberá incluir un test de DL10: tras cerrar, insertar un evento de la campaña no deberá
@@ -453,6 +469,7 @@ detalle y fundamento en `design-campanas-congeladas.md` §0.3):
 | 2026-08-07 | Redacción inicial del delta desde `context-campanas-congeladas.md` (Gate 0 aprobado). | `spec_author` |
 | 2026-08-07 | **F8 / DP-10 reescrito.** El leader objetó que la precondición de cierre original (solo "el servicio terminó") dejaba abierto para el usuario real exactamente el modo de falla que DP-22 identifica para la demo: congelar `%parición`/`%destete` en 0 para siempre. Se agrega `p_acknowledge_incomplete` a `close_campaign` (error imposible por accidente, posible a propósito), el predicado de ciclo completo pasa a tener un único dueño compartido con `rodeo_campaign_status`, y el reconocimiento queda **persistido** en el snapshot. Nuevos: RCC.4.11, RCC.5.7.a–d, RCC.5.10.a, RCC.7.7, RCC.10.7.a/b, RCC.10.11, RCC.13.9.a–c. Modificados: RCC.5.1, RCC.5.7. | Leader (objeción pre-Gate 1) |
 | 2026-08-07 | **Gate 1 FAIL (3 HIGH + 6 MEDIUM) — arreglos aplicados.** Los tres HIGH eran de la misma clase: invariantes sostenidos en prosa, sin oráculo. **H-1** (el cortocircuito agrega 7 salidas tempranas y la suite es estructuralmente ciega a ellas porque todos los IDOR existentes corren con campañas abiertas) → RCC.13.5.a/b/e. **H-2** (la procedencia del `establishment_id` de las 2 tablas de snapshot no estaba fijada y la premisa "no hay escritura del cliente" no se testeaba) → RCC.4.8.a/b + RCC.13.6.a. **H-3** (`is_owner_or_vet_of` sin caso de rol revocado ni de campo borrado) → RCC.13.5.c/d. MEDIUM: RCC.9.2 (`pg_temp`), RCC.9.5/9.6 (lista blanca + barrido), RCC.9.10/9.11 (costo real + piso de años), RCC.9.12 (`member_name`), RCC.5.7.e (año sin campaña), RCC.11.7–11.10 (re-seed blindado), RCC.13.10 (case-insensitive), RCC.13.13. | Gate 1 + leader |
+| 2026-08-07 | **Gate 1 PASS (2ª pasada).** Los 3 HIGH quedaron cerrados con oráculos que saben fallar; M-1 fue **retirado** por el propio informe (la premisa sobre `rodeo_id` era falsa). La re-auditoría trajo **6 findings introducidos por los arreglos**, todos aplicados: **N-1** (el runbook moría en su primer `delete`: `authenticated` no tiene `DELETE` → la impersonación se acota al paso de cierre, RCC.11.7); **N-2** (el barrido excluía la lista blanca por construcción → `close_campaign` nacía `EXECUTE`-able por `PUBLIC`; dos loops sobre la misma enumeración, RCC.9.6.a); **N-3** (`can_close` no reflejaba el gate `serviced = 0` → la UI entrenaba a clickear el reconocimiento de DP-10, RCC.7.6.a); **N-4** (TR.14f(b) es inalcanzable por `0076`: se rotula en vez de borrarse o contarse como cobertura, RCC.13.5.c.i); **N-5** (el oráculo de la cota corre sobre las 9 descubiertas, RCC.13.5.b); **N-6** (el tenant de la cabecera se cierra por test, no por constraint: asimetría declarada, RCC.13.6.b). | Gate 1 (2ª pasada) + leader |
 | 2026-08-07 | **Corrección de una premisa FALSA del informe de Gate 1** (verificada contra el remoto por el leader): M-1 afirmaba que `animal_profiles.rodeo_id` no tiene CHECK ni trigger de mismo-establecimiento. **Sí lo tiene**: `tg_animal_profiles_rodeo_check` (`0021:25-43`) rechaza con `23514` un rodeo de otro establecimiento o inactivo, y `tg_animal_profiles_rodeo_same_system_check` (`0047`) cubre el cruce de sistemas. No se agregó ningún requisito defensivo apoyado en esa premisa; la corrección de §5.6 se escribió con el motivo correcto y citando el trigger. | Leader (verificación en el remoto) |
 | 2026-08-07 | **RCC.10.6 (cierre masivo por campo) confirmado DENTRO del delta** — sale de la tabla de pendientes de `design` §12. Fundamento del leader: DL1 ya lo prometió y es la mitigación directa del riesgo más alto de la feature ("el productor nunca cierra"). DP-11 (N llamadas del cliente, sin RPC de establecimiento) se mantiene. | Leader (decisión) |
 </content>

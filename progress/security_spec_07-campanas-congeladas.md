@@ -466,3 +466,273 @@ verificación del backup.
 
 Ninguna de las decisiones de dominio (D1-D3, DL1-DL10, ①/②) se cuestiona: son input fijo del Gate 0 y este informe no
 las toca.
+
+---
+---
+
+# RE-AUDITORÍA — Gate 1 sobre `1ed7b7b` (fix-loop)
+
+- **Fecha**: 2026-08-07 · **Input**: los 3 documentos del delta en `1ed7b7b` · El informe de arriba **no se toca**:
+  queda como registro de qué se encontró en la primera pasada, incluida la premisa que tuve mal.
+
+## Veredicto: **PASS**
+
+Los **3 HIGH quedaron cerrados con oráculos que saben fallar** — los audité contra el catálogo y contra el
+as-built, no contra la prosa que los describe. No hay findings HIGH nuevos.
+
+Hay **6 MEDIUM**, de los cuales **4 son nuevos e introducidos por los propios arreglos**. Ninguno es un hueco de
+seguridad explotable; el más serio (N-1) hace que el runbook del re-seed **aborte en su primera ejecución real**.
+Los listo con su fix, y **uno de ellos es culpa mía**: N-1 nace de una recomendación que escribí sin verificar
+contra los grants del repo.
+
+## Corrección de M-1 — mi finding tenía una premisa FALSA
+
+**Retiro la premisa.** Verifiqué `supabase/migrations/0021_animal_profiles_validations.sql:25-43`:
+
+```sql
+create trigger animal_profiles_rodeo_check
+  before insert or update on public.animal_profiles
+  for each row execute function public.tg_animal_profiles_rodeo_check();
+```
+
+cuyo cuerpo exige `r.establishment_id = new.establishment_id and r.active = true and r.deleted_at is null` y tira
+`23514`. El par (perfil de A, rodeo de B) **no es alcanzable por ningún camino** — ni de cliente ni de
+`service_role`, porque es un trigger de tabla y no una policy. **El ataque que tracé "hasta el final" no existe.**
+
+**Cómo me equivoqué, para que sirva de algo**: leí `0020` (DDL de la tabla) y `0022` (RLS), vi una FK sin CHECK y
+una policy que solo pide `has_role_in`, y **afirmé una ausencia sin buscarla**. El archivo que la desmiente es
+`0021` — literalmente el que está en el medio de los dos que leí. Un finding de seguridad que afirma "no existe
+control X" exige grep exhaustivo por la tabla, no inferencia desde dos archivos. Es el mismo error de clase que yo
+mismo le marco a las specs: **concluir desde la ausencia de evidencia en vez de buscar evidencia de la ausencia.**
+
+Lo que del M-1 **sí** era correcto y quedó bien aplicado: la justificación de §5.6 estaba mal argumentada. La spec
+ahora dice que el reemplazo de `p.status = 'active'` por el intervalo de membresía es **bidireccional** (no "más
+restrictivo"), que **no es equivalente en el presente** (el perfil `sold` con `exit_date` nulo entra en toda
+campaña pasada), que la seguridad la sostiene §5.5 y no ese filtro, y suma el riesgo declarado en §13 con su cota
+(0 de 21 perfiles en DEV). La nota nueva de §5.A cita el trigger correcto. **Bien cerrado, y con el motivo real.**
+
+## Auditoría de los oráculos, uno por uno
+
+### H-1 — CERRADO. Los dos oráculos saben fallar; el descubrimiento es genuino
+
+**(a) Orden guard → cortocircuito.** Oráculo conductual: se cierra la campaña de A, el owner de **B** invoca cada
+función descubierta sobre el rodeo de **A** y tiene que recibir `42501` **y** `data` vacío. Si el cortocircuito se
+mueve antes del guard, la función **retorna filas sin excepción** → el test se pone rojo. Sabe fallar. Y el doble
+assert (código + vacío) cubre el caso de un driver que se coma el error.
+
+**El descubrimiento es real, no decorativo.** Verifiqué el predicado contra el catálogo:
+`nspname = 'public'` + prefijo `rodeo_` + `pg_get_function_identity_arguments = 'uuid, integer'` +
+`has_function_privilege('authenticated', …)`. Da exactamente **9**: `rodeo_service_campaign`, las 7 de campaña y
+`rodeo_campaign_status`. Verifiqué también las exclusiones y son correctas por construcción, no por suerte:
+`rodeo_sessions_list(uuid)` y `rodeo_weight_by_category(uuid,uuid)` no matchean la firma; las 3 internas
+`rodeo_campaign_tacto/_births/_calves` **sí** matchean nombre y firma pero quedan fuera por el filtro de
+privilegio — y esa es la propiedad buena: **si alguien les otorga `authenticated` por error, entran solas al test
+de tenant en vez de quedar en zona ciega**. El piso `>= 9` impide esquivarlo sacando una función del namespace.
+Una función de campaña nueva entra sola. ✔
+
+**(b) Orden cota → cortocircuito.** El razonamiento es correcto y lo verifiqué: `p_year = 9999999` **no** sirve
+(no habría snapshot y hasta una función mal ordenada caería en la cota). Sembrar `campaign_year = 2400` sí: el
+`CHECK` de la tabla es `between 1900 and 2400` (§2.2) y la cota de las RPC es `1900..current+1`, así que el año
+existe para la tabla y no para la función. Si el cortocircuito está antes de la cota, devuelve la foto sembrada en
+vez de `22023`. Sabe fallar. ✔ (Ver N-5: cubre una sola función.)
+
+**La limitación declarada está bien acotada y es verdadera.** Confirmo el hecho técnico: `pg_depend` **no**
+registra referencias a tablas dentro de un cuerpo `plpgsql` ni dentro de un cuerpo `sql` con `$$` (solo los
+`BEGIN ATOMIC` de PG14+ las registran), así que "esta función lee la tabla de snapshots" no es observable desde el
+catálogo. Pero además —y esto la spec lo dice bien— **observar la referencia no serviría**: el invariante no es
+"la lee" sino "la lee **después** del guard", y eso solo se observa por comportamiento. El oráculo elegido es
+**estrictamente más fuerte** que el que la limitación impide. El borde que queda (una función de campaña futura
+con otra firma o fuera del prefijo `rodeo_`) está declarado sin maquillaje. **Es la decisión correcta.**
+
+### H-2 — CERRADO, y con más de lo que pedí
+
+- **Procedencia fijada** para las dos tablas (RCC.4.8.a): cabecera ← `v_est` del guard; detalle ← **fila padre**,
+  no `animal_profiles`. El fundamento que agregaron (si un día un perfil se moviera de establecimiento in-place,
+  tomarlo del animal haría que una fila del detalle de A pasara a ser legible por B) es correcto.
+- **Desvío de ADR-026 declarado** en §2.3 y en DP-19, con su invariante escrito, en vez de citar ADR-026 como si
+  lo autorizara. Es exactamente lo que pedí.
+- **La FK compuesta hace la discrepancia imposible, y lo verifiqué en serio.** `(snapshot_id, establishment_id) →
+  rodeo_campaign_snapshots(id, establishment_id)` con el `unique (id, establishment_id)` de destino. Las FK se
+  enforcen **para todos los roles**, incluidos `service_role` y el owner de la tabla (a diferencia de la RLS), así
+  que una escritura privilegiada tampoco puede desalinear el tenant. Y el detalle crítico que hace que funcione:
+  **ambas columnas son `not null`** — con `MATCH SIMPLE` (el default), si cualquier columna de la FK fuera NULL la
+  restricción **no se chequearía**; un `establishment_id` nullable la habría desactivado en silencio. Está bien.
+- **TR.14e** cubre las 9 combinaciones (3 tablas × 3 verbos) + el `insert` con `establishment_id` de otro tenant +
+  `pg_policies` con `cmd = 'SELECT'` únicamente. Es el guard del invariante de DP-19 que faltaba. ✔
+- **TR.14h** confirma la FK por comportamiento (`23503`). ✔
+
+### H-3 — CERRADO en su mitad explotable; la otra mitad es inobservable y hay que decirlo (ver N-4)
+
+- **TR.14f(a)** — owner con `user_roles.active = false` → `42501`. Es un oráculo genuino: si el helper se escribe
+  sin `ur.active = true`, el test se pone rojo. **Esta es la mitad que importa** (el ex-miembro revocado que
+  congela campañas del campo del que lo echaron). ✔
+- **TR.14g** — guard de catálogo sobre `pg_proc`: `prosecdef`, `provolatile`, `proconfig`. Cubre lo que pedí sobre
+  volatilidad y `search_path`, y lo hace resolviendo valores en vez de texto. ✔
+- **TR.14f(b)** — owner de un establecimiento con `deleted_at` no nulo → ver **N-4**: el caso es vacuo.
+
+## Findings nuevos (introducidos por los arreglos)
+
+### N-1 · MEDIUM — `set local role authenticated` **rompe el re-seed**: el runbook aborta en el primer `delete`
+
+**Este lo generé yo.** En M-6 pedí `set local role authenticated` junto con los claims, y lo pedí sin verificarlo
+contra los grants del repo. La spec lo aplicó al pie de la letra en RCC.11.7 y en §9.2 paso 2, **para toda la
+transacción**. Verifiqué qué pasa:
+
+```
+grant select, insert, update on public.animal_profiles to authenticated;        -- 0020:77 — SIN delete
+grant select                 on public.animal_category_history to authenticated; -- 0030:60 — solo select
+```
+
+y no existe **ninguna** policy `for delete` en el schema salvo `push_tokens` (`0009:50`). Consecuencias, con la
+impersonación activa desde el paso 2:
+
+- **Paso 3 (borrado)**: cada `delete from animal_profiles where establishment_id = …` muere con
+  `42501 permission denied for table` — no hay grant de DELETE para `authenticated`. Con el requisito de
+  transacción única (RCC.11.8), **el re-seed entero hace rollback en su primera sentencia destructiva**.
+- **Paso 4 (retrodatar `animal_category_history.changed_at`)**: es un UPDATE sobre una tabla con **solo** `select`
+  para `authenticated` → mismo `42501`. Y el propio paso dice "por `service_role`", que es lo contrario de lo que
+  el paso 2 acaba de fijar: **el procedimiento se contradice consigo mismo**.
+
+La buena noticia es que **falla cerrado y ruidoso** (aborta, no borra a medias). La mala es que se descubre en
+T74, con las 4 migraciones ya aplicadas.
+
+**Fix**: la impersonación tiene que estar **acotada al paso que la necesita**, no a la transacción entera. El
+borrado, el seed y el retrodatado corren con el rol privilegiado (su contención son los asserts de magnitud de
+RCC.11.8, que es para lo que están); `set local role authenticated` + los claims se fijan **inmediatamente antes**
+de los dos `close_campaign` del paso 5 —que es el único punto donde hace falta una identidad fiel, porque
+`is_owner_or_vet_of` lee `auth.uid()`— y se vuelve con `reset role` si hace falta seguir. `set local role` se
+puede cambiar más de una vez dentro de la misma transacción, así que el paso 5 sigue entrando en la transacción
+única. **RCC.11.7 hay que reescribirlo con ese alcance.**
+
+### N-2 · MEDIUM — el smoke-check de §6-bis **perdió la mitad `anon`/`public`** del contrato §5.8 de `0106`
+
+La inversión (enumerar lo público, barrer el resto) es correcta y resuelve M-2. Pero el barrido solo pregunta
+*"¿hay una interna ejecutable por alguien?"*. Las funciones de la lista blanca quedan **excluidas del check por
+construcción** (`and not (p.proname = any (v_public))`), así que **nadie verifica que las públicas estén revocadas
+de `public`/`anon`** — que es exactamente la otra mitad de lo que `0105:237-252` hacía y de lo que `0106` §5.8
+exige. Y `close_campaign`/`reopen_campaign` ni siquiera matchean el predicado de prefijo (`campaign\_%` es prefijo,
+no sufijo), así que no los toca por ningún lado.
+
+Importa porque `close_campaign` es una función **nueva**: nace con `EXECUTE` a `PUBLIC` por default de Postgres.
+Si el `revoke` se omite, el barrido no lo ve. (Si se escribe con la firma equivocada, muere con `42883` y aborta
+la migración — eso sí está cubierto por T42.) A nivel suite lo agarra TR.14b, pero eso corre **después** del
+apply.
+
+**Fix**: dos loops sobre la **misma** enumeración, no uno. (1) el barrido por prefijo actual, sobre
+`public, anon, authenticated`; (2) un loop explícito sobre `v_public` que falle si alguna es ejecutable por
+`public` o `anon` — que es el `0105:237-252` tal cual, todavía aplicable. La propiedad "una sola lista" se
+conserva.
+
+### N-3 · MEDIUM — el gate G2 (`serviced = 0`) crea un callejón sin salida en la UI y en el cierre masivo
+
+El gate nuevo es correcto y cierra el multiplicador de M-4. Pero rompe el contrato cliente↔servidor de §5.C. Los
+**tres** gates devuelven `23514`, y §5.C dice que el cliente distingue el reconocible del no reconocible mirando
+`can_close` de `rodeo_campaign_status`. Verifiqué la derivación vigente:
+
+```
+can_close = is_owner_or_vet_of(v_est) and not is_closed and state_as_of <= current_date
+```
+
+Eso refleja **G1**, no **G2**. Un rodeo sin hembras servidas en ese año queda con `can_close = true` y
+`cycle_complete` en falso → la UI lo clasifica como "incompleto, reintentable con reconocimiento", muestra
+"Cerrar igual con estos datos incompletos", el usuario confirma, y el segundo intento **vuelve a fallar con el
+mismo `23514`** porque G2 no es reconocible. En el cierre masivo (dos pasadas, RCC.5.10.a) esos rodeos entran a la
+lista de "incompletos", el usuario los confirma y la segunda pasada falla entera.
+
+No es una fuga, pero es relevante para seguridad por un motivo concreto: **entrena al usuario a clickear el
+reconocimiento de F8**. Ese segundo toque es el control que hace que congelar una campaña a medias sea "imposible
+por accidente" (DP-10); si la UI se lo pone adelante en casos donde nunca va a funcionar, el control se degrada a
+ruido.
+
+**Fix (costo cero)**: sumar `serviced > 0` a `can_close`. El número ya está en la mano: `rodeo_campaign_status` ya
+invoca `rodeo_weaning_kpi` en el camino abierto, y su `returns table` incluye `serviced` — no hace falta una
+ejecución más de `rodeo_serviced_females`. Conviene además exponer el motivo (`close_blocked_reason`) para que la
+UI diga "esta campaña no tiene servicio cargado" en vez de ofrecer un botón que no puede funcionar.
+
+### N-4 · MEDIUM — TR.14f(b) es **vacuo**: `0076` hace que la cláusula `e.deleted_at is null` sea inobservable
+
+Verifiqué `0076_deactivate_roles_on_establishment_soft_delete.sql`: al soft-deletear un establecimiento, un
+trigger pone `active = false` en todos sus `user_roles`; y un segundo guard **impide** crear o activar un rol
+sobre un campo ya borrado. O sea que el estado que TR.14f(b) quiere montar —owner **activo** de un establecimiento
+**borrado**— **no es alcanzable**, ni siquiera por `service_role` (son triggers de tabla).
+
+Consecuencia: TR.14f(b) pasa siempre, y pasaría **igual si `is_owner_or_vet_of` no tuviera el join a
+`establishments`**, porque el rechazo lo produce la cláusula `ur.active` que ya testea TR.14f(a). Y RCC.13.5.d
+—que en mi pedido original comparaba el **cuerpo** contra `is_owner_of`— quedó reducida a `prosecdef` /
+`provolatile` / `proconfig`, que no miran el cuerpo. **La cláusula `e.deleted_at is null` no la cubre ningún
+oráculo.**
+
+Matizo el impacto, que es lo que la baja de HIGH a MEDIUM: dado `0076`, esa cláusula es **genuinamente redundante**
+hoy — su ausencia no es explotable, porque `ur.active` ya cierra el caso. `0105`/`0106` y el propio header de
+`0076` dicen lo mismo ("redundante con la RLS, no cambia comportamiento observable"). El riesgo es diferido: `0076`
+declara explícitamente que **no** reactiva roles en un restore y que un flujo de restore futuro tendrá que
+manejarlo; el día que exista, esta cláusula pasa a ser load-bearing y hoy nadie la sostiene.
+
+**Fix**: (a) re-etiquetar TR.14f(b) por lo que realmente prueba —la cadena de `0076`: soft-delete → rol
+desactivado → `42501`—, que es valiosa como test de integración pero no es un test del helper; y (b) para la
+cláusula en sí, aceptar la **única** observación disponible, que es textual: un assert de que el cuerpo de
+`is_owner_or_vet_of` contiene el join a `establishments` con `deleted_at is null`. La regla de este repo
+("resolver el valor, no el texto") existe porque un guard textual se burla escribiendo el valor de otra forma —
+pero acá **no hay valor que resolver**: el comportamiento está enmascarado por `0076`. Cuando el texto es lo único
+observable, hay que decirlo y usarlo, no fingir cobertura con un test que pasa por otro motivo.
+
+### N-5 · LOW — el oráculo de la cota (H-1b) cubre **una** función, el de tenant cubre las 9
+
+RCC.13.5.e manda el barrido descubierto solo sobre el test de RCC.13.5.**a**; RCC.13.5.b queda como caso único
+(el design ejemplifica con `rodeo_pregnancy_kpi`). Si el orden cota↔cortocircuito sale bien en esa y mal en otra,
+verde.
+
+Lo dejo en LOW y no en MEDIUM porque el impacto real es ~nulo, y verifiqué por qué: para que la inversión importe
+tiene que existir un snapshot con `campaign_year` fuera de `1900..current+1`, y **`close_campaign` no puede
+crearlo** (tiene la misma cota). Solo `service_role` puede sembrarlo, que es lo que hace el propio test. O sea que
+en producción el estado es inalcanzable y el oráculo es un proxy de disciplina, no de exposición. **Fix de una
+línea**: correr también (b) sobre el conjunto descubierto, que ya está calculado ahí al lado.
+
+### N-6 · MEDIUM — el tenant de la **cabecera** no está fijado estructuralmente como el del detalle
+
+La FK compuesta ata detalle↔cabecera. Pero la mitad que **define quién lee** —`rodeo_campaign_snapshots.establishment_id`
+vs. el `establishment_id` del `rodeos` al que apunta `rodeo_id`— sigue sostenida solo por que
+`close_campaign` escriba `v_est`. Es la misma clase de garantía que el fix acaba de demostrar que sabe hacer, un
+nivel más arriba, y es el nivel donde la RLS decide.
+
+No es explotable hoy (ambos valores salen del mismo `select` sobre `rodeos`), por eso MEDIUM y no HIGH.
+**Dos fixes posibles**: (a) simétrico y estructural — `unique (id, establishment_id)` en `rodeos` + FK compuesta
+`(rodeo_id, establishment_id)` desde la cabecera; cuesta tocar una tabla core, que es más blast radius del que el
+delta quería; (b) barato — un assert de invariante en la suite: para **toda** fila de `rodeo_campaign_snapshots`,
+`establishment_id` = el `establishment_id` del rodeo. **Recomiendo (b)**, y que quede escrito en DP-19 que la
+mitad de arriba se sostiene por test y la de abajo por constraint, para que nadie asuma simetría que no hay.
+
+## Los 6 MEDIUM originales
+
+| # | Qué pedí | Estado |
+|---|---|---|
+| **M-1** | Corregir la justificación de §5.6 | **Cerrado** — §5.A reescrita con "bidireccional", el caso `sold`/`exit_date` nulo declarado en §13 con su cota (0 de 21 en DEV), y la premisa falsa mía corregida citando `0021`. |
+| **M-2** | Completar la lista de revokes (5 de 7) | **Cerrado y mejorado** — se invierte a lista blanca + barrido por prefijo (§6-bis, DP-25), que resuelve la clase y no solo las dos que faltaban. El borde (nombre fuera del prefijo) queda declarado. **Ver N-2**: se perdió la mitad `anon`/`public`. |
+| **M-3** | `pg_temp` + doble cierre en una transacción | **Cerrado** — `set search_path = public, pg_temp` en las 2 de escritura, con el motivo y el "que nadie lo uniformice". Verifiqué el crear-o-truncar: `to_regclass('pg_temp._snap_serviced')` + `truncate`/`insert` calificados, sin SQL dinámico (§5.10 intacto), y `create temp table` crea en el temp schema independientemente del `search_path`. Correcto. |
+| **M-4** | Cota de costo real + piso de años | **Cerrado** — W8 declara `≈ 12 × N_cabezas` con la cadena de invocaciones explícita, el costo extra de `rodeo_campaign_status` en el camino abierto, la medición pendiente en T74 y la salida si sale caro. El gate G2 elimina el multiplicador de ~126 años. **Ver N-3** por el efecto colateral de G2. |
+| **M-5** | `member_name` en vez de `users.name` | **Cerrado** — verifiqué que `user_roles.member_name` existe (`0080`) y que su trigger la fuerza desde `users.name` (anti-spoof). Bien elegido además que el join **no** filtre `active`: el autor de un cierre tiene que seguir resolviendo aunque después deje el campo, que es lo correcto para un rastro de auditoría. |
+| **M-6** | Blindar el runbook del §9 | **Cerrado en 3 de 4** — backup verificado, asserts de magnitud + cardinalidad 1, transacción única, `sub` resuelto en el momento en vez de transcripto. **El cuarto punto (el rol) quedó mal por culpa de mi recomendación: ver N-1.** |
+
+## Tabla de inputs — sin cambios
+
+El fix-loop no agregó ningún campo tipeado. `p_acknowledge_incomplete` sigue sin poder hacer nada más que saltear
+G3: los tres gates están ahora en una tabla explícita (§4.2-bis) donde se ve que G1 y G2 no son reconocibles.
+
+## Tabla de rate limits — un cambio, a favor
+
+`close_campaign` sigue sin rate limit (ninguna RPC de PostgREST lo tiene), pero el gate G2 le saca el
+multiplicador: la cota de snapshots materializables por rodeo pasa de "~126 años" a "los años en que el rodeo
+realmente sirvió". Sigue pendiente la medición de T74 para saber si el `≈12×` importa en una campaña de 350
+cabezas. El resto de la tabla no cambia.
+
+## Qué queda para el leader
+
+**Antes del apply (`T73`)**: N-2 (recuperar la mitad `anon`/`public` del smoke-check) — es dentro de la migración.
+
+**Antes del re-seed (`T74`)**: **N-1**, sí o sí, o el runbook aborta en su primer `delete`.
+
+**Antes de la Puerta 2**: N-3 (`can_close` con `serviced > 0`) y N-4 (re-etiquetar TR.14f(b) + el assert textual
+justificado). N-5 y N-6 son de una línea cada uno y pueden ir con el resto.
+
+Ninguno bloquea el veredicto: el contrato §5.1–§5.10 de `0106` se preserva, los tres HIGH tienen oráculos que
+saben fallar, y las decisiones de dominio del Gate 0 siguen sin tocarse.
