@@ -1,6 +1,6 @@
 # Spec 07 — Delta CAMPAÑAS CONGELADAS: los reportes cerrados son una foto — Tasks
 
-**Status**: `spec_ready` · Delta **Nivel B (ADR-028)** sobre spec 07 (`done`, y **sigue** `done`) ·
+**Status**: `approved` — **Puerta 1 APROBADA por Raf (2026-08-07)**, con DP-22 resuelto (campaña cerrada del demo = **2024**, 2025 en curso) · Delta **Nivel B (ADR-028)** sobre spec 07 (`done`, y **sigue** `done`) ·
 **CON BACKEND** · **Gate 1 OBLIGATORIO** · **Gate 2.5 OBLIGATORIO** ·
 **Deploy NO autorizado todavía** — las 4 migraciones (`0127`–`0130`) las aplica el **leader** por Supabase MCP
 tras Gate 1 (PASS) + reviewer (APPROVED) + Gate 2 (PASS) + Gate 2.5 (capturas OK) + **OK explícito de Raf**.

@@ -1,6 +1,6 @@
 # Spec 07 — Delta CAMPAÑAS CONGELADAS: los reportes cerrados son una foto — Requirements (EARS)
 
-**Status**: `spec_ready` · Delta **Nivel B (ADR-028)** sobre spec 07 (`done` — el delta **no** cambia su estado) ·
+**Status**: `approved` — **Puerta 1 APROBADA por Raf (2026-08-07)**, con DP-22 resuelto (campaña cerrada del demo = **2024**, 2025 en curso) · Delta **Nivel B (ADR-028)** sobre spec 07 (`done` — el delta **no** cambia su estado) ·
 **CON BACKEND** (3 tablas nuevas + 3 RPC nuevas + 3 set-functions internas + 3 helpers + reescritura de 7 funciones
 de lectura) · **Gate 1 OBLIGATORIO** · **Gate 2.5 OBLIGATORIO** (ADR-029).
 **Deploy**: **NO autorizado todavía** — toca DB. Lo pide el leader en sesión antes de aplicar.

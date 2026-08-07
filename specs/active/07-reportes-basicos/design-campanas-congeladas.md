@@ -1242,7 +1242,7 @@ No lo hace el implementer (es escritura sobre la DB de DEV compartida).
 **Objetivo**: `establishment_id = fac00000-face-4000-a000-000000000010` con una campaña cerrada y correcta y una
 campaña en curso, en los dos rodeos (`Servicio Invierno {6,7,8}`, `Servicio Primavera {10,11,12}`).
 
-### §9.1 — El año de la campaña cerrada **no puede ser 2025** — [VALIDAR CON RAF]
+### §9.1 — El año de la campaña cerrada es **2024** — ✅ RESUELTO POR RAF (Puerta 1, 2026-08-07)
 
 D2 / ADR-032 §4.2 dicen "su campaña **2025** ya cerrada y correcta". La aritmética del ciclo lo impide (hoy es
 **2026-08-07**):
@@ -1449,7 +1449,7 @@ Puerta 2. Tras correr el capture: revertir `design/**` si el build re-renderizó
 | **DP-33** *(Gate 1 N-6)* | La garantía del tenant es **asimétrica y se declara**: detalle↔cabecera por constraint (FK compuesta), cabecera↔rodeo por test (RCC.13.6.b). | Cerrar el eslabón de arriba con el mismo mecanismo exigiría `unique (id, establishment_id)` + FK compuesta sobre `rodeos`, una tabla core, por un invariante que hoy no tiene camino de violación (los dos valores salen del mismo `select`). Más blast radius del que el delta quiere. Se declara para que nadie asuma una simetría que no hay. | RCC.13.6.b |
 | **DP-20** | `transfer_animal` **no** re-apunta la membresía (a diferencia de lo que hace con `animal_category_history`). | Re-apuntarla movería la historia de rodeo al campo destino: F4 a escala de establecimiento. | RCC.1.13 |
 | **DP-21** | Migraciones `0127`–`0130` en cuatro archivos, en el orden de §6. | La tabla de historia y su backfill tienen que existir antes del cómputo; el cómputo histórico antes del cierre. | §6 |
-| **DP-22** | Re-seed: campaña **2024** cerrada y **2025** en curso, no 2025 cerrada. **[VALIDAR CON RAF]** | §9.1: una campaña 2025 no puede tener su destete cargado antes de ~oct-2026. | RCC.11.4 |
+| **DP-22** ✅ **RATIFICADA POR RAF (Puerta 1, 2026-08-07)** | Re-seed: campaña **2024** cerrada y **2025** en curso, no 2025 cerrada. | §9.1: una campaña 2025 no puede tener su destete cargado antes de ~oct-2026. | RCC.11.4 |
 | **DP-23** | El contrafactual del test de inmutabilidad usa un tacto **dentro** de la ventana, no las tres mutaciones de estado. | §8.1: con el cómputo histórico arreglado, esas tres tampoco mueven una campaña abierta. | RCC.13.2, RCC.13.3 |
 
 ### Pendientes marcados
@@ -1460,7 +1460,7 @@ Puerta 2. Tras correr el capture: revertir `design/**` si el build re-renderizó
 | **[VALIDAR CON FACUNDO]** | DP-14: acotar el aborto a la ventana de la campaña. | RCC.3.4 |
 | **[VALIDAR CON FACUNDO]** | DP-15: los 18 meses de "ciclo completo por vencimiento". | RCC.7.6 |
 | **[VALIDAR CON FACUNDO]** | F7 / DP-8: que `entoradas == servidas` sea aceptable como estado transitorio hasta que se redefina *entoradas*. | RCC.2.12 |
-| **[VALIDAR CON RAF]** | DP-22: campaña cerrada de la demo = 2024, no 2025. **Es la única pregunta abierta para la Puerta 1.** | §9.1 |
+| ~~[VALIDAR CON RAF]~~ ✅ | DP-22: campaña cerrada de la demo = 2024, no 2025. **RESUELTO** en la Puerta 1 (2026-08-07): Raf eligió 2024 cerrada + 2025 en curso. **No quedan preguntas abiertas para Raf en esta spec.** | §9.1 |
 
 > **Resuelto por el leader (2026-08-07, ya no es pendiente)**: el **cierre masivo por campo (RCC.10.6) entra en
 > este delta**. DL1 ya lo prometió y es la mitigación directa del riesgo #5 de §13 ("el productor nunca cierra"),
