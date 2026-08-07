@@ -17,6 +17,34 @@ No es un sustituto de `feature_list.json` ni de los ADRs — es la antesala dond
 
 ## Ítems pendientes
 
+## 2026-08-07 — El "último tacto" no está acotado a la campaña, así que reescribe el pasado
+
+**Origen**: lo encontró el `spec_author` del delta `ficha-categoria-tacto` al verificar si un tacto **sin
+jornada** aparece en los reportes. La respuesta a eso fue **sí** (ninguna de las funciones de reporte
+referencia `session_id`) — pero el camino para verificarlo destapó esto, que es **preexistente** y **no** lo
+introduce ese delta.
+
+**Qué**: los KPIs reproductivos (`rodeo_pregnancy_kpi`, `rodeo_ccl_distribution`, y las de parición) toman
+**el último tacto vigente del animal**, sin acotarlo a la campaña consultada. El parámetro `p_year`
+selecciona el **denominador** (las hembras servidas de esa campaña), no el tacto.
+
+**Por qué importa**: un tacto cargado hoy **cambia los KPIs de campañas anteriores**. Si en marzo un animal
+dio preñado y hoy se le carga un tacto vacío, el reporte de la campaña de marzo pasa a mostrarlo vacío —
+retroactivamente y sin que nadie lo pida. Los números que el productor vio ayer no son los que va a ver
+mañana, y no hay nada que se lo diga.
+
+**Ya pasa hoy con los tactos de manga**: no es una consecuencia de permitir tactos desde la ficha. Lo que sí
+hace el delta es **abaratar** el gesto que lo dispara (un tacto suelto, sin armar jornada), así que la
+frecuencia con la que ocurra va a subir.
+
+**Por qué no se resolvió ahí**: acotar el tacto a la campaña es una decisión de **dominio**, no de código —
+¿cuál es la ventana correcta para "el tacto de esta campaña"? ¿la fecha del tacto contra los meses de
+servicio del rodeo? Es una pregunta para Facundo antes que para nosotros.
+
+**Próximo paso sugerido**: llevarlo a `CONTEXT/07-pendientes.md` junto con los mínimos etarios, y decidir la
+ventana con él. Mientras tanto, **los reportes históricos son mutables y nadie lo sabe** — eso solo ya
+justifica anotarlo.
+
 ## 2026-08-06 — El avatar de la home ocupa el lugar de "tu cuenta" y no lleva a ningún lado
 
 **Origen**: Raf preguntó qué función cumple el avatar, al discutir dónde poner el indicador del bastón.
