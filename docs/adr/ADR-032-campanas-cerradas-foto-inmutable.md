@@ -64,6 +64,11 @@ Probe 2 (mismo método) cerró dos puntos que el primero dejó abiertos:
 | F2 | el estado se lee del `status` **actual** | `0105:122` | **sí** — `animal_profiles.exit_date`: **21/21** perfiles no-activos de DEV lo tienen poblado, y la RPC `exit_animal_profile` (0044) lo exige como parámetro sin default |
 | F3 | la categoría se lee de la **actual** | `0105:121,127-144` | **sí** — `animal_category_history` (0030), con `from_category_id`/`to_category_id`/`changed_at` |
 | F4 | la membresía de rodeo se lee de la **actual** | `0105:119` | **NO EXISTE.** `moveAnimalToRodeo` (`app/src/services/animals.ts:1683`) es un UPDATE plano de `rodeo_id`, sin evento ni fila de historia |
+| F5 | `n_months`/`is_configured` salen de `service_months`, que es **mutable** | `rodeo_service_campaign` (0105) | **no hace falta historia**: se congelan en el snapshot (§1.3) |
+| F6 | el fallback por edad de vaquillonas compara contra **`current_date`** | `0105:141` | **no hace falta historia**: se evalúa contra la fecha de corte |
+
+*(F5 y F6 las encontró el `spec_author` al diseñar sobre el as-built; no estaban en el diagnóstico original.
+Son las dos más chicas y las dos se tapan sin datos nuevos.)*
 
 F4 es la peor de las cuatro porque **el rodeo es la llave de partición de todo reporte**: no hay un solo KPI
 que no esté parametrizado por `p_rodeo_id`.
@@ -74,12 +79,24 @@ trigger `audit_i_u_d`, y está sobre `user_roles`. Aunque cubriera `animal_profi
 
 ### 1.3 Superficie afectada
 
-Las **6 RPC** parametrizadas por `p_year`: `rodeo_serviced_females` y `rodeo_repro_denominator` (0105) —
-que son el denominador común— más `rodeo_pregnancy_kpi`, `rodeo_calving_kpi` (re-creada por `0117`),
-`rodeo_ccl_distribution`, `rodeo_calving_by_stage` (0106) y `rodeo_weaning_kpi` (`0118`, **no estaba en el
-inventario original del handoff**). Las 4 RPC sin `p_year` (`session_event_summary`, `rodeo_sessions_list`,
-`rodeo_weight_by_category`, `establishment_overdue_doses`, `establishment_unweighed`) trabajan sobre el
-presente por diseño y quedan fuera del alcance.
+En el remoto hay **8** funciones que reciben `p_year` (verificado en `pg_proc`). **Siete** necesitan cómputo
+histórico: `rodeo_serviced_females` y `rodeo_repro_denominator` (0105) —que son el denominador común— más
+`rodeo_pregnancy_kpi`, `rodeo_calving_kpi` (re-creada por `0117`), `rodeo_ccl_distribution`,
+`rodeo_calving_by_stage` (0106) y `rodeo_weaning_kpi` (`0118`, **no estaba en el inventario original del
+handoff**).
+
+La octava, `rodeo_service_campaign` (0105), **no** se reescribe: no resuelve estado de animales, solo deriva
+la ventana desde `service_months`. Pero es por donde entra una **quinta fuga**: `service_months` es mutable,
+así que editar la estación después de cerrar cambiaría `n_months`/`is_configured` de una campaña cerrada (y
+con eso el número de barras del CCL). Se tapa **congelando esos valores en el snapshot**, no tocando la
+función.
+
+*(Corrección: la primera versión de este ADR decía "6 RPC" y enumeraba 7. La cuenta correcta es 8 con
+`p_year`, 7 a reescribir — lo levantó el `spec_author` y se verificó contra `pg_proc`.)*
+
+Las 5 RPC sin `p_year` (`session_event_summary`, `rodeo_sessions_list`, `rodeo_weight_by_category`,
+`establishment_overdue_doses`, `establishment_unweighed`) trabajan sobre el presente por diseño y quedan
+fuera del alcance.
 
 UI: `app/app/(tabs)/reportes.tsx` (`YearStepper`, `useRodeoKpis`, `defaultCampaignYear`).
 
