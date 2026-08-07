@@ -84,3 +84,6 @@ Esto preserva el razonamiento histórico: cualquiera puede leer el ADR viejo y e
 | 027 | Invariante de layout: centrado robusto ante decoraciones (slots simétricos) | Accepted |
 | 028 | Documentación SDD de cambios sobre features `done`: in-place vs delta-spec | Accepted |
 | 029 | Gate de verificación E2E + visual (post-Gate 2, pre-Puerta 2): capturas nombradas, bloqueante | Accepted |
+| 030 | Watched queries (`db.onChange` / `useQuery`) para reactividad | Accepted |
+| 031 | Liveness de la conexión de sync (reconexión NetInfo+AppState + teardown de socket zombie) | Accepted |
+| 032 | Las campañas cerradas son una foto inmutable (snapshot al cierre + estado histórico del animal) | Accepted |

@@ -17,6 +17,28 @@ No es un sustituto de `feature_list.json` ni de los ADRs — es la antesala dond
 
 ## Ítems pendientes
 
+## 2026-08-07 — 🟠 «Entoradas = servidas − retiradas» nunca resta nada en cría por servicio natural
+
+**Origen**: sesión de reproducción del defecto de campañas congeladas (ADR-032). Salió de costado y **es un
+problema distinto**: acá el número está mal **hoy**, no solo en el pasado. Por eso no entra en esa spec.
+
+**Qué**: `rodeo_repro_denominator` (`0105:207-210`) cuenta las retiradas *sobre el conjunto servidas*, pero la
+rama de servicio natural de `rodeo_serviced_females` ya filtra `status='active'` (`0105:122`) → la vaca que
+salió del padrón **nunca entra al conjunto**, así que **nunca puede contarse como retirada**. Medido en DEV:
+se vende un vientre, `serviced` baja de 1 a 0 y `retired` se queda en **0**.
+
+El comentario que justifica el diseño (`0105:187-189`) solo es cierto para la rama de **IA**, que no filtra
+status. En un rodeo de cría con servicio natural puro —el caso del MVP— `entoradas == servidas` siempre.
+
+**Por qué importa**: el "denominador explícito" (convención Bavera, Gate 0 §7) se muestra en la UI como el
+número que le da transparencia al KPI. Hoy exhibe una resta que estructuralmente no puede dar distinto de
+cero, así que comunica una precisión que no tiene.
+
+**Próximo paso**: se resuelve solo si el rediseño de ADR-032 mantiene el concepto de "retiradas" — al pasar a
+estado histórico por fecha, "retirada durante la campaña" pasa a ser computable de verdad (`exit_date` dentro
+de la ventana). Evaluarlo al escribir la delta-spec; si el concepto se cae, borrar la columna en vez de
+arreglarla.
+
 ## 2026-08-07 — 🔴 Los reportes de campañas pasadas se recalculan solos, y tienen que ser una FOTO
 
 **Estado**: **decisión de producto tomada por Raf el 2026-08-07** — *"los reportes de años anteriores son una
@@ -51,32 +73,40 @@ entero en cuanto arranca la campaña siguiente.
 **Y nada se lo dice al productor**: el reporte que imprimió el año pasado y el que abre hoy difieren, sin
 explicación a la vista.
 
-### Lo que se puede y lo que no (esto decide el diseño)
+### ✅ CERRADO POR **ADR-032** (2026-08-07)
 
-- **`animal_category_history` EXISTE** (0030), con fecha y motivo. ✅
-- **NO existe historia de membresía de rodeo.** El propio código lo documenta en `0105:89-90`: *"El historial
-  de membresía por fecha NO se modela en MVP (no hay tabla de historia de `rodeo_id`; transferencia = UPDATE
-  in-place, spec 11)"*. ❌
-- **No existe ningún concepto de "cerrar campaña"** en el árbol. ❌
+**Reproducido en la DB de DEV**, no solo leído: el reporte 2025 de un rodeo pasó de `3 servidas / 3 preñadas`
+(100 %) a `1 servida / 0 preñadas` (0 %) con tres acciones normales de un campo de cría — un tacto de 2026,
+una venta y una transferencia de rodeo. Evidencia completa en
+`progress/repro_reportes-campanas-congeladas.md`.
 
-**Conclusión dura**: hacia adelante se puede congelar. **Hacia atrás, no del todo**: para los animales que ya
-cambiaron de rodeo o se vendieron, el dato de dónde estaban se perdió. Se puede congelar *el número que la
-consulta devuelve hoy* —al menos deja de moverse— pero ese número ya está contaminado por el estado actual.
-No es la foto de lo que pasó: es la foto de lo que la app cree hoy que pasó.
+**Lo que la reproducción corrigió o agregó respecto de este diagnóstico:**
 
-### Arruga a resolver con Facundo
+- **El año es decorativo, no solo impreciso.** Pedir el KPI de **2020** —un año sin un solo evento cargado—
+  devuelve **exactamente el mismo reporte que 2025**. Para servicio natural puro no hay campañas: hay una
+  foto de hoy replicada en todos los años.
+- **La RPC afectada nº 5 faltaba en el inventario**: `rodeo_weaning_kpi` (`0118`), además de las 4 listadas.
+- **Un cambio de categoría no siempre mueve el número** (una vaquillona puede quedar rescatada por el
+  fallback por edad de `0105:136-142`), pero **cuando lo mueve, borra la campaña entera**: un
+  `tacto_vaquillona='no_apta'` fechado en 2026 deja la campaña 2025 en `serviced: 0`.
+- **Sí hay con qué reconstruir 3 de las 4 fugas**: la fecha del tacto (`event_date`, ya está), la baja
+  (`exit_date`, poblado 21/21 en DEV y exigido por la RPC `exit_animal_profile`) y la categoría
+  (`animal_category_history`). La que **no** tiene historia es la **membresía de rodeo**, que es justo la
+  llave de partición de todo reporte.
+- **El audit de spec 18 no sirve**: verificado en DEV, tiene un solo trigger y está sobre `user_roles`
+  (y retención de 90 días).
+- **No hay pasado que salvar**: la única campaña pasada con datos reales está en "La Facundina", el campo
+  demo. Ningún cliente productivo tiene histórico.
+- **La fecha propuesta para el freeze (1/1) es imposible**: la campaña 2025 sigue generando hechos hasta
+  fines de 2026 (partos a los 9 meses, destetes a los ~15-17), y los tres se imputan a la campaña 2025.
+  Congelar el 1/1/2026 dejaría %parición y %destete en 0 para siempre.
 
-**La campaña no es el año calendario.** El rodeo tiene `service_months` y el código maneja explícitamente el
-wrap de fin de año. "Cuándo se cierra 2025" depende del rodeo, no del almanaque.
+**Decisiones de Raf (2026-08-07), en el ADR**: cierre **manual por rodeo** con aviso de la app · **re-seedear
+La Facundina** en vez de congelar un número contaminado · **tapar las cuatro fugas, incluida la historia de
+membresía de rodeo** (tabla nueva).
 
-### Preguntas abiertas para Raf
-
-1. ¿El cierre lo dispara el productor o es automático?
-2. Las campañas ya pasadas: ¿congelamos el número actual (imperfecto pero estable) o quedan marcadas como no
-   confiables hasta que haya un cierre real?
-
-**Próximo paso**: ADR (cómo el producto trata la historia — toca modelo de datos y es la base de los
-benchmarks, uno de los tres pilares) + spec de cierre de campaña.
+**Próximo paso**: delta-spec sobre `specs/active/07-reportes-basicos/` (feature `done` → ADR-028), con
+**Gate 1** (toca DB).
 
 ## 2026-08-06 — El avatar de la home ocupa el lugar de "tu cuenta" y no lleva a ningún lado
 

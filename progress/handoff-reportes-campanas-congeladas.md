@@ -1,5 +1,28 @@
 # HANDOFF — Los reportes de campañas pasadas se recalculan solos, y tienen que ser una foto
 
+> ## ✅ CONSUMIDO (2026-08-07)
+>
+> Este handoff se tomó y se cerró. **No arranques desde acá**: arrancá desde
+> [`docs/adr/ADR-032-campanas-cerradas-foto-inmutable.md`](../docs/adr/ADR-032-campanas-cerradas-foto-inmutable.md)
+> (la decisión) y desde [`repro_reportes-campanas-congeladas.md`](repro_reportes-campanas-congeladas.md)
+> (la evidencia empírica).
+>
+> El paso 1 de la §7 se cumplió: **el defecto está reproducido en la DB de DEV**, y salió más ancho que
+> este documento. Las 3 preguntas de la §5 **están respondidas por Raf**. Lo que queda es la delta-spec.
+>
+> **Lo que este documento dice y la reproducción corrigió** — leelo con estas correcciones puestas:
+> - la §6 lista 9 RPC: son **10**. Falta `rodeo_weaning_kpi` (`0118`), que tiene el mismo defecto.
+> - la §2 dice que el año "no acota" el denominador natural. Es más fuerte: **el año es decorativo** — el
+>   KPI de un año sin ningún evento devuelve el mismo número que el año con datos.
+> - la §3 concluye que hacia atrás "no se puede reconstruir". Se puede **3 de 4**: fecha del tacto,
+>   `exit_date` (21/21 poblado) y `animal_category_history`. La que falta es la membresía de rodeo.
+> - la §3 marca la historia de `status` como NO VERIFICADA: **verificada**. No hay tabla de historia y el
+>   audit de spec 18 cubre solo `user_roles` con 90 días de retención, pero `exit_date` la sustituye.
+> - la §5 pregunta 3 sobre el fin de campaña con `service_months`: el problema real es peor y es
+>   independiente del wrap — **una campaña sigue generando hechos hasta ~17 meses después del servicio**,
+>   así que ninguna fecha del almanaque sirve como disparador.
+> - la §9 pregunta cuántas campañas contaminadas hay: **una sola**, en La Facundina (el campo demo).
+
 > **Para quién**: la terminal que tome el tema de reportes/campañas. **Autosuficiente**: no hace falta la
 > conversación donde salió. Todo lo verificado está con `archivo:línea`; todo lo no verificado está marcado.
 > **Escrito**: 2026-08-07, en una sesión saturada de Bluetooth y QA, a pedido de Raf, para sacarlo de ahí.
