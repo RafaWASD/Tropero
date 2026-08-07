@@ -17,6 +17,30 @@ No es un sustituto de `feature_list.json` ni de los ADRs — es la antesala dond
 
 ## Ítems pendientes
 
+## 2026-08-06 — El avatar de la home ocupa el lugar de "tu cuenta" y no lleva a ningún lado
+
+**Origen**: Raf preguntó qué función cumple el avatar, al discutir dónde poner el indicador del bastón.
+
+**Qué**: `app/(tabs)/index.tsx:147-161` es un **`View`**, no un `Pressable`. Sin `onPress`, sin
+`accessibilityRole`, sin navegación. El comentario del propio código lo dice: *"Avatar (placeholder: círculo
+bone con ícono de usuario)"*.
+
+**Por qué importa**: está en la esquina superior derecha, que es **la convención universal de "tu cuenta"**.
+Un usuario que lo toca esperando su perfil no recibe nada — ni siquiera un feedback de que no es tocable.
+Hoy el perfil vive en el tab "Más". No es un bug (nada se rompe), es una afordancia falsa: ocupa el lugar de
+una acción esperada sin cumplirla.
+
+**Decisión pendiente, de producto**: ¿lleva a "Más"? ¿muestra la foto/iniciales del usuario y lleva al
+perfil? ¿o se saca y se libera la esquina? Las tres son defendibles; la que no lo es, es la de hoy.
+
+**Dato colateral útil**: al medir dónde poner el indicador del bastón se encontró que la esquina superior
+derecha está ocupada por la acción secundaria en **6 pantallas** — pero **5 tienen controles tocables reales**
+(el ⋮ y "Saltear" de toda la manga, la ✕ de `/maniobra`, "+ Crear campo" de mis-campos, la selección de
+`lote/[id]`) y **solo la home tiene un adorno**. Si alguna vez hace falta esa esquina para algo funcional, la
+home es la única que la puede ceder sin perder nada.
+
+**Próximo paso sugerido**: decidir al retomar frontend (`design/FRONTEND-STATUS.md`, ADR-023). No bloquea nada.
+
 ## 2026-08-06 — El sexo es el único dato del alta que no se puede corregir nunca
 
 **Origen**: Gate 0 de «forzar categoría desde la ficha». Raf preguntó si tenía sentido poder cambiar el sexo
