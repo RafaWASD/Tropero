@@ -17,33 +17,66 @@ No es un sustituto de `feature_list.json` ni de los ADRs — es la antesala dond
 
 ## Ítems pendientes
 
-## 2026-08-07 — El "último tacto" no está acotado a la campaña, así que reescribe el pasado
+## 2026-08-07 — 🔴 Los reportes de campañas pasadas se recalculan solos, y tienen que ser una FOTO
 
-**Origen**: lo encontró el `spec_author` del delta `ficha-categoria-tacto` al verificar si un tacto **sin
-jornada** aparece en los reportes. La respuesta a eso fue **sí** (ninguna de las funciones de reporte
-referencia `session_id`) — pero el camino para verificarlo destapó esto, que es **preexistente** y **no** lo
-introduce ese delta.
+**Estado**: **decisión de producto tomada por Raf el 2026-08-07** — *"los reportes de años anteriores son una
+foto de lo que pasó cuando se cerró la campaña. No debería cambiar ningún reporte de 2025 luego de finalizar
+2025 (…) es muy importante que quede bien guardado todo para benchmarkings y comparativas año a año"*.
+Con eso, esto **deja de ser una simplificación defendible de MVP y pasa a ser un defecto**. Va a **ADR**, no
+se resuelve con un parche.
 
-**Qué**: los KPIs reproductivos (`rodeo_pregnancy_kpi`, `rodeo_ccl_distribution`, y las de parición) toman
-**el último tacto vigente del animal**, sin acotarlo a la campaña consultada. El parámetro `p_year`
-selecciona el **denominador** (las hembras servidas de esa campaña), no el tacto.
+**Origen**: lo destapó el `spec_author` del delta `ficha-categoria-tacto` verificando si un tacto sin jornada
+aparece en los reportes (aparece). El leader leyó después el SQL completo y el problema resultó **más ancho**
+de lo primero reportado.
 
-**Por qué importa**: un tacto cargado hoy **cambia los KPIs de campañas anteriores**. Si en marzo un animal
-dio preñado y hoy se le carga un tacto vacío, el reporte de la campaña de marzo pasa a mostrarlo vacío —
-retroactivamente y sin que nadie lo pida. Los números que el productor vio ayer no son los que va a ver
-mañana, y no hay nada que se lo diga.
+### Qué pasa, leído en el SQL (`0105_repro_denominator.sql`, `0106_reports_rpcs.sql`)
 
-**Ya pasa hoy con los tactos de manga**: no es una consecuencia de permitir tactos desde la ficha. Lo que sí
-hace el delta es **abaratar** el gesto que lo dispara (un tacto suelto, sin armar jornada), así que la
-frecuencia con la que ocurra va a subir.
+**El numerador** de `rodeo_pregnancy_kpi` toma el **último tacto del animal en toda su historia** — el join a
+`reproductive_events` **no tiene ningún filtro por fecha**. Un tacto de 2026 reescribe el %preñez de 2025.
 
-**Por qué no se resolvió ahí**: acotar el tacto a la campaña es una decisión de **dominio**, no de código —
-¿cuál es la ventana correcta para "el tacto de esta campaña"? ¿la fecha del tacto contra los meses de
-servicio del rodeo? Es una pregunta para Facundo antes que para nosotros.
+**El denominador** es peor: `rodeo_serviced_females(p_rodeo_id, p_year)` tiene dos ramas y **solo una usa el
+año**:
+- `ai_females` (inseminación) **sí** acota: `extract(year from rv.event_date) = p_year`.
+- `eligible_natural` (servicio natural) **no usa `p_year` en ningún lado**. Filtra por el rodeo **actual** del
+  animal, su `status='active'` **actual**, su categoría **actual**, y para vaquillonas por el **último**
+  `tacto_vaquillona` sin límite de fecha, o por la edad contra `current_date`.
 
-**Próximo paso sugerido**: llevarlo a `CONTEXT/07-pendientes.md` junto con los mínimos etarios, y decidir la
-ventana con él. Mientras tanto, **los reportes históricos son mutables y nadie lo sabe** — eso solo ya
-justifica anotarlo.
+O sea: *"las servidas de 2025"* no es *quiénes se sirvieron en 2025*, es **quiénes serían elegibles hoy**.
+
+**Consecuencias concretas**: vender una vaca la saca del denominador de **todas** las campañas pasadas ·
+moverla de rodeo se lleva su historia al rodeo nuevo y se la quita al viejo · un tacto nuevo reclasifica
+campañas viejas. En cría, donde casi toda vaca se sirve todos los años, esto reescribe el histórico casi
+entero en cuanto arranca la campaña siguiente.
+
+**Y nada se lo dice al productor**: el reporte que imprimió el año pasado y el que abre hoy difieren, sin
+explicación a la vista.
+
+### Lo que se puede y lo que no (esto decide el diseño)
+
+- **`animal_category_history` EXISTE** (0030), con fecha y motivo. ✅
+- **NO existe historia de membresía de rodeo.** El propio código lo documenta en `0105:89-90`: *"El historial
+  de membresía por fecha NO se modela en MVP (no hay tabla de historia de `rodeo_id`; transferencia = UPDATE
+  in-place, spec 11)"*. ❌
+- **No existe ningún concepto de "cerrar campaña"** en el árbol. ❌
+
+**Conclusión dura**: hacia adelante se puede congelar. **Hacia atrás, no del todo**: para los animales que ya
+cambiaron de rodeo o se vendieron, el dato de dónde estaban se perdió. Se puede congelar *el número que la
+consulta devuelve hoy* —al menos deja de moverse— pero ese número ya está contaminado por el estado actual.
+No es la foto de lo que pasó: es la foto de lo que la app cree hoy que pasó.
+
+### Arruga a resolver con Facundo
+
+**La campaña no es el año calendario.** El rodeo tiene `service_months` y el código maneja explícitamente el
+wrap de fin de año. "Cuándo se cierra 2025" depende del rodeo, no del almanaque.
+
+### Preguntas abiertas para Raf
+
+1. ¿El cierre lo dispara el productor o es automático?
+2. Las campañas ya pasadas: ¿congelamos el número actual (imperfecto pero estable) o quedan marcadas como no
+   confiables hasta que haya un cierre real?
+
+**Próximo paso**: ADR (cómo el producto trata la historia — toca modelo de datos y es la base de los
+benchmarks, uno de los tres pilares) + spec de cierre de campaña.
 
 ## 2026-08-06 — El avatar de la home ocupa el lugar de "tu cuenta" y no lleva a ningún lado
 
