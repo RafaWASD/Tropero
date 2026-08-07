@@ -17,6 +17,37 @@ No es un sustituto de `feature_list.json` ni de los ADRs — es la antesala dond
 
 ## Ítems pendientes
 
+## 2026-08-06 — El sexo es el único dato del alta que no se puede corregir nunca
+
+**Origen**: Gate 0 de «forzar categoría desde la ficha». Raf preguntó si tenía sentido poder cambiar el sexo
+desde la ficha y pidió analizarlo; decidió dejarlo **fuera de esa tanda** y decidirlo con el QA a la vista.
+
+**Los dos datos que contestan su pregunta** (verificados, no supuestos):
+- **El EID NO codifica sexo.** FDX-B ISO 11784/11785 son 15 dígitos: 3 de prefijo (país/fabricante) + 12 de
+  identificación nacional (`src/utils/eid-format.ts:6`). No hay nada reservado a sexo.
+- **No existe ninguna forma de cambiar el sexo hoy.** Se setea solo en el alta (`crear-animal.tsx:182,808`,
+  paso 2) y en la ficha únicamente se **lee** (`animal/[id].tsx:465`, para gatear "castrado").
+
+**Qué**: el sexo es el **único** atributo del alta sin reparación. Raza, lote, categoría, castrado, caravana
+visual y caravana electrónica se editan todos desde la ficha. El sexo no. Un misclick en el paso 2 deja al
+animal mal **para siempre**, o hay que borrarlo y recrearlo perdiendo su historia.
+
+**Por qué importa más de lo que parece**: el propio razonamiento de Raf lo confirma en vez de descartarlo —
+*"si querías cargar un macho y misclickeaste, te vas a dar cuenta cuando elijas «vaquillona»"*. Exacto: **te
+das cuenta y no podés hacer nada**. Descubrible e irreparable es la peor combinación.
+
+**Por qué NO alcanza con "un toggle con doble confirmación"** (la idea inicial): el sexo arrastra estado
+derivado —sistema de categorías, elegibilidad reproductiva, circunferencia escrotal, partos—. Cambiárselo a
+un animal **con historia** produce registros incoherentes: una hembra con `scrotal_measurements`.
+
+**Propuesta**: editable **solo mientras el animal no tenga historia que dependa del sexo** (sin
+`reproductive_events`, sin `scrotal_measurements`, sin partos registrados). Cubre el caso real —el misclick,
+que se descubre minutos después del alta— sin habilitar incoherencias. Con historia, la ficha lo dice con
+honestidad en vez de ofrecer un botón que va a romper cosas. La condición es consultable con los mismos reads
+que ya alimentan la ficha.
+
+**Próximo paso sugerido**: decidir junto con los hallazgos del QA de maniobras (`progress/qa_maniobras-device.md`).
+
 ## 2026-08-06 — `WEB_TONES` y los .wav nativos se espejan por comentario, no por guard
 
 **Origen**: verificación del leader de la unidad de feedback sensorial, mirando si los assets viajaban en el
