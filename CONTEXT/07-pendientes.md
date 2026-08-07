@@ -179,3 +179,23 @@ Mecanismos a explorar (post-MVP):
 - Estrategia de marketing y go-to-market
 - Modelo de soporte (chat, email, presencial en CABA/Chascomús)
 - Integraciones con otros sistemas (cabaña genética, frigoríficos, financieras)
+
+## Mínimos etarios de las categorías reproductivas (2026-08-06)
+
+**Contexto**: se agregó "forzar la categoría a mano desde la ficha" (delta `ficha-categoria-tacto` de spec
+02). Cuando la categoría elegida es **incoherente con la edad** del animal, la app avisa y pide confirmar —
+no bloquea.
+
+**La pregunta**: ¿a partir de qué edad tiene sentido cada categoría reproductiva? Hoy el único piso que el
+modelo asserta es el corte de **365 días**, así que fijar **"Multípara"** en una hembra de 14 meses **no
+dispara ningún aviso**, y probablemente debería.
+
+**Por qué es de Facundo y no nuestra**: inventar mínimos etarios sería meter reglas de dominio veterinario
+por conveniencia de UI. Preferimos no avisar antes que avisar mal — un aviso falso enseña a ignorar los
+avisos.
+
+**Qué necesitamos, concretamente**: edad mínima razonable para vaquillona, multípara, "2º servicio" y
+"preñada", y si esos mínimos cambian por raza o por sistema (cría vs. invernada).
+
+**Impacto si no se contesta**: la confirmación por incoherencia de edad queda funcionando solo para el
+corte de 365 días. No bloquea la feature.
