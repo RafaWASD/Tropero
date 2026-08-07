@@ -18,13 +18,24 @@ import {
   type CategoryCatalogEntry,
 } from './animal-category.ts';
 import { birthYearToDate } from './animal-birth-year.ts';
+import { todayIsoLocal } from './today-iso.ts';
 
 // Fecha fija para determinismo.
-const TODAY = new Date(Date.UTC(2026, 5, 1)); // 2026-06-01
+//
+// ⚠️ EL ANCLA ES UN INSTANTE **LOCAL**, y eso importa (fix-loop 2026-08-07). `today` es, en TODOS los call
+// sites de producción, un instante real (`new Date()`, o el `now` de `crear-animal.tsx`), y el día
+// calendario que decide la edad es el **LOCAL** del dispositivo — no el UTC. Escribir el ancla como
+// `new Date(Date.UTC(2026, 5, 1))` era ambiguo: en Argentina (UTC−3) ese instante es *el 31 de mayo a las
+// 21:00*, así que el test decía "hoy es el 1 de junio" y en realidad estaba fijando el 31 de mayo. Se pasa a
+// componentes LOCALES al MEDIODÍA: "hoy es el 1 de junio" sin lugar a dudas y sin bordes de huso.
+const TODAY = new Date(2026, 5, 1, 12, 0, 0); // 2026-06-01, 12:00 LOCAL
 
+/** La fecha calendario LOCAL de `n` días antes de TODAY (el constructor normaliza el desborde de día). */
 function isoDaysAgo(n: number): string {
-  const d = new Date(TODAY.getTime() - n * 24 * 60 * 60 * 1000);
-  return d.toISOString().slice(0, 10);
+  const d = new Date(TODAY.getFullYear(), TODAY.getMonth(), TODAY.getDate() - n, 12, 0, 0);
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${mm}-${dd}`;
 }
 
 // ─── computeInitialCategoryCode (RT2.20) ──────────────────────────────────────────────────
@@ -73,6 +84,63 @@ test('RT2.20 borde de 1 año: exactamente 365 días NO es cría (≥ 1 año)', (
   assert.equal(computeInitialCategoryCode('female', isoDaysAgo(364), TODAY), 'ternera');
   assert.equal(computeInitialCategoryCode('male', isoDaysAgo(365), TODAY), 'torito');
   assert.equal(computeInitialCategoryCode('male', isoDaysAgo(364), TODAY), 'ternero');
+});
+
+// ─── 🔴 BUG VIVO — el ancla de "hoy" era el día UTC (fix-loop del QA de maniobras, 2026-08-07) ──────
+//
+// `startOfDay` tomaba `getUTCFullYear/Month/Date` de un INSTANTE real. En Argentina (UTC−3), de 21:00 a
+// 23:59 el día UTC ya es el siguiente ⇒ el ancla se corría +1 y **todo animal figuraba un día más viejo**.
+// Es el mismo 🔴 A.2 (derivar un día calendario en UTC) escrito con getters en vez de con `toISOString()`.
+// No es cosmético: el corte de 365 días decide ternera/vaquillona y ternero/torito, y esa categoría
+// alimenta el denominador reproductivo de los reportes (0105, rama `eligible_natural`).
+//
+// Los tres tests de abajo FALLAN con el código viejo. El instante está elegido para que el día LOCAL y el
+// UTC difieran: 22:54 en AR = 01:54 UTC del día siguiente (la hora exacta que midió el QA en el A07).
+
+/** 6-ago-2026 22:54 hora de Argentina. En UTC eso ya es el 7-ago. */
+const NOCHE_AR = new Date(Date.parse('2026-08-07T01:54:00.000Z'));
+
+test('🔴 vivo: a las 22:54 (AR) un animal de 364 días sigue siendo cría, no se le suma un día', () => {
+  // Nació el 2025-08-07. Al 2026-08-06 tiene 364 días (cría); al 2026-08-07 tendría 365 (adulto).
+  // Con el ancla en UTC el animal cruzaba el corte tres horas antes de tiempo, todos los días.
+  if (NOCHE_AR.getTimezoneOffset() <= 0) {
+    // Un runner al este de UTC (o en UTC) no puede exhibir la divergencia: se declara en vez de mentir.
+    assert.ok(true, 'runner sin desfasaje hacia el oeste — caso no ejercitado acá');
+    return;
+  }
+  assert.equal(computeInitialCategoryCode('female', '2025-08-07', NOCHE_AR), 'ternera');
+  assert.equal(computeInitialCategoryCode('male', '2025-08-07', NOCHE_AR), 'ternero');
+  // Y el día siguiente sí cruza (el corte existe, no lo desactivamos).
+  const MANANA_AR = new Date(Date.parse('2026-08-08T01:54:00.000Z')); // 7-ago 22:54 AR
+  assert.equal(computeInitialCategoryCode('female', '2025-08-07', MANANA_AR), 'vaquillona');
+});
+
+test('🔴 vivo: el ancla es el día LOCAL — el mismo día calendario da la MISMA edad a cualquier hora', () => {
+  // Un animal no puede cambiar de categoría por el paso de las horas dentro del MISMO día del operario.
+  const manana = new Date(2026, 7, 6, 9, 0, 0); // 6-ago 09:00 local
+  const noche = new Date(2026, 7, 6, 22, 54, 0); // 6-ago 22:54 local — el instante del bug
+  for (const born of ['2025-08-07', '2025-08-06', '2024-08-06']) {
+    assert.equal(
+      computeInitialCategoryCode('female', born, manana),
+      computeInitialCategoryCode('female', born, noche),
+      `nacida el ${born}: la categoría no puede depender de la hora del día`,
+    );
+  }
+});
+
+test('🔴 vivo: la imputación year-only del alta usa el día LOCAL (la ventana no se adelanta un día)', () => {
+  // `imputeBirthDateForCategory` acota el cruce a "no futuro" con el MISMO ancla, así que el ancla corrido
+  // le agranda la ventana un día y le mueve el midpoint. Instante elegido MIDIENDO (no razonando): con el
+  // ancla local da 2026-01-01 y con el ancla UTC da 2026-01-02.
+  const local0102_2254 = new Date(2026, 0, 2, 22, 54, 0);
+  if (local0102_2254.getTimezoneOffset() <= 0) {
+    assert.ok(true, 'runner sin desfasaje hacia el oeste — caso no ejercitado acá');
+    return;
+  }
+  const yearMid = birthYearToDate(2026, local0102_2254) as string;
+  const res = imputeBirthDateForCategory('ternera', 'female', yearMid, local0102_2254);
+  assert.equal(res, '2026-01-01', 'la fecha imputada se queda dentro del día del operario');
+  assert.ok(res <= todayIsoLocal(local0102_2254), 'y nunca pasa del día local');
 });
 
 test('RT2.20 fecha inválida/futura se trata como desconocida (default por sexo)', () => {
@@ -194,22 +262,24 @@ test('B: recría coincidente sigue override=false con la firma de opciones', () 
 // imputeBirthDateForCategory (delta override-imputacion-categoria) — imputación year-only CONSCIENTE de
 // la categoría elegida. El corazón del fix: la fecha imputada es category-consistent → categoryOverrideFor
 // da override=FALSE (auto-avanza sin flip); si la categoría es imposible para el año → fallback midpoint
-// ciego → override=TRUE (pin). today INYECTADO (2026-07-05 UTC), determinista.
+// ciego → override=TRUE (pin). today INYECTADO (2026-07-05 LOCAL), determinista.
 // ══════════════════════════════════════════════════════════════════════════════════════════════
 
-const TODAY_IMPUTE = new Date(Date.UTC(2026, 6, 5)); // 2026-07-05 UTC
+const TODAY_IMPUTE = new Date(2026, 6, 5, 12, 0, 0); // 2026-07-05, 12:00 LOCAL (ver la nota de TODAY)
 
 /** El midpoint CIEGO que validateBirthDate pasa como yearOnlyIso (solo el año es load-bearing). */
 function yearMid(year: number): string {
   return birthYearToDate(year, TODAY_IMPUTE) as string;
 }
 
-/** Invariantes propios del contrato: ISO válido, DENTRO del año pedido, NUNCA futuro (≤ today UTC). */
+/** Invariantes propios del contrato: ISO válido, DENTRO del año pedido, NUNCA futuro (≤ el día LOCAL de today). */
 function assertImputeInvariants(res: string, year: number, today: Date): void {
   assert.match(res, /^\d{4}-\d{2}-\d{2}$/, `${res} debe ser ISO YYYY-MM-DD`);
   assert.equal(res.slice(0, 4), String(year), `${res} debe caer en el año ${year}`);
-  const todayIsoUtc = today.toISOString().slice(0, 10);
-  assert.ok(res <= todayIsoUtc, `${res} no puede ser futuro (> ${todayIsoUtc})`);
+  // El techo es el día calendario LOCAL de `today` (el mismo que usa `startOfLocalDay`), no el UTC:
+  // con el UTC, un ancla de tarde-noche en AR dejaba pasar como "no futuro" una fecha de MAÑANA.
+  const hoyLocal = todayIsoLocal(today);
+  assert.ok(res <= hoyLocal, `${res} no puede ser futuro (> ${hoyLocal})`);
 }
 
 // ─── Casos age-derivables: la fecha imputada es category-consistent ⟺ override=false (el corazón) ──
@@ -300,7 +370,7 @@ test('impute invariantes: nunca futuro + dentro del año + ISO válido (matriz d
 
 // ─── Límite propio: today = 2026-01-01, año en curso 2026 (borde del año) ──────────────────────────
 test('impute límite: today=2026-01-01 — ternero año 2026 consistente (nacido hoy), torito imposible → pin', () => {
-  const jan1 = new Date(Date.UTC(2026, 0, 1));
+  const jan1 = new Date(2026, 0, 1, 12, 0, 0); // 2026-01-01, 12:00 LOCAL
   const yearMidJan = birthYearToDate(2026, jan1) as string; // clamp a 2026-01-01 (07-01 sería futuro)
   const ternRes = imputeBirthDateForCategory('ternero', 'male', yearMidJan, jan1);
   assert.equal(ternRes, '2026-01-01'); // único día posible del cruce (nacido hoy)

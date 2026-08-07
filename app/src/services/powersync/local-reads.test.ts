@@ -943,21 +943,119 @@ test('buildSearchByIdvQuery: exacto por idv, active, limit 20, UNION overlay', (
 test('buildSearchLikeQuery: LIKE %term% local con ESCAPE, sobre la columna whitelisteada, UNION overlay', () => {
   const q = buildSearchLikeQuery('est-1', 'idv', 'R12');
   // el SQL contiene ESCAPE '\' (un solo backslash); en regex un backslash literal es \\
-  assert.match(q.sql, /AND ap\.idv LIKE \? ESCAPE '\\'/);
-  assert.match(q.sql, /AND pap\.idv LIKE \? ESCAPE '\\'/);
+  assert.match(q.sql, /AND REPLACE\(REPLACE\(REPLACE\(REPLACE\(ap\.idv, '-', ''\), ' ', ''\), '\.', ''\), '\/', ''\) LIKE \? ESCAPE '\\'/);
+  assert.match(q.sql, /AND REPLACE\(REPLACE\(REPLACE\(REPLACE\(pap\.idv, '-', ''\), ' ', ''\), '\.', ''\), '\/', ''\) LIKE \? ESCAPE '\\'/);
   assert.match(q.sql, /LIMIT 20/);
   assert.deepEqual(q.args, ['est-1', 'active', '%R12%', 'est-1', 'active', '%R12%']);
 });
 
-test('buildSearchLikeQuery: degradación fuzzy → tag y idv también van por LIKE (UNION overlay)', () => {
+// 🔴 A.1 (QA en device 2026-08-06): el término del buscador viaja COMPACTO y el idv guardado conserva el
+// separador (`PERF-00500`) → todo fragmento que CRUZA el guion no matcheaba nada y la app ofrecía "Dar de
+// alta" sobre un animal que existe (= duplicado). La columna `idv` se compara COMPACTADA.
+test('A.1 buildSearchLikeQuery: sobre `idv` compacta LA COLUMNA (los dos lados sin separadores)', () => {
+  const idv = buildSearchLikeQuery('est-1', 'idv', 'PERF005');
+  // Los 4 separadores de `STRUCTURED_SEPARATORS` (espacio, guion, punto, barra), en las DOS ramas.
+  for (const alias of ['ap', 'pap']) {
+    const m = new RegExp(`REPLACE\\(REPLACE\\(REPLACE\\(REPLACE\\(${alias}\\.idv, '-', ''\\), ' ', ''\\), '\\.', ''\\), '/', ''\\) LIKE \\?`);
+    assert.match(idv.sql, m, `la rama ${alias} tiene que comparar la columna compactada`);
+  }
+  assert.deepEqual(idv.args, ['est-1', 'active', '%PERF005%', 'est-1', 'active', '%PERF005%']);
+  // Y el patrón sigue escapado + acotado (no se perdió nada al envolver la columna).
+  assert.match(idv.sql, /LIKE \? ESCAPE '\\'/);
+  assert.match(idv.sql, /LIMIT 20/);
+});
+
+test('A.1 buildSearchLikeQuery: sobre `animal_tag_electronic` NO compacta (15 díg puros, sería un scan al pedo)', () => {
   const tag = buildSearchLikeQuery('est-1', 'animal_tag_electronic', '0320');
   assert.match(tag.sql, /ap\.animal_tag_electronic LIKE \?/);
   assert.match(tag.sql, /pap\.animal_tag_electronic LIKE \?/);
+  assert.doesNotMatch(tag.sql, /REPLACE\(/, 'la caravana electrónica guardada no tiene separadores');
   assert.deepEqual(tag.args, ['est-1', 'active', '%0320%', 'est-1', 'active', '%0320%']);
-  const idv = buildSearchLikeQuery('est-1', 'idv', '0320');
-  assert.match(idv.sql, /ap\.idv LIKE \?/);
-  assert.match(idv.sql, /pap\.idv LIKE \?/);
-  assert.deepEqual(idv.args, ['est-1', 'active', '%0320%', 'est-1', 'active', '%0320%']);
+});
+
+/**
+ * SQLite en memoria con el esquema MÍNIMO que necesita `buildSearchUnion` (las 9 tablas que toca la query
+ * real, con las columnas que proyecta). Sembra `animal_profiles` con los idv dados.
+ */
+function seedSearchDb(rows: { id: string; idv: string; establishmentId?: string }[]): DatabaseSync {
+  const db = new DatabaseSync(':memory:');
+  db.exec(
+    'CREATE TABLE animal_profiles (id TEXT, animal_id TEXT, idv TEXT, category_id TEXT, rodeo_id TEXT,' +
+      ' status TEXT, management_group_id TEXT, animal_tag_electronic TEXT, animal_sex TEXT,' +
+      ' category_override INTEGER, animal_birth_date TEXT, is_castrated INTEGER, future_bull INTEGER,' +
+      ' is_cut INTEGER, establishment_id TEXT, deleted_at TEXT, created_at TEXT);' +
+      'CREATE TABLE pending_animal_profiles (id TEXT, animal_id TEXT, idv TEXT, category_id TEXT,' +
+      ' rodeo_id TEXT, status TEXT, management_group_id TEXT, animal_tag_electronic TEXT, animal_sex TEXT,' +
+      ' category_override INTEGER, animal_birth_date TEXT, establishment_id TEXT, created_at TEXT);' +
+      'CREATE TABLE pending_status_overrides (target_table TEXT, target_id TEXT, effect TEXT);' +
+      'CREATE TABLE rodeos (id TEXT, system_id TEXT, name TEXT);' +
+      'CREATE TABLE categories_by_system (id TEXT, code TEXT, name TEXT);' +
+      'CREATE TABLE custom_attributes (animal_profile_id TEXT, field_definition_id TEXT, value TEXT);' +
+      'CREATE TABLE field_definitions (id TEXT, data_key TEXT, establishment_id TEXT);' +
+      'CREATE TABLE rodeo_data_config (rodeo_id TEXT, field_definition_id TEXT, enabled INTEGER);' +
+      'CREATE TABLE pending_rodeo_data_config (rodeo_id TEXT, field_definition_id TEXT, enabled INTEGER);' +
+      "INSERT INTO rodeos VALUES ('rod-1','sys-1','Rodeo general');" +
+      "INSERT INTO categories_by_system VALUES ('cat-1','vaquillona','Vaquillona');",
+  );
+  const ins = db.prepare(
+    'INSERT INTO animal_profiles (id, idv, category_id, rodeo_id, status, establishment_id, deleted_at)' +
+      " VALUES (?,?,'cat-1','rod-1','active',?,NULL)",
+  );
+  for (const r of rows) ins.run(r.id, r.idv, r.establishmentId ?? 'est-1');
+  return db;
+}
+
+/** Ejecuta un `LocalQuery` del repo tal cual (SQL + args) y devuelve las filas como objetos planos. */
+function runQuery(db: DatabaseSync, q: { sql: string; args: unknown[] }): { id: string; idv: string }[] {
+  const raw = db.prepare(q.sql).all(...(q.args as string[])) as { id: string; idv: string }[];
+  return raw.map((r) => ({ id: r.id, idv: r.idv })).sort((a, b) => a.id.localeCompare(b.id));
+}
+
+// Oráculo de COMPORTAMIENTO: se EJECUTA el SQL que genera el repo contra un SQLite REAL (`node:sqlite`),
+// sembrado con los valores del bug.
+//
+// ⚠️ Por qué no alcanza un espejo en JS (era la versión anterior de este test, y el reviewer tenía razón):
+// un espejo escrito a mano es una SEGUNDA implementación de lo mismo, así que si el `REPLACE` real quedara
+// con los argumentos invertidos o con un separador de menos, el espejo seguiría verde. Ejecutar el SQL
+// verdadero es la única forma de que el test hable del predicado que corre en el teléfono.
+test('A.1 el predicado compactado ENCUENTRA lo que el bug no encontraba (SQL REAL sobre node:sqlite)', () => {
+  const db = seedSearchDb([
+    { id: 'p-guion', idv: 'PERF-00500' },
+    { id: 'p-otro', idv: 'PERF-00501' },
+    { id: 'p-ajeno', idv: 'OTRO-123' },
+  ]);
+  try {
+    // Las 10 filas del barrido del QA en el A07 — las 6 que daban "Animal nuevo" y las 2 que ya andaban.
+    // El término viaja COMPACTO (es lo que `classifySearchQuery` entrega en `plan.compact`).
+    for (const typed of ['PERF-0', 'PERF-005', 'PERF-0050', 'PERF-00500', 'perf-00500', 'F-005', 'PERF', '00500']) {
+      const compact = typed.replace(/[\s\-./]/g, '');
+      const ids = runQuery(db, buildSearchLikeQuery('est-1', 'idv', compact)).map((r) => r.id);
+      assert.ok(ids.includes('p-guion'), `tipear «${typed}» tiene que encontrar el idv PERF-00500 (dio ${ids})`);
+    }
+    // Y NO se volvió comodín: el idv completo de OTRO animal no lo trae.
+    assert.deepEqual(
+      runQuery(db, buildSearchLikeQuery('est-1', 'idv', 'PERF00500')).map((r) => r.id),
+      ['p-guion'],
+      'el término completo trae SOLO al que corresponde',
+    );
+    assert.deepEqual(runQuery(db, buildSearchLikeQuery('est-1', 'idv', 'NADA')).map((r) => r.id), []);
+    // Scope de tenant: un homónimo de OTRO campo nunca sale (el filtro sigue en las dos ramas del UNION).
+    const db2 = seedSearchDb([
+      { id: 'p-mio', idv: 'PERF-00500' },
+      { id: 'p-vecino', idv: 'PERF-00500', establishmentId: 'est-2' },
+    ]);
+    try {
+      assert.deepEqual(
+        runQuery(db2, buildSearchLikeQuery('est-1', 'idv', 'PERF00500')).map((r) => r.id),
+        ['p-mio'],
+        'cero fuga cross-tenant',
+      );
+    } finally {
+      db2.close();
+    }
+  } finally {
+    db.close();
+  }
 });
 
 // ─── delta IDU: canal de búsqueda por APODO (IDU.4.4) ───────────────────────────────────────

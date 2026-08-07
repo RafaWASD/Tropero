@@ -21,6 +21,7 @@ import { Select } from './Select';
 import { buttonA11y } from '../utils/a11y';
 import { maskDateInput } from '../utils/animal-input';
 import { validateEventDate } from '../utils/event-input';
+import { todayIsoLocal } from '../utils/today-iso';
 import {
   TREATMENT_ROUTE_OPTIONS,
   treatmentKindLabel,
@@ -48,13 +49,6 @@ export type TreatmentApplicationSheetProps = {
   onSubmit: (submit: TreatmentApplicationSubmit) => Promise<{ ok: boolean; error?: string }>;
 };
 
-function todayIso(): string {
-  const d = new Date();
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${d.getFullYear()}-${mm}-${dd}`;
-}
-
 export function TreatmentApplicationSheet({ treatment, onClose, onSubmit }: TreatmentApplicationSheetProps) {
   // ABRIR EL SHEET BAJA EL TECLADO (bug 🔴 device Android): se abre desde la ficha del animal, que tiene
   // campos de texto. Además del lift, esto tapa el LÍMITE del montaje del `KeyboardAvoidingShell` de abajo
@@ -68,7 +62,7 @@ export function TreatmentApplicationSheet({ treatment, onClose, onSubmit }: Trea
   // Delta con el teclado CERRADO: **web 32 (idéntico) · iOS 32 → 34 · Android gestos 32 → 48 · Android 3
   // botones 32 → 64**, fijado por test en `utils/footer-action.test.ts`.
   const bottomPad = useKeyboardAwareBottomInset({ floor: getTokenValue('$6', 'space') });
-  const [appDate, setAppDate] = useState(todayIso());
+  const [appDate, setAppDate] = useState(todayIsoLocal());
   const [dose, setDose] = useState('');
   const [route, setRoute] = useState<string | null>(null);
   const [nextDose, setNextDose] = useState('');

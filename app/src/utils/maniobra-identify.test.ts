@@ -185,3 +185,46 @@ test('IDU.4.10: precargado BLE → tag; manual (numérico o alfanumérico) → i
     { idv: 'ROJO-12' },
   );
 });
+
+// ─── 🔴 A.1 — el EFECTO COLATERAL de buscar la caravana "como está impresa" ──────────────────
+//
+// Al hacer que `PERF-00500` encuentre al animal guardado como `PERF-00500`, un campo donde COEXISTAN
+// `PERF-00500` y `PERF00500` (hoy son dos animales DISTINTOS: el índice único de `idv` los admite) puede
+// devolver los DOS para un mismo término. Estos tests fijan qué pasa en ese caso — que era la pregunta
+// abierta del pliego, y la respuesta tiene que estar escrita en un test, no en un comentario.
+
+test('A.1 colateral: si coexisten `PERF-00500` y `PERF00500`, NO se funden — se desambigua', () => {
+  const out = resolveManualIdentify(
+    [
+      { profileId: 'p-con-guion', idv: 'PERF-00500', apodo: null },
+      { profileId: 'p-sin-guion', idv: 'PERF00500', apodo: null },
+    ],
+    'PERF-00500',
+  );
+  assert.equal(out.kind, 'ambiguous', 'dos candidatos → estado SEGURO, sin auto-elegir');
+  assert.deepEqual(
+    out.kind === 'ambiguous' ? out.candidateProfileIds : null,
+    ['p-con-guion', 'p-sin-guion'],
+    'los dos van al picker: el operario ve las dos caravanas y elige',
+  );
+  // Y las dos caravanas viajan al picker, que es lo que las hace distinguibles en pantalla.
+  assert.deepEqual(
+    out.kind === 'ambiguous' ? out.candidates.map((c) => c.idv) : null,
+    ['PERF-00500', 'PERF00500'],
+  );
+});
+
+test('A.1: con UN solo animal, tipear la caravana como está impresa AUTO-AVANZA (camino rápido intacto)', () => {
+  const out = resolveManualIdentify([{ profileId: 'p1', idv: 'PERF-00500', apodo: null }], 'PERF-00500');
+  assert.equal(out.kind, 'found', 'match exacto literal → carga rápida sin desambiguar');
+  assert.equal(out.kind === 'found' ? out.animal.profileId : null, 'p1');
+});
+
+test('A.1: tipear SIN el separador sobre un idv que SÍ lo tiene → confirmación, nunca auto-avance', () => {
+  // El canal substring (columna compactada) igual lo encuentra, pero el texto tecleado NO es el idv
+  // guardado ⇒ `isExactMatch` es false ⇒ el operario CONFIRMA en el picker. Es la política correcta:
+  // nunca se carga sobre una caravana que el operario no tecleó exacta.
+  const out = resolveManualIdentify([{ profileId: 'p1', idv: 'PERF-00500', apodo: null }], 'PERF00500');
+  assert.equal(out.kind, 'ambiguous');
+  assert.deepEqual(out.kind === 'ambiguous' ? out.candidateProfileIds : null, ['p1']);
+});

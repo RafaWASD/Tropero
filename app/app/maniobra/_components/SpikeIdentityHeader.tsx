@@ -35,6 +35,7 @@ import { getTokenValue, Text, View, XStack, YStack } from 'tamagui';
 import { MoreVertical, SkipForward } from 'lucide-react-native';
 
 import { buttonA11y } from '@/utils/a11y';
+import { useStickStatusSurface } from '@/hooks/useStickStatusSurface';
 
 export type SpikeIdentityHeaderProps = {
   /** Identidad dominante ya resuelta por el caller (delta IDU: idv → tag) — la verificación #1 (grande, R12.4). */
@@ -133,6 +134,16 @@ export function SpikeIdentityHeader({
   skipStepLabel,
   onSkipAnimal,
 }: SpikeIdentityHeaderProps) {
+  // ── ESTE HEADER SE QUEDA CON LA BANDA DEL CHROME (2026-08-06) ────────────────────────────────────
+  // El indicador global del bastón (RMV3.5) flota DEBAJO de la fila del header, a la derecha. Acá ese
+  // lugar ya es de esta pantalla: el pill "Saltear ‹maniobra›" y el "⋮" viven en la esquina de la fila
+  // (a propósito, por Fitts) y el chip de progreso "Animal N" cae JUSTO en la banda de abajo — medido
+  // @412: chip en x=[317,393] y=[91,112], el indicador iría a x=[354,394] y=[66,106]. Superpuestos.
+  // Por eso esta pantalla RECLAMA el lugar y el chrome se calla mientras está enfocada. No se pierde
+  // información: la pantalla que importa para el bastón (`maniobra/identificar`) muestra el estado en
+  // su propio chip, y acá el animal ya está identificado.
+  useStickStatusSurface('screen-band');
+
   // ¿Hay alguna afordancia de skip? (per-paso o animal-entero) → el chip de progreso baja a la línea 3.
   const hasSkip = onSkipStep != null || onSkipAnimal != null;
   return (

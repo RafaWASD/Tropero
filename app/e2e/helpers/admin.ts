@@ -34,6 +34,20 @@ export const E2E_NAMESPACE = 'rafaq-e2e.test';
 export const RUN_TAG = `e2e_${Date.now()}_${randomUUID().slice(0, 8)}`;
 export const TEST_PASSWORD = 'E2ePassword!Aa1';
 
+/**
+ * `AAAA-MM-DD` del día LOCAL. Espeja `app/src/utils/today-iso.ts` (la fuente única de la app) — no se
+ * importa porque `e2e/` corre fuera del bundle del cliente, pero la regla es la misma.
+ *
+ * ⚠️ Antes esto era `new Date().toISOString().slice(0, 10)` (UTC) en los dos seeders de eventos
+ * reproductivos: en una corrida NOCTURNA (después de las 21:00 AR) sembraban con la fecha de MAÑANA, y
+ * los tests asertan contra esos datos. Misma clase que el 🔴 A.2, en el helper que fabrica la evidencia.
+ */
+export function todayLocalIso(now: Date = new Date()): string {
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  const dd = String(now.getDate()).padStart(2, '0');
+  return `${now.getFullYear()}-${mm}-${dd}`;
+}
+
 function makeClient(key: string): SupabaseClient {
   return createClientRaw(supabaseUrl, key, {
     auth: { autoRefreshToken: false, persistSession: false },
@@ -971,7 +985,7 @@ export async function seedReproductiveServiceEvent(
     animal_profile_id: profileId,
     event_type: 'service',
     service_type: opts.serviceType ?? 'natural',
-    event_date: opts.eventDate ?? new Date().toISOString().slice(0, 10),
+    event_date: opts.eventDate ?? todayLocalIso(),
     notes: opts.notes ?? null,
   });
   if (error) throw new Error(`seedReproductiveServiceEvent: ${error.message}`);
@@ -997,7 +1011,7 @@ export async function seedReproductiveTactoEvent(
     animal_profile_id: profileId,
     event_type: 'tacto',
     pregnancy_status: opts.pregnancyStatus,
-    event_date: opts.eventDate ?? new Date().toISOString().slice(0, 10),
+    event_date: opts.eventDate ?? todayLocalIso(),
   });
   if (error) throw new Error(`seedReproductiveTactoEvent: ${error.message}`);
   return id;

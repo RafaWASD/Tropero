@@ -50,6 +50,7 @@ import { pickHeroIdentifier } from '@/utils/animal-identifier';
 import { formatEidReadable } from '@/utils/eid-format';
 import { buttonA11y } from '@/utils/a11y';
 import { backOr } from '@/utils/nav';
+import { todayIsoLocal } from '@/utils/today-iso';
 
 import { BatchSaleAnimalRow } from './_components/BatchSaleAnimalRow';
 
@@ -62,14 +63,6 @@ const REASON_SUBTITLE: Record<BatchExitChoice, string> = {
   sale: 'Se vendieron y salen del campo',
   death: 'Murieron',
 };
-
-/** Fecha de hoy en ISO 'YYYY-MM-DD' (local). El caso típico: la baja es de hoy. */
-function todayIso(): string {
-  const d = new Date();
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${d.getFullYear()}-${mm}-${dd}`;
-}
 
 type Target = { profileId: string; hero: string };
 type OverrideState = { priceRaw: string; weightRaw: string; priceErr: string | null; weightErr: string | null };
@@ -145,7 +138,7 @@ export default function LoteVentaScreen() {
   const mapping = choice ? batchExitReasonToStatus(choice) : null;
   const showSaleData = mapping?.capturesSaleData ?? false;
 
-  const [exitDate, setExitDate] = useState(todayIso());
+  const [exitDate, setExitDate] = useState(todayIsoLocal());
   const [exitDateErr, setExitDateErr] = useState<string | null>(null);
   const [commonPrice, setCommonPrice] = useState('');
   const [commonPriceErr, setCommonPriceErr] = useState<string | null>(null);

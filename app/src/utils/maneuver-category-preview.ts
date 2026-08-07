@@ -31,6 +31,7 @@ import {
   computeCategoryCode,
 } from './animal-category';
 import type { CaptureMap } from './maneuver-sequence';
+import { todayIsoLocal } from './today-iso';
 
 /** El cambio de categoría que el operario VE en el resumen antes de sincronizar (R8.4). Display-only. */
 export type CategoryTransitionPreview = {
@@ -133,11 +134,6 @@ function capturedReproEvents(captured: CaptureMap, todayIso: string): ReproEvent
   return events;
 }
 
-/** ISO 'YYYY-MM-DD' de una fecha (wall-clock). */
-function isoDay(d: Date): string {
-  return d.toISOString().slice(0, 10);
-}
-
 /**
  * Anticipa la transición de categoría que el server aplicará por las maniobras capturadas (R8.4). PURA,
  * display-only: reusa `computeCategoryCode` (espejo C6) ⇒ cero drift. Devuelve el `{ from, to }` a mostrar,
@@ -182,8 +178,12 @@ export function previewManeuverCategoryTransition(args: {
   if (synthetic === null) return null;
 
   // 4) eventos capturados que alimentan compute_category ("ahora"). Ninguno → no hay disparador.
+  //    El `eventDate` del sintético tiene que ser EL MISMO que `maniobra/carga` va a escribir (día
+  //    calendario LOCAL, `todayIsoLocal`): si acá se derivara en UTC, después de las 21:00 (AR, UTC−3) el
+  //    preview razonaría sobre un día distinto del que se persiste — el preview dejaría de anticipar lo
+  //    que el server hará, que es su única razón de existir (A.2).
   const today = args.today ?? new Date();
-  const captured = capturedReproEvents(args.captured, isoDay(today));
+  const captured = capturedReproEvents(args.captured, todayIsoLocal(today));
   if (captured.length === 0) return null;
 
   // 5) lo que el server computará con [partida + capturas]. Sin cambio → nada que mostrar.

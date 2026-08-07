@@ -816,12 +816,120 @@ test('deriveCurrentState: ignora kinds que no son medición (observación / cate
   assert.equal(state.conditionScore, undefined);
 });
 
-test('deriveCurrentState: empate de fecha exacta → desempata por eventId mayor (determinístico)', () => {
+test('deriveCurrentState: empate total (misma fecha, mismo created_at, sin seq) → estable por eventId', () => {
+  // ÚLTIMO recurso de la escalera, no un criterio de recencia: acá ni el orden de lectura ni el instante
+  // de creación distinguen los dos eventos, así que lo único que se pide es que el resultado sea el MISMO
+  // en cada corrida. Ver los casos A.5 de abajo, que son los que sí miden recencia.
   const items = parseTimeline([
     weightRow('w-aaa', '2025-03-01T00:00:00Z', 300),
     weightRow('w-zzz', '2025-03-01T00:00:00Z', 400), // misma fecha, id mayor → gana
   ]);
   assert.deepEqual(deriveCurrentState(items).weight, { kg: 400, date: '2025-03-01T00:00:00Z' });
+});
+
+// ─── 🔴 A.5 — dos cargas del MISMO día (QA en device 2026-08-06) ────────────────────────────
+//
+// El desempate bueno (seq → created_at → eventId) existía SOLO en la rama reproductiva. Peso y condición
+// desempataban por `eventId`, que es un UUID v4 RANDOM ⇒ ~50 % de las veces coronaba el evento VIEJO.
+// Medido en `PERF-02001`, repesado y re-condicionado el mismo día: el peso salió bien (318) y la condición
+// mal (2,25 en vez de 3,75) — la moneda, exactamente.
+//
+// LOS TESTS ESTÁN CONSTRUIDOS PARA FALLAR CON EL CÓDIGO VIEJO: el evento VIEJO lleva a propósito el
+// eventId lexicográficamente MAYOR (`zzz` > `aaa`), así que si alguien vuelve a desempatar por id, gana el
+// viejo y el assert cae. Sin esa elección de ids, un test así pasaría con el bug puesto la mitad de las
+// veces (que es como el bug sobrevivió hasta el device).
+
+/** Fila con `seq` explícito (lo asigna `fetchTimeline` = orden de lectura del read local). */
+function rowWithSeq(row: TimelineRow, seq: number): TimelineRow {
+  return { ...row, seq };
+}
+
+test('A.5 peso: dos pesajes el MISMO día → gana el insertado DESPUÉS (aunque su eventId sea menor)', () => {
+  const items = parseTimeline([
+    rowWithSeq({ ...weightRow('w-zzz-viejo', '2026-08-06', 312), created_at: '2026-08-06T22:13:00Z' }, 0),
+    rowWithSeq({ ...weightRow('w-aaa-nuevo', '2026-08-06', 318), created_at: '2026-08-06T22:40:00Z' }, 1),
+  ]);
+  assert.deepEqual(
+    deriveCurrentState(items).weight,
+    { kg: 318, date: '2026-08-06' },
+    'el repesaje (318) es el vigente; con el desempate por UUID ganaba el viejo la mitad de las veces',
+  );
+});
+
+test('A.5 condición: EL CASO MEDIDO EN EL A07 — 2,25 y después 3,75 el mismo día → vale 3,75', () => {
+  const items = parseTimeline([
+    rowWithSeq({ ...scoreRow('cs-zzz-viejo', '2026-08-06', 2.25), created_at: '2026-08-06T22:13:00Z' }, 0),
+    rowWithSeq({ ...scoreRow('cs-aaa-nuevo', '2026-08-06', 3.75), created_at: '2026-08-06T22:40:00Z' }, 1),
+  ]);
+  assert.deepEqual(
+    deriveCurrentState(items).conditionScore,
+    { score: 3.75, date: '2026-08-06' },
+    'la ficha mostraba 2,25 (el valor viejo) en la pasada que el QA midió',
+  );
+});
+
+test('A.5: el orden de ENTRADA no importa (la función no asume que el timeline llegue ordenado)', () => {
+  // Mismos dos eventos, pasados al revés: el resultado tiene que ser idéntico.
+  const items = parseTimeline([
+    rowWithSeq({ ...scoreRow('cs-aaa-nuevo', '2026-08-06', 3.75), created_at: '2026-08-06T22:40:00Z' }, 1),
+    rowWithSeq({ ...scoreRow('cs-zzz-viejo', '2026-08-06', 2.25), created_at: '2026-08-06T22:13:00Z' }, 0),
+  ]);
+  assert.equal(deriveCurrentState(items).conditionScore?.score, 3.75);
+});
+
+test('A.5: sin `seq` (RPC que no lo aporta) el desempate cae a created_at, no al UUID', () => {
+  const items = parseTimeline([
+    { ...weightRow('w-zzz-viejo', '2026-08-06', 312), created_at: '2026-08-06T22:13:00Z' },
+    { ...weightRow('w-aaa-nuevo', '2026-08-06', 318), created_at: '2026-08-06T22:40:00Z' },
+  ]);
+  assert.equal(deriveCurrentState(items).weight?.kg, 318);
+});
+
+test('A.5: null-as-newest — la carga LOCAL sin sellar le gana a la ya sincronizada del mismo día', () => {
+  // El write CRUD-plano de weight_events/condition_score_events NO setea created_at de cliente: la fila
+  // local queda con created_at NULL hasta que el trigger lo sella al SUBIR. Esa es la MÁS reciente.
+  const items = parseTimeline([
+    { ...weightRow('w-zzz-sincronizado', '2026-08-06', 312), created_at: '2026-08-06T22:13:00Z' },
+    { ...weightRow('w-aaa-local', '2026-08-06', 318), created_at: null as unknown as string },
+  ]);
+  assert.equal(deriveCurrentState(items).weight?.kg, 318, 'la local sin sellar es la nueva');
+  // Y al revés: la sincronizada NO le gana a la local aunque llegue después en el array.
+  const inverso = parseTimeline([
+    { ...weightRow('w-aaa-local', '2026-08-06', 318), created_at: null as unknown as string },
+    { ...weightRow('w-zzz-sincronizado', '2026-08-06', 312), created_at: '2026-08-06T22:13:00Z' },
+  ]);
+  assert.equal(deriveCurrentState(inverso).weight?.kg, 318);
+});
+
+test('A.5: la rama REPRODUCTIVA conserva el mismo desempate (no se cambió el criterio, se compartió)', () => {
+  // Es la rama que ya lo tenía bien: acá se verifica que la unificación no la degradó.
+  const items = parseTimeline([
+    rowWithSeq(reproRow('r-zzz-viejo', '2026-08-06', 'tacto', 'medium', '2026-08-06T22:13:00Z'), 0),
+    rowWithSeq(reproRow('r-aaa-nuevo', '2026-08-06', 'abortion', null, '2026-08-06T22:40:00Z'), 1),
+  ]);
+  assert.deepEqual(deriveCurrentState(items).pregnancy, {
+    kind: 'empty',
+    via: 'abortion',
+    date: '2026-08-06',
+  });
+});
+
+test('A.5: las tres ramas desempatan IGUAL sobre el mismo día (peso, condición y preñez a la vez)', () => {
+  // El invariante de la unificación: un animal que pasa DOS veces por la manga el mismo día muestra, en
+  // las tres filas de "Estado actual", lo de la SEGUNDA pasada. Con el bug, cada fila tiraba su propia
+  // moneda (por eso el QA vio el peso bien y la condición mal en el MISMO animal).
+  const items = parseTimeline([
+    rowWithSeq({ ...weightRow('w-zzz', '2026-08-06', 312), created_at: '2026-08-06T22:13:00Z' }, 0),
+    rowWithSeq({ ...scoreRow('cs-zzz', '2026-08-06', 2.25), created_at: '2026-08-06T22:13:01Z' }, 1),
+    rowWithSeq(reproRow('r-zzz', '2026-08-06', 'tacto', 'empty', '2026-08-06T22:13:02Z'), 2),
+    rowWithSeq({ ...weightRow('w-aaa', '2026-08-06', 318), created_at: '2026-08-06T22:40:00Z' }, 3),
+    rowWithSeq({ ...scoreRow('cs-aaa', '2026-08-06', 3.75), created_at: '2026-08-06T22:40:01Z' }, 4),
+    rowWithSeq(reproRow('r-aaa', '2026-08-06', 'tacto', 'large', '2026-08-06T22:40:02Z'), 5),
+  ]);
+  const state = deriveCurrentState(items);
+  assert.equal(state.weight?.kg, 318);
+  assert.equal(state.conditionScore?.score, 3.75);
+  assert.deepEqual(state.pregnancy, { kind: 'pregnant', status: 'large', date: '2026-08-06' });
 });
 
 // ─── deriveCurrentState: estado reproductivo (preñez) — C3.2a ──────────────────────────────

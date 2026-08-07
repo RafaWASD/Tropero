@@ -17,6 +17,7 @@
 // (opcional): sin año → birth_date null → la categoría cae al default conservador por sexo (= backend).
 
 import type { PregnancyStatus } from './event-timeline';
+import { todayIsoLocal } from './today-iso';
 
 export type { PregnancyStatus };
 
@@ -68,12 +69,9 @@ export function birthYearToDate(year: number | null, now: Date = new Date()): st
   if (year == null) return null;
   const yyyy = String(year).padStart(4, '0');
   const midYear = `${yyyy}-07-01`;
-  // ISO local de hoy (YYYY-MM-DD) para comparar como strings (orden lexicográfico = orden de fecha).
-  const todayIso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(
-    now.getDate(),
-  ).padStart(2, '0')}`;
   // Si la mitad de año cae en el futuro, caemos al 1-enero (siempre pasado para un año ≤ el actual).
-  return midYear > todayIso ? `${yyyy}-01-01` : midYear;
+  // La comparación es de strings (orden lexicográfico = orden de fecha) contra el HOY local canónico.
+  return midYear > todayIsoLocal(now) ? `${yyyy}-01-01` : midYear;
 }
 
 // ─── Fecha de nacimiento DÍA/MES opcional separada del año (delta alta-form-refinamiento, RAF2.1) ──────
@@ -111,13 +109,6 @@ function isLeapYear(year: number): boolean {
 function daysInMonth(month: number, year: number): number {
   if (month === 2) return isLeapYear(year) ? 29 : 28;
   return [1, 3, 5, 7, 8, 10, 12].includes(month) ? 31 : 30;
-}
-
-/** ISO local 'AAAA-MM-DD' de `now` para comparar fechas como strings (orden lexicográfico = orden de fecha). */
-function todayIso(now: Date): string {
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(
-    now.getDate(),
-  ).padStart(2, '0')}`;
 }
 
 /**
@@ -178,7 +169,7 @@ export function validateBirthDate(
   const iso = `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
   // Fecha exacta futura (RAF2.1.9): el año ya pasó el filtro de "no futuro", pero el día/mes en el año en
   // curso puede caer adelante de hoy → lo rechaza el eje día/mes (sin clamp).
-  if (iso > todayIso(now)) {
+  if (iso > todayIsoLocal(now)) {
     return { ok: false, error: 'La fecha de nacimiento no puede ser futura.', field: 'dayMonth' };
   }
 

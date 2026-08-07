@@ -14,6 +14,8 @@
 // `calfIdvForSubmit` lo trimea). El `value` del EID viene COMPACTO (15 díg); el de la rama search viene
 // TRIMEADO (conserva letras/espacios para la búsqueda por apodo).
 
+import { todayIsoLocal } from './today-iso';
+
 /** Separadores de formato de una caravana (espacio, guion, punto, barra) — se descartan solo para el EID. */
 const STRUCTURED_SEPARATORS = /[\s\-./]/g;
 
@@ -47,13 +49,6 @@ export function classifyCalfQuery(raw: string): CalfQueryClass {
   // Cualquier otro término no vacío → rama de búsqueda (idv alfanumérico + apodo). Se pasa TRIMEADO (los
   // espacios de un apodo importan para el LIKE; el CREATE lo trimea con calfIdvForSubmit).
   return { kind: 'idv', value: trimmed };
-}
-
-/** ISO 'YYYY-MM-DD' local de `now` (orden lexicográfico = orden de fecha). `now` inyectable (tests). */
-export function todayIsoLocal(now: Date = new Date()): string {
-  const mm = String(now.getMonth() + 1).padStart(2, '0');
-  const dd = String(now.getDate()).padStart(2, '0');
-  return `${now.getFullYear()}-${mm}-${dd}`;
 }
 
 /**

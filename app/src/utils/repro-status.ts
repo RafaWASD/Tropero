@@ -21,6 +21,8 @@ import {
   type TimelineItem,
 } from './event-timeline';
 import type { HeiferFitness } from './maneuver-sequence';
+// El ancla LOCAL de "hoy" en el dominio date-only (FUENTE ÚNICA — ver `ageInDaysFromBirthDate`).
+import { localDayAnchorUtc } from './today-iso';
 
 /**
  * Categorías de hembra "PROBADAMENTE servidas" — elegibles SIN gate de aptitud (cuentan como servidas en
@@ -336,7 +338,12 @@ export function ageInDaysFromBirthDate(birthDate: string | null | undefined, now
   ) {
     return null; // fecha desbordada (ej. 2026-02-31)
   }
-  const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  // 🔴 BUG VIVO cerrado en el fix-loop del QA (2026-08-07): acá se anclaba `now` por su día **UTC**
+  // (`Date.UTC(now.getUTCFullYear(), …)`), y `now` es un INSTANTE real — `carga.tsx:1243` pasa
+  // `new Date()`. En Argentina (UTC−3), de 21:00 a 23:59 el día UTC ya es el siguiente ⇒ el animal
+  // figuraba **un día más viejo**, y esta edad es la que alimenta `isReproApt` (RAR.6.1), o sea la que
+  // decide si la manga OFRECE INSEMINAR. El día calendario del operario es el LOCAL.
+  const today = localDayAnchorUtc(now);
   const days = Math.floor((today.getTime() - birth.getTime()) / (1000 * 60 * 60 * 24));
   return days >= 0 ? days : null; // futura → null (no inventamos edad negativa)
 }

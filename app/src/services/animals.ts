@@ -651,19 +651,25 @@ export async function searchAnimals(
 
   // 2) IDV exacto (animal_profiles.idv) — para todo término no vacío (idv alfanumérico incluido, IDU.4.3).
   //    Priorizado sobre el substring (el operario que tipea el IDV completo ve su animal primero).
+  //    Corre una vez POR TÉRMINO (`idvExactTerms`, fix 🔴 A.1): el tipeado tal cual —como está IMPRESO en
+  //    la caravana— primero, y el compacto después. El tipeado solo se comparaba compactado, así que
+  //    `PERF-00500` no encontraba al animal `PERF-00500` y la app ofrecía darlo de alta (= duplicado).
   if (plan.tryIdvExact) {
-    const r = await runLocalQuery<LocalListRow>(
-      buildSearchByIdvQuery(establishmentId, plan.compact),
-      { emptyIsSyncing: false },
-    );
-    if (!r.ok) return { ok: false, error: r.error };
-    pushLocalRows(r.value, seen, rawRows);
+    for (const term of plan.idvExactTerms) {
+      const r = await runLocalQuery<LocalListRow>(
+        buildSearchByIdvQuery(establishmentId, term),
+        { emptyIsSyncing: false },
+      );
+      if (!r.ok) return { ok: false, error: r.error };
+      pushLocalRows(r.value, seen, rawRows);
+    }
   }
 
   // 3) Substring (LIKE PARCIAL local) sobre idv Y tag_electronic — tipear un prefijo/fragmento ("03200",
   //    "AB1") ENCUENTRA los animales que lo contengan, no solo el match exacto. SQLite no tiene pg_trgm →
   //    `LIKE '%term%' ESCAPE '\'` local (buildSearchLikeQuery escapa los comodines). Dos sub-queries (una
-  //    por columna), el dedup por profileId las une. Usa el compacto (sin separadores, como el idv guardado).
+  //    por columna), el dedup por profileId las une. Usa el compacto; del lado de `idv`, la COLUMNA también
+  //    se compacta (A.1) para que un fragmento que cruza el separador encuentre al animal.
   if (plan.tryIdvSubstring) {
     const idvRes = await runLocalQuery<LocalListRow>(
       buildSearchLikeQuery(establishmentId, 'idv', plan.compact),

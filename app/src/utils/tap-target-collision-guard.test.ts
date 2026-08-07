@@ -78,6 +78,7 @@ import { assertScanCoverage } from './scan-coverage';
 import {
   MIN_TAP_TARGET_SEPARATION,
   REAL_BOTTOM_RESERVES,
+  REAL_TOP_RESERVES,
   TargetResolutionError,
   allJsxProps,
   evaluateDp,
@@ -102,6 +103,9 @@ const SCANNED_FILES_FLOOR = 300;
 const TAMAGUI_CONFIG = 'tamagui.config.ts';
 const FAB_OWNER = 'app/(tabs)/_layout.tsx';
 const PILL = 'src/features/ble-stick/components/StickStatusIndicator.tsx';
+const INDICATOR_GEOMETRY = 'src/features/ble-stick/indicator-geometry.ts';
+/** La pantalla que RESERVA la banda para el indicador (ver (F-reserva)). */
+const HOME = 'app/(tabs)/index.tsx';
 const PURE_TEST = 'src/utils/nav-target-bands.test.ts';
 const E2E_GUARD = 'e2e/fab-target-geometry.spec.ts';
 const BOTTOM_INSET_HOOK = 'src/hooks/useSafeBottomInset.ts';
@@ -150,14 +154,25 @@ const MAX_UNCHECKED_SCALAR_SLOP = 12;
 // ─────────────────────────────────────────────────────────────────────────────────────────────────────
 const BOTTOM_BAND_SURFACES: Record<string, string> = {
   [FAB_OWNER]: 'es el dueño del nav y del FAB: define la banda, no se ancla a ella',
-  [PILL]:
-    'pill de estado del bastón (RMV3.5): se ancla `$fabRaise + $4` sobre el nav → 20 dp de aire al pico ' +
-    `del FAB. Verificado en ${PURE_TEST}, en ${E2E_GUARD} y —con su anclaje REAL resuelto del fuente— en ` +
-    '(B-banda) de este archivo. NO es tocable (ver (E))',
   [BOTTOM_INSET_HOOK]:
     'define la reserva inferior compartida (`$navBottomMin` es su piso): no se ancla en la banda, la ' +
     'establece. Como el FAB_OWNER, entra al registro por ser dueño de la geometría, no vecino de ella',
 };
+
+/**
+ * **CUÁNTOS INQUILINOS REALES TIENE LA BANDA HOY. HOY: CERO — Y ESTÁ DECLARADO A PROPÓSITO.**
+ *
+ * El pill del bastón, el único que hubo, **se mudó arriba a la derecha el 2026-08-06** (ver la cabecera de
+ * `StickStatusIndicator.tsx`). Un guard que se queda sin población y sigue en verde es un **falso verde**
+ * —justamente la clase que este archivo vino a cerrar—, así que la cuenta no puede quedar implícita:
+ *   · si aparece un inquilino nuevo y NO se registra → (B1) rojo;
+ *   · si se registra pero nadie actualiza este número → (B-banda) rojo;
+ *   · y con población CERO, (B-banda) igual ejercita el resolvedor contra un inquilino SINTÉTICO, así que
+ *     "no encontré a nadie" y "el resolvedor se rompió" dejan de verse igual.
+ * El invariante *nada anclado al borde inferior invade la banda del FAB* no depende de que haya alguien:
+ * describe qué le va a pasar al próximo.
+ */
+const BOTTOM_BAND_TENANTS_EXPECTED = 0;
 
 // ─── Firmas ──────────────────────────────────────────────────────────────────────────────────────────
 const HIT_SLOP_ANY = /\bhitSlop\b/;
@@ -663,8 +678,8 @@ test('(B-banda) el anclaje REAL de cada superficie registrada DESPEJA la banda d
       ...geometry,
       fabHitSlopTop: slop.top,
       fabHitSlopBottom: slop.bottom,
-      pillGap: 0,
-      pillHeight: 0,
+      tenantGap: 0,
+      tenantHeight: 0,
     }).top;
 
   let checked = 0;
@@ -700,11 +715,45 @@ test('(B-banda) el anclaje REAL de cada superficie registrada DESPEJA la banda d
       });
     }
   }
-  assert.ok(
-    checked > 0,
-    'no se verificó NI UN anclaje: o el pill dejó de anclarse como se cree, o el resolvedor dejó de ' +
-      'encontrarlo. Un test de banda que no mide ninguna banda es peor que no tenerlo.',
+  // ── LA POBLACIÓN, CONTRA EL NÚMERO DECLARADO ──────────────────────────────────────────────────────
+  // Antes acá decía `checked > 0` ("si no medí nada, algo se rompió"). Con el pill mudado arriba eso
+  // dejaba dos salidas malas: borrar el test (y con él la vigilancia del mecanismo) o relajarlo (y no
+  // enterarse nunca de que dejó de medir). La forma correcta es DECLARAR la cuenta: cero es una respuesta
+  // válida, pero tiene que estar escrita.
+  assert.equal(
+    checked,
+    BOTTOM_BAND_TENANTS_EXPECTED,
+    `la banda inferior tiene ${checked} inquilino(s) verificado(s) y el registro declara ` +
+      `${BOTTOM_BAND_TENANTS_EXPECTED}. Si agregaste una superficie anclada abajo: verificá su separación, ` +
+      'registrala y actualizá el número. Si la sacaste: bajá el número en el mismo commit. Lo que NO vale ' +
+      'es que el guard mida una cantidad distinta de la que alguien declaró — así es como un test se queda ' +
+      'verde mirando a nadie.',
   );
+
+  // ── Y CON POBLACIÓN CERO, EL MEDIDOR SE EJERCITA IGUAL (contra un inquilino SINTÉTICO) ─────────────
+  // Sin esto, el día que la población quedó vacía el test pasó a no ejecutar una sola línea del
+  // resolvedor: "no hay inquilinos" y "el resolvedor está roto" se verían igual (verde). Acá se le da el
+  // anclaje que tenía el pill (el único que existió) y se exige que (a) el que despeja, despeje, y (b) el
+  // que se mete en la banda del FAB, se detecte. Es la falsificación in-place del medidor.
+  const syntheticEnv = (reserve: number): ResolveEnv => ({
+    src: '',
+    token: (name, group) => (group === 'size' ? sizeTokenFromConfig(configCode, name) : spaceToken(`$${name}`)),
+    scope: { safeBottom: reserve },
+  });
+  const despeja = "safeBottom + getTokenValue('$navBar','size') + getTokenValue('$fabRaise','size') + getTokenValue('$4','space')";
+  const invade = "safeBottom + getTokenValue('$navBar','size') + getTokenValue('$fabRaise','size')"; // el PICO del FAB
+  REAL_BOTTOM_RESERVES.forEach((reserve, i) => {
+    const fabTop = fabTopAt(reserve);
+    assert.ok(
+      resolveByReserve(despeja, syntheticEnv).values[i] - fabTop >= MIN_TAP_TARGET_SEPARATION,
+      'el medidor dejó de reconocer como VÁLIDO el anclaje que sí despejaba el FAB',
+    );
+    assert.ok(
+      resolveByReserve(invade, syntheticEnv).values[i] - fabTop < MIN_TAP_TARGET_SEPARATION,
+      'el medidor dejó de detectar una superficie anclada JUSTO en el pico del FAB: con la población ' +
+        'vacía, este contrafáctico es lo ÚNICO que prueba que (B-banda) sigue sabiendo medir',
+    );
+  });
 });
 
 test('(A-bis) `hitSlop` solo aparece como PROP — nunca en otra posición sintáctica', () => {
@@ -801,6 +850,211 @@ test('(E) el pill del bastón sigue siendo INFORMATIVO (sin onPress, con pointer
   );
 });
 
+// ═══ (F) LA BANDA DE ARRIBA A LA DERECHA (donde vive el indicador desde el 2026-08-06) ══════════════
+//
+// El indicador del bastón se mudó del borde inferior a **debajo de la fila del header, a la derecha**. La
+// banda que dejó libre sigue vigilada por (B); esta es la banda NUEVA, y nace con la misma disciplina: el
+// que se ancle acá se registra, y el anclaje se verifica con NÚMEROS, no con prosa.
+//
+// ⚠️ LÍMITE DECLARADO: la firma es *"el valor menciona la reserva SUPERIOR"* (`insets.top` y sus alias).
+// Un overlay que se ancle arriba con un valor MEDIDO en runtime (el caso real: el dropdown del switch de
+// campo, que recibe `anchorTop={headerBottom}` de un `onLayout`) es invisible para cualquier análisis
+// estático — por eso está enumerado abajo a mano, con su motivo, en vez de fingir que el guard lo ve.
+
+/** Superficies registradas en la banda superior derecha. */
+const TOP_BAND_SURFACES: Record<string, string> = {
+  [PILL]:
+    'el indicador global del bastón (RMV3.5): se ancla `insets.top + $3*2 + $avatar` → JUSTO debajo de la ' +
+    'fila del header, y `right: $4`. Es el dueño de la banda. Verificado con números en (F-banda). NO es ' +
+    'tocable (ver (E))',
+  'app/(tabs)/index.tsx':
+    'el dropdown del switch de campo baja DESDE la fila del header con `anchorTop={headerBottom}`, un valor ' +
+    'MEDIDO por `onLayout` — no menciona la reserva, así que la firma de (F1) no lo ve. Se enumera acá a ' +
+    'mano porque existe y comparte banda. No hay defecto: el dropdown solo existe mientras está abierto (un ' +
+    'gesto deliberado) y el indicador es `pointerEvents="none"`, así que en el peor caso se superponen unos ' +
+    'segundos sin robar un solo toque. Queda ANOTADO para que el próximo que toque cualquiera de los dos ' +
+    'sepa que comparten esquina.',
+};
+
+/** Prop que COLOCA el borde de arriba de un elemento en una coordenada. */
+const TOP_ANCHOR_PROP = /^top$/;
+
+/** Los nombres con los que un archivo tiene la reserva SUPERIOR en la mano. */
+function topReserveNames(src: string): string[] {
+  const names = new Set<string>(['insets.top', 'safeTop', 'topInset']);
+  for (const [, name] of src.matchAll(/\bconst\s+([A-Za-z_$][\w$]*)\s*=\s*useSafeAreaInsets\s*\(\)\s*\.top/g)) {
+    names.add(name);
+  }
+  for (const [, name] of src.matchAll(/\bconst\s+([A-Za-z_$][\w$]*)\s*=\s*useSafeAreaInsets\s*\(\)\s*;/g)) {
+    names.add(`${name}.top`);
+  }
+  for (const [, alias] of src.matchAll(
+    /\bconst\s*\{[^}]*\btop\b\s*(?::\s*([A-Za-z_$][\w$]*))?[^}]*\}\s*=\s*useSafeAreaInsets\s*\(\)/g,
+  )) {
+    names.add(alias ?? 'top');
+  }
+  return [...names];
+}
+
+/** ¿El VALOR de esta expresión sale de la reserva superior? (mismo criterio que `mentionsBottomReserve`) */
+function mentionsTopReserve(src: string, expr: string): boolean {
+  const alternatives = [
+    ...topReserveNames(src).map((n) => `${/^[\w$]/.test(n) ? '\\b' : ''}${n.replace(ESCAPE_RE, '\\$&')}\\b`),
+    // ── EL MUTANTE QUE ESTO CIERRA (medido: sobrevivía a la primera versión de la firma) ──────────────
+    // `<View top={useSafeAreaInsets().top + 70} />` — la reserva LEÍDA EN LÍNEA, sin pasar por un `const`.
+    // La firma derivaba nombres SOLO de declaraciones, así que un anclaje escrito así se metía en la banda
+    // del indicador sin registrarse y el guard daba VERDE. Es la misma alternativa que `bottomReserveRegex`
+    // ya tenía para el borde de abajo; faltaba de este lado.
+    'useSafeAreaInsets\\s*\\(\\)\\s*\\.top',
+  ];
+  const reserve = new RegExp(`(?:${alternatives.join('|')})`);
+  if (reserve.test(expr)) return true;
+  if (!BARE_IDENTIFIER.test(expr)) return false;
+  const decl = new RegExp(`\\bconst\\s+${expr}\\s*(?::[^=]+)?=\\s*([^;]+);`).exec(src);
+  if (decl === null) return false;
+  const rhs = decl[1].replace(/\s+/g, ' ');
+  // ── EL FALSO POSITIVO QUE ESTO CIERRA (medido: 2 archivos) ─────────────────────────────────
+  // `agregar-evento.tsx` y `crear-animal.tsx` arman su header en un `const headerNode = <YStack
+  // paddingTop={insets.top} …>` y después lo pasan como `header={headerNode}`. Seguir un nivel de const
+  // hacía que el guard viera la reserva ADENTRO del JSX y reportara la prop `header` como "coloca algo con
+  // la reserva". No coloca nada: pasa un NODO, y ahí adentro la reserva se usa como `paddingTop` (que
+  // reserva espacio, la única forma permitida). Un guard con falsos positivos se termina apagando, así que
+  // la indirección solo se sigue cuando el valor es una EXPRESIÓN, no un árbol de JSX.
+  if (rhs.includes('<')) return false;
+  return reserve.test(rhs);
+}
+
+test('(F1) nadie ancla nada en la banda SUPERIOR sin estar en el registro', () => {
+  const offenders: string[] = [];
+  for (const { file, src, rawLines } of scannedSources()) {
+    if (Object.prototype.hasOwnProperty.call(TOP_BAND_SURFACES, file)) continue;
+    for (const use of propUsesOfFile(src, rawLines)) {
+      if (!TOP_ANCHOR_PROP.test(use.prop)) continue;
+      if (!mentionsTopReserve(src, use.expr)) continue;
+      offenders.push(`${file}:${use.line}  ${use.prop}={${use.expr.slice(0, 90)}}`);
+    }
+  }
+  assert.deepEqual(
+    offenders,
+    [],
+    'Un `top` cuyo valor sale de la reserva SUPERIOR ancla el elemento en la banda del chrome de arriba — la ' +
+      'misma donde vive el indicador del bastón desde el 2026-08-06, y la misma donde cada pantalla pone su ' +
+      'acción secundaria (el avatar de la home, la ✕ de MODO MANIOBRAS, "+ Crear campo"…). Registralo en ' +
+      '`TOP_BAND_SURFACES` con su motivo; (F-banda) va a exigirle que despeje la fila del header. Y si va a ' +
+      'ser TOCABLE, leé antes el bloque ⛔ de `StickStatusIndicator.tsx`.',
+  );
+});
+
+test('(F1-bis) si el valor sale de la reserva superior, la prop tiene que ser una que el guard sepa medir', () => {
+  // Espejo exacto de (B1-bis) para el borde de arriba: la familia `padding` RESERVA espacio (no coloca) y
+  // `top` COLOCA (y se puede convertir en coordenada). Todo lo demás que dependa de la reserva superior
+  // —`marginTop`, `translateY`, `inset`, un `style={fn(insets.top)}`— nace en ROJO, porque coloca igual de
+  // fuerte y el guard no lo sabe medir. La lista está al revés a propósito: enumerar lo PELIGROSO es lo
+  // que hizo que el guard de abajo se dejara burlar tres veces.
+  const offenders: string[] = [];
+  for (const { file, src, rawLines } of scannedSources()) {
+    if (Object.prototype.hasOwnProperty.call(TOP_BAND_SURFACES, file)) continue;
+    for (const use of propUsesOfFile(src, rawLines)) {
+      if (TOP_ANCHOR_PROP.test(use.prop) || SPACE_RESERVING_PROP.test(use.prop)) continue;
+      if (!mentionsTopReserve(src, use.expr)) continue;
+      offenders.push(`${file}:${use.line}  ${use.prop}: ${use.expr.slice(0, 70)}`);
+    }
+  }
+  assert.deepEqual(offenders, [], 'ver el mensaje de (B1-bis): mismo invariante, borde de arriba');
+});
+
+test('(F-banda) el indicador DESPEJA la fila del header, en las cuatro reservas superiores reales', () => {
+  // El número que importa: el borde de ARRIBA del indicador tiene que quedar en `reserva + alto de la fila`.
+  // Más arriba, se le montaría a la fila — que es donde viven el avatar de la home, la ✕ de MODO MANIOBRAS,
+  // el "+ Crear campo" y el "⋮" de saltar animal (todos MEDIDOS, ver `progress/impl_pill-arriba-derecha.md`).
+  // Se calcula para las CUATRO reservas porque un anclaje que no dependa de la reserva (un número pelado,
+  // un `Math.max`) se rompe justo en el teléfono con notch.
+  const configCode = code(TAMAGUI_CONFIG);
+  const src = code(PILL);
+  const headerRow = spaceToken('$3') * 2 + sizeTokenFromConfig(configCode, 'avatar');
+  const anchors = propUsesOfFile(src).filter(
+    (u) => TOP_ANCHOR_PROP.test(u.prop) && mentionsTopReserve(src, u.expr),
+  );
+  assert.equal(
+    anchors.length,
+    1,
+    `el indicador tiene que declarar UN solo anclaje superior legible; encontré ${anchors.length}`,
+  );
+  const mkEnv = (reserve: number): ResolveEnv => ({
+    src,
+    token: (name, group) => (group === 'size' ? sizeTokenFromConfig(configCode, name) : spaceToken(`$${name}`)),
+    scope: Object.fromEntries(topReserveNames(src).map((n) => [n, reserve])),
+  });
+  const { values, dependsOnReserve } = resolveByReserve(anchors[0].expr, mkEnv, REAL_TOP_RESERVES);
+  assert.ok(
+    dependsOnReserve,
+    'el anclaje no se mueve con la reserva superior: en un teléfono con notch quedaría metido debajo del ' +
+      'status bar (o flotando de más). Tiene que sumar sobre `insets.top`.',
+  );
+  REAL_TOP_RESERVES.forEach((reserve, i) => {
+    assert.equal(
+      values[i],
+      reserve + headerRow,
+      `con reserva superior ${reserve} dp el indicador arranca en ${values[i]} dp y la fila del header ` +
+        `termina en ${reserve + headerRow} (= reserva + $3*2 + $avatar). Si lo moviste a propósito, cambiá ` +
+        'este cálculo Y volvé a medir las pantallas: la fila está OCUPADA en la home, en mis-campos, en ' +
+        '/maniobra, en lote/[id] en selección y en todo el flujo de manga.',
+    );
+  });
+});
+
+test('(F-reserva) la home RESERVA la banda, y con el MISMO número del que sale el círculo', () => {
+  // ── EL DEFECTO DE MÉTODO QUE ESTE TEST CIERRA (2026-08-07) ─────────────────────────────────────────
+  // El sondeo E2E dio la banda LIBRE en la home… con un fixture cuyo usuario se llama "E2E". El saludo
+  // (`¡Hola {nombre}! 👋`, `$9` = 30 px, **sin `numberOfLines`**) crece con el nombre, y el producto acepta
+  // hasta `NAME_MAX_LENGTH`. Medido con nombres reales @412: con 14 caracteres el primer renglón llegaba a
+  // **x=355** y el círculo arranca en **x=354** → el saludo pasaba POR DEBAJO del indicador. Se había
+  // medido la instancia, no el rango.
+  //
+  // El arreglo (reservar, en vez de truncar un nombre propio) vive en el JSX y es exactamente la clase de
+  // cosa que alguien saca "porque no se ve para qué está": tres tokens de padding en un texto. Por eso el
+  // guard exige (a) que la reserva ESTÉ y (b) que salga de `stickIndicatorBandReserve()` — o sea del mismo
+  // token del que sale el círculo. Una copia (`paddingRight={47}`) se desincronizaría el día que el
+  // indicador cambie de tamaño, y nadie se enteraría hasta ver un nombre tapado en producción.
+  const home = code(HOME);
+  assert.match(
+    home,
+    /import \{ stickIndicatorBandReserve \} from '@\/features\/ble-stick\/indicator-geometry'/,
+    'la home tiene que pedirle la reserva al dueño de la geometría, no calcularla',
+  );
+  assert.match(
+    home,
+    /paddingRight=\{stickIndicatorBandReserve\(\)\}/,
+    'el saludo de la home tiene que reservar la banda del indicador: sin eso, un nombre de ~14 caracteres ' +
+      'queda por debajo del círculo (medido x=355 vs banda x=354). Si el saludo pasa a truncar o la home ' +
+      'reclama la banda, cambiá ESTE test y decí por qué — no lo borres.',
+  );
+  // Y la reserva cubre el círculo COMPLETO más aire (no la mitad).
+  const reserve = /return indicatorGeometry\(\)\.circle \+ getTokenValue\('\$(\w+)', 'space'\);/.exec(
+    code(INDICATOR_GEOMETRY),
+  );
+  assert.ok(reserve, '`stickIndicatorBandReserve()` tiene que ser `círculo + un token de aire`');
+  assert.ok(
+    spaceToken(`$${reserve[1]}`) > 0,
+    'el aire de la reserva tiene que ser un token real del DS',
+  );
+});
+
+test('(F-inverso) el registro de la banda superior no tiene entradas MUERTAS', () => {
+  for (const file of Object.keys(TOP_BAND_SURFACES)) {
+    const src = code(file);
+    const anchored = propUsesOfFile(src).some(
+      (u) => TOP_ANCHOR_PROP.test(u.prop) && mentionsTopReserve(src, u.expr),
+    );
+    const measured = /\banchorTop\b/.test(src);
+    assert.ok(
+      anchored || measured,
+      `\`${file}\` está en TOP_BAND_SURFACES pero ya no se ancla arriba: sacalo del registro (una entrada ` +
+        'muerta es un permiso sin dueño).',
+    );
+  }
+});
+
 // ═══ (C) Los tests de geometría no están midiendo una app imaginaria ════════════════════════════════
 
 test('(C) los tokens que copia `nav-target-bands.test.ts` coinciden con los REALES', () => {
@@ -884,23 +1138,57 @@ test('(C) la separación AS-BUILT que fija el test puro ES la que sale de los to
 
 // ═══ (D) El código de producción lee los tokens (no un literal equivalente) ══════════════════════════
 
-test('(D) el pill se ancla con TOKENS (no con literales equivalentes)', () => {
+test('(D) el indicador se ancla con TOKENS (no con literales equivalentes)', () => {
+  // ⚠️ ANCLAJE NUEVO (2026-08-06): el indicador dejó el borde inferior y vive DEBAJO DE LA FILA DEL HEADER,
+  // a la derecha. Los tokens que tiene que leer cambiaron con él: ya no `$navBar`/`$fabRaise` (era vecino
+  // del FAB) sino los que describen la fila del header que tiene que despejar.
   const src = code(PILL);
-  assert.match(src, /getTokenValue\('\$navBar',\s*'size'\)/, 'el pill se posiciona relativo al alto del nav');
-  assert.match(src, /getTokenValue\('\$fabRaise',\s*'size'\)/, 'y relativo al pico del FAB');
   assert.match(
     src,
-    /getTokenValue\('\$4',\s*'space'\)/,
-    'el aire al pico del FAB es `$4` (18) y no `$2` (7): con 9-10 dp el pill y el círculo se leían como una ' +
-      'sola pieza pegada, y cualquier slop futuro del FAB se los volvía a comer',
+    /getTokenValue\('\$3',\s*'space'\)/,
+    'el alto de la fila del header se deriva de SU paddingVertical (`$3`), no de un 66 escrito a mano',
+  );
+  assert.match(
+    src,
+    /getTokenValue\('\$avatar',\s*'size'\)/,
+    'y del elemento más ALTO que vive en esa fila (`$avatar`): si el avatar del header cambia de tamaño, el ' +
+      'indicador lo sigue solo en vez de quedarse encima de él',
+  );
+  assert.match(src, /getTokenValue\('\$4',\s*'space'\)/, 'y el margen derecho es el `$4` de la app');
+  assert.match(
+    code(INDICATOR_GEOMETRY),
+    /getTokenValue\('\$navIcon',\s*'size'\)/,
+    'el círculo se DIMENSIONA desde el ícono (`$navIcon` + padding + borde), no desde un `$chipMin`: no es ' +
+      'un target, así que su tamaño sale de su contenido',
   );
   assert.doesNotMatch(
     src,
     /minHeight="\$chipMin"/,
-    '`$chipMin` (40) es el bar de un TARGET compacto, y el pill NO es un target (ver (E)): su alto es el de ' +
-      'su contenido. Se le puso en el intento del 2026-08-06 de hacerlo tocable y salió con ese intento.',
+    '`$chipMin` (40) es el bar de un TARGET compacto, y el indicador NO es un target (ver (E)): su tamaño ' +
+      'sale de su contenido. Se le puso en el intento del 2026-08-06 de hacerlo tocable y salió con él.',
   );
-  assert.doesNotMatch(src, /\bhitSlop\b/, 'el pill NO usa hitSlop; si algún día lo lleva, va al registro de (A)');
+  assert.doesNotMatch(src, /\bhitSlop\b/, 'el indicador NO usa hitSlop; si algún día lo lleva, va al registro de (A)');
+});
+
+test('(D-color) el ESTADO no viaja solo por color: lo lleva el ÍCONO', () => {
+  // ── LA REGLA, Y POR QUÉ ES UN GUARD ────────────────────────────────────────────────────────────────
+  // La forma nueva del indicador (círculo permanente) se pidió con verde/rojo. Con el color como ÚNICO
+  // canal, el ~8 % de los varones con daltonismo rojo-verde no puede leer el estado — y este producto es
+  // de usuarios mayoritariamente varones en el campo (WCAG 1.4.1). El proyecto ya cometió y corrigió este
+  // error en el nav: *"la pill suma 2 canales (forma + fondo) además del color"* (`app/(tabs)/_layout.tsx`).
+  // Acá el canal que manda es el ÍCONO —y el color refuerza—, así que el guard exige que la función que
+  // elige el ícono siga discriminando estados en vez de devolver siempre el mismo glifo.
+  const src = code(PILL);
+  const iconFn = /function iconFor\(status: ConnectionStatus\)[\s\S]*?\n\}/.exec(src);
+  assert.ok(iconFn, 'el indicador tiene que resolver su ícono a partir del `ConnectionStatus`');
+  for (const icon of ['BluetoothConnected', 'BluetoothSearching', 'TriangleAlert', 'Bluetooth']) {
+    assert.ok(
+      iconFn[0].includes(icon),
+      `el ícono \`${icon}\` desapareció del mapeo de estado: si el glifo deja de cambiar con el estado, el ` +
+        'color queda como único canal — que es exactamente lo que no puede pasar.',
+    );
+  }
+  assert.match(src, /<Icon size=\{geometry\.icon\}/, 'y ese ícono es el que se pinta (no uno fijo)');
 });
 
 test('(D) el `bottom` del hitSlop del FAB se DERIVA de los mismos tokens que el modelo', () => {

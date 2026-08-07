@@ -23,6 +23,7 @@ import { Select } from './Select';
 import { buttonA11y } from '../utils/a11y';
 import { maskDateInput } from '../utils/animal-input';
 import { validateEventDate } from '../utils/event-input';
+import { todayIsoLocal } from '../utils/today-iso';
 import {
   TREATMENT_KIND_OPTIONS,
   TREATMENT_ROUTE_OPTIONS,
@@ -59,14 +60,6 @@ export type TreatmentStartSheetProps = {
   onSubmit: (submit: TreatmentStartSubmit) => Promise<{ ok: boolean; error?: string }>;
 };
 
-/** Fecha de hoy ISO 'YYYY-MM-DD' (local) para pre-cargar la fecha de la 1ª aplicación. */
-function todayIso(): string {
-  const d = new Date();
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${d.getFullYear()}-${mm}-${dd}`;
-}
-
 export function TreatmentStartSheet({ onClose, onSubmit }: TreatmentStartSheetProps) {
   // ABRIR EL SHEET BAJA EL TECLADO (bug 🔴 device Android): se abre desde la ficha del animal, que tiene
   // campos de texto. Además del lift, tapa el LÍMITE del montaje del `KeyboardAvoidingShell` de abajo
@@ -87,7 +80,7 @@ export function TreatmentStartSheet({ onClose, onSubmit }: TreatmentStartSheetPr
   const [productName, setProductName] = useState('');
   const [notes, setNotes] = useState('');
   const [includeFirstApp, setIncludeFirstApp] = useState(false);
-  const [appDate, setAppDate] = useState(todayIso());
+  const [appDate, setAppDate] = useState(todayIsoLocal());
   const [dose, setDose] = useState('');
   const [route, setRoute] = useState<string | null>(null);
   const [nextDose, setNextDose] = useState('');

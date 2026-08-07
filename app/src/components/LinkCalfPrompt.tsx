@@ -57,7 +57,8 @@ import { lookupByTag, searchAnimals, type AnimalListItem } from '../services/ani
 import { fetchMother, linkCalfToMother, registerBirth } from '../services/events';
 import type { Rodeo } from '../services/rodeos';
 import type { AnimalSex } from '../utils/animal-category';
-import { classifyCalfQuery, resolveLinkEventDate, todayIsoLocal } from '../utils/link-calf-query';
+import { classifyCalfQuery, resolveLinkEventDate } from '../utils/link-calf-query';
+import { todayIsoLocal } from '../utils/today-iso';
 import { sanitizeIdvInput } from '../utils/animal-input';
 import {
   sanitizeBirthYearInput,

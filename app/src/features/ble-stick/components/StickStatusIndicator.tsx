@@ -3,77 +3,85 @@
 // spec 04, NO redefinido). Reactivo al `connection_changed` que el provider ya emite.
 //
 // Montaje: en el host raíz (`app/app/_layout.tsx`, dentro del BleStickListenerProvider), como HERMANO
-// del stack de navegación — NO toca ningún archivo/contrato de spec 09 (find-or-create). NO BLOQUEANTE
-// (RMV3.6):
-//   - `pointerEvents="box-none"` en el CONTENEDOR absoluto → la banda a ancho completo NO captura
-//     toques: pasan de largo a la pantalla de abajo. Esto NO se toca: el contenedor mide todo el ancho
-//     y varias decenas de px de alto sobre el nav; si capturara, rompería el borde inferior de TODAS
-//     las pantallas (es el mismo motivo por el que se descartó agrandar el tabBar).
-//   - ANCLADO AL FONDO (estilo "toast"), por encima de la bottom tab bar y del pico del FAB central →
-//     nunca pisa el título del header de ninguna pantalla (Gate 2.5 / ADR-029, veta visual resuelta).
+// del stack de navegación — NO toca ningún archivo/contrato de spec 09 (find-or-create).
+//
+// ── LA FORMA: CÍRCULO PERMANENTE QUE SE ESTIRA A PILL AL CAMBIAR (decisión de Raf, 2026-08-06) ───────
+// Vive **arriba a la derecha**, permanente, como un **círculo con el ícono solo** (presencia sin ocupar
+// lugar); cuando el estado CAMBIA se estira unos segundos a una **pill con el texto corto** y vuelve al
+// círculo. Presencia permanente (el chrome nunca queda mudo) + el mensaje completo justo cuando importa.
+// El CUÁNDO se decide en `../indicator-morph.ts` (puro, testeado): el ciclo del backoff de reconexión
+// —que cicla `connecting`↔`scanning` durante minutos— es UNA sola noticia y no hace parpadear nada.
+//
+// **El estado NO va por color solo** (WCAG 1.4.1; y ~8 % de los varones no distingue rojo/verde, en un
+// producto de usuarios mayoritariamente varones en el campo): lo lleva el **ícono** —`iconFor()`:
+// bluetooth / bluetooth-conectado / bluetooth-buscando / triángulo de alerta— y el color lo REFUERZA. Es
+// la misma regla que el nav ya aplica ("la pill suma 2 canales además del color", `(tabs)/_layout.tsx`).
+//
+// ── DÓNDE SE ANCLA, Y POR QUÉ AHÍ (medido) ──────────────────────────────────────────────────────────
+// `top = insets.top + ALTO_FILA_HEADER`, `right = $4`: **DEBAJO de la fila del header**, no adentro.
+//   · Adentro de la fila NO se puede: esa fila es donde la app pone su acción secundaria, y está ocupada
+//     en la home (avatar `$avatar`, medido en x=[353,393] y=[13,52] @412), en `/maniobra` (la ✕ que cierra
+//     el modal), en `mis-campos` ("+ Crear campo"), en `lote/[id]` en selección ("Todos/Ninguno") y en el
+//     flujo de manga (`SpikeIdentityHeader`: "Saltear ‹maniobra›" + el "⋮", ahí A PROPÓSITO por Fitts).
+//     Cederle el lugar en flujo tampoco: **37 pantallas arman su propio header** y no hay componente
+//     compartido.
+//   · El alto de la fila se DERIVA de tokens y no se elige a ojo: `$3` (su paddingVertical) ×2 + `$avatar`
+//     (el elemento más alto que vive en ella). Con eso el círculo despeja la fila en TODAS las pantallas
+//     que la arman con el patrón estándar.
+//   · Debajo de esa fila la banda está libre en la mayoría (medido con Pillow sobre renders reales: home,
+//     "Más", reportes, ficha, alta, listas…). Donde NO lo está —porque la pantalla mete algo a ancho
+//     completo pegado al header (buscador, header de identidad de manga)— la pantalla RECLAMA el lugar
+//     (`useStickStatusSurface`), igual que las que ya muestran el estado. La lista y la medición están en
+//     `progress/impl_pill-arriba-derecha.md`.
+//
+// ── ⛔ NO ES TOCABLE, Y NO PUEDE SERLO. NO LE PONGAS `onPress` ──────────────────────────────────────
+// Se intentó el 2026-08-06 (pedido de Raf: la app arrancaba con el pill ciclando "Conectando…" y el gesto
+// natural —tocar lo que te informa el problema— no hacía nada) y **se revirtió el mismo día con evidencia
+// medida**. Los números eran de cuando el pill vivía ABAJO (quedaba ENTERO adentro del CTA 'Arrancar
+// jornada' del A07: `[34,1242]-[686,1362]` vs `[220,1244]-[500,1306]`, y era el elemento topmost sobre
+// "Ir a Animales", "Eliminar campo" y tres maniobras de `/maniobra/jornada`). **Mudarse arriba NO reabre
+// la discusión**: un elemento flotante del chrome que reclama toques ajenos es la misma clase de defecto
+// —el `hitSlop.top` del FAB, en la otra dirección—, y acá abajo del círculo hay contenido de la pantalla
+// (buscadores, cards, la primera línea del contenido). El acceso a `/baston` ya está resuelto sin esto: la
+// fila de "Dispositivos" del tab "Más" (RMV3.1) y el `ConnectHero` de cada pantalla relevante.
+// Lo hace cumplir `src/utils/tap-target-collision-guard.test.ts` → `(E)`: si aparece un `onPress` o se va
+// el `pointerEvents="none"`, el guard se pone rojo. Y lo verifica por comportamiento
+// `e2e/fab-target-geometry.spec.ts` (el indicador nunca es el elemento *topmost* en su centro).
+//
+// ── SUPRESIÓN ───────────────────────────────────────────────────────────────────────────────────────
 //   - se AUTO-OCULTA en 'off' (el estado por defecto / sin bastón activo) → invisible en las pantallas
-//     normales; solo aparece cuando hay actividad real del bastón (conectando/conectado/reintentando/
-//     desconectado/sin permiso). Durante una demo, es justo cuando se lo quiere ver.
-//   - se SUPRIME en la propia `/baston`: ahí la StickConnectionScreen ya muestra el estado en su card
-//     (redundante) y el indicador competiría con el título de esa pantalla.
-//
-// ── ⛔ EL PILL NO ES TOCABLE, Y NO PUEDE SERLO. NO LE PONGAS `onPress` ──────────────────────────────
-// Se intentó el 2026-08-06 (pedido de Raf: la app arrancaba con el pill ciclando "Conectando…" y el
-// gesto natural —tocar lo que te informa el problema— no hacía nada) y **se revirtió el mismo día con
-// evidencia medida**. Queda escrito acá para que el próximo que lo proponga se encuentre con los números
-// y no con el silencio:
-//
-//   · **A07, build real** (720×1600): el CTA primario del asistente de jornada, `'Arrancar jornada'`,
-//     ocupa `[34,1242]-[686,1362]`; el pill ocupa `[220,1244]-[500,1306]` — o sea el pill queda
-//     **ENTERO ADENTRO del botón**. Hoy un tap en el centro del pill (360, 1275) atraviesa y arranca la
-//     jornada, que es lo correcto. Con el pill tocable, ese mismo tap se lo lleva `/baston`: el botón
-//     más importante del flujo de manga deja de responder donde el operario apoya el dedo.
-//   · **Barrido en web @412×915** (pill `y=[759,799] x=[133,279]`), con el pill como elemento *topmost*
-//     en su centro: se quedaba con los toques de `"Ir a Animales"` (tab Inicio), `"Eliminar campo
-//     (acción destructiva)"` (tab Más) y **tres maniobras tocables de `/maniobra/jornada` etapa 2**
-//     (`"Antibiótico"`, `"Circunferencia escrotal"`, `"Antiparasitario"`) — 🔴 manga.
-//
-// **La conclusión no es "elegimos mal el lugar": es que el lugar no existe.** La banda de abajo está
-// disputada POR DISEÑO — todo CTA a ancho completo la cruza —, así que no hay ninguna posición en el eje
-// x donde un pill flotante y tocable sea seguro ahí. Un elemento flotante que reclama toques ajenos es
-// exactamente la clase de defecto que esta unidad vino a cerrar (el `hitSlop.top` del FAB), reintroducida
-// en la otra dirección. Gatear por ruta ya se descartó aparte (una afordancia que aparece y desaparece
-// según dónde estés es peor que una constante).
-//
-// El acceso a `/baston` ya está resuelto sin esto: la fila de la sección "Dispositivos" del tab "Más"
-// (RMV3.1) y el `ConnectHero` que cada pantalla relevante ya monta. No se pierde nada.
-//
-// Lo hace cumplir `src/utils/tap-target-collision-guard.test.ts` → `(E)`: si aparece un `onPress` o se
-// va el `pointerEvents="none"`, el guard se pone rojo.
-//
-// ── GEOMETRÍA: por qué el pill se ancla donde se ancla ──────────────────────────────────────────────
-// El pill flota JUSTO encima del pico del FAB de Maniobra, y hasta el 2026-08-06 el `hitSlop.top` del FAB
-// se comía el **48 % inferior** del pill: un toque ahí abría MODO MANIOBRAS (bugfix 🔴 de Raf en device).
-// Ojo: que el pill sea `pointerEvents="none"` **no alcanzaba** para evitarlo — el toque atravesaba el
-// pill y caía justo en el target inflado del FAB, que es lo que estaba abajo. El fix es del lado del FAB
-// (sacarle el `top`), y de este lado se conserva el aire:
-//   · el gap al pico del FAB es `$4` (18) y no `$2` (7) → **20 dp** de separación efectiva (el gap más el
-//     `$navItemTop` del nav). Con 9-10 dp el pill y el círculo se leían como una sola pieza pegada, y
-//     cualquier futuro slop del FAB se los comía de nuevo. El aire es visual Y es margen de seguridad.
-//   · NO lleva `minHeight="$chipMin"`: 40 dp es el bar de un TARGET compacto, y esto no es un target. Su
-//     alto es el de su contenido (~33 dp), como siempre.
-// Lo verifica `src/utils/nav-target-bands.test.ts` (aritmética desde los tokens) y
-// `e2e/fab-target-geometry.spec.ts` (cajas reales).
+//     normales; solo aparece cuando hay actividad real del bastón. Durante una demo, es justo cuando se
+//     lo quiere ver.
+//   - se SUPRIME donde OTRA superficie ya muestra el estado (la card de `/baston`, el chip del header de
+//     `(tabs)/animales` y `maniobra/identificar`) y donde la pantalla ya usa esa banda. Lo declara cada
+//     superficie con `useStickStatusSurface()` mientras está enfocada — NO una lista de rutas acá adentro
+//     (hasta el 2026-08-06 era `pathname === '/baston'`, la clase de lista que envejece mal: renombrás la
+//     ruta y el indicador vuelve a duplicar en silencio). El porqué, en `services/ble/stick-status-surface.ts`.
 //
 // Cero hardcode (ADR-023 §4): tokens + getTokenValue para el ícono lucide y la geometría. es-AR.
 
-import { usePathname } from 'expo-router';
+import { useEffect, useRef, useState } from 'react';
+import { Platform } from 'react-native';
+import Animated, { useAnimatedStyle, useSharedValue, withTiming, Easing } from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getTokenValue, Text, View, XStack } from 'tamagui';
 import { Bluetooth, BluetoothConnected, BluetoothSearching, TriangleAlert } from 'lucide-react-native';
 
-import { useSafeBottomInset } from '@/hooks/useSafeBottomInset';
 import { useBleProviderApi } from '@/services/ble/BleStickListenerProvider';
 import { useBleConnectionStatus } from '@/services/ble/connection-status';
+import { useStickStatusSurfaceClaimed } from '@/services/ble/stick-status-surface';
+import { useReduceMotion } from '@/hooks/useReduceMotion';
+import { INDICATOR_BORDER as BORDER, indicatorGeometry } from '../indicator-geometry';
 import type { ConnectionStatus } from '@/services/ble/stick-adapter';
 import { isDemoMode } from '@/services/ble/demo-gate';
 import { labelA11y } from '@/utils/a11y';
-import { connectionStatusView, type ViewTone } from '../connection-view';
-import { Platform } from 'react-native';
+import { connectionRowStatus, stickStateA11yName, toneColorToken } from '../connection-view';
+import {
+  MORPH_EXPANDED_MS,
+  announceKeyFor,
+  planMorph,
+  type StickAnnounceKey,
+} from '../indicator-morph';
 
 // ¿Estamos en una corrida E2E que NO es demo? (regresión de Playwright de OTRAS features / capturas).
 // El indicador es un elemento NUEVO del chrome GLOBAL: si se montara en las corridas E2E existentes,
@@ -89,6 +97,7 @@ function isNonDemoE2E(): boolean {
   }
 }
 
+/** El ícono ES el canal de estado (no el color): ver la cabecera. */
 function iconFor(status: ConnectionStatus): typeof Bluetooth {
   switch (status) {
     case 'connected':
@@ -105,54 +114,79 @@ function iconFor(status: ConnectionStatus): typeof Bluetooth {
   }
 }
 
-function toneColorToken(tone: ViewTone): '$primary' | '$terracota' | '$textMuted' {
-  switch (tone) {
-    case 'success':
-      return '$primary';
-    case 'warning':
-      return '$terracota';
-    case 'progress':
-      return '$primary';
-    case 'idle':
-    default:
-      return '$textMuted';
-  }
-}
+/** Duración del estirado/encogido. Corto: es un cambio de forma, no un espectáculo. */
+const MORPH_MS = 220;
 
 export function StickStatusIndicator() {
   const status = useBleConnectionStatus();
   // ¿Hay transporte instanciado? Sin transporte no hay NADA que reportar (el único estado alcanzable es
-  // 'off', y el provider ni siquiera suscribe un onStatus) → el pill no existe. Hoy es equivalente al
+  // 'off', y el provider ni siquiera suscribe un onStatus) → el indicador no existe. Hoy es equivalente al
   // auto-oculto en 'off' de más abajo; se hace explícito para (a) alimentar la vista pura, que exige el
   // dato, y (b) cubrir el transitorio en que el transporte se desmonta en caliente con un status previo
-  // pegado (cambio de `mode` del provider). Hook arriba de todo: antes de cualquier return temprano.
+  // pegado (cambio de `mode` del provider). Hooks arriba de todo: antes de cualquier return temprano.
   const hasTransport = useBleProviderApi()?.transport != null;
-  // MISMA reserva inferior que el bottom-nav: este pill se posiciona RELATIVO a la tab bar, así que
-  // tiene que leerla por el mismo hook o se desincroniza. Antes usaba el inset PELADO, que en web (inset
-  // 0) lo dejaba 12px por debajo del paddingBottom real del nav y en Android quedaría 16px abajo al
-  // sumarse el aire → el pico del FAB (que sube $fabRaise sobre el nav) se lo comía.
-  const safeBottom = useSafeBottomInset();
-  // Ruta actual del árbol de expo-router. BleHost (donde vive este componente) está DENTRO del contexto de
-  // navegación — mismo tramo del árbol que RootGate, que usa useSegments — así que usePathname() resuelve
-  // (para la ruta `app/baston.tsx` → '/baston').
-  const pathname = usePathname();
+  // ¿Alguna superficie de la pantalla ENFOCADA ya está mostrando el estado, o ya usa esta banda?
+  const surfaceClaimed = useStickStatusSurfaceClaimed();
+  const insets = useSafeAreaInsets();
+  const reduceMotion = useReduceMotion();
+  const geometry = indicatorGeometry();
 
-  // Suprimido en la regresión E2E no-demo (evita duplicar textos de estado que sus specs asertan exact).
-  if (isNonDemoE2E()) return null;
+  // ── El morph ────────────────────────────────────────────────────────────────────────────────────────
+  // `expanded` es estado de React (decide qué se muestra); el ANCHO es un shared value de reanimated (se
+  // anima en el hilo de UI). El ancho natural de la pill se MIDE (`onLayout` de la fila de adentro): el
+  // texto cambia con el estado y con el idioma, así que no puede ser una constante.
+  const [expanded, setExpanded] = useState(false);
+  const naturalWidth = useSharedValue(0);
+  const expandedShared = useSharedValue(0);
+  const prevKeyRef = useRef<StickAnnounceKey | null>(null);
+  const lastAnnouncedAtRef = useRef<Partial<Record<StickAnnounceKey, number>>>({});
 
-  // Suprimido en la PROPIA pantalla de conexión (/baston): ahí es REDUNDANTE (la StickConnectionScreen ya
-  // muestra el estado en su card, con su CTA) y, montado sobre esa pantalla, el pill compite con el título.
-  // El indicador GLOBAL (RMV3.5) se demuestra en las pantallas SIN card de estado propia (home, tabs, flujos).
-  if (pathname === '/baston') return null;
+  const announceKey = announceKeyFor(status);
+  const visible = !isNonDemoE2E() && !surfaceClaimed && hasTransport && status !== 'off';
 
-  // Sin transporte instanciado (native manual-first hoy): nada que indicar → sin pill.
-  if (!hasTransport) return null;
+  // Decide el aviso cuando cambia la CLASE de estado (no el estado crudo: el backoff no parpadea) y
+  // programa la vuelta al círculo. El plan es puro y está testeado en `indicator-morph.test.ts`; acá solo
+  // vive el reloj, la memoria de lo anunciado y el timer.
+  useEffect(() => {
+    if (!visible) {
+      // Mientras no se muestra, no se anuncia nada y no se arrastra memoria de una sesión de bastón vieja:
+      // si el indicador vuelve a aparecer, esa aparición ES una noticia.
+      prevKeyRef.current = null;
+      setExpanded(false);
+      return;
+    }
+    const plan = planMorph({
+      prevKey: prevKeyRef.current,
+      nextKey: announceKey,
+      now: Date.now(),
+      lastAnnouncedAt: lastAnnouncedAtRef.current,
+    });
+    prevKeyRef.current = announceKey;
+    if (!plan.expand) return;
+    lastAnnouncedAtRef.current[announceKey] = Date.now();
+    setExpanded(true);
+    const timer = setTimeout(() => setExpanded(false), MORPH_EXPANDED_MS);
+    return () => clearTimeout(timer);
+  }, [announceKey, visible]);
 
-  // Auto-oculto en 'off' (sin actividad del bastón): no ensucia el chrome de las pantallas normales.
-  if (status === 'off') return null;
+  // El ancho: círculo ↔ natural. Con reduce-motion no hay recorrido (salta), que es exactamente lo que esa
+  // preferencia pide — la información igual aparece. Mismo criterio que `Skeleton`.
+  useEffect(() => {
+    expandedShared.value = expanded ? 1 : 0;
+  }, [expanded, expandedShared]);
 
-  const view = connectionStatusView(status, { hasTransport });
-  const colorToken = toneColorToken(view.tone);
+  const circle = geometry.circle;
+  const animatedStyle = useAnimatedStyle(() => {
+    const target = expandedShared.value === 1 && naturalWidth.value > 0 ? naturalWidth.value : circle;
+    return {
+      width: reduceMotion ? target : withTiming(target, { duration: MORPH_MS, easing: Easing.out(Easing.cubic) }),
+    };
+  }, [reduceMotion, circle]);
+
+  if (!visible) return null;
+
+  const row = connectionRowStatus(status, { hasTransport });
+  const colorToken = toneColorToken(row.tone);
   const iconColor = getTokenValue(colorToken, 'color');
   const Icon = iconFor(status);
 
@@ -160,55 +194,92 @@ export function StickStatusIndicator() {
     <View
       testID="stick-status-indicator"
       position="absolute"
-      // Anclado al FONDO (estilo "toast"), centrado, POR ENCIMA de la bottom tab bar Y del pico del FAB
-      // central elevado → nunca pisa el título de un header (en ninguna pantalla). Geometría 100% con tokens
-      // (cero hardcode, ADR-023 §4): reserva inferior del nav (`useSafeBottomInset()`, EXACTAMENTE el
-      // paddingBottom de la tab bar) + alto de contenido de la nav bar ($navBar=60) + cuánto sube el FAB
-      // sobre la barra ($fabRaise=26) + un gap → el pill queda ese gap por encima del pico del FAB.
-      // El gap es `$4` (18) desde el 2026-08-06, no `$2` (7): la separación EFECTIVA entre el borde de
-      // abajo del pill y el techo del target del FAB es `gap + $navItemTop` = 20 dp (el nav mete 2 de
-      // paddingTop antes del círculo). Con 9-10 dp los dos se leían como una sola pieza pegada, y
-      // cualquier slop futuro del FAB se los volvía a comer. Lo fija `src/utils/nav-target-bands.test.ts`.
-      // En pantallas SIN tab bar (Stack) flota ~navBar+fabRaise px sobre el fondo: aceptable (no hay
-      // header abajo que pisar).
-      bottom={
-        safeBottom +
-        getTokenValue('$navBar', 'size') +
-        getTokenValue('$fabRaise', 'size') +
-        getTokenValue('$4', 'space')
-      }
+      // DEBAJO de la fila del header y pegado al margen derecho. El alto de la fila se DERIVA de tokens
+      // (`$3` ×2 = su paddingVertical + `$avatar` = el elemento más alto que vive ahí), no se elige a ojo:
+      // si mañana el avatar del header cambia de tamaño, el indicador lo sigue solo. Ver la cabecera para
+      // por qué no va DENTRO de la fila.
+      top={insets.top + getTokenValue('$3', 'space') * 2 + getTokenValue('$avatar', 'size')}
+      // ── EL CONTENEDOR VA A ANCHO COMPLETO Y ALINEA A LA DERECHA (no `right={$4}` a secas) ───────────
+      // Con `right` en el contenedor, el bug que la captura del Gate 2.5 encontró: al estirarse, la pill
+      // crecía hacia la DERECHA y se salía de la pantalla ("Conectado" cortado en el borde @412). El
+      // contenedor tomaba su ancho del hijo COLAPSADO (40) y el ancho animado del hijo no lo re-dimensiona.
+      // A ancho completo con `alignItems="flex-end"`, el que crece es un hijo alineado al final: la pill se
+      // estira hacia la IZQUIERDA, que es lo que tiene que pasar. El `paddingRight` es el margen de la app.
       left="$0"
       right="$0"
-      alignItems="center"
-      // NO bloqueante (RMV3.6): los toques atraviesan el CONTENEDOR hacia la pantalla de abajo. Solo el
-      // pill de adentro es tocable. Cambiar esto por 'auto'/'box-only' convertiría una banda de ancho
-      // completo en un capturador de toques sobre el borde inferior de todas las pantallas.
+      alignItems="flex-end"
+      paddingRight={getTokenValue('$4', 'space')}
+      // NO bloqueante (RMV3.6): los toques atraviesan el CONTENEDOR hacia la pantalla de abajo. Ahora que
+      // mide todo el ancho, esto NO es opcional: sin `box-none` capturaría los toques de una banda entera.
       pointerEvents="box-none"
     >
-      {/* EL PILL. `pointerEvents="none"` — NO se toca (ver el bloque ⛔ de la cabecera): el pill se
-          superpone a CTAs a ancho completo en las pantallas de manga (medido: 'Arrancar jornada' en el
-          A07, las 3 maniobras de jornada etapa 2, "Ir a Animales" en Inicio), así que tiene que dejar
-          pasar el toque a lo que hay debajo. `none` y no heredar del contenedor: el contenedor es
-          `box-none`, que en Tamagui web emite `._pe-boxnone > * { pointer-events:auto }` — o sea el hijo
-          directo VOLVERÍA a capturar si no lo declarara. El `none` explícito es lo que sostiene RMV3.6. */}
-      <XStack
+      {/* EL INDICADOR. `pointerEvents="none"` — NO se toca (ver el bloque ⛔ de la cabecera): flota sobre
+          contenido de la pantalla (buscadores, cards, la primera línea del contenido), así que tiene que
+          dejar pasar el toque a lo que hay debajo. `none` explícito y no heredado: el contenedor es
+          `box-none`, que en web emite `._pe-boxnone > * { pointer-events:auto }` — el hijo directo
+          VOLVERÍA a capturar. Ese `none` es lo que sostiene RMV3.6.
+          `overflow="hidden"` es el mecanismo del morph: la fila de adentro está SIEMPRE completa y lo que
+          cambia es cuánto de ella se ve. */}
+      <Animated.View
         testID="stick-status-pill"
-        alignItems="center"
-        gap="$2"
-        backgroundColor="$surface"
-        borderWidth={1}
-        borderColor="$divider"
-        borderRadius="$pill"
-        paddingHorizontal="$3"
-        paddingVertical="$2"
+        style={[
+          {
+            height: geometry.circle,
+            borderRadius: geometry.circle / 2,
+            borderWidth: BORDER,
+            borderColor: getTokenValue('$divider', 'color'),
+            backgroundColor: getTokenValue('$surface', 'color'),
+            overflow: 'hidden',
+            // Fila: el hijo conserva su ancho natural y lo que sobra se RECORTA (no se comprime). Con el
+            // default (columna + `align-items: stretch`) el hijo heredaba el ancho del clipper y el texto
+            // salía apretado; con `flexShrink: 0` (abajo) se desborda y el `overflow: hidden` lo tapa, que
+            // es exactamente el mecanismo del morph.
+            flexDirection: 'row',
+            alignItems: 'center',
+          },
+          animatedStyle,
+        ]}
         pointerEvents="none"
-        {...labelA11y(Platform.OS, view.label)}
+        {...labelA11y(Platform.OS, stickStateA11yName(status, { hasTransport }))}
       >
-        <Icon size={getTokenValue('$dot', 'size')} color={iconColor} strokeWidth={2.25} />
-        <Text fontFamily="$body" fontSize="$2" lineHeight="$2" fontWeight="600" color={colorToken}>
-          {view.label}
-        </Text>
-      </XStack>
+        {/* ── LA FILA, SIEMPRE COMPLETA ────────────────────────────────────────────────────────────────
+            `flexShrink={0}` es lo que hace que mida su ancho NATURAL aunque el clipper esté en 40: sin eso
+            el hijo se comprime y el texto sale apretado/cortado adentro de la pill en vez de quedar TAPADO
+            por el recorte. Lo encontró la captura del Gate 2.5 (el primer intento la posicionaba absoluta,
+            y en web `position:absolute; left:0` igual queda acotado por el ancho del contenedor → medía
+            86 px donde el contenido pedía 111, y "Conectado" salía cortado). El `onLayout` de acá es el
+            que le dice al morph hasta dónde estirarse: el texto cambia con el estado, así que el destino
+            de la animación no puede ser una constante. */}
+        <XStack
+          flexShrink={0}
+          height={geometry.content}
+          alignItems="center"
+          gap="$2"
+          paddingLeft={geometry.pad}
+          paddingRight="$3"
+          onLayout={(e) => {
+            naturalWidth.value = e.nativeEvent.layout.width + BORDER * 2;
+          }}
+        >
+          <Icon size={geometry.icon} color={iconColor} strokeWidth={2.25} />
+          <Text
+            fontFamily="$body"
+            fontSize="$2"
+            lineHeight="$2"
+            fontWeight="600"
+            color={colorToken}
+            numberOfLines={1}
+            // `flexShrink={0}` TAMBIÉN acá, y no es redundante con el de la fila: el texto es el que se
+            // comprimía. Con el clipper en 40 px, el `<Text>` se encogía a lo que "entraba" y arrastraba a
+            // la fila con él (medido: la fila reportaba 84 px donde el contenido pide 111, y "Conectado"
+            // salía cortado DENTRO de la pill en vez de quedar tapado por el recorte).
+            flexShrink={0}
+          >
+            {row.text}
+          </Text>
+        </XStack>
+      </Animated.View>
     </View>
   );
 }
+

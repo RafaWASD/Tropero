@@ -39,7 +39,12 @@ export type SearchPlan = {
   tryTagExact: boolean;
   /** término no vacío → match EXACTO de idv (alfanumérico; el motor lo prioriza sobre substring/apodo). */
   tryIdvExact: boolean;
-  /** término no vacío → match PARCIAL (LIKE) sobre idv + tag_electronic denormalizado. */
+  /**
+   * compacto NO vacío → match PARCIAL (LIKE) sobre idv (con los separadores descartados de LOS DOS lados,
+   * ver `idvExactTerms`) + sobre tag_electronic. Gatea por el COMPACTO y no por el normalizado: un término
+   * que es puro separador (`---`) compacta a vacío y el patrón `%%` matchearía TODA la tabla — 20 animales
+   * arbitrarios presentados como candidatos (y, en la manga, como una desambiguación de 20).
+   */
   tryIdvSubstring: boolean;
   /** término no vacío → match PARCIAL (LIKE) sobre el apodo (custom_attributes join). NUEVO. */
   tryApodo: boolean;
@@ -47,6 +52,20 @@ export type SearchPlan = {
   normalized: string;
   /** Texto compacto (sin separadores) — el que se usa para el match exacto/substring de TAG/IDV. */
   compact: string;
+  /**
+   * Los términos del match EXACTO de idv, en orden de prioridad: el tipeado TAL CUAL (que es como el
+   * identificador está IMPRESO en la caravana) y, si difiere, su versión compacta. 1 ó 2 elementos; vacío
+   * solo si el término está vacío.
+   *
+   * ── POR QUÉ (🔴 A.1, QA en device 2026-08-06) ────────────────────────────────────────────────────
+   * El plan corría el canal idv SOLO con `compact`, pero el idv GUARDADO conserva el guion: tipear
+   * `PERF-00500` —el string exacto que la propia app muestra— se comparaba como `PERF00500` contra
+   * `PERF-00500` y NO matcheaba. La app contestaba "Animal nuevo · Dalo de alta": un toque y quedaba un
+   * animal DUPLICADO con la jornada repartida entre los dos. El compactado tiene sentido para la caravana
+   * ELECTRÓNICA (el operario tipea `982 000 364…` en grupos); aplicarlo al canal idv, donde el separador
+   * es parte del valor guardado, es lo que rompía.
+   */
+  idvExactTerms: readonly string[];
 };
 
 // Una caravana electrónica FDX-B son exactamente 15 dígitos. Si el texto compacto tiene 15 dígitos, es un
@@ -63,6 +82,16 @@ const TAG_DIGITS = 15;
  *   - `tryTagExact` = el compact es 15 dígitos (sin cambio conceptual).
  * La desambiguación (un mismo texto matchea varios canales) la resuelve el motor (searchAnimals), que
  * prioriza los EXACTOS (tag/idv) sobre los substring/apodo y deduplica por profileId.
+ *
+ * Fix 🔴 A.1 (QA en device 2026-08-06) — la normalización de separadores del canal IDV va en DOS piezas y
+ * cada una tiene su motivo:
+ *   (a) EXACTO → `idvExactTerms` = [tipeado, compacto]: el tipeado TAL CUAL entra primero para que "tipear
+ *       la caravana como está impresa" pegue en el índice de `idv` (camino rápido de la manga, auto-avance
+ *       sin desambiguar). El compacto se conserva para el caso inverso (idv guardado sin separadores).
+ *   (b) SUBSTRING → el término compacto contra la columna TAMBIÉN compactada (lo hace `buildSearchLikeQuery`).
+ *       Es lo que hace que un fragmento que CRUZA el separador (`PERF-005`, `F-005`) encuentre al animal.
+ * El canal TAG sigue usando solo `compact`: la caravana electrónica guardada son 15 dígitos puros y el
+ * separador ahí es SIEMPRE de tipeo.
  */
 export function classifySearchQuery(query: string): SearchPlan {
   // F1-1 (R7.3): recorte AUTORITATIVO server-side del término antes de cualquier query. El service consume
@@ -73,13 +102,20 @@ export function classifySearchQuery(query: string): SearchPlan {
   const compact = normalized.replace(STRUCTURED_SEPARATORS, '');
   const nonEmpty = normalized.length > 0;
   const isDigits = compact.length > 0 && /^\d+$/.test(compact);
+  // El tipeado primero (prioridad: es como está impreso), el compacto solo si aporta algo distinto.
+  const idvExactTerms = nonEmpty
+    ? compact.length > 0 && compact !== normalized
+      ? [normalized, compact]
+      : [normalized]
+    : [];
   return {
     tryTagExact: isDigits && compact.length === TAG_DIGITS,
-    tryIdvExact: nonEmpty,
-    tryIdvSubstring: nonEmpty,
+    tryIdvExact: idvExactTerms.length > 0,
+    tryIdvSubstring: compact.length > 0,
     tryApodo: nonEmpty,
     normalized,
     compact,
+    idvExactTerms,
   };
 }
 

@@ -206,11 +206,24 @@ function joinStateAndAction(state: string, action: string): string {
 }
 
 /**
+ * Nombre accesible de **cualquier superficie que solo INFORME el estado del bastón**: el estado corto,
+ * precedido por el sujeto ("Bastón: Conectado"). Sin acción — quien además navega le agrega la suya.
+ *
+ * Existe porque el indicador global del chrome (`StickStatusIndicator`) muestra el estado corto y, cuando
+ * está colapsado en círculo, **el texto no se ve**: el nombre accesible es lo único que lo dice. Sale de
+ * la MISMA fuente que el trailing de la fila de "Más" (`connectionRowStatus`) para que las dos superficies
+ * no puedan divergir — que es el defecto que este archivo viene cerrando desde el 2026-07-29.
+ */
+export function stickStateA11yName(status: ConnectionStatus, env: ConnectionEnv): string {
+  return `Bastón: ${connectionRowStatus(status, env).text}`;
+}
+
+/**
  * Nombre accesible de la **fila "Bastón" del tab "Más"**. El estado va DENTRO del nombre: la fila
  * informa sin entrar, y un lector de pantalla tiene que poder decir lo mismo que el trailing.
  */
 export function connectionRowA11yLabel(status: ConnectionStatus, env: ConnectionEnv): string {
-  return joinStateAndAction(`Bastón: ${connectionRowStatus(status, env).text}`, STICK_ROW_ACTION);
+  return joinStateAndAction(stickStateA11yName(status, env), STICK_ROW_ACTION);
 }
 
 /**

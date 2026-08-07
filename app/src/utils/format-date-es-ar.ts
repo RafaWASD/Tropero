@@ -16,6 +16,14 @@
 // NOTA: los valores date-only que la RPC animal_timeline castea a UTC-medianoche
 // (`2026-06-02T00:00:00+00:00`) NO pasan por este util — los formatea `formatEventDate` con su flag
 // `dateOnly` (getters UTC). Este util recibe date-only CRUDO (`AAAA-MM-DD`) o instantes reales.
+//
+// ── EL MÓDULO HERMANO: `utils/today-iso.ts` ──────────────────────────────────────────────────────────
+// Este archivo es de DISPLAY. Para el valor de MÁQUINA —"qué día es hoy" cuando el destino es una columna
+// Postgres `date` o una clave idempotente— la fuente única es `todayIsoLocal()` / `localDayAnchorUtc()` de
+// `utils/today-iso.ts`, y NO va acá a propósito: `docs/conventions.md` separa el formato de usuario del de
+// máquina, y borrar esa línea es lo que empieza a mezclar los dos mundos. Lo que SÍ comparten es la regla
+// de TZ-safety, así que si tocás una, mirá la otra. Un guard app-wide
+// (`utils/today-iso-guard.test.ts`) prohíbe derivar el día calendario en cualquier otro lado.
 
 function pad2(n: number): string {
   return n < 10 ? `0${n}` : String(n);

@@ -24,6 +24,7 @@ import { Bluetooth, BluetoothConnected, BluetoothSearching, TriangleAlert } from
 
 import { useBleConnectionStatus } from '../services/ble/connection-status';
 import { useBleProviderApi } from '../services/ble/BleStickListenerProvider';
+import { useStickStatusSurface } from '../hooks/useStickStatusSurface';
 import { bleConnectionView, type BleStatusIcon } from './ble-connection-view';
 import { buttonA11y } from '../utils/a11y';
 
@@ -43,6 +44,14 @@ export function BleConnectionChip() {
   const transport = api?.transport ?? null;
   const view = bleConnectionView(status, { hasTransport: transport != null });
   const connected = view?.connected ?? false;
+
+  // Mientras este chip esté pintado en una pantalla ENFOCADA, el indicador global del chrome (RMV3.5) se
+  // calla: el estado del bastón ya está a la vista y repetirlo es ruido (pedido de Raf, 2026-08-06). La
+  // señal la declara el chip —no una lista de rutas en el indicador—, así que montarlo en una pantalla
+  // nueva trae el comportamiento puesto y renombrar una ruta no rompe nada en silencio. `view !== null`:
+  // sin transporte el chip no renderiza, y reclamar sin pintar apagaría el indicador global a cambio de
+  // nada. Ver `services/ble/stick-status-surface.ts`.
+  useStickStatusSurface('header-chip', view !== null);
 
   // Conectar requiere un GESTO DE USUARIO (este onPress lo es): web-serial rechaza requestPort sin gesto.
   // Si ya está conectado, el tap no hace nada (el chip pasa a informativo). El caso "sin transporte" ya

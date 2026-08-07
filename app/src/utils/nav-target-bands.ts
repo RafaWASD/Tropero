@@ -56,14 +56,14 @@ export interface NavTargetTokens {
   fabHitSlopTop: number;
   /** `hitSlop.bottom` del Pressable del FAB (crece hacia DENTRO del nav; ahí no hay vecinos). */
   fabHitSlopBottom: number;
-  /** Gap declarado entre el borde de abajo del pill y el PICO del FAB (token de space del pill). */
-  pillGap: number;
+  /** Gap declarado entre el borde de abajo de una superficie anclada abajo y el PICO del FAB. */
+  tenantGap: number;
   /**
-   * Alto PINTADO del pill (no es un target: el pill es `pointerEvents="none"` — ver el bloque ⛔ de
-   * `StickStatusIndicator.tsx`). Sale del contenido (`lineHeight $2` + `paddingVertical $2` ×2 + borde
-   * ×2); quien lo mide de verdad es `e2e/fab-target-geometry.spec.ts`, acá viaja como dato.
+   * Alto PINTADO de esa superficie. **Hoy la banda no tiene inquilinos** (el indicador del bastón se mudó
+   * arriba el 2026-08-06), así que este dato alimenta al INQUILINO SINTÉTICO con el que el modelo se
+   * sigue ejercitando. El invariante no depende de que haya alguien: describe qué le pasaría al próximo.
    */
-  pillHeight: number;
+  tenantHeight: number;
 }
 
 /** Franja vertical en `y_up` (dp sobre el borde inferior de la pantalla). `top > bottom`. */
@@ -101,17 +101,23 @@ export function fabTargetBand(t: NavTargetTokens): Band {
 }
 
 /**
- * La banda PINTADA del pill del bastón, anclada `pillGap` por encima del PICO del FAB.
+ * La banda PINTADA de una superficie ANCLADA AL BORDE INFERIOR, `tenantGap` por encima del PICO del FAB.
  *
- * ⚠️ El pill NO es un target (`pointerEvents="none"`), y eso **no vuelve inofensivo** que el FAB se meta
- * acá: fue exactamente el bug 🔴 original. El toque atraviesa el pill y cae en lo que hay DEBAJO — y si
- * el target inflado del FAB llega hasta acá, lo que hay debajo es el FAB. El operario toca lo que ve (un
- * chip de estado) y se le abre MODO MANIOBRAS. Por eso el invariante se mide contra la banda PINTADA:
- * es lo que el usuario percibe como "una cosa", tenga o no `onPress`.
+ * ⚠️ **HOY ESTA BANDA NO TIENE INQUILINOS.** El pill del bastón —el único que hubo— se mudó arriba a la
+ * derecha el 2026-08-06. El modelo se conserva **a propósito**: el invariante no es "el pill despeja el
+ * FAB", es *"nada anclado al borde inferior invade la banda del FAB"*, y eso sigue valiendo con la
+ * población vacía. Un guard que se borra cuando se va su último inquilino deja el mecanismo disponible
+ * para el próximo toast/snackbar/banner, que es exactamente cómo nació el bug 🔴 de 2026-08-05.
+ *
+ * ⚠️ Que el inquilino NO sea un target (el pill era `pointerEvents="none"`) **no vuelve inofensivo** que
+ * el FAB se meta acá: fue exactamente el bug original. El toque atraviesa la superficie y cae en lo que
+ * hay DEBAJO — y si el target inflado del FAB llega hasta acá, lo que hay debajo es el FAB. El operario
+ * toca lo que ve (un chip de estado) y se le abre MODO MANIOBRAS. Por eso el invariante se mide contra la
+ * banda PINTADA: es lo que el usuario percibe como "una cosa", tenga o no `onPress`.
  */
-export function stickPillBand(t: NavTargetTokens): Band {
-  const bottom = tabBarTop(t) + nonNegative(t.fabRaise) + nonNegative(t.pillGap);
-  return { bottom, top: bottom + nonNegative(t.pillHeight) };
+export function bottomAnchoredBand(t: NavTargetTokens): Band {
+  const bottom = tabBarTop(t) + nonNegative(t.fabRaise) + nonNegative(t.tenantGap);
+  return { bottom, top: bottom + nonNegative(t.tenantHeight) };
 }
 
 /**
@@ -195,6 +201,16 @@ export interface JsxPropExpr {
 
 /** Las reservas inferiores REALES: web · iOS · Android gestos · Android 3 botones. */
 export const REAL_BOTTOM_RESERVES = [12, 34, 40, 64];
+
+/**
+ * Las reservas SUPERIORES reales (`useSafeAreaInsets().top`): web (0, no hay barra de estado propia) ·
+ * Android típico (24) · iPhone con notch (47) · iPhone con Dynamic Island (59).
+ *
+ * Se usan igual que las de abajo: para probar que un anclaje del borde SUPERIOR se mueve CON la reserva
+ * (o sea, que está pegado al borde de la pantalla y no a un número fijo que en un teléfono con notch
+ * quedaría debajo del status bar o encima del header).
+ */
+export const REAL_TOP_RESERVES = [0, 24, 47, 59];
 
 /**
  * Resuelve la MISMA expresión con distintos valores de la reserva inferior.

@@ -26,6 +26,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Pressable } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { stickIndicatorBandReserve } from '@/features/ble-stick/indicator-geometry';
 import { getTokenValue, ScrollView, Text, View, XStack, YStack } from 'tamagui';
 import { Check, ChevronDown, User, X } from 'lucide-react-native';
 import { usePowerSync } from '@powersync/react';
@@ -683,13 +685,29 @@ export default function InicioScreen() {
         showsVerticalScrollIndicator={false}
       >
         {/* Saludo. Nombre real del usuario (ProfileContext, fuente única — Fase 6). Mientras
-            el perfil carga o no hay nombre, saludo NEUTRO (sin parpadear "Hola undefined"). */}
+            el perfil carga o no hay nombre, saludo NEUTRO (sin parpadear "Hola undefined").
+
+            ── RESERVA PARA EL INDICADOR DEL BASTÓN (2026-08-07) ────────────────────────────────────
+            El chrome monta el indicador de conexión del bastón flotando arriba a la derecha, JUSTO
+            debajo de la fila del header: la banda que ocupa es la de este renglón. Este texto va en `$9`
+            (30 px) y **sin `numberOfLines`**, así que crece con el nombre del usuario (el producto acepta
+            hasta `NAME_MAX_LENGTH`). MEDIDO @412: con un nombre de 14 caracteres el primer renglón llega
+            a x=355 y el círculo del indicador arranca en x=354 → el saludo quedaba POR DEBAJO, ilegible
+            justo ahí. (La medición anterior lo dio libre porque el usuario del fixture se llamaba "E2E":
+            se había medido la instancia, no el rango.)
+            Se RESERVA en vez de truncar: el nombre propio se conserva entero y, si no entra, el saludo
+            envuelve — que es lo que un saludo puede hacer sin perder nada. El número sale de
+            `stickIndicatorBandReserve()`, o sea del mismo token del que sale el círculo: si el indicador
+            cambia de tamaño, esto lo sigue solo. Lo ata `(F-reserva)` en
+            `utils/tap-target-collision-guard.test.ts` y lo mide, con nombres reales,
+            `e2e/baston-indicador-banda-peor-caso.spec.ts`. ── */}
         <Text
           fontFamily="$body"
           fontSize="$9" lineHeight="$9"
           fontWeight="700"
           color="$textPrimary"
           marginTop="$4"
+          paddingRight={stickIndicatorBandReserve()}
         >
           {!profileLoading && userFirstName ? `¡Hola ${userFirstName}! 👋` : '¡Hola! 👋'}
         </Text>

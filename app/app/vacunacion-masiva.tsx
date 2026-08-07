@@ -55,11 +55,7 @@ import {
 import type { AnimalSex } from '@/utils/animal-category';
 import { backOr } from '@/utils/nav';
 import { buttonA11y } from '@/utils/a11y';
-
-/** today() ISO 'YYYY-MM-DD' — la fecha del evento (= la fecha de la clave idempotente). Local, no hardcode. */
-function todayISO(): string {
-  return new Date().toISOString().slice(0, 10);
-}
+import { todayIsoLocal } from '@/utils/today-iso';
 
 /** Tope de caracteres del nombre del producto (defensivo; product_name es text en DB). */
 const PRODUCT_NAME_MAX = 80;
@@ -103,7 +99,7 @@ export default function VacunacionMasivaScreen() {
   const [sexFilter, setSexFilter] = useState<AnimalSex | null>(null);
 
   // ── Preview (R4.2) ─────────────────────────────────────────────────────────────────────────
-  const eventDate = useMemo(() => todayISO(), []);
+  const eventDate = useMemo(() => todayIsoLocal(), []);
   const [preview, setPreview] = useState<VaccinationPreview | null>(null);
   const [previewing, setPreviewing] = useState(false);
 

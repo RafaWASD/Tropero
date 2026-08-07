@@ -144,13 +144,18 @@ export async function searchGroupAnimals(
     if (!r.ok) return { ok: false, error: r.error };
     push(r.value);
   }
+  // Una sub-query POR TÉRMINO exacto (fix 🔴 A.1, espejo de searchAnimals): el tipeado TAL CUAL —como está
+  // impreso en la caravana— y, si difiere, el compacto. La 3ra superficie del bug: el buscador DENTRO de un
+  // rodeo/lote tiene el mismo motor y tenía el mismo agujero.
   if (plan.tryIdvExact) {
-    const r = await runLocalQuery<LocalListRow>(
-      buildSearchByIdvQuery(establishmentId, plan.compact, group),
-      { emptyIsSyncing: false },
-    );
-    if (!r.ok) return { ok: false, error: r.error };
-    push(r.value);
+    for (const term of plan.idvExactTerms) {
+      const r = await runLocalQuery<LocalListRow>(
+        buildSearchByIdvQuery(establishmentId, term, group),
+        { emptyIsSyncing: false },
+      );
+      if (!r.ok) return { ok: false, error: r.error };
+      push(r.value);
+    }
   }
   if (plan.tryIdvSubstring) {
     const idvRes = await runLocalQuery<LocalListRow>(

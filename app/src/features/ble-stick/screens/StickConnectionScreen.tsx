@@ -38,6 +38,7 @@ import {
   writeRememberedDevice,
 } from '@/services/ble/remembered-device';
 import { readBeepEnabled, writeBeepEnabled, cachedBeepEnabled } from '@/services/ble/feedback-pref';
+import { useStickStatusSurface } from '@/hooks/useStickStatusSurface';
 import { buttonA11y, labelA11y, switchA11y } from '@/utils/a11y';
 import { backOr } from '@/utils/nav';
 import {
@@ -181,6 +182,14 @@ export default function StickConnectionScreen() {
   // la pantalla en primer plano.
   const acquireScopedScanner = useScopedScannerControls();
   useFocusEffect(useCallback(() => acquireScopedScanner(), [acquireScopedScanner]));
+
+  // ── Y PROPIEDAD DEL LUGAR DEL INDICADOR GLOBAL, por el mismo criterio ──────────────────────────────
+  // Esta pantalla muestra el estado en su card, con su CTA: el indicador global (RMV3.5) sería el MISMO
+  // dato repetido. Hasta el 2026-08-06 eso lo resolvía un literal adentro del indicador
+  // (`pathname === '/baston' → null`) — la lista de rutas que el párrafo de arriba explica por qué no
+  // usamos, escrita en el otro archivo y a espaldas del dueño. Ahora la propiedad la declara la pantalla,
+  // igual que el scanner: si la ruta se mueve o se renombra, esto sigue funcionando.
+  useStickStatusSurface('screen-card');
 
   // Lista EN VIVO de lecturas confirmadas (confirmación pre-commit del contrato, RMV4.8): el provider
   // entrega el EID YA validado + des-duplicado por `subscribeTagRead`. Marcamos "DEMO" las que vienen

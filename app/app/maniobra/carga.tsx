@@ -68,6 +68,7 @@ import { maneuverLabel } from '@/utils/maneuver-wizard';
 import { collectManeuverDiscardTargets, countPersistedCaptures } from '@/utils/maneuver-skip';
 import { maneuverTitleFontToken } from '@/utils/maneuver-title-size';
 import { formatEidReadable } from '@/utils/eid-format';
+import { todayIsoLocal } from '@/utils/today-iso';
 import { stepKindFor } from '@/utils/maneuver-step-kind';
 import {
   buildSequence,
@@ -135,11 +136,6 @@ function mutedTag(a: AnimalDetail): string | null {
   // ¿El tag YA es la identidad dominante? (no hay idv) → no repetirlo muted.
   if (!a.idv) return null;
   return formatEidReadable(a.tagElectronic);
-}
-
-/** ISO 'YYYY-MM-DD' de hoy (wall-clock del dispositivo) para event_date. */
-function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
 }
 
 /** Error de captura superficiado en la UI: línea accionable es-AR + detalle crudo (atenuado, diagnóstico). */
@@ -624,7 +620,7 @@ export default function ManiobraCarga() {
           value,
           profileId,
           sessionId,
-          eventDate: todayIso(),
+          eventDate: todayIsoLocal(),
           createdAt: new Date().toISOString(),
           eventId: eventIdFor(maneuver),
           eventIds,

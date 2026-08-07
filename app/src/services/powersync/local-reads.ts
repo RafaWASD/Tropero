@@ -1241,16 +1241,42 @@ export function buildSearchByIdvQuery(
 }
 
 /**
+ * Los separadores de FORMATO de una caravana (espacio, guion, punto, barra) descartados de una columna, en
+ * SQL. Espeja `STRUCTURED_SEPARATORS` de `utils/animal-identifier.ts` — el mismo conjunto, del lado de la
+ * COLUMNA. `REPLACE` anidado porque SQLite no tiene `translate()` ni regex nativa.
+ *
+ * ── POR QUÉ (🔴 A.1, QA en device 2026-08-06) ────────────────────────────────────────────────────────
+ * El término del buscador viaja COMPACTO (sin separadores) pero el idv GUARDADO los conserva
+ * (`PERF-00500`): todo fragmento que CRUZA el separador no matcheaba nada. Medido en el A07: `PERF-0`,
+ * `PERF-005`, `PERF-0050`, `PERF-00500`, `perf-00500` y `F-005` daban "Animal nuevo" sobre un animal que
+ * existe; solo andaban los términos que caen de UN lado del guion (`PERF`, `00500`). Compactando LOS DOS
+ * lados, el fragmento vuelve a encontrar al animal.
+ *
+ * ⚠️ Solo se aplica al canal IDV. En `animal_tag_electronic` sería un no-op costoso: la caravana
+ * electrónica guardada son 15 dígitos puros (CHECK), el separador ahí es siempre de tipeo.
+ */
+function withoutSeparators(expr: string): string {
+  return `REPLACE(REPLACE(REPLACE(REPLACE(${expr}, '-', ''), ' ', ''), '.', ''), '/', '')`;
+}
+
+/**
  * Búsqueda PARCIAL (substring) sobre una columna de animal_profiles, como `LIKE '%term%'` local
  * (degradación del fuzzy/ilike de PostgREST — SQLite no tiene pg_trgm; el LIKE cubre el caso operativo
  * de tipear un fragmento). `escapeLike` neutraliza los comodines `% _ \` del término del usuario y usa
  * `ESCAPE '\'` (SQLite LIKE usa `%`/`_` como comodines; sin escape un `%` literal del término actuaría
  * de comodín). status active + deleted_at IS NULL + LIMIT 20. UNION synced + overlay (T6).
  *
+ * Sobre `idv` la comparación es CONTRA LA COLUMNA COMPACTADA (`withoutSeparators`): el término ya viene
+ * compacto y el guardado no, así que sin esto un fragmento que cruza el separador no matchea (🔴 A.1). El
+ * costo es que la expresión no usa índice — pero un `LIKE '%x%'` tampoco lo usaba, así que el plan de esta
+ * sub-query no cambia: sigue siendo un scan del set ya scopeado por campo (+ LIMIT 20).
+ *
  * @param column  columna de animal_profiles sobre la que matchear (whitelist: 'animal_tag_electronic',
  *                'idv'). NO es input de usuario — la elige el service (anti-injection). `visual_id_alt` se
  *                ELIMINÓ de la whitelist (delta IDU, IDU.4.5); el apodo tiene su propio canal
  *                (buildApodoSearchQuery) porque vive en custom_attributes, no en animal_profiles.
+ * @param term    el término COMPACTO (`SearchPlan.compact`). Para `idv` es obligatorio que venga compacto:
+ *                la columna se compara compactada y un término con separadores no matchearía nunca.
  */
 export function buildSearchLikeQuery(
   establishmentId: string,
@@ -1259,10 +1285,12 @@ export function buildSearchLikeQuery(
   groupScope?: GroupScope,
 ): LocalQuery {
   const pattern = `%${escapeLike(term)}%`;
+  const lhs = (alias: string): string =>
+    column === 'idv' ? withoutSeparators(`${alias}.idv`) : `${alias}.${column}`;
   return buildSearchUnion(
     establishmentId,
-    `ap.${column} LIKE ? ESCAPE '\\'`,
-    `pap.${column} LIKE ? ESCAPE '\\'`,
+    `${lhs('ap')} LIKE ? ESCAPE '\\'`,
+    `${lhs('pap')} LIKE ? ESCAPE '\\'`,
     pattern,
     groupScope,
   );

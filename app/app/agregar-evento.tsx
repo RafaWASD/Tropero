@@ -91,6 +91,7 @@ import type { PregnancyStatus } from '@/utils/event-timeline';
 type ManualServiceType = (typeof SERVICE_TYPE_INPUT_OPTIONS)[number]['value'];
 import { buttonA11y } from '@/utils/a11y';
 import { backOr } from '@/utils/nav';
+import { todayIsoLocal } from '@/utils/today-iso';
 import { confirmAction } from '@/utils/confirm';
 
 const OFFLINE_COPY =
@@ -124,15 +125,6 @@ let calfIdSeq = 0;
 function newCalf(): CalfRow {
   calfIdSeq += 1;
   return { localId: `calf-${calfIdSeq}`, sex: null, weightRaw: '', tagRaw: '', idvRaw: '' };
-}
-
-// Fecha de hoy en ISO 'YYYY-MM-DD' (local) para pre-cargar el campo de fecha (el caso típico es
-// "cargar el evento de hoy" — el operario rara vez cambia la fecha).
-function todayIso(): string {
-  const d = new Date();
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${d.getFullYear()}-${mm}-${dd}`;
 }
 
 export default function AgregarEventoScreen() {
@@ -175,13 +167,13 @@ export default function AgregarEventoScreen() {
 
   // Campos de peso.
   const [weightKg, setWeightKg] = useState('');
-  const [weightDate, setWeightDate] = useState(todayIso());
+  const [weightDate, setWeightDate] = useState(todayIsoLocal());
   const [weightErr, setWeightErr] = useState<string | null>(null);
   const [weightDateErr, setWeightDateErr] = useState<string | null>(null);
 
   // Campos de condición corporal.
   const [score, setScore] = useState<number | null>(null);
-  const [scoreDate, setScoreDate] = useState(todayIso());
+  const [scoreDate, setScoreDate] = useState(todayIsoLocal());
   const [scoreErr, setScoreErr] = useState<string | null>(null);
   const [scoreDateErr, setScoreDateErr] = useState<string | null>(null);
 
@@ -191,21 +183,21 @@ export default function AgregarEventoScreen() {
 
   // Campos de tacto (reproductivo).
   const [pregnancyStatus, setPregnancyStatus] = useState<PregnancyStatus | null>(null);
-  const [tactoDate, setTactoDate] = useState(todayIso());
+  const [tactoDate, setTactoDate] = useState(todayIsoLocal());
   const [tactoStatusErr, setTactoStatusErr] = useState<string | null>(null);
   const [tactoDateErr, setTactoDateErr] = useState<string | null>(null);
 
   // Campos de servicio (reproductivo). Notas OPCIONALES. Tipo restringido a IA/TE (B3: monta natural
   // deprecada de la carga manual). addService acepta el enum completo → el subset es válido.
   const [serviceType, setServiceType] = useState<ManualServiceType | null>(null);
-  const [serviceDate, setServiceDate] = useState(todayIso());
+  const [serviceDate, setServiceDate] = useState(todayIsoLocal());
   const [serviceNotes, setServiceNotes] = useState('');
   const [serviceTypeErr, setServiceTypeErr] = useState<string | null>(null);
   const [serviceDateErr, setServiceDateErr] = useState<string | null>(null);
   const [serviceNotesErr, setServiceNotesErr] = useState<string | null>(null);
 
   // Campos de parto (reproductivo). Lista dinámica de terneros (default 1, R9.5 mellizos).
-  const [birthDate, setBirthDate] = useState(todayIso());
+  const [birthDate, setBirthDate] = useState(todayIsoLocal());
   const [calves, setCalves] = useState<CalfRow[]>(() => [newCalf()]);
   const [birthDateErr, setBirthDateErr] = useState<string | null>(null);
   const [calvesErr, setCalvesErr] = useState<string | null>(null);
@@ -223,7 +215,7 @@ export default function AgregarEventoScreen() {
   const [motherCtx, setMotherCtx] = useState<{ rodeoId: string; systemId: string } | null>(null);
 
   // Campos de aborto (reproductivo). Fecha + notas OPCIONALES (mismo shape que el servicio).
-  const [abortionDate, setAbortionDate] = useState(todayIso());
+  const [abortionDate, setAbortionDate] = useState(todayIsoLocal());
   const [abortionNotes, setAbortionNotes] = useState('');
   const [abortionDateErr, setAbortionDateErr] = useState<string | null>(null);
   const [abortionNotesErr, setAbortionNotesErr] = useState<string | null>(null);

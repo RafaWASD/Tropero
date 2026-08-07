@@ -14,6 +14,13 @@
 // declarado (que web no aplica pero nativo sí) y se exige que el rect resultante no se cruce con ningún
 // otro elemento interactivo de la pantalla.
 //
+// ⚠️ EL INDICADOR DEL BASTÓN YA NO VIVE ACÁ ABAJO (2026-08-06): se mudó arriba a la derecha. Este archivo
+// se conserva entero igual, por el mismo motivo por el que se conserva el modelo de la banda inferior — el
+// invariante es *"el target del FAB no invade territorio ajeno"*, y no depende de quién sea el vecino de
+// turno. Lo que cambió es la aserción (2), que antes medía la separación pill↔FAB (hoy daría ~700 dp y
+// pasaría por trivial) y ahora verifica que la banda del FAB quedó VACÍA y que el indicador aterrizó donde
+// el modelo dice.
+//
 // La pata aritmética del mismo invariante (bandas derivadas de los tokens, sin navegador) vive en
 // `src/utils/nav-target-bands.test.ts`; el inventario de clase (¿quién más declara un `hitSlop`? ¿quién
 // más se ancla en la banda del FAB?) en `src/utils/tap-target-collision-guard.test.ts`. Este archivo es
@@ -41,7 +48,7 @@ import {
   navGeometryFromConfig,
   resolveFabHitSlop,
   sizeTokenFromConfig,
-  stickPillBand,
+  bottomAnchoredBand,
 } from '../src/utils/nav-target-bands';
 
 // ─── El VALOR REAL, leído del código de producción (sin copias) ───────────────────────────────────────
@@ -53,7 +60,7 @@ const readApp = (p: string) => readFileSync(join(APP_ROOT, p), 'utf8');
 const CONFIG_SRC = readApp('tamagui.config.ts');
 const LAYOUT_SRC = readApp('app/(tabs)/_layout.tsx');
 /** Tokens de space que el resolvedor pueda necesitar si el slop llegara a usarlos (hoy no usa ninguno). */
-const SPACE_TOKENS: Record<string, number> = { '2': 7, '4': 18, '6': 32 };
+const SPACE_TOKENS: Record<string, number> = { '2': 7, '3': 13, '4': 18, '6': 32 };
 
 /**
  * El `hitSlop` del FAB tal como lo escribe el componente HOY. Si el fuente usa una gramática que el
@@ -72,13 +79,20 @@ const MODEL_SEPARATION = (() => {
     ...NAV,
     fabHitSlopTop: FAB_HIT_SLOP.top,
     fabHitSlopBottom: FAB_HIT_SLOP.bottom,
-    pillGap: SPACE_TOKENS['4'],
-    pillHeight: 0,
+    tenantGap: SPACE_TOKENS['4'],
+    tenantHeight: 0,
   };
-  return stickPillBand(t).bottom - fabTargetBand(t).top;
+  return bottomAnchoredBand(t).bottom - fabTargetBand(t).top;
 })();
 /** El `hitSlop.top` que el FAB tenía HASTA el bugfix (`$fabRaise`). Solo se usa como CONTRAFÁCTICO. */
 const HISTORIC_TOP_SLOP = sizeTokenFromConfig(CONFIG_SRC, 'fabRaise');
+/**
+ * Alto de la FILA DEL HEADER, derivado de los tokens reales igual que en el componente: su
+ * `paddingVertical` (`$3`) ×2 + el elemento más alto que vive en ella (`$avatar`). Es la coordenada donde
+ * tiene que arrancar el indicador desde el 2026-08-06 (en web el inset superior es 0). Derivado, no
+ * copiado: si el avatar cambia de tamaño, este test sigue midiendo lo correcto.
+ */
+const HEADER_ROW_HEIGHT = SPACE_TOKENS['3'] * 2 + sizeTokenFromConfig(CONFIG_SRC, 'avatar');
 
 /** a11y de la fila "Bastón" del tab "Más" (el estado va dentro del nombre accesible). */
 const STICK_ROW_NAME = /^Bastón: .+ Abrí la pantalla de conexión del bastón$/;
@@ -291,19 +305,33 @@ test('GUARD: el target del FAB (expandido por su hitSlop) no pisa ningún otro c
         'no está midiendo nada y la aserción (1) pasa por ceguera, no por corrección',
     ).toBeGreaterThan(0);
 
-    // (2) El pill queda a una distancia usable con guante del pico del FAB.
-    const separation = fab.top - pill.bottom;
+    // ── (2) LA BANDA DEL FAB QUEDÓ VACÍA, Y ESO SE VERIFICA (no se supone) ─────────────────────────
+    // Hasta el 2026-08-06 acá se medía la separación pill↔FAB (as-built 20 dp). El indicador se mudó
+    // ARRIBA A LA DERECHA, así que esa resta ahora da ~700 dp y pasaría **trivialmente**: exactamente el
+    // falso verde que este archivo existe para no tener. La aserción se reemplaza por las dos que sí
+    // dicen algo hoy:
+    //   (2a) el indicador REALMENTE se fue de la banda del FAB (si alguien lo vuelve a anclar abajo, rojo);
+    //   (2b) y aterrizó donde el modelo dice — `insets.top + $3*2 + $avatar` (en web el inset es 0, así
+    //        que el número es el alto de la fila del header), o sea DESPEJANDO la fila donde viven el
+    //        avatar de la home, la ✕ de MODO MANIOBRAS y el "+ Crear campo".
+    const fabBandTop = fab.top - MIN_TAP_TARGET_SEPARATION;
     expect(
-      separation,
-      `separación pill↔FAB = ${separation.toFixed(1)} dp (piso ${MIN_TAP_TARGET_SEPARATION})`,
-    ).toBeGreaterThanOrEqual(MIN_TAP_TARGET_SEPARATION);
-    // El modelo aritmético (derivado de los tokens + el slop REAL) dice 20; el DOM mide 1 px más (el
-    // borde superior del tabBar, que el modelo ignora del lado seguro). Por eso `>=` y no `===`.
+      pill.bottom,
+      `el indicador vuelve a estar en la banda del FAB (su borde de abajo en y=${pill.bottom.toFixed(0)}, y la ` +
+        `banda arranca en y=${fabBandTop.toFixed(0)}). Ahí abajo la pantalla pone sus CTA a ancho completo: ` +
+        'es de donde lo sacamos.',
+    ).toBeLessThan(fabBandTop);
     expect(
-      separation,
-      `el DOM mide ${separation.toFixed(1)} dp de aire y el modelo predice ${MODEL_SEPARATION}: si el DOM ` +
-        'mide MENOS, hay un drift de layout que la aritmética no ve (que es para lo que existe este test)',
-    ).toBeGreaterThanOrEqual(MODEL_SEPARATION);
+      Math.round(pill.top),
+      'el indicador no está pegado debajo de la fila del header: el DOM mide ' +
+        `${pill.top.toFixed(1)} y el modelo (tokens $3*2 + $avatar, con inset superior 0 en web) predice ` +
+        `${HEADER_ROW_HEIGHT}. Si el DOM mide MENOS, se le está montando a la fila.`,
+    ).toBe(HEADER_ROW_HEIGHT);
+    // Y el modelo de la banda de abajo sigue vivo aunque no tenga inquilinos: si mañana alguien ancla algo
+    // ahí, `MODEL_SEPARATION` es el número que ese inquilino tendría que respetar.
+    expect(MODEL_SEPARATION, 'el modelo de la banda inferior dejó de calcular').toBeGreaterThanOrEqual(
+      MIN_TAP_TARGET_SEPARATION,
+    );
   } finally {
     await ctx.close();
   }

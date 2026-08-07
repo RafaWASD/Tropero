@@ -91,6 +91,9 @@
 // `imputeBirthDateForCategory` cuando la categoría no es age-derivable o el cruce es vacío. NO hay ciclo de
 // imports: animal-birth-year importa solo event-timeline (→ wheel-picker), nunca este módulo.
 import { birthYearToDate } from './animal-birth-year';
+// FUENTE ÚNICA de "qué día es hoy" (🔴 A.2). Acá se usa para anclar un INSTANTE real en el dominio
+// date-only (`startOfLocalDay`, abajo): el día calendario del operario es el LOCAL, no el UTC.
+import { localDayAnchorUtc } from './today-iso';
 
 /**
  * Códigos de categoría de (bovino, cría) que el modelo contempla para el alta.
@@ -173,7 +176,8 @@ const DAY_MS = 1000 * 60 * 60 * 24;
  * computada difiere de la elegida → `override=true` (preserva la elección rara, congelada). Toda la
  * inteligencia vive acá; `categoryOverrideFor` queda IGUAL.
  *
- * Aritmética de días en UTC (consistente con `ageInDays`/`startOfDay`; edad = floor((today - birth)/día)).
+ * Aritmética de días en el dominio date-only (consistente con `ageInDays`/`startOfLocalDay`: el ancla
+ * de HOY es el día calendario LOCAL; edad = floor((today - birth)/día)).
  */
 export function imputeBirthDateForCategory(
   chosen: string,
@@ -187,7 +191,7 @@ export function imputeBirthDateForCategory(
   // categoryOverrideFor (con `pregnant` para vaquillona_prenada; el resto queda override=true).
   if (!window) return birthYearToDate(year, today) as string;
 
-  const todayMid = startOfDay(today ?? new Date());
+  const todayMid = startOfLocalDay(today ?? new Date());
   // age >= minAge  ⟺ birth <= today - minAge          (latestBirth, inclusive).
   const latestBirth = todayMid.getTime() - window.minAge * DAY_MS;
   // age <  maxAge  ⟺ birth >= today - (maxAge - 1)     (earliestBirth, inclusive; maxAge=∞ → sin cota inferior).
@@ -607,7 +611,7 @@ export function categoryOverrideFor(
 function ageInDays(birthDateIso: string, today: Date): number | null {
   const birth = parseIsoDate(birthDateIso);
   if (!birth) return null;
-  const ms = startOfDay(today).getTime() - birth.getTime();
+  const ms = startOfLocalDay(today).getTime() - birth.getTime();
   return Math.floor(ms / (1000 * 60 * 60 * 24));
 }
 
@@ -627,7 +631,32 @@ function parseIsoDate(iso: string): Date | null {
   return d;
 }
 
-/** Medianoche UTC del día de `d` (para comparar con fechas ISO normalizadas a UTC midnight). */
-function startOfDay(d: Date): Date {
-  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+/**
+ * Ancla de un INSTANTE real en el dominio DATE-ONLY: medianoche UTC del día calendario **LOCAL** de `d`.
+ * Es lo que hay que comparar contra un `birth_date` (columna `date`, parseado por `parseIsoDate` a
+ * medianoche UTC).
+ *
+ * ── EL BUG QUE CIERRA (🔴 vivo, encontrado en el fix-loop del QA de maniobras, 2026-08-07) ────────────
+ * Antes esto era `Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())`: tomaba el día **UTC**
+ * del instante. En Argentina (UTC−3), entre las 21:00 y las 23:59 locales el día UTC ya es el siguiente, así
+ * que el ancla se corría **+1 día** y todo animal figuraba **un día más viejo**. Es EXACTAMENTE el 🔴 A.2
+ * (derivar un día calendario en UTC) escrito con getters en vez de con `toISOString()`.
+ * Dónde pegaba: (a) `ageInDays` → el corte de **365 días** decide ternera/vaquillona y ternero/torito, y esa
+ * categoría es la que alimenta el denominador reproductivo de los reportes (`0105`, rama `eligible_natural`);
+ * (b) `imputeBirthDateForCategory` → la ventana de imputación del alta year-only se corría un día y, en el
+ * borde, el animal caía en otra categoría (con `override` mal calculado detrás).
+ * En producción `today` es **siempre un instante real** (`new Date()` por default, o el `now` explícito de
+ * `crear-animal.tsx:518` y del preview de manga) — nunca un ancla date-only, así que la corrección aplica al
+ * 100 % de los call sites.
+ *
+ * El día calendario LOCAL se deriva de la FUENTE ÚNICA (`todayIsoLocal`, `utils/today-iso.ts`) y no a mano:
+ * es la misma regla de A.2, y así no hay dos definiciones de "qué día es hoy" en la app.
+ *
+ * ⚠️ Lo que NO cambia: `isoUtcDate` y `parseIsoDate` siguen trabajando en UTC puro. Eso es CORRECTO — una
+ * fecha sin hora vive en un dominio UTC coherente. El defecto era meter un INSTANTE real en ese dominio.
+ */
+function startOfLocalDay(d: Date): Date {
+  // Un instante inválido propaga NaN → `ageInDays` da NaN → la categoría cae al default por sexo (misma
+  // degradación segura que ya tenía con un Date inválido).
+  return localDayAnchorUtc(d);
 }

@@ -5,9 +5,12 @@ import assert from 'node:assert/strict';
 import {
   classifyCalfQuery,
   resolveLinkEventDate,
-  todayIsoLocal,
   CALF_EID_LENGTH,
 } from './link-calf-query.ts';
+// `todayIsoLocal` se mudó al módulo canónico `today-iso.ts` (unidad A.2: una sola fuente de "hoy" en toda
+// la app). Los casos propios de la función viven ahora en `today-iso.test.ts`; acá se conserva su uso
+// porque `resolveLinkEventDate` cae a él cuando el ternero no tiene fecha de nacimiento conocida.
+import { todayIsoLocal } from './today-iso.ts';
 
 const NOW = new Date(2026, 5, 30); // 2026-06-30 (local)
 

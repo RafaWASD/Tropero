@@ -15,11 +15,10 @@
 //   02 — BANDA ampliada pill + FAB + bottom-nav (el veto de la separación, que es el corazón del fix).
 //   04 — la sección "Dispositivos" del tab "Más" (pantalla completa): la UBICACIÓN + el título nuevo.
 //   05 — BANDA de la sección "Dispositivos" + su fila (el veto del rótulo).
-//   06 — el pill sobre el tab **Inicio**, encima de "Ir a Animales". Es la EVIDENCIA VISUAL de por qué el
-//        pill no puede ser tocable: se superpone a un control de la pantalla de abajo. Con
-//        `pointerEvents="none"` el toque lo atraviesa y llega a "Ir a Animales", que es lo correcto; con
-//        `onPress` se lo llevaba `/baston`. (En el A07 el caso peor es 'Arrancar jornada', que contiene al
-//        pill ENTERO — no se puede montar en la captura web sin una jornada activa.)
+//   06 — el tab **Inicio**: el indicador YA NO está sobre "Ir a Animales". Hasta el 2026-08-06 este shot
+//        era la evidencia de la superposición (por qué el pill no podía ser tocable); desde que el
+//        indicador se mudó arriba a la derecha, documenta lo contrario — y la aserción se dio vuelta, así
+//        que si vuelve a caer sobre el CTA la captura se pone roja.
 //
 // ⚠️ LÍMITE DECLARADO: en web `hitSlop` es NO-OP (react-native-web 0.21.2 no lo implementa en `Pressable`),
 // así que NINGUNA captura puede mostrar el bug ni su ausencia. Lo que estas capturas vetan es el DISEÑO
@@ -140,6 +139,11 @@ test('capturas del aire pill↔FAB + la sección "Dispositivos" @ 412×915', asy
     // dejaría de documentar lo que dice documentar.
     await gotoTab(page, 'Inicio', page.getByText(/¡Hola.*👋/));
     await expect(pill).toBeVisible({ timeout: 20_000 });
+    // ⚠️ RECONCILIADO 2026-08-06 (unidad «el indicador sale de la banda de los CTA»): el indicador SE MUDÓ
+    // arriba a la derecha, así que ya NO se superpone a "Ir a Animales". Este shot documentaba la
+    // superposición (la evidencia de por qué no podía ser tocable); ahora documenta su AUSENCIA, que es el
+    // arreglo. La aserción se da vuelta en vez de borrarse: si algún día el indicador vuelve a caer sobre
+    // un CTA, esta captura se pone roja en lugar de sacar una foto que nadie mira.
     const overlap = await page.evaluate(() => {
       const p = document.querySelector('[data-testid="stick-status-pill"]')?.getBoundingClientRect();
       const cta = [...document.querySelectorAll('[role="button"],button,a[href]')].find((e) =>
@@ -149,8 +153,12 @@ test('capturas del aire pill↔FAB + la sección "Dispositivos" @ 412×915', asy
       const c = cta.getBoundingClientRect();
       return p.left < c.right && p.right > c.left && p.top < c.bottom && p.bottom > c.top;
     });
-    expect(overlap, 'el shot 06 documenta la superposición pill ↔ "Ir a Animales"; ya no se solapan').toBe(true);
-    await shot(page, '06-pill-encima-de-un-cta-en-inicio');
+    expect(
+      overlap,
+      'el indicador volvió a superponerse a "Ir a Animales": es la banda de la que lo sacamos (el CTA a ' +
+        'ancho completo la cruza por diseño). Ver `progress/impl_pill-arriba-derecha.md`.',
+    ).toBe(false);
+    await shot(page, '06-el-indicador-ya-no-pisa-el-cta-de-inicio');
   } finally {
     await ctx.close();
   }

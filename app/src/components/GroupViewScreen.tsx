@@ -31,6 +31,7 @@ import { GroupMetaHeader } from './GroupViewBits';
 import { GroupSearchBar } from './GroupSearchBar';
 import { backOr } from '../utils/nav';
 import { buttonA11y } from '../utils/a11y';
+import { useStickStatusSurface } from '../hooks/useStickStatusSurface';
 import type { AnimalListItem } from '../services/animals';
 import type { GroupAction } from '../utils/group-actions';
 import type { GroupViewState } from '../hooks/useGroupView';
@@ -68,6 +69,14 @@ export function GroupViewScreen({
   renderRow,
   backFallback = '/(tabs)',
 }: GroupViewScreenProps) {
+  // ── ESTA PANTALLA SE QUEDA CON LA BANDA DEL CHROME (2026-08-06) ──────────────────────────────────
+  // El indicador global del bastón (RMV3.5) flota DEBAJO de la fila del header, a la derecha. Acá esa
+  // banda no está libre: el header es apenas un chevron y el BUSCADOR a ancho completo arranca pegado
+  // (medido @412: input en y=[58,108]; el indicador iría a y=[66,106]) → el círculo quedaría flotando
+  // ENCIMA del campo de búsqueda, tapando la cola de lo que el operario escribe. Reclama el lugar
+  // mientras está enfocada; el estado del bastón sigue disponible en "Más" y en la pantalla de conexión.
+  useStickStatusSurface('screen-band');
+
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const muted = getTokenValue('$textMuted', 'color');

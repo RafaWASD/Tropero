@@ -196,6 +196,42 @@ export type SearchPlan = {
 ```
 
 - **Cambios vs. hoy**: (a) `tryIdvExact`/`tryIdvSubstring` dejan de gatear por `isDigits` — se habilitan para **todo término no vacío** (así un idv alfanumérico o su prefijo se encuentra; hoy solo dígitos disparaban idv). (b) Se **elimina** `tryVisual` (visual_id_alt). (c) Se **agrega** `tryApodo` (todo término no vacío). (d) `tryTagExact` = compact es 15 dígitos (sin cambio conceptual).
+
+#### AS-BUILT (2026-08-06) — el canal IDV dejó de correr SOLO con el compacto (🔴 A.1)
+
+El plan de arriba corría el canal `idv` con `compact`. Es lo que rompía tipear la caravana **como está impresa**:
+el `idv` guardado conserva el guion (`PERF-00500`) y el término llegaba compactado (`PERF00500`) ⇒ ningún
+match, y la app ofrecía "Dar de alta" sobre un animal que existe. El plan quedó así:
+
+```ts
+  /** Términos del match EXACTO de idv, en orden: el tipeado TAL CUAL y —si difiere— el compacto. */
+  idvExactTerms: readonly string[];
+```
+
+- **EXACTO** → una sub-query por término (`for (const term of plan.idvExactTerms)`), el tipeado primero.
+  Se hace del lado del TÉRMINO (y no compactando la columna) porque `ap.idv = ?` usa índice: el camino
+  rápido de la manga —tipear la caravana completa y auto-avanzar sin desambiguar— se conserva sin scan.
+- **PARCIAL** → un solo término (`compact`) contra la **columna compactada** (`withoutSeparators` en
+  `buildSearchLikeQuery`, `REPLACE` anidado ×4 — SQLite no tiene `translate()` ni regex). Se hace del lado
+  de la COLUMNA porque es lo único que hace matchear un fragmento que **cruza** el separador (`PERF-005`,
+  `F-005`). No agrega costo de plan: un `LIKE '%x%'` ya era scan.
+- El canal **TAG** sigue con `compact`: la electrónica guardada son 15 dígitos puros y ahí el separador es
+  siempre de tipeo.
+- **`tryIdvSubstring` pasó a gatear por el COMPACTO** (no por el normalizado): un término que es puro
+  separador (`---`) compacta a vacío y el patrón `%%` matcheaba **toda la tabla** — 20 animales arbitrarios
+  ofrecidos como candidatos (y, en la manga, como una desambiguación de 20). Defecto adyacente encontrado
+  en la autorrevisión de esta unidad, cerrado acá porque vive en la línea que se estaba tocando.
+- **Efecto colateral, declarado**: si en un campo coexisten `PERF-00500` y `PERF00500` (hoy son dos animales
+  distintos: el índice único de `idv` los admite), tipear cualquiera de las dos formas devuelve **los dos**.
+  NO se funden: la búsqueda no escribe nada. En la manga eso es 2 candidatos ⇒ `resolveManualIdentify`
+  devuelve `ambiguous` ⇒ el `CandidatePicker` muestra las dos caravanas y el operario elige (nunca hay
+  auto-avance sobre el equivocado). En el buscador global son dos filas de la lista. Se prefirió esto antes
+  que normalizar lo GUARDADO, que habría exigido migrar datos existentes, cambiar lo que se exporta a
+  SIGSA y colisionar en el índice único.
+- **El invariante lo cuida un guard**: `src/services/search-idv-wiring-guard.test.ts` deriva del árbol los
+  motores (todo archivo que importe y llame `classifySearchQuery`) y exige que consuman `idvExactTerms`.
+  El bug apareció por duplicado —`searchAnimals` y `searchGroupAnimals`, el segundo escrito espejando al
+  primero— así que un tercer motor nace en rojo.
 - **Desambiguación (IDU.4.2)**: `tryTagExact` y `tryIdvExact` pueden dispararse ambos para un texto de 15 dígitos (un idv puede ser 15 dígitos) — se prueban en paralelo; el motor (`searchAnimals`) **prioriza los exactos** (tag/idv) sobre los substring/apodo, concatenándolos arriba y deduplicando por `profileId` (comportamiento vigente conservado).
 - `SEARCH_TERM_MAX_LENGTH = 64` (cap autoritativo server-side, spec 13) **se conserva**.
 

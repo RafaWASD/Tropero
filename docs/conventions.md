@@ -37,6 +37,22 @@ decimal por diseño.
     Postgres `date`) se formatea por **manipulación de STRING** (split del prefijo → reordenar), **NUNCA**
     `new Date(iso)` (parsea como UTC-medianoche y en huso AR (UTC-3) corre −1 día). Un **instante real**
     (timestamptz con hora) sí usa `new Date` + getters LOCALES (el día calendario que ve el operario).
+  - **"HOY" TIENE UNA SOLA FUENTE — `app/src/utils/today-iso.ts` (regla dura app-wide, con guard).** Lo
+    anterior es sobre MOSTRAR una fecha. Esto es sobre PRODUCIRLA: cuando el destino es una columna
+    `date` (o una clave idempotente), el día calendario es el **LOCAL del dispositivo** y sale de
+    `todayIsoLocal()` (string `AAAA-MM-DD`) o de `localDayAnchorUtc()` (el mismo día como `Date` a
+    medianoche UTC, para la aritmética contra fechas date-only). **Ningún otro archivo de `app/app` o
+    `app/src` puede derivarlo**, ni por `toISOString()`/`toJSON()` recortado, ni componiendo
+    `${y}-${mm}-${dd}` a mano, ni por `toLocaleDateString('sv-SE')`, ni anclando un instante por sus
+    componentes **UTC** (`Date.UTC(x.getUTCFullYear(), …)`). Lo hace cumplir
+    `app/src/utils/today-iso-guard.test.ts`, cuyo oráculo se **deriva del git** (trae los cuerpos reales
+    pre-fix y exige que disparen). Un instante real (`created_at`, `deleted_at`) sí se serializa con
+    `toISOString()` **entero** — eso no es una fecha date-only.
+    - *Por qué es regla dura y no una recomendación*: la de arriba ya estaba escrita y aun así "hoy" quedó
+      implementado a mano **13 veces**, 6 de ellas en UTC. Efectos medidos en device (QA de maniobras,
+      2026-08-06/07): toda la carga posterior a las 21:00 fechada **mañana** en columnas `date` (rompe la
+      ventana SENASA, las ganancias diarias y los filtros "de hoy"), y **todo animal un día más viejo**
+      después de las 21:00 (corre el corte de 365 días que decide categoría y aptitud reproductiva).
 - **Teléfonos — CARVE-OUT explícito**: la regla de coma decimal + punto de miles **NO aplica**. Un
   teléfono no es una cantidad (`1.123.456.789` sería absurdo). Tiene formato propio, centralizado en
   **`app/src/utils/phone.ts`** (origen único: normalización, máscara y copy).

@@ -380,3 +380,35 @@ test('reproStateRowDisplay: none (macho/ternera) → none (sin fila de estado, c
   // igual gana el switch (no es pregnant/empty) → "No apta" (consistente con la precedencia de la card).
   assert.deepEqual(reproStateRowDisplay({ kind: 'cut' }, true, false), { kind: 'label', label: 'No apta' });
 });
+
+// ─── 🔴 BUG VIVO — el ancla de "hoy" era el día UTC (fix-loop del QA de maniobras, 2026-08-07) ──────
+//
+// `ageInDaysFromBirthDate` anclaba `now` por su día **UTC** y `now` es un INSTANTE real: `carga.tsx:1243`
+// pasa `new Date()`. En Argentina (UTC−3), de 21:00 a 23:59 el día UTC ya es el siguiente ⇒ el animal
+// figuraba **un día más viejo**. Y esta edad alimenta `isReproApt` (RAR.6.1), o sea DECIDE SI LA MANGA
+// OFRECE INSEMINAR: a partir de las 21:00 se le ofrecía inseminación a una vaquillona que todavía no
+// llegaba al año. Misma clase que el 🔴 A.2, escrita con getters en vez de con `toISOString()`.
+
+test('🔴 vivo: a las 22:54 (AR) la edad es la del día LOCAL, no la del día UTC', () => {
+  const noche = new Date(2026, 7, 6, 22, 54, 0); // 6-ago 22:54 local
+  if (noche.getTimezoneOffset() <= 0) {
+    assert.ok(true, 'runner sin desfasaje hacia el oeste — caso no ejercitado acá');
+    return;
+  }
+  // Nacida el 2025-08-07 → al 2026-08-06 tiene 364 días. Con el ancla en UTC daba 365.
+  assert.equal(ageInDaysFromBirthDate('2025-08-07', noche), 364);
+  // Y el corte de aptitud por edad (365) NO se cruza todavía.
+  assert.equal(isReproApt({ fitness: null, ageDays: ageInDaysFromBirthDate('2025-08-07', noche) }), false);
+});
+
+test('🔴 vivo: la edad no puede cambiar por la hora dentro del MISMO día del operario', () => {
+  const manana = new Date(2026, 7, 6, 9, 0, 0);
+  const noche = new Date(2026, 7, 6, 22, 54, 0);
+  for (const born of ['2025-08-07', '2025-08-06', '2024-02-29']) {
+    assert.equal(
+      ageInDaysFromBirthDate(born, manana),
+      ageInDaysFromBirthDate(born, noche),
+      `nacida el ${born}: la edad no puede depender de la hora`,
+    );
+  }
+});

@@ -65,6 +65,57 @@ test('IDU.4 classifySearchQuery: vacío → nada que buscar', () => {
   assert.equal(p.tryIdvSubstring, false);
   assert.equal(p.tryApodo, false);
   assert.equal(p.normalized, '');
+  assert.deepEqual(p.idvExactTerms, []);
+});
+
+// ─── 🔴 A.1 — tipear la caravana COMO ESTÁ IMPRESA (QA en device 2026-08-06) ─────────────────
+//
+// El canal idv corría SOLO con `compact` (separadores borrados) mientras el idv GUARDADO los conserva:
+// tipear `PERF-00500` —el string exacto que la propia app muestra en su lista— no encontraba al animal y
+// la app ofrecía "Dar de alta". Un toque = animal duplicado con la jornada partida en dos.
+
+test('A.1: el término se prueba TAL CUAL (como está impreso) y también compacto', () => {
+  const p = classifySearchQuery('PERF-00500');
+  assert.deepEqual(
+    p.idvExactTerms,
+    ['PERF-00500', 'PERF00500'],
+    'el tipeado va PRIMERO (es como está impreso en la caravana → pega en el índice y auto-avanza)',
+  );
+  assert.equal(p.tryIdvExact, true);
+  assert.equal(p.compact, 'PERF00500', 'el compacto se conserva para el idv guardado SIN separadores');
+});
+
+test('A.1: sin separadores, el término no se duplica (una sola sub-query, sin costo de más)', () => {
+  assert.deepEqual(classifySearchQuery('PERF00500').idvExactTerms, ['PERF00500']);
+  assert.deepEqual(classifySearchQuery('AB123').idvExactTerms, ['AB123']);
+  assert.deepEqual(classifySearchQuery('  00500  ').idvExactTerms, ['00500'], 'el trim no cuenta como separador');
+});
+
+test('A.1: los 4 separadores de formato (espacio, guion, punto, barra) producen el par de términos', () => {
+  for (const typed of ['PERF-00500', 'PERF 00500', 'PERF.00500', 'PERF/00500']) {
+    assert.deepEqual(
+      classifySearchQuery(typed).idvExactTerms,
+      [typed, 'PERF00500'],
+      `«${typed}» tiene que probarse tal cual y compacto`,
+    );
+  }
+});
+
+test('A.1: un término que es PURO separador no dispara el substring (el patrón `%%` traía toda la tabla)', () => {
+  const p = classifySearchQuery('---');
+  assert.equal(p.compact, '', 'compacta a vacío');
+  assert.equal(p.tryIdvSubstring, false, '`LIKE %%` matchearía TODOS los animales del campo');
+  assert.equal(p.tryIdvExact, true, 'el exacto sobre el literal `---` sigue siendo inofensivo');
+  assert.deepEqual(p.idvExactTerms, ['---']);
+  assert.equal(p.tryApodo, true, 'un apodo podría llamarse así — ese canal usa el normalizado');
+});
+
+test('A.1: el canal TAG sigue usando SOLO el compacto (la electrónica guardada son 15 díg puros)', () => {
+  const p = classifySearchQuery('982 000 364 696 050');
+  assert.equal(p.tryTagExact, true);
+  assert.equal(p.compact, '982000364696050', 'el operario tipea la electrónica en grupos: compactar es correcto');
+  // El canal idv igual prueba el tipeado (un idv podría ser "982 000…"), pero el TAG usa `compact`.
+  assert.deepEqual(p.idvExactTerms, ['982 000 364 696 050', '982000364696050']);
 });
 
 // ─── F1-1 (R7.3): tope de largo AUTORITATIVO del término ────────────────────────────────────

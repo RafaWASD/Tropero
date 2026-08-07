@@ -71,11 +71,7 @@ import {
 import { formatAnimalAge } from '@/utils/animal-age';
 import { backOr } from '@/utils/nav';
 import { buttonA11y } from '@/utils/a11y';
-
-// today() ISO para la fecha de la operación (destete). Local, no hardcodeado.
-function todayISO(): string {
-  return new Date().toISOString().slice(0, 10);
-}
+import { todayIsoLocal } from '@/utils/today-iso';
 
 /** Resuelve la operación de los params. Default defensivo a castración (la única siempre disponible). */
 function parseOperation(raw: string | undefined): BulkOperation {
@@ -231,7 +227,7 @@ export default function SeleccionMasivaScreen() {
     const result =
       operation === 'castrate'
         ? await applyBulkCastration(selectedCandidates, { onProgress })
-        : await applyBulkWeaning(selectedCandidates, { eventDate: todayISO(), createdAt: new Date().toISOString() }, { onProgress });
+        : await applyBulkWeaning(selectedCandidates, { eventDate: todayIsoLocal(), createdAt: new Date().toISOString() }, { onProgress });
 
     if (!result.ok) {
       setApplyError(

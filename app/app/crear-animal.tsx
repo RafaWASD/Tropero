@@ -82,6 +82,7 @@ import {
 } from '@/utils/animal-birth-year';
 import { buttonA11y, labelA11y } from '@/utils/a11y';
 import { backOr } from '@/utils/nav';
+import { todayIsoLocal } from '@/utils/today-iso';
 
 const OFFLINE_COPY =
   'Necesitás conexión para dar de alta un animal. Conectate a internet y volvé a intentar.';
@@ -91,15 +92,6 @@ const OFFLINE_COPY =
 const COAT_MAX_LENGTH = 40;
 
 const TOTAL_STEPS = 4;
-
-// Fecha de hoy en ISO 'YYYY-MM-DD' (local) para fechar los eventos post-create (condición/preñez). El
-// caso del alta es "lo cargué hoy" — el evento se fecha hoy (mismo patrón que agregar-evento.tsx).
-function todayIso(): string {
-  const d = new Date();
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${d.getFullYear()}-${mm}-${dd}`;
-}
 
 // Qué identificador vino precargado y en qué campo. 'idv' | 'visual' (puerta MANUAL, heurística R1.4) |
 // 'tag' (rama BLE: el EID bastoneado llega por el param `tag` desde el overlay del chunk BLE global —
@@ -621,7 +613,7 @@ export default function CrearAnimalScreen() {
     //    pero un evento falla, NO se pierde el animal — avisamos suave y navegamos a la ficha igual
     //    (el operario lo agrega desde "Agregar evento"). El tenant lo deriva la RLS (sin establishmentId).
     const profileId = created.value.profileId;
-    const eventDate = todayIso();
+    const eventDate = todayIsoLocal();
     const softFails: string[] = [];
 
     if (showCondition && conditionScore != null) {

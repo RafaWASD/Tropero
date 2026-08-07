@@ -575,21 +575,74 @@ export type CurrentState = {
  * ante cualquier orden de entrada). Timeline vacío/null → `{}`. Un evento con valor null (payload
  * incompleto) NO cuenta como vigente (no surfaceamos un "peso actual" sin número).
  *
- * Empate de fecha (mismo `eventDate` exacto):
- *   - weight / condition_score → desempate estable por `eventId` mayor (el id "más alto" gana).
- *   - reproductive → desempate por `seq` (orden de inserción local), porque a igualdad de `eventDate`
- *     (columna `date`, SIN hora) el orden total real lo da el `created_at` = INSTANTE DE CREACIÓN. Los
- *     INSERT CRUD-plano de reproductive_events ahora setean created_at de CLIENTE al insertar (tacto/
- *     service/abortion, ver banner en local-reads.ts) y el parto del overlay también → TODOS los
- *     determinantes tienen un instante real de creación. `buildTimelineQuery` entrega las filas
- *     `ORDER BY event_date ASC, created_at IS NULL ASC, created_at ASC` (created_at ascendentes; NULL al
- *     final = recién insertado sin sellar = más reciente; espejo de buildCategoryMirrorEventsQuery/RC6.1.4)
- *     → fetchTimeline asigna ese orden de lectura como `seq`. El INSERTADO DESPUÉS (created_at mayor → seq
- *     MAYOR) es posterior ⇒ gana. Esto hace DETERMINÍSTICO el bug: tacto + parto/aborto el MISMO día (el
- *     parto/aborto, creado DESPUÉS, GANA ⇒ "Vacía" SIEMPRE), reemplazando el `eventId` UUID random (~50/50).
- *     Sin `seq` (RPC fallback / tests legados) cae a `createdAt` (el mayor si AMBOS presentes; null = recién
- *     insertado = más reciente) y, sin él, a `eventId` mayor (estable). PURA.
+ * Empate de fecha (mismo `eventDate` exacto): **las TRES ramas usan el MISMO desempate**, `isNewerItem`
+ * (`seq` → `createdAt` con null-as-newest → `eventId`). Ver el docblock de esa función para el porqué.
+ *
+ * ⚠️ Hasta el 🔴 A.5 (QA en device, 2026-08-06) esto NO era así: solo la rama reproductiva tenía el
+ * desempate bueno, y peso/condición desempataban por `eventId`, que es un UUID v4 RANDOM ⇒ **la mitad de
+ * las veces ganaba el evento VIEJO**. Medido: un animal repesado el mismo día mostró bien el peso (318) y
+ * mal la condición (2,25 en vez de 3,75) — exactamente lo que predice una moneda. Repesar/re-condicionar
+ * un animal es rutina de manga (se movió en la balanza, el primer número no cerraba), y "Peso actual" es
+ * de lo que se alimenta el pilar de analytics.
  */
+/**
+ * Lo MÍNIMO que hace falta para decidir cuál de dos eventos es el más reciente. Todo `TimelineItem` lo
+ * cumple (los 4 campos están en las 8 variantes) — el tipo se declara acotado a propósito para que el
+ * desempate no pueda mirar nada específico de un kind y siga siendo EL MISMO para todos.
+ */
+type EventOrderKey = {
+  eventDate: string;
+  createdAt: string | null;
+  seq?: number;
+  eventId: string;
+};
+
+/**
+ * ¿`cand` es ESTRICTAMENTE posterior a `best`? EL desempate del "valor vigente", uno solo para todas las
+ * ramas de `deriveCurrentState`.
+ *
+ * ── LA ESCALERA, Y POR QUÉ CADA ESCALÓN ──────────────────────────────────────────────────────────────
+ *  0. `eventDate` mayor gana. Es una columna `date` SIN hora ⇒ dos cargas del MISMO día SIEMPRE empatan
+ *     acá, y todo lo que sigue existe por eso.
+ *  1. `seq` (orden de LECTURA de `buildTimelineQuery`, `ORDER BY event_date ASC, created_at IS NULL ASC,
+ *     created_at ASC`) — proxy FIEL del orden de inserción local: los `created_at` presentes ascendentes y
+ *     los NULL al final (= recién insertado, aún sin sellar = el más reciente, semántica null-as-newest de
+ *     RC6.1.4). El insertado DESPUÉS queda con `seq` mayor ⇒ gana.
+ *  2. Sin `seq` (RPC que no lo aporta / tests legados) → `createdAt`, con null = recién insertado = más
+ *     reciente. Parseado; fallback lexicográfico si no parsea (el texto timestamptz de PG es ISO uniforme).
+ *  3. `eventId`. Es el ÚLTIMO recurso y no un criterio: solo aporta ESTABILIDAD (que dos corridas den lo
+ *     mismo) cuando ni el orden de lectura ni el instante de creación distinguen los eventos.
+ *
+ * ── EL BUG QUE CIERRA (🔴 A.5, QA en device 2026-08-06) ──────────────────────────────────────────────
+ * Esta escalera existía SOLO en la rama reproductiva (`isNewerRepro`). Peso y condición corporal saltaban
+ * del escalón 0 al 3 — o sea, desempataban por un **UUID v4 random**: determinístico pero ARBITRARIO, con
+ * ~50 % de probabilidad de coronar el evento VIEJO. Con dos cargas del mismo día en `PERF-02001` el peso
+ * salió bien (318) y la condición mal (2,25 en vez de 3,75). El arreglo no inventa criterio nuevo: aplica
+ * el que la rama repro ya tenía, a todas.
+ */
+function isNewerItem(cand: EventOrderKey, best: { item: EventOrderKey; ms: number } | null): boolean {
+  if (!best) return true;
+  const candMs = Date.parse(cand.eventDate);
+  if (Number.isFinite(candMs) && candMs !== best.ms) return candMs > best.ms;
+  // (1) Mismo eventDate (mismo día) → seq: el insertado DESPUÉS es posterior.
+  if (typeof cand.seq === 'number' && typeof best.item.seq === 'number' && cand.seq !== best.item.seq) {
+    return cand.seq > best.item.seq;
+  }
+  // (2) Sin seq → created_at, con null-as-newest (el trigger lo sella al SUBIR).
+  const candCa = cand.createdAt;
+  const bestCa = best.item.createdAt;
+  if (candCa !== bestCa) {
+    if (candCa === null) return true; // cand recién insertado → posterior
+    if (bestCa === null) return false; // best recién insertado → cand NO posterior
+    const candCreated = Date.parse(candCa);
+    const bestCreated = Date.parse(bestCa);
+    if (Number.isNaN(candCreated) || Number.isNaN(bestCreated)) return candCa > bestCa;
+    return candCreated > bestCreated;
+  }
+  // (3) Nada más distingue → estabilidad por eventId (NO es un criterio de recencia).
+  return cand.eventId > best.item.eventId;
+}
+
 export function deriveCurrentState(
   timeline: readonly TimelineItem[] | null | undefined,
 ): CurrentState {
@@ -608,66 +661,15 @@ export function deriveCurrentState(
     ms: number;
   } | null = null;
 
-  // ¿`candidate` es más reciente que `best`? Mayor fecha gana; empate → mayor eventId. (weight/score)
-  const isNewer = (
-    candDate: string,
-    candId: string,
-    best: { item: { eventDate: string; eventId: string }; ms: number } | null,
-  ): boolean => {
-    if (!best) return true;
-    const cand = Date.parse(candDate);
-    if (Number.isFinite(cand) && cand !== best.ms) return cand > best.ms;
-    // Empate (o fecha inválida) → desempate estable por eventId.
-    return candId > best.item.eventId;
-  };
-
-  // ¿`cand` es más reciente que `best` para los eventos repro? Fecha mayor gana; a igualdad de eventDate
-  // (columna `date` sin hora), DESEMPATE PRIMARIO por `seq` (orden de inserción local = orden de lectura de
-  // buildTimelineQuery `ORDER BY event_date ASC, created_at IS NULL ASC, created_at ASC` → created_at
-  // ascendentes y NULL al final; el insertado DESPUÉS queda con seq mayor). Como los repro CRUD-plano ahora
-  // setean created_at de cliente al insertar (ver banner en local-reads.ts) y el parto del overlay también,
-  // el caso REALISTA es "ambos created_at presentes" → el seq sale del orden por created_at = orden de
-  // creación. Fallback sin seq: created_at (mayor, con null = recién insertado = más reciente), luego
-  // eventId. Espeja la precedencia server (animal-category.ts/RC6.1.4) de forma DETERMINÍSTICA.
-  const isNewerRepro = (
-    cand: Extract<TimelineItem, { kind: 'reproductive' }>,
-    best: { item: Extract<TimelineItem, { kind: 'reproductive' }>; ms: number } | null,
-  ): boolean => {
-    if (!best) return true;
-    const candMs = Date.parse(cand.eventDate);
-    if (Number.isFinite(candMs) && candMs !== best.ms) return candMs > best.ms;
-    // Mismo eventDate (mismo día). (1) DESEMPATE PRIMARIO: seq (orden de inserción local). El insertado
-    // DESPUÉS (seq mayor) es posterior → gana.
-    if (typeof cand.seq === 'number' && typeof best.item.seq === 'number' && cand.seq !== best.item.seq) {
-      return cand.seq > best.item.seq;
-    }
-    // (2) Fallback SIN seq (RPC que no lo aporta / tests legados): created_at. Un null = recién insertado
-    // local (el trigger lo sella al SUBIR) = MÁS RECIENTE que cualquier presente (isAfter/RC6.1.4).
-    const candCa = cand.createdAt;
-    const bestCa = best.item.createdAt;
-    if (candCa !== bestCa) {
-      if (candCa === null) return true; // cand recién insertado → posterior
-      if (bestCa === null) return false; // best recién insertado → cand NO posterior
-      const candCreated = Date.parse(candCa);
-      const bestCreated = Date.parse(bestCa);
-      // PowerSync materializa el texto timestamptz de PG (ISO uniforme, lexicográficamente ordenable) →
-      // Date.parse es fiable; fallback lexicográfico si alguno no parsea (defensivo).
-      if (Number.isNaN(candCreated) || Number.isNaN(bestCreated)) return candCa > bestCa;
-      return candCreated > bestCreated;
-    }
-    // (3) seq y createdAt no deciden → desempate estable por eventId (previo).
-    return cand.eventId > best.item.eventId;
-  };
-
   for (const it of timeline) {
     if (it.kind === 'weight') {
       if (it.weightKg == null) continue; // sin número → no es un peso vigente válido
-      if (isNewer(it.eventDate, it.eventId, weightBest)) {
+      if (isNewerItem(it, weightBest)) {
         weightBest = { item: it, ms: Date.parse(it.eventDate) };
       }
     } else if (it.kind === 'condition_score') {
       if (it.score == null) continue;
-      if (isNewer(it.eventDate, it.eventId, scoreBest)) {
+      if (isNewerItem(it, scoreBest)) {
         scoreBest = { item: it, ms: Date.parse(it.eventDate) };
       }
     } else if (it.kind === 'reproductive') {
@@ -675,7 +677,7 @@ export function deriveCurrentState(
       if (it.eventType !== 'tacto' && it.eventType !== 'birth' && it.eventType !== 'abortion') {
         continue;
       }
-      if (isNewerRepro(it, reproBest)) {
+      if (isNewerItem(it, reproBest)) {
         reproBest = { item: it, ms: Date.parse(it.eventDate) };
       }
     }

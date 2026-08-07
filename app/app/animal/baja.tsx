@@ -48,6 +48,7 @@ import { sanitizeWeightInput, maskDateInput } from '@/utils/animal-input';
 import { validateEventDate } from '@/utils/event-input';
 import { buttonA11y } from '@/utils/a11y';
 import { backOr } from '@/utils/nav';
+import { todayIsoLocal } from '@/utils/today-iso';
 
 // Estilo del `KeyboardAvoidingShell` (API no-Tamagui). `flex` no es spacing/color → no aplica el lint
 // anti-hardcode (ADR-023 §4).
@@ -69,14 +70,6 @@ const REASON_SUBTITLE: Record<ExitReasonChoice, string> = {
   death: 'Murió',
   transfer: 'Se fue del campo',
 };
-
-/** Fecha de hoy en ISO 'YYYY-MM-DD' (local) — el caso típico es "la baja es de hoy". */
-function todayIso(): string {
-  const d = new Date();
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${d.getFullYear()}-${mm}-${dd}`;
-}
 
 export default function BajaAnimalScreen() {
   const router = useRouter();
@@ -101,7 +94,7 @@ export default function BajaAnimalScreen() {
   const [step, setStep] = useState<1 | 2>(1);
   const [choice, setChoice] = useState<ExitReasonChoice | null>(null);
 
-  const [exitDate, setExitDate] = useState(todayIso());
+  const [exitDate, setExitDate] = useState(todayIsoLocal());
   const [exitDateErr, setExitDateErr] = useState<string | null>(null);
   const [weightRaw, setWeightRaw] = useState('');
   const [weightErr, setWeightErr] = useState<string | null>(null);

@@ -1,8 +1,16 @@
 // Tests de la geometría de los targets del borde inferior (bugfix 🔴 «el FAB le roba los taps a la banda
 // de arriba del nav», 2026-08-06). node:test, puro.
 //
+// ⚠️ **LA BANDA HOY NO TIENE INQUILINOS, Y ESO NO APAGA ESTOS TESTS.** El pill del bastón —el único que
+// hubo— se mudó arriba a la derecha el 2026-08-06 (ver `StickStatusIndicator.tsx`). Lo que se verifica acá
+// es el INVARIANTE —*nada anclado al borde inferior invade la banda del FAB*— sobre un **inquilino
+// sintético** con la geometría del que se fue. Borrar el archivo con el inquilino habría dejado el
+// mecanismo intacto y sin vigilancia para el próximo toast/snackbar/banner: exactamente cómo nació el bug.
+// Quién controla que la población REAL siga siendo la declarada (hoy: cero) es
+// `tap-target-collision-guard.test.ts` → (B-banda).
+//
 // Lo que se fija acá:
-//   (a) el TARGET del FAB y el del pill del bastón **no se tocan**, y la separación es ≥ el piso;
+//   (a) el TARGET del FAB y el de un inquilino anclado abajo **no se tocan**, y la separación es ≥ el piso;
 //   (b) esa separación NO depende de la plataforma (el inset inferior se cancela) — o sea, verificarlo
 //       una vez alcanza para web / iOS / Android gestos / Android 3 botones;
 //   (c) el CONTRAFÁCTICO: con los tokens que tenía el repo antes del fix, el modelo da SOLAPE, y del
@@ -39,7 +47,7 @@ import {
   resolveFabHitSlop,
   resolveInsetSides,
   sizeTokenFromConfig,
-  stickPillBand,
+  bottomAnchoredBand,
   tabBarTop,
   type NavTargetTokens,
   type ResolveEnv,
@@ -51,13 +59,16 @@ const NAV_ITEM_TOP = 2; // $navItemTop
 const FAB = 64; // $fab
 const FAB_RAISE = 26; // $fabRaise = round(64 * 0.40)
 /**
- * Alto PINTADO del pill (`lineHeight $2` + `paddingVertical $2` ×2 + borde ×2). NO sale de un token:
- * lo produce el contenido. Quien lo mide de verdad es `e2e/fab-target-geometry.spec.ts` — acá es un
- * dato de entrada del modelo, y por eso NO lo cruza `tap-target-collision-guard` contra ningún token.
- * El pill **no es un target** (`pointerEvents="none"`), así que no aplica ningún mínimo de tap.
+ * Alto PINTADO del INQUILINO SINTÉTICO. Es el del pill histórico (`lineHeight $2` + `paddingVertical $2`
+ * ×2 + borde ×2 = 33): se conserva ese número para que el contrafáctico de `1f1c002` siga reproduciendo
+ * el bug medido. NO sale de un token (lo producía el contenido), y por eso `tap-target-collision-guard`
+ * no lo cruza contra ninguno.
  */
-const PILL_PAINTED_HEIGHT = 33;
-const PILL_GAP = 18; // space.$4 — el gap AS-BUILT del pill (antes: space.$2 = 7)
+const TENANT_PAINTED_HEIGHT = 33;
+// Gap del inquilino sintético = el que tenía el pill cuando vivía acá (`space.$4`; antes `$2` = 7). El
+// nombre conserva la palabra `PILL` porque es la clave con la que `tap-target-collision-guard` (C) cruza
+// esta copia contra el token real; el inquilino ya no existe (se mudó arriba el 2026-08-06).
+const PILL_GAP = 18;
 
 /**
  * Las cuatro reservas inferiores reales (web · iOS · Android gestos · Android 3 botones).
@@ -66,7 +77,8 @@ const PILL_GAP = 18; // space.$4 — el gap AS-BUILT del pill (antes: space.$2 =
  */
 const RESERVES = REAL_BOTTOM_RESERVES;
 
-/** Separación AS-BUILT pill↔FAB. `pillGap + navItemTop` = 18 + 2. Cambiarla es una decisión de diseño. */
+/** Separación inquilino↔FAB que produce el modelo (`tenantGap + navItemTop` = 18 + 2). Cambiarla a
+ *  propósito es una decisión de diseño: cambiá el número y decí por qué. */
 const AS_BUILT_SEPARATION = 20;
 
 function tokens(over: Partial<NavTargetTokens> = {}): NavTargetTokens {
@@ -78,8 +90,8 @@ function tokens(over: Partial<NavTargetTokens> = {}): NavTargetTokens {
     fabRaise: FAB_RAISE,
     fabHitSlopTop: 0, // AS-BUILT: el `top` se sacó. Es EL fix.
     fabHitSlopBottom: Math.max(0, NAV_BAR - NAV_ITEM_TOP - (FAB - FAB_RAISE)), // = 20
-    pillGap: PILL_GAP,
-    pillHeight: PILL_PAINTED_HEIGHT,
+    tenantGap: PILL_GAP,
+    tenantHeight: TENANT_PAINTED_HEIGHT,
     ...over,
   };
 }
@@ -88,18 +100,18 @@ function tokens(over: Partial<NavTargetTokens> = {}): NavTargetTokens {
 function buggyTokens(over: Partial<NavTargetTokens> = {}): NavTargetTokens {
   return tokens({
     fabHitSlopTop: FAB_RAISE, // el `hitSlop.top` que se sacó
-    pillGap: 7, // space.$2
+    tenantGap: 7, // space.$2
     ...over,
   });
 }
 
 // ─── (a) El invariante ───────────────────────────────────────────────────────────────────
 
-test('el target del FAB y el del pill NO se solapan', () => {
+test('el target del FAB y el de un inquilino anclado abajo NO se solapan', () => {
   for (const safeBottomInset of RESERVES) {
     const t = tokens({ safeBottomInset });
     assert.equal(
-      bandsOverlap(fabTargetBand(t), stickPillBand(t)),
+      bandsOverlap(fabTargetBand(t), bottomAnchoredBand(t)),
       false,
       `con reserva inferior ${safeBottomInset} los dos targets se pisan`,
     );
@@ -109,7 +121,7 @@ test('el target del FAB y el del pill NO se solapan', () => {
 test('la separación entre los dos targets respeta el piso de la app', () => {
   for (const safeBottomInset of RESERVES) {
     const t = tokens({ safeBottomInset });
-    const separation = bandSeparation(fabTargetBand(t), stickPillBand(t));
+    const separation = bandSeparation(fabTargetBand(t), bottomAnchoredBand(t));
     assert.ok(
       separation >= MIN_TAP_TARGET_SEPARATION,
       `separación ${separation} dp < piso ${MIN_TAP_TARGET_SEPARATION} dp (reserva ${safeBottomInset})`,
@@ -117,10 +129,10 @@ test('la separación entre los dos targets respeta el piso de la app', () => {
   }
 });
 
-test('la separación AS-BUILT es 20 dp (si la cambiás a propósito, cambiá este número y decí por qué)', () => {
+test('la separación del modelo es 20 dp (si la cambiás a propósito, cambiá este número y decí por qué)', () => {
   // Change-detector deliberado, ADEMÁS del piso: 4 dp de deriva silenciosa hacia el piso serían un
   // empeoramiento real del diseño que ningún test vería.
-  assert.equal(bandSeparation(fabTargetBand(tokens()), stickPillBand(tokens())), AS_BUILT_SEPARATION);
+  assert.equal(bandSeparation(fabTargetBand(tokens()), bottomAnchoredBand(tokens())), AS_BUILT_SEPARATION);
 });
 
 // ─── (b) La separación no depende de la plataforma ───────────────────────────────────────
@@ -130,7 +142,7 @@ test('la separación es INDEPENDIENTE de la reserva inferior (el inset se cancel
   // la resta. Vale la pena fijarlo: si alguien ancla el pill al inset PELADO (que es como estaba antes de
   // la unidad «aire»), esta propiedad se rompe y el bug vuelve SOLO en Android.
   const separations = RESERVES.map((safeBottomInset) =>
-    bandSeparation(fabTargetBand(tokens({ safeBottomInset })), stickPillBand(tokens({ safeBottomInset }))),
+    bandSeparation(fabTargetBand(tokens({ safeBottomInset })), bottomAnchoredBand(tokens({ safeBottomInset }))),
   );
   assert.deepEqual(separations, [AS_BUILT_SEPARATION, AS_BUILT_SEPARATION, AS_BUILT_SEPARATION, AS_BUILT_SEPARATION]);
 });
@@ -138,7 +150,7 @@ test('la separación es INDEPENDIENTE de la reserva inferior (el inset se cancel
 test('desincronizar el pill del nav (anclarlo al inset pelado) SÍ rompe la separación en Android', () => {
   // Contrafáctico de la propiedad de arriba: el pill anclado a un inset de 0 mientras el nav reserva 64.
   const nav = tokens({ safeBottomInset: 64 });
-  const pillAnchoredToRawInset = stickPillBand(tokens({ safeBottomInset: 0 }));
+  const pillAnchoredToRawInset = bottomAnchoredBand(tokens({ safeBottomInset: 0 }));
   assert.ok(bandsOverlap(fabTargetBand(nav), pillAnchoredToRawInset));
 });
 
@@ -146,32 +158,32 @@ test('desincronizar el pill del nav (anclarlo al inset pelado) SÍ rompe la sepa
 
 test('CONTRAFÁCTICO: con los tokens de `1f1c002` el modelo da SOLAPE (el bug 🔴 que se arregló)', () => {
   const t = buggyTokens();
-  assert.equal(bandsOverlap(fabTargetBand(t), stickPillBand(t)), true);
+  assert.equal(bandsOverlap(fabTargetBand(t), bottomAnchoredBand(t)), true);
   // 17 y no 16: el modelo ignora el borde de 1 px del tabBar, a propósito y del lado seguro (ver el
   // docblock del módulo). El DOM midió 16 dp y el device 30 px = 16 dp.
-  assert.equal(bandSeparation(fabTargetBand(t), stickPillBand(t)), -17);
+  assert.equal(bandSeparation(fabTargetBand(t), bottomAnchoredBand(t)), -17);
   // Y coincide con el síntoma reportado: casi la mitad de abajo del pill le pertenecía al FAB.
-  const pill = stickPillBand(t);
+  const pill = bottomAnchoredBand(t);
   const stolen = fabTargetBand(t).top - pill.bottom;
   assert.equal(Math.round((stolen / (pill.top - pill.bottom)) * 100), 52); // DOM: 48 % (el 1 px de borde)
 });
 
 test('CONTRAFÁCTICO: re-agregar SOLO el `hitSlop.top` ya rompe el invariante (aunque el aire sea el nuevo)', () => {
   const t = tokens({ fabHitSlopTop: FAB_RAISE });
-  assert.equal(bandsOverlap(fabTargetBand(t), stickPillBand(t)), true);
-  assert.equal(bandSeparation(fabTargetBand(t), stickPillBand(t)), -6);
+  assert.equal(bandsOverlap(fabTargetBand(t), bottomAnchoredBand(t)), true);
+  assert.equal(bandSeparation(fabTargetBand(t), bottomAnchoredBand(t)), -6);
 });
 
 test('CONTRAFÁCTICO: volver el gap del pill a `$2` cae por debajo del piso (aunque el slop sea 0)', () => {
-  const t = tokens({ pillGap: 7 });
-  assert.equal(bandSeparation(fabTargetBand(t), stickPillBand(t)), 9);
+  const t = tokens({ tenantGap: 7 });
+  assert.equal(bandSeparation(fabTargetBand(t), bottomAnchoredBand(t)), 9);
   assert.ok(9 < MIN_TAP_TARGET_SEPARATION);
 });
 
 test('CONTRAFÁCTICO: agrandar el pill hacia ABAJO (hitSlop.bottom) también lo rompe', () => {
   // Un pill de 40 con 12 de slop inferior "para que sea más fácil de tocar" se come el aire entero.
   const t = tokens();
-  const pill = stickPillBand(t);
+  const pill = bottomAnchoredBand(t);
   const withSlopDown = { bottom: pill.bottom - 12, top: pill.top };
   assert.ok(bandSeparation(fabTargetBand(t), withSlopDown) < MIN_TAP_TARGET_SEPARATION);
 });
@@ -185,10 +197,10 @@ test('el invariante se mide contra la banda PINTADA del pill, no contra un targe
   // hay debajo ES el FAB. El operario toca un chip de estado y se le abre MODO MANIOBRAS. Que es,
   // literalmente, el reporte de Raf.
   const t = tokens();
-  const pill = stickPillBand(t);
-  assert.equal(pill.top - pill.bottom, PILL_PAINTED_HEIGHT, 'la banda del modelo es la PINTADA');
+  const pill = bottomAnchoredBand(t);
+  assert.equal(pill.top - pill.bottom, TENANT_PAINTED_HEIGHT, 'la banda del modelo es la PINTADA');
   // Con el bug puesto, el FAB llegaba adentro de esa banda pintada aunque el pill no fuera tocable.
-  assert.ok(fabTargetBand(buggyTokens()).top > stickPillBand(buggyTokens()).bottom);
+  assert.ok(fabTargetBand(buggyTokens()).top > bottomAnchoredBand(buggyTokens()).bottom);
   // Y hoy no llega.
   assert.ok(fabTargetBand(t).top < pill.bottom);
 });
@@ -225,8 +237,8 @@ test('el FAB asoma ~40% por encima del nav (la premisa de B4 que la geometría d
 // ─── Robustez ────────────────────────────────────────────────────────────────────────────
 
 test('NaN / negativos / no-finitos se tratan como 0 y no producen bandas invertidas', () => {
-  const t = tokens({ safeBottomInset: NaN, navItemTop: -5, pillGap: Infinity });
-  for (const band of [fabCircleBand(t), fabTargetBand(t), stickPillBand(t)]) {
+  const t = tokens({ safeBottomInset: NaN, navItemTop: -5, tenantGap: Infinity });
+  for (const band of [fabCircleBand(t), fabTargetBand(t), bottomAnchoredBand(t)]) {
     assert.ok(Number.isFinite(band.top) && Number.isFinite(band.bottom));
     assert.ok(band.top >= band.bottom, 'una banda nunca puede quedar invertida');
   }
@@ -234,7 +246,7 @@ test('NaN / negativos / no-finitos se tratan como 0 y no producen bandas inverti
 
 test('`bandSeparation` no depende del orden de los argumentos', () => {
   const t = tokens();
-  const [fab, pill] = [fabTargetBand(t), stickPillBand(t)];
+  const [fab, pill] = [fabTargetBand(t), bottomAnchoredBand(t)];
   assert.equal(bandSeparation(fab, pill), bandSeparation(pill, fab));
 });
 
@@ -431,7 +443,7 @@ test('EL INVARIANTE, con el valor resuelto: cualquier `top` > 0 come el aire del
   // debajo del piso de la app. Por eso el registro exige `{bottom}` a secas y no "un top chico".
   for (const top of [1, 5, 12, 26]) {
     const t = tokens({ fabHitSlopTop: top });
-    const separation = bandSeparation(fabTargetBand(t), stickPillBand(t));
+    const separation = bandSeparation(fabTargetBand(t), bottomAnchoredBand(t));
     assert.equal(separation, AS_BUILT_SEPARATION - top);
     if (top > AS_BUILT_SEPARATION - MIN_TAP_TARGET_SEPARATION) {
       assert.ok(separation < MIN_TAP_TARGET_SEPARATION, `un top de ${top} dp ya cae por debajo del piso`);

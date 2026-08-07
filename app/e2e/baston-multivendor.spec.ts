@@ -217,10 +217,12 @@ test('(c) estados de conexión con CTA: off → conectado → desconectado; manu
   await triggerDemoRead(page);
 
   // Estado 'connected' (RMV3.4): "Bastón conectado" + CTA "Desconectar". El indicador GLOBAL del chrome
-  // (RMV3.5) se SUPRIME en la PROPIA /baston (redundante con esta card + evita pisar el título del header,
-  // Gate 2.5 / ADR-029) → count 0 acá aunque el status sea 'connected'. Su rol real (visible en pantallas
-  // SIN card de estado, anclado abajo) se demuestra en la captura (shot 07, home). "Bastón conectado" aparece
-  // una sola vez (la card) → `.first()` sigue válido. Manual sigue disponible (RMV3.6).
+  // (RMV3.5) se SUPRIME acá porque esta pantalla YA muestra el estado en su card: sería el mismo dato dos
+  // veces. **Desde el 2026-08-06 eso lo declara la propia pantalla** (`useStickStatusSurface('screen-card')`)
+  // y ya no un `pathname === '/baston'` adentro del indicador — el comportamiento observable es idéntico,
+  // lo que cambió es que dejó de depender del nombre de la ruta (ver `services/ble/stick-status-surface.ts`).
+  // Su rol real (visible en pantallas SIN superficie propia) lo verifica `baston-indicador-unico.spec.ts`.
+  // "Bastón conectado" aparece una sola vez (la card) → `.first()` sigue válido. Manual disponible (RMV3.6).
   await expect(page.getByText('Bastón conectado', { exact: true }).first()).toBeVisible({ timeout: 10_000 });
   await expect(page.getByTestId('stick-status-indicator')).toHaveCount(0);
   await expect(page.getByText(/Sin bast[oó]n/).first()).toBeVisible();
