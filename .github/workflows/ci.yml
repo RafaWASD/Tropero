@@ -1,0 +1,65 @@
+name: CI
+
+# Puerta automática del repo. Corre en cada push a main y en cada PR.
+#
+# Qué cubre: `node scripts/check.mjs` = estructura del harness + validación de
+# feature_list.json/specs + higiene de progress/current.md + lint anti-hardcode
+# (ADR-023 §4) + typecheck del cliente + unit tests de scripts + ~170 archivos de
+# unit tests del cliente (incluidos los guards estáticos, que son la ÚNICA
+# cobertura de varios bugs de clase que ninguna E2E de web puede ver).
+#
+# Qué NO cubre, a propósito:
+#   · Las 16 suites de DB (RLS/animal/maneuvers/reports/...) — pegan contra la base
+#     DEV COMPARTIDA. Correrlas en cada push agrega un tercer escritor concurrente
+#     (ya hay flakes de rate-limit con dos terminales) y ensucia DEV con fixtures.
+#     Van en ci-db.yml: nightly + manual.
+#   · La suite E2E de Playwright (~38 min, y HOY tiene rojos abiertos desde
+#     2026-07-10). Meterla ahora dejaría el badge en rojo permanente, que es la
+#     forma más rápida de que un CI deje de significar algo. Se engancha cuando los
+#     rojos estén cerrados.
+# `check.mjs` sin SUPABASE_SERVICE_ROLE_KEY saltea las suites de DB solo — no hay
+# que pasarle ningún flag (ver scripts/run-tests.mjs).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch: {}
+
+# Un push nuevo sobre el mismo ref cancela la corrida anterior (ahorra minutos:
+# el repo es privado y los minutos de Actions son finitos).
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      # pnpm ANTES de setup-node: setup-node con cache:'pnpm' necesita que el
+      # binario ya exista para resolver el store path.
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      # Node 24: los unit tests del cliente son .ts corridos con node:test y
+      # type-stripping NATIVO (sin Jest, sin build). Con Node 20 no parsean.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+          cache-dependency-path: app/pnpm-lock.yaml
+
+      # --frozen-lockfile: si el lockfile no está al día con package.json, la
+      # corrida FALLA en vez de resolver versiones nuevas por su cuenta.
+      - name: Install deps
+        working-directory: app
+        run: pnpm install --frozen-lockfile
+
+      # SIN SUPABASE_SERVICE_ROLE_KEY en el env → las suites de DB se saltean
+      # solas y no se toca la base compartida. Todo lo demás corre.
+      - name: check.mjs (harness + lint + typecheck + unit tests)
+        run: node scripts/check.mjs

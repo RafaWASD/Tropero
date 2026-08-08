@@ -1,0 +1,81 @@
+name: CI — suites de DB (nightly)
+
+# Las 16 suites que pegan contra la base DEV COMPARTIDA (RLS, animal, maneuvers,
+# reports, custom, scrotal, user_private, import, sync_streams, operaciones_rodeo,
+# sigsa, treatments, audit, health, puesta-en-servicio, edge).
+#
+# POR QUÉ NO VAN EN ci.yml (cada push): escriben en DEV. Sumar un tercer escritor
+# concurrente a las dos terminales que ya trabajan ahí reproduce el flake conocido
+# de rate-limit de auth de Supabase y deja fixtures dando vueltas. Nightly a las
+# 04:30 AR nadie más está tocando la base.
+#
+# Detectan lo que ci.yml no puede: DRIFT entre las migraciones aplicadas al remoto
+# y lo que el código asume. Ese desfasaje hoy solo se ve cuando alguien corre el
+# check completo a mano.
+
+on:
+  schedule:
+    - cron: '30 7 * * *'   # 07:30 UTC ≈ 04:30 AR (offset del backup de PROD, 06:00 UTC)
+  workflow_dispatch: {}
+
+concurrency:
+  group: ci-db
+  cancel-in-progress: false
+
+jobs:
+  db-suites:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      # Fail-fast ANTES de instalar nada. Sin estos secrets, run-tests.mjs saltea
+      # las suites de DB con un warning y termina en VERDE — un nightly que no
+      # corrió nada pero informa éxito es peor que no tenerlo. Acá se cae con
+      # instrucciones en vez de mentir.
+      - name: Verificar secrets
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL_DEV }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY_DEV }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY_DEV }}
+          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF_DEV }}
+        run: |
+          missing=""
+          for v in SUPABASE_URL SUPABASE_ANON_KEY SUPABASE_SERVICE_ROLE_KEY SUPABASE_PROJECT_REF; do
+            [ -z "${!v}" ] && missing="$missing ${v}_DEV"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Faltan secrets del repo:$missing"
+            echo "Cargalos en Settings > Secrets and variables > Actions."
+            echo "Los valores son los de .env.local (proyecto DEV, NUNCA los de PROD)."
+            exit 1
+          fi
+          echo "Secrets presentes."
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+          cache-dependency-path: app/pnpm-lock.yaml
+
+      - name: Install deps
+        working-directory: app
+        run: pnpm install --frozen-lockfile
+
+      # Las suites leen tanto SUPABASE_* como EXPO_PUBLIC_SUPABASE_* según el archivo.
+      # U9_DEPLOYED queda SIN setear a propósito: gatea asserts de comportamiento de
+      # Edge Functions que todavía no están deployadas (se saltean, es lo correcto).
+      - name: Suites de DB
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL_DEV }}
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.SUPABASE_URL_DEV }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY_DEV }}
+          EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY_DEV }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY_DEV }}
+          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF_DEV }}
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: node scripts/run-tests.mjs
