@@ -32,6 +32,8 @@ import {
   AlertList,
   ReportOffline,
   ReportEmpty,
+  CampaignStateBar,
+  CampaignCloseSheet,
   type AlertItem,
 } from '@/components/reports';
 import {
@@ -46,8 +48,10 @@ import {
   eventKindLabel,
   compareSessions,
   compareWeights,
+  campaignStateView,
   type CalvingStatus,
   type WeaningStatus,
+  type CampaignStatusLike,
 } from '@/utils/reports-format';
 
 type SpikeVariant =
@@ -69,7 +73,55 @@ type SpikeVariant =
   | 'destete-leyenda'
   | 'destete-sin-destete'
   | 'destete-sin-meses'
-  | 'destete-12m';
+  | 'destete-12m'
+  // delta CAMPAÑAS CONGELADAS (RCC.14.1) — los 9 estados de la barra de campaña + las dos hojas de
+  // confirmación (mock, para el capture del Gate 2.5).
+  | 'campana-en-curso'
+  | 'campana-sugerencia'
+  | 'campana-cerrada'
+  | 'campana-cerrada-a-medias'
+  | 'campana-datos-nuevos'
+  | 'campana-sin-permiso'
+  | 'campana-confirmacion'
+  | 'campana-confirmacion-incompleta'
+  | 'campana-cierre-masivo'
+  | 'campana-desconocida';
+
+/** Estados mock de campaña, uno por variante (los mismos que devuelve `rodeo_campaign_status`). */
+const MOCK_CAMPAIGN: Record<string, CampaignStatusLike> = {
+  'campana-en-curso': {
+    isClosed: false, closedAt: null, closedByName: null, closedIncomplete: false, missingAtClose: null,
+    pendingPregnant: 2, pendingWeaning: 5, canClose: true, canReopen: false, cycleComplete: false,
+    hasNewData: false,
+  },
+  'campana-sugerencia': {
+    isClosed: false, closedAt: null, closedByName: null, closedIncomplete: false, missingAtClose: null,
+    pendingPregnant: 0, pendingWeaning: 0, canClose: true, canReopen: false, cycleComplete: true,
+    hasNewData: false,
+  },
+  'campana-cerrada': {
+    isClosed: true, closedAt: '2026-03-14', closedByName: 'Facundo', closedIncomplete: false,
+    missingAtClose: null, pendingPregnant: 0, pendingWeaning: 0, canClose: false, canReopen: true,
+    cycleComplete: true, hasNewData: false,
+  },
+  'campana-cerrada-a-medias': {
+    isClosed: true, closedAt: '2026-03-14', closedByName: 'Facundo', closedIncomplete: true,
+    missingAtClose: '2 preñadas sin parir · 5 crías sin destetar', pendingPregnant: 2, pendingWeaning: 5,
+    canClose: false, canReopen: true, cycleComplete: false, hasNewData: false,
+  },
+  'campana-datos-nuevos': {
+    isClosed: true, closedAt: '2026-03-14', closedByName: 'Facundo', closedIncomplete: false,
+    missingAtClose: null, pendingPregnant: 0, pendingWeaning: 0, canClose: false, canReopen: true,
+    cycleComplete: true, hasNewData: true,
+  },
+  // field_operator: ve el estado y el aviso de "a medias" (es información del reporte), pero NO las
+  // acciones (RCC.10.8 + RCC.10.11).
+  'campana-sin-permiso': {
+    isClosed: true, closedAt: '2026-03-14', closedByName: 'Facundo', closedIncomplete: true,
+    missingAtClose: '5 crías sin destetar', pendingPregnant: 0, pendingWeaning: 5, canClose: false,
+    canReopen: false, cycleComplete: false, hasNewData: false,
+  },
+};
 
 export default function ReportesSpikeScreen() {
   const insets = useSafeAreaInsets();
@@ -136,7 +188,57 @@ export default function ReportesSpikeScreen() {
         {variant === 'destete-12m' ? (
           <DesteteVariant status="not_applicable_12m" weaned={0} serviced={46} pendingWeaning={0} />
         ) : null}
+        {MOCK_CAMPAIGN[variant] ? <CampanaVariant status={MOCK_CAMPAIGN[variant]} /> : null}
+        {/* El estado que NO se puede sembrar con un mock "de estado": el que todavía no se sabe (H-1). */}
+        {variant === 'campana-desconocida' ? <CampanaVariant status={null} /> : null}
+        {variant.startsWith('campana-confirmacion') || variant === 'campana-cierre-masivo' ? (
+          <CampanaVariant status={MOCK_CAMPAIGN['campana-en-curso']} />
+        ) : null}
       </ScrollView>
+
+      {/* Las hojas de confirmación van FUERA del ScrollView: su scrim cubre la pantalla entera. */}
+      {variant === 'campana-confirmacion' ? (
+        <CampaignCloseSheet
+          year={2025}
+          rodeoName="Servicio Invierno"
+          cycleComplete
+          missing={[]}
+          acknowledgeAvailable={false}
+          rodeoCount={1}
+          onConfirm={() => {}}
+          onCancel={() => {}}
+        />
+      ) : null}
+      {variant === 'campana-confirmacion-incompleta' ? (
+        <CampaignCloseSheet
+          year={2025}
+          rodeoName="Servicio Invierno"
+          cycleComplete={false}
+          missing={['2 preñadas sin parir', '5 crías sin destetar']}
+          acknowledgeAvailable
+          rodeoCount={1}
+          onConfirm={() => {}}
+          onCancel={() => {}}
+        />
+      ) : null}
+      {variant === 'campana-cierre-masivo' ? (
+        <CampaignCloseSheet
+          year={2025}
+          rodeoName="Servicio Invierno"
+          cycleComplete
+          missing={[]}
+          acknowledgeAvailable={false}
+          rodeoCount={4}
+          bulkResult={{
+            ok: ['Servicio Invierno', 'Servicio Primavera', 'Rodeo General'],
+            incomplete: [{ id: 'r4', name: 'Vaquillonas', missing: ['3 crías sin destetar'] }],
+            failed: [],
+          }}
+          onConfirm={() => {}}
+          onCloseAll={() => {}}
+          onCancel={() => {}}
+        />
+      ) : null}
     </YStack>
   );
 }
@@ -587,6 +689,43 @@ function DesteteVariant({
         <KpiCard label="Destete" value={wv.value} detail={wv.detail ?? wv.note} muted={wv.muted} />
       </KpiRow>
       {wv.legend ? <InfoNote>{wv.legend}</InfoNote> : null}
+    </>
+  );
+}
+
+// ─── Delta CAMPAÑAS CONGELADAS: la barra de estado + los KPIs debajo (RCC.14.1) ─────────────────────
+//
+// La barra va ARRIBA de los números a propósito: es el marco de interpretación de todo lo que viene
+// abajo. La captura del Gate 2.5 tiene que mostrar las dos cosas juntas — un 89 % arriba de "Campaña
+// cerrada · Foto del 14/03/2026" se lee distinto que el mismo 89 % arriba de "Campaña en curso".
+function CampanaVariant({ status }: { status: CampaignStatusLike | null }) {
+  const view = campaignStateView(status);
+  const pregnant = 41;
+  const serviced = 46;
+  const calved = 38;
+  return (
+    <>
+      <CampaignStateBar view={view} onClose={() => {}} onReopen={() => {}} />
+      <ReportSectionHeader
+        title="Reproductivo"
+        hint={
+          view.badge === 'desconocido'
+            ? 'Campaña 2025 · base servidas'
+            : `Campaña 2025 · ${status && status.isClosed ? 'foto' : 'en curso'} · base servidas`
+        }
+      />
+      <KpiRow>
+        <KpiCard
+          label="Preñez"
+          value={formatPercentAR(safePercent(pregnant, serviced))}
+          detail={`${pregnant} preñadas / ${serviced} servidas`}
+        />
+        <KpiCard
+          label="Parición"
+          value={formatPercentAR(safePercent(calved, serviced))}
+          detail={`${calved} paridas / ${serviced} servidas`}
+        />
+      </KpiRow>
     </>
   );
 }

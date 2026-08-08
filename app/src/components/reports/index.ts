@@ -8,3 +8,8 @@ export { CclBars } from './CclBars';
 export type { CclBarsProps } from './CclBars';
 export { AlertList } from './AlertList';
 export type { AlertItem } from './AlertList';
+// Delta campañas congeladas: estado de la campaña + confirmación del cierre.
+export { CampaignStateBar } from './CampaignStateBar';
+export type { CampaignStateBarProps } from './CampaignStateBar';
+export { CampaignCloseSheet } from './CampaignCloseSheet';
+export type { CampaignCloseSheetProps } from './CampaignCloseSheet';

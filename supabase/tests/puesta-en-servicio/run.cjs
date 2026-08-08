@@ -145,7 +145,15 @@ async function createRodeo(client, { establishmentId, name, systemCode = 'cria' 
   return { id: data.id, systemId: data.system_id };
 }
 
-async function createAnimal(client, { tag = null, idv = null, sex, birthDate = null, rodeoId, establishmentId, systemId, categoryCode = null }) {
+// ⚠ `entryDate` (delta campañas congeladas, migración 0127 — reconciliación §15 R6):
+// esta suite es el OTRO consumidor de `rodeo_serviced_females` / `rodeo_repro_denominator` (13 call sites).
+// Post-0127, el trigger de membresía abre la fila con `from_date = coalesce(entry_date, created_at::date)`, y
+// `rodeo_serviced_females` evalúa la pertenencia al rodeo A LA FECHA DE CORTE de la campaña. Un perfil SIN
+// `entry_date` nace con membresía HOY: con `service_months = [11]` el corte es el 30/11 del año en curso, así
+// que la suite **pasa hasta el 30/11 y se cae entera desde el 1/12** — un rojo repo-wide con fecha de
+// vencimiento, sin ninguna regresión detrás. Default: la fecha de nacimiento (que en cría es cuándo entró al
+// campo) o 10 años atrás. Es el mismo requisito que RCC.11.2 le pide al re-seed, un nivel más abajo.
+async function createAnimal(client, { tag = null, idv = null, sex, birthDate = null, rodeoId, establishmentId, systemId, categoryCode = null, entryDate = undefined }) {
   const { speciesId } = await lookupSpeciesSystem(client, 'bovino', 'cria');
   const animalId = require('node:crypto').randomUUID();
   const animalPayload = { id: animalId, sex, species_id: speciesId };
@@ -162,6 +170,7 @@ async function createAnimal(client, { tag = null, idv = null, sex, birthDate = n
   const profilePayload = {
     id: profileId, animal_id: animalId, establishment_id: establishmentId,
     rodeo_id: rodeoId, category_id: catId, status: 'active',
+    entry_date: entryDate === undefined ? (birthDate || daysAgo(3650)) : entryDate,
   };
   if (idv) profilePayload.idv = idv;
   // IDU: visual_id_alt eliminado (0122). Un perfil sin idv/tag persiste (trigger de completitud dropeado).
@@ -638,8 +647,14 @@ test('puesta-en-servicio suite — spec 02 Stream A', async (t) => {
       assert.ifError(bajaErr); // baja debe persistir: un literal de enum inválido reverte el status='sold' silenciosamente y rompe el assert de membresía de abajo
       const { data: denomAfter } = await clientA.rpc('rodeo_repro_denominator', { p_rodeo_id: r.id, p_year: thisYear() });
       const after = denomAfter[0];
-      // la vacaBaja (natural) sale del set serviced al no estar 'active' → serviced baja en 1.
-      assert.ok(after.serviced === before.serviced - 1, 'una baja de rama natural sale del set serviced (membresía active)');
+      // La vacaBaja (rama natural) sale del set serviced → serviced baja en 1.
+      // ⚠ POR QUÉ SALE, post-delta `campanas-congeladas` (0129): **ya no es por `p.status = 'active'`** — ese
+      // filtro se ELIMINÓ a propósito (era la fuga F2: una vaca vendida hoy desaparecía de las campañas
+      // pasadas en las que sí estuvo). Lo que la saca ahora es la MEMBRESÍA: al escribirle `exit_date`, el
+      // trigger de 0127 cierra su fila con `to_date = exit_date`, que es anterior a la fecha de corte de la
+      // campaña, así que deja de estar en el rodeo A ESA FECHA. El número no cambia; el motivo sí, y el
+      // comentario viejo ("al no estar 'active'") quedaba falso — un test que pasa por la razón equivocada.
+      assert.ok(after.serviced === before.serviced - 1, 'una baja de rama natural sale del set serviced (por MEMBRESÍA cerrada al corte, no por status)');
       assert.equal(after.entoradas, after.serviced - after.retired, 'entoradas = serviced − retired tras la baja (RPS.5.5)');
     }
 

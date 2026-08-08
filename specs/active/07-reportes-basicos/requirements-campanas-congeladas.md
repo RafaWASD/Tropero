@@ -156,8 +156,21 @@ detalle y fundamento en `design-campanas-congeladas.md` §0.3):
   de borrar la fila.
 - **RCC.4.7** — El sistema deberá garantizar que la cantidad de filas de cada bucket coincida con el número
   congelado correspondiente en la cabecera (`serviced`, `pregnant`, `empty`, `calved`, `weaned`).
+  > **Reconciliación as-built (2026-08-07, `design` §2.4 y §15-bis R13)**: la garantía **no** es "salen del
+  > mismo `select`" —`close_campaign` es `VOLATILE`, así que en `READ COMMITTED` cada sentencia toma un
+  > snapshot nuevo y el detalle y la cabecera se materializan en sentencias distintas—, sino que el cierre
+  > **cuenta las filas del detalle y las compara con los cinco números antes de terminar**, y **aborta con
+  > `40001` sin dejar snapshot** si difieren. Un dato concurrente ya no puede acuñar una foto internamente
+  > inconsistente: hace fallar el cierre, que se reintenta.
 - **RCC.4.8** — El sistema deberá exponer ambas tablas de snapshot con RLS de solo lectura para los roles activos del
   establecimiento y no deberá otorgar `insert`/`update`/`delete` a `authenticated`.
+  > **Reconciliación as-built (2026-08-07, Gate 2 H-C1 · `design` §15-bis R12)**: "no otorgar" **no alcanza**,
+  > porque el `pg_default_acl` del schema **ya otorga** `TRUNCATE` (más `REFERENCES`/`TRIGGER`/`MAINTAIN`) a
+  > `anon` y `authenticated` en toda tabla nueva de `public`, y la RLS **no puede restringir TRUNCATE** (no
+  > existe policy de esa categoría). Las tres tablas del delta emiten `revoke all … from public, anon,
+  > authenticated` explícito antes de sus `grant select`, y el oráculo (TR.14e) resuelve el **ACL real** con
+  > `has_table_privilege` además del comportamiento por PostgREST — que es estructuralmente ciego a un grant
+  > de TRUNCATE. La condición del schema es general (35 tablas) y su barrido está en `docs/backlog.md`.
 - **RCC.4.8.a** — El sistema deberá escribir el `establishment_id` de `rodeo_campaign_snapshots` derivándolo de la
   fila del `rodeos` padre (el mismo valor que usó el guard de tenant) y el de `rodeo_campaign_snapshot_animals`
   derivándolo de la fila de snapshot padre; en ningún caso de un valor del cliente ni de la fila del animal
@@ -214,6 +227,12 @@ detalle y fundamento en `design-campanas-congeladas.md` §0.3):
   rodeos**.
 - **RCC.5.11** — Mientras el dispositivo esté sin conexión, el sistema no deberá ofrecer ni intentar el cierre:
   deberá mostrar que hace falta conexión.
+  > **Reconciliación as-built (2026-08-07, `design` §15-bis R20)**: la mitad de "no intentar" tiene oráculo —
+  > el guard de cableado `app/src/services/reports-online-guard.test.ts`, que verifica que **cada** helper de
+  > invocación chequea la conexión **antes** del fetch y que ningún wrapper exportado llama a la RPC por su
+  > cuenta. Hace falta un guard de cableado y no un test de comportamiento porque `services/reports.ts`
+  > arrastra React Native y ningún test de `node:test` lo puede importar: sin él, borrar el `assertOnline` no
+  > ponía nada en rojo.
 
 ## RCC.6 — Reapertura (`reopen_campaign`) — DL4
 
@@ -291,6 +310,12 @@ detalle y fundamento en `design-campanas-congeladas.md` §0.3):
 - **RCC.9.6.a** — El sistema deberá verificar, con la **misma** enumeración y en el mismo smoke-check, la otra
   mitad del contrato §5.8: que ninguna de las funciones **públicas** del delta quedó ejecutable por `anon` o
   `public`. Una función nueva a la que se le olvide el `revoke` deberá abortar la migración.
+  > **Reconciliación as-built (2026-08-07, `design` §15 R1/R2)**: la lista blanca quedó con **14** entradas,
+  > no 11 — el barrido por `rodeo\_%` alcanza también a `rodeo_sessions_list` y `rodeo_weight_by_category`
+  > (públicas preexistentes, verificado en el catálogo del remoto), y sin ellas la migración **abortaba**. Se
+  > sumó `is_owner_or_vet_of` y los prefijos `close\_%`/`reopen\_%` al barrido. Los `revoke`/`grant` se
+  > **derivan** de esa única lista leyendo la firma del catálogo, en vez de escribirse a mano: así el
+  > requisito de "una sola enumeración" se cumple literal y la firma no puede quedar vieja.
 - **RCC.9.7** — El sistema deberá declarar el trigger de membresía como `SECURITY DEFINER` con
   `set search_path = public`, siguiendo el molde de `tg_animal_profiles_record_category_change` (`0030`).
 - **RCC.9.8** — El sistema deberá resolver una carrera entre dos cierres concurrentes de la misma campaña sin crear
@@ -313,10 +338,21 @@ detalle y fundamento en `design-campanas-congeladas.md` §0.3):
   ambigüedad que es una foto y la fecha del cierre en formato es-AR (`dd/mm/aaaa`).
 - **RCC.10.2** — Mientras la campaña seleccionada esté en curso, la pantalla de reportes deberá indicarlo
   explícitamente ("en curso") y no deberá presentar los números como definitivos.
+- **RCC.10.2.a** *(agregado por el reviewer, H-1, 2026-08-07)* — Mientras el sistema **todavía no sepa** si la
+  campaña está cerrada (el estado en vuelo, o el estado del año/rodeo anterior retenido por el anti-parpadeo),
+  la pantalla no deberá afirmar ni "en curso" ni "cerrada", no deberá mostrar fecha de foto y no deberá
+  ofrecer acciones: deberá mostrar un estado **desconocido** hasta que llegue el estado de esa campaña.
+  Afirmar "en curso" mientras no se sabe es la misma afirmación falsa que ADR-032 existe para impedir, y en
+  una conexión de campo dura segundos, no un frame.
 - **RCC.10.3** — El sistema deberá derivar la presentación del estado de campaña (etiqueta, detalle, qué acciones se
   ofrecen) de una función pura testeable, sin lógica de presentación en la pantalla.
 - **RCC.10.4** — Mientras la campaña esté cerrada, la pantalla deberá dibujar las barras de la distribución CCL con
   los `service_months` **congelados** del snapshot, no con los del rodeo actual.
+  > **Reconciliación as-built (2026-08-07, `design` §15-bis R20)**: la regla vive en la función pura
+  > `campaignCclMonths` y **no es un `??` encadenado**. Con la campaña cerrada mandan los meses congelados
+  > **incluso cuando son `null`** (una campaña que se corrió sin estación configurada): la primera
+  > implementación usaba `campaign?.serviceMonths ?? rodeo?.serviceMonths` y ese `null` caía a los meses del
+  > rodeo de HOY, o sea F5 reintroducida por un operador. Tiene test con su mutante.
 - **RCC.10.5** — Cuando el ciclo de la campaña está completo y la campaña sigue abierta, la pantalla deberá sugerir
   cerrarla.
 - **RCC.10.6** — La pantalla deberá ofrecer, además del cierre por rodeo, cerrar la campaña del año seleccionado en
@@ -415,10 +451,18 @@ detalle y fundamento en `design-campanas-congeladas.md` §0.3):
   que `is_owner_or_vet_of` es `security definer`, `stable` y tiene `search_path` fijado; y que las funciones del
   delta tienen la volatilidad que les corresponde (las de lectura `stable`, `close_campaign` y `reopen_campaign`
   **no** `stable`), con `search_path` fijado en todas.
+  > **Reconciliación as-built (2026-08-07, `design` §15 R5)**: `prosecdef` se exige en las **15 funciones del
+  > delta que tocan datos**; `search_path`, en **las 18**. Las tres puras (`campaign_tacto_bounds`,
+  > `campaign_cycle_complete`, `campaign_missing_summary`) **no** son `SECURITY DEFINER` por diseño (§3.2 /
+  > §4.1-bis) y están revocadas de los tres roles: exigirles `definer` habría contradicho al propio design.
 - **RCC.13.5.e** — El sistema deberá **descubrir** en tiempo de test, desde el catálogo, el conjunto de funciones
   de campaña ejecutables por `authenticated` con firma `(uuid, integer)` y aplicarle a **cada una** el test de
   RCC.13.5.a, en vez de enumerarlas a mano; y deberá fallar si el conjunto descubierto es menor que el conjunto
   conocido al escribir la spec. Una función de campaña nueva deberá entrar al test sin que nadie la agregue.
+  > **Reconciliación as-built (2026-08-07, `design` §15 R3)**: la firma se resuelve con
+  > `oidvectortypes(p.proargtypes)`, **no** con `pg_get_function_identity_arguments`. Medido contra el remoto,
+  > la segunda devuelve `"p_rodeo_id uuid, p_year integer"` (con los nombres de los parámetros) → el
+  > descubrimiento daba **0** funciones y el oráculo no se ejecutaba nunca.
 - **RCC.13.6** — El sistema deberá incluir tests de grants: `anon`/`public` no ejecutan ninguna de las funciones
   nuevas, y `authenticated` no ejecuta las funciones internas.
 - **RCC.13.6.a** — El sistema deberá incluir un test de que un cliente `authenticated` con rol activo no puede
@@ -471,6 +515,10 @@ detalle y fundamento en `design-campanas-congeladas.md` §0.3):
 | 2026-08-07 | **Gate 1 FAIL (3 HIGH + 6 MEDIUM) — arreglos aplicados.** Los tres HIGH eran de la misma clase: invariantes sostenidos en prosa, sin oráculo. **H-1** (el cortocircuito agrega 7 salidas tempranas y la suite es estructuralmente ciega a ellas porque todos los IDOR existentes corren con campañas abiertas) → RCC.13.5.a/b/e. **H-2** (la procedencia del `establishment_id` de las 2 tablas de snapshot no estaba fijada y la premisa "no hay escritura del cliente" no se testeaba) → RCC.4.8.a/b + RCC.13.6.a. **H-3** (`is_owner_or_vet_of` sin caso de rol revocado ni de campo borrado) → RCC.13.5.c/d. MEDIUM: RCC.9.2 (`pg_temp`), RCC.9.5/9.6 (lista blanca + barrido), RCC.9.10/9.11 (costo real + piso de años), RCC.9.12 (`member_name`), RCC.5.7.e (año sin campaña), RCC.11.7–11.10 (re-seed blindado), RCC.13.10 (case-insensitive), RCC.13.13. | Gate 1 + leader |
 | 2026-08-07 | **Gate 1 PASS (2ª pasada).** Los 3 HIGH quedaron cerrados con oráculos que saben fallar; M-1 fue **retirado** por el propio informe (la premisa sobre `rodeo_id` era falsa). La re-auditoría trajo **6 findings introducidos por los arreglos**, todos aplicados: **N-1** (el runbook moría en su primer `delete`: `authenticated` no tiene `DELETE` → la impersonación se acota al paso de cierre, RCC.11.7); **N-2** (el barrido excluía la lista blanca por construcción → `close_campaign` nacía `EXECUTE`-able por `PUBLIC`; dos loops sobre la misma enumeración, RCC.9.6.a); **N-3** (`can_close` no reflejaba el gate `serviced = 0` → la UI entrenaba a clickear el reconocimiento de DP-10, RCC.7.6.a); **N-4** (TR.14f(b) es inalcanzable por `0076`: se rotula en vez de borrarse o contarse como cobertura, RCC.13.5.c.i); **N-5** (el oráculo de la cota corre sobre las 9 descubiertas, RCC.13.5.b); **N-6** (el tenant de la cabecera se cierra por test, no por constraint: asimetría declarada, RCC.13.6.b). | Gate 1 (2ª pasada) + leader |
 | 2026-08-07 | **Corrección de una premisa FALSA del informe de Gate 1** (verificada contra el remoto por el leader): M-1 afirmaba que `animal_profiles.rodeo_id` no tiene CHECK ni trigger de mismo-establecimiento. **Sí lo tiene**: `tg_animal_profiles_rodeo_check` (`0021:25-43`) rechaza con `23514` un rodeo de otro establecimiento o inactivo, y `tg_animal_profiles_rodeo_same_system_check` (`0047`) cubre el cruce de sistemas. No se agregó ningún requisito defensivo apoyado en esa premisa; la corrección de §5.6 se escribió con el motivo correcto y citando el trigger. | Leader (verificación en el remoto) |
+| 2026-08-07 | **Veto visual del Gate 2.5** (`implementer`). Tres arreglos de jerarquía, ninguno de dominio: (1) tras el rechazo del server la hoja dejaba como **primario** el botón que estaba garantizado que volvía a fallar, al lado del reconocimiento y con el mismo comienzo de label — los controles pasan a salir de la función pura `campaignCloseActions`, que garantiza que con `acknowledgeAvailable` **no queda ningún primario** y el intento fallido desaparece; (2) "Reabrir campaña" era el elemento interactivo más grande de una campaña cerrada (la jerarquía contradecía al texto: una foto se lee, no se deshace) → acción de texto con target ≥40 dp; (3) borde duplicado en el aviso + **contraste medido** (detalle 5,58:1, título 17,86:1, aviso 17,06:1 — todos AA), con el capture midiéndolo de ahora en más. | `implementer` + Gate 2.5 |
+| 2026-08-07 | **Segundo fix-loop** (`implementer`), tras **Gate 2 PASS** + reviewer con un 🟡. **RR-1**: el "arreglo" del M-C2 (barrer por `oid`) era un **no-op demostrable** —los `oid` salían de seleccionar por `proname`— y el comentario afirmaba lo contrario; la lista blanca pasa a enumerar **FIRMAS** resueltas con `to_regprocedure`, y el mutante de la sobrecarga lo mide (0 detecciones por nombre vs 3 por firma). **⚪**: §2.4 deja de prometer de más — el `40001` garantiza identidad de **conteo**, no de conjunto ni cabecera↔cabecera. Y **se refutó por medición una premisa que las dos puertas dieron por verificada**: una función nueva **SÍ** nace `EXECUTE`-able por `PUBLIC` (`proacl = NULL`), así que los `revoke` de las 7 internas son load-bearing y el hueco del typo era de **exposición**. Los 3 bloques `DO` del smoke-check validados contra el catálogo real. | `implementer` |
+| 2026-08-07 | **Fix-loop de la Puerta 2** (`implementer`), tras **reviewer CHANGES_REQUESTED** + **Gate 2 FAIL**. Bloqueante de seguridad (H-C1): las 3 tablas nacían con `TRUNCATE` para `anon`/`authenticated` por el `pg_default_acl` del schema —condición general de las 35 tablas de `public`, no del delta— y el `comment on column` lo **negaba por escrito** nombrando como guard a un test que no podía verlo → `revoke all` explícito + assert de ACL crudo + comentario corregido. Del reviewer: **H-1** (el oráculo de `campaignStateView(null)` asserteaba la afirmación que su nombre negaba, y con el anti-parpadeo la barra conservaba la etiqueta de otra campaña al cambiar de año → estado `desconocido` + resultado etiquetado por clave + test reescrito, RCC.10.2.a), **H-2** (`entry_date` propagado a la otra suite consumidora + el comentario falso de TPS.15), **H-3** (la rama `ai_females` sin oráculo → TR.13(g) + `source='ai'` en TR.20), **H-4** (RCC.4.7 pasa a verificarse antes del commit con `40001`), **H-5** (tercer loop del smoke-check), **H-6/H-7** (RCC.5.11, RCC.10.4, RCC.4.6/7.2, RCC.9.12, RCC.9.8 y RCC.11.10 cerrados con oráculo; RCC.1.13 y los de UI declarados como límite). MEDIUM del Gate 2: publicación `FOR ALL TABLES` declarada, barrido por `oid`, premisa del `EXECUTE a PUBLIC` corregida. Detalle en `design` §15-bis y §15.2. | `implementer` + reviewer + Gate 2 |
+| 2026-08-07 | **Implementación + reconciliación as-built** (`implementer`). Las 4 migraciones, la suite (TR.12–TR.21) y el frontend quedaron escritos; **nada se aplicó al remoto** (lo hace el leader en T73). La implementación encontró **tres defectos de esta spec al ejecutarla**, todos corregidos y documentados en `design` §15: (R1) la lista blanca del smoke-check tenía 11 entradas y el barrido `rodeo\_%` alcanza también a `rodeo_sessions_list`/`rodeo_weight_by_category` → **las migraciones abortaban**; (R3) el descubrimiento de TR.21 usaba `pg_get_function_identity_arguments`, que devuelve los **nombres** de los parámetros → descubría **0** funciones y los dos oráculos de Gate 1 H-1 **no se ejecutaban nunca**; (R6) los fixtures de la suite no escribían `entry_date`, así que TR.4b/TR.11 se ponían rojas post-apply por el calendario. Otras 8 reconciliaciones menores (R2, R4, R5, R7–R11) en la misma tabla. Notas bajo RCC.9.6.a, RCC.13.5.d y RCC.13.5.e. | `implementer` |
 | 2026-08-07 | **RCC.10.6 (cierre masivo por campo) confirmado DENTRO del delta** — sale de la tabla de pendientes de `design` §12. Fundamento del leader: DL1 ya lo prometió y es la mitigación directa del riesgo más alto de la feature ("el productor nunca cierra"). DP-11 (N llamadas del cliente, sin RPC de establecimiento) se mantiene. | Leader (decisión) |
 </content>
 </invoke>

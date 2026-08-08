@@ -559,3 +559,229 @@ export function sessionRangeLabel(startedAtIso: string | null, endedAtIso: strin
   if (startDay && startDay === end.toDateString()) return start;
   return `${start} → ${sessionDateLabel(endedAtIso)}`;
 }
+
+// ─── Delta CAMPAÑAS CONGELADAS: el estado de la campaña, en una función PURA (RCC.10.3) ─────────────
+
+/**
+ * Lo que `campaignStateView` necesita de `CampaignStatus` (`services/reports.ts`). Se declara acá de forma
+ * ESTRUCTURAL a propósito: `reports.ts` ya importa de este módulo, así que importar su tipo desde acá
+ * cerraría un ciclo. TypeScript es estructural → un `CampaignStatus` entra sin cast.
+ */
+export type CampaignStatusLike = {
+  isClosed: boolean;
+  /** F5: con la campaña cerrada son los CONGELADOS del snapshot; con la campaña abierta, los de hoy. */
+  serviceMonths?: number[] | null;
+  closedAt: string | null;
+  closedByName: string | null;
+  closedIncomplete: boolean;
+  missingAtClose: string | null;
+  pendingPregnant: number;
+  pendingWeaning: number;
+  canClose: boolean;
+  canReopen: boolean;
+  cycleComplete: boolean;
+  hasNewData: boolean;
+};
+
+/** Presentación derivada del estado de campaña (RCC.10.1/10.2/10.3/10.11). Sin lógica en la pantalla. */
+export type CampaignStateView = {
+  /**
+   * `desconocido` = **todavía no sabemos** si esta campaña es una foto o un número vivo (el estado está en
+   * vuelo, o falló). NO es un sinónimo de "en curso": afirmar "en curso" mientras no se sabe es exactamente
+   * la afirmación que ADR-032 existe para impedir, y en una conexión de campo dura segundos, no un frame.
+   */
+  badge: 'desconocido' | 'en-curso' | 'cerrada' | 'cerrada-a-medias';
+  /** "Campaña" (desconocido) | "Campaña en curso" | "Campaña cerrada" | "Campaña cerrada a medias". */
+  title: string;
+  /** "Foto del 14/03/2026 · la cerró Facundo" | "Los números se actualizan con cada dato nuevo". */
+  detail: string | null;
+  /** Aviso contextual: sugerencia de cierre (D1) · datos nuevos (DL10) · qué faltaba al cerrar (F8). */
+  notice: string | null;
+  primaryAction: 'close' | 'reopen' | null;
+  /** F8: lo que falta HOY para completar el ciclo — alimenta la confirmación de RCC.10.7.a. */
+  missing: string[];
+  tone: 'neutral' | 'info' | 'warning';
+};
+
+const CAMPAIGN_LIVE_DETAIL = 'Los números se actualizan con cada dato nuevo';
+const CAMPAIGN_CYCLE_DONE_NOTICE = 'El ciclo de esta campaña está completo. ¿La cerrás?';
+const CAMPAIGN_NEW_DATA_NOTICE =
+  'Hay datos nuevos sin reflejar en la foto. Reabrí la campaña para incorporarlos.';
+
+// ─── Los controles de la hoja de cierre, en una función PURA (Gate 2.5) ─────────────────────────────
+
+export type CampaignCloseActionId = 'close' | 'close-ack' | 'close-all' | 'close-all-ack' | 'cancel';
+
+export type CampaignCloseAction = {
+  id: CampaignCloseActionId;
+  label: string;
+  /** Peso visual. `primary` = relleno; `secondary` = contorno; `ghost` = salida neutra. */
+  kind: 'primary' | 'secondary' | 'ghost';
+  /** Qué se le manda al server. `undefined` = no dispara ningún cierre (p. ej. "Volver"). */
+  acknowledge?: boolean;
+};
+
+/**
+ * Qué botones muestra la hoja de confirmación, con qué peso y qué mandan (RCC.10.7/10.7.a/10.7.b).
+ *
+ * **EL INVARIANTE QUE ESTA FUNCIÓN EXISTE PARA SOSTENER** (Gate 2.5): una vez que el server rechazó el
+ * cierre por ciclo incompleto (`acknowledgeAvailable`), **no queda ningún control primario**, y el intento
+ * sin reconocimiento **desaparece**. Antes quedaban dos botones adyacentes que empezaban con la misma
+ * palabra —"Cerrar campaña" relleno y "Cerrar igual con estos datos incompletos" en contorno— y el que
+ * tenía más peso visual, más área y mejor target de Fitts era el **único que estaba garantizado que volvía
+ * a fallar**: es el mismo `onConfirm(false)` que el server acababa de rechazar. En la manga, con guante o
+ * con barro, eso no es un detalle estético: es un slip esperando pasar, y encima degrada a ruido el control
+ * de dos toques que DP-10 existe para proteger.
+ *
+ * Que esto viva acá y no en el `.tsx` es lo que hace que el invariante sea **testeable sin renderizar**: la
+ * hoja mapea `kind` a la variante del botón y nada más.
+ */
+export function campaignCloseActions(input: {
+  cycleComplete: boolean;
+  /** El server YA rechazó este cierre por ciclo incompleto. */
+  acknowledgeAvailable: boolean;
+  rodeoCount: number;
+  /** Rodeos que la primera pasada del cierre masivo dejó pendientes por ciclo incompleto. */
+  incompleteCount: number;
+  busy: boolean;
+}): CampaignCloseAction[] {
+  const { acknowledgeAvailable, rodeoCount, incompleteCount, busy } = input;
+  const out: CampaignCloseAction[] = [];
+
+  // El intento SIN reconocimiento solo existe mientras el server no lo haya rechazado.
+  if (!acknowledgeAvailable) {
+    out.push({
+      id: 'close',
+      label: busy ? 'Cerrando…' : 'Cerrar campaña',
+      kind: 'primary',
+      acknowledge: false,
+    });
+  } else {
+    // Reconocer es una decisión deliberada: contorno, nunca relleno. Después de un rechazo, NADA queda
+    // pre-atractivo — el usuario elige, no acierta.
+    out.push({
+      id: 'close-ack',
+      label: 'Cerrar igual con estos datos incompletos',
+      kind: 'secondary',
+      acknowledge: true,
+    });
+  }
+
+  // Cierre masivo: primera pasada mientras no haya rechazados; segunda acotada a los rechazados.
+  if (rodeoCount > 1 && incompleteCount === 0) {
+    out.push({
+      id: 'close-all',
+      label: `Cerrar los ${rodeoCount} rodeos del campo`,
+      kind: 'secondary',
+      acknowledge: false,
+    });
+  }
+  if (incompleteCount > 0) {
+    out.push({
+      id: 'close-all-ack',
+      label: `Cerrar igual ${incompleteCount === 1 ? 'el rodeo incompleto' : `los ${incompleteCount} incompletos`}`,
+      kind: 'secondary',
+      acknowledge: true,
+    });
+  }
+
+  out.push({ id: 'cancel', label: 'Volver', kind: 'ghost' });
+  return out;
+}
+
+/**
+ * Con qué `service_months` se dibujan las barras del CCL (RCC.10.4 / F5).
+ *
+ * **La regla no es un `??` encadenado.** Si la campaña está CERRADA mandan los meses CONGELADOS del
+ * snapshot **incluso cuando son `null`** — un `null` congelado significa "esta campaña se corrió sin
+ * estación de servicio configurada", y caer al valor del rodeo de HOY volvería a meter en una foto un dato
+ * de hoy, que es exactamente la fuga F5 que el delta tapa (y que reaparece sola si alguien escribe
+ * `campaign?.serviceMonths ?? rodeo?.serviceMonths`). Con la campaña abierta, o sin estado, mandan los del
+ * rodeo.
+ */
+export function campaignCclMonths(
+  s: CampaignStatusLike | null,
+  rodeoServiceMonths: number[] | null | undefined,
+): number[] | null {
+  if (s && s.isClosed) return s.serviceMonths ?? null;
+  return rodeoServiceMonths ?? null;
+}
+
+/** Lista es-AR de lo que falta para completar el ciclo, con singular/plural. */
+function campaignMissingList(pendingPregnant: number, pendingWeaning: number): string[] {
+  const out: string[] = [];
+  if (pendingPregnant > 0) {
+    out.push(`${pendingPregnant} ${pendingPregnant === 1 ? 'preñada sin parir' : 'preñadas sin parir'}`);
+  }
+  if (pendingWeaning > 0) {
+    out.push(`${pendingWeaning} ${pendingWeaning === 1 ? 'cría sin destetar' : 'crías sin destetar'}`);
+  }
+  return out;
+}
+
+/**
+ * Deriva TODA la presentación del estado de campaña (tabla de `design` §7.2). Copys en sentence-case;
+ * fechas por `formatDateEsAr` (dd/mm/aaaa, tz-safe por string).
+ *
+ * Reglas que no son obvias:
+ * - **El aviso de "cerrada a medias" se muestra aunque el usuario NO pueda reabrir** (RCC.10.11): es
+ *   información del reporte, no una acción. Un reporte comparado año contra año tiene que poder decir "este
+ *   número se congeló antes de que terminara la parición", o el benchmarking compara peras con manzanas.
+ * - **Sin `canClose` no se ofrece cerrar NI reconocer** (RCC.7.6.a / Gate 1 N-3): `canClose` refleja los tres
+ *   gates duros del server (rol · la fecha de corte ya ocurrió · hay hembras servidas). Ofrecer un cierre que
+ *   el server va a rechazar entrena al usuario a clickear el reconocimiento de DP-10, que es justo el control
+ *   que existe para que congelar una campaña a medias sea imposible por accidente.
+ * - Si la campaña está cerrada a medias **y además** llegaron datos nuevos, se muestran los DOS avisos (uno
+ *   por línea): son hechos distintos y ninguno reemplaza al otro.
+ */
+export function campaignStateView(s: CampaignStatusLike | null): CampaignStateView {
+  if (s === null) {
+    // SIN ESTADO NO SE AFIRMA NADA. La versión anterior devolvía `badge: 'en-curso'` con el título "Campaña
+    // en curso" y un comentario que decía "no afirmamos nada" — o sea, afirmaba. Y el test que lo cubría se
+    // llamaba "no afirma nada" mientras asserteaba esa afirmación.
+    //
+    // No es cosmética: la barra se monta INCONDICIONALMENTE arriba de los números, y el `useReport` genérico
+    // no blanquea `data` al recargar (anti-parpadeo: correcto para los números, equivocado para la etiqueta
+    // que los CALIFICA). Con el estado en vuelo —primera carga, o cambio de año/rodeo— la pantalla decía
+    // "Campaña en curso" sobre números que podían ser una foto, que es la afirmación exacta que ADR-032
+    // existe para impedir. `desconocido` no ofrece acciones, no pone fecha y no califica los números.
+    return {
+      badge: 'desconocido', title: 'Campaña', detail: null, notice: null,
+      primaryAction: null, missing: [], tone: 'neutral',
+    };
+  }
+
+  const missing = campaignMissingList(s.pendingPregnant, s.pendingWeaning);
+
+  if (!s.isClosed) {
+    const suggest = s.cycleComplete && s.canClose;
+    return {
+      badge: 'en-curso',
+      title: 'Campaña en curso',
+      detail: CAMPAIGN_LIVE_DETAIL,
+      notice: suggest ? CAMPAIGN_CYCLE_DONE_NOTICE : null,
+      primaryAction: s.canClose ? 'close' : null,
+      missing,
+      tone: suggest ? 'info' : 'neutral',
+    };
+  }
+
+  const fecha = formatDateEsAr(s.closedAt);
+  const detail = `Foto del ${fecha}${s.closedByName ? ` · la cerró ${s.closedByName}` : ''}`;
+  const notices: string[] = [];
+  if (s.closedIncomplete) {
+    const faltaba = s.missingAtClose ? `Se cerró con ${s.missingAtClose}.` : 'Se cerró con el ciclo incompleto.';
+    notices.push(`${faltaba} Los números no incluyen eso.`);
+  }
+  if (s.hasNewData) notices.push(CAMPAIGN_NEW_DATA_NOTICE);
+
+  return {
+    badge: s.closedIncomplete ? 'cerrada-a-medias' : 'cerrada',
+    title: s.closedIncomplete ? 'Campaña cerrada a medias' : 'Campaña cerrada',
+    detail,
+    notice: notices.length > 0 ? notices.join('\n') : null,
+    primaryAction: s.canReopen ? 'reopen' : null,
+    missing,
+    tone: s.closedIncomplete ? 'warning' : s.hasNewData ? 'info' : 'neutral',
+  };
+}

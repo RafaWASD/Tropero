@@ -30,6 +30,31 @@
 //            del weaning (vuelve a pending) + IDOR (42501) + cota p_year (22023) + rodeo inexistente (P0002).
 //            ROJA-HASTA-APPLY de la migración 0118 (la aplica el LEADER por MCP).
 //   - TR.10 transversal: anon/public sin EXECUTE en las 10 (incl. rodeo_weaning_kpi); read-only; tenant-iso A↮B.
+//   - TR.12 tacto/tacto_vaquillona SIN session_id (delta ficha-categoria-tacto, RTF.8): cuentan igual en
+//     rodeo_pregnancy_kpi / rodeo_ccl_distribution / rodeo_serviced_females y NO en session_event_summary.
+//
+// DELTA «CAMPAÑAS CONGELADAS» (spec 07, migraciones 0127-0130) — TR.12 … TR.21. ⚠ El rótulo TR.12 quedó
+// DUPLICADO: el delta `ficha-categoria-tacto` (spec 02) lo tomó para su test de tacto suelto al mismo tiempo
+// que este delta lo tomaba para el oráculo de inmutabilidad. Los de este delta llevan "(campañas
+// congeladas)" en el título del test.
+//   - TR.12  INMUTABILIDAD (oráculo central): cerrada, las 4 mutaciones del probe no la mueven (deepStrictEqual).
+//   - TR.12b contrafactual del SNAPSHOT: el gemelo ABIERTO sí se mueve con un dato de la ventana; el cerrado no.
+//   - TR.12c contrafactual del CÓMPUTO HISTÓRICO: venta/transferencia/no_apta posteriores al corte ya no
+//            reescriben una campaña ABIERTA (antes movían 7, 6 y hasta `serviced: 0`).
+//   - TR.13  cómputo histórico antes del cierre: entradas/salidas, edad al corte (F3-bis), año sin nadie.
+//   - TR.14  authz de close/reopen/status + idempotencia + reapertura bloqueada; TR.14b grants de función;
+//            TR.14c el cierre no muta datos; TR.14d el gate del ciclo incompleto (F8) y los guards duros;
+//            TR.14e grants de TABLA (el invariante que sostiene DP-19); TR.14f el rol CADUCADO;
+//            TR.14g catálogo (prosecdef/volatilidad/search_path); TR.14h FK compuesta del tenant + N-6.
+//   - TR.15  historia de membresía (apertura/movimiento/baja/invariante/backfill/RLS/par cruzado).
+//   - TR.16  DL10: el dato tardío entra, no mueve la foto, enciende has_new_data, y reabrir+cerrar lo incorpora.
+//   - TR.17  regresión tacto sin jornada + guard de clase (ninguna de las 7 referencia session_id).
+//   - TR.18  denominador (retired = 0, entoradas = serviced) — asserteado dentro de kpiBundle, o sea en TODOS
+//            los escenarios del delta, no en uno elegido.
+//   - TR.19  guard de AUSENCIA: las 3 tablas nuevas no están en sync-streams/rafaq.yaml (case-insensitive).
+//   - TR.20  el detalle por animal ES la evidencia del número congelado (conteo por bucket == cabecera).
+//   - TR.21  guard y cota ANTES del cortocircuito por snapshot, sobre el conjunto de funciones DESCUBIERTO
+//            del catálogo (Gate 1 H-1, bloqueante).
 //
 // 🔴 ROJA-HASTA-APPLY: la migración 0106 NO está aplicada (el deploy lo gatea el LEADER por CLI/Management-API
 // + autorización de Raf, patrón Stream A 0102-0105). Hasta entonces ESTA SUITE FALLA — es ESPERADO (mismo
@@ -163,7 +188,14 @@ async function setServiceMonths(rodeoId, months) {
 }
 
 // Crea un animal + perfil. Devuelve { profile:{id, category_id}, animalId }.
-async function createAnimal(client, { idv = null, sex, birthDate = null, rodeoId, establishmentId, systemId, categoryCode = null, status = 'active' }) {
+//
+// ⚠ `entryDate` (delta campañas congeladas): el trigger de membresía (0127) abre la fila con
+// `from_date = coalesce(entry_date, created_at::date)`. Un perfil SIN entry_date nace con membresía desde
+// HOY, así que NO pertenece al rodeo en la fecha de corte de una campaña pasada y `rodeo_serviced_females`
+// lo excluye. Los tests que usan `lastYear` (TR.4b, TR.11) se pondrían rojos por la fecha del calendario, no
+// por una regresión. Default: la fecha de nacimiento (que es cuándo entró al campo en un sistema de cría) o
+// 10 años atrás si no hay. Es el mismo requisito que RCC.11.2 le pide al re-seed de La Facundina.
+async function createAnimal(client, { idv = null, sex, birthDate = null, rodeoId, establishmentId, systemId, categoryCode = null, status = 'active', entryDate = undefined }) {
   const { speciesId } = await lookupSpeciesSystem(client, 'bovino', 'cria');
   const animalId = crypto.randomUUID();
   const animalPayload = { id: animalId, sex, species_id: speciesId };
@@ -176,6 +208,7 @@ async function createAnimal(client, { idv = null, sex, birthDate = null, rodeoId
   const profilePayload = {
     id: profileId, animal_id: animalId, establishment_id: establishmentId,
     rodeo_id: rodeoId, category_id: catId, status,
+    entry_date: entryDate === undefined ? (birthDate || daysAgo(3650)) : entryDate,
     // override para que los triggers de categoría no muevan la categoría sembrada bajo nuestros pies.
     category_override: true,
   };
@@ -248,6 +281,138 @@ async function seedWeaning(client, calfProfileId, eventDate) {
     .order('created_at', { ascending: false }).limit(1).single();
   if (selErr) throw new Error(`seedWeaning select: ${selErr.message}`);
   return data.id;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+// Helpers del delta CAMPAÑAS CONGELADAS (T43) — cierre/reapertura/estado + mutaciones de escenario.
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+// Management API (database/query) para los asserts de CATÁLOGO (pg_proc, pg_policies, information_schema) y
+// para el descubrimiento de funciones de TR.21. PostgREST solo expone el schema `public`, así que no hay otra
+// forma de leer el catálogo desde la suite. Mismo endpoint que scripts/apply-migration.mjs y misma forma que
+// supabase/tests/operaciones_rodeo/run.cjs:59-71.
+const PROJECT_REF = process.env.SUPABASE_PROJECT_REF;
+const ACCESS_TOKEN = process.env.SUPABASE_ACCESS_TOKEN;
+async function adminQuery(sql) {
+  if (!PROJECT_REF || !ACCESS_TOKEN) {
+    throw new Error('Falta SUPABASE_PROJECT_REF / SUPABASE_ACCESS_TOKEN para adminQuery (asserts de catálogo).');
+  }
+  const res = await fetch(`https://api.supabase.com/v1/projects/${PROJECT_REF}/database/query`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${ACCESS_TOKEN}`, 'Content-Type': 'application/json; charset=utf-8' },
+    body: Buffer.from(JSON.stringify({ query: sql }), 'utf8'),
+  });
+  const body = await res.text();
+  if (!res.ok) throw new Error(`adminQuery HTTP ${res.status}: ${body}`);
+  return JSON.parse(body);
+}
+
+// El wrapper NO tiene default para `acknowledge`, igual que el de TypeScript (§7.1): quien llama elige.
+async function closeCampaign(client, rodeoId, year, acknowledge) {
+  return await client.rpc('close_campaign', {
+    p_rodeo_id: rodeoId, p_year: year, p_acknowledge_incomplete: acknowledge,
+  });
+}
+async function reopenCampaign(client, rodeoId, year) {
+  return await client.rpc('reopen_campaign', { p_rodeo_id: rodeoId, p_year: year });
+}
+async function campaignStatus(client, rodeoId, year) {
+  const res = await client.rpc('rodeo_campaign_status', { p_rodeo_id: rodeoId, p_year: year });
+  return { error: res.error, status: row1(res.data) };
+}
+// snapshot VIGENTE de (rodeo, año) leído por service_role (la tabla es select-only para el cliente).
+async function snapshotOf(rodeoId, year) {
+  const { data, error } = await admin.from('rodeo_campaign_snapshots')
+    .select('*').eq('rodeo_id', rodeoId).eq('campaign_year', year).is('reopened_at', null);
+  if (error) throw new Error(`snapshotOf: ${error.message}`);
+  return (data || [])[0] || null;
+}
+async function snapshotDetail(snapshotId, bucket) {
+  const { data, error } = await admin.from('rodeo_campaign_snapshot_animals')
+    .select('*').eq('snapshot_id', snapshotId).eq('bucket', bucket);
+  if (error) throw new Error(`snapshotDetail: ${error.message}`);
+  return data || [];
+}
+async function moveProfileToRodeo(profileId, rodeoId) {
+  const { error } = await admin.from('animal_profiles').update({ rodeo_id: rodeoId }).eq('id', profileId);
+  if (error) throw new Error(`moveProfileToRodeo: ${error.message}`);
+}
+async function setCategory(profileId, systemId, code) {
+  const catId = await categoryId(admin, systemId, code);
+  const { error } = await admin.from('animal_profiles').update({ category_id: catId }).eq('id', profileId);
+  if (error) throw new Error(`setCategory(${code}): ${error.message}`);
+}
+// Venta: status + exit_date. El trigger de membresía cierra la fila vigente con to_date = exit_date.
+async function sellProfile(profileId, exitDate) {
+  const { error } = await admin.from('animal_profiles')
+    .update({ status: 'sold', exit_reason: 'sale', exit_date: exitDate }).eq('id', profileId);
+  if (error) throw new Error(`sellProfile: ${error.message}`);
+}
+// RETRODATAR la fila `initial` de animal_category_history al ingreso del animal (RCC.11.3). Sin esto, el
+// perfil sembrado HOY no tiene historia de categoría anterior a la fecha de corte de una campaña pasada y
+// `animal_category_at` cae en la degradación de RCC.2.7 (categoría ACTUAL) → un cambio de categoría de hoy
+// reescribiría el pasado y los contrafactuales de TR.12c/TR.13 pasarían por el motivo equivocado.
+async function backdateCategoryHistory(profileId, isoDate) {
+  const { error } = await admin.from('animal_category_history')
+    .update({ changed_at: `${isoDate}T12:00:00Z` }).eq('animal_profile_id', profileId).eq('reason', 'initial');
+  if (error) throw new Error(`backdateCategoryHistory: ${error.message}`);
+}
+async function seedTacto(client, profileId, eventDate, pregnancyStatus) {
+  const { error } = await client.from('reproductive_events').insert({
+    animal_profile_id: profileId, event_type: 'tacto', event_date: eventDate, pregnancy_status: pregnancyStatus,
+  });
+  if (error) throw new Error(`seedTacto: ${error.message}`);
+}
+// Habilita un data_key del rodeo (gating de 0054): sin `inseminacion` habilitada, el insert de un evento
+// `service`/`ai` muere con "maneuver gated: rodeo … is missing enabled data_keys {inseminacion}". Mismo
+// procedimiento que usa supabase/tests/puesta-en-servicio/run.cjs para sembrar IA.
+async function enableDataKey(client, rodeoId, dataKey) {
+  const { data: fd, error: fdErr } = await client
+    .from('field_definitions').select('id').eq('data_key', dataKey).single();
+  if (fdErr) throw new Error(`enableDataKey lookup(${dataKey}): ${fdErr.message}`);
+  const { error } = await client.from('rodeo_data_config')
+    .update({ enabled: true }).eq('rodeo_id', rodeoId).eq('field_definition_id', fd.id);
+  if (error) throw new Error(`enableDataKey(${dataKey}): ${error.message}`);
+  await eventually(
+    async () => (await client.from('rodeo_data_config').select('enabled')
+      .eq('rodeo_id', rodeoId).eq('field_definition_id', fd.id).maybeSingle()).data,
+    (row) => row && row.enabled === true,
+  );
+}
+async function seedTactoVaquillona(client, profileId, eventDate, fitness) {
+  const { error } = await client.from('reproductive_events').insert({
+    animal_profile_id: profileId, event_type: 'tacto_vaquillona', event_date: eventDate, heifer_fitness: fitness,
+  });
+  if (error) throw new Error(`seedTactoVaquillona: ${error.message}`);
+}
+
+// Los 6 reportes de la campaña en UN objeto, para comparar de una con deepStrictEqual (TR.12).
+// Asserta de paso el invariante de TR.18 (RCC.2.12) en TODOS los escenarios de la suite que lo usan.
+async function kpiBundle(client, rodeoId, year) {
+  const sf = await client.rpc('rodeo_serviced_females', { p_rodeo_id: rodeoId, p_year: year });
+  if (sf.error) throw new Error(`kpiBundle serviced_females: ${sf.error.message}`);
+  const denom = await client.rpc('rodeo_repro_denominator', { p_rodeo_id: rodeoId, p_year: year });
+  if (denom.error) throw new Error(`kpiBundle denominator: ${denom.error.message}`);
+  const preg = await client.rpc('rodeo_pregnancy_kpi', { p_rodeo_id: rodeoId, p_year: year });
+  const calv = await client.rpc('rodeo_calving_kpi', { p_rodeo_id: rodeoId, p_year: year });
+  const ccl = await client.rpc('rodeo_ccl_distribution', { p_rodeo_id: rodeoId, p_year: year });
+  const stage = await client.rpc('rodeo_calving_by_stage', { p_rodeo_id: rodeoId, p_year: year });
+  const wean = await client.rpc('rodeo_weaning_kpi', { p_rodeo_id: rodeoId, p_year: year });
+  const d = row1(denom.data);
+  // TR.18 / RCC.2.12: con el conjunto servidas evaluado a la fecha de corte, `retired` es estructuralmente 0
+  // y `entoradas` == `serviced`. Se asserta acá para que valga en TODOS los escenarios, no en uno elegido.
+  assert.equal(d.retired, 0, 'TR.18: retired === 0 en todo escenario (F7/RCC.2.12)');
+  assert.equal(d.entoradas, d.serviced, 'TR.18: entoradas === serviced (F7/RCC.2.12)');
+  return {
+    servicedIds: (sf.data || []).map((x) => x.animal_profile_id).sort(),
+    servicedCount: (sf.data || []).length,
+    denom: d,
+    preg: row1(preg.data),
+    calv: row1(calv.data),
+    ccl: row1(ccl.data),
+    stage: row1(stage.data),
+    wean: row1(wean.data),
+  };
 }
 
 function pgcode(error) {
@@ -1029,6 +1194,1207 @@ test('reports suite — spec 07 Stream C (RPC de reportes)', async (t) => {
   });
 
   // =====================================================================
+  // TR.12 — TACTO SUELTO (sin `session_id`): "suelto, pero visible en los reportes"
+  //         (delta spec 02 `ficha-categoria-tacto`, RTF.8.1/8.2/8.4/8.5)
+  // =====================================================================
+  //
+  // El tacto que se carga desde la FICHA (de a un animal) NO pertenece a ninguna jornada: `session_id`
+  // queda NULL. La spec AFIRMA que eso no cambia nada para los reportes reproductivos porque ninguna de
+  // esas funciones referencia `session_id`. Este test convierte esa afirmacion de "lo lei en el SQL" a
+  // "lo ejecute y lo vi" (RTF.8.5) - que es la diferencia entre un contrato y un supuesto.
+  //
+  // El oraculo FUERTE es el de la vaquillona `no_apta`: `rodeo_serviced_females` incluye por FALLBACK DE
+  // EDAD a toda vaquillona >=365 d SIN veredicto. Si la funcion ignorara los `tacto_vaquillona` sin
+  // `session_id`, esa vaquillona entraria igual. Que quede EXCLUIDA prueba que el veredicto sin jornada SI
+  // se lee.
+  await t.test('TR.12 tacto sin session_id: cuenta en pregnancy_kpi / serviced_females y NO en session_event_summary', async () => {
+    const year = thisYear();
+    const r = await createRodeo(clientA, { establishmentId: estA, name: 'R suelto' });
+    await setServiceMonths(r.id, [11]);
+
+    // -- (a) RTF.8.1 - tacto de PRENEZ sin session_id sobre una hembra del conjunto SERVIDAS. -------
+    const m1 = await createAnimal(clientA, { idv: `${RUN_TAG}_sl1`, sex: 'female', birthDate: daysAgo(1500), rodeoId: r.id, establishmentId: estA, systemId: r.systemId, categoryCode: 'multipara' });
+    const m2 = await createAnimal(clientA, { idv: `${RUN_TAG}_sl2`, sex: 'female', birthDate: daysAgo(1500), rodeoId: r.id, establishmentId: estA, systemId: r.systemId, categoryCode: 'multipara' });
+    // m1: tacto POSITIVO SUELTO (session_id NULL - exactamente lo que escribe `addTacto` desde la ficha).
+    const { data: looseTacto, error: ltErr } = await clientA
+      .from('reproductive_events')
+      .insert({ animal_profile_id: m1.profile.id, event_type: 'tacto', event_date: dateOn(year, 12, 10), pregnancy_status: 'large' })
+      .select('id, session_id')
+      .single();
+    assert.equal(ltErr, null, ltErr ? `insert tacto suelto: ${ltErr.message}` : 'el tacto sin session_id se inserta');
+    assert.equal(looseTacto.session_id, null, 'el tacto de la ficha queda con session_id NULL (RTF.5.3)');
+    // m2: tacto POSITIVO de JORNADA (control) - el mismo computo debe tratarlos IGUAL.
+    const sess = await createSession(clientA, { establishmentId: estA, rodeoId: r.id, status: 'active' });
+    await clientA.from('reproductive_events').insert({ animal_profile_id: m2.profile.id, session_id: sess, event_type: 'tacto', event_date: dateOn(year, 12, 10), pregnancy_status: 'medium' });
+
+    const { data: kpi, error: kErr } = await eventually(
+      async () => await clientA.rpc('rodeo_pregnancy_kpi', { p_rodeo_id: r.id, p_year: year }),
+      (res) => res && res.data && row1(res.data) && row1(res.data).pregnant >= 2,
+    );
+    assert.equal(kErr, null, kErr ? `pregnancy_kpi: ${kErr.message}` : 'ejecuto');
+    assert.equal(row1(kpi).pregnant, 2, 'el tacto SUELTO cuenta igual que el de jornada (RTF.8.1)');
+    assert.equal(row1(kpi).serviced, 2, 'las dos multiparas estan en el denominador');
+
+    // El mismo tacto suelto tambien alimenta la distribucion CCL (mismo `last_tacto`, sin session_id).
+    const { data: ccl } = await clientA.rpc('rodeo_ccl_distribution', { p_rodeo_id: r.id, p_year: year });
+    assert.equal(row1(ccl).head, 1, 'el tacto suelto `large` entra en CCL como cabeza');
+    assert.equal(row1(ccl).body, 1, 'el de jornada `medium` entra como cuerpo');
+
+    // -- (b) RTF.8.2 - `tacto_vaquillona` sin session_id: 'apta' INCLUYE, 'no_apta' EXCLUYE. --------
+    // Las dos vaquillonas tienen >=365 d -> SIN veredicto entrarian por el fallback de edad. El veredicto
+    // suelto es lo unico que puede sacarlas o mantenerlas.
+    const vApta = await createAnimal(clientA, { idv: `${RUN_TAG}_slv1`, sex: 'female', birthDate: daysAgo(500), rodeoId: r.id, establishmentId: estA, systemId: r.systemId, categoryCode: 'vaquillona' });
+    const vNo = await createAnimal(clientA, { idv: `${RUN_TAG}_slv2`, sex: 'female', birthDate: daysAgo(500), rodeoId: r.id, establishmentId: estA, systemId: r.systemId, categoryCode: 'vaquillona' });
+    // CONTROL de no-vacuidad: antes del veredicto, las DOS estan (fallback por edad).
+    const { data: before } = await eventually(
+      async () => await clientA.rpc('rodeo_serviced_females', { p_rodeo_id: r.id, p_year: year }),
+      (res) => res && res.data && res.data.some((x) => x.animal_profile_id === vNo.profile.id),
+    );
+    const beforeIds = new Set((before || []).map((x) => x.animal_profile_id));
+    assert.ok(beforeIds.has(vApta.profile.id), 'control: sin veredicto, la vaquillona >=365 d entra por edad');
+    assert.ok(beforeIds.has(vNo.profile.id), 'control: sin veredicto, la otra tambien');
+
+    const { data: aptaRow, error: aErr } = await clientA
+      .from('reproductive_events')
+      .insert({ animal_profile_id: vApta.profile.id, event_type: 'tacto_vaquillona', event_date: dateOn(year, 11, 5), heifer_fitness: 'apta' })
+      .select('id, session_id')
+      .single();
+    assert.equal(aErr, null, aErr ? `insert tacto_vaquillona suelto: ${aErr.message}` : 'inserta');
+    assert.equal(aptaRow.session_id, null, 'el tacto_vaquillona de la ficha queda sin jornada');
+    await clientA
+      .from('reproductive_events')
+      .insert({ animal_profile_id: vNo.profile.id, event_type: 'tacto_vaquillona', event_date: dateOn(year, 11, 5), heifer_fitness: 'no_apta' });
+
+    const { data: after } = await eventually(
+      async () => await clientA.rpc('rodeo_serviced_females', { p_rodeo_id: r.id, p_year: year }),
+      (res) => res && res.data && !res.data.some((x) => x.animal_profile_id === vNo.profile.id),
+    );
+    const afterIds = new Set((after || []).map((x) => x.animal_profile_id));
+    assert.ok(afterIds.has(vApta.profile.id), "el 'apta' SUELTO la mantiene en servidas (RTF.8.2)");
+    assert.ok(
+      !afterIds.has(vNo.profile.id),
+      "el 'no_apta' SUELTO la EXCLUYE de servidas y anula el fallback por edad - o sea: el evento sin " +
+        'session_id SI se lee (RTF.8.2)',
+    );
+
+    // -- (c) RTF.8.4 - el tacto suelto NO aparece en el Resumen de jornada. -----------------------
+    // La sesion creada arriba tiene UN evento reproductivo (el tacto de m2). El suelto no pertenece a
+    // ninguna jornada, asi que no puede sumar aca - y eso es la semantica correcta, no una perdida.
+    const { data: summary, error: sErr } = await eventually(
+      async () => await clientA.rpc('session_event_summary', { p_session_id: sess }),
+      (res) => res && res.data && res.data.length === 7,
+    );
+    assert.equal(sErr, null, sErr ? `session_event_summary: ${sErr.message}` : 'ejecuto');
+    const repro = (summary || []).find((x) => x.event_kind === 'reproductive');
+    assert.equal(repro.event_count, 1, 'la jornada cuenta SOLO su propio tacto (el suelto no aparece, RTF.8.4)');
+    assert.equal(repro.animals, 1, 'y un solo animal (m2)');
+
+    // Una sesion VACIA del mismo rodeo tampoco lo ve (no hay "jornada por defecto" que lo absorba).
+    const sessEmpty = await createSession(clientA, { establishmentId: estA, rodeoId: r.id, status: 'active' });
+    const { data: emptySummary } = await clientA.rpc('session_event_summary', { p_session_id: sessEmpty });
+    const emptyRepro = (emptySummary || []).find((x) => x.event_kind === 'reproductive');
+    assert.equal(emptyRepro.event_count, 0, 'una jornada vacia del mismo rodeo NO absorbe el tacto suelto');
+  });
+
+  // =====================================================================
+  // DELTA «CAMPAÑAS CONGELADAS» (spec 07) — TR.12 … TR.21
+  // =====================================================================
+  //
+  // ⚠ COLISIÓN DE NUMERACIÓN, declarada: el delta `ficha-categoria-tacto` (spec 02) tomó el rótulo TR.12
+  // para su test de "tacto suelto" al mismo tiempo que este delta lo tomaba para el oráculo de
+  // inmutabilidad. Los dos rótulos conviven; los de este delta llevan "(campañas congeladas)" en el título.
+  //
+  // Qué prueban, en una línea: que una campaña CERRADA es una foto (nada la mueve), que una campaña ABIERTA
+  // se computa con el estado HISTÓRICO (la venta / el movimiento de rodeo / la recategorización posteriores
+  // al corte ya no reescriben el pasado), y que las 7 salidas tempranas nuevas del cortocircuito por
+  // snapshot NO se comen el guard de tenant ni la cota de p_year (Gate 1 H-1).
+  //
+  // 🔴 ROJA-HASTA-APPLY de las migraciones 0127-0130 (las aplica el LEADER).
+  const CC_YEAR = thisYear() - 1;          // campaña en el PASADO → la fecha de corte ya ocurrió (G1 pasa).
+  const CC_MONTHS = [6, 7];                // servicio jun-jul (probe 1) → corte 31/07, ventana de tacto
+  const CC_CUT = dateOn(CC_YEAR, 7, 31);   //   [CC_YEAR-06-01, CC_YEAR+1-05-31].
+  const CC_ENTRY = dateOn(CC_YEAR - 1, 1, 10);
+
+  // Escenario del probe 1 (progress/repro_reportes-campanas-congeladas.md): 3 multíparas, las 3 con tacto
+  // PREÑADA `large` el CC_YEAR-09-15, y la vaca B con parto el CC_YEAR+1-03-15 (concepción CC_YEAR-06 →
+  // campaña CC_YEAR). Opcionalmente una vaquillona sin veredicto que entra por el fallback de edad.
+  async function seedProbeScenario(label, { withHeifer = false, withAi = false } = {}) {
+    const r = await createRodeo(clientA, { establishmentId: estA, name: `R ${label}` });
+    await setServiceMonths(r.id, CC_MONTHS);
+    const cows = [];
+    for (const tag of ['a', 'b', 'c']) {
+      const c = await createAnimal(clientA, {
+        idv: `${RUN_TAG}_${label}_${tag}`, sex: 'female', birthDate: daysAgo(1800), rodeoId: r.id,
+        establishmentId: estA, systemId: r.systemId, categoryCode: 'multipara', entryDate: CC_ENTRY,
+      });
+      await backdateCategoryHistory(c.profile.id, CC_ENTRY);
+      await seedTacto(clientA, c.profile.id, dateOn(CC_YEAR, 9, 15), 'large');
+      cows.push(c);
+    }
+    // parto de la vaca B: concepción = parto − 9 meses = CC_YEAR-06-15 ∈ {6,7} de CC_YEAR.
+    await seedBirthWithCalf(clientA, { motherProfileId: cows[1].profile.id, eventDate: dateOn(CC_YEAR + 1, 3, 15) });
+    let heifer = null;
+    if (withHeifer) {
+      // Vaquillona SIN veredicto y con ≥365 días AL CORTE → entra por el fallback de edad. Es el sujeto del
+      // `no_apta` posterior del probe 2 (el que hacía serviced: 0).
+      heifer = await createAnimal(clientA, {
+        idv: `${RUN_TAG}_${label}_h`, sex: 'female', birthDate: dateOn(CC_YEAR - 2, 1, 10), rodeoId: r.id,
+        establishmentId: estA, systemId: r.systemId, categoryCode: 'vaquillona', entryDate: CC_ENTRY,
+      });
+      await backdateCategoryHistory(heifer.profile.id, CC_ENTRY);
+    }
+    let ai = null;
+    if (withAi) {
+      await enableDataKey(clientA, r.id, 'inseminacion');   // gating 0054
+      // Ternera cuyo ÚNICO camino al conjunto es el evento de IA dentro de la ventana (RCC.2.10): por
+      // categoría no es elegible en la rama natural y el fallback de edad es solo para vaquillonas.
+      ai = await createAnimal(clientA, {
+        idv: `${RUN_TAG}_${label}_ai`, sex: 'female', birthDate: dateOn(CC_YEAR - 1, 3, 1), rodeoId: r.id,
+        establishmentId: estA, systemId: r.systemId, categoryCode: 'ternera', entryDate: CC_ENTRY,
+      });
+      await backdateCategoryHistory(ai.profile.id, CC_ENTRY);
+      const { error } = await clientA.from('reproductive_events').insert({
+        animal_profile_id: ai.profile.id, event_type: 'service', service_type: 'ai',
+        event_date: dateOn(CC_YEAR, 6, 20),
+      });
+      if (error) throw new Error(`seedProbeScenario IA: ${error.message}`);
+    }
+    return { rodeo: r, cows, heifer, ai };
+  }
+
+  // ── TR.12 — INMUTABILIDAD (el oráculo central del delta, RCC.13.1) ────────────────────────────────────
+  await t.test('TR.12 (campañas congeladas) inmutabilidad: cerrada, las 4 mutaciones del probe no la mueven', async () => {
+    const { rodeo, cows } = await seedProbeScenario('immut');
+
+    // T0 — "el reporte que el productor imprimió" (números exactos del probe 1).
+    const t0 = await eventually(
+      async () => await kpiBundle(clientA, rodeo.id, CC_YEAR),
+      (b) => b && b.servicedCount === 3 && b.calv.calved === 1,
+    );
+    assert.equal(t0.servicedCount, 3, 'T0 serviced_females = 3');
+    assert.deepStrictEqual(t0.denom, { serviced: 3, retired: 0, entoradas: 3 }, 'T0 denominador');
+    assert.equal(t0.preg.pregnant, 3, 'T0 pregnant = 3');
+    assert.equal(t0.preg.empty, 0, 'T0 empty = 0');
+    assert.equal(t0.calv.calved, 1, 'T0 calved = 1');
+    assert.equal(t0.calv.pending_pregnant, 2, 'T0 pending_pregnant = 2');
+    assert.equal(t0.ccl.total, 3, 'T0 ccl total = 3');
+    assert.equal(t0.stage.total_born, 1, 'T0 total_born = 1');
+    assert.equal(t0.wean.pending_weaning, 1, 'T0 pending_weaning = 1');
+
+    // CIERRE. El ciclo está INCOMPLETO a propósito (hay 1 cría sin destetar y 2 preñadas sin parir: son los
+    // números del probe), así que el cierre exige el reconocimiento de F8 — que es justamente lo que TR.14d
+    // prueba en detalle. Acá se usa `true` para poder ejercitar la inmutabilidad con el escenario del probe.
+    const closed = await closeCampaign(clientA, rodeo.id, CC_YEAR, true);
+    assert.equal(closed.error, null, closed.error ? `close_campaign: ${closed.error.message}` : 'cerró');
+    assert.ok(closed.data, 'close_campaign devuelve el id del snapshot');
+
+    // Las CUATRO mutaciones del probe, todas posteriores al cierre.
+    // (1) tacto VACÍO de la campaña SIGUIENTE (fuera de la ventana [CC_YEAR-06-01, CC_YEAR+1-05-31]).
+    await seedTacto(clientA, cows[0].profile.id, dateOn(CC_YEAR + 1, 6, 15), 'empty');
+    // (2) VENTA de la vaca B (la que parió).
+    await sellProfile(cows[1].profile.id, daysAgo(1));
+    // (3) TRANSFERENCIA de rodeo de la vaca C.
+    const otro = await createRodeo(clientA, { establishmentId: estA, name: `R immut destino` });
+    await moveProfileToRodeo(cows[2].profile.id, otro.id);
+    // (4) recategorización a `cut` + veredicto `no_apta` fechado en CC_YEAR+1 (el killer del probe 2).
+    await setCategory(cows[0].profile.id, rodeo.systemId, 'cut');
+    await seedTactoVaquillona(clientA, cows[0].profile.id, dateOn(CC_YEAR + 1, 6, 15), 'no_apta');
+
+    const t1 = await kpiBundle(clientA, rodeo.id, CC_YEAR);
+    assert.deepStrictEqual(t1, t0, 'la campaña CERRADA es idéntica campo por campo tras las 4 mutaciones');
+  });
+
+  // ── TR.12b — CONTRAFACTUAL DEL SNAPSHOT (RCC.13.2) ────────────────────────────────────────────────────
+  await t.test('TR.12b (campañas congeladas) contrafactual del snapshot: el gemelo ABIERTO sí se mueve', async () => {
+    // Por qué la mutación tiene que ser un dato DE LA CAMPAÑA y no una venta: después de este delta, la
+    // venta / la transferencia / la recategorización TAMPOCO mueven una campaña abierta (ese es el fix del
+    // cómputo histórico, y lo prueba TR.12c). Si el contrafactual se escribiera con esas tres, el gemelo no
+    // se movería, el test fallaría y el próximo que lo lea aflojaría la aserción. La única mutación que
+    // aísla la contribución del SNAPSHOT es un dato legítimo de la campaña que llega tarde (DL10).
+    const twin = await seedProbeScenario('twin');
+    const before = await eventually(
+      async () => await kpiBundle(clientA, twin.rodeo.id, CC_YEAR),
+      (b) => b && b.preg.pregnant === 3,
+    );
+    assert.equal(before.preg.pregnant, 3, 'gemelo abierto: pregnant = 3');
+    assert.equal(before.ccl.total, 3, 'gemelo abierto: ccl total = 3');
+
+    // tacto VACÍO DENTRO de la ventana (CC_YEAR+1-02-15 < CC_YEAR+1-06-01) y posterior al de septiembre.
+    await seedTacto(clientA, twin.cows[0].profile.id, dateOn(CC_YEAR + 1, 2, 15), 'empty');
+    const after = await eventually(
+      async () => await kpiBundle(clientA, twin.rodeo.id, CC_YEAR),
+      (b) => b && b.preg.pregnant === 2,
+    );
+    assert.equal(after.preg.pregnant, 2, 'gemelo ABIERTO: pregnant 3 → 2');
+    assert.equal(after.preg.empty, 1, 'gemelo ABIERTO: empty 0 → 1');
+    assert.equal(after.ccl.total, 2, 'gemelo ABIERTO: ccl total 3 → 2');
+
+    // El mismo dato, sobre una campaña CERRADA, no la mueve (se cierra el par).
+    const closedTwin = await seedProbeScenario('twinclosed');
+    const t0 = await eventually(
+      async () => await kpiBundle(clientA, closedTwin.rodeo.id, CC_YEAR),
+      (b) => b && b.preg.pregnant === 3,
+    );
+    const res = await closeCampaign(clientA, closedTwin.rodeo.id, CC_YEAR, true);
+    assert.equal(res.error, null, res.error ? `close: ${res.error.message}` : 'cerró');
+    await seedTacto(clientA, closedTwin.cows[0].profile.id, dateOn(CC_YEAR + 1, 2, 15), 'empty');
+    const t1 = await kpiBundle(clientA, closedTwin.rodeo.id, CC_YEAR);
+    assert.deepStrictEqual(t1, t0, 'con el MISMO tacto de la ventana, la CERRADA no se mueve');
+  });
+
+  // ── TR.12c — CONTRAFACTUAL DEL CÓMPUTO HISTÓRICO (RCC.13.3) ───────────────────────────────────────────
+  await t.test('TR.12c (campañas congeladas) contrafactual del cómputo histórico: venta/transferencia/no_apta ya no reescriben el pasado', async () => {
+    // Antes de este delta (probe 1/2, medido contra DEV): la venta movía 7 campos del reporte del año
+    // anterior, la transferencia de rodeo 6, y un `no_apta` de la campaña siguiente dejaba `serviced: 0`.
+    // Sobre una campaña ABIERTA, ahora ninguna de las tres mueve nada.
+    const s = await seedProbeScenario('hist', { withHeifer: true });
+    const before = await eventually(
+      async () => await kpiBundle(clientA, s.rodeo.id, CC_YEAR),
+      (b) => b && b.servicedCount === 4,
+    );
+    assert.equal(before.servicedCount, 4, '3 multíparas + 1 vaquillona por fallback de edad AL CORTE');
+
+    await sellProfile(s.cows[1].profile.id, daysAgo(1));                       // venta posterior al corte
+    const dest = await createRodeo(clientA, { establishmentId: estA, name: 'R hist destino' });
+    await moveProfileToRodeo(s.cows[2].profile.id, dest.id);                    // transferencia posterior
+    await setCategory(s.cows[0].profile.id, s.rodeo.systemId, 'cut');           // recategorización posterior
+    await seedTactoVaquillona(clientA, s.heifer.profile.id, dateOn(CC_YEAR + 1, 6, 15), 'no_apta');
+
+    const after = await kpiBundle(clientA, s.rodeo.id, CC_YEAR);
+    assert.deepStrictEqual(after, before, 'campaña ABIERTA: las 3 mutaciones de estado no mueven ningún KPI');
+
+    // …y el rodeo DESTINO no hereda la campaña: en CC_YEAR la vaca C no estaba ahí (era la fuga F4).
+    await setServiceMonths(dest.id, CC_MONTHS);
+    const destBundle = await kpiBundle(clientA, dest.id, CC_YEAR);
+    assert.equal(destBundle.servicedCount, 0, 'el rodeo destino NO hereda la historia del animal movido (F4)');
+  });
+
+  // ── TR.13 — cómputo histórico ANTES del cierre (RCC.13.4, RCC.2.*, RCC.12.6) ──────────────────────────
+  await t.test('TR.13 (campañas congeladas) cómputo histórico: entradas/salidas/edad al corte, año sin nadie', async () => {
+    const r = await createRodeo(clientA, { establishmentId: estA, name: 'R hist2' });
+    await setServiceMonths(r.id, CC_MONTHS);
+
+    // (a) entra DESPUÉS del corte → no cuenta.
+    const late = await createAnimal(clientA, { idv: `${RUN_TAG}_h_late`, sex: 'female', birthDate: daysAgo(1800), rodeoId: r.id, establishmentId: estA, systemId: r.systemId, categoryCode: 'multipara', entryDate: daysAgo(2) });
+    await backdateCategoryHistory(late.profile.id, daysAgo(2));
+    // (b) sale ANTES del corte → no cuenta.
+    const gone = await createAnimal(clientA, { idv: `${RUN_TAG}_h_gone`, sex: 'female', birthDate: daysAgo(1800), rodeoId: r.id, establishmentId: estA, systemId: r.systemId, categoryCode: 'multipara', entryDate: CC_ENTRY });
+    await backdateCategoryHistory(gone.profile.id, CC_ENTRY);
+    await sellProfile(gone.profile.id, dateOn(CC_YEAR, 3, 1));   // exit ANTES del 31/07
+    // (c) vendida DESPUÉS del corte → SÍ cuenta (fix F2).
+    const sold = await createAnimal(clientA, { idv: `${RUN_TAG}_h_sold`, sex: 'female', birthDate: daysAgo(1800), rodeoId: r.id, establishmentId: estA, systemId: r.systemId, categoryCode: 'multipara', entryDate: CC_ENTRY });
+    await backdateCategoryHistory(sold.profile.id, CC_ENTRY);
+    await sellProfile(sold.profile.id, daysAgo(1));
+    // (e) vaquillona con ≥365 días HOY pero <365 AL CORTE → no cuenta (F3-bis).
+    const young = await createAnimal(clientA, { idv: `${RUN_TAG}_h_young`, sex: 'female', birthDate: dateOn(CC_YEAR, 7, 3), rodeoId: r.id, establishmentId: estA, systemId: r.systemId, categoryCode: 'vaquillona', entryDate: dateOn(CC_YEAR, 7, 3) });
+    await backdateCategoryHistory(young.profile.id, dateOn(CC_YEAR, 7, 3));
+
+    const { data, error } = await eventually(
+      async () => await clientA.rpc('rodeo_serviced_females', { p_rodeo_id: r.id, p_year: CC_YEAR }),
+      (res) => res && Array.isArray(res.data) && res.data.some((x) => x.animal_profile_id === sold.profile.id),
+    );
+    assert.equal(error, null, error ? `serviced_females: ${error.message}` : 'ejecutó');
+    const ids = new Set((data || []).map((x) => x.animal_profile_id));
+    assert.ok(!ids.has(late.profile.id), '(a) el que entró DESPUÉS del corte no cuenta');
+    assert.ok(!ids.has(gone.profile.id), '(b) el que salió ANTES del corte no cuenta');
+    assert.ok(ids.has(sold.profile.id), '(c) el vendido DESPUÉS del corte SÍ cuenta (F2: el fix, no una regresión)');
+    assert.ok(!ids.has(young.profile.id), '(e) fallback por edad evaluado AL CORTE, no a hoy (F3-bis)');
+    // control de no-vacuidad de (e): hoy la vaquillona YA tiene edad de servicio, así que el código viejo
+    // (que evaluaba contra current_date) la habría incluido.
+    const ageToday = Math.floor((Date.now() - Date.parse(dateOn(CC_YEAR, 7, 3))) / 86400000);
+    assert.ok(ageToday >= 365, 'control: la vaquillona de (e) HOY ya tiene ≥365 días');
+
+    // (d) `no_apta` posterior al corte NO borra la campaña (probe 2: antes dejaba serviced en 0).
+    const withVerdict = await createAnimal(clientA, { idv: `${RUN_TAG}_h_v`, sex: 'female', birthDate: dateOn(CC_YEAR - 2, 1, 10), rodeoId: r.id, establishmentId: estA, systemId: r.systemId, categoryCode: 'vaquillona', entryDate: CC_ENTRY });
+    await backdateCategoryHistory(withVerdict.profile.id, CC_ENTRY);
+    const withV = await eventually(
+      async () => await clientA.rpc('rodeo_serviced_females', { p_rodeo_id: r.id, p_year: CC_YEAR }),
+      (res) => res && res.data && res.data.some((x) => x.animal_profile_id === withVerdict.profile.id),
+    );
+    assert.ok((withV.data || []).some((x) => x.animal_profile_id === withVerdict.profile.id), 'control: la vaquillona apta por edad entra');
+    await seedTactoVaquillona(clientA, withVerdict.profile.id, dateOn(CC_YEAR + 1, 6, 15), 'no_apta');
+    const afterVerdict = await clientA.rpc('rodeo_serviced_females', { p_rodeo_id: r.id, p_year: CC_YEAR });
+    assert.ok((afterVerdict.data || []).some((x) => x.animal_profile_id === withVerdict.profile.id),
+      '(d) un `no_apta` POSTERIOR al corte no borra la campaña anterior (probe 2)');
+
+    // (f) año en el que no había nadie presente → serviced = 0 (el año deja de ser decorativo, RCC.12.6).
+    const { data: old } = await clientA.rpc('rodeo_serviced_females', { p_rodeo_id: r.id, p_year: CC_YEAR - 5 });
+    assert.equal((old || []).length, 0, '(f) campaña de un año sin nadie presente → serviced = 0');
+
+    // ── (g) LA RAMA DE INSEMINACIÓN ARTIFICIAL (RCC.2.10) ──────────────────────────────────────────────
+    // `ai_females` también se reescribió (se le agregó el `join member` y se le sacó `p.status`), y es la
+    // MITAD del conjunto de elegibilidad — `docs/verification.md` pone los KPI en la lista de testing no
+    // negociable. Sin esto, ninguna hembra entraba por IA en ningún escenario del delta y la rama quedaba
+    // cubierta solo por una aserción INVERSA (`every(source === 'natural')`), que es lo contrario de un
+    // oráculo. El sujeto es una `ternera`: por categoría NO es elegible en la rama natural (ni por el
+    // fallback de edad, que es solo para vaquillonas), así que su ÚNICO camino al conjunto es el evento de IA.
+    await enableDataKey(clientA, r.id, 'inseminacion');   // gating 0054: sin esto el insert de IA se rechaza
+    const aiIn = await createAnimal(clientA, { idv: `${RUN_TAG}_h_ai`, sex: 'female', birthDate: dateOn(CC_YEAR - 1, 3, 1), rodeoId: r.id, establishmentId: estA, systemId: r.systemId, categoryCode: 'ternera', entryDate: CC_ENTRY });
+    await backdateCategoryHistory(aiIn.profile.id, CC_ENTRY);
+    // IA DENTRO de la campaña: año = CC_YEAR y mes ∈ service_months {6,7}.
+    const { error: aiErr } = await clientA.from('reproductive_events').insert({
+      animal_profile_id: aiIn.profile.id, event_type: 'service', service_type: 'ai',
+      event_date: dateOn(CC_YEAR, 6, 20),
+    });
+    assert.equal(aiErr, null, aiErr ? `insert IA: ${aiErr.message}` : 'IA insertada');
+
+    // (g.1) entra, y entra POR LA RAMA IA.
+    const withAi = await eventually(
+      async () => await clientA.rpc('rodeo_serviced_females', { p_rodeo_id: r.id, p_year: CC_YEAR }),
+      (res) => res && res.data && res.data.some((x) => x.animal_profile_id === aiIn.profile.id),
+    );
+    const aiRow = (withAi.data || []).find((x) => x.animal_profile_id === aiIn.profile.id);
+    assert.ok(aiRow, '(g) la ternera con IA en la ventana entra al conjunto servidas');
+    assert.equal(aiRow.source, 'ai', '(g) y entra por la rama `ai`, no por la natural');
+
+    // (g.2) contrafactual de MEMBRESÍA sobre la rama IA: misma IA, pero el animal entró al rodeo DESPUÉS del
+    // corte → NO cuenta. Es el predicado histórico que la rama IA no tenía antes del delta.
+    const aiLate = await createAnimal(clientA, { idv: `${RUN_TAG}_h_ail`, sex: 'female', birthDate: dateOn(CC_YEAR - 1, 3, 1), rodeoId: r.id, establishmentId: estA, systemId: r.systemId, categoryCode: 'ternera', entryDate: daysAgo(2) });
+    await backdateCategoryHistory(aiLate.profile.id, daysAgo(2));
+    await clientA.from('reproductive_events').insert({
+      animal_profile_id: aiLate.profile.id, event_type: 'service', service_type: 'ai',
+      event_date: dateOn(CC_YEAR, 6, 20),
+    });
+    // (g.3) …y el que SALIÓ del rodeo antes del corte tampoco, aunque su IA esté en la ventana.
+    const aiGone = await createAnimal(clientA, { idv: `${RUN_TAG}_h_aig`, sex: 'female', birthDate: dateOn(CC_YEAR - 1, 3, 1), rodeoId: r.id, establishmentId: estA, systemId: r.systemId, categoryCode: 'ternera', entryDate: CC_ENTRY });
+    await backdateCategoryHistory(aiGone.profile.id, CC_ENTRY);
+    await clientA.from('reproductive_events').insert({
+      animal_profile_id: aiGone.profile.id, event_type: 'service', service_type: 'ai',
+      event_date: dateOn(CC_YEAR, 6, 20),
+    });
+    await sellProfile(aiGone.profile.id, dateOn(CC_YEAR, 3, 1));   // salió ANTES del 31/07
+
+    const aiFinal = await eventually(
+      async () => await clientA.rpc('rodeo_serviced_females', { p_rodeo_id: r.id, p_year: CC_YEAR }),
+      (res) => res && res.data && res.data.some((x) => x.animal_profile_id === aiIn.profile.id),
+    );
+    const aiIds = new Set((aiFinal.data || []).map((x) => x.animal_profile_id));
+    assert.ok(aiIds.has(aiIn.profile.id), '(g.1) control: la IA presente al corte SIGUE contando');
+    assert.ok(!aiIds.has(aiLate.profile.id), '(g.2) rama IA: el que entró al rodeo DESPUÉS del corte no cuenta');
+    assert.ok(!aiIds.has(aiGone.profile.id), '(g.3) rama IA: el que salió ANTES del corte no cuenta');
+  });
+
+  // ── TR.14 — authz de las 3 RPC nuevas (RCC.13.5) ──────────────────────────────────────────────────────
+  await t.test('TR.14 (campañas congeladas) authz de close/reopen/status: owner B, field_operator, veterinario, cotas', async () => {
+    const s = await seedProbeScenario('authz');
+    await eventually(
+      async () => await clientA.rpc('rodeo_serviced_females', { p_rodeo_id: s.rodeo.id, p_year: CC_YEAR }),
+      (res) => res && res.data && res.data.length === 3,
+    );
+
+    // owner de B sobre el rodeo de A → 42501 en las TRES.
+    for (const [fn, args] of [
+      ['close_campaign', { p_rodeo_id: s.rodeo.id, p_year: CC_YEAR, p_acknowledge_incomplete: false }],
+      ['reopen_campaign', { p_rodeo_id: s.rodeo.id, p_year: CC_YEAR }],
+      ['rodeo_campaign_status', { p_rodeo_id: s.rodeo.id, p_year: CC_YEAR }],
+    ]) {
+      const res = await clientB.rpc(fn, args);
+      assert.match(pgcode(res.error), /42501|not authorized/i, `${fn}: owner de B → 42501`);
+      assert.ok(!res.data || (Array.isArray(res.data) && res.data.length === 0), `${fn}: y sin datos`);
+    }
+
+    // field_operator de A: NO cierra ni reabre, pero SÍ lee el estado y los KPI (RCC.7.3).
+    const fClose = await closeCampaign(clientField, s.rodeo.id, CC_YEAR, false);
+    assert.match(pgcode(fClose.error), /42501|not authorized/i, 'field_operator no cierra (punto ①)');
+    const fReopen = await reopenCampaign(clientField, s.rodeo.id, CC_YEAR);
+    assert.match(pgcode(fReopen.error), /42501|not authorized/i, 'field_operator no reabre');
+    const fStatus = await campaignStatus(clientField, s.rodeo.id, CC_YEAR);
+    assert.equal(fStatus.error, null, fStatus.error ? `field status: ${fStatus.error.message}` : 'field_operator LEE el estado');
+    assert.equal(fStatus.status.can_close, false, 'field_operator: can_close = false');
+    assert.equal(fStatus.status.can_reopen, false, 'field_operator: can_reopen = false');
+    const fKpi = await clientField.rpc('rodeo_pregnancy_kpi', { p_rodeo_id: s.rodeo.id, p_year: CC_YEAR });
+    assert.equal(fKpi.error, null, 'field_operator lee los KPI (el guard de lectura NO se endurece)');
+
+    // cotas y existencia.
+    const badYear = await closeCampaign(clientA, s.rodeo.id, 1899, false);
+    assert.match(pgcode(badYear.error), /22023/i, 'p_year fuera de cota → 22023');
+    const ghost = await closeCampaign(clientA, crypto.randomUUID(), CC_YEAR, false);
+    assert.match(pgcode(ghost.error), /P0002|not found/i, 'rodeo inexistente → P0002');
+
+    // veterinario de A: cierra, lee y reabre.
+    const userVet = await createTestUser('userVet');
+    await assignRoleAsService(userVet.id, estA, 'veterinarian');
+    const clientVet = await getUserClient(userVet.email);
+    const vClose = await closeCampaign(clientVet, s.rodeo.id, CC_YEAR, true);
+    assert.equal(vClose.error, null, vClose.error ? `vet close: ${vClose.error.message}` : 'el veterinario CIERRA (punto ①)');
+    // idempotencia: cerrar dos veces devuelve el MISMO id y deja UNA sola fila (RCC.5.6, RCC.13.9).
+    const again = await closeCampaign(clientA, s.rodeo.id, CC_YEAR, true);
+    assert.equal(again.error, null, 'cerrar dos veces no falla');
+    assert.equal(again.data, vClose.data, 'cerrar dos veces devuelve el mismo snapshot');
+    const { data: rows } = await admin.from('rodeo_campaign_snapshots')
+      .select('id').eq('rodeo_id', s.rodeo.id).eq('campaign_year', CC_YEAR);
+    assert.equal((rows || []).length, 1, 'y NO hay dos filas de snapshot');
+
+    // reapertura bloqueada por la campaña siguiente cerrada (RCC.6.2).
+    const nextClose = await closeCampaign(clientA, s.rodeo.id, CC_YEAR + 1, true);
+    if (!nextClose.error) {
+      const blocked = await reopenCampaign(clientA, s.rodeo.id, CC_YEAR);
+      assert.match(pgcode(blocked.error), /23514/i, 'reabrir con la campaña siguiente cerrada → 23514');
+      await reopenCampaign(clientA, s.rodeo.id, CC_YEAR + 1);   // se destraba para el resto del test
+    }
+    const vReopen = await reopenCampaign(clientVet, s.rodeo.id, CC_YEAR);
+    assert.equal(vReopen.error, null, vReopen.error ? `vet reopen: ${vReopen.error.message}` : 'el veterinario REABRE');
+    // reabrir una campaña ya abierta no falla: devuelve null (RCC.6.4).
+    const noop = await reopenCampaign(clientA, s.rodeo.id, CC_YEAR);
+    assert.equal(noop.error, null, 'reabrir una campaña abierta no falla');
+    assert.equal(noop.data, null, 'reabrir una campaña abierta devuelve null (idempotente)');
+  });
+
+  // ── TR.14d — el gate del CICLO INCOMPLETO (F8 / RCC.13.9.a-c) ─────────────────────────────────────────
+  await t.test('TR.14d (campañas congeladas) ciclo incompleto: 23514 con el detalle, ack cierra, guard duro no reconocible', async () => {
+    const s = await seedProbeScenario('f8');
+    await eventually(
+      async () => await campaignStatus(clientA, s.rodeo.id, CC_YEAR),
+      (r) => r && r.status && r.status.cycle_complete === false,
+    );
+
+    // (a) sin ack → 23514 y el mensaje NOMBRA lo que falta; y NO se creó ninguna fila de snapshot.
+    const st0 = await campaignStatus(clientA, s.rodeo.id, CC_YEAR);
+    assert.equal(st0.status.cycle_complete, false, 'el ciclo está incompleto (hay crías sin destetar)');
+    assert.equal(st0.status.can_close, true, 'can_close = true: el 23514 que viene es RECONOCIBLE (G3)');
+    const noAck = await closeCampaign(clientA, s.rodeo.id, CC_YEAR, false);
+    assert.match(pgcode(noAck.error), /23514/i, 'ciclo incompleto sin ack → 23514');
+    assert.match(String(noAck.error.message), /preñadas sin parir|crías sin destetar/i,
+      'el mensaje enumera QUÉ falta, no es un "no se puede" pelado');
+    assert.equal(await snapshotOf(s.rodeo.id, CC_YEAR), null, 'y no se escribió ninguna fila de snapshot');
+
+    // (e) el predicado que usó el gate es el MISMO que expone el status (RCC.13.9.c).
+    assert.equal(st0.status.cycle_complete, false, 'cycle_complete del status coincide con el gate');
+    assert.ok(st0.status.missing_summary && /crías sin destetar/i.test(st0.status.missing_summary),
+      'missing_summary enumera lo mismo que el mensaje del 23514');
+
+    // (b) con ack → cierra, y queda marcado como cerrado a medias con su descriptor.
+    const ack = await closeCampaign(clientA, s.rodeo.id, CC_YEAR, true);
+    assert.equal(ack.error, null, ack.error ? `close con ack: ${ack.error.message}` : 'con ack cierra');
+    const snap = await snapshotOf(s.rodeo.id, CC_YEAR);
+    assert.equal(snap.closed_incomplete, true, 'closed_incomplete = true (RCC.4.11)');
+    assert.ok(snap.missing_at_close, 'missing_at_close guarda qué faltaba');
+    // (c) y el status lo expone.
+    const st1 = await campaignStatus(clientA, s.rodeo.id, CC_YEAR);
+    assert.equal(st1.status.is_closed, true, 'status: cerrada');
+    assert.equal(st1.status.closed_incomplete, true, 'status: cerrada a medias');
+    assert.ok(st1.status.missing_at_close, 'status: expone qué faltaba al cerrar');
+    assert.ok(st1.status.closed_at, 'status: expone la fecha del cierre');
+
+    // (d) una campaña con el ciclo COMPLETO cierra SIN ack y no queda marcada.
+    const rc = await createRodeo(clientA, { establishmentId: estA, name: 'R f8 completa' });
+    await setServiceMonths(rc.id, [1]);                       // corte 31/01 de CC_YEAR
+    const entry = dateOn(CC_YEAR - 1, 1, 10);
+    const mom = await createAnimal(clientA, { idv: `${RUN_TAG}_f8c`, sex: 'female', birthDate: daysAgo(1800), rodeoId: rc.id, establishmentId: estA, systemId: rc.systemId, categoryCode: 'multipara', entryDate: entry });
+    await backdateCategoryHistory(mom.profile.id, entry);
+    await seedTacto(clientA, mom.profile.id, dateOn(CC_YEAR, 4, 10), 'large');
+    const b = await seedBirthWithCalf(clientA, { motherProfileId: mom.profile.id, eventDate: dateOn(CC_YEAR, 10, 15) });
+    for (const calf of b.calfProfileIds) await seedWeaning(clientA, calf, dateOn(CC_YEAR + 1, 5, 10));
+    const stc = await eventually(
+      async () => await campaignStatus(clientA, rc.id, CC_YEAR),
+      (r) => r && r.status && r.status.cycle_complete === true,
+    );
+    assert.equal(stc.status.cycle_complete, true, 'ciclo completo (destete cargado, weaning_status ok)');
+    const clean = await closeCampaign(clientA, rc.id, CC_YEAR, false);
+    assert.equal(clean.error, null, clean.error ? `close ciclo completo: ${clean.error.message}` : 'cierra SIN ack');
+    const snapC = await snapshotOf(rc.id, CC_YEAR);
+    assert.equal(snapC.closed_incomplete, false, 'ciclo completo → closed_incomplete = false');
+    assert.equal(snapC.missing_at_close, null, 'ciclo completo → missing_at_close null');
+
+    // (f) EL GUARD DURO NO ES RECONOCIBLE: con la fecha de corte en el futuro, ack = true igual falla.
+    const rf = await createRodeo(clientA, { establishmentId: estA, name: 'R f8 futura' });
+    await setServiceMonths(rf.id, [12]);                      // corte 31/12 del año EN CURSO → futuro
+    const fut = await closeCampaign(clientA, rf.id, thisYear(), true);
+    assert.match(pgcode(fut.error), /23514/i, 'G1 (corte en el futuro): ack = true NO lo sortea');
+    const stf = await campaignStatus(clientA, rf.id, thisYear());
+    assert.equal(stf.status.can_close, false, 'y can_close = false → la UI no ofrece el reconocimiento');
+
+    // G2 (RCC.5.7.e): campaña sin hembras servidas → 23514 no reconocible, y can_close = false (N-3).
+    const rz = await createRodeo(clientA, { establishmentId: estA, name: 'R f8 vacia' });
+    await setServiceMonths(rz.id, CC_MONTHS);
+    const zero = await closeCampaign(clientA, rz.id, CC_YEAR, true);
+    assert.match(pgcode(zero.error), /23514/i, 'G2 (serviced = 0): ack = true NO lo sortea');
+    const stz = await campaignStatus(clientA, rz.id, CC_YEAR);
+    assert.equal(stz.status.can_close, false, 'can_close refleja el TERCER gate duro (serviced > 0) — Gate 1 N-3');
+  });
+
+  // ── TR.21 — el tenant del camino CERRADO (Gate 1 H-1, BLOQUEANTE) ─────────────────────────────────────
+  await t.test('TR.21 (campañas congeladas) guard y cota ANTES del cortocircuito por snapshot', async () => {
+    // Los IDOR preexistentes de esta suite (TR.1, TR.3, TR.8, TR.9, TR.10) corren TODOS con campañas
+    // abiertas — no por descuido, sino porque hasta este delta no existían las campañas cerradas. El
+    // cortocircuito agrega SIETE salidas tempranas nuevas y este bloque es el único que las ejercita.
+    // Poner el `select … from rodeo_campaign_snapshots` antes del `select … from rodeos` es la variante
+    // NATURAL de escribir la función (leer el snapshot no necesita la fila del rodeo): una sola de las siete
+    // escrita así entrega los 5 KPI congelados y el detalle por animal completo de un campo ajeno.
+    const s = await seedProbeScenario('tenant');
+    await eventually(
+      async () => await clientA.rpc('rodeo_serviced_females', { p_rodeo_id: s.rodeo.id, p_year: CC_YEAR }),
+      (res) => res && res.data && res.data.length === 3,
+    );
+    const closed = await closeCampaign(clientA, s.rodeo.id, CC_YEAR, true);
+    assert.equal(closed.error, null, closed.error ? `close: ${closed.error.message}` : 'campaña cerrada');
+
+    // La lista NO se escribe a mano: se DESCUBRE del catálogo. Una función de campaña nueva entra sola.
+    //
+    // ⚠ La firma se resuelve con `oidvectortypes(p.proargtypes)`, NO con
+    // `pg_get_function_identity_arguments` como decía la spec: MEDIDO contra el remoto, la segunda
+    // devuelve "p_rodeo_id uuid, p_year integer" (CON los nombres de los parámetros), así que la
+    // comparación con 'uuid, integer' no matchea NUNCA y el descubrimiento daba 0 funciones. El test
+    // habría quedado rojo para siempre por el piso —fail-closed, pero inútil: los dos oráculos de abajo
+    // no se ejecutarían jamás—. `oidvectortypes` devuelve exactamente "uuid, integer".
+    const discovered = await adminQuery(`
+      select p.proname
+      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'public'
+        and p.proname like 'rodeo\\_%'
+        and oidvectortypes(p.proargtypes) = 'uuid, integer'
+        and has_function_privilege('authenticated', p.oid, 'EXECUTE')
+      order by 1;
+    `);
+    const fns = discovered.map((r) => r.proname);
+    assert.ok(fns.length >= 9,
+      `piso de 9 funciones descubiertas (hay ${fns.length}: ${fns.join(', ')}) — sacar una del namespace no esquiva el test`);
+    // Borde declarado: el descubrimiento no ve funciones futuras con otra firma (p. ej. (uuid,int,text)) ni
+    // fuera del prefijo `rodeo_`. close_campaign/reopen_campaign se cubren explícitamente en TR.14.
+
+    // (a) GUARD antes del cortocircuito: owner de B, rodeo de A, campaña CERRADA → 42501 y `data` vacío.
+    for (const fn of fns) {
+      const res = await clientB.rpc(fn, { p_rodeo_id: s.rodeo.id, p_year: CC_YEAR });
+      assert.match(pgcode(res.error), /42501|not authorized/i, `${fn}: owner de B con campaña CERRADA → 42501`);
+      assert.ok(!res.data || (Array.isArray(res.data) && res.data.length === 0),
+        `${fn}: y NO devuelve ni una fila del snapshot ajeno`);
+    }
+
+    // (b) COTA antes del cortocircuito. `p_year = 9999999` NO sirve como oráculo (no habría snapshot para
+    // ese año, así que hasta una función mal ordenada caería igual en la cota). El oráculo es sembrar un
+    // snapshot en un año que el CHECK de la tabla admite (1900..2400) y la cota de las RPC rechaza
+    // (1900..current+1): si el cortocircuito está antes de la cota, devuelve la foto sembrada.
+    const seeded = {
+      rodeo_id: s.rodeo.id, campaign_year: 2400, establishment_id: estA,
+      is_configured: true, n_months: 2, serviced: 99, retired: 0, entoradas: 99, pregnant: 99, empty: 0,
+      calved: 99, pending_pregnant: 0, calving_status: 'ok',
+      ccl_head: 99, ccl_body: 0, ccl_tail: 0, ccl_total: 99,
+      born_head: 99, born_body: 0, born_tail: 0, born_total: 99,
+      weaned: 99, pending_weaning: 0, weaning_status: 'ok',
+    };
+    const { error: seedErr } = await admin.from('rodeo_campaign_snapshots').insert(seeded);
+    assert.equal(seedErr, null, seedErr ? `seed 2400: ${seedErr.message}` : 'snapshot sembrado en 2400');
+    for (const fn of fns) {
+      const res = await clientA.rpc(fn, { p_rodeo_id: s.rodeo.id, p_year: 2400 });
+      assert.match(pgcode(res.error), /22023/i, `${fn}: cota de p_year ANTES del cortocircuito (22023, no la foto)`);
+    }
+  });
+
+  // ── TR.14i — la CARRERA de dos cierres (RCC.9.8) y los DOS cierres en UNA transacción (RCC.11.10) ──
+  await t.test('TR.14i (campañas congeladas) carrera de cierres concurrentes + dos cierres en la misma transacción', async () => {
+    // (a) RCC.9.8 — CARRERA, no idempotencia secuencial. TR.14 ya prueba que cerrar dos veces EN SERIE
+    // devuelve el mismo id; eso NO ejercita el `on conflict` + `unique_violation`, que es lo que impide dos
+    // fotos vigentes cuando dos clientes cierran a la vez. Este oráculo es PROBABILÍSTICO y se declara como
+    // tal: si las dos llamadas no llegan a interleavearse, pasa sin haber probado nada — pero **no puede
+    // dar un falso verde**, porque el assert que importa (una sola fila vigente) es sobre el estado final.
+    const race = await seedProbeScenario('carrera');
+    await eventually(
+      async () => await clientA.rpc('rodeo_serviced_females', { p_rodeo_id: race.rodeo.id, p_year: CC_YEAR }),
+      (res) => res && res.data && res.data.length === 3,
+    );
+    const [r1, r2] = await Promise.all([
+      closeCampaign(clientA, race.rodeo.id, CC_YEAR, true),
+      closeCampaign(clientA, race.rodeo.id, CC_YEAR, true),
+    ]);
+    assert.equal(r1.error, null, r1.error ? `cierre 1: ${r1.error.message}` : 'el primero cerró');
+    assert.equal(r2.error, null, r2.error ? `cierre 2: ${r2.error.message}` : 'el segundo NO propaga unique_violation');
+    assert.equal(r1.data, r2.data, 'los dos devuelven el MISMO snapshot (el que ganó la carrera)');
+    const { data: rows } = await admin.from('rodeo_campaign_snapshots')
+      .select('id').eq('rodeo_id', race.rodeo.id).eq('campaign_year', CC_YEAR).is('reopened_at', null);
+    assert.equal((rows || []).length, 1, 'y NUNCA quedan dos fotos vigentes de la misma campaña');
+
+    // (b) RCC.11.10 — DOS `close_campaign` en la MISMA transacción. Es el requisito que existe SOLO para el
+    // runbook del re-seed (§9) y que no tenía test: por PostgREST cada RPC es su propia transacción, así que
+    // el `42P07` de las temporales (`on commit drop` limpia al COMMIT, no al salir de la función) no se
+    // puede reproducir desde el cliente. Se ejercita por el mismo transporte que usa el leader, con
+    // impersonación —igual que el paso 5 del runbook— y **`rollback` al final**: el oráculo corre, y el
+    // estado de la DB no se mueve ni un byte. Si el crear-o-truncar estuviera mal, esto muere con 42P07 acá
+    // y no en T74 con las 4 migraciones ya aplicadas.
+    const tx1 = await seedProbeScenario('tx1');
+    const tx2 = await seedProbeScenario('tx2');
+    await eventually(
+      async () => await clientA.rpc('rodeo_serviced_females', { p_rodeo_id: tx2.rodeo.id, p_year: CC_YEAR }),
+      (res) => res && res.data && res.data.length === 3,
+    );
+    const twoInOne = await adminQuery(`
+      begin;
+      set local role authenticated;
+      set local request.jwt.claims = '{"sub":"${userA.id}","role":"authenticated"}';
+      select public.close_campaign('${tx1.rodeo.id}'::uuid, ${CC_YEAR}, true) as snap1;
+      select public.close_campaign('${tx2.rodeo.id}'::uuid, ${CC_YEAR}, true) as snap2;
+      reset role;
+      rollback;
+    `);
+    // El transporte devuelve la salida de la ÚLTIMA sentencia con filas; lo que importa es que ninguna de
+    // las dos haya reventado (adminQuery tira si el HTTP no es 2xx, o sea si el 42P07 ocurrió).
+    assert.ok(Array.isArray(twoInOne), 'dos close_campaign en la misma transacción no fallan (RCC.11.10)');
+    // Y el rollback dejó todo como estaba: ninguna de las dos campañas quedó cerrada.
+    assert.equal(await snapshotOf(tx1.rodeo.id, CC_YEAR), null, 'el rollback no dejó rastro (rodeo 1)');
+    assert.equal(await snapshotOf(tx2.rodeo.id, CC_YEAR), null, 'el rollback no dejó rastro (rodeo 2)');
+  });
+
+  // ── TR.14e — grants de TABLA (Gate 1 H-2b, BLOQUEANTE) ────────────────────────────────────────────────
+  await t.test('TR.14e (campañas congeladas) un authenticated NO escribe en las 3 tablas nuevas', async () => {
+    // Es el guard del invariante que sostiene DP-19 (la RLS de las tablas de snapshot scopea por la columna
+    // denormalizada porque NO hay camino de escritura del cliente). Si mañana alguien agrega un `grant
+    // insert` "para el import", esto se pone rojo ANTES de que la frontera se caiga.
+    // Los payloads son COMPLETOS y VÁLIDOS a propósito: con uno incompleto, un `insert` rechazado por
+    // `23502 not-null` se vería igual de "rechazado" que uno rechazado por permisos, y el test pasaría por
+    // la razón equivocada el día que alguien agregue el grant.
+    const s = await seedProbeScenario('grants');
+    const payloads = {
+      rodeo_membership_history: {
+        animal_profile_id: s.cows[0].profile.id, rodeo_id: s.rodeo.id, establishment_id: estA,
+        from_date: daysAgo(1), to_date: null, reason: 'move',
+      },
+      rodeo_campaign_snapshots: {
+        rodeo_id: s.rodeo.id, campaign_year: CC_YEAR - 3, establishment_id: estA,
+        is_configured: true, n_months: 2, serviced: 1, retired: 0, entoradas: 1, pregnant: 1, empty: 0,
+        calved: 0, pending_pregnant: 1, calving_status: 'ok', ccl_head: 1, ccl_body: 0, ccl_tail: 0,
+        ccl_total: 1, born_head: 0, born_body: 0, born_tail: 0, born_total: 0, weaned: 0,
+        pending_weaning: 0, weaning_status: 'ok',
+      },
+      rodeo_campaign_snapshot_animals: {
+        snapshot_id: crypto.randomUUID(), establishment_id: estA, bucket: 'serviced',
+        animal_profile_id: s.cows[0].profile.id,
+      },
+    };
+    for (const [tbl, payload] of Object.entries(payloads)) {
+      const ins = await clientA.from(tbl).insert(payload);
+      assert.notEqual(ins.error, null, `${tbl}: insert de authenticated RECHAZADO`);
+      // El regex NO acepta "no existe la tabla": las 3 tablas SÍ están en el schema cache (authenticated
+      // tiene SELECT), así que el rechazo legítimo es de PERMISOS. Aceptar "not find" dejaría el oráculo
+      // verde el día que alguien dropee una tabla, que es lo contrario de lo que este test protege.
+      assert.match(pgcode(ins.error), /42501|permission denied|violates row-level/i,
+        `${tbl}: insert rechazado por PERMISOS (no por una constraint de datos ni por una tabla ausente)`);
+      const upd = await clientA.from(tbl).update({ establishment_id: estB }).eq('establishment_id', estA);
+      assert.notEqual(upd.error, null, `${tbl}: update de authenticated RECHAZADO`);
+      const del = await clientA.from(tbl).delete().eq('establishment_id', estA);
+      assert.notEqual(del.error, null, `${tbl}: delete de authenticated RECHAZADO`);
+    }
+    // el caso que más importa: insertar una cabecera con el establishment_id de OTRO tenant.
+    const spoof = await clientA.from('rodeo_campaign_snapshots').insert({
+      rodeo_id: crypto.randomUUID(), campaign_year: CC_YEAR, establishment_id: estB,
+      is_configured: true, n_months: 1, serviced: 1, retired: 0, entoradas: 1, pregnant: 1, empty: 0,
+      calved: 0, pending_pregnant: 1, calving_status: 'ok', ccl_head: 1, ccl_body: 0, ccl_tail: 0, ccl_total: 1,
+      born_head: 0, born_body: 0, born_tail: 0, born_total: 0, weaned: 0, pending_weaning: 0, weaning_status: 'ok',
+    });
+    assert.notEqual(spoof.error, null, 'insert con el establishment_id de OTRO tenant → rechazado');
+
+    // y las policies de las 3 tablas son EXCLUSIVAMENTE de SELECT.
+    const pols = await adminQuery(`
+      select tablename, policyname, cmd from pg_policies
+      where schemaname = 'public'
+        and tablename in ('rodeo_membership_history','rodeo_campaign_snapshots','rodeo_campaign_snapshot_animals')
+      order by tablename, policyname;
+    `);
+    assert.ok(pols.length >= 3, 'las 3 tablas tienen su policy de SELECT');
+    for (const p of pols) {
+      assert.equal(p.cmd, 'SELECT', `${p.tablename}.${p.policyname}: la policy es de SELECT y nada más`);
+    }
+
+    // ── EL ACL CRUDO (Gate 2 H-C1) — la mitad que los dos asserts de arriba NO pueden ver ───────────────
+    // PostgREST no expone TRUNCATE y `pg_policies` no tiene fila de TRUNCATE (no existe la categoría), así
+    // que probar por COMPORTAMIENTO es estructuralmente ciego a un grant de TRUNCATE. Y el pg_default_acl de
+    // este proyecto concede `Dxtm` (TRUNCATE/REFERENCES/TRIGGER/MAINTAIN) a anon y authenticated en TODA
+    // tabla que `postgres` cree en `public`: sin el `revoke all` explícito de 0127/0128, las 3 tablas nacen
+    // TRUNCATE-ables por cualquier authenticated — y un TRUNCATE borra las filas de TODOS los tenants de una,
+    // con la RLS en verde, sobre una tabla que se presenta como append-only y auditable a tres años.
+    // Este assert resuelve el VALOR del ACL, igual que TR.14b hace con los ACL de función.
+    // SABE FALLAR: sin los `revoke`, `anon_trunc` y `auth_trunc` dan true.
+    const acl = await adminQuery(`
+      select c.relname,
+             has_table_privilege('anon',          c.oid, 'TRUNCATE') as anon_trunc,
+             has_table_privilege('authenticated', c.oid, 'TRUNCATE') as auth_trunc,
+             has_table_privilege('anon',          c.oid, 'INSERT')   as anon_ins,
+             has_table_privilege('authenticated', c.oid, 'INSERT')   as auth_ins,
+             has_table_privilege('authenticated', c.oid, 'UPDATE')   as auth_upd,
+             has_table_privilege('authenticated', c.oid, 'DELETE')   as auth_del,
+             has_table_privilege('anon',          c.oid, 'SELECT')   as anon_sel,
+             has_table_privilege('authenticated', c.oid, 'SELECT')   as auth_sel
+      from pg_class c join pg_namespace n on n.oid = c.relnamespace
+      where n.nspname = 'public'
+        and c.relname in ('rodeo_membership_history','rodeo_campaign_snapshots','rodeo_campaign_snapshot_animals')
+      order by 1;
+    `);
+    assert.equal(acl.length, 3, 'las 3 tablas del delta existen en el catálogo');
+    for (const t of acl) {
+      assert.equal(t.anon_trunc, false, `${t.relname}: anon NO puede TRUNCATE (la RLS no lo podría tapar)`);
+      assert.equal(t.auth_trunc, false, `${t.relname}: authenticated NO puede TRUNCATE`);
+      assert.equal(t.anon_ins, false, `${t.relname}: anon NO puede INSERT`);
+      assert.equal(t.auth_ins, false, `${t.relname}: authenticated NO puede INSERT (ACL, no solo RLS)`);
+      assert.equal(t.auth_upd, false, `${t.relname}: authenticated NO puede UPDATE (ACL)`);
+      assert.equal(t.auth_del, false, `${t.relname}: authenticated NO puede DELETE (ACL)`);
+      assert.equal(t.anon_sel, false, `${t.relname}: anon no lee ni con RLS de por medio`);
+      // el único privilegio que SÍ tiene que estar (control de no-vacuidad del assert de arriba).
+      assert.equal(t.auth_sel, true, `${t.relname}: authenticated SÍ lee (si no, el reporte no se puede leer)`);
+    }
+  });
+
+  // ── TR.14h — procedencia ESTRUCTURAL del tenant (RCC.4.8.b + Gate 1 N-6) ──────────────────────────────
+  await t.test('TR.14h (campañas congeladas) FK compuesta: el tenant del detalle no puede divergir del de su cabecera', async () => {
+    const s = await seedProbeScenario('fk');
+    await eventually(
+      async () => await clientA.rpc('rodeo_serviced_females', { p_rodeo_id: s.rodeo.id, p_year: CC_YEAR }),
+      (res) => res && res.data && res.data.length === 3,
+    );
+    const closed = await closeCampaign(clientA, s.rodeo.id, CC_YEAR, true);
+    assert.equal(closed.error, null, 'cerrada');
+
+    // service_role (que bypassea la RLS) intenta escribir una fila de detalle con OTRO establishment_id:
+    // las FK se enforcen para TODOS los roles, así que la escritura privilegiada tampoco puede desalinear.
+    const bad = await admin.from('rodeo_campaign_snapshot_animals').insert({
+      snapshot_id: closed.data, establishment_id: estB, bucket: 'serviced',
+      animal_profile_id: s.cows[0].profile.id,
+    });
+    assert.notEqual(bad.error, null, 'detalle con tenant distinto al de su cabecera → rechazado');
+    assert.match(pgcode(bad.error), /23503|foreign key/i, 'lo rechaza la FK COMPUESTA (23503), no un test');
+
+    // Las DOS columnas de la FK compuesta son NOT NULL: con MATCH SIMPLE (el default), un NULL en cualquiera
+    // DESACTIVA el chequeo en silencio y la garantía estructural se evapora sin que nada se ponga rojo.
+    const cols = await adminQuery(`
+      select column_name, is_nullable from information_schema.columns
+      where table_schema='public' and table_name='rodeo_campaign_snapshot_animals'
+        and column_name in ('snapshot_id','establishment_id');
+    `);
+    assert.equal(cols.length, 2, 'las 2 columnas de la FK existen');
+    for (const c of cols) assert.equal(c.is_nullable, 'NO', `${c.column_name} es NOT NULL (MATCH SIMPLE)`);
+
+    // TR.14h-bis (Gate 1 N-6): el eslabón de ARRIBA —cabecera ↔ rodeo— NO tiene constraint (DP-33: abajo por
+    // constraint, arriba por test). Invariante sobre TODA fila de la tabla, no solo las de este run.
+    const drift = await adminQuery(`
+      select count(*)::int as n
+      from public.rodeo_campaign_snapshots s
+      join public.rodeos r on r.id = s.rodeo_id
+      where s.establishment_id <> r.establishment_id;
+    `);
+    assert.equal(drift[0].n, 0, 'ninguna cabecera tiene un establishment_id distinto al de su rodeo');
+  });
+
+  // ── TR.14f — el helper de authz con el rol CADUCADO (Gate 1 H-3, BLOQUEANTE) ──────────────────────────
+  await t.test('TR.14f (campañas congeladas) is_owner_or_vet_of: el rol correcto pero caducado tampoco pasa', async () => {
+    // Se testeaba que el rol EQUIVOCADO no pase (TR.14). Faltaba lo simétrico: que el rol CORRECTO pero
+    // caducado tampoco. Sin `ur.active = true` en el helper, un owner revocado seguiría congelando los
+    // reportes del campo del que lo echaron — una escritura irreversible en la práctica.
+    const userGone = await createTestUser('userGone');
+    await assignRoleAsService(userGone.id, estA, 'owner');
+    const clientGone = await getUserClient(userGone.email);
+    const s = await seedProbeScenario('revoked');
+
+    // control de no-vacuidad: con el rol ACTIVO, el status funciona.
+    const okStatus = await campaignStatus(clientGone, s.rodeo.id, CC_YEAR);
+    assert.equal(okStatus.error, null, 'control: con el rol activo, el owner lee el estado');
+
+    // (a) rol desactivado → 42501 en las tres. ORÁCULO GENUINO: si el helper se escribe sin `ur.active`,
+    // este bloque se pone rojo.
+    const { error: deactErr } = await admin.from('user_roles')
+      .update({ active: false }).eq('user_id', userGone.id).eq('establishment_id', estA);
+    assert.equal(deactErr, null, deactErr ? `desactivar rol: ${deactErr.message}` : 'rol desactivado');
+    const gClose = await closeCampaign(clientGone, s.rodeo.id, CC_YEAR, true);
+    assert.match(pgcode(gClose.error), /42501|not authorized/i, 'owner con user_roles.active=false NO cierra');
+    const gReopen = await reopenCampaign(clientGone, s.rodeo.id, CC_YEAR);
+    assert.match(pgcode(gReopen.error), /42501|not authorized/i, 'owner con user_roles.active=false NO reabre');
+    const gStatus = await campaignStatus(clientGone, s.rodeo.id, CC_YEAR);
+    assert.match(pgcode(gStatus.error), /42501|not authorized/i, 'y has_role_in lo rechaza igual para leer');
+
+    // (b) owner de un establecimiento con deleted_at no nulo → 42501.
+    // ⚠ ESTE CASO HOY NO PUEDE FALLAR, y va rotulado (Gate 1 N-4 / RCC.13.5.c.i): la migración 0076
+    // desactiva TODOS los user_roles al soft-deletear un establecimiento y prohíbe reactivarlos, así que el
+    // estado que describe —owner ACTIVO de un campo BORRADO— es INALCANZABLE, ni siquiera por service_role
+    // (son triggers de tabla). El rechazo lo produce `ur.active = false`, no el join a `establishments`, y
+    // pasaría igual si el helper no tuviera ese join. NO se borra ni se disfraza: prueba la cadena de 0076
+    // (soft-delete → rol desactivado → 42501), que es valiosa como test de integración, y se vuelve
+    // load-bearing el día que exista el flujo de restore de campo que 0076 difiere. La única observación
+    // disponible de la cláusula en sí es textual y está en TR.14g.
+    const userDel = await createTestUser('userDel');
+    const clientDel = await getUserClient(userDel.email);
+    const estDel = await createEstablishmentAs(clientDel, `${RUN_TAG} estDel`);
+    const rDel = await createRodeo(clientDel, { establishmentId: estDel, name: 'R del' });
+    const { error: delErr } = await admin.from('establishments')
+      .update({ deleted_at: new Date().toISOString() }).eq('id', estDel);
+    assert.equal(delErr, null, delErr ? `soft-delete est: ${delErr.message}` : 'establecimiento borrado');
+    const dClose = await closeCampaign(clientDel, rDel.id, CC_YEAR, true);
+    assert.match(pgcode(dClose.error), /42501|P0002|not authorized|not found/i,
+      'owner de un establecimiento borrado NO cierra (por 0076, vía ur.active)');
+    const dStatus = await campaignStatus(clientDel, rDel.id, CC_YEAR);
+    assert.notEqual(dStatus.error, null, 'ni lee el estado');
+  });
+
+  // ── TR.14g — guard de CATÁLOGO (no textual salvo donde no hay otra cosa) — RCC.13.5.d ─────────────────
+  await t.test('TR.14g (campañas congeladas) catálogo: security definer, volatilidad y search_path de todo el delta', async () => {
+    const rows = await adminQuery(`
+      select p.proname, p.prosecdef, p.provolatile::text as vol,
+             coalesce(array_to_string(p.proconfig, ','), '') as cfg
+      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'public' and p.proname in (
+        'is_owner_or_vet_of','animal_category_at','campaign_tacto_bounds','campaign_cycle_complete',
+        'campaign_missing_summary','rodeo_campaign_tacto','rodeo_campaign_births','rodeo_campaign_calves',
+        'rodeo_serviced_females','rodeo_repro_denominator','rodeo_pregnancy_kpi','rodeo_calving_kpi',
+        'rodeo_ccl_distribution','rodeo_calving_by_stage','rodeo_weaning_kpi',
+        'close_campaign','reopen_campaign','rodeo_campaign_status')
+      order by 1;
+    `);
+    const by = new Map(rows.map((r) => [r.proname, r]));
+    // search_path fijado en TODAS las funciones del delta (incluidas las puras).
+    for (const [name, r] of by) {
+      assert.match(r.cfg, /search_path/, `${name}: tiene search_path fijado en proconfig`);
+    }
+    // SECURITY DEFINER en todas las que TOCAN DATOS. Las tres puras (campaign_tacto_bounds /
+    // campaign_cycle_complete / campaign_missing_summary) NO son definer a propósito (design §3.2/§4.1-bis:
+    // operan sobre los valores que les pasa el caller, no hay nada que autorizar) y están revocadas de los
+    // tres roles, así que no son alcanzables. La lista de acá es la reconciliación de T48-ε con ese diseño.
+    const mustBeDefiner = ['is_owner_or_vet_of', 'animal_category_at', 'rodeo_campaign_tacto',
+      'rodeo_campaign_births', 'rodeo_campaign_calves', 'rodeo_serviced_females', 'rodeo_repro_denominator',
+      'rodeo_pregnancy_kpi', 'rodeo_calving_kpi', 'rodeo_ccl_distribution', 'rodeo_calving_by_stage',
+      'rodeo_weaning_kpi', 'close_campaign', 'reopen_campaign', 'rodeo_campaign_status'];
+    for (const name of mustBeDefiner) {
+      assert.ok(by.has(name), `${name}: existe`);
+      assert.equal(by.get(name).prosecdef, true, `${name}: SECURITY DEFINER`);
+    }
+    // Volatilidad: las de lectura STABLE; las DOS de escritura NO stable (declararlas STABLE dejaría a
+    // Postgres cachear/reordenar una escritura) y con pg_temp en el search_path.
+    const mustBeStable = ['is_owner_or_vet_of', 'rodeo_serviced_females', 'rodeo_repro_denominator',
+      'rodeo_pregnancy_kpi', 'rodeo_calving_kpi', 'rodeo_ccl_distribution', 'rodeo_calving_by_stage',
+      'rodeo_weaning_kpi', 'rodeo_campaign_status'];
+    for (const name of mustBeStable) assert.equal(by.get(name).vol, 's', `${name}: STABLE`);
+    for (const name of ['close_campaign', 'reopen_campaign']) {
+      assert.notEqual(by.get(name).vol, 's', `${name}: NO es STABLE (escribe)`);
+      assert.match(by.get(name).cfg, /pg_temp/, `${name}: pg_temp explícito y último en el search_path`);
+    }
+
+    // La ÚNICA observación disponible de `e.deleted_at is null` en is_owner_or_vet_of es TEXTUAL, porque su
+    // comportamiento está enmascarado por 0076 (ver TR.14f(b)). La regla del repo ("resolver el valor, no el
+    // texto") existe porque un guard textual se burla escribiendo el valor de otra forma — pero acá no hay
+    // valor que resolver: no hay estado alcanzable en el que la cláusula cambie el resultado. Cuando el
+    // texto es lo único observable, se dice y se usa; fingir cobertura con un test que pasa por otro motivo
+    // sería peor.
+    const src = (await adminQuery(`
+      select pg_get_functiondef((select p.oid from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+        where n.nspname='public' and p.proname='is_owner_or_vet_of')) as src;
+    `))[0].src.toLowerCase();
+    assert.match(src, /ur\.active\s*=\s*true/, 'is_owner_or_vet_of exige ur.active = true');
+    assert.match(src, /join\s+public\.establishments\s+e/, 'is_owner_or_vet_of joinea establishments');
+    assert.match(src, /e\.deleted_at\s+is\s+null/, 'is_owner_or_vet_of exige e.deleted_at is null (0005)');
+    assert.match(src, /ur\.role\s+in\s*\(\s*'owner'\s*,\s*'veterinarian'\s*\)/, 'y el único cambio es el rol');
+
+    // RCC.9.12 / DP-28 — `closed_by_name` sale de `user_roles.member_name` DE ESE ESTABLECIMIENTO y NUNCA de
+    // la tabla global `users`. Mismo caso que la cláusula de arriba: la observación posible es TEXTUAL,
+    // porque "qué tabla lee un cuerpo plpgsql" no está en el catálogo (`pg_depend` no registra las
+    // referencias a tablas dentro de un cuerpo: se resuelven en runtime). Rotulado como tal, igual que el
+    // guard de `session_id` de TR.17 — que es de la misma clase y este repo ya aceptó.
+    const statusSrc = (await adminQuery(`
+      select pg_get_functiondef((select p.oid from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+        where n.nspname='public' and p.proname='rodeo_campaign_status')) as src;
+    `))[0].src.toLowerCase();
+    assert.match(statusSrc, /user_roles/, 'rodeo_campaign_status resuelve el nombre por user_roles');
+    assert.match(statusSrc, /member_name/, 'y por la columna denormalizada member_name (ADR-026 c2 / 0080)');
+    assert.ok(!/\bpublic\.users\b/.test(statusSrc),
+      'y NO lee la tabla global `users` desde un SECURITY DEFINER (RCC.9.12): sería una lectura cross-tenant');
+  });
+
+  // ── TR.14b — grants de FUNCIÓN: las internas no son alcanzables por authenticated (RCC.13.6) ──────────
+  await t.test('TR.14b (campañas congeladas) authenticated NO ejecuta las 7 funciones internas', async () => {
+    const internals = [
+      ['rodeo_campaign_tacto', { p_rodeo_id: crypto.randomUUID(), p_year: CC_YEAR }],
+      ['rodeo_campaign_births', { p_rodeo_id: crypto.randomUUID(), p_year: CC_YEAR }],
+      ['rodeo_campaign_calves', { p_rodeo_id: crypto.randomUUID(), p_year: CC_YEAR }],
+      ['animal_category_at', { p_profile_id: crypto.randomUUID(), p_on: daysAgo(1) }],
+      ['campaign_tacto_bounds', { p_months: [6, 7], p_year: CC_YEAR }],
+      ['campaign_cycle_complete', { p_weaning_status: 'ok', p_pending_weaning: 0, p_state_as_of: daysAgo(1) }],
+      ['campaign_missing_summary', { p_calving_status: 'ok', p_pending_pregnant: 0, p_weaning_status: 'ok', p_pending_weaning: 0 }],
+    ];
+    for (const [fn, args] of internals) {
+      const { error } = await clientA.rpc(fn, args);
+      assert.notEqual(error, null, `${fn}: authenticated NO debe poder ejecutarla (RCC.9.5)`);
+      assert.match(pgcode(error), /permission denied|not find|does not exist|404|PGRST/i, `${fn}: revocada`);
+    }
+    // y el estado del catálogo lo confirma sin depender de cómo responda PostgREST.
+    const priv = await adminQuery(`
+      select p.proname,
+             has_function_privilege('authenticated', p.oid, 'EXECUTE') as auth,
+             has_function_privilege('anon', p.oid, 'EXECUTE') as anon,
+             has_function_privilege('public', p.oid, 'EXECUTE') as pub
+      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname='public' and p.proname in ('rodeo_campaign_tacto','rodeo_campaign_births',
+        'rodeo_campaign_calves','animal_category_at','campaign_tacto_bounds','campaign_cycle_complete',
+        'campaign_missing_summary');
+    `);
+    assert.equal(priv.length, 7, 'las 7 internas existen');
+    for (const p of priv) {
+      assert.equal(p.auth, false, `${p.proname}: sin EXECUTE para authenticated`);
+      assert.equal(p.anon, false, `${p.proname}: sin EXECUTE para anon`);
+      assert.equal(p.pub, false, `${p.proname}: sin EXECUTE para public`);
+    }
+  });
+
+  // ── TR.14c — el cierre NO muta datos de negocio (RCC.5.9 / RCC.13.12) ─────────────────────────────────
+  await t.test('TR.14c (campañas congeladas) close_campaign no toca animales ni eventos', async () => {
+    const s = await seedProbeScenario('nomut');
+    await eventually(
+      async () => await clientA.rpc('rodeo_serviced_females', { p_rodeo_id: s.rodeo.id, p_year: CC_YEAR }),
+      (res) => res && res.data && res.data.length === 3,
+    );
+    const counts = async () => {
+      const { count: p } = await admin.from('animal_profiles').select('id', { count: 'exact', head: true }).eq('establishment_id', estA);
+      const { count: e } = await admin.from('reproductive_events').select('id', { count: 'exact', head: true }).eq('establishment_id', estA);
+      const { count: w } = await admin.from('weight_events').select('id', { count: 'exact', head: true }).eq('establishment_id', estA);
+      return { p, e, w };
+    };
+    const before = await counts();
+    const res = await closeCampaign(clientA, s.rodeo.id, CC_YEAR, true);
+    assert.equal(res.error, null, res.error ? `close: ${res.error.message}` : 'cerró');
+    const after = await counts();
+    assert.deepStrictEqual(after, before, 'el cierre no crea ni borra perfiles, eventos reproductivos ni pesos');
+  });
+
+  // ── TR.15 — historia de membresía (RCC.1.*, RCC.13.7, RCC.13.13) ──────────────────────────────────────
+  await t.test('TR.15 (campañas congeladas) membresía: apertura, movimiento, baja, invariante, backfill, RLS', async () => {
+    const r1 = await createRodeo(clientA, { establishmentId: estA, name: 'R memb 1' });
+    const r2 = await createRodeo(clientA, { establishmentId: estA, name: 'R memb 2' });
+    const rowsOf = async (profileId) => {
+      const { data, error } = await admin.from('rodeo_membership_history')
+        .select('*').eq('animal_profile_id', profileId).order('from_date', { ascending: true });
+      if (error) throw new Error(`rowsOf: ${error.message}`);
+      return data || [];
+    };
+
+    // (1) alta CON entry_date → una fila abierta desde el entry_date.
+    const withEntry = await createAnimal(clientA, { idv: `${RUN_TAG}_mb1`, sex: 'female', birthDate: daysAgo(1800), rodeoId: r1.id, establishmentId: estA, systemId: r1.systemId, categoryCode: 'multipara', entryDate: CC_ENTRY });
+    let rows = await rowsOf(withEntry.profile.id);
+    assert.equal(rows.length, 1, 'alta → 1 fila de membresía');
+    assert.equal(rows[0].from_date, CC_ENTRY, 'from_date = entry_date (RCC.1.4)');
+    assert.equal(rows[0].to_date, null, 'to_date null = vigente');
+    assert.equal(rows[0].rodeo_id, r1.id, 'apunta al rodeo del alta');
+    assert.equal(rows[0].establishment_id, estA, 'establishment_id derivado de la fila padre (RCC.1.12)');
+    assert.equal(rows[0].reason, 'initial', 'reason = initial');
+
+    // (2) alta SIN entry_date → from_date = hoy (created_at::date).
+    const noEntry = await createAnimal(clientA, { idv: `${RUN_TAG}_mb2`, sex: 'female', birthDate: daysAgo(1800), rodeoId: r1.id, establishmentId: estA, systemId: r1.systemId, categoryCode: 'multipara', entryDate: null });
+    rows = await rowsOf(noEntry.profile.id);
+    assert.equal(rows.length, 1, 'alta sin entry_date → 1 fila');
+    assert.equal(rows[0].from_date, daysAgo(0), 'from_date = hoy (coalesce a created_at)');
+
+    // (3) MOVIMIENTO de rodeo → cierra la vigente HOY y abre una nueva HOY.
+    await moveProfileToRodeo(withEntry.profile.id, r2.id);
+    rows = await rowsOf(withEntry.profile.id);
+    assert.equal(rows.length, 2, 'mover → 2 filas');
+    assert.equal(rows[0].to_date, daysAgo(0), 'la vieja se cierra hoy (intervalo medio-abierto)');
+    assert.equal(rows[1].rodeo_id, r2.id, 'la nueva apunta al rodeo destino');
+    assert.equal(rows[1].to_date, null, 'la nueva queda vigente');
+    assert.equal(rows[1].reason, 'move', 'reason = move');
+    // un UPDATE de rodeo_id que NO cambia nada no escribe (is distinct from).
+    await moveProfileToRodeo(withEntry.profile.id, r2.id);
+    assert.equal((await rowsOf(withEntry.profile.id)).length, 2, 'un update que no cambia el rodeo no escribe');
+
+    // (4) BAJA con exit_date → cierra la vigente con to_date = exit_date.
+    const exitDate = daysAgo(3);
+    await sellProfile(noEntry.profile.id, exitDate);
+    rows = await rowsOf(noEntry.profile.id);
+    assert.equal(rows.length, 1, 'la baja no abre filas nuevas');
+    assert.equal(rows[0].to_date, daysAgo(0), 'to_date = greatest(exit_date, from_date) — el CHECK no se viola');
+
+    // (5) INVARIANTE de una sola fila vigente: un segundo `to_date is null` → 23505.
+    const dup = await admin.from('rodeo_membership_history').insert({
+      animal_profile_id: withEntry.profile.id, rodeo_id: r1.id, establishment_id: estA,
+      from_date: daysAgo(0), to_date: null, reason: 'move',
+    });
+    assert.match(pgcode(dup.error), /23505|duplicate key/i, 'dos membresías vigentes a la vez → 23505 (RCC.1.3)');
+
+    // (6) BACKFILL idempotente: re-correrlo acotado al establecimiento no duplica ni una fila.
+    const before = await adminQuery(`select count(*)::int as n from public.rodeo_membership_history h
+      join public.animal_profiles p on p.id = h.animal_profile_id where p.establishment_id = '${estA}';`);
+    await adminQuery(`
+      insert into public.rodeo_membership_history
+        (animal_profile_id, rodeo_id, establishment_id, from_date, to_date, reason, changed_by)
+      select p.id, p.rodeo_id, p.establishment_id,
+             coalesce(p.entry_date, p.created_at::date),
+             case when p.status = 'active' and p.deleted_at is null then null
+                  else greatest(coalesce(p.exit_date, current_date),
+                                coalesce(p.entry_date, p.created_at::date)) end,
+             'backfill', null
+      from public.animal_profiles p
+      where p.establishment_id = '${estA}'
+        and not exists (select 1 from public.rodeo_membership_history h where h.animal_profile_id = p.id);
+    `);
+    const after = await adminQuery(`select count(*)::int as n from public.rodeo_membership_history h
+      join public.animal_profiles p on p.id = h.animal_profile_id where p.establishment_id = '${estA}';`);
+    assert.equal(after[0].n, before[0].n, 'el backfill corrido dos veces NO duplica (RCC.1.8)');
+
+    // (7) RLS: el owner de B no ve las filas de A.
+    const { data: bSees } = await clientB.from('rodeo_membership_history')
+      .select('id').eq('animal_profile_id', withEntry.profile.id);
+    assert.equal((bSees || []).length, 0, 'owner de B no ve la membresía de A (RCC.1.11)');
+
+    // (8) el par CRUZADO entre establecimientos nunca llega a esta tabla: apuntar el rodeo_id de un perfil
+    // de A a un rodeo de B lo rechaza la base con 23514 (tg_animal_profiles_rodeo_check, 0021:25-43). Es lo
+    // que hace que `mh.rodeo_id` no pueda ser una vía de fuga aunque el CTE `member` no filtre tenant — la
+    // frontera de tenant sigue siendo `p.establishment_id = v_est` (§5.5).
+    const rB = await createRodeo(clientB, { establishmentId: estB, name: 'R memb B' });
+    const cross = await admin.from('animal_profiles')
+      .update({ rodeo_id: rB.id }).eq('id', withEntry.profile.id);
+    assert.match(pgcode(cross.error), /23514/i, 'perfil de A apuntado a un rodeo de B → 23514 (0021)');
+  });
+
+  // ── TR.16 — DL10: el dato que llega tarde a una campaña cerrada (RCC.8.*, RCC.13.8) ───────────────────
+  await t.test('TR.16 (campañas congeladas) DL10: el dato tardío entra, no mueve la foto, y se avisa', async () => {
+    const s = await seedProbeScenario('dl10');
+    const t0 = await eventually(
+      async () => await kpiBundle(clientA, s.rodeo.id, CC_YEAR),
+      (b) => b && b.preg.pregnant === 3,
+    );
+    const first = await closeCampaign(clientA, s.rodeo.id, CC_YEAR, true);
+    assert.equal(first.error, null, 'cerrada');
+
+    // (1) el evento de una campaña cerrada NO se rechaza: el offline-first no se rompe (no hay trigger).
+    await seedTacto(clientA, s.cows[0].profile.id, dateOn(CC_YEAR + 1, 2, 15), 'empty');
+
+    // (2) los KPI no se mueven.
+    const t1 = await kpiBundle(clientA, s.rodeo.id, CC_YEAR);
+    assert.deepStrictEqual(t1, t0, 'el dato tardío no mueve la foto');
+
+    // (3) …pero la pantalla se entera.
+    const st = await eventually(
+      async () => await campaignStatus(clientA, s.rodeo.id, CC_YEAR),
+      (r) => r && r.status && r.status.has_new_data === true,
+    );
+    assert.equal(st.status.has_new_data, true, 'has_new_data = true (RCC.8.3)');
+
+    // (4) reabrir + volver a cerrar: AHORA sí lo incorpora, con un snapshot NUEVO y el viejo con reopened_at.
+    const reop = await reopenCampaign(clientA, s.rodeo.id, CC_YEAR);
+    assert.equal(reop.error, null, reop.error ? `reopen: ${reop.error.message}` : 'reabierta');
+    const live = await kpiBundle(clientA, s.rodeo.id, CC_YEAR);
+    assert.equal(live.preg.pregnant, 2, 'reabierta: el KPI en vivo ya incorpora el tacto de la ventana');
+    const second = await closeCampaign(clientA, s.rodeo.id, CC_YEAR, true);
+    assert.equal(second.error, null, 'cerrada de nuevo');
+    assert.notEqual(second.data, first.data, 'el re-cierre crea un snapshot NUEVO (RCC.6.5)');
+    const { data: old } = await admin.from('rodeo_campaign_snapshots').select('reopened_at, reopened_by').eq('id', first.data).single();
+    assert.ok(old.reopened_at, 'el snapshot viejo QUEDA, marcado con reopened_at (RCC.6.3)');
+    assert.ok(old.reopened_by, 'y con reopened_by');
+    const t2 = await kpiBundle(clientA, s.rodeo.id, CC_YEAR);
+    assert.equal(t2.preg.pregnant, 2, 'la foto nueva ya incorpora el dato tardío');
+  });
+
+  // ── TR.17 — regresión "tacto sin jornada" + guard de clase (RCC.12.1, RCC.12.2, RCC.13.11) ────────────
+  await t.test('TR.17 (campañas congeladas) un tacto sin session_id sigue contando + ninguna de las 7 mira session_id', async () => {
+    const r = await createRodeo(clientA, { establishmentId: estA, name: 'R sin jornada' });
+    await setServiceMonths(r.id, CC_MONTHS);
+    const m = await createAnimal(clientA, { idv: `${RUN_TAG}_nosess`, sex: 'female', birthDate: daysAgo(1800), rodeoId: r.id, establishmentId: estA, systemId: r.systemId, categoryCode: 'multipara', entryDate: CC_ENTRY });
+    await backdateCategoryHistory(m.profile.id, CC_ENTRY);
+    await seedTacto(clientA, m.profile.id, dateOn(CC_YEAR, 9, 15), 'large');   // session_id NULL
+    const b = await eventually(
+      async () => await kpiBundle(clientA, r.id, CC_YEAR),
+      (x) => x && x.preg.pregnant === 1,
+    );
+    assert.equal(b.preg.pregnant, 1, 'el tacto SIN jornada cuenta en preñez');
+    assert.equal(b.ccl.total, 1, 'y en la distribución CCL');
+    assert.equal(b.servicedCount, 1, 'y la hembra está en el conjunto servidas');
+
+    // GUARD DE CLASE (se escribe sobre la AUSENCIA): ninguna de las 7 puede referenciar session_id. El delta
+    // `ficha-categoria-tacto` (spec 02) depende de esto; si alguien se lo agrega, esto se pone rojo.
+    const defs = await adminQuery(`
+      select p.proname, pg_get_functiondef(p.oid) as src
+      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname='public' and p.proname in ('rodeo_serviced_females','rodeo_repro_denominator',
+        'rodeo_pregnancy_kpi','rodeo_calving_kpi','rodeo_ccl_distribution','rodeo_calving_by_stage',
+        'rodeo_weaning_kpi');
+    `);
+    assert.equal(defs.length, 7, 'las 7 funciones de campaña existen');
+    for (const d of defs) {
+      assert.ok(!/session_id/i.test(d.src), `${d.proname}: NO referencia session_id (RCC.12.2)`);
+    }
+  });
+
+  // ── TR.19 — guard de AUSENCIA en las sync rules (DL8 / RCC.13.10) ─────────────────────────────────────
+  await t.test('TR.19 (campañas congeladas) las 3 tablas nuevas NO están en sync-streams/rafaq.yaml', async () => {
+    const yamlPath = path.join(REPO_ROOT, 'sync-streams', 'rafaq.yaml');
+    const yaml = fs.readFileSync(yamlPath, 'utf8').toLowerCase();   // case-insensitive (Gate 1 L-3)
+    for (const tbl of ['rodeo_membership_history', 'rodeo_campaign_snapshots', 'rodeo_campaign_snapshot_animals']) {
+      assert.ok(!yaml.includes(tbl), `${tbl} NO debe estar en las sync rules (DL8: no baja a los devices)`);
+    }
+    // Borde declarado: este guard no ve una edición manual en el dashboard de PowerSync. El header del
+    // propio YAML ya declara eso fuera de proceso (los deploys van por scripts/powersync-deploy.sh).
+    //
+    // Y el borde MÁS IMPORTANTE (Gate 2 M-C1): este guard mira el YAML porque **ahí vive la frontera real**.
+    // La publicación `powersync` de este proyecto es FOR ALL TABLES, así que las filas de las 3 tablas SÍ
+    // cruzan al slot de replicación — no hay forma de excluirlas — y lo que las mantiene fuera de los
+    // DEVICES es que ninguna sync stream las nombra (no hay catch-all). Un guard sobre `pg_publication`
+    // sería rojo por diseño y no probaría DL8; este prueba lo que DL8 realmente exige.
+    const pub = await adminQuery(`select pubname, puballtables from pg_publication where pubname = 'powersync';`);
+    assert.equal(pub.length, 1, 'la publicación powersync existe');
+    assert.equal(pub[0].puballtables, true,
+      'la publicación es FOR ALL TABLES: si algún día dejara de serlo, la frontera cambia de capa y este ' +
+      'comentario (y el comment on table de 0127) hay que reescribirlos');
+  });
+
+  // ── TR.20 — consistencia detalle ↔ cabecera (RCC.4.7, RCC.7.2, RCC.13.x) ──────────────────────────────
+  await t.test('TR.20 (campañas congeladas) el detalle por animal ES la evidencia del número congelado', async () => {
+    // Con IA: el detalle tiene que congelar el `source` REAL de cada fila, no un 'natural' fijo (RCC.2.10).
+    const s = await seedProbeScenario('detalle', { withAi: true });
+    const t0 = await eventually(
+      async () => await kpiBundle(clientA, s.rodeo.id, CC_YEAR),
+      (b) => b && b.servicedCount === 4 && b.calv.calved === 1,
+    );
+    const res = await closeCampaign(clientA, s.rodeo.id, CC_YEAR, true);
+    assert.equal(res.error, null, 'cerrada');
+    const snap = await snapshotOf(s.rodeo.id, CC_YEAR);
+
+    const expected = {
+      serviced: snap.serviced, pregnant: snap.pregnant, empty: snap.empty,
+      calved: snap.calved, weaned: snap.weaned,
+    };
+    for (const [bucket, n] of Object.entries(expected)) {
+      const rows = await snapshotDetail(snap.id, bucket);
+      assert.equal(rows.length, n, `bucket ${bucket}: ${rows.length} filas == ${n} congelado (RCC.4.7)`);
+    }
+    // el idv queda CONGELADO en el detalle (sobrevive a la baja del animal).
+    const servicedRows = await snapshotDetail(snap.id, 'serviced');
+    assert.ok(servicedRows.every((x) => x.idv), 'el detalle congela el identificador legible');
+    assert.ok(servicedRows.every((x) => x.establishment_id === estA), 'y el tenant sale de la cabecera');
+    // El `source` se congela TAL CUAL lo devolvió el conjunto servidas: 3 multíparas por la rama natural + 1
+    // ternera por la rama IA. Un detalle que escribiera 'natural' fijo pasaría el test viejo (`every(...)`).
+    assert.equal(servicedRows.filter((x) => x.source === 'natural').length, 3, 'las 3 multíparas, `source` natural');
+    assert.equal(servicedRows.filter((x) => x.source === 'ai').length, 1, 'la ternera de IA, `source` ai (RCC.2.10)');
+    const aiDetail = servicedRows.find((x) => x.source === 'ai');
+    assert.equal(aiDetail.animal_profile_id, s.ai.profile.id, 'y es la que sembró la IA');
+    // el snapshot congeló los parámetros del cómputo (F5 + auditoría).
+    assert.deepStrictEqual(snap.service_months, CC_MONTHS, 'service_months congelados (F5)');
+    assert.equal(snap.state_as_of, CC_CUT, 'la fecha de corte queda auditada (RCC.4.3)');
+    assert.equal(snap.tacto_from, dateOn(CC_YEAR, 6, 1), 'ventana del tacto: desde');
+    assert.equal(snap.tacto_to, dateOn(CC_YEAR + 1, 5, 31), 'ventana del tacto: hasta');
+
+    // con la campaña cerrada, rodeo_serviced_females devuelve EXACTAMENTE `serviced` filas (RCC.7.2) — y son
+    // las del snapshot, no un cómputo en vivo.
+    const { data: sf } = await clientA.rpc('rodeo_serviced_females', { p_rodeo_id: s.rodeo.id, p_year: CC_YEAR });
+    assert.equal((sf || []).length, snap.serviced, 'serviced_females cerrada = el bucket serviced');
+    assert.deepStrictEqual((sf || []).map((x) => x.animal_profile_id).sort(), t0.servicedIds,
+      'y son los MISMOS animales que antes del cierre');
+
+    // ── EL DETALLE SOBREVIVE A LA BAJA DEL ANIMAL (RCC.4.6 + RCC.7.2) ──────────────────────────────────
+    // La FK del detalle es `on delete set null` y NUNCA cascade, y el `idv` queda congelado: borrar un
+    // animal NO puede vaciar un reporte cerrado. Hasta acá el test verificaba que el idv está congelado,
+    // pero ningún test BORRABA un perfil, así que la mitad que importa —que la fila queda y que
+    // `rodeo_serviced_females` sigue devolviendo `serviced` filas, incluida la de `animal_profile_id` nulo—
+    // no tenía oráculo. Se borra la ternera de IA (sus eventos cascadean; no es cría de ningún parto).
+    const victimId = s.ai.profile.id;
+    const victimIdv = servicedRows.find((x) => x.animal_profile_id === victimId).idv;
+    const { error: delErr } = await admin.from('animal_profiles').delete().eq('id', victimId);
+    assert.equal(delErr, null, delErr ? `borrar el perfil: ${delErr.message}` : 'el perfil se borró');
+
+    const after = await snapshotDetail(snap.id, 'serviced');
+    assert.equal(after.length, snap.serviced, 'el detalle NO perdió la fila: sigue teniendo `serviced` filas');
+    const orphan = after.find((x) => x.idv === victimIdv);
+    assert.ok(orphan, 'la fila del animal borrado SIGUE, identificable por su idv congelado (RCC.4.6)');
+    assert.equal(orphan.animal_profile_id, null, 'y su referencia quedó en NULL (`on delete set null`)');
+    assert.equal(orphan.source, 'ai', 'con su `source` intacto');
+
+    const { data: sfAfter } = await clientA.rpc('rodeo_serviced_females', { p_rodeo_id: s.rodeo.id, p_year: CC_YEAR });
+    assert.equal((sfAfter || []).length, snap.serviced,
+      'y la RPC cerrada sigue devolviendo `serviced` filas (RCC.7.2: incluidas las de animal_profile_id nulo)');
+    assert.equal((sfAfter || []).filter((x) => x.animal_profile_id === null).length, 1,
+      'exactamente una fila con animal_profile_id nulo, la del borrado');
+  });
+
+  // =====================================================================
   // TR.10 — transversal: grants (anon/public sin EXECUTE) + read-only + tenant-isolation
   // =====================================================================
   await t.test('TR.10 grants: anon/public NO ejecutan ninguna de las 10 RPC', async () => {
@@ -1047,6 +2413,11 @@ test('reports suite — spec 07 Stream C (RPC de reportes)', async (t) => {
       ['rodeo_weight_by_category', { p_rodeo_id: ghost }],
       ['establishment_overdue_doses', { p_establishment_id: ghost }],
       ['establishment_unweighed', { p_establishment_id: ghost }],
+      // delta campañas congeladas (RCC.9.5/RCC.13.6): las 3 RPC NUEVAS nacen con EXECUTE a PUBLIC por
+      // default de Postgres → el revoke de 0130 es OBLIGATORIO, y esto lo verifica desde afuera.
+      ['close_campaign', { p_rodeo_id: ghost, p_year: thisYear(), p_acknowledge_incomplete: false }],
+      ['reopen_campaign', { p_rodeo_id: ghost, p_year: thisYear() }],
+      ['rodeo_campaign_status', { p_rodeo_id: ghost, p_year: thisYear() }],
     ];
     for (const [fn, args] of calls) {
       const { error } = await anon.rpc(fn, args);
@@ -1087,6 +2458,22 @@ test('reports suite — spec 07 Stream C (RPC de reportes)', async (t) => {
   });
 
   await t.test('cleanup', async () => {
+    const ests = [...createdEstablishmentIds];
     await cleanup();
+    // T57 / higiene: las 3 tablas del delta cascadean por `establishments` (FK on delete cascade), así que
+    // el cleanup() existente no hace falta tocarlo — pero eso es una afirmación, y las afirmaciones se
+    // verifican. Si mañana alguien crea una de estas tablas sin la FK a establishments, esto se pone rojo.
+    if (ests.length > 0) {
+      const list = ests.map((id) => `'${id}'`).join(',');
+      const left = await adminQuery(`
+        select
+          (select count(*)::int from public.rodeo_membership_history where establishment_id in (${list})) as memb,
+          (select count(*)::int from public.rodeo_campaign_snapshots where establishment_id in (${list})) as snaps,
+          (select count(*)::int from public.rodeo_campaign_snapshot_animals where establishment_id in (${list})) as det;
+      `);
+      assert.equal(left[0].memb, 0, 'rodeo_membership_history cascadea con el establecimiento');
+      assert.equal(left[0].snaps, 0, 'rodeo_campaign_snapshots cascadea con el establecimiento');
+      assert.equal(left[0].det, 0, 'rodeo_campaign_snapshot_animals cascadea con el establecimiento');
+    }
   });
 });

@@ -37,13 +37,33 @@ dinámico corriendo bajo `SECURITY INVOKER` con rol de cliente. Es defensa en pr
 puerta abierta — pero deja de ser teórico el día que exista cualquier superficie que ejecute SQL con el rol
 del usuario.
 
-**Precedente en el repo**: `0068:208` ya hizo un `revoke` explícito sobre `user_private`, así que el patrón
-existe y está entendido; simplemente no se generalizó.
+**El precedente del repo NO sirve de molde — corregido 2026-08-07.** La primera versión de esta entrada decía
+que `0068:208` ya aplicaba el patrón sobre `user_private` y que "solo faltaba generalizarlo". **Es falso en
+las dos mitades**, y lo destapó un mutante por sustitución del Gate 2 (correr el assert nuevo contra la tabla
+del precedente) que terminó corrigiendo al propio auditor que lo había citado. Lo verifiqué:
+
+```sql
+revoke insert, delete on public.user_private from authenticated;   -- 0068:207  ← lista ENUMERADA
+revoke all    on public.user_private from anon, public;            -- 0068:208
+```
+
+El revoke a `authenticated` **enumera** `insert, delete`, así que TRUNCATE y UPDATE sobreviven. Medido:
+`user_private` —la tabla de PII de ADR-025— tiene hoy `SELECT, UPDATE, TRUNCATE, REFERENCES, TRIGGER` para
+`authenticated`. Es **34/35** para `anon` (única excepción: `user_private`, por el `revoke all` de la
+segunda línea) y **35/35** para `authenticated`, sin ninguna excepción.
+
+O sea: la única aplicación deliberada del patrón en el repo deja abierto justamente el rol que tiene sesión,
+y generalizar *ese* molde a las 35 tablas no cerraría nada. **Es el mismo bug de clase que esta entrada
+describe**: un `revoke` enumerado deja pasar lo que no enumeró. El molde correcto es el del delta
+`campanas-congeladas` (`revoke all … from public, anon, authenticated` **antes** de los `grant`, sin tocar
+`service_role` ni `powersync_role`), no `0068`.
 
 **Próximo paso**: no se resuelve dentro del delta de reportes (ahí solo se cubren sus 3 tablas nuevas, con un
-assert que resuelva el **ACL real** y no `pg_policies`, que es ciego a esto). Lo que corresponde es una
-migración de barrido + un guard escrito **sobre la ausencia**: que toda tabla nueva de `public` nazca en rojo
-si no revoca. Evaluar de paso `anon` y si el `service_role=Dxtm` tiene sentido.
+assert que resuelve el **ACL real** vía `has_table_privilege` — `pg_policies` es ciego a esto). Lo que
+corresponde es una migración de barrido sobre las 35 + **corregir `user_private`** + un guard escrito **sobre
+la ausencia**: que toda tabla nueva de `public` nazca en rojo si no revoca, y que el assert fije el ACL
+completo y no una lista enumerada (si no, se reintroduce el mismo defecto en el guard). Evaluar de paso si
+`service_role=Dxtm` tiene sentido.
 
 ## 2026-08-07 — el `tacto_vaquillona` se lee "Reproducción" en el timeline (no tiene label propio)
 

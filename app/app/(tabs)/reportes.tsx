@@ -20,6 +20,8 @@
 import { useCallback, useMemo, useState } from 'react';
 import { Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { useStickStatusSurface } from '@/hooks/useStickStatusSurface';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { ScrollView, Text, View, XStack, YStack, getTokenValue } from 'tamagui';
 import { ChevronLeft, ChevronRight, CalendarRange, FileText, GitCompare } from 'lucide-react-native';
@@ -37,6 +39,8 @@ import {
   ReportOffline,
   ReportError,
   ReportEmpty,
+  CampaignStateBar,
+  CampaignCloseSheet,
   type AlertItem,
 } from '@/components/reports';
 import { useEstablishment, useRodeo } from '@/contexts';
@@ -44,8 +48,10 @@ import {
   useRodeoKpis,
   useEstablishmentAlerts,
   useRodeoSessions,
+  useCampaignStatus,
   reportView,
   type ReportPhase,
+  type BulkCloseResult,
 } from '@/hooks/use-reports';
 import {
   safePercent,
@@ -54,6 +60,8 @@ import {
   cclBarsForMonths,
   calvingCardView,
   weaningCardView,
+  campaignStateView,
+  campaignCclMonths,
   defaultCampaignYear,
   animalLabel,
   daysSinceLabel,
@@ -63,6 +71,14 @@ import { describeServicePeriod } from '@/utils/service-months';
 import { buttonA11y } from '@/utils/a11y';
 
 export default function ReportesScreen() {
+  // ── ESTA PANTALLA SE QUEDA CON LA BANDA DEL CHROME (2026-08-06) ──────────────────────────────────
+  // El indicador global del bastón flota DEBAJO de la fila del header, a la derecha. Acá esa banda la
+  // ocupa el selector de rodeo a ancho completo, que arranca pegado al título — MEDIDO por el sondeo de
+  // `e2e/baston-indicador-unico.spec.ts`: el indicador (x=[354,394] y=[66,106]) caía ENCIMA del control
+  // "Elegir el rodeo a reportar". Reclama el lugar mientras está enfocada; el estado del bastón no hace
+  // falta acá (esta pantalla no lee caravanas) y sigue disponible en "Más" y en la pantalla de conexión.
+  useStickStatusSurface('screen-band');
+
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { state: estState } = useEstablishment();
@@ -95,6 +111,28 @@ export default function ReportesScreen() {
   const kpis = useRodeoKpis(rodeoId, year);
   const alerts = useEstablishmentAlerts(establishmentId);
 
+  // ── Delta CAMPAÑAS CONGELADAS: estado de la campaña + cierre/reapertura ──────────────────────────
+  // Al cerrar o reabrir, los 6 KPI se recargan JUNTO con el estado: la campaña recién cerrada pasa a
+  // leerse del snapshot y los números tienen que coincidir con los que estaban en pantalla. Si no
+  // coincidieran, se ve en el acto — que es exactamente lo que queremos que pase.
+  const reloadKpis = useCallback(() => {
+    kpis.pregnancy.reload();
+    kpis.calving.reload();
+    kpis.weaning.reload();
+    kpis.ccl.reload();
+    kpis.calvingByStage.reload();
+    kpis.weight.reload();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rodeoId, year]);
+  const campaign = useCampaignStatus(rodeoId, year, reloadKpis);
+  const campaignView = useMemo(() => campaignStateView(campaign.status.data ?? null), [campaign.status.data]);
+
+  const [closeSheetOpen, setCloseSheetOpen] = useState(false);
+  // El reconocimiento del ciclo incompleto NO se ofrece de entrada: recién cuando el server rechazó el
+  // primer intento (RCC.10.7.a). Se resetea al abrir/cerrar la hoja.
+  const [ackAvailable, setAckAvailable] = useState(false);
+  const [bulkResult, setBulkResult] = useState<BulkCloseResult | null>(null);
+
   // Recargar al ENFOCAR (volver de la ficha / resumen) — refresh silencioso de las secciones.
   useFocusEffect(
     useCallback(() => {
@@ -106,8 +144,53 @@ export default function ReportesScreen() {
       kpis.weight.reload();
       alerts.overdue.reload();
       alerts.unweighed.reload();
+      campaign.status.reload();
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [rodeoId, year, establishmentId]),
+  );
+
+  const openCloseSheet = useCallback(() => {
+    setAckAvailable(false);
+    setBulkResult(null);
+    setCloseSheetOpen(true);
+  }, []);
+
+  const handleConfirmClose = useCallback(
+    async (acknowledge: boolean) => {
+      const res = await campaign.closeAction(acknowledge);
+      if (res.ok) {
+        setCloseSheetOpen(false);
+        setAckAvailable(false);
+        return;
+      }
+      // `conflict` = 23514. Lo RECONOCIBLE se distingue por el estado (§5.C), NUNCA por el texto del
+      // error: `canClose` refleja los tres gates duros del server, así que si es falso el rechazo vino de
+      // G1/G2 y no hay reintento posible — ofrecer el reconocimiento ahí sería entrenar al usuario a
+      // clickear el control que existe para proteger el cierre a medias.
+      const st = campaign.status.data;
+      if (res.error.kind === 'conflict' && st && st.canClose && !st.cycleComplete) {
+        setAckAvailable(true);
+        return;
+      }
+      setCloseSheetOpen(false);
+    },
+    [campaign],
+  );
+
+  const handleCloseAll = useCallback(
+    async (acknowledge: boolean) => {
+      const targets =
+        acknowledge && bulkResult
+          ? bulkResult.incomplete.map((r) => ({ id: r.id, name: r.name }))
+          : rodeos.map((r) => ({ id: r.id, name: r.name }));
+      const res = await campaign.closeAllAction(targets, acknowledge);
+      setBulkResult((prev) =>
+        acknowledge && prev
+          ? { ok: [...prev.ok, ...res.ok], incomplete: res.incomplete, failed: [...prev.failed, ...res.failed] }
+          : res,
+      );
+    },
+    [bulkResult, rodeos, campaign],
   );
 
   const goToAnimal = useCallback(
@@ -142,8 +225,14 @@ export default function ReportesScreen() {
   }
 
   const rodeoOptions = rodeos.map((r) => ({ value: r.id, label: r.name }));
+  const campaignStatus = campaign.status.data ?? null;
+  // RCC.10.4 / F5: con la campaña CERRADA, las barras del CCL se dibujan con los `service_months`
+  // CONGELADOS del snapshot, no con los del rodeo de hoy. La regla vive en `campaignCclMonths` (pura y
+  // testeada): NO es un `??` encadenado — un `serviceMonths` congelado en `null` tiene que ganar igual.
+  const cclMonths = campaignCclMonths(campaignStatus, selectedRodeo?.serviceMonths ?? null);
 
   return (
+    <>
     <Shell insets={insets}>
       {/* Selector de RODEO. */}
       <YStack gap="$2">
@@ -168,12 +257,32 @@ export default function ReportesScreen() {
       {/* Selector de CAMPAÑA (año). */}
       <YearStepper year={year} onChange={(y) => setPickedYear(y)} />
 
-      {/* REPRODUCTIVO */}
-      <ReportSectionHeader title="Reproductivo" hint={`Campaña ${year} · base servidas`} />
+      {/* ESTADO DE CAMPAÑA — va ENTRE el stepper y los números a propósito: es el marco de
+          interpretación de todo lo que viene abajo (nadie debería ver un 89 % sin saber si es una foto o
+          un número vivo). */}
+      <CampaignStateBar
+        view={campaignView}
+        busy={campaign.busy}
+        onClose={openCloseSheet}
+        onReopen={() => void campaign.reopenAction()}
+      />
+      {campaign.actionError ? <InfoNote>{campaign.actionError.message}</InfoNote> : null}
+
+      {/* REPRODUCTIVO. El hint repite el estado para que siga visible al scrollear — pero MIENTRAS NO SE
+          SABE no dice ni "foto" ni "en curso": califica los números tanto como el título de la barra, así que
+          se calla por el mismo motivo (H-1). */}
+      <ReportSectionHeader
+        title="Reproductivo"
+        hint={
+          campaignView.badge === 'desconocido'
+            ? `Campaña ${year} · base servidas`
+            : `Campaña ${year} · ${campaignStatus?.isClosed ? 'foto' : 'en curso'} · base servidas`
+        }
+      />
       <ReproSection
         rodeoId={rodeoId}
         year={year}
-        serviceMonths={selectedRodeo?.serviceMonths ?? null}
+        serviceMonths={cclMonths}
         kpis={kpis}
         onConfigure={() =>
           selectedRodeo
@@ -221,6 +330,28 @@ export default function ReportesScreen() {
 
       <View height={getTokenValue('$6', 'space')} />
     </Shell>
+
+    {/* Confirmación del cierre (RCC.10.7). Va como HERMANO del Shell —no adentro del ScrollView— para
+        que el scrim cubra la pantalla entera. NO toca el header ni el Shell. */}
+    {closeSheetOpen ? (
+      <CampaignCloseSheet
+        year={year}
+        rodeoName={selectedRodeo?.name ?? ''}
+        cycleComplete={campaignStatus?.cycleComplete ?? false}
+        missing={campaignView.missing}
+        acknowledgeAvailable={ackAvailable}
+        busy={campaign.busy}
+        rodeoCount={rodeos.length}
+        bulkResult={bulkResult}
+        onConfirm={(ack) => void handleConfirmClose(ack)}
+        onCloseAll={(ack) => void handleCloseAll(ack)}
+        onCancel={() => {
+          setCloseSheetOpen(false);
+          setAckAvailable(false);
+        }}
+      />
+    ) : null}
+    </>
   );
 }
 

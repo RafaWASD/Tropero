@@ -36,7 +36,7 @@ import {
  * `network`/`server` = fallo de red post-online-check o error del servidor (R7.2.4: reintentable).
  */
 export type ReportError = {
-  kind: 'offline' | 'network' | 'server' | 'forbidden' | 'validation';
+  kind: 'offline' | 'network' | 'server' | 'forbidden' | 'validation' | 'conflict';
   message: string;
 };
 
@@ -166,6 +166,12 @@ function mapRpcError(error: unknown): ReportError {
   if (code === '22023') {
     return { kind: 'validation', message: 'Parámetro de reporte fuera de rango.' };
   }
+  // delta campañas congeladas (§5.C): `23514` = precondición de cierre/reapertura. Tres orígenes posibles,
+  // y el cliente NO los distingue por el texto del mensaje sino por `canClose`/`cycleComplete` de
+  // `rodeo_campaign_status` (parsear el mensaje del server es exactamente lo que la spec evita).
+  if (code === '23514') {
+    return { kind: 'conflict', message: 'El estado de la campaña no permite esta operación.' };
+  }
   // supabase-js, ante un fallo de red (sin respuesta), deja un error sin `code` con un message de fetch.
   if (code === '' && /fetch|network|Failed to fetch|conexión|timeout/i.test(rawMsg)) {
     return { kind: 'network', message: 'No se pudo conectar. Revisá tu conexión y reintentá.' };
@@ -192,6 +198,23 @@ async function callRpcRows<TRow, TOut>(
 
   const rows = (Array.isArray(data) ? data : data == null ? [] : [data]) as TRow[];
   return { ok: true, value: rows.map(mapRow) };
+}
+
+/**
+ * Variante para las RPC que devuelven un ESCALAR (`returns uuid`): `close_campaign` / `reopen_campaign`.
+ * Conserva el `assertOnline` ANTES de la llamada — de ahí sale DL9 (el cierre es online-only) sin código
+ * extra: sin red no se dispara la RPC y la UI muestra "necesitás conexión".
+ */
+async function callRpcScalar<T>(
+  rpcName: string,
+  args: Record<string, unknown>,
+): Promise<ReportResult<T | null>> {
+  const off = assertOnline(OFFLINE_MSG);
+  if (off) return { ok: false, error: { kind: 'offline', message: OFFLINE_MSG } };
+
+  const { data, error } = await supabase.rpc(rpcName, args);
+  if (error) return { ok: false, error: mapRpcError(error) };
+  return { ok: true, value: (data ?? null) as T | null };
 }
 
 /** Variante para las RPC que devuelven UN row (KPIs): toma la primera fila o `null` si vino vacío. */
@@ -383,6 +406,106 @@ export function fetchOverdueDoses(
     productName: r.product_name,
     nextDoseDate: r.next_dose_date,
   }));
+}
+
+// ─── Delta CAMPAÑAS CONGELADAS: estado de campaña + cierre + reapertura ─────────────────────────────
+
+/**
+ * Estado de la campaña (rodeo, año) — `rodeo_campaign_status` (RCC.7.6/7.7). Es lo que decide TODA la
+ * presentación de la barra de estado: si la campaña es una FOTO o un número vivo, si se cerró a medias y
+ * qué faltaba, si llegaron datos nuevos después del cierre, y qué acciones ofrecer.
+ *
+ * `canClose` refleja los TRES gates duros del server (rol · la fecha de corte ya ocurrió · hay al menos una
+ * hembra servida): la UI nunca ofrece un cierre que el server va a rechazar, ni el reconocimiento que
+ * vendría después (§5.C / RCC.7.6.a).
+ */
+export type CampaignStatus = {
+  isClosed: boolean;
+  snapshotId: string | null;
+  closedAt: string | null;
+  closedBy: string | null;
+  closedByName: string | null;
+  /** F8: se cerró con el ciclo incompleto y alguien lo reconoció explícitamente. */
+  closedIncomplete: boolean;
+  /** F8: descriptor de lo que faltaba AL CERRAR (texto del server, congelado en el snapshot). */
+  missingAtClose: string | null;
+  /** F5: con la campaña cerrada son los CONGELADOS, no los del rodeo de hoy (RCC.10.4). */
+  serviceMonths: number[] | null;
+  nMonths: number;
+  stateAsOf: string | null;
+  pendingPregnant: number;
+  pendingWeaning: number;
+  /** Descriptor de lo que falta HOY, armado por el server (fallback; la UI arma el suyo en es-AR). */
+  missingSummary: string | null;
+  canClose: boolean;
+  canReopen: boolean;
+  cycleComplete: boolean;
+  hasNewData: boolean;
+};
+
+type CampaignStatusRow = {
+  is_closed: boolean; snapshot_id: string | null;
+  closed_at: string | null; closed_by: string | null; closed_by_name: string | null;
+  closed_incomplete: boolean; missing_at_close: string | null;
+  service_months: number[] | null; n_months: number | string; state_as_of: string | null;
+  pending_pregnant: number | string; pending_weaning: number | string; missing_summary: string | null;
+  can_close: boolean; can_reopen: boolean; cycle_complete: boolean; has_new_data: boolean;
+};
+
+/** Estado de la campaña seleccionada. `null` si la RPC no trajo fila (defensivo). */
+export function fetchCampaignStatus(
+  rodeoId: string,
+  year: number,
+): Promise<ReportResult<CampaignStatus | null>> {
+  return callRpcSingle<CampaignStatusRow, CampaignStatus>(
+    'rodeo_campaign_status',
+    { p_rodeo_id: rodeoId, p_year: year },
+    (r) => ({
+      isClosed: !!r.is_closed,
+      snapshotId: r.snapshot_id,
+      closedAt: r.closed_at,
+      closedBy: r.closed_by,
+      closedByName: r.closed_by_name,
+      closedIncomplete: !!r.closed_incomplete,
+      missingAtClose: r.missing_at_close,
+      serviceMonths: Array.isArray(r.service_months) ? r.service_months.map((m) => toNum(m)) : null,
+      nMonths: toNum(r.n_months),
+      stateAsOf: r.state_as_of,
+      pendingPregnant: toNum(r.pending_pregnant),
+      pendingWeaning: toNum(r.pending_weaning),
+      missingSummary: r.missing_summary,
+      canClose: !!r.can_close,
+      canReopen: !!r.can_reopen,
+      cycleComplete: !!r.cycle_complete,
+      hasNewData: !!r.has_new_data,
+    }),
+  );
+}
+
+/**
+ * Congela la campaña (RCC.5.1). Devuelve el id del snapshot vigente (idempotente: si ya estaba cerrada,
+ * devuelve el existente sin escribir).
+ *
+ * `acknowledgeIncomplete` **NO tiene default a propósito** (§7.1): el `p_acknowledge_incomplete` de SQL sí
+ * lo tiene (compatibilidad de PostgREST), pero un default en el wrapper de TypeScript sería inofensivo hoy
+ * y catastrófico y silencioso el día que alguien lo cambie a `true` en un refactor. Sin default, el
+ * compilador obliga a decidir en cada call site.
+ */
+export function closeCampaign(
+  rodeoId: string,
+  year: number,
+  acknowledgeIncomplete: boolean,
+): Promise<ReportResult<string | null>> {
+  return callRpcScalar<string>('close_campaign', {
+    p_rodeo_id: rodeoId,
+    p_year: year,
+    p_acknowledge_incomplete: acknowledgeIncomplete,
+  });
+}
+
+/** Reabre la campaña (RCC.6.1). Devuelve el id del snapshot reabierto, o `null` si ya estaba abierta. */
+export function reopenCampaign(rodeoId: string, year: number): Promise<ReportResult<string | null>> {
+  return callRpcScalar<string>('reopen_campaign', { p_rodeo_id: rodeoId, p_year: year });
 }
 
 /**

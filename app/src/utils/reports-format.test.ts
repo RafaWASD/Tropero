@@ -30,6 +30,10 @@ import {
   asWeaningStatus,
   WEANING_PENDING_LEGEND,
   SESSION_EVENT_KINDS,
+  campaignStateView,
+  campaignCclMonths,
+  campaignCloseActions,
+  type CampaignStatusLike,
 } from './reports-format';
 
 // ─── safePercent: guard de 0 (R7.5.4 / R7.6.3) ──────────────────────────────────────────────────────
@@ -520,4 +524,250 @@ test('defaultCampaignYear: ignora fechas inválidas, toma el máximo año válid
     defaultCampaignYear([null, '2023-01-01T00:00:00Z', 'basura', '2022-12-01T00:00:00Z'], 2026),
     2023,
   );
+});
+
+// ─── campaignStateView: el estado de campaña (delta campañas congeladas, RCC.10.3) ──────────────────
+//
+// Es la única lógica de presentación del delta, y la pantalla no tiene ninguna: si esta función se
+// equivoca, la UI ofrece cerrar una campaña que el server va a rechazar (que es el modo de falla que
+// Gate 1 N-3 encontró) o esconde que un número es una foto sacada a medias.
+
+const openStatus: CampaignStatusLike = {
+  isClosed: false, closedAt: null, closedByName: null, closedIncomplete: false, missingAtClose: null,
+  pendingPregnant: 2, pendingWeaning: 5, canClose: true, canReopen: false, cycleComplete: false,
+  hasNewData: false,
+};
+const closedStatus: CampaignStatusLike = {
+  isClosed: true, closedAt: '2026-03-14', closedByName: null, closedIncomplete: false, missingAtClose: null,
+  pendingPregnant: 0, pendingWeaning: 0, canClose: false, canReopen: true, cycleComplete: true,
+  hasNewData: false,
+};
+
+test('campaignStateView: en curso sin sugerencia → ofrece cerrar, sin aviso', () => {
+  const v = campaignStateView(openStatus);
+  assert.equal(v.badge, 'en-curso');
+  assert.equal(v.title, 'Campaña en curso');
+  assert.equal(v.detail, 'Los números se actualizan con cada dato nuevo');
+  assert.equal(v.notice, null);
+  assert.equal(v.primaryAction, 'close');
+  assert.equal(v.tone, 'neutral');
+});
+
+test('campaignStateView: en curso con el ciclo completo → sugiere cerrar (D1)', () => {
+  const v = campaignStateView({ ...openStatus, cycleComplete: true, pendingPregnant: 0, pendingWeaning: 0 });
+  assert.equal(v.notice, 'El ciclo de esta campaña está completo. ¿La cerrás?');
+  assert.equal(v.primaryAction, 'close');
+  assert.equal(v.tone, 'info');
+});
+
+test('campaignStateView: cerrada → dice que es una FOTO y con qué fecha (es-AR)', () => {
+  const v = campaignStateView(closedStatus);
+  assert.equal(v.badge, 'cerrada');
+  assert.equal(v.title, 'Campaña cerrada');
+  assert.equal(v.detail, 'Foto del 14/03/2026');
+  assert.equal(v.notice, null);
+  assert.equal(v.primaryAction, 'reopen');
+});
+
+test('campaignStateView: cerrada con autor → lo nombra en el detalle', () => {
+  const v = campaignStateView({ ...closedStatus, closedByName: 'Facundo' });
+  assert.equal(v.detail, 'Foto del 14/03/2026 · la cerró Facundo');
+});
+
+test('campaignStateView: cerrada A MEDIAS → badge + aviso de qué faltaba (F8/RCC.10.11)', () => {
+  const v = campaignStateView({
+    ...closedStatus, closedIncomplete: true, missingAtClose: '2 preñadas sin parir · 5 crías sin destetar',
+  });
+  assert.equal(v.badge, 'cerrada-a-medias');
+  assert.equal(v.title, 'Campaña cerrada a medias');
+  assert.equal(v.detail, 'Foto del 14/03/2026');
+  assert.equal(
+    v.notice,
+    'Se cerró con 2 preñadas sin parir · 5 crías sin destetar. Los números no incluyen eso.',
+  );
+  assert.equal(v.tone, 'warning');
+});
+
+test('campaignStateView: cerrada con datos nuevos → avisa y ofrece reabrir (DL10)', () => {
+  const v = campaignStateView({ ...closedStatus, hasNewData: true });
+  assert.equal(v.notice, 'Hay datos nuevos sin reflejar en la foto. Reabrí la campaña para incorporarlos.');
+  assert.equal(v.primaryAction, 'reopen');
+  assert.equal(v.tone, 'info');
+});
+
+test('campaignStateView: cerrada a medias Y con datos nuevos → los DOS avisos, uno por línea', () => {
+  const v = campaignStateView({
+    ...closedStatus, closedIncomplete: true, missingAtClose: '5 crías sin destetar', hasNewData: true,
+  });
+  const lines = String(v.notice).split('\n');
+  assert.equal(lines.length, 2, 'son dos hechos distintos: ninguno reemplaza al otro');
+  assert.match(lines[0], /Se cerró con 5 crías sin destetar/);
+  assert.match(lines[1], /Hay datos nuevos sin reflejar en la foto/);
+});
+
+test('campaignStateView: SIN permiso pero cerrada a medias → el aviso SÍ se muestra, la acción no', () => {
+  // RCC.10.11 + RCC.10.8: "cerrada a medias" es información del reporte, no una acción. El field_operator
+  // tiene que poder ver que ese número se congeló antes de que terminara la parición.
+  const v = campaignStateView({
+    ...closedStatus, canReopen: false, closedIncomplete: true, missingAtClose: '5 crías sin destetar',
+  });
+  assert.equal(v.primaryAction, null, 'sin permiso no se ofrece reabrir');
+  assert.match(String(v.notice), /Se cerró con 5 crías sin destetar/, 'pero el aviso se muestra igual');
+  assert.equal(v.badge, 'cerrada-a-medias');
+});
+
+test('campaignStateView: canClose=false con el ciclo incompleto → NO ofrece cerrar ni reconocer (N-3)', () => {
+  // `canClose` refleja los TRES gates duros del server (rol · corte ya ocurrido · serviced > 0). Ofrecer el
+  // cierre acá lleva al usuario a un 23514 que NO es reconocible, y de ahí a clickear "cerrar igual con
+  // estos datos incompletos" — que también falla. Eso degrada a ruido el control que protege DP-10.
+  const v = campaignStateView({ ...openStatus, canClose: false, cycleComplete: false });
+  assert.equal(v.primaryAction, null);
+  assert.equal(v.notice, null, 'ni siquiera se sugiere');
+});
+
+test('campaignStateView: canClose=false con el ciclo completo → tampoco sugiere cerrar', () => {
+  const v = campaignStateView({ ...openStatus, canClose: false, cycleComplete: true });
+  assert.equal(v.primaryAction, null);
+  assert.equal(v.notice, null);
+  assert.equal(v.tone, 'neutral');
+});
+
+test('campaignStateView: `missing` enumera en es-AR, con singular y plural', () => {
+  assert.deepEqual(campaignStateView(openStatus).missing, ['2 preñadas sin parir', '5 crías sin destetar']);
+  assert.deepEqual(
+    campaignStateView({ ...openStatus, pendingPregnant: 1, pendingWeaning: 0 }).missing,
+    ['1 preñada sin parir'],
+  );
+  assert.deepEqual(
+    campaignStateView({ ...openStatus, pendingPregnant: 0, pendingWeaning: 1 }).missing,
+    ['1 cría sin destetar'],
+  );
+  assert.deepEqual(campaignStateView({ ...openStatus, pendingPregnant: 0, pendingWeaning: 0 }).missing, []);
+});
+
+test('campaignStateView: status null → NO afirma (badge desconocido), sin fecha ni acciones', () => {
+  // Este test se llamaba "no afirma nada" y asserteaba `badge: 'en-curso'` + `title: 'Campaña en curso'`.
+  // O sea: verificaba la afirmación que su nombre prometía que no existía, y con eso CONGELABA el defecto.
+  // Ahora asserta la AUSENCIA de afirmación, que es lo que el nombre dice.
+  const v = campaignStateView(null);
+  assert.equal(v.badge, 'desconocido', 'ni en curso ni cerrada: TODAVÍA NO SE SABE');
+  assert.notEqual(v.badge, 'en-curso', 'sin estado NO se puede decir que la campaña está en curso');
+  assert.equal(v.title, 'Campaña', 'título neutro: no califica los números de abajo');
+  assert.ok(!/en curso|cerrada|foto/i.test(v.title), 'el título no afirma ningún estado');
+  assert.equal(v.detail, null, 'sin fecha de foto: no hay foto que fechar');
+  assert.equal(v.notice, null);
+  assert.equal(v.primaryAction, null, 'no se ofrece cerrar ni reabrir algo cuyo estado se desconoce');
+  assert.deepEqual(v.missing, []);
+});
+
+test('campaignStateView: un estado CONOCIDO nunca queda en `desconocido`', () => {
+  // Control de no-vacuidad del test de arriba: si alguien "arreglara" el badge devolviendo siempre
+  // `desconocido`, esto se pone rojo.
+  assert.equal(campaignStateView(openStatus).badge, 'en-curso');
+  assert.equal(campaignStateView(closedStatus).badge, 'cerrada');
+  assert.equal(
+    campaignStateView({ ...closedStatus, closedIncomplete: true, missingAtClose: '1 cría sin destetar' }).badge,
+    'cerrada-a-medias',
+  );
+});
+
+// ─── campaignCclMonths: con qué meses se dibujan las barras del CCL (RCC.10.4 / F5) ─────────────────
+
+test('campaignCclMonths: campaña ABIERTA → los meses del rodeo de hoy', () => {
+  assert.deepEqual(campaignCclMonths({ ...openStatus, serviceMonths: [1, 2] }, [6, 7]), [6, 7]);
+  assert.deepEqual(campaignCclMonths(null, [6, 7]), [6, 7]);
+  assert.equal(campaignCclMonths(null, null), null);
+});
+
+test('campaignCclMonths: campaña CERRADA → los meses CONGELADOS, no los del rodeo de hoy (F5)', () => {
+  // El productor editó la estación después de cerrar: la foto NO puede cambiar de número de barras.
+  assert.deepEqual(campaignCclMonths({ ...closedStatus, serviceMonths: [6, 7] }, [10, 11, 12]), [6, 7]);
+});
+
+test('campaignCclMonths: cerrada con `serviceMonths` NULL → NULL, NO los del rodeo (el caso que mata al `??`)', () => {
+  // Una campaña cerrada SIN estación configurada congela `service_months = null`. Escrito como
+  // `campaign?.serviceMonths ?? rodeo?.serviceMonths` —que es la forma natural y la que tenía la pantalla—
+  // ese null cae al valor de HOY y la foto vuelve a depender del presente: F5 reintroducida por un `??`.
+  assert.equal(campaignCclMonths({ ...closedStatus, serviceMonths: null }, [10, 11, 12]), null);
+  assert.equal(campaignCclMonths({ ...closedStatus }, [10, 11, 12]), null, 'sin la clave, igual: la foto manda');
+});
+
+test('campaignStateView: `closedAt` con la forma REAL del contrato (timestamptz) usa el día LOCAL', () => {
+  // El fixture de los otros casos usa '2026-03-14' (date-only), pero `rodeo_campaign_status.closed_at` es
+  // **timestamptz**: con ese fixture, el mutante "formatear el instante con getters UTC en vez de locales"
+  // —el drift de −1 día que la convención es-AR existe para evitar— NO se puede matar. Este caso lo cierra.
+  // La expectativa se COMPUTA con los getters locales en vez de hardcodearse: hardcodear '14/03/2026' sería
+  // verde en Argentina y rojo en un runner UTC, o sea un test que depende del huso del que lo corre.
+  const iso = '2026-03-15T01:30:00Z';
+  const d = new Date(iso);
+  const esperado = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+  const v = campaignStateView({ ...closedStatus, closedAt: iso, closedByName: null });
+  assert.equal(v.detail, `Foto del ${esperado}`);
+  assert.ok(!/T01:30|Z|2026-03/.test(String(v.detail)), 'nunca el ISO crudo');
+});
+
+// ─── campaignCloseActions: qué controles ofrece la hoja, y con qué peso (Gate 2.5) ──────────────────
+
+const baseActions = { cycleComplete: false, acknowledgeAvailable: false, rodeoCount: 1, incompleteCount: 0, busy: false };
+
+test('campaignCloseActions: sin rechazo previo → UN primario, que es el cierre sin reconocimiento', () => {
+  const a = campaignCloseActions(baseActions);
+  const primary = a.filter((x) => x.kind === 'primary');
+  assert.equal(primary.length, 1, 'exactamente un control con peso de primario');
+  assert.equal(primary[0].id, 'close');
+  assert.equal(primary[0].acknowledge, false, 'el primer intento NUNCA reconoce nada');
+  assert.equal(a.at(-1).id, 'cancel', 'y siempre hay salida');
+});
+
+test('campaignCloseActions: TRAS EL RECHAZO no queda NINGÚN primario, y el intento que falló desaparece', () => {
+  // El invariante de Gate 2.5. El botón relleno "Cerrar campaña" manda `onConfirm(false)`, que es
+  // exactamente lo que el server acaba de rechazar: dejarlo como la acción de más peso visual y mejor
+  // target de Fitts es ofrecer, con el control más atractivo de la pantalla, la única cosa que no puede
+  // funcionar. Y dos labels que arrancan igual, pegados, uno relleno y otro no, es un slip esperando pasar.
+  const a = campaignCloseActions({ ...baseActions, acknowledgeAvailable: true });
+  assert.deepEqual(a.filter((x) => x.kind === 'primary'), [], 'ningún control primario');
+  assert.deepEqual(a.filter((x) => x.id === 'close'), [], 'el intento sin reconocimiento ya no se ofrece');
+  const ack = a.find((x) => x.id === 'close-ack');
+  assert.ok(ack, 'el reconocimiento SÍ se ofrece');
+  assert.equal(ack.acknowledge, true);
+  assert.equal(ack.kind, 'secondary', 'reconocer es deliberado: contorno, nunca relleno');
+});
+
+test('campaignCloseActions: ninguna acción que RECONOZCA puede tener peso de primario', () => {
+  // Barre el espacio de estados en vez de un caso: el reconocimiento no puede volverse el héroe visual
+  // por ningún camino (DP-10).
+  for (const ackAvail of [false, true]) {
+    for (const rodeoCount of [1, 4]) {
+      for (const incompleteCount of [0, 2]) {
+        const a = campaignCloseActions({ ...baseActions, acknowledgeAvailable: ackAvail, rodeoCount, incompleteCount });
+        for (const x of a.filter((y) => y.acknowledge === true)) {
+          assert.notEqual(x.kind, 'primary', `${x.id} con acknowledge=true NO puede ser primario`);
+        }
+        if (ackAvail) {
+          assert.deepEqual(a.filter((y) => y.kind === 'primary'), [], 'tras el rechazo, cero primarios');
+        }
+      }
+    }
+  }
+});
+
+test('campaignCloseActions: el masivo va en dos pasadas y la segunda queda acotada a los rechazados', () => {
+  const first = campaignCloseActions({ ...baseActions, rodeoCount: 4 });
+  assert.ok(first.some((x) => x.id === 'close-all' && x.acknowledge === false), 'primera pasada sin reconocer');
+  assert.ok(!first.some((x) => x.id === 'close-all-ack'), 'sin rechazados no se ofrece la segunda');
+
+  const second = campaignCloseActions({ ...baseActions, rodeoCount: 4, incompleteCount: 2 });
+  const ack = second.find((x) => x.id === 'close-all-ack');
+  assert.ok(ack, 'con rechazados aparece la segunda pasada');
+  assert.match(ack.label, /2 incompletos/, 'y nombra CUÁNTOS, no "todos"');
+  const uno = campaignCloseActions({ ...baseActions, rodeoCount: 4, incompleteCount: 1 });
+  assert.equal(uno.find((x) => x.id === 'close-all-ack').label, 'Cerrar igual el rodeo incompleto',
+    'singular es-AR: "el rodeo incompleto", no "los 1 incompletos"');
+  assert.ok(!second.some((x) => x.id === 'close-all'), 'y la primera ya no se re-ofrece');
+});
+
+test('campaignCloseActions: `busy` solo cambia el label del primario, no la forma de la hoja', () => {
+  const a = campaignCloseActions({ ...baseActions, busy: true });
+  assert.equal(a.find((x) => x.id === 'close').label, 'Cerrando…');
+  assert.equal(a.length, campaignCloseActions(baseActions).length);
 });

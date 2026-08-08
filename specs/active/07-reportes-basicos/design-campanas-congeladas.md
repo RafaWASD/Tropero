@@ -370,9 +370,31 @@ de FK canónica (§5.5 de `0106`).
 | agregar un bucket | `alter type … add value` + un `insert` más | `alter table … add column` + tocar el plegado |
 | costo | ~3 filas por vientre + 1 por cría ≈ 1.500/campaña/rodeo | ~650 |
 
-Gana (a). El argumento decisivo es el segundo: el detalle **es** la evidencia del número, y sale del mismo
-`select` que lo calculó, sin un paso de transformación en el medio que pueda mentir. El costo en filas es
+Gana (a). El argumento decisivo es el segundo: el detalle **es** la evidencia del número, y sale de las
+mismas CTE que lo calcularon, sin un paso de transformación en el medio que pueda mentir. El costo en filas es
 irrelevante (~1.500 filas por campaña por rodeo).
+
+> **AS-BUILT (reconciliación §15 R13, reviewer H-4) — "el mismo `select`" es más fuerte de lo que el código
+> puede prometer, y por eso se verifica.** `close_campaign` es `VOLATILE`: en `READ COMMITTED` **cada
+> sentencia toma un snapshot de transacción nuevo**, así que las 4 temporales (de donde sale el detalle) y
+> las 5 RPC de KPI (de donde salen los números de la cabecera, porque DL2/RCC.5.4 obligan a leer de las
+> MISMAS funciones que la lectura en vivo) se materializan en sentencias distintas. Un `reproductive_events`
+> que commitee en el medio podía dejar el detalle y la cabecera diferidos en una fila — y el artefacto que
+> ADR-032 presenta como "la evidencia del número" quedaría mintiendo para siempre, sin que nada lo notara
+> (TR.20 corre sobre un fixture quieto y es estructuralmente ciego a eso).
+> **Lo que se hace, dicho con precisión** (el chequeo no es "el mismo select", y no hay que venderlo como
+> tal). El paso 10 de §4.2 cuenta las filas del detalle recién insertadas y las compara con los cinco números
+> de la cabecera; si difieren, el cierre **aborta con `40001`** y la transacción entera se va (no queda
+> snapshot). Eso garantiza **exactamente RCC.4.7 —identidad de CONTEO por bucket— verificada antes del
+> commit**, y convierte la carrera de "acuña un artefacto inconsistente que nadie va a notar" en "falla y se
+> reintenta".
+> **Lo que NO garantiza, y queda declarado**: (a) no es identidad de **conjunto** — si en la misma ventana
+> entrara un vientre y saliera otro, los conteos podrían coincidir con conjuntos distintos; (b) no cruza
+> **cabecera contra cabecera** — `ccl_total` y `pregnant` salen de invocaciones distintas de RPC distintas, y
+> nadie los compara entre sí (lo mismo `born_total` vs `calved`, que además **no** son iguales por diseño:
+> `rodeo_calving_by_stage` devuelve 0 cuando `n_months < 2` o `>= 12`). Subir la garantía exigiría un único
+> cómputo interno del que salieran los dos lados, que es el rediseño que §5.B W8 deja anotado para cuando la
+> medición de T74 diga si hace falta.
 
 ---
 
@@ -891,6 +913,7 @@ No se agrega ningún trigger de rechazo (rompería el offline-first). Se testea 
 | `P0002` | rodeo inexistente o borrado | `forbidden` |
 | `22023` | `p_year` fuera de `1900..current+1` | `validation` |
 | `23514` | (a) cerrar una campaña cuyo servicio no terminó **[no reconocible]**; (b) cerrar con el ciclo incompleto sin `p_acknowledge_incomplete` **[reconocible]**; (c) reabrir con la campaña siguiente cerrada | **`conflict`** (nuevo `kind`, con mensaje accionable) |
+| `40001` | el detalle y la cabecera no coinciden porque llegó un dato **durante** el cierre (§2.4 as-built): el cierre aborta sin escribir | `server` (reintentable — es exactamente lo que hay que hacer) |
 
 El cliente distingue **lo reconocible de lo no reconocible por `can_close`**, no por el texto del mensaje ni por
 un código nuevo: si `can_close` es falso, el `23514` viene de G1 o G2 y **no hay reintento posible** (la UI no
@@ -944,9 +967,17 @@ declare
     'close_campaign','reopen_campaign','rodeo_campaign_status',
     'rodeo_service_campaign','rodeo_serviced_females','rodeo_repro_denominator',
     'rodeo_pregnancy_kpi','rodeo_calving_kpi','rodeo_ccl_distribution',
-    'rodeo_calving_by_stage','rodeo_weaning_kpi'
+    'rodeo_calving_by_stage','rodeo_weaning_kpi',
+    -- AS-BUILT (reconciliación §15 R1): las dos públicas PREEXISTENTES que el barrido `rodeo\_%` también
+    -- alcanza. Sin ellas acá, el loop (1) aborta la migración por dos RPC legítimas de spec 07.
+    'rodeo_sessions_list','rodeo_weight_by_category',
+    -- + el helper de authz (mismo estatus que is_owner_of/has_role_in: grant a authenticated).
+    'is_owner_or_vet_of'
   ];
-  v_ns constant text[] := array['rodeo\_campaign\_%','campaign\_%','rodeo\_%'];
+  -- AS-BUILT: `rodeo\_campaign\_%` ⊂ `rodeo\_%`; se suman `close\_%`/`reopen\_%` porque close_campaign y
+  -- reopen_campaign no matchean NINGÚN prefijo (`campaign\_%` es prefijo, no sufijo) y sin eso un error de
+  -- tipeo en la lista blanca los dejaría fuera de LOS DOS loops, abiertos a PUBLIC por default.
+  v_ns constant text[] := array['rodeo\_%','campaign\_%','close\_%','reopen\_%'];
   v_bad record;
 begin
   -- (1) INTERNAS: todo lo del namespace del delta que NO está en la lista blanca no puede ser
@@ -1065,6 +1096,10 @@ fechas por `formatDateEsAr` (`dd/mm/aaaa`, TZ-safe por string).
   siga visible al scrollear.
 - **RCC.10.4**: `CclBlock` recibe `campaign.serviceMonths ?? selectedRodeo?.serviceMonths ?? null` — con la
   campaña cerrada manda el array congelado, no el del rodeo de hoy.
+> **AS-BUILT (§15-ter)**: (a) los controles de la hoja los decide `campaignCloseActions` (pura): tras un
+> rechazo del server no queda ningún primario y el intento que falló desaparece; (b) "Reabrir campaña" es una
+> acción de texto de baja jerarquía, no un botón a ancho completo.
+
 - Confirmación (RCC.10.7): `BulkConfirmSheet` ya existe y es el molde; se reusa con el copy "Vas a cerrar la
   campaña 2025 de *Servicio Invierno*. Los números quedan congelados. Podés reabrirla mientras no cierres la
   campaña 2026."
@@ -1183,9 +1218,17 @@ select p.oid::regprocedure::text as fn, p.proname
 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
 where n.nspname = 'public'
   and p.proname like 'rodeo\_%'
-  and pg_get_function_identity_arguments(p.oid) = 'uuid, integer'
+  and oidvectortypes(p.proargtypes) = 'uuid, integer'   -- ← AS-BUILT (§15 R3), NO identity_arguments
   and has_function_privilege('authenticated', p.oid, 'EXECUTE')
 ```
+
+> **AS-BUILT (reconciliación §15 R3).** La versión original de este bloque usaba
+> `pg_get_function_identity_arguments(p.oid) = 'uuid, integer'`. **Medido contra el remoto, esa función
+> devuelve `"p_rodeo_id uuid, p_year integer"` — CON los nombres de los parámetros**, así que la comparación
+> no matchea nunca y el descubrimiento daba **0 funciones**: el test habría quedado rojo para siempre por el
+> piso (fail-closed, sí, pero inútil — los dos oráculos no se ejecutarían jamás). `oidvectortypes(proargtypes)`
+> devuelve exactamente `uuid, integer`. Es la misma lección que `reference_function_recreate_base`, aplicada
+> al catálogo: lo que "dice" una función del catálogo se **verifica ejecutándola**, no se supone.
 
 Hoy devuelve 9 (`rodeo_service_campaign`, las 7 de campaña y `rodeo_campaign_status`). El test **asserta un piso**
 (`>= 9`) para que sacar una función del namespace tampoco sirva para esquivarlo, y machaca cada una de las
@@ -1508,3 +1551,79 @@ Puerta 2. Tras correr el capture: revertir `design/**` si el build re-renderizó
   RCC.12.1 + el guard de RCC.12.2 lo protegen. Si alguna de las 7 funciones necesitara `session_id`, se para y
   se coordina.
 </content>
+
+---
+
+## §15 — As-built: reconciliación tras la implementación (2026-08-07)
+
+> Lo que quedó CONSTRUIDO distinto de lo que decía este documento, con el motivo. Regla
+> `feedback_correcciones_en_specs`: nunca se deja una spec que contradiga al código. Todo lo de acá está
+> aplicado en `supabase/migrations/0127`–`0130`, `supabase/tests/reports/run.cjs` y el frontend del §7.
+> Nada de esto cambia una decisión de dominio (D1-D3, DL1-DL10, ①/②): son correcciones de mecanismo, y
+> **tres de ellas son defectos de esta spec que la implementación encontró al ejecutarlos**.
+
+| # | Qué decía | Qué quedó | Por qué |
+|---|---|---|---|
+| **R1** | §6-bis: lista blanca de **11** funciones públicas + barrido `rodeo\_%`. | **14**: se suman `rodeo_sessions_list`, `rodeo_weight_by_category` e `is_owner_or_vet_of`; y el barrido suma los prefijos `close\_%` / `reopen\_%`. | **La migración no aplicaba.** Verificado contra el catálogo del remoto: `rodeo_sessions_list(uuid)` y `rodeo_weight_by_category(uuid,uuid)` son públicas, están concedidas a `authenticated` y **matchean `rodeo\_%`** → el loop (1) las tomaba por internas y abortaba `0128`/`0129`/`0130`. Los prefijos nuevos cierran el hueco simétrico: `close_campaign` no matchea ninguno de los tres originales, así que un typo en la lista blanca lo dejaba fuera de **los dos** loops (que es exactamente el N-2 de Gate 1, un nivel más abajo). |
+| **R2** | T42/T32: `revoke`/`grant` escritos a mano **con la firma tipada completa**. | Se **derivan del catálogo** (`pg_get_function_identity_arguments`) dentro del mismo `DO` que corre los dos checks. | RCC.9.6 exige que la lista blanca sea la **única** enumeración de la migración: con `revoke`/`grant` escritos aparte hay dos. Derivándolos, la firma es correcta **por construcción** y el `42883` que T42 previene deja de ser posible. (No es SQL dinámico con input de usuario: es `format('%I(%s)')` sobre el catálogo, dentro de una migración — §5.10 habla de los cuerpos de las funciones.) |
+| **R3** | §8.1-bis / T48-α: descubrimiento por `pg_get_function_identity_arguments(oid) = 'uuid, integer'`. | `oidvectortypes(p.proargtypes) = 'uuid, integer'`. | **El oráculo no podía funcionar.** Medido: `identity_arguments` devuelve `"p_rodeo_id uuid, p_year integer"` (con nombres) → 0 descubiertas → el piso `>= 9` rojo para siempre y los dos oráculos de tenant/cota **sin ejecutarse nunca**. Con el fix, hoy descubre 8 (pre-apply) y 9 post-apply. |
+| **R4** | T64: "reusar `BulkConfirmSheet`". | `app/src/components/reports/CampaignCloseSheet.tsx`, **moldeado** sobre él (mismo shell, mismo copy reversible, mismo `useSafeBottomInset`). | Las props de `BulkConfirmSheet` son de dominio de la operación masiva de animales (`operation: 'castrate'|'wean'`, `summary: SelectionSummary` con desglose por categoría, futuros toritos y overrides). Reusarlo exigía inventar una `SelectionSummary` falsa y una "operación" que no existe: degradaba los dos componentes. Se reusa la **estructura**, que es lo que el molde aporta. |
+| **R5** | T48-ε: `prosecdef = true` en **todas** las funciones del delta. | `prosecdef` en las **15 que tocan datos**; `search_path` fijado en **las 18**. | Las tres puras (`campaign_tacto_bounds`, `campaign_cycle_complete`, `campaign_missing_summary`) **no son `SECURITY DEFINER` por diseño** (§3.2 y §4.1-bis: operan sobre los valores que les pasa el caller, no hay nada que autorizar) y están revocadas de los tres roles. Exigirles `definer` habría contradicho al propio design. |
+| **R6** | — (no estaba) | El helper `createAnimal` de `supabase/tests/reports/run.cjs` escribe **`entry_date`** (default: la fecha de nacimiento). | Sin `entry_date`, el trigger de `0127` abre la membresía **hoy**, así que los fixtures no pertenecen al rodeo en la fecha de corte de una campaña pasada y **TR.4b y TR.11 (que usan `lastYear`) se ponen rojas post-apply por el calendario, no por una regresión**. Es el mismo requisito que RCC.11.2 le pide al re-seed, un nivel más abajo. |
+| **R7** | §3.5: `rodeo_campaign_calves` = `rodeo_campaign_births ⋈ birth_calves`. | Igual — con la **consecuencia declarada**: si una madre tuviera **dos** partos imputables a la misma campaña, `weaned`/`pending_weaning` cuentan solo las crías del de concepción más temprana. | `rodeo_campaign_births` es `distinct on (madre)` (molde `0106`), así que partir de ella unifica la convención "un parto por hembra por campaña" que ya sostenía `calved == total_born`. El as-built de `0118` contaba las crías de los dos partos: es un cambio de conjunto en un borde raro, y va escrito en el `comment on function` en vez de quedar como sorpresa. |
+| **R8** | — | El rótulo **TR.12 quedó duplicado** en `run.cjs`. | El delta `ficha-categoria-tacto` (spec 02) tomó `TR.12` para su test de tacto suelto **al mismo tiempo** que este delta lo tomaba para el oráculo de inmutabilidad (dos terminales en paralelo). Los dos conviven; los de este delta llevan `(campañas congeladas)` en el título y el header de la suite lo declara. |
+| **R9** | — | `CampaignCloseSheet` llama `useDismissKeyboardOnOpen()`. | Lo exige el guard de clase `sheet-keyboard-dismiss-guard` (todo overlay con `$scrim` baja el teclado al abrirse). El guard **cazó el sheet nuevo en el primer `check.mjs`**: funcionó exactamente como fue diseñado. |
+| **R10** | §7.2: `campaignStateView(s: CampaignStatus \| null)`. | `campaignStateView(s: CampaignStatusLike \| null)`, con el tipo declarado **estructuralmente** en `reports-format.ts`. | `services/reports.ts` ya importa de `utils/reports-format.ts`; importar su tipo desde ahí cerraba un ciclo. TypeScript es estructural → un `CampaignStatus` entra sin cast. **Además**: cuando la campaña está cerrada a medias **y** tiene datos nuevos, se muestran **los dos** avisos (uno por línea) — la tabla de §7.2 los tenía en filas separadas y no decía qué pasa cuando coinciden. |
+| **R11** | §8.1 / T44: "…`close_campaign`; aplicar las cuatro mutaciones…". | El cierre de TR.12 va con **`p_acknowledge_incomplete = true`**. | El escenario del probe tiene `pending_weaning = 1` (lo fija el propio T44), o sea **ciclo incompleto** → sin reconocimiento el cierre se rechaza con `23514`, que es lo correcto y lo que prueba TR.14d. Se documenta en el test para que nadie lo lea como una licencia. |
+
+### §15-bis — Segunda tanda de reconciliaciones (fix-loop de la Puerta 2, 2026-08-07)
+
+> Del **reviewer** (CHANGES_REQUESTED, `progress/review_campanas-congeladas.md`) y del **Gate 2** (FAIL,
+> `progress/security_code_07-campanas-congeladas.md`). Mismo criterio que §15: acá va **cómo quedó
+> construido**, no cómo se había pensado.
+
+| # | Origen | Qué quedó |
+|---|---|---|
+| **R12** | Gate 2 **H-C1** | `0127`/`0128` emiten `revoke all ... from public, anon, authenticated` **antes** de sus `grant select`. Motivo: el `pg_default_acl` de este proyecto concede `Dxtm` —**`D` = TRUNCATE**— a `anon` y `authenticated` en toda tabla que `postgres` cree en `public`, y **la RLS no puede restringir TRUNCATE** (no existe policy de TRUNCATE: `pg_policies.cmd` solo toma DELETE/INSERT/SELECT/UPDATE). **No es una condición que introduzca este delta** —alcanza a las 35 tablas del schema, el molde `animal_category_history` incluido, y el barrido general quedó anotado en `docs/backlog.md`—, pero sobre estas tres está escrito el invariante que sostiene el desvío de ADR-026 (DP-19), así que su ACL tiene que decir lo mismo que el comentario. El `comment on column` de la cabecera se reescribió: antes afirmaba "no existe grant de escritura a authenticated" (falso al momento del apply) y nombraba como guard a TR.14e, que **no podía verlo** (PostgREST no expone TRUNCATE y `pg_policies` no tiene esa categoría). Precedente del repo: `0068:208`. |
+| **R13** | reviewer **H-4** | El invariante detalle↔cabecera (RCC.4.7) pasa a estar **verificado antes del commit** en vez de prometido — ver §2.4. |
+| **R14** | reviewer **H-5** + Gate 2 **M-C2** + reviewer **RR-1** | **La lista blanca enumera FIRMAS, no nombres**, y cada entrada se resuelve con `to_regprocedure` al `oid` de esa función exacta. La primera versión de este arreglo barría por `oid` pero **construía los `oid` seleccionando por `proname`**, así que `oid ∈ v_oids` era idénticamente equivalente a `proname ∈ v_public`: un no-op con un comentario que afirmaba lo contrario (RR-1, y la tercera vez en esta unidad que un texto promete lo que el código no hace). **Medido** con la sobrecarga `rodeo_serviced_females(uuid,integer,uuid)` creada y concedida a `authenticated` dentro de `begin/rollback`: la lista por NOMBRE la detecta **0** veces; la lista por FIRMA, **3** (una por rol). Con firmas, además, un typo en una entrada deja a la función real fuera de `v_oids` → cae en el barrido de internas → **el apply aborta**. `0130` conserva el tercer loop, que ahora verifica que **cada firma resuelva** (cubre también a `is_owner_or_vet_of`, que no matchea ningún prefijo). El loop (2) queda, con su comentario diciendo qué es: verificación del estado final. |
+| **R15** | Gate 2 **M-C1** | El `comment on table` de `0127` decía "no sincroniza porque no está en el YAML", que confunde dos capas. Reescrito con el texto de la cabecera de `0124`: la publicación `powersync` es **FOR ALL TABLES** y el default ACL le da `SELECT` a `powersync_role`, así que las filas **sí cruzan al slot de replicación** (no se puede excluir una tabla de un FOR ALL TABLES); lo que las mantiene fuera de los **devices** es que ninguna sync stream las nombra, y no hay catch-all. TR.19 suma el assert de `puballtables` para que, si esa premisa cambiara, el comentario se ponga rojo. |
+| **R16** | Gate 2 **M-C3** — **RETIRADO: la premisa del gate era falsa** | M-C3 afirmaba que en esta base una función nueva **no** nace `EXECUTE`-able por `PUBLIC`, y el reviewer lo ratificó en su H-5. Lo apliqué a los comentarios de tres migraciones **sin medirlo yo** — y es falso. Medición directa (crear una función sin grant/revoke dentro de `begin/rollback`): `quien_crea = postgres`, **`proacl = NULL`** (= default built-in) y `public_x = anon_x = auth_x = TRUE`. El `pg_default_acl` de `postgres` sobre funciones de `public` (`postgres=X`) **suma** privilegios; no revoca el `EXECUTE` a `PUBLIC` del built-in. Los dos gates infirieron el default mirando funciones cuyo ACL era `postgres=X/postgres` — funciones a las que su propia migración ya les había hecho el `revoke`: inferir el default desde objetos modificados. **Consecuencia**: los `revoke` de las 7 internas y el del loop (0) son **load-bearing**, no defensa en profundidad (sin ellos, `campaign_tacto_bounds` y compañía quedan invocables por `anon`), el loop (2) es un oráculo real, y el hueco del typo de H-5 era **de exposición**, no de disponibilidad. Los tres comentarios quedaron con la medición escrita. |
+| **R17** | reviewer **H-1** | `campaignStateView(null)` devuelve un estado **`desconocido`** (título neutro "Campaña", sin fecha y sin acciones) en vez de afirmar "Campaña en curso"; el hint de la sección se calla por el mismo motivo; el test asserta la **ausencia** de afirmación (antes verificaba la afirmación que su propio nombre negaba, y con eso congelaba el defecto); y `useCampaignStatus` **etiqueta el resultado con la clave `(rodeo, año)`** que lo produjo y lo descarta si cambió, para que la etiqueta de una campaña no sobreviva al cambio de año o de rodeo. El `useReport` genérico **no se toca**: su anti-parpadeo es correcto para los números y equivocado solo para la etiqueta que los califica. Reconcilia §7.2 y §7.4. Capture nuevo: `10-campana-desconocida`. |
+| **R18** | reviewer **H-2** | La corrección de `entry_date` (R6) se propagó a `supabase/tests/puesta-en-servicio/run.cjs`, el **otro** consumidor de las funciones reescritas (13 call sites): sin ella, TPS.9/TPS.15 pasaban hasta el 30/11 y se caían enteras desde el 1/12, por calendario y sin regresión detrás. Además se reescribió el comentario y el mensaje de TPS.15, que post-delta eran **falsos**: lo que saca del conjunto a la vaca vendida ya no es `p.status = 'active'` —ese filtro se eliminó a propósito, es la fuga F2— sino que el trigger cierra su membresía con `to_date` anterior al corte. **Consumidores medidos: dos** (`reports` y `puesta-en-servicio`); no hay un tercero. |
+| **R19** | reviewer **H-3** | La rama `ai_females` tiene oráculo propio: TR.13(g) siembra una **ternera** —que por categoría no es elegible en la rama natural, y el fallback por edad es solo para vaquillonas, así que su único camino al conjunto es el evento de IA— y le aplica los dos contrafactuales históricos (entró al rodeo después del corte / salió antes del corte). TR.20 congela una fila con `source = 'ai'` y asserta **la mezcla** (3 natural + 1 ai) en vez del `every(source === 'natural')` anterior, que era una aserción inversa. |
+| **R20** | reviewer **H-6/H-7** | Cerrados con oráculo: **RCC.5.11** (guard de cableado `app/src/services/reports-online-guard.test.ts` — los helpers chequean conexión **antes** del fetch y ningún wrapper exportado se saltea el helper; registrado en `run-tests.mjs`), **RCC.10.4** (la regla pasa a la función pura `campaignCclMonths`, que además **arregla un bug real**: el `??` encadenado de la pantalla hacía que una campaña cerrada **sin** meses configurados cayera a los del rodeo de hoy — F5 reintroducida por un operador), **RCC.4.6/7.2** (TR.20 borra un `animal_profiles` y verifica que la fila del detalle sobrevive con `animal_profile_id` nulo y el `idv` congelado, y que la RPC cerrada sigue devolviendo `serviced` filas), **RCC.9.12** (assert textual rotulado sobre el cuerpo de `rodeo_campaign_status`), **RCC.9.8** (TR.14i: dos cierres **concurrentes** con `Promise.all` — oráculo probabilístico declarado como tal, pero el assert de "una sola foto vigente" es sobre el estado final y no puede dar falso verde) y **RCC.11.10** (TR.14i: los dos `close_campaign` en **una** transacción, por el mismo transporte que usa el runbook del §9 y con `rollback` al final → el oráculo corre y el estado no se mueve). **H-7**: un caso de `closedAt` con la forma real del contrato (`timestamptz` con hora) y la expectativa **computada** con getters locales, para que el test no dependa del huso del runner. |
+
+### §15-ter — Veto visual del Gate 2.5 (2026-08-07)
+
+| # | Hallazgo | Qué quedó |
+|---|---|---|
+| **R21** 🟠 | Tras el rechazo del server, la hoja dejaba **dos botones adyacentes que empiezan con la misma palabra**: "Cerrar campaña" (relleno, primario) y "Cerrar igual con estos datos incompletos" (contorno). El primero es el mismo `onConfirm(false)` que el server **acaba de rechazar**: estaba garantizado que volvía a fallar, y era el de más peso visual y mejor target de Fitts. Prevención de error (Nielsen #5) al revés, y en la manga —con guante o barro— un slip esperando pasar. Peor: degradaba a ruido el control de dos toques que DP-10 existe para proteger. | Los controles de la hoja salen de una función **pura**, `campaignCloseActions` (`reports-format.ts`), y el `.tsx` solo mapea `kind` → variante. Con `acknowledgeAvailable`, el intento sin reconocimiento **desaparece** y **no queda ningún control primario**: reconocer y volver son los dos de contorno, con la explicación del rechazo arriba. Ninguna acción con `acknowledge === true` puede tener peso de primario **por ningún camino** (el test barre el espacio de estados). |
+| **R22** 🟠 | "Reabrir campaña" era un botón de contorno a **ancho completo**: el elemento interactivo más grande de una campaña cerrada. Invertido — sobre una foto la acción frecuente es **leerla**, y reabrir es rara y semi-destructiva (des-congela lo que ADR-032 declara inmutable). La jerarquía contradecía al texto. | Pasa a **acción de texto alineada a la derecha**, sin competir con los números, pero con target real (`$chipMin` 40 + `hitSlop` 8). La asimetría con "Cerrar campaña" (que sigue siendo botón) es **deliberada**: cerrar es lo que la app quiere y sugiere (D1); reabrir es la salida de emergencia. Oráculo en el capture: el alto del target de reabrir es **≥ 40** y **< la mitad** del alto de la tarjeta. |
+| **R23** 🟡 | (a) Recuadro con borde dentro de una tarjeta con borde, los dos en terracota: la severidad duplicada sin información nueva. (b) Sospecha de que el color del detalle leía como "family de alerta". | (a) El aviso pierde su borde propio: la tarjeta ya carga la severidad. (b) **Medido, no estimado** — el detalle es `$textMuted` `rgb(92,101,95)` sobre `$surface` `rgb(248,246,241)` a 13 px = **5,58:1 (AA ✔)**, un gris-verde neutro que **no** es de la familia del terracota; lo que leía como alerta era el chrome (el borde duplicado de (a)). El capture ahora **mide el contraste** de título/detalle/aviso y falla por debajo de 4,5:1, así que la próxima vez no hay que estimarlo. |
+
+**Números medidos en el capture** (`getComputedStyle` sobre el render real, viewport 412×915):
+
+| Elemento | Color | Fondo | Tamaño | Contraste |
+|---|---|---|---|---|
+| Título de la barra | `rgb(15,14,12)` | `rgb(248,246,241)` | 16 px | **17,86:1** ✔ |
+| Detalle ("Foto del 14/03/2026 · la cerró Facundo") | `rgb(92,101,95)` | `rgb(248,246,241)` | 13 px | **5,58:1** ✔ |
+| Aviso ("Se cerró con…") | `rgb(23,23,23)` | `rgb(250,249,249)` | 16 px | **17,06:1** ✔ |
+
+De referencia, el token que **no** se usa: `$textFaint` sobre `$surface` da **3,92:1** — por debajo de AA para texto normal. Es el caso que el repo ya se comió una vez.
+
+### §15.2 — Lo que queda declarado como límite (sin oráculo, a propósito)
+
+| Requisito | Por qué no tiene oráculo |
+|---|---|
+| **RCC.1.13** (`transfer_animal` no re-apunta la membresía) | Es **ausencia de código** en `0087`, que este delta no toca. Un oráculo exigiría montar el flujo completo de transferencia (dos establecimientos con rol del mismo usuario, la RPC y su GUC) para verificar que **algo no pasó**. Se sostiene por: (a) `git diff` vacío sobre `0087`; (b) el `comment on function` del trigger de `0127`, que dice explícitamente por qué NO hay que "arreglar" la asimetría con `animal_category_history`; (c) TR.15, que verifica que el ciclo archivar-origen / crear-destino escribe las filas correctas. |
+| **RCC.5.10 / 5.10.a** (cierre masivo en dos pasadas) | Vive en un hook de React y el repo no monta react-testing-library. Cubierto por el capture 08 (el resultado por rodeo, con la falla parcial visible) + lectura. La parte pura (`campaignStateView.missing`, que alimenta la lista de lo que falta) sí tiene tests. |
+| **RCC.10.6 / 10.7 / 10.10** (composición de la pantalla) | Misma razón. Cubierto por los 10 captures del Gate 2.5 y el veto del leader (ADR-029). |
+
+### §15.1 — Lo que queda ROJO hasta el apply (esperado)
+
+`supabase/tests/reports/run.cjs`: **18 de 35** tests en rojo, **todos** del delta y **todos** por la misma
+causa (`PGRST202 Could not find the function public.close_campaign…` / `relation "public.rodeo_membership_history"
+does not exist` / los dos contrafactuales del cómputo histórico, que hoy fallan **porque el defecto todavía
+está vivo**). Los **17 verdes** incluyen **todos** los tests preexistentes (TR.1–TR.11, el TR.12 de spec 02 y
+los dos TR.10), o sea que el cambio de `createAnimal` (R6) no rompió nada. Post-apply (T73) deben quedar 35/35.
