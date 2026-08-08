@@ -1869,8 +1869,12 @@ test('reports suite — spec 07 Stream C (RPC de reportes)', async (t) => {
         `${tbl}: insert rechazado por PERMISOS (no por una constraint de datos ni por una tabla ausente)`);
       const upd = await clientA.from(tbl).update({ establishment_id: estB }).eq('establishment_id', estA);
       assert.notEqual(upd.error, null, `${tbl}: update de authenticated RECHAZADO`);
+      assert.match(pgcode(upd.error), /42501|permission denied|violates row-level/i,
+        `${tbl}: update rechazado por PERMISOS. Recibido: ${pgcode(upd.error)}`);
       const del = await clientA.from(tbl).delete().eq('establishment_id', estA);
       assert.notEqual(del.error, null, `${tbl}: delete de authenticated RECHAZADO`);
+      assert.match(pgcode(del.error), /42501|permission denied|violates row-level/i,
+        `${tbl}: delete rechazado por PERMISOS. Recibido: ${pgcode(del.error)}`);
     }
     // el caso que más importa: insertar una cabecera con el establishment_id de OTRO tenant.
     const spoof = await clientA.from('rodeo_campaign_snapshots').insert({
@@ -1880,6 +1884,8 @@ test('reports suite — spec 07 Stream C (RPC de reportes)', async (t) => {
       born_head: 0, born_body: 0, born_tail: 0, born_total: 0, weaned: 0, pending_weaning: 0, weaning_status: 'ok',
     });
     assert.notEqual(spoof.error, null, 'insert con el establishment_id de OTRO tenant → rechazado');
+    assert.match(pgcode(spoof.error), /42501|permission denied|violates row-level/i,
+      `el spoof lo tiene que frenar el PERMISO (no una FK ni un not-null). Recibido: ${pgcode(spoof.error)}`);
 
     // y las policies de las 3 tablas son EXCLUSIVAMENTE de SELECT.
     const pols = await adminQuery(`
@@ -1943,12 +1949,39 @@ test('reports suite — spec 07 Stream C (RPC de reportes)', async (t) => {
 
     // service_role (que bypassea la RLS) intenta escribir una fila de detalle con OTRO establishment_id:
     // las FK se enforcen para TODOS los roles, así que la escritura privilegiada tampoco puede desalinear.
+    //
+    // ⚠ LA FILA TIENE QUE SER ÚNICA-SAFE, o el test no prueba lo que dice. La primera versión reusaba
+    // `s.cows[0]` en el bucket `serviced`, que YA está en el detalle: el índice único
+    // `(snapshot_id, bucket, animal_profile_id)` la rechazaba con **23505 antes de llegar a la FK**. La fila
+    // se rechazaba igual, pero el test no distinguía "la FK funciona" de "la FK no está y me salvó el
+    // índice" — que es exactamente lo que la FK compuesta existe para garantizar de forma estructural. Lo
+    // destapó el apply (el error real fue 23505, no 23503). Se usa un perfil que NO está en el snapshot, así
+    // que la única cosa capaz de rechazar la fila es la FK compuesta.
+    const outsider = await createAnimal(clientA, {
+      idv: `${RUN_TAG}_fk_out`, sex: 'female', birthDate: daysAgo(1800), rodeoId: s.rodeo.id,
+      establishmentId: estA, systemId: s.rodeo.systemId, categoryCode: 'multipara', entryDate: daysAgo(2),
+    });
     const bad = await admin.from('rodeo_campaign_snapshot_animals').insert({
       snapshot_id: closed.data, establishment_id: estB, bucket: 'serviced',
-      animal_profile_id: s.cows[0].profile.id,
+      animal_profile_id: outsider.profile.id,
     });
     assert.notEqual(bad.error, null, 'detalle con tenant distinto al de su cabecera → rechazado');
-    assert.match(pgcode(bad.error), /23503|foreign key/i, 'lo rechaza la FK COMPUESTA (23503), no un test');
+    assert.match(pgcode(bad.error), /23503|foreign key/i,
+      `lo rechaza la FK COMPUESTA (23503), no el índice único ni un test. Recibido: ${pgcode(bad.error)}`);
+
+    // CONTRAFACTUAL — la MISMA fila con el tenant CORRECTO entra sin error. Sin esto, el assert de arriba
+    // seguiría verde el día que alguien borre la FK y algún otro constraint rechace la fila por otro motivo:
+    // es la diferencia entre "la fila no entró" y "la fila no entró POR EL TENANT".
+    const good = await admin.from('rodeo_campaign_snapshot_animals').insert({
+      snapshot_id: closed.data, establishment_id: estA, bucket: 'serviced',
+      animal_profile_id: outsider.profile.id,
+    });
+    assert.equal(good.error, null,
+      good.error ? `la misma fila con el tenant correcto DEBE entrar: ${good.error.message}` : 'entra');
+    // Se limpia: el detalle tiene que seguir cuadrando con los números congelados de su cabecera (RCC.4.7).
+    const { error: cleanErr } = await admin.from('rodeo_campaign_snapshot_animals')
+      .delete().eq('snapshot_id', closed.data).eq('animal_profile_id', outsider.profile.id);
+    assert.equal(cleanErr, null, 'la fila del contrafactual se limpia');
 
     // Las DOS columnas de la FK compuesta son NOT NULL: con MATCH SIMPLE (el default), un NULL en cualquiera
     // DESACTIVA el chequeo en silencio y la garantía estructural se evapora sin que nada se ponga rojo.
@@ -2018,6 +2051,8 @@ test('reports suite — spec 07 Stream C (RPC de reportes)', async (t) => {
       'owner de un establecimiento borrado NO cierra (por 0076, vía ur.active)');
     const dStatus = await campaignStatus(clientDel, rDel.id, CC_YEAR);
     assert.notEqual(dStatus.error, null, 'ni lee el estado');
+    assert.match(pgcode(dStatus.error), /42501|P0002|not authorized|not found/i,
+      `el rechazo tiene que ser de authz/existencia. Recibido: ${pgcode(dStatus.error)}`);
   });
 
   // ── TR.14g — guard de CATÁLOGO (no textual salvo donde no hay otra cosa) — RCC.13.5.d ─────────────────

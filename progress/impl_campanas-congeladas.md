@@ -526,3 +526,65 @@ permanente del capture y no como una nota.
   completo. Es intencional (D1: la app *sugiere* cerrar cuando el ciclo termina) y el veto solo objetó la
   jerarquía de *reabrir*.
 - Capturas regeneradas: **10/10**, capture verde, `design/**` sin re-renderizar.
+
+
+---
+---
+
+# POST-APPLY (2026-08-07) — la suite entera en verde y los oráculos de Gate 1 medidos
+
+Las 4 migraciones están **aplicadas a DEV** (las aplicó el leader con OK de Raf). Todo lo de acá está
+**medido contra la base real**, no razonado.
+
+## 22. TR.14h no probaba lo que decía — el séptimo oráculo de la unidad, destapado por el apply
+
+El apply lo mostró: el rechazo llegaba con **`23505` (índice único)**, no con `23503` (FK compuesta). La fila
+que insertaba reusaba `s.cows[0]` en el bucket `serviced`, que **ya está en el detalle**, así que colisionaba
+con `rodeo_campaign_snapshot_animals_unique (snapshot_id, bucket, animal_profile_id)` **antes de llegar a la
+FK**. La fila se rechazaba igual, pero el test no distinguía *"la FK funciona"* de *"la FK no está y me salvó
+el índice"* — y la FK está justamente para dar esa garantía de forma estructural.
+
+**Arreglado**: la fila usa ahora un perfil que **no está en el snapshot**, así que es única-safe y **lo único
+capaz de rechazarla es la FK compuesta**. Y se agregó el **contrafactual**: la misma fila con el tenant
+**correcto** entra sin error (y se limpia después, para que el detalle siga cuadrando con la cabecera). Sin
+el contrafactual, el assert seguiría verde el día que alguien borre la FK y otra constraint rechace la fila
+por otro motivo: es la diferencia entre "no entró" y "no entró **por el tenant**".
+
+**Barrido del mismo patrón** (rechazos cuyo código no se verificaba), pedido por el leader: encontré **4** y
+los cerré — `update` y `delete` de TR.14e (solo `notEqual(error, null)`), el `insert` de spoof de tenant de
+TR.14e (podía estar siendo rechazado por una FK o un not-null en vez de por permisos) y el `status` de
+TR.14f(b). Todos verifican ahora el **código** del rechazo, no solo que haya habido rechazo.
+
+## 23. Los 5 mutantes que estaban declarados como "no ejecutables hasta el apply" — EJECUTADOS
+
+Cada mutante se aplicó al remoto, se corrió **la suite entera**, y se restauró en la misma corrida.
+**Criterio de seguridad**: solo se mutaron objetos **exclusivos de este delta** (nadie más los invoca) o se
+creó un objeto **nuevo**; nunca una de las 7 funciones compartidas, que la suite de la otra terminal usa.
+
+| # | Oráculo (finding de Gate 1) | Mutante aplicado al remoto | Resultado MEDIDO |
+|---|---|---|---|
+| **M21** | **TR.14f(a)** — `ur.active` en `is_owner_or_vet_of` (**H-3**) | `create or replace` del helper **sin** `and ur.active = true` | ✅ **rojo**: `TR.14f`. Y de yapa **TR.14g** (el assert textual rotulado) también lo cazó → 33/36 |
+| **M22** | **TR.21(a)** — guard de tenant **antes** del cortocircuito (**H-1**) | una función de campaña **NUEVA** (`rodeo_zz_mutante(uuid,integer)`, concedida a `authenticated`) que lee el snapshot **antes** del guard y de la cota | ✅ **rojo**: `AssertionError: rodeo_zz_mutante: owner de B con campaña CERRADA → 42501`. **El descubrimiento la encontró sola** — que es literalmente la propiedad que H-1 pidió ("una función de campaña nueva entra sola al test") |
+| **M23** | **TR.14e** — sin camino de escritura del cliente (**H-2**) | `grant insert on public.rodeo_campaign_snapshots to authenticated` | ✅ **rojo**: `rodeo_campaign_snapshots: authenticated NO puede INSERT (ACL, no solo RLS)` |
+| **M24** | **TR.14i(b)** — crear-o-truncar de las temporales (**M-3b**) | `create or replace` de `close_campaign` con el `create temp table` **pelado** | ✅ **rojo**: `42P07: relation "_snap_serviced" already exists` en el **segundo** cierre de la misma transacción → 34/36. Es **exactamente** el fallo que habría roto el runbook del re-seed en T74 |
+| **M25** | **TR.14h** — FK compuesta del tenant (**H-2**) | *(no hace falta mutar)* el propio apply lo destapó: la versión vieja fallaba por `23505` | ✅ cerrado con el arreglo + contrafactual de §22 |
+
+**Restauración verificada**: `pg_get_functiondef` de las 3 funciones mutadas **idéntico byte a byte** al
+estado previo; **0** objetos `rodeo_zz_%` residuales; y el ACL de `rodeo_campaign_snapshots` de vuelta en
+`INSERT=false`, `TRUNCATE=false`, `SELECT=true`.
+
+## 24. Estado final MEDIDO
+
+| Verificación | Resultado |
+|---|---|
+| `supabase/tests/reports/run.cjs` | **36 / 36** ✅ |
+| `supabase/tests/puesta-en-servicio/run.cjs` (el otro consumidor) | **11 / 11** ✅ |
+| Unit del frontend (lista completa de `run-tests.mjs`) | **3035 / 3035** ✅ |
+| `tsc --noEmit` | 0 errores |
+| Anti-hardcode (ADR-023 §4) | 0 violaciones |
+| Capture del Gate 2.5 | 10 capturas, verde, `design/**` sin re-renderizar |
+| Contraste (medido en el render) | título 17,86:1 · detalle 5,58:1 · aviso 17,06:1 — **todos AA** |
+
+**Lo que queda fuera de mi alcance**: T74 (re-seed de La Facundina, del leader), T75 (fold al baseline) y
+T76 (backlog). Y la medición de wall-time de `close_campaign` sobre 350 cabezas que §5.B W8 deja pedida para
+T74 — sigue sin medirse.

@@ -513,6 +513,14 @@ sin justificación documentada.
   cierres en una transacción, `closedAt` timestamptz) · M-C1/M-C2/M-C3. Detalle y mutantes en
   `progress/impl_campanas-congeladas.md` §8-§11; reconciliación en `design` §15-bis y §15.2.
 
+- [x] **T69-quinquies — POST-APPLY (2026-08-07)**: suite de reportes **36/36** contra las migraciones ya
+  aplicadas. Se arregló **TR.14h**, que fallaba por `23505` (la fila colisionaba con el índice único **antes**
+  de llegar a la FK compuesta, así que no distinguía "la FK funciona" de "me salvó el único") → fila
+  única-safe + contrafactual con el tenant correcto; y se barrió el mismo patrón en otros **4** asserts que
+  verificaban el rechazo sin verificar su código. Y se **midieron los 5 mutantes** que estaban declarados como
+  no ejecutables hasta el apply (H-1, H-2, H-3, M-3b): los cuatro aplicables pusieron en rojo su oráculo y se
+  restauró todo (verificado byte a byte). Detalle en `progress/impl_campanas-congeladas.md` §22-§24.
+
 - [x] **T69-quater — VETO VISUAL del Gate 2.5 (2026-08-07)**: (1) tras el rechazo del server, la hoja ya no
   deja como primario el botón que estaba garantizado que volvía a fallar — los controles salen de la función
   pura `campaignCloseActions` y con `acknowledgeAvailable` **no queda ningún primario**; (2) "Reabrir campaña"

@@ -1620,7 +1620,21 @@ De referencia, el token que **no** se usa: `$textFaint` sobre `$surface` da **3,
 | **RCC.5.10 / 5.10.a** (cierre masivo en dos pasadas) | Vive en un hook de React y el repo no monta react-testing-library. Cubierto por el capture 08 (el resultado por rodeo, con la falla parcial visible) + lectura. La parte pura (`campaignStateView.missing`, que alimenta la lista de lo que falta) sí tiene tests. |
 | **RCC.10.6 / 10.7 / 10.10** (composición de la pantalla) | Misma razón. Cubierto por los 10 captures del Gate 2.5 y el veto del leader (ADR-029). |
 
+### §15-quater — Post-apply (2026-08-07): TR.14h no probaba su enunciado
+
+El apply destapó que **TR.14h fallaba con `23505`, no con `23503`**: la fila que insertaba reusaba un perfil
+que YA estaba en el bucket `serviced` del snapshot, así que el índice único
+`(snapshot_id, bucket, animal_profile_id)` la rechazaba **antes de que la FK compuesta llegara a opinar**. La
+fila se rechazaba igual, pero el oráculo no distinguía *"la FK funciona"* de *"la FK no está y me salvó el
+índice"* — y la FK existe precisamente para dar esa garantía **estructural** (RCC.4.8.b). Arreglado con una
+fila **única-safe** (un perfil ausente del snapshot) y el **contrafactual** de tenant correcto, que es lo que
+hace que el test se ponga rojo si mañana alguien borra la FK. Mismo barrido en otros 4 asserts que
+verificaban el rechazo sin verificar su código.
+
 ### §15.1 — Lo que queda ROJO hasta el apply (esperado)
+
+> **SUPERADO (2026-08-07)**: con las 4 migraciones aplicadas, la suite da **36/36**. Lo de abajo queda como
+> registro del estado pre-apply.
 
 `supabase/tests/reports/run.cjs`: **18 de 35** tests en rojo, **todos** del delta y **todos** por la misma
 causa (`PGRST202 Could not find the function public.close_campaign…` / `relation "public.rodeo_membership_history"
