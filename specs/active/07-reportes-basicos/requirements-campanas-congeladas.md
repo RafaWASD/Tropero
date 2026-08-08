@@ -378,6 +378,15 @@ detalle y fundamento en `design-campanas-congeladas.md` §0.3):
 - **RCC.11.1** — El sistema deberá borrar íntegramente los datos del establecimiento
   `fac00000-face-4000-a000-000000000010` (animales, perfiles, eventos, sesiones, lotes, configuraciones y rodeos)
   antes de regenerarlo, y no deberá tocar el establecimiento "Santo Domingo" del mismo usuario.
+  > **Reconciliación as-built (T74, 2026-08-07)**: el borrado **excluye** la tenencia y la configuración —
+  > `establishments`, `user_roles`, `rodeos`, `rodeo_data_config`, `management_groups`, `field_definitions`,
+  > `maneuver_presets`, `invitations` se **conservan**; se borra todo lo animal-scopeado más `sessions`,
+  > snapshots, declaraciones y logs. Motivo: borrar `establishments` cascadea a `user_roles` y destruye las
+  > membresías del owner y de los dos veterinarios (cuentas de auth reales), y borrar `rodeos` destruye los
+  > UUID fijos `…0011`/`…0012` que el propio `design` §9.2 paso 4 pide preservar. Lo invariante —"no se toca
+  > ningún otro campo"— se sostiene igual: cada `delete` va scopeado por `establishment_id`, y el de `animals`
+  > (tabla **global**, sin `establishment_id`) se limita a los huérfanos de esa tanda. Detalle en `design`
+  > §9.3, desviación A.
 - **RCC.11.2** — El re-seed deberá escribir `entry_date` explícito en cada perfil, anterior al inicio del servicio
   de la campaña más vieja que se quiera reportar, para que la membresía histórica sembrada por el trigger sea
   correcta.
@@ -396,8 +405,29 @@ detalle y fundamento en `design-campanas-congeladas.md` §0.3):
 - **RCC.11.8** — El re-seed deberá ejecutarse dentro de **una** transacción y deberá abortar antes del primer
   borrado si (a) el conjunto de `establishment_id` alcanzados por los `where` no tiene cardinalidad 1, o (b) los
   conteos de perfiles y eventos se desvían de la magnitud esperada del campo demo.
+  > **Reconciliación as-built (T74, 2026-08-07)**: (b) se implementa tal cual (`--expect-profiles MIN:MAX`).
+  > **(a) se reemplaza**: con cada `delete` llevando `where establishment_id = <literal>`, el conjunto
+  > alcanzado es ⊆ {est} **por construcción**, así que el assert literal es tautológico — un guard que no
+  > sabe fallar. En su lugar, el re-seed aborta si el establecimiento **no se llama** como dice
+  > `--expect-name` o si el `--owner-id` no es owner **activo** de él, que es el riesgo real (apuntar al id
+  > equivocado) y sí sabe fallar. Detalle en `design` §9.3, desviación B.
 - **RCC.11.9** — El re-seed deberá verificar, antes del primer borrado, que el archivo de backup existe, pesa más
   de cero y contiene filas del `establishment_id` que se va a borrar.
+  > **Reconciliación as-built (T74, 2026-08-07)**: deja de ser un paso manual del runbook y pasa a ser un
+  > guard en código: `--require-backup <json>` es **obligatorio** cuando el campo tiene datos, y el script
+  > **abre** el archivo y exige que declare este `establishment_id` y que contenga filas suyas.
+- **RCC.11.11** *(nuevo, as-built)* — El generador del campo demo deberá vivir en el repo
+  (`scripts/seed-facundina.mjs`), estar parametrizado por establecimiento y owner, ofrecer un modo
+  `--dry-run` que ejecute todo y termine en `rollback`, y ser **determinista**: dos corridas sobre el mismo
+  establecimiento deberán producir los mismos números. *(El seed anterior se hizo a mano y no quedó en
+  ninguna parte; cuando hubo que re-sembrarlo no había con qué. Y un demo cuyos KPI cambian en cada corrida
+  no se puede citar en una presentación ni comparar contra una captura.)*
+- **RCC.11.12** *(nuevo, as-built)* — El generador deberá abortar, **antes** de cerrar ninguna campaña, si su
+  modelo de elegibilidad no coincide con el conjunto que devuelve `rodeo_serviced_females`, si la campaña a
+  cerrar no tiene el ciclo completo **por sus datos** (`weaning_status = 'ok'`, `weaned > 0`,
+  `pending_weaning = 0`), si la campaña posterior no queda con `cycle_complete = false`, o si dejó algún
+  evento fechado en el futuro. *(Congelar un malentendido es peor que no congelar nada; y el gate del ciclo
+  completo es lo que impide que el re-seed "resuelva" un seed mal fechado reconociendo el incompleto.)*
 - **RCC.11.10** — El sistema deberá permitir cerrar más de una campaña dentro de la misma transacción sin fallar
   por objetos temporales ya existentes.
 
@@ -520,5 +550,4 @@ detalle y fundamento en `design-campanas-congeladas.md` §0.3):
 | 2026-08-07 | **Fix-loop de la Puerta 2** (`implementer`), tras **reviewer CHANGES_REQUESTED** + **Gate 2 FAIL**. Bloqueante de seguridad (H-C1): las 3 tablas nacían con `TRUNCATE` para `anon`/`authenticated` por el `pg_default_acl` del schema —condición general de las 35 tablas de `public`, no del delta— y el `comment on column` lo **negaba por escrito** nombrando como guard a un test que no podía verlo → `revoke all` explícito + assert de ACL crudo + comentario corregido. Del reviewer: **H-1** (el oráculo de `campaignStateView(null)` asserteaba la afirmación que su nombre negaba, y con el anti-parpadeo la barra conservaba la etiqueta de otra campaña al cambiar de año → estado `desconocido` + resultado etiquetado por clave + test reescrito, RCC.10.2.a), **H-2** (`entry_date` propagado a la otra suite consumidora + el comentario falso de TPS.15), **H-3** (la rama `ai_females` sin oráculo → TR.13(g) + `source='ai'` en TR.20), **H-4** (RCC.4.7 pasa a verificarse antes del commit con `40001`), **H-5** (tercer loop del smoke-check), **H-6/H-7** (RCC.5.11, RCC.10.4, RCC.4.6/7.2, RCC.9.12, RCC.9.8 y RCC.11.10 cerrados con oráculo; RCC.1.13 y los de UI declarados como límite). MEDIUM del Gate 2: publicación `FOR ALL TABLES` declarada, barrido por `oid`, premisa del `EXECUTE a PUBLIC` corregida. Detalle en `design` §15-bis y §15.2. | `implementer` + reviewer + Gate 2 |
 | 2026-08-07 | **Implementación + reconciliación as-built** (`implementer`). Las 4 migraciones, la suite (TR.12–TR.21) y el frontend quedaron escritos; **nada se aplicó al remoto** (lo hace el leader en T73). La implementación encontró **tres defectos de esta spec al ejecutarla**, todos corregidos y documentados en `design` §15: (R1) la lista blanca del smoke-check tenía 11 entradas y el barrido `rodeo\_%` alcanza también a `rodeo_sessions_list`/`rodeo_weight_by_category` → **las migraciones abortaban**; (R3) el descubrimiento de TR.21 usaba `pg_get_function_identity_arguments`, que devuelve los **nombres** de los parámetros → descubría **0** funciones y los dos oráculos de Gate 1 H-1 **no se ejecutaban nunca**; (R6) los fixtures de la suite no escribían `entry_date`, así que TR.4b/TR.11 se ponían rojas post-apply por el calendario. Otras 8 reconciliaciones menores (R2, R4, R5, R7–R11) en la misma tabla. Notas bajo RCC.9.6.a, RCC.13.5.d y RCC.13.5.e. | `implementer` |
 | 2026-08-07 | **RCC.10.6 (cierre masivo por campo) confirmado DENTRO del delta** — sale de la tabla de pendientes de `design` §12. Fundamento del leader: DL1 ya lo prometió y es la mitigación directa del riesgo más alto de la feature ("el productor nunca cierra"). DP-11 (N llamadas del cliente, sin RPC de establecimiento) se mantiene. | Leader (decisión) |
-</content>
-</invoke>
+| 2026-08-07 | **T74-α: el runbook del re-seed se convierte en un GENERADOR del repo** (`implementer`). Al ir a ejecutar §9.2 se descubrió que **el seed original de La Facundina nunca quedó en el repo**: "borrar y volver a sembrar" no tenía con qué sembrar. Se invirtió el orden (nunca se borra antes de tener el reemplazo probado) y el runbook pasó a ser `scripts/seed-facundina.mjs`, parametrizado, determinista y con `--dry-run`. Conserva todo lo load-bearing del §9.2 (una transacción, asserts antes del primer `delete`, borrado/sembrado como `service_role`, impersonación acotada al cierre, los dos `close_campaign` reales). **Tres reconciliaciones**: RCC.11.1 (el borrado excluye la tenencia — borrar `establishments` cascadea a `user_roles` y se lleva las membresías del owner y de los dos vets; borrar `rodeos` destruye los uuid fijos que el propio §9.2 pide preservar), RCC.11.8(a) (el assert de "cardinalidad 1" es **tautológico** con los `where` explícitos → se reemplaza por nombre del campo + owner activo, que sí saben fallar) y RCC.11.9 (el backup deja de ser un paso manual: `--backup-to`/`--require-backup`, y el archivo se **abre**). **Dos requisitos nuevos**: RCC.11.11 (el generador vive en el repo y es determinista) y RCC.11.12 (aborta si su modelo de elegibilidad no coincide con `rodeo_serviced_females`, si el ciclo no está completo por datos, si la campaña posterior no queda en curso, o si dejó eventos en el futuro). Probado de punta a punta contra un establecimiento descartable y **medido**: `close_campaign` ≈ 150 ms sobre 433 cabezas → §5.B W8 cerrado, **no** hace falta el cómputo interno único. Detalle en `design` §9.3. | `implementer` (T74-α) |

@@ -899,7 +899,7 @@ No se agrega ningún trigger de rechazo (rompería el offline-first). Se testea 
 | **W5b** | **Procedencia del `establishment_id` de las 2 tablas de snapshot.** | Cabecera: `v_est`, derivado de la fila de `rodeos` por el guard. Detalle: de la **fila de snapshot padre**, no de `animal_profiles`. La FK compuesta `(snapshot_id, establishment_id) → (id, establishment_id)` lo hace estructural: cabecera y detalle no pueden discrepar de tenant ni con una escritura privilegiada. |
 | **W6** | **Idempotencia y carrera.** | Índice único parcial `(rodeo_id, campaign_year) where reopened_at is null` + `exception when unique_violation then` → devuelve el existente. Dos cierres concurrentes no producen dos fotos. |
 | **W7** | **El cierre no toca datos de negocio.** | Las únicas escrituras son sobre las 2 tablas de snapshot. Testeado con conteos antes/después de `animal_profiles`, `reproductive_events`, `weight_events` (RCC.13.12). |
-| **W8** | **Cota de costo — declarada, no minimizada.** | Ningún parámetro del cliente modula el volumen (no hace falta `p_limit`), pero el costo **por llamada no es una pasada**: `close_campaign` materializa 4 temporales y **después** invoca las 5 RPC de KPI, que recomputan desde cero (`pregnancy` → tacto → serviced; `calving` → tacto + births → serviced; `ccl` → tacto → serviced; `by_stage` → births → serviced; `weaning` → calves → births → serviced). **`rodeo_serviced_females` corre del orden de una docena de veces por cierre**, y cada corrida hace un `animal_category_at` correlacionado por perfil más la subquery de `heifer_fitness`. Cota realista: **≈ 12 × N_cabezas_del_rodeo**. Además `rodeo_campaign_status` recomputa 2 KPI en el camino abierto y se recarga en cada `useFocusEffect` (la pantalla pasa de 8 RPC a 9). **Piso de años**: el gate G2 (`serviced = 0`) impide materializar snapshots de años vacíos, que era el multiplicador que convertía esto en abuso (≈126 años × N rodeos). **Medición pendiente**: wall-time de un `close_campaign` sobre La Facundina (350 cabezas) en T74, con el número foldeado acá. Si sale caro, la salida natural es que el cierre haga **un único cómputo interno** y las 5 RPC lean de los temporales ya materializados, en vez de recomputar. |
+| **W8** | **Cota de costo — declarada, no minimizada.** | Ningún parámetro del cliente modula el volumen (no hace falta `p_limit`), pero el costo **por llamada no es una pasada**: `close_campaign` materializa 4 temporales y **después** invoca las 5 RPC de KPI, que recomputan desde cero (`pregnancy` → tacto → serviced; `calving` → tacto + births → serviced; `ccl` → tacto → serviced; `by_stage` → births → serviced; `weaning` → calves → births → serviced). **`rodeo_serviced_females` corre del orden de una docena de veces por cierre**, y cada corrida hace un `animal_category_at` correlacionado por perfil más la subquery de `heifer_fitness`. Cota realista: **≈ 12 × N_cabezas_del_rodeo**. Además `rodeo_campaign_status` recomputa 2 KPI en el camino abierto y se recarga en cada `useFocusEffect` (la pantalla pasa de 8 RPC a 9). **Piso de años**: el gate G2 (`serviced = 0`) impide materializar snapshots de años vacíos, que era el multiplicador que convertía esto en abuso (≈126 años × N rodeos). **MEDIDO (T74, 2026-08-07, DEV, campo de prueba equivalente a La Facundina: 433 cabezas en padrón, 84 y 135 servidas por rodeo)**: `close_campaign` **≈ 150 ms** (152 ms Invierno / 147 ms Primavera) sobre datos **ya commiteados**, y ≈ 153/159 ms dentro de la misma transacción que los sembró. La lectura en vivo de las 6 RPC de una campaña **abierta** es **≈ 128 ms**; la de una **cerrada** (cortocircuito por snapshot) **≈ 10 ms** — o sea que el snapshot no solo congela, además **divide por doce** el costo de la pantalla. **Veredicto: la amplificación ≈12× es real pero irrelevante a esta escala; NO se rediseña el cierre a un cómputo interno único.** El umbral en el que valdría la pena revisitarlo es un rodeo un orden de magnitud mayor (≈4.000 vientres → ≈1,5 s), o un cierre masivo de muchos rodeos en una sola acción; anotado como disparador, no como deuda abierta. |
 | **W9** | **Funciones internas no alcanzables por PostgREST.** | `revoke execute … from public, anon, authenticated` sobre **las 7**: `rodeo_campaign_tacto`, `rodeo_campaign_births`, `rodeo_campaign_calves`, `animal_category_at`, `campaign_tacto_bounds`, **`campaign_cycle_complete`**, **`campaign_missing_summary`**. La lista **no se enumera dos veces**: la migración declara una única **lista blanca de lo público** y el smoke-check barre por prefijo todo lo demás (§6-bis), así que una interna nueva nace revocada o la migración muere. Testeado (RCC.13.6). |
 | **W10** | **El trigger es `SECURITY DEFINER set search_path = public`** (molde `0030`) y toma `establishment_id` **de la fila padre**, nunca de un valor del cliente (anti-spoof, ADR-026). |
 | **W11** | **PII**: ninguna tabla nueva guarda PII (ADR-025). `closed_by`/`changed_by` son FK a `users(id)`; el nombre se resuelve por JOIN dentro de una RPC con guard, no se denormaliza. |
@@ -1383,6 +1383,90 @@ de dominio: es la consecuencia aritmética del calendario. **Va a la Puerta 1 pa
    `rodeo_campaign_status` + las 5 RPC **después**; comprobar `is_closed = true` con su `closed_at`, y que 2025
    sigue abierta. **Medir y anotar** el wall-time de cada `close_campaign` (350 cabezas) y foldearlo en §5.B W8.
    `commit` recién acá; ante cualquier desvío, `rollback`.
+
+### §9.3 — AS-BUILT: el runbook es un SCRIPT DEL REPO (`scripts/seed-facundina.mjs`), 2026-08-07
+
+Lo de arriba estaba escrito como un runbook a ejecutar a mano. **No se podía**: el seed original de La
+Facundina se hizo a mano en una sesión anterior y **no quedó en el repo**, así que "borrar y volver a sembrar"
+no tenía con qué sembrar. Se invirtió el orden — nunca se borra antes de tener el reemplazo probado — y el
+runbook se convirtió en un generador parametrizado: **`scripts/seed-facundina.mjs`**, probado de punta a punta
+contra un establecimiento descartable ANTES de tocar el campo demo.
+
+```
+node scripts/seed-facundina.mjs --establishment-id <uuid> --owner-id <uuid> \
+  [--closed-year 2024] --expect-name "La Facundina" [--expect-profiles 250:500] \
+  (--backup-to <archivo.json> | --require-backup <archivo.json>) \
+  [--tag-block 700] [--scale 1] [--dry-run] [--print-sql <archivo>]
+node scripts/seed-facundina.mjs --bootstrap                 # campo descartable de prueba + su usuario
+node scripts/seed-facundina.mjs --establishment-id <uuid> --teardown --i-know
+```
+
+Con datos en el campo, **`--expect-name` y el backup son obligatorios**: no es posible destruir un
+establecimiento sin nombrarlo y sin respaldarlo.
+
+**Lo que se conserva del §9.2**: una sola transacción; asserts de aborto antes del primer `delete`; cada
+`delete` con su `where establishment_id` explícito; borrado y sembrado como `service_role`; la impersonación
+(`set local role authenticated` + `request.jwt.claims`) **acotada al paso de cierre y a nada más**; los dos
+`close_campaign` en la misma transacción; `close_campaign` real, cero filas de snapshot escritas a mano;
+comparación de las RPC antes/después; `commit` recién al final.
+
+**Las cinco desviaciones, con su motivo:**
+
+| # | §9.2 decía | As-built | Por qué |
+|---|---|---|---|
+| **A** | borrar hasta `rodeos` → `user_roles` → `establishments` | se **conservan** `establishments`, `user_roles`, `rodeos`, `rodeo_data_config`, `management_groups`, `field_definitions`, `maneuver_presets`, `invitations`; se borra todo lo demás del establecimiento | Borrar `establishments` **cascadea a `user_roles`** y se lleva puestas la membresía del owner y las de los dos veterinarios, que apuntan a cuentas de auth reales (una de ellas con login por Google). Borrar `rodeos` destruye los UUID fijos `…0011`/`…0012` **que el propio §9.2 paso 4 pide preservar** y su `rodeo_data_config`. El objetivo es regenerar el **rodeo y sus eventos**, no la tenencia. "Santo Domingo" sigue intacto por la misma razón de siempre: todo `delete` va scopeado por `establishment_id`. |
+| **B** | assert (a) = "cardinalidad 1 del conjunto de `establishment_id` alcanzados" | reemplazado por dos asserts que **sí pueden fallar**: el nombre del establecimiento (`--expect-name`, **obligatorio** si el campo tiene datos) y que el `--owner-id` sea owner **activo** | Con cada `delete` llevando `where establishment_id = <literal>`, el conjunto alcanzado es ⊆ {est} **por construcción**: el assert literal es tautológico, un guard que no sabe fallar. El riesgo real que buscaba cubrir es *apuntar al establecimiento equivocado*, y eso lo cierra comparar el NOMBRE. El otro riesgo real —`animals` es una tabla **global**, sin `establishment_id`— se cierra borrando solo los **huérfanos de esta tanda** (`not exists (select 1 from animal_profiles …)`), nunca "los animales del campo". |
+| **C** | el backup se verifica "a mano" con `scripts/backup-db.mjs` | el mismo script lo **toma** (`--backup-to`) o **exige** uno ya tomado (`--require-backup`), y en los dos casos lo **abre** y verifica que declare este `establishment_id` y contenga filas suyas. Sin uno de los dos, con datos en el campo, no arranca | RCC.11.9 pedía exactamente eso y como paso manual se cumple una vez y después no. Además `scripts/backup-db.mjs` **no sirve para esto**: es un `pg_dump` entero de **PROD** a `.sql.gz` (spec 16 Run B), no el volcado JSON de UN establecimiento de DEV, que es el formato del backup que ya existía de La Facundina. Que el mismo script respalde y destruya evita que el formato que se produce y el que se verifica diverjan. |
+| **D** | "~350 cabezas, ~2.000 eventos" | ~271 adultos + ~322 crías = **~593 perfiles** (~433 en padrón) y ~1.850 eventos | El estado anterior tenía **`birth_calves = 0`**: un campo de cría con 243 vientres **tiene** ~200 terneros por año. La cifra de 350 describía el campo roto que este delta viene a arreglar, no uno sano. El denominador reproductivo (84 + 135 servidas) sí queda en el orden del original. |
+| **E** | — | el seed es **determinista**: todo el azar (preñada/vacía, cabeza/cuerpo/cola, pérdida, sexo de la cría, a quién se pesa, a quién se vende) sale de un `md5` sobre una clave `rodeo:cohorte:índice`, no del UUID del perfil | Dos corridas sobre el mismo establecimiento producen el MISMO campo. Un demo cuyos números cambian en cada re-seed no se puede citar en una presentación ni comparar contra una captura. |
+
+**Qué siembra, y por qué cada cohorte existe.** No son "350 vacas genéricas": cada una ejercita una rama del
+cómputo histórico de `0129`, y el script **aborta si su modelo de elegibilidad no coincide con lo que devuelve
+`rodeo_serviced_females`** (assert A3) — o sea que el seed no puede "acomodar" los números.
+
+| Cohorte | Invierno / Primavera | Qué prueba |
+|---|---|---|
+| `multipara` | 52 / 85 | el grueso: elegible sin gate de aptitud en las dos campañas |
+| `repo_cerrada` | 18 / 28 | `vaquillona` **apta** en la campaña cerrada y `vaca_segundo_servicio` en la en curso → **F3**: `animal_category_at` lee la categoría **de esa fecha** (fila `manual_override` re-fechada entre los dos cortes) |
+| `vaq_prenada` | 8 / 14 | categoría que prueba servicio por sí sola |
+| `salida` | 6 / 8 | multípara **vendida entre campañas**: sigue contando en la cerrada (**F2**, el fix) y desaparece de la en curso |
+| `repo_abierta` | 9 / 15 | vaquillona que **entró después** del corte de la cerrada: ausente de la cerrada, presente en la en curso (**F4**) |
+| `rechazo` | 3 / 5 | veredicto `no_apta` → fuera de las dos (RPS.6.2) |
+| `cut` / `toro` / `torito` | 3+3+2 / 4+5+3 | cabezas que **no** son denominador reproductivo |
+
+**Los asserts que abortan antes de congelar nada** (los marcados ✓ verificados **disparando**, no solo
+pasando):
+**A0** hay backup, es de este establecimiento y tiene filas suyas ✓ · **A1** el establecimiento existe, se
+llama como se espera ✓ y el `--owner-id` es owner **activo** ✓ · **A2** la magnitud de perfiles cae en la
+cota ✓ · **A2-bis** el bloque de caravana electrónica está libre y los `data_keys` que el gating de `0054`
+exige están habilitados · **A3** servidas **modelo == DB**, por rodeo y por año · **A4** la campaña a cerrar
+tiene el ciclo completo **por sus datos** (`weaning_status = ok`, `weaned > 0`, `pending_weaning = 0`) ✓ y la
+posterior queda con `cycle_complete = false` según `rodeo_campaign_status` · **A4-bis** ningún evento sembrado
+queda fechado en el futuro · **A5** la foto es idéntica a la lectura en vivo previa y ningún snapshot sale con
+`closed_incomplete = true`. El `--teardown` además se **niega** a borrar un establecimiento cuyo nombre no
+lleve la marca `SEED-TEST` ✓ (probado apuntándolo a La Facundina).
+
+**A4 es el que cierra DP-22 empíricamente**: correr el generador con `--closed-year 2025` aborta con
+*"137 crías de la campaña 2025 no llegan a destetarse antes de hoy — el ciclo NO está completo y el cierre
+pediría reconocimiento. Corregí las fechas, no reconozcas."* La aritmética de §9.1 deja de ser un argumento
+en prosa y pasa a ser un guard.
+
+**Medido contra el establecimiento de prueba** (2026-08-07, DEV, las 4 migraciones aplicadas):
+
+| Qué | Invierno | Primavera |
+|---|---|---|
+| servidas 2024 / 2025 | 84 / 87 | 135 / 142 |
+| 2024 (cerrada): preñadas · paridas · destetadas | 76 · 70 · 70 | 120 · 113 · 113 |
+| 2024: `closed_incomplete` · `cycle_complete` · `has_new_data` | `false` · `true` · `false` | ídem |
+| 2025 (en curso): `is_closed` · `cycle_complete` · `can_close` | `false` · `false` · `true` | ídem |
+| las 7 RPC de 2024 antes vs. después del cierre | **idénticas** | **idénticas** |
+| detalle por animal vs. cabecera (RCC.4.7) | coincide en los 5 buckets | coincide |
+
+Y los contrafactuales, sobre el campo ya sembrado: un `tacto` nuevo dentro de la ventana de 2024 **y** una
+venta posterior al corte **no mueven ni un número** de la campaña cerrada, y `has_new_data` pasa a `true`.
+
+**Reconciliación de RCC.11**: RCC.11.1 (alcance del borrado) → desviación **A**; RCC.11.8(a) (cardinalidad 1)
+→ desviación **B**; RCC.11.9 (backup verificado) → desviación **C**, ahora en código.
 
 ---
 

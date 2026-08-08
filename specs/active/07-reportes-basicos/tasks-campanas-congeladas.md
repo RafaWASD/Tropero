@@ -575,8 +575,29 @@ sin justificación documentada.
   por Supabase MCP; correr `supabase/tests/reports/run.cjs` verde post-apply (TR.1–TR.20) y `node
   scripts/check.mjs` verde. Si algo falla entre migraciones, **no** seguir con la siguiente. Cubre: §6.
 
-- [ ] **T74 — [LEADER] Re-seed de "La Facundina" (D2)** — solo después de T73 y con el punto DP-22 confirmado por
-  Raf. Runbook blindado de `design` §9.2 (Gate 1 M-6), **en una sola transacción**:
+- [x] **T74-α — El GENERADOR: `scripts/seed-facundina.mjs`** *(implementer, 2026-08-07)*. El §9.2 estaba escrito
+  como runbook a mano, pero **el seed original de La Facundina no quedó en el repo**: no había con qué sembrar
+  después de borrar. Se invirtió el orden (nunca se borra antes de tener el reemplazo probado) y el runbook pasó
+  a ser un script parametrizado (`--establishment-id`, `--owner-id`, `--closed-year`, `--expect-name`,
+  `--expect-profiles`, `--require-backup`, `--tag-block`, `--scale`, `--dry-run`, `--print-sql`, más
+  `--bootstrap`/`--teardown` del campo descartable). Conserva del §9.2 todo lo que era load-bearing (una
+  transacción, asserts antes del primer `delete`, borrado/sembrado como `service_role`, impersonación **acotada**
+  al cierre, los dos `close_campaign` reales en la misma transacción, comparación antes/después). Cinco
+  desviaciones documentadas en `design` §9.3 (A: no se borra la tenencia · B: la cardinalidad-1 tautológica se
+  cambia por nombre + owner activo · C: `--require-backup` en código · D: ~593 perfiles porque un campo de cría
+  con 243 vientres tiene terneros · E: seed determinista). **Probado de punta a punta contra un establecimiento
+  descartable** (creado y borrado por el propio script) con las 4 migraciones aplicadas: `closed_incomplete =
+  false` en los dos rodeos, las 7 RPC de 2024 idénticas antes y después del cierre, detalle == cabecera en los 5
+  buckets, 2025 abierta con `cycle_complete = false`, y los contrafactuales (tacto tardío + venta posterior al
+  corte) sin mover un número. Los 6 asserts de aborto verificados **disparando**. Wall-time foldeado en §5.B W8.
+  Cubre: RCC.11.2, RCC.11.3, RCC.11.4, RCC.11.5, RCC.11.7, RCC.11.8(b), RCC.11.9, RCC.11.10, RCC.11.11, RCC.11.12.
+
+- [ ] **T74 — [LEADER] Re-seed de "La Facundina" (D2)** — solo después de T73, con el punto DP-22 confirmado por
+  Raf y con T74-α (el generador ya probado). Se ejecuta **con el script**, no a mano:
+  `node scripts/seed-facundina.mjs --establishment-id fac00000-face-4000-a000-000000000010 --owner-id
+  b3fb7b0f-b0b2-4c22-87a4-a88f8870a376 --expect-name "La Facundina" --expect-profiles 250:500 --require-backup
+  ~/.rafaq-backups/facundina-pre-reseed-2026-08-07.json --dry-run` primero, y sin `--dry-run` después.
+  El runbook blindado de `design` §9.2 sigue describiendo el contrato, **en una sola transacción**:
   1. backup (`node scripts/backup-db.mjs`) **y verificarlo**: el archivo existe, pesa > 0 y **contiene filas del
      `establishment_id` que se va a borrar** (RCC.11.9). Un backup que no se abrió no es un backup.
   2. `begin;` **como `service_role`, SIN impersonar todavía**. ⚠ La impersonación **no** va acá: `authenticated`
@@ -611,4 +632,3 @@ sin justificación documentada.
 - [ ] **T76 — [LEADER] Backlog**: anotar en `docs/backlog.md` (a) que `entoradas = servidas − retiradas` quedó
   formalmente en `retired = 0` y por qué, y (b) que `transfer_animal` re-apunta `animal_category_history` al
   campo destino y deja al perfil de origen sin categoría histórica. Cubre: RCC.2.12, `design` §13.
-</content>
