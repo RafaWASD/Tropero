@@ -6,7 +6,9 @@ import path from 'node:path';
 
 import { buildBackupPlan, parseConnString, safeSummary, backupFilename, defaultBackupDir } from './backup-cmd.mjs';
 
-const CONN = 'postgres://postgres.projref:s3cr3t-p4ss@aws-0-sa-east-1.pooler.supabase.com:6543/postgres';
+// Session pooler (5432): es el unico modo con el que pg_dump puede trabajar. Un fixture en 6543
+// insinuaba una configuracion que este script NO puede usar.
+const CONN = 'postgres://postgres.projref:s3cr3t-p4ss@aws-0-sa-east-1.pooler.supabase.com:5432/postgres';
 const HOME = '/home/runner';
 
 test('B4(a) R5.8: sin SUPABASE_DB_URL_PROD → throw (el script aborta sin crear archivo)', () => {
@@ -33,7 +35,7 @@ test('B4(c) R5.11: la conn string / password NO va en pgDumpArgs (se pasa por en
   // la password SÍ va por env (libpq):
   assert.equal(plan.pgEnv.PGPASSWORD, 's3cr3t-p4ss');
   assert.equal(plan.pgEnv.PGHOST, 'aws-0-sa-east-1.pooler.supabase.com');
-  assert.equal(plan.pgEnv.PGPORT, '6543');
+  assert.equal(plan.pgEnv.PGPORT, '5432');
   assert.equal(plan.pgEnv.PGUSER, 'postgres.projref');
   assert.equal(plan.pgEnv.PGDATABASE, 'postgres');
 });
@@ -60,12 +62,12 @@ test('R5.10: --out-dir override respeta la ruta dada (para el $RUNNER_TEMP de la
   assert.equal(path.dirname(plan.outPath), path.join('/tmp/runner'));
 });
 
-test('parseConnString: URI inválida → throw; puerto default pooler 6543 si falta', () => {
+test('parseConnString: URI inválida → throw; puerto default session-pooler 5432 si falta', () => {
   assert.throws(() => parseConnString('not a uri'), /no es una URI válida/);
   // Host con punto a propósito: un fixture "host" pelado no se parece a ninguna conn string real y
   // dejaba pasar el bug de abajo.
   const noPort = parseConnString('postgres://u:p@host.example.com/db');
-  assert.equal(noPort.PGPORT, '6543');
+  assert.equal(noPort.PGPORT, '5432');
   assert.equal(noPort.PGDATABASE, 'db');
 });
 
@@ -89,6 +91,16 @@ test('parseConnString: host sin punto → THROW nombrando la causa típica', () 
   assert.throws(
     () => parseConnString('postgres://u:p@BBBBBB:5432/postgres'),
     /no parece un host real/,
+  );
+});
+
+test('parseConnString: pooler en modo TRANSACCIÓN (6543) → THROW; pg_dump no puede por ahí', () => {
+  // El dashboard de Supabase ofrece "Transaction pooler" (6543) y "Session pooler" (5432) uno al lado
+  // del otro. Copiar el primero da una conn string que CONECTA pero con la que pg_dump falla, con un
+  // error que no menciona el pooler. Antes este era además el DEFAULT del script.
+  assert.throws(
+    () => parseConnString('postgres://postgres.abc:pw@aws-0-sa-east-1.pooler.supabase.com:6543/postgres'),
+    /modo TRANSACCIÓN|Session pooler/,
   );
 });
 

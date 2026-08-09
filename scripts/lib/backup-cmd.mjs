@@ -42,9 +42,21 @@ export function parseConnString(uri) {
     );
   }
 
+  // PUERTO: session mode (5432), NUNCA transaction mode (6543). pg_dump no puede trabajar a través
+  // de pgBouncer en modo transacción —necesita estado de sesión y prepared statements— así que un
+  // 6543 acá produce un backup fallido con un error que no menciona el pooler. El default también
+  // es 5432: este script SOLO hace pg_dump, no hay caso en que 6543 sea lo correcto.
+  const port = u.port || '5432';
+  if (port === '6543') {
+    throw new Error(
+      'SUPABASE_DB_URL_PROD apunta al pooler en modo TRANSACCIÓN (puerto 6543): pg_dump no funciona ' +
+        'por ahí. Usá la conn string del "Session pooler" (puerto 5432) del dashboard de Supabase.',
+    );
+  }
+
   return {
     PGHOST: decodeURIComponent(u.hostname),
-    PGPORT: u.port || '6543', // pooler transaction-mode default
+    PGPORT: port,
     PGUSER: decodeURIComponent(u.username),
     PGPASSWORD: decodeURIComponent(u.password),
     PGDATABASE: decodeURIComponent(u.pathname.replace(/^\//, '')) || 'postgres',
