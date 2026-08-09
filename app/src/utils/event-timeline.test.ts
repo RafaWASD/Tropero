@@ -567,6 +567,16 @@ test('formatEventDate: MISMO ISO sin dateOnly se ubica por su día LOCAL (por es
   // nunca cae en un salto DST).
   const iso = '2026-06-02T00:00:00+00:00';
   const local = new Date(iso); // mismo instante, leído en el huso del runner
+  // PRECONDICIÓN EXPLÍCITA: el caso solo prueba algo al OESTE de UTC. En UTC exacto el día
+  // calendario y el día local coinciden, `dateOnly` no cambia el resultado y el notEqual de abajo
+  // se cae con un mensaje que no dice por qué. Pasó de verdad: la primera corrida de CI (runner en
+  // UTC) murió acá. El harness pinea TZ=America/Argentina/Buenos_Aires en scripts/run-tests.mjs;
+  // si alguien despinea el huso, que falle DICIENDO esto.
+  assert.ok(
+    local.getTimezoneOffset() > 0,
+    `este test requiere un huso al oeste de UTC (offset actual: ${-local.getTimezoneOffset() / 60}h). ` +
+      'El harness lo pinea a America/Argentina/Buenos_Aires en scripts/run-tests.mjs.',
+  );
   const now = new Date(local.getFullYear(), local.getMonth(), local.getDate() + 1, 12, 0, 0);
   // Como instante, `iso` cae el día local `local`; `now` es el día siguiente → "Ayer".
   assert.equal(formatEventDate(iso, now), 'Ayer');

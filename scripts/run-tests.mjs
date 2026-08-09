@@ -32,10 +32,18 @@ if (existsSync(envLocalPath)) {
   }
 }
 
+// HUSO PINEADO. Los tests corren SIEMPRE en hora argentina, en la máquina de Raf y en el runner
+// de CI (que es UTC). No es cosmético: toda la clase de bugs de fecha de este proyecto vive en el
+// offset −3 — el bug de `today-iso` (cargas posteriores a las 21:00 fechadas MAÑANA en una columna
+// `date`) es literalmente INVISIBLE en UTC, así que correr la suite en UTC desarmaría en silencio
+// los guards que lo cubren. Además hay tests que solo tienen sentido al oeste de UTC
+// (`event-timeline.test.ts`, el que hizo roja la primera corrida de CI).
+const TZ = 'America/Argentina/Buenos_Aires';
+
 function run(label, cmd) {
   console.log(`\n>>> ${label}`);
   console.log(`    ${cmd}`);
-  execSync(cmd, { stdio: 'inherit', cwd: repoRoot });
+  execSync(cmd, { stdio: 'inherit', cwd: repoRoot, env: { ...process.env, TZ } });
   console.log(`<<< ${label} OK`);
 }
 
