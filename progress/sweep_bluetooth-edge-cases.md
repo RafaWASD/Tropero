@@ -262,6 +262,32 @@ confirmación en la manga? Hoy no hay beep en device y no hay UI para configurar
 
 ---
 
+## 7-bis. MEDIDO en device (2026-08-09) — 🟡-11 y 🟡-12 CERRADOS
+
+Corrida sobre el A07 con el ESP32 en `MODO_SPP`, **build local** (`scripts/gradle.mjs` + dev client sobre
+Metro, cero builds de EAS). Usuario sembrado con el EID por defecto del emulador para que el bastonazo caiga
+sobre un animal existente.
+
+| pregunta | oráculo usado | medido | veredicto |
+|---|---|---|---|
+| ¿el beep suena en **cada** bastonazo? | `piid` de `package:ar.rafq.app` con `event:started` en `dumpsys audio` | 3 lecturas emitidas → **3 sonidos** | ✅ 1:1, el bug del "2.º en adelante" NO está |
+| ¿los duplicados quedan **mudos**? | ídem, con `same 3 300` | 3 emisiones del mismo EID → **1 sonido** | ✅ el dedup silencia, como manda `decideFeedback` |
+| ¿los dos patrones hápticos **difieren**? (R4.8 / 🟡-12) | `duration` del efecto en `dumpsys vibrator_manager`, **atribuido** disparando aceptada y rechazada alternadas | aceptada **187 ms** · rechazada **338 ms** | ✅ difieren; 338 ≈ el doble, coherente con "más grave y doble" |
+| ¿sigue siendo la vibración pelada de 50 ms? (🟡-11) | ídem | **no**: 185-191 ms, no `Step=50ms` | ✅ la háptica rica de `expo-haptics` está viva en hardware |
+| ¿el audio **interrumpe** otras apps? | `ducked players` | **sin medir** — necesita otra app reproduciendo | ⏳ |
+| ¿se **oye** con ruido y se distingue con guante? | humano | — | ⏳ irreducible, es de Raf |
+
+⚠️ **Dos oráculos que probé y NO sirven** (para que nadie los repita):
+- **Contar `event:started` global de `dumpsys audio`**: es un buffer circular, los eventos envejecen. En la
+  primera corrida el delta dio **−1**. Hay que filtrar por los `piid` de `package:ar.rafq.app`.
+- **Filtrar las vibraciones por el uid documentado (`10276`)**: el uid **cambia al reinstalar** la app (pasó
+  a `10283`), así que ese filtro devuelve historial rancio del install anterior y cero de la corrida actual.
+  Filtrar por fecha del día, o resolver el uid en caliente.
+- Y un error de lectura mío: `dumpsys vibrator_manager | grep played: | tail` muestra una sección **vieja**
+  del dump, no las últimas vibraciones. Llegué a concluir "no vibra" con eso, y era falso.
+
+---
+
 ## 7. Cómo verificar el feedback sensorial EN DEVICE sin oír ni sentir nada
 
 Descubierto el 2026-08-06 preparando la verificación de la unidad de sonido. Tres de las cuatro preguntas
