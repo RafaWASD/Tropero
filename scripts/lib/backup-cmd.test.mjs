@@ -62,7 +62,51 @@ test('R5.10: --out-dir override respeta la ruta dada (para el $RUNNER_TEMP de la
 
 test('parseConnString: URI inválida → throw; puerto default pooler 6543 si falta', () => {
   assert.throws(() => parseConnString('not a uri'), /no es una URI válida/);
-  const noPort = parseConnString('postgres://u:p@host/db');
+  // Host con punto a propósito: un fixture "host" pelado no se parece a ninguna conn string real y
+  // dejaba pasar el bug de abajo.
+  const noPort = parseConnString('postgres://u:p@host.example.com/db');
   assert.equal(noPort.PGPORT, '6543');
   assert.equal(noPort.PGDATABASE, 'db');
+});
+
+// ─── La password con caracteres especiales (bug real del 2026-08-09) ─────────────────────────────
+// El backup de PROD falló 8 veces. La octava murió con
+// `pg_dump: could not translate host name "<pedazo de la password>"`: la password tenía `@` y `#`
+// sin percent-encodear, el `#` cortó la URI en fragmento y el host terminó siendo el tramo de
+// password entre los dos especiales. `new URL` NO tira con eso — la URI es sintácticamente válida—
+// así que el guard viejo (que solo miraba el throw) la dejaba pasar.
+
+test('parseConnString: `#` sin escapar en la password → THROW (no un host silenciosamente falso)', () => {
+  const rota = 'postgres://postgres.abc:AAA@BBBBBB#CCCC@aws-0-sa-east-1.pooler.supabase.com:5432/postgres';
+  // Prueba de que el modo de falla es REAL y no imaginado: así parseado, el host sale mal.
+  // Mayúsculas INTACTAS: `postgres:` no es un esquema "especial" para WHATWG, así que el host es
+  // opaco y no se lowercasea — por eso en el log real se leyó la password con su capitalización.
+  assert.equal(new URL(rota).hostname, 'BBBBBB', 'si esto cambia, el bug que este test cubre cambió de forma');
+  assert.throws(() => parseConnString(rota), /sin escapar|no parece un host real/);
+});
+
+test('parseConnString: host sin punto → THROW nombrando la causa típica', () => {
+  assert.throws(
+    () => parseConnString('postgres://u:p@BBBBBB:5432/postgres'),
+    /no parece un host real/,
+  );
+});
+
+test('parseConnString: percent-encodeada, la MISMA password entra bien y vuelve intacta', () => {
+  // La forma correcta de la de arriba: @ → %40, # → %23.
+  const ok = parseConnString(
+    'postgres://postgres.abc:AAA%40BBBBBB%23CCCC@aws-0-sa-east-1.pooler.supabase.com:5432/postgres',
+  );
+  assert.equal(ok.PGHOST, 'aws-0-sa-east-1.pooler.supabase.com');
+  assert.equal(ok.PGUSER, 'postgres.abc');
+  assert.equal(ok.PGPASSWORD, 'AAA@BBBBBB#CCCC'); // libpq la recibe con los especiales, decodificada
+  assert.equal(ok.PGPORT, '5432');
+});
+
+test('parseConnString: un `@` suelto en la password NO rompe (el host es lo que sigue al ÚLTIMO @)', () => {
+  // Precisión sobre el diagnóstico: el culpable fue el `#`, no el `@`. Sin esta aserción es fácil
+  // "arreglar" el caso equivocado.
+  const ok = parseConnString('postgres://postgres.abc:AAA@BBBBBB@aws-0-sa-east-1.pooler.supabase.com:5432/postgres');
+  assert.equal(ok.PGHOST, 'aws-0-sa-east-1.pooler.supabase.com');
+  assert.equal(ok.PGPASSWORD, 'AAA@BBBBBB');
 });

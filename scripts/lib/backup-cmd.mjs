@@ -19,6 +19,29 @@ export function parseConnString(uri) {
   } catch {
     throw new Error('SUPABASE_DB_URL_PROD no es una URI válida (esperado postgres://user:pass@host:port/db).');
   }
+
+  // VALIDAR EL RESULTADO, no solo que haya parseado. Este guard existía y era CIEGO: solo miraba si
+  // `new URL` tiraba. Una password con `#` o `@` SIN percent-encodear produce una URI perfectamente
+  // parseable y silenciosamente equivocada, y el error recién aparece como un DNS raro dentro de
+  // pg_dump. Pasó de verdad (2026-08-09): con la password `5YV@...#...`, el `#` cortó la URI en
+  // fragmento y el host quedó siendo el pedazo de password entre los dos caracteres especiales —
+  // que además se logueó en claro, porque `safeSummary` imprime el host confiando en que es un host.
+  if (u.hash || u.search) {
+    throw new Error(
+      'SUPABASE_DB_URL_PROD tiene un `#` o un `?` sin escapar: cortan la URI y el host queda mal. ' +
+        'Si están en la password, percent-encodealos (# → %23, ? → %3F, @ → %40, / → %2F) o usá una ' +
+        'password alfanumérica.',
+    );
+  }
+  const host = decodeURIComponent(u.hostname);
+  if (!host.includes('.') && host !== 'localhost') {
+    throw new Error(
+      `SUPABASE_DB_URL_PROD apunta al host "${host}", que no parece un host real. Causa típica: la ` +
+        'password tiene caracteres especiales sin percent-encodear (@ / # / : / ? / %) y el parseo ' +
+        'tomó un pedazo de la password como host. Copiá de nuevo la conn string del pooler.',
+    );
+  }
+
   return {
     PGHOST: decodeURIComponent(u.hostname),
     PGPORT: u.port || '6543', // pooler transaction-mode default
