@@ -104,13 +104,16 @@ test('offline: el animal creado (overlay) SIGUE en la lista tras navegar Más �
   await page.getByLabel('Caravana visual (recomendado)', { exact: true }).fill('12');
   await page.getByRole('button', { name: 'Crear animal', exact: true }).click();
 
+  // `.filter({ visible: true })` en todas las asserts de "12": el texto NO es único en el DOM (hay un
+  // elemento OCULTO con el mismo contenido) y `.first()` agarraba ese → "Received: hidden" con el animal
+  // a la vista en la captura. Lo que este spec verifica es justamente que el usuario LO VEA.
   // Ficha del recién creado, servida 100% del overlay local (sin red).
   await expect(page.getByText('Identificación', { exact: true })).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByText('12', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText('12', { exact: true }).filter({ visible: true }).first()).toBeVisible();
 
   // "Volver" cae en la tab Animales (replace) → el animal SE VE en la lista (como en el repro).
   await page.getByRole('button', { name: 'Volver', exact: true }).click();
-  await expect(page.getByText('12', { exact: true }).first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText('12', { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 20_000 });
 
   // La navegación del repro: tab "Más" → volver a "Animales". Ancla: "Cerrar sesión" (siempre
   // presente en Más; "Editar perfil" NO aparece offline — la sección Perfil degrada a "Sin conexión",
@@ -122,7 +125,7 @@ test('offline: el animal creado (overlay) SIGUE en la lista tras navegar Más �
 
   // ── ORÁCULO del bug: el animal "12" SIGUE en la lista (offline-first, CLAUDE.md ppio 3). ──
   try {
-    await expect(page.getByText('12', { exact: true }).first()).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByText('12', { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 20_000 });
   } catch (err) {
     console.log('[diag] consola del page al fallar:\n' + consoleLines.join('\n'));
     throw err;
@@ -141,7 +144,7 @@ test('offline: el animal creado (overlay) SIGUE en la lista tras navegar Más �
 
     // Y el animal SIGUE en la lista: overlay → fila real (clearOverlay en el ACK + download de la
     // stream) sin desaparición permanente. toBeVisible tolera la ventana de reconciliación.
-    await expect(page.getByText('12', { exact: true }).first()).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByText('12', { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 20_000 });
 
     // Ningún rechazo permanente durante el drenado (la señal de la cadena vieja del bug era el warn
     // "[powersync] upload rechazado (descartado)" + rollback del overlay).
