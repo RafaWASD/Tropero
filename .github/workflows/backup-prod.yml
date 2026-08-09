@@ -52,8 +52,113 @@ jobs:
         env:
           BK: ${{ secrets.BACKUP_GPG_PASSPHRASE }}
 
+      # ⚠️ ORDEN DELIBERADO: el backup se sube ANTES de generar el manifiesto. El manifiesto es una
+      # comodidad para VERIFICAR el backup; si su consulta falla, el job va rojo pero el artifact ya
+      # está guardado. Al revés —manifiesto primero— un error en la verificación costaría el backup
+      # del día, que es exactamente lo que se quiere proteger.
       - uses: actions/upload-artifact@v4
         with:
           name: rafaq-prod-backup
           path: ${{ runner.temp }}/*.sql.gz.gpg
           retention-days: 90
+
+      # ORÁCULO de la verificación de restauración: tabla + filas EXACTAS del schema public, leídas de
+      # PROD en el mismo momento del dump. No es PII (nombres de tabla y conteos). Se compara contra el
+      # mismo manifiesto generado sobre la base restaurada — si difieren, el backup no sirve.
+      - name: Manifiesto de PROD
+        run: node scripts/db-manifest.mjs --source prod > "$RUNNER_TEMP/manifest-prod.txt"
+        env:
+          SUPABASE_DB_URL_PROD: ${{ secrets.SUPABASE_DB_URL_PROD }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rafaq-prod-manifest
+          path: ${{ runner.temp }}/manifest-prod.txt
+          retention-days: 90
+
+  # ─────────────────────────────────────────────────────────────────────────────────────────────────
+  # Un backup que nunca se restauró NO es un backup: es un archivo. Este job cierra el camino de vuelta
+  # —descifrar → descomprimir → restaurar → comparar contra el manifiesto de origen— y corre DENTRO del
+  # runner, así que ni la passphrase ni la PII salen a ningún lado. El Postgres destino es un service
+  # container efímero que muere con el job.
+  verify-restore:
+    needs: backup
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      pg:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      # Mismo cliente 17 que el job de backup (ver el comentario de allá arriba sobre la key armada).
+      - name: Install postgresql-client 17
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl --fail -sS -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client-17
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: rafaq-prod-backup
+          path: ${{ runner.temp }}/dl
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: rafaq-prod-manifest
+          path: ${{ runner.temp }}/dl
+
+      # Descifrar + descomprimir. Que esto funcione ya prueba dos cosas que hasta hoy nadie había
+      # comprobado: que la passphrase guardada abre el archivo, y que el .gz no viajó truncado.
+      - name: Descifrar y descomprimir
+        run: |
+          set -euo pipefail
+          gpg --batch --yes --quiet --passphrase "$BK" \
+            --output "$RUNNER_TEMP/dump.sql.gz" \
+            --decrypt "$RUNNER_TEMP"/dl/rafaq-prod-*.sql.gz.gpg
+          gunzip -f "$RUNNER_TEMP/dump.sql.gz"
+          wc -l < "$RUNNER_TEMP/dump.sql" | xargs echo "líneas de SQL en el dump:"
+        env:
+          BK: ${{ secrets.BACKUP_GPG_PASSPHRASE }}
+
+      # Restaurar. SIN ON_ERROR_STOP a propósito: el dump trae `CREATE EXTENSION` de cosas que solo
+      # existen en Supabase (pg_graphql, pgsodium, supabase_vault) y fallan en un Postgres pelado. Esos
+      # errores son ESPERADOS y no invalidan el backup. Lo que decide si el backup sirve no es la
+      # ausencia de errores acá, sino la comparación de manifiestos del paso siguiente.
+      - name: Restaurar en el Postgres efímero
+        run: psql -h localhost -U postgres -d postgres -q -f "$RUNNER_TEMP/dump.sql" 2>&1 | tail -30
+        env:
+          PGPASSWORD: postgres
+
+      - name: Manifiesto de la base restaurada
+        run: node scripts/db-manifest.mjs --source local > "$RUNNER_TEMP/manifest-restored.txt"
+        env:
+          PGHOST: localhost
+          PGPORT: '5432'
+          PGUSER: postgres
+          PGPASSWORD: postgres
+          PGDATABASE: postgres
+
+      # EL VEREDICTO. Si falta una tabla o cambió un conteo, `diff` sale distinto de 0 y el job va rojo.
+      - name: Comparar manifiestos (origen vs restaurado)
+        run: |
+          if diff -u "$RUNNER_TEMP/dl/manifest-prod.txt" "$RUNNER_TEMP/manifest-restored.txt"; then
+            echo "✅ La base restaurada coincide con PROD: mismas tablas, mismos conteos."
+          else
+            echo "::error::La restauración NO reproduce PROD (ver el diff de arriba). El backup no sirve."
+            exit 1
+          fi
