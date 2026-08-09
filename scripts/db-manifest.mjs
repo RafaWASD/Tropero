@@ -22,14 +22,25 @@ import { parseConnString } from './lib/backup-cmd.mjs';
 
 // Una sola consulta: nombre + count(*) exacto de cada tabla base de `public`. `query_to_xml` permite
 // contar filas de una tabla nombrada dinámicamente sin hacer un round-trip por tabla.
+// Dos secciones:
+//   T<TAB>tabla<TAB>filas      — estructura + datos
+//   P<TAB>tabla<TAB>policy     — las POLÍTICAS RLS, que son el modelo de seguridad multi-tenant entero.
+// Las policies van incluidas porque la primera corrida de esta verificación (2026-08-09) pasó en VERDE
+// mientras el restore tiraba decenas de `role "authenticated" does not exist`: `pg_dump --no-privileges`
+// saca los GRANT pero NO las policies, así que la base restaurada tenía las tablas y los datos y NINGUNA
+// política. Un backup que restaura los datos sin la seguridad no es un backup restaurado.
 const SQL = `
-select t.table_name,
+select 'T'::text as tipo, t.table_name as obj,
        (xpath('/row/cnt/text()',
               query_to_xml(format('select count(*) as cnt from public.%I', t.table_name),
-                           false, true, '')))[1]::text::bigint as filas
+                           false, true, '')))[1]::text::text as det
 from information_schema.tables t
 where t.table_schema = 'public' and t.table_type = 'BASE TABLE'
-order by t.table_name
+union all
+select 'P'::text, p.tablename, p.policyname
+from pg_policies p
+where p.schemaname = 'public'
+order by 1, 2, 3
 `;
 
 const source = process.argv.includes('--source') ? process.argv[process.argv.indexOf('--source') + 1] : 'prod';
@@ -61,18 +72,22 @@ if (r.status !== 0) {
 }
 
 const lineas = r.stdout.split('\n').filter((l) => l.trim() !== '');
+const tablas = lineas.filter((l) => l.startsWith('T\t')).length;
+const policies = lineas.filter((l) => l.startsWith('P\t')).length;
 
-// PISO ANTI-VACUIDAD: sin esto, una base sin tablas produce un manifiesto vacío que después coincide
-// con CUALQUIER restauración fallida — la verificación pasaría en verde sin haber verificado nada.
-const MINIMO = 10;
-if (lineas.length < MINIMO) {
+// PISO ANTI-VACUIDAD: sin esto, una base sin tablas ni policies produce un manifiesto vacío que después
+// coincide con CUALQUIER restauración fallida — la verificación pasaría en verde sin verificar nada.
+// El piso de policies es igual de importante: fue exactamente el agujero de la primera corrida.
+const MIN_TABLAS = 10;
+const MIN_POLICIES = 10;
+if (tablas < MIN_TABLAS || policies < MIN_POLICIES) {
   console.error(
-    `[db-manifest] el manifiesto tiene ${lineas.length} tablas (< ${MINIMO}). O la base origen está mal, ` +
-      'o la consulta no ve el schema public. Un manifiesto casi vacío hace VACUA la verificación de ' +
-      'restauración, así que se aborta en vez de emitirlo.',
+    `[db-manifest] manifiesto sospechosamente chico: ${tablas} tablas (mín ${MIN_TABLAS}), ` +
+      `${policies} policies (mín ${MIN_POLICIES}). Un manifiesto casi vacío hace VACUA la verificación ` +
+      'de restauración, así que se aborta en vez de emitirlo.',
   );
   process.exit(1);
 }
 
 process.stdout.write(`${lineas.join('\n')}\n`);
-console.error(`[db-manifest] ${lineas.length} tablas en public (origen: ${source}).`);
+console.error(`[db-manifest] ${tablas} tablas y ${policies} policies en public (origen: ${source}).`);

@@ -135,6 +135,21 @@ jobs:
         env:
           BK: ${{ secrets.BACKUP_GPG_PASSPHRASE }}
 
+      # Los roles de Supabase NO vienen en el dump (pg_dump no dumpea roles) pero las POLÍTICAS RLS sí,
+      # y cada `CREATE POLICY ... TO authenticated` falla si el rol no existe. Sin este paso, la base
+      # restaurada queda con todas las tablas y datos y CERO políticas — y la verificación pasaba igual.
+      # Fue el agujero real de la primera corrida del job (2026-08-09).
+      - name: Crear los roles de Supabase en el destino
+        run: |
+          for rol in anon authenticated service_role authenticator dashboard_user pgbouncer \
+                     supabase_admin supabase_auth_admin supabase_storage_admin \
+                     supabase_realtime_admin supabase_read_only_user; do
+            psql -h localhost -U postgres -d postgres -q -c \
+              "do \$\$ begin if not exists (select 1 from pg_roles where rolname='$rol') then create role \"$rol\" nologin; end if; end \$\$;"
+          done
+        env:
+          PGPASSWORD: postgres
+
       # Restaurar. SIN ON_ERROR_STOP a propósito: el dump trae `CREATE EXTENSION` de cosas que solo
       # existen en Supabase (pg_graphql, pgsodium, supabase_vault) y fallan en un Postgres pelado. Esos
       # errores son ESPERADOS y no invalidan el backup. Lo que decide si el backup sirve no es la
