@@ -18,6 +18,9 @@ on:
     - cron: '30 7 * * *'   # 07:30 UTC ≈ 04:30 AR (offset del backup de PROD, 06:00 UTC)
   workflow_dispatch: {}
 
+# Una sola corrida de este workflow a la vez. Sin esto, un `Run workflow` manual mientras corre el nightly
+# programado vuelve a poner dos escritores sobre la misma base DEV — el problema que `needs:` resuelve
+# ADENTRO de la corrida, pero no ENTRE corridas.
 concurrency:
   group: ci-db
   cancel-in-progress: false
@@ -35,6 +38,14 @@ jobs:
   # background se mueren (se llevó puesto a Metro y a tres corridas), y en foreground no entra en el límite
   # de 10 min por comando. Acá 45 minutos no le molestan a nadie.
   e2e:
+    # ⚠️ EN SERIE con db-suites, NUNCA en paralelo. Los dos siembran contra la MISMA base DEV, y dos
+    # escritores concurrentes reproducen el flake de rate-limit de auth de Supabase — el mismo que ya
+    # conocemos de tener dos terminales trabajando a la vez. Medido: la corrida #1 con `db-suites` sola dio
+    # verde en 19m41s; la #2, con `e2e` en paralelo, la mató en 50s.
+    #
+    # El orden es db-suites → e2e y no al revés a propósito: el job barato primero, así un problema de DB se
+    # ve en 20 minutos en vez de después de 50 de Playwright.
+    needs: db-suites
     runs-on: ubuntu-latest
     timeout-minutes: 75
     steps:
