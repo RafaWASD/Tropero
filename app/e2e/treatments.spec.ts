@@ -78,6 +78,9 @@ test('ficha: iniciar → marca en hero → pin en lista general y del rodeo → 
   await expect(page.getByText('Oxitetraciclina', { exact: true }).first()).toBeVisible();
 
   // ── Pin + marca en la LISTA GENERAL (RTR.5.1/4.4) ──
+  // La ficha es una ruta APILADA: no tiene bottom-nav, así que `gotoAnimales` (que busca el `role=tab`)
+  // no puede funcionar desde acá. Hay que volver primero — mismo patrón que `lotes.spec.ts`.
+  await page.getByRole('button', { name: 'Volver', exact: true }).click();
   await gotoAnimales(page);
   // El animal tratado está PINNEADO arriba: la PRIMERA fila de la lista es la del idvTreated (pese a ser más viejo).
   const firstRow = page.getByRole('button', { name: /,/ }).first();

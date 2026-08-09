@@ -712,6 +712,21 @@ function injectProjection(select: string, expr: string): string {
  * UNION overlay (T6/R6.11): suma las altas/terneros optimistas (`pending_animal_profiles`) y OCULTA los
  * perfiles con un override `exited`/`soft_deleted` pendiente. Overlay vacío → idéntico al swap T4.
  */
+/**
+ * `in_treatment` (0/1): EXISTS de un treatment ABIERTO del perfil (RTR.4.1). Vive en el módulo, y NO adentro
+ * de un builder, porque lo necesitan TODAS las queries que producen `LocalListRow` — la lista Y la búsqueda.
+ *
+ * Bug que motivó el hoisteo (2026-08-09): estaba declarado adentro de `buildAnimalsListQuery`, así que la
+ * lista pintaba el chip "En tratamiento" y **la búsqueda no**. Tipear la caravana —justo lo que hace el peón
+ * para encontrar al animal— hacía desaparecer el aviso de que estaba bajo tratamiento, con período de retiro
+ * de por medio. Una sola constante compartida es lo que impide que las dos superficies vuelvan a divergir.
+ */
+export const IN_TREATMENT_SYNCED =
+  'EXISTS (SELECT 1 FROM treatments t WHERE t.animal_profile_id = ap.id ' +
+  'AND t.ended_at IS NULL AND t.deleted_at IS NULL) AS in_treatment';
+/** Rama overlay: un alta optimista pendiente no puede tener tratamiento (RTR.1.7). */
+export const IN_TREATMENT_OVERLAY = '0 AS in_treatment';
+
 export function buildAnimalsListQuery(
   establishmentId: string,
   filter: {
@@ -741,9 +756,7 @@ export function buildAnimalsListQuery(
   // OVERLAY: `0 AS in_treatment` (un alta optimista pending no tiene tratamiento — los tratamientos se inician
   // solo desde la ficha de un animal YA existente, RTR.1.7). Cubre la lista general Y la del rodeo (ambas usan
   // este builder; la del rodeo pasa filter.rodeoId) — un solo cambio, RTR.5.1/RTR.5.2.
-  const IN_TREATMENT_SYNCED =
-    'EXISTS (SELECT 1 FROM treatments t WHERE t.animal_profile_id = ap.id ' +
-    'AND t.ended_at IS NULL AND t.deleted_at IS NULL) AS in_treatment';
+  // (`IN_TREATMENT_SYNCED` vive en el módulo: lo comparte la búsqueda — ver el comentario de la constante.)
   // Cuando ordenamos por updated_at, AMBAS ramas deben PROYECTAR el alias `updated_at` (el ORDER BY de un
   // UNION solo referencia columnas proyectadas). La synced usa ap.updated_at REAL; la overlay no tiene esa
   // columna → proyecta pap.created_at AS updated_at (señal de frescura del alta optimista). Para el orden
@@ -751,7 +764,7 @@ export function buildAnimalsListQuery(
   // El alias va INYECTADO en la lista de proyección (antes del ` FROM`), NO concatenado al final del SELECT
   // (que ya incluye FROM/JOINs — concatenar ahí lo tomaría como una tabla del FROM).
   let syncedSelect = injectProjection(LOCAL_LIST_SELECT, IN_TREATMENT_SYNCED);
-  let overlaySelect = injectProjection(LOCAL_LIST_SELECT_OVERLAY, '0 AS in_treatment');
+  let overlaySelect = injectProjection(LOCAL_LIST_SELECT_OVERLAY, IN_TREATMENT_OVERLAY);
   if (orderBy === 'updated_at') {
     syncedSelect = injectProjection(syncedSelect, 'ap.updated_at AS updated_at');
     overlaySelect = injectProjection(overlaySelect, 'pap.created_at AS updated_at');
@@ -1015,9 +1028,13 @@ function buildSearchUnion(
   const domO = listDomainFiltersOverlay(establishmentId, 'active');
   const syncedScope = groupScope ? ` AND ap.${groupScopeCol(groupScope.type)} = ?` : '';
   const overlayScope = groupScope ? ` AND pap.${groupScopeCol(groupScope.type)} = ?` : '';
-  const synced = `${LOCAL_LIST_SELECT} WHERE ${dom.where} AND ${HIDE_EXITED_PROFILE} AND ${syncedExtra}${syncedScope}`;
+  // `in_treatment` en AMBAS ramas, igual que la lista: sin esto la búsqueda devuelve la columna en NULL y el
+  // chip "En tratamiento" desaparece justo cuando el peón tipea la caravana para encontrar al animal.
+  const syncedSel = injectProjection(LOCAL_LIST_SELECT, IN_TREATMENT_SYNCED);
+  const overlaySel = injectProjection(LOCAL_LIST_SELECT_OVERLAY, IN_TREATMENT_OVERLAY);
+  const synced = `${syncedSel} WHERE ${dom.where} AND ${HIDE_EXITED_PROFILE} AND ${syncedExtra}${syncedScope}`;
   const overlay =
-    `${LOCAL_LIST_SELECT_OVERLAY} WHERE ${domO.where} AND ` +
+    `${overlaySel} WHERE ${domO.where} AND ` +
     notHiddenByOverride('animal_profiles', 'pap.id', ['exited', 'soft_deleted']) +
     ` AND ${overlayExtra}${overlayScope}`;
   // Orden de args por rama (en el orden de aparición de los `?`): dom ++ extraArg ++ [scopeId]. Con groupScope
