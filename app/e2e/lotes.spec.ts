@@ -98,9 +98,14 @@ test('crear lote → asignar desde la ficha → ver miembros', async ({ page }) 
   await page.getByRole('button', { name: 'Asignar a un lote', exact: true }).click();
 
   // Selector: elegir el lote creado → la ficha refleja el lote asignado al instante (queda como
-  // "Lote actual" y el trigger pasa a "Cambiar lote"). El nombre con RUN_TAG es único en el DOM.
+  // "Lote actual" y el trigger pasa a "Cambiar lote").
   await page.getByRole('button', { name: `Lote ${loteName}`, exact: true }).click();
-  await expect(page.getByText(loteName, { exact: true }).first()).toBeVisible({ timeout: 20_000 });
+  // `.filter({ visible: true })`, NO `.first()`: el supuesto viejo era "el nombre con RUN_TAG es único en el
+  // DOM" y es FALSO — el mismo texto vive en la OPCIÓN del sheet de lotes, que al cerrarse queda oculta pero
+  // presente. `.first()` agarraba esa y el test moría con "Received: hidden" teniendo el lote a la vista.
+  await expect(page.getByText(loteName, { exact: true }).filter({ visible: true }).first()).toBeVisible({
+    timeout: 20_000,
+  });
   await expect(page.getByRole('button', { name: 'Cambiar lote', exact: true })).toBeVisible({ timeout: 20_000 });
 
   // ── 3. Volver a /lotes → ver miembros (D3): el animal asignado aparece en el acordeón. ─
