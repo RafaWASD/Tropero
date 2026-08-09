@@ -114,7 +114,7 @@ test('alta guiada desde empty → wizard (sexo→categoría→datos) → el anim
   await expect(page.getByText('Identificación', { exact: true })).toBeVisible({ timeout: 20_000 });
   await expect(page.getByText(idv, { exact: true }).first()).toBeVisible();
   // El badge de categoría refleja la elegida ("Vaquillona") — coincide con la computada → sin override.
-  await expect(page.getByText('Vaquillona', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText('Vaquillona', { exact: true }).filter({ visible: true }).first()).toBeVisible();
   // Sección Historial (C3.1) — reemplaza el teaser "Próximamente". Un animal recién creado tiene
   // solo el `initial` → empty/sparse cálido.
   await expect(page.getByText('Historial', { exact: true })).toBeVisible();
@@ -420,7 +420,7 @@ test('alta guiada: elegir la categoría que COINCIDE con la computada → sin ov
   await page.getByRole('button', { name: 'Crear animal', exact: true }).click();
 
   await expect(page.getByText('Identificación', { exact: true })).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByText('Vaquillona', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText('Vaquillona', { exact: true }).filter({ visible: true }).first()).toBeVisible();
   // Coincide → SIN override (a11y label sin "fijada manualmente").
   await expect(page.getByLabel('Categoría Vaquillona', { exact: true }).first()).toBeVisible();
   await expect(
