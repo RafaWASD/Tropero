@@ -1404,7 +1404,7 @@ function AnimalHero({
       <XStack width="100%" alignItems="center" gap="$2" flexWrap="wrap">
         {/* code={detail.categoryCode}: ruta preferida de detección CUT (RCUT.6.2) → el badge del hero pasa a
             AMARILLO al toque cuando se marca CUT (el optimismo en sitio setea categoryCode='cut'). */}
-        <CategoryBadge label={categoryLabel} code={detail.categoryCode} manual={detail.categoryOverride} size="md" />
+        <CategoryBadge testID="hero-category-badge" label={categoryLabel} code={detail.categoryCode} manual={detail.categoryOverride} size="md" />
         {inTreatment ? <TreatmentFlag /> : null}
         {hadAbortion ? <AbortionFlag /> : null}
         <XStack alignItems="center" gap="$1" {...labelA11y(Platform.OS, `Sexo ${sexLabel}`)}>

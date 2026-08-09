@@ -33,9 +33,16 @@ export type CategoryBadgeProps = {
    * llamada literalmente "CUT" igual cae amarilla por el fallback de `label` (valor fijo del catálogo 0015).
    */
   code?: string | null;
+  /**
+   * testID opcional. Existe porque el a11yLabel del badge (`Categoría <nombre>`) COLISIONA con el de las
+   * opciones del `CategoryPickerSheet`, que usan el mismo prefijo por convención del alta guiada. Con el
+   * sheet cerrado esas opciones siguen en el DOM (ocultas), así que un `getByLabel(/^Categoría /).first()`
+   * agarra una de ellas en vez del badge. Un testID le da al hero un ancla que no depende del texto.
+   */
+  testID?: string;
 };
 
-export function CategoryBadge({ label, manual = false, size = 'sm', code }: CategoryBadgeProps) {
+export function CategoryBadge({ label, manual = false, size = 'sm', code, testID }: CategoryBadgeProps) {
   const trimmed = label.trim();
   if (trimmed.length === 0) return null;
 
@@ -49,6 +56,7 @@ export function CategoryBadge({ label, manual = false, size = 'sm', code }: Cate
 
   return (
     <View
+      testID={testID}
       backgroundColor={isCut ? '$cutBg' : '$greenLight'}
       borderRadius="$pill"
       paddingHorizontal={isMd ? '$3' : '$2'}

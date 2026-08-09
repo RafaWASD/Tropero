@@ -114,7 +114,10 @@ test('ficha de una hembra ≠ ternera: marcar CUT → badge amarillo → quitar 
   // el color de fondo del badge del hero (verde) — la señal de "no es descarte", RCUT.6 — sin acoplarnos al
   // NAME exacto de la derivada (que el espejo computa según los eventos/edad).
   await expect(page.getByText('CUT', { exact: true })).toHaveCount(0, { timeout: 20_000 });
-  const heroBadge = page.getByLabel(/^Categoría /).first();
+  // Ancla por testID, NO por `getByLabel(/^Categoría /).first()`: las opciones del CategoryPickerSheet
+  // llevan el mismo prefijo de label (convención del alta guiada) y, con el sheet cerrado, siguen en el DOM
+  // ocultas — `.first()` agarraba una de ellas y el test moría con "Received: hidden".
+  const heroBadge = page.getByTestId('hero-category-badge');
   await expect(heroBadge).toBeVisible({ timeout: 20_000 });
   expect(await heroBadge.evaluate((el) => getComputedStyle(el as HTMLElement).backgroundColor)).toBe(
     GREEN_BG_RGB,
