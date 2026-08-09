@@ -3,6 +3,56 @@
 > Este archivo se vacía al cerrar cada sesión y su resumen se mueve a `history.md`.
 > Mientras trabajás, **mantenelo actualizado en tiempo real**, no al final.
 
+## 2026-08-07 — UNIDAD «ficha: fijar la categoría a mano + tacto desde la ficha» — LISTA para reviewer
+
+Delta de spec 02 `ficha-categoria-tacto`, baseline **`fc5aa2f`**. Puerta 1 aprobada con las 5 decisiones
+P1–P5 resueltas (P3+P4 las decidió Raf: se retira la card "Tacto" de "Agregar evento" **y** el flujo nuevo
+suma el link "Fue otro día" → **RTF.6.2 cambia** y se reconcilia en las specs).
+
+Plan (TCT.1–TCT.32): puro categoría → datos/servicio → UI de la fila + sheet → puro tacto → ruta
+`animal/tacto` + CTA → retiro de la card sin gatear → tests de reportes (`session_id` NULL) → E2E + capturas.
+
+**Gate 1 N/A** (design §9): cero migraciones / RPC / Edge / policies. El único archivo bajo `supabase/` que
+se toca es `tests/reports/run.cjs`. Verificación al cierre: `git diff supabase/migrations/
+supabase/functions/` vacío (TCT.31).
+
+⚠️ Otra terminal trabaja en `specs/active/07-reportes-basicos/**`, `app/app/(tabs)/reportes.tsx`,
+`docs/adr/ADR-032*`, `specs/active/10-operaciones-rodeo/requirements.md` y `docs/marketing/**` — esta unidad
+NO los toca ni los commitea.
+
+**Verificado**: `check.mjs` **RC=0** · client unit **3009/0** (era 2946, +63) · anti-hardcode 0 ·
+reportes **17/17** (TR.12 nuevo: el tacto sin `session_id` cuenta en `rodeo_pregnancy_kpi` /
+`rodeo_serviced_females` y NO en `session_event_summary`) · E2E nuevas **10/10** · `events.spec.ts` migrada
+**17/17** · **12 mutantes, 12 muertos** · **15 capturas** del Gate 2.5 · `git diff supabase/migrations/
+supabase/functions/` **vacío** → **Gate 1 N/A confirmado (TCT.31)** · `design/` limpio · **nada commiteado**.
+
+⚠️ ~~**11 E2E en ROJO PRE-EXISTENTE**~~ → **RESUELTO PARCIALMENTE (2026-08-09, commit `778f709`)**. La
+suite completa dio **19 rojos / 287 verdes** (46 min), no 11: el conteo viejo se quedaba corto. Triage: **14
+de los 19 eran DOS causas de fixture**, ninguna del producto — (1) once specs sembraban una hembra SIN
+servicio y el tacto de preñez dejó de aplicarles con el fix del bug-B (`a2354d9`, 2026-07-10); (2) tres
+sembraban `categoryCode: 'vaca'`, un código que **no existe** en `categories_by_system`, y el `.single()`
+del helper devolvía "Cannot coerce the result to a single JSON object". Arreglados y verificados spec por
+spec.
+
+**Quedan 4 rojos, TODOS pre-existentes y confirmados como tales por experimento**: `animals-offline`,
+`cut-ficha`, `lotes`, `treatments`. Verificado restaurando el árbol a `c252b72` (pre-sesión), rebuildeando y
+corriéndolos: fallan igual. Ojo que `lotes` **no figuraba** en el conteo viejo. Además `animals` tiene un
+cluster flaky real: falló en `:74` en una corrida y en `:397` en la siguiente.
+
+⚠️ **Un test E2E mío nació CIEGO y lo cazó un mutante** (el de CUT: `toHaveCount(0)` matcheaba en t=0, antes
+de que resolviera la lectura asíncrona del catálogo). Corregido y re-falsificado.
+
+⚠️ **Corrección de un defecto PRE-EXISTENTE en `resolveRevertCategory`**: derivaba con `is_castrated` FALSO
+hardcodeado (justificación vencida desde spec 10). Sin eso, P2 no se cumple en un macho castrado. Es el punto
+de mayor riesgo de regresión de la unidad — reconciliado en `design.md` §2.5-ter.
+
+**P3+P4 (la decisión de Raf) cumplida**: se retiró la card "Tacto" de "Agregar evento" Y el flujo nuevo tiene
+el link "Fue otro día", con E2E que verifica contra el SERVER que el evento queda fechado en el pasado y con
+`session_id` NULL. No se perdió capacidad.
+
+Detalle, trazabilidad `R<n>→test`, tabla de mutantes, lo que NO pude verificar y las dos observaciones sobre
+CAMPAÑAS (señaladas, no resueltas) en `progress/impl_ficha-categoria-tacto.md`.
+
 ## 2026-08-06 — UNIDAD «el bastón tiene que sonar y vibrar de verdad en la manga» — FIX-LOOP CERRADO, sin commitear
 
 > **FIX-LOOP del review (`progress/review_baston-feedback-sensorial.md`) + veto de diseño del leader.**
