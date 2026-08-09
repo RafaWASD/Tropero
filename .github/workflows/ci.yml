@@ -37,7 +37,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
+      # fetch-depth: 0 (historial COMPLETO) NO es un lujo: `today-iso-guard.test.ts` deriva su
+      # oráculo del git — trae con `git show <baseline>:<archivo>` el cuerpo literal pre-fix de los
+      # 13 archivos que tenían el bug y exige que el guard dispare en cada uno. Con el clone shallow
+      # por defecto (depth 1) ese commit no existe y el guard falla. No bajar a depth 1: el guard
+      # está escrito fail-closed a propósito, así que "arreglarlo" acortando el clone lo apagaría.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       # pnpm ANTES de setup-node: setup-node con cache:'pnpm' necesita que el
       # binario ya exista para resolver el store path.

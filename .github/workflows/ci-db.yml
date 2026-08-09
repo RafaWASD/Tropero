@@ -27,7 +27,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
+      # Historial completo: run-tests.mjs corre también los unit tests del cliente, y
+      # `today-iso-guard.test.ts` deriva su oráculo con `git show <baseline>:<archivo>`.
+      # Con el clone shallow por defecto ese commit no existe y el guard falla (fail-closed).
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       # Fail-fast ANTES de instalar nada. Sin estos secrets, run-tests.mjs saltea
       # las suites de DB con un warning y termina en VERDE — un nightly que no
