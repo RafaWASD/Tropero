@@ -15,6 +15,7 @@ import {
   createTestUser,
   seedEstablishmentWithRodeo,
   seedAnimal,
+  seedReproductiveServiceEvent,
   setUserPhone,
   RUN_TAG,
   cleanupAll,
@@ -85,12 +86,15 @@ test('preview de transición: tacto+ sobre vaquillona muestra "Vaquillona preña
   const eid = makeEid();
   const visual = '0410';
   // VAQUILLONA (sin override) → el espejo C6 la muestra "Vaquillona"; el tacto+ la transicionará a preñada.
-  await seedAnimal(establishmentId, rodeoId, {
+  const profileId = await seedAnimal(establishmentId, rodeoId, {
     tag: eid,
     idv: visual,
     sex: 'female',
     categoryCode: 'vaquillona',
   });
+  // SERVIDA: desde el fix del bug-B (`a2354d9`, 2026-07-10) el tacto de preñez solo aplica a hembras
+  // servidas. Sin esto el paso no ofrece PREÑADA y el spec quedó rojo desde entonces.
+  await seedReproductiveServiceEvent(profileId);
 
   await gotoWithBle(page);
   await signIn(page, user);
@@ -130,15 +134,19 @@ test('preview de transición: tacto VACÍO no muestra el banner (sin transición
   test.setTimeout(150_000);
   const user = await createTestUser('r84-vacia');
   await setUserPhone(user.id, '1123456789');
-  const { establishmentId, rodeoId } = await seedEstablishmentWithRodeo(user.id, 'Campo Preview Vacia R84');
+  // El rodeo necesita meses de servicio para que el tacto aplique (igual que el caso positivo).
+  const { establishmentId, rodeoId } = await seedEstablishmentWithRodeo(user.id, 'Campo Preview Vacia R84', {
+    serviceMonths: [10, 11, 12],
+  });
   const eid = makeEid();
   const visual = `${RUN_TAG}-V`;
-  await seedAnimal(establishmentId, rodeoId, {
+  const profileId = await seedAnimal(establishmentId, rodeoId, {
     tag: eid,
     idv: visual,
     sex: 'female',
     categoryCode: 'vaquillona',
   });
+  await seedReproductiveServiceEvent(profileId);
 
   await gotoWithBle(page);
   await signIn(page, user);

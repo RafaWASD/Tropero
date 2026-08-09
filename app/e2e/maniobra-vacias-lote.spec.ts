@@ -108,7 +108,7 @@ test('vacías post-tacto → crear lote "Descarte" → la vaca queda en el lote 
   });
   const eid = makeEid();
   const idv = `${RUN_TAG}-VC`;
-  const profileId = await seedAnimal(establishmentId, rodeoId, { tag: eid, idv, sex: 'female', categoryCode: 'vaca' });
+  const profileId = await seedAnimal(establishmentId, rodeoId, { tag: eid, idv, sex: 'female', categoryCode: 'multipara' });
   await seedReproductiveServiceEvent(profileId);
 
   await gotoWithBle(page);
@@ -147,7 +147,7 @@ test('vacías post-tacto → elegir un lote existente → la vaca queda en ese l
   const grupo = await seedManagementGroup(establishmentId, 'Descarte otoño', { rawName: true });
   const eid = makeEid();
   const idv = `${RUN_TAG}-VE`;
-  const profileId = await seedAnimal(establishmentId, rodeoId, { tag: eid, idv, sex: 'female', categoryCode: 'vaca' });
+  const profileId = await seedAnimal(establishmentId, rodeoId, { tag: eid, idv, sex: 'female', categoryCode: 'multipara' });
   await seedReproductiveServiceEvent(profileId);
 
   await gotoWithBle(page);
@@ -181,7 +181,7 @@ test('vacías post-tacto → "Ahora no" → sale del flujo y la vaca sigue sin l
   });
   const eid = makeEid();
   const idv = `${RUN_TAG}-VS`;
-  const profileId = await seedAnimal(establishmentId, rodeoId, { tag: eid, idv, sex: 'female', categoryCode: 'vaca' });
+  const profileId = await seedAnimal(establishmentId, rodeoId, { tag: eid, idv, sex: 'female', categoryCode: 'multipara' });
   await seedReproductiveServiceEvent(profileId);
 
   await gotoWithBle(page);

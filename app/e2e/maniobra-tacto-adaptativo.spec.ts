@@ -19,6 +19,9 @@ import {
   createTestUser,
   seedEstablishmentWithRodeo,
   seedAnimal,
+  // El tacto de PREÑEZ solo aplica a hembras SERVIDAS desde el fix del bug-B (`a2354d9`,
+  // 2026-07-10). Estos specs sembraban una vaquillona pelada y quedaron rojos desde entonces.
+  seedReproductiveServiceEvent,
   setUserPhone,
   RUN_TAG,
   waitForServerTactoWithSession,
@@ -128,6 +131,7 @@ test('(1) rodeo de 2 meses de servicio → tacto preñada ofrece CABEZA y COLA (
     sex: 'female',
     categoryCode: 'vaquillona',
   });
+  await seedReproductiveServiceEvent(profileId);
 
   await gotoWithBle(page);
   await signIn(page, user);
@@ -180,6 +184,7 @@ test.describe('tacto adaptativo (web táctil 360)', () => {
       sex: 'female',
       categoryCode: 'vaquillona',
     });
+    await seedReproductiveServiceEvent(profileId);
 
     await gotoWithBle(page);
     await signIn(page, user);
@@ -230,6 +235,7 @@ test('(2) rodeo de 1 mes de servicio → PREÑADA sin sub-paso de tamaño; resum
     sex: 'female',
     categoryCode: 'vaquillona',
   });
+  await seedReproductiveServiceEvent(profileId);
 
   await gotoWithBle(page);
   await signIn(page, user);
@@ -274,6 +280,7 @@ test('(3) override "no medir" sobre un rodeo de 3 meses → PREÑADA va directo;
     sex: 'female',
     categoryCode: 'vaquillona',
   });
+  await seedReproductiveServiceEvent(profileId);
 
   await gotoWithBle(page);
   await signIn(page, user);

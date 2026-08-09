@@ -19,6 +19,9 @@ import {
   createTestUser,
   seedEstablishmentWithRodeo,
   seedAnimal,
+  // El tacto de PREÑEZ solo aplica a hembras SERVIDAS desde el fix del bug-B (`a2354d9`,
+  // 2026-07-10). Este spec sembraba una hembra sin servicio y quedó rojo desde entonces.
+  seedReproductiveServiceEvent,
   setUserPhone,
   RUN_TAG,
   waitForServerWeightEventWithSession,
@@ -155,6 +158,7 @@ test('flujo completo: identify → carga rápida (tacto + pesaje) → resumen �
     sex: 'female',
     categoryCode: 'vaquillona',
   });
+  await seedReproductiveServiceEvent(profileId);
 
   await gotoWithBle(page);
   await signIn(page, user);
@@ -285,6 +289,7 @@ test('offline: cargar maniobras sin red → reconexión → los eventos aterriza
   const eid = makeEid();
   const visual = `${RUN_TAG}-OFF`;
   const profileId = await seedAnimal(establishmentId, rodeoId, { tag: eid, idv: visual, sex: 'female' });
+  await seedReproductiveServiceEvent(profileId);
 
   await gotoWithBle(page);
   await signIn(page, user);

@@ -21,6 +21,10 @@ import {
   createTestUser,
   seedEstablishmentWithRodeo,
   seedAnimal,
+  // El tacto de PREÑEZ solo aplica a hembras SERVIDAS desde el fix del bug-B (`a2354d9`, 2026-07-10).
+  // Estos specs sembraban una vaquillona pelada y quedaron rojos desde entonces: el paso de tacto no
+  // ofrecía PREÑADA/VACÍA porque el animal no era elegible.
+  seedReproductiveServiceEvent,
   setUserPhone,
   RUN_TAG,
   waitForServerTactoWithSession,
@@ -93,9 +97,11 @@ test('(1) substring manual NO auto-carga la caravana equivocada → picker de co
   const { establishmentId, rodeoId } = await seedEstablishmentWithRodeo(user.id, 'Campo Tacto Wrong', {
     rodeoName: 'Cría hembras',
     rodeoRawName: true,
+    serviceMonths: [10],
   });
   // ÚNICO animal: idv "1428". El operario teclea "42" (su caravana "1428" CONTIENE "42" como substring).
-  await seedAnimal(establishmentId, rodeoId, { idv: '1428', sex: 'female', categoryCode: 'vaquillona' });
+  const wrongId = await seedAnimal(establishmentId, rodeoId, { idv: '1428', sex: 'female', categoryCode: 'vaquillona' });
+  await seedReproductiveServiceEvent(wrongId);
 
   await gotoWithBle(page);
   await signIn(page, user);
@@ -127,8 +133,10 @@ test('(1b) match EXACTO por idv → auto-avance directo a la carga (camino rápi
   const { establishmentId, rodeoId } = await seedEstablishmentWithRodeo(user.id, 'Campo Tacto Exact', {
     rodeoName: 'Cría hembras',
     rodeoRawName: true,
+    serviceMonths: [10],
   });
-  await seedAnimal(establishmentId, rodeoId, { idv: '385', sex: 'female', categoryCode: 'vaquillona' });
+  const exactId = await seedAnimal(establishmentId, rodeoId, { idv: '385', sex: 'female', categoryCode: 'vaquillona' });
+  await seedReproductiveServiceEvent(exactId);
 
   await gotoWithBle(page);
   await signIn(page, user);
@@ -153,6 +161,7 @@ test('(2) persist falla → banner de error visible + NO avanza; reintento → a
   const { establishmentId, rodeoId } = await seedEstablishmentWithRodeo(user.id, 'Campo Tacto Fail', {
     rodeoName: 'Cría hembras',
     rodeoRawName: true,
+    serviceMonths: [10],
   });
   const eid = makeEid();
   const profileId = await seedAnimal(establishmentId, rodeoId, {
@@ -161,6 +170,7 @@ test('(2) persist falla → banner de error visible + NO avanza; reintento → a
     sex: 'female',
     categoryCode: 'vaquillona',
   });
+  await seedReproductiveServiceEvent(profileId);
 
   await gotoWithBle(page);
   await signIn(page, user);
