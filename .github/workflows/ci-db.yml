@@ -23,6 +23,72 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # La suite E2E de Playwright (~45 min, 306 tests). Vive acá y no en `ci.yml` por el tiempo, y sobre todo
+  # porque siembra datos reales vía los helpers admin → necesita los mismos secrets que las suites de DB.
+  #
+  # POR QUÉ SE ENGANCHA AHORA (2026-08-09): estuvo fuera de CI mientras tenía rojos —un badge rojo
+  # permanente enseña a ignorar el badge—. Los rojos eran 19, y 19 de 19 quedaron cerrados hoy: 14 de dos
+  # causas de fixture y 5 de un modo de falla sistémico (un elemento OCULTO con el mismo texto le ganaba al
+  # `.first()`). Con la suite en verde, dejarla afuera solo garantiza que se vuelva a pudrir.
+  #
+  # Y hay una razón operativa: correrla a mano NO es viable. En la máquina de Raf los procesos largos en
+  # background se mueren (se llevó puesto a Metro y a tres corridas), y en foreground no entra en el límite
+  # de 10 min por comando. Acá 45 minutos no le molestan a nadie.
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+          cache-dependency-path: app/pnpm-lock.yaml
+
+      - name: Install deps
+        working-directory: app
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Chromium
+        working-directory: app
+        run: pnpm exec playwright install --with-deps chromium
+
+      # El build web que sirve el webServer de playwright.config (dist/). Sin esto el config avisa y el
+      # webServer muere por timeout — falla clara, pero tarde.
+      - name: Build web
+        working-directory: app
+        run: pnpm run e2e:build
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.SUPABASE_URL_DEV }}
+          EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY_DEV }}
+          EXPO_PUBLIC_POWERSYNC_URL: ${{ secrets.POWERSYNC_URL_DEV }}
+
+      - name: Playwright
+        working-directory: app
+        run: pnpm exec playwright test --reporter=line
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.SUPABASE_URL_DEV }}
+          EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY_DEV }}
+          EXPO_PUBLIC_POWERSYNC_URL: ${{ secrets.POWERSYNC_URL_DEV }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL_DEV }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY_DEV }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY_DEV }}
+
+      # Solo ante rojo: el reporte con trazas es lo que convierte "falló" en "falló acá y así se veía".
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: |
+            app/playwright-report
+            app/test-results
+          retention-days: 14
+
   db-suites:
     runs-on: ubuntu-latest
     timeout-minutes: 45
