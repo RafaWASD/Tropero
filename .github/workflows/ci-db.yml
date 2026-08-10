@@ -79,9 +79,14 @@ jobs:
           EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY_DEV }}
           EXPO_PUBLIC_POWERSYNC_URL: ${{ secrets.POWERSYNC_URL_DEV }}
 
+      # `github` ADEMÁS de `line`: el reporter de GitHub emite una ANOTACIÓN por test fallado (archivo,
+      # línea y mensaje) que sale en el panel de Annotations de la corrida. Sin eso, saber qué falló exige
+      # abrir un log de 51 minutos — probado: cuelga el navegador— o bajar el artifact de 22 MB. Un CI que
+      # no sabe decir qué rompió obliga a una excavación cada vez, y esa fricción es cómo un nightly rojo
+      # termina ignorado.
       - name: Playwright
         working-directory: app
-        run: pnpm exec playwright test --reporter=line
+        run: pnpm exec playwright test --reporter=github,line
         env:
           EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.SUPABASE_URL_DEV }}
           EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY_DEV }}
