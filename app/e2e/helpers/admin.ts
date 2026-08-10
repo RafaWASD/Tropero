@@ -975,6 +975,27 @@ export async function seedScrotalMeasurement(
  * perfil → no se pasa. Default `service_type='natural'` (el caso que B3 deprecó). Se borra en cascada al
  * borrar el establishment.
  */
+/**
+ * RETRODATA la fila `initial` de `animal_category_history` (RCC.11.3). Port del helper homónimo de
+ * `supabase/tests/reports/run.cjs`, que lo usa en `seedProbeScenario` antes de sembrar una IA.
+ *
+ * POR QUÉ HACE FALTA: un perfil sembrado HOY no tiene historia de categoría anterior a la fecha de corte de
+ * la campaña, así que `animal_category_at` cae en la degradación de RCC.2.7 (usa la categoría ACTUAL) y la
+ * hembra no entra en el denominador. Síntoma desde la UI: el reporte muestra "0 servidas · Sin datos de esta
+ * campaña" aunque el evento de servicio exista y esté dentro de la ventana — que es exactamente donde se
+ * trabó el primer intento de `campana-cierre.spec.ts`.
+ *
+ * @param isoDate fecha `AAAA-MM-DD` ANTERIOR a la ventana de servicio de la campaña que se quiere probar.
+ */
+export async function backdateCategoryHistory(profileId: string, isoDate: string): Promise<void> {
+  const { error } = await admin
+    .from('animal_category_history')
+    .update({ changed_at: `${isoDate}T12:00:00Z` })
+    .eq('animal_profile_id', profileId)
+    .eq('reason', 'initial');
+  if (error) throw new Error(`backdateCategoryHistory: ${error.message}`);
+}
+
 export async function seedReproductiveServiceEvent(
   profileId: string,
   opts: { serviceType?: 'natural' | 'ai' | 'te'; eventDate?: string; notes?: string | null } = {},

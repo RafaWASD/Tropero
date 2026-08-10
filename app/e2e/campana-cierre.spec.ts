@@ -25,6 +25,7 @@ import {
   seedAnimal,
   seedReproductiveServiceEvent,
   setRodeoDataKey,
+  backdateCategoryHistory,
   RUN_TAG,
   cleanupAll,
 } from './helpers/admin';
@@ -34,20 +35,20 @@ test.afterAll(async () => {
   await cleanupAll();
 });
 
-// ⛔ `fixme` — el TEST está escrito y su oráculo es correcto; lo que falta es el FIXTURE.
+// ⛔ `fixme` — el TEST y su oráculo están bien; falta UNA pieza del fixture.
 //
-// Para que una hembra cuente como SERVIDA no alcanza con el evento en la ventana: la suite backend
-// (`supabase/tests/reports/run.cjs`, `seedProbeScenario`) llama `backdateCategoryHistory(profileId, ENTRY)`
-// ANTES de insertar la IA — la hembra tiene que haber ESTADO en una categoría elegible en la fecha de
-// referencia de la campaña. Sin esa historia, el reporte muestra "0 servidas · Sin datos de esta campaña",
-// no hay campaña que cerrar y el botón no aparece.
+// AVANCE (2026-08-10): con `backdateCategoryHistory` (portado de la suite backend) la hembra YA entra al
+// denominador — el reporte pasó de "0 servidas · Sin datos de esta campaña" a "0 preñadas / 1 servidas".
+// Eso estaba trabado y ya no lo está.
 //
-// Ese helper no existe del lado E2E. Lo que falta, concreto: portar `backdateCategoryHistory` a
-// `e2e/helpers/admin.ts` (inserta en la tabla de historia de categoría con fecha anterior a la ventana de
-// servicio) y llamarlo acá antes del `seedReproductiveServiceEvent`.
+// LO QUE FALTA: que la campaña sea CERRABLE. Con ventana jul-sep (que incluye el mes corriente) la
+// temporada sigue abierta y el botón de cerrar no aparece. Al mover la ventana a ene-mar —terminada— con el
+// evento en febrero, la hembra dejó de contar otra vez. O sea que hay una tercera condición sin aislar,
+// probablemente la fecha de ENTRADA del animal al rodeo: el perfil se crea HOY (agosto) y no puede ser una
+// servida de febrero. La suite backend lo resuelve en `seedProbeScenario`; hay que leer de ahí qué más
+// retrodata además de la historia de categoría.
 //
-// Se deja `fixme` y NO `skip`: skip dice "esto no aplica", fixme dice "esto debería andar y no anda", que
-// es la verdad. Y no se commitea en rojo para no estrenar el nightly con un falso negativo.
+// Se deja `fixme` y NO `skip`: skip dice "no aplica", fixme dice "debería andar y no anda".
 test.fixme('campaña con ciclo incompleto: el reconocimiento NO se ofrece de entrada, aparece tras el rechazo', async ({
   page,
 }) => {
@@ -58,9 +59,10 @@ test.fixme('campaña con ciclo incompleto: el reconocimiento NO se ofrece de ent
   const { establishmentId, rodeoId } = await seedEstablishmentWithRodeo(user.id, 'Campo Campaña', {
     rodeoName: 'Cría hembras',
     rodeoRawName: true,
-    // La ventana de servicio DEBE incluir el mes corriente: el evento se siembra con fecha de hoy y, con
-    // una ventana oct-dic, caía fuera de la campaña → "0 servidas · Sin datos de esta campaña".
-    serviceMonths: [7, 8, 9],
+    // La ventana tiene que estar TERMINADA (ene-mar, ya pasó) y el evento CAER ADENTRO. Las dos cosas a la
+    // vez: si la ventana incluye el mes corriente la temporada sigue abierta y no hay nada que cerrar; si el
+    // evento cae fuera, la hembra no entra al denominador y no hay campaña con datos.
+    serviceMonths: [1, 2, 3],
   });
   // Hembra SERVIDA y sin tacto → hay campaña en curso pero el ciclo está INCOMPLETO, que es la precondición
   // del camino que se quiere probar (sin esto el cierre saldría derecho y nunca veríamos el reconocimiento).
@@ -72,13 +74,16 @@ test.fixme('campaña con ciclo incompleto: el reconocimiento NO se ofrece de ent
   // El gating fail-closed del rodeo (spec 03 M5) rechaza una IA si `inseminacion` no está habilitada:
   // "maneuver gated: rodeo … is missing enabled data_keys {inseminacion}". El guard está bien y avisa
   // con el nombre de la clave; el fixture tiene que pedirla explícitamente.
+  // La historia de categoría tiene que ser ANTERIOR a la ventana de servicio: sin eso `animal_category_at`
+  // degrada a la categoría actual (RCC.2.7) y la hembra no entra al denominador → "0 servidas".
+  await backdateCategoryHistory(profileId, '2025-12-01');
   await setRodeoDataKey(rodeoId, 'inseminacion', true);
   // `ai` y NO `natural` a propósito: `rodeo_serviced_females` (0105) tiene dos ramas y solo la de IA cuenta
   // por el EVENTO (`extract(year from event_date) = p_year`). La de servicio natural no mira el evento —
   // infiere la servida por elegibilidad, que para una vaquillona exige el tacto de aptitud. Con `natural`
   // el reporte mostraba "0 servidas · Sin datos de esta campaña" y no había campaña que cerrar: el fixture
   // parecía razonable y no producía el estado que este test necesita.
-  await seedReproductiveServiceEvent(profileId, { serviceType: 'ai' });
+  await seedReproductiveServiceEvent(profileId, { serviceType: 'ai', eventDate: '2026-02-15' });
 
   await page.goto('/');
   await signIn(page, user);
