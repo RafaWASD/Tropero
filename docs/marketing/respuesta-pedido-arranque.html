@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="es-AR">
+<head>
+<meta charset="utf-8">
+<title>Respuesta al pedido para arrancar</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0 auto; padding: 44px 52px 56px; max-width: 920px;
+    font-family: "Segoe UI", Inter, system-ui, sans-serif;
+    color: #0F0E0C; background: #faf9f9;
+    font-size: 15px; line-height: 23px;
+    -webkit-font-smoothing: antialiased;
+  }
+  h1 { font-size: 29px; line-height: 37px; margin: 0 0 4px; letter-spacing: -0.5px; }
+  .date { color: #807A74; font-size: 13px; margin: 0 0 26px; }
+  .lead { font-size: 16px; line-height: 25px; margin: 0 0 30px; }
+  h2 {
+    font-size: 12px; letter-spacing: 1.4px; text-transform: uppercase;
+    color: #5C655F; margin: 38px 0 4px; font-weight: 600;
+  }
+  .rule { height: 1px; background: #E5E5E3; margin: 0 0 18px; }
+  h3 { font-size: 16px; margin: 0 0 4px; line-height: 22px; }
+  p { margin: 0 0 12px; }
+  b, strong { font-weight: 600; }
+  ul { margin: 0 0 12px; padding-left: 20px; }
+  li { margin-bottom: 5px; }
+
+  .item { border-left: 3px solid #E5E5E3; padding: 2px 0 2px 16px; margin: 0 0 22px; break-inside: avoid; }
+  .item.ready { border-left-color: #1e5a3e; }
+  .item.blocked { border-left-color: #C0451F; }
+  .item.wait { border-left-color: #9A6206; }
+  .num { font-size: 11px; letter-spacing: 1px; text-transform: uppercase; color: #807A74; font-weight: 600; }
+  .tag {
+    display: inline-block; font-size: 11px; font-weight: 600; letter-spacing: .4px;
+    padding: 2px 9px; border-radius: 9999px; vertical-align: 2px; margin-left: 8px;
+  }
+  .t-ready { background: #93cfac; color: #14402c; }
+  .t-mine { background: #DBEEF3; color: #106B7A; }
+  .t-fac { background: #FBE6AE; color: #855300; }
+  .t-block { background: #C0451F; color: #fff; }
+
+  .slot {
+    background: #FBE6AE; color: #855300; font-weight: 600;
+    padding: 1px 8px; border-radius: 5px; font-size: 14px;
+  }
+
+  table { border-collapse: collapse; width: 100%; font-size: 14px; margin: 6px 0 8px; }
+  th { text-align: left; font-size: 11px; letter-spacing: .8px; text-transform: uppercase; color: #807A74; padding: 0 12px 7px 0; font-weight: 600; }
+  td { padding: 8px 12px 8px 0; border-top: 1px solid #E5E5E3; vertical-align: top; }
+  td:first-child { font-weight: 600; width: 30%; }
+
+  .callout {
+    background: #F8F6F1; border-radius: 12px; padding: 16px 18px; margin: 0 0 20px;
+    break-inside: avoid;
+  }
+  .callout h3 { margin-bottom: 6px; }
+  .callout p:last-child { margin-bottom: 0; }
+
+  .foot { margin-top: 40px; border-top: 1px solid #E5E5E3; padding-top: 14px; font-size: 13px; color: #807A74; line-height: 19px; }
+
+  @media print {
+    body { background: #fff; padding: 0; max-width: none; font-size: 11pt; line-height: 1.5; }
+    @page { margin: 16mm 15mm; }
+    h2 { break-after: avoid; }
+    h1 { font-size: 20pt; }
+  }
+</style>
+</head>
+<body>
+
+<h1>Respuesta al pedido para arrancar</h1>
+<p class="date">Rafael → Gonzalo · 02/08/2026</p>
+
+<p class="lead">
+  Gonzalo: va punto por punto. El <b>4 ya está resuelto</b> y te lo mando junto con esto. Al final te agrego tres cosas
+  que le faltan al plan y una corrección. Escrito antes de la reunión del domingo 02/08: varios de estos puntos se
+  cierran ahí mismo, y el documento queda como registro de en qué quedamos y de qué depende de quién.
+</p>
+
+<h2>Lo que va adjunto</h2><div class="rule"></div>
+
+<div class="item ready">
+  <div class="num">Punto 4 — material</div>
+  <h3>Capturas, paleta y tipografía<span class="tag t-ready">Listo</span></h3>
+  <p>
+    <b>17 capturas</b> en una carpeta, con un índice que explica qué es cada una. Cubren las cinco zonas que pediste:
+    modo maniobras, ficha del animal, lectura del bastón, reportes y exportación a SENASA. Van con tres advertencias
+    escritas adentro: los datos son de prueba, son renders a ancho de teléfono (no fotos de un celular), y todavía no
+    tienen marca porque no hay nombre.
+  </p>
+  <p>
+    La que yo usaría primero es <b>"Acercá el bastón al animal — la lectura entra sola, sin tocar la pantalla"</b>.
+    Es el producto entero en una pantalla.
+  </p>
+  <p>
+    <b>Paleta y tipografía</b>: te lo mandé aparte. Es la que está en el código hoy, con los contrastes medidos, no una
+    propuesta. Ahí adentro está marcado un problema real que la identidad nueva tiene que arreglar: dos de los colores
+    de estado (el de "no apta" y el de "diferida") se ven iguales para alguien con daltonismo rojo-verde.
+  </p>
+  <p>
+    <b>Video-recorrido del campo demo</b>: lo grabo esta semana. Es un recorrido guiado por la app con el campo de
+    demostración cargado, sin edición.
+  </p>
+</div>
+
+<h2>Punto por punto</h2><div class="rule"></div>
+
+<div class="item ready">
+  <div class="num">Punto 1 — el nombre</div>
+  <h3>Se decide en la reunión del 02/08<span class="tag t-ready">Hoy</span></h3>
+  <p>
+    Tenés razón y no lo voy a discutir: bloquea el dominio, las tiendas, el logo, la web, la cuenta de anuncios y las
+    invitaciones dentro de la app. Por eso lo cerramos ya, en la reunión, con Pilar presente para arrancar el manual de marca sobre el nombre definitivo y no sobre un provisorio.
+  </p>
+  <p>
+    Los tres chequeos que proponés los corremos <b>en la mesa, antes de cerrar</b>. Agrego dos: <b>que no se confunda escrito</b> (el productor lo va a tipear después de escucharlo una sola vez) y <b>que no esté registrado en INPI</b> en software y servicios — un manual de marca completo sobre un nombre ya registrado es plata quemada, y el chequeo es gratis.
+  </p>
+</div>
+
+<div class="item ready">
+  <div class="num">Punto 2 — el número del dolor</div>
+  <h3>Hoy, en la misma reunión<span class="tag t-ready">Hoy</span></h3>
+  <p>
+    De acuerdo en que es el insumo número uno, así que no lo agendamos aparte: lo saco hoy con Facundo y <b>te lo mando por escrito esta semana</b>, con la fuente de cada número.
+  </p>
+  <p>
+    Leé antes lo que te agrego más abajo sobre <b>qué clase de número</b> podemos usar, porque ahí hay una línea que no
+    conviene cruzar.
+  </p>
+</div>
+
+<div class="item">
+  <div class="num">Punto 3 — precio de Control Ganadero</div>
+  <h3>Va Facundo, y lo busco yo en paralelo<span class="tag t-fac">Con Facundo</span></h3>
+  <p>
+    Facundo pregunta a dos clientes que ya lo pagan. En paralelo lo busco yo por si está publicado, así no dependemos de
+    que se den las llamadas.
+  </p>
+  <p>
+    Una advertencia sobre cómo usarlo: <b>su precio solo no define el nuestro</b>. Lo que hay que sacar de esa
+    conversación es qué incluye, qué no, y sobre todo <b>qué le costaría al productor cambiarse</b> — si tiene años de
+    historia cargada ahí, el precio pasa a segundo plano y el argumento tiene que ser otro.
+  </p>
+</div>
+
+<div class="item">
+  <div class="num">Punto 5 — primera jornada real de manga</div>
+  <h3>Mediados de agosto<span class="tag t-fac">Con Facundo</span></h3>
+  <p>
+    <b>Mediados de agosto</b>, a confirmar el día con Facundo y con el campo. Las jornadas de manga pasan cuando
+    hay trabajo que hacer (tacto, destete), no cuando a nosotros nos viene bien, así que el día exacto sale de su
+    calendario.
+  </p>
+  <p>
+    Y va una corrección al plan, que está más abajo: <b>esa primera jornada no se filma.</b>
+  </p>
+</div>
+
+<div class="item blocked">
+  <div class="num">Punto 6 — validación con SIGSA</div>
+  <h3>Sin fecha nuestra, y no se promete hasta que valide<span class="tag t-block">Externo</span></h3>
+  <p>
+    Estado real: <b>el código está terminado y probado</b> (72 pruebas automáticas en verde). Lo que falta es que SIGSA
+    confirme que el formato del archivo es el correcto, y ese trámite lo gestiona Facundo. <b>No tenemos fecha y no
+    depende de nosotros.</b>
+  </p>
+  <p>
+    Coincido cien por ciento con no prometerlo en ningún material hasta que valide. Si sale en un anuncio y después no
+    valida, no lo recuperamos.
+  </p>
+  <p>
+    <b>Planificá el lanzamiento con el otro argumento</b> —la historia individual del animal y la carga en la manga— y
+    tratá el de SENASA como una mejora que puede llegar o no. Si llega, es un empujón; si no, no se cae nada.
+  </p>
+</div>
+
+<div class="item">
+  <div class="num">Punto 7 — autoservicio y soporte</div>
+  <h3>No es una fecha independiente: cuelga del nombre<span class="tag t-mine">Yo</span></h3>
+  <p>
+    Acá hay algo que conviene que veas, porque cambia cómo planificás: <b>el alta autoservicio no se puede terminar sin
+    el nombre.</b> Para que alguien se dé de alta solo tiene que poder bajar la app de una tienda y aceptar una
+    invitación por un link — y las dos cosas necesitan el nombre y el dominio.
+  </p>
+  <p>
+    Contando desde el día que cierro el nombre: <b>2 a 3 semanas</b> para estar publicado en las tiendas, y con eso el
+    alta autoservicio queda operativa. El canal de soporte con respuestas armadas lo montamos en paralelo, es cuestión
+    de una tarde.
+  </p>
+  <p>
+    O sea: <b>toda la cadena es una sola</b> y arranca en el mismo lugar.
+  </p>
+</div>
+
+<div class="item">
+  <div class="num">Punto 8 — las dos preguntas a Facundo</div>
+  <h3>Son las mejores del documento<span class="tag t-fac">Con Facundo</span></h3>
+  <p>
+    Se las paso y te las devuelvo <b>por escrito</b>. La de las horas por semana es la que más me importa a mí también:
+    el plan de tres meses descansa entero sobre eso, y prefiero dimensionarlo ahora y no en el mes dos.
+  </p>
+</div>
+
+<div class="item">
+  <div class="num">Punto 9 — dónde cae el interesado</div>
+  <h3>De acuerdo, con una condición<span class="tag t-mine">Los tres</span></h3>
+  <p>
+    Reservamos los 20 minutos. Mi posición sobre la pregunta que hacés: <b>línea nueva del proyecto, no el celular
+    personal de Facundo.</b>
+  </p>
+  <p>
+    Tres razones: un lead que cae en un WhatsApp personal no se mide, no se transfiere si mañana cambia algo, y se
+    mezcla con las consultas de su clínica veterinaria. Que atienda él —es el que tiene que atender—, pero en un número
+    que sea del proyecto.
+  </p>
+</div>
+
+<h2>Tres cosas que le agrego al plan</h2><div class="rule"></div>
+
+<div class="callout">
+  <h3>1. Falta tu espejo</h3>
+  <p>
+    Son nueve pedidos y ninguna fecha tuya. Antes de pasarte el nombre —que es la llave del dominio, las cuentas y la
+    marca— necesito la contraparte escrita: <b>qué entregás, en qué orden y para cuándo</b>. No es desconfianza, es que
+    un plan sin fechas de los dos lados no se puede cumplir ni incumplir: simplemente se estira.
+  </p>
+</div>
+
+<div class="callout">
+  <h3>2. Todas las cuentas se abren a mi nombre</h3>
+  <p>
+    Dominio, Business Manager de Meta, Instagram, cuenta de anuncios y el número de WhatsApp Business: se crean con la
+    titularidad mía y te agrego a vos como administrador. <b>Nunca al revés.</b>
+  </p>
+  <p>
+    No es por vos: es que al día siguiente de que una relación se termina, los accesos que quedaron del otro lado no se
+    recuperan, y ya vi ese final varias veces. Si arrancamos con la titularidad ordenada, no hay conversación incómoda
+    después.
+  </p>
+</div>
+
+<div class="callout">
+  <h3>3. El número del dolor tiene una línea que no podemos cruzar</h3>
+  <p>
+    Lo que arme Facundo van a ser <b>estimaciones del rubro</b>, no resultados medidos con nuestra app. Tenemos cero
+    usuarios: no hay un solo caso propio.
+  </p>
+  <p>
+    Entonces sirve para <b>dimensionar el problema</b> — "una vaca que queda vacía dos años seguidos te cuesta tanto".
+    Y no sirve para <b>prometer un resultado</b> — "con la app recuperás tantos kilos por cabeza". Esa segunda forma no
+    la podemos respaldar con nada, y es la clase de frase que después no se puede sostener.
+  </p>
+  <p>
+    Te pido además que el número venga <b>con fuente citable</b> (INTA, Rosgan, publicaciones del rubro) y no solamente
+    de la cabeza de Facundo. Un número con fuente aguanta la objeción del productor; uno sin fuente se cae en la primera
+    charla.
+  </p>
+</div>
+
+<h2>Una corrección: la primera jornada no se filma</h2><div class="rule"></div>
+<p>
+  Estoy de acuerdo con que el video del bastón pasando por la oreja y el animal apareciendo entero en pantalla es el
+  mejor anuncio que este producto va a tener. Pero <b>la primera jornada es la prueba del producto</b>: es el día en que
+  puede fallar el Bluetooth, puede quedar más lenta que el cuaderno, o puede aparecer algo que no previmos. Con una
+  cámara encima, nadie testea bien, y encima terminás con un video de cosas que no funcionan.
+</p>
+<p>
+  <b>Primera jornada: prueba, sin cámara.</b> Armá el guion igual y lo filmamos en la segunda, ya sabiendo qué mostrar y
+  con los problemas del primer día corregidos. Vas a tener un video mejor y yo voy a tener una validación limpia.
+</p>
+
+<h2>Quién hace qué</h2><div class="rule"></div>
+<table>
+  <tr><th>Qué</th><th>Quién</th><th>Estado</th></tr>
+  <tr><td>Capturas + paleta + tipografía</td><td>Rafael</td><td>Entregado con este documento</td></tr>
+  <tr><td>Video-recorrido del campo demo</td><td>Rafael</td><td>Esta semana</td></tr>
+  <tr><td>El nombre definitivo</td><td>Los cuatro</td><td>Se cierra en la reunión del 02/08</td></tr>
+  <tr><td>Chequeo de dominio, Instagram, INPI y "se entiende por teléfono"</td><td>Gonzalo</td><td>En la mesa, antes de cerrar</td></tr>
+  <tr><td>El número del dolor, con fuente</td><td>Facundo</td><td>Sale de la reunión → por escrito esta semana</td></tr>
+  <tr><td>Precio de Control Ganadero</td><td>Facundo + Rafael en paralelo</td><td>Esta semana</td></tr>
+  <tr><td>Horas semanales de venta y lista de 5-10 campos</td><td>Facundo</td><td>Por escrito</td></tr>
+  <tr><td>Fecha de la jornada de manga</td><td>Facundo + el campo</td><td>Mediados de agosto</td></tr>
+  <tr><td>Validación con SIGSA</td><td>Facundo</td><td>Externo, sin fecha</td></tr>
+  <tr><td>Tiendas + alta autoservicio</td><td>Rafael</td><td>2-3 semanas desde el nombre</td></tr>
+  <tr><td>Número de WhatsApp y quién contesta</td><td>Los tres</td><td>20 minutos, a coordinar</td></tr>
+  <tr><td>Plan, fechas y entregables de marketing</td><td>Gonzalo</td><td>Pendiente</td></tr>
+</table>
+
+<p class="foot">
+  Lo único que queda sin fecha nuestra es la validación con SIGSA, porque es un trámite externo. Todo lo demás está contestado.
+</p>
+
+</body>
+</html>

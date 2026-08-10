@@ -26,8 +26,10 @@ EARS estricto (`docs/specs.md`). "DEV" = ambiente de desarrollo/tests actual; "P
 ## R2 — Config de la app: `app.config.ts` + `APP_VARIANT`
 
 - **R2.1** El sistema deberá definir la configuración de Expo en `app/app.config.ts` (reemplazando `app/app.json`), preservando `name`/`slug`/`scheme`/`version`/`orientation`/`icon`/`plugins`/`permissions`/`eas.projectId`/`owner` actuales.
-- **R2.2** Cuando `APP_VARIANT` valga `development`, el sistema deberá exponer el nombre visible **"RAFAQ (Dev)"** y el identificador de app **`ar.rafq.app.dev`** (Android `package` e iOS `bundleIdentifier`).
-- **R2.3** Cuando `APP_VARIANT` no valga `development` (o esté ausente), el sistema deberá exponer el nombre **"RAFAQ"** y el identificador **`ar.rafq.app`**.
+- **R2.2** Cuando `APP_VARIANT` valga `development`, el sistema deberá exponer el nombre visible **"miTropero (Dev)"** y el identificador de app **`ar.rafq.app.dev`** (Android `package` e iOS `bundleIdentifier`).
+- **R2.3** Cuando `APP_VARIANT` no valga `development` (o esté ausente), el sistema deberá exponer el nombre **"miTropero"** y el identificador **`ar.rafq.app`**.
+
+> **Rebrand — 10/08/2026.** El producto pasó a llamarse **miTropero**. El **nombre visible** ya se cambió (fase 1). El **identificador** sigue siendo `ar.rafq.app` a propósito: cambiarlo obliga a crear App IDs y Services ID nuevos en Apple, OAuth Clients nuevos en Google y una app nueva en App Store Connect (la actual, `ascAppId 6797347994`, quedó atada al bundle viejo y ese dato es inmutable). Eso es la fase 2 y arranca por las consolas externas, no por el código. `slug`, `owner` y `projectId` no se tocan en ninguna de las dos fases: cambiarlos desengancha el proyecto de EAS y se pierden historial de builds y credentials.
 - **R2.4** El sistema deberá permitir que el target `development` (`ar.rafq.app.dev`) y el de producción (`ar.rafq.app`) coexistan instalados en el mismo dispositivo (identificadores distintos).
 - **R2.5** Si algún módulo consume `Constants.expoConfig.extra.supabaseUrl`, entonces el sistema deberá conservar ese valor en `extra` hasta que ese consumidor haya sido migrado (grep de consumidores obligatorio antes de eliminarlo).
 

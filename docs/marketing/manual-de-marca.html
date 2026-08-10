@@ -1,0 +1,1092 @@
+<!doctype html>
+<html lang="es-AR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Manual de marca — miTropero</title>
+<style>
+  * { box-sizing: border-box; }
+  :root {
+    --ink: #0F0E0C; --muted: #5C655F; --faint: #807A74;
+    --line: #E5E5E3; --bg: #faf9f9; --card: #F8F6F1; --accent: #1e5a3e;
+    --slotbg: #FBE6AE; --slotink: #855300;
+  }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: "Segoe UI", Inter, system-ui, sans-serif;
+    font-size: 15px; line-height: 24px; -webkit-font-smoothing: antialiased;
+  }
+  .layout { display: flex; align-items: flex-start; max-width: 1280px; margin: 0 auto; }
+
+  /* ── Índice lateral ── */
+  nav {
+    position: sticky; top: 0; height: 100vh; overflow-y: auto;
+    width: 268px; flex: none; padding: 30px 18px 40px 26px;
+    border-right: 1px solid var(--line); font-size: 13px; line-height: 19px;
+  }
+  nav .navtitle { font-size: 12px; letter-spacing: 1.2px; text-transform: uppercase; color: var(--faint); font-weight: 600; margin-bottom: 12px; }
+  nav a { display: block; color: var(--muted); text-decoration: none; padding: 4px 0; }
+  nav a:hover { color: var(--accent); }
+  nav .grp { font-size: 11px; letter-spacing: .9px; text-transform: uppercase; color: var(--faint); font-weight: 600; margin: 16px 0 4px; }
+  nav .n { color: var(--faint); font-variant-numeric: tabular-nums; margin-right: 6px; }
+
+  main { flex: 1; min-width: 0; padding: 40px 52px 90px; }
+
+  h1 { font-size: 34px; line-height: 42px; margin: 0 0 6px; letter-spacing: -0.6px; }
+  .sub { color: var(--muted); font-size: 15px; margin: 0 0 12px; }
+  section { scroll-margin-top: 24px; padding-top: 30px; break-inside: auto; }
+  h2 { font-size: 23px; line-height: 30px; margin: 0 0 4px; letter-spacing: -0.3px; }
+  h2 .n { color: var(--faint); font-weight: 400; font-size: 17px; margin-right: 10px; font-variant-numeric: tabular-nums; }
+  h3 { font-size: 16px; margin: 22px 0 6px; line-height: 22px; }
+  .rule { height: 1px; background: var(--line); margin: 8px 0 16px; }
+  p { margin: 0 0 12px; }
+  b, strong { font-weight: 600; }
+  ul, ol { margin: 0 0 12px; padding-left: 20px; }
+  li { margin-bottom: 6px; }
+  em { font-style: normal; color: var(--muted); }
+
+  table { border-collapse: collapse; width: 100%; font-size: 14px; margin: 8px 0 16px; }
+  th { text-align: left; font-size: 11px; letter-spacing: .8px; text-transform: uppercase; color: var(--faint); padding: 0 14px 8px 0; font-weight: 600; }
+  td { padding: 9px 14px 9px 0; border-top: 1px solid var(--line); vertical-align: top; }
+  .mono { font-family: Consolas, monospace; font-size: 13px; }
+
+  .slot { background: var(--slotbg); color: var(--slotink); font-weight: 600; padding: 1px 8px; border-radius: 5px; font-size: 13px; white-space: nowrap; }
+  .card { background: var(--card); border-radius: 12px; padding: 16px 20px; margin: 0 0 16px; break-inside: avoid; }
+  .card h3 { margin-top: 0; }
+  .card p:last-child, .card ul:last-child { margin-bottom: 0; }
+  .hard { border-left: 3px solid var(--accent); background: #fff; border-radius: 0 12px 12px 0; }
+  .warn { border-left: 3px solid #C0451F; background: #fff; border-radius: 0 12px 12px 0; }
+
+  .two { display: flex; gap: 26px; } .two > div { flex: 1; min-width: 0; }
+  .ok li::marker { color: var(--accent); }
+  .no li::marker { color: #C0451F; }
+
+  .sw { display: flex; flex-wrap: wrap; gap: 10px; margin: 4px 0 14px; }
+  .sw div { width: 128px; }
+  .sw .chip { height: 62px; border-radius: 9px; border: 1px solid rgba(15,14,12,.10); }
+  .sw .lb { font-size: 12px; line-height: 16px; margin-top: 5px; }
+  .sw .hx { font-family: Consolas, monospace; font-size: 11px; color: var(--faint); }
+
+  .quote { font-size: 17px; line-height: 26px; border-left: 3px solid var(--line); padding-left: 16px; margin: 0 0 14px; color: var(--ink); }
+  .foot { margin-top: 50px; border-top: 1px solid var(--line); padding-top: 16px; font-size: 13px; color: var(--faint); line-height: 19px; }
+
+  @media print {
+    nav { display: none; }
+    body { background: #fff; font-size: 10.5pt; line-height: 1.5; }
+    main { padding: 0; }
+    @page { margin: 15mm 14mm; }
+    section { break-before: page; padding-top: 0; }
+    section:first-of-type { break-before: avoid; }
+    h2 { break-after: avoid; } h3 { break-after: avoid; }
+    .card, table, .sw { break-inside: avoid; }
+  }
+  @media (max-width: 900px) {
+    nav { display: none; }
+    main { padding: 28px 22px 60px; }
+    .two { display: block; }
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+
+<nav>
+  <div class="navtitle">Manual de marca</div>
+  <div class="grp">Fundamentos</div>
+  <a href="#s1"><span class="n">01</span>Introducción</a>
+  <a href="#s2"><span class="n">02</span>Descripción</a>
+  <a href="#s3"><span class="n">03</span>Propósito</a>
+  <a href="#s4"><span class="n">04</span>Visión</a>
+  <a href="#s5"><span class="n">05</span>Misión</a>
+  <a href="#s6"><span class="n">06</span>Valores</a>
+  <a href="#s7"><span class="n">07</span>Personalidad</a>
+  <div class="grp">Estructura</div>
+  <a href="#s8"><span class="n">08</span>Arquitectura de marca</a>
+  <a href="#s9"><span class="n">09</span>Productos futuros</a>
+  <div class="grp">Verbal</div>
+  <a href="#s10"><span class="n">10</span>Tono de voz</a>
+  <a href="#s11"><span class="n">11</span>Mensajes clave</a>
+  <div class="grp">Logo</div>
+  <a href="#s12"><span class="n">12</span>Uso del logo</a>
+  <a href="#s13"><span class="n">13</span>Versiones</a>
+  <a href="#s14"><span class="n">14</span>Área de seguridad</a>
+  <a href="#s15"><span class="n">15</span>Tamaños mínimos</a>
+  <a href="#s16"><span class="n">16</span>Usos correctos</a>
+  <a href="#s17"><span class="n">17</span>Usos incorrectos</a>
+  <div class="grp">Color</div>
+  <a href="#s18"><span class="n">18</span>Paleta principal</a>
+  <a href="#s19"><span class="n">19</span>Paleta secundaria</a>
+  <a href="#s20"><span class="n">20</span>Neutros y fondos</a>
+  <a href="#s21"><span class="n">21</span>Colores funcionales</a>
+  <a href="#s22"><span class="n">22</span>Reglas de color</a>
+  <div class="grp">Tipografía</div>
+  <a href="#s23"><span class="n">23</span>Tipografías</a>
+  <a href="#s24"><span class="n">24</span>Jerarquías</a>
+  <div class="grp">Visual</div>
+  <a href="#s25"><span class="n">25</span>Estilo visual</a>
+  <a href="#s26"><span class="n">26</span>Iconografía</a>
+  <a href="#s27"><span class="n">27</span>Estilo fotográfico</a>
+  <a href="#s28"><span class="n">28</span>Componentes de interfaz</a>
+  <div class="grp">Aplicaciones</div>
+  <a href="#s29"><span class="n">29</span>Digitales</a>
+  <a href="#s30"><span class="n">30</span>Comerciales</a>
+  <a href="#s31"><span class="n">31</span>Firma de email</a>
+  <a href="#s32"><span class="n">32</span>Redes sociales</a>
+  <a href="#s33"><span class="n">33</span>Presentaciones</a>
+  <a href="#s34"><span class="n">34</span>Sitio web</a>
+  <div class="grp">Cierre</div>
+  <a href="#s35"><span class="n">35</span>Coherencia visual</a>
+  <a href="#s36"><span class="n">36</span>Qué falta cerrar</a>
+</nav>
+
+<main>
+
+<h1>Manual de marca — miTropero</h1>
+<p class="sub">App de gestión ganadera · Argentina · Versión 2 — borrador de trabajo, 10/08/2026 · nombre cerrado, identidad visual pendiente</p>
+
+<div class="card warn">
+  <h3>Cómo leer este documento</h3>
+  <p>
+    El nombre ya está cerrado: <b>miTropero</b>, escrito así —<code>mi</code> en minúscula, pegado, con la <code>T</code>
+    mayúscula—. Es la única grafía correcta: no "Mi Tropero", no "MiTropero", no "MITROPERO" salvo en el registro de
+    marca del INPI, donde va en mayúsculas por formato del trámite. Donde queda un <span class="slot">slot</span> amarillo
+    falta una decisión de diseño que todavía no está tomada —el logo y los valores de color—; el resto del documento ya
+    está escrito y no depende de eso.
+  </p>
+  <p>
+    <b>Los capítulos de color y tipografía tienen dos capas:</b> las <b>reglas duras</b>, que salen de cómo se usa el
+    producto y no se negocian, y los <b>valores</b>, que los define diseño. Una paleta preciosa que rompa una regla dura
+    hace que un operario no pueda leer la pantalla al sol, y eso no es un detalle estético: es que deja de usar la app.
+  </p>
+</div>
+
+<!-- ══════════════════ FUNDAMENTOS ══════════════════ -->
+
+<section id="s1">
+  <h2><span class="n">01</span>Introducción de marca</h2><div class="rule"></div>
+  <p>
+    Este manual define cómo se ve, cómo suena y cómo se comporta miTropero en cada lugar donde
+    aparece: la app, la tienda de aplicaciones, el sitio, las redes, una presentación a un productor y un folleto sobre
+    el mostrador de una agroveterinaria.
+  </p>
+  <p>Está escrito para que lo usen cuatro tipos de personas, sin que ninguna tenga que preguntar:</p>
+  <ul>
+    <li><b>Diseño</b> — para crear piezas nuevas sin reinventar la identidad cada vez.</li>
+    <li><b>Desarrollo</b> — para que lo que se construye coincida con lo que se diseñó.</li>
+    <li><b>Marketing y redes</b> — para que la voz sea la misma en un aviso y en un mensaje de WhatsApp.</li>
+    <li><b>Comercial</b> — para que una propuesta a un productor se vea y suene como la app que después va a usar.</li>
+  </ul>
+
+  <div class="card hard">
+    <h3>La regla que manda sobre todas las demás</h3>
+    <p>
+      Esta marca no vive en una pantalla calibrada dentro de una oficina. Vive en <b>un celular, al aire libre, bajo sol
+      directo, en la mano de alguien con guante, barro y a veces sangre</b>, que está apurado porque tiene un animal
+      esperando en la manga.
+    </p>
+    <p>
+      Cada vez que haya que elegir entre que algo se vea más lindo y que se lea mejor en esa situación,
+      <b>gana que se lea</b>. No es una postura de humildad: es que si el peón no puede usar la app en el corral, vuelve
+      al cuaderno en la segunda jornada y no avisa.
+    </p>
+  </div>
+
+  <p>
+    <b>Fuente de verdad.</b> Los valores de color, tipografía y espaciado viven en el código de la app, en un único
+    archivo, y hay una verificación automática que rompe la compilación si una pantalla escribe un color a mano. Este
+    manual y ese archivo tienen que decir lo mismo. Si algún día no coinciden, se corrige el que esté desactualizado —
+    nunca conviven dos verdades.
+  </p>
+</section>
+
+<section id="s2">
+  <h2><span class="n">02</span>Descripción de miTropero</h2><div class="rule"></div>
+  <p>
+    miTropero es una aplicación móvil para manejar un rodeo de cría bovina desde el celular.
+    Se usa en la manga, animal por animal, con o sin señal de internet.
+  </p>
+  <p>Hace tres cosas:</p>
+  <ol>
+    <li><b>Captura el dato donde se genera.</b> Se pasa el bastón por la caravana electrónica del animal y la lectura entra sola; el tacto, el peso, la vacuna y la condición corporal se cargan con botones grandes, una decisión por pantalla.</li>
+    <li><b>Lo convierte en historia y en números.</b> Cada animal tiene su ficha con todo lo que le pasó, y el rodeo tiene indicadores reales: porcentaje de preñez, de parición, de destete, peso por categoría, comparación entre campañas.</li>
+    <li><b>Le resuelve el trámite.</b> Genera el archivo para declararle a SENASA las identificaciones electrónicas dentro del plazo obligatorio.</li>
+  </ol>
+  <p>
+    Es <b>offline-first</b> —funciona sin señal y sincroniza sola cuando vuelve—, <b>multi-campo</b> y
+    <b>agnóstica de la marca del hardware</b>: no obliga a comprar un bastón ni una balanza determinados.
+  </p>
+</section>
+
+<section id="s3">
+  <h2><span class="n">03</span>Propósito de marca</h2><div class="rule"></div>
+  <p class="quote">
+    Que el dato que hoy se pierde en un cuaderno vuelva convertido en una decisión que le hace ganar plata al productor.
+  </p>
+  <p>
+    En el campo argentino la información no falta: se genera todos los días, en cada tacto, en cada pesada, en cada
+    parto. Lo que falta es que sobreviva. Se anota en una hoja, se pasa a una planilla si alguien se acuerda, y termina
+    en un informe que se mira una vez y se archiva.
+  </p>
+  <p>El propósito no es digitalizar el cuaderno. Es cerrar el círculo entre el dato y la decisión.</p>
+</section>
+
+<section id="s4">
+  <h2><span class="n">04</span>Visión</h2><div class="rule"></div>
+  <p class="quote">Ser el sistema operativo de la gestión ganadera argentina.</p>
+  <p>
+    Que cualquier campo —de cría hoy, de invernada, feedlot, tambo o cabaña mañana— maneje su hacienda sobre esta
+    plataforma, sin importar qué marca de bastón, de balanza o de caravana haya comprado.
+  </p>
+  <p>
+    La palabra importante es <b>argentina</b>. La ventaja se construye sobre lo que es específico de acá: la caravana
+    oficial, la obligación de SENASA, el modo en que se trabaja una manga en la provincia de Buenos Aires. No es una
+    limitación: es el foso.
+  </p>
+</section>
+
+<section id="s5">
+  <h2><span class="n">05</span>Misión</h2><div class="rule"></div>
+  <p class="quote">Capturar el dato una sola vez, en el campo, y devolverlo convertido en decisiones.</p>
+  <p>Tres compromisos operativos que se desprenden de eso y que la marca tiene que sostener:</p>
+  <ul>
+    <li><b>Una sola carga.</b> Lo que se carga en la manga no se vuelve a tipear en ningún lado.</li>
+    <li><b>Sin señal también.</b> El corral no tiene datos y eso no es un caso borde: es el caso normal.</li>
+    <li><b>Sin cambiar el equipo.</b> Nos adaptamos al hardware que el campo ya tiene.</li>
+  </ul>
+</section>
+
+<section id="s6">
+  <h2><span class="n">06</span>Valores</h2><div class="rule"></div>
+  <p>No son adjetivos de pared. Son las cinco reglas con las que se decide cuando hay que elegir.</p>
+
+  <h3>1. Velocidad operativa antes que elegancia</h3>
+  <p>
+    El operario trabaja con una mano libre, con barro o con sangre. Botones grandes, letra grande, una decisión por
+    pantalla. Si algo es más lindo pero más lento de usar en el corral, no va.
+  </p>
+
+  <h3>2. Sin señal no es una excepción</h3>
+  <p>
+    Toda función de carga tiene que andar sin internet. Una app que necesita señal en el campo es una app que no se
+    usa en el campo.
+  </p>
+
+  <h3>3. El veterinario primero</h3>
+  <p>
+    El vet es quien recomienda la herramienta y quien la pone a trabajar. Nunca se degrada su experiencia por un motivo
+    comercial.
+  </p>
+
+  <h3>4. Decir el estado real</h3>
+  <p>
+    Se comunica lo que el producto hace hoy, no lo que va a hacer. Nada de prometer una función que todavía está en
+    trámite o una mejora que no medimos. La credibilidad en este rubro se pierde una sola vez.
+  </p>
+
+  <h3>5. El dato es del productor</h3>
+  <p>
+    Su información es suya: se la puede llevar, exportar y usar en el trámite oficial. No se lo retiene por
+    conveniencia.
+  </p>
+</section>
+
+<section id="s7">
+  <h2><span class="n">07</span>Personalidad de marca</h2><div class="rule"></div>
+  <p class="quote"><b>Confiable · Técnica · Directa · De campo</b></p>
+
+  <table>
+    <tr><th style="width:130px">Rasgo</th><th>Qué significa en la práctica</th></tr>
+    <tr><td><b>Confiable</b></td><td>Muestra el estado de las cosas sin adornar: si algo no sincronizó, lo dice. Si un dato falta, lo marca. Nunca finge que todo está bien.</td></tr>
+    <tr><td><b>Técnica</b></td><td>Usa las palabras del rubro con precisión: tacto, entore, destete, condición corporal, cabeza / cuerpo / cola. No traduce a lenguaje de oficina.</td></tr>
+    <tr><td><b>Directa</b></td><td>Dice qué hacer en una línea. Sin rodeos, sin marketing adentro del producto.</td></tr>
+    <tr><td><b>De campo</b></td><td>Está diseñada para el corral, no adaptada al corral. Se nota en el tamaño de los botones y en que funcione sin señal.</td></tr>
+  </table>
+
+  <div class="two">
+    <div>
+      <h3>Es</h3>
+      <ul class="ok">
+        <li>Una herramienta de trabajo</li>
+        <li>Precisa con el vocabulario del rubro</li>
+        <li>Sobria: el protagonismo es del dato</li>
+        <li>Respetuosa del tiempo del que la usa</li>
+      </ul>
+    </div>
+    <div>
+      <h3>No es</h3>
+      <ul class="no">
+        <li>Simpática ni graciosa: nadie está para chistes con veinte vacas esperando</li>
+        <li>Aspiracional ni de estilo de vida</li>
+        <li>Tecnológica por la tecnología: el Bluetooth no es el argumento</li>
+        <li>Condescendiente: el productor sabe más de ganadería que nosotros</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Si fuera una persona</h3>
+    <p>
+      Sería el asesor técnico que llega temprano, no habla de más, sabe exactamente qué mirar, te dice el número sin
+      maquillarlo y se va cuando terminó el trabajo. No el vendedor que te muestra un folleto.
+    </p>
+  </div>
+</section>
+
+<!-- ══════════════════ ESTRUCTURA ══════════════════ -->
+
+<section id="s8">
+  <h2><span class="n">08</span>Arquitectura de marca</h2><div class="rule"></div>
+  <p>
+    <b>Marca única.</b> Un solo nombre para la empresa y para el producto. No hay submarcas, ni nombres separados por
+    módulo, ni una marca para la app y otra para la compañía.
+  </p>
+  <p>
+    Es la decisión correcta para el tamaño actual: un equipo chico no puede sostener dos marcas, y el mercado apenas nos
+    conoce. Toda la inversión de reconocimiento va a un solo lugar.
+  </p>
+
+  <h3>Cuándo se revisaría</h3>
+  <ul>
+    <li>Si aparece un producto para un público completamente distinto del productor y su veterinario.</li>
+    <li>Si se vendiera hardware con marca propia — hoy explícitamente descartado.</li>
+  </ul>
+  <p>Mientras eso no pase, <b>todo se llama miTropero</b>.</p>
+</section>
+
+<section id="s9">
+  <h2><span class="n">09</span>Relación con futuros productos</h2><div class="rule"></div>
+  <p>
+    Hoy el producto cubre <b>cría bovina</b>. La plataforma está construida para extenderse a invernada, feedlot, tambo
+    y cabaña, y más adelante a otras especies. También hay planes distintos para el productor y para el veterinario.
+  </p>
+
+  <h3>Regla de nombres</h3>
+  <p>
+    Los productos y planes futuros se nombran <b>descriptivamente debajo de la marca</b>, nunca con marca propia:
+  </p>
+  <table>
+    <tr><th style="width:250px">Correcto</th><th>Incorrecto</th></tr>
+    <tr><td>miTropero Invernada</td><td>Un nombre de fantasía nuevo para el módulo</td></tr>
+    <tr><td>miTropero Vet</td><td>Una marca aparte para los veterinarios</td></tr>
+    <tr><td>miTropero Tambo</td><td>Un logo distinto por sistema productivo</td></tr>
+  </table>
+  <p>
+    Los descriptores usan la <b>palabra del rubro</b>, no una inventada. Van en el mismo tipo de letra que la marca, en
+    un peso menor, y nunca alteran el logo.
+  </p>
+
+  <div class="card hard">
+    <h3>Consecuencia para la elección del nombre</h3>
+    <p>
+      El nombre <b>no puede encerrarnos en cría</b>. Un nombre que hable de vacas, de terneros o de parición va a quedar
+      chico el día que entre invernada o tambo, que son mercados más grandes. Tiene que aguantar la extensión sin
+      sonar forzado.
+    </p>
+  </div>
+</section>
+
+<!-- ══════════════════ VERBAL ══════════════════ -->
+
+<section id="s10">
+  <h2><span class="n">10</span>Tono de voz</h2><div class="rule"></div>
+
+  <h3>Reglas fijas</h3>
+  <ul>
+    <li><b>Voseo argentino</b>, siempre. "Acercá", "Cargá", "Elegí". Nunca "acerca" ni "acerque".</li>
+    <li><b>Segunda persona.</b> Se le habla a una persona concreta, no a un usuario genérico.</li>
+    <li><b>Frases cortas.</b> Una idea por frase. Se lee de reojo, con el celular en una mano.</li>
+    <li><b>Vocabulario del rubro sin traducir.</b> Se dice tacto, entore, destete, boca llena, cabeza / cuerpo / cola.</li>
+    <li><b>Tildes correctas.</b> Siempre, en todos lados, también en redes.</li>
+    <li><b>Números en formato argentino:</b> coma decimal y punto de miles. 385 kg · 4,5 · 1.050 animales.</li>
+  </ul>
+
+  <h3>El tono real de la app, como referencia</h3>
+  <p>Estas frases están hoy en el producto y son la mejor definición del tono: copiá de acá antes que inventar.</p>
+  <table>
+    <tr><th style="width:52%">Lo que dice</th><th>Por qué funciona</th></tr>
+    <tr><td>"Acercá el bastón al animal"</td><td>Un verbo, una acción, cero explicación de más.</td></tr>
+    <tr><td>"La lectura entra sola, sin tocar la pantalla"</td><td>Anticipa la duda antes de que aparezca.</td></tr>
+    <tr><td>"¿Sin chip? Ingresá la caravana"</td><td>Ofrece la salida en el momento exacto en que hace falta.</td></tr>
+    <tr><td>"Generá el archivo para declarar las caravanas electrónicas en SIGSA web"</td><td>Dice el resultado concreto, con el nombre real del sistema oficial.</td></tr>
+    <tr><td>"Completá la raza para SIGSA"</td><td>No reta: explica para qué sirve el dato que falta.</td></tr>
+  </table>
+
+  <div class="two">
+    <div>
+      <h3>Sí</h3>
+      <ul class="ok">
+        <li>"Se cargaron 42 animales. 3 quedaron sin sincronizar."</li>
+        <li>"El bastón se desconectó. Podés seguir cargando a mano."</li>
+        <li>"Esta vaca no tiene tacto registrado en esta campaña."</li>
+      </ul>
+    </div>
+    <div>
+      <h3>No</h3>
+      <ul class="no">
+        <li>"¡Uy! Algo salió mal 😅"</li>
+        <li>"Optimizá la performance productiva de tu unidad ganadera."</li>
+        <li>"Estamos sincronizando tus datos para brindarte la mejor experiencia."</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card warn">
+    <h3>Lo que nunca se dice</h3>
+    <ul>
+      <li><b>Promesas de resultado.</b> "Con miTropero recuperás X kilos por cabeza" no se puede respaldar: todavía no hay un solo caso medido. Se puede decir cuánto cuesta el problema, citando la fuente; no cuánto se gana con nosotros.</li>
+      <li><b>Funciones que no están disponibles.</b> Mientras la exportación a SENASA no esté validada por el organismo, no aparece como promesa en ninguna pieza.</li>
+      <li><b>Hablar mal de la competencia por nombre.</b> Se contrasta con hechos —informes estáticos contra historia por animal—, no con adjetivos.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="s11">
+  <h2><span class="n">11</span>Mensajes clave</h2><div class="rule"></div>
+
+  <h3>Mensaje central</h3>
+  <p class="quote">
+    Bastoneás la caravana en la manga y queda cargado todo: el tacto, el peso, la vacuna. Sin señal y sin cuaderno.
+    Después el rodeo te habla con números de verdad.
+  </p>
+
+  <h3>Por interlocutor</h3>
+  <table>
+    <tr><th style="width:130px">A quién</th><th>Qué le importa</th><th>Qué se le dice</th></tr>
+    <tr>
+      <td><b>Al productor</b><br><em>decide y paga</em></td>
+      <td>Que no se le escape plata y cumplir con lo obligatorio</td>
+      <td>"Sabés qué pasó con cada animal, no solo cómo viene el rodeo. Y el trámite de las caravanas sale de acá."</td>
+    </tr>
+    <tr>
+      <td><b>Al veterinario</b><br><em>recomienda</em></td>
+      <td>Trabajar más rápido y verse profesional frente a su cliente</td>
+      <td>"Cargás en la manga sin papeles y le dejás el informe hecho el mismo día."</td>
+    </tr>
+    <tr>
+      <td><b>Al capataz o peón</b><br><em>la usa</em></td>
+      <td>Que no le complique la jornada</td>
+      <td>"Pasás el bastón y listo. Botones grandes, se usa con guante, anda sin señal."</td>
+    </tr>
+  </table>
+
+  <h3>Los tres argumentos, en orden de fuerza</h3>
+  <ol>
+    <li><b>La historia individual del animal.</b> Lo que hoy no existe en el mercado: informes contra ficha por animal.</li>
+    <li><b>La carga en la manga sin papel.</b> Se ahorra la jornada de pasar planillas a la noche.</li>
+    <li><b>El trámite de SENASA resuelto.</b> El más fuerte de todos <b>cuando esté validado</b>; hasta entonces no se usa.</li>
+  </ol>
+</section>
+
+<!-- ══════════════════ LOGO ══════════════════ -->
+
+<section id="s12">
+  <h2><span class="n">12</span>Uso del logo</h2><div class="rule"></div>
+  <div class="card warn">
+    <p>
+      <b>El logo todavía no existe.</b> Las secciones 12 a 17 definen las <b>reglas</b> que va a tener que cumplir
+      cualquier logo que se diseñe. El arte entra en los <span class="slot">slots</span> sin reescribir nada de esto.
+    </p>
+  </div>
+  <p>
+    El logo es el único elemento que no se modifica nunca. Todo lo demás —color, foto, disposición— puede adaptarse a la
+    pieza; el logo no.
+  </p>
+  <p>
+    Se aplica <b>siempre desde el archivo original</b>. Nunca se copia de una captura, ni se rearma con la tipografía de
+    la marca, ni se redibuja "parecido".
+  </p>
+  <p><span class="slot">Aplicación principal: pendiente de arte</span></p>
+</section>
+
+<section id="s13">
+  <h2><span class="n">13</span>Versiones del logo</h2><div class="rule"></div>
+  <p>Se necesitan estas versiones. Cada una tiene un uso específico y no son intercambiables.</p>
+  <table>
+    <tr><th style="width:200px">Versión</th><th>Cuándo se usa</th><th style="width:110px">Formato</th></tr>
+    <tr><td><b>Principal (horizontal)</b></td><td>Uso general: web, presentaciones, documentos, firma de email</td><td>SVG + PNG</td></tr>
+    <tr><td><b>Vertical / apilada</b></td><td>Espacios angostos y formatos cuadrados</td><td>SVG + PNG</td></tr>
+    <tr><td><b>Isotipo solo</b></td><td>Ícono de app, avatar de redes, favicon, marca de agua</td><td>SVG + PNG</td></tr>
+    <tr><td><b>Monocromática</b></td><td>Un solo color: sellos, bordados, fax de una guía, ícono temático de Android</td><td>SVG</td></tr>
+    <tr><td><b>Negativa</b></td><td>Sobre fondos oscuros o sobre foto</td><td>SVG + PNG</td></tr>
+  </table>
+  <p><span class="slot">Muestras: pendientes de arte</span></p>
+
+  <div class="card hard">
+    <h3>Archivos que se necesitan para publicar la app</h3>
+    <p>Esto no es preferencia: sin estos archivos la aplicación no se puede subir a las tiendas.</p>
+    <ul>
+      <li><b>Ícono 1024 × 1024 px, sin transparencia</b> (requisito de Apple).</li>
+      <li><b>Ícono adaptativo de Android en dos capas separadas</b> (frente y fondo). El sistema lo recorta a círculo o a cuadrado redondeado según el fabricante, así que el isotipo tiene que sobrevivir un recorte circular con margen.</li>
+      <li><b>Versión monocromática</b> del isotipo, para el ícono temático de Android 13 y posteriores.</li>
+      <li><b>Splash</b>: isotipo como imagen suelta más el color de fondo. No una imagen a sangre.</li>
+      <li><b>Favicon</b> para el sitio.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="s14">
+  <h2><span class="n">14</span>Área de seguridad</h2><div class="rule"></div>
+  <p>
+    Alrededor del logo tiene que quedar un espacio libre donde no entra ningún otro elemento: ni texto, ni imagen, ni
+    borde, ni otro logo.
+  </p>
+  <p>
+    <b>La medida es proporcional al propio logo</b>, así escala sola. La unidad de referencia se define con el arte
+    —normalmente la altura de la inicial del wordmark o el ancho del isotipo— y el área libre equivale a
+    <b>una unidad por cada lado</b>.
+  </p>
+  <p>
+    En cobranding —por ejemplo junto al logo de una agroveterinaria o de una sociedad rural— la separación entre marcas
+    es de <b>dos unidades</b>, y ninguna queda visualmente subordinada por tamaño.
+  </p>
+  <p><span class="slot">Diagrama del área de seguridad: pendiente de arte</span></p>
+</section>
+
+<section id="s15">
+  <h2><span class="n">15</span>Tamaños mínimos</h2><div class="rule"></div>
+  <table>
+    <tr><th style="width:230px">Aplicación</th><th style="width:150px">Mínimo</th><th>Nota</th></tr>
+    <tr><td>Logo horizontal en pantalla</td><td>24 px de alto</td><td>Abajo de eso el wordmark deja de leerse</td></tr>
+    <tr><td>Isotipo en pantalla</td><td>32 px</td><td>—</td></tr>
+    <tr><td>Ícono de app</td><td><b>48 px</b></td><td>Es como se ve en la lista de aplicaciones del teléfono</td></tr>
+    <tr><td>Favicon</td><td>16 px</td><td>Casi siempre exige una versión simplificada</td></tr>
+    <tr><td>Logo impreso</td><td>15 mm de ancho</td><td>Tarjetas, folletos</td></tr>
+  </table>
+  <div class="card hard">
+    <h3>Las dos pruebas que el logo tiene que pasar</h3>
+    <ol>
+      <li><b>A 48 píxeles.</b> Si a ese tamaño se convierte en una mancha, no sirve como ícono de app — y el ícono es la superficie de marca más vista de todas.</li>
+      <li><b>En un solo color, en negro plano.</b> Si deja de reconocerse sin color, depende del color para existir, y eso lo rompe en un sello, un bordado o una impresión en blanco y negro.</li>
+    </ol>
+  </div>
+</section>
+
+<section id="s16">
+  <h2><span class="n">16</span>Usos correctos</h2><div class="rule"></div>
+  <ul class="ok">
+    <li>Sobre <b>fondo plano</b>, con el área de seguridad respetada.</li>
+    <li>En la versión que corresponde al fondo: la positiva sobre claro, la negativa sobre oscuro.</li>
+    <li>Sobre foto <b>solo</b> si hay una zona limpia con contraste suficiente, o con un velo de color por debajo.</li>
+    <li>Siempre desde el archivo original, sin reescalar de un PNG chico.</li>
+    <li>Alineado a la grilla de la pieza, no puesto a ojo.</li>
+  </ul>
+</section>
+
+<section id="s17">
+  <h2><span class="n">17</span>Usos incorrectos</h2><div class="rule"></div>
+  <ul class="no">
+    <li><b>Deformarlo.</b> Estirar o achatar. Se escala siempre proporcional.</li>
+    <li><b>Rotarlo</b> o inclinarlo.</li>
+    <li><b>Cambiarle el color</b> por fuera de las versiones definidas.</li>
+    <li><b>Agregarle efectos</b>: sombra, brillo, relieve, contorno, degradado.</li>
+    <li><b>Reescribirlo con otra tipografía</b> o rehacerlo a mano.</li>
+    <li><b>Encerrarlo</b> en una caja, un círculo o una forma que no sea parte del diseño.</li>
+    <li><b>Invadir el área de seguridad</b> con texto u otros elementos.</li>
+    <li><b>Ponerlo sobre una foto sin contraste</b>, donde se pierde.</li>
+    <li><b>Alterar la proporción</b> entre isotipo y wordmark, o separarlos cuando van juntos.</li>
+    <li><b>Usarlo como textura</b>, repetido de fondo.</li>
+  </ul>
+  <p><span class="slot">Ejemplos gráficos de cada error: pendientes de arte</span></p>
+</section>
+
+<!-- ══════════════════ COLOR ══════════════════ -->
+
+<section id="s18">
+  <h2><span class="n">18</span>Paleta cromática principal</h2><div class="rule"></div>
+
+  <div class="card warn">
+    <p>
+      <b>Los valores de esta sección los define diseño.</b> Lo que está cerrado es la <b>estructura</b> —qué roles
+      existen— y las <b>reglas duras</b> que cualquier paleta tiene que cumplir. Los contrastes de la paleta propuesta
+      se miden antes de aprobarla; no se estiman a ojo.
+    </p>
+  </div>
+
+  <h3>Reglas duras (no se negocian)</h3>
+  <ol>
+    <li><b>Todo par de texto sobre fondo alcanza 4.5:1</b> (nivel AA de la norma WCAG 2.1). La pantalla se lee bajo sol directo: no es accesibilidad teórica, es legibilidad real.</li>
+    <li><b>El color principal tiene que aceptar texto blanco encima</b> con ese mismo 4.5:1. El botón principal y el botón flotante llevan texto e ícono blancos; si el principal no lo permite, hay que rediseñar todos los botones de la app.</li>
+    <li><b>Los cuatro estados operativos son inconfundibles entre sí</b> (sección 21).</li>
+    <li><b>Se distinguen también por luminosidad, no solo por tono</b> (sección 21).</li>
+    <li><b>El fondo base es neutro, sin tinte.</b> Ya se probó un blanco levemente azulado y ensucia el color de marca de forma visible.</li>
+    <li><b>La paleta se piensa desde el principio con una versión oscura.</b> Todavía no existe, pero para una app que se usa al sol probablemente haga falta; si se contempla ahora, después no hay que rehacerla.</li>
+  </ol>
+
+  <h3>Estructura a completar</h3>
+  <table>
+    <tr><th style="width:180px">Rol</th><th style="width:110px">HEX</th><th style="width:120px">RGB</th><th>Uso</th></tr>
+    <tr><td><b>Color principal</b></td><td><span class="slot">#______</span></td><td><span class="slot">—</span></td><td>Botones principales, botón flotante, ítem activo, íconos de marca, enlaces</td></tr>
+    <tr><td><b>Variante oscura</b></td><td><span class="slot">#______</span></td><td><span class="slot">—</span></td><td>Estado presionado y jerarquías secundarias</td></tr>
+    <tr><td><b>Variante media</b></td><td><span class="slot">#______</span></td><td><span class="slot">—</span></td><td>Degradados y botones secundarios</td></tr>
+    <tr><td><b>Contenedor claro</b></td><td><span class="slot">#______</span></td><td><span class="slot">—</span></td><td>Fondo de badges e íconos, halo del botón flotante</td></tr>
+  </table>
+
+  <h3>Punto de partida documentado</h3>
+  <p>
+    La paleta que la app usa hoy está medida y funcionando. Sirve como referencia de qué se está reemplazando y como
+    prueba de que la estructura cierra:
+  </p>
+  <div class="sw">
+    <div><div class="chip" style="background:#1e5a3e"></div><div class="lb">Principal actual<div class="hx">#1E5A3E · 8.12 sobre blanco</div></div></div>
+    <div><div class="chip" style="background:#184a33"></div><div class="lb">Variante oscura<div class="hx">#184A33</div></div></div>
+    <div><div class="chip" style="background:#2e8259"></div><div class="lb">Variante media<div class="hx">#2E8259</div></div></div>
+    <div><div class="chip" style="background:#93cfac"></div><div class="lb">Contenedor<div class="hx">#93CFAC</div></div></div>
+  </div>
+</section>
+
+<section id="s19">
+  <h2><span class="n">19</span>Paleta cromática secundaria</h2><div class="rule"></div>
+  <p>
+    Es de apoyo institucional: piezas comerciales, presentaciones, bloques destacados de la web. <b>No entra en la
+    app</b>, donde el color tiene significado operativo y cualquier tono extra genera ambigüedad.
+  </p>
+  <table>
+    <tr><th style="width:180px">Rol</th><th style="width:110px">HEX</th><th>Uso</th></tr>
+    <tr><td>Secundario 1</td><td><span class="slot">#______</span></td><td>Bloques destacados y títulos alternativos en piezas comerciales</td></tr>
+    <tr><td>Secundario 2</td><td><span class="slot">#______</span></td><td>Contraste en piezas institucionales</td></tr>
+    <tr><td>Secundario 3</td><td><span class="slot">#______</span></td><td>Fondos sobrios y textos alternativos</td></tr>
+  </table>
+  <div class="card hard">
+    <p>
+      <b>Restricción:</b> ningún color secundario puede parecerse a los cuatro estados operativos (sección 21). Si un
+      folleto usa un naranja parecido al de alerta, el productor aprende un código de colores que después le miente
+      dentro de la app.
+    </p>
+  </div>
+</section>
+
+<section id="s20">
+  <h2><span class="n">20</span>Colores neutros, fondos y texto</h2><div class="rule"></div>
+
+  <h3>Fondos</h3>
+  <table>
+    <tr><th style="width:180px">Rol</th><th style="width:110px">HEX</th><th>Uso</th></tr>
+    <tr><td>Fondo principal</td><td><span class="slot">#______</span></td><td>Fondo base de la app y de las secciones del sitio. <b>Neutro, sin tinte frío ni cálido.</b></td></tr>
+    <tr><td>Fondo elevado</td><td><span class="slot">#______</span></td><td>Tarjetas y contenedores. Puede ser levemente cálido para separarlo del fondo.</td></tr>
+    <tr><td>Blanco</td><td class="mono">#FFFFFF</td><td>Modales, formularios, contenedores de máxima legibilidad</td></tr>
+    <tr><td>Divisor</td><td><span class="slot">#______</span></td><td>Líneas y separadores</td></tr>
+  </table>
+
+  <h3>Texto</h3>
+  <table>
+    <tr><th style="width:180px">Rol</th><th style="width:110px">HEX</th><th>Uso</th></tr>
+    <tr><td>Texto principal</td><td><span class="slot">#______</span></td><td>Títulos y contenido. <b>Negro de marca, no negro puro</b>: el negro absoluto vibra sobre fondo claro.</td></tr>
+    <tr><td>Texto secundario</td><td><span class="slot">#______</span></td><td>Bajadas y descripciones. Mínimo 4.5:1 sobre el fondo.</td></tr>
+    <tr><td>Texto auxiliar</td><td><span class="slot">#______</span></td><td>Notas y etiquetas. Si no llega a 4.5:1, <b>solo en tamaño grande</b>.</td></tr>
+    <tr><td>Texto sobre color</td><td class="mono">#FFFFFF</td><td>Sobre el principal y sobre los estados</td></tr>
+  </table>
+  <p>Referencia de la paleta actual: texto principal <span class="mono">#0F0E0C</span> (18.36:1), secundario <span class="mono">#5C655F</span> (5.74:1), auxiliar <span class="mono">#807A74</span> (4.03:1, solo grande), divisor <span class="mono">#E5E5E3</span>.</p>
+</section>
+
+<section id="s21">
+  <h2><span class="n">21</span>Colores funcionales: los cuatro estados</h2><div class="rule"></div>
+  <p>
+    <b>Este es el capítulo más importante del sistema de color</b>, y el que lo diferencia de una marca común. Estos
+    colores no decoran: <b>codifican decisiones sobre un animal</b>, y alguien las lee con guante, a un metro de
+    distancia y con el sol de frente.
+  </p>
+  <table>
+    <tr><th style="width:150px">Estado</th><th style="width:110px">HEX</th><th>Qué comunica</th><th style="width:130px">Referencia actual</th></tr>
+    <tr><td><b>Positivo</b></td><td><span class="slot">#______</span></td><td>Apta, preñada, confirmado, todo en orden</td><td class="mono">#1E5A3E</td></tr>
+    <tr><td><b>Alerta</b></td><td><span class="slot">#______</span></td><td>No apta, vacía, resultado negativo, error</td><td class="mono">#C0451F</td></tr>
+    <tr><td><b>Pausa</b></td><td><span class="slot">#______</span></td><td>Diferida, posponer la decisión, advertencia</td><td class="mono">#9A6206</td></tr>
+    <tr><td><b>Clínico</b></td><td><span class="slot">#______</span></td><td>En tratamiento, información sanitaria</td><td class="mono">#106B7A</td></tr>
+  </table>
+  <p>
+    Hay además un par para <b>descarte</b> (animal marcado para salir del rodeo), que en la paleta actual es un ámbar
+    oscuro sobre ámbar pálido — <span class="mono">#855300</span> sobre <span class="mono">#FBE6AE</span>.
+  </p>
+
+  <div class="card warn">
+    <h3>El error que la paleta nueva tiene que corregir</h3>
+    <p>
+      En la paleta actual, <b>alerta</b> y <b>pausa</b> tienen luminancia prácticamente idéntica: el contraste entre
+      ellos es de <b>1.00</b>. Simulados con daltonismo rojo-verde, los dos caen en el mismo tono oliva
+      (<span class="mono">#877819</span> y <span class="mono">#82730B</span>).
+    </p>
+    <p>
+      Eso afecta a cerca de <b>uno de cada doce varones</b>, y el usuario de manga es casi siempre varón. En la pantalla
+      de tacto de vaquillona son dos de los tres bloques grandes. Hoy lo salva el texto del botón — o sea que
+      <b>el color no está haciendo el trabajo que decimos que hace</b>.
+    </p>
+    <p>
+      <b>Regla que sale de ahí:</b> los cuatro estados se separan <b>también por luminosidad</b>, no solo por tono.
+      Prueba de aceptación: pasar la paleta por un simulador de daltonismo y verificar que los cuatro sigan siendo
+      distinguibles.
+    </p>
+  </div>
+
+  <div class="card hard">
+    <p><b>El color nunca va solo.</b> Todo estado se comunica con al menos dos señales de las tres: color, texto e ícono o forma. Un usuario que no distingue el color tiene que poder operar igual.</p>
+  </div>
+</section>
+
+<section id="s22">
+  <h2><span class="n">22</span>Reglas de aplicación del color</h2><div class="rule"></div>
+
+  <h3>Proporción de uso</h3>
+  <table>
+    <tr><th style="width:90px">Proporción</th><th>Qué</th></tr>
+    <tr><td><b>60 %</b></td><td>Fondos neutros</td></tr>
+    <tr><td><b>25 %</b></td><td>Superficies y tarjetas</td></tr>
+    <tr><td><b>10 %</b></td><td>Color principal: botones, botón flotante, íconos de marca, ítem activo</td></tr>
+    <tr><td><b>5 %</b></td><td>Acentos, badges y estados</td></tr>
+  </table>
+  <p>
+    La marca <b>no se comunica por saturación</b>: se comunica por dónde aparece el color. En una pantalla llena de
+    verde, el botón verde deja de verse.
+  </p>
+
+  <h3>Reglas</h3>
+  <ul>
+    <li>El color principal marca <b>la acción importante de la pantalla</b>. Si hay dos botones del color principal, hay un problema de jerarquía.</li>
+    <li>Los colores de estado <b>se reservan para estados</b>. Nunca decoran una tarjeta ni un título.</li>
+    <li>Fondos claros dominan la identidad. El modo oscuro, cuando exista, mantiene los mismos roles y la misma semántica.</li>
+    <li>Los degradados son opcionales y sutiles: <span class="slot">definir o descartar</span>. En la app hay uno solo, en el encabezado de la tarjeta de campo.</li>
+  </ul>
+
+  <h3>Sombras</h3>
+  <p>Dos niveles, nada más. Aportan profundidad; no recargan.</p>
+  <table>
+    <tr><th style="width:150px">Nivel</th><th style="width:260px">Valor de referencia</th><th>Uso</th></tr>
+    <tr><td>Suave</td><td class="mono">0 2px 12px rgba(15,14,12,.06)</td><td>Tarjetas</td></tr>
+    <tr><td>Elevada</td><td class="mono">0 4px 8px + color principal al 30 %</td><td>Botón flotante. <b>Tiñe con el color de marca, no con negro.</b></td></tr>
+  </table>
+</section>
+
+<!-- ══════════════════ TIPOGRAFÍA ══════════════════ -->
+
+<section id="s23">
+  <h2><span class="n">23</span>Tipografías</h2><div class="rule"></div>
+  <p>
+    <b>Recomendación: mantener Inter</b>, en cuatro pesos, como familia única. Cumple los dos requisitos difíciles que
+    impone este producto, es de licencia libre —se puede embeber en la app sin costo ni trámite— y ya está integrada.
+  </p>
+  <table>
+    <tr><th style="width:130px">Rol</th><th style="width:150px">Familia</th><th style="width:110px">Pesos</th><th>Uso</th></tr>
+    <tr><td>Display</td><td>Inter</td><td>700</td><td>Títulos, claims, el número grande</td></tr>
+    <tr><td>Subtítulos</td><td>Inter</td><td>600</td><td>Títulos de tarjeta y de sección</td></tr>
+    <tr><td>Etiquetas</td><td>Inter</td><td>500</td><td>Labels, micro-textos del menú</td></tr>
+    <tr><td>Cuerpo</td><td>Inter</td><td>400</td><td>Párrafos, interfaz, campos de formulario</td></tr>
+  </table>
+
+  <div class="card hard">
+    <h3>Los dos requisitos que cualquier tipografía tiene que cumplir</h3>
+    <ol>
+      <li>
+        <b>Aguantar un número gigante.</b> El dato más importante de la app es el peso del animal y se muestra a 64 px,
+        porque el operario lo verifica de un vistazo, a un metro, sosteniendo el celular con una mano. La familia tiene
+        que verse sólida y clara a ese tamaño.
+      </li>
+      <li>
+        <b>Números tabulares</b> (todos los dígitos del mismo ancho). Los pesos y porcentajes van en listas alineadas;
+        con números proporcionales las columnas bailan y se pierde la lectura de un vistazo.
+      </li>
+    </ol>
+    <p>
+      Si se cambia de familia, la nueva tiene que cumplir las dos y tener <b>licencia que permita embeberla en una
+      aplicación móvil</b>. Una tipografía comprada por puesto de trabajo no sirve para esto.
+    </p>
+  </div>
+
+  <p>
+    <b>Una sola familia.</b> No se suma una segunda para títulos: la jerarquía se construye con tamaño y peso, no con
+    contraste de familias. Es más sobrio y hace la app más liviana.
+  </p>
+</section>
+
+<section id="s24">
+  <h2><span class="n">24</span>Jerarquías tipográficas</h2><div class="rule"></div>
+  <p>Escala en uso, en píxeles (tamaño / interlineado). Es la que está en el código.</p>
+  <table>
+    <tr><th style="width:130px">Tamaño</th><th style="width:90px">Peso</th><th>Uso</th></tr>
+    <tr><td><b>64 / 72</b></td><td>700</td><td><b>Número héroe.</b> El peso del animal. Es el elemento más grande de la pantalla y domina todo lo demás</td></tr>
+    <tr><td>38 / 46</td><td>700</td><td>Títulos de pantalla</td></tr>
+    <tr><td>30 / 38</td><td>700</td><td>Titulares intermedios</td></tr>
+    <tr><td>23 / 31</td><td>600</td><td>Subtítulos</td></tr>
+    <tr><td>20 / 28</td><td>600</td><td>Títulos de tarjeta</td></tr>
+    <tr><td>18 / 25</td><td>600</td><td>Títulos de sección</td></tr>
+    <tr><td>16 / 22</td><td>400</td><td>Texto grande y campos de formulario</td></tr>
+    <tr><td>14 / 20</td><td>400</td><td>Texto base</td></tr>
+    <tr><td>13 / 18 · 12 / 17</td><td>400</td><td>Texto secundario</td></tr>
+    <tr><td>11 / 16</td><td>500</td><td>Micro-etiquetas del menú inferior</td></tr>
+  </table>
+  <div class="card">
+    <h3>Regla técnica que se rompe seguido</h3>
+    <p>
+      <b>Todo título lleva su interlineado declarado explícitamente.</b> Si se define el tamaño y se deja el
+      interlineado por defecto, las letras con cola —g, q, p, j, y— se cortan por abajo. Es un error recurrente y se
+      revisa siempre probando con una palabra que tenga una de esas letras.
+    </p>
+  </div>
+</section>
+
+<!-- ══════════════════ VISUAL ══════════════════ -->
+
+<section id="s25">
+  <h2><span class="n">25</span>Estilo visual</h2><div class="rule"></div>
+  <table>
+    <tr><th style="width:200px">Elemento</th><th>Regla</th></tr>
+    <tr><td>Esquinas de tarjeta</td><td>16 px</td></tr>
+    <tr><td>Botones principales</td><td>Pill completo (esquinas redondeadas al máximo)</td></tr>
+    <tr><td>Área táctil mínima</td><td><b>56 px</b> de alto. En pantallas de manga, 80 a 88 px</td></tr>
+    <tr><td>Espacio</td><td>Generoso. Aire entre bloques, márgenes amplios. Nada apretado</td></tr>
+    <tr><td>Profundidad</td><td>Dos niveles de sombra, sin bordes marcados salvo para contraste al sol</td></tr>
+    <tr><td>Densidad</td><td><b>Una decisión por pantalla</b> durante la carga en el corral</td></tr>
+  </table>
+  <p>
+    El estilo es <b>sobrio y espacioso</b>. La pantalla no compite con el dato: el dato es el protagonista. En las
+    piezas de comunicación se traduce en composiciones limpias, mucho aire y un solo mensaje por pieza.
+  </p>
+</section>
+
+<section id="s26">
+  <h2><span class="n">26</span>Iconografía</h2><div class="rule"></div>
+  <ul>
+    <li><b>Familia: Lucide.</b> Trazo lineal, uniforme, sin relleno.</li>
+    <li><b>Tamaños:</b> 24 px en el menú inferior, 28 px en el botón flotante, 48 px en contenedores circulares.</li>
+    <li><b>Un ícono nunca va solo</b> si comunica algo importante: lleva etiqueta.</li>
+    <li><b>Nada de emoji como sustituto de ícono.</b> El emoji solo aparece en un saludo — "¡Hola Lucas! 👋" — y nunca dentro de un flujo de trabajo.</li>
+    <li>Si hace falta un ícono que no existe en la familia, se dibuja <b>con el mismo grosor de trazo y la misma grilla</b>, no se toma de otra familia.</li>
+  </ul>
+</section>
+
+<section id="s27">
+  <h2><span class="n">27</span>Estilo fotográfico</h2><div class="rule"></div>
+  <p>
+    La fotografía es donde una marca de agro se vuelve creíble o se vuelve un folleto. La dirección es
+    <b>documental, no publicitaria</b>.
+  </p>
+
+  <div class="two">
+    <div>
+      <h3>Sí</h3>
+      <ul class="ok">
+        <li><b>Campo argentino real</b>, reconocible: la manga, el corral, el brete, la camioneta.</li>
+        <li><b>Luz natural dura</b>, la del mediodía. Es la luz en la que se trabaja.</li>
+        <li><b>Manos con barro</b>, botas embarradas, guantes. La verdad del trabajo.</li>
+        <li><b>Gente real trabajando</b>: el peón, el veterinario, el productor. Sin posar.</li>
+        <li><b>El celular sucio y en uso</b>, sostenido con una mano.</li>
+        <li>Detalle de la <b>caravana en la oreja</b> y del bastón acercándose.</li>
+      </ul>
+    </div>
+    <div>
+      <h3>No</h3>
+      <ul class="no">
+        <li><b>Banco de imágenes con vacas europeas</b> en praderas verdes. Se nota y quema la credibilidad.</li>
+        <li><b>Luz dorada publicitaria</b> ni atardeceres. No es una marca de estilo de vida.</li>
+        <li><b>Todo impecable</b>: ropa limpia, celular sin una marca, corral recién pintado.</li>
+        <li><b>Modelos posando</b> con el teléfono como si fuera un aviso de telefonía.</li>
+        <li><b>Drones y planos aéreos</b> genéricos que podrían ser de cualquier lado.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card hard">
+    <h3>Regla dura</h3>
+    <p>
+      <b>Si la pantalla del celular aparece en la foto, tiene que leerse.</b> Toda la promesa del producto es que se lee
+      con sol; una foto donde la pantalla está lavada o reflejando contradice el argumento de venta en la misma imagen.
+    </p>
+  </div>
+
+  <p>
+    <b>Tratamiento:</b> sin filtros de color fuertes, sin virados. Corrección de exposición y nada más. La foto tiene
+    que parecer tomada, no producida.
+  </p>
+</section>
+
+<section id="s28">
+  <h2><span class="n">28</span>Componentes de interfaz</h2><div class="rule"></div>
+  <p>Los que llevan marca y aparecen en toda pieza donde se muestre el producto:</p>
+  <table>
+    <tr><th style="width:200px">Componente</th><th>Definición</th></tr>
+    <tr><td><b>Botón principal</b></td><td>Pill, color principal, texto blanco, mínimo 56 px de alto, ancho completo en móvil</td></tr>
+    <tr><td><b>Botón flotante central</b></td><td>Círculo de 64 px con un halo claro de 4 px, flota sobre el menú inferior, ícono blanco. <b>Es la pieza de interfaz más reconocible de la marca</b></td></tr>
+    <tr><td><b>Menú inferior</b></td><td>Cinco lugares con el botón flotante en el centro. Ítem activo en el color principal, inactivos en gris</td></tr>
+    <tr><td><b>Tarjeta</b></td><td>Esquinas de 16 px, fondo elevado, sombra suave</td></tr>
+    <tr><td><b>Badge de estado</b></td><td>Pill con el color del estado como fondo claro y el mismo tono oscuro como texto</td></tr>
+    <tr><td><b>Bloques de decisión</b></td><td>Los botones gigantes de la manga: ocupan la mayor parte de la pantalla, con ícono y palabra</td></tr>
+  </table>
+</section>
+
+<!-- ══════════════════ APLICACIONES ══════════════════ -->
+
+<section id="s29">
+  <h2><span class="n">29</span>Aplicaciones digitales</h2><div class="rule"></div>
+  <table>
+    <tr><th style="width:210px">Superficie</th><th>Definición</th></tr>
+    <tr><td><b>Ícono de la app</b></td><td>Isotipo centrado sobre color plano. Tiene que sobrevivir el recorte circular de Android y leerse a 48 px</td></tr>
+    <tr><td><b>Pantalla de arranque</b></td><td>Isotipo centrado sobre color plano, sin texto adicional. Dura menos de dos segundos: no es un lugar para comunicar</td></tr>
+    <tr><td><b>Ingreso y registro</b></td><td>Donde la marca se presenta: logo, una línea de qué es, y el formulario. Sin fotos de fondo que compitan</td></tr>
+    <tr><td><b>Ficha en las tiendas</b></td><td>Ícono, gráfico destacado y capturas. La primera captura decide la instalación: va la de la lectura del bastón</td></tr>
+    <tr><td><b>Preview del link de invitación</b></td><td>El link se comparte por WhatsApp: la imagen y el texto del preview <b>son marca</b> y se diseñan, no se dejan por defecto</td></tr>
+    <tr><td><b>Sitio</b></td><td>Ver sección 34</td></tr>
+  </table>
+</section>
+
+<section id="s30">
+  <h2><span class="n">30</span>Aplicaciones comerciales</h2><div class="rule"></div>
+  <table>
+    <tr><th style="width:210px">Pieza</th><th>Qué lleva</th></tr>
+    <tr><td><b>Una hoja para el veterinario</b></td><td>La pieza comercial más importante: es la que él deja en el campo. Frente: qué es, tres capturas, el argumento. Dorso: cómo empezar y a quién escribirle</td></tr>
+    <tr><td><b>Presentación a productor</b></td><td>Ver sección 33</td></tr>
+    <tr><td><b>Tarjeta personal</b></td><td>Sobria. Logo, nombre, rol, teléfono y sitio. Nada más</td></tr>
+    <tr><td><b>Folleto de mostrador</b></td><td>Para agroveterinarias. Formato chico, un solo mensaje y un código QR que lleve a la tienda</td></tr>
+    <tr><td><b>Presencia en remate o exposición</b></td><td>Logo grande y legible a diez metros. Una sola frase. El teléfono visible</td></tr>
+  </table>
+</section>
+
+<section id="s31">
+  <h2><span class="n">31</span>Firma de email</h2><div class="rule"></div>
+  <p><b>Solo texto y una imagen chica.</b> Sin tablas complicadas, sin banners, sin frases sobre imprimir o no imprimir.</p>
+  <table>
+    <tr><th style="width:170px">Elemento</th><th>Especificación</th></tr>
+    <tr><td>Logo</td><td>Versión horizontal, 120 px de ancho, PNG</td></tr>
+    <tr><td>Nombre</td><td>14 px, peso 600, color de texto principal</td></tr>
+    <tr><td>Rol</td><td>13 px, peso 400, color de texto secundario</td></tr>
+    <tr><td>Contacto</td><td>13 px. Teléfono y sitio. El mail no se repite: ya está en el remitente</td></tr>
+    <tr><td>Separador</td><td>Una línea de 1 px del color divisor</td></tr>
+    <tr><td>Tipografía</td><td>Arial o Helvetica. <b>Inter no está disponible en los clientes de correo</b></td></tr>
+  </table>
+  <p><span class="slot">Plantilla armada: pendiente del logo</span></p>
+</section>
+
+<section id="s32">
+  <h2><span class="n">32</span>Redes sociales</h2><div class="rule"></div>
+  <p>
+    <b>Instagram es la red principal.</b> El productor y el veterinario están ahí. LinkedIn solo para inversores y
+    prensa del rubro; no se le habla al productor por ahí.
+  </p>
+
+  <h3>Perfil</h3>
+  <ul>
+    <li><b>Avatar:</b> isotipo sobre color plano. Nunca el logo horizontal, que en un círculo se vuelve ilegible.</li>
+    <li><b>Biografía:</b> qué es en una línea, para quién, y el enlace. Sin palabras vacías.</li>
+  </ul>
+
+  <h3>Qué se publica</h3>
+  <ul class="ok">
+    <li><b>Capturas reales del producto</b>, con una línea que explique qué resuelve.</li>
+    <li><b>Datos del rubro con fuente citada.</b> Educar antes que vender.</li>
+    <li><b>Fotos de jornadas de campo reales</b>, siguiendo la sección 27.</li>
+    <li><b>Recordatorios de obligaciones y plazos</b> de SENASA: es servicio puro y posiciona.</li>
+    <li><b>Fragmentos de video de la manga</b> — la lectura del bastón es el mejor contenido que tiene esta marca.</li>
+  </ul>
+
+  <h3>Qué no</h3>
+  <ul class="no">
+    <li>Memes y tendencias que no tengan que ver con el rubro.</li>
+    <li>Frases motivacionales sobre fondos de atardecer.</li>
+    <li>Banco de imágenes de vacas que no son de acá.</li>
+    <li>Promesas de resultado que no podemos respaldar (sección 10).</li>
+  </ul>
+
+  <h3>Formatos</h3>
+  <ul>
+    <li><b>Cuadrado 1080 × 1080</b> para el feed, <b>vertical 1080 × 1350</b> cuando hay más para contar.</li>
+    <li>La captura de la app siempre dentro de un <b>marco de teléfono</b>, nunca suelta.</li>
+    <li>Texto sobre imagen: mínimo 32 px, con velo por debajo si hace falta contraste.</li>
+  </ul>
+</section>
+
+<section id="s33">
+  <h2><span class="n">33</span>Presentaciones institucionales</h2><div class="rule"></div>
+  <p>Formato 16:9, fondo claro, una idea por lámina. Sin transiciones ni animaciones.</p>
+  <table>
+    <tr><th style="width:180px">Tipo de lámina</th><th>Regla</th></tr>
+    <tr><td>Portada</td><td>Logo centrado, título de la presentación, fecha. Nada más</td></tr>
+    <tr><td>Sección</td><td>Solo el título, sobre fondo del color principal con texto blanco</td></tr>
+    <tr><td>Contenido</td><td>Título arriba, un mensaje. Máximo cinco viñetas</td></tr>
+    <tr><td>Dato</td><td>El número enorme, la explicación abajo chica. <b>Con la fuente al pie</b></td></tr>
+    <tr><td>Producto</td><td>Captura dentro de un marco de teléfono, con una línea que diga qué se está viendo</td></tr>
+    <tr><td>Cierre</td><td>Un pedido concreto y el contacto</td></tr>
+  </table>
+  <p>
+    <b>Regla de contenido:</b> toda lámina con un número lleva su fuente. Es lo que separa una presentación técnica de
+    un folleto, y frente a un veterinario esa diferencia se nota.
+  </p>
+</section>
+
+<section id="s34">
+  <h2><span class="n">34</span>Sitio web</h2><div class="rule"></div>
+  <p>
+    <b>El sitio tiene un solo trabajo: que el interesado deje su contacto o baje la app.</b> No es un catálogo ni un
+    portfolio.
+  </p>
+  <h3>Estructura de la página principal</h3>
+  <ol>
+    <li><b>Encabezado</b> — qué es en una frase, para quién, botón principal y una captura del producto. Sin video de fondo.</li>
+    <li><b>El problema</b> — qué se pierde hoy, con el número del rubro y su fuente.</li>
+    <li><b>Cómo funciona</b> — tres pasos con capturas reales: bastoneás, cargás, ves los números.</li>
+    <li><b>Qué hace</b> — la lista de funciones, agrupada, sin exagerar.</li>
+    <li><b>Para el veterinario</b> — bloque propio: es el canal.</li>
+    <li><b>Prueba</b> — testimonios cuando existan. <b>Hasta entonces el bloque no va</b>: un testimonio inventado se detecta y se paga caro.</li>
+    <li><b>Cierre</b> — el mismo botón principal del encabezado.</li>
+  </ol>
+  <h3>Reglas</h3>
+  <ul>
+    <li><b>Móvil primero.</b> El productor entra desde el celular, casi siempre desde un link de WhatsApp.</li>
+    <li><b>Un solo botón principal</b> repetido, no cinco distintos.</li>
+    <li><b>Tiene que cargar con mala señal.</b> El destinatario puede estar en el campo.</li>
+    <li>El formulario pide <b>lo mínimo</b>: nombre, teléfono, cuántas cabezas.</li>
+  </ul>
+</section>
+
+<!-- ══════════════════ CIERRE ══════════════════ -->
+
+<section id="s35">
+  <h2><span class="n">35</span>Reglas generales de coherencia visual</h2><div class="rule"></div>
+  <ol>
+    <li><b>El ambiente manda.</b> Ante la duda entre lindo y legible al sol, gana legible.</li>
+    <li><b>Una sola tipografía</b>, cuatro pesos. La jerarquía se hace con tamaño y peso.</li>
+    <li><b>El color principal marca la acción</b>, no decora. Si está en todos lados, no está en ninguno.</li>
+    <li><b>Los colores de estado significan algo.</b> Jamás se usan por gusto estético.</li>
+    <li><b>El color nunca va solo</b>: siempre con texto o forma que lo respalde.</li>
+    <li><b>Todo par de texto y fondo llega a 4.5:1.</b> Se mide, no se estima.</li>
+    <li><b>El logo no se toca.</b> Se usa desde el archivo original y con su área de seguridad.</li>
+    <li><b>Aire.</b> Es preferible una pieza con menos cosas que una apretada.</li>
+    <li><b>Fotos reales del campo argentino</b>, nunca banco de imágenes genérico.</li>
+    <li><b>Solo se promete lo que el producto hace hoy.</b> La credibilidad se pierde una vez sola.</li>
+  </ol>
+</section>
+
+<section id="s36">
+  <h2><span class="n">36</span>Qué falta para cerrar este manual</h2><div class="rule"></div>
+  <table>
+    <tr><th style="width:230px">Qué falta</th><th style="width:130px">Quién</th><th>Destraba</th></tr>
+    <tr><td><b>El nombre</b></td><td>Los socios</td><td>Todo el documento, el dominio, las tiendas y el identificador técnico de la app</td></tr>
+    <tr><td><b>Verificación en INPI</b></td><td>Antes de cerrar el nombre</td><td>Evita rehacer el manual entero sobre un nombre registrado</td></tr>
+    <tr><td><b>El logo y sus cinco versiones</b></td><td>Diseño</td><td>Secciones 12 a 17, ícono de app, redes, firma</td></tr>
+    <tr><td><b>Los valores de color</b></td><td>Diseño</td><td>Secciones 18 a 22. Se miden los contrastes antes de aprobar</td></tr>
+    <tr><td><b>Sesión de fotos en el campo</b></td><td>Producción</td><td>Sección 27 y toda pieza comercial. Se puede aprovechar la primera jornada de manga</td></tr>
+    <tr><td><b>Plantilla de firma y de presentación</b></td><td>Diseño</td><td>Secciones 31 y 33, una vez que exista el logo</td></tr>
+  </table>
+
+  <div class="card hard">
+    <h3>Orden recomendado</h3>
+    <ol>
+      <li>Nombre + verificación en INPI.</li>
+      <li>Logo, en sus cinco versiones, pasando las dos pruebas de la sección 15.</li>
+      <li>Paleta, con los contrastes medidos.</li>
+      <li>Aplicación en la app y en el sitio.</li>
+      <li>Sesión de fotos, aprovechando una jornada real de campo.</li>
+    </ol>
+    <p>
+      Cada paso depende del anterior. Saltearse el primero significa rehacer los cuatro que siguen.
+    </p>
+  </div>
+</section>
+
+<p class="foot">
+  Documento de trabajo, versión 1 — 02/08/2026. Los valores de color y tipografía tienen su fuente en el archivo de
+  configuración del frontend de la app; este manual y ese archivo tienen que decir lo mismo. Los contrastes citados
+  están calculados con la fórmula de luminancia relativa de WCAG 2.1; la simulación de daltonismo usa las matrices de
+  Machado et al. (2009) y es una aproximación de referencia.
+</p>
+
+</main>
+</div>
+</body>
+</html>

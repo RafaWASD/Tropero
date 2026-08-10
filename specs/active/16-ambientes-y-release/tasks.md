@@ -38,6 +38,9 @@ escribe a un ambiente real vive en Run F, gateado.
   Cubre: R2.1, R2.2, R2.3, R2.4.
   **Verif**: assert de que `APP_VARIANT=development` produce name/ids `.dev` y el default produce
   `ar.rafq.app` (evaluar `app.config.ts` en node); typecheck verde.
+  > **Superado por el rebrand (10/08/2026)**: el nombre visible pasó a "miTropero (Dev)" / "miTropero".
+  > Los identificadores no cambiaron. El texto de A1 queda como registro de lo que se implementó
+  > entonces; el contrato vigente es R2.2/R2.3 en `requirements.md`.
 
 - [x] **A2** — `Grep` de consumidores de `Constants.expoConfig.extra.supabaseUrl` (clave literal
   `supabaseUrl`) en `app/src`. Si no hay ninguno, eliminar `extra.supabaseUrl`; si hay, conservarlo y

@@ -54,7 +54,7 @@ Migrar `app/app.json` → `app/app.config.ts` (TS, `export default ({ config }) 
 // app/app.config.ts (forma; el implementer completa)
 const IS_DEV = process.env.APP_VARIANT === 'development';
 export default (): ExpoConfig => ({
-  name: IS_DEV ? 'RAFAQ (Dev)' : 'RAFAQ',
+  name: IS_DEV ? 'miTropero (Dev)' : 'miTropero',   // rebrand 10/08/2026
   slug: 'rafaq-app',
   scheme: 'rafq',
   version: '0.1.0',
@@ -195,11 +195,13 @@ de modo que **tanto el build como `eas update --environment <env>`** las reciban
 >
 > | profile | backend | distribución | id / nombre | para qué |
 > |---|---|---|---|---|
-> | `development` | DEV | internal (ad-hoc) | `ar.rafq.app.dev` · "RAFAQ (Dev)" | dev client, coexiste con el de prod (R2.4) |
-> | `preview-dev` | **DEV** | internal (ad-hoc) | `ar.rafq.app` · "RAFAQ" | APK/IPA de prueba en device contra datos de DEV |
-> | `preview` | PROD | internal (ad-hoc) | `ar.rafq.app` · "RAFAQ" | R4.2 |
-> | `testflight-dev` | **DEV** | **store** (App Store Connect) | `ar.rafq.app` · "RAFAQ" | TestFlight — testers iOS **sin registrar UDID** |
-> | `production` | PROD | store | `ar.rafq.app` · "RAFAQ" | R4.2 |
+> | `development` | DEV | internal (ad-hoc) | `ar.rafq.app.dev` · "miTropero (Dev)" | dev client, coexiste con el de prod (R2.4) |
+> | `preview-dev` | **DEV** | internal (ad-hoc) | `ar.rafq.app` · "miTropero" | APK/IPA de prueba en device contra datos de DEV |
+> | `preview` | PROD | internal (ad-hoc) | `ar.rafq.app` · "miTropero" | R4.2 |
+> | `testflight-dev` | **DEV** | **store** (App Store Connect) | `ar.rafq.app` · "miTropero" | TestFlight — testers iOS **sin registrar UDID** |
+> | `production` | PROD | store | `ar.rafq.app` · "miTropero" | R4.2 |
+>
+> El identificador sigue siendo `ar.rafq.app` después del rebrand (10/08/2026): ver la nota de R2.2/R2.3 en `requirements.md`.
 >
 > **`testflight-dev` (agregado 2026-08-02)** es el primer profile de distribución `store` que se usa.
 > Consecuencias que la spec original no cubría:
