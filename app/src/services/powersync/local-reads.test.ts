@@ -995,6 +995,11 @@ function seedSearchDb(rows: { id: string; idv: string; establishmentId?: string 
       'CREATE TABLE field_definitions (id TEXT, data_key TEXT, establishment_id TEXT);' +
       'CREATE TABLE rodeo_data_config (rodeo_id TEXT, field_definition_id TEXT, enabled INTEGER);' +
       'CREATE TABLE pending_rodeo_data_config (rodeo_id TEXT, field_definition_id TEXT, enabled INTEGER);' +
+      // `treatments` la exige el EXISTS de `in_treatment` que la BÚSQUEDA inyecta desde 2026-08-09 (antes
+      // solo lo hacía la lista). Sin la tabla, el SQL real tira "no such table: treatments" — y este test
+      // ejecuta el SQL de verdad, no un espejo, así que lo ve. Vacía alcanza: acá se prueba el predicado de
+      // búsqueda, no la marca de tratamiento.
+      'CREATE TABLE treatments (id TEXT, animal_profile_id TEXT, ended_at TEXT, deleted_at TEXT);' +
       "INSERT INTO rodeos VALUES ('rod-1','sys-1','Rodeo general');" +
       "INSERT INTO categories_by_system VALUES ('cat-1','vaquillona','Vaquillona');",
   );
