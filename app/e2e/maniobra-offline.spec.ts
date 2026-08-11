@@ -146,7 +146,7 @@ test('offline: jornada por manual → vacunación + pesaje → cerrar la jornada
 
   // El animal baja por la stream (visible en la lista = ya sincronizó al SQLite local) ANTES de cortar la red.
   await gotoAnimales(page);
-  await expect(page.getByText(idv, { exact: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(idv, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
 
   // Configurar la jornada (elegir rodeo + maniobras + verificar el gating del cache local, R10.3). Esta parte
   // navega a `/maniobra/jornada` (carga de página SPA) → necesita el server → ONLINE. Deja "Arrancar jornada"

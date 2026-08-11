@@ -133,7 +133,7 @@ async function triggerDemoRead(page: Page): Promise<void> {
   await expect(page.getByTestId('demo-simulate')).toBeVisible();
   await expect(async () => {
     await page.getByTestId('demo-simulate').click();
-    await expect(page.getByLabel(DEMO_READ_ROW).first()).toBeVisible({ timeout: 4_000 });
+    await expect(page.getByLabel(DEMO_READ_ROW).filter({ visible: true }).first()).toBeVisible({ timeout: 4_000 });
   }).toPass({ timeout: 60_000 });
 }
 
@@ -163,7 +163,7 @@ test('(a) StickConnectionScreen monta en /baston bajo demo: RS420 reconocido + "
   await expect(page.getByRole('button', { name: 'Simular lectura', exact: true })).toBeVisible();
 
   // Manual-first SIEMPRE disponible, no bloqueante (RMV3.6): la salida manual está a la vista.
-  await expect(page.getByText(/Sin bast[oó]n/).first()).toBeVisible();
+  await expect(page.getByText(/Sin bast[oó]n/).filter({ visible: true }).first()).toBeVisible();
 });
 
 // ─── (b) Lectura simulada → UN SOLO consumidor: la lista de la pantalla, marcada DEMO ──────────────────────
@@ -184,7 +184,7 @@ test('(b) "Simular lectura" entra UNA sola vez: lista en vivo marcada DEMO, sin 
   // CONFIRMACIÓN de esta pantalla (RMV4.8): la lista de lecturas en vivo muestra el EID leído, marcado
   // "DEMO" (RMV4.6, integridad SENASA) — el read-row tiene aria-label "Caravana <15 díg> DEMO" (el badge
   // visible + el EID). Nada se commitea desde acá.
-  await expect(page.getByLabel(DEMO_READ_ROW).first()).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByLabel(DEMO_READ_ROW).filter({ visible: true }).first()).toBeVisible({ timeout: 10_000 });
   await expect(page.getByText(/^Lecturas \(\d+\)$/)).toBeVisible();
 
   // INVARIANTE (BENCH-3): un solo consumidor efectivo. El sheet global NO se abre encima de la pantalla
@@ -210,7 +210,7 @@ test('(c) estados de conexión con CTA: off → conectado → desconectado; manu
 
   // Estado 'off': CTA "Conectar bastón". Manual disponible (no bloqueante, RMV3.6).
   await expect(page.getByText('Bastón sin conectar', { exact: true })).toBeVisible();
-  await expect(page.getByText(/Sin bast[oó]n/).first()).toBeVisible();
+  await expect(page.getByText(/Sin bast[oó]n/).filter({ visible: true }).first()).toBeVisible();
 
   // Simular una lectura → el simulador conecta (status 'connected') + emite. Desde BENCH-3 la lectura queda
   // en la lista de ESTA pantalla y no hay ningún sheet que cerrar antes de leer el estado.
@@ -223,13 +223,13 @@ test('(c) estados de conexión con CTA: off → conectado → desconectado; manu
   // lo que cambió es que dejó de depender del nombre de la ruta (ver `services/ble/stick-status-surface.ts`).
   // Su rol real (visible en pantallas SIN superficie propia) lo verifica `baston-indicador-unico.spec.ts`.
   // "Bastón conectado" aparece una sola vez (la card) → `.first()` sigue válido. Manual disponible (RMV3.6).
-  await expect(page.getByText('Bastón conectado', { exact: true }).first()).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText('Bastón conectado', { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 10_000 });
   await expect(page.getByTestId('stick-status-indicator')).toHaveCount(0);
-  await expect(page.getByText(/Sin bast[oó]n/).first()).toBeVisible();
+  await expect(page.getByText(/Sin bast[oó]n/).filter({ visible: true }).first()).toBeVisible();
 
   // CTA de estado en 'connected' = "Desconectar" (stick-status-cta) → status 'disconnected'.
   await page.getByTestId('stick-status-cta').click();
-  await expect(page.getByText('Bastón desconectado', { exact: true }).first()).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText('Bastón desconectado', { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 10_000 });
   await expect(page.getByRole('button', { name: 'Volver a conectar', exact: true })).toBeVisible();
 });
 

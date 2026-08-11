@@ -84,6 +84,6 @@ test('header de la tab "Animales" intacto tras el fix preventivo (sin descendent
   await signIn(page, user);
   await waitForHome(page);
   await gotoAnimales(page);
-  await expect(page.getByText('Animales', { exact: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText('Animales', { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
   await page.screenshot({ path: path.join(OUT_DIR, 'animales.png') });
 });

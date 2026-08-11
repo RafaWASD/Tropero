@@ -91,5 +91,5 @@ test('con ≥2 campos el login aterriza en "Mis campos" y elegir uno lleva a su 
   await page.getByText(norte, { exact: true }).first().click();
   await waitForHome(page);
   // La home del campo elegido muestra su nombre en el switch del header.
-  await expect(page.getByText(norte, { exact: true }).first()).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText(norte, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 15_000 });
 });

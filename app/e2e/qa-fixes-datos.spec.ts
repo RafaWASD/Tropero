@@ -58,8 +58,8 @@ test('A.1 buscador global: tipear la caravana CON GUION encuentra al animal (no 
   await signIn(page, user);
   await waitForHome(page);
   await gotoAnimales(page);
-  await expect(page.getByText(idv, { exact: true }).first()).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByText(senuelo, { exact: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(idv, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(senuelo, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
 
   const search = page.getByLabel('Buscar animal por caravana o número', { exact: true });
   const senueloRow = page.getByText(senuelo, { exact: true });
@@ -126,8 +126,8 @@ test('A.1 buscador del rodeo (3ra superficie): la caravana con guion también en
   await signIn(page, user);
   await waitForHome(page);
   await gotoRodeoGroup(page, `${RUN_TAG} Rodeo general`);
-  await expect(page.getByText(idv, { exact: true }).first()).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByText(senuelo, { exact: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(idv, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(senuelo, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
 
   // Ojo: el buscador del GRUPO tiene su propio label (no es el de la tab Animales).
   const search = page.getByLabel('Buscar animal en el grupo por caravana o número', { exact: true });
@@ -160,7 +160,7 @@ test('A.1 manga: la entrada manual con la caravana con guion carga sobre el anim
   await waitForHome(page);
   // Esperar a que el animal baje al SQLite local (la manga busca LOCAL, offline-first).
   await gotoAnimales(page);
-  await expect(page.getByText(idv, { exact: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(idv, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
 
   await startPesajeSession(page);
 

@@ -153,7 +153,7 @@ test('custom enum_single: título largo SIN recorte + lista con affordance de sc
   await signIn(page, user);
   await waitForHome(page);
   await gotoAnimales(page);
-  await expect(page.getByText(visual, { exact: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(visual, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
 
   await startSessionWithCustomManeuver(page, LONG_LABEL);
   await bastonazo(page, eid);
@@ -161,7 +161,7 @@ test('custom enum_single: título largo SIN recorte + lista con affordance de sc
 
   // BUG 1 — el título (label largo) entra COMPLETO (no recortado a "Ángulo de inclinación…"). El texto completo
   // debe ser leíble en pantalla (sin ellipsis del recorte de 1 línea).
-  await expect(page.getByText(LONG_LABEL, { exact: true }).first()).toBeVisible();
+  await expect(page.getByText(LONG_LABEL, { exact: true }).filter({ visible: true }).first()).toBeVisible();
 
   // BUG 2 — los bloques del enum existen (la lista es scrolleable: la 1ra opción y una intermedia visibles).
   await expect(page.getByTestId(`custom-enum-block-${MANY_SINGLE[0]}`)).toBeVisible();
@@ -210,14 +210,14 @@ test('custom enum_multi: título largo SIN recorte + multi-select con affordance
   await signIn(page, user);
   await waitForHome(page);
   await gotoAnimales(page);
-  await expect(page.getByText(visual, { exact: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(visual, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
 
   await startSessionWithCustomManeuver(page, LONG_LABEL);
   await bastonazo(page, eid);
   await expect(page.getByText('· 1 de 1', { exact: true })).toBeVisible({ timeout: 30_000 });
 
   // BUG 1 — título completo.
-  await expect(page.getByText(LONG_LABEL, { exact: true }).first()).toBeVisible();
+  await expect(page.getByText(LONG_LABEL, { exact: true }).filter({ visible: true }).first()).toBeVisible();
   // BUG 2 — multi-select scrolleable con fade abajo.
   await expect(page.getByTestId(`custom-multi-${MANY_SINGLE[0]}`)).toBeVisible();
   await expect(page.getByTestId('custom-multi-scroll-fade-bottom')).toBeVisible();

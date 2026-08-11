@@ -74,8 +74,8 @@ test('ficha: iniciar → marca en hero → pin en lista general y del rodeo → 
   await page.getByRole('button', { name: 'Iniciar tratamiento', exact: true }).last().tap();
 
   // La marca "En tratamiento" aparece en el HERO (RTR.4.3) + el badge "En curso" en la card (RTR.9.2).
-  await expect(page.getByLabel('En tratamiento', { exact: true }).first()).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByText('Oxitetraciclina', { exact: true }).first()).toBeVisible();
+  await expect(page.getByLabel('En tratamiento', { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText('Oxitetraciclina', { exact: true }).filter({ visible: true }).first()).toBeVisible();
 
   // ── Pin + marca en la LISTA GENERAL (RTR.5.1/4.4) ──
   // La ficha es una ruta APILADA: no tiene bottom-nav, así que `gotoAnimales` (que busca el `role=tab`)
@@ -87,7 +87,7 @@ test('ficha: iniciar → marca en hero → pin en lista general y del rodeo → 
   await expect(firstRow).toBeVisible({ timeout: 20_000 });
   await expect(firstRow).toContainText(idvTreated);
   // La marca "En tratamiento" aparece en la fila (RTR.4.4).
-  await expect(page.getByLabel('En tratamiento').first()).toBeVisible();
+  await expect(page.getByLabel('En tratamiento').filter({ visible: true }).first()).toBeVisible();
 
   // ── Pin + marca en la LISTA DEL RODEO (RTR.5.2) ──
   // (Navegación a la vista de rodeo: por robustez, volvemos a la ficha y de ahí a la lista — el pin del rodeo
@@ -95,7 +95,7 @@ test('ficha: iniciar → marca en hero → pin en lista general y del rodeo → 
   await page.goto(`/rodeo/${rodeoId}`);
   const firstRodeoRow = page.getByRole('button', { name: new RegExp(idvTreated) }).first();
   await expect(firstRodeoRow).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByLabel('En tratamiento').first()).toBeVisible();
+  await expect(page.getByLabel('En tratamiento').filter({ visible: true }).first()).toBeVisible();
 
   // ── Volver a la ficha → Registrar aplicación ──
   await firstRodeoRow.tap();
@@ -105,14 +105,14 @@ test('ficha: iniciar → marca en hero → pin en lista general y del rodeo → 
   await page.getByLabel('Dosis en ml (opcional)', { exact: true }).fill('5');
   await page.getByRole('button', { name: 'Registrar aplicación', exact: true }).last().tap();
   // La aplicación aparece en la card (dosis 5 ml, RTR.9.3).
-  await expect(page.getByText(/5 ml/).first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText(/5 ml/).filter({ visible: true }).first()).toBeVisible({ timeout: 20_000 });
 
   // ── Finalizar (confirmación inline) → la marca desaparece (RTR.4.6) ──
   await page.getByRole('button', { name: 'Finalizar tratamiento', exact: true }).first().tap();
   await page.getByRole('button', { name: 'Finalizar', exact: true }).tap();
   // La marca "En tratamiento" del hero desaparece (RTR.4.6) + el badge de la card pasa a "Finalizado".
   await expect(page.getByLabel('En tratamiento', { exact: true })).toHaveCount(0, { timeout: 20_000 });
-  await expect(page.getByLabel('Finalizado', { exact: true }).first()).toBeVisible();
+  await expect(page.getByLabel('Finalizado', { exact: true }).filter({ visible: true }).first()).toBeVisible();
 });
 
 test('offline: iniciar tratamiento sin conexión → la marca aparece al instante (RTR.8.1/8.4)', async ({ page }) => {
@@ -144,8 +144,8 @@ test('offline: iniciar tratamiento sin conexión → la marca aparece al instant
   await page.getByRole('button', { name: 'Iniciar tratamiento', exact: true }).last().tap();
 
   // La marca "En tratamiento" aparece al INSTANTE offline (derivado de la fila local, RTR.8.4).
-  await expect(page.getByLabel('En tratamiento', { exact: true }).first()).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByText('Ivermectina', { exact: true }).first()).toBeVisible();
+  await expect(page.getByLabel('En tratamiento', { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText('Ivermectina', { exact: true }).filter({ visible: true }).first()).toBeVisible();
 
   await page.context().setOffline(false);
 });

@@ -66,7 +66,7 @@ test('paridad card↔ficha: una hembra VACÍA con dientes → el chip "Vacía" e
 
   // PARIDAD (fuente): la CARD del listado (AnimalRow no-compact) muestra el chip de estado reproductivo
   // "Vacía" (a11y "Estado reproductivo: Vacía"). Esto es lo que Raf ve en el listado.
-  await expect(page.getByLabel('Estado reproductivo: Vacía').first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByLabel('Estado reproductivo: Vacía').filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
 
   const row = page.getByRole('button', { name: new RegExp(idv) }).first();
   await expect(row).toBeVisible({ timeout: 30_000 });
@@ -89,5 +89,5 @@ test('paridad card↔ficha: una hembra VACÍA con dientes → el chip "Vacía" e
   //     registrar"). El "· " es el separador de la fila de "Estado actual" (valor + fecha) → distingue esta
   //     fila del nodo del timeline.
   await expect(page.getByText('Estado reproductivo', { exact: true })).toBeVisible();
-  await expect(page.getByText(/^Vacía ·/).first()).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText(/^Vacía ·/).filter({ visible: true }).first()).toBeVisible({ timeout: 15_000 });
 });

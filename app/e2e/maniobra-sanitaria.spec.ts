@@ -132,7 +132,7 @@ test('sanitarias + sangrado + raspado sobre un macho persisten con session_id', 
   await signIn(page, user);
   await waitForHome(page);
   await gotoAnimales(page);
-  await expect(page.getByText(visual, { exact: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(visual, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
 
   // Orden: vacunación → antiparasitario → antibiótico → sangrado → raspado.
   await startSession(page, ['vacunacion', 'antiparasitario', 'antibiotico', 'sangrado', 'raspado']);
@@ -226,7 +226,7 @@ test('raspado se salta para una hembra (R6.12); el resto de la jornada corre', a
   await signIn(page, user);
   await waitForHome(page);
   await gotoAnimales(page);
-  await expect(page.getByText(visual, { exact: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(visual, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
 
   // Jornada {raspado, antiparasitario}: sobre una hembra el raspado se salta → secuencia de 1 paso.
   await startSession(page, ['raspado', 'antiparasitario']);
@@ -273,7 +273,7 @@ test('pesaje de ternero persiste con session_id (R6.10)', async ({ page }) => {
   await signIn(page, user);
   await waitForHome(page);
   await gotoAnimales(page);
-  await expect(page.getByText(visual, { exact: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(visual, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
 
   // La jornada elige PESAJE DE TERNERO (no el pesaje genérico): para una ternera, el pesaje genérico se
   // SALTA y el de ternero APLICA (excluyentes por categoría, R6.9/R6.10 — mata el doble pesaje). Si la
@@ -284,7 +284,7 @@ test('pesaje de ternero persiste con session_id (R6.10)', async ({ page }) => {
 
   // El header muestra la categoría TERNERA (autocompletada por el espejo C6; R6.10 no la re-captura). El
   // header la pinta como "<rodeo> · <categoría>" en un solo nodo → match por substring.
-  await expect(page.getByText(/· Ternera$/).first()).toBeVisible();
+  await expect(page.getByText(/· Ternera$/).filter({ visible: true }).first()).toBeVisible();
 
   // Keypad: 95 kg → Confirmar.
   await expect(page.getByTestId('weight-display')).toBeVisible();
@@ -368,7 +368,7 @@ test('inseminación con 1 pajuela preconfigurada confirma de un toque (R6.5)', a
   await signIn(page, user);
   await waitForHome(page);
   await gotoAnimales(page);
-  await expect(page.getByText(visual, { exact: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(visual, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
 
   await startInseminacionSession(page, 'Toro 123');
   await bastonazo(page, eid);
@@ -414,7 +414,7 @@ test('inseminación con >1 pajuela ofrece selector (R6.5)', async ({ page }) => 
   await signIn(page, user);
   await waitForHome(page);
   await gotoAnimales(page);
-  await expect(page.getByText(visual, { exact: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(visual, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
 
   // >1 pajuela: coma-separado → pajuelasFor produce 2 → SELECTOR.
   await startInseminacionSession(page, 'Toro 123, Toro 456');
@@ -467,7 +467,7 @@ test('el hero del producto silent_apply nunca overflowea horizontal a 360 ni 412
   await signIn(page, user);
   await waitForHome(page);
   await gotoAnimales(page);
-  await expect(page.getByText(visual, { exact: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(visual, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
 
   // Jornada SOLO de antibiótico → el paso silent_apply (sin preconfig → arranca en el input).
   await startSession(page, ['antibiotico']);

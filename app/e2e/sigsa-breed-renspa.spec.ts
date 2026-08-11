@@ -96,8 +96,8 @@ test('BreedPicker en el alta: abrir el sheet → buscar → elegir una raza → 
 
   // La ficha muestra la raza (el NOMBRE persistió en `breed`).
   await expect(page.getByText('Identificación', { exact: true })).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByText('Raza', { exact: true }).first()).toBeVisible();
-  await expect(page.getByText('Aberdeen Angus', { exact: true }).first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText('Raza', { exact: true }).filter({ visible: true }).first()).toBeVisible();
+  await expect(page.getByText('Aberdeen Angus', { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 20_000 });
 
   // ✅ VERIFICACIÓN SERVER-SIDE DEL TRIGGER (spec 08, T18 / 0113): el alta persiste `breed`='Aberdeen Angus'
   // (texto) y el trigger tg_derive_breed_id_from_breed DERIVA `breed_id` = el id de AA al subir. Sin el
@@ -168,7 +168,7 @@ test('Ficha: editar la raza (completar para SIGSA) → BreedPickerSheet → la r
   await hOption.click();
 
   // El sheet se cierra y la ficha muestra la raza elegida + el link "Cambiar" (ya hay raza).
-  await expect(page.getByText('Hereford', { exact: true }).first()).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText('Hereford', { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 15_000 });
   await expect(page.getByRole('button', { name: 'Cambiar la raza', exact: true })).toBeVisible();
   // El CTA "Completar" ya no debe estar (hay raza).
   await expect(page.getByRole('button', { name: 'Completá la raza para SIGSA', exact: true })).toHaveCount(0);

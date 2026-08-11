@@ -145,12 +145,12 @@ test('castración masiva: defaults → ⭐ resaltado → bottom-sheet reversible
   await openAnimalFichaFromGroup(page, idvBull);
 
   // R13.5 + R10.6: el espejo C6 (offline) muestra la categoría recalculada → Novillito (torito → novillito).
-  await expect(page.getByText('Novillito', { exact: true }).first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText('Novillito', { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 20_000 });
   // R13.7: la observación automática aparece en el timeline (animal_events local). El nodo "Observación"
   // (título del TimelineEvent) existe SOLO en el timeline, no en la sección Manejo → su presencia prueba que
   // se creó una observación. Su detalle "Castrado" aparece DOS veces en la ficha (la label de Manejo +
   // el detalle de la observación) → asertamos ≥2 ocurrencias: la 2da es la del timeline.
-  await expect(page.getByText('Observación', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText('Observación', { exact: true }).filter({ visible: true }).first()).toBeVisible();
   await expect(page.getByText('Castrado', { exact: true })).toHaveCount(2);
 
   // ── REVERT desde la ficha: Castrado → No (R13.1). ──────────────────────────────────────────────
@@ -171,7 +171,7 @@ test('castración masiva: defaults → ⭐ resaltado → bottom-sheet reversible
 
   // Tras el revert: vuelve a TORITO (recompute simétrico, R13.5) + observación de corrección (R13.7).
   // El cambio se refleja EN SITIO (optimista) → no esperamos un re-fetch que blanquee.
-  await expect(page.getByText('Torito', { exact: true }).first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText('Torito', { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 20_000 });
   await expect(
     page.getByText('Corrección: marcado como no castrado', { exact: true }).first(),
   ).toBeVisible();

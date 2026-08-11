@@ -86,7 +86,7 @@ test('ficha → timeline (sparse inicial) → agregar peso y observación → ap
   // Como el animal es HEMBRA, "Estado reproductivo" también muestra "Sin registrar" (C3.2a) → hay 2
   // filas "Sin registrar"; usamos .first() (su presencia es lo que importa, no la unicidad).
   await expect(page.getByText('Condición corporal', { exact: true })).toBeVisible();
-  await expect(page.getByText('Sin registrar', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText('Sin registrar', { exact: true }).filter({ visible: true }).first()).toBeVisible();
 
   // ── Agregar una OBSERVACIÓN. ──────────────────────────────────────────────────────────
   await page.getByRole('button', { name: 'Agregar evento', exact: true }).click();
@@ -848,7 +848,7 @@ test('C6 espejo: tacto+ desde la ficha sobre vaquillona → el hero muestra "Vaq
   // "Vaquillona preñada" (categoría del catálogo, contiene "preñada"). Anclamos por el a11y label del
   // CategoryBadge. NO se muestra el indicador de "fijada manualmente" (override sigue false: transición auto).
   await expect(page.getByText('Tacto', { exact: true })).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByLabel(/Categoría Vaquillona pre[ñn]ada/i).first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByLabel(/Categoría Vaquillona pre[ñn]ada/i).filter({ visible: true }).first()).toBeVisible({ timeout: 20_000 });
   await expect(page.getByText('Categoría fijada manualmente', { exact: true })).toHaveCount(0);
 });
 

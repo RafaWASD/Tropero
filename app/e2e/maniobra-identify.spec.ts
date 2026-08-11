@@ -185,7 +185,7 @@ test('(a) bastonazo a un animal del campo → encontrado → auto-avance a la ca
 
   // Esperamos a que el animal BAJE por la stream (visible en la lista = ya sincronizó al SQLite local).
   await gotoAnimales(page);
-  await expect(page.getByText(visual, { exact: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(visual, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
 
   await startManiobraSession(page);
 
@@ -273,7 +273,7 @@ test('(d) búsqueda manual por idv → encontrado → auto-avance a la carga rá
   // Proxy de "ya sincronizó al SQLite local": para un animal SIN caravana electrónica el HERO de la fila es
   // el IDV (AnimalRow: apodo → idv → tag → "—"); acá no hay apodo → esperamos el IDV (hero), que es
   // exact-matchable. El idv corto no colisiona con otro animal (el campo es fresco por test).
-  await expect(page.getByText(idv, { exact: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(idv, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
 
   await startManiobraSession(page);
 
@@ -299,7 +299,7 @@ test('(e) desconexión del bastón → fallback a manual sin perder la sesión',
   await waitForHome(page);
   await gotoAnimales(page);
   // Proxy de sync: el IDV es el hero de la fila del animal sin caravana (ver test (d)).
-  await expect(page.getByText(idv, { exact: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(idv, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
 
   await startManiobraSession(page);
 
@@ -351,8 +351,8 @@ test('(f) manual con apodo duplicado → picker de candidatos → elegir → car
   await gotoAnimales(page);
   // Proxy de sync: el hero de ambas filas es el apodo "0385" (rodeo con apodo + apodo cargado); el idv baja a
   // la línea secundaria (#5001/#5002) → esperamos ver ambos idv (substring, el secundario los distingue).
-  await expect(page.getByText('5001').first()).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByText('5002').first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText('5001').filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText('5002').filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
 
   await startManiobraSessionOnRodeo(page, 'Cría hembras');
 
@@ -395,7 +395,7 @@ test('(g) animal de otro rodeo del mismo campo → pasar el animal a este rodeo 
   await signIn(page, user);
   await waitForHome(page);
   await gotoAnimales(page);
-  await expect(page.getByText(idv, { exact: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(idv, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
 
   // Arrancamos la jornada sobre el RODEO A ("Cría hembras"; el animal está en "Vaquillonas" → R4.4).
   await startManiobraSessionOnRodeo(page, 'Cría hembras');
@@ -442,8 +442,8 @@ test('(h) 3 consecutivos de otro rodeo → aviso "rodeo de jornada mal elegido" 
   await signIn(page, user);
   await waitForHome(page);
   await gotoAnimales(page);
-  await expect(page.getByText('7001', { exact: true }).first()).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByText('7003', { exact: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText('7001', { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText('7003', { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
 
   // Jornada sobre el rodeo A ("Cría hembras"; los 3 animales están en el B → cada uno R4.4; al 3ro → R4.7).
   await startManiobraSessionOnRodeo(page, 'Cría hembras');

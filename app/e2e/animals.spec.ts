@@ -112,7 +112,7 @@ test('alta guiada desde empty → wizard (sexo→categoría→datos) → el anim
   // R4.7: aterriza en la ficha del recién creado. La ficha tiene el bloque "Identificación" y el
   // valor visual cargado (aparece en el hero Y en la fila → .first()).
   await expect(page.getByText('Identificación', { exact: true })).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByText(idv, { exact: true }).first()).toBeVisible();
+  await expect(page.getByText(idv, { exact: true }).filter({ visible: true }).first()).toBeVisible();
   // El badge de categoría refleja la elegida ("Vaquillona") — coincide con la computada → sin override.
   await expect(page.getByText('Vaquillona', { exact: true }).filter({ visible: true }).first()).toBeVisible();
   // Sección Historial (C3.1) — reemplaza el teaser "Próximamente". Un animal recién creado tiene
@@ -129,7 +129,7 @@ test('alta guiada desde empty → wizard (sexo→categoría→datos) → el anim
   // Volvemos a la lista vía "Volver" (el create se hizo con replace → back desde la ficha cae en
   // (tabs)/Animales). El animal aparece.
   await page.getByRole('button', { name: 'Volver', exact: true }).click();
-  await expect(page.getByText(idv, { exact: true }).first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText(idv, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 20_000 });
 
   // fix-loop 3: volvemos a Inicio → el paso de animal ahora está HECHO (count real = 1, no
   // hardcodeado). useFocusEffect recarga el count al re-enfocar la home tras crear el animal.
@@ -169,12 +169,12 @@ test('delta aptitud (RAR.1/RAR.3/RAR.4): alta de VAQUILLONA "Sí, apta" → fila
   await expect(page.getByText('Identificación', { exact: true })).toBeVisible({ timeout: 20_000 });
   await expect(page.getByText('Estado actual', { exact: true })).toBeVisible();
   await expect(page.getByText('Aptitud reproductiva', { exact: true })).toBeVisible();
-  await expect(page.getByText('Apta', { exact: true }).first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText('Apta', { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 20_000 });
 
   // Volvemos a la lista → el chip de estado reproductivo "Apta" (RAR.3.1, a11y "Estado reproductivo: Apta").
   await page.getByRole('button', { name: 'Volver', exact: true }).click();
-  await expect(page.getByText(idv, { exact: true }).first()).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByLabel('Estado reproductivo: Apta').first()).toBeVisible();
+  await expect(page.getByText(idv, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByLabel('Estado reproductivo: Apta').filter({ visible: true }).first()).toBeVisible();
 });
 
 test('delta aptitud (RAR.1.3): alta de VAQUILLONA "Aún no sé" → fila Aptitud "Diferida" (diferida, NO servida)', async ({
@@ -199,7 +199,7 @@ test('delta aptitud (RAR.1.3): alta de VAQUILLONA "Aún no sé" → fila Aptitud
   await page.getByRole('button', { name: 'Crear animal', exact: true }).click();
 
   await expect(page.getByText('Aptitud reproductiva', { exact: true })).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByText('Diferida', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText('Diferida', { exact: true }).filter({ visible: true }).first()).toBeVisible();
 });
 
 test('delta aptitud (RAR.1.2): el prompt de aptitud NO aparece para una categoría que no es vaquillona (ternera)', async ({
@@ -266,7 +266,7 @@ test('B: alta de una MULTÍPARA → el form NO pide peso, SÍ dientes/condición
 
   // Ficha: badge "Multípara" (override, no derivable) + condición corporal en "Estado actual".
   await expect(page.getByText('Identificación', { exact: true })).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByText('Multípara', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText('Multípara', { exact: true }).filter({ visible: true }).first()).toBeVisible();
   // El override se refleja en el a11y label del badge ("fijada manualmente").
   await expect(
     page.getByLabel('Categoría Multípara, fijada manualmente', { exact: true }).first(),
@@ -276,7 +276,7 @@ test('B: alta de una MULTÍPARA → el form NO pide peso, SÍ dientes/condición
   // es la prueba real de que el evento se guardó (el label "Condición corporal" lo renderiza RN-web en
   // div+span anidados → matchea 2 nodos en strict mode; asertamos el VALOR, que es único y diagnóstico).
   await expect(page.getByText('Estado actual', { exact: true })).toBeVisible();
-  await expect(page.getByText(/3 \/ 5/).first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText(/3 \/ 5/).filter({ visible: true }).first()).toBeVisible({ timeout: 20_000 });
 });
 
 test('B: alta de un TERNERO → el form pide PESO, NO dientes/preñez', async ({ page }) => {
@@ -306,7 +306,7 @@ test('B: alta de un TERNERO → el form pide PESO, NO dientes/preñez', async ({
   await page.getByRole('button', { name: 'Crear animal', exact: true }).click();
 
   await expect(page.getByText('Identificación', { exact: true })).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByText('Ternero', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText('Ternero', { exact: true }).filter({ visible: true }).first()).toBeVisible();
   // El peso de alta (entry_weight) NO es un weight_event → "Estado actual / Peso actual" queda
   // "Sin registrar" (el peso de entrada vive en la columna, no en el timeline). Un macho NO muestra
   // la fila "Estado reproductivo".
@@ -347,7 +347,7 @@ test('B: alta de una VAQUILLONA PREÑADA con preñez "Cabeza" → estado reprodu
   // SIN override (a11y label sin "fijada manualmente").
   await expect(page.getByText('Identificación', { exact: true })).toBeVisible({ timeout: 20_000 });
   await expect(page.getByText('Estado reproductivo', { exact: true })).toBeVisible();
-  await expect(page.getByText(/Preñada \(cabeza\)/).first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText(/Preñada \(cabeza\)/).filter({ visible: true }).first()).toBeVisible({ timeout: 20_000 });
   // Badge derivable → SIN "fijada manualmente".
   await expect(
     page.getByLabel('Categoría Vaquillona preñada', { exact: true }).first(),
@@ -388,7 +388,7 @@ test('alta guiada: elegir una categoría que DIFIERE de la computada → overrid
   // override preservó la elección. (El badge "Multípara" en el hero confirma category_id + el punto
   // de override sutil no es asertable por texto; basta con la categoría elegida.)
   await expect(page.getByText('Identificación', { exact: true })).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByText('Multípara', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText('Multípara', { exact: true }).filter({ visible: true }).first()).toBeVisible();
   // Y NUNCA muestra "Vaquillona" (la computada): si el override hubiera fallado, el server la habría
   // dejado como vaquillona o el recálculo la revertiría.
   await expect(page.getByText('Vaquillona', { exact: true })).toHaveCount(0);
@@ -422,7 +422,7 @@ test('alta guiada: elegir la categoría que COINCIDE con la computada → sin ov
   await expect(page.getByText('Identificación', { exact: true })).toBeVisible({ timeout: 20_000 });
   await expect(page.getByText('Vaquillona', { exact: true }).filter({ visible: true }).first()).toBeVisible();
   // Coincide → SIN override (a11y label sin "fijada manualmente").
-  await expect(page.getByLabel('Categoría Vaquillona', { exact: true }).first()).toBeVisible();
+  await expect(page.getByLabel('Categoría Vaquillona', { exact: true }).filter({ visible: true }).first()).toBeVisible();
   await expect(
     page.getByLabel('Categoría Vaquillona, fijada manualmente', { exact: true }),
   ).toHaveCount(0);
@@ -518,7 +518,7 @@ test('buscar un animal EXISTENTE → tocar el resultado → ficha', async ({ pag
   await gotoAnimales(page);
 
   // El animal aparece en la lista (carga inicial).
-  await expect(page.getByText(idv, { exact: true }).first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText(idv, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 20_000 });
 
   // Buscar por el IDV exacto → el resultado aparece; tocarlo abre la ficha.
   const search = page.getByLabel('Buscar animal por caravana o número', { exact: true });
@@ -532,7 +532,7 @@ test('buscar un animal EXISTENTE → tocar el resultado → ficha', async ({ pag
   // Ficha del animal: bloque "Datos del animal" + el IDV en "Identificación" (aparece en el
   // título del header Y en la fila → .first()).
   await expect(page.getByText('Datos del animal', { exact: true })).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByText(idv, { exact: true }).first()).toBeVisible();
+  await expect(page.getByText(idv, { exact: true }).filter({ visible: true }).first()).toBeVisible();
 });
 
 test('fix-loop 2: buscar por un PREFIJO de la caravana electrónica encuentra el animal', async ({
@@ -554,7 +554,7 @@ test('fix-loop 2: buscar por un PREFIJO de la caravana electrónica encuentra el
   await gotoAnimales(page);
 
   // El animal aparece en la lista (carga inicial) — se identifica por su IDV.
-  await expect(page.getByText(idv, { exact: true }).first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText(idv, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 20_000 });
 
   // Buscamos por un PREFIJO de la caravana electrónica (substring, no exacto de 15 díg). Antes del
   // fix daba "no encontramos"; ahora debe matchear por substring de tag_electronic.
@@ -668,7 +668,7 @@ test('C3.3 baja: owner da de baja (Venta) → desaparece de la tab Animales y la
 
   // De vuelta en la ficha (in-situ): modo archivada → badge "Vendido el …" + el botón "Dar de baja"
   // YA NO está (el animal está de baja) + "Agregar evento" tampoco.
-  await expect(page.getByText(/Vendido el /).first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText(/Vendido el /).filter({ visible: true }).first()).toBeVisible({ timeout: 20_000 });
   await expect(page.getByRole('button', { name: 'Dar de baja', exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Agregar evento', exact: true })).toHaveCount(0);
 
@@ -682,7 +682,7 @@ test('C3.3 baja: owner da de baja (Venta) → desaparece de la tab Animales y la
   // Pero SÍ aparece si filtramos por "Vendidos" (sigue archivado y visible, R4.12/R4.15).
   await page.getByRole('button', { name: 'Filtrar por estado' }).click();
   await page.getByRole('button', { name: 'Vendidos', exact: true }).click();
-  await expect(page.getByText(idv, { exact: true }).first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText(idv, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 20_000 });
 });
 
 // ─── Delta alta-form-refinamiento (#3 fecha DD/MM separada del año · #13 condición stepper · #14 destildar) ──
@@ -813,7 +813,7 @@ test('delta override-imputación: macho "Torito" con SOLO el año (borde 2 años
 
   // Aterriza en la ficha (create OK) y el badge muestra la categoría ELEGIDA (Torito), no la flipeada.
   await expect(page.getByText('Historial', { exact: true })).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByText('Torito', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText('Torito', { exact: true }).filter({ visible: true }).first()).toBeVisible();
 
   // ORÁCULO server: la categoría almacenada = Torito y category_override=FALSE (auto-avanza sin flip). Sin
   // el fix, el midpoint ciego daría category_override=TRUE (la elección quedaría pineada/congelada).
@@ -849,7 +849,7 @@ test('delta override-imputación: macho "Ternero" con SOLO el año en curso → 
   await page.getByRole('button', { name: 'Crear animal', exact: true }).click();
 
   await expect(page.getByText('Historial', { exact: true })).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByText('Ternero', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText('Ternero', { exact: true }).filter({ visible: true }).first()).toBeVisible();
 
   const { id: profileId } = await waitForServerAnimalProfile(establishmentId, { idv });
   const { categoryOverride, categoryCode } = await readServerProfileCategory(profileId);
@@ -1109,7 +1109,7 @@ test('caravana-ficha (RCF.1.3/RCF.3.3/RCF.3.5): "Agregar caravana visual" → ti
 
   // OPTIMISMO EN SITIO (RCF.3.5): la fila pasa a mostrar el idv en SOLO-LECTURA al instante (UPDATE local,
   // offline-first) → ya no se ofrece la afordancia "Agregar caravana visual".
-  await expect(page.getByText(idv, { exact: true }).first()).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText(idv, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 10_000 });
   await expect(page.getByRole('button', { name: 'Agregar caravana visual', exact: true })).toHaveCount(0);
 });
 
@@ -1282,7 +1282,7 @@ test('delta #15 (RCAP.3.1/3.2/3.5): vaca con cría al pie → vincular un terner
   await waitForHome(page);
   await gotoAnimales(page);
   // Gate de sync: el ternero sembrado aparece en la lista → está en el SQLite local → el find-or-create lo verá.
-  await expect(page.getByText(calfIdv, { exact: true }).first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText(calfIdv, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 20_000 });
 
   // El campo ya tiene un animal → el alta arranca por el buscador (un id fresco no-match → "Dar de alta este animal").
   const motherIdv = `5512${Date.now().toString().slice(-6)}`;
@@ -1297,7 +1297,7 @@ test('delta #15 (RCAP.3.1/3.2/3.5): vaca con cría al pie → vincular un terner
   await page.getByLabel('Caravana del ternero', { exact: true }).fill(calfIdv);
   await page.getByTestId('link-calf-search').click();
   await expect(page.getByText('Ternero encontrado', { exact: true })).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByText(calfIdv, { exact: true }).first()).toBeVisible();
+  await expect(page.getByText(calfIdv, { exact: true }).filter({ visible: true }).first()).toBeVisible();
   await page.getByTestId('link-calf-confirm').click();
 
   // Navega a la ficha de la vaca (reflejo optimista). Oráculo server: 1 parto con 1 birth_calf.
@@ -1408,7 +1408,7 @@ test('delta #15 (RCAP.3.3): un ternero que YA tiene madre no se re-vincula → a
 
   // Gate de sync DETERMINISTA: la ficha del ternero muestra la card "Madre" (fetchMother LOCAL) → el
   // birth_calf sembrado YA bajó al SQLite local → el prompt lo verá como "ya tiene madre" (sin race de sync).
-  await expect(page.getByText(calfIdv, { exact: true }).first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText(calfIdv, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 20_000 });
   await page.getByRole('button', { name: new RegExp(calfIdv) }).first().click();
   await expect(page.getByLabel(`Ver la ficha de la madre: ${pmIdv}`)).toBeVisible({ timeout: 20_000 });
   await page.getByRole('button', { name: 'Volver', exact: true }).click();
@@ -1499,7 +1499,7 @@ test('delta #2 nombre/apodo (RNA.2.2/RNA.4.2/RNA.8.2): con el "apodo" habilitado
   // RNA.2.2: el built-in "Nombre / seña" sigue AUSENTE; el apodo se ofrece por la sección "Datos personalizados".
   await expect(page.getByLabel('Nombre / seña (opcional)', { exact: true })).toHaveCount(0);
   await expect(page.getByText('Datos personalizados', { exact: true })).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByText('Nombre / apodo', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText('Nombre / apodo', { exact: true }).filter({ visible: true }).first()).toBeVisible();
   const apodoInput = page.getByTestId('custom-prop-text').first();
   await expect(apodoInput).toBeVisible();
   await apodoInput.fill('Pinto');
@@ -1507,7 +1507,7 @@ test('delta #2 nombre/apodo (RNA.2.2/RNA.4.2/RNA.8.2): con el "apodo" habilitado
   await page.getByRole('button', { name: 'Crear animal', exact: true }).click();
 
   // Aterriza en la ficha del recién creado. Oráculo SERVER: el apodo aterrizó en custom_attributes ("Pinto").
-  await expect(page.getByText('Identificación', { exact: true }).first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText('Identificación', { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 20_000 });
   const { id: profileId } = await waitForServerAnimalProfile(establishmentId, { idv });
   await waitForServerCustomAttribute(profileId, fieldId, 'Pinto');
 

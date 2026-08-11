@@ -104,7 +104,7 @@ test('fila "Categoría": fijar a mano → card de fijación → elegir la autom�
   // la card "Categoría fijada manualmente" (RCM.7.4) aparecen en el mismo render.
   await expect(page.getByTestId('category-sheet')).toHaveCount(0, { timeout: 15_000 });
   await expect(page.getByTestId('ficha-categoria-valor')).toHaveText('Multípara', { timeout: 15_000 });
-  await expect(page.getByLabel(/^Categoría Multípara/).first()).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByLabel(/^Categoría Multípara/).filter({ visible: true }).first()).toBeVisible({ timeout: 15_000 });
   await expect(page.getByText('Categoría fijada manualmente', { exact: true })).toBeVisible({
     timeout: 15_000,
   });

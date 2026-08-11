@@ -94,7 +94,7 @@ test('crear lote → asignar desde la ficha → ver miembros', async ({ page }) 
 
   // Ficha: sección "Lote" con "Sin lote" + CTA "Asignar a un lote".
   await expect(page.getByText('Lote actual', { exact: true })).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByText('Sin lote', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText('Sin lote', { exact: true }).filter({ visible: true }).first()).toBeVisible();
   await page.getByRole('button', { name: 'Asignar a un lote', exact: true }).click();
 
   // Selector: elegir el lote creado → la ficha refleja el lote asignado al instante (queda como
@@ -225,7 +225,7 @@ test('borrar lote → su animal queda reasignado a NULL (D1)', async ({ page }) 
   await gotoAnimales(page);
   await page.getByRole('button', { name: new RegExp(idv) }).first().click();
   await expect(page.getByText('Lote actual', { exact: true })).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByText('Sin lote', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText('Sin lote', { exact: true }).filter({ visible: true }).first()).toBeVisible();
 });
 
 // ── delta lotes-venta (RLV.2/RLV.3/RLV.7/RLV.9): BAJA EN TANDA desde el lote. Vender/Descartar → modo
@@ -254,8 +254,8 @@ test('vender en tanda un subconjunto del lote → menos cabezas + archivado sin 
 
   // Vista de grupo del lote (card de Inicio). Ambos animales activos visibles.
   await gotoLoteGroup(page, grupo.name);
-  await expect(page.getByText(idvA, { exact: true }).first()).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByText(idvB, { exact: true }).first()).toBeVisible();
+  await expect(page.getByText(idvA, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(idvB, { exact: true }).filter({ visible: true }).first()).toBeVisible();
 
   // Vender / Descartar → modo selección → tildar SOLO A (subconjunto).
   await page.getByTestId('lote-vender-descartar').click();
@@ -272,7 +272,7 @@ test('vender en tanda un subconjunto del lote → menos cabezas + archivado sin 
 
   // Volvemos al lote (modo normal, re-leído): A ya no está; B sigue.
   await expect(page.getByTestId('lote-vender-descartar')).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByText(idvB, { exact: true }).first()).toBeVisible();
+  await expect(page.getByText(idvB, { exact: true }).filter({ visible: true }).first()).toBeVisible();
   await expect(page.getByText(idvA, { exact: true })).toHaveCount(0, { timeout: 20_000 });
 
   // ORÁCULO SERVER (tras drenar la outbox): A archivado (sold) + SIN lote; B intacto (activo, en el lote).

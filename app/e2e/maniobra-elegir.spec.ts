@@ -134,7 +134,7 @@ test('elegir: tacto vaquillona (apta) + condición corporal (3,25) + dientes (1/
   await signIn(page, user);
   await waitForHome(page);
   await gotoAnimales(page);
-  await expect(page.getByText(visual, { exact: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(visual, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
 
   await startSessionTresElegir(page);
 
@@ -215,7 +215,7 @@ test('dientes: el prompt CUT NO aparece para un ternero (R6.8)', async ({ page }
   await signIn(page, user);
   await waitForHome(page);
   await gotoAnimales(page);
-  await expect(page.getByText(visual, { exact: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(visual, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
 
   await startSessionDientes(page);
   await bastonazo(page, eid);

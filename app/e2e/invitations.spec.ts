@@ -142,7 +142,7 @@ test('loop 2 cuentas: el dueño invita por link y el invitado acepta; el dueño 
   // Tras aceptar OK → refreshEstablishments(estId) + router.replace('/(tabs)') → home del campo.
   await waitForHome(pageB);
   // El invitado ahora ve el campo en el switch del header de su home.
-  await expect(pageB.getByText(fieldName, { exact: true }).first()).toBeVisible({ timeout: 15_000 });
+  await expect(pageB.getByText(fieldName, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 15_000 });
 
   // ── Contexto A: el DUEÑO ve al nuevo miembro ──────────────────────────────────
   await pageA.goto('/');
@@ -200,7 +200,7 @@ test('bug 1: /invite?token= en carga fresca con sesión ACTIVA → aceptar → h
 
   // 3) Aterriza en la HOME del campo (oráculo POSITIVO por elemento exclusivo del destino: el saludo
   //    "¡Hola …! 👋" + el nombre del campo en el switch del header).
-  await expect(page.getByText(fieldName, { exact: true }).first()).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText(fieldName, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 15_000 });
 
   // 4) NO loopea: tras un settle generoso seguimos en la home (con el bug, el RootGate ya habría
   //    re-ruteado a /invite → el saludo desaparecería, la URL sería /invite y volvería el botón
@@ -254,7 +254,7 @@ test('deslogueado: /invite?token= → auth_required (persiste) → login → vue
   await acceptInvitationUntilHome(page);
 
   // 4) Acepta → home del campo (el guard one-shot del RootGate evita el loop en este path también).
-  await expect(page.getByText(fieldName, { exact: true }).first()).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText(fieldName, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 15_000 });
   await page.waitForTimeout(2_000);
   await expect(page.getByText(/¡Hola.*👋/)).toBeVisible();
   await expect(page).not.toHaveURL(/\/invite(\?|$)/);

@@ -129,8 +129,8 @@ test('destete masivo: todos pre-tildados → mellizos 1 weaning c/u → transici
   // y verificamos que el evento "Destete" está en su timeline (prueba directa del evento por ternero).
   await page.getByRole('button', { name: new RegExp(`Torito.*${idvTwin1}`) }).click();
   await expect(page.getByText('Historial', { exact: true })).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByText('Destete', { exact: true }).first()).toBeVisible();
-  await expect(page.getByText('Torito', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText('Destete', { exact: true }).filter({ visible: true }).first()).toBeVisible();
+  await expect(page.getByText('Torito', { exact: true }).filter({ visible: true }).first()).toBeVisible();
   // Volvemos a la vista de grupo (router.back de la ficha) para abrir el animal con override.
   await page.getByRole('button', { name: 'Volver', exact: true }).first().click();
 
@@ -139,9 +139,9 @@ test('destete masivo: todos pre-tildados → mellizos 1 weaning c/u → transici
   // override sigue puesto, no se revirtió). Lo abrimos desde su fila del grupo.
   await page.getByRole('button', { name: new RegExp(`Ternera.*${idvOverride}`) }).click();
   await expect(page.getByText('Historial', { exact: true })).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByText('Destete', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText('Destete', { exact: true }).filter({ visible: true }).first()).toBeVisible();
   await expect(page.getByText('Categoría fijada manualmente', { exact: true })).toBeVisible();
-  await expect(page.getByText('Ternera', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText('Ternera', { exact: true }).filter({ visible: true }).first()).toBeVisible();
 });
 
 // ─── FIX 1 (Raf 2026-06-12): la acción "Destetar" se ofrece solo si HAY CANDIDATOS, no solo por config ──

@@ -115,7 +115,7 @@ test('vacías post-tacto → crear lote "Descarte" → la vaca queda en el lote 
   await signIn(page, user);
   await waitForHome(page);
   await gotoAnimales(page);
-  await expect(page.getByText(idv, { exact: true }).first()).toBeVisible({ timeout: 45_000 });
+  await expect(page.getByText(idv, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 45_000 });
 
   await startSessionTacto(page);
   await tactoVacia(page, eid);
@@ -154,7 +154,7 @@ test('vacías post-tacto → elegir un lote existente → la vaca queda en ese l
   await signIn(page, user);
   await waitForHome(page);
   await gotoAnimales(page);
-  await expect(page.getByText(idv, { exact: true }).first()).toBeVisible({ timeout: 45_000 });
+  await expect(page.getByText(idv, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 45_000 });
 
   await startSessionTacto(page);
   await tactoVacia(page, eid);
@@ -188,7 +188,7 @@ test('vacías post-tacto → "Ahora no" → sale del flujo y la vaca sigue sin l
   await signIn(page, user);
   await waitForHome(page);
   await gotoAnimales(page);
-  await expect(page.getByText(idv, { exact: true }).first()).toBeVisible({ timeout: 45_000 });
+  await expect(page.getByText(idv, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 45_000 });
 
   await startSessionTacto(page);
   await tactoVacia(page, eid);

@@ -100,7 +100,7 @@ test('captura: modo assign_or_create del bottom-sheet (≥3 candidatos + buscado
   // Esperamos a que los candidatos BAJEN por la stream (visibles en la lista = ya sincronizó al SQLite
   // local). El hero de IDV '0319' se renderiza completo.
   await gotoAnimales(page);
-  await expect(page.getByText('0319', { exact: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText('0319', { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
 
   // Bastonazo de un EID SIN match → con ≥1 candidato sin caravana → modo assign_or_create (RD3.1).
   await bastonazo(page, makeEid());
@@ -147,7 +147,7 @@ test('captura: BulkTagAssignmentScreen (opción B, asignación masiva) — vací
 
   // Esperamos a que los candidatos bajen por la stream (visibles en la lista = sincronizado al local).
   await gotoAnimales(page);
-  await expect(page.getByText('0512', { exact: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText('0512', { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
 
   // Filtro "Sin electrónica" → aparece el CTA "Asignar caravanas en masa" → entra a la pantalla masiva.
   await page.getByRole('button', { name: 'Filtrar animales sin electrónica' }).click();
@@ -194,8 +194,8 @@ test('opción B: bastonear un EID ya asignado NO encola y avisa (prevención cli
   // Esperamos a que el animal CON caravana baje al SQLite local (visible en la lista = ya sincronizó, así
   // lookupByTag lo encuentra localmente). El candidato sin caravana también baja.
   await gotoAnimales(page);
-  await expect(page.getByText('3001', { exact: true }).first()).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByText('3050', { exact: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText('3001', { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText('3050', { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
 
   // Entramos a la masiva (tab Más sirve también, pero reusamos el filtro + CTA de la tab Animales).
   await page.getByRole('button', { name: 'Filtrar animales sin electrónica' }).click();

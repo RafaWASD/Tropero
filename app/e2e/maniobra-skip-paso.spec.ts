@@ -100,7 +100,7 @@ test('skip por-paso: saltear la aptitud → el MISMO animal sigue en pesaje → 
   await signIn(page, user);
   await waitForHome(page);
   await gotoAnimales(page);
-  await expect(page.getByText(visual, { exact: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(visual, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
 
   await startSessionAptitudPesaje(page);
 
@@ -153,7 +153,7 @@ test('skip animal (secundario, overflow): descarta lo cargado y vuelve a identif
   await signIn(page, user);
   await waitForHome(page);
   await gotoAnimales(page);
-  await expect(page.getByText(visual, { exact: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(visual, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
 
   await startSessionAptitudPesaje(page);
 

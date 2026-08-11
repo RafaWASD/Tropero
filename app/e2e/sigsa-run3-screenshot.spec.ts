@@ -59,7 +59,7 @@ test('captura: edición de raza en la ficha (CTA completar → BreedPickerSheet 
 
   // (3) Elegimos Hereford → la ficha muestra la raza + el link "Cambiar".
   await page.getByRole('button', { name: 'Raza Hereford, código H', exact: true }).click();
-  await expect(page.getByText('Hereford', { exact: true }).first()).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText('Hereford', { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 15_000 });
   await expect(page.getByRole('button', { name: 'Cambiar la raza', exact: true })).toBeVisible();
   await page.screenshot({ path: path.join(outDir, '03-ficha-con-raza-cambiar.png'), fullPage: true });
 });

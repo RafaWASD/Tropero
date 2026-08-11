@@ -72,10 +72,10 @@ test('custom: ⋯ owner-only solo en filas custom; Eliminar muestra impacto + AD
 
   // ── PRE: el valor "Pinto" SE VE en la ficha ANTES de borrar (R13.10/R13.12; confirma que sincronizó) ──
   await gotoAnimales(page);
-  await expect(page.getByText(idv, { exact: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(idv, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
   await openFichaByIdv(page, idv);
   await expect(page.getByText('Datos personalizados', { exact: true })).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByText('Pinto', { exact: true }).first()).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText('Pinto', { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 15_000 });
 
   // ── 1) El ⋯ aparece SOLO en la fila custom (R13.29) — no en las de fábrica ──
   await gotoPlantilla(page, rodeoId);
@@ -141,10 +141,10 @@ test('R13.30 (Opción B): el diálogo ADVIERTE que las cargas dejan de verse y, 
 
   // ── PRE: el valor "Pinto" SE VE en la ficha ANTES de borrar (confirma que sincronizó y se renderiza) ──
   await gotoAnimales(page);
-  await expect(page.getByText(idv, { exact: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(idv, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
   await openFichaByIdv(page, idv);
   await expect(page.getByText('Datos personalizados', { exact: true })).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByText('Pinto', { exact: true }).first()).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText('Pinto', { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 15_000 });
 
   // ── (a) El diálogo de borrado ADVIERTE la pérdida de visibilidad (Opción B, R13.31) ──
   await gotoPlantilla(page, rodeoId);
@@ -165,7 +165,7 @@ test('R13.30 (Opción B): el diálogo ADVIERTE que las cargas dejan de verse y, 
   await page.goto('/');
   await waitForHome(page);
   await gotoAnimales(page);
-  await expect(page.getByText(idv, { exact: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(idv, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
   await openFichaByIdv(page, idv);
   await expect(page.getByText('Identificación', { exact: true })).toBeVisible({ timeout: 20_000 });
   // El valor "Pinto" desaparece (la propiedad ya no se renderiza). toBeHidden tolera la latencia del prune.

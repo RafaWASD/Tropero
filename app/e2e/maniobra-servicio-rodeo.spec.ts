@@ -169,7 +169,7 @@ test.describe('edición offline de meses (web táctil 360)', () => {
   await rodeosEntry.tap();
 
   // En Rodeos: la card del rodeo sembrado tiene la fila "Meses de servicio" con subtexto "sin configurar".
-  await expect(page.getByText('Meses de servicio').first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText('Meses de servicio').filter({ visible: true }).first()).toBeVisible({ timeout: 20_000 });
   // Abrir la edición de meses del rodeo sembrado (el primero, RUN_TAG Rodeo general).
   const editServicio = page
     .getByRole('button', { name: new RegExp(`Editar los meses de servicio de ${RUN_TAG} Rodeo general`) })
@@ -201,7 +201,7 @@ test.describe('edición offline de meses (web táctil 360)', () => {
 
   // ── Overlay optimista (RPSC.3.4): la card del rodeo en Rodeos ahora muestra "Jun → Jul" SIN red. ──
   try {
-    await expect(page.getByText('Jun → Jul', { exact: true }).first()).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByText('Jun → Jul', { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 20_000 });
   } catch (err) {
     console.log('[diag] consola del page al fallar (overlay edición):\n' + consoleLines.join('\n'));
     throw err;

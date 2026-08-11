@@ -106,7 +106,7 @@ test('lote opcional: elegir un lote desde el resumen lo asigna al animal (R9.2, 
   await signIn(page, user);
   await waitForHome(page);
   await gotoAnimales(page);
-  await expect(page.getByText(visual, { exact: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(visual, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
 
   await startSessionPesaje(page);
 
@@ -201,7 +201,7 @@ test('lote NO auto-asignado: una maniobra sin tocar el lote deja el management_g
   await signIn(page, user);
   await waitForHome(page);
   await gotoAnimales(page);
-  await expect(page.getByText(visual, { exact: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(visual, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
 
   await startSessionPesaje(page);
   await bastonazo(page, eid);

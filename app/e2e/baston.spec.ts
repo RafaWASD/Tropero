@@ -81,7 +81,7 @@ test('(a) bastonazo a un animal del campo → overlay editar → "Ver ficha" →
 
   // Esperamos a que el animal BAJE por la stream (visible en la lista = ya sincronizó al SQLite local).
   await gotoAnimales(page);
-  await expect(page.getByText(visual, { exact: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(visual, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
 
   // Bastonazo → overlay con el EID legible arriba + card del animal + "Ver ficha".
   await bastonazo(page, eid);

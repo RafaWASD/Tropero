@@ -239,14 +239,14 @@ test('CE en un TORITO entero (cría): aparece en la secuencia → rueda + campo 
   await signIn(page, user);
   await waitForHome(page);
   await gotoAnimales(page);
-  await expect(page.getByText(visual, { exact: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(visual, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
 
   await startSessionCE(page);
 
   // Bastonazo → found → auto-avance a la carga rápida con la CE (· 1 de 1).
   await bastonazo(page, eid);
   await expect(page.getByText('· 1 de 1', { exact: true })).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByText('Circunferencia escrotal', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText('Circunferencia escrotal', { exact: true }).filter({ visible: true }).first()).toBeVisible();
 
   // La rueda de CE + el campo editable + la pill de edad están presentes (R14.5/R14.6).
   await expect(page.getByTestId('ce-wheel')).toBeVisible({ timeout: 15_000 });
@@ -272,7 +272,7 @@ test('CE en un TORITO entero (cría): aparece en la secuencia → rueda + campo 
   await page.getByTestId('confirm-step').click();
   await expect(page.getByText('Revisá la carga', { exact: true })).toBeVisible({ timeout: 15_000 });
   // El resumen muestra la maniobra + el valor legible es-AR ("38,5 cm").
-  await expect(page.getByText(/38,5\s*cm/).first()).toBeVisible();
+  await expect(page.getByText(/38,5\s*cm/).filter({ visible: true }).first()).toBeVisible();
 
   await page.getByRole('button', { name: 'Confirmar y pasar al siguiente animal' }).click();
   await expect(page.getByText('Acercá el bastón al animal', { exact: true })).toBeVisible({ timeout: 15_000 });
@@ -313,7 +313,7 @@ test('CE NO aparece para una HEMBRA ni un TERNERO (se saltea, R14.2/R14.4)', asy
   await signIn(page, user);
   await waitForHome(page);
   await gotoAnimales(page);
-  await expect(page.getByText(cowVisual, { exact: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(cowVisual, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
 
   await startSessionCE(page);
 
@@ -354,7 +354,7 @@ test('CE: castrado (novillo) la saltea; castración desconocida en un torito la 
   await signIn(page, user);
   await waitForHome(page);
   await gotoAnimales(page);
-  await expect(page.getByText(steerVisual, { exact: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(steerVisual, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
 
   await startSessionCE(page);
 
@@ -413,7 +413,7 @@ test('SNAP: la rueda de CE y la de EDAD lockean EXACTO al soltar a mitad de cami
   await signIn(page, user);
   await waitForHome(page);
   await gotoAnimales(page);
-  await expect(page.getByText(visual, { exact: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(visual, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
 
   await startSessionCE(page);
   await bastonazo(page, eid);
@@ -483,7 +483,7 @@ test('ANTI-RECORTE: ningún valor de CE se recorta en el campo hero, a 360 y 412
   await signIn(page, user);
   await waitForHome(page);
   await gotoAnimales(page);
-  await expect(page.getByText(visual, { exact: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(visual, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
 
   await startSessionCE(page);
   await bastonazo(page, eid);

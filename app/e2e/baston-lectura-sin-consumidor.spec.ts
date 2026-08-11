@@ -145,8 +145,8 @@ test('🔴-2: en `maniobra/carga` el bastonazo NO confirma (nadie lo recibe); en
 
   // Los animales bajan por la stream (visibles en la lista = ya sincronizaron al SQLite local).
   await gotoAnimales(page);
-  await expect(page.getByText('0401', { exact: true }).first()).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByText('0402', { exact: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText('0401', { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText('0402', { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
 
   await startSessionPesaje(page);
   // Piso limpio: hasta acá nadie bastoneó nada.

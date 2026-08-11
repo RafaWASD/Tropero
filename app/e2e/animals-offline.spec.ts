@@ -208,14 +208,14 @@ test('offline: alta vía BUSCADOR no-match → al volver de la ficha el animal s
   });
   try {
     await expect(page.getByText('No encontramos «34».', { exact: true })).toHaveCount(0);
-    await expect(page.getByText('34', { exact: true }).first()).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByText('34', { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 20_000 });
 
     // Y la navegación del repro de Raf con el término aún en el buscador: tab "Más" → volver a
     // "Animales" → el animal SIGUE visible (cada re-foco re-corre la búsqueda activa, no el stale).
     await gotoTab(page, 'Más', page.getByRole('button', { name: 'Cerrar sesión' }));
     await gotoAnimales(page);
     await expect(page.getByText('No encontramos «34».', { exact: true })).toHaveCount(0);
-    await expect(page.getByText('34', { exact: true }).first()).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByText('34', { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 20_000 });
   } catch (err) {
     console.log('[diag] consola del page al fallar:\n' + consoleLines.join('\n'));
     throw err;
@@ -269,7 +269,7 @@ test('offline: agregar un PESO offline → reconexión → el weight_event aterr
   // De vuelta en la ficha: el peso se ve OFFLINE (lectura local del timeline — INSERT local ya aplicado).
   try {
     await expect(page.getByText('Pesaje', { exact: true })).toBeVisible({ timeout: 20_000 });
-    await expect(page.getByText(`${weightKg} kg`, { exact: true }).first()).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByText(`${weightKg} kg`, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 20_000 });
   } catch (err) {
     console.log('[diag] consola del page al fallar (offline):\n' + consoleLines.join('\n'));
     throw err;
@@ -280,7 +280,7 @@ test('offline: agregar un PESO offline → reconexión → el weight_event aterr
   try {
     await waitForServerWeightEvent(establishmentId, weightKg);
     // Y el peso SIGUE en la ficha tras el drenado (sin desaparición espuria).
-    await expect(page.getByText(`${weightKg} kg`, { exact: true }).first()).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByText(`${weightKg} kg`, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 20_000 });
     // Cero rechazo del upload (la señal de un drenado fallido sería el warn de connector.ts).
     const rejected = consoleLines.filter((l) => l.includes('upload rechazado'));
     expect(rejected, `el drenado del evento NO debe rechazar:\n${rejected.join('\n')}`).toEqual([]);
@@ -387,7 +387,7 @@ for (const { label, calves } of [
 
     // De vuelta en la ficha: el PARTO se ve OFFLINE en la cronología (overlay pending_reproductive_events).
     try {
-      await expect(page.getByText('Parto', { exact: true }).first()).toBeVisible({ timeout: 20_000 });
+      await expect(page.getByText('Parto', { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 20_000 });
     } catch (err) {
       console.log('[diag] consola del page al fallar (parto offline):\n' + consoleLines.join('\n'));
       throw err;
@@ -512,7 +512,7 @@ test('offline: PARTO offline + madre soft-deleteada server-side → reconexión 
   await page.context().setOffline(true);
   await registerBirthFromProfile(page, 1);
   // El parto se ve offline (cronología) y el ternero en la lista (overlay): la BASE que el rollback borra.
-  await expect(page.getByText('Parto', { exact: true }).first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText('Parto', { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 20_000 });
   await backToAnimalesList(page);
   await expect(page.getByRole('button', { name: CALF_ROW })).toHaveCount(1, { timeout: 20_000 });
 
@@ -580,7 +580,7 @@ test('offline: PARTO offline + sigue sin red (transitorio) → el overlay NO se 
   // ── OFFLINE → registrar el parto (overlay: parto + 1 ternero). ──
   await page.context().setOffline(true);
   await registerBirthFromProfile(page, 1);
-  await expect(page.getByText('Parto', { exact: true }).first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText('Parto', { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 20_000 });
 
   // Seguimos OFFLINE un ciclo de retry del upload (el connector intenta drenar, la red está caída →
   // clasifica TRANSITORIO → re-throw → la tx queda en cola, el overlay NO se toca).

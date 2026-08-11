@@ -30,7 +30,7 @@ const OUT_DIR = path.join(__dirname, '..', '..', 'design', 'maniobra-spike');
 /** Espera a que el bundle monte y la pantalla del spike esté visible (post-splash), por un ancla. */
 async function gotoSpike(page: Page, route: string, anchor: string): Promise<void> {
   await page.goto(route);
-  await expect(page.getByText(anchor, { exact: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(anchor, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
 }
 
 /**
@@ -96,8 +96,8 @@ test('captura: PESAJE (teclado numérico gigante + CTA Confirmar) + densidad', a
   await expect(page.getByText('kg', { exact: true })).toBeVisible();
   await expect(page.getByText('Confirmar', { exact: true })).toBeVisible();
   // Las teclas: el '1' (esquina sup-izq) y el '0' (última fila) confirman el teclado.
-  await expect(page.getByText('1', { exact: true }).first()).toBeVisible();
-  await expect(page.getByText('0', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText('1', { exact: true }).filter({ visible: true }).first()).toBeVisible();
+  await expect(page.getByText('0', { exact: true }).filter({ visible: true }).first()).toBeVisible();
 
   // Captura SIEMPRE antes del assert (idem carga).
   await page.screenshot({ path: path.join(OUT_DIR, 'paso.png') });

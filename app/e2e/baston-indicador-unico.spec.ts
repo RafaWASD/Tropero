@@ -79,10 +79,10 @@ test('el estado del bastón se dice UNA vez: el chrome se calla donde hay chip p
     await expect(page.getByTestId('demo-simulate')).toBeVisible({ timeout: 20_000 });
     await expect(async () => {
       await page.getByTestId('demo-simulate').click();
-      await expect(page.getByLabel(/^Caravana \d{15} DEMO$/).first()).toBeVisible({ timeout: 4_000 });
+      await expect(page.getByLabel(/^Caravana \d{15} DEMO$/).filter({ visible: true }).first()).toBeVisible({ timeout: 4_000 });
     }).toPass({ timeout: 60_000 });
     // Conectado, y la card de la pantalla lo dice — con el indicador global callado encima de ella.
-    await expect(page.getByText('Bastón conectado', { exact: true }).first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText('Bastón conectado', { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 15_000 });
     await expect(page.getByTestId('stick-status-indicator')).toHaveCount(0);
 
     await page.getByRole('button', { name: 'Volver', exact: true }).click();
@@ -237,7 +237,7 @@ test('la banda nueva: el indicador no le cae encima a nada legible, y se estira 
     await expect(page.getByTestId('demo-simulate')).toBeVisible({ timeout: 20_000 });
     await expect(async () => {
       await page.getByTestId('demo-simulate').click();
-      await expect(page.getByLabel(/^Caravana \d{15} DEMO$/).first()).toBeVisible({ timeout: 4_000 });
+      await expect(page.getByLabel(/^Caravana \d{15} DEMO$/).filter({ visible: true }).first()).toBeVisible({ timeout: 4_000 });
     }).toPass({ timeout: 60_000 });
     await page.getByRole('button', { name: 'Volver', exact: true }).click();
     await expect(stickRow).toBeVisible({ timeout: 20_000 });

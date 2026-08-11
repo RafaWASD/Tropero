@@ -141,9 +141,9 @@ test('E1a (IDU.4.3/4.4/4.6): buscador general encuentra por electrónica exacta,
 
   // Los 3 bajaron por la stream (visibles en la lista = ya sincronizaron al SQLite local). El animal de
   // solo-apodo tiene el APODO como hero (rodeo usa apodo + tiene apodo).
-  await expect(page.getByText('TAGME01', { exact: true }).first()).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByText('VAQ12AB', { exact: true }).first()).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByText('Manchada', { exact: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText('TAGME01', { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText('VAQ12AB', { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText('Manchada', { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
 
   const search = page.getByLabel('Buscar animal por caravana o número', { exact: true });
 
@@ -186,9 +186,9 @@ test('E1b (IDU.4.7): cría al pie encuentra por idv alfanumérico, apodo y elect
   await waitForHome(page);
   await gotoAnimales(page);
   // Esperar a que los 3 bajen al SQLite local (el find-or-create de la cría al pie lee LOCAL).
-  await expect(page.getByText('TERNE07', { exact: true }).first()).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByText('CR12XY', { exact: true }).first()).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByText('Lucera', { exact: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText('TERNE07', { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText('CR12XY', { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText('Lucera', { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
 
   // Alta de una MADRE (multípara CON cría al pie) → tras "Crear animal" se abre el LinkCalfPrompt.
   // Entramos al alta por el no-match del buscador (idv precargado read-only; la madre es un animal aparte).
@@ -241,7 +241,7 @@ test('E1c (IDU.4.8): maniobra manual encuentra por idv ALFANUMÉRICO → auto-av
   await signIn(page, user);
   await waitForHome(page);
   await gotoAnimales(page);
-  await expect(page.getByText('VQ88AB', { exact: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText('VQ88AB', { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
 
   await startManiobraSession(page);
 
@@ -266,7 +266,7 @@ test('E1d (IDU.4.8): maniobra manual encuentra por APODO → auto-avance a la ca
   await signIn(page, user);
   await waitForHome(page);
   await gotoAnimales(page);
-  await expect(page.getByText('Pinta', { exact: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText('Pinta', { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
 
   await startManiobraSession(page);
 
@@ -328,7 +328,7 @@ test('E2a (IDU.1.4): alta SIN ninguna caravana → el animal persiste (idv/tag N
   // El hero es el fallback "Animal" (sin ningún identificador de usuario, IDU.6.6).
   await expect(page.getByText('Identificación', { exact: true })).toBeVisible({ timeout: 20_000 });
   await expect(page.getByText('Historial', { exact: true })).toBeVisible();
-  await expect(page.getByText('Animal', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText('Animal', { exact: true }).filter({ visible: true }).first()).toBeVisible();
 
   // ORÁCULO server: el perfil aterrizó de verdad con idv NULL y el animal con tag NULL (persiste sin 23514).
   const profile = await waitForSoleProfile(establishmentId);
@@ -477,7 +477,7 @@ test('E4 (IDU.5.4/5.5/5.7): aviso de apodo duplicado en el MISMO campo, no bloqu
   await waitForHome(page);
   await gotoAnimales(page);
   // Esperamos a que el apodo "Pinta" de field1 baje al SQLite local (el warning lee LOCAL, por campo).
-  await expect(page.getByText('Pinta', { exact: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText('Pinta', { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
 
   // Entramos al alta de un animal NUEVO por el no-match del buscador (idv precargado; el apodo va aparte).
   const search = page.getByLabel('Buscar animal por caravana o número', { exact: true });

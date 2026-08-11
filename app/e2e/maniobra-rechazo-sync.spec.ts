@@ -60,8 +60,8 @@ test('(a) un rechazo de sync de maniobra se SUPERFICIA: banner → sheet con mot
   // Tap → el SHEET de detalle con el tipo + motivo (Pesaje + gating 23514).
   await banner.click();
   await expect(page.getByTestId('sync-rechazo-sheet')).toBeVisible({ timeout: 10_000 });
-  await expect(page.getByText(/Pesaje:/).first()).toBeVisible();
-  await expect(page.getByText(/rodeo dejó de habilitar|cambió de rodeo\/campo/).first()).toBeVisible();
+  await expect(page.getByText(/Pesaje:/).filter({ visible: true }).first()).toBeVisible();
+  await expect(page.getByText(/rodeo dejó de habilitar|cambió de rodeo\/campo/).filter({ visible: true }).first()).toBeVisible();
 
   // "Entendido" → marca vistos + cierra + el banner desaparece.
   await page.getByTestId('sync-rechazo-entendido').click();

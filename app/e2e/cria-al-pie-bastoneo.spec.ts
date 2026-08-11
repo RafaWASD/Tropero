@@ -176,7 +176,7 @@ test('(b) scan-para-llenar FOUND: bastonear la caravana de un ternero existente 
   await waitForHome(page);
   await gotoAnimales(page);
   // Gate de sync: el ternero sembrado aparece en la lista → bajó al SQLite local → el find-or-create lo verá por tag.
-  await expect(page.getByText(calfIdv, { exact: true }).first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText(calfIdv, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 20_000 });
 
   // El campo ya tiene un animal → el alta arranca por el buscador (un id fresco no-match → "Dar de alta este animal").
   const motherIdv = `5515${Date.now().toString().slice(-6)}`;

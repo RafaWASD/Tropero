@@ -166,7 +166,7 @@ test('flujo completo: identify → carga rápida (tacto + pesaje) → resumen �
 
   // El animal baja por la stream (visible en la lista = ya sincronizó al SQLite local).
   await gotoAnimales(page);
-  await expect(page.getByText(visual, { exact: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(visual, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
 
   await startSessionTactoPesaje(page);
 
@@ -177,7 +177,7 @@ test('flujo completo: identify → carga rápida (tacto + pesaje) → resumen �
   // ── CARGA RÁPIDA: identidad real + primer paso (Tacto de preñez · 1 de 2). Header con la caravana VISUAL. ──
   await expect(page.getByText('· 1 de 2', { exact: true })).toBeVisible({ timeout: 30_000 });
   // La línea de maniobra muestra el label es-AR (MANEUVER_LABELS): el tacto de preñez fue renombrado.
-  await expect(page.getByText('Tacto de preñez', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText('Tacto de preñez', { exact: true }).filter({ visible: true }).first()).toBeVisible();
   await expect(page.getByText('PREÑADA', { exact: true })).toBeVisible();
   await expect(page.getByText('VACÍA', { exact: true })).toBeVisible();
   // JERARQUÍA DE IDENTIDAD (R12.4, fix de jerarquía): la caravana VISUAL "0385" es la identidad DOMINANTE
@@ -236,7 +236,7 @@ test('resumen corregible: tocar el pesaje vuelve al keypad y reescribe el valor'
   await signIn(page, user);
   await waitForHome(page);
   await gotoAnimales(page);
-  await expect(page.getByText(visual, { exact: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(visual, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
 
   // Jornada SOLO PESAJE → el foco es la corrección del pesaje (R5.9), sin acoplar al gating del tacto.
   await startSessionPesaje(page);
@@ -295,7 +295,7 @@ test('offline: cargar maniobras sin red → reconexión → los eventos aterriza
   await signIn(page, user);
   await waitForHome(page);
   await gotoAnimales(page);
-  await expect(page.getByText(visual, { exact: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(visual, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
 
   await startSessionTactoPesaje(page);
 

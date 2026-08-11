@@ -107,7 +107,7 @@ test('R20.1 — un campo al que te agregan server-side aparece SIN reiniciar la 
 
   // Y el campo activo NO cambió por la aparición del nuevo (R20.11: el guard de equivalencia no
   // puede tragarse el cambio, pero tampoco puede mover al usuario de campo).
-  await expect(page.getByText(nameA, { exact: true }).first()).toBeVisible();
+  await expect(page.getByText(nameA, { exact: true }).filter({ visible: true }).first()).toBeVisible();
   expect(estA).not.toEqual(estB);
 });
 
@@ -130,7 +130,7 @@ test('R20.2/R20.5/R20.19 — un rodeo creado por un coworker aparece sin reinici
   await page.goto('/');
   await signIn(page, user);
   await waitForHome(page);
-  await expect(page.getByText(`${RUN_TAG} Rodeo Secundario`, { exact: true }).first()).toBeVisible({
+  await expect(page.getByText(`${RUN_TAG} Rodeo Secundario`, { exact: true }).filter({ visible: true }).first()).toBeVisible({
     timeout: 30_000,
   });
 
@@ -290,7 +290,7 @@ test('R20.14/R20.23/R20.24/R20.26/R20.28 — revocación fuera de maniobra → a
   // "Entendido" → re-ruteo por cantidad de campos restantes: queda uno (B) → su home.
   await page.getByRole('button', { name: 'Entendido', exact: true }).click();
   await waitForHome(page);
-  await expect(page.getByText(`${RUN_TAG} Campo Restante B`, { exact: true }).first()).toBeVisible({
+  await expect(page.getByText(`${RUN_TAG} Campo Restante B`, { exact: true }).filter({ visible: true }).first()).toBeVisible({
     timeout: 30_000,
   });
   expect(estA).not.toEqual(estB);
@@ -431,7 +431,7 @@ test('R21.22/R21.23 — offline puro: sin cambios de tabla el onChange no dispar
     await expect(page.getByText(/Ya no tenés acceso a/)).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Crear mi primer campo' })).toHaveCount(0);
     await expect(page.getByText('Creá tu primer rodeo', { exact: true })).toHaveCount(0);
-    await expect(page.getByText(`${RUN_TAG} Campo Offline Puro`, { exact: true }).first()).toBeVisible();
+    await expect(page.getByText(`${RUN_TAG} Campo Offline Puro`, { exact: true }).filter({ visible: true }).first()).toBeVisible();
   } finally {
     await context.setOffline(false);
   }

@@ -76,7 +76,7 @@ async function bastonazo(page: Page, eid: string): Promise<void> {
 /** Abre la ficha de un animal (por su idv, que es el hero) + espera la sección "Identificación". */
 async function openFicha(page: Page, idv: string): Promise<void> {
   await gotoAnimales(page);
-  await expect(page.getByText(idv, { exact: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(idv, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
   await page.getByRole('button', { name: new RegExp(idv) }).first().click();
   await expect(page.getByText('Identificación', { exact: true })).toBeVisible({ timeout: 20_000 });
 }

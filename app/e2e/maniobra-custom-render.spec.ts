@@ -120,7 +120,7 @@ test('maniobra custom enum_single: seleccionable → secuencia → bloques → c
   await waitForHome(page);
   // El animal + la maniobra custom bajaron por la stream (visible en la lista = sincronizó al SQLite local).
   await gotoAnimales(page);
-  await expect(page.getByText(visual, { exact: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(visual, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
 
   await startSessionWithCustomManeuver(page, 'Ángulo de pezuñas');
 
@@ -128,7 +128,7 @@ test('maniobra custom enum_single: seleccionable → secuencia → bloques → c
   await bastonazo(page, eid);
   await expect(page.getByText('· 1 de 1', { exact: true })).toBeVisible({ timeout: 30_000 });
   // La línea de maniobra muestra el LABEL del field custom (no un ManeuverKind).
-  await expect(page.getByText('Ángulo de pezuñas', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText('Ángulo de pezuñas', { exact: true }).filter({ visible: true }).first()).toBeVisible();
   // El render por ui_component enum_single = bloques full-width con las 3 opciones.
   await expect(page.getByTestId('custom-enum-block-Adentro')).toBeVisible();
   await expect(page.getByTestId('custom-enum-block-Afuera')).toBeVisible();
@@ -173,7 +173,7 @@ test('maniobra custom numeric: render keypad → captura número a custom_measur
   await signIn(page, user);
   await waitForHome(page);
   await gotoAnimales(page);
-  await expect(page.getByText(visual, { exact: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(visual, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
 
   await startSessionWithCustomManeuver(page, 'Score propio');
   await bastonazo(page, eid);
@@ -240,7 +240,7 @@ test('propiedad custom: aparece en el alta (paso 4) → custom_attributes; visib
   await page.getByRole('button', { name: 'Crear animal', exact: true }).click();
 
   // Aterriza en la ficha del recién creado. Resolvemos su profileId del server por el visual.
-  await expect(page.getByText('Identificación', { exact: true }).first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText('Identificación', { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 20_000 });
 
   // Oráculo SERVER: el apodo aterrizó en custom_attributes (value="Pinto" jsonb string).
   // El profileId lo descubrimos por el idv del animal recién creado.
@@ -262,6 +262,6 @@ test('propiedad custom: aparece en el alta (paso 4) → custom_attributes; visib
   await expect(fichaInput).toBeVisible();
   await fichaInput.fill('Manchado');
   await page.getByTestId(`ficha-custom-save-${fieldId}`).click();
-  await expect(page.getByText('Manchado', { exact: true }).first()).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText('Manchado', { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 15_000 });
   await waitForServerCustomAttribute(profileId, fieldId, 'Manchado');
 });

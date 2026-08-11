@@ -107,7 +107,7 @@ test('(1) substring manual NO auto-carga la caravana equivocada → picker de co
   await signIn(page, user);
   await waitForHome(page);
   await gotoAnimales(page);
-  await expect(page.getByText('1428', { exact: true }).first()).toBeVisible({ timeout: 45_000 });
+  await expect(page.getByText('1428', { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 45_000 });
   await page.waitForTimeout(2000);
 
   await startSessionTacto(page);
@@ -142,7 +142,7 @@ test('(1b) match EXACTO por idv → auto-avance directo a la carga (camino rápi
   await signIn(page, user);
   await waitForHome(page);
   await gotoAnimales(page);
-  await expect(page.getByText('385', { exact: false }).first()).toBeVisible({ timeout: 45_000 });
+  await expect(page.getByText('385', { exact: false }).filter({ visible: true }).first()).toBeVisible({ timeout: 45_000 });
   await page.waitForTimeout(2000);
 
   await startSessionTacto(page);
@@ -176,7 +176,7 @@ test('(2) persist falla → banner de error visible + NO avanza; reintento → a
   await signIn(page, user);
   await waitForHome(page);
   await gotoAnimales(page);
-  await expect(page.getByText(`${RUN_TAG}-FAIL`, { exact: true }).first()).toBeVisible({ timeout: 45_000 });
+  await expect(page.getByText(`${RUN_TAG}-FAIL`, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 45_000 });
 
   await startSessionTacto(page);
 

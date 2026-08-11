@@ -191,7 +191,7 @@ test('listos / a-completar: animales con y sin raza → tabs con conteo; "A comp
   // button cuyo a11y label arranca con el TAG enmascarado.
   await page.getByRole('button', { name: new RegExp(escapeRegExp(maskedIncomplete)) }).first().click();
   await expect(page.getByText('Identificación', { exact: true })).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByText(idvIncomplete, { exact: true }).first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText(idvIncomplete, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 20_000 });
 });
 
 test('historial: una exportación previa sembrada aparece en la tab Historial con su cantidad + re-descarga', async ({

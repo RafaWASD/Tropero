@@ -100,7 +100,7 @@ test('preview de transición: tacto+ sobre vaquillona muestra "Vaquillona preña
   await signIn(page, user);
   await waitForHome(page);
   await gotoAnimales(page);
-  await expect(page.getByText(visual, { exact: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(visual, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
 
   await startSessionTacto(page);
   await bastonazo(page, eid);
@@ -152,7 +152,7 @@ test('preview de transición: tacto VACÍO no muestra el banner (sin transición
   await signIn(page, user);
   await waitForHome(page);
   await gotoAnimales(page);
-  await expect(page.getByText(visual, { exact: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(visual, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
 
   await startSessionTacto(page);
   await bastonazo(page, eid);

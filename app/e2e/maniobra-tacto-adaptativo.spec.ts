@@ -137,7 +137,7 @@ test('(1) rodeo de 2 meses de servicio → tacto preñada ofrece CABEZA y COLA (
   await signIn(page, user);
   await waitForHome(page);
   await gotoAnimales(page);
-  await expect(page.getByText(`${RUN_TAG}-2M`, { exact: true }).first()).toBeVisible({ timeout: 45_000 });
+  await expect(page.getByText(`${RUN_TAG}-2M`, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 45_000 });
 
   await startSessionTacto(page);
   await bastonazo(page, eid);
@@ -190,7 +190,7 @@ test.describe('tacto adaptativo (web táctil 360)', () => {
     await signIn(page, user);
     await waitForHome(page);
     await gotoAnimales(page);
-    await expect(page.getByText(`${RUN_TAG}-360`, { exact: true }).first()).toBeVisible({ timeout: 45_000 });
+    await expect(page.getByText(`${RUN_TAG}-360`, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 45_000 });
 
     await startSessionTacto(page);
     await bastonazo(page, eid);
@@ -241,7 +241,7 @@ test('(2) rodeo de 1 mes de servicio → PREÑADA sin sub-paso de tamaño; resum
   await signIn(page, user);
   await waitForHome(page);
   await gotoAnimales(page);
-  await expect(page.getByText(`${RUN_TAG}-1M`, { exact: true }).first()).toBeVisible({ timeout: 45_000 });
+  await expect(page.getByText(`${RUN_TAG}-1M`, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 45_000 });
 
   await startSessionTacto(page);
   await bastonazo(page, eid);
@@ -286,7 +286,7 @@ test('(3) override "no medir" sobre un rodeo de 3 meses → PREÑADA va directo;
   await signIn(page, user);
   await waitForHome(page);
   await gotoAnimales(page);
-  await expect(page.getByText(`${RUN_TAG}-OVR`, { exact: true }).first()).toBeVisible({ timeout: 45_000 });
+  await expect(page.getByText(`${RUN_TAG}-OVR`, { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 45_000 });
 
   // En el wizard, fijar "¿medir tamaño? = NO" antes de arrancar (override del default Sí de un rodeo de 3m).
   await startSessionTacto(page, false);

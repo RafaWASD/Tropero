@@ -106,8 +106,8 @@ test('(a) opción A: bastoneo sin match con candidatos → asignar candidato →
 
   // Esperamos a que los candidatos BAJEN por la stream (visibles = ya sincronizó al SQLite local).
   await gotoAnimales(page);
-  await expect(page.getByText('4001', { exact: true }).first()).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByText('4002', { exact: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText('4001', { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText('4002', { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
 
   // Bastoneo de un EID SIN match + ≥1 candidato sin caravana → modo assign_or_create (RD3.1), NO create directo.
   const eid = makeEid();
@@ -156,7 +156,7 @@ test('(b) opción A: intermedia → "es nuevo" → crear-animal con el EID preca
   await waitForHome(page);
 
   await gotoAnimales(page);
-  await expect(page.getByText('4100', { exact: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText('4100', { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
 
   const eid = makeEid();
   await bastonazo(page, eid);
@@ -188,7 +188,7 @@ test('(a\') opción A: bastoneo sin match SIN candidatos noTag → CREATE direct
   await waitForHome(page);
 
   await gotoAnimales(page);
-  await expect(page.getByText('4200', { exact: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText('4200', { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
 
   // Bastoneo de un EID NUEVO sin match → como NO hay candidatos noTag, va directo a CREATE (RD3.2).
   const eid = makeEid();
@@ -223,8 +223,8 @@ test('(c) opción B: masiva — 2 bastoneos → asignar a 2 candidatos → conta
 
   // Esperamos a que AMBOS candidatos bajen al SQLite local (visibles = sincronizado).
   await gotoAnimales(page);
-  await expect(page.getByText('5001', { exact: true }).first()).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByText('5002', { exact: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText('5001', { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText('5002', { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
 
   // Entramos a la masiva por el entry point de la tab Animales (filtro noTag → CTA).
   await page.getByRole('button', { name: 'Filtrar animales sin electrónica' }).click();
@@ -297,8 +297,8 @@ test('(d) opción B: bastonear un EID ya asignado NO encola y avisa (prevención
 
   // El animal CON caravana debe estar local (visible = sincronizado) para que lookupByTag lo encuentre.
   await gotoAnimales(page);
-  await expect(page.getByText('6001', { exact: true }).first()).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByText('6050', { exact: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText('6001', { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText('6050', { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
 
   await page.getByRole('button', { name: 'Filtrar animales sin electrónica' }).click();
   await page.getByRole('button', { name: 'Asignar caravanas en masa' }).click();

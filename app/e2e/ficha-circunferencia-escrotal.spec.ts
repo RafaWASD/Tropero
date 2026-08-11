@@ -80,17 +80,17 @@ test('ficha de un TORO entero con CE: tarjeta de tendencia (serie cm+edad+fecha 
   await openFichaByIdv(page, idv);
 
   // La TARJETA "Circunferencia escrotal" está presente (solo machos enteros, R14.14).
-  await expect(page.getByText('Circunferencia escrotal', { exact: true }).first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText('Circunferencia escrotal', { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 20_000 });
 
   // La SERIE muestra las 3 mediciones en es-AR (coma decimal). La más reciente arriba ("38 cm"), luego
   // "35,5 cm" y "32 cm". El "35,5 cm" prueba la coma decimal es-AR.
-  await expect(page.getByText('38 cm', { exact: true }).first()).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByText('35,5 cm', { exact: true }).first()).toBeVisible();
-  await expect(page.getByText('32 cm', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText('38 cm', { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText('35,5 cm', { exact: true }).filter({ visible: true }).first()).toBeVisible();
+  await expect(page.getByText('32 cm', { exact: true }).filter({ visible: true }).first()).toBeVisible();
   // La edad snapshot + fecha de la medición más reciente. FIX #11 (2026-06-29): la edad va en AÑOS tras los
   // 24 meses → 30 meses se muestra "2 años 6 meses" (no "30 meses"), tanto en la LISTA como en el RIEL
   // (mismo formateador formatAgeYearsAR → consistencia). Verificamos el formato en años en la lista.
-  await expect(page.getByText(/2\s*años\s*6\s*meses/).first()).toBeVisible();
+  await expect(page.getByText(/2\s*años\s*6\s*meses/).filter({ visible: true }).first()).toBeVisible();
 
   // Scrolleamos la tarjeta de CE a la vista para la captura (vive debajo del fold de la ficha).
   await page.getByText('Circunferencia escrotal', { exact: true }).first().scrollIntoViewIfNeeded();
@@ -146,9 +146,9 @@ test('ficha de un TORO con serie LARGA de CE: la lista scrollea (affordance), mu
   await gotoAnimales(page);
   await openFichaByIdv(page, idv);
 
-  await expect(page.getByText('Circunferencia escrotal', { exact: true }).first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText('Circunferencia escrotal', { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 20_000 });
   // La más reciente (40 cm) está arriba de la serie (visible sin scrollear la lista interna).
-  await expect(page.getByText('40 cm', { exact: true }).first()).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText('40 cm', { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 15_000 });
   // Captura de la serie larga (lista capeada + fade de affordance abajo; sin sparkline desde FIX #11).
   await page.getByText('Circunferencia escrotal', { exact: true }).first().scrollIntoViewIfNeeded();
   await page.screenshot({ path: path.join(OUT_DIR, 'ficha-ce-serie-larga-412.png') });
