@@ -366,6 +366,8 @@ Cambiar el identificador `ar.rafq.app` **crea una app nueva** a los ojos de las 
 3. [RAF] Google: OAuth Clients nuevos para iOS y Android (el de Android va atado a package + SHA-1).
 4. [RAF] App Store Connect: **app nueva**. La actual (`ascAppId 6797347994`) quedó atada al bundle viejo y ese dato no se puede cambiar nunca.
 5. [CLAUDE] Recién entonces, tocar `app.config.ts` y `eas.json`.
+6. [CLAUDE] **Actualizar la página web en el mismo movimiento.** El botón "Abrir en la app" de `mitropero.com.ar/invite` usa `rafq://`: el scheme dejó de ser un identificador interno y pasó a ser un contrato con el sitio publicado. Si se cambia en la app y no en la web, el botón deja de funcionar sin que ningún test lo note.
+7. [CLAUDE] Publicar los archivos de asociación (`apple-app-site-association` y `assetlinks.json`) para que tocar el link abra la app. Van firmados con el identificador y la huella del certificado, por eso van acá y no antes.
 
 > **Por qué conviene hacerlo ahora y no en tres meses:** Apple emite un identificador de usuario distinto por Services ID. Cualquiera que ya haya entrado con Apple aparecería como cuenta nueva y perdería el acceso a sus datos. Hoy eso no le pasa a nadie —no hay productores usando la app y la cuenta demo entra por Google—, así que es la ventana más barata que va a existir.
 
@@ -375,7 +377,7 @@ Cambiar el identificador `ar.rafq.app` **crea una app nueva** a los ojos de las 
 
 | Qué | Quién | Nota |
 |---|---|---|
-| **Links de invitación** contra `mitropero.com.ar` | [CLAUDE] | Cambiar el dominio **no alcanza**: hace falta que exista una página en `/invite`. Son tres cosas juntas — el cliente, las dos Edge Functions, y el secret `APP_URL` en Supabase dev **y** prod |
+| **Links de invitación** contra `mitropero.com.ar` | [CLAUDE] + [RAF] | ✅ La página `/invite` está publicada y las tres puntas del repo apuntan al dominio nuevo. ⛔ **Falta el secret `APP_URL` en Supabase (DEV y PROD) y redesplegar las dos Edge Functions.** Hasta que eso pase, el link que se reparte sigue siendo el muerto, con los tests en verde |
 | **Remitente de mails** `@mitropero.com.ar` | [CLAUDE] | Requiere verificar el dominio en Resend (SPF/DKIM). El Email Routing de Cloudflare sirve para **recibir**; enviar es otra configuración |
 | **Publicación en tiendas** | [AMBOS] | Depende de la fase 2 |
 | **Paleta e identidad** | Pilar | Al cerrar, le mido los contrastes y la simulación de daltonismo |

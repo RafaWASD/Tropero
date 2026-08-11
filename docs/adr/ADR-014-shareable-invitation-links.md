@@ -21,7 +21,9 @@ El posicionamiento del producto ("el mejor en el primer try", ver memoria `produ
 
 ## Decisión
 
-**Las invitaciones se generan como link shareable.** El owner crea la invitación (sin ingresar email), recibe inmediatamente un link tipo `https://app.rafq.ar/invite?token=XXX` (y/o `rafq://invite?token=XXX` para deep link nativo), y lo comparte por el canal que prefiera (WhatsApp, SMS, mail, copy-paste manual) usando la share sheet nativa del SO o el botón de copy al clipboard.
+**Las invitaciones se generan como link shareable.** El owner crea la invitación (sin ingresar email), recibe inmediatamente un link tipo `https://mitropero.com.ar/invite?token=XXX` (y/o `rafq://invite?token=XXX` para deep link nativo), y lo comparte por el canal que prefiera (WhatsApp, SMS, mail, copy-paste manual) usando la share sheet nativa del SO o el botón de copy al clipboard.
+
+> **Dominio — 11/08/2026.** Este ADR decía `app.rafq.ar`, un dominio que **nunca se compró** y que hizo que los links de invitación estuvieran rotos en producción durante semanas. La decisión de fondo (link shareable, token bearer) no cambió; cambió el host, que ahora es `mitropero.com.ar` y **existe**. El scheme nativo sigue siendo `rafq://` hasta la fase 2 del rebrand.
 
 Cambios concretos respecto al modelo anterior:
 
@@ -100,6 +102,13 @@ La auditoría confirmó que el modelo bearer puro de esta ADR es una **decisión
 
 3. **Single-use atómico (MEDIUM-1 / TOCTOU)**. Antes `accept_invitation` insertaba el `user_roles` ANTES de marcar `accepted`, sin lock → dos aceptaciones concurrentes del mismo token (por dos users distintos) entraban ambas. Ahora se **reclama la invitación atómicamente PRIMERO** (`UPDATE ... SET status='accepted' WHERE id=? AND status='pending'`, verificando 1 fila afectada) y **solo el ganador inserta el rol**; el perdedor recibe `invalid_state`. Si el insert del rol falla, se revierte el claim a `pending` (compensación best-effort, sin transacción explícita EF↔DB). Atómico a nivel statement (row-lock de Postgres), pooler-safe.
 
-**Deferido (de la auditoría)**: MEDIUM-2 (token en query string + `localStorage` en web) — se endurece cuando exista la página web `app.rafq.ar/invite` (`Referrer-Policy: no-referrer`, limpiar el token de la URL/localStorage apenas se lee). No bloquea este delta.
+**Deferido (de la auditoría)**: MEDIUM-2 (token en query string + `localStorage` en web) — se endurece cuando exista la página web `/invite` (`Referrer-Policy: no-referrer`, limpiar el token de la URL/localStorage apenas se lee). No bloquea este delta.
+
+> **Actualización 11/08/2026 — la página ya existe, y este deferido quedó a medias, a propósito.**
+> `https://mitropero.com.ar/invite` está publicada. De las dos medidas:
+> - ✅ **`Referrer-Policy: no-referrer`** aplicado, más `Cache-Control: no-store`, `X-Robots-Tag: noindex, nofollow` y un `robots.txt` que excluye la ruta. Cierra la fuga por `Referer`, que era el vector principal.
+> - ❌ **Limpiar el token de la URL** (`history.replaceState`) **no se hizo**, y la razón es de uso, no de olvido: la página ofrece copiar el link completo como camino alternativo, y si al recargar la página el token ya no está en la URL, el invitado ve "este link no tiene una invitación" sin entender por qué. Con el `Referer` cerrado, lo que queda expuesto es el historial del navegador y una captura de pantalla — riesgo real pero menor, sobre un token que además es de un solo uso y vive 72h.
+>
+> Queda anotado en el backlog para revisarlo cuando el link abra la app directo (universal links) y la página deje de ser el camino principal.
 
 **Reversibilidad**: alta. El binding es un guard de ~6 líneas; el TTL es una constante; el claim es reordenar el flujo. Revertir cualquiera es trivial.

@@ -16,7 +16,7 @@ Sirve como sustrato de todas las features que vienen después: ninguna entidad d
 Antes de las requirements, dejo registradas las decisiones que ya están cerradas para esta spec:
 
 - **Auth provider**: Supabase Auth (email + password) — ver `ADR-002`.
-- **Invitaciones (modelo link shareable)**: el owner crea la invitación sin ingresar email del destinatario. El sistema genera un link tipo `https://app.rafq.ar/invite?token=XXX` (y deep link `rafq://invite?token=XXX`) que el owner comparte por el canal que prefiera (WhatsApp, mail, SMS, copy/paste) usando la share sheet nativa o el botón de copy. El token vale por sí solo (modelo bearer, ver `ADR-014`).
+- **Invitaciones (modelo link shareable)**: el owner crea la invitación sin ingresar email del destinatario. El sistema genera un link tipo `https://mitropero.com.ar/invite?token=XXX` (y deep link `rafq://invite?token=XXX`) que el owner comparte por el canal que prefiera (WhatsApp, mail, SMS, copy/paste) usando la share sheet nativa o el botón de copy. El token vale por sí solo (modelo bearer, ver `ADR-014`).
 - **Signup neutro**: el signup no pregunta "soy productor" vs "soy vet". El rol vive solo en `user_roles` (relación user-establishment). Un mismo usuario puede ser owner de su campo y veterinario invitado en otro.
 - **Sin `user_type` en MVP**: la diferenciación de UX para el cold-start del vet se resuelve con un CTA dual en el empty state, no con autodeclaración en signup. Mantiene `ADR-006` intacto. Si más adelante hace falta segmentar para analytics o marketing, se agrega post-MVP con data real.
 - **Modelo de roles**: `owner` / `field_operator` / `veterinarian` — ver `ADR-006`.
@@ -120,7 +120,7 @@ Antes de las requirements, dejo registradas las decisiones que ya están cerrada
 
 **R5.2** Cuando un owner crea una invitación, el sistema deberá:
 - Crear una fila en `invitations` con token único (UUID v4), expiración 7 días, estado `pending`, y `email` opcional. <br>> **Reconciliación U9 (2026-07-21)**: la expiración se acortó a **72h** (era 7 días) para reducir la ventana de leak del link bearer. Aplica también a la regeneración (`R5.8`). El owner regenera el link en un tap si necesita más tiempo.
-- Retornar al cliente `{ invitation_id, token, accept_url, expires_at }`, donde `accept_url` es un universal link (`https://app.rafq.ar/invite?token=XXX`) que también funciona como deep link nativo (`rafq://invite?token=XXX`).
+- Retornar al cliente `{ invitation_id, token, accept_url, expires_at }`, donde `accept_url` es un universal link (`https://mitropero.com.ar/invite?token=XXX`) que también funciona como deep link nativo (`rafq://invite?token=XXX`).
 - **No** disparar email automático al destinatario.
 
 **R5.3** El cliente del owner deberá ofrecer al menos dos acciones visibles sobre el link generado:
@@ -173,7 +173,7 @@ Antes de las requirements, dejo registradas las decisiones que ya están cerrada
 
 **R6.4** Cuando un usuario solo tiene `user_roles` activo en un único establecimiento, el sistema deberá seleccionarlo automáticamente sin pedir input.
 
-**R6.5** Cuando un usuario verificado no tiene ningún `user_roles` activo, el sistema deberá mostrar un wizard de onboarding con dos CTAs visibles: (a) primario, "crear mi primer campo", que inicia el flujo de creación de establecimiento; y (b) secundario, "pegar link de invitación", que abre un input para que el usuario pegue manualmente un link `https://app.rafq.ar/invite?token=XXX` o `rafq://invite?token=XXX` recibido por WhatsApp, mail o cualquier otro canal. Al pegar un link válido, el sistema deberá extraer el token, navegar a la pantalla de aceptación de invitación (ver `R5.4`) y completar el flujo. Este CTA actúa como red de seguridad cuando el deep link no autoabre la app por restricciones del SO o porque el usuario abrió el link desde un dispositivo distinto.
+**R6.5** Cuando un usuario verificado no tiene ningún `user_roles` activo, el sistema deberá mostrar un wizard de onboarding con dos CTAs visibles: (a) primario, "crear mi primer campo", que inicia el flujo de creación de establecimiento; y (b) secundario, "pegar link de invitación", que abre un input para que el usuario pegue manualmente un link `https://mitropero.com.ar/invite?token=XXX` o `rafq://invite?token=XXX` recibido por WhatsApp, mail o cualquier otro canal. Al pegar un link válido, el sistema deberá extraer el token, navegar a la pantalla de aceptación de invitación (ver `R5.4`) y completar el flujo. Este CTA actúa como red de seguridad cuando el deep link no autoabre la app por restricciones del SO o porque el usuario abrió el link desde un dispositivo distinto.
 
 **R6.6** El sistema deberá exponer una pantalla **"Mis campos"** que liste todos los establecimientos donde el usuario tiene `user_roles.active = true`, mostrando para cada uno al menos: nombre del establecimiento, rol del usuario en ese campo (owner / field_operator / veterinarian) y un indicador visual del campo activo actual. Al tocar un item, el sistema deberá fijarlo como establecimiento activo (ver `R6.3`) y navegar a su home. La pantalla deberá incluir un CTA "crear campo" (inicia el flujo de creación de establecimiento, `R3.1`) y, si corresponde, el CTA "pegar link de invitación" (`R6.5`).
 

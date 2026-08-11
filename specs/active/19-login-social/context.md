@@ -14,7 +14,7 @@ Bajar la fricción de alta agregando **login social**: **Google (Gmail)** + **Si
 - **`@supabase/supabase-js ^2.106.1` instalado**; NO están `@react-native-google-signin/google-signin`, `expo-apple-authentication`, `expo-crypto`.
 - **Cliente Supabase** (`app/src/services/supabase.ts`): `detectSessionInUrl: Platform.OS === 'web'` (ya en `true`), storage SecureStore/localStorage, **sin `flowType`** (implicit por default).
 - **Build**: development builds vía EAS + **prebuild/CNG** (sin `ios/`/`android/` committeados). NO Expo Go. `scheme: "rafq"`, bundle `ar.rafq.app` (iOS = Android).
-- **Deep-linking NO cableado** (`expo-linking` instalado pero sin uso; TODOs diferidos). El dominio `app.rafq.ar` no existe aún.
+- **Deep-linking NO cableado** (`expo-linking` instalado pero sin uso; TODOs diferidos). El dominio pasó a ser `mitropero.com.ar` y **ya está publicado** (11/08/2026), pero los archivos de asociación (`apple-app-site-association`, `assetlinks.json`) siguen sin publicarse, así que tocar un link abre el navegador, no la app. Van firmados contra el identificador de la app, o sea que se cablean en la fase 2 del rebrand, no antes: hacerlos ahora contra `ar.rafq.app` es trabajo tirado.
 - **PowerSync connector** toma `access_token` de la sesión → **agnóstico del proveedor** (funciona igual con OAuth).
 - **Gating**: `RootGate` (`app/app/_layout.tsx:314`) saltea `/verify-email` si `emailVerified`. Trigger `handle_new_auth_user` (`0001_users.sql`) copia `raw_user_meta_data->>'name'` a `public.users.name` con `on conflict (id) do nothing`.
 - **Targets**: iOS, Android y Web. E2E Playwright corre **solo sobre web** (`localhost:8099`).

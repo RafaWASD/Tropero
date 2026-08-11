@@ -110,7 +110,7 @@ Plan de implementación paso a paso. Cada tarea tiene su criterio de aceptación
 - Genera token con `crypto.randomUUID()`.
 - Si vino `email`: prechecks soft de R5.9 (no es member activo) y de duplicado de pending. Si no vino email: skip esos prechecks (el bloqueo duro está en `accept_invitation`).
 - Inserta en `invitations` con `email` nullable.
-- Construye `accept_url` usando `Deno.env.get('PUBLIC_APP_URL')` (default `https://app.rafq.ar`).
+- Construye `accept_url` usando `Deno.env.get('PUBLIC_APP_URL')` (default `https://mitropero.com.ar`).
 - **No** dispara email al destinatario.
 - **Aceptación**: invocada con owner válido crea invitación y retorna `accept_url` con el token embebido; con no-owner retorna 403; sin email funciona; con email duplicado o member activo, falla 409 según corresponda.
 - Cubre: R5.1, R5.2, R5.9 (precheck soft), `ADR-014`.
@@ -215,7 +215,7 @@ Plan de implementación paso a paso. Cada tarea tiene su criterio de aceptación
 ### T4.3 Pantalla OnboardingWizard (sin establecimientos)
 - Wizard con dos CTAs visibles (ver `R6.5`):
   - Primario: "Crear mi primer campo" → navega a `CreateEstablishmentScreen` (T4.4).
-  - Secundario: "Pegar link de invitación" → abre un input modal donde el usuario pega un link `https://app.rafq.ar/invite?token=XXX` o `rafq://invite?token=XXX`. El cliente extrae el token con `expo-linking` (parse de URL) y navega a `AcceptInvitationScreen` (T5.4) con ese token en el estado. Validar que el link tenga el formato esperado y mostrar error legible si no.
+  - Secundario: "Pegar link de invitación" → abre un input modal donde el usuario pega un link `https://mitropero.com.ar/invite?token=XXX` o `rafq://invite?token=XXX`. El cliente extrae el token con `expo-linking` (parse de URL) y navega a `AcceptInvitationScreen` (T5.4) con ese token en el estado. Validar que el link tenga el formato esperado y mostrar error legible si no.
 - **Aceptación**: user verificado sin `user_roles` activos cae acá; ambos CTAs son visibles con jerarquía clara (primario más grande, ambos accesibles). Pegar un link válido lleva a la pantalla de aceptación; pegar texto inválido muestra error.
 - Cubre: `R6.5`, `ADR-014`.
 
@@ -298,7 +298,7 @@ Plan de implementación paso a paso. Cada tarea tiene su criterio de aceptación
     (goto authed → aceptar → home, NO loopea) + regresión del path deslogueado.
   - **`router.back()` pelado → `backOr(router, '/(tabs)')`** en el "Cancelar" de la fase `paste`
     (stack vacío en cold-start/deep-link → back fallaba silenciosamente).
-- Configurar `expo-linking` con esquema `rafq://` y universal link `https://app.rafq.ar/invite`.
+- Configurar `expo-linking` con esquema `rafq://` y universal link `https://mitropero.com.ar/invite`.
 - `AcceptInvitationScreen` accesible vía:
   - Deep link / universal link con `?token=XXX`.
   - Entrada manual desde el CTA "pegar link" del wizard (T4.3).

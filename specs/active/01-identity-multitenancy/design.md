@@ -254,7 +254,7 @@ create policy establishments_update on public.establishments
    - **Si hay token pendiente** → re-rutea automáticamente a `AcceptInvitationScreen` con ese token (ver `R5.4`/`R5.13`). Resuelta la aceptación (ok o error terminal), borra el token persistido. Este camino cubre el onboarding del vet/peón invitado, que atraviesa signup + verificación + posible kill de la app sin perder la invitación.
    - **Si no hay token** → muestra el wizard de onboarding con dos CTAs (ver `R6.5`):
      - Primario: "Crear mi primer campo" → flujo de creación de establecimiento. **Requiere conexión** (`R9.2`, operación administrativa online). Si el perfil del usuario no tiene `phone`, se intercala una pantalla pidiéndolo antes de continuar (ver `R3.8`).
-     - Secundario: "Pegar link de invitación" → abre un input para pegar el link `https://app.rafq.ar/invite?token=XXX` o `rafq://invite?token=XXX` recibido por WhatsApp/mail/etc. El cliente extrae el token, **lo persiste en almacenamiento seguro** (`R5.13`) y navega a la pantalla de aceptación (ver `ADR-014`).
+     - Secundario: "Pegar link de invitación" → abre un input para pegar el link `https://mitropero.com.ar/invite?token=XXX` o `rafq://invite?token=XXX` recibido por WhatsApp/mail/etc. El cliente extrae el token, **lo persiste en almacenamiento seguro** (`R5.13`) y navega a la pantalla de aceptación (ver `ADR-014`).
 ```
 
 ## Flujo de landing / selección de establecimiento (ver `R6.6`–`R6.9`, sesión 17)
@@ -304,7 +304,7 @@ Al abrir la app con sesión válida + email verificado, el router decide el land
    c. Si vino email: valida que no hay una invitación pending no expirada con ese email (evita duplicar invites visibles).
    d. Inserta en invitations (email opcional, token = crypto.randomUUID(), expires_at = now() + **72h** (as-built delta U9; era 7 días — TTL acortado para reducir la ventana de leak del link bearer), status = 'pending').
    e. Retorna { invitation_id, token, accept_url, expires_at }.
-       accept_url = `${APP_URL}/invite?token=${token}` (env del Edge Function, default `https://app.rafq.ar`).
+       accept_url = `${APP_URL}/invite?token=${token}` (env del Edge Function, default `https://mitropero.com.ar`).
 5. Cliente del owner muestra un modal con el link generado y dos acciones:
    - "Copiar al portapapeles" → Clipboard.setStringAsync(accept_url).
    - "Compartir" → Share.share({ message }) — abre la share sheet nativa (WhatsApp, mail, SMS, Instagram, etc.).
@@ -540,11 +540,21 @@ pnpm start                                    # arrancar Metro
 - **Supabase project** creado (con Auth habilitado).
 - **Servicio de email transaccional (Resend)**: Supabase Auth cubre verificación de email y password reset. Resend se usa **solo para notificar al owner cuando aceptan** una invitación (`R5.10`). Ya **no** se usa para invitar al destinatario (eso ahora es link shareable, ver `ADR-014`). Si Resend cae, el flujo de invitación sigue funcionando; solo se pierde la notificación al owner (push notification queda como backup).
 - **Expo Push Notifications**: necesario para `R5.11`. Requiere setup de `expo-notifications` en el cliente, registro de push tokens server-side (tabla `push_tokens`), y manejo de permisos en runtime.
-- **Deep linking + universal links** configurado en Expo (esquema `rafq://` para deep link nativo + `https://app.rafq.ar/invite?token=...` para universal link). **Crítico** para el modelo link shareable: el link generado por `invite_user` debe abrir la app cuando el destinatario tap.
+- **Deep linking + universal links** configurado en Expo (esquema `rafq://` para deep link nativo + `https://mitropero.com.ar/invite?token=...` para universal link). **Crítico** para el modelo link shareable: el link generado por `invite_user` debe abrir la app cuando el destinatario tap.
 - **Native share sheet** del SO: `expo-sharing` o `react-native`'s `Share.share` para que el owner reparta el link por WhatsApp/mail/etc.
 - **Clipboard**: `expo-clipboard` (`Clipboard.setStringAsync`) para el botón "copiar link".
 - **Almacenamiento seguro**: `expo-secure-store` para persistir el **token de invitación pendiente** a través del cold-start del onboarding del invitado (`R5.13`, sesión 17). Se escribe al abrir/pegar el link sin sesión, se lee al pasar el gate de verificación de email, y se borra al consumir el token.
-- **Variable de entorno `APP_URL`** (env del Edge Function en Supabase secrets, ej. `https://app.rafq.ar`): usada por `invite_user` y `resend_invitation` para construir el `accept_url` retornado al cliente. Default en código: `https://app.rafq.ar` si no está seteada. Cuando arranque la Fase 3 del cliente, el universal link debe apuntar al mismo host.
+- **Variable de entorno `APP_URL`** (env del Edge Function en Supabase secrets, ej. `https://mitropero.com.ar`): usada por `invite_user` y `resend_invitation` para construir el `accept_url` retornado al cliente. Default en código: `https://mitropero.com.ar` si no está seteada. Cuando arranque la Fase 3 del cliente, el universal link debe apuntar al mismo host.
+
+> **El origen del link vive en CUATRO lugares que tienen que coincidir** (11/08/2026):
+> 1. `app/src/services/members.ts` → `INVITE_BASE_URL`, con el que el cliente reconstruye el link de las invitaciones pendientes que lista.
+> 2. `supabase/functions/invite_user/index.ts` → el default de `APP_URL`.
+> 3. `supabase/functions/resend_invitation/index.ts` → el mismo default.
+> 4. **El secret `APP_URL` en Supabase, en DEV y en PROD.** Vive fuera del repo y **le gana a los defaults**.
+>
+> Si se desalinean, el link que sale por mail y el que muestra la app son distintos, y no se entera nadie hasta que un invitado no puede entrar. Las tres puntas del repo las compara entre sí una regla de `app/src/utils/brand-name-guard.test.ts`; **la cuarta ningún test puede verla**.
+>
+> **Cambiar sólo el código no tiene efecto**: si el secret está seteado con el host viejo, sigue mandando el link viejo con los tests en verde. Y si no está seteado, los defaults nuevos recién aplican tras redesplegar las dos Edge Functions.
 
 Ver `tasks.md` para el plan de implementación paso a paso.
 

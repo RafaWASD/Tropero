@@ -1539,6 +1539,30 @@ device destapa un caso no cubierto.
   - "las invitaciones son inusables" → suena a lo que es.
   **Un diferimiento se nombra por su CONSECUENCIA para el usuario, no por la tarea técnica que queda pendiente.** El encuadre viejo incluso llevó a escribir en este mismo archivo que "no es MVP-blocker porque el camino usable hoy es pegar el link, que anda" — asumiendo que el destinatario pegaría en vez de tocar. Corregido in-place más arriba.
 
+### Estado 11/08/2026 — parcialmente resuelto, y falta lo que no está en el repo
+
+- ✅ **El dominio existe y sirve una página.** `https://mitropero.com.ar/invite?token=…` responde 200, lee el token, ofrece abrir la app por `rafq://` y, si no abre, copiar el link para pegarlo. Va con `no-referrer`, `no-store` y `noindex`.
+- ✅ **Las tres puntas del repo** (`INVITE_BASE_URL` y los defaults de `invite_user` y `resend_invitation`) apuntan al dominio nuevo, con una regla en `brand-name-guard.test.ts` que las compara entre sí.
+- ⛔ **No tiene efecto todavía.** La cuarta punta es el secret `APP_URL` en Supabase (DEV **y** PROD): si está seteado con el host viejo, **le gana al código** y el link que se reparte sigue muerto, con los tests en verde. Y aunque no esté seteado, los defaults nuevos recién aplican tras redesplegar las dos Edge Functions. Ninguna de las dos cosas se hizo: la CLI no está autenticada y el deploy necesita autorización.
+- ⛔ **Tocar el link sigue sin abrir la app.** Los archivos de asociación (`apple-app-site-association`, `assetlinks.json`) no están publicados. Van firmados contra el identificador de la app, así que se cablean en la **fase 2 del rebrand** — hacerlos ahora contra `ar.rafq.app` es trabajo tirado.
+- ⛔ **La app sigue sin estar en tiendas**, que era el "agujero mayor al dominio" de arriba. La página le sirve a quien ya la tiene instalada; al que no, todavía no hay de dónde bajarla.
+
+**O sea, nombrado por su consecuencia, que es la lección de esta misma entrada**: hoy el invitado ya no ve un error del navegador, ve una página que le explica qué hacer. Pero **hasta que se toque el secret, el link que le llega sigue siendo el muerto.**
+
+---
+
+## El token de invitación queda en la URL de la página web
+
+**Abierto 2026-08-11** — deferido consciente, ver la actualización de `ADR-014`.
+
+La página `/invite` no limpia el token de la barra de direcciones con `history.replaceState`. Se decidió así: la página ofrece copiar el link completo como camino alternativo, y si al recargar el token ya no está, el invitado ve "este link no tiene una invitación" sin entender por qué.
+
+**Lo que ya está cerrado**: la fuga por `Referer` (con `Referrer-Policy: no-referrer`), el cacheo (`no-store`) y la indexación (`noindex` + `robots.txt`).
+
+**Lo que queda expuesto**: el historial del navegador y una captura de pantalla. Sobre un token de un solo uso y 72h de vida.
+
+**Cuándo revisarlo**: cuando los universal links estén cableados y la página deje de ser el camino principal. Ahí limpiar la URL ya no rompe nada, porque el flujo normal ni pasa por la web.
+
 ## La salida del vacío de `asignar-caravanas` es descriptiva, no accionable
 - **Origen**: veto de diseño del leader (2026-07-29), sobre el fix "sin transporte el copy dice la verdad".
 - El vacío sin bastón dice *"Podés cargar las caravanas de a una desde la ficha de cada animal"* — **cierto y verificado** (esa salida tiene E2E verde en `baston-ficha.spec.ts` con oráculo de server), pero **te la describe en vez de llevarte**. En una pantalla 🔴 de manga, Nielsen #3 (control y libertad) pide dar la salida, no explicarla.
