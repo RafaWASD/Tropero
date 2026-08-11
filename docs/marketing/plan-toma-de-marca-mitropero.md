@@ -173,9 +173,15 @@ Chip propio del proyecto **11 7058-0364**, registrado en WhatsApp Business. Qued
 
 Falta sólo cargarle `hola@mitropero.com.ar` como mail de contacto en el perfil — ya funciona.
 
-#### 5. Defensivas — 5 minutos cada una · [RAF]
+#### 5. Defensivas — ✅ TikTok, X y Threads tomadas · ⛔ falta LinkedIn
 
-TikTok, X y LinkedIn. Tomás el usuario, ponés foto y bio, y las dejás quietas. No hace falta publicar nada.
+Tomás el usuario, ponés foto y bio, y las dejás quietas. No hace falta publicar nada.
+
+> **Dos trampas que aparecieron al hacerlo (11/08/2026):**
+>
+> **YouTube: crear el canal y reclamar el `@` son dos pasos distintos.** El canal nace con una URL de `/channel/UC…` y el identificador queda libre hasta que lo definís a mano en Studio → Personalización → Información básica. Al 11/08 `youtube.com/@mitropero` daba 404: nadie lo tomó todavía, pero nosotros tampoco.
+>
+> **Facebook no deja crear la página con un perfil nuevo, y castiga el reintento.** Devuelve "intentaste crear demasiadas páginas recientemente" y dice "unos minutos", pero el bloqueo dura horas y cada reintento lo extiende. La página va creada desde el **perfil personal de siempre** de Rafael: Meta exige un humano detrás de toda página, y un perfil inventado se cae y se lleva la página puesta.
 
 #### 6. Reserva del nombre en las tiendas · [RAF] — cuando existan las cuentas
 
@@ -300,12 +306,18 @@ CORREO
 [ ] [RAF]    Compartir el vault de Proton Pass del proyecto con Facundo
 
 REDES
-[x] [RAF]    Instagram @mitropero
+[x] [RAF]    Instagram @mitropero (profesional, foto, bio, 2FA)
 [x] [RAF]    Cuenta de Google del proyecto
 [x] [RAF]    Chip nuevo (11 7058-0364) + WhatsApp Business
-[ ] [RAF]    Instagram: pasar a cuenta profesional + foto + bio + 2FA
+[x] [RAF]    TikTok @mitropero — verificado, responde
+[x] [RAF]    Threads @mitropero — verificado, responde
+[x] [RAF]    X — creada; falta confirmar que el usuario quedó "mitropero"
+[x] [RAF]    YouTube: canal creado
+[ ] [RAF]    YouTube: RECLAMAR el identificador @mitropero (hoy da 404, está libre)
+[ ] [RAF]    YouTube: confirmar que el canal está en la cuenta del PROYECTO
 [ ] [RAF]    Página de Facebook + Business Manager + Facundo como admin
-[ ] [RAF]    TikTok, X, LinkedIn (defensivas)
+[ ] [RAF]    LinkedIn (defensiva)
+[ ] [RAF]    Poner el link a mitropero.com.ar en la bio de cada red
 
 MARCA — detalle completo en guia-inpi-marca-mitropero.md
 [x] [RAF]    Clave fiscal + adherir el servicio del INPI en ARCA
