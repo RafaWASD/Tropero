@@ -110,7 +110,8 @@ Plan de implementación paso a paso. Cada tarea tiene su criterio de aceptación
 - Genera token con `crypto.randomUUID()`.
 - Si vino `email`: prechecks soft de R5.9 (no es member activo) y de duplicado de pending. Si no vino email: skip esos prechecks (el bloqueo duro está en `accept_invitation`).
 - Inserta en `invitations` con `email` nullable.
-- Construye `accept_url` usando `Deno.env.get('PUBLIC_APP_URL')` (default `https://mitropero.com.ar`).
+- Construye `accept_url` usando `Deno.env.get('APP_URL')` (default `https://mitropero.com.ar`).
+  > La tarea decía `PUBLIC_APP_URL`, una variable que **nunca existió** en el código: el as-built usa `APP_URL`. Corregido el 11/08/2026, lo encontró el review del cambio de dominio.
 - **No** dispara email al destinatario.
 - **Aceptación**: invocada con owner válido crea invitación y retorna `accept_url` con el token embebido; con no-owner retorna 403; sin email funciona; con email duplicado o member activo, falla 409 según corresponda.
 - Cubre: R5.1, R5.2, R5.9 (precheck soft), `ADR-014`.

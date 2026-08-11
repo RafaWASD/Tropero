@@ -546,13 +546,16 @@ pnpm start                                    # arrancar Metro
 - **Almacenamiento seguro**: `expo-secure-store` para persistir el **token de invitación pendiente** a través del cold-start del onboarding del invitado (`R5.13`, sesión 17). Se escribe al abrir/pegar el link sin sesión, se lee al pasar el gate de verificación de email, y se borra al consumir el token.
 - **Variable de entorno `APP_URL`** (env del Edge Function en Supabase secrets, ej. `https://mitropero.com.ar`): usada por `invite_user` y `resend_invitation` para construir el `accept_url` retornado al cliente. Default en código: `https://mitropero.com.ar` si no está seteada. Cuando arranque la Fase 3 del cliente, el universal link debe apuntar al mismo host.
 
-> **El origen del link vive en CUATRO lugares que tienen que coincidir** (11/08/2026):
+> **El origen del link vive en CINCO lugares que tienen que coincidir** (11/08/2026):
 > 1. `app/src/services/members.ts` → `INVITE_BASE_URL`, con el que el cliente reconstruye el link de las invitaciones pendientes que lista.
 > 2. `supabase/functions/invite_user/index.ts` → el default de `APP_URL`.
 > 3. `supabase/functions/resend_invitation/index.ts` → el mismo default.
-> 4. **El secret `APP_URL` en Supabase, en DEV y en PROD.** Vive fuera del repo y **le gana a los defaults**.
+> 4. `docs/marketing/landing-proximamente/invite.html` → el string del botón "Copiar el link" de la página publicada. **Es literalmente lo que el invitado copia y pega en la app**, y el archivo es byte a byte lo que sirve el Worker de Cloudflare.
+> 5. **El secret `APP_URL` en Supabase, en DEV y en PROD.** Vive fuera del repo y **le gana a los defaults**.
 >
-> Si se desalinean, el link que sale por mail y el que muestra la app son distintos, y no se entera nadie hasta que un invitado no puede entrar. Las tres puntas del repo las compara entre sí una regla de `app/src/utils/brand-name-guard.test.ts`; **la cuarta ningún test puede verla**.
+> Si se desalinean, el link que sale por mail y el que muestra la app son distintos, y no se entera nadie hasta que un invitado no puede entrar. Las cuatro puntas del repo las compara una regla de `app/src/utils/brand-name-guard.test.ts`, anclada contra el `<link rel="canonical">` del sitio publicado; **la quinta ningún test puede verla**.
+>
+> *Este recuento decía "cuatro" y se olvidaba de la página web, que es la punta más cercana al invitado. Lo encontró el review del 11/08 falsificando la regla, no leyendo el código.*
 >
 > **Cambiar sólo el código no tiene efecto**: si el secret está seteado con el host viejo, sigue mandando el link viejo con los tests en verde. Y si no está seteado, los defaults nuevos recién aplican tras redesplegar las dos Edge Functions.
 
