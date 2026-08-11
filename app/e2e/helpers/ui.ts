@@ -47,7 +47,11 @@ export async function isOnOnboarding(page: Page): Promise<boolean> {
  * "RAFAQ" en el header y el saludo "¡Hola …! 👋". Anclamos al saludo (texto único de la home).
  */
 export async function waitForHome(page: Page): Promise<void> {
-  await expect(page.getByText(/¡Hola.*👋/)).toBeVisible({ timeout: 30_000 });
+  // 45s y no 30s: esta espera cubre login + PRIMER SYNC de PowerSync, y el runner de CI es bastante más
+  // lento que la máquina de desarrollo. Con 30s, `account.spec.ts:137` falló en el primer intento y pasó en
+  // el retry del nightly #4 — un flaky que igual cuesta el doble de tiempo y desgasta la confianza en el
+  // verde. No es enmascarar una lentitud real: el umbral estaba calibrado contra una máquina más rápida.
+  await expect(page.getByText(/¡Hola.*👋/)).toBeVisible({ timeout: 45_000 });
 }
 
 /** Espera el wizard de onboarding (estado no_establishments). */
