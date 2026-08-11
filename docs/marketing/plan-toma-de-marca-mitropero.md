@@ -1,6 +1,6 @@
 # Plan de toma de marca — miTropero
 
-**Actualizado: 10/08/2026** · Documento vivo. Refleja lo hecho, lo que falta, y quién hace cada cosa.
+**Actualizado: 11/08/2026** · Documento vivo. Refleja lo hecho, lo que falta, y quién hace cada cosa.
 
 > **Convención de responsable**
 > **[RAF]** — lo hace Rafael a mano (requiere clave fiscal, tarjeta, un teléfono, o un clic de verificación).
@@ -33,7 +33,10 @@
 | **`mitropero.ar` → `mitropero.com.ar`** | ✅ Redirección 301 verificada, preservando ruta y parámetros. `www` incluido |
 | **Herramientas de Cloudflare** | Plugin instalado y autenticado — puedo operar la cuenta |
 | **Decisión: dominio principal** | `mitropero.com.ar`. El `.ar` redirige |
-| **Identificador de la app** | `com.mitropero.app` *(a confirmar por Rafael)* |
+| **Identificador de la app** | ✅ **`com.mitropero.app`** — decidido el 11/08. Se aplica en la fase 2, antes de publicar |
+| **Sitio web** | ✅ `mitropero.com.ar` publicado: landing + página `/invite`. Los tres dominios responden |
+| **Links de invitación** | ✅ Apuntan al dominio nuevo y las funciones están desplegadas en DEV |
+| **Rebrand del código** | ✅ Fase 1 (nombre visible) hecha, revisada y commiteada |
 | **Cuenta de Google del proyecto** | ✅ Creada con `mitropero@proton.me` |
 | **Instagram** | ✅ Cuenta creada con la casilla del proyecto |
 | **Línea del proyecto** | ✅ Chip Tuenti · **11 7058-0364** |
@@ -45,23 +48,19 @@
 
 ### ❌ Todavía no arrancado
 
-Facebook · TikTok · X · LinkedIn · clase 44 del INPI · documento de titularidad con Facundo · cuentas de desarrollador · fase 2 del rebrand.
+Página de Facebook · LinkedIn · clase 44 del INPI · documento de titularidad con Facundo · cuentas de desarrollador · fase 2 del rebrand.
+
+*(TikTok, X, Threads y YouTube quedaron tomadas el 11/08. Falta reclamar el identificador `@mitropero` en YouTube: crear el canal no lo reserva.)*
 
 ---
 
 ## 2. Lo primero que hay que destrabar
 
-*(La delegación por TAD ya cerró y las tres zonas quedaron `active`. Ese cuello de botella se destrabó el 05/08.)*
+*(Dos cuellos de botella ya se destrabaron: la delegación por TAD cerró el 05/08 y el sitio se publicó el 11/08, así que los tres dominios responden.)*
 
-### 🔴 [RAF] Los tres dominios no muestran nada
+### [FAC] Confirmar el destino de correo
 
-`mitropero.com.ar` **no tiene registro A**: no resuelve a ningún servidor. Verificado el 10/08 — devuelve error de conexión. Y como el `.ar` y el `.com` redirigen ahí, **los tres dominios terminan en un error del navegador**.
-
-Hay una página mínima de "próximamente" lista en `docs/marketing/landing-proximamente/index.html`, sin publicar, esperando el OK. Se publica gratis en Cloudflare Pages y las redirecciones existentes no se tocan.
-
-### [RAF] + [FAC] Confirmar los dos destinos de correo
-
-Los mails de verificación de Cloudflare ya salieron a `ravennarafael59@gmail.com` y a `iamfadolf@gmail.com`. Es **un clic en cada casilla** y desbloquea `rafa@` y `facundo@`. Avisarle a Facundo antes: le llega un mail de un servicio que él no dio de alta y se lo puede comer el spam.
+Rafael ya confirmó el suyo y `rafa@mitropero.com.ar` está activa. Falta **un clic de Facundo** en `iamfadolf@gmail.com` para desbloquear `facundo@`. Avisarle antes: le llega un mail de un servicio que él no dio de alta y se lo puede comer el spam.
 
 ---
 
