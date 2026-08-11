@@ -389,7 +389,7 @@ Cambiar el identificador `ar.rafq.app` **crea una app nueva** a los ojos de las 
 
 | Qué | Quién | Nota |
 |---|---|---|
-| **Links de invitación** contra `mitropero.com.ar` | [CLAUDE] + [RAF] | ✅ La página `/invite` está publicada y las **cuatro** puntas del repo apuntan al dominio nuevo. ⛔ **Falta el secret `APP_URL` en Supabase (DEV y PROD) y redesplegar las dos Edge Functions.** Ojo con el nombre: es `APP_URL`, no `PUBLIC_APP_URL`. Hasta que eso pase, el link que se reparte sigue siendo el muerto, con los tests en verde |
+| **Links de invitación** contra `mitropero.com.ar` | [CLAUDE] | ✅ **Cerrado en DEV el 11/08.** Página `/invite` publicada, las cuatro puntas del repo alineadas con guard, y `invite_user` v9 + `resend_invitation` v8 desplegadas y verificadas en el artefacto. El secret `APP_URL` no existía y se dejó así a propósito. En PROD estas funciones nunca se desplegaron. Falta probar una invitación real de punta a punta |
 | **Remitente de mails** `@mitropero.com.ar` | [CLAUDE] | Requiere verificar el dominio en Resend (SPF/DKIM). El Email Routing de Cloudflare sirve para **recibir**; enviar es otra configuración |
 | **Publicación en tiendas** | [AMBOS] | Depende de la fase 2 |
 | **Paleta e identidad** | Pilar | Al cerrar, le mido los contrastes y la simulación de daltonismo |

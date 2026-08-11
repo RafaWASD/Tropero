@@ -553,6 +553,8 @@ pnpm start                                    # arrancar Metro
 > 4. `docs/marketing/landing-proximamente/invite.html` → el string del botón "Copiar el link" de la página publicada. **Es literalmente lo que el invitado copia y pega en la app**, y el archivo es byte a byte lo que sirve el Worker de Cloudflare.
 > 5. **El secret `APP_URL` en Supabase, en DEV y en PROD.** Vive fuera del repo y **le gana a los defaults**.
 >
+> **Decisión 11/08/2026: `APP_URL` se deja SIN SETEAR, a propósito.** Se verificó que no existe en DEV ni en PROD, y no se creó. El motivo: es la única de las cinco puntas que ningún test puede ver, así que setearla vuelve a meter el punto ciego que causó este bug. Sin el secret, el que manda es el default del código, que sí está cubierto por la regla F del guard. **Sólo crear el secret si hace falta un host distinto por ambiente**, y si ese día llega, anotarlo acá.
+>
 > Si se desalinean, el link que sale por mail y el que muestra la app son distintos, y no se entera nadie hasta que un invitado no puede entrar. Las cuatro puntas del repo las compara una regla de `app/src/utils/brand-name-guard.test.ts`, anclada contra el `<link rel="canonical">` del sitio publicado; **la quinta ningún test puede verla**.
 >
 > *Este recuento decía "cuatro" y se olvidaba de la página web, que es la punta más cercana al invitado. Lo encontró el review del 11/08 falsificando la regla, no leyendo el código.*
