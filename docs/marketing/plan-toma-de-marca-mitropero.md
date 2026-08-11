@@ -371,9 +371,12 @@ Sin dependencias externas y sin riesgo: el nombre de la app en la config de Expo
 
 ### Fase 2 — identidad de la app · [AMBOS] · bloqueada por trabajo en consolas
 
+> **DECIDIDO 11/08/2026: el identificador definitivo es `com.mitropero.app`.**
+> Se eligió sobre `ar.mitropero.app` por coherencia con `mitropero.com`, que también es nuestro. Y se eligió cambiarlo **ahora** y no después de publicar, porque **publicar lo congela para siempre**: Google Play no libera un applicationId ya publicado y el bundle de una app en App Store Connect es inmutable. Cambiarlo con la app en la calle no es un cambio, es una app nueva — se pierden instalaciones, reseñas y posicionamiento.
+
 Cambiar el identificador `ar.rafq.app` **crea una app nueva** a los ojos de las tiendas. Arranca por afuera del código, en este orden:
 
-1. [RAF] Confirmar el identificador definitivo (`com.mitropero.app`).
+1. [x] [RAF] Confirmar el identificador definitivo → **`com.mitropero.app`**.
 2. [RAF] Apple: App IDs nuevos, **Services ID nuevo**, regenerar el client secret, reconfigurar Supabase Auth en dev y prod con el orden exacto de Client IDs.
 3. [RAF] Google: OAuth Clients nuevos para iOS y Android (el de Android va atado a package + SHA-1).
 4. [RAF] App Store Connect: **app nueva**. La actual (`ascAppId 6797347994`) quedó atada al bundle viejo y ese dato no se puede cambiar nunca.
@@ -391,5 +394,40 @@ Cambiar el identificador `ar.rafq.app` **crea una app nueva** a los ojos de las 
 |---|---|---|
 | **Links de invitación** contra `mitropero.com.ar` | [CLAUDE] | ✅ **Cerrado en DEV el 11/08.** Página `/invite` publicada, las cuatro puntas del repo alineadas con guard, y `invite_user` v9 + `resend_invitation` v8 desplegadas y verificadas en el artefacto. El secret `APP_URL` no existía y se dejó así a propósito. En PROD estas funciones nunca se desplegaron. Falta probar una invitación real de punta a punta |
 | **Remitente de mails** `@mitropero.com.ar` | [CLAUDE] | Requiere verificar el dominio en Resend (SPF/DKIM). El Email Routing de Cloudflare sirve para **recibir**; enviar es otra configuración |
-| **Publicación en tiendas** | [AMBOS] | Depende de la fase 2 |
+| **Publicación en tiendas** | [AMBOS] | Ver el capítulo 11 |
 | **Paleta e identidad** | Pilar | Al cerrar, le mido los contrastes y la simulación de daltonismo |
+
+---
+
+## 11. Qué frena la salida a las tiendas
+
+**Relevado el 11/08/2026 midiendo, no de memoria.** Nada de esto es código que falte escribir.
+
+| # | Freno | Estado medido | Quién |
+|---|---|---|---|
+| 1 | **El identificador se congela al publicar** | Decidido: `com.mitropero.app`. Requiere la fase 2 **antes** de publicar | [AMBOS] |
+| 2 | **PROD no es un ambiente funcional** | 35 tablas pero **0 usuarios, 0 animales** y **1 sola Edge Function** (`health`) de 9. Faltan invitar, aceptar, borrar cuenta, cambiar rol. Faltan los secrets `RESEND_API_KEY` y `RAFAQ_ENV` | [CLAUDE] |
+| 3 | **El ícono es el template de Expo** | Verificado a ojo: la "A" azul con las guías de construcción dibujadas. Es lo que se publicaría hoy | Pilar |
+| 4 | **No hay política de privacidad** | Cero apariciones en el repo. Los dos la exigen como URL pública. Google pide además el formulario de Data Safety y una **URL web de eliminación de cuenta** | [CLAUDE] |
+| 5 | **Google Play: 12 testers × 14 días** | La cuenta **no existe** (USD 25). Como cuenta personal, Google exige testing cerrado con 12 testers durante 14 días corridos antes de habilitar producción | [RAF] |
+
+### La trampa de secuencia
+
+**El testing cerrado de Play es por app, y la app se identifica por su applicationId.** Si se crea la cuenta y se arrancan los 14 días con `ar.rafq.app`, al cambiar el identificador **el reloj vuelve a cero**. Los 14 días arrancan **después** de la fase 2, nunca antes.
+
+Por eso el orden no admite atajos:
+
+```
+1. Fase 2 del rebrand            → com.mitropero.app en las consolas y en el código
+2. PROD funcionando              → desplegar las 8 Edge Functions + secrets
+3. Privacidad + eliminación      → dos páginas en mitropero.com.ar
+4. Ícono y capturas de Pilar     → sin esto no hay ficha
+5. Crear la cuenta de Play       → recién acá, con el identificador final
+6. 12 testers × 14 días          → calendario, no trabajo
+```
+
+Los pasos 2, 3 y 4 se pueden hacer **en paralelo** con el 1. El 5 y el 6 no.
+
+### Consecuencia para los testers de hoy
+
+Los builds del 11/08 salieron con `ar.rafq.app`. Son los **últimos** con el identificador viejo: cuando se haga la fase 2, la app pasa a ser otra para el sistema operativo. Los testers van a tener que **desinstalar y reinstalar**, y en iOS hay que **volver a invitarlos**, porque la app de TestFlight actual (`ascAppId 6797347994`) queda atada al bundle viejo y hay que crear una nueva.
