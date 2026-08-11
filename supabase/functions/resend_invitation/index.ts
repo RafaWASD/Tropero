@@ -78,7 +78,10 @@ Deno.serve(async (req: Request) => {
       return serverError('db_error', updErr);
     }
 
-    const appUrl = Deno.env.get('APP_URL') ?? 'https://app.rafq.ar';
+    // Mismo origen que `invite_user`, que el `INVITE_BASE_URL` del cliente y que el HTML de la página
+    // publicada (`docs/marketing/landing-proximamente/invite.html`) — y que el secret `APP_URL` de
+    // Supabase, que gana sobre este default. Ver `app/src/services/members.ts`.
+    const appUrl = Deno.env.get('APP_URL') ?? 'https://mitropero.com.ar';
     const acceptUrl = `${appUrl}/invite?token=${encodeURIComponent(newToken)}`;
 
     return jsonOk({

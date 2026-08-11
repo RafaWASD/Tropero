@@ -10,8 +10,9 @@ import type { UserRole } from '../types';
 // ─── parseInviteToken (R5.4 / R6.5) ─────────────────────────────────────────────
 //
 // El destinatario pega lo que recibió por WhatsApp/mail/etc. Aceptamos TRES formas:
-//   1. URL universal:   https://app.rafq.ar/invite?token=XXX   (o cualquier host/path con ?token=)
-//   2. Deep-link:       rafq://invite?token=XXX
+//   1. URL universal:   https://mitropero.com.ar/invite?token=XXX  (o CUALQUIER host/path con
+//      ?token= — ver abajo: el parser es host-agnóstico a propósito)
+//   2. Deep-link:       rafq://invite?token=XXX  (el scheme NO se rebrandeó: sigue siendo `rafq`)
 //   3. Token crudo:     XXX (un UUID v4 que el usuario copió suelto)
 // Cualquier basura (texto sin token, vacío) → null. El backend hace el lookup definitivo del
 // token (accept_invitation); acá solo lo EXTRAEMOS para no mandar ruido al edge.
@@ -29,7 +30,10 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
  *   1. Si el input trimmeado YA es un UUID válido → es un token crudo, lo devolvemos.
  *   2. Si parsea como URL (http/https/rafq://) → tomamos el query param `token`. Si ese token
  *      es no vacío, lo devolvemos (sin re-validar formato UUID estricto: el backend manda;
- *      pero exigimos que exista y no esté vacío).
+ *      pero exigimos que exista y no esté vacío). **HOST-AGNÓSTICO A PROPÓSITO**: no se compara
+ *      contra `mitropero.com.ar` ni contra ningún host. Los links viejos (`app.rafq.ar`), los de un
+ *      dominio futuro y los que pasaron por un acortador tienen que seguir entrando; el que decide
+ *      si el token vale es el backend, no el host del que vino.
  *   3. Fallback tolerante: buscamos `token=...` con regex aunque la URL no parsee limpio (ej.
  *      el usuario pegó algo con espacios alrededor o un esquema raro). Tomamos hasta el primer
  *      separador (`&`, espacio, fin).

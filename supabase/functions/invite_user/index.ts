@@ -153,7 +153,13 @@ Deno.serve(async (req: Request) => {
       return serverError('db_error', insErr);
     }
 
-    const appUrl = Deno.env.get('APP_URL') ?? 'https://app.rafq.ar';
+    // El origen del link vive en CINCO puntas que tienen que coincidir (ver el comentario largo en
+    // `app/src/services/members.ts` sobre `INVITE_BASE_URL`): esta, el default de
+    // `resend_invitation`, el `INVITE_BASE_URL` del cliente, el HTML de la página publicada
+    // (`docs/marketing/landing-proximamente/invite.html`, que arma el link que el invitado copia), y
+    // el secret `APP_URL` de Supabase —que GANA sobre este default y no se puede verificar desde el
+    // repo—. Las cuatro del repo las vigila la regla F de `app/src/utils/brand-name-guard.test.ts`.
+    const appUrl = Deno.env.get('APP_URL') ?? 'https://mitropero.com.ar';
     const acceptUrl = `${appUrl}/invite?token=${encodeURIComponent(token)}`;
 
     return jsonOk({

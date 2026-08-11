@@ -28,6 +28,23 @@
 //   E  El remitente de los mails transaccionales muestra el nombre nuevo **y sigue apuntando a
 //      `noreply@rafq.ar`**. Las dos mitades importan: Resend verifica el DOMINIO de la dirección, no el
 //      display name — rebrandear el dominio antes de verificar `mitropero.com.ar` deja de mandar mails.
+//   F  Las CUATRO puntas del repo que arman el link de invitación dicen EXACTAMENTE el mismo origen, y
+//      ese origen es el que el SITIO PUBLICADO declara como suyo. Las cuatro son: el cliente
+//      (`INVITE_BASE_URL`), las dos Edge Functions (`invite_user` y `resend_invitation`) y la página
+//      publicada `docs/marketing/landing-proximamente/invite.html` — la que arma el link que el invitado
+//      COPIA Y PEGA cuando "Abrir en la app" no funciona, o sea la superficie MÁS cercana a él. Ese
+//      `.html` acá se LEE, nunca se edita: tiene que seguir siendo byte a byte lo que sirve el Worker.
+//      ⚠️ QUÉ PROTEGE Y QUÉ NO (leelo antes de confiar en el verde):
+//        · SÍ: que ninguna punta se separe de las otras, ni del origen que el sitio publicado declara en
+//          su `<link rel="canonical">` (`landing-proximamente/index.html`). Ese canonical es EL ANCLA, y
+//          por eso este test no tiene el dominio escrito como literal: si el origen cambia de verdad,
+//          cambia PRIMERO ahí —es lo que se publica— y las puntas tienen que seguirlo.
+//        · NO: mover TODO junto —las cuatro puntas Y el canonical— a un dominio ajeno sigue pasando en
+//          verde. Es un límite consciente: nada dentro del repo puede saber qué dominio se compró de
+//          verdad. Lo único que ataja el dominio muerto concreto es el literal `DEAD_ORIGIN`.
+//        · NO: la QUINTA punta, que vive fuera del repo — el secret `APP_URL` del proyecto de Supabase
+//          (DEV y PROD). Si está seteado, GANA sobre los defaults de las dos Edge Functions: este guard
+//          puede estar verde y el mail salir con otro origen igual. Se alinea a mano en la consola.
 //
 // ── FALSIFICACIÓN (el test PROPIEDAD) ────────────────────────────────────────────────────────────────
 // El oráculo no se escribe de memoria: se saca del git. `PRE_FIX_FILES` trae con `git show` el cuerpo
@@ -91,6 +108,184 @@ const DISABLE_LINE = /brand-name-disable-line\s*--\s*\S/;
 const EMAIL_MODULE = 'supabase/functions/_shared/email.ts';
 /** La dirección NO se rebrandea en fase 1: Resend verifica el dominio, no el display name. */
 const SENDER_ADDRESS = 'noreply@rafq.ar';
+
+// ── El origen del link de invitación (REGLA F) ──────────────────────────────────────────────────────
+//
+// El mismo origen se escribe en CUATRO lugares del repo. El link que el backend devuelve en `accept_url`
+// (Edge Functions), el que la app MUESTRA para esa misma invitación (cliente, reconstruido del token) y
+// el que la PÁGINA PUBLICADA le da a copiar al invitado tienen que ser el mismo string; si divergen, el
+// owner comparte uno sin saber cuál y el fallo aparece recién del lado del invitado.
+//
+// ⚠️ LA QUINTA PUNTA NO SE PUEDE VER DESDE ACÁ: el secret `APP_URL` del proyecto de Supabase (DEV y
+// PROD) pisa los defaults de las dos Edge Functions. Este guard verde NO implica que el mail salga con
+// el origen correcto — solo que las cuatro puntas del REPO coinciden entre sí y con el canonical.
+interface OriginSite {
+  /** Path relativo a la raíz del repo. */
+  file: string;
+  /** Qué punta es, para que el mensaje de error diga qué se rompe. */
+  what: string;
+  /** Captura 1 = el origen literal. Si deja de matchear, el test TIRA (no pasa en silencio). */
+  re: RegExp;
+  /** Cómo arma el link a partir del origen: tiene que ser el MISMO path en las cuatro puntas. */
+  build: RegExp;
+  /**
+   * Cómo se blanquean los comentarios de ESE lenguaje antes de extraer (para que un literal comentado
+   * no engañe al extractor). Default: el escáner de TS/JS.
+   */
+  strip?: (src: string) => string;
+}
+
+const APP_URL_DEFAULT = /Deno\.env\.get\('APP_URL'\)\s*\?\?\s*'([^']+)'/;
+
+/**
+ * Blanquea comentarios de HTML (`<!-- … -->`) y, después, los de JS/CSS — el `<script>` de la página es
+ * JavaScript, así que un `//` de ahí adentro también tiene que blanquearse. Preserva largo y saltos de
+ * línea, igual que `stripSourceComments`.
+ *
+ * Medido sobre las dos páginas de `landing-proximamente`: cero líneas dañadas (mismo largo, ninguna
+ * línea con contenido queda en blanco). Y si algún día el escáner de TS sí dañara la línea que la regla
+ * necesita, el modo de falla es FAIL-CLOSED: `readOrigin` no encuentra su entrada y TIRA (rojo), no pasa
+ * en verde.
+ */
+function stripHtmlComments(src: string): string {
+  const sinHtml = src.replace(/<!--[\s\S]*?-->/g, (m) => m.replace(/[^\n]/g, ' '));
+  return stripSourceComments(sinHtml);
+}
+
+const INVITE_ORIGIN_SITES: readonly OriginSite[] = [
+  {
+    file: 'app/src/services/members.ts',
+    what: 'INVITE_BASE_URL — el CLIENTE reconstruye con esto el link de las invitaciones PENDIENTES',
+    re: /INVITE_BASE_URL\s*=\s*'([^']+)'/,
+    build: /\$\{INVITE_BASE_URL\}\/invite\?token=/,
+  },
+  {
+    file: 'supabase/functions/invite_user/index.ts',
+    what: 'default de APP_URL — el `accept_url` que vuelve al CREAR la invitación',
+    re: APP_URL_DEFAULT,
+    build: /\$\{appUrl\}\/invite\?token=/,
+  },
+  {
+    file: 'supabase/functions/resend_invitation/index.ts',
+    what: 'default de APP_URL — el `accept_url` que vuelve al REGENERAR el token',
+    re: APP_URL_DEFAULT,
+    build: /\$\{appUrl\}\/invite\?token=/,
+  },
+  {
+    // ⚠️ Esta punta se LEE, NO se edita desde el repo: el archivo tiene que seguir siendo byte a byte
+    // lo que sirve el Worker de Cloudflare, o el repo y el sitio se desincronizan. Si esta regla
+    // necesitara cambiarlo, se cambia primero en el sitio publicado.
+    file: 'docs/marketing/landing-proximamente/invite.html',
+    what:
+      'la PÁGINA PUBLICADA — el link que el invitado COPIA Y PEGA en la app cuando "Abrir en la app" ' +
+      'no funciona (la superficie MÁS cercana al invitado; el origen está hardcodeado, no sale de ' +
+      '`window.location.origin`)',
+    re: /linkCompleto\s*=\s*'([^']*)\/invite\?token='/,
+    build: /linkCompleto\s*=\s*'[^']*\/invite\?token='\s*\+\s*enc\b/,
+    strip: stripHtmlComments,
+  },
+];
+
+/**
+ * EL ANCLA de la regla F: el sitio publicado declarando SU PROPIO origen. No es un literal escrito a
+ * mano en este test — es el `<link rel="canonical">` de la landing, o sea lo que el sitio le dice al
+ * mundo que es. Si el origen cambia de verdad, cambia primero acá y las puntas tienen que seguirlo.
+ *
+ * Cierra el agujero que la comparación "entre sí" no puede ver: las cuatro puntas coherentes entre sí
+ * apuntando a un dominio que nunca se compró — exactamente la forma del bug histórico de este repo.
+ */
+const CANONICAL_FILE = 'docs/marketing/landing-proximamente/index.html';
+const CANONICAL_RE = /<link\s+rel="canonical"\s+href="([^"]+)"\s*\/?>/;
+
+/**
+ * El canonical de la raíz lleva barra final por definición (`https://host/`) y las puntas concatenan
+ * `/invite?token=` sobre un origen SIN barra. Se normaliza UNA sola barra final — nada más: cualquier
+ * otra forma (dos barras, un path) queda como está y la rechaza `PURE_ORIGIN`. Puro → falsificable.
+ */
+function canonicalOrigin(href: string): string {
+  return href.replace(/\/$/, '');
+}
+
+/**
+ * El dominio MUERTO: nunca se compró, `nslookup` da NXDOMAIN. Estuvo meses en los tres lugares y el
+ * síntoma fue un invitado con un link que abre "el servidor no se encuentra". Este literal SÍ es
+ * legítimo (prohíbe un valor conocido-malo); el que no puede ser literal es el valor CORRECTO.
+ */
+const DEAD_ORIGIN = /rafq\.ar/i;
+
+/** Un origen puro: esquema + host (+ puerto). Sin barra final ni path — las cuatro puntas le concatenan
+ *  `/invite?token=`, así que una barra de más produce `//invite` y un path de más lo rompe entero. */
+const PURE_ORIGIN = /^https:\/\/[a-z0-9.-]+(?::\d+)?$/;
+
+/**
+ * EL COMPARADOR, puro y sin I/O (para poder falsificarlo con casos sintéticos, abajo). Devuelve las
+ * puntas que NO coinciden con las demás, formateadas. El oráculo son las entradas ENTRE SÍ: no hay
+ * ningún origen "esperado" escrito acá — con un literal, cambiar las cuatro puntas y "actualizar el
+ * test" pasaría verde sin haber detectado nada, que es justo el movimiento peligroso. (Lo que la
+ * comparación entre sí NO puede ver —todas movidas juntas— lo cubre el ancla del canonical.)
+ * Referencia = la MAYORÍA (así el mensaje nombra la que se movió, no las que quedaron bien). Sin
+ * mayoría (empate o todas distintas) se reportan todas.
+ */
+function misalignedOrigins(
+  entries: readonly { file: string; what: string; origin: string }[],
+): string[] {
+  const counts = new Map<string, number>();
+  for (const e of entries) counts.set(e.origin, (counts.get(e.origin) ?? 0) + 1);
+  const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+  const mayoria = ranked.length > 0 && ranked[0][1] > (ranked[1]?.[1] ?? 0) ? ranked[0][0] : null;
+  return entries
+    .filter((e) => mayoria === null || e.origin !== mayoria)
+    .map(
+      (e) =>
+        `${e.file} dice "${e.origin}"${mayoria ? ` y las otras dicen "${mayoria}"` : ''} — ${e.what}`,
+    );
+}
+
+/** Lee el origen declarado en una punta. Tira si la forma cambió: un guard que no encuentra su
+ *  entrada no puede "no tener violaciones", tiene que ponerse rojo. */
+function readOrigin(site: OriginSite): { origin: string; code: string } {
+  const code = (site.strip ?? stripComments)(readFileSync(join(REPO_ROOT, site.file), 'utf8'));
+  const m = site.re.exec(code);
+  if (!m) {
+    throw new Error(
+      `[F] no encontré el origen del link en ${site.file} (${site.what}) con ${site.re}. Si la forma ` +
+        'del código cambió (o el PATH del link dejó de ser `/invite?token=`), actualizá el extractor ' +
+        'EN EL MISMO COMMIT: sin esto el guard no compara nada y las cuatro puntas pueden desalinearse ' +
+        'sin que nadie se entere.',
+    );
+  }
+  return { origin: m[1], code };
+}
+
+/** La punta registrada para ese archivo (por nombre, no por índice: la lista crece). */
+function originSite(file: string): OriginSite {
+  const found = INVITE_ORIGIN_SITES.find((s) => s.file === file);
+  if (!found) throw new Error(`[F] ${file} no está registrado en INVITE_ORIGIN_SITES`);
+  return found;
+}
+
+/** Lee el origen que el SITIO PUBLICADO declara como suyo (el ancla de la regla F). */
+function readCanonicalOrigin(): string {
+  const html = stripHtmlComments(readFileSync(join(REPO_ROOT, CANONICAL_FILE), 'utf8'));
+  const m = CANONICAL_RE.exec(html);
+  if (!m) {
+    throw new Error(
+      `[F] no encontré el <link rel="canonical"> en ${CANONICAL_FILE} con ${CANONICAL_RE}. Ese tag es ` +
+        'EL ANCLA de la regla F: sin él, el guard no tiene contra qué comparar las puntas y sólo ' +
+        'podría verificar que coincidan entre sí (lo que deja pasar "todas movidas juntas"). Si la ' +
+        'landing cambió de forma, actualizá el extractor EN EL MISMO COMMIT.',
+    );
+  }
+  const origin = canonicalOrigin(m[1]);
+  if (!PURE_ORIGIN.test(origin)) {
+    throw new Error(
+      `[F] el canonical de ${CANONICAL_FILE} es "${m[1]}" y normalizado da "${origin}", que no es un ` +
+        `origen puro (${PURE_ORIGIN}). Las puntas le concatenan "/invite?token=": el ancla tiene que ` +
+        'ser esquema+host, no una URL con path.',
+    );
+  }
+  return origin;
+}
 
 // ── LA PROPIEDAD: el oráculo sale del git ───────────────────────────────────────────────────────────
 /** El commit anterior al rebrand fase 1 (HEAD al arrancar la vuelta 2). */
@@ -315,6 +510,187 @@ test('E — el remitente de los mails muestra el nombre nuevo y NO rebrandea el 
   assert.match(code, new RegExp(`Equipo ${BRAND}`), 'la firma del cuerpo del mail también nombra la marca');
 });
 
+test('F — las CUATRO puntas del link de invitación dicen el MISMO origen que el sitio publicado', () => {
+  // (0) ANTI-VACÍO: son cuatro las puntas del repo que ARMAN el link. Si alguien saca una de la lista,
+  //     el guard deja de mirarla en silencio — que es exactamente cómo la página publicada estuvo
+  //     afuera de esta regla hasta la vuelta 2.
+  assert.equal(
+    INVITE_ORIGIN_SITES.length,
+    4,
+    'la regla F mira CUATRO puntas: cliente + invite_user + resend_invitation + la página publicada. ' +
+      'Si agregás o sacás una, actualizá este número Y los comentarios que declaran el conteo ' +
+      '(`app/src/services/members.ts`, el header de este archivo y las dos Edge Functions).',
+  );
+
+  const sites = INVITE_ORIGIN_SITES.map((site) => ({ site, ...readOrigin(site) }));
+  const canonical = readCanonicalOrigin();
+
+  // (1) Ninguna apunta al dominio MUERTO.
+  assert.deepEqual(
+    sites.filter((s) => DEAD_ORIGIN.test(s.origin)).map((s) => `${s.site.file} → ${s.origin}`),
+    [],
+    'ese dominio nunca existió (NXDOMAIN). Un invitado que toca el link ve "el servidor no se ' +
+      'encuentra"; el owner no se entera nunca porque él nunca abre el link que comparte.',
+  );
+
+  // (2) EL ANCLA: todas dicen el origen que el SITIO PUBLICADO declara como suyo. Sin esto, mover las
+  //     cuatro puntas juntas a un dominio ajeno pasaba en verde — y esa es la forma exacta del bug
+  //     histórico (las puntas coherentes entre sí, apuntando a un dominio que nunca se compró).
+  assert.deepEqual(
+    sites.filter((s) => s.origin !== canonical).map((s) => `${s.site.file} dice "${s.origin}" — ${s.site.what}`),
+    [],
+    `El sitio publicado declara su propio origen en ${CANONICAL_FILE} (<link rel="canonical">) y hoy ` +
+      `vale "${canonical}". Una punta que diga otra cosa manda al invitado a un dominio que no es el ` +
+      'que servimos. Si el origen cambió DE VERDAD, se cambia primero en el sitio y después acá — no ' +
+      'al revés. ⚠️ Lo que esta regla NO puede ver: que el dominio del canonical esté realmente ' +
+      'comprado, y el secret `APP_URL` de Supabase (DEV y PROD), que GANA sobre los defaults de las EFs.',
+  );
+
+  // (3) Las cuatro dicen EXACTAMENTE lo mismo (comparador puro, falsificado con casos sintéticos abajo).
+  //     Redundante con (2) mientras el canonical exista, pero es el que NOMBRA la que se movió.
+  assert.deepEqual(
+    misalignedOrigins(sites.map((s) => ({ ...s.site, origin: s.origin }))),
+    [],
+    'Las puntas del link de invitación quedaron DESALINEADAS: el `accept_url` que manda el backend, el ' +
+      'link que la app muestra para la misma invitación y el que la página le da a copiar al invitado ' +
+      'apuntan a hosts distintos. Nadie se entera hasta que un invitado no puede entrar. Alineá las ' +
+      'cuatro — y acordate de la QUINTA, el secret `APP_URL` de Supabase (DEV y PROD), que este test no ' +
+      'puede ver y que GANA sobre los defaults de las Edge Functions.',
+  );
+
+  // (4) Forma: origen PURO (esquema + host). Las cuatro concatenan `/invite?token=`, así que una barra
+  //     final produce `//invite` y un path de más rompe el link aunque las cuatro "coincidan".
+  assert.deepEqual(
+    sites.filter((s) => !PURE_ORIGIN.test(s.origin)).map((s) => `${s.site.file} → ${s.origin}`),
+    [],
+    `el origen tiene que ser esquema+host sin barra final ni path (${PURE_ORIGIN}): las cuatro puntas ` +
+      'le concatenan "/invite?token=".',
+  );
+
+  // (5) …y lo concatenan IGUAL. Cuatro orígenes idénticos con paths distintos siguen dando links
+  //     distintos, que es exactamente el bug que esta regla existe para cerrar.
+  assert.deepEqual(
+    sites.filter((s) => !s.site.build.test(s.code)).map((s) => `${s.site.file} (esperaba ${s.site.build})`),
+    [],
+    'una de las puntas dejó de armar el link como `<origen>/invite?token=…`. El path también es parte ' +
+      'del acoplamiento: la página web publicada responde en /invite y lee `?token=`.',
+  );
+});
+
+test('F — el comentario que documenta las puntas las NOMBRA a todas (el conteo no puede mentir)', () => {
+  // EL DEFECTO DE LA VUELTA 1, cerrado sobre la ausencia: el comentario decía "CUATRO lugares" y
+  // enumeraba tres del repo + el secret, dejando afuera la página publicada — la superficie más cercana
+  // al invitado. Un conteo escrito a mano se desactualiza en silencio; acá se verifica la ENUMERACIÓN
+  // contra la lista que el guard realmente mira, así una punta nueva nace obligando a documentarla.
+  const DOC = 'app/src/services/members.ts';
+  const doc = readFileSync(join(REPO_ROOT, DOC), 'utf8');
+  const sinNombrar = INVITE_ORIGIN_SITES.filter((s) => s.file !== DOC && !doc.includes(s.file));
+  assert.deepEqual(
+    sinNombrar.map((s) => s.file),
+    [],
+    `el comentario de ${DOC} (arriba de INVITE_BASE_URL) es el índice de las puntas del origen: tiene ` +
+      'que nombrar TODAS por su path. Una que no está enumerada es una que el próximo rebrand se va a ' +
+      'saltear, igual que se salteó la página publicada.',
+  );
+  assert.ok(
+    doc.includes('APP_URL'),
+    `${DOC} también tiene que nombrar la punta que vive FUERA del repo (el secret \`APP_URL\` de ` +
+      'Supabase): es la única que gana sobre las demás y la única que ningún test puede ver.',
+  );
+  assert.ok(
+    doc.includes(CANONICAL_FILE),
+    `${DOC} tiene que nombrar el ancla (${CANONICAL_FILE}): quien cambie el dominio necesita saber que ` +
+      'el origen se declara primero en el sitio publicado y que las puntas lo siguen.',
+  );
+});
+
+test('F (bis) — el placeholder que ve el usuario muestra el MISMO origen que el link real', () => {
+  // Superficie del repo que MUESTRA el origen sin armar ningún link (por eso no es una de las cuatro
+  // puntas, pero la lee un humano y la copia): el ejemplo del input "Link de invitación". Si queda con
+  // un dominio viejo, le estamos mostrando al usuario un link que no existe justo cuando está tratando
+  // de pegar el suyo.
+  const { origin } = readOrigin(originSite('app/src/services/members.ts'));
+  const code = stripComments(readFileSync(join(APP_ROOT, 'app', 'invite.tsx'), 'utf8'));
+  const found = allMatches(code, /placeholder="(https?:\/\/[^"]+)"/).map((m) => m.text);
+  assert.equal(
+    found.length,
+    1,
+    'esperaba exactamente 1 placeholder con una URL en app/invite.tsx (el del input de pegar el ' +
+      `link); encontré ${found.length}. Si se agregó otro, sumalo a esta regla en el mismo commit.`,
+  );
+  assert.ok(
+    found[0].includes(`"${origin}/invite?token=`),
+    `el placeholder muestra "${found[0]}" y el link real se arma sobre "${origin}/invite?token=". El ` +
+      'ejemplo que ve el usuario tiene que ser el link que de verdad recibe.',
+  );
+});
+
+test('F — el detector de desalineamiento DETECTA (casos sintéticos, sin tocar el árbol)', () => {
+  // Sin esto, la regla F podría estar comparando mal (o no comparando nada) y verse igual: verde.
+  // Los orígenes de acá son inventados A PROPÓSITO — el detector no puede depender de cuál sea el
+  // dominio real, solo de que las puntas coincidan entre sí.
+  const p = (file: string, origin: string) => ({ file, what: `punta ${file}`, origin });
+  const A = 'https://uno.example';
+  const B = 'https://dos.example';
+
+  assert.deepEqual(misalignedOrigins([p('a', A), p('b', A), p('c', A)]), [], 'las tres iguales → OK');
+
+  const unaSeMovio = misalignedOrigins([p('a', A), p('b', B), p('c', A)]);
+  assert.equal(unaSeMovio.length, 1, 'con una punta movida tiene que reportar UNA');
+  assert.match(unaSeMovio[0], /^b dice "https:\/\/dos\.example" y las otras dicen "https:\/\/uno\.example"/);
+
+  // La MINORÍA es la que se movió, aunque sea la primera de la lista (si tomáramos la primera punta
+  // como referencia, mover justo esa haría que el mensaje acusara a las otras dos).
+  const laPrimera = misalignedOrigins([p('a', B), p('b', A), p('c', A)]);
+  assert.deepEqual(laPrimera.map((s) => s.split(' ')[0]), ['a']);
+
+  // Todas distintas: no hay mayoría, se reportan todas (no se elige una al azar como "la buena").
+  assert.equal(misalignedOrigins([p('a', A), p('b', B), p('c', 'https://tres.example')]).length, 3);
+
+  // Diferencias que un `includes`/`startsWith` dejaría pasar y que rompen el link igual.
+  assert.equal(misalignedOrigins([p('a', A), p('b', `${A}/`), p('c', A)]).length, 1, 'barra final');
+  assert.equal(misalignedOrigins([p('a', A), p('b', A.toUpperCase()), p('c', A)]).length, 1, 'mayúsculas');
+  assert.equal(
+    misalignedOrigins([p('a', A), p('b', A.replace('https', 'http')), p('c', A)]).length,
+    1,
+    'http vs https',
+  );
+
+  // El dominio MUERTO y la forma del origen, con los mismos predicados que usa la regla.
+  assert.ok(DEAD_ORIGIN.test('https://app.rafq.ar'), 'el detector del dominio muerto tiene que verlo');
+  assert.ok(!DEAD_ORIGIN.test(A), 'y no puede disparar sobre un origen cualquiera');
+  assert.ok(PURE_ORIGIN.test(A) && PURE_ORIGIN.test('https://sub.dominio.example:8443'));
+  assert.ok(!PURE_ORIGIN.test(`${A}/`), 'barra final');
+  assert.ok(!PURE_ORIGIN.test(`${A}/invite`), 'path');
+  assert.ok(!PURE_ORIGIN.test(A.replace('https', 'http')), 'http pelado en un link de invitación');
+
+  // EL ANCLA (el canonical del sitio publicado), con los mismos predicados que usa la regla. Sin estos
+  // casos, el extractor podría estar leyendo cualquier cosa —o nada— y el check (2) verse igual: verde.
+  const canon = (html: string) => CANONICAL_RE.exec(html)?.[1] ?? null;
+  assert.equal(canon(`<link rel="canonical" href="${A}/">`), `${A}/`, 'lo extrae del tag');
+  assert.equal(canon(`<link rel="canonical" href="${A}/" />`), `${A}/`, 'y con el cierre XHTML');
+  assert.equal(canon(`<meta property="og:url" content="${B}/">`), null, 'sólo el canonical, no el og:url');
+  assert.equal(canon(`<link rel="icon" href="${B}/favicon.png">`), null, 'ni cualquier otro <link>');
+  assert.equal(canonicalOrigin(`${A}/`), A, 'la barra final del canonical de la raíz se normaliza');
+  assert.equal(canonicalOrigin(A), A, 'y sin barra queda igual');
+  // Se normaliza UNA barra, no se "arregla" nada más: lo demás lo rechaza PURE_ORIGIN (fail-closed).
+  assert.ok(!PURE_ORIGIN.test(canonicalOrigin(`${A}//`)), 'dos barras no se limpian: quedan rojas');
+  assert.ok(!PURE_ORIGIN.test(canonicalOrigin(`${A}/invite/`)), 'un canonical con path no es un origen');
+
+  // …y el blanqueo de comentarios de HTML: un literal comentado NO puede ser lo que lea el extractor.
+  const conComentario = `<!-- viejo: <link rel="canonical" href="${B}/"> -->\n<link rel="canonical" href="${A}/">`;
+  assert.equal(canon(stripHtmlComments(conComentario)), `${A}/`, 'gana el tag VIVO, no el comentado');
+  assert.equal(
+    stripHtmlComments(conComentario).split('\n').length,
+    2,
+    'el blanqueo preserva los saltos de línea (los guards reportan números de línea)',
+  );
+  assert.ok(
+    !stripHtmlComments(`<script>\n// var linkCompleto = '${B}/invite?token=';\n</script>`).includes(B),
+    'y el `//` de adentro del <script> también se blanquea: la página publicada es HTML + JS',
+  );
+});
+
 // ─── LA PROPIEDAD: el oráculo sale del git, no de la memoria ─────────────────────────────────────
 
 test('PROPIEDAD — revertir CUALQUIERA de las superficies a su forma pre-rebrand pone el guard en ROJO', () => {
@@ -405,7 +781,9 @@ test('el guard DETECTA las firmas (no pasa verde por no estar mirando nada)', ()
   assert.ok(!hit(stripComments(`/* el wordmark viejo decía ${OLD_NAME_FIXTURE} */`)));
   // El scheme / los ids de fase 2 NO son el nombre viejo (son otra cadena) → no disparan.
   assert.ok(!hit("const APP_ID = 'ar.rafq.app';"), 'el bundle id es fase 2 y no contiene el nombre');
-  assert.ok(!hit("placeholder=\"https://app.rafq.ar/invite?token=…\""), 'la URL de invitación tampoco');
+  // El scheme `rafq://` sigue vigente (el rebrand del DOMINIO del link, 2026-08-11, NO lo tocó: es
+  // fase 2 y la página web publicada lo usa para abrir la app). Contiene "rafq", no el nombre viejo.
+  assert.ok(!hit("const deepLink = 'rafq://invite?token=' + token;"), 'el deep-link scheme tampoco');
 
   // REGLA B — las grafías equivocadas del nombre nuevo.
   assert.ok(hit('<Text>MiTropero</Text>'), 'M mayúscula');

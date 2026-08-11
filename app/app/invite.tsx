@@ -3,11 +3,14 @@
 // Entradas:
 //   1. Pegar link (wizard onboarding T4.3 + stub PasteInviteLink de mis-campos): se navega acá con
 //      el token ya extraído (?token=...) o se pega acá mismo (input).
-//   2. [DIFERIDO] deep link nativo rafq://invite?token= / universal link https://app.rafq.ar/invite:
-//      device-blocked (Expo Go SDK 56 fuera de tiendas) + el dominio app.rafq.ar no existe aún. El
-//      loop se prueba en WEB pegando el link manualmente. El scheme 'rafq' ya está en app.json y
-//      expo-linking parsea ?token=; la asociación universal-link (apple-app-site-association /
-//      assetlinks) + verificación on-device quedan como TODO (no testeable sin dev-build + dominio).
+//   2. [DIFERIDO] deep link nativo rafq://invite?token= / universal link
+//      https://mitropero.com.ar/invite: device-blocked (Expo Go SDK 56 fuera de tiendas). El
+//      dominio SÍ existe y sirve /invite desde 2026-08-11 (página web que lee el token y ofrece
+//      abrir la app por rafq://), pero la asociación universal-link NO está publicada
+//      (apple-app-site-association / assetlinks.json redirigen, no sirven JSON) → tocar el link
+//      abre el navegador, no la app. El loop se prueba en WEB pegando el link manualmente. El
+//      scheme 'rafq' ya está en app.json y expo-linking parsea ?token=; la asociación + la
+//      verificación on-device quedan como TODO (no testeable sin dev-build).
 //
 // Flujo:
 //   - Si NO logueado: persistimos el token en almacenamiento seguro (R5.13, pending-invitation) y
@@ -254,7 +257,7 @@ export default function InviteScreen() {
           label="Link de invitación"
           value={pasteInput}
           onChangeText={setPasteInput}
-          placeholder="https://app.rafq.ar/invite?token=…"
+          placeholder="https://mitropero.com.ar/invite?token=…"
           autoCapitalize="none"
           autoComplete="off"
           error={pasteError}

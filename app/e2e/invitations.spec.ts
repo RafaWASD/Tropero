@@ -128,7 +128,10 @@ test('loop 2 cuentas: el dueño invita por link y el invitado acepta; el dueño 
   // El path de goto('/invite?token=') en carga fresca con sesión activa —que ANTES loopeaba— está
   // cubierto por el test "bug 1" más abajo (ya arreglado: no se persiste el token mientras auth carga).
   await pageB.getByRole('button', { name: 'Pegar link de invitación' }).click();
-  const inviteLink = `https://app.rafq.ar/invite?token=${encodeURIComponent(token)}`;
+  // El host es el REAL de hoy (el que arman `INVITE_BASE_URL` y el `APP_URL` de las Edge Functions)
+  // para que el fixture no documente un dominio muerto. El test NO depende de él: `parseInviteToken`
+  // es host-agnóstico (ver `src/utils/invite.test.ts`), acá lo que importa es el `?token=`.
+  const inviteLink = `https://mitropero.com.ar/invite?token=${encodeURIComponent(token)}`;
   await expect(pageB.getByLabel('Link de invitación', { exact: true })).toBeVisible({ timeout: 15_000 });
   await pageB.getByLabel('Link de invitación', { exact: true }).fill(inviteLink);
   await pageB.getByRole('button', { name: 'Continuar', exact: true }).click();

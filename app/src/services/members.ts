@@ -39,10 +39,33 @@ import { mapMemberRows, type MemberListItem, type MemberRow } from '../utils/sor
 
 // Base URL para reconstruir el accept_url de invitaciones PENDIENTES a partir del token. Las
 // invitaciones recién creadas/regeneradas ya traen `accept_url` del backend; para las que listamos
-// (que solo tienen el token en la fila) reconstruimos el link con esta base. DEBE coincidir con el
-// `APP_URL` del backend (invite_user/resend_invitation: `${APP_URL}/invite?token=...`, default
-// `https://app.rafq.ar`). Si el backend cambia APP_URL en secrets, actualizar acá.
-export const INVITE_BASE_URL = 'https://app.rafq.ar';
+// (que solo tienen el token en la fila) reconstruimos el link con esta base.
+//
+// ⚠️ EL MISMO ORIGEN SE ESCRIBE EN CINCO LUGARES Y LOS CINCO TIENEN QUE COINCIDIR — cuatro en el
+// repo (los que arman el link) y uno afuera:
+//   1. acá (`INVITE_BASE_URL`) — el CLIENTE reconstruye con esto el link de las invitaciones
+//      pendientes que lista (Miembros → Compartir/Copiar).
+//   2. `supabase/functions/invite_user/index.ts` — default de `APP_URL` al CREAR la invitación.
+//   3. `supabase/functions/resend_invitation/index.ts` — el mismo default al REGENERAR el token.
+//   4. `docs/marketing/landing-proximamente/invite.html` — la PÁGINA PUBLICADA. Tiene el origen
+//      HARDCODEADO (no sale de `window.location.origin`) y arma el string que el invitado COPIA Y
+//      PEGA en la pantalla de Invitación cuando el botón "Abrir en la app" no funciona: es la
+//      superficie más cercana al invitado de todas. Ese archivo es byte a byte lo que sirve el
+//      Worker de Cloudflare → se cambia en el sitio publicado, no "de paso" desde el repo.
+//   5. el secret `APP_URL` del proyecto de Supabase (DEV **y** PROD), que vive FUERA del repo. Si
+//      está seteado, GANA sobre los defaults de 2 y 3; ningún test ni typecheck puede verlo, así que
+//      cambiar el dominio acá sin cambiarlo allá no rompe nada visible hasta que un invitado abre el
+//      link.
+// Qué pasa si se desalinean: el `accept_url` que devuelve el backend al crear/regenerar, el link que
+// la app MUESTRA para esa misma invitación y el que la página le da a copiar al invitado apuntan a
+// hosts distintos. El owner comparte uno sin saber cuál, y el fallo aparece recién del lado del
+// invitado (dominio que no resuelve, o página que no es la nuestra).
+// Quién cuida qué: las puntas 1-4 las compara el guard `src/utils/brand-name-guard.test.ts` (regla F)
+// entre sí Y contra el origen que el sitio publicado declara en su `<link rel="canonical">`
+// (`docs/marketing/landing-proximamente/index.html`) — ese canonical es el ancla, así que el dominio
+// se cambia PRIMERO en el sitio y las puntas lo siguen. La punta 5 hay que alinearla a mano en
+// Supabase, y ningún verde de este repo dice nada sobre ella.
+export const INVITE_BASE_URL = 'https://mitropero.com.ar';
 
 /** Reconstruye el accept_url shareable de una invitación pendiente a partir de su token. */
 export function inviteUrlForToken(token: string): string {

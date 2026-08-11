@@ -14,10 +14,34 @@ import {
 
 const TOKEN = '550e8400-e29b-41d4-a716-446655440000';
 
+// El host que usan los fixtures es el REAL de hoy (el que arman `INVITE_BASE_URL` y el `APP_URL` de
+// las Edge Functions), para que los casos no documenten un dominio muerto. ⚠️ NO es lo que estos
+// tests verifican: `parseInviteToken` es host-agnóstico a propósito y tiene su propio caso explícito
+// más abajo ("acepta CUALQUIER host"). Si mañana cambia el dominio, estos fixtures se actualizan por
+// higiene, no porque el parser haya cambiado de contrato. El acoplamiento real entre las puntas del
+// origen lo cuida `brand-name-guard.test.ts`, no este archivo.
+const HOST = 'https://mitropero.com.ar';
+
 // ─── parseInviteToken ────────────────────────────────────────────────────────────
 
 test('parseInviteToken: URL universal https con token → extrae token', () => {
-  assert.equal(parseInviteToken(`https://app.rafq.ar/invite?token=${TOKEN}`), TOKEN);
+  assert.equal(parseInviteToken(`${HOST}/invite?token=${TOKEN}`), TOKEN);
+});
+
+test('parseInviteToken: acepta CUALQUIER host (es host-agnóstico A PROPÓSITO)', () => {
+  // Contrato explícito, no accidente: el parser NO valida el dominio. Tienen que seguir entrando
+  // los links ya compartidos con un host anterior, los de un dominio futuro, los que pasaron por un
+  // acortador y los que traen puerto o subdominio. Quien decide si el token vale es el backend
+  // (accept_invitation); rechazar por host acá solo lograría que un invitado con un link viejo o
+  // acortado no pueda entrar, sin ganar ninguna seguridad (el token es bearer, ADR-014).
+  for (const url of [
+    `https://un-dominio-cualquiera.example/invite?token=${TOKEN}`,
+    `https://acorta.me/xY9?token=${TOKEN}`, // acortador: otro host, otro path
+    `https://sub.dominio.example:8443/ruta/rara?token=${TOKEN}`, // subdominio + puerto + path
+    `http://localhost:8081/invite?token=${TOKEN}`, // el dev server local
+  ]) {
+    assert.equal(parseInviteToken(url), TOKEN, `debería extraer el token de ${url}`);
+  }
 });
 
 test('parseInviteToken: deep-link rafq:// con token → extrae token', () => {
@@ -31,11 +55,11 @@ test('parseInviteToken: token crudo (UUID suelto) → lo devuelve', () => {
 
 test('parseInviteToken: URL con params extra → toma el token igual', () => {
   assert.equal(
-    parseInviteToken(`https://app.rafq.ar/invite?ref=wsp&token=${TOKEN}&utm=x`),
+    parseInviteToken(`${HOST}/invite?ref=wsp&token=${TOKEN}&utm=x`),
     TOKEN,
   );
   assert.equal(
-    parseInviteToken(`https://app.rafq.ar/invite?token=${TOKEN}&ref=mail`),
+    parseInviteToken(`${HOST}/invite?token=${TOKEN}&ref=mail`),
     TOKEN,
   );
 });
@@ -44,15 +68,15 @@ test('parseInviteToken: token percent-encoded en la URL → lo decodifica', () =
   // invite_user usa encodeURIComponent; un UUID no tiene chars especiales, pero validamos
   // que un valor encodeado se decodifique (ej. si el token trajera un %2D).
   const raw = 'abc%2Ddef';
-  assert.equal(parseInviteToken(`https://app.rafq.ar/invite?token=${raw}`), 'abc-def');
+  assert.equal(parseInviteToken(`${HOST}/invite?token=${raw}`), 'abc-def');
 });
 
 test('parseInviteToken: vacío / garbage → null', () => {
   assert.equal(parseInviteToken(''), null);
   assert.equal(parseInviteToken('   '), null);
   assert.equal(parseInviteToken('hola que tal'), null);
-  assert.equal(parseInviteToken('https://app.rafq.ar/invite'), null); // sin ?token
-  assert.equal(parseInviteToken('https://app.rafq.ar/invite?token='), null); // token vacío
+  assert.equal(parseInviteToken(`${HOST}/invite`), null); // sin ?token
+  assert.equal(parseInviteToken(`${HOST}/invite?token=`), null); // token vacío
   assert.equal(parseInviteToken('no-soy-un-uuid'), null);
 });
 
@@ -104,7 +128,7 @@ test('alreadyMemberCopy: sin rol → cae al copy genérico de already_member', (
 // ─── inviteShareMessage (bugfix U8b: el link sale UNA sola vez) ─────────────────────
 
 test('inviteShareMessage: la URL aparece EXACTAMENTE una vez en el mensaje', () => {
-  const url = 'https://app.rafq.ar/invite?token=' + TOKEN;
+  const url = `${HOST}/invite?token=${TOKEN}`;
   const msg = inviteShareMessage('La Escondida', url);
   // Contar ocurrencias del link completo — el bug U8b lo repetía (una en el texto + una del `url`).
   const occurrences = msg.split(url).length - 1;
@@ -133,7 +157,7 @@ test('inviteShareMessage: nombra la marca "miTropero" con la grafía exacta y NO
 });
 
 test('inviteShareMessage: termina con la URL (sink limpio para la share sheet)', () => {
-  const url = 'https://app.rafq.ar/invite?token=' + TOKEN;
+  const url = `${HOST}/invite?token=${TOKEN}`;
   assert.ok(inviteShareMessage('Campo', url).endsWith(url));
 });
 
