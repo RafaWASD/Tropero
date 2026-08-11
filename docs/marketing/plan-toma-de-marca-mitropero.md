@@ -41,10 +41,11 @@
 | **Instagram** | ✅ Cuenta creada con la casilla del proyecto |
 | **Línea del proyecto** | ✅ Chip Tuenti · **11 7058-0364** |
 | **WhatsApp Business** | ✅ Registrado con esa línea |
-
 | **Marca en INPI** | ✅ `MITROPERO` denominativa, clases **42** y **9** — en trámite |
 | **Manual de marca** | ✅ Nombre real puesto en las 36 secciones · `manual-de-marca.html` / `.pdf` |
-| **Landing "próximamente"** | ✅ Armada, **sin publicar** — esperando el OK |
+| **Landing "próximamente"** | ✅ **Publicada** el 11/08 en `mitropero.com.ar`, con la página `/invite` |
+| **Redes** | ✅ Instagram, TikTok, X, Threads y YouTube · ⛔ falta Facebook y LinkedIn |
+| **Builds para testers** | ✅ iOS build 5 en TestFlight (abre bien en iPhone) · APK de Android con link de instalación |
 
 ### ❌ Todavía no arrancado
 
@@ -60,7 +61,11 @@ Página de Facebook · LinkedIn · clase 44 del INPI · documento de titularidad
 
 ### [FAC] Confirmar el destino de correo
 
-Rafael ya confirmó el suyo y `rafa@mitropero.com.ar` está activa. Falta **un clic de Facundo** en `iamfadolf@gmail.com` para desbloquear `facundo@`. Avisarle antes: le llega un mail de un servicio que él no dio de alta y se lo puede comer el spam.
+Rafael ya confirmó el suyo y `rafa@mitropero.com.ar` está activa. Falta **un clic de Facundo** en `facundollorens2610@gmail.com` para desbloquear `facundo@`. Avisarle antes: le llega un mail de un servicio que él no dio de alta y se lo puede comer el spam.
+
+> **Cambió el 11/08**: Facundo pidió no usar `iamfadolf@gmail.com` para la marca. El destino viejo se eliminó de Cloudflare (estaba sin verificar y sin reglas apuntándole).
+>
+> ⚠️ **Ojo, son dos cosas distintas.** `iamfadolf@gmail.com` **sigue siendo su login de Google en la app**: es dueño de "La Facundina" —el campo de las demos a inversores— y de "Santo Domingo" en DEV. Cambiar el mail de contacto **no** cambia con qué cuenta entra. Si algún día quiere unificar, hay que crear la cuenta nueva, sumarla como dueña de los dos campos y recién después sacar la vieja — en ese orden, o se queda afuera del campo de las demos.
 
 ---
 
@@ -88,7 +93,7 @@ Las direcciones `hola@`, `rafa@` y `facundo@` **no se crean en Proton ni en ning
 | 11 | **Probar mandando un mail a `hola@mitropero.com.ar`** | [RAF] | ⛔ **hacelo ahora** |
 | 12 | Agregar como destino `ravennarafael59@gmail.com` | [CLAUDE] | ✅ 10/08 |
 | 13 | **Confirmar ese destino** desde el Gmail de Rafael | [RAF] | ✅ 10/08 |
-| 14 | Agregar como destino `iamfadolf@gmail.com` | [CLAUDE] | ✅ 10/08 |
+| 14 | Agregar como destino el Gmail de Facundo | [CLAUDE] | ✅ 11/08 · reapuntado a `facundollorens2610@gmail.com` |
 | 15 | **Confirmar ese destino** desde el Gmail de Facundo | [FAC] | ⛔ **un clic** — avisarle antes, le llega un mail de un servicio que él no dio de alta |
 | 16 | Crear la regla de `rafa@` | [CLAUDE] | ✅ 10/08 |
 | 17 | Crear la regla de `facundo@` | [CLAUDE] | ⛔ bloqueado por 15 |
@@ -102,7 +107,7 @@ Las direcciones `hola@`, `rafa@` y `facundo@` **no se crean en Proton ni en ning
 |---|---|---|
 | `hola@mitropero.com.ar` | `mitropero@proton.me` | ✅ activa |
 | `rafa@mitropero.com.ar` | `ravennarafael59@gmail.com` | ✅ activa desde el 10/08 |
-| `facundo@mitropero.com.ar` | `iamfadolf@gmail.com` | ⛔ falta que Facundo confirme |
+| `facundo@mitropero.com.ar` | `facundollorens2610@gmail.com` | ⛔ falta que Facundo confirme |
 | **catch-all** (cualquier otra) | `mitropero@proton.me` | ✅ activa |
 
 El catch-all evita que rebote un mail a `info@`, `ventas@` o `contacto@`. Alguien va a escribir a una de esas.
@@ -299,7 +304,7 @@ CORREO
 [x] [CLAUDE] Dar de alta los dos destinos en Cloudflare
 [x] [RAF]    Confirmar el destino desde ravennarafael59@gmail.com
 [x] [CLAUDE] Crear la regla de rafa@
-[ ] [FAC]    Confirmar el destino desde iamfadolf@gmail.com
+[ ] [FAC]    Confirmar el destino desde facundollorens2610@gmail.com
 [ ] [CLAUDE] Crear facundo@ (bloqueado hasta que confirme)
 [ ] [RAF]    Probar de punta a punta: mandar un mail a rafa@ desde otra cuenta
 [ ] [RAF]    Compartir el vault de Proton Pass del proyecto con Facundo
