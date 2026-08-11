@@ -44,6 +44,8 @@ import {
 } from '@/utils/import/column-mapping';
 import type { NormalizedRow } from '@/utils/import/normalize-row';
 import { validateRows, type ValidationResult } from '@/utils/import/validate-rows';
+import { captureDomainEvent } from '@/services/observability/posthog';
+import { DOMAIN_EVENTS } from '@/services/observability/payloads';
 import {
   buildCategoryLabelByIndex,
   buildCategoryStatusByIndex,
@@ -477,6 +479,10 @@ export function useImportRodeo(): UseImportRodeo {
       setError({ message: mapErrorToCopy(run.error) });
       return;
     }
+
+    // Spec 17 (R6.2/R6.4) — evento de dominio al completar el import OK. Prop { rows } = animales escritos
+    // OK (conteo, no-PII: ni idv, ni tag, ni nombre). No-op en web/E2E. Best-effort.
+    captureDomainEvent(DOMAIN_EVENTS.importCompletado, { rows: run.value.importedOk });
 
     setResult(run.value);
     setLoading(false);

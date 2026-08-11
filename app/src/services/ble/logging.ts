@@ -5,6 +5,12 @@
 //
 // PURO respecto de RN/I-O: no importa RN; usa console (disponible en RN y web). Testeable
 // (la forma del evento) sin device.
+//
+// Spec 17 (R4.4/R4.5): además del console, agrega un BREADCRUMB de Sentry con el kind + los campos
+// diagnósticos del evento (sin opData/PII — el TransportLogEvent nunca lleva el EID crudo). Sink en su
+// PROPIO try/catch, sin tocar call sites; no-op en web/E2E (wrapper platform-split).
+
+import { addBleBreadcrumb } from '../observability/sentry';
 
 export type TransportLogEvent =
   | { kind: 'connection_changed'; connected: boolean }
@@ -76,5 +82,12 @@ export function logTransportEvent(event: TransportLogEvent): void {
     console.info('[ble]', event.kind, JSON.stringify(event));
   } catch {
     // Logger roto → ignorar. El logging jamás propaga (R15.2).
+  }
+  // Spec 17 (R4.4/R4.5) — breadcrumb de Sentry en su PROPIO try/catch (separado del console: si el
+  // primero tira, éste igual corre). Sin opData/PII; no-op en web/E2E. Best-effort: jamás propaga.
+  try {
+    addBleBreadcrumb(event);
+  } catch {
+    // El sink de observabilidad jamás propaga (R15.2 / R4.5).
   }
 }

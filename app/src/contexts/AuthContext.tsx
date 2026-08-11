@@ -27,6 +27,7 @@ import type { Session, User } from '@supabase/supabase-js';
 
 import { supabase } from '../services/supabase';
 import { registerPushTokenBestEffort } from '../services/push-notifications';
+import { identifyUser, resetIdentity } from '../services/observability/posthog';
 import { signInWithGoogle as signInWithGoogleService } from '../services/google-auth';
 import { signInWithApple as signInWithAppleService } from '../services/apple-auth';
 import { forgetRememberedDevice } from '../services/ble/remembered-device';
@@ -122,7 +123,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // la sesión muere por acá y el `forget` de `services/account.ts` no corre nunca.
       // Sin esto, el teléfono seguiría abriendo un RFCOMM sin gesto contra la MAC del dueño anterior
       // en cada apertura (R6.4). No se bloquea nada: es best-effort y la función tiene techo propio.
-      if (event === 'SIGNED_OUT') void forgetRememberedDevice().catch(() => undefined);
+      if (event === 'SIGNED_OUT') {
+        void forgetRememberedDevice().catch(() => undefined);
+        // Spec 17 (R5.6) — reset de PostHog al cerrar sesión (gesto explícito O muerte involuntaria de la
+        // sesión): no cruzar identidades entre usuarios en un teléfono compartido. Best-effort (no-op en
+        // web/E2E). Cubre AMBOS finales de sesión, igual que el forget del bastón de arriba.
+        resetIdentity();
+      }
     });
 
     return () => {
@@ -130,6 +137,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       sub.subscription.unsubscribe();
     };
   }, []);
+
+  // Spec 17 (R5.3) — identify de PostHog al quedar autenticado: SOLO el user.id como distinct id, NADA de
+  // email/nombre/PII. Guard por-usuario (identify repetido en TOKEN_REFRESHED/USER_UPDATED es no-op, pero
+  // evitamos la llamada). Best-effort (no-op en web/E2E). El reset vive en el branch SIGNED_OUT (R5.6).
+  const identifiedForUser = useRef<string | null>(null);
+  useEffect(() => {
+    if (state.status !== 'authenticated') {
+      identifiedForUser.current = null;
+      return;
+    }
+    if (identifiedForUser.current === state.user.id) return;
+    identifiedForUser.current = state.user.id;
+    identifyUser(state.user.id);
+  }, [state]);
 
   // Registro best-effort del push token cuando hay sesión verificada (T3.6).
   useEffect(() => {

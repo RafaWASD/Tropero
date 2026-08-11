@@ -41,6 +41,8 @@ import {
   type MembershipEstablishment,
 } from '../services/establishments';
 import { loadTrail, recordOpened, saveTrail } from '../services/establishment-store';
+import { setTenantGroup } from '../services/observability/posthog';
+import { getAppEnv } from '../utils/app-env';
 import { isFirstSyncPending, waitForUsableSync } from '../services/powersync/first-sync';
 import {
   assessDisappearance,
@@ -562,6 +564,23 @@ export function EstablishmentProvider({ children }: { children: ReactNode }) {
       cancelled = true;
     };
   }, [inManeuverRoute, emitActiveLost]);
+
+  // Spec 17 (R5.4/R5.5/R7.2/R7.3) — al pasar el campo activo a 'active', registrar en PostHog el
+  // group('establishment', id) + super props {role, establishment_id, env}. establishment_id derivado del
+  // contexto ya scopeado por RLS (NUNCA hardcodeado, CLAUDE.md ppio 6); role = rol por-establecimiento;
+  // env = getAppEnv(). Sin PII. Guard por (id, role): un re-render con el mismo campo/rol no re-registra.
+  // Best-effort (no-op en web/E2E). El reset de identidad lo hace AuthContext en SIGNED_OUT (R5.6).
+  const tenantGroupKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (state.status !== 'active') {
+      tenantGroupKeyRef.current = null;
+      return;
+    }
+    const key = `${state.current.id}:${state.role}`;
+    if (tenantGroupKeyRef.current === key) return;
+    tenantGroupKeyRef.current = key;
+    setTenantGroup(state.current.id, state.role, getAppEnv());
+  }, [state]);
 
   // Poda del rastro persistido: si algún id del rastro ya no es accesible (R6.9), lo
   // sacamos del storage para que no resucite si el usuario recupera otro campo. Best-effort.

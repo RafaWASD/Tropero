@@ -29,6 +29,7 @@ import { buildCredentials, buildCrudPatch, buildCrudUpsert, isTransientUploadErr
 import { mapIntentToRpc, classifyIntentUploadError } from './upload';
 import { clearOverlay, rollbackOverlay } from './outbox';
 import { recordUploadRejection } from './upload-rejections';
+import { captureUploadRejected } from '../observability/sentry';
 
 /** Tabla outbox (insertOnly): genera CrudEntry pero se mapea a supabase.rpc (§5.4.2), NO a CRUD plano. */
 const OP_INTENTS_TABLE = 'op_intents';
@@ -186,11 +187,14 @@ export class SupabaseConnector implements PowerSyncBackendConnector {
  * Registro observable de un rechazo permanente de upload (R10.2 / R10.8). Best-effort, sin filtrar datos
  * (NUNCA se loguea/guarda `opData` — puede traer datos del campo; solo tabla + op + code + id).
  *
- * DOS canales, ambos en su PROPIO try/catch (el drenado de la upload queue NO se puede romper por ninguno):
+ * TRES canales, cada uno en su PROPIO try/catch (el drenado de la upload queue NO se puede romper por ninguno):
  *   1. `console.warn` — diagnóstico (existía).
  *   2. `recordUploadRejection` (spec 03 R10.8) — store observable que la UI de manga consume para
  *      mostrarle al operario el rechazo (que un evento cargado offline y rechazado NO se pierda en
  *      silencio). El store ya es best-effort internamente; lo blindamos igual acá.
+ *   3. `captureUploadRejected` (spec 17 R4.1) — sink de Sentry: emite `upload_rejected` con SOLO
+ *      {table, op, code} — JAMÁS `opData` (que puede traer datos del campo). SOLO llega acá el rechazo
+ *      PERMANENTE (el transitorio re-throwea antes → no se reporta, R4.3). No-op en web/E2E.
  */
 function surfaceUploadRejection(op: CrudEntry | null, error: unknown): void {
   try {
@@ -211,5 +215,12 @@ function surfaceUploadRejection(op: CrudEntry | null, error: unknown): void {
     recordUploadRejection(op, error);
   } catch {
     /* noop: el surfacing de R10.8 nunca rompe el drenado de la upload queue */
+  }
+  try {
+    // R4.1/R4.2: sink de Sentry (SOLO table/op/code; el builder puro nunca incluye opData). Su propio
+    // try/catch — no propaga ni demora el drenado. NO toca fetchCredentials (el JWT queda intacto).
+    captureUploadRejected(op, error);
+  } catch {
+    /* noop: el sink de observabilidad nunca rompe el drenado de la upload queue */
   }
 }

@@ -80,6 +80,14 @@ import { BleE2EBridge } from './_components/BleE2EBridge';
 import { isBleE2E, isBleE2EManual } from './_components/ble-e2e-flag';
 // DIAGNÓSTICO TEMPORAL (bring-up nativo) — QUITAR cuando se resuelva.
 import { DiagnosticErrorBoundary } from './_components/DiagnosticErrorBoundary';
+// Observabilidad (feature 17): wiring JS platform-split (no-op en web/E2E, real en device [nativo GATED-FASE0]).
+import { RootErrorBoundary } from './_components/RootErrorBoundary';
+import { initSentry, wrapRoot } from '@/services/observability/sentry';
+import { PostHogProvider, posthogClient } from '@/services/observability/posthog';
+import { trackNavigation } from '@/services/observability/navigation';
+
+// R1.1 — Sentry.init a NIVEL MÓDULO (antes de montar el árbol). No-op en web/E2E (wrapper platform-split).
+initSentry();
 
 // Fallback que destapa el splash si NADA resuelve (getSession/memberships colgados). DEBE ser MAYOR
 // que FIRST_SYNC_TIMEOUT_MS (la espera del primer sync en EstablishmentContext, ~4500ms): así, cuando
@@ -209,6 +217,8 @@ const DEV_WEB_ROUTES = new Set([
   'maniobra/tacto-spike',
   'reportes-spike',
   'skeletons-spike',
+  // Spec 17 Gate 2.5 — SPIKE del fallback del RootErrorBoundary (captura del design-review sin auth).
+  'observabilidad-spike',
 ]);
 
 /**
@@ -277,6 +287,13 @@ function RootGate() {
       active = false;
     };
   }, [isAuthedVerified]);
+
+  // Spec 17 (R3.5) — screen tracking + breadcrumb de navegación. Effect NUEVO y SEPARADO del effect de
+  // gating de abajo (no se acopla a la lógica de re-ruteo): solo observa `segments` y emite el pathname
+  // (segmentos de ARCHIVO, `animal/[id]`, sin params/PII — R3.3). No-op en web/E2E (wrappers platform-split).
+  useEffect(() => {
+    trackNavigation(segments.join('/'));
+  }, [segments]);
 
   // FIX 1 (heredado de B.1.1): el splash nativo se oculta UNA sola vez, recién cuando el
   // gating resolvió (o por timeout). El ref evita ocultar dos veces.
@@ -601,6 +618,10 @@ function RootGate() {
           primera carga de las 4 pantallas (variantes animales/home/lotes/reportes) con los MISMOS
           componentes que producción. NO es producción. */}
       <Stack.Screen name="skeletons-spike" />
+      {/* Spec 17 Gate 2.5 — SPIKE del fallback del RootErrorBoundary (`observabilidad-spike`): pantalla
+          VISUAL 100% MOCK, alcanzable directo en web sin auth (DEV_WEB_ROUTES) para la captura a 412×915.
+          Reusa el MISMO RootErrorBoundaryFallback que producción. NO es producción. */}
+      <Stack.Screen name="observabilidad-spike" />
     </Stack>
   );
 }
@@ -626,7 +647,7 @@ function BleHost() {
   );
 }
 
-export default function RootLayout() {
+function RootLayout() {
   const [fontsLoaded, fontError] = useFonts({
     Inter: Inter_400Regular,
     'Inter-Medium': Inter_500Medium,
@@ -662,6 +683,13 @@ export default function RootLayout() {
         <DiagnosticErrorBoundary>
         <TamaguiProvider config={config} defaultTheme="light">
           <StatusBar style="dark" />
+          {/* Spec 17 (R2.1) — ErrorBoundary RAÍZ: DENTRO de Tamagui (el fallback usa el design system) y
+              por ENCIMA de TODOS los data providers (Auth/PowerSync/Profile/Establishment/Rodeo) → captura
+              un throw de render de cualquiera. Passthrough sin error (R2.4): no altera el boot. */}
+          <RootErrorBoundary>
+          {/* Spec 17 (R5.1) — PostHogProvider SIEMPRE montado (árbol idéntico con/sin key), autocapture off,
+              client singleton. No-op en web/E2E (base platform-split = passthrough). */}
+          <PostHogProvider client={posthogClient} autocapture={false}>
           <AuthProvider>
             {/* PowerSyncProvider (spec 15, T1.7): provee el DB local de PowerSync al árbol
                 (PowerSyncContext) y orquesta connect/disconnect según la sesión Supabase. Monta
@@ -706,9 +734,14 @@ export default function RootLayout() {
               </ProfileProvider>
             </PowerSyncProvider>
           </AuthProvider>
+          </PostHogProvider>
+          </RootErrorBoundary>
         </TamaguiProvider>
         </DiagnosticErrorBoundary>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );
 }
+
+// R1.4 — Sentry.wrap del componente raíz exportado. No-op (identidad) en web/E2E (wrapper platform-split).
+export default wrapRoot(RootLayout);

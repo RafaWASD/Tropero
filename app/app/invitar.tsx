@@ -26,6 +26,8 @@ import {
 import { inviteErrorCopy, inviteShareMessage } from '@/utils/invite';
 import { isValidEmail } from '@/utils/validation';
 import { backOr } from '@/utils/nav';
+import { captureDomainEvent } from '@/services/observability/posthog';
+import { DOMAIN_EVENTS } from '@/services/observability/payloads';
 
 const OFFLINE_COPY = 'Necesitás conexión para crear una invitación. Conectate a internet y volvé a intentar.';
 
@@ -112,6 +114,9 @@ export default function InvitarScreen() {
     setCreating(false);
 
     if (result.ok) {
+      // Spec 17 (R6.3/R6.4) — evento de dominio al enviar OK la invitación. Prop { role } = rol invitado
+      // (no-PII: NO el email de anotación). No-op en web/E2E. Best-effort.
+      captureDomainEvent(DOMAIN_EVENTS.invitacionEnviada, { role });
       setCreated(result.value);
     } else if (result.error.kind === 'network') {
       setFormError(OFFLINE_COPY);

@@ -40,6 +40,8 @@ import {
 import { previewManeuverCategoryTransition } from '@/utils/maneuver-category-preview';
 import { getSessionById, setSessionCounts, type Session } from '@/services/sessions';
 import { discardManeuverEvents, persistManeuverEvent, softDeleteManeuverEvents } from '@/services/maneuver-events';
+import { captureDomainEvent } from '@/services/observability/posthog';
+import { DOMAIN_EVENTS } from '@/services/observability/payloads';
 import { fetchEnabledCustomManeuvers, type EnabledCustomManeuver } from '@/services/custom-fields';
 import { addCustomMeasurement } from '@/services/custom-measurements';
 import { assignAnimalToGroup, fetchManagementGroups, type ManagementGroup } from '@/services/management-groups';
@@ -631,6 +633,12 @@ export default function ManiobraCarga() {
         if (!res.ok) {
           setCaptureError(buildCaptureError(res.error.message));
           return;
+        }
+        // Spec 17 (R6.1/R6.4) — 1 evento de dominio por PERSISTENCIA REAL de maniobra (persisted:false =
+        // placeholder/skipped → no cuenta; una maniobra multi-write = UN solo evento). Prop { type } = tipo
+        // de la maniobra (no-PII). No-op en web/E2E. Best-effort: nunca bloquea el avance.
+        if (res.value.persisted) {
+          captureDomainEvent(DOMAIN_EVENTS.maniobraGuardada, { type: maneuver });
         }
         // Recién con el write local CONFIRMADO guardamos en el mapa local (resumen + corrección) y avanzamos.
         setCaptured((c) => ({ ...c, [maneuver]: value }));
