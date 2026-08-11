@@ -211,6 +211,21 @@ de modo que **tanto el build como `eas update --environment <env>`** las reciban
 > - `ios.infoPlist.ITSAppUsesNonExemptEncryption: false` en `app.config.ts` (declaración de export
 >   compliance: la app solo usa HTTPS + keychain del SO, ambos exentos). Sin la clave, App Store
 >   Connect frena **cada** build subido pidiendo la declaración a mano antes de liberarlo a testers.
+> - `ios.infoPlist.NSBluetoothAlwaysUsageDescription` (+ la deprecada `NSBluetoothPeripheralUsageDescription`).
+>   **Agregadas el 11/08/2026 tras el `ITMS-90683` del build 5.** Hay que separar dos cosas:
+>   **incondicional** — sin la clave, el validador de Apple **rechaza la entrega**, se ejecute o no;
+>   **condicional** — el aborto en runtime ocurre sólo si la app instancia el manager de Bluetooth, y
+>   en iOS hoy eso no pasa porque no hay adapter (`adapter-selection` devuelve `manual`).
+>   `react-native-bluetooth-classic` referencia CoreBluetooth en su Swift, así que la clave hace falta
+>   aunque en Android el transporte sea SPP.
+> - `ios.infoPlist.UISupportedExternalAccessoryProtocols: []`. El módulo hace un **force-cast** sobre esa
+>   clave en su `init()` (`RNBluetoothClassic.swift:68`): sin ella es `nil as! [String]` y **trapea al
+>   instanciarse**. En bridgeless, **leer** `NativeModules.RNBluetoothClassic` ya crea el objeto nativo,
+>   así que el chequeo defensivo de `adapter-spp-android.ts:190` sería el disparador — hoy sólo lo frena
+>   el corte por `Platform.OS` que tiene arriba. El array va **vacío** porque es la verdad de hoy: no hay
+>   ningún protocolo MFi aprobado. Cuando salga el trámite, ahí va el del RS420.
+> - El guard que impide que cualquiera de las tres vuelva a faltar vive en
+>   `app/ios-purpose-strings-guard.test.ts`.
 > - Ocupa el bundle `ar.rafq.app` en App Store Connect con un binario que apunta a **DEV**. Es
 >   deliberado (evita registrar un App ID nuevo y romper los OAuth clients de Google/Apple, que están
 >   atados al bundle), pero implica que la app de App Store Connect es *compartida* entre este profile

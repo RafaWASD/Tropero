@@ -1696,3 +1696,30 @@ suelto— y la regla C del guard sólo cubre los wordmarks.
 **Cómo se cierra**: `lineHeight` matching en los dos, y evaluar si la regla C debería exigirlo en
 todo `Text` con `fontSize >= $6` en vez de sólo en los wordmarks. Ojo con el alcance: eso es un
 barrido, no un fix de dos líneas.
+
+---
+
+## `eas.json` no cumple R4.3 ni R4.4 de la spec 16 (canales y EAS Environment Variables)
+
+**Constatado 2026-08-11** al arreglar el ambiente por perfil. No es una regresión: nunca se hicieron, y la spec los afirmaba como si sí.
+
+- **R4.3 — canales**: `grep -c channel app/eas.json` → **0**. Ningún perfil declara `channel`. Sin eso, `eas update` no puede segmentar por ambiente: una actualización OTA no tiene a qué apuntar. Hoy no duele porque no se usan OTA updates; el día que se quieran usar, es prerequisito.
+- **R4.4 — EAS Environment Variables**: las `EXPO_PUBLIC_*` viven **inline** en el `env` de cada perfil, repetidas cinco veces.
+
+**Por qué importa, con el caso real**: agregar `EXPO_PUBLIC_ENV` obligó a escribirla en los cinco perfiles, y **olvidarse de uno es invisible**. Ese es literalmente el defecto que se encontró ese día — ninguno la tenía, todos los builds se creían `development`, y el chip de crash apareció en un TestFlight que ya estaba en manos de testers.
+
+**Mitigación puesta** (no es el fix): `app/eas-profiles-guard.test.ts` enumera los perfiles y falla si a alguno le falta la variable o tiene un valor fuera de dominio. Un perfil nuevo nace en rojo.
+
+**Cómo se cierra**: mover las públicas a EAS Environment Variables por ambiente y referenciarlas con `environment` en cada perfil; sumar `channel`. Al hacerlo, revisar que el guard siga midiendo algo — si las variables dejan de estar en el archivo, el guard tiene que aprender a mirar dónde viven ahora, o queda verde por no ver nada.
+
+---
+
+## El perfil `development` de EAS es el único que muestra el chip de crash, y usa el id de producción
+
+**Abierto 2026-08-11.** Dos bugs conocidos que se cruzan.
+
+`app/eas.json` **no setea `APP_VARIANT`** en el perfil `development` (`grep -c APP_VARIANT app/eas.json` → 0), aunque `app.config.ts:36` lo lee. Resultado: ese perfil produce el identificador y el nombre de **producción** en vez de la variante `.dev`, así que no coexiste con el build de prod en el mismo teléfono.
+
+Al achicar el gate del chip de crash a `development`, ese perfil pasó a ser **el único** que lo muestra — y es justo el que se instala bajo el id de producción.
+
+**No se arregló a propósito**: cambiar `APP_VARIANT` cambia qué app instala el dev client y se cruza con la fase 2 del rebrand, que ya va a mover el identificador. Se resuelve ahí, en un solo movimiento.

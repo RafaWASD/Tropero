@@ -146,6 +146,33 @@ test('spec 04 / R4.2: `expo-audio` NO se engancha como config plugin (sería ped
   );
 });
 
+test('ITMS-90683: las dos purpose strings de Bluetooth están declaradas y NO vacías, en TODA variante', () => {
+  // El defecto real del build 5 de iOS (2026-08-10): el bundle no traía NINGÚN purpose string. Son dos
+  // consecuencias distintas y solo una es incondicional:
+  //  · el validador de App Store Connect RECHAZA la entrega si la clave no está (ITMS-90683). No depende
+  //    de que la app ejecute nada: alcanza con que el binario linkee CoreBluetooth. Esto es lo que pasó.
+  //  · instanciar el manager de CoreBluetooth sin la clave ABORTA el proceso — pero para eso la app tiene
+  //    que llegar a montarlo, y en iOS hoy no llega: no hay transporte iOS (`selectTransportAdapter`
+  //    devuelve `manual`), así que la pantalla del bastón en iPhone es manual-first.
+  //
+  // Se recorren TODAS las variantes a propósito: el build que Raf instala en el teléfono es el `dev`, así
+  // que declarar la clave solo en una rama del ternario sería el mismo agujero con otra cara.
+  //
+  // Un string VACÍO pasaría un `'X' in infoPlist` y sería exactamente el bug (iOS trata la clave vacía
+  // como ausente): por eso se verifica el CONTENIDO, no la presencia.
+  for (const variant of [undefined, 'development', 'preview', 'production']) {
+    const info = build(variant).ios?.infoPlist as Record<string, unknown> | undefined;
+    for (const key of ['NSBluetoothAlwaysUsageDescription', 'NSBluetoothPeripheralUsageDescription']) {
+      const value = info?.[key];
+      assert.equal(typeof value, 'string', `falta \`${key}\` en ios.infoPlist (variant=${variant})`);
+      assert.ok(
+        typeof value === 'string' && value.trim().length > 0,
+        `\`${key}\` está vacía (variant=${variant}): para iOS es lo mismo que no declararla`,
+      );
+    }
+  }
+});
+
 test('R2.5: extra.supabaseUrl eliminado (grep sin consumidores); extra.router/eas conservados', () => {
   const extra = build(undefined).extra as Record<string, unknown> | undefined;
   assert.equal(extra?.supabaseUrl, undefined);

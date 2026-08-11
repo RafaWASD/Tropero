@@ -39,6 +39,10 @@ EARS estricto (`docs/specs.md`). "DEV" = ambiente de desarrollo/tests actual; "P
 - **R3.2** Si un acceso estático devuelve vacío, entonces el sistema deberá recurrir en orden al reader **dinámico** actual (`process.env[name]`) y luego a `Constants.expoConfig.extra`, antes de considerar la variable ausente.
 - **R3.3** Mientras falte cualquiera de las tres variables requeridas (`supabaseUrl`, `supabaseAnonKey`, `powersyncUrl`), el sistema deberá lanzar el error accionable en español existente (fail-closed), **sin cambiar el copy**.
 - **R3.4** El sistema deberá reconocer la variable `EXPO_PUBLIC_ENV` con dominio `{development, preview, production, e2e}` y default `development` cuando esté ausente.
+
+> **Alcance del default, precisado el 11/08/2026.** Desde que los cinco perfiles de `eas.json` declaran su `EXPO_PUBLIC_ENV`, este default ya **no** gobierna a ningún build de EAS: sólo al dev server local y a los **builds nativos locales** (`./gradlew`), que no leen `eas.json`. Se mantiene `development` a propósito — es literalmente la verdad en esos dos casos, y hacerlo fail-closed convertiría un problema de etiquetado en uno de arranque.
+>
+> `e2e` es un valor válido **del runtime**, no de un perfil de build: un binario con `isE2E()` en true apaga Sentry y PostHog en silencio. El guard de perfiles lo rechaza a propósito.
 - **R3.5** Cuando corra la suite E2E, el shim de `app/e2e/helpers/fixtures.ts` deberá inyectar `EXPO_PUBLIC_ENV='e2e'` además de las 3 variables actuales, **sin modificar los ~70 specs**.
 - **R3.6** Cuando Playwright cargue el bundle, el sistema deberá exponer una función pura `isE2E()` que devuelva `true` si Playwright marcó `window.__RAFAQ_E2E__` antes del boot **o** si `EXPO_PUBLIC_ENV==='e2e'` (mismo patrón que `ble-e2e-flag.ts`).
 - **R3.7** Si no existe la marca `window.__RAFAQ_E2E__` ni `EXPO_PUBLIC_ENV==='e2e'`, entonces `isE2E()` deberá devolver `false` (producción/dev normal).
@@ -49,6 +53,17 @@ EARS estricto (`docs/specs.md`). "DEV" = ambiente de desarrollo/tests actual; "P
 - **R4.2** Los profiles `preview` y `production` de `app/eas.json` deberán resolver al backend **PROD**.
 - **R4.3** Cada profile deberá declarar su `channel` correspondiente (`development` / `preview` / `production`).
 - **R4.4** El sistema deberá proveer las variables `EXPO_PUBLIC_*` y `EXPO_PUBLIC_ENV` por ambiente vía **EAS Environment Variables** (referenciadas por `environment` en cada profile), no embebidas en el bloque `env` inline del profile.
+
+> ### ⚠️ R4.3 y R4.4 NO están implementados (constatado el 11/08/2026)
+>
+> No es una regresión nueva: nunca se hicieron, y la spec venía afirmándolos como si sí.
+>
+> - **R4.3**: `grep -c channel app/eas.json` → **0**. Ningún perfil declara canal. Consecuencia: `eas update` no puede segmentar por ambiente; una actualización OTA no tiene a qué apuntar.
+> - **R4.4**: las variables viven **inline** en el bloque `env` de cada perfil, repetidas cinco veces.
+>
+> **La consecuencia de R4.4 se cobró sola el 11/08**: agregar `EXPO_PUBLIC_ENV` obligó a escribirla en los cinco perfiles, y **olvidarse de uno es invisible** — que es exactamente el defecto que se encontró (ningún perfil la tenía, y todos los builds se creían `development`, incluido el de producción). La mitigación que se puso **no** es cumplir R4.4 sino un guard: `app/eas-profiles-guard.test.ts` enumera los perfiles y falla si a alguno le falta o tiene un valor fuera de dominio, de modo que **un perfil nuevo nace en rojo**.
+>
+> Migrar a EAS Environment Variables sigue siendo lo correcto y queda en el backlog. No se hizo ahora porque es una migración con su propio riesgo, sin apuro, y con el guard el modo de falla que importaba quedó cerrado.
 - **R4.5** Si se publica un OTA con `eas update`, entonces el sistema deberá tomar las variables del `--environment <env>` correspondiente y no del campo `env` del build profile (que no viaja a los updates).
 
 ## R5 — Scripts parametrizados con guarda de PROD + ledger + backup

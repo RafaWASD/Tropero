@@ -10,7 +10,10 @@
 
 export type AppEnv = 'development' | 'preview' | 'production' | 'e2e';
 
-const APP_ENVS: readonly AppEnv[] = ['development', 'preview', 'production', 'e2e'];
+// EXPORTADA para que los guards deriven el dominio de acá en vez de re-tipearlo (un espejo escrito a
+// mano se desincroniza en silencio): hoy la consume `app/eas-profiles-guard.test.ts`, que valida el
+// `EXPO_PUBLIC_ENV` de cada perfil de `eas.json` contra ESTE conjunto.
+export const APP_ENVS: readonly AppEnv[] = ['development', 'preview', 'production', 'e2e'];
 const DEFAULT_APP_ENV: AppEnv = 'development';
 
 // Key VARIABLE para el fallback dinámico → NO inlineable por babel (igual que env.ts).

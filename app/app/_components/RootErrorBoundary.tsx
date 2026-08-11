@@ -14,7 +14,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Text, YStack } from 'tamagui';
 
 import { Button } from '@/components';
-import { getAppEnv } from '@/utils/app-env';
+import { isDevCrashEnabled } from '@/utils/dev-crash-gate';
 import { captureExceptionSafe } from '@/services/observability/sentry';
 
 /**
@@ -69,11 +69,16 @@ export function RootErrorBoundaryFallback({ onRetry }: { onRetry: () => void }) 
 }
 
 /**
- * Acción "crash de prueba" DEV-ONLY (R2.6): visible solo en development/preview. Un pequeño chip que, al
- * tocarse, lanza un error de RENDER → lo atrapa este mismo boundary → fallback + captureException. Valida
- * el pipeline ErrorBoundary → Sentry. NUNCA en producción ni en E2E (getAppEnv() ∈ {development, preview}),
- * así no interfiere con los ~70 specs de regresión (que corren en env 'e2e'). Vive DENTRO del boundary
- * (sibling de children) para que su throw sea capturado. Al reintentar, remonta con `armed=false` (no loopea).
+ * Acción "crash de prueba" DEV-ONLY (R2.6): visible SOLO en un bundle de desarrollo (`__DEV__`) Y con
+ * ambiente `development` — las dos llaves. Un pequeño chip que, al tocarse, lanza un error de RENDER → lo
+ * atrapa este mismo boundary → fallback + captureException. Valida el pipeline ErrorBoundary → Sentry.
+ * NUNCA en preview/producción ni en E2E, y nunca en un binario release (aunque le falte `EXPO_PUBLIC_ENV`).
+ * La decisión —las dos llaves— vive en `@/utils/dev-crash-gate` (`isDevCrashEnabled()`), fuera de este
+ * .tsx, para que sea testeable por comportamiento; este componente NO la re-implementa (ni entera ni a
+ * medias). Así no le aparece a los testers (el APK `preview` y TestFlight son ambiente `preview`) ni
+ * interfiere con los ~70 specs de regresión (que corren en env 'e2e').
+ * Vive DENTRO del boundary (sibling de children) para que su throw sea capturado. Al reintentar, remonta con
+ * `armed=false` (no loopea).
  */
 function DevCrashTrigger() {
   const [armed, setArmed] = useState(false);
@@ -81,8 +86,8 @@ function DevCrashTrigger() {
     throw new Error('Crash de prueba (RootErrorBoundary → Sentry)');
   }
   // Chip flotante arriba-IZQUIERDA (el indicador del bastón vive arriba-derecha → sin colisión). Posición
-  // por TOKENS (no `insets.top` → fuera del radar del guard de bandas; no hay overlay en producción/E2E: el
-  // trigger solo se monta en development/preview). Tap directo en la pieza Tamagui (regla del repo:
+  // por TOKENS (no `insets.top` → fuera del radar del guard de bandas; no hay overlay fuera de development:
+  // el trigger no se monta en preview/producción/E2E). Tap directo en la pieza Tamagui (regla del repo:
   // onPress + a11y en el mismo componente, no un Pressable de RN envolviéndolo).
   return (
     <YStack
@@ -107,11 +112,6 @@ function DevCrashTrigger() {
       </Text>
     </YStack>
   );
-}
-
-function isDevCrashEnabled(): boolean {
-  const env = getAppEnv();
-  return env === 'development' || env === 'preview';
 }
 
 interface RootErrorBoundaryProps {

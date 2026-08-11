@@ -73,9 +73,28 @@
   (passthrough, sin cambiar el flujo de splash/gating).
 - **R2.5** — Cuando el ErrorBoundary captura un error, el sistema deberá reportarlo a Sentry (best-effort,
   respetando el no-op de R1.3).
-- **R2.6** — Donde el build sea de desarrollo o preview, el sistema deberá exponer una acción de "crash de
-  prueba" (dev-only) que dispare un error para validar el pipeline ErrorBoundary → Sentry (captura de
-  Gate 2.5).
+- **R2.6** — Donde el bundle corra en modo desarrollo (`__DEV__`) **y** el ambiente resuelto sea
+  `development`, el sistema deberá exponer una acción de "crash de prueba" que dispare un error para
+  validar el pipeline ErrorBoundary → Sentry (captura de Gate 2.5). En cualquier otro caso **no deberá
+  montarse**.
+
+> **Reescrito el 11/08/2026, después de que se colara en un TestFlight.** La versión anterior decía
+> "desarrollo o preview". Dos cosas la rompieron:
+>
+> 1. **`preview` son los builds que van a los testers.** Un botón que cierra la app a propósito no puede
+>    estar en lo que usa Facundo, ni en algo que pueda tocar un revisor de Apple. Y no perdía nada al
+>    sacarlo: **ningún perfil declara `EXPO_PUBLIC_SENTRY_DSN`**, así que con `enabled: !!sentryDsn` el
+>    chip del build 5 cerraba la app **y no reportaba nada**. Era puro costo.
+> 2. **Mirar sólo el ambiente no alcanza.** Un bundle release que no pasó por `eas.json`
+>    (`assembleRelease`, `expo run --variant release`, un perfil futuro fuera del guard) no trae
+>    `EXPO_PUBLIC_ENV`, cae al default `development` y volvía a mostrar el chip. El `__DEV__` cierra eso.
+>
+> Un build **debug** local (`assembleDebug`) sí lo sigue mostrando, y está bien: carga de Metro con
+> `__DEV__` en true y es una máquina de desarrollo. Verificado empíricamente contra el bundle real, no
+> deducido. El gate vive en `app/src/utils/dev-crash-gate.ts`.
+>
+> Si algún día hace falta validar Sentry sobre un binario release, la forma es un evento **manejado**
+> (`captureMessage`) detrás de un gesto oculto y con variable propia — no un crash real.
 - **R2.7** `[GATED-FASE0]` — Donde el build sea de testers (preview), el sistema deberá ofrecer el gesto de
   feedback por "shake" de Sentry. El shake feedback queda gated por Fase 0 y, cuando se habilite, **no**
   deberá activarse sobre datos de un tenant real sin una decisión aparte (captura de pantalla = PII visual,
