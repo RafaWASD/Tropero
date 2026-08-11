@@ -19,25 +19,48 @@ function pluginNames(c: ReturnType<typeof config>): string[] {
   return (c.plugins ?? []).map((p) => (Array.isArray(p) ? String(p[0]) : String(p)));
 }
 
-test('R2.2/R2.4: APP_VARIANT=development → "RAFAQ (Dev)" + ids ar.rafq.app.dev', () => {
+test('R2.2/R2.4: APP_VARIANT=development → "miTropero (Dev)" + ids ar.rafq.app.dev', () => {
   const c = build('development');
-  assert.equal(c.name, 'RAFAQ (Dev)');
+  assert.equal(c.name, 'miTropero (Dev)');
   assert.equal(c.ios?.bundleIdentifier, 'ar.rafq.app.dev');
   assert.equal(c.android?.package, 'ar.rafq.app.dev');
 });
 
-test('R2.3: APP_VARIANT ausente → "RAFAQ" + ids ar.rafq.app', () => {
+test('R2.3: APP_VARIANT ausente → "miTropero" + ids ar.rafq.app', () => {
   const c = build(undefined);
-  assert.equal(c.name, 'RAFAQ');
+  assert.equal(c.name, 'miTropero');
   assert.equal(c.ios?.bundleIdentifier, 'ar.rafq.app');
   assert.equal(c.android?.package, 'ar.rafq.app');
 });
 
-test('R2.3: APP_VARIANT != development (ej. production) → "RAFAQ" + ar.rafq.app', () => {
+test('R2.3: APP_VARIANT != development (ej. production) → "miTropero" + ar.rafq.app', () => {
   const c = build('production');
-  assert.equal(c.name, 'RAFAQ');
+  assert.equal(c.name, 'miTropero');
   assert.equal(c.ios?.bundleIdentifier, 'ar.rafq.app');
   assert.equal(c.android?.package, 'ar.rafq.app');
+});
+
+test('rebrand fase 1: NINGUNA variante muestra el nombre viejo, y los ids NO se rebrandean', () => {
+  // Guard sobre la AUSENCIA: los asserts de arriba fijan el nombre nuevo variante por variante, pero
+  // un revert parcial (una sola rama del ternario) pasaría desapercibido si mañana se agrega otra
+  // variante. Acá se barre el conjunto.
+  for (const variant of [undefined, 'development', 'preview', 'production']) {
+    const c = build(variant);
+    assert.ok(
+      !/rafaq/i.test(String(c.name)),
+      `la marca vieja quedó en el nombre visible con variant=${variant}: ${c.name}`,
+    );
+    assert.ok(String(c.name).startsWith('miTropero'), `nombre inesperado con variant=${variant}: ${c.name}`);
+  }
+  // La contracara: el rebrand de fase 1 es SOLO el nombre visible. El identificador de la app, el
+  // scheme, el slug y el owner NO se tocan (fase 2 — dependen de Apple/Google/EAS y de romper los
+  // deep links de OAuth e invitaciones). Si alguien "completa el rebrand" acá, este assert lo frena.
+  const c = build(undefined);
+  assert.equal(c.ios?.bundleIdentifier, 'ar.rafq.app');
+  assert.equal(c.android?.package, 'ar.rafq.app');
+  assert.equal(c.scheme, 'rafq');
+  assert.equal(c.slug, 'rafaq-app');
+  assert.equal(c.owner, 'rafaqsorg');
 });
 
 test('R2.4: dev y prod tienen ids distintos → coexisten instalados en el mismo device', () => {

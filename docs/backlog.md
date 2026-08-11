@@ -1629,3 +1629,44 @@ es la misma clase de divergencia (montado ≠ dueño) del otro lado de la tabla.
 **Cómo se cierra**: que `/baston` declare un `accepts` atado a su foco (el mismo `useFocusEffect` que ya
 usa para el scanner acotado), y pase de `'always'` a `'declares-accepts'` en la tabla `CONSUMERS` de
 `app/src/services/ble/read-dispatch.test.ts`.
+
+---
+
+## El guard del nombre de marca no cubre las Edge Functions salvo `_shared/email.ts`
+
+**Abierto 2026-08-10** — hallazgo del review del rebrand fase 1, no bloqueante.
+
+`app/src/utils/brand-name-guard.test.ts` escanea el árbol —esa es su gracia, y por eso atrapa un
+archivo nuevo— pero sus `ROOTS` son `app/app` y `app/src`. De `supabase/functions/` mira **un solo
+archivo**: `_shared/email.ts`.
+
+El reviewer lo falsificó en vez de deducirlo: creó `supabase/functions/mutante_test/index.ts` con el
+texto `'Tu cuenta de RAFAQ fue creada.'` y el guard dio **11 pass, 0 fail**.
+
+**Por qué está latente hoy**: `_shared/email.ts` es el único módulo que compone copy de mail —
+`invite_user` no manda nada, devuelve el `accept_url`. Así que hoy no hay superficie descubierta.
+
+**Por qué igual hay que cerrarlo**: es exactamente el modo de falla que el guard existe para frenar.
+Una Edge Function nueva que le escriba al usuario nace fuera del radar, que es lo mismo que pasó con
+`AuthScreenShell` en la primera vuelta del rebrand.
+
+**Cómo se cierra**: sumar `supabase/functions` a `ROOTS` con las exclusiones que haga falta declarar
+una por una, y dejar el mutante del reviewer como caso de prueba.
+
+---
+
+## Dos `Text` de `AuthScreenShell` sin `lineHeight` declarado
+
+**Abierto 2026-08-10** — hallazgo del review del rebrand fase 1, no es regresión.
+
+`app/src/components/AuthScreenShell.tsx:79` (título, `fontSize="$8"`) y `:83` (subtítulo, `$5`) no
+declaran `lineHeight`. Están dos líneas debajo del wordmark que sí se corrigió en el rebrand.
+
+**No es regresión**: esos strings ya tenían descendentes antes del cambio de nombre ("Sumate al
+campo", "aceptar"), así que si recortaran, recortarían desde siempre. Pero es la misma clase de bug
+que el repo viene arrastrando —Tamagui no aplica el `lineHeight` del token cuando el `fontSize` va
+suelto— y la regla C del guard sólo cubre los wordmarks.
+
+**Cómo se cierra**: `lineHeight` matching en los dos, y evaluar si la regla C debería exigirlo en
+todo `Text` con `fontSize >= $6` en vez de sólo en los wordmarks. Ojo con el alcance: eso es un
+barrido, no un fix de dos líneas.

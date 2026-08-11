@@ -17,8 +17,11 @@ export type EmailResult =
   | { ok: true; id: string }
   | { ok: false; reason: 'no_key' | 'api_error'; detail?: string };
 
+// SOLO el nombre para mostrar se rebrandea. La DIRECCIÓN sigue siendo `noreply@rafq.ar`: Resend
+// verifica el DOMINIO del remitente, no el display name — cambiar el nombre no rompe el envío,
+// cambiar el dominio lo rompería hasta verificar `mitropero.com.ar` en Resend (eso es fase 2).
 const FROM_DEFAULT =
-  Deno.env.get('RESEND_FROM_EMAIL') ?? 'RAFAQ <noreply@rafq.ar>';
+  Deno.env.get('RESEND_FROM_EMAIL') ?? 'miTropero <noreply@rafq.ar>';
 
 async function sendViaResend(payload: {
   to: string;
@@ -75,7 +78,7 @@ export async function sendInvitationAcceptedEmail(params: {
     (${escapeHtml(params.newMemberEmail)}) aceptó tu invitación y ya forma
     parte de <strong>${escapeHtml(params.establishmentName)}</strong> como
     <strong>${roleEs}</strong>.</p>
-    <p>— Equipo RAFAQ</p>
+    <p>— Equipo miTropero</p>
   `;
 
   return sendViaResend({

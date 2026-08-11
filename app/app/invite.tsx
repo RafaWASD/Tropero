@@ -224,7 +224,7 @@ export default function InviteScreen() {
     return (
       <AuthScreenShell
         title="Sumate al campo"
-        subtitle="Te invitaron a un campo en RAFAQ. Creá tu cuenta o iniciá sesión para aceptar."
+        subtitle="Te invitaron a un campo en miTropero. Creá tu cuenta o iniciá sesión para aceptar."
       >
         <YStack gap="$4" marginTop="$2">
           <InfoNote>

@@ -1,8 +1,12 @@
 // app/app.config.ts — Configuración dinámica de Expo (reemplaza app.json). Spec 16, R2.
 //
 // El discriminador es `process.env.APP_VARIANT`, que EAS setea por build profile:
-//   - development → variante "RAFAQ (Dev)" con id `ar.rafq.app.dev` (instalable JUNTO al de prod, R2.4).
-//   - preview/production/ausente → "RAFAQ" con id `ar.rafq.app` (R2.3).
+//   - development → variante "miTropero (Dev)" con id `ar.rafq.app.dev` (instalable JUNTO al de prod, R2.4).
+//   - preview/production/ausente → "miTropero" con id `ar.rafq.app` (R2.3).
+//
+// El NOMBRE visible es "miTropero" (rebrand fase 1) pero los IDENTIFICADORES siguen siendo `ar.rafq.app`
+// / slug `rafaq-app` / scheme `rafq` / owner `rafaqsorg`: cambiarlos es fase 2 y depende de trabajo en
+// consolas externas (Apple/Google/EAS/Resend). Nombre e id no tienen por qué coincidir.
 //
 // Preserva TODO lo que tenía app.json (as-built al migrar):
 //   - OAuth/scheme de la FEATURE 19: scheme 'rafq', ios.usesAppleSignIn, plugin google-signin
@@ -27,7 +31,7 @@ export default (): ExpoConfig => {
   const appId = isDev ? `${APP_ID}.dev` : APP_ID;
 
   return {
-    name: isDev ? 'RAFAQ (Dev)' : 'RAFAQ', // R2.2 / R2.3
+    name: isDev ? 'miTropero (Dev)' : 'miTropero', // R2.2 / R2.3
     slug: 'rafaq-app',
     scheme: 'rafq', // feature 19 (deep-link OAuth) — PRESERVADO
     version: '0.1.0',

@@ -118,6 +118,20 @@ test('inviteShareMessage: incluye el nombre del campo y es es-AR (voseo, invitac
   assert.match(msg, /link para aceptar/i);
 });
 
+// ─── Rebrand fase 1 (2026-08-10): el texto SALIENTE nombra la marca ─────────────────
+//
+// Este mensaje sale de la app hacia afuera (WhatsApp/mail/SMS): es marca visible para alguien que
+// todavía NO es usuario. El assert es sobre el nombre EXACTO ("miTropero": `mi` minúscula pegado a
+// `T` mayúscula) y sobre la AUSENCIA del viejo — un rebrand a medias acá manda al invitado a buscar
+// una app que no se llama así.
+test('inviteShareMessage: nombra la marca "miTropero" con la grafía exacta y NO dice el nombre viejo', () => {
+  const msg = inviteShareMessage('La Escondida', 'https://x/y?token=z');
+  assert.match(msg, /\bmiTropero\b/, `el mensaje tiene que nombrar la marca: ${msg}`);
+  assert.doesNotMatch(msg, /rafaq/i, `quedó el nombre viejo en el mensaje saliente: ${msg}`);
+  // Grafía: NO "MiTropero", NO "Mi Tropero", NO "mitropero".
+  assert.doesNotMatch(msg, /MiTropero|Mi Tropero|mitropero(?![.\w])/, `grafía incorrecta de la marca: ${msg}`);
+});
+
 test('inviteShareMessage: termina con la URL (sink limpio para la share sheet)', () => {
   const url = 'https://app.rafq.ar/invite?token=' + TOKEN;
   assert.ok(inviteShareMessage('Campo', url).endsWith(url));

@@ -2,7 +2,7 @@
 //
 // Da el marco consistente a SignIn / SignUp / ForgotPassword / VerifyEmail /
 // UpdatePassword: safe-area, fondo $bg, scroll que respeta el teclado, wordmark
-// RAFAQ, título + subtítulo, y un slot para el contenido (form + CTAs). Cero
+// miTropero, título + subtítulo, y un slot para el contenido (form + CTAs). Cero
 // hardcode (ADR-023 §4): todo via tokens. No es una pantalla — es un componente de
 // la librería que componen las pantallas (ADR-023).
 //
@@ -57,16 +57,22 @@ export function AuthScreenShell({ title, subtitle, children }: AuthScreenShellPr
           showsHorizontalScrollIndicator={false}
         >
           <YStack flex={1} width="100%" paddingHorizontal="$4" paddingTop="$6" gap="$5">
-            {/* Wordmark de marca (identidad consistente con la home). */}
+            {/* Wordmark de marca (identidad consistente con la home).
+                ⚠️ `lineHeight="$7"` es OBLIGATORIO y matchea el `fontSize="$7"`: "miTropero" tiene
+                DESCENDENTE (la `p`) y el wordmark viejo ("RAFAQ", todo mayúsculas) no tenía ninguno.
+                Tamagui NO aplica el lineHeight del token cuando solo se le da `fontSize` suelto → sin
+                esta línea la `p` sale recortada (el bug recurrente del repo). Mismo par que el
+                wordmark de la home. */}
             <Text
               fontFamily="$body"
               fontSize="$7"
+              lineHeight="$7"
               fontWeight="700"
               color="$primary"
               letterSpacing={1}
               alignSelf="center"
             >
-              RAFAQ
+              miTropero
             </Text>
 
             <YStack gap="$2" marginTop="$4">

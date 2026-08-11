@@ -133,7 +133,11 @@ function HomeHeader({
         </XStack>
       </Pressable>
 
-      {/* Wordmark RAFAQ. No encoge (flexShrink:0): es identidad de marca. */}
+      {/* Wordmark miTropero. No encoge (flexShrink:0): es identidad de marca — el que cede en la fila
+          es el nombre del campo (flexShrink:1 + ellipsis). `lineHeight="$7"` (28) matching el fontSize
+          $7 (20): sin él, Tamagui no aplica el lineHeight del token y la `p` de "Tropero" —el wordmark
+          nuevo TIENE descendente, el viejo no tenía ninguno— se recorta (feedback_descender_clipping).
+          Sin numberOfLines a propósito: truncar la marca sería peor que ajustar el resto. */}
       <Text
         fontFamily="$body"
         fontSize="$7" lineHeight="$7"
@@ -143,7 +147,7 @@ function HomeHeader({
         flexShrink={0}
         marginHorizontal="$2"
       >
-        RAFAQ
+        miTropero
       </Text>
 
       {/* Avatar (placeholder: círculo bone con ícono de usuario). No encoge: queda

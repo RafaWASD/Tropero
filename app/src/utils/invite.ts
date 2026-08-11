@@ -131,7 +131,7 @@ export function invitePhaseForAuth(
 // es-AR, voseo. La URL aparece EXACTAMENTE una vez (lo verifica el test).
 
 export function inviteShareMessage(establishmentName: string, url: string): string {
-  return `Te invito a sumarte a "${establishmentName}" en RAFAQ. Abrí este link para aceptar: ${url}`;
+  return `Te invito a sumarte a "${establishmentName}" en miTropero. Abrí este link para aceptar: ${url}`;
 }
 
 // ─── inviteErrorCopy (R5.6 / R5.9 / errores de las Edge Functions) ──────────────

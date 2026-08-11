@@ -321,6 +321,15 @@ WEB
 [ ] [CLAUDE] Publicarla en Cloudflare Pages sobre mitropero.com.ar
 [ ] [CLAUDE] Página /invite que reciba los links de invitación
 
+PRODUCTO — rebrand
+[x] [CLAUDE] Fase 1: nombre visible en la app, los mails y el copy + guard automático
+[ ] [RAF]    Cambiar las plantillas de mail de Supabase Auth (en DEV **y** en PROD)
+[ ] [RAF]    Re-correr el prebuild de Android antes del próximo build local
+[ ] [RAF]    Confirmar el identificador definitivo para arrancar la fase 2
+[ ] [RAF]    Fase 2: Apple (App IDs + Services ID + client secret), Google (OAuth
+             Clients + pantalla de consentimiento), App Store Connect (app nueva)
+[ ] [CLAUDE] Fase 2: recién después, app.config.ts y eas.json
+
 ORDEN INTERNO
 [ ] [RAF]    Confirmar en qué cuenta de Proton Pass vive el vault del proyecto
 [ ] [RAF]    Confirmar el identificador com.mitropero.app
@@ -333,9 +342,17 @@ ORDEN INTERNO
 
 El relevamiento del 10/08 mostró que el rebrand del código **no es un rename**: se parte en dos fases muy distintas.
 
-### Fase 1 — nombre visible · [CLAUDE] · en curso
+### Fase 1 — nombre visible · [CLAUDE] · hecha en código
 
-Sin dependencias externas y sin riesgo: el nombre de la app en la config de Expo, el wordmark del header de la Home, la firma de los mails y los tests que los asertan.
+Sin dependencias externas y sin riesgo: el nombre de la app en la config de Expo, los wordmarks de la Home y de las pantallas de auth, el subtítulo de la pantalla de invitación, el copy que se manda por WhatsApp, y el nombre del remitente de los mails. Queda un guard automático que escanea el árbol y falla si aparece el nombre viejo en una superficie nueva.
+
+> El **nombre para mostrar** del remitente sí se pudo cambiar hoy: Resend verifica el **dominio de la dirección**, no el nombre. El mail ya llega de "miTropero <noreply@rafq.ar>". Cambiar la dirección a `@mitropero.com.ar` es fase 2 y necesita verificar el dominio en Resend.
+
+#### 🔴 [RAF] Lo que quedó fuera del código y sólo podés hacer vos
+
+1. **Las plantillas de mail de Supabase Auth** —confirmación de cuenta y reseteo de contraseña— siguen diciendo el nombre viejo. Viven en el dashboard de Supabase, no hay archivo en el repo que las contenga. **Es el único texto cara al usuario que todavía dice RAFAQ, y lo ve todo usuario nuevo al registrarse.** Hay que cambiarlas en **DEV y en PROD**, son dos proyectos distintos.
+2. **El prebuild de Android que está en disco está viejo**: su `strings.xml` todavía dice `RAFAQ`. Es un archivo generado y gitignoreado, pero si buildeás local hoy, la app se instala con el nombre viejo en el launcher. Hay que re-correr el prebuild antes del próximo `gradlew assembleDebug`.
+3. **La pantalla de consentimiento de OAuth de Google** está dada de alta como "RAFAQ" — es lo que ve el usuario cuando entra con Google. Consola externa; va con el resto de la fase 2.
 
 ### Fase 2 — identidad de la app · [AMBOS] · bloqueada por trabajo en consolas
 
