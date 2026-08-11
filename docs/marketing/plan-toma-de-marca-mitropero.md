@@ -59,14 +59,9 @@ Facebook · TikTok · X · LinkedIn · clase 44 del INPI · documento de titular
 
 Hay una página mínima de "próximamente" lista en `docs/marketing/landing-proximamente/index.html`, sin publicar, esperando el OK. Se publica gratis en Cloudflare Pages y las redirecciones existentes no se tocan.
 
-### [RAF] Pasarme dos datos
+### [RAF] + [FAC] Confirmar los dos destinos de correo
 
-- **Tu mail personal** → para `rafa@mitropero.com.ar`
-- **El mail de Facundo** → para `facundo@mitropero.com.ar`. Le va a llegar un mail de Cloudflare que **tiene que confirmar él**: avisale antes.
-
-### [RAF] Confirmar dónde vive el gestor de claves
-
-Se está usando **Proton Pass**, no Bitwarden. La herramienta está bien; la pregunta es de qué cuenta cuelga. Si el vault vive en el Proton **personal** de Rafael, las claves del proyecto dependen de una cuenta privada. Deberían vivir en la cuenta del proyecto (`mitropero@proton.me`) y compartirse con Facundo.
+Los mails de verificación de Cloudflare ya salieron a `ravennarafael59@gmail.com` y a `iamfadolf@gmail.com`. Es **un clic en cada casilla** y desbloquea `rafa@` y `facundo@`. Avisarle a Facundo antes: le llega un mail de un servicio que él no dio de alta y se lo puede comer el spam.
 
 ---
 
@@ -92,11 +87,13 @@ Las direcciones `hola@`, `rafa@` y `facundo@` **no se crean en Proton ni en ning
 | 9 | Poner el catch-all | [CLAUDE] | ✅ |
 | 10 | Redirigir `mitropero.ar` → `mitropero.com.ar` | [CLAUDE] | ✅ verificada |
 | 11 | **Probar mandando un mail a `hola@mitropero.com.ar`** | [RAF] | ⛔ **hacelo ahora** |
-| 12 | Agregar como destino el mail personal de Rafael | [CLAUDE] | ⛔ falta el dato |
-| 13 | Confirmar ese destino desde su casilla | [RAF] | ⛔ |
-| 14 | Agregar como destino el mail de Facundo | [CLAUDE] | ⛔ falta el dato |
-| 15 | Confirmar ese destino desde su casilla | [RAF] | ⛔ |
-| 16 | Crear las reglas de `rafa@` y `facundo@` | [CLAUDE] | ⛔ |
+| 12 | Agregar como destino `ravennarafael59@gmail.com` | [CLAUDE] | ✅ 10/08 |
+| 13 | **Confirmar ese destino** desde el Gmail de Rafael | [RAF] | ⛔ **un clic** |
+| 14 | Agregar como destino `iamfadolf@gmail.com` | [CLAUDE] | ✅ 10/08 |
+| 15 | **Confirmar ese destino** desde el Gmail de Facundo | [FAC] | ⛔ **un clic** — avisarle antes, le llega un mail de un servicio que él no dio de alta |
+| 16 | Crear las reglas de `rafa@` y `facundo@` | [CLAUDE] | ⛔ bloqueado por 13 y 15 |
+
+> Cloudflare rechaza crear la regla mientras el destino no esté verificado (`2054: Destination address is not verified`), y está bien que lo haga: si no, cualquiera podría desviar correo a una casilla ajena. Los dos mails de verificación ya salieron el 10/08.
 
 ### Las reglas que voy a crear
 
@@ -256,7 +253,7 @@ Sin sociedad, Apple y Google Play van como **individuo, a nombre de Rafael**. La
 ## 7. Seguridad de las cuentas · [RAF]
 
 - **Doble factor en todo**, y los **códigos de recuperación guardados fuera** de la casilla del proyecto. Si el segundo factor y el mail viven en el mismo teléfono, perderlo deja al proyecto afuera de todo.
-- **Gestor de claves del proyecto aparte.** Se eligió **Proton Pass** (no Bitwarden). La herramienta está bien; lo que importa es de qué cuenta cuelga el vault: tiene que ser el Proton **del proyecto** (`mitropero@proton.me`), compartido con Facundo, y **no** el Proton personal de Rafael — no por inseguro, sino porque las claves del proyecto quedarían colgando de una cuenta privada. **Pendiente de confirmar en cuál de las dos está hoy.**
+- **Gestor de claves del proyecto: ✅ resuelto.** Se usa el **Proton Pass que viene con la cuenta del proyecto** (`mitropero@proton.me`), no el Proton personal de Rafael. Es lo correcto: las claves del proyecto no cuelgan de una cuenta privada. Queda pendiente sólo **compartir el acceso con Facundo**, para que la pérdida del teléfono de uno no deje al proyecto afuera de todo.
 - Ahí van: Proton del proyecto, Cloudflare, nic.ar, y todas las redes.
 
 ### Qué dirección usar para cada cosa
@@ -291,10 +288,13 @@ Sin sociedad, Apple y Google Play van como **individuo, a nombre de Rafael**. La
 CORREO
 [x] [RAF]    Delegación cargada y propagada
 [x] [CLAUDE] Email Routing activo + hola@ + catch-all + redirección del .ar
+[x] [RAF]    Pasar el mail personal propio y el de Facundo
+[x] [CLAUDE] Dar de alta los dos destinos en Cloudflare
 [ ] [RAF]    Probar mandando un mail a hola@mitropero.com.ar
-[ ] [RAF]    Pasar el mail personal propio y el de Facundo
-[ ] [CLAUDE] Crear rafa@ y facundo@
-[ ] [RAF]    Confirmar los dos destinos desde cada casilla
+[ ] [RAF]    Confirmar el destino desde ravennarafael59@gmail.com
+[ ] [FAC]    Confirmar el destino desde iamfadolf@gmail.com
+[ ] [CLAUDE] Crear rafa@ y facundo@ (bloqueado hasta que confirmen)
+[ ] [RAF]    Compartir el vault de Proton Pass del proyecto con Facundo
 
 REDES
 [x] [RAF]    Instagram @mitropero
