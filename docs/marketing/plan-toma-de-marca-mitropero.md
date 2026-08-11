@@ -88,21 +88,23 @@ Las direcciones `hola@`, `rafa@` y `facundo@` **no se crean en Proton ni en ning
 | 10 | Redirigir `mitropero.ar` → `mitropero.com.ar` | [CLAUDE] | ✅ verificada |
 | 11 | **Probar mandando un mail a `hola@mitropero.com.ar`** | [RAF] | ⛔ **hacelo ahora** |
 | 12 | Agregar como destino `ravennarafael59@gmail.com` | [CLAUDE] | ✅ 10/08 |
-| 13 | **Confirmar ese destino** desde el Gmail de Rafael | [RAF] | ⛔ **un clic** |
+| 13 | **Confirmar ese destino** desde el Gmail de Rafael | [RAF] | ✅ 10/08 |
 | 14 | Agregar como destino `iamfadolf@gmail.com` | [CLAUDE] | ✅ 10/08 |
 | 15 | **Confirmar ese destino** desde el Gmail de Facundo | [FAC] | ⛔ **un clic** — avisarle antes, le llega un mail de un servicio que él no dio de alta |
-| 16 | Crear las reglas de `rafa@` y `facundo@` | [CLAUDE] | ⛔ bloqueado por 13 y 15 |
+| 16 | Crear la regla de `rafa@` | [CLAUDE] | ✅ 10/08 |
+| 17 | Crear la regla de `facundo@` | [CLAUDE] | ⛔ bloqueado por 15 |
+| 18 | **Probar de punta a punta**: mandar un mail a `rafa@` desde otra cuenta | [RAF] | ⛔ nunca se probó la cadena entera |
 
 > Cloudflare rechaza crear la regla mientras el destino no esté verificado (`2054: Destination address is not verified`), y está bien que lo haga: si no, cualquiera podría desviar correo a una casilla ajena. Los dos mails de verificación ya salieron el 10/08.
 
 ### Las reglas que voy a crear
 
-| Dirección | Reenvía a |
-|---|---|
-| `hola@mitropero.com.ar` | `mitropero@proton.me` |
-| `rafa@mitropero.com.ar` | mail personal de Rafael |
-| `facundo@mitropero.com.ar` | mail personal de Facundo |
-| **catch-all** (cualquier otra) | `mitropero@proton.me` |
+| Dirección | Reenvía a | Estado |
+|---|---|---|
+| `hola@mitropero.com.ar` | `mitropero@proton.me` | ✅ activa |
+| `rafa@mitropero.com.ar` | `ravennarafael59@gmail.com` | ✅ activa desde el 10/08 |
+| `facundo@mitropero.com.ar` | `iamfadolf@gmail.com` | ⛔ falta que Facundo confirme |
+| **catch-all** (cualquier otra) | `mitropero@proton.me` | ✅ activa |
 
 El catch-all evita que rebote un mail a `info@`, `ventas@` o `contacto@`. Alguien va a escribir a una de esas.
 
@@ -290,10 +292,11 @@ CORREO
 [x] [CLAUDE] Email Routing activo + hola@ + catch-all + redirección del .ar
 [x] [RAF]    Pasar el mail personal propio y el de Facundo
 [x] [CLAUDE] Dar de alta los dos destinos en Cloudflare
-[ ] [RAF]    Probar mandando un mail a hola@mitropero.com.ar
-[ ] [RAF]    Confirmar el destino desde ravennarafael59@gmail.com
+[x] [RAF]    Confirmar el destino desde ravennarafael59@gmail.com
+[x] [CLAUDE] Crear la regla de rafa@
 [ ] [FAC]    Confirmar el destino desde iamfadolf@gmail.com
-[ ] [CLAUDE] Crear rafa@ y facundo@ (bloqueado hasta que confirmen)
+[ ] [CLAUDE] Crear facundo@ (bloqueado hasta que confirme)
+[ ] [RAF]    Probar de punta a punta: mandar un mail a rafa@ desde otra cuenta
 [ ] [RAF]    Compartir el vault de Proton Pass del proyecto con Facundo
 
 REDES
