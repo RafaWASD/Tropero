@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="es-AR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Invitación — miTropero</title>
+<meta name="description" content="Abrí tu invitación a un campo en miTropero.">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<meta name="theme-color" content="#1E5A3E">
+<style>
+  :root { --bg:#FAF9F9; --surface:#F8F6F1; --primary:#1E5A3E; --primary-alt:#2E8259; --press:#184A33; --text:#0F0E0C; --muted:#5C655F; --divider:#E5E5E3; }
+  * { box-sizing:border-box; }
+  html, body { height:100%; }
+  body { margin:0; background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif; -webkit-font-smoothing:antialiased; display:flex; flex-direction:column; min-height:100svh; }
+  main { flex:1 0 auto; display:flex; flex-direction:column; justify-content:center; max-width:34rem; width:100%; margin:0 auto; padding:3rem 1.5rem 2.5rem; }
+  .wordmark { font-size:1.75rem; line-height:1.3; letter-spacing:-0.02em; margin:0 0 2rem; color:var(--primary); font-weight:700; }
+  .wordmark .mi { font-weight:300; }
+  h1 { font-size:clamp(1.6rem,6.5vw,2rem); line-height:1.3; margin:0 0 0.75rem; letter-spacing:-0.015em; }
+  .sub { font-size:1.0625rem; line-height:1.6; color:var(--muted); margin:0 0 2rem; }
+  .btn { display:block; width:100%; background:var(--primary); color:#FFFFFF; text-align:center; text-decoration:none; font-size:1.0625rem; font-weight:600; line-height:1.3; padding:1rem 1.25rem; border:none; border-radius:12px; cursor:pointer; font-family:inherit; }
+  .btn:hover { background:var(--primary-alt); }
+  .btn:active { background:var(--press); }
+  .btn:focus-visible { outline:3px solid var(--primary-alt); outline-offset:3px; }
+  .fallback { margin-top:2.5rem; padding-top:2rem; border-top:1px solid var(--divider); }
+  .fallback p { font-size:0.9375rem; line-height:1.6; color:var(--muted); margin:0 0 0.875rem; }
+  .linkbox { background:var(--surface); border:1px solid var(--divider); border-radius:10px; padding:0.875rem 1rem; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:0.8125rem; line-height:1.5; color:var(--text); word-break:break-all; margin-bottom:0.75rem; }
+  .btn-sec { background:transparent; color:var(--primary); border:1.5px solid var(--primary); font-size:0.9375rem; padding:0.7rem 1.25rem; }
+  .btn-sec:hover { background:var(--surface); color:var(--primary); }
+  .btn-sec:active { background:var(--surface); color:var(--press); }
+  .aviso { font-size:0.9375rem; line-height:1.6; color:var(--muted); background:var(--surface); border:1px solid var(--divider); border-radius:10px; padding:1rem 1.125rem; margin:0; }
+  .aviso a { color:var(--primary); }
+  [hidden] { display:none !important; }
+  footer { flex-shrink:0; border-top:1px solid var(--divider); padding:1.25rem 0; }
+  footer p { max-width:34rem; margin:0 auto; padding:0 1.5rem; font-size:0.875rem; color:var(--muted); }
+  @media (min-width:640px) { main { padding:4rem 2rem 3rem; } footer p { padding:0 2rem; } }
+</style>
+</head>
+<body>
+  <main>
+    <p class="wordmark"><span class="mi">mi</span>Tropero</p>
+    <div id="con-invitacion" hidden>
+      <h1>Te invitaron a un campo</h1>
+      <p class="sub">Abrí la invitación en la app para sumarte al equipo.</p>
+      <a class="btn" id="abrir" href="#">Abrir en la app</a>
+      <div class="fallback">
+        <p>¿No se abrió? Copiá este link y pegalo en la app, en la pantalla de <b>Invitación</b>.</p>
+        <div class="linkbox" id="link"></div>
+        <button class="btn btn-sec" id="copiar" type="button">Copiar el link</button>
+      </div>
+    </div>
+    <div id="sin-invitacion" hidden>
+      <h1>Este link no tiene una invitación</h1>
+      <p class="sub">Puede que se haya cortado al copiarlo o al pasarlo por un mensaje. Pedile a quien te invitó que te lo mande de nuevo, completo.</p>
+      <p class="aviso">Si el problema sigue, escribinos a <a href="mailto:hola@mitropero.com.ar">hola@mitropero.com.ar</a>.</p>
+    </div>
+  </main>
+  <footer><p>miTropero · Argentina</p></footer>
+<script>
+(function () {
+  'use strict';
+  var token = null;
+  try { token = new URL(window.location.href).searchParams.get('token'); } catch (e) { token = null; }
+  if (token !== null) token = token.trim();
+  var conInv = document.getElementById('con-invitacion');
+  var sinInv = document.getElementById('sin-invitacion');
+  if (!token) { sinInv.hidden = false; return; }
+  var enc = encodeURIComponent(token);
+  var linkCompleto = 'https://mitropero.com.ar/invite?token=' + enc;
+  document.getElementById('link').textContent = linkCompleto;
+  document.getElementById('abrir').setAttribute('href', 'rafq://invite?token=' + enc);
+  var btnCopiar = document.getElementById('copiar');
+  function seleccionar() {
+    var caja = document.getElementById('link');
+    var rango = document.createRange();
+    rango.selectNodeContents(caja);
+    var sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(rango);
+    btnCopiar.textContent = 'Copialo a mano';
+  }
+  btnCopiar.addEventListener('click', function () {
+    var listo = function () {
+      btnCopiar.textContent = 'Copiado';
+      setTimeout(function () { btnCopiar.textContent = 'Copiar el link'; }, 2000);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(linkCompleto).then(listo, seleccionar);
+    } else { seleccionar(); }
+  });
+  conInv.hidden = false;
+})();
+</script>
+</body>
+</html>
