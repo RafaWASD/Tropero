@@ -394,7 +394,19 @@ Sin dependencias externas y sin riesgo: el nombre de la app en la config de Expo
 Cambiar el identificador `ar.rafq.app` **crea una app nueva** a los ojos de las tiendas. Arranca por afuera del código, en este orden:
 
 1. [x] [RAF] Confirmar el identificador definitivo → **`com.mitropero.app`**.
-2. [RAF] Apple: App IDs nuevos, **Services ID nuevo**, regenerar el client secret, reconfigurar Supabase Auth en dev y prod con el orden exacto de Client IDs.
+2. [RAF] **Apple** — valores exactos, verificados contra la consola el 12/08:
+
+   | Qué | Valor |
+   |---|---|
+   | App ID (hecho ✅) | Description `miTropero` · Bundle **Explicit** `com.mitropero.app` |
+   | App ID | Description `miTropero dev` · Bundle **Explicit** `com.mitropero.app.dev` |
+   | Capabilities en **los dos** | `Sign In with Apple` + `Push Notifications` |
+   | Services ID | Description `miTropero Web` · Identifier `com.mitropero.app.web` |
+   | Config del Services ID | Primary App ID `com.mitropero.app` · Domain `xrhlxxdnfzvdnztacofj.supabase.co` · Return URL `https://xrhlxxdnfzvdnztacofj.supabase.co/auth/v1/callback` |
+
+   **La Key `.p8` no se toca**: es de la cuenta, no del Services ID, y se reusa. Tampoco hay que regenerar el client secret a mano — Supabase lo arma solo con la Key; lo único que se actualiza ahí es el campo del Services ID.
+
+   > **Esto lo tiene que hacer Rafael a mano.** Se intentó automatizarlo con el navegador el 12/08 y **no se pudo**: la página de capabilities tiene 168 filas y el renderer se cuelga, así que no hay forma de verificar qué queda tildado antes de enviar. Y enviar a ciegas crea un identificador permanente con las capabilities equivocadas. La consola de Google Cloud, en cambio, sí renderiza bien.
 3. [RAF] Google: OAuth Clients nuevos para iOS y Android (el de Android va atado a package + SHA-1).
 4. [RAF] App Store Connect: **app nueva**. La actual (`ascAppId 6797347994`) quedó atada al bundle viejo y ese dato no se puede cambiar nunca.
 5. [CLAUDE] Recién entonces, tocar `app.config.ts` y `eas.json`.
