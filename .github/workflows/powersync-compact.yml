@@ -1,0 +1,38 @@
+name: Compact PowerSync (DEV)
+
+# Compacta el historial de operaciones de los buckets de la instancia DEV de PowerSync para reclamar
+# "Data Hosted" (free tier = 500 MB). El historial NO es el estado actual: crece con cada write a las
+# tablas sincronizadas (INSERT/UPDATE/DELETE → WAL → buckets) y NO baja al borrar filas. En DEV el churn
+# de los tests (check.mjs crea/borra miles de fixtures) + los re-seeds de la demo (La Facundina) lo inflan.
+# Compactar consolida ese historial SIN perder el estado actual; el único costo es que los devices de dev
+# re-sincronizan los buckets afectados una vez.
+#
+# Por qué una Action y no "compactar a mano cada tanto": nadie se acuerda y no está automatizado. Esto sí.
+#
+# Requiere el secret PS_ADMIN_TOKEN (Personal Access Token de management de la cuenta PowerSync,
+# dashboard.powersync.com/account/access-tokens). El repo DEBE ser privado: el token maneja TODA la cuenta.
+# Solo toca DEV (--instance-id explícito); PROD es otra instancia y no se compacta acá (bajo churn + no
+# interrumpir el sync del beta).
+
+on:
+  schedule:
+    - cron: '0 5 * * 0'   # domingos 05:00 UTC ≈ 02:00 AR (semanal; el churn de DEV se acumula despacio)
+  workflow_dispatch: {}
+
+jobs:
+  compact:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4   # deja powersync/cli.yaml presente (coherente con --instance-id DEV)
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # Compacta SOLO la instancia DEV (6a260fd035ca576ca0dad778, ver powersync/README.md). El --instance-id
+      # explícito evita cualquier ambigüedad de auto-discovery. --timeout en minutos que el CLI espera a que
+      # la compactación termine (0 = indefinido). El token va por env (nunca por argv).
+      - name: Compact DEV instance
+        run: npx --yes powersync@0.10.0 compact --instance-id 6a260fd035ca576ca0dad778 --timeout 60
+        env:
+          PS_ADMIN_TOKEN: ${{ secrets.PS_ADMIN_TOKEN }}
