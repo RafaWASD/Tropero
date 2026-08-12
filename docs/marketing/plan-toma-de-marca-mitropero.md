@@ -325,7 +325,12 @@ REDES
 [x] [RAF]    LinkedIn /company/mitropero — verificado, responde
 [x] [RAF]    Página de Facebook creada (id 1252709604596699)
 [x] [RAF]    Business Manager — se creó solo junto con la página
-[ ] [RAF]    Facebook: sacar el apodo "(miTropero)", es redundante
+[ ] [RAF]    Facebook: sacar el apodo "(miTropero)" — INTENTADO 3 VECES SIN EXITO
+             Vive en Informacion > Datos personales > Nombres > "Otros nombres",
+             cargado como tipo "Nombre con titulo". El dialogo de confirmacion
+             cierra sin error pero la entrada sigue ahi al recargar: Meta no
+             aplica el borrado y no dice por que. Reintentar en unas horas, o
+             desde la app del celular, que a veces usa otro camino.
 [ ] [RAF]    Facebook: asegurar el usuario facebook.com/mitropero (en minúscula)
 [ ] [RAF]    Facebook: sumar a Facundo como administrador
 [ ] [RAF]    Facebook: conectar la cuenta de Instagram a la página
