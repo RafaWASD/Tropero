@@ -10,7 +10,7 @@ Documento autocontenido: se puede leer sin haber visto ningún otro archivo del 
 > | **42** — SaaS y desarrollo de software | ✅ **Presentada. En trámite** |
 > | **9** — software y aplicaciones descargables | ✅ **Presentada. En trámite** |
 > | **35** — gestión y datos | ❌ **Descartada**: hay un "EL TROPERO" vivo en esa clase (ver el recuadro rojo más abajo) |
-> | **44** — servicios veterinarios y de cría | 🟡 **Recomendada, falta un dato**: en qué clase está el "Tropero" de Mendoza (cuchillos). Si no es la 44, se presenta |
+> | **44** — servicios veterinarios y de cría | ❌ **DESCARTADA el 12/08.** No protege nada que hoy se venda. Ver abajo |
 >
 > **Seguimiento**: revisar el portal cada dos semanas. Si el INPI observa algo y no se contesta en plazo, la solicitud se cae y se pierde lo pagado.
 >
@@ -81,7 +81,25 @@ Las marcas no se registran "para todo": se registran por **clases** de la Clasif
 | **35** | Publicidad; gestión de negocios; **sistematización y análisis de datos en bases informáticas** | ❌ **Descartada.** Hay un "EL TROPERO" vivo acá desde abril de 2025 — ver el recuadro |
 | **44** | Servicios médicos y **veterinarios**; agricultura, **cría de animales** | 🟡 **A tomar, si la clase está limpia.** Ver abajo |
 
-> **La recomendación sobre la 44 cambió, y conviene decir por qué.** Al principio decía que no, por riesgo de oposición: existen *El Tropero S.A.*, *El Tropero S.R.L.* y una marca de carne española *Tropero*, y todas viven cerca de las clases de animales, carne y cría (29, 31, 35, 44).
+> ### ❌ Veredicto final (12/08/2026): la 44 NO se presenta
+>
+> Esta recomendación cambió **dos veces**, así que vale dejar escrito el razonamiento completo y no sólo la conclusión.
+>
+> **Por qué no.** La 44 son servicios veterinarios y de cría **prestados**. miTropero no vende eso: vende software (clase 42) y una app descargable (clase 9), las dos ya presentadas. Tres cosas que pesaron:
+>
+> 1. **"Es la clase defensiva más cercana disponible" no es un argumento.** Fue el que usé para recomendarla cuando se cayó la 35, y confunde disponibilidad con utilidad.
+> 2. **Que Facundo sea veterinario no es que la empresa preste servicios veterinarios.** Yo mismo mezclé las dos cosas al argumentar a favor.
+> 3. **Una clase sin usar se cae a los 5 años** por falta de uso. Una marca defensiva que nunca se ejerce es un escudo de papel, que además se paga y se renueva.
+>
+> Y sigue sin resolverse en qué clase está el "Tropero" de Mendoza. Pagar ~AR$ 39.000 para meterse al lado de un homónimo activo, en una clase que no se usa, es comprarse una oposición.
+>
+> **Esa plata queda reservada** para un abogado si aparece una oposición en la 42 o la 9, que son las que sí protegen lo que se vende.
+>
+> **Qué lo daría vuelta**: que algún día se facture asesoramiento **como servicio** —el Plan Pro vendido como consultoría y no como software—. Ahí la 44 pasa a proteger algo real y se presenta.
+>
+> ---
+>
+> **El historial del análisis, para no repetirlo:** al principio decía que no, por riesgo de oposición: existen *El Tropero S.A.*, *El Tropero S.R.L.* y una marca de carne española *Tropero*, y todas viven cerca de las clases de animales, carne y cría (29, 31, 35, 44).
 >
 > Lo que dio vuelta el análisis, con la investigación de Facundo del 08/08: **El Tropero S.A. no presenta balances desde el año 2000** y en el INPI no aparece nada vivo de esos titulares. Un homónimo inerte no se opone. Súmese que **Facundo es veterinario** —así que un planteo de "no usan la clase" es débil— y que **la 35 quedó bloqueada**, con lo cual la 44 pasó a ser la clase defensiva más cercana a nuestro mercado que todavía está disponible.
 >

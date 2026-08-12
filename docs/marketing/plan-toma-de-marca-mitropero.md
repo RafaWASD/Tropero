@@ -1,6 +1,6 @@
 # Plan de toma de marca — miTropero
 
-**Actualizado: 11/08/2026** · Documento vivo. Refleja lo hecho, lo que falta, y quién hace cada cosa.
+**Actualizado: 12/08/2026** · Documento vivo. Refleja lo hecho, lo que falta, y quién hace cada cosa.
 
 > **Convención de responsable**
 > **[RAF]** — lo hace Rafael a mano (requiere clave fiscal, tarjeta, un teléfono, o un clic de verificación).
@@ -44,14 +44,14 @@
 | **Marca en INPI** | ✅ `MITROPERO` denominativa, clases **42** y **9** — en trámite |
 | **Manual de marca** | ✅ Nombre real puesto en las 36 secciones · `manual-de-marca.html` / `.pdf` |
 | **Landing "próximamente"** | ✅ **Publicada** el 11/08 en `mitropero.com.ar`, con la página `/invite` |
-| **Redes** | ✅ Instagram, TikTok, X, Threads y YouTube · ⛔ falta Facebook y LinkedIn |
+| **Redes** | ✅ Instagram, TikTok, X, Threads, YouTube y LinkedIn · ⛔ falta sólo Facebook |
 | **Builds para testers** | ✅ iOS build 5 en TestFlight (abre bien en iPhone) · APK de Android con link de instalación |
 
 ### ❌ Todavía no arrancado
 
-Página de Facebook · LinkedIn · clase 44 del INPI · documento de titularidad con Facundo · cuentas de desarrollador · fase 2 del rebrand.
+Página de Facebook · documento de titularidad con Facundo · cuenta de Google Play · fase 2 del rebrand.
 
-*(TikTok, X, Threads y YouTube quedaron tomadas el 11/08. Falta reclamar el identificador `@mitropero` en YouTube: crear el canal no lo reserva.)*
+*(Al 12/08 responden `@mitropero` en Instagram, TikTok, Threads, X, YouTube y LinkedIn — verificado desde afuera. La única que falta es la página de Facebook, trabada por el límite de creación de páginas de Meta.)*
 
 ---
 
@@ -317,10 +317,9 @@ REDES
 [x] [RAF]    Threads @mitropero — verificado, responde
 [x] [RAF]    X — creada; falta confirmar que el usuario quedó "mitropero"
 [x] [RAF]    YouTube: canal creado
-[ ] [RAF]    YouTube: RECLAMAR el identificador @mitropero (hoy da 404, está libre)
-[ ] [RAF]    YouTube: confirmar que el canal está en la cuenta del PROYECTO
+[x] [RAF]    YouTube @mitropero — verificado, responde
+[x] [RAF]    LinkedIn /company/mitropero — verificado, responde
 [ ] [RAF]    Página de Facebook + Business Manager + Facundo como admin
-[ ] [RAF]    LinkedIn (defensiva)
 [ ] [RAF]    Poner el link a mitropero.com.ar en la bio de cada red
 
 MARCA — detalle completo en guia-inpi-marca-mitropero.md
@@ -329,8 +328,8 @@ MARCA — detalle completo en guia-inpi-marca-mitropero.md
 [x] [RAF]    Presentar MITROPERO denominativa, clase 42 — EN TRÁMITE
 [x] [RAF]    Presentar MITROPERO denominativa, clase 9 — EN TRÁMITE
 [—] [AMBOS]  Clase 35 DESCARTADA: hay un "EL TROPERO" vivo desde abril 2025
-[ ] [FAC]    Averiguar EN QUÉ CLASE está el "Tropero" de Mendoza (cuchillos)
-[ ] [RAF]    Si no está en la 44, presentar la clase 44 (~AR$ 39.000)
+[—] [AMBOS]  Clase 44 DESCARTADA (12/08): no protege nada que hoy se venda.
+             La plata queda para un abogado si hay oposición en la 42 o la 9
 [ ] [RAF]    Seguimiento quincenal en el portal — los plazos son perentorios
 [ ] [AMBOS]  Firmar la hoja de titularidad de activos
 
