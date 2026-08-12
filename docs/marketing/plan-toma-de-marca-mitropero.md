@@ -44,14 +44,18 @@
 | **Marca en INPI** | ✅ `MITROPERO` denominativa, clases **42** y **9** — en trámite |
 | **Manual de marca** | ✅ Nombre real puesto en las 36 secciones · `manual-de-marca.html` / `.pdf` |
 | **Landing "próximamente"** | ✅ **Publicada** el 11/08 en `mitropero.com.ar`, con la página `/invite` |
-| **Redes** | ✅ Instagram, TikTok, X, Threads, YouTube y LinkedIn · ⛔ falta sólo Facebook |
+| **Redes** | ✅ Instagram, TikTok, X, Threads, YouTube, LinkedIn y Facebook (con Business Manager) |
 | **Builds para testers** | ✅ iOS build 5 en TestFlight (abre bien en iPhone) · APK de Android con link de instalación |
 
 ### ❌ Todavía no arrancado
 
-Página de Facebook · documento de titularidad con Facundo · cuenta de Google Play · fase 2 del rebrand.
+Documento de titularidad con Facundo · cuenta de Google Play · fase 2 del rebrand.
 
-*(Al 12/08 responden `@mitropero` en Instagram, TikTok, Threads, X, YouTube y LinkedIn — verificado desde afuera. La única que falta es la página de Facebook, trabada por el límite de creación de páginas de Meta.)*
+*(Al 12/08 están las siete: Instagram, TikTok, Threads, X, YouTube, LinkedIn y Facebook.)*
+
+> **Facebook no acepta la grafía `miTropero`.** Su política de nombres de página prohíbe la "capitalización inusual" y normaliza sola a **`MiTropero`** al guardar, aunque se cargue bien — se comprobó en vivo y **no hay opción en la interfaz que lo evite**: la regla se aplica del lado del servidor. Se acepta y se documenta como excepción en el manual de marca; no vale gastar tiempo peleándolo. Lo que sí se controla es el **nombre de usuario**, que va en minúscula.
+>
+> Los trucos para forzarlo —un carácter Unicode parecido a la `m`, un espacio de ancho cero— **están descartados**: rompen la búsqueda, los lectores de pantalla y el copiar y pegar, y violan la política, que es motivo de suspensión de la página.
 
 ---
 
@@ -319,7 +323,12 @@ REDES
 [x] [RAF]    YouTube: canal creado
 [x] [RAF]    YouTube @mitropero — verificado, responde
 [x] [RAF]    LinkedIn /company/mitropero — verificado, responde
-[ ] [RAF]    Página de Facebook + Business Manager + Facundo como admin
+[x] [RAF]    Página de Facebook creada (id 1252709604596699)
+[x] [RAF]    Business Manager — se creó solo junto con la página
+[ ] [RAF]    Facebook: sacar el apodo "(miTropero)", es redundante
+[ ] [RAF]    Facebook: asegurar el usuario facebook.com/mitropero (en minúscula)
+[ ] [RAF]    Facebook: sumar a Facundo como administrador
+[ ] [RAF]    Facebook: conectar la cuenta de Instagram a la página
 [ ] [RAF]    Poner el link a mitropero.com.ar en la bio de cada red
 
 MARCA — detalle completo en guia-inpi-marca-mitropero.md
