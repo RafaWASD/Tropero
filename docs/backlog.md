@@ -1723,3 +1723,26 @@ barrido, no un fix de dos líneas.
 Al achicar el gate del chip de crash a `development`, ese perfil pasó a ser **el único** que lo muestra — y es justo el que se instala bajo el id de producción.
 
 **No se arregló a propósito**: cambiar `APP_VARIANT` cambia qué app instala el dev client y se cruza con la fase 2 del rebrand, que ya va a mover el identificador. Se resuelve ahí, en un solo movimiento.
+
+---
+
+## 🔴 "Eliminar mi cuenta" no borra ningún dato personal
+
+**Abierto 2026-08-12**, al relevar qué hace falta para las tiendas. Verificado en el código, no supuesto.
+
+`delete_account_tx` (`supabase/migrations/0058_delete_account_rpc.sql`) hace **dos** cosas: `update public.users set deleted_at = now()` y `update public.user_roles set active = false`. La Edge Function además revoca la sesión y banea al usuario 100 años.
+
+**Lo que NO hace**: tocar `public.user_private`, que es donde viven **`email` y `phone`**. Tampoco anonimiza `user_roles.member_name`. Después de que alguien elimina su cuenta, su mail, su teléfono y su nombre siguen ahí, indefinidamente.
+
+**Por qué importa, en dos planos:**
+
+1. **Google Play lo exige.** Toda app que permita crear cuenta debe ofrecer eliminación de la cuenta **y de los datos asociados**, y publicar una URL donde pedirlo. Se admite retener lo que haya obligación legal de conservar, pero hay que declararlo y acotarlo. "Conservamos tu mail y tu teléfono para siempre" no entra en esa excepción.
+2. **Es un problema propio, no sólo de la ficha.** La retención por trazabilidad de SENASA justifica conservar los **eventos de los animales**; no justifica el mail ni el teléfono de la persona. Los registros de animales referencian el `user_id`, no el mail.
+
+**El soft-delete en sí está bien y hay que conservarlo**: `users.deleted_at` preserva la integridad referencial de la trazabilidad. El defecto es que la anonimización nunca se hizo.
+
+**Cómo se cierra**: que `delete_account_tx` además borre o anonimice la fila de `user_private` y el `member_name`. Es una migración chica. Antes hay que decidir dos cosas que no son técnicas:
+- **Qué exige retener SENASA exactamente y por cuánto tiempo** — es una pregunta para Facundo, no para el código.
+- Si el mail se **borra** o se **hashea** (hashearlo permitiría detectar un re-alta de la misma persona; borrarlo es más limpio).
+
+**Bloquea**: la página pública de eliminación de cuenta y la política de privacidad, que no se pueden escribir con honestidad hasta que esto esté definido. Y bloquea el envío a Google Play.
