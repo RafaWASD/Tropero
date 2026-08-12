@@ -423,10 +423,20 @@ Cambiar el identificador `ar.rafq.app` **crea una app nueva** a los ojos de las 
 | # | Freno | Estado medido | Quién |
 |---|---|---|---|
 | 1 | **El identificador se congela al publicar** | Decidido: `com.mitropero.app`. Requiere la fase 2 **antes** de publicar | [AMBOS] |
-| 2 | **PROD no es un ambiente funcional** | 35 tablas pero **0 usuarios, 0 animales** y **1 sola Edge Function** (`health`) de 9. Faltan invitar, aceptar, borrar cuenta, cambiar rol. Faltan los secrets `RESEND_API_KEY` y `RAFAQ_ENV` | [CLAUDE] |
+| 2 | **PROD: casi resuelto** | ✅ Las 8 Edge Functions que faltaban desplegadas el 12/08 y **verificadas respondiendo**: `health` devuelve `env: production` y las protegidas dan 401. `RAFAQ_ENV` seteado. ⛔ Falta el esquema (ver abajo) y `RESEND_API_KEY` | [CLAUDE] + [RAF] |
 | 3 | **El ícono es el template de Expo** | Verificado a ojo: la "A" azul con las guías de construcción dibujadas. Es lo que se publicaría hoy | Pilar |
 | 4 | **No hay política de privacidad** | Cero apariciones en el repo. Los dos la exigen como URL pública. Google pide además el formulario de Data Safety y una **URL web de eliminación de cuenta** | [CLAUDE] |
 | 5 | **Google Play: 12 testers × 14 días** | La cuenta **no existe** (USD 25). Como cuenta personal, Google exige testing cerrado con 12 testers durante 14 días corridos antes de habilitar producción | [RAF] |
+
+### 🔴 A PROD le faltan tres tablas
+
+`health` reporta `schema_version 0125`: PROD se quedó cinco migraciones atrás de DEV. Le faltan **`rodeo_campaign_snapshots`**, **`rodeo_campaign_snapshot_animals`** y **`rodeo_membership_history`** — las de **campañas congeladas** (ADR-032).
+
+El código desplegado es el actual. Si alguna función toca esas tablas, **falla en PROD y anda en DEV**, que es el modo de falla más difícil de diagnosticar. Se cierra con `apply-all-migrations.mjs` y la guarda `RAFAQ_CONFIRM_PROD`. **Pendiente del OK de Rafael**: aplicar migraciones a producción es otra categoría que desplegar funciones.
+
+### `RESEND_API_KEY` no está en PROD
+
+Sin esa clave, lo único que falla es el mail de "aceptaron tu invitación"; el resto anda. **No se copió la de DEV a propósito**: lo correcto es una clave propia de producción en Resend, para poder revocar una sin tumbar la otra.
 
 ### La trampa de secuencia
 
