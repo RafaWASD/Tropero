@@ -423,16 +423,18 @@ Cambiar el identificador `ar.rafq.app` **crea una app nueva** a los ojos de las 
 | # | Freno | Estado medido | Quién |
 |---|---|---|---|
 | 1 | **El identificador se congela al publicar** | Decidido: `com.mitropero.app`. Requiere la fase 2 **antes** de publicar | [AMBOS] |
-| 2 | **PROD: casi resuelto** | ✅ Las 8 Edge Functions que faltaban desplegadas el 12/08 y **verificadas respondiendo**: `health` devuelve `env: production` y las protegidas dan 401. `RAFAQ_ENV` seteado. ⛔ Falta el esquema (ver abajo) y `RESEND_API_KEY` | [CLAUDE] + [RAF] |
+| 2 | **PROD: ✅ RESUELTO el 12/08** | Las 9 Edge Functions desplegadas y **verificadas respondiendo** (`health` da `env: production`, las protegidas dan 401), y el esquema al día: `schema_version 0130` y listado de tablas **idéntico a DEV**, comparado con un diff. Queda sólo `RESEND_API_KEY` | [CLAUDE] |
 | 3 | **El ícono es el template de Expo** | Verificado a ojo: la "A" azul con las guías de construcción dibujadas. Es lo que se publicaría hoy | Pilar |
 | 4 | **No hay política de privacidad** | Cero apariciones en el repo. Los dos la exigen como URL pública. Google pide además el formulario de Data Safety y una **URL web de eliminación de cuenta** | [CLAUDE] |
 | 5 | **Google Play: 12 testers × 14 días** | La cuenta **no existe** (USD 25). Como cuenta personal, Google exige testing cerrado con 12 testers durante 14 días corridos antes de habilitar producción | [RAF] |
 
-### 🔴 A PROD le faltan tres tablas
+### ✅ El desfase de esquema de PROD, cerrado el 12/08
 
-`health` reporta `schema_version 0125`: PROD se quedó cinco migraciones atrás de DEV. Le faltan **`rodeo_campaign_snapshots`**, **`rodeo_campaign_snapshot_animals`** y **`rodeo_membership_history`** — las de **campañas congeladas** (ADR-032).
+`health` reportaba `schema_version 0125`: PROD estaba cinco migraciones atrás y le faltaban `rodeo_campaign_snapshots`, `rodeo_campaign_snapshot_animals` y `rodeo_membership_history` — las de **campañas congeladas** (ADR-032). El riesgo concreto era el peor modo de falla que existe: **una función que anda en DEV y revienta en PROD.**
 
-El código desplegado es el actual. Si alguna función toca esas tablas, **falla en PROD y anda en DEV**, que es el modo de falla más difícil de diagnosticar. Se cierra con `apply-all-migrations.mjs` y la guarda `RAFAQ_CONFIRM_PROD`. **Pendiente del OK de Rafael**: aplicar migraciones a producción es otra categoría que desplegar funciones.
+Se aplicaron las 5 faltantes (0126 a 0130) con `apply-all-migrations.mjs --env prod`, que lleva ledger idempotente. Resultado verificado: `schema_version 0130` y tablas idénticas a DEV.
+
+> **Ojo para la próxima**: el script exige `SUPABASE_PROJECT_REF_PROD` en `.env.local` y ahí no está — se pasó por variable de entorno en la corrida. Si se va a repetir seguido, conviene agregarlo al archivo.
 
 ### `RESEND_API_KEY` no está en PROD
 
