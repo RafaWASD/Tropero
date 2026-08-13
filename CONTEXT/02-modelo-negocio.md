@@ -60,6 +60,24 @@ El manual de token de SENASA dice que el mecanismo permite que *"otras aplicacio
 
 ### Pricing
 
+> # ⚠️ ESTOS NÚMEROS NO ESTÁN APROBADOS
+>
+> **Marcado el 13/08/2026.** Rafael confirmó que **este modelo de precios lo generó un agente en una
+> sesión anterior sin consultarlo**. Nunca fue una decisión suya. Estaba escrito acá —en CONTEXT, que
+> está por encima de las specs en la jerarquía de verdad del repo— con formato de decisión cerrada, y
+> **se citó como doctrina al menos una vez** antes de que se detectara.
+>
+> **Separá los datos de la conclusión.** La distribución del rodeo de más abajo **sí tiene fuente real
+> y verificable** (MAGyP, Anexo II, datos SIGSA/SENASA al 31/12/2023) y es lo más valioso de este
+> archivo. Lo que nadie aprobó es el precio que se apoyó encima de esos datos.
+>
+> **La dirección que Rafael quiere** (13/08/2026, todavía sin cerrar): estrategia de precio bajo para
+> ganar mercado. Dos o tres planes, el más caro **USD 9,90/mes** como techo, intermedios cerca de USD 5.
+> Prueba gratuita de **3 meses**. Decisiones abiertas: el eje que separa los planes (por cabezas o por
+> funcionalidad), si sobrevive el "gratis hasta 50", y el descuento de la modalidad anual.
+>
+> **Hasta que se cierre, no tomar los números de abajo como vigentes.**
+
 **USD 300/año de base + USD 0,80 por cabeza. Tope: USD 3.500/año.**
 **Gratis hasta 50 cabezas.**
 
