@@ -51,9 +51,12 @@ muchas piezas.
 
 ### La 16 debería ser la primera, no la última
 
-**Es el único argumento del plan que hoy se puede respaldar de verdad.** El offline-first está
-construido y probado; casi todo lo demás son afirmaciones que todavía no se sostienen con datos
-propios.
+Hay que separar dos cosas que al principio mezclé:
+
+- **Es el único argumento del plan que hoy podemos respaldar con producto.** El offline-first está
+  construido y probado; casi todo lo demás son afirmaciones que todavía no se sostienen con datos
+  propios. Eso sigue siendo cierto y es el motivo para ponerla primero.
+- **No es exclusivo del mercado.** Bovitag lo dice en su portada.
 
 > **Corregido el 13/08/2026 tras relevar a Bovitag.** Acá decía que el argumento *"esto anda sin
 > señal"* era territorio libre. **Es falso**: está en la portada de Bovitag con esas palabras
