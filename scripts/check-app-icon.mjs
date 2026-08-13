@@ -47,7 +47,7 @@ const CHEQUEOS = [
     archivo: 'android-icon-foreground.png',
     lado: null, // Expo acepta varias medidas; lo que importa es la zona segura
     alfaProhibida: false,
-    porQue: 'Es la capa de FRENTE y va sobre transparente. Todo lo legible tiene que caber en el 66% central o el recorte circular se lo come.',
+    porQue: 'Es la capa de FRENTE y va sobre transparente. Todo lo legible tiene que caber en el circulo seguro (66dp de 108dp = 61% del ancho) o el recorte circular se lo come.',
   },
   {
     archivo: 'android-icon-background.png',
@@ -113,7 +113,7 @@ console.log(`
 Lo que este script NO puede verificar, y hay que mirar a ojo:
   · Que a 48 píxeles se distinga. Es el tamaño real en un teléfono.
   · Que en negro plano se reconozca. Si no, el logo se apoya en el color y no en la forma.
-  · Que la capa de frente respete el 66% central del recorte circular.
+  · Que la capa de frente respete el circulo seguro (61% del ancho).
 Para eso: node scripts/preview-app-icon.mjs (genera las tres pruebas en una página).`);
 
 if (fallas) {

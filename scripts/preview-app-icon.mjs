@@ -5,7 +5,10 @@
 //
 //   1. A 48 px — el tamaño real en un teléfono. Si ahí no se distingue, no sirve.
 //   2. En negro plano — si sin color no se reconoce, el logo se apoya en el color, no en la forma.
-//   3. Recortado en círculo, con la zona segura del 66% marcada — es como lo recorta Android.
+//   3. Recortado en círculo, con la zona segura marcada — es como lo recorta Android.
+//      Ojo: la zona segura es un círculo de 66dp sobre un lienzo de 108dp, o sea el 61% del ancho.
+//      Decir "66%" es confundir dp con porcentaje y dibuja el círculo MÁS GRANDE que la realidad,
+//      que es el lado peligroso del error: avisa de menos.
 //
 // Uso:  node scripts/preview-app-icon.mjs [carpeta-de-salida]
 // Deja un PNG para mirar. Requiere Chrome instalado (mismo camino que la generación de PDFs).
@@ -43,7 +46,7 @@ const mono = dataUri('android-icon-monochrome.png');
 const bloqueAdaptive = frente && fondo
   ? `<div class="caso">
        <h2>3 · Recorte circular de Android, con la zona segura</h2>
-       <p>Todo lo legible tiene que caber dentro del círculo punteado (66% central). Lo que quede afuera
+       <p>Todo lo legible tiene que caber dentro del círculo punteado. Es un círculo de 66dp sobre un lienzo de 108dp: <b>61% del ancho</b>, no 66%. Lo que quede afuera
           se corta en los teléfonos que recortan en círculo, y no se descubre hasta publicar.</p>
        <div class="fila">
          <div class="pieza">
@@ -90,7 +93,7 @@ const html = `<!doctype html><html lang="es-AR"><head><meta charset="utf-8"><sty
   .adaptive img { position:absolute; inset:0; width:100%; height:100%; }
   .redondo { border-radius:50%; }
   .gota { border-radius:50% 50% 50% 12%; }
-  .zona-segura { position:absolute; left:17%; top:17%; width:66%; height:66%;
+  .zona-segura { position:absolute; left:19.4%; top:19.4%; width:61.1%; height:61.1%;
                  border:2px dashed #C0451F; border-radius:50%; }
 </style></head><body>
   <h1>miTropero — pruebas del ícono</h1>
