@@ -345,7 +345,14 @@ MARCA — detalle completo en guia-inpi-marca-mitropero.md
 [—] [AMBOS]  Clase 44 DESCARTADA (12/08): no protege nada que hoy se venda.
              La plata queda para un abogado si hay oposición en la 42 o la 9
 [ ] [RAF]    Seguimiento quincenal en el portal — los plazos son perentorios
-[ ] [AMBOS]  Firmar la hoja de titularidad de activos
+[ ] [AMBOS]  Firmar la hoja de titularidad de activos (con Facundo)
+[ ] [RAF]    Cerrar con Pilar: precio CERRADO por entregable (no por horas),
+             cuántas rondas de revisión entran, y qué se debe por lo ya hecho
+[ ] [RAF]    Pilar: CESIÓN DE DERECHOS del logo por escrito + archivos fuente.
+             No es formalismo: para registrar la marca MIXTA en el INPI hay que
+             ser dueño del logo, y un acuerdo de palabra no sirve ahí ni ante un
+             comprador. Pedirlo ahora es un trámite; pedirlo en seis meses parece
+             desconfianza
 
 WEB
 [x] [CLAUDE] Armar la landing "próximamente" (sin publicar, esperando OK)
