@@ -77,6 +77,8 @@ Ninguno de los otros modelos relevados menciona modo teclado. Así que el `hid-w
 
 ## Qué falta
 
-- **HR0, XRP2 y TRAZA 2 PRO**: sin relevar.
-- **Confirmar el iAP del RS420** leyendo el manual. El PDF no tiene capa de texto extraíble y ManualsLib devuelve 403.
-- **Ningún dato de cuota de mercado.** No existe un ranking publicado de "los más usados en Argentina": lo de arriba es el surtido de los distribuidores, que es una señal de lo que se vende, no una medición.
+1. **Qué es SIGTRAZA.** Lo primero, y por lejos. Ver arriba.
+2. **Confirmar el modo HID del HR0** con Gallagher, no con un revendedor. Decide si el `hid-wedge` de ADR-024 tiene con qué hablar.
+3. **El XRP2**: sin relevar. Es panel con antena, no bastón de mano, así que es el menos urgente.
+4. **Confirmar el iAP del RS420** leyendo el manual. El PDF no tiene capa de texto extraíble y ManualsLib devuelve 403.
+5. **Ningún dato de cuota de mercado.** No existe un ranking publicado de "los más usados en Argentina". Lo de arriba es el **surtido de los distribuidores**, que es una señal de lo que se vende, no una medición. Si hace falta el dato duro, la vía es preguntarle a un distribuidor cuánto vende de cada uno.
