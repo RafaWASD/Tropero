@@ -61,6 +61,35 @@ Tres fundadores —Luca, Fede y Maggie—, con hacienda en **Córdoba y Entre R�
 
 **Y hay un diferencial disponible hoy, sin depender de nada: la prueba de 3 meses.** Ellos piden una llamada de demostración. Contra eso, *"probalo tres meses vos solo, sin tarjeta"* es una ventaja concreta y verificable — no una promesa a futuro.
 
+## Su app en las tiendas
+
+| | |
+|---|---|
+| App Store | **v1.0.3** · publicada **22/05/2026**, actualizada 29/07 · 44 MB · gratis · iOS 15.1+ |
+| Cuenta de desarrollador | **Individual**, a nombre de uno de los fundadores — no una empresa |
+| Valoraciones | **2**, con 5 estrellas |
+| Google Play | No se encontró la app |
+
+### 🔴 El claim de "todos los bastones" no se sostiene con lo que dice su propia app
+
+La web dice *"compatible con TODOS los bastones: desde el más barato (USD 35) hasta el más caro (USD 2.500)"*. Las notas de la versión 1.0.3 en la App Store dicen otra cosa:
+
+> "Mejoras en la conexión con lectores y balanzas **Gallagher**."
+
+Nombran **una marca**. La distancia entre el claim de la portada y lo que declaran en la tienda es de ellos.
+
+### Y corrige una creencia nuestra que estaba condicionando el roadmap
+
+Se venía asumiendo que **iOS exige llaves MFi por fabricante para cualquier bastón**. Es incompleto:
+
+- **Bluetooth Classic SPP** → sí exige MFi (el accesorio lleva el chip de autenticación de Apple y la app declara el protocolo). **El Allflex RS420 es este caso**, y por eso está trabado.
+- **BLE** → cualquier app se conecta por CoreBluetooth. **Sin MFi, sin llaves, sin acuerdo con nadie.** Los bastones baratos suelen ser BLE.
+- **HID teclado** → el bastón se emparejea como teclado Bluetooth y tipea el EID en un campo enfocado. **Cero integración.**
+
+**Esto ya está resuelto en el repo**: `ADR-024` eligió el camino HID sin MFi para iOS y está especificado en `R8.1` de la spec 04. Lo que lo frena es el **gate `R8.7`** — probarlo en un iPhone real antes de implementar.
+
+**Conclusión**: Bovitag no resolvió algo que nosotros no podemos. Nuestro bloqueo es una prueba en device, no un muro de licencias.
+
 ## Lo que falta verificar
 
 1. **Los precios de los tramos de arriba.** Definen si la tesis de "somos más baratos" se sostiene o no.
