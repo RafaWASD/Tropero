@@ -22,9 +22,9 @@ Distribuidores identificados: ADN Ganadería (oficial de Gallagher, Datamars, Al
 | **Tru-Test XRS2** | Clásico, **sin chip MFi** | ❌ | ídem |
 | **Tru-Test SRS2i** | **MFi** | ✅ vía **MFi** | iLivestock: emparejan por el **Accessory Picker** de iOS |
 | **Tru-Test XRS2i** | **MFi** | ✅ vía **MFi** | ídem |
-| **Gallagher HR0** | ❓ | ❓ | **Pendiente** |
-| **Tru-Test XRP2** | ❓ | ❓ | **Pendiente** (es panel con antena, no bastón de mano) |
-| **TRAZA 2 PRO** | ❓ | ❓ | **Pendiente** — aparece en Don Agro, posible marca local |
+| **Gallagher HR0** | Bluetooth · **posible modo HID** | ✅ | Gallagher declara en los datos de su ficha `Compatible with: Android` y `Compatible with: iOS`. El **modo HID/teclado** aparece en descripciones de revendedores, **sin confirmar del fabricante** |
+| **TRAZA 2 PRO** | Bluetooth · USB 2.4G | ✅ | Ficha del distribuidor: *"compatible con Windows, Android, IOS"*. HDX y FDX-B. **Compatible con la app oficial de SENASA, SIGTRAZA** |
+| **Tru-Test XRP2** | ❓ | ❓ | **Pendiente** — es panel con antena, no bastón de mano |
 
 ### La regla que ordena todo
 
@@ -46,13 +46,30 @@ En Gallagher el corte es por generación: **hasta el HR5 estándar es Android so
 - **BLE** (HR5 v3) → CoreBluetooth, sin licencias, sin acuerdos. Cualquiera lo puede hacer.
 - **MFi / iAP** (RS420, SRS2i, XRS2i) → hay que declarar la cadena de protocolo del fabricante. **Es una gestión comercial**, no un problema técnico.
 
+## 🔴🔴 El hallazgo más importante no es un bastón: SENASA tiene app propia
+
+La ficha del TRAZA 2 PRO dice que es *"compatible con la aplicación oficial de SENASA **SIGTRAZA**"*.
+
+**Eso hay que investigarlo antes que cualquier otra cosa de este documento.** Si SENASA ofrece una app
+gratuita que lee caravanas y hace las declaraciones, entonces:
+
+- El "trámites de SENASA integrados" de Bovitag compite con una herramienta oficial y gratuita.
+- La feature soñada de declaración automática compite con lo mismo.
+- Y cambia la pregunta de posicionamiento entera: no alcanza con ser mejor que Bovitag; hay que ser
+  mejor que **lo gratis que da el Estado**.
+
+**No está verificado qué hace SIGTRAZA exactamente** — puede ser sólo declaración y no gestión de
+rodeo, que sería una diferencia enorme. Pero es la incógnita de mayor impacto que apareció hoy.
+
 ## 🔴 Un problema para ADR-024 que hay que mirar
 
 `ADR-024` eligió el **HID keyboard-wedge** como el camino iOS-sin-MFi, y `R8` de la spec 04 lo especifica esperando el gate físico `R8.7`.
 
-**Ninguno de los bastones relevados del mercado argentino declara un modo teclado/HID.** Ni Allflex, ni Gallagher, ni Tru-Test lo mencionan en sus fichas ni en la documentación de los integradores.
+**Apareció un candidato: el Gallagher HR0.** Descripciones de revendedores dicen que se emparejea *"via HID mode, acting as a sort of keyboard"*, tipeando el número en el campo de texto que esté enfocado. **No lo pude confirmar en la documentación de Gallagher** — su ficha oficial confirma la compatibilidad con iOS pero no describe el mecanismo.
 
-Esto no prueba que no exista —los lectores suelen tener menús de configuración con más opciones que la ficha comercial— pero **abre la posibilidad de que el adaptador HID no tenga con qué hablar en este mercado**. Si es así, el gate `R8.7` no va a fallar por iOS: va a fallar por falta de un bastón que haga HID.
+Si se confirma, es una noticia muy buena y algo irónica: **el bastón más barato del catálogo es el que destraba iOS gratis**, sin MFi y sin acuerdo con nadie.
+
+Ninguno de los otros modelos relevados menciona modo teclado. Así que el `hid-wedge` tendría **un solo dispositivo conocido** con el que hablar en este mercado, y conviene saberlo antes de construirlo.
 
 **Lo que hay que verificar, en este orden:**
 1. Si algún bastón del mercado tiene modo HID en su menú de configuración (requiere el aparato en la mano).
