@@ -55,8 +55,13 @@ muchas piezas.
 construido y probado; casi todo lo demás son afirmaciones que todavía no se sostienen con datos
 propios.
 
-Y resuelve un problema aparte: el competidor **Bovitag** usa una paleta muy parecida. Ninguna paleta
-diferencia en una categoría donde todo el mundo es verde — *"esto anda donde no tenés señal"* sí.
+> **Corregido el 13/08/2026 tras relevar a Bovitag.** Acá decía que el argumento *"esto anda sin
+> señal"* era territorio libre. **Es falso**: está en la portada de Bovitag con esas palabras
+> ("diseñada offline-first", "funciona sin señal ni wifi"). Demostrarlo en video sigue valiendo
+> —mostrar pesa más que decir— pero es **paridad, no diferenciación**.
+>
+> El diferencial que sí está disponible hoy y nadie más ofrece: **la prueba de 3 meses**. Bovitag pide
+> una llamada de demostración. Ver `competidor-bovitag.md`.
 
 Las otras más fuertes: **7, 10, 11 y 12**, porque no dependen de nada pendiente y son las que se
 comparten. Y la **15**, la mejor relación credibilidad/esfuerzo que hay hoy.
