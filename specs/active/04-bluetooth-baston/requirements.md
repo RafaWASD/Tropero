@@ -280,6 +280,27 @@ ráfaga, el orden de los microtasks no está atado al orden de las lecturas).
 
 > **GATED.** Dirección elegida para el camino iOS-sin-MFi (ADR-024 §4), **pero su implementación NO arranca** hasta pasar el gate físico en iPhone real (ver R8.7 + Preguntas abiertas). El Council fue enfático: no fijar arquitectura sobre un mecanismo no ejecutado. NO es GATT; NO usa `react-native-ble-plx`. Estos requirements describen el comportamiento esperado del adaptador **una vez destrabado**; hasta entonces no se implementa código de este adaptador.
 
+> ### 🔴 El HID NO cubre al RS420 (constatado el 13/08/2026)
+>
+> Este bloque puede leerse como si el HID resolviera **iOS entero**. No es así, y la excepción es
+> justamente el bastón que más nos importa.
+>
+> Allflex declara que el RS420 **conecta con apps de iPhone y Android** *(leído en su ficha de
+> producto)*, y una fuente secundaria sin confirmar indica que cumple **SPP + iAP** — iAP es el
+> protocolo de accesorios de Apple, o sea **MFi**. Ni la ficha ni la búsqueda mencionan un modo
+> teclado/HID en el RS420.
+>
+> **Consecuencia**: el `hid-wedge` sirve para bastones BLE/HID —típicamente los baratos— pero **el
+> RS420 en iOS va por iAP**. Ese camino exige declarar la cadena de protocolo del fabricante en
+> `UISupportedExternalAccessoryProtocols`, y el protocolo está registrado a nombre de Allflex.
+>
+> **Traducido**: el bloqueo del RS420 en iOS **no es técnico, es comercial**. Nadie le pidió todavía a
+> Allflex la cadena de protocolo ni la autorización. Es lo que figura como "MFi, gestión de Facundo".
+>
+> **Sin verificar**: si el RS420 tiene algún modo de salida alternativo que la ficha comercial no
+> publicita. El manual en PDF no tiene capa de texto extraíble y ManualsLib devuelve 403. Sólo se
+> resuelve con el aparato en la mano.
+
 **R8.1** El sistema deberá exponer (una vez pasado el gate de R8.7) un `adapter-hid-wedge` que implemente la interfaz `StickAdapter` (R11) capturando el EID que el bastón **tipea como teclado Bluetooth del SO** en un `TextInput` de "scan" enfocado, en iOS y Android, sin MFi.
 
 **R8.2** El sistema deberá capturar los dígitos tipeados por el bastón HID y el **terminador (Enter)** en el campo de scan, ensamblar la línea y entregarla al contrato de ingesta para que `isValidTag` (R1.3) la valide. (El framing de `parseRs420Line` puede no aplicar si el HID tipea solo los 15 dígitos: el adaptador define su propia captura — R11.4.)
