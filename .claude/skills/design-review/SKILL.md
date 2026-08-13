@@ -58,7 +58,7 @@ Estos tres se le escaparon al leader en sesión 26 (CustomFieldSheet) y Raf los 
   - 🟡 **IMPORTANTE pero no crítico (mixto)** — pantallas que A VECES se acceden desde la manga pero otras veces desde un lugar cómodo (oficina, sillón, escritorio): home, reportes, "Mis campos", configuración, alta de establecimiento. Acá manga-friendly **se aplica igual** (es buena práctica general y el contexto de uso es variable), pero hay más margen para densidad de info, más opciones por pantalla y refinamiento visual. No sacrificar operabilidad, pero no está todo en juego en cada toque.
   - **Regla de clasificación**: ante cualquier pantalla nueva, primero preguntarse *"¿esto se va a usar en la manga sí o sí?"*. Si la respuesta es sí → 🔴, aplicar el estándar máximo. En las 🔴 **no hay chance de que se nos pase por alto**: es el corazón del producto.
 - **"El mejor en el primer try"**: cuidar especialmente los estados de alto impacto (vacío, error, sync offline, lectura BLE fallida) — ahí se gana o pierde la percepción de calidad.
-- **El vet es el canal de adquisición**: nunca degradar la experiencia del vet.
+- **El vet es credibilidad, no el canal de adquisición** (cambió el 13/08/2026): nunca degradar su experiencia, pero una pantalla que sólo le sirve al vet no tiene prioridad automática sobre una del productor.
 - **Design system (v4)**: base BLANCO NEUTRO (`#FFFFFF`/`#faf9f9`, sin tinte) · verde botella `#1e5a3e` (primary/activo) · bone `#F8F6F1` (cards) · terracota `#c84a2c` (alertas) · Inter (700/600/500/400). Componentes = deliverable (ADR-023): **cero color/spacing hardcodeado** en pantallas, todo vía tokens.
 - **Referencias**: Mercado Pago (patrón cultural argentino, `design/inspiration/06-argentino/`) + Mobbin (medir patrones reales, no estimar).
 

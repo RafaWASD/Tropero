@@ -49,7 +49,7 @@ utils/           → helpers puros
 
 5. **Una decisión por pantalla.** El operario en manga no tiene tiempo ni paciencia para formularios largos. Velocidad operativa > elegancia visual (`CLAUDE.md` principio 4).
 
-6. **El veterinario es el canal de adquisición.** Funcionalidades que les sirvan a vets no se degradan por motivos comerciales (`CLAUDE.md` principio 5).
+6. **El veterinario es credibilidad, no el canal de adquisición.** La apuesta de crecimiento es contenido en redes; el vet sigue siendo usuario, prueba social y red propia de Facundo. Una funcionalidad que sólo le sirve al vet **no tiene prioridad automática**, pero su experiencia no se degrada por motivos comerciales (`CLAUDE.md` principio 5, cambiado el 13/08/2026).
 
 ## Flujo de datos típico (lectura)
 

@@ -90,7 +90,11 @@ Ver `docs/adr/ADR-002-tech-stack.md` para detalles de la decisión.
 
 4. **Velocidad operativa por encima de elegancia visual.** El operador trabaja con una mano, a veces con barro o sangre. Botones grandes, fonts grandes, una decisión por pantalla.
 
-5. **El veterinario es el canal de adquisición.** Funcionalidades que les sirvan a vets generan adopción. Nunca degradar la experiencia del vet por motivos comerciales.
+5. **La adquisición se juega en el contenido; el veterinario es credibilidad, no el canal.** *(Cambiado el 13/08/2026 — antes este principio decía "el veterinario es el canal de adquisición".)*
+
+   La apuesta de crecimiento es **contenido de alto volumen en redes**, con foco en Reels. El veterinario sigue importando por tres motivos distintos, y conviene no mezclarlos: es **usuario** del producto, es la **prueba social más creíble** que hay hoy (una persona real del rubro hablando con su voz), y Facundo trae **su propia red**.
+
+   **La consecuencia práctica, que es el motivo del cambio**: una funcionalidad que sólo le sirve al vet **ya no tiene prioridad automática** por ser "el canal". Compite por mérito como cualquier otra. Lo que sí se mantiene: no degradar la experiencia del vet por motivos comerciales.
 
 6. **Multi-tenant desde día 1.** Todo dato tiene contexto de `establishment_id`. Nunca asumas que solo hay un campo.
 

@@ -19,6 +19,12 @@ La diferencia entre **dueño** y **operario** sí es relevante: el dueño tiene 
 
 El **veterinario** es un caso especial: tiene cuenta propia, trabaja en múltiples campos, factura aparte, y es el principal canal de adquisición del producto.
 
+> **Nota del 13/08/2026 — cambió la premisa, no la decisión.** El principio 5 de `CLAUDE.md` se
+> reescribió: la apuesta de adquisición pasó a ser **contenido en redes**, y el vet quedó como usuario,
+> prueba social y red propia de Facundo. **El modelo de roles de este ADR no cambia** — el vet sigue
+> necesitando cuenta propia y multi-campo por cómo trabaja, no por ser el canal. Lo que se debilita es
+> el argumento de prioridad: una feature exclusiva del vet ya no se justifica sola por adquisición.
+
 ## Decisión
 
 **Tres roles**:
