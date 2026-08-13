@@ -286,3 +286,50 @@ El manual de gestión de token dice literal que el mecanismo *"permite crear una
 - Gestión de token: https://www.argentina.gob.ar/sites/default/files/2026/01/gestion_de_token_para_vincular_la_app_sigbiotraza_con_sigsa.pdf
 - Manual DT-e autogestor SIGSA (mismo directorio de SENASA)
 - Prensa del memorándum: https://www.noti-rio.com.ar/2026/07/revolucion-digital-en-los-corrales-el-senasa-le-pone-fin-al-cierre-manual-de-transito-de-terneros/
+
+---
+
+## 10. Biotraza (KYAS SRL) y la calidad real de SIGBIOTRAZA en iOS (13/08/2026)
+
+> **Motivo**: apareció de rebote relevando bastones (`docs/bastones-mercado-argentino.md`). Dos hechos nuevos que tocan el posicionamiento de 08. No cambia el diseño ni el formato del archivo.
+
+### 10.1 El TXT ya lo regala un privado — muere el diferencial, no la feature
+
+**Biotraza**, de **KYAS SRL** (opera desde 2019, web + iOS + Android), tiene una **versión gratuita** cuya tercera viñeta es, literal:
+
+> *"Generación de planilla oficial PDF y TXT (Resolución 841/2025)"*
+
+Más *"Registro individual con lector RFID (compatible con cualquier dispositivo)"* y *"Carga masiva desde Excel"*. Su tier pago ("Pro") suma *"manejo sanitario completo"*, *"datos productivos (alimentación, peso, genética)"* y *"reportes avanzados"*. **Precio del Pro: no publicado.**
+
+Distribución por **colegios veterinarios**: presentado en la asamblea de la **FeVA**, publicado por el **Colegio Veterinario de Río Negro** a sus matriculados.
+
+**Qué corrige de este documento**: el §7 ("Posicionamiento: alternativa a SIGBIOTRAZA") queda incompleto. No competimos sólo contra la app del Estado: **hay un privado dando gratis el mismo archivo**.
+
+**Qué NO cambia**: el argumento de `requirements.md` línea 9 —*"para quien ya carga en RAFAQ y quiere cumplir sin re-cargar en otra app"*— resiste, porque contra Biotraza el costo también es salir de la app y re-cargar. **El valor de 08 nunca fue el archivo; es no tener que salir.**
+
+**Consecuencia práctica, y es la que importa**: 08 deja de ser feature-imán y pasa a ser **higiene** — su ausencia da motivo para irse, su presencia no da motivo para venir. **No usarla como argumento de venta ni cobrarla por separado.** Ver `docs/marketing/competidor-biotraza.md`.
+
+**Asimetría a favor, sin confirmar**: ni el tier gratis ni el Pro de Biotraza mencionan **reproducción** (servicio, tacto, preñez, CCL, índices de destete). Para cría —nuestro ICP— es el corazón, y la feature 07 está cerrada. Falta ver el Pro por dentro antes de darlo por bueno.
+
+### 10.2 SIGBIOTRAZA en iOS está roto, y es evidencia sobre el muro de MFi
+
+El §8.4 registró que la app llegó a iOS. Faltaba la calidad: **1,8 de 5** en la App Store. Las tres reseñas visibles (enero 2026), textuales:
+
+> *"No hay manera de conectar el bastón y realizar lecturas. Ojalá que el equipo actualice la app y le den continuidad… estamos muy entusiasmados, pero por ahora, esta es la triste realidad. Sin uso."* (23/1)
+>
+> *"Al poner los dos cuit q pide, el teclado tapa el aceptar y no se puede avanzar"* (17/1)
+>
+> *"No me deja leer el código para cerrar el dte, no te explica nada."* (28/1)
+
+Coherente con el manual, que exige el lector *"vinculado al teléfono mediante Bluetooth"* y cuya guía de problemas dice *"asegúrese de que no esté conectado a otro teléfono"* — síntoma de **Bluetooth clásico**, no BLE.
+
+**Lecturas**:
+- El muro de iOS + bastón **no es una carencia nuestra**: es del mercado, y el Estado tampoco lo resolvió. Refuerza la conclusión de `docs/bastones-mercado-argentino.md` de ir por **BLE** y no por HID.
+- La fricción de SIGBIOTRAZA en la manga (§9.6) es **peor de lo estimado** en iOS: ahí directamente no lee.
+- La segunda reseña es el bug de teclado-tapa-el-botón que ya está codificado en nuestra skill de design-review. Vale como recordatorio de contra qué barra se compite.
+
+### 10.3 Fuentes
+
+- Biotraza: https://biotraza.com/ganaderia/ · App Store `id1471542186` (KYAS SRL) · Play `srl.kyas.fixbean`
+- Colegio Veterinario de Río Negro: https://www.colvetrionegro.com.ar/disponibilidad-de-plataforma-gratuita-biotraza-resolucion-senasa-841-2025/
+- Reseñas SIGBIOTRAZA iOS: https://apps.apple.com/ar/app/sigbiotraza/id6756583501

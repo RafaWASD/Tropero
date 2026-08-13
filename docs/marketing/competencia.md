@@ -108,6 +108,7 @@ Rasgos de RAFAQ: ① cría bovina extensiva · ② móvil offline-first · ③ R
 | **AgriWebb** | AU | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | por cabeza (DSE) |
 | **Vacuno** | **AR** | ✅ | ✅ | ✅ | ❌ | ✅ | 🟡 | ✅ | ❌ | ✅ | por cabeza (ARS) |
 | **Control Ganadero** | LatAm | 🟡 | ✅ | ✅ | ✅ | 🟡 | ❌ | ✅ | ✅ | ✅ | por cuenta, freemium |
+| **Biotraza** | **AR** | 🟡 | 🟡 | ✅ | ✅ | ❓ | ✅ | ❓ | ✅ | ✅ | freemium (Pro a cotizar) |
 | iRancho | BR | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ❓ | ✅ | ❌ | por cabeza |
 | iLivestock | UK | 🟡 | ✅ | ✅ | ✅ | 🟡 | ✅ | ❌ | ❌ | ❌ | **£300/año por campo** |
 | Herdwatch | IE/UK | 🟡 | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ | ❌ | por granja |
@@ -181,6 +182,7 @@ Lo que sí compra es **gestión productiva que dialogue con el sistema oficial**
 | Sygma Sistemas | R$ 270/mes + R$ 45/mes por propiedad adicional | por establecimiento |
 | Herdwatch | Promo 6 meses €79/£79/USD 49 · lista a cotización | por granja |
 | AgriWebb | Tarifa por DSE **no pública** (calculadora JS). Add-ons: AU$300/año pastoreo, AU$300/año movimientos, PastureKey desde US$1.000/año. Terciarias: ~AU$34/48/61 por mes | por cabeza vía DSE (1 bovino = 8), **promedio de 12 meses**, sin permanencia |
+| **Biotraza (AR)** | **Versión Base SENASA gratis** (alta RFID + Excel + planilla oficial PDF/TXT) · Pro **no publicado**, "Solicitar Demo" | freemium |
 | **RAFAQ (propuesto)** | USD 300 + USD 0,80/cabeza, tope 3.500, gratis ≤50 | por campo |
 
 **Recalibración del ancla**: seguimos siendo caros contra Control Ganadero (USD 130/año), pero el rango de la categoría es más ancho de lo que creíamos — iLivestock cobra £300/año por campo y Performance Beef USD 2.340/año. Nuestro USD 860 en un campo de 500 madres queda en el medio del rango internacional, no en el techo.
@@ -190,6 +192,7 @@ Lo que sí compra es **gestión productiva que dialogue con el sistema oficial**
 ## Qué falta averiguar
 
 1. **Vacuno**: cuántos clientes tiene, hace cuánto opera, si levantó inversión. Es la incógnita más importante del documento.
+1. bis. **Biotraza (KYAS SRL)** — entró tarde a esta grilla, el 13/08/2026, y no pasó por el relevamiento de tres pasadas como el resto. Regala gratis el TXT oficial que construye la spec 08 y llega por colegios veterinarios. Ficha completa y qué falta averiguarle: `competidor-biotraza.md`.
 2. **Digirodeo**: precio exacto de sus tres niveles.
 3. **Control Ganadero en Argentina**: precio local y cuántos de esos 22.712 ganaderos son argentinos.
 4. **Comitiva Gestão** (Brasil): anuncia en Meta pero no tiene huella pública verificable. Se resuelve entrando al anuncio y viendo el dominio de destino.

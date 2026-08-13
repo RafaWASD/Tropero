@@ -46,20 +46,47 @@ En Gallagher el corte es por generación: **hasta el HR5 estándar es Android so
 - **BLE** (HR5 v3) → CoreBluetooth, sin licencias, sin acuerdos. Cualquiera lo puede hacer.
 - **MFi / iAP** (RS420, SRS2i, XRS2i) → hay que declarar la cadena de protocolo del fabricante. **Es una gestión comercial**, no un problema técnico.
 
-## 🔴🔴 El hallazgo más importante no es un bastón: SENASA tiene app propia
+## Lo del "SIGTRAZA" de la ficha: falsa alarma mía
 
-La ficha del TRAZA 2 PRO dice que es *"compatible con la aplicación oficial de SENASA **SIGTRAZA**"*.
+La ficha del TRAZA 2 PRO dice que es *"compatible con la aplicación oficial de SENASA **SIGTRAZA**"*, y
+acá lo marqué como la incógnita más grande del relevamiento. **Estaba equivocado: no era una
+incógnita.**
 
-**Eso hay que investigarlo antes que cualquier otra cosa de este documento.** Si SENASA ofrece una app
-gratuita que lee caravanas y hace las declaraciones, entonces:
+La app se llama **SIGBIOtraza** y el proyecto ya la tenía relevada desde la sesión 16, con manual leído
+y todo, en `specs/active/08-export-sigsa/research-findings.md`. La spec 08 existe **precisamente** para
+convivir con ella. Lo que la ficha llama "SIGTRAZA" es el nombre mal escrito por el revendedor.
 
-- El "trámites de SENASA integrados" de Bovitag compite con una herramienta oficial y gratuita.
-- La feature soñada de declaración automática compite con lo mismo.
-- Y cambia la pregunta de posicionamiento entera: no alcanza con ser mejor que Bovitag; hay que ser
-  mejor que **lo gratis que da el Estado**.
+Lo que ya estaba documentado y sigue valiendo, en una línea: SIGBIOtraza **captura y nada más** —lee
+caravanas por Bluetooth y arma una planilla que se termina de procesar en SIGSA web, desde una
+computadora—. No gestiona rodeo: por animal sólo guarda **raza, mes/año de nacimiento y sexo**. No
+compite con miTropero; compite con el paso de tipear números.
 
-**No está verificado qué hace SIGTRAZA exactamente** — puede ser sólo declaración y no gestión de
-rodeo, que sería una diferencia enorme. Pero es la incógnita de mayor impacto que apareció hoy.
+Los formatos de archivo de SIGSA (alta `RFID-SEXO-RAZA-MM/AAAA;`, TRI separada por espacios,
+reidentificación `ORIGINAL-NUEVO;`) están todos en la spec 08, verificados contra los manuales
+oficiales. No hay que volver a buscarlos.
+
+### Lo que sí es nuevo, y es sobre bastones
+
+**La app oficial de SENASA tampoco puede conectar un bastón en iPhone.** Está en las reseñas públicas
+de la App Store, con **1,8 de 5** estrellas:
+
+> *"No hay manera de conectar el bastón y realizar lecturas. Ojalá que el equipo actualice la app y le
+> den continuidad… estamos muy entusiasmados, pero por ahora, esta es la triste realidad. Sin uso."*
+> — reseña del 23 de enero
+
+Y el manual oficial pide, como requisito previo, que el lector esté *"encendido y vinculado al teléfono
+mediante Bluetooth"*, con este ítem en la solución de problemas: *"¿El lector RFID no envía datos?
+Asegúrese de que no esté conectado a otro teléfono"* — que es el síntoma clásico del **Bluetooth
+clásico**, no de BLE.
+
+**Por qué importa**: el muro de iOS no es una carencia de miTropero. Es del mercado, y **el Estado
+también se lo comió**. Sirve para dos cosas concretas:
+
+1. **Deja de ser una vergüenza a esconder.** Que la app oficial esté en 1,8 estrellas por esto mismo
+   convierte "en iPhone anda con estos bastones y con estos no" en un dato honesto que nadie más está
+   dando, no en una excusa.
+2. **Refuerza que el camino es BLE, no HID.** Si SENASA con presupuesto estatal no logró que el
+   Bluetooth clásico funcione en iOS, es porque no se puede: iOS no habla SPP sin MFi. Ver abajo.
 
 ## 🔴 Un problema para ADR-024 que hay que mirar
 
@@ -77,8 +104,7 @@ Ninguno de los otros modelos relevados menciona modo teclado. Así que el `hid-w
 
 ## Qué falta
 
-1. **Qué es SIGTRAZA.** Lo primero, y por lejos. Ver arriba.
-2. **Confirmar el modo HID del HR0** con Gallagher, no con un revendedor. Decide si el `hid-wedge` de ADR-024 tiene con qué hablar.
-3. **El XRP2**: sin relevar. Es panel con antena, no bastón de mano, así que es el menos urgente.
-4. **Confirmar el iAP del RS420** leyendo el manual. El PDF no tiene capa de texto extraíble y ManualsLib devuelve 403.
-5. **Ningún dato de cuota de mercado.** No existe un ranking publicado de "los más usados en Argentina". Lo de arriba es el **surtido de los distribuidores**, que es una señal de lo que se vende, no una medición. Si hace falta el dato duro, la vía es preguntarle a un distribuidor cuánto vende de cada uno.
+1. **Confirmar el modo HID del HR0** con Gallagher, no con un revendedor. Decide si el `hid-wedge` de ADR-024 tiene con qué hablar. Es lo primero.
+2. **El XRP2**: sin relevar. Es panel con antena, no bastón de mano, así que es el menos urgente.
+3. **Confirmar el iAP del RS420** leyendo el manual. El PDF no tiene capa de texto extraíble y ManualsLib devuelve 403.
+4. **Ningún dato de cuota de mercado.** No existe un ranking publicado de "los más usados en Argentina". Lo de arriba es el **surtido de los distribuidores**, que es una señal de lo que se vende, no una medición. Si hace falta el dato duro, la vía es preguntarle a un distribuidor cuánto vende de cada uno.
