@@ -20,6 +20,7 @@ import {
   buildUploadRejectedPayload,
   buildBleBreadcrumb,
   buildNavigationBreadcrumb,
+  buildCaptureTags,
   UPLOAD_REJECTED_EVENT,
 } from './payloads';
 
@@ -51,11 +52,17 @@ export function wrapRoot<P extends object>(Component: ComponentType<P>): Compone
   return Sentry.wrap(Component as ComponentType<Record<string, unknown>>) as ComponentType<P>;
 }
 
-export function captureExceptionSafe(error: unknown, hint?: { mechanism?: string }): void {
+export function captureExceptionSafe(
+  error: unknown,
+  hint?: { mechanism?: string; requestId?: string },
+): void {
   try {
+    // Tags POR-CAPTURA (no setTag global): mechanism + request_id de correlación (no-PII, spec 23).
+    // Builder puro (payloads.ts), testeado en payloads.test.ts → esta es la MISMA función que produce el tag.
+    const tags = buildCaptureTags(hint);
     Sentry.captureException(
       error,
-      hint?.mechanism ? { tags: { mechanism: hint.mechanism } } : undefined,
+      Object.keys(tags).length > 0 ? { tags } : undefined,
     );
   } catch {
     /* best-effort: el reporte nunca rompe el flujo del operario. */

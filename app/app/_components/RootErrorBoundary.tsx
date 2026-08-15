@@ -15,7 +15,10 @@ import { Text, YStack } from 'tamagui';
 
 import { Button } from '@/components';
 import { isDevCrashEnabled } from '@/utils/dev-crash-gate';
+import { newRequestId } from '@/utils/request-id';
 import { captureExceptionSafe } from '@/services/observability/sentry';
+
+import { SupportCodeRow } from './SupportCodeRow';
 
 /**
  * Fallback presentacional es-AR (R2.2). Exportado para que el spike de captura (Gate 2.5) muestre EL MISMO
@@ -23,7 +26,14 @@ import { captureExceptionSafe } from '@/services/observability/sentry';
  * `fontSize="$8"` — "Algo salió mal" tiene DESCENDENTE (la `g`) y Tamagui no aplica el lineHeight del token
  * con `fontSize` suelto → sin esto la `g` se recorta (regla de clase del repo).
  */
-export function RootErrorBoundaryFallback({ onRetry }: { onRetry: () => void }) {
+export function RootErrorBoundaryFallback({
+  onRetry,
+  supportCode,
+}: {
+  onRetry: () => void;
+  /** Código de soporte (requestId del crash, taggeado en Sentry). Si viene, se muestra bajo el copy (R5.3). */
+  supportCode?: string;
+}) {
   const insets = useSafeAreaInsets();
   return (
     <YStack
@@ -59,6 +69,13 @@ export function RootErrorBoundaryFallback({ onRetry }: { onRetry: () => void }) 
           Se produjo un error inesperado. Podés reintentar; si vuelve a pasar, cerrá y volvé a abrir la app.
         </Text>
       </YStack>
+      {/* Código de soporte (R5.3): DEBAJO del copy, ARRIBA de Reintentar. El requestId correlaciona con el
+          tag de Sentry aun sin fila de audit (un crash de render no escribe DB). */}
+      {supportCode ? (
+        <YStack width="100%" maxWidth={360}>
+          <SupportCodeRow supportCode={supportCode} />
+        </YStack>
+      ) : null}
       <YStack width="100%" maxWidth={360}>
         <Button variant="primary" fullWidth onPress={onRetry}>
           Reintentar
@@ -120,6 +137,8 @@ interface RootErrorBoundaryProps {
 
 interface RootErrorBoundaryState {
   hasError: boolean;
+  /** requestId generado en componentDidCatch → código de soporte del fallback + tag de Sentry (R5.1). */
+  requestId?: string;
 }
 
 export class RootErrorBoundary extends React.Component<RootErrorBoundaryProps, RootErrorBoundaryState> {
@@ -134,19 +153,25 @@ export class RootErrorBoundary extends React.Component<RootErrorBoundaryProps, R
   }
 
   componentDidCatch(error: Error): void {
+    // R5.1/R5.2 — el id se genera ACÁ (getDerivedStateFromError no tiene el error a mano y el id no depende
+    // del error). setState en componentDidCatch es válido → re-render con el código a la vista. El MISMO
+    // requestId va como tag de Sentry, así el código que dicta el usuario correlaciona con el evento.
+    const requestId = newRequestId();
+    this.setState({ requestId });
     // R2.5 — reporte best-effort (no-op en web/E2E por el wrapper platform-split). El `mechanism` distingue
     // este boundary del eco que `captureConsole` sube del console.error que React emite del mismo crash.
-    captureExceptionSafe(error, { mechanism: 'RootErrorBoundary' });
+    captureExceptionSafe(error, { mechanism: 'RootErrorBoundary', requestId });
   }
 
   reset(): void {
-    // R2.3 — resetea el boundary y re-monta el árbol (children remontan limpios).
-    this.setState({ hasError: false });
+    // R2.3 — resetea el boundary y re-monta el árbol (children remontan limpios). Se limpia el requestId para
+    // que un crash posterior genere un código nuevo (no arrastra el anterior).
+    this.setState({ hasError: false, requestId: undefined });
   }
 
   render(): ReactNode {
     if (this.state.hasError) {
-      return <RootErrorBoundaryFallback onRetry={this.reset} />;
+      return <RootErrorBoundaryFallback onRetry={this.reset} supportCode={this.state.requestId} />;
     }
     // R2.4 — passthrough sin error. El trigger dev-only va como sibling DENTRO del boundary.
     return (

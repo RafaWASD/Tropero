@@ -30,6 +30,7 @@ import { useHardwareBack, useKeyboardAwareBottomInset } from '@/hooks';
 import { KeyboardAvoidingShell } from '@/components/KeyboardAvoidingShell';
 import { buttonA11y, labelA11y } from '@/utils/a11y';
 import { cargaBackAction } from '@/utils/maniobra-back';
+import { newRequestId } from '@/utils/request-id';
 import {
   fetchAnimalDetail,
   fetchRodeoCategoryCatalog,
@@ -532,6 +533,8 @@ export default function ManiobraCarga() {
       capturingRef.current = true;
       // Re-intento: limpiamos cualquier error previo al arrancar un nuevo intento de captura.
       setCaptureError(null);
+      // Correlación client-only con Sentry (spec 23): un requestId por acción de guardar la maniobra.
+      const requestId = newRequestId();
       try {
         // ¿La maniobra YA tenía un evento PERSISTIDO? (corrección desde el resumen, R5.9) → UPDATE; si no →
         // INSERT (1ra captura). Una captura previa `skipped` NO contó como persistida (placeholder M3).
@@ -638,7 +641,7 @@ export default function ManiobraCarga() {
         // placeholder/skipped → no cuenta; una maniobra multi-write = UN solo evento). Prop { type } = tipo
         // de la maniobra (no-PII). No-op en web/E2E. Best-effort: nunca bloquea el avance.
         if (res.value.persisted) {
-          captureDomainEvent(DOMAIN_EVENTS.maniobraGuardada, { type: maneuver });
+          captureDomainEvent(DOMAIN_EVENTS.maniobraGuardada, { type: maneuver, request_id: requestId });
         }
         // Recién con el write local CONFIRMADO guardamos en el mapa local (resumen + corrección) y avanzamos.
         setCaptured((c) => ({ ...c, [maneuver]: value }));

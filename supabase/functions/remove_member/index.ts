@@ -6,7 +6,7 @@
 // Input: { user_id, establishment_id }
 // Output: { ok: true }
 
-import { handleOptions } from '../_shared/cors.ts';
+import { serveEf } from '../_shared/serve.ts';
 import { jsonError, jsonOk, serverError } from '../_shared/errors.ts';
 import { createAdminClient, createUserClient } from '../_shared/supabase.ts';
 import { HttpError, requireOwnerOf, requireUser } from '../_shared/auth.ts';
@@ -16,10 +16,7 @@ type Body = {
   establishment_id?: unknown;
 };
 
-Deno.serve(async (req: Request) => {
-  const preflight = handleOptions(req);
-  if (preflight) return preflight;
-
+serveEf('remove_member', async (req: Request, ctx) => {
   if (req.method !== 'POST') {
     return jsonError(405, 'method_not_allowed', 'Solo POST.');
   }
@@ -29,7 +26,7 @@ Deno.serve(async (req: Request) => {
     const user = await requireUser(userClient);
     // spec 18 (Opción A): admin client con el ACTOR real = user.id del JWT validado (el OWNER que remueve),
     // NUNCA del body. El header X-Rafaq-Actor viaja en el UPDATE deactivate de user_roles.
-    const adminClient = createAdminClient(user.id);
+    const adminClient = createAdminClient(user.id, ctx.requestId);
 
     const body = (await req.json().catch(() => ({}))) as Body;
     const targetUserId = typeof body.user_id === 'string' ? body.user_id : '';

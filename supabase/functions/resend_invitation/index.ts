@@ -10,7 +10,7 @@
 // Input:  { invitation_id }
 // Output: { token, accept_url, expires_at }
 
-import { handleOptions } from '../_shared/cors.ts';
+import { serveEf } from '../_shared/serve.ts';
 import { jsonError, jsonOk, serverError } from '../_shared/errors.ts';
 import { createAdminClient, createUserClient } from '../_shared/supabase.ts';
 import { HttpError, requireOwnerOf, requireUser } from '../_shared/auth.ts';
@@ -20,17 +20,14 @@ type Body = { invitation_id?: unknown };
 // se reinicia la expiración a 72h desde ahora.
 const INVITATION_TTL_HOURS = 72;
 
-Deno.serve(async (req: Request) => {
-  const preflight = handleOptions(req);
-  if (preflight) return preflight;
-
+serveEf('resend_invitation', async (req, ctx) => {
   if (req.method !== 'POST') {
     return jsonError(405, 'method_not_allowed', 'Solo POST.');
   }
 
   try {
     const userClient = createUserClient(req);
-    const adminClient = createAdminClient();
+    const adminClient = createAdminClient(undefined, ctx.requestId);
     const user = await requireUser(userClient);
 
     const body = (await req.json().catch(() => ({}))) as Body;

@@ -17,15 +17,13 @@
 // En fallo (RPC error o excepción) → serverError: copy genérico fijo, SIN el `.message` del driver
 // Postgres/Deno (R7.3, patrón spec 13). El status no-200 lo produce serverError (500).
 
-import { handleOptions } from '../_shared/cors.ts';
+import { serveEf } from '../_shared/serve.ts';
 import { jsonOk, serverError } from '../_shared/errors.ts';
 import { createAdminClient } from '../_shared/supabase.ts';
 
-Deno.serve(async (req: Request) => {
-  // Preflight CORS (OPTIONS → 204). Método-agnóstico para el resto: UptimeRobot pinguea con GET/HEAD,
-  // el dashboard/tests pueden usar POST. No se restringe el método (no hay efecto de lado ni input).
-  const preflight = handleOptions(req);
-  if (preflight) return preflight;
+serveEf('health', async () => {
+  // Método-agnóstico: UptimeRobot pinguea con GET/HEAD, el dashboard/tests pueden usar POST. No se
+  // restringe el método (no hay efecto de lado ni input). El preflight CORS (OPTIONS → 204) lo hace serveEf.
 
   // R7.9 — INPUT-FREE: NO se lee req.json() ni la query string. La respuesta no depende del request.
   try {

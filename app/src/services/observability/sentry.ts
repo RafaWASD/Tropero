@@ -23,8 +23,14 @@ export function wrapRoot<P extends object>(Component: ComponentType<P>): Compone
   return Component;
 }
 
-/** Reporta una excepción best-effort (R2.5). `hint.mechanism` distingue el origen (p.ej. RootErrorBoundary). */
-export function captureExceptionSafe(_error: unknown, _hint?: { mechanism?: string }): void {
+/**
+ * Reporta una excepción best-effort (R2.5). `hint.mechanism` distingue el origen (p.ej. RootErrorBoundary);
+ * `hint.requestId` correlaciona la captura (tag `request_id` por-captura en nativo, spec 23). WEB/E2E: no-op.
+ */
+export function captureExceptionSafe(
+  _error: unknown,
+  _hint?: { mechanism?: string; requestId?: string },
+): void {
   /* no-op en web/E2E. */
 }
 

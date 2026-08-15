@@ -8,7 +8,7 @@
 // Input:  { establishment_id, role, email? }
 // Output: { invitation_id, token, accept_url, expires_at }
 
-import { handleOptions } from '../_shared/cors.ts';
+import { serveEf } from '../_shared/serve.ts';
 import { jsonError, jsonOk, serverError } from '../_shared/errors.ts';
 import { createAdminClient, createUserClient } from '../_shared/supabase.ts';
 import { HttpError, requireOwnerOf, requireUser } from '../_shared/auth.ts';
@@ -24,17 +24,14 @@ const ALLOWED_ROLES = new Set(['field_operator', 'veterinarian']);
 // El owner regenera el link en un tap (resend_invitation) si necesita más tiempo.
 const INVITATION_TTL_HOURS = 72;
 
-Deno.serve(async (req: Request) => {
-  const preflight = handleOptions(req);
-  if (preflight) return preflight;
-
+serveEf('invite_user', async (req, ctx) => {
   if (req.method !== 'POST') {
     return jsonError(405, 'method_not_allowed', 'Solo POST.');
   }
 
   try {
     const userClient = createUserClient(req);
-    const adminClient = createAdminClient();
+    const adminClient = createAdminClient(undefined, ctx.requestId);
     const user = await requireUser(userClient);
 
     const body = (await req.json().catch(() => ({}))) as Body;

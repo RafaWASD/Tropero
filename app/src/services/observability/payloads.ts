@@ -12,6 +12,8 @@ import type { CrudEntry } from '@powersync/common';
 export const UPLOAD_REJECTED_EVENT = 'upload_rejected';
 export const BLE_BREADCRUMB_CATEGORY = 'ble';
 export const NAVIGATION_BREADCRUMB_CATEGORY = 'navigation';
+/** Tag de correlación por-captura del requestId (no-PII). Spec 23. */
+export const REQUEST_ID_TAG = 'request_id';
 
 /** Eventos de dominio del MVP (R6). Sin PII en sus props (R6.4). */
 export const DOMAIN_EVENTS = {
@@ -24,24 +26,46 @@ function asString(value: unknown): string | undefined {
   return typeof value === 'string' ? value : value == null ? undefined : String(value);
 }
 
-// ─── R4.1 / R4.2 — upload_rejected: SOLO table/op/code, JAMÁS opData ───────────────────────────────────
+// ─── R4.1 / R4.2 — upload_rejected: SOLO id/table/op/code, JAMÁS opData ────────────────────────────────
 /**
- * Payload del sink `upload_rejected` (R4.1). Extrae EXCLUSIVAMENTE `table`, `op` y `code` — NUNCA `opData`
- * (que puede traer datos del campo) ni ningún otro campo del CrudEntry. Omite las claves ausentes. Es la
- * MISMA función que llama el connector: si alguien la ensanchara a opData, payloads.test.ts lo pondría rojo.
+ * Payload del sink `upload_rejected` (R4.1). Extrae EXCLUSIVAMENTE `id`, `table`, `op` y `code` — NUNCA
+ * `opData` (que puede traer datos del campo) ni ningún otro campo del CrudEntry. `id` es el `op.id` (id de
+ * la fila afectada, no-PII) para correlacionar la op rechazada. Omite las claves ausentes. Es la MISMA
+ * función que llama el connector: si alguien la ensanchara a opData, payloads.test.ts lo pondría rojo.
  */
 export function buildUploadRejectedPayload(
   op: CrudEntry | null,
   error: unknown,
 ): Record<string, string> {
+  const id = asString(op?.id);
   const table = asString(op?.table);
   const opType = asString(op?.op);
   const code = asString((error as { code?: unknown } | null | undefined)?.code);
   const out: Record<string, string> = {};
+  if (id !== undefined) out.id = id;
   if (table !== undefined) out.table = table;
   if (opType !== undefined) out.op = opType;
   if (code !== undefined) out.code = code;
   return out;
+}
+
+// ─── R4.1 / R4.4 (spec 23) — tags POR-CAPTURA de captureException: mechanism + request_id (no-PII) ─────
+/**
+ * Tags de UNA captura de excepción de Sentry (R4.1). Scope acotado a esa captura (R4.4): se pasan como el
+ * `tags` de esa llamada a `Sentry.captureException`, NUNCA con `setTag` global (que se filtraría a capturas
+ * de otras acciones — scope sticky). `request_id` (uuid v4 sin significado → no-PII) correlaciona la captura
+ * con la EF/audit/PostHog. Omite las claves ausentes → `{}` si no hay hint (una captura sin requestId NO
+ * hereda el de otra). Es la MISMA función que llama `captureExceptionSafe`: si alguien dejara de adjuntar el
+ * `request_id`, payloads.test.ts lo pondría rojo.
+ */
+export function buildCaptureTags(hint?: {
+  mechanism?: string;
+  requestId?: string;
+}): Record<string, string> {
+  const tags: Record<string, string> = {};
+  if (hint?.mechanism) tags.mechanism = hint.mechanism;
+  if (hint?.requestId) tags[REQUEST_ID_TAG] = hint.requestId;
+  return tags;
 }
 
 // ─── R4.4 — breadcrumb BLE: kind + campos diagnósticos del evento, sin opData/PII ─────────────────────

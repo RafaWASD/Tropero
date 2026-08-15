@@ -26,7 +26,7 @@
 // y se devuelve 200 igual (la baja de datos ya se consumó atómicamente en el paso 4 y
 // RLS ya niega todo acceso con los roles inactivos).
 
-import { handleOptions } from '../_shared/cors.ts';
+import { serveEf } from '../_shared/serve.ts';
 import { jsonError, jsonOk, serverError } from '../_shared/errors.ts';
 import { createAdminClient, createUserClient } from '../_shared/supabase.ts';
 import { HttpError, requireUser } from '../_shared/auth.ts';
@@ -39,10 +39,7 @@ const SOLE_OWNER_COPY =
 // re-login. Mismo valor que documenta el design / la Auth Admin API.
 const BAN_DURATION = '876000h';
 
-Deno.serve(async (req: Request) => {
-  const preflight = handleOptions(req);
-  if (preflight) return preflight;
-
+serveEf('delete_account', async (req, ctx) => {
   if (req.method !== 'POST') {
     return jsonError(405, 'method_not_allowed', 'Solo POST.');
   }
@@ -57,7 +54,7 @@ Deno.serve(async (req: Request) => {
     // NUNCA del body. El write de user_roles va dentro de la RPC delete_account_tx (SECURITY DEFINER, 1
     // request .rpc()) → el header X-Rafaq-Actor viaja en esa request → el trigger de audit lo ve en la
     // transacción de la RPC. delete_account_tx NO se toca. Se crea DESPUÉS de requireUser (necesita user.id).
-    const adminClient = createAdminClient(user.id);
+    const adminClient = createAdminClient(user.id, ctx.requestId);
 
     // Paso 2: idempotencia. Si ya está soft-deleteado → 200 already_deleted, sin tocar nada.
     const { data: userRow, error: userErr } = await adminClient

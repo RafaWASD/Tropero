@@ -35,6 +35,7 @@ import {
 } from '../utils/account-result';
 import { getPowerSync } from './powersync/database';
 import { forgetRememberedDevice } from './ble/remembered-device';
+import { newRequestId } from '../utils/request-id';
 
 export type { ChangeEmailResult, DeleteAccountResult, BlockingEstablishment } from '../utils/account-result';
 
@@ -115,10 +116,16 @@ export async function deleteAccount(): Promise<DeleteAccountResult> {
   );
   if (off) return { ok: false, reason: 'network', establishments: [], message: off.message };
 
+  // Header de correlación (spec 23): el mismo id aterriza en el audit de la baja.
+  const requestId = newRequestId();
+
   let data: unknown;
   let error: unknown;
   try {
-    const res = await supabase.functions.invoke('delete_account', { body: {} });
+    const res = await supabase.functions.invoke('delete_account', {
+      body: {},
+      headers: { 'X-Rafaq-Request-Id': requestId },
+    });
     data = res.data;
     error = res.error;
   } catch (err) {

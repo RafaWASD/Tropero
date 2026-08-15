@@ -35,6 +35,7 @@ import { useDismissKeyboardOnOpen } from '@/hooks/useDismissKeyboardOnOpen';
 import { useSafeBottomInset } from '@/hooks/useSafeBottomInset';
 import { Button } from '@/components';
 import { buttonA11y, labelA11y } from '@/utils/a11y';
+import { SupportCodeRow } from '../../_components/SupportCodeRow';
 import {
   rejectionReason,
   rejectionWhenLabel,
@@ -194,6 +195,9 @@ function RechazoRow({ rejection }: { rejection: UploadRejection }) {
       <Text fontFamily="$body" fontSize="$2" lineHeight="$2" color="$textMuted" numberOfLines={1}>
         {when}
       </Text>
+      {/* Código de soporte (R5.7): el id de la op (ya en UploadRejection) — el MISMO que figura en el evento
+          upload_rejected de Sentry, así soporte lo busca por ese id. Sin mapa persistente ni tocar el payload. */}
+      <SupportCodeRow supportCode={rejection.id} />
     </View>
   );
 }

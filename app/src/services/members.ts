@@ -36,6 +36,7 @@ import { runLocalQuery } from './powersync/local-query';
 import { offlineError } from './powersync/online-guard';
 import { getPowerSync } from './powersync/database';
 import { mapMemberRows, type MemberListItem, type MemberRow } from '../utils/sort-members';
+import { newRequestId } from '../utils/request-id';
 
 // Base URL para reconstruir el accept_url de invitaciones PENDIENTES a partir del token. Las
 // invitaciones recién creadas/regeneradas ya traen `accept_url` del backend; para las que listamos
@@ -121,7 +122,11 @@ export type Result<T> = { ok: true; value: T } | { ok: false; error: ServiceErro
  * También cubre el caso defensivo de un 2xx que igual trae `{ error: {...} }` en el body (no
  * debería con jsonOk/jsonError, pero blindamos como push-notifications.ts).
  */
-async function invokeFn<T>(name: string, body: Record<string, unknown>): Promise<Result<T>> {
+async function invokeFn<T>(
+  name: string,
+  body: Record<string, unknown>,
+  requestId?: string,
+): Promise<Result<T>> {
   // Las operaciones de equipo (invitar/cancelar/regenerar/remover/cambiar-rol/aceptar) son Edge
   // Functions ONLINE-only (R9.2): sin red el invoke no resuelve rápido → fast-fail accionable ANTES
   // del call. Todas pasan por acá → un único guard cubre todos los call-sites. (Las LECTURAS de
@@ -134,10 +139,18 @@ async function invokeFn<T>(name: string, body: Record<string, unknown>): Promise
     return { ok: false, error: { kind: 'network', code: null, message: off.message } };
   }
 
+  // Header de correlación (spec 23): el MISMO id viaja al audit para las ops que escriben user_roles.
+  // Si el llamador pasó su requestId (para correlacionar con su evento de dominio) usamos ese; si no,
+  // generamos uno acá para que TODA op de miembros lleve el header igual.
+  const rid = requestId ?? newRequestId();
+
   let data: unknown;
   let error: unknown;
   try {
-    const res = await supabase.functions.invoke(name, { body });
+    const res = await supabase.functions.invoke(name, {
+      body,
+      headers: { 'X-Rafaq-Request-Id': rid },
+    });
     data = res.data;
     error = res.error;
   } catch (err) {
@@ -348,6 +361,8 @@ export function createInvitation(args: {
   establishmentId: string;
   role: InvitableRole;
   email?: string | null;
+  /** requestId de correlación (spec 23): el mismo id que la pantalla manda al evento de dominio. */
+  requestId?: string;
 }): Promise<Result<CreatedInvitation>> {
   const body: Record<string, unknown> = {
     establishment_id: args.establishmentId,
@@ -355,7 +370,7 @@ export function createInvitation(args: {
   };
   const email = args.email?.trim();
   if (email) body.email = email;
-  return mapInviteResult(invokeFn('invite_user', body));
+  return mapInviteResult(invokeFn('invite_user', body, args.requestId));
 }
 
 async function mapInviteResult(

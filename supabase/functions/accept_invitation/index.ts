@@ -12,7 +12,7 @@
 // Input:  { token }
 // Output: { establishment_id, role }
 
-import { handleOptions } from '../_shared/cors.ts';
+import { serveEf } from '../_shared/serve.ts';
 import { jsonError, jsonOk, serverError } from '../_shared/errors.ts';
 import { createAdminClient, createUserClient } from '../_shared/supabase.ts';
 import { HttpError, requireUser } from '../_shared/auth.ts';
@@ -21,10 +21,7 @@ import { sendExpoPush } from '../_shared/push.ts';
 
 type Body = { token?: unknown };
 
-Deno.serve(async (req: Request) => {
-  const preflight = handleOptions(req);
-  if (preflight) return preflight;
-
+serveEf('accept_invitation', async (req: Request, ctx) => {
   if (req.method !== 'POST') {
     return jsonError(405, 'method_not_allowed', 'Solo POST.');
   }
@@ -34,7 +31,7 @@ Deno.serve(async (req: Request) => {
     const user = await requireUser(userClient);
     // spec 18 (Opción A): admin client con el ACTOR real = user.id del JWT validado (el que ACEPTA y se
     // auto-agrega el user_roles), NUNCA del body. El header X-Rafaq-Actor viaja en el INSERT de user_roles.
-    const adminClient = createAdminClient(user.id);
+    const adminClient = createAdminClient(user.id, ctx.requestId);
 
     const body = (await req.json().catch(() => ({}))) as Body;
     const token = typeof body.token === 'string' ? body.token : '';

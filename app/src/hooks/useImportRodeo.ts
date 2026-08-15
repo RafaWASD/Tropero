@@ -44,6 +44,7 @@ import {
 } from '@/utils/import/column-mapping';
 import type { NormalizedRow } from '@/utils/import/normalize-row';
 import { validateRows, type ValidationResult } from '@/utils/import/validate-rows';
+import { newRequestId } from '@/utils/request-id';
 import { captureDomainEvent } from '@/services/observability/posthog';
 import { DOMAIN_EVENTS } from '@/services/observability/payloads';
 import {
@@ -458,6 +459,8 @@ export function useImportRodeo(): UseImportRodeo {
 
     setError(null);
     setLoading(true);
+    // Correlación client-only con Sentry (spec 23): un requestId por acción de import.
+    const requestId = newRequestId();
 
     // Re-armamos las candidatas (las válidas + no-dup): re-normalizamos + re-validamos + re-dedup.
     const rows: NormalizedRow[] =
@@ -482,7 +485,7 @@ export function useImportRodeo(): UseImportRodeo {
 
     // Spec 17 (R6.2/R6.4) — evento de dominio al completar el import OK. Prop { rows } = animales escritos
     // OK (conteo, no-PII: ni idv, ni tag, ni nombre). No-op en web/E2E. Best-effort.
-    captureDomainEvent(DOMAIN_EVENTS.importCompletado, { rows: run.value.importedOk });
+    captureDomainEvent(DOMAIN_EVENTS.importCompletado, { rows: run.value.importedOk, request_id: requestId });
 
     setResult(run.value);
     setLoading(false);

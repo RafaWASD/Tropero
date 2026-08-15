@@ -28,6 +28,7 @@ import { isValidEmail } from '@/utils/validation';
 import { backOr } from '@/utils/nav';
 import { captureDomainEvent } from '@/services/observability/posthog';
 import { DOMAIN_EVENTS } from '@/services/observability/payloads';
+import { newRequestId } from '@/utils/request-id';
 
 const OFFLINE_COPY = 'Necesitás conexión para crear una invitación. Conectate a internet y volvé a intentar.';
 
@@ -105,18 +106,24 @@ export default function InvitarScreen() {
       return;
     }
 
+    // Un solo requestId por acción: viaja al header X-Rafaq-Request-Id de invite_user (para el audit)
+    // y al evento de dominio → correlación 1:1 entre el llamado y el evento (spec 23).
+    const requestId = newRequestId();
+
     setCreating(true);
     const result = await createInvitation({
       establishmentId: activeField!.id,
       role,
       email: trimmedEmail || null,
+      requestId,
     });
     setCreating(false);
 
     if (result.ok) {
       // Spec 17 (R6.3/R6.4) — evento de dominio al enviar OK la invitación. Prop { role } = rol invitado
-      // (no-PII: NO el email de anotación). No-op en web/E2E. Best-effort.
-      captureDomainEvent(DOMAIN_EVENTS.invitacionEnviada, { role });
+      // (no-PII: NO el email de anotación). request_id (spec 23) = MISMO id que el header → correlación.
+      // No-op en web/E2E. Best-effort.
+      captureDomainEvent(DOMAIN_EVENTS.invitacionEnviada, { role, request_id: requestId });
       setCreated(result.value);
     } else if (result.error.kind === 'network') {
       setFormError(OFFLINE_COPY);
