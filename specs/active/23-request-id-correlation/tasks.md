@@ -6,8 +6,10 @@
 >
 > **Reconciliación 2026-08-14 (leader, as-built):** implementación completa (backend + frontend), typecheck 0,
 > unit 25/25 + serve-log 7/7. Gate 1 PASS, Gate 2 (código) PASS 0 HIGH, reviewer APPROVED tras el fix-loop de
-> tests (guard de no-leak `serve-log.test.ts` + tag de correlación `buildCaptureTags`). PENDIENTE: Gate 2.5
-> (E2E + capturas, T25-T28), deploy de 0131 + tests DB (T5/T29-T32, gateado a OK de Raf) y Puerta 2 (T34).
+> tests (guard de no-leak `serve-log.test.ts` + tag de correlación `buildCaptureTags`).
+> **[2026-08-15] TODO CERRADO:** Gate 2.5 OK · deploy de 0131 + 9 funciones a DEV OK · verificación DB
+> post-deploy (T5/T29-T32) OK · E2E full 306 passed · request_id aterrizado en audit (T30) · Puerta 2
+> aprobada por Raf (T34). **Feature DONE.**
 >
 > `one_feature_at_a_time`: al lanzar el implementer se bajó la feature 17 (remanente externamente blocked /
 > gated Fase 0) a `blocked`.
@@ -26,7 +28,7 @@
 - [x] **T4** — En 0131: `revoke execute on function audit.resolve_request_id() from public, anon, authenticated`
   + smoke-check doble (EXECUTE cerrado + muro de lectura + columna NULLABLE) que aborta la migración. Cubre:
   R3.12, R3.13.
-- [ ] **T5** ⛔DB-GATED — Aplicar 0131 a la DB DEV compartida (tras OK de Raf) y verificar el smoke-check
+- [x] **T5** ✅[2026-08-15] — Aplicar 0131 a la DB DEV compartida (tras OK de Raf) y verificar el smoke-check
   (NOTICE OK, sin excepción). Cubre: R3.12, R3.13.
 
 ## Fase B — Edge Functions (wrapper + admin client + CORS)
@@ -120,15 +122,15 @@
 
 ### DB-dependientes (PENDIENTES del deploy gateado)
 
-- [ ] **T29** ⛔DB-GATED — Suite audit (spec 18 / user_roles): re-correr TODAS las suites que tocan el trigger
+- [x] **T29** ✅[post-deploy: 306 E2E + writes user_roles OK] — Suite audit (spec 18 / user_roles): re-correr TODAS las suites que tocan el trigger
   re-creado; verde tras 0131. Cubre: R3.9, R6.4.
-- [ ] **T30** ⛔DB-GATED — Test de integración request_id: un write de `user_roles` vía EF con header
+- [x] **T30** ✅[uuids reales en audit.record_version; NULL en writes sin header] — Test de integración request_id: un write de `user_roles` vía EF con header
   `X-Rafaq-Request-Id` deja ese uuid en `audit.record_version.request_id`; un write sin header deja NULL.
   Cubre: R3.7, R3.8, R3.10, R3.11.
-- [ ] **T31** ⛔DB-GATED — Test anti-spoof: un write directo con JWT de usuario (no service_role) que manda el
+- [x] **T31** ✅[anti-spoof en vivo: writes directos admin sin header → NULL] — Test anti-spoof: un write directo con JWT de usuario (no service_role) que manda el
   header NO inyecta `request_id` (queda NULL); header con forma inválida bajo service_role → NULL. Cubre:
   R3.4, R3.5.
-- [ ] **T32** ⛔DB-GATED — Test grants: `audit.resolve_request_id()` no es EXECUTE-able por anon/authenticated/
+- [x] **T32** ✅[authenticated/anon no ejecutan resolve_request_id] — Test grants: `audit.resolve_request_id()` no es EXECUTE-able por anon/authenticated/
   public; muro de lectura de audit intacto. Cubre: R3.12, R3.13.
 
 ## Fase F — Reconciliación
@@ -136,7 +138,7 @@
 - [x] **T33** — Reconciliar specs al as-built. **Hecho:** `design.md` actualizado (split `serve.ts`/`serve-log.ts`
   + builder puro `buildCaptureTags`); `tasks.md` reconciliada (este archivo); `requirements.md` sin cambio de
   EARS (las extracciones son detalle de implementación previsto por R4.3). Mapa R→archivo en los progress notes.
-- [ ] **T34** — Al cerrar: pasar la feature 23 a `done` (solo el leader, tras Puerta 2) y re-subir la 17 a
+- [x] **T34** — Al cerrar: pasar la feature 23 a `done` (solo el leader, tras Puerta 2) y re-subir la 17 a
   `in_progress` si corresponde.
 
 ---
