@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="es-AR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>miTropero — Consola de auditoría (interno)</title>
+<meta name="description" content="Herramienta interna de staff de miTropero. Acceso restringido.">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<meta name="theme-color" content="#1E5A3E">
+<link rel="icon" href="data:,">
+<!-- CSP de defensa en profundidad (el _headers de Cloudflare Pages es la fuente autoritativa). -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; connect-src https://xrhlxxdnfzvdnztacofj.supabase.co; img-src 'self' data:; font-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'">
+<style>
+  :root {
+    --bg:#FAF9F9; --surface:#F8F6F1; --primary:#1E5A3E; --primary-alt:#2E8259; --press:#184A33;
+    --text:#0F0E0C; --muted:#5C655F; --divider:#E5E5E3; --card:#FFFFFF;
+    --danger:#B42318; --danger-bg:#FEF3F2; --warn:#B54708; --warn-bg:#FFFAEB;
+    --ok:#1E5A3E; --ok-bg:#ECF6F0; --focus:#2E8259;
+  }
+  * { box-sizing:border-box; }
+  html, body { height:100%; }
+  .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0; }
+  body {
+    margin:0; background:var(--bg); color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+    -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
+    display:flex; flex-direction:column; min-height:100svh;
+  }
+  [hidden] { display:none !important; }
+  .wordmark { font-weight:700; letter-spacing:-0.02em; color:var(--primary); line-height:1.3; margin:0; }
+  .wordmark .mi { font-weight:300; }
+  .wordmark .tag {
+    display:inline-block; vertical-align:middle; margin-left:0.5rem; font-weight:600; font-size:0.6em;
+    letter-spacing:0.04em; color:var(--muted); background:var(--surface); border:1px solid var(--divider);
+    border-radius:999px; padding:0.15em 0.6em; text-transform:lowercase;
+  }
+
+  /* --- Botones --- */
+  .btn {
+    display:inline-block; background:var(--primary); color:#FFFFFF; text-align:center; text-decoration:none;
+    font-size:1rem; font-weight:600; line-height:1.3; padding:0.85rem 1.25rem; border:none; border-radius:12px;
+    cursor:pointer; font-family:inherit;
+  }
+  .btn:hover { background:var(--primary-alt); }
+  .btn:active { background:var(--press); }
+  .btn:disabled { opacity:0.55; cursor:default; }
+  .btn:focus-visible, .btn-sec:focus-visible, .toggle-btn:focus-visible, .copy-btn:focus-visible, input:focus-visible, select:focus-visible {
+    outline:3px solid var(--focus); outline-offset:2px;
+  }
+  .btn-sec {
+    display:inline-block; background:transparent; color:var(--primary); border:1.5px solid var(--primary);
+    font-size:0.95rem; font-weight:600; line-height:1.3; padding:0.7rem 1.1rem; border-radius:12px;
+    cursor:pointer; font-family:inherit;
+  }
+  .btn-sec:hover { background:var(--surface); }
+  .btn-sec:disabled { opacity:0.55; cursor:default; }
+  .btn-small { padding:0.5rem 0.9rem; font-size:0.875rem; }
+
+  /* --- Vista login --- */
+  #view-login {
+    flex:1 0 auto; display:flex; flex-direction:column; justify-content:center; align-items:center;
+    padding:3rem 1.5rem;
+  }
+  .card {
+    background:var(--card); border:1px solid var(--divider); border-radius:16px;
+    padding:2.25rem 2rem; width:100%; max-width:26rem;
+    box-shadow:0 1px 2px rgba(15,14,12,0.04), 0 8px 24px rgba(15,14,12,0.05);
+  }
+  .card .wordmark { font-size:1.6rem; margin-bottom:1.5rem; }
+  .card h1 { font-size:1.4rem; line-height:1.3; margin:0 0 0.4rem; letter-spacing:-0.01em; }
+  .card .sub { font-size:0.9375rem; line-height:1.55; color:var(--muted); margin:0 0 1.75rem; }
+  form label { display:block; font-size:0.875rem; font-weight:600; color:var(--text); margin-bottom:1rem; }
+  form label span.lbl { display:block; margin-bottom:0.35rem; }
+  input[type="email"], input[type="password"], input[type="text"], input[type="date"], select {
+    display:block; width:100%; font-family:inherit; font-size:1rem; line-height:1.3; color:var(--text);
+    background:#FFFFFF; border:1.5px solid var(--divider); border-radius:10px; padding:0.7rem 0.85rem;
+  }
+  input:focus, select:focus { border-color:var(--primary); outline:none; }
+  .card .btn { width:100%; margin-top:0.25rem; }
+
+  /* --- Mensajes --- */
+  .error, .notice {
+    font-size:0.9375rem; line-height:1.5; border-radius:10px; padding:0.75rem 0.95rem; margin:0;
+  }
+  .error { color:var(--danger); background:var(--danger-bg); border:1px solid #FDA29B; }
+  #login-error { margin-top:1.25rem; }
+  .notice { color:var(--warn); background:var(--warn-bg); border:1px solid #FEDF89; margin-bottom:1.25rem; }
+
+  /* --- Vista consola --- */
+  #view-console { flex:1 0 auto; display:flex; flex-direction:column; min-height:0; }
+  .topbar {
+    display:flex; align-items:center; justify-content:space-between; gap:1rem;
+    padding:0.9rem 1.5rem; border-bottom:1px solid var(--divider); background:var(--card);
+  }
+  .topbar .wordmark { font-size:1.15rem; }
+  .topbar-right { display:flex; align-items:center; gap:1rem; }
+  #whoami { font-size:0.875rem; color:var(--muted); }
+  .console { flex:1 0 auto; width:100%; max-width:76rem; margin:0 auto; padding:1.5rem; }
+
+  /* --- Filtros --- */
+  .filters {
+    background:var(--card); border:1px solid var(--divider); border-radius:14px; padding:1.25rem 1.25rem 1rem;
+    margin-bottom:1.25rem;
+  }
+  .filters-grid {
+    display:grid; grid-template-columns:repeat(auto-fit, minmax(13rem, 1fr)); gap:0.9rem 1rem;
+  }
+  .filters label { margin-bottom:0; }
+  .filters-actions {
+    display:flex; gap:0.75rem; margin-top:1.1rem; padding-top:1rem; border-top:1px solid var(--divider);
+    flex-wrap:wrap;
+  }
+
+  /* --- Resultados --- */
+  .results-wrap { overflow-x:auto; border:1px solid var(--divider); border-radius:14px; background:var(--card); }
+  table.results { width:100%; border-collapse:collapse; font-size:0.9375rem; }
+  table.results thead th {
+    text-align:left; font-size:0.75rem; letter-spacing:0.05em; text-transform:uppercase; color:var(--muted);
+    font-weight:600; padding:0.85rem 1rem; border-bottom:1px solid var(--divider); white-space:nowrap;
+    background:var(--surface);
+  }
+  table.results tbody td { padding:0.8rem 1rem; border-bottom:1px solid var(--divider); vertical-align:top; }
+  tr.row:hover td { background:var(--surface); }
+  tr.row.open td { background:var(--surface); }
+  .cell-date { white-space:nowrap; color:var(--text); font-variant-numeric:tabular-nums; }
+  .actor { display:flex; flex-direction:column; gap:0.1rem; }
+  .actor-name { font-weight:600; }
+  .actor-email, .actor-uid {
+    font-size:0.8125rem; color:var(--muted);
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  .cell-table { white-space:nowrap; }
+
+  .badge {
+    display:inline-block; font-size:0.75rem; font-weight:700; letter-spacing:0.02em; line-height:1.4;
+    padding:0.2rem 0.6rem; border-radius:999px; white-space:nowrap;
+  }
+  .badge-insert { color:var(--ok); background:var(--ok-bg); border:1px solid #A6E0BF; }
+  .badge-update { color:var(--warn); background:var(--warn-bg); border:1px solid #FEDF89; }
+  .badge-delete { color:var(--danger); background:var(--danger-bg); border:1px solid #FDA29B; }
+
+  .reqid { display:flex; align-items:center; gap:0.5rem; }
+  .reqid-text {
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:0.8125rem; color:var(--muted);
+    max-width:11rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display:inline-block;
+  }
+  .copy-btn {
+    font-family:inherit; font-size:0.75rem; font-weight:600; color:var(--primary); background:transparent;
+    border:1px solid var(--divider); border-radius:8px; padding:0.2rem 0.5rem; cursor:pointer; white-space:nowrap;
+  }
+  .copy-btn:hover { background:var(--surface); }
+
+  .cell-toggle { text-align:right; white-space:nowrap; }
+  .toggle-btn {
+    font-family:inherit; font-size:0.8125rem; font-weight:600; color:var(--primary); background:transparent;
+    border:1.5px solid var(--divider); border-radius:8px; padding:0.35rem 0.75rem; cursor:pointer;
+  }
+  .toggle-btn:hover { background:var(--surface); border-color:var(--primary); }
+
+  /* --- Diff --- */
+  .detail-cell { background:var(--surface); padding:1rem 1.25rem; }
+  .diff { display:flex; flex-direction:column; gap:0.55rem; }
+  .diff-line { display:flex; align-items:baseline; flex-wrap:wrap; gap:0.5rem; font-size:0.9375rem; line-height:1.5; }
+  .diff-label { font-weight:700; color:var(--text); min-width:9rem; }
+  .diff-val {
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:0.875rem;
+    padding:0.1rem 0.45rem; border-radius:6px; word-break:break-word;
+  }
+  .val-old { color:var(--danger); background:var(--danger-bg); text-decoration:line-through; text-decoration-color:rgba(180,35,24,0.5); }
+  .val-new { color:var(--ok); background:var(--ok-bg); }
+  .diff-arrow { color:var(--muted); font-weight:700; }
+  .diff-empty { font-size:0.9375rem; color:var(--muted); font-style:italic; }
+
+  .empty, .loading {
+    text-align:center; color:var(--muted); font-size:0.9375rem; padding:2.5rem 1rem; margin:0;
+  }
+  .more-wrap { text-align:center; margin-top:1.25rem; }
+
+  footer { flex-shrink:0; border-top:1px solid var(--divider); padding:1.1rem 0; }
+  footer p { max-width:76rem; margin:0 auto; padding:0 1.5rem; font-size:0.8125rem; color:var(--muted); }
+
+  @media (min-width:640px) {
+    .topbar { padding:0.9rem 2rem; }
+    footer p { padding:0 2rem; }
+  }
+</style>
+</head>
+<body>
+
+  <!-- ==================== VISTA: LOGIN ==================== -->
+  <main id="view-login" class="view">
+    <div class="card">
+      <p class="wordmark"><span class="mi">mi</span>Tropero</p>
+      <h1>Consola de auditoría</h1>
+      <p class="sub">Herramienta interna de staff. Ingresá con tu cuenta de miTropero.</p>
+      <form id="login-form" novalidate autocomplete="on">
+        <label>
+          <span class="lbl">Email</span>
+          <input type="email" id="login-email" autocomplete="username" inputmode="email" autocapitalize="none" spellcheck="false" required>
+        </label>
+        <label>
+          <span class="lbl">Contraseña</span>
+          <input type="password" id="login-password" autocomplete="current-password" required>
+        </label>
+        <button class="btn" type="submit" id="login-submit">Entrar</button>
+      </form>
+      <p class="error" id="login-error" role="alert" hidden></p>
+    </div>
+  </main>
+
+  <!-- ==================== VISTA: CONSOLA ==================== -->
+  <div id="view-console" class="view" hidden>
+    <header class="topbar">
+      <p class="wordmark"><span class="mi">mi</span>Tropero <span class="tag">auditoría</span></p>
+      <div class="topbar-right">
+        <span id="whoami"></span>
+        <button class="btn-sec btn-small" id="logout" type="button">Salir</button>
+      </div>
+    </header>
+
+    <main class="console">
+      <form id="filters" class="filters" novalidate>
+        <div class="filters-grid">
+          <label>
+            <span class="lbl">Fecha desde</span>
+            <input type="date" id="f-from">
+          </label>
+          <label>
+            <span class="lbl">Fecha hasta</span>
+            <input type="date" id="f-to">
+          </label>
+          <label>
+            <span class="lbl">Usuario (uuid)</span>
+            <input type="text" id="f-uid" placeholder="uuid del actor" autocapitalize="none" spellcheck="false">
+          </label>
+          <label>
+            <span class="lbl">Campo (uuid)</span>
+            <input type="text" id="f-est" placeholder="establishment_id" autocapitalize="none" spellcheck="false">
+          </label>
+          <label>
+            <span class="lbl">operationId (uuid)</span>
+            <input type="text" id="f-req" placeholder="request_id" autocapitalize="none" spellcheck="false">
+          </label>
+          <label>
+            <span class="lbl">Tabla</span>
+            <select id="f-table">
+              <option value="">Todas</option>
+              <option value="user_roles">Roles de miembro</option>
+            </select>
+          </label>
+          <label>
+            <span class="lbl">Operación</span>
+            <select id="f-op">
+              <option value="">Todas</option>
+              <option value="INSERT">INSERT</option>
+              <option value="UPDATE">UPDATE</option>
+              <option value="DELETE">DELETE</option>
+            </select>
+          </label>
+        </div>
+        <div class="filters-actions">
+          <button class="btn" type="submit" id="search">Buscar</button>
+          <button class="btn-sec" type="button" id="clear">Limpiar</button>
+        </div>
+      </form>
+
+      <p class="notice" id="console-notice" role="status" hidden></p>
+
+      <div class="results-wrap">
+        <table class="results" id="results-table">
+          <thead>
+            <tr>
+              <th scope="col">Fecha</th>
+              <th scope="col">Actor</th>
+              <th scope="col">Tabla</th>
+              <th scope="col">Operación</th>
+              <th scope="col">operationId</th>
+              <th scope="col"><span class="sr-only">Detalle</span></th>
+            </tr>
+          </thead>
+          <tbody id="results-body"></tbody>
+        </table>
+        <p class="empty" id="empty-state" hidden>No hay registros para esos filtros.</p>
+      </div>
+
+      <div class="more-wrap">
+        <button class="btn-sec" id="load-more" type="button" hidden>Ver más</button>
+        <p class="loading" id="loading" role="status" hidden>Cargando…</p>
+      </div>
+    </main>
+  </div>
+
+  <footer><p>miTropero · Consola interna de auditoría · Acceso restringido a staff</p></footer>
+
+  <!-- @supabase/supabase-js pineado a versión EXACTA + SRI (archivo original estático de jsDelivr, no el .min generado). -->
+  <script
+    src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.3/dist/umd/supabase.js"
+    integrity="sha384-qafw21c/iciq0VXsi9FzkfoQv5I/V0iqE4lSNcKXPnW9/UTJLnv5CcN4FHxVLnKg"
+    crossorigin="anonymous"
+    referrerpolicy="no-referrer"></script>
+  <script src="app.js"></script>
+</body>
+</html>

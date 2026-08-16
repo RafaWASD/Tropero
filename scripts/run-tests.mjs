@@ -164,6 +164,19 @@ run(
   `node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./scripts/ts-ext-resolver.mjs --test supabase/functions/_shared/serve-log.test.ts`,
 );
 
+// spec 24 — helpers PUROS de la EF `audit_query` (visor forense interno). `supabase/functions/audit_query/
+// query.ts` es el módulo sin deps Deno-only (solo globals JS: Date/RegExp/Set/Map) que hace el gate de
+// staff (parseStaffAllowlist, FAIL-CLOSED si el secret falta) y la validación AUTORITATIVA de filtros
+// (validateFilters): uuids por regex antes del cast, allowlists de table_name/op, cap de limit, guards de
+// tipo en from/to. Este test FALSIFICA que un valor malformado o inyectivo NUNCA produzca un `Filtros`
+// (que es lo único que db.ts liga como parámetros) y que la allowlist de staff no se abra por default. El
+// runtime (index.ts/db.ts) usa Deno/Postgres.js → deploy-gated, no corre acá; su SQL 100% tagged-template
+// (sin unsafe/concat) es garantía estática. Corre en el harness de node, sin Deno ni keys de Supabase.
+run(
+  'audit_query pure helpers (spec 24)',
+  `node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./scripts/ts-ext-resolver.mjs --test supabase/functions/audit_query/query.test.ts`,
+);
+
 // La suite RLS y la suite Edge necesitan keys de Supabase. Si no hay service_role,
 // se saltean con un warning (para builds CI sin credenciales). Para el check
 // local completo, exigimos las claves.

@@ -1,0 +1,9 @@
+# Cloudflare Pages — headers para la consola de auditoría interna (staff miTropero).
+# Herramienta interna: no debe indexarse, no debe embeberse, no debe filtrar referrer.
+/*
+  X-Robots-Tag: noindex, nofollow
+  Referrer-Policy: no-referrer
+  X-Frame-Options: DENY
+  X-Content-Type-Options: nosniff
+  Content-Security-Policy: default-src 'none'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; connect-src https://xrhlxxdnfzvdnztacofj.supabase.co; img-src 'self' data:; font-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'
+  Permissions-Policy: geolocation=(), microphone=(), camera=(), payment=(), usb=()
