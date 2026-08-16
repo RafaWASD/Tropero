@@ -1746,3 +1746,7 @@ Al achicar el gate del chip de crash a `development`, ese perfil pasó a ser **e
 - Si el mail se **borra** o se **hashea** (hashearlo permitiría detectar un re-alta de la misma persona; borrarlo es más limpio).
 
 **Bloquea**: la página pública de eliminación de cuenta y la política de privacidad, que no se pueden escribir con honestidad hasta que esto esté definido. Y bloquea el envío a Google Play.
+
+## [2026-08-16] Funnel/step events en PostHog (idea de Raf)
+
+Taggear pasos de flujos que NO disparan query, para medir "hasta qué paso se llegó" y abandono. VA A POSTHOG (trabajo 3), NO al audit log (que solo ve writes) ni a una tabla propia (rehacer PostHog peor = antipatrón del banco). El caño ya está (feature 17); autocapture off, 3 eventos hoy. Meter un set chico de eventos de funnel cuando se haga el chunk NATIVO de PostHog (gated Fase 0): PRIORIDAD = wizard de MODO MANIOBRA (session_started/config_done/step_reached/summary_reached/committed|abandoned) + onboarding/activación (signup->1er campo->1er animal->1era maniobra) + import (started/abandoned). Sin PII en props. Offline: el SDK de PostHog buffea y flushea. Correlacionable con el request_id (spec 23).
