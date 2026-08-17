@@ -166,7 +166,11 @@ if (FAST) {
       execSync(testCommand, { stdio: 'inherit' });
       ok('Tests verdes');
     } catch (e) {
-      fail(`Tests rojos (exit ${e.status})`);
+      // El detalle de QUÉ stage se cayó sale del "RESUMEN DE STAGES" que imprime run-tests.mjs justo
+      // arriba de esta línea (llega por stdio:'inherit'). Antes acá solo se leía "Tests rojos (exit 1)",
+      // que no decía cuál — y hasta 2026-08-17 el orquestador ni siquiera llegaba a los stages de
+      // backend cuando uno anterior se ponía rojo. Ver scripts/lib/stage-runner.mjs.
+      fail(`Tests rojos (exit ${e.status}) — el stage (o los stages) están nombrados en el RESUMEN DE STAGES de arriba`);
       exitCode = 1;
     }
   }

@@ -1,4 +1,4 @@
 {
   "testCommand": "node scripts/run-tests.mjs",
-  "_comment": "Lanza typecheck del cliente + suite RLS. La suite RLS requiere .env.local con SUPABASE_SERVICE_ROLE_KEY (toca DB remota). Ver ADR-011 sobre pnpm.cmd en PowerShell."
+  "_comment": "Lanza los 22 stages: typecheck del cliente + unit de scripts + unit del cliente + 3 guards de Edge Functions + 16 suites contra la DB remota. Las 16 ultimas requieren .env.local con SUPABASE_SERVICE_ROLE_KEY; sin esa key se saltean una por una y la corrida queda verde (asi corre ci.yml en cada push). Un stage de test rojo NO corta a los siguientes: al final imprime un RESUMEN DE STAGES que los nombra a todos. Ver scripts/lib/stage-runner.mjs y ADR-011 sobre pnpm.cmd en PowerShell."
 }

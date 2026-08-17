@@ -60,7 +60,24 @@ Ya hay código, así que `.harness/config.json` está configurado con:
 }
 ```
 
-`run-tests.mjs` corre, en orden: typecheck del cliente → suite RLS → suite Edge Functions. La suite RLS/Edge toca DB remota y requiere `.env.local` con `SUPABASE_SERVICE_ROLE_KEY`; si falta, se saltea con warning.
+`run-tests.mjs` corre **22 stages** en orden: typecheck del cliente → unit de `scripts/lib` → ~170 unit del
+cliente → 3 guards puros de Edge Functions → **16 suites contra la DB remota**. Las 16 últimas requieren
+`.env.local` con `SUPABASE_SERVICE_ROLE_KEY`; si falta, se saltean **una por una** (el resumen las nombra) y
+la corrida queda en verde — así `ci.yml` puede correr `check.mjs` en cada push sin tocar la base compartida.
+
+**Los stages de test ACUMULAN: un rojo no corta la corrida.** Hasta el 2026-08-17 `run()` llamaba a
+`execSync` sin `try`, así que el primer stage rojo mataba el proceso y los siguientes nunca corrían —
+un rojo en `client unit tests` (stage 3 de 22) apagó las 16 suites de backend durante días, en silencio.
+Ahora cada stage corre dentro de `try`, el fallo se acumula, y al final se imprime un **RESUMEN DE STAGES**
+que nombra a los 22 con su estado (`PASS` / `FAIL` / `SKIP` / `NO CORRIÓ`). Detalle del mecanismo y del
+contrato con `check.mjs` en `scripts/lib/stage-runner.mjs`.
+
+- El **typecheck es el único stage `fatal`**: si el árbol no compila, corta (no tiene sentido gastar ~20
+  minutos de suites que escriben fixtures en la base DEV compartida sobre un árbol a medio editar). Los
+  stages que no corrieron **igual salen nombrados** en el resumen, así que el corte no vuelve a ser mudo.
+- `--keep-going`: ignora los `fatal` y barre los 22 igual (útil para tener señal de backend mientras se
+  arregla un error de tipos).
+- `--fail-fast`: el comportamiento viejo (corta en el primer rojo, sea cual sea). Para loops cortos.
 
 ## Reglas duras de verificación
 

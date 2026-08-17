@@ -1586,7 +1586,7 @@ Un purgado que enumere sólo el primero —como decía esta entrada originalment
 **Origen**: unidad «aire» (safe-area del borde inferior). Se dio por sentado que el semáforo `node scripts/check.mjs` incluía la suite E2E; no la incluye.
 
 **Qué** (verificado, no supuesto):
-- `scripts/check.mjs` y `scripts/run-tests.mjs` tienen **CERO** referencias a `e2e` / `playwright`. El RC=0 cubre: lint anti-hardcode, typecheck del cliente, unit de scripts, unit del cliente, y las ~17 suites de backend contra Supabase. **Nada de Playwright.**
+- `scripts/check.mjs` y `scripts/run-tests.mjs` tienen **CERO** referencias a `e2e` / `playwright`. El RC=0 cubre: lint anti-hardcode, typecheck del cliente, unit de scripts, unit del cliente, 3 guards puros de Edge Functions, y las **16** suites de backend contra Supabase (22 stages en total, contados por el propio orquestador desde el 2026-08-17 — antes eran "~17" de memoria). **Nada de Playwright.**
 - Corrida completa de `pnpm e2e` (269 tests, build fresco, ~38 min) en esa unidad: **247 passed / 22 failed**. Los 22 se atribuyeron **empíricamente** contra un worktree en el baseline (mismo build, mismos specs) → **todos pre-existentes**, ninguno de la unidad.
 - De esos 22: **14 son la deuda ya conocida** del fixture desfasado del gating del tacto (`maniobra-carga` ×2, `preview-transicion` ×2, `tacto-adaptativo` ×4, `tacto-bugfix` ×3, `vacias-lote` ×3 — ver el ítem "el fixture del tacto quedó desfasado" más arriba).
 - Los **6 restantes** (`animals-offline:73`, `animals:397`, `cut-ficha:54`, `events:703`, `lotes:61`, `treatments:36`) son un patrón **distinto y nuevo para el registro**: `getByText(...).first()` matchea un elemento **oculto de la pantalla de fondo** —react-navigation web deja la pantalla anterior montada con `display:none`— en vez del visible de la pantalla de arriba. Es un **bug de ORÁCULO del test**, no de la app; misma familia que la memoria `reference_e2e_sheet_no_nav_oracle`. Fix candidato: `.first()` → filtrar por visibilidad (`locator(':visible')` / `getByRole` con el scope de la pantalla activa).
@@ -1939,6 +1939,34 @@ igual nombre los resultados de los stages backend.
 `node --test supabase/tests/<suite>/run.cjs` a mano. La fase 5 devuelve el árbol a verde y con eso
 `check.mjs` vuelve a alcanzar el backend solo — pero el defecto del orquestador queda igual y hay que
 cerrarlo, porque el próximo rojo temprano vuelve a apagar el backend sin avisar.
+
+### ✅ CERRADO (2026-08-17)
+
+`scripts/lib/stage-runner.mjs` (módulo nuevo) + cableado en `run-tests.mjs`. Los stages de test
+**acumulan**; el resumen final es **TOTAL** —una línea por cada uno de los 22 stages declarados,
+incluidos los que no corrieron, con `PASS` / `FAIL` / `SKIP` / `NO CORRIÓ`—. Esa es la pieza que cierra
+el agujero: el defecto no era *cortar*, era *callar*. La salida ya no puede sugerir que lo que no se
+ejecutó está sano.
+
+El `typecheck` quedó como **único stage fatal**, y es una decisión de costo, no de seguridad: si el
+árbol no compila, el veredicto ya es "no", y las 16 suites de backend cuestan minutos, escriben
+fixtures en la base DEV **compartida** y suman un escritor concurrente al flake catalogado de
+rate-limit de auth. Cortar ahí dejó de ser peligroso porque los 21 restantes **igual salen nombrados**.
+Escape hatch: `--keep-going`. El modo viejo sigue disponible con `--fail-fast`.
+
+**Falsificación medida** (el mismo test roto a propósito en el stage 3, `strip-comments.test.ts`, sin
+`SUPABASE_SERVICE_ROLE_KEY` — que es exactamente como corre `ci.yml`):
+
+| Corrida | Stages en la salida | RC | Resumen |
+|---|---|---|---|
+| Script **viejo** | **3** — muere en `client unit tests`, los 19 siguientes no existen ni como nombre | 1 | ninguno |
+| Script **nuevo** | **22** — 5 PASS · 1 FAIL · 16 SKIP · 0 NO CORRIÓ | 1 | nombra las 16 suites de DB una por una |
+| Nuevo, con un **error de tipos** inyectado | 22 — 1 FAIL · **21 NO CORRIÓ**, cada uno con `abortado tras el fallo FATAL de 'typecheck client'` | 1 | ídem |
+
+Corolario para este archivo: la afirmación de la entrada *"`check.mjs` NO corre la suite E2E"* (el RC=0
+cubre *"las ~17 suites de backend contra Supabase"*) ahora es verificable **leyendo el resumen**, en vez
+de asumirse. Y el número exacto, contado por el propio orquestador, es **16** suites contra la DB
+remota más **6** stages locales.
 
 ---
 
