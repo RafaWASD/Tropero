@@ -1967,3 +1967,51 @@ hace uno solo). Migración nueva con `CREATE OR REPLACE` moldeado sobre el cuerp
 **Falsificación obligatoria del fix**: un test que transfiera un animal y asserte
 `rodeo_membership_history.reason = 'transfer_in'` en la fila del perfil destino, y que se ponga **rojo**
 contra la función de hoy. Sin ese test el arreglo no se puede distinguir de no haberlo hecho.
+
+## [2026-08-17] 🔴 Ocho claves de storage `rafq.*` viven en el device y NADIE lo declaró
+
+Auditoría de la variante **`rafq`** (sin la "a"), pedida por Raf al cerrar el rebrand: 291 ocurrencias en
+72 archivos. Casi todas son clases ya decididas. **Una no lo estaba.**
+
+### Las claves
+
+Son prefijos de `AsyncStorage`/`localStorage`. **Renombrarlas le borra el estado a todo device ya
+instalado** — exactamente la misma propiedad que hizo que `rafaq.db` quedara eximido en
+`brand-name-guard.test.ts`.
+
+| Clave | Archivo | Qué se pierde si se renombra |
+|---|---|---|
+| `rafq.ble.beep_enabled` | `services/ble/feedback-pref.ts` | la preferencia de beep del bastón |
+| `rafq.ble.remembered_device` | `services/ble/remembered-device.ts` | el bastón recordado → hay que re-emparejar en la manga |
+| `rafq.est_trail.<uid>` | `services/establishment-store.ts` | el orden de campos recientes |
+| `rafq.banner_dismissed.<uid>` | `services/establishment-store.ts` | vuelven a aparecer banners ya descartados |
+| `rafq.lockout.<hash>` | `services/lockout-store.ts` | el contador de lockout se reinicia (**afloja una defensa**) |
+| `rafq.active_rodeo.<uid>.<estId>` | `services/rodeo-store.ts` | el rodeo activo |
+| `rafq.last_rodeo.<uid>.<estId>` | `services/last-rodeo.ts` | el último rodeo usado |
+| `rafq.pending_invitation_token` | `services/pending-invitation.ts` | **una invitación en curso** |
+
+### Por qué el guard no las ve, y por qué eso importa
+
+`brand-name-guard.test.ts` sólo conoce el nombre viejo **`rafaq`**. Estas dicen **`rafq`** — otra cadena.
+La regla A nunca las miró, así que no hay exención declarada ni nada que se ponga rojo si alguien las
+renombra "para terminar el rebrand". El de `rafaq.db` está escrito con su motivo; estas ocho no.
+
+**Fix propuesto** (no hecho): una constante única `STORAGE_PREFIX` de la que salgan las ocho, con un
+guard que (a) prohíba el prefijo literal fuera de ese módulo y (b) deje escrito que **no se renombra sin
+una migración de claves**. Falsificable: cambiar el prefijo en un solo servicio → rojo.
+
+Si algún día se renombra de verdad, la migración es leer la clave vieja, escribir la nueva y borrar la
+vieja en el primer arranque — no un swap de literal.
+
+### El resto de los `rafq`, para no volver a auditarlos
+
+- `ar.rafq.app` / `.dev` / `.web` (105) — bundle id y Services ID de Apple. Van con el bundle id a
+  `com.mitropero.app`, **antes de publicar**. Diferido con la fase 6.
+- `rafq://` (56) — scheme de deep-link. Diferido: sin OTA, cambiarlo deja muertas las builds instaladas,
+  y lo usa la página publicada `invite.html`.
+- `noreply@rafq.ar` (22) — remitente de Resend. **La regla E del brand guard EXIGE que siga**: Resend
+  verifica el dominio, no el display name. Se cambia recién cuando `mitropero.com.ar` esté verificado.
+- `app.rafq.ar` (~20) — el dominio MUERTO. Ya no está en ninguna ruta viva: sólo en docs, en `progress/`,
+  en el `DEAD_ORIGIN` del guard (que lo prohíbe) y en un comentario de `utils/invite.ts` que explica a
+  propósito que el parser es host-agnóstico **para que los links viejos sigan entrando**.
+- `raf@rafq.ar` (11) — email de ejemplo en `validation.test.ts`. Cosmético.
