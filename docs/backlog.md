@@ -1750,3 +1750,7 @@ Al achicar el gate del chip de crash a `development`, ese perfil pasó a ser **e
 ## [2026-08-16] Funnel/step events en PostHog (idea de Raf)
 
 Taggear pasos de flujos que NO disparan query, para medir "hasta qué paso se llegó" y abandono. VA A POSTHOG (trabajo 3), NO al audit log (que solo ve writes) ni a una tabla propia (rehacer PostHog peor = antipatrón del banco). El caño ya está (feature 17); autocapture off, 3 eventos hoy. Meter un set chico de eventos de funnel cuando se haga el chunk NATIVO de PostHog (gated Fase 0): PRIORIDAD = wizard de MODO MANIOBRA (session_started/config_done/step_reached/summary_reached/committed|abandoned) + onboarding/activación (signup->1er campo->1er animal->1era maniobra) + import (started/abandoned). Sin PII en props. Offline: el SDK de PostHog buffea y flushea. Correlacionable con el request_id (spec 23).
+
+## [2026-08-17] Visor de audit (feat 24) — login de Facundo (Google)
+
+El visor usa `signInWithPassword`. Facundo entra con Google (`iamfadolf@gmail.com`) → no puede con password. Follow-up: o le pone password a esa cuenta, o v2 con `signInWithOAuth({provider:google})` en `docs/internal/audit-viewer/app.js` (+ agregar el origin de Pages `https://mitropero-auditoria.pages.dev` a las redirect URLs de Supabase Auth).
