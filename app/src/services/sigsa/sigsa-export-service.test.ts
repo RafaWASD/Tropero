@@ -304,7 +304,7 @@ test('buildSigsaDeclarationInsert: columnas correctas, SIN declared_by (lo fuerz
 
 test('buildSigsaDeclarationInsert: export_log_id NULL = marca manual ("ya declarado por otro medio") — T19 test b', () => {
   const q = buildSigsaDeclarationInsert('dec-m', 'est-1', 'prof-9', null);
-  // el último arg (export_log_id) es null → distingue la marca manual del export con archivo RAFAQ.
+  // el último arg (export_log_id) es null → distingue la marca manual del export con archivo miTropero.
   assert.deepEqual(q.args, ['dec-m', 'est-1', 'prof-9', null]);
 });
 

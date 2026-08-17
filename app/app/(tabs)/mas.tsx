@@ -1,4 +1,4 @@
-// app/(tabs)/mas.tsx — pantalla "Más" (settings) de RAFAQ (spec 01, ADR-018).
+// app/(tabs)/mas.tsx — pantalla "Más" (settings) de miTropero (spec 01, ADR-018).
 //
 // Cajón de ajustes (patrón Settings iOS/Android / tab "Más" de Mercado Pago — Jakob, modelo
 // mental conocido): SECCIONES AGRUPADAS con título mudo arriba + filas/cards adentro.

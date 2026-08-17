@@ -1,4 +1,4 @@
-// tamagui.config.ts — RAFAQ design tokens (FUENTE ÚNICA CANÓNICA)
+// tamagui.config.ts — miTropero design tokens (FUENTE ÚNICA CANÓNICA)
 //
 // Este archivo ES la fuente única canónica de tokens del frontend (ADR-023 §1):
 // color, spacing, tipografía, radios, touch-targets y elevación. Su LECTURA

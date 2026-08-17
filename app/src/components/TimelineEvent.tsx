@@ -5,7 +5,7 @@
 //
 // Anatomía (patrón feed/tracking, Jakob):
 //   - GUTTER izquierdo ~28px: un NODO circular (halo $greenLight, ícono lucide $primary — la firma
-//     RAFAQ de C2 DetailSection) + una LÍNEA conectora 1px $divider hacia el nodo siguiente (Gestalt
+//     miTropero de C2 DetailSection) + una LÍNEA conectora 1px $divider hacia el nodo siguiente (Gestalt
 //     continuidad). El último item NO dibuja la línea de abajo.
 //   - CONTENIDO derecha: título ($textPrimary 600) + detalle ($textMuted) + timestamp legible
 //     ($textFaint). Textos largos truncados (numberOfLines) — lección del hero clip de C2.

@@ -242,7 +242,7 @@ export async function persistDeclarations(
 
 /**
  * Marca UN animal como "ya declarado por otro medio" (T19 / R10.2) — INSERT de 1 sigsa_declarations SIN
- * export_log_id (el NULL distingue la marca manual del export con archivo RAFAQ). Offline-first (local →
+ * export_log_id (el NULL distingue la marca manual del export con archivo miTropero). Offline-first (local →
  * cola de sync). RLS owner/vet + IDOR-check (0111) lo re-validan al subir; un field_operator es rechazado
  * (42501, MEDIUM-3) por uploadData, NO por el return de acá. declared_by forzado por trigger.
  *

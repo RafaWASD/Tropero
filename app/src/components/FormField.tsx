@@ -1,4 +1,4 @@
-// FormField — input de formulario canónico de RAFAQ (spec 01, T3.2 / ADR-023).
+// FormField — input de formulario canónico de miTropero (spec 01, T3.2 / ADR-023).
 //
 // Anatomía: label arriba + input pill + texto de error opcional debajo. Patrón
 // canónico de la librería (igual que Button): tokens-only (cero hardcode, ADR-023

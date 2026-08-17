@@ -150,7 +150,7 @@ test('capturas: el indicador arriba a la derecha, en sus dos formas @ 412×915',
       clip: { x: 0, y: 0, width: 412, height: Math.round(collapsed.y + collapsed.height + 24) },
     });
 
-    // ── (04)/(05) "Inicio": la fila del header está LLENA (switch · RAFAQ · avatar) ────────────────
+    // ── (04)/(05) "Inicio": la fila del header está LLENA (switch · miTropero · avatar) ────────────────
     // Se pasa por "Animales" —que reclama el lugar, así que el indicador se apaga— y al volver a Inicio
     // vuelve a aparecer: esa reaparición es, de nuevo, una noticia → pill. Es una ruta REAL de operario,
     // no un truco de test.

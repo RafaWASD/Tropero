@@ -1,4 +1,4 @@
-// app/(tabs)/index.tsx — Home de RAFAQ (post-creación de establecimiento).
+// app/(tabs)/index.tsx — Home de miTropero (post-creación de establecimiento).
 //
 // Construida a mano como TEST DE COBERTURA del design system (A.1, ADR-023 §5):
 // reproduce el mockup canónico `design/stitch-iter-4/00-home-CANONICAL.png`

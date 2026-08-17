@@ -44,7 +44,7 @@ export async function isOnOnboarding(page: Page): Promise<boolean> {
 
 /**
  * Espera a aterrizar en la HOME (post-login con campo activo). La home tiene el wordmark
- * "RAFAQ" en el header y el saludo "¡Hola …! 👋". Anclamos al saludo (texto único de la home).
+ * "miTropero" en el header y el saludo "¡Hola …! 👋". Anclamos al saludo (texto único de la home).
  */
 export async function waitForHome(page: Page): Promise<void> {
   // 45s y no 30s: esta espera cubre login + PRIMER SYNC de PowerSync, y el runner de CI es bastante más

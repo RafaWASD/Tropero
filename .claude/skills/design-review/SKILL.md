@@ -1,11 +1,11 @@
 ---
 name: design-review
-description: Criterios + procedimiento de diseñador UX/UI mobile profesional para RAFAQ. Usar al DISEÑAR, CRITICAR o REVISAR cualquier UI (pantallas, componentes, navegación, microinteracciones), y SIEMPRE al vetear lo que devuelve el implementer en una tarea de diseño ANTES de mostrárselo a Raf. Triggers fuertes — "analizá este diseño", "criticá esta pantalla", "¿está bien este componente?", "revisá lo que devolvió el implementer", "qué opinás de cómo quedó", o cualquier iteración de diseño visual. El objetivo: que a Raf solo le llegue diseño que pasó un filtro profesional (lindo + buenas prácticas), no cada devolución cruda.
+description: Criterios + procedimiento de diseñador UX/UI mobile profesional para miTropero. Usar al DISEÑAR, CRITICAR o REVISAR cualquier UI (pantallas, componentes, navegación, microinteracciones), y SIEMPRE al vetear lo que devuelve el implementer en una tarea de diseño ANTES de mostrárselo a Raf. Triggers fuertes — "analizá este diseño", "criticá esta pantalla", "¿está bien este componente?", "revisá lo que devolvió el implementer", "qué opinás de cómo quedó", o cualquier iteración de diseño visual. El objetivo: que a Raf solo le llegue diseño que pasó un filtro profesional (lindo + buenas prácticas), no cada devolución cruda.
 ---
 
-# Design Review — criterios + procedimiento (RAFAQ)
+# Design Review — criterios + procedimiento (miTropero)
 
-RAFAQ apunta a "el mejor en el primer try": el polish de UX pesa más que YAGNI estricto. El leader es el **primer revisor de diseño**, NO un pasamanos: filtra antes de molestar a Raf.
+miTropero apunta a "el mejor en el primer try": el polish de UX pesa más que YAGNI estricto. El leader es el **primer revisor de diseño**, NO un pasamanos: filtra antes de molestar a Raf.
 
 ## Procedimiento (OBLIGATORIO en toda tarea de diseño)
 1. **Lluvia de ideas + análisis ANTES de implementar.** Ante un pedido de diseño, generar 2–4 ideas, analizar cada una con los criterios de abajo (nombrando el principio), elegir la mejor con fundamento, y recién ahí mandar al implementer. No implementar la primera ocurrencia.
@@ -30,9 +30,9 @@ RAFAQ apunta a "el mejor en el primer try": el polish de UX pesa más que YAGNI 
 - **Aesthetic-Usability**: lo estéticamente agradable se percibe como más usable (y perdona fallas menores). El polish importa.
 
 ### Mobile (HIG / Material / thumb-zone)
-- **Touch targets** ≥ 44pt (iOS) / 48dp (Android), **gap ≥ 8px**. RAFAQ: tirar más grande (guante/barro). Botones primarios ≥56px.
+- **Touch targets** ≥ 44pt (iOS) / 48dp (Android), **gap ≥ 8px**. miTropero: tirar más grande (guante/barro). Botones primarios ≥56px.
 - **Thumb zone**: acciones primarias en el **tercio inferior** (≈75% de los toques son con el pulgar). Esquinas superiores = incómodas en teléfonos grandes.
-- **Safe areas**: respetar insets (home indicator iOS ≈34pt, gesture/3-botones Android ≈24/48dp). NO poner contenido tocable/importante en esa franja **ni pegado a ella**. En RAFAQ **nunca se calcula a mano**: `useSafeBottomInset()` = `max(insetVigente, insetArranque, $navBottomMin=12) + (Android ? $navBarGap=16 : 0)` → **web 12 · iOS 34 · Android gestos 40 · Android 3 botones 64**. Dos errores a no repetir: ⚠️ **NO** `max(insets.bottom, mínimo)` —lo que esta skill prescribía hasta el 2026-07-26— porque reserva la barra y nada más en cualquier Android con barra real (`max(48,12)=48`) y deja el CTA a **1dp** de ella (el mínimo solo gana con inset 0, o sea en web: por eso el bug no se ve en el preview); ⚠️ **NO** sumar el aire en todas las plataformas, porque en **iOS el inset de 34pt YA es aire** (espacio pintado con el fondo de la app, con el home indicator fino adentro) y sumarle 16 engorda la tab bar a 110pt (33% más que la nativa de iOS) comiendo zona de pulgar. El aire va donde el inset es una **barra de navegación opaca dibujada sobre el contenido**: Android. Un toque bajo con guante cae en "atrás"/"home" → prevención de errores (Nielsen #5).
+- **Safe areas**: respetar insets (home indicator iOS ≈34pt, gesture/3-botones Android ≈24/48dp). NO poner contenido tocable/importante en esa franja **ni pegado a ella**. En miTropero **nunca se calcula a mano**: `useSafeBottomInset()` = `max(insetVigente, insetArranque, $navBottomMin=12) + (Android ? $navBarGap=16 : 0)` → **web 12 · iOS 34 · Android gestos 40 · Android 3 botones 64**. Dos errores a no repetir: ⚠️ **NO** `max(insets.bottom, mínimo)` —lo que esta skill prescribía hasta el 2026-07-26— porque reserva la barra y nada más en cualquier Android con barra real (`max(48,12)=48`) y deja el CTA a **1dp** de ella (el mínimo solo gana con inset 0, o sea en web: por eso el bug no se ve en el preview); ⚠️ **NO** sumar el aire en todas las plataformas, porque en **iOS el inset de 34pt YA es aire** (espacio pintado con el fondo de la app, con el home indicator fino adentro) y sumarle 16 engorda la tab bar a 110pt (33% más que la nativa de iOS) comiendo zona de pulgar. El aire va donde el inset es una **barra de navegación opaca dibujada sobre el contenido**: Android. Un toque bajo con guante cae en "atrás"/"home" → prevención de errores (Nielsen #5).
 - **Bottom nav 3–5 ítems** (4 es el sweet spot; más = targets chicos). Íconos **con label** salvo símbolo universal (evitar "mystery meat").
 - **Device real** para el veredicto final, no emulador/mouse.
 

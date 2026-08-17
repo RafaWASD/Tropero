@@ -1,4 +1,4 @@
-// Select — combo reutilizable de RAFAQ (ADR-023 §0: el deliverable del frontend son los
+// Select — combo reutilizable de miTropero (ADR-023 §0: el deliverable del frontend son los
 // componentes). Patrón INLINE-ACCORDION: el trigger es un pill que, al tocarlo, despliega la
 // lista de opciones JUSTO debajo (en el flujo del layout, no en un overlay/portal nativo). Esto
 // garantiza que ande IGUAL en web (`pnpm web`, RN-web) y en native sin Modal/Portal específicos

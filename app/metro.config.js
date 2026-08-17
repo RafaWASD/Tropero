@@ -1,4 +1,4 @@
-// metro.config.js — RAFAQ (B.0 scaffold, ADR-013)
+// metro.config.js — miTropero (B.0 scaffold, ADR-013)
 //
 // Base de Expo (getDefaultConfig) envuelta por el plugin de Tamagui.
 // `isCSSEnabled: true` habilita el pipeline de CSS que Tamagui usa en web;

@@ -2,11 +2,11 @@
 // R7, R8, R9, R10, R12, R13).
 //
 // Genera el archivo .txt importable en SIGSA web para declarar los dispositivos de identificación
-// electrónica (Res. 841/2025). El productor sube el archivo manualmente; RAFAQ lo produce + recuerda
+// electrónica (Res. 841/2025). El productor sube el archivo manualmente; miTropero lo produce + recuerda
 // los 4 datos de pantalla (checklist post-export). Accesible desde "Más" (stack-pushed, hermana de
 // /rodeos). OFFLINE-FIRST (R14): toda la generación es local (SQLite de PowerSync) — el hook lo orquesta.
 //
-// Estructura (design §"UX — Pantalla de exportación", 🟡 criticidad MIXTA — oficina, RAFAQ big-touch):
+// Estructura (design §"UX — Pantalla de exportación", 🟡 criticidad MIXTA — oficina, miTropero big-touch):
 //   - Card-resumen: "{N} animales listos" + botón "Exportar {N} animales" (deshabilitado si N=0) +
 //     sub-texto "{M} a completar".
 //   - Filtros colapsables (rodeo + rango de fechas de nacimiento), SECUNDARIOS (no dominan).

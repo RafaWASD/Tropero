@@ -1,4 +1,4 @@
-// e2e/helpers/fixtures.ts — `test` extendido de RAFAQ con el shim de env del bundle web.
+// e2e/helpers/fixtures.ts — `test` extendido de miTropero con el shim de env del bundle web.
 //
 // ⚠️ POR QUÉ ESTE SHIM (hallazgo de la corrida):
 //   El cliente Supabase lee la URL/anon key con `src/utils/env.ts → readPublicEnv(name)`, que

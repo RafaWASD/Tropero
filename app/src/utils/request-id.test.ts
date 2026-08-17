@@ -59,7 +59,7 @@ test('el header del cliente es EXACTAMENTE el que el backend acepta (no dos lite
 test('ningún archivo de app/src escribe el nombre del header a mano (sobre la AUSENCIA)', () => {
   // No enumera los tres call-sites: escanea el árbol. Un servicio nuevo que hardcodee el literal —en
   // cualquiera de las dos grafías— nace en ROJO sin que nadie tenga que acordarse de agregarlo acá.
-  const HEADER_LITERAL = /['"`]x-(mitropero|rafaq)-(actor|request-id)['"`]/i;
+  const HEADER_LITERAL = /['"`]x-(rafaq|mitropero)-(actor|request-id)['"`]/i;
   const EXENTO = 'utils/request-id.ts'; // la ÚNICA definición
   const files: string[] = [];
   const walk = (dir: string): void => {

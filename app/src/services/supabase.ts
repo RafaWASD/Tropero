@@ -1,4 +1,4 @@
-// Cliente Supabase real de RAFAQ (spec 01, T3.1).
+// Cliente Supabase real de miTropero (spec 01, T3.1).
 //
 // La sesión de Auth persiste en almacenamiento seguro del dispositivo vía un
 // storage adapter sobre expo-secure-store (solo-native). En WEB expo-secure-store

@@ -1,11 +1,11 @@
-// app/animal/[id].tsx — ficha del animal con IDENTIDAD RAFAQ (spec 09 R5 versión C2 / spec 02 R14
+// app/animal/[id].tsx — ficha del animal con IDENTIDAD miTropero (spec 09 R5 versión C2 / spec 02 R14
 // parcial). Fix-loop C2 FIX 1: era una lista label-valor pelada en negro (genérica); ahora tiene
 // jerarquía y marca.
 //
 // Aterrizaje del find-or-create (match → EDIT, post-create → R4.7) y del tap en la lista (R1.3).
 // Anatomía:
 //   - HERO header (capa de identidad): el identificador visual/IDV grande (Inter 700) + CategoryBadge
-//     (firma verde de RAFAQ) + sexo con ícono en color ($primary) + rodeo. "La ficha de ESTE animal".
+//     (firma verde de miTropero) + sexo con ícono en color ($primary) + rodeo. "La ficha de ESTE animal".
 //   - Secciones (Identificación · Datos del animal): cards bone ($surface) con header de sección
 //     (ícono lucide chico $primary) + filas label/valor. Identificadores largos truncados (no wrap).
 //   - "Historial de eventos": teaser cálido ($greenLight + reloj $primary), NO un cuadro gris muerto.
@@ -1546,7 +1546,7 @@ function ArchivedBadge({ status, exitDate }: { status: AnimalStatus; exitDate: s
 // derivada (`onPreviewRevert`, la MISMA resolución que el revert ⇒ no divergen). Si no es resoluble
 // localmente (RC6.4.5), no se anticipa nada (el flujo de error del revert manda) → línea omitida.
 //
-// Lenguaje visual: $surface + borde/ícono/texto $primary (firma RAFAQ, NO terracota — esto NO es una
+// Lenguaje visual: $surface + borde/ícono/texto $primary (firma miTropero, NO terracota — esto NO es una
 // alerta ni una baja). a11y por helper. Cero hardcode (tokens + getTokenValue para el ícono lucide).
 function CategoryOverrideCard({
   canRevert,
@@ -1808,7 +1808,7 @@ function CutRow({
 
 // ─── Sección "Manejo" (spec 10 T-UI.7): Castrado Sí/No + ⭐ Futuro torito (solo machos) ────────
 //
-// Dos controles de manejo del macho, agrupados en una card con la firma RAFAQ (DetailSection + Scissors):
+// Dos controles de manejo del macho, agrupados en una card con la firma miTropero (DetailSection + Scissors):
 //   1. "Castrado": estado editable (R13.1) con confirmación que ANTICIPA el recálculo de categoría (espejo
 //      C6, igual patrón que CategoryOverrideCard). Al confirmar → setCastrated (UPDATE + observación
 //      automática R13.7). El flip NO es un evento tipado en el timeline (D10) — aparece como observación.
@@ -2076,7 +2076,7 @@ function archivedLabel(status: AnimalStatus): string | null {
 }
 
 /**
- * Card tappable "Madre" (R14.7): ícono Milk (firma RAFAQ verde) + label de la madre + su categoría;
+ * Card tappable "Madre" (R14.7): ícono Milk (firma miTropero verde) + label de la madre + su categoría;
  * si la madre está archivada (status ≠ active), un indicador chico ("Vendida"/"Muerta"/"Transferida").
  * Al tocar → ficha de la madre (tolerante a archivada, R4.15). a11y por helper (Pressable). Cero
  * hardcode (tokens). Mismo lenguaje visual que las TypeCard (borde, halo verde, chevron).
@@ -2683,7 +2683,7 @@ function CurrentStateSection({
 
 /**
  * CTA "Tacto de preñez" / "Tacto de aptitud" de la sección "Estado actual" (RTF.3.1/RTF.3.2). Outline
- * `$primary` (firma RAFAQ, acción constructiva — no compite con el CTA principal "Agregar evento" del
+ * `$primary` (firma miTropero, acción constructiva — no compite con el CTA principal "Agregar evento" del
  * historial, que es sólido), ícono `Stethoscope`, alto ≥ `$touchMin`. El copy NOMBRA el tacto que se va a
  * hacer: el operario tiene que saber qué le va a pedir la pantalla siguiente antes de tocar.
  *

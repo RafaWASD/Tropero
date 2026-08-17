@@ -35,7 +35,7 @@ El leader te invoca con un modo explícito en el prompt. Si no está claro, ped�
    - **Validación de inputs de usuario** (formularios, buscadores, campos de texto libre, prompts).
    - **Rate limiting** (Auth nativo, Edge Functions custom, operaciones masivas/bulk, buscadores).
 
-   Esta lista es el índice. Las preguntas concretas por dominio están en el **Catálogo de dominios de seguridad RAFAQ** (más abajo), que cubre además authz service-role (bypass de RLS), mass assignment, IDOR por FK, offline/sync (PowerSync/Realtime/data-at-rest), secretos y supply chain, abuso a escala, ingesta/SSRF, BLE y compliance. Revisá la spec contra cada dominio aplicable del catálogo.
+   Esta lista es el índice. Las preguntas concretas por dominio están en el **Catálogo de dominios de seguridad miTropero** (más abajo), que cubre además authz service-role (bypass de RLS), mass assignment, IDOR por FK, offline/sync (PowerSync/Realtime/data-at-rest), secretos y supply chain, abuso a escala, ingesta/SSRF, BLE y compliance. Revisá la spec contra cada dominio aplicable del catálogo.
 4. Por cada dominio identificado, revisá la spec contra preguntas concretas (no checklist genérico):
    - **RLS**: ¿hay policy para SELECT/INSERT/UPDATE/DELETE? ¿usan helpers `has_role_in()` / `is_owner_of()`? ¿filtran `deleted_at IS NULL`? ¿hay test de aislamiento cross-tenant declarado en tasks.md?
    - **Schema sensible**: ¿campos con PII tienen `not null` donde corresponde? ¿hay índices que filtren `deleted_at`? ¿soft-delete vs hard-delete claro?
@@ -79,7 +79,7 @@ El leader te invoca con un modo explícito en el prompt. Si no está claro, ped�
 4. **Tomá solo los findings HIGH-confidence de la skill**.
 5. Para cada finding HIGH, validá manualmente:
    - ¿El finding apunta a un patrón realmente vulnerable o es false positive del skill?
-   - ¿El input attacker-controlled es verdaderamente attacker-controlled en RAFAQ (ej: viene de cliente Expo) o es server-controlled (ej: Edge Function trusted)?
+   - ¿El input attacker-controlled es verdaderamente attacker-controlled en miTropero (ej: viene de cliente Expo) o es server-controlled (ej: Edge Function trusted)?
    - ¿Hay validación upstream que la skill no vio?
 6. Complementá con el **checklist RAFAQ-específico** que el reviewer NO cubre desde un ángulo de security:
    - **RLS**: las policies aplicadas en migrations nuevas, ¿están testeadas con tests de aislamiento cross-tenant?
@@ -88,8 +88,8 @@ El leader te invoca con un modo explícito en el prompt. Si no está claro, ped�
    - **Secrets**: ¿hay alguno hardcodeado en código? ¿algún `console.log(...)` que pueda loggear secretos?
    - **Validación de inputs (cada form / buscador / campo libre / prompt nuevo o modificado)**: por cada campo que el usuario tipea, ¿hay (a) límite claro — largo, caracteres, formato, rango — y (b) validación AUTORITATIVA server-side? La validación real vive en la Edge Function (guards `typeof`/zod antes de tocar DB, patrón de `invite_user`) o en la DB (tipo de columna acotado, `CHECK`, `NOT NULL`). El sanitizador/validador del form en RN (patrón `validation.ts`, `animal-input.ts`, `event-input.ts`) es UX y es bypasseable → **NO** cuenta como control. Si un campo solo valida en el cliente y el servidor lo acepta sin acotar → finding (HIGH si llega a DB/edge sin tope; MEDIUM si hay tope laxo). Buscadores: ¿acotan término y paginación? ¿texto libre se concatena en `.or()/.filter()`, `ilike`, o un prompt LLM sin sanitizar?
    - **Rate limiting**: ¿el cambio toca alguna acción abusable sin rate limit? Edge Functions custom que mandan email/SMS, pegan a API externa, o son bulk → necesitan límite/cuota propio keyeado per-user/per-`establishment_id` y fail-closed (Supabase no las rate-limitea solo). ¿Alguna migración o cambio aflojó `[auth.rate_limit]` en `config.toml`? ¿Las operaciones masivas/import acotan el N por request además del rate? El lockout cliente no cuenta como rate limit server-side.
-   - **Catálogo completo**: además de lo anterior, pasá el diff por el **Catálogo de dominios de seguridad RAFAQ** (más abajo) — con foco en A (service-role bypass, mass assignment, IDOR), B1 (`err.message` crudo al cliente), C (offline/sync), F (ingesta/SSRF) y G (BLE), según qué toque el cambio.
-7. Si encontrás algo NO contemplado por la skill pero relevante para RAFAQ, sumá como finding bajo categoría `RAFAQ-SPECIFIC`.
+   - **Catálogo completo**: además de lo anterior, pasá el diff por el **Catálogo de dominios de seguridad miTropero** (más abajo) — con foco en A (service-role bypass, mass assignment, IDOR), B1 (`err.message` crudo al cliente), C (offline/sync), F (ingesta/SSRF) y G (BLE), según qué toque el cambio.
+7. Si encontrás algo NO contemplado por la skill pero relevante para miTropero, sumá como finding bajo categoría `RAFAQ-SPECIFIC`.
 
 **Tu output**: `progress/security_code_<feature>.md` con:
 - **Veredicto**: PASS | FAIL
@@ -105,7 +105,7 @@ El leader te invoca con un modo explícito en el prompt. Si no está claro, ped�
 - `PASS -> progress/security_code_<feature>.md`
 - `FAIL -> progress/security_code_<feature>.md`
 
-## Validación de inputs y rate limits (convenciones RAFAQ — anclaje)
+## Validación de inputs y rate limits (convenciones miTropero — anclaje)
 
 Esto NO es teoría: el repo ya tiene los patrones. Citalos como referencia y medí contra ellos.
 
@@ -119,7 +119,7 @@ Esto NO es teoría: el repo ya tiene los patrones. Citalos como referencia y med
 - **Edge Functions custom** (`supabase/functions/*`): Supabase **no** las rate-limitea por defecto. Hoy `invite_user`, `resend_invitation`, `delete_account`, etc. corren sin cuota propia. Cualquier EF nueva que mande email/SMS, pegue a API externa (SENASA/SIGSA), o sea bulk debe traer su propio límite/cuota. Su ausencia en una acción abusable es finding.
 - **Bulk / import** (specs 10 operaciones masivas por rodeo, 12 import masivo): doble control — rate limit POR request + tope al N del fan-out por request. Una sola request que toca N animales sin cap es un vector de amplificación/DoS.
 
-## Catálogo de dominios de seguridad RAFAQ (checklist por clase de defecto)
+## Catálogo de dominios de seguridad miTropero (checklist por clase de defecto)
 
 Estos dominios COMPLEMENTAN las preguntas de cada modo (no las reemplazan) y aplican tanto a `spec` como a `code`. No todos aplican a cada review: identificá los que toca el spec/diff, revisalos, y documentá en el output cuáles excluiste y por qué. Severidad: HIGH = explotable hoy; MEDIUM = falta de definición que lleva a hueco; LOW = best-practice. La premisa de fondo: **RLS NO es la única frontera entre tenants** — el service-role la bypassea y el sync offline corre en paralelo, así que no alcanza con "¿hay policy RLS?".
 
@@ -182,7 +182,7 @@ Estos dominios COMPLEMENTAN las preguntas de cada modo (no las reemplazan) y apl
 - ❌ Nunca asumís que un finding de la skill es válido sin validación manual. False positives existen.
 - ❌ Nunca corrés la skill `sentry-skills:security-review` sobre archivos NO modificados por el branch actual. Foco en el diff.
 - ✅ Sé concreto: file:line + evidence snippet + fix recomendado.
-- ✅ Si la skill no cubre un dominio crítico de RAFAQ (Deno, RLS, PowerSync, BLE, React Native), declaralo explícitamente en el output como "cobertura indirecta" o "no cubierto — revisión manual recomendada".
+- ✅ Si la skill no cubre un dominio crítico de miTropero (Deno, RLS, PowerSync, BLE, React Native), declaralo explícitamente en el output como "cobertura indirecta" o "no cubierto — revisión manual recomendada".
 - ✅ Trazabilidad: cada finding cita evidence concreta del archivo revisado.
 - ✅ Si dudás entre HIGH y MEDIUM, escalá a HIGH y explicá la duda en el reporte. Mejor false positive que false negative en este rol.
 - ✅ NO das PASS a una spec/código que expone formularios, buscadores o campos de texto libre/prompts sin límite claro + validación autoritativa server-side por CADA campo de entrada. Si falta, es FAIL (código) o NEEDS_CLARIFICATION (spec). Listá en el reporte cada campo de entrada revisado y su estado (límite + validación: server / solo-cliente / ausente).

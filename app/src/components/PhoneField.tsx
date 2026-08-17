@@ -1,4 +1,4 @@
-// PhoneField — el ÚNICO input de teléfono de RAFAQ (spec 01, delta TELÉFONO / RTEL.3.1).
+// PhoneField — el ÚNICO input de teléfono de miTropero (spec 01, delta TELÉFONO / RTEL.3.1).
 //
 // Por qué existe: el teléfono se capturaba en DOS pantallas con dos configuraciones distintas de
 // FormField, y apenas se tocó una las dos divergieron (en `crear-campo` se podían tipear letras y el

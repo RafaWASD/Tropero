@@ -1,6 +1,6 @@
-// CategoryBadge — pill de categoría del animal (capa de identidad RAFAQ, spec 02/09 fix-loop C2).
+// CategoryBadge — pill de categoría del animal (capa de identidad miTropero, spec 02/09 fix-loop C2).
 //
-// FIRMA VISUAL de RAFAQ: fondo $greenLight + texto $textPrimary (casi-negro, recipe B §2.1 — era
+// FIRMA VISUAL de miTropero: fondo $greenLight + texto $textPrimary (casi-negro, recipe B §2.1 — era
 // $primary/#1e5a3e sobre $greenLight, 4.55:1 ilegible al sol). Mismo FONDO que la pill activa del
 // bottom-nav (NavTabIcon: ícono $primary sobre $greenLight — ahí es ícono, pasa 3:1). Reusable a través de
 // la ficha (hero), la fila de la lista (AnimalRow) y, a futuro, C3 (ficha completa) — base de la

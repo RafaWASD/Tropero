@@ -1,4 +1,4 @@
-// app/(tabs)/_layout.tsx — shell de navegación raíz de RAFAQ (ADR-018).
+// app/(tabs)/_layout.tsx — shell de navegación raíz de miTropero (ADR-018).
 //
 // Bottom tab bar de 5 items con FAB central elevado:
 //   [Inicio]  [Animales]  [⚡ FAB Maniobra]  [Reportes]  [Más]

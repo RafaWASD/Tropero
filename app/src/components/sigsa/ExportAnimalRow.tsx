@@ -9,7 +9,7 @@
 //     AbortionFlag/FutureBullBadge: $surface + $terracota, sin token terracota-claro nuevo) + chevron.
 //     Tap → ficha para completar el dato y reintentar (R8.3).
 //
-// Criticidad MIXTA (tarea de oficina, no manga-only, pero RAFAQ big-touch): target ≥ $touchMin, TAG
+// Criticidad MIXTA (tarea de oficina, no manga-only, pero miTropero big-touch): target ≥ $touchMin, TAG
 // grande que pop-ea (es el dato por el que el productor reconoce el animal), divider entre filas.
 //
 // Cero hardcode de color/spacing (ADR-023 §4): tokens; lo que cruza a la API no-Tamagui de lucide

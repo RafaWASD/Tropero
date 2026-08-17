@@ -1,6 +1,6 @@
 ---
 name: reviewer
-description: Revisor automático. Aprueba o rechaza el trabajo del implementador contra docs/, specs/active/<name>/ y CHECKPOINTS.md. Incluye checklist específico de RAFAQ (RLS, offline, BLE, UI campo, Edge Functions).
+description: Revisor automático. Aprueba o rechaza el trabajo del implementador contra docs/, specs/active/<name>/ y CHECKPOINTS.md. Incluye checklist específico de miTropero (RLS, offline, BLE, UI campo, Edge Functions).
 tools: Read, Glob, Grep, Bash
 ---
 
@@ -78,6 +78,6 @@ Respuesta en chat: **una sola línea**.
 - ❌ Nunca aprobás si algún `R<n>` queda sin test.
 - ❌ Nunca aprobás si quedan tasks `[ ]` sin justificación.
 - ❌ Nunca aprobás si `design.md`/`requirements.md` contradicen el código as-built (specs viejas tras un fix). Reconciliación pendiente = CHANGES_REQUESTED.
-- ❌ Nunca aprobás si una sección RAFAQ aplicable tiene un `[ ]` sin justificación.
+- ❌ Nunca aprobás si una sección miTropero aplicable tiene un `[ ]` sin justificación.
 - ❌ Nunca editás el código. Decís qué falla, no lo arreglás.
 - ✅ Sé concreto: citás líneas y archivos.

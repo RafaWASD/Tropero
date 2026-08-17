@@ -96,7 +96,7 @@ test('idempotencyName: formato canónico estable <type>:<animal>:<date>', () => 
   );
 });
 
-test('el namespace de RAFAQ es un UUID válido y CONGELADO (cambiarlo rompería la dedup)', () => {
+test('el namespace de miTropero es un UUID válido y CONGELADO (cambiarlo rompería la dedup)', () => {
   assert.match(BULK_EVENT_NAMESPACE, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
   // Pin del valor: si alguien lo toca por accidente, este test lo caza.
   assert.equal(BULK_EVENT_NAMESPACE, '6b9a7d2e-1c4f-5a83-9e0b-2f3c4d5e6a7b');

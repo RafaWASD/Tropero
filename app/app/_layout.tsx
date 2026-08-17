@@ -1,4 +1,4 @@
-// app/_layout.tsx — layout raíz de RAFAQ (Expo Router).
+// app/_layout.tsx — layout raíz de miTropero (Expo Router).
 //
 // Monta los providers globales del frontend (ADR-013):
 //   - GestureHandlerRootView: requerido por react-native-gesture-handler en la

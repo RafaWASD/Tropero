@@ -1,4 +1,4 @@
-// playwright.config.ts — suite E2E del build WEB de RAFAQ contra el Supabase REMOTO.
+// playwright.config.ts — suite E2E del build WEB de miTropero contra el Supabase REMOTO.
 //
 // Estrategia (ver e2e/README.md):
 //   - Servimos el build ESTÁTICO de Expo (app/dist, generado con `expo export -p web`) en el

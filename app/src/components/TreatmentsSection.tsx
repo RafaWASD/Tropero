@@ -60,7 +60,7 @@ export function TreatmentsSection({
 
   return (
     <Card gap="$3">
-      {/* Header de sección (firma RAFAQ: greenLight + $primary, consistente con las otras DetailSection). */}
+      {/* Header de sección (firma miTropero: greenLight + $primary, consistente con las otras DetailSection). */}
       <XStack alignItems="center" gap="$2">
         <View
           width={28}

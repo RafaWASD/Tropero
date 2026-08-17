@@ -1,17 +1,17 @@
 ---
 name: stitch-workflow
-description: "Flujo adaptado para importar designs de Google Stitch al proyecto RAFAQ (React Native + Expo + Tamagui + Reanimated). Pipeline: conectar Stitch MCP → listar/importar proyecto → adaptar si Stitch exportó código web → auditar contra stack target → aplicar fixes en orden → validar con check.mjs → levantar Metro. TRIGGERS OBLIGATORIOS: 'stitch workflow', 'importá de stitch', 'pasá esto de stitch a RAFAQ', 'auditá lo importado de stitch', 'stitch-to-RN'. TRIGGERS FUERTES (con contexto de import): 'traete este flujo de stitch', 'el proyecto X de stitch ya está listo', 'meté esto en el repo'. NO disparar para diseños hechos en Figma manualmente, exports de otros sistemas, o cuando no hay un proyecto de Stitch identificado."
+description: "Flujo adaptado para importar designs de Google Stitch al proyecto miTropero (React Native + Expo + Tamagui + Reanimated). Pipeline: conectar Stitch MCP → listar/importar proyecto → adaptar si Stitch exportó código web → auditar contra stack target → aplicar fixes en orden → validar con check.mjs → levantar Metro. TRIGGERS OBLIGATORIOS: 'stitch workflow', 'importá de stitch', 'pasá esto de stitch a miTropero', 'auditá lo importado de stitch', 'stitch-to-RN'. TRIGGERS FUERTES (con contexto de import): 'traete este flujo de stitch', 'el proyecto X de stitch ya está listo', 'meté esto en el repo'. NO disparar para diseños hechos en Figma manualmente, exports de otros sistemas, o cuando no hay un proyecto de Stitch identificado."
 ---
 
-# Stitch → RAFAQ Workflow
+# Stitch → miTropero Workflow
 
-> Versión adaptada del prompt original "Diseños con Stitch y Claude Code" al stack RAFAQ. La estructura general (fases + puertas + checklist + diff contra `/imported`) se preserva. El contenido específico (animaciones, tokens, server, validaciones) está reescrito para React Native + Expo + Tamagui + Reanimated.
+> Versión adaptada del prompt original "Diseños con Stitch y Claude Code" al stack miTropero. La estructura general (fases + puertas + checklist + diff contra `/imported`) se preserva. El contenido específico (animaciones, tokens, server, validaciones) está reescrito para React Native + Expo + Tamagui + Reanimated.
 
 ---
 
 ## Stack target obligatorio
 
-Este flujo asume el stack de RAFAQ:
+Este flujo asume el stack de miTropero:
 
 - **React Native + Expo** (no React DOM, no Next.js, no Vite).
 - **TypeScript strict**.
@@ -67,7 +67,7 @@ Mostrar el árbol completo de archivos y esperar confirmación del usuario antes
 
 ## Fase 2 — Análisis de compatibilidad con stack target (NUEVO — CRÍTICO)
 
-**Antes de auditar nada de calidad, validar compatibilidad con stack RAFAQ.**
+**Antes de auditar nada de calidad, validar compatibilidad con stack miTropero.**
 
 Escanear lo importado y clasificar:
 
@@ -78,7 +78,7 @@ Escanear lo importado y clasificar:
 | Elementos HTML (`<div>`, `<span>`, `<button>`, `<img>`) | **WEB** | Necesita traducción a primitives RN (`View`, `Text`, `Pressable`, `Image`) |
 | Imports de `react-dom` | **WEB** | Crítico — no existe en RN |
 | Imports de `next/*` o `vite/*` | **WEB** | Crítico — incompatible |
-| Tailwind classes (`className="bg-blue-500 p-4"`) | **WEB** | Crítico — RAFAQ usa Tamagui, no Tailwind. Hay NativeWind pero no es el patrón canónico |
+| Tailwind classes (`className="bg-blue-500 p-4"`) | **WEB** | Crítico — miTropero usa Tamagui, no Tailwind. Hay NativeWind pero no es el patrón canónico |
 | CSS imports (`.css`, `.scss`, `.module.css`) | **WEB** | Crítico — no funciona en RN |
 | `motion.*` de Framer Motion | **WEB** | Reemplazar por `Animated.View` de Reanimated o `MotiView` |
 | `useReducedMotion` de framer-motion | **WEB** | Existe en RN pero distinto: `useReducedMotion` de `react-native` |
@@ -100,7 +100,7 @@ Tecnologías web encontradas: [Tailwind / Framer Motion / etc.]
 Opciones:
 1. TRADUCIR a React Native + Tamagui antes de continuar.
    Estimación: depende del tamaño del proyecto, típicamente 1-3 sesiones.
-   Pro: el código termina utilizable en RAFAQ.
+   Pro: el código termina utilizable en miTropero.
    Contra: trabajo significativo.
 
 2. DESCARTAR este import y volver a generar en Stitch pidiendo explícitamente
@@ -232,7 +232,7 @@ Escanear todo el código importado/traducido y generar checklist numerada usando
 - ¿Hover states sin equivalente RN? → Menor.
 - ¿APIs DOM (`document`, `window`, `localStorage`)? → Crítico.
 
-**17. Convenciones RAFAQ (PUNTO NUEVO)**
+**17. Convenciones miTropero (PUNTO NUEVO)**
 - ¿Idioma de UI en español? (CLAUDE.md convención).
 - ¿Idioma de código (variables, funciones, comments) en inglés? (CLAUDE.md convención).
 - ¿Multi-tenant respetado? (toda query con `establishment_id` del context activo).
@@ -646,5 +646,5 @@ Al terminar Fase 5 o 6, generar reporte breve con:
 
 - El usuario tiene un proyecto de Stitch listo y quiere traerlo al repo.
 - El usuario dice "importá lo que generé en Stitch" o equivalente.
-- El usuario quiere validar un design hecho en Stitch contra las convenciones de RAFAQ.
+- El usuario quiere validar un design hecho en Stitch contra las convenciones de miTropero.
 - El usuario quiere refinar visualmente una feature ya specificada usando algo que generó en Stitch como base.

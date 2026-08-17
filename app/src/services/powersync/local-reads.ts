@@ -3833,7 +3833,7 @@ export function buildExportLogInsert(
  * ⚠ NO se manda `declared_by`: el trigger `sigsa_declarations_set_declared_by` (0111, HIGH-1) lo FUERZA =
  * auth.uid() server-side. `declared_at` tiene `default now()` (no se manda).
  *
- * @param exportLogId  el export_log_id de la corrida (T11 export con archivo RAFAQ), o `null` para la
+ * @param exportLogId  el export_log_id de la corrida (T11 export con archivo miTropero), o `null` para la
  *                     MARCA MANUAL (T19 — "ya declarado por otro medio"): el NULL distingue las dos. La FK
  *                     export_log_id (0112) es ON DELETE SET NULL.
  */

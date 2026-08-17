@@ -7,7 +7,7 @@
 //   silenciosamente y deja al usuario TRABADO (consola: "The action 'GO_BACK' was not handled by
 //   any navigator. Is there any screen to go back to?"). NO es solo de DEV: el mismo stack-vacío
 //   pasa con un deep-link o un cold-start que aterriza directo en una ruta profunda (las rutas de
-//   RAFAQ son un Stack plano — `animal/[id]`, `agregar-evento`, `crear-animal` son hermanas en
+//   miTropero son un Stack plano — `animal/[id]`, `agregar-evento`, `crear-animal` son hermanas en
 //   `app/_layout.tsx` → sin pantalla previa no hay fallback automático).
 //
 // El patrón robusto: si se PUEDE volver (`router.canGoBack()`), `router.back()` (preserva la

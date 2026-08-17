@@ -1,4 +1,4 @@
-// Card — superficie de tarjeta canónica de RAFAQ (derivada de la home, A.1 / ADR-023).
+// Card — superficie de tarjeta canónica de miTropero (derivada de la home, A.1 / ADR-023).
 //
 // Fondo bone ($surface, cálido — la única surface que NO es el bg neutro), radio
 // $card (16px), padding generoso, y una sombra suave provisional (shadows.card del

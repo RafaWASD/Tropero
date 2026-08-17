@@ -1,4 +1,4 @@
-# E2E (Playwright) — build WEB de RAFAQ contra Supabase REMOTO
+# E2E (Playwright) — build WEB de miTropero contra Supabase REMOTO
 
 Red de seguridad de regresión para los flujos críticos del cliente (auth + establecimientos + rodeos).
 Es donde aparecen bugs de runtime que `tsc --noEmit` y los unit tests no atrapan: loops de

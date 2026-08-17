@@ -39,7 +39,7 @@ export type IdempotencyKey = {
 };
 
 /**
- * Namespace UUID FIJO de las operaciones masivas de RAFAQ (RFC 4122 §4.3). Es un UUID v4 generado UNA vez
+ * Namespace UUID FIJO de las operaciones masivas de miTropero (RFC 4122 §4.3). Es un UUID v4 generado UNA vez
  * y CONGELADO acá: cambiar este valor cambiaría TODOS los ids derivados → NUNCA modificar (rompería la
  * dedup contra eventos ya subidos). No es secreto (es un discriminador de namespace, no una clave).
  */

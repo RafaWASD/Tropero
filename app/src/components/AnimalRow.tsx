@@ -280,7 +280,7 @@ function TreatmentChip() {
 
 /**
  * Tier visual del chip de estado reproductivo (RAR.5.1, design §5) — 3 señales semánticas (Hick):
- *   - `good`    verde: Apta / Preñada → relleno $greenLight + texto $primary (firma RAFAQ, igual que CategoryBadge).
+ *   - `good`    verde: Apta / Preñada → relleno $greenLight + texto $primary (firma miTropero, igual que CategoryBadge).
  *   - `attn`    ámbar: Diferida / Vacía → outline $amber sobre $surface (≈5:1 AA).
  *   - `neutral` neutro: Servida sin tacto / No apta / CUT / Sin evaluar → outline $divider, texto $textMuted
  *     (igual que NoTagChip). NO reusa $cutBg/$cutText (firma amarilla del badge de CATEGORÍA CUT — evita doble
@@ -517,7 +517,7 @@ export function AnimalRow({
               {showStar ? <FutureBullBadge /> : null}
             </XStack>
           ) : (
-            // Subtítulo NORMAL: badge de categoría con COLOR (firma verde RAFAQ; AMARILLA si es CUT, RCUT.6.2
+            // Subtítulo NORMAL: badge de categoría con COLOR (firma verde miTropero; AMARILLA si es CUT, RCUT.6.2
             // — ruta preferida con `code`) + chip de estado reproductivo (RAR.3.1, hembras) + rodeo muted.
             //
             // Degradación anti-overlap (fix overlap AnimalRow — el subtítulo NUNCA debe pisar el chip "Sin

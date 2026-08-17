@@ -1,4 +1,4 @@
-// babel.config.js — RAFAQ (B.0 scaffold, ADR-013)
+// babel.config.js — miTropero (B.0 scaffold, ADR-013)
 //
 // Orden de plugins (importa):
 //   1. @tamagui/babel-plugin — optimizing compiler de Tamagui (extrae estilos,

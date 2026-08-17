@@ -1,4 +1,4 @@
-// Button — botón pill canónico de RAFAQ (derivado de la home, A.1 / ADR-023).
+// Button — botón pill canónico de miTropero (derivado de la home, A.1 / ADR-023).
 //
 // Variantes:
 //   - primary   → relleno verde botella ($primary), texto blanco. CTA principal.
