@@ -17,6 +17,60 @@ No es un sustituto de `feature_list.json` ni de los ADRs — es la antesala dond
 
 ## Ítems pendientes
 
+## 2026-08-17 — 🟠 Rename de env vars: los 2 pasos MANUALES de Raf + la limpieza posterior
+
+**Origen**: fase 7 punto 3 del rebrand miTropero. El código ya está renombrado y **es tolerante a los dos
+nombres**, así que hoy funciona con la configuración externa tal cual está. Lo que sigue son las acciones
+que sólo puede hacer Raf (tocan Supabase) y la limpieza que las sigue. **Nada de esto es urgente ni
+bloquea**; hacerlo a medias tampoco rompe, por eso está escrito con el orden explícito.
+
+### 1. `MITROPERO_ENV` — secret de Supabase (paso manual)
+
+La EF `health` lee `MITROPERO_ENV ?? RAFAQ_ENV ?? 'unknown'`, así que anda igual antes y después de que
+lo setees. **El código nuevo todavía no está deployado** (entra con el próximo deploy de `health`).
+
+⚠️ **Medido el 2026-08-17** (GET a `/functions/v1/health` de DEV): hoy devuelve
+`{"ok":true,"schema_version":"unknown","env":"unknown"}`. O sea que **en DEV el secret no está seteado con
+ninguno de los dos nombres** — el plan de rebrand suponía que sí. No pasó nada malo, pero tampoco se
+enteró nadie: el label de ambiente del monitor viene diciendo `unknown` desde que se deployó.
+
+1. `supabase secrets set MITROPERO_ENV=development --project-ref <dev>` (y `=production` en PROD si allá
+   existe el secret). Los dos secrets pueden convivir: setear el nuevo no rompe nada.
+2. **Recién después**, sacar el `?? Deno.env.get('RAFAQ_ENV')` de `supabase/functions/health/index.ts` y
+   borrar el secret viejo.
+
+⚠️ **No hay guard que cubra esto**: la suite `health` sólo valida el juego de claves del body, no el
+**valor** de `env`. Si se saca el fallback antes de setear el secret, el endpoint reporta
+`env: "unknown"` y el único que se entera es quien mire el monitor. Si al hacer el paso 2 querés cerrar
+ese agujero, el oráculo barato es agregar a `supabase/tests/health/run.cjs` un `assert` de que `env` es
+`development`/`production` (nunca `unknown`) — hoy no está puesto porque exigiría que el secret esté
+seteado en DEV para dar verde, y este trabajo se hizo sin tocar nada externo.
+
+### 2. `MITROPERO_CONFIRM_PROD` — memoria muscular (no hay paso obligatorio)
+
+Los scripts (`backup-db`, `apply-migration-mgmt`, `apply-all-migrations`, `powersync-deploy.sh`) y el
+workflow `backup-prod.yml` ya usan el nombre nuevo, **y aceptan el viejo** con un aviso por stderr. No
+hay nada que setear: cuando exportes la confirmación, usá `MITROPERO_CONFIRM_PROD=1`.
+
+**Cuándo sacar la aceptación del nombre viejo**: cuando ya no lo tipees por costumbre. Es un cambio de
+2 líneas (`ACCEPTED_CONFIRM_PROD_ENVS` en `scripts/lib/env-target.mjs` + el `elif` de
+`powersync-deploy.sh`), y `GUARD-ENV-0` va a nacer en rojo pidiendo que confirmes que es a propósito.
+
+### 3. `MITROPERO_KNOWN_PROD_REFS` — la que falla ABIERTA (leer antes de tocar)
+
+No está seteada en ningún lado hoy (ni `.env.local`, ni el workflow). El módulo lee la **unión** de
+`MITROPERO_KNOWN_PROD_REFS` y `RAFAQ_KNOWN_PROD_REFS`.
+
+**Por qué no se limpia igual que las otras dos**: es la única cuya pérdida **no tiene síntoma**. Si el
+código pasara a leer sólo el nombre nuevo y nadie lo setea, la lista queda vacía, la guarda destino-aware
+pierde el refuerzo, todo sigue en verde, y el día que el slot `dev` apunte a PROD nadie lo frena. Por eso
+además de la unión hay un guard: si el ambiente declara refs bajo un nombre que el módulo no lee,
+`resolveTarget` **aborta** con `KnownProdRefsCoverageError` nombrando la variable ignorada. Si algún día
+la renombrás por tu cuenta, el guard te va a cortar en vez de degradarse en silencio — ese corte es la
+feature, no un bug.
+
+**Próximo paso sugerido**: nada automático. El paso 1 cuando toque el próximo deploy de `health`.
+
 ## 2026-08-17 — 🟡 Limpieza del rename de headers: sacar la lectura del nombre VIEJO (`X-Rafaq-*`)
 
 **Origen**: fase 5 del rebrand miTropero. El rename se hizo **en dos tiempos** a propósito; esta entrada

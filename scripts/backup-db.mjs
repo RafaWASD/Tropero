@@ -9,8 +9,11 @@
 //   - Aborta SIN crear archivo si falta la conn string (R5.8).
 //
 // GUARDA (destino-aware, fail-closed): backup-db SIEMPRE apunta a PROD (lee SUPABASE_DB_URL_PROD y
-// exfiltra PII de PROD) → exige RAFAQ_CONFIRM_PROD=1 SIEMPRE, con o sin --env (as-built: más estricto
-// que R5.2, alineado a M5/R5.12). La Action lo setea; un run local exige exportarlo a mano.
+// exfiltra PII de PROD) → exige MITROPERO_CONFIRM_PROD=1 SIEMPRE, con o sin --env (as-built: más
+// estricto que R5.2, alineado a M5/R5.12). La Action lo setea; un run local exige exportarlo a mano.
+// El nombre PRE-rebrand (RAFAQ_CONFIRM_PROD) se sigue aceptando — el criterio vive en UN solo lugar
+// (`prodConfirmed` en lib/env-target.mjs), no duplicado acá: el workflow y el script tienen que aceptar
+// exactamente lo mismo o el backup nocturno se corta (lo ata `lib/backup-ci-consistency.test.mjs`).
 //
 // ⚠️ Lee PROD (read-only). El artifact trae PII: se cifra (gpg) en la Action ANTES de subirlo (M3/R8.6).
 
@@ -20,7 +23,7 @@ import { createGzip } from 'node:zlib';
 import { dirname, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { parseEnvFlag } from './lib/env-target.mjs';
+import { parseEnvFlag, prodConfirmedVia, legacyConfirmNotice, CONFIRM_PROD_ENV } from './lib/env-target.mjs';
 import { buildBackupPlan, safeSummary } from './lib/backup-cmd.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -54,12 +57,15 @@ if (envFlag !== undefined && envFlag !== 'dev' && envFlag !== 'prod') {
 }
 
 // GUARDA destino-aware: backup SIEMPRE es PROD → exige confirmación (fail-closed, R5.2/R5.12).
-if (process.env.RAFAQ_CONFIRM_PROD !== '1') {
+const confirmedVia = prodConfirmedVia(process.env);
+if (confirmedVia === null) {
   console.error(
-    'ABORTADO: backup-db apunta a PROD (SUPABASE_DB_URL_PROD) y exfiltra PII. Exportá RAFAQ_CONFIRM_PROD=1 para confirmar.',
+    `ABORTADO: backup-db apunta a PROD (SUPABASE_DB_URL_PROD) y exfiltra PII. Exportá ${CONFIRM_PROD_ENV}=1 para confirmar.`,
   );
   process.exit(2);
 }
+const notice = legacyConfirmNotice(confirmedVia);
+if (notice) console.error(notice); // a stderr: no contamina el stdout del script
 
 // Plan (throws si falta la conn string → aborta ANTES de crear archivo, R5.8). NUNCA loguear la conn string.
 let plan;

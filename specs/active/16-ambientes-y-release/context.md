@@ -44,7 +44,7 @@ Cubre las **Fases 1 (separación de ambientes)** y **5 (ops livianas)** del plan
 - Extender `fixtures.ts` para setear `EXPO_PUBLIC_ENV='e2e'` + flag `window.__MITROPERO_E2E__` (mismo patrón que `ble-e2e-flag.ts`).
 
 ### D5 — Scripts parametrizados con guarda de prod + backup/health desde día 1
-- `scripts/apply-migration.mjs --env prod` (default dev = **cero cambio**; con prod imprime el ref y exige `RAFAQ_CONFIRM_PROD=1`); nuevo `scripts/apply-all-migrations.mjs` (replay + ledger); `scripts/powersync-deploy.sh --env prod`; deploy de las 8 Edge Functions a prod.
+- `scripts/apply-migration.mjs --env prod` (default dev = **cero cambio**; con prod imprime el ref y exige `MITROPERO_CONFIRM_PROD=1`); nuevo `scripts/apply-all-migrations.mjs` (replay + ledger); `scripts/powersync-deploy.sh --env prod`; deploy de las 8 Edge Functions a prod.
 - `scripts/backup-db.mjs` (pg_dump contra el **pooler** de prod, comprimido, timestampeado) + GitHub Action cron diaria (`RafaWASD/Tropero`, connection string como secret, artifacts 90 días).
 - Edge Function `health` (`SELECT 1` + versión de schema del ledger) en **ambos** proyectos (el ping de UptimeRobot además evita la pausa por inactividad del free tier).
 

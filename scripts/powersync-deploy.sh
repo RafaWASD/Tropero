@@ -12,7 +12,7 @@
 # Uso:
 #   bash scripts/powersync-deploy.sh                       # DEV (default = IDÉNTICO a hoy)
 #   bash scripts/powersync-deploy.sh --validate-only       # DEV, solo valida
-#   bash scripts/powersync-deploy.sh --env prod            # PROD (exige RAFAQ_CONFIRM_PROD=1)
+#   bash scripts/powersync-deploy.sh --env prod            # PROD (exige MITROPERO_CONFIRM_PROD=1)
 #   bash scripts/powersync-deploy.sh --env prod --validate-only
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -53,13 +53,25 @@ fi
 
 # --- Guarda de PROD + selección de la instancia (cli.yaml → link de instancia). -------------------
 # DEV (default): usa powersync/cli.yaml tal cual → comportamiento IDÉNTICO al histórico (R5.9).
-# PROD: exige RAFAQ_CONFIRM_PROD=1 + swap del link de instancia por powersync/cli.prod.yaml (lo crea
-#       Run F/F5 al provisionar la instancia "Production", con su project_id real). El swap se
+# PROD: exige MITROPERO_CONFIRM_PROD=1 + swap del link de instancia por powersync/cli.prod.yaml (lo
+#       crea Run F/F5 al provisionar la instancia "Production", con su project_id real). El swap se
 #       restaura SIEMPRE al salir (trap EXIT); el backup va a *.tmp (gitignoreado). Mecanismo
 #       agnóstico al auto-discovery del CLI (lee powersync/cli.yaml desde el cwd).
+#
+# ⚠️ Este `if` es la ÚNICA copia en bash del criterio que en JS vive en `prodConfirmed()`
+# (scripts/lib/env-target.mjs): un .sh no puede importar el módulo. Los nombres aceptados tienen que ser
+# LOS MISMOS que los de allá — si divergen, la misma variable exportada abre una guarda y bloquea la
+# otra. Lo ata `scripts/lib/env-target.test.mjs` (GUARD-ENV-SH), que deriva los nombres del módulo JS y
+# exige que este archivo los mencione: agregar o renombrar un nombre allá pone este script en rojo.
+# Se acepta el nombre PRE-rebrand (RAFAQ_CONFIRM_PROD) con aviso; el canónico es MITROPERO_CONFIRM_PROD.
 if [ "$ENV_ARG" = "prod" ]; then
-  if [ "${RAFAQ_CONFIRM_PROD:-}" != "1" ]; then
-    echo "ABORTADO: --env prod requiere RAFAQ_CONFIRM_PROD=1 (guarda de destino PROD)." >&2
+  if [ "${MITROPERO_CONFIRM_PROD:-}" = "1" ]; then
+    :
+  elif [ "${RAFAQ_CONFIRM_PROD:-}" = "1" ]; then
+    echo "AVISO: confirmaste con RAFAQ_CONFIRM_PROD (nombre PRE-rebrand, sigue funcionando)." >&2
+    echo "       El nombre nuevo es MITROPERO_CONFIRM_PROD — pasate cuando puedas: el viejo se va a sacar." >&2
+  else
+    echo "ABORTADO: --env prod requiere MITROPERO_CONFIRM_PROD=1 (guarda de destino PROD)." >&2
     exit 2
   fi
   if [ ! -f powersync/cli.prod.yaml ]; then

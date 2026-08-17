@@ -37,9 +37,21 @@ serveEf('health', async () => {
       // R7.2 / L1 — prefijo numérico de 4 dígitos, o 'unknown'. `?? 'unknown'` refleja la misma postura
       // defensiva de la función DB (nunca romper el health por un shape inesperado del payload).
       schema_version: data?.schema_version ?? 'unknown',
-      // Label de ambiente (secret por proyecto: RAFAQ_ENV=development|production). 'unknown' si no está
-      // seteado todavía (no es sensible; ayuda a distinguir DEV de PROD en el monitor).
-      env: Deno.env.get('RAFAQ_ENV') ?? 'unknown',
+      // Label de ambiente (secret por proyecto: MITROPERO_ENV=development|production). 'unknown' si no
+      // está seteado (no es sensible; ayuda a distinguir DEV de PROD en el monitor).
+      //
+      // RENAME EN DOS TIEMPOS (rebrand fase 7). Leer los DOS —nuevo primero— hace que esto funcione IGUAL
+      // antes y después de que Raf setee el secret nuevo, sin ventana ni orden de deploy obligatorio. Los
+      // dos secrets pueden convivir. La limpieza (sacar el `?? RAFAQ_ENV`) está anotada en
+      // `docs/backlog.md` con su condición: primero setear `MITROPERO_ENV`, después sacar el fallback.
+      //
+      // ⚠️ MEDIDO el 2026-08-17 (GET al endpoint de DEV): la función deployada devuelve `env: "unknown"`,
+      // o sea que en DEV el secret NO está seteado **con ninguno de los dos nombres** — al revés de lo que
+      // suponía el plan de rebrand. Y nadie se enteró en todo este tiempo porque la suite `health` sólo
+      // valida el JUEGO DE CLAVES del body (R7.5), nunca el VALOR de `env`. El fallback se mantiene igual:
+      // el estado del secret en PROD no se midió (probar PROD era una acción externa que esta sesión no
+      // hizo) y cuesta un `??`.
+      env: Deno.env.get('MITROPERO_ENV') ?? Deno.env.get('RAFAQ_ENV') ?? 'unknown',
     });
   } catch (err) {
     return serverError('health_unexpected', err); // R7.3 — 5xx genérico ante cualquier excepción.

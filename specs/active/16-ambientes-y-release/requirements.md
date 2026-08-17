@@ -20,7 +20,7 @@ EARS estricto (`docs/specs.md`). "DEV" = ambiente de desarrollo/tests actual; "P
 
 - **R1.1** El sistema deberá conservar el proyecto Supabase `xrhlxxdnfzvdnztacofj` y la instancia PowerSync "Development" como ambiente **DEV**, sin migrar sus datos ni reconfigurarlo.
 - **R1.2** El sistema deberá disponer de un ambiente **PROD** compuesto por un proyecto Supabase nuevo (misma región que DEV) y la instancia PowerSync "Production" (`6a260fd10ef84ed6719fd6bf`).
-- **R1.3** Mientras no se exporte `RAFAQ_CONFIRM_PROD`, `node scripts/check.mjs` deberá ejecutar las 14 suites contra **DEV** y quedar verde **sin cambios en el código de tests**.
+- **R1.3** Mientras no se exporte `MITROPERO_CONFIRM_PROD`, `node scripts/check.mjs` deberá ejecutar las 14 suites contra **DEV** y quedar verde **sin cambios en el código de tests**.
 - **R1.4** El sistema deberá mantener DEV y PROD como proyectos Supabase **separados** (distinto project ref), sin que ninguna operación de PROD pueda escribir en DEV ni viceversa.
 
 ## R2 — Config de la app: `app.config.ts` + `APP_VARIANT`
@@ -69,7 +69,7 @@ EARS estricto (`docs/specs.md`). "DEV" = ambiente de desarrollo/tests actual; "P
 ## R5 — Scripts parametrizados con guarda de PROD + ledger + backup
 
 - **R5.1** Si un script de ambiente se invoca **sin `--env`**, entonces el sistema deberá operar contra **DEV** (default = cero cambio respecto al comportamiento actual).
-- **R5.2** Cuando un script de ambiente se invoque con `--env prod`, el sistema deberá imprimir el project ref/host destino y **abortar** salvo que `RAFAQ_CONFIRM_PROD=1` esté exportado.
+- **R5.2** Cuando un script de ambiente se invoque con `--env prod`, el sistema deberá imprimir el project ref/host destino y **abortar** salvo que `MITROPERO_CONFIRM_PROD=1` esté exportado.
 - **R5.3** El sistema deberá parametrizar `scripts/apply-migration-mgmt.mjs` con `--env {dev,prod}` (seleccionando `SUPABASE_PROJECT_REF`/`SUPABASE_ACCESS_TOKEN` del ambiente), preservando su comportamiento actual con `--env dev`.
 - **R5.4** El sistema deberá proveer `scripts/apply-all-migrations.mjs` que aplique las migraciones en **orden de nombre de archivo** contra el ambiente target y registre cada archivo aplicado en el ledger `ops.applied_migrations`.
 - **R5.5** Cuando una migración ya figure en `ops.applied_migrations`, `apply-all-migrations.mjs` deberá saltearla (idempotencia = catch-up incremental por release).
@@ -79,8 +79,27 @@ EARS estricto (`docs/specs.md`). "DEV" = ambiente de desarrollo/tests actual; "P
 - **R5.9** El sistema deberá parametrizar `scripts/powersync-deploy.sh` con `--env {dev,prod}` (seleccionando instancia/token del ambiente), con default `dev`.
 - **R5.10** (Gate 1 H1) El directorio de salida de `backup-db.mjs` deberá estar **gitignoreado** y, por default, residir **fuera del árbol versionado**; ningún artefacto de backup podrá quedar en el working tree trackeable.
 - **R5.11** (Gate 1 L2) `backup-db.mjs` deberá pasar la connection string a `pg_dump` por **variable de entorno** (`PGPASSWORD`/URI en env), nunca como argumento de línea de comando visible en `ps`.
-- **R5.12** (Gate 1 M5) La guarda de PROD deberá ser **destino-aware**: si el project ref resuelto para `--env dev` (default) coincide con un ref conocido de PROD, entonces el sistema deberá tratar la operación como PROD y exigir `RAFAQ_CONFIRM_PROD=1` igual.
+- **R5.12** (Gate 1 M5) La guarda de PROD deberá ser **destino-aware**: si el project ref resuelto para `--env dev` (default) coincide con un ref conocido de PROD, entonces el sistema deberá tratar la operación como PROD y exigir `MITROPERO_CONFIRM_PROD=1` igual.
 - **R5.13** (Gate 1 L4) Los scripts de ambiente **no deberán** imprimir el header `Authorization` ni el `SUPABASE_ACCESS_TOKEN`/token en stdout/stderr.
+
+> **Reconciliación 2026-08-17 (rebrand miTropero, fase 7) — nombres de las env vars de R5.2 / R5.12.**
+> Las dos env vars de esta sección se renombraron `RAFAQ_*` → `MITROPERO_*`. El *qué* cambia en dos puntos,
+> por eso se anota en vez de sólo reescribir el identificador:
+>
+> 1. **R5.2 / R5.12 — la confirmación vale bajo LOS DOS nombres.** El as-built acepta
+>    `MITROPERO_CONFIRM_PROD=1` **o** `RAFAQ_CONFIRM_PROD=1` (mismo `=== '1'` estricto, fail-closed), y el
+>    mensaje de aborto nombra **sólo el nuevo**. Motivo: la guarda la tipea el operador a mano y la setea el
+>    workflow de backup; un corte seco no pierde seguridad (falla cerrada) pero corta el backup nocturno de
+>    PROD y bloquea al operador sin decirle el nombre nuevo. El criterio vive en `prodConfirmed()`
+>    (`scripts/lib/env-target.mjs`) y `powersync-deploy.sh` tiene la única copia en bash, atada por
+>    `GUARD-ENV-SH`. La aceptación del nombre viejo es **transitoria** (condición de retiro en
+>    `docs/backlog.md`).
+> 2. **R5.12 — la lista extra de refs de PROD se lee como UNIÓN, con guard de cobertura.** Es
+>    `MITROPERO_KNOWN_PROD_REFS` ∪ `RAFAQ_KNOWN_PROD_REFS` (no "el nuevo si está, si no el viejo": con
+>    fallback, setear el nuevo apagaría los refs del viejo en silencio). Además, **si el ambiente declara
+>    refs de PROD bajo un nombre que el código no lee, `resolveTarget` aborta** con
+>    `KnownProdRefsCoverageError` en vez de seguir con cobertura degradada — esta var es la única del rename
+>    que falla **abierta**, y sin ese guard su pérdida no tiene ningún síntoma.
 
 ## R6 — Estado de PROD por replay ordenado + diff + PROD vacío
 
@@ -192,7 +211,7 @@ Aditivo, sin cambiar el *qué* de ningún EARS. Detalle en `progress/impl_16-run
   dígitos) / de la **convención** (todo delta futuro = migración numerada nueva); el comportamiento no
   cambia — solo el número concreto del primer delta pasa a 0125.
 - **R5.2 / R5.12 — hardening de `backup-db.mjs`**: como `backup-db` SIEMPRE apunta a PROD (lee
-  `SUPABASE_DB_URL_PROD` y exfiltra PII), exige `RAFAQ_CONFIRM_PROD=1` **siempre** (con o sin `--env`),
+  `SUPABASE_DB_URL_PROD` y exfiltra PII), exige `MITROPERO_CONFIRM_PROD=1` **siempre** (con o sin `--env`),
   más estricto que el mínimo de R5.2 y alineado a la lógica destino-aware de R5.12 (fail-closed).
 - **R5.9 — `powersync-deploy.sh` prod**: selecciona la instancia PROD swappeando el link
   `powersync/cli.prod.yaml` (creado en Run F/F5) con restauración por `trap EXIT`; falla fail-closed si
@@ -216,5 +235,5 @@ Cambios foldeados desde `progress/security_spec_16-ambientes-y-release.md`. Todo
 | L3 — publication `FOR TABLE` sin aserción explícita | LOW | **R6.7b** | design §Bring-up + task F3 |
 | L4 — `apply-all-migrations.mjs` no debe loguear el token | LOW | **R5.13** | design §4 + task B3 |
 | L5 — `.env.example` con placeholders, no valores reales | LOW | (task E4, nota) | task E4 |
-| L6 — `RAFAQ_CONFIRM_PROD=1` en la Action solo en jobs read-only | LOW | (invariante, design §7) | design §7 |
+| L6 — `MITROPERO_CONFIRM_PROD=1` en la Action solo en jobs read-only | LOW | (invariante, design §7) | design §7 |
 | **Hallazgo en vivo** — publication de DEV es `FOR ALL TABLES` (PG 17.6) | — | **R6.7** reescrito: PROD nace `FOR TABLES IN SCHEMA public`; conversión de DEV la owna feature 18 | design §Multi-tenancy + §Bring-up + task F3 |

@@ -245,7 +245,7 @@ de modo que **tanto el build como `eas update --environment <env>`** las reciban
 >   env vars, output fuera del tree, log seguro; R5.7/R5.8/R5.10/R5.11/R5.13), consumido por `backup-db.mjs`.
 >
 > **Hardening de `backup-db.mjs` (más estricto que R5.2).** `backup-db` SIEMPRE apunta a PROD (lee
-> `SUPABASE_DB_URL_PROD` y exfiltra PII) → exige `RAFAQ_CONFIRM_PROD=1` **siempre** (con o sin `--env`),
+> `SUPABASE_DB_URL_PROD` y exfiltra PII) → exige `MITROPERO_CONFIRM_PROD=1` **siempre** (con o sin `--env`),
 > no solo con `--env prod`. Fail-closed alineado a M5 (destino-aware). La Action lo setea; un run local
 > exige exportarlo a mano. `apply-all-migrations.mjs` aplica cada migración y registra en el ledger en
 > **dos** llamadas Management API separadas (no atómicas): si el apply commitea pero el INSERT falla, el
@@ -255,13 +255,38 @@ Extraer la lógica pura de selección de ambiente + guarda a `scripts/lib/env-ta
 `node:test`), consumida por todos los scripts:
 
 ```
-resolveTarget(argv, env) -> { env: 'dev'|'prod', ref, token, host } | throws
+resolveTarget(argv, env) -> { env: 'dev'|'prod', ref, token, host, pointsToProd, confirmedVia } | throws
   - sin --env  → 'dev' (R5.1)
-  - --env prod → exige RAFAQ_CONFIRM_PROD=1, si no imprime ref y process.exit(2) (R5.2)
+  - --env prod → exige MITROPERO_CONFIRM_PROD=1, si no imprime ref y process.exit(2) (R5.2)
   - DESTINO-AWARE (M5, R5.12): si el ref resuelto para 'dev' == SUPABASE_PROJECT_REF_PROD
-    (o ∈ una lista de refs de PROD conocidos), tratar como PROD y exigir RAFAQ_CONFIRM_PROD=1 igual.
+    (o ∈ una lista de refs de PROD conocidos), tratar como PROD y exigir MITROPERO_CONFIRM_PROD=1 igual.
     Así una env var mal seteada (slot dev apuntando a prod) NO bypassea la guarda.
+  - COBERTURA (rebrand fase 7): antes de decidir nada, aborta si el ambiente declara refs de PROD
+    bajo un nombre *_KNOWN_PROD_REFS que el módulo no lee (KnownProdRefsCoverageError).
 ```
+
+**As-built del rename de env vars (2026-08-17, rebrand fase 7)** — `scripts/lib/env-target.mjs` es la
+única definición de los nombres y de los dos criterios; los scripts la importan:
+
+| Símbolo | Qué es |
+|---|---|
+| `CONFIRM_PROD_ENV` / `LEGACY_CONFIRM_PROD_ENV` | `MITROPERO_CONFIRM_PROD` / `RAFAQ_CONFIRM_PROD` |
+| `prodConfirmedVia(env)` / `prodConfirmed(env)` | confirmación bajo **cualquiera** de los dos nombres, `=== '1'` estricto; devuelve **cuál** confirmó |
+| `legacyConfirmNotice(via)` | aviso de deprecación (lo imprime el script; el módulo no hace I/O) |
+| `KNOWN_PROD_REFS_ENV` / `LEGACY_KNOWN_PROD_REFS_ENV` | `MITROPERO_KNOWN_PROD_REFS` / `RAFAQ_KNOWN_PROD_REFS` |
+| `knownProdRefs(env)` | `SUPABASE_PROJECT_REF_PROD` ∪ **las dos** listas CSV (unión, no fallback) |
+| `knownProdRefsCoverageGap` / `assertKnownProdRefsCoverage` | guard de la falla ABIERTA: refs declarados en el ambiente que el módulo no lee |
+
+Por qué el guard de cobertura no es "la lista quedó vacía": teniendo `SUPABASE_PROJECT_REF_PROD` seteado
+esa condición es **inalcanzable** (`knownProdRefs` lo mete él mismo) — sería un test que no puede fallar.
+El oráculo real es el **skew**: barre `env` por FORMA del nombre (`/(?:^|_)KNOWN_PROD_REFS$/`, deliberadamente
+**no** derivado de la lista de nombres aceptados) y corta si algún ref declarado no quedó en el set resuelto.
+Cubre las dos direcciones: el rename que deja de leer un nombre vivo y el operador que setea un nombre que
+nadie lee. Falsificado con mutantes (ver `progress/rebrand-env-vars.md`).
+
+`powersync-deploy.sh` es la **única copia en bash** del criterio de confirmación (un `.sh` no puede importar
+el módulo); `GUARD-ENV-SH` en `scripts/lib/env-target.test.mjs` deriva los nombres del módulo y exige que el
+`.sh` condicione sobre todos ellos, así el skew entre las dos copias nace en rojo.
 
 **L4 (R5.13)**: ningún script imprime el header `Authorization` ni el `SUPABASE_ACCESS_TOKEN`. Se
 loguea solo el project ref (no secreto) + un slice del body de respuesta, igual que
@@ -277,7 +302,7 @@ PowerSync por env.
 | `apply-migration-mgmt.mjs` | `--env {dev,prod}` → elige ref/token; guarda de prod. Default dev = idéntico a hoy. (El plan lo llama `apply-migration.mjs`; se mantiene el nombre real para no romper las ~13 referencias.) | R5.1–R5.3 |
 | `apply-all-migrations.mjs` **(nuevo)** | bootstrap del ledger → lista `supabase/migrations/*.sql` ordenada → aplica las **ausentes** del ledger vía Management API (`database/query`) → inserta en `ops.applied_migrations`. Flags: `--env`, `--backfill` (registra sin ejecutar). | R5.4–R5.6, R6.1 |
 | `backup-db.mjs` **(nuevo)** | `pg_dump` contra el **pooler** de PROD. **Output por default FUERA del working tree** (H1/R5.10): `os.homedir()/.mitropero-backups/mitropero-prod-<ISO>.sql.gz` (override con `--out-dir`; la Action apunta a un dir del runner). Conn string a `pg_dump` **por env** (`PGPASSWORD`/URI en env, no argv — L2/R5.11). Aborta sin conn string (R5.8). Nunca loguea la conn string. | R5.7, R5.8, R5.10, R5.11 |
-| `powersync-deploy.sh` | `--env {dev,prod}` → dev usa `powersync/cli.yaml` (idéntico a hoy); prod exige `RAFAQ_CONFIRM_PROD=1`, swappea el link de instancia por **`powersync/cli.prod.yaml`** (creado en Run F/F5, con `trap EXIT` que restaura + backup a `*.tmp` gitignoreado) y usa `PS_ADMIN_TOKEN_PROD` si está (si no, `PS_ADMIN_TOKEN`, account-level). Default dev. **En prod, `validate` corre con `--skip-validations=connections`** (ver nota abajo). | R5.9 |
+| `powersync-deploy.sh` | `--env {dev,prod}` → dev usa `powersync/cli.yaml` (idéntico a hoy); prod exige `MITROPERO_CONFIRM_PROD=1`, swappea el link de instancia por **`powersync/cli.prod.yaml`** (creado en Run F/F5, con `trap EXIT` que restaura + backup a `*.tmp` gitignoreado) y usa `PS_ADMIN_TOKEN_PROD` si está (si no, `PS_ADMIN_TOKEN`, account-level). Default dev. **En prod, `validate` corre con `--skip-validations=connections`** (ver nota abajo). | R5.9 |
 
 > **`--env prod` saltea el connection-test de `validate` (2026-07-16, Run F).** `powersync validate`
 > prueba la conexión del `service.yaml` **local**, que describe la DB de **dev**
@@ -371,14 +396,26 @@ Deno.serve(async (req) => {
     const admin = createAdminClient();
     const { data, error } = await admin.rpc('health_status');   // SELECT 1 implícito + schema_version
     if (error) return serverError('health_db', error);          // R7.3 (copy genérico, sin driver msg)
-    return jsonOk({ ok: true, schema_version: data.schema_version, env: Deno.env.get('RAFAQ_ENV') ?? 'unknown' });
+    // as-built: lectura DOBLE (el secret hoy existe con el nombre PRE-rebrand) — ver la nota de abajo.
+    return jsonOk({ ok: true, schema_version: data.schema_version,
+                    env: Deno.env.get('MITROPERO_ENV') ?? Deno.env.get('RAFAQ_ENV') ?? 'unknown' });
   } catch (err) { return serverError('health_unexpected', err); }
 });
 ```
 
 - **`verify_jwt=false`**: agregar `[functions.health]\nverify_jwt = false` a `supabase/config.toml`
   **y** deployar con `supabase functions deploy health --no-verify-jwt --project-ref <ref>` (R7.4).
-- **`RAFAQ_ENV`**: secret por proyecto (`supabase secrets set RAFAQ_ENV=production/development`).
+- **`MITROPERO_ENV`**: secret por proyecto (`supabase secrets set MITROPERO_ENV=production/development`).
+  **Reconciliación 2026-08-17 (rebrand fase 7)**: la función lee **los dos** nombres
+  (`MITROPERO_ENV ?? RAFAQ_ENV ?? 'unknown'`); los dos secrets pueden convivir, así que setear el nuevo no
+  rompe nada y recién después se saca el fallback (anotado en `docs/backlog.md`). **El código nuevo no
+  está deployado**: entra con el próximo deploy de `health`.
+  ⚠️ **Medido** (GET a `/functions/v1/health` de DEV, 2026-08-17): devuelve `env: "unknown"` → en DEV el
+  secret **no está seteado con ninguno de los dos nombres**, al revés de lo que suponía el plan de
+  rebrand. Y la suite `health` **no lo ve**: valida el juego de claves del body (R7.5), nunca el VALOR de
+  `env`. Si algún día se quiere cerrar ese agujero, el oráculo barato es assertar en
+  `supabase/tests/health/run.cjs` que `env ∈ {development, production}` — hoy no está puesto porque exige
+  que el secret exista en DEV.
 - **Privacidad (R7.5/L1)**: la respuesta es exactamente `{ok, schema_version, env}`, con `schema_version`
   = **prefijo numérico de 4 dígitos** (no el filename). Ningún conteo de filas, ningún nombre de tabla de
   negocio, ninguna PII. Gate 1 valida esta superficie pública.
@@ -406,7 +443,7 @@ jobs:
       - uses: actions/checkout@v4
       - run: sudo apt-get update && sudo apt-get install -y postgresql-client
       - run: node scripts/backup-db.mjs --env prod --out-dir "$RUNNER_TEMP"   # H1: fuera del tree
-        env: { RAFAQ_CONFIRM_PROD: '1', SUPABASE_DB_URL_PROD: ${{ secrets.SUPABASE_DB_URL_PROD }} }
+        env: { MITROPERO_CONFIRM_PROD: '1', SUPABASE_DB_URL_PROD: ${{ secrets.SUPABASE_DB_URL_PROD }} }
       # M3: cifrar el dump ANTES de subirlo → artifact inútil sin la passphrase (secret aparte).
       - run: gpg --batch --yes --symmetric --cipher-algo AES256 --passphrase "$BK" "$RUNNER_TEMP"/mitropero-prod-*.sql.gz
         env: { BK: ${{ secrets.BACKUP_GPG_PASSPHRASE }} }
@@ -433,7 +470,12 @@ jobs:
 - **H1/R5.10**: el output nunca cae en el working tree (`--out-dir "$RUNNER_TEMP"` en CI;
   `~/.mitropero-backups` local). Además `backups/` va a `.gitignore` como red de contención
   (design §Archivos, task B7).
-- **L6**: `RAFAQ_CONFIRM_PROD=1` se setea **solo** en esta Action (que corre `backup-db.mjs`, read-only).
+- **L6**: `MITROPERO_CONFIRM_PROD=1` se setea **solo** en esta Action (que corre `backup-db.mjs`, read-only).
+  **Reconciliación (rebrand fase 7, 2026-08-17)**: L6 dejó de ser prosa. `GUARD-BK-7` barre TODOS los
+  `.github/workflows/*.yml` y exige que la única asignación de una variable `*CONFIRM_PROD` esté en
+  `backup-prod.yml`, así un job nuevo que se auto-autorice a escribir en PROD nace en rojo. Y `GUARD-BK-5`
+  ata el nombre que el workflow setea con lo que `prodConfirmed()` acepta (lo **deriva** del módulo, no lo
+  hardcodea): renombrar en un lado y no en el otro cortaría el backup nocturno con un job rojo a las 3 AM.
   Invariante: nunca setear ese env a nivel workflow en un job que también corra scripts de escritura.
 - **Restore drill (R8.4)**: una vez, descifrar (`gpg --decrypt`) + restaurar el `.gz` en un Postgres
   local (`gunzip | psql`) y verificar tablas clave; documentar comando + resultado en el runbook.
@@ -456,7 +498,7 @@ de Raf); el runbook documenta URLs + config.
      `[auth.rate_limit]` del dashboard de PROD (email/SMS/sign-in/token verifications), decidir captcha
      en signup, decidir `enable_confirmations` (email verification) — firmar la decisión en el runbook
      aunque sea "aceptar defaults" (PROD es el único ambiente internet-facing con signup público).
-   - `supabase secrets set --project-ref <prod>` (incl. `RAFAQ_ENV=production`).
+   - `supabase secrets set --project-ref <prod>` (incl. `MITROPERO_ENV=production`).
    - PowerSync: rol de replicación + `CREATE PUBLICATION powersync FOR TABLES IN SCHEMA public;` (R6.7,
      PG15+; **no** `FOR ALL TABLES`) → **asertar** `puballtables=false` y set ⊆ DEV vía query a
      `pg_publication`/`pg_publication_tables` (R6.7b, paso firmado, no solo el ojo en el diff).

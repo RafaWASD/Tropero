@@ -42,11 +42,17 @@ jobs:
           pg_dump --version
 
       # Dump → gzip → $RUNNER_TEMP (H1/R5.10: fuera del working tree). La conn string llega por env,
-      # nunca por argv (L2/R5.11). RAFAQ_CONFIRM_PROD=1 SOLO en este job read-only (L6).
+      # nunca por argv (L2/R5.11). La confirmación de destino PROD va SOLO en este job read-only (L6).
+      #
+      # ⚠️ El nombre de la variable de confirmación NO es libre: lo tiene que aceptar `prodConfirmed()`
+      # en `scripts/lib/env-target.mjs`, que es quien lo lee desde `backup-db.mjs`. Renombrarlo acá y no
+      # allá (o al revés) corta el backup nocturno de PROD: el script aborta con exit 2 y lo único que
+      # queda es un job rojo a las 3 AM. Lo ata `scripts/lib/backup-ci-consistency.test.mjs`
+      # (GUARD-BK-5), que DERIVA la respuesta del módulo real en vez de hardcodear el nombre.
       - name: Dump PROD
         run: node scripts/backup-db.mjs --env prod --out-dir "$RUNNER_TEMP"
         env:
-          RAFAQ_CONFIRM_PROD: '1'
+          MITROPERO_CONFIRM_PROD: '1'
           SUPABASE_DB_URL_PROD: ${{ secrets.SUPABASE_DB_URL_PROD }}
 
       # Cifrado en reposo (M3/R8.6): el .sql.gz → .sql.gz.gpg antes de subirlo.

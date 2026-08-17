@@ -23,7 +23,7 @@ PROD + provisionar PowerSync "Production" `6a260fd10ef84ed6719fd6bf`; (c) GitHub
 de PROD; (d) cuenta UptimeRobot. (La dep (a) — log del build EAS — es de **Fase 0**, chore fuera de
 esta spec.)
 
-**Regla dura**: ningún task de Run A–E puede tocar PROD ni requerir `RAFAQ_CONFIRM_PROD`. Todo lo que
+**Regla dura**: ningún task de Run A–E puede tocar PROD ni requerir `MITROPERO_CONFIRM_PROD`. Todo lo que
 escribe a un ambiente real vive en Run F, gateado.
 
 ---
@@ -80,14 +80,20 @@ escribe a un ambiente real vive en Run F, gateado.
 > Los scripts quedan escritos y unit-testeados con default DEV. Ninguna ejecución contra PROD acá.
 
 - [x] **B1** — `scripts/lib/env-target.mjs` (nuevo, puro): `resolveTarget(argv, env)` → sin `--env`
-  devuelve `dev`; con `--env prod` exige `RAFAQ_CONFIRM_PROD=1` (si no, imprime el ref y sale con
+  devuelve `dev`; con `--env prod` exige `MITROPERO_CONFIRM_PROD=1` (si no, imprime el ref y sale con
   código ≠0). **Destino-aware (Gate 1 M5)**: si el ref resuelto para `dev` coincide con
   `SUPABASE_PROJECT_REF_PROD` (o ∈ lista de refs de PROD conocidos), tratar como PROD y exigir
-  `RAFAQ_CONFIRM_PROD=1` igual. Cubre: R5.1, R5.2, R5.12.
+  `MITROPERO_CONFIRM_PROD=1` igual. Cubre: R5.1, R5.2, R5.12.
   **Verif** (`env-target.test.ts`, registrar en `run-tests.mjs`): (a) sin `--env` → `dev`; (b)
-  `--env prod` sin confirm → throw/exit; (c) `--env prod` + `RAFAQ_CONFIRM_PROD=1` → target prod con
+  `--env prod` sin confirm → throw/exit; (c) `--env prod` + `MITROPERO_CONFIRM_PROD=1` → target prod con
   ref correcto; (d) `--env` inválido → error; (e) **`--env dev` (default) pero el ref de dev == ref de
   PROD → exige confirmación igual** (M5, destino-aware).
+  **Reconciliación 2026-08-17 (rebrand fase 7)**: al renombrar las env vars, B1 sumó los bloques
+  `GUARD-ENV-0..7` y `GUARD-ENV-SH` en `scripts/lib/env-target.test.mjs` (aceptación de los dos nombres,
+  estrictez `=== '1'`, precedencia + aviso de deprecación, el mensaje nombra el nuevo, unión de las listas
+  de refs, guard de cobertura, y el contrato con la copia en bash de `powersync-deploy.sh`). El archivo
+  ya estaba registrado en el stage `scripts unit tests` de `run-tests.mjs` → **no hizo falta tocar el
+  orquestador** (siguen siendo 22 stages).
 
 - [x] **B2** — `scripts/apply-migration-mgmt.mjs`: aceptar `--env {dev,prod}` vía `env-target.mjs`
   (selecciona `SUPABASE_PROJECT_REF`/`_PROD` + token). Default dev = comportamiento **idéntico** a hoy.
@@ -167,12 +173,12 @@ escribe a un ambiente real vive en Run F, gateado.
 
 - [ ] **D1** — `.github/workflows/backup-prod.yml` (para `RafaWASD/Tropero`): cron diario +
   `workflow_dispatch`; instala postgresql-client; `node scripts/backup-db.mjs --env prod --out-dir
-  "$RUNNER_TEMP"` (H1 — fuera del tree) con `RAFAQ_CONFIRM_PROD=1` + `SUPABASE_DB_URL_PROD` desde
+  "$RUNNER_TEMP"` (H1 — fuera del tree) con `MITROPERO_CONFIRM_PROD=1` + `SUPABASE_DB_URL_PROD` desde
   `secrets`; **cifrar el dump** con `gpg --symmetric AES256` (passphrase en el secret
   `BACKUP_GPG_PASSPHRASE`, distinto del de la conn string — Gate 1 M3) → `upload-artifact` del
   `*.sql.gz.gpg` con retention 90 días; fail-fast (Action roja si `pg_dump` falla). Cubre: R8.1, R8.2,
   R8.3, R8.5, R8.6.
-  **Invariante (L6)**: `RAFAQ_CONFIRM_PROD=1` solo en esta Action (read-only); nunca en un job que corra
+  **Invariante (L6)**: `MITROPERO_CONFIRM_PROD=1` solo en esta Action (read-only); nunca en un job que corra
   scripts de escritura.
 
 - [ ] **D2** — Documentar el procedimiento de **restore drill** en `docs/runbook.md`
@@ -230,7 +236,7 @@ escribe a un ambiente real vive en Run F, gateado.
 - [ ] **F3** — 🔒 Checklist manual de PROD (firmar en el runbook cada ítem):
   - Auth: SMTP/Resend, templates es-AR, Site URL/redirects **+ postura internet-facing (M4)**:
     `[auth.rate_limit]`, captcha en signup, `enable_confirmations`.
-  - `supabase secrets set --project-ref <prod>` (incl. `RAFAQ_ENV=production` y `BACKUP_GPG_PASSPHRASE`
+  - `supabase secrets set --project-ref <prod>` (incl. `MITROPERO_ENV=production` y `BACKUP_GPG_PASSPHRASE`
     donde corresponda).
   - PowerSync: rol de replicación + `CREATE PUBLICATION powersync FOR TABLES IN SCHEMA public;` (R6.7,
     PG15+; **no** `FOR ALL TABLES`) → **asertar** `puballtables=false` y set de tablas ⊆ DEV vía query a

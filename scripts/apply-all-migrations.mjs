@@ -23,7 +23,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { resolveTarget, ProdGuardError } from './lib/env-target.mjs';
+import { resolveTarget, ProdGuardError, legacyConfirmNotice, CONFIRM_PROD_ENV } from './lib/env-target.mjs';
 import { planMigrations } from './lib/ledger-plan.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -48,12 +48,15 @@ try {
   target = resolveTarget(argv, process.env); // guarda destino-aware (R5.2/R5.12); NO expone el token
 } catch (err) {
   if (err instanceof ProdGuardError) {
-    console.error(`ABORTADO: ${err.message}\n  Exportá RAFAQ_CONFIRM_PROD=1 para confirmar el destino PROD.`);
+    console.error(`ABORTADO: ${err.message}\n  Exportá ${CONFIRM_PROD_ENV}=1 para confirmar el destino PROD.`);
   } else {
     console.error(err.message);
   }
   process.exit(2);
 }
+
+const confirmNotice = legacyConfirmNotice(target.confirmedVia);
+if (confirmNotice) console.error(confirmNotice);
 
 // --- Management API helper. NUNCA loguea el token (R5.13). -----------------------------------------
 async function mgmtQuery(sql) {

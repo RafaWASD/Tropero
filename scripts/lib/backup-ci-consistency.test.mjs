@@ -24,6 +24,7 @@ import { dirname, resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { backupFilename, isoStamp } from './backup-cmd.mjs';
+import { prodConfirmed, ACCEPTED_CONFIRM_PROD_ENVS } from './env-target.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, '..', '..');
@@ -194,4 +195,75 @@ test('GUARD-BK-4: los artifacts se nombran con el prefijo derivado, en el upload
         `(subidos: ${JSON.stringify([...uploaded])}). El job de verificación fallaría en el runner.`,
     );
   }
+});
+
+// ─── El otro contrato mudo del mismo workflow: la variable de confirmación de PROD ───────────────────
+// `backup-db.mjs` aborta con exit 2 si no está confirmado el destino PROD, y el ÚNICO lugar que lo
+// confirma en CI es este workflow. El nombre de esa variable se renombró `RAFAQ_CONFIRM_PROD` →
+// `MITROPERO_CONFIRM_PROD` (rebrand fase 7): renombrarlo en el script y no en el workflow (o al revés)
+// corta el backup nocturno de PROD y el único síntoma es un job rojo a las 3 AM. Mismo modo de falla que
+// el glob del nombre del dump, mismo remedio: DERIVAR la respuesta del módulo real, no hardcodear.
+
+/** `NOMBRE: 'valor'` con forma de asignación YAML (no una mención en un comentario). */
+const CONFIRM_ASSIGN_RE = /^\s*([A-Z0-9_]*CONFIRM_PROD)\s*:\s*'?([^'\s#]+)'?\s*$/;
+
+function collectConfirmAssignments(text, file) {
+  const out = [];
+  for (const [i, line] of text.split(/\r?\n/).entries()) {
+    const m = line.match(CONFIRM_ASSIGN_RE);
+    if (m) out.push({ file, line: i + 1, name: m[1], value: m[2] });
+  }
+  return out;
+}
+
+test('GUARD-BK-5: la confirmación de PROD que setea el CI es la que el script ACEPTA', () => {
+  const assignments = collectConfirmAssignments(workflow, 'backup-prod.yml');
+
+  // Cota anti-vacío: sin esto, borrar la línea del workflow dejaría el guard pasando en verde sobre un
+  // conjunto vacío — y el backup abortaría en el runner por falta de confirmación.
+  assert.equal(
+    assignments.length,
+    1,
+    `esperaba EXACTAMENTE una variable de confirmación de PROD en backup-prod.yml y encontré ` +
+      `${assignments.length}: ${JSON.stringify(assignments)}`,
+  );
+
+  for (const a of assignments) {
+    assert.ok(
+      prodConfirmed({ [a.name]: a.value }),
+      `backup-prod.yml:${a.line} — el CI setea ${a.name}='${a.value}' y prodConfirmed() NO lo acepta ` +
+        `(acepta: ${ACCEPTED_CONFIRM_PROD_ENVS.join(', ')} con valor '1'). backup-db.mjs abortaría con ` +
+        'exit 2 y el backup diario de PROD se pierde con un job rojo a las 3 AM.',
+    );
+  }
+});
+
+test('GUARD-BK-6: backup-db.mjs decide la confirmación con el módulo compartido, no a mano', () => {
+  // Sin este ancla, GUARD-BK-5 sería vacuo: el script podría leer `process.env.LO_QUE_SEA` por su cuenta
+  // y el guard seguiría preguntándole a un módulo que el script no usa.
+  const script = readFileSync(BACKUP_SCRIPT, 'utf8');
+  assert.match(script, /from\s+'\.\/lib\/env-target\.mjs'/, 'backup-db.mjs ya no importa lib/env-target.mjs');
+  assert.match(
+    script,
+    /prodConfirmedVia\(process\.env\)/,
+    'backup-db.mjs dejó de decidir la confirmación de PROD con prodConfirmedVia(): si la lee a mano, el ' +
+      'nombre aceptado vuelve a estar duplicado y el contrato con el CI deja de estar atado.',
+  );
+  assert.ok(
+    !/process\.env\.[A-Z0-9_]*CONFIRM_PROD/.test(script),
+    'backup-db.mjs volvió a leer una variable *CONFIRM_PROD directo de process.env',
+  );
+});
+
+test('GUARD-BK-7 (L6): NINGÚN otro workflow ni otro job confirma destino PROD', () => {
+  // Invariante L6 de la spec 16: la confirmación existe SOLO en el job read-only de backup. Hasta hoy era
+  // prosa en el design; acá se vuelve ejecutable, y barre TODOS los workflows (no una lista) para que un
+  // job nuevo que se auto-autorice a escribir en PROD nazca en rojo.
+  const files = readdirSync(WORKFLOWS_DIR).filter((f) => /\.ya?ml$/.test(f));
+  const all = files.flatMap((f) => collectConfirmAssignments(readFileSync(join(WORKFLOWS_DIR, f), 'utf8'), f));
+  assert.deepEqual(
+    all.map((a) => a.file),
+    ['backup-prod.yml'],
+    `la confirmación de destino PROD aparece fuera del job de backup: ${JSON.stringify(all)}`,
+  );
 });

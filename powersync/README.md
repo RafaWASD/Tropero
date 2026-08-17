@@ -50,7 +50,8 @@ El token es de management de TODA la cuenta — no committearlo nunca; se revoca
 - **Production** (`6a260fd10ef84ed6719fd6bf`): **provisionada y replicando** (Run F, 2026-07-16).
   Conexión → `db.bcrsgekkfcdpwvkebsqe.supabase.co` (`Status: connected`, initial replication done,
   lag 0). Sync streams canónicas (`mitropero.yaml`) deployadas. Linkeada por `cli.prod.yaml`; deploy con
-  `bash scripts/powersync-deploy.sh --env prod` (exige `RAFAQ_CONFIRM_PROD=1`).
+  `bash scripts/powersync-deploy.sh --env prod` (exige `MITROPERO_CONFIRM_PROD=1`; el nombre PRE-rebrand
+  `RAFAQ_CONFIRM_PROD` se sigue aceptando con un aviso — ver `docs/backlog.md`).
 
 ### `--env prod` saltea el connection-test de `validate` (a propósito)
 

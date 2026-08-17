@@ -6,14 +6,21 @@
 //
 // Uso: node scripts/apply-migration-mgmt.mjs [--env dev|prod] supabase/migrations/0106_xxx.sql
 //   - sin --env → DEV (comportamiento IDÉNTICO al histórico, spec 16 R5.1/R5.3).
-//   - --env prod → exige RAFAQ_CONFIRM_PROD=1 (guarda destino-aware, R5.2/R5.12).
+//   - --env prod → exige MITROPERO_CONFIRM_PROD=1 (guarda destino-aware, R5.2/R5.12; se acepta también
+//     el nombre PRE-rebrand RAFAQ_CONFIRM_PROD, con aviso).
 //
 // ⚠️ Escribe a la DB compartida (beta). Solo correr con OK de deploy de Raf.
 
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { resolveTarget, positionalArgs, ProdGuardError } from './lib/env-target.mjs';
+import {
+  resolveTarget,
+  positionalArgs,
+  ProdGuardError,
+  legacyConfirmNotice,
+  CONFIRM_PROD_ENV,
+} from './lib/env-target.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, '..');
@@ -42,12 +49,15 @@ try {
 } catch (err) {
   // NUNCA loguea el token (R5.13): resolveTarget/ProdGuardError solo exponen el ref (no secreto).
   if (err instanceof ProdGuardError) {
-    console.error(`ABORTADO: ${err.message}\n  Exportá RAFAQ_CONFIRM_PROD=1 para confirmar el destino PROD.`);
+    console.error(`ABORTADO: ${err.message}\n  Exportá ${CONFIRM_PROD_ENV}=1 para confirmar el destino PROD.`);
   } else {
     console.error(err.message);
   }
   process.exit(2);
 }
+
+const confirmNotice = legacyConfirmNotice(target.confirmedVia);
+if (confirmNotice) console.error(confirmNotice);
 
 const sql = readFileSync(resolve(repoRoot, file), 'utf8');
 console.log(`Aplicando ${file} (${sql.length} chars) a project ${target.ref} [${target.env}] vía Management API...`);
