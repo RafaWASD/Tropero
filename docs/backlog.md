@@ -2053,6 +2053,35 @@ una migración de claves**. Falsificable: cambiar el prefijo en un solo servicio
 Si algún día se renombra de verdad, la migración es leer la clave vieja, escribir la nueva y borrar la
 vieja en el primer arranque — no un swap de literal.
 
+### ✅ CERRADO (2026-08-17) — y el `STORAGE_PREFIX` de arriba se DESCARTÓ
+
+`app/src/services/storage-keys-guard.test.ts`. Cero archivos de producción tocados.
+
+**Por qué NO se hizo la constante única**, que era el fix que proponía esta misma entrada:
+
+1. **Centralizar el prefijo hace que la operación peligrosa cueste UNA línea.** Es al revés de lo que
+   queremos. El riesgo no es la duplicación del literal —ocho literales duplicados no rompieron nada
+   nunca—: es que nadie había **declarado** que estas claves viven en el device. Con ocho literales más
+   un registro, renombrar es ruidoso y caro: hay que tocar ocho módulos y discutir con ocho motivos
+   escritos. **La fricción es la defensa.**
+2. **Rompería un guard vivo de otra unidad.** `app/src/services/ble/wiring.test.ts` exige que el literal
+   del bastón recordado viva en exactamente un módulo, buscándolo *como literal*. Derivarlo de un
+   prefijo compartido lo hace desaparecer del árbol y pone rojo aquel guard sin que se haya roto nada de
+   lo que él cuida.
+
+**Lo que hay en su lugar**: un registro de las ocho —forma del literal, módulo dueño, y qué se pierde en
+el device— y un barrido que cierra **las dos direcciones**: una clave sin declarar nace en rojo (se
+enumera el árbol, no una lista de archivos que alguien recordó), y una declaración cuya clave ya no está
+en su módulo también, con el mensaje diciendo qué se pierde y que el rename correcto es una migración.
+Anti-vacuidad vía el `assertScanCoverage` compartido: si el barrido devuelve menos de 300 archivos,
+revienta ahí en vez de pasar en verde por vacío. Falsificado con 5 mutantes, los 5 rojos.
+
+**Alcance declarado en el propio archivo**: los otros cuatro usos de `rafq` (bundle id, scheme,
+`noreply@rafq.ar`, `app.rafq.ar`) quedan **fuera a propósito** — se rechazan por forma, no por olvido, y
+están más abajo en esta misma entrada. Límite conocido: una clave nueva armada por concatenación no la
+ve la regla 1; pero para las ocho que ya existen el guard es fail-closed (si alguien reescribe una así,
+el literal desaparece y salta la regla 2).
+
 ### El resto de los `rafq`, para no volver a auditarlos
 
 - `ar.rafq.app` / `.dev` / `.web` (105) — bundle id y Services ID de Apple. Van con el bundle id a
