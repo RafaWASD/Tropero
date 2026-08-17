@@ -3,6 +3,8 @@ node_modules/
 .expo/
 .expo-shared/
 dist/
+# Cache/tmp local de wrangler (Cloudflare) — artefacto de build del visor de audit, NO va al repo.
+.wrangler/
 web-build/
 coverage/
 *.log
