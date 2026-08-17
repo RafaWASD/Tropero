@@ -3,7 +3,7 @@
 // (spec 16 Run B, B4 / R5.7/R5.8/R5.10/R5.11/R5.13).
 //
 // Uso:  node scripts/backup-db.mjs --env prod [--out-dir <dir>]
-//   - Output DEFAULT fuera del working tree: ~/.rafaq-backups/rafaq-prod-<ISO>.sql.gz (H1/R5.10).
+//   - Output DEFAULT fuera del working tree: ~/.mitropero-backups/mitropero-prod-<ISO>.sql.gz (H1/R5.10).
 //     La GitHub Action pasa --out-dir "$RUNNER_TEMP" (design §7).
 //   - Conn string por env (SUPABASE_DB_URL_PROD) → a pg_dump por VARIABLES libpq, NUNCA por argv (L2/R5.11).
 //   - Aborta SIN crear archivo si falta la conn string (R5.8).

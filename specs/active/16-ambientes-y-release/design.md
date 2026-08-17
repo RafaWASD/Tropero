@@ -276,7 +276,7 @@ PowerSync por env.
 |---|---|---|
 | `apply-migration-mgmt.mjs` | `--env {dev,prod}` → elige ref/token; guarda de prod. Default dev = idéntico a hoy. (El plan lo llama `apply-migration.mjs`; se mantiene el nombre real para no romper las ~13 referencias.) | R5.1–R5.3 |
 | `apply-all-migrations.mjs` **(nuevo)** | bootstrap del ledger → lista `supabase/migrations/*.sql` ordenada → aplica las **ausentes** del ledger vía Management API (`database/query`) → inserta en `ops.applied_migrations`. Flags: `--env`, `--backfill` (registra sin ejecutar). | R5.4–R5.6, R6.1 |
-| `backup-db.mjs` **(nuevo)** | `pg_dump` contra el **pooler** de PROD. **Output por default FUERA del working tree** (H1/R5.10): `os.homedir()/.rafaq-backups/rafaq-prod-<ISO>.sql.gz` (override con `--out-dir`; la Action apunta a un dir del runner). Conn string a `pg_dump` **por env** (`PGPASSWORD`/URI en env, no argv — L2/R5.11). Aborta sin conn string (R5.8). Nunca loguea la conn string. | R5.7, R5.8, R5.10, R5.11 |
+| `backup-db.mjs` **(nuevo)** | `pg_dump` contra el **pooler** de PROD. **Output por default FUERA del working tree** (H1/R5.10): `os.homedir()/.mitropero-backups/mitropero-prod-<ISO>.sql.gz` (override con `--out-dir`; la Action apunta a un dir del runner). Conn string a `pg_dump` **por env** (`PGPASSWORD`/URI en env, no argv — L2/R5.11). Aborta sin conn string (R5.8). Nunca loguea la conn string. | R5.7, R5.8, R5.10, R5.11 |
 | `powersync-deploy.sh` | `--env {dev,prod}` → dev usa `powersync/cli.yaml` (idéntico a hoy); prod exige `RAFAQ_CONFIRM_PROD=1`, swappea el link de instancia por **`powersync/cli.prod.yaml`** (creado en Run F/F5, con `trap EXIT` que restaura + backup a `*.tmp` gitignoreado) y usa `PS_ADMIN_TOKEN_PROD` si está (si no, `PS_ADMIN_TOKEN`, account-level). Default dev. **En prod, `validate` corre con `--skip-validations=connections`** (ver nota abajo). | R5.9 |
 
 > **`--env prod` saltea el connection-test de `validate` (2026-07-16, Run F).** `powersync validate`
@@ -408,11 +408,20 @@ jobs:
       - run: node scripts/backup-db.mjs --env prod --out-dir "$RUNNER_TEMP"   # H1: fuera del tree
         env: { RAFAQ_CONFIRM_PROD: '1', SUPABASE_DB_URL_PROD: ${{ secrets.SUPABASE_DB_URL_PROD }} }
       # M3: cifrar el dump ANTES de subirlo → artifact inútil sin la passphrase (secret aparte).
-      - run: gpg --batch --yes --symmetric --cipher-algo AES256 --passphrase "$BK" "$RUNNER_TEMP"/rafaq-prod-*.sql.gz
+      - run: gpg --batch --yes --symmetric --cipher-algo AES256 --passphrase "$BK" "$RUNNER_TEMP"/mitropero-prod-*.sql.gz
         env: { BK: ${{ secrets.BACKUP_GPG_PASSPHRASE }} }
       - uses: actions/upload-artifact@v4
-        with: { name: rafaq-prod-backup, path: ${{ runner.temp }}/*.sql.gz.gpg, retention-days: 90 }
+        with: { name: mitropero-prod-backup, path: ${{ runner.temp }}/*.sql.gz.gpg, retention-days: 90 }
 ```
+
+> **Reconciliación (rebrand Cat. H, 2026-08-17)** — el prefijo del dump pasó de `rafaq-prod-*` a
+> `mitropero-prod-*` y el dir local default de `~/.rafaq-backups` a `~/.mitropero-backups`. Los dumps ya
+> existentes NO se migran (son locales; el script nunca lista el dir, solo escribe su `outPath`).
+> El nombre está repetido en 6 sitios del workflow (2 globs de `gpg` + 4 `name:` de artifact, contando el
+> job `verify-restore` que baja lo que subió el mismo run) y desincronizarlos rompe el backup **en
+> silencio**, así que el rename vino con un guard: `scripts/lib/backup-ci-consistency.test.mjs` **deriva**
+> el prefijo de `backupFilename()` y exige que toda referencia del workflow sea consistente
+> (registrado en el stage `scripts unit tests` de `scripts/run-tests.mjs`).
 
 - La conn string **solo** como secret `SUPABASE_DB_URL_PROD` (R8.2). `backup-db.mjs` la lee de env y
   nunca la imprime; se la pasa a `pg_dump` por env, no por argv (L2/R5.11). `fail-fast` del step ⇒
@@ -421,8 +430,9 @@ jobs:
   secret `BACKUP_GPG_PASSPHRASE`, distinto del secret de la conn string) → el artifact subido es
   `*.sql.gz.gpg`, inútil sin la passphrase. Runbook (R8.7/R9.10): el repo `RafaWASD/Tropero` debe ser
   **privado**; acceso a Actions/artifacts = acceso efectivo a la PII de PROD.
-- **H1/R5.10**: el output nunca cae en el working tree (`--out-dir "$RUNNER_TEMP"` en CI; `~/.rafaq-backups`
-  local). Además `backups/` va a `.gitignore` como red de contención (design §Archivos, task B7).
+- **H1/R5.10**: el output nunca cae en el working tree (`--out-dir "$RUNNER_TEMP"` en CI;
+  `~/.mitropero-backups` local). Además `backups/` va a `.gitignore` como red de contención
+  (design §Archivos, task B7).
 - **L6**: `RAFAQ_CONFIRM_PROD=1` se setea **solo** en esta Action (que corre `backup-db.mjs`, read-only).
   Invariante: nunca setear ese env a nivel workflow en un job que también corra scripts de escritura.
 - **Restore drill (R8.4)**: una vez, descifrar (`gpg --decrypt`) + restaurar el `.gz` en un Postgres

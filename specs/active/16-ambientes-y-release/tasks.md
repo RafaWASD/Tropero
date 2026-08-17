@@ -103,7 +103,7 @@ escribe a un ambiente real vive en Run F, gateado.
   numérico; (b) una migración ya en el ledger se saltea; (c) `--backfill` no ejecuta SQL, solo inserta.
 
 - [x] **B4** — `scripts/backup-db.mjs` (nuevo): `pg_dump` contra el pooler de PROD. **Output por default
-  FUERA del working tree** (Gate 1 H1): `~/.rafaq-backups/rafaq-prod-<ISO>.sql.gz` (override con
+  FUERA del working tree** (Gate 1 H1): `~/.mitropero-backups/mitropero-prod-<ISO>.sql.gz` (override con
   `--out-dir`). Conn string a `pg_dump` **por env** (`PGPASSWORD`/URI en env, no argv — L2). Aborta con
   error si falta la conn string, **sin** crear archivo parcial. Nunca loguea la conn string. Cubre: R5.7,
   R5.8, R5.10, R5.11.
@@ -130,7 +130,7 @@ escribe a un ambiente real vive en Run F, gateado.
 
 - [x] **B7** — `.gitignore`: agregar `backups/` (Gate 1 H1 — red de contención aunque el output default
   vaya fuera del working tree). Cubre: R5.10.
-  **Verif**: `git check-ignore backups/rafaq-prod-x.sql.gz` matchea (exit 0).
+  **Verif**: `git check-ignore backups/mitropero-prod-x.sql.gz` matchea (exit 0).
 
 ---
 

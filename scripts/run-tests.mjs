@@ -54,9 +54,19 @@ run('typecheck client', `cd app && ${pnpmCmd} typecheck`);
 // Unit tests PUROS de los scripts de ops (spec 16 Run B): resolución de target por ambiente + guarda
 // destino-aware (env-target), plan del replay/ledger (ledger-plan), armado del comando de backup
 // (backup-cmd). Son .mjs puros (sin red, sin RN, sin ts-ext-resolver) → corren siempre, sin keys.
+//
+// ⚠️ LISTA EXPLÍCITA (no hay glob): un test que no figure acá NUNCA corre.
+// `scripts/lib/backup-ci-consistency.test.mjs` (rebrand Cat. H, 2026-08-17) es el guard que ata el
+// NOMBRE del dump —que decide `backupFilename()` en backup-cmd.mjs— con las 6 referencias de
+// `.github/workflows/backup-prod.yml` (los dos globs de gpg + los 4 nombres de artifact). Ese
+// acoplamiento no lo ve NADA más: cambiar el prefijo en el script y no en el glob rompe el backup
+// diario de PROD EN SILENCIO (gpg no encuentra el .sql.gz, no hay artifact, y el único síntoma es un
+// job rojo a las 3 AM). El guard DERIVA el prefijo del script en vez de hardcodearlo, así que el
+// próximo rename nace en rojo sin que nadie se acuerde de venir a actualizarlo. Verificarlo de verdad
+// costaría disparar el workflow, que corre contra PROD.
 run(
   'scripts unit tests (spec 16 Run B)',
-  `node --test scripts/lib/env-target.test.mjs scripts/lib/ledger-plan.test.mjs scripts/lib/backup-cmd.test.mjs`,
+  `node --test scripts/lib/env-target.test.mjs scripts/lib/ledger-plan.test.mjs scripts/lib/backup-cmd.test.mjs scripts/lib/backup-ci-consistency.test.mjs`,
 );
 
 // Tests unitarios del CLIENTE (lógica pura: validación, mapeo de errores de auth,

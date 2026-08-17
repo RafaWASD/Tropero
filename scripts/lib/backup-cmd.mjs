@@ -5,7 +5,7 @@
 //   - L2/R5.11: la conn string va a pg_dump por VARIABLE DE ENTORNO (libpq: PGHOST/PGPORT/PGUSER/
 //     PGPASSWORD/PGDATABASE), NUNCA como argumento de línea de comando (visible en `ps`). Por eso
 //     `pgDumpArgs` no contiene ni la conn string ni la password.
-//   - H1/R5.10: el output default vive FUERA del working tree (`~/.rafaq-backups/`).
+//   - H1/R5.10: el output default vive FUERA del working tree (`~/.mitropero-backups/`).
 //   - R5.8: sin conn string → throw (el script aborta ANTES de crear cualquier archivo).
 //   - R5.13: `safeSummary` NUNCA incluye la password ni la conn string cruda.
 
@@ -68,14 +68,26 @@ export function isoStamp(now = new Date()) {
   return now.toISOString().replace(/[:.]/g, '-');
 }
 
-/** Nombre del archivo de backup, comprimido + con timestamp (R5.7). */
+/**
+ * Nombre del archivo de backup, comprimido + con timestamp (R5.7).
+ *
+ * ⚠️ ESTE PREFIJO ES UN CONTRATO CON `.github/workflows/backup-prod.yml`: el paso de cifrado busca el
+ * dump con un glob (`"$RUNNER_TEMP"/<prefijo>*.sql.gz`) y los artifacts se nombran con él. Cambiarlo acá
+ * y no allá rompe el backup de PROD EN SILENCIO (el glob no matchea nada). Lo ata
+ * `scripts/lib/backup-ci-consistency.test.mjs`, que DERIVA el prefijo de esta función.
+ */
 export function backupFilename(now = new Date()) {
-  return `rafaq-prod-${isoStamp(now)}.sql.gz`;
+  return `mitropero-prod-${isoStamp(now)}.sql.gz`;
 }
 
-/** Dir default del backup: FUERA del working tree (`~/.rafaq-backups`, H1/R5.10). */
+/**
+ * Dir default del backup: FUERA del working tree (`~/.mitropero-backups`, H1/R5.10).
+ *
+ * Rebrand (2026-08-17): antes era `~/.rafaq-backups`. Los backups viejos SIGUEN en el dir viejo — son
+ * locales y no se migran; este script nunca lista el dir, solo escribe el `outPath` que arma acá.
+ */
 export function defaultBackupDir(homedir) {
-  return path.join(homedir, '.rafaq-backups');
+  return path.join(homedir, '.mitropero-backups');
 }
 
 /**

@@ -226,3 +226,23 @@ PNG es cosmético; el asset visual es trabajo de diseño.
 3. **Env vars** — con el mismo cuidado de dos tiempos que la fase 5, y coordinando con Raf porque las
    tipea él.
 4. **`rafaq-beta` y los assets** — no ahora.
+
+### Detalle del punto 3 (env vars) — medido el 2026-08-17
+
+Las tres NO son la misma clase de problema, y una falla **abierta**.
+
+| Var | Dónde | Qué pasa si el rename queda a medias |
+|---|---|---|
+| `RAFAQ_ENV` | `supabase/functions/health/index.ts` + spec 16 | Es un **secret ya seteado en Supabase**. Si el código lee el nombre nuevo y el secret no está, `health` reporta el ambiente mal. **Falla visible.** |
+| `RAFAQ_CONFIRM_PROD` | 5 scripts (`backup-db`, `apply-migration-mgmt`, `apply-all-migrations`, `env-target`, `powersync-deploy.sh`) + `.github/workflows/backup-prod.yml` | La guarda **bloquea** si falta. **Falla CERRADA** — molesta (corta el backup nocturno, y rompe la memoria muscular de Raf) pero es la dirección segura. |
+| `RAFAQ_KNOWN_PROD_REFS` | `scripts/lib/env-target.mjs` + su test | 🔴 **Falla ABIERTA.** Es la lista extra de refs que se tratan como PROD. Si el código lee el nombre nuevo y nadie lo setea, la lista queda **vacía** y la guarda destino-aware pierde cobertura **sin ningún síntoma**. La protección primaria (`SUPABASE_PROJECT_REF_PROD`) sigue, pero el refuerzo desaparece callado. |
+
+**Consecuencia para el orden de trabajo**: `RAFAQ_KNOWN_PROD_REFS` no se renombra con un swap. Necesita
+leer **los dos nombres** durante la transición (mismo patrón que los headers de la fase 5) o, mejor,
+un guard que falle si la lista resuelta queda vacía teniendo `SUPABASE_PROJECT_REF_PROD` seteado.
+
+`RAFAQ_ENV` se ordena solo si se setea el secret nuevo **antes** de deployar el código que lo lee: los
+dos secrets pueden convivir, así que no hay ventana.
+
+`__RAFAQ_PS__` (3 menciones en docs) es prosa histórica de instrumentación **ya removida**. No se toca:
+renombrarlo falsifica el registro del experimento.

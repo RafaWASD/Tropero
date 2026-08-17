@@ -1,6 +1,11 @@
 name: Backup PROD database
 
-# Backup diario del Postgres de PROD (rafaq-prod) — spec 16 R8.
+# Backup diario del Postgres de PROD (el proyecto Supabase de producción) — spec 16 R8.
+#
+# ⚠️ Los nombres de abajo (`mitropero-prod-*`) NO son libres: salen de `backupFilename()` en
+# `scripts/lib/backup-cmd.mjs`, que es quien nombra el archivo que este workflow cifra y sube. Si cambian
+# allá y no acá, el glob del cifrado no matchea nada y el backup del día se pierde SIN error visible.
+# Los ata `scripts/lib/backup-ci-consistency.test.mjs` (corre en `node scripts/check.mjs`).
 # - pg_dump contra el POOLER de PROD (conn string en el secret SUPABASE_DB_URL_PROD).
 # - El dump se cifra con gpg (AES256) ANTES de subirlo → el artifact es inútil sin BACKUP_GPG_PASSPHRASE.
 # - Artifacts retenidos 90 días (R8.3). Fail-fast: si pg_dump falla, la Action queda ROJA (R8.5).
@@ -48,7 +53,7 @@ jobs:
       - name: Encrypt dump
         run: |
           gpg --batch --yes --symmetric --cipher-algo AES256 \
-            --passphrase "$BK" "$RUNNER_TEMP"/rafaq-prod-*.sql.gz
+            --passphrase "$BK" "$RUNNER_TEMP"/mitropero-prod-*.sql.gz
         env:
           BK: ${{ secrets.BACKUP_GPG_PASSPHRASE }}
 
@@ -58,7 +63,7 @@ jobs:
       # del día, que es exactamente lo que se quiere proteger.
       - uses: actions/upload-artifact@v4
         with:
-          name: rafaq-prod-backup
+          name: mitropero-prod-backup
           path: ${{ runner.temp }}/*.sql.gz.gpg
           retention-days: 90
 
@@ -72,7 +77,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: rafaq-prod-manifest
+          name: mitropero-prod-manifest
           path: ${{ runner.temp }}/manifest-prod.txt
           retention-days: 90
 
@@ -114,12 +119,12 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          name: rafaq-prod-backup
+          name: mitropero-prod-backup
           path: ${{ runner.temp }}/dl
 
       - uses: actions/download-artifact@v4
         with:
-          name: rafaq-prod-manifest
+          name: mitropero-prod-manifest
           path: ${{ runner.temp }}/dl
 
       # Descifrar + descomprimir. Que esto funcione ya prueba dos cosas que hasta hoy nadie había
@@ -129,7 +134,7 @@ jobs:
           set -euo pipefail
           gpg --batch --yes --quiet --passphrase "$BK" \
             --output "$RUNNER_TEMP/dump.sql.gz" \
-            --decrypt "$RUNNER_TEMP"/dl/rafaq-prod-*.sql.gz.gpg
+            --decrypt "$RUNNER_TEMP"/dl/mitropero-prod-*.sql.gz.gpg
           gunzip -f "$RUNNER_TEMP/dump.sql.gz"
           wc -l < "$RUNNER_TEMP/dump.sql" | xargs echo "líneas de SQL en el dump:"
         env:

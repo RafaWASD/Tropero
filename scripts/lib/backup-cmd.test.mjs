@@ -40,17 +40,18 @@ test('B4(c) R5.11: la conn string / password NO va en pgDumpArgs (se pasa por en
   assert.equal(plan.pgEnv.PGDATABASE, 'postgres');
 });
 
-test('B4(d) R5.10: output default resuelve FUERA del repo (~/.rafaq-backups)', () => {
+test('B4(d) R5.10: output default resuelve FUERA del repo (~/.mitropero-backups)', () => {
   const plan = buildBackupPlan({ env: { SUPABASE_DB_URL_PROD: CONN }, homedir: HOME });
-  assert.ok(plan.outPath.startsWith(defaultBackupDir(HOME)), 'default va bajo ~/.rafaq-backups');
+  assert.equal(defaultBackupDir(HOME), path.join(HOME, '.mitropero-backups'));
+  assert.ok(plan.outPath.startsWith(defaultBackupDir(HOME)), 'default va bajo ~/.mitropero-backups');
   const repoRoot = process.cwd();
   assert.ok(!plan.outPath.startsWith(repoRoot), 'el default NUNCA cae dentro del working tree');
 });
 
-test('R5.7: filename comprimido + con timestamp (rafaq-prod-<ISO>.sql.gz), sin `:` ni `.` en el stamp', () => {
+test('R5.7: filename comprimido + con timestamp (mitropero-prod-<ISO>.sql.gz), sin `:` ni `.` en el stamp', () => {
   const now = new Date('2026-07-14T03:00:05.123Z');
   const name = backupFilename(now);
-  assert.equal(name, 'rafaq-prod-2026-07-14T03-00-05-123Z.sql.gz');
+  assert.equal(name, 'mitropero-prod-2026-07-14T03-00-05-123Z.sql.gz');
   const plan = buildBackupPlan({ env: { SUPABASE_DB_URL_PROD: CONN }, homedir: HOME, now });
   assert.equal(path.basename(plan.outPath), name);
 });
