@@ -15,6 +15,8 @@
 // `react-native-bluetooth-classic`, sigue eligiendo 'spp-android' pero NO monta transporte → la
 // app queda manual-first y el chip/CTA se ocultan solos (guard de `hasTransport`).
 
+import type { FrameParser, ReaderDriver } from './driver-types';
+
 // Delta multivendor (RMV2.7, RMV4.1): `'simulator'` se agrega de forma ADITIVA al union del core.
 // Es el adapter del camino de demo (dev/demo-gated, triple-guard) — no cambia ninguno de los otros.
 export type AdapterKind = 'manual' | 'mock' | 'web-serial' | 'spp-android' | 'hid-wedge' | 'simulator';
@@ -63,8 +65,10 @@ export function selectTransportAdapter(env: SelectionEnv): AdapterKind {
 //
 // Cómo entra al contrato lo que emite un adapter. Son dos puertas distintas del MISMO motor
 // (`EidIngestEngine`) y elegir la equivocada deja el bastón MUDO con la suite entera en verde:
-//   · 'raw-line' → línea CRUDA del lector → `processRawLine` → `parseRs420Line` (descarta STX,
-//                  cabecera fija y timestamp) → `isValidTag`.
+//   · 'raw-line' → línea CRUDA del lector → `processRawLine` → el `frameParser` del DRIVER de ese
+//                  adapter (para el RS420, `parseRs420Line`: descarta STX, cabecera fija y
+//                  timestamp) → `isValidTag`. Con qué parser exactamente lo resuelve
+//                  `resolveFrameParser` (abajo), fail-closed si el adapter no expone driver.
 //   · 'eid'      → el adapter ya entrega el EID limpio (manual, mock, simulador, y el wedge HID
 //                  cuando destrabe R8.7) → `processEid`, sin desframear nada.
 //
@@ -97,6 +101,112 @@ export const ADAPTER_INGEST_MODE = {
 /** Modo de ingesta de un adaptador. Total sobre `AdapterKind` por construcción (ver arriba). */
 export function ingestModeFor(kind: AdapterKind): IngestMode {
   return ADAPTER_INGEST_MODE[kind];
+}
+
+// ─── CON QUÉ se desframea una línea cruda (RBM1.1/RBM1.4, delta ios-ble-mfi) ──────────────────────
+//
+// `ingestModeFor` dice POR QUÉ PUERTA del contrato entra una lectura; esta función dice CON QUÉ
+// PARSER se desframea. Son las dos mitades de la MISMA decisión, y por eso viven juntas: separarlas
+// fue lo que dejó al contrato llamando `parseRs420Line` hardcodeado mientras el registro de drivers
+// declaraba un `frameParser` que **no se invocaba en producción** (deuda RMV5.2, cerrada acá).
+//
+// ── FAIL-CLOSED, Y POR QUÉ NO "SI NO HAY DRIVER, RS420" (RBM1.4) ────────────────────────────────
+// La alternativa tentadora es caer al parser del RS420 cuando el adapter no expone driver. Está
+// descartada con motivo: ese fallback produce lecturas para UN lector y **silencio total** para
+// todos los demás, y el silencio es indistinguible de "el operario no está bastoneando" — el mismo
+// síntoma que costó el terminador equivocado del SPP (🟠-5 / BENCH-2: `term cr` → 0 ingestas, 0
+// errores, en device). Un rechazo con log es diagnosticable; un fallback, no.
+//
+// ── POR QUÉ EL SINK DEL LOG SE INYECTA Y NO SE IMPORTA ──────────────────────────────────────────
+// Esta función es PURA (sin RN, sin I/O, sin importar `logging.ts`) y el aviso del camino
+// fail-closed entra por `onUnresolved`, exactamente como `acceptingTargets(subscribers, onError)`
+// en `read-dispatch.ts`. Dos consecuencias buscadas: (1) el "null + log" del caso anómalo se
+// verifica por COMPORTAMIENTO en node:test con un espía, en vez de por un regex sobre el provider;
+// (2) el parámetro es REQUERIDO —no opcional con no-op por default— porque un call site que se
+// olvide del sink perdería la única señal de que el transporte montado no puede parsear nada.
+
+/**
+ * El `frameParser` con el que hay que desframear las líneas de ESTE adaptador, o `null` si no hay
+ * ninguno aplicable.
+ *
+ * - modo `'eid'` (manual, mock, simulator, hid-wedge) → `null` **normal y silencioso**: esos
+ *   adaptadores ya entregan el EID limpio y no hay nada que desframear (entran por `processEid`).
+ * - modo `'raw-line'` con driver → el `frameParser` de su `ReaderDriver` (RBM1.1).
+ * - modo `'raw-line'` SIN driver → `null` + `onUnresolved(kind)`: fail-closed (RBM1.4). El caller
+ *   DEBE descartar la línea; nunca caer a un parser por defecto.
+ */
+export function resolveFrameParser(
+  adapter: { readonly kind: AdapterKind; readonly driver?: ReaderDriver },
+  onUnresolved: (kind: AdapterKind) => void,
+): FrameParser | null {
+  if (ingestModeFor(adapter.kind) !== 'raw-line') return null;
+  const parser = adapter.driver?.frameParser;
+  // `typeof parse === 'function'` y no solo `!= null`: un driver a medio escribir (o venido de un
+  // JSON/config) puede traer un `frameParser` sin `parse`, y eso tiene que caer del lado del
+  // descarte —igual que no traer driver— en vez de tirar `frameParser.parse is not a function`
+  // dentro del read-loop del transporte.
+  if (!parser || typeof parser.parse !== 'function') {
+    onUnresolved(adapter.kind);
+    return null;
+  }
+  return parser;
+}
+
+// ─── DE DÓNDE VINO UNA LECTURA, YA RESUELTO (RBM1.1/RBM1.4) ──────────────────────────────────────
+//
+// `ReadSource` + `readSourceFor` VIVÍAN EN EL PROVIDER hasta el review de F1, y ahí no había forma de
+// probarlos: `BleStickListenerProvider.tsx` importa `react-native`, así que ninguna suite `node:test`
+// puede importarlo y el único oráculo posible era un REGEX sobre el fuente. El reviewer lo falsificó:
+// con `resolveFrameParser(...) ?? DRIVER_REGISTRY[0].frameParser` adentro de esa función —el fallback
+// silencioso que RBM1.4 prohíbe, escrito sin nombrar `parseRs420Line` ni `RS420_DRIVER`— el guard
+// estático quedaba en VERDE y los 233 tests de las suites BLE también (mutante MR1b).
+//
+// La función es PURA (kind + `ingestModeFor` + `resolveFrameParser` + un sink inyectado), así que su
+// lugar es acá, donde `frame-parser-resolve.test.ts` la ejerce POR COMPORTAMIENTO —identidad del
+// parser, `null` + aviso en el fail-closed, silencio en los kinds `'eid'`— y cualquier grafía futura
+// del fallback cae por lo que HACE, no por cómo se escribe. El guard estático del provider queda como
+// red barata, no como único oráculo.
+
+/**
+ * De dónde vino una lectura, YA RESUELTO. Se calcula UNA VEZ al cablear cada adaptador —no por
+ * bastonazo— y viaja con la lectura hasta el contrato:
+ *   · `kind`        → para poder decir en el log QUÉ transporte quedó sin parser;
+ *   · `mode`        → por qué puerta del contrato entra (`ingestModeFor`, tabla exhaustiva 🟡-1);
+ *   · `frameParser` → CON QUÉ se desframea, sacado del `ReaderDriver` del adapter
+ *                     (`resolveFrameParser`). `null` con `mode==='raw-line'` es el estado
+ *                     FAIL-CLOSED: la lectura se descarta y se loguea, nunca cae a un parser por
+ *                     defecto (RBM1.4).
+ */
+export interface ReadSource {
+  readonly kind: AdapterKind;
+  readonly mode: IngestMode;
+  readonly frameParser: FrameParser | null;
+}
+
+/**
+ * Resuelve el `ReadSource` de un adaptador: las DOS mitades de la misma decisión (por qué puerta entra
+ * la lectura y con qué se desframea) resueltas en un solo lugar, para que ninguna superficie se escriba
+ * la suya a mano.
+ *
+ * `onUnresolved` es el sink del aviso del fail-closed, inyectado y REQUERIDO (esta capa es pura y no
+ * importa `logging.ts`): el provider le pasa el `parser_unresolved{at:'mount'}` = se cableó un
+ * transporte que NO PUEDE parsear nada. Los kinds de modo `'eid'` no avisan nada: no tienen qué
+ * desframear (ver `resolveFrameParser`).
+ *
+ * Se resuelve al CABLEAR y no dentro del camino caliente a propósito: el camino caliente corre una vez
+ * por bastonazo y su tabla de invocables (`HOT_PATH_CALLABLE`, `read-dispatch.test.ts`) es una lista
+ * cerrada. Eso es correcto **mientras el `driver` sea inmutable por instancia de adapter** (hoy lo es:
+ * `readonly` + inyectado por constructor) — ver la nota para F3 en el design del delta.
+ */
+export function readSourceFor(
+  adapter: { readonly kind: AdapterKind; readonly driver?: ReaderDriver },
+  onUnresolved: (kind: AdapterKind) => void,
+): ReadSource {
+  return {
+    kind: adapter.kind,
+    mode: ingestModeFor(adapter.kind),
+    frameParser: resolveFrameParser(adapter, onUnresolved),
+  };
 }
 
 /**

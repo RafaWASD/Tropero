@@ -7,34 +7,84 @@
 // este módulo expone el punto de confirmación pre-commit (R2) como un GATE que la UI llama,
 // y nunca emite tag_read sin pasar por él.
 //
-// Reuso OBLIGATORIO de parser-rs420.ts (commit 9126dba) — NO se reimplementa el parseo
-// (R1.2, R11.4). Los streams (spp-android, web-serial) entran por ingestRawLine; los
-// adaptadores que ya entregan el EID limpio (manual, mock) entran por ingestEid.
+// EL PARSER DE TRAMA ENTRA POR PARÁMETRO (RBM1.1/RBM1.2, delta ios-ble-mfi 2026-08-17) — este
+// módulo NO importa ni invoca el parser de NINGÚN fabricante. Hasta esta fecha `ingestRawLine`
+// llamaba `parseRs420Line` hardcodeado, y esa línea era la razón por la que un segundo driver **no
+// podía existir**: cualquier transporte nuevo solo podía hablar con algo que emitiera tramas del
+// RS420 (la deuda que el delta multivendor declaró bajo RMV5.2). Ahora el `frameParser` viene del
+// `ReaderDriver` del adaptador que produjo la línea, y el fabricante vuelve a ser un DATO
+// (`DRIVER_REGISTRY`) en vez de una dependencia del corazón del contrato (ADR-024 §1, RMV1.6).
+//
+// `isValidTag` / `normalizeTag` SE QUEDAN: son reglas DEL CONTRATO (EID = 15 dígitos ISO
+// 11784/11785, normalización de bordes), no de un fabricante — se aplican a todo EID salga del
+// frameParser que salga (RBM1.8). Que vivan en `parser-rs420.ts` es un accidente de dónde se
+// escribieron primero, no una pertenencia: ver el guard de `frame-parser-resolve.test.ts`, que
+// permite EXACTAMENTE esos dos nombres y prohíbe cualquier otro export de un `parser-*.ts`.
+//
+// Los streams (spp-android, web-serial, y los transportes nuevos) entran por ingestRawLine; los
+// adaptadores que ya entregan el EID limpio (manual, mock, simulator) entran por ingestEid.
 
 import type { BleStickEvent } from './stick-adapter';
+import type { FrameParser } from './driver-types';
 import { TagDedup } from './dedup';
-import { parseRs420Line, isValidTag, normalizeTag } from './parser-rs420';
+import { isValidTag, normalizeTag } from './parser-rs420';
 
-/** Motivo por el que una entrada cruda se rechaza (para loguear, R1.4 / R15.1). */
-export type RejectReason = 'parse_failed' | 'invalid_eid' | 'empty';
+/**
+ * Motivo por el que una entrada cruda se rechaza (para loguear, R1.4 / R15.1).
+ *
+ * `parse_failed` y `parser_threw` son DOS FALLAS DISTINTAS, con dos causas y dos acciones, y hasta el
+ * review de F1 compartían bolsa (🟡-2):
+ *   · `parse_failed` → el `frameParser` corrió bien y dijo "esta trama no es de mi formato". Causa
+ *     probable: el LECTOR está mandando otra cosa (terminador, modo de salida, o directamente basura).
+ *     Acción: mirar el aparato / su configuración.
+ *   · `parser_threw` → el `parse` del driver TIRÓ (o no era invocable). Causa: el DRIVER —código
+ *     nuestro o de un tercero— está roto. Acción: arreglar el driver; el lector puede estar perfecto.
+ * Con un lector nuevo ésa es justamente la pregunta que importa ("¿el bastón manda basura o el driver
+ * que escribimos está roto?"), y con un solo motivo los dos casos producían un log byte-idéntico.
+ *
+ * Un `parse` que devuelve `undefined` o un objeto sin `eid` se cuenta como `parse_failed` y no como
+ * driver roto: caerse del final de una función sin `return` es la forma descuidada —y frecuente en
+ * JS— de escribir "no match", y no hay forma de distinguirla de la intención. Un throw, en cambio,
+ * nunca es "no match".
+ */
+export type RejectReason = 'parse_failed' | 'parser_threw' | 'invalid_eid' | 'empty';
 
 /** Resultado de extraer un EID de una entrada cruda, antes de dedup/confirmación. */
 export type IngestResult = { ok: true; eid: string } | { ok: false; reason: RejectReason };
 
 /**
- * Extrae el EID de una LÍNEA CRUDA de un adaptador de stream (spp-android / web-serial).
- * Descarta el framing (byte de control, cabecera fija 1000000, timestamp del lector)
- * reusando parseRs420Line (R1.2) y valida con isValidTag (R1.3). NO reimplementa el parseo.
+ * Extrae el EID de una LÍNEA CRUDA de un adaptador de stream (spp-android / web-serial / BLE).
+ * Descarta el framing (byte de control, cabecera fija, timestamp del lector) con el `frameParser`
+ * DEL DRIVER que produjo la línea (RBM1.1 — para el RS420 eso sigue siendo `parseRs420Line`, vía
+ * `RS420_DRIVER.frameParser`: reuso, no reimplementación, R1.2/R11.4) y valida con `isValidTag`
+ * (R1.3), que es del contrato y se aplica cualquiera sea el driver (RBM1.8).
+ *
+ * `frameParser` es un parámetro **REQUERIDO** a propósito (RBM1.2): un call site que se lo olvide
+ * NO COMPILA. Es la misma familia de guard que `satisfies Record<AdapterKind, IngestMode>` — el
+ * mecanismo se escribe sobre la AUSENCIA. Un default (p. ej. "si no me pasás nada, RS420") sería
+ * exactamente el fallback silencioso que RBM1.4 prohíbe: produciría lecturas para un lector y
+ * silencio total para todos los demás, indistinguible de "el operario no está bastoneando".
  *
  * Devuelve {ok:false} con el motivo en vez de tirar, para que el caller lo loguee sin
- * romper el flujo (R1.4, R15.1). Nunca tira.
+ * romper el flujo (R1.4, R15.1). Nunca tira — ni siquiera si el `frameParser` del driver tira:
+ * un parser de un fabricante nuevo es código que no controlamos y no puede tumbar el read-loop
+ * del transporte (un throw acá mataba la ingesta hasta reconectar). Ese caso se rechaza con su
+ * motivo PROPIO (`parser_threw`), distinto del de una trama que el parser no entiende
+ * (`parse_failed`): son dos causas y dos acciones distintas — ver `RejectReason`.
  */
-export function ingestRawLine(line: string): IngestResult {
+export function ingestRawLine(line: string, frameParser: FrameParser): IngestResult {
   if (typeof line !== 'string' || normalizeTag(line).length === 0) {
     return { ok: false, reason: 'empty' };
   }
-  const parsed = parseRs420Line(line);
-  if (parsed === null) {
+  let parsed: { eid: string } | null;
+  try {
+    parsed = frameParser.parse(line);
+  } catch {
+    // El parser del driver EXPLOTÓ (o `frameParser` no era invocable): el driver está roto, no la
+    // trama. Motivo propio para que en el log no se lea igual que "el lector mandó basura" (🟡-2).
+    return { ok: false, reason: 'parser_threw' };
+  }
+  if (parsed === null || parsed === undefined || typeof parsed.eid !== 'string') {
     return { ok: false, reason: 'parse_failed' };
   }
   if (!isValidTag(parsed.eid)) {
@@ -99,13 +149,21 @@ export class EidIngestEngine {
   }
 
   /**
-   * Procesa una lectura cruda de un adaptador de STREAM. Devuelve el EID candidato si pasa
-   * parse+validate+dedup, o null si debe descartarse (malformado → loguear, R1.4; o
-   * re-escaneo dentro de la ventana → ignorar, R3.1). NO emite todavía: el caller decide la
-   * confirmación (R2) y luego llama a commit().
+   * Procesa una lectura cruda de un adaptador de STREAM, desframeándola con el `frameParser` del
+   * driver de ESE adaptador (RBM1.1; lo resuelve `resolveFrameParser` en `adapter-selection.ts`).
+   * Devuelve el EID candidato si pasa parse+validate+dedup, o null si debe descartarse (malformado
+   * → loguear, R1.4; o re-escaneo dentro de la ventana → ignorar, R3.1). NO emite todavía: el
+   * caller decide la confirmación (R2) y luego llama a commit().
+   *
+   * `frameParser` va ANTES de `now` y sin default: `now` es un detalle de test (reloj inyectable) y
+   * el parser es parte del contrato de la llamada. Un call site que no lo pase no compila (RBM1.2).
    */
-  processRawLine(line: string, now: number = Date.now()): { eid: string } | { rejected: RejectReason } | null {
-    const res = ingestRawLine(line);
+  processRawLine(
+    line: string,
+    frameParser: FrameParser,
+    now: number = Date.now(),
+  ): { eid: string } | { rejected: RejectReason } | null {
+    const res = ingestRawLine(line, frameParser);
     if (!res.ok) return { rejected: res.reason };
     if (!this.dedup.shouldEmit(res.eid, now)) return null; // re-escaneo accidental (R3.1)
     return { eid: res.eid };

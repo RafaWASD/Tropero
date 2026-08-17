@@ -101,6 +101,10 @@ test('R15.1/R15.2: logTransportEvent nunca tira (best-effort), aun con console r
   // No debe propagar excepción bajo ninguna forma de evento.
   assert.doesNotThrow(() => logTransportEvent({ kind: 'connection_changed', connected: true }));
   assert.doesNotThrow(() => logTransportEvent({ kind: 'eid_rejected', reason: 'parse_failed' }));
+  // 🟡-2 (review de F1): el motivo NUEVO —el `parse` del driver tiró— también se construye y se
+  // loguea. El `reason` del evento es el `RejectReason` del contrato importado, no una copia: si
+  // alguien agrega un motivo allá y no llega acá, deja de compilar.
+  assert.doesNotThrow(() => logTransportEvent({ kind: 'eid_rejected', reason: 'parser_threw' }));
   assert.doesNotThrow(() => logTransportEvent({ kind: 'reconnect_attempt', attempt: 3 }));
   assert.doesNotThrow(() => logTransportEvent({ kind: 'read_loop_error', message: 'boom' }));
   // Diagnóstico de los bloqueantes cerrados el 2026-07-30: los cuatro existen para poder distinguir
@@ -122,6 +126,11 @@ test('R15.1/R15.2: logTransportEvent nunca tira (best-effort), aun con console r
   assert.doesNotThrow(() => logTransportEvent({ kind: 'read_dropped_no_consumer', subscribers: 3 }));
   // Y el subscriber que TIRA dentro del despacho (🟠-D): el provider lo acota y lo loguea por este canal.
   assert.doesNotThrow(() => logTransportEvent({ kind: 'read_loop_error', message: 'tag_subscriber_threw' }));
+  // RBM1.4 (delta ios-ble-mfi): el fail-closed del parser de trama, en sus DOS momentos. Igual que
+  // con `read_dropped_no_consumer` (⚪-J), el payload se EJECUTA acá y no solo se verifica que el
+  // literal aparezca en el provider — un evento que nada construye es un log que nadie probó.
+  assert.doesNotThrow(() => logTransportEvent({ kind: 'parser_unresolved', adapter: 'spp-android', at: 'mount' }));
+  assert.doesNotThrow(() => logTransportEvent({ kind: 'parser_unresolved', adapter: 'web-serial', at: 'read' }));
 
   // Aun si console.info tira, el logger se lo traga (R15.2).
   const original = console.info;

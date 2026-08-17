@@ -34,7 +34,13 @@ import { ConnectionStatusContext, isConnectedStatus } from './connection-status'
 import { EidIngestEngine } from './contract';
 import { resolveListening } from './listener-gate';
 import { acceptingTargets, resolveReadHandling, type ReadSubscriber } from './read-dispatch';
-import { selectTransportAdapter, ingestModeFor, type ProviderMode } from './adapter-selection';
+import {
+  selectTransportAdapter,
+  readSourceFor,
+  type AdapterKind,
+  type ProviderMode,
+  type ReadSource,
+} from './adapter-selection';
 import { ManualAdapter } from './adapter-manual';
 import { MockAdapter } from './adapter-mock';
 import { WebSerialAdapter } from './adapter-web-serial';
@@ -99,6 +105,20 @@ type TagSubscriber = ReadSubscriber<(tag: string) => void>;
 /** Default de `accepts`: el consumidor toma todas las lecturas mientras esté suscripto. */
 const ALWAYS_ACCEPTS = (): boolean => true;
 
+/**
+ * El sink del aviso de fail-closed AL CABLEAR un adaptador (RBM1.4): se montó un transporte de modo
+ * `'raw-line'` que no expone un `ReaderDriver` con `frameParser`, así que no va a poder desframear ni
+ * un bastonazo. `at:'mount'` aparece UNA vez y dice "error de cableado"; su hermano `at:'read'`
+ * (abajo, en el camino de lectura) aparece por bastonazo y es el que hace diagnosticable el
+ * "bastoneo y no pasa nada".
+ *
+ * Vive acá y no en `adapter-selection.ts` porque aquella capa es PURA (no importa `logging.ts`): el
+ * sink entra inyectado, igual que `acceptingTargets(subscribers, onError)` en `read-dispatch.ts`.
+ */
+const logParserUnresolvedAtMount = (adapterKind: AdapterKind): void => {
+  logTransportEvent({ kind: 'parser_unresolved', adapter: adapterKind, at: 'mount' });
+};
+
 function instantiateTransport(kind: ReturnType<typeof selectTransportAdapter>): StickAdapter | null {
   switch (kind) {
     case 'web-serial':
@@ -109,8 +129,9 @@ function instantiateTransport(kind: ReturnType<typeof selectTransportAdapter>): 
       // Delta multivendor (RMV4.5, triple-guard 3): re-chequeo del gate demo AL INSTANCIAR. Aun
       // si `selectTransportAdapter` devolviera 'simulator' (solo bajo mode='demo'), si el build no
       // está en modo demo (`isDemoMode()` false) devolvemos null → sin camino a instanciar el
-      // simulador en producción. El simulador entra por `handleReading(value, isRawStream=false)`
-      // (kind !== 'web-serial'/'spp-android'), igual que el mock: EID limpio, no línea cruda.
+      // simulador en producción. El simulador entra con `mode: 'eid'` (su fila de
+      // `ADAPTER_INGEST_MODE`), igual que el mock: EID limpio, no línea cruda — así que tampoco
+      // necesita driver ni parser (`resolveFrameParser` devuelve `null` en silencio).
       return isDemoMode() ? new SimulatorAdapter() : null;
     case 'spp-android':
       // Android (Fase 4, construida 2026-07-29). El guard NO es cosmético: sin el módulo nativo
@@ -181,7 +202,7 @@ export function BleStickListenerProvider({
   }, []);
 
   // ─── Ingesta de una lectura (cruda de stream o EID limpio) → confirmación → tag_read ────
-  const handleReading = useCallback((rawOrEid: string, isRawStream: boolean) => {
+  const handleReading = useCallback((rawOrEid: string, source: ReadSource) => {
     // ── GATE ÚNICO: ¿esta lectura se procesa, y si no, por qué? (`read-dispatch.ts`, decisión pura) ──
     // Cubre los DOS motivos por los que una lectura no va a ningún lado, y los dos cortan ANTES del
     // feedback sensorial (R4) y ANTES del motor de dedup (R3):
@@ -210,7 +231,23 @@ export function BleStickListenerProvider({
 
     const now = Date.now();
     const engine = engineRef.current;
-    const candidate = isRawStream ? engine.processRawLine(rawOrEid, now) : engine.processEid(rawOrEid, now);
+    // ── EL PARSER SALE DEL DRIVER DEL ADAPTER, NO DE UN IMPORT DEL CONTRATO (RBM1.1) ───────────────
+    // `source.frameParser` lo resolvió `resolveFrameParser` al cablear este adaptador. Si es `null`
+    // con modo 'raw-line', el transporte NO PUEDE desframear: la línea se DESCARTA con log
+    // (FAIL-CLOSED, RBM1.4) en vez de caer al parser del RS420 — ese fallback daría lecturas para un
+    // lector y silencio total para todos los demás, y el silencio es indistinguible de "el operario
+    // no está bastoneando". Sale antes del feedback: no hay nada que confirmarle a nadie.
+    let candidate: ReturnType<EidIngestEngine['processEid']>;
+    if (source.mode === 'raw-line') {
+      const frameParser = source.frameParser;
+      if (frameParser === null) {
+        logTransportEvent({ kind: 'parser_unresolved', adapter: source.kind, at: 'read' });
+        return;
+      }
+      candidate = engine.processRawLine(rawOrEid, frameParser, now);
+    } else {
+      candidate = engine.processEid(rawOrEid, now);
+    }
 
     // ── FEEDBACK SENSORIAL (R4), UNA SOLA LLAMADA, PARA LOS TRES DESENLACES ────────────────────────
     // Se invoca SIEMPRE, con el desenlace clasificado, y es el punto único (R4.7). Lo que suena —o no—
@@ -276,21 +313,36 @@ export function BleStickListenerProvider({
   useEffect(() => {
     const unsubs: Array<() => void> = [];
 
-    // Manual (piso, R7): siempre activo, alimenta el MISMO contrato (R7.1).
+    // Manual (piso, R7): siempre activo, alimenta el MISMO contrato (R7.1). Su `ReadSource` sale de
+    // la MISMA función que el del transporte (modo 'eid' → sin parser, `null` silencioso): que la
+    // puerta manual y la del bastón se resuelvan por el mismo camino es lo que evita que una de las
+    // dos quede con una regla escrita a mano que nadie mira.
     const manual = manualRef.current;
-    unsubs.push(manual.onTagRead((value) => handleReading(value, false)));
+    const manualSource = readSourceFor(manual, logParserUnresolvedAtMount);
+    unsubs.push(manual.onTagRead((value) => handleReading(value, manualSource)));
     void manual.connect();
 
     // Transporte (web-serial/mock): si hay, suscribimos sus lecturas + status.
     if (transport) {
-      // Modo de ingesta DECLARADO por adaptador (`adapter-selection.ts`), no una comparación de
-      // literales acá (🟡-1 del review, 2026-07-30). Era una lista de dos kinds sin un solo test:
+      // Modo de ingesta DECLARADO por adaptador (`readSourceFor` → `ingestModeFor`, en
+      // `adapter-selection.ts`), no una comparación de literales acá (🟡-1 del review, 2026-07-30).
+      // Era una lista de dos kinds sin un solo test:
       // si le faltara 'spp-android', cada trama del RS420 iría por `processEid` → `normalizeTag` le
       // saca el STX → 34 dígitos → `isValidTag` false → CERO lecturas, con la suite entera en verde
       // (ni el unit ni el E2E —que corre web con mock/manual/simulator— tocan este camino). La
       // tabla es exhaustiva por tipo: un adapter nuevo no compila hasta declarar su modo.
-      const isRawStream = ingestModeFor(transport.kind) === 'raw-line';
-      unsubs.push(transport.onTagRead((value) => handleReading(value, isRawStream)));
+      //
+      // Delta ios-ble-mfi (RBM1.1): junto con el MODO viaja ahora el `frameParser` del `ReaderDriver`
+      // de ESTE adapter (las dos mitades las resuelve `readSourceFor`, fail-closed). Antes el
+      // contrato llamaba `parseRs420Line` hardcodeado, así que un transporte nuevo solo podía hablar
+      // con algo que emitiera tramas del RS420 — o sea, con nuestro emulador y con nada más.
+      //
+      // Las DOS mitades viven en la capa pura y se ejercen por COMPORTAMIENTO desde node:test
+      // (`frame-parser-resolve.test.ts`): este archivo importa `react-native`, así que todo lo que
+      // se decida ACÁ ADENTRO solo puede vigilarse con un regex — y un regex vigila las grafías de
+      // hoy, no el invariante (el reviewer lo falsificó con un fallback que no nombraba a nadie).
+      const transportSource = readSourceFor(transport, logParserUnresolvedAtMount);
+      unsubs.push(transport.onTagRead((value) => handleReading(value, transportSource)));
       unsubs.push(
         transport.onStatus((s) => {
           setStatus(s);

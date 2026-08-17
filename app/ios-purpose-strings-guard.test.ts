@@ -38,10 +38,19 @@
 //     habilita ningún accesorio. Sin el protocol string del fabricante (trámite MFi, gateado) el bastón
 //     no aparece en iOS, y este guard no puede saber cuál es ese string ni verificar el trámite.
 //  5. **El `Info.plist` FINAL.** Lo que se verifica es la FUENTE (`app.config.ts`), no el plist que sale
-//     del prebuild: un config plugin podría borrar una clave después. Los nuestros no tocan iOS
-//     (`with-bluetooth-classic` solo escribe el AndroidManifest), y verificar el plist real exigiría
-//     correr `expo prebuild` en cada corrida de la suite — un costo que no se paga por un riesgo que hoy
-//     no existe. Si algún día se agrega un plugin que escriba el Info.plist, esto hay que revisarlo.
+//     del prebuild: un config plugin podría borrar una clave después. Verificar el plist real exigiría
+//     correr `expo prebuild` en cada corrida de la suite — un costo que no se paga por un riesgo acotado.
+//     ⚠️ **Reconciliado el 2026-08-17 (delta `ios-ble-mfi`, F2).** Este párrafo decía *"los nuestros no
+//     tocan iOS"* y dejó de ser cierto: el config plugin de `react-native-ble-plx` **escribe el
+//     Info.plist** (`withBluetoothPermissions` setea `NSBluetoothAlwaysUsageDescription`, y
+//     `withBLEBackgroundModes` toca `UIBackgroundModes`). Es exactamente el caso que este límite
+//     anticipaba ("si algún día se agrega un plugin que escriba el Info.plist, esto hay que revisarlo"),
+//     y se cerró así, sin correr prebuild: en `app.config.ts` el plugin se engancha pasándole
+//     **la misma constante** que `ios.infoPlist` (`bluetoothAlwaysPermission: BLUETOOTH_PURPOSE`), de modo
+//     que el resultado no depende del orden de los mods, y `app.config.test.ts` verifica que las dos no
+//     puedan divergir (test «el purpose string que el plugin de BLE escribe es EL NUESTRO») y que ningún
+//     modo de background BLE aparezca en la config. Lo que sigue sin verificarse acá es el plist
+//     GENERADO; el veto empírico de F2 lo miró una vez a mano (`progress/impl_ios-ble-mfi-f2.md`).
 //
 // ⚠️ Debe estar registrado en la lista EXPLÍCITA de `scripts/run-tests.mjs`: un guard que no corre da
 // falsa confianza.
@@ -846,6 +855,18 @@ test('CENSO: las dependencias DIRECTAS con código nativo Apple son exactamente 
     'expo-sharing',
     'expo-splash-screen',
     'react-native',
+    // ── VEREDICTO (spec 04, delta ios-ble-mfi / RBM2.17) ────────────────────────────────────────
+    // `react-native-ble-plx` es el transporte BLE GATT del bastón (`adapter-ble-gatt`). TOCA
+    // CoreBluetooth → exige `NSBluetoothAlwaysUsageDescription`, que YA está declarada en
+    // `app.config.ts` y con texto útil (la misma que pide `react-native-bluetooth-classic`).
+    // El detalle que importa y que NO es obvio: sus fuentes propias (`ios/BlePlx.m` y las tres
+    // cabeceras) NO nombran un solo símbolo de CoreBluetooth — el framework entra por su dependencia
+    // de CocoaPods `MultiplatformBleAdapter 0.2.0`, que vive en `Pods/` y no en `node_modules/`, o sea
+    // en el punto ciego nº2 de este guard. Lo que hace obligatoria la clave acá es la RED POR NOMBRE
+    // (`MODULES_BY_NAME`), no el escaneo de símbolos. Está verificado ejecutando, en el test
+    // «VEREDICTO react-native-ble-plx» de más abajo. Por eso mismo NO tiene entrada en
+    // `MODULE_VERDICTS`: sin hits, sería un veredicto "fantasma" y el guard que los caza lo rechazaría.
+    'react-native-ble-plx',
     'react-native-bluetooth-classic',
     'react-native-gesture-handler',
     'react-native-reanimated',
@@ -876,6 +897,57 @@ test('CENSO: las dependencias DIRECTAS con código nativo Apple son exactamente 
       'está en la tabla, el guard de veredictos ya te lo va a decir; si NO está en la tabla, agregalo ahí ' +
       'primero. Este censo existe para forzar esa mirada.',
   );
+});
+
+test('VEREDICTO `react-native-ble-plx` (RBM2.17): la clave es obligatoria, y por qué RUTA lo es', (t) => {
+  // El veredicto del censo, EJECUTADO en vez de escrito en un comentario. Lo que este test fija no es
+  // "la clave está" (eso ya lo hacen los guards de arriba): es **por qué mecanismo** está obligada,
+  // que es lo único que se puede romper sin que nadie lo note.
+  //
+  // No se escribe como "no hay hits" a secas a propósito: eso daría rojo el día que la lib inline
+  // CoreBluetooth en sus propias fuentes, que es un cambio BENIGNO. Se escribe como la disyunción, así
+  // que el invariante ("la clave es obligatoria por una ruta verificada") vale en los dos mundos.
+  const PKG = 'react-native-ble-plx';
+  if (!directDependencies().includes(PKG) && !existsSync(join(NODE_MODULES, PKG))) {
+    t.skip(`\`${PKG}\` no está (ni declarado ni instalado): no hay veredicto que verificar`);
+    return;
+  }
+  // (1) Pertenece al CENSO: trae código nativo de Apple (por eso agregarla obligó a mirar esta lista).
+  assert.ok(hasAppleNativeCode(PKG), `${PKG} dejó de traer código nativo Apple: revisá el censo`);
+
+  const seen = vendorMatches(PKG, IOS_PROTECTED_RESOURCES.bluetooth.symbols);
+  if (seen.length > 0) {
+    // (2a) El escaneo de símbolos SÍ lo ve → la ruta pasa a ser la de siempre y exige veredicto propio.
+    assert.equal(
+      MODULE_VERDICTS[PKG]?.bluetooth?.requires,
+      true,
+      `ahora el escaneo SÍ ve CoreBluetooth en las fuentes de ${PKG} (${seen.slice(0, 3).join(', ')}): ` +
+        'agregale su entrada en `MODULE_VERDICTS` con `requires: true` y borrá esta rama del test.',
+    );
+  } else {
+    // (2b) El escaneo es CIEGO (el caso de hoy): el framework entra por el pod, y lo que obliga la
+    // clave es la red por nombre. Las dos mitades se verifican, porque si se cae cualquiera de las dos
+    // la clave dejaría de ser obligatoria sin que ningún assert se moviera.
+    assert.ok(
+      MODULES_BY_NAME[PKG]?.includes('bluetooth'),
+      `el escaneo no ve CoreBluetooth en ${PKG} y tampoco está en \`MODULES_BY_NAME\`: la clave quedó ` +
+        'sin nadie que la exija (y el bastón por BLE la necesita: sin ella iOS ABORTA al montar el manager).',
+    );
+    const podspec = readFileSync(join(NODE_MODULES, PKG, `${PKG}.podspec`), 'utf8');
+    assert.match(
+      podspec,
+      /s\.dependency\s+"MultiplatformBleAdapter"/,
+      'el podspec ya no depende de `MultiplatformBleAdapter`, que era LA EXPLICACIÓN de por qué el ' +
+        'escaneo de símbolos no ve CoreBluetooth. De dónde sale el BLE ahora hay que mirarlo a mano.',
+    );
+  }
+
+  // (3) Y la clave que exige, declarada y con texto útil en TODAS las variantes (el build que se
+  //     instala en el teléfono es el `dev`).
+  const { key } = IOS_PROTECTED_RESOURCES.bluetooth;
+  for (const variant of VARIANTS) {
+    assert.equal(purposeStringProblem(infoPlistOf(variant)[key]), null, `\`${key}\` con variant=${variant}`);
+  }
 });
 
 test('AUTO-VERIFICACIÓN: el guard escaneó el árbol REAL (si no, todo lo de arriba pasa por no mirar nada)', () => {

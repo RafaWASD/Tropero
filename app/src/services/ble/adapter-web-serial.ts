@@ -2,7 +2,8 @@
 // web vía navigator.serial (COM virtual del SPP). NO es transporte de producción (Web Serial
 // no existe en RN ni iOS Safari). Solo se monta cuando Platform.OS === 'web' (R5.1). Reusa
 // parser-rs420.ts tal cual (R5.3) — el framing por línea (LineFramer) entrega cada línea
-// cruda al contrato, que llama parseRs420Line.
+// cruda al contrato, que la desframea con el `frameParser` del `driver` de ESTE adapter
+// (RBM1.1; default `RS420_DRIVER`, o sea `parseRs420Line`: el comportamiento no cambia, RBM1.5).
 //
 // La lógica PURA (framing, soporte, backoff) vive en line-framer.ts y la testea node:test;
 // este módulo es la capa de I/O sobre la Web Serial API (no testeada en CI — necesita Chrome
@@ -10,6 +11,8 @@
 // onStatus y reintenta con backoff (R5.5), sin romper la carga manual (R7).
 
 import type { StickAdapter, ConnectionStatus, Unsubscribe } from './stick-adapter';
+import type { ReaderDriver } from './driver-types';
+import { RS420_DRIVER } from './driver-rs420';
 import { LineFramer, isWebSerialSupported, backoffDelayMs } from './line-framer';
 import { DEFAULT_BAUD } from './config';
 
@@ -39,6 +42,14 @@ function getSerial(): SerialLike | null {
 export class WebSerialAdapter implements StickAdapter {
   readonly kind = 'web-serial' as const;
 
+  /**
+   * El lector con el que este harness habla (RBM1.3/RBM1.5). Default `RS420_DRIVER`: es el bastón
+   * que se enchufa al COM virtual de Windows, así que el comportamiento actual no cambia — lo único
+   * nuevo es que ahora el contrato puede LEER de acá el `frameParser` en vez de tener el del RS420
+   * hardcodeado (RBM1.1). Inyectable para poder ejercitar otro fabricante sin tocar el adapter.
+   */
+  readonly driver: ReaderDriver;
+
   private tagListeners = new Set<(rawLine: string) => void>();
   private statusListeners = new Set<(status: ConnectionStatus) => void>();
   private listening = true;
@@ -50,8 +61,14 @@ export class WebSerialAdapter implements StickAdapter {
   private reconnectScheduled = false;
   private readonly baudRate: number;
 
-  constructor(baudRate: number = DEFAULT_BAUD) {
+  /**
+   * `baudRate` queda PRIMERO (aditivo): los tres call sites existentes (`new WebSerialAdapter()`,
+   * `new WebSerialAdapter(baud)` de la pantalla del harness, y los tests) siguen compilando y
+   * comportándose igual. El driver entra segundo, con el RS420 por default (RBM1.5).
+   */
+  constructor(baudRate: number = DEFAULT_BAUD, driver: ReaderDriver = RS420_DRIVER) {
     this.baudRate = baudRate;
+    this.driver = driver;
   }
 
   /** ¿El navegador soporta Web Serial (Chromium + contexto seguro)? (R5.6) */

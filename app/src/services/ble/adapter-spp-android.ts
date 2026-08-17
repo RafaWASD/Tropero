@@ -368,8 +368,11 @@ export function __resetSppModuleStateForTests(): void {
 export function defaultSppEnv(): SppEnv {
   return {
     loadNative: loadRNBC,
-    ensurePermissions: ensureAndroidBluetoothPermissions,
-    checkPermissions: checkAndroidBluetoothPermissions,
+    // El transporte va EXPLÍCITO (RBM2.13): la tabla de permisos es por transporte desde que existe
+    // `ble-gatt`, y el parámetro no tiene default a propósito — un call site que se lo olvide no
+    // compila, en vez de pedir en silencio el conjunto de otro transporte.
+    ensurePermissions: () => ensureAndroidBluetoothPermissions('spp'),
+    checkPermissions: () => checkAndroidBluetoothPermissions('spp'),
     readRemembered: async () => {
       try {
         // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -419,7 +422,14 @@ export function defaultSppEnv(): SppEnv {
 export class SppAndroidAdapter implements StickAdapter {
   readonly kind = 'spp-android' as const;
 
-  private readonly driver: ReaderDriver;
+  /**
+   * El lector con el que este adapter habla (RMV5.2). PÚBLICO de solo lectura desde el delta
+   * ios-ble-mfi (RBM1.3): el contrato de ingesta necesita SU `frameParser` para desframear las
+   * líneas que este transporte entrega (RBM1.1), y lo lee por la interfaz `StickAdapter` —
+   * `resolveFrameParser(transport, …)` en el provider. Era `private`; pasar a `readonly` público
+   * no cambia ningún método ni ningún comportamiento (RBM1.5).
+   */
+  readonly driver: ReaderDriver;
   private readonly env: SppEnv;
   private tagListeners = new Set<(rawLine: string) => void>();
   private statusListeners = new Set<(status: ConnectionStatus) => void>();

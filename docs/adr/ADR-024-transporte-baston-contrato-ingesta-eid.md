@@ -126,3 +126,37 @@ Perseguir autorización MFi de Allflex (SDK 2.0 + protocol string, precedentes C
 **Por qué se formaliza (regla "¿se referencia en 6 meses?")**: se referencia cada vez que se suma un fabricante o un transporte (GATT/MFi); fija una decisión de integridad (qué transporte usa producción por plataforma). No es un detalle de una feature.
 
 **Reversibilidad / relación**: mantiene la reversibilidad de §Consecuencias (agregar/sacar un driver o un adapter no toca el contrato). Insumos: `specs/active/04-bluetooth-baston/{context,requirements,design,tasks}-multivendor.md`. El adapter External Accessory/MFi (iOS Classic) sigue **diferido a Facundo** (§5); la arquitectura solo lo deja declarable (`transportKind:'mfi'` + `protocolString`).
+
+## Enmienda 2026-08-17 — El camino iOS-abierto real es BLE-GATT, no HID
+
+**Status**: Accepted (Puertas 1 y 2 del delta `04-bluetooth-baston/*-ios-ble-mfi`, aprobadas por Raf el 2026-08-15 y el 2026-08-17). Corrige §2, §4 y §5 y la prioridad de iOS de la enmienda 2026-07-20; **no cambia** el contrato de ingesta ni la interfaz `StickAdapter`.
+
+**Disparador**: el relevamiento de bastones del mercado argentino (`docs/bastones-mercado-argentino.md`, 13/08/2026), que cruzó los catálogos reales de los distribuidores locales en vez de suponer el parque instalado.
+
+### Lo que el relevamiento FALSIFICÓ de este ADR
+
+1. **§2 llamaba al `hid-wedge` "el único camino BLE-abierto verificado".** No estaba verificado: **no hay un solo bastón del mercado argentino con modo HID confirmado por su fabricante**. El único candidato —el Gallagher **HR0**— sale de descripciones de revendedores y Gallagher no lo documenta.
+
+2. **§2 decía "si aparece un lector con GATT abierto real se suma un `adapter-ble-gatt`".** Apareció: el **Gallagher HR5 v3**, que pasó a BLE justamente para entrar a iOS sin MFi (declarado por el fabricante vía AgriWebb).
+
+⇒ **Los roles se dieron vuelta.** El camino con evidencia documental es **BLE-GATT** (un modelo, declarado por el fabricante); el que quedó sin ningún dispositivo confirmado es **HID**. La decisión original apostó al revés, con la información que había.
+
+### Decisión (cuatro piezas)
+
+1. **Se construye `adapter-ble-gatt`** sobre `react-native-ble-plx`, **cross-platform** (iOS y Android): el mismo transporte sirve al HR5 v3 en las dos plataformas, y Android es donde está el productor argentino. La dep quedó **vetada por inspección de fuente** (`progress/veto_ble-plx.md`): maneja new arch en Android e iOS y **no tiene capa JSI**, así que el modo de falla de `react-native-quick-sqlite` bajo bridgeless no aplica. El veto es **provisional** hasta un build de Gradle real.
+
+2. **La prioridad de transporte de iOS pasa a `['mfi', 'ble-gatt', 'ble-hid']`**, invirtiendo la de la enmienda 2026-07-20 (`['ble-hid','ble-gatt','mfi']`). Cuando la cadena de protocolo existe, MFi es un stream nativo del lector que el cliente **ya tiene** (RS420, SRS2i, XRS2i) y no depende de que haya un campo enfocado; BLE-GATT va segundo porque es abierto pero hoy solo lo habla el HR5 v3; HID queda último porque secuestra el teclado del SO y sigue gated. Android y web no cambian.
+
+3. **El gate físico del HID (§4) deja de requerir una compra.** El requisito original —*"conseguir un lector HID-capable (un AgriEID BT Ultra importado, o un genérico AR)"*— quedó obsoleto: el **emulador ESP32 en `MODO_HID`** es un teclado BLE HID y se construyó para esto, con terminador, delay y modo raw configurables. El gate se corre con hardware propio, contra una build ya instalada en el iPhone, **sin consumir un build de EAS**.
+   ⚠️ **Lo que ese gate NO prueba** sigue siendo lo de (1): valida el **lado del teléfono** (que iOS entregue los keystrokes a un `TextInput` enfocado), **no** que exista un bastón comercial con modo HID. Son dos incógnitas y el verde de una no cierra la otra.
+
+4. **§5 se corrige en quién es interlocutor de qué**, porque el ADR original hablaba solo de "autorización MFi de Allflex" y el pedido no es el mismo para los tres:
+   - **Allflex** (RS420) y **Datamars** (Tru-Test SRS2i/XRS2i) → cadena de protocolo **iAP + licencia MFi**. Datamars **no figuraba** en este ADR y cubre dos de los cuatro modelos iOS-capaces del relevamiento.
+   - **Gallagher** (HR5 v3) → **documentación técnica** (UUIDs de servicio/característica, formato de trama). **No hay ninguna licencia MFi que pedirle**: su camino iOS es BLE. Pedírsela sería pedir algo que no existe.
+   - **HR4, HR5 estándar, SRS2, XRS2** → Bluetooth clásico sin chip MFi: **no se conectan a un iPhone con ninguna app, jamás**. No hay gestión posible por esos modelos.
+
+**Lo que NO se decide acá**: registrar un `ReaderDriver` del HR5 v3. No tenemos el aparato ni sus parámetros, y un driver con UUIDs adivinados convertiría una incógnita en un verde falso. Un fabricante entra al `DRIVER_REGISTRY` cuando entrega su documentación.
+
+**Prerrequisito que esta enmienda paga**: la deuda declarada bajo RMV5.2 —`contract.ts` llamaba `parseRs420Line` hardcodeado, así que un segundo driver **no podía existir**— se cierra en la Fase F1 del delta. Recién con eso RMV1.6 ("sumar una marca = agregar una fila") pasa a ser cierto.
+
+**Reversibilidad**: intacta. Los adaptadores nuevos entran detrás de la misma `StickAdapter`; sacar `ble-gatt` o `mfi-ios` no toca el contrato de ingesta ni los otros transportes. El MFi queda **prearmado y gateado por la lista `UISupportedExternalAccessoryProtocols`** del build: el día que llegue una cadena, se destraba con una línea de config + una `TransportCapability`, **sin escribir código**.

@@ -9,15 +9,21 @@ import assert from 'node:assert/strict';
 
 import { EidIngestEngine } from './contract.ts';
 import { MockAdapter } from './adapter-mock.ts';
+import { RS420_DRIVER } from './driver-rs420.ts';
 
 const EID_A = '982000364696050';
+
+// El parser de trama entra por PARÁMETRO desde el delta ios-ble-mfi (RBM1.1/RBM1.2): sale del
+// `ReaderDriver` del adapter que produjo la línea, no de un import de `contract.ts`. Acá se usa el
+// del RS420 porque la línea de ejemplo ES una trama del RS420.
+const RS420_PARSER = RS420_DRIVER.frameParser;
 
 // ─── R14: offline-first ─────────────────────────────────────────────────────────────────
 
 test('R14.2: el contrato de ingesta completo corre sin red (este test no tiene conectividad)', () => {
   // No hay import de supabase/fetch en el grafo del contrato; el pipeline es local y puro.
   const eng = new EidIngestEngine();
-  const cand = eng.processRawLine('1000000982000364696050260530101701', 1000);
+  const cand = eng.processRawLine('1000000982000364696050260530101701', RS420_PARSER, 1000);
   assert.deepEqual(cand, { eid: EID_A });
   const ev = eng.commit((cand as { eid: string }).eid, 1717000000000);
   assert.equal(ev.kind, 'tag_read');

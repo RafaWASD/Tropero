@@ -9,6 +9,8 @@
 // de spec 09 publicó (specs/active/09-buscar-animal/design.md líneas 168-175). 04
 // implementa esa interfaz; cuando spec 09 Fase 4 tenga código, reexporta estos tipos.
 
+import type { ReaderDriver } from './driver-types';
+
 /**
  * Evento que el contrato emite hacia el consumidor de spec 09. Forma idéntica para todos
  * los adaptadores (R1.6, R9.4). Declarado por spec 09; 04 lo implementa sin redefinirlo.
@@ -35,9 +37,14 @@ export type Unsubscribe = () => void;
 /**
  * Interfaz transport-agnóstica de un adaptador de bastón (R11.1). Los adaptadores de
  * stream (spp-android, web-serial) entregan la LÍNEA CRUDA del lector por onTagRead (la
- * desframea parser-rs420.ts en el contrato); manual/mock entregan el EID/identificador ya
- * limpio; hid-wedge (GATED) entregaría los dígitos tipeados. El contrato decide cómo
- * ingerir cada uno (ver contract.ingestFromAdapter).
+ * desframea el `frameParser` del `driver` de ESE adapter, que el contrato recibe por
+ * parámetro — RBM1.1; hasta el 2026-08-17 era `parseRs420Line` hardcodeado en `contract.ts`,
+ * y por eso un segundo fabricante no podía existir); manual/mock entregan el EID/identificador ya
+ * limpio; hid-wedge (GATED) entregaría los dígitos tipeados. POR QUÉ PUERTA del contrato entra cada
+ * uno lo declara `ADAPTER_INGEST_MODE` y lo resuelve `readSourceFor` (`adapter-selection.ts`):
+ * `'raw-line'` → `ingestRawLine`/`processRawLine`, `'eid'` → `ingestEid`/`processEid`.
+ * (Este bloque decía "ver `contract.ingestFromAdapter`": esa función NUNCA existió — ⚪ del review de
+ * F1, verificado con un ripgrep sobre `app/` que solo encontraba esta línea.)
  */
 export interface StickAdapter {
   /**
@@ -46,6 +53,29 @@ export interface StickAdapter {
    * camino de demo (dev/demo-gated). No cambia ningún método de la interfaz.
    */
   readonly kind: 'manual' | 'mock' | 'web-serial' | 'spp-android' | 'hid-wedge' | 'simulator';
+
+  /**
+   * OPCIONAL — el `ReaderDriver` (fabricante) con el que ESTE adaptador está hablando (RBM1.3).
+   *
+   * Aditivo y de solo lectura: **ningún método de la interfaz cambia** (mismo precedente que
+   * `autoConnect?()` y `autoConnectExhausted?`). Un adapter que no lo exponga sigue cumpliendo la
+   * interfaz exactamente como antes.
+   *
+   * Existe por una sola razón, y es la que destraba todo el delta: el contrato de ingesta necesita
+   * el `frameParser` DEL LECTOR que produjo la línea (RBM1.1), y hasta hoy `contract.ts` llamaba
+   * `parseRs420Line` hardcodeado — o sea que un segundo fabricante con otro formato de trama **no
+   * podía existir** (la deuda que el delta multivendor declaró bajo RMV5.2). El driver viaja con el
+   * adapter porque es el adapter el que sabe con qué aparato abrió el link.
+   *
+   * Lo declaran los adaptadores de STREAM (`web-serial`, `spp-android`, y los de este delta): los
+   * que ya entregan el EID limpio (`manual`, `mock`, `simulator`, `hid-wedge`) no desframean nada y
+   * no necesitan driver — su modo de ingesta es `'eid'` (ver `ADAPTER_INGEST_MODE`). Un adapter de
+   * modo `'raw-line'` SIN driver es un error de cableado, no un caso normal: `resolveFrameParser`
+   * devuelve `null` y la lectura se descarta con log, **sin** caer a ningún parser por defecto
+   * (RBM1.4 — el fallback silencioso produce lecturas para un lector y silencio total para el resto,
+   * que es indistinguible de "el operario no está bastoneando").
+   */
+  readonly driver?: ReaderDriver;
 
   /** Conecta (opcionalmente a un device recordado). No bloquea la carga manual si falla (R7.4). */
   connect(deviceId?: string): Promise<void>;

@@ -534,7 +534,10 @@ test('el guard de R4.9 DETECTA sus mutantes (no pasa verde por mirar un patrón 
   assert.ok(ve('void loadPref().then(setBeep);'), 'un helper NUEVO con otro nombre: lo caza la regla del .then');
   // Falso positivo: la línea que SÍ corresponde en el camino caliente no puede disparar.
   assert.ok(!ve('playFeedback(classifyReadOutcome(candidate), cachedBeepEnabled());'));
-  assert.ok(!ve('const candidate = isRawStream ? engine.processRawLine(rawOrEid, now) : engine.processEid(rawOrEid, now);'));
+  // La línea real del camino caliente (delta ios-ble-mfi: el parser entra por parámetro, resuelto
+  // FUERA de `handleReading` — el hot path no puede ganar una llamada sin declararla).
+  assert.ok(!ve('candidate = engine.processRawLine(rawOrEid, frameParser, now);'));
+  assert.ok(!ve('candidate = engine.processEid(rawOrEid, now);'));
 });
 
 test('MUTANTES 2026-08-06: los canales NUEVOS (expo-haptics / expo-audio) también caen', () => {

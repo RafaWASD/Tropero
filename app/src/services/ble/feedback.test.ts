@@ -38,6 +38,9 @@ test('classifyReadOutcome: mapea las TRES formas de candidato del motor de inges
   assert.equal(classifyReadOutcome({ eid: '982000123456789' }), 'accepted');
   assert.equal(classifyReadOutcome({ rejected: 'invalid_eid' }), 'rejected');
   assert.equal(classifyReadOutcome({ rejected: 'parse_failed' }), 'rejected');
+  // 🟡-2 del review de F1: el driver de un tercero que EXPLOTA tiene motivo propio, y al operario le
+  // tiene que sonar igual que cualquier otro rechazo (la causa es para el log, no para la manga).
+  assert.equal(classifyReadOutcome({ rejected: 'parser_threw' }), 'rejected');
   assert.equal(classifyReadOutcome({ rejected: 'empty' }), 'rejected');
   // null = lo comió la ventana de dedup (R3.1). NO es un fracaso: ese animal ya entró hace <3 s.
   assert.equal(classifyReadOutcome(null), 'duplicate');

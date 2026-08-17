@@ -31,6 +31,8 @@ import { Button, Card } from '@/components';
 import { BleStickListenerProvider } from '@/services/ble/BleStickListenerProvider';
 import { WebSerialAdapter } from '@/services/ble/adapter-web-serial';
 import { EidIngestEngine } from '@/services/ble/contract';
+import { resolveFrameParser } from '@/services/ble/adapter-selection';
+import { logTransportEvent } from '@/services/ble/logging';
 import { isWebSerialSupported } from '@/services/ble/line-framer';
 import { DEFAULT_BAUD } from '@/services/ble/config';
 import type { ConnectionStatus } from '@/services/ble/stick-adapter';
@@ -161,8 +163,9 @@ function BastonTestInner() {
   const seqRef = useRef(0);
 
   // Construye (o reconstruye) el adapter cuando cambia el baud, suscribiendo lecturas + status.
-  // Cada línea CRUDA del lector pasa por el contrato committeado: processRawLine = parseRs420Line
-  // (descarta framing + timestamp del lector) → isValidTag → dedup por-TAG. Un malformado o un
+  // Cada línea CRUDA del lector pasa por el contrato committeado: processRawLine = el `frameParser`
+  // del driver del adapter (RS420 → `parseRs420Line`, que descarta framing + timestamp del lector)
+  // → isValidTag → dedup por-TAG. Un malformado o un
   // re-escaneo dentro de la ventana NO produce fila (se descarta en silencio, R1.4/R3.1).
   useEffect(() => {
     if (!supported) return;
@@ -170,12 +173,30 @@ function BastonTestInner() {
     const adapter = new WebSerialAdapter(baud);
     adapterRef.current = adapter;
 
+    // El parser de trama sale del `ReaderDriver` del adapter (RBM1.1), igual que en el provider de
+    // producción — el harness no puede tener su propia regla o dejaría de ejercitar el camino real.
+    // `null` (modo 'raw-line' sin driver) = FAIL-CLOSED: se descarta con log, sin caer a RS420 (RBM1.4).
+    const frameParser = resolveFrameParser(adapter, (adapterKind) =>
+      logTransportEvent({ kind: 'parser_unresolved', adapter: adapterKind, at: 'mount' }),
+    );
+
     const offStatus = adapter.onStatus((s) => setStatus(s));
     const offTag = adapter.onTagRead((rawLine) => {
+      if (frameParser === null) {
+        logTransportEvent({ kind: 'parser_unresolved', adapter: adapter.kind, at: 'read' });
+        return;
+      }
       const now = Date.now();
-      const candidate = engineRef.current.processRawLine(rawLine, now);
+      const candidate = engineRef.current.processRawLine(rawLine, frameParser, now);
       if (candidate === null) return; // re-escaneo dentro de la ventana de dedup (R3.1)
-      if ('rejected' in candidate) return; // malformado: se descarta sin romper el flujo (R1.4)
+      if ('rejected' in candidate) {
+        // Se descarta sin romper el flujo (R1.4) — pero CON log, igual que el provider de producción
+        // (⚪ del review de F1): el harness no puede tener su propia regla, y menos la de tragarse en
+        // silencio el único rastro de que el driver está roto (`parser_threw`) o de que el lector
+        // manda otra trama (`parse_failed`). Sin esto, acá "bastoneo y no pasa nada" era mudo puro.
+        logTransportEvent({ kind: 'eid_rejected', reason: candidate.rejected });
+        return;
+      }
       // Candidato válido + des-duplicado → confirmación visual (R2.1/R4.4): fila en la lista.
       // commit() materializa el tag_read del contrato (R1.6) con el timestamp del teléfono (R1.5).
       // `now` ES ese timestamp (el mismo que commit usa, R1.5); lo guardamos directo para la fila.

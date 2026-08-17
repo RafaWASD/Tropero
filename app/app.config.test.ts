@@ -108,6 +108,99 @@ test('spec 04 / RMV5.8: el config plugin del bastón Bluetooth está enganchado'
   assert.ok(pluginNames(build('development')).includes('./plugins/with-bluetooth-classic'));
 });
 
+/** Opciones del plugin `name` (o `undefined` si no está declarado / se declaró sin opciones). */
+function pluginOptions(c: ReturnType<typeof config>, name: string): Record<string, unknown> | undefined {
+  const entry = (c.plugins ?? []).find((p) => (Array.isArray(p) ? p[0] === name : p === name));
+  return Array.isArray(entry) ? ((entry[1] ?? {}) as Record<string, unknown>) : undefined;
+}
+
+const ALL_VARIANTS: (string | undefined)[] = [undefined, 'development', 'preview', 'production'];
+
+test('spec 04 delta ios-ble-mfi / RBM2.15: el plugin de `react-native-ble-plx` está declarado y SIN background', () => {
+  // Dos cosas distintas y las dos importan: que el plugin ESTÉ (sin él no hay permisos de Android ni
+  // purpose string desde la lib) y que el background esté APAGADO (R6.9 es foreground-only).
+  //
+  // `isBackgroundEnabled: true` agregaría `<uses-feature bluetooth_le required="true">` al manifiesto
+  // y `modes: ['central']` escribiría `UIBackgroundModes: ['bluetooth-central']` en el Info.plist —
+  // una capacidad que la app no usa y que en iOS arrastra escrutinio de App Review.
+  for (const variant of ALL_VARIANTS) {
+    const c = build(variant);
+    assert.ok(pluginNames(c).includes('react-native-ble-plx'), `falta el plugin de BLE (variant=${variant})`);
+    const opts = pluginOptions(c, 'react-native-ble-plx');
+    assert.ok(opts, `el plugin de BLE quedó declarado SIN opciones (variant=${variant})`);
+    assert.equal(opts?.isBackgroundEnabled, false, `background BLE habilitado (variant=${variant})`);
+    assert.deepEqual(opts?.modes, [], `el plugin declaró modos de background (variant=${variant})`);
+  }
+});
+
+test('RBM2.15 (GUARD sobre la AUSENCIA): la palabra `bluetooth-central` no aparece en NINGUNA parte de la config', () => {
+  // Los asserts de arriba vigilan la puerta del plugin. Esta vigila TODAS las demás: declararlo a mano
+  // en `ios.infoPlist.UIBackgroundModes`, colarlo por otro plugin, o pasarlo con otro nombre de opción.
+  // Es la diferencia entre prohibir una grafía en un lugar y prohibir la capacidad en la config entera.
+  for (const variant of ALL_VARIANTS) {
+    const serialized = JSON.stringify(build(variant));
+    assert.equal(
+      /bluetooth-central|bluetooth-peripheral/.test(serialized),
+      false,
+      `apareció un modo de background BLE en la config (variant=${variant})`,
+    );
+  }
+  // Y el positivo que sostiene el negativo: el único background declarado sigue siendo el de push.
+  for (const variant of ALL_VARIANTS) {
+    assert.deepEqual(
+      (build(variant).ios?.infoPlist as { UIBackgroundModes?: string[] } | undefined)?.UIBackgroundModes,
+      ['remote-notification'],
+      `cambió UIBackgroundModes (variant=${variant})`,
+    );
+  }
+});
+
+test('RBM2.13: el plugin de BLE declara `neverForLocation` → la ubicación entra TOPEADA a API 30', () => {
+  // No es cosmético: con el default (`false`) el plugin declara `ACCESS_COARSE_LOCATION` y
+  // `ACCESS_FINE_LOCATION` SIN `maxSdkVersion`, y una app de ganado pasaría a pedir ubicación en
+  // Android 12+ (ruido en la ficha de Play y una pregunta incómoda en la revisión). Es exactamente lo
+  // que `plugins/with-bluetooth-classic.js` existe para evitar — ver su cabecera.
+  for (const variant of ALL_VARIANTS) {
+    assert.equal(
+      pluginOptions(build(variant), 'react-native-ble-plx')?.neverForLocation,
+      true,
+      `falta neverForLocation en el plugin de BLE (variant=${variant})`,
+    );
+  }
+});
+
+test('RBM2.17: el purpose string que el plugin de BLE escribe es EL NUESTRO, no su default en inglés', () => {
+  // `withBluetoothPermissions` de la lib hace
+  //     NSBluetoothAlwaysUsageDescription = bluetoothAlwaysPermission || <el ya existente> || <default EN>
+  // y ESCRIBE el Info.plist. El guard de purpose strings verifica la FUENTE (`app.config.ts`), no el
+  // plist del prebuild — su límite nº5 dice, textual, que ningún plugin nuestro tocaba iOS. Este es el
+  // primero que lo toca. Pasándole la MISMA constante que `ios.infoPlist`, el resultado no depende del
+  // orden de los mods de Expo, y las dos no pueden divergir sin que este assert caiga.
+  for (const variant of ALL_VARIANTS) {
+    const c = build(variant);
+    const declared = (c.ios?.infoPlist as Record<string, unknown> | undefined)?.NSBluetoothAlwaysUsageDescription;
+    assert.equal(typeof declared, 'string');
+    assert.equal(
+      pluginOptions(c, 'react-native-ble-plx')?.bluetoothAlwaysPermission,
+      declared,
+      `el plugin de BLE escribiría un texto distinto del declarado (variant=${variant})`,
+    );
+    assert.equal(/allow .*to connect to bluetooth/i.test(String(declared)), false, 'quedó el default en inglés de la lib');
+  }
+});
+
+test('RBM4.3: `UISupportedExternalAccessoryProtocols` sigue declarada (y vacía) con la dep de BLE instalada', () => {
+  // El delta de BLE no puede tocar la clave del MFi: la lista VACÍA es el guard anti-crash del
+  // force-cast del `init()` de `react-native-bluetooth-classic` (`nil as! [String]` trapea). Se asertá
+  // acá además del guard de purpose strings porque el cambio que la rompería es de ESTE archivo.
+  for (const variant of ALL_VARIANTS) {
+    const info = build(variant).ios?.infoPlist as Record<string, unknown> | undefined;
+    const value = info?.UISupportedExternalAccessoryProtocols;
+    assert.ok(Array.isArray(value), `UISupportedExternalAccessoryProtocols no es un array (variant=${variant})`);
+    assert.deepEqual(value, [], 'sigue vacía hasta que llegue la cadena iAP del fabricante (RBM4.6)');
+  }
+});
+
 test('spec 04 / R4.2: `expo-audio` NO se engancha como config plugin (sería pedir el micrófono)', () => {
   // ── DECISIÓN, no olvido (2026-08-06, unidad «el bastón tiene que sonar y vibrar de verdad») ────────
   // `npx expo install expo-audio` imprime «Add the following to your Expo config: plugins:

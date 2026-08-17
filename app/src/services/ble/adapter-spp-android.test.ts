@@ -309,6 +309,15 @@ test('🟠-5: un driver sin `delimiter` cae al del RS420 (el default es un supue
   assert.equal(resolveSppParams(NO_DELIM)?.delimiter, SPP_DELIMITER);
 });
 
+test('RBM1.3/RBM1.5: el adapter EXPONE su driver (default RS420) para que el contrato lea su frameParser', () => {
+  // T1.4 del delta ios-ble-mfi. Es lo que hace que `resolveFrameParser(transport, …)` devuelva el
+  // parser del RS420 en vez de `null`: sin esto, el modo 'raw-line' del SPP caería en el fail-closed
+  // (RBM1.4) y el bastón que HOY lee en device quedaría mudo. Se verifica la IDENTIDAD del driver.
+  assert.equal(new SppAndroidAdapter().driver, RS420_DRIVER);
+  const OTRO: ReaderDriver = { ...RS420_DRIVER, vendorId: 'otro-spp' };
+  assert.equal(new SppAndroidAdapter(OTRO).driver, OTRO);
+});
+
 test('RMV5.2: un driver sin transporte SPP → resolveSppParams null', () => {
   const NO_SPP: ReaderDriver = { ...RS420_DRIVER, transports: [{ kind: 'serial', params: { baud: 9600 } }] };
   assert.equal(resolveSppParams(NO_SPP), null);

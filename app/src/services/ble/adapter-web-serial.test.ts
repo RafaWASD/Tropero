@@ -9,6 +9,12 @@ import assert from 'node:assert/strict';
 
 import { LineFramer, isWebSerialSupported, backoffDelayMs } from './line-framer.ts';
 import { ingestRawLine } from './contract.ts';
+import { WebSerialAdapter } from './adapter-web-serial.ts';
+import { RS420_DRIVER } from './driver-rs420.ts';
+
+// El parser sale del `ReaderDriver` del adapter (RBM1.1), no de un import de `contract.ts`. Para el
+// harness web-serial ese driver es el RS420 por default (RBM1.5) → mismo comportamiento que antes.
+const RS420_PARSER = RS420_DRIVER.frameParser;
 
 // Capturas reales con framing del lector (header + EID + ts), terminadas en \n / \r\n.
 const RAW_982 = '1000000982000364696050260530101701';
@@ -28,7 +34,7 @@ test('R5.3: tolera el terminador \\r\\n (el \\r queda en la línea, lo limpia el
   const lines = f.push(`${RAW_982}\r\n`);
   assert.equal(lines.length, 1);
   // La línea framed va cruda al contrato; parseRs420Line/normalizeTag descartan el \r.
-  assert.deepEqual(ingestRawLine(lines[0]), { ok: true, eid: EID_982 });
+  assert.deepEqual(ingestRawLine(lines[0], RS420_PARSER), { ok: true, eid: EID_982 });
 });
 
 test('R5.3: bufferea fragmentos partidos entre chunks (Web Serial no garantiza 1 línea/chunk)', () => {
@@ -49,7 +55,7 @@ test('R5.3: cada línea framed reusada por el parser/contrato → EID correcto',
   const f = new LineFramer();
   const lines = f.push(`\x02${RAW_982}\r\n\x02${RAW_032}\r\n`); // con STX como en el SPP real
   const eids = lines.map((l) => {
-    const r = ingestRawLine(l);
+    const r = ingestRawLine(l, RS420_PARSER);
     return r.ok ? r.eid : null;
   });
   assert.deepEqual(eids, [EID_982, EID_032]);
@@ -66,6 +72,19 @@ test('flush() devuelve null si lo que queda es solo whitespace/\\r', () => {
   const f = new LineFramer();
   f.push('   \r');
   assert.equal(f.flush(), null);
+});
+
+// ─── RBM1.5: el harness expone SU driver (regresión: sigue siendo el RS420) ──────────────
+
+test('RBM1.5: WebSerialAdapter expone el RS420 como driver por default (comportamiento intacto)', () => {
+  // Es la mitad de T1.4 que se puede ejecutar: sin esto, `resolveFrameParser` devolvería `null` para
+  // web-serial (modo 'raw-line') y el harness dejaría de leer — el fail-closed de RBM1.4 convertido
+  // en una regresión. Se verifica la IDENTIDAD del parser, no que "haya algo".
+  const adapter = new WebSerialAdapter();
+  assert.equal(adapter.driver, RS420_DRIVER);
+  assert.equal(adapter.driver.frameParser.parse(RAW_982)?.eid, EID_982);
+  // Y el baud sigue siendo el primer parámetro (los call sites viejos no cambian).
+  assert.equal(new WebSerialAdapter(19200).driver, RS420_DRIVER);
 });
 
 // ─── R5.6: detección de soporte (degradación clara en navegadores sin Web Serial) ───────

@@ -1,0 +1,372 @@
+# Spec 04 — DELTA «iOS BLE real + MFi prearmado» — Requirements (EARS)
+
+**Status**: `spec_ready` (delta-spec, estilo ADR-028 Nivel B — corre su propio mini-ciclo; **NO reabre el core aprobado de spec 04 ni el delta `multivendor` ya cerrado**).
+**Fecha**: 2026-08-17.
+**Autor**: spec_author.
+**Prefijo de IDs**: `RBM<n>` (**b**le-**m**fi). IDs estables: no se reordenan después de aprobar.
+
+**Fuente de verdad**: `specs/active/04-bluetooth-baston/context-ios-ble-mfi.md` (Gate 0 **aprobado por Raf el 2026-08-15**, con las decisiones de la Puerta 1 en su §7). Todo lo que ese documento afirma está verificado contra el código y **no se re-deriva ni se contradice acá**. Insumos que el contexto declara y que este delta respeta sin re-decidir: **ADR-024** (contrato de ingesta transport-agnóstico + enmienda del registro de drivers), **ADR-003** (Nordic UART — vigente para el hardware propio, y los UUIDs que el emulador usa), `docs/bastones-mercado-argentino.md` (relevamiento del 13/08), el delta `*-multivendor.md` (`RMV1`–`RMV6`) y el core de spec 04 (`R1`–`R15`).
+
+**Related**: core spec 04 (`requirements.md` — este delta lo **extiende sin contradecir**; toca R6.9, R8, R11.2, R12), `requirements-multivendor.md` (cierra la deuda declarada bajo RMV5.2 y destraba RMV6.2/RMV6.3), spec 09 (interfaz `BleStickEvent`/`useBleStickListener`/`useBleConnectionStatus` que 04 implementa y este delta **reusa sin redefinir**), spec 03 (consumidor), ADR-018 (pantalla en "Más"), ADR-010 (el ESP32 es test rig, no producto).
+
+> **Notación EARS** (`docs/specs.md`): Ubicuo "El sistema deberá…", Evento "Cuando…, el sistema deberá…", Estado "Mientras…, el sistema deberá…", Opcional "Donde…, el sistema deberá…", No deseado "Si…, entonces el sistema deberá…". Un solo "deberá" por requisito. Cada `RBM<n>` verificable por ≥1 test o por una medición registrada.
+
+---
+
+## Qué agrega este delta, en una pantalla
+
+El core dejó firme el contrato de ingesta (R1–R3) y la interfaz `StickAdapter` (R11). El delta `multivendor` agregó el **registro de drivers** (RMV1) y la **selección por capacidad** (RMV2), y escribió el `adapter-spp-android` (RMV5) — que es hoy el único transporte con stream verificado en device.
+
+Este delta hace **siete cosas** (T1…T7 del contexto §4 y §7):
+
+| | Qué | Por qué acá |
+|---|---|---|
+| **T1** | El parser de trama sale del **registro de drivers**, no de una llamada hardcodeada en `contract.ts` | **Prerrequisito duro.** `contract.ts:16` importa y `:36` llama `parseRs420Line` hardcodeado: hoy un segundo driver **no puede existir**. Sin esto, el adapter BLE solo puede hablar con algo que emita tramas RS420 — o sea, con nuestro emulador y con nada más (contexto §1.1) |
+| **T2** | `adapter-ble-gatt.ts` sobre `react-native-ble-plx`, **cross-platform** (iOS **y** Android) | Es el camino iOS-abierto real del mercado (HR5 v3), y restringirlo a iOS sería trabajo extra para tener menos (contexto §4) |
+| **T3** | `adapter-mfi-ios.ts` sobre la rama iOS de `react-native-bluetooth-classic`, **gateado por la lista de protocolos** | La lib ya está instalada y tiene rama iOS sobre ExternalAccessory: falta el adapter, no el paquete (contexto §1.3) |
+| **T4** | Selección y prioridad por plataforma, y que el transporte montado siga al bastón recordado | En iOS el orden pasa a ser `mfi (si hay protocolo) → ble-gatt → …`; `spp-android` no se ofrece (contexto §4) |
+| **T5** | Banco del ESP32 en `MODO_GATT`, en device | La lección de `dad711f`: un transporte "escrito y testeado" sin device tenía tres 🔴 de máquina de estados (contexto §3) |
+| **T6** | Reconciliación de ADR-024, del delta multivendor, del relevamiento y del emulador | Regla dura de `docs/specs.md`: ninguna spec queda contradiciendo al código |
+| **T7** | Camino HID: **primero el gate físico**, después (y solo si pasa) el adapter | La cabecera de `adapter-hid-wedge.ts` lo prohíbe explícitamente al revés (contexto §7) |
+
+**Lo que NO entra, dicho para que no se lea como olvido**: la **cadena de protocolo real** de cualquier fabricante (Allflex/Datamars) — es gestión comercial, no código (contexto §4); y un **driver del Gallagher HR5 v3** — no tenemos ni el aparato ni sus UUIDs/formato de trama (contexto §2/§3).
+
+> **Manual-first sigue siendo ley** (core R7, R9.6): ningún estado de los transportes nuevos, del gate MFi, del gate HID ni de un driver desconocido deberá **nunca** bloquear la app ni la carga manual. El delta hereda ese piso y lo re-afirma en RBM9.
+
+---
+
+## RBM1. El parser de trama sale del registro de drivers (T1 — prerrequisito de todo lo demás)
+
+> **Buildable-hoy, puro.** Cierra la deuda que el propio delta multivendor declaró y **no escondió** bajo RMV5.2: *"`frameParser`: no se usa en producción. `contract.ingestRawLine` llama `parseRs420Line` hardcodeado… con un segundo driver SPP de otro formato de trama, RMV1.6 no se cumple"*. Era teórica mientras todos los transportes hablaban con un RS420. Deja de serlo con un transporte BLE.
+
+**RBM1.1** El sistema deberá extraer el EID de una línea cruda usando el `frameParser` del `ReaderDriver` del adaptador que produjo esa línea.
+
+**RBM1.2** El sistema **no deberá** importar ni invocar ningún parser de fabricante (`parseRs420Line` u otro) desde `contract.ts`: el parser deberá entrar como parámetro del contrato.
+
+**RBM1.3** El sistema deberá exponer el `ReaderDriver` activo de un adaptador a través de la interfaz `StickAdapter` de forma **aditiva** (campo de solo lectura, opcional), sin modificar ninguno de los métodos ya existentes de la interfaz (R11.1, R11.3).
+
+**RBM1.4** Si un adaptador cuyo modo de ingesta es `raw-line` entrega una línea sin exponer un `ReaderDriver` con `frameParser`, entonces el sistema **no deberá** ingerir esa línea, deberá descartarla y deberá registrar el evento de log correspondiente, **sin** caer a un parser por defecto.
+
+> **Por qué fail-closed y no "si no hay driver, RS420"**: el fallback silencioso produce lecturas para un lector y **silencio total** para todos los demás, que es indistinguible de "el operario no está bastoneando" — el mismo síntoma que costó el terminador equivocado del SPP (🟠-5 / BENCH-2). Un rechazo con log es diagnosticable; un fallback no.
+
+**RBM1.5** El sistema deberá conservar, para los adaptadores de stream ya existentes (`web-serial`, `spp-android`), el `RS420_DRIVER` como driver por defecto, de modo que su comportamiento actual no cambie (regresión).
+
+**RBM1.6** Cuando se registra un `ReaderDriver` nuevo con un `frameParser` distinto del RS420, el sistema deberá ingerir sus tramas de punta a punta **sin modificar** `contract.ts`, `stick-adapter.ts` ni los adaptadores existentes (recién acá RMV1.6 pasa a ser cierto).
+
+**RBM1.7** El sistema deberá exponer un guard que falle si `contract.ts` vuelve a llamar un parser de fabricante hardcodeado o si el provider deja de resolver el parser por el driver, y ese guard deberá haberse verificado **mutando el código que vigila**.
+
+> **Reconciliación al as-built (F1, tras el review del 2026-08-17)** — el requisito no cambia; cambia **quién** lo cumple y **cómo se verifica**, y conviene que quede escrito porque la primera implementación no alcanzaba.
+>
+> 1. **"El provider resuelve el parser por el driver" se cumple ahora en la capa pura.** La composición `ReadSource {kind, mode, frameParser}` la arma `readSourceFor(adapter, onUnresolved)` en `adapter-selection.ts`; el provider la **invoca**. Motivo: `BleStickListenerProvider.tsx` importa `react-native`, así que nada de lo que se decida ahí adentro se puede ejercer desde `node:test` — el único oráculo posible era un regex sobre el fuente.
+> 2. **Un guard de nombres NO satisface este requisito.** La primera versión prohibía tres grafías conocidas y el reviewer la falsificó con un fallback que no nombraba ninguna (`?? DRIVER_REGISTRY[0].frameParser`): compilaba, reintroducía lo que RBM1.4 prohíbe, y dejaba la suite entera en verde. Se lee, entonces, con este piso: el guard tiene que caer ante **la ausencia del invariante**, no ante los nombres de hoy. As-built: (a) oráculo de **comportamiento** sobre `readSourceFor` (identidad del parser · `null` + aviso · silencio en los kinds `'eid'`); (b) guard estático **derivado del árbol** (módulos de fabricante = `parser-*.ts` + `driver-*.ts` salvo los tipos) sobre las dos superficies que cablean un adaptador; (c) prohibición de **fabricar** un parser o un `ReadSource` dentro del provider.
+
+**RBM1.8** El sistema deberá seguir aplicando `isValidTag` (R1.3), la dedup por-TAG (R3) y la confirmación visual pre-commit (R2) a todo EID que salga de un `frameParser`, cualquiera sea el driver.
+
+> **Es el requisito de integridad SENASA de este delta.** Lo único que RBM1 cambia es **de dónde sale el parser**; la validación y el gate de confirmación quedan donde estaban. Ver RBM9.2.
+
+## RBM2. `adapter-ble-gatt` — BLE GATT cross-platform (T2)
+
+> **Buildable-hoy el código + los tests puros; el stream real se verifica contra el emulador (RBM6).** Sobre `react-native-ble-plx`, **dep nueva** (contexto §1.5) → cambia el fingerprint → hace falta build de iOS **y** de Android. El adaptador entra detrás de la MISMA interfaz `StickAdapter`, sin tocar el contrato (R10.3 / R11.3).
+
+**RBM2.1** El sistema deberá exponer `adapter-ble-gatt.ts` como un `StickAdapter` (`kind: 'ble-gatt'`) sobre `react-native-ble-plx`, con **el mismo código en iOS y en Android**.
+
+**RBM2.2** El sistema deberá importar `react-native-ble-plx` de forma **perezosa** (require dentro de las funciones de I/O, patrón `feedback.ts` / RMV5.6), de modo que `adapter-ble-gatt.ts` sea importable en web y en CI sin el módulo nativo.
+
+**RBM2.3** Si el módulo nativo de BLE no está presente en el build, entonces el sistema **no deberá** montar el adaptador (el provider deberá devolver `null`) y deberá quedar manual-first, con el chip y el CTA ocultos por `hasTransport` (mismo guard que `isSppNativeAvailable`).
+
+**RBM2.4** Cuando el operario inicia el descubrimiento, el sistema deberá escanear **filtrado por el `serviceUuid`** declarado en el `TransportCapability` de kind `ble-gatt` del driver, y **no deberá** escanear sin filtro de servicio.
+
+**RBM2.5** Mientras un escaneo esté en curso, el sistema deberá acotarlo con un presupuesto de tiempo y detenerlo al vencer o al conectar, y **no deberá** dejar el escaneo corriendo indefinidamente.
+
+**RBM2.6** Cuando el operario elige un dispositivo, el sistema deberá conectar, descubrir servicios y características, y suscribirse a las **notificaciones** de la característica `notifyCharUuid` del driver.
+
+**RBM2.7** Cuando llega una notificación, el sistema deberá decodificar su valor **base64 → bytes → texto de un byte por carácter (ASCII/latin-1)**, conservando los bytes de control de la trama (el `STX` `0x02` del RS420), y **no deberá** decodificarlo como UTF-8.
+
+**RBM2.8** Cuando una trama llega **partida** en varias notificaciones, el sistema deberá reensamblarla con `LineFramer` (reuso, R5.3) usando el delimitador del driver y deberá entregar cada línea completa al contrato como línea cruda.
+
+**RBM2.9** Cuando llegan **dos tramas pegadas** en una misma notificación, el sistema deberá entregarlas como dos lecturas separadas.
+
+**RBM2.10** Si el driver declara para su transporte `ble-gatt` un delimitador que este adaptador no puede framear (vacío), entonces el sistema **no deberá** abrir la conexión y deberá registrarlo con su motivo (misma honestidad que el chequeo del delimitador del SPP, 🟠-5).
+
+**RBM2.11** El sistema deberá declarar el modo de ingesta de `ble-gatt` como `raw-line` en la tabla exhaustiva `ADAPTER_INGEST_MODE`, de modo que la decisión no viva como una comparación de literales en el provider (🟡-1).
+
+**RBM2.12** El sistema deberá funcionar con el **MTU por defecto** (23 bytes → 20 de payload), sin depender de que una negociación de MTU tenga éxito.
+
+**RBM2.13** Donde la plataforma sea Android, el sistema deberá resolver los permisos del transporte por una **tabla exhaustiva por transporte**: para `ble-gatt`, API ≥ 31 → `BLUETOOTH_SCAN` + `BLUETOOTH_CONNECT`; API ≤ 30 → `ACCESS_FINE_LOCATION` (el escaneo BLE lo exige) — sin cambiar el conjunto que hoy pide el transporte `spp`.
+
+> **Reconciliación al as-built (F2, 2026-08-17)** — el requisito se cumple literal (los conjuntos son esos y el del `spp` no cambió, con test de regresión). Tres cosas que el requisito no fijaba y que la implementación tuvo que decidir:
+>
+> 1. **Los transportes sin permisos también se declaran.** `serial` (Web Serial, navegador), `ble-hid` (teclado que el SO ya emparejó) y `mfi` (no existe en Android) llevan **conjunto vacío declarado con motivo escrito** — es lo que hace la tabla exhaustiva (`satisfies Record<TransportKind, …>`) y lo que hace que un transporte nuevo no compile hasta declararse.
+> 2. **"Lista vacía" significaba dos cosas.** Los consumidores leen `[]` como *concedido* (`classifyPermissionResults([], …) === 'granted'`), correcto para los tres de arriba pero **fail-OPEN** para un transporte desconocido, que también daría `[]`. Se agregó el predicado puro `hasAndroidPermissionPolicy(transport)`, que los dos caminos asincrónicos consultan **antes** de tocar RN y que devuelve `'unavailable'` — "no sé" no es "concedido". El `transport` es además **requerido y sin default** en las tres funciones (un default a `'spp'` es el fallback silencioso que el review de F1 rechazó).
+> 3. **La política del manifiesto no cambió, pero hubo que sostenerla en la config.** El config plugin de `react-native-ble-plx` agrega `ACCESS_COARSE_LOCATION` (y una segunda copia de `ACCESS_FINE_LOCATION`) en el array `uses-permission-sdk-23`, que el `tools:node="replace"` de `with-bluetooth-classic.js` **no alcanza**; con el default de la lib entran **sin tope de API**. Se cerró con `neverForLocation: true` en `app.config.ts` (no tocando la política), verificado en el manifiesto **mergeado** del APK del build de T2.8 y falsificado en `with-bluetooth-classic.test.ts`.
+>
+> **Lo que este requisito NO cubre, dicho**: en API ≤ 30 el escaneo BLE exige además que el **servicio de ubicación esté prendido**, que no es un permiso de app y no se resuelve en `permissions-android.ts` — es estado del adapter (F3) y escenario del banco (F6).
+
+**RBM2.14** Si el permiso de BLE es denegado, entonces el sistema deberá reflejar el estado `permission_denied` con CTA, deberá mantener la carga manual operativa y **no deberá** disparar backoff (R12.5, R7.2).
+
+**RBM2.15** El sistema **no deberá** habilitar BLE en background: no deberá declarar `UIBackgroundModes: bluetooth-central` en iOS ni configurar el plugin de `react-native-ble-plx` con background habilitado (R6.9 — foreground-only en MVP).
+
+> **Reconciliación al as-built (F2)** — cumplido, con dos precisiones. (a) En el plugin son **dos** opciones independientes, no una: `modes: []` es la que escribiría `UIBackgroundModes: ['bluetooth-central']` en iOS, e `isBackgroundEnabled: false` es la que agregaría `<uses-feature android.hardware.bluetooth_le required="true">` en Android (que además excluiría de Google Play a los devices sin BLE). Las dos se declaran explícitas aunque coincidan con el default de la lib. (b) El oráculo no es solo el assert de las opciones: hay un **guard sobre la ausencia** que exige que las cadenas `bluetooth-central`/`bluetooth-peripheral` no aparezcan en **ninguna parte** de la config serializada, en las 4 variantes — así queda cerrada también la puerta de declararlo a mano en `ios.infoPlist`. Verificado además en el `Info.plist` que devuelve `expo config --type introspect` y en el manifiesto **mergeado** del APK.
+
+**RBM2.16** El sistema deberá reusar `remembered-device.ts` para persistir el bastón BLE elegido y deberá implementar `autoConnect()` (R6.4) con la misma política de `ConnectTrigger` que el SPP.
+
+**RBM2.17** El sistema deberá dejar la instalación de `react-native-ble-plx` reflejada en el **censo de dependencias con código nativo Apple** de `app/ios-purpose-strings-guard.test.ts`, con su veredicto escrito (toca CoreBluetooth → exige `NSBluetoothAlwaysUsageDescription`, ya declarada).
+
+> **Reconciliación al as-built (F2)** — el veredicto es el que el requisito pide (**exige** la clave, que ya estaba declarada y con texto útil), pero el paréntesis *"toca CoreBluetooth"* es más sutil de lo que parece y cambia **qué guard lo sostiene**: las fuentes propias del paquete (`ios/BlePlx.m` + 3 cabeceras) **no nombran ni un símbolo de CoreBluetooth** — el framework entra por su dependencia de CocoaPods `MultiplatformBleAdapter 0.2.0`, que vive en `Pods/` y no en `node_modules/`, o sea en el punto ciego declarado nº2 del guard. Consecuencias: (a) lo que hace obligatoria la clave es la **red por nombre** (`MODULES_BY_NAME`), no el escaneo de símbolos; (b) el paquete **no lleva** entrada en `MODULE_VERDICTS`, porque sin hits sería un veredicto "fantasma" y el guard que los caza lo rechazaría; (c) el veredicto quedó **ejecutable** en un test propio, escrito como disyunción (si algún día el escaneo sí lo ve, exige `MODULE_VERDICTS`; si no lo ve, exige la red por nombre **y** que el podspec siga dependiendo del pod que explica la ceguera) para que una versión futura no produzca un rojo espurio.
+>
+> **Efecto colateral que hubo que reconciliar**: el config plugin de la lib **escribe el `Info.plist`**, lo que vuelve falso el **límite nº5** del propio guard (*"los nuestros no tocan iOS"*). Cerrado pasándole al plugin la **misma constante** de purpose string que usa `ios.infoPlist` (así el resultado no depende del orden de los mods) + un test que impide que las dos copias divergan. Medido en el plist introspectado: el texto que sobrevive es el nuestro, en español.
+
+**RBM2.18** El sistema deberá vetar la compatibilidad de `react-native-ble-plx` con el stack instalado (Expo SDK 56 / RN 0.85.3 new-arch bridgeless) **antes** de comprometer el adaptador, y si es incompatible deberá **parar y reportar al leader**.
+
+> Mismo procedimiento que el veto de T-MV.5.1, que dio COMPATIBLE contra el código instalado y un build Gradle real, no contra docs. El precedente que obliga a hacerlo: `react-native-quick-sqlite` (bindings JSI no instalados bajo bridgeless) — y `react-native-ble-plx` **sí** tiene C++/JSI, así que la analogía que fue incorrecta para `bluetooth-classic` acá **puede** aplicar.
+
+> **Reconciliación al as-built (F2, 2026-08-17) — veredicto: COMPATIBLE, FIRME.** Dos correcciones al párrafo de arriba, las dos verificadas contra el paquete instalado y un build real (`progress/veto_ble-plx.md`, `progress/impl_ios-ble-mfi-f2.md` §5):
+>
+> 1. **La premisa era FALSA**: `react-native-ble-plx` **no tiene una sola fuente C++/JSI** (cero `.cpp`/`.hpp`/`.cc`; los únicos `.h` son cabeceras de puente ObjC/Swift). El modo de falla de `quick-sqlite` **no tiene dónde ocurrir**. La analogía era incorrecta acá también.
+> 2. **El riesgo real es otro, y el build lo dejó a la vista**: el codegen produce un `schema.json` **vacío** (`{"libraryName":"","modules":{}}`) porque la lib **no tiene specs de TurboModule**; su clase es `ReactContextBaseJavaModule` → es un **módulo de puente LEGACY** que bajo bridgeless anda por la **capa de interop**. O sea que el build prueba *compila + linkea + autolinkea + empaqueta* (`BUILD SUCCESSFUL 3m 23s`, `PackageList.java` con `BlePlxPackage`, APK generado, **0 builds de EAS**) y **no** prueba que el puente resuelva en runtime. Lo que sostiene esa mitad es un precedente fuerte —`react-native-bluetooth-classic` es la misma clase de módulo y **lee de verdad en device** sobre este mismo stack— y la medición definitiva es el banco de **RBM6.1**, que es donde ya estaba puesta. El "compila" **no** se lee como "el transporte anda" (lección de `dad711f`).
+
+## RBM3. Las lecciones del SPP son requisitos del transporte nuevo, no sugerencias
+
+> Los tres bloqueantes 🔴 del SPP (`progress/impl_baston-spp-bloqueantes.md`) son **defectos de la máquina de estados en los bordes**, no accidentes de una librería: los tres reaparecen en cualquier transporte con radio, latch y eventos del SO. Este bloque los declara como requisitos del `adapter-ble-gatt` (y del `adapter-mfi-ios` cuando se destrabe) para que no haya que redescubrirlos en device.
+
+**RBM3.1** Mientras una cadena de reintentos haya arrancado **sin un gesto del operario**, el sistema deberá acotarla con el tope de tiempo `UNPROMPTED_RETRY_BUDGET_MS` y con la política por `ConnectTrigger` de `connect-trigger.ts` (tabla exhaustiva, `retry` hereda), sin duplicar esa lógica.
+
+**RBM3.2** El sistema deberá dar presupuesto (`withTimeout` / `withTimeoutOr` de `bridge-timeout.ts`) a **todo** `await` del adaptador BLE que cruce el puente nativo, y deberá liberar el latch de conexión en el `finally` **y** en `disconnect()`, usando una **generación de intento** para que un intento viejo que despierta no pise al vigente.
+
+**RBM3.3** El sistema deberá extender el guard estático de presupuestos (`spp-bridge-timeout-guard.test.ts`, mitad "bordes declarados") al adaptador nuevo, de modo que un `await` del puente sin techo **nazca en rojo**.
+
+**RBM3.4** Cuando el SO informa una desconexión, el sistema deberá atender **únicamente** el evento de su propio dispositivo (suscripción por device de `react-native-ble-plx`), y **no deberá** reaccionar a un listener global que cualquier dispositivo pueda disparar (🔴-2 del SPP).
+
+**RBM3.5** Si el evento de desconexión no llega (app minimizada, evento descartado por el puente), entonces el sistema deberá reconciliar el estado con una **segunda fuente de verdad** consultada al volver a foreground **y** por un poll periódico, fallando **cerrado** (ante duda, no seguir afirmando "conectado") — BENCH-1.
+
+**RBM3.6** Mientras la app no esté en foreground, el sistema **no deberá** conectar, escanear ni reintentar, y deberá verificar el foreground **al disparar** el timer y no solo al programarlo (R6.9, 🟠-1).
+
+**RBM3.7** Si llega un `connect()` con otro dispositivo objetivo mientras hay un intento en curso, entonces el sistema deberá encolar ese objetivo, atenderlo al terminar el intento vigente y dejar log (`connect_superseded`), sin descartarlo en silencio.
+
+**RBM3.8** El sistema **no deberá** mostrar un diálogo del SO (permiso, "¿activar Bluetooth?") desde un camino automático: un arranque o un reintento deberá **consultar** el estado del permiso en vez de pedirlo.
+
+**RBM3.9** El sistema deberá resetear el contador de backoff solo si el link **duró** `LINK_DWELL_MS`, de modo que un flap no deje el reintento martillando en `attempt:0` (🟡-3).
+
+**RBM3.10** Mientras el link esté conectado y no llegue un byte durante el presupuesto de silencio, el sistema deberá dejarlo escrito en el log (`connected_silent`) sin desconectar, para distinguir "conectado y mudo" de "socket muerto" y de "el operario no bastonea" (🟠-5).
+
+**RBM3.11** El sistema deberá ejercitar la máquina de estados completa del adaptador BLE en `node:test` con el entorno **inyectado** (patrón `SppEnv`), incluidas las promesas que **no resuelven nunca**, el reloj y la desconexión de otro dispositivo.
+
+## RBM4. `adapter-mfi-ios` — prearmado y gateado por la lista de protocolos (T3)
+
+> **Gated por negocio, con la arquitectura viva.** No hay dependencia nueva (contexto §1.3): es la **rama iOS** (ExternalAccessory) de `react-native-bluetooth-classic`, que ya está instalada. Lo que falta es la **cadena de protocolo iAP del fabricante** — Allflex y Datamars, trámite MFi, canal Facundo. **Gallagher no tiene ninguna key que dar** (contexto §2): su camino iOS es BLE, no MFi.
+
+**RBM4.1** El sistema deberá exponer `adapter-mfi-ios.ts` como un `StickAdapter` (`kind: 'mfi-ios'`) sobre la rama iOS de `react-native-bluetooth-classic`, **sin agregar ninguna dependencia nueva**.
+
+**RBM4.2** Mientras el build declare la lista `UISupportedExternalAccessoryProtocols` **vacía**, el adaptador deberá reportarse **no disponible** y **no deberá** cargar el módulo nativo ni tocar el framework ExternalAccessory (ni siquiera leyendo `NativeModules.RNBluetoothClassic`).
+
+> Leer ese global **instancia** el módulo nativo en bridgeless (`BridgelessNativeModuleProxy` → `RCTTurboModuleManager` → `[moduleClass new]`), como ya dejó documentado el guard de purpose strings. Con la clave declarada eso hoy no crashea — el requisito es igual: sin protocolo declarado, no hay nada que abrir.
+
+**RBM4.3** El sistema **no deberá** eliminar la clave `UISupportedExternalAccessoryProtocols` de `app.config.ts`: la lista vacía es el **guard anti-crash** del `init()` de la librería (force-cast `as! [String]` sobre un opcional), y el guard que lo verifica deberá seguir en verde.
+
+**RBM4.4** Cuando el build declara al menos una cadena de protocolo y un `ReaderDriver` declara un `TransportCapability` de kind `mfi` con esa misma `protocolString`, el sistema deberá resolver su binding como **disponible**, sin cambios de código.
+
+**RBM4.5** Si un driver declara una `protocolString` que el build **no** declara, entonces el sistema deberá marcar ese binding `available:false` con el motivo explícito ("falta declarar el protocolo en el build") y **no deberá** intentar una conexión que fallaría (RMV3.7).
+
+**RBM4.6** El sistema **no deberá** inventar ni popular ninguna `protocolString` real en este delta: el `RS420_DRIVER` deberá seguir sin declarar el transporte `mfi` hasta que el fabricante entregue la cadena.
+
+**RBM4.7** El sistema deberá dejar documentado y **probado con una cadena sintética** el diff exacto que destraba MFi el día que llegue el dato (una entrada en la lista de `app.config.ts` + una `TransportCapability` en el driver), de modo que ese día no haya que escribir código.
+
+**RBM4.8** El sistema deberá moldear la forma del adaptador sobre el **código nativo instalado** (`ios/conn/*.swift`, `device/NativeDevice.swift` de `react-native-bluetooth-classic`) y no sobre su README; si esa rama no expone en JS lo necesario para listar accesorios por protocolo, abrir la sesión y leer el stream, el sistema deberá **parar y reportar al leader**.
+
+> Es la lección literal del SPP: *"la forma que quedó salió de leer el código nativo, no su README"*, después de que el diseño original describiera un adapter que no funcionaba.
+
+**RBM4.9** El sistema deberá declarar el modo de ingesta de `mfi-ios` como `raw-line` (el accesorio entrega la trama del lector, no un EID limpio) y deberá parametrizarlo por el `frameParser` del driver (RBM1.1).
+
+## RBM5. Selección y prioridad por plataforma (T4)
+
+> **Buildable-hoy, puro.** Extiende `selection-priority.ts` (RMV2) sin cambiar su forma: sigue siendo lógica pura, determinística y testeable sin device (RMV2.6, RMV2.8).
+
+**RBM5.1** El sistema deberá cambiar la prioridad de transporte de iOS a `['mfi', 'ble-gatt', 'ble-hid']` (contexto §4: *"en iOS el orden pasa a ser mfi (si hay protocolo) → ble-gatt → manual"*).
+
+> **Por qué MFi primero y HID último**, dado que RMV2.1 tenía a HID en la cabeza: cuando la cadena de protocolo existe, MFi es un **stream nativo del lector que el cliente ya tiene** (RS420, SRS2i, XRS2i) y no depende de que el operario tenga un campo enfocado; BLE-GATT va segundo porque es abierto pero hoy solo lo habla el HR5 v3; HID queda último porque secuestra el teclado del SO y sigue **gateado** por el gate físico (RBM8). El orden lo fijó el contexto aprobado; acá se traduce, no se re-decide.
+
+**RBM5.2** El sistema deberá mapear el transporte `ble-gatt` al `AdapterKind` `'ble-gatt'` **en iOS y en Android**, y el transporte `mfi` al `AdapterKind` `'mfi-ios'` **solo en iOS** (fuera de iOS, `null`).
+
+**RBM5.3** El sistema deberá seguir mapeando el transporte `spp` a `null` fuera de Android, de modo que `spp-android` **no se ofrezca** en iOS (contexto §4).
+
+**RBM5.4** El sistema deberá conservar sin cambios la prioridad de Android (`['spp', 'ble-gatt', 'ble-hid']`) y la de web (`['serial']`).
+
+**RBM5.5** El sistema deberá calcular el `available` de un binding `mfi-ios` como la conjunción de "el adaptador está construido en el build" **y** "la `protocolString` del driver está declarada en el build" (RBM4.4/RBM4.5), tomando la lista declarada como una entrada **inyectable**.
+
+**RBM5.6** El sistema deberá montar como transporte activo el que corresponde al **bastón recordado** cuando hay uno, y deberá caer al piso por plataforma cuando no lo hay.
+
+> **Por qué entra**: sin esto, en Android `selectTransportAdapter` monta siempre `spp-android`, así que un lector **BLE** (el HR5 v3, el único consumidor conocido del transporte nuevo) sería **inalcanzable en producción justo en la plataforma donde está el productor argentino**, y el banco de RBM6 en Android no podría correr el camino real. El transporte se elige por el bastón que el operario ya eligió, no por la plataforma sola.
+
+**RBM5.7** El sistema deberá tratar un valor de bastón recordado en el formato viejo (solo el identificador del dispositivo) como "sin preferencia de transporte", cayendo al piso por plataforma sin romper (compatibilidad hacia atrás).
+
+**RBM5.8** El sistema deberá mantener la selección **determinística**: con las mismas entradas (plataforma, transportes del driver, adaptadores construidos, protocolos declarados, preferencia recordada) deberá devolver siempre el mismo binding, sin depender del orden de descubrimiento (RMV2.8).
+
+**RBM5.9** El sistema deberá conservar `selectTransportAdapter` devolviendo **exactamente lo mismo que hoy** para los modos `mock`, `manual` y `demo`, y para `auto` cuando no hay preferencia recordada en Android y en web (regresión de RMV2.7).
+
+**RBM5.10** Mientras ningún transporte sea alcanzable en la plataforma, el sistema deberá dejar la carga manual como piso y **no deberá** bloquear nada (RMV2.5, R7).
+
+**RBM5.11** El sistema **no deberá** registrar un `ReaderDriver` del Gallagher HR5 v3 ni de ningún otro lector con UUIDs, formato de trama o parámetros **inventados**: un fabricante entra al registro cuando entrega su documentación técnica.
+
+> Es la consecuencia directa del contexto §3: *"hoy el adapter BLE tiene exactamente UN consumidor conocido en este mercado: el Gallagher HR5 v3, que no tenemos"*. Un driver con parámetros adivinados convertiría esa incógnita en un verde falso.
+
+**RBM5.12** El sistema deberá registrar un `ReaderDriver` del **emulador ESP32 en `MODO_GATT`** cuyo `displayName` diga explícitamente que es un banco de pruebas, de modo que nunca se presente en la UI como un lector comercial (ADR-010: el ESP32 es test rig, no producto).
+
+**RBM5.13** El sistema deberá reconocer al driver del emulador **por su nombre anunciado** y **no deberá** reconocerlo por el UUID del servicio Nordic UART.
+
+> **Por qué importa y no es una preferencia de estilo**: el bridge de la balanza Vesta (ADR-003) anuncia **los mismos UUIDs NUS**. Un `deviceMatch` por UUID de servicio haría que la app reconozca **el bridge de la balanza como un bastón**. Con el match por nombre, el bridge aparece como "no reconocido" y no es accionable (RMV1.7 / RMV3.8), que es la conducta correcta.
+
+**RBM5.14** El sistema deberá presentar en la pantalla de conexión el flujo específico de los transportes nuevos (BLE: escanear → listar → elegir → conectar; MFi: instrucción del Accessory Picker de iOS + el estado "falta el protocolo del fabricante"), derivándolo del `ReaderBinding` como ya hace el resto (RMV3.2).
+
+## RBM6. Banco del emulador ESP32 en `MODO_GATT` (T5)
+
+> **No es un extra: es parte de la unidad** (contexto §3). El emulador en `MODO_GATT` notifica la trama **partida en trozos de 20 bytes**, que es exactamente lo que hay que reensamblar — y es donde el SPP se rompió.
+
+**RBM6.1** El sistema **no deberá** considerar verificado el transporte BLE hasta correr el banco del emulador en `MODO_GATT` contra un dispositivo real y documentar el resultado.
+
+**RBM6.2** El sistema deberá ejercitar en el banco, como mínimo: stream de lecturas distintas, dedup del mismo EID dentro y fuera de la ventana, ráfaga, 20 animales sin perder ninguno, las 10 tramas malformadas, trama partida, dos tramas pegadas, corte del link con reconexión, radio abajo, flap con backoff creciente, mudez, y corte con la app en background.
+
+**RBM6.3** El sistema deberá dar el **mismo resultado** con la trama troceada por defecto (`chunk 20`) y con la trama entera (`chunk 0`), de modo que el reensamblado no dependa del troceo.
+
+**RBM6.4** El sistema deberá correr el banco en **Android** y en **iOS**, porque el transporte se declara cross-platform (RBM2.1) y una sola plataforma no lo demuestra.
+
+**RBM6.5** Si un escenario del banco da distinto de lo esperado, entonces el sistema deberá registrarlo como **hallazgo** y **no deberá** anotarlo como verde.
+
+**RBM6.6** El sistema deberá documentar el resultado del banco en `progress/`, incluyendo qué escenarios el emulador **no** puede validar (las mañas de un lector comercial), sin dejar que el verde del emulador se lea como validación contra hardware real.
+
+## RBM7. Reconciliación de la documentación (T6)
+
+> Regla dura de `docs/specs.md` §"Reconciliación de specs al as-built". Estas afirmaciones quedan **falsas** cuando este delta cierre, y una spec que miente por omisión es peor que una que falta.
+
+**RBM7.1** El sistema deberá reconciliar `requirements-multivendor.md`: la deuda declarada bajo **RMV5.2** (*"el `frameParser` no se usa en producción"*) queda **cerrada** por RBM1; **RMV1.6** pasa a ser cierto; **RMV2.1/RMV2.2** cambian con la prioridad de iOS y los mapeos nuevos; **RMV6.2/RMV6.3** dejan de ser "fuera de este delta".
+
+**RBM7.2** El sistema deberá reconciliar el core `requirements.md` de spec 04: **R11.2** ("los 5 adaptadores del MVP") pasa a enumerar los nuevos; **R12** gana el modelo de permisos del transporte BLE; **R8** queda ligado al desenlace del gate de RBM8.
+
+**RBM7.3** El sistema deberá dejar **recomendada al leader** una enmienda a **ADR-024** que registre: (a) que el camino iOS-abierto real del mercado es **BLE-GATT** (HR5 v3) y no solo HID; (b) la prioridad de transporte de iOS nueva; (c) que a Gallagher se le pide **documentación técnica** y no una licencia, y que **Datamars** es un tercer interlocutor.
+
+> La redacción del ADR es del **leader**, no del `spec_author` (misma regla que la Pregunta abierta 1 del delta multivendor: política tentativo-vs-firme). El delta deja la recomendación, no el ADR.
+
+**RBM7.4** El sistema deberá reconciliar `docs/bastones-mercado-argentino.md` §"Qué falta" con el pedido correcto por fabricante (documentación técnica a Gallagher; cadena iAP + licencia MFi a Allflex y Datamars).
+
+**RBM7.5** El sistema deberá reconciliar `firmware/baston-emulator/README.md`: la fila de `MODO_GATT` dice *"sin implementar"* y la de `MODO_HID` dice *"con este modo el gate se puede correr"* — las dos cambian con este delta.
+
+**RBM7.6** El sistema deberá reconciliar el comentario de `app/plugins/with-bluetooth-classic.js` que afirma que `BLUETOOTH_SCAN` está *"declarado para un descubrimiento futuro… no se usa hoy"*, porque el escaneo BLE lo usa.
+
+## RBM8. Camino HID: primero el GATE, después (y solo si pasa) el adapter (T7)
+
+> **El orden es el requisito.** `adapter-hid-wedge.ts` son 22 líneas de placeholder gateado a propósito, y su cabecera dice por qué: *"el Council fue enfático: no fijar arquitectura sobre un mecanismo no ejecutado en hardware real"*. Lo nuevo es que el gate **ya se puede correr**: el ESP32 en `MODO_HID` es un teclado BLE HID construido para esto.
+
+**RBM8.0** El sistema deberá correr el gate físico **antes** de escribir una sola línea del adaptador HID, y el adaptador **no deberá** escribirse hasta que el resultado del gate esté documentado.
+
+**RBM8.1** Cuando se corre el gate, el sistema deberá medir y registrar con evidencia los cuatro puntos de R8.7 / ADR-024 §4: **(a)** que se tipeen los **15 dígitos completos**, **(b)** que se emita el **terminador Enter**, **(c)** que la **supresión del teclado en pantalla** de iOS no rompa la UX de manga, y **(d)** que un `TextInput` de RN con foco programático capture de forma confiable.
+
+**RBM8.2** El sistema deberá correr el gate contra la build **ya instalada** en el iPhone (TestFlight del 2026-08-11, perfil `testflight-dev`, commit `0273c43`), usando el campo de carga manual de `/maniobra/identificar` (`testID="manual-entry-input"`), y por lo tanto el gate **no deberá** consumir ningún build de EAS ni quedar gateado por el OK de build de Raf.
+
+> Es lo **primero ejecutable de toda la unidad**: va antes incluso de instalar `react-native-ble-plx`. El OK de build de iOS sigue haciendo falta después, para RBM2/RBM4/RBM5 (la dep nueva cambia el fingerprint) — pero no para esto.
+
+**RBM8.3** El sistema deberá correr el gate variando los knobs del emulador (`hidterm enter|tab|none`, `hiddelay <ms>`, `hidraw on|off`) y deberá registrar el resultado por knob.
+
+**RBM8.4** Cuando el gate pase en (a), (b), (c) y (d), el sistema deberá implementar el adaptador detrás de la MISMA interfaz `StickAdapter`, sin tocar el contrato de ingesta (R10.3 / R11.3), con la captura de keystrokes y el terminador **que el gate validó**.
+
+**RBM8.5** Si el gate falla en (c) o en (d), entonces el sistema **no deberá** escribir el adaptador y deberá cerrar el camino HID con la **evidencia** de la medición, dejando `adapter-hid-wedge.ts` como placeholder gateado y su binding en `available:false`.
+
+**RBM8.6** Si el gate falla por una **prop del `TextInput` de producción** y no por el comportamiento de iOS, entonces el sistema deberá registrarlo como un desenlace **distinto** y **no deberá** concluir que el camino HID no sirve.
+
+> El campo que se va a usar es el de producción, con sus props actuales (`maxLength`, `autoCapitalize="characters"`, `autoCorrect={false}`, `returnKeyType="search"`, `onSubmitEditing` → búsqueda, sin `keyboardType` explícito). Un fallo atribuible a una de esas props tiene otra consecuencia: **ajustar el campo de scan (o darle un campo de scan dedicado al wedge) y re-correr el gate**, no cerrar el camino. Mezclar los dos desenlaces es cómo se cierra por error una puerta que estaba abierta.
+
+**RBM8.7** El sistema deberá declarar explícitamente, junto al resultado del gate, que el gate valida **el lado del teléfono** y **no deberá** presentarlo como confirmación de que exista un bastón comercial con modo HID.
+
+> El **Gallagher HR0** sigue **sin confirmar del fabricante** (relevamiento §"Qué falta", ítem 1). Son dos incógnitas distintas y el verde de una no puede tapar a la otra.
+
+**RBM8.8** El sistema deberá mantener `ADAPTER_INGEST_MODE['hid-wedge'] = 'eid'`: si el gate mostrara que algún wedge tipea la trama completa, ese lector deberá resolverse con su propio driver y no cambiando esa fila.
+
+## RBM9. Invariantes heredados, frontera de datos y Gate 1
+
+**RBM9.1** El sistema **no deberá** tocar la base de datos en este delta: cero migraciones, cero funciones/RPC, cero Edge Functions, cero policies RLS, cero cambios en `sync-streams/`.
+
+**RBM9.2** El sistema deberá tratar **Gate 1 (security_analyzer modo `spec`) como N/A** por RBM9.1, y deberá verificarlo al cierre de forma ATRIBUIBLE: el conjunto de archivos que ESTE delta tocó no deberá contener ninguno bajo `supabase/` ni `sync-streams/`. **El oráculo NO es `git diff supabase/`**: ese comando mide el ÁRBOL, no el cambio, y con dos terminales en paralelo muestra el trabajo ajeno; además es CIEGO a los archivos **untracked** (una migración nueva no aparece en un `git diff`). Se verifica con `git status --porcelain supabase/ sync-streams/` **cruzado contra la lista de archivos del implementer**: lo que aparezca ahí y no esté en esa lista es de otra terminal y no cuenta; **Gate 2 (modo `code`) sigue siendo obligatorio**.
+
+> **La única superficie de este delta que roza "datos regulados" está nombrada, no barrida**: un EID mal parseado se declara mal ante SENASA (ADR-024 §Contexto). Este delta **no toca** la validación (`isValidTag`), la dedup ni la confirmación pre-commit — solo cambia **de dónde sale el parser** (RBM1.8), y el único modo de falla nuevo es "parser no resuelto", que es **fail-closed con log** (RBM1.4). Si el leader quiere correr Gate 1 igual, esa es la única pregunta que vale la pena hacerle.
+
+**RBM9.3** El sistema **no deberá** tocar tablas con `establishment_id` ni ningún camino multi-tenant: el EID que este delta ingiere entra al motor find-or-create de spec 09, que ya corre bajo RLS y PowerSync, y ese camino **no cambia**.
+
+**RBM9.4** El sistema **no deberá** requerir internet para conectar, reconectar, escanear, leer, parsear ni deduplicar por ninguno de los transportes nuevos (R14, offline-first).
+
+**RBM9.5** El sistema deberá mantener la carga manual disponible y no bloqueante en todos los estados de los transportes nuevos, del gate MFi y del gate HID (R7.2, R7.4, R9.6).
+
+**RBM9.6** El sistema **no deberá** modificar ningún método de la interfaz `StickAdapter` ni ningún archivo de spec 09 (`app/src/features/animals/*`, screens de find-or-create); si algo lo exigiera, deberá **parar y reportar al leader**.
+
+**RBM9.7** El sistema deberá cubrir con capturas del Gate 2.5 las superficies de UI nuevas (instrucciones por transporte y filas de dispositivo BLE/MFi); donde una superficie solo exista en device, la evidencia visual deberá ser la del banco (RBM6) y deberá quedar dicho que la E2E web no la cubre.
+
+**RBM9.8** El sistema deberá tratar el build de **iOS** como gateado por el **OK explícito de Raf, por plataforma y por build** (la dep nueva cambia el fingerprint), y el de **Android** como local con Gradle sin consumir EAS.
+
+---
+
+## Trazabilidad `context-ios-ble-mfi.md` → requirements
+
+| Punto del contexto | Requirement(s) |
+|---|---|
+| §1.1 🔴 el registro de drivers no soporta un segundo driver (prerrequisito) | RBM1.1–RBM1.8 |
+| §1.2 ✅ `UISupportedExternalAccessoryProtocols: []` es un guard anti-crash que no hay que romper | RBM4.3 |
+| §1.3 ✅ el MFi no necesita dependencia nueva (rama iOS de la lib instalada) | RBM4.1, RBM4.8 |
+| §1.4 ✅ se puede probar BLE end-to-end sin bastón comercial (emulador `MODO_GATT`) | RBM6.1–RBM6.6, RBM5.12, RBM5.13 |
+| §1.5 ⚠️ `react-native-ble-plx` no está instalado → dep nueva, fingerprint, builds | RBM2.1, RBM2.17, RBM2.18, RBM9.8 |
+| §2 qué pedirle a cada fabricante (Gallagher = doc; Allflex/Datamars = iAP + MFi) | RBM7.4, RBM7.3, RBM4.6 |
+| §3 riesgo declarado: un solo consumidor conocido, sale sin hardware real | RBM5.11, RBM6.1, RBM6.5, RBM6.6 |
+| §4 T1 — pagar la deuda del driver, con guard sobre el parser hardcodeado | RBM1.2, RBM1.7 |
+| §4 T2 — `adapter-ble-gatt` cross-platform (scan filtrado → connect → notify → reensamblado) | RBM2.1–RBM2.16, RBM6.4 |
+| §4 T2 — con las lecciones del SPP ya escritas (techo, latch, desconexión de fuente propia) | RBM3.1–RBM3.11 |
+| §4 T3 — `adapter-mfi-ios` gateado por la lista de protocolos, vivo el día que llegue la cadena | RBM4.1, RBM4.2, RBM4.4, RBM4.5, RBM4.7 |
+| §4 T4 — selección y prioridad por plataforma; `spp-android` no se ofrece en iOS | RBM5.1–RBM5.10, RBM5.14 |
+| §4 T5 — banco del ESP32 en `MODO_GATT` con los escenarios del `MODO_SPP` | RBM6.2, RBM6.3 |
+| §4 T6 — reconciliación de ADR-024, multivendor y relevamiento | RBM7.1–RBM7.6 |
+| §4 "no entra": la cadena de protocolo real de cualquier fabricante | RBM4.6 |
+| §5 lo que hace falta para verificar y de quién depende | RBM9.8, RBM6.4 |
+| §6.2 ¿el HR0 tiene modo HID? (sin confirmar del fabricante) | RBM8.7 |
+| §7.1 el camino HID ENTRA como T7 | RBM8.0–RBM8.8 |
+| §7 T7 secuencia obligatoria: gate → (si pasa) adapter; si falla en (c)/(d), se cierra con evidencia | RBM8.0, RBM8.4, RBM8.5 |
+| §7 💡 atajo: correr el gate contra la build ya instalada, sin gastar un build | RBM8.2 |
+| §7 ⚠️ lo que el gate NO prueba | RBM8.7 |
+| Restricción del leader: Gate 1 N/A, declarado y verificable al cierre | RBM9.1, RBM9.2 |
+
+## Clasificación de madurez (regla de despacho para el leader)
+
+| Bloque | Buildable-hoy sin hardware | Gated por hardware / device | Gated por negocio o por terceros |
+|---|---|---|---|
+| RBM1 — parser por driver | ✅ (puro + guard) | — | — |
+| RBM2 — `adapter-ble-gatt` | ✅ código + tests puros (env inyectado) | stream real (RBM6) | — |
+| RBM3 — lecciones del SPP | ✅ (dobles, relojes, promesas que no resuelven) | los 🔴 en device los cierra RBM6 | — |
+| RBM4 — `adapter-mfi-ios` | ✅ el gate por lista de protocolos + el diff sintético | — | ✅ la cadena iAP real (Facundo) |
+| RBM5 — selección/prioridad | ✅ (puro) | el montaje real por bastón recordado | `available` real de MFi |
+| RBM6 — banco `MODO_GATT` | — | ✅ Android local; **iOS requiere OK de build de Raf** | — |
+| RBM7 — reconciliación | ✅ | — | ADR: lo redacta el leader |
+| RBM8 — gate HID → adapter | **RBM8.2: corre YA, sin build** | ✅ el gate es device (iPhone + ESP32) | que exista un bastón comercial HID |
+| RBM9 — invariantes / Gate 1 | ✅ | — | — |
+
+## Criterios de aceptación del delta
+
+Este delta se considera implementado cuando:
+
+- El gate HID (RBM8.1) está **corrido y documentado** con sus cuatro mediciones, y el camino quedó **abierto con adapter** o **cerrado con evidencia** — pero nunca "pendiente".
+- `contract.ts` no menciona ningún parser de fabricante, un driver con otro `frameParser` se ingiere de punta a punta sin tocar el contrato, y el guard que lo vigila fue falsificado con un mutante (RBM1).
+- `adapter-ble-gatt.ts` está escrito detrás de la misma `StickAdapter`, con import perezoso, scan filtrado y acotado, reensamblado por `LineFramer` sobre el delimitador del driver, y las diez lecciones del SPP implementadas y testeadas con entorno inyectado (RBM2, RBM3).
+- `adapter-mfi-ios.ts` existe, reporta "no disponible" con la lista de protocolos vacía sin tocar el framework, y un test con una cadena sintética demuestra que el día que llegue el dato se destraba **sin escribir código** (RBM4).
+- La selección iOS es `mfi → ble-gatt → ble-hid`, `spp-android` no se ofrece en iOS, el transporte montado sigue al bastón recordado, y `selectTransportAdapter` no cambió su resultado para `mock`/`manual`/`demo` (RBM5).
+- El banco del emulador en `MODO_GATT` se corrió **en device, en las dos plataformas**, y su resultado está documentado con los hallazgos como hallazgos (RBM6).
+- Las cuatro fuentes que quedaban mintiendo están reconciliadas y la enmienda a ADR-024 quedó **recomendada** al leader (RBM7).
+- Ningún archivo del changeset del delta cae bajo `supabase/` ni `sync-streams/`, verificado con `git status --porcelain` (que SÍ ve untracked) cruzado contra la lista de archivos tocados — no con `git diff`, que mide el árbol y no el cambio (RBM9.2). La carga manual nunca se bloquea (RBM9.5) y ningún archivo de spec 09 se tocó (RBM9.6).
+
+## Historial de refinamiento
+
+- **2026-08-17 — Redacción inicial del delta (v1).** Traducción del `context-ios-ble-mfi.md` (Gate 0 aprobado el 2026-08-15, con las decisiones de la Puerta 1 de su §7) a EARS sobre el as-built de spec 04 + delta multivendor. No se re-decidió contexto ni transporte. Tres cosas que el contexto **no fijaba** y que se resolvieron acá como diseño (no como decisión de producto), cada una con su justificación escrita en el requisito: **(1)** el fail-closed del parser no resuelto (RBM1.4) en vez de un fallback a RS420; **(2)** que el transporte montado siga al bastón recordado (RBM5.6), sin lo cual el BLE quedaría inalcanzable en Android en producción; **(3)** el driver del emulador matcheado por nombre y **no** por el UUID NUS (RBM5.13), porque el bridge de la balanza (ADR-003) anuncia los mismos UUIDs y sería reconocido como bastón.
+- **2026-08-17 — Dato del leader incorporado antes de cerrar.** El gate HID se corre contra la build de TestFlight ya instalada (2026-08-11, `testflight-dev`, `0273c43`) usando `manual-entry-input` de `/maniobra/identificar` → **RBM8.2**: no consume build de EAS y no está gateado por el OK de Raf. Con eso, RBM8 pasa a ser lo **primero ejecutable** de la unidad. Se agregaron además RBM8.6 (un fallo por una prop del `TextInput` es un desenlace distinto de "el camino HID no sirve") y RBM8.7 (el gate mide el lado del teléfono, no la existencia de un bastón comercial HID).
+
+## Preguntas abiertas / a confirmar (Puerta 1)
+
+Huecos entre el contexto, el as-built y los terceros. **No se improvisaron resoluciones.**
+
+1. **¿La rama iOS de `react-native-bluetooth-classic` expone en JS lo que el adapter MFi necesita?** El contexto verificó que existe el código nativo (`ios/conn/*.swift`); lo que no está verificado es la **superficie JS** (listar accesorios por protocolo, abrir sesión, leer el stream). RBM4.8 obliga a moldear sobre el fuente instalado y a **parar y reportar** si no alcanza. No bloquea el `spec_ready`; es el primer paso de la fase de MFi.
+2. ~~**¿`react-native-ble-plx` es compatible con RN 0.85.3 bridgeless?**~~ **RESUELTA (F2, 2026-08-17): COMPATIBLE, FIRME.** La premisa de esta pregunta era falsa (la lib **no** trae C++/JSI: cero fuentes C++). Veto en dos mitades —inspección de fuente + `:app:assembleDebug` verde en 3m 23s, 0 builds de EAS— en `progress/veto_ble-plx.md`. Queda **declarado** lo que el build no prueba (la reachability del puente en runtime: es un módulo de puente legacy bajo la capa de interop, y lo mide el banco de RBM6.1). El delta **no** se replantea; F3 está desbloqueada. Ver la nota de reconciliación bajo RBM2.18.
+3. **Prioridad de iOS con HID último.** El contexto §4 fija `mfi → ble-gatt → manual`; RMV2.1 tenía `['ble-hid','ble-gatt','mfi']`. La traducción (RBM5.1) invierte HID y MFi respecto del delta anterior. Está justificada en el requisito, pero es un cambio de una tabla ya aprobada: **confirmar en Puerta 1**.
+4. **Uniones nuevas `'ble-gatt'` y `'mfi-ios'`** extienden `StickAdapter['kind']`, `AdapterKind`, `ADAPTER_KINDS`, `ADAPTER_INGEST_MODE` y los switches exhaustivos de `permissions.ts` e `instantiateTransport`. Es aditivo y 04-owned (mismo precedente que `'simulator'`), pero toca archivos del core as-built — confirmar que se acepta.
+5. **El driver del emulador vive en el `DRIVER_REGISTRY` de producción** (RBM5.12), no detrás de un gate de build. La alternativa (registro condicional) está descartada en el design con su motivo (rompe el determinismo que RMV2.8 compró). Confirmar que se acepta que un build de producción incluya una fila de datos de un test rig, con su `displayName` diciéndolo.
+6. **Un bastón por dispositivo (R6.7) sigue vigente**: RBM5.6 elige **cuál** transporte se monta, no monta dos a la vez. Si en el campo apareciera un caso de dos bastones de transportes distintos en el mismo teléfono, es scope nuevo.

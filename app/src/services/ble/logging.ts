@@ -11,11 +11,19 @@
 // PROPIO try/catch, sin tocar call sites; no-op en web/E2E (wrapper platform-split).
 
 import { addBleBreadcrumb } from '../observability/sentry';
+import type { RejectReason } from './contract';
 
 export type TransportLogEvent =
   | { kind: 'connection_changed'; connected: boolean }
   | { kind: 'reconnect_attempt'; attempt: number }
-  | { kind: 'eid_rejected'; reason: 'parse_failed' | 'invalid_eid' | 'empty' }
+  /**
+   * Un EID entró y NO se ingirió. El motivo es el `RejectReason` DEL CONTRATO, importado y no
+   * recopiado: los dos unions eran gemelos escritos a mano y un motivo nuevo (`parser_threw`, 🟡-2
+   * del review de F1) se agregaba de un lado y se perdía del otro, sin que nada se pusiera rojo.
+   * Es un `import type`: se borra en runtime y no crea dependencia real (`contract.ts` no importa
+   * este módulo, así que tampoco hay ciclo).
+   */
+  | { kind: 'eid_rejected'; reason: RejectReason }
   | { kind: 'read_loop_error'; message: string }
   | { kind: 'connect_error'; message: string }
   // ── Diagnóstico de los bloqueantes cerrados el 2026-07-30 (review + banco del ESP32) ──────────
@@ -68,7 +76,26 @@ export type TransportLogEvent =
    * ≥1 = suscriptas pero todas censurando (el caso de `maniobra/carga`: el overlay global está montado y
    * suprimido por ruta, y la pantalla no tiene listener propio).
    */
-  | { kind: 'read_dropped_no_consumer'; subscribers: number };
+  | { kind: 'read_dropped_no_consumer'; subscribers: number }
+  /**
+   * FAIL-CLOSED del parser de trama (RBM1.4, delta ios-ble-mfi): un adaptador cuyo modo de ingesta
+   * es `'raw-line'` no expone un `ReaderDriver` con `frameParser`, así que su línea NO se ingiere.
+   *
+   * Existe porque la alternativa —caer al parser del RS420— produciría lecturas para UN lector y
+   * **silencio total** para todos los demás, y ese silencio es indistinguible de "el operario no
+   * está bastoneando" (es literalmente el síntoma que costó el terminador equivocado del SPP:
+   * `term cr` → 0 ingestas, 0 errores, en device). Un rechazo con log se diagnostica; un fallback
+   * silencioso, no.
+   *
+   * `adapter` = el `AdapterKind` que quedó sin parser (`string` para no acoplar `logging.ts` al
+   * union de `adapter-selection.ts`). `at` distingue los dos momentos, que tienen consecuencias
+   * distintas:
+   *   · `'mount'` → se montó un transporte que NO PUEDE parsear nada (error de cableado; aparece
+   *     una vez, antes de cualquier bastonazo);
+   *   · `'read'`  → se descartó UNA línea concreta (aparece por bastonazo y correlaciona con lo que
+   *     el operario está haciendo, que es lo que hace diagnosticable el "bastoneo y no pasa nada").
+   */
+  | { kind: 'parser_unresolved'; adapter: string; at: 'mount' | 'read' };
 
 /**
  * Registra un evento de transporte sin bloquear (R15.1). Best-effort: si el logger falla, se

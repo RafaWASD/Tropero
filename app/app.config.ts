@@ -131,10 +131,49 @@ export default (): ExpoConfig => {
       'expo-apple-authentication', // feature 19 — PRESERVADO
       // Bastón Bluetooth Classic (spec 04 / RMV5.8). `react-native-bluetooth-classic` NO trae
       // config plugin propio, así que la política de permisos Android del bastón vive acá:
-      // BLUETOOTH_CONNECT (Android 12+, el único de runtime), BLUETOOTH/BLUETOOTH_ADMIN topeados a
-      // API 30, BLUETOOTH_SCAN con `neverForLocation`, y ACCESS_FINE_LOCATION —que la lib mete sin
-      // tope— acotado a API 30: este camino NO hace discovery, solo lista los emparejados.
+      // BLUETOOTH_CONNECT (Android 12+), BLUETOOTH/BLUETOOTH_ADMIN topeados a API 30, BLUETOOTH_SCAN
+      // con `neverForLocation`, y ACCESS_FINE_LOCATION —que la lib mete sin tope— acotado a API 30.
+      // ⚠️ Reconciliado 2026-08-17 (delta ios-ble-mfi / RBM7.6): este comentario decía que
+      // BLUETOOTH_CONNECT era "el único de runtime" y que "este camino NO hace discovery". Con el
+      // transporte `ble-gatt` las dos afirmaciones dejaron de ser ciertas: el escaneo BLE pide
+      // BLUETOOTH_SCAN en runtime (API ≥ 31) y ACCESS_FINE_LOCATION en API ≤ 30 — que es justo la
+      // ventana que el tope deja abierta. La POLÍTICA no cambió; cambió quién la usa. El detalle está
+      // en la cabecera de `plugins/with-bluetooth-classic.js` y en `services/ble/permissions-android.ts`.
       './plugins/with-bluetooth-classic',
+      // ── Bastón por BLE GATT (spec 04, delta ios-ble-mfi / RBM2.15, RBM2.17) ────────────────────
+      // `react-native-ble-plx` SÍ trae config plugin propio (`app.plugin.js` → `plugin/build/withBLE`),
+      // así que no hace falta `@config-plugins/react-native-ble-plx`. Las cuatro opciones están
+      // EXPLÍCITAS a propósito, aunque tres coincidan con el default de la lib: cada una es una
+      // decisión con consecuencia, y un default que cambie en una versión futura de la lib no puede
+      // cambiarnos la política en silencio.
+      [
+        'react-native-ble-plx',
+        {
+          // ⛔ BACKGROUND BLE PROHIBIDO (RBM2.15 / R6.9 foreground-only). `isBackgroundEnabled` es lo
+          // que agregaría `<uses-feature android:name="android.hardware.bluetooth_le" required="true"/>`
+          // al manifiesto (que además excluiría de Play a los devices sin BLE), y `modes` es lo que
+          // escribiría `UIBackgroundModes: ['bluetooth-central']` en el Info.plist. Los dos apagados:
+          // el bastón se usa con la app en la mano, en la manga, y declarar background en iOS arrastra
+          // escrutinio de App Review por una capacidad que no usamos.
+          isBackgroundEnabled: false,
+          modes: [],
+          // Política de permisos de Android (RBM2.13). Con `neverForLocation: true` el plugin declara
+          // `ACCESS_COARSE_LOCATION`/`ACCESS_FINE_LOCATION` TOPEADAS a `maxSdkVersion=30` y el
+          // `BLUETOOTH_SCAN` con el flag `neverForLocation`. Con el default (`false`) las declararía
+          // SIN TOPE, que es exactamente lo que `plugins/with-bluetooth-classic.js` existe para evitar:
+          // una app de ganado no pide ubicación. Y es verdad, no una conveniencia: el escaneo se filtra
+          // por `serviceUuid` para encontrar un bastón, nunca para inferir dónde está el teléfono.
+          neverForLocation: true,
+          // El texto del diálogo de iOS es NUESTRO. `withBluetoothPermissions` del plugin ESCRIBE
+          // `NSBluetoothAlwaysUsageDescription` en el Info.plist y, si no se le pasa nada, puede dejar
+          // su default en inglés ("Allow $(PRODUCT_NAME) to connect to bluetooth devices"). Pasarle la
+          // misma constante que `ios.infoPlist` hace el resultado independiente del orden en que Expo
+          // aplique los mods. Es la premisa que el guard de purpose strings tenía escrita como límite
+          // nº5 ("ningún plugin nuestro toca el Info.plist"): este es el primero que sí lo toca, y así
+          // queda cerrado.
+          bluetoothAlwaysPermission: BLUETOOTH_PURPOSE,
+        },
+      ],
       [
         'expo-build-properties',
         {

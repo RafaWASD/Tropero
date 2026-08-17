@@ -102,9 +102,41 @@ Ninguno de los otros modelos relevados menciona modo teclado. Así que el `hid-w
 1. Si algún bastón del mercado tiene modo HID en su menú de configuración (requiere el aparato en la mano).
 2. Si conviene reemplazar el camino HID por **BLE**, que es lo que efectivamente usan los modelos nuevos.
 
+## Qué pedirle a cada fabricante (2026-08-17)
+
+Ordenado por interlocutor, porque el pedido **no es el mismo** y confundirlos cuesta semanas.
+
+| Fabricante | Modelo que sirve en iOS | Qué pedir | Qué NO pedir |
+|---|---|---|---|
+| **Gallagher** | **HR5 v3** (BLE) | **Documentación técnica de integración**: UUID de servicio, UUID de la característica de notificación, formato de trama y terminador | ❌ **Una key MFi.** BLE no lleva licencia ni acuerdo con Apple. Pedirla es pedir algo que no existe |
+| **Allflex** | RS420 (SPP + iAP) | **Cadena de protocolo iAP** (`com.allflex.…`) **+ licencia MFi** | — |
+| **Datamars** (Tru-Test) | SRS2i / XRS2i | Cadena de protocolo iAP + licencia MFi | — |
+
+**Dos cosas que se deducen de la tabla y conviene tener a mano en la llamada:**
+
+- **El HR4 y el HR5 estándar son Bluetooth clásico sin chip MFi.** No se van a conectar a un iPhone con
+  ninguna app, nunca, por ningún acuerdo. Gestionar algo por esos modelos es tiempo perdido.
+- **Gallagher es el interlocutor más barato de los tres**: su camino no depende de ningún trámite con
+  Apple, solo de que alguien de soporte técnico mande un documento.
+
+> Estado del lado del software (delta `ios-ble-mfi` de spec 04, aprobado el 2026-08-17): el transporte
+> **BLE-GATT** se está construyendo y se prueba contra el emulador ESP32 en `MODO_GATT`; el **MFi** queda
+> prearmado y gateado, y se destraba el día que llegue una cadena de protocolo **sin escribir código**
+> (una línea en `app.config.ts` + una capability en el driver). O sea: cuando llegue el dato, no hay que
+> esperar a que se programe nada.
+>
+> ⚠️ **No se va a registrar ningún driver con UUIDs o formato de trama inventados.** Un fabricante entra
+> al registro cuando entrega su documentación. Adivinar los parámetros convertiría una incógnita en un
+> verde falso.
+
 ## Qué falta
 
 1. **Confirmar el modo HID del HR0** con Gallagher, no con un revendedor. Decide si el `hid-wedge` de ADR-024 tiene con qué hablar. Es lo primero.
+
+   > **Actualización 2026-08-17**: el *gate físico* de ese camino (que iOS entregue los keystrokes a un
+   > campo enfocado) **ya no depende del HR0**: se corre con el ESP32 en `MODO_HID`, que es un teclado
+   > BLE HID. Pero son **dos incógnitas distintas** — el gate valida el lado del teléfono, no que exista
+   > un bastón comercial con modo HID. Esta pregunta sigue abierta tal cual.
 2. **El XRP2**: sin relevar. Es panel con antena, no bastón de mano, así que es el menos urgente.
 3. **Confirmar el iAP del RS420** leyendo el manual. El PDF no tiene capa de texto extraíble y ManualsLib devuelve 403.
 4. **Ningún dato de cuota de mercado.** No existe un ranking publicado de "los más usados en Argentina". Lo de arriba es el **surtido de los distribuidores**, que es una señal de lo que se vende, no una medición. Si hace falta el dato duro, la vía es preguntarle a un distribuidor cuánto vende de cada uno.
