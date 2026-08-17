@@ -95,7 +95,20 @@ export type TransportLogEvent =
    *   · `'read'`  → se descartó UNA línea concreta (aparece por bastonazo y correlaciona con lo que
    *     el operario está haciendo, que es lo que hace diagnosticable el "bastoneo y no pasa nada").
    */
-  | { kind: 'parser_unresolved'; adapter: string; at: 'mount' | 'read' };
+  | { kind: 'parser_unresolved'; adapter: string; at: 'mount' | 'read' }
+  /**
+   * El escaneo BLE se agotó sin encontrar un bastón que algún driver reconozca (RBM2.5, delta
+   * ios-ble-mfi). `ms` es el presupuesto que se consumió y `seen` cuántos dispositivos aparecieron
+   * ANUNCIANDO EL SERVICIO del driver — juntos separan tres causas que desde la UI se ven igual
+   * ("no apareció nada"):
+   *   · `seen: 0`  → no hay nada con ese servicio a la vista: el bastón está apagado, fuera de rango,
+   *     o la radio del teléfono no está escaneando de verdad (permiso/ubicación en API ≤ 30);
+   *   · `seen: >0` → SÍ hay dispositivos con ese servicio pero NINGUNO lo reconoce el `deviceMatch`
+   *     del driver. Es el caso del bridge de la balanza Vesta, que anuncia los mismos UUID Nordic
+   *     UART (ADR-003): la conducta correcta es no conectarse, y este contador es lo que hace visible
+   *     que pasó eso y no lo otro.
+   */
+  | { kind: 'ble_scan_timeout'; ms: number; seen: number };
 
 /**
  * Registra un evento de transporte sin bloquear (R15.1). Best-effort: si el logger falla, se

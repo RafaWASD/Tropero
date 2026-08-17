@@ -86,3 +86,22 @@ void _triggersAreExhaustive;
  * Y el techo del martilleo por apertura de la app queda en 2 minutos, en vez de infinito.
  */
 export const UNPROMPTED_RETRY_BUDGET_MS = 120_000;
+
+/**
+ * Cuánto tiene que DURAR un link para que cuente como sano y resetee el backoff (🟡-3 del review del
+ * SPP, confirmado en el banco §4.3: `flap 4 3000` daba `attempt:0` las cuatro veces).
+ *
+ * Antes el contador se reseteaba apenas resolvía el connect, así que un link que se cae a los 200 ms
+ * producía connect → drop → 500 ms → connect indefinido: el chip parpadeando y la radio martillando sin
+ * que el backoff creciera nunca. Ahora el reset exige que la conexión haya vivido este tiempo. 30 s: más
+ * que cualquier ciclo de flap patológico, mucho menos que una jornada normal (un corte único a mitad de
+ * la mañana sigue reconectando desde el piso de 500 ms).
+ *
+ * ── POR QUÉ VIVE ACÁ Y NO EN UN ADAPTER (delta ios-ble-mfi, F3) ──────────────────────────────────
+ * Nació en `adapter-spp-android.ts` porque era el único transporte con radio. Con el segundo
+ * (`adapter-ble-gatt`) la elección era duplicar el número o importarlo de un adapter hermano, y las dos
+ * son peores: el dwell es una política DE LA CADENA DE REINTENTOS, igual que
+ * `UNPROMPTED_RETRY_BUDGET_MS`, y este módulo es donde vive esa política. `adapter-spp-android.ts` lo
+ * re-exporta para no tocar sus call sites (RMV5.5 sigue verificándose contra el mismo símbolo).
+ */
+export const LINK_DWELL_MS = 30_000;

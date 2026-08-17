@@ -51,8 +51,10 @@ export interface StickAdapter {
    * Identificador del transporte, para logging/diagnóstico (R15) y selección en el provider.
    * `'simulator'` (delta multivendor, RMV4.1) se agrega de forma ADITIVA: es el adapter del
    * camino de demo (dev/demo-gated). No cambia ningún método de la interfaz.
+   * `'ble-gatt'` (delta ios-ble-mfi, RBM2.1) entra igual de aditivo: BLE GATT cross-platform, el
+   * camino iOS-abierto real del mercado. Tampoco cambia ningún método (RBM9.6).
    */
-  readonly kind: 'manual' | 'mock' | 'web-serial' | 'spp-android' | 'hid-wedge' | 'simulator';
+  readonly kind: 'manual' | 'mock' | 'web-serial' | 'spp-android' | 'ble-gatt' | 'hid-wedge' | 'simulator';
 
   /**
    * OPCIONAL — el `ReaderDriver` (fabricante) con el que ESTE adaptador está hablando (RBM1.3).

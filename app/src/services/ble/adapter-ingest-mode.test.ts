@@ -78,11 +78,16 @@ test('🟡-1: el mapa no declara kinds que no existen (no acumula filas muertas)
   }
 });
 
-test('🟡-1: los dos adaptadores de STREAM entregan LÍNEA CRUDA (verificado en device)', () => {
+test('🟡-1: los adaptadores de STREAM entregan LÍNEA CRUDA (los dos primeros, verificados en device)', () => {
   // spp-android: la trama del RS420 llega con STX + cabecera fija + timestamp → tiene que pasar por
   // `parseRs420Line`. Verificado leyendo una trama real del emulador en el A07 (banco §2).
   assert.equal(ingestModeFor('spp-android'), 'raw-line');
   assert.equal(ingestModeFor('web-serial'), 'raw-line');
+  // ble-gatt (delta ios-ble-mfi, RBM2.11): el lector notifica su TRAMA por la característica, partida en
+  // trozos de ≤ MTU−3 bytes. Si esta fila dijera 'eid', el `normalizeTag` le sacaría el STX y `isValidTag`
+  // rechazaría los 34 dígitos → CERO lecturas con la suite en verde. ⚠️ Todavía NO verificado en device:
+  // eso es el banco del ESP32 en `MODO_GATT` (RBM6.1, F6).
+  assert.equal(ingestModeFor('ble-gatt'), 'raw-line');
 });
 
 test('🟡-1: los adaptadores que ya entregan el EID limpio NO pasan por el parser del lector', () => {

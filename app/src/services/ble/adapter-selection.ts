@@ -19,7 +19,20 @@ import type { FrameParser, ReaderDriver } from './driver-types';
 
 // Delta multivendor (RMV2.7, RMV4.1): `'simulator'` se agrega de forma ADITIVA al union del core.
 // Es el adapter del camino de demo (dev/demo-gated, triple-guard) — no cambia ninguno de los otros.
-export type AdapterKind = 'manual' | 'mock' | 'web-serial' | 'spp-android' | 'hid-wedge' | 'simulator';
+//
+// Delta ios-ble-mfi (RBM2.11, T3.7): `'ble-gatt'` entra igual de aditivo — es el transporte BLE GATT
+// cross-platform (`adapter-ble-gatt.ts`, mismo código en iOS y Android). Agregarlo al union deja en
+// ROJO, por typecheck, las tres tablas que tienen que declararlo (`ADAPTER_INGEST_MODE`,
+// `ADAPTER_KINDS`, `permissionModelFor`) y el switch de `instantiateTransport`: eso es el mecanismo, no
+// un efecto colateral. `'mfi-ios'` es de F5 y NO entra acá.
+export type AdapterKind =
+  | 'manual'
+  | 'mock'
+  | 'web-serial'
+  | 'spp-android'
+  | 'ble-gatt'
+  | 'hid-wedge'
+  | 'simulator';
 
 // 'auto' = elige por plataforma (web-serial en web). 'mock' = adapter-mock (CI/dev toggle, R10.2).
 // 'manual' = SIN transporte buildable, solo el piso manual (native manual-first / captura del sub-estado
@@ -92,6 +105,12 @@ export const ADAPTER_INGEST_MODE = {
   simulator: 'eid',
   'web-serial': 'raw-line',
   'spp-android': 'raw-line',
+  // Delta ios-ble-mfi (RBM2.11): el lector entrega su TRAMA por la característica de notificaciones
+  // (el emulador en MODO_GATT reproduce la del RS420, con su STX), no un EID limpio → hay que
+  // desframear con el `frameParser` de su driver. Si esta fila dijera 'eid', cada trama iría por
+  // `processEid` → `normalizeTag` le saca el STX → 34 dígitos → `isValidTag` false → CERO lecturas,
+  // con la suite entera en verde (es literalmente el bug de clase que 🟡-1 vino a cerrar).
+  'ble-gatt': 'raw-line',
   // GATED (R8.7). Un keyboard-wedge tipea los dígitos del EID (y un Enter), no la trama del lector:
   // no hay STX ni cabecera que desframear. Si algún wedge tipeara la trama completa (el `hidraw on`
   // del emulador), ese lector necesita su propio adapter, no cambiar esta fila.
@@ -221,6 +240,7 @@ export const ADAPTER_KINDS = [
   'mock',
   'web-serial',
   'spp-android',
+  'ble-gatt',
   'hid-wedge',
   'simulator',
 ] as const satisfies readonly AdapterKind[];

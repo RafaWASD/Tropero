@@ -60,6 +60,11 @@ app/src/services/ble/
 └── tests (junto al módulo, patrón node:test)
     ├── ble-gatt-protocol.test.ts       # base64/latin-1 con STX, uuid case, delimitador inválido
     ├── adapter-ble-gatt.test.ts        # máquina de estados con BleEnv inyectado (RBM2, RBM3)
+    │                                   #   as-built F3 (fix-loop del review): DOS PERFILES DE DRIVER
+    │                                   #   (`DRIVER_PROFILES`) — UUID y fin de trama DISTINTOS, recorridos
+    │                                   #   de punta a punta. Es lo que hace falsificable "el parámetro sale
+    │                                   #   del driver" (RBM2.4/2.6/2.8): con un solo juego, un literal de
+    │                                   #   fabricante y el valor del driver son los mismos bytes.
     ├── ea-protocols.test.ts            # lista vacía → no disponible; cadena sintética → disponible (RBM4)
     ├── adapter-mfi-ios.test.ts         # con lista vacía NO carga el nativo (RBM4.2)
     └── frame-parser-resolve.test.ts    # (A) exhaustivo sobre ADAPTER_KINDS + fail-closed (RBM1.4)
@@ -86,7 +91,10 @@ app/src/services/ble/
 | `selection-priority.ts` | prioridad iOS; `adapterForTransport` +`ble-gatt`/+`mfi-ios`; `BindingEnv.declaredEaProtocols`; `available` de MFi. | RBM5.1–RBM5.5 |
 | `driver-registry.ts` | `DRIVER_REGISTRY = [RS420_DRIVER, ESP32_GATT_DRIVER]`. | RBM5.12 |
 | `driver-types.ts` | `TransportCapability` de kind `ble-gatt` gana `delimiter?` (el fin de trama es del **lector**, no del transporte — misma lección que 🟠-5 del SPP). | RBM2.8, RBM2.10 |
-| `logging.ts` | + `parser_unresolved` (RBM1.4), + `ble_scan_timeout`, + `mfi_unavailable{reason}`. | RBM1.4, RBM2.5, RBM4.2 |
+| `logging.ts` | + `parser_unresolved` (RBM1.4), + `ble_scan_timeout`, + `mfi_unavailable{reason}`. ✅ **as-built F3**: `ble_scan_timeout` lleva `{ms, seen}` — `seen` = cuántos devices aparecieron anunciando el servicio del driver, que es lo que separa "no hay nada a la vista" de "hay algo con ese servicio que NO es un bastón" (el bridge de la balanza). `mfi_unavailable` es de F5. | RBM1.4, RBM2.5, RBM4.2 |
+| `line-framer.ts` | **as-built F3 (no estaba en esta tabla)**: el delimitador estaba **hardcodeado** en `'\n'`, así que "framear con el delimitador del driver" (RBM2.8) exigía parametrizarlo. Entra por **constructor con default `'\n'`** → los dos call sites existentes no cambian (con test de regresión); multi-carácter consume el delimitador completo; un delimitador vacío cae al default en vez de colgar el bucle (`indexOf('')` = 0 para siempre) — quién RECHAZA ese driver es el adapter, antes de conectar. | RBM2.8 |
+| `connect-trigger.ts` | **as-built F3 (no estaba en esta tabla)**: `LINK_DWELL_MS` se **mudó** acá desde `adapter-spp-android.ts` (que lo re-exporta para no tocar sus call sites). Es una política de la **cadena de reintentos**, igual que `UNPROMPTED_RETRY_BUDGET_MS`, y con dos transportes con radio la alternativa era duplicar el número o importarlo de un adapter hermano. | RBM3.9 |
+| `adapter-ingest-mode.test.ts` | **as-built F3**: el bloque "los dos adaptadores de STREAM" pasó a tres — `ingestModeFor('ble-gatt') === 'raw-line'` va **asertado explícitamente** (el bucle exhaustivo solo exige que la fila EXISTA y sea válida, así que un `'eid'` ahí lo cazaba únicamente la suite del adapter). | RBM2.11 |
 | `remembered-device.ts` | el valor pasa de `deviceId: string` a `{ deviceId, vendorId?, adapterKind? }`, **leyendo el formato viejo sin romper** (RBM5.7). Los tres call sites del `forget` y los techos de `storage` quedan intactos. | RBM5.6, RBM5.7 |
 | `features/ble-stick/connection-view.ts` | ramas de vista para `ble-gatt` y `mfi` (incluido el estado "reconocido, falta el protocolo del fabricante"). | RBM5.14, RBM4.5 |
 | `features/ble-stick/screens/StickConnectionScreen.tsx` | `BUILT_ADAPTERS` += `'ble-gatt'`, `'mfi-ios'`; `TransportInstructions` gana las dos ramas; lista de resultados de escaneo BLE. | RBM5.14 |
@@ -216,6 +224,49 @@ El provider llama `processRawLine(line, parser)` solo si `parser != null`; si es
 11. => 'connected' ; writeRememberedDevice({deviceId, vendorId, adapterKind:'ble-gatt'})
 ```
 
+> ### ✅ as-built F3 (2026-08-17) — en qué se APARTA este flujo de lo que se construyó
+>
+> El informe completo está en `progress/impl_ios-ble-mfi-f3.md`. Cuatro diferencias que cambian el flujo de
+> arriba y una que hay que leer como límite:
+>
+> 1. **Falta un paso: LA RADIO.** Entre el permiso (3) y el device (4) el as-built **consulta**
+>    `manager.state()`, y **nunca llama `manager.enable()`** — decisión explícita: en iOS esa API no existe
+>    (la única salida es Ajustes), así que un camino que dependa de ella sería Android-only en un transporte
+>    que se declara cross-platform (RBM2.1); además está deprecada desde API 33 y falla en silencio; y no
+>    pedirla es la forma más simple de cumplir RBM3.8 sin depender de acertar el trigger. Tres desenlaces
+>    distintos, no uno: `Unauthorized` → `permission_denied` (en iOS ESE es el permiso denegado: CTA, sin
+>    backoff), `Unsupported` → `disconnected` **sin** reintento, `PoweredOff`/`Resetting`/ilegible →
+>    `disconnected` **con** reintento (puede cambiar solo). Con un gesto del operario, un estado **ilegible**
+>    (el puente no contestó) se trata como `PoweredOn` y se sigue: el error real del connect es mejor
+>    diagnóstico que un "prendé el Bluetooth" inventado sobre una radio que no pudimos leer. En `autoConnect`
+>    es al revés (ante la duda no se toca la radio: nadie pidió nada).
+> 2. **El techo del escaneo es DOBLE** (paso 4): adentro su presupuesto (`schedule(..., 'scan')`, el que
+>    produce el `ble_scan_timeout` con su diagnóstico) y afuera un `withTimeoutOr('scan_for_target')`, para
+>    que ni un timer que no llega ni un `startDeviceScan` que no se asienta puedan dejar el **latch** tomado.
+>    Y el escaneo **no se cierra con el primer resultado**: un device que el `deviceMatch` no reconoce se
+>    cuenta, se loguea (`ble_device_not_recognized`) y se sigue buscando.
+> 3. **Hay una GENERACIÓN DE SESIÓN además de la del intento**, por una trampa propia de esta lib:
+>    `subscription.remove()` de un monitor hace `cancelTransaction`, lo que **rechaza la promesa del
+>    monitor**, y la lib traduce ese rechazo en `listener(error, null)` → **nuestro propio teardown dispara
+>    el handler de error de lectura**. Sin mirar la sesión, un `disconnect()` del operario terminaría
+>    RECONECTANDO. `teardownStreams()` bumpea la sesión ANTES de remover suscripciones.
+> 4. **El framer vive en la clausura de la sesión** (paso 8), no en un campo del adapter: un buffer a medio
+>    llenar de un link caído no puede pegarse con la primera trama del siguiente (el arrastre del banco §4.4
+>    del SPP).
+> 5. **La superficie modelada de `BleManagerLike` NO declara `cancelDeviceConnection(id)`** (fix-loop del
+>    review 🟡-3). Estaba declarada y sin un solo call site de producción, que es la clase de pieza muerta que
+>    parece cableada. Y no se saca solo por prolijidad: cerrar el link **por id** —en vez de por el objeto
+>    `device` que abrió ESTE intento— es exactamente el bug que `canCloseOrphanLink` existe para evitar (un
+>    intento vencido le mata el link al que conectó después, y la app queda diciendo "conectado" sobre un link
+>    muerto: el síntoma de BENCH-1 producido por la limpieza). Con la firma fuera del modelo, un call site
+>    nuevo **no compila**: la ausencia es el guard, más fuerte que el contador que el doble llevaba y que
+>    ningún test asertaba.
+> 6. ⚠️ **Lo que F3 NO hace, dicho para que no se lea como hecho**: el transporte **no es alcanzable en
+>    producción**. `selectTransportAdapter` no devuelve `'ble-gatt'` y `adapterForTransport('ble-gatt')` sigue
+>    en `null` (las dos cosas son **F4**), y `isBleGattTransportAvailable()` exige además que algún driver del
+>    registro declare `ble-gatt` — que también entra en F4. El `case` del provider está escrito y probado,
+>    pero hoy nada lo elige.
+
 **Las decisiones que no son obvias, con su motivo:**
 
 - **`decodeBase64Ascii` y no `TextDecoder('utf-8')`.** `react-native-ble-plx` entrega el valor de la característica en **base64**. La trama del RS420 arranca con `STX` (`0x02`) y el emulador la reproduce byte por byte; decodificar como UTF-8 rompería cualquier byte ≥ `0x80` de un lector futuro y volvería el bug invisible (el `normalizeTag` del contrato limpia los control chars **después**, así que el síntoma sería "parse_failed intermitente"). Se decodifica **un byte = un carácter**.
@@ -241,6 +292,16 @@ El manifiesto **ya declara los cuatro** con los atributos correctos (`with-bluet
 > ✅ **as-built F2 — lo que este párrafo no preveía, medido contra el manifiesto MERGEADO del APK.** "No hace falta cambiar la política" quedó **confirmado**, pero la política tenía un agujero que no era visible desde acá: el **config plugin de `react-native-ble-plx`** agrega `ACCESS_COARSE_LOCATION` y una segunda copia de `ACCESS_FINE_LOCATION` en el array **`uses-permission-sdk-23`** — otro array que el `tools:node="replace"` de `with-bluetooth-classic.js` **no toca**. Con el **default** de la lib (`neverForLocation: false`) los dos entran **SIN tope de API**, o sea la app pasaría a pedir ubicación en Android 12+: exactamente lo que ese plugin existe para evitar. Se resolvió **en la config, no en la política**: `neverForLocation: true`. Verificado en el manifiesto mergeado del build de T2.8 (los dos capados a 30, `BLUETOOTH_SCAN` con `neverForLocation` y sin tope, ningún `uses-feature`) y falsificado en `with-bluetooth-classic.test.ts` (el mundo malo produce **dos** permisos de ubicación sin tope).
 >
 > **Nota de implementación para F3** (sale del mismo lugar): en API ≤ 30 el escaneo BLE además exige que el **servicio de ubicación del teléfono esté prendido**. No es un permiso de app, así que `permissions-android.ts` no lo puede resolver: es un estado que el adapter tiene que reflejar (y un escenario del banco de F6).
+>
+> ✅ **as-built F3 — NO se implementó, y el motivo importa**: `react-native-ble-plx` **no expone** el estado
+> del servicio de ubicación (su `state()` es el de la radio: `PoweredOn`/`PoweredOff`/`Unauthorized`/…), y
+> leerlo exigiría una dependencia nativa nueva —que es justo lo que este delta no va a agregar por un caso de
+> API ≤ 30—. Lo que el adapter **sí** hace es dejarlo **diagnosticable en vez de invisible**: con la ubicación
+> apagada el escaneo no devuelve nada y eso sale como `ble_scan_timeout {ms, seen:0}`, que es el mismo log que
+> "el bastón está apagado o fuera de rango" pero **distinto** de `seen:>0` ("hay algo con ese servicio que no
+> es un bastón"). O sea: se distingue de la otra causa, no del bastón apagado. Queda como **escenario del
+> banco de F6** en Android ≤ 30 y como **recomendación al leader** para `docs/backlog.md` (el archivo lo está
+> tocando la otra terminal, así que esta fase no lo edita).
 
 ## 5. T3 — `adapter-mfi-ios` y su gate
 

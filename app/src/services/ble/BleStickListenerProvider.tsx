@@ -46,6 +46,7 @@ import { MockAdapter } from './adapter-mock';
 import { WebSerialAdapter } from './adapter-web-serial';
 import { SimulatorAdapter } from './adapter-simulator';
 import { SppAndroidAdapter, isSppNativeAvailable } from './adapter-spp-android';
+import { BleGattAdapter, isBleGattTransportAvailable } from './adapter-ble-gatt';
 import { isDemoMode } from './demo-gate';
 import { classifyReadOutcome, playFeedback, primeFeedback } from './feedback';
 import { cachedBeepEnabled, readBeepEnabled } from './feedback-pref';
@@ -139,6 +140,15 @@ function instantiateTransport(kind: ReturnType<typeof selectTransportAdapter>): 
       // manual-first y el chip + el CTA de la pantalla se ocultan solos por `hasTransport`. Montar
       // el adapter igual sería volver a prometer una conexión imposible.
       return isSppNativeAvailable() ? new SppAndroidAdapter() : null;
+    case 'ble-gatt':
+      // BLE GATT cross-platform (delta ios-ble-mfi, RBM2.3). MISMO guard que el SPP y por el mismo
+      // motivo: `require('react-native-ble-plx')` resuelve desde `node_modules` aunque el binario no
+      // esté en el build, y ahí `new BleManager()` tira recién al construirse. `isBleGattTransportAvailable()`
+      // chequea además que ALGÚN driver del registro declare el transporte `ble-gatt`: sin `serviceUuid`
+      // no hay filtro de escaneo posible, así que montarlo sería un transporte que no puede ni buscar.
+      // Los dos motivos se loguean por separado (un try/catch mudo acá convierte "el build no trae BLE"
+      // en "el operario no está bastoneando").
+      return isBleGattTransportAvailable() ? new BleGattAdapter() : null;
     case 'manual':
       // Piso manual sin transporte extra (iOS, y el flag de E2E que reproduce ese sub-estado).
       return null;

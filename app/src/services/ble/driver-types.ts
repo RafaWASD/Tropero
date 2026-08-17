@@ -27,7 +27,7 @@ export interface FrameParser {
  * `params` de conexión propios:
  *   - spp      → { sppUuid, pin?, delimiter? }  (RFCOMM del RS420, PIN de pairing, fin de trama)
  *   - serial   → { baud }                       (Web Serial exige un baud; el SPP virtual lo ignora)
- *   - ble-gatt → { serviceUuid, notifyCharUuid } (futuro; sin adapter concreto todavía)
+ *   - ble-gatt → { serviceUuid, notifyCharUuid, delimiter? } (`adapter-ble-gatt`, delta ios-ble-mfi)
  *   - ble-hid  → sin params                     (teclado del SO, keyboard-wedge)
  *   - mfi      → { protocolString }             (arch-ready para iOS Classic vía Facundo, RMV6.1)
  *
@@ -38,11 +38,17 @@ export interface FrameParser {
  * el `StringBuffer` del nativo acumula sin cota, así que al corregir el terminador la PRIMERA trama
  * válida también se pierde, arrastrada por las anteriores (banco §4.4). Ahora el terminador sale del
  * driver; ausente = `\n` (el supuesto del RS420, documentado en `driver-rs420.ts`, no del transporte).
+ *
+ * `ble-gatt` gana el MISMO campo en el delta `ios-ble-mfi` (RBM2.8/RBM2.10, T3.3), y ahí pesa más
+ * todavía: en GATT **no hay framing nativo** (las notificaciones son trozos de ≤ MTU−3 bytes), así que
+ * el delimitador no es una preferencia sino la única forma de saber dónde termina una trama. Un
+ * delimitador vacío NO abre la conexión (`resolveBleGattParams` → `delimitador-no-soportado`), en vez
+ * de dejar al framer bufferando para siempre.
  */
 export type TransportCapability =
   | { kind: 'spp'; params: { sppUuid: string; pin?: string; delimiter?: string } }
   | { kind: 'serial'; params: { baud: number } }
-  | { kind: 'ble-gatt'; params: { serviceUuid: string; notifyCharUuid: string } }
+  | { kind: 'ble-gatt'; params: { serviceUuid: string; notifyCharUuid: string; delimiter?: string } }
   | { kind: 'ble-hid'; params: Record<string, never> }
   | { kind: 'mfi'; params: { protocolString: string } };
 

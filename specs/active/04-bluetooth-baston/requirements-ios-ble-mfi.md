@@ -74,15 +74,66 @@ Este delta hace **siete cosas** (T1…T7 del contexto §4 y §7):
 
 **RBM2.3** Si el módulo nativo de BLE no está presente en el build, entonces el sistema **no deberá** montar el adaptador (el provider deberá devolver `null`) y deberá quedar manual-first, con el chip y el CTA ocultos por `hasTransport` (mismo guard que `isSppNativeAvailable`).
 
+> **Reconciliación al as-built (F3, 2026-08-17)** — el requisito se cumple, y el guard resultó **más
+> exigente** de lo que dice: `isBleGattTransportAvailable()` pide **dos** condiciones y las loguea por
+> separado —(a) el módulo nativo está en el build, (b) **algún driver del registro declara el transporte
+> `ble-gatt`**—. El motivo de (b): sin un `serviceUuid` no hay filtro de escaneo posible (RBM2.4 lo exige),
+> así que montar el adapter sería un transporte que no puede ni buscar — un CTA que promete y no cumple, el
+> mismo bug que cerró el fix del chip. Consecuencia honesta: al cerrar F3 la condición (b) es **false en
+> producción**, porque el único driver `ble-gatt` (el del emulador) lo registra **F4**.
+
 **RBM2.4** Cuando el operario inicia el descubrimiento, el sistema deberá escanear **filtrado por el `serviceUuid`** declarado en el `TransportCapability` de kind `ble-gatt` del driver, y **no deberá** escanear sin filtro de servicio.
+
+> **Reconciliación al as-built (F3, fix-loop del review) — cubre RBM2.4, RBM2.6 y RBM2.8.** El código cumplía
+> los tres desde la primera pasada, pero la mitad *"**del driver**"* de los tres **no estaba falsificada**, y
+> eso hacía que el requisito pudiera dejar de cumplirse sin que nada se pusiera rojo: los fixtures de la suite
+> declaraban **un solo juego de parámetros** (los UUID Nordic UART y ningún fin de trama propio), así que un
+> literal de fabricante hardcodeado adentro del transporte y el valor del driver eran **los mismos bytes**.
+> Medido: tres mutantes que re-hardcodean el filtro del escaneo, el par servicio+característica del monitor y
+> el delimitador del framer sobrevivían con **136/136 en verde** — o sea, la deuda **RMV5.2 que este delta vino
+> a cerrar** era reintroducible sin costo. As-built: la suite ejercita **DOS perfiles de driver** de punta a
+> punta (escaneo → device reconocido → monitor → reensamblado → EID), el segundo con **otros** UUID (servicio
+> en la forma corta de 16 bits, que además ejercita la expansión de `normalizeUuid128`) y fin de trama `'\r'`,
+> con un test de **anti-vacuidad** que exige que los dos juegos difieran en los tres campos. Los tres mutantes
+> ahora **caen** nombrando ese test. (Sin esto, F4 —que registra el `ESP32_GATT_DRIVER` con esos mismos UUID
+> NUS— habría vuelto el agujero invisible hasta el primer lector de tercero.)
 
 **RBM2.5** Mientras un escaneo esté en curso, el sistema deberá acotarlo con un presupuesto de tiempo y detenerlo al vencer o al conectar, y **no deberá** dejar el escaneo corriendo indefinidamente.
 
+> **Reconciliación al as-built (F3)** — cumplido, con dos precisiones que el requisito no fijaba: (a) el
+> techo es **DOBLE** (el presupuesto del escaneo por dentro, un `withTimeoutOr` por fuera), porque "acotarlo"
+> con un solo timer deja el latch tomado si el timer no llega o si `startDeviceScan` no se asienta — el 🔴-1
+> del SPP entrando por la puerta del descubrimiento; (b) `startDeviceScan` **puede RECHAZAR** y en ese caso
+> su listener no se llama nunca: el rechazo se atiende y se loguea con **su** motivo, y el test exige que en
+> ese caso NO se loguee `ble_scan_timeout` (decir "timeout" cuando el escaneo ni arrancó es un diagnóstico
+> falso). El evento lleva además `seen` (cuántos devices aparecieron anunciando el servicio), que es lo que
+> separa "no hay nada" de "hay algo con ese servicio que no es un bastón".
+
 **RBM2.6** Cuando el operario elige un dispositivo, el sistema deberá conectar, descubrir servicios y características, y suscribirse a las **notificaciones** de la característica `notifyCharUuid` del driver.
+
+> **Reconciliación al as-built (F3, fix-loop)**: la mitad *"del driver"* está falsificada por los dos perfiles
+> de driver (nota bajo RBM2.4). El test que decía cubrirlo (`el servicio y la característica del MONITOR salen
+> del driver, normalizados`) medía en realidad la **normalización** y el `deepEqual` exhaustivo de las opciones
+> del connect (RBM2.12), no el ORIGEN — y su título se corrigió para no reclamar lo que no podía probar.
 
 **RBM2.7** Cuando llega una notificación, el sistema deberá decodificar su valor **base64 → bytes → texto de un byte por carácter (ASCII/latin-1)**, conservando los bytes de control de la trama (el `STX` `0x02` del RS420), y **no deberá** decodificarlo como UTF-8.
 
 **RBM2.8** Cuando una trama llega **partida** en varias notificaciones, el sistema deberá reensamblarla con `LineFramer` (reuso, R5.3) usando el delimitador del driver y deberá entregar cada línea completa al contrato como línea cruda.
+
+> **Reconciliación al as-built (F3)** — "reusar `LineFramer` con el delimitador del driver" exigió un cambio
+> que ni el requisito ni el design nombraban: **el delimitador estaba HARDCODEADO** en `'\n'` dentro de
+> `line-framer.ts` (en el SPP no se notaba porque ahí el framing lo hace el nativo con el terminador del
+> driver). Ahora entra por **constructor con default `'\n'`**, así que los dos call sites existentes no
+> cambian de comportamiento (con test de regresión). Dos detalles con consecuencia: multi-carácter (`\r\n`)
+> consume el delimitador **completo** (sin eso el `\n` sobrante arrancaba la línea siguiente), y un
+> delimitador **vacío** en el framer cae al default en vez de colgarse (`indexOf('')` devuelve 0 SIEMPRE →
+> bucle infinito de líneas vacías) — quién **rechaza** ese driver es el adapter antes de conectar (RBM2.10),
+> el framer solo garantiza no colgar.
+>
+> **Fix-loop del review**: que el adapter le pase al framer el delimitador **del driver** (y no el default)
+> recién quedó falsificado con el segundo perfil de driver — ver la nota bajo RBM2.4. Hasta entonces
+> `new LineFramer()` sobrevivía la suite entera, porque el único delimitador que llegaba al adapter era `'\n'`,
+> que es exactamente el default.
 
 **RBM2.9** Cuando llegan **dos tramas pegadas** en una misma notificación, el sistema deberá entregarlas como dos lecturas separadas.
 
@@ -102,7 +153,23 @@ Este delta hace **siete cosas** (T1…T7 del contexto §4 y §7):
 >
 > **Lo que este requisito NO cubre, dicho**: en API ≤ 30 el escaneo BLE exige además que el **servicio de ubicación esté prendido**, que no es un permiso de app y no se resuelve en `permissions-android.ts` — es estado del adapter (F3) y escenario del banco (F6).
 
+> **Reconciliación al as-built (F3) — lo que quedó declarado y NO implementado.** El párrafo de arriba
+> anticipaba que el estado del **servicio de ubicación** (que el escaneo BLE exige en API ≤ 30) era "estado
+> que el adapter tiene que reflejar (F3)". **No se implementó, y no por olvido**: `react-native-ble-plx` no lo
+> expone (su `state()` es el de la radio) y leerlo pediría una dependencia nativa nueva, justo lo que este
+> delta no va a agregar por un caso de API ≤ 30. Lo que el adapter sí hace es no dejarlo invisible: el
+> síntoma sale como `ble_scan_timeout {seen:0}`, distinguible de `seen:>0` ("hay algo que no es un bastón")
+> aunque **no** de "el bastón está apagado". Queda como escenario del banco de **F6** en Android ≤ 30 y como
+> recomendación de backlog para el leader.
+
 **RBM2.14** Si el permiso de BLE es denegado, entonces el sistema deberá reflejar el estado `permission_denied` con CTA, deberá mantener la carga manual operativa y **no deberá** disparar backoff (R12.5, R7.2).
+
+> **Reconciliación al as-built (F3)** — cumplido, y el estado `permission_denied` cubre **dos** caminos que
+> el requisito escribía como uno: el permiso denegado de Android (`PermissionsAndroid`) y —en iOS— el estado
+> `Unauthorized` de la radio, que **es** la forma en que llega la negación del diálogo de Bluetooth (en iOS no
+> hay API para volver a pedirlo: se arregla en Ajustes). Los dos terminan igual: CTA, **sin backoff**, carga
+> manual intacta. Y se agregó lo que el requisito no contemplaba: un permiso `unavailable` (puente roto / sin
+> RN) **no** se lee como concedido — corta con `disconnected` + log, fail-closed.
 
 **RBM2.15** El sistema **no deberá** habilitar BLE en background: no deberá declarar `UIBackgroundModes: bluetooth-central` en iOS ni configurar el plugin de `react-native-ble-plx` con background habilitado (R6.9 — foreground-only en MVP).
 
@@ -131,9 +198,45 @@ Este delta hace **siete cosas** (T1…T7 del contexto §4 y §7):
 
 **RBM3.1** Mientras una cadena de reintentos haya arrancado **sin un gesto del operario**, el sistema deberá acotarla con el tope de tiempo `UNPROMPTED_RETRY_BUDGET_MS` y con la política por `ConnectTrigger` de `connect-trigger.ts` (tabla exhaustiva, `retry` hereda), sin duplicar esa lógica.
 
+> **Reconciliación al as-built (F3)** — el tope está implementado **dos veces a propósito** (en la cabecera de
+> `scheduleReconnect` y adentro del timer) y las dos veces **antes** del gate de foreground: una cadena con el
+> presupuesto vencido tiene que MORIR, no quedarse esperando el retorno a primer plano para seguir
+> martillando. La segunda copia no es redundante y lo probó un **mutante que sobrevivió** a las 133 pruebas
+> (borrar la de la cabecera): el caso que solo ella cubre es programar un reintento con la cadena **ya
+> vencida** y la app en **background**, donde sin ella el tope se vuelve evitable guardando el teléfono en el
+> bolsillo. Hay test nuevo por eso (detalle en `progress/impl_ios-ble-mfi-f3.md` §5, mutante MB3.1).
+>
+> **Precisión del fix-loop del review (⚪-4)**: de las dos copias, al cerrar la primera pasada solo la de la
+> **cabecera** estaba falsificada — borrar la del **timer** dejaba 136/136 en verde, porque el desenlace
+> observado (`off` + `autoconnect_exhausted`) se alcanzaba igual por la cabecera **después de un intento más**.
+> O sea: no eran dos oráculos, era un oráculo y un cinturón. Ahora el cinturón tiene el suyo: el test del tope
+> exige además que con el presupuesto ya vencido el timer **no sume un intento** (en device, ese intento de más
+> son ~10 s de radio martillando por apertura de la app). Los dos mutantes caen.
+>
+> **Y el DESTOPE por gesto tiene su oráculo (🟡-2 del review)**: `runConnect` re-aplica la política del trigger
+> cuando llega un `connect()` con un intento **en vuelo** (no solo cuando la cadena ya murió). Eso también se
+> podía borrar en verde; el caso real es *"abro la app, el bastón tarda, toco «Volver a conectar» a los 90 s"*
+> → sin esa línea el tap no destopa nada y la cadena muere igual a los 120 s, con el gesto del operario sin
+> ningún efecto observable. El test nuevo es diferencial (el mismo escenario **sin** el tap tiene que morir en
+> `off`), así que no puede pasar por vacuidad.
+
 **RBM3.2** El sistema deberá dar presupuesto (`withTimeout` / `withTimeoutOr` de `bridge-timeout.ts`) a **todo** `await` del adaptador BLE que cruce el puente nativo, y deberá liberar el latch de conexión en el `finally` **y** en `disconnect()`, usando una **generación de intento** para que un intento viejo que despierta no pise al vigente.
 
 **RBM3.3** El sistema deberá extender el guard estático de presupuestos (`spp-bridge-timeout-guard.test.ts`, mitad "bordes declarados") al adaptador nuevo, de modo que un `await` del puente sin techo **nazca en rojo**.
+
+> **Reconciliación al as-built (F3, 2026-08-17)** — el requisito se cumple pero **NO donde el task decía**, y
+> la diferencia es la que separa un guard de un adorno. `tasks` pedía agregar el adapter a
+> `BOUNDED_AT_THE_BOUNDARY` de `spp-bridge-timeout-guard.test.ts`: esa mitad del guard mira **solo** awaits de
+> primitivas nativas (`SecureStore|PermissionsAndroid|AsyncStorage|NativeModules`), y el adapter BLE **no
+> awaitea ninguna** (habla por `manager.` / `device.` / `this.env.`) → habría sido una entrada **VACUA**: cero
+> awaits mirados, verde garantizado, requisito "cumplido" sin vigilar nada. As-built: la mitad que sí modela
+> el puente de un adapter dejó de mirar UN archivo y recorre una tabla `RADIO_ADAPTERS` con los prefijos de
+> puente de cada uno, la tabla **se deriva del árbol** (todo `adapter-*.ts` con un `require('react-native…')`
+> perezoso tiene que estar declarado, así que `adapter-mfi-ios.ts` de F5 **nace en rojo**), y hay un test de
+> **no-ceguera** (cuando todo está envuelto la lista de violaciones es vacía por construcción, así que
+> renombrar la variable de la lib dejaría el guard verde mirando nada). Falsificado con 3 mutantes: el await
+> sin techo cae **nombrando archivo y línea** (`adapter-ble-gatt.ts:1127`) mientras las 75 pruebas del adapter
+> quedan en VERDE — que es exactamente por qué el guard hace falta.
 
 **RBM3.4** Cuando el SO informa una desconexión, el sistema deberá atender **únicamente** el evento de su propio dispositivo (suscripción por device de `react-native-ble-plx`), y **no deberá** reaccionar a un listener global que cualquier dispositivo pueda disparar (🔴-2 del SPP).
 
@@ -145,11 +248,28 @@ Este delta hace **siete cosas** (T1…T7 del contexto §4 y §7):
 
 **RBM3.8** El sistema **no deberá** mostrar un diálogo del SO (permiso, "¿activar Bluetooth?") desde un camino automático: un arranque o un reintento deberá **consultar** el estado del permiso en vez de pedirlo.
 
+> **Reconciliación al as-built (F3, fix-loop del review 🟡-3)** — cumplido, y ahora también **por resultado** y
+> no solo por contadores de llamadas. En la primera pasada el doble hacía que `checkPermissions()` y
+> `ensurePermissions()` devolvieran **lo mismo** en toda la suite, así que ningún test distinguía los dos
+> caminos por su desenlace: medido, borrar el **gate de permiso del `autoConnect`** dejaba todo en verde. El
+> test nuevo ejercita la secuencia real —`check → denied` (nunca se pidió) y después `ensure → granted` (el
+> gesto muestra el diálogo y el operario concede)— y exige que el arranque **no conecte, no toque la radio y no
+> emita estado**, y que el gesto sí conecte.
+
 **RBM3.9** El sistema deberá resetear el contador de backoff solo si el link **duró** `LINK_DWELL_MS`, de modo que un flap no deje el reintento martillando en `attempt:0` (🟡-3).
 
 **RBM3.10** Mientras el link esté conectado y no llegue un byte durante el presupuesto de silencio, el sistema deberá dejarlo escrito en el log (`connected_silent`) sin desconectar, para distinguir "conectado y mudo" de "socket muerto" y de "el operario no bastonea" (🟠-5).
 
 **RBM3.11** El sistema deberá ejercitar la máquina de estados completa del adaptador BLE en `node:test` con el entorno **inyectado** (patrón `SppEnv`), incluidas las promesas que **no resuelven nunca**, el reloj y la desconexión de otro dispositivo.
+
+> **Reconciliación al as-built (F3, fix-loop del review 🟡-3)** — "el reloj" estaba **inyectado pero no
+> ejercitado**: el knob existía y ningún test lo pasaba, así que toda la suite corría desde `t=0`, donde
+> `now() - lastDataAt` y `now()` dan el mismo número (idem `now() - connectedAt`). Consecuencia medida: los
+> mutantes que borran la **resta** —o sea, la medición del intervalo del `connected_silent` (RBM3.10) y del
+> dwell (RBM3.9)— sobrevivían la suite entera. As-built: los tests que miden un intervalo arrancan el reloj en
+> un instante REAL (`CLOCK_START`) y los dos mutantes caen. La misma corrección se aplicó a los presupuestos
+> del doble (eran los cuatro iguales, así que **cuál** presupuesto acota **cuál** await tampoco se podía
+> observar): ahora son distintos y los tests asertan el `ms` del `bridge_timeout`.
 
 ## RBM4. `adapter-mfi-ios` — prearmado y gateado por la lista de protocolos (T3)
 
@@ -214,6 +334,15 @@ Este delta hace **siete cosas** (T1…T7 del contexto §4 y §7):
 **RBM5.13** El sistema deberá reconocer al driver del emulador **por su nombre anunciado** y **no deberá** reconocerlo por el UUID del servicio Nordic UART.
 
 > **Por qué importa y no es una preferencia de estilo**: el bridge de la balanza Vesta (ADR-003) anuncia **los mismos UUIDs NUS**. Un `deviceMatch` por UUID de servicio haría que la app reconozca **el bridge de la balanza como un bastón**. Con el match por nombre, el bridge aparece como "no reconocido" y no es accionable (RMV1.7 / RMV3.8), que es la conducta correcta.
+
+> **Reconciliación al as-built (F3)** — la **mitad del transporte** de este requisito ya está construida y
+> falsificada, aunque el driver del emulador sea F4: el escaneo del adapter solo acepta devices que el
+> `deviceMatch` de su driver reconoce, delegando en `findDriverForDevice`, y le pasa los UUID que el device
+> **anunció de verdad** — nunca el `serviceUuid` con el que filtramos, que convertiría cualquier resultado del
+> escaneo en un match por UUID y dejaría el chequeo por nombre decorativo. El mutante que hace exactamente eso
+> **muere** en `adapter-ble-gatt.test.ts` (y para que muriera hubo que arreglar el test: con un driver que
+> matchea solo por nombre, el mutante pasaba en verde). Se prueban además los **dos** nombres que el SO expone
+> (`name` del GAP y `localName` del anuncio), porque el emulador se identifica por el del anuncio.
 
 **RBM5.14** El sistema deberá presentar en la pantalla de conexión el flujo específico de los transportes nuevos (BLE: escanear → listar → elegir → conectar; MFi: instrucción del Accessory Picker de iOS + el estado "falta el protocolo del fabricante"), derivándolo del `ReaderBinding` como ya hace el resto (RMV3.2).
 

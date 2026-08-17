@@ -78,6 +78,7 @@ import {
 import {
   policyFor,
   UNPROMPTED_RETRY_BUDGET_MS,
+  LINK_DWELL_MS,
   type ConnectTrigger,
 } from './connect-trigger';
 import {
@@ -147,16 +148,13 @@ export interface SppEnv {
 }
 
 /**
- * Cuánto tiene que DURAR un link para que cuente como sano y resetee el backoff (🟡-3 del review,
- * confirmado en el banco §4.3: `flap 4 3000` daba `attempt:0` las cuatro veces).
- *
- * Antes el contador se reseteaba apenas resolvía `connectToDevice`, así que un link que se cae a los
- * 200 ms producía connect → drop → 500 ms → connect indefinido: el chip parpadeando y la radio
- * martillando sin que el backoff creciera nunca. Ahora el reset exige que la conexión haya vivido
- * este tiempo. 30 s: más que cualquier ciclo de flap patológico, mucho menos que una jornada normal
- * (un corte único a mitad de la mañana sigue reconectando desde el piso de 500 ms).
+ * El dwell del backoff (🟡-3) se MUDÓ a `connect-trigger.ts` en el delta ios-ble-mfi (F3): es una
+ * política de la cadena de reintentos —igual que `UNPROMPTED_RETRY_BUDGET_MS`— y ahora la comparten
+ * DOS transportes con radio (`spp-android` y `ble-gatt`). Se re-exporta desde acá para no tocar los
+ * call sites existentes (`adapter-spp-android.test.ts` la importa de este módulo) y para que quede
+ * escrito dónde vivía.
  */
-export const LINK_DWELL_MS = 30_000;
+export { LINK_DWELL_MS };
 
 /**
  * Resuelve los params del transporte SPP del driver (RMV5.2). PURO y exportado → testeable sin

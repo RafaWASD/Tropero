@@ -16,12 +16,20 @@
 // NUEVA nace en rojo.
 //
 // ── EL MODELO ─────────────────────────────────────────────────────────────────────────────────────
-//  · SEMILLA   — todo `await <expr>` de `adapter-spp-android.ts` cuya expresión arranque en el puente:
-//                `native.` (la lib nativa), `device.` (el socket) o `env.` / `this.env.` (la I/O
-//                inyectada: permisos, storage, foreground). Son exactamente las cuatro superficies
-//                que no controlamos.
+//  · SEMILLA   — todo `await <expr>` de un ADAPTER CON RADIO cuya expresión arranque en el puente:
+//                la lib nativa (`native.` en el SPP, `manager.` en el BLE), `device.` (el socket/link)
+//                o `env.` / `this.env.` (la I/O inyectada: permisos, storage, foreground). Son
+//                exactamente las superficies que no controlamos.
 //  · CUBIERTO  — la expresión pasa por `withTimeout(` o `withTimeoutOr(`.
 //  · VIOLACIÓN — cualquier otra.
+//
+// ── POR QUÉ LA TABLA Y NO UN ARCHIVO (delta ios-ble-mfi, T3.11/RBM3.3) ───────────────────────────
+// Este guard nació mirando UN archivo, y con el segundo transporte con radio (`adapter-ble-gatt.ts`)
+// eso lo volvía inútil justo donde más hace falta: el adapter nuevo tiene el MISMO borde (latch,
+// generación de intento, awaits que cruzan el puente) y ninguno de sus 🔴 fue un accidente de una
+// librería. La lista NO se escribe a mano: se DERIVA del árbol (`adapter-*.ts` que hace un `require`
+// perezoso de un módulo nativo) y se exige que cada uno esté declarado con sus prefijos de puente, así
+// que `adapter-mfi-ios.ts` (F5) va a NACER EN ROJO hasta que alguien lo declare — que es el punto.
 //
 // ── LO QUE ESTE GUARD NO PUEDE VER (límite declarado) ────────────────────────────────────────────
 //  (a) Un await indirecto: `const p = native.connectToDevice(x); await p;`. La firma se evade
@@ -45,13 +53,38 @@ import { dirname, resolve } from 'node:path';
 import { stripSourceComments } from '../../utils/strip-comments.ts';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const ADAPTER = resolve(HERE, 'adapter-spp-android.ts');
 
-/** Prefijos de expresión que SON el puente (lo que no controlamos). */
-const BRIDGE_EXPR = /^(native|device|env|this\.env)\s*\./;
+/**
+ * Los adaptadores CON RADIO y, por cada uno, los identificadores por los que llama al puente. El
+ * nombre de la variable de la lib es distinto en cada uno (`native` vs `manager`) porque cada lib
+ * expone otra cosa; lo que NO cambia es el invariante.
+ *
+ * `minUses` es una cota deliberadamente FLOJA: lo que importa no es el número exacto, es que el
+ * mecanismo esté en uso REAL y no importado de adorno.
+ */
+const RADIO_ADAPTERS: Array<{ file: string; prefixes: string[]; minUses: number; why: string }> = [
+  {
+    file: 'adapter-spp-android.ts',
+    prefixes: ['native', 'device', 'env', 'this.env'],
+    minUses: 8,
+    why: 'Bluetooth Classic (RS420): 2 min 40 s de bastón muerto medidos en el A07 por UN await sin techo',
+  },
+  {
+    file: 'adapter-ble-gatt.ts',
+    prefixes: ['manager', 'device', 'env', 'this.env'],
+    minUses: 8,
+    why: 'BLE GATT cross-platform: mismo latch, misma generación de intento, mismos bordes (RBM3.2/RBM3.3)',
+  },
+];
 
-function adapterSource(): string {
-  return stripSourceComments(readFileSync(ADAPTER, 'utf8'));
+/** Prefijos de expresión que SON el puente, para un adapter dado (lo que no controlamos). */
+function bridgeExpr(prefixes: string[]): RegExp {
+  const alt = prefixes.map((p) => p.replace(/\./g, '\\.')).join('|');
+  return new RegExp(`^(${alt})\\s*\\.`);
+}
+
+function sourceOf(file: string): string {
+  return stripSourceComments(readFileSync(resolve(HERE, file), 'utf8'));
 }
 
 /**
@@ -74,47 +107,84 @@ function awaitedExpressions(src: string): Array<{ line: number; expr: string }> 
   return out;
 }
 
-test('🔴-1: TODO await que cruza el puente nativo está envuelto en withTimeout/withTimeoutOr', () => {
-  const src = adapterSource();
-  const violations = awaitedExpressions(src)
-    .filter((a) => BRIDGE_EXPR.test(a.expr))
-    .map((a) => `  adapter-spp-android.ts:${a.line} → await ${a.expr}`);
+for (const { file, prefixes, minUses, why } of RADIO_ADAPTERS) {
+  test(`🔴-1 [${file}]: TODO await que cruza el puente nativo está envuelto en withTimeout/withTimeoutOr`, () => {
+    const src = sourceOf(file);
+    const expr = bridgeExpr(prefixes);
+    const violations = awaitedExpressions(src)
+      .filter((a) => expr.test(a.expr))
+      .map((a) => `  ${file}:${a.line} → await ${a.expr}`);
 
+    assert.deepEqual(
+      violations,
+      [],
+      `hay awaits del puente SIN presupuesto en ${file} (${why}); un solo await que no resuelva mata el bastón hasta reiniciar la app:\n${violations.join('\n')}`,
+    );
+  });
+
+  test(`🔴-1 [${file}]: el adapter importa el mecanismo y lo usa DE VERDAD`, () => {
+    const src = sourceOf(file);
+    assert.match(src, /from '\.\/bridge-timeout'/);
+    const uses = src.match(/withTimeout(Or)?\s*\(/g)?.length ?? 0;
+    assert.ok(uses >= minUses, `${file}: se esperaban ≥${minUses} usos de withTimeout*, hay ${uses}`);
+  });
+
+  test(`🔴-1 [${file}]: el escáner NO está ciego (los prefijos declarados existen en el archivo)`, () => {
+    // La contraprueba de vacuidad del guard de arriba, y no es teórica: cuando TODO está envuelto, la
+    // lista de violaciones es vacía POR CONSTRUCCIÓN — o sea que un renombre de la variable de la lib
+    // (`manager` → `mgr`) dejaría el guard verde MIRANDO NADA. Si un prefijo declarado ya no aparece en
+    // el fuente, este test cae y obliga a actualizar la tabla (que es una decisión visible en el diff).
+    const src = sourceOf(file);
+    for (const p of prefixes) {
+      assert.ok(
+        src.includes(`${p}.`),
+        `${file}: el prefijo de puente '${p}.' ya no aparece en el fuente — el guard quedó ciego, actualizá RADIO_ADAPTERS`,
+      );
+    }
+  });
+
+  test(`🔴-1 [${file}]: la promesa del puente que se guarda en una variable (\`pending\`) se envuelve`, () => {
+    // Cierra el límite (a) para el caso que existe en los dos adapters: el `connectToDevice` se guarda
+    // para poder cerrarle el socket si resuelve DESPUÉS del vencimiento. Si alguien la awaiteara
+    // directo, el guard de arriba no lo vería.
+    const src = sourceOf(file);
+    assert.match(src, /const pending = (native|manager)\.connectToDevice\(/);
+    assert.match(src, /withTimeout\(\s*pending,/);
+    assert.equal(/\bawait\s+pending\b/.test(src), false, `${file}: la promesa guardada NO se puede awaitear directo`);
+  });
+
+  test(`🔴-1 [${file}]: el latch de conexión se libera SIEMPRE (finally) y también en disconnect()`, () => {
+    const src = sourceOf(file);
+    // El latch es `inFlightGen`: se toma en `runConnect` y se libera en su `finally`…
+    assert.match(src, /finally\s*\{\s*if \(this\.inFlightGen === gen\) this\.inFlightGen = null;/);
+    // …y `disconnect()` lo suelta además por su cuenta, invalidando la generación en curso para que
+    // el intento viejo no pueda pisar al nuevo.
+    const disconnectBody = /async disconnect\(\): Promise<void> \{([\s\S]*?)\n  \}/.exec(src)?.[1] ?? '';
+    assert.match(disconnectBody, /this\.connectGeneration \+= 1;/);
+    assert.match(disconnectBody, /this\.inFlightGen = null;/);
+  });
+}
+
+test('🔴-1: la tabla de adaptadores con radio se DERIVA del árbol (uno nuevo nace en rojo)', () => {
+  // El bug de clase de este archivo fue mirar UNA carpeta. La lista no puede depender de que alguien se
+  // acuerde de agregar el adapter nuevo: se enumeran los `adapter-*.ts` que hacen un `require` perezoso
+  // de un módulo nativo —que es exactamente la definición de "tiene puente"— y se exige que estén
+  // declarados. `adapter-mfi-ios.ts` (F5) va a caer acá el día que se escriba, y eso es lo correcto:
+  // hereda los mismos 🔴 (ADR-024 / RBM3).
+  const declared = new Set(RADIO_ADAPTERS.map((a) => a.file));
+  const withNativeBridge = readdirSync(HERE)
+    .filter((f) => /^adapter-.*\.ts$/.test(f) && !/\.test\.ts$/.test(f))
+    .filter((f) => /require\('react-native/.test(stripSourceComments(readFileSync(resolve(HERE, f), 'utf8'))));
+  assert.ok(withNativeBridge.length >= 2, `el extractor no ve nada (encontró ${withNativeBridge.length}): está ciego`);
+  const missing = withNativeBridge.filter((f) => !declared.has(f));
   assert.deepEqual(
-    violations,
+    missing,
     [],
-    `hay awaits del puente SIN presupuesto (un solo await que no resuelva mata el bastón hasta reiniciar la app):\n${violations.join('\n')}`,
+    `estos adaptadores cruzan el puente nativo y NO están declarados en RADIO_ADAPTERS (sus awaits sin techo no los vigila nadie): ${missing.join(', ')}`,
   );
-});
-
-test('🔴-1: el adapter importa el mecanismo (no puede haber quedado "cubierto" por accidente)', () => {
-  const src = adapterSource();
-  assert.match(src, /from '\.\/bridge-timeout'/);
-  // Cota inferior deliberadamente floja: lo que importa no es el número exacto, es que el mecanismo
-  // esté en uso REAL y no una importación decorativa. Al 2026-07-30 hay 12 usos.
-  const uses = src.match(/withTimeout(Or)?\s*\(/g)?.length ?? 0;
-  assert.ok(uses >= 8, `se esperaban ≥8 usos de withTimeout*, hay ${uses}`);
-});
-
-test('🔴-1: la ÚNICA promesa del puente que se guarda en una variable (`pending`) se envuelve', () => {
-  // Cierra el límite (a) para el caso que existe hoy: `connectToDevice` se guarda para poder
-  // cerrarle el socket si resuelve DESPUÉS del vencimiento. Si alguien la awaiteara directo, el
-  // guard de arriba no lo vería.
-  const src = adapterSource();
-  assert.match(src, /const pending = native\.connectToDevice\(/);
-  assert.match(src, /withTimeout\(\s*pending,/);
-  assert.equal(/\bawait\s+pending\b/.test(src), false, 'la promesa guardada NO se puede awaitear directo');
-});
-
-test('🔴-1: el latch de conexión se libera SIEMPRE (finally) y también en disconnect()', () => {
-  const src = adapterSource();
-  // El latch es `inFlightGen`: se toma en `runConnect` y se libera en su `finally`…
-  assert.match(src, /finally\s*\{\s*if \(this\.inFlightGen === gen\) this\.inFlightGen = null;/);
-  // …y `disconnect()` lo suelta además por su cuenta, invalidando la generación en curso para que
-  // el intento viejo no pueda pisar al nuevo.
-  const disconnectBody = /async disconnect\(\): Promise<void> \{([\s\S]*?)\n  \}/.exec(src)?.[1] ?? '';
-  assert.match(disconnectBody, /this\.connectGeneration \+= 1;/);
-  assert.match(disconnectBody, /this\.inFlightGen = null;/);
+  for (const f of declared) {
+    assert.ok(existsSync(resolve(HERE, f)), `'${f}' está declarado pero ya no existe: sacalo de la tabla`);
+  }
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
