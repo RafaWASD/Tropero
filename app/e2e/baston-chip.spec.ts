@@ -12,9 +12,9 @@
 // Android" → cuando la Fase 4 construya el adapter SPP, el chip vuelve solo.
 //
 // CÓMO SE REPRODUCE EN WEB (sin device): el provider de la raíz acepta `mode='manual'` bajo la marca
-// SECUNDARIA `__RAFAQ_BLE_E2E_MANUAL__` (app/_layout.tsx → isBleE2EManual). Ese modo existe justo para
+// SECUNDARIA `__MITROPERO_BLE_E2E_MANUAL__` (app/_layout.tsx → isBleE2EManual). Ese modo existe justo para
 // esto: `instantiateTransport('manual')` devuelve null, o sea EXACTAMENTE el estado del Android de hoy.
-// Con solo `__RAFAQ_BLE_E2E__` el provider monta el MockAdapter → transporte presente (paridad con web
+// Con solo `__MITROPERO_BLE_E2E__` el provider monta el MockAdapter → transporte presente (paridad con web
 // real, donde el web-serial siempre existe).
 //
 // ORÁCULOS (los dos lados, para que el test no pueda pasar por la razón equivocada):
@@ -39,7 +39,7 @@ test.afterAll(async () => {
 /** Arranca la app con el MockAdapter montado (transporte PRESENTE, como el web-serial de web real). */
 async function gotoWithTransport(page: Page): Promise<void> {
   await page.addInitScript(() => {
-    (window as unknown as Record<string, unknown>).__RAFAQ_BLE_E2E__ = true;
+    (window as unknown as Record<string, unknown>).__MITROPERO_BLE_E2E__ = true;
   });
   await page.goto('/');
 }
@@ -47,8 +47,8 @@ async function gotoWithTransport(page: Page): Promise<void> {
 /** Arranca la app en modo 'manual': provider SIN transporte (el estado del Android de hoy). */
 async function gotoWithoutTransport(page: Page): Promise<void> {
   await page.addInitScript(() => {
-    (window as unknown as Record<string, unknown>).__RAFAQ_BLE_E2E__ = true;
-    (window as unknown as Record<string, unknown>).__RAFAQ_BLE_E2E_MANUAL__ = true;
+    (window as unknown as Record<string, unknown>).__MITROPERO_BLE_E2E__ = true;
+    (window as unknown as Record<string, unknown>).__MITROPERO_BLE_E2E_MANUAL__ = true;
   });
   await page.goto('/');
 }
@@ -101,8 +101,8 @@ test('(b) RB8.1/RB8.3: CON transporte, el chip está y refleja el estado (off �
 
   // Conectar el mock → el chip refleja el cambio de estado (RB8.2): el chip informa de verdad.
   await page.evaluate(() => {
-    const h = (window as unknown as { __rafaqBle?: { connectMock: () => void } }).__rafaqBle;
-    if (!h) throw new Error('window.__rafaqBle no está disponible (¿se montó el BleE2EBridge?)');
+    const h = (window as unknown as { __mitroperoBle?: { connectMock: () => void } }).__mitroperoBle;
+    if (!h) throw new Error('window.__mitroperoBle no está disponible (¿se montó el BleE2EBridge?)');
     h.connectMock();
   });
   await expect(page.getByText('Bastón conectado', { exact: true })).toBeVisible({ timeout: 10_000 });

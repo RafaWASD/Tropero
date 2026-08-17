@@ -21,7 +21,7 @@
 //     focusable) → el oráculo no distingue nada;
 //   · si lo abre ENTER, tampoco: el `handleKeyDown` de RNW hace `blurOnSubmit` por default en single-line.
 // El único disparador que NO toca el foco por su cuenta es el que NO viene del usuario: un **BASTONAZO**.
-// El `FindOrCreateOverlay` es global y lo abre una lectura BLE inyectada por `window.__rafaqBle.tagRead()`.
+// El `FindOrCreateOverlay` es global y lo abre una lectura BLE inyectada por `window.__mitroperoBle.tagRead()`.
 // Sin el fix, el buscador de Animales sigue ENFOCADO con el overlay encima (que es exactamente el bug, en su
 // versión más filosa: el overlay se abre solo, sobre cualquier pantalla). Con el fix, se desenfoca.
 // **Falsificado**: sacando la llamada al hook, el test 1 cae; con la llamada, pasa.
@@ -64,7 +64,7 @@ function makeEid(): string {
 /** Arranca la app con la marca de E2E del bastón ANTES del bundle → mode='mock' + handle en window. */
 async function gotoWithBle(page: Page): Promise<void> {
   await page.addInitScript(() => {
-    (window as unknown as Record<string, unknown>).__RAFAQ_BLE_E2E__ = true;
+    (window as unknown as Record<string, unknown>).__MITROPERO_BLE_E2E__ = true;
   });
   await page.goto('/');
 }
@@ -72,9 +72,9 @@ async function gotoWithBle(page: Page): Promise<void> {
 /** Conecta el mock e inyecta un bastonazo (NO es un gesto del usuario: no toca el foco por su cuenta). */
 async function bastonazo(page: Page, eid: string): Promise<void> {
   await page.evaluate((e) => {
-    const h = (window as unknown as { __rafaqBle?: { connectMock: () => void; tagRead: (x: string) => void } })
-      .__rafaqBle;
-    if (!h) throw new Error('window.__rafaqBle no está disponible (¿se montó el BleE2EBridge bajo el flag?)');
+    const h = (window as unknown as { __mitroperoBle?: { connectMock: () => void; tagRead: (x: string) => void } })
+      .__mitroperoBle;
+    if (!h) throw new Error('window.__mitroperoBle no está disponible (¿se montó el BleE2EBridge bajo el flag?)');
     h.connectMock();
     h.tagRead(e);
   }, eid);

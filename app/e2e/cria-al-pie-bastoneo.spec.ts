@@ -10,7 +10,7 @@
 // EXCLUSIVA del bastón → la lectura entra al sheet y el FindOrCreateOverlay global NO se abre encima.
 //
 // Inyección sin hardware: mismo mecanismo que alta-bastoneo.spec.ts — el provider monta el MockAdapter bajo la
-// marca __RAFAQ_BLE_E2E__; window.__rafaqBle.connectMock/tagRead lo publica el BleE2EBridge.
+// marca __MITROPERO_BLE_E2E__; window.__mitroperoBle.connectMock/tagRead lo publica el BleE2EBridge.
 //
 // Oráculos:
 //   - "scan-para-llenar" → tras confirmar el scan, el campo "Caravana del ternero" queda con el EID leído y el
@@ -52,7 +52,7 @@ function eidReadable(eid: string): string {
 
 async function gotoWithBle(page: Page): Promise<void> {
   await page.addInitScript(() => {
-    (window as unknown as Record<string, unknown>).__RAFAQ_BLE_E2E__ = true;
+    (window as unknown as Record<string, unknown>).__MITROPERO_BLE_E2E__ = true;
   });
   await page.goto('/');
 }
@@ -60,8 +60,8 @@ async function gotoWithBle(page: Page): Promise<void> {
 /** Conecta el mock + inyecta un bastonazo del EID dado. */
 async function bastonazo(page: Page, eid: string): Promise<void> {
   await page.evaluate((e: string) => {
-    const h = (window as unknown as { __rafaqBle?: { connectMock: () => void; tagRead: (x: string) => void } }).__rafaqBle;
-    if (!h) throw new Error('window.__rafaqBle no está disponible (¿se montó el BleE2EBridge bajo el flag?)');
+    const h = (window as unknown as { __mitroperoBle?: { connectMock: () => void; tagRead: (x: string) => void } }).__mitroperoBle;
+    if (!h) throw new Error('window.__mitroperoBle no está disponible (¿se montó el BleE2EBridge bajo el flag?)');
     h.connectMock();
     h.tagRead(e);
   }, eid);

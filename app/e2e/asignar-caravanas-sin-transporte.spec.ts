@@ -14,9 +14,9 @@
 // indicador de estado que sin transporte no informa nada; esto es una funcionalidad REAL que existe y
 // funciona con el bastón — ocultarla la volvería indescubrible. Ver `utils/bulk-assign-empty.ts`.
 //
-// CÓMO SE REPRODUCE EN WEB (sin device): marca secundaria `__RAFAQ_BLE_E2E_MANUAL__` → el provider monta
+// CÓMO SE REPRODUCE EN WEB (sin device): marca secundaria `__MITROPERO_BLE_E2E_MANUAL__` → el provider monta
 // `mode='manual'` → `instantiateTransport('manual')` devuelve null, EXACTAMENTE el estado del Android de
-// hoy. Con solo `__RAFAQ_BLE_E2E__` monta el MockAdapter → transporte presente (paridad con web real).
+// hoy. Con solo `__MITROPERO_BLE_E2E__` monta el MockAdapter → transporte presente (paridad con web real).
 //
 // ── 🔴-3 (barrido de edge cases del Bluetooth, 2026-08-06): LA DIMENSIÓN QUE FALTABA ─────────────────
 // El corte original miraba SOLO `hasTransport`. Con el adapter SPP de la Fase 4 eso es `true` en TODO
@@ -83,8 +83,8 @@ test('(a) RD5.2: SIN transporte, el vacío de la masiva dice la verdad (y la fil
   await seedEstablishmentWithRodeo(user.id, 'Campo BulkNT');
 
   await page.addInitScript(() => {
-    (window as unknown as Record<string, unknown>).__RAFAQ_BLE_E2E__ = true;
-    (window as unknown as Record<string, unknown>).__RAFAQ_BLE_E2E_MANUAL__ = true;
+    (window as unknown as Record<string, unknown>).__MITROPERO_BLE_E2E__ = true;
+    (window as unknown as Record<string, unknown>).__MITROPERO_BLE_E2E_MANUAL__ = true;
   });
   await page.goto('/');
   await signIn(page, user);
@@ -106,7 +106,7 @@ test('(a) RD5.2: SIN transporte, el vacío de la masiva dice la verdad (y la fil
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────────────
 // (b) 🔴-3 · CON TRANSPORTE PERO DESCONECTADO → el pozo mudo pasa a decir la verdad y traer una salida.
-//     Reproducción en web sin device: con `__RAFAQ_BLE_E2E__` el provider monta el MockAdapter, que
+//     Reproducción en web sin device: con `__MITROPERO_BLE_E2E__` el provider monta el MockAdapter, que
 //     arranca DESCONECTADO — exactamente el Android con el bastón apagado (hay transporte, no hay link).
 // ─────────────────────────────────────────────────────────────────────────────────────────────────────
 test('(b) 🔴-3: con transporte pero DESCONECTADO, el vacío lo dice y el CTA lleva a /baston', async ({
@@ -117,7 +117,7 @@ test('(b) 🔴-3: con transporte pero DESCONECTADO, el vacío lo dice y el CTA l
   await seedEstablishmentWithRodeo(user.id, 'Campo BulkDC');
 
   await page.addInitScript(() => {
-    (window as unknown as Record<string, unknown>).__RAFAQ_BLE_E2E__ = true;
+    (window as unknown as Record<string, unknown>).__MITROPERO_BLE_E2E__ = true;
   });
   await page.goto('/');
   await signIn(page, user);
@@ -154,7 +154,7 @@ test('(c) RD5.2: con el bastón CONECTADO, el vacío sigue siendo "Bastoneá par
   await seedEstablishmentWithRodeo(user.id, 'Campo BulkCT');
 
   await page.addInitScript(() => {
-    (window as unknown as Record<string, unknown>).__RAFAQ_BLE_E2E__ = true;
+    (window as unknown as Record<string, unknown>).__MITROPERO_BLE_E2E__ = true;
   });
   await page.goto('/');
   await signIn(page, user);
@@ -163,8 +163,8 @@ test('(c) RD5.2: con el bastón CONECTADO, el vacío sigue siendo "Bastoneá par
   // El bastón conectado ES la precondición de este estado (antes del 🔴-3 el test no lo pedía y estaba
   // asertando "Bastoneá para empezar" sobre un mock desconectado — o sea, sobre el propio bug).
   await page.evaluate(() => {
-    const h = (window as unknown as { __rafaqBle?: { connectMock: () => void } }).__rafaqBle;
-    if (!h) throw new Error('window.__rafaqBle no está disponible (¿se montó el BleE2EBridge bajo el flag?)');
+    const h = (window as unknown as { __mitroperoBle?: { connectMock: () => void } }).__mitroperoBle;
+    if (!h) throw new Error('window.__mitroperoBle no está disponible (¿se montó el BleE2EBridge bajo el flag?)');
     h.connectMock();
   });
 

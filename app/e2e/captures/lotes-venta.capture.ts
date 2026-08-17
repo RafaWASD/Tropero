@@ -12,7 +12,7 @@
 //   05 — post-venta: el lote con MENOS cabezas (el vendido salió).
 //   06 — SugerenciaVaciasSheet en modo "crear lote nuevo" con el default "Descarte".
 //
-// Setup BLE mock (flag __RAFAQ_BLE_E2E__, fuera de prod) para el flujo de tacto (01/06). Viewport mobile
+// Setup BLE mock (flag __MITROPERO_BLE_E2E__, fuera de prod) para el flujo de tacto (01/06). Viewport mobile
 // 412×915 (contexto propio, mismo patrón que vacunas-checklist.capture.ts). NO corras esto en `pnpm e2e`
 // (es un `.capture.ts`); lo dispara el leader:
 //   pnpm exec playwright test e2e/captures/lotes-venta.capture.ts --config playwright.capture.config.ts
@@ -53,21 +53,21 @@ async function shot(page: Page, name: string): Promise<void> {
 
 async function markBle(page: Page): Promise<void> {
   await page.addInitScript(() => {
-    (window as unknown as Record<string, unknown>).__RAFAQ_BLE_E2E__ = true;
+    (window as unknown as Record<string, unknown>).__MITROPERO_BLE_E2E__ = true;
   });
 }
 
 async function connectMock(page: Page): Promise<void> {
   await page.evaluate(() => {
-    const h = (window as unknown as { __rafaqBle?: { connectMock: () => void } }).__rafaqBle;
+    const h = (window as unknown as { __mitroperoBle?: { connectMock: () => void } }).__mitroperoBle;
     h?.connectMock();
   });
 }
 
 async function bastonazo(page: Page, eid: string): Promise<void> {
   await page.evaluate((e) => {
-    const h = (window as unknown as { __rafaqBle?: { connectMock: () => void; tagRead: (x: string) => void } }).__rafaqBle;
-    if (!h) throw new Error('window.__rafaqBle no disponible (¿BleE2EBridge bajo el flag?)');
+    const h = (window as unknown as { __mitroperoBle?: { connectMock: () => void; tagRead: (x: string) => void } }).__mitroperoBle;
+    if (!h) throw new Error('window.__mitroperoBle no disponible (¿BleE2EBridge bajo el flag?)');
     h.connectMock();
     h.tagRead(e);
   }, eid);

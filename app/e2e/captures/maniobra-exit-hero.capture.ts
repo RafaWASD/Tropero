@@ -9,8 +9,8 @@
 // Las capturas se guardan en tests/modo-maniobra/ con nombres claros (identify-<estado>-<width>.png).
 //
 // El sub-estado "manual promovido" (transport==null) NO es reproducible con el adapter-mock (siempre tiene
-// transporte) → se fuerza con el flag SECUNDARIO de E2E `__RAFAQ_BLE_E2E_MANUAL__` (doble-gateado por
-// `__RAFAQ_BLE_E2E__`, sin superficie de prod) → el provider monta SIN transporte (mode='manual').
+// transporte) → se fuerza con el flag SECUNDARIO de E2E `__MITROPERO_BLE_E2E_MANUAL__` (doble-gateado por
+// `__MITROPERO_BLE_E2E__`, sin superficie de prod) → el provider monta SIN transporte (mode='manual').
 
 import path from 'node:path';
 
@@ -30,8 +30,8 @@ async function markBle(page: Page, manual = false): Promise<void> {
   await page.addInitScript(
     (isManual) => {
       const w = window as unknown as Record<string, unknown>;
-      w.__RAFAQ_BLE_E2E__ = true;
-      if (isManual) w.__RAFAQ_BLE_E2E_MANUAL__ = true;
+      w.__MITROPERO_BLE_E2E__ = true;
+      if (isManual) w.__MITROPERO_BLE_E2E_MANUAL__ = true;
     },
     manual,
   );
@@ -40,7 +40,7 @@ async function markBle(page: Page, manual = false): Promise<void> {
 /** Conecta / inyecta el mock (solo cuando hay transporte mock — no en modo manual). */
 async function connectMock(page: Page): Promise<void> {
   await page.evaluate(() => {
-    const h = (window as unknown as { __rafaqBle?: { connectMock: () => void } }).__rafaqBle;
+    const h = (window as unknown as { __mitroperoBle?: { connectMock: () => void } }).__mitroperoBle;
     h?.connectMock();
   });
 }

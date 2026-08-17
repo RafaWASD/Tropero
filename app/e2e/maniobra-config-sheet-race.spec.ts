@@ -283,7 +283,7 @@ test('el sheet de confirmación de "Nueva jornada" (M4) NO se auto-cierra al abr
   await applyEnvShim(page);
   // Bastón mock (igual que los specs de identify): la jornada se arranca y aterriza en la identificación.
   await page.addInitScript(() => {
-    (window as unknown as Record<string, unknown>).__RAFAQ_BLE_E2E__ = true;
+    (window as unknown as Record<string, unknown>).__MITROPERO_BLE_E2E__ = true;
   });
 
   try {

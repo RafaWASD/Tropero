@@ -4,8 +4,8 @@
 // debe perderse en silencio: el landing muestra un BANNER terracota "N maniobras no se sincronizaron" → tap
 // → un SHEET que lista cada rechazo (tipo + motivo + cuándo) + "Entendido" que las marca como vistas.
 //
-// Cómo se inyecta el rechazo: un hook SOLO-E2E (`window.__RAFAQ_SYNC_REJECT_E2E__`, gated fuera de prod,
-// mismo patrón que `__RAFAQ_MANEUVER_FAULT__` / `__RAFAQ_BLE_E2E__`) que el landing consume al enfocar y
+// Cómo se inyecta el rechazo: un hook SOLO-E2E (`window.__MITROPERO_SYNC_REJECT_E2E__`, gated fuera de prod,
+// mismo patrón que `__MITROPERO_MANEUVER_FAULT__` / `__MITROPERO_BLE_E2E__`) que el landing consume al enfocar y
 // registra en el store de rechazos (vía recordUploadRejection) — sin forzar un rechazo server-side real
 // (frágil/lento). En prod/dev la marca no existe → el banner nunca aparece sin un rechazo real.
 //
@@ -27,7 +27,7 @@ async function armSyncReject(
   payload: { id: string; table: string; op: string; code: string } | true,
 ): Promise<void> {
   await page.addInitScript((p) => {
-    (window as unknown as Record<string, unknown>).__RAFAQ_SYNC_REJECT_E2E__ = p;
+    (window as unknown as Record<string, unknown>).__MITROPERO_SYNC_REJECT_E2E__ = p;
   }, payload);
 }
 

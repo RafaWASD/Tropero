@@ -57,15 +57,15 @@ escribe a un ambiente real vive en Run F, gateado.
   `process.env.EXPO_PUBLIC_*`, incluida `EXPO_PUBLIC_ENV`) + `composeReader`. Cubre: R3.1, R3.2.
 
 - [x] **A5** — `app/src/utils/app-env.ts` (nuevo, puro): `getAppEnv(): 'development'|'preview'|
-  'production'|'e2e'` (default `development`) + `isE2E()` (flag `window.__RAFAQ_E2E__` **o**
+  'production'|'e2e'` (default `development`) + `isE2E()` (flag `window.__MITROPERO_E2E__` **o**
   `EXPO_PUBLIC_ENV==='e2e'`) + export de `APP_E2E_GLOBAL_KEY`. Patrón de `ble-e2e-flag.ts`.
   Cubre: R3.4, R3.6, R3.7.
   **Verif** (`app-env.test.ts`, nuevo, registrar en `run-tests.mjs`): (a) sin marca ni env → `isE2E()`
   false y `getAppEnv()` `development`; (b) `EXPO_PUBLIC_ENV='e2e'` → `isE2E()` true; (c)
-  `globalThis.__RAFAQ_E2E__=true` → `isE2E()` true; (d) valor fuera de dominio → default `development`.
+  `globalThis.__MITROPERO_E2E__=true` → `isE2E()` true; (d) valor fuera de dominio → default `development`.
 
 - [x] **A6** — Extender `app/e2e/helpers/fixtures.ts` (fixture `page` **y** `applyEnvShim`): en el
-  `addInitScript` setear además `process.env.EXPO_PUBLIC_ENV='e2e'` y `window.__RAFAQ_E2E__=true`. **No
+  `addInitScript` setear además `process.env.EXPO_PUBLIC_ENV='e2e'` y `window.__MITROPERO_E2E__=true`. **No
   tocar** los ~70 specs. Cubre: R3.5.
 
 - [x] **A7** — Registrar `app-env.test.ts` (y el resto de units nuevas) en `scripts/run-tests.mjs`.

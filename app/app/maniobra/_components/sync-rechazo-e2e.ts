@@ -7,7 +7,7 @@
 // inyectamos un rechazo determinístico en el store, sin tocar la DB ni el connector.
 //
 // FUERA de la superficie de producción (mismo patrón gated que `maneuver-e2e-fault.ts` / `ble-e2e-flag.ts`,
-// vetado por Gate 2): la inyección SOLO ocurre si Playwright marcó `window.__RAFAQ_SYNC_REJECT_E2E__` ANTES
+// vetado por Gate 2): la inyección SOLO ocurre si Playwright marcó `window.__MITROPERO_SYNC_REJECT_E2E__` ANTES
 // de cargar el bundle (vía `addInitScript`). En un build normal — dev o prod — la marca NO existe (ningún
 // input de usuario ni ruta de UI la puede setear) → `consumeSyncRejectE2E()` es SIEMPRE null → cero efecto.
 // El consumidor (el landing de maniobra) chequea la marca UNA vez al enfocar y, si está armada, registra un
@@ -15,7 +15,7 @@
 //
 // PURO de RN (solo lee/escribe globalThis): seguro de importar desde el landing.
 
-const REJECT_GLOBAL_KEY = '__RAFAQ_SYNC_REJECT_E2E__';
+const REJECT_GLOBAL_KEY = '__MITROPERO_SYNC_REJECT_E2E__';
 
 /** Forma de la marca E2E: la op rechazada (table/op/id) + el errcode. Default razonable si viene `true`. */
 export type SyncRejectE2EPayload = {

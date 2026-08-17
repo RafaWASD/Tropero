@@ -43,15 +43,15 @@ function makeEid(): string {
 /** Arranca la app con la marca de E2E del bastón (mock) seteada antes del bundle. */
 async function gotoWithBle(page: Page): Promise<void> {
   await page.addInitScript(() => {
-    (window as unknown as Record<string, unknown>).__RAFAQ_BLE_E2E__ = true;
+    (window as unknown as Record<string, unknown>).__MITROPERO_BLE_E2E__ = true;
   });
   await page.goto('/');
 }
 
 async function bastonazo(page: Page, eid: string): Promise<void> {
   await page.evaluate((e) => {
-    const h = (window as unknown as { __rafaqBle?: { connectMock: () => void; tagRead: (x: string) => void } }).__rafaqBle;
-    if (!h) throw new Error('window.__rafaqBle no disponible (¿BleE2EBridge bajo el flag?)');
+    const h = (window as unknown as { __mitroperoBle?: { connectMock: () => void; tagRead: (x: string) => void } }).__mitroperoBle;
+    if (!h) throw new Error('window.__mitroperoBle no disponible (¿BleE2EBridge bajo el flag?)');
     h.connectMock();
     h.tagRead(e);
   }, eid);
@@ -107,7 +107,7 @@ async function startSessionTacto(page: Page, setMeasureSize?: boolean): Promise<
   await page.getByRole('button', { name: 'Arrancar jornada', exact: true }).click();
   // Hero adaptativo (M2.1): con el mock conectable arranca ConnectHero → conectamos → ScanHero.
   await page.evaluate(() => {
-    const h = (window as unknown as { __rafaqBle?: { connectMock: () => void } }).__rafaqBle;
+    const h = (window as unknown as { __mitroperoBle?: { connectMock: () => void } }).__mitroperoBle;
     h?.connectMock();
   });
   await expect(page.getByText('Acercá el bastón al animal', { exact: true })).toBeVisible({ timeout: 20_000 });

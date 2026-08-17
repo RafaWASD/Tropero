@@ -8,7 +8,7 @@
 //       el animal (el progreso sigue en "0 hoy").
 //
 // Setup: rodeo "Cría hembras" (0018 habilita tacto_vaquillona + pesaje por default) + hembra vaquillona con
-// EID → identificación por bastonazo del MockAdapter (flag __RAFAQ_BLE_E2E__, fuera de prod). Secuencia
+// EID → identificación por bastonazo del MockAdapter (flag __MITROPERO_BLE_E2E__, fuera de prod). Secuencia
 // tacto_vaquillona + pesaje → 2 pasos. La secuencia de skip por-paso pica el 1er paso y verifica que el
 // frame avanza al 2do del mismo animal.
 
@@ -36,22 +36,22 @@ function makeEid(): string {
 
 async function gotoWithBle(page: Page): Promise<void> {
   await page.addInitScript(() => {
-    (window as unknown as Record<string, unknown>).__RAFAQ_BLE_E2E__ = true;
+    (window as unknown as Record<string, unknown>).__MITROPERO_BLE_E2E__ = true;
   });
   await page.goto('/');
 }
 
 async function connectMock(page: Page): Promise<void> {
   await page.evaluate(() => {
-    const h = (window as unknown as { __rafaqBle?: { connectMock: () => void } }).__rafaqBle;
+    const h = (window as unknown as { __mitroperoBle?: { connectMock: () => void } }).__mitroperoBle;
     h?.connectMock();
   });
 }
 
 async function bastonazo(page: Page, eid: string): Promise<void> {
   await page.evaluate((e) => {
-    const h = (window as unknown as { __rafaqBle?: { connectMock: () => void; tagRead: (x: string) => void } }).__rafaqBle;
-    if (!h) throw new Error('window.__rafaqBle no disponible (¿BleE2EBridge bajo el flag?)');
+    const h = (window as unknown as { __mitroperoBle?: { connectMock: () => void; tagRead: (x: string) => void } }).__mitroperoBle;
+    if (!h) throw new Error('window.__mitroperoBle no disponible (¿BleE2EBridge bajo el flag?)');
     h.connectMock();
     h.tagRead(e);
   }, eid);

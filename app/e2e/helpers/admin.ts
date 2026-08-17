@@ -6,8 +6,12 @@
 //   - tracking de ids creados + cleanup robusto (borra establishments con CASCADE y users).
 //
 // DB COMPARTIDA: el remoto se usa también para el testing manual de Raf. Por eso:
-//   - Emails namespaced bajo @rafaq-e2e.test con un RUN_TAG único por corrida (no colisiona
-//     con los @rafaq-test.local de las suites RLS ni con datos reales).
+//   - Emails namespaced bajo @mitropero-e2e.test con un RUN_TAG único por corrida (no colisiona
+//     con los @rafaq-test.local de las suites de `supabase/tests/**` ni con datos reales).
+//     ⚠️ Ese `@rafaq-test.local` NO es un descuido del rebrand: es el dominio que HOY usan las 20
+//     suites backend (`supabase/tests/*/run.cjs`) y `scripts/seed-facundina.mjs`, que viven fuera de
+//     `app/` y se renombran en su propia pasada. Mientras diverjan, los dos namespaces siguen sin
+//     chocar (que es lo único que este comentario afirma).
 //   - Todo lo creado se trackea y se borra (global-teardown.ts hace el barrido final).
 //   - Nunca tocamos ni leemos datos que no hayamos creado nosotros.
 //
@@ -30,7 +34,7 @@ const { supabaseUrl, anonKey, serviceRoleKey } = getE2EEnv();
 
 // Namespace + marca de corrida única (no choca entre corridas paralelas ni con el
 // testing manual / las suites RLS).
-export const E2E_NAMESPACE = 'rafaq-e2e.test';
+export const E2E_NAMESPACE = 'mitropero-e2e.test';
 export const RUN_TAG = `e2e_${Date.now()}_${randomUUID().slice(0, 8)}`;
 export const TEST_PASSWORD = 'E2ePassword!Aa1';
 
@@ -1680,7 +1684,7 @@ export function trackEstablishment(id: string): void {
  * errores pero no tira, para no dejar usuarios colgados si falla el borrado de un establishment.
  *
  * Además barre por namespace: cualquier establishment cuyo nombre arranque con el RUN_TAG
- * (por si un test creó uno por UI y no lo trackeó) y cualquier usuario @rafaq-e2e.test de ESTA
+ * (por si un test creó uno por UI y no lo trackeó) y cualquier usuario @mitropero-e2e.test de ESTA
  * corrida. NO toca datos de otras corridas ni del testing manual.
  */
 export async function cleanupAll(): Promise<void> {

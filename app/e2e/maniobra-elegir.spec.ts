@@ -45,15 +45,15 @@ function makeEid(): string {
 
 async function gotoWithBle(page: Page): Promise<void> {
   await page.addInitScript(() => {
-    (window as unknown as Record<string, unknown>).__RAFAQ_BLE_E2E__ = true;
+    (window as unknown as Record<string, unknown>).__MITROPERO_BLE_E2E__ = true;
   });
   await page.goto('/');
 }
 
 async function bastonazo(page: Page, eid: string): Promise<void> {
   await page.evaluate((e) => {
-    const h = (window as unknown as { __rafaqBle?: { connectMock: () => void; tagRead: (x: string) => void } }).__rafaqBle;
-    if (!h) throw new Error('window.__rafaqBle no disponible (¿BleE2EBridge bajo el flag?)');
+    const h = (window as unknown as { __mitroperoBle?: { connectMock: () => void; tagRead: (x: string) => void } }).__mitroperoBle;
+    if (!h) throw new Error('window.__mitroperoBle no disponible (¿BleE2EBridge bajo el flag?)');
     h.connectMock();
     h.tagRead(e);
   }, eid);
@@ -82,7 +82,7 @@ async function startSessionTresElegir(page: Page): Promise<void> {
   // Hero adaptativo (M2.1): con el mock conectable, el estado inicial es ConnectHero. Conectamos el mock →
   // pasa a ScanHero ("Acercá el bastón"), el camino conectado que este flujo asume.
   await page.evaluate(() => {
-    const h = (window as unknown as { __rafaqBle?: { connectMock: () => void } }).__rafaqBle;
+    const h = (window as unknown as { __mitroperoBle?: { connectMock: () => void } }).__mitroperoBle;
     h?.connectMock();
   });
   await expect(page.getByText('Acercá el bastón al animal', { exact: true })).toBeVisible({ timeout: 20_000 });
@@ -104,7 +104,7 @@ async function startSessionDientes(page: Page): Promise<void> {
   // Hero adaptativo (M2.1): con el mock conectable, el estado inicial es ConnectHero. Conectamos el mock →
   // pasa a ScanHero ("Acercá el bastón"), el camino conectado que este flujo asume.
   await page.evaluate(() => {
-    const h = (window as unknown as { __rafaqBle?: { connectMock: () => void } }).__rafaqBle;
+    const h = (window as unknown as { __mitroperoBle?: { connectMock: () => void } }).__mitroperoBle;
     h?.connectMock();
   });
   await expect(page.getByText('Acercá el bastón al animal', { exact: true })).toBeVisible({ timeout: 20_000 });

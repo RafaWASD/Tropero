@@ -28,14 +28,14 @@ async function newMobilePage(browser: Browser): Promise<Page> {
   const page = await ctx.newPage();
   await applyEnvShim(page);
   await page.addInitScript(() => {
-    (window as unknown as Record<string, unknown>).__RAFAQ_BLE_E2E__ = true;
+    (window as unknown as Record<string, unknown>).__MITROPERO_BLE_E2E__ = true;
   });
   return page;
 }
 
 async function connectMock(page: Page): Promise<void> {
   await page.evaluate(() => {
-    const h = (window as unknown as { __rafaqBle?: { connectMock: () => void } }).__rafaqBle;
+    const h = (window as unknown as { __mitroperoBle?: { connectMock: () => void } }).__mitroperoBle;
     h?.connectMock();
   });
 }

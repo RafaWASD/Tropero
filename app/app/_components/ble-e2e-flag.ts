@@ -5,17 +5,17 @@
 //
 // Por qué un flag explícito (no NODE_ENV): el bundle web puede correr en modo dev (Metro) igual que el
 // de E2E. El discriminador es una marca DELIBERADA que solo Playwright pone ANTES de cargar la app (vía
-// `addInitScript` → setea `window.__RAFAQ_BLE_E2E__ = true` antes del bundle). Sin esa marca, `isBleE2E()`
+// `addInitScript` → setea `window.__MITROPERO_BLE_E2E__ = true` antes del bundle). Sin esa marca, `isBleE2E()`
 // es false. La marca NO se puede setear desde la UI ni desde un input de usuario → no hay camino para que
 // un usuario real la active. Gate 2 revisa esta superficie. Vive en _components/ (host-level), NO en
 // services/ble/ (que es firma de spec 04, no se toca).
 //
 // PURO de RN (solo lee globalThis): seguro de importar desde el provider de la raíz y desde el bridge.
 
-const E2E_GLOBAL_KEY = '__RAFAQ_BLE_E2E__';
+const E2E_GLOBAL_KEY = '__MITROPERO_BLE_E2E__';
 
 /**
- * ¿Estamos en una corrida E2E del bastón? true SOLO si Playwright marcó `window.__RAFAQ_BLE_E2E__` antes
+ * ¿Estamos en una corrida E2E del bastón? true SOLO si Playwright marcó `window.__MITROPERO_BLE_E2E__` antes
  * de cargar el bundle. En producción/dev normal: false (sin marca → transporte real, sin handle).
  */
 export function isBleE2E(): boolean {
@@ -35,7 +35,7 @@ export function isBleE2E(): boolean {
 // SOLO se honra si TAMBIÉN está `isBleE2E()` (doble gate): en producción/dev normal ninguna de las dos
 // marcas existe → false → transporte real. NO se puede setear desde la UI ni desde un input → sin camino de
 // usuario. Lo pone Playwright con addInitScript antes del bundle, igual que la marca principal.
-const E2E_MANUAL_GLOBAL_KEY = '__RAFAQ_BLE_E2E_MANUAL__';
+const E2E_MANUAL_GLOBAL_KEY = '__MITROPERO_BLE_E2E_MANUAL__';
 
 /** ¿Forzar el modo manual-first (sin transporte) en la corrida E2E? Solo si además isBleE2E(). */
 export function isBleE2EManual(): boolean {
@@ -51,4 +51,4 @@ export function isBleE2EManual(): boolean {
 
 export const BLE_E2E_GLOBAL_KEY = E2E_GLOBAL_KEY;
 export const BLE_E2E_MANUAL_GLOBAL_KEY = E2E_MANUAL_GLOBAL_KEY;
-export const BLE_E2E_HANDLE_KEY = '__rafaqBle';
+export const BLE_E2E_HANDLE_KEY = '__mitroperoBle';

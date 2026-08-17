@@ -184,7 +184,7 @@ Al navegar a `/crear-animal` o `/animal/[id]`, esos screens montan `useBusyWhile
 > - **La vista pasó a ser 100% type-only.** El ícono viaja como CLAVE (`BleStatusIcon = 'bluetooth' | 'bluetooth-connected' | 'bluetooth-searching' | 'alert'`) y el chip la mapea al componente lucide (`CHIP_ICONS`). Motivo: importar `lucide-react-native` en runtime hace que el módulo **no cargue bajo `node:test`** (su barrel ESM solo resuelve dentro de Metro) — o sea que la decisión no era testeable como unit. Mismo patrón que `features/ble-stick/connection-view.ts` + el `statusIcon()` de `StickConnectionScreen` y el `iconFor()` de `StickStatusIndicator`.
 > - **`app/app/maniobra/identificar.tsx`** pasa el slot como `right={conectable ? <BleConnectionChip /> : undefined}`. NO es una segunda decisión: `conectable` es literalmente la misma entrada (`transport != null`) que el chip lee adentro y que ya alimenta el hero adaptativo de esa pantalla. Es composición de layout: el slot `right` de `SpikeSessionHeader` envuelve al hijo en un `<View>` propio y el `XStack` aplica `gap="$2"` entre todos sus items, así que un chip que no pinta nada dejaría un 4º flex item vacío **más un gap de sobra** (`$2` = 7px en la escala v4 —`sizeToSpace(28)`—, no 8) robándole ancho al nombre del rodeo (que trunca). En `(tabs)/animales.tsx` **no hace falta** (el chip es hijo directo → devolver `null` no crea flex item ni gap).
 > - **`BleConnectionChip`** lleva `testID="ble-connection-chip"` (oráculo estructural del E2E) y el guard `if (view === null) return null` va **después** de los hooks (reglas de hooks).
-> - **Verificación**: unit puro `app/src/components/ble-connection-view.test.ts` (5 tests, las dos ramas de transporte) + E2E `app/e2e/baston-chip.spec.ts` (a: sin transporte → sin chip; b: con transporte → chip + estado). Los dos **falsificados en las dos direcciones**: quitar el guard deja (a) en rojo; ocultar siempre deja (b) en rojo. El estado "sin transporte" es reproducible en web con `mode='manual'` (marca `__RAFAQ_BLE_E2E_MANUAL__`), que existe justo para eso.
+> - **Verificación**: unit puro `app/src/components/ble-connection-view.test.ts` (5 tests, las dos ramas de transporte) + E2E `app/e2e/baston-chip.spec.ts` (a: sin transporte → sin chip; b: con transporte → chip + estado). Los dos **falsificados en las dos direcciones**: quitar el guard deja (a) en rojo; ocultar siempre deja (b) en rojo. El estado "sin transporte" es reproducible en web con `mode='manual'` (marca `__MITROPERO_BLE_E2E_MANUAL__`), que existe justo para eso.
 
 ## 7. Tests / E2E (RB criterios + §9 Gate 0)
 
@@ -194,7 +194,7 @@ Al navegar a `/crear-animal` o `/animal/[id]`, esos screens montan `useBusyWhile
 
 ### 7.2 E2E Playwright con `MockAdapter` (los 4 escenarios del §9 Gate 0)
 
-**Wiring necesario (no existe hoy)**: el `MockAdapter` (`adapter-mock.ts`) ya tiene `mockTagRead(eid)` / `mockConnectionChange`, pero **no hay forma de que Playwright lo invoque** (el provider de la raíz instancia el adapter internamente). El chunk debe exponer un **hook de test** controlado por flag (p. ej. `mode="mock"` activado por una env/flag de E2E + un handle en `window` como `window.__rafaqBle.tagRead(eid)`) que enchufe al `MockAdapter` montado. Patrón: igual espíritu que el harness, pero sobre el provider de la raíz. Documentar el flag para no dejar superficie en prod.
+**Wiring necesario (no existe hoy)**: el `MockAdapter` (`adapter-mock.ts`) ya tiene `mockTagRead(eid)` / `mockConnectionChange`, pero **no hay forma de que Playwright lo invoque** (el provider de la raíz instancia el adapter internamente). El chunk debe exponer un **hook de test** controlado por flag (p. ej. `mode="mock"` activado por una env/flag de E2E + un handle en `window` como `window.__mitroperoBle.tagRead(eid)`) que enchufe al `MockAdapter` montado. Patrón: igual espíritu que el harness, pero sobre el provider de la raíz. Documentar el flag para no dejar superficie en prod.
 
 Escenarios (sobre PowerSync local, con seed de animals.spec.ts):
 - (a) `tagRead(eid de un animal existente del campo)` → overlay `edit` → "Ver ficha" → ficha correcta.
@@ -223,8 +223,8 @@ Archivo: extender `app/e2e/` con un `baston.spec.ts` nuevo (patrón de `animals.
 | `app/src/components/ble-connection-view.ts` | **+** [Run 2] `bleConnectionView` (copy es-AR + íconos, módulo compartido del chip) | RB8.2 |
 | `app/src/components/index.ts` | **mod** [Run 2] exportar `BleConnectionChip` + `bleConnectionView` | RB8 |
 | `app/app/(tabs)/animales.tsx` | **mod** [Run 2] montar el `BleConnectionChip` en la fila del título | RB8.1 |
-| `app/app/_components/ble-e2e-flag.ts` | **+** [Run 2] `isBleE2E()` (marca `window.__RAFAQ_BLE_E2E__`, fuera de prod) | §7.2 |
-| `app/app/_components/BleE2EBridge.tsx` | **+** [Run 2] publica `window.__rafaqBle.{tagRead,connectMock,…}` (solo bajo el flag) | §7.2 |
+| `app/app/_components/ble-e2e-flag.ts` | **+** [Run 2] `isBleE2E()` (marca `window.__MITROPERO_BLE_E2E__`, fuera de prod) | §7.2 |
+| `app/app/_components/BleE2EBridge.tsx` | **+** [Run 2] publica `window.__mitroperoBle.{tagRead,connectMock,…}` (solo bajo el flag) | §7.2 |
 | `scripts/run-tests.mjs` | **mod** [Run 2] enganchar `eid-format.test.ts` a los unit del cliente | RB3.2 |
 | `app/app/crear-animal.tsx` | **mod** [Run 1] aceptar param `tag`, precargarlo read-only, header "Creando: [TAG]"; `useBusyWhileMounted()` | RB6.3, RB2.2 |
 | `app/app/animal/[id].tsx` | **mod** [Run 1] `useBusyWhileMounted()` | RB2.2 |
@@ -256,7 +256,7 @@ Archivo: extender `app/e2e/` con un `baston.spec.ts` nuevo (patrón de `animals.
 > 1. **`buildLookupTagAcrossFieldsQuery`** (Run 1): `establishments(name)` verificado sincronizado (lo usan `buildMembershipsQuery`/`buildEstablishmentDetailQuery`). Query nueva del chunk, builder + test SQLite verdes.
 > 2. **Param `tag` en `crear-animal.tsx`** (Run 1): implementado read-only (prioridad tag>idv>visual); comentarios stale actualizados. La nota de spec 02 (el alta acepta TAG precargado por BLE) se reconcilia al cerrar el chunk con `requirements.md`/`design.md` base.
 > 3. **`targetCategoryId`/`targetRodeoId` del transfer** (Run 2): NO fue bloqueante — se resolvió por CÓDIGO sobre el sistema DESTINO (que viene del `Rodeo.systemId` del rodeo destino), leyendo el `categoryCode` del perfil de origen (`fetchAnimalDetail`, sincronizado local). No hizo falta exponer el `system_id` de origen. Si la categoría no resuelve en el sistema destino → error accionable, NO se inventa default (regla del leader respetada). Ver §3.4 reconciliado. E2E (d) verde.
-> 4. **Wiring E2E del `MockAdapter`** (Run 2): creado con la marca DELIBERADA `window.__RAFAQ_BLE_E2E__` (`isBleE2E()`) → `mode='mock'` + `BleE2EBridge` que publica `window.__rafaqBle`. FUERA de prod (sin la marca, ni mock ni handle; doble guard en el bridge; vive en `_components/`, no en `services/ble/`). Gate 2 revisará la superficie. E2E (a)/(b)/(c)/(d) verdes.
+> 4. **Wiring E2E del `MockAdapter`** (Run 2): creado con la marca DELIBERADA `window.__MITROPERO_BLE_E2E__` (`isBleE2E()`) → `mode='mock'` + `BleE2EBridge` que publica `window.__mitroperoBle`. FUERA de prod (sin la marca, ni mock ni handle; doble guard en el bridge; vive en `_components/`, no en `services/ble/`). Gate 2 revisará la superficie. E2E (a)/(b)/(c)/(d) verdes.
 
 
 ---

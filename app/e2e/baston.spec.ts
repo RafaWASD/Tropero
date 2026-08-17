@@ -4,8 +4,8 @@
 // desde cualquier pantalla abre el overlay con el EID legible arriba y resuelve a editar / alta / transferir.
 //
 // Cómo se inyecta el bastonazo sin hardware: en E2E el provider de la raíz monta el MockAdapter (mode='mock',
-// activado por la marca DELIBERADA `window.__RAFAQ_BLE_E2E__` que ponemos vía addInitScript ANTES del bundle).
-// El BleE2EBridge publica `window.__rafaqBle.tagRead(eid)` / `connectMock()`. FUERA de producción: sin la
+// activado por la marca DELIBERADA `window.__MITROPERO_BLE_E2E__` que ponemos vía addInitScript ANTES del bundle).
+// El BleE2EBridge publica `window.__mitroperoBle.tagRead(eid)` / `connectMock()`. FUERA de producción: sin la
 // marca, ni el mock ni el handle existen (Gate 2).
 //
 // Los 4 escenarios del Gate 0 §9:
@@ -46,7 +46,7 @@ function makeEid(): string {
 /** Arranca la app con la marca de E2E del bastón SETEADA antes del bundle → mode='mock' + handle en window. */
 async function gotoWithBle(page: Page): Promise<void> {
   await page.addInitScript(() => {
-    (window as unknown as Record<string, unknown>).__RAFAQ_BLE_E2E__ = true;
+    (window as unknown as Record<string, unknown>).__MITROPERO_BLE_E2E__ = true;
   });
   await page.goto('/');
 }
@@ -54,8 +54,8 @@ async function gotoWithBle(page: Page): Promise<void> {
 /** Conecta el mock + inyecta un bastonazo del EID dado (el handle lo publica BleE2EBridge bajo el flag). */
 async function bastonazo(page: Page, eid: string): Promise<void> {
   await page.evaluate((e) => {
-    const h = (window as unknown as { __rafaqBle?: { connectMock: () => void; tagRead: (x: string) => void } }).__rafaqBle;
-    if (!h) throw new Error('window.__rafaqBle no está disponible (¿se montó el BleE2EBridge bajo el flag?)');
+    const h = (window as unknown as { __mitroperoBle?: { connectMock: () => void; tagRead: (x: string) => void } }).__mitroperoBle;
+    if (!h) throw new Error('window.__mitroperoBle no está disponible (¿se montó el BleE2EBridge bajo el flag?)');
     h.connectMock();
     h.tagRead(e);
   }, eid);

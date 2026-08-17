@@ -1,7 +1,7 @@
 // e2e/global-teardown.ts — barrido final de fixtures de la corrida.
 //
 // Cada spec limpia lo suyo en afterAll, pero este teardown global es la red de seguridad:
-// borra TODO lo creado por esta corrida (usuarios @rafaq-e2e.test + establishments con el
+// borra TODO lo creado por esta corrida (usuarios @mitropero-e2e.test + establishments con el
 // RUN_TAG en el nombre, vía service_role con CASCADE). Así no dejamos basura en la DB remota
 // compartida con el testing manual de Raf, ni siquiera si un test crashea a mitad.
 

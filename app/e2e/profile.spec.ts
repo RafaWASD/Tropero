@@ -7,7 +7,7 @@
 //      inválido muestra error; uno válido guarda OK.
 //   3. La edición se descarta al salir de "Más" (useFocusEffect → vuelve a modo lectura, Fix 1).
 //
-// Usuarios + campos namespaced (@rafaq-e2e.test, RUN_TAG); cleanup en afterAll + global-teardown.
+// Usuarios + campos namespaced (@mitropero-e2e.test, RUN_TAG); cleanup en afterAll + global-teardown.
 // Cada usuario se siembra con teléfono + un campo → aterriza en HOME (no en onboarding) y puede ir
 // a la tab "Más".
 

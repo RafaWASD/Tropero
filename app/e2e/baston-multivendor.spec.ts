@@ -4,10 +4,10 @@
 // ningún bastón físico. NO toca código de producción (todos los testIDs/anclas ya existen en la UI).
 //
 // CÓMO SE ACTIVA LA DEMO (triple-guard, RMV4.3/4.4/4.5): seteamos ANTES del bundle (addInitScript) las DOS
-// marcas globales `__RAFAQ_BLE_E2E__` + `__RAFAQ_BLE_DEMO__`. Con ambas, `isDemoMode()` es true (el gate
+// marcas globales `__MITROPERO_BLE_E2E__` + `__MITROPERO_BLE_DEMO__`. Con ambas, `isDemoMode()` es true (el gate
 // permite el contexto E2E como "no-prod" vía isE2eDemoAllowed()) → `_layout.tsx` da precedencia `mode='demo'`
 // al BleStickListenerProvider raíz → monta el `SimulatorAdapter` + los `DemoControls`. Una corrida E2E
-// NORMAL (solo `__RAFAQ_BLE_E2E__`, SIN demo) sigue en `mock` — el test (d) lo prueba como regresión.
+// NORMAL (solo `__MITROPERO_BLE_E2E__`, SIN demo) sigue en `mock` — el test (d) lo prueba como regresión.
 //
 // Los casos:
 //   (a) La StickConnectionScreen MONTA en /baston bajo demo: el RS420 sale RECONOCIDO en web + control de
@@ -25,7 +25,7 @@
 // pantalla que `context-multivendor.md` §3 define como la cara de la demo a los fabricantes. Ahora la
 // pantalla toma la PROPIEDAD EXCLUSIVA del bastón mientras está enfocada (scanner acotado, RCF.6) y el
 // overlay se auto-suprime. Estos tests pasan a asertar la invariante NUEVA: la lectura entra una sola vez.
-//   (d) REGRESIÓN: una corrida E2E NO-demo (solo __RAFAQ_BLE_E2E__ → mock) NO monta ni los DemoControls ni el
+//   (d) REGRESIÓN: una corrida E2E NO-demo (solo __MITROPERO_BLE_E2E__ → mock) NO monta ni los DemoControls ni el
 //       indicador global (isNonDemoE2E lo suprime) y el bridge mock sigue abriendo el overlay como HOY. Es la
 //       prueba de que el elemento NUEVO del chrome (StickStatusIndicator) no perturba las ~70 specs E2E.
 //
@@ -74,23 +74,23 @@ function makeEid(): string {
 async function markBleDemo(page: Page): Promise<void> {
   await page.addInitScript(() => {
     const w = window as unknown as Record<string, unknown>;
-    w.__RAFAQ_BLE_E2E__ = true;
-    w.__RAFAQ_BLE_DEMO__ = true;
+    w.__MITROPERO_BLE_E2E__ = true;
+    w.__MITROPERO_BLE_DEMO__ = true;
   });
 }
 
 /** Setea SOLO la marca E2E (sin demo) → isDemoMode() false → mode='mock' (regresión del camino existente). */
 async function markBleE2EOnly(page: Page): Promise<void> {
   await page.addInitScript(() => {
-    (window as unknown as Record<string, unknown>).__RAFAQ_BLE_E2E__ = true;
+    (window as unknown as Record<string, unknown>).__MITROPERO_BLE_E2E__ = true;
   });
 }
 
 /** Inyecta un bastonazo por el bridge MOCK (test (d)): el handle lo publica BleE2EBridge bajo el flag E2E. */
 async function bastonazoMock(page: Page, eid: string): Promise<void> {
   await page.evaluate((e: string) => {
-    const h = (window as unknown as { __rafaqBle?: { connectMock: () => void; tagRead: (x: string) => void } }).__rafaqBle;
-    if (!h) throw new Error('window.__rafaqBle no está disponible (¿se montó el BleE2EBridge bajo el flag?)');
+    const h = (window as unknown as { __mitroperoBle?: { connectMock: () => void; tagRead: (x: string) => void } }).__mitroperoBle;
+    if (!h) throw new Error('window.__mitroperoBle no está disponible (¿se montó el BleE2EBridge bajo el flag?)');
     h.connectMock();
     h.tagRead(e);
   }, eid);
@@ -323,13 +323,13 @@ test('(f) RMV3.1: sin transporte la fila sigue en "Más", dice "No disponible" y
   await setUserPhone(user.id, '1123456789');
   await seedEstablishmentWithRodeo(user.id, 'Campo Baston FilaNT');
 
-  // `__RAFAQ_BLE_E2E_MANUAL__` → provider en mode='manual' → `instantiateTransport` devuelve null:
+  // `__MITROPERO_BLE_E2E_MANUAL__` → provider en mode='manual' → `instantiateTransport` devuelve null:
   // EXACTAMENTE el estado de un iOS / dev build sin el módulo nativo (mismo shim que usa
   // `asignar-caravanas-sin-transporte.spec.ts`).
   await page.addInitScript(() => {
     const w = window as unknown as Record<string, unknown>;
-    w.__RAFAQ_BLE_E2E__ = true;
-    w.__RAFAQ_BLE_E2E_MANUAL__ = true;
+    w.__MITROPERO_BLE_E2E__ = true;
+    w.__MITROPERO_BLE_E2E_MANUAL__ = true;
   });
   await page.goto('/');
   await signIn(page, user);

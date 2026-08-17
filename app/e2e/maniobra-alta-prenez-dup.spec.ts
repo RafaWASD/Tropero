@@ -35,7 +35,7 @@ test.afterAll(async () => {
 
 async function gotoWithBle(page: Page): Promise<void> {
   await page.addInitScript(() => {
-    (window as unknown as Record<string, unknown>).__RAFAQ_BLE_E2E__ = true;
+    (window as unknown as Record<string, unknown>).__MITROPERO_BLE_E2E__ = true;
   });
   await page.goto('/');
 }
@@ -43,7 +43,7 @@ async function gotoWithBle(page: Page): Promise<void> {
 /** Conecta el bastón mock (el hero adaptativo pasa de ConnectHero a ScanHero — camino conectado). */
 async function connectBaston(page: Page): Promise<void> {
   await page.evaluate(() => {
-    const h = (window as unknown as { __rafaqBle?: { connectMock: () => void } }).__rafaqBle;
+    const h = (window as unknown as { __mitroperoBle?: { connectMock: () => void } }).__mitroperoBle;
     h?.connectMock();
   });
 }

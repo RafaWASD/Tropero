@@ -57,7 +57,7 @@ async function newMobilePage(browser: Browser, withBle = false): Promise<Page> {
   await applyEnvShim(page);
   if (withBle) {
     await page.addInitScript(() => {
-      (window as unknown as Record<string, unknown>).__RAFAQ_BLE_E2E__ = true;
+      (window as unknown as Record<string, unknown>).__MITROPERO_BLE_E2E__ = true;
     });
   }
   return page;
@@ -145,8 +145,8 @@ test('capturas: el overlay GLOBAL abierto por un bastonazo sobre el buscador enf
   await buscador.fill('038');
   const eid = `982${String(Date.now()).slice(-9)}0001`.slice(0, 15).padEnd(15, '0');
   await page.evaluate((e) => {
-    const h = (window as unknown as { __rafaqBle?: { connectMock: () => void; tagRead: (x: string) => void } })
-      .__rafaqBle;
+    const h = (window as unknown as { __mitroperoBle?: { connectMock: () => void; tagRead: (x: string) => void } })
+      .__mitroperoBle;
     h?.connectMock();
     h?.tagRead(e);
   }, eid);

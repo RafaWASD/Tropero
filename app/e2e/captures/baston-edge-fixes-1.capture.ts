@@ -90,7 +90,7 @@ test('capturas 🔴-3: el vacío de la masiva en sus tres estados + el CTA llega
   await seedEstablishmentWithRodeo(userDc.id, 'Campo EdgeDC');
 
   await page.addInitScript(() => {
-    (window as unknown as Record<string, unknown>).__RAFAQ_BLE_E2E__ = true;
+    (window as unknown as Record<string, unknown>).__MITROPERO_BLE_E2E__ = true;
   });
   await page.goto('/');
   await signIn(page, userDc);
@@ -115,8 +115,8 @@ test('capturas 🔴-3: el vacío de la masiva en sus tres estados + el CTA llega
   //        ⚠️ NO se vuelve con `gotoTab(page, 'Más', …)`: `/baston` es una pantalla de **Stack** y NO
   //        tiene bottom tab bar, así que el `role="tab"` no existe ahí y el helper no encuentra nada.
   await page.evaluate(() => {
-    const h = (window as unknown as { __rafaqBle?: { connectMock: () => void } }).__rafaqBle;
-    if (!h) throw new Error('window.__rafaqBle no está disponible (¿se montó el BleE2EBridge?)');
+    const h = (window as unknown as { __mitroperoBle?: { connectMock: () => void } }).__mitroperoBle;
+    if (!h) throw new Error('window.__mitroperoBle no está disponible (¿se montó el BleE2EBridge?)');
     h.connectMock();
   });
   // `.last()`: la pantalla de origen (`asignar-caravanas`) queda MONTADA detrás en el Stack y también
@@ -135,7 +135,7 @@ test('capturas 🔴-3: el vacío de la masiva en sus tres estados + el CTA llega
 // 🔴-3 · (4) SIN TRANSPORTE — el estado del bugfix de julio, INTACTO: frase canónica, salida por la ficha
 // y SIN CTA (no hay nada que conectar en ese dispositivo).
 //
-// Va en un test APARTE y no al final del anterior: la marca `__RAFAQ_BLE_E2E_MANUAL__` se tiene que poner
+// Va en un test APARTE y no al final del anterior: la marca `__MITROPERO_BLE_E2E_MANUAL__` se tiene que poner
 // ANTES del bundle, o sea que hace falta arrancar la app de cero con otra sesión. Reusar la misma `page`
 // no alcanza — `context().clearCookies()` NO desloguea, porque el token de Supabase vive en
 // `localStorage`, así que el `signIn` siguiente se quedaba esperando un campo "Email" que nunca aparece
@@ -150,8 +150,8 @@ test('captura 🔴-3 (4): SIN transporte el vacío queda intacto (frase canónic
   await seedEstablishmentWithRodeo(userNt.id, 'Campo EdgeNT');
 
   await page.addInitScript(() => {
-    (window as unknown as Record<string, unknown>).__RAFAQ_BLE_E2E__ = true;
-    (window as unknown as Record<string, unknown>).__RAFAQ_BLE_E2E_MANUAL__ = true;
+    (window as unknown as Record<string, unknown>).__MITROPERO_BLE_E2E__ = true;
+    (window as unknown as Record<string, unknown>).__MITROPERO_BLE_E2E_MANUAL__ = true;
   });
   await page.goto('/');
   await signIn(page, userNt);
@@ -166,7 +166,7 @@ test('captura 🔴-3 (4): SIN transporte el vacío queda intacto (frase canónic
 // ═════════════════════════════════════════════════════════════════════════════════════════════════════
 // 🔴-2 · La pantalla donde la lectura vibraba sin llegar a nadie. El fix es una AUSENCIA (no hay UI
 // nueva): la captura documenta el estado, y el veredicto de comportamiento lo da el .spec.ts con el
-// contador de confirmaciones (`window.__rafaqBeeps`).
+// contador de confirmaciones (`window.__mitroperoBeeps`).
 // ═════════════════════════════════════════════════════════════════════════════════════════════════════
 
 test('captura 🔴-2: `maniobra/carga` — un bastonazo acá ya no confirma nada (no hay UI que lo reciba)', async ({
@@ -183,7 +183,7 @@ test('captura 🔴-2: `maniobra/carga` — un bastonazo acá ya no confirma nada
   await seedAnimal(establishmentId, rodeoId, { tag: eidB, idv: '0502', sex: 'female', categoryCode: 'vaquillona' });
 
   await page.addInitScript(() => {
-    (window as unknown as Record<string, unknown>).__RAFAQ_BLE_E2E__ = true;
+    (window as unknown as Record<string, unknown>).__MITROPERO_BLE_E2E__ = true;
   });
   await page.goto('/');
   await signIn(page, user);
@@ -205,7 +205,7 @@ test('captura 🔴-2: `maniobra/carga` — un bastonazo acá ya no confirma nada
   await page.getByRole('button', { name: /^Continuar/ }).click();
   await page.getByRole('button', { name: 'Arrancar jornada', exact: true }).click();
   await page.evaluate(() => {
-    const h = (window as unknown as { __rafaqBle?: { connectMock: () => void } }).__rafaqBle;
+    const h = (window as unknown as { __mitroperoBle?: { connectMock: () => void } }).__mitroperoBle;
     h?.connectMock();
   });
   await expect(page.getByText('Acercá el bastón al animal', { exact: true })).toBeVisible({ timeout: 30_000 });
@@ -213,7 +213,7 @@ test('captura 🔴-2: `maniobra/carga` — un bastonazo acá ya no confirma nada
 
   // Bastonazo del animal A → la lectura SÍ la recibe alguien (identificar) → auto-avance a la carga.
   await page.evaluate((e) => {
-    const h = (window as unknown as { __rafaqBle?: { tagRead: (x: string) => void } }).__rafaqBle;
+    const h = (window as unknown as { __mitroperoBle?: { tagRead: (x: string) => void } }).__mitroperoBle;
     h?.tagRead(e);
   }, eidA);
   await expect(page.getByText('· 1 de 1', { exact: true })).toBeVisible({ timeout: 30_000 });
@@ -223,7 +223,7 @@ test('captura 🔴-2: `maniobra/carga` — un bastonazo acá ya no confirma nada
   // lectura: la pantalla no tiene listener propio y el overlay global está suprimido en `maniobra/*`.
   // Antes de este fix, acá el teléfono CONFIRMABA (vibración en device / beep en web).
   await page.evaluate((e) => {
-    const h = (window as unknown as { __rafaqBle?: { tagRead: (x: string) => void } }).__rafaqBle;
+    const h = (window as unknown as { __mitroperoBle?: { tagRead: (x: string) => void } }).__mitroperoBle;
     h?.tagRead(e);
   }, eidB);
   await page.waitForTimeout(2500);

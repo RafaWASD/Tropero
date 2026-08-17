@@ -7,7 +7,7 @@
 // ⚠️ NO es un test de regresión (.capture.ts, no .spec.ts → NO corre en `pnpm e2e`; se dispara a mano con
 // --config playwright.capture.config.ts, viewport mobile real 412×915). La RED DE REGRESIÓN del RCF.6 vive en
 // e2e/baston-ficha.spec.ts; este archivo SOLO captura estados, reusando el MISMO mecanismo de mock del bastón
-// (marca __RAFAQ_BLE_E2E__ / handle window.__rafaqBle) y los MISMOS testIDs (tag-scan-*).
+// (marca __MITROPERO_BLE_E2E__ / handle window.__mitroperoBle) y los MISMOS testIDs (tag-scan-*).
 //
 // Es la pantalla REAL (NO un mock): el sheet vive en src/components/TagScanSheet.tsx, lo dispara la ficha
 // (app/animal/[id].tsx) al tocar "Bastonear la caravana" con la caravana electrónica vacía.
@@ -70,7 +70,7 @@ test('captura RCF.6: bastoneo desde la ficha (afordancia / connect / scan / lect
   await seedAnimal(establishmentId, rodeoId, { tag: null, idv, sex: 'female' });
 
   await page.addInitScript(() => {
-    (window as unknown as Record<string, unknown>).__RAFAQ_BLE_E2E__ = true;
+    (window as unknown as Record<string, unknown>).__MITROPERO_BLE_E2E__ = true;
   });
   await page.goto('/');
   await signIn(page, user);
@@ -90,7 +90,7 @@ test('captura RCF.6: bastoneo desde la ficha (afordancia / connect / scan / lect
 
   // ── 03 — conectado (connectMock) → hero de ESCANEO "Acercá el bastón al animal". ──
   await page.evaluate(() => {
-    const h = (window as unknown as { __rafaqBle?: { connectMock: () => void } }).__rafaqBle;
+    const h = (window as unknown as { __mitroperoBle?: { connectMock: () => void } }).__mitroperoBle;
     h?.connectMock();
   });
   await expect(page.getByText('Acercá el bastón al animal', { exact: true })).toBeVisible({ timeout: 10_000 });
@@ -99,7 +99,7 @@ test('captura RCF.6: bastoneo desde la ficha (afordancia / connect / scan / lect
   // ── 04 — lectura recibida → confirmación pre-commit (EID legible + "Asignar caravana"). ──
   const eid = makeEid(1);
   await page.evaluate((e: string) => {
-    const h = (window as unknown as { __rafaqBle?: { tagRead: (x: string) => void } }).__rafaqBle;
+    const h = (window as unknown as { __mitroperoBle?: { tagRead: (x: string) => void } }).__mitroperoBle;
     h?.tagRead(e);
   }, eid);
   await expect(page.getByTestId('tag-scan-read')).toBeVisible({ timeout: 15_000 });
@@ -125,8 +125,8 @@ test('captura RCF.6: sheet manual-promovido + carga manual DENTRO del sheet', as
   await seedAnimal(establishmentId, rodeoId, { tag: null, idv, sex: 'female' });
 
   await page.addInitScript(() => {
-    (window as unknown as Record<string, unknown>).__RAFAQ_BLE_E2E__ = true;
-    (window as unknown as Record<string, unknown>).__RAFAQ_BLE_E2E_MANUAL__ = true;
+    (window as unknown as Record<string, unknown>).__MITROPERO_BLE_E2E__ = true;
+    (window as unknown as Record<string, unknown>).__MITROPERO_BLE_E2E_MANUAL__ = true;
   });
   await page.goto('/');
   await signIn(page, user);

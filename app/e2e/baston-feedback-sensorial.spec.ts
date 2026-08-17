@@ -55,9 +55,9 @@ function makeEid(): string {
 async function gotoWithToneRecorder(page: Page): Promise<void> {
   await page.addInitScript(() => {
     const w = window as unknown as Record<string, unknown>;
-    w.__RAFAQ_BLE_E2E__ = true;
+    w.__MITROPERO_BLE_E2E__ = true;
     const tones: { frequency: { value: number } }[][] = [];
-    w.__rafaqTones = tones;
+    w.__mitroperoTones = tones;
 
     // ── CONTADOR DE ACCESOS AL STORAGE DE LA PREFERENCIA (R4.9) ──────────────────────────────────────
     // El invariante de 🟡-11 no es "no hay `await` en el camino caliente": es **"leer la preferencia no
@@ -67,7 +67,7 @@ async function gotoWithToneRecorder(page: Page): Promise<void> {
     // `getItem`/`setItem` y se cuenta cuántas veces se tocó ESA clave.
     let reads = 0;
     let writes = 0;
-    w.__rafaqPrefStorage = { get reads() { return reads; }, get writes() { return writes; } };
+    w.__mitroperoPrefStorage = { get reads() { return reads; }, get writes() { return writes; } };
     const proto = Storage.prototype;
     const origGet = proto.getItem;
     const origSet = proto.setItem;
@@ -113,7 +113,7 @@ async function gotoWithToneRecorder(page: Page): Promise<void> {
 /** Un aviso por elemento, cada uno con las frecuencias que pidió sonar. `[[3150],[1300,850]]`. */
 function cues(page: Page): Promise<number[][]> {
   return page.evaluate(() =>
-    (window as unknown as { __rafaqTones: { frequency: { value: number } }[][] }).__rafaqTones.map((oscs) =>
+    (window as unknown as { __mitroperoTones: { frequency: { value: number } }[][] }).__mitroperoTones.map((oscs) =>
       oscs.map((o) => o.frequency.value),
     ),
   );
@@ -122,16 +122,16 @@ function cues(page: Page): Promise<number[][]> {
 /** Cuántas veces se tocó el storage de la preferencia desde que arrancó la página. */
 function prefStorage(page: Page): Promise<{ reads: number; writes: number }> {
   return page.evaluate(() => {
-    const s = (window as unknown as { __rafaqPrefStorage: { reads: number; writes: number } }).__rafaqPrefStorage;
+    const s = (window as unknown as { __mitroperoPrefStorage: { reads: number; writes: number } }).__mitroperoPrefStorage;
     return { reads: s.reads, writes: s.writes };
   });
 }
 
 async function bastonazo(page: Page, value: string): Promise<void> {
   await page.evaluate((v) => {
-    const h = (window as unknown as { __rafaqBle?: { connectMock: () => void; tagRead: (x: string) => void } })
-      .__rafaqBle;
-    if (!h) throw new Error('window.__rafaqBle no disponible (¿BleE2EBridge bajo el flag?)');
+    const h = (window as unknown as { __mitroperoBle?: { connectMock: () => void; tagRead: (x: string) => void } })
+      .__mitroperoBle;
+    if (!h) throw new Error('window.__mitroperoBle no disponible (¿BleE2EBridge bajo el flag?)');
     h.connectMock();
     h.tagRead(v);
   }, value);

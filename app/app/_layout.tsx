@@ -723,8 +723,8 @@ function RootLayout() {
                       (doble-gateado por isBleE2E) fuerza mode='manual' (sin transporte) para reproducir el
                       sub-estado "manual promovido" del hero adaptativo (spec 03 M2.1) en la captura E2E.
                       Spec 04 delta multivendor (RMV4.3/4.4, triple-guard 1): PRECEDENCIA DEMO — isDemoMode()
-                      (marca __RAFAQ_BLE_DEMO__ + build permitido: dev/build-demo/E2E) → mode='demo' (simulador).
-                      Una corrida E2E normal (solo __RAFAQ_BLE_E2E__, SIN __RAFAQ_BLE_DEMO__) tiene isDemoMode()
+                      (marca __MITROPERO_BLE_DEMO__ + build permitido: dev/build-demo/E2E) → mode='demo' (simulador).
+                      Una corrida E2E normal (solo __MITROPERO_BLE_E2E__, SIN __MITROPERO_BLE_DEMO__) tiene isDemoMode()
                       false → cae a 'mock'/'manual' como HOY (regresión intacta). Producción → 'auto'. */}
                   <BleStickListenerProvider mode={isDemoMode() ? 'demo' : isBleE2E() ? (isBleE2EManual() ? 'manual' : 'mock') : 'auto'}>
                     <BleHost />

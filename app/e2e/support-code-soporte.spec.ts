@@ -9,7 +9,7 @@
 //         que tocar Copiar NO rompe (best-effort: en web el clipboard puede estar bloqueado → degrada visible).
 //
 //   (T26) RECHAZO DE MANGA — SyncRechazoSheet: cada fila muestra el `id` de la op rechazada como código de
-//         soporte. Se inyecta un rechazo con la marca SOLO-E2E (`__RAFAQ_SYNC_REJECT_E2E__`, gated fuera de
+//         soporte. Se inyecta un rechazo con la marca SOLO-E2E (`__MITROPERO_SYNC_REJECT_E2E__`, gated fuera de
 //         prod, mismo patrón que maniobra-rechazo-sync.spec.ts). Asserta: la fila muestra el id + Copiar.
 //
 // Fixtures desde ./helpers/fixtures (NO @playwright/test) → el shim de env web (si no, PowerSync bootea en blanco).
@@ -69,7 +69,7 @@ async function armSyncReject(
   payload: { id: string; table: string; op: string; code: string },
 ): Promise<void> {
   await page.addInitScript((p) => {
-    (window as unknown as Record<string, unknown>).__RAFAQ_SYNC_REJECT_E2E__ = p;
+    (window as unknown as Record<string, unknown>).__MITROPERO_SYNC_REJECT_E2E__ = p;
   }, payload);
 }
 

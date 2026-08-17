@@ -5,8 +5,8 @@
 // ruta `maniobra` (R3.2) → el escaneo lo maneja ESTA pantalla.
 //
 // Cómo se inyecta el bastonazo sin hardware: igual que baston.spec.ts — el provider de la RAÍZ monta el
-// MockAdapter (mode='mock', marca `window.__RAFAQ_BLE_E2E__` vía addInitScript ANTES del bundle). El
-// BleE2EBridge publica `window.__rafaqBle.tagRead(eid)` / `connectMock()` / `disconnectMock()`. FUERA de
+// MockAdapter (mode='mock', marca `window.__MITROPERO_BLE_E2E__` vía addInitScript ANTES del bundle). El
+// BleE2EBridge publica `window.__mitroperoBle.tagRead(eid)` / `connectMock()` / `disconnectMock()`. FUERA de
 // producción: sin la marca, ni el mock ni el handle existen (Gate 2).
 //
 // Escenarios (R3.x / R4.x):
@@ -56,7 +56,7 @@ function makeEid(): string {
 /** Arranca la app con la marca de E2E del bastón SETEADA antes del bundle → mode='mock' + handle en window. */
 async function gotoWithBle(page: Page): Promise<void> {
   await page.addInitScript(() => {
-    (window as unknown as Record<string, unknown>).__RAFAQ_BLE_E2E__ = true;
+    (window as unknown as Record<string, unknown>).__MITROPERO_BLE_E2E__ = true;
   });
   await page.goto('/');
 }
@@ -64,8 +64,8 @@ async function gotoWithBle(page: Page): Promise<void> {
 /** Conecta el mock + inyecta un bastonazo del EID dado (el handle lo publica BleE2EBridge bajo el flag). */
 async function bastonazo(page: Page, eid: string): Promise<void> {
   await page.evaluate((e) => {
-    const h = (window as unknown as { __rafaqBle?: { connectMock: () => void; tagRead: (x: string) => void } }).__rafaqBle;
-    if (!h) throw new Error('window.__rafaqBle no está disponible (¿se montó el BleE2EBridge bajo el flag?)');
+    const h = (window as unknown as { __mitroperoBle?: { connectMock: () => void; tagRead: (x: string) => void } }).__mitroperoBle;
+    if (!h) throw new Error('window.__mitroperoBle no está disponible (¿se montó el BleE2EBridge bajo el flag?)');
     h.connectMock();
     h.tagRead(e);
   }, eid);
@@ -74,7 +74,7 @@ async function bastonazo(page: Page, eid: string): Promise<void> {
 /** Marca el bastón conectado sin inyectar lectura (para el chip + el listening del mock). */
 async function connectBaston(page: Page): Promise<void> {
   await page.evaluate(() => {
-    const h = (window as unknown as { __rafaqBle?: { connectMock: () => void } }).__rafaqBle;
+    const h = (window as unknown as { __mitroperoBle?: { connectMock: () => void } }).__mitroperoBle;
     h?.connectMock();
   });
 }
@@ -82,7 +82,7 @@ async function connectBaston(page: Page): Promise<void> {
 /** Desconecta el mock (simula pérdida de batería / fuera de rango, R3.6). */
 async function disconnectBaston(page: Page): Promise<void> {
   await page.evaluate(() => {
-    const h = (window as unknown as { __rafaqBle?: { disconnectMock: () => void } }).__rafaqBle;
+    const h = (window as unknown as { __mitroperoBle?: { disconnectMock: () => void } }).__mitroperoBle;
     h?.disconnectMock();
   });
 }
@@ -580,7 +580,7 @@ test('(l) el ExitJornadaSheet NO se auto-cierra al abrirlo con tap táctil (clic
   const page = await ctx.newPage();
   await applyEnvShim(page);
   await page.addInitScript(() => {
-    (window as unknown as Record<string, unknown>).__RAFAQ_BLE_E2E__ = true;
+    (window as unknown as Record<string, unknown>).__MITROPERO_BLE_E2E__ = true;
   });
 
   try {

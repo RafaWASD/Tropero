@@ -84,7 +84,7 @@ for (const width of WIDTHS) {
     await applyEnvShim(page);
     const OP_ID = 'op-soporte-42';
     await page.addInitScript((id) => {
-      (window as unknown as Record<string, unknown>).__RAFAQ_SYNC_REJECT_E2E__ = {
+      (window as unknown as Record<string, unknown>).__MITROPERO_SYNC_REJECT_E2E__ = {
         id,
         table: 'weight_events',
         op: 'PUT',

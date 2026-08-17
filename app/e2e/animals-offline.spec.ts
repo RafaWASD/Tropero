@@ -48,8 +48,8 @@ test.afterAll(async () => {
 });
 
 // Diagnóstico: permite apuntar estos tests al DEV SERVER de Metro (el entorno del repro en vivo)
-// con RAFAQ_E2E_BASE_URL=http://localhost:8082/. Sin la env corre contra el export estático (default).
-const BASE_URL = process.env.RAFAQ_E2E_BASE_URL ?? '/';
+// con MITROPERO_E2E_BASE_URL=http://localhost:8082/. Sin la env corre contra el export estático (default).
+const BASE_URL = process.env.MITROPERO_E2E_BASE_URL ?? '/';
 
 // Camina el wizard de alta con DOS rodeos (paso 1 NO auto-avanza) hasta el paso de datos.
 async function walkWizardWithTwoRodeos(page: import('@playwright/test').Page): Promise<void> {

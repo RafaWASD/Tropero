@@ -1,5 +1,5 @@
 // Tests de app-env.ts (spec 16, A5 / R3.4/R3.6/R3.7). node:test + type-stripping (sin Jest).
-// PURO: solo toca process.env.EXPO_PUBLIC_ENV y globalThis.__RAFAQ_E2E__, que se resetean por test.
+// PURO: solo toca process.env.EXPO_PUBLIC_ENV y globalThis.__MITROPERO_E2E__, que se resetean por test.
 
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
@@ -40,7 +40,7 @@ test('R3.6: EXPO_PUBLIC_ENV=e2e → isE2E() true', () => {
   assert.equal(isE2E(), true);
 });
 
-test('R3.6: globalThis.__RAFAQ_E2E__=true → isE2E() true (aunque el env no sea e2e)', () => {
+test('R3.6: globalThis.__MITROPERO_E2E__=true → isE2E() true (aunque el env no sea e2e)', () => {
   process.env.EXPO_PUBLIC_ENV = 'production';
   (globalThis as Record<string, unknown>)[APP_E2E_GLOBAL_KEY] = true;
   assert.equal(isE2E(), true);

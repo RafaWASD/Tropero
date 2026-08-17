@@ -3,7 +3,7 @@
 // PURO de RN/expo (solo lee process.env / globalThis): testeable bajo node:test e importable desde
 // cualquier lado. Feature 17 lo consume para gatear Sentry/PostHog (`enabled: !!dsn && !isE2E()`).
 //
-// Mismo patrón de flag que ble-e2e-flag.ts: una marca `window.__RAFAQ_E2E__` que SOLO Playwright pone
+// Mismo patrón de flag que ble-e2e-flag.ts: una marca `window.__MITROPERO_E2E__` que SOLO Playwright pone
 // (addInitScript antes del bundle, ver e2e/helpers/fixtures.ts), más el discriminador
 // EXPO_PUBLIC_ENV==='e2e'. En producción/dev normal ninguna existe → isE2E() = false. La marca NO se
 // puede setear desde la UI ni desde un input de usuario → sin camino para un usuario real.
@@ -18,7 +18,7 @@ const DEFAULT_APP_ENV: AppEnv = 'development';
 
 // Key VARIABLE para el fallback dinámico → NO inlineable por babel (igual que env.ts).
 const ENV_KEY = 'EXPO_PUBLIC_ENV';
-const E2E_GLOBAL_KEY = '__RAFAQ_E2E__';
+const E2E_GLOBAL_KEY = '__MITROPERO_E2E__';
 
 /**
  * Lee EXPO_PUBLIC_ENV con la misma precedencia que env.ts para las públicas (R3.1/R3.2):
@@ -44,7 +44,7 @@ export function getAppEnv(): AppEnv {
 }
 
 /**
- * ¿Corrida E2E? true si Playwright marcó `window.__RAFAQ_E2E__` antes del boot (R3.6) O si
+ * ¿Corrida E2E? true si Playwright marcó `window.__MITROPERO_E2E__` antes del boot (R3.6) O si
  * EXPO_PUBLIC_ENV==='e2e'. Sin ninguna de las dos: false (producción/dev normal, R3.7). PURA
  * (fail-safe: cualquier excepción al leer globalThis → false).
  */

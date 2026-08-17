@@ -11,10 +11,10 @@
 //       de la maniobra se TRAGABA (`void captureAndAdvance` sin try/catch ni chequeo del ServiceResult).
 //       FIX: fail-closed — si el persist local FALLA, se SUPERFICIA un banner accionable es-AR (R5.7/R10.8)
 //       y NO se avanza; el reintento (tocar de nuevo) procede. La falla se inyecta determinísticamente con
-//       una marca SOLO-E2E (window.__RAFAQ_MANEUVER_FAULT__, fuera de la superficie de prod).
+//       una marca SOLO-E2E (window.__MITROPERO_MANEUVER_FAULT__, fuera de la superficie de prod).
 //
 // Cómo se llega: jornada con TACTO (rodeo de cría → habilitado) → /maniobra/identificar. El bastonazo (mock
-// bajo __RAFAQ_BLE_E2E__) o la búsqueda manual aterrizan en /maniobra/carga con el sessionId+profileId reales.
+// bajo __MITROPERO_BLE_E2E__) o la búsqueda manual aterrizan en /maniobra/carga con el sessionId+profileId reales.
 
 import { test, expect, type Page } from './helpers/fixtures';
 import {
@@ -46,15 +46,15 @@ function makeEid(): string {
 /** Arranca la app con la marca de E2E del bastón (mock) seteada antes del bundle. */
 async function gotoWithBle(page: Page): Promise<void> {
   await page.addInitScript(() => {
-    (window as unknown as Record<string, unknown>).__RAFAQ_BLE_E2E__ = true;
+    (window as unknown as Record<string, unknown>).__MITROPERO_BLE_E2E__ = true;
   });
   await page.goto('/');
 }
 
 async function bastonazo(page: Page, eid: string): Promise<void> {
   await page.evaluate((e) => {
-    const h = (window as unknown as { __rafaqBle?: { connectMock: () => void; tagRead: (x: string) => void } }).__rafaqBle;
-    if (!h) throw new Error('window.__rafaqBle no disponible (¿BleE2EBridge bajo el flag?)');
+    const h = (window as unknown as { __mitroperoBle?: { connectMock: () => void; tagRead: (x: string) => void } }).__mitroperoBle;
+    if (!h) throw new Error('window.__mitroperoBle no disponible (¿BleE2EBridge bajo el flag?)');
     h.connectMock();
     h.tagRead(e);
   }, eid);
@@ -76,7 +76,7 @@ async function startSessionTacto(page: Page): Promise<void> {
   // Hero adaptativo (M2.1): con el mock conectable, el estado inicial es ConnectHero. Conectamos el mock →
   // pasa a ScanHero ("Acercá el bastón"), el camino conectado que este flujo asume.
   await page.evaluate(() => {
-    const h = (window as unknown as { __rafaqBle?: { connectMock: () => void } }).__rafaqBle;
+    const h = (window as unknown as { __mitroperoBle?: { connectMock: () => void } }).__mitroperoBle;
     h?.connectMock();
   });
   await expect(page.getByText('Acercá el bastón al animal', { exact: true })).toBeVisible({ timeout: 20_000 });
@@ -182,7 +182,7 @@ test('(2) persist falla → banner de error visible + NO avanza; reintento → a
 
   // ARMAR la falla de persistencia inyectada (solo-e2e): la PRÓXIMA captura fallará una vez.
   await page.evaluate(() => {
-    (window as unknown as Record<string, unknown>).__RAFAQ_MANEUVER_FAULT__ = true;
+    (window as unknown as Record<string, unknown>).__MITROPERO_MANEUVER_FAULT__ = true;
   });
 
   // Bastonazo → carga rápida. Paso de tacto: tapear VACÍA → el persist falla → banner + NO avanza.

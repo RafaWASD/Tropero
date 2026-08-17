@@ -91,7 +91,7 @@ import {
 // se muestra). Lee el global directo (patrón demo-gate/ble-e2e-flag; sin import cross-capa).
 function isNonDemoE2E(): boolean {
   try {
-    return (globalThis as Record<string, unknown>).__RAFAQ_BLE_E2E__ === true && !isDemoMode();
+    return (globalThis as Record<string, unknown>).__MITROPERO_BLE_E2E__ === true && !isDemoMode();
   } catch {
     return false;
   }

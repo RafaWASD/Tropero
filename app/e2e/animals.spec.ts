@@ -1128,8 +1128,8 @@ test('caravana-ficha (RCF.2.1/RCF.2.2/RCF.2.4/RCF.2.7): la electrónica se carga
   // electrónica" directa; la electrónica se carga por el sheet de bastoneo, con la entrada manual detrás del
   // CTA (paridad con baston-ficha.spec.ts (c); la marca MANUAL cae al hero manual-promovido, sin transporte).
   await page.addInitScript(() => {
-    (window as unknown as Record<string, unknown>).__RAFAQ_BLE_E2E__ = true;
-    (window as unknown as Record<string, unknown>).__RAFAQ_BLE_E2E_MANUAL__ = true;
+    (window as unknown as Record<string, unknown>).__MITROPERO_BLE_E2E__ = true;
+    (window as unknown as Record<string, unknown>).__MITROPERO_BLE_E2E_MANUAL__ = true;
   });
   await page.goto('/');
   await signIn(page, user);

@@ -64,9 +64,9 @@ async function shot(page: Page, name: string): Promise<void> {
 
 async function bastonazo(page: Page, value: string): Promise<void> {
   await page.evaluate((v) => {
-    const h = (window as unknown as { __rafaqBle?: { connectMock: () => void; tagRead: (x: string) => void } })
-      .__rafaqBle;
-    if (!h) throw new Error('window.__rafaqBle no disponible');
+    const h = (window as unknown as { __mitroperoBle?: { connectMock: () => void; tagRead: (x: string) => void } })
+      .__mitroperoBle;
+    if (!h) throw new Error('window.__mitroperoBle no disponible');
     h.connectMock();
     h.tagRead(v);
   }, value);
@@ -82,7 +82,7 @@ test('capturas: la tarjeta «Aviso de lectura» en sus dos estados + los dos des
   await seedEstablishmentWithRodeo(user.id, 'Campo Feedback');
 
   await page.addInitScript(() => {
-    (window as unknown as Record<string, unknown>).__RAFAQ_BLE_E2E__ = true;
+    (window as unknown as Record<string, unknown>).__MITROPERO_BLE_E2E__ = true;
   });
   await page.goto('/');
   await signIn(page, user);

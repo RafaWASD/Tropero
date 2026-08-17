@@ -15,7 +15,7 @@
 //
 // Setup espejado de maniobra-elegir.spec.ts: rodeo "Cría hembras" (0018 habilita tacto_vaquillona por
 // default) + hembra categoría vaquillona con caravana electrónica (EID) → se identifica por bastonazo del
-// MockAdapter (flag __RAFAQ_BLE_E2E__, fuera de prod). tacto_vaquillona + pesaje → la secuencia tiene 2
+// MockAdapter (flag __MITROPERO_BLE_E2E__, fuera de prod). tacto_vaquillona + pesaje → la secuencia tiene 2
 // pasos → la línea muestra "· 1 de 2" (el contador importa tanto como el nombre largo).
 
 import path from 'node:path';
@@ -47,21 +47,21 @@ function makeEid(): string {
 /** Marca el flag de E2E del bastón (mock) antes del bundle. */
 async function markBle(page: Page): Promise<void> {
   await page.addInitScript(() => {
-    (window as unknown as Record<string, unknown>).__RAFAQ_BLE_E2E__ = true;
+    (window as unknown as Record<string, unknown>).__MITROPERO_BLE_E2E__ = true;
   });
 }
 
 async function connectMock(page: Page): Promise<void> {
   await page.evaluate(() => {
-    const h = (window as unknown as { __rafaqBle?: { connectMock: () => void } }).__rafaqBle;
+    const h = (window as unknown as { __mitroperoBle?: { connectMock: () => void } }).__mitroperoBle;
     h?.connectMock();
   });
 }
 
 async function bastonazo(page: Page, eid: string): Promise<void> {
   await page.evaluate((e) => {
-    const h = (window as unknown as { __rafaqBle?: { connectMock: () => void; tagRead: (x: string) => void } }).__rafaqBle;
-    if (!h) throw new Error('window.__rafaqBle no disponible (¿BleE2EBridge bajo el flag?)');
+    const h = (window as unknown as { __mitroperoBle?: { connectMock: () => void; tagRead: (x: string) => void } }).__mitroperoBle;
+    if (!h) throw new Error('window.__mitroperoBle no disponible (¿BleE2EBridge bajo el flag?)');
     h.connectMock();
     h.tagRead(e);
   }, eid);

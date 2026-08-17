@@ -7,7 +7,7 @@
 //   (2) ELEGIR EXISTENTE: Elegir lote → tap un lote sembrado → la vaca queda en ese lote (RLV.12).
 //   (3) "AHORA NO" (saltar, RLV.11): la sugerencia se salta → sale del flujo → la vaca sigue SIN lote.
 //
-// Reusa el bastón mock (__RAFAQ_BLE_E2E__) y el flujo de tacto real (jornada con tacto → VACÍA → confirmar).
+// Reusa el bastón mock (__MITROPERO_BLE_E2E__) y el flujo de tacto real (jornada con tacto → VACÍA → confirmar).
 // El animal se siembra SERVIDO (seedReproductiveServiceEvent) para que el tacto de PREÑEZ aplique. Rodeo de
 // 1 mes de servicio → VACÍA va directo al resumen (sin sub-paso de tamaño). Importa `test` de
 // './helpers/fixtures' (NO de '@playwright/test' — el shim de env con PowerSync).
@@ -41,15 +41,15 @@ function makeEid(): string {
 
 async function gotoWithBle(page: Page): Promise<void> {
   await page.addInitScript(() => {
-    (window as unknown as Record<string, unknown>).__RAFAQ_BLE_E2E__ = true;
+    (window as unknown as Record<string, unknown>).__MITROPERO_BLE_E2E__ = true;
   });
   await page.goto('/');
 }
 
 async function bastonazo(page: Page, eid: string): Promise<void> {
   await page.evaluate((e) => {
-    const h = (window as unknown as { __rafaqBle?: { connectMock: () => void; tagRead: (x: string) => void } }).__rafaqBle;
-    if (!h) throw new Error('window.__rafaqBle no disponible (¿BleE2EBridge bajo el flag?)');
+    const h = (window as unknown as { __mitroperoBle?: { connectMock: () => void; tagRead: (x: string) => void } }).__mitroperoBle;
+    if (!h) throw new Error('window.__mitroperoBle no disponible (¿BleE2EBridge bajo el flag?)');
     h.connectMock();
     h.tagRead(e);
   }, eid);
@@ -69,7 +69,7 @@ async function startSessionTacto(page: Page): Promise<void> {
   await expect(page.getByRole('button', { name: 'Arrancar jornada', exact: true })).toBeVisible({ timeout: 20_000 });
   await page.getByRole('button', { name: 'Arrancar jornada', exact: true }).click();
   await page.evaluate(() => {
-    const h = (window as unknown as { __rafaqBle?: { connectMock: () => void } }).__rafaqBle;
+    const h = (window as unknown as { __mitroperoBle?: { connectMock: () => void } }).__mitroperoBle;
     h?.connectMock();
   });
   await expect(page.getByText('Acercá el bastón al animal', { exact: true })).toBeVisible({ timeout: 20_000 });

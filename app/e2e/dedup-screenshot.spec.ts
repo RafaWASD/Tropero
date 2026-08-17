@@ -2,7 +2,7 @@
 //
 // NO es un test de la Fase 6 (E2E formal, run posterior): son las capturas en 412×915 que el leader vetea
 // con la skill design-review ANTES de mostrar a Raf (manga-crítico). Reusa el mock del bastón del chunk
-// BLE global (`window.__rafaqBle.tagRead` bajo el flag E2E, igual que baston.spec.ts).
+// BLE global (`window.__mitroperoBle.tagRead` bajo el flag E2E, igual que baston.spec.ts).
 //
 // Opción A (modo `assign_or_create` del bottom-sheet) — DOS estados:
 //   1) la LISTA (≥3 candidatos sin caravana + el buscador visible, cada fila con su chevron de afford de tap)
@@ -49,15 +49,15 @@ function makeEid(): string {
 
 async function gotoWithBle(page: Page): Promise<void> {
   await page.addInitScript(() => {
-    (window as unknown as Record<string, unknown>).__RAFAQ_BLE_E2E__ = true;
+    (window as unknown as Record<string, unknown>).__MITROPERO_BLE_E2E__ = true;
   });
   await page.goto('/');
 }
 
 async function bastonazo(page: Page, eid: string): Promise<void> {
   await page.evaluate((e) => {
-    const h = (window as unknown as { __rafaqBle?: { connectMock: () => void; tagRead: (x: string) => void } }).__rafaqBle;
-    if (!h) throw new Error('window.__rafaqBle no está disponible (¿se montó el BleE2EBridge bajo el flag?)');
+    const h = (window as unknown as { __mitroperoBle?: { connectMock: () => void; tagRead: (x: string) => void } }).__mitroperoBle;
+    if (!h) throw new Error('window.__mitroperoBle no está disponible (¿se montó el BleE2EBridge bajo el flag?)');
     h.connectMock();
     h.tagRead(e);
   }, eid);
@@ -70,8 +70,8 @@ async function bastonazo(page: Page, eid: string): Promise<void> {
  */
 async function conectarBaston(page: Page): Promise<void> {
   await page.evaluate(() => {
-    const h = (window as unknown as { __rafaqBle?: { connectMock: () => void } }).__rafaqBle;
-    if (!h) throw new Error('window.__rafaqBle no está disponible (¿se montó el BleE2EBridge bajo el flag?)');
+    const h = (window as unknown as { __mitroperoBle?: { connectMock: () => void } }).__mitroperoBle;
+    if (!h) throw new Error('window.__mitroperoBle no está disponible (¿se montó el BleE2EBridge bajo el flag?)');
     h.connectMock();
   });
 }

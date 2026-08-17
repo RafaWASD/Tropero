@@ -44,8 +44,8 @@ const STICK_ROW_NAME = /^Bastón: .+ Abrí la pantalla de conexión del bastón$
 async function markBleDemo(page: Page): Promise<void> {
   await page.addInitScript(() => {
     const w = window as unknown as Record<string, unknown>;
-    w.__RAFAQ_BLE_E2E__ = true;
-    w.__RAFAQ_BLE_DEMO__ = true;
+    w.__MITROPERO_BLE_E2E__ = true;
+    w.__MITROPERO_BLE_DEMO__ = true;
   });
 }
 

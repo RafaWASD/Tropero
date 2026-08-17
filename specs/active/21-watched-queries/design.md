@@ -20,7 +20,7 @@
 - **Ninguna firma pública de contexto** (R21.15). `EstablishmentContextValue`, `RodeoContextValue`, `EstablishmentState`, `RodeoState`, `ActiveLostReason` quedan igual. Los llamadores de `refreshEstablishments`/`refreshRodeos` quedan intactos.
 - **Ninguna lógica pura.** `app/src/utils/establishment.ts` (`assessDisappearance`, `shouldEmitDeferredRevocation`, `sameResolvedEstablishmentState`, `sameRodeo`, `isManeuverRouteSegment`) y `app/src/services/{establishments,rodeos,management-groups}.ts` + `powersync/local-reads.ts` **no se tocan** — la resolución de la 20 se re-corre tal cual (R21.10–R21.12). Sus suites unitarias siguen verdes y son las que garantizan la corrección de la resolución preservada.
 - **Ninguna migración, RLS policy ni sync stream** (R21.15, §8). La frontera de autorización real no se roza. El candado RG-1 de la 20 (`self_user_roles` sin filtro `active`) es exactamente lo que hace posible D2 y se preserva.
-- **Feature 04/BLE**: NO se toca (`app/src/services/ble/**`, `baston.tsx`, `*-multivendor*`). El `__RAFAQ_BLE_E2E__` init-script del caso T21 de la E2E se conserva sin editar (es del stub de maniobra, no código BLE).
+- **Feature 04/BLE**: NO se toca (`app/src/services/ble/**`, `baston.tsx`, `*-multivendor*`). El `__MITROPERO_BLE_E2E__` init-script del caso T21 de la E2E se conserva sin editar (es del stub de maniobra, no código BLE).
 
 ---
 

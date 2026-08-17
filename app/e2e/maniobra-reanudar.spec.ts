@@ -36,7 +36,7 @@ test.afterAll(async () => {
 /** Arranca con la marca de E2E del bastón SETEADA antes del bundle → mode='mock' (igual que identify). */
 async function gotoWithBle(page: Page): Promise<void> {
   await page.addInitScript(() => {
-    (window as unknown as Record<string, unknown>).__RAFAQ_BLE_E2E__ = true;
+    (window as unknown as Record<string, unknown>).__MITROPERO_BLE_E2E__ = true;
   });
   await page.goto('/');
 }

@@ -6,7 +6,7 @@
 // determinística, sin depender de romper el SQLite local (frágil) ni de un estado de DB real.
 //
 // FUERA de la superficie de producción (mismo patrón que `_components/ble-e2e-flag.ts`, vetado por Gate 2):
-// la falla SOLO se arma si Playwright marcó `window.__RAFAQ_MANEUVER_FAULT__ = true` ANTES de cargar el
+// la falla SOLO se arma si Playwright marcó `window.__MITROPERO_MANEUVER_FAULT__ = true` ANTES de cargar el
 // bundle (vía `addInitScript`). En un build normal — dev o prod — la marca NO existe (ningún input de
 // usuario ni ruta de UI la puede setear) → `maneuverPersistFaultArmed()` es SIEMPRE false → cero efecto.
 // El consumidor (carga.tsx) chequea la marca y, si está armada, trata la captura como un fallo de write
@@ -14,11 +14,11 @@
 //
 // PURO de RN (solo lee/escribe globalThis): seguro de importar desde el frame.
 
-const FAULT_GLOBAL_KEY = '__RAFAQ_MANEUVER_FAULT__';
+const FAULT_GLOBAL_KEY = '__MITROPERO_MANEUVER_FAULT__';
 
 /**
  * ¿Hay una falla de persistencia ARMADA para esta corrida E2E? true SOLO si Playwright marcó
- * `window.__RAFAQ_MANEUVER_FAULT__` antes de cargar el bundle. En producción/dev normal: false.
+ * `window.__MITROPERO_MANEUVER_FAULT__` antes de cargar el bundle. En producción/dev normal: false.
  * Consumir-y-desarmar: la 1ra captura tras armarla falla; la marca se borra → el reintento del operario
  * (o de la siguiente captura) procede normal (espeja "tocá de nuevo para reintentar").
  */

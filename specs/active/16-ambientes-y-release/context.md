@@ -41,7 +41,7 @@ Cubre las **Fases 1 (separación de ambientes)** y **5 (ops livianas)** del plan
 ### D4 — Config de la app: `app.config.ts` + lecturas estáticas
 - Migrar `app/app.json` → `app/app.config.ts` con `APP_VARIANT` (development → "miTropero (Dev)" + package `.dev`; ojo: cambiar package **invalida el dev client instalado** → rebuild).
 - `env.ts`: anteponer lecturas **ESTÁTICAS** (una por var, literales) con fallback al reader dinámico actual y a `extra` → el shim E2E sigue funcionando **sin tocar los ~70 specs**. Antes de borrar `extra.supabaseUrl`: grep de quién la consume.
-- Extender `fixtures.ts` para setear `EXPO_PUBLIC_ENV='e2e'` + flag `window.__RAFAQ_E2E__` (mismo patrón que `ble-e2e-flag.ts`).
+- Extender `fixtures.ts` para setear `EXPO_PUBLIC_ENV='e2e'` + flag `window.__MITROPERO_E2E__` (mismo patrón que `ble-e2e-flag.ts`).
 
 ### D5 — Scripts parametrizados con guarda de prod + backup/health desde día 1
 - `scripts/apply-migration.mjs --env prod` (default dev = **cero cambio**; con prod imprime el ref y exige `RAFAQ_CONFIRM_PROD=1`); nuevo `scripts/apply-all-migrations.mjs` (replay + ledger); `scripts/powersync-deploy.sh --env prod`; deploy de las 8 Edge Functions a prod.

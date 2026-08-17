@@ -325,7 +325,7 @@ test('R20.20/R20.21/R20.22/R20.18 — revocación durante la maniobra: no patea,
     .insert({ user_id: member.id, establishment_id: estA, role: 'field_operator', active: true });
 
   await page.addInitScript(() => {
-    (window as unknown as Record<string, unknown>).__RAFAQ_BLE_E2E__ = true;
+    (window as unknown as Record<string, unknown>).__MITROPERO_BLE_E2E__ = true;
   });
   await page.goto('/');
   await signIn(page, member);

@@ -157,7 +157,7 @@ test('cambiar email: pide confirmación y mantiene el email VIEJO hasta confirma
 
   // Pedimos el cambio a un email nuevo (namespaced para no chocar). NO clickeamos el link de
   // verificación (no automatizable contra el remoto sin inbox-tool — ver cabecera del archivo).
-  const newEmail = `${RUN_TAG}_changed_${Date.now()}@rafaq-e2e.test`.toLowerCase();
+  const newEmail = `${RUN_TAG}_changed_${Date.now()}@mitropero-e2e.test`.toLowerCase();
   await page.getByLabel('Nuevo email', { exact: true }).fill(newEmail);
   await page.getByRole('button', { name: 'Cambiar email', exact: true }).click();
 

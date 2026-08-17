@@ -7,7 +7,7 @@
 //   (2) sync-rechazo-sheet-<w>.png  — el SHEET de detalle con un rechazo (tipo + motivo + cuándo) + "Entendido".
 //
 // Setup: un usuario con campo + un rechazo de maniobra INYECTADO con la marca SOLO-E2E
-// (`__RAFAQ_SYNC_REJECT_E2E__`, gated fuera de prod) que el landing consume al enfocar (sin forzar un
+// (`__MITROPERO_SYNC_REJECT_E2E__`, gated fuera de prod) que el landing consume al enfocar (sin forzar un
 // rechazo server-side real). Sembramos DOS rechazos (pesaje + sanitaria) para que el plural y la lista se vean.
 
 import path from 'node:path';
@@ -43,7 +43,7 @@ for (const width of WIDTHS) {
     // Inyectamos UN rechazo (pesaje, gating 23514) → la lista muestra el motivo es-AR real. (El hook E2E
     // consume un solo payload; con uno alcanza para mostrar el banner singular + el sheet con su motivo.)
     await page.addInitScript(() => {
-      (window as unknown as Record<string, unknown>).__RAFAQ_SYNC_REJECT_E2E__ = {
+      (window as unknown as Record<string, unknown>).__MITROPERO_SYNC_REJECT_E2E__ = {
         id: 'cap-rej-1',
         table: 'weight_events',
         op: 'PUT',

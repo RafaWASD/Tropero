@@ -130,11 +130,11 @@ export const getEnv = () => resolveEnv(read);   // resolveEnv INTACTO (R3.3, cop
 
 ### `app/src/utils/app-env.ts` — `isE2E()` (R3.6/R3.7)
 
-Mismo patrón que `ble-e2e-flag.ts`: flag `window.__RAFAQ_E2E__` que **solo** Playwright pone con
+Mismo patrón que `ble-e2e-flag.ts`: flag `window.__MITROPERO_E2E__` que **solo** Playwright pone con
 `addInitScript` antes del bundle, más el discriminador `EXPO_PUBLIC_ENV==='e2e'`.
 
 ```ts
-const E2E_GLOBAL_KEY = '__RAFAQ_E2E__';
+const E2E_GLOBAL_KEY = '__MITROPERO_E2E__';
 export function isE2E(): boolean {
   try {
     if ((globalThis as any)[E2E_GLOBAL_KEY] === true) return true;
@@ -149,7 +149,7 @@ Feature 17 consume `isE2E()` para gatear Sentry/PostHog. Pura (solo lee `globalT
 ### Shim E2E — `app/e2e/helpers/fixtures.ts` (R3.5)
 
 Extender **ambos** injectores (la fixture `page` y `applyEnvShim`) para setear también
-`EXPO_PUBLIC_ENV='e2e'` y `window.__RAFAQ_E2E__ = true` en el `addInitScript`. Los ~70 specs no se
+`EXPO_PUBLIC_ENV='e2e'` y `window.__MITROPERO_E2E__ = true` en el `addInitScript`. Los ~70 specs no se
 tocan (importan `test` de este archivo). El fallback dinámico de `env.ts` (R3.2) sigue captando las 3
 vars del shim → el build web E2E arranca igual.
 

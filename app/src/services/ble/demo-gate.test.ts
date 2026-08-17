@@ -10,12 +10,12 @@ import { isDemoMode, isDemoBuildAllowed, BLE_DEMO_GLOBAL_KEY } from './demo-gate
 
 const g = globalThis as Record<string, unknown>;
 
-const E2E_KEY = '__RAFAQ_BLE_E2E__';
-const E2E_ALLOW_KEY = '__RAFAQ_BLE_DEMO_ALLOW_E2E__';
+const E2E_KEY = '__MITROPERO_BLE_E2E__';
+const E2E_ALLOW_KEY = '__MITROPERO_BLE_DEMO_ALLOW_E2E__';
 
 /**
  * Corre `fn` con la marca demo, `__DEV__`, y las marcas de E2E en el estado pedido, y limpia TODO
- * después (incl. las de E2E → sin leak entre casos: un caso que setea `__RAFAQ_BLE_E2E__` no puede
+ * después (incl. las de E2E → sin leak entre casos: un caso que setea `__MITROPERO_BLE_E2E__` no puede
  * ensuciar el "prod-safe" del siguiente). `undefined` = la marca NO existe (delete).
  */
 function withEnv(
@@ -42,7 +42,7 @@ function withEnv(
 
 // ─── RMV4.4: sin marca → false (aunque sea dev) ─────────────────────────────────────────────
 
-test('RMV4.4: sin la marca global __RAFAQ_BLE_DEMO__ → isDemoMode() false (aun en dev)', () => {
+test('RMV4.4: sin la marca global __MITROPERO_BLE_DEMO__ → isDemoMode() false (aun en dev)', () => {
   withEnv({ mark: undefined, dev: true }, () => {
     assert.equal(isDemoMode(), false);
   });
@@ -73,25 +73,25 @@ test('RMV4.4/RMV4.7: con la marca y __DEV__ ausente (prod típico) → isDemoMod
   });
 });
 
-// ─── Refinamiento E2E/captura: __RAFAQ_BLE_E2E__ (no-prod) habilita el "build allowed" ──────────
+// ─── Refinamiento E2E/captura: __MITROPERO_BLE_E2E__ (no-prod) habilita el "build allowed" ──────────
 
-test('E2E: con la marca + __RAFAQ_BLE_E2E__ (sin dev, sin build de demo) → allowed true → isDemoMode true', () => {
+test('E2E: con la marca + __MITROPERO_BLE_E2E__ (sin dev, sin build de demo) → allowed true → isDemoMode true', () => {
   withEnv({ mark: true, dev: false, e2e: true }, () => {
     assert.equal(isDemoBuildAllowed(), true);
     assert.equal(isDemoMode(), true);
   });
 });
 
-test('E2E: __RAFAQ_BLE_E2E__ SIN la marca demo → isDemoMode false (regresión E2E normal: cae a mock/manual)', () => {
+test('E2E: __MITROPERO_BLE_E2E__ SIN la marca demo → isDemoMode false (regresión E2E normal: cae a mock/manual)', () => {
   withEnv({ mark: undefined, dev: false, e2e: true }, () => {
-    // El build queda "allowed" (contexto E2E) pero sin __RAFAQ_BLE_DEMO__ NO es modo demo → el host
+    // El build queda "allowed" (contexto E2E) pero sin __MITROPERO_BLE_DEMO__ NO es modo demo → el host
     // no elige 'demo' y la corrida E2E normal sigue en mock/manual (regresión intacta).
     assert.equal(isDemoBuildAllowed(), true);
     assert.equal(isDemoMode(), false);
   });
 });
 
-test('E2E: override __RAFAQ_BLE_DEMO_ALLOW_E2E__ = false anula el allow aun bajo __RAFAQ_BLE_E2E__', () => {
+test('E2E: override __MITROPERO_BLE_DEMO_ALLOW_E2E__ = false anula el allow aun bajo __MITROPERO_BLE_E2E__', () => {
   withEnv({ mark: true, dev: false, e2e: true, e2eAllow: false }, () => {
     assert.equal(isDemoBuildAllowed(), false);
     assert.equal(isDemoMode(), false);

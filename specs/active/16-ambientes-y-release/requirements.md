@@ -44,8 +44,8 @@ EARS estricto (`docs/specs.md`). "DEV" = ambiente de desarrollo/tests actual; "P
 >
 > `e2e` es un valor válido **del runtime**, no de un perfil de build: un binario con `isE2E()` en true apaga Sentry y PostHog en silencio. El guard de perfiles lo rechaza a propósito.
 - **R3.5** Cuando corra la suite E2E, el shim de `app/e2e/helpers/fixtures.ts` deberá inyectar `EXPO_PUBLIC_ENV='e2e'` además de las 3 variables actuales, **sin modificar los ~70 specs**.
-- **R3.6** Cuando Playwright cargue el bundle, el sistema deberá exponer una función pura `isE2E()` que devuelva `true` si Playwright marcó `window.__RAFAQ_E2E__` antes del boot **o** si `EXPO_PUBLIC_ENV==='e2e'` (mismo patrón que `ble-e2e-flag.ts`).
-- **R3.7** Si no existe la marca `window.__RAFAQ_E2E__` ni `EXPO_PUBLIC_ENV==='e2e'`, entonces `isE2E()` deberá devolver `false` (producción/dev normal).
+- **R3.6** Cuando Playwright cargue el bundle, el sistema deberá exponer una función pura `isE2E()` que devuelva `true` si Playwright marcó `window.__MITROPERO_E2E__` antes del boot **o** si `EXPO_PUBLIC_ENV==='e2e'` (mismo patrón que `ble-e2e-flag.ts`).
+- **R3.7** Si no existe la marca `window.__MITROPERO_E2E__` ni `EXPO_PUBLIC_ENV==='e2e'`, entonces `isE2E()` deberá devolver `false` (producción/dev normal).
 
 ## R4 — EAS: targets, canales y variables por ambiente
 

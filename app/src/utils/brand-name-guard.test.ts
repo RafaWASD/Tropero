@@ -16,10 +16,12 @@
 //
 // ── LAS REGLAS ───────────────────────────────────────────────────────────────────────────────────────
 //   A  El nombre VIEJO no aparece en código de `app/app` + `app/src`. Excepciones: los identificadores
-//      INTERNOS que lo llevan por motivos técnicos (flags globales `__RAFAQ_*__` de E2E/demo y el
-//      nombre del archivo SQLite local) — declarados uno por uno, con su motivo.
+//      INTERNOS que lo llevan por motivos técnicos (flags globales prefijados con `__` y el nombre del
+//      archivo SQLite local) — declarados uno por uno, con su motivo.
 //   B  El nombre NUEVO se escribe SIEMPRE `miTropero` (mi minúscula, pegado, T mayúscula). Ni
-//      "MiTropero", ni "Mi Tropero", ni "mitropero".
+//      "MiTropero", ni "Mi Tropero", ni "mitropero". Mismas dos excepciones que no son wordmark: un
+//      DOMINIO (lo pide el DNS) y un FLAG GLOBAL interno prefijado con `__` (lo pide la convención de
+//      identificadores; ver `INTERNAL_FLAG_PREFIX`).
 //   C  El WORDMARK (el nombre como texto suelto en un `<Text>`) declara `lineHeight` matching su
 //      `fontSize`. Es la trampa concreta de este rebrand: el nombre viejo era todo mayúsculas y no
 //      tenía NINGÚN descendente; "miTropero" tiene la `p`. Tamagui no aplica el lineHeight del token
@@ -94,9 +96,16 @@ const INTERNAL_LITERAL_ALLOW: Record<string, string> = {
 };
 
 /**
- * Un `__` inmediatamente antes del nombre viejo lo marca como FLAG GLOBAL interno
- * (`__RAFAQ_BLE_E2E__`, `__RAFAQ_MANEUVER_FAULT__`, `__rafaqBle`). Son marcas que pone Playwright antes
- * del bundle; no las ve ningún usuario y renombrarlas rompe la suite sin ganar nada.
+ * Un `__` inmediatamente antes del nombre (VIEJO o NUEVO) lo marca como FLAG GLOBAL interno
+ * (`__MITROPERO_BLE_E2E__`, `__MITROPERO_MANEUVER_FAULT__`, `__mitroperoBle`). Son marcas que pone
+ * Playwright antes del bundle: no las ve ningún usuario, no son wordmark, y su grafía la manda la
+ * convención de identificadores, no la marca.
+ *
+ * Lo usan las DOS reglas de nombre, y por motivos distintos:
+ *   · A — mientras un flag siga con el nombre viejo, renombrarlo rompe la suite sin ganar nada.
+ *   · B — ya renombrado (rebrand fase 2, 2026-08-16), `__MITROPERO_…`/`__mitropero…` no es "grafía
+ *     equivocada del wordmark": es un identificador. Sin este carve-out, la fase 2 dejaba 10 líneas
+ *     de plomería en rojo y la única salida habría sido una válvula por línea.
  */
 const INTERNAL_FLAG_PREFIX = '__';
 
@@ -380,6 +389,14 @@ function spellingHits(code: string): { rule: string; idx: number }[] {
     // Carve-out: un DOMINIO (`mitropero.com.ar`, `mitropero.ar`) es minúscula por definición del DNS y
     // no es el wordmark. Se reconoce por el punto + letras inmediatamente después.
     if (/^\.[a-z]/.test(code.slice(idx + text.length, idx + text.length + 2))) continue;
+    // Carve-out: un FLAG GLOBAL interno (`__MITROPERO_BLE_E2E__`, `__mitroperoBle`). MISMO predicado
+    // que la regla A (`INTERNAL_FLAG_PREFIX`), por el mismo motivo: un `__` inmediatamente antes marca
+    // un identificador de plomería que no ve ningún usuario, y en un identificador la grafía la manda
+    // la convención de código (`mitropero`/`MITROPERO`), no la marca. Hasta el rebrand fase 2 estos
+    // flags llevaban el nombre VIEJO, así que sólo los tocaba la regla A; al renombrarlos pasaron a
+    // caer bajo la B — que los reportaba como "grafía equivocada del wordmark" siendo que no son
+    // wordmark. Lo que la B sigue prohibiendo, y está falsificado abajo: `mitropero` en TEXTO.
+    if (code.slice(idx - INTERNAL_FLAG_PREFIX.length, idx) === INTERNAL_FLAG_PREFIX) continue;
     out.push({ rule: `B grafía "${text}" (la única forma es ${BRAND})`, idx });
   }
   return out;
@@ -792,6 +809,18 @@ test('el guard DETECTA las firmas (no pasa verde por no estar mirando nada)', ()
   assert.ok(hit("const t = 'MITROPERO';"), 'todo mayúscula');
   assert.ok(!hit(`const t = 'Te invito a sumarte en ${BRAND}.';`), 'la grafía correcta no dispara');
   assert.ok(!hit("const url = 'https://mitropero.com.ar/invite';"), 'un dominio en minúscula está exento');
+  // REGLA B / carve-out de FLAG GLOBAL interno (rebrand fase 2). Los flags reales, tal como quedaron:
+  assert.ok(!hit("const K = '__MITROPERO_BLE_E2E__';"), 'flag global de E2E con el nombre NUEVO');
+  assert.ok(!hit("const H = '__mitroperoBle';"), 'handle de E2E en camelCase con el nombre NUEVO');
+  assert.ok(
+    !hit('(globalThis as R).__MITROPERO_BLE_E2E__ === true && !isDemoMode()'),
+    'y leído inline, sin pasar por una constante',
+  );
+  // …y su CONTRAPRUEBA: el carve-out es SÓLO el `__` pegado. Sin él, la B sigue cazando todo.
+  assert.ok(hit("const t = 'Bienvenido a mitropero';"), 'sin `__`, minúscula en texto SIGUE disparando');
+  assert.ok(hit("const K = 'MITROPERO_BLE_E2E';"), 'sin `__`, un identificador NO está exento');
+  assert.ok(hit('<Text>__ mitropero</Text>'), 'el `__` tiene que estar PEGADO, no cerca');
+  assert.ok(hit('<Text>mitropero</Text>'), 'un wordmark en minúscula sigue siendo una violación');
 
   // REGLA C — el wordmark sin lineHeight matching (LA trampa de este rebrand).
   assert.ok(

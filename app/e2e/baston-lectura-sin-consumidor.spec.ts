@@ -12,7 +12,7 @@
 // ve. Pero en web el MISMO `playFeedback` toca el canal `web-audio` (`decideFeedback('web', beep=ON,
 // 'accepted')` → `sound.channel:'web-audio'` → `new AudioContext()`), y el sonido viene habilitado por
 // default (`BEEP_DEFAULT_ENABLED`). Así que stubeamos `AudioContext` con un CONTADOR: cada confirmación
-// del bastón incrementa `window.__rafaqBeeps`. Eso convierte "¿el producto le confirmó al peón?" en un
+// del bastón incrementa `window.__mitroperoBeeps`. Eso convierte "¿el producto le confirmó al peón?" en un
 // número observable, que es exactamente la pregunta del bug.
 //
 // Este test cuenta CUÁNTAS veces habló el producto; el que verifica QUÉ dijo (pip agudo de "entró" vs.
@@ -59,13 +59,13 @@ function makeEid(): string {
 async function gotoWithBeepCounter(page: Page): Promise<void> {
   await page.addInitScript(() => {
     const w = window as unknown as Record<string, unknown>;
-    w.__RAFAQ_BLE_E2E__ = true;
-    w.__rafaqBeeps = 0;
+    w.__MITROPERO_BLE_E2E__ = true;
+    w.__mitroperoBeeps = 0;
     class CountingAudioContext {
       currentTime = 0;
       destination = {};
       constructor() {
-        (window as unknown as { __rafaqBeeps: number }).__rafaqBeeps += 1;
+        (window as unknown as { __mitroperoBeeps: number }).__mitroperoBeeps += 1;
       }
       createOscillator() {
         return {
@@ -91,8 +91,8 @@ async function gotoWithBeepCounter(page: Page): Promise<void> {
 
 async function bastonazo(page: Page, eid: string): Promise<void> {
   await page.evaluate((e) => {
-    const h = (window as unknown as { __rafaqBle?: { connectMock: () => void; tagRead: (x: string) => void } }).__rafaqBle;
-    if (!h) throw new Error('window.__rafaqBle no disponible (¿BleE2EBridge bajo el flag?)');
+    const h = (window as unknown as { __mitroperoBle?: { connectMock: () => void; tagRead: (x: string) => void } }).__mitroperoBle;
+    if (!h) throw new Error('window.__mitroperoBle no disponible (¿BleE2EBridge bajo el flag?)');
     h.connectMock();
     h.tagRead(e);
   }, eid);
@@ -100,7 +100,7 @@ async function bastonazo(page: Page, eid: string): Promise<void> {
 
 /** Cuántas veces el producto le CONFIRMÓ una lectura al operario desde que arrancó la página. */
 function beeps(page: Page): Promise<number> {
-  return page.evaluate(() => (window as unknown as { __rafaqBeeps: number }).__rafaqBeeps);
+  return page.evaluate(() => (window as unknown as { __mitroperoBeeps: number }).__mitroperoBeeps);
 }
 
 /** Arranca una jornada con SOLO PESAJE y aterriza en la identificación con el mock conectado. */
@@ -117,7 +117,7 @@ async function startSessionPesaje(page: Page): Promise<void> {
   await expect(page.getByRole('button', { name: 'Arrancar jornada', exact: true })).toBeVisible({ timeout: 20_000 });
   await page.getByRole('button', { name: 'Arrancar jornada', exact: true }).click();
   await page.evaluate(() => {
-    const h = (window as unknown as { __rafaqBle?: { connectMock: () => void } }).__rafaqBle;
+    const h = (window as unknown as { __mitroperoBle?: { connectMock: () => void } }).__mitroperoBle;
     h?.connectMock();
   });
   await expect(page.getByText('Acercá el bastón al animal', { exact: true })).toBeVisible({ timeout: 20_000 });

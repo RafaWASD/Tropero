@@ -1,14 +1,14 @@
 // BleE2EBridge — puente de test entre Playwright y el MockAdapter montado en el provider de la RAÍZ
 // (spec 09 chunk BLE global, §7.2 / T8.1). El provider instancia su transporte internamente; sin este
 // puente, Playwright no tiene forma de inyectarle un bastonazo. El puente lee `api.transport` (que en
-// mode='mock' ES un MockAdapter) y publica un handle acotado en `window.__rafaqBle`:
+// mode='mock' ES un MockAdapter) y publica un handle acotado en `window.__mitroperoBle`:
 //   - tagRead(eid)        → inyecta una lectura (mockTagRead) → el provider valida/dedupea/confirma y
 //                           entrega el EID al overlay.
 //   - connectMock()       → marca el transporte conectado (para el chip + el connect web-serial mockeado).
 //   - disconnectMock()    → marca desconectado.
 //
 // FUERA DE PRODUCCIÓN (RB E2E / Gate 2): se monta SOLO si `isBleE2E()` (la marca DELIBERADA que solo
-// Playwright pone antes del bundle). En un build normal NO se monta → `window.__rafaqBle` NO existe y no
+// Playwright pone antes del bundle). En un build normal NO se monta → `window.__mitroperoBle` NO existe y no
 // hay ninguna superficie de inyección. El handle expone únicamente lo necesario para los 4 escenarios;
 // no toca datos, red ni DB.
 

@@ -2,8 +2,8 @@
 // caravana)" de spec 09. Tests de COMPORTAMIENTO con aserciones (no solo captura — eso vive en
 // dedup-screenshot.spec.ts, que sigue generando los PNG del veto del leader).
 //
-// Reusa el harness mock del bastón del chunk BLE global (`window.__rafaqBle.tagRead` bajo el flag
-// `__RAFAQ_BLE_E2E__`, igual que baston.spec.ts): el provider de la raíz monta el MockAdapter, que NO
+// Reusa el harness mock del bastón del chunk BLE global (`window.__mitroperoBle.tagRead` bajo el flag
+// `__MITROPERO_BLE_E2E__`, igual que baston.spec.ts): el provider de la raíz monta el MockAdapter, que NO
 // existe fuera de la marca (Gate 2). El lookup es LOCAL (PowerSync SQLite) → los candidatos sembrados
 // server-side deben BAJAR por la stream antes de bastonear; esperamos a verlos en la lista (proxy de
 // "ya sincronizó") para no pasar por la razón equivocada (patrón del test RD6.1 existente).
@@ -50,7 +50,7 @@ function makeEid(): string {
 /** Arranca la app con la marca de E2E del bastón SETEADA antes del bundle → mode='mock' + handle en window. */
 async function gotoWithBle(page: Page): Promise<void> {
   await page.addInitScript(() => {
-    (window as unknown as Record<string, unknown>).__RAFAQ_BLE_E2E__ = true;
+    (window as unknown as Record<string, unknown>).__MITROPERO_BLE_E2E__ = true;
   });
   await page.goto('/');
 }
@@ -66,8 +66,8 @@ async function gotoWithBle(page: Page): Promise<void> {
  */
 async function conectarBaston(page: Page): Promise<void> {
   await page.evaluate(() => {
-    const h = (window as unknown as { __rafaqBle?: { connectMock: () => void } }).__rafaqBle;
-    if (!h) throw new Error('window.__rafaqBle no está disponible (¿se montó el BleE2EBridge bajo el flag?)');
+    const h = (window as unknown as { __mitroperoBle?: { connectMock: () => void } }).__mitroperoBle;
+    if (!h) throw new Error('window.__mitroperoBle no está disponible (¿se montó el BleE2EBridge bajo el flag?)');
     h.connectMock();
   });
 }
@@ -75,8 +75,8 @@ async function conectarBaston(page: Page): Promise<void> {
 /** Conecta el mock + inyecta un bastonazo del EID dado (el handle lo publica BleE2EBridge bajo el flag). */
 async function bastonazo(page: Page, eid: string): Promise<void> {
   await page.evaluate((e) => {
-    const h = (window as unknown as { __rafaqBle?: { connectMock: () => void; tagRead: (x: string) => void } }).__rafaqBle;
-    if (!h) throw new Error('window.__rafaqBle no está disponible (¿se montó el BleE2EBridge bajo el flag?)');
+    const h = (window as unknown as { __mitroperoBle?: { connectMock: () => void; tagRead: (x: string) => void } }).__mitroperoBle;
+    if (!h) throw new Error('window.__mitroperoBle no está disponible (¿se montó el BleE2EBridge bajo el flag?)');
     h.connectMock();
     h.tagRead(e);
   }, eid);

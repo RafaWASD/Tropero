@@ -43,7 +43,7 @@ for (const width of WIDTHS) {
     await applyEnvShim(page);
     // Bastón mock (igual que los specs): la identificación se comporta como en producción de test.
     await page.addInitScript(() => {
-      (window as unknown as Record<string, unknown>).__RAFAQ_BLE_E2E__ = true;
+      (window as unknown as Record<string, unknown>).__MITROPERO_BLE_E2E__ = true;
     });
 
     try {

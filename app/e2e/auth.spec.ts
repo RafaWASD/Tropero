@@ -5,7 +5,7 @@
 //   - Validación de inputs de sign-up (cliente: nombre/email/password) sin tocar el server.
 //   - Logout vuelve a login (re-ruteo del AuthGate al cambiar el AuthState).
 //
-// Todos los usuarios son namespaced (@rafaq-e2e.test) y se borran en afterAll + global-teardown.
+// Todos los usuarios son namespaced (@mitropero-e2e.test) y se borran en afterAll + global-teardown.
 
 import { test, expect } from './helpers/fixtures';
 import { createTestUser, cleanupAll, type TestUser } from './helpers/admin';

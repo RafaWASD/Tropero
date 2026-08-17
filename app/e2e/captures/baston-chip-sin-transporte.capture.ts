@@ -15,7 +15,7 @@
 // LAS DOS PASADAS SON EL PUNTO: el bug es "hay algo de más", así que una captura sola no dice nada (una
 // pantalla sin chip se ve igual que una pantalla que nunca tuvo chip). Por eso se capturan las MISMAS 4
 // superficies en las 2 condiciones, para leerlas en pareja:
-//   PASADA A — SIN transporte (`mode='manual'`, marca __RAFAQ_BLE_E2E_MANUAL__): el Android de Raf.
+//   PASADA A — SIN transporte (`mode='manual'`, marca __MITROPERO_BLE_E2E_MANUAL__): el Android de Raf.
 //   PASADA B — CON transporte (`mode='mock'`): el estado de web, que NO se toca.
 //
 // Para correrlo:
@@ -100,8 +100,8 @@ test('captura A: SIN transporte — ninguna superficie ofrece ni pide el bastón
   await seedEstablishmentWithRodeo(user.id, 'Campo CapChipNT');
 
   await page.addInitScript(() => {
-    (window as unknown as Record<string, unknown>).__RAFAQ_BLE_E2E__ = true;
-    (window as unknown as Record<string, unknown>).__RAFAQ_BLE_E2E_MANUAL__ = true;
+    (window as unknown as Record<string, unknown>).__MITROPERO_BLE_E2E__ = true;
+    (window as unknown as Record<string, unknown>).__MITROPERO_BLE_E2E_MANUAL__ = true;
   });
   await page.goto('/');
   await signIn(page, user);
@@ -161,7 +161,7 @@ test('captura B: CON transporte — todo sigue igual (web no se toca)', async ({
   await seedEstablishmentWithRodeo(user.id, 'Campo CapChipCT');
 
   await page.addInitScript(() => {
-    (window as unknown as Record<string, unknown>).__RAFAQ_BLE_E2E__ = true;
+    (window as unknown as Record<string, unknown>).__MITROPERO_BLE_E2E__ = true;
   });
   await page.goto('/');
   await signIn(page, user);
@@ -176,8 +176,8 @@ test('captura B: CON transporte — todo sigue igual (web no se toca)', async ({
 
   // ── 08 — el chip CONECTADO: informa de verdad (RB8.2), que es su razón de ser cuando hay transporte. ──
   await page.evaluate(() => {
-    const h = (window as unknown as { __rafaqBle?: { connectMock: () => void } }).__rafaqBle;
-    if (!h) throw new Error('window.__rafaqBle no está disponible (¿se montó el BleE2EBridge?)');
+    const h = (window as unknown as { __mitroperoBle?: { connectMock: () => void } }).__mitroperoBle;
+    if (!h) throw new Error('window.__mitroperoBle no está disponible (¿se montó el BleE2EBridge?)');
     h.connectMock();
   });
   await expect(page.getByText('Bastón conectado', { exact: true })).toBeVisible({ timeout: 10_000 });

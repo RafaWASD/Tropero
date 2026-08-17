@@ -6,7 +6,7 @@
 // El punto CRÍTICO (RCF.6): el form de parto suspende el listener global (useBusyWhileMounted); el sheet toma
 // la propiedad EXCLUSIVA del bastón → la lectura entra al sheet y el FindOrCreateOverlay global NO se abre.
 //
-// Inyección sin hardware: __RAFAQ_BLE_E2E__ (MockAdapter) + window.__rafaqBle.connectMock/tagRead.
+// Inyección sin hardware: __MITROPERO_BLE_E2E__ (MockAdapter) + window.__mitroperoBle.connectMock/tagRead.
 //
 // Oráculos:
 //   - "capturado en ESE ternero" → CapturedTagRow por índice (testID tag-captured-<i>) con el EID legible.
@@ -43,15 +43,15 @@ function eidReadable(eid: string): string {
 
 async function gotoWithBle(page: Page): Promise<void> {
   await page.addInitScript(() => {
-    (window as unknown as Record<string, unknown>).__RAFAQ_BLE_E2E__ = true;
+    (window as unknown as Record<string, unknown>).__MITROPERO_BLE_E2E__ = true;
   });
   await page.goto('/');
 }
 
 async function bastonazo(page: Page, eid: string): Promise<void> {
   await page.evaluate((e: string) => {
-    const h = (window as unknown as { __rafaqBle?: { connectMock: () => void; tagRead: (x: string) => void } }).__rafaqBle;
-    if (!h) throw new Error('window.__rafaqBle no está disponible (¿se montó el BleE2EBridge bajo el flag?)');
+    const h = (window as unknown as { __mitroperoBle?: { connectMock: () => void; tagRead: (x: string) => void } }).__mitroperoBle;
+    if (!h) throw new Error('window.__mitroperoBle no está disponible (¿se montó el BleE2EBridge bajo el flag?)');
     h.connectMock();
     h.tagRead(e);
   }, eid);

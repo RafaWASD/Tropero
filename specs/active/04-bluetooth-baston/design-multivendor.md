@@ -59,7 +59,7 @@ app/src/services/ble/
 ├── selection-priority.ts      # platformTransportPriority, adapterForTransport, selectReaderBinding,
 │                              #   ReaderBinding, BindingEnv (RMV2). PURO.
 ├── adapter-simulator.ts       # SimulatorAdapter (kind:'simulator'), emite EIDs sintéticos válidos (RMV4). 
-├── demo-gate.ts               # isDemoMode() puro: lee __RAFAQ_BLE_DEMO__ + __DEV__/no-prod (RMV4.4/4.5). PURO.
+├── demo-gate.ts               # isDemoMode() puro: lee __MITROPERO_BLE_DEMO__ + __DEV__/no-prod (RMV4.4/4.5). PURO.
 └── __tests__ (junto al módulo, patrón node:test del core)
     ├── driver-registry.test.ts    # match por deviceMatch, lookup por vendorId, no-match → null (RMV1)
     ├── selection-priority.test.ts  # tabla de prioridad, binding por plataforma, available, ambigüedad,
@@ -122,7 +122,7 @@ app/src/features/ble-stick/                     (territorio de 04; features/anim
 ### 2.5 Frontera host-level (mínima, coordinada — NO toca teléfono/auth)
 
 - `app/app/_layout.tsx` — extender el prop `mode` del `BleStickListenerProvider` raíz: hoy `mode={isBleE2E() ? (isBleE2EManual() ? 'manual' : 'mock') : 'auto'}`; el delta lo lleva a `… : (isDemoMode() ? 'demo' : 'auto')`. **1 línea**, análoga a la de E2E. Coordinar con el leader (colisión-safe).
-- `app/app/_components/ble-demo-flag.ts` — *(opcional)* si se prefiere el patrón host-level de `ble-e2e-flag.ts`, la marca `__RAFAQ_BLE_DEMO__` puede vivir acá en vez de en `services/ble/demo-gate.ts`. **Decisión de diseño**: la lógica pura del gate vive en `services/ble/demo-gate.ts` (04-owned, testeable en node:test); el `_layout.tsx` la importa. No se necesita un `BleDemoBridge` separado (los controles de simulación viven en `DemoControls.tsx` dentro de la pantalla, gateados por `isDemoMode()`).
+- `app/app/_components/ble-demo-flag.ts` — *(opcional)* si se prefiere el patrón host-level de `ble-e2e-flag.ts`, la marca `__MITROPERO_BLE_DEMO__` puede vivir acá en vez de en `services/ble/demo-gate.ts`. **Decisión de diseño**: la lógica pura del gate vive en `services/ble/demo-gate.ts` (04-owned, testeable en node:test); el `_layout.tsx` la importa. No se necesita un `BleDemoBridge` separado (los controles de simulación viven en `DemoControls.tsx` dentro de la pantalla, gateados por `isDemoMode()`).
 - Nav "Más" (ADR-018) — agregar la entrada de ruta a `StickConnectionScreen`, y montar `StickStatusIndicator` en el chrome. Coordinar el punto de montaje del indicador; si exigiera tocar un contrato de spec 09, **parar y reportar** al leader.
 
 > **Ningún archivo de spec 09 (`app/src/features/animals/*`, screens de find-or-create) se modifica.** El delta reusa `useBleConnectionStatus`, `useBleProviderApi`, `useBleStickListener` tal como el core los expone.
@@ -239,14 +239,14 @@ selectReaderBinding(env):
 ```
 Guard 1 (selección):  selectTransportAdapter(mode='auto') NUNCA devuelve 'simulator'.
                       Solo mode='demo' → 'simulator'. Prod monta 'auto'. (RMV4.3)
-Guard 2 (marca):      isDemoMode() = (globalThis.__RAFAQ_BLE_DEMO__ === true) && isDemoBuildAllowed()
+Guard 2 (marca):      isDemoMode() = (globalThis.__MITROPERO_BLE_DEMO__ === true) && isDemoBuildAllowed()
                       donde isDemoBuildAllowed() = (__DEV__ === true) || isExplicitDemoBuild() || isE2eDemoAllowed().
                       isExplicitDemoBuild() lee un flag de build dedicado (ej. Constants.expoConfig.extra.demoBuild),
                       seteado SOLO en un perfil de build 'demo', NUNCA en production/preview.
-                      isE2eDemoAllowed() = (globalThis.__RAFAQ_BLE_E2E__ === true): el contexto de E2E/captura
+                      isE2eDemoAllowed() = (globalThis.__MITROPERO_BLE_E2E__ === true): el contexto de E2E/captura
                       (Playwright vía addInitScript, fuera del bundle prod) es no-producción → puede ejercitar la
-                      demo seteando AMBOS flags (__RAFAQ_BLE_E2E__ + __RAFAQ_BLE_DEMO__). El flag de E2E por sí
-                      solo NO activa el simulador (sigue exigiendo __RAFAQ_BLE_DEMO__). Producción no tiene NINGUNO.
+                      demo seteando AMBOS flags (__MITROPERO_BLE_E2E__ + __MITROPERO_BLE_DEMO__). El flag de E2E por sí
+                      solo NO activa el simulador (sigue exigiendo __MITROPERO_BLE_DEMO__). Producción no tiene NINGUNO.
                       La marca la pone deliberadamente el operador ANTES del bundle (addInitScript en web /
                       extra del perfil de demo en nativo); no hay camino desde la UI ni desde input. Un build de
                       producción/preview no tiene __DEV__ ni el flag de demo → simulador imposible. (RMV4.4)
@@ -260,7 +260,7 @@ Guard 3 (instancia):  instantiateTransport('simulator') re-chequea isDemoMode() 
 
 Consecuencia (RMV4.7): en un **bundle de producción** los tres guards fallan (mode='auto' → no 'simulator'; `isDemoMode()` es false; instancia null) → **no existe camino** para que un EID simulado entre al pipeline y termine declarado ante SENASA. En un build de demo, todo es demo por definición y las lecturas se marcan **"DEMO"** en la confirmación (RMV4.6). **Nota de frontera**: si garantizar la no-declaración exigiera que spec 09 / spec 08 supriman/marquen la declaración de un EID demo, **parar y reportar al leader** (04 no toca la declaración). Este patrón replica y **endurece** el del bridge E2E (backlog LOW-2 pedía gatear la marca también por `__DEV__`: acá se folda desde el diseño).
 
-**Distinción con el mock y el bridge E2E:** el `MockAdapter` (kind `'mock'`) + `BleE2EBridge` existen para **Playwright** (inyección programática, no visible). El `SimulatorAdapter` (kind `'simulator'`) es para **demos humanas en vivo** (controles visibles, marcado "DEMO", auto-play). Se elige un `kind` distinto — en vez de reusar `'mock'` — para poder marcar honestamente las lecturas como demo, con su **propia marca requerida** (`__RAFAQ_BLE_DEMO__`), distinta del `mock`. El gate de demo trata el flag de E2E como un **contexto no-prod válido** para ejercitar la demo en captura/Playwright (`isE2eDemoAllowed()`), pero el modo demo sigue **exigiendo** su marca propia → siguen siendo modos distintos (`mock` invisible vs `simulator` con controles + DEMO). (Ver Alternativa descartada B.)
+**Distinción con el mock y el bridge E2E:** el `MockAdapter` (kind `'mock'`) + `BleE2EBridge` existen para **Playwright** (inyección programática, no visible). El `SimulatorAdapter` (kind `'simulator'`) es para **demos humanas en vivo** (controles visibles, marcado "DEMO", auto-play). Se elige un `kind` distinto — en vez de reusar `'mock'` — para poder marcar honestamente las lecturas como demo, con su **propia marca requerida** (`__MITROPERO_BLE_DEMO__`), distinta del `mock`. El gate de demo trata el flag de E2E como un **contexto no-prod válido** para ejercitar la demo en captura/Playwright (`isE2eDemoAllowed()`), pero el modo demo sigue **exigiendo** su marca propia → siguen siendo modos distintos (`mock` invisible vs `simulator` con controles + DEMO). (Ver Alternativa descartada B.)
 
 ## 6. `adapter-spp-android` (RMV5) — **AS-BUILT 2026-07-30**
 
@@ -581,8 +581,8 @@ Sin cambios. El delta es 100% cliente (drivers, selección, UI, simulador, adapt
 
 **Contras:**
 - El mock/bridge están diseñados para **inyección de Playwright** (invisible, sin marcado). Una demo humana necesita **marcar las lecturas como "DEMO"** (honestidad de integridad SENASA, RMV4.6) y controles visibles — un `kind` propio lo permite sin contaminar el mock de E2E.
-- Acopla el gate de demo al de E2E (`__RAFAQ_BLE_E2E__`), cuando son propósitos distintos; separarlos (`__RAFAQ_BLE_DEMO__`) mantiene cada superficie mínima y auditable en su gate.
-- **Elegido:** `SimulatorAdapter` con `kind:'simulator'` + marca `__RAFAQ_BLE_DEMO__` propia y **requerida** (triple-guard). No se reusa el flag de E2E como disparador de demo; `isDemoBuildAllowed()` solo acepta `__RAFAQ_BLE_E2E__` como **señal de contexto no-prod** (para capturar/testear la demo con Playwright), no como la marca de demo. Costo: extender 3 uniones 04-owned de forma aditiva (Pregunta abierta #2 de requirements) — barato y honesto.
+- Acopla el gate de demo al de E2E (`__MITROPERO_BLE_E2E__`), cuando son propósitos distintos; separarlos (`__MITROPERO_BLE_DEMO__`) mantiene cada superficie mínima y auditable en su gate.
+- **Elegido:** `SimulatorAdapter` con `kind:'simulator'` + marca `__MITROPERO_BLE_DEMO__` propia y **requerida** (triple-guard). No se reusa el flag de E2E como disparador de demo; `isDemoBuildAllowed()` solo acepta `__MITROPERO_BLE_E2E__` como **señal de contexto no-prod** (para capturar/testear la demo con Playwright), no como la marca de demo. Costo: extender 3 uniones 04-owned de forma aditiva (Pregunta abierta #2 de requirements) — barato y honesto.
 
 ## 12. Recomendación de ADR (la decide y redacta el LEADER — flag, no formalización)
 

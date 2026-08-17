@@ -126,7 +126,7 @@
 
 ## RMV4. Camino de demo / simulador (gated a dev/demo)
 
-> **Buildable-hoy, dev/demo-only.** Simula un bastón leyendo tags "en vivo" para mostrar el pipeline completo (conexión → lectura → dedup → confirmación → find-or-create) **sin bastón físico**. Gateado con **triple-guard** al estilo del bridge E2E `__RAFAQ_BLE_E2E__`. **Requisito duro de integridad SENASA**: un EID simulado **nunca** se declara como real.
+> **Buildable-hoy, dev/demo-only.** Simula un bastón leyendo tags "en vivo" para mostrar el pipeline completo (conexión → lectura → dedup → confirmación → find-or-create) **sin bastón físico**. Gateado con **triple-guard** al estilo del bridge E2E `__MITROPERO_BLE_E2E__`. **Requisito duro de integridad SENASA**: un EID simulado **nunca** se declara como real.
 
 **RMV4.1** El sistema deberá exponer un adaptador simulador (`adapter-simulator.ts`, `kind: 'simulator'`) que implemente la interfaz `StickAdapter` y emita lecturas de EID sintéticas **válidas** (que pasen `isValidTag`) para ejercitar el pipeline completo sin bastón físico.
 
@@ -134,7 +134,7 @@
 
 **RMV4.3** *(triple-guard 1)* El sistema **no deberá** devolver el simulador desde `selectTransportAdapter` en `mode='auto'` (default de producción); el simulador solo deberá seleccionarse bajo `mode='demo'`.
 
-**RMV4.4** *(triple-guard 2)* El sistema deberá gatear el modo demo detrás de una marca global deliberada (`__RAFAQ_BLE_DEMO__`) horneada en build-time, disponible **solo** en un contexto **no-producción**: entorno de dev (`__DEV__`), **o** un **build de demo explícito** (canal de build dedicado, ej. `extra.demoBuild`), **o** el contexto de **E2E/captura** (`__RAFAQ_BLE_E2E__`, Playwright fuera del bundle prod); y **nunca** presente en el build de producción/preview que usan los usuarios reales (que no tiene ninguno de esos flags). No seteable desde la UI ni desde ningún input de usuario. La marca `__RAFAQ_BLE_DEMO__` es **requerida** además del contexto no-prod (el flag de E2E por sí solo NO activa el simulador — sigue en `mock`).
+**RMV4.4** *(triple-guard 2)* El sistema deberá gatear el modo demo detrás de una marca global deliberada (`__MITROPERO_BLE_DEMO__`) horneada en build-time, disponible **solo** en un contexto **no-producción**: entorno de dev (`__DEV__`), **o** un **build de demo explícito** (canal de build dedicado, ej. `extra.demoBuild`), **o** el contexto de **E2E/captura** (`__MITROPERO_BLE_E2E__`, Playwright fuera del bundle prod); y **nunca** presente en el build de producción/preview que usan los usuarios reales (que no tiene ninguno de esos flags). No seteable desde la UI ni desde ningún input de usuario. La marca `__MITROPERO_BLE_DEMO__` es **requerida** además del contexto no-prod (el flag de E2E por sí solo NO activa el simulador — sigue en `mock`).
 
 **RMV4.5** *(triple-guard 3)* El sistema deberá **re-verificar** el gate (marca demo + `kind === 'simulator'`) en el adaptador simulador y en la pantalla antes de emitir lecturas o montar controles de simulación, de modo que un build de producción **no tenga** ningún camino para instanciar el simulador.
 
@@ -235,7 +235,7 @@
 | §3 Pantalla de conexión/selección (descubrir→listar→elegir→conectar→estados→recordar), no bloqueante | RMV3.1, RMV3.2, RMV3.3, RMV3.4, RMV3.6 |
 | §3 Indicador de estado global | RMV3.5 |
 | §4 Camino de demo/simulador (lee tags en vivo sin bastón) | RMV4.1, RMV4.2 |
-| §4 Gateado dev/demo, triple-guard tipo `__RAFAQ_BLE_E2E__` | RMV4.3, RMV4.4, RMV4.5 |
+| §4 Gateado dev/demo, triple-guard tipo `__MITROPERO_BLE_E2E__` | RMV4.3, RMV4.4, RMV4.5 |
 | §4 EID simulado NUNCA se declara como real (integridad SENASA) | RMV4.7 |
 | §4 marca visual "demo" + confirmación pre-commit se mantiene | RMV4.6, RMV4.8 |
 | §5 `adapter-spp-android` escrito (Classic SPP, `react-native-bluetooth-classic`), código + unit puro | RMV5.1, RMV5.2, RMV5.3, RMV5.6, RMV5.7 |

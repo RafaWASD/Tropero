@@ -42,7 +42,7 @@
 // estados sin mockear Platform.OS o inyectar un device sintético. Son mapeos PUROS cubiertos por
 // `connection-view.test.ts` (node:test, T-MV.4.6) → 07/08 quedan fuera de esta captura (documentado).
 //
-// La demo se activa con las DOS marcas globales (__RAFAQ_BLE_E2E__ + __RAFAQ_BLE_DEMO__) seteadas ANTES del
+// La demo se activa con las DOS marcas globales (__MITROPERO_BLE_E2E__ + __MITROPERO_BLE_DEMO__) seteadas ANTES del
 // bundle (addInitScript) → isDemoMode() true → mode='demo' (simulador). Viewport mobile 412×915 (contexto
 // propio, mismo patrón que lotes-venta.capture.ts). NO corras esto en `pnpm e2e` (es un `.capture.ts`); lo
 // dispara el leader:
@@ -98,8 +98,8 @@ async function shotBand(page: Page, name: string, topLoc: Locator, bottomLoc: Lo
 async function markBleDemo(page: Page): Promise<void> {
   await page.addInitScript(() => {
     const w = window as unknown as Record<string, unknown>;
-    w.__RAFAQ_BLE_E2E__ = true;
-    w.__RAFAQ_BLE_DEMO__ = true;
+    w.__MITROPERO_BLE_E2E__ = true;
+    w.__MITROPERO_BLE_DEMO__ = true;
   });
 }
 
@@ -232,12 +232,12 @@ test('captura de la fila del bastón SIN transporte (decisión: no se oculta) @ 
   const ctx = await browser.newContext({ hasTouch: true, isMobile: true, viewport: { width: 412, height: 915 } });
   const page = await ctx.newPage();
   await applyEnvShim(page);
-  // `__RAFAQ_BLE_E2E_MANUAL__` → provider en mode='manual' → `instantiateTransport` devuelve null:
+  // `__MITROPERO_BLE_E2E_MANUAL__` → provider en mode='manual' → `instantiateTransport` devuelve null:
   // exactamente el estado de un iOS / dev build sin el módulo nativo.
   await page.addInitScript(() => {
     const w = window as unknown as Record<string, unknown>;
-    w.__RAFAQ_BLE_E2E__ = true;
-    w.__RAFAQ_BLE_E2E_MANUAL__ = true;
+    w.__MITROPERO_BLE_E2E__ = true;
+    w.__MITROPERO_BLE_E2E_MANUAL__ = true;
   });
 
   try {

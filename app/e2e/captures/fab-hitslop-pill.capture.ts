@@ -72,8 +72,8 @@ async function shotBand(page: Page, name: string, topLoc: Locator, bottomLoc: Lo
 async function markBleDemo(page: Page): Promise<void> {
   await page.addInitScript(() => {
     const w = window as unknown as Record<string, unknown>;
-    w.__RAFAQ_BLE_E2E__ = true;
-    w.__RAFAQ_BLE_DEMO__ = true;
+    w.__MITROPERO_BLE_E2E__ = true;
+    w.__MITROPERO_BLE_DEMO__ = true;
   });
 }
 

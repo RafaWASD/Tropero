@@ -13,7 +13,7 @@
 //   T17 (RTEL.3.3, RTEL.3.4) — paridad: el input del perfil se comporta igual.
 //   DP4 (RTEL.6.6, RTEL.6.7, RTEL.6.9) — el 15 pegado propone el número corregido y el tap lo aplica.
 //
-// Usuarios namespaced (@rafaq-e2e.test, RUN_TAG); cleanup en afterAll + global-teardown.
+// Usuarios namespaced (@mitropero-e2e.test, RUN_TAG); cleanup en afterAll + global-teardown.
 
 import { test, expect } from './helpers/fixtures';
 import {

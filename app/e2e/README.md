@@ -54,7 +54,7 @@ Vars requeridas (si falta alguna, la suite tira con un mensaje claro):
 
 El remoto se comparte con el testing manual de Raf, así que la suite es **colisión-safe**:
 
-- Usuarios namespaced bajo `@rafaq-e2e.test` con un `RUN_TAG` único por corrida.
+- Usuarios namespaced bajo `@mitropero-e2e.test` con un `RUN_TAG` único por corrida.
 - Campos namespaced con el `RUN_TAG` en el nombre.
 - Todo se borra en `afterAll` de cada spec **y** en `global-teardown.ts` (barrido final por
   `service_role` con CASCADE). No deja basura ni pisa datos reales.

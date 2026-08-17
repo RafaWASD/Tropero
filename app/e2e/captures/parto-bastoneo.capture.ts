@@ -7,7 +7,7 @@
 // ⚠️ NO es un test de regresión (.capture.ts, no .spec.ts → NO corre en `pnpm e2e`; se dispara a mano con
 // --config playwright.capture.config.ts, viewport mobile real 412×915). La RED DE REGRESIÓN vive en
 // e2e/parto-bastoneo.spec.ts; este archivo SOLO captura estados, reusando el MISMO mock del bastón
-// (__RAFAQ_BLE_E2E__ / window.__rafaqBle) y los MISMOS testIDs (tag-scan-* / tag-captured-<i>).
+// (__MITROPERO_BLE_E2E__ / window.__mitroperoBle) y los MISMOS testIDs (tag-scan-* / tag-captured-<i>).
 //
 // Es la pantalla REAL: el sheet vive en src/components/TagScanSheet.tsx (modo captura), lo dispara el CTA
 // TagScanCta de cada CalfBlock en el form de Parto (app/agregar-evento.tsx, eventType='birth').
@@ -65,14 +65,14 @@ async function openParto(page: Page, motherIdv: string): Promise<void> {
 
 async function connectMock(page: Page): Promise<void> {
   await page.evaluate(() => {
-    const h = (window as unknown as { __rafaqBle?: { connectMock: () => void } }).__rafaqBle;
+    const h = (window as unknown as { __mitroperoBle?: { connectMock: () => void } }).__mitroperoBle;
     h?.connectMock();
   });
 }
 
 async function tagRead(page: Page, eid: string): Promise<void> {
   await page.evaluate((e: string) => {
-    const h = (window as unknown as { __rafaqBle?: { tagRead: (x: string) => void } }).__rafaqBle;
+    const h = (window as unknown as { __mitroperoBle?: { tagRead: (x: string) => void } }).__mitroperoBle;
     h?.tagRead(e);
   }, eid);
 }
@@ -87,7 +87,7 @@ test('captura RCF.6 parto: CTA por ternero / captura en un ternero / mellizos co
   await seedAnimal(establishmentId, rodeoId, { idv: motherIdv, sex: 'female' });
 
   await page.addInitScript(() => {
-    (window as unknown as Record<string, unknown>).__RAFAQ_BLE_E2E__ = true;
+    (window as unknown as Record<string, unknown>).__MITROPERO_BLE_E2E__ = true;
   });
   await page.goto('/');
   await signIn(page, user);

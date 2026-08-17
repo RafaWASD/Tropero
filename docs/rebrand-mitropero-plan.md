@@ -21,6 +21,28 @@
 > **Baseline real, y el juez de las fases que siguen: `3115 pass / 1 fail`, ese fallo y sólo ese.**
 > Cualquier fallo nuevo es de la fase en curso. Lo cierra la fase 5 (no hace falta tocar el guard).
 >
+> ### ⚠️ El guard de marca (regla B) le dispara al nombre NUEVO en identificadores — lo van a pisar las fases 5 y 6
+>
+> Lo descubrió la **fase 2** al renombrar los globals: `brand-name-guard.test.ts` tenía el concepto de
+> "flag global interno" (`INTERNAL_FLAG_PREFIX = '__'`) pero **sólo lo aplicaba a la regla A** (nombre
+> VIEJO). Tenía sentido mientras todos los identificadores internos llevaran "rafaq". Al pasarlos a
+> `mitropero`, cayeron bajo la **regla B** ("el nombre nuevo se escribe SIEMPRE `miTropero`") — que los
+> reportó como grafía equivocada del wordmark siendo que **no son wordmark**. 10 líneas en rojo.
+>
+> **Cerrado en fase 2**: el carve-out `__` se extendió a la regla B (misma constante, mismo predicado),
+> con 3 mutantes que lo falsifican y contrapruebas de que `mitropero` en TEXTO sigue prohibido.
+>
+> **Lo que viene, y conviene tenerlo presente ANTES de empezar cada fase** (la regla B mira
+> `app/app` + `app/src`, con carve-out sólo para DOMINIO —punto + letra— y flag `__` pegado):
+>
+> | Fase | Identificador nuevo | ¿Dispara la regla B? |
+> |---|---|---|
+> | 5 — headers | `'X-Mitropero-Request-Id'` en `app/src/services/{account,members,push-notifications}.ts` | **SÍ** (`Mitropero` precedido de `-`, no de `__`) → hay que decidir carve-out o válvula |
+> | 4 — GUCs | `set_config('mitropero.is_transfer', …)` en el cliente | **No**, pero **por accidente**: el `.i` que sigue matchea el carve-out de DOMINIO. Pasa por la razón equivocada. |
+> | 6 — Expo | `slug: 'mitropero-app'`, `owner`, `scheme` en `app.config.ts` | **SÍ** (`-a` después, no es dominio ni `__`) |
+>
+> No hace falta resolverlo ahora: hace falta **no descubrirlo con la fase a medio hacer**.
+
 > ### Pregunta 5 resuelta: los nombres de streams NO llevan "rafaq"
 >
 > Verificado sobre `sync-streams/rafaq.yaml`: las streams se llaman `catalog_species`,
