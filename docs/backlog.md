@@ -1755,3 +1755,32 @@ Taggear pasos de flujos que NO disparan query, para medir "hasta qué paso se ll
 ## [2026-08-17] Visor de audit (feat 24) — login de Facundo (Google)
 
 El visor usa `signInWithPassword`. Facundo entra con Google (`iamfadolf@gmail.com`) → no puede con password. Follow-up: o le pone password a esa cuenta, o v2 con `signInWithOAuth({provider:google})` en `docs/internal/audit-viewer/app.js` (+ agregar el origin de Pages `https://mitropero-auditoria.pages.dev` a las redirect URLs de Supabase Auth).
+
+## [2026-08-17] Rebrand fase 6 (Expo) — diferida a propósito, junto con el bundle id
+
+**Decisión de Raf (2026-08-17)**: `owner: 'rafaqsorg'` y `slug: 'rafaq-app'` se quedan como están **hasta
+que se toque el bundle id**. No es olvido: es que Expo permite renombrar una cuenta un número **limitado**
+de veces, y gastar uno de esos renames en algo que no ve ningún usuario es tirarlo.
+
+Lo que se verificó para poder decidirlo con datos, y que conviene no re-investigar:
+
+- **El proyecto está clavado por UUID**: `app/app.config.ts:160` → `extra.eas.projectId:
+  'd8cf3a19-e8f7-4d7f-b417-54123e7f0d3e'`. Builds, credenciales y updates cuelgan de ahí, no del nombre.
+  O sea que renombrar la org **no desvincula nada**, y la opción "crear proyecto nuevo" que planteaba
+  `docs/rebrand-mitropero-plan.md` §4.B queda descartada: sería tirar historial de builds y credenciales
+  para resolver un problema inexistente.
+- Sólo el **Owner** puede renombrar, en *Settings → Organization settings → Rename account*. Es trabajo
+  de Raf en el dashboard, nadie más puede.
+- La doc de Expo confirma que las credenciales de Android/iOS guardadas en sus servidores sobreviven al
+  rename.
+
+**El `scheme: 'rafq'` es otra cosa y NO se toca ni entonces sin pensarlo.** No es cosmético: es el
+deep-link de OAuth de la feature 19 y lo usa la página publicada `invite.html` (`rafq://invite?token=`).
+Cambiarlo obliga, todo junto, a: build nativa nueva + editar el sitio publicado + actualizar los redirect
+URIs de Apple y de Google. Y como **no hay OTA configurado** (`app.config.ts` no tiene bloque `updates`;
+expo-updates es trabajo de la Fase 0), cualquier build ya instalada deja de responder al scheme nuevo y
+no hay forma de arreglarla remotamente.
+
+**Cuándo hacer las tres cosas juntas**: al pasar el bundle id a `com.mitropero.app`, que hay que hacer
+**antes de publicar en las tiendas** — un bundle id no se puede cambiar después. Ese es el único momento
+en que el rename de org, el slug y el scheme salen gratis.
