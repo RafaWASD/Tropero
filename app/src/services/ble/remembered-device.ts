@@ -24,12 +24,17 @@ import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 
 import { DEFAULT_BRIDGE_TIMINGS, withTimeout } from './bridge-timeout';
+import {
+  parseRememberedValue,
+  serializeRememberedValue,
+  type RememberedDevice,
+  type RememberedMeta,
+} from './remembered-format';
 
+// ⚠️ La clave NO se renombra (auditoría de `rafq.*`, `e0a32ad`): renombrarla le borra el bastón
+// recordado a todo teléfono instalado → re-emparejar en la manga. El FORMATO del valor sí cambia en
+// este delta, y por eso `parseRememberedValue` lee el viejo (RBM5.7).
 const STORAGE_KEY = 'rafq.ble.remembered_device';
-
-function safe(s: string): string {
-  return s.replace(/[^A-Za-z0-9._:-]/g, '_');
-}
 
 function hasLocalStorage(): boolean {
   try {
@@ -39,26 +44,46 @@ function hasLocalStorage(): boolean {
   }
 }
 
-/** Lee el id del bastón recordado, o null si no hay (R6.3). */
-export async function readRememberedDevice(): Promise<string | null> {
+/**
+ * Lee el bastón recordado (R6.3), o `null` si no hay. Devuelve el REGISTRO
+ * (`{deviceId, vendorId?, adapterKind?}`), no el id pelado: además de reconectar al device, el
+ * `adapterKind` es la preferencia de TRANSPORTE que `selectTransportAdapter` honra (RBM5.6).
+ *
+ * Un valor en el formato VIEJO (string pelado) se lee como "sin preferencia" (RBM5.7): el `deviceId`
+ * sale intacto y la app cae al piso por plataforma, exactamente como antes.
+ *
+ * ⚠️ El tipo de retorno cambió a propósito y **el typecheck enumera los call sites** (misma técnica que
+ * la cirugía de firma de T1/RBM1.2): un consumidor que solo quiera el id escribe `?.deviceId`, y así no
+ * hay dos lectores del mismo registro que puedan divergir.
+ */
+export async function readRememberedDevice(): Promise<RememberedDevice | null> {
   try {
     if (Platform.OS === 'web') {
-      return hasLocalStorage() ? window.localStorage.getItem(STORAGE_KEY) : null;
+      return parseRememberedValue(hasLocalStorage() ? window.localStorage.getItem(STORAGE_KEY) : null);
     }
-    return await withTimeout(
-      SecureStore.getItemAsync(STORAGE_KEY),
-      DEFAULT_BRIDGE_TIMINGS.storage,
-      'remembered_read',
+    return parseRememberedValue(
+      await withTimeout(
+        SecureStore.getItemAsync(STORAGE_KEY),
+        DEFAULT_BRIDGE_TIMINGS.storage,
+        'remembered_read',
+      ),
     );
   } catch {
     return null;
   }
 }
 
-/** Persiste el bastón elegido (R6.3, sobrevive reinicios). Best-effort. */
-export async function writeRememberedDevice(deviceId: string): Promise<void> {
+/**
+ * Persiste el bastón elegido (R6.3, sobrevive reinicios). Best-effort.
+ *
+ * `meta` es OPCIONAL y quien lo pasa es el borde de cada adapter (`defaultSppEnv` / `defaultBleEnv`),
+ * que es el único que sabe con qué transporte se abrió el link. Sin `adapterKind` el registro queda
+ * "sin preferencia" (piso por plataforma), que es lo correcto para un escritor que no lo sabe.
+ */
+export async function writeRememberedDevice(deviceId: string, meta?: RememberedMeta): Promise<void> {
   try {
-    const value = safe(deviceId);
+    const value = serializeRememberedValue(deviceId, meta);
+    if (value === null) return; // nada que guardar (el id no sobrevive el saneado)
     if (Platform.OS === 'web') {
       if (hasLocalStorage()) window.localStorage.setItem(STORAGE_KEY, value);
       return;

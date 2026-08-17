@@ -223,6 +223,78 @@ export interface BleEnv {
 // ─── Carga del módulo nativo (perezosa) y disponibilidad del transporte ──────────────────────────
 
 /**
+ * Las DOS operaciones del borde de la lib, **separadas a propósito** porque en iOS no cuestan lo mismo
+ * (🟠-1 del review de F4):
+ *
+ *   · `nativeModulePresent()` **CONSULTA** si el binario está en este build (`NativeModules.BlePlx`).
+ *     Es el equivalente exacto de `isSppNativeAvailable()`: leer una propiedad del registro de módulos.
+ *     En bridgeless eso instancia el MÓDULO nativo (la clase ObjC/Java), y eso es seguro para este
+ *     paquete porque `NSBluetoothAlwaysUsageDescription` **está declarada** (verificado en el plist real
+ *     en F2, RBM2.17): sin esa clave, tocar CoreBluetooth aborta el proceso (ITMS-90683 / el defecto del
+ *     build 5 de iOS). El guard de purpose strings es lo que mantiene esa condición viva.
+ *   · `constructManager()` **CONSTRUYE** el client (`new BleManager()`), que llama
+ *     `BleModule.createClient(...)` → del lado nativo **se crea un `CBCentralManager`**. Y ESO, en iOS,
+ *     es lo que le muestra al operario el diálogo de permiso de Bluetooth del sistema (el SO lo muestra
+ *     cuando la app usa CoreBluetooth por primera vez; no hay API que lo pida). O sea: construir el
+ *     manager NO es un chequeo, es el primer uso de la radio.
+ *
+ * Por eso la disponibilidad del transporte pregunta lo primero y **nunca** lo segundo (RBM3.8): con las
+ * dos cosas en la misma función, montar el provider en el arranque en frío —que pasa por
+ * `instantiateTransport('ble-gatt')` → `isBleGattTransportAvailable()`— le tiraba el diálogo del SO a un
+ * operario que no tocó nada. La construcción queda para el primer uso REAL: `doConnect` (que sale de un
+ * gesto o de una cadena de reintentos) y `autoConnect` **después** de su gate de bastón recordado.
+ *
+ * Entra como entorno inyectable —no como dos funciones sueltas— para que el oráculo del arranque en frío
+ * pueda **contar construcciones** en vez de aserrar sobre el texto de un comentario.
+ */
+export interface BleModuleEnv {
+  /** ¿El binario de la lib está en ESTE build? Solo consulta; no construye ni toca la radio. */
+  nativeModulePresent: () => boolean;
+  /** Construye el client de la lib. En iOS ESTO crea el `CBCentralManager` (diálogo del SO). */
+  constructManager: () => BleManagerLike | null;
+}
+
+const REAL_BLE_MODULE_ENV: BleModuleEnv = {
+  // Chequeo del MÓDULO NATIVO y no del paquete JS, por el mismo motivo que en el SPP:
+  // `react-native-ble-plx` resuelve igual desde `node_modules` aunque el binario no esté en el APK/IPA,
+  // y en ese caso `new BleManager()` tira RECIÉN al construirse (`BleModule.createClient(...)` y
+  // `new NativeEventEmitter(BleModule)` con `BleModule === undefined`). Sin este chequeo montaríamos un
+  // transporte fantasma → un CTA que promete y no cumple, que es el bug que cerró el fix del chip
+  // (2026-07-29).
+  //
+  // El catch va **en silencio**: en web y en CI `react-native` no resuelve, y eso es lo esperado, no una
+  // falla. Loguearlo llenaría el log de la suite con ruido que no significa nada.
+  nativeModulePresent: () => {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const { NativeModules } = require('react-native') as typeof import('react-native');
+      return NativeModules != null && (NativeModules as Record<string, unknown>).BlePlx != null;
+    } catch {
+      return false; // sin RN: no hay transporte BLE y no hay nada que reportar
+    }
+  },
+  // Este SÍ se loguea, y la distinción es el punto: un try/catch mudo acá convertiría "la lib explotó al
+  // inicializarse" en "el operario no está bastoneando" — el transporte simplemente no se montaría y no
+  // habría NADA que lo explicara (es el hallazgo del review de F1).
+  constructManager: () => {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const mod = require('react-native-ble-plx') as { BleManager?: new () => BleManagerLike };
+      if (typeof mod?.BleManager !== 'function') {
+        logTransportEvent({ kind: 'connect_error', message: 'ble_manager_load_failed: sin BleManager' });
+        return null;
+      }
+      return new mod.BleManager();
+    } catch (e) {
+      logTransportEvent({ kind: 'connect_error', message: `ble_manager_load_failed: ${errorMessage(e)}` });
+      return null;
+    }
+  },
+};
+
+let bleModuleEnv: BleModuleEnv = REAL_BLE_MODULE_ENV;
+
+/**
  * El `BleManager` de la lib es un SINGLETON (`BleManager.sharedInstance`, verificado en el fuente: el
  * constructor devuelve la instancia previa si existe). Se cachea igual acá para no repetir el `require`
  * ni el chequeo de `NativeModules` en cada intento.
@@ -230,52 +302,19 @@ export interface BleEnv {
 let cachedManager: BleManagerLike | null = null;
 
 /**
- * Require PEREZOSO del manager (RBM2.2). `null` si la lib no está instalada o si el MÓDULO NATIVO no
- * está registrado en ESTE build (dev build anterior a la dep / Expo Go / web).
+ * Construcción PEREZOSA del manager (RBM2.2). `null` si la lib no está instalada o si el MÓDULO NATIVO
+ * no está registrado en ESTE build (dev build anterior a la dep / Expo Go / web).
  *
- * El chequeo es del MÓDULO NATIVO (`NativeModules.BlePlx`) y no del paquete JS, por el mismo motivo que
- * en el SPP: `react-native-ble-plx` resuelve igual desde `node_modules` aunque el binario no esté en el
- * APK/IPA, y en ese caso `new BleManager()` tira RECIÉN al construirse (su constructor llama
- * `BleModule.createClient(...)` y `new NativeEventEmitter(BleModule)` con `BleModule === undefined`).
- * Sin este chequeo montaríamos un transporte fantasma → un CTA que promete y no cumple, que es
- * exactamente el bug que cerró el fix del chip (2026-07-29).
- *
- * ⚠️ Leer `NativeModules.BlePlx` INSTANCIA el módulo nativo en bridgeless. Eso es seguro para este
- * paquete porque `NSBluetoothAlwaysUsageDescription` **está declarada** (verificado en el plist real en
- * F2, RBM2.17): sin esa clave, instanciar CoreBluetooth aborta el proceso (ITMS-90683 / el defecto del
- * build 5 de iOS). El guard de purpose strings es lo que mantiene esa condición viva.
+ * ⚠️ Llamarla es **tocar la radio** en iOS (ver `BleModuleEnv`). Los únicos caminos que pueden llegar acá
+ * son los que ya tienen su gate: `doConnect` (gesto u cadena de reintentos con su política de
+ * `ConnectTrigger`) y `autoConnect` **después** de comprobar que hay un bastón recordado. Un camino nuevo
+ * que la llame antes de eso está violando RBM3.8.
  */
 export function loadBleManager(): BleManagerLike | null {
   if (cachedManager != null) return cachedManager;
-  // ── PRIMER TRAMO: ¿estamos en un runtime con RN y con el binario? ────────────────────────────────
-  // Va en su PROPIO try y **en silencio**: en web y en CI `react-native` no resuelve, y eso es lo
-  // esperado, no una falla. Loguearlo acá llenaría el log de la suite con ruido que no significa nada.
-  let nativeModulePresent = false;
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { NativeModules } = require('react-native') as typeof import('react-native');
-    nativeModulePresent = NativeModules != null && (NativeModules as Record<string, unknown>).BlePlx != null;
-  } catch {
-    return null; // sin RN: no hay transporte BLE y no hay nada que reportar
-  }
-  if (!nativeModulePresent) return null;
-  // ── SEGUNDO TRAMO: el binario está y el manager NO se pudo construir ─────────────────────────────
-  // Este SÍ se loguea, y la distinción es el punto: un try/catch mudo acá convertiría "la lib explotó
-  // al inicializarse" en "el operario no está bastoneando" — el transporte simplemente no se montaría y
-  // no habría NADA que lo explicara (es el hallazgo del review de F1).
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const mod = require('react-native-ble-plx') as { BleManager?: new () => BleManagerLike };
-    if (typeof mod?.BleManager !== 'function') {
-      logTransportEvent({ kind: 'connect_error', message: 'ble_manager_load_failed: sin BleManager' });
-      return null;
-    }
-    cachedManager = new mod.BleManager();
-    return cachedManager;
-  } catch (e) {
-    logTransportEvent({ kind: 'connect_error', message: `ble_manager_load_failed: ${errorMessage(e)}` });
-    return null;
-  }
+  if (!bleModuleEnv.nativeModulePresent()) return null;
+  cachedManager = bleModuleEnv.constructManager();
+  return cachedManager;
 }
 
 /**
@@ -305,13 +344,19 @@ export function bleGattDriverFrom(registry: ReaderDriver[] = DRIVER_REGISTRY): R
  *   · sin módulo nativo → el build no trae el binario (o es web/CI). Nada que hacer en runtime.
  *   · sin driver `ble-gatt` en el registro → no hay a QUÉ conectarse: sin `serviceUuid` no hay filtro
  *     de escaneo posible. Montar el adapter igual sería un transporte que no puede ni buscar.
+ *
+ * ⚠️ **CONSULTA el módulo, NO construye el manager** (🟠-1 del review de F4, RBM3.8). Este camino lo
+ * corre el **arranque en frío** (el provider monta el transporte en el primer render) y también la
+ * pantalla de conexión al ofrecer el transporte BLE como elección, así que tiene que ser exactamente tan
+ * barato como `isSppNativeAvailable()`: en iOS, construir el `CBCentralManager` es lo que dispara el
+ * diálogo de permiso del SO, y hacerlo desde acá se lo mostraría a un operario que no tocó nada.
  */
 export function isBleGattTransportAvailable(registry: ReaderDriver[] = DRIVER_REGISTRY): boolean {
   if (bleGattDriverFrom(registry) == null) {
     logTransportEvent({ kind: 'connect_error', message: 'ble_unavailable: no_ble_gatt_driver' });
     return false;
   }
-  if (loadBleManager() == null) {
+  if (!bleModuleEnv.nativeModulePresent()) {
     logTransportEvent({ kind: 'connect_error', message: 'ble_unavailable: no_native_module' });
     return false;
   }
@@ -319,11 +364,16 @@ export function isBleGattTransportAvailable(registry: ReaderDriver[] = DRIVER_RE
 }
 
 /**
- * SOLO PARA TESTS: suelta el manager cacheado. En producción vive lo que vive el proceso (es un
- * singleton de la lib); un test que inyecta un manager falso no puede arrastrarlo al siguiente.
+ * SOLO PARA TESTS: suelta el manager cacheado y restaura (o inyecta) el borde del módulo nativo. En
+ * producción el manager vive lo que vive el proceso (es un singleton de la lib); un test que inyecta un
+ * manager falso no puede arrastrarlo al siguiente.
+ *
+ * El `env` opcional es lo que permite **contar construcciones** del manager: sin él, el oráculo de "el
+ * arranque en frío no toca la radio" sería una aserción sobre un comentario.
  */
-export function __resetBleModuleStateForTests(): void {
+export function __resetBleModuleStateForTests(env?: BleModuleEnv): void {
   cachedManager = null;
+  bleModuleEnv = env ?? REAL_BLE_MODULE_ENV;
 }
 
 // ─── Helpers puros de este módulo ────────────────────────────────────────────────────────────────
@@ -375,7 +425,17 @@ export function defaultBleEnv(): BleEnv {
       try {
         // eslint-disable-next-line @typescript-eslint/no-var-requires
         const { readRememberedDevice } = require('./remembered-device') as typeof import('./remembered-device');
-        return await readRememberedDevice();
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const { rememberedDeviceIdFor } = require('./remembered-format') as typeof import('./remembered-format');
+        // El adapter solo necesita el ID para reconectar; el `adapterKind` del registro lo consume el
+        // provider (RBM5.6) y el `vendorId` nadie todavía. Un solo LECTOR del registro, dos consumidores.
+        //
+        // Y el id se toma SOLO si el registro es de ESTE transporte (🟠-2 del review de F4): desde que el
+        // operario puede elegir el transporte por gesto, el bastón recordado puede ser el del OTRO, y
+        // dialar una MAC de Bluetooth Classic por GATT no falla rápido — se queda esperando. Sin registro
+        // propio, el camino correcto es escanear. `acceptsLegacy: false` porque un registro viejo (sin
+        // `adapterKind`) solo pudo escribirlo el SPP.
+        return rememberedDeviceIdFor(await readRememberedDevice(), 'ble-gatt', { acceptsLegacy: false });
       } catch {
         return null;
       }
@@ -384,7 +444,12 @@ export function defaultBleEnv(): BleEnv {
       try {
         // eslint-disable-next-line @typescript-eslint/no-var-requires
         const { writeRememberedDevice } = require('./remembered-device') as typeof import('./remembered-device');
-        await writeRememberedDevice(deviceId);
+        // ── EL `adapterKind` VA ACÁ, Y NO ES DECORATIVO (RBM5.6) ─────────────────────────────────────
+        // Es el único punto del sistema que SABE con qué transporte se abrió el link de verdad, y es lo
+        // que hace que el próximo arranque monte ESTE transporte en vez del piso por plataforma. Sin este
+        // literal, la preferencia nunca se escribe y RBM5.6 queda siendo código que nadie puede alcanzar
+        // (mismo patrón —y mismo riesgo— que el `'ble-gatt'` de `ensurePermissions`, RBM2.13).
+        await writeRememberedDevice(deviceId, { adapterKind: 'ble-gatt' });
       } catch {
         // best-effort: si falla, la próxima vez se elige el device de nuevo
       }
@@ -567,8 +632,16 @@ export class BleGattAdapter implements StickAdapter {
    * app USA la radio, y su denegación llega como `state() === 'Unauthorized'`. O sea que un arranque que
    * escanea podría tirarle el diálogo al operario sin que haya tocado nada. No pasa, y por construcción:
    * el gate 1 exige un bastón RECORDADO, y para que exista un bastón recordado el operario ya eligió uno
-   * antes por un gesto — momento en el que el diálogo ya apareció (con contexto). El arranque en frío no
-   * llega nunca a tocar la radio.
+   * antes por un gesto — momento en el que el diálogo ya apareció (con contexto).
+   *
+   * ⚠️ Esta función es **una de las dos mitades** de esa afirmación, y hasta el review de F4 la otra
+   * mitad era falsa: en iOS, **construir el `BleManager` ya es tocar la radio**, y el instanciado del
+   * transporte lo construía UNA CAPA ANTES de todos estos gates (`instantiateTransport` →
+   * `isBleGattTransportAvailable` → `loadBleManager`), o sea en el primer render del provider. Se cerró
+   * separando "consultar el módulo" de "construir el manager" (ver `BleModuleEnv`): ahora el
+   * `env.loadManager()` de abajo —que es lo que construye— está **detrás** del gate del bastón recordado,
+   * y el arranque en frío efectivamente no toca la radio. Lo mide un test que **cuenta construcciones**
+   * durante un arranque sin gesto, no este comentario.
    *
    * Cuando un gate no pasa **no se emite ningún estado**: se queda en `'off'`, que es el estado honesto
    * de "nunca se intentó". El motivo queda en el log (`autoconnect_skipped`), que es lo que hace

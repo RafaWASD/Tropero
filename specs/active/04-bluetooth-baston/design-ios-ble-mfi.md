@@ -266,6 +266,13 @@ El provider llama `processRawLine(line, parser)` solo si `parser != null`; si es
 >    en `null` (las dos cosas son **F4**), y `isBleGattTransportAvailable()` exige además que algún driver del
 >    registro declare `ble-gatt` — que también entra en F4. El `case` del provider está escrito y probado,
 >    pero hoy nada lo elige.
+> 7. **(F4, fix-loop del review 🟠-1)** El paso 2 del flujo (`loadBleManager()`) es lo que **construye** el
+>    client de la lib, y en iOS eso crea el `CBCentralManager` → **es el primer uso de la radio**, el que
+>    dispara el diálogo del SO. Por eso el borde se partió en dos (`BleModuleEnv`:
+>    `nativeModulePresent()` consulta / `constructManager()` construye) y **la disponibilidad del transporte
+>    solo consulta**: con las dos cosas juntas, `instantiateTransport` —o sea el primer render del provider—
+>    tocaba la radio sin un gesto (RBM3.8 incumplido en iOS, ver su nota de reconciliación). El paso 2 y el
+>    `autoConnect` después de su gate de bastón recordado son los únicos que construyen.
 
 **Las decisiones que no son obvias, con su motivo:**
 
@@ -350,6 +357,12 @@ adapterForTransport(kind, os):
 
 `available` deja de ser solo `builtAdapters.includes(ak)`: para `mfi-ios` es `built ∧ mfiAvailability(driver, declaredEaProtocols).available` (RBM5.5). La lista declarada entra **inyectada** en `BindingEnv` → sigue siendo lógica pura testeable sin device (RMV2.6).
 
+**(as-built F4, 2026-08-17)** Tres precisiones que la implementación fijó y que esta sección no decía:
+
+- **El orden del chequeo es "construido primero"**: si `mfi-ios` no está en `builtAdapters`, el estado del plist es irrelevante y el motivo honesto es `adapter-no-construido` (decir "falta el protocolo" mandaría a buscar el dato equivocado). Con las dos mitades falsas, gana igual el primero.
+- **`unavailableReason` viaja en TODOS los bindings no disponibles**, no solo en los de MFi (los demás: `adapter-no-construido`). El motivo largo está en la nota de reconciliación de RBM4.5; en la tabla de abajo eso significa que las filas `available:false` traen además su `unavailableReason`.
+- **La lista declarada se lee por una función aparte** (`eaProtocolsFromExpoConfig`, exportada) y no inline adentro del `require`: es lo que permite ejercitar **la ruta** `ios.infoPlist[KEY]` contra la config REAL de la app en `node:test`, agregándole la cadena sintética. Sin eso, mover la clave en `app.config.ts` (o leer otra rama acá) dejaría la lista en `[]` **para siempre** —incluso el día que llegue la cadena del fabricante— y RBM4.7 sería falso sin que nada se pusiera rojo. Los dos mutantes (mover la clave / mover la ruta del lector) **mueren**.
+
 **Casos que la tabla de tests tiene que fijar:**
 
 | driver | plataforma | binding |
@@ -361,8 +374,13 @@ adapterForTransport(kind, os):
 | RS420 **+ mfi sintético**, build **con** esa cadena | ios | `{mfi-ios, mfi, available:true}` ← el test de RBM4.7 |
 | emulador GATT (ble-gatt) | ios | `{ble-gatt, ble-gatt, available:true}` |
 | emulador GATT | android | `{ble-gatt, ble-gatt, available:true}` |
-| driver HID genérico | ios | `{hid-wedge, ble-hid, available:false}` mientras el gate no pase |
+| driver HID genérico | ios | `{hid-wedge, ble-hid, available:false, reason:'adapter-no-construido'}` mientras el gate no pase |
 | driver ble-gatt+mfi, build con protocolo | ios | `mfi` gana (prioridad), determinístico |
+
+**(as-built F4)** Las nueve filas están en un solo test data-driven (`selection-priority.test.ts`, *"la tabla del design §6.1, fila por fila"*), con el `driver` del binding aserrado **por identidad** (más fuerte que un `deepEqual`: caza un binding que devuelva el driver de otro). Se agregaron dos oráculos que la tabla sola no da:
+
+- **El orden de declaración de los transportes del driver no cambia el resultado** (RMV2.8/RBM5.8): la última fila se corre con `[ble-gatt, mfi]` y con `[mfi, ble-gatt]` → `mfi` en las dos. Es el mutante interesante de este motor (recorrer `driver.transports` en vez de la tabla de prioridad), y sin el segundo orden el fixture no puede verlo. Con anti-vacuidad: el fixture declara el transporte de MENOR prioridad primero.
+- **`emulador GATT | web → null`** (RMV2.5): el driver del banco declara solo `ble-gatt`, que en web no mapea → carga manual como piso.
 
 ### 6.2 El transporte que se monta sigue al bastón recordado (RBM5.6)
 
@@ -386,6 +404,56 @@ selectTransportAdapter(env):
 - **iOS pasa de `'manual'` a `'ble-gatt'`** como piso: es el único transporte que iOS tiene, y si el módulo nativo no está en el build, `instantiateTransport` devuelve `null` y la app queda manual-first exactamente como hoy (mismo guard que `isSppNativeAvailable`).
 
 **Limitación declarada, no escondida**: un teléfono con **dos** bastones de transportes distintos monta uno solo (R6.7: un bastón por dispositivo). Cambiar de bastón = elegirlo en la pantalla, que reescribe la preferencia. Si el campo pide dos simultáneos, es scope nuevo → `docs/backlog.md`.
+
+**(as-built F4, 2026-08-17) — tres cosas que esta sección no tenía bien:**
+
+1. **"Cambiar de bastón = elegirlo en la pantalla" NO alcanza como salida.** En BLE no hay lista de devices que elegir (el adapter escanea y se conecta solo; RBM9.6 no deja exponer el escaneo en la interfaz del `StickAdapter`), así que la única forma de reescribir la preferencia es conectar con ese mismo transporte — que es imposible si el bastón que la preferencia apunta ya no está. Y el CTA "Olvidar el bastón guardado" (R6.6) **vivía adentro de la rama `isSpp`**, o sea que la preferencia escondía su propia salida. Se movió afuera de las dos ramas, con guard. Ver la nota de reconciliación de RBM5.6.
+2. **La preferencia se valida fail-closed** (`honorsPreference`): usable en la plataforma (**derivado** de `adapterForTransport` con `isAdapterUsableOn`, una sola tabla) **y** no gateada (`NOT_SELECTABLE_AS_PREFERENCE = ['hid-wedge']`). Es la primera entrada por la que STORAGE elige un transporte, así que "nunca se elige `hid-wedge`" dejó de ser cierto "porque ninguna rama lo escribe".
+3. **El piso de iOS + la preferencia hacen alcanzable el `autoConnect` del adapter BLE** (RBM2.16): desde este delta la app puede arrancar escaneando por BLE **sin gesto**. Se dejó dicho en el provider y en la tabla de `autoConnect` de `wiring.test.ts`, que decía *"la implementa SOLO spp-android"* y era falso desde F3 sin que nada cayera (el adapter nuevo no estaba en la lista que la tabla recorría).
+
+**(as-built F4, fix-loop del review 🟠-2, 2026-08-17) — "El problema real" de esta sección NO estaba resuelto
+en Android. Ahora sí, y así:**
+
+El diagrama de arriba resuelve **quién gana** cuando hay preferencia. Lo que faltaba era **quién la escribe**:
+el `adapterKind` lo escribe el adapter al conectar, y en Android el adapter BLE no se monta si la preferencia
+no dice ya `ble-gatt` → bucle sin entrada, `ble-gatt` inalcanzable en producción, y el banco de F6/T6.2 sin
+poder arrancar. (Mismo patrón que R6.6 con cero call sites.)
+
+```
+transportChoices({platformOS, mountedKind, builtAdapters, declaredEaProtocols, canInstantiate, registry})
+  → por cada driver del registro (en orden): binding = selectReaderBinding(...)
+      · sin binding                         → no alcanzable en esta plataforma  (RMV2.5)
+      · binding.adapterKind === mountedKind  → ya montado, no es alternativa
+      · kind repetido                        → una fila por transporte (el adapter usa el 1º del registro)
+      · selectTransportAdapter(pref: kind) !== kind → NO se ofrece (gateado / imposible): sería una fila
+                                                      que no monta nada  ← derivado, no una 2ª tabla
+  → [{adapterKind, binding, driver, installable: canInstantiate(kind)}]
+
+pantalla:  fila (deviceRowView) + instrucción (transportInstructionsView), AFUERA del ternario `isSpp`
+tap     →  api.chooseTransport(kind)  →  provider: setPreferredAdapter(kind) + ref "elegido por gesto"
+        →  se monta ese adapter  →  mountActionFor({chosenByGesture:true}) === 'connect'  (trigger operator)
+        →  el adapter escanea/dialoga y, al conectar, persiste {deviceId, adapterKind}  ← el único escritor
+```
+
+- **`registry` entra INYECTADO y sin default** a `DRIVER_REGISTRY`: `adapter-selection.ts` es una de las dos
+  superficies **ciegas al fabricante** (RBM1.7, con guard) y nombrar el registro ahí abre la puerta al
+  `DRIVER_REGISTRY[0].frameParser` que el review de F1 falsificó. Lo pasa la pantalla, que sí conoce lectores.
+- **`installable`** es la otra mitad de `BUILT_ADAPTERS`: aquella dice "el build trae el adapter", esta "este
+  dispositivo puede montarlo" (`isSppNativeAvailable` / `isBleGattTransportAvailable`). Sin ella, un APK sin el
+  módulo nativo ofrecería "Tocá para conectar" y el tap dejaría al operario **sin** transporte. El probe de la
+  pantalla es un espejo de los guards de `instantiateTransport`, y hay guard cruzando los dos archivos.
+  ⚠️ Esto **depende del fix de 🟠-1**: antes, consultar la disponibilidad del BLE construía el
+  `CBCentralManager` — o sea que la pantalla no podía preguntarlo sin tirar el diálogo del SO.
+- **El id recordado no se presta entre transportes** (`rememberedDeviceIdFor`): el registro guarda UN bastón
+  con SU `adapterKind`, y desde que el montado puede no ser el que escribió, un `connect()` sin id dialaba el
+  id del otro — un intento que **no falla rápido, se queda esperando**. El formato viejo lo acepta solo el SPP.
+- **Guard sobre la ausencia** (`wiring.test.ts`): todo kind construido y usable en una plataforma es alcanzable
+  ahí (piso, o honrado + ofrecido + con escritor), y lo no construido no se honra. F5 (`mfi-ios`) nace en rojo.
+- **Límite declarado**: el único driver `ble-gatt` del registro es el del emulador (RBM5.11), así que en
+  Android esa fila dice *"Emulador ESP32 (banco de pruebas)"* — la misma superficie que RBM5.12 declaró para
+  iOS, ahora también en la plataforma del productor. Es lo que hace posible T6.2 y lo que el Gate 2.5 tiene que
+  ver **en device** (T6.6): en web la lista de alternativas es **vacía** (el único transporte de web es el
+  montado), así que la E2E y las capturas de F4 no la pueden fotografiar.
 
 ## 7. Los drivers: qué se registra y qué NO
 
@@ -425,7 +493,35 @@ selectTransportAdapter(env):
 
 `connection-view.ts` sigue siendo puro y testeado con `node:test`; ninguna de estas ramas mete lógica en el componente.
 
+**(as-built F4, 2026-08-17) — cómo quedó de verdad esta sección:**
+
+- **El copy ENTERO de las instrucciones se mudó del JSX a la vista pura** (`transportInstructionsView`), no solo las dos ramas nuevas. Mientras vivía en el `if` del componente era la única decisión de presentación del bastón **sin un solo test**, y este delta le agregaba dos ramas más —una de ellas dependiendo del `unavailableReason`—. En el componente quedó la traducción clave→ícono lucide y el layout (lo que no puede vivir en el módulo puro). Las cinco cadenas que ya existían se conservan verbatim, con test de regresión. Las claves están enumeradas en una lista **anclada al union por typecheck** (`TRANSPORT_INSTRUCTION_KEYS`), así que una rama de copy nueva **nace en rojo** hasta que tenga su caso de test.
+- **La rama `ble-gatt` NO lista resultados de escaneo**: ver la nota de reconciliación de RBM5.14. El copy dice lo que el adapter hace (busca y se conecta al que reconoce) y remata con el CTA real ("Buscar de nuevo").
+- **El copy por transporte en la CARD de estado** entró como un override aditivo (`env.transportKind`, opcional): `scanning` → *"Buscando el bastón…"* y `disconnected` → CTA *"Buscar de nuevo"* + hint que nombra lo accionable. **No toca `tone`, `cta`, `icon` ni `connected`**, así que el invariante de que la fila no contradiga a la card se sigue cumpliendo con el mismo test (ahora con el `transportKind` en su matriz). Sin `transportKind`, o con cualquier otro, la card es byte por byte la de antes del delta (test de regresión sobre los 6 estados).
+- **`BUILT_ADAPTERS` suma `'ble-gatt'` y NO `'mfi-ios'`** — desviación deliberada de T4.8, ver su nota.
+
 **Gate 2.5 (ADR-029)**: hay UI nueva → capturas obligatorias. Con una salvedad honesta: la E2E de web **no puede** ejercitar el flujo BLE (no hay transporte en web y el binding en web es `serial`). Las capturas de las ramas nuevas salen de (a) los tests puros de `connection-view` para el copy y (b) **screenshots del banco en device** (RBM9.7). Decirlo es parte del entregable: una captura web de una pantalla que en web no existe sería teatro.
+
+**(as-built F4)** Lo que SÍ se entregó en web: `app/e2e/captures/baston-ios-ble-mfi-f4.capture.ts` (4 shots) con las dos cosas que web renderiza de verdad — la instrucción del transporte `serial` (para vetar que la mudanza del copy no cambió el layout) y el **CTA "Olvidar el bastón guardado" fuera de la rama SPP**, sembrando el registro del bastón recordado en `localStorage` con el **formato nuevo** (que además ejercita `parseRememberedValue` de punta a punta en el navegador). El archivo declara arriba qué es N/A y por qué.
+
+**(as-built F4, fix-loop del review 🟠-2)** La sección "Dispositivos" gana una banda más, **afuera de las dos
+ramas** del ternario `isSpp`: **los otros transportes alcanzables** en esta plataforma, uno por fila, con la
+misma anatomía que la rama no-SPP (fila del lector + card de instrucción de su transporte) y con las mismas
+vistas puras. Cómo se ve por plataforma:
+
+| Plataforma / montado | Qué agrega la banda |
+|---|---|
+| web (`web-serial`) | **nada** (lista vacía) → la E2E y las 4 capturas de F4 quedan idénticas |
+| iOS (`ble-gatt`) | **nada** (el SPP no existe en iOS —RBM5.3— y MFi está gateado hasta F5) |
+| Android (`spp-android`) | fila *"Emulador ESP32 (banco de pruebas) · Reconocido. Tocá para conectar."* + la instrucción de BLE GATT (*"no hace falta emparejarlo desde los ajustes"*) |
+| Android (`ble-gatt`) | fila *"Allflex RS420"* + la instrucción del SPP → **la vuelta** al bastón por Classic |
+| cualquiera, sin el módulo nativo de ese transporte | la misma fila, **no accionable**, diciendo *"Reconocido, todavía no disponible en esta versión"* |
+
+⚠️ **Para el veto visual (y es el límite honesto de esta fase)**: esta banda **no se puede fotografiar en web**
+—en web no hay transporte alternativo, a propósito— así que su evidencia visual es **de device (T6.6)**, igual
+que las instrucciones de `ble-gatt`/`mfi`. Lo que sí está fijado por test: qué filas aparecen en cada
+plataforma, que la de BLE dice que es un banco de pruebas, que ninguna se ofrece si tocarla no montaría nada, y
+que el bloque no vive adentro de una rama del ternario (la trampa por ubicación del CTA de olvidar).
 
 ## 9. T5 — el banco del emulador en `MODO_GATT`
 
@@ -522,6 +618,9 @@ Descartada, y no por prudencia genérica: la cabecera de `adapter-hid-wedge.ts` 
 | El re-montaje del transporte por preferencia recordada introduce un ciclo (montar → hidratar → re-montar) | baja | El `mode` corta antes que la preferencia; la hidratación ocurre **una vez**; el ciclo `autoConnect → disconnect → autoConnect` ya tiene test. Guard: la preferencia solo re-monta si **cambia** el `AdapterKind` resuelto |
 | Sacar `parseRs420Line` de `contract.ts` rompe un call site no listado | baja | El parámetro es **requerido** → el typecheck enumera los call sites por nosotros |
 | El build de iOS se necesita dos veces (uno para el banco, otro para un fix) | media | Recurso agotable: 30/mes. Por eso el gate HID va **antes** y sin build, y el código llega al build de EAS con unit + emulador Android ya en verde |
+| **(F4 fix-loop 🟠-1)** El diálogo de Bluetooth de iOS aparece en un camino que no medimos (el `CBCentralManager` se crea en algún lugar que no vimos) | baja, pero **no verificada en device** | El fix mueve la construcción del manager detrás de los gates y lo fija un test que **cuenta construcciones** en un arranque en frío (0) con control positivo (1). Lo que ningún unit puede probar es qué hace iOS de verdad: **escenario explícito de T6.4** (instalación limpia, sin bastón recordado, abrir la app → el diálogo NO debe aparecer). Si apareciera igual, el siguiente sospechoso es leer `NativeModules.BlePlx` en bridgeless, y la mitigación sería mover ese chequeo también detrás de un gesto |
+| **(F4 fix-loop 🟠-2)** La banda de "otros transportes" de la pantalla **no tiene evidencia visual**: en web la lista es vacía por diseño, así que el Gate 2.5 de F4 no la puede fotografiar | media | Está fijada por tests puros (qué filas por plataforma, copy, no-accionable sin módulo, ubicación afuera del ternario) y por typecheck (reusa `StickDeviceRow`/`TransportInstructions` con las mismas props que la rama existente). El veto visual queda **atado a T6.6** (capturas de device) y el flujo entero a **T6.2**. Riesgo residual: un error de render solo visible en device |
+| **(F4 fix-loop 🟠-2)** En Android, un productor sin banco ve una fila que dice *"Emulador ESP32 (banco de pruebas)"* | **alta (es un hecho hoy)** | Es la consecuencia de RBM5.11 (no se inventa el driver del HR5 v3) + RBM5.12 (el del banco se llama por su nombre), y la misma superficie que iOS ya muestra. Honesta y funcional: es lo único con lo que hoy se puede conectar por BLE. Si Raf decide esconderla, es **un `filter` en la pantalla** (una línea) y no un rediseño; el día que un lector comercial entre al registro, la misma fila dice su nombre |
 
 ## 14. Notas para el implementer
 

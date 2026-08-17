@@ -24,6 +24,15 @@ export type PermissionModel =
    *     que se usa la radio y su denegación llega como el estado `Unauthorized` del manager.
    */
   | { kind: 'ble' }
+  /**
+   * mfi-ios — ExternalAccessory (delta ios-ble-mfi, RBM4.9/T5.3, declarado en F4 con el kind). NO hay
+   * permiso de runtime que pedir: iOS gatea el acceso al accesorio por la LISTA DE PROTOCOLOS declarada
+   * en el `Info.plist` (`UISupportedExternalAccessoryProtocols`) y por el emparejamiento que hace el
+   * propio SO en su Accessory Picker. O sea que "no disponible" acá no es un permiso denegado sino un
+   * dato de BUILD que falta (`ea-protocols.ts` → `mfiAvailability`), y por eso no puede compartir el
+   * modelo `{kind:'ble'}` (que sí tiene diálogo y estado `permission_denied`).
+   */
+  | { kind: 'ios-mfi' }
   | { kind: 'os-keyboard' }; // hid-wedge — teclado del SO, sin permisos de app (R12.3)
 
 /** Devuelve el modelo de permiso de un adaptador por su `kind` (R12). */
@@ -41,6 +50,8 @@ export function permissionModelFor(kind: StickAdapter['kind']): PermissionModel 
       return { kind: 'android-bluetooth' };
     case 'ble-gatt':
       return { kind: 'ble' };
+    case 'mfi-ios':
+      return { kind: 'ios-mfi' };
     case 'hid-wedge':
       return { kind: 'os-keyboard' };
   }

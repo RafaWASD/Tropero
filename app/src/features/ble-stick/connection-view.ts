@@ -13,7 +13,7 @@
 
 import type { ConnectionStatus } from '../../services/ble/stick-adapter';
 import type { ReaderBinding } from '../../services/ble/selection-priority';
-import type { ReaderDriver } from '../../services/ble/driver-types';
+import type { ReaderDriver, TransportKind } from '../../services/ble/driver-types';
 
 /** Qué acción dispara el CTA primario de un estado. 'none' = en progreso / auto-reintento (sin CTA). */
 export type ConnectionCta = 'connect' | 'retry' | 'disconnect' | 'none';
@@ -74,6 +74,19 @@ export interface ConnectionEnv {
    * sites que no lo saben (el indicador global) siguen viendo el copy genérico, que para ellos es cierto.
    */
   autoConnectExhausted?: boolean;
+  /**
+   * El TRANSPORTE del binding activo (delta ios-ble-mfi, RBM5.14). OPCIONAL: los call sites que no lo
+   * saben (el indicador global del chrome, la fila de "Más") ven el copy genérico, que para ellos sigue
+   * siendo cierto.
+   *
+   * Existe porque en BLE GATT "conectar" **es buscar**: no hay emparejamiento previo ni lista del SO, el
+   * transporte escanea filtrando por el servicio del driver y se conecta al que reconoce. Con el copy
+   * genérico, un escaneo agotado decía "Se apagó, quedó fuera de rango o cancelaste" + "Volver a
+   * conectar" — la mitad de una verdad que no le dice al operario lo único que puede hacer (acercarse y
+   * volver a buscar). NO cambia ningún `tone` (el invariante de que la fila y la card no se contradigan
+   * se sigue cumpliendo con el mismo test).
+   */
+  transportKind?: TransportKind;
 }
 
 /**
@@ -88,8 +101,52 @@ export interface ConnectionEnv {
  * vuelve solo, sin tocar este archivo. El corte va ANTES del switch (no como una rama más) porque sin
  * transporte NINGÚN estado puede ofrecer conectar, ni siquiera el 'connected'/'disconnected'
  * transitorio que quedaría si el transporte se desmontara en caliente (cambio de `mode` del provider).
+ *
+ * Desde el delta ios-ble-mfi la función son DOS: el mapeo base (`baseConnectionStatusView`, idéntico al
+ * as-built) y un override de COPY por transporte encima (`withBleGattSearchCopy`, RBM5.14). Sin
+ * `env.transportKind`, o con cualquier transporte que no sea `ble-gatt`, el resultado es byte por byte el
+ * de antes del delta — y hay un test que lo recorre para todos los estados.
  */
 export function connectionStatusView(status: ConnectionStatus, env: ConnectionEnv): ConnectionStatusView {
+  const base = baseConnectionStatusView(status, env);
+  // El copy específico del transporte se aplica ENCIMA del base y solo cuando hay transporte: sin
+  // transporte el estado ya es "no disponible / sin CTA" y ninguna instrucción de búsqueda aplica.
+  if (env.hasTransport && env.transportKind === 'ble-gatt') return withBleGattSearchCopy(status, base);
+  return base;
+}
+
+/**
+ * En BLE GATT, "conectar" ES buscar (RBM5.14): el transporte escanea filtrando por el servicio del
+ * driver, se conecta al primer device que su `deviceMatch` reconoce y, si el presupuesto del escaneo se
+ * agota, emite `disconnected` (el reintento es un GESTO — un escaneo que se reintenta solo es la radio
+ * escaneando para siempre). Este override es lo que hace que el copy diga eso:
+ *   · `scanning`     → "Buscando el bastón…" en vez de "Reintentando…" (la primera vez no se está
+ *                      reintentando nada, se está buscando).
+ *   · `disconnected` → CTA **"Buscar de nuevo"** y un hint que nombra lo único accionable (acercarse).
+ * Deliberadamente NO toca `tone`, `cta` (la acción sigue siendo `connect`/`none`), `icon` ni
+ * `connected`: el invariante de que el tono de la fila no contradiga a la card se mantiene con el mismo
+ * test, y la fila (`connectionRowStatus`) no necesita conocer el transporte.
+ */
+function withBleGattSearchCopy(status: ConnectionStatus, base: ConnectionStatusView): ConnectionStatusView {
+  switch (status) {
+    case 'scanning':
+      return {
+        ...base,
+        label: 'Buscando el bastón…',
+        hint: 'Estamos buscando el bastón cerca. La carga manual sigue disponible.',
+      };
+    case 'disconnected':
+      return {
+        ...base,
+        hint: 'Se apagó, quedó fuera de rango o no lo encontramos. Acercate y buscalo de nuevo.',
+        ctaLabel: 'Buscar de nuevo',
+      };
+    default:
+      return base;
+  }
+}
+
+function baseConnectionStatusView(status: ConnectionStatus, env: ConnectionEnv): ConnectionStatusView {
   if (!env.hasTransport) {
     return {
       label: 'Bastón no disponible',
@@ -415,6 +472,180 @@ export function deviceRowView(input: {
     subtitle: 'No reconocido. Podés cargar la caravana a mano.',
     actionable: false,
     tone: 'warning',
+  };
+}
+
+// ─── INSTRUCCIONES POR TRANSPORTE (RMV3.2/3.7 → RBM5.14, RBM4.5) ─────────────────────────────────────
+//
+// Este copy vivía INLINE en el JSX de `StickConnectionScreen` (el componente `TransportInstructions`).
+// Se muda acá por la misma razón por la que se mudaron el ícono del estado, el trailing de la fila de
+// "Más" y el hint de la lista vacía (bugfix 2026-07-29 en adelante): una decisión de presentación que
+// vive fuera del archivo donde se decide **no se testea**, y en este archivo el historial es que termina
+// contradiciendo a la card. Con las dos ramas nuevas del delta (BLE y MFi) eso deja de ser teórico: el
+// copy de MFi depende del `unavailableReason` del binding, y un `if` en el JSX sería la única cosa del
+// delta sin oráculo. Todas las cadenas EXISTENTES se conservan byte por byte (regresión).
+
+/**
+ * Qué instrucción corresponde. La clave la elige esta función y el componente solo la renderiza (nota
+ * simple vs. card con ícono y título), igual que `StatusIconKey`.
+ */
+export type TransportInstructionKey =
+  | 'sin-binding' // el lector no es alcanzable en esta plataforma (RMV2.5)
+  | 'no-disponible' // reconocido, pero el adapter no está en este build o no hay transporte instanciado
+  | 'mfi-sin-protocolo' // NUEVO: MFi reconocido y el build no declara la cadena del fabricante (RBM4.5)
+  | 'ble-hid' // emparejar como teclado del SO (GATED, R8.7)
+  | 'ble-gatt' // NUEVO: prender el bastón y buscar (no hay emparejamiento previo)
+  | 'mfi' // NUEVO: emparejar por el Accessory Picker de iOS (con la cadena del fabricante declarada)
+  | 'serial' // elegir el puerto COM en el diálogo del navegador
+  | 'spp'; // emparejar por Bluetooth y elegir de la lista
+
+/**
+ * Todas las claves, ENUMERADAS A MANO, para que un test pueda recorrerlas en runtime.
+ *
+ * Vive acá y no en el test por el mismo motivo que `ADAPTER_KINDS` y `TRANSPORT_KINDS`:
+ * `app/tsconfig.json` EXCLUYE `**​/*.test.ts`, así que una aserción de tipos escrita en un test **no la
+ * chequea nadie**. Con la lista acá, una clave nueva no compila hasta declararla (abajo) y recién
+ * entonces el test que exige un caso por clave se pone en rojo — o sea que una rama de copy nueva NACE
+ * SIN ORÁCULO EN ROJO, en vez de nacer sin oráculo y en verde.
+ */
+export const TRANSPORT_INSTRUCTION_KEYS = [
+  'sin-binding',
+  'no-disponible',
+  'mfi-sin-protocolo',
+  'ble-hid',
+  'ble-gatt',
+  'mfi',
+  'serial',
+  'spp',
+] as const satisfies readonly TransportInstructionKey[];
+
+// EXHAUSTIVIDAD en tiempo de compilación: si `TransportInstructionKey` gana un miembro que no está en
+// `TRANSPORT_INSTRUCTION_KEYS`, `Exclude<…>` deja de ser `never` y esta asignación NO COMPILA.
+type InstructionKeyMissingFromList = Exclude<
+  TransportInstructionKey,
+  (typeof TRANSPORT_INSTRUCTION_KEYS)[number]
+>;
+const _instructionKeysAreExhaustive: InstructionKeyMissingFromList extends never ? true : never = true;
+void _instructionKeysAreExhaustive;
+
+/** Ícono de la instrucción (clave; el componente resuelve el lucide). `null` = nota simple sin ícono. */
+export type InstructionIconKey = 'keyboard' | 'bluetooth' | 'bluetooth-searching';
+
+export interface TransportInstructionView {
+  key: TransportInstructionKey;
+  /** Título de la card. `null` → se renderiza como nota simple (InfoNote), sin título ni ícono. */
+  title: string | null;
+  icon: InstructionIconKey | null;
+  /** Cuerpo es-AR, voseo. SIEMPRE ofrece la salida manual cuando no se puede conectar (RMV3.6). */
+  body: string;
+}
+
+/**
+ * Instrucciones del transporte del binding activo. NO bloquea nada: cuando no se puede conectar, el
+ * cuerpo apunta a la carga manual (RMV3.6/RBM5.10) y **no se ofrece intentar** una conexión que
+ * fallaría (RMV3.7).
+ *
+ * Precedencia (la misma que tenía el componente, más las dos ramas nuevas):
+ *   1. sin binding → no alcanzable en esta plataforma;
+ *   2. `available:false` o sin transporte instanciado → no disponible… salvo que el motivo sea de MFi,
+ *      que tiene su copy propio (RBM4.5: "falta el protocolo del fabricante" no es lo mismo que
+ *      "todavía no lo soportamos", y el operario que ve el segundo va a esperar una actualización que
+ *      no depende de nosotros);
+ *   3. por transporte: `ble-hid` / `ble-gatt` / `mfi` / `serial` / resto (`spp`).
+ */
+export function transportInstructionsView(input: {
+  binding: ReaderBinding | null;
+  /** ¿Hay un transporte INSTANCIADO? (`provider.transport != null`). Obligatorio: ver `deviceRowView`. */
+  hasTransport: boolean;
+}): TransportInstructionView {
+  const { binding, hasTransport } = input;
+
+  if (!binding) {
+    return {
+      key: 'sin-binding',
+      title: null,
+      icon: null,
+      body: 'En este dispositivo el bastón no se conecta directo. Cargá las caravanas a mano.',
+    };
+  }
+
+  if (!binding.available || !hasTransport) {
+    // Los tres motivos de MFi comparten el mismo desenlace (no se intenta conectar) pero NO el mismo
+    // copy: el que importa es `protocolo-no-declarado` / `build-sin-protocolos`, donde lo que falta es la
+    // autorización del fabricante para iPhone y no una versión nuestra. `driver-sin-mfi` no llega acá
+    // (si el driver no declara MFi, el binding no es de MFi).
+    if (
+      binding.transportKind === 'mfi' &&
+      (binding.unavailableReason === 'build-sin-protocolos' ||
+        binding.unavailableReason === 'protocolo-no-declarado')
+    ) {
+      return {
+        key: 'mfi-sin-protocolo',
+        title: 'Todavía no podemos conectarlo por iPhone',
+        icon: 'bluetooth',
+        body: 'Reconocemos este bastón, pero esta versión de la app todavía no tiene la autorización del fabricante para iPhone. Cargá las caravanas a mano; el bastón sigue andando en Android.',
+      };
+    }
+    return {
+      key: 'no-disponible',
+      title: null,
+      icon: null,
+      body: 'Este bastón todavía no se conecta en esta versión de la app. Mientras tanto, cargá las caravanas a mano.',
+    };
+  }
+
+  if (binding.transportKind === 'ble-hid') {
+    return {
+      key: 'ble-hid',
+      title: 'Emparejalo como teclado Bluetooth',
+      icon: 'keyboard',
+      body: 'Andá a los ajustes de Bluetooth del sistema, emparejá el lector como un teclado y volvé. La lectura por teclado llega en una próxima versión.',
+    };
+  }
+
+  if (binding.transportKind === 'ble-gatt') {
+    // Lo que la app HACE de verdad (as-built del adapter, F3): al tocar el CTA escanea filtrando por el
+    // servicio del driver, reconoce por nombre y se conecta sola al que reconoce. NO hay emparejamiento
+    // previo en los ajustes del sistema (a diferencia del SPP) y NO hay lista de resultados que elegir
+    // —el `StickAdapter` no expone el escaneo y este delta no cambia su interfaz (RBM9.6)—, así que el
+    // copy no puede prometer un paso de selección que no existe.
+    return {
+      key: 'ble-gatt',
+      title: 'Prendé el bastón y tocá conectar',
+      icon: 'bluetooth-searching',
+      body: 'Lo buscamos por Bluetooth y nos conectamos al bastón que reconocemos: no hace falta emparejarlo desde los ajustes. Si no aparece, acercate y tocá «Buscar de nuevo».',
+    };
+  }
+
+  if (binding.transportKind === 'mfi') {
+    // Disponible de verdad (la cadena del fabricante está declarada en el build): el emparejamiento lo
+    // hace el SO con su Accessory Picker, que es como emparejan los Tru-Test "i" según el relevamiento.
+    // Esta rama es INALCANZABLE en producción mientras ningún driver declare `mfi` (RBM4.6: no se
+    // inventa ninguna `protocolString`) — existe para que el día que llegue la cadena el diff sea el dato
+    // y no el copy, y se ejercita con una cadena sintética en `connection-view.test.ts`.
+    return {
+      key: 'mfi',
+      title: 'Emparejalo desde el aviso de iPhone',
+      icon: 'bluetooth',
+      body: 'Prendé el bastón y aceptá el aviso de iPhone para usar el accesorio. Después volvé acá y tocá «Conectar bastón».',
+    };
+  }
+
+  if (binding.transportKind === 'serial') {
+    return {
+      key: 'serial',
+      title: null,
+      icon: null,
+      body: 'Tocá «Conectar bastón» y elegí el puerto COM del RS420 en el diálogo del navegador.',
+    };
+  }
+
+  // spp (u otro stream): emparejar por Bluetooth y elegir de la lista.
+  return {
+    key: 'spp',
+    title: null,
+    icon: null,
+    body: 'Emparejá el bastón por Bluetooth y elegilo de la lista para conectarlo.',
   };
 }
 

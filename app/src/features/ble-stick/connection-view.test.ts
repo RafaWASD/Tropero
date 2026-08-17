@@ -16,10 +16,14 @@ import {
   readingBadge,
   readsEmptyHint,
   toneColorToken,
+  transportInstructionsView,
+  TRANSPORT_INSTRUCTION_KEYS,
   type PairedListState,
+  type TransportInstructionKey,
   type ViewTone,
 } from './connection-view.ts';
 import { RS420_DRIVER } from '../../services/ble/driver-rs420.ts';
+import { ESP32_GATT_DRIVER } from '../../services/ble/driver-esp32-gatt.ts';
 import type { ReaderBinding } from '../../services/ble/selection-priority.ts';
 import type { ConnectionStatus } from '../../services/ble/stick-adapter.ts';
 
@@ -146,12 +150,22 @@ test('sin transporte: el ícono no puede contradecir al label ("Bastón no dispo
 // La fila existe para que el operario sepa si el bastón está conectado SIN entrar a la pantalla. El
 // copy es de este archivo (no inline en `mas.tsx`) para que no pueda contradecir a la card.
 
-/** Todas las combinaciones de entrada de la fila: 6 estados × {con, sin} transporte × {agotado, no}. */
+/**
+ * Todas las combinaciones de entrada de la fila: 6 estados × {con, sin} transporte × {agotado, no}.
+ *
+ * Desde el delta ios-ble-mfi entran además las dos del `transportKind` nuevo (RBM5.14): el override de
+ * copy de BLE GATT vive en `connectionStatusView`, así que sin estas filas el invariante de tono de más
+ * abajo NUNCA lo ejercitaría y el override podría contradecir a la fila sin que nada se ponga rojo.
+ */
 const ROW_ENVS = [
   { hasTransport: true },
   { hasTransport: false },
   { hasTransport: true, autoConnectExhausted: true },
   { hasTransport: false, autoConnectExhausted: true },
+  { hasTransport: true, transportKind: 'ble-gatt' },
+  { hasTransport: true, transportKind: 'ble-gatt', autoConnectExhausted: true },
+  { hasTransport: false, transportKind: 'ble-gatt' },
+  { hasTransport: true, transportKind: 'spp' },
 ] as const;
 
 test('RMV3.1 fila: los 6 estados (× transporte) tienen texto no vacío y CORTO (cabe en un trailing)', () => {
@@ -598,5 +612,241 @@ test('es-AR voseo en todo el copy de la preferencia (nada de tuteo)', () => {
       assert.ok(text.length > 0, 'copy vacío');
       assert.doesNotMatch(text, /\b(apágalo|enciéndelo|puedes|tienes|siéntes|actívalo)\b/i, `tuteo: "${text}"`);
     }
+  }
+});
+
+// ─── T4.9 · INSTRUCCIONES POR TRANSPORTE (RMV3.2/3.7 → RBM5.14, RBM4.5) ─────────────────────────────
+//
+// El copy vivía INLINE en el JSX de `StickConnectionScreen` y por lo tanto NO SE TESTEABA. Con las dos
+// ramas nuevas del delta eso deja de ser teórico: la de MFi depende del `unavailableReason` del binding,
+// así que un `if` en el JSX sería la única decisión de presentación del delta sin oráculo.
+
+/** Un binding armado a mano (la forma la fija `selection-priority.test.ts`; acá importa el copy). */
+function binding(over: Partial<ReaderBinding> = {}): ReaderBinding {
+  return { adapterKind: 'spp-android', transportKind: 'spp', driver: RS420_DRIVER, available: true, ...over };
+}
+
+const GATT_BINDING = binding({
+  adapterKind: 'ble-gatt',
+  transportKind: 'ble-gatt',
+  driver: ESP32_GATT_DRIVER,
+});
+
+/**
+ * Una entrada por clave: el caso mínimo que la produce. La lista de claves NO se copia acá a mano —sale
+ * de `TRANSPORT_INSTRUCTION_KEYS`, que el typecheck del repo obliga a mantener exhaustiva—, así que una
+ * rama de copy nueva sin caso de test cae en el primer assert de abajo.
+ */
+const INSTRUCTION_CASES: { key: TransportInstructionKey; input: Parameters<typeof transportInstructionsView>[0] }[] = [
+  { key: 'sin-binding', input: { binding: null, hasTransport: true } },
+  {
+    key: 'no-disponible',
+    input: { binding: binding({ available: false, unavailableReason: 'adapter-no-construido' }), hasTransport: true },
+  },
+  {
+    key: 'mfi-sin-protocolo',
+    input: {
+      binding: binding({
+        adapterKind: 'mfi-ios',
+        transportKind: 'mfi',
+        available: false,
+        unavailableReason: 'build-sin-protocolos',
+      }),
+      hasTransport: true,
+    },
+  },
+  {
+    key: 'ble-hid',
+    input: { binding: binding({ adapterKind: 'hid-wedge', transportKind: 'ble-hid' }), hasTransport: true },
+  },
+  { key: 'ble-gatt', input: { binding: GATT_BINDING, hasTransport: true } },
+  {
+    key: 'mfi',
+    input: { binding: binding({ adapterKind: 'mfi-ios', transportKind: 'mfi' }), hasTransport: true },
+  },
+  {
+    key: 'serial',
+    input: { binding: binding({ adapterKind: 'web-serial', transportKind: 'serial' }), hasTransport: true },
+  },
+  { key: 'spp', input: { binding: binding(), hasTransport: true } },
+];
+
+test('RBM5.14: cada clave de instrucción se alcanza, con cuerpo no vacío y un cuerpo DISTINTO', () => {
+  assert.deepEqual(
+    [...INSTRUCTION_CASES.map((c) => c.key)].sort(),
+    [...TRANSPORT_INSTRUCTION_KEYS].sort(),
+    'hay una clave de instrucción sin caso de test (o un caso de una clave que ya no existe)',
+  );
+  const cuerpos = new Set<string>();
+  for (const { key, input } of INSTRUCTION_CASES) {
+    const v = transportInstructionsView(input);
+    assert.equal(v.key, key, `el caso de '${key}' resolvió a '${v.key}'`);
+    assert.ok(v.body.length > 0, `cuerpo vacío en ${key}`);
+    // Anti-vacuidad: si dos claves compartieran el cuerpo, distinguirlas no serviría de nada (es
+    // exactamente el defecto que el copy de MFi vino a arreglar).
+    assert.equal(cuerpos.has(v.body), false, `dos claves comparten el cuerpo: '${key}'`);
+    cuerpos.add(v.body);
+    // Coherencia de forma: con título hay ícono, sin título no (el componente renderiza nota simple).
+    if (v.title === null) assert.equal(v.icon, null, `${key}: sin título no puede haber ícono`);
+    else assert.ok(v.icon, `${key}: una card con título necesita su ícono`);
+  }
+});
+
+test('REGRESIÓN: las cinco instrucciones que ya existían dicen EXACTAMENTE lo que decía el JSX', () => {
+  // El copy se MUDÓ del componente a la vista pura. Una mudanza que cambia el texto no es una mudanza:
+  // estas cadenas salen del JSX de antes del delta (`git show a9d81ff -- …/StickConnectionScreen.tsx`),
+  // con los saltos de línea de la indentación del JSX colapsados a un espacio (que es lo que renderizaba).
+  assert.deepEqual(transportInstructionsView({ binding: null, hasTransport: true }), {
+    key: 'sin-binding',
+    title: null,
+    icon: null,
+    body: 'En este dispositivo el bastón no se conecta directo. Cargá las caravanas a mano.',
+  });
+  assert.equal(
+    transportInstructionsView({ binding: binding({ available: false }), hasTransport: true }).body,
+    'Este bastón todavía no se conecta en esta versión de la app. Mientras tanto, cargá las caravanas a mano.',
+  );
+  assert.deepEqual(
+    transportInstructionsView({
+      binding: binding({ adapterKind: 'hid-wedge', transportKind: 'ble-hid' }),
+      hasTransport: true,
+    }),
+    {
+      key: 'ble-hid',
+      title: 'Emparejalo como teclado Bluetooth',
+      icon: 'keyboard',
+      body: 'Andá a los ajustes de Bluetooth del sistema, emparejá el lector como un teclado y volvé. La lectura por teclado llega en una próxima versión.',
+    },
+  );
+  assert.equal(
+    transportInstructionsView({
+      binding: binding({ adapterKind: 'web-serial', transportKind: 'serial' }),
+      hasTransport: true,
+    }).body,
+    'Tocá «Conectar bastón» y elegí el puerto COM del RS420 en el diálogo del navegador.',
+  );
+  assert.equal(
+    transportInstructionsView({ binding: binding(), hasTransport: true }).body,
+    'Emparejá el bastón por Bluetooth y elegilo de la lista para conectarlo.',
+  );
+});
+
+test('RBM5.14: SIN transporte instanciado, ningún transporte da instrucciones de un pairing imposible', () => {
+  // Bugfix 2026-07-29 extendido a las ramas nuevas: `available:true` + `hasTransport:false` (dev build sin
+  // el módulo nativo) NO puede seguir explicando cómo emparejar.
+  for (const { key, input } of INSTRUCTION_CASES) {
+    if (key === 'sin-binding') continue;
+    const v = transportInstructionsView({ ...input, hasTransport: false });
+    assert.ok(
+      v.key === 'no-disponible' || v.key === 'mfi-sin-protocolo',
+      `${key} sin transporte devolvió '${v.key}': está explicando un pairing que no se puede hacer`,
+    );
+  }
+});
+
+test('RBM4.5: el copy de MFi dice que falta la autorización DEL FABRICANTE, no que "no lo soportamos"', () => {
+  // Los dos motivos son un dato que falta —la cadena iAP del fabricante (trámite MFi) o la línea en
+  // `app.config.ts`—, no una versión nuestra que va a salir. Si el operario lee "todavía no lo
+  // soportamos" va a esperar una actualización que no depende de nosotros.
+  for (const reason of ['build-sin-protocolos', 'protocolo-no-declarado'] as const) {
+    const v = transportInstructionsView({
+      binding: binding({ adapterKind: 'mfi-ios', transportKind: 'mfi', available: false, unavailableReason: reason }),
+      hasTransport: true,
+    });
+    assert.equal(v.key, 'mfi-sin-protocolo', reason);
+    assert.match(v.body, /fabricante/i, `el copy de ${reason} no nombra al fabricante`);
+    // Y ofrece la salida: manual acá y ahora (RBM9.5), sin prometer una conexión que fallaría (RMV3.7).
+    assert.match(v.body, /a mano/i, `el copy de ${reason} no ofrece la carga manual`);
+    assert.doesNotMatch(v.body, /toc[aá].*conectar/i, `el copy de ${reason} invita a intentar conectar`);
+  }
+  // El tercer motivo de `mfiAvailability` (`driver-sin-mfi`) NO puede llegar acá: si el driver no declara
+  // MFi, el binding no es de MFi. Con un binding de OTRO transporte, el motivo de MFi no secuestra el copy.
+  assert.equal(
+    transportInstructionsView({
+      binding: binding({ available: false, unavailableReason: 'driver-sin-mfi' }),
+      hasTransport: true,
+    }).key,
+    'no-disponible',
+  );
+});
+
+test('RBM5.14: el copy de BLE GATT no promete un paso que el adapter NO tiene (ni lista ni emparejar)', () => {
+  // El design §8 hablaba de "escanear → listar → elegir → conectar", pero el `StickAdapter` NO expone el
+  // escaneo y este delta no puede cambiar su interfaz (RBM9.6): el adapter escanea filtrado por el
+  // servicio del driver y se conecta SOLO al que su `deviceMatch` reconoce. Prometer una lista que no
+  // existe sería la misma clase de afordancia muerta que el bugfix del 2026-07-29 cerró.
+  const v = transportInstructionsView({ binding: GATT_BINDING, hasTransport: true });
+  assert.equal(v.key, 'ble-gatt');
+  assert.equal(v.icon, 'bluetooth-searching');
+  assert.doesNotMatch(v.body, /elegilo de la lista|eleg[íi] el bast[oó]n de la lista/i);
+  assert.match(v.body, /no hace falta emparejarlo/i, 'lo que distingue a GATT del SPP es justo eso');
+  // Y las dos ramas nuevas hablan es-AR con voseo, como el resto del copy de la pantalla.
+  for (const { input } of INSTRUCTION_CASES) {
+    const view = transportInstructionsView(input);
+    for (const text of [view.title ?? '', view.body]) {
+      assert.doesNotMatch(text, /\b(puedes|tienes|debes|acércate|toca el bot[oó]n)\b/i, `tuteo: "${text}"`);
+    }
+  }
+});
+
+// ─── T4.9 · El override de copy de BLE GATT en la card (RBM5.14) ─────────────────────────────────────
+
+test('RBM5.12: la fila del bastón BLE dice "banco de pruebas" (la consecuencia visible de registrar el emulador)', () => {
+  // Consecuencia DECLARADA de dos decisiones del delta juntas, y hay que mirarla de frente: (1) el driver
+  // del emulador vive en el registro de producción (design §7) y (2) la pantalla muestra el driver del
+  // TRANSPORTE MONTADO. En iOS el piso es `ble-gatt` (RBM5.6) y el único driver que declara ese transporte
+  // es el del banco → en un iPhone la fila de Dispositivos dice **"Emulador ESP32 (banco de pruebas)"** y
+  // es accionable (tocar = escanear buscando `EMU-GATT-STICK`).
+  //
+  // Eso es exactamente lo que RBM5.12/ADR-010 pidieron —que un banco de pruebas NUNCA se presente como un
+  // lector comercial— y es lo que hace posible el banco de F6 en device. Pero es una superficie que el
+  // usuario final puede ver, así que queda FIJADA acá: el día que se decida esconderla, el cambio es
+  // visible en este test y no un drift silencioso. (El Gate 2.5 la mira en las capturas del device: en web
+  // el binding es `serial` y esta fila no existe.)
+  const row = deviceRowView({ driver: ESP32_GATT_DRIVER, binding: GATT_BINDING, hasTransport: true });
+  assert.equal(row.state, 'recognized-available');
+  assert.equal(row.actionable, true);
+  assert.equal(row.title, 'Emulador ESP32 (banco de pruebas)');
+  assert.match(row.title, /banco de pruebas/i, 'el rótulo del banco no puede parecer un lector comercial');
+});
+
+test('RBM5.14: en BLE GATT "conectar" es BUSCAR — scanning y disconnected cambian de copy', () => {
+  const scanning = connectionStatusView('scanning', { hasTransport: true, transportKind: 'ble-gatt' });
+  assert.equal(scanning.label, 'Buscando el bastón…');
+  assert.match(scanning.hint, /manual/i, 'sigue ofreciendo la carga manual (RBM9.5)');
+  const disconnected = connectionStatusView('disconnected', { hasTransport: true, transportKind: 'ble-gatt' });
+  assert.equal(disconnected.ctaLabel, 'Buscar de nuevo');
+  assert.match(disconnected.hint, /acercate/i, 'el hint nombra lo único accionable');
+  // Lo que el override NO toca, y es lo que impide que contradiga a la fila o al ícono:
+  for (const s of ALL_STATES) {
+    const base = connectionStatusView(s, WITH_TRANSPORT);
+    const gatt = connectionStatusView(s, { hasTransport: true, transportKind: 'ble-gatt' });
+    assert.equal(gatt.tone, base.tone, `el override cambió el tono en ${s}`);
+    assert.equal(gatt.cta, base.cta, `el override cambió la ACCIÓN en ${s}`);
+    assert.equal(gatt.icon, base.icon, `el override cambió el ícono en ${s}`);
+    assert.equal(gatt.connected, base.connected, `el override cambió el flag connected en ${s}`);
+  }
+});
+
+test('REGRESIÓN: sin `transportKind` (o con cualquier otro) la card es IDÉNTICA a antes del delta', () => {
+  // Los call sites que no saben el transporte —el indicador global del chrome, la fila de "Más"— siguen
+  // viendo el copy genérico, que para ellos es cierto. Un override que se aplicara por default cambiaría
+  // el copy de TODA la app (incluido el camino SPP de producción) sin que nadie lo pidiera.
+  for (const s of ALL_STATES) {
+    const base = connectionStatusView(s, WITH_TRANSPORT);
+    for (const otro of ['spp', 'serial', 'ble-hid', 'mfi'] as const) {
+      assert.deepEqual(
+        connectionStatusView(s, { hasTransport: true, transportKind: otro }),
+        base,
+        `el transporte '${otro}' cambió la card en ${s}`,
+      );
+    }
+    // Y sin transporte, el corte "no disponible" gana incluso con `transportKind:'ble-gatt'`: sin
+    // transporte ninguna instrucción de búsqueda aplica.
+    assert.deepEqual(
+      connectionStatusView(s, { hasTransport: false, transportKind: 'ble-gatt' }),
+      connectionStatusView(s, NO_TRANSPORT),
+      `sin transporte, el override de GATT se colgó en ${s}`,
+    );
   }
 });

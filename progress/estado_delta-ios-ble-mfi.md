@@ -13,8 +13,8 @@ para retomar sin releer todo. **Fuente de verdad de QUÉ hacer**: `requirements-
 | **F0** | Gate físico del HID | ⏸ **espera a Raf** (iPhone + ESP32 en mano) | Runbook listo: `progress/gate_hid-runbook.md`. **No cuesta build de EAS** |
 | **F1** | El parser sale del registro de drivers | ✅ **commiteada `3272227`** | reviewer CHANGES_REQUESTED → fix-loop → **re-falsificado por el leader con un mutante nuevo** (`Object.values(DRIVER_REGISTRY)[0]`): compila y **4 tests caen** |
 | **F2** | `react-native-ble-plx@3.5.1` + config + permisos + veto | ✅ **commiteada `3272227`** | Veto **FIRME**: `assembleDebug` local BUILD SUCCESSFUL 3m23s, **0 EAS**. `progress/veto_ble-plx.md` |
-| **F3** | `adapter-ble-gatt` | 🔄 **en revisión** | 98 tests verdes, `tsc` rc=0. **Sin commitear** |
-| **F4** | Selección/prioridad + driver del emulador | ⏳ pendiente | Bloqueada hasta que cierre la review de F3 (no mover el árbol bajo un reviewer) |
+| **F3** | `adapter-ble-gatt` | ✅ **commiteada `a9d81ff`** | review CHANGES_REQUESTED (🟠-1: fixtures con un solo juego de parámetros) → fix-loop → **re-falsificado por el leader**: quitarle el delimitador al driver **cae**. 17 mutantes, 17 muertos |
+| **F4** | Selección/prioridad + driver del emulador | 🔄 **lista para review** (3er agente la cerró) | **Sin commitear.** `tsc` rc=0, **689 pasan / 0 fallan**, 21 mutantes / 21 muertos. Informe: `progress/impl_ios-ble-mfi-f4.md` |
 | **F5** | `adapter-mfi-ios` prearmado | ⏳ pendiente | — |
 | **F6** | Banco ESP32 en `MODO_GATT`, en device | ⏳ pendiente | Android local; **iOS necesita OK de build de Raf** |
 | **F7** | Adapter HID | ⏳ **condicional**: solo si F0 da verde | — |
@@ -56,3 +56,82 @@ para retomar sin releer todo. **Fuente de verdad de QUÉ hacer**: `requirements-
   entrega su documentación.
 - El veto de `ble-plx` prueba que **compila, linkea y se empaqueta**; **no** prueba la reachability del
   puente en runtime (es un módulo de puente legacy bajo la capa de interop). Eso lo mide F6.
+
+## F4 — clasificación de los 6 rojos (leader, 2026-08-17)
+
+El agente de F4 murió dos veces (límite de sesión y watchdog) dejando `tsc` en verde y 6 tests rojos. **Los
+seis no son iguales**, y confundirlos es cómo se acepta una regresión en silencio. Clasificados contra la
+spec ANTES de mandar a arreglarlos:
+
+**Legítimamente obsoletos** — el delta los vuelve falsos a propósito. Se actualiza el test **citando el
+requisito que lo autoriza**:
+
+1. `RMV6.2/6.3: ble-gatt y mfi no tienen adapter buildable (null)` → **RBM7.1** (dejan de ser "fuera del delta").
+2. `RMV6.1/6.2: driver mfi-only en iOS → binding null` → F4 cablea el binding de MFi (**RBM4.4/4.5/RBM5.5**).
+
+**Sospechosos de REGRESIÓN** — la spec dice que estos caminos NO cambian. Default: **el código está mal, no
+el test**:
+
+3. `RMV2.3/2.4: RS420 en android` → **RBM5.4**, la prioridad de Android no cambia.
+4. `RMV2.2/2.4: driver solo-HID en android` → ídem.
+5. `RMV2.2/2.4: driver HID genérico en iOS` → si el driver declara **solo** `ble-hid`, el orden de prioridad
+   no debería cambiar su resultado; si cambió, hay algo más.
+6. 🔴 `RMV2.7: selectTransportAdapter(auto/mock/manual) devuelve EXACTAMENTE lo de antes` → **RBM5.9 lo
+   prohíbe explícitamente**.
+
+~~**Sospecha concreta para 3/4/6**: **RBM5.6** puede haber cambiado el camino por defecto de Android.~~
+
+**❌ FALSIFICADA (2026-08-17).** La escribí yo como sospecha concreta y **estaba equivocada**. Medido: sin
+preferencia recordada la selección **sí** cae al piso por plataforma, y el mutante que mueve la rama de la
+preferencia antes de `mock` **muere**. **Ninguno de los 7 rojos era regresión** (eran 7, no 6: el séptimo
+estaba en `wiring.test.ts`).
+
+Lo que realmente eran:
+- **3/4/5** — `adapterKind` y `transportKind` **idénticos**; lo único que cambió es la clave nueva
+  `unavailableReason:'adapter-no-construido'`, cambio de **forma** autorizado por RBM4.5 + RBM5.14.
+- **6** — de sus 8 aserciones falla **una**: `ios/auto`. RBM5.9 congela `auto` *"en Android y en web"*, y el
+  design §6.2 dice literal que iOS pasa de `manual` a `ble-gatt`. Android sigue en `spp-android`.
+
+**La lección de método, que es lo que vale**: la clasificación previa sirvió para que nadie pusiera los tests
+en verde editándolos, pero **una sospecha del leader es una hipótesis, no un hallazgo** — y esta se cayó
+contra la medición. Que se mida siempre antes de tratarla como cierta.
+
+## Dos bugs que NO estaban en los rojos (los cazó la autorrevisión de F4)
+
+- **El CTA "Olvidar el bastón guardado" quedaba escondido por la preferencia misma**: vivía dentro de
+  `{isSpp ? …}` y desde RBM5.6 la preferencia monta `ble-gatt` → `isSpp` false → **R6.6 incumplido por
+  ubicación**, sin salida posible. Un bastón recordado que ya no existe y ningún botón para olvidarlo.
+- **La pantalla persistía el `vendorId` como si fuera un id de device.** Bug **vivo** con el adapter BLE,
+  porque `connect()` usa el id recordado **en vez de escanear**. Era deuda ⚪-K del backlog desde julio y
+  esta fase la volvió real. → El reviewer de F4 tiene orden de **barrer la clase**, no la instancia.
+
+### Veredicto de los 7 rojos (implementer, 2026-08-17) — ninguno era regresión, y se midió
+
+El séptimo estaba en `wiring.test.ts` (`R7: en iOS (auto) … piso manual`), misma causa que el 6º.
+
+- **1 y 2**: obsoletos a propósito, como estaban clasificados. Reescritos citando RBM5.2/RBM7.1 y
+  RBM4.4/4.5/RBM5.5.
+- **3, 4 y 5**: **NO son regresión de RBM5.4/Android.** Medido: `adapterKind` y `transportKind` son
+  **idénticos** en los tres; la única diferencia es la clave nueva `unavailableReason:'adapter-no-construido'`.
+  Es un cambio de FORMA del `ReaderBinding` que autorizan RBM4.5 (el motivo tiene que ser explícito) y
+  RBM5.14 (la UI dice la verdad). Se agregó el invariante "todo `available:false` trae motivo" sobre la
+  matriz completa y se reconcilió `requirements` + `design §6.1`.
+- **6**: **NO viola RBM5.9.** De sus 8 aserciones falla UNA: `ios/auto`. RBM5.9 congela `auto` *"en Android
+  y en web"* y el design §6.2 dice literal *"iOS pasa de 'manual' a 'ble-gatt' como piso"*. Android sigue
+  en `spp-android` y web en `web-serial`. Se partió en dos tests: uno congela lo congelado, el otro declara
+  el único cambio con su autorización citada.
+- **La sospecha de RBM5.6 quedó falsificada**: sin preferencia recordada la selección **cae al piso por
+  plataforma** (`spp-android` en Android), la rama de la preferencia va después de `mock`/`demo`/`manual`, y
+  el mutante que la mueve al principio **muere**.
+
+**Dos bugs propios encontrados en la autorrevisión** (no estaban en los rojos): el CTA "Olvidar el bastón
+guardado" quedaba **escondido por la preferencia misma** (vivía dentro de la rama `isSpp`, y la preferencia
+monta `ble-gatt` → `isSpp` false → R6.6 incumplido por ubicación), y la pantalla persistía el **`vendorId`
+como si fuera un id de device** — que con el adapter BLE es un bug vivo (`connect()` usa el id recordado en
+vez de escanear). Los dos cerrados con guard y mutante.
+
+## Regla de proceso que esta unidad dejó (2 agentes caídos)
+
+`tsc` verde **no** confirma cableado. Ante un agente muerto mid-tarea: medir el árbol (typecheck **+** correr
+las suites **+** buscar imports muertos y leer los archivos de integración) **antes** de relanzar, y relanzar
+**un agente fresco y angosto** con el diagnóstico ya servido, no resucitar el transcript largo.

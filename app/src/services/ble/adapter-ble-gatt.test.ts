@@ -34,6 +34,7 @@ import {
   type BleDeviceLike,
   type BleEnv,
   type BleManagerLike,
+  type BleModuleEnv,
   type BleSubscription,
   type BleTimerLabel,
   type BleTimings,
@@ -652,6 +653,115 @@ test('RBM2.2/RBM2.3: sin módulo nativo, `loadBleManager` devuelve null y el tra
     false,
     '"no hay RN" no es "la lib explotó": si se loguearan igual, el ruido taparía el caso que importa',
   );
+});
+
+// ── RBM3.8 / 🟠-1 del review de F4: EL ARRANQUE EN FRÍO NO PUEDE CONSTRUIR EL MANAGER ──────────────
+// En iOS el diálogo de permiso de Bluetooth no lo pide una API: lo muestra el SO cuando la app usa
+// CoreBluetooth por primera vez, y **construir el central manager es ese primer uso**. El as-built de F4
+// lo construía dentro de `isBleGattTransportAvailable()`, o sea dentro de `instantiateTransport` — el
+// primer render del provider, sin un solo gesto del operario. El comentario del archivo afirmaba lo
+// contrario, y esa clase de defecto ("el comentario promete más que el código") ya costó un 🔴 en esta
+// unidad. Por eso el oráculo es de COMPORTAMIENTO y no una aserción sobre el texto: se CUENTAN las
+// construcciones del manager en el borde inyectado.
+
+/** Borde del módulo nativo con contadores: el binario "está" y construir el manager se cuenta. */
+function countingModuleEnv(opts: { present?: boolean } = {}) {
+  const state = { presenceChecks: 0, constructions: 0 };
+  const manager = fakeManager().manager;
+  const env: BleModuleEnv = {
+    nativeModulePresent: () => {
+      state.presenceChecks += 1;
+      return opts.present ?? true;
+    },
+    constructManager: () => {
+      state.constructions += 1;
+      return manager;
+    },
+  };
+  return { env, state, manager };
+}
+
+test('RBM3.8: `isBleGattTransportAvailable` CONSULTA el módulo nativo y NO construye el manager', () => {
+  const mod = countingModuleEnv();
+  __resetBleModuleStateForTests(mod.env);
+  try {
+    assert.equal(isBleGattTransportAvailable([TEST_DRIVER]), true);
+    assert.equal(mod.state.presenceChecks, 1, 'tiene que consultar la presencia del binario');
+    assert.equal(
+      mod.state.constructions,
+      0,
+      'construir el BleManager crea el CBCentralManager → el diálogo del SO en iOS: no puede pasar en un chequeo de disponibilidad',
+    );
+    // Y sin driver `ble-gatt` en el registro corta ANTES incluso de consultar el módulo (el orden de los
+    // dos gates es parte de la decisión: el barato primero).
+    const antes = mod.state.presenceChecks;
+    assert.equal(isBleGattTransportAvailable([]), false);
+    assert.equal(mod.state.presenceChecks, antes, 'sin driver no hace falta preguntarle nada al SO');
+    assert.equal(mod.state.constructions, 0);
+  } finally {
+    __resetBleModuleStateForTests();
+  }
+});
+
+test('RBM3.8: un ARRANQUE EN FRÍO (montar el transporte + autoConnect sin bastón) construye CERO managers', async () => {
+  // Reproduce la secuencia exacta de producción, con el ENTORNO REAL del adapter (`defaultBleEnv`, o sea
+  // el `loadManager` de verdad): `instantiateTransport('ble-gatt')` pregunta si el transporte está
+  // disponible, construye el adapter y el efecto de wiring llama `autoConnect()`. En un teléfono recién
+  // instalado no hay bastón recordado, así que la radio no se puede tocar (RBM3.8).
+  const mod = countingModuleEnv();
+  __resetBleModuleStateForTests(mod.env);
+  try {
+    assert.equal(isBleGattTransportAvailable([TEST_DRIVER]), true, 'el transporte se monta');
+    const adapter = new BleGattAdapter(TEST_DRIVER); // env REAL: readRemembered/loadManager de producción
+    const seen = track(adapter);
+    await withLogs(async () => {
+      await adapter.autoConnect();
+    });
+    assert.deepEqual(seen.statuses, [], 'un arranque en frío no emite estado: nunca se intentó');
+    assert.equal(
+      mod.state.constructions,
+      0,
+      'el arranque en frío construyó el manager: en iOS eso es el diálogo de Bluetooth sin un gesto del operario',
+    );
+  } finally {
+    __resetBleModuleStateForTests();
+  }
+});
+
+test('RBM2.16: con un bastón recordado, el manager SÍ se construye — y una sola vez (control positivo)', async () => {
+  // Contraprueba del test de arriba: si "cero construcciones" fuera cierto SIEMPRE, el oráculo no probaría
+  // nada (bastaría con romper `loadBleManager` para que los dos pasaran). Acá el gate del bastón recordado
+  // SÍ pasa, así que la construcción tiene que ocurrir — y quedar cacheada (el `BleManager` de la lib es
+  // un singleton).
+  const mod = countingModuleEnv();
+  __resetBleModuleStateForTests(mod.env);
+  try {
+    const { env } = fakeEnv({ remembered: DEV_ID });
+    // El `loadManager` REAL (el que construye), con el resto del entorno inyectado.
+    (env as { loadManager: () => BleManagerLike | null }).loadManager = loadBleManager;
+    const adapter = new BleGattAdapter(TEST_DRIVER, env);
+    track(adapter);
+    await withLogs(async () => {
+      await adapter.autoConnect();
+    });
+    assert.equal(mod.state.constructions, 1, 'con bastón recordado el autoConnect tiene que llegar a la radio');
+    assert.equal(loadBleManager(), mod.manager, 'y devuelve el mismo manager');
+    assert.equal(mod.state.constructions, 1, 'el manager se cachea: una construcción por proceso');
+  } finally {
+    __resetBleModuleStateForTests();
+  }
+});
+
+test('RBM2.3: sin el binario en el build, ni disponibilidad ni manager (y nunca se intenta construir)', () => {
+  const mod = countingModuleEnv({ present: false });
+  __resetBleModuleStateForTests(mod.env);
+  try {
+    assert.equal(isBleGattTransportAvailable([TEST_DRIVER]), false);
+    assert.equal(loadBleManager(), null);
+    assert.equal(mod.state.constructions, 0, 'sin binario, construir tiraría (`BleModule === undefined`)');
+  } finally {
+    __resetBleModuleStateForTests();
+  }
 });
 
 test('un adapter construido SIN driver no tira (no se lleva el render) y corta con log', async () => {

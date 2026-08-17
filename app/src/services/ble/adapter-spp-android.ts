@@ -375,7 +375,18 @@ export function defaultSppEnv(): SppEnv {
       try {
         // eslint-disable-next-line @typescript-eslint/no-var-requires
         const { readRememberedDevice } = require('./remembered-device') as typeof import('./remembered-device');
-        return await readRememberedDevice();
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const { rememberedDeviceIdFor } = require('./remembered-format') as typeof import('./remembered-format');
+        // El adapter solo necesita el ID (la MAC) para reconectar; el `adapterKind` del registro lo
+        // consume el provider (RBM5.6). El registro tiene UN lector y dos consumidores.
+        //
+        // Y el id se toma SOLO si el registro es de ESTE transporte (🟠-2 del review de F4): desde que el
+        // operario puede elegir el transporte por gesto, el recordado puede ser el del BLE, y abrir un
+        // RFCOMM contra el id de un device que solo anuncia GATT es un intento que no puede salir bien.
+        // `acceptsLegacy: true` **solo acá**: un registro en el formato viejo (string pelado) solo pudo
+        // escribirlo este adapter —era el único escritor antes del delta, y en Android— así que negarlo
+        // le costaría el bastón recordado a todo teléfono ya instalado (RBM5.7).
+        return rememberedDeviceIdFor(await readRememberedDevice(), 'spp-android', { acceptsLegacy: true });
       } catch {
         return null;
       }
@@ -384,7 +395,11 @@ export function defaultSppEnv(): SppEnv {
       try {
         // eslint-disable-next-line @typescript-eslint/no-var-requires
         const { writeRememberedDevice } = require('./remembered-device') as typeof import('./remembered-device');
-        await writeRememberedDevice(deviceId);
+        // El `adapterKind` (RBM5.6): este es el único punto que sabe con qué transporte se abrió el link.
+        // Para el SPP además importa por la otra dirección — si el registro NO dijera `spp-android`, un
+        // teléfono que alguna vez usó el bastón BLE se quedaría con esa preferencia para siempre y el
+        // RS420 dejaría de montarse.
+        await writeRememberedDevice(deviceId, { adapterKind: 'spp-android' });
       } catch {
         // best-effort: si falla, la próxima vez se elige el device de nuevo
       }

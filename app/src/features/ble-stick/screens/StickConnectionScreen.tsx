@@ -27,16 +27,14 @@ import { useBleProviderApi } from '@/services/ble/BleStickListenerProvider';
 import { useScopedScannerControls } from '@/services/ble/stick';
 import { useBleConnectionStatus } from '@/services/ble/connection-status';
 import { selectReaderBinding, type ReaderBinding } from '@/services/ble/selection-priority';
-import type { AdapterKind } from '@/services/ble/adapter-selection';
+import { transportChoices, type AdapterKind, type TransportChoice } from '@/services/ble/adapter-selection';
+import { declaredEaProtocols } from '@/services/ble/ea-protocols';
 import { RS420_DRIVER } from '@/services/ble/driver-rs420';
-import { findDriverForDevice } from '@/services/ble/driver-registry';
-import { listPairedSppDevices } from '@/services/ble/adapter-spp-android';
+import { DRIVER_REGISTRY, findDriverForDevice } from '@/services/ble/driver-registry';
+import { listPairedSppDevices, isSppNativeAvailable } from '@/services/ble/adapter-spp-android';
+import { isBleGattTransportAvailable } from '@/services/ble/adapter-ble-gatt';
 import type { PairedDevice } from '@/services/ble/spp-protocol';
-import {
-  forgetRememberedDevice,
-  readRememberedDevice,
-  writeRememberedDevice,
-} from '@/services/ble/remembered-device';
+import { forgetRememberedDevice, readRememberedDevice } from '@/services/ble/remembered-device';
 import { readBeepEnabled, writeBeepEnabled, cachedBeepEnabled } from '@/services/ble/feedback-pref';
 import { useStickStatusSurface } from '@/hooks/useStickStatusSurface';
 import { buttonA11y, labelA11y, switchA11y } from '@/utils/a11y';
@@ -48,6 +46,8 @@ import {
   pairedDevicesView,
   readingBadge,
   readsEmptyHint,
+  transportInstructionsView,
+  type InstructionIconKey,
   type PairedListState,
   type StatusIconKey,
 } from '../connection-view';
@@ -63,11 +63,45 @@ import { DemoControls } from '../components/DemoControls';
 // ⚠️ `available` (capacidad de BUILD) NO alcanza para habilitar el tap: la fila cruza además
 // `hasTransport` (¿hay un adapter INSTANCIADO ahora?), que en Android es false si el APK no trae el
 // módulo nativo (dev build viejo). Son dos fuentes distintas — ver `deviceRowView`.
-const BUILT_ADAPTERS: AdapterKind[] = ['web-serial', 'mock', 'manual', 'simulator', 'spp-android'];
+//
+// Delta ios-ble-mfi: entra `'ble-gatt'` — el adapter existe y la dep nativa está en el build desde F2/F3.
+// **NO entra `'mfi-ios'`**, aunque el task T4.8 lo pedía: `adapter-mfi-ios.ts` es F5 y todavía no existe,
+// así que declararlo "construido" haría que su binding saliera `available:true` y la fila ofreciera tocar
+// para conectar algo que no se puede instanciar — exactamente la afordancia muerta que el bugfix del
+// 2026-07-29 vino a cerrar. La conjunción de RBM5.5 (`built ∧ protocolo declarado`) se ejercita igual en
+// los tests, que inyectan `builtAdapters` (por eso la entrada es inyectable). Entra en F5, con el adapter.
+const BUILT_ADAPTERS: AdapterKind[] = ['web-serial', 'mock', 'manual', 'simulator', 'spp-android', 'ble-gatt'];
 
-// El driver primario mostrado en la pantalla (el registry hoy tiene uno: el RS420, RMV1.3). Con más
-// fabricantes, esta pantalla listaría un binding por driver reconocido; el patrón es idéntico.
-const PRIMARY_DRIVER = RS420_DRIVER;
+// ¿Ese transporte se puede INSTANCIAR acá y ahora? Es la otra mitad de `BUILT_ADAPTERS`: aquella dice
+// "este build trae el adapter", esto dice "este dispositivo puede montarlo". Son distintas y la diferencia
+// es la que decide si una fila es una promesa (un APK sin el módulo nativo de BLE tiene el adapter
+// compilado y no puede montarlo).
+//
+// ⚠️ Es un ESPEJO de los guards de `instantiateTransport` (en el provider), y espejo que puede driftar no
+// prueba nada: `wiring.test.ts` cruza los dos archivos y exige que cada kind use LA MISMA función de
+// prueba acá y allá. Un kind sin probe declarada cae en `false` (fail-closed: la fila dice "todavía no
+// disponible" en vez de ofrecer un tap que deja al operario sin transporte).
+const TRANSPORT_INSTALLABLE: Partial<Record<AdapterKind, () => boolean>> = {
+  'spp-android': isSppNativeAvailable,
+  'ble-gatt': isBleGattTransportAvailable,
+  // Sin módulo nativo que chequear: `new WebSerialAdapter()` nunca falla (el diálogo del navegador vive en
+  // el `connect()`, no en el instanciado).
+  'web-serial': () => true,
+};
+
+function canInstantiateTransport(kind: AdapterKind): boolean {
+  return TRANSPORT_INSTALLABLE[kind]?.() ?? false;
+}
+
+// El driver por defecto de la pantalla: el RS420 (RMV1.3), que es el bastón del cliente beta.
+//
+// ⚠️ NO es necesariamente el driver del transporte MONTADO. Desde el delta ios-ble-mfi el transporte
+// puede ser `ble-gatt` (piso de iOS, o preferencia del bastón recordado en Android — RBM5.6), y ese
+// adapter habla con OTRO driver: el que declare `ble-gatt` en el registro. Mostrar el binding del RS420
+// mientras el transporte montado es el BLE hacía que la pantalla se contradijera sola —la card diciendo
+// "Conectar bastón" y la fila diciendo "no se conecta en este dispositivo"—, que es el defecto de clase
+// de esta pantalla. Ver `activeDriver` en el componente.
+const DEFAULT_DRIVER = RS420_DRIVER;
 
 interface ReadRow {
   eid: string;
@@ -119,20 +153,35 @@ export default function StickConnectionScreen() {
   // por `Platform.OS`: es la misma fuente que decide si el CTA existe.
   const isSpp = transport?.kind === 'spp-android';
 
-  // Binding del driver primario en ESTA plataforma (RMV2.3/2.4): elige adapter+transporte por la tabla
-  // de prioridad + marca `available` según los adaptadores construidos. Puro, sin device real: refleja
-  // qué se puede conectar en este build/plataforma (web → web-serial available; android → spp-android
-  // NO construido → available:false; ios → RS420 no alcanzable → binding null).
+  // El driver del que habla esta pantalla: el del TRANSPORTE MONTADO si lo expone, y el RS420 como
+  // default (delta ios-ble-mfi). Sin esto, en iOS —donde el piso pasa a ser `ble-gatt`— la pantalla
+  // mostraba el binding del RS420 (que en iOS es `null` → "no se conecta en este dispositivo") mientras
+  // la card ofrecía "Conectar bastón" porque SÍ había transporte: la pantalla contradiciéndose sola.
+  // `transport.driver` es el dato honesto — es el adapter el que sabe con qué aparato puede hablar
+  // (RBM1.3) — y en web/mock es `undefined` o el RS420, así que ese camino no cambia.
+  const activeDriver = transport?.driver ?? DEFAULT_DRIVER;
+
+  // Binding del driver activo en ESTA plataforma (RMV2.3/2.4): elige adapter+transporte por la tabla
+  // de prioridad + marca `available` según los adaptadores construidos Y, para MFi, según la lista de
+  // protocolos que el build declara (RBM5.5 — entra inyectada para que el motor siga siendo puro). Sin
+  // device real: refleja qué se puede conectar en este build/plataforma (web → web-serial available;
+  // ios con el driver del BLE → ble-gatt available; ios con el RS420 → binding null).
   const binding: ReaderBinding | null = useMemo(
-    () => selectReaderBinding({ platformOS: Platform.OS, driver: PRIMARY_DRIVER, builtAdapters: BUILT_ADAPTERS }),
-    [],
+    () =>
+      selectReaderBinding({
+        platformOS: Platform.OS,
+        driver: activeDriver,
+        builtAdapters: BUILT_ADAPTERS,
+        declaredEaProtocols: declaredEaProtocols(),
+      }),
+    [activeDriver],
   );
   // `hasTransport` va ADEMÁS del binding (bugfix 2026-07-29): el binding es capacidad de BUILD, el
   // transporte es "hay un adapter instanciado ahora". Tocar la fila llama `transport?.connect()` → sin
   // transporte sería una afordancia muerta (el mismo defecto que el chip del header).
   const rowView = useMemo(
-    () => deviceRowView({ driver: PRIMARY_DRIVER, binding, hasTransport }),
-    [binding, hasTransport],
+    () => deviceRowView({ driver: activeDriver, binding, hasTransport }),
+    [activeDriver, binding, hasTransport],
   );
 
   // Sin transporte instanciado, la vista pura ya devuelve `cta: 'none'` + copy honesto ("Bastón no
@@ -145,9 +194,14 @@ export default function StickConnectionScreen() {
   // la verdad ("no lo encontramos") en vez de "conectá el bastón", que suena a que nunca se intentó. Se
   // lee en el render y no por suscripción porque el adapter lo setea ANTES de emitir el cambio de estado
   // que dispara este re-render.
+  // `transportKind` (delta ios-ble-mfi, RBM5.14): en BLE GATT "conectar" es BUSCAR, y el copy genérico
+  // ("Se apagó, quedó fuera de rango o cancelaste" + "Volver a conectar") no le dice al operario lo único
+  // accionable. Sale del binding del driver activo, que es la misma fuente que decide la fila y las
+  // instrucciones — así los tres no pueden contradecirse.
   const view = connectionStatusView(status, {
     hasTransport,
     autoConnectExhausted: transport?.autoConnectExhausted ?? false,
+    transportKind: binding?.transportKind,
   });
   const StatusIcon = STATUS_ICONS[view.icon];
   const statusColorToken = toneColorToken(view.tone);
@@ -207,15 +261,64 @@ export default function StickConnectionScreen() {
     return unsub;
   }, [api]);
 
-  // Elegir el device reconocido-conectable (RMV3.3): lo persistimos como el bastón recordado + conectamos.
-  // `available:false` / no reconocido NO llega acá (la fila no es accionable) → nunca intentamos conectar
-  // algo que fallaría (RMV3.7/3.8). El id recordado es el vendorId del driver (marcador de reconexión;
-  // cuando el adapter SPP real aterrice, recordará la MAC del device elegido de la lista).
+  // Elegir el device reconocido-conectable (RMV3.3): conectamos. `available:false` / no reconocido NO
+  // llega acá (la fila no es accionable) → nunca intentamos conectar algo que fallaría (RMV3.7/3.8).
+  //
+  // ── YA NO PERSISTE NADA (delta ios-ble-mfi, misma lección que MEDIUM-2 del Gate 2) ────────────────
+  // Antes hacía `writeRememberedDevice(binding.driver.vendorId)`: un **vendorId guardado como si fuera un
+  // id de device**, "marcador de reconexión" de cuando ningún adapter real leía ese valor. Con el
+  // transporte BLE eso pasa a ser un bug vivo: `connect()` usa el id recordado **en vez de escanear**
+  // (`adapter-ble-gatt.ts`: `target = deviceId ?? readRemembered()`), así que un `'esp32-gatt-emu'`
+  // guardado ahí manda a `connectToDevice()` contra un id que no existe → nunca vuelve a encontrar el
+  // bastón, y el CTA de "Olvidar" solo se renderiza en el camino SPP. El único que puede persistir es el
+  // adapter, en el punto donde el bastón contestó (y ahí también escribe el `adapterKind`, RBM5.6).
   const onChooseDevice = useCallback(() => {
     if (!binding || !binding.available) return;
-    void writeRememberedDevice(binding.driver.vendorId);
     void transport?.connect().catch(() => undefined);
   }, [binding, transport]);
+
+  // ── LOS OTROS TRANSPORTES QUE ESTA PLATAFORMA PUEDE MONTAR (🟠-2 del review de F4, RBM5.14) ────────
+  // Sin esto, en **Android** el transporte BLE era inalcanzable en producción: se monta solo si la
+  // preferencia del bastón recordado lo dice, y esa preferencia solo la escribe el adapter BLE al conectar
+  // — o sea que había que haber conectado por BLE para poder conectar por BLE. Es el problema que RBM5.6
+  // declara resuelto y el que dejaba al banco de F6 sin camino real en la plataforma del productor.
+  //
+  // La lista es la de los transportes alcanzables que NO son el montado, y sale de la capa pura: qué
+  // lector le corresponde a cada uno (el binding, igual que el resto de las filas) y si elegirlo haría
+  // algo (derivado de `selectTransportAdapter` **con el modo real**, no de una segunda tabla). En web con
+  // `mode:'auto'` da vacío (el único transporte de web es el montado) y en `mock`/`demo`/`manual` da vacío
+  // SIEMPRE (esos modos ignoran la preferencia, RBM5.9) → cero filas nuevas para las ~70 specs E2E.
+  const choices = useMemo(
+    () =>
+      transportChoices({
+        platformOS: Platform.OS,
+        // El MODO del provider, no un `'auto'` literal (bug medido por la E2E del capture): en `mock` —donde
+        // corren las ~70 specs— el kind montado NO es el piso de la plataforma, así que con `'auto'` el piso
+        // aparecía como "alternativa" y la pantalla mostraba DOS filas idénticas. Sin provider,
+        // `'manual'`: nadie a quien pedirle montar → la derivación no ofrece nada (fail-closed).
+        mode: api?.providerMode ?? 'manual',
+        mountedKind: transport?.kind,
+        builtAdapters: BUILT_ADAPTERS,
+        declaredEaProtocols: declaredEaProtocols(),
+        canInstantiate: canInstantiateTransport,
+        // El registro entra desde acá y no por un default del módulo puro: `adapter-selection.ts` es una
+        // superficie CIEGA AL FABRICANTE (RBM1.7) y nombrar ahí el registro abre la puerta al
+        // `DRIVER_REGISTRY[0].frameParser` que el review de F1 falsificó. Esta pantalla sí conoce lectores
+        // (muestra sus nombres), así que es su lugar.
+        registry: DRIVER_REGISTRY,
+      }),
+    [transport, api?.providerMode],
+  );
+
+  // Elegir OTRO transporte: lo monta el provider y lo conecta (gesto → trigger `operator`). No se persiste
+  // nada acá — el adapter recuerda el device que contestó, con su `adapterKind` (RBM5.6). Es la misma
+  // lección que MEDIUM-2: se recuerda lo que funcionó, no lo que se intentó.
+  const onChooseTransport = useCallback(
+    (kind: AdapterKind) => {
+      api?.chooseTransport(kind);
+    },
+    [api],
+  );
 
   // ── Lista de devices EMPAREJADOS del teléfono (camino SPP-Android, RMV3.2) ──────────────────
   // No se carga sola al entrar: la primera llamada dispara el diálogo de permiso del SO, y un
@@ -233,8 +336,10 @@ export default function StickConnectionScreen() {
   const [hasRemembered, setHasRemembered] = useState(false);
   useEffect(() => {
     let active = true;
-    void readRememberedDevice().then((id) => {
-      if (active) setHasRemembered(id != null && id.length > 0);
+    void readRememberedDevice().then((remembered) => {
+      // El registro ya viene validado (`parseRememberedValue` devuelve `null` si no hay un `deviceId`
+      // usable), así que "hay bastón guardado" es exactamente "hay registro".
+      if (active) setHasRemembered(remembered != null);
     });
     return () => {
       active = false;
@@ -433,7 +538,9 @@ export default function StickConnectionScreen() {
         <DemoControls />
 
         {/* ── Dispositivos (RMV3.2). En SPP-Android: la lista REAL de emparejados del teléfono.
-              En web/iOS: la fila única de capacidad de build, como hasta ahora. ── */}
+              En web/iOS: la fila única de capacidad de build, como hasta ahora.
+              + (delta ios-ble-mfi, 🟠-2) las filas de los OTROS transportes que esta plataforma puede montar,
+              afuera de las dos ramas: en Android es lo único que hace alcanzable el BLE (y la vuelta al SPP). ── */}
         <YStack gap="$2">
           {/* `testID` y no el texto como ancla en la E2E: desde el 2026-08-06 el tab "Más" también tiene
               una sección "Dispositivos", y ese tab queda MONTADO detrás de esta pantalla (Stack) → un
@@ -473,17 +580,6 @@ export default function StickConnectionScreen() {
                   {pairedView.ctaLabel}
                 </Button>
               ) : null}
-              {/* R6.6 — OLVIDAR el bastón guardado. Cableado el 2026-07-30 (MEDIUM-2 del Gate 2): el
-                  requisito existía y `forgetRememberedDevice` no tenía un solo call site. Desde R6.4 la
-                  app se conecta sola contra esa MAC en cada apertura, así que "no quiero más ese bastón"
-                  —lo vendí, era de otro, toqué los auriculares por error— tiene que ser accionable, y no
-                  solo por prolijidad: mientras la MAC esté guardada, cada arranque abre un RFCOMM contra
-                  ella sin que nadie lo pida. */}
-              {hasRemembered ? (
-                <Button testID="stick-forget-cta" variant="secondary" fullWidth onPress={onForgetRemembered}>
-                  Olvidar el bastón guardado
-                </Button>
-              ) : null}
             </>
           ) : (
             <>
@@ -491,6 +587,46 @@ export default function StickConnectionScreen() {
               <TransportInstructions binding={binding} hasTransport={hasTransport} />
             </>
           )}
+
+          {/* ── OTROS TRANSPORTES ALCANZABLES (🟠-2 del review de F4, RBM5.14/RBM5.6) ──────────────────
+              Va AFUERA de las dos ramas del ternario, igual que el CTA de olvidar y por un motivo emparentado:
+              lo que decide qué transporte se monta es el bastón recordado, así que la forma de ELEGIR otro no
+              puede vivir adentro de la rama del que ya está montado (ahí es donde nunca se alcanza).
+
+              En Android son las filas que destraban el BLE: la de arriba lista los emparejados del SPP y esta
+              ofrece el lector BLE (hoy, el único que el registro declara: el emulador del banco — RBM5.11 no
+              deja inventar el driver del HR5 v3, y el día que Gallagher entregue su doc esta MISMA fila pasa a
+              decir su nombre, sin código nuevo). Tocarla monta ese transporte y conecta; al conectar, el
+              adapter persiste el device que contestó con su `adapterKind` y el próximo arranque lo monta solo.
+              En web la lista es vacía (el único transporte de web es el montado) y en iOS también (el SPP no
+              existe ahí, RBM5.3, y MFi está gateado hasta F5). */}
+          {choices.map((choice) => (
+            <TransportChoiceRows key={choice.adapterKind} choice={choice} onChoose={onChooseTransport} />
+          ))}
+
+          {/* ── R6.6 — OLVIDAR el bastón guardado. VA AFUERA DE LAS DOS RAMAS (delta ios-ble-mfi) ──────
+              Cableado el 2026-07-30 (MEDIUM-2 del Gate 2): el requisito existía y `forgetRememberedDevice`
+              no tenía un solo call site. Desde R6.4 la app se conecta sola contra esa MAC en cada
+              apertura, así que "no quiero más ese bastón" —lo vendí, era de otro, toqué los auriculares
+              por error— tiene que ser accionable.
+
+              Estaba ADENTRO de la rama `isSpp`, y con el delta eso se volvió una TRAMPA que se cierra
+              sola: el registro del bastón recordado ahora decide QUÉ TRANSPORTE se monta (RBM5.6), así que
+              un teléfono que alguna vez conectó por BLE monta `ble-gatt` para siempre → `isSpp` es false →
+              el único botón que puede borrar esa preferencia queda ESCONDIDO por la preferencia misma, y
+              el RS420 por SPP se vuelve inalcanzable. (El design §6.2 ofrecía como salida "elegir otro
+              bastón en la pantalla, que reescribe la preferencia", y en BLE **no hay lista de devices** que
+              elegir: el as-built del adapter escanea y se conecta solo — RBM9.6 no deja tocar la interfaz
+              del `StickAdapter` para exponer el escaneo. Desde el fix-loop del review hay una salida MÁS
+              —elegir otro TRANSPORTE en las filas de arriba, que en Android devuelve al RS420—, pero este
+              CTA sigue siendo el único que BORRA el registro, así que su ubicación sigue importando lo
+              mismo.) `onForgetRemembered` ya era agnóstico del transporte (disconnect → forget → reset),
+              así que la corrección es de UBICACIÓN. */}
+          {hasRemembered ? (
+            <Button testID="stick-forget-cta" variant="secondary" fullWidth onPress={onForgetRemembered}>
+              Olvidar el bastón guardado
+            </Button>
+          ) : null}
         </YStack>
 
         {/* ── Lecturas en vivo (confirmación pre-commit, RMV4.8; marca DEMO, RMV4.6) ── */}
@@ -613,11 +749,51 @@ export default function StickConnectionScreen() {
   );
 }
 
-// ─── Instrucciones específicas por adaptador del binding (RMV3.2/3.7) ────────────────────────────────
-// web-serial (serial) → elegir el puerto COM en el diálogo del navegador; spp → emparejar por Bluetooth;
-// ble-hid → emparejar como teclado del SO + campo de scan (GATED); available:false (o SIN transporte
-// instanciado) → no disponible + manual; sin binding → no alcanzable en este dispositivo + manual.
-// Todas NO bloqueantes.
+// ─── Fila + instrucción de un transporte ELEGIBLE (🟠-2 del review de F4, RBM5.14) ───────────────────
+// Misma anatomía que la rama no-SPP de la sección (fila + instrucción del transporte) y con las MISMAS
+// vistas puras: la fila sale de `deviceRowView` y el copy de `transportInstructionsView`, así que un
+// transporte elegible no puede describirse distinto que el montado.
+//
+// `hasTransport` recibe `choice.installable` a propósito: la pregunta que esas vistas hacen es "¿tocar esto
+// va a hacer algo de verdad?", y para un transporte que todavía no está montado la respuesta es "¿este
+// dispositivo puede montarlo?". Sin eso, un APK sin el módulo nativo de BLE ofrecería "Tocá para conectar"
+// y el tap dejaría al operario sin transporte (la afordancia muerta del bugfix del 2026-07-29).
+function TransportChoiceRows({
+  choice,
+  onChoose,
+}: {
+  choice: TransportChoice;
+  onChoose: (kind: AdapterKind) => void;
+}) {
+  const view = deviceRowView({
+    driver: choice.driver,
+    binding: choice.binding,
+    hasTransport: choice.installable,
+  });
+  return (
+    <>
+      <StickDeviceRow
+        view={view}
+        onPress={view.actionable ? () => onChoose(choice.adapterKind) : undefined}
+      />
+      <TransportInstructions binding={choice.binding} hasTransport={choice.installable} />
+    </>
+  );
+}
+
+// ─── Instrucciones específicas por transporte del binding (RMV3.2/3.7 → RBM5.14) ─────────────────────
+// El COPY y la decisión de QUÉ instrucción corresponde viven en la vista pura
+// (`transportInstructionsView`, testeada en node:test); acá solo queda la traducción clave→ícono lucide y
+// el layout — que es lo que NO puede vivir en el módulo puro (importar lucide rompe su loader). Es el
+// mismo movimiento que el del ícono del estado (bugfix 2026-07-29): mientras el copy vivía en este JSX,
+// el `if` que lo elegía era la única decisión de presentación del bastón sin un solo test, y este delta le
+// agregaba dos ramas más (BLE y MFi, la de MFi dependiendo del `unavailableReason`).
+const INSTRUCTION_ICONS: Record<InstructionIconKey, typeof Bluetooth> = {
+  keyboard: Keyboard,
+  bluetooth: Bluetooth,
+  'bluetooth-searching': BluetoothSearching,
+};
+
 function TransportInstructions({
   binding,
   hasTransport,
@@ -625,59 +801,28 @@ function TransportInstructions({
   binding: ReaderBinding | null;
   hasTransport: boolean;
 }) {
-  // Sin binding: reconocido pero sin transporte alcanzable en esta plataforma (o piso manual). La fila
-  // ya lo dice; agregamos la salida manual explícita.
-  if (!binding) {
-    return (
-      <InfoNote>
-        En este dispositivo el bastón no se conecta directo. Cargá las caravanas a mano.
-      </InfoNote>
-    );
-  }
+  const view = transportInstructionsView({ binding, hasTransport });
 
-  // Reconocido pero el adapter no está construido en este build (RMV3.7) o no hay transporte instanciado
-  // (bugfix 2026-07-29): NO se intenta conectar, y NO se dan instrucciones de un pairing imposible.
-  if (!binding.available || !hasTransport) {
-    return (
-      <InfoNote>
-        Este bastón todavía no se conecta en esta versión de la app. Mientras tanto, cargá las
-        caravanas a mano.
-      </InfoNote>
-    );
-  }
+  // Sin título → nota simple (el caso de las cuatro ramas que ya eran `InfoNote`).
+  if (view.title === null) return <InfoNote>{view.body}</InfoNote>;
 
-  // Emparejamiento como TECLADO del SO + campo de scan (GATED, RMV3.2). Solo aplica a drivers HID (el
-  // RS420 no declara HID → esta rama no se renderiza para él; queda lista para un lector HID futuro).
-  if (binding.transportKind === 'ble-hid') {
-    return (
-      <Card gap="$3" borderWidth={1} borderColor="$divider">
-        <XStack alignItems="center" gap="$2">
-          <Keyboard size={getTokenValue('$navIcon', 'size')} color={getTokenValue('$textMuted', 'color')} strokeWidth={2.25} />
-          <Text flex={1} minWidth={0} fontFamily="$body" fontSize="$4" lineHeight="$4" fontWeight="600" color="$textPrimary">
-            Emparejalo como teclado Bluetooth
-          </Text>
-        </XStack>
-        <Text fontFamily="$body" fontSize="$3" lineHeight="$3" fontWeight="400" color="$textMuted">
-          Andá a los ajustes de Bluetooth del sistema, emparejá el lector como un teclado y volvé. La
-          lectura por teclado llega en una próxima versión.
-        </Text>
-      </Card>
-    );
-  }
-
-  if (binding.transportKind === 'serial') {
-    return (
-      <InfoNote>
-        Tocá «Conectar bastón» y elegí el puerto COM del RS420 en el diálogo del navegador.
-      </InfoNote>
-    );
-  }
-
-  // spp (u otro stream): emparejar por Bluetooth y elegir de la lista.
+  const Icon = view.icon ? INSTRUCTION_ICONS[view.icon] : null;
   return (
-    <InfoNote>
-      Emparejá el bastón por Bluetooth y elegilo de la lista para conectarlo.
-    </InfoNote>
+    <Card gap="$3" borderWidth={1} borderColor="$divider">
+      <XStack alignItems="center" gap="$2">
+        {Icon ? (
+          <Icon size={getTokenValue('$navIcon', 'size')} color={getTokenValue('$textMuted', 'color')} strokeWidth={2.25} />
+        ) : null}
+        {/* `lineHeight` matcheado al `fontSize` (bug de clase del repo: los descendentes g/q/p/j/y se
+            recortan si no coincide — y este título tiene una 'j' en "Emparejalo"). */}
+        <Text flex={1} minWidth={0} fontFamily="$body" fontSize="$4" lineHeight="$4" fontWeight="600" color="$textPrimary">
+          {view.title}
+        </Text>
+      </XStack>
+      <Text fontFamily="$body" fontSize="$3" lineHeight="$4" fontWeight="400" color="$textMuted">
+        {view.body}
+      </Text>
+    </Card>
   );
 }
 

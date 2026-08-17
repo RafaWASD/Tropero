@@ -37,6 +37,7 @@ import { acceptingTargets, resolveReadHandling, type ReadSubscriber } from './re
 import {
   selectTransportAdapter,
   readSourceFor,
+  mountActionFor,
   type AdapterKind,
   type ProviderMode,
   type ReadSource,
@@ -48,6 +49,7 @@ import { SimulatorAdapter } from './adapter-simulator';
 import { SppAndroidAdapter, isSppNativeAvailable } from './adapter-spp-android';
 import { BleGattAdapter, isBleGattTransportAvailable } from './adapter-ble-gatt';
 import { isDemoMode } from './demo-gate';
+import { readRememberedDevice } from './remembered-device';
 import { classifyReadOutcome, playFeedback, primeFeedback } from './feedback';
 import { cachedBeepEnabled, readBeepEnabled } from './feedback-pref';
 import { logTransportEvent } from './logging';
@@ -91,6 +93,30 @@ interface ProviderApi {
   transport: StickAdapter | null;
   /** El adaptador manual (piso, siempre disponible, R7). */
   manual: ManualAdapter;
+  /**
+   * MONTA (y conecta) otro transporte porque el operario lo ELIGIÓ en la pantalla de conexión
+   * (🟠-2 del review de F4, RBM5.6/RBM5.14). Es la ÚNICA entrada por gesto a la preferencia de
+   * transporte, y lo que destraba el bucle que dejaba a `ble-gatt` inalcanzable en Android: hasta acá la
+   * preferencia solo se auto-escribía (el adapter, al conectar), así que un transporte que no fuera el
+   * piso de su plataforma no tenía forma de montarse nunca.
+   *
+   * NO persiste nada: el `AdapterKind` vive en el estado del provider hasta que el adapter conecte de
+   * verdad y persista el device que contestó (con su `adapterKind`). Si la conexión falla, el próximo
+   * arranque vuelve al piso por plataforma — se recuerda lo que funcionó, no lo que se intentó.
+   *
+   * Un kind que la selección no honraría (gateado, o imposible en esta plataforma) no cambia nada:
+   * `selectTransportAdapter` lo ignora y sigue el piso. La pantalla ya no lo ofrece (`transportChoices`).
+   */
+  chooseTransport: (kind: AdapterKind) => void;
+  /**
+   * El MODO con el que este provider está montado. Lo consume la pantalla de conexión para saber si
+   * ofrecer otros transportes tiene sentido: en `mock`, `demo` y `manual`, `selectTransportAdapter` corta
+   * **antes** de la preferencia (RBM5.9), así que `chooseTransport` no puede montar nada y una fila que lo
+   * ofreciera sería una afordancia muerta — y, medido en la E2E, además DUPLICABA la fila del transporte
+   * montado. Viaja el modo crudo (y no un booleano derivado) para que la decisión la siga tomando
+   * `selectTransportAdapter`, que es la única fuente de esa verdad.
+   */
+  providerMode: ProviderMode;
 }
 
 const ProviderContext = createContext<ProviderApi | null>(null);
@@ -148,7 +174,19 @@ function instantiateTransport(kind: ReturnType<typeof selectTransportAdapter>): 
       // no hay filtro de escaneo posible, así que montarlo sería un transporte que no puede ni buscar.
       // Los dos motivos se loguean por separado (un try/catch mudo acá convierte "el build no trae BLE"
       // en "el operario no está bastoneando").
+      //
+      // ⚠️ El guard CONSULTA el módulo nativo y **no construye** el manager (🟠-1 del review de F4): este
+      // camino corre en el PRIMER RENDER, y en iOS construir el `CBCentralManager` es lo que dispara el
+      // diálogo de permiso de Bluetooth del SO — o sea que hacerlo acá se lo mostraría a un operario que
+      // no tocó nada (RBM3.8). La construcción vive detrás de los gates de `autoConnect`/`doConnect`.
       return isBleGattTransportAvailable() ? new BleGattAdapter() : null;
+    case 'mfi-ios':
+      // Delta ios-ble-mfi: el KIND existe desde F4 (lo exige el mapeo de RBM5.2 y el `available` de
+      // RBM5.5), el ADAPTER llega en F5. Hasta entonces no se monta nada → la app queda manual-first en
+      // ese binding, que es la verdad: sin la cadena de protocolo del fabricante no hay sesión que abrir
+      // (RBM4.2/RBM5.10). Devolver null acá y no lanzar es deliberado: un throw en el instanciado se
+      // llevaría el render del provider por un dato de configuración.
+      return null;
     case 'manual':
       // Piso manual sin transporte extra (iOS, y el flag de E2E que reproduce ese sub-estado).
       return null;
@@ -182,12 +220,65 @@ export function BleStickListenerProvider({
   // Callbacks de tag_read del consumidor (spec 09) + su predicado `accepts` (🔴-2). Set para soportar
   // múltiples suscriptores.
   const tagSubscribersRef = useRef(new Set<TagSubscriber>());
+  // ¿El transporte montado lo pidió un GESTO del operario (eligió otro en la pantalla de conexión)? Guarda
+  // el `AdapterKind` elegido, no un booleano: lo leen DOS decisiones distintas —si la hidratación puede
+  // pisarlo (abajo) y si el transporte recién montado se conecta de una (`mountActionFor`)— y las dos
+  // necesitan saber CUÁL kind se pidió. Declarado acá arriba porque la hidratación lo consulta.
+  const chosenByGestureRef = useRef<AdapterKind | null>(null);
 
-  // El transporte activo (web-serial/mock/null) se elige una vez por (plataforma, modo).
-  const transport = useMemo(
-    () => instantiateTransport(selectTransportAdapter({ platformOS: Platform.OS, mode })),
-    [mode],
-  );
+  // ── PREFERENCIA DE TRANSPORTE DEL BASTÓN RECORDADO (RBM5.6, delta ios-ble-mfi) ─────────────────────
+  // El transporte tiene que seguir al bastón que el operario YA eligió, no a la plataforma sola: sin
+  // esto, en Android se monta siempre `spp-android` y un lector BLE queda inalcanzable en producción
+  // justo donde está el productor argentino.
+  //
+  // La hidratación es ASINCRÓNICA (SecureStore, con el techo de `storage` que ya vive en el borde de
+  // `remembered-device.ts`): el provider arranca con el PISO por plataforma y re-monta si la preferencia
+  // resuelve a otro `AdapterKind`. `undefined` mientras no se sepa —y también cuando el registro está en
+  // el formato viejo (RBM5.7)— significa "sin preferencia".
+  //
+  // Solo se lee en `mode === 'auto'`: los otros tres modos cortan antes en `selectTransportAdapter`
+  // (RBM5.9), así que leer el storage ahí sería I/O que no puede cambiar nada. Las ~70 specs E2E corren
+  // en `mock` → cero lecturas nuevas, cero riesgo.
+  const [preferredAdapter, setPreferredAdapter] = useState<AdapterKind | undefined>(undefined);
+  useEffect(() => {
+    if (mode !== 'auto') return;
+    let active = true;
+    void readRememberedDevice().then((remembered) => {
+      // ⚠️ El GESTO LE GANA A LA HIDRATACIÓN, y no es teórico: la lectura es asincrónica (SecureStore, con
+      // el techo de `storage` = 2 s) y el operario puede elegir otro transporte ANTES de que resuelva
+      // (deep-link a `/baston`, o un arranque lento). Sin este guard, la hidratación pisaría la elección
+      // del operario ~2 s después de que la hizo: el transporte que acababa de elegir se desmontaría solo.
+      if (active && remembered?.adapterKind && chosenByGestureRef.current == null) {
+        setPreferredAdapter(remembered.adapterKind);
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, [mode]);
+
+  // ── EL OPERARIO ELIGE EL TRANSPORTE (🟠-2 del review de F4, RBM5.14) ───────────────────────────────
+  // La otra entrada de la preferencia, y la que faltaba: hasta acá el `adapterKind` solo lo escribía el
+  // adapter AL CONECTAR, así que un transporte que no fuera el piso de su plataforma no tenía forma de
+  // montarse nunca (en Android, `ble-gatt` era inalcanzable en producción — el problema que RBM5.6 dice
+  // resolver). La pantalla ofrece los transportes alcanzables (`transportChoices`) y esto los monta.
+  //
+  // El REF (y no un estado más) es lo correcto: no cambia lo que se renderiza, solo el ORIGEN del montaje
+  // —gesto vs. arranque—, que es lo que decide si el transporte recién montado se conecta de una
+  // (`mountActionFor`) y si la hidratación puede pisarlo. Y no se limpia al consumirse: mientras el kind
+  // elegido siga siendo el montado, un re-montaje sigue siendo "el que el operario pidió" (con StrictMode,
+  // que invoca los efectos dos veces, limpiarlo convertiría el gesto en un no-op).
+  const chooseTransport = useCallback((kind: AdapterKind) => {
+    chosenByGestureRef.current = kind;
+    setPreferredAdapter(kind);
+  }, []);
+
+  // El transporte activo se elige por (plataforma, modo, preferencia). El `useMemo` depende del KIND ya
+  // resuelto —un string— y no de la preferencia cruda: así la hidratación re-monta **solo si el
+  // `AdapterKind` cambió** (guard del riesgo declarado en el design §13: montar → hidratar → re-montar
+  // en ciclo). Si la preferencia coincide con el piso, no pasa nada.
+  const resolvedKind = selectTransportAdapter({ platformOS: Platform.OS, mode, preferredAdapter });
+  const transport = useMemo(() => instantiateTransport(resolvedKind), [resolvedKind]);
 
   // Un scanner acotado (RCF.6) FUERZA la escucha: quiere las lecturas para SÍ, aunque la ficha haya
   // prendido busyMode (useBusyWhileMounted) para suspender el listener global. Sin scanner acotado, la
@@ -371,11 +462,30 @@ export function BleStickListenerProvider({
       // diálogo de activar. Cualquier gate que no pase deja el estado en 'off' (nunca se intentó) y
       // loguea el motivo — ver `SppAndroidAdapter.autoConnect()`.
       //
-      // `autoConnect` es OPCIONAL en `StickAdapter`: hoy la implementa solo spp-android. No es olvido —
-      // web-serial NO PUEDE (la Web Serial API exige un gesto para `requestPort()`), manual no tiene
-      // transporte, y mock/simulator los conecta su propio disparador (bridge de E2E / botón de demo).
-      // O sea: cero riesgo para las ~70 specs E2E, que corren en mock.
-      void transport.autoConnect?.().catch(() => undefined);
+      // `autoConnect` es OPCIONAL en `StickAdapter`: la implementan los DOS transportes con radio —
+      // `spp-android` y, desde el delta ios-ble-mfi, `ble-gatt` (RBM2.16). No es olvido que los otros
+      // cuatro no la tengan: web-serial NO PUEDE (la Web Serial API exige un gesto para `requestPort()`),
+      // manual no tiene transporte, y mock/simulator los conecta su propio disparador (bridge de E2E /
+      // botón de demo). O sea: cero riesgo para las ~70 specs E2E, que corren en mock.
+      //
+      // ⚠️ Consecuencia NUEVA de este delta, dicha en voz alta: con `ble-gatt` como piso de iOS (RBM5.6)
+      // y como preferencia posible en Android, este `autoConnect` hace que la app arranque ESCANEANDO por
+      // BLE sin gesto. Es lo que R6.4 pide y el adapter tiene la misma política de `ConnectTrigger` que el
+      // SPP (presupuesto de la cadena sin gesto, permiso CONSULTADO y no pedido, foreground-only), pero
+      // ahora corre en un transporte más.
+      //
+      // ── Y CUÁL DE LAS DOS PUERTAS SE USA LO DECIDE UNA FUNCIÓN PURA (`mountActionFor`) ───────────────
+      // Si este montaje lo pidió el operario eligiendo el transporte en la pantalla, `autoConnect` sería
+      // el camino equivocado: su primer gate es "¿hay bastón recordado?" y en el escenario que 🟠-2 vino a
+      // destrabar justamente NO hay (es la primera conexión por ese transporte) → el tap del operario no
+      // haría nada. Con `'connect'` sale con trigger `operator`: puede pedir permisos y su cadena no tiene
+      // tope, que es lo que corresponde a un gesto.
+      const action = mountActionFor({
+        chosenByGesture: chosenByGestureRef.current === transport.kind,
+        canAutoConnect: typeof transport.autoConnect === 'function',
+      });
+      if (action === 'connect') void transport.connect().catch(() => undefined);
+      else if (action === 'autoconnect') void transport.autoConnect?.().catch(() => undefined);
     }
 
     return () => {
@@ -416,6 +526,8 @@ export function BleStickListenerProvider({
       subscribeTagRead,
       transport,
       manual: manualRef.current,
+      chooseTransport,
+      providerMode: mode,
     }),
     [
       disableListener,
@@ -426,6 +538,8 @@ export function BleStickListenerProvider({
       status,
       subscribeTagRead,
       transport,
+      chooseTransport,
+      mode,
     ],
   );
 

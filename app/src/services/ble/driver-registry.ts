@@ -4,10 +4,23 @@
 // adaptadores.
 
 import { RS420_DRIVER } from './driver-rs420';
+import { ESP32_GATT_DRIVER } from './driver-esp32-gatt';
 import type { ReaderDriver, DiscoveredDevice, DeviceMatcher } from './driver-types';
 
-/** Todos los drivers soportados. El RS420 es el primero (RMV1.3). */
-export const DRIVER_REGISTRY: ReaderDriver[] = [RS420_DRIVER];
+/**
+ * Todos los drivers soportados. El RS420 es el primero (RMV1.3).
+ *
+ * `ESP32_GATT_DRIVER` (delta ios-ble-mfi, RBM5.12) es el emulador en `MODO_GATT`: el único aparato con
+ * el que hoy se puede verificar el transporte BLE de punta a punta, con su `displayName` diciendo que es
+ * un banco de pruebas. Entra como DATOS y no detrás de un gate de build — el motivo largo está en
+ * `driver-esp32-gatt.ts` y en el design §7/§12-D.
+ *
+ * ⚠️ Lo que NO entra (RBM5.11): el **Gallagher HR5 v3** ni ningún otro lector comercial con UUIDs,
+ * formato de trama o parámetros **inventados**. No tenemos el aparato ni su documentación técnica, y un
+ * driver adivinado convertiría la incógnita más importante del delta en un verde falso. Un fabricante
+ * entra al registro cuando entrega su doc.
+ */
+export const DRIVER_REGISTRY: ReaderDriver[] = [RS420_DRIVER, ESP32_GATT_DRIVER];
 
 /** Lookup de un driver por `vendorId` (RMV1.4). `null` si no existe. */
 export function driverByVendorId(
