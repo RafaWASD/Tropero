@@ -24,7 +24,7 @@ cambios secuenciales, evidencia cruda en `progress/impl_20-reactividad-sync.md`)
 **Consecuencia medida**: la E2E de la 20 necesita `retries` honestos + un forzador de blip (adiciones) y
 timeouts amplios (revocaciones) para ser verde — porque el cambio "aparece sin reiniciar" pero con latencia
 no acotada. En producción, en conexión estable, el cambio de un coworker puede tardar hasta el próximo
-checkpoint (~90 s+) en verse. Toda la reactividad de RAFAQ está emulada sobre esta señal gruesa: la app
+checkpoint (~90 s+) en verse. Toda la reactividad de miTropero está emulada sobre esta señal gruesa: la app
 tiene **CERO** watched queries (`useQuery`/`db.watch`) — deuda deliberada de spec 15 desde 2026-06-09.
 
 ## 2. Qué cambia con watched queries

@@ -1,6 +1,52 @@
 # Rebrand RAFAQ → miTropero — plan de ejecución (handoff para otra sesión)
 
-> **Estado:** DECIDIDO por Raf (2026-08-15), NO ejecutado. Se difirió a su propia sesión porque "rafaq"
+> ## Estado de ejecución
+>
+> | Fase | Estado |
+> |---|---|
+> | 1 — Prosa (docs/specs/CONTEXT/.github) | ✅ **HECHA** (2026-08-16). 66 archivos, 139 ocurrencias. 308 protegidas por ser plomería. |
+> | 2 — Infra de E2E (globals + fixtures) | ⏳ pendiente |
+> | 3 — PowerSync (`rafaq.yaml`) | ⏳ pendiente — **pregunta 5 resuelta, ver abajo** |
+> | 4 — GUCs de Postgres | ⏳ pendiente — Gate 1 |
+> | 5 — Headers HTTP | ⏳ pendiente — Gate 1. **Además es lo que hoy tiene el árbol en rojo** |
+> | 6 — Identidad Expo | 🔴 bloqueada por decisiones de Raf (§6.2) |
+> | Assets (logo) | 🔴 bloqueada: falta el logo real |
+>
+> ### ⚠️ Corrección al §1: el baseline que este plan da por bueno NO existe
+>
+> El plan dice `check.mjs` → RC=0. **Medido el 2026-08-16: el árbol está ROJO**, con un solo fallo:
+> el guard de marca (regla A) caza `'X-Rafaq-Request-Id'` en `app/src/services/{account,members,
+> push-notifications}.ts`. Es la spec 23, que entró deployada y dejó el guard en rojo.
+>
+> **Baseline real, y el juez de las fases que siguen: `3115 pass / 1 fail`, ese fallo y sólo ese.**
+> Cualquier fallo nuevo es de la fase en curso. Lo cierra la fase 5 (no hace falta tocar el guard).
+>
+> ### Pregunta 5 resuelta: los nombres de streams NO llevan "rafaq"
+>
+> Verificado sobre `sync-streams/rafaq.yaml`: las streams se llaman `catalog_species`,
+> `self_user_private`, `est_establishments`, etc. La única mención al nombre viejo adentro del archivo
+> es **el comentario de la línea 1**. O sea: la fase 3 es renombrar el archivo y sus referencias, y
+> **no fuerza re-sync de los devices** — que era el riesgo que la pregunta buscaba descartar.
+>
+> ### Preguntas 1 y 3 resueltas por defecto (eran decisiones menores, no de Raf)
+>
+> - **Casing**: `mitropero` en identificadores, `miTropero` sólo en texto de marca. Es la propia
+>   recomendación del plan y la convención que ya usa el repo.
+> - **`progress/`**: se DEJA como historial. 323 archivos que son logs de sesión; el nombre viejo ahí
+>   es historia fiel, igual que los mensajes de commit.
+>
+> ### Lo que la fase 1 protegió (y por qué el `sed` del §4.A habría roto la doc)
+>
+> El script enumeraba los GUCs a mano y se comió `rafaq.actor_id`, que no estaba en la lista:
+> reescribió la spec 18 para que nombrara un GUC **que el trigger deployado no lee**. Se rehizo
+> protegiendo **por forma** (`rafaq\.[a-z_]+`, `x-rafaq-*`, `__rafaq*`, `RAFAQ_*`, `rafaq-*`), con una
+> invariante que compara protegidos-antes contra protegidos-después y **no escribe el archivo si no
+> coinciden**. Es el mismo principio que el resto de los guards del repo: se escribe sobre la ausencia,
+> así lo que aparezca mañana también queda cubierto.
+>
+> ---
+>
+> **Estado original:** DECIDIDO por Raf (2026-08-15), NO ejecutado. Se difirió a su propia sesión porque "rafaq"
 > interno **no es texto: es plomería de runtime interconectada** (GUCs de DB, identidad Expo, config de
 > PowerSync, globals de E2E, headers deployados). Un `sed` global rompe el beta.
 >

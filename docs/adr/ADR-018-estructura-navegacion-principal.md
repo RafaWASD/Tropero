@@ -24,7 +24,7 @@ La decisión está condicionada por los principios del producto (CLAUDE.md):
 
 ## Decisión
 
-**La navegación raíz de RAFAQ es un bottom tab bar de 5 items con un FAB central elevado**, con esta estructura fija:
+**La navegación raíz de miTropero es un bottom tab bar de 5 items con un FAB central elevado**, con esta estructura fija:
 
 ```
 [Inicio]   [Animales]   [⚡ FAB Maniobra]   [Reportes]   [Más]

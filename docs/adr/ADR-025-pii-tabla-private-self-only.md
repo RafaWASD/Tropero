@@ -6,11 +6,11 @@
 
 ## Contexto
 
-RAFAQ es multi-tenant con React Native (Expo) + Supabase (Postgres + RLS). El cliente móvil usa la anon key y lee/escribe a **PostgREST directo** — no hay una capa de API server intermedia para el CRUD. Por lo tanto **RLS es la única frontera de autorización** del lado de datos, y el proyecto va a **PowerSync** (ADR-002).
+miTropero es multi-tenant con React Native (Expo) + Supabase (Postgres + RLS). El cliente móvil usa la anon key y lee/escribe a **PostgREST directo** — no hay una capa de API server intermedia para el CRUD. Por lo tanto **RLS es la única frontera de autorización** del lado de datos, y el proyecto va a **PowerSync** (ADR-002).
 
 La auditoría baseline de seguridad (2026-06-04, `progress/security_baseline_shipped.md`, finding **B3-1**) encontró un patrón explotable: la tabla `public.users` mezcla datos de **identidad pública** (`id, name` — visibles a coworkers por diseño, para pantallas tipo "Miembros") con **datos de contacto privados** (`email, phone` — PII regulada por la Ley 25.326 AR, que solo debería ver el dueño). La RLS de Postgres es **row-level, no column-level**: una policy que deja a un coworker ver la fila expone la fila COMPLETA. El cliente "cumplía" pidiendo solo `select id, name`, pero eso es un control client-side bypasseable (cualquier miembro hace `GET /rest/v1/users?select=email,phone`).
 
-Se evaluaron cuatro patrones para ocultar las columnas sensibles. El insight decisivo del council: **realtime y PowerSync sincronizan la tabla base por el WAL (replicación lógica, por fila) — no respetan views, RPCs ni column-GRANTs**. Como RAFAQ va a PowerSync, cualquier solución que viva en la capa PostgREST (view / RPC / column-grant) taparía la query REST pero **dejaría la PII sangrando por el canal de sync**. Solo la **separación física** de la PII a otra tabla cierra el dato en todos los canales (PostgREST + realtime + PowerSync).
+Se evaluaron cuatro patrones para ocultar las columnas sensibles. El insight decisivo del council: **realtime y PowerSync sincronizan la tabla base por el WAL (replicación lógica, por fila) — no respetan views, RPCs ni column-GRANTs**. Como miTropero va a PowerSync, cualquier solución que viva en la capa PostgREST (view / RPC / column-grant) taparía la query REST pero **dejaría la PII sangrando por el canal de sync**. Solo la **separación física** de la PII a otra tabla cierra el dato en todos los canales (PostgREST + realtime + PowerSync).
 
 Este ADR fija el patrón como canónico porque se va a **replicar en toda lectura de PII multi-miembro** del producto (perfil del vet visible entre campos, datos de contacto de owners/operarios, futuros datos sociales), y resolverlo caso por caso es una fuente de fugas sistémicas.
 

@@ -6,11 +6,11 @@
 
 ## Contexto
 
-A lo largo de la vida de un animal en RAFAQ, distintos usuarios capturan información sobre él: observaciones del peón en el campo ("la vaca 247 parió esta mañana"), eventos sanitarios del vet ("vacunación brucelosis, dosis 5cc"), registros reproductivos ("celo detectado", "tacto positivo cabeza", "parto"), movimientos de traslado ("pasó del rodeo de cría al rodeo de vaquillonas"), eventos de identificación ("agregada caravana electrónica"), pesajes en manga, y observaciones libres.
+A lo largo de la vida de un animal en miTropero, distintos usuarios capturan información sobre él: observaciones del peón en el campo ("la vaca 247 parió esta mañana"), eventos sanitarios del vet ("vacunación brucelosis, dosis 5cc"), registros reproductivos ("celo detectado", "tacto positivo cabeza", "parto"), movimientos de traslado ("pasó del rodeo de cría al rodeo de vaquillonas"), eventos de identificación ("agregada caravana electrónica"), pesajes en manga, y observaciones libres.
 
 La pregunta arquitectónica abierta: ¿estos datos viven como un campo `comments: text` sobreescribible en la tabla `animals`, o como una **tabla aparte de eventos** con timestamp, autor y tipado?
 
-Durante el discovery de BUSCAR ANIMAL (2026-05-26), Raf mencionó "permitir agregar comentarios" en la pantalla de edit del animal sin haber resuelto cuál es el modelo. El leader propuso explícitamente evaluar entre las dos opciones. Varios factores específicos de RAFAQ empujan hacia eventos estructurados:
+Durante el discovery de BUSCAR ANIMAL (2026-05-26), Raf mencionó "permitir agregar comentarios" en la pantalla de edit del animal sin haber resuelto cuál es el modelo. El leader propuso explícitamente evaluar entre las dos opciones. Varios factores específicos de miTropero empujan hacia eventos estructurados:
 
 1. **SENASA exige identificación electrónica individual y su declaración** desde el 1/1/2026 (Res. 530/2025 + 841/2025), base de la trazabilidad individual del bovino. Un historial granular y auditable es requisito regulatorio, no opcional. Si se empieza con nota plana, habrá que migrar y reconstruir cuando crezca la exigencia de trazabilidad.
 2. **Multi-usuario con roles distintos**: el owner (productor), el vet, los peones (`field_operator`) y eventualmente el cliente vet con múltiples campos (post-MVP) dejan información con autoridad y propósito distintos. Que el peón sobreescriba lo que dejó el vet es un bug de producto, no una feature.

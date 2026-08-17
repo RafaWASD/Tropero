@@ -39,7 +39,7 @@ Cubre las **Fases 1 (separación de ambientes)** y **5 (ops livianas)** del plan
 - Tras aplicar a prod: `pg_dump --schema-only` de dev vs prod + **diff** → cada delta se vuelve **migración 0124+**, nunca fix manual.
 
 ### D4 — Config de la app: `app.config.ts` + lecturas estáticas
-- Migrar `app/app.json` → `app/app.config.ts` con `APP_VARIANT` (development → "RAFAQ (Dev)" + package `.dev`; ojo: cambiar package **invalida el dev client instalado** → rebuild).
+- Migrar `app/app.json` → `app/app.config.ts` con `APP_VARIANT` (development → "miTropero (Dev)" + package `.dev`; ojo: cambiar package **invalida el dev client instalado** → rebuild).
 - `env.ts`: anteponer lecturas **ESTÁTICAS** (una por var, literales) con fallback al reader dinámico actual y a `extra` → el shim E2E sigue funcionando **sin tocar los ~70 specs**. Antes de borrar `extra.supabaseUrl`: grep de quién la consume.
 - Extender `fixtures.ts` para setear `EXPO_PUBLIC_ENV='e2e'` + flag `window.__RAFAQ_E2E__` (mismo patrón que `ble-e2e-flag.ts`).
 
@@ -52,7 +52,7 @@ Cubre las **Fases 1 (separación de ambientes)** y **5 (ops livianas)** del plan
 - El campo de Chascomús se recarga vía **import** (feature 12) — de paso smoke-testea el import en prod. Se pierde el historial de las 2 demos (rescate a mano solo si Raf lo pide un dato puntual). Usuarios se **re-crean** (smoke real del flujo invitaciones + Resend en prod).
 
 ### D7 — Riesgo `preview → PROD`: tenant de prueba aislado
-- Con `preview` apuntando a PROD, las pruebas diarias de Raf escriben en prod → crear un establecimiento **"Campo de prueba RAFAQ"** en prod y **filtrar ese tenant** en PostHog/Sentry (coordina con feature 17).
+- Con `preview` apuntando a PROD, las pruebas diarias de Raf escriben en prod → crear un establecimiento **"Campo de prueba miTropero"** en prod y **filtrar ese tenant** en PostHog/Sentry (coordina con feature 17).
 
 ## Checklist manual que el replay NO cubre (va al runbook, E.5)
 
@@ -91,7 +91,7 @@ Diagnosticar+arreglar el fallo de Gradle del primer APK (build `68cc88d7`) **con
 |---|---|
 | Replay de migraciones no reproducible en prod | Ensayar contra Supabase local/docker primero; ledger `ops.applied_migrations`; diff pg_dump dev/prod obligatorio. |
 | Divergencia silenciosa dev/prod | Todo delta del diff → migración 0124+, nunca fix manual. |
-| `preview → PROD` ensucia prod con pruebas de Raf | Tenant "Campo de prueba RAFAQ" + filtro en observabilidad (feature 17). |
+| `preview → PROD` ensucia prod con pruebas de Raf | Tenant "Campo de prueba miTropero" + filtro en observabilidad (feature 17). |
 | Backup nunca probado | Restore drill contra Postgres local, UNA vez, documentado en el runbook. |
 | Setup PowerSync manual olvidado en prod | Checklist explícito en el runbook (role + publication `FOR TABLE`). |
 

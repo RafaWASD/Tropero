@@ -200,7 +200,7 @@ insert into public.user_private (user_id, email) values (new.id, new.email) on c
 
 ### Anti-takeover (R8.4 — Gate 1)
 
-El auto-linking de Supabase solo une identidades cuando el email está **verificado**. RAFAQ exige
+El auto-linking de Supabase solo une identidades cuando el email está **verificado**. miTropero exige
 verificación de email (spec 01), así que las cuentas email/password son verificadas; Google/Apple
 devuelven email verificado. No hay camino de linking por email no verificado → no se puede secuestrar una
 cuenta ajena logueando con un OAuth de email no confirmado. Gate 1 debe confirmar que la config del

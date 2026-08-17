@@ -29,7 +29,7 @@ La instancia Cloud (`rafaq-beta`, región BR) ya está **provisionada** (sesión
 - **`user_private` self-only**: nunca entra al sync set de un coworker (ADR-025, razón WAL). Solo el dueño recibe su email/phone.
 - **Catálogos globales** (`field_definitions`, `system_default_fields`, species/systems/categories): referencia **read-only** sincronizada a todos.
 - **Conflictos**: los eventos son **append-only** → sin conflicto. Para filas editables (ej. `animal_profiles`) = **last-write-wins** (default de PowerSync), suficiente para MVP.
-  - **Expansión post-MVP** (nota de diseño, NO-MVP): (1) **surfacing** del conflicto en vez de pisada silenciosa; (2) **árbitro server-side** rutando ediciones sensibles por RPCs `SECURITY DEFINER` con reglas de dominio (patrón `exit_animal_profile`/`register_birth`); (3) concurrencia optimista (`version`/`updated_at` + rechazo de stale + audit); (4) merge a nivel campo (CRDT) — overkill para ganadería. Realista para RAFAQ: capas 1+2.
+  - **Expansión post-MVP** (nota de diseño, NO-MVP): (1) **surfacing** del conflicto en vez de pisada silenciosa; (2) **árbitro server-side** rutando ediciones sensibles por RPCs `SECURITY DEFINER` con reglas de dominio (patrón `exit_animal_profile`/`register_birth`); (3) concurrencia optimista (`version`/`updated_at` + rechazo de stale + audit); (4) merge a nivel campo (CRDT) — overkill para ganadería. Realista para miTropero: capas 1+2.
 
 ## Clases de sincronización por tabla (insumo para design.md)
 

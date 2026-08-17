@@ -57,7 +57,7 @@ debe poder insertarse siempre, con tipos holgados, para no volverse un punto de 
 
 **R1.11** — Mientras se trackea una tabla del **camino caliente de campo** (`animals` y, en incrementos
 futuros, las tablas de evento), el sistema deberá insertar la fila de audit en modo **best-effort**: si
-la inserción de audit falla, el write del operario deberá proceder igual (regla dura RAFAQ: el flujo de
+la inserción de audit falla, el write del operario deberá proceder igual (regla dura miTropero: el flujo de
 manga nunca se traba; se acepta perder esa fila de audit antes que bloquear la carga). Para `user_roles`
 (admin, vía Edge Function, bajo volumen) el modo deberá ser **estricto** (los errores propagan → sin
 huecos en el log de membresías).

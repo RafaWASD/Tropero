@@ -56,7 +56,7 @@
 
 ### T1.1 Servicio `services/last-rodeo.ts`
 - Implementar funciones: `readLastRodeo`, `writeLastRodeo`, `queryLastUsedRodeoFromDb`, `getDefaultRodeo`.
-- AsyncStorage key pattern: `rafaq:last_rodeo:<establishment_id>`.
+- AsyncStorage key pattern: `mitropero:last_rodeo:<establishment_id>`.
 - Query DB usa PowerSync local: `select rodeo_id from animal_profiles where establishment_id = ? order by updated_at desc limit 1` (filtrado por usuario actual si el schema permite; sino el más reciente del establishment).
 - Fallback final: **primer rodeo activo creado** del establishment (`select id from rodeos where establishment_id = ? and active = true and deleted_at is null order by created_at asc limit 1`). Si no hay ningún rodeo activo, la función retorna `null` para que la UI muestre el bloqueo "Creá un rodeo primero" que lleva al wizard de R2.6 de spec 02. **Refinamiento 2026-05-27 de spec 02**: ya no existe el rodeo autogenerado "Rodeo principal"; el fallback es el primer rodeo creado, o `null` con bloqueo de UI.
 - **Aceptación**: tests `last-rodeo.test.ts` verdes (CRUD AsyncStorage + fallback DB + fallback default).

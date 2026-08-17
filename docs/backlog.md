@@ -445,10 +445,10 @@ Cuando aterrice el camino de iOS (BLE-HID wedge, `adapter-hid-wedge.ts`, hoy 22 
 
 ## 2026-07-22 — 🎯 REBRANDING (nombre nuevo) — camino crítico del beta; bloquea U8a/deep-links + submit a stores
 
-**Origen**: al arrancar el Gate 0 de U8a (deep links), Raf avisó: **rebranding PENDIENTE, nombre NUEVO (RAFAQ no es final), "cambia todo"**, y **no tiene dominio ni nada (0)**.
-**Qué**: cambio de identidad de la app. Toca, en cadena: (1) **decidir el nombre nuevo** (decisión de Raf, sin empezar); (2) **conseguir el dominio** (no existe); (3) rebrandear el CÓDIGO — bundle id (`ar.rafq.app` → nuevo; barato ahora, PRE-launch), `scheme` (`rafq://`), URLs hardcodeadas del invite (`app.rafq.ar` en `invite_user`/`resend_invitation`/`members.ts` `INVITE_BASE_URL`), strings "RAFAQ"/"rafq" en todo el código, nombre EAS/Supabase project, app.config.ts (name/slug); (4) **assets de marca** (logo/colores/favicon/íconos); (5) app store listings.
+**Origen**: al arrancar el Gate 0 de U8a (deep links), Raf avisó: **rebranding PENDIENTE, nombre NUEVO (miTropero no es final), "cambia todo"**, y **no tiene dominio ni nada (0)**.
+**Qué**: cambio de identidad de la app. Toca, en cadena: (1) **decidir el nombre nuevo** (decisión de Raf, sin empezar); (2) **conseguir el dominio** (no existe); (3) rebrandear el CÓDIGO — bundle id (`ar.rafq.app` → nuevo; barato ahora, PRE-launch), `scheme` (`rafq://`), URLs hardcodeadas del invite (`app.rafq.ar` en `invite_user`/`resend_invitation`/`members.ts` `INVITE_BASE_URL`), strings "miTropero"/"rafq" en todo el código, nombre EAS/Supabase project, app.config.ts (name/slug); (4) **assets de marca** (logo/colores/favicon/íconos); (5) app store listings.
 **Por qué importa (CRÍTICO para el beta)**: es **prerequisito** de U8a (deep links dependen del dominio+bundle final) y del **submit a las stores** (bundle id + nombre + assets son dolorosos de cambiar POST-launch). La prioridad-beta que eligió Raf (multi-usuario/U8a) está en realidad DETRÁS de esto. Hacer deep-link config ahora contra `app.rafq.ar` = 100% trabajo tirado.
-**Estado**: NADA que hacer hasta que Raf **decida el nombre nuevo** (nada que rebrandear sin nombre). El leader puede ayudar a scopear el rebrand MECÁNICO (inventario de dónde vive "rafq"/"RAFAQ", plan de migración de bundle/scheme/URLs/EAS/Supabase, checklist de assets) una vez elegido el nombre.
+**Estado**: NADA que hacer hasta que Raf **decida el nombre nuevo** (nada que rebrandear sin nombre). El leader puede ayudar a scopear el rebrand MECÁNICO (inventario de dónde vive "rafq"/"miTropero", plan de migración de bundle/scheme/URLs/EAS/Supabase, checklist de assets) una vez elegido el nombre.
 **Próximo paso sugerido**: Raf decide el nombre → registra dominio → el leader arma el plan de rebrand (probablemente su propio "feature"/effort grande) → recién ahí U8a (deep links) + preparación de stores. Fixes rebrand-safe del invite (loop + backOr) se hacen YA (independientes del nombre).
 
 ## 2026-07-22 — U8a (deep links de invitación / multi-usuario) — DIFERIDO hasta el rebrand
@@ -733,7 +733,7 @@ Cuando aterrice el camino de iOS (BLE-HID wedge, `adapter-hid-wedge.ts`, hoy 22 
 
 **Origen**: fix-loop del chunk M7 de spec 03 (gestión de datos custom). El reviewer + el e2e cazaron que R13.30 ("la ficha sigue mostrando el valor de un dato custom borrado") NO se honra end-to-end: la sync-stream `est_field_definitions_custom` (`sync-streams/rafaq.yaml` l.243) filtra `deleted_at IS NULL` → al soft-deletear, la definición se prunea del device → el INNER JOIN del display no resuelve el `label` → el valor histórico desaparece. **Raf eligió la Opción B (MVP)**: no se cambia la stream; el cliente lo asume y la confirmación de borrado ADVIERTE que las cargas previas dejarán de verse (R13.30/R13.31 reconciliados al as-built).
 **Qué**: **Opción A** — quitar el `AND deleted_at IS NULL` de la sync-stream `est_field_definitions_custom` para que la fila soft-deleteada SIGA sincronizando (dentro del MISMO `org_scope` del tenant) → el JOIN del display resolvería el `label`/`config_schema` histórico, y la ficha volvería a mostrar el valor de un dato borrado (read-only). Los forms/listas NUEVAS ya filtran `deleted_at` por su cuenta (sin cambio). Implica además volver a separar el read de display (sin filtro `deleted_at`) del de los forms.
-**Por qué importa**: medio. El histórico de cargas de un dato custom borrado es valioso para analytics/trazabilidad (uno de los 3 pilares de RAFAQ), pero NO bloquea el MVP — la advertencia de Opción B es honesta y el dato sigue en la DB (no se pierde, solo deja de verse desde la app).
+**Por qué importa**: medio. El histórico de cargas de un dato custom borrado es valioso para analytics/trazabilidad (uno de los 3 pilares de miTropero), pero NO bloquea el MVP — la advertencia de Opción B es honesta y el dato sigue en la DB (no se pierde, solo deja de verse desde la app).
 **Próximo paso sugerido**: cambio de sync-rules + deploy a PowerSync (gateado por Raf) → **reabre la frontera WAL → Gate 1** (riesgo bajo: dato lógicamente-borrado del mismo campo/tenant). Foldear como chunk M8 o sub-chunk de M7-fast-follow. Detalle: `specs/active/03-modo-maniobras/design.md §13.5` + `requirements.md` nota R13.30.
 
 ## 2026-06-20 — Bug pre-existente: editar in-place el valor de una propiedad custom falla con UNIQUE constraint — ✅ RESUELTO (2026-06-29)
@@ -1076,7 +1076,7 @@ arreglada.
 
 **Origen**: sesión 17, intento de correr la app en el teléfono de Raf.
 **Qué**: el proyecto está en Expo SDK 56 (salió 21-may-2026). Expo Go para SDK 56 **no está en App Store ni Play Store** (sin fecha) → la Expo Go de tienda (SDK 54) no carga el proyecto. Para device real hay 3 opciones: (a) sideload del APK Expo Go SDK 56 en **Android** (vía Expo CLI / expo.dev/go); (b) **iOS** vía TestFlight beta o `eas go` (necesita cuenta Apple Developer US$99/año); (c) **dev-build propio** (expo-dev-client + EAS build o build local) — el camino "correcto" para una app real, no Expo Go.
-**Por qué importa**: el veredicto de "primer try" en hardware real (manga, sol, guante) es clave para RAFAQ, y el peón usa Android probablemente. Pero NO bloquea iterar diseño (eso va por web ahora).
+**Por qué importa**: el veredicto de "primer try" en hardware real (manga, sol, guante) es clave para miTropero, y el peón usa Android probablemente. Pero NO bloquea iterar diseño (eso va por web ahora).
 **Próximo paso sugerido**: cuando importe device real, decidir entre dev-build (recomendado para app seria, alineado con ADR-013/EAS) vs sideload Android. Por ahora: **web** (`pnpm.cmd web`) para diseño. Sub-decisión latente: ¿quedarse en SDK 56 bleeding-edge o alinear a un SDK con Expo Go en tiendas? (rework si se baja).
 
 ## 2026-05-29 — Rollup de resumen por establecimiento (stats de la card "Mis campos")
@@ -1147,7 +1147,7 @@ arreglada.
 
 **Origen**: sesión 22, merge de la suite Playwright a main. Al traer `e2e/*` al árbol principal, el `tsc --noEmit` del app levantaba sus `.ts` (Node: `node:fs`/`__dirname`/`ws`/`node:crypto`) y fallaba.
 **Qué**: se excluyó `e2e` + `playwright.config.ts` del `app/tsconfig.json` para que `check.mjs` quede verde sin meter `@types/node` en el árbol del app (al estar `node-linker=hoisted`, `@types/node` contaminaría el type-env del RN app y podría enmascarar usos de APIs de Node inexistentes en RN). Consecuencia: el código de los tests E2E hoy **no tiene type-check** (Playwright lo transpila en runtime sin chequear tipos).
-**Por qué importa**: los helpers de e2e operan con `service_role` (admin) — un type bug ahí podría pasar silencioso. Bajo riesgo (suite chica + corre verde), pero RAFAQ apunta a "mejor en el primer try".
+**Por qué importa**: los helpers de e2e operan con `service_role` (admin) — un type bug ahí podría pasar silencioso. Bajo riesgo (suite chica + corre verde), pero miTropero apunta a "mejor en el primer try".
 **Próximo paso sugerido**: agregar `app/e2e/tsconfig.json` con `types: ["node", "@playwright/test"]` (scopeado, sin filtrar a la app) + `@types/node`/`@types/ws` como devDeps + script `e2e:typecheck` (`tsc -p e2e/tsconfig.json --noEmit`). Opcional cablearlo a `check.mjs` (ojo: no debería pegarle a la red). Cuando se active `invitations.spec.ts` post-B.1.3 es buen momento.
 
 ## 2026-06-01 — Loop potencial al abrir `/invite?token=` con sesión iniciada (deep-link, DIFERIDO)
@@ -1171,7 +1171,7 @@ arreglada.
 
 **Origen**: Gate 2 de Fase 6 backend (edge `db_error` devuelve `err.message` de Postgres) y de C1 rodeos (errores `kind:'unknown'` muestran el `message` crudo de PostgREST en `crear-rodeo`/`rodeos`/`editar-plantilla`). LOW, no bloqueante, no explotable, pero es information disclosure de bajo impacto + UX pobre (el usuario ve jerga SQL).
 **Qué**: dos clases del mismo patrón — (a) las 8 edge functions devuelven `err.message` crudo en el caso 500 `db_error`; (b) varios services del cliente clasifican errores no-red como `kind:'unknown'` con el `message` del server y la UI lo muestra tal cual.
-**Por qué importa**: RAFAQ apunta a "mejor en el primer try" — un error con jerga de Postgres rompe la percepción de calidad. Riesgo de seguridad bajo (cliente autenticado, sin secretos en el message), pero conviene limpiar antes de beta real.
+**Por qué importa**: miTropero apunta a "mejor en el primer try" — un error con jerga de Postgres rompe la percepción de calidad. Riesgo de seguridad bajo (cliente autenticado, sin secretos en el message), pero conviene limpiar antes de beta real.
 **Próximo paso sugerido**: en el cliente, mapear `kind:'unknown'` a copy genérico es-AR ("No pudimos completar la acción. Probá de nuevo.") en vez de pasar el `message` crudo; en las edge functions, devolver un code estable + copy genérico para 500 (loguear el detalle server-side, no exponerlo). Pasada transversal cuando se pula la capa de errores; no bloquea features nuevas.
 
 ## 2026-06-01 — `accessibilityLabel` crudo filtra al DOM en TODAS las pantallas (warning de React en DEV)
@@ -1248,7 +1248,7 @@ arreglada.
 
 **Origen**: deploy de feature 13 (INPUT-1). Al aplicar el CHECK de `tag_electronic` (tope 32), el pre-check encontró 179 animales con tags > 32 chars; resultaron ser fixtures de e2e (`animal_test_<ts>_<rand>_<SUFFIX>`, ej. `animal_test_1780000540101_s33chk_DUPCALF`, y un `120321...` de 36 díg sintético).
 **Qué**: el proyecto Supabase **remoto** (prod) tiene ~**1800 `animals` + 747 `animal_profiles` + cientos de eventos de TEST** (de las corridas e2e/seed acumuladas), con tags basura. No es data real. Cuando se onboardee el beta de Chascomús (Facundo + el campo del padre), el cliente arrancaría con su data mezclada con basura de test.
-**Por qué importa**: data sucia en prod = analytics sucio (pilar del producto), confusión, y riesgo de que el cliente vea animales fantasma. RAFAQ apunta a "el mejor en el primer try". Además, por culpa de esos tags largos, 2 columnas (`animals.tag_electronic`, `reproductive_events.calf_tag_electronic`) quedaron con su CHECK en `NOT VALID` sin `VALIDATE` (grandfather) y con tope 64 en vez de 32 — una limpieza permitiría validar el constraint y bajar el tope al valor real (15 díg FDX-B + holgura).
+**Por qué importa**: data sucia en prod = analytics sucio (pilar del producto), confusión, y riesgo de que el cliente vea animales fantasma. miTropero apunta a "el mejor en el primer try". Además, por culpa de esos tags largos, 2 columnas (`animals.tag_electronic`, `reproductive_events.calf_tag_electronic`) quedaron con su CHECK en `NOT VALID` sin `VALIDATE` (grandfather) y con tope 64 en vez de 32 — una limpieza permitiría validar el constraint y bajar el tope al valor real (15 díg FDX-B + holgura).
 **Próximo paso sugerido**: antes del beta real, purgar la data de e2e del remoto (identificable por el prefijo `animal_test_` / emails `@rafaq-test.local` / `bantest_` etc.) con un script de limpieza cuidadoso (respetando FKs: events → profiles → animals → users). Después, opcionalmente, `VALIDATE CONSTRAINT` de los 2 tags + bajar el tope a 32. Coordinar con la suite e2e (que debe limpiar lo suyo; ver si el cleanup de los helpers está fallando y dejando residuo).
 **Nota 2026-06-10 (Gate 2 T7, LOW-2)**: la suite nueva `sync_streams` limpia por ids trackeados, pero ante un kill duro puede dejar huérfanos namespaced (`@rafaq-test.local`) — el sweep de esta entrada los cubre; aplica a todas las suites contra remoto.
 
@@ -1269,7 +1269,7 @@ arreglada.
 
 **Origen**: Gate 1 (security) del modelo de sync JOIN-free de PowerSync (feature 15, V3). Finding HIGH-1 cerrado a nivel DB.
 **Qué**: el invariante "`user_roles.active = true` ⇒ campo vivo" (del que dependen las streams JOIN-free) lo cierra ahora un **guard trigger en `user_roles`** (migración 0076): prohíbe activar/insertar un rol para un establecimiento soft-deleteado. Eso cierra el agujero de seguridad (un invitado que acepta el link de un campo recién borrado ya NO crea un rol activo → no se le sincroniza data del campo borrado). PERO: cuando `accept_invitation/index.ts` (~l.93) inserta el rol contra un campo borrado, el guard tira una **excepción cruda de Postgres** → la EF devuelve un error genérico/feo en vez de un mensaje claro ("Esta invitación ya no es válida: el campo fue eliminado").
-**Por qué importa**: es UX de un edge-case raro (aceptar justo después de un borrado), no un hueco de seguridad (ese ya está cerrado por el guard). RAFAQ apunta a "mejor en el primer try" → un error con jerga SQL rompe la percepción.
+**Por qué importa**: es UX de un edge-case raro (aceptar justo después de un borrado), no un hueco de seguridad (ese ya está cerrado por el guard). miTropero apunta a "mejor en el primer try" → un error con jerga SQL rompe la percepción.
 **Próximo paso sugerido**: en `accept_invitation`, antes del insert del rol, chequear `establishments.deleted_at IS NOT NULL` → devolver un code estable + copy es-AR ("La invitación ya no es válida porque el establecimiento fue eliminado."). Defensa-en-profundidad sobre el guard DB (que sigue siendo la barrera autoritativa). Requiere redeploy de la EF. Cuando se toque la capa de EFs / errores (cruza con la entrada 2026-06-01 "Mapear errores crudos del backend a copy genérico").
 
 ## 2026-06-09 — Propagar el soft-delete del padre a `birth_calves` / `rodeo_data_config` (equivalencia stream↔RLS, paso 2)
@@ -1324,7 +1324,7 @@ arreglada.
 
 ## EAS: el perfil `development` no setea `APP_VARIANT=development`
 - **Origen**: revisión del leader al wirear `eas.json` a prod (spec 16, Run F d, 2026-07-16).
-- `app/app.config.ts` deriva la variante ".dev" (`name: "RAFAQ (Dev)"`, id `ar.rafq.app.dev`, R2.4) de `process.env.APP_VARIANT === 'development'`. Pero `app/eas.json` → `build.development.env` **no** setea `APP_VARIANT`, así que un `eas build --profile development` produciría la app con id/nombre de **prod** (`ar.rafq.app` / "RAFAQ"), no la `.dev` coinstalable.
+- `app/app.config.ts` deriva la variante ".dev" (`name: "miTropero (Dev)"`, id `ar.rafq.app.dev`, R2.4) de `process.env.APP_VARIANT === 'development'`. Pero `app/eas.json` → `build.development.env` **no** setea `APP_VARIANT`, así que un `eas build --profile development` produciría la app con id/nombre de **prod** (`ar.rafq.app` / "miTropero"), no la `.dev` coinstalable.
 - **No bloquea el beta**: el APK del peón sale del perfil `preview` (correctamente sin `APP_VARIANT` → id prod). Esto solo afecta al build `development` (dev-client), que hoy se usa vía `pnpm web`/local, no por EAS.
 - **Fix (pendiente)**: agregar `"APP_VARIANT": "development"` al `build.development.env` de `eas.json` (o confirmar que el dev-client se buildea siempre local con la var seteada a mano y documentarlo). Verificar antes de depender del build `development` de EAS.
 
@@ -1667,7 +1667,7 @@ archivo nuevo— pero sus `ROOTS` son `app/app` y `app/src`. De `supabase/functi
 archivo**: `_shared/email.ts`.
 
 El reviewer lo falsificó en vez de deducirlo: creó `supabase/functions/mutante_test/index.ts` con el
-texto `'Tu cuenta de RAFAQ fue creada.'` y el guard dio **11 pass, 0 fail**.
+texto `'Tu cuenta de miTropero fue creada.'` y el guard dio **11 pass, 0 fail**.
 
 **Por qué está latente hoy**: `_shared/email.ts` es el único módulo que compone copy de mail —
 `invite_user` no manda nada, devuelve el `accept_url`. Así que hoy no hay superficie descubierta.

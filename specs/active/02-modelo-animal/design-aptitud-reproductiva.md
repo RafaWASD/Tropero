@@ -135,7 +135,7 @@ Tres tiers semánticos (bajo costo cognitivo — Hick; el estado se lee también
 
 | Estado | Tier | Fondo | Borde / Texto | Token base |
 |---|---|---|---|---|
-| Apta / Preñada | verde (bueno) | `$greenLight` | texto `$primary` (relleno, firma RAFAQ) | igual que `CategoryBadge` |
+| Apta / Preñada | verde (bueno) | `$greenLight` | texto `$primary` (relleno, firma miTropero) | igual que `CategoryBadge` |
 | Diferida / Vacía | ámbar (atención) | `$surface` | borde+texto `$amber` (outline) | `$amber` #9A6206 ≈ 5:1 AA sobre surface |
 | Servida sin tacto / No apta / CUT | neutro (sin info / fuera) | `$surface` | borde `$divider`, texto `$textMuted` (outline) | igual que `NoTagChip` |
 

@@ -457,7 +457,7 @@ de Raf); el runbook documenta URLs + config.
 6. `pg_dump --schema-only` DEV vs PROD → diff (R6.3); cada delta → `0124+` (R6.4).
 7. EAS Environment Variables preview/production → PROD (R4.4).
 8. GitHub secret + primer backup + restore drill (R8).
-9. UptimeRobot (R9.8) + tenant "Campo de prueba RAFAQ" (R9.9).
+9. UptimeRobot (R9.8) + tenant "Campo de prueba miTropero" (R9.9).
 10. Smoke manual (R6.8).
 
 ---

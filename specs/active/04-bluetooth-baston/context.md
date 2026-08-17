@@ -10,7 +10,7 @@
 
 ## Contexto validado
 
-04 hace que RAFAQ lea el **EID** (RFID, caravana electrónica FDX-B ISO 11784/11785, 15 dígitos) del bastón y lo entregue al **motor de identificación** (find-or-create de spec 09). El bastón es una de las puertas de BUSCAR ANIMAL (spec 09 R2) y la lectura dentro de MODO MANIOBRAS (spec 03).
+04 hace que miTropero lea el **EID** (RFID, caravana electrónica FDX-B ISO 11784/11785, 15 dígitos) del bastón y lo entregue al **motor de identificación** (find-or-create de spec 09). El bastón es una de las puertas de BUSCAR ANIMAL (spec 09 R2) y la lectura dentro de MODO MANIOBRAS (spec 03).
 
 **Transporte — ver ADR-024, no se re-decide acá.** El bastón se integra detrás de un **contrato de ingesta de EID transport-agnóstico** con adaptadores intercambiables. El MVP soporta:
 - `adapter-spp-android` — RS420 nativo (Bluetooth Classic SPP). **Cubre al cliente beta.**

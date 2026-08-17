@@ -10,7 +10,7 @@ El flujo SDD del proyecto (ADR-001) iba `pending → spec_author → spec_ready 
 
 Dos problemas concretos aparecieron en la práctica:
 
-1. **Specs largas e ilegibles.** Las specs de RAFAQ son extensas (la de spec 02 supera las 200 líneas en `requirements.md` y 400 en `design.md`). A Raf le cuesta leerlas enteras, y la aprobación humana (Puerta 1) termina siendo superficial — se aprueba sin leer todo el detalle.
+1. **Specs largas e ilegibles.** Las specs de miTropero son extensas (la de spec 02 supera las 200 líneas en `requirements.md` y 400 en `design.md`). A Raf le cuesta leerlas enteras, y la aprobación humana (Puerta 1) termina siendo superficial — se aprueba sin leer todo el detalle.
 
 2. **Rework por contexto mal refinado.** Cuando la spec se escribe desde un contexto incompleto o con edge cases sin contemplar, sale mal y hay que reescribirla. Evidencia: la spec 02 se reescribió **dos veces** (refinamiento sesión 11 + refundición completa sesión 14 por un bug en el modelo de plantilla de datos que no se había pensado al escribir la primera versión). Reescribir una spec larga es caro.
 

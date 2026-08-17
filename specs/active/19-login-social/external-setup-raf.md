@@ -23,8 +23,8 @@
 - [ ] Crear un **Services ID** (identificador para el flujo web) + una **Key** de "Sign in with Apple" (te da un archivo `.p8` — guardalo, se descarga una sola vez) + anotá el **Team ID**. Esto va a Supabase (paso Supabase Dashboard).
 
 ### Google Cloud Console
-- [ ] Proyecto GCP (nuevo o existente) para "RAFAQ".
-- [ ] **OAuth consent screen**: tipo *External*, nombre "RAFAQ", support email, scopes `openid email profile`. Authorized domain: `supabase.co`. Agregá tu mail como *test user* (o publicá la app).
+- [ ] Proyecto GCP (nuevo o existente) para "miTropero".
+- [ ] **OAuth consent screen**: tipo *External*, nombre "miTropero", support email, scopes `openid email profile`. Authorized domain: `supabase.co`. Agregá tu mail como *test user* (o publicá la app).
 - [ ] **OAuth Client ID — Web application**: guardá el **Client ID** + el **Client Secret**.
   - Authorized redirect URI: **`https://xrhlxxdnfzvdnztacofj.supabase.co/auth/v1/callback`**.
   - Este Web Client ID es el eje: se usa en la app (`GoogleSignin.configure`) y en Supabase.

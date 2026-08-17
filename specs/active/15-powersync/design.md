@@ -1079,7 +1079,7 @@ export function getEnv(): RequiredEnv {
 
 - **Eventos**: append-only (insert) → sin conflicto por diseño.
 - **Filas editables** (`animal_profiles`, `management_groups`, `rodeos`, `sessions`): **last-write-wins** (default de PowerSync). Suficiente para MVP (un campo, pocos operarios concurrentes).
-- **Post-MVP (nota, NO se implementa)**: surfacing del conflicto en vez de pisada silenciosa; árbitro server-side rutando ediciones sensibles por RPCs SECURITY DEFINER (patrón `exit_animal_profile`); concurrencia optimista (`updated_at` + rechazo de stale). Realista para RAFAQ: capas 1+2 (context).
+- **Post-MVP (nota, NO se implementa)**: surfacing del conflicto en vez de pisada silenciosa; árbitro server-side rutando ediciones sensibles por RPCs SECURITY DEFINER (patrón `exit_animal_profile`); concurrencia optimista (`updated_at` + rechazo de stale). Realista para miTropero: capas 1+2 (context).
 
 ---
 

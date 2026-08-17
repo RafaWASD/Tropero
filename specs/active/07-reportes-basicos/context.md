@@ -5,7 +5,7 @@
 
 ## 1. Por qué esta feature importa (no es "reportes básicos")
 
-Según `CONTEXT/01-producto.md`, **esta es la capa diferencial del producto**. El competidor dominante (Control Ganadero) entrega "informes estáticos en PDF que el productor mira y archiva". La propuesta de valor de RAFAQ es la *capa de inteligencia*: KPIs que muestran **tendencias**, **comparativas** y **alertas**, no fotos puntuales. Toda la manga construida (specs 02/03/10) es la materia prima; spec 07 es donde esa materia prima se vuelve la razón por la que el dueño paga.
+Según `CONTEXT/01-producto.md`, **esta es la capa diferencial del producto**. El competidor dominante (Control Ganadero) entrega "informes estáticos en PDF que el productor mira y archiva". La propuesta de valor de miTropero es la *capa de inteligencia*: KPIs que muestran **tendencias**, **comparativas** y **alertas**, no fotos puntuales. Toda la manga construida (specs 02/03/10) es la materia prima; spec 07 es donde esa materia prima se vuelve la razón por la que el dueño paga.
 
 ## 2. Estado de partida (as-built 2026-06-19)
 

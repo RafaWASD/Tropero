@@ -127,7 +127,7 @@ EARS estricto (`docs/specs.md`). "DEV" = ambiente de desarrollo/tests actual; "P
 - **R9.6** El sistema deberá documentar el esquema de **release notes con semver** atado al crash-free por versión.
 - **R9.7** El sistema deberá documentar el **staged rollout gated por crash-free** (no ampliar una release si crash-free users < ~99.5%).
 - **R9.8** El sistema deberá configurar **UptimeRobot** con monitores sobre `health` PROD, `health` DEV y el endpoint de sync de PowerSync PROD, con alerta por email.
-- **R9.9** El sistema deberá crear en PROD el tenant **"Campo de prueba RAFAQ"** para las pruebas diarias de Raf y documentarlo en el runbook (insumo del filtro de observabilidad de feature 17).
+- **R9.9** El sistema deberá crear en PROD el tenant **"Campo de prueba miTropero"** para las pruebas diarias de Raf y documentarlo en el runbook (insumo del filtro de observabilidad de feature 17).
 - **R9.10** (Gate 1 M2/M3/M4) El runbook deberá incluir una **tabla de rate limits** (endpoint público `health` + Auth de PROD) y la **postura de data-at-rest** del backup (cifrado del artifact + repo privado), consolidando R7.8, R8.7 y R6.6b.
 
 ---

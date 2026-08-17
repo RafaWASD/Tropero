@@ -87,7 +87,7 @@ Orden tal cual el manual. Grafías **literales del manual** (respetarlas: SIGSA 
 - No hay un "sin especificar" propio de bovinos en esta tabla: para un bovino sin raza conocida el fallback es **`OR` (Otra Raza)**; `S/E` es el genérico de cierre de la tabla.
 - El manual tiene un typo en su propio ejemplo en una versión de la extracción (`...-AA8/2025`); el formato correcto es `MM/AAAA` (`08/2025`).
 
-## Relevante para el MVP de RAFAQ (cría bovina)
+## Relevante para el MVP de miTropero (cría bovina)
 
 Las 28 bovinas son el universo. Las que probablemente toquen al beta de Chascomús / zona pampeana (validar con Facundo el subconjunto real): **AA** (Aberdeen Angus), **H/PH** (Hereford / Polled Hereford), **BG** (Brangus), **BF** (Braford), **SH** (Shorthorn), **CH** (Charolais), **L** (Limousine), **LA** (Limangus), **HA** (Holando Argentino, si hay tambo), **CR** (Criolla), **GC** (Ganado Cruza), con **OR** (Otra Raza) de fallback. El catálogo se siembra con las 28; el subset "relevante" es solo para priorizar el picker (default/orden), no para recortar el enum.
 

@@ -238,7 +238,7 @@ export function subscribeSyncDiagnostics(db = getPowerSync()): () => void {
 
 ---
 
-## 6. Cumplimiento de los MUSTs de RAFAQ
+## 6. Cumplimiento de los MUSTs de miTropero
 
 - **Multi-tenancy / RLS (CLAUDE.md ppio 6, R22.25/R22.26)**: la feature es **cliente puro** — no modifica ninguna migración, RLS policy, sync rule ni Edge Function (`git diff supabase/ sync-streams/` vacío). La reconexión reabre el MISMO stream ya scopeado por `org_scope` + RLS server-side; las tablas observadas por la watched query (`rodeo_data_config`, `pending_rodeo_data_config`) son el SQLite LOCAL ya scopeado por las streams. Observarlas y reconectar es **liveness / disparador de UX, no un control de acceso** (el enforcement sigue siendo `has_role_in`, server-side, en cada lectura/escritura). El cliente nunca hardcodea `establishment_id`. Si en implementación apareciera necesidad de tocar la frontera → **PARAR y reabrir Gate 1**.
 - **Offline-first (CLAUDE.md ppio 3, R22.6/R22.21/R22.27)**: la watched query lee del SQLite local (cero red nueva). Sin red, `db.onChange` no dispara (no hay cambios del server) y el trigger de conexión no intenta nada (solo dispara en `offline→online`). El write optimista del owner (overlay) sigue reflejándose offline (R22.22). La app en la manga sin señal no cambia.

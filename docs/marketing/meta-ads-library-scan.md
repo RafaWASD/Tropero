@@ -1,6 +1,6 @@
 # Meta Ads Library — quién anuncia en gestión ganadera
 
-> **Pregunta**: ¿hay apps parecidas a RAFAQ corriendo más de 100 anuncios activos en Meta, a nivel mundial?
+> **Pregunta**: ¿hay apps parecidas a miTropero corriendo más de 100 anuncios activos en Meta, a nivel mundial?
 > **Respuesta corta**: **no. Ninguna.** El techo de toda la categoría es AgriWebb con ~48 anuncios activos.
 > **Método**: Biblioteca de Anuncios de Meta, alcance mundial, solo anuncios activos, relevado el 5/8/2026.
 

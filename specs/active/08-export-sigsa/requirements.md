@@ -6,7 +6,7 @@
 
 ## Resumen
 
-Genera el archivo `.txt` importable en SIGSA web para declarar ante SENASA los dispositivos de identificación electrónica (Res. 841/2025, Art. 8°). La app produce el archivo; el productor lo sube manualmente. No hay API: RAFAQ es la alternativa a SIGBIOTRAZA para quien ya carga en RAFAQ y quiere cumplir sin re-cargar en otra app.
+Genera el archivo `.txt` importable en SIGSA web para declarar ante SENASA los dispositivos de identificación electrónica (Res. 841/2025, Art. 8°). La app produce el archivo; el productor lo sube manualmente. No hay API: miTropero es la alternativa a SIGBIOTRAZA para quien ya carga en miTropero y quiere cumplir sin re-cargar en otra app.
 
 **⚠ GATE DURO — FORMATO EXACTO NO CONFIRMADO CON UPLOAD REAL**: el formato del archivo TXT viene de 2 fuentes de investigación (manual SIGSA v2.42.80 + sesión 16) pero NO se verificó con un upload real ni login a SIGSA con clave fiscal. Antes de cerrar la feature 08 como `done`, Raf o Facundo deben hacer un upload real a SIGSA web y verificar: (1) si hay o no `;` al final del último registro, (2) si hay espacios, (3) si hay restricción de rango de fechas (`birth_date`), (4) la longitud exacta y validaciones server-side del RFID, (5) si el sistema acepta mayúsculas/minúsculas mixtas o solo uno de los dos. Por eso el generador del TXT debe estar AISLADO en un módulo swappable (ver design) para absorber ajustes sin tocar el resto.
 

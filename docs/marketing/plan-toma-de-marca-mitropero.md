@@ -389,9 +389,9 @@ Sin dependencias externas y sin riesgo: el nombre de la app en la config de Expo
 
 #### 🔴 [RAF] Lo que quedó fuera del código y sólo podés hacer vos
 
-1. **Las plantillas de mail de Supabase Auth** —confirmación de cuenta y reseteo de contraseña— siguen diciendo el nombre viejo. Viven en el dashboard de Supabase, no hay archivo en el repo que las contenga. **Es el único texto cara al usuario que todavía dice RAFAQ, y lo ve todo usuario nuevo al registrarse.** Hay que cambiarlas en **DEV y en PROD**, son dos proyectos distintos.
-2. **El prebuild de Android que está en disco está viejo**: su `strings.xml` todavía dice `RAFAQ`. Es un archivo generado y gitignoreado, pero si buildeás local hoy, la app se instala con el nombre viejo en el launcher. Hay que re-correr el prebuild antes del próximo `gradlew assembleDebug`.
-3. **La pantalla de consentimiento de OAuth de Google** está dada de alta como "RAFAQ" — es lo que ve el usuario cuando entra con Google. Consola externa; va con el resto de la fase 2.
+1. **Las plantillas de mail de Supabase Auth** —confirmación de cuenta y reseteo de contraseña— siguen diciendo el nombre viejo. Viven en el dashboard de Supabase, no hay archivo en el repo que las contenga. **Es el único texto cara al usuario que todavía dice miTropero, y lo ve todo usuario nuevo al registrarse.** Hay que cambiarlas en **DEV y en PROD**, son dos proyectos distintos.
+2. **El prebuild de Android que está en disco está viejo**: su `strings.xml` todavía dice `miTropero`. Es un archivo generado y gitignoreado, pero si buildeás local hoy, la app se instala con el nombre viejo en el launcher. Hay que re-correr el prebuild antes del próximo `gradlew assembleDebug`.
+3. **La pantalla de consentimiento de OAuth de Google** está dada de alta como "miTropero" — es lo que ve el usuario cuando entra con Google. Consola externa; va con el resto de la fase 2.
 
 ### Fase 2 — identidad de la app · [AMBOS] · bloqueada por trabajo en consolas
 
@@ -422,7 +422,7 @@ Cambiar el identificador `ar.rafq.app` **crea una app nueva** a los ojos de las 
 
 > **Por qué conviene hacerlo ahora y no en tres meses:** Apple emite un identificador de usuario distinto por Services ID. Cualquiera que ya haya entrado con Apple aparecería como cuenta nueva y perdería el acceso a sus datos. Hoy eso no le pasa a nadie —no hay productores usando la app y la cuenta demo entra por Google—, así que es la ventana más barata que va a existir.
 
-**Lo que NO se toca en ninguna fase**, porque parece marca y son contratos internos: los prefijos de storage `rafq.*` (renombrarlos le borra a cada usuario el rodeo activo, el bastón recordado y el token de invitación a medio usar), el header `X-Rafaq-Actor` que lee un trigger de auditoría en Postgres, las GUCs `rafaq.*`, el nombre del archivo `sync-streams/rafaq.yaml`, y `slug`/`owner`/`projectId` de EAS (cambiarlos pierde historial de builds y credentials).
+**Lo que NO se toca en ninguna fase**, porque parece marca y son contratos internos: los prefijos de storage `rafq.*` (renombrarlos le borra a cada usuario el rodeo activo, el bastón recordado y el token de invitación a medio usar), el header `X-Rafaq-Actor` que lee un trigger de auditoría en Postgres, las GUCs `mitropero.*`, el nombre del archivo `sync-streams/rafaq.yaml`, y `slug`/`owner`/`projectId` de EAS (cambiarlos pierde historial de builds y credentials).
 
 ### El resto
 

@@ -95,7 +95,7 @@
   string con `Bearer`/`token=`/`eyJ` (R7.4.3). Verificado por MUTACIÓN (identidad → 8/9 rojo). Cubre: R7.4,
   R7.4.1, R7.4.2, R7.4.3.
 - [ ] **T23** — Runbook (feature 16 E.5): documentar el paso de ops del filtro del tenant "Campo de prueba
-  RAFAQ" en dashboards de PostHog (group) y Sentry (inbound filter / saved search por tag). Cubre: R7.2.
+  miTropero" en dashboards de PostHog (group) y Sentry (inbound filter / saved search por tag). Cubre: R7.2.
   **OPS** (doc del runbook de feat 16 → lo cierra el leader; no es wiring JS).
 
 ## E. Runbook / ops

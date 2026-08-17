@@ -166,7 +166,7 @@ useLastRodeoSelected(establishmentId: string): {
 ```
 
 - En memoria: zustand store global indexado por `establishment_id` (zustand recomendado por consistencia con stack ADR-013 si está adoptado; fallback a Context API si zustand no está confirmado todavía).
-- Persistencia: `AsyncStorage` con key `rafaq:last_rodeo:<establishment_id>`. Hidratar al mount del provider.
+- Persistencia: `AsyncStorage` con key `mitropero:last_rodeo:<establishment_id>`. Hidratar al mount del provider.
 - Fallback DB: cuando el store no tiene valor para el establishment, dispara una query a PowerSync SQLite del último `animal_profiles.rodeo_id` tocado por el usuario en ese establishment (`max(updated_at) where created_by = userId or last_modified_by = userId`). La query es read-local, no red.
 - Si la query DB también retorna vacío, fallback al **primer rodeo activo creado** del establishment (`order by created_at asc limit 1`). Si tampoco hay rodeos activos, retorna `null` y la UI debe bloquear el flujo con un CTA al wizard de R2.6 de spec 02 ("Creá tu primer rodeo"). **Refinamiento 2026-05-27 de spec 02**: el trigger que creaba un "Rodeo principal" autogenerado fue eliminado; los establecimientos recién creados arrancan con 0 rodeos.
 

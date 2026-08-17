@@ -49,7 +49,7 @@ frontera de seguridad.
 
 1. **EF `audit_query`** (nueva, en `supabase/functions/`, usando `serveEf`):
    - `requireUser` + gate de staff por **allowlist en EF secret** `MITROPERO_STAFF_USER_IDS` (uuids separados por
-     coma; Raf lo setea con su user_id + el de Facundo). Alternativa considerada (tabla `rafaq_staff`) =
+     coma; Raf lo setea con su user_id + el de Facundo). Alternativa considerada (tabla `mitropero_staff`) =
      overkill para 2 personas; env secret es lo mínimo. Si no está en la lista → 403 `not_staff`.
    - **Filtros** (todos opcionales, validados server-side): `from`/`to` (rango de ts), `auth_uid` (uuid),
      `establishment_id` (uuid — se filtra por `record->>'establishment_id'`; hoy solo aplica a user_roles),

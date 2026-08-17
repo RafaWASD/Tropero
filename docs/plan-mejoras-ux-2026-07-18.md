@@ -134,7 +134,7 @@ RLS, así que para él el orden es indistinto.
 
 El gold standard está partido y se explica por eso: WhatsApp pone "You" primero porque **ahí tu fila sí
 es accionable** (salir del grupo, silenciar). Slack y Notion usan orden estable con badge "you" en su
-lugar porque gestionás a otros. RAFAQ está en el segundo grupo.
+lugar porque gestionás a otros. miTropero está en el segundo grupo.
 
 **Detalles**: los roles reales son **tres**, no cuatro — `owner` / `field_operator` / `veterinarian`
 (= Dueño / Operario / Veterinario, `establishment.ts:255`). Entre Operario y Veterinario no hay jerarquía
@@ -211,7 +211,7 @@ FAB ⌀64 elevado 35px = **54.7% del círculo sobre la barra**, más halo ⌀80 
 Notion, Superpower, Obsidian, Cosmos) → **cero** elevan un FAB sobre la barra. Strava —el análogo
 funcional exacto, "Record" arranca una sesión que toma el control de la app, igual que Maniobra— lo pone
 **inline, mismo baseline, mismo tamaño**. El FAB que sobresale es patrón Material 2 (~2016-2020).
-Nota: **MP no le pone label al botón** (el QR es un círculo pelado); RAFAQ le agregó "Maniobra" debajo.
+Nota: **MP no le pone label al botón** (el QR es un círculo pelado); miTropero le agregó "Maniobra" debajo.
 
 **Decisión (Raf)**: renderizar dos familias para comparar —
 - **Familia A** (FAB elevado, proporción corregida; respeta ADR-018): A1 raise 0.33 + halo actual ·

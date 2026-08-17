@@ -120,7 +120,7 @@
 
 ## Bloque F — Marcado manual + re-export
 
-- [x] **T19** — Implementar `markAsDeclared(animalProfileId, establishmentId)` en `SigsaExportService`: crea fila en `sigsa_declarations` sin `export_log_id` (para declaraciones hechas por otros medios). **Copy de la UI (decisión 2, leader 2026-06-24): "Marcar como ya declarado por otro medio"**, NO "Declarar" — el usuario no debe creer que esto sube algo a SENASA; solo apaga el recordatorio local. El `export_log_id = NULL` distingue la marca manual del export con archivo RAFAQ. NO agregar sub-selector de "¿por qué vía?" (over-engineering MVP). Cubre: R10.2.
+- [x] **T19** — Implementar `markAsDeclared(animalProfileId, establishmentId)` en `SigsaExportService`: crea fila en `sigsa_declarations` sin `export_log_id` (para declaraciones hechas por otros medios). **Copy de la UI (decisión 2, leader 2026-06-24): "Marcar como ya declarado por otro medio"**, NO "Declarar" — el usuario no debe creer que esto sube algo a SENASA; solo apaga el recordatorio local. El `export_log_id = NULL` distingue la marca manual del export con archivo miTropero. NO agregar sub-selector de "¿por qué vía?" (over-engineering MVP). Cubre: R10.2.
 
   **Tests**: (a) el animal marcado manualmente desaparece de la lista de pendientes; (b) la fila tiene `export_log_id = NULL`; (c) un usuario con rol `field_operator` que llama a `markAsDeclared` recibe error (RLS rechaza el INSERT con 42501) (MEDIUM-3).
 

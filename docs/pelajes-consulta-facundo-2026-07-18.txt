@@ -1,4 +1,4 @@
-PELAJES — lista para que valides (RAFAQ)
+PELAJES — lista para que valides (miTropero)
 
 Hoy la app deja escribir el pelaje a mano, en un campo de texto libre. Así el
 mismo pelaje entra de diez formas distintas (colorado / Colorado / col. / rojo)

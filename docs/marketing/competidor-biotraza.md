@@ -59,7 +59,7 @@ motivo de compra, es insostenible.
 
 Lo que sigue en pie es el framing que la spec ya tiene escrito, y que resiste bien:
 
-> *"RAFAQ es la alternativa a SIGBIOTRAZA para quien ya carga en RAFAQ y quiere cumplir sin re-cargar en
+> *"miTropero es la alternativa a SIGBIOTRAZA para quien ya carga en miTropero y quiere cumplir sin re-cargar en
 > otra app."* — `requirements.md`, línea 9
 
 Ese sigue siendo cierto contra Biotraza: si el rodeo vive en miTropero, cumplir no debería costar

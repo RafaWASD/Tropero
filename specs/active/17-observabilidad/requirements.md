@@ -158,7 +158,7 @@
 - **R7.1** — El sistema no deberá enviar PII (email, nombre, teléfono, datos de animales/campo) en
   breadcrumbs, eventos ni capturas de Sentry/PostHog.
 - **R7.2** — El sistema deberá adjuntar `establishment_id` a los eventos/issues (group de PostHog +
-  disponible en Sentry) para que el tenant de prueba "Campo de prueba RAFAQ" (feature 16 D7) sea filtrable
+  disponible en Sentry) para que el tenant de prueba "Campo de prueba miTropero" (feature 16 D7) sea filtrable
   en los dashboards.
 - **R7.3** — El sistema deberá etiquetar `env` (Sentry `environment` + PostHog super property) de modo que
   los dashboards puedan segmentar por `env=production` y excluir dev/preview/e2e de las métricas de beta.
@@ -239,7 +239,7 @@
 | D3 · sin PII en eventos | R7.1, R4.2, R6.4, R1.6 |
 | D3 · sin PII — defense-in-depth (scrubber de Sentry, fail-closed, defensa de valores) | R7.4, R7.4.1, R7.4.2, R7.4.3 |
 | D3 · sin PII visual (attachments de pixeles off) | R7.5, R2.7 |
-| D3 · filtrar tenant de prueba "Campo de prueba RAFAQ" | R7.2 |
+| D3 · filtrar tenant de prueba "Campo de prueba miTropero" | R7.2 |
 | Edge · E2E no-op + ErrorBoundary passthrough | R1.3, R5.2, R8.1 |
 | Edge · buffer offline de Sentry | R9.1 |
 | Edge · breadcrumbs sin params/PII | R3.3 |

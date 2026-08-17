@@ -60,7 +60,7 @@ El flujo se detiene **tres veces** para el humano:
 
 - **Gate 1 (spec security)** — Condicional. Se invoca si la spec toca: RLS, schema sensible, Edge Functions, auth/tokens, secrets, datos regulados (SENASA/PII). El subagente `security_analyzer` en modo `spec` audita las decisiones de diseño y emite veredicto PASS / FAIL / NEEDS_CLARIFICATION. Output: `progress/security_spec_<feature>.md`.
 
-- **Gate 2 (code security)** — Siempre. Se invoca después de `reviewer` APPROVED. El subagente `security_analyzer` en modo `code` invoca la skill `security-review` de Sentry (plugin `sentry-skills` instalado a nivel user) sobre el diff del branch. Reporta solo findings HIGH-confidence + complementa con checklist específico de RAFAQ (RLS, Edge Functions, secrets, triggers). Veredicto PASS / FAIL. Output: `progress/security_code_<feature>.md`.
+- **Gate 2 (code security)** — Siempre. Se invoca después de `reviewer` APPROVED. El subagente `security_analyzer` en modo `code` invoca la skill `security-review` de Sentry (plugin `sentry-skills` instalado a nivel user) sobre el diff del branch. Reporta solo findings HIGH-confidence + complementa con checklist específico de miTropero (RLS, Edge Functions, secrets, triggers). Veredicto PASS / FAIL. Output: `progress/security_code_<feature>.md`.
 
 ## context.md — refinamiento de contexto (Gate 0)
 

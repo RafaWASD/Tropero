@@ -10,8 +10,8 @@
 
 1. **El formato de importación está CONFIRMADO y es simple.** SIGSA web acepta un archivo **TXT** con la estructura `RFID-SEXO-RAZA-MM/AAAA` por animal, animales separados por `;`. Documentado con ejemplo literal en el manual oficial de SENASA. La feature 08 es **viable hoy con info pública**.
 2. **Corrección de un supuesto base del proyecto: el "deadline julio 2026" NO existe en la norma vigente** (verificado contra el articulado, §3). El cronograma real arranca **1/1/2026 (terneros al destete)** + reposición natural del rodeo, no una fecha de corte fija para adultos. **Aplicado en docs base** en sesión 16 (CLAUDE.md/CONTEXT/feature_list/plan); los ADRs quedaron pendientes de una pasada aparte (ver §6).
-3. **No es una API** — es upload manual de archivo por el productor en SIGSA web. RAFAQ genera el `.txt`; el productor lo sube.
-4. **SIGBIOTRAZA es competidor, no integrable.** Es una app Android de SENASA que lee RFID por Bluetooth y sincroniza directo a SIGSA (no expone archivo). La oportunidad de RAFAQ es ser **alternativa** a SIGBIOTRAZA generando el TXT importable.
+3. **No es una API** — es upload manual de archivo por el productor en SIGSA web. miTropero genera el `.txt`; el productor lo sube.
+4. **SIGBIOTRAZA es competidor, no integrable.** Es una app Android de SENASA que lee RFID por Bluetooth y sincroniza directo a SIGSA (no expone archivo). La oportunidad de miTropero es ser **alternativa** a SIGBIOTRAZA generando el TXT importable.
 
 ---
 
@@ -108,12 +108,12 @@ Art. 8° (cita): *"El productor debe asociar cada número de dispositivo oficial
 ## 5. Implicancias para la feature 08 (a aterrizar en el context.md)
 
 1. **Qué construye 08**: un generador de archivo `.txt` con la estructura `RFID-SEXO-RAZA-MM/AAAA;…` a partir de los animales del rodeo/establecimiento, descargable/compartible para que el productor lo suba a SIGSA web.
-2. **Problema de mapeo de razas** (única pieza de "negocio" real): hay que mapear las razas internas de RAFAQ → códigos SENASA (tabla del manual). Falta extraer la tabla completa.
+2. **Problema de mapeo de razas** (única pieza de "negocio" real): hay que mapear las razas internas de miTropero → códigos SENASA (tabla del manual). Falta extraer la tabla completa.
 3. **Dependencia de datos del modelo de animal (spec 02)**: el TXT necesita **RFID (tag_electronic), sexo, raza, fecha de nacimiento** por animal. **A verificar**: ¿el modelo de spec 02 captura `raza` y `sexo` y `fecha de nacimiento` para todos los animales? (sexo/categoría/fecha probablemente sí; **raza es la incógnita** — quizás vive en `field_definitions`/plantilla, quizás no se modela hoy). Esto condiciona si 08 puede generar el archivo sin pedir datos extra.
-4. **RENSPA por establecimiento**: el productor lo elige en SIGSA, no va en el TXT — pero conviene que RAFAQ lo conozca para el flujo/recordatorio. **A verificar**: ¿`establishments` modela RENSPA? (CONTEXT/07 lo menciona como validación anti-fraude opcional post-MVP).
+4. **RENSPA por establecimiento**: el productor lo elige en SIGSA, no va en el TXT — pero conviene que miTropero lo conozca para el flujo/recordatorio. **A verificar**: ¿`establishments` modela RENSPA? (CONTEXT/07 lo menciona como validación anti-fraude opcional post-MVP).
 5. **Audit trail**: los acceptance de 08 piden "audit trail de qué se exportó y cuándo" — alineado con que el productor tiene plazo de 10 días hábiles y necesita saber qué ya declaró.
 6. **UX = upload manual, no API**: la feature termina en "generá y descargá/compartí este archivo + acá están los 4 datos (RENSPA, especie, fecha aplicación, motivo) que vas a tener que elegir en SIGSA". No hay submit programático.
-7. **Posicionamiento**: alternativa a SIGBIOTRAZA. Quien ya usa SIGBIOTRAZA (Bluetooth→SIGSA directo) no necesita el archivo; el diferencial de RAFAQ es para quien carga en RAFAQ y quiere cumplir sin re-cargar en otra app.
+7. **Posicionamiento**: alternativa a SIGBIOTRAZA. Quien ya usa SIGBIOTRAZA (Bluetooth→SIGSA directo) no necesita el archivo; el diferencial de miTropero es para quien carga en miTropero y quiere cumplir sin re-cargar en otra app.
 
 ---
 
@@ -190,7 +190,7 @@ La obligación del Art. 8° (declarar en **10 días hábiles**) **no cambia**; l
 
 **Consecuencia para 08 y para el pitch comercial:**
 - 08 cubre el **alta de dispositivos**. **NO cubre TRI ni cierre de DT-e**, que es donde desde el 3/8 se aplica la sanción.
-- Por lo tanto **no se puede vender "cumplí la 841 con RAFAQ"**: se vende *"te generamos el archivo de declaración de dispositivos para SIGSA"*. Un productor que compre entendiendo lo primero y se coma un bloqueo de CUIG en su primer movimiento se lo va a atribuir a RAFAQ.
+- Por lo tanto **no se puede vender "cumplí la 841 con miTropero"**: se vende *"te generamos el archivo de declaración de dispositivos para SIGSA"*. Un productor que compre entendiendo lo primero y se coma un bloqueo de CUIG en su primer movimiento se lo va a atribuir a miTropero.
 - Queda como **decisión de scope abierta para Raf** (ver `context.md`, sección Alcance): si el cierre de DT-e entra al roadmap y con qué prioridad.
 
 ### 8.6 Fuentes de esta sección
@@ -254,9 +254,9 @@ SIGSA web, autogestión (clave fiscal + CBU + RENSPA). El manual del autogestor 
 
 Tres módulos; **todos terminan en un segundo paso obligatorio en SIGSA web**.
 
-| Módulo | Qué pide en la manga | ¿RAFAQ agrega valor? |
+| Módulo | Qué pide en la manga | ¿miTropero agrega valor? |
 |---|---|---|
-| Declaración de dispositivos | **Raza, mes/año de nacimiento y sexo, a mano, dispositivo por dispositivo** | **Sí, por goleada** — RAFAQ ya tiene esos datos |
+| Declaración de dispositivos | **Raza, mes/año de nacimiento y sexo, a mano, dispositivo por dispositivo** | **Sí, por goleada** — miTropero ya tiene esos datos |
 | Inicio de TRI | Nada (solo lee RFID) | Poco |
 | Cierre de DT-e | Nada (escanea el código de barras del DT-e con la cámara) | Poco |
 
@@ -305,7 +305,7 @@ Distribución por **colegios veterinarios**: presentado en la asamblea de la **F
 
 **Qué corrige de este documento**: el §7 ("Posicionamiento: alternativa a SIGBIOTRAZA") queda incompleto. No competimos sólo contra la app del Estado: **hay un privado dando gratis el mismo archivo**.
 
-**Qué NO cambia**: el argumento de `requirements.md` línea 9 —*"para quien ya carga en RAFAQ y quiere cumplir sin re-cargar en otra app"*— resiste, porque contra Biotraza el costo también es salir de la app y re-cargar. **El valor de 08 nunca fue el archivo; es no tener que salir.**
+**Qué NO cambia**: el argumento de `requirements.md` línea 9 —*"para quien ya carga en miTropero y quiere cumplir sin re-cargar en otra app"*— resiste, porque contra Biotraza el costo también es salir de la app y re-cargar. **El valor de 08 nunca fue el archivo; es no tener que salir.**
 
 **Consecuencia práctica, y es la que importa**: 08 deja de ser feature-imán y pasa a ser **higiene** — su ausencia da motivo para irse, su presencia no da motivo para venir. **No usarla como argumento de venta ni cobrarla por separado.** Ver `docs/marketing/competidor-biotraza.md`.
 

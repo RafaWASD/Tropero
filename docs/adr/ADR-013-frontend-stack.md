@@ -1,4 +1,4 @@
-# ADR-013 — Stack de frontend para RAFAQ
+# ADR-013 — Stack de frontend para miTropero
 
 **Status**: Accepted (pendiente de validación al ejecutar Fase 3+ del spec 01)
 **Fecha**: 2026-05-25
@@ -6,7 +6,7 @@
 
 ## Contexto
 
-RAFAQ tiene un posicionamiento de "el mejor en el primer try" frente a competencia naciente (ver memoria `product-positioning`). El frontend de la app va a ser el principal diferenciador percibido por el usuario: necesita ser hiper-profesional, polish nivel B2B premium, y al mismo tiempo **manga-friendly** (operario con barro, sangre, guantes, una mano, sol directo, sin red).
+miTropero tiene un posicionamiento de "el mejor en el primer try" frente a competencia naciente (ver memoria `product-positioning`). El frontend de la app va a ser el principal diferenciador percibido por el usuario: necesita ser hiper-profesional, polish nivel B2B premium, y al mismo tiempo **manga-friendly** (operario con barro, sangre, guantes, una mano, sol directo, sin red).
 
 El desarrollo lo hace una sola persona (Raf) en su tiempo libre, con apoyo de Claude Code. Las decisiones de stack tienen que:
 
@@ -93,7 +93,7 @@ Adoptamos el siguiente stack de frontend, en capas:
 
 ### Gluestack UI v2 (componentes copy-paste)
 - **Pros**: componentes muy polished, templates listos, copy-paste a tu proyecto (no es dep).
-- **Contras**: menos performance que Tamagui en listas largas (caso típico en RAFAQ: lista de animales). Menos optimización compile-time. **Cerca de ganar — pero la performance en manga manda**.
+- **Contras**: menos performance que Tamagui en listas largas (caso típico en miTropero: lista de animales). Menos optimización compile-time. **Cerca de ganar — pero la performance en manga manda**.
 
 ### Detox para E2E
 - **Pros**: ecosistema maduro, integración con CI estándar.

@@ -48,7 +48,7 @@ Padre del vet socio — primer cliente beta. Campo en Chascomús.
 
 **El mercado argentino NO es un monopolio.** Hay al menos una docena de jugadores: Vacuno, Digirodeo, Huella, Ñandú, Albor, Agrodeo, Cattler, Wincampo, Kelpie, SYNAgro, Calipso, más los regionales.
 
-**Vacuno** (`vacuno.app`, Argentina): **el competidor más parecido a RAFAQ.** Cría, offline-first, RFID HDX/FDX-B, bastón Bluetooth propio, módulo reproductivo completo, rol de prestador de servicios. Cobra por cantidad de animales en pesos. Sus dos debilidades frente a nosotros: vende su propio bastón (no es agnóstico) y no exporta el archivo SIGSA.
+**Vacuno** (`vacuno.app`, Argentina): **el competidor más parecido a miTropero.** Cría, offline-first, RFID HDX/FDX-B, bastón Bluetooth propio, módulo reproductivo completo, rol de prestador de servicios. Cobra por cantidad de animales en pesos. Sus dos debilidades frente a nosotros: vende su propio bastón (no es agnóstico) y no exporta el archivo SIGSA.
 
 **Control Ganadero**: el más instalado (autorreporta 22.712 ganaderos y 583.925 animales, en iOS desde 2013). **Hace más de lo que asumíamos**: funciona offline, identifica por RFID, lee lectores Bluetooth y balanzas, tiene módulo reproductivo y rol de veterinario. Sus huecos reales: **ninguna integración con SENASA/SIGSA** y sesgo lechero en el módulo reproductivo.
 

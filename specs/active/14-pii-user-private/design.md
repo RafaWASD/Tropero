@@ -223,7 +223,7 @@ El implementer documenta el mapa `R<n> → archivo:test` en `progress/impl_14-pi
 
 **Propuesta: `ADR-025-pii-sensible-tabla-private.md`** (el último es ADR-024). Contenido mínimo:
 - **Decisión**: PII de contacto/sensible va a `<entidad>_private (<entidad>_id PK)` con RLS self-only (o scope mínimo), separada del perfil/registro público.
-- **Por qué (lo no-obvio)**: RLS, views, RPCs y column-GRANTs viven en PostgREST; realtime y PowerSync sincronizan la tabla base por el WAL → solo la separación FÍSICA cierra la PII en TODOS los canales. RAFAQ va a PowerSync (ADR-002).
+- **Por qué (lo no-obvio)**: RLS, views, RPCs y column-GRANTs viven en PostgREST; realtime y PowerSync sincronizan la tabla base por el WAL → solo la separación FÍSICA cierra la PII en TODOS los canales. miTropero va a PowerSync (ADR-002).
 - **Consecuencia**: `ALTER TABLE ADD COLUMN pii` sobre una tabla pública es un anti-patrón; la PII nueva va a la tabla `*_private`.
 - **Referencias**: spec 14, finding B3-1 (`progress/security_baseline_shipped.md`), ADR-002 (PowerSync), ADR-004 (multi-tenancy).
 

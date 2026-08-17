@@ -210,7 +210,7 @@ Que el `onChange` —que dispara en cada cambio de tabla, más seguido que `last
 
 ### 4.2 Por qué se sostiene (dos capas, ambas ya presentes en la 20)
 
-1. **El disparo observa snapshots CONSISTENTES, no estados a medio aplicar (R21.18).** PowerSync (core Rust, `@powersync/common`) aplica cada checkpoint como una transacción sobre el SQLite local y recién ahí emite `tablesUpdated` (que es lo que `onChange` escucha). RAFAQ **no declara prioridades** en `sync-streams/rafaq.yaml` (feature 20, `design.md` §4.2, evidencia 1-4, verificada en el repo) → todo checkpoint es una vista completa y consistente. No existe el escenario "publicó unos buckets y otros no" dentro de un mismo disparo. Un set momentáneamente vacío es un estado consistente real (el bucket efectivamente se removió a esa altura), no una descarga a medias.
+1. **El disparo observa snapshots CONSISTENTES, no estados a medio aplicar (R21.18).** PowerSync (core Rust, `@powersync/common`) aplica cada checkpoint como una transacción sobre el SQLite local y recién ahí emite `tablesUpdated` (que es lo que `onChange` escucha). miTropero **no declara prioridades** en `sync-streams/rafaq.yaml` (feature 20, `design.md` §4.2, evidencia 1-4, verificada en el repo) → todo checkpoint es una vista completa y consistente. No existe el escenario "publicó unos buckets y otros no" dentro de un mismo disparo. Un set momentáneamente vacío es un estado consistente real (el bucket efectivamente se removió a esa altura), no una descarga a medias.
 
 2. **El veredicto es por EVIDENCIA AFIRMATIVA, no por ausencia, y es idempotente (R21.12/R21.16/R21.17).** `assessDisappearance` (sin cambios) concluye `confirmed` **solo** cuando la fila local de rol propia está ausente o `active = 0`. Si el campo desapareció de `establishments` pero el rol propio todavía está `active = 1` (la baja del rol llega en un checkpoint POSTERIOR), el veredicto es `inconclusive` → no se cambia de estado → se espera. El siguiente `onChange` (cuando `user_roles.active → 0` aterriza, observado por R21.7) re-evalúa → `absent_or_inactive` → `confirmed`. Sin timer ni contador (R21.17).
 
@@ -255,7 +255,7 @@ Los oráculos NO se aflojan (R21.28) y los casos/garantías se conservan (R21.29
 
 ---
 
-## 8. Cumplimiento de los MUSTs de RAFAQ
+## 8. Cumplimiento de los MUSTs de miTropero
 
 - **Multi-tenancy / RLS**: la feature toca el contexto que decide el `establishment_id` activo y la detección de revocación, así que se declara explícitamente: **no se modifica ninguna policy RLS, migración ni sync stream**. El set de campos accesibles se sigue derivando de `auth.uid()` vía `org_scope` + RLS; el cliente nunca hardcodea `establishment_id`. Las tablas observadas por las watched queries (`user_roles`, `establishments`, `rodeos`, `management_groups`) son el SQLite LOCAL ya scopeado por las streams — observarlas es un **disparador de UX, no un control de acceso** (misma nota que la 20: la evidencia afirmativa decide qué pantalla mostrar, nunca un permiso; el enforcement es `has_role_in` server-side). El candado RG-1 (`self_user_roles` sin filtro `active`) es lo que hace posible D2 y se preserva intacto.
 - **Offline-first**: las watched queries leen del **SQLite local**; **cero llamadas de red** nuevas. Sin conexión, `db.onChange` no dispara (no hay cambios de tabla del servidor) y `useQuery` refleja el estado local — comportamiento idéntico al de hoy, sin el guard `=== 0` (reemplazado por "no hay evento sin cambio"). La app en la manga sin señal no cambia en nada.

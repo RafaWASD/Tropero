@@ -1,4 +1,4 @@
-# Setup — Frontend de RAFAQ
+# Setup — Frontend de miTropero
 
 Guía paso a paso para instalar las MCPs, librerías y tools que decidimos en `docs/adr/ADR-013-frontend-stack.md`. Cada sección incluye **comandos concretos** para copy-paste.
 
@@ -77,7 +77,7 @@ Las MCPs son servidores que se conectan a Claude Code y le dan superpoderes. Una
 
    - `set -a && . ./.env.local && set +a` carga las vars de `.env.local` en la shell (necesario porque ya tenés el token ahí).
    - El flag `--read-only` es crítico: bloquea cualquier operación de write desde Claude. Solo SELECT y EXPLAIN. **Defensa importante para no romper la DB de producción accidentalmente.**
-   - `--project-ref=xrhlxxdnfzvdnztacofj` lo scopea a tu proyecto RAFAQ específicamente.
+   - `--project-ref=xrhlxxdnfzvdnztacofj` lo scopea a tu proyecto miTropero específicamente.
    - **`pnpm dlx` en lugar de `npx`**: npm está roto en este entorno por Cylance. pnpm dlx esquiva el problema.
 
 2. **Verificá**:
@@ -139,7 +139,7 @@ Las MCPs son servidores que se conectan a Claude Code y le dan superpoderes. Una
 
 **Costo**: $0 adicional sobre tu suscripción Pro existente.
 
-**Workflow recomendado en RAFAQ**:
+**Workflow recomendado en miTropero**:
 - Vos hacés primera pasada solo en Mobbin browser (calibrar tu ojo).
 - Sesión conjunta: yo traigo screens via MCP, comparamos, vos guardás los que valen en tu Project + descargás los esenciales a `design/inspiration/`.
 - Síntesis: yo leo todo (MCP + repo) y propongo direcciones contrastadas.
@@ -152,12 +152,12 @@ Las MCPs son servidores que se conectan a Claude Code y le dan superpoderes. Una
 
 **Para qué (cuando llegue el momento)**: importar `design/tokens.json` como Variables nativas de Figma, en una sola operación. Sin esto tendrías que typear cientos de tokens a mano — paleta light + dark, escala tipográfica, spacing, radius, sombras.
 
-**Pre-requisito**: cuenta Figma activa, archivo `RAFAQ Design System` creado (vacío por ahora).
+**Pre-requisito**: cuenta Figma activa, archivo `miTropero Design System` creado (vacío por ahora).
 
 **Pasos**:
 
 1. **Instalar el plugin** dentro de Figma:
-   - Abrí Figma → en el archivo `RAFAQ Design System` → menú `Plugins` → `Find plugins` → buscar **"Tokens Studio for Figma"** (autor: Jan Six / Figma Tokens) → **Run**.
+   - Abrí Figma → en el archivo `miTropero Design System` → menú `Plugins` → `Find plugins` → buscar **"Tokens Studio for Figma"** (autor: Jan Six / Figma Tokens) → **Run**.
    - La primera vez te pide aceptar permisos. Es free para uso personal.
 
 2. **Importar el JSON del repo**:
@@ -336,7 +336,7 @@ Cosas que conviene tildar HOY (paralelo a otras tareas):
 - [ ] `claude mcp add mobbin --scope user --transport http https://api.mobbin.com/mcp`
 - [ ] Reiniciar Claude Code → primer uso dispara OAuth flow → autorizar con cuenta Mobbin Pro
 - [ ] `claude mcp list` y verificar que `mobbin` aparece como `connected`
-- [ ] (FUTURO, cuando design system esté cerrado) Crear archivo Figma `RAFAQ Design System`
+- [ ] (FUTURO, cuando design system esté cerrado) Crear archivo Figma `miTropero Design System`
 - [ ] (FUTURO) Instalar plugin **Tokens Studio for Figma** dentro del archivo
 - [ ] (FUTURO) Importar `design/tokens.json` vía `Tools → Load from local file`
 - [ ] (FUTURO) Activar themes light/dark del sistema definitivo

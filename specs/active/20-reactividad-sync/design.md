@@ -128,7 +128,7 @@ Que `lastSyncedAt` solo avanza cuando se aplicó un checkpoint **completo y cons
    `app/node_modules/@powersync/common/lib/client/sync/stream/core-instruction.js:22` → `lastSyncedAt: completeSync?.lastSyncedAt`, donde `completeSync = status.priority_status.find(s => s.priority == FULL_SYNC_PRIORITY)`. No hay ninguna otra ruta que lo escriba (`grep lastSyncedAt` sobre todo `@powersync/*`).
 2. **La semántica de esa entrada es "vista consistente sobre todos los buckets".**
    `SyncStatus.js:111-124` (doc del SDK shipped): *"When a consistent view over all buckets for all priorities up until the given priority is reached, PowerSync makes data from those buckets available"*. Y `SyncStatus.d.ts` sobre `lastSyncedAt`: *"Time that a last sync has **fully completed**"*.
-3. **En RAFAQ no hay prioridades declaradas.** `sync-streams/rafaq.yaml`: las 31 streams se declaran sin `priority` → todas caen en la prioridad completa. No existe el escenario "PowerSync publicó los buckets de prioridad 1 y todavía no los de 3" que es el único caso documentado de visibilidad parcial.
+3. **En miTropero no hay prioridades declaradas.** `sync-streams/rafaq.yaml`: las 31 streams se declaran sin `priority` → todas caen en la prioridad completa. No existe el escenario "PowerSync publicó los buckets de prioridad 1 y todavía no los de 3" que es el único caso documentado de visibilidad parcial.
 4. **La validación y aplicación del checkpoint no vive en JS.** `@powersync/common@1.53.2` delega el ciclo entero al core Rust (`powersync_control` / `UpdateSyncStatus`); no queda código JS de `sync_local`/checksums (grep vacío sobre `common/lib`). El SDK ni siquiera expone ya la implementación JS (`clientImplementation` está marcada deprecada: *"RUST is the only option"*). No hay, del lado del cliente, un camino que aplique ops sueltas a las tablas de usuario fuera de un checkpoint validado.
 5. **Ordenamiento causal del lado del servicio** (razonamiento, no verificación directa): la fila de `establishments` solo sale del SQLite local cuando el bucket de `est_establishments` se remueve, y eso solo ocurre cuando `org_scope` deja de incluir el campo — es decir, **causado por** el cambio en `user_roles`. El servicio procesa el WAL en orden, así que la remoción del bucket no puede preceder al commit que la origina.
 
@@ -426,7 +426,7 @@ Arquitectónicamente más limpia (el contexto de datos no sabría de rutas), per
 
 ---
 
-## 10. Cumplimiento de los MUSTs de RAFAQ
+## 10. Cumplimiento de los MUSTs de miTropero
 
 - **Multi-tenancy / RLS**: la feature toca el contexto que decide el `establishment_id` activo, así que se declara explícitamente: **no se modifica ninguna policy RLS, ninguna migración, ni ninguna sync stream**. El set de campos accesibles se sigue derivando de `auth.uid()` vía `org_scope` + RLS; el cliente nunca hardcodea `establishment_id` (`CLAUDE.md` ppio 6). El único cambio con implicancia de acceso es la ventana de diferimiento de §5, analizada en §5.5 (insumo de Gate 1).
 - **Offline-first**: todas las lecturas afectadas ya salen del SQLite local (spec 15); esta feature no agrega ni una llamada de red. Sin conexión, `lastSyncedMs` queda en 0 y el comportamiento es idéntico al de hoy (R20.7/R20.8). La app en la manga sin señal no cambia en nada.
@@ -511,7 +511,7 @@ rol, T21 se pone **rojo antes** de asertar nada del diferimiento.
 
 - La fila SIEMPRE llega al SQLite local en **~1,5 s** (6/6 cambios observados, INSERT y UPDATE). La
   ENTREGA del dato no es el problema.
-- Pero `lastSyncedAt` —la señal sobre la que TODA la reactividad de RAFAQ está emulada— avanza de
+- Pero `lastSyncedAt` —la señal sobre la que TODA la reactividad de miTropero está emulada— avanza de
   forma **NO determinista por cambio**: corrida 1, los 3 cambios ticaron al instante (~1,5 s);
   corrida 2, el **primer** cambio se estancó (fila en SQLite, señal congelada ~90 s) hasta que el
   **segundo** cambio forzó un checkpoint que barrió ambos de golpe.

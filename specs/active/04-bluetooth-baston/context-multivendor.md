@@ -55,7 +55,7 @@ Traducción a la arquitectura existente: lo que pide **ya es** el patrón `Stick
 
 - **Device-validation** de Classic SPP / HID / GATT — gated por hardware (cuando Raf tenga el RS420 y/o un lector HID/BLE).
 - **Adapter MFi / External Accessory (iOS Classic)** — requiere autorización + protocol string del fabricante (Allflex "Reader Connectivity SDK 2.0", etc.). **Track paralelo de negocio (Facundo)**, off-critical-path (ADR-024 §5). Este delta deja la arquitectura preparada (el driver puede declarar `transportKind: 'mfi'` + protocolString), pero no implementa el adapter EA hasta tener autorización.
-- **Correlación EID↔peso** (spec 05). **Certificación / lista de compatibilidad RAFAQ** (negocio).
+- **Correlación EID↔peso** (spec 05). **Certificación / lista de compatibilidad miTropero** (negocio).
 
 ## Ganchos para la fase de spec (a confirmar en Puerta 0)
 

@@ -132,18 +132,18 @@ Opciones de alto nivel (a evaluar, no decididas), reordenadas con el reencuadre:
 NO poner el deal Allflex en el camino crítico. Android SPP ya; iOS degradado (carga manual/import); Allflex MFi como upside paralelo de Facundo. Reframes: el **foso real puede ser el loop de declaración SENASA (10 días hábiles)**, no la lectura en vivo; el bastón quizá **no es P0** (carga manual/visual del número = puerta cero); AR es mayoritariamente Android → el problema iOS puede ser menor de lo asumido (**medir el split del beta**).
 
 ### Council #2 — ¿vender el dongle ESP32 "estandarizador" como producto?
-Veredicto (4/5 + chairman): **NO.** No montar un negocio de hardware (FCC/SIG, IP67, RMA, OTA, baterías) en un equipo de 2 personas de software. Los BLE genéricos ya resuelven iOS+Android sin MFi → recomendar/certificar un BLE barato como "hardware compatible RAFAQ" (canal Facundo, sin fábrica). Dongle solo como proyecto custom pagado por adelantado. El Expansionista (caballo-de-Troya-de-datos) fue refutado 5/5: el dato lo captura el SaaS, no el dongle.
+Veredicto (4/5 + chairman): **NO.** No montar un negocio de hardware (FCC/SIG, IP67, RMA, OTA, baterías) en un equipo de 2 personas de software. Los BLE genéricos ya resuelven iOS+Android sin MFi → recomendar/certificar un BLE barato como "hardware compatible miTropero" (canal Facundo, sin fábrica). Dongle solo como proyecto custom pagado por adelantado. El Expansionista (caballo-de-Troya-de-datos) fue refutado 5/5: el dato lo captura el SaaS, no el dongle.
 **Única acción #1:** comprar UN bastón BLE genérico (~USD 100-300) + probar lectura **GATT en iPhone** con `react-native-ble-plx`. Falsea la premisa de la que cuelga TODA la estrategia.
 
 ### Hallazgo Allflex (autorización MFi — verificado por empresa)
-- RAFAQ **NO necesita certificación MFi propia**: el RS420 ya es MFi (Allflex lo certificó). RAFAQ necesita que **Allflex autorice su app** (decisión de negocio que Allflex da de rutina). FAQ de Apple confirma: el portero es el fabricante, no Apple.
+- miTropero **NO necesita certificación MFi propia**: el RS420 ya es MFi (Allflex lo certificó). miTropero necesita que **Allflex autorice su app** (decisión de negocio que Allflex da de rutina). FAQ de Apple confirma: el portero es el fabricante, no Apple.
 - Allflex tiene un **"Reader Connectivity SDK 2.0"** (mencionado en su app Allflex Connect) → es lo concreto a pedir.
 - **Precedentes de terceros INDEPENDIENTES** (verificados) que leen el RS420 en iOS = están autorizados: **CattleMax/TagMax** (Cattlesoft Inc, independencia confirmada explícita), **AgriWebb** (VC-backed, USD 64.6M), **Herdwatch** (FRS co-op). [DuraDiamond/Gestor RS420 = **contratista** de Allflex SA → precedente débil; iLivestock = su producto propio, independiente pero íntimo con Allflex.]
 - **"Pedido B" redactado** (en la conversación de la sesión): pedir SDK 2.0 + autorización del protocol string MFi, citando CattleMax/AgriWebb/Herdwatch. Lo manda **Facundo**.
 
 ### Atajo Serialio (analizado)
-- **SerialMagic Keys (keyboard-wedge):** SÍ saltea a Allflex (la app de Serialio sostiene la conexión MFi; RAFAQ recibe el tag tecleado). UX clunky (2 apps, teclado pago por dispositivo, keyboard custom con Full Access) → **stopgap/demo**, no producto. Se combina con la "puerta cero" (teclea en el campo de carga manual).
-- **SDK embebido:** probablemente NO saltea a Allflex (la app de RAFAQ igual declara el protocol string → necesita autorización). Acelera el código, no la autorización.
+- **SerialMagic Keys (keyboard-wedge):** SÍ saltea a Allflex (la app de Serialio sostiene la conexión MFi; miTropero recibe el tag tecleado). UX clunky (2 apps, teclado pago por dispositivo, keyboard custom con Full Access) → **stopgap/demo**, no producto. Se combina con la "puerta cero" (teclea en el campo de carga manual).
+- **SDK embebido:** probablemente NO saltea a Allflex (la app de miTropero igual declara el protocol string → necesita autorización). Acelera el código, no la autorización.
 - **3 preguntas pendientes a soporte Serialio** (support@serialio.com): ¿el SDK exime de la autorización MFi?; mecanismo iOS del wedge; soporte RN + precio.
 
 ## Sesión 22 (2026-06-02) — investigación de mercado: ¿existe un BLE-abierto barato en AR? (deep-research, verificado)

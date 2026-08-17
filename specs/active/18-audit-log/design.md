@@ -89,7 +89,7 @@ Tres hechos que no hay que confundir:
 
 3. **Modo de falla [Gate 1 M2].** El insert de audit es **best-effort** para el camino caliente de campo
    (`animals` y futuras tablas de evento): si falla, el write del operario **procede igual** (regla dura
-   RAFAQ: la manga nunca se traba; mismo criterio que `ble/logging.ts` y `upload-rejections.ts`, que
+   miTropero: la manga nunca se traba; mismo criterio que `ble/logging.ts` y `upload-rejections.ts`, que
    jamás propagan). Para `user_roles` (admin, EF, bajo volumen) es **estricto** (sin huecos).
 
 Los tres hechos van **en el header** de `0124_audit_log.sql` (R2.5).
@@ -99,7 +99,7 @@ Los tres hechos van **en el header** de `0124_audit_log.sql` (R2.5).
 ## Schema SQL (contrato de diseño — el implementer escribe el archivo real)
 
 Vendoreado de `supa_audit` (la extensión **no** está en el catálogo hosted de Supabase, D1), recortado a
-lo que RAFAQ necesita, **con la columna `auth_uid`** (supa_audit no captura actor) y el **modo de falla
+lo que miTropero necesita, **con la columna `auth_uid`** (supa_audit no captura actor) y el **modo de falla
 por tabla**.
 
 ```sql

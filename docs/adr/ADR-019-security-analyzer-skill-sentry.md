@@ -6,7 +6,7 @@
 
 ## Contexto
 
-RAFAQ tiene superficie de ataque real: multi-tenant + RLS de Postgres + Edge Functions de Supabase + auth con invitaciones por link bearer (ADR-014) + datos personales y de SENASA + sync offline con PowerSync + integración BLE. Hasta esta decisión, el flujo SDD del proyecto (ADR-001) tenía 4 subagentes — `leader`, `spec_author`, `implementer`, `reviewer` — donde el reviewer cubría calidad funcional + checklist específico de RAFAQ (RLS, offline, BLE, UI campo, Edge Functions) pero **no había un agente especializado en análisis de seguridad** con metodología propia.
+miTropero tiene superficie de ataque real: multi-tenant + RLS de Postgres + Edge Functions de Supabase + auth con invitaciones por link bearer (ADR-014) + datos personales y de SENASA + sync offline con PowerSync + integración BLE. Hasta esta decisión, el flujo SDD del proyecto (ADR-001) tenía 4 subagentes — `leader`, `spec_author`, `implementer`, `reviewer` — donde el reviewer cubría calidad funcional + checklist específico de miTropero (RLS, offline, BLE, UI campo, Edge Functions) pero **no había un agente especializado en análisis de seguridad** con metodología propia.
 
 El riesgo concreto que se quería mitigar: que una decisión de RLS mal diseñada en una spec, o una Edge Function con validación de input débil, o un endpoint con secrets mal manejados, pase la revisión por estar dentro de "lo que funciona" sin ser explícitamente revisado por un ángulo de seguridad.
 
@@ -125,7 +125,7 @@ Para specs puramente UI sin datos nuevos (ej: refactor de pantalla), Gate 1 se s
 - **Costo de tokens sube ~15-25%** por feature implementada. Gate 2 corre security review completo en cada flujo. Mitigación: HIGH-only output es corto.
 - **Tiempo de sesión sube ~5-10 minutos** por feature por el gate. Mitigación: el subagente corre en background si se delega correctamente; el humano puede revisar el output cuando esté.
 - **Dependencia externa**: si Sentry deja de mantener la skill o cambia el comportamiento entre versiones, el flujo se afecta. Mitigación: pin a un commit/tag específico del repo (no a `main` indiscriminadamente) cuando se considere production-critical.
-- **Gaps específicos de RAFAQ**: la skill no tiene guides explícitos de Deno (Edge Functions), Postgres RLS, PowerSync, React Native, BLE. Cobertura indirecta vía guides de Python/JS/Go/Rust/Java. Mitigación: el `security_analyzer` complementa con el checklist RAFAQ del `reviewer` (sección A "tablas con establishment_id" + sección E "Edge Functions"). En el futuro vale evaluar si crear reference files complementarios para los gaps.
+- **Gaps específicos de miTropero**: la skill no tiene guides explícitos de Deno (Edge Functions), Postgres RLS, PowerSync, React Native, BLE. Cobertura indirecta vía guides de Python/JS/Go/Rust/Java. Mitigación: el `security_analyzer` complementa con el checklist miTropero del `reviewer` (sección A "tablas con establishment_id" + sección E "Edge Functions"). En el futuro vale evaluar si crear reference files complementarios para los gaps.
 - **Curva de aprendizaje**: el equipo (Raf solo por ahora) tiene que entender cómo leer los findings VULN-001/VERIFY-001 y aprender a iterar con el security_analyzer. Primera vez puede ser confuso.
 - **No es bala de plata**: las skills de Claude Code no reemplazan revisiones humanas en momentos críticos (pre-prod deploy, exposición pública de endpoint nuevo, auditoría regulatoria). Quedan como complemento.
 
@@ -153,4 +153,4 @@ Media. Adoptar la skill + crear el subagente + actualizar los agentes existentes
 **Relacionado**:
 - ADR-001 (SDD): este ADR extiende el flujo SDD con 2 gates.
 - ADR-014 (invitaciones link bearer): caso de uso típico que el security_analyzer va a auditar (token bearer + expiración + scoping).
-- Checklist RAFAQ del `reviewer` (`.claude/agents/reviewer.md` sección A "RLS" + E "Edge Functions"): complementa al security_analyzer en los gaps específicos del proyecto.
+- Checklist miTropero del `reviewer` (`.claude/agents/reviewer.md` sección A "RLS" + E "Edge Functions"): complementa al security_analyzer en los gaps específicos del proyecto.

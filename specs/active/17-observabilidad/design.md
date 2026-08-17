@@ -258,7 +258,7 @@ Ninguna prop lleva id de animal, caravana, nombre, email ni datos de campo (R6.4
   feedback (R2.7) queda gated Fase 0 y su screenshot no se activa sobre un tenant real sin decisión aparte.
 - **Tenant de prueba filtrable (R7.2)**: cada evento lleva `establishment_id` (super property + group de
   PostHog) y Sentry lo tiene disponible por `setTag`/`setContext` (opcional, mismo dato no-PII). El
-  **mecanismo de "filtrar"** el "Campo de prueba RAFAQ" es a nivel **dashboard/saved-search** (PostHog:
+  **mecanismo de "filtrar"** el "Campo de prueba miTropero" es a nivel **dashboard/saved-search** (PostHog:
   filtro por group `establishment` ≠ id de prueba; Sentry: inbound filter / saved search por tag), no
   supresión client-side: el `establishment_id` del tenant de prueba **no se conoce en tiempo de spec** (se
   crea en PROD en feature 16). Se documenta como paso de ops en el runbook. → **Punto de decisión Puerta 1**

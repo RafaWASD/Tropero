@@ -4,7 +4,7 @@
 > Idioma de identificadores: inglés. Prosa: es-AR.
 >
 > **Naming (rebrand):** todo identificador NUEVO nace `miTropero`/`mitropero` (secret
-> `MITROPERO_STAFF_USER_IDS`, EF `audit_query`). Lo único "rafaq" tolerado es lo REUTILIZADO ya deployado:
+> `MITROPERO_STAFF_USER_IDS`, EF `audit_query`). Lo único "mitropero" tolerado es lo REUTILIZADO ya deployado:
 > el wrapper `serveEf` sigue mandando `X-Rafaq-Request-Id` (deuda de rebrand, spec 23) — NO se duplica ni
 > se renombra acá. Ver `docs/rebrand-mitropero-plan.md`.
 >

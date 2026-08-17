@@ -1,4 +1,4 @@
-# RAFAQ Design System — v4 (canónico)
+# miTropero Design System — v4 (canónico)
 
 **Status**: Activo (canonizado 2026-05-30, sesión 20). Cierra el item **A.1** del plan.
 **Reemplaza**: el draft exploratorio "Campo Profundo" (archivado en `design/explorations/`, NO canónico).
@@ -82,7 +82,7 @@ Base **blanco neutro** (sin tinte frío ni cálido — se mató el `#f8f9ff` de 
 
 **Spacing**: se usa la **escala default de `@tamagui/config/v4`** (heredada, no se override). Las pantallas usan `$1`, `$2`, `$3`, `$4`… El mapeo px exacto vive en el config de Tamagui; la convención de uso: padding de cards/pantallas ≈ `$4`, gap entre secciones mayor.
 
-**Radius** (custom RAFAQ sobre la escala v4):
+**Radius** (custom miTropero sobre la escala v4):
 
 | Token | px | uso |
 |---|---|---|

@@ -7,7 +7,7 @@
 
 ## Contexto
 
-Toda la reactividad de RAFAQ está **emulada sobre la señal de status** de PowerSync: el patrón canónico
+Toda la reactividad de miTropero está **emulada sobre la señal de status** de PowerSync: el patrón canónico
 del repo es `useStatus()` de `@powersync/react` + `lastSyncedAt.getTime()` como dependencia primitiva de un
 efecto que re-lee con `getAll` en cada avance de sync. **La app tiene CERO watched queries** (`db.watch` /
 `useQuery`) — deuda deliberada documentada desde 2026-06-09.

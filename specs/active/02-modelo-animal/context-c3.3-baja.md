@@ -29,7 +29,7 @@ Dos mitades, ambas en la ficha (`app/app/animal/[id].tsx`) + el servicio (`app/s
   su semántica de reporte se valida con Facundo más adelante (el enum ya los soporta; agregarlos
   después es un cambio de UI, sin migración).
 - **D2 — peso + precio de salida opcionales SOLO en Venta**. Alimenta analytics (precio/kg,
-  ganancia de peso — pilar de RAFAQ). Ocultos en Muerte/Transferencia. Opcionales = sin fricción.
+  ganancia de peso — pilar de miTropero). Ocultos en Muerte/Transferencia. Opcionales = sin fricción.
 
 ### Mapeo motivo → (status, exit_reason)
 

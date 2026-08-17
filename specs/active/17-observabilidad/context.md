@@ -44,7 +44,7 @@ El plan agrupó Sentry + PostHog + audit log en feature 17, con la nota "si la s
 
 ### D3 — Privacidad (Ley 25.326)
 - **Sin PII en eventos** (analytics disociados; en B2B probablemente no requieren consentimiento, pero el **aviso breve** es buena práctica → coordina con el runbook).
-- **Filtrar el tenant de prueba** "Campo de prueba RAFAQ" (feature 16 D7) en Sentry/PostHog para no ensuciar métricas de beta con las pruebas diarias de Raf.
+- **Filtrar el tenant de prueba** "Campo de prueba miTropero" (feature 16 D7) en Sentry/PostHog para no ensuciar métricas de beta con las pruebas diarias de Raf.
 
 ## Edge cases (a cubrir en requirements)
 

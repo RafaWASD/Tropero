@@ -17,7 +17,7 @@ El refinamiento original de spec 04 (`context.md`) y ADR-002 asumían que el bas
 Por las apuestas (define la capa de integración del bastón para todo el MVP, equivocarse = rework o un MVP que se siente mal en el "primer try"), la estrategia se pasó por el **LLM Council** (5 asesores + revisión por pares + síntesis). El veredicto convergió fuerte:
 - La abstracción correcta **no es "BLE"**: es **"un EID es texto"** — un contrato de ingesta ("string de 15 díg validado → commit") con N transportes como proveedores.
 - La estructura multi-adaptador es correcta, **pero no se lockea el leg HID-iOS sobre un mecanismo nunca ejecutado** (HID→`TextInput` de RN en iOS, con la supresión del teclado en pantalla, es el supuesto más frágil).
-- **NO** estandarizar un lector USD 595 importado como "hardware RAFAQ" (mata adopción en AR); sirve como test rig + ancla premium de una lista de compatibilidad.
+- **NO** estandarizar un lector USD 595 importado como "hardware miTropero" (mata adopción en AR); sirve como test rig + ancla premium de una lista de compatibilidad.
 - Riesgo nuevo detectado: un EID tipeado por el wedge con un dígito mutado se **declara MAL ante SENASA** (10 días hábiles) → el contrato necesita **checksum + confirmación visual antes del commit**, no solo "stream + Enter".
 
 ## Decisión
@@ -63,13 +63,13 @@ Si el wedge resulta frágil en RN/iOS, el contrato no cambia (los otros adaptado
 
 ### 5. MFi-Allflex + certificaciones de fabricantes = track paralelo diferido (importante)
 
-Perseguir autorización MFi de Allflex (SDK 2.0 + protocol string, precedentes CattleMax/AgriWebb/Herdwatch) y acuerdos/certificaciones con fabricantes de bastones es **importante pero off-critical-path**, gestionado por Facundo, **post-MVP**. Desbloquea (i) el RS420 en iOS para quienes ya lo tienen, y (ii) una **lista de compatibilidad certificada RAFAQ** (no reventa de hardware; programa de certificación). El dongle ESP32 sigue siendo **test rig, no producto** (ADR-010, Council #2).
+Perseguir autorización MFi de Allflex (SDK 2.0 + protocol string, precedentes CattleMax/AgriWebb/Herdwatch) y acuerdos/certificaciones con fabricantes de bastones es **importante pero off-critical-path**, gestionado por Facundo, **post-MVP**. Desbloquea (i) el RS420 en iOS para quienes ya lo tienen, y (ii) una **lista de compatibilidad certificada miTropero** (no reventa de hardware; programa de certificación). El dongle ESP32 sigue siendo **test rig, no producto** (ADR-010, Council #2).
 
 ## Alternativas consideradas
 
 ### B — Comprometer MFi-Allflex como EL camino iOS (en el camino crítico)
 - **Pros**: soporta en iOS el RS420 exacto que el beta ya tiene.
-- **Contras**: el timeline lo controla Allflex, no RAFAQ (equipo de 2, beta inminente) → bloquea el MVP contra una negociación de fabricante. El Council lo descartó como camino crítico; queda como track paralelo (Decisión §5).
+- **Contras**: el timeline lo controla Allflex, no miTropero (equipo de 2, beta inminente) → bloquea el MVP contra una negociación de fabricante. El Council lo descartó como camino crítico; queda como track paralelo (Decisión §5).
 
 ### C — Android-SPP-only para el beta + manual en iOS, diferir todo iOS
 - **Pros**: lo más lean; es de facto lo que sale para el beta (Decisión §3).

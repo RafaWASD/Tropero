@@ -14,7 +14,7 @@ El **kilo de ternero destetado por vaca** es, en la práctica, el **producto fin
 - **Comparar** campañas entre sí, y eventualmente toros/pajuelas.
 - **Benchmarkear** contra la zona/raza.
 
-Hoy la app ya tiene **% destete** (#10, recién hecho: terneros destetados / vacas servidas). Falta el **peso**. La combinación de los dos es el diferencial analítico de RAFAQ. Por eso vale la pena diseñarlo bien desde el principio, no improvisarlo.
+Hoy la app ya tiene **% destete** (#10, recién hecho: terneros destetados / vacas servidas). Falta el **peso**. La combinación de los dos es el diferencial analítico de miTropero. Por eso vale la pena diseñarlo bien desde el principio, no improvisarlo.
 
 ## 1. Estado actual de la app (lo que ya existe)
 

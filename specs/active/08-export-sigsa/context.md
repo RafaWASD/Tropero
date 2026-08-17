@@ -9,7 +9,7 @@
 
 ## Contexto validado
 
-08 genera un archivo **`.txt`** que el productor sube manualmente a **SIGSA web** para declarar ante SENASA los dispositivos de identificación electrónica (obligación vigente desde 1/1/2026, Res. 841/2025; plazo **10 días hábiles** por novedad). NO es una API: RAFAQ produce el archivo, el productor lo sube. Es el **diferencial competitivo** frente a SIGBIOTRAZA (app oficial Bluetooth→SIGSA que NO genera archivo): RAFAQ sirve a quien ya carga en RAFAQ y quiere cumplir sin re-cargar en otra app.
+08 genera un archivo **`.txt`** que el productor sube manualmente a **SIGSA web** para declarar ante SENASA los dispositivos de identificación electrónica (obligación vigente desde 1/1/2026, Res. 841/2025; plazo **10 días hábiles** por novedad). NO es una API: miTropero produce el archivo, el productor lo sube. Es el **diferencial competitivo** frente a SIGBIOTRAZA (app oficial Bluetooth→SIGSA que NO genera archivo): miTropero sirve a quien ya carga en miTropero y quiere cumplir sin re-cargar en otra app.
 
 **Capacidad de importar archivo CORROBORADA** (verificación s18): la documentación de SENASA confirma que en SIGSA web se puede declarar **por importación de archivo** —incluyendo un archivo "generado por un lector de dispositivos RFID" con un formato específico— como una de las 3 vías (presencial / autogestión SIGSA web / app SIGBIOTRAZA). 2 fuentes independientes (research s16 + búsqueda s18).
 
@@ -54,8 +54,8 @@
 - **Sub-tarea pre-spec**: ✅ **HECHA (sesión 22)** — tabla completa de 32 códigos (28 bovinas) extraída y verificada en `razas-senasa-codigos.md` (este directorio). El catálogo se siembra con las 28 bovinas (grafías literales del manual). Queda validar con Facundo el subset relevante de la zona (solo para ordenar/defaultear el picker, no recorta el enum).
 
 ### RENSPA (decisión 2: campo opcional en establishments)
-- Se agrega **`renspa` (opcional)** a `establishments`. RAFAQ lo muestra como recordatorio al exportar y queda disponible para validación anti-fraude futura (CONTEXT/07).
-- **NO va en el archivo TXT** — el productor lo elige en pantalla en SIGSA. RAFAQ solo lo conoce para el flujo/recordatorio.
+- Se agrega **`renspa` (opcional)** a `establishments`. miTropero lo muestra como recordatorio al exportar y queda disponible para validación anti-fraude futura (CONTEXT/07).
+- **NO va en el archivo TXT** — el productor lo elige en pantalla en SIGSA. miTropero solo lo conoce para el flujo/recordatorio.
 - **Cardinalidad (decidida sesión 18): un RENSPA por establecimiento en MVP** (campo único). El beta (Chascomús) es un campo. Si un establecimiento tuviera varias unidades productivas (RENSPA), el flujo de export deja **tipear/elegir** el RENSPA aunque no esté guardado. Ampliable post-MVP a lista de RENSPA por establecimiento.
 - **Delta sobre spec 01 (backend done)**: campo `renspa` nullable (único) en `establishments`.
 

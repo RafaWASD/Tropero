@@ -63,5 +63,5 @@ Se agrega un gate obligatorio **Gate 2.5 — Verificación E2E + Visual**, entre
 ## Referencias
 
 - Complementa ADR-019 (gates de seguridad), ADR-022 (Gate 0 contexto), ADR-028 (delta-specs).
-- Skill `design-review` (criterios de diseño RAFAQ).
+- Skill `design-review` (criterios de diseño miTropero).
 - Memoria `reference_e2e_design_png_rerender` (por qué los `.png` van gitignored).

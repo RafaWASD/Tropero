@@ -27,7 +27,7 @@ Por ADR-019, Gate 1 (`security_analyzer` modo `spec`) se invoca si la spec toca 
 
 **Disparador de reapertura (RPSC.8.4):** si durante la implementación el implementer descubre que necesita una columna nueva, una RPC nueva, un cambio de RLS, o tocar una Edge Function (p. ej. si decidiera materializar algo server-side en vez de derivarlo en el cliente), **debe parar y marcar Gate 1 OBLIGATORIO** antes de seguir. Con el diseño de abajo eso **no** debería ocurrir: todo el backend necesario ya está as-built.
 
-**Gate 2 (code security) — SIEMPRE, por chunk.** Aunque sea frontend, el listón de Gate 2 (RAFAQ checklist) revisa que el cliente no hardcodee `establishment_id`, no abra un camino de escritura que saltee la RPC owner-only, y que el parseo del array desde TEXT no sea injtable. Cada chunk (B1/B2/B3/B4) pasa Gate 2 tras el reviewer.
+**Gate 2 (code security) — SIEMPRE, por chunk.** Aunque sea frontend, el listón de Gate 2 (miTropero checklist) revisa que el cliente no hardcodee `establishment_id`, no abra un camino de escritura que saltee la RPC owner-only, y que el parseo del array desde TEXT no sea injtable. Cada chunk (B1/B2/B3/B4) pasa Gate 2 tras el reviewer.
 
 ---
 

@@ -196,7 +196,7 @@ columna de tipo").
   sugerencia → crear "Descarte"/elegir → las vacías quedan en el lote, RLV.10–14; y el caso "saltar", RLV.11).
   Regla del repo: importar `test`/`expect` de `./helpers/fixtures`.
 
-## 5. Multi-tenant / RLS / offline (MUSTs de RAFAQ)
+## 5. Multi-tenant / RLS / offline (MUSTs de miTropero)
 
 - **RLS / anti-IDOR (RLV.21):** no hay tabla ni RPC nueva. La barrera real de cada baja es
   `exit_animal_profile` (deriva el tenant de la fila real del perfil; el cliente solo manda `p_profile_id`). La

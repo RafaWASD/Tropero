@@ -33,7 +33,7 @@ escribe a un ambiente real vive en Run F, gateado.
 > Es el run que "desbloquea" al implementer. No toca PROD. `check.mjs` y E2E deben quedar verdes.
 
 - [x] **A1** — Migrar `app/app.json` → `app/app.config.ts` (TS) con `APP_VARIANT`: `development` →
-  name "RAFAQ (Dev)" + `package`/`bundleIdentifier` `ar.rafq.app.dev`; caso contrario "RAFAQ" +
+  name "miTropero (Dev)" + `package`/`bundleIdentifier` `ar.rafq.app.dev`; caso contrario "miTropero" +
   `ar.rafq.app`. Preservar slug/scheme/version/icon/plugins/permissions/`eas.projectId`/`owner`.
   Cubre: R2.1, R2.2, R2.3, R2.4.
   **Verif**: assert de que `APP_VARIANT=development` produce name/ids `.dev` y el default produce
@@ -263,7 +263,7 @@ escribe a un ambiente real vive en Run F, gateado.
 - [ ] **F10** — 🔒(dep d) Configurar UptimeRobot: monitores sobre health PROD, health DEV y endpoint
   sync PowerSync PROD + alerta email. Documentar URLs en el runbook. Cubre: R9.8.
 
-- [ ] **F11** — Crear en PROD el tenant "Campo de prueba RAFAQ" (para las pruebas diarias de Raf) y
+- [ ] **F11** — Crear en PROD el tenant "Campo de prueba miTropero" (para las pruebas diarias de Raf) y
   documentarlo en el runbook (insumo del filtro de observabilidad de feature 17). Cubre: R9.9.
 
 - [ ] **F12** — Smoke manual en PROD: sign-up → crear campo → import de rodeo (feature 12) → maniobra

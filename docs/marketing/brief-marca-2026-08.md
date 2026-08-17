@@ -26,14 +26,14 @@ El resto (historia por animal, indicadores, comparativas) es lo que hace que no 
 
 Esta es la corrección más importante del documento y la verificamos el 1/8.
 
-La resolución de SENASA tiene **tres** obligaciones. **RAFAQ cubre una**: declarar las caravanas dentro de los 10 días.
+La resolución de SENASA tiene **tres** obligaciones. **miTropero cubre una**: declarar las caravanas dentro de los 10 días.
 
 De las otras dos, una (declarar el 100% de las caravanas al cerrar el remito electrónico) **la carga el que compra el ganado, no el que lo cría** — o sea, no es nuestro cliente. La otra (la TRI, una tarjeta que acompaña al remito) **sí es del criador y no la cubrimos**. Es un agregado chico y probablemente lo hagamos, pero hoy no está.
 
 | Se puede decir | No se puede decir |
 |---|---|
-| "Te generamos el archivo para declarar las caravanas en SIGSA" | "Con RAFAQ cumplís con SENASA" |
-| "Declarás en 10 días sin cargar una por una" | "RAFAQ te resuelve la 841" |
+| "Te generamos el archivo para declarar las caravanas en SIGSA" | "Con miTropero cumplís con SENASA" |
+| "Declarás en 10 días sin cargar una por una" | "miTropero te resuelve la 841" |
 
 Si el mensaje promete cumplimiento completo, el primer cliente al que le falte algo nos lo va a atribuir a nosotros. Con un solo canal —un veterinario y su cartera— no hay margen para quemarlo.
 

@@ -34,11 +34,11 @@ Es la diferencia entre competir contra Control Ganadero (USD 129,99/año, instal
 
 El valor de gestión (KPIs, historia individual, comparativas) es lo que retiene, no lo que vende.
 
-### Límite del claim — no decir "cumplí la 841 con RAFAQ"
+### Límite del claim — no decir "cumplí la 841 con miTropero"
 
-Verificado el 1/8/2026: la Res. 841/2025 tiene **tres** obligaciones operativas. RAFAQ cubre una — pero **no las tres caen sobre nuestro cliente**, y eso cambia la severidad:
+Verificado el 1/8/2026: la Res. 841/2025 tiene **tres** obligaciones operativas. miTropero cubre una — pero **no las tres caen sobre nuestro cliente**, y eso cambia la severidad:
 
-| Obligación | Quién la carga | ¿RAFAQ? |
+| Obligación | Quién la carga | ¿miTropero? |
 |---|---|---|
 | Declarar dispositivos en 10 días hábiles (Art. 8°) | El que aplica la caravana — **nuestro ICP** | **Sí** (feature 08) |
 | **TRI** al emitir el DT-e | El RENSPA de origen — **nuestro ICP** | **No** — es la pata que falta |
@@ -48,7 +48,7 @@ El riesgo propio del criador es que *"el movimiento de terneros sin identificaci
 
 Aun así el claim completo no se sostiene, por la TRI. Y hay una discrepancia sin resolver: el manual oficial de SENASA (dic-2025) dice que la TRI *"no es obligatoria"*; la prensa del memorándum de julio dice que el sistema la exige. El texto del memorándum no está publicado.
 
-**Frase vendible:** *"te generamos el archivo de declaración de dispositivos para SIGSA"*. **Frase prohibida:** *"cumplí la 841 con RAFAQ"*.
+**Frase vendible:** *"te generamos el archivo de declaración de dispositivos para SIGSA"*. **Frase prohibida:** *"cumplí la 841 con miTropero"*.
 
 La TRI es un delta barato (un TXT de RFIDs separados por espacio) y cerraría la pata de emisión. Decisión de scope abierta — ver `specs/active/08-export-sigsa/research-findings.md` §9.
 

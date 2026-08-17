@@ -130,6 +130,6 @@ Si no tenés un caso real, **no lo fuerces**. No vale gastar una declaración fi
 
 ## Lo que esta prueba NO cubre
 
-Que quede claro para no vender de más: esto valida **la declaración de altas de dispositivos**. La resolución tiene otras dos obligaciones que RAFAQ hoy **no** cubre —la **TRI** al emitir el DT-e y la declaración del **100% de dispositivos al cerrarlo**— y son justamente las que desde el 3/8 SIGSA valida sola, con bloqueo de CUIG.
+Que quede claro para no vender de más: esto valida **la declaración de altas de dispositivos**. La resolución tiene otras dos obligaciones que miTropero hoy **no** cubre —la **TRI** al emitir el DT-e y la declaración del **100% de dispositivos al cerrarlo**— y son justamente las que desde el 3/8 SIGSA valida sola, con bloqueo de CUIG.
 
 Ver `context.md` (sección Alcance) y `research-findings.md` §8.5.

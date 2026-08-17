@@ -6,7 +6,7 @@
 
 ## Contexto
 
-El frontend de RAFAQ (React Native + Expo + Tamagui, ver ADR-002/ADR-013) estuvo bloqueado esperando "cerrar el design system". Durante las sesiones de diseño se usó **Google Stitch** (Gemini 3.1 Pro) vía MCP para generar mockups de pantallas. La práctica reveló problemas estructurales:
+El frontend de miTropero (React Native + Expo + Tamagui, ver ADR-002/ADR-013) estuvo bloqueado esperando "cerrar el design system". Durante las sesiones de diseño se usó **Google Stitch** (Gemini 3.1 Pro) vía MCP para generar mockups de pantallas. La práctica reveló problemas estructurales:
 
 - Ajustar **una** pantalla (la home) costó ~4 idas y vueltas solo para clavar un color de fondo (el motor Material You de Stitch pisa los colores explícitos); fricción de MCP (screenshots cacheados, consistencia eventual, DOM-ops que no persisten).
 - El output de Stitch es **HTML/Tailwind web**, no responsive, y **se re-implementa igual en Tamagui** — se paga un peaje de traducción por un artefacto que se descarta.
@@ -18,13 +18,13 @@ Esto abrió la pregunta de fondo: **¿conviene diseñar las ~30 pantallas en una
 
 ## Decisión
 
-**El deliverable del frontend son los componentes, no las pantallas.** El workflow de diseño/implementación de frontend de RAFAQ es:
+**El deliverable del frontend son los componentes, no las pantallas.** El workflow de diseño/implementación de frontend de miTropero es:
 
 1. **La verdad canónica vive en código**: `tamagui.config.ts` (tokens: color, spacing, tipografía, radios, touch-targets) + una **librería de componentes RN reales** (`BottomNav`, `Card`, `Button`, `Stepper`, `FormField`, `ListRow`, …). Una pantalla deja de ser un acto de diseño y pasa a ser **composición de componentes ya correctos** — por construcción no puede verse inconsistente. Ahí muere el "drift visual".
 
 2. **Las herramientas de diseño se demotan a inspiración, con cero handoff de código.** Stitch sale del critical path. No se cimenta el workflow sobre TapUI/Bolt/Claude Design (ninguna genera Tamagui; agregar una sería otra fuente de verdad que mantener). Para inspiración de patrones móviles reales se usa **Mobbin** (vía MCP) y opcionalmente Claude Design puntual. Los mockups existentes (home canónica, `design/stitch-iter-4/`) quedan como **referencia visual de dirección**, no como spec ni como código a portar.
 
-3. **Hand-craft vs generate, deliberado.** El "primer try" (posicionamiento de RAFAQ) se gana en las pantallas de alto impacto: el wizard de MODO MANIOBRAS, estados vacíos, errores de sync offline, feedback del bastón BLE, la pantalla a las 6am con barro. **Esas se hacen a mano.** Las pantallas CRUD-aburridas (listas, forms estándar) las generan los implementer agents desde tokens + librería + arquetipo cercano. No se persigue un "generador universal de pantallas" (eso sería scope creep incompatible con rush-MVP).
+3. **Hand-craft vs generate, deliberado.** El "primer try" (posicionamiento de miTropero) se gana en las pantallas de alto impacto: el wizard de MODO MANIOBRAS, estados vacíos, errores de sync offline, feedback del bastón BLE, la pantalla a las 6am con barro. **Esas se hacen a mano.** Las pantallas CRUD-aburridas (listas, forms estándar) las generan los implementer agents desde tokens + librería + arquetipo cercano. No se persigue un "generador universal de pantallas" (eso sería scope creep incompatible con rush-MVP).
 
 4. **Guardrail = oráculo de QA + defensa contra drift.** Un lint/check **falla ante cualquier color o spacing hardcodeado** (hex/px literal en pantallas): todo valor visual debe referenciar un token. Esto reemplaza al "mockup de referencia" como oráculo de QA (no validás contra imágenes, validás contra los componentes/tokens canónicos) y garantiza que cuando un token cambia, las pantallas se re-derivan solas en vez de quedar pegadas a la v1.
 

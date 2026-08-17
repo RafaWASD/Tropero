@@ -19,7 +19,7 @@ Cerrar esta terminología en un ADR ahora evita propagación de inconsistencias 
 
 ## Decisión
 
-**El vocabulario oficial del proyecto RAFAQ es**:
+**El vocabulario oficial del proyecto miTropero es**:
 
 - **Rodeo** — Entidad concreta. El grupo de animales agrupado y gestionado como unidad productiva dentro de un establecimiento. Es el sustantivo principal de la app cuando se habla de agrupaciones de animales. Un establecimiento puede tener N rodeos. Cada animal pertenece a exactamente un rodeo en un momento dado.
 
@@ -49,7 +49,7 @@ Aplicación práctica:
 
 ### Nombres genéricos en clave (HERD / PRODUCTION_SYSTEM) como placeholder durante toda la app
 - **Pros**: máxima neutralidad lingüística, internacionalización trivial.
-- **Contras**: descarta la oportunidad de hablar el idioma del usuario. RAFAQ es producto argentino para el productor argentino; usar nombres traducidos es perderse el efecto de proximidad cultural que es parte del posicionamiento.
+- **Contras**: descarta la oportunidad de hablar el idioma del usuario. miTropero es producto argentino para el productor argentino; usar nombres traducidos es perderse el efecto de proximidad cultural que es parte del posicionamiento.
 
 ## Consecuencias
 

@@ -11,7 +11,7 @@ La pregunta tiene **dos respuestas distintas** y conviene no mezclarlas.
 
 ### El más parecido por producto: **AgriWebb** (Australia)
 
-Cumple 8 de los 9 rasgos que definen a RAFAQ. Lo único que no comparte es el mercado.
+Cumple 8 de los 9 rasgos que definen a miTropero. Lo único que no comparte es el mercado.
 
 Cría extensiva a pasto · app nativa con offline real · identificación individual por EID · **Bluetooth genuinamente agnóstico de marca** (Gallagher, Tru-Test, Allflex RS420, Agrident, Shearwell, Te Pari, Pharmweigh, PTS) · módulo reproductivo con KPIs · **exporta a NLIS**, el sistema oficial de trazabilidad australiano · multi-establecimiento con acceso de asesores · **no vende hardware**.
 
@@ -52,7 +52,7 @@ Lo que **no** hay: ni un precio en pesos ni en dólares, ni un solo testimonio o
 
 `vacuno.app`. Argentino. **Es casi el mismo producto, en el mismo mercado, ya funcionando.**
 
-| | Vacuno | RAFAQ |
+| | Vacuno | miTropero |
 |---|---|---|
 | Sistema | Cría, foco reproductivo | Cría |
 | Offline-first | Sí | Sí |
@@ -101,7 +101,7 @@ O sea: **hace casi todo lo que hacemos nosotros.** El diferencial "nosotros indi
 
 ## La grilla completa
 
-Rasgos de RAFAQ: ① cría bovina extensiva · ② móvil offline-first · ③ RFID individual · ④ BLE agnóstico de marca · ⑤ reproductivo con KPIs · ⑥ export a trazabilidad oficial · ⑦ rol vet multi-campo · ⑧ no vende hardware · ⑨ mercado hispano.
+Rasgos de miTropero: ① cría bovina extensiva · ② móvil offline-first · ③ RFID individual · ④ BLE agnóstico de marca · ⑤ reproductivo con KPIs · ⑥ export a trazabilidad oficial · ⑦ rol vet multi-campo · ⑧ no vende hardware · ⑨ mercado hispano.
 
 | Producto | País | ① | ② | ③ | ④ | ⑤ | ⑥ | ⑦ | ⑧ | ⑨ | Cobro |
 |---|---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|---|
@@ -183,7 +183,7 @@ Lo que sí compra es **gestión productiva que dialogue con el sistema oficial**
 | Herdwatch | Promo 6 meses €79/£79/USD 49 · lista a cotización | por granja |
 | AgriWebb | Tarifa por DSE **no pública** (calculadora JS). Add-ons: AU$300/año pastoreo, AU$300/año movimientos, PastureKey desde US$1.000/año. Terciarias: ~AU$34/48/61 por mes | por cabeza vía DSE (1 bovino = 8), **promedio de 12 meses**, sin permanencia |
 | **Biotraza (AR)** | **Versión Base SENASA gratis** (alta RFID + Excel + planilla oficial PDF/TXT) · Pro **no publicado**, "Solicitar Demo" | freemium |
-| **RAFAQ (propuesto)** | USD 300 + USD 0,80/cabeza, tope 3.500, gratis ≤50 | por campo |
+| **miTropero (propuesto)** | USD 300 + USD 0,80/cabeza, tope 3.500, gratis ≤50 | por campo |
 
 **Recalibración del ancla**: seguimos siendo caros contra Control Ganadero (USD 130/año), pero el rango de la categoría es más ancho de lo que creíamos — iLivestock cobra £300/año por campo y Performance Beef USD 2.340/año. Nuestro USD 860 en un campo de 500 madres queda en el medio del rango internacional, no en el techo.
 
