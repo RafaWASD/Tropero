@@ -101,7 +101,7 @@ Igual que con spec 01, la feature se puede cerrar tras Fase 1+2 y **diferir Fase
   - `tg_animal_profiles_identity_check` (R4.2): rechaza si los 3 identificadores están vacíos mirando `animals.tag_electronic`.
   - `tg_animal_profiles_rodeo_check` (R4.5): rechaza si rodeo no es del establishment o está inactivo/soft-deleted.
   - `tg_animal_profiles_category_check` (R4.6): rechaza si `category_id` no pertenece al system del rodeo.
-  - `tg_animal_profiles_set_override_on_manual` (R4.8): si UPDATE de `category_id` y GUC `rafaq.is_auto_transition` no está `on`, setea `category_override = true`.
+  - `tg_animal_profiles_set_override_on_manual` (R4.8): si UPDATE de `category_id` y GUC `mitropero.is_auto_transition` no está `on`, setea `category_override = true`.
 - **Aceptación**: 4 escenarios cubiertos por tests T2.x:
   - animal sin tag + perfil sin idv ni visual_alt → falla.
   - rodeo de otro establishment → falla.
@@ -182,7 +182,7 @@ Igual que con spec 01, la feature se puede cerrar tras Fase 1+2 y **diferir Fase
 
 ### [x] T1.20 Migration `0030_category_transitions.sql`
 - Función `compute_category(profile_id uuid) returns uuid` security definer stable, con la lógica del design (sex + edad + conteo de partos + tacto positivo).
-- Función `apply_auto_transition(profile_id uuid, target_category_id uuid)`: setea GUC `rafaq.is_auto_transition = 'on'`, UPDATE de **solo** `category_id`, GUC `'off'`. **No** toca `rodeo_id` ni `management_group_id` (ortogonalidad, R7.7).
+- Función `apply_auto_transition(profile_id uuid, target_category_id uuid)`: setea GUC `mitropero.is_auto_transition = 'on'`, UPDATE de **solo** `category_id`, GUC `'off'`. **No** toca `rodeo_id` ni `management_group_id` (ortogonalidad, R7.7). *(Rebrand fase 4, `0132`: la GUC se llamaba `rafaq.is_auto_transition`; `0031`/`0021`/`0030`/`0040` conservan el nombre viejo por append-only — ver `design.md`.)*
 - Trigger `tg_reproductive_events_apply_transition` AFTER INSERT en `reproductive_events`:
   - Si `category_override = true` → return.
   - Si `event_type = 'tacto'` con `pregnancy_status != 'empty'` y categoría actual `vaquillona` → target `vaquillona_prenada`.

@@ -7,7 +7,7 @@
 > | 1 — Prosa (docs/specs/CONTEXT/.github) | ✅ **HECHA** (2026-08-16). 66 archivos, 139 ocurrencias. 308 protegidas por ser plomería. |
 > | 2 — Infra de E2E (globals + fixtures) | ✅ **HECHA** (2026-08-16, `c055e6e`). 96 archivos, 11 globals de window + fixtures. La fila decía `⏳ pendiente` por descuido de esa fase; corregida acá. |
 > | 3 — PowerSync (`rafaq.yaml` → `mitropero.yaml`) | ✅ **HECHA** (2026-08-16). 57 archivos: 145 ocurrencias del literal en 55, más 2 docs editados a criterio. **Sin deploy**: el nombre del archivo fuente es local (el script lo copia a `sync-config.yaml`, que es lo único que ve la instancia). Ver `progress/rebrand-fase3-powersync.md`. |
-> | 4 — GUCs de Postgres | ⏳ pendiente — Gate 1 |
+> | 4 — GUCs de Postgres | ✅ **HECHA** (2026-08-17). Migración `0132` aplicada a **DEV** (autorización de Raf en sesión; PROD no se tocó): `CREATE OR REPLACE` de las 6 funciones que nombran una GUC, en **una sola transacción**. 9 archivos de spec/doc reconciliados. **Falsificada** (ver abajo). Detalle: `progress/rebrand-fase4-gucs.md`. |
 > | 5 — Headers HTTP | ⏳ pendiente — Gate 1. **Además es lo que hoy tiene el árbol en rojo** |
 > | 6 — Identidad Expo | 🔴 bloqueada por decisiones de Raf (§6.2) |
 > | Assets (logo) | 🔴 bloqueada: falta el logo real |
@@ -38,7 +38,7 @@
 > | Fase | Identificador nuevo | ¿Dispara la regla B? |
 > |---|---|---|
 > | 5 — headers | `'X-Mitropero-Request-Id'` en `app/src/services/{account,members,push-notifications}.ts` | **SÍ** (`Mitropero` precedido de `-`, no de `__`) → hay que decidir carve-out o válvula |
-> | 4 — GUCs | `set_config('mitropero.is_transfer', …)` en el cliente | **No**, pero **por accidente**: el `.i` que sigue matchea el carve-out de DOMINIO. Pasa por la razón equivocada. |
+> | 4 — GUCs | ~~`set_config('mitropero.is_transfer', …)` en el cliente~~ **no existe** | **No, y no por accidente**: la fase 4 (hecha el 17/08) confirmó que el cliente **no setea ninguna GUC** — el identificador nuevo no aparece en `app/app` ni en `app/src`, así que la regla B ni lo mira. La preocupación del carve-out de DOMINIO era sobre una línea de cliente que nunca existió. |
 > | 6 — Expo | `slug: 'mitropero-app'`, `owner`, `scheme` en `app.config.ts` | **SÍ** (`-a` después, no es dominio ni `__`) |
 >
 > No hace falta resolverlo ahora: hace falta **no descubrirlo con la fase a medio hacer**.
@@ -146,6 +146,34 @@ Antes y después de cada fase, confirmar contra el baseline actual (2026-08-15):
   (con OK de Raf, recurso agotable — ver [[feedback_builds_eas_ok_explicito]]).
 
 ### C. GUCs de Postgres (`rafaq.is_transfer`, `rafaq.is_auto_transition`) — 🔴 ALTO riesgo / DEPLOYADO
+
+> ## ✅ HECHA (2026-08-17, migración `0132`, DEV). Y este apartado estaba equivocado en lo principal.
+>
+> **Lo que decía y era falso:** *"cambiar TODOS los `set_config`/`current_setting` en el cliente y en RPCs,
+> en sync"* y *"Deploy coordinado"*. Medido:
+> `git grep -nE "set_config|current_setting" -- app supabase/functions` → **cero**. Ni el cliente ni las
+> Edge Functions tocan estas GUCs: viven **enteramente dentro de Postgres**. **No hay skew posible** →
+> una sola migración atómica, no un deploy coordinado. El riesgo real era 🟠, no 🔴.
+>
+> **Lo que decía y era cierto, y sí mordió:** moldear sobre el cuerpo **vigente en el remoto**. Mordió
+> **tres veces**: `transfer_animal` vigente es la de `0122` (no `0087`),
+> `tg_animal_profiles_set_override_on_manual` es la de `0040` (no `0021`), y hay un sexto lector que este
+> apartado ni menciona, `tg_animal_profiles_record_rodeo_change` (`0127`). Copiar de las migraciones que
+> este plan cita habría revertido `0122` y `0040` en silencio.
+>
+> **Además, el inventario se sacó del CATÁLOGO, no del grep:** `pg_proc` + `pg_db_role_setting` + vistas +
+> constraints + policies + `WHEN` de triggers + defaults de columna + índices. Todo lo no-función dio
+> vacío. Son 6 funciones y nada más.
+>
+> **Falsificación (lo que hace que esto no sea un "confío en que anda"):** con la migración aplicada, se
+> revirtieron **sólo los 4 lectores** al nombre viejo dejando los 2 setters en el nuevo — el escenario
+> exacto de desalineación — y la suite `animal` pasó de **139/139 a 122 pass / 17 fail**, en dos clusters
+> limpios: 6 tests por `is_auto_transition` (*"transición auto no marca override"*, `actual: true`) y 9 +
+> 2 nodos padre por `is_transfer` (`23514 immutable column changed on animal_event …`). Después se
+> restauró y volvió a 139/139. O sea: el guard **sí** está cubierto por tests.
+>
+> Detalle completo, baseline literal y hallazgos: `progress/rebrand-fase4-gucs.md`.
+
 - Son **session config vars** que usan triggers de DB deployados para early-return:
   - `rafaq.is_auto_transition` → migración **0031** (auto-transición de categoría; el cliente setea
     `set_config('rafaq.is_auto_transition','on',true)` para distinguir auto vs override manual).

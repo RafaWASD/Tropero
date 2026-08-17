@@ -54,7 +54,7 @@ sin justificación documentada.
 - [x] **T7 — Trigger `tg_animal_profiles_record_rodeo_change`** — `SECURITY DEFINER set search_path = public`
   (molde `0030:23-54`), con las 5 ramas de la tabla de `design` §2.1: INSERT (en padrón / fuera de padrón),
   UPDATE de `rodeo_id`, salida del padrón, reingreso. `establishment_id` **derivado de `new.establishment_id`**,
-  nunca del cliente. `reason = 'transfer_in'` si `current_setting('rafaq.is_transfer', true) = 'on'`.
+  nunca del cliente. `reason = 'transfer_in'` si `current_setting('mitropero.is_transfer', true) = 'on'`.
   Cubre: RCC.1.4, RCC.1.5, RCC.1.6, RCC.1.7, RCC.1.12, RCC.9.7, RCC.9.10.
 
 - [x] **T8 — Declarar el trigger** con `after insert or update of rodeo_id, status, deleted_at on

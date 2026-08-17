@@ -1817,3 +1817,53 @@ igual nombre los resultados de los stages backend.
 `node --test supabase/tests/<suite>/run.cjs` a mano. La fase 5 devuelve el árbol a verde y con eso
 `check.mjs` vuelve a alcanzar el backend solo — pero el defecto del orquestador queda igual y hay que
 cerrarlo, porque el próximo rojo temprano vuelve a apagar el backend sin avisar.
+
+---
+
+## `rodeo_membership_history.reason = 'transfer_in'` no se escribe nunca (rama muerta)
+
+**Encontrado**: 2026-08-17, fase 4 del rebrand (al traer el cuerpo vigente de `transfer_animal` del
+remoto para renombrar la GUC). **No lo introdujo el rebrand** — la fase 4 es un rename puro y dejó el
+comportamiento idéntico a propósito.
+
+`tg_animal_profiles_record_rodeo_change` (`0127`) decide el `reason` del alta así:
+
+```sql
+v_reason := case when coalesce(current_setting('mitropero.is_transfer', true), 'off') = 'on'
+                 then 'transfer_in' else 'initial' end;
+```
+
+Pero en el cuerpo vigente de `transfer_animal` (`0122`), el `set_config('…is_transfer','on',true)` está
+**después** del `insert into public.animal_profiles` del perfil destino, y se apaga inmediatamente
+después del `update` de `animal_events`:
+
+```
+  insert into public.animal_profiles (...)            ← acá corre el trigger AFTER INSERT
+  ...
+  perform set_config('…is_transfer', 'on',  true);    ← la GUC se prende recién acá
+  update public.animal_events ...
+  perform set_config('…is_transfer', 'off', true);
+```
+
+`animal_profiles_record_rodeo_change_ins` es `AFTER INSERT ... FOR EACH ROW`, **no** un constraint
+trigger deferrable: corre al terminar ese `INSERT`, con la GUC todavía apagada. Resultado: el alta del
+perfil destino de una transferencia se registra como **`initial`**, no como `transfer_in`. La rama es
+inalcanzable.
+
+**Cómo se coló**: `progress/review_campanas-congeladas.md` ya lo había marcado como *ausencia de
+código* — «la rama `transfer_in` del trigger no se ejercita en ningún test» (RCC.1.13). No había test
+que la cubriera, así que nada se puso rojo.
+
+**Impacto**: bajo pero real. `rodeo_membership_history` no distingue un alta genuina de un ingreso por
+transferencia; cualquier reporte que quiera separar "nacidos/comprados acá" de "transferidos desde otro
+campo" no puede. No corrompe datos ni rompe la transferencia.
+
+**Fix** (chico): mover el `set_config('…is_transfer','on',true)` a **antes** del `insert into
+public.animal_profiles` (y el `'off'` al final del bloque de re-apuntado). Ojo: eso ensancha la ventana
+en la que el early-return de `tg_animal_events_enforce_edit_window` está activo — hay que confirmar que
+en esa ventana el RPC no hace ningún otro `update` de `animal_events` que deba seguir bloqueado (hoy
+hace uno solo). Migración nueva con `CREATE OR REPLACE` moldeado sobre el cuerpo vigente.
+
+**Falsificación obligatoria del fix**: un test que transfiera un animal y asserte
+`rodeo_membership_history.reason = 'transfer_in'` en la fila del perfil destino, y que se ponga **rojo**
+contra la función de hoy. Sin ese test el arreglo no se puede distinguir de no haberlo hecho.

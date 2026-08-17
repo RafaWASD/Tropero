@@ -422,7 +422,16 @@ Cambiar el identificador `ar.rafq.app` **crea una app nueva** a los ojos de las 
 
 > **Por qué conviene hacerlo ahora y no en tres meses:** Apple emite un identificador de usuario distinto por Services ID. Cualquiera que ya haya entrado con Apple aparecería como cuenta nueva y perdería el acceso a sus datos. Hoy eso no le pasa a nadie —no hay productores usando la app y la cuenta demo entra por Google—, así que es la ventana más barata que va a existir.
 
-**Lo que NO se toca en ninguna fase**, porque parece marca y son contratos internos: los prefijos de storage `rafq.*` (renombrarlos le borra a cada usuario el rodeo activo, el bastón recordado y el token de invitación a medio usar), el header `X-Rafaq-Actor` que lee un trigger de auditoría en Postgres, las GUCs `mitropero.*`, y `slug`/`owner`/`projectId` de EAS (cambiarlos pierde historial de builds y credentials).
+**Lo que NO se toca en ninguna fase**, porque parece marca y son contratos internos: los prefijos de storage `rafq.*` (renombrarlos le borra a cada usuario el rodeo activo, el bastón recordado y el token de invitación a medio usar), el header `X-Rafaq-Actor` que lee un trigger de auditoría en Postgres, y `slug`/`owner`/`projectId` de EAS (cambiarlos pierde historial de builds y credentials).
+
+> **Corrección (17/08).** Esta lista incluía también *las GUCs de Postgres*, y las nombraba `mitropero.*`
+> — o sea que era **falsa por partida doble**: se llamaban `rafaq.is_auto_transition` /
+> `rafaq.is_transfer`, y sí se tocaron. **La fase 4 del rebrand las renombró a `mitropero.is_*`**
+> (migración `0132`, aplicada a DEV el 17/08; PROD no se tocó). No eran un contrato con nada externo: a
+> diferencia del header `X-Rafaq-Actor` —que lo escribe el cliente y lo lee la base, con clientes viejos
+> instalados afuera que no se pueden actualizar—, las GUCs **viven enteramente dentro de Postgres** (ni
+> la app ni las Edge Functions hacen un solo `set_config`/`current_setting`). Por eso se pudo hacer en
+> una sola migración atómica, sin ventana de desalineación. Ver `progress/rebrand-fase4-gucs.md`.
 
 > **Corrección (16/08).** Esta lista incluía también *el nombre del archivo `sync-streams/rafaq.yaml`*, y estaba mal: **nunca fue un contrato**. `scripts/powersync-deploy.sh` lo copia a `powersync/sync-config.yaml` y **eso** es lo único que ve la instancia de PowerSync; el nombre de la fuente es local al repo. Se renombró a `sync-streams/mitropero.yaml` en la fase 3 del rebrand, sin deploy y sin re-sync de devices (los nombres de las streams nunca llevaron la marca). Ver `progress/rebrand-fase3-powersync.md`.
 

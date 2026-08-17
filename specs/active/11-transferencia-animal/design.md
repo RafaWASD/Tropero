@@ -95,7 +95,8 @@ El **orden** es parte del contrato (garantiza R4.2 — nunca cero ni dos perfile
 
 > **Reconciliación as-built (implementer, sesión 23 — migraciones `0087` + `0088`):** dos divergencias menores vs el SQL ilustrativo de abajo, sin cambio de comportamiento ni de contrato:
 > 1. **`rodeo_id` del origen se lee en el SELECT (a)** (junto a `establishment_id`/`animal_id`/`created_by`/`idv`/descriptivos), no en un SELECT separado en (b) como muestra el pseudocódigo. Es la misma fila real del perfil de origen (active) → idéntica semántica, una query menos. El `v_source_rodeo_system` se resuelve en (b) desde ese `rodeo_id`.
-> 2. **El delta del trigger de `animal_events` (§4.3 / DEC-A1) vive en una migración separada `0088`** (`CREATE OR REPLACE` de `tg_animal_events_enforce_edit_window` con el early-return por GUC), no embebido en el `0087` del RPC. Append-only: NO se edita `0034` in-place. El RPC (`0087`) hace `set_config('rafaq.is_transfer','on',true)` antes del UPDATE de `animal_events` y `'off'` después. Reconciliado en `specs/active/02-modelo-animal/design.md` (T5.1).
+> 2. **El delta del trigger de `animal_events` (§4.3 / DEC-A1) vive en una migración separada `0088`** (`CREATE OR REPLACE` de `tg_animal_events_enforce_edit_window` con el early-return por GUC), no embebido en el `0087` del RPC. Append-only: NO se edita `0034` in-place. El RPC (`0087`) hace `set_config('mitropero.is_transfer','on',true)` antes del UPDATE de `animal_events` y `'off'` después. Reconciliado en `specs/active/02-modelo-animal/design.md` (T5.1).
+> 3. **La GUC se llama `mitropero.is_transfer` desde el rebrand (fase 4, migración `0132`, 2026-08-17)** — antes era `rafaq.is_transfer`. Este doc dice el nombre deployado. `0132` re-emitió en **una sola transacción** las 3 funciones que la tocan (`transfer_animal` la SETEA; `tg_animal_events_enforce_edit_window` y `tg_animal_profiles_record_rodeo_change` la LEEN) más las 3 de `mitropero.is_auto_transition`, así que nunca existió un instante con el que setea y el que lee desalineados. `0087`/`0088`/`0122`/`0127` conservan el nombre viejo: son historial append-only. **El molde del re-CREATE fue el cuerpo vigente en el remoto (`pg_get_functiondef`), no `0087`** — `transfer_animal` había sido redefinida por `0122`.
 
 ```sql
 -- (0) IDEMPOTENCIA PRIMERO (R6.1/R6.2 — FIX Gate-1 HIGH-2): el corte de replay va ANTES del select de origen
@@ -289,7 +290,7 @@ Las streams de PowerSync filtran `WHERE establishment_id IN org_scope` **sin JOI
 
 ⚠️ **Esto BLOQUEA el re-apuntado de `animal_events` por un UPDATE normal.** El UPDATE de §3.2(f) que cambia `animal_profile_id` **y** `establishment_id` dispararía `'immutable column changed on animal_event'`.
 
-**Resolución (a decidir con el implementer + Gate 1 — DEC-A1):** la opción recomendada es que el trigger `tg_animal_events_enforce_edit_window` **tolere el contexto de transferencia**: el RPC `transfer_animal` (SECURITY DEFINER) setea una GUC local `set_config('rafaq.is_transfer','on',true)` antes de los UPDATE de re-parenting, y el trigger hace `return new` temprano cuando esa GUC está `'on'` (mismo patrón que `rafaq.is_auto_transition` de `0020`). Así el re-apuntado del RPC pasa, pero un UPDATE de cliente directo a PostgREST **sigue** rechazado (la GUC solo la setea el definer). **Alternativa descartada** (§6): dejar `establishment_id`/`animal_profile_id` mutables en el trigger — abre el vector de spoofeo que ese trigger justamente cierra.
+**Resolución (a decidir con el implementer + Gate 1 — DEC-A1):** la opción recomendada es que el trigger `tg_animal_events_enforce_edit_window` **tolere el contexto de transferencia**: el RPC `transfer_animal` (SECURITY DEFINER) setea una GUC local `set_config('mitropero.is_transfer','on',true)` antes de los UPDATE de re-parenting, y el trigger hace `return new` temprano cuando esa GUC está `'on'` (mismo patrón que `mitropero.is_auto_transition` de `0020`). Así el re-apuntado del RPC pasa, pero un UPDATE de cliente directo a PostgREST **sigue** rechazado (la GUC solo la setea el definer). **Alternativa descartada** (§6): dejar `establishment_id`/`animal_profile_id` mutables en el trigger — abre el vector de spoofeo que ese trigger justamente cierra.
 
 > Esto es un **delta pequeño sobre la migración `0034` de spec 02** (extender el trigger con el early-return por GUC). Se reconcilia en el `design.md` de spec 02 al cerrar la feature 11 (regla de reconciliación de specs). Marcado para Gate 1.
 
@@ -382,7 +383,7 @@ Una Edge Function con `service_role` podría orquestar la transferencia. **Desca
 | **Performance: animal con mucha historia** | ver §8 | — |
 
 ### Decisiones que el Gate 1 debe confirmar (etiquetadas DEC-A*)
-- **DEC-A1** — trigger de `animal_events`: early-return por GUC `rafaq.is_transfer` (recomendado) vs alternativa. Es un delta sobre `0034` de spec 02.
+- **DEC-A1** — trigger de `animal_events`: early-return por GUC `mitropero.is_transfer` (recomendado) vs alternativa. Es un delta sobre `0034` de spec 02.
 - **DEC-A2** — `birth_calves` del animal-como-ternero con madre en X: dejar `establishment_id` en X (recomendado) vs moverlo a Y.
 - **DEC-A3** — `birth_calves` del animal-como-madre: mover `establishment_id` a Y (recomendado, incluido en §4.4).
 - **DEC-A4** — campos descriptivos del perfil (§4.7, R2.12): partición viaja (visual_id_alt/breed/coat_color) vs reset (entry_*/notes). Gap del Gate 0 cazado por el leader; defaults propuestos, confirmar en Puerta 1 (TODO-D6).

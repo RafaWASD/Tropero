@@ -759,7 +759,7 @@ begin
   -- Si la categoría cambió y no estamos dentro de un trigger de transición automática,
   -- marcamos override. Detectamos "automático" por una GUC local seteada por el trigger AUTO.
   if new.category_id is distinct from old.category_id then
-    if coalesce(current_setting('rafaq.is_auto_transition', true), 'off') <> 'on' then
+    if coalesce(current_setting('mitropero.is_auto_transition', true), 'off') <> 'on' then
       new.category_override := true;
     end if;
   end if;
@@ -771,7 +771,17 @@ create trigger animal_profiles_set_override
   for each row execute function public.tg_animal_profiles_set_override_on_manual();
 ```
 
-El trigger de transición automática (definido más abajo) seteará `set_config('rafaq.is_auto_transition','on',true)` antes del UPDATE para evitar marcar override en automático.
+El trigger de transición automática (definido más abajo) seteará `set_config('mitropero.is_auto_transition','on',true)` antes del UPDATE para evitar marcar override en automático.
+
+> **RECONCILIACIÓN (rebrand miTropero, fase 4 — migración `0132`, 2026-08-17).** La GUC se llamaba
+> `rafaq.is_auto_transition` y **hoy se llama `mitropero.is_auto_transition`**. Este doc dice el nombre
+> nuevo, que es el que está deployado. `0132` hizo `CREATE OR REPLACE` de las 6 funciones que la
+> nombran (`apply_auto_transition` la SETEA; `tg_animal_profiles_set_override_on_manual` y
+> `tg_animal_profiles_record_category_change` la LEEN; más las 3 de `mitropero.is_transfer`), en **una
+> sola transacción** — sin instante de desalineación entre el que setea y el que lee. Las migraciones
+> `0021`/`0030`/`0031`/`0040` **siguen diciendo el nombre viejo y así se quedan**: las migraciones son
+> append-only (son el historial de lo que se aplicó, no la verdad del estado actual). La verdad del
+> estado actual es `0132` + este doc.
 
 ### Fold del Tier 1 — bloque backend delta s17/s18 (sesión 20, migrations 0043+)
 
@@ -1314,7 +1324,7 @@ begin
       (animal_profile_id, from_category_id, to_category_id, changed_by, reason)
     values (new.id, null, new.category_id, auth.uid(), v_reason);
   elsif tg_op = 'UPDATE' and new.category_id is distinct from old.category_id then
-    if coalesce(current_setting('rafaq.is_auto_transition', true), 'off') = 'on' then
+    if coalesce(current_setting('mitropero.is_auto_transition', true), 'off') = 'on' then
       v_reason := 'auto_transition';
     elsif old.category_override = true and new.category_override = false then
       v_reason := 'revert_to_auto';
@@ -1422,11 +1432,11 @@ create or replace function public.apply_auto_transition (profile_id uuid, target
 returns void language plpgsql security definer
 set search_path = public as $$
 begin
-  perform set_config('rafaq.is_auto_transition', 'on', true);
+  perform set_config('mitropero.is_auto_transition', 'on', true);
   update public.animal_profiles
     set category_id = target_category_id
     where id = profile_id;
-  perform set_config('rafaq.is_auto_transition', 'off', true);
+  perform set_config('mitropero.is_auto_transition', 'off', true);
 end; $$;
 
 -- Trigger sobre reproductive_events: dispara transición incremental (R7.1..R7.3)
@@ -1546,7 +1556,7 @@ create trigger reproductive_events_recompute_on_delete
 Notas:
 - **Alcance del recálculo**: el trigger vive **solo sobre `reproductive_events`** porque es la única tabla tipada que participa de transiciones de categoría en el Tier 1 (`tacto` positivo, `birth`). Las otras cuatro tipadas (`weight_events`, `sanitary_events`, `condition_score_events`, `lab_samples`) no disparan transiciones, así que no llevan este trigger. (Cuando Tier 2 agregue `weaning`/`abortion`, siguen siendo `reproductive_events`, así que el mismo trigger los cubre sin cambios.)
 - **El soft-delete es un UPDATE de `deleted_at`**: el trigger `... after update of deleted_at` lo captura. El trigger `after delete` es defensa para el hard-delete eventual.
-- El recálculo reusa `apply_auto_transition` (que setea la GUC `rafaq.is_auto_transition`), así el cambio queda registrado en `animal_category_history` como `auto_transition` y no marca override.
+- El recálculo reusa `apply_auto_transition` (que setea la GUC `mitropero.is_auto_transition`), así el cambio queda registrado en `animal_category_history` como `auto_transition` y no marca override.
 - El **cliente** marca el evento como "corregido" en el timeline (es presentación; el soft-delete ya preserva la fila para el audit trail). No requiere columna nueva: editado = `created_at < updated_at` (si las tipadas tuvieran `updated_at`) o, para soft-delete, `deleted_at IS NOT NULL` filtrado fuera del timeline normal pero contable para el aviso. **Decisión de presentación del cliente** (R14, TENTATIVO).
 - **Edición/borrado sin ventana de tiempo** para los 5 tipados (`R6.8.1`): las policies de UPDATE de las tablas tipadas (`is_owner_of OR created_by = auth.uid()`) **ya** permiten esto sin límite temporal. **No** hay que agregar ningún `edit_window_until` a las tipadas — la ventana de 15 min es exclusiva de `animal_events` (R6.12). Esto corrige la lectura de spec 09 R5.5 (que asumía 15 min para todos): el cliente de spec 09 debe ofrecer editar/borrar los tipados a owner/autor siempre, y limitar a 15 min solo las observaciones.
 
@@ -1900,13 +1910,17 @@ create trigger animal_events_enforce_edit_window
 
 -- RECONCILIACIÓN (feature 11 — transferencia-animal, migración 0088, sesión 23): el cuerpo de
 -- tg_animal_events_enforce_edit_window se re-emitió (CREATE OR REPLACE, append-only) con un
--- early-return al INICIO cuando la GUC LOCAL `rafaq.is_transfer = 'on'` está activa. El RPC
+-- early-return al INICIO cuando la GUC LOCAL `mitropero.is_transfer = 'on'` está activa. El RPC
 -- transfer_animal (SECURITY DEFINER, 0087) re-apunta la observación al perfil nuevo en Y cambiando
 -- animal_profile_id + establishment_id (ambas inmutables acá); la GUC habilita ESE re-apuntado solo
 -- dentro del definer. Un UPDATE de cliente directo a PostgREST NO puede setear la GUC dentro de la
 -- transacción del trigger → la inmutabilidad sigue valiendo para clientes (cero relajación del vector
--- anti-spoof que este trigger cierra). Mismo patrón que rafaq.is_auto_transition (0031). Ver
+-- anti-spoof que este trigger cierra). Mismo patrón que mitropero.is_auto_transition (0031). Ver
 -- specs/active/11-transferencia-animal/design.md §4.3 (DEC-A1).
+--
+-- RECONCILIACIÓN (rebrand miTropero, fase 4 — migración 0132, 2026-08-17): la GUC se llamaba
+-- `rafaq.is_transfer`. 0132 re-emitió este trigger (y los otros 5 que nombran una GUC) con
+-- `mitropero.is_transfer`, en una sola transacción. 0088 conserva el nombre viejo por append-only.
 
 -- RLS
 alter table public.animal_events enable row level security;

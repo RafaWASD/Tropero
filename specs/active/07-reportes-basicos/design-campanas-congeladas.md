@@ -181,11 +181,25 @@ Ramas (todas con `is distinct from`, así que un `update of` que no cambia nada 
 
 | Disparo | Acción | `reason` |
 |---|---|---|
-| INSERT, perfil en padrón | insert `[coalesce(entry_date, created_at::date), NULL)` | `initial` (o `transfer_in` si `current_setting('rafaq.is_transfer', true) = 'on'`) |
+| INSERT, perfil en padrón | insert `[coalesce(entry_date, created_at::date), NULL)` | `initial` (o `transfer_in` si `current_setting('mitropero.is_transfer', true) = 'on'`) |
 | INSERT, perfil ya fuera del padrón | insert `[from, greatest(coalesce(exit_date, current_date), from))` | ídem |
 | UPDATE `rodeo_id` cambia, sigue en padrón | cierra la vigente con `to_date = current_date`; abre `[current_date, NULL)` | `move` |
 | UPDATE sale del padrón | cierra la vigente con `to_date = greatest(coalesce(new.exit_date, current_date), from_date)` | — |
 | UPDATE vuelve al padrón sin fila vigente | abre `[current_date, NULL)` | `reactivation` |
+
+> **RECONCILIACIÓN (rebrand miTropero, fase 4 — migración `0132`, 2026-08-17).** La GUC de la primera
+> fila se llamaba `rafaq.is_transfer` y hoy se llama **`mitropero.is_transfer`**. `0132` re-emitió
+> `tg_animal_profiles_record_rodeo_change` (y las otras 5 funciones que nombran una GUC) en una sola
+> transacción; `0127` conserva el nombre viejo por append-only.
+>
+> ⚠️ **La rama `transfer_in` de esta tabla no se dispara hoy, y no es por el rename.** En el cuerpo
+> vigente de `transfer_animal` (`0122`), el `set_config('…is_transfer','on',true)` está **después** del
+> `insert into animal_profiles` del perfil destino y se apaga inmediatamente después del UPDATE de
+> `animal_events`. El trigger `animal_profiles_record_rodeo_change_ins` es `AFTER INSERT` (no
+> deferrable), así que corre con la GUC todavía apagada → el alta del perfil destino se registra como
+> `initial`, nunca como `transfer_in`. Coincide con lo que ya marcó `progress/review_campanas-congeladas.md`
+> (RCC.1.13: la rama `transfer_in` no la ejercita ningún test). **La fase 4 no lo tocó a propósito**: es
+> un rename puro y arreglarlo cambiaría comportamiento. Queda como hallazgo abierto.
 
 **El trigger captura el upload de PowerSync**: `moveAnimalToRodeo` (`app/src/services/animals.ts:1683`) es un
 UPDATE plano de `rodeo_id` que sube por la cola de CRUD → dispara el trigger igual que cualquier UPDATE. No hace
